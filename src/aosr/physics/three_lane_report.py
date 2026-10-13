@@ -16,6 +16,7 @@ T20/T30 仍沿正式細軸，0.5 Hz 早期路不換軸（#435）。
 """
 
 from __future__ import annotations
+from aosr.materials.construction_models import SurfaceMaterial
 
 import math
 from collections.abc import Mapping, Sequence
@@ -693,6 +694,7 @@ def solve_three_lane_report(
     sound_speed_m_s: float,
     density_kg_m3: float,
     impedance_by_wall: Mapping[Wall, object],
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None = None,
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
@@ -721,7 +723,7 @@ def solve_three_lane_report(
         receivers={"receiver": receiver},
         sound_speed_m_s=sound_speed_m_s,
         density_kg_m3=density_kg_m3,
-        impedance_by_wall=impedance_by_wall,
+        impedance_by_wall=impedance_by_wall, materials_by_wall=materials_by_wall,
         scattering_by_wall=scattering_by_wall,
         capability=capability,
         reflection_order_k=reflection_order_k,
@@ -740,6 +742,7 @@ def solve_three_lane_reports(
     sound_speed_m_s: float,
     density_kg_m3: float,
     impedance_by_wall: Mapping[Wall, object],
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None = None,
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
@@ -758,7 +761,7 @@ def solve_three_lane_reports(
         receivers=receivers,
         sound_speed_m_s=sound_speed_m_s,
         density_kg_m3=density_kg_m3,
-        impedance_by_wall=impedance_by_wall,
+        impedance_by_wall=impedance_by_wall, materials_by_wall=materials_by_wall,
         scattering_by_wall=scattering_by_wall,
         capability=capability,
         reflection_order_k=reflection_order_k,

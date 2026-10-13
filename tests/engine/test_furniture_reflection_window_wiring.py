@@ -1,5 +1,7 @@
 """桌面手算場景：牆面證明維持全集，補算列只移除被擋的牆面路徑。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from dataclasses import asdict
 
@@ -39,7 +41,7 @@ def inputs(*, furnished: bool = True, order: int = 1) -> report_io.ReportInput:
 
 def window(data: report_io.ReportInput, seconds: float) -> ReflectionWindow:
     return build_reflection_window(data, frequencies_hz=FREQUENCIES,
-        scattering_coefficient=SCATTERING, window_s=seconds, contact_rel=case.CONTACT_REL)
+        scattering_coefficient=SCATTERING, window_s=seconds, contact_rel=case.CONTACT_REL, materials_by_wall=_flow_inputs(data).materials_by_wall)
 
 
 def table(data: report_io.ReportInput, order: int) -> PathTableData:
@@ -48,7 +50,7 @@ def table(data: report_io.ReportInput, order: int) -> PathTableData:
                                      FREQUENCIES, case.RHO_C, contact_rel=case.CONTACT_REL)
     return build_path_table(room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s, rho_c_pa_s_per_m=case.RHO_C,
-        impedance_by_wall=solved.impedance_by_wall, frequencies_hz=FREQUENCIES,
+        materials_by_wall=_flow_materials(solved.impedance_by_wall), frequencies_hz=FREQUENCIES,
         scattering_coefficient=SCATTERING, reflection_order_k=order,
         source_model=solved.source_model, furniture=furniture, furniture_rows=False)
 
@@ -116,7 +118,7 @@ def test_furniture_window_plus_k_table_equals_full_wall_only_table(order: int, s
 def test_furniture_requires_explicit_keyword_contact() -> None:
     with pytest.raises(ValueError, match="有家具時必須提供 contact_rel（家具幾何接觸界線）"):
         build_reflection_window(inputs(), frequencies_hz=FREQUENCIES,
-            scattering_coefficient=SCATTERING, window_s=0.015)
+            scattering_coefficient=SCATTERING, window_s=0.015, materials_by_wall=_flow_inputs(inputs()).materials_by_wall)
 
 
 @pytest.mark.parametrize(("depth_m", "blocked"), [(2e-12, False), (0.02, True)])
@@ -175,8 +177,8 @@ def test_filtered_wall_proof_would_miss_a_surviving_third_order_path() -> None:
 
 def test_screen_next_order_ignores_furniture_blocking() -> None:
     # 篩查第 K+1 階只算牆面、不扣遮擋；這個場景的第 4 階最早那條會被桌子擋，扣了就分得出來。
-    empty = build_reflection_screen(inputs(furnished=False, order=3), FREQUENCIES)
-    screened = build_reflection_screen(inputs(order=3), FREQUENCIES)
+    empty = build_reflection_screen(inputs(furnished=False, order=3), FREQUENCIES, materials_by_wall=_flow_inputs(inputs(furnished=False, order=3)).materials_by_wall)
+    screened = build_reflection_screen(inputs(order=3), FREQUENCIES, materials_by_wall=_flow_inputs(inputs(order=3)).materials_by_wall)
     assert screened.next_order_earliest_delay_s == empty.next_order_earliest_delay_s
     assert screened.pairs == empty.pairs
     paths = tuple(image_source_paths(case.ROOM, case.SOURCE, case.RECEIVER, case.SPEED, max_order=4))

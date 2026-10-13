@@ -11,6 +11,7 @@
    與「能力表標 unsupported」。
 """
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import json
 import os
@@ -33,7 +34,6 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from tests.conftest import GitSandbox
-
 
 _REPO = Path(__file__).resolve().parents[2]
 _TABLE_PATH = config_path("capabilities.toml")
@@ -629,7 +629,7 @@ def test_three_lane_report_dataclass_carries_capability(
         sound_speed_m_s=343.0,
         density_kg_m3=1.2,
         impedance_by_wall={wall: 4.0 * 411.6 for wall in Wall.all()},
-    )
+    materials_by_wall=_flow_materials({wall: 4.0 * 411.6 for wall in Wall.all()}))
 
     assert report.capability.record is None
     assert report.capability.entry == "three_lane_report"

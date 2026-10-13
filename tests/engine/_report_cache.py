@@ -1,5 +1,6 @@
 """同一次 pytest 的報表上游資料；xdist 工人共用暫存根與檔案鎖。"""
 from __future__ import annotations
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import fcntl
 import hashlib
@@ -150,9 +151,9 @@ def _control_pair(inputs: report_io.ReportInput, window_s: float) -> str:
     lane = raw.geometric_lane
     calculated = ControlPairPhysics(
         report=output_from_report(raw, inputs=inputs, with_points=True, path_table_inputs=solved),
-        screen=build_reflection_screen(inputs, lane.frequencies_hz),
+        screen=build_reflection_screen(inputs, lane.frequencies_hz, materials_by_wall=_flow_inputs(inputs).materials_by_wall),
         window=build_reflection_window(inputs, frequencies_hz=lane.frequencies_hz,
-                                       scattering_coefficient=lane.scattering, window_s=window_s),
+                                       scattering_coefficient=lane.scattering, window_s=window_s, materials_by_wall=_flow_inputs(inputs).materials_by_wall),
         third_octave_decay=build_third_octave_decay(raw, inputs),
     )
     text = calculated.model_dump_json()

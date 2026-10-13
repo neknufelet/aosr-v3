@@ -6,6 +6,9 @@
 """
 
 from __future__ import annotations
+from collections.abc import Mapping
+from aosr.geometry.shoebox import Wall
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 
 from aosr.physics import report_validation
 
@@ -28,8 +31,12 @@ from aosr.physics.report_io import (
 )
 
 
-def report_capability(table: CapabilityTable) -> ReportCapability:
+def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReportCapability:
     """查三路報表既有能力列；不支援的條件在求解前拒收。"""
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    if any(not isinstance(material, ConstantImpedance) for material in materials_by_wall.values()):
+        raise ValueError("構造牆的能力列還沒開，#309 之五丙")
     entry = report_validation.CAPABILITY_ENTRY
     room = "shoebox"
     materials = "real_frequency_independent_impedance"

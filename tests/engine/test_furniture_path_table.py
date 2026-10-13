@@ -1,5 +1,6 @@
 """#559 第四步：家具路徑列、手算方向／能量、牆面遮擋與主表界線。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import math
 from dataclasses import asdict, replace
@@ -27,7 +28,7 @@ def built_table(model: SourceModelSpec = case.OMNI, *,
                 items: tuple[AbsoluteFurniture, ...] | None = (case.desk(),),
                 furniture_rows: bool = True, order: int = 1, scattering: float = 0.36) -> PathTableData:
     return build_path_table(source_model=model, room=case.ROOM, source=case.SOURCE, receiver=case.RECEIVER,
-        sound_speed_m_s=case.SPEED, rho_c_pa_s_per_m=case.RHO_C, impedance_by_wall=case.WALLS,
+        sound_speed_m_s=case.SPEED, rho_c_pa_s_per_m=case.RHO_C, materials_by_wall=_flow_materials(case.WALLS),
         frequencies_hz=case.FREQUENCIES, scattering_coefficient=(scattering,) * len(case.FREQUENCIES),
         reflection_order_k=order, furniture=None if items is None else case.lane_inputs(items),
         furniture_rows=furniture_rows)
@@ -136,7 +137,7 @@ def test_third_order_two_pieces_rows_match_hand_pressures_and_own_blocked_list()
     inputs = third.lane_inputs(third.FREQUENCIES)
     table = build_path_table(source_model=third.MODEL, room=third.ROOM, source=third.SOURCE,
         receiver=third.RECEIVER, sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C,
-        impedance_by_wall={wall: third.WALLS[wall.wall_name()] for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: third.WALLS[wall.wall_name()] for wall in Wall.all()}),
         frequencies_hz=third.FREQUENCIES, scattering_coefficient=(third.SCATTERING,) * len(third.FREQUENCIES),
         reflection_order_k=3, furniture=inputs)
     paths = image_source_paths(third.ROOM, third.SOURCE, third.RECEIVER, third.SPEED, max_order=3,

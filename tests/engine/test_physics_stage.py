@@ -1,5 +1,7 @@
 """物理段搬家後的載入邊界、逐欄等值與子行程執行緒設定。"""
 from __future__ import annotations
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from aosr.physics import report_validation
 
@@ -7,7 +9,7 @@ import copy
 import inspect
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from typing import ParamSpec, TypeVar
@@ -17,7 +19,7 @@ import pytest
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.precision_contracts import default_precision_contracts_path
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Wall
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import build_reflection_screen
 from aosr.physics.report_output import output_from_report
@@ -73,7 +75,7 @@ def _direct_reports(scheme: Scheme, table: CapabilityTable,
         receivers={point.receiver_id: Point(*point.position_m)
                    for point in scheme.receiver_set.points},
         sound_speed_m_s=solved.sound_speed_m_s, density_kg_m3=solved.density_kg_m3,
-        impedance_by_wall=solved.impedance_by_wall,
+        impedance_by_wall=solved.impedance_by_wall, materials_by_wall=solved.materials_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
         low_frequency_axis=solved.low_frequency_axis,
@@ -96,7 +98,7 @@ def parts() -> Iterator[_Parts]:
     solve_calls: list[dict[str, object]] = []
     reports: list[_Reports] = []
 
-    def capability(table: CapabilityTable) -> three_lane_report.ReportCapability:
+    def capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> three_lane_report.ReportCapability:
         calls.append("report_capability")
         return three_lane_report._unchecked_capability()
 
@@ -179,7 +181,7 @@ def test_stage_hands_the_contact_it_read_to_the_pair(monkeypatch: pytest.MonkeyP
     class PairReached(RuntimeError):
         pass
 
-    def pair(*args: object, contact_rel: float | None) -> physics_stage.PhysicsPair:
+    def pair(*args: object, solved: report_io.SolverInputs, contact_rel: float | None) -> physics_stage.PhysicsPair:
         assert contact_rel == (marker if furnished else None)
         raise PairReached
 
@@ -212,7 +214,7 @@ def test_pair_passes_the_solver_furniture_and_same_contact_to_path_table(
 
     monkeypatch.setattr(physics_stage, "output_from_report", output)
     with pytest.raises(OutputReached):
-        physics_stage._pair(parts.scheme, key, document, inputs, parts.raw[key],
+        physics_stage._pair(parts.scheme, key, document, inputs, parts.raw[key], solved=report_io.solver_inputs(inputs),
                             contact_rel=CONTACT_REL if furnished else None)
 
 
@@ -246,7 +248,7 @@ def _raw_pair(parts: _Parts, key: tuple[str, str]) -> PairResult:
         report_id=f"report-{speaker_id}-{receiver_id}", input_document=document,
         report=output_from_report(raw, inputs=inputs, with_points=True,
                                   path_table_inputs=report_io.solver_inputs(inputs)),
-        screen=build_reflection_screen(inputs, lane.frequencies_hz),
+        screen=build_reflection_screen(inputs, lane.frequencies_hz, materials_by_wall=_flow_inputs(inputs).materials_by_wall),
         third_octave_decay=build_third_octave_decay(raw, inputs),
     )
 
@@ -273,8 +275,8 @@ def test_window_from_stored_parts_equals_window_from_raw_lane(parts: _Parts) -> 
         for window_s in (control.WINDOW_S, 0.02):
             expected = build_reflection_window(
                 inputs, frequencies_hz=lane.frequencies_hz,
-                scattering_coefficient=lane.scattering, window_s=window_s)
-            rebuilt = build_pair_window(inputs, pair.report, window_s)
+                scattering_coefficient=lane.scattering, window_s=window_s, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
+            rebuilt = build_pair_window(inputs, pair.report, window_s, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
             assert rebuilt == expected
             assert rebuilt.model_dump_json() == expected.model_dump_json()
 
@@ -286,7 +288,7 @@ def test_build_pair_window_refuses_missing_path_table(parts: _Parts) -> None:
     inputs = parts.documents[pair.speaker_id, pair.receiver_id][1]
     report = pair.report.model_copy(update={"path_table": None})
     with pytest.raises(ValueError, match="path_table"):
-        build_pair_window(inputs, report, control.WINDOW_S)
+        build_pair_window(inputs, report, control.WINDOW_S, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
 
 
 def test_child_process_env_threads() -> None:

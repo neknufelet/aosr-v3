@@ -1,6 +1,7 @@
 """票 #351：平行牆對與下一階幾何延遲的獨立考卷。"""
 
 from __future__ import annotations
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 
 import math
@@ -41,7 +42,7 @@ def _inputs(**overrides: object) -> ReportInput:
 
 
 def test_round_trip_delay_uses_each_room_length_and_input_sound_speed() -> None:
-    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall)
     pairs = {row.pair: row for row in screen.pairs}
 
     assert pairs["x"].distance_m == pytest.approx(5.0)
@@ -55,7 +56,7 @@ def test_round_trip_delay_uses_each_room_length_and_input_sound_speed() -> None:
 def test_face_energy_uses_hand_calculated_normal_incidence_and_pair_product() -> None:
     scattering = {wall.wall_name(): 0.2 for wall in Wall.all()}
     inputs = _inputs(scattering_by_wall=scattering)
-    row = next(row for row in build_reflection_screen(inputs, _FREQUENCIES).pairs if row.pair == "x")
+    row = next(row for row in build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall).pairs if row.pair == "x")
     rho_c = inputs.density_kg_m3 * inputs.sound_speed_m_s
     face_energy = ((1600.0 - rho_c) / (1600.0 + rho_c)) ** 2 * (1.0 - 0.2)
 
@@ -76,7 +77,7 @@ def test_each_face_uses_its_own_impedance() -> None:
     impedance = {wall.wall_name(): 1600.0 for wall in Wall.all()}
     impedance.update(x0=800.0, xL=4000.0)
     inputs = _inputs(impedance_pa_s_per_m_by_wall=impedance)
-    row = next(row for row in build_reflection_screen(inputs, _FREQUENCIES).pairs if row.pair == "x")
+    row = next(row for row in build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall).pairs if row.pair == "x")
     rho_c = inputs.density_kg_m3 * inputs.sound_speed_m_s
     unscattered = 1.0 - MATERIAL_SCATTERING_DEFAULT_S
     near = ((800.0 - rho_c) / (800.0 + rho_c)) ** 2 * unscattered
@@ -90,7 +91,7 @@ def test_each_face_uses_its_own_impedance() -> None:
 
 
 def test_missing_scattering_uses_material_default_symbol() -> None:
-    row = next(row for row in build_reflection_screen(_inputs(), _FREQUENCIES).pairs if row.pair == "x")
+    row = next(row for row in build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall).pairs if row.pair == "x")
     reflection_energy = ((1600.0 - 400.0) / (1600.0 + 400.0)) ** 2
     expected = reflection_energy * (1.0 - MATERIAL_SCATTERING_DEFAULT_S)
 
@@ -102,7 +103,7 @@ def test_missing_scattering_uses_material_default_symbol() -> None:
 def test_missing_one_wall_scattering_uses_material_default_symbol() -> None:
     inputs = _inputs()
     partial = inputs.model_copy(update={"scattering_by_wall": {"x0": 0.0}})
-    row = next(row for row in build_reflection_screen(partial, _FREQUENCIES).pairs if row.pair == "x")
+    row = next(row for row in build_reflection_screen(partial, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall).pairs if row.pair == "x")
     reflection_energy = ((1600.0 - 400.0) / (1600.0 + 400.0)) ** 2
 
     assert row.face_retained_energy[0][0] == pytest.approx(reflection_energy)
@@ -116,7 +117,7 @@ def test_each_wall_uses_its_own_scattering_instead_of_room_average() -> None:
         "x0": 0.0, "xL": 0.5, "y0": 0.2,
         "yL": 0.4, "floor": 0.6, "ceiling": 0.8,
     }
-    screen = build_reflection_screen(_inputs(scattering_by_wall=scattering), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(scattering_by_wall=scattering), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs(scattering_by_wall=scattering)).materials_by_wall)
     reflection_energy = ((1600.0 - 400.0) / (1600.0 + 400.0)) ** 2
 
     for row in screen.pairs:
@@ -133,7 +134,7 @@ def test_each_wall_uses_its_own_scattering_instead_of_room_average() -> None:
 
 
 def test_next_order_earliest_delay_matches_hand_mirrored_second_order() -> None:
-    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall)
     # x0 與 y0 各反射一次：最近鏡像源 (-1,-2,3)，接收點 (3,4,5)。
     expected_distance = math.sqrt((-1.0 - 3.0) ** 2 + (-2.0 - 4.0) ** 2 + (3.0 - 5.0) ** 2)
 
@@ -142,7 +143,7 @@ def test_next_order_earliest_delay_matches_hand_mirrored_second_order() -> None:
 
 
 def test_next_order_is_none_at_supported_maximum() -> None:
-    screen = build_reflection_screen(_inputs(reflection_order_k=8), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(reflection_order_k=8), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs(reflection_order_k=8)).materials_by_wall)
 
     assert screen.next_order_earliest_delay_s is None
 
@@ -159,8 +160,8 @@ def test_wall_pairs_ignore_coordinates_but_next_order_changes(
 ) -> None:
     inputs = _inputs()
     moved = inputs.model_copy(update={coordinate: changed})
-    original = build_reflection_screen(inputs, _FREQUENCIES)
-    shifted = build_reflection_screen(moved, _FREQUENCIES)
+    original = build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
+    shifted = build_reflection_screen(moved, _FREQUENCIES, materials_by_wall=_flow_inputs(moved).materials_by_wall)
 
     assert shifted.pairs == original.pairs
     assert shifted.next_order_earliest_delay_s != original.next_order_earliest_delay_s
@@ -173,8 +174,8 @@ def test_scene_fingerprint_tracks_wall_impedance() -> None:
             **inputs.impedance_pa_s_per_m_by_wall, "x0": 1800.0
         }
     })
-    original = build_reflection_screen(inputs, _FREQUENCIES)
-    modified = build_reflection_screen(changed, _FREQUENCIES)
+    original = build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
+    modified = build_reflection_screen(changed, _FREQUENCIES, materials_by_wall=_flow_inputs(changed).materials_by_wall)
 
     assert original.scene_fingerprint == scene_fingerprint(inputs)
     assert modified.scene_fingerprint == scene_fingerprint(changed)
@@ -182,7 +183,7 @@ def test_scene_fingerprint_tracks_wall_impedance() -> None:
 
 
 def test_screen_rejects_mismatched_band_length_nonascending_axis_and_duplicate_pair() -> None:
-    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall)
     document = screen.model_dump()
     document["pairs"][0]["round_trip_retained_energy"] = (0.5,)
     with pytest.raises(ValidationError, match="round_trip_retained_energy"):
@@ -200,7 +201,7 @@ def test_screen_rejects_mismatched_band_length_nonascending_axis_and_duplicate_p
 
 
 def test_screen_rejects_nonfinite_values_and_extra_fields() -> None:
-    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall)
     document = screen.model_dump()
     document["pairs"][0]["face_retained_energy"] = ((float("nan"), 0.5), (0.5, 0.5))
     with pytest.raises(ValidationError, match="face_retained_energy"):
@@ -219,7 +220,7 @@ def test_screen_rejects_nonfinite_values_and_extra_fields() -> None:
 
 def test_screen_keeps_the_input_source_and_receiver_as_given() -> None:
     inputs = _inputs()
-    screen = build_reflection_screen(inputs, _FREQUENCIES)
+    screen = build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
 
     assert screen.source_m == inputs.source_m
     assert screen.receiver_m == inputs.receiver_m
@@ -229,7 +230,7 @@ def test_next_order_is_computed_just_below_the_supported_maximum() -> None:
     """K＝上限減一時第 K+1 階還算得出來；上限判斷差一就會變成 None。"""
     screen = build_reflection_screen(
         _inputs(reflection_order_k=SUPPORTED_MAX_ORDER - 1), _FREQUENCIES
-    )
+    , materials_by_wall=_flow_inputs(_inputs(reflection_order_k=SUPPORTED_MAX_ORDER - 1)).materials_by_wall)
 
     assert screen.next_order_earliest_delay_s is not None
     assert screen.next_order_earliest_delay_s > 0.0
@@ -246,7 +247,7 @@ def test_corner_grazing_second_order_counts_by_mirror_identity() -> None:
         source_m={"x": 1.0, "y": 1.0, "z": 1.5},
         receiver_m={"x": 2.0, "y": 2.0, "z": 1.5},
     )
-    screen = build_reflection_screen(inputs, _FREQUENCIES)
+    screen = build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
 
     assert screen.next_order_earliest_delay_s == pytest.approx(math.hypot(3.0, 3.0) / 320.0)
 
@@ -261,7 +262,7 @@ def test_next_order_earliest_is_earliest_of_every_order_not_computed(
 ) -> None:
     """沒過濾的牆面鏡像全集：更高階不准比第 K+1 階更早到，不含家具混合路徑。"""
     inputs = _inputs(room_m=room, reflection_order_k=order_k)
-    screen = build_reflection_screen(inputs, _FREQUENCIES)
+    screen = build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     deeper = image_source_paths(
         inputs.room_m, inputs.source_m, inputs.receiver_m, inputs.sound_speed_m_s,
         max_order=order_k + 3, materials=None,
@@ -277,7 +278,7 @@ def test_screen_rejects_repeated_or_nonpositive_frequencies(
     frequencies: tuple[float, ...]
 ) -> None:
     """只有一個頻點時沒有相鄰的一對可比，負頻率要靠第一格那一道擋。"""
-    screen = build_reflection_screen(_inputs(), tuple(abs(f) + index for index, f in enumerate(frequencies)))
+    screen = build_reflection_screen(_inputs(), tuple(abs(f) + index for index, f in enumerate(frequencies)), materials_by_wall=_flow_inputs(_inputs()).materials_by_wall)
     document = screen.model_dump()
     document["frequencies_hz"] = frequencies
     with pytest.raises(ValidationError, match="frequencies_hz"):
@@ -285,7 +286,7 @@ def test_screen_rejects_repeated_or_nonpositive_frequencies(
 
 
 def test_screen_rejects_negative_next_order_delay() -> None:
-    document = build_reflection_screen(_inputs(), _FREQUENCIES).model_dump()
+    document = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall).model_dump()
     document["next_order_earliest_delay_s"] = -0.001
     with pytest.raises(ValidationError, match="next_order_earliest_delay_s"):
         ReflectionScreen.model_validate(document)
@@ -293,14 +294,14 @@ def test_screen_rejects_negative_next_order_delay() -> None:
 
 @pytest.mark.parametrize("faces", [("xL", "x0"), ("x0", "window")])
 def test_screen_rejects_wall_pair_faces_out_of_order_or_unknown(faces: tuple[str, str]) -> None:
-    document = build_reflection_screen(_inputs(), _FREQUENCIES).model_dump()
+    document = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall).model_dump()
     document["pairs"][0]["faces"] = faces
     with pytest.raises(ValidationError, match="faces"):
         ReflectionScreen.model_validate(document)
 
 
 def test_screen_rejects_a_fourth_pair_and_a_nonfinite_coordinate() -> None:
-    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs()).materials_by_wall)
     document = screen.model_dump()
     document["pairs"] = (*document["pairs"], document["pairs"][2])
     with pytest.raises(ValidationError, match="pairs"):
@@ -361,7 +362,7 @@ def test_next_order_earliest_matches_the_image_formula_for_k_one_to_three(
         receiver_m=dict(zip("xyz", receiver)),
         reflection_order_k=order_k,
     )
-    screen = build_reflection_screen(inputs, _FREQUENCIES)
+    screen = build_reflection_screen(inputs, _FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
 
     assert screen.next_order_earliest_delay_s == pytest.approx(
         _earliest_image_distance(room, source, receiver, order_k + 1) / 320.0
@@ -370,8 +371,8 @@ def test_next_order_earliest_matches_the_image_formula_for_k_one_to_three(
 
 def test_screen_delays_follow_a_legitimate_sound_speed_change() -> None:
     """同一份場景合法換聲速（報表與篩查同一份輸入）：來回延遲與下一階到達都照距離÷聲速跟著變。"""
-    slow = build_reflection_screen(_inputs(sound_speed_m_s=320.0), _FREQUENCIES)
-    fast = build_reflection_screen(_inputs(sound_speed_m_s=343.0), _FREQUENCIES)
+    slow = build_reflection_screen(_inputs(sound_speed_m_s=320.0), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs(sound_speed_m_s=320.0)).materials_by_wall)
+    fast = build_reflection_screen(_inputs(sound_speed_m_s=343.0), _FREQUENCIES, materials_by_wall=_flow_inputs(_inputs(sound_speed_m_s=343.0)).materials_by_wall)
 
     for slow_row, fast_row in zip(slow.pairs, fast.pairs, strict=True):
         assert fast_row.round_trip_delay_s == pytest.approx(slow_row.round_trip_delay_s * 320.0 / 343.0)

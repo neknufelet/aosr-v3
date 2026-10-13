@@ -1,5 +1,6 @@
 """票 #415：三路接合報表的場景身分與逐份座標。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from aosr.physics import report_validation
 
@@ -99,7 +100,7 @@ def _solved_report(
         impedance_by_wall=solved.impedance_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
-    )
+    materials_by_wall=_flow_materials(solved.impedance_by_wall))
 
 
 def _shared_solved_report(

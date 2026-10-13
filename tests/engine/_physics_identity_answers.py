@@ -92,6 +92,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理身分變更：#309 之五甲第二段審查修補；runtime 晚設定核生效值與冷布林讀法改變。
-# 出處：本工作樹以 physics_identity_parts 實跑重釘；閉包、資料清單與守門不變。
-CODE_DIGEST = 'ea1b89d03066ee1797aff51c535f3cf803f6f9c7aafe0da461b535d0d6f42aeb'
+# 物理身分變更：#309 之五乙；牆面材料的唯一出生地與所有下游接線改變。
+# 出處：#309 之五乙材料接線，以 physics_identity_parts 實跑重釘；閉包與資料清單不變。
+CODE_DIGEST = '31e38336b49e85aee720ae1b84ef253b6a94963124fe58105b07ed7f703eb7ff'

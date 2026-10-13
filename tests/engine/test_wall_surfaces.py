@@ -110,6 +110,8 @@ def _child(directory: Path, mode: str, *, x64: bool) -> dict[str, object]:
     env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=x64, env=env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    root = Path(__file__).resolve().parents[2]
+    env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(root)))
     env["TMPDIR"] = str(directory)
     output = directory / "result.json"
     probe = Path(__file__).with_name("_wall_surfaces_probe.py")

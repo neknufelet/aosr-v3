@@ -1,5 +1,7 @@
 """逐路徑構造反射的隔離雙精度考卷；來源檔由父行程核對。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from aosr.physics import three_lane_report_geometry as report_geometry
 
@@ -105,7 +107,7 @@ def _direct() -> None:
 
 def _table(materials: Mapping[Wall, SurfaceMaterial], order: int = 3) -> PathTableData:
     return tables.build_path_table(room=ROOM, source=SOURCE, receiver=RECEIVER, sound_speed_m_s=C,
-        rho_c_pa_s_per_m=RHO * C, density_kg_m3=RHO, impedance_by_wall=WALLS, frequencies_hz=AXIS,
+        rho_c_pa_s_per_m=RHO * C, density_kg_m3=RHO,  frequencies_hz=AXIS,
         scattering_coefficient=(.21,) * len(AXIS), reflection_order_k=order, source_model=MODEL,
         furniture=None, materials_by_wall=materials)
 
@@ -123,12 +125,12 @@ def _readers() -> None:
 
     with patch.object(geo, "image_source_paths", recording):
         report_geometry._solve_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
-            wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
+             scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
             reflection_order_k=3, frequencies_hz=AXIS, density_kg_m3=RHO, materials_by_wall=materials)
         reader[0] = "dense"
         with patch.object(report_geometry, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
             report_geometry._solve_dense_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
-                wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
+                 scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
                 reflection_order_k=3, density_kg_m3=RHO, materials_by_wall=materials)
     reader[0] = "table"
     with patch.object(tables, "image_source_paths", recording):
@@ -149,10 +151,10 @@ def _both_lanes() -> None:
     """兩軸總入口要把覆寫交給細軸與密軸兩支；任一支丟掉，那一軸就跟固定阻抗一模一樣。"""
     with patch.object(report_geometry, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
         plain = report_geometry._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
-            receiver=RECEIVER, wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
+            receiver=RECEIVER, materials_by_wall=_flow_materials(WALLS), scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
             sound_speed_m_s=C, reflection_order_k=3, report_frequencies_hz=AXIS)
         override = report_geometry._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
-            receiver=RECEIVER, wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
+            receiver=RECEIVER,  scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
             sound_speed_m_s=C, reflection_order_k=3, report_frequencies_hz=AXIS,
             materials_by_wall=_materials(), density_kg_m3=RHO)
     assert plain[0] != override[0], "細軸沒吃到覆寫"
@@ -180,7 +182,7 @@ def _override_inputs() -> None:
 
     with patch.object(tables, "image_source_paths", recording):
         tables.build_path_table(room=ROOM, source=SOURCE, receiver=RECEIVER, sound_speed_m_s=c,
-            rho_c_pa_s_per_m=rho * c, density_kg_m3=rho, impedance_by_wall=WALLS, frequencies_hz=AXIS,
+            rho_c_pa_s_per_m=rho * c, density_kg_m3=rho,  frequencies_hz=AXIS,
             scattering_coefficient=(.21,) * len(AXIS), reflection_order_k=3, source_model=MODEL,
             furniture=None, materials_by_wall=materials)
     direct = image_source_paths(ROOM, SOURCE, RECEIVER, c, 3, reflection_sources=wall_reflection_sources(
@@ -282,11 +284,11 @@ def _constant() -> None:
             baseline = image_source_paths(ROOM, SOURCE, RECEIVER, C, 3, amp.Materials(RHO*C, axis, rows))
             assert _paths(materials, axis) == baseline
             lane = report_geometry._solve_geometric_report_lane if axis == GEOMETRIC_LANE_FREQUENCIES_HZ else report_geometry._solve_dense_geometric_report_lane
-            lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER, wall_impedances=WALLS,
+            lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER, materials_by_wall=materials,
                 scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C, reflection_order_k=3)
         _table(materials)
-        build_reflection_window(_input(), frequencies_hz=AXIS, scattering_coefficient=(.21,)*len(AXIS), window_s=.025)
-        build_reflection_screen(_input(), AXIS)
+        build_reflection_window(_input(), frequencies_hz=AXIS, scattering_coefficient=(.21,)*len(AXIS), window_s=.025, materials_by_wall=_flow_inputs(_input()).materials_by_wall)
+        build_reflection_screen(_input(), AXIS, materials_by_wall=_flow_inputs(_input()).materials_by_wall)
 
 
 def _reject_mutant(check: Callable[[], None]) -> None:
@@ -343,32 +345,25 @@ def _screen_angle_mutant() -> None:
 
 
 def _batch() -> None:
-    """正式批次內部覆寫只流向鏡像法；有限元素、晚期的材料來源照舊（晚期拿有無覆寫兩份比）。"""
-    from aosr.physics import three_lane_report_batch as batch
-    shared = batch._prepare(source_model=MODEL, room=ROOM, sound_speed_m_s=C, density_kg_m3=RHO,
-        impedance_by_wall=WALLS, scattering_by_wall=SCATTER, capability=None, reflection_order_k=3,
-        low_frequency_axis=LowFrequencyAxis.SEARCH, geometric_materials_by_wall=_materials())
-    assert shared.geometric_materials == _materials()
-    assert shared.fem_wall_impedances == WALLS
-    plain = batch._prepare(source_model=MODEL, room=ROOM, sound_speed_m_s=C, density_kg_m3=RHO,
-        impedance_by_wall=WALLS, scattering_by_wall=SCATTER, capability=None, reflection_order_k=3,
-        low_frequency_axis=LowFrequencyAxis.SEARCH)
-    assert (shared.surfaces, shared.t60, shared.late_result) == (plain.surfaces, plain.t60, plain.late_result), \
-        "晚期家族吃到了鏡像法的覆寫"
+    """正式單對入口的材料同時到有限元素、晚期與鏡像法。"""
+    from aosr.physics.report_io import solver_inputs
+    from tests.engine._source_model_control import fake_fem_energy
+    fixed = solver_inputs(_input(order=3))
+    solved = fixed._replace(materials_by_wall=_materials())
     captured: list[Mapping[Wall, SurfaceMaterial]] = []
     real = report_geometry._solve_both_geometric_report_lanes
 
     def recording(*args: object, **kwargs: object) -> tuple[geo.GeometricLaneResult, geo.GeometricEarlyResult]:
-        from typing import cast
         captured.append(cast(Mapping[Wall, SurfaceMaterial], kwargs["materials_by_wall"]))
         return real(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交批次鏡像法參數
 
-    with patch.object(report_geometry, "_solve_both_geometric_report_lanes", recording):
-        batch.solve_reports(source_model=MODEL, room=ROOM, sources={"S": SOURCE}, receivers={"R": RECEIVER},
-            sound_speed_m_s=C, density_kg_m3=RHO, impedance_by_wall=WALLS, scattering_by_wall=SCATTER,
-            capability=None, reflection_order_k=3, low_frequency_axis=LowFrequencyAxis.SEARCH, batch_fem=True,
-            fem_energies={("S", "R"): (0.,)*len(shared.fem_frequencies_hz)}, geometric_materials_by_wall=_materials())
-    assert captured == [_materials()]
+    with patch.object(report, "_solve_fem_energy", fake_fem_energy), \
+            patch.object(report_geometry, "_solve_both_geometric_report_lanes", recording):
+        changed = report.solve_three_lane_report(**solved._asdict())
+        plain = report.solve_three_lane_report(**fixed._asdict())
+    assert captured == [solved.materials_by_wall, fixed.materials_by_wall]
+    assert changed.geometric_lane.reflected_energy != plain.geometric_lane.reflected_energy
+    assert changed.geometric_lane.late_energy != plain.geometric_lane.late_energy
 
 
 if __name__ == "__main__":

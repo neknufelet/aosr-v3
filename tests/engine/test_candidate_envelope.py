@@ -6,6 +6,7 @@
 因此兩個場景指紋都來自正式報表輸入。
 """
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 import math
@@ -108,7 +109,7 @@ def _solve_report(
         impedance_by_wall=solved.impedance_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
-    )
+    materials_by_wall=_flow_materials(solved.impedance_by_wall))
     return output_from_report(solved_report, inputs=inputs, with_points=True)
 
 

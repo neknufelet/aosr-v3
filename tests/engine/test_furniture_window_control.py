@@ -8,6 +8,7 @@
 uv run --no-sync python -B -c 'from tests.engine.test_furniture_window_control import control_values; print(control_values())'
 """
 from __future__ import annotations
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import hashlib
 
@@ -38,15 +39,15 @@ def control_values() -> dict[str, str]:
     values = {}
     for name, room in (("reference", window_cases._REFERENCE), ("small", window_cases._SMALL)):
         inputs = window_cases._inputs(room)
-        screen = build_reflection_screen(inputs, window_cases._FREQUENCIES)
+        screen = build_reflection_screen(inputs, window_cases._FREQUENCIES, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
         values[f"{name}_screen"] = hashlib.sha256(screen.model_dump_json().encode()).hexdigest()
         for seconds in (0.015, 0.02, 1.0):
             window = window_cases._window(inputs, seconds)
             values[f"{name}_{seconds}"] = hashlib.sha256(window.model_dump_json().encode()).hexdigest()
     inputs = report_io.load_input_document(
         source_cases._document(source_cases._analytic_input()), source_cases._table(), _directivity.DIRECTIVITY)
-    window = build_reflection_window(inputs, frequencies_hz=(1000.0,), scattering_coefficient=(0.0,), window_s=0.05)
-    screen = build_reflection_screen(inputs, (1000.0,))
+    window = build_reflection_window(inputs, frequencies_hz=(1000.0,), scattering_coefficient=(0.0,), window_s=0.05, materials_by_wall=_flow_inputs(inputs).materials_by_wall)
+    screen = build_reflection_screen(inputs, (1000.0,), materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     values["analytic_window"] = hashlib.sha256(window.model_dump_json().encode()).hexdigest()
     values["analytic_screen"] = hashlib.sha256(screen.model_dump_json().encode()).hexdigest()
     return values

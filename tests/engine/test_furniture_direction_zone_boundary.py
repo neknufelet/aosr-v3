@@ -1,5 +1,7 @@
 """#559 第七步：桌面到達方向跨登記簿仰角界線的獨立手算考卷。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import math
 from dataclasses import asdict, replace
@@ -56,7 +58,7 @@ def _hand_geometry(source: Point, receiver: Point) -> tuple[tuple[float, float, 
 
 def _table(source: Point, receiver: Point) -> PathTableData:
     return build_path_table(source_model=case.OMNI, room=case.ROOM, source=source, receiver=receiver,
-        sound_speed_m_s=case.SPEED, rho_c_pa_s_per_m=case.RHO_C, impedance_by_wall=case.WALLS,
+        sound_speed_m_s=case.SPEED, rho_c_pa_s_per_m=case.RHO_C, materials_by_wall=_flow_materials(case.WALLS),
         frequencies_hz=reflections._AXIS, scattering_coefficient=reflections._SCATTERING,
         reflection_order_k=3, furniture=case.lane_inputs((case.desk(),), reflections._AXIS))
 
@@ -105,9 +107,9 @@ def _record(role: str, source: Point, receiver: Point) -> ReflectionInput:
     })
     window = build_reflection_window(inputs, frequencies_hz=reflections._AXIS,
         scattering_coefficient=reflections._SCATTERING, window_s=template.window.window_s,
-        contact_rel=case.CONTACT_REL) if template.window is not None else None
+        contact_rel=case.CONTACT_REL, materials_by_wall=_flow_inputs(inputs).materials_by_wall) if template.window is not None else None
     return replace(template, report=report, window=window,
-        screen=build_reflection_screen(inputs, reflections._AXIS), third_octave_decay=reflections._third_decay(report))
+        screen=build_reflection_screen(inputs, reflections._AXIS, materials_by_wall=_flow_inputs(inputs).materials_by_wall), third_octave_decay=reflections._third_decay(report))
 
 
 @pytest.mark.parametrize(("offset_m", "expected_zone"), (

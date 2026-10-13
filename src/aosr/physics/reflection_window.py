@@ -163,7 +163,7 @@ def _coverage_from_geometry(
 def build_reflection_window(
     inputs: ReportInput, *, frequencies_hz: tuple[float, ...],
     scattering_coefficient: tuple[float, ...], window_s: float, contact_rel: float | None = None,
-    materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
 ) -> ReflectionWindow:
     """補算至未算路徑全在窗外；逐頻能量直接沿用路徑表同一支程式。"""
     solved = solver_inputs(inputs)
@@ -178,7 +178,7 @@ def build_reflection_window(
             room=solved.room, source=solved.source, receiver=solved.receiver,
             sound_speed_m_s=solved.sound_speed_m_s,
             rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
-            impedance_by_wall=solved.impedance_by_wall, density_kg_m3=solved.density_kg_m3,
+            density_kg_m3=solved.density_kg_m3,
             materials_by_wall=materials_by_wall,
             frequencies_hz=frequencies_hz,
             scattering_coefficient=scattering_coefficient,

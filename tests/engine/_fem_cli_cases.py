@@ -24,7 +24,7 @@ def prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[Path]
     monkeypatch.setattr(frequency_axis, "GEOMETRIC_LANE_FREQUENCIES_HZ", report_axis)
     for module, name, fake in control.STAND_INS:
         monkeypatch.setattr(module, name, fake)
-    monkeypatch.setattr(physics_stage, "report_capability", lambda table: three_lane_report._unchecked_capability())
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table, materials_by_wall: three_lane_report._unchecked_capability())
     monkeypatch.setattr(fem_slices, "solve_fem_energies_many", fake_slices)
     paths = []
     for name in ("trial", "other"):

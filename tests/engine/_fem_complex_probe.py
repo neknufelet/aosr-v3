@@ -1,5 +1,6 @@
 """複數有限元素考卷的子行程：精度與 CPU 釘選由父行程注入；跨機器釘主線與構造接線的題用替身解法器。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import json
 import sys
@@ -44,9 +45,9 @@ def _materials() -> dict[Wall, SurfaceMaterial]:
 def _inputs(materials: dict[Wall, SurfaceMaterial] | None = None) -> FemInputs:
     scheme = small_scheme()
     solved = SolverInputs(ROOM, Point(.4, .5, .6), SOURCE_MODEL, Point(1.5, .9, .7),
-                          SPEED, RHO, _walls(), None, 3, LowFrequencyAxis.SEARCH)
+                          SPEED, RHO, _walls(), None, 3, LowFrequencyAxis.SEARCH, materials_by_wall=_materials())
     if materials is None:
-        return fem_inputs(scheme, solved)
+        return fem_inputs(scheme, solved, materials_by_wall=solved.materials_by_wall)
     return fem_inputs(scheme, solved, materials_by_wall=materials)
 
 
@@ -83,7 +84,7 @@ def _formal_energies(
         shared = original(source_model=SOURCE_MODEL, room=ROOM,
             density_kg_m3=RHO, sound_speed_m_s=SPEED, impedance_by_wall=_walls(),
             scattering_by_wall=None, capability=None, reflection_order_k=3,
-            low_frequency_axis=LowFrequencyAxis.SEARCH)
+            low_frequency_axis=LowFrequencyAxis.SEARCH, materials_by_wall=_materials())
         return shared if rows is None else replace(shared, fem_wall_impedances=rows)
 
     def pair(shared: batch._Shared, source: Point, receiver: Point,
@@ -95,7 +96,7 @@ def _formal_energies(
             sources=_points('sources'), receivers=_points('receivers'),
             density_kg_m3=RHO, sound_speed_m_s=SPEED, impedance_by_wall=_walls(),
             scattering_by_wall=None, capability=None, reflection_order_k=3,
-            low_frequency_axis=LowFrequencyAxis.SEARCH, batch_fem=batched)
+            low_frequency_axis=LowFrequencyAxis.SEARCH, batch_fem=batched, materials_by_wall=_flow_materials(_walls()))
     return cast(dict[tuple[str, str], tuple[float, ...]], values)
 
 
@@ -109,7 +110,7 @@ def _constant() -> dict[str, object]:
         shared = batch._prepare(source_model=SOURCE_MODEL, room=ROOM,
             density_kg_m3=RHO, sound_speed_m_s=SPEED, impedance_by_wall=_walls(),
             scattering_by_wall=None, capability=None, reflection_order_k=3,
-            low_frequency_axis=LowFrequencyAxis.SEARCH)
+            low_frequency_axis=LowFrequencyAxis.SEARCH, materials_by_wall=_flow_materials(_walls()))
         inputs = _inputs()
         assert shared.fem_wall_impedances == inputs.wall_impedances
         assert all(type(z) is float for z in shared.fem_wall_impedances.values()), '固定阻抗要原樣的 float'
@@ -224,7 +225,7 @@ def _scene_air() -> dict[str, object]:
         expected = tuple(complex(z) for z in direct)
         prepared = batch._prepare_fem_impedances(materials, axis, density_kg_m3=rho, sound_speed_m_s=speed)
         solved = SolverInputs(ROOM, Point(.4, .5, .6), SOURCE_MODEL, Point(1.5, .9, .7),
-                              speed, rho, _walls(), None, 3, LowFrequencyAxis.SEARCH)
+                              speed, rho, _walls(), None, 3, LowFrequencyAxis.SEARCH, materials_by_wall=_materials())
         sliced = fem_inputs(small_scheme(), solved, materials_by_wall=materials).wall_impedances
         assert prepared[Wall.XL] == expected and sliced[Wall.XL] == expected
         assert prepared[Wall.XL] != default_rows[Wall.XL]

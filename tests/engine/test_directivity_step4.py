@@ -1,6 +1,7 @@
 """#505 第四步：輸入允許範圍與方向倍率的產品接線。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from aosr.physics import report_validation
 
@@ -55,7 +56,7 @@ def _table(solved: report_io.SolverInputs, model: SourceModelSpec) -> PathTableD
         source_model=model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3,
-        frequencies_hz=(1000.0, 4000.0), impedance_by_wall=solved.impedance_by_wall,
+        frequencies_hz=(1000.0, 4000.0), materials_by_wall=_flow_materials(solved.impedance_by_wall),
         scattering_coefficient=(0.2, 0.2), reflection_order_k=1,
     )
 
@@ -179,7 +180,7 @@ def test_relative_path_energy_uses_direct_and_reflected_d_independently() -> Non
         furniture=None,
         source_model=model, room=Room(10.0, 10.0, 10.0), source=source, receiver=receiver,
         sound_speed_m_s=343.0, rho_c_pa_s_per_m=rho_c,
-        impedance_by_wall={wall: 4.0 * rho_c for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: 4.0 * rho_c for wall in Wall.all()}),
         frequencies_hz=frequencies, scattering_coefficient=(0.2, 0.2), reflection_order_k=1,
     )
     x0 = next(row for row in table.rows if row.wall_sequence == ("x0",))
@@ -209,7 +210,7 @@ def test_mirrored_paths_keep_each_departure_factor_bitwise() -> None:
             furniture=None,
             source=source, receiver=receiver, source_model=model, room=Room(4.0, 4.0, 2.0),
             sound_speed_m_s=343.0, rho_c_pa_s_per_m=1.2 * 343.0,
-            impedance_by_wall={wall: 1600.0 for wall in Wall.all()},
+            materials_by_wall=_flow_materials({wall: 1600.0 for wall in Wall.all()}),
             frequencies_hz=(1000.0,), scattering_coefficient=(0.2,), reflection_order_k=1,
         )
 

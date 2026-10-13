@@ -1,6 +1,8 @@
 """方案邊界與報表能力查表的施工考卷。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
+from aosr.geometry.shoebox import Wall
 
 from pathlib import Path
 
@@ -172,7 +174,7 @@ def test_reference_scheme_loads() -> None:
 
 def test_report_capability_rejects_unsupported() -> None:
     table = load_capabilities(config_path("capabilities.toml"))
-    assert report_capability(table).record is not None
+    assert report_capability(table, _flow_materials({w: 900. for w in Wall.all()})).record is not None
     entry = table.for_entry("three_lane_report")
     changed = entry.model_copy(update={"capability": tuple(
         row.model_copy(update={"status": "unsupported", "evidence": ()})
@@ -181,4 +183,4 @@ def test_report_capability_rejects_unsupported() -> None:
     unsupported = table.model_copy(update={"entry": tuple(
         changed if item.name == entry.name else item for item in table.entry)})
     with pytest.raises(ValueError, match="three_lane_report"):
-        report_capability(unsupported)
+        report_capability(unsupported, _flow_materials({w: 900. for w in Wall.all()}))

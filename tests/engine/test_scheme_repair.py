@@ -1,5 +1,8 @@
 """方案存讀、結果交叉身分與無求解邊界的修補考卷。"""
 from __future__ import annotations
+from collections.abc import Mapping
+from aosr.geometry.shoebox import Wall
+from aosr.materials.construction_models import SurfaceMaterial
 
 import json
 from collections.abc import Callable, Sequence
@@ -66,7 +69,7 @@ def wall_2() -> SchemeResult:
             patch.setattr(module, name, fake)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
         patch.setattr(physics_stage, "report_capability",
-                      lambda table: three_lane_report._unchecked_capability())
+                      lambda table, materials_by_wall: three_lane_report._unchecked_capability())
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
@@ -364,7 +367,7 @@ def test_explicit_scene_options_reach_solver(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", stop_at_solver)
     monkeypatch.setattr(physics_stage, "report_capability",
-                        lambda table: three_lane_report._unchecked_capability())
+                        lambda table, materials_by_wall: three_lane_report._unchecked_capability())
     with pytest.raises(ReachedSolver):
         pipeline.run_scheme(scheme, capabilities=load_capabilities(config_path("capabilities.toml")),
                             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
@@ -393,7 +396,7 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
         return instant
 
     def physical_pair(scheme: Scheme, key: tuple[str, str], *args: object,
-                      contact_rel: float | None) -> physics_stage.PhysicsPair:
+                      contact_rel: float | None, solved: report_io.SolverInputs) -> physics_stage.PhysicsPair:
         calls.append("physical_pair")
         return pairs[key]
 
@@ -401,21 +404,22 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     original_evaluate = evaluation.evaluate_parts
 
     def window(inputs: report_io.ReportInput, report: report_io.ReportOutput,
-               window_s: float) -> ReflectionWindow:
+               window_s: float, *, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReflectionWindow:
         calls.append("window")
-        return original_window(inputs, report, window_s)
+        return original_window(inputs, report, window_s, materials_by_wall=materials_by_wall)
 
     def evaluate(value: SchemeResult, path: Path, registry: evaluation.RegistrySettings,
-                 *, capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
+                 *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
+                 materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> CandidateEvaluation:
         mark("evaluate_parts")
-        return original_evaluate(value, path, registry, capabilities=capabilities, directivity=directivity)
+        return original_evaluate(value, path, registry, capabilities=capabilities, directivity=directivity, materials_by_wall=materials_by_wall)
 
     monkeypatch.setattr(pipeline, "checked_inputs", lambda scheme, **kwargs:
                         (mark("checked_inputs"), (scheme, inputs))[1])
     monkeypatch.setattr(physics_stage, "_pair", physical_pair)
     monkeypatch.setattr(evaluation, "build_pair_window", window)
     monkeypatch.setattr(pipeline, "evaluate_parts", evaluate)
-    monkeypatch.setattr(physics_stage, "report_capability", lambda table:
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table, materials_by_wall:
                         (mark("report_capability"), three_lane_report._unchecked_capability())[1])
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", lambda **kwargs:
                         (mark("solve"), dict.fromkeys(inputs))[1])

@@ -1,5 +1,9 @@
 """存檔重建雙向核家具表頭，接觸尺只由入口讀一次並顯式轉傳。"""
 from __future__ import annotations
+from collections.abc import Mapping
+from aosr.geometry.shoebox import Wall
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from pathlib import Path
 
@@ -41,7 +45,7 @@ def test_stored_header_must_match_input_in_both_directions(
         assert data.furniture is not None
         data = data.model_copy(update={"furniture": (data.furniture[0].model_copy(update={"material": "glass"}),)})
     with pytest.raises(ValueError, match=message):
-        evaluation.build_pair_window(data, report, 0.015)
+        evaluation.build_pair_window(data, report, 0.015, materials_by_wall=_flow_inputs(data).materials_by_wall)
 
 
 def test_material_check_pairs_each_id_with_its_own_material(plain_report: ReportOutput) -> None:
@@ -59,7 +63,7 @@ def test_material_check_pairs_each_id_with_its_own_material(plain_report: Report
             {"furniture_id": "z-desk", "material": "glass", "unknown_bands_hz": (63.0, 125.0, 8000.0)}))
     swapped = plain_report.model_copy(update={"path_table": PathTableSection.model_validate(header)})
     with pytest.raises(ValueError, match="存下來的路徑表表頭與輸入的家具材質不一致"):
-        evaluation.build_pair_window(data, swapped, 0.015)
+        evaluation.build_pair_window(data, swapped, 0.015, materials_by_wall=_flow_inputs(data).materials_by_wall)
 
 
 def test_matching_stored_header_equals_direct_window(plain_report: ReportOutput) -> None:
@@ -67,8 +71,8 @@ def test_matching_stored_header_equals_direct_window(plain_report: ReportOutput)
     assert report.path_table is not None
     expected = build_reflection_window(data, frequencies_hz=report.path_table.frequencies_hz,
         scattering_coefficient=report.path_table.scattering_coefficient, window_s=0.015,
-        contact_rel=case.CONTACT_REL)
-    assert evaluation.build_pair_window(data, report, 0.015) == expected
+        contact_rel=case.CONTACT_REL, materials_by_wall=_flow_inputs(data).materials_by_wall)
+    assert evaluation.build_pair_window(data, report, 0.015, materials_by_wall=_flow_inputs(data).materials_by_wall) == expected
 
 
 @pytest.mark.parametrize("furnished", [False, True])
@@ -89,14 +93,15 @@ def test_pair_hands_the_contact_it_read_to_the_window(
 
     def supplied_window(inputs: ReportInput, *, frequencies_hz: tuple[float, ...],
                         scattering_coefficient: tuple[float, ...], window_s: float,
-                        contact_rel: float | None = None) -> ReflectionWindow:
+                        contact_rel: float | None = None,
+                        materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReflectionWindow:
         assert contact_rel == (marker if furnished else None)
         return original(inputs, frequencies_hz=frequencies_hz,
-            scattering_coefficient=scattering_coefficient, window_s=window_s, contact_rel=contact_rel)
+            scattering_coefficient=scattering_coefficient, window_s=window_s, contact_rel=contact_rel, materials_by_wall=materials_by_wall)
 
     monkeypatch.setattr(evaluation, "furniture_contact_rel", read_contact, raising=False)
     monkeypatch.setattr(evaluation, "build_reflection_window", supplied_window)
-    result = evaluation.build_pair_window(data, report, 0.015)
+    result = evaluation.build_pair_window(data, report, 0.015, materials_by_wall=_flow_inputs(data).materials_by_wall)
     assert result.furniture_ids == (("desk",) if furnished else None)
     assert reads == ([default_precision_contracts_path()] if furnished else [])
 
@@ -108,5 +113,5 @@ def test_raw_unfurnished_window_never_reads_furniture_registry(monkeypatch: pyte
     # 攔在讀檔那一層：具名匯入的 furniture_contact_rel 在呼叫時仍查模組全域的 load_precision_contracts。
     monkeypatch.setattr("aosr.config.precision_contracts.load_precision_contracts", forbidden)
     result = build_reflection_window(inputs(furnished=False), frequencies_hz=(125.0, 250.0),
-        scattering_coefficient=(0.2, 0.3), window_s=0.015)
+        scattering_coefficient=(0.2, 0.3), window_s=0.015, materials_by_wall=_flow_inputs(inputs(furnished=False)).materials_by_wall)
     assert result.coverage == "complete" and result.furniture_ids is None

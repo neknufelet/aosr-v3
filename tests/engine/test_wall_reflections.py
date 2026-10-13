@@ -1,5 +1,6 @@
 """鏡像法逐路徑構造阻抗：純量逐位契約與四個讀者接線。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from aosr.physics import three_lane_report_geometry as report_geometry
 
@@ -68,7 +69,7 @@ _SUITE = {
     "outputs": "構造接線未改變輸出、忽略空腔參數",
     "reuse": "混合房只打固定牆時失去捷徑或核心按每路重算",
     "constant": "固定牆的細密軸、路徑表、時間窗、篩檢觸碰 JAX",
-    "batch": "內部構造覆寫沒有送到逐對鏡像法、污染有限元素或晚期家族的材料",
+    "batch": "同一份材料沒有從單對主入口送到有限元素、晚期與逐對鏡像法",
     "zero-angle": "植錯：全部路徑用 0° 要被抓到",
     "wrong-axis": "植錯：入射角取錯軸要被抓到",
     "scattering-angle": "植錯：房間散射用路徑角要被抓到",
@@ -97,7 +98,7 @@ def test_legacy_rho_c_is_not_rounded_through_density() -> None:
     source, receiver, axis = Point(1.1, .9, 1.2), Point(3.7, 2.1, 1.45), (125., 503., 2017.)
     actual = report_geometry._solve_geometric_report_lane(source_model=model, room=room, source=source,
         receiver=receiver, sound_speed_m_s=c, rho_c_pa_s_per_m=rho_c, frequencies_hz=axis,
-        reflection_order_k=3, wall_impedances=walls, scattering_by_wall=None)
+        reflection_order_k=3, materials_by_wall=_flow_materials(walls), scattering_by_wall=None)
     expected = geometric_lane.solve_geometric_lane(source_model=model, room=room, source=source,
         receiver=receiver, sound_speed_m_s=c, rho_c_pa_s_per_m=rho_c, frequencies_hz=axis,
         reflection_order_k=3, impedance_by_wall={w.wall_name(): complex(z) for w, z in walls.items()})
@@ -113,7 +114,7 @@ def test_construction_override_requires_scene_density() -> None:
     materials: dict[Wall, SurfaceMaterial] = {
         **{wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}, Wall.X0: board}
     with pytest.raises(ValueError, match="場景密度"):
-        lane_reflection_sources(walls, materials, (125., 503.), rho_c_pa_s_per_m=1.19 * 347.,
+        lane_reflection_sources(materials, (125., 503.), rho_c_pa_s_per_m=1.19 * 347.,
                                 sound_speed_m_s=347., density_kg_m3=None)
 
 
