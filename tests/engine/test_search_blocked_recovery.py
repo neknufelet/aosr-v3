@@ -84,6 +84,8 @@ def test_blocked_kill_sweep_matches_whole_run(tmp_path: Path, monkeypatch: pytes
             assert rows(store) == expected_rows, (source, index, after)
             assert next_params(store) == expected_next, (source, index, after)
             assert None not in continued.calls and not store.baseline_path.exists()
+    # 「只取一次」的前提要守：中斷點都跑完之後，對照組的帳本與下一批參數仍跟取的那一份一樣。
+    assert (rows(whole), next_params(whole)) == (expected_rows, expected_next)
 
 
 class ChangedPhysicsCompute(SavedFurnitureCompute):
