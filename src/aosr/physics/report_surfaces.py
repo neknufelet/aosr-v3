@@ -97,14 +97,17 @@ def normalized_surfaces(value: object, *, json_shape: bool = False) -> object:
 
 
 def validation_content(value: object, *, json_shape: bool = False) -> object:
-    """物件回到明給的欄位內容再驗：省略照舊省略、明給空值照舊明給。
+    """物件回到它的欄位內容再驗：省略而且仍是預設空值的欄位照舊省略、明給空值照舊明給。
 
+    其餘欄位照現值帶上：直接建構時用預設的種類代號 kind（聯合型別靠它分辨），與驗證器補出的值，
+    都是物件的現值，省略了會掉回預設或認不出材料。
     ``json_shape``（JSON 形狀）給報表輸入用：那份契約只收 JSON 物件與陣列，資料類別與 tuple 都攤平。
     其餘（方案、場景）裡面沒有模型的資料類別與 tuple（固定序列）保留原型別，嚴格模式照收。
     """
     if isinstance(value, BaseModel):
         return {name: validation_content(getattr(value, name), json_shape=json_shape)
-                for name in type(value).model_fields if name in value.model_fields_set}
+                for name, field in type(value).model_fields.items()
+                if name in value.model_fields_set or getattr(value, name) is not None or field.default is not None}
     if is_dataclass(value) and not isinstance(value, type):
         given = {item.name: getattr(value, item.name) for item in fields(value) if item.init}
         content = {name: validation_content(item, json_shape=json_shape) for name, item in given.items()}

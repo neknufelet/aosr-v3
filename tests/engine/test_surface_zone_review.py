@@ -2,16 +2,16 @@
 import json
 import re
 from pathlib import Path
-from typing import cast
+from typing import Self, cast
 
 import pytest
-from pydantic import ValidationError
+from pydantic import ValidationError, model_validator
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.compare_view import scheme_differences
 from aosr.gui.problem_text import field_name, material_summary
-from aosr.materials.construction_models import Assembly, ConstantImpedance, PorousLayer
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, Layer, PorousLayer
 from aosr.physics import report_io
 from aosr.physics.report_surfaces import WholeWallZone
 from aosr.physics.report_validation import ReportInputError
@@ -190,6 +190,53 @@ def test_revalidation_keeps_explicit_null_of_forged_layer() -> None:
     layers[0] = PorousLayer.model_construct(None, **(porous() | {"porosity": None}))
     with pytest.raises(ValidationError, match="不讀"):
         Scene.model_validate(scene)
+
+
+def test_revalidation_rejects_forged_null_over_unset_default() -> None:
+    """偽造層沒明給模型、現值卻是空值：重驗要照現值拒收，不能悄悄換回預設的 Komatsu。"""
+    scene = zone_scene(mixed=True)
+    zone = cast(list[dict[str, object]], cast(dict[str, object], scene[NEW])["floor"])[0]
+    layers = cast(list[object], cast(dict[str, object], zone["material"])["layers"])
+    layers[0] = PorousLayer.model_construct(set(porous()) - {"model"}, **(porous() | {"model": None}))
+    with pytest.raises(ValidationError, match="合法選項"):
+        Scene.model_validate(scene)
+
+
+@pytest.mark.parametrize("material", ("constant", "assembly", "air", "porous", "board"))
+@pytest.mark.parametrize("entry", ("scene", "scheme", "report"))
+def test_objects_built_with_default_kind_are_accepted(material: str, entry: str) -> None:
+    """直接建構的材料或層省略 kind（種類）用預設值，跟明給 kind 的字典是同一份材料，三入口都要收、結果一樣。"""
+    layers: dict[str, Layer] = {
+        "air": AirLayer(thickness_m=.1), "board": BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.),
+        "porous": PorousLayer(thickness_m=.1, flow_resistivity_pa_s_m2=10000., material_class="fibrous")}
+    built = (ConstantImpedance(impedance_pa_s_m=1646.4) if material == "constant" else
+             Assembly(layers=(AirLayer(kind="air", thickness_m=.1),), backing="rigid") if material == "assembly" else
+             Assembly(kind="assembly", layers=(layers[material],), backing="rigid"))
+    saved = []
+    for value in (built, built.model_dump(mode="json")):
+        scene = zone_scene(mixed=True)
+        cast(list[dict[str, object]], cast(dict[str, object], scene[NEW])["floor"])[0]["material"] = value
+        saved.append(Scene.model_validate(scene).model_dump_json() if entry == "scene" else
+                     Scheme.model_validate(reference_document() | {"scene": scene}).model_dump_json()
+                     if entry == "scheme" else
+                     report_io.load_input_document(report_document(scene), CAPABILITIES, DIRECTIVITY).model_dump_json())
+    assert saved[0] == saved[1]
+
+
+def test_values_filled_by_validators_survive_scheme_revalidation() -> None:
+    """驗證器補出、沒明給的值也是場景的現值：交給方案重驗不准掉回預設，存檔要跟同值字典一樣。"""
+    class FilledScene(Scene):
+        @model_validator(mode="after")
+        def filled(self) -> Self:
+            if self.reflection_order_k is None:
+                object.__setattr__(self, "reflection_order_k", 2)
+            return self
+
+    source = FilledScene.model_validate(reference_document()["scene"])
+    assert "reflection_order_k" not in source.model_fields_set
+    expected = Scheme.model_validate(reference_document() | {"scene": source.model_dump(mode="json")})
+    assert Scheme.model_validate(reference_document() | {"scene": source}).model_dump_json() == (
+        expected.model_dump_json())
 
 
 def test_schema_reader_honours_ref_siblings_and_json_booleans() -> None:
