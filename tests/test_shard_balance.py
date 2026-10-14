@@ -315,7 +315,10 @@ def test_printed_text_names_the_shard_it_moves_to(tmp_path: Path, source: str, t
     (lambda text, file: '', '不一樣'),
     (lambda text, file: text + text.replace('balance-shard-b', 'balance-shard-b-again'), '兩群'),
     (lambda text, file: text.replace(f'"{file}"', '"tests/test_verify_shards.py"'), '兩群'),
-], ids=['not-toml', 'not-a-list', 'other-shard', 'missing', 'file-twice', 'steals-a-pinned-file'])
+    (lambda text, file: text + '\n[extra]\nx = 1\n', '只准有群'),
+    (lambda text, file: 'x = 1\n', '只准有群'),
+], ids=['not-toml', 'not-a-list', 'other-shard', 'missing', 'file-twice', 'steals-a-pinned-file', 'extra-table',
+        'extra-key-without-groups'])
 def test_suggestion_check_reads_the_printed_text_back(tmp_path: Path, tamper: Callable[[str, str], str],
                                                       message: str) -> None:
     """抓印出來的原文沒讀回核對：讀不回、讀回來跟算的不一樣、或跟固定群撞檔，都回 2。"""
@@ -342,3 +345,47 @@ def test_same_as_registry_compares_groups_not_prose(tmp_path: Path) -> None:
     for changed in (replace(groups[0], shard='shard-a'), replace(groups[0], name='balance-other'),
                     replace(groups[0], files=groups[0].files + ('tests/test_verify_shards.py',))):
         assert not same_as_registry(replace(loaded, groups=loaded.groups + (changed,)), groups)
+
+
+_HEAD, _GROUP = REGISTRY.split('[[group]]\n', 1)
+_INLINE = 'group = [{name = "control", shard = "shard-a", why = "共用控制組", files = ["tests/test_verify_shards.py"]}]\n'
+
+
+@pytest.mark.parametrize('registry_text,message', [
+    (REGISTRY.replace('name = "control"', 'name = "balance-control"'), '沒有固定群'),
+    (_HEAD.replace('[evidence]', 'group = []\n[evidence]'), '沒有固定群'),
+    (_HEAD.replace('[evidence]', _INLINE + '[evidence]'), '[[group]] 表'),
+], ids=['only-balance-groups', 'root-empty-list', 'pinned-group-inline'])
+def test_registry_shapes_the_paste_cannot_handle_return_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], registry_text: str, message: str,
+) -> None:
+    """抓照標題貼不回去的登記簿寫法照樣出建議：沒有固定群、群寫成根層清單，一律回 2、說明要手改、什麼都不印也不改。"""
+    from governance.status.shard_balance import main
+    registry, _ = _tree(tmp_path)
+    registry.write_text(registry_text)
+    load_registry(registry)
+    _sample(tmp_path, 'r1', 'shard-a', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
+    _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
+    monkeypatch.chdir(tmp_path)
+    before = _snapshot(tmp_path)
+    assert main(['--history', str(tmp_path / 'hist'), '--registry', str(registry), '--reference-cpu', '參考處理器']) == TOOL_BROKEN
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert message in captured.err and '請手改登記簿' in captured.err
+    assert _snapshot(tmp_path) == before
+
+
+_TOP, _EVIDENCE = _HEAD.split('[evidence]', 1)
+
+
+@pytest.mark.parametrize('registry_text', [
+    REGISTRY,
+    _TOP + '[[group]]\n' + _GROUP + '[evidence]' + _EVIDENCE,
+    REGISTRY + '\n[[group]]\nname = "balance-shard-b"\nshard = "shard-b"\nwhy = "舊"\nfiles = ["tests/test_shard_seal.py"]\n',
+], ids=['groups-at-the-end', 'groups-before-another-table', 'pinned-plus-old-balance'])
+def test_registry_shapes_the_paste_handles_pass(tmp_path: Path, registry_text: str) -> None:
+    """控制組：固定群寫成 [[group]] 表（在檔尾、在別張表前面、後面跟著舊的 balance 群）都照常放行。"""
+    from governance.status.shard_balance import check_registry_shape
+    registry = tmp_path / 'registry.toml'
+    registry.write_text(registry_text)
+    check_registry_shape(registry_text, load_registry(registry))

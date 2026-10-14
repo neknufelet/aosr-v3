@@ -289,9 +289,12 @@ def suggested_groups(result: Balance) -> tuple[Group, ...]:
 def check_suggestion(result: Balance, registry: Registry, text: str) -> None:
     """只在記憶體裡驗印出來的那段原文：讀得回同一批群、跟固定群一起過登記簿的群規則、兩片互斥且合起來是全部考卷。不寫任何檔。"""
     try:
-        pasted = tomllib.loads(text).get('group', [])
+        parsed = tomllib.loads(text)
     except ValueError as exc:
         raise ToolBroken(f'建議原文讀不回來：{exc}') from exc
+    if set(parsed) - {'group'}:
+        raise ToolBroken(f'建議原文最上層只准有群，實際多了 {sorted(set(parsed) - {"group"})!r}')
+    pasted = parsed.get('group', [])
     if not isinstance(pasted, list):
         raise ToolBroken(f'建議原文的 group 不是群清單：{pasted!r}')
     pinned = [{'name': group.name, 'shard': group.shard, 'why': group.why, 'files': list(group.files)}
@@ -304,6 +307,21 @@ def check_suggestion(result: Balance, registry: Registry, text: str) -> None:
     parts = [set(render_inputs(nodes, candidate, shard).args.splitlines()) for shard in candidate.shards]
     if parts[0] & parts[1] or parts[0] | parts[1] != set(result.weights):
         raise ToolBroken('建議分片不互斥或未覆蓋全部考卷')
+
+
+def check_registry_shape(source: str, registry: Registry) -> None:
+    """建議只照一種貼法給：登記簿至少留一個固定群、群寫成 [[group]] 表；別種寫法回 2，請人手改。
+
+    換掉 balance 群之後沒有固定群，檔裡就沒有 group 鍵、讀不回；群寫成根層一行清單（例如
+    group = [...]）時，尾巴接不上 [[group]] 表。試接一張空的 [[group]] 表就知道是哪一種。
+    """
+    if not any(not group.name.startswith('balance-') for group in registry.groups):
+        raise ToolBroken('登記簿沒有固定群：換掉 balance 群後檔裡就沒有 group 鍵，這種寫法不出建議，請手改登記簿')
+    try:
+        tomllib.loads(source + '\n[[group]]\n')
+    except ValueError as exc:
+        raise ToolBroken(f'登記簿的群沒有寫成 [[group]] 表（例如根層 group = [...]），檔尾接不上建議的群，'
+                         f'這種寫法不出建議，請手改登記簿：{exc}') from exc
 
 
 def suggestion_text(groups: tuple[Group, ...]) -> str:
@@ -362,6 +380,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         result = analyze(args.history, args.registry, Path.cwd(), args.reference_cpu)
         registry = load_registry(args.registry)
+        check_registry_shape(args.registry.read_text(encoding='utf-8'), registry)
         groups = suggested_groups(result)
         text = suggestion_text(groups)
         check_suggestion(result, registry, text)
