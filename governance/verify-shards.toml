@@ -91,6 +91,7 @@ files = [
   "tests/test_temp_repo_background_maintenance.py",
 ]
 
+# 以下 balance 群由 governance/status/shard_balance 依雲端歷史耗時產生；重算時從這一行到檔尾整段重寫，不手改。
 [[group]]
 name = "balance-shard-b"
 shard = "shard-b"

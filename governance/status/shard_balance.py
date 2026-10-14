@@ -273,55 +273,76 @@ def analyze(history: Path, registry_path: Path, root: Path, reference_cpu: str) 
                    _hints(root, movable, registry))
 
 
-def _without_balance_groups(source: str) -> str:
-    """刪掉每個 balance 群自己那幾行與緊貼在它前面的空行；群後的註解與空行歸下一張表，原樣留著。
+BALANCE_MARKER = '# 以下 balance 群由 governance/status/shard_balance 依雲端歷史耗時產生；重算時從這一行到檔尾整段重寫，不手改。'
 
-    切段只看行首的表頭（可帶行尾註解）。切錯的話（例如多行字串裡有一行長得像表頭），
-    不是那一段讀不成 TOML，就是刪完的檔讀出來不等於「原檔去掉 balance 群」——兩種都回 2。
+
+def _is_balance(group: object) -> bool:
+    """群名以 balance- 開頭的才是這支工具管的群。"""
+    return isinstance(group, dict) and str(cast(dict[str, object], group).get('name', '')).startswith('balance-')
+
+
+def _split(source: str) -> tuple[str, dict[str, object]]:
+    """標記之前的原文（不含緊貼標記的空行）與它讀出來的內容；標記之前這一段一個位元都不改。
+
+    只比讀出來的內容，不切表頭：標記之前不准有 balance 群，標記之後只准有 balance 群
+    （而且只多群、不多別的鍵）；標記出現兩次、哪一段讀不成 TOML（例如標記落在多行字串裡）都回 2。
     """
     lines = source.splitlines(keepends=True)
-    headers = [index for index, line in enumerate(lines) if re.match(r'[ \t]*\[\[?[^\[\]\n]+\]\]?[ \t]*(#.*)?$', line)]
-    drop: set[int] = set()
-    for position, start in enumerate(headers):
-        if not re.match(r'[ \t]*\[\[[ \t]*group[ \t]*\]\][ \t]*(#.*)?$', lines[start]):
-            continue
-        end = headers[position + 1] if position + 1 < len(headers) else len(lines)
-        while end > start + 1 and re.match(r'[ \t]*(#.*)?$', lines[end - 1]):
-            end -= 1
-        try:
-            name = cast(object, tomllib.loads(''.join(lines[start:end]))['group'][0]['name'])
-        except (tomllib.TOMLDecodeError, KeyError, IndexError, TypeError) as error:
-            raise ToolBroken(f'登記簿第 {start + 1} 行起的群切不出來：{error}') from error
-        if isinstance(name, str) and name.startswith('balance-'):
-            first = start
-            while first > 0 and not lines[first - 1].strip():
-                first -= 1
-            drop.update(range(first, end))
-    kept = ''.join(line for index, line in enumerate(lines) if index not in drop)
-    expected = tomllib.loads(source)
-    if 'group' in expected:
-        expected['group'] = [group for group in cast(list[dict[str, object]], expected['group'])
-                             if not str(group.get('name', '')).startswith('balance-')]
+    marks = [index for index, line in enumerate(lines) if line.rstrip('\r\n') == BALANCE_MARKER]
+    if len(marks) > 1:
+        raise ToolBroken(f'配平標記出現 {len(marks)} 次（第 {[mark + 1 for mark in marks]} 行），只准一次')
+    cut = marks[0] if marks else len(lines)
+    if marks:
+        while cut > 0 and not lines[cut - 1].strip():
+            cut -= 1
+    head = ''.join(lines[:cut])
     try:
-        same = tomllib.loads(kept) == expected
+        full, head_data = tomllib.loads(source), tomllib.loads(head)
+    except tomllib.TOMLDecodeError as error:
+        raise ToolBroken(f'登記簿或配平標記之前那一段讀不成 TOML：{error}') from error
+    head_groups = cast(list[object], head_data.get('group', []))
+    if any(_is_balance(group) for group in head_groups):
+        raise ToolBroken('balance 群只准住在配平標記之後（那一段由這支工具整段重寫）；標記之前發現 balance 群')
+    full_groups = cast(list[object], full.get('group', []))
+    rest = {key: value for key, value in full.items() if key != 'group'}
+    if (full_groups[:len(head_groups)] != head_groups or not all(_is_balance(group) for group in full_groups[len(head_groups):])
+            or rest != {key: value for key, value in head_data.items() if key != 'group'}):
+        raise ToolBroken('配平標記之後只准有 balance 群；固定群與其他設定請移到標記之前')
+    return head, head_data
+
+
+def _with_empty_group_list(head: str, head_data: dict[str, object]) -> str:
+    """群全刪光又沒有新群：在根層第一張表之前補 group = []（空群清單是合法的），再讀一次核對。"""
+    lines = head.splitlines(keepends=True)
+    if lines and not lines[-1].endswith('\n'):
+        lines[-1] += '\n'
+    first = next((index for index, line in enumerate(lines) if line.lstrip().startswith('[')), len(lines))
+    while first > 0 and re.match(r'[ \t]*(#.*)?$', lines[first - 1]):
+        first -= 1
+    text = ''.join(lines[:first]) + 'group = []\n' + ''.join(lines[first:])
+    try:
+        same = tomllib.loads(text) == {**head_data, 'group': []}
     except tomllib.TOMLDecodeError:
         same = False
     if not same:
-        raise ToolBroken('刪掉舊 balance 群之後的登記簿不等於原檔去掉那幾群，文字切段失手')
-    return kept
+        raise ToolBroken('群全刪光後補不進 group = []（根層找不到放的位置）')
+    return text
 
 
 def _suggestion_text(source: str, result: Balance) -> str:
-    """只刪舊 balance 段，原文其餘位元保持；新群不帶過期數字。"""
-    text = _without_balance_groups(source)
+    """標記之前原文不動；標記之後整段換成新算的 balance 群（不帶會過期的數字）。"""
+    head, head_data = _split(source)
+    blocks: list[str] = []
     for shard in result.shards:
         files = sorted(file for file, assigned in result.suggested.items() if assigned == shard and assigned != result.hashed[file])
         if files:
-            separator = '' if text.endswith('\n\n') else '\n'
-            text += f'{separator}[[group]]\nname = "balance-{shard}"\nshard = {json.dumps(shard)}\n'
-            text += 'why = "由 governance/status/shard_balance 依雲端歷史耗時算出；重算時整群重寫，不手改。"\nfiles = [\n'
-            text += ''.join(f'  {json.dumps(file)},\n' for file in files) + ']\n'
-    return text
+            blocks.append(f'[[group]]\nname = "balance-{shard}"\nshard = {json.dumps(shard)}\n'
+                          'why = "由 governance/status/shard_balance 依雲端歷史耗時算出；重算時整群重寫，不手改。"\nfiles = [\n'
+                          + ''.join(f'  {json.dumps(file)},\n' for file in files) + ']\n')
+    if not blocks:
+        return head if 'group' in head_data else _with_empty_group_list(head, head_data)
+    separator = '' if head.endswith('\n\n') or not head else '\n' if head.endswith('\n') else '\n\n'
+    return head + separator + BALANCE_MARKER + '\n' + '\n'.join(blocks)
 
 
 def write_suggestion(source: Path, output: Path, result: Balance) -> None:
