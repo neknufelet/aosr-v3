@@ -54,7 +54,8 @@ GUARDED_KEY_PATHS = ("profiles.*.rfz.threshold_db", "early_reflection.window_ms"
 class Exemption:
     """一筆具名豁免：哪支檔、豁免哪一條鍵路徑的值、那一次出現的前後文、為什麼。
 
-    ``around`` 裡的 ``{}`` 就是那一次出現的數字本身；前後文要緊貼著它、逐字相同。
+    ``around`` 裡的 ``{}`` 就是那一次出現的數字本身；前後文要緊貼著它、逐字相同，而且前文要從
+    識別字邊界開始（名字更長的別的變數、別的類別，例如前面多一段的 ``RFZ_…``，借不到）。
     """
 
     file: str
@@ -149,6 +150,15 @@ def _exempt_value(exemption: Exemption) -> float:
     return _as_value(exemption.key_path, values[0])
 
 
+def _covers(exemption: Exemption, line: str, match: re.Match[str]) -> bool:
+    """這筆豁免是不是緊貼著這一次出現：前文逐字相同且從識別字邊界開始、後文逐字相同。"""
+    before, _, after = exemption.around.partition("{}")
+    start = match.start() - len(before)
+    if start < 0 or line[start:match.start()] != before or not line[match.end():].startswith(after):
+        return False
+    return start == 0 or not (line[start - 1].isalnum() or line[start - 1] == "_")
+
+
 def _line_offenders(rel: str, line: str) -> tuple[list[str], set[Exemption]]:
     """一行裡每一次出現被守的數字：沒有豁免緊貼著它就是違規；回（違規的那幾個寫法、用到的豁免）。"""
     guarded = _guarded_values()
@@ -158,9 +168,7 @@ def _line_offenders(rel: str, line: str) -> tuple[list[str], set[Exemption]]:
         value = float(match.group())
         if value not in guarded:
             continue
-        hits = {e for e in EXEMPTIONS if e.file == rel and _exempt_value(e) == value
-                and line[:match.start()].endswith(e.around.split("{}")[0])
-                and line[match.end():].startswith(e.around.split("{}")[1])}
+        hits = {e for e in EXEMPTIONS if e.file == rel and _exempt_value(e) == value and _covers(e, line, match)}
         used |= hits
         if not hits:
             offending.append(match.group())
@@ -213,7 +221,7 @@ def test_every_exemption_still_matches_a_line() -> None:
 
 
 def test_an_exemption_covers_only_the_occurrence_it_names() -> None:
-    """同一行別處同值的數字、或把豁免的前後文抄進註解，都借不到那一筆豁免。"""
+    """同一行別處同值的數字、把豁免的前後文抄進註解、名字更長的別的變數，都借不到那一筆豁免。"""
     for exemption in EXEMPTIONS:
         written = repr(_exempt_value(exemption))
         named = exemption.around.format(written)
@@ -221,6 +229,8 @@ def test_an_exemption_covers_only_the_occurrence_it_names() -> None:
         assert (offending, used) == ([], {exemption})
         assert _line_offenders(exemption.file, f"{named}; OTHER = {written}")[0] == [written]
         assert _line_offenders(exemption.file, f"OTHER = {written}  # {named}")[0] == [written]
+        assert _line_offenders(exemption.file, f"RFZ_{named}")[0] == [written]
+        assert _line_offenders(exemption.file, f"Other{named}")[0] == [written]
         assert _line_offenders(ELSEWHERE, named)[0] == [written]
 
 
