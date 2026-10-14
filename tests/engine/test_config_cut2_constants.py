@@ -37,7 +37,7 @@ from dataclasses import dataclass, fields, is_dataclass, make_dataclass
 from typing import cast
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, create_model
 
 from blueprint import config_cut1_cases as cases
 from tests.engine._config_answers import (
@@ -212,8 +212,21 @@ def test_class_constant_is_the_class_the_loader_builds(constant_id: str) -> None
     )
 
 
+def _impostor(name: str, flavor: str) -> type:
+    """同名、欄位不同的冒牌類別。
+
+    ``rejects-fields``：收不下設定檔的欄位，在呼叫當下用模組上的名字去建的載入器會炸。
+    ``accepts-anything``：什麼欄位都收、另外多一格自己的，那種載入器會真的建出冒牌貨——
+    這時身分那一條是綠的，只剩載入器探針（欄位比對）擋得住。
+    """
+    if flavor == "rejects-fields":
+        return make_dataclass(name, [("impostor_only_field", int)])
+    return create_model(name, __config__=ConfigDict(extra="allow"), impostor_only_field=(int, 0))
+
+
+@pytest.mark.parametrize("flavor", ["rejects-fields", "accepts-anything"])
 @pytest.mark.parametrize("constant_id", CUT2_CLASS_CONSTANT_IDS)
-def test_a_same_named_impostor_turns_a_judge_red(constant_id: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_same_named_impostor_turns_a_judge_red(constant_id: str, flavor: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """控制組：模組上那一格換成同名、欄位不同的類別，至少一位裁判要紅。
 
     名字那一條本來就照樣綠（只比名字）。載入器在呼叫當下用模組上的名字去建物件的，會建出
@@ -222,7 +235,7 @@ def test_a_same_named_impostor_turns_a_judge_red(constant_id: str, monkeypatch: 
     """
     table_name, _, name = constant_id.split(".", 2)
     module = importlib.import_module(f"aosr.config.{cases.engine_module_name(table_name)}")
-    impostor = make_dataclass(name, [("impostor_only_field", int)])
+    impostor = _impostor(name, flavor)
     monkeypatch.setattr(module, name, impostor)
     assert is_approx(cast(object, getattr(module, name)), constant(table_name, name)), "名字那一條應該照樣綠"
     identity_green = bool(_cases_that_build(impostor, table_name))
