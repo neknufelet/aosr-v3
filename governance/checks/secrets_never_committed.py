@@ -60,7 +60,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.exit_codes import ToolBroken, make_temp_dir, note, run
+from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken, make_temp_dir, note, run
 from governance.loader import EXEMPTION_KEYS, RULES_DIR
 
 # 這張卡的 id。名單與樣式只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
@@ -569,6 +569,8 @@ def _materialize(scan_root: Path, decl: Path) -> tuple[Path, Callable[[], None]]
             what="開樣本用的暫存 repo",
             env=env,
         )
+        for key, value in TEMP_REPO_QUIET_CONFIG:
+            _git(["config", key, value], work, what="關掉暫存 repo 的背景自動維護", env=env)
         for index, step in enumerate(plan, start=1):
             target = work / step.path
             if step.action == DECL_ADD:

@@ -85,7 +85,8 @@ files = [
 [[group]]
 name = "meta"
 shard = "shard-a"
-why = "治理規矩卡的後設考卷。"
+why = "治理規矩卡的後設考卷（對每張卡跑樣本的那幾支）。"
 files = [
   "tests/test_fixture_runner.py",
+  "tests/test_temp_repo_background_maintenance.py",
 ]

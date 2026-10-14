@@ -70,7 +70,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.exit_codes import ToolBroken, make_temp_dir, note, run
+from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken, make_temp_dir, note, run
 
 AUTHORS_FILE = "governance/authors.txt"
 FIXTURE_RANGE_FILE = "governance/fixture-commit-range.txt"
@@ -390,6 +390,8 @@ def _materialize(scan_root: Path, decl: Path) -> tuple[Path, Range, Callable[[],
             what="開樣本用的暫存 repo",
             env=env,
         )
+        for key, value in TEMP_REPO_QUIET_CONFIG:
+            _run_git(["config", key, value], work, what="關掉暫存 repo 的背景自動維護", env=env)
         listed: list[str] = []
         shas: list[str] = []
         for step in plan:

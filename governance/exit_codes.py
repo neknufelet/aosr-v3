@@ -75,6 +75,12 @@ def remove_temp_dir(path: Path) -> None:
         raise ToolBroken(f"清不掉自己開的暫存目錄 {path}：{exc}") from exc
 
 
+# 自己開的暫存 git repo 一開完就寫進這兩格、再做第一次 commit：雲端的 git 在 commit 之後會在背景自動維護
+# （重新打包、寫 maintenance.lock），跟收尾刪暫存目錄搶同一個目錄，偶發「清不掉自己開的暫存目錄」把主線打紅
+# （#778 是考卷沙箱、#810 是檢查自己建樣本歷史的暫存 repo）。寫進那顆 repo 自己的設定，之後每個指令都吃得到。
+TEMP_REPO_QUIET_CONFIG: tuple[tuple[str, str], ...] = (("maintenance.auto", "false"), ("gc.auto", "0"))
+
+
 def repo_root() -> Path:
     """這個 repo 的根（往上找 .git）。檢查程式不准讀這個範圍外的路徑。"""
     here = Path(__file__).resolve()

@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from governance.cloud_receipts import card_settings
-from governance.exit_codes import ToolBroken, make_temp_dir, note, remove_temp_dir
+from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken, make_temp_dir, note, remove_temp_dir
 from governance.loader import setting_strings, setting_text
 
 
@@ -327,6 +327,8 @@ def _build_fixture_range(
     work.mkdir()
     env = _fixture_env(identity)
     run_git(["-c", "init.defaultBranch=main", "init", "--quiet"], work, "建暫存 repo", env)
+    for key, value in TEMP_REPO_QUIET_CONFIG:
+        run_git(["config", key, value], work, "關掉暫存 repo 的背景自動維護", env)
     base_cases = scan_root / rules.fixture_base_cases_file
     for source in answers:
         _write_fixture_answer(source, work / source.relative_to(scan_root), mode, base_cases, rules,

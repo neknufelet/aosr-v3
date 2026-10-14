@@ -73,7 +73,7 @@ import pytest  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須
 REPO = Path(__file__).resolve().parents[1]
 
 from governance import gh_replay, repo_residue  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
-from governance.exit_codes import ToolBroken  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.loader import load_all_cards  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.status import mirror_receipts  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 
@@ -360,9 +360,9 @@ def git_sandbox(tmp_path: Path) -> Iterator[GitSandbox]:
     if top.is_relative_to(REPO):
         raise AssertionError(f"sandbox 負控制不過：{top} 落在真 repo（{REPO}）裡面")
     # 雲端 git 2.55 在 commit 之後會在背景自動維護（重新打包、寫點陣圖暫存檔），跟收尾刪樹搶同一個目錄，
-    # 偶發 FileNotFoundError（#778）。只關這顆沙盒 repo 自己的設定，負控制過了才寫。
-    git("config", "maintenance.auto", "false")
-    git("config", "gc.auto", "0")
+    # 偶發 FileNotFoundError（#778）。只關這顆沙盒 repo 自己的設定，負控制過了才寫；兩格跟檢查的暫存 repo 同一份（#810）。
+    for key, value in TEMP_REPO_QUIET_CONFIG:
+        git("config", key, value)
 
     yield GitSandbox(root=root, git=git)
     shutil.rmtree(root)
