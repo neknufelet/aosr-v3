@@ -128,7 +128,12 @@ reason = "green-must-be-real-green 那張卡的 [junit] 宣告收據要落在 go
 #     以下寫法靜態都咬不到：代寫函式匯入改名、指給別的名字（一層或多層）、
 #     `getattr(模組, "regenerate_schema_files")`；參數先把登記常數或登記路徑字串指給名字再餵、
 #     常數匯入改名、`getattr(模組, "_SCHEMA_DIR")`；functools.partial 包一層、經 tests/ 裡別的
-#     函式轉手、經 CLI main 或子程序跑 --regenerate-schemas。靜態追別名與名字綁定試過一版，
+#     函式轉手、經 CLI main 或子程序跑 --regenerate-schemas；等價的路徑寫法 `Path("./blueprint/schemas")`、
+#     `Path("blueprint", "schemas")`、`Path("blueprint") / "schemas"`（只認一整串登記路徑字串）；
+#     寫在函式參數預設值、裝飾器裡、或 `match` 的 case 本文裡的呼叫（遍歷遇到函式定義只走本文，
+#     也不進 case 本文）。後面這三處遍歷的洞，第①段的 spawn 判準同樣有（同日實跑：預設值、
+#     裝飾器、case 本文裡的 `subprocess.run(["git", "status"])` 都不咬），是早就在的，記在候選票 #816。
+#     靜態追別名與名字綁定試過一版，
 #     獨立審查實跑出跨作用域的誤咬（別支函式的別名、內層同名變數、字串剛好等於常數名），已收回。
 #     這些寫法真的改到版控檔時由動態那半接（它比跑前跑後的 git status、跟怎麼呼叫無關；
 #     直接呼叫的探針已實跑接住，經 CLI 那條沒實跑）。
