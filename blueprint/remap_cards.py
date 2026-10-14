@@ -5,6 +5,10 @@
 合併那一步自己手寫的 lesson_ids 有一部分是編的（不存在於 lessons.json），
 所以這支腳本整組丟掉，改用「沿 covers 回查候選規則的 lesson_ids」重建。
 
+**2026-10-14 起跑不起來**：那份 convergence-journal.jsonl 跟著 repo 外的備份資料夾一起被刪、
+找不到副本（#822）。blueprint/cards-38.json 是最後一份產物；改 v2 欄位只能直接編輯它，
+下面說的「再跑一次重算統計與自驗」做不了了。
+
 第 2 版（revision 2）：第二輪人寫的欄位（check_idea_v2、feasibility_v2、blocked_on…）
 不是這支腳本產生的，而是寫在 blueprint/cards-38.json 裡。重跑時這支腳本先讀舊檔、
 把那些欄位原樣搬過來，**絕不覆蓋、絕不清掉**，然後重算統計並重驗一次。
