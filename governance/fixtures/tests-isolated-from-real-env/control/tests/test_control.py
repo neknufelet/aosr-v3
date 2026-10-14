@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 from conftest import read_only_helper
+from aosr.physics import report_io
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -55,3 +56,8 @@ def test_status_of_the_real_tree():
     """已知會咬的那一條：不經 fixture 直接問真樹。"""
     proc = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
     assert proc.stdout == ""
+
+
+def test_product_writer_uses_tmp_path(tmp_path):
+    """合規：產品代寫函式收到暫存目錄。"""
+    report_io.regenerate_schema_files(tmp_path)

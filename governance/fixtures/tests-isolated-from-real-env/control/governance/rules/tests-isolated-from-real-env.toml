@@ -7,3 +7,10 @@ check = "governance/checks/tests_isolated_from_real_env.py"
 [settings]
 # 唯一准 spawn 版控工具、准對真樹寫檔的那支 fixture 叫什麼名字。
 sandbox_fixture = "git_sandbox"
+
+# 替呼叫端寫檔的產品函式，只比被呼叫者最後一段名字。
+product_writers = ["regenerate_schema_files"]
+# 產品裡指向版控目錄的常數；參數子樹的裸名或屬性命中就紅。
+committed_constants = ["_SCHEMA_DIR"]
+# 版控目錄的相對路徑；參數子樹的字串等於它或以它開頭就紅。
+committed_paths = ["blueprint/schemas"]
