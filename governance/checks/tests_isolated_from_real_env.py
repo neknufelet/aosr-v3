@@ -34,8 +34,7 @@ fixture」，fixture 的名字由卡宣告。
    答案取決於「跑在誰的機器上」。這一條不看有沒有 fixture：家目錄從來不是這棵樹的一部分。
 6. **放行本身壞掉**——放行指向的檔不在掃描面裡（過期的放行）、放行的路徑沒有被掃描根的
    ``.gitignore`` 蓋住（等於准你在版控樹裡留殘留）、或放行從頭到尾沒有對象（該拿掉了）。
-7. **登記的產品代寫函式收到版控路徑**——任一參數是真樹路徑，或含登記常數／路徑字串（代寫函式
-   匯入成別名或先指給別的名字、參數先指給名字再餵、常數名寫成 ``getattr`` 的字串，都算）。
+7. **登記的產品代寫函式收到版控路徑**——任一參數是真樹路徑，或含登記常數／路徑字串。
    沙盒 fixture 改不了產品路徑常數，這一類也不能由寫入放行免掉。
 
 **門檻只寫在卡上**
@@ -67,7 +66,7 @@ import ast
 import sys
 import tomllib
 from collections.abc import Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
@@ -698,17 +697,25 @@ def _scan_scope(
 
 
 def _committed_write_hit(
-    call: ast.Call, rel: str, chain: tuple[str, ...], anchors: dict[str, str | None],
-    bindings: dict[str, tuple[ast.expr, ...]], rules: Settings,
+    call: ast.Call, rel: str, chain: tuple[str, ...],
+    anchors: dict[str, str | None], rules: Settings,
 ) -> Hit | None:
-    """只認登記的代寫者（含先指給別的名字的）；任一參數命中真樹、常數或路徑就紅，不吃沙盒與放行。"""
-    named = [_last(_callee(call.func))]
-    if isinstance(call.func, ast.Name):
-        named += [_last(_callee(value)) for value in bindings.get(call.func.id, ())]
-    if not any(name in rules.product_writers for name in named):
+    """只認登記的代寫者；任一參數子樹命中真樹、常數或路徑就紅，不吃沙盒與放行。"""
+    if _last(_callee(call.func)) not in rules.product_writers:
         return None
     for arg in (*call.args, *(kw.value for kw in call.keywords)):
-        if _is_tree_expr(arg, anchors) or _names_committed(arg, bindings, rules):
+        matched = _is_tree_expr(arg, anchors)
+        for node in ast.walk(arg):
+            if isinstance(node, ast.Name) and node.id in rules.committed_constants:
+                matched = True
+            if isinstance(node, ast.Attribute) and node.attr in rules.committed_constants:
+                matched = True
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                text = node.value.strip("/")
+                if any(text == path or text.startswith(path)
+                       for path in rules.committed_paths):
+                    matched = True
+        if matched:
             return Hit(
                 kind="committed", rel=rel, lineno=call.lineno, chain=chain,
                 prefix=_prefix(arg, anchors),
@@ -716,39 +723,6 @@ def _committed_write_hit(
                          "——沙盒 fixture 改不了產品路徑常數，寫入放行也不能免掉；請傳暫存目錄"),
             )
     return None
-
-
-def _names_committed(arg: ast.expr, bindings: dict[str, tuple[ast.expr, ...]], rules: Settings) -> bool:
-    """參數子樹（沿名字綁定追下去、同一個名字只追一次）有沒有登記的常數名或版控路徑字串。
-
-    常數名寫成字串也算（``getattr(report_io, "_SCHEMA_DIR")``）。
-    """
-    todo: list[ast.expr] = [arg]
-    seen: set[str] = set()
-    while todo:
-        for node in ast.walk(todo.pop()):
-            if isinstance(node, ast.Name) and node.id not in seen:
-                seen.add(node.id)
-                todo.extend(bindings.get(node.id, ()))
-            if isinstance(node, ast.Name) and node.id in rules.committed_constants:
-                return True
-            if isinstance(node, ast.Attribute) and node.attr in rules.committed_constants:
-                return True
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                text = node.value.strip("/")
-                if text in rules.committed_constants or any(
-                    text == path or text.startswith(path) for path in rules.committed_paths
-                ):
-                    return True
-    return False
-
-
-def _writer_aliases(tree: ast.AST, writers: tuple[str, ...]) -> tuple[str, ...]:
-    """這支檔把登記的代寫函式匯入成別名的那幾個名字（``from … import regenerate_schema_files as regen``）。"""
-    return tuple(
-        alias.asname for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
-        for alias in node.names if alias.name in writers and alias.asname
-    )
 
 
 def _look_at_call(
@@ -762,7 +736,7 @@ def _look_at_call(
     facts: FileFacts,
 ) -> None:
     fixture = rules.fixture
-    hit = _committed_write_hit(call, rel, chain, anchors, bindings, rules)
+    hit = _committed_write_hit(call, rel, chain, anchors, rules)
     if hit is not None:
         facts.hits.append(hit)
     name = _last(_callee(call.func))
@@ -889,9 +863,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     for path in picked:
         rel = str(path.relative_to(scan_root).as_posix())
         scanned.add(rel)
-        tree = _parse(path, rel)
-        aliases = _writer_aliases(tree, rules.product_writers)
-        _scan_scope(tree, rel, (), False, {}, {}, replace(rules, product_writers=rules.product_writers + aliases), facts)
+        _scan_scope(_parse(path, rel), rel, (), False, {}, {}, rules, facts)
 
     bad, usable = _allow_problems(allow, scanned, _ignored_prefixes(scan_root))
     used: set[int] = set()

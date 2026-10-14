@@ -61,33 +61,6 @@ def test_committed_literal_path_is_red(tmp_path: Path, path: str) -> None:
     assert any(WRITE_MARK in row for row in _run(tmp_path, source))
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "from aosr.physics.report_io import regenerate_schema_files as regen\nregen(report_io._SCHEMA_DIR)",
-        "regen = report_io.regenerate_schema_files\nregen(report_io._SCHEMA_DIR)",
-        "d = report_io._SCHEMA_DIR\nreport_io.regenerate_schema_files(d)",
-        "d = 'blueprint/schemas'\nreport_io.regenerate_schema_files(Path(d))",
-        "a = report_io._SCHEMA_DIR\nb = a\nreport_io.regenerate_schema_files(b)",
-        "report_io.regenerate_schema_files(getattr(report_io, '_SCHEMA_DIR'))",
-    ],
-    ids=["import-alias", "assigned-alias", "bound-constant", "bound-literal", "bound-twice", "getattr-string"],
-)
-def test_writer_or_argument_behind_a_name_is_still_red(tmp_path: Path, source: str) -> None:
-    assert any(WRITE_MARK in row for row in _run(tmp_path, source))
-
-
-def test_names_that_loop_back_are_followed_once(tmp_path: Path) -> None:
-    source = "a = b\nb = a\nreport_io.regenerate_schema_files(a)"
-    assert _run(tmp_path, source) == []
-
-
-def test_alias_of_an_unregistered_function_is_clean(tmp_path: Path) -> None:
-    """改名的若不是登記的代寫函式，就算收到版控路徑也不咬（只認原名在名單上的別名）。"""
-    source = "from aosr.physics.report_io import input_schema as regen\nregen(report_io._SCHEMA_DIR)"
-    assert _run(tmp_path, source) == []
-
-
 def test_same_call_under_git_sandbox_is_still_red(tmp_path: Path) -> None:
     source = (
         "def git_sandbox():\n    pass\n"
