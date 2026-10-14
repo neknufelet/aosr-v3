@@ -63,6 +63,9 @@ class Exemption:
     reason: str
 
 
+# 一支沒有任何豁免的檔（只拿來比「豁免的檔對不對」，不是真的路徑）。
+ELSEWHERE = "沒有豁免的別支檔"
+
 EXEMPTIONS = (
     Exemption("src/aosr/config/art_lane.py", "profiles.critical.rfz.threshold_db", "ART_WLS_T20_LO_DB: float = {}",
               "T20 積分視窗的下限（art_lane 自己的結構常數），不是感知門檻"),
@@ -139,7 +142,8 @@ def _scanned_files() -> list[Path]:
 
 
 def _exempt_value(exemption: Exemption) -> float:
-    assert exemption.around.count("{}") == 1, f"豁免 {exemption.file} 的 around 要恰好一個 {{}}"
+    _, mark, rest = exemption.around.partition("{}")
+    assert mark and "{}" not in rest, f"豁免 {exemption.file} 的 around 要恰好一個 {{}}"
     values = _resolve(_load(PERCEPTUAL_TOML), exemption.key_path)
     assert values[1:] == [], f"豁免的鍵路徑 {exemption.key_path} 要只解析得到一個值"
     return _as_value(exemption.key_path, values[0])
@@ -217,7 +221,7 @@ def test_an_exemption_covers_only_the_occurrence_it_names() -> None:
         assert (offending, used) == ([], {exemption})
         assert _line_offenders(exemption.file, f"{named}; OTHER = {written}")[0] == [written]
         assert _line_offenders(exemption.file, f"OTHER = {written}  # {named}")[0] == [written]
-        assert _line_offenders("src/aosr/elsewhere.py", named)[0] == [written]
+        assert _line_offenders(ELSEWHERE, named)[0] == [written]
 
 
 def test_the_guard_would_actually_bite_a_hardcoded_threshold() -> None:
@@ -230,6 +234,6 @@ def test_the_guard_would_actually_bite_a_hardcoded_threshold() -> None:
         text = repr(value)
         forms = {text, f"{text}0", f"{value:.3f}", text.replace("0.", ".", 1) if abs(value) < 1 else text}
         for form in forms:
-            assert _line_offenders("src/aosr/elsewhere.py", f"THRESHOLD = {form}\n")[0] == [form], form
+            assert _line_offenders(ELSEWHERE, f"THRESHOLD = {form}\n")[0] == [form], form
         for other in (f"{text}99", f"1{text.lstrip('-')}", f"{text}e5"):
-            assert _line_offenders("src/aosr/elsewhere.py", f"GUARD = {other}\n")[0] == [], other
+            assert _line_offenders(ELSEWHERE, f"GUARD = {other}\n")[0] == [], other
