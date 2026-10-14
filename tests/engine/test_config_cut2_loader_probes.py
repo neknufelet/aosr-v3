@@ -76,11 +76,10 @@ def test_every_declared_cut2_case_has_a_donor_probe() -> None:
 def test_cut2_case_ids_are_not_empty_and_cover_every_module() -> None:
     """這一刀每一支模組都有東西被裁判（case 或常數），而且整組不是空的。
 
-    ``cut2_fem_lane`` 是刻意的例外：它整支都是模組層常數（含三個載入期讀檔算出來的），
-    沒有公開函式可以餵，所以「每一支都有探針」對它不成立。**它的裁判是另一支考卷**
-    （``tests/engine/test_config_cut2_constants.py``：逐個拿 ``getattr(模組, NAME)``
-    跟答案檔的凍結值比）——不是這一句話。獨立驗證抓到過一次「話寫在這裡、沒有實作」：
-    當時這一支只迭代探針，`fem_lane` 的常數改壞了整套照樣綠。
+    ``cut2_fem_lane`` 也有載入器探針：三支私有函式直接由 op.fn 呼叫，
+    真檔的純量／tuple 與壞值的例外型別、訊息都跟上一代比。
+    模組層常數另由 ``tests/engine/test_config_cut2_constants.py`` 逐筆比凍結值；
+    載入期接線則由 wiring 考卷餵突變檔、reload 守。
     """
     assert CUT2_CASE_IDS
     for name in cases.CUT2_MODULES:

@@ -16,7 +16,8 @@ tuple／dict／純量都蓋到）。
 覆蓋不到的：**載入期算出來的常數**（`fem_lane` 的 `SPLAY_CAP`／`MIN_OCTAGON_EDGE_M`／
 六個 `POSITION_*`）——它們的值由這一支蓋到，但「它們是從 TOML 算出來的」那條線由
 `tests/engine/test_config_cut2_fem_lane_wiring.py` 蓋到（票 #162 補的：餵一份改過值的
-`fem_lane.toml`、reload，常數要跟著變；同一支也蓋那三支私有載入器對壞值的守門）。
+`fem_lane.toml`、reload，常數要跟著變）。三支私有載入器的真檔與所有報錯點則由
+`tests/engine/test_config_cut2_loader_probes.py` 逐筆比上一代的回傳值、例外型別與訊息（票 #156）。
 
 **具名的殘餘風險（票 #155：類別常數只比名字）。** 類別那一種常數（`CalibrationConfig`
 那一類 13 筆）在答案檔裡是 ``{"kind": "type", "name": "…"}``，這一支比的是**那個名字**：
