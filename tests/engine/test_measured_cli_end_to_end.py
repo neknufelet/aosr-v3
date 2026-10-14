@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, geometric_band_frequencies
 from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
 from aosr.physics.crossover import crossover_weights
 from aosr.physics.report_io import ReportOutput
@@ -175,6 +175,22 @@ def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_b
     # 至少一個段內頻點兩路能量可辨別，證明合成總能量真的受交接權重牽動。
     assert any(a.total_energy != b.total_energy for a, b in zip(board.points, porous.points, strict=True)
                if a.frequency_hz in window), window
+    # 八度帶走另一條細軸（早期幾何、晚期衰減各自取帶內頻點）：整帶落在表內的帶，各路能量與衰減時間也不准動。
+    whole_bands = []
+    for board_band, porous_band in zip(board.bands, porous.bands, strict=True):
+        center = board_band.center_frequency_hz
+        assert center == porous_band.center_frequency_hz
+        band = geometric_band_frequencies(center)
+        if 100. <= min(band) and max(band) <= 400.:
+            whole_bands.append(center)
+            for field in ('fem_energy', 'fem_point_count', 'direct_energy', 'reflected_energy', 'interference_energy',
+                          'late_energy', 'geometric_energy', 't20_s', 't30_s'):
+                assert getattr(board_band, field) == getattr(porous_band, field), (center, field)
+    assert whole_bands
+    for report in (board, porous):
+        assert report.construction_notes_by_wall is not None
+        fill = next(n for n in report.construction_notes_by_wall['x0'] if n.code == 'measured_table_model_fill')
+        assert fill.frequencies_hz and not [f for f in fill.frequencies_hz if 100. <= f <= 400.], fill.frequencies_hz
     assert board.measured_seams_by_wall is not None and porous.measured_seams_by_wall is not None
     for old_seam, new_seam in zip(board.measured_seams_by_wall['x0'], porous.measured_seams_by_wall['x0'], strict=True):
         assert old_seam.measured == new_seam.measured
