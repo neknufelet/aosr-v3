@@ -1,11 +1,11 @@
 """合成收據驗配平；每題指明它能咬的產品植錯。"""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -122,27 +122,20 @@ def test_pinned_group_and_greedy_improvement(tmp_path: Path) -> None:
     assert max(result.predictions(result.suggested).values()) < max(result.predictions(result.hashed).values())
 
 
-def test_old_balance_groups_discarded_and_write_roundtrips(tmp_path: Path) -> None:
-    """抓舊建議固定化、原文遭重寫、輸出群重疊或資料遺漏。"""
-    from governance.status.shard_balance import write_suggestion
+def test_old_balance_groups_discarded_and_nothing_to_paste(tmp_path: Path) -> None:
+    """抓舊建議固定化：登記簿裡舊的 balance 群先丟掉、從雜湊重算；這次沒得搬，就沒有群可貼、也報「跟建議不同」。"""
+    from governance.status.shard_balance import same_as_registry, suggested_groups, suggestion_text
     registry, files = _tree(tmp_path)
     file = next(file for file in files[1:] if _assignment(file) == 'shard-a')
-    original = registry.read_text()
-    from governance.status.shard_balance import BALANCE_MARKER
-    registry.write_text(original + f'\n{BALANCE_MARKER}\n[[group]]\nname = "balance-stale"\nshard = "shard-b"\nwhy = "舊"\nfiles = ["{file}"]\n')
+    registry.write_text(registry.read_text() + f'\n[[group]]\nname = "balance-stale"\nshard = "shard-b"\nwhy = "舊"\nfiles = ["{file}"]\n')
     _sample(tmp_path, 'r1', 'shard-a', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
     _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
     result = _analyze(tmp_path, registry)
     assert result.actual[file] == 'shard-b'
     assert result.hashed[file] == result.suggested[file] == 'shard-a'
-    output = tmp_path / 'suggestion.toml'
-    write_suggestion(registry, output, result)
-    assert output.read_text().startswith(original)
-    assert 'balance-stale' not in output.read_text()
-    rewritten = load_registry(output)
-    parts = [set(render_inputs([f'{file}::test_one' for file in files], rewritten, shard).args.splitlines()) for shard in rewritten.shards]
-    assert not parts[0] & parts[1]
-    assert parts[0] | parts[1] == set(files)
+    assert suggested_groups(result) == ()
+    assert suggestion_text(()) == ''
+    assert not same_as_registry(load_registry(registry), ())
 
 
 def test_import_tracking_helpers_cycles_and_paths(tmp_path: Path) -> None:
@@ -181,38 +174,51 @@ def test_move_requires_at_least_one_second(tmp_path: Path, weight: float, should
     assert (result.suggested[file] == 'shard-b') == should_move
 
 
-def test_cli_report_and_nonempty_written_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                              capsys: pytest.CaptureFixture[str]) -> None:
-    """抓標準輸出漏三組預測、寫出搬檔反向、把 run id 或預測寫進登記簿。"""
+def _pasted(report: str) -> str:
+    """報告尾巴那段建議原文（標題行之後到結尾）。"""
+    return report.split('（換掉登記簿裡現有的 balance-* 群；改登記簿走合併請求，這支不改檔）：\n', 1)[1]
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob('*')) if path.is_file()}
+
+
+def test_cli_prints_a_pasteable_group_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         capsys: pytest.CaptureFixture[str]) -> None:
+    """抓標準輸出漏三組預測、印出的群搬反了或貼上讀不回、把 run id 或預測印進群、工具偷改任何檔、貼上後重算不穩。"""
     from governance.status.shard_balance import main
     registry, files = _tree(tmp_path)
     file = next(file for file in files[1:] if _assignment(file) == 'shard-a')
     _sample(tmp_path, 'synthetic-run', 'shard-a', '參考處理器',
             {'tests.test_verify_shards': 10, file.removesuffix('.py').replace('/', '.'): 100}, 110, 2)
     _sample(tmp_path, 'synthetic-run', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    output = tmp_path / 'new.toml'
     monkeypatch.chdir(tmp_path)
-    command = ['--history', str(tmp_path / 'hist'), '--registry', str(registry),
-               '--reference-cpu', '參考處理器', '--write', str(output)]
-    assert main(command) == CLEAN
+    command = ['--history', str(tmp_path / 'hist'), '--reference-cpu', '參考處理器']
+    before = _snapshot(tmp_path)
+    assert main([*command, '--registry', str(registry)]) == CLEAN
+    assert _snapshot(tmp_path) == before
     report = capsys.readouterr().out
     for marker in ('算數的跑', 'synthetic-run/shard-a', '跳過的與原因', '牆鐘比例', '每片固定成本',
-                   '照今天實際落片預測', '只用雜湊預測', '建議預測', '推測', '分鐘', '未量', '共用前置提醒'):
+                   '照今天實際落片預測', '只用雜湊預測', '建議預測', '推測', '分鐘', '未量', '共用前置提醒',
+                   '登記簿現有的 balance 群：跟建議不同'):
         assert marker in report
-    rewritten = load_registry(output)
+    text = _pasted(report)
+    assert 'synthetic-run' not in text
+    assert '110' not in text
+    pasted = tmp_path / 'pasted.toml'
+    pasted.write_text(registry.read_text() + '\n' + text)
+    rewritten = load_registry(pasted)
     balance = next(group for group in rewritten.groups if group.name == 'balance-shard-b')
     assert balance.files == (file,)
-    assert 'synthetic-run' not in output.read_text()
-    assert '110' not in output.read_text()
     nodes = [f'{file}::test_one' for file in files]
     parts = {shard: set(render_inputs(nodes, rewritten, shard).args.splitlines()) for shard in rewritten.shards}
     assert file in parts['shard-b'] and file not in parts['shard-a']
     assert not parts['shard-a'] & parts['shard-b']
     assert parts['shard-a'] | parts['shard-b'] == set(files)
-    command[command.index('--registry') + 1] = str(output)
-    first = output.read_bytes()
-    assert main(command) == CLEAN
-    assert output.read_bytes() == first
+    assert main([*command, '--registry', str(pasted)]) == CLEAN
+    again = capsys.readouterr().out
+    assert '登記簿現有的 balance 群：跟建議相同，不用改' in again
+    assert _pasted(again) == text
 
 
 @pytest.mark.parametrize('replacement', ['', 'unregistered = "other"\n', 'unregistered = 7\n'])
@@ -251,145 +257,68 @@ def test_pinned_group_stays_even_when_it_is_the_best_move(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize('broken', ['overlap', 'incomplete'])
-def test_write_refuses_partitions_that_overlap_or_miss_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str,
+def test_suggestion_check_refuses_partitions_that_overlap_or_miss_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], broken: str,
 ) -> None:
-    """抓寫檔前不驗兩片互斥與聯集：分片結果壞掉時一個字都不准寫出去。"""
-    from governance.exit_codes import ToolBroken
+    """抓印建議前不驗兩片互斥與聯集：分片結果壞掉時回 2，標準輸出一個字都不印。"""
     from governance.status import shard_balance
     from governance.verify_shards import Prepared
     registry, files = _tree(tmp_path)
     _sample(tmp_path, 'r1', 'shard-a', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
     _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    result = _analyze(tmp_path, registry)
     picked = {'overlap': {'shard-a': files, 'shard-b': files},
               'incomplete': {'shard-a': files[:1], 'shard-b': files[1:2]}}[broken]
     monkeypatch.setattr(shard_balance, 'render_inputs',
                         lambda nodes, registry, shard: Prepared('', '\n'.join(picked[shard]) + '\n'))
-    output = tmp_path / 'suggestion.toml'
-    with pytest.raises(ToolBroken, match='互斥'):
-        shard_balance.write_suggestion(registry, output, result)
-    assert not output.exists()
-
-
-
-_STALE = 'name = "balance-stale"\nshard = "shard-b"\nwhy = "舊"\nfiles = ["tests/test_shard_prepare.py"]\n'
-_FIXED = '[[group]]\nname = "fixed-tail"\nshard = "shard-a"\nwhy = "固定"\nfiles = ["tests/test_shard_seal.py"]\n'
-# 標記之前的寫法花樣：表頭帶行尾註解、表名加引號與跳脫、群之間的說明註解、多行字串裡長得像表頭的一行。
-_ODD_HEAD = (REGISTRY + '\n# 以下這一群請勿拆散：既有註解。\n[["gr\\u006fup"]] # 引號與跳脫\n'
-             + _FIXED.removeprefix('[[group]]\n') + "\n[['group']]\nname = 'odd'\nshard = 'shard-a'\n"
-             + 'why = """\n[[group]]\nname = "balance-fake"\n"""\nfiles = []\n')
-
-
-def _marker() -> str:
-    from governance.status.shard_balance import BALANCE_MARKER
-    return BALANCE_MARKER
-
-
-def test_split_keeps_every_byte_before_the_marker() -> None:
-    """抓標記之前被改寫：註解、引號表頭、多行字串裡的假表頭都原封不動，標記前的空行不算。"""
-    from governance.status.shard_balance import _split
-    tail = f'\n\n{_marker()}\n[[group]] # 行尾註解\n' + _STALE + '\n[["group"]]\n' + _STALE.replace('stale', 'stale-2')
-    head, data = _split(_ODD_HEAD + tail)
-    assert head == _ODD_HEAD
-    groups = cast(list[dict[str, object]], data['group'])
-    assert [group['name'] for group in groups][-2:] == ['fixed-tail', 'odd']
-
-
-def test_split_without_marker_is_the_whole_file() -> None:
-    """抓沒有標記時吃掉檔尾空行、或把整份檔判成壞的。"""
-    from governance.status.shard_balance import _split
-    head, _ = _split(_ODD_HEAD + '\n')
-    assert head == _ODD_HEAD + '\n'
-
-
-@pytest.mark.parametrize('source', [
-    REGISTRY + '\n[[group]]\n' + _STALE,
-    REGISTRY + f'\n{_marker()}\n' + _FIXED,
-    REGISTRY + f'\n{_marker()}\n[[group]]\n' + _STALE + '\n[extra]\nkey = 1\n',
-    REGISTRY + f'\n{_marker()}\n[[group]]\n' + _STALE + f'\n{_marker()}\n',
-    '[evidence]\nnote = """\n' + _marker() + '\n"""\n',
-    # 標記之後補一張子表，等於改了標記之前最後那一個固定群。
-    REGISTRY + f'\n{_marker()}\n[group.extra]\nkey = 1\n',
-], ids=['balance-before-marker', 'fixed-after-marker', 'table-after-marker', 'marker-twice', 'marker-inside-string',
-        'subtable-edits-a-fixed-group'])
-def test_split_refuses_what_it_does_not_own(source: str) -> None:
-    """抓刪到不歸它管的東西、或留下該它管的東西：一律回 2，訊息講得出哪一條。"""
-    from governance.exit_codes import ToolBroken
-    from governance.status.shard_balance import _split
-    with pytest.raises(ToolBroken):
-        _split(source)
-
-
-def test_removing_every_group_writes_an_empty_group_list(tmp_path: Path) -> None:
-    """抓群全刪光又沒有新群時寫出讀不回的登記簿（缺 group 鍵）；空群清單是合法的。"""
-    from governance.status.shard_balance import write_suggestion
-    registry, files = _tree(tmp_path)
-    head = REGISTRY[:REGISTRY.index('\n[[group]]')] + '\n'
-    registry.write_text(head + f'\n{_marker()}\n[[group]]\n' + _STALE.replace('tests/test_shard_prepare.py', files[1]))
-    _sample(tmp_path, 'r1', 'shard-a', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    result = _analyze(tmp_path, registry)
-    output = tmp_path / 'out.toml'
-    write_suggestion(registry, output, result)
-    rewritten = load_registry(output)
-    assert rewritten.groups == ()
-    assert 'group = []' in output.read_text()
-    assert output.read_text().replace('group = []\n', '') == head
-
-
-def test_bad_source_returns_two_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                   capsys: pytest.CaptureFixture[str]) -> None:
-    """抓來源不合約時照樣寫出輸出檔：回 2、輸出路徑不存在，訊息講的是標記那一條。"""
-    from governance.status.shard_balance import main
-    registry, files = _tree(tmp_path)
-    registry.write_text(REGISTRY + '\n[[group]]\n' + _STALE.replace('tests/test_shard_prepare.py', files[1]))
-    _sample(tmp_path, 'r1', 'shard-a', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    output = tmp_path / 'out.toml'
     monkeypatch.chdir(tmp_path)
-    assert main(['--history', str(tmp_path / 'hist'), '--registry', str(registry),
-                 '--reference-cpu', '參考處理器', '--write', str(output)]) == TOOL_BROKEN
-    assert not output.exists()
-    assert '配平標記' in capsys.readouterr().err
+    assert shard_balance.main(['--history', str(tmp_path / 'hist'), '--registry', str(registry),
+                               '--reference-cpu', '參考處理器']) == TOOL_BROKEN
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert '互斥' in captured.err
 
 
-@pytest.mark.parametrize('head,expected', [
-    ('schema = 2\n\n# evidence 的說明\n[evidence]\ndir = "x"\n', 'schema = 2\ngroup = []\n\n# evidence 的說明\n[evidence]\ndir = "x"\n'),
-    ('schema = 2', 'schema = 2\ngroup = []\n'),
-], ids=['before-the-first-tables-comment', 'no-trailing-newline'])
-def test_empty_group_list_goes_to_the_root_and_keeps_comments_attached(head: str, expected: str) -> None:
-    """抓 group = [] 插在第一張表的說明註解與表頭之間、或接在沒換行的最後一行後面。"""
-    import tomllib
-    from governance.status.shard_balance import _with_empty_group_list
-    assert _with_empty_group_list(head, tomllib.loads(head)) == expected
-
-
-def test_empty_group_list_that_cannot_be_placed_is_tool_broken() -> None:
-    """抓補完沒讀回核對：根層多行陣列裡以 [ 開頭的一行會被誤認成第一張表，補進去就壞了。"""
-    import tomllib
-    from governance.exit_codes import ToolBroken
-    from governance.status.shard_balance import _with_empty_group_list
-    head = 'x = [\n  ["a"],\n]\n'
-    with pytest.raises(ToolBroken):
-        _with_empty_group_list(head, tomllib.loads(head))
-
-
-@pytest.mark.parametrize('ending', ['', '\n', '\n\n'], ids=['no-newline', 'one-newline', 'blank-line'])
-def test_rewrite_is_byte_stable_whatever_the_source_ends_with(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                            ending: str) -> None:
-    """抓標記前的空行算法不穩：第一次寫出的檔再算一次必須逐位元相同，標記前恰好一個空行。"""
-    from governance.status.shard_balance import main
+def _moved(tmp_path: Path) -> tuple[Balance, Path, str]:
+    """一檔從第一台搬去第二台的合成結果、登記簿與那一檔。"""
     registry, files = _tree(tmp_path)
-    registry.write_text(REGISTRY.rstrip('\n') + ending)
     file = next(file for file in files[1:] if _assignment(file) == 'shard-a')
     _sample(tmp_path, 'r1', 'shard-a', '參考處理器',
             {'tests.test_verify_shards': 10, file.removesuffix('.py').replace('/', '.'): 100}, 110, 2)
     _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
-    monkeypatch.chdir(tmp_path)
-    first, second = tmp_path / 'first.toml', tmp_path / 'second.toml'
-    command = ['--history', str(tmp_path / 'hist'), '--reference-cpu', '參考處理器']
-    assert main([*command, '--registry', str(registry), '--write', str(first)]) == CLEAN
-    assert main([*command, '--registry', str(first), '--write', str(second)]) == CLEAN
-    assert second.read_bytes() == first.read_bytes()
-    assert first.read_text().startswith(REGISTRY.rstrip('\n') + '\n\n' + _marker() + '\n[[group]]\n')
+    return _analyze(tmp_path, registry), registry, file
+
+
+@pytest.mark.parametrize('tamper,message', [
+    (lambda text, file: text.replace('[[group]]', '[[group]', 1), '讀不回來'),
+    (lambda text, file: 'group = 7\n', '不是群清單'),
+    (lambda text, file: text.replace('"shard-b"', '"shard-a"'), '不一樣'),
+    (lambda text, file: '', '不一樣'),
+    (lambda text, file: text + text.replace('balance-shard-b', 'balance-shard-b-again'), '兩群'),
+    (lambda text, file: text.replace(f'"{file}"', '"tests/test_verify_shards.py"'), '兩群'),
+], ids=['not-toml', 'not-a-list', 'other-shard', 'missing', 'file-twice', 'steals-a-pinned-file'])
+def test_suggestion_check_reads_the_printed_text_back(tmp_path: Path, tamper: Callable[[str, str], str],
+                                                      message: str) -> None:
+    """抓印出來的原文沒讀回核對：讀不回、讀回來跟算的不一樣、或跟固定群撞檔，都回 2。"""
+    from governance.exit_codes import ToolBroken
+    from governance.status.shard_balance import check_suggestion, suggested_groups, suggestion_text
+    result, registry, file = _moved(tmp_path)
+    text = suggestion_text(suggested_groups(result))
+    check_suggestion(result, load_registry(registry), text)
+    with pytest.raises(ToolBroken, match=message):
+        check_suggestion(result, load_registry(registry), tamper(text, file))
+
+
+def test_same_as_registry_compares_groups_not_prose(tmp_path: Path) -> None:
+    """抓「跟建議相同」判錯：說明改字仍算相同；檔、片、群名任一不同就不同；固定群不算進來。"""
+    from dataclasses import replace
+    from governance.status.shard_balance import same_as_registry, suggested_groups
+    result, registry, _ = _moved(tmp_path)
+    groups = suggested_groups(result)
+    loaded = load_registry(registry)
+    assert not same_as_registry(loaded, groups)
+    assert same_as_registry(replace(loaded, groups=loaded.groups + groups), groups)
+    reworded = tuple(replace(group, why='人改過的說明') for group in groups)
+    assert same_as_registry(replace(loaded, groups=loaded.groups + reworded), groups)
+    for changed in (replace(groups[0], shard='shard-a'), replace(groups[0], name='balance-other'),
+                    replace(groups[0], files=groups[0].files + ('tests/test_verify_shards.py',))):
+        assert not same_as_registry(replace(loaded, groups=loaded.groups + (changed,)), groups)

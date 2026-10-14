@@ -7,18 +7,17 @@ import json
 import math
 import re
 import sys
-import tempfile
 import tomllib
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
 from typing import cast
 from xml.etree import ElementTree as ET
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
-from governance.verify_shards import Registry, load_registry, render_inputs, unregistered_shard
+from governance.verify_shards import Group, Registry, _groups, load_registry, render_inputs, unregistered_shard
 
 
 @dataclass(frozen=True)
@@ -273,95 +272,57 @@ def analyze(history: Path, registry_path: Path, root: Path, reference_cpu: str) 
                    _hints(root, movable, registry))
 
 
-BALANCE_MARKER = '# 以下 balance 群由 governance/status/shard_balance 依雲端歷史耗時產生；重算時從這一行到檔尾整段重寫，不手改。'
+BALANCE_WHY = '照 governance/status/shard_balance 依雲端歷史耗時印出的建議貼上；重算後整群換掉，改動走合併請求。'
 
 
-def _is_balance(group: object) -> bool:
-    """群名以 balance- 開頭的才是這支工具管的群。"""
-    return isinstance(group, dict) and str(cast(dict[str, object], group).get('name', '')).startswith('balance-')
-
-
-def _split(source: str) -> tuple[str, dict[str, object]]:
-    """標記之前的原文（不含緊貼標記的空行）與它讀出來的內容；標記之前這一段一個位元都不改。
-
-    只比讀出來的內容，不切表頭：標記之前不准有 balance 群，標記之後只准有 balance 群
-    （而且只多群、不多別的鍵）；標記出現兩次、哪一段讀不成 TOML（例如標記落在多行字串裡）都回 2。
-    """
-    lines = source.splitlines(keepends=True)
-    marks = [index for index, line in enumerate(lines) if line.rstrip('\r\n') == BALANCE_MARKER]
-    if len(marks) > 1:
-        raise ToolBroken(f'配平標記出現 {len(marks)} 次（第 {[mark + 1 for mark in marks]} 行），只准一次')
-    cut = marks[0] if marks else len(lines)
-    if marks:
-        while cut > 0 and not lines[cut - 1].strip():
-            cut -= 1
-    head = ''.join(lines[:cut])
-    try:
-        full, head_data = tomllib.loads(source), tomllib.loads(head)
-    except tomllib.TOMLDecodeError as error:
-        raise ToolBroken(f'登記簿或配平標記之前那一段讀不成 TOML：{error}') from error
-    head_groups = cast(list[object], head_data.get('group', []))
-    if any(_is_balance(group) for group in head_groups):
-        raise ToolBroken('balance 群只准住在配平標記之後（那一段由這支工具整段重寫）；標記之前發現 balance 群')
-    full_groups = cast(list[object], full.get('group', []))
-    rest = {key: value for key, value in full.items() if key != 'group'}
-    if (full_groups[:len(head_groups)] != head_groups or not all(_is_balance(group) for group in full_groups[len(head_groups):])
-            or rest != {key: value for key, value in head_data.items() if key != 'group'}):
-        raise ToolBroken('配平標記之後只准有 balance 群；固定群與其他設定請移到標記之前')
-    return head, head_data
-
-
-def _with_empty_group_list(head: str, head_data: dict[str, object]) -> str:
-    """群全刪光又沒有新群：在根層第一張表之前補 group = []（空群清單是合法的），再讀一次核對。"""
-    lines = head.splitlines(keepends=True)
-    if lines and not lines[-1].endswith('\n'):
-        lines[-1] += '\n'
-    first = next((index for index, line in enumerate(lines) if line.lstrip().startswith('[')), len(lines))
-    while first > 0 and re.match(r'[ \t]*(#.*)?$', lines[first - 1]):
-        first -= 1
-    text = ''.join(lines[:first]) + 'group = []\n' + ''.join(lines[first:])
-    try:
-        same = tomllib.loads(text) == {**head_data, 'group': []}
-    except tomllib.TOMLDecodeError:
-        same = False
-    if not same:
-        raise ToolBroken('群全刪光後補不進 group = []（根層找不到放的位置）')
-    return text
-
-
-def _suggestion_text(source: str, result: Balance) -> str:
-    """標記之前原文不動；標記之後整段換成新算的 balance 群（不帶會過期的數字）。"""
-    head, head_data = _split(source)
-    blocks: list[str] = []
+def suggested_groups(result: Balance) -> tuple[Group, ...]:
+    """跟雜湊落片不同的檔，按片名各成一個 balance 群（空群不列）；群裡不帶會過期的數字。"""
+    groups = []
     for shard in result.shards:
-        files = sorted(file for file, assigned in result.suggested.items() if assigned == shard and assigned != result.hashed[file])
+        files = tuple(sorted(file for file, assigned in result.suggested.items()
+                             if assigned == shard and assigned != result.hashed[file]))
         if files:
-            blocks.append(f'[[group]]\nname = "balance-{shard}"\nshard = {json.dumps(shard)}\n'
-                          'why = "由 governance/status/shard_balance 依雲端歷史耗時算出；重算時整群重寫，不手改。"\nfiles = [\n'
-                          + ''.join(f'  {json.dumps(file)},\n' for file in files) + ']\n')
-    if not blocks:
-        return head if 'group' in head_data else _with_empty_group_list(head, head_data)
-    separator = '' if head.endswith('\n\n') or not head else '\n' if head.endswith('\n') else '\n\n'
-    return head + separator + BALANCE_MARKER + '\n' + '\n'.join(blocks)
+            groups.append(Group(f'balance-{shard}', shard, BALANCE_WHY, files))
+    return tuple(groups)
 
 
-def write_suggestion(source: Path, output: Path, result: Balance) -> None:
-    """寫前讀回並驗互斥聯集；同路徑重算也不能先毀來源。"""
-    text = _suggestion_text(source.read_text(encoding='utf-8'), result)
-    with tempfile.TemporaryDirectory(prefix='shard-balance-') as directory:
-        candidate = Path(directory) / 'registry.toml'
-        candidate.write_text(text, encoding='utf-8')
-        registry = load_registry(candidate)
-        nodes = [f'{file}::test_balance_validation' for file in result.weights]
-        parts = [set(render_inputs(nodes, registry, shard).args.splitlines()) for shard in registry.shards]
-        if parts[0] & parts[1] or parts[0] | parts[1] != set(result.weights):
-            raise ToolBroken('建議分片不互斥或未覆蓋全部考卷')
-        output.write_text(text, encoding='utf-8')
-    load_registry(output)
+def check_suggestion(result: Balance, registry: Registry, text: str) -> None:
+    """只在記憶體裡驗印出來的那段原文：讀得回同一批群、跟固定群一起過登記簿的群規則、兩片互斥且合起來是全部考卷。不寫任何檔。"""
+    try:
+        pasted = tomllib.loads(text).get('group', [])
+    except ValueError as exc:
+        raise ToolBroken(f'建議原文讀不回來：{exc}') from exc
+    if not isinstance(pasted, list):
+        raise ToolBroken(f'建議原文的 group 不是群清單：{pasted!r}')
+    pinned = [{'name': group.name, 'shard': group.shard, 'why': group.why, 'files': list(group.files)}
+              for group in registry.groups if not group.name.startswith('balance-')]
+    groups = _groups(pinned + pasted, registry.shards)
+    if groups[len(pinned):] != suggested_groups(result):
+        raise ToolBroken('建議原文讀回來跟算出來的群不一樣')
+    candidate = replace(registry, groups=groups)
+    nodes = [f'{file}::test_balance_validation' for file in result.weights]
+    parts = [set(render_inputs(nodes, candidate, shard).args.splitlines()) for shard in candidate.shards]
+    if parts[0] & parts[1] or parts[0] | parts[1] != set(result.weights):
+        raise ToolBroken('建議分片不互斥或未覆蓋全部考卷')
 
 
-def format_report(result: Balance, reference_cpu: str) -> str:
-    """完整中文報告；每個預測帶推測標記。"""
+def suggestion_text(groups: tuple[Group, ...]) -> str:
+    """建議貼上的群原文（TOML 的 [[group]] 表）；沒有群就是空字串。"""
+    return '\n'.join(
+        f'[[group]]\nname = {json.dumps(group.name)}\nshard = {json.dumps(group.shard)}\nwhy = {json.dumps(group.why, ensure_ascii=False)}\n'
+        'files = [\n' + ''.join(f'  {json.dumps(file)},\n' for file in group.files) + ']\n'
+        for group in groups)
+
+
+def same_as_registry(registry: Registry, groups: tuple[Group, ...]) -> bool:
+    """登記簿現有的 balance 群跟建議的是不是同一批（只比群名、片、檔；說明是人話不比）。"""
+    def shape(items: Sequence[Group]) -> list[tuple[str, str, tuple[str, ...]]]:
+        return sorted((group.name, group.shard, tuple(sorted(group.files))) for group in items)
+    return shape([group for group in registry.groups if group.name.startswith('balance-')]) == shape(groups)
+
+
+def format_report(result: Balance, reference_cpu: str, text: str = '', applied: bool = False) -> str:
+    """完整中文報告；每個預測帶推測標記，尾巴是建議貼上的 balance 群原文。"""
     lines = [f'參考型號：{reference_cpu}', '算數的跑（權重與固定成本）：']
     lines.extend(f'  {run}/{shard} 型號：{cpu}' for run, shard, cpu in result.accepted)
     lines.append('跳過的與原因：')
@@ -386,7 +347,9 @@ def format_report(result: Balance, reference_cpu: str) -> str:
     lines.extend(f'  {file}：建議併入群 {group}（經 {" → ".join(chain)}）' for file, group, chain in result.hints)
     if not result.hints:
         lines.append('  無')
-    return '\n'.join(lines) + '\n'
+    lines.append(f'登記簿現有的 balance 群：{"跟建議相同，不用改" if applied else "跟建議不同，要換成下面這段"}')
+    lines.append('建議貼上的 balance 群（換掉登記簿裡現有的 balance-* 群；改登記簿走合併請求，這支不改檔）：')
+    return '\n'.join(lines) + '\n' + (text if text else '  無（登記簿裡不用 balance 群）\n')
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -395,13 +358,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--history', type=Path, required=True)
     parser.add_argument('--registry', type=Path, default=Path('governance/verify-shards.toml'))
     parser.add_argument('--reference-cpu', required=True)
-    parser.add_argument('--write', type=Path)
     args = parser.parse_args(argv)
     try:
         result = analyze(args.history, args.registry, Path.cwd(), args.reference_cpu)
-        sys.stdout.write(format_report(result, args.reference_cpu))
-        if args.write is not None:
-            write_suggestion(args.registry, args.write, result)
+        registry = load_registry(args.registry)
+        groups = suggested_groups(result)
+        text = suggestion_text(groups)
+        check_suggestion(result, registry, text)
+        sys.stdout.write(format_report(result, args.reference_cpu, text, same_as_registry(registry, groups)))
     except (ToolBroken, OSError, ValueError, SyntaxError) as exc:
         note(f'配平建議回 2（工具自壞）：{exc}')
         return TOOL_BROKEN

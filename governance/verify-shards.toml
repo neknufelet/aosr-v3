@@ -91,11 +91,10 @@ files = [
   "tests/test_temp_repo_background_maintenance.py",
 ]
 
-# 以下 balance 群由 governance/status/shard_balance 依雲端歷史耗時產生；重算時從這一行到檔尾整段重寫，不手改。
 [[group]]
 name = "balance-shard-b"
 shard = "shard-b"
-why = "由 governance/status/shard_balance 依雲端歷史耗時算出；重算時整群重寫，不手改。"
+why = "照 governance/status/shard_balance 依雲端歷史耗時印出的建議貼上；重算後整群換掉，改動走合併請求。"
 files = [
   "tests/engine/test_fem_complex.py",
   "tests/engine/test_fem_fenics_answers.py",
