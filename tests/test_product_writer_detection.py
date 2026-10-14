@@ -83,7 +83,8 @@ def test_names_that_loop_back_are_followed_once(tmp_path: Path) -> None:
 
 
 def test_alias_of_an_unregistered_function_is_clean(tmp_path: Path) -> None:
-    source = "from aosr.physics.report_io import input_schema as regen\nregen(getattr(report_io, 'other'))"
+    """改名的若不是登記的代寫函式，就算收到版控路徑也不咬（只認原名在名單上的別名）。"""
+    source = "from aosr.physics.report_io import input_schema as regen\nregen(report_io._SCHEMA_DIR)"
     assert _run(tmp_path, source) == []
 
 
