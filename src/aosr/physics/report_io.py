@@ -53,6 +53,7 @@ from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.physics.report_measured import MeasuredSeam
 from aosr.physics.report_furniture import AbsoluteFurniture, normalized_furniture
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_path_output import (
@@ -608,6 +609,23 @@ class ReportOutput(_FactsModel):
             "propertyNames": {"enum": list(Wall.wall_names())}, "minProperties": 1,
         },
     )
+
+    measured_seams_by_wall: dict[str, Annotated[tuple[MeasuredSeam, ...], Field(min_length=2, max_length=2)]] | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+        description="實測牆表格兩端的接縫報告；實測與底構造各自保存，不存差值",
+        json_schema_extra=facts("接縫資料", "1", "沒有基準（兩組端點資料的容器，不是量測值）", NOT_MEASURED) | {
+            "propertyNames": {"enum": list(Wall.wall_names())}, "minProperties": 1},
+    )
+
+    @model_validator(mode="after")
+    def _measured_seams_are_canonical(self) -> Self:
+        seams = self.measured_seams_by_wall
+        if seams is not None:
+            if not seams or not set(seams) <= set(Wall.wall_names()):
+                raise ValueError("接縫報告必須使用六面牆名，且不可為空物件")
+            if any(rows[0].frequency_hz >= rows[-1].frequency_hz for rows in seams.values()):
+                raise ValueError("接縫報告須依低、高端點排列")
+        return self
 
     @model_validator(mode="after")
     def _construction_notes_are_canonical(self) -> Self:

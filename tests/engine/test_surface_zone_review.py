@@ -172,7 +172,7 @@ def test_python_objects_cannot_bypass_nested_validation(forgery: str, entry: str
         material = ({"kind": "measured_impedance"} if forgery == "construct-measured" else
                     ConstantImpedance(impedance_pa_s_m=1646.4).model_copy(update={"kind": "measured_impedance"}))
         forged = WholeWallZone.model_construct(area="whole_wall", material=material)
-        hint, leaf = "實測阻抗表", "material"
+        hint, leaf = "必填", "material.measured_impedance.points"
     zones["floor"] = (forged,)
     with pytest.raises((ValidationError, ReportInputError, SchemeValidationError)) as caught:
         _object_entry(entry, scene)

@@ -330,6 +330,83 @@
       "title": "LowFrequencyAxis",
       "type": "string"
     },
+    "MeasuredImpedance": {
+      "additionalProperties": false,
+      "description": "MeasuredImpedance（實測阻抗表）：表外用描述同一面牆的底構造補值。",
+      "properties": {
+        "kind": {
+          "const": "measured_impedance",
+          "default": "measured_impedance",
+          "description": "kind（表面種類代號，measured_impedance 表示實測阻抗表）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "points": {
+          "description": "points（實測阻抗列；至少兩列，頻率嚴格遞增）",
+          "items": {
+            "$ref": "#/$defs/MeasuredImpedancePoint"
+          },
+          "minItems": 2,
+          "title": "Points",
+          "type": "array"
+        },
+        "base_assembly": {
+          "$ref": "#/$defs/Assembly",
+          "description": "base_assembly（同一面牆的底構造；表外模型補值，只收多層構造）"
+        },
+        "source_and_conditions": {
+          "description": "source_and_conditions（量測出處與條件，包含阻抗管、入射方式與樣品厚度）",
+          "minLength": 1,
+          "title": "Source And Conditions",
+          "type": "string"
+        },
+        "fill_rule": {
+          "const": "log_linear_table_base_assembly_outside_v1",
+          "default": "log_linear_table_base_assembly_outside_v1",
+          "description": "fill_rule（補值規則版本：log_linear_table_base_assembly_outside_v1 表示表內對數頻率線性內插、表外底構造補值第一版）",
+          "title": "Fill Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "points",
+        "base_assembly",
+        "source_and_conditions",
+        "kind"
+      ],
+      "title": "MeasuredImpedance",
+      "type": "object"
+    },
+    "MeasuredImpedancePoint": {
+      "additionalProperties": false,
+      "description": "MeasuredImpedancePoint（實測列）：SI 阻抗，正時間指數。",
+      "properties": {
+        "frequency_hz": {
+          "description": "frequency_hz（量測頻率，Hz；有限正數、逐列嚴格遞增）",
+          "exclusiveMinimum": 0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "real_pa_s_m": {
+          "description": "real_pa_s_m（阻抗實部，Pa·s/m；有限且大於零，不收正規化值）",
+          "exclusiveMinimum": 0,
+          "title": "Real Pa S M",
+          "type": "number"
+        },
+        "imag_pa_s_m": {
+          "description": "imag_pa_s_m（阻抗虛部，Pa·s/m；有限，時間慣例 e^{+jωt}；e^{−iωt} 的表須將虛部變號）",
+          "title": "Imag Pa S M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "frequency_hz",
+        "real_pa_s_m",
+        "imag_pa_s_m"
+      ],
+      "title": "MeasuredImpedancePoint",
+      "type": "object"
+    },
     "OmnidirectionalInput": {
       "additionalProperties": false,
       "properties": {
@@ -604,7 +681,8 @@
           "discriminator": {
             "mapping": {
               "assembly": "#/$defs/Assembly",
-              "constant_impedance": "#/$defs/ConstantImpedance"
+              "constant_impedance": "#/$defs/ConstantImpedance",
+              "measured_impedance": "#/$defs/MeasuredImpedance"
             },
             "propertyName": "kind"
           },
@@ -614,6 +692,9 @@
             },
             {
               "$ref": "#/$defs/ConstantImpedance"
+            },
+            {
+              "$ref": "#/$defs/MeasuredImpedance"
             }
           ],
           "title": "Material"

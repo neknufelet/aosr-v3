@@ -54,6 +54,7 @@ CLOSURE = (
     'aosr.physics.report_facts',
     'aosr.physics.report_furniture',
     'aosr.physics.report_io',
+    'aosr.physics.report_measured',
     'aosr.physics.report_output',
     'aosr.physics.report_path_output',
     'aosr.physics.report_path_table',
@@ -95,4 +96,6 @@ PYTHON_MINOR = (3, 12)
 
 # 物理身分變更：#309 之五丙第二批；三路當次構造註記合併存報表、固定輸出省略此欄，材料模型描述補中文辨識名，外推頻點分低高兩段寫；審查修補：固定阻抗描述改成可直接上畫面的中文、外推頻點綱要不重複。
 # 出處：之五丙第二批，以正式 physics_identity_parts 實跑重釘；閉包、資料清單與模態摘要不變。
-CODE_DIGEST = '9cacc8b08fd1b5118673b78d77b75b5b825dfa3252025b247964826cc2a135f3'
+# #309 實測阻抗表：格式、表內外計算、註記與接縫輸出。
+# 程式閉包加入接縫報告，能力表新增實測材料列；物理結果需重算。
+CODE_DIGEST = '24017d828c154feb45c3cf5cfd5b6cc4162542ba1905eadd6b8fc9d075c8b4fb'

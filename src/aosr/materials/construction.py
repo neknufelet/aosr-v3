@@ -23,7 +23,7 @@ from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.materials import transfer_matrix as tmm
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
-from aosr.materials.construction_models import AirLayer, ConstantImpedance, ConstructionNote, Layer, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, ConstantImpedance, ConstructionNote, Layer, MeasuredImpedance, PorousLayer, SurfaceMaterial
 
 
 class _PorousParameters(TypedDict):
@@ -35,6 +35,9 @@ def _context(material: SurfaceMaterial) -> str:
     """表面結果不能歸罪單層；列出完整構造，讓拒收訊息可定位輸入。"""
     if isinstance(material, ConstantImpedance):
         return f"固定阻抗（整面）{material.impedance_pa_s_m} Pa·s/m"
+    if isinstance(material, MeasuredImpedance):
+        return (f"實測阻抗表 {len(material.points)} 列，涵蓋 {material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz；"
+                f"底構造：{_context(material.base_assembly)}")
     descriptions = []
     for index, layer in enumerate(material.layers, start=1):
         prefix = f"第 {index} 層"
@@ -68,6 +71,12 @@ def _axis(values: jax.Array, *, angles: bool = False) -> jax.Array:
 def _komatsu_notes(material: SurfaceMaterial, frequencies: jax.Array, ranges: PorousModelRanges) -> tuple[ConstructionNote, ...]:
     if isinstance(material, ConstantImpedance):
         return ()
+    if isinstance(material, MeasuredImpedance):
+        outside_axis = frequencies[_outside_table(material, frequencies)]
+        if not outside_axis.size:
+            return ()
+        return tuple(note.model_copy(update={"message": "底構造" + note.message})
+                     for note in _komatsu_notes(material.base_assembly, outside_axis, ranges))
     notes = []
     limits = ranges.komatsu
     lower, upper = limits.f_over_sigma_bounds_m3_kg
@@ -128,6 +137,10 @@ def _evaluate_impedance(material: SurfaceMaterial, frequencies_hz: jax.Array, in
     _require_precision(jnp.asarray(0.), "float64", context)
     frequencies = _axis(frequencies_hz)
     angles = _axis(incidence_angles_deg, angles=True) if incidence_angles_deg is not None else None
+    if isinstance(material, MeasuredImpedance):
+        impedance, notes = _measured_impedance(material, frequencies, angles, air, ranges)
+        _check_surface_impedance(impedance, frequencies, angles, context=context)
+        return impedance, notes
     notes = _komatsu_notes(material, frequencies, ranges)
     if isinstance(material, ConstantImpedance):
         impedance = tmm.constant_z(frequencies, jnp.asarray(material.impedance_pa_s_m, dtype=jnp.complex128), incidence_angles_deg=angles)
@@ -153,7 +166,9 @@ def surface_impedance_at_angles(material: SurfaceMaterial, frequencies_hz: jax.A
 def random_incidence_absorption(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air: PhysicsConstants,
                                 ranges: PorousModelRanges) -> tuple[jax.Array, tuple[ConstructionNote, ...]]:
     """無規入射吸音：Paris（角度加權平均）預設完整角度格，固定阻抗沿用既有型錄換算。"""
-    if isinstance(material, ConstantImpedance):
+    if isinstance(material, MeasuredImpedance):
+        absorption, notes = _measured_absorption(material, frequencies_hz, air, ranges)
+    elif isinstance(material, ConstantImpedance):
         impedance, notes = surface_impedance(material, frequencies_hz, air=air, ranges=ranges)
         alpha = complex_random_incidence_absorption(material.impedance_pa_s_m / air.rho_c)
         absorption = jnp.full(impedance.shape, alpha)
@@ -164,3 +179,66 @@ def random_incidence_absorption(material: SurfaceMaterial, frequencies_hz: jax.A
         absorption = tmm.diffuse_absorption_coefficient(impedance, angles, air=air)
     _require_precision(absorption, "float64", _context(material))
     return absorption, notes
+
+
+def _outside_table(material: MeasuredImpedance, frequencies: jax.Array) -> np.ndarray:
+    """嚴格表外遮罩；端點屬於實測段，不重算底構造。"""
+    axis = np.asarray(frequencies)
+    return (axis < material.points[0].frequency_hz) | (axis > material.points[-1].frequency_hz)
+
+
+def _table_impedance(material: MeasuredImpedance, frequencies: jax.Array) -> jax.Array:
+    """對數頻率線性內插；明確覆寫命中列，包含端點，逐位保留輸入表值。"""
+    axis = np.asarray(frequencies)
+    knots = np.asarray([point.frequency_hz for point in material.points])
+    real = np.asarray([point.real_pa_s_m for point in material.points])
+    imag = np.asarray([point.imag_pa_s_m for point in material.points])
+    values = np.empty(axis.shape, dtype=np.complex128)
+    values.real = np.interp(np.log10(axis), np.log10(knots), real)
+    values.imag = np.interp(np.log10(axis), np.log10(knots), imag)
+    for point in material.points:
+        values[axis == point.frequency_hz] = complex(point.real_pa_s_m, point.imag_pa_s_m)
+    return jnp.asarray(values)
+
+
+def _fill_notes(material: MeasuredImpedance, frequencies: jax.Array,
+                notes: tuple[ConstructionNote, ...]) -> tuple[ConstructionNote, ...]:
+    """只記實際求值的表外頻點；底構造訊息加前綴，原構造訊息不改。"""
+    if not frequencies.size:
+        return ()
+    fill = ConstructionNote(code="measured_table_model_fill", frequencies_hz=tuple(sorted(set(np.asarray(frequencies).tolist()))),
+        message=f"模型補值：實測表涵蓋 {material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz，表外以底構造計算")
+    return (fill, *(note.model_copy(update={"message": "底構造" + note.message}) for note in notes))
+
+
+def _measured_impedance(material: MeasuredImpedance, frequencies: jax.Array, angles: jax.Array | None,
+                        air: PhysicsConstants, ranges: PorousModelRanges) -> tuple[jax.Array, tuple[ConstructionNote, ...]]:
+    impedance = tmm._broadcast_angles(_table_impedance(material, frequencies), angles)
+    indices = np.flatnonzero(_outside_table(material, frequencies))
+    if not indices.size:
+        return impedance, ()
+    outside = frequencies[indices]
+    try:
+        values, notes = _evaluate_impedance(material.base_assembly, outside, angles, air, ranges)
+    except ValueError as exc:
+        raise ValueError(f"{_context(material)}；{exc}") from exc
+    return impedance.at[indices].set(values), _fill_notes(material, outside, notes)
+
+
+def _measured_absorption(material: MeasuredImpedance, frequencies_hz: jax.Array, air: PhysicsConstants,
+                         ranges: PorousModelRanges) -> tuple[jax.Array, tuple[ConstructionNote, ...]]:
+    _require_precision(jnp.asarray(0.), "float64", _context(material))
+    frequencies = _axis(frequencies_hz)
+    outside = _outside_table(material, frequencies)
+    inside_indices, outside_indices = np.flatnonzero(~outside), np.flatnonzero(outside)
+    result = jnp.zeros(frequencies.shape, dtype=jnp.float64)
+    values = _table_impedance(material, frequencies[inside_indices])
+    absorption = jnp.asarray([complex_random_incidence_absorption(complex(z) / air.rho_c) for z in np.asarray(values)], dtype=jnp.float64)
+    result = result.at[inside_indices].set(absorption)
+    if not outside_indices.size:
+        return result, ()
+    try:
+        base, notes = random_incidence_absorption(material.base_assembly, frequencies[outside_indices], air=air, ranges=ranges)
+    except ValueError as exc:
+        raise ValueError(f"{_context(material)}；{exc}") from exc
+    return result.at[outside_indices].set(base), _fill_notes(material, frequencies[outside_indices], notes)

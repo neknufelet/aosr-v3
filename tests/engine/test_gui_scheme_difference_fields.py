@@ -19,6 +19,8 @@ Json: TypeAlias = None | bool | str | int | float | list["Json"] | dict[str, "Js
 
 EXEMPTIONS = {
     "scene.surface_zones_by_wall[][].area": "Literal 只收 whole_wall，其他分區都由三入口拒收考卷擋下。",
+    "scene.surface_zones_by_wall[][].material.fill_rule": "Literal 只收第一版補值規則；實測格式考卷拒收其他值，預設值隨方案保存。",
+    "scene.surface_zones_by_wall[][].material.base_assembly.kind": "底構造只收 Assembly；實測格式考卷拒收固定阻抗與巢狀實測表。",
     "schema_version": "Literal 固定版號，方案驗證器拒收其他值。",
     "scheme_id": "施工單明定排除方案代號；它不是方案設定。",
     "channel_group.channels[].role": "恰好兩個聲道且比較對引用角色，須連動修改。",
@@ -191,4 +193,38 @@ def _surface_fields(scheme: Scheme) -> set[str]:
     changed = _change(porous_document, ("scene", NEW, "floor", 0, "material", "layers", 0), miki)
     assert {row.path for row in scheme_differences(porous_scheme, changed)} == {f"scene.{NEW}.floor"}
     names = set(cases) | {f"layers[].{name}" for name in parameters} | {"layers[].model"}
-    return {f"scene.{NEW}[][].material.{name}" for name in names}
+    return {f"scene.{NEW}[][].material.{name}" for name in names} | _measured_surface_fields(document)
+
+
+def _measured_surface_fields(document: dict[str, Json]) -> set[str]:
+    from tests.engine.test_measured_impedance import measured
+    from tests.engine._surface_zone_cases import NEW
+    measured_material = measured()
+    base = cast(dict[str, object], measured_material['base_assembly'])
+    layers = cast(list[dict[str, object]], base['layers'])
+    layers.append({'kind': 'porous', 'thickness_m': .05, 'flow_resistivity_pa_s_m2': 19100.,
+        'material_class': 'fibrous', 'model': 'wilson_2015', 'porosity': .98, 'tortuosity': 1.1})
+    prefix: tuple[str | int, ...] = ('scene', NEW, 'floor', 0, 'material')
+    original = _change(document, prefix, cast(Json, measured_material))
+    data = cast(dict[str, Json], original.model_dump(mode='json'))
+    cases: dict[str, tuple[tuple[str | int, ...], Json]] = {
+        'source_and_conditions': (('source_and_conditions',), '另一支量測管'),
+        'points[].frequency_hz': (('points', 0, 'frequency_hz'), 110.),
+        'points[].real_pa_s_m': (('points', 0, 'real_pa_s_m'), 410.),
+        'points[].imag_pa_s_m': (('points', 0, 'imag_pa_s_m'), -210.),
+        'base_assembly.backing': (('base_assembly', 'backing'), 'air'),
+        'base_assembly.layers[].kind': (('base_assembly', 'layers', 0), {'kind': 'air', 'thickness_m': .02}),
+        'base_assembly.layers[].thickness_m': (('base_assembly', 'layers', 1, 'thickness_m'), .04),
+        'base_assembly.layers[].surface_mass_kg_m2': (('base_assembly', 'layers', 0, 'surface_mass_kg_m2'), .2),
+        'base_assembly.layers[].resistance_pa_s_m': (('base_assembly', 'layers', 0, 'resistance_pa_s_m'), 90.),
+        'base_assembly.layers[].flow_resistivity_pa_s_m2': (('base_assembly', 'layers', 2, 'flow_resistivity_pa_s_m2'), 20000.),
+        'base_assembly.layers[].material_class': (('base_assembly', 'layers', 2, 'material_class'), 'foam'),
+        'base_assembly.layers[].porosity': (('base_assembly', 'layers', 2, 'porosity'), .97),
+        'base_assembly.layers[].tortuosity': (('base_assembly', 'layers', 2, 'tortuosity'), 1.2),
+        'base_assembly.layers[].model': (('base_assembly', 'layers', 2), {'kind': 'porous', 'model': 'miki',
+            'thickness_m': .05, 'flow_resistivity_pa_s_m2': 19100., 'material_class': 'fibrous'}),
+    }
+    for name, (path, value) in cases.items():
+        rows = scheme_differences(original, _change(data, (*prefix, *path), value))
+        assert {row.path for row in rows} == {f'scene.{NEW}.floor'}, name
+    return {f'scene.{NEW}[][].material.{name}' for name in cases}

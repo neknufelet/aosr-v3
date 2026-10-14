@@ -75,15 +75,22 @@ def merge_construction_notes(
                                    set(() if previous is None else previous.frequencies_hz)))
         merged[key] = note if frequencies == note.frequencies_hz else note.model_copy(
             update={"frequencies_hz": frequencies})
-    into[wall] = tuple(merged[key] for key in sorted(merged))
+    into[wall] = tuple(merged[key] for key in sorted(merged, key=lambda key: (key[0] or 0, key[1])))
 
 
-def extrapolated_frequency_text(frequencies_hz: tuple[float, ...]) -> str:
+def extrapolated_frequency_text(frequencies_hz: tuple[float, ...], *,
+                                table_bounds_hz: tuple[float, float] | None = None) -> str:
     """外推頻點寫成低、高兩段（「20–27 Hz、8400–11313.5 Hz」），中間照常算的頻率不連進去。
 
     Komatsu 的 f/σ 界線由量測頻率與樣品流阻推導，流阻又只收樣品範圍內的值，
     所以低段外推必在量測頻率下限以下、高段必在上限以上：用下限切開恰好是兩段。
     """
+    if table_bounds_hz is not None:
+        lower, upper = table_bounds_hz
+        spans = [part for part in (tuple(f for f in frequencies_hz if f < lower),
+                                   tuple(f for f in frequencies_hz if f > upper)) if part]
+        return "、".join(f"{part[0]:g} Hz" if part[0] == part[-1] else f"{part[0]:g}–{part[-1]:g} Hz"
+                        for part in spans)
     lowest = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu.measured_frequency_min_hz
     spans = [part for part in (tuple(f for f in frequencies_hz if f < lowest),
                                tuple(f for f in frequencies_hz if f >= lowest)) if part]

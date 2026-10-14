@@ -296,22 +296,72 @@
     },
     "ConstructionNote": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "layer_index": {
+                "type": "integer"
+              },
+              "material_class": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "layer_index",
+              "material_class"
+            ]
+          },
+          "if": {
+            "properties": {
+              "code": {
+                "const": "measured_table_model_fill"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "layer_index"
+                  ]
+                },
+                {
+                  "required": [
+                    "material_class"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
       "description": "ConstructionNote（結構化材料註記）：層編號從房間側的一開始，不因角度重複。",
       "properties": {
         "code": {
           "description": "code（註記代號：頻率外推或材料類別不在擬合範圍）",
           "enum": [
             "komatsu_frequency_extrapolation",
-            "komatsu_material_class_outside_fit"
+            "komatsu_material_class_outside_fit",
+            "measured_table_model_fill"
           ],
           "title": "Code",
           "type": "string"
         },
         "layer_index": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "layer_index（從房間側起算的層編號）",
-          "minimum": 1,
-          "title": "Layer Index",
-          "type": "integer"
+          "title": "Layer Index"
         },
         "frequencies_hz": {
           "default": [],
@@ -325,13 +375,21 @@
           "uniqueItems": true
         },
         "material_class": {
-          "description": "material_class（材料類別：fibrous 是纖維類，foam 是泡棉）",
-          "enum": [
-            "fibrous",
-            "foam"
+          "anyOf": [
+            {
+              "enum": [
+                "fibrous",
+                "foam"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Material Class",
-          "type": "string"
+          "default": null,
+          "description": "material_class（材料類別：fibrous 是纖維類，foam 是泡棉）",
+          "title": "Material Class"
         },
         "message": {
           "description": "message（中文說明）",
@@ -342,8 +400,6 @@
       },
       "required": [
         "code",
-        "layer_index",
-        "material_class",
         "message"
       ],
       "title": "ConstructionNote",
@@ -370,6 +426,45 @@
       ],
       "title": "LowFrequencyAxis",
       "type": "string"
+    },
+    "MeasuredSeam": {
+      "additionalProperties": false,
+      "description": "表的精確端點，兩組數字各自保存。",
+      "properties": {
+        "frequency_hz": {
+          "description": "實測表的精確端點頻率，Hz",
+          "exclusiveMinimum": 0,
+          "quantity": "頻率",
+          "reference": "絕對值",
+          "title": "Frequency Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "measured": {
+          "$ref": "#/$defs/SeamValues",
+          "description": "實測表值；假設與角度無關",
+          "quantity": "實測端點組",
+          "reference": "沒有基準（端點資料容器）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "base_assembly": {
+          "$ref": "#/$defs/SeamValues",
+          "description": "底構造端點值；保留自己的角度響應",
+          "quantity": "底構造端點組",
+          "reference": "沒有基準（端點資料容器）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "frequency_hz",
+        "measured",
+        "base_assembly"
+      ],
+      "title": "MeasuredSeam",
+      "type": "object"
     },
     "PathDirectionAngles": {
       "additionalProperties": false,
@@ -985,6 +1080,57 @@
       "title": "SceneSection",
       "type": "object"
     },
+    "SeamValues": {
+      "additionalProperties": false,
+      "description": "同一端點的一組阻抗與兩種入射吸音率；數字不含兩組之差。",
+      "properties": {
+        "real_pa_s_m": {
+          "description": "端點阻抗實部，Pa·s/m",
+          "minimum": 0,
+          "quantity": "阻抗實部",
+          "reference": "絕對值",
+          "title": "Real Pa S M",
+          "type": "number",
+          "unit": "Pa*s/m",
+          "validity": "可估"
+        },
+        "imag_pa_s_m": {
+          "description": "端點阻抗虛部，Pa·s/m；正時間指數",
+          "quantity": "阻抗虛部",
+          "reference": "絕對值",
+          "title": "Imag Pa S M",
+          "type": "number",
+          "unit": "Pa*s/m",
+          "validity": "可估"
+        },
+        "normal_absorption": {
+          "description": "端點垂直入射吸音率",
+          "quantity": "吸音率",
+          "reference": "入射能量",
+          "title": "Normal Absorption",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "random_absorption": {
+          "description": "端點無規入射吸音率；各組使用自己的算法",
+          "quantity": "吸音率",
+          "reference": "入射能量",
+          "title": "Random Absorption",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        }
+      },
+      "required": [
+        "real_pa_s_m",
+        "imag_pa_s_m",
+        "normal_absorption",
+        "random_absorption"
+      ],
+      "title": "SeamValues",
+      "type": "object"
+    },
     "SourceCurveParameters": {
       "additionalProperties": false,
       "description": "兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它），\n「大於 0」那條界限跟它共用同一個型別 ``PositiveStrictFloat``，匯出的 schema 才說得出同一條界限。",
@@ -1368,6 +1514,42 @@
       "quantity": "構造註記",
       "reference": "沒有基準（材料模型適用範圍說明，不是量測值）",
       "title": "Construction Notes By Wall",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+    },
+    "measured_seams_by_wall": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/MeasuredSeam"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "實測牆表格兩端的接縫報告；實測與底構造各自保存，不存差值",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "floor",
+          "ceiling",
+          "x0",
+          "xL",
+          "y0",
+          "yL"
+        ]
+      },
+      "quantity": "接縫資料",
+      "reference": "沒有基準（兩組端點資料的容器，不是量測值）",
+      "title": "Measured Seams By Wall",
       "unit": "1",
       "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     }
