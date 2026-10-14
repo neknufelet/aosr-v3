@@ -107,11 +107,11 @@ class Mutation(TypedDict):
 class CaseOp(TypedDict, total=False):
     """這一刀每一筆 case 的執行方式（第 1 刀那些 case 沒有這一格）。
 
-    * ``fn``：要呼叫哪一支載入器（不給就用 case id 的第二段）。
-    * ``module``：要載入哪一支新家模組（不給就用 case id 第一段的 ``cut2_`` 後面那個名字）。
+    * ``fn``：要呼叫哪一支載入器；必填，產生器與考卷兩端缺了都直接拒絕。
+    * ``module``：兩端目前都不讀；模組一律由表名（``cut2_`` 後面那個名字）決定。
     * ``mutations``：依序套用的突變（見 :class:`Mutation`）；真的設定檔讀進來、改過再餵。
     * ``text``：整份設定檔換成這段原文；不可與 ``mutations`` 或 ``path: "missing"`` 並用。
-    * ``path``：餵給載入器的路徑（``"default"`` ＝ 不傳路徑、走載入器自己的預設；
+    * ``path``：餵給載入器的路徑（``"default"`` ＝ 明著傳新家那一份真的設定檔路徑；
       ``"missing"`` ＝ 一個不存在的路徑，驗「檔案不存在」那條分支）。
     * ``kwargs``：其他關鍵字參數（例如 ``profile=``、``mode=``）。
     """
@@ -191,7 +191,7 @@ def perimeter_default(
     mutations: list[Mutation] | None = None,
     kwargs: dict[str, Tagged | int | str] | None = None,
 ) -> CaseOp:
-    """一筆「餵真的設定檔、不傳路徑（走載入器自己的預設）」的 case。"""
+    """一筆「明著傳新家那一份真的設定檔路徑」的 case（可再疊突變）。"""
     op: CaseOp = {"fn": fn, "path": "default"}
     if mutations is not None:
         op["mutations"] = mutations
