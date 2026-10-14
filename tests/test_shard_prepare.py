@@ -19,7 +19,7 @@ from tests.test_verify_shards import REGISTRY, write_registry
 NODES = ('tests/test_shard_seal.py::test_z', 'tests/test_verify_shards.py::test_y', 'tests/test_verify_shards.py::test_x[escaped\\n]')
 
 
-def test_outputs_are_sorted_and_default_is_complement(tmp_path: Path) -> None:
+def test_outputs_are_sorted_and_hash_partitions(tmp_path: Path) -> None:
     registry = load_registry(write_registry(tmp_path))
     first = render_inputs(NODES, registry, 'shard-a')
     second = render_inputs(reversed(NODES), registry, 'shard-b')
@@ -48,7 +48,7 @@ def test_collected_address_must_be_test_file_and_item(tmp_path: Path, nodeid: st
         render_inputs((nodeid,), load_registry(write_registry(tmp_path)), 'shard-b')
 
 
-def test_default_can_also_have_explicit_groups(tmp_path: Path) -> None:
+def test_either_shard_can_have_explicit_groups(tmp_path: Path) -> None:
     registry = load_registry(write_registry(tmp_path))
     registry = replace(registry, groups=(replace(registry.groups[0], shard='shard-b'),))
     result = render_inputs(NODES, registry, 'shard-b')

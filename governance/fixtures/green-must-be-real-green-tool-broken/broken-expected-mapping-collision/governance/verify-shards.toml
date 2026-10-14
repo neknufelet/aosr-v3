@@ -1,6 +1,6 @@
-schema = 1
+schema = 2
 shards = ["shard-a", "shard-b"]
-default_shard = "shard-b"
+unregistered = "path-hash"
 [evidence]
 dir = "governance/receipts/shard"
 expected = "expected.txt"
