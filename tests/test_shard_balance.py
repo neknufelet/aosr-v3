@@ -288,6 +288,26 @@ def _moved(tmp_path: Path) -> tuple[Balance, Path, str]:
     return _analyze(tmp_path, registry), registry, file
 
 
+@pytest.mark.parametrize('source,target', [('shard-a', 'shard-b'), ('shard-b', 'shard-a')])
+def test_printed_text_names_the_shard_it_moves_to(tmp_path: Path, source: str, target: str) -> None:
+    """抓原文的群名或片寫死成某一台：兩個方向各搬一檔，讀回來的群名、片、檔都對得上，記憶體驗證也過。"""
+    import tomllib
+    from governance.status.shard_balance import check_suggestion, suggested_groups, suggestion_text
+    registry, files = _tree(tmp_path)
+    heavy = [file for file in files[1:] if _assignment(file) == source][:2]
+    times = {'tests.test_verify_shards': 10}
+    times.update({file.removesuffix('.py').replace('/', '.'): weight for file, weight in zip(heavy, (100, 90))})
+    _sample(tmp_path, 'r1', source, '參考處理器', times, sum(times.values()), 2)
+    _sample(tmp_path, 'r1', target, '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
+    result = _analyze(tmp_path, registry)
+    moved = [file for file in sorted(result.weights) if result.suggested[file] != result.hashed[file]]
+    assert [(result.hashed[file], result.suggested[file]) for file in moved] == [(source, target)]
+    text = suggestion_text(suggested_groups(result))
+    parsed = tomllib.loads(text)['group']
+    assert [(group['name'], group['shard'], group['files']) for group in parsed] == [(f'balance-{target}', target, moved)]
+    check_suggestion(result, load_registry(registry), text)
+
+
 @pytest.mark.parametrize('tamper,message', [
     (lambda text, file: text.replace('[[group]]', '[[group]', 1), '讀不回來'),
     (lambda text, file: 'group = 7\n', '不是群清單'),
