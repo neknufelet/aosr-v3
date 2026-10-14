@@ -110,8 +110,15 @@ def test_measured_three_real_cli_runs_isolate_each_frequency(tmp_path: Path) -> 
 
 
 def test_measured_real_cli_text_contains_plain_header_and_seams(tmp_path: Path) -> None:
+    """底構造換成單層纖維多孔（流阻 60000，約 82 Hz 以下才落在小松模型量測範圍外）：
+    表下方的模型補值頻點同時是材料模型外推，拍板補記要求報告開頭那一行也寫出來。"""
+    document = variants()[0]
+    zones = cast(dict[str, list[dict[str, object]]], document['surface_zones_by_wall'])
+    cast(dict[str, object], zones['x0'][0]['material'])['base_assembly'] = {'kind': 'assembly', 'layers': [
+        {'kind': 'porous', 'thickness_m': .05, 'flow_resistivity_pa_s_m2': 60000., 'material_class': 'fibrous'}],
+        'backing': 'rigid'}
     path = tmp_path / 'text.json'
-    path.write_text(json.dumps(variants()[0]))
+    path.write_text(json.dumps(document))
     args = command(path)
     args[args.index('json')] = 'text'
     child = subprocess.run(args, cwd=tmp_path, env=environment(tmp_path), capture_output=True, text=True, timeout=120)
@@ -120,6 +127,8 @@ def test_measured_real_cli_text_contains_plain_header_and_seams(tmp_path: Path) 
     assert '75 Hz 以下與 1500 Hz 以上是模型補值（底構造）' in child.stdout
     assert '實測段假設與角度無關' in child.stdout
     assert '實測表只代表樣品在管子裡量到的結果，不代表現場安裝' in child.stdout
+    header = [line for line in child.stdout.splitlines() if line.startswith('x0：實測表涵蓋 75–1500 Hz')]
+    assert header and all('底構造第 1 層另有材料模型外推' in line and '；其中 ' in line for line in header), header
     assert '接縫報告（差＝底構造減實測）' in child.stdout
     assert '垂直入射吸音率' in child.stdout and '無規入射吸音率' in child.stdout
     assert '模型補值頻點' in child.stdout
