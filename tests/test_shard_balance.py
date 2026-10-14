@@ -232,3 +232,40 @@ def test_reference_cpu_requires_complete_equality(tmp_path: Path, monkeypatch: p
         _sample(tmp_path, 'r1', shard, '參考處理器 額外尾綴', {'tests.test_verify_shards': 10}, 10, 2)
     monkeypatch.chdir(tmp_path)
     assert main(['--history', str(tmp_path / 'hist'), '--registry', str(registry), '--reference-cpu', '參考處理器']) == TOOL_BROKEN
+
+
+def test_pinned_group_stays_even_when_it_is_the_best_move(tmp_path: Path) -> None:
+    """抓不能動的群被當成能搬：讓固定群那一檔正好是唯一最划算的一搬。"""
+    registry, files = _tree(tmp_path)
+    pinned = 'tests/test_verify_shards.py'
+    loose = [file for file in files[1:] if _assignment(file) == 'shard-a'][:2]
+    times = {pinned.removesuffix('.py').replace('/', '.'): 60}
+    times.update({file.removesuffix('.py').replace('/', '.'): 50 for file in loose})
+    _sample(tmp_path, 'r1', 'shard-a', '參考處理器', times, 160, 2)
+    _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {}, 0, 2)
+    result = _analyze(tmp_path, registry)
+    assert result.ratio == pytest.approx(1)
+    assert result.suggested[pinned] == 'shard-a'
+    assert [result.suggested[file] for file in loose] == ['shard-b', 'shard-b']
+
+
+@pytest.mark.parametrize('broken', ['overlap', 'incomplete'])
+def test_write_refuses_partitions_that_overlap_or_miss_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str,
+) -> None:
+    """抓寫檔前不驗兩片互斥與聯集：分片結果壞掉時一個字都不准寫出去。"""
+    from governance.exit_codes import ToolBroken
+    from governance.status import shard_balance
+    from governance.verify_shards import Prepared
+    registry, files = _tree(tmp_path)
+    _sample(tmp_path, 'r1', 'shard-a', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
+    _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
+    result = _analyze(tmp_path, registry)
+    picked = {'overlap': {'shard-a': files, 'shard-b': files},
+              'incomplete': {'shard-a': files[:1], 'shard-b': files[1:2]}}[broken]
+    monkeypatch.setattr(shard_balance, 'render_inputs',
+                        lambda nodes, registry, shard: Prepared('', '\n'.join(picked[shard]) + '\n'))
+    output = tmp_path / 'suggestion.toml'
+    with pytest.raises(ToolBroken, match='互斥'):
+        shard_balance.write_suggestion(registry, output, result)
+    assert not output.exists()
