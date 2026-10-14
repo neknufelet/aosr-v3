@@ -39,12 +39,15 @@ import sys
 REAL = {real!r}
 LOG = {log!r}
 KEYS = {keys!r}
+# 值可以寫在下一格的全域選項（本機 git 實測 `git <選項> <值> version` 照樣跑得起來的那幾個）；
+# 寫成「--git-dir=路徑」那種附在同一格的，下面一格一格往前走就好。
+TAKES_NEXT = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source")
 args = sys.argv[1:]
 lead = []
 i = 0
-# 子指令前面的全域選項（-C 目錄、-c 設定…）照樣帶去問：commit 那一刻真 git 看到的就是這一組。
+# 子指令前面的全域選項照樣帶去問：commit 那一刻真 git 看到的就是這一組。
 while i < len(args) and args[i].startswith("-"):
-    step = 2 if args[i] in ("-C", "-c") else 1
+    step = 2 if args[i] in TAKES_NEXT else 1
     lead += args[i:i + step]
     i += step
 if i < len(args) and args[i] == "commit":
@@ -133,23 +136,28 @@ def test_the_fake_git_sees_the_commits_of_a_known_committer(git_sandbox: GitSand
 
 
 def test_a_commit_with_maintenance_on_is_reported(git_sandbox: GitSandbox, tmp_path: Path) -> None:
-    """負控制：背景維護開著的那一次 commit，假 git 要記成開著、而且被判出來——不然第一題永遠綠。
+    """負控制：背景維護開著的那幾次 commit，假 git 要記成開著、而且被判出來——不然第一題永遠綠。
 
+    全域選項的值寫在下一格（``--git-dir 路徑``）也要認得出後面那個 commit；值本身叫 commit 的不算提交。
     在沙箱裡、而且暫存區是空的：真 git 會回「沒東西可提交」不留提交，也就不會真的叫背景維護。
     """
     env, log = _fake_git(git_sandbox, tmp_path)
     env = {key: value for key, value in env.items() if not key.startswith("GIT_")}
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_NOSYSTEM"] = "1"
-    for lead in ([], ["-c", "maintenance.auto=true"]):
+    root = git_sandbox.root
+    on = ["-c", "maintenance.auto=true"]
+    split = ["--git-dir", str(root / ".git"), "--work-tree", str(root), "--namespace", "commit", *on]
+    for argv in ([], on, split, ["--git-dir", "commit", "status"]):
         subprocess.run(
-            ["git", *lead, "commit", "--quiet", "--no-verify", "-m", "負控制"],
-            cwd=git_sandbox.root,
+            ["git", *argv, *([] if "status" in argv else ["commit", "--quiet", "--no-verify", "-m", "負控制"])],
+            cwd=root,
             env=env,
             capture_output=True,
             text=True,
         )
     rows = _commits(log)
-    assert [values for _where, values in rows] == [QUIET, QUIET | {"maintenance.auto": "true"}], rows
-    assert _noisy(rows) == [f"{rows[-1][0]}：{rows[-1][1]}"]
+    opened = QUIET | {"maintenance.auto": "true"}
+    assert [values for _where, values in rows] == [QUIET, opened, opened], rows
+    assert _noisy(rows) == [f"{where}：{values}" for where, values in rows if values == opened]
     assert git_sandbox.git("rev-list", "--all").stdout.strip() == "", "負控制不准真的在沙箱留提交"
