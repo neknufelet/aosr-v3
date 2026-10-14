@@ -1,6 +1,6 @@
-schema = 1
+schema = 2
 shards = ["shard-a", "shard-b"]
-default_shard = "shard-b"
+unregistered = "path-hash"
 [evidence]
 dir = "governance/receipts/shard"
 expected = "expected.txt"
@@ -12,3 +12,8 @@ name = "first"
 shard = "shard-a"
 why = "小控制樹的第一組考卷"
 files = ["tests/test_a.py"]
+[[group]]
+name = "rest"
+shard = "shard-b"
+why = "樣本裡原本由預設片接走的考卷，明著登記、不靠路徑雜湊"
+files = ["tests/test_b.py", "tests/test_extra.py"]

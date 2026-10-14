@@ -1,9 +1,9 @@
-# schema 1：每片全套清點相同；未登記的檔由 default_shard 接補集。
+# schema 2：每片全套清點相同；未登記檔依 POSIX 路徑的 SHA-256 雜湊分片。
 # _search_worker_cases 的 lru_cache 只在行程內；xdist 跨行程不保證共用，所以不登記。
 # _report_cache 的單對物理（shared_control_pair）兩片各算一次，本機收據逐題時間約二十秒，接受、不登記；控制組結果（shared_control_result）那一群才是重算會變一百多秒的。
-schema = 1
+schema = 2
 shards = ["shard-a", "shard-b"]
-default_shard = "shard-b"
+unregistered = "path-hash"
 
 [evidence]
 dir = "governance/receipts/shard"
@@ -89,4 +89,24 @@ why = "治理規矩卡的後設考卷（對每張卡跑樣本的那幾支）。"
 files = [
   "tests/test_fixture_runner.py",
   "tests/test_temp_repo_background_maintenance.py",
+]
+
+[[group]]
+name = "balance-shard-b"
+shard = "shard-b"
+why = "照 governance/status/shard_balance 依雲端歷史耗時印出的建議貼上；重算後整群換掉，改動走合併請求。"
+files = [
+  "tests/engine/test_fem_complex.py",
+  "tests/engine/test_fem_fenics_answers.py",
+  "tests/engine/test_material_flow.py",
+  "tests/engine/test_physics_identity.py",
+  "tests/engine/test_scheme_cli_fem.py",
+  "tests/engine/test_search_blocked_recovery.py",
+  "tests/engine/test_search_pipeline_integration.py",
+  "tests/engine/test_search_report_completion.py",
+  "tests/engine/test_three_lane_report.py",
+  "tests/engine/test_transfer_matrix_reference.py",
+  "tests/engine/test_transfer_matrix_step2_reference.py",
+  "tests/engine/test_transfer_matrix_step3_reference.py",
+  "tests/engine/test_wall_surfaces.py",
 ]

@@ -10,9 +10,9 @@ import pytest
 from governance.exit_codes import ToolBroken
 from governance.verify_shards import load_registry
 
-REGISTRY = '''schema = 1
+REGISTRY = '''schema = 2
 shards = ["shard-a", "shard-b"]
-default_shard = "shard-b"
+unregistered = "path-hash"
 [evidence]
 dir = "governance/receipts/shard"
 expected = "expected.txt"
@@ -36,9 +36,9 @@ def write_registry(tmp_path: Path, text: str = REGISTRY) -> Path:
 
 def test_legal_registry_is_immutable(tmp_path: Path) -> None:
     registry = load_registry(write_registry(tmp_path))
-    assert registry.schema == 1
+    assert registry.schema == 2
     assert registry.shards == ("shard-a", "shard-b")
-    assert registry.default_shard == "shard-b"
+    assert registry.unregistered == "path-hash"
     assert registry.evidence.dir == "governance/receipts/shard"
     assert registry.evidence.expected == "expected.txt"
     assert registry.evidence.args == "pytest.args"
@@ -54,19 +54,20 @@ def test_legal_registry_is_immutable(tmp_path: Path) -> None:
 
 
 BAD_FIELDS = [
-    ("top-extra", "schema = 1", "schema = 1\nextra = 7", "registry"),
-    ("top-missing", "schema = 1\n", "", "registry"),
-    ("schema-wrong", "schema = 1", "schema = 2", "schema"),
-    ("schema-bool", "schema = 1", "schema = true", "schema"),
-    ("schema-string", "schema = 1", 'schema = "1"', "schema"),
+    ("top-extra", "schema = 2", "schema = 2\nextra = 7", "registry"),
+    ("top-missing", "schema = 2\n", "", "registry"),
+    ("schema-wrong", "schema = 2", "schema = 1", "schema"),
+    ("schema-bool", "schema = 2", "schema = true", "schema"),
+    ("schema-string", "schema = 2", 'schema = "1"', "schema"),
     ("shards-scalar", '["shard-a", "shard-b"]', '"shard-a"', "shards"),
     ("shards-empty", '["shard-a", "shard-b"]', "[]", "shards"),
     ("shards-duplicate", '["shard-a", "shard-b"]', '["shard-a", "shard-b", "shard-a"]', "shards"),
     ("shards-empty-item", '["shard-a", "shard-b"]', '["shard-a", ""]', "shards"),
     ("shards-blank-item", '["shard-a", "shard-b"]', '["shard-a", "  "]', "shards"),
     ("shards-nonstring", '["shard-a", "shard-b"]', '["shard-a", 7]', "shards"),
-    ("default-unknown", 'default_shard = "shard-b"', 'default_shard = "missing"', "default_shard"),
-    ("default-nonstring", 'default_shard = "shard-b"', 'default_shard = 7', "default_shard"),
+    ("unregistered-missing", 'unregistered = "path-hash"\n', '', "registry"),
+    ("unregistered-unknown", 'unregistered = "path-hash"', 'unregistered = "missing"', "unregistered"),
+    ("unregistered-nonstring", 'unregistered = "path-hash"', 'unregistered = 7', "unregistered"),
     ("evidence-extra", '[evidence]', '[evidence]\nextra = "x"', "evidence"),
     ("evidence-missing", 'args = "pytest.args"\n', '', "evidence"),
     ("evidence-not-table", '[evidence]', '[evidence]', "evidence"),
@@ -159,3 +160,38 @@ def test_each_evidence_key_is_required(tmp_path: Path, field: str) -> None:
     text = '\n'.join(line for line in REGISTRY.splitlines() if not line.startswith(f'{field} ='))
     with pytest.raises(ToolBroken, match='^evidence:'):
         load_registry(write_registry(tmp_path, text))
+
+
+def test_unregistered_hash_matches_independent_digest() -> None:
+    """抓摘要截取、端序、片序或編碼植錯。"""
+    import hashlib
+    from governance import verify_shards
+
+    shards = ('shard-a', 'shard-b', 'shard-c')
+    for file in (str(Path('tests') / 'test_new.py'), str(Path('tests') / 'engine' / 'test_new.py'), str(Path('tests') / 'test_新.py')):
+        expected = shards[int.from_bytes(hashlib.sha256(file.encode('utf-8')).digest()[:8], 'big') % len(shards)]
+        assert verify_shards.unregistered_shard(file, shards) == expected
+
+
+def test_unregistered_hash_partitions_and_group_overrides(tmp_path: Path) -> None:
+    """抓新檔全落同片、群登記失效與改名沿用舊片。"""
+    import hashlib
+    from governance.verify_shards import render_inputs
+
+    files = [f'tests/test_probe_{index}.py' for index in range(64)]
+    shards = ('shard-a', 'shard-b')
+    expected = {file: shards[int.from_bytes(hashlib.sha256(file.encode()).digest()[:8], 'big') % len(shards)] for file in files}
+    pinned = next(file for file in files if expected[file] == 'shard-b')
+    registry = load_registry(write_registry(tmp_path, REGISTRY.replace('tests/test_verify_shards.py', pinned)))
+    nodes = [f'{file}::test_one' for file in files]
+    expected[pinned] = 'shard-a'
+    for shard in shards:
+        selected = set(render_inputs(nodes, registry, shard).args.splitlines())
+        assert selected == {file for file, assigned in expected.items() if assigned == shard}
+        assert selected
+    original = next(file for file in files if file != pinned and expected[file] == 'shard-a')
+    renamed = next(file for file in files if file != pinned and expected[file] == 'shard-b')
+    renamed_nodes = [node for node in nodes if not node.startswith((original + '::', renamed + '::'))]
+    renamed_nodes.append(renamed + '::test_one')
+    assert original not in render_inputs(renamed_nodes, registry, 'shard-a').args.splitlines()
+    assert renamed in render_inputs(renamed_nodes, registry, 'shard-b').args.splitlines()

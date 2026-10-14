@@ -1,6 +1,7 @@
 """分片工具與未來收尾裁判共用的不可變登記簿；不依賴 status 產證據層。"""
 from __future__ import annotations
 
+import hashlib
 import re
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
@@ -32,10 +33,10 @@ class Group:
 
 @dataclass(frozen=True)
 class Registry:
-    """schema 1；所有容器都是不可變的 tuple 或 frozen 資料物件。"""
+    """schema 2；所有容器都是不可變的 tuple 或 frozen 資料物件。"""
     schema: int
     shards: tuple[str, ...]
-    default_shard: str
+    unregistered: str
     evidence: Evidence
     groups: tuple[Group, ...]
 
@@ -106,7 +107,7 @@ def _files(raw: object, field: str) -> tuple[str, ...]:
 
 
 def _groups(raw: object, shards: tuple[str, ...]) -> tuple[Group, ...]:
-    """群名與檔案都互斥；空群清單可用補集覆蓋全套。"""
+    """群名與檔案都互斥；空群清單可用路徑雜湊覆蓋全套。"""
     if not isinstance(raw, list):
         raise ToolBroken(f"group: 預期群清單，實際 {raw!r}")
     groups: list[Group] = []
@@ -135,12 +136,15 @@ def load_registry(path: Path) -> Registry:
         raw = tomllib.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError) as exc:  # ValueError 含解碼錯、TOML 錯與路徑裡的 NUL
         raise ToolBroken(f"registry {path}: 讀不開，實際 {exc}") from exc
-    table = _table(raw, 'registry', frozenset({'schema', 'shards', 'default_shard', 'evidence', 'group'}))
+    table = _table(raw, 'registry', frozenset({'schema', 'shards', 'unregistered', 'evidence', 'group'}))
     schema = table['schema']
-    if type(schema) is not int or schema != 1:
-        raise ToolBroken(f"schema: 預期整數 1，實際 {schema!r}")
+    if type(schema) is not int or schema != 2:
+        raise ToolBroken(f"schema: 預期整數 2，實際 {schema!r}")
     shards = _strings(table['shards'], 'shards')
-    return Registry(schema, shards, _member(table['default_shard'], 'default_shard', shards),
+    policy = _string(table['unregistered'], 'unregistered')
+    if policy != 'path-hash':
+        raise ToolBroken(f"unregistered: 只認 path-hash，實際 {policy!r}")
+    return Registry(schema, shards, policy,
                     _evidence(table['evidence']), _groups(table['group'], shards))
 
 
@@ -191,7 +195,7 @@ def _collected_file(nodeid: str) -> str:
 
 
 def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str) -> Prepared:
-    """不套分片篩選的全套 expected；群檔加預設片補集形成 pytest.args。"""
+    """不套分片篩選的全套 expected；群檔加未登記檔的路徑雜湊形成 pytest.args。"""
     if shard not in registry.shards:
         raise ToolBroken(f'shard: 未登記 {shard!r}，實際 shards={registry.shards!r}')
     nodes = tuple(nodeids)
@@ -205,8 +209,13 @@ def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str) -> Pre
     if missing:
         raise ToolBroken(f'group.files: 登記了收集不到的考卷 {sorted(missing)!r}')
     selected = {file for group in registry.groups if group.shard == shard for file in group.files}
-    if shard == registry.default_shard:
-        selected.update(files - registered)
+    selected.update(file for file in files - registered
+                    if unregistered_shard(file, registry.shards) == shard)
     if not selected:
         raise ToolBroken(f'shard {shard!r}: 本片考卷集合是空的，空參數檔會跑全套')
     return Prepared('\n'.join(sorted(nodes)) + '\n', '\n'.join(sorted(selected)) + '\n')
+
+
+def unregistered_shard(file: str, shards: tuple[str, ...]) -> str:
+    """POSIX 路徑 UTF-8 摘要的前八位元組，按登記順序分片。"""
+    return shards[int.from_bytes(hashlib.sha256(file.encode("utf-8")).digest()[:8], "big") % len(shards)]

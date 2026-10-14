@@ -464,7 +464,8 @@ def decode(node: object) -> object:
     if kind == "model":
         return decode(marker.get("fields"))
     if kind == "type":
-        # 模組層的類別物件（這一刀那 9 支的 `CalibrationConfig` 那一種常數）：只記名字。
+        # 模組層的類別物件（這一刀那 9 支的 `CalibrationConfig` 那一種常數）：還原成名字。
+        # 欄位表那一格由 `constant_type_fields` 另外讀（票 #166）。
         name = marker.get("name")
         if not isinstance(name, str) or not name:
             raise AssertionError(f"答案檔的類別記號沒有名字：{marker!r}")
@@ -485,6 +486,26 @@ def constant(module: str, name: str) -> object:
     if name not in constants:
         raise AssertionError(f"答案檔裡沒有 {module}.{name}——這一格沒有裁判")
     return decode(constants[name])
+
+
+def constant_kind(module: str, name: str) -> object:
+    """某一筆常數在答案檔裡的記號種類（donor 那一邊說它是什麼）。"""
+    constants = _as_mapping(module_answers(module).get("constants"), f"{module} 的常數表")
+    if name not in constants:
+        raise AssertionError(f"答案檔裡沒有 {module}.{name}——這一格沒有裁判")
+    return _as_mapping(constants[name], f"{module}.{name} 的記號").get("kind")
+
+
+def constant_type_fields(module: str, name: str) -> list[str]:
+    """某一筆類別常數在 donor 宣告的欄位表（照宣告順序，含序列化時排除的欄位；票 #166）。"""
+    constants = _as_mapping(module_answers(module).get("constants"), f"{module} 的常數表")
+    marker = _as_mapping(constants.get(name), f"{module}.{name} 的記號")
+    if marker.get("kind") != "type":
+        raise AssertionError(f"{module}.{name} 在答案檔裡不是類別記號：{marker!r}")
+    table = marker.get("fields")
+    if not isinstance(table, list) or not table or not all(isinstance(item, str) for item in table):
+        raise AssertionError(f"{module}.{name} 的類別記號沒有欄位表——答案檔要用新的產生器重產")
+    return [str(item) for item in table]
 
 
 def expected_block(case: dict[str, object]) -> dict[str, object]:
