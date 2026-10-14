@@ -32,8 +32,8 @@ dump，而 pydantic 照**上一層宣告的類別**輸出，同名子類別多�
   匯出的那一個（``is``，子類別不算）；巢狀的那一格，上一層模型宣告的欄位型別也要是它。
   只在登記的那一格比，冒牌貨藏在別的欄位裡不算數。
 
-控制組是 ``test_a_same_named_impostor_turns_a_judge_red``（五種冒牌貨）與
-``test_an_impostor_hidden_in_another_field_does_not_count``。
+控制組是 ``test_a_same_named_impostor_turns_a_judge_red``（六種冒牌貨）與
+``test_home_judge_controls``（冒牌貨藏在別的欄位、子類別坐在家裡、上一層宣告的不是它）。
 **這兩條不比的**：欄位的型別、預設值與驗證器（只比欄位名）；以及同名、欄位名完全相同的
 子類別在**最外層**由載入器真的建出來——那時匯出的就是載入器用的那一個、欄位表也跟上一代
 一樣，沒有東西可以分辨，算綠。
@@ -221,9 +221,10 @@ def test_class_constant_is_the_class_at_its_home(constant_id: str) -> None:
 
 
 def _impostor(original: type, flavor: str) -> type:
-    """同名的冒牌類別，五種。
+    """同名的冒牌類別，六種。
 
     ``rejects-fields``：只有自己一格，收不下設定檔的欄位。``accepts-anything``：什麼都收、另外多一格。
+    ``reordered``：欄位名一樣、宣告順序反過來（只有一格的那幾個等於原樣，靠家那一條擋）。
     ``subclass-extra``：原本那一個的子類別，多一格欄位。``subclass-excluded``：同上，但那一格序列化時
     排除（dump 看不到）。``same-fields-subclass``：子類別、欄位一格不多——只有身分分得出來。
     """
@@ -232,6 +233,14 @@ def _impostor(original: type, flavor: str) -> type:
         return make_dataclass(name, [("impostor_only_field", int)])
     if flavor == "accepts-anything":
         return create_model(name, __config__=ConfigDict(extra="allow"), impostor_only_field=(int, 0))
+    if flavor == "reordered":
+        if is_dataclass(original):
+            frozen = bool(getattr(original, "__dataclass_params__").frozen)
+            return make_dataclass(name, [(item.name, item.type) for item in reversed(fields(original))], frozen=frozen)
+        model_fields = cast(dict[str, FieldInfo], getattr(original, "model_fields"))
+        reordered = dict(reversed(model_fields.items()))
+        namespace: dict[str, object] = {"__annotations__": {key: info.annotation for key, info in reordered.items()}, **reordered}
+        return type(name, (BaseModel,), namespace)
     if is_dataclass(original):
         extra = [] if flavor == "same-fields-subclass" else [("impostor_only_field", int, field(default=0))]
         frozen = bool(getattr(original, "__dataclass_params__").frozen)
@@ -244,7 +253,7 @@ def _impostor(original: type, flavor: str) -> type:
     return create_model(name, __base__=model)
 
 
-_FLAVORS = ("rejects-fields", "accepts-anything", "subclass-extra", "subclass-excluded", "same-fields-subclass")
+_FLAVORS = ("rejects-fields", "accepts-anything", "reordered", "subclass-extra", "subclass-excluded", "same-fields-subclass")
 # 同名、欄位名一樣的子類別在最外層由載入器真的建出來時沒有東西可以分辨（見檔頭），那幾格不列。
 _IMPOSTOR_CASES = [
     pytest.param(constant_id, flavor, id=f"{constant_id.split('.const.')[1]}-{flavor}")
@@ -275,14 +284,26 @@ def test_a_same_named_impostor_turns_a_judge_red(constant_id: str, flavor: str, 
     ("cut2_physics_constants.const.PhysicsConstants", "specific_heat_ratio"),
     ("cut2_calibration.const.CalibrationBandConfig", "rt"),
 ])
-def test_an_impostor_hidden_in_another_field_does_not_count(constant_id: str, other_field: str) -> None:
-    """控制組：冒牌貨的實例塞在別的欄位、登記那一格仍是原本的類別——家那一條要紅（不在任何位置都算）。"""
-    original = cast(type, getattr(_module_of(constant_id), constant_id.split(".", 2)[2]))
+def test_home_judge_controls(constant_id: str, other_field: str) -> None:
+    """家那一條自己的控制組，三種形狀各要紅一次（原本那一個坐在家裡時要綠）。
+
+    * 冒牌貨的實例塞在別的欄位、家裡仍是原本的類別——不在任何位置都算；
+    * 家裡坐的是原本那一個的子類別——``is``，子類別不算；
+    * 巢狀那一格：匯出的是欄位一樣的子類別、也真的坐在家裡，但上一層宣告的仍是原本那一個。
+    """
+    original = cast(type[BaseModel], getattr(_module_of(constant_id), constant_id.split(".", 2)[2]))
     impostor = _impostor(original, "rejects-fields")
+    subclass = _impostor(original, "same-fields-subclass")
     case_id, path = CLASS_HOMES[constant_id]
     with loader_case_run(case_id) as actual:
         root = cast(BaseModel, actual)
+        assert _home_holds(constant_id, original, root), "原本那一個在登記的那一格，這一條應該是綠的"
         planted = root.model_copy(update={other_field: impostor(impostor_only_field=0)})
-        assert _home_holds(constant_id, original, planted), "原本那一個在登記的那一格，這一條應該是綠的"
         assert not _home_holds(constant_id, impostor, planted), f"{constant_id}：冒牌貨藏在 {other_field}，家那一條卻綠了"
-        assert path != (other_field,)
+        if path:
+            seated = root.model_copy(update={path[-1]: subclass(**cast(BaseModel, getattr(root, path[-1])).model_dump())})
+        else:
+            seated = subclass(**root.model_dump())
+        assert not _home_holds(constant_id, original, seated), f"{constant_id}：家裡坐的是子類別，家那一條卻綠了"
+        if path:
+            assert not _home_holds(constant_id, subclass, seated), f"{constant_id}：上一層宣告的不是匯出的那一個，家那一條卻綠了"
