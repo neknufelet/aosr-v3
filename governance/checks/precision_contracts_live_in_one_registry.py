@@ -52,7 +52,7 @@ from governance.checks.tests_land_with_code import (
     resolve_range,
 )
 from governance.checks.thresholds_live_only_in_registry import _load_time_entries
-from governance.exit_codes import ToolBroken, make_temp_dir, note, run
+from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken, make_temp_dir, note, run
 from governance.loader import setting_strings, setting_text
 
 CARD_ID = "precision-contracts-live-in-one-registry"
@@ -340,6 +340,8 @@ def _materialize(scan_root: Path, decl: Path) -> Source:
         work.mkdir()
         env = _fixture_env(tmp)
         _run_git(["-c", "init.defaultBranch=main", "init", "--quiet"], work, what="開樣本用的暫存 repo", env=env)
+        for key, value in TEMP_REPO_QUIET_CONFIG:
+            _run_git(["config", key, value], work, what="關掉暫存 repo 的背景自動維護", env=env)
         def snapshot(key: str) -> str:
             _copy_snapshot(scan_root, history[key], work, decl)
             _run_git(["add", "-A"], work, what=f"加入快照 {key}", env=env)
