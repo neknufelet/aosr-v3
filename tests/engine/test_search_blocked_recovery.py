@@ -68,6 +68,8 @@ def test_blocked_kill_sweep_matches_whole_run(tmp_path: Path, monkeypatch: pytes
         expected = run(whole, registry, SavedFurnitureCompute(whole, missing=missing))
     assert expected.comparison_trial is not None
     assert expected.comparison_trial // whole.settings.batch_size == missing_prefix // whole.settings.batch_size
+    # 對照組跑完就不再動：帳本與下一批參數（要重播整本帳）只取一次，每個中斷點都跟同一份比。
+    expected_rows, expected_next = rows(whole), next_params(whole)
     for index in range(len(events)):
         for after in (False, True):
             store, other = blocked_store(tmp_path / f"cut-{index}-{after}", workers=workers)
@@ -79,9 +81,11 @@ def test_blocked_kill_sweep_matches_whole_run(tmp_path: Path, monkeypatch: pytes
             continued = SavedFurnitureCompute(store, missing=missing)
             actual = resume(store, other, continued) if saved.state == "running" else saved
             assert actual == expected, (source, index, after)
-            assert rows(store) == rows(whole), (source, index, after)
-            assert next_params(store) == next_params(whole), (source, index, after)
+            assert rows(store) == expected_rows, (source, index, after)
+            assert next_params(store) == expected_next, (source, index, after)
             assert None not in continued.calls and not store.baseline_path.exists()
+    # 「只取一次」的前提要守：中斷點都跑完之後，對照組的帳本與下一批參數仍跟取的那一份一樣。
+    assert (rows(whole), next_params(whole)) == (expected_rows, expected_next)
 
 
 class ChangedPhysicsCompute(SavedFurnitureCompute):
