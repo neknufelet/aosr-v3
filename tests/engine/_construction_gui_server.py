@@ -37,8 +37,14 @@ def _stop_calculations(folder: Path, base: str) -> None:
     with httpx.Client(trust_env=False) as client:
         for path in sorted((folder / "runs").glob("*.json")):
             state = json.loads(path.read_text())
-            response = client.post(f"{base}/api/runs/{path.stem}/stop", json={}, timeout=15)
-            if response.status_code != 200 or response.json().get("status") == "running":
+            try:
+                response = client.post(f"{base}/api/runs/{path.stem}/stop", json={}, timeout=15)
+                body = response.json() if response.status_code == 200 else None
+            except (httpx.HTTPError, ValueError) as exc:
+                # 斷線、逾時、回的不是 JSON：記下這一筆，照樣去停下一筆。
+                left.append(f"{path.stem}：停止請求失敗 {type(exc).__name__}")
+                continue
+            if not isinstance(body, dict) or body.get("status") in (None, "running"):
                 left.append(f"{path.stem}：{response.status_code} {response.text}")
             elif isinstance(pid := state.get("pid"), int) and pid > 0 and calculation_group_exists(pid, state.get("proc_start_ticks")):
                 left.append(f"{path.stem}：行程組 {pid} 收尾後仍存在")

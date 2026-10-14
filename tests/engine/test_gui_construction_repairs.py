@@ -9,8 +9,9 @@ from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.construction_input import material_field_values, material_input_problems, wall_materials
 from aosr.gui.problem_text import plain_problems
-from aosr.reporting.validation import SchemeProblem
-from tests.engine._furniture_cases import reference_document
+from aosr.reporting.validation import SchemeProblem, validate_scheme
+from tests.engine._directivity import DIRECTIVITY
+from tests.engine._furniture_cases import CAPABILITIES, reference_document
 from tests.engine.test_construction_presets import preset_document
 from tests.engine.test_gui_app import _app
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -97,6 +98,24 @@ def test_broken_floor_is_refused_alike_on_every_route(tmp_path: Path, case: str)
              *("；".join(row["text"] for row in response.json()["problems"]) for response in (validate, save)))
     assert all("地板材料構造" in text for text in texts), texts
     assert not (tmp_path / "schemes" / "broken.json").exists()
+
+
+def test_formal_refusal_of_flow_resistivity_is_not_repeated_by_range_rule(tmp_path: Path) -> None:
+    """流阻 0：正式驗證已經拒收（要大於 0），範圍那條不再補；補上的只回正式驗證之外的，不重回正式驗證那幾條。"""
+    document = preset_document({"kind": "assembly", "backing": "rigid", "layers": [
+        {"kind": "porous", "model": "komatsu", "thickness_m": .05, "flow_resistivity_pa_s_m2": 0.}]})
+    document["scheme_id"] = "zero"
+    problems = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert problems
+    assert material_input_problems(document, problems) == ()
+    with _app(tmp_path) as client:
+        validate = client.post("/api/validate", json=document)
+        save = client.put("/api/schemes/zero", json=document)
+    assert validate.status_code == 200 and save.status_code == 422, (validate.text, save.text)
+    for response in (validate, save):
+        text = "；".join(row["text"] for row in response.json()["problems"])
+        assert "地板材料構造" in text and "流阻" in text
+        assert "可用範圍" not in text
 
 
 @pytest.mark.parametrize("layers", ("missing", [], None))

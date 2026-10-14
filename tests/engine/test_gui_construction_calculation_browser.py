@@ -1,6 +1,7 @@
 """網頁正式方案管線真算兩份小房間，只有一層厚度不同，三路與保存註記都要改變。"""
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -50,19 +51,19 @@ def test_real_server_cleans_calculation_group_when_exam_raises(tmp_path: Path) -
             assert unrelated.poll() is None
         finally:
             if pid is not None and calculation_group_exists(pid, start_ticks):
-                os.killpg(pid, signal.SIGKILL)
+                # 剛核完身分就自己結束了也不算錯，後面的無關行程照樣要收。
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(pid, signal.SIGKILL)
             unrelated.terminate()
             unrelated.wait(timeout=15)
 
 
 def test_calculation_group_check_follows_birth_identity() -> None:
-    """領頭在：開始時脈對才算原組（不對＝行程號被重用）；領頭死了、組裡還有成員：仍算原組沒收乾淨。"""
-    script = ("import subprocess, sys, time; child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
-              "print(child.pid, flush=True); time.sleep(60)")
-    with subprocess.Popen([sys.executable, "-c", script], start_new_session=True, stdout=subprocess.PIPE) as leader:
+    """領頭在：開始時脈對才算原組（不對＝行程號被重用）；領頭死了、組裡還有成員：仍算原組沒收乾淨。
+    兩個行程都是這支考卷自己的子行程、同一個行程組，收屍由考卷自己做，不靠外面收養。"""
+    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+    with subprocess.Popen(sleep, process_group=0) as leader, subprocess.Popen(sleep, process_group=leader.pid) as member:
         try:
-            assert leader.stdout is not None
-            int(leader.stdout.readline())
             stat = _proc_stat(leader.pid)
             assert stat is not None
             assert calculation_group_exists(leader.pid, stat[2])
@@ -71,21 +72,21 @@ def test_calculation_group_check_follows_birth_identity() -> None:
             leader.wait(timeout=15)
             assert _proc_stat(leader.pid) is None
             assert calculation_group_exists(leader.pid, stat[2])
+            member.kill()
+            member.wait(timeout=15)
+            assert not calculation_group_exists(leader.pid, stat[2])
         finally:
-            try:
-                os.killpg(leader.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        deadline = time.monotonic() + 15
-        while calculation_group_exists(leader.pid, stat[2]) and time.monotonic() < deadline:
-            time.sleep(.05)
-        assert not calculation_group_exists(leader.pid, stat[2])
+            # Popen 只對自己還沒收屍的子行程送訊號，行程號不會已經被別人拿去。
+            leader.kill()
+            member.kill()
 
 
 def test_stop_calculations_names_every_unconfirmed_record(tmp_path: Path) -> None:
     """停止端點回錯、回還在算、或回已停但原組還在，都要點名；一筆出錯不中斷後面幾筆。"""
-    replies = {"a" * 32: (500, {"error": "停止未確認"}), "b" * 32: (200, {"status": "running"}),
-               "c" * 32: (200, {"status": "stopped"})}
+    # 排序在前的兩筆先出例外（斷線、回的不是 JSON），後面幾筆照樣要被問到。
+    replies: dict[str, tuple[int, object]] = {"1" * 32: (0, None), "2" * 32: (200, None),
+        "a" * 32: (500, {"error": "停止未確認"}), "b" * 32: (200, {"status": "running"}),
+        "c" * 32: (200, {"status": "stopped"})}
     asked = []
 
     class Stub(BaseHTTPRequestHandler):
@@ -93,7 +94,10 @@ def test_stop_calculations_names_every_unconfirmed_record(tmp_path: Path) -> Non
             run_id = self.path.split("/")[3]
             asked.append(run_id)
             code, body = replies[run_id]
-            data = json.dumps(body).encode()
+            if code == 0:
+                self.close_connection = True
+                return
+            data = json.dumps(body).encode() if body is not None else b"not json"
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
@@ -117,6 +121,7 @@ def test_stop_calculations_names_every_unconfirmed_record(tmp_path: Path) -> Non
                 _stop_calculations(tmp_path, f"http://127.0.0.1:{server.server_address[1]}")
             assert sorted(asked) == sorted(replies)
             text = str(raised.value)
+            assert f"{'1' * 32}：停止請求失敗" in text and f"{'2' * 32}：停止請求失敗" in text
             assert f"{'a' * 32}：500" in text and f"{'b' * 32}：200" in text
             assert f"{'c' * 32}：行程組 {leader.pid}" in text
         finally:
