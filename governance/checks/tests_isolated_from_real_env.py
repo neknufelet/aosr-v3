@@ -34,13 +34,17 @@ fixture」，fixture 的名字由卡宣告。
    答案取決於「跑在誰的機器上」。這一條不看有沒有 fixture：家目錄從來不是這棵樹的一部分。
 6. **放行本身壞掉**——放行指向的檔不在掃描面裡（過期的放行）、放行的路徑沒有被掃描根的
    ``.gitignore`` 蓋住（等於准你在版控樹裡留殘留）、或放行從頭到尾沒有對象（該拿掉了）。
+7. **登記的產品代寫函式收到版控路徑**——任一參數是真樹路徑，或含登記常數／路徑字串。
+   沙盒 fixture 改不了產品路徑常數，這一類也不能由寫入放行免掉。
 
 **門檻只寫在卡上**
 
 卡（宣告 ``check = "governance/checks/tests_isolated_from_real_env.py"`` 的那一張）的
-``[settings]`` 給兩樣：``sandbox_fixture``（唯一那支 fixture 的名字）與選填的
+``[settings]`` 給 ``sandbox_fixture``（唯一那支 fixture 的名字）與選填的
 ``[[settings.allow]]``（寫入真樹的放行，一條一格：``file``／``function``／``path``，
 加上放行條目共用的 ``reason``／``expires``）。
+選填的 ``product_writers``／``committed_constants``／``committed_paths`` 是純字串陣列，
+分別登記產品代寫函式、版控目錄常數與相對路徑；省略時保留原有判準。
 讀不到、找到多張、或形狀不對，一律 raise :class:`ToolBroken` 讓外殼回 2——這支檢查沒有
 預設值，「沒設定就當乾淨」正是 v2 假綠的病根。
 
@@ -74,7 +78,9 @@ CHECK_REL = "governance/checks/tests_isolated_from_real_env.py"
 TESTS_DIR = "tests"
 GITIGNORE = ".gitignore"
 
-SETTINGS_KEYS = ("sandbox_fixture", "allow")
+SETTINGS_KEYS = (
+    "sandbox_fixture", "allow", "product_writers", "committed_constants", "committed_paths"
+)
 ALLOW_KEY = "allow"
 # 一筆放行五格：哪支檔、哪個函式、寫到哪，加上放行條目共用的兩格（reason ＋ expires，
 # 形狀定義在 governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一。
@@ -160,6 +166,17 @@ class Allow:
 
 
 @dataclass(frozen=True)
+class Settings:
+    """這張卡的沙盒、放行與產品代寫登記；舊卡可省略代寫那三格。"""
+
+    fixture: str
+    allow: tuple[Allow, ...]
+    product_writers: tuple[str, ...]
+    committed_constants: tuple[str, ...]
+    committed_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Hit:
     """一筆違規（或一筆被放行擋掉的寫入）。"""
 
@@ -176,7 +193,7 @@ class Hit:
 
 
 # ── 門檻：只從卡上讀 ────────────────────────────────────────────────────────
-def _settings(scan_root: Path, files: list[Path]) -> tuple[str, tuple[Allow, ...]]:
+def _settings(scan_root: Path, files: list[Path]) -> Settings:
     """從掃描根自己的 ``governance/rules/`` 讀這支檢查的門檻。
 
     找不到、找到多張、或形狀不對，一律 raise ToolBroken——沒有門檻就不出結論。
@@ -206,7 +223,32 @@ def _settings(scan_root: Path, files: list[Path]) -> tuple[str, tuple[Allow, ...
     name = settings.get("sandbox_fixture")
     if not isinstance(name, str) or not name.isidentifier():
         raise ToolBroken(f"{rel} 的 [settings] sandbox_fixture 必須是一個合法的 Python 名字，實際是 {name!r}")
-    return name, _allow_list(settings, rel)
+    return Settings(
+        fixture=name,
+        allow=_allow_list(settings, rel),
+        product_writers=_string_list(settings, rel, "product_writers"),
+        committed_constants=_string_list(settings, rel, "committed_constants"),
+        committed_paths=_string_list(settings, rel, "committed_paths"),
+    )
+
+
+def _string_list(settings: dict[str, object], rel: str, key: str) -> tuple[str, ...]:
+    """選填登記寫了就必須有效；不讀產品檔案，名字綁定交由引擎籃的考卷守。"""
+    if key not in settings:
+        return ()
+    raw = settings[key]
+    if not isinstance(raw, list) or not raw:
+        raise ToolBroken(f"{rel} 的 [settings] {key} 必須是非空字串陣列，實際是 {raw!r}")
+    out: list[str] = []
+    for value in raw:
+        if not isinstance(value, str) or not value.strip():
+            raise ToolBroken(f"{rel} 的 [settings] {key} 每格必須是非空字串，實際是 {value!r}")
+        if key == "committed_constants" and not value.isidentifier():
+            raise ToolBroken(f"{rel} 的 [settings] {key} 必須是合法 Python 名字，實際是 {value!r}")
+        if key == "committed_paths" and (Path(value).is_absolute() or ".." in Path(value).parts):
+            raise ToolBroken(f"{rel} 的 [settings] {key} 必須是相對路徑，不准絕對路徑或 ..：{value!r}")
+        out.append(value)
+    return tuple(out)
 
 
 def _allow_list(settings: dict[str, object], rel: str) -> tuple[Allow, ...]:
@@ -592,10 +634,11 @@ def _scan_scope(
     guarded: bool,
     anchors: dict[str, str | None],
     bindings: dict[str, tuple[ast.expr, ...]],
-    fixture: str,
+    rules: Settings,
     facts: FileFacts,
 ) -> None:
     """一個作用域：先把錨與名字綁定收出來，再看每一個呼叫。"""
+    fixture = rules.fixture
     anchors = dict(anchors)
     bindings = dict(bindings)
     statements = _own_statements(scope)
@@ -641,16 +684,45 @@ def _scan_scope(
                 guarded or stmt.name == fixture or _asks_for(stmt, fixture),
                 anchors,
                 bindings,
-                fixture,
+                rules,
                 facts,
             )
             continue
         if isinstance(stmt, ast.ClassDef):
-            _scan_scope(stmt, rel, (*chain, stmt.name), guarded, anchors, bindings, fixture, facts)
+            _scan_scope(stmt, rel, (*chain, stmt.name), guarded, anchors, bindings, rules, facts)
             continue
         for node in _own_expressions(stmt):
             if isinstance(node, ast.Call):
-                _look_at_call(node, rel, chain, guarded, anchors, bindings, fixture, facts)
+                _look_at_call(node, rel, chain, guarded, anchors, bindings, rules, facts)
+
+
+def _committed_write_hit(
+    call: ast.Call, rel: str, chain: tuple[str, ...],
+    anchors: dict[str, str | None], rules: Settings,
+) -> Hit | None:
+    """只認登記的代寫者；任一參數子樹命中真樹、常數或路徑就紅，不吃沙盒與放行。"""
+    if _last(_callee(call.func)) not in rules.product_writers:
+        return None
+    for arg in (*call.args, *(kw.value for kw in call.keywords)):
+        matched = _is_tree_expr(arg, anchors)
+        for node in ast.walk(arg):
+            if isinstance(node, ast.Name) and node.id in rules.committed_constants:
+                matched = True
+            if isinstance(node, ast.Attribute) and node.attr in rules.committed_constants:
+                matched = True
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                text = node.value.strip("/")
+                if any(text == path or text.startswith(path)
+                       for path in rules.committed_paths):
+                    matched = True
+        if matched:
+            return Hit(
+                kind="committed", rel=rel, lineno=call.lineno, chain=chain,
+                prefix=_prefix(arg, anchors),
+                message=(f"代寫函式收到版控路徑：{ast.unparse(call)[:100]}"
+                         "——沙盒 fixture 改不了產品路徑常數，寫入放行也不能免掉；請傳暫存目錄"),
+            )
+    return None
 
 
 def _look_at_call(
@@ -660,9 +732,13 @@ def _look_at_call(
     guarded: bool,
     anchors: dict[str, str | None],
     bindings: dict[str, tuple[ast.expr, ...]],
-    fixture: str,
+    rules: Settings,
     facts: FileFacts,
 ) -> None:
+    fixture = rules.fixture
+    hit = _committed_write_hit(call, rel, chain, anchors, rules)
+    if hit is not None:
+        facts.hits.append(hit)
     name = _last(_callee(call.func))
     if name in HOME_NAMES:
         facts.hits.append(
@@ -772,7 +848,8 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    fixture, allow = _settings(scan_root, files)
+    rules = _settings(scan_root, files)
+    fixture, allow = rules.fixture, rules.allow
     base = scan_root / TESTS_DIR
     picked = sorted(f for f in files if f.suffix == ".py" and f.is_relative_to(base))
     if not picked:
@@ -786,7 +863,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     for path in picked:
         rel = str(path.relative_to(scan_root).as_posix())
         scanned.add(rel)
-        _scan_scope(_parse(path, rel), rel, (), False, {}, {}, fixture, facts)
+        _scan_scope(_parse(path, rel), rel, (), False, {}, {}, rules, facts)
 
     bad, usable = _allow_problems(allow, scanned, _ignored_prefixes(scan_root))
     used: set[int] = set()
