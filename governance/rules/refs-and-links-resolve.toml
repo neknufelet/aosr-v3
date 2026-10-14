@@ -210,7 +210,7 @@ expires = "2026-12-08"
 
 [[settings.allow]]
 path = "src/aosr/config/data/x.toml"
-reason = "示範用的占位名（x 是任一個設定檔名的代稱）。`blueprint/config_cut1_cases.py` 的註解用它說明「載入器訊息裡本來就有的相對路徑刻意不動」——它不是真的檔案，是說明文字的一部分。"
+reason = "示範用的占位名（x 是任一個設定檔名的代稱）。`blueprint/config_cut1_parts.py`（#156 拆檔前在 `blueprint/config_cut1_cases.py`）的註解用它說明「載入器訊息裡本來就有的相對路徑刻意不動」——它不是真的檔案，是說明文字的一部分。"
 expires = "2026-12-08"
 
 [[settings.allow]]
