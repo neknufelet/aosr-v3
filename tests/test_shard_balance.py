@@ -309,7 +309,10 @@ def test_split_without_marker_is_the_whole_file() -> None:
     REGISTRY + f'\n{_marker()}\n[[group]]\n' + _STALE + '\n[extra]\nkey = 1\n',
     REGISTRY + f'\n{_marker()}\n[[group]]\n' + _STALE + f'\n{_marker()}\n',
     '[evidence]\nnote = """\n' + _marker() + '\n"""\n',
-], ids=['balance-before-marker', 'fixed-after-marker', 'table-after-marker', 'marker-twice', 'marker-inside-string'])
+    # 標記之後補一張子表，等於改了標記之前最後那一個固定群。
+    REGISTRY + f'\n{_marker()}\n[group.extra]\nkey = 1\n',
+], ids=['balance-before-marker', 'fixed-after-marker', 'table-after-marker', 'marker-twice', 'marker-inside-string',
+        'subtable-edits-a-fixed-group'])
 def test_split_refuses_what_it_does_not_own(source: str) -> None:
     """抓刪到不歸它管的東西、或留下該它管的東西：一律回 2，訊息講得出哪一條。"""
     from governance.exit_codes import ToolBroken
@@ -349,3 +352,44 @@ def test_bad_source_returns_two_and_writes_nothing(tmp_path: Path, monkeypatch: 
                  '--reference-cpu', '參考處理器', '--write', str(output)]) == TOOL_BROKEN
     assert not output.exists()
     assert '配平標記' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('head,expected', [
+    ('schema = 2\n\n# evidence 的說明\n[evidence]\ndir = "x"\n', 'schema = 2\ngroup = []\n\n# evidence 的說明\n[evidence]\ndir = "x"\n'),
+    ('schema = 2', 'schema = 2\ngroup = []\n'),
+], ids=['before-the-first-tables-comment', 'no-trailing-newline'])
+def test_empty_group_list_goes_to_the_root_and_keeps_comments_attached(head: str, expected: str) -> None:
+    """抓 group = [] 插在第一張表的說明註解與表頭之間、或接在沒換行的最後一行後面。"""
+    import tomllib
+    from governance.status.shard_balance import _with_empty_group_list
+    assert _with_empty_group_list(head, tomllib.loads(head)) == expected
+
+
+def test_empty_group_list_that_cannot_be_placed_is_tool_broken() -> None:
+    """抓補完沒讀回核對：根層多行陣列裡以 [ 開頭的一行會被誤認成第一張表，補進去就壞了。"""
+    import tomllib
+    from governance.exit_codes import ToolBroken
+    from governance.status.shard_balance import _with_empty_group_list
+    head = 'x = [\n  ["a"],\n]\n'
+    with pytest.raises(ToolBroken):
+        _with_empty_group_list(head, tomllib.loads(head))
+
+
+@pytest.mark.parametrize('ending', ['', '\n', '\n\n'], ids=['no-newline', 'one-newline', 'blank-line'])
+def test_rewrite_is_byte_stable_whatever_the_source_ends_with(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                            ending: str) -> None:
+    """抓標記前的空行算法不穩：第一次寫出的檔再算一次必須逐位元相同，標記前恰好一個空行。"""
+    from governance.status.shard_balance import main
+    registry, files = _tree(tmp_path)
+    registry.write_text(REGISTRY.rstrip('\n') + ending)
+    file = next(file for file in files[1:] if _assignment(file) == 'shard-a')
+    _sample(tmp_path, 'r1', 'shard-a', '參考處理器',
+            {'tests.test_verify_shards': 10, file.removesuffix('.py').replace('/', '.'): 100}, 110, 2)
+    _sample(tmp_path, 'r1', 'shard-b', '參考處理器', {'tests.test_verify_shards': 10}, 10, 2)
+    monkeypatch.chdir(tmp_path)
+    first, second = tmp_path / 'first.toml', tmp_path / 'second.toml'
+    command = ['--history', str(tmp_path / 'hist'), '--reference-cpu', '參考處理器']
+    assert main([*command, '--registry', str(registry), '--write', str(first)]) == CLEAN
+    assert main([*command, '--registry', str(first), '--write', str(second)]) == CLEAN
+    assert second.read_bytes() == first.read_bytes()
+    assert first.read_text().startswith(REGISTRY.rstrip('\n') + '\n\n' + _marker() + '\n[[group]]\n')
