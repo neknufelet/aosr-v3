@@ -60,7 +60,7 @@ MATERIAL_MODELS: dict[str, type[BaseModel]] = {
 MATERIAL_WORDS = {kind: {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
                        for name, field in model.model_fields.items()}
                   for kind, model in MATERIAL_MODELS.items()}
-PATH_WORDS.update({name: label for words in MATERIAL_WORDS.values() for name, label in words.items()
+PATH_WORDS.update({name: label.split("：", 1)[0] for words in MATERIAL_WORDS.values() for name, label in words.items()
                    if name not in ("kind", "thickness_m")})
 PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m"})
 PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
@@ -79,6 +79,42 @@ def _enum_word(description: str, value: object) -> str:
         if str(value) in {code.strip() for code in codes.split("、")}:
             return word.strip()
     raise ValueError(f"材料模型描述缺少 {value!r} 的中文說明")
+
+
+def material_field_text(kind: str, name: str) -> str:
+    """枚舉只取欄名，其餘保留所屬模型的中文欄名與單位。"""
+    description = MATERIAL_WORDS[kind][name]
+    return description.split("：", 1)[0] if "：" in description else description.split("，", 1)[0] if name == "kind" else description
+
+
+def material_form_spec() -> dict[str, dict[str, object]]:
+    """表單欄名、單位與選項全部執行期來自模型描述，不建立材料物件。"""
+    specs: dict[str, dict[str, object]] = {}
+    for kind, model in MATERIAL_MODELS.items():
+        fields: dict[str, object] = {}
+        for name, field in model.model_fields.items():
+            description = MATERIAL_WORDS[kind][name]
+            label, _, unit = material_field_text(kind, name).partition("，")
+            choices = get_args(field.annotation) if str(field.annotation).startswith("typing.Literal[") else ()
+            fields[name] = {"label": label, "unit": unit.split("；", 1)[0],
+                            "options": {str(value): _enum_word(description, value) for value in choices},
+                            "default": field.default if not field.is_required() else None}
+        specs[kind] = {"label": _enum_word(MATERIAL_WORDS[kind]["kind"], kind), "fields": fields}
+    return specs
+
+
+def _plain_material_message(message: str) -> str:
+    """核心原文只在顯示時替換代號；模型與其描述都不改。"""
+    words: dict[str, str] = dict(WALLS)
+    message = re.sub(r"(種類代號)\s+kind(?=（種類）)", r"\1", message)
+    for kind, spec in material_form_spec().items():
+        words[kind] = str(spec["label"])
+        for name, field in cast(dict[str, dict[str, object]], spec["fields"]).items():
+            words[name] = str(field["label"])
+            words.update(cast(dict[str, str], field["options"]))
+    for code in sorted(words, key=len, reverse=True):
+        message = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])", lambda _match: words[code], message)
+    return message
 
 
 def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str:
@@ -200,11 +236,22 @@ def _material_path(rest: list[str], document: Document) -> str:
                 value = value[int(part)]
             else:
                 break
-            if isinstance(value, dict) and value.get("kind") in MATERIAL_MODELS:
+            # 種類代號不是字串（清單、字典）就不查名稱表：不能當鍵，查了會崩。
+            if isinstance(value, dict) and isinstance(value.get("kind"), str) and value["kind"] in MATERIAL_MODELS:
                 kind = cast(str, value["kind"])
-    words = PATH_WORDS | MATERIAL_WORDS.get(kind or "", {})
-    return " › ".join(f"第 {int(part) + 1} 個" if part.isdigit() else words.get(part, part)
-                      for part in rest[2:])
+    parts = []
+    if "layers" in rest:
+        tail = rest[rest.index("layers") + 1:]
+        if tail and tail[0].isdigit():
+            parts.append(f"第 {int(tail[0]) + 1} 層")
+    leaf = rest[-1]
+    if kind and leaf in MATERIAL_WORDS[kind]:
+        parts.append(material_field_text(kind, leaf))
+    elif leaf in MATERIAL_MODELS:
+        parts.append(_enum_word(MATERIAL_WORDS[leaf]["kind"], leaf))
+    elif leaf not in ("material", "layers") and not leaf.isdigit():
+        parts.append(PATH_WORDS.get(leaf, leaf))
+    return " › ".join(parts)
 
 
 def _scene_field(rest: list[str], document: Document) -> str | None:
@@ -531,7 +578,7 @@ def plain_problem(problem: SchemeProblem, document: object) -> tuple[tuple[str, 
         if match:
             fields = rule.fields(match, scheme) if rule.fields else (field,) if field else ()
             return fields, rule.message(match)
-    return ((field,) if field else ()), problem.message
+    return ((field,) if field else ()), _plain_material_message(problem.message) if "surface_zones_by_wall" in problem.path else problem.message
 
 
 def plan_problems(problems: Sequence[SchemeProblem], document: object,

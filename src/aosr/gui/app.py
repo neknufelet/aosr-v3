@@ -35,6 +35,7 @@ from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
+from aosr.gui.construction_input import material_input_problems
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
@@ -67,7 +68,7 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"app.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"app.js", "walls.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
@@ -379,7 +380,7 @@ class GuiHandlers:
         document: object = await request.json()
         try:
             data = InputEdit.model_validate(document)
-            return JSONResponse({"scheme": edit_input(data)})
+            return JSONResponse({"scheme": edit_input(data, self.capabilities, self.directivity)})
         except ValidationError:
             return _bad(ValueError("填值請求格式不完整，請先填好房間、喇叭與座位"))
         except InputShapeError as exc:
@@ -417,6 +418,7 @@ class GuiHandlers:
         document = cast(object, await request.json())
         problems = validate_scheme(document, capabilities=self.capabilities,
                                    directivity=self.directivity)
+        problems += material_input_problems(document, problems)
         multiples: dict[str, float | None] = {}
         try:
             scene = Scheme.model_validate(document).scene
@@ -452,6 +454,8 @@ class GuiHandlers:
             _require_scheme_id(path, document)
             problems = validate_scheme(document, capabilities=self.capabilities,
                                        directivity=self.directivity)
+            # 流阻超出登記範圍跟其他驗證問題同一種回應（422 問題清單），跟底版存檔壞文件一樣。
+            problems += material_input_problems(document, problems)
             if problems:
                 return _problems_response(problems, document)
             scheme = Scheme.model_validate(document)

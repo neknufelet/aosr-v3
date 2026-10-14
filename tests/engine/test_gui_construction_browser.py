@@ -71,7 +71,7 @@ def test_compare_keeps_plain_construction_summary(tmp_path: Path, browser: Brows
             assert watched.page_errors == []
 
 
-def test_input_explains_construction_refusal(tmp_path: Path, browser: Browser) -> None:
+def test_input_opens_construction_without_rewriting_layers(tmp_path: Path, browser: Browser) -> None:
     (tmp_path / "schemes").mkdir()
     scheme = mixed_scheme().model_copy(update={"scheme_id": "construction"})
     (tmp_path / "schemes" / "construction.json").write_text(scheme.model_dump_json())
@@ -80,7 +80,10 @@ def test_input_explains_construction_refusal(tmp_path: Path, browser: Browser) -
         page.locator("#scheme-list").select_option("construction")
         with page.expect_response("**/api/input-preview") as response:
             page.locator("#open-scheme").click()
-        assert response.value.status == 400
-        page.wait_for_function("document.body.textContent.includes('這一版輸入頁還不能改構造牆')")
-        assert "地板" in page.locator("#open-note").inner_text()
+        assert response.value.status == 200
+        page.wait_for_function("!document.querySelector('main').inert")
+        assert page.locator("#layer-floor-0-surface_mass_kg_m2").input_value() == "0.15"
+        assert page.locator("#layer-floor-1-thickness_m").input_value() == "0.43"
+        assert "薄板層" in page.locator("#construction-floor").inner_text()
+        assert page.evaluate("collect().scene.surface_zones_by_wall.floor") == scheme.model_dump(mode="json")["scene"]["surface_zones_by_wall"]["floor"]
         assert watched.page_errors == []
