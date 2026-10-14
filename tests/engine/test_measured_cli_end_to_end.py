@@ -1,6 +1,8 @@
 """真有限元素命令列三份方案；逐頻隔離表內與表外，不用帶平均掩蓋。
 
-表內含施羅德兩個中頻帶，故這題的底構造變更不應經交接權重影響表內。
+前三份的表蓋住施羅德兩個中頻帶，底構造變更不經交接權重影響表內。另一題刻意讓表不蓋
+500／1000 Hz：換底構造只准移動有限元素與幾何路的交接下端（拍板第 7 點 10-14 講準的那句），
+表內各路能量逐位不變，只有交接段內的權重與合成總能量跟著動。
 固定與構造場景改動前後逐位不變，是合併請求裡同機一次對照的證據，不放進考卷：
 考卷不准自己叫版控工具取舊原碼（tests-isolated-from-real-env），而真有限元素與構造計算的
 本機答案依 verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 不能當跨處理器門檻。
@@ -43,11 +45,15 @@ def variants() -> tuple[dict[str, object], ...]:
 
 
 def run_variants(tmp_path: Path) -> list[ReportOutput]:
+    return run_documents(tmp_path, dict(zip(('baseline', 'table', 'base'), variants(), strict=True)), '實測表三份')
+
+
+def run_documents(tmp_path: Path, documents_by_name: dict[str, dict[str, object]], label: str) -> list[ReportOutput]:
     children = []
     outputs = []
     start = time.perf_counter()
     try:
-        for name, document in zip(('baseline', 'table', 'base'), variants(), strict=True):
+        for name, document in documents_by_name.items():
             path = tmp_path / f'{name}.json'
             path.write_text(json.dumps(document))
             children.append(subprocess.Popen(command(path), cwd=tmp_path, env=environment(tmp_path),
@@ -61,7 +67,7 @@ def run_variants(tmp_path: Path) -> list[ReportOutput]:
             if child.poll() is None:
                 child.kill()
             child.wait()
-    note(f'實測表三份真有限元素命令列牆鐘：{time.perf_counter() - start:.3f} 秒')
+    note(f'{label}真有限元素命令列牆鐘：{time.perf_counter() - start:.3f} 秒')
     return outputs
 
 
@@ -107,6 +113,56 @@ def test_measured_three_real_cli_runs_isolate_each_frequency(tmp_path: Path) -> 
     fill = next(n for n in original.construction_notes_by_wall['x0'] if n.code == 'measured_table_model_fill')
     assert fill.frequencies_hz and all(f < 75. or f > 1500. for f in fill.frequencies_hz)
     note('逐頻表內隔離通過；施羅德兩帶均位於表內，此題交接權重無跨頻變動。')
+
+
+def coupling_variants() -> tuple[dict[str, object], dict[str, object]]:
+    """表只蓋 100–400 Hz，500／1000 Hz 由底構造補；兩份只差底構造（板＋空腔 → 纖維多孔）。"""
+    _, scene = documents()
+    zones = cast(dict[str, list[dict[str, object]]], scene['surface_zones_by_wall'])
+    material = measured()
+    material['points'] = [{'frequency_hz': 100., 'real_pa_s_m': 600., 'imag_pa_s_m': -900.},
+        {'frequency_hz': 200., 'real_pa_s_m': 700., 'imag_pa_s_m': -400.},
+        {'frequency_hz': 400., 'real_pa_s_m': 800., 'imag_pa_s_m': -100.}]
+    zones['x0'][0]['material'] = material
+    porous = deepcopy(scene)
+    porous_zones = cast(dict[str, list[dict[str, object]]], porous['surface_zones_by_wall'])
+    cast(dict[str, object], porous_zones['x0'][0]['material'])['base_assembly'] = {'kind': 'assembly', 'layers': [
+        {'kind': 'porous', 'thickness_m': .05, 'flow_resistivity_pa_s_m2': 19100., 'material_class': 'fibrous'}],
+        'backing': 'rigid'}
+    return scene, porous
+
+
+def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_bands(tmp_path: Path) -> None:
+    """拍板第 7 點（10-14 講準）：表內材料與各路能量不變；只有交接段內的房間合成結果可以動。"""
+    board, porous = run_documents(tmp_path, dict(zip(('board', 'porous'), coupling_variants(), strict=True)), '交接段連動兩份')
+    assert board.points is not None and porous.points is not None
+    # 前提：500／1000 Hz 在表外，換底構造真的讓施羅德頻率與交接下端移動，而且兩份都沒被上限硬切。
+    assert board.top.f_s_hz != porous.top.f_s_hz
+    assert not board.top.capped_by_upper_limit and not porous.top.capped_by_upper_limit
+    assert board.top.crossover_upper_hz == porous.top.crossover_upper_hz
+    lower = min(board.top.crossover_lower_hz, porous.top.crossover_lower_hz)
+    upper = board.top.crossover_upper_hz
+    assert board.top.crossover_lower_hz != porous.top.crossover_lower_hz and lower < upper
+    window, steady = [], []
+    for a, b in zip(board.points, porous.points, strict=True):
+        assert a.frequency_hz == b.frequency_hz
+        if not 100. <= a.frequency_hz <= 400.:
+            continue
+        for field in ('fem_energy', 'direct_energy', 'reflected_energy', 'interference_energy', 'late_energy',
+                      'scattering', 'geometric_energy'):
+            assert getattr(a, field) == getattr(b, field), (a.frequency_hz, field)
+        if lower < a.frequency_hz < upper:
+            window.append(a.frequency_hz)
+            assert a.w_geo != b.w_geo and a.total_energy != b.total_energy, a.frequency_hz
+        else:
+            steady.append(a.frequency_hz)
+            assert (a.w_fem, a.w_geo, a.total_energy) == (b.w_fem, b.w_geo, b.total_energy), a.frequency_hz
+    assert window and any(f <= lower for f in steady) and any(f >= upper for f in steady), (window, steady)
+    assert board.measured_seams_by_wall is not None and porous.measured_seams_by_wall is not None
+    for old_seam, new_seam in zip(board.measured_seams_by_wall['x0'], porous.measured_seams_by_wall['x0'], strict=True):
+        assert old_seam.measured == new_seam.measured
+    note(f'交接下端 {board.top.crossover_lower_hz:.1f}→{porous.top.crossover_lower_hz:.1f} Hz；'
+         f'表內交接段 {min(window):.1f}–{max(window):.1f} Hz 的權重與合成總能量變，各路能量不變。')
 
 
 def test_measured_real_cli_text_contains_plain_header_and_seams(tmp_path: Path) -> None:
