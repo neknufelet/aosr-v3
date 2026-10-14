@@ -202,11 +202,13 @@ def declared_fields(cls: type) -> list[str]:
     考卷那一邊（``tests/engine/test_config_cut2_constants.py``）自己另算一次，不匯入這一支。
     兩種都不是就當場炸：這一刀的類別常數只有這兩種，第三種要先想清楚它的欄位表是什麼。
     """
-    if is_dataclass(cls):
-        return [field.name for field in fields(cls)]
+    # pydantic 先判：pydantic 模型若混進一個 dataclass 父類別，`is_dataclass` 也是真，
+    # 走 `fields` 會只讀到那個父類別的欄位、漏掉模型自己宣告的（#166 複查）。
     model_fields = getattr(cls, "model_fields", None)
     if isinstance(model_fields, dict):
         return [str(name) for name in model_fields]
+    if is_dataclass(cls):
+        return [field.name for field in fields(cls)]
     raise TypeError(f"這個類別的欄位表編不出來：{cls.__name__}")
 
 

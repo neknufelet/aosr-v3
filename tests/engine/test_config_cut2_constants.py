@@ -32,7 +32,7 @@ dump，而 pydantic 照**上一層宣告的類別**輸出，同名子類別多�
   匯出的那一個（``is``，子類別不算）；巢狀的那一格，上一層模型宣告的欄位型別也要是它。
   只在登記的那一格比，冒牌貨藏在別的欄位裡不算數。
 
-控制組是 ``test_a_same_named_impostor_turns_a_judge_red``（六種冒牌貨）與
+控制組是 ``test_a_same_named_impostor_turns_a_judge_red``（七種冒牌貨）與
 ``test_home_judge_controls``（冒牌貨藏在別的欄位、子類別坐在家裡、上一層宣告的不是它）。
 **這兩條不比的**：欄位的型別、預設值與驗證器（只比欄位名）；以及同名、欄位名完全相同的
 子類別在**最外層**由載入器真的建出來——那時匯出的就是載入器用的那一個、欄位表也跟上一代
@@ -131,12 +131,16 @@ def _module_of(constant_id: str) -> types.ModuleType:
 
 
 def _declared_fields(cls: type) -> list[str]:
-    """一個類別宣告的欄位名，照宣告順序（dataclass 走 ``fields``、pydantic 走類別上的 ``model_fields``）。"""
-    if is_dataclass(cls):
-        return [field.name for field in fields(cls)]
+    """一個類別宣告的欄位名，照宣告順序（pydantic 走類別上的 ``model_fields``、dataclass 走 ``fields``）。
+
+    pydantic 先判：模型混進一個 dataclass 父類別時 ``is_dataclass`` 也是真，走 ``fields`` 只讀到
+    父類別那幾格（#166 複查）。
+    """
     model_fields = getattr(cls, "model_fields", None)
     if isinstance(model_fields, dict):
         return [str(name) for name in cast(dict[object, object], model_fields)]
+    if is_dataclass(cls):
+        return [field.name for field in fields(cls)]
     raise AssertionError(f"{cls!r} 既不是 dataclass 也不是 pydantic 模型，欄位表比不了")
 
 
@@ -221,12 +225,13 @@ def test_class_constant_is_the_class_at_its_home(constant_id: str) -> None:
 
 
 def _impostor(original: type, flavor: str) -> type:
-    """同名的冒牌類別，六種。
+    """同名的冒牌類別，七種。
 
     ``rejects-fields``：只有自己一格，收不下設定檔的欄位。``accepts-anything``：什麼都收、另外多一格。
     ``reordered``：欄位名一樣、宣告順序反過來（只有一格的那幾個等於原樣，靠家那一條擋）。
     ``subclass-extra``：原本那一個的子類別，多一格欄位。``subclass-excluded``：同上，但那一格序列化時
-    排除（dump 看不到）。``same-fields-subclass``：子類別、欄位一格不多——只有身分分得出來。
+    排除（dump 看不到）。``dataclass-mixin``：同上，再混進一個欄位相同的 dataclass 父類別（只走
+    ``fields`` 的欄位表會被它騙）。``same-fields-subclass``：子類別、欄位一格不多——只有身分分得出來。
     """
     name = original.__name__
     if flavor == "rejects-fields":
@@ -250,10 +255,16 @@ def _impostor(original: type, flavor: str) -> type:
         return create_model(name, __base__=model, impostor_only_field=(int, 0))
     if flavor == "subclass-excluded":
         return create_model(name, __base__=model, impostor_only_field=(int, Field(default=0, exclude=True)))
+    if flavor == "dataclass-mixin":
+        mixin = make_dataclass(f"_{name}Mixin", [(key, info.annotation) for key, info in model.model_fields.items()])
+        mixed: dict[str, object] = {"__annotations__": {"impostor_only_field": int},
+                                    "impostor_only_field": Field(default=0, exclude=True)}
+        return type(name, (model, mixin), mixed)
     return create_model(name, __base__=model)
 
 
-_FLAVORS = ("rejects-fields", "accepts-anything", "reordered", "subclass-extra", "subclass-excluded", "same-fields-subclass")
+_FLAVORS = ("rejects-fields", "accepts-anything", "reordered", "subclass-extra", "subclass-excluded", "dataclass-mixin",
+            "same-fields-subclass")
 # 同名、欄位名一樣的子類別在最外層由載入器真的建出來時沒有東西可以分辨（見檔頭），那幾格不列。
 _IMPOSTOR_CASES = [
     pytest.param(constant_id, flavor, id=f"{constant_id.split('.const.')[1]}-{flavor}")
