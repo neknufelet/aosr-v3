@@ -888,7 +888,167 @@
           "kind": "float"
         }
       },
-      "probes": []
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml must define a numeric [shape].min_octagon_edge_m",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.min_octagon_edge.mut.non-numeric"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [shape].min_octagon_edge_m must be finite and > 0, got 0.0",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.min_octagon_edge.mut.non-positive"
+        },
+        {
+          "args": {},
+          "expected": {
+            "hex": "0x1.0000000000000p-1",
+            "kind": "float"
+          },
+          "id": "cut2_fem_lane.min_octagon_edge.real"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [position].centerline_tol_m must be finite and > 0, got 0.0",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.centerline-tol-zero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [position].default_height_m must be finite and > 0, got -1.0",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.default-height-nonpositive"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [position].min_source_source_m must be finite and > 0, got nan",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.min-source-source-nan"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml must define [position] n_trials_default, default_height_m, centerline_tol_m, min_source_source_m, objective_rule_default, objective_flatness_eps_default",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.missing-key"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [position].n_trials_default must be >= 1, got 0",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.n-trials-below-one"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [position].objective_flatness_eps_default must be finite and >= 0, got -0.1",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.objective-eps-negative"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [position].objective_rule_default must be 'lexicographic', got 'greedy'",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.position.mut.objective-rule-unknown"
+        },
+        {
+          "args": {},
+          "expected": {
+            "items": [
+              {
+                "kind": "scalar",
+                "value": 80
+              },
+              {
+                "hex": "0x1.3333333333333p+0",
+                "kind": "float"
+              },
+              {
+                "hex": "0x1.a36e2eb1c432dp-14",
+                "kind": "float"
+              },
+              {
+                "hex": "0x1.0000000000000p-2",
+                "kind": "float"
+              },
+              {
+                "kind": "scalar",
+                "value": "lexicographic"
+              },
+              {
+                "hex": "0x1.999999999999ap-5",
+                "kind": "float"
+              }
+            ],
+            "kind": "list"
+          },
+          "id": "cut2_fem_lane.position.real"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml must define a numeric [shape].splay_cap",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.splay_cap.mut.non-numeric"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/fem_lane.toml [shape].splay_cap must be finite and in (0, 1), got 1.5",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_fem_lane.splay_cap.mut.out-of-range"
+        },
+        {
+          "args": {},
+          "expected": {
+            "hex": "0x1.0000000000000p-1",
+            "kind": "float"
+          },
+          "id": "cut2_fem_lane.splay_cap.real"
+        }
+      ]
     },
     "cut2_mat_continuation": {
       "constants": {
@@ -3131,6 +3291,16 @@
               "type": "ValueError"
             }
           },
+          "id": "cut2_stereo_layout.load.mut.stereo-renamed-is-unknown-top-level"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml must define [stereo]",
+              "type": "ValueError"
+            }
+          },
           "id": "cut2_stereo_layout.load.mut.stereo-section-missing"
         },
         {
@@ -3237,6 +3407,16 @@
             "kind": "object"
           },
           "id": "cut2_stereo_layout.load.real"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml [stereo] must be a table",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.text.stereo-not-a-table"
         }
       ]
     },

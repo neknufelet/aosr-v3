@@ -636,6 +636,17 @@ def loader_case_run(case_id: str) -> Iterator[object]:
     kwargs_node = op.get("kwargs")
     kwargs = {} if kwargs_node is None else _as_mapping(kwargs_node, f"{case_id} 的 op.kwargs")
     resolved_kwargs = {name: cases.resolve(value) for name, value in kwargs.items()}
+    if "text" in op:
+        if "mutations" in op or op.get("path") == "missing":
+            raise AssertionError(f"{case_id} 的 text 不可與 mutations 或 path: missing 並用")
+        text = op["text"]
+        if not isinstance(text, str):
+            raise AssertionError(f"{case_id} 的 op.text 不是原文字串")
+        with tempfile.TemporaryDirectory(dir=_tmp_root()) as work:
+            probe = Path(work) / f"{engine_name}.toml"
+            probe.write_text(text, encoding="utf-8")
+            yield _capture(lambda: loader(probe, **resolved_kwargs))
+        return
     path_mode = op.get("path")
     if path_mode == "missing":
         yield _capture(lambda: loader(cases.missing_path()))

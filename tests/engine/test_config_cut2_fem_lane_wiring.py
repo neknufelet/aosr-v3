@@ -3,10 +3,9 @@
 **這一支在補什麼洞（票 #162）。** ``fem_lane.py`` 是「載入期就讀設定檔」的模組：``SPLAY_CAP``
 與 ``MIN_OCTAGON_EDGE_M`` 各走一支私有載入器，另外 6 個 ``POSITION_*``／``OBJECTIVE_*``
 由 ``_load_position_defaults`` 一次算出來，8 個全部在 import 那一刻從 ``fem_lane.toml``
-算出來。可是它的考卷是**凍結值比對**（``tests/engine/test_config_cut2_constants.py`` 拿
-``getattr(模組, NAME)`` 跟答案檔比），而 case 表裡 ``cut2_fem_lane`` 的突變 case 是 0 筆
-——所以「值是多少」有守，「值是從設定檔來的」沒有。實測：把那 8 個常數整段換成寫死的固定
-值、讀檔接線整條拿掉，``244 passed``。這一支就是那條接線的裁判。
+算出來。模組常數的值由 ``tests/engine/test_config_cut2_constants.py`` 跟凍結答案比，
+三支私有載入器的真檔與所有報錯點另由 ``blueprint/config_cut2_cases.py`` 的探針比上一代。
+但只比值與直接呼叫載入器，仍看不出「模組常數是否從設定檔來的」；這一支是那條接線的裁判。
 
 **做法（照 ``test_config_cut2_default_paths.py`` 已經用過的形狀：同一件事換一條路走到
 同一個地方）。** 突變過的 TOML 寫在 pytest 的 ``tmp_path``（不碰真樹），把
@@ -14,16 +13,10 @@
 import 那一刻重算，所以「餵哪一份檔就得到哪一組值」當場看得出來。反過來也成立：接線被
 拿掉時，reload 只會把寫死的值再貼一次，斷言就紅。
 
-**三支私有載入器自己的錯誤分支**也由這一支順手蓋到（壞掉的 ``splay_cap``／
-``min_octagon_edge_m``／``objective_rule_default`` 要丟 ``ValueError``）——原本那三支
-的訊息一條考卷都沒有。
-
-**為什麼 ``blueprint/config_cut1_cases.py`` 的 ``cut2_fem_lane`` 突變清單還是空的。**
-case 表那一格是**產生器與考卷共用的探針表**：一筆 case 的形狀是「載入器回傳一個值」，
-而 ``fem_lane`` 沒有公開載入器可以餵（三支都是私有的、回的是純量／tuple），加一筆
-「餵突變檔的載入器 case」得先替它生一支公開入口——那是動 ``src/aosr/config/`` 的行為，
-這一支只碰裁判與考卷。所以「接線是活的」由這一支的三條＋突變 case 表式的控制組蓋，
-那一格維持空的並在這裡寫明理由（票 #162 的「或明說為什麼不補」）。
+**三支私有載入器自己的錯誤分支。** 這一支的五筆壞值仍守載入期要丟 ``ValueError``；
+完整的例外型別與訊息比對由 ``test_config_cut2_loader_probes.py`` 守（票 #156）。
+case 機器可用 ``getattr(module, op.fn)`` 呼叫私有函式，純量與 tuple 也能編碼，
+所以不需要替產品新增公開入口；原先以此為理由留空的清單已補齊。
 """
 from __future__ import annotations
 

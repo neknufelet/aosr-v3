@@ -110,6 +110,7 @@ class CaseOp(TypedDict, total=False):
     * ``fn``：要呼叫哪一支載入器（不給就用 case id 的第二段）。
     * ``module``：要載入哪一支新家模組（不給就用 case id 第一段的 ``cut2_`` 後面那個名字）。
     * ``mutations``：依序套用的突變（見 :class:`Mutation`）；真的設定檔讀進來、改過再餵。
+    * ``text``：整份設定檔換成這段原文；不可與 ``mutations`` 或 ``path: "missing"`` 並用。
     * ``path``：餵給載入器的路徑（``"default"`` ＝ 不傳路徑、走載入器自己的預設；
       ``"missing"`` ＝ 一個不存在的路徑，驗「檔案不存在」那條分支）。
     * ``kwargs``：其他關鍵字參數（例如 ``profile=``、``mode=``）。
@@ -118,6 +119,7 @@ class CaseOp(TypedDict, total=False):
     fn: str
     module: str
     mutations: list[Mutation]
+    text: str
     path: str
     kwargs: dict[str, Tagged | int | str]
 
@@ -206,6 +208,11 @@ def perimeter_missing(fn: str) -> CaseOp:
 def perimeter_mutation(fn: str, before: str, after: str) -> CaseOp:
     """一筆「把真的設定檔改一格再餵」的 case。"""
     return {"fn": fn, "path": "default", "mutations": [Mutation(before=before, after=after)]}
+
+
+def perimeter_text(fn: str, text: str) -> CaseOp:
+    """一筆「整份設定檔換成指定原文再餵」的 case。"""
+    return {"fn": fn, "text": text}
 
 
 def resolve(value: object) -> object:

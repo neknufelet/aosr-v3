@@ -14,6 +14,7 @@ from blueprint.config_cut1_parts import (
     perimeter_default,
     perimeter_missing,
     perimeter_mutation,
+    perimeter_text,
     strs,
 )
 
@@ -83,11 +84,80 @@ CUT2_CASES: Final[dict[str, ModuleSpec]] = {
             "SV_FLOOR_FRAC",
             "VOL_CONSERVE_W",
         ],
-        # 這一格**刻意維持空的**（票 #162 的「或明說為什麼不補」；完整理由寫在
-        # `tests/engine/test_config_cut2_fem_lane_wiring.py` 的檔頭）：`fem_lane` 沒有公開
-        # 載入器可以餵一筆「突變過的 TOML」，而這一張表的一筆 case 就是「餵一個公開載入器」。
-        # 「值是從 `fem_lane.toml` 算出來的」那條接線由那一支考卷直接餵突變檔 ＋ reload 守。
-        "cases": [],
+        # 私有載入器可由 op.fn 直接呼叫；純量與 tuple 同樣能凍結比對（票 #156）。
+        # 三筆真檔與每個報錯點由這張表守；載入期常數接線另由 wiring 考卷餵檔、reload 守。
+        "cases": [
+            {
+                "id": "cut2_fem_lane.splay_cap.real",
+                "args": {},
+                "op": perimeter_default("_load_splay_cap"),
+            },
+            {
+                "id": "cut2_fem_lane.splay_cap.mut.non-numeric",
+                "args": {},
+                "op": perimeter_mutation("_load_splay_cap", 'splay_cap = 0.5', 'splay_cap = "half"'),
+            },
+            {
+                "id": "cut2_fem_lane.splay_cap.mut.out-of-range",
+                "args": {},
+                "op": perimeter_mutation("_load_splay_cap", 'splay_cap = 0.5', 'splay_cap = 1.5'),
+            },
+            {
+                "id": "cut2_fem_lane.min_octagon_edge.real",
+                "args": {},
+                "op": perimeter_default("_load_min_octagon_edge_m"),
+            },
+            {
+                "id": "cut2_fem_lane.min_octagon_edge.mut.non-numeric",
+                "args": {},
+                "op": perimeter_mutation("_load_min_octagon_edge_m", 'min_octagon_edge_m = 0.5', 'min_octagon_edge_m = "wide"'),
+            },
+            {
+                "id": "cut2_fem_lane.min_octagon_edge.mut.non-positive",
+                "args": {},
+                "op": perimeter_mutation("_load_min_octagon_edge_m", 'min_octagon_edge_m = 0.5', 'min_octagon_edge_m = 0.0'),
+            },
+            {
+                "id": "cut2_fem_lane.position.real",
+                "args": {},
+                "op": perimeter_default("_load_position_defaults"),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.missing-key",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'n_trials_default = 80\n', ''),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.n-trials-below-one",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'n_trials_default = 80', 'n_trials_default = 0'),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.default-height-nonpositive",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'default_height_m = 1.2', 'default_height_m = -1.0'),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.centerline-tol-zero",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'centerline_tol_m = 0.0001', 'centerline_tol_m = 0.0'),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.min-source-source-nan",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'min_source_source_m = 0.25', 'min_source_source_m = nan'),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.objective-rule-unknown",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'objective_rule_default = "lexicographic"', 'objective_rule_default = "greedy"'),
+            },
+            {
+                "id": "cut2_fem_lane.position.mut.objective-eps-negative",
+                "args": {},
+                "op": perimeter_mutation("_load_position_defaults", 'objective_flatness_eps_default = 0.05', 'objective_flatness_eps_default = -0.1'),
+            },
+        ],
     },
     "cut2_mat_continuation": {
         "file": "mat_continuation",
@@ -458,6 +528,16 @@ CUT2_CASES: Final[dict[str, ModuleSpec]] = {
             },
             {
                 "id": "cut2_stereo_layout.load.mut.stereo-section-missing",
+                "args": {},
+                "op": perimeter_text("load_stereo_layout", ""),
+            },
+            {
+                "id": "cut2_stereo_layout.load.text.stereo-not-a-table",
+                "args": {},
+                "op": perimeter_text("load_stereo_layout", "stereo = 1.0\n"),
+            },
+            {
+                "id": "cut2_stereo_layout.load.mut.stereo-renamed-is-unknown-top-level",
                 "args": {},
                 "op": perimeter_mutation("load_stereo_layout", "[stereo]", "[not_stereo]"),
             },

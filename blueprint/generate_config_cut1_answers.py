@@ -76,6 +76,12 @@ DONOR_TAG: Final[str] = "v3-donor"
 # 「哪一支載入器炸了、炸什麼」。
 ANSWER_SCHEMA: Final[int] = 3
 
+# 新家為 TMM 加的物性，上一代沒有這三格；新家輸出時排除它們，
+# 四格共同欄位才是兩代比對的對象；這三格的數字由 TMM 凍結答案守。
+TMM_ONLY_PHYSICS_KEYS: Final[tuple[str, ...]] = (
+    "specific_heat_ratio", "prandtl_number", "atmospheric_pressure_pa",
+)
+
 
 def stub_v2_packages(v2_root: Path) -> None:
     """在 ``sys.modules`` 放 ``lib`` 與 ``lib.config`` 的空殼，跳過 v2 的門面檔。
@@ -358,6 +364,18 @@ def _resolved_kwargs(op: dict[str, object], table_name: str) -> dict[str, object
     return {str(name): cases.resolve(value) for name, value in raw.items()}
 
 
+def _donor_physics_text(text: str) -> str:
+    """逐行去掉上一代沒有的物性；每一鍵必須恰好拿掉一行。"""
+    lines = text.splitlines(keepends=True)
+    for key in TMM_ONLY_PHYSICS_KEYS:
+        prefix = f"{key} ="
+        hits = sum(line.startswith(prefix) for line in lines)
+        if hits != 1:
+            raise SystemExit(f"physics_constants.toml 的 {key} 行出現 {hits} 次，不是 1 次")
+        lines = [line for line in lines if not line.startswith(prefix)]
+    return "".join(lines)
+
+
 def _loader_block_with_text(
     fn: Callable[..., object],
     text: str,
@@ -391,6 +409,15 @@ def loader_block(
     fn = getattr(module, fn_name)
     engine_name = cases.engine_module_name(table_name)
     kwargs = _resolved_kwargs(op, table_name)
+    if "text" in op:
+        if "mutations" in op or op.get("path") == "missing":
+            raise SystemExit(f"{table_name} 的 text 不可與 mutations 或 path: missing 並用")
+        text = op["text"]
+        if not isinstance(text, str):
+            raise SystemExit(f"{table_name} 的 op.text 不是原文字串")
+        if engine_name == "physics_constants":
+            text = _donor_physics_text(text)
+        return _loader_block_with_text(fn, text, engine_name, kwargs, tmp_dir)
     raw_path = op.get("path")
     if raw_path == "missing":
         return missing_case_block(fn, cases.missing_path())
@@ -404,9 +431,15 @@ def loader_block(
         raise SystemExit(f"{table_name} 有一筆 case 的 mutations 不是一串東西")
     if mutations:
         text = mutated_text(data_dir, engine_name, mutations)
+        if engine_name == "physics_constants":
+            text = _donor_physics_text(text)
         return _loader_block_with_text(fn, text, engine_name, kwargs, tmp_dir)
+    if engine_name == "physics_constants":
+        text = (data_dir / f"{engine_name}.toml").read_text(encoding="utf-8")
+        return _loader_block_with_text(fn, _donor_physics_text(text), engine_name, kwargs, tmp_dir)
     # `op.path == "default"` 那幾筆：把新家那一份真的設定檔的路徑**明著餵進去**。
-    # 兩邊餵的是同一份檔（新家那 9 個 `.toml` 與上一代逐位元相同，搬進來的當下量過），
+    # 兩邊餵的是同一份檔（新家那 9 個 `.toml` 搬進來的當下與上一代逐位元相同；之後只有
+    # `physics_constants` 多了 TMM 那三格，上面那一段先拿掉再餵），
     # 定的就是「同一份設定檔在兩代載入器底下的輸出」。
     #
     # **為什麼不餵 `None`**：`calibration`／`mat_continuation`／`scoring_v2`／`stereo_layout`
