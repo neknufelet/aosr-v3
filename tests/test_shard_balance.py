@@ -269,3 +269,42 @@ def test_write_refuses_partitions_that_overlap_or_miss_files(
     with pytest.raises(ToolBroken, match='互斥'):
         shard_balance.write_suggestion(registry, output, result)
     assert not output.exists()
+
+
+_STALE = 'name = "balance-stale"\nshard = "shard-b"\nwhy = "舊"\nfiles = ["tests/test_shard_prepare.py"]\n'
+_FIXED = '[[group]]\nname = "fixed-tail"\nshard = "shard-a"\nwhy = "固定"\nfiles = ["tests/test_shard_seal.py"]\n'
+
+
+def test_balance_header_with_trailing_comment_is_still_removed() -> None:
+    """抓表頭帶行尾註解就認不出來、舊 balance 群留下來跟新群撞名（審查 B 第 1 條）。"""
+    from governance.status.shard_balance import _without_balance_groups
+    assert _without_balance_groups(REGISTRY + '\n[[group]] # 自動配平群\n' + _STALE) == REGISTRY
+
+
+def test_middle_balance_group_keeps_the_next_groups_comment() -> None:
+    """抓刪中間那一群時把下一群前面的說明註解一起吞掉（審查 B 第 2 條）；其餘逐位元相同。"""
+    from governance.status.shard_balance import _without_balance_groups
+    note = '\n# 以下這一群請勿拆散：既有註解。\n'
+    assert _without_balance_groups(REGISTRY + '\n[[group]]\n' + _STALE + note + _FIXED) == REGISTRY + note + _FIXED
+
+
+@pytest.mark.parametrize('source', [
+    # 多行字串裡長得像表頭的一行：前一段切出來讀不成 TOML。
+    REGISTRY + '\n' + _FIXED.replace('why = "固定"', 'why = """\n[[group]]\n"""'),
+    # 假群的收尾引號落在註解行、被歸給下一段：刪完讀得成 TOML，但內容變了。
+    '[evidence]\na = """\n[[group]]\nname = "balance-fake"\nshard = "shard-b"\n# """\n',
+    # 假群讀得成、刪完的檔讀不成。
+    '[evidence]\na = """\n[[group]]\nname = "balance-fake"\nfiles = [] # """\n',
+], ids=['segment-unreadable', 'content-changed', 'result-unreadable'])
+def test_cut_that_goes_wrong_is_tool_broken(source: str) -> None:
+    """抓文字切段失手卻照樣寫出（多行字串裡的假表頭）：一律回 2，不寫壞登記簿。"""
+    from governance.exit_codes import ToolBroken
+    from governance.status.shard_balance import _without_balance_groups
+    with pytest.raises(ToolBroken):
+        _without_balance_groups(source)
+
+
+def test_source_without_any_group_comes_back_unchanged() -> None:
+    """抓原檔沒有群時硬塞一格空群、把沒動過的檔判成切段失手。"""
+    from governance.status.shard_balance import _without_balance_groups
+    assert _without_balance_groups('[evidence]\na = 1\n') == '[evidence]\na = 1\n'

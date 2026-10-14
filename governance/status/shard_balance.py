@@ -273,18 +273,47 @@ def analyze(history: Path, registry_path: Path, root: Path, reference_cpu: str) 
                    _hints(root, movable, registry))
 
 
+def _without_balance_groups(source: str) -> str:
+    """刪掉每個 balance 群自己那幾行與緊貼在它前面的空行；群後的註解與空行歸下一張表，原樣留著。
+
+    切段只看行首的表頭（可帶行尾註解）。切錯的話（例如多行字串裡有一行長得像表頭），
+    不是那一段讀不成 TOML，就是刪完的檔讀出來不等於「原檔去掉 balance 群」——兩種都回 2。
+    """
+    lines = source.splitlines(keepends=True)
+    headers = [index for index, line in enumerate(lines) if re.match(r'[ \t]*\[\[?[^\[\]\n]+\]\]?[ \t]*(#.*)?$', line)]
+    drop: set[int] = set()
+    for position, start in enumerate(headers):
+        if not re.match(r'[ \t]*\[\[[ \t]*group[ \t]*\]\][ \t]*(#.*)?$', lines[start]):
+            continue
+        end = headers[position + 1] if position + 1 < len(headers) else len(lines)
+        while end > start + 1 and re.match(r'[ \t]*(#.*)?$', lines[end - 1]):
+            end -= 1
+        try:
+            name = cast(object, tomllib.loads(''.join(lines[start:end]))['group'][0]['name'])
+        except (tomllib.TOMLDecodeError, KeyError, IndexError, TypeError) as error:
+            raise ToolBroken(f'登記簿第 {start + 1} 行起的群切不出來：{error}') from error
+        if isinstance(name, str) and name.startswith('balance-'):
+            first = start
+            while first > 0 and not lines[first - 1].strip():
+                first -= 1
+            drop.update(range(first, end))
+    kept = ''.join(line for index, line in enumerate(lines) if index not in drop)
+    expected = tomllib.loads(source)
+    if 'group' in expected:
+        expected['group'] = [group for group in cast(list[dict[str, object]], expected['group'])
+                             if not str(group.get('name', '')).startswith('balance-')]
+    try:
+        same = tomllib.loads(kept) == expected
+    except tomllib.TOMLDecodeError:
+        same = False
+    if not same:
+        raise ToolBroken('刪掉舊 balance 群之後的登記簿不等於原檔去掉那幾群，文字切段失手')
+    return kept
+
+
 def _suggestion_text(source: str, result: Balance) -> str:
     """只刪舊 balance 段，原文其餘位元保持；新群不帶過期數字。"""
-    pieces = re.split(r'(?=^\[\[group\]\]\s*$)', source, flags=re.MULTILINE)
-    kept = [pieces[0]]
-    for piece in pieces[1:]:
-        group_text, separator, following = piece.partition('\n[')
-        group = tomllib.loads(group_text)['group'][0]
-        if not group['name'].startswith('balance-'):
-            kept.append(piece)
-        elif separator:
-            kept.append(separator + following)
-    text = ''.join(kept)
+    text = _without_balance_groups(source)
     for shard in result.shards:
         files = sorted(file for file, assigned in result.suggested.items() if assigned == shard and assigned != result.hashed[file])
         if files:
