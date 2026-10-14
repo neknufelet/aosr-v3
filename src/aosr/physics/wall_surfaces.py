@@ -17,7 +17,7 @@ from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Wall
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
-from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, ConstructionNote, MeasuredImpedance, SurfaceMaterial
 
 
 @dataclass(frozen=True)
@@ -132,6 +132,9 @@ def wall_surface_response(
             except ValueError as exc:
                 if "需要雙精度" in str(exc):
                     raise ValueError(f"{wall.wall_name()}：行程的 JAX 精度設定不足；{exc}") from exc
+                if isinstance(material, MeasuredImpedance):
+                    # 既有構造牆的訊息不動；實測牆的底構造可能第一次在這條軸求值，要說出牆名。
+                    raise ValueError(f"{wall.wall_name()}：{exc}") from exc
                 raise
             alpha[wall] = tuple(float(value) for value in values)
     return WallSurfaceResponse(frequencies_hz, alpha, notes)
@@ -204,3 +207,21 @@ def wall_path_impedances(
     merge_construction_notes(notes_by_wall, Wall.from_name(wall_name), notes)
     array = np.asarray(values, dtype=np.complex128)
     return {cos: array[:, i] for i, cos in enumerate(cosines)}
+
+
+def assembly_endpoint_responses(
+    material: Assembly, frequencies_hz: tuple[float, ...], *, density_kg_m3: float, sound_speed_m_s: float,
+) -> tuple[tuple[complex, ...], tuple[float, ...], float]:
+    """實測表接縫用：底構造在指定頻點的 Z(f,0°)、Paris 無規入射 α 與場景 ρc。
+
+    構造核心仍只從本模組的延後匯入分支進來（TMM 進物理閉包只准這一個入口）。
+    """
+    import jax.numpy as jnp
+    from aosr.materials.construction import random_incidence_absorption, surface_impedance
+
+    air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
+    normal, _ = surface_impedance(material, axis, air=air, ranges=ranges)
+    diffuse, _ = random_incidence_absorption(material, axis, air=air, ranges=ranges)
+    return (tuple(np.asarray(normal, dtype=np.complex128).tolist()),
+            tuple(float(value) for value in np.asarray(diffuse, dtype=np.float64)), air.rho_c)

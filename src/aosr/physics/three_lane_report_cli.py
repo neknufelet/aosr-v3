@@ -248,7 +248,7 @@ def _text_sections(
     ]
     from aosr.physics.report_measured_text import construction_note_lines, measured_text
 
-    sections[2:2] = measured_text(inputs)
+    sections[2:2] = measured_text(inputs, report.construction_notes_by_wall)
     if report.construction_notes_by_wall:
         sections.append("\n".join(construction_note_lines(inputs, report.construction_notes_by_wall)))
     if with_points:

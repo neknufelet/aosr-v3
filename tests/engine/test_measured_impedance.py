@@ -35,7 +35,7 @@ def test_measured_zone_roundtrip_and_default_fill_rule() -> None:
 
 @pytest.mark.parametrize("case,path", [
     ("missing-source", ("source_and_conditions",)), ("blank-source", ("source_and_conditions",)),
-    ("missing-base", ("base_assembly",)), ("fixed-base", ("base_assembly", "kind")),
+    ("missing-base", ("base_assembly",)), ("missing-base-kind", ("base_assembly",)), ("fixed-base", ("base_assembly", "kind")),
     ("nested-base", ("base_assembly", "kind")), ("short", ("points",)),
     ("duplicate", ("points", 1, "frequency_hz")), ("decreasing", ("points", 1, "frequency_hz")),
     ("negative-frequency", ("points", 0, "frequency_hz")), ("infinite-frequency", ("points", 0, "frequency_hz")),
@@ -53,7 +53,11 @@ def test_measured_format_rejects_at_the_row_and_field(case: str, path: tuple[str
         "zero-real": (0, "real_pa_s_m", 0.), "negative-real": (0, "real_pa_s_m", -1.),
         "infinite-real": (0, "real_pa_s_m", float("inf")), "nan-imag": (0, "imag_pa_s_m", float("nan")),
         "extra-point": (0, "unknown", 1.)}
-    if case in changes:
+    if case == "missing-base-kind":
+        base = data["base_assembly"]
+        assert isinstance(base, dict)
+        base.pop("kind")
+    elif case in changes:
         index, field, value = changes[case]
         points[index][field] = value
     elif case.startswith("missing-"):
@@ -99,3 +103,24 @@ assert 'aosr.materials.construction' not in sys.modules
     child = subprocess.run([sys.executable, '-B', '-c', script, str(path)], cwd=tmp_path,
         env=environment(tmp_path), capture_output=True, text=True, timeout=60)
     assert child.returncode == 0, child.stdout + child.stderr
+
+
+@pytest.mark.parametrize("value", ("", 123))
+@pytest.mark.parametrize("entry", ("scheme", "report", "search"))
+def test_measured_source_errors_are_plain_chinese(value: object, entry: str, tmp_path: Path) -> None:
+    """出處欄填空字串或數字：三個正式入口都要定位到欄位、說中文，不落回英文原句。"""
+    import re
+    from tests.engine._surface_zone_cases import NEW, zone_scene
+    from tests.engine._zone_review_cases import reject_at
+    scene = zone_scene(mixed=True)
+    zones = scene[NEW]
+    assert isinstance(zones, dict)
+    material = measured()
+    material["source_and_conditions"] = value
+    zones["floor"][0]["material"] = material
+    with pytest.raises(Exception) as caught:
+        reject_at(entry, scene, tmp_path)
+    text = str(caught.value)
+    assert "source_and_conditions" in text, text
+    assert ("必填" if value == "" else "要填文字") in text, text
+    assert re.search(r"Input should|String should|at least 1 character", text) is None, text

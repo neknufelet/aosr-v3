@@ -80,7 +80,9 @@ def material_summary(material: SurfaceMaterial) -> str:
         base = material_field_text(kind, "base_assembly").split("；", 1)[0]
         real = PATH_WORDS["real_pa_s_m"].split("，", 1)[0]
         imag = PATH_WORDS["imag_pa_s_m"].split("，", 1)[0]
-        rows = "／".join(f"{point.frequency_hz!r} Hz：{real} {point.real_pa_s_m!r}、{imag} {point.imag_pa_s_m!r} Pa·s/m"
+        def number(value: float) -> str:
+            return str(value).removesuffix(".0")  # 與 _model_summary 同一種數字寫法
+        rows = "／".join(f"{number(point.frequency_hz)} Hz：{real} {number(point.real_pa_s_m)}、{imag} {number(point.imag_pa_s_m)} Pa·s/m"
                         for point in material.points)
         return (f"{name}：{material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz，"
                 f"{len(material.points)} 列；{rows}；{source}：{material.source_and_conditions}；"
@@ -256,6 +258,12 @@ def _material_path(rest: list[str], document: Document) -> str:
             if isinstance(value, dict) and isinstance(value.get("kind"), str) and value["kind"] in MATERIAL_MODELS:
                 kind = cast(str, value["kind"])
     parts = []
+    if "points" in rest:
+        tail = rest[rest.index("points") + 1:]
+        if tail and tail[0].isdigit():
+            parts.append(f"實測表第 {int(tail[0]) + 1} 列")
+    if "base_assembly" in rest:
+        parts.append(material_field_text("measured_impedance", "base_assembly").split("；", 1)[0])
     if "layers" in rest:
         tail = rest[rest.index("layers") + 1:]
         if tail and tail[0].isdigit():

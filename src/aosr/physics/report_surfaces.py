@@ -173,6 +173,7 @@ def _zone_error_message(error: Mapping[str, object]) -> str:
         return "必填：這一格不能空著"
     messages = {"float_type": "要填數字", "float_parsing": "要填數字",
         "finite_number": "要填有限數字（不收無限大或非數值）",
+        "string_type": "要填文字", "string_too_short": "必填：這一格不能空著",
         "union_tag_not_found": "必填材料或層的種類代號 kind（種類）",
         "union_tag_invalid": "不認識的材料或層種類代號 kind（種類）；請選合法種類",
         "literal_error": "只能填這個材料或層的合法選項",

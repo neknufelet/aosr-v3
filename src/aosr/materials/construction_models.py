@@ -6,6 +6,7 @@ Mechel 1976（低頻延伸多孔模型）的孔隙率另須不大於一。
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, ValidationError, field_validator, model_validator
@@ -122,10 +123,23 @@ class MeasuredImpedance(_ConstructionRecord):
     kind: Literal["measured_impedance"] = Field(default="measured_impedance", description="kind（表面種類代號，measured_impedance 表示實測阻抗表）")
     points: tuple[MeasuredImpedancePoint, ...] = Field(min_length=2, description="points（實測阻抗列；至少兩列，頻率嚴格遞增）")
     base_assembly: Assembly = Field(description="base_assembly（同一面牆的底構造；表外模型補值，只收多層構造）")
-    source_and_conditions: str = Field(min_length=1, description="source_and_conditions（量測出處與條件，包含阻抗管、入射方式與樣品厚度）")
+    source_and_conditions: str = Field(min_length=1, json_schema_extra={"pattern": r"\S"},  # 全空白由驗證器拒收，綱要同一條
+                                       description="source_and_conditions（量測出處與條件，包含阻抗管、入射方式與樣品厚度）")
     fill_rule: Literal["log_linear_table_base_assembly_outside_v1"] = Field(
         default="log_linear_table_base_assembly_outside_v1",
         description="fill_rule（補值規則版本：log_linear_table_base_assembly_outside_v1 表示表內對數頻率線性內插、表外底構造補值第一版）")
+
+    def coverage_text(self) -> str:
+        """拒收訊息與表頭共用的表範圍字樣。"""
+        return f"實測阻抗表 {len(self.points)} 列，涵蓋 {self.points[0].frequency_hz:g}–{self.points[-1].frequency_hz:g} Hz"
+
+    @field_validator("base_assembly", mode="before")
+    @classmethod
+    def _base_kind_given(cls, value: object) -> object:
+        """輸出的綱要要求底構造明給 kind；原始文件省略就拒收，直接建構的物件照舊帶預設。"""
+        if isinstance(value, Mapping) and "kind" not in value:
+            raise ValueError("必填底構造的種類代號 kind（assembly）")
+        return value
 
     @field_validator("source_and_conditions")
     @classmethod

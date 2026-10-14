@@ -51,6 +51,13 @@ def core_contract() -> None:
     assert np.any(np.asarray(z)[[1, 2, 3]] != np.asarray(changed)[[1, 2, 3]])
     context = core._context(m)
     assert '2 列' in context and '100–1000 Hz' in context and '底構造' in context
+    # 嚴格遞增但 log10 相同的相鄰列（100 與它的下一個浮點數）：命中的列仍逐位回自己的值，首尾兩端都試。
+    for knots in ((100., float(np.nextafter(100., np.inf)), 1000.), (100., 1000., float(np.nextafter(1000., np.inf)))):
+        rows = tuple(type(m.points[0])(frequency_hz=f, real_pa_s_m=r, imag_pa_s_m=i)
+                     for f, (r, i) in zip(knots, ((400., -200.), (800., 100.), (900., 50.)), strict=True))
+        colliding = m.model_copy(update={'points': rows})
+        hit, _ = core.surface_impedance(colliding, jnp.asarray(knots), air=air, ranges=ranges)
+        np.testing.assert_array_equal(np.asarray(hit), [400.-200.j, 800.+100.j, 900.+50.j])
 
 
 def notes_contract() -> None:
@@ -67,6 +74,19 @@ def notes_contract() -> None:
         assert by_code['komatsu_frequency_extrapolation'].frequencies_hz == (20.,)
         assert by_code['komatsu_material_class_outside_fit'].frequencies_hz == ()
         assert all(n.message.startswith('底構造第 1 層') for n in notes if n.layer_index is not None)
+    # 表從 50 Hz 起：底構造在 50、60 Hz 也會外推，但那兩點在表內、不准出底構造註記。
+    low = m.model_copy(update={'points': (m.points[0].model_copy(update={'frequency_hz': 50.}), m.points[1])})
+    axis = jnp.asarray([20., 50., 60., 100., 2000.])
+    base_only = {n.code: n for n in core.surface_impedance(low.base_assembly, axis, air=air, ranges=ranges)[1]}
+    assert {50., 60.} <= set(base_only['komatsu_frequency_extrapolation'].frequencies_hz), base_only
+    for notes in (core.surface_impedance(low, axis, air=air, ranges=ranges)[1],
+                  core.random_incidence_absorption(low, axis, air=air, ranges=ranges)[1],
+                  core.surface_impedance_at_angles(low, axis, jnp.asarray([0., 45.]), air=air, ranges=ranges)[1]):
+        by_code = {n.code: n for n in notes}
+        assert by_code['komatsu_frequency_extrapolation'].frequencies_hz == (20.,), by_code
+        assert by_code['measured_table_model_fill'].frequencies_hz == (20., 2000.), by_code
+    for evaluate in (core.surface_impedance, core.random_incidence_absorption):
+        _, notes = evaluate(m, jnp.asarray([20., 100., 200., 1000., 2000.]), air=air, ranges=ranges)
         merged: dict[Wall, tuple[ConstructionNote, ...]] = {}
         merge_construction_notes(merged, Wall.X0, tuple(reversed(notes)))
         merge_construction_notes(merged, Wall.X0, notes)
@@ -110,6 +130,20 @@ def rejection_context_contract() -> None:
             evaluate(m, jnp.asarray([20.]), air=air, ranges=ranges)
         assert '實測阻抗表 2 列' in str(caught.value) and '100–1000 Hz' in str(caught.value)
         assert '底構造' in str(caught.value) and '100000.0' in str(caught.value)
+        # 底構造只說一次：不再先抄一遍底構造逐層描述、再接底構造自己的錯誤。
+        assert str(caught.value).startswith('實測阻抗表 2 列，涵蓋 100–1000 Hz；底構造第 1 層：'), str(caught.value)
+        assert core._context(bad_base) not in str(caught.value), str(caught.value)
+    from aosr.materials.construction_models import ConstantImpedance
+    from aosr.physics.report_measured import measured_seams
+    from aosr.physics.report_surfaces import WholeWallZone
+    from aosr.physics.wall_surfaces import wall_surface_response
+    with pytest.raises(ValueError) as caught:
+        measured_seams({'x0': (WholeWallZone(area='whole_wall', material=m),)}, density_kg_m3=1.2, sound_speed_m_s=343.)
+    assert str(caught.value).startswith('x0：實測阻抗表 2 列') and '100000.0' in str(caught.value), str(caught.value)
+    walls = {wall: ConstantImpedance(impedance_pa_s_m=1646.4) for wall in Wall.all()} | {Wall.X0: m}
+    with pytest.raises(ValueError) as caught:
+        wall_surface_response(walls, (20., 200.), density_kg_m3=1.2, sound_speed_m_s=343.)
+    assert str(caught.value).startswith('x0：實測阻抗表 2 列'), str(caught.value)
 
 
 if __name__ == '__main__':

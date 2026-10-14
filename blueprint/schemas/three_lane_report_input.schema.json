@@ -357,6 +357,7 @@
         "source_and_conditions": {
           "description": "source_and_conditions（量測出處與條件，包含阻抗管、入射方式與樣品厚度）",
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Source And Conditions",
           "type": "string"
         },

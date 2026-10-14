@@ -98,4 +98,4 @@ PYTHON_MINOR = (3, 12)
 # 出處：之五丙第二批，以正式 physics_identity_parts 實跑重釘；閉包、資料清單與模態摘要不變。
 # #309 實測阻抗表：格式、表內外計算、註記與接縫輸出。
 # 程式閉包加入接縫報告，能力表新增實測材料列；物理結果需重算。
-CODE_DIGEST = '24017d828c154feb45c3cf5cfd5b6cc4162542ba1905eadd6b8fc9d075c8b4fb'
+CODE_DIGEST = '21244879c7bdd5de517dc16941a4929b514215d6dbe57828754f078e19dbb3b9'

@@ -5,11 +5,11 @@ from collections.abc import Mapping, Sequence
 
 from pydantic import Field
 
-from aosr.config.construction_environment import construction_environment
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.materials.construction_models import MeasuredImpedance
 from aosr.physics.report_facts import FactsModel, NOT_MEASURED, facts
 from aosr.physics.report_surfaces import WholeWallZone
+from aosr.physics.wall_surfaces import assembly_endpoint_responses
 
 
 class SeamValues(FactsModel):
@@ -41,20 +41,19 @@ def measured_seams(zones: Mapping[str, Sequence[WholeWallZone]] | None, *, densi
              if isinstance(entries[0].material, MeasuredImpedance)}
     if not walls:
         return None
-    import jax.numpy as jnp
-    from aosr.materials.construction import random_incidence_absorption, surface_impedance
-
-    air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     result = {}
     for wall, material in walls.items():
         assert isinstance(material, MeasuredImpedance)
         points = (material.points[0], material.points[-1])
-        axis = jnp.asarray([point.frequency_hz for point in points])
-        normal, _ = surface_impedance(material.base_assembly, axis, air=air, ranges=ranges)
-        diffuse, _ = random_incidence_absorption(material.base_assembly, axis, air=air, ranges=ranges)
+        try:
+            normal, diffuse, rho_c = assembly_endpoint_responses(material.base_assembly,
+                tuple(point.frequency_hz for point in points), density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+        except ValueError as exc:
+            # 表蓋住整條三路軸時底構造只在這裡求值；錯誤要跟三路一樣說出是哪面牆、哪張表。
+            raise ValueError(f"{wall}：{material.coverage_text()}的接縫；底構造{exc}") from exc
         result[wall] = tuple(MeasuredSeam(frequency_hz=point.frequency_hz,
             measured=_values(complex(point.real_pa_s_m, point.imag_pa_s_m),
-                complex_random_incidence_absorption(complex(point.real_pa_s_m, point.imag_pa_s_m) / air.rho_c), air.rho_c),
-            base_assembly=_values(complex(z), float(alpha), air.rho_c))
+                complex_random_incidence_absorption(complex(point.real_pa_s_m, point.imag_pa_s_m) / rho_c), rho_c),
+            base_assembly=_values(z, alpha, rho_c))
             for point, z, alpha in zip(points, normal, diffuse, strict=True))
     return result

@@ -111,7 +111,8 @@ def test_invalid_layer_has_only_its_real_error() -> None:
 @pytest.mark.parametrize("case", ("empty-zones", "two", "null-old", "missing-material-kind",
     "missing-layer-kind", "wilson-missing", "komatsu-porosity", "mechel-large", "miki-tortuosity",
     "mechel-missing", "wilson-null", "wilson-valid", "mechel-valid", "miki-valid",
-    "komatsu-null", "mechel-tortuosity", "wilson-large", "fixed-valid"))
+    "komatsu-null", "mechel-tortuosity", "wilson-large", "fixed-valid",
+    "measured-valid", "measured-no-base-kind", "measured-blank-source"))
 def test_schema_and_model_agree_on_review_table(tmp_path: Path, case: str) -> None:
     scene = _schema_scene(case)
     root = cast(Schema, report_io.ReportInput.model_json_schema())
@@ -125,7 +126,7 @@ def test_schema_and_model_agree_on_review_table(tmp_path: Path, case: str) -> No
         model_accepts = False
     else:
         model_accepts = True
-    expected = case in {"wilson-valid", "wilson-large", "mechel-valid", "miki-valid", "fixed-valid"}
+    expected = case in {"wilson-valid", "wilson-large", "mechel-valid", "miki-valid", "fixed-valid", "measured-valid"}
     assert model_accepts is expected, case
     assert schema_accepts is expected, case
     report_io.regenerate_schema_files(tmp_path)
@@ -142,6 +143,14 @@ def _schema_scene(case: str) -> dict[str, object]:
         zones["floor"] = []
     elif case == "fixed-valid":
         return zone_scene()
+    elif case.startswith("measured-"):
+        from tests.engine.test_measured_impedance import measured
+        material = measured()
+        if case == "measured-no-base-kind":
+            cast(dict[str, object], material["base_assembly"]).pop("kind")
+        elif case == "measured-blank-source":
+            material["source_and_conditions"] = " "
+        zones["floor"][0]["material"] = material
     else:
         layer = porous("wilson_2015" if case.startswith("wilson") else
                        "mechel_1976" if case.startswith("mechel") else "miki" if case.startswith("miki") else "komatsu")

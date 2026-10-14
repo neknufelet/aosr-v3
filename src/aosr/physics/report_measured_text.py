@@ -1,6 +1,7 @@
 """命令列的實測牆表頭、接縫小表與補值註記；差值只在顯示時計算。"""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance
@@ -11,14 +12,26 @@ if TYPE_CHECKING:
     from aosr.physics.report_io import ReportInput
 
 
-def measured_text(inputs: ReportInput) -> list[str]:
+def _base_note_text(notes: tuple[ConstructionNote, ...]) -> str:
+    """表頭照實寫底構造自己的 Komatsu 註記：表外頻點同時是模型補值與材料模型外推時兩個都寫。"""
+    parts = []
+    for note in notes:
+        if note.code == "komatsu_frequency_extrapolation":
+            parts.append(f"其中 {extrapolated_frequency_text(note.frequencies_hz)} 底構造第 {note.layer_index} 層另有材料模型外推")
+        elif note.code == "komatsu_material_class_outside_fit":
+            parts.append(f"底構造第 {note.layer_index} 層的材料類別不在 Komatsu（小松）纖維模型擬合範圍")
+    return "".join(f"；{part}" for part in parts)
+
+
+def measured_text(inputs: ReportInput, notes_by_wall: Mapping[str, tuple[ConstructionNote, ...]] | None = None) -> list[str]:
     sections = []
     for wall, zones in (inputs.surface_zones_by_wall or {}).items():
         material = zones[0].material
         if not isinstance(material, MeasuredImpedance):
             continue
         lower, upper = material.points[0].frequency_hz, material.points[-1].frequency_hz
-        sections.append(f"{wall}：實測表涵蓋 {lower:g}–{upper:g} Hz；{lower:g} Hz 以下與 {upper:g} Hz 以上是模型補值（底構造）；"
+        sections.append(f"{wall}：實測表涵蓋 {lower:g}–{upper:g} Hz；{lower:g} Hz 以下與 {upper:g} Hz 以上是模型補值（底構造）"
+                        f"{_base_note_text((notes_by_wall or {}).get(wall, ()))}；"
                         "實測段假設與角度無關；實測表只代表樣品在管子裡量到的結果，不代表現場安裝")
     seams = measured_seams(inputs.surface_zones_by_wall, density_kg_m3=inputs.density_kg_m3,
                            sound_speed_m_s=inputs.sound_speed_m_s)
@@ -45,6 +58,8 @@ def construction_note_lines(inputs: ReportInput, notes_by_wall: dict[str, tuple[
                 lines.append(f"{wall}：{note.message}；模型補值頻點 {frequency}")
             else:
                 frequency = f"；外推頻點 {extrapolated_frequency_text(note.frequencies_hz)}" if note.frequencies_hz else ""
-                prefix = "底構造" if isinstance(material, MeasuredImpedance) else ""
-                lines.append(f"{wall} {prefix}第 {note.layer_index} 層：{note.message}{frequency}")
+                if isinstance(material, MeasuredImpedance):
+                    lines.append(f"{wall} {note.message}{frequency}")
+                else:  # 既有構造牆照舊（文字輸出逐位不變）
+                    lines.append(f"{wall} 第 {note.layer_index} 層：{note.message}{frequency}")
     return lines

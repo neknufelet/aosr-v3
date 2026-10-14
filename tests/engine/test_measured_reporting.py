@@ -123,6 +123,17 @@ async def _web_requests(tmp_path: Path) -> None:
             assert response.status_code == 400, response.text
             assert '這一版網頁還不能編輯實測阻抗表的牆' in response.json()['error']
             assert '地板' in response.json()['error']
+        bad, table = document(), measured()
+        for point in cast(list[dict[str, object]], table['points']):
+            point['real_pa_s_m'] = 0
+        cast(dict[str, list[dict[str, object]]], cast(dict[str, object], bad['scene'])[NEW])['floor'][0]['material'] = table
+        # 兩列同一欄都錯、訊息合併成一條時，仍要說得出是哪兩列。
+        validation = await client.post('/api/validate', json=bad)
+        assert validation.status_code == 200, validation.text
+        preview = await client.post('/api/input-preview', json=bad)
+        assert preview.status_code == 400, preview.text
+        for text in (' '.join(problem['text'] for problem in validation.json()['problems']), preview.json()['error']):
+            assert '地板' in text and '實測表第 1 列' in text and '實測表第 2 列' in text and '阻抗實部' in text, text
 
 
 def test_measured_scheme_cli_saved_result_displays_model_fill(tmp_path: Path) -> None:
@@ -188,3 +199,58 @@ def test_measured_fields_do_not_rename_existing_seat_path_words() -> None:
     assert field_name('unrecognized.points', {}) == 'unrecognized › 座位'
     label = field_name(f'scene.{NEW}.floor.0.material.measured_impedance.points.0.imag_pa_s_m', {})
     assert label is not None and '阻抗虛部' in label and 'e^{+jωt}' in label
+
+
+def test_header_line_states_base_model_extrapolation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """拍板補記：表外頻點同時是模型補值與材料模型外推時，報告開頭那一行兩個都寫。"""
+    from aosr.physics import report_measured_text
+    inputs = report_io.load_input_document(pair(Scheme.model_validate(document())), CAPABILITIES, DIRECTIVITY)
+    monkeypatch.setattr(report_measured_text, 'measured_seams', lambda *args, **kwargs: None)
+    plain = report_measured_text.measured_text(inputs)
+    assert '材料模型外推' not in '\n'.join(plain)
+    notes = {'floor': (
+        ConstructionNote(code='measured_table_model_fill', frequencies_hz=(20., 25.), message='模型補值'),
+        ConstructionNote(code='komatsu_frequency_extrapolation', layer_index=1, frequencies_hz=(20., 25.),
+                         material_class='fibrous', message='底構造第 1 層：外推'),
+        ConstructionNote(code='komatsu_material_class_outside_fit', layer_index=2, material_class='foam',
+                         message='底構造第 2 層：泡棉'))}
+    header = next(line for line in report_measured_text.measured_text(inputs, notes) if line.startswith('floor：'))
+    assert f'其中 {extrapolated_frequency_text((20., 25.))} 底構造第 1 層另有材料模型外推' in header
+    assert '底構造第 2 層的材料類別不在 Komatsu（小松）纖維模型擬合範圍' in header
+    assert '模型補值（底構造）' in header and '不代表現場安裝' in header
+
+
+def test_web_messages_name_the_measured_row_and_the_base() -> None:
+    from aosr.gui.problem_text import field_name
+    row = field_name(f'scene.{NEW}.floor.0.material.measured_impedance.points.1.real_pa_s_m', document())
+    assert row is not None and '實測表第 2 列' in row and '阻抗實部' in row
+    base = field_name(f'scene.{NEW}.floor.0.material.measured_impedance.base_assembly.layers.0.board.surface_mass_kg_m2',
+                      document())
+    assert base is not None and '底構造' in base and '第 1 層' in base
+
+
+def test_construction_modal_reason_text_is_unchanged() -> None:
+    """既有構造方案的模態範圍外理由一字不改（來源：cf479639 的 display.modal_reason 原文）。"""
+    from aosr.reporting.display import modal_reason
+    from aosr.reporting.modal_diagnosis_model import ModalDiagnosis
+    diagnosis = ModalDiagnosis.model_construct(reason_text=None, reason_code='construction_walls')
+    assert modal_reason(diagnosis) == '有牆面用構造，會隨頻率變；模態診斷這一版只收六面固定阻抗'
+
+
+def test_cli_note_line_names_the_base_layer_once() -> None:
+    from aosr.physics.report_measured_text import construction_note_lines
+    inputs = report_io.load_input_document(pair(Scheme.model_validate(document())), CAPABILITIES, DIRECTIVITY)
+    note = ConstructionNote(code='komatsu_material_class_outside_fit', layer_index=1, material_class='foam',
+                            message='底構造第 1 層：泡棉')
+    plain = ConstructionNote(code='komatsu_material_class_outside_fit', layer_index=1, material_class='foam',
+                             message='泡棉')
+    lines = construction_note_lines(inputs, {'floor': (note,), 'x0': (plain,)})
+    assert 'floor 底構造第 1 層：泡棉' in lines and 'x0 第 1 層：泡棉' in lines, lines
+
+
+def test_compare_summary_writes_measured_numbers_like_other_materials() -> None:
+    from aosr.gui.problem_text import material_summary
+    from aosr.physics.report_surfaces import WholeWallZone
+    summary = material_summary(WholeWallZone.model_validate({'area': 'whole_wall', 'material': measured()}).material)
+    assert '100 Hz：阻抗實部 400、阻抗虛部 -200 Pa·s/m' in summary and '1000 Hz：' in summary, summary
+    assert all(f'{value}.0' not in summary for value in (100, 1000, 400, 800, 200)), summary

@@ -15,7 +15,6 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_input_problems
-from aosr.gui.labels import WALLS
 from aosr.gui.construction_input import wall_materials
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS

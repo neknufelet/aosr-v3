@@ -36,8 +36,7 @@ def _context(material: SurfaceMaterial) -> str:
     if isinstance(material, ConstantImpedance):
         return f"固定阻抗（整面）{material.impedance_pa_s_m} Pa·s/m"
     if isinstance(material, MeasuredImpedance):
-        return (f"實測阻抗表 {len(material.points)} 列，涵蓋 {material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz；"
-                f"底構造：{_context(material.base_assembly)}")
+        return f"{material.coverage_text()}；底構造：{_context(material.base_assembly)}"
     descriptions = []
     for index, layer in enumerate(material.layers, start=1):
         prefix = f"第 {index} 層"
@@ -69,14 +68,9 @@ def _axis(values: jax.Array, *, angles: bool = False) -> jax.Array:
 
 
 def _komatsu_notes(material: SurfaceMaterial, frequencies: jax.Array, ranges: PorousModelRanges) -> tuple[ConstructionNote, ...]:
-    if isinstance(material, ConstantImpedance):
+    # 實測表不經這裡：它的底構造只在表外子軸求值，註記由 _fill_notes 加前綴（_evaluate_impedance 先分流）。
+    if isinstance(material, (ConstantImpedance, MeasuredImpedance)):
         return ()
-    if isinstance(material, MeasuredImpedance):
-        outside_axis = frequencies[_outside_table(material, frequencies)]
-        if not outside_axis.size:
-            return ()
-        return tuple(note.model_copy(update={"message": "底構造" + note.message})
-                     for note in _komatsu_notes(material.base_assembly, outside_axis, ranges))
     notes = []
     limits = ranges.komatsu
     lower, upper = limits.f_over_sigma_bounds_m3_kg
@@ -221,7 +215,7 @@ def _measured_impedance(material: MeasuredImpedance, frequencies: jax.Array, ang
     try:
         values, notes = _evaluate_impedance(material.base_assembly, outside, angles, air, ranges)
     except ValueError as exc:
-        raise ValueError(f"{_context(material)}；{exc}") from exc
+        raise ValueError(f"{material.coverage_text()}；底構造{exc}") from exc
     return impedance.at[indices].set(values), _fill_notes(material, outside, notes)
 
 
@@ -240,5 +234,5 @@ def _measured_absorption(material: MeasuredImpedance, frequencies_hz: jax.Array,
     try:
         base, notes = random_incidence_absorption(material.base_assembly, frequencies[outside_indices], air=air, ranges=ranges)
     except ValueError as exc:
-        raise ValueError(f"{_context(material)}；{exc}") from exc
+        raise ValueError(f"{material.coverage_text()}；底構造{exc}") from exc
     return result.at[outside_indices].set(base), _fill_notes(material, frequencies[outside_indices], notes)
