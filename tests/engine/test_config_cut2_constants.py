@@ -43,7 +43,7 @@ from __future__ import annotations
 import importlib
 import types
 from dataclasses import field, fields, is_dataclass, make_dataclass
-from typing import cast
+from typing import ClassVar, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -134,11 +134,11 @@ def _declared_fields(cls: type) -> list[str]:
     """一個類別宣告的欄位名，照宣告順序（pydantic 走類別上的 ``model_fields``、dataclass 走 ``fields``）。
 
     pydantic 先判：模型混進一個 dataclass 父類別時 ``is_dataclass`` 也是真，走 ``fields`` 只讀到
-    父類別那幾格（#166 複查）。
+    父類別那幾格（#166 複查）。是不是 pydantic 看真的繼承關係，不看類別上有沒有一個叫
+    ``model_fields`` 的字典：dataclass 自己宣告一個假的就能藏住多出來的欄位（#166 第三輪複查）。
     """
-    model_fields = getattr(cls, "model_fields", None)
-    if isinstance(model_fields, dict):
-        return [str(name) for name in cast(dict[object, object], model_fields)]
+    if issubclass(cls, BaseModel):
+        return [str(name) for name in cls.model_fields]
     if is_dataclass(cls):
         return [field.name for field in fields(cls)]
     raise AssertionError(f"{cls!r} 既不是 dataclass 也不是 pydantic 模型，欄位表比不了")
@@ -225,15 +225,23 @@ def test_class_constant_is_the_class_at_its_home(constant_id: str) -> None:
 
 
 def _impostor(original: type, flavor: str) -> type:
-    """同名的冒牌類別，七種。
+    """同名的冒牌類別，八種。
 
     ``rejects-fields``：只有自己一格，收不下設定檔的欄位。``accepts-anything``：什麼都收、另外多一格。
     ``reordered``：欄位名一樣、宣告順序反過來（只有一格的那幾個等於原樣，靠家那一條擋）。
     ``subclass-extra``：原本那一個的子類別，多一格欄位。``subclass-excluded``：同上，但那一格序列化時
     排除（dump 看不到）。``dataclass-mixin``：同上，再混進一個欄位相同的 dataclass 父類別（只走
     ``fields`` 的欄位表會被它騙）。``same-fields-subclass``：子類別、欄位一格不多——只有身分分得出來。
+    ``forged-model-fields``（只給 dataclass）：子類別多一格欄位，再自己宣告一個假的 ``model_fields``
+    字典、鍵照抄原本的欄位名（看字典認 pydantic 的欄位表會被它騙）。
     """
     name = original.__name__
+    if flavor == "forged-model-fields":
+        forged = {item.name: None for item in fields(original)}
+        frozen = bool(getattr(original, "__dataclass_params__").frozen)
+        return make_dataclass(name, [("impostor_only_field", int, field(default=0)),
+                                     ("model_fields", ClassVar[dict[str, None]], field(default=forged))],
+                              bases=(original,), frozen=frozen)
     if flavor == "rejects-fields":
         return make_dataclass(name, [("impostor_only_field", int)])
     if flavor == "accepts-anything":
@@ -264,13 +272,22 @@ def _impostor(original: type, flavor: str) -> type:
 
 
 _FLAVORS = ("rejects-fields", "accepts-anything", "reordered", "subclass-extra", "subclass-excluded", "dataclass-mixin",
-            "same-fields-subclass")
-# 同名、欄位名一樣的子類別在最外層由載入器真的建出來時沒有東西可以分辨（見檔頭），那幾格不列。
+            "same-fields-subclass", "forged-model-fields")
+
+
+def _exported(constant_id: str) -> type:
+    """模組上那一格現在匯出的類別。"""
+    return cast(type, getattr(_module_of(constant_id), constant_id.split(".", 2)[2]))
+
+
+# 同名、欄位名一樣的子類別在最外層由載入器真的建出來時沒有東西可以分辨（見檔頭），那幾格不列；
+# 假 model_fields 那一種只給 dataclass（pydantic 模型的 model_fields 本來就是真的）。
 _IMPOSTOR_CASES = [
     pytest.param(constant_id, flavor, id=f"{constant_id.split('.const.')[1]}-{flavor}")
     for constant_id in CUT2_CLASS_CONSTANT_IDS
     for flavor in _FLAVORS
     if not (flavor == "same-fields-subclass" and CLASS_HOMES[constant_id][1] == ())
+    and not (flavor == "forged-model-fields" and not is_dataclass(_exported(constant_id)))
 ]
 
 
@@ -289,6 +306,20 @@ def test_a_same_named_impostor_turns_a_judge_red(constant_id: str, flavor: str, 
     assert not (_field_table_holds(constant_id, impostor) and _home_judge(constant_id, impostor)), (
         f"{constant_id}：換成 {flavor} 冒牌貨，欄位表與家兩位裁判都綠"
     )
+
+
+@pytest.mark.parametrize(("constant_id", "flavor"), [
+    pytest.param(constant_id, "forged-model-fields" if is_dataclass(_exported(constant_id)) else "dataclass-mixin",
+                 id=constant_id.split(".const.")[1])
+    for constant_id in CUT2_CLASS_CONSTANT_IDS
+])
+def test_generator_field_table_sees_the_extra_field(constant_id: str, flavor: str) -> None:
+    """產生器那一支也照真的繼承關係認欄位表：dataclass 的假 model_fields 騙不了它、pydantic 混 dataclass
+    也讀得到模型自己那一格；正常的類別兩支算出來一樣（答案檔重產逐位元相同是另一層證據）。"""
+    from blueprint.generate_config_cut1_answers import declared_fields
+    original = _exported(constant_id)
+    assert declared_fields(original) == _declared_fields(original)
+    assert "impostor_only_field" in declared_fields(_impostor(original, flavor))
 
 
 @pytest.mark.parametrize(("constant_id", "other_field"), [

@@ -68,6 +68,8 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Final, cast
 
+from pydantic import BaseModel
+
 from blueprint import config_cut1_cases as cases
 
 DONOR_TAG: Final[str] = "v3-donor"
@@ -204,9 +206,10 @@ def declared_fields(cls: type) -> list[str]:
     """
     # pydantic 先判：pydantic 模型若混進一個 dataclass 父類別，`is_dataclass` 也是真，
     # 走 `fields` 會只讀到那個父類別的欄位、漏掉模型自己宣告的（#166 複查）。
-    model_fields = getattr(cls, "model_fields", None)
-    if isinstance(model_fields, dict):
-        return [str(name) for name in model_fields]
+    # 是不是 pydantic 看真的繼承關係，不看類別上有沒有一個叫 model_fields 的字典：dataclass
+    # 自己宣告一個假的就能把多出來的欄位藏起來（#166 第三輪複查）。
+    if issubclass(cls, BaseModel):
+        return [str(name) for name in cls.model_fields]
     if is_dataclass(cls):
         return [field.name for field in fields(cls)]
     raise TypeError(f"這個類別的欄位表編不出來：{cls.__name__}")
