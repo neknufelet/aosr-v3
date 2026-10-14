@@ -135,11 +135,8 @@ def coupling_variants() -> tuple[dict[str, object], dict[str, object]]:
     return scene, porous
 
 
-def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_bands(tmp_path: Path) -> None:
-    """拍板第 7 點（10-14 講準）：表內材料與各路能量不變；只有交接段內的房間合成結果可以動。"""
-    board, porous = run_documents(tmp_path, dict(zip(('board', 'porous'), coupling_variants(), strict=True)), '交接段連動兩份')
-    assert board.points is not None and porous.points is not None
-    # 前提：500／1000 Hz 在表外，換底構造真的讓施羅德頻率與交接下端移動，而且兩份都沒被上限硬切。
+def _verified_crossover_bounds(board: ReportOutput, porous: ReportOutput) -> tuple[float, float]:
+    """前提：500／1000 Hz 在表外，換底構造真的讓施羅德頻率與交接下端移動，而且兩份都沒被上限硬切。"""
     assert board.top.f_s_hz != porous.top.f_s_hz
     for report in (board, porous):
         # 界線不拿報告自己說的當裁判：下端照決策紙是 max(施羅德頻率, 下限)，上端固定為有限元素上限。
@@ -147,8 +144,14 @@ def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_b
         assert report.top.crossover_lower_hz == max(report.top.f_s_hz, CROSSOVER_LOWER_FLOOR_HZ)
         assert report.top.crossover_upper_hz == FEM_GEOMETRIC_CROSSOVER_CAP_HZ
     lower = min(board.top.crossover_lower_hz, porous.top.crossover_lower_hz)
-    upper = FEM_GEOMETRIC_CROSSOVER_CAP_HZ
-    assert board.top.crossover_lower_hz != porous.top.crossover_lower_hz and lower < upper
+    assert board.top.crossover_lower_hz != porous.top.crossover_lower_hz and lower < FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+    return lower, FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+
+
+def _in_table_points_split_at_crossover(board: ReportOutput, porous: ReportOutput, lower: float,
+                             upper: float) -> tuple[list[float], list[float]]:
+    """表內逐點：各路能量不變；權重與合成照公式；交接段內權重變，段外整點不變。"""
+    assert board.points is not None and porous.points is not None
     window, steady = [], []
     for a, b in zip(board.points, porous.points, strict=True):
         assert a.frequency_hz == b.frequency_hz
@@ -166,16 +169,18 @@ def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_b
         if lower < a.frequency_hz < upper:
             window.append(a.frequency_hz)
             assert a.w_geo != b.w_geo, a.frequency_hz
-            if a.fem_energy != a.geometric_energy:
-                assert a.total_energy != b.total_energy, a.frequency_hz
         else:
             steady.append(a.frequency_hz)
             assert (a.w_fem, a.w_geo, a.total_energy) == (b.w_fem, b.w_geo, b.total_energy), a.frequency_hz
     assert window and any(f <= lower for f in steady) and any(f >= upper for f in steady), (window, steady)
-    # 至少一個段內頻點兩路能量可辨別，證明合成總能量真的受交接權重牽動。
+    # 段內逐點只要求權重變（兩路能量很接近時，正確加權和可能捨入成同一個數）；至少一點的合成總能量真的變。
     assert any(a.total_energy != b.total_energy for a, b in zip(board.points, porous.points, strict=True)
                if a.frequency_hz in window), window
-    # 八度帶走另一條細軸（早期幾何、晚期衰減各自取帶內頻點）：整帶落在表內的帶，各路能量與衰減時間也不准動。
+    return window, steady
+
+
+def _in_table_bands_and_notes_unchanged(board: ReportOutput, porous: ReportOutput) -> None:
+    """八度帶走另一條細軸（早期幾何、晚期衰減各自取帶內頻點）：整帶落在表內的帶，各路能量與衰減時間也不准動。"""
     whole_bands = []
     for board_band, porous_band in zip(board.bands, porous.bands, strict=True):
         center = board_band.center_frequency_hz
@@ -194,6 +199,14 @@ def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_b
     assert board.measured_seams_by_wall is not None and porous.measured_seams_by_wall is not None
     for old_seam, new_seam in zip(board.measured_seams_by_wall['x0'], porous.measured_seams_by_wall['x0'], strict=True):
         assert old_seam.measured == new_seam.measured
+
+
+def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_bands(tmp_path: Path) -> None:
+    """拍板第 7 點（10-14 講準）：表內材料與各路能量不變；只有交接段內的房間合成結果可以動。"""
+    board, porous = run_documents(tmp_path, dict(zip(('board', 'porous'), coupling_variants(), strict=True)), '交接段連動兩份')
+    lower, upper = _verified_crossover_bounds(board, porous)
+    window, _ = _in_table_points_split_at_crossover(board, porous, lower, upper)
+    _in_table_bands_and_notes_unchanged(board, porous)
     note(f'交接下端 {board.top.crossover_lower_hz:.1f}→{porous.top.crossover_lower_hz:.1f} Hz；'
          f'表內交接段 {min(window):.1f}–{max(window):.1f} Hz 的權重與合成總能量變，各路能量不變。')
 
