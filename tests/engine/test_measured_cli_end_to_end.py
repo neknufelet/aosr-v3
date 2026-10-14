@@ -18,6 +18,9 @@ import time
 
 import pytest
 
+from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
+from aosr.physics.crossover import crossover_weights
 from aosr.physics.report_io import ReportOutput
 from governance.exit_codes import note
 from tests.engine.test_construction_cli_end_to_end import command, documents, environment
@@ -138,26 +141,40 @@ def test_base_change_moves_only_the_crossover_band_when_table_misses_schroeder_b
     assert board.points is not None and porous.points is not None
     # 前提：500／1000 Hz 在表外，換底構造真的讓施羅德頻率與交接下端移動，而且兩份都沒被上限硬切。
     assert board.top.f_s_hz != porous.top.f_s_hz
-    assert not board.top.capped_by_upper_limit and not porous.top.capped_by_upper_limit
-    assert board.top.crossover_upper_hz == porous.top.crossover_upper_hz
+    for report in (board, porous):
+        # 界線不拿報告自己說的當裁判：下端照決策紙是 max(施羅德頻率, 下限)，上端固定為有限元素上限。
+        assert not report.top.capped_by_upper_limit
+        assert report.top.crossover_lower_hz == max(report.top.f_s_hz, CROSSOVER_LOWER_FLOOR_HZ)
+        assert report.top.crossover_upper_hz == FEM_GEOMETRIC_CROSSOVER_CAP_HZ
     lower = min(board.top.crossover_lower_hz, porous.top.crossover_lower_hz)
-    upper = board.top.crossover_upper_hz
+    upper = FEM_GEOMETRIC_CROSSOVER_CAP_HZ
     assert board.top.crossover_lower_hz != porous.top.crossover_lower_hz and lower < upper
     window, steady = [], []
     for a, b in zip(board.points, porous.points, strict=True):
         assert a.frequency_hz == b.frequency_hz
         if not 100. <= a.frequency_hz <= 400.:
             continue
+        for report, point in ((board, a), (porous, b)):
+            # 權重照當份施羅德頻率算、合成總能量照權重加（沒有有限元素值時那一路貢獻為零）。
+            expected = crossover_weights((point.frequency_hz,), report.top.f_s_hz)
+            assert (point.w_fem, point.w_geo) == (expected.w_fem[0], expected.w_geo[0]), point.frequency_hz
+            fem_part = 0.0 if point.fem_energy is None else point.w_fem * point.fem_energy
+            assert point.total_energy == fem_part + point.w_geo * point.geometric_energy, point.frequency_hz
         for field in ('fem_energy', 'direct_energy', 'reflected_energy', 'interference_energy', 'late_energy',
                       'scattering', 'geometric_energy'):
             assert getattr(a, field) == getattr(b, field), (a.frequency_hz, field)
         if lower < a.frequency_hz < upper:
             window.append(a.frequency_hz)
-            assert a.w_geo != b.w_geo and a.total_energy != b.total_energy, a.frequency_hz
+            assert a.w_geo != b.w_geo, a.frequency_hz
+            if a.fem_energy != a.geometric_energy:
+                assert a.total_energy != b.total_energy, a.frequency_hz
         else:
             steady.append(a.frequency_hz)
             assert (a.w_fem, a.w_geo, a.total_energy) == (b.w_fem, b.w_geo, b.total_energy), a.frequency_hz
     assert window and any(f <= lower for f in steady) and any(f >= upper for f in steady), (window, steady)
+    # 至少一個段內頻點兩路能量可辨別，證明合成總能量真的受交接權重牽動。
+    assert any(a.total_energy != b.total_energy for a, b in zip(board.points, porous.points, strict=True)
+               if a.frequency_hz in window), window
     assert board.measured_seams_by_wall is not None and porous.measured_seams_by_wall is not None
     for old_seam, new_seam in zip(board.measured_seams_by_wall['x0'], porous.measured_seams_by_wall['x0'], strict=True):
         assert old_seam.measured == new_seam.measured
