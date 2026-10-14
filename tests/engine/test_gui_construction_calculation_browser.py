@@ -84,7 +84,7 @@ def test_calculation_group_check_follows_birth_identity() -> None:
 def test_stop_calculations_names_every_unconfirmed_record(tmp_path: Path) -> None:
     """停止端點回錯、回還在算、或回已停但原組還在，都要點名；一筆出錯不中斷後面幾筆。"""
     # 排序在前的兩筆先出例外（斷線、回的不是 JSON），後面幾筆照樣要被問到。
-    replies: dict[str, tuple[int, object]] = {"1" * 32: (0, None), "2" * 32: (200, None),
+    replies: dict[str, tuple[int, object]] = {"1" * 32: (0, None), "2" * 32: (200, None), "3" * 32: (200, {}),
         "a" * 32: (500, {"error": "停止未確認"}), "b" * 32: (200, {"status": "running"}),
         "c" * 32: (200, {"status": "stopped"})}
     asked = []
@@ -122,7 +122,7 @@ def test_stop_calculations_names_every_unconfirmed_record(tmp_path: Path) -> Non
             assert sorted(asked) == sorted(replies)
             text = str(raised.value)
             assert f"{'1' * 32}：停止請求失敗" in text and f"{'2' * 32}：停止請求失敗" in text
-            assert f"{'a' * 32}：500" in text and f"{'b' * 32}：200" in text
+            assert f"{'3' * 32}：200" in text and f"{'a' * 32}：500" in text and f"{'b' * 32}：200" in text
             assert f"{'c' * 32}：行程組 {leader.pid}" in text
         finally:
             server.shutdown()
