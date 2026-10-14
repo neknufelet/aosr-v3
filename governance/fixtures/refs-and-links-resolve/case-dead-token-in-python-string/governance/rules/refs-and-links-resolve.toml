@@ -40,7 +40,7 @@ scan_exempt_suffixes = [
 # 會讓每份樣本多犯一條跟它要證的事無關的違規。實測踩過。
 [[settings.allow]]
 path = "~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle"
-reason = "刻意指向 repo 外的備份：清空重來前的完整 git 歷史 bundle。決策紙「git 歷史重來，GitHub repo 刪掉重建」（在 docs/decisions/ 底下）與 handoff.md 都要寫得出它在哪，不然還原不了。"
+reason = "刻意指向 repo 外、2026-10-14 已刪除的備份：清空重來前的完整 git 歷史 bundle，找不到副本（#822）。決策紙「從 v2 事故重長，歷史清空」（在 docs/decisions/ 底下）與已取代的舊紙要寫得出它原本在哪、已經不在。"
 expires = "2026-12-08"
 
 [[settings.allow]]
