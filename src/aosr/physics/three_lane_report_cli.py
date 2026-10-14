@@ -6,7 +6,7 @@
 
 輸入 JSON 新舊恰好一個：舊 impedance_pa_s_per_m_by_wall 永遠照收；新
 ``surface_zones_by_wall`` 六面各一區，area（分區）只收 whole_wall（整面），
-material（材料）只收構造 assembly 或固定阻抗 constant_impedance；實測阻抗表不收。
+material（材料）只收構造 assembly 或固定阻抗 constant_impedance；也收實測阻抗表 measured_impedance，表外由必填底構造補值。
 全固定新寫法折回舊欄位，混合或構造場景保留六面分區。以下為舊格式；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
 ``reflection_order_k``（交接階數 K）也可省略，省略時用產品設定 ``REFLECTION_ORDER_K``；
@@ -246,13 +246,11 @@ def _text_sections(
         _top_table(report),
         _band_table(report),
     ]
+    from aosr.physics.report_measured_text import construction_note_lines, measured_text
+
+    sections[2:2] = measured_text(inputs, report.construction_notes_by_wall)
     if report.construction_notes_by_wall:
-        lines = ["構造註記"]
-        for wall, notes in report.construction_notes_by_wall.items():
-            for note in notes:
-                frequency = f"；外推頻點 {extrapolated_frequency_text(note.frequencies_hz)}" if note.frequencies_hz else ""
-                lines.append(f"{wall} 第 {note.layer_index} 層：{note.message}{frequency}")
-        sections.append("\n".join(lines))
+        sections.append("\n".join(construction_note_lines(inputs, report.construction_notes_by_wall)))
     if with_points:
         sections.append(_point_table(report))
     if path_table_inputs is not None:

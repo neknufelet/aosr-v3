@@ -66,8 +66,8 @@ def invalid_scene(case: str) -> tuple[dict[str, object], str, str]:
         hint = "這一版每面只收整面一區；矩形分區是 #309 第二步"
     elif case == "measured":
         zones["floor"][0]["material"] = {"kind": "measured_impedance", "arbitrary": True}
-        path += ".floor.0.material"
-        hint = "實測阻抗表這一版還不收"
+        path += ".floor.0.material.measured_impedance.points"
+        hint = "必填"
     else:
         zones["floor"][0]["material"] = {"kind": "assembly", "layers": [
             {"kind": "air", "thickness_m": 0.0}], "backing": "rigid"}

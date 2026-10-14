@@ -17,7 +17,7 @@ from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Wall
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
-from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, ConstructionNote, MeasuredImpedance, SurfaceMaterial
 
 
 @dataclass(frozen=True)
@@ -75,15 +75,22 @@ def merge_construction_notes(
                                    set(() if previous is None else previous.frequencies_hz)))
         merged[key] = note if frequencies == note.frequencies_hz else note.model_copy(
             update={"frequencies_hz": frequencies})
-    into[wall] = tuple(merged[key] for key in sorted(merged))
+    into[wall] = tuple(merged[key] for key in sorted(merged, key=lambda key: (key[0] or 0, key[1])))
 
 
-def extrapolated_frequency_text(frequencies_hz: tuple[float, ...]) -> str:
+def extrapolated_frequency_text(frequencies_hz: tuple[float, ...], *,
+                                table_bounds_hz: tuple[float, float] | None = None) -> str:
     """外推頻點寫成低、高兩段（「20–27 Hz、8400–11313.5 Hz」），中間照常算的頻率不連進去。
 
     Komatsu 的 f/σ 界線由量測頻率與樣品流阻推導，流阻又只收樣品範圍內的值，
     所以低段外推必在量測頻率下限以下、高段必在上限以上：用下限切開恰好是兩段。
     """
+    if table_bounds_hz is not None:
+        lower, upper = table_bounds_hz
+        spans = [part for part in (tuple(f for f in frequencies_hz if f < lower),
+                                   tuple(f for f in frequencies_hz if f > upper)) if part]
+        return "、".join(f"{part[0]:g} Hz" if part[0] == part[-1] else f"{part[0]:g}–{part[-1]:g} Hz"
+                        for part in spans)
     lowest = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu.measured_frequency_min_hz
     spans = [part for part in (tuple(f for f in frequencies_hz if f < lowest),
                                tuple(f for f in frequencies_hz if f >= lowest)) if part]
@@ -125,6 +132,9 @@ def wall_surface_response(
             except ValueError as exc:
                 if "需要雙精度" in str(exc):
                     raise ValueError(f"{wall.wall_name()}：行程的 JAX 精度設定不足；{exc}") from exc
+                if isinstance(material, MeasuredImpedance):
+                    # 既有構造牆的訊息不動；實測牆的底構造可能第一次在這條軸求值，要說出牆名。
+                    raise ValueError(f"{wall.wall_name()}：{exc}") from exc
                 raise
             alpha[wall] = tuple(float(value) for value in values)
     return WallSurfaceResponse(frequencies_hz, alpha, notes)
@@ -197,3 +207,21 @@ def wall_path_impedances(
     merge_construction_notes(notes_by_wall, Wall.from_name(wall_name), notes)
     array = np.asarray(values, dtype=np.complex128)
     return {cos: array[:, i] for i, cos in enumerate(cosines)}
+
+
+def assembly_endpoint_responses(
+    material: Assembly, frequencies_hz: tuple[float, ...], *, density_kg_m3: float, sound_speed_m_s: float,
+) -> tuple[tuple[complex, ...], tuple[float, ...], float]:
+    """實測表接縫用：底構造在指定頻點的 Z(f,0°)、Paris 無規入射 α 與場景 ρc。
+
+    構造核心仍只從本模組的延後匯入分支進來（TMM 進物理閉包只准這一個入口）。
+    """
+    import jax.numpy as jnp
+    from aosr.materials.construction import random_incidence_absorption, surface_impedance
+
+    air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
+    normal, _ = surface_impedance(material, axis, air=air, ranges=ranges)
+    diffuse, _ = random_incidence_absorption(material, axis, air=air, ranges=ranges)
+    return (tuple(np.asarray(normal, dtype=np.complex128).tolist()),
+            tuple(float(value) for value in np.asarray(diffuse, dtype=np.float64)), air.rho_c)

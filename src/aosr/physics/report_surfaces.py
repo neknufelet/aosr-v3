@@ -11,10 +11,9 @@ from pydantic_core import PydanticCustomError
 from pydantic.config import JsonDict
 
 from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
 
 
-MEASURED_IMPEDANCE_UNSUPPORTED = "實測阻抗表這一版還不收：表沒涵蓋的頻點怎麼處理還沒拍板（#309）；請改填構造或固定阻抗"
 WHOLE_WALL_ONLY = "這一版每面只收整面一區；矩形分區是 #309 第二步"
 OLD_WALL_FIELD = "impedance_pa_s_per_m_by_wall"
 ZONE_WALL_FIELD = "surface_zones_by_wall"
@@ -34,12 +33,6 @@ class WholeWallZone(BaseModel):
             raise ValueError(WHOLE_WALL_ONLY)
         return value
 
-    @field_validator("material", mode="before")
-    @classmethod
-    def _reject_measured(cls, value: object) -> object:
-        if isinstance(value, Mapping) and value.get("kind") == "measured_impedance":
-            raise ValueError(MEASURED_IMPEDANCE_UNSUPPORTED)
-        return value
 
 
 def _single_zone(value: object) -> object:
@@ -166,6 +159,8 @@ def exclusive_wall_schema(schema: JsonDict) -> None:
 
 def report_materials_code(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> str:
     """查表與未查表的報表標籤使用同一個材料分類。"""
+    if any(isinstance(material, MeasuredImpedance) for material in materials_by_wall.values()):
+        return "measured_impedance_by_wall"
     return ("real_frequency_independent_impedance" if all(isinstance(material, ConstantImpedance)
             for material in materials_by_wall.values()) else "assembly_by_wall")
 
@@ -178,6 +173,7 @@ def _zone_error_message(error: Mapping[str, object]) -> str:
         return "必填：這一格不能空著"
     messages = {"float_type": "要填數字", "float_parsing": "要填數字",
         "finite_number": "要填有限數字（不收無限大或非數值）",
+        "string_type": "要填文字", "string_too_short": "必填：這一格不能空著",
         "union_tag_not_found": "必填材料或層的種類代號 kind（種類）",
         "union_tag_invalid": "不認識的材料或層種類代號 kind（種類）；請選合法種類",
         "literal_error": "只能填這個材料或層的合法選項",

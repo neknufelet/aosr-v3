@@ -28,7 +28,7 @@ not_modeled = [
   "喇叭箱體本身的反射（兩支喇叭互相反射也不算）",
   "空氣吸收",
   "非長方形房間",
-  "實測阻抗表與牆面局部分區（這一版每面只收整面一區）",
+  "牆面局部分區（這一版每面只收整面一區）",
 ]
 note = "命令列不收家具：有家具的場景只從方案入口（網頁或 scheme_cli）計算。三路接合物理量報表；輸入 JSON 新舊恰好一個：impedance_pa_s_per_m_by_wall 六面固定阻抗，或 surface_zones_by_wall 六面整面一區的構造／固定阻抗。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
 
@@ -58,6 +58,15 @@ outputs = ["fem_energy", "direct_energy", "reflected_energy", "interference_ener
 status = "experimental"
 evidence = []
 note = "整面構造（含固定面混合）：有限元素每頻 Z(f,0°)，鏡像法每條路徑按入射角取 Z(f,θ)，晚期 Paris 無規入射 α。Komatsu 流阻超出樣品範圍拒收，f/σ 外推照算並出註記。標 experimental：沒有獨立參考答案，比照家具的決定。有限元素用垂直入射阻抗 Z(f,0°)，空腔當局部反應（沒有隔間的空腔實際是延伸反應），這個近似的誤差沒有量過。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "measured_impedance_by_wall"
+frequency_hz = [20.0, 11166.0]
+outputs = ["fem_energy", "direct_energy", "reflected_energy", "interference_energy", "late_energy", "total_energy", "t20_s", "t30_s"]
+status = "experimental"
+evidence = []
+note = "實測表（含構造與固定面混合）：表內在對數頻率上對實虛部各自線性內插，實測段假設與角度無關；有限元素與鏡像法用同一個逐頻阻抗，無規吸音沿用固定阻抗的複數換算。表外照底構造的垂直與各角度阻抗及 Paris 無規吸音，逐頻標模型補值，材料模型外推也照實標示。表的精確兩端報實測與底構造阻抗、垂直及無規吸音率，只報不擋。實測表只代表樣品在管子裡量到的結果，不代表現場安裝。標 experimental：沒有獨立參考答案。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -289,7 +298,7 @@ frequency_hz = [20.0, 300.0]
 outputs = ["房間模態表", "重疊分組", "逐喇叭座位參與大小", "求解自檢", "不計分診斷四態"]
 status = "experimental"
 evidence = ["tests/engine/test_modal_lookup.py::test_hit_reuses_room_and_placement_across_entrypoints", "tests/engine/test_gui_modal_view.py::test_groups_keep_bounds_members_and_each_resonance"]
-note = "構造牆不在模態診斷範圍。只支援長方形與六面頻率無關有限正實阻抗；密度、聲速讀方案。目標線範圍外逐列寫未評估。求解收斂且最近根選取完整才有開圓內保證；強阻尼完備性仍有未驗限制，診斷不等於排名或聽感門檻。"
+note = "構造牆與實測阻抗表的牆同樣不在模態診斷範圍。只支援長方形與六面頻率無關有限正實阻抗；密度、聲速讀方案。目標線範圍外逐列寫未評估。求解收斂且最近根選取完整才有開圓內保證；強阻尼完備性仍有未驗限制，診斷不等於排名或聽感門檻。"
 
 [[entry]]
 name = "low_frequency_modal"

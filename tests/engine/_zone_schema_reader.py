@@ -1,4 +1,5 @@
 """只判讀本批綱要考卷所用關鍵字；未知驗證關鍵字直接報錯，不冒充完整驗證器。"""
+import re
 from collections.abc import Callable, Mapping
 from typing import cast
 
@@ -7,7 +8,7 @@ ANNOTATIONS = {"title", "description", "default", "discriminator", "$defs", "$sc
                "quantity", "unit", "reference", "validity"}
 KEYWORDS = {"$ref", "type", "const", "enum", "required", "properties", "additionalProperties",
             "items", "minItems", "maxItems", "minimum", "maximum", "exclusiveMinimum",
-            "exclusiveMaximum", "anyOf", "oneOf", "allOf", "not", "if", "then", "else", "minLength", "maxLength"}
+            "exclusiveMaximum", "anyOf", "oneOf", "allOf", "not", "if", "then", "else", "minLength", "maxLength", "pattern"}
 
 
 def accepts(schema: Schema, value: object, root: Schema) -> bool:
@@ -63,6 +64,9 @@ def _scalar(schema: Schema, value: object) -> bool:
         if "minLength" in schema and len(value) < cast(int, schema["minLength"]):
             return False
         if "maxLength" in schema and len(value) > cast(int, schema["maxLength"]):
+            return False
+        # JSON 綱要的 pattern 不錨定：字串裡任何位置找得到就算符合。
+        if "pattern" in schema and re.search(str(schema["pattern"]), value) is None:
             return False
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         checks: tuple[tuple[str, Callable[[float], bool]], ...] = (

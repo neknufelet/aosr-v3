@@ -14,6 +14,7 @@ from aosr.physics import report_validation
 from aosr.config.capabilities import CapabilityTable, capability_for
 from aosr.geometry.shoebox import Room, Wall
 from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_measured import measured_seams
 from aosr.physics.report_surfaces import report_materials_code
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
@@ -190,6 +191,8 @@ def output_from_report(
     return ReportOutput(
         scene=_scene_section(inputs),
         construction_notes_by_wall=report.construction_notes_by_wall,
+        measured_seams_by_wall=measured_seams(inputs.surface_zones_by_wall,
+            density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s),
         capability=_capability_section(report),
         top=_top_fields(report, inputs.room_m),
         bands=_band_rows(report),

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import cast, get_args
 
 from pydantic import BaseModel
-from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, MeasuredImpedance, MeasuredImpedancePoint, PorousLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -61,14 +61,32 @@ MATERIAL_WORDS = {kind: {name: (field.description or name).split("（", 1)[-1].r
                        for name, field in model.model_fields.items()}
                   for kind, model in MATERIAL_MODELS.items()}
 PATH_WORDS.update({name: label.split("：", 1)[0] for words in MATERIAL_WORDS.values() for name, label in words.items()
-                   if name not in ("kind", "thickness_m")})
+                   if name not in ("kind", "thickness_m", "points")})
 PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m"})
 PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
                    "air": "空氣層", "board": "薄板層", "porous": "多孔層"})
 
 
+PATH_WORDS.update({name: (field.description or name).split("（", 1)[-1].removesuffix("）")
+                   for name, field in MeasuredImpedancePoint.model_fields.items()})
+
+
 def material_summary(material: SurfaceMaterial) -> str:
     """逐層白話只從所屬模型的描述取欄名、單位與種類中文。"""
+    if isinstance(material, MeasuredImpedance):
+        kind = material.kind
+        name = _enum_word(MATERIAL_WORDS[kind]["kind"], kind)
+        source = material_field_text(kind, "source_and_conditions").split("，", 1)[0]
+        base = material_field_text(kind, "base_assembly").split("；", 1)[0]
+        real = PATH_WORDS["real_pa_s_m"].split("，", 1)[0]
+        imag = PATH_WORDS["imag_pa_s_m"].split("，", 1)[0]
+        def number(value: float) -> str:
+            return str(value).removesuffix(".0")  # 與 _model_summary 同一種數字寫法
+        rows = "／".join(f"{number(point.frequency_hz)} Hz：{real} {number(point.real_pa_s_m)}、{imag} {number(point.imag_pa_s_m)} Pa·s/m"
+                        for point in material.points)
+        return (f"{name}：{material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz，"
+                f"{len(material.points)} 列；{rows}；{source}：{material.source_and_conditions}；"
+                f"{base}：{material_summary(material.base_assembly)}")
     return _model_summary(type(material), lambda name: getattr(material, name))
 
 
@@ -240,6 +258,12 @@ def _material_path(rest: list[str], document: Document) -> str:
             if isinstance(value, dict) and isinstance(value.get("kind"), str) and value["kind"] in MATERIAL_MODELS:
                 kind = cast(str, value["kind"])
     parts = []
+    if "points" in rest:
+        tail = rest[rest.index("points") + 1:]
+        if tail and tail[0].isdigit():
+            parts.append(f"實測表第 {int(tail[0]) + 1} 列")
+    if "base_assembly" in rest:
+        parts.append(material_field_text("measured_impedance", "base_assembly").split("；", 1)[0])
     if "layers" in rest:
         tail = rest[rest.index("layers") + 1:]
         if tail and tail[0].isdigit():

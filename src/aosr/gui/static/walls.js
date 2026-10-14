@@ -81,7 +81,11 @@ function renderWalls() {
     if (material.kind === "constant_impedance") {
       row.append(numberField(`wall-${name}`, `${wallNames[name]}阻抗（帕·秒／公尺）`, material.impedance_pa_s_m));
       const multiple = document.createElement("span"); multiple.id = `multiple-${name}`; row.append(multiple);
-    } else renderAssembly(name, material, row);
+    } else if (material.kind === "assembly") renderAssembly(name, material, row);
+    else {
+      const notice = document.createElement("p");
+      notice.textContent = "這一版網頁還不能編輯實測阻抗表的牆"; row.append(notice);
+    }
   }
 }
 function collectWallMaterials() {
@@ -90,7 +94,7 @@ function collectWallMaterials() {
     if (material.kind === "constant_impedance") {
       if (scheme.scene.surface_zones_by_wall) material.impedance_pa_s_m = numericInput(`wall-${name}`);
       else scheme.scene.impedance_pa_s_per_m_by_wall[name] = numericInput(`wall-${name}`);
-    } else {
+    } else if (material.kind === "assembly") {
       material.layers.forEach((layer, index) => {
         for (const input of document.querySelectorAll(`#wall-editor-${name} input[data-layer-field]`)) {
           if (input.id === `layer-${name}-${index}-${input.dataset.layerField}`)

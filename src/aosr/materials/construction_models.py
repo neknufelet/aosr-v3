@@ -1,14 +1,15 @@
 """牆面構造的凍結資料格式；所有連續欄位用 SI（國際單位制）。
 
-層順序是房間側 → 牆體側，背後負載必填。實測阻抗表的插值尚未拍板，不在此型別內。
+層順序是房間側 → 牆體側，背後負載必填。實測阻抗表在表內對數頻率內插，表外交必填底構造。
 孔隙率與曲折度沿用傳遞矩陣的合法域：皆正；不額外收緊曲折度為大於等於一。
 Mechel 1976（低頻延伸多孔模型）的孔隙率另須不大於一。
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, ValidationError, field_validator, model_validator
 from pydantic.config import JsonDict
 
 
@@ -108,17 +109,86 @@ class ConstantImpedance(_ConstructionRecord):
     impedance_pa_s_m: _PositiveNumber = Field(description="impedance_pa_s_m（阻抗，Pa·s/m；整面一個正有限實數）")
 
 
-SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance, Field(discriminator="kind")]
-"""SurfaceMaterial（牆面材料型別）依 kind（表面種類代號）分辨構造與固定阻抗。"""
+class MeasuredImpedancePoint(_ConstructionRecord):
+    """MeasuredImpedancePoint（實測列）：SI 阻抗，正時間指數。"""
+
+    frequency_hz: _PositiveNumber = Field(description="frequency_hz（量測頻率，Hz；有限正數、逐列嚴格遞增）")
+    real_pa_s_m: _PositiveNumber = Field(description="real_pa_s_m（阻抗實部，Pa·s/m；有限且大於零，不收正規化值）")
+    imag_pa_s_m: StrictFloat = Field(description="imag_pa_s_m（阻抗虛部，Pa·s/m；有限，時間慣例 e^{+jωt}；e^{−iωt} 的表須將虛部變號）")
+
+
+class MeasuredImpedance(_ConstructionRecord):
+    """MeasuredImpedance（實測阻抗表）：表外用描述同一面牆的底構造補值。"""
+
+    kind: Literal["measured_impedance"] = Field(default="measured_impedance", description="kind（表面種類代號，measured_impedance 表示實測阻抗表）")
+    points: tuple[MeasuredImpedancePoint, ...] = Field(min_length=2, description="points（實測阻抗列；至少兩列，頻率嚴格遞增）")
+    base_assembly: Assembly = Field(description="base_assembly（同一面牆的底構造；表外模型補值，只收多層構造）")
+    source_and_conditions: str = Field(min_length=1, json_schema_extra={"pattern": r"\S"},  # 全空白由驗證器拒收，綱要同一條
+                                       description="source_and_conditions（量測出處與條件，包含阻抗管、入射方式與樣品厚度）")
+    fill_rule: Literal["log_linear_table_base_assembly_outside_v1"] = Field(
+        default="log_linear_table_base_assembly_outside_v1",
+        description="fill_rule（補值規則版本：log_linear_table_base_assembly_outside_v1 表示表內對數頻率線性內插、表外底構造補值第一版）")
+
+    def coverage_text(self) -> str:
+        """拒收訊息與表頭共用的表範圍字樣。"""
+        return f"實測阻抗表 {len(self.points)} 列，涵蓋 {self.points[0].frequency_hz:g}–{self.points[-1].frequency_hz:g} Hz"
+
+    @field_validator("base_assembly", mode="before")
+    @classmethod
+    def _base_kind_given(cls, value: object) -> object:
+        """輸出的綱要要求底構造明給 kind；原始文件省略就拒收，直接建構的物件照舊帶預設。"""
+        if isinstance(value, Mapping) and "kind" not in value:
+            raise ValueError("必填底構造的種類代號 kind（assembly）")
+        return value
+
+    @field_validator("source_and_conditions")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("量測出處與條件不可空白")
+        return value
+
+    @field_validator("points")
+    @classmethod
+    def _increasing(cls, points: tuple[MeasuredImpedancePoint, ...]) -> tuple[MeasuredImpedancePoint, ...]:
+        for index in range(1, len(points)):
+            if points[index].frequency_hz <= points[index - 1].frequency_hz:
+                raise ValidationError.from_exception_data("實測阻抗表", [{"type": "value_error",
+                    "loc": (index, "frequency_hz"), "input": points[index].frequency_hz,
+                    "ctx": {"error": ValueError("頻率必須嚴格遞增，不可重複")}}])
+        return points
+
+
+SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance | MeasuredImpedance, Field(discriminator="kind")]
+"""SurfaceMaterial（牆面材料型別）依 kind（表面種類代號）分辨構造、固定阻抗與實測表。"""
+
+
+def _note_schema(schema: JsonDict) -> None:
+    """層與材料類別只屬於 Komatsu 註記；補值註記不允許提供這兩格。"""
+    schema["allOf"] = [{"if": {"properties": {"code": {"const": "measured_table_model_fill"}}},
+        "then": {"not": {"anyOf": [{"required": ["layer_index"]}, {"required": ["material_class"]}]}},
+        "else": {"required": ["layer_index", "material_class"], "properties": {
+            "layer_index": {"type": "integer"}, "material_class": {"type": "string"}}}}]
 
 
 class ConstructionNote(_ConstructionRecord):
     """ConstructionNote（結構化材料註記）：層編號從房間側的一開始，不因角度重複。"""
 
-    code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit"] = Field(description="code（註記代號：頻率外推或材料類別不在擬合範圍）")
-    layer_index: int = Field(ge=1, description="layer_index（從房間側起算的層編號）")
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_note_schema)
+
+    code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit", "measured_table_model_fill"] = Field(description="code（註記代號：頻率外推或材料類別不在擬合範圍）")
+    layer_index: int | None = Field(default=None, exclude_if=lambda value: value is None, ge=1, description="layer_index（從房間側起算的層編號）")
     frequencies_hz: tuple[_PositiveNumber, ...] = Field(
         default=(), json_schema_extra={"uniqueItems": True},  # 不重複由報表輸出驗證器守，綱要同一條；遞增寫不進綱要
         description="frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）")
-    material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
+    material_class: Literal["fibrous", "foam"] | None = Field(default=None, exclude_if=lambda value: value is None, description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
     message: str = Field(min_length=1, description="message（中文說明）")
+
+    @model_validator(mode="after")
+    def _code_fields(self) -> Self:
+        if self.code == "measured_table_model_fill":
+            if self.model_fields_set & {"layer_index", "material_class"}:
+                raise ValueError("模型補值註記不給層編號或材料類別")
+        elif self.layer_index is None or self.material_class is None:
+            raise ValueError("Komatsu 註記必填層編號與材料類別")
+        return self

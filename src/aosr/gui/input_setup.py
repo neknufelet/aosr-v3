@@ -15,6 +15,7 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_input_problems
+from aosr.gui.construction_input import wall_materials
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
@@ -150,6 +151,10 @@ def check_input_shape(document: dict[str, object], capabilities: CapabilityTable
         if wall_problems:
             text = "；".join(str(row["text"]) for row in plain_problems(wall_problems, document))
             raise InputShapeError(text)
+    measured_walls = [WALLS.get(name, name) for name, material in wall_materials(document).items()
+                      if material.get("kind") == "measured_impedance"]
+    if measured_walls:
+        raise InputShapeError("這一版網頁還不能編輯實測阻抗表的牆：" + "、".join(measured_walls))
     scene = _input_mapping(document.get("scene"), ("room_m",))
     _input_mapping(scene["room_m"], ("Lx", "Ly", "Lz"))
     _input_mapping(scene.get(ZONE_WALL_FIELD) if scene.get(ZONE_WALL_FIELD) is not None

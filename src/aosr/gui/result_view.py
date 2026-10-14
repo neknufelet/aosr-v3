@@ -838,7 +838,7 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     from aosr.gui.labels import WALLS
     from aosr.physics.wall_surfaces import extrapolated_frequency_text, merge_construction_notes
     from aosr.geometry.shoebox import Wall
-    from aosr.materials.construction_models import ConstructionNote
+    from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance
 
     merged: dict[Wall, tuple[ConstructionNote, ...]] = {}
     for pair in result.pairs:
@@ -846,12 +846,21 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
             merge_construction_notes(merged, Wall.from_name(wall_name), notes)
     lines = []
     for wall in Wall.all():
+        zones = result.scheme.scene.surface_zones_by_wall
+        material = zones[wall.wall_name()][0].material if zones is not None else None
         for note in merged.get(wall, ()):
+            if note.code == "measured_table_model_fill" and isinstance(material, MeasuredImpedance):
+                bounds = material.points[0].frequency_hz, material.points[-1].frequency_hz
+                frequencies = extrapolated_frequency_text(note.frequencies_hz, table_bounds_hz=bounds)
+                lines.append(f"{WALLS[wall.wall_name()]}：{note.message}；模型補值頻點 {frequencies}")
+                continue
             if note.frequencies_hz:
                 text = f"{extrapolated_frequency_text(note.frequencies_hz)} 超出材料模型原研究的量測範圍，仍以外推照算"
             else:
-                text = note.message.removeprefix(f"第 {note.layer_index} 層：")
-            lines.append(f"{WALLS[wall.wall_name()]}第 {note.layer_index} 層：{text}")
+                base = "底構造" if isinstance(material, MeasuredImpedance) else ""
+                text = note.message.removeprefix(f"{base}第 {note.layer_index} 層：")
+            base = "底構造" if isinstance(material, MeasuredImpedance) else ""
+            lines.append(f"{WALLS[wall.wall_name()]}{base}第 {note.layer_index} 層：{text}")
     return tuple(lines)
 
 
