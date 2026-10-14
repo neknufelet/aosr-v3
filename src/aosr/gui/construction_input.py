@@ -29,10 +29,9 @@ def _layers(material: dict[str, object]) -> list[object]:
 
 
 def material_input_problems(document: object, problems: tuple[SchemeProblem, ...]) -> tuple[SchemeProblem, ...]:
-    """補上核心同一登記簿的流阻拒收；格式錯先由 validate_scheme（方案驗證）定案。"""
-    located = tuple(problem for problem in problems if problem.path.startswith(f"scene.{ZONE_WALL_FIELD}"))
-    if located or not isinstance(document, dict):
-        return located
+    """只回正式驗證之外補上的流阻拒收（核心同一登記簿）；正式驗證已點名牆面時容器形狀未定，不補。"""
+    if any(problem.path.startswith(f"scene.{ZONE_WALL_FIELD}") for problem in problems) or not isinstance(document, dict):
+        return ()
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
     low, high = ranges.sample_flow_resistivity_min_pa_s_m2, ranges.sample_flow_resistivity_max_pa_s_m2
     issues = []

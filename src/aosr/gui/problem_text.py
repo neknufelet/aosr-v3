@@ -236,7 +236,8 @@ def _material_path(rest: list[str], document: Document) -> str:
                 value = value[int(part)]
             else:
                 break
-            if isinstance(value, dict) and value.get("kind") in MATERIAL_MODELS:
+            # 種類代號不是字串（清單、字典）就不查名稱表：不能當鍵，查了會崩。
+            if isinstance(value, dict) and isinstance(value.get("kind"), str) and value["kind"] in MATERIAL_MODELS:
                 kind = cast(str, value["kind"])
     parts = []
     if "layers" in rest:

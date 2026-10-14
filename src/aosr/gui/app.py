@@ -454,9 +454,8 @@ class GuiHandlers:
             _require_scheme_id(path, document)
             problems = validate_scheme(document, capabilities=self.capabilities,
                                        directivity=self.directivity)
-            material_problems = material_input_problems(document, problems)
-            if material_problems:
-                return _bad(ValueError("；".join(str(row["text"]) for row in plain_problems(material_problems, document))))
+            # 流阻超出登記範圍跟其他驗證問題同一種回應（422 問題清單），跟底版存檔壞文件一樣。
+            problems += material_input_problems(document, problems)
             if problems:
                 return _problems_response(problems, document)
             scheme = Scheme.model_validate(document)

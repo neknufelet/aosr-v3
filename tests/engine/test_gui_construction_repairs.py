@@ -31,7 +31,7 @@ def test_non_object_scene_returns_formal_problems(tmp_path: Path, scene: object,
 
 
 @pytest.mark.parametrize("container", ("zones", "wall", "entry", "material", "layers", "layer"))
-@pytest.mark.parametrize("bad", (None, "x", []))
+@pytest.mark.parametrize("bad", (None, "x", [], 5))
 def test_material_readers_check_every_container(container: str, bad: object) -> None:
     document = preset_document({"kind": "assembly", "backing": "rigid", "layers": [
         {"kind": "porous", "thickness_m": .05, "flow_resistivity_pa_s_m2": 19100.}]})
@@ -55,6 +55,48 @@ def test_material_readers_check_every_container(container: str, bad: object) -> 
     assert not any(name.startswith("layer-floor-") for name in fields)
     if container in ("zones", "wall", "entry", "material"):
         assert "floor" not in wall_materials(document)
+
+
+def broken_floor(case: str) -> dict[str, object]:
+    """地板那一格換成壞容器或壞種類代號；其餘照合法預設。"""
+    document = preset_document({"kind": "assembly", "backing": "rigid", "layers": [
+        {"kind": "porous", "thickness_m": .05, "flow_resistivity_pa_s_m2": 19100.}]})
+    document["scheme_id"] = "broken"
+    zones = cast(dict[str, object], cast(dict[str, object], document["scene"])["surface_zones_by_wall"])
+    entry = cast(list[dict[str, object]], zones["floor"])[0]
+    material = cast(dict[str, object], entry["material"])
+    if case == "wall":
+        zones["floor"] = "x"
+    elif case == "material":
+        entry["material"] = []
+    elif case == "layers":
+        material["layers"] = {}
+    elif case == "layer":
+        cast(list[object], material["layers"])[0] = 5
+    elif case == "kind-list":
+        material["kind"] = []
+    else:
+        material["kind"] = {}
+    return document
+
+
+@pytest.mark.parametrize("case", ("wall", "material", "layers", "layer", "kind-list", "kind-dict"))
+def test_broken_floor_is_refused_alike_on_every_route(tmp_path: Path, case: str) -> None:
+    """壞容器與非字串種類：預覽白話 400、檢查列問題、存檔 422 問題清單不寫檔、換別面牆預設照樣點名地板，都不准崩。"""
+    document = broken_floor(case)
+    with _app(tmp_path) as client:
+        preset = client.get("/api/input-defaults").json()["construction_presets"][1]
+        preview = client.post("/api/input-preview", json=document)
+        validate = client.post("/api/validate", json=document)
+        save = client.put("/api/schemes/broken", json=document)
+        edit = client.post("/api/input-edit", json={"scheme": document, "action": "wall_preset",
+            "value": preset["id"], "wall": "ceiling"})
+    assert preview.status_code == 400 and edit.status_code == 400, (preview.text, edit.text)
+    assert validate.status_code == 200 and save.status_code == 422, (validate.text, save.text)
+    texts = (preview.json()["error"], edit.json()["error"],
+             *("；".join(row["text"] for row in response.json()["problems"]) for response in (validate, save)))
+    assert all("地板材料構造" in text for text in texts), texts
+    assert not (tmp_path / "schemes" / "broken.json").exists()
 
 
 @pytest.mark.parametrize("layers", ("missing", [], None))

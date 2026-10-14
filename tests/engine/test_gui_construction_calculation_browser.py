@@ -1,11 +1,14 @@
 """網頁正式方案管線真算兩份小房間，只有一層厚度不同，三路與保存註記都要改變。"""
 from __future__ import annotations
 
+import json
+import threading
 import time
 import os
 import signal
 import subprocess
 import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
 
@@ -14,16 +17,18 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from governance.exit_codes import note
+from aosr.gui.jobs import _proc_stat
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import reference_document
-from tests.engine._construction_gui_server import real_server
+from tests.engine._construction_gui_server import _stop_calculations, calculation_group_exists, real_server
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
 
 
 def test_real_server_cleans_calculation_group_when_exam_raises(tmp_path: Path) -> None:
     pid: int | None = None
+    start_ticks: object = None
     # 未被這個資料夾登記的行程必須存活；它與計算一樣另成行程組。
     with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True) as unrelated:
         try:
@@ -34,22 +39,89 @@ def test_real_server_cleans_calculation_group_when_exam_raises(tmp_path: Path) -
                     response = client.post(f"{base}/api/runs", json={"scheme_id": "small"})
                     assert response.status_code == 200, response.text
                     state = client.get(f"{base}/api/runs/{response.json()['run_id']}").json()
-                    pid = state["pid"]
+                    pid, start_ticks = state["pid"], state["proc_start_ticks"]
                     assert state["status"] == "running"
-                    os.killpg(pid, 0)
+                    assert calculation_group_exists(pid, start_ticks)
                     raise RuntimeError("考卷故意中斷")
             assert pid is not None
-            with pytest.raises(ProcessLookupError):
-                os.killpg(pid, 0)
+            assert not calculation_group_exists(pid, start_ticks)
+            # 確認原計算消失就解除兜底清理：之後這個組號可能被別的行程重用。
+            pid = None
             assert unrelated.poll() is None
         finally:
-            if pid is not None:
-                try:
-                    os.killpg(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+            if pid is not None and calculation_group_exists(pid, start_ticks):
+                os.killpg(pid, signal.SIGKILL)
             unrelated.terminate()
             unrelated.wait(timeout=15)
+
+
+def test_calculation_group_check_follows_birth_identity() -> None:
+    """領頭在：開始時脈對才算原組（不對＝行程號被重用）；領頭死了、組裡還有成員：仍算原組沒收乾淨。"""
+    script = ("import subprocess, sys, time; child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+              "print(child.pid, flush=True); time.sleep(60)")
+    with subprocess.Popen([sys.executable, "-c", script], start_new_session=True, stdout=subprocess.PIPE) as leader:
+        try:
+            assert leader.stdout is not None
+            int(leader.stdout.readline())
+            stat = _proc_stat(leader.pid)
+            assert stat is not None
+            assert calculation_group_exists(leader.pid, stat[2])
+            assert not calculation_group_exists(leader.pid, stat[2] + 1)
+            leader.kill()
+            leader.wait(timeout=15)
+            assert _proc_stat(leader.pid) is None
+            assert calculation_group_exists(leader.pid, stat[2])
+        finally:
+            try:
+                os.killpg(leader.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 15
+        while calculation_group_exists(leader.pid, stat[2]) and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert not calculation_group_exists(leader.pid, stat[2])
+
+
+def test_stop_calculations_names_every_unconfirmed_record(tmp_path: Path) -> None:
+    """停止端點回錯、回還在算、或回已停但原組還在，都要點名；一筆出錯不中斷後面幾筆。"""
+    replies = {"a" * 32: (500, {"error": "停止未確認"}), "b" * 32: (200, {"status": "running"}),
+               "c" * 32: (200, {"status": "stopped"})}
+    asked = []
+
+    class Stub(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            run_id = self.path.split("/")[3]
+            asked.append(run_id)
+            code, body = replies[run_id]
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    with (subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True) as leader,
+          ThreadingHTTPServer(("127.0.0.1", 0), Stub) as server):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            stat = _proc_stat(leader.pid)
+            assert stat is not None
+            (tmp_path / "runs").mkdir()
+            for run_id in replies:
+                (tmp_path / "runs" / f"{run_id}.json").write_text(
+                    json.dumps({"pid": leader.pid, "proc_start_ticks": stat[2]}))
+            with pytest.raises(RuntimeError) as raised:
+                _stop_calculations(tmp_path, f"http://127.0.0.1:{server.server_address[1]}")
+            assert sorted(asked) == sorted(replies)
+            text = str(raised.value)
+            assert f"{'a' * 32}：500" in text and f"{'b' * 32}：200" in text
+            assert f"{'c' * 32}：行程組 {leader.pid}" in text
+        finally:
+            server.shutdown()
+            leader.kill()
 
 
 def small_document() -> dict[str, object]:

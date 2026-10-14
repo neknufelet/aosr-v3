@@ -69,7 +69,8 @@ def test_presets_stay_outside_physics_identity_and_defaults_are_plain_data() -> 
 
 
 @pytest.mark.parametrize("value", (None, 0., "missing"))
-def test_missing_layer_has_wall_layer_and_field_in_plain_400(tmp_path: Path, value: object) -> None:
+def test_missing_layer_names_wall_layer_and_field_in_plain_text(tmp_path: Path, value: object) -> None:
+    """輸入頁預覽回白話 400；存檔跟底版一樣回 422 問題清單，兩邊都寫牆、第幾層、哪一欄。"""
     preset = load_construction_presets(config_path("construction_presets.toml"))[0]
     material = deepcopy(preset.material)
     layer = cast(list[dict[str, object]], material["layers"])[0]
@@ -80,12 +81,14 @@ def test_missing_layer_has_wall_layer_and_field_in_plain_400(tmp_path: Path, val
     document = preset_document(material)
     document["scheme_id"] = "reference"
     with _app(tmp_path) as client:
-        for response in (client.post("/api/input-preview", json=document),
-                         client.put("/api/schemes/reference", json=document)):
-            assert response.status_code == 400, response.text
-            text = response.json()["error"]
-            assert "地板" in text and "第 1 層" in text and "層厚度" in text
-            assert "thickness_m" not in text
+        preview = client.post("/api/input-preview", json=document)
+        save = client.put("/api/schemes/reference", json=document)
+    assert preview.status_code == 400, preview.text
+    assert save.status_code == 422, save.text
+    for text in (preview.json()["error"], "；".join(row["text"] for row in save.json()["problems"])):
+        assert "地板" in text and "第 1 層" in text and "層厚度" in text
+        assert "thickness_m" not in text
+    assert not (tmp_path / "schemes" / "reference.json").exists()
 
 
 def test_komatsu_outside_registry_is_refused_before_save(tmp_path: Path) -> None:
@@ -97,8 +100,8 @@ def test_komatsu_outside_registry_is_refused_before_save(tmp_path: Path) -> None
     document["scheme_id"] = "out-of-range"
     with _app(tmp_path) as client:
         response = client.put("/api/schemes/out-of-range", json=document)
-        assert response.status_code == 400, response.text
-        text = response.json()["error"]
+        assert response.status_code == 422, response.text
+        text = "；".join(row["text"] for row in response.json()["problems"])
         assert "地板" in text and "第 1 層" in text and "流阻" in text
         assert f"{ranges.sample_flow_resistivity_min_pa_s_m2:g}" in text
         assert f"{ranges.sample_flow_resistivity_max_pa_s_m2:g}" in text and "Pa·s/m²" in text

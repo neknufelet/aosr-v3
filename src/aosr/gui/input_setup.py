@@ -145,9 +145,10 @@ def check_input_shape(document: dict[str, object], capabilities: CapabilityTable
     raw_scene = document.get("scene")
     if isinstance(raw_scene, dict) and raw_scene.get(ZONE_WALL_FIELD) is not None:
         problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
-        material_problems = material_input_problems(document, problems)
-        if material_problems:
-            text = "；".join(str(row["text"]) for row in plain_problems(material_problems, document))
+        problems += material_input_problems(document, problems)
+        wall_problems = tuple(problem for problem in problems if problem.path.startswith(f"scene.{ZONE_WALL_FIELD}"))
+        if wall_problems:
+            text = "；".join(str(row["text"]) for row in plain_problems(wall_problems, document))
             raise InputShapeError(text)
     scene = _input_mapping(document.get("scene"), ("room_m",))
     _input_mapping(scene["room_m"], ("Lx", "Ly", "Lz"))

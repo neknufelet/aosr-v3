@@ -14,25 +14,36 @@ from pathlib import Path
 
 import httpx
 
+from aosr.gui.jobs import _proc_stat
 from aosr.runtime import child_process_env
 
 
+def calculation_group_exists(pid: int, start_ticks: object) -> bool:
+    """那一筆計算的行程組還在不在。組還有成員時核心不會把這個行程號再發出去，所以：
+    領頭在就比開始時脈（不同＝行程號已被重用、原組早沒了）；領頭不在、組號還探得到，就是原組留下的成員。"""
+    stat = _proc_stat(pid)
+    if stat is not None:
+        return stat[1] == pid and stat[2] == start_ticks
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def _stop_calculations(folder: Path, base: str) -> None:
-    """只按本題資料夾的紀錄停整組；讓網頁收屍後再確認行程組消失。"""
+    """只按本題資料夾的紀錄停整組；停止端點自己核出生身分、停不掉回錯，每一筆都停過才彙報。"""
+    left = []
     with httpx.Client(trust_env=False) as client:
-        for path in (folder / "runs").glob("*.json"):
+        for path in sorted((folder / "runs").glob("*.json")):
             state = json.loads(path.read_text())
-            pid = state.get("pid")
-            if not isinstance(pid, int) or pid <= 0:
-                continue
-            # 正式停止端點核對行程出生身分，避免已結束的紀錄碰到重用的行程號。
             response = client.post(f"{base}/api/runs/{path.stem}/stop", json={}, timeout=15)
-            response.raise_for_status()
-            try:
-                os.killpg(pid, 0)
-            except ProcessLookupError:
-                continue
-            raise RuntimeError(f"計算行程組收尾後仍存在：{pid}")
+            if response.status_code != 200 or response.json().get("status") == "running":
+                left.append(f"{path.stem}：{response.status_code} {response.text}")
+            elif isinstance(pid := state.get("pid"), int) and pid > 0 and calculation_group_exists(pid, state.get("proc_start_ticks")):
+                left.append(f"{path.stem}：行程組 {pid} 收尾後仍存在")
+    if left:
+        raise RuntimeError("計算收尾未確認：" + "；".join(left))
 
 
 @contextmanager
