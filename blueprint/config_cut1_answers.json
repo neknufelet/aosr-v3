@@ -715,18 +715,34 @@
     "cut2_calibration": {
       "constants": {
         "CalibrationBandConfig": {
+          "fields": [
+            "f_lo_hz",
+            "f_hi_hz"
+          ],
           "kind": "type",
           "name": "CalibrationBandConfig"
         },
         "CalibrationConfig": {
+          "fields": [
+            "band",
+            "rt",
+            "smoothing"
+          ],
           "kind": "type",
           "name": "CalibrationConfig"
         },
         "CalibrationRtConfig": {
+          "fields": [
+            "valid_floor_hz",
+            "floor_ratio_min"
+          ],
           "kind": "type",
           "name": "CalibrationRtConfig"
         },
         "CalibrationSmoothingConfig": {
+          "fields": [
+            "fraction"
+          ],
           "kind": "type",
           "name": "CalibrationSmoothingConfig"
         }
@@ -1053,6 +1069,13 @@
     "cut2_mat_continuation": {
       "constants": {
         "MatContinuationConfig": {
+          "fields": [
+            "beta0",
+            "hold_steps",
+            "ramp_increment",
+            "ramp_every_steps",
+            "beta_cap"
+          ],
           "kind": "type",
           "name": "MatContinuationConfig"
         }
@@ -1115,6 +1138,25 @@
     "cut2_membrane_opt": {
       "constants": {
         "MembraneOptConfig": {
+          "fields": [
+            "energy_frac",
+            "barrier_t",
+            "barrier_relaxation",
+            "fmax_hz",
+            "elements_per_wavelength",
+            "re_z_floor_frac_rho_c",
+            "re_z_floor_sharpness",
+            "w_decay",
+            "w_rt60",
+            "air_gap_min_m",
+            "air_gap_max_m",
+            "mass_min_kg_m2",
+            "mass_max_kg_m2",
+            "porous_min_m",
+            "porous_max_m",
+            "flow_resistivity_min",
+            "flow_resistivity_max"
+          ],
           "kind": "type",
           "name": "MembraneOptConfig"
         }
@@ -2753,6 +2795,12 @@
     "cut2_physics_constants": {
       "constants": {
         "PhysicsConstants": {
+          "fields": [
+            "air_density_kg_m3",
+            "sound_speed_m_s",
+            "ref_pressure_pa",
+            "air_viscosity_pa_s"
+          ],
           "kind": "type",
           "name": "PhysicsConstants"
         }
@@ -2811,22 +2859,41 @@
     "cut2_scoring": {
       "constants": {
         "AsymmetryScoringConfig": {
+          "fields": [
+            "peak_dip_bias"
+          ],
           "kind": "type",
           "name": "AsymmetryScoringConfig"
         },
         "DecayScoringConfig": {
+          "fields": [
+            "w_decay",
+            "w_rt60"
+          ],
           "kind": "type",
           "name": "DecayScoringConfig"
         },
         "ScoringConfig": {
+          "fields": [
+            "spatial",
+            "asymmetry",
+            "decay",
+            "smoothing"
+          ],
           "kind": "type",
           "name": "ScoringConfig"
         },
         "SmoothingScoringConfig": {
+          "fields": [
+            "frac_oct"
+          ],
           "kind": "type",
           "name": "SmoothingScoringConfig"
         },
         "SpatialScoringConfig": {
+          "fields": [
+            "hf_rolloff_fc_hz"
+          ],
           "kind": "type",
           "name": "SpatialScoringConfig"
         }
@@ -3238,6 +3305,27 @@
     "cut2_stereo_layout": {
       "constants": {
         "StereoLayoutConfig": {
+          "fields": [
+            "source_wall_margin_m",
+            "receiver_wall_margin_m",
+            "min_source_source_m",
+            "min_source_seat_m",
+            "min_seat_pair_center_m",
+            "min_front_depth_m",
+            "search_min_front_depth_m",
+            "speaker_front_wall_min_m",
+            "speaker_front_wall_max_m",
+            "speaker_lateral_wall_margin_m",
+            "seat_rear_wall_margin_frac",
+            "receiver_centerline_tol_m",
+            "horizontal_angle_min_deg",
+            "horizontal_angle_target_deg",
+            "horizontal_angle_max_deg",
+            "search_horizontal_angle_max_deg",
+            "horizontal_angle_target_scale_deg",
+            "pair_center_offset_max_m",
+            "distance_imbalance_max"
+          ],
           "kind": "type",
           "name": "StereoLayoutConfig"
         }

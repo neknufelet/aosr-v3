@@ -68,6 +68,8 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Final, cast
 
+from pydantic import BaseModel
+
 from blueprint import config_cut1_cases as cases
 
 DONOR_TAG: Final[str] = "v3-donor"
@@ -174,9 +176,10 @@ def encode(value: object) -> dict[str, object]:
     if isinstance(value, (int, str)) or value is None:
         return {"kind": "scalar", "value": value}
     if isinstance(value, type):
-        # 模組層的**類別物件**（這一刀 9 支的 `CalibrationConfig` 這種常數）：記名字。
-        # 不是比記憶體位址、也不是比它的欄位表（那是「建出來的東西」在比的）。
-        return {"kind": "type", "name": value.__name__}
+        # 模組層的**類別物件**（這一刀 9 支的 `CalibrationConfig` 這種常數）：記名字與宣告的欄位表。
+        # 欄位表照宣告順序、含序列化時排除的欄位（票 #166：同名、多一格欄位的子類別，
+        # 載入器回傳物件的 dump 看不出來，只有比宣告的欄位表才看得到）。不比記憶體位址。
+        return {"kind": "type", "name": value.__name__, "fields": declared_fields(value)}
     if is_dataclass(value) and not isinstance(value, type):
         return {
             "kind": "object",
@@ -193,6 +196,23 @@ def encode(value: object) -> dict[str, object]:
     if isinstance(value, (tuple, list)):
         return {"kind": "list", "items": [encode(item) for item in value]}
     raise TypeError(f"這個值編不出來：{type(value).__name__}")
+
+
+def declared_fields(cls: type) -> list[str]:
+    """一個類別宣告的欄位名，照宣告順序（dataclass 走 ``fields``、pydantic 走 ``model_fields``）。
+
+    考卷那一邊（``tests/engine/test_config_cut2_constants.py``）自己另算一次，不匯入這一支。
+    兩種都不是就當場炸：這一刀的類別常數只有這兩種，第三種要先想清楚它的欄位表是什麼。
+    """
+    # pydantic 先判：pydantic 模型若混進一個 dataclass 父類別，`is_dataclass` 也是真，
+    # 走 `fields` 會只讀到那個父類別的欄位、漏掉模型自己宣告的（#166 複查）。
+    # 是不是 pydantic 看真的繼承關係，不看類別上有沒有一個叫 model_fields 的字典：dataclass
+    # 自己宣告一個假的就能把多出來的欄位藏起來（#166 第三輪複查）。
+    if issubclass(cls, BaseModel):
+        return [str(name) for name in cls.model_fields]
+    if is_dataclass(cls):
+        return [field.name for field in fields(cls)]
+    raise TypeError(f"這個類別的欄位表編不出來：{cls.__name__}")
 
 
 def constants_block(module: types.ModuleType, names: list[str]) -> dict[str, object]:
