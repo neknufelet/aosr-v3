@@ -85,8 +85,10 @@ def test_header_unions_saved_extrapolation_frequencies_across_pairs() -> None:
     assert lines == ('底構造第 1 層另有材料模型外推（小松纖維模型）：20–40 Hz',)
 
 
-@pytest.mark.parametrize('case', ['different', 'missing', 'wrong-wall', 'wrong-endpoint'])
-def test_all_pairs_and_walls_must_agree_before_showing_seams(case: str) -> None:
+@pytest.mark.parametrize(('case', 'message'), [('different', '各位置對保存的接縫不一致'), ('missing', '接縫牆面與方案'),
+                                             ('wrong-wall', '接縫牆面與方案'), ('wrong-endpoint', '接縫端點與實測表不一致')],
+                         ids=['different', 'missing', 'wrong-wall', 'wrong-endpoint'])
+def test_all_pairs_and_walls_must_agree_before_showing_seams(case: str, message: str) -> None:
     from aosr.gui.measured_view import build_measured_view
     result = saved_result()
     report = deepcopy(result.pairs[-1].report)
@@ -101,8 +103,11 @@ def test_all_pairs_and_walls_must_agree_before_showing_seams(case: str) -> None:
         changed = first.model_copy(update={'frequency_hz': 101.}) if case == 'wrong-endpoint' else first.model_copy(
             update={'base_assembly': first.base_assembly.model_copy(update={'real_pa_s_m': 999.})})
         report = report.model_copy(update={'measured_seams_by_wall': {'floor': (changed, seams['floor'][-1])}})
-    altered = result.model_copy(update={'pairs': (*result.pairs[:-1], result.pairs[-1].model_copy(update={'report': report}))})
-    with pytest.raises(ValueError, match='接縫'):
+    pairs = (*result.pairs[:-1], result.pairs[-1].model_copy(update={'report': report}))
+    if case == 'wrong-endpoint':  # 每一對都存錯，各位置對一致也擋得住
+        pairs = tuple(pair.model_copy(update={'report': report}) for pair in result.pairs)
+    altered = result.model_copy(update={'pairs': pairs})
+    with pytest.raises(ValueError, match=message):
         build_measured_view(altered)
 
 
@@ -145,6 +150,17 @@ def test_compare_details_detect_a_change_hidden_by_display_rounding() -> None:
     assert {c.path for c in changes} == {'scene.surface_zones_by_wall.floor'}
     assert {row[0] for row in changes[0].details} == {'100 Hz'}
     assert all(row[1] != row[2] for row in changes[0].details)
+
+
+def test_compare_details_name_a_base_assembly_change_on_the_same_wall() -> None:
+    a, b = document(), document()
+    layers = cast(list[dict[str, object]], cast(dict[str, object], floor(b)['base_assembly'])['layers'])
+    layers[1]['thickness_m'] = .05
+    changes = scheme_differences(Scheme.model_validate(a), Scheme.model_validate(b))
+    assert {c.path for c in changes} == {'scene.surface_zones_by_wall.floor'}
+    rows = {row[0]: row for row in changes[0].details}
+    assert rows.keys() == {'同一面牆的底構造'}
+    assert rows['同一面牆的底構造'][1] != rows['同一面牆的底構造'][2]
 
 
 def test_construction_and_fixed_result_json_omit_measured_block(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
