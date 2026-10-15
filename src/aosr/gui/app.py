@@ -68,7 +68,7 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"app.js", "walls.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"app.js", "walls.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")

@@ -18,6 +18,7 @@ shard = "shard-a"
 why = "直接或經 result／pair、_gui_best_cases 共用 test_scheme_pipeline.shared_control_result；另含 _furniture_scheme_results 的家具結果鏈（另一份共用快取 shared_scheme_result，算法同為 _run_control 但不是同一份結果）。這群內的瀏覽器／畫面考卷也需要無頭瀏覽器，只登記在本群。"
 files = [
   "tests/engine/test_calculation_fingerprint.py",
+  "tests/engine/test_measured_web_view.py",
   "tests/engine/test_furniture_compare_view.py",
   "tests/engine/test_furniture_gui_comparison.py",
   "tests/engine/test_furniture_result_view.py",
@@ -66,6 +67,8 @@ name = "browser"
 shard = "shard-a"
 why = "從 test_gui_browser 取瀏覽器夾具／操作函式，或檔名為 *_browser.py／*_visual.py；不另列共用控制組群已有的檔。"
 files = [
+  "tests/engine/test_gui_measured_input_browser.py",
+  "tests/engine/test_gui_measured_calculation_browser.py",
   "tests/engine/test_gui_construction_input_browser.py",
   "tests/engine/test_gui_construction_calculation_browser.py",
   "tests/engine/test_gui_furniture_drawings_browser.py",

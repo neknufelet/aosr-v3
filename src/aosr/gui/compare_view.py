@@ -54,6 +54,7 @@ _MATERIAL_PATH_PREFIX = "scene.surface_zones_by_wall."
 
 
 class SchemeChange(ViewModel):
+    details: tuple[tuple[str, str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
     path: str
     label: str
     a_text: str
@@ -490,6 +491,7 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     _collect_scheme(a, left, labels, split_angles, wall_materials)
     _collect_scheme(b, right, labels, split_angles, wall_materials)
     _name_both_kinds(a, b, labels)
+    from aosr.gui.measured_view import wall_difference_details
     changes: list[SchemeChange] = []
     for path in sorted(left.keys() | right.keys()):
         if path not in left or path not in right:
@@ -519,7 +521,7 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
                 if a_text == b_text:
                     a_text, b_text = repr(aa), repr(bb)
         changes.append(SchemeChange(path=path, label=labels[path][0], a_text=a_text, b_text=b_text,
-                                    material=path.startswith(_MATERIAL_PATH_PREFIX)))
+                                    material=path.startswith(_MATERIAL_PATH_PREFIX), details=wall_difference_details(a, b, path)))
     if not changes and a.model_dump(exclude={"scheme_id"}) != b.model_dump(exclude={"scheme_id"}):
         changes.append(SchemeChange(path="other_settings", label=OTHER_SETTINGS_LABEL,
                                     a_text="—", b_text="—"))

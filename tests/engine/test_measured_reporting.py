@@ -120,9 +120,7 @@ async def _web_requests(tmp_path: Path) -> None:
         for route, body in (('/api/input-preview', data),
             ('/api/input-edit', {'scheme': data, 'action': 'shortcut', 'value': 'listening'})):
             response = await client.post(route, json=body)
-            assert response.status_code == 400, response.text
-            assert '這一版網頁還不能編輯實測阻抗表的牆' in response.json()['error']
-            assert '地板' in response.json()['error']
+            assert response.status_code == 200, response.text
         bad, table = document(), measured()
         for point in cast(list[dict[str, object]], table['points']):
             point['real_pa_s_m'] = 0
