@@ -253,11 +253,12 @@ def test_old_snapshot_without_axis_resumes_unchanged(tmp_path: Path) -> None:
     snapshot = json.loads((created.path / PROJECT_FILE).read_text())
     snapshot["scene"]["low_frequency_axis"] = None
     (created.path / PROJECT_FILE).write_text(json.dumps(snapshot))
+    project_bytes = (created.path / PROJECT_FILE).read_bytes()
     old = SearchStore.open(created.path)
     assert old.project.scene.low_frequency_axis is None
     with pytest.raises(Killed):
         run(old, registry, FakeCompute(old, fail_after=1, kill=True, persist_baseline=True))
-    project_bytes = (created.path / PROJECT_FILE).read_bytes()
+    assert (created.path / PROJECT_FILE).read_bytes() == project_bytes
     header_line = old.ledger_path.read_bytes().splitlines()[0]
     reopened = SearchStore.open(created.path)
     assert header_for(reopened) == header_for(old)
