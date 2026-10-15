@@ -58,7 +58,9 @@ def test_project_fingerprint_is_canonical_sha256(tmp_path: Path) -> None:
     canonical = json.dumps(document, sort_keys=True,
                            separators=(",", ":"), allow_nan=False)
     assert header_for(store).project_fingerprint == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    assert header_for(store).project_fingerprint == "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f"
+    # #435（10-16）起開新搜尋會把沒寫的低頻軸填成 search_octave_48，這份快照多了那一格、答案跟著換
+    # （舊答案 0cd0e215…）；排序、壓緊與雜湊算法沒變（上一行現算）。舊搜尋資料夾的快照沒有這一格，表頭不受影響。
+    assert header_for(store).project_fingerprint == "13e53ca280e615222c87db6efd029919211986b8db9fc01679e45ec424ffe2fa"
 
 
 @pytest.mark.parametrize("point", ("tell", "batch_status", "terminal_status"))

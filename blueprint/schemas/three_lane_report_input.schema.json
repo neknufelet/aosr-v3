@@ -322,9 +322,10 @@
       "type": "string"
     },
     "LowFrequencyAxis": {
-      "description": "報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。",
+      "description": "報表低頻取樣軸。\n\nSEARCH 是每八度 24 點，供網頁單方案、命令列預設與舊搜尋；\nSEARCH_48 是正式擺位搜尋的每八度 48 點；驗證仍用 1 Hz 軸。",
       "enum": [
         "search_octave_24",
+        "search_octave_48",
         "verification_linear_1hz"
       ],
       "title": "LowFrequencyAxis",
@@ -1045,7 +1046,7 @@
     "low_frequency_axis": {
       "$ref": "#/$defs/LowFrequencyAxis",
       "default": "search_octave_24",
-      "description": "低頻報表軸；省略時用正式 1/24 八度搜尋軸，驗證用 20–300 Hz 每 1 Hz",
+      "description": "低頻報表軸；search_octave_24 為舊搜尋軸（每八度 24 點，單方案省略時的預設），search_octave_48 為正式擺位搜尋軸（每八度 48 點），verification_linear_1hz 為驗證軸（20–300 Hz 每 1 Hz）",
       "quantity": "頻率軸身分",
       "reference": "沒有基準（只是文字或狀態，不是量測值）",
       "unit": "1",

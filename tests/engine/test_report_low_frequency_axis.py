@@ -176,16 +176,18 @@ def _shared_axis_report(
     return _solve_with_axis(solved, axis, cache=(tmp_path_factory, worker_id))
 
 
+@pytest.mark.parametrize("axis", (LowFrequencyAxis.SEARCH, LowFrequencyAxis.SEARCH_48))
 def test_two_complete_reports_keep_high_points_and_decay_identical(
+    axis: LowFrequencyAxis,
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
     inputs = _inputs()
     solved = report_io.solver_inputs(inputs)
-    search = _shared_axis_report(tmp_path_factory, worker_id, solved, LowFrequencyAxis.SEARCH)
+    search = _shared_axis_report(tmp_path_factory, worker_id, solved, axis)
     verification = _shared_axis_report(tmp_path_factory, worker_id, solved, LowFrequencyAxis.VERIFICATION)
-    assert search.low_frequency_axis is LowFrequencyAxis.SEARCH
+    assert search.low_frequency_axis is axis
     assert verification.low_frequency_axis is LowFrequencyAxis.VERIFICATION
     assert verification.fem_frequencies_hz == VERIFICATION_FEM_FREQUENCIES_HZ
     assert tuple(p.frequency_hz for p in verification.points) == VERIFICATION_REPORT_FREQUENCIES_HZ
@@ -419,3 +421,13 @@ def test_solver_inputs_carry_the_axis_from_the_input_file(
 
     assert report.low_frequency_axis is LowFrequencyAxis.VERIFICATION
     assert report.fem_frequencies_hz == VERIFICATION_FEM_FREQUENCIES_HZ
+
+
+def test_search_48_report_axis_composes_low_and_unchanged_high_points() -> None:
+    from aosr.config.frequency_axis import SEARCH_48_FEM_FREQUENCIES_HZ, SEARCH_48_REPORT_FREQUENCIES_HZ
+
+    low, report = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH_48)
+    assert low == SEARCH_48_FEM_FREQUENCIES_HZ
+    assert report == SEARCH_48_REPORT_FREQUENCIES_HZ == (
+        low + tuple(f for f in GEOMETRIC_LANE_FREQUENCIES_HZ if f > 300.0))
+    assert all(left < right for left, right in zip(report, report[1:]))

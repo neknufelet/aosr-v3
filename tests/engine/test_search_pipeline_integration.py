@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.capabilities import load_capabilities
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room, Wall
@@ -39,7 +40,8 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
 
     # 一階反射、兩批各一個：真實串接只要證明「擺法→方案→物理→評估→排名→帳本→取樣器」接得起來，
     # 物理數值另有考卷；三階與四個候選要四分多鐘，一階與兩個候選約幾十秒（雲端時間吃緊，#586）。
-    store, registry = make_store(tmp_path, budget=2, batch=1, scene_changes={"reflection_order_k": 1})
+    # #435 實量 48 點較慢；本題驗接線，依 #586 雲端時間預算明寫舊 24 點軸。
+    store, registry = make_store(tmp_path, budget=2, batch=1, scene_changes={"reflection_order_k": 1, "low_frequency_axis": LowFrequencyAxis.SEARCH})
     source = next((Path(__file__).resolve().parents[2] / "src" / "aosr" / "config" / "data").glob("capabilities.*"))
     capabilities_path = tmp_path / "capabilities"
     capabilities_path.write_bytes(source.read_bytes())
@@ -96,7 +98,8 @@ def test_furniture_one_batch_through_the_real_pipeline(tmp_path: Path, monkeypat
     # 跟上一題同樣只替換有限元素控制組、一階反射；一批三個（試算 0 被擋、1 越界、2 合法），
     # 只有原方案與試算 2 真的算。真子行程（scheme_cli 與 fem-slice 全套真物理）同一題實跑要十分鐘以上，
     # 只在 #559 第七支第三步的合併請求留一次實跑紀錄，不放進考卷。
-    store, registry = furnished_store(tmp_path, scene_changes={"reflection_order_k": 1})
+    # #435 家具串接在 48 點也較慢；同上明寫舊 24 點，不把解析度成本塞進接線題。
+    store, registry = furnished_store(tmp_path, scene_changes={"reflection_order_k": 1, "low_frequency_axis": LowFrequencyAxis.SEARCH})
     enqueue_hand_placements(monkeypatch)
     source = next((Path(__file__).resolve().parents[2] / "src" / "aosr" / "config" / "data").glob("capabilities.*"))
     capabilities_path = tmp_path / "capabilities"

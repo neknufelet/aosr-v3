@@ -44,9 +44,10 @@ def test_planned_points_keep_axis_order_and_half_open_bounds() -> None:
     assert LATE_DECAY_FREQUENCIES_HZ is GEOMETRIC_LANE_FREQUENCIES_HZ
 
 
-def test_axis_identity_changes_only_low_wall_pair_plans() -> None:
+@pytest.mark.parametrize("identity", (LowFrequencyAxis.VERIFICATION, LowFrequencyAxis.SEARCH_48))
+def test_axis_identity_changes_only_low_wall_pair_plans(identity: LowFrequencyAxis) -> None:
     search = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[1]
-    verification = low_frequency_axis_frequencies(LowFrequencyAxis.VERIFICATION)[1]
+    verification = low_frequency_axis_frequencies(identity)[1]
     bands = third_octave_bands()
     for band in bands:
         searched = planned_band_points(search, band.lower_hz, band.upper_hz)
@@ -233,12 +234,14 @@ def test_failed_octave_keeps_its_own_reason_although_its_points_are_missing(
     assert cell.reason_codes == (ReasonCode.INSUFFICIENT_DECAY_RANGE,)
 
 
+@pytest.mark.parametrize("identity", (LowFrequencyAxis.VERIFICATION, LowFrequencyAxis.SEARCH_48))
 def test_whole_room_plan_does_not_follow_the_report_axis_identity(
+    identity: LowFrequencyAxis,
     solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
 ) -> None:
     """晚期衰減一律走正式細軸：報表換成驗證軸身分，整房側 21 個子帶仍全部照計畫算齊。"""
     report, inputs = solved_report
-    verification = LowFrequencyAxis.VERIFICATION
+    verification = identity
     built = build_third_octave_decay(
         replace(report, low_frequency_axis=verification),
         inputs.model_copy(update={"low_frequency_axis": verification}))

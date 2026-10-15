@@ -124,3 +124,15 @@ def test_module_docstring_anchors_only_live_accepted_decision_papers() -> None:
         assert folder == "decisions", f"{folder}/{name}"
         text = (decisions_dir / name).read_text(encoding="utf-8")
         assert "\nstatus: accepted\n" in text, name
+
+
+def test_search_48_axis_keeps_24_points_and_half_step_at_crossover() -> None:
+    """防換錯共用解析度、漏上界內最後點或拼接時重複／跳點。"""
+    assert hasattr(frequency_axis_config.LowFrequencyAxis, "SEARCH_48")
+    axis = frequency_axis_config.SEARCH_48_FEM_FREQUENCIES_HZ
+    assert axis[0] == 20.0
+    assert all(f == 20.0 * 2.0 ** (i / 48) for i, f in enumerate(axis))
+    assert axis[-1] <= 300.0 < axis[-1] * 2.0 ** (1.0 / 48)
+    assert axis[::2] == frequency_axis_config.FEM_LANE_FREQUENCIES_HZ
+    high = next(f for f in frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ if f > 300.0)
+    assert math.isclose(math.log2(high / axis[-1]), 1.0 / 48, abs_tol=1e-14)

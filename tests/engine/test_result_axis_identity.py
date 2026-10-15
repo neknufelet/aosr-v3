@@ -54,12 +54,13 @@ def test_the_control_result_passes(wall_1: SchemeResult) -> None:
     check_declared_axes(SchemeResult.model_validate(wall_1.model_dump(mode="json")))
 
 
-def test_declaring_another_axis_is_refused(wall_1: SchemeResult) -> None:
+@pytest.mark.parametrize("axis", (LowFrequencyAxis.VERIFICATION, LowFrequencyAxis.SEARCH_48))
+def test_declaring_another_axis_is_refused(wall_1: SchemeResult, axis: LowFrequencyAxis) -> None:
     document = wall_1.model_dump(mode="json")
     top = _report(document, 0)["top"]
     assert isinstance(top, dict)
-    top["low_frequency_axis"] = LowFrequencyAxis.VERIFICATION.value
-    with pytest.raises(ValueError, match=_refusal(LowFrequencyAxis.VERIFICATION.value, "逐點表")):
+    top["low_frequency_axis"] = axis.value
+    with pytest.raises(ValueError, match=_refusal(axis.value, "逐點表")):
         _checked(document)
 
 
@@ -112,3 +113,17 @@ def test_an_older_physics_result_is_marked_for_recalculation_not_refused(wall_1:
     older = "phys-v1:" + "0" * 64
     assert wall_1.physics_identity != older
     assert _load(_mislabelled(wall_1, tmp_path), older) is ResultStanding.NEEDS_PHYSICS
+
+
+def test_legacy_24_result_with_old_physics_loads_as_needs_physics(wall_1: SchemeResult, tmp_path: Path) -> None:
+    """舊物理身分的 24 點存檔仍可讀、重評並標重算，不覆寫或拒收。"""
+    # #435 改前以正式 physics_identity_parts（物理身分入口）實量。
+    older = "phys-v1:f7c4a8d9ed68c6637fbf664b7d176219bbee1ec8d393ced55dfc3fc399558291"
+    legacy = wall_1.model_copy(update={"physics_identity": older})
+    assert legacy.physics_identity != wall_1.physics_identity
+    assert all(pair.report.top.low_frequency_axis is LowFrequencyAxis.SEARCH for pair in legacy.pairs)
+    path = tmp_path / "legacy.json"
+    save_result(legacy, path)
+    before = path.read_bytes()
+    assert _load(path, wall_1.physics_identity) is ResultStanding.NEEDS_PHYSICS
+    assert path.read_bytes() == before

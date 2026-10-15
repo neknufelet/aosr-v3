@@ -12,6 +12,10 @@
 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 與
 ``docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md``：
 20 Hz 起、每八度 24 份；有限元素只收不高於 300 Hz 的公式格點。
+``SEARCH``（每八度 24 點）保留給網頁單方案、命令列預設與舊搜尋；
+``SEARCH_48``（每八度 48 點）給正式擺位搜尋，只改搜尋解析度。
+48 點搜尋報表在 300 Hz 以上仍接原幾何路細軸，晚期衰減與最後入選候選的
+20–300 Hz 每 1 Hz 驗證軸不變，見 ``docs/decisions/shared-search-flow-v1-stage-two-subset.md``。
 """
 
 from __future__ import annotations
@@ -136,6 +140,20 @@ def planned_band_points(
     return tuple(frequency for frequency in axis_hz
                  if lower_hz <= frequency < upper_hz)
 
+# 正式擺位搜尋只加密低頻；300 Hz 以上沿用幾何路細軸，不更動晚期衰減。
+SEARCH_48_POINTS_PER_OCTAVE: int = 48
+SEARCH_48_FEM_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
+    "octave_fraction", V3_AXIS_START_HZ, FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+    per_octave=SEARCH_48_POINTS_PER_OCTAVE,
+)
+SEARCH_48_REPORT_FREQUENCIES_HZ: tuple[float, ...] = (
+    SEARCH_48_FEM_FREQUENCIES_HZ
+    + tuple(
+        frequency for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
+        if frequency > FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+    )
+)
+
 # 驗證報表的低頻 1 Hz 軸見 docs/decisions/shared-search-flow-v1-stage-two-subset.md 第六節（自驗證報表紙搬入）。
 VERIFICATION_AXIS_STEP_HZ: float = 1.0
 VERIFICATION_FEM_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
@@ -152,9 +170,14 @@ VERIFICATION_REPORT_FREQUENCIES_HZ: tuple[float, ...] = (
 
 
 class LowFrequencyAxis(StrEnum):
-    """報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。"""
+    """報表低頻取樣軸。
+
+    SEARCH 是每八度 24 點，供網頁單方案、命令列預設與舊搜尋；
+    SEARCH_48 是正式擺位搜尋的每八度 48 點；驗證仍用 1 Hz 軸。
+    """
 
     SEARCH = "search_octave_24"
+    SEARCH_48 = "search_octave_48"
     VERIFICATION = "verification_linear_1hz"
 
 
@@ -164,6 +187,8 @@ def low_frequency_axis_frequencies(
     """依報表軸身分回傳有限元素軸與整條報表逐點軸。"""
     if axis is LowFrequencyAxis.SEARCH:
         return FEM_LANE_FREQUENCIES_HZ, GEOMETRIC_LANE_FREQUENCIES_HZ
+    if axis is LowFrequencyAxis.SEARCH_48:
+        return SEARCH_48_FEM_FREQUENCIES_HZ, SEARCH_48_REPORT_FREQUENCIES_HZ
     if axis is LowFrequencyAxis.VERIFICATION:
         return VERIFICATION_FEM_FREQUENCIES_HZ, VERIFICATION_REPORT_FREQUENCIES_HZ
     raise ValueError(f"未知的低頻報表軸：{axis!r}")

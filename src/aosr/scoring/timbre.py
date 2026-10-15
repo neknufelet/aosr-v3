@@ -69,7 +69,7 @@ _MAY_BE_ZERO: Final[frozenset[str]] = frozenset(
     {"smoothing_width_octave_ripple", "feature_min_width_octave"}
 )
 _TARGET_TILT_UNIT: Final[Unit] = "dB/oct"
-# 分數八度視窗邊界的捨入護欄：1/24 八度細軸上視窗邊緣剛好落在格點，對數頻率的捨入
+# 分數八度視窗邊界的捨入護欄：1/24 與 1/48 八度軸上視窗邊緣剛好落在格點，對數頻率的捨入
 # 會讓同一個距離一側算進、一側算不進（視窗歪一格，平滑值就跳）。護欄只吸收機器捨入
 # （epsilon，機器精度），不是品質門檻。
 _WINDOW_ROUNDING_OCT: Final[float] = 64.0 * float(np.finfo(float).eps)
