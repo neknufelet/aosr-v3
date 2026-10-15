@@ -6,16 +6,28 @@ import signal
 import subprocess
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
+from aosr.config.frequency_axis import LowFrequencyAxis
+from aosr.reporting.result import SchemeResult
 from aosr.runtime import child_process_env
 from aosr.search.run import SearchStatus
 from aosr.search.settings import SearchSettings
 from tests.engine._search_worker_cases import CLI_SCRIPT, ENTRY_SCRIPT, prepared_result
+from tests.engine.test_scheme_pipeline import _run_control, _scheme
 from tests.engine.test_search_cli import opened, start_args
 from tests.engine.test_search_worker import assert_dead, events, setup_worker
+
+
+@lru_cache
+def _template_48() -> SchemeResult:
+    """#435 起開新搜尋把省略的低頻軸補成 48 點；CLI_SCRIPT 把搜尋專案接進範本，範本要用同一條軸算（替身物理）。"""
+    scheme = _scheme("wall-1")
+    return _run_control(scheme.model_copy(update={"scene": scheme.scene.model_copy(
+        update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})}))
 
 
 def launch(tmp_path: Path, options: dict[str, object]) -> subprocess.Popen[bytes]:
@@ -25,6 +37,7 @@ def launch(tmp_path: Path, options: dict[str, object]) -> subprocess.Popen[bytes
     args = start_args(tmp_path)
     project_path = Path(args[args.index("--project") + 1])
     project_path.write_text(prepared_result(tmp_path).scheme.model_dump_json())
+    (tmp_path / "template").write_text(_template_48().model_dump_json(), encoding="utf-8")
     settings_path = Path(args[args.index("--settings") + 1])
     settings = SearchSettings.model_validate_json(settings_path.read_bytes())
     settings_path.write_text(settings.model_copy(update={"batch_size": 2, "max_workers": 2}).model_dump_json())

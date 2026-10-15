@@ -240,3 +240,31 @@ def test_resume_checks_both_search_axes_and_refuses_verification(
     else:
         assert status.state == "budget_exhausted"
         assert compute.calls
+
+
+def test_old_snapshot_without_axis_resumes_unchanged(tmp_path: Path) -> None:
+    """#435 之前建的搜尋快照那一格是 null：接續照准，讀回不補 48，快照與帳本表頭都不改寫。"""
+    from aosr.search.ledger import header_for
+    from aosr.search.run import resume_search
+    from aosr.search.store import PROJECT_FILE, SearchStore
+    from tests.engine._search_run_cases import ENGINE, RUN_DATE, FakeCompute, Killed, make_store, run
+
+    created, registry = make_store(tmp_path, budget=6, batch=1)
+    snapshot = json.loads((created.path / PROJECT_FILE).read_text())
+    snapshot["scene"]["low_frequency_axis"] = None
+    (created.path / PROJECT_FILE).write_text(json.dumps(snapshot))
+    old = SearchStore.open(created.path)
+    assert old.project.scene.low_frequency_axis is None
+    with pytest.raises(Killed):
+        run(old, registry, FakeCompute(old, fail_after=1, kill=True, persist_baseline=True))
+    project_bytes = (created.path / PROJECT_FILE).read_bytes()
+    header_line = old.ledger_path.read_bytes().splitlines()[0]
+    reopened = SearchStore.open(created.path)
+    assert header_for(reopened) == header_for(old)
+    compute = FakeCompute(reopened)
+    status = resume_search(reopened, compute=compute, probe=lambda: reopened.identity,
+                           registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    assert status.state == "budget_exhausted" and compute.calls
+    assert reopened.project.scene.low_frequency_axis is None
+    assert (created.path / PROJECT_FILE).read_bytes() == project_bytes
+    assert reopened.ledger_path.read_bytes().splitlines()[0] == header_line

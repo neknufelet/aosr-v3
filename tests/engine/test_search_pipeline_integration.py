@@ -7,20 +7,21 @@ from pathlib import Path
 
 import pytest
 
-from aosr.config.frequency_axis import LowFrequencyAxis
+from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_frequencies
 from aosr.config.capabilities import load_capabilities
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import three_lane_report
 from aosr.reporting.pipeline import run_scheme
-from aosr.reporting.result import save_result
+from aosr.reporting.result import SchemeResult, save_result
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import RankingContext, comparison_identity_of
-from aosr.search.store import SearchIdentity
+from aosr.search.store import SearchIdentity, SearchStore
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._scoring_source_model_control import STAND_INS
 from tests.engine._source_model_control import fake_fem_energy
 from tests.engine._search_run_cases import ENGINE, RUN_DATE, make_store, next_params, rows
+from tests.engine._search_store_cases import reference_project
 
 
 def _many_fem(*, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
@@ -34,14 +35,35 @@ def _many_fem(*, room: Room, sources: Mapping[str, Point], receivers: Mapping[st
     ) for speaker, source_point in sources.items() for receiver, receiver_point in receivers.items()}
 
 
+def _assert_axis_reaches_results(store: SearchStore, numbers: Sequence[int | None], axis: LowFrequencyAxis) -> None:
+    """補上的軸要原樣串到每一份存下的結果：重開的快照、方案、輸入文件、報表頂欄、逐點表與路徑表。"""
+    assert SearchStore.open(store.path).project.scene.low_frequency_axis is axis
+    expected = low_frequency_axis_frequencies(axis)[1]
+    for number in numbers:
+        result = SchemeResult.model_validate_json(
+            (store.baseline_path if number is None else store.candidate_path(number)).read_bytes())
+        assert result.scheme.scene.low_frequency_axis is axis
+        assert result.pairs
+        for pair in result.pairs:
+            assert pair.input_document["low_frequency_axis"] == axis.value
+            assert pair.report.top.low_frequency_axis is axis
+            assert pair.report.points is not None
+            assert tuple(point.frequency_hz for point in pair.report.points) == expected
+            assert pair.report.path_table is not None and pair.report.path_table.frequencies_hz == expected
+
+
 def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """防真實候選全被報不能同表或原方案偷換聲源模型；舊題只查算完題數與檔案存在。"""
     from aosr.search.run import CandidateJob, ComputedCandidate, start_search
 
     # 一階反射、兩批各一個：真實串接只要證明「擺法→方案→物理→評估→排名→帳本→取樣器」接得起來，
     # 物理數值另有考卷；三階與四個候選要四分多鐘，一階與兩個候選約幾十秒（雲端時間吃緊，#586）。
-    # #435 實量 48 點較慢；本題驗接線，依 #586 雲端時間預算明寫舊 24 點軸。
-    store, registry = make_store(tmp_path, budget=2, batch=1, scene_changes={"reflection_order_k": 1, "low_frequency_axis": LowFrequencyAxis.SEARCH})
+    # #435：專案故意不寫低頻軸，由搜尋建立補成 48 點，再一路串到存下的結果（審查要的那條接線）；
+    # 實量比 24 點多約 0.4 秒。下一題明寫舊 24 點軸，兩條軸都走過真實串接。
+    assert reference_project(tmp_path).scene.low_frequency_axis is None
+    store, registry = make_store(tmp_path, budget=2, batch=1, scene_changes={"reflection_order_k": 1})
+    axis = LowFrequencyAxis.SEARCH_48
+    assert store.project.scene.low_frequency_axis is axis
     source = next((Path(__file__).resolve().parents[2] / "src" / "aosr" / "config" / "data").glob("capabilities.*"))
     capabilities_path = tmp_path / "capabilities"
     capabilities_path.write_bytes(source.read_bytes())
@@ -54,6 +76,7 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
     def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
         assert workers == store.settings.max_workers
         for job in jobs:
+            assert job.scheme.scene.low_frequency_axis is axis
             if job.trial_number is None:
                 assert job.scheme.model_dump(exclude={"scheme_id"}) == store.project.model_dump(exclude={"scheme_id"})
             result = run_scheme(job.scheme, capabilities=capabilities, directivity=DIRECTIVITY,
@@ -87,6 +110,7 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
     assert pinned is not None
     assert all(comparison_identity_of(candidate, targets, context) == pinned
                for number, candidate in candidates.items() if number is not None)
+    _assert_axis_reaches_results(store, tuple(candidates), axis)
 
 
 def test_furniture_one_batch_through_the_real_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,7 +122,7 @@ def test_furniture_one_batch_through_the_real_pipeline(tmp_path: Path, monkeypat
     # 跟上一題同樣只替換有限元素控制組、一階反射；一批三個（試算 0 被擋、1 越界、2 合法），
     # 只有原方案與試算 2 真的算。真子行程（scheme_cli 與 fem-slice 全套真物理）同一題實跑要十分鐘以上，
     # 只在 #559 第七支第三步的合併請求留一次實跑紀錄，不放進考卷。
-    # #435 家具串接在 48 點也較慢；同上明寫舊 24 點，不把解析度成本塞進接線題。
+    # #435：本題明寫舊 24 點軸，留住「明寫 24 照開搜尋」的真實串接；省略軸補 48 那條由上一題走。
     store, registry = furnished_store(tmp_path, scene_changes={"reflection_order_k": 1, "low_frequency_axis": LowFrequencyAxis.SEARCH})
     enqueue_hand_placements(monkeypatch)
     source = next((Path(__file__).resolve().parents[2] / "src" / "aosr" / "config" / "data").glob("capabilities.*"))
@@ -138,3 +162,4 @@ def test_furniture_one_batch_through_the_real_pipeline(tmp_path: Path, monkeypat
         assert result.pairs
         for pair in result.pairs:
             assert pair.report.path_table is not None and pair.report.path_table.furniture_ids
+    _assert_axis_reaches_results(store, tuple(submitted), LowFrequencyAxis.SEARCH)
