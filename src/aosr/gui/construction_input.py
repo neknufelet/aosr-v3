@@ -24,6 +24,9 @@ def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
 
 
 def _layers(material: dict[str, object]) -> list[object]:
+    if material.get("kind") == "measured_impedance":
+        base = material.get("base_assembly")
+        material = base if isinstance(base, dict) else {}
     layers = material.get("layers")
     return layers if isinstance(layers, list) else []
 
@@ -42,7 +45,8 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
             model = layer.get("model", MATERIAL_MODELS["porous"].model_fields["model"].default)
             sigma = layer.get("flow_resistivity_pa_s_m2")
             if model == "komatsu" and isinstance(sigma, int | float) and not low <= sigma <= high:
-                issues.append(SchemeProblem(f"scene.{ZONE_WALL_FIELD}.{wall}.0.material.assembly.layers.{index}.porous.flow_resistivity_pa_s_m2",
+                branch = "measured_impedance.base_assembly" if material.get("kind") == "measured_impedance" else "assembly"
+                issues.append(SchemeProblem(f"scene.{ZONE_WALL_FIELD}.{wall}.0.material.{branch}.layers.{index}.porous.flow_resistivity_pa_s_m2",
                     f"小松纖維模型的流阻可用範圍為 {low:g}–{high:g} Pa·s/m²；這是原研究樣品範圍，請改流阻或選合適模型"))
     return tuple(issues)
 
@@ -57,6 +61,12 @@ def material_field_values(document: dict[str, object]) -> dict[str, object]:
         if material.get("kind") == "constant_impedance":
             name = next(name for name in model.model_fields if name != "kind")
             values[f"wall-{wall}"] = material.get(name)
+        points = material.get("points")
+        if isinstance(points, list):
+            for index, point in enumerate(points):
+                if isinstance(point, dict):
+                    values.update({f"point-{wall}-{index}-{name}": value for name, value in point.items()
+                                   if isinstance(value, int | float) or value is None})
         for index, layer in enumerate(_layers(material)):
             if not isinstance(layer, dict):
                 continue

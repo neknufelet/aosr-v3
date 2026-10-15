@@ -72,3 +72,9 @@ main:has(#results-list){max-width:1220px}
 .construction-layer label{flex-direction:column;align-items:flex-start;margin:.25rem 0}
 .wall-editor p{overflow-wrap:anywhere}
 @media(max-width:500px){main{padding:.6rem}.wall-editor select{width:100%}.wall-editor label{display:flex}}
+
+/* 實測表的時間慣例完整換行；草稿與逐列數字在窄畫面上下排。 */
+.measured-draft,.measured-point{border-left:3px solid #d5e0e4;padding:.6rem;margin:.5rem 0;max-width:100%;min-width:0}
+.wall-editor textarea{box-sizing:border-box;width:100%;min-height:5em}
+.measured-draft>label,.measured-point>label{display:flex;flex-direction:column;align-items:flex-start}
+.measured-point .note{max-width:40em;margin:.3rem 0}

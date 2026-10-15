@@ -269,6 +269,13 @@ function draw() {
       rows[index + 1].cells[1].dataset.side = "A";
       rows[index + 1].cells[2].dataset.side = "B";
       if (item.material) rows[index + 1].classList.add("material-change");
+      if (item.details?.length) {
+        for (const side of [1, 2]) {
+          const details = document.createElement("div"); details.className = "measured-changes";
+          for (const detail of item.details) details.append(node("p", `${detail[0]}：${detail[side]}`));
+          rows[index + 1].cells[side].append(details);
+        }
+      }
     });
   } else $("changes").append(node("p", view.no_changes_text));
   for (const side of ["a", "b"]) {

@@ -25,7 +25,14 @@ async def main(folder: Path, identifier: str) -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://localhost') as client:
             response = await client.get(f'/api/results/{identifier}')
             assert response.status_code == 200, response.text
-            lines = response.json()['construction_notes']
+            view = response.json()
+            walls = view['measured_walls']
+            assert {row[0] for wall in walls for row in wall['rows']} == {'100 Hz', '1000 Hz'}
+            assert all('實測段假設與角度無關' in '；'.join(wall['header_lines']) for wall in walls)
+            assert all('不代表現場安裝' in '；'.join(wall['header_lines']) for wall in walls)
+            lines = view['construction_notes']
+            assert all('Komatsu' not in line for line in lines)
+            assert any('泡棉材料類別' in line and '小松纖維模型' in line for line in lines)
             assert any('地板' in line and '模型補值' in line for line in lines)
             assert any('底構造第 1 層' in line and '泡棉材料類別' in line for line in lines)
             assert any('底構造第 1 層' in line and '外推照算' in line for line in lines)

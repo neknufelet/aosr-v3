@@ -1,0 +1,479 @@
+{
+  "source_commit": "3cc9e0c1",
+  "forms": {
+    "constant_impedance": {
+      "label": "固定阻抗",
+      "fields": {
+        "kind": {
+          "label": "表面種類代號",
+          "unit": "",
+          "options": {
+            "constant_impedance": "固定阻抗"
+          },
+          "default": "constant_impedance"
+        },
+        "impedance_pa_s_m": {
+          "label": "阻抗",
+          "unit": "Pa·s/m",
+          "options": {},
+          "default": null
+        }
+      }
+    },
+    "assembly": {
+      "label": "多層構造",
+      "fields": {
+        "kind": {
+          "label": "表面種類代號",
+          "unit": "",
+          "options": {
+            "assembly": "多層構造"
+          },
+          "default": "assembly"
+        },
+        "layers": {
+          "label": "至少一層",
+          "unit": "依房間側到牆體側排序",
+          "options": {},
+          "default": null
+        },
+        "backing": {
+          "label": "背後負載",
+          "unit": "",
+          "options": {
+            "rigid": "剛背",
+            "air": "空氣負載"
+          },
+          "default": null
+        }
+      }
+    },
+    "porous": {
+      "label": "多孔層",
+      "fields": {
+        "kind": {
+          "label": "層種類代號",
+          "unit": "",
+          "options": {
+            "porous": "多孔層"
+          },
+          "default": "porous"
+        },
+        "thickness_m": {
+          "label": "層厚度",
+          "unit": "m",
+          "options": {},
+          "default": null
+        },
+        "flow_resistivity_pa_s_m2": {
+          "label": "流阻",
+          "unit": "Pa·s/m²",
+          "options": {},
+          "default": null
+        },
+        "model": {
+          "label": "多孔模型",
+          "unit": "",
+          "options": {
+            "komatsu": "小松纖維經驗式",
+            "miki": "三木纖維經驗式",
+            "wilson_2015": "威爾森鬆弛模型",
+            "mechel_1976": "梅歇爾低頻延伸式"
+          },
+          "default": "komatsu"
+        },
+        "material_class": {
+          "label": "材料類別",
+          "unit": "",
+          "options": {
+            "fibrous": "纖維類",
+            "foam": "泡棉"
+          },
+          "default": null
+        },
+        "porosity": {
+          "label": "孔隙率",
+          "unit": "無量綱",
+          "options": {},
+          "default": null
+        },
+        "tortuosity": {
+          "label": "曲折度",
+          "unit": "無量綱",
+          "options": {},
+          "default": null
+        }
+      }
+    },
+    "air": {
+      "label": "空氣層",
+      "fields": {
+        "kind": {
+          "label": "層種類代號",
+          "unit": "",
+          "options": {
+            "air": "空氣層"
+          },
+          "default": "air"
+        },
+        "thickness_m": {
+          "label": "空腔厚度",
+          "unit": "m",
+          "options": {},
+          "default": null
+        }
+      }
+    },
+    "board": {
+      "label": "薄板層",
+      "fields": {
+        "kind": {
+          "label": "層種類代號",
+          "unit": "",
+          "options": {
+            "board": "薄板層"
+          },
+          "default": "board"
+        },
+        "surface_mass_kg_m2": {
+          "label": "面密度",
+          "unit": "kg/m²",
+          "options": {},
+          "default": null
+        },
+        "resistance_pa_s_m": {
+          "label": "面阻力",
+          "unit": "Pa·s/m",
+          "options": {},
+          "default": null
+        }
+      }
+    }
+  },
+  "previews": {
+    "fixed": {
+      "readonly": [],
+      "coordinates": {},
+      "height_problems": {},
+      "placement_warnings": [],
+      "furniture_items": [],
+      "furniture_controls": {
+        "sofa": true,
+        "table": true,
+        "cloud": true
+      },
+      "field_values": {
+        "room-Lx": {
+          "value": 6.0,
+          "text": "6"
+        },
+        "room-Ly": {
+          "value": 4.0,
+          "text": "4"
+        },
+        "room-Lz": {
+          "value": 3.0,
+          "text": "3"
+        },
+        "wall-floor": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-ceiling": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-x0": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-xL": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-y0": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-yL": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "speaker-left-x": {
+          "value": 1.0,
+          "text": "1"
+        },
+        "speaker-left-y": {
+          "value": 1.3,
+          "text": "1.3"
+        },
+        "speaker-left-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "speaker-right-x": {
+          "value": 1.0,
+          "text": "1"
+        },
+        "speaker-right-y": {
+          "value": 2.5,
+          "text": "2.5"
+        },
+        "speaker-right-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-main-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-main-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-main-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-front-x": {
+          "value": 3.1,
+          "text": "3.1"
+        },
+        "receiver-front-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-front-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-back-x": {
+          "value": 3.3,
+          "text": "3.3"
+        },
+        "receiver-back-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-back-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-left-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-left-y": {
+          "value": 1.8,
+          "text": "1.8"
+        },
+        "receiver-left-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-right-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-right-y": {
+          "value": 2.0,
+          "text": "2"
+        },
+        "receiver-right-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-up-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-up-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-up-z": {
+          "value": 1.3,
+          "text": "1.3"
+        },
+        "receiver-down-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-down-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-down-z": {
+          "value": 1.1,
+          "text": "1.1"
+        }
+      },
+      "stand_hint": "",
+      "mounts": []
+    },
+    "assembly": {
+      "readonly": [],
+      "coordinates": {},
+      "height_problems": {},
+      "placement_warnings": [],
+      "furniture_items": [],
+      "furniture_controls": {
+        "sofa": true,
+        "table": true,
+        "cloud": true
+      },
+      "field_values": {
+        "room-Lx": {
+          "value": 6.0,
+          "text": "6"
+        },
+        "room-Ly": {
+          "value": 4.0,
+          "text": "4"
+        },
+        "room-Lz": {
+          "value": 3.0,
+          "text": "3"
+        },
+        "layer-floor-0-thickness_m": {
+          "value": 0.05,
+          "text": "0.05"
+        },
+        "layer-floor-0-flow_resistivity_pa_s_m2": {
+          "value": 19100.0,
+          "text": "19100"
+        },
+        "wall-ceiling": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-x0": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-xL": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-y0": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "wall-yL": {
+          "value": 1646.4,
+          "text": "1646.4"
+        },
+        "speaker-left-x": {
+          "value": 1.0,
+          "text": "1"
+        },
+        "speaker-left-y": {
+          "value": 1.3,
+          "text": "1.3"
+        },
+        "speaker-left-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "speaker-right-x": {
+          "value": 1.0,
+          "text": "1"
+        },
+        "speaker-right-y": {
+          "value": 2.5,
+          "text": "2.5"
+        },
+        "speaker-right-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-main-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-main-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-main-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-front-x": {
+          "value": 3.1,
+          "text": "3.1"
+        },
+        "receiver-front-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-front-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-back-x": {
+          "value": 3.3,
+          "text": "3.3"
+        },
+        "receiver-back-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-back-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-left-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-left-y": {
+          "value": 1.8,
+          "text": "1.8"
+        },
+        "receiver-left-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-right-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-right-y": {
+          "value": 2.0,
+          "text": "2"
+        },
+        "receiver-right-z": {
+          "value": 1.2,
+          "text": "1.2"
+        },
+        "receiver-up-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-up-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-up-z": {
+          "value": 1.3,
+          "text": "1.3"
+        },
+        "receiver-down-x": {
+          "value": 3.2,
+          "text": "3.2"
+        },
+        "receiver-down-y": {
+          "value": 1.9,
+          "text": "1.9"
+        },
+        "receiver-down-z": {
+          "value": 1.1,
+          "text": "1.1"
+        }
+      },
+      "stand_hint": "",
+      "mounts": []
+    }
+  }
+}

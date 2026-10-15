@@ -232,6 +232,20 @@ function drawReflections() {
     target.append(block);
   }
 }
+function drawMeasuredWalls() {
+  const walls = view.measured_walls || [];
+  $("measured-walls").hidden = !walls.length;
+  const target = $("measured-wall-details"); target.replaceChildren();
+  for (const wall of walls) {
+    const block = node("div", ""); block.className = "measured-wall";
+    block.append(node("h3", wall.wall_name));
+    for (const line of wall.header_lines) block.append(node("p", line));
+    block.append(node("h4", wall.seam_heading), node("p", wall.seam_note));
+    const wrapper = node("div", ""); wrapper.className = "table-wrap";
+    const seams = tableElement(["端點頻率", "量", "實測", "底構造", "差"], wall.rows);
+    seams.classList.add("measured-seams"); wrapper.append(seams); block.append(wrapper); target.append(block);
+  }
+}
 function drawConstructionNotes() {
   const lines = view.construction_notes || [];
   $("construction-notes").hidden = !lines.length;
@@ -318,7 +332,7 @@ async function load() {
   if (view.rerun_url) $("fingerprint-rerun").onclick = () =>
     rerun(view.rerun_url, "fingerprint-rerun-state", $("fingerprint-rerun"));
   selectedRole = view.frequency_responses[0]?.role;
-  drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections(); drawFurniture(); drawConstructionNotes();
+  drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections(); drawFurniture(); drawConstructionNotes(); drawMeasuredWalls();
   loadModalDiagnosis(resultId);
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {

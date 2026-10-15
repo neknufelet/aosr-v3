@@ -332,7 +332,7 @@ async function editInput(actionName, value, wall) {
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
-  const walls = Object.keys(wallNames).filter(name => wallMaterial(name).kind === "constant_impedance");
+  const walls = Object.keys(wallNames).filter(name => wallMaterial(name).kind === "constant_impedance" && !measuredDrafts[name]);
   const sent = Object.fromEntries(walls.map((name) => [name, $(`wall-${name}`).value]));
   const checked = await api("/api/validate", "POST", collect());
   if (asked !== multiplesAsked) return;
@@ -410,6 +410,8 @@ async function openScheme() {
     sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
     return;
   }
+  for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
+  renderWalls();
   openedId = name;
   $("scheme-archive-notice").hidden = true;
   $("result-link").hidden = true;
@@ -692,7 +694,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("walls").addEventListener("input", event => {
     if (!event.target.matches("input[data-layer-field]")) return;
     collectWallMaterials();
-    for (const name of Object.keys(wallNames)) if (wallMaterial(name).kind === "assembly") showPresetState(name);
+    for (const name of Object.keys(wallNames)) if (["assembly", "measured_impedance"].includes(wallMaterial(name).kind) && !measuredDrafts[name]) showPresetState(name);
   });
   $("furniture-sofa").onchange = () => action(() => editInput($("furniture-sofa").checked ? "furniture" : "remove_furniture", "sofa"));
   $("furniture-cloud").onchange = () => action(() => editInput($("furniture-cloud").checked ? "furniture" : "remove_furniture", $("furniture-cloud").checked ? "ceiling_cloud" : "cloud"));

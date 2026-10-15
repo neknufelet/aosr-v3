@@ -20,8 +20,10 @@ function wallSelect(id, label, choices, value) {
   chooseOptions(select, Object.keys(choices), choices, value);
   wrap.append(select); return wrap;
 }
-function showPresetState(name) {
-  const material = wallMaterial(name);
+function assemblyMaterial(material) {
+  return material.kind === "measured_impedance" ? material.base_assembly : material;
+}
+function showPresetState(name, material = assemblyMaterial(wallMaterial(name))) {
   const preset = matchingPreset(material);
   $(`preset-state-${name}`).textContent = preset ? `使用預設：${preset.label}` : "自訂構造（參數與預設不完全相同）";
   $(`preset-${name}`).value = preset?.id ?? "";
@@ -35,12 +37,14 @@ function showPresetState(name) {
     }
   }
 }
-function renderAssembly(name, material, row) {
+function renderAssembly(name, material, row, onPreset = null) {
   const matched = matchingPreset(material);
   const choices = {"": "自訂構造", ...Object.fromEntries(inputDefaults.construction_presets.map(p => [p.id, p.label]))};
   const selector = wallSelect(`preset-${name}`, `${wallNames[name]}構造預設`, choices, matched?.id ?? "");
   selector.querySelector("option").disabled = true;
-  selector.querySelector("select").onchange = event => action(() => editInput("wall_preset", event.target.value, name));
+  selector.querySelector("select").onchange = event => action(() => onPreset
+    ? onPreset(inputDefaults.construction_presets.find(p => p.id === event.target.value))
+    : editInput("wall_preset", event.target.value, name));
   row.append(selector);
   const state = document.createElement("p"); state.id = `preset-state-${name}`; row.append(state);
   const details = document.createElement("details"); details.id = `construction-${name}`; details.open = true;
@@ -66,7 +70,7 @@ function renderAssembly(name, material, row) {
   const notes = document.createElement("p"); notes.id = `preset-notes-${name}`; notes.className = "note"; row.append(notes);
   const source = document.createElement("details"); const heading = document.createElement("summary"); heading.textContent = "預設數字的出處";
   const body = document.createElement("div"); body.id = `preset-source-${name}`; source.append(heading, body); row.append(source);
-  showPresetState(name);
+  showPresetState(name, material);
 }
 function renderWalls() {
   $("walls").replaceChildren();
@@ -75,33 +79,29 @@ function renderWalls() {
     const material = wallMaterial(name);
     const row = document.createElement("div"); row.className = "wall-editor row"; row.id = `wall-editor-${name}`;
     const choice = wallSelect(`material-kind-${name}`, `${wallNames[name]}材料`,
-      Object.fromEntries(["constant_impedance", "assembly"].map(kind => [kind, spec[kind].label])), material.kind);
+      Object.fromEntries(["constant_impedance", "assembly", "measured_impedance"].map(kind => [kind, spec[kind].label])), material.kind);
     choice.querySelector("select").onchange = event => action(() => changeWallKind(name, event.target.value));
     row.append(choice); $("walls").append(row);
-    if (material.kind === "constant_impedance") {
+    if (measuredDrafts[name]) {
+      choice.querySelector("select").value = "measured_impedance";
+      renderMeasuredDraft(name, row);
+    } else if (material.kind === "constant_impedance") {
       row.append(numberField(`wall-${name}`, `${wallNames[name]}阻抗（帕·秒／公尺）`, material.impedance_pa_s_m));
       const multiple = document.createElement("span"); multiple.id = `multiple-${name}`; row.append(multiple);
     } else if (material.kind === "assembly") renderAssembly(name, material, row);
-    else {
-      const notice = document.createElement("p");
-      notice.textContent = "這一版網頁還不能編輯實測阻抗表的牆"; row.append(notice);
-    }
+    else if (material.kind === "measured_impedance") renderMeasured(name, material, row);
   }
 }
 function collectWallMaterials() {
   for (const name of Object.keys(wallNames)) {
     const material = wallMaterial(name);
+    if (measuredDrafts[name]) continue;
     if (material.kind === "constant_impedance") {
       if (scheme.scene.surface_zones_by_wall) material.impedance_pa_s_m = numericInput(`wall-${name}`);
       else scheme.scene.impedance_pa_s_per_m_by_wall[name] = numericInput(`wall-${name}`);
     } else if (material.kind === "assembly") {
-      material.layers.forEach((layer, index) => {
-        for (const input of document.querySelectorAll(`#wall-editor-${name} input[data-layer-field]`)) {
-          if (input.id === `layer-${name}-${index}-${input.dataset.layerField}`)
-            layer[input.dataset.layerField] = numericInput(input.id);
-        }
-      });
-    }
+      collectAssembly(name, material);
+    } else if (material.kind === "measured_impedance") collectMeasured(name, material);
   }
 }
 function wallDocument() {
@@ -114,9 +114,25 @@ function wallDocument() {
   return document;
 }
 async function changeWallKind(name, kind) {
-  if (kind === "assembly") return editInput("wall_preset", inputDefaults.construction_presets[0].id, name);
+  if (kind === "measured_impedance") return startMeasuredDraft(name);
+  if (measuredDrafts[name]) {
+    delete measuredDrafts[name]; renderWalls();
+    if (wallMaterial(name).kind === kind) return;
+  }
+  if (kind === "assembly" && wallMaterial(name).kind !== "measured_impedance") return editInput("wall_preset", inputDefaults.construction_presets[0].id, name);
   const document = wallDocument();
-  document.scene.surface_zones_by_wall[name][0].material = {
+  document.scene.surface_zones_by_wall[name][0].material = kind === "assembly"
+    ? structuredClone(wallMaterial(name).base_assembly) : {
     kind: "constant_impedance", impedance_pa_s_m: fixedWallDefaults[name]};
   if (await changeInputScheme(async () => document)) { markStale(); await refreshPlan(); }
+}
+
+function collectAssembly(name, material) {
+  if (!material) return;
+  material.layers.forEach((layer, index) => {
+    for (const input of document.querySelectorAll(`#wall-editor-${name} input[data-layer-field]`)) {
+      if (input.id === `layer-${name}-${index}-${input.dataset.layerField}`)
+        layer[input.dataset.layerField] = numericInput(input.id);
+    }
+  });
 }

@@ -118,6 +118,13 @@ def material_form_spec() -> dict[str, dict[str, object]]:
                             "options": {str(value): _enum_word(description, value) for value in choices},
                             "default": field.default if not field.is_required() else None}
         specs[kind] = {"label": _enum_word(MATERIAL_WORDS[kind]["kind"], kind), "fields": fields}
+    measured_fields = cast(dict[str, dict[str, object]], specs["measured_impedance"]["fields"])
+    measured_fields["source_and_conditions"]["hint"] = MATERIAL_WORDS["measured_impedance"]["source_and_conditions"].partition("，")[2]
+    specs["measured_impedance"]["point_fields"] = {
+        name: {"label": description.split("，", 1)[0],
+               "unit": description.split("，", 1)[1].split("；", 1)[0], "description": description}
+        for name, field in MeasuredImpedancePoint.model_fields.items()
+        for description in [(field.description or name).split("（", 1)[-1].removesuffix("）")]}
     return specs
 
 
@@ -587,7 +594,7 @@ RULES = (
                         f"（只收 {'、'.join(_quoted(match['allowed']))}）"),
     _rule(r"\S+ 必須是正實數阻抗；.*", "要大於 0（這一版只收一個正的實數阻抗）"),
     _rule(r"impedance_pa_s_per_m_by_wall\.\S+：.*",
-          "固定阻抗欄只收正實數；隨頻率變的牆請填構造，實測阻抗表還不收"),
+          "固定阻抗欄只收正實數；隨頻率變的牆請填構造或實測阻抗表"),
     _rule(r"scattering_by_wall\.\S+：散射係數只收一個實數", "散射係數只收一個數"),
     _rule(r"\S+ 必須落在 \[0,1\]（散射係數）", "要在 0 到 1 之間"),
 )

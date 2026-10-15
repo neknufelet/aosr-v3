@@ -131,6 +131,9 @@ def _placements(diagnosis: ModalDiagnosis, readout: DiagnosisReadout, scheme: Sc
 def build_modal_view(diagnosis: ModalDiagnosis, scheme: Scheme) -> ModalView:
     """四態分開；未評估不印零，群沒有代表成員，保證高度零不印無限大。"""
     reason = modal_reason(diagnosis)
+    from aosr.gui.measured_view import measured_materials
+    if diagnosis.reason_code == "construction_walls" and measured_materials(scheme):
+        reason = "有牆面用實測阻抗表，會隨頻率變；模態診斷這一版只收六面固定阻抗"
     view = ModalView(state=diagnosis.state.value, state_text=STATE_TEXT[diagnosis.state], reason_text=reason,
         can_calculate=diagnosis.state is ModalDiagnosisState.NOT_COMPUTED, compute_note=COMPUTE_NOTE)
     if diagnosis.state is not ModalDiagnosisState.DIAGNOSED_NOT_SCORED:

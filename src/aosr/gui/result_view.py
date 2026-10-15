@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
+from aosr.gui.measured_view import MeasuredWallView, build_measured_view, measured_note_text
 from aosr.gui.capability_view import capability_lists
 from aosr.gui.furniture_view import furniture_rows, furniture_surface, has_furniture_paths
 from aosr.config.quality_targets import QualityTargets, TargetEntry, load_quality_targets
@@ -246,6 +247,7 @@ class ResultView(ViewModel):
     furniture_reason: str = ""
     furniture_notes: tuple[str, ...] = ()
     construction_notes: tuple[str, ...] | None = Field(default=None, exclude_if=lambda value: value is None)
+    measured_walls: tuple[MeasuredWallView, ...] | None = Field(default=None, exclude_if=lambda value: value is None)
     furniture_flutter_text: str = ""
     frequency_note: str = ""
     ranking_approximation_text: str = ""
@@ -860,6 +862,8 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
                 base = "底構造" if isinstance(material, MeasuredImpedance) else ""
                 text = note.message.removeprefix(f"{base}第 {note.layer_index} 層：")
             base = "底構造" if isinstance(material, MeasuredImpedance) else ""
+            if isinstance(material, MeasuredImpedance):
+                text = measured_note_text(text)
             lines.append(f"{WALLS[wall.wall_name()]}{base}第 {note.layer_index} 層：{text}")
     return tuple(lines)
 
@@ -891,6 +895,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         speaker_setup_line=speaker_setup_text(result.scheme.speaker_setup) if result.scheme.speaker_setup else "",
         furniture=furniture_rows(result),
         construction_notes=_construction_notes(result) or None,
+        measured_walls=build_measured_view(result),
         furniture_reason=FURNITURE_REASON if result.scheme.furniture else "",
         furniture_notes=(FURNITURE_TRANSMISSION_NOTE, FURNITURE_DIRECTIVITY_NOTE,
                          FURNITURE_BOUNDARY_NOTE, FURNITURE_SCATTERING_NOTE,
