@@ -1,4 +1,4 @@
-"""家具能力範圍取自決策紙第 2、10、11、16、20、22、27 條，不宣稱實物精度已驗證。"""
+"""家具能力範圍取自決策紙第 2、10、11、16、20、22、23、27 條，不宣稱實物精度已驗證。"""
 from importlib.util import find_spec
 
 from aosr.config.capabilities import load_capabilities
@@ -11,9 +11,16 @@ def test_furniture_entry_declares_experimental_boxes_and_unsupported_angles() ->
     entry = load_capabilities(config_path("capabilities.toml")).for_entry("furniture_reflections")
     assert entry.module == "aosr.physics.furniture_paths" and find_spec(entry.module) is not None
     rows = {row.materials: row for row in entry.capability}
-    assert set(rows) == {"axis_aligned_boxes_estimated_absorption", "tilted_or_non_right_angle_boxes"}
+    absorption = "axis_aligned_boxes_whole_object_absorption_area"
+    assert set(rows) == {"axis_aligned_boxes_estimated_absorption", "tilted_or_non_right_angle_boxes", absorption}
     assert all(row.room == "shoebox" and row.frequency_hz == (20.0, 11166.0) for row in rows.values())
-    assert all(not row.evidence for row in rows.values())
+    assert all(not row.evidence for name, row in rows.items() if name != absorption)
+    # 家具紙第 23、27 條：整件吸音量進晚期一族，有獨立真值前最多試驗中；宣告手寫整組、每個都是報表真的有的鍵。
+    assert rows[absorption].status == "experimental"
+    assert set(rows[absorption].outputs) == {"bands.t20_s", "bands.t30_s", "bands.late_energy", "points.late_energy",
+                                             "bands.f_s_hz", "top.f_s_hz", "top.eyring_t60_by_band_s"}
+    assert set(rows[absorption].outputs) <= quantity_table().keys()
+    assert "實際家具精度未驗證" in rows[absorption].note and "已驗證" not in rows[absorption].note
     boxes = rows["axis_aligned_boxes_estimated_absorption"]
     assert boxes.status == "experimental"
     assert rows["tilted_or_non_right_angle_boxes"].status == "unsupported"

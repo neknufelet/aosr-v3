@@ -228,7 +228,7 @@ note = "能力表新條目在有獨立真值前最多標試驗中（experimental
 room = "shoebox"
 materials = "axis_aligned_boxes_whole_object_absorption_area"
 frequency_hz = [20.0, 11166.0]
-outputs = ["t20_s", "t30_s", "late_energy", "f_s_hz", "eyring_t60_by_band_s"]
+outputs = ["bands.t20_s", "bands.t30_s", "bands.late_energy", "points.late_energy", "bands.f_s_hz", "top.f_s_hz", "top.eyring_t60_by_band_s"]
 status = "experimental"
 evidence = [
   "tests/engine/test_furniture_absorption.py::test_default_object_area_times_raw_catalog_absorption",
