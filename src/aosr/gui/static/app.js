@@ -499,9 +499,10 @@ function resultRow(item, archived = false) {
   }
   return row;
 }
-function rowButton(row, text, work) {
+function rowButton(row, text, work, danger = false) {
   const cell = document.createElement("td"), button = document.createElement("button");
   button.type = "button"; button.textContent = text;
+  if (danger) button.className = "archive-danger";
   button.onclick = () => action(work);
   cell.append(button); row.append(cell);
 }
@@ -510,8 +511,8 @@ async function moveResult(item, restore = false) {
   const data = await api(`/api/archive/${item.run_id}/restore`, "POST", {});
   await refreshMovedLists(data.message);
 }
-async function refreshMovedLists(message) {
-  say(message, "ok");
+async function refreshMovedLists(message, tone = "ok") {
+  say(message, tone);
   try { await loadSchemeList(); await loadResultList(); } catch (error) {
     say(`${message}；清單更新不了，請重新整理：${errorText(error)}`, "notice");
   }
@@ -545,10 +546,37 @@ async function movePackage(item) {
   }
   await refreshMovedLists(data.message);
 }
+async function deleteArchive(item, package = true) {
+  const label = package
+    ? `封存的「${item.scheme_id}」（${item.archived_text}封存、${item.result_count} 筆結果、${item.size_text}）`
+    : `舊的單筆封存「${item.scheme_id}」（${item.finished_text}算完、${item.size_text}）`;
+  if (!window.confirm(`會永久刪除${label}。這個資料夾沒有備份，刪了救不回來。確定刪除嗎？`)) return;
+  const path = package ? `packages/${item.package_id}` : item.run_id;
+  try {
+    const data = await api(`/api/archive/${path}/delete`, "POST", {});
+    await refreshMovedLists(data.message);
+  } catch (error) {
+    await refreshMovedLists(errorText(error), "notice");
+  }
+}
+async function clearArchive(preview) {
+  let message = `會永久刪除封存區的 ${preview.package_count} 包方案（共 ${preview.result_count} 筆結果）和 ${preview.legacy_count} 筆舊的單筆封存，${preview.size_text}。清單上現在的方案和結果不受影響。這個資料夾沒有備份，刪了救不回來。確定全部刪除嗎？`;
+  if (preview.skipped.length) message += `\n另有 ${preview.skipped.length} 包封存沒做完或清單讀不出，不會刪，請助理檢查。`;
+  if (!window.confirm(message)) return;
+  const data = await api("/api/archive/clear", "POST", {
+    package_ids: preview.package_ids, run_ids: preview.run_ids});
+  // 確認框已說不刪的包仍在；伺服器只處理這次送去的代號。
+  const skipped = preview.skipped.length;
+  const note = skipped ? `\n另有 ${skipped} 包封存已跳過，請助理檢查。` : "";
+  await refreshMovedLists(data.message + note, skipped || data.skipped.length || data.failed.length ? "notice" : "ok");
+}
 async function loadArchiveList() {
   const data = await api("/api/archive");
   const archive = $("archived"), list = $("archived-list");
   const packages = data.packages || [];
+  const preview = data.clear_preview;
+  $("clear-archive").hidden = !preview || (!preview.package_ids.length && !preview.run_ids.length);
+  $("clear-archive").onclick = () => action(() => clearArchive(preview));
   archive.hidden = !packages.length && !data.results.length;
   archive.querySelector("summary").textContent = `已封存（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
   const packageList = $("archived-packages-list"); packageList.replaceChildren();
@@ -568,6 +596,8 @@ async function loadArchiveList() {
     }
     if (item.restore_available) rowButton(row, "搬回", () => movePackage(item));
     else row.append(document.createElement("td"));
+    if (item.delete_available) rowButton(row, "永久刪除", () => deleteArchive(item), true);
+    else row.append(document.createElement("td"));
     packageList.append(row);
   }
   $("legacy-archive").hidden = !data.results.length;
@@ -575,6 +605,7 @@ async function loadArchiveList() {
   for (const item of data.results) {
     const row = resultRow(item, true);
     rowButton(row, "搬回", () => moveResult(item, true));
+    rowButton(row, "永久刪除", () => deleteArchive(item, false), true);
     list.append(row);
   }
 }

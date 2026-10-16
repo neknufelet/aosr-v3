@@ -78,3 +78,15 @@ main:has(#results-list){max-width:1220px}
 .wall-editor textarea{box-sizing:border-box;width:100%;min-height:5em}
 .measured-draft>label,.measured-point>label{display:flex;flex-direction:column;align-items:flex-start}
 .measured-point .note{max-width:40em;margin:.3rem 0}
+
+/* 永久刪除以紅框紅字區別搬回；內距與同列按鈕一致。窄畫面在封存區內捲動。 */
+button.archive-danger{background:#fff;color:#a12020;border:1px solid #a12020;padding:.4rem .8rem;line-height:1.3}
+button.archive-danger:hover{background:#fff0f0}
+#archived{max-width:100%;overflow-x:auto}
+#archived-packages{width:100%}
+.archive-scroll-note{display:none}
+#archived-packages-list td:nth-child(2){white-space:normal}
+@media(max-width:700px){
+  .archive-scroll-note{display:block}
+  #archived table,table:has(#results-list){display:block;overflow-x:auto;max-width:100%}
+}

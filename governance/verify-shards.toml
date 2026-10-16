@@ -26,6 +26,8 @@ files = [
   "tests/engine/test_furniture_wiring_end_to_end.py",
   "tests/engine/test_gui_archive.py",
   "tests/engine/test_gui_archive_browser.py",
+  "tests/engine/test_gui_archive_delete.py",
+  "tests/engine/test_gui_archive_delete_browser.py",
   "tests/engine/test_gui_browser.py",
   "tests/engine/test_gui_capability_lists.py",
   "tests/engine/test_gui_capability_lists_browser.py",

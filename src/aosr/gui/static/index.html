@@ -71,8 +71,10 @@
     <section><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>
       <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>物理</th><th>評分設定</th><th>查看</th><th>選為 A</th><th>選為 B</th><th>封存方案</th></tr></thead><tbody id="results-list"></tbody></table>
       <details id="archived" hidden><summary>已封存</summary>
-        <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
-        <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th></tr></thead><tbody id="archived-list"></tbody></table></div>
+        <p><button id="clear-archive" type="button" class="archive-danger" hidden>全部清除封存</button></p>
+        <p class="archive-scroll-note note">表格可左右滑動查看完整內容與操作按鈕。</p>
+        <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th><th>永久刪除</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
+        <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
       </details></section>
   </main>
 </body>
