@@ -33,8 +33,9 @@ def test_no_furniture_reference_fingerprints_are_unchanged(tmp_path: Path) -> No
     for pair_document, inputs in pairs.values():
         assert "furniture" not in pair_document
         assert scene_fingerprint(inputs) == "ef718eb5ecfa13d9d0c84320d18aeb99566db02021bdc16d7b7cbb2644b74de2"
+    # #435 起開新搜尋把省略的低頻軸寫成 search_octave_48，快照那一格由 null 變字串、答案換值（舊答案 0cd0e215…）。
     assert ledger.header_for(_store(tmp_path, scheme)).project_fingerprint == (
-        "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f")
+        "13e53ca280e615222c87db6efd029919211986b8db9fc01679e45ec424ffe2fa")
 
 
 @pytest.mark.parametrize("facing,center,yaw", [
@@ -333,8 +334,9 @@ def test_search_store_accepts_legal_furniture_and_preserves_each_item(tmp_path: 
 def test_search_project_fingerprint_includes_furniture(tmp_path: Path) -> None:
     changed = Scheme.model_validate(reference_document() | {"furniture": [relative_item()]})
     furnished = _store(tmp_path, changed)
+    # 比的是同樣經 #435 補軸的無家具答案（上面那題）。
     assert ledger.header_for(furnished).project_fingerprint != (
-        "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f")
+        "13e53ca280e615222c87db6efd029919211986b8db9fc01679e45ec424ffe2fa")
 
 
 def test_furniture_facing_rejects_equal_horizontal_components() -> None:

@@ -222,12 +222,13 @@ def test_wall_unplanned_point_is_incomplete() -> None:
         ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
 
 
-def test_verification_axis_has_complete_wall_bands() -> None:
-    axis = low_frequency_axis_frequencies(LowFrequencyAxis.VERIFICATION)[1]
+@pytest.mark.parametrize("identity", (LowFrequencyAxis.VERIFICATION, LowFrequencyAxis.SEARCH_48))
+def test_verification_axis_has_complete_wall_bands(identity: LowFrequencyAxis) -> None:
+    axis = low_frequency_axis_frequencies(identity)[1]
     changed = []
     for role, y in (("left", 1.3), ("right", 2.5)):
         record = fixtures._record(role, y, axis=axis)
-        top = record.report.top.model_copy(update={"low_frequency_axis": LowFrequencyAxis.VERIFICATION})
+        top = record.report.top.model_copy(update={"low_frequency_axis": identity})
         changed.append(replace(record, report=record.report.model_copy(update={"top": top})))
     bands = _control_band_rows(tuple(changed))
     assert bands

@@ -285,3 +285,21 @@ def test_unreadable_result_clears_every_chart(tmp_path: Path, best_result: Schem
         assert isinstance(chart, dict) and chart["error"].startswith("讀不到：")
         assert set(chart) == {"error"}
     assert _snapshot(store.path) == before
+
+
+def test_search_48_best_view_has_axis_label(tmp_path: Path, best_result: SchemeResult) -> None:
+    from aosr.config.frequency_axis import LowFrequencyAxis
+    from aosr.gui.labels import LOW_FREQUENCY_AXES
+
+    axis = LowFrequencyAxis.SEARCH_48
+    project = best_result.scheme.model_copy(update={"scene": best_result.scheme.scene.model_copy(
+        update={"low_frequency_axis": axis})})
+    pairs = tuple(pair.model_copy(update={"report": pair.report.model_copy(update={
+        "top": pair.report.top.model_copy(update={"low_frequency_axis": axis})})}) for pair in best_result.pairs)
+    labelled = best_result.model_copy(update={"scheme": project, "pairs": pairs})
+    store = best_store(tmp_path, labelled)
+    view = _best(store.path)
+    assert LOW_FREQUENCY_AXES[axis.value] in str(view["title"])
+    frequency = view["frequency"]
+    assert isinstance(frequency, dict) and not frequency["error"]
+    assert frequency["axis_text"] == LOW_FREQUENCY_AXES[axis.value]

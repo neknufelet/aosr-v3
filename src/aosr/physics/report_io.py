@@ -200,7 +200,7 @@ class ReportInput(_FactsModel):
     )
     low_frequency_axis: LowFrequencyAxis = Field(
         default=LowFrequencyAxis.SEARCH,
-        description="低頻報表軸；省略時用正式 1/24 八度搜尋軸，驗證用 20–300 Hz 每 1 Hz",
+        description="低頻報表軸；search_octave_24 為舊搜尋軸（每八度 24 點，單方案省略時的預設），search_octave_48 為正式擺位搜尋軸（每八度 48 點），verification_linear_1hz 為驗證軸（20–300 Hz 每 1 Hz）",
         json_schema_extra=facts("頻率軸身分", "1", NO_BASIS_TEXT, NOT_MEASURED),
     )
     furniture: tuple[AbsoluteFurniture, ...] | None = Field(

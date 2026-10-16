@@ -113,7 +113,7 @@ def _check_purpose(project: Scheme, settings: SearchSettings, purpose: PurposeSe
 
 def check_search_axis(project: Scheme) -> None:
     """第六節第 6 條：驗證軸只給細算的候選；候選沿用專案場景，專案寫了驗證軸整場就會用 1 Hz 軸跑。"""
-    if project.scene.low_frequency_axis not in (None, LowFrequencyAxis.SEARCH):
+    if project.scene.low_frequency_axis not in (None, LowFrequencyAxis.SEARCH, LowFrequencyAxis.SEARCH_48):
         raise ValueError("searches run on the search axis; the verification axis is only for refining candidates")
 
 
@@ -176,6 +176,9 @@ class SearchStore:
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project)
+        if project.scene.low_frequency_axis is None:
+            project = project.model_copy(update={"scene": project.scene.model_copy(
+                update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
         check_project_furniture_layout(project)
         settings = SearchSettings.model_validate(settings.canonical())
         _check_speaker_settings(project, settings.layout)
