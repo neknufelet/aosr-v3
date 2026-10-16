@@ -5,9 +5,10 @@ from dataclasses import asdict, fields, replace
 
 import pytest
 
-from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ, GEOMETRIC_BAND_FREQUENCIES_HZ, LowFrequencyAxis, low_frequency_axis_frequencies
+from aosr.config.frequency_axis import (FEM_GEOMETRIC_CROSSOVER_CAP_HZ, LATE_DECAY_FREQUENCIES_HZ, GEOMETRIC_BAND_FREQUENCIES_HZ,
+    LowFrequencyAxis, low_frequency_axis_frequencies)
 from aosr.physics import furniture_scene, geometric_lane, report_io, report_output, three_lane_report as report
-from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
+from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ, SCHROEDER_T60_BANDS_HZ
 from aosr.physics.room_paths import RoomPath
 from aosr.physics.furniture_paths import Furniture, FurniturePath, filter_room_paths, single_bounce_furniture_paths
 from aosr.geometry.furniture import FaceDirection, Vec3
@@ -53,7 +54,10 @@ def test_shared_room_fields_bitwise_equal_except_furniture() -> None:
         assert decay_after.t20_s < decay_before.t20_s
         if decay_before.t30_s is not None and decay_after.t30_s is not None:
             assert decay_after.t30_s < decay_before.t30_s
-    changes_weights = any(150.0 < fs < 300.0 for fs in (plain.f_s_hz, furnished.f_s_hz))
+    # 交接權重只看 f_s 落在哪一段：不小於上限是硬切、不大於下端地板是固定的地板到上限，中間才隨 f_s 走。
+    def regime(fs: float) -> object:
+        return "hard" if fs >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ else "floor" if fs <= CROSSOVER_LOWER_FLOOR_HZ else fs
+    changes_weights = regime(plain.f_s_hz) != regime(furnished.f_s_hz)
     for name in ("full_weights", "dense_weights"):
         assert (getattr(plain, name) != getattr(furnished, name)) == changes_weights
 

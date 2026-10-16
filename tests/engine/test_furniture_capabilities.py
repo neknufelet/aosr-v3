@@ -55,7 +55,7 @@ def test_furniture_notes_keep_decision_scope_and_limits() -> None:
     for phrase in ("家具路徑不乘整房合成散射的 (1−s) 那一項", "天雲材質第一版開兩種", "吸音天雲",
                    "數值借用木質桌面那組估計值，懸空的板直接借用是近似"):
         assert phrase in entry.note
-    boxes = next(row for row in entry.capability if row.status == "experimental")
+    boxes = next(row for row in entry.capability if row.materials == "axis_aligned_boxes_estimated_absorption")
     assert "能力表新條目在有獨立真值前最多標試驗中" in boxes.note
     assert "考卷只證明公式實作一致，不寫成實際家具精度已驗證" in boxes.note
     # 不准說過頭：除了那一句「不寫成……已驗證」本身，哪裡都不准出現「已驗證」「實測驗證」。
