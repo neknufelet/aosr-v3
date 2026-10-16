@@ -54,7 +54,7 @@ def groups_are_dead(records: Sequence[SliceEvent]) -> None:
             assert_dead(int(str(record["child"])))
 
 
-@pytest.mark.parametrize("axis", [None, LowFrequencyAxis.SEARCH, LowFrequencyAxis.VERIFICATION])
+@pytest.mark.parametrize("axis", [None, LowFrequencyAxis.SEARCH, LowFrequencyAxis.SEARCH_48, LowFrequencyAxis.VERIFICATION])
 def test_two_waves_cover_axis_and_pass_all_parts(tmp_path: Path, axis: LowFrequencyAxis | None) -> None:
     worker, jobs = setup_worker(tmp_path, {"slice-0": {"sleep": 0.2, "child": True}}, (0, 1, 2))
     jobs = tuple(replace(job, scheme=job.scheme.model_copy(update={

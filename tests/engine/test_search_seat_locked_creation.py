@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.reporting.scheme import Scheme
 from aosr.geometry.shoebox import Point
 from aosr.reporting.validation import SchemeValidationError
@@ -54,7 +55,9 @@ def test_axis_contact_margin_accepts_tail_error_rejects_outside(
     offset = -1.001 + error  # 2+(-1.001) 的最後一位不等於 .999。
     if accepted:
         store = create(tmp_path / "searches", project, axis_offset_m=offset)
-        assert SearchStore.open(store.path).project == project
+        # #435 起開新搜尋把省略的低頻軸補成 48 點，其餘原樣落盤。
+        assert SearchStore.open(store.path).project == project.model_copy(update={"scene": project.scene.model_copy(
+            update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
     else:
         with pytest.raises(SchemeValidationError) as caught:
             create(tmp_path / "searches", project, axis_offset_m=offset)

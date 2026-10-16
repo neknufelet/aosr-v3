@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from aosr.config.frequency_axis import LowFrequencyAxis
+
 from tests.engine._search_store_cases import purpose_settings, reference_project, settings_document
 
 if TYPE_CHECKING:
@@ -116,7 +118,7 @@ def test_verification_axis_project_is_refused(tmp_path: Path, store: SearchStore
     from aosr.reporting.scheme import Scheme
     from aosr.search.store import SearchStore
 
-    scene = store.project.scene.model_dump(mode="json") | {"low_frequency_axis": "verification_linear_1hz"}
+    scene = store.project.scene.model_dump(mode="json") | {"low_frequency_axis": LowFrequencyAxis.VERIFICATION}
     project = Scheme.model_validate(store.project.model_dump(mode="json") | {"scene": scene})
     with pytest.raises(ValueError, match="search axis"):
         SearchStore.create(tmp_path / "verification", project=project, settings=store.settings,
@@ -125,15 +127,16 @@ def test_verification_axis_project_is_refused(tmp_path: Path, store: SearchStore
 
 
 def test_explicit_search_axis_project_is_accepted(tmp_path: Path, store: SearchStore) -> None:
-    """明寫搜尋軸跟沒寫一樣可以開搜尋。"""
+    """明寫舊搜尋軸仍可重現舊搜尋，不被改成 48 點。"""
     from aosr.reporting.scheme import Scheme
     from aosr.search.store import SearchStore
 
-    scene = store.project.scene.model_dump(mode="json") | {"low_frequency_axis": "search_octave_24"}
+    scene = store.project.scene.model_dump(mode="json") | {"low_frequency_axis": LowFrequencyAxis.SEARCH}
     project = Scheme.model_validate(store.project.model_dump(mode="json") | {"scene": scene})
     created = SearchStore.create(tmp_path / "explicit", project=project, settings=store.settings,
                                  identity=store.identity, versions=store.versions)
-    assert created.project.scene.low_frequency_axis == "search_octave_24"
+    assert created.project.scene.low_frequency_axis is LowFrequencyAxis.SEARCH
+    assert SearchStore.open(created.path).project.scene.low_frequency_axis is LowFrequencyAxis.SEARCH
 
 
 @pytest.mark.parametrize("missing", ["python", "optuna", "numpy"])
@@ -194,3 +197,75 @@ def test_store_exposes_read_only_snapshots(tmp_path: Path, store: SearchStore) -
     assert store.project.speakers
     assert store.identity.purpose_settings.content
     assert tmp_path.is_dir()
+
+
+def test_implicit_axis_is_persisted_for_new_search(tmp_path: Path, store: SearchStore) -> None:
+    """開新搜尋必須把解析度寫進快照，不能落回單方案的預設軸。"""
+    from aosr.search.store import PROJECT_FILE, SearchStore
+
+    assert store.project.scene.low_frequency_axis is LowFrequencyAxis.SEARCH_48
+    saved = SearchStore.open(store.path)
+    assert saved.project.scene.low_frequency_axis is store.project.scene.low_frequency_axis
+    assert json.loads((store.path / PROJECT_FILE).read_text())["scene"]["low_frequency_axis"] == (
+        store.project.scene.low_frequency_axis.value)
+
+
+@pytest.mark.parametrize("axis", (LowFrequencyAxis.SEARCH, LowFrequencyAxis.SEARCH_48, LowFrequencyAxis.VERIFICATION))
+def test_resume_checks_both_search_axes_and_refuses_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, axis: LowFrequencyAxis,
+) -> None:
+    """舊版建過的驗證軸搜尋照擋；24 與 48 點均可重播並繼續。"""
+    from aosr.search import store as store_module
+    from aosr.search.run import resume_search
+    from tests.engine._search_run_cases import ENGINE, RUN_DATE, FakeCompute, Killed, make_store, run
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store_module, "check_search_axis", lambda project: None)
+        created, registry = make_store(tmp_path, budget=6, batch=1,
+                                      scene_changes={"low_frequency_axis": axis})
+        with pytest.raises(Killed):
+            run(created, registry, FakeCompute(created, fail_after=1, kill=True, persist_baseline=True))
+    from aosr.search.store import SearchStore
+
+    reopened = SearchStore.open(created.path)
+    before = reopened.ledger_path.read_bytes()
+    compute = FakeCompute(reopened)
+    status = resume_search(reopened, compute=compute, probe=lambda: reopened.identity,
+                           registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    assert reopened.project.scene.low_frequency_axis is axis
+    if axis is LowFrequencyAxis.VERIFICATION:
+        assert status.state == "interrupted" and status.message.startswith("拒絕接續：")
+        assert "search axis" in status.message
+        assert not compute.calls and reopened.ledger_path.read_bytes() == before
+    else:
+        assert status.state == "budget_exhausted"
+        assert compute.calls
+
+
+def test_old_snapshot_without_axis_resumes_unchanged(tmp_path: Path) -> None:
+    """#435 之前建的搜尋快照那一格是 null：接續照准，讀回不補 48，快照與帳本表頭都不改寫。"""
+    from aosr.search.ledger import header_for
+    from aosr.search.run import resume_search
+    from aosr.search.store import PROJECT_FILE, SearchStore
+    from tests.engine._search_run_cases import ENGINE, RUN_DATE, FakeCompute, Killed, make_store, run
+
+    created, registry = make_store(tmp_path, budget=6, batch=1)
+    snapshot = json.loads((created.path / PROJECT_FILE).read_text())
+    snapshot["scene"]["low_frequency_axis"] = None
+    (created.path / PROJECT_FILE).write_text(json.dumps(snapshot))
+    project_bytes = (created.path / PROJECT_FILE).read_bytes()
+    old = SearchStore.open(created.path)
+    assert old.project.scene.low_frequency_axis is None
+    with pytest.raises(Killed):
+        run(old, registry, FakeCompute(old, fail_after=1, kill=True, persist_baseline=True))
+    assert (created.path / PROJECT_FILE).read_bytes() == project_bytes
+    header_line = old.ledger_path.read_bytes().splitlines()[0]
+    reopened = SearchStore.open(created.path)
+    assert header_for(reopened) == header_for(old)
+    compute = FakeCompute(reopened)
+    status = resume_search(reopened, compute=compute, probe=lambda: reopened.identity,
+                           registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    assert status.state == "budget_exhausted" and compute.calls
+    assert reopened.project.scene.low_frequency_axis is None
+    assert (created.path / PROJECT_FILE).read_bytes() == project_bytes
+    assert reopened.ledger_path.read_bytes().splitlines()[0] == header_line

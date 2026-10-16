@@ -201,7 +201,7 @@ def _batch(
         materials_by_wall=_flow_materials(WALLS))
 
 
-@pytest.mark.parametrize("axis", (LowFrequencyAxis.SEARCH, LowFrequencyAxis.VERIFICATION))
+@pytest.mark.parametrize("axis", (LowFrequencyAxis.SEARCH, LowFrequencyAxis.SEARCH_48, LowFrequencyAxis.VERIFICATION))
 def test_candidate_reports_equal_individual_reports_bitwise(
     axis: LowFrequencyAxis, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

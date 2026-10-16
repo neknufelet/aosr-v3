@@ -11,7 +11,8 @@ from aosr.search.labels import SPEAKER_SETUP as SPEAKER_SETUP
 # 聲源模型：跟輸入頁下拉選單的字一樣。
 SOURCE_MODELS = {"product_default": "產品預設指向", "omnidirectional": "全向"}
 # 低頻取樣軸。
-LOW_FREQUENCY_AXES = {"search_octave_24": "搜尋軸（每八度 24 點）",
+LOW_FREQUENCY_AXES = {"search_octave_24": "舊搜尋軸（每八度 24 點）",
+                      "search_octave_48": "搜尋軸（每八度 48 點）",
                       "verification_linear_1hz": "驗證軸（每 1 Hz）"}
 # 喇叭：用聲道代號叫它。喇叭的 left 跟座位的 left（主位左方）是兩回事，名字要分得開。
 # 六面牆：跟方案輸入頁表單上阻抗、散射兩排的牆名一樣（比較頁「改了哪裡」也用這一張）。

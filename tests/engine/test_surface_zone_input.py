@@ -6,6 +6,7 @@ from typing import Literal, cast
 import pytest
 from pydantic import ValidationError
 
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.physics import report_io
 from aosr.physics.report_validation import ReportInputError
 from aosr.reporting.modal_lookup import key_from_scheme
@@ -52,8 +53,10 @@ def test_all_fixed_new_format_has_every_original_fingerprint(tmp_path: Path) -> 
     for _, inputs in new_pairs.values():
         assert report_io.scene_fingerprint(inputs) == "ef718eb5ecfa13d9d0c84320d18aeb99566db02021bdc16d7b7cbb2644b74de2"
     store = _store(tmp_path, new)
-    assert header_for(store).project_fingerprint == "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f"
-    assert json.loads((store.path / "project.json").read_text()) == old.model_dump(mode="json")
+    # #435 起開新搜尋把省略的低頻軸寫成 search_octave_48，快照那一格由 null 變字串、答案換值（舊答案 0cd0e215…）。
+    assert header_for(store).project_fingerprint == "13e53ca280e615222c87db6efd029919211986b8db9fc01679e45ec424ffe2fa"
+    searched = old.model_copy(update={"scene": old.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
+    assert json.loads((store.path / "project.json").read_text()) == searched.model_dump(mode="json")
     assert scheme_hash(old) == scheme_hash(new)
     old_key, new_key = key_from_scheme(old), key_from_scheme(new)
     assert old_key is not None and new_key is not None

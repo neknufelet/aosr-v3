@@ -1,7 +1,7 @@
 ---
 title: 三個最佳化階段各調什麼：房型與位置一起找、房間固定後調擺位與物件、切區貼材料
 date_created: 2026-09-30
-date_modified: 2026-10-11
+date_modified: 2026-10-16
 status: accepted
 kind: governance
 supersedes: "compute-strategy-three-stages-three-lanes-fem-300hz.md"
@@ -53,7 +53,9 @@ summary: "第一階段房型與喇叭、接收點位置一起用黑箱搜尋，�
 | 鏡像法 | 鏡像源；幾何的路徑、距離、到達時間與入射角用中央處理器雙精度，同一份路徑表產出頻率域與時間域 | numpy（陣列運算函式庫）雙精度 | JAX（自動微分計算庫）在 GPU（圖形處理器）用單精度 | 三階；20～300 Hz 為 1/24 八度，300 Hz 以上以同間距接續到 8000 Hz 八度帶上緣（原 4000，由 frequency-axes-to-8khz-band-and-dense-half-hertz.md 修正）；直達與反射帶相位疊加，報表頻帶取帶內能量平均。老闆在票 #285 回 A |
 | 晚期混響 | 牆面分格能量交換，精確解 | 不用 | JAX（自動微分計算庫）在 GPU（圖形處理器）用單精度 | 每面 6×6 格；20～300 Hz 為 1/24 八度，300 Hz 以上以同間距接續到 8000 Hz 八度帶上緣（原 4000，同上修正）。老闆在票 #285 回 A |
 
-有限元素與幾何路的硬切換以 ≤300 Hz 有限元素、>300 Hz 幾何路處理；「300 Hz 那一點歸有限元素」是助理補定，老闆未逐字拍板。頻率軸本身不另補 300 Hz 這一點：20 Hz 起的 1/24 八度點在 300 Hz 兩側是約 293.4 Hz 與 302.0 Hz，≤300 Hz 的 94 點由有限元素算、>300 Hz 的點只給幾何路；「300 Hz 那一點歸有限元素」指 300 Hz 這個邊界值落在有限元素那一側（助理補定）。票 #280 的成本欄是「分解＋解一個頻點（單緒）」；700 Hz 老闆說不用測。交接帶本身（f_s < 300 Hz 時在 `[max(f_s, 150 Hz), 300 Hz]` 平滑交接，f_s ≥ 300 Hz 才在 300 Hz 硬切）由 `docs/decisions/stage-nine-reflection-order-is-a-setting.md` 第 1～4 條定，本紙不改。
+2026-10-16（#435）修正本表的正式擺位搜尋解析度：20～300 Hz 改每八度 48 點（`f = 20·2^(n/48)`，不超過 300 Hz），300 Hz 以上仍接原 24 點軸；晚期衰減、網頁單方案與命令列預設保持原 24 點，入選候選仍每 1 Hz 細算重排並分開保存。第三階段材料最佳化不直接套用擺位結論，見 `shared-search-flow-v1-stage-two-subset.md` 的 10-16 拍板。
+
+有限元素與幾何路的硬切換以 ≤300 Hz 有限元素、>300 Hz 幾何路處理；「300 Hz 那一點歸有限元素」是助理補定，老闆未逐字拍板。網頁單方案與舊搜尋的頻率軸不另補 300 Hz：20 Hz 起的 1/24 八度點在 300 Hz 兩側是約 293.4 Hz 與 302.0 Hz，≤300 Hz 的 94 點由有限元素算、>300 Hz 的點只給幾何路；「300 Hz 那一點歸有限元素」指 300 Hz 這個邊界值落在有限元素那一側（助理補定）。票 #280 的成本欄是「分解＋解一個頻點（單緒）」；700 Hz 老闆說不用測。交接帶本身（f_s < 300 Hz 時在 `[max(f_s, 150 Hz), 300 Hz]` 平滑交接，f_s ≥ 300 Hz 才在 300 Hz 硬切）由 `docs/decisions/stage-nine-reflection-order-is-a-setting.md` 第 1～4 條定，本紙不改。
 
 主線 `src/aosr/config/fem_lane.py` 的 `FEM_FMAX_CAP_HZ = 250.0` 是照上一代搬來的設定；引擎籃（`tests/engine/`）的設定答案考卷 `tests/engine/test_shoebox_mesh.py` 拿它對上一代凍結值，本紙不改它。v3 正式路徑另立自己的 300 Hz 上限常數，名稱到實作時再定。
 `docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md` 的有限元素小節中，≤250 Hz、29 點是既有考卷的凍結題目；`docs/decisions/fem-contract-fenics-frozen-answers.md` 的 FEniCS（外部有限元素程式）題目檔自帶網格；`docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md` 所記 20～250 Hz 網格量測與既有 29 點成本證據也維持有效。

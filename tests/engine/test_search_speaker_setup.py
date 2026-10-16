@@ -33,4 +33,5 @@ def test_no_setup_project_snapshot_and_fingerprint_are_unchanged(tmp_path: Path,
     store = _store(tmp_path / "search", Scheme.model_validate(document))
     assert "speaker_setup" not in json.loads((store.path / "project.json").read_text())
     # 出處：主線 8f9493a1 的 test_no_furniture_reference_fingerprints_are_unchanged。
-    assert header_for(store).project_fingerprint == "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f"
+    # #435 起開新搜尋把省略的低頻軸寫成 search_octave_48，快照那一格由 null 變字串、答案換值（舊答案 0cd0e215…）。
+    assert header_for(store).project_fingerprint == "13e53ca280e615222c87db6efd029919211986b8db9fc01679e45ec424ffe2fa"
