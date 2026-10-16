@@ -1,7 +1,7 @@
 ---
 title: 不立的候選卡：五張砍掉、身分字串那張收窄改寫（四張舊紙合成一張）
 date_created: 2026-09-21
-date_modified: 2026-10-05
+date_modified: 2026-10-16
 status: accepted
 kind: governance
 supersedes: "drop-handoff-replayable-card.md, drop-review-findings-card.md, drop-text-format-consistent-card.md, drop-two-ticket-cards-keep-identity-strings.md"
@@ -31,6 +31,7 @@ summary: "五張候選卡不立（文字格式一致、交接單可重播、審�
 - `ticket-open-preflight`（一票一棵乾淨工作樹、身分先驗）與 `ticket-stage-gate`（沒收據不准關票、停止條件）標 dropped：對象（票務工具、工作樹、關票）全在 repo 外，卡守的是空氣——真樹永遠回綠，卡面看起來有人守。
 - `identity-strings-generated` 立卡，人話是「版控裡的文件出現的 commit sha 與雲端 run id 必須解析得到」：完整 sha 與夠長的短 sha 用本機物件庫查（不上網），run id 在收據鏡像裡找（`run.run_id` 或 `written_by.run_id`）；網址與 UUID 裡的十六進位段不算 sha。清空前舊歷史的 sha 解析不到是對的，那種引用改寫成「清空前的歷史」。血債是 `hand-copied-identity-strings-drift`。短 sha 誤咬時改文件寫法或在卡上具名放行，不放寬判準。立卡當天文件裡一個真的 sha、一個 run id 都沒有，卡先立起來等對象出現——沒有對象時的綠是「掃了文件、沒有 sha」，不是「有 sha 而且都對」。
 - 停止條件那顆牙歸 delivery skill（派工流程那套工具）：issue #59 加一條「現用的 v4 帳本要有停止條件的測試」，由 skill 自己的測試守；「關掉的票對不對得到綠收據」歸狀態頁當一格，是給人看的紅字、不是擋合併的卡。
+  2026-10-16 依老闆同日拍板就地補正（`ticket-stage-gate` 照舊不立卡）：#59 以不採用舊派工工具結案，上一句那條 v4 帳本停止條件測試沒做、也不做，「由 skill 自己的測試守」不再成立。現在守停止條件的只有現行停止規則（#245，老闆 2026-10-14；寫在 `handoff.md`「動手前要知道」），靠人守、沒有機器在守；這條規則不取消。日後要在這個 repo 重新用那套工具，先重新評估。
 - 藍圖 `blueprint/cards-38.json` 裡這幾張卡的 feasibility_v2_reason 指到這張紙。
 
 ## 為什麼
@@ -47,3 +48,4 @@ summary: "五張候選卡不立（文字格式一致、交接單可重播、審�
 ## 拍板
 
 老闆：2026-09-09 對話「砍」（文字格式）；2026-09-10 對話「照你的意見」（issue #54、#52）；2026-09-10「留一張改寫」（issue #11）。四張合成一張：老闆 2026-09-21 對話「我想要B」（票 #412）。
+2026-10-16 老闆主對話原話「#59 以不採用舊工具關閉，不取消現行停止規則，日後重新引入前重新評估」；決定第四條第三點依此就地補正：那條工具考卷不做，停止條件現在只剩人守的現行停止規則——這是主對話照現況記下，不是老闆另拍的歸屬。
