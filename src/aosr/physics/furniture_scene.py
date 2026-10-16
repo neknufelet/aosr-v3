@@ -6,14 +6,16 @@
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from aosr.config.directivity_defaults import DirectivityDefaults, TwoParameterCurve
 from aosr.config.furniture_materials import FurnitureMaterialName, load_furniture_materials
 from aosr.config.paths import config_path
-from aosr.geometry.furniture import FurnitureBox, Vec3, contact_margin_m
-from aosr.geometry.shoebox import Point
+from aosr.geometry.furniture import FurnitureBox, FurnitureKind, Vec3, contact_margin_m
+from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics.crossover import _room_measures
 from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis, furniture_impedance_on_axis
 from aosr.physics.furniture_paths import Furniture, FurniturePath, furniture_path_amplitude
 from aosr.physics.report_furniture import AbsoluteFurniture, normalized_furniture
@@ -114,6 +116,44 @@ def furniture_impedances(items: Sequence[AbsoluteFurniture], frequencies_hz: Seq
                 material, frequencies_hz, rho_c, curve="default", kind=item.kind.value)
         by_id[item.furniture_id] = by_material[item.material]
     return by_id
+
+
+def furniture_absorption_area_m2(items: Sequence[AbsoluteFurniture], frequencies_hz: Sequence[float],
+                                 rho_c: float) -> tuple[float, ...]:
+    """家具紙第 23 條：整件原始 αObj 乘外露面積，不分位置與轉向。
+
+    加總依代號從左到右；封閉式的運算順序固定，避免搜尋轉向改變 f_s 末位。
+    不用阻抗反推所夾過的 absorption，讓未來上下界與早期反射共用曲線來源。
+    """
+    impedances = furniture_impedances(items, frequencies_hz, rho_c)
+    total = [0.0 for _ in frequencies_hz]
+    for item in normalized_furniture(tuple(items)) or ():
+        w, d, h = item.width_m, item.depth_m, item.height_m
+        area = w*d + 2.0*h*(w+d) if FurnitureKind(item.kind).grounded else 2.0*w*d + 2.0*h*(w+d)
+        for i, alpha in enumerate(impedances[item.furniture_id].catalog_absorption):
+            total[i] += area * alpha
+    return tuple(total)
+
+
+def furniture_adjusted_absorption(
+    room: Room, frequencies_hz: tuple[float, ...],
+    absorption_by_wall: Mapping[Wall, tuple[float, ...]], absorption_area_m2: tuple[float, ...],
+) -> dict[Wall, tuple[float, ...]]:
+    """同一 ε 乘六面剩餘反射率；總吸音多 A_f，牆面積與體積都不改。
+
+    供方案晚期一族與物理性質考卷共用。無家具時呼叫端直接跳過，不走 ε=0。
+    全吸牆 ART 原可接受，但有家具的總量分配無剩餘反射率，必須拒收。
+    """
+    _, areas = _room_measures(room)
+    epsilon = []
+    for i, (frequency, af) in enumerate(zip(frequencies_hz, absorption_area_m2, strict=True)):
+        denom = sum(areas[wall] * (1.0 - absorption_by_wall[wall][i]) for wall in Wall.all())
+        extra = af / denom if denom > 0.0 else math.nan
+        if not math.isfinite(extra) or not 0.0 <= extra < 1.0:
+            raise ValueError(f"{frequency:g} Hz 家具吸音量無法分配：A_f={af!r}, denom={denom!r}")
+        epsilon.append(extra)
+    return {wall: tuple(alpha + (1.0 - alpha) * extra for alpha, extra in
+                        zip(absorption_by_wall[wall], epsilon, strict=True)) for wall in Wall.all()}
 
 
 def furniture_pressure_with_directivity(

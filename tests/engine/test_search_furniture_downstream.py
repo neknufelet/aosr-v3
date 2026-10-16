@@ -5,9 +5,9 @@ import pytest
 
 # 決策紙第 13、23、25 條：手打原文，常數改錯也必須紅。
 FURNITURE_REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
-                    "完整繞射，以及家具吸音對整房殘響的影響")
+                    "完整繞射；家具吸音只以整件吸音量計入整房殘響與交接頻率，不分位置")
 FURNITURE_TRANSMISSION_NOTE = "透射未算"
-FURNITURE_REVERBERATION_NOTE = "整房殘響與交接頻率未包含家具吸音"
+FURNITURE_REVERBERATION_NOTE = "整房殘響與交接頻率：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具"
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeValidationError, furniture_problems
 from aosr.gui.search_view import build_search_view

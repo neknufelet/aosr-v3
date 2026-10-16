@@ -13,6 +13,9 @@ from aosr.geometry.shoebox import Room, Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_decay, late_energy
 from aosr.physics.wall_surfaces import impedance_absorption_rows
+from aosr.physics.furniture_scene import furniture_absorption_area_m2, furniture_adjusted_absorption
+from aosr.physics.crossover import _room_measures
+from tests.engine._furniture_absorption_cases import ITEMS
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
@@ -30,6 +33,24 @@ def _inputs(case_name: str) -> late_energy.LateEnergyInputs:
     return late_energy.load_late_energy_inputs(
         _ROOT / "blueprint" / f"reference_art_{case_name}.json"
     )
+
+
+def _with_furniture(inputs: late_energy.LateEnergyInputs, furnished: bool) -> late_energy.LateEnergyInputs:
+    if not furnished:
+        return inputs
+    af = furniture_absorption_area_m2(ITEMS, inputs.frequencies_hz, inputs.rho_c_pa_s_per_m)
+    rows = furniture_adjusted_absorption(inputs.room, inputs.frequencies_hz,
+        {wall: inputs.absorption_by_wall[wall.wall_name()] for wall in Wall.all()}, af)
+    return replace(inputs, absorption_by_wall={wall.wall_name(): row for wall, row in rows.items()})
+
+
+def _uniform_mean(inputs: late_energy.LateEnergyInputs, furnished: bool) -> tuple[float, ...]:
+    """獨立總量真值，不用調整函式的輸出作為預期。"""
+    _, areas = _room_measures(inputs.room)
+    surface_area = sum(areas.values())
+    af = furniture_absorption_area_m2(ITEMS, inputs.frequencies_hz, inputs.rho_c_pa_s_per_m) if furnished else (0.0,) * len(inputs.frequencies_hz)
+    return tuple((surface_area * alpha + extra) / surface_area for alpha, extra in
+                 zip(inputs.absorption_by_wall[Wall.FLOOR.wall_name()], af, strict=True))
 
 
 def _relative_difference(actual: float, expected: float) -> float:
@@ -63,17 +84,20 @@ def test_form_factors_preserve_reciprocity_and_close_every_row(
 
 
 @pytest.mark.parametrize("case_name", _UNIFORM_CASES)
-def test_uniform_raw_energy_matches_sabine_diffuse_field(case_name: str) -> None:
+@pytest.mark.parametrize("furnished", (False, True))
+def test_uniform_raw_energy_matches_sabine_diffuse_field(case_name: str, furnished: bool) -> None:
     """抓無規入射吸音率、源項、正規化或 Eyring 前 raw 能量接錯。"""
-    inputs = _inputs(case_name)
+    base = _inputs(case_name)
+    averages = _uniform_mean(base, furnished)
+    inputs = _with_furniture(base, furnished)
     result = late_energy.solve_late_energy(inputs)
     surface_area = 2.0 * (
         inputs.room.Lx * inputs.room.Ly
         + inputs.room.Ly * inputs.room.Lz
         + inputs.room.Lx * inputs.room.Lz
     )
-    for band in result.bands:
-        alpha = band.alpha_bar
+    for band, alpha in zip(result.bands, averages, strict=True):
+        assert _relative_difference(band.alpha_bar, alpha) <= _TOLERANCE_REL
         sabine = 4.0 * DIFFUSE_MONOPOLE_4PI * (1.0 - alpha) / (
             surface_area * alpha
         )
@@ -83,13 +107,14 @@ def test_uniform_raw_energy_matches_sabine_diffuse_field(case_name: str) -> None
         )
 
 
-def test_steady_state_patch_absorption_equals_source_power() -> None:
+@pytest.mark.parametrize("furnished", (False, True))
+def test_steady_state_patch_absorption_equals_source_power(furnished: bool) -> None:
     """抓反射算子方向、互易、源項或 patch 吸收功率接錯。
 
     ``B=(I-diag(1-alpha)F)^-1 E`` 是 patch 出射度，``H=F B`` 是入射度；
     每格吸收功率因此是 ``A_i alpha_i H_i``，總和要等於 ``sum(A_i E_i)``。
     """
-    inputs = _inputs("varied")
+    inputs = _with_furniture(_inputs("varied"), furnished)
     problem = late_energy._reflection_problem(inputs)
     form_factors = late_energy._form_factors(problem.patches)
     alpha_patch = problem.alpha_by_wall[problem.patches.wall_index, :]
@@ -111,9 +136,10 @@ def test_steady_state_patch_absorption_equals_source_power() -> None:
         )
 
 
-def test_identical_floor_halves_equal_whole_wall_late_energy() -> None:
+@pytest.mark.parametrize("furnished", (False, True))
+def test_identical_floor_halves_equal_whole_wall_late_energy(furnished: bool) -> None:
     """抓同阻抗地板分成兩區後，patch 指派或面積權重改變晚期能量。"""
-    inputs = _inputs("varied")
+    inputs = _with_furniture(_inputs("varied"), furnished)
     whole = late_energy.solve_late_energy(inputs)
     problem = late_energy._reflection_problem(inputs)
     form_factors = late_energy._form_factors(problem.patches)
@@ -145,9 +171,12 @@ def test_identical_floor_halves_equal_whole_wall_late_energy() -> None:
 
 
 @pytest.mark.parametrize("case_name", _UNIFORM_CASES)
-def test_uniform_decay_matches_exact_constant_eyring(case_name: str) -> None:
+@pytest.mark.parametrize("furnished", (False, True))
+def test_uniform_decay_matches_exact_constant_eyring(case_name: str, furnished: bool) -> None:
     """抓 T20/T30 沒有回到同一無規入射吸音率的精確指數衰減時間。"""
-    inputs = _inputs(case_name)
+    base = _inputs(case_name)
+    averages = _uniform_mean(base, furnished)
+    inputs = _with_furniture(base, furnished)
     sound_speed_m_s = 343.0
     energy = late_energy.solve_late_energy(inputs)
     decay = late_decay.solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s)
@@ -157,13 +186,14 @@ def test_uniform_decay_matches_exact_constant_eyring(case_name: str) -> None:
         + inputs.room.Ly * inputs.room.Lz
         + inputs.room.Lx * inputs.room.Lz
     )
-    for energy_band, decay_band in zip(energy.bands, decay.bands, strict=True):
+    for energy_band, decay_band, alpha in zip(energy.bands, decay.bands, averages, strict=True):
+        assert _relative_difference(energy_band.alpha_bar, alpha) <= _TOLERANCE_REL
         exact = (
             24.0
             * math.log(10.0)
             / sound_speed_m_s
             * volume
-            / (-surface_area * math.log1p(-energy_band.alpha_bar))
+            / (-surface_area * math.log1p(-alpha))
         )
         assert (
             _relative_difference(decay_band.t20_s, exact)

@@ -16,11 +16,11 @@ FURNITURE_MATERIALS = {"fabric": "布面", "leather": "皮面", "wood": "木質"
                        "glass": "玻璃", "absorptive_cloud": "吸音天雲"}
 FURNITURE_FACES = {"top": "頂面", "bottom": "底面", "+x": "朝 +x 的面",
                    "-x": "朝 -x 的面", "+y": "朝 +y 的面", "-y": "朝 -y 的面"}
-# 第 13 條（第 75、77、78 行）、第 16、23、25、27、22 條，逐字取用。
+# 第 13 條（第 87、88、90 行）、第 16、23、25、27、22 條，逐字取用。
 FURNITURE_REFLECTION_NOTE = "家具僅一次反射、混合反射未納入"
 FURNITURE_MODEL_NOTE = "家具模型：近似"
 FURNITURE_REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
-                    "完整繞射，以及家具吸音對整房殘響的影響")
+                    "完整繞射；家具吸音只以整件吸音量計入整房殘響與交接頻率，不分位置")
 FURNITURE_ESTIMATE_NOTE = "估計，非本件實測"
 # 第 18 條：這一版只新增決策紙明寫要註明的材質附註。
 FURNITURE_MATERIAL_NOTES = {"leather": "參考的是合成皮"}
@@ -30,8 +30,8 @@ FURNITURE_SCATTERING_NOTE = "家具表面的粗糙散射第一版不算"
 FURNITURE_FINITE_SIZE_NOTE = ("有限尺寸鏡面修正的限制：原理論的前提「家具尺寸遠小於距離」對桌面與沙發不成立；"
     "截止以上一律截在 1（精確式會略超過 1）；反射點靠板邊時會高估，最多約 6 dB；"
     "只乘實數、沒有相位與邊緣繞射路徑；靠牆或接靠背的非自由邊會低估；只收矩形面。")
-FURNITURE_REVERBERATION_NOTE = "未包含家具吸音"
-FURNITURE_REVERBERATION_REPORT_NOTE = f"整房殘響與交接頻率{FURNITURE_REVERBERATION_NOTE}"
+FURNITURE_REVERBERATION_NOTE = "家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具"
+FURNITURE_REVERBERATION_REPORT_NOTE = f"整房殘響與交接頻率：{FURNITURE_REVERBERATION_NOTE}"
 FURNITURE_MATERIAL_UNREADABLE_NOTE = "家具材質：第一名結果讀不回"
 FURNITURE_REVERBERATION_COMPARISON_NOTE = "不能用來判斷增加家具後的殘響改善量"
 FURNITURE_MODEL_TITLE = "家具模型說明"

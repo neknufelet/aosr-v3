@@ -24,7 +24,7 @@
 name = "three_lane_report"
 module = "aosr.physics.three_lane_report_cli"
 not_modeled = [
-  "桌面、沙發、天雲都不進有限元素網格；未包含家具吸音",
+  "桌面、沙發、天雲都不進有限元素網格；家具吸音只以整件吸音量計入整房殘響與交接頻率、不分位置；家具反射相位假設為零",
   "喇叭箱體本身的反射（兩支喇叭互相反射也不算）",
   "空氣吸收",
   "非長方形房間",
@@ -223,6 +223,22 @@ outputs = ["path_table.furniture_ids", "path_table.furniture_model", "path_table
 status = "experimental"
 evidence = []
 note = "能力表新條目在有獨立真值前最多標試驗中（experimental）；考卷只證明公式實作一致，不寫成實際家具精度已驗證。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "axis_aligned_boxes_whole_object_absorption_area"
+frequency_hz = [20.0, 11166.0]
+outputs = ["t20_s", "t30_s", "late_energy", "f_s_hz", "eyring_t60_by_band_s"]
+status = "experimental"
+evidence = [
+  "tests/engine/test_furniture_absorption.py::test_default_object_area_times_raw_catalog_absorption",
+  "tests/engine/test_furniture_absorption.py::test_late_family_eyring_and_art_share_total_absorption",
+  "tests/engine/test_late_energy_physical_properties.py::test_uniform_raw_energy_matches_sabine_diffuse_field",
+  "tests/engine/test_late_energy_physical_properties.py::test_steady_state_patch_absorption_equals_source_power",
+  "tests/engine/test_late_energy_physical_properties.py::test_identical_floor_halves_equal_whole_wall_late_energy",
+  "tests/engine/test_late_energy_physical_properties.py::test_uniform_decay_matches_exact_constant_eyring",
+]
+note = "家具紙第 23 條：整件吸音量不分位置加進晚期一族；只驗總量與公式實作一致，實際家具精度未驗證。"
 
 [[entry.capability]]
 room = "shoebox"

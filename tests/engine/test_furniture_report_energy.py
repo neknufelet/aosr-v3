@@ -5,8 +5,9 @@ from dataclasses import asdict, fields, replace
 
 import pytest
 
-from aosr.config.frequency_axis import GEOMETRIC_BAND_FREQUENCIES_HZ, LowFrequencyAxis, low_frequency_axis_frequencies
+from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ, GEOMETRIC_BAND_FREQUENCIES_HZ, LowFrequencyAxis, low_frequency_axis_frequencies
 from aosr.physics import furniture_scene, geometric_lane, report_io, report_output, three_lane_report as report
+from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.physics.room_paths import RoomPath
 from aosr.physics.furniture_paths import Furniture, FurniturePath, filter_room_paths, single_bounce_furniture_paths
 from aosr.geometry.furniture import FaceDirection, Vec3
@@ -38,11 +39,24 @@ def _prepared(furniture: tuple[AbsoluteFurniture, ...] | None = None) -> batch._
 
 def test_shared_room_fields_bitwise_equal_except_furniture() -> None:
     plain, furnished = _prepared(), _prepared((case.desk(),))
+    changing = {"furniture", "t60", "f_s_hz", "late_result", "decay", "full_weights", "dense_weights"}
     for field in fields(plain):
-        if field.name != "furniture":
+        if field.name not in changing:
             # Python 浮點 repr 是往返不失位的表示，亦分開正負零；遞迴展開每格。
             assert repr(_key_value(getattr(plain, field.name))) == repr(_key_value(getattr(furnished, field.name))), field.name
     assert plain.furniture is None and furnished.furniture is not None
+    assert all(furnished.t60[f] < value for f, value in plain.t60.items())
+    assert furnished.f_s_hz < plain.f_s_hz
+    for before, after in zip(plain.late_result.bands, furnished.late_result.bands, strict=True):
+        assert after.late_reverberant_energy < before.late_reverberant_energy
+    for decay_before, decay_after in zip(plain.decay.result.bands, furnished.decay.result.bands, strict=True):
+        assert decay_after.t20_s < decay_before.t20_s
+        if decay_before.t30_s is not None and decay_after.t30_s is not None:
+            assert decay_after.t30_s < decay_before.t30_s
+    changes_weights = any(150.0 < fs < 300.0 for fs in (plain.f_s_hz, furnished.f_s_hz))
+    for name in ("full_weights", "dense_weights"):
+        assert (getattr(plain, name) != getattr(furnished, name)) == changes_weights
+
 
 
 @pytest.mark.usefixtures("fast_room")
@@ -95,7 +109,9 @@ def test_batch_prepares_impedances_once_per_axis_and_reports_keep_absolute_furni
         impedance_by_wall=case.WALLS, reflection_order_k=1,
         furniture=(case.desk(),), contact_rel=case.CONTACT_REL,
         fem_energies={(s, r): (0.1,) * len(fs) for s in sources for r in receivers}, materials_by_wall=_flow_materials(case.WALLS))
-    assert calls == [(low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[1], case.RHO_C * medium_scale),
+    report_axis = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[1]
+    union_axis = tuple(sorted(set(report_axis) | set(LATE_DECAY_FREQUENCIES_HZ) | set(SCHROEDER_T60_BANDS_HZ)))
+    assert calls == [(union_axis, case.RHO_C * medium_scale), (report_axis, case.RHO_C * medium_scale),
                      (GEOMETRIC_BAND_FREQUENCIES_HZ, case.RHO_C * medium_scale)]
     for result in actual.values():
         assert result.furniture == result.geometric_lane.furniture == (case.desk(),)

@@ -79,7 +79,9 @@ def test_single_pair_changes_geometry_but_keeps_wall_screen_and_decay(single_pai
     assert furnished.third_octave_decay.scene_fingerprint != plain.third_octave_decay.scene_fingerprint
     assert tuple((band.t20_s, band.t30_s) for band in furnished.report.bands) == tuple(
         (band.t20_s, band.t30_s) for band in plain.report.bands)
-    assert furnished.report.top.eyring_t60_by_band_s == plain.report.top.eyring_t60_by_band_s
+    # 晚期替身不吃吸音率；Eyring 真算整件量，必須縮短。
+    assert all(value < plain.report.top.eyring_t60_by_band_s[f]
+               for f, value in furnished.report.top.eyring_t60_by_band_s.items())
 
 
 def test_scheme_without_wrapper_rejects_blocked_direct_paths() -> None:

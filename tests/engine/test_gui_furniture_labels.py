@@ -81,7 +81,7 @@ def test_mixed_compare_reverberation_names_side_and_preserves_verdict(
     row = next(row for row in view.categories if row.category == "reverberation")
     assert row.better_text == "相同"
     side = "A" if reverse else "B"
-    assert row.note_text == f"{side}：未包含家具吸音；不能用來判斷增加家具後的殘響改善量"
+    assert row.note_text == f"{side}：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；不能用來判斷增加家具後的殘響改善量"
 
 
 def _old_reverberation(result: SchemeResult) -> SchemeResult:
@@ -102,7 +102,7 @@ def test_mixed_compare_reverberation_keeps_conditions_difference(
     side = "A" if reverse else "B"
     assert row.better_text == ""
     assert row.comparison_text == "評分條件不同，這一類代價不能直接比"
-    assert row.note_text == (f"{side}：未包含家具吸音；不能用來判斷增加家具後的殘響改善量；"
+    assert row.note_text == (f"{side}：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；不能用來判斷增加家具後的殘響改善量；"
                              "評分條件不同，這一類代價不能直接比")
 
 
@@ -111,7 +111,7 @@ def test_two_furnished_compare_reverberation_has_no_improvement_warning(scheme_p
     view = _view((furnished, _renamed(furnished, "both-furnished")))
     row = next(row for row in view.categories if row.category == "reverberation")
     assert row.better_text == "相同"
-    assert row.note_text == "未包含家具吸音"
+    assert row.note_text == "家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具"
 
 
 @pytest.mark.parametrize("furnished", [False, True])
@@ -177,7 +177,7 @@ def test_report_materials_use_first_place_saved_path_table(tmp_path: Path, schem
     assert FINITE_LIMITATIONS in text
     assert "家具僅一次反射、混合反射未納入" in text
     assert "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設" in text
-    assert "整房殘響與交接頻率未包含家具吸音" in text
+    assert "整房殘響與交接頻率：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具" in text
     assert "布面；估計" not in "\n".join(report.furniture_notes)
 
 
@@ -206,7 +206,7 @@ def test_report_unreadable_first_materials_are_explicit_without_search_fallback(
         "家具模型說明", display.FURNITURE_REASON, "家具僅一次反射、混合反射未納入",
         "家具材質：第一名結果讀不回", FINITE_LIMITATIONS,
         "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設",
-        "透射未算", "整房殘響與交接頻率未包含家具吸音",
+        "透射未算", "整房殘響與交接頻率：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具",
     )
     assert "家具材質：第一名結果讀不回" in render_text(report).splitlines()
     assert not any("估計，非本件實測" in line for line in report.furniture_notes)
@@ -231,7 +231,7 @@ def test_compare_browser_notes_and_reverberation_screenshot(
         page.wait_for_selector("#content", state="visible")
         assert "B：沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz" in page.locator("#notes").inner_text()
         row = page.locator("#categories tr").filter(has_text="殘響")
-        assert "B：未包含家具吸音；不能用來判斷增加家具後的殘響改善量" in row.inner_text()
+        assert "B：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；不能用來判斷增加家具後的殘響改善量" in row.inner_text()
         page.locator("#notes").screenshot(path=str(tmp_path / "compare-notes.png"))
         row.screenshot(path=str(tmp_path / "compare-reverberation.png"))
         _assert_text_is_formatted(page)
