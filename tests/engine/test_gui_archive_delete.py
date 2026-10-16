@@ -291,7 +291,7 @@ def test_last_cleanup_failure_keeps_manifest_for_retry(
 def test_clear_rejects_missing_json_and_malformed_json(tmp_path: Path) -> None:
     with _client(tmp_path, (sys.executable,)) as client:
         before = _tree(tmp_path)
-        assert client.post("/api/archive/clear").status_code == 400
+        assert client.post("/api/archive/clear").status_code == 415
         assert client.post("/api/archive/clear", content="{", headers={"content-type": "application/json"}).status_code == 400
         assert _tree(tmp_path) == before
 

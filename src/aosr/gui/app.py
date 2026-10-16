@@ -923,7 +923,7 @@ def create_app(settings: GuiSettings) -> Starlette:
                 request.client.host if request.client else None, settings.client_networks):
             return _bad(ValueError("只接受這台本機與 Tailscale 裝置的連線"), 403)
         if request.method in {"POST", "PUT"} and not _is_json_media_type(request.headers.get("content-type", "")):
-            return _bad(ValueError("只收 application/json"), 400 if request.url.path == "/api/archive/clear" else 415)
+            return _bad(ValueError("只收 application/json"), 415)
         response = await call_next(request)
         if response.status_code == 400 and response.headers.get("content-type", "").startswith("text/plain"):
             return _bad(ValueError("Host 不受信任"))

@@ -546,12 +546,12 @@ async function movePackage(item) {
   }
   await refreshMovedLists(data.message);
 }
-async function deleteArchive(item, package = true) {
-  const label = package
-    ? `封存的「${item.scheme_id}」（${item.archived_text}封存、${item.result_count} 筆結果、${item.size_text}）`
-    : `舊的單筆封存「${item.scheme_id}」（${item.finished_text}算完、${item.size_text}）`;
+async function deleteArchive(item, isPackage = true) {
+  const label = isPackage
+    ? `封存的「${item.scheme_id}」（${item.archived_text} 封存、${item.result_count} 筆結果、${item.size_text}）`
+    : `舊的單筆封存「${item.scheme_id}」（${item.finished_text} 算完、${item.size_text}）`;
   if (!window.confirm(`會永久刪除${label}。這個資料夾沒有備份，刪了救不回來。確定刪除嗎？`)) return;
-  const path = package ? `packages/${item.package_id}` : item.run_id;
+  const path = isPackage ? `packages/${item.package_id}` : item.run_id;
   try {
     const data = await api(`/api/archive/${path}/delete`, "POST", {});
     await refreshMovedLists(data.message);

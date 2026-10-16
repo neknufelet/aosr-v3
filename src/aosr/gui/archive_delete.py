@@ -116,7 +116,7 @@ class ArchiveDelete:
                 marker.write_bytes(manifest)
                 raise OSError("刪除未完成：已刪全部成員，還剩空資料夾；這一包還列在封存區，可以再刪；請助理檢查") from exc
             row = package.summary()
-            return {"message": f"已永久刪除封存的「{package.scheme_id}」（{row['archived_text']}封存、"
+            return {"message": f"已永久刪除封存的「{package.scheme_id}」（{row['archived_text']} 封存、"
                                f"{len(package.result_ids)} 筆結果）"}
 
     def result(self, run_id: str, rows: list[dict[str, object]]) -> dict[str, object]:
@@ -134,7 +134,7 @@ class ArchiveDelete:
             entries = [entry for path in paths for entry in _entries(path)]
             _delete_entries(entries, marker, "這一筆")
             return {"message": f"已永久刪除舊的單筆封存「{row.get('scheme_id', run_id)}」"
-                               f"（{row.get('finished_text', '讀不出')}算完）"}
+                               f"（{row.get('finished_text', '讀不出')} 算完）"}
 
     def listing(self, results: list[dict[str, object]]) -> dict[str, object]:
         """呼叫端持共用鎖；表格與確認預覽用同一份名單與大小。"""
