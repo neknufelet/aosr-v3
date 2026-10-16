@@ -31,15 +31,19 @@ def fast_room(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(batch, "solve_geometric_late_energy", stand_ins.fake_late_energy)
 
 
-def _prepared(furniture: tuple[AbsoluteFurniture, ...] | None = None) -> batch._Shared:
+def _prepared(furniture: tuple[AbsoluteFurniture, ...] | None = None,
+              walls: dict[Wall, float] = case.WALLS) -> batch._Shared:
     return batch._prepare(source_model=case.OMNI, room=case.ROOM, sound_speed_m_s=case.SPEED,
-        density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, scattering_by_wall=None,
+        density_kg_m3=case.DENSITY, impedance_by_wall=walls, scattering_by_wall=None,
         capability=None, reflection_order_k=1, low_frequency_axis=LowFrequencyAxis.SEARCH,
-        furniture=furniture, contact_rel=case.CONTACT_REL if furniture else None, materials_by_wall=_flow_materials(case.WALLS))
+        furniture=furniture, contact_rel=case.CONTACT_REL if furniture else None, materials_by_wall=_flow_materials(walls))
 
 
-def test_shared_room_fields_bitwise_equal_except_furniture() -> None:
-    plain, furnished = _prepared(), _prepared((case.desk(),))
+# 原場景 f_s 兩邊都在地板以下、權重不變；硬牆那組 f_s 兩邊都在地板與上限之間、權重跟著變，兩支都要真的走到。
+@pytest.mark.parametrize("impedance, weights_change", ((case.WALLS[Wall.FLOOR], False), (20000.0, True)))
+def test_shared_room_fields_bitwise_equal_except_furniture(impedance: float, weights_change: bool) -> None:
+    walls = {wall: impedance for wall in Wall.all()}
+    plain, furnished = _prepared(walls=walls), _prepared((case.desk(),), walls=walls)
     changing = {"furniture", "t60", "f_s_hz", "late_result", "decay", "full_weights", "dense_weights"}
     for field in fields(plain):
         if field.name not in changing:
@@ -58,6 +62,7 @@ def test_shared_room_fields_bitwise_equal_except_furniture() -> None:
     def regime(fs: float) -> object:
         return "hard" if fs >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ else "floor" if fs <= CROSSOVER_LOWER_FLOOR_HZ else fs
     changes_weights = regime(plain.f_s_hz) != regime(furnished.f_s_hz)
+    assert changes_weights == weights_change
     for name in ("full_weights", "dense_weights"):
         assert (getattr(plain, name) != getattr(furnished, name)) == changes_weights
 

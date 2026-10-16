@@ -234,8 +234,9 @@ evidence = [
   "tests/engine/test_furniture_absorption.py::test_default_object_area_times_raw_catalog_absorption",
   "tests/engine/test_furniture_absorption.py::test_late_family_eyring_and_art_share_total_absorption",
   "tests/engine/test_late_energy_physical_properties.py::test_uniform_raw_energy_matches_sabine_diffuse_field",
-  "tests/engine/test_late_energy_physical_properties.py::test_steady_state_patch_absorption_equals_source_power",
-  "tests/engine/test_late_energy_physical_properties.py::test_identical_floor_halves_equal_whole_wall_late_energy",
+  "tests/engine/test_furniture_absorption.py::test_every_kind_uses_its_own_closed_form",
+  "tests/engine/test_furniture_absorption.py::test_several_items_sum_by_furniture_id_from_left",
+  "tests/engine/test_furniture_report_energy.py::test_shared_room_fields_bitwise_equal_except_furniture",
   "tests/engine/test_late_energy_physical_properties.py::test_uniform_decay_matches_exact_constant_eyring",
 ]
 note = "家具紙第 23 條：整件吸音量不分位置加進晚期一族；只驗總量與公式實作一致，實際家具精度未驗證。"
