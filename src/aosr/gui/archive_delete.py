@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from aosr.gui.jobs import ResultMoveConflict
+from aosr.gui.jobs import LEGACY_DELETING_TEXT, ResultMoveConflict
 from aosr.gui.scheme_archive import ArchivePackage, IDENTITY, SchemeArchive, _present, result_relatives
 
 
@@ -51,8 +51,8 @@ def _delete_entries(entries: list[Path], marker: Path, label: str) -> None:
     except OSError as exc:
         base = marker.parent if marker.name == "manifest.json" else marker.parent.parent
         removed = "、".join(str(path.relative_to(base)) for path in deleted) or "無"
-        remaining = [str(path.relative_to(base)) for path in entries if _present(path)]
-        raise OSError(f"刪除未完成：已刪 {len(deleted)} 個成員，還剩 {len(remaining)} 個成員；"
+        remaining = [str(path.relative_to(base)) for path in [*entries, marker] if _present(path)]
+        raise OSError(f"刪除未完成：已刪 {len(deleted)} 項，還剩 {len(remaining)} 項；"
                       f"已刪：{removed}；未刪：{'、'.join(remaining) or marker.name}。{label}還列在封存區，可以再刪；請助理檢查") from exc
 
 
@@ -68,9 +68,13 @@ class ArchiveDelete:
         self.jobs = archive.jobs
         self.root = self.jobs.data_dir / "archive"
 
+    def _safe_root(self) -> None:
+        _safe_parents(self.root, [self.root, *(self.root / name for name in ("results", "runs", "packages", "deleting"))])
+
     def _package(self, package_id: str) -> tuple[Path, ArchivePackage, list[Path]]:
         if not IDENTITY.fullmatch(package_id):
             raise FileNotFoundError("封存包找不到")
+        self._safe_root()
         folder = self.archive.packages_dir / package_id
         if not _present(folder):
             raise FileNotFoundError("封存包找不到")
@@ -113,7 +117,10 @@ class ArchiveDelete:
             try:
                 folder.rmdir()
             except OSError as exc:
-                marker.write_bytes(manifest)
+                try:
+                    marker.write_bytes(manifest)
+                except OSError as rewrite:
+                    raise OSError("清單已刪、資料夾沒清掉，畫面不會再列這一包；請助理檢查") from rewrite
                 raise OSError("刪除未完成：已刪全部成員，還剩空資料夾；這一包還列在封存區，可以再刪；請助理檢查") from exc
             row = package.summary()
             return {"message": f"已永久刪除封存的「{package.scheme_id}」（{row['archived_text']} 封存、"
@@ -123,7 +130,7 @@ class ArchiveDelete:
         with self.jobs._lock:
             if not IDENTITY.fullmatch(run_id):
                 raise FileNotFoundError("封存的結果找不到")
-            _safe_parents(self.root, [self.root, self.root / "results", self.root / "runs"])
+            self._safe_root()
             marker = self.root / "results" / f"{run_id}.json"
             if not marker.is_file():
                 raise FileNotFoundError("封存的結果找不到")
@@ -132,28 +139,36 @@ class ArchiveDelete:
             # 快照、錯誤輸出、紀錄先刪，結果檔是清單依據，最後才刪。
             paths = [self.root / path for path in reversed(relatives[1:])]
             entries = [entry for path in paths for entry in _entries(path)]
-            _delete_entries(entries, marker, "這一筆")
+            deleting = self.root / "deleting" / run_id
+            if deleting.is_symlink() or (_present(deleting) and not deleting.is_file()):
+                raise DeleteConflict("刪除標記位置不安全，不能刪除；沒有刪任何檔案，請助理檢查")
+            deleting.parent.mkdir(exist_ok=True)
+            deleting.touch(exist_ok=True)
+            _delete_entries([*entries, marker], deleting, "這一筆")
+            if not any(deleting.parent.iterdir()):
+                deleting.parent.rmdir()
             return {"message": f"已永久刪除舊的單筆封存「{row.get('scheme_id', run_id)}」"
                                f"（{row.get('finished_text', '讀不出')} 算完）"}
 
     def listing(self, results: list[dict[str, object]]) -> dict[str, object]:
         """呼叫端持共用鎖；表格與確認預覽用同一份名單與大小。"""
         packages = self.archive.list_packages()
-        total = 0
+        total, unknown = 0, 0
         for row in packages:
             folder = self.archive.packages_dir / str(row["package_id"])
             row["delete_available"] = row.get("status") == "complete"
-            row["size_text"] = size_text(size_bytes([folder]))
+            size = self._package_size(row, folder)
             if row["delete_available"]:
-                total += size_bytes([folder])
-                package = self.archive._load(str(row["package_id"]))
-                if any(not _present(folder / path) for path in package.paths):
-                    row["restore_available"] = False
-                    row["status_text"] = "這一包缺少檔案，不能搬回；可以按永久刪除，或請助理檢查"
+                total += size or 0
+                unknown += size is None
         for row in results:
-            size = size_bytes([self.root / path for path in result_relatives(str(row["run_id"]))])
-            row["size_text"] = size_text(size)
-            total += size
+            run_id = str(row["run_id"])
+            size = _row_size(row, [self.root / path for path in result_relatives(run_id)])
+            total += size or 0
+            unknown += size is None
+            row["restore_available"] = not _present(self.root / "deleting" / run_id)
+            if not row["restore_available"]:
+                row["status_text"] = LEGACY_DELETING_TEXT
         deletable = [row for row in packages if row["delete_available"]]
         skipped = [{"package_id": row["package_id"], "scheme_id": row["scheme_id"],
                     "archived_text": row["archived_text"], "reason": row["status_text"]}
@@ -161,7 +176,22 @@ class ArchiveDelete:
         return {"packages": packages, "results": results, "clear_preview": {
             "package_ids": [row["package_id"] for row in deletable], "run_ids": [row["run_id"] for row in results],
             "package_count": len(deletable), "result_count": sum(cast(int, row["result_count"]) for row in deletable),
-            "legacy_count": len(results), "size_text": size_text(total), "skipped": skipped}}
+            "legacy_count": len(results), "size_text": (
+                f"至少約 {total / 1_000_000:.1f} MB（{unknown} 項大小讀不出）" if unknown else size_text(total)), "skipped": skipped}}
+
+    def _package_size(self, row: dict[str, object], folder: Path) -> int | None:
+        size = _row_size(row, [folder])
+        if not row["delete_available"]:
+            return size
+        try:
+            package = self.archive._load(str(row["package_id"]))
+            if any(not _present(folder / path) for path in package.paths):
+                row["restore_available"] = False
+                row["status_text"] = "這一包缺少檔案，不能搬回；可以按永久刪除，或請助理檢查"
+        except (OSError, ValueError):
+            row["size_text"] = "大小讀不出"
+            return None
+        return size
 
     def clear(self, body: object, rows: list[dict[str, object]]) -> dict[str, object]:
         packages, results = clear_ids(body)
@@ -200,7 +230,19 @@ def clear_ids(body: object) -> tuple[list[str], list[str]]:
     return lists[0], lists[1]
 
 
+def _row_size(row: dict[str, object], paths: list[Path]) -> int | None:
+    try:
+        size = size_bytes(paths)
+        row["size_text"] = size_text(size)
+        return size
+    except (OSError, ValueError):
+        row["size_text"] = "大小讀不出"
+        return None
+
+
 def _error_message(exc: ValueError | OSError) -> str:
+    if isinstance(exc, FileNotFoundError) and exc.errno is not None:
+        return "封存項目已經不在"
     if isinstance(exc, OSError) and exc.errno is not None:
         return "刪除未完成，封存項目仍保留；請助理檢查資料夾權限後再刪"
     return str(exc)

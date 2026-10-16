@@ -472,7 +472,7 @@ function resultRow(item, archived = false) {
   const row = document.createElement("tr");
   row.dataset.runId = item.run_id;
   const finished = ["done", "none"].includes(item.run_status);
-  row.classList.toggle("not-finished", !finished);
+  row.classList.toggle("not-finished", !finished || (archived && item.restore_available === false));
   // 「物理」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
   // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
   const values = archived ? [[item.scheme_id], [item.finished_text],
@@ -486,7 +486,7 @@ function resultRow(item, archived = false) {
   // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
   // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
   // 封存動作另有按鈕欄；方案代號保持完整，日期與時刻各自不折、只在兩段之間換行，留出新欄的位置。
-  if (!finished) {
+  if (!finished || (archived && item.restore_available === false)) {
     const status = document.createElement("span");
     status.className = "run-status"; status.textContent = item.status_text;
     row.firstElementChild.append(status);
@@ -604,7 +604,8 @@ async function loadArchiveList() {
   list.replaceChildren();
   for (const item of data.results) {
     const row = resultRow(item, true);
-    rowButton(row, "搬回", () => moveResult(item, true));
+    if (item.restore_available) rowButton(row, "搬回", () => moveResult(item, true));
+    else row.append(document.createElement("td"));
     rowButton(row, "永久刪除", () => deleteArchive(item, false), true);
     list.append(row);
   }

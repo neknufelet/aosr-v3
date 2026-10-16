@@ -1,10 +1,11 @@
 """永久刪除的確認、取消、清單更新與窄畫面。"""
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Dialog, expect
+from playwright.sync_api import Browser, Dialog, Page, expect
 
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
@@ -37,8 +38,14 @@ def test_package_delete_cancel_then_accept(tmp_path: Path, browser: Browser, res
             messages.append(dialog.message)
             dialog.dismiss()
 
+        before = _tree(tmp_path)
+        _record_posts(page)
         page.once("dialog", cancel)
-        button.click()
+        with page.expect_event("dialog"):
+            button.click()
+        assert page.request.get(f"{base}/api/archive").ok
+        assert page.evaluate("window.archivePosts") == []
+        assert _tree(tmp_path) == before
         expect(row).to_be_visible()
         assert requests == []
         folder = tmp_path / "archive" / "packages" / package["package_id"]
@@ -78,7 +85,7 @@ def test_clear_keeps_skipped_packages_and_tables_fit(
             assert page.locator(selector).evaluate("""table => {
               const card = table.closest('section');
               return table.getBoundingClientRect().right <= card.getBoundingClientRect().right
-                && card.scrollWidth <= card.clientWidth;
+                || (getComputedStyle(table).overflowX === 'auto' && table.clientWidth < table.scrollWidth);
             }""")
         if width == 390:
             expect(page.locator(".archive-scroll-note")).to_be_visible()
@@ -99,6 +106,10 @@ def test_clear_keeps_skipped_packages_and_tables_fit(
         assert WARNING in messages[0] and "1 包方案（共 0 筆結果）和 1 筆舊的單筆封存" in messages[0]
         assert "另有 2 包" in messages[0]
         expect(page.get_by_role("button", name="全部清除封存", exact=True)).to_be_hidden()
+        expect(page.locator("#archived")).to_be_visible()
+        for package_id in (incomplete["package_id"], broken.name):
+            expect(page.locator(f'tr[data-package-id="{package_id}"]')).to_be_visible()
+            assert (parent / package_id).is_dir()
         _assert_quiet(watched)
 
 
@@ -134,12 +145,19 @@ def test_clear_cancel_then_accept_hides_empty_archive(
             messages.append(dialog.message)
             dialog.dismiss()
 
+        _record_posts(page)
         page.once("dialog", cancel)
-        _row(page, "a" * 32, True).get_by_role("button", name="永久刪除").click()
+        with page.expect_event("dialog"):
+            _row(page, "a" * 32, True).get_by_role("button", name="永久刪除").click()
+        assert page.request.get(f"{base}/api/archive").ok
         page.once("dialog", cancel)
-        page.get_by_role("button", name="全部清除封存", exact=True).click()
+        with page.expect_event("dialog"):
+            page.get_by_role("button", name="全部清除封存", exact=True).click()
+        assert page.request.get(f"{base}/api/archive").ok
+        assert page.evaluate("window.archivePosts") == []
         assert sent == [] and _tree(tmp_path) == before
-        assert all(WARNING in message for message in messages)
+        assert WARNING in messages[0] and "舊的單筆封存" in messages[0]
+        assert WARNING in messages[1] and "確定全部刪除嗎" in messages[1]
         expect(page.locator("#archived")).to_be_visible()
         _confirm(page)
         page.get_by_role("button", name="全部清除封存", exact=True).click()
@@ -147,3 +165,75 @@ def test_clear_cancel_then_accept_hides_empty_archive(
         listing = page.request.get(f"{base}/api/archive").json()
         assert listing["packages"] == [] and listing["results"] == []
         _assert_quiet(watched)
+
+
+def _record_posts(page: Page) -> None:
+    page.evaluate("""() => {
+      window.archivePosts = [];
+      const original = window.fetch;
+      window.fetch = (...args) => {
+        if (args[1]?.method === 'POST') window.archivePosts.push(args[0]);
+        return original(...args);
+      };
+    }""")
+
+
+def test_narrow_legacy_only_hides_empty_package_table(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    _bundle(tmp_path / "archive", result, "a" * 32)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=390) as watched:
+        page = watched.page
+        page.locator("#archived summary").click()
+        expect(_row(page, "a" * 32, True)).to_be_visible()
+        expect(page.locator("#archived-packages")).to_be_hidden()
+        _saved(tmp_path, result)
+        package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
+        page.reload(wait_until="networkidle")
+        page.locator("#archived summary").click()
+        _confirm(page)
+        page.locator(f'tr[data-package-id="{package["package_id"]}"]').get_by_role(
+            "button", name="永久刪除", exact=True).click()
+        expect(page.locator("#archived-packages-list tr")).not_to_be_attached()
+        expect(page.locator("#archived-packages")).to_be_hidden()
+        expect(_row(page, "a" * 32, True)).to_be_visible()
+        _assert_quiet(watched)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_partial_delete_refreshes_row_and_disables_restore(
+        tmp_path: Path, browser: Browser, result: SchemeResult, monkeypatch: pytest.MonkeyPatch, legacy: bool) -> None:
+    run_id = "a" * 32
+    _bundle(tmp_path / "archive" if legacy else tmp_path, result, run_id)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        if legacy:
+            folder = tmp_path / "archive"
+        else:
+            package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
+            folder = tmp_path / "archive" / "packages" / package["package_id"]
+            page.reload(wait_until="networkidle")
+        page.locator("#archived summary").click()
+        row = _row(page, run_id, True) if legacy else _package_row(page, result.scheme.scheme_id)
+        unlink = Path.unlink
+        deleted: list[Path] = []
+
+        def fail_second(path: Path, missing_ok: bool = False) -> None:
+            if path.is_relative_to(folder):
+                if deleted:
+                    raise PermissionError(errno.EACCES, "第二個刪不掉")
+                deleted.append(path)
+            unlink(path, missing_ok=missing_ok)
+
+        _confirm(page)
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", fail_second)
+            row.get_by_role("button", name="永久刪除", exact=True).click()
+            expect(page.locator("#messages")).to_have_class("notice")
+            expect(page.locator("#messages")).to_contain_text("還剩")
+        expect(row).to_be_visible()
+        expect(row.get_by_role("button", name="搬回", exact=True)).not_to_be_attached()
+        expect(row.get_by_role("button", name="永久刪除", exact=True)).to_be_visible()
+        status = "這一筆刪到一半" if legacy else "這一包缺少檔案"
+        expect(row).to_contain_text(f"{status}，不能搬回；可以按永久刪除，或請助理檢查")
+        assert watched.page_errors == []
+        assert watched.console_errors and all("500" in message for message in watched.console_errors)

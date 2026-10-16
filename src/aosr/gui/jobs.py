@@ -18,6 +18,7 @@ from aosr.runtime import child_process_env
 
 
 REFERENCE_SECONDS = 360
+LEGACY_DELETING_TEXT = "這一筆刪到一半，不能搬回；可以按永久刪除，或請助理檢查"
 RUN_ID_ENV = "AOSR_GUI_RUN_ID"
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 
@@ -272,6 +273,9 @@ class JobManager:
     def restore_result(self, run_id: str) -> None:
         """持鎖搬回舊的單筆產物，不覆蓋原位置的任何同代號檔案。"""
         with self._lock:
+            marker = self.data_dir / "archive" / "deleting" / run_id
+            if marker.exists() or marker.is_symlink():
+                raise ResultMoveConflict(LEGACY_DELETING_TEXT)
             self._move_result(run_id, self.data_dir / "archive", self.data_dir)
 
     def _move_result(self, run_id: str, source: Path, target: Path) -> None:
