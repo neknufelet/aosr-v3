@@ -1,4 +1,4 @@
-"""家具整件吸音量的共用輸入；尺寸沿用輸入頁預設，位置只供場景綁定。"""
+"""家具整件吸音量的共用輸入；尺寸抄自輸入頁預設（考卷自己的值，預設改了這裡不跟著動），位置只供場景綁定。"""
 from typing import TypedDict
 from aosr.geometry.furniture import FurnitureKind
 from aosr.geometry.shoebox import Room, Wall
