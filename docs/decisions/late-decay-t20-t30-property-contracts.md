@@ -31,7 +31,7 @@ summary: "上一代 T20 答案只作相容紀錄；均勻材料房間的 T20、T
 - 上一代 T20 答案 `blueprint/reference_art_decay_{flat,varied,lowabs}.json` 依 `legacy-answers-three-roles.md` 降為第二類相容紀錄：照量、照留，但不擋合併。
 - T20 擬合算法不變：使用同一條晚期混響衰減曲線，在 −5～−25 dB（分貝）作加權直線擬合，採 256 階，擬合無效就報錯。
 - 擋合併的獨立性質是均勻材料房間的 T20 與 T30，各自必須等於考卷自行寫出的精確常數 Eyring（艾林）公式 `T = 24·ln(10)/c · V / (−S·ln(1−ᾱ_d))`，相對差不得超過 `2^-30`。
-  2026-10-16（#703）起同一題加「均勻牆面加家具」的案例：家具整件吸音量 A_f 照 `late-energy-random-incidence-reciprocal-form-factors.md` 決定 1 分到每格後，式中 ᾱ_d 換成 (S·α_d＋A_f)/S；碰撞頻率只用六面牆面積，不變。
+  2026-10-16（#703）起同一題加「均勻牆面加家具」的案例：家具整件吸音量 A_f 照 `late-energy-random-incidence-reciprocal-form-factors.md` 決定 1 分到每格後，式中 ᾱ_d 換成 (S·α_d＋A_f)/S；碰撞頻率只用六面牆面積，不變。掛在既有契約 `late_energy_physical_property` 底下，不加新列。
 - `blueprint/precision_contracts.toml` 中 `late_decay_t20_vs_legacy`（T20 對上一代）仍是第二類紀錄尺；擋合併的是該登記簿的 `late_energy_physical_property`（晚期能量物理性質）所含精確常數 Eyring 性質。
 
 **T30 的 12 組合成衰減性質採 `2^-30`（2026-09-15）**
