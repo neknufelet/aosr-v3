@@ -16,7 +16,7 @@ FURNITURE_MATERIALS = {"fabric": "布面", "leather": "皮面", "wood": "木質"
                        "glass": "玻璃", "absorptive_cloud": "吸音天雲"}
 FURNITURE_FACES = {"top": "頂面", "bottom": "底面", "+x": "朝 +x 的面",
                    "-x": "朝 -x 的面", "+y": "朝 +y 的面", "-y": "朝 -y 的面"}
-# 第 13 條（第 85、87、88 行）、第 16、23、25、27、22 條，逐字取用；
+# 第 13 條（第 85、87、88 行）、第 16、25、27、22 條，逐字取用；
 # 殘響那句（FURNITURE_REVERBERATION_NOTE）是第 23 條 2026-10-16 照實改寫，句子出自 #703 施工單、不是紙上逐字。
 FURNITURE_REFLECTION_NOTE = "家具僅一次反射、混合反射未納入"
 FURNITURE_MODEL_NOTE = "家具模型：近似"
@@ -34,7 +34,6 @@ FURNITURE_FINITE_SIZE_NOTE = ("有限尺寸鏡面修正的限制：原理論的�
 FURNITURE_REVERBERATION_NOTE = "家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具"
 FURNITURE_REVERBERATION_REPORT_NOTE = f"整房殘響與交接頻率：{FURNITURE_REVERBERATION_NOTE}"
 FURNITURE_MATERIAL_UNREADABLE_NOTE = "家具材質：第一名結果讀不回"
-FURNITURE_REVERBERATION_COMPARISON_NOTE = "不能用來判斷增加家具後的殘響改善量"
 FURNITURE_MODEL_TITLE = "家具模型說明"
 FURNITURE_TRANSMISSION_NOTE = "透射未算"
 FURNITURE_DIRECTIVITY_NOTE = "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設"

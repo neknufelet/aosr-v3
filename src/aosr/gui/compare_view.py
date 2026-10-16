@@ -23,7 +23,7 @@ from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import (
     REVERBERATION_ROOM_NOTE, APPROXIMATE_TEXT, CONDITIONS_DIFFER_TEXT,
-    FURNITURE_REVERBERATION_NOTE, FURNITURE_REVERBERATION_COMPARISON_NOTE, FURNITURE_COMPARISON_REASON, FURNITURE_FIELDS,
+    FURNITURE_REVERBERATION_NOTE, FURNITURE_COMPARISON_REASON, FURNITURE_FIELDS,
     FURNITURE_KINDS, FURNITURE_MATERIALS, FURNITURE_MODEL_NOTE, FURNITURE_REASON,
     FURNITURE_ROOM_ANGLE, NO_SCHEME_CHANGES_TEXT, OTHER_SETTINGS_LABEL,
     furniture_name, furniture_ranking_note, reflection_models_differ,
@@ -778,7 +778,8 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
         notes: tuple[str, ...] = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
         if kind is QualityCategory.REVERBERATION and bool(view_a.furniture_reason) != bool(view_b.furniture_reason):
             side = "A" if view_a.furniture_reason else "B"
-            notes = (f"{side}：{FURNITURE_REVERBERATION_NOTE}", FURNITURE_REVERBERATION_COMPARISON_NOTE, comparison)
+            # 家具紙第 23 條 2026-10-16（#842）拿掉「改善量」那句提醒，有家具那一邊照舊附殘響說明。
+            notes = (f"{side}：{FURNITURE_REVERBERATION_NOTE}", comparison)
         rows.append(CategoryRow(category=kind.value, label=LABELS[kind.value], a=a, b=b,
                                 a_state_text=a.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in a.flags else ""),
                                 b_state_text=b.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in b.flags else ""),
