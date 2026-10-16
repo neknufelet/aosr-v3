@@ -81,7 +81,8 @@ def test_mixed_compare_reverberation_names_side_and_preserves_verdict(
     row = next(row for row in view.categories if row.category == "reverberation")
     assert row.better_text == "相同"
     side = "A" if reverse else "B"
-    assert row.note_text == f"{side}：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；不能用來判斷增加家具後的殘響改善量"
+    # 家具紙第 23 條 2026-10-16（#842）：「改善量」那句拿掉，有家具那一邊照舊點名。
+    assert row.note_text == f"{side}：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具"
 
 
 def _old_reverberation(result: SchemeResult) -> SchemeResult:
@@ -102,7 +103,7 @@ def test_mixed_compare_reverberation_keeps_conditions_difference(
     side = "A" if reverse else "B"
     assert row.better_text == ""
     assert row.comparison_text == "評分條件不同，這一類代價不能直接比"
-    assert row.note_text == (f"{side}：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；不能用來判斷增加家具後的殘響改善量；"
+    assert row.note_text == (f"{side}：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；"
                              "評分條件不同，這一類代價不能直接比")
 
 
@@ -231,7 +232,8 @@ def test_compare_browser_notes_and_reverberation_screenshot(
         page.wait_for_selector("#content", state="visible")
         assert "B：沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz" in page.locator("#notes").inner_text()
         row = page.locator("#categories tr").filter(has_text="殘響")
-        assert "B：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具；不能用來判斷增加家具後的殘響改善量" in row.inner_text()
+        assert "B：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具" in row.inner_text()
+        assert "改善量" not in page.locator("#categories").inner_text()
         page.locator("#notes").screenshot(path=str(tmp_path / "compare-notes.png"))
         row.screenshot(path=str(tmp_path / "compare-reverberation.png"))
         _assert_text_is_formatted(page)
