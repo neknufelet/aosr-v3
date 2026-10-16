@@ -33,6 +33,8 @@ def _damage(folder: Path, kind: str) -> None:
         manifest.write_text("{")
     elif kind == "extra":
         (folder / "extra").write_text("不在清單")
+    elif kind == "extra_dir":
+        (folder / "extra-dir").mkdir()  # 空資料夾不在檔案清單比對裡，只靠列成員那一步擋
     else:
         doc = json.loads(manifest.read_text())
         doc["status"] = "incomplete"
@@ -57,7 +59,7 @@ def test_delete_package_preserves_every_other_byte(tmp_path: Path, pair: tuple[S
         assert {row["package_id"] for row in client.get("/api/archive").json()["packages"]} == {other.name}
 
 
-@pytest.mark.parametrize("kind", ["incomplete", "broken", "extra"])
+@pytest.mark.parametrize("kind", ["incomplete", "broken", "extra", "extra_dir"])
 def test_unsafe_package_changes_nothing(tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], kind: str) -> None:
     with _client(tmp_path, (sys.executable,)) as client:
         folder = _package(client, tmp_path, pair[0])
@@ -719,3 +721,27 @@ def test_unreadable_deleting_marker_blocks_restore_without_breaking_listing(
         assert row["status_text"] == "這一筆刪到一半，不能搬回；可以按永久刪除，或請助理檢查"
         assert restored.status_code == 409 and restored.json()["error"] == row["status_text"]
         assert _tree(tmp_path) == before
+
+
+@pytest.mark.parametrize("kind", ["file_link", "dangling_link", "folder"])
+def test_unsafe_deleting_marker_deletes_nothing_and_writes_nothing_outside(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], kind: str) -> None:
+    """刪除標記的位置是連結或資料夾時拒刪；建標記不准沿著連結在封存區外面建檔或改檔。"""
+    with _client(tmp_path, (sys.executable,)) as client:
+        run_id = "a" * 32
+        _bundle(tmp_path / "archive", pair[0], run_id)
+        marker = tmp_path / "archive/deleting" / run_id
+        marker.parent.mkdir()
+        outside, missing = tmp_path / "outside-target", tmp_path / "outside-missing"
+        outside.write_bytes(b"outside")
+        if kind == "file_link":
+            marker.symlink_to(outside)
+        elif kind == "dangling_link":
+            marker.symlink_to(missing)
+        else:
+            marker.mkdir()
+        before = _tree(tmp_path)
+        response = client.post(f"/api/archive/{run_id}/delete", json={})
+        assert response.status_code == 409, response.text
+        assert "刪除標記位置不安全" in response.json()["error"]
+        assert _tree(tmp_path) == before and not missing.exists()
