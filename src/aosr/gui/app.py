@@ -26,6 +26,7 @@ from starlette.routing import Route
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
+from aosr.gui.archive_delete import ArchiveDelete, delete_response
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
 from aosr.gui.modal_jobs import ModalJobs, scheme_snapshot
 from aosr.gui.compare_view import (
@@ -295,6 +296,7 @@ class GuiHandlers:
         # 兩區共用同一把鎖：讀清單、查狀態與搬動互斥，封存區只讀自己的計算紀錄。
         self.archive_jobs._lock = self.jobs._lock
         self.scheme_archive = SchemeArchive(self.jobs)
+        self.archive_delete = ArchiveDelete(self.scheme_archive)
         modal_runner = settings.modal_runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
         self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
         self.startup_fingerprint = (settings.startup_fingerprint or
@@ -580,10 +582,29 @@ class GuiHandlers:
     async def archive(self, request: Request) -> Response:
         try:
             with self.jobs._lock:
-                return JSONResponse({"packages": self.scheme_archive.list_packages(),
-                                     "results": [item.model_dump() for item in self._result_summaries(True)]})
+                return JSONResponse(self.archive_delete.listing(
+                    [item.model_dump() for item in self._result_summaries(True)]))
         except (ValueError, OSError):
             return JSONResponse({"error": "封存清單讀不出，請助理檢查資料夾"}, status_code=500)
+
+    async def delete_archive(self, request: Request) -> Response:
+        with self.jobs._lock:
+            if "package_id" in request.path_params:
+                data, code = delete_response(lambda: self.archive_delete.package(request.path_params["package_id"]))
+            else:
+                data, code = delete_response(lambda: self.archive_delete.result(
+                    request.path_params["run_id"], [row.model_dump() for row in self._result_summaries(True)]))
+            return JSONResponse(data, status_code=code)
+
+    async def clear_archive(self, request: Request) -> Response:
+        try:
+            body = cast(object, await request.json())
+        except ValueError:
+            return _bad(ValueError("清除名單格式不對；沒有刪任何檔案"))
+        with self.jobs._lock:
+            data, code = delete_response(lambda: self.archive_delete.clear(
+                body, [row.model_dump() for row in self._result_summaries(True)]))
+            return JSONResponse(data, status_code=code)
 
     def _archive_scheme(self, name: str) -> dict[str, object]:
         _scheme_path(self.data_dir, name)
@@ -850,6 +871,9 @@ def _archive_routes(handlers: GuiHandlers) -> list[Route]:
     return [Route("/api/schemes/{name}/archive", handlers.archive_scheme, methods=["POST"]),
             Route("/api/schemes/{name}/archive-preview", handlers.archive_preview),
             Route("/api/archive", handlers.archive),
+            Route("/api/archive/clear", handlers.clear_archive, methods=["POST"]),
+            Route("/api/archive/packages/{package_id}/delete", handlers.delete_archive, methods=["POST"]),
+            Route("/api/archive/{run_id}/delete", handlers.delete_archive, methods=["POST"]),
             Route("/api/archive/packages/{package_id}/restore", handlers.restore_package, methods=["POST"]),
             Route("/api/results/{run_id}/archive", handlers.archive_result, methods=["POST"]),
             Route("/api/archive/{run_id}/restore", handlers.restore_result, methods=["POST"])]

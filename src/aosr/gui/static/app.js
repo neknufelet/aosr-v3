@@ -472,7 +472,7 @@ function resultRow(item, archived = false) {
   const row = document.createElement("tr");
   row.dataset.runId = item.run_id;
   const finished = ["done", "none"].includes(item.run_status);
-  row.classList.toggle("not-finished", !finished);
+  row.classList.toggle("not-finished", !finished || (archived && item.restore_available === false));
   // 「物理」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
   // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
   const values = archived ? [[item.scheme_id], [item.finished_text],
@@ -486,7 +486,7 @@ function resultRow(item, archived = false) {
   // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
   // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
   // 封存動作另有按鈕欄；方案代號保持完整，日期與時刻各自不折、只在兩段之間換行，留出新欄的位置。
-  if (!finished) {
+  if (!finished || (archived && item.restore_available === false)) {
     const status = document.createElement("span");
     status.className = "run-status"; status.textContent = item.status_text;
     row.firstElementChild.append(status);
@@ -499,9 +499,10 @@ function resultRow(item, archived = false) {
   }
   return row;
 }
-function rowButton(row, text, work) {
+function rowButton(row, text, work, danger = false) {
   const cell = document.createElement("td"), button = document.createElement("button");
   button.type = "button"; button.textContent = text;
+  if (danger) button.className = "archive-danger";
   button.onclick = () => action(work);
   cell.append(button); row.append(cell);
 }
@@ -510,8 +511,8 @@ async function moveResult(item, restore = false) {
   const data = await api(`/api/archive/${item.run_id}/restore`, "POST", {});
   await refreshMovedLists(data.message);
 }
-async function refreshMovedLists(message) {
-  say(message, "ok");
+async function refreshMovedLists(message, tone = "ok") {
+  say(message, tone);
   try { await loadSchemeList(); await loadResultList(); } catch (error) {
     say(`${message}；清單更新不了，請重新整理：${errorText(error)}`, "notice");
   }
@@ -545,10 +546,37 @@ async function movePackage(item) {
   }
   await refreshMovedLists(data.message);
 }
+async function deleteArchive(item, isPackage = true) {
+  const label = isPackage
+    ? `封存的「${item.scheme_id}」（${item.archived_text} 封存、${item.result_count} 筆結果、${item.size_text}）`
+    : `舊的單筆封存「${item.scheme_id}」（${item.finished_text} 算完、${item.size_text}）`;
+  if (!window.confirm(`會永久刪除${label}。這個資料夾沒有備份，刪了救不回來。確定刪除嗎？`)) return;
+  const path = isPackage ? `packages/${item.package_id}` : item.run_id;
+  try {
+    const data = await api(`/api/archive/${path}/delete`, "POST", {});
+    await refreshMovedLists(data.message);
+  } catch (error) {
+    await refreshMovedLists(errorText(error), "notice");
+  }
+}
+async function clearArchive(preview) {
+  let message = `會永久刪除封存區的 ${preview.package_count} 包方案（共 ${preview.result_count} 筆結果）和 ${preview.legacy_count} 筆舊的單筆封存，${preview.size_text}。清單上現在的方案和結果不受影響。這個資料夾沒有備份，刪了救不回來。確定全部刪除嗎？`;
+  if (preview.skipped.length) message += `\n另有 ${preview.skipped.length} 包封存沒做完或清單讀不出，不會刪，請助理檢查。`;
+  if (!window.confirm(message)) return;
+  const data = await api("/api/archive/clear", "POST", {
+    package_ids: preview.package_ids, run_ids: preview.run_ids});
+  // 確認框已說不刪的包仍在；伺服器只處理這次送去的代號。
+  const skipped = preview.skipped.length;
+  const note = skipped ? `\n另有 ${skipped} 包封存已跳過，請助理檢查。` : "";
+  await refreshMovedLists(data.message + note, skipped || data.skipped.length || data.failed.length ? "notice" : "ok");
+}
 async function loadArchiveList() {
   const data = await api("/api/archive");
   const archive = $("archived"), list = $("archived-list");
   const packages = data.packages || [];
+  const preview = data.clear_preview;
+  $("clear-archive").hidden = !preview || (!preview.package_ids.length && !preview.run_ids.length);
+  $("clear-archive").onclick = () => action(() => clearArchive(preview));
   archive.hidden = !packages.length && !data.results.length;
   archive.querySelector("summary").textContent = `已封存（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
   const packageList = $("archived-packages-list"); packageList.replaceChildren();
@@ -568,13 +596,17 @@ async function loadArchiveList() {
     }
     if (item.restore_available) rowButton(row, "搬回", () => movePackage(item));
     else row.append(document.createElement("td"));
+    if (item.delete_available) rowButton(row, "永久刪除", () => deleteArchive(item), true);
+    else row.append(document.createElement("td"));
     packageList.append(row);
   }
   $("legacy-archive").hidden = !data.results.length;
   list.replaceChildren();
   for (const item of data.results) {
     const row = resultRow(item, true);
-    rowButton(row, "搬回", () => moveResult(item, true));
+    if (item.restore_available) rowButton(row, "搬回", () => moveResult(item, true));
+    else row.append(document.createElement("td"));
+    rowButton(row, "永久刪除", () => deleteArchive(item, false), true);
     list.append(row);
   }
 }

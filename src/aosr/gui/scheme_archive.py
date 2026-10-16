@@ -225,13 +225,15 @@ class SchemeArchive:
             raise
         return complete
 
-    def _validate_contents(self, folder: Path, package: ArchivePackage) -> None:
+    def _validate_contents(self, folder: Path, package: ArchivePackage, *, follow_links: bool = True) -> None:
         listed = [Path(path) for path in package.paths]
         snapshots = {Path("runs") / run_id for run_id in package.artifact_ids}
         for path in _package_files(folder):
             if not any(path == item or (item in snapshots and item in path.parents) for item in listed):
                 raise ResultMoveConflict("包裡的檔案與封存清單對不上，沒有搬動任何檔案；請助理檢查")
         for path in (folder / "results").glob("*.json"):
+            if not follow_links and path.is_symlink():
+                continue
             found = _scheme_id(path, result=True)
             if found is not None and found != package.scheme_id:
                 raise ResultMoveConflict("結果的方案代號與封存清單對不上，沒有搬動任何檔案；請助理檢查")
