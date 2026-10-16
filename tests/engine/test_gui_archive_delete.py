@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import errno
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -132,6 +133,7 @@ def test_partial_failure_keeps_listing_then_retry_deletes(
         assert response.status_code == 500, response.text
         assert "刪除" in response.json()["error"] and "搬動" not in response.json()["error"]
         assert "還剩" in response.json()["error"] and "可以再刪" in response.json()["error"]
+        assert re.search(r"已刪 \d+ 項，還剩 \d+ 項", response.json()["error"]), response.json()["error"]
         listing = client.get("/api/archive").json()
         if legacy:
             row = next(row for row in listing["results"] if row["run_id"] == run_id)
@@ -379,6 +381,7 @@ def test_tampered_scheme_id_deletes_nothing(tmp_path: Path, pair: tuple[SchemeRe
         before = _tree(tmp_path)
         response = client.post(f"/api/archive/packages/{package['package_id']}/delete", json={})
         assert response.status_code == 409, response.text
+        assert "對不上" in response.json()["error"]
         assert _tree(tmp_path) == before
 
 
@@ -603,3 +606,116 @@ def test_legacy_marker_precedes_deletion_and_is_removed_last(
         assert response.status_code == 200, response.text
         assert deleted[-2:] == [result, marker]
         assert not marker.parent.exists()
+
+
+@pytest.mark.parametrize("identity", ["..", "aa/bb"])
+def test_invalid_legacy_id_with_decoys_deletes_nothing(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], identity: str) -> None:
+    """代號檢查拿掉時，「..」會把 runs/.. 也就是整個封存區列進要刪的清單；放誘餌讓它真的刪得到。"""
+    with _client(tmp_path, (sys.executable,)) as client:
+        _package(client, tmp_path, pair[0])
+        _bundle(tmp_path / "archive", pair[1], "b" * 32)
+    decoy = tmp_path / "archive/results" / f"{identity}.json"
+    decoy.parent.mkdir(parents=True, exist_ok=True)
+    decoy.write_bytes(b"{}")
+    deletion = ArchiveDelete(SchemeArchive(JobManager(tmp_path, (), "a" * 40, tmp_path / "unused")))
+    before = _tree(tmp_path)
+    with pytest.raises(FileNotFoundError, match="封存的結果找不到"):
+        deletion.result(identity, [])
+    assert _tree(tmp_path) == before
+
+
+def test_leftover_empty_deleting_folder_still_reports_deleted(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], monkeypatch: pytest.MonkeyPatch) -> None:
+    """全部刪完、只剩空的 deleting 資料夾刪不掉時，照實報已刪，不報未完成。"""
+    with _client(tmp_path, (sys.executable,)) as client:
+        run_id = "a" * 32
+        _bundle(tmp_path / "archive", pair[0], run_id)
+        parent = tmp_path / "archive/deleting"
+        rmdir = Path.rmdir
+
+        def fail(path: Path) -> None:
+            if path == parent:
+                raise PermissionError(errno.EACCES, "空資料夾刪不掉")
+            rmdir(path)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "rmdir", fail)
+            response = client.post(f"/api/archive/{run_id}/delete", json={})
+        assert response.status_code == 200, response.text
+        assert "已永久刪除" in response.json()["message"]
+        assert parent.is_dir() and not any(parent.iterdir())
+        assert client.get("/api/archive").json()["results"] == []
+
+
+def test_orphan_marker_failure_says_already_deleted(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], monkeypatch: pytest.MonkeyPatch) -> None:
+    """結果檔已刪、只剩標記刪不掉：那一列已經不在，不准說「還列在封存區，可以再刪」。"""
+    with _client(tmp_path, (sys.executable,)) as client:
+        run_id = "a" * 32
+        _bundle(tmp_path / "archive", pair[0], run_id)
+        marker = tmp_path / "archive/deleting" / run_id
+        unlink = Path.unlink
+
+        def fail(path: Path, missing_ok: bool = False) -> None:
+            if path == marker:
+                raise PermissionError(errno.EACCES, "標記刪不掉")
+            unlink(path, missing_ok=missing_ok)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", fail)
+            response = client.post(f"/api/archive/{run_id}/delete", json={})
+        assert response.status_code == 500, response.text
+        assert response.json()["error"] == f"已刪除；只剩刪除標記 deleting/{run_id} 沒清掉，不影響清單；請助理檢查"
+        assert marker.is_file() and not (tmp_path / "archive/results" / f"{run_id}.json").exists()
+        assert client.get("/api/archive").json()["results"] == []
+
+
+def test_clear_skipped_reason_is_plain_chinese(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], monkeypatch: pytest.MonkeyPatch) -> None:
+    """全部清除跳過的理由跟單刪一樣白話，不帶系統訊息與完整路徑。"""
+    with _client(tmp_path, (sys.executable,)) as client:
+        folder = _package(client, tmp_path, pair[0])
+        preview = client.get("/api/archive").json()["clear_preview"]
+        read = Path.read_bytes
+
+        def gone(path: Path) -> bytes:
+            if path == folder / "manifest.json":
+                raise FileNotFoundError(errno.ENOENT, "鎖外先刪了", str(path))
+            return read(path)
+
+        before = _tree(tmp_path)
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "read_bytes", gone)
+            response = client.post("/api/archive/clear",
+                                   json={"package_ids": preview["package_ids"], "run_ids": preview["run_ids"]})
+        assert response.status_code == 200, response.text
+        assert response.json()["skipped"] == [{"kind": "package", "id": folder.name, "reason": "封存項目已經不在"}]
+        assert _tree(tmp_path) == before
+
+
+def test_unreadable_deleting_marker_blocks_restore_without_breaking_listing(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], monkeypatch: pytest.MonkeyPatch) -> None:
+    """刪除標記讀不出時，清單照列、那一筆不給搬回，搬回端點也擋下，不回系統訊息。"""
+    with _client(tmp_path, (sys.executable,)) as client:
+        run_id = "a" * 32
+        _bundle(tmp_path / "archive", pair[0], run_id)
+        deleting = tmp_path / "archive/deleting"
+        exists = Path.exists
+
+        def blocked(path: Path, *, follow_symlinks: bool = True) -> bool:
+            if path.is_relative_to(deleting):
+                raise PermissionError(errno.EACCES, "讀不進去", str(path))
+            return exists(path, follow_symlinks=follow_symlinks)
+
+        before = _tree(tmp_path)
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "exists", blocked)
+            listing = client.get("/api/archive")
+            restored = client.post(f"/api/archive/{run_id}/restore", json={})
+        assert listing.status_code == 200, listing.text
+        row = next(row for row in listing.json()["results"] if row["run_id"] == run_id)
+        assert row["restore_available"] is False
+        assert row["status_text"] == "這一筆刪到一半，不能搬回；可以按永久刪除，或請助理檢查"
+        assert restored.status_code == 409 and restored.json()["error"] == row["status_text"]
+        assert _tree(tmp_path) == before

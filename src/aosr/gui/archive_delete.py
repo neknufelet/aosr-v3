@@ -144,9 +144,17 @@ class ArchiveDelete:
                 raise DeleteConflict("刪除標記位置不安全，不能刪除；沒有刪任何檔案，請助理檢查")
             deleting.parent.mkdir(exist_ok=True)
             deleting.touch(exist_ok=True)
-            _delete_entries([*entries, marker], deleting, "這一筆")
-            if not any(deleting.parent.iterdir()):
-                deleting.parent.rmdir()
+            try:
+                _delete_entries([*entries, marker], deleting, "這一筆")
+            except OSError as exc:
+                if not _present(marker):
+                    raise OSError(f"已刪除；只剩刪除標記 deleting/{run_id} 沒清掉，不影響清單；請助理檢查") from exc
+                raise
+            try:
+                if not any(deleting.parent.iterdir()):
+                    deleting.parent.rmdir()
+            except OSError:
+                pass  # 空的 deleting 資料夾留著無害，下一次刪除會再清。
             return {"message": f"已永久刪除舊的單筆封存「{row.get('scheme_id', run_id)}」"
                                f"（{row.get('finished_text', '讀不出')} 算完）"}
 
@@ -166,7 +174,10 @@ class ArchiveDelete:
             size = _row_size(row, [self.root / path for path in result_relatives(run_id)])
             total += size or 0
             unknown += size is None
-            row["restore_available"] = not _present(self.root / "deleting" / run_id)
+            try:
+                row["restore_available"] = not _present(self.root / "deleting" / run_id)
+            except OSError:
+                row["restore_available"] = False  # 標記讀不出，當成可能刪到一半。
             if not row["restore_available"]:
                 row["status_text"] = LEGACY_DELETING_TEXT
         deletable = [row for row in packages if row["delete_available"]]
@@ -206,7 +217,7 @@ class ArchiveDelete:
                         self.package(identity) if kind == "package" else self.result(identity, rows)
                         deleted.append(identity)
                     except (DeleteConflict, FileNotFoundError) as exc:
-                        skipped.append({"kind": kind, "id": identity, "reason": str(exc)})
+                        skipped.append({"kind": kind, "id": identity, "reason": _error_message(exc)})
                     except OSError as exc:
                         failed.append({"kind": kind, "id": identity, "reason": _error_message(exc)})
         message = f"已永久刪除 {len(deleted_packages)} 包封存方案、{len(deleted_results)} 筆舊的單筆封存。"

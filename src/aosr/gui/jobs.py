@@ -274,7 +274,11 @@ class JobManager:
         """持鎖搬回舊的單筆產物，不覆蓋原位置的任何同代號檔案。"""
         with self._lock:
             marker = self.data_dir / "archive" / "deleting" / run_id
-            if marker.exists() or marker.is_symlink():
+            try:
+                deleting = marker.exists() or marker.is_symlink()
+            except OSError as exc:
+                raise ResultMoveConflict(LEGACY_DELETING_TEXT) from exc
+            if deleting:
                 raise ResultMoveConflict(LEGACY_DELETING_TEXT)
             self._move_result(run_id, self.data_dir / "archive", self.data_dir)
 
