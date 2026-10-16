@@ -80,7 +80,7 @@ def test_furniture_section_ranking_reverb_flutter_and_response(scheme_pair: tupl
     assert view.furniture == (("沙發（seat）", "布面；估計，非本件實測",
                               "未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz"),)
     assert view.furniture_reason == ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
-                                     "完整繞射，以及家具吸音對整房殘響的影響")
+                                     "完整繞射；家具吸音只以整件吸音量計入整房殘響與交接頻率，不分位置")
     assert set(view.furniture_notes) == {"透射未算", "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設",
                                          "遮擋邊界上的反射會突然出現或消失", ROUGH_SCATTERING, FINITE_LIMITATIONS}
     prefix, subject = view.ranking_approximation_text.split("；")
@@ -89,8 +89,8 @@ def test_furniture_section_ranking_reverb_flutter_and_response(scheme_pair: tupl
     assert subject.endswith(suffix)
     assert set(subject.removesuffix(suffix).split("、")) == {"音色平衡", "聆聽區穩定性", "反射與回聲", "聲道匹配"}
     assert "家具模型" not in view.ranking_text
-    assert "未包含家具吸音" in view.reverberation.caption_text
-    assert next(row.note for row in view.categories if row.category == "reverberation") == "未包含家具吸音"
+    assert "家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具" in view.reverberation.caption_text
+    assert next(row.note for row in view.categories if row.category == "reverberation") == "家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具"
     assert view.furniture_flutter_text == "顫動警戒第一版只看三對牆，家具形成的平行面未評估"
     assert view.frequency_note == "家具模型：近似"
 
@@ -103,7 +103,7 @@ def test_plain_result_has_no_scene_furniture_notices(scheme_pair: tuple[SchemeRe
     assert not view.ranking_approximation_text
     assert not view.furniture_flutter_text
     assert not view.frequency_note
-    assert "未包含家具吸音" not in view.reverberation.caption_text
+    assert "家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具" not in view.reverberation.caption_text
 
 
 def test_scene_notices_survive_missing_reflection_payload(scheme_pair: tuple[SchemeResult, ...]) -> None:

@@ -452,7 +452,7 @@ class TopFields(_FactsModel):
         json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
     )
     eyring_t60_by_band_s: dict[str, float] = Field(
-        json_schema_extra=facts("時間", "s", "絕對值：Eyring 公式、面積加權平均吸音率算出的秒數")
+        json_schema_extra=facts("時間", "s", "絕對值：Eyring 公式、面積加權平均吸音率算出的秒數；有家具時含家具整件吸音量")
     )
     room_volume_m3: float = Field(
         json_schema_extra=facts("體積", "m^3", "絕對值：房三軸長相乘的立方公尺數")

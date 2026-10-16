@@ -25,7 +25,7 @@ from tests.engine.test_furniture_result_view import FINITE_LIMITATIONS
 _COST = re.compile(r"(?:(?<=代價 )|(?<=\| ))-?\d+(?:\.\d+(?:e[+-]\d+)?|e[+-]\d+)(?= \||$)", re.MULTILINE)
 
 REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
-          "完整繞射，以及家具吸音對整房殘響的影響")
+          "完整繞射；家具吸音只以整件吸音量計入整房殘響與交接頻率，不分位置")
 
 
 def _compare_text(results: tuple[SchemeResult, ...], tmp_path: Path,
@@ -159,7 +159,7 @@ def test_reverberation_line_marks_only_the_furnished_result(
     blocks = _blocks(_compare_text(scheme_pair, tmp_path, capsys))
     for result in scheme_pair:
         line = next(line for line in blocks[result.scheme.scheme_id] if line.startswith("  reverberation | "))
-        assert (" | 整房殘響與交接頻率未包含家具吸音" in line) == bool(result.scheme.furniture)
+        assert (" | 整房殘響與交接頻率：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具" in line) == bool(result.scheme.furniture)
 
 
 def test_scheme_cli_furniture_model_section_uses_decision_words(
@@ -183,7 +183,7 @@ def test_scheme_cli_furniture_model_section_order_is_exact(
         REASON, "家具僅一次反射、混合反射未納入",
         f"{scheme_pair[1].scheme.scheme_id}：沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz",
         FINITE_LIMITATIONS, "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設",
-        "透射未算", "整房殘響與交接頻率未包含家具吸音",
+        "透射未算", "整房殘響與交接頻率：家具吸音只以整件吸音量計入、不分位置；低頻有限元素未含家具",
     ]
 
 

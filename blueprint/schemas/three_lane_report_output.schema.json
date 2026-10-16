@@ -1361,7 +1361,7 @@
             "type": "number"
           },
           "quantity": "時間",
-          "reference": "絕對值：Eyring 公式、面積加權平均吸音率算出的秒數",
+          "reference": "絕對值：Eyring 公式、面積加權平均吸音率算出的秒數；有家具時含家具整件吸音量",
           "title": "Eyring T60 By Band S",
           "type": "object",
           "unit": "s",

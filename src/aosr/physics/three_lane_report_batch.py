@@ -23,7 +23,9 @@ from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
 from aosr.physics.geometric_lane import solve_geometric_late_energy
 from aosr.physics.furniture_paths import direct_path_blockers
-from aosr.physics.furniture_scene import FurnitureReportInputs, furniture_report_inputs
+from aosr.physics.furniture_scene import (
+    FurnitureReportInputs, furniture_report_inputs, furniture_absorption_area_m2, furniture_adjusted_absorption,
+)
 from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.late_energy import LateEnergyOrderResult
 from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
@@ -81,6 +83,7 @@ def _prepare(
         room=room, materials_by_wall=materials_by_wall,
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
         report_frequencies_hz=report_frequencies, reflection_order_k=reflection_order_k,
+        furniture=furniture,
     )
     for wall, items in surfaces.notes_by_wall.items():
         merge_construction_notes(notes, wall, items)
@@ -116,6 +119,7 @@ def _prepare_late_family(
     *, room: Room, materials_by_wall: Mapping[Wall, SurfaceMaterial],
     density_kg_m3: float, sound_speed_m_s: float,
     report_frequencies_hz: tuple[float, ...], reflection_order_k: int,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None,
 ) -> tuple[WallSurfaceResponse, dict[float, float], float, LateEnergyOrderResult, report._ReportLateDecay]:
     """每場景一次求聯集軸；各消費者只取自己的精確頻點，註記留在響應裡。"""
     axis = tuple(sorted(set(report_frequencies_hz) | set(LATE_DECAY_FREQUENCIES_HZ)
@@ -123,12 +127,17 @@ def _prepare_late_family(
     surfaces = wall_surface_response(materials_by_wall, axis,
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     rho_c = density_kg_m3 * sound_speed_m_s
-    t60, f_s_hz = report._eyring_t60_and_schroeder(room, surfaces.band_rows(SCHROEDER_T60_BANDS_HZ))
+    late_surfaces = surfaces
+    if furniture:
+        af = furniture_absorption_area_m2(furniture, axis, rho_c)
+        late_surfaces = replace(surfaces, absorption_by_wall=furniture_adjusted_absorption(
+            room, axis, surfaces.absorption_by_wall, af))
+    t60, f_s_hz = report._eyring_t60_and_schroeder(room, late_surfaces.band_rows(SCHROEDER_T60_BANDS_HZ))
     late = solve_geometric_late_energy(room=room, rho_c_pa_s_per_m=rho_c,
-        frequencies_hz=report_frequencies_hz, absorption_by_wall=surfaces.named_rows(report_frequencies_hz),
+        frequencies_hz=report_frequencies_hz, absorption_by_wall=late_surfaces.named_rows(report_frequencies_hz),
         reflection_order_k=reflection_order_k)
     decay = report._solve_report_late_decay(room=room,
-        absorption_by_wall=surfaces.named_rows(LATE_DECAY_FREQUENCIES_HZ),
+        absorption_by_wall=late_surfaces.named_rows(LATE_DECAY_FREQUENCIES_HZ),
         rho_c_pa_s_per_m=rho_c, sound_speed_m_s=sound_speed_m_s)
     return surfaces, t60, f_s_hz, late, decay
 

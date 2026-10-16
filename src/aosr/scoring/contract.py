@@ -716,7 +716,9 @@ class CategoryEvaluation(_FrozenModel):
 
     @model_validator(mode="after")
     def _furniture_approximation_matches_category(self) -> Self:
-        """殘響與低頻衰減不吃家具幾何，不准帶家具近似旗標；不反向補旗標。"""
+        """殘響與低頻衰減照現狀不帶家具近似旗標，不反向補旗標。
+
+        殘響吃外露面積後要不要掛近似待老闆定（家具紙第 13 條）。"""
         if self.category in (QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY):
             if Flag.FURNITURE_MODEL_APPROXIMATE in self.flags:
                 raise ValueError("殘響與低頻衰減不准帶家具近似旗標")

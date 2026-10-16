@@ -75,11 +75,15 @@ def test_single_pair_changes_geometry_but_keeps_wall_screen_and_decay(single_pai
     assert furnished.screen.pairs == plain.screen.pairs
     assert furnished.screen.next_order_earliest_delay_s == plain.screen.next_order_earliest_delay_s
     assert furnished.screen.scene_fingerprint != plain.screen.scene_fingerprint
+    # 晚期衰減用替身 fast_late_decay，替身不吃吸音率，所以有無家具 T20／T30 與三分之一倍頻衰減才相同；
+    # 真產品有家具時會變短，真求解見 test_furniture_report_energy 與 test_furniture_absorption。
     assert furnished.third_octave_decay.rows == plain.third_octave_decay.rows
     assert furnished.third_octave_decay.scene_fingerprint != plain.third_octave_decay.scene_fingerprint
     assert tuple((band.t20_s, band.t30_s) for band in furnished.report.bands) == tuple(
         (band.t20_s, band.t30_s) for band in plain.report.bands)
-    assert furnished.report.top.eyring_t60_by_band_s == plain.report.top.eyring_t60_by_band_s
+    # 晚期替身不吃吸音率；Eyring 真算整件量，必須縮短。
+    assert all(value < plain.report.top.eyring_t60_by_band_s[f]
+               for f, value in furnished.report.top.eyring_t60_by_band_s.items())
 
 
 def test_scheme_without_wrapper_rejects_blocked_direct_paths() -> None:
