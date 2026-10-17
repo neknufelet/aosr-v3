@@ -1,6 +1,6 @@
 """鏡像法的總壓力、直達能量、反射能量，以及總量的精度契約界線與判決。
 
-**定義照上一代（決策紙 ``docs/decisions/engine-stage-order-three-to-ten.md``）。** 把 63 條
+**定義照上一代（決策紙 ``docs/decisions/engine-stages-three-to-ten-then-three-optimization-stages.md``）。** 把 63 條
 路徑加起來（含相位）得每個頻帶的總壓力，直達能量是直達那一條（order 0，恰好一條）壓力的
 模平方，反射能量是 order 大於 0 的 62 條**先複數相加再取模平方**（交叉項刻意不算——這是
 上一代的定義，v3 照比）。路徑順序照 ``image_source_paths`` 給的順序相加。

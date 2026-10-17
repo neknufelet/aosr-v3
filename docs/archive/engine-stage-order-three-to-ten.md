@@ -2,10 +2,10 @@
 title: 引擎第三到第十段的順序、邊界與交付
 date_created: 2026-09-21
 date_modified: 2026-09-21
-status: accepted
+status: superseded
 kind: governance
 supersedes: "stage-three-higher-order-reflections-first.md, stage-five-ism-totals-and-energy.md, roadmap-stages-six-to-ten.md"
-superseded_by: ""
+superseded_by: "engine-stages-three-to-ten-then-three-optimization-stages.md"
 summary: "第三段到第十段依序完成高階反射、振幅與吸收、鏡像法總量、有限元素、晚期混響、三路接合、頻率域報表、分格材料與多接收點；上一代計分不接，新的計分另排。"
 ---
 
