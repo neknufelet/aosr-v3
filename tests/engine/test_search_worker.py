@@ -65,15 +65,24 @@ def assert_dead(pid: int) -> None:
 
 
 def test_bounded_workers_yield_first_finished_and_environment(tmp_path: Path) -> None:
+    # 先後用檔案排定、不靠睡眠差（#846，同 #735）：1 等 0 寫出事件檔才結束（0 確定已開始），
+    # 0 等考卷建放行檔才結束；放行前 2、3 一支一支補進 0 旁邊的空位，上限那段才量得到多開的錯。
     numbers = (0, 1, 2, 3)
     limit = 2
-    worker, jobs = setup_worker(tmp_path, {"0": {"sleep": 0.7}, "1": {"sleep": 0.05}}, numbers)
+    worker, jobs = setup_worker(tmp_path, {"0": {"hold": "release-0"}, "1": {"started": 0}}, numbers)
     stream = worker(jobs, limit)
-    first = next(stream)
-    assert first.job == jobs[1]
-    running = events(tmp_path)
-    assert any("end" not in row for row in running)
-    results = [first, *stream]
+    try:
+        first = next(stream)
+        assert first.job == jobs[1]
+        running = events(tmp_path)
+        assert any("end" not in row for row in running)
+        results = [first, next(stream), next(stream)]
+        assert [result.job.trial_number for result in results] == [1, 2, 3]
+        (tmp_path / "release-0").touch()
+        results.extend(stream)
+    finally:
+        # 斷言半途紅了也要停掉還在等放行的 0，不留它等到逾時。
+        stream.close()
     assert {result.job.trial_number for result in results} == {job.trial_number for job in jobs}
     records = events(tmp_path)
     changes = sorted([(float(str(row["start"])), 1) for row in records]
