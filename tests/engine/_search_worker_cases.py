@@ -52,6 +52,8 @@ def publish(record):
     os.replace(temporary, event)
 
 
+# 只給重現用（#846）：事件檔寫出前先睡，模擬機器忙時直譯器啟動慢；正式考卷不准用它排先後。
+time.sleep(options.get("start_delay", 0))
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]) if options.get("child") else None
 record = {"start": time.monotonic(), "pid": os.getpid(), "child": child.pid if child else None,
           "env": dict(os.environ), "cwd": str(Path.cwd()), "parts": args.fem_parts}
@@ -71,6 +73,26 @@ if after is not None:
         time.sleep(0.01)
     else:
         sys.exit(9)
+started = options.get("started")
+if started is not None:
+    # 等指定那一支寫出事件檔才繼續：確定它已經開始，不賭它的直譯器多快起來（#846）；逾時不准無聲通過。
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if (root / ("event-" + str(started))).exists():
+            break
+        time.sleep(0.01)
+    else:
+        sys.exit(10)
+hold = options.get("hold")
+if hold is not None:
+    # 等考卷建出這個放行檔才結束：考卷讀完事件、做完斷言才放，不賭主行程多快讀到（#846）；逾時不准無聲通過。
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if (root / hold).exists():
+            break
+        time.sleep(0.01)
+    else:
+        sys.exit(11)
 time.sleep(options.get("sleep", 0))
 sys.stderr.write(options.get("stderr", ""))
 if options.get("exit"):
