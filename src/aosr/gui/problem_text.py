@@ -118,6 +118,8 @@ def material_form_spec() -> dict[str, dict[str, object]]:
             fields[name] = {"label": label, "unit": unit.split("；", 1)[0],
                             "options": {str(value): _enum_word(description, value) for value in choices},
                             "default": field.default if not field.is_required() else None}
+            if kind in ("fabric", "micro_perforated", "perforated", "slotted"):
+                cast(dict[str, object], fields[name])["required"] = field.is_required()
         specs[kind] = {"label": _enum_word(MATERIAL_WORDS[kind]["kind"], kind), "fields": fields}
     measured_fields = cast(dict[str, dict[str, object]], specs["measured_impedance"]["fields"])
     measured_fields["source_and_conditions"]["hint"] = MATERIAL_WORDS["measured_impedance"]["source_and_conditions"].partition("，")[2]

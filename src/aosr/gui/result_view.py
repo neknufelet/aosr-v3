@@ -242,6 +242,7 @@ class ListeningAreaView(ViewModel):
 
 
 class ResultView(ViewModel):
+    material_research_notice: str | None = Field(default=None, exclude_if=lambda value: value is None)
     speaker_setup_line: str = ""
     furniture: tuple[tuple[str, str, str], ...] = ()
     furniture_reason: str = ""
@@ -870,6 +871,8 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
 
 def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
     """只接受先經 load_result 驗證的結果；呼叫端負責拒收錯誤。"""
+    from aosr.physics.report_research_text import komatsu_research_notice
+
     registry = load_quality_targets(quality_targets_path)
     ranking = compare_results((result,), quality_targets=registry, run_date=result.run_date)
     row = next((item for item in ranking.rankable if item.candidate_id == result.scheme.scheme_id), None)
@@ -892,6 +895,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels})
     capabilities = capability_lists(load_capabilities(config_path("capabilities.toml")))
     return ResultView(
+        material_research_notice=komatsu_research_notice(result.scheme.scene.surface_zones_by_wall, web=True),
         speaker_setup_line=speaker_setup_text(result.scheme.speaker_setup) if result.scheme.speaker_setup else "",
         furniture=furniture_rows(result),
         construction_notes=_construction_notes(result) or None,
