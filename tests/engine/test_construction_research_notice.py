@@ -58,6 +58,8 @@ def test_cli_notice_follows_materials_including_measured_base(
     assert ("Komatsu（小松）纖維模型：原論文只量到 100 Hz 以上" in text) is present
     assert sections[0].startswith("capability ")
     assert sections[1].startswith("scene ")
+    # 紙說「報告開頭」：緊接在兩行表頭之後，不准被移到後面。
+    assert (sections[2] == "Komatsu（小松）纖維模型：原論文只量到 100 Hz 以上") is present
 
 
 @pytest.mark.parametrize("case,present", (("porous", True), ("measured-base", True), ("board", False), ("miki", False), ("fixed", False)))

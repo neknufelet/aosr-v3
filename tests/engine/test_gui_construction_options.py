@@ -44,10 +44,12 @@ def send(client: TestClient, route: str, document: dict[str, object]) -> HttpxRe
     if route == "edit":
         return cast(HttpxResponse, client.post("/api/input-edit", json={"scheme": document, "action": "wall_preset",
                            "value": "glass_wool_48k_50mm", "wall": "ceiling"}))
+    if route == "plan":
+        return cast(HttpxResponse, client.post("/api/plan", json=document))
     return cast(HttpxResponse, client.post("/api/validate" if route == "validate" else "/api/input-preview", json=document))
 
 
-@pytest.mark.parametrize("route", ("validate", "preview", "save", "edit"))
+@pytest.mark.parametrize("route", ("validate", "preview", "save", "edit", "plan"))
 @pytest.mark.parametrize("measured", (False, True))
 def test_optional_null_is_removed_at_each_web_entry(tmp_path: Path, route: str, measured: bool) -> None:
     data = facing_document(measured=measured)
@@ -59,6 +61,8 @@ def test_optional_null_is_removed_at_each_web_entry(tmp_path: Path, route: str, 
             assert response.json()["problems"] == []
         elif route == "edit":
             assert "surface_mass_kg_m2" not in first_layer(response.json()["scheme"])
+        elif route == "plan":
+            assert response.json()["message"] == "檢查通過"
         elif route == "save":
             saved = client.get("/api/schemes/options").json()["scheme"]
             assert "surface_mass_kg_m2" not in first_layer(saved)
@@ -168,5 +172,5 @@ def test_input_scripts_only_render_server_open_area_values() -> None:
     static = config_path("construction_presets.toml").parents[2] / "gui" / "static"
     for name in ("walls.js", "app.js", "measured.js"):
         script = (static / name).read_text()
-        for formula in ("Math.PI", "Math.pow", "Math.sqrt", "** 2", "**2", "3.14159", "0.7854"):
+        for formula in ("Math.PI", "Math.pow", "Math.sqrt", "** 2", "**2", "3.14159", "0.785"):
             assert formula not in script

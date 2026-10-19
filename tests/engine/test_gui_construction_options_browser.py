@@ -11,6 +11,8 @@ from tests.engine.test_gui_construction_options import P1, first_layer
 from tests.engine.test_gui_input_setup_browser import _filled
 from tests.engine.test_gui_measured_input_browser import start_draft, apply_draft
 
+S2 = "slotted_wood_typ9_absorber40_gap98"
+
 
 def save_reload(page: Page, name: str) -> dict[str, object]:
     page.locator("#save-as-id").fill(name)
@@ -111,4 +113,22 @@ def test_measured_draft_preserves_both_select_values(tmp_path: Path, browser: Br
         saved = save_reload(page, "draft-selects")
         assert first_layer(saved)["hole_pattern"] == "staggered_45"
         take_shots(page, tmp_path, "measured-draft")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_s2_without_source_reloads_as_the_unchanged_preset(tmp_path: Path, browser: Browser) -> None:
+    # S2 的吸音材沒寫流阻來源；網頁不准把選單預設值補寫回層裡，否則重開就變「自訂構造」。
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _filled(page, "#material-kind-floor", "assembly")
+        _filled(page, "#preset-floor", S2)
+        expect(page.locator("#preset-state-floor")).to_contain_text("使用預設")
+        saved = save_reload(page, "s2-plain")
+        scene = cast(dict[str, object], saved["scene"])
+        zones = cast(dict[str, list[dict[str, object]]], scene["surface_zones_by_wall"])
+        layers = cast(list[dict[str, object]], cast(dict[str, object], zones["floor"][0]["material"])["layers"])
+        assert [layer["kind"] for layer in layers] == ["slotted", "porous", "air"]
+        assert "flow_resistivity_source" not in layers[1]
+        expect(page.locator("#preset-state-floor")).to_contain_text("使用預設")
+        expect(page.locator("#preset-state-floor")).not_to_contain_text("自訂構造")
         assert watched.page_errors == [] and watched.console_errors == []
