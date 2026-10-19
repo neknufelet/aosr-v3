@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Self, cast
 
 import pytest
-from pydantic import ValidationError, model_validator
+from pydantic import TypeAdapter, ValidationError, model_validator
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
@@ -217,13 +217,15 @@ def test_revalidation_rejects_forged_null_over_unset_default() -> None:
         Scene.model_validate(scene)
 
 
-@pytest.mark.parametrize("material", ("constant", "assembly", "air", "porous", "board"))
+@pytest.mark.parametrize("material", ("constant", "assembly", "air", "porous", "board", "fabric", "micro_perforated", "perforated", "slotted"))
 @pytest.mark.parametrize("entry", ("scene", "scheme", "report"))
 def test_objects_built_with_default_kind_are_accepted(material: str, entry: str) -> None:
     """直接建構的材料或層省略 kind（種類）用預設值，跟明給 kind 的字典是同一份材料，三入口都要收、結果一樣。"""
     layers: dict[str, Layer] = {
         "air": AirLayer(thickness_m=.1), "board": BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.),
         "porous": PorousLayer(thickness_m=.1, flow_resistivity_pa_s_m2=10000., material_class="fibrous")}
+    from tests.engine.test_construction_facings_models import FACING_CASES
+    layers.update({kind: TypeAdapter(Layer).validate_python(data) for kind, data in FACING_CASES.items()})
     built = (ConstantImpedance(impedance_pa_s_m=1646.4) if material == "constant" else
              Assembly(layers=(AirLayer(kind="air", thickness_m=.1),), backing="rigid") if material == "assembly" else
              Assembly(kind="assembly", layers=(layers[material],), backing="rigid"))
@@ -320,13 +322,15 @@ def test_plain_material_summary_reads_the_own_model_description(monkeypatch: pyt
     fixed = ConstantImpedance(impedance_pa_s_m=1646.4)
     assembly = Assembly(layers=(PorousLayer.model_validate(porous()),
         BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)), backing="rigid")
+    from tests.engine.test_construction_facings_models import FACING_CASES
+    assembly = assembly.model_copy(update={"layers": (*assembly.layers, *(TypeAdapter(Layer).validate_python(data) for data in FACING_CASES.values()))})
     summary = material_summary(assembly)
     # 描述原字照上畫面：網頁不另改材料的中文（改字等於在 src 另寫一份對照表）
     assert material_summary(fixed).startswith("考卷固定實數阻抗材料；考卷整面正有限實數阻抗 1646.4 Pa·s/m")
     assert fixed_material_summary(1646.4) == material_summary(fixed)
     assert "考卷多孔厚度" in summary and "考卷空腔厚度" in summary
     assert "0.43 m" in summary and "0.15 kg/m²" in summary and "80 Pa·s/m" in summary
-    for code in ("constant_impedance", "assembly", "porous", "air", "board", "rigid", "fibrous", "komatsu", "None"):
+    for code in ("constant_impedance", "assembly", "porous", "air", "board", "rigid", "fibrous", "komatsu", "None", "fabric", "micro_perforated", "perforated", "slotted"):
         assert code not in summary and code not in material_summary(fixed)
 
 

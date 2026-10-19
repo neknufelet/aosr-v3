@@ -340,10 +340,11 @@
       "description": "ConstructionNote（結構化材料註記）：層編號從房間側的一開始，不因角度重複。",
       "properties": {
         "code": {
-          "description": "code（註記代號：頻率外推或材料類別不在擬合範圍）",
+          "description": "code（註記代號：頻率外推、材料類別不在擬合範圍、流阻低於原研究樣品範圍或實測表模型補值）",
           "enum": [
             "komatsu_frequency_extrapolation",
             "komatsu_material_class_outside_fit",
+            "komatsu_flow_below_samples",
             "measured_table_model_fill"
           ],
           "title": "Code",
@@ -365,7 +366,7 @@
         },
         "frequencies_hz": {
           "default": [],
-          "description": "frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）",
+          "description": "frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別與低流阻註記沒有頻點）",
           "items": {
             "exclusiveMinimum": 0,
             "type": "number"

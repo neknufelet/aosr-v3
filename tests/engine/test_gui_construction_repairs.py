@@ -1,10 +1,13 @@
 """審查重現的壞容器、換預設與材料白話；使用正式驗證端點，不建材料物件。"""
+import asyncio
+import httpx
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+from aosr.gui.app import GuiSettings, create_app
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.construction_input import material_field_values, material_input_problems, wall_materials
@@ -187,8 +190,8 @@ def test_preset_leaves_half_filled_room_to_formal_validation(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("field,value,label", (("kind", "slab", "種類"),
-    ("model", "foo", "多孔模型"), ("material_class", "wood", "材料類別")))
-@pytest.mark.parametrize("layer_kind", ("porous", "air"))
+    ("model", "foo", "多孔模型"), ("material_class", "wood", "材料類別"), ("method", "bessel_ingard", "算法")))
+@pytest.mark.parametrize("layer_kind", ("porous", "air", "fabric", "micro_perforated", "perforated", "slotted"))
 def test_unknown_layer_codes_have_plain_chinese_display(
     tmp_path: Path, field: str, value: str, label: str, layer_kind: str,
 ) -> None:
@@ -196,6 +199,9 @@ def test_unknown_layer_codes_have_plain_chinese_display(
         material = client.get("/api/input-defaults").json()["construction_presets"][0]["material"]
         if layer_kind == "air":
             material["layers"] = [{"kind": "air", "thickness_m": .05}]
+        if layer_kind not in ("porous", "air"):
+            from tests.engine.test_construction_facings_models import FACING_CASES
+            material["layers"] = [dict(FACING_CASES[layer_kind])]
         material["layers"][0][field] = value
         response = client.post("/api/validate", json=preset_document(material))
     assert response.status_code == 200, response.text
@@ -235,3 +241,60 @@ def test_material_message_keeps_codes_inside_alphanumeric_names() -> None:
     text = str(plain_problems((problem,), {})[0]["text"])
     assert "floor1 1floor floor_a afloor" in text
     assert text.endswith("；地板")
+
+
+async def _new_facing_api_roundtrip(tmp_path: Path, kind: str) -> None:
+    from copy import deepcopy
+    from aosr.gui.problem_text import material_summary
+    from aosr.materials.construction_models import Assembly
+    from tests.engine.test_construction_facings_models import FACING_CASES
+    from tests.engine.test_construction_facings import BACKING
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
+        defaults = await client.get("/api/input-defaults")
+        assert defaults.status_code == 200
+        layer = (deepcopy(defaults.json()["construction_presets"][0]["material"]["layers"][0]) |
+            {"flow_resistivity_source": "density_table", "flow_resistivity_pa_s_m2": 4000.}) if kind == "porous" else deepcopy(FACING_CASES[kind])
+        if kind in ("perforated", "slotted"):
+            layer.update(BACKING)
+        material: dict[str, object] = {"kind": "assembly", "layers": [layer, {"kind": "air", "thickness_m": .05}], "backing": "rigid"}
+        data = preset_document(material) | {"scheme_id": "facings"}
+        preview = await client.post("/api/input-preview", json=data)
+        assert preview.status_code == 200, preview.text
+        saved = await client.put("/api/schemes/facings", json=data)
+        assert saved.status_code == 200, saved.text
+        loaded = await client.get("/api/schemes/facings")
+        assert loaded.status_code == 200
+        assert (await client.post("/api/input-preview", json=loaded.json()["scheme"])).status_code == 200
+    shown = material_summary(Assembly.model_validate(material))
+    for code in (*FACING_CASES, "density_table", "unspecified", "surface_mass_kg_m2"):
+        assert code not in shown
+    assert layer in loaded.json()["scheme"]["scene"]["surface_zones_by_wall"]["floor"][0]["material"]["layers"]
+
+
+async def _new_facing_api_errors(tmp_path: Path, kind: str) -> None:
+    from copy import deepcopy
+    from tests.engine.test_construction_facings_models import FACING_CASES
+    layer = deepcopy(FACING_CASES[kind])
+    material: dict[str, object] = {"kind": "assembly", "layers": [layer], "backing": "rigid"}
+    field = "flow_resistance_pa_s_m" if kind == "fabric" else "open_area"
+    layer[field] = 0.
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
+        response = await client.post("/api/validate", json=preset_document(material))
+    assert response.status_code == 200
+    shown = "；".join(row["text"] for row in response.json()["problems"])
+    assert "地板" in shown and "第 1 層" in shown
+    for code in (*FACING_CASES, field, "Input", "greater"):
+        assert code not in shown
+
+
+@pytest.mark.parametrize("kind", ("fabric", "micro_perforated", "perforated", "slotted", "porous"))
+def test_new_facing_api_save_reload_preview_and_defaults(tmp_path: Path, kind: str) -> None:
+    """同事件迴圈走真 ASGI 路由，避開測試客戶端跨執行緒的環境限制。"""
+    asyncio.run(_new_facing_api_roundtrip(tmp_path, kind))
+
+
+@pytest.mark.parametrize("kind", ("fabric", "micro_perforated", "perforated", "slotted"))
+def test_new_facing_api_errors_are_plain_chinese(tmp_path: Path, kind: str) -> None:
+    asyncio.run(_new_facing_api_errors(tmp_path, kind))

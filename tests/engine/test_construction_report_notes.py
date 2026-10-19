@@ -117,7 +117,8 @@ def test_formal_report_merges_three_lane_returns_without_recalculation(monkeypat
     assert output.construction_notes_by_wall == {"x0": (note((20., 40., 80.)),)}
 
 
-def test_two_sided_extrapolation_is_written_as_two_spans() -> None:
+@pytest.mark.parametrize("low_flow", (False, True))
+def test_two_sided_extrapolation_is_written_as_two_spans(low_flow: bool) -> None:
     """流阻夠低、頻軸夠寬時低高兩端都外推：寫成兩段，中間照常算的頻率不連進去。"""
     import jax.numpy as jnp
     from aosr.config.construction_environment import construction_environment
@@ -126,12 +127,13 @@ def test_two_sided_extrapolation_is_written_as_two_spans() -> None:
 
     _air, ranges = construction_environment(density_kg_m3=1.2, sound_speed_m_s=343.)
     limits = ranges.komatsu
-    sigma = (limits.sample_flow_resistivity_min_pa_s_m2 + limits.sample_flow_resistivity_max_pa_s_m2) / 2
+    sigma = 4000. if low_flow else (limits.sample_flow_resistivity_min_pa_s_m2 + limits.sample_flow_resistivity_max_pa_s_m2) / 2
     lower, upper = (bound * sigma for bound in limits.f_over_sigma_bounds_m3_kg)
     axis = (lower / 2, lower * 2, upper / 2, upper * 2)
     layer = PorousLayer(thickness_m=.05, flow_resistivity_pa_s_m2=sigma, material_class="fibrous")
-    (extrapolation,) = construction._komatsu_notes(Assembly(layers=(layer,), backing="rigid"),
+    notes = construction._komatsu_notes(Assembly(layers=(layer,), backing="rigid"),
                                                    jnp.asarray(axis), ranges)
+    extrapolation = next(note for note in notes if note.code == "komatsu_frequency_extrapolation")
     low, high = extrapolation.frequencies_hz  # 考卷行程沒開雙精度，頻點是單精度：比相對誤差
     assert (low, high) == pytest.approx((axis[0], axis[-1]), rel=1e-6)
     assert wall_surfaces.extrapolated_frequency_text(extrapolation.frequencies_hz) == f"{low:g} Hz、{high:g} Hz"

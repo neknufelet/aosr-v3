@@ -143,9 +143,9 @@ def test_construction_comparison_includes_each_wall_material_summary() -> None:
 
 
 def test_material_leaf_labels_are_model_descriptions_and_errors_are_plain() -> None:
-    from aosr.materials.construction_models import AirLayer, BoardLayer, ConstantImpedance, PorousLayer
+    from aosr.materials.construction_models import AirLayer, BoardLayer, ConstantImpedance, FabricLayer, MicroPerforatedLayer, PerforatedLayer, PorousLayer, SlottedLayer
 
-    for model in (AirLayer, BoardLayer, ConstantImpedance, PorousLayer):
+    for model in (AirLayer, BoardLayer, ConstantImpedance, PorousLayer, FabricLayer, MicroPerforatedLayer, PerforatedLayer, SlottedLayer):
         for name in model.model_fields:
             label = field_name(f"scene.{NEW}.floor.0.material.assembly.layers.0.{name}", {})
             assert label is not None

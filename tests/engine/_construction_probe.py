@@ -2,9 +2,17 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 from typing import cast
+
+from aosr.runtime import configure_calculation_jax
+
+# 父行程單精度拒收題保留原來設定；雙精度題走正式開機入口。
+if "--calculation" in sys.argv:
+    configure_calculation_jax()
+    sys.argv.remove("--calculation")
 
 import jax
 import jax.numpy as jnp
@@ -36,14 +44,58 @@ def _direct(request: dict[str, object], f: jax.Array, air: PhysicsConstants, the
         elif layer["kind"] == "board":
             z = cast(float, layer["resistance_pa_s_m"]) + 1j * 2 * jnp.pi * f * cast(float, layer["surface_mass_kg_m2"])
             m = tmm._sheet_layer(tmm._broadcast_angles(z, theta))
-        else:
+        elif layer["kind"] == "porous":
             m = tmm.porous_layer(f, jnp.asarray(layer["thickness_m"]), jnp.asarray(layer["flow_resistivity_pa_s_m2"]),
                 air=air, model=cast(str, layer.get("model", "komatsu")),
                 porosity=cast(float, layer.get("porosity", 0.95)), tortuosity=cast(float, layer.get("tortuosity", 1.)),
                 incidence_angles_deg=theta)
+        elif layer["kind"] == "fabric":
+            m = tmm.porous_facing_layer(f, jnp.asarray(.005), air=air, method="pieren_free",
+                surface_mass_kg_m2=jnp.asarray(layer["surface_mass_kg_m2"]),
+                resistance_pa_s_m=jnp.asarray(layer["flow_resistance_pa_s_m"]), incidence_angles_deg=theta)
+        elif layer["kind"] == "micro_perforated":
+            m = tmm.perforated_panel_layer(f, jnp.asarray(layer["thickness_m"]), jnp.asarray(layer["hole_diameter_m"]),
+                air=air, method="barrier_mpp", open_area=_direct_phi(layer),
+                surface_mass_kg_m2=_mass(layer), incidence_angles_deg=theta)
+        elif layer["kind"] == "perforated":
+            m = tmm.perforated_panel_layer(f, jnp.asarray(layer["thickness_m"]), jnp.asarray(layer["hole_diameter_m"]),
+                air=air, method="barrier", end_correction="jb", open_area=_direct_phi(layer),
+                surface_mass_kg_m2=_mass(layer), incidence_angles_deg=theta)
+            m = _direct_backing(m, layer, f, theta)
+        elif layer["kind"] == "slotted":
+            m = tmm.slotted_panel_layer(f, jnp.asarray(layer["thickness_m"]), jnp.asarray(layer["slot_width_m"]),
+                air=air, method="barrier", open_area=_direct_phi(layer),
+                surface_mass_kg_m2=_mass(layer), incidence_angles_deg=theta)
+            m = _direct_backing(m, layer, f, theta)
+        else:
+            raise ValueError("考卷不認識的層種類")
         matrices.append(m)
     z = tmm.compute(matrices, air=air, backing=cast(str, material["backing"]), incidence_angles_deg=theta)[0]
     return tmm.diffuse_absorption_coefficient(z, theta, air=air) if request["mode"] == "diffuse" and theta is not None else z
+
+
+def _mass(layer: dict[str, object]) -> jax.Array | None:
+    return jnp.asarray(layer["surface_mass_kg_m2"]) if "surface_mass_kg_m2" in layer else None
+
+
+def _direct_phi(layer: dict[str, object]) -> jax.Array:
+    """考卷獨立幾何，不呼叫被測的孔距換算。"""
+    if "open_area" in layer:
+        return jnp.asarray(layer["open_area"])
+    if layer["kind"] == "slotted":
+        return jnp.asarray(layer["slot_width_m"]) / jnp.asarray(layer["slot_spacing_m"])
+    d, p = jnp.asarray(layer["hole_diameter_m"]), jnp.asarray(layer["hole_spacing_m"])
+    if layer["hole_pattern"] == "rectangular":
+        return math.pi / 4 * d ** 2 / (p * jnp.asarray(layer["hole_spacing_2_m"]))
+    factor = {"square": math.pi / 4, "staggered_60": math.pi / (2 * math.sqrt(3)), "staggered_45": math.pi / 2}
+    return factor[cast(str, layer["hole_pattern"])] * (d / p) ** 2
+
+
+def _direct_backing(matrix: jax.Array, layer: dict[str, object], f: jax.Array, theta: jax.Array | None) -> jax.Array:
+    if "backing_fabric_flow_resistance_pa_s_m" not in layer:
+        return matrix
+    z = jnp.zeros_like(f, dtype=jnp.complex128) + jnp.asarray(layer["backing_fabric_flow_resistance_pa_s_m"]) / _direct_phi(layer)
+    return matrix @ tmm._sheet_layer(tmm._broadcast_angles(z, theta))
 
 
 def _evaluate(request: dict[str, object]) -> dict[str, object]:

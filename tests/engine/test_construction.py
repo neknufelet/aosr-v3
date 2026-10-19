@@ -77,7 +77,7 @@ def _requests() -> dict[str, dict[str, object]]:
 
 
 def _boundary_requests(rows: dict[str, dict[str, object]]) -> None:
-    for sigma in (6000., 72900., 5999.99, 72900.01):
+    for sigma in (6000., 72900., 3999.99, 72900.01):
         rows[f"sigma_{sigma}"] = _request([_AIR, {**_POROUS, "flow_resistivity_pa_s_m2": sigma}])
     # 答案只由論文四個原始數字推導，不用被測範圍屬性生成答案。
     low, high = 100 * 19100 / 72900, 5000 * 19100 / 6000
@@ -103,7 +103,7 @@ def _run_requests(requests: dict[str, dict[str, object]], directory: Path, *, x6
     source, output = directory / "requests.json", directory / "answers.json"
     source.write_text(json.dumps(requests))
     probe = Path(__file__).with_name("_construction_probe.py")
-    process = subprocess.run([sys.executable, str(probe), str(source), str(output)], cwd=directory,
+    process = subprocess.run([sys.executable, str(probe), str(source), str(output), *(["--calculation"] if x64 else [])], cwd=directory,
                              env=env, capture_output=True, text=True, timeout=180)
     assert process.returncode == 0, process.stdout + process.stderr
     return cast(dict[str, dict[str, object]], json.loads(output.read_text()))
@@ -178,7 +178,7 @@ def test_komatsu_sigma_endpoints_and_rejection(results: dict[str, dict[str, obje
     """抓樣品流阻端點被排除、越界自動換模型，或拒收訊息少了兩條出路。"""
     for sigma in (6000., 72900.):
         assert "error" not in results[f"sigma_{sigma}"]
-    for sigma in (5999.99, 72900.01):
+    for sigma in (3999.99, 72900.01):
         message = cast(str, results[f"sigma_{sigma}"]["error"])
         for text in ("第 2 層", str(sigma), "實測阻抗", "明確指定別的多孔模型", "樣品"):
             assert text in message

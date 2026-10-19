@@ -57,7 +57,7 @@ frequency_hz = [20.0, 11166.0]
 outputs = ["fem_energy", "direct_energy", "reflected_energy", "interference_energy", "late_energy", "total_energy", "t20_s", "t30_s"]
 status = "experimental"
 evidence = []
-note = "整面構造（含固定面混合）：有限元素每頻 Z(f,0°)，鏡像法每條路徑按入射角取 Z(f,θ)，晚期 Paris 無規入射 α。Komatsu 流阻超出樣品範圍拒收，f/σ 外推照算並出註記。標 experimental：沒有獨立參考答案，比照家具的決定。有限元素用垂直入射阻抗 Z(f,0°)，空腔當局部反應（沒有隔間的空腔實際是延伸反應），這個近似的誤差沒有量過。"
+note = "整面構造（含固定面混合）：有限元素每頻 Z(f,0°)，鏡像法每條路徑按入射角取 Z(f,θ)，晚期 Paris 無規入射 α。多孔、空氣、薄板、布、微孔板、一般圓孔板與長縫板可疊層，一般圓孔板與長縫板可背面貼布（工程近似）。Komatsu 手動流阻低於工程下限或高於樣品上限拒收，低於樣品下限照算並註記，f/σ 外推窗仍由原研究樣品範圍推得，外推照算並出註記。8,000–11,166 Hz 沒對原套件驗過，薄片沒有角度修正。標 experimental：沒有獨立參考答案，比照家具的決定。有限元素用垂直入射阻抗 Z(f,0°)，空腔當局部反應（沒有隔間的空腔實際是延伸反應），這個近似的誤差沒有量過。"
 
 [[entry.capability]]
 room = "shoebox"

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import aosr
+import pytest
 from governance.exit_codes import note
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
@@ -49,14 +50,23 @@ def environment(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-def test_board_cavity_wall_changes_every_lane(tmp_path: Path) -> None:
+@pytest.mark.parametrize("kind", ("board", "fabric", "micro_perforated", "perforated", "slotted"))
+def test_board_cavity_wall_changes_every_lane(tmp_path: Path, kind: str) -> None:
     env = environment(tmp_path)
     loaded = subprocess.run([sys.executable, "-B", "-c", "import aosr, sys; sys.stdout.write(aosr.__file__)"],
                             cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
     assert Path(loaded.stdout.strip()).resolve() == Path(aosr.__file__).resolve()
     note(f"子行程 aosr.__file__：{loaded.stdout.strip()}")
+    from tests.engine.test_construction_facings_models import FACING_CASES
+    from tests.engine.test_construction_facings import BACKING
+    cases = documents()
+    if kind != "board":
+        zones = cases[1]["surface_zones_by_wall"]
+        assert isinstance(zones, dict)
+        layer = FACING_CASES[kind] | (BACKING if kind in ("perforated", "slotted") else {})
+        zones["x0"][0]["material"] = {"kind": "assembly", "layers": [layer, {"kind": "air", "thickness_m": .03}], "backing": "rigid"}
     paths = []
-    for name, document in zip(("A", "B"), documents(), strict=True):
+    for name, document in zip(("A", "B"), cases, strict=True):
         path = tmp_path / f"{name}.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         paths.append(path)
@@ -98,13 +108,14 @@ def test_board_cavity_wall_changes_every_lane(tmp_path: Path) -> None:
     assert "construction_notes_by_wall" not in b.model_dump(mode="json")
 
 
-def test_porous_extrapolation_survives_report_and_text(tmp_path: Path) -> None:
+@pytest.mark.parametrize("sigma", (60000., 4000.))
+def test_porous_extrapolation_survives_report_and_text(tmp_path: Path, sigma: float) -> None:
     _fixed, document = documents()
     zones = document["surface_zones_by_wall"]
     assert isinstance(zones, dict)
     zones["x0"] = [{"area": "whole_wall", "material": {
         "kind": "assembly", "layers": [{"kind": "porous", "thickness_m": .05,
-            "flow_resistivity_pa_s_m2": 60000., "material_class": "foam"}], "backing": "rigid"}}]
+            "flow_resistivity_pa_s_m2": sigma, "material_class": "foam"}], "backing": "rigid"}}]
     path = tmp_path / "C.json"
     path.write_text(json.dumps(document), encoding="utf-8")
     probe = Path(__file__).with_name("_construction_report_probe.py")
@@ -127,7 +138,12 @@ def test_porous_extrapolation_survives_report_and_text(tmp_path: Path) -> None:
     _air, ranges = construction_environment(density_kg_m3=1.2, sound_speed_m_s=343.)
     lower = ranges.komatsu.f_over_sigma_bounds_m3_kg[0] * 60000.
     assert extrapolation.frequencies_hz
-    assert all(f < lower for f in extrapolation.frequencies_hz)
+    if sigma == 60000.:
+        assert all(f < lower for f in extrapolation.frequencies_hz)
+    else:
+        assert all(f > 5000 / 6000 * 4000 for f in extrapolation.frequencies_hz)
+        assert by_code["komatsu_flow_below_samples"].frequencies_hz == ()
+        assert "流阻低於原研究樣品範圍" in results["text"]
     assert by_code["komatsu_material_class_outside_fit"].frequencies_hz == ()
     for item in notes:
         assert item.message in results["text"]

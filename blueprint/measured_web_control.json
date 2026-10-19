@@ -71,6 +71,17 @@
           "options": {},
           "default": null
         },
+        "flow_resistivity_source": {
+          "label": "流阻從哪裡來",
+          "unit": "",
+          "options": {
+            "measured": "實測",
+            "density_table": "照密度查論文表",
+            "catalog": "廠商型錄",
+            "unspecified": "未註明"
+          },
+          "default": "unspecified"
+        },
         "model": {
           "label": "多孔模型",
           "unit": "",

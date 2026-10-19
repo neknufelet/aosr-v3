@@ -1,6 +1,8 @@
 # Komatsu 多孔模型的原研究樣品與量測範圍；不是作者宣告的物理有效界線。
-# 只存原文四個數字；f/σ 涵蓋範圍由載入模型推導。
+# 存原文四個數字與另列的手動試算工程下限；f/σ 涵蓋範圍由載入模型推導。
 [komatsu]
+# 工程界線，#309 留言 6198202074，不是論文數字、不是經實測證明的準確性界線。
+manual_flow_resistivity_min_pa_s_m2 = 4000
 sample_flow_resistivity_min_pa_s_m2 = 6000
 sample_flow_resistivity_max_pa_s_m2 = 72900
 measured_frequency_min_hz = 100

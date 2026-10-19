@@ -36,7 +36,7 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
     if any(problem.path.startswith(f"scene.{ZONE_WALL_FIELD}") for problem in problems) or not isinstance(document, dict):
         return ()
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
-    low, high = ranges.sample_flow_resistivity_min_pa_s_m2, ranges.sample_flow_resistivity_max_pa_s_m2
+    low, high = ranges.manual_flow_resistivity_min_pa_s_m2, ranges.sample_flow_resistivity_max_pa_s_m2
     issues = []
     for wall, material in wall_materials(document).items():
         for index, layer in enumerate(_layers(material)):
@@ -47,7 +47,7 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
             if model == "komatsu" and isinstance(sigma, int | float) and not low <= sigma <= high:
                 branch = "measured_impedance.base_assembly" if material.get("kind") == "measured_impedance" else "assembly"
                 issues.append(SchemeProblem(f"scene.{ZONE_WALL_FIELD}.{wall}.0.material.{branch}.layers.{index}.porous.flow_resistivity_pa_s_m2",
-                    f"小松纖維模型的流阻可用範圍為 {low:g}–{high:g} Pa·s/m²；這是原研究樣品範圍，請改流阻或選合適模型"))
+                    f"小松纖維模型的流阻可用範圍為 {low:g}–{high:g} Pa·s/m²；手動下限是工程界線，上限沿用原研究樣品值，請改流阻或選合適模型"))
     return tuple(issues)
 
 
