@@ -22,6 +22,7 @@ backing = "rigid"
 kind = "porous"
 model = "komatsu"
 material_class = "fibrous"
+flow_resistivity_source = "density_table"
 thickness_m = 0.050
 flow_resistivity_pa_s_m2 = 19100.0
 
@@ -46,6 +47,7 @@ backing = "rigid"
 kind = "porous"
 model = "komatsu"
 material_class = "fibrous"
+flow_resistivity_source = "density_table"
 thickness_m = 0.050
 flow_resistivity_pa_s_m2 = 19100.0
 [[preset.material.layers]]
@@ -73,6 +75,7 @@ backing = "rigid"
 kind = "porous"
 model = "komatsu"
 material_class = "fibrous"
+flow_resistivity_source = "density_table"
 thickness_m = 0.050
 flow_resistivity_pa_s_m2 = 19100.0
 [[preset.material.layers]]
@@ -100,6 +103,7 @@ backing = "rigid"
 kind = "porous"
 model = "komatsu"
 material_class = "fibrous"
+flow_resistivity_source = "density_table"
 thickness_m = 0.100
 flow_resistivity_pa_s_m2 = 19100.0
 
@@ -124,6 +128,7 @@ backing = "rigid"
 kind = "porous"
 model = "komatsu"
 material_class = "fibrous"
+flow_resistivity_source = "density_table"
 thickness_m = 0.050
 flow_resistivity_pa_s_m2 = 6900.0
 
@@ -148,5 +153,215 @@ backing = "rigid"
 kind = "porous"
 model = "komatsu"
 material_class = "fibrous"
+flow_resistivity_source = "density_table"
 thickness_m = 0.050
 flow_resistivity_pa_s_m2 = 53100.0
+
+[[preset]]
+id = "fabric_pet_a_gap100"
+label = "PET（聚酯）織布 A＋100 mm 空腔"
+source = """
+Sakagami, K.; Okuzono, T.; Somatomo, Y.; Funahashi, K.; Toyoda, M. (2019).
+A Basic Study on a Rectangular Plane Space Sound Absorber Using Permeable Membranes.
+Sustainability 11(7), 2185. https://doi.org/10.3390/su11072185
+Table 1 Membrane A；Fig. 3 阻抗管垂直入射，背後 100 mm 空腔。
+"""
+links = ["https://hdl.handle.net/20.500.14094/90005850", "https://da.lib.kobe-u.ac.jp/da/kernel/90005850/90005850.pdf", "https://doi.org/10.3390/su11072185"]
+notes = ["布的兩個數字是論文實測值。流阻參照 ISO 9053（流阻量測標準），因為最低風速只到 0.005 m/s，用外推法求得。", "論文量的就是這個構造（布＋100 mm 空腔、阻抗管垂直入射），但只有曲線圖、沒有數字表。", "軟布採質量與面流阻並聯算法。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "fabric"
+surface_mass_kg_m2 = 0.065
+flow_resistance_pa_s_m = 196.0
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.100
+
+[[preset]]
+id = "fabric_pet_b_gap100"
+label = "PET（聚酯）織布 B＋100 mm 空腔"
+source = """
+Sakagami, K.; Okuzono, T.; Somatomo, Y.; Funahashi, K.; Toyoda, M. (2019).
+A Basic Study on a Rectangular Plane Space Sound Absorber Using Permeable Membranes.
+Sustainability 11(7), 2185. https://doi.org/10.3390/su11072185
+Table 1 Membrane B（PET 織布，面流阻接近空氣阻抗）；Fig. 3 阻抗管垂直入射，背後 100 mm 空腔。
+"""
+links = ["https://hdl.handle.net/20.500.14094/90005850", "https://da.lib.kobe-u.ac.jp/da/kernel/90005850/90005850.pdf", "https://doi.org/10.3390/su11072185"]
+notes = ["布的兩個數字是論文實測值。流阻參照 ISO 9053（流阻量測標準），因為最低風速只到 0.005 m/s，用外推法求得。", "論文量的就是這個構造（布＋100 mm 空腔、阻抗管垂直入射），但只有曲線圖、沒有數字表。", "軟布採質量與面流阻並聯算法。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "fabric"
+surface_mass_kg_m2 = 0.120
+flow_resistance_pa_s_m = 462.0
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.100
+
+[[preset]]
+id = "perforated_gypsum_8_18r_backed_gw30_ceiling"
+label = "穿孔石膏板 8/18R 背面貼布＋30 mm 玻璃棉＋吊頂空腔"
+source = """
+VoglFuge — Continuously perforated plasterboard acoustic ceiling, Perforation Patterns & Acoustic Data.
+Atkar Group, ©2018，8/18R 那一列（30 mm Glass Wool、Ceiling Cavity 200 mm）；VoglFuge Brochure 2018。
+背布代填：Dugan, E. 等，US 8,684,134 B2，Gypsum-panel acoustical monolithic ceiling，USG Interiors，2014-04-01。
+Soundtex 名義 63 g/m²、面流阻 236 Pa·s/m。板厚旁證：Knauf Belgium，Fiche technique SoundDesign Cleaneo，09/2020。
+棉代填：Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 03，樣品 22.2 kg/m³、流阻 6,900 Pa·s/m²，借為 24K 玻璃棉。
+"""
+links = ["https://cdn.atkar.com.au/wp-content/uploads/2017/09/23111246/VoglFuge-Acoustic-Data.pdf", "https://cdn.atkar.com.au/wp-content/uploads/2018/10/01163401/VoglFuge-Brochure-2018-WEB.pdf", "https://patents.google.com/patent/US8684134B2/en", "https://cdn.chausson.fr/catalog-document/6e8fa6a5-6789-46f3-8c9e-3173a6c31217/ft.pdf", "https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf"]
+notes = ["這是吊頂的量測，不是牆面；型錄沒寫試驗標準與實驗室。", "背面那層布型錄沒給數字，借同類產品 Soundtex 代填（63 g/m²、236 Pa·s/m）。那是美國專利以 16.4 mm/s 風速量的，不是 ISO 9053（流阻量測標準）的低風速。", "板厚型錄沒寫，先填 12.5 mm（別家同孔型的厚度，未驗，推測）；板本身面密度不填，不計板質量。", "型錄的棉約 18 kg/m³，這裡用 24K 玻璃棉的流阻 6,900 Pa·s/m² 代填。200 mm 吊頂空腔拆成棉 30 mm＋空氣 170 mm 是未驗、推測；若型錄空腔不含棉，另一讀法是空氣 200 mm。", "孔徑 8 mm、孔距 18 mm、方格，換算開孔率約 15.51%，型錄印 15.5%。", "量測條件跟這組不完全一樣，只能大概對照。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "perforated"
+thickness_m = 0.0125
+hole_diameter_m = 0.008
+hole_spacing_m = 0.018
+hole_pattern = "square"
+backing_fabric_surface_mass_kg_m2 = 0.063
+backing_fabric_flow_resistance_pa_s_m = 236.0
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.030
+flow_resistivity_pa_s_m2 = 6900.0
+flow_resistivity_source = "density_table"
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.170
+
+[[preset]]
+id = "perforated_0p8mm_d10_gw24k_50mm"
+label = "0.8 mm 圓孔面板（孔 10 mm）＋24K 玻璃棉 50 mm 貼牆"
+source = """
+Sugie, S.; Yoshimura, J.; Ogawa, H. (2006). Absorption characteristics of fibrous material covered with perforated facing and film.
+Acoustical Science and Technology 27(2), 87–96. https://doi.org/10.1250/ast.27.87 Fig. 2。
+棉代填：Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 03，樣品 22.2 kg/m³、流阻 6,900 Pa·s/m²，借為 24K 玻璃棉。
+"""
+links = ["https://doi.org/10.1250/ast.27.87", "https://www.jstage.jst.go.jp/article/ast/27/2/27_2_87/_pdf", "https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf"]
+notes = ["面板材質與板重原文沒寫；面密度不填，不計板質量。", "原文的棉是 32 kg/m³、作者反推流阻約 7,500 Pa·s/m²，這裡用 24K 玻璃棉的 6,900 代填。", "原文是阻抗管垂直入射，管子上限約 2 kHz，只有曲線圖。", "面板直接貼棉，沒有空氣層、膜或背面貼布；量測條件跟這組不完全一樣，只能大概對照。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "perforated"
+thickness_m = 0.0008
+hole_diameter_m = 0.010
+open_area = 0.31
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.050
+flow_resistivity_pa_s_m2 = 6900.0
+flow_resistivity_source = "density_table"
+
+[[preset]]
+id = "mpp_t1mm_d0p5_gap50"
+label = "微孔板 1 mm 厚、孔 0.5 mm＋50 mm 空腔"
+source = """
+Hoshi, K.; Hanyu, T.; Okuzono, T.; Sakagami, K.; Yairi, M.; Harada, S.; Takahashi, S.; Ueda, Y. (2020).
+Implementation experiment of a honeycomb-backed MPP sound absorber in a meeting room.
+Applied Acoustics 157, 107000. Table 1。JSP Corp. 製作的 polymethacrylstyrene sheet（樹脂板）。
+"""
+links = ["https://hdl.handle.net/20.500.14094/90006344"]
+notes = ["原文的 50 mm 空腔裡塞滿蜂巢格，背後是盒子背板。這裡當成空的空腔＋剛性牆，斜入射時跟殘響室量測不能直接比。", "開孔率 0.77% 是原文值。用方格算是 0.785%，原文說按加工稍微改過；未給排法，不填孔距。", "原文是殘響室量測（JIS A 1409，量測標準；9 m²），只有曲線圖。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "micro_perforated"
+thickness_m = 0.001
+hole_diameter_m = 0.0005
+open_area = 0.0077
+surface_mass_kg_m2 = 1.13
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.050
+
+[[preset]]
+id = "mpp_t0p5mm_d0p5_gap50"
+label = "微孔板 0.5 mm 厚、孔 0.5 mm＋50 mm 空腔"
+source = """
+Sakagami, K.; Yamashita, I.; Yairi, M.; Morimoto, M. (2010).
+Sound absorption characteristics of a honeycomb-backed microperforated panel absorber: Revised theory and experimental validation.
+Noise Control Engineering Journal 58(2), 157–162. Table 1 Specimen C；Fig. 2(a)。
+"""
+links = ["https://hdl.handle.net/20.500.14094/90001285"]
+notes = ["原文的空腔裡有鋁蜂巢。這裡當成空的空腔，殘響室量測只能大概對照。", "板的材質原文沒寫；面密度不填，不計板質量。", "原文是殘響室量測（10 m²），只有曲線圖。原文寫的標準號 JIS A1419 可能是 A1409 的筆誤（日本殘響室量測標準）。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "micro_perforated"
+thickness_m = 0.0005
+hole_diameter_m = 0.0005
+open_area = 0.00785
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.050
+
+[[preset]]
+id = "slotted_gypsum_b6_backed_gap65"
+label = "開縫石膏板 Slotline B6 背面貼布＋65 mm 空腔"
+source = """
+Knauf，《D12.es Techo Knauf Cleaneo Akustik — Hoja técnica 01/2020》。p.12 B6 Slotline；p.30 Con velo acústico 65。
+UNE-EN ISO 354 與 ISO 11654（殘響室與吸音評級標準），型錄未列實驗室與報告號；連結是第三方站的型錄複本。
+背布代填：Dugan, E. 等，US 8,684,134 B2，Gypsum-panel acoustical monolithic ceiling，USG Interiors，2014-04-01。
+Soundtex 名義 63 g/m²、面流阻 236 Pa·s/m。
+"""
+links = ["https://documentacion.generadordeprecios.info/documentaciontecnica/knauf/knauf_d12.pdf", "https://patents.google.com/patent/US8684134B2/en"]
+notes = ["縫是一段一段的（5×82 mm），程式當成無限長的縫算，只能近似。", "背面那層布型錄沒給數字，借同類產品 Soundtex 代填（63 g/m²、236 Pa·s/m，美國專利以 16.4 mm/s 量，不是低風速流阻量測）。", "開孔率採型錄整板值 15.7%；開孔區局部約 0.216（由原圖推算），不採縫寬除縫距路線。", "原文是吊頂的殘響室量測，空腔裡有龍骨；65 mm 含不含龍骨高度沒寫，全當空氣 65 mm。實驗室與報告號型錄沒寫。", "板本身面密度不填，不計板質量；布流阻、開孔率取法、板重、空腔實際深度都有不確定性，量測只能大概對照。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "slotted"
+thickness_m = 0.0125
+slot_width_m = 0.005
+open_area = 0.157
+backing_fabric_surface_mass_kg_m2 = 0.063
+backing_fabric_flow_resistance_pa_s_m = 236.0
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.065
+
+[[preset]]
+id = "slotted_wood_typ9_absorber40_gap98"
+label = "開縫木板 Typ 9＋40 mm 吸音材＋98 mm 空腔"
+source = """
+Hochschule für Technik Stuttgart（斯圖加特應用科大），Projekt 122 001 12P-212，Anlage 5（第 5 號附件，Typ 9）。
+試驗日 7.3.2012，報告日 28.3.2012；委託人 Lignatur AG，產品為 LFE 平面元件。
+DIN EN ISO 354（殘響室量測標準），殘響室 203 m³，試體 10.9 m²。
+吸音材借 48K 預設代填：Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 09，樣品 47.2 kg/m³、流阻 19,100 Pa·s/m²；原文未給材料與密度，並非照本產品密度查表。
+"""
+links = ["https://www.lignatur.ch/fileadmin/ablage/downloads/raumakustik/schallabsorptionsgrad-typ-9.pdf", "https://www.lignatur.ch/produkt/raumakustik/schallabsorptionsgrade", "https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf"]
+notes = ["縫長 380 mm、每 600 mm 斷一次，程式用無限長的縫近似，只算部分修正。", "開孔率取含肋的整片平均 0.133（20×5.5×380÷（524×600）推算）；縫區約 0.145。沿縫方向 600 mm 格距是類推，另一位核對員用歐洲技術評估文件的圖對過；縫兩頭可圓可方，實際面積還會小一點。", "40 mm 吸音材借 48K 預設代填，實際材料原文沒寫，流阻 19,100 Pa·s/m²；纖維類是未驗、推測，流阻來源未註明。背面貼不貼布原文也沒寫。", "原件背後是 31 mm 木板，空腔被肋隔成約 210 mm 寬的長條，這裡當成剛性牆（未驗，推測），算法不處理肋分格。", "板本身面密度不填，不計板質量。殘響室量測，量測條件跟這組不完全一樣，只能大概對照。"]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "slotted"
+thickness_m = 0.031
+slot_width_m = 0.0055
+open_area = 0.133
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.040
+flow_resistivity_pa_s_m2 = 19100.0
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.098

@@ -14,6 +14,8 @@ from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.input_setup import input_defaults
 from aosr.reporting.physics_identity import physics_identity_parts
 from aosr.reporting.validation import validate_scheme
+from aosr.reporting.scheme import Scheme
+from tests.engine._construction_preset_answers import NEW_ROWS
 from aosr.runtime import child_process_env
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
@@ -40,14 +42,22 @@ def preset_document(material: dict[str, object]) -> dict[str, object]:
 
 def test_presets_equal_decided_rows_and_validate() -> None:
     presets = load_construction_presets(config_path("construction_presets.toml"))
-    assert {p.id for p in presets} == set(ANSWERS)
+    assert {p.id for p in presets} == set(ANSWERS) | set(NEW_ROWS)
     assert {p.label for p in presets} == {"48K 玻璃棉 50 mm 貼牆", "48K 玻璃棉 50 mm＋50 mm 空腔",
-        "48K 玻璃棉 50 mm＋100 mm 空腔", "48K 玻璃棉 100 mm 貼牆", "24K 玻璃棉 50 mm 貼牆", "96K 玻璃棉 50 mm 貼牆"}
+        "48K 玻璃棉 50 mm＋100 mm 空腔", "48K 玻璃棉 100 mm 貼牆", "24K 玻璃棉 50 mm 貼牆", "96K 玻璃棉 50 mm 貼牆"} | {row[0] for row in NEW_ROWS.values()}
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
     for preset in presets:
+        if preset.id in NEW_ROWS:
+            label, layers = NEW_ROWS[preset.id]
+            assert preset.label == label
+            assert preset.material == {"kind": "assembly", "backing": "rigid", "layers": layers}
+            assert preset.links and all(link.startswith("https://") for link in preset.links)
+            assert preset.source and preset.notes and all(note.strip() for note in preset.notes)
+            assert not validate_scheme(preset_document(preset.material), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+            continue
         thickness, sigma, gap, sample = ANSWERS[preset.id]
         layers = [{"kind": "porous", "model": "komatsu", "material_class": "fibrous",
-                   "thickness_m": thickness, "flow_resistivity_pa_s_m2": sigma}]
+                   "thickness_m": thickness, "flow_resistivity_pa_s_m2": sigma, "flow_resistivity_source": "density_table"}]
         if gap is not None:
             layers.append({"kind": "air", "thickness_m": gap})
         assert preset.material == {"kind": "assembly", "backing": "rigid", "layers": layers}
@@ -64,7 +74,7 @@ def test_presets_stay_outside_physics_identity_and_defaults_are_plain_data() -> 
     assert "construction_presets.toml" not in parts.data_files
     assert "aosr.config.construction_presets" not in parts.closure
     presets = cast(list[dict[str, object]], input_defaults()["construction_presets"])
-    assert {p["id"] for p in presets} == set(ANSWERS)
+    assert {p["id"] for p in presets} == set(ANSWERS) | set(NEW_ROWS)
     assert all(isinstance(p["material"], dict) for p in presets)
 
 
@@ -140,3 +150,16 @@ def test_loader_refuses_broken_metadata(tmp_path: Path, case: str) -> None:
     path.write_text(source)
     with pytest.raises(ValidationError):
         load_construction_presets(path)
+
+
+def test_preset_order_and_every_field_survives_disk_roundtrip(tmp_path: Path) -> None:
+    presets = load_construction_presets(config_path("construction_presets.toml"))
+    assert tuple(p.id for p in presets) == (*ANSWERS, *NEW_ROWS)
+    for preset in presets:
+        document = preset_document(preset.material)
+        path = tmp_path / f"{preset.id}.json"
+        path.write_text(Scheme.model_validate(document).model_dump_json())
+        saved = Scheme.model_validate_json(path.read_text()).model_dump(mode="json")
+        scene = cast(dict[str, object], saved["scene"])
+        zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
+        assert zones["floor"][0]["material"] == preset.material
