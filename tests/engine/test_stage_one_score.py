@@ -253,13 +253,21 @@ def _section_records() -> list[dict[str, object]]:
             *(row for rows in tables if isinstance(rows, list) for row in rows)]
 
 
-def test_extra_component_such_as_decay_is_rejected(tmp_path: Path) -> None:
-    """權重表多一項（例如拖尾超出量）就拒收：第一階段分數只有兩個具名分項。"""
+@pytest.mark.parametrize("change", ["added", "renamed"])
+def test_components_other_than_the_two_named_are_rejected(tmp_path: Path, change: str) -> None:
+    """權重表多一項（例如拖尾超出量）或某一項換了名字都拒收：第一階段分數只有兩個具名分項。"""
     text = _REGISTRY.read_text(encoding="utf-8")
-    extra = text.replace(f'name = "{_ROBUSTNESS}"', 'name = "low_frequency_decay_excess"', 1)
-    assert extra != text
+    marker = f'[[stage_one.weight.item]]\nname = "{_ROBUSTNESS}"\n'
+    head, found, tail = text.partition(marker)
+    block, purposes, rest = tail.partition("\n[[purpose]]\n")
+    assert found and purposes
+    decay = '[[stage_one.weight.item]]\nname = "low_frequency_decay_excess"\n'
+    if change == "added":
+        changed = head + found + block + "\n" + decay + block + purposes + rest
+    else:
+        changed = head + decay + block + purposes + rest
     path = tmp_path / "quality_targets.toml"
-    path.write_text(extra, encoding="utf-8")
+    path.write_text(changed, encoding="utf-8")
     with pytest.raises(ValueError, match="分項必須剛好是"):
         _settings(path)
 
