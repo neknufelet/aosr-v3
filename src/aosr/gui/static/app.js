@@ -258,6 +258,7 @@ async function updateInputPreview() {
   } catch (error) {
     // 過期那一次的失敗不報：已經有更新的交接或預覽，舊錯誤蓋掉新訊息只會誤導（複查三）。
     if (stale()) return;
+    document.querySelectorAll("[data-open-area]").forEach(node => { node.textContent = ""; });
     throw error;
   }
   if (stale()) return;
@@ -267,6 +268,7 @@ async function updateInputPreview() {
 function renderInputPreview() {
   requireInputMatch();
   const data = inputPreview;
+  document.querySelectorAll("[data-open-area]").forEach(node => { node.textContent = data.open_area_texts?.[node.id] || ""; });
   if (scheme.speaker_setup)
     chooseOptions($("speaker-mount"), data.mounts, labels.speaker_setup || {}, scheme.speaker_setup.mount);
   for (const role of Object.keys(inputDefaults.roles)) {
@@ -724,7 +726,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     $(id).addEventListener("input", () => action(updateInputPreview));
   }
   $("walls").addEventListener("input", event => {
-    if (!event.target.matches("input[data-layer-field]")) return;
+    if (!event.target.matches("[data-layer-field]")) return;
     collectWallMaterials();
     for (const name of Object.keys(wallNames)) if (["assembly", "measured_impedance"].includes(wallMaterial(name).kind) && !measuredDrafts[name]) showPresetState(name);
   });

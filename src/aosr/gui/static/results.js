@@ -247,6 +247,8 @@ function drawMeasuredWalls() {
   }
 }
 function drawConstructionNotes() {
+  $("material-research-notice").textContent = view.material_research_notice || "";
+  $("material-research-notice").hidden = !view.material_research_notice;
   const lines = view.construction_notes || [];
   $("construction-notes").hidden = !lines.length;
   const target = $("construction-note-lines"); target.replaceChildren();

@@ -14,14 +14,13 @@ from aosr.config.paths import config_path
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.config.construction_presets import load_construction_presets
-from aosr.gui.construction_input import material_field_values, material_input_problems
+from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
 from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
-from aosr.reporting.validation import validate_scheme
 from aosr.search.furniture_prefilter import PLACEMENT_NAMES, scheme_placement_hits
 
 
@@ -144,8 +143,7 @@ def check_input_shape(document: dict[str, object], capabilities: CapabilityTable
         raise InputShapeError(NON_FINITE_ERROR)
     raw_scene = document.get("scene")
     if isinstance(raw_scene, dict) and raw_scene.get(ZONE_WALL_FIELD) is not None:
-        problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
-        problems += material_input_problems(document, problems)
+        problems = web_scheme_problems(document, capabilities=capabilities, directivity=directivity)
         wall_problems = tuple(problem for problem in problems if problem.path.startswith(f"scene.{ZONE_WALL_FIELD}"))
         if wall_problems:
             text = "；".join(str(row["text"]) for row in plain_problems(wall_problems, document))
@@ -419,7 +417,7 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
                 for role in ROLES}
     readonly = [{"item": item, "text": _readonly_text(item)} for item in items if editable_role(item) is None]
     setup = cast(dict[str, object] | None, document.get("speaker_setup"))
-    problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
+    problems = web_scheme_problems(document, capabilities=capabilities, directivity=directivity)
     heights: dict[str, str] = {}
     for problem in problems:
         if "跟擺法推出值不同" in problem.message:
@@ -439,7 +437,9 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
     except ValueError:
         # 半填表單由正式檢查列原因，座標清掉，避免舊座標配新格子。
         pass
-    return {"readonly": readonly, "coordinates": coordinates, "height_problems": heights,
+    open_areas = material_open_area_texts(document)
+    return {**({"open_area_texts": open_areas} if open_areas else {}),
+            "readonly": readonly, "coordinates": coordinates, "height_problems": heights,
             "placement_warnings": placement_warnings(document),
             "furniture_items": furniture_items, "furniture_controls": controls,
             "field_values": input_field_values(document),

@@ -36,7 +36,7 @@ from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
-from aosr.gui.construction_input import material_input_problems
+from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
@@ -418,9 +418,8 @@ class GuiHandlers:
 
     async def validate(self, request: Request) -> Response:
         document = cast(object, await request.json())
-        problems = validate_scheme(document, capabilities=self.capabilities,
+        problems = web_scheme_problems(document, capabilities=self.capabilities,
                                    directivity=self.directivity)
-        problems += material_input_problems(document, problems)
         multiples: dict[str, float | None] = {}
         try:
             scene = Scheme.model_validate(document).scene
@@ -454,10 +453,9 @@ class GuiHandlers:
                 return JSONResponse({"scheme": _read_scheme(path).model_dump(mode="json")})
             document = cast(object, await request.json())
             _require_scheme_id(path, document)
-            problems = validate_scheme(document, capabilities=self.capabilities,
+            problems = web_scheme_problems(document, capabilities=self.capabilities,
                                        directivity=self.directivity)
             # 流阻超出登記範圍跟其他驗證問題同一種回應（422 問題清單），跟底版存檔壞文件一樣。
-            problems += material_input_problems(document, problems)
             if problems:
                 return _problems_response(problems, document)
             scheme = Scheme.model_validate(document)
@@ -507,8 +505,8 @@ class GuiHandlers:
         try:
             if request.method == "POST":
                 document = cast(object, await request.json())
-                problems = validate_scheme(document, capabilities=self.capabilities,
-                                           directivity=self.directivity)
+                problems = web_scheme_problems(document, capabilities=self.capabilities,
+                                           directivity=self.directivity, check_material_range=False)
                 if problems:
                     data: dict[str, object] = {"problems": plain_problems(problems, document)}
                     try:

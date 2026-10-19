@@ -3,11 +3,14 @@ from __future__ import annotations
 
 from typing import cast
 
+from aosr.config.capabilities import CapabilityTable
+from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.problem_text import MATERIAL_MODELS
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
-from aosr.reporting.validation import SchemeProblem
+from aosr.reporting.validation import SchemeProblem, validate_scheme
+from aosr.materials.construction_models import layer_open_area
 
 
 def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -74,3 +77,43 @@ def material_field_values(document: dict[str, object]) -> dict[str, object]:
                 if isinstance(value, int | float) or value is None:
                     values[f"layer-{wall}-{index}-{name}"] = value
     return values
+
+
+def web_scheme_problems(document: object, *, capabilities: CapabilityTable,
+                        directivity: DirectivityDefaults, check_material_range: bool = True) -> tuple[SchemeProblem, ...]:
+    """網頁驗證唯一入口：移除模型上選填的 null；必填與未知鍵原樣交正式驗證。
+
+    只處理網頁傳來的層，包含實測底構造；不改方案檔格式的拒收契約。
+    """
+    if isinstance(document, dict):
+        for material in wall_materials(document).values():
+            for layer in _layers(material):
+                if not isinstance(layer, dict):
+                    continue
+                model = MATERIAL_MODELS.get(str(layer.get("kind")))
+                if model is None:
+                    continue
+                for name, field in model.model_fields.items():
+                    if name in layer and layer[name] is None and not field.is_required():
+                        layer.pop(name)
+    problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
+    return problems + material_input_problems(document, problems) if check_material_range else problems
+
+
+def material_open_area_texts(document: dict[str, object]) -> dict[str, str]:
+    """只在幾何填法驗證完成後呼叫唯一換算；直接給開孔率的層不回傳提示。"""
+    texts = {}
+    for wall, material in wall_materials(document).items():
+        for index, layer in enumerate(_layers(material)):
+            if not isinstance(layer, dict) or layer.get("open_area") is not None:
+                continue
+            kind = layer.get("kind")
+            if kind in ("micro_perforated", "perforated"):
+                area = layer_open_area(cast(float, layer["hole_diameter_m"]), cast(float, layer["hole_spacing_m"]),
+                    str(layer["hole_pattern"]), cast(float | None, layer.get("hole_spacing_2_m")))
+            elif kind == "slotted":
+                area = layer_open_area(cast(float, layer["slot_width_m"]), cast(float, layer["slot_spacing_m"]), "slotted")
+            else:
+                continue
+            texts[f"open-area-{wall}-{index}"] = f"算出的開孔率約 {area:.2%}"
+    return texts

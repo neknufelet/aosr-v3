@@ -82,7 +82,7 @@ function renderMeasuredDraft(name, row) {
     panel.append(selector);
   }
   panel.addEventListener("input", event => {
-    if (event.target.matches("input[data-layer-field]")) {
+    if (event.target.matches("[data-layer-field]")) {
       collectAssembly(name, draft.base_assembly); showPresetState(name, draft.base_assembly);
     }
     event.stopPropagation(); // 草稿未套用，不觸發原方案的預覽或存值。

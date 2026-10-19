@@ -205,6 +205,8 @@ def test_web_save_reload_real_calculation_changes_all_lanes_and_shows_notes(tmp_
             with _open(browser, f"{base}/results/{identifier}") as result_page:
                 expect(result_page.page.locator("#construction-note-lines")).to_contain_text("地板第 1 層")
                 expect(result_page.page.locator("#construction-note-lines")).to_contain_text("外推照算")
+                expect(result_page.page.locator("#material-research-notice")).to_be_visible()
+                expect(result_page.page.locator("#material-research-notice")).to_have_text("小松纖維模型：原論文只量到 100 Hz 以上")
                 assert result_page.page_errors == []
         assert watched.page_errors == []
     note(f"填表、存讀、兩份真計算與結果顯示整題牆鐘：{time.perf_counter() - before:.3f} 秒")

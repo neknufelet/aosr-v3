@@ -7,8 +7,8 @@ function wallMaterial(name) {
 function sameMaterial(a, b) {
   if (a === b) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameMaterial(a[key], b[key]));
+  const keys = Object.keys(a).filter(key => a[key] !== null);
+  return keys.length === Object.keys(b).filter(key => b[key] !== null).length && keys.every(key => Object.hasOwn(b, key) && sameMaterial(a[key], b[key]));
 }
 function matchingPreset(material) {
   return inputDefaults.construction_presets.find(preset => sameMaterial(preset.material, material));
@@ -54,14 +54,28 @@ function renderAssembly(name, material, row, onPreset = null) {
     const entry = document.createElement("div"); entry.className = "construction-layer";
     const title = document.createElement("h4"); title.textContent = `第 ${index + 1} 層：${spec[layer.kind].label}`; entry.append(title);
     const fields = document.createElement("div"); fields.className = "fields";
-    for (const [key, field] of Object.entries(spec[layer.kind].fields)) {
-      if (key === "kind" || !Object.hasOwn(layer, key)) continue;
-      if (Object.keys(field.options).length) {
-        const text = document.createElement("span"); text.textContent = `${field.label}：${field.options[layer[key]]}`; fields.append(text);
+    const definitions = Object.entries(spec[layer.kind].fields).sort(([a], [b]) =>
+      Number(a.startsWith("backing_fabric_")) - Number(b.startsWith("backing_fabric_")));
+    for (const [key, field] of definitions) {
+      if (key === "kind" || (!Object.hasOwn(layer, key) && field.required === undefined && key !== "flow_resistivity_source")) continue;
+      const value = layer[key] ?? field.default ?? null;
+      const label = field.label + (field.unit ? `（${field.unit}）` : "")
+        + (field.required === undefined ? "" : field.required ? "（必填）" : "（選填）");
+      if (["hole_pattern", "flow_resistivity_source"].includes(key)) {
+        const options = value === null || key === "hole_pattern" ? {"": "未填", ...field.options} : field.options;
+        const control = wallSelect(`layer-${name}-${index}-${key}`, label, options, value ?? "");
+        control.querySelector("select").dataset.layerField = key; fields.append(control);
+      } else if (Object.keys(field.options).length) {
+        const text = document.createElement("span"); text.textContent = `${label}：${field.options[value]}`; fields.append(text);
       } else {
-        const input = numberField(`layer-${name}-${index}-${key}`, field.label + (field.unit ? `（${field.unit}）` : ""), layer[key]);
+        const input = numberField(`layer-${name}-${index}-${key}`, label, value);
         input.querySelector("input").dataset.layerField = key; fields.append(input);
       }
+    }
+    if (["micro_perforated", "perforated", "slotted"].includes(layer.kind)) {
+      const opening = document.createElement("p"); opening.id = `open-area-${name}-${index}`;
+      opening.textContent = !measuredDrafts[name] && inputPreviewScheme === scheme ? inputPreview?.open_area_texts?.[opening.id] || "" : "";
+      opening.dataset.openArea = ""; opening.setAttribute("aria-live", "polite"); entry.append(opening);
     }
     entry.append(fields); details.append(entry);
   });
@@ -130,9 +144,14 @@ async function changeWallKind(name, kind) {
 function collectAssembly(name, material) {
   if (!material) return;
   material.layers.forEach((layer, index) => {
-    for (const input of document.querySelectorAll(`#wall-editor-${name} input[data-layer-field]`)) {
-      if (input.id === `layer-${name}-${index}-${input.dataset.layerField}`)
-        layer[input.dataset.layerField] = numericInput(input.id);
+    for (const input of document.querySelectorAll(`#wall-editor-${name} [data-layer-field]`)) {
+      if (input.id !== `layer-${name}-${index}-${input.dataset.layerField}`) continue;
+      const key = input.dataset.layerField;
+      if (input.tagName === "SELECT") {
+        const value = input.value || null;
+        if (Object.hasOwn(layer, key) || value !== inputDefaults.material_form[layer.kind].fields[key].default)
+          layer[key] = value;
+      } else layer[key] = numericInput(input.id);
     }
   });
 }
