@@ -119,15 +119,15 @@ def _total(score: StageOneScore) -> float:
 def _rewrite(tmp_path: Path, block_marker: str, field: str, new_value: object) -> Path:
     """臨時登記簿：把第一階段那一段裡含 ``block_marker`` 的那一塊的 ``field`` 那一行換掉。"""
     text = _REGISTRY.read_text(encoding="utf-8")
-    head, marker, section = text.partition("\n[[stage_one]]\n")
-    assert marker
+    head, marker, rest = text.partition("\n[[stage_one]]\n")
+    section, purposes, tail = rest.partition("\n[[purpose]]\n")
+    assert marker and purposes
     blocks = section.split("\n[[")
-    hits = [index for index, block in enumerate(blocks) if block_marker in block]
-    assert len(hits) == 1, block_marker
-    blocks[hits[0]], count = re.subn(rf"(?m)^{field} = .*$", f"{field} = {new_value!r}", blocks[hits[0]])
+    hit, = (index for index, block in enumerate(blocks) if block_marker in block)
+    blocks[hit], count = re.subn(rf"(?m)^{field} = .*$", f"{field} = {new_value!r}", blocks[hit])
     assert count == 1, (block_marker, field)
     path = tmp_path / "quality_targets.toml"
-    path.write_text(head + marker + "\n[[".join(blocks), encoding="utf-8")
+    path.write_text(head + marker + "\n[[".join(blocks) + purposes + tail, encoding="utf-8")
     return path
 
 

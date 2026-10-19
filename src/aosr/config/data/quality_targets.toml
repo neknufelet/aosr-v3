@@ -5,6 +5,63 @@
 # 的名冊擋著——偷偷把一條改成 calibrated 會紅。
 schema_version = 1
 
+# 第一階段（房型篩選，票 #558）那一段：照用途分塊、形狀同一個用途，但不進用途快照，也不進整份登記簿指紋
+# （src/aosr/config/quality_targets.py 的 stage_one_sections）——第二階段的比較身分與存檔讀回一位都不變
+# （老闆 2026-10-20「不連帶重做第二階段」）。讀值與合分在 src/aosr/scoring/stage_one_score.py；
+# 量法與拍板在 docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md 第一階段那條。
+# 這一段放在第一個用途之前：有考卷照「從第一個用途表頭複製到檔尾」造多一個用途的登記簿。
+
+[[stage_one]]
+name = "dedicated_two_channel_listening_room"
+qualification = []
+
+[[stage_one.setting]]
+key = "stage_one_low_frequency.scored_range_hz"
+value = [20.0, 300.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #558 老闆 2026-10-19 回低音分數第 2 題（重問）「1」＝選項 1：20～300 Hz，跟有限元素算的範圍一樣；是產品選擇、沒有外部出處，所以登記成基線"
+
+[[stage_one.target]]
+key = "stage_one_low_frequency.own_line_ripple_rms_db"
+value = 0.0
+unit = "dB"
+cost_shape = "less_is_better"
+worse_reference = 1.0
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「實作要核對參考尺度：兩項各增加 1 dB，對代價的增量應相同。不能權重填 1:1，卻因各自除以不同尺度而變成另一種比例。」較差參考只為無單位化，兩項取同一個值、合分程式不相等就報錯；代價數字本身沒有意義，顯示分項一律用原始 dB"
+
+[[stage_one.target]]
+key = "stage_one_low_frequency.seat_robustness_rms_db"
+value = 0.0
+unit = "dB"
+cost_shape = "less_is_better"
+worse_reference = 1.0
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「實作要核對參考尺度：兩項各增加 1 dB，對代價的增量應相同。不能權重填 1:1，卻因各自除以不同尺度而變成另一種比例。」較差參考只為無單位化，兩項取同一個值、合分程式不相等就報錯；代價數字本身沒有意義，顯示分項一律用原始 dB"
+
+[[stage_one.weight]]
+key = "stage_one_low_frequency.component_weights"
+
+[[stage_one.weight.item]]
+name = "own_line_ripple_rms_db"
+value = 1.0
+note = "主項（主位扣自己直線後的起伏）；1:1 是暫定的工程取捨，不是兩項在聽感上等價的保證；拖尾不在這張表"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
+
+[[stage_one.weight.item]]
+name = "seat_robustness_rms_db"
+value = 1.0
+note = "座位穩健性（周圍六點對主位曲線差的均方根平均）；1:1 是暫定的工程取捨，不是兩項在聽感上等價的保證；拖尾不在這張表"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
+
 [[purpose]]
 name = "dedicated_two_channel_listening_room"
 
@@ -849,59 +906,3 @@ conditions = "同 low_frequency_decay.strict_reference_frequencies_hz"
 frequency_range_hz = [32.0, 200.0]
 context = "只當參考印在模態表上，不是這個用途的目標；作者稱人工線為 worst case（最壞情況門檻），但照本登記的規則，約 49.7 Hz 以下目標線比它嚴"
 verification_digest = "sha256:ada7d8bb994e3008fb33f2e6b4b6754e722d7e7dfcc0c4f4f17f77f3c1aabed1"
-
-# 第一階段（房型篩選，票 #558）那一段：照用途分塊、形狀同一個用途，但不進用途快照，也不進整份登記簿指紋
-# （src/aosr/config/quality_targets.py 的 stage_one_sections）——第二階段的比較身分與存檔讀回一位都不變
-# （老闆 2026-10-20「不連帶重做第二階段」）。讀值與合分在 src/aosr/scoring/stage_one_score.py；
-# 量法與拍板在 docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md 第一階段那條。
-
-[[stage_one]]
-name = "dedicated_two_channel_listening_room"
-qualification = []
-
-[[stage_one.setting]]
-key = "stage_one_low_frequency.scored_range_hz"
-value = [20.0, 300.0]
-unit = "Hz"
-status = "baseline"
-source_kind = "product_choice"
-source = "票 #558 老闆 2026-10-19 回低音分數第 2 題（重問）「1」＝選項 1：20～300 Hz，跟有限元素算的範圍一樣；是產品選擇、沒有外部出處，所以登記成基線"
-
-[[stage_one.target]]
-key = "stage_one_low_frequency.own_line_ripple_rms_db"
-value = 0.0
-unit = "dB"
-cost_shape = "less_is_better"
-worse_reference = 1.0
-status = "baseline"
-source_kind = "product_choice"
-source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「實作要核對參考尺度：兩項各增加 1 dB，對代價的增量應相同。不能權重填 1:1，卻因各自除以不同尺度而變成另一種比例。」較差參考只為無單位化，兩項取同一個值、合分程式不相等就報錯；代價數字本身沒有意義，顯示分項一律用原始 dB"
-
-[[stage_one.target]]
-key = "stage_one_low_frequency.seat_robustness_rms_db"
-value = 0.0
-unit = "dB"
-cost_shape = "less_is_better"
-worse_reference = 1.0
-status = "baseline"
-source_kind = "product_choice"
-source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「實作要核對參考尺度：兩項各增加 1 dB，對代價的增量應相同。不能權重填 1:1，卻因各自除以不同尺度而變成另一種比例。」較差參考只為無單位化，兩項取同一個值、合分程式不相等就報錯；代價數字本身沒有意義，顯示分項一律用原始 dB"
-
-[[stage_one.weight]]
-key = "stage_one_low_frequency.component_weights"
-
-[[stage_one.weight.item]]
-name = "own_line_ripple_rms_db"
-value = 1.0
-note = "主項（主位扣自己直線後的起伏）；1:1 是暫定的工程取捨，不是兩項在聽感上等價的保證；拖尾不在這張表"
-status = "baseline"
-source_kind = "product_choice"
-source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
-
-[[stage_one.weight.item]]
-name = "seat_robustness_rms_db"
-value = 1.0
-note = "座位穩健性（周圍六點對主位曲線差的均方根平均）；1:1 是暫定的工程取捨，不是兩項在聽感上等價的保證；拖尾不在這張表"
-status = "baseline"
-source_kind = "product_choice"
-source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"

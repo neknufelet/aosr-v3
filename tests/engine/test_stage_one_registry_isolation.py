@@ -24,6 +24,7 @@ from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 _SECTION_HEADER = "\n[[stage_one]]\n"
+_PURPOSE_HEADER = "\n[[purpose]]\n"
 
 
 @pytest.fixture(scope="module")
@@ -33,10 +34,13 @@ def wall_1(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeRe
 
 @pytest.fixture
 def registries(tmp_path: Path) -> tuple[Path, Path]:
-    """（沒有第一階段那一段、正式登記簿原樣）兩份；那一段在檔尾，從第一個 [[stage_one]] 切掉。"""
+    """（沒有第一階段那一段、正式登記簿原樣）兩份；那一段在第一個用途之前，從第一個 [[stage_one]] 切到第一個用途表頭。"""
     text = control.TARGETS.read_text(encoding="utf-8")
-    head, marker, _ = text.partition(_SECTION_HEADER)
+    head, marker, rest = text.partition(_SECTION_HEADER)
     assert marker, "正式登記簿沒有第一階段那一段"
+    _, purposes, tail = rest.partition(_PURPOSE_HEADER)
+    assert purposes, "第一階段那一段後面找不到用途表頭，形狀變了"
+    head = head + purposes + tail
     full, stripped = tomllib.loads(text), tomllib.loads(head)
     # 切掉的只有第一階段那一段：其餘頂層內容逐格相同。
     assert "stage_one" in full and "stage_one" not in stripped
