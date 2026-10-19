@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import cast, get_args
 
 from pydantic import BaseModel
-from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, MeasuredImpedance, MeasuredImpedancePoint, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, FabricLayer, MeasuredImpedance, MeasuredImpedancePoint, MicroPerforatedLayer, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -56,15 +56,15 @@ PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇�
 # 模型按 kind（種類）分開，重名欄位不能互相蓋掉。
 MATERIAL_MODELS: dict[str, type[BaseModel]] = {
     str(model.model_fields["kind"].default): model
-    for model in (*get_args(get_args(SurfaceMaterial)[0]), PorousLayer, AirLayer, BoardLayer)}
+    for model in (*get_args(get_args(SurfaceMaterial)[0]), PorousLayer, AirLayer, BoardLayer, FabricLayer, MicroPerforatedLayer, PerforatedLayer, SlottedLayer)}
 MATERIAL_WORDS = {kind: {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
                        for name, field in model.model_fields.items()}
                   for kind, model in MATERIAL_MODELS.items()}
 PATH_WORDS.update({name: label.split("：", 1)[0] for words in MATERIAL_WORDS.values() for name, label in words.items()
                    if name not in ("kind", "thickness_m", "points")})
-PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m"})
+PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m", "method": "算法", "end_correction": "末端修正"})
 PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
-                   "air": "空氣層", "board": "薄板層", "porous": "多孔層"})
+                   "air": "空氣層", "board": "薄板層", "porous": "多孔層", "fabric": "布層", "micro_perforated": "微孔板", "perforated": "一般圓孔板", "slotted": "長縫板"})
 
 
 PATH_WORDS.update({name: (field.description or name).split("（", 1)[-1].removesuffix("）")
@@ -113,7 +113,8 @@ def material_form_spec() -> dict[str, dict[str, object]]:
         for name, field in model.model_fields.items():
             description = MATERIAL_WORDS[kind][name]
             label, _, unit = material_field_text(kind, name).partition("，")
-            choices = get_args(field.annotation) if str(field.annotation).startswith("typing.Literal[") else ()
+            annotation = next((part for part in get_args(field.annotation) if str(part).startswith("typing.Literal[")), field.annotation)
+            choices = get_args(annotation) if str(annotation).startswith("typing.Literal[") else ()
             fields[name] = {"label": label, "unit": unit.split("；", 1)[0],
                             "options": {str(value): _enum_word(description, value) for value in choices},
                             "default": field.default if not field.is_required() else None}

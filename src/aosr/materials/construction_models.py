@@ -6,10 +6,14 @@ Mechel 1976（低頻延伸多孔模型）的孔隙率另須不大於一。
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
-from typing import Annotated, Literal, Self, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, Self, TypeAlias, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, ValidationError, field_validator, model_validator
+if TYPE_CHECKING:
+    import jax
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictFloat, ValidationError, field_validator, model_validator
 from pydantic.config import JsonDict
 
 
@@ -54,6 +58,7 @@ class PorousLayer(_ConstructionRecord):
     kind: Literal["porous"] = Field(default="porous", description="kind（層種類代號，porous 表示多孔層）")
     thickness_m: _PositiveNumber = Field(description="thickness_m（層厚度，m）")
     flow_resistivity_pa_s_m2: _PositiveNumber = Field(description="flow_resistivity_pa_s_m2（流阻，Pa·s/m²）")
+    flow_resistivity_source: Literal["measured", "density_table", "catalog", "unspecified"] = Field(default="unspecified", exclude_if=lambda value: value == "unspecified", description="flow_resistivity_source（流阻從哪裡來：measured 表示 實測，density_table 表示 照密度查論文表，catalog 表示 廠商型錄，unspecified 表示 未註明；只記出處，不影響計算）")
     model: Literal["komatsu", "miki", "wilson_2015", "mechel_1976"] = Field(default="komatsu", description="model（多孔模型：komatsu 為小松纖維經驗式，miki 為三木纖維經驗式，wilson_2015 為威爾森鬆弛模型，mechel_1976 為梅歇爾低頻延伸式）")
     material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
     porosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="porosity（孔隙率，無量綱；模型要求時必填）")
@@ -90,8 +95,178 @@ class BoardLayer(_ConstructionRecord):
     resistance_pa_s_m: _NonnegativeNumber = Field(description="resistance_pa_s_m（面阻力，Pa·s/m）")
 
 
-Layer: TypeAlias = Annotated[PorousLayer | AirLayer | BoardLayer, Field(discriminator="kind")]
-"""Layer（構造層型別）依 kind（層種類代號）分辨多孔、空氣與板。"""
+_OpeningNumber = TypeVar("_OpeningNumber", float, "jax.Array")
+
+
+def layer_open_area(size: _OpeningNumber, spacing: _OpeningNumber, pattern: str, spacing_2: _OpeningNumber | None = None) -> _OpeningNumber:
+    """唯一孔距換開孔率公式；純算術亦接受陣列，核心先轉陣列再呼叫。
+
+    交錯 45° 的 spacing 量同一排相鄰兩孔中心距；斜向最近距的型錄請選方格。
+    長縫用 slotted；開孔率嚴格 0 < φ < 1 由格式驗證，不沿用原套件允許等於一。
+    """
+    if pattern == "slotted":
+        return size / spacing
+    if pattern == "square":
+        return math.pi / 4 * (size / spacing) ** 2
+    if pattern == "staggered_60":
+        return math.pi / (2 * math.sqrt(3)) * (size / spacing) ** 2
+    if pattern == "staggered_45":
+        return math.pi / 2 * (size / spacing) ** 2
+    if pattern == "rectangular" and spacing_2 is not None:
+        return math.pi / 4 * size ** 2 / (spacing * spacing_2)
+    raise ValueError("請選方格、交錯 60°、交錯 45°、長方格或長縫；長方格還要填排距")
+
+
+def _geometry_schema(schema: JsonDict) -> None:
+    """二擇一與禁填同驗證器；跨欄數值大小和幾何運算無法用標準綱要表達。"""
+    _required_kind(schema)
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    circular = "hole_pattern" in properties
+    geometry = ["hole_spacing_m", "hole_pattern", "hole_spacing_2_m"] if circular else ["slot_spacing_m"]
+    nonnull: JsonDict = {name: {"not": {"type": "null"}} for name in ["open_area", "surface_mass_kg_m2", *geometry]}
+    direct: JsonDict = {"required": ["open_area"], "not": {"anyOf": [{"required": [name]} for name in geometry]}}
+    spacing: JsonDict = {"required": [*geometry[:2]] if circular else [*geometry], "not": {"required": ["open_area"]}}
+    if circular:
+        spacing["if"] = {"properties": {"hole_pattern": {"const": "rectangular"}}}
+        spacing["then"] = {"required": ["hole_spacing_2_m"]}
+        spacing["else"] = {"not": {"required": ["hole_spacing_2_m"]}}
+    conditions: list[JsonValue] = [{"properties": nonnull}, {"oneOf": [direct, spacing]}]
+    schema["allOf"] = conditions
+    if "backing_fabric_surface_mass_kg_m2" in properties:
+        names = ["backing_fabric_surface_mass_kg_m2", "backing_fabric_flow_resistance_pa_s_m"]
+        conditions.append({"oneOf": [
+            {"not": {"anyOf": [{"required": [name]} for name in names]}},
+            {"required": [*names], "properties": {name: {"not": {"type": "null"}} for name in names}}]})
+
+
+class FabricLayer(_ConstructionRecord):
+    """布層：質量與面流阻並聯；只收兩格，不收厚度。
+
+    核心傳正厚度常數給傳遞矩陣的必填位置；明給兩個物性後厚度不影響結果。
+    """
+
+    kind: Literal["fabric"] = Field(default="fabric", description="kind（層種類代號，fabric 表示 布層）")
+    surface_mass_kg_m2: _PositiveNumber = Field(description="surface_mass_kg_m2（面密度，kg/m²）")
+    flow_resistance_pa_s_m: _PositiveNumber = Field(description="flow_resistance_pa_s_m（面流阻，Pa·s/m；整片布擋氣流的值，不是每公尺的流阻率）")
+
+
+class _FacingGeometry(_ConstructionRecord):
+    """面層幾何：開孔率嚴格 0 < φ < 1，原套件收 ≤ 1，產品拒收全開面。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_geometry_schema)
+    thickness_m: _PositiveNumber = Field(description="thickness_m（層厚度，m）")
+    open_area: Annotated[StrictFloat, Field(gt=0, lt=1)] | None = Field(default=None, exclude_if=lambda value: value is None, description="open_area（開孔率，比例；嚴格大於零小於一，不是百分比，與孔距或縫距二擇一）")
+    surface_mass_kg_m2: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="surface_mass_kg_m2（面密度，kg/m²：指整片板）")
+
+    @model_validator(mode="after")
+    def geometry_used(self) -> Self:
+        """拒收空值、填一半與兩路都填；孔不接觸，縫寬小於縫距。"""
+        circular = isinstance(self, _CircularGeometry)
+        names = {"hole_spacing_m", "hole_pattern", "hole_spacing_2_m"} if circular else {"slot_spacing_m"}
+        given = self.model_fields_set
+        if any(getattr(self, name) is None for name in given & (names | {"open_area", "surface_mass_kg_m2"})):
+            raise ValueError("已填的開孔率、孔距、排法、縫距或面密度不可空白；不用的欄位請刪除")
+        if "open_area" in given:
+            if given & names:
+                raise ValueError("開孔率與孔距加排法或縫距只能選一條填；請刪掉另一條")
+        elif isinstance(self, _CircularGeometry):
+            self._check_holes()
+        else:
+            assert isinstance(self, SlottedLayer)
+            if self.slot_spacing_m is None:
+                raise ValueError("請填開孔率，或填縫距，兩種填法選一種")
+            if self.slot_width_m >= self.slot_spacing_m:
+                raise ValueError("縫寬必須小於縫距，縫不可重疊")
+        return self
+
+
+class _CircularGeometry(_FacingGeometry):
+    """圓孔：只設文獻 1／2 mm 分界與孔不重疊；不設未核原文的 0.1 mm 下限或一般孔上限。"""
+
+    hole_diameter_m: _PositiveNumber = Field(description="hole_diameter_m（孔徑，m；只設微孔與一般孔的 1／2 mm 分界及孔不重疊，不用未核原文的 0.1 mm 下限，一般圓孔板沒有另設上限）")
+    hole_spacing_m: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="hole_spacing_m（孔距，m；同一排相鄰兩孔中心距，交錯 60° 為正三角形邊長；交錯 45° 若型錄量斜向最近兩孔請選方格）")
+    hole_pattern: Literal["square", "staggered_60", "staggered_45", "rectangular"] | None = Field(default=None, exclude_if=lambda value: value is None, description="hole_pattern（孔排法：square 表示 方格，staggered_60 表示 交錯 60°，staggered_45 表示 交錯 45°，rectangular 表示 長方格）")
+    hole_spacing_2_m: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="hole_spacing_2_m（排距，m；排與排的距離，只限長方格必填）")
+
+    def _check_holes(self) -> None:
+        if self.hole_spacing_m is None or self.hole_pattern is None:
+            raise ValueError("請填開孔率，或一起填孔距與孔排法；長方格還要填排距")
+        rectangular = self.hole_pattern == "rectangular"
+        if rectangular != ("hole_spacing_2_m" in self.model_fields_set):
+            raise ValueError("長方格必須多填排距；其他三種排法請刪掉排距")
+        nearest = self.hole_spacing_m
+        if self.hole_pattern == "staggered_45":
+            nearest /= math.sqrt(2)
+        if self.hole_spacing_2_m is not None:
+            nearest = min(nearest, self.hole_spacing_2_m)
+        if self.hole_diameter_m >= nearest:
+            raise ValueError("孔不可重疊或接觸，孔徑必須小於最近兩孔中心的孔距")
+
+    @model_validator(mode="after")
+    def diameter_range(self) -> Self:
+        if isinstance(self, MicroPerforatedLayer) and self.hole_diameter_m > .002:
+            raise ValueError("孔徑較大請改用一般圓孔板")
+        if isinstance(self, PerforatedLayer) and self.hole_diameter_m < .001:
+            raise ValueError("孔徑較小請改用微孔板")
+        return self
+
+
+class _BackingFabric(_ConstructionRecord):
+    """背面貼布工程近似：板阻抗加面流阻除板自身開孔率，沒有一手出處；布當不會動。"""
+
+    backing_fabric_surface_mass_kg_m2: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="backing_fabric_surface_mass_kg_m2（背面貼布面密度，kg/m²；面密度先記錄、不進計算，與背面貼布面流阻同給同不給）")
+    backing_fabric_flow_resistance_pa_s_m: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="backing_fabric_flow_resistance_pa_s_m（背面貼布面流阻，Pa·s/m；工程近似：板阻抗加布面流阻除板開孔率，布當不會動，沒有一手出處，長縫板同圓孔板）")
+
+    @model_validator(mode="after")
+    def paired_backing(self) -> Self:
+        names = {"backing_fabric_surface_mass_kg_m2", "backing_fabric_flow_resistance_pa_s_m"}
+        given = self.model_fields_set & names
+        if given and (given != names or any(getattr(self, name) is None for name in names)):
+            raise ValueError("背面貼布的面密度與面流阻必須一起填正數，或兩格都刪除")
+        return self
+
+
+class MicroPerforatedLayer(_CircularGeometry):
+    """微孔板：微穿孔薄片，孔徑 ≤ 2 mm，1–2 mm 亦可選一般圓孔板；不收背面貼布。"""
+
+    kind: Literal["micro_perforated"] = Field(default="micro_perforated", description="kind（層種類代號，micro_perforated 表示 微孔板）")
+    hole_diameter_m: Annotated[StrictFloat, Field(gt=0, le=.002)] = Field(description=_CircularGeometry.model_fields["hole_diameter_m"].description)
+
+    @field_validator("hole_diameter_m", mode="before")
+    @classmethod
+    def diameter_hint(cls, value: object) -> object:
+        if isinstance(value, int | float) and value > .002:
+            raise ValueError("孔徑較大請改用一般圓孔板")
+        return value
+
+
+class PerforatedLayer(_CircularGeometry, _BackingFabric):
+    """一般圓孔板：集中孔道薄片加末端修正，孔徑 ≥ 1 mm，不另設上限；背面貼布是工程近似。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_geometry_schema)
+    kind: Literal["perforated"] = Field(default="perforated", description="kind（層種類代號，perforated 表示 一般圓孔板）")
+    hole_diameter_m: Annotated[StrictFloat, Field(ge=.001)] = Field(description=_CircularGeometry.model_fields["hole_diameter_m"].description)
+
+    @field_validator("hole_diameter_m", mode="before")
+    @classmethod
+    def diameter_hint(cls, value: object) -> object:
+        if isinstance(value, int | float) and value < .001:
+            raise ValueError("孔徑較小請改用微孔板")
+        return value
+
+
+class SlottedLayer(_FacingGeometry, _BackingFabric):
+    """長縫板：假設縫無限長、週期排列，有限長木條未驗；也收背面貼布，式子同圓孔板的工程近似。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_geometry_schema)
+    kind: Literal["slotted"] = Field(default="slotted", description="kind（層種類代號，slotted 表示 長縫板）")
+    slot_width_m: _PositiveNumber = Field(description="slot_width_m（縫寬，m；假設縫無限長、週期排列）")
+    slot_spacing_m: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="slot_spacing_m（縫距，m；縫寬必須小於縫距，與開孔率二擇一）")
+
+
+Layer: TypeAlias = Annotated[PorousLayer | AirLayer | BoardLayer | FabricLayer | MicroPerforatedLayer | PerforatedLayer | SlottedLayer, Field(discriminator="kind")]
+"""Layer（構造層型別）依 kind（層種類代號）分辨多孔、空氣、板、布、微孔板、一般圓孔板與長縫板。"""
 
 
 class Assembly(_ConstructionRecord):
@@ -164,7 +339,7 @@ SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance | MeasuredIm
 
 
 def _note_schema(schema: JsonDict) -> None:
-    """層與材料類別只屬於 Komatsu 註記；補值註記不允許提供這兩格。"""
+    """層與材料類別只屬於 Komatsu 頻率、類別與低流阻註記；補值註記不允許提供這兩格。"""
     schema["allOf"] = [{"if": {"properties": {"code": {"const": "measured_table_model_fill"}}},
         "then": {"not": {"anyOf": [{"required": ["layer_index"]}, {"required": ["material_class"]}]}},
         "else": {"required": ["layer_index", "material_class"], "properties": {
@@ -176,11 +351,11 @@ class ConstructionNote(_ConstructionRecord):
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_note_schema)
 
-    code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit", "measured_table_model_fill"] = Field(description="code（註記代號：頻率外推或材料類別不在擬合範圍）")
+    code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit", "komatsu_flow_below_samples", "measured_table_model_fill"] = Field(description="code（註記代號：頻率外推、材料類別不在擬合範圍、流阻低於原研究樣品範圍或實測表模型補值）")
     layer_index: int | None = Field(default=None, exclude_if=lambda value: value is None, ge=1, description="layer_index（從房間側起算的層編號）")
     frequencies_hz: tuple[_PositiveNumber, ...] = Field(
         default=(), json_schema_extra={"uniqueItems": True},  # 不重複由報表輸出驗證器守，綱要同一條；遞增寫不進綱要
-        description="frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）")
+        description="frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別與低流阻註記沒有頻點）")
     material_class: Literal["fibrous", "foam"] | None = Field(default=None, exclude_if=lambda value: value is None, description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
     message: str = Field(min_length=1, description="message（中文說明）")
 
@@ -190,5 +365,5 @@ class ConstructionNote(_ConstructionRecord):
             if self.model_fields_set & {"layer_index", "material_class"}:
                 raise ValueError("模型補值註記不給層編號或材料類別")
         elif self.layer_index is None or self.material_class is None:
-            raise ValueError("Komatsu 註記必填層編號與材料類別")
+            raise ValueError("Komatsu 頻率、類別與低流阻註記必填層編號與材料類別")
         return self

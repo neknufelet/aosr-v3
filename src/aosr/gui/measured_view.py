@@ -59,6 +59,8 @@ def _header(result: SchemeResult, wall: str, material: MeasuredImpedance) -> tup
                          f'{extrapolated_frequency_text(note.frequencies_hz)}')
         elif note.code == 'komatsu_material_class_outside_fit':
             extra.append(f'底構造第 {note.layer_index} 層的材料類別不在小松纖維模型擬合範圍')
+        elif note.code == 'komatsu_flow_below_samples':
+            extra.append(f'底構造第 {note.layer_index} 層流阻低於原研究樣品範圍，照算但不宣稱準確性')
     return (f'{WALLS[wall]}：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
             '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
             *dict.fromkeys(extra))

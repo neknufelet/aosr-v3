@@ -193,7 +193,41 @@ def _surface_fields(scheme: Scheme) -> set[str]:
     changed = _change(porous_document, ("scene", NEW, "floor", 0, "material", "layers", 0), miki)
     assert {row.path for row in scheme_differences(porous_scheme, changed)} == {f"scene.{NEW}.floor"}
     names = set(cases) | {f"layers[].{name}" for name in parameters} | {"layers[].model"}
+    names |= {f"layers[].{name}" for name in _facing_fields(document, ("scene", NEW, "floor", 0, "material", "layers"))}
     return {f"scene.{NEW}[][].material.{name}" for name in names} | _measured_surface_fields(document)
+
+
+# 布、微孔、一般圓孔（長方格＋背面貼布）、長縫與多孔流阻來源：起點層與要逐一改的欄位。
+_FACINGS: tuple[tuple[dict[str, Json], dict[str, Json]], ...] = (
+    ({"kind": "fabric", "surface_mass_kg_m2": .1, "flow_resistance_pa_s_m": 200.}, {"flow_resistance_pa_s_m": 300.}),
+    ({"kind": "perforated", "thickness_m": .0125, "hole_diameter_m": .008, "hole_spacing_m": .018,
+      "hole_pattern": "rectangular", "hole_spacing_2_m": .02, "backing_fabric_surface_mass_kg_m2": .063,
+      "backing_fabric_flow_resistance_pa_s_m": 236.},
+     {"hole_diameter_m": .009, "hole_spacing_m": .019, "hole_spacing_2_m": .021,
+      "backing_fabric_surface_mass_kg_m2": .07, "backing_fabric_flow_resistance_pa_s_m": 250.}),
+    ({"kind": "micro_perforated", "thickness_m": .0005, "hole_diameter_m": .0005, "hole_spacing_m": .005,
+      "hole_pattern": "square"}, {"hole_pattern": "staggered_60"}),
+    ({"kind": "micro_perforated", "thickness_m": .0005, "hole_diameter_m": .0005, "open_area": .01}, {"open_area": .02}),
+    ({"kind": "slotted", "thickness_m": .0125, "slot_width_m": .006, "slot_spacing_m": .03},
+     {"slot_width_m": .007, "slot_spacing_m": .032}),
+    ({"kind": "porous", "thickness_m": .05, "flow_resistivity_pa_s_m2": 19100., "material_class": "fibrous"},
+     {"flow_resistivity_source": "density_table"}),
+)
+
+
+def _facing_fields(document: dict[str, Json], layers: tuple[str | int, ...]) -> set[str]:
+    """第一層換成各新面層，每一格各改一次，證明差異表逐欄看得到、不落進其他設定。"""
+    from tests.engine._surface_zone_cases import NEW
+
+    names: set[str] = set()
+    for start, changes in _FACINGS:
+        original = _change(document, (*layers, 0), start)
+        data = cast(dict[str, Json], original.model_dump(mode="json"))
+        for name, value in changes.items():
+            rows = scheme_differences(original, _change(data, (*layers, 0, name), value))
+            assert {row.path for row in rows} == {f"scene.{NEW}.floor"}, name
+            names.add(name)
+    return names
 
 
 def _measured_surface_fields(document: dict[str, Json]) -> set[str]:
@@ -227,4 +261,5 @@ def _measured_surface_fields(document: dict[str, Json]) -> set[str]:
     for name, (path, value) in cases.items():
         rows = scheme_differences(original, _change(data, (*prefix, *path), value))
         assert {row.path for row in rows} == {f'scene.{NEW}.floor'}, name
-    return {f'scene.{NEW}[][].material.{name}' for name in cases}
+    names = set(cases) | {f'base_assembly.layers[].{name}' for name in _facing_fields(data, (*prefix, 'base_assembly', 'layers'))}
+    return {f'scene.{NEW}[][].material.{name}' for name in names}

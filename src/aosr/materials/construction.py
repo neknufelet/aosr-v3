@@ -1,7 +1,7 @@
 """牆面構造計算核心：給具體值、在即時編譯之外驗證，不接進三路。
 
 時間慣例沿用傳遞矩陣 e^{+jωt}（正時間指數），層從房間側往負載連乘。
-Komatsu（纖維多孔模型）依注入設定拒收樣品流阻範圍外值，按 f/σ 記頻率外推，
+Komatsu（纖維多孔模型）依注入設定拒收手動試算流阻範圍外值，低於樣品下限另標註，按 f/σ 記頻率外推，
 泡棉另記類別不在擬合範圍；樣品範圍不是作者訂的物理有效界線。
 Miki（纖維經驗模型）、Wilson 2015（鬆弛模型）、Mechel 1976（低頻延伸模型）尚未設範圍。
 所有入口檢查最終表面阻抗的每個頻點、每個角度；非有限或實部負值拒收，沒有模型備援。
@@ -23,7 +23,11 @@ from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.materials import transfer_matrix as tmm
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
-from aosr.materials.construction_models import AirLayer, ConstantImpedance, ConstructionNote, Layer, MeasuredImpedance, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, BoardLayer, ConstantImpedance, ConstructionNote, FabricLayer, Layer, MeasuredImpedance, MicroPerforatedLayer, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial, layer_open_area
+
+
+# 布的兩個物性明給後不讀厚度；正數只滿足傳遞矩陣的必填位置。
+FABRIC_THICKNESS_PLACEHOLDER_M = 0.001
 
 
 class _PorousParameters(TypedDict):
@@ -44,8 +48,18 @@ def _context(material: SurfaceMaterial) -> str:
             descriptions.append(f"{prefix}：{layer.model} 多孔模型，厚度 {layer.thickness_m} m、流阻 {layer.flow_resistivity_pa_s_m2} Pa·s/m²、孔隙率 {layer.porosity}、曲折度 {layer.tortuosity}")
         elif isinstance(layer, AirLayer):
             descriptions.append(f"{prefix}：空氣層，厚度 {layer.thickness_m} m")
-        else:
+        elif isinstance(layer, BoardLayer):
             descriptions.append(f"{prefix}：板層，面密度 {layer.surface_mass_kg_m2} kg/m²、面阻力 {layer.resistance_pa_s_m} Pa·s/m")
+        elif isinstance(layer, FabricLayer):
+            descriptions.append(f"{prefix}：布層，面密度 {layer.surface_mass_kg_m2} kg/m²、面流阻 {layer.flow_resistance_pa_s_m} Pa·s/m")
+        elif isinstance(layer, MicroPerforatedLayer):
+            descriptions.append(f"{prefix}：微孔板，厚度 {layer.thickness_m} m、孔徑 {layer.hole_diameter_m} m")
+        elif isinstance(layer, PerforatedLayer):
+            descriptions.append(f"{prefix}：一般圓孔板，厚度 {layer.thickness_m} m、孔徑 {layer.hole_diameter_m} m")
+        elif isinstance(layer, SlottedLayer):
+            descriptions.append(f"{prefix}：長縫板，厚度 {layer.thickness_m} m、縫寬 {layer.slot_width_m} m")
+        else:
+            raise ValueError("不認識的構造層，無法描述；請修正層種類")
     return "；".join(descriptions) + f"；背後負載為{'剛背' if material.backing == 'rigid' else '空氣'}"
 
 
@@ -78,8 +92,12 @@ def _komatsu_notes(material: SurfaceMaterial, frequencies: jax.Array, ranges: Po
         if not isinstance(layer, PorousLayer) or layer.model != "komatsu":
             continue
         sigma = layer.flow_resistivity_pa_s_m2
-        if not limits.sample_flow_resistivity_min_pa_s_m2 <= sigma <= limits.sample_flow_resistivity_max_pa_s_m2:
-            raise ValueError(f"第 {index} 層：Komatsu（小松）纖維模型流阻 {sigma} Pa·s/m² 超出原研究樣品範圍 [{limits.sample_flow_resistivity_min_pa_s_m2}, {limits.sample_flow_resistivity_max_pa_s_m2}]；這不是作者訂的物理有效界線。請改填實測阻抗，或明確指定別的多孔模型；不自動換模型")
+        if not limits.manual_flow_resistivity_min_pa_s_m2 <= sigma <= limits.sample_flow_resistivity_max_pa_s_m2:
+            raise ValueError(f"第 {index} 層：Komatsu（小松）纖維模型流阻 {sigma} Pa·s/m² 超出手動試算範圍 [{limits.manual_flow_resistivity_min_pa_s_m2}, {limits.sample_flow_resistivity_max_pa_s_m2}]；原研究樣品範圍另記，這不是作者訂的物理有效界線。請改填實測阻抗，或明確指定別的多孔模型；不自動換模型")
+        if sigma < limits.sample_flow_resistivity_min_pa_s_m2:
+            notes.append(ConstructionNote(code="komatsu_flow_below_samples", layer_index=index,
+                material_class=layer.material_class,
+                message=f"第 {index} 層：流阻低於原研究樣品範圍，保留輸入 {sigma:g} Pa·s/m² 照算；手動試算下限 {limits.manual_flow_resistivity_min_pa_s_m2:g} 是工程界線，不是經實測證明的準確性界線"))
         outside = tuple(float(f) for f in np.asarray(frequencies) if not lower <= float(f) / sigma <= upper)
         if outside:
             notes.append(ConstructionNote(code="komatsu_frequency_extrapolation", layer_index=index,
@@ -106,8 +124,50 @@ def _layer_matrix(layer: Layer, frequencies: jax.Array, air: PhysicsConstants,
             incidence_angles_deg=angles, **parameters)
     if isinstance(layer, AirLayer):
         return tmm.air_layer(frequencies, jnp.asarray(layer.thickness_m), air=air, incidence_angles_deg=angles)
-    impedance = layer.resistance_pa_s_m + 1j * 2 * jnp.pi * frequencies * layer.surface_mass_kg_m2
-    return tmm._sheet_layer(tmm._broadcast_angles(impedance, angles))
+    if isinstance(layer, BoardLayer):
+        impedance = jnp.asarray(layer.resistance_pa_s_m) + 1j * 2 * jnp.pi * frequencies * jnp.asarray(layer.surface_mass_kg_m2)
+        return tmm._sheet_layer(tmm._broadcast_angles(impedance, angles))
+    if isinstance(layer, FabricLayer):
+        return tmm.porous_facing_layer(frequencies, jnp.asarray(FABRIC_THICKNESS_PLACEHOLDER_M), air=air,
+            method="pieren_free", surface_mass_kg_m2=jnp.asarray(layer.surface_mass_kg_m2),
+            resistance_pa_s_m=jnp.asarray(layer.flow_resistance_pa_s_m), incidence_angles_deg=angles)
+    if isinstance(layer, MicroPerforatedLayer):
+        return tmm.perforated_panel_layer(frequencies, jnp.asarray(layer.thickness_m), jnp.asarray(layer.hole_diameter_m),
+            air=air, open_area=_open_area(layer), surface_mass_kg_m2=_panel_mass(layer), method="barrier_mpp", incidence_angles_deg=angles)
+    if isinstance(layer, PerforatedLayer):
+        matrix = tmm.perforated_panel_layer(frequencies, jnp.asarray(layer.thickness_m), jnp.asarray(layer.hole_diameter_m),
+            air=air, open_area=_open_area(layer), surface_mass_kg_m2=_panel_mass(layer), method="barrier", end_correction="jb", incidence_angles_deg=angles)
+        return _backed_sheet(matrix, layer, frequencies, angles)
+    if isinstance(layer, SlottedLayer):
+        matrix = tmm.slotted_panel_layer(frequencies, jnp.asarray(layer.thickness_m), jnp.asarray(layer.slot_width_m),
+            air=air, open_area=_open_area(layer), surface_mass_kg_m2=_panel_mass(layer), method="barrier", incidence_angles_deg=angles)
+        return _backed_sheet(matrix, layer, frequencies, angles)
+    raise ValueError("不認識的構造層，無法計算；請修正層種類")
+
+
+def _panel_mass(layer: MicroPerforatedLayer | PerforatedLayer | SlottedLayer) -> jax.Array | None:
+    return None if layer.surface_mass_kg_m2 is None else jnp.asarray(layer.surface_mass_kg_m2)
+
+
+def _open_area(layer: MicroPerforatedLayer | PerforatedLayer | SlottedLayer) -> jax.Array:
+    """核心只把算好的開孔率交給傳遞矩陣；不讓它再用方形式孔距推導。"""
+    if layer.open_area is not None:
+        return jnp.asarray(layer.open_area)
+    if isinstance(layer, SlottedLayer):
+        return jnp.asarray(layer_open_area(jnp.asarray(layer.slot_width_m), jnp.asarray(layer.slot_spacing_m), "slotted"))
+    second = None if layer.hole_spacing_2_m is None else jnp.asarray(layer.hole_spacing_2_m)
+    assert layer.hole_pattern is not None
+    return jnp.asarray(layer_open_area(jnp.asarray(layer.hole_diameter_m), jnp.asarray(layer.hole_spacing_m), layer.hole_pattern, second))
+
+
+def _backed_sheet(matrix: jax.Array, layer: PerforatedLayer | SlottedLayer, frequencies: jax.Array,
+                  angles: jax.Array | None) -> jax.Array:
+    """工程近似：板後串聯布面流阻除板開孔率，布不動，面密度只記錄。"""
+    if layer.backing_fabric_flow_resistance_pa_s_m is None:
+        return matrix
+    impedance = jnp.zeros_like(frequencies, dtype=jnp.complex128) + jnp.asarray(layer.backing_fabric_flow_resistance_pa_s_m) / _open_area(layer)
+    backing = tmm._sheet_layer(tmm._broadcast_angles(impedance, angles))
+    return matrix @ backing
 
 
 def _check_surface_impedance(impedance: jax.Array, frequencies: jax.Array, angles: jax.Array | None,

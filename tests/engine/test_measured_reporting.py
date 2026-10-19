@@ -49,9 +49,9 @@ def test_measured_seams_output_is_optional_closed_and_has_facts() -> None:
     assert 'difference' not in output.model_dump_json()
 
 
-@pytest.mark.parametrize('code', ('komatsu_frequency_extrapolation', 'komatsu_material_class_outside_fit'))
+@pytest.mark.parametrize('code', ('komatsu_frequency_extrapolation', 'komatsu_material_class_outside_fit', 'komatsu_flow_below_samples'))
 def test_komatsu_notes_still_require_layer_and_material_class(
-    code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit"],
+    code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit", "komatsu_flow_below_samples"],
 ) -> None:
     with pytest.raises(ValidationError):
         ConstructionNote(code=code, message='外推')
@@ -211,10 +211,13 @@ def test_header_line_states_base_model_extrapolation(monkeypatch: pytest.MonkeyP
         ConstructionNote(code='komatsu_frequency_extrapolation', layer_index=1, frequencies_hz=(20., 25.),
                          material_class='fibrous', message='底構造第 1 層：外推'),
         ConstructionNote(code='komatsu_material_class_outside_fit', layer_index=2, material_class='foam',
-                         message='底構造第 2 層：泡棉'))}
+                         message='底構造第 2 層：泡棉'),
+        ConstructionNote(code='komatsu_flow_below_samples', layer_index=3, material_class='fibrous',
+                         message='底構造第 3 層：流阻低於原研究樣品範圍'))}
     header = next(line for line in report_measured_text.measured_text(inputs, notes) if line.startswith('floor：'))
     assert f'其中 {extrapolated_frequency_text((20., 25.))} 底構造第 1 層另有材料模型外推' in header
     assert '底構造第 2 層的材料類別不在 Komatsu（小松）纖維模型擬合範圍' in header
+    assert '底構造第 3 層流阻低於原研究樣品範圍' in header
     assert '模型補值（底構造）' in header and '不代表現場安裝' in header
 
 

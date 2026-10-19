@@ -20,6 +20,8 @@ def _base_note_text(notes: tuple[ConstructionNote, ...]) -> str:
             parts.append(f"其中 {extrapolated_frequency_text(note.frequencies_hz)} 底構造第 {note.layer_index} 層另有材料模型外推")
         elif note.code == "komatsu_material_class_outside_fit":
             parts.append(f"底構造第 {note.layer_index} 層的材料類別不在 Komatsu（小松）纖維模型擬合範圍")
+        elif note.code == "komatsu_flow_below_samples":
+            parts.append(f"底構造第 {note.layer_index} 層流阻低於原研究樣品範圍，照算但不宣稱準確性")
     return "".join(f"；{part}" for part in parts)
 
 

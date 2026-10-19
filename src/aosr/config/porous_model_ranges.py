@@ -32,6 +32,7 @@ class RangeProvenance(_RangeRecord):
 class KomatsuRanges(_RangeRecord):
     """Komatsu（纖維多孔模型）原研究的樣品流阻、量測頻率與材料類別。"""
 
+    manual_flow_resistivity_min_pa_s_m2: _PositiveNumber = Field(description="manual_flow_resistivity_min_pa_s_m2（手動試算流阻下限，Pa·s/m²；工程界線，不是論文數字、不是經實測證明的準確性界線）")
     sample_flow_resistivity_min_pa_s_m2: _PositiveNumber = Field(description="sample_flow_resistivity_min_pa_s_m2（樣品流阻下限，Pa·s/m²）")
     sample_flow_resistivity_max_pa_s_m2: _PositiveNumber = Field(description="sample_flow_resistivity_max_pa_s_m2（樣品流阻上限，Pa·s/m²）")
     measured_frequency_min_hz: _PositiveNumber = Field(description="measured_frequency_min_hz（量測頻率下限，Hz）")
@@ -43,6 +44,8 @@ class KomatsuRanges(_RangeRecord):
     @model_validator(mode="after")
     def ordered_ranges(self) -> Self:
         """樣品與量測兩個區間都須下界小於上界。"""
+        if self.manual_flow_resistivity_min_pa_s_m2 >= self.sample_flow_resistivity_min_pa_s_m2:
+            raise ValueError("手動試算下限必須小於原研究樣品流阻下限")
         if self.sample_flow_resistivity_min_pa_s_m2 >= self.sample_flow_resistivity_max_pa_s_m2:
             raise ValueError("樣品流阻下界必須小於上界，請核對原研究表格")
         if self.measured_frequency_min_hz >= self.measured_frequency_max_hz:

@@ -214,7 +214,11 @@
               "mapping": {
                 "air": "#/$defs/AirLayer",
                 "board": "#/$defs/BoardLayer",
-                "porous": "#/$defs/PorousLayer"
+                "fabric": "#/$defs/FabricLayer",
+                "micro_perforated": "#/$defs/MicroPerforatedLayer",
+                "perforated": "#/$defs/PerforatedLayer",
+                "porous": "#/$defs/PorousLayer",
+                "slotted": "#/$defs/SlottedLayer"
               },
               "propertyName": "kind"
             },
@@ -227,6 +231,18 @@
               },
               {
                 "$ref": "#/$defs/BoardLayer"
+              },
+              {
+                "$ref": "#/$defs/FabricLayer"
+              },
+              {
+                "$ref": "#/$defs/MicroPerforatedLayer"
+              },
+              {
+                "$ref": "#/$defs/PerforatedLayer"
+              },
+              {
+                "$ref": "#/$defs/SlottedLayer"
               }
             ]
           },
@@ -307,6 +323,38 @@
         "kind"
       ],
       "title": "ConstantImpedance",
+      "type": "object"
+    },
+    "FabricLayer": {
+      "additionalProperties": false,
+      "description": "布層：質量與面流阻並聯；只收兩格，不收厚度。\n\n核心傳正厚度常數給傳遞矩陣的必填位置；明給兩個物性後厚度不影響結果。",
+      "properties": {
+        "kind": {
+          "const": "fabric",
+          "default": "fabric",
+          "description": "kind（層種類代號，fabric 表示 布層）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "surface_mass_kg_m2": {
+          "description": "surface_mass_kg_m2（面密度，kg/m²）",
+          "exclusiveMinimum": 0,
+          "title": "Surface Mass Kg M2",
+          "type": "number"
+        },
+        "flow_resistance_pa_s_m": {
+          "description": "flow_resistance_pa_s_m（面流阻，Pa·s/m；整片布擋氣流的值，不是每公尺的流阻率）",
+          "exclusiveMinimum": 0,
+          "title": "Flow Resistance Pa S M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "surface_mass_kg_m2",
+        "flow_resistance_pa_s_m",
+        "kind"
+      ],
+      "title": "FabricLayer",
       "type": "object"
     },
     "FurnitureKind": {
@@ -409,6 +457,204 @@
       "title": "MeasuredImpedancePoint",
       "type": "object"
     },
+    "MicroPerforatedLayer": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "open_area": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "surface_mass_kg_m2": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "hole_spacing_m": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "hole_pattern": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "hole_spacing_2_m": {
+              "not": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "hole_spacing_m"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "hole_pattern"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "hole_spacing_2_m"
+                    ]
+                  }
+                ]
+              },
+              "required": [
+                "open_area"
+              ]
+            },
+            {
+              "else": {
+                "not": {
+                  "required": [
+                    "hole_spacing_2_m"
+                  ]
+                }
+              },
+              "if": {
+                "properties": {
+                  "hole_pattern": {
+                    "const": "rectangular"
+                  }
+                }
+              },
+              "not": {
+                "required": [
+                  "open_area"
+                ]
+              },
+              "required": [
+                "hole_spacing_m",
+                "hole_pattern"
+              ],
+              "then": {
+                "required": [
+                  "hole_spacing_2_m"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "微孔板：微穿孔薄片，孔徑 ≤ 2 mm，1–2 mm 亦可選一般圓孔板；不收背面貼布。",
+      "properties": {
+        "thickness_m": {
+          "description": "thickness_m（層厚度，m）",
+          "exclusiveMinimum": 0,
+          "title": "Thickness M",
+          "type": "number"
+        },
+        "open_area": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "open_area（開孔率，比例；嚴格大於零小於一，不是百分比，與孔距或縫距二擇一）",
+          "title": "Open Area"
+        },
+        "surface_mass_kg_m2": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "surface_mass_kg_m2（面密度，kg/m²：指整片板）",
+          "title": "Surface Mass Kg M2"
+        },
+        "hole_diameter_m": {
+          "description": "hole_diameter_m（孔徑，m；只設微孔與一般孔的 1／2 mm 分界及孔不重疊，不用未核原文的 0.1 mm 下限，一般圓孔板沒有另設上限）",
+          "exclusiveMinimum": 0,
+          "maximum": 0.002,
+          "title": "Hole Diameter M",
+          "type": "number"
+        },
+        "hole_spacing_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hole_spacing_m（孔距，m；同一排相鄰兩孔中心距，交錯 60° 為正三角形邊長；交錯 45° 若型錄量斜向最近兩孔請選方格）",
+          "title": "Hole Spacing M"
+        },
+        "hole_pattern": {
+          "anyOf": [
+            {
+              "enum": [
+                "square",
+                "staggered_60",
+                "staggered_45",
+                "rectangular"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hole_pattern（孔排法：square 表示 方格，staggered_60 表示 交錯 60°，staggered_45 表示 交錯 45°，rectangular 表示 長方格）",
+          "title": "Hole Pattern"
+        },
+        "hole_spacing_2_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hole_spacing_2_m（排距，m；排與排的距離，只限長方格必填）",
+          "title": "Hole Spacing 2 M"
+        },
+        "kind": {
+          "const": "micro_perforated",
+          "default": "micro_perforated",
+          "description": "kind（層種類代號，micro_perforated 表示 微孔板）",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thickness_m",
+        "hole_diameter_m",
+        "kind"
+      ],
+      "title": "MicroPerforatedLayer",
+      "type": "object"
+    },
     "OmnidirectionalInput": {
       "additionalProperties": false,
       "properties": {
@@ -426,6 +672,269 @@
         "kind"
       ],
       "title": "OmnidirectionalInput",
+      "type": "object"
+    },
+    "PerforatedLayer": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "open_area": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "surface_mass_kg_m2": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "hole_spacing_m": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "hole_pattern": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "hole_spacing_2_m": {
+              "not": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "hole_spacing_m"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "hole_pattern"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "hole_spacing_2_m"
+                    ]
+                  }
+                ]
+              },
+              "required": [
+                "open_area"
+              ]
+            },
+            {
+              "else": {
+                "not": {
+                  "required": [
+                    "hole_spacing_2_m"
+                  ]
+                }
+              },
+              "if": {
+                "properties": {
+                  "hole_pattern": {
+                    "const": "rectangular"
+                  }
+                }
+              },
+              "not": {
+                "required": [
+                  "open_area"
+                ]
+              },
+              "required": [
+                "hole_spacing_m",
+                "hole_pattern"
+              ],
+              "then": {
+                "required": [
+                  "hole_spacing_2_m"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "backing_fabric_surface_mass_kg_m2"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "backing_fabric_flow_resistance_pa_s_m"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "backing_fabric_surface_mass_kg_m2": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "backing_fabric_flow_resistance_pa_s_m": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "backing_fabric_surface_mass_kg_m2",
+                "backing_fabric_flow_resistance_pa_s_m"
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "一般圓孔板：集中孔道薄片加末端修正，孔徑 ≥ 1 mm，不另設上限；背面貼布是工程近似。",
+      "properties": {
+        "backing_fabric_surface_mass_kg_m2": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "backing_fabric_surface_mass_kg_m2（背面貼布面密度，kg/m²；面密度先記錄、不進計算，與背面貼布面流阻同給同不給）",
+          "title": "Backing Fabric Surface Mass Kg M2"
+        },
+        "backing_fabric_flow_resistance_pa_s_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "backing_fabric_flow_resistance_pa_s_m（背面貼布面流阻，Pa·s/m；工程近似：板阻抗加布面流阻除板開孔率，布當不會動，沒有一手出處，長縫板同圓孔板）",
+          "title": "Backing Fabric Flow Resistance Pa S M"
+        },
+        "thickness_m": {
+          "description": "thickness_m（層厚度，m）",
+          "exclusiveMinimum": 0,
+          "title": "Thickness M",
+          "type": "number"
+        },
+        "open_area": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "open_area（開孔率，比例；嚴格大於零小於一，不是百分比，與孔距或縫距二擇一）",
+          "title": "Open Area"
+        },
+        "surface_mass_kg_m2": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "surface_mass_kg_m2（面密度，kg/m²：指整片板）",
+          "title": "Surface Mass Kg M2"
+        },
+        "hole_diameter_m": {
+          "description": "hole_diameter_m（孔徑，m；只設微孔與一般孔的 1／2 mm 分界及孔不重疊，不用未核原文的 0.1 mm 下限，一般圓孔板沒有另設上限）",
+          "minimum": 0.001,
+          "title": "Hole Diameter M",
+          "type": "number"
+        },
+        "hole_spacing_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hole_spacing_m（孔距，m；同一排相鄰兩孔中心距，交錯 60° 為正三角形邊長；交錯 45° 若型錄量斜向最近兩孔請選方格）",
+          "title": "Hole Spacing M"
+        },
+        "hole_pattern": {
+          "anyOf": [
+            {
+              "enum": [
+                "square",
+                "staggered_60",
+                "staggered_45",
+                "rectangular"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hole_pattern（孔排法：square 表示 方格，staggered_60 表示 交錯 60°，staggered_45 表示 交錯 45°，rectangular 表示 長方格）",
+          "title": "Hole Pattern"
+        },
+        "hole_spacing_2_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hole_spacing_2_m（排距，m；排與排的距離，只限長方格必填）",
+          "title": "Hole Spacing 2 M"
+        },
+        "kind": {
+          "const": "perforated",
+          "default": "perforated",
+          "description": "kind（層種類代號，perforated 表示 一般圓孔板）",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thickness_m",
+        "hole_diameter_m",
+        "kind"
+      ],
+      "title": "PerforatedLayer",
       "type": "object"
     },
     "PorousLayer": {
@@ -541,6 +1050,18 @@
           "title": "Flow Resistivity Pa S M2",
           "type": "number"
         },
+        "flow_resistivity_source": {
+          "default": "unspecified",
+          "description": "flow_resistivity_source（流阻從哪裡來：measured 表示 實測，density_table 表示 照密度查論文表，catalog 表示 廠商型錄，unspecified 表示 未註明；只記出處，不影響計算）",
+          "enum": [
+            "measured",
+            "density_table",
+            "catalog",
+            "unspecified"
+          ],
+          "title": "Flow Resistivity Source",
+          "type": "string"
+        },
         "model": {
           "default": "komatsu",
           "description": "model（多孔模型：komatsu 為小松纖維經驗式，miki 為三木纖維經驗式，wilson_2015 為威爾森鬆弛模型，mechel_1976 為梅歇爾低頻延伸式）",
@@ -598,6 +1119,196 @@
         "kind"
       ],
       "title": "PorousLayer",
+      "type": "object"
+    },
+    "SlottedLayer": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "open_area": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "surface_mass_kg_m2": {
+              "not": {
+                "type": "null"
+              }
+            },
+            "slot_spacing_m": {
+              "not": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "slot_spacing_m"
+                    ]
+                  }
+                ]
+              },
+              "required": [
+                "open_area"
+              ]
+            },
+            {
+              "not": {
+                "required": [
+                  "open_area"
+                ]
+              },
+              "required": [
+                "slot_spacing_m"
+              ]
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "backing_fabric_surface_mass_kg_m2"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "backing_fabric_flow_resistance_pa_s_m"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "backing_fabric_surface_mass_kg_m2": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "backing_fabric_flow_resistance_pa_s_m": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "backing_fabric_surface_mass_kg_m2",
+                "backing_fabric_flow_resistance_pa_s_m"
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "長縫板：假設縫無限長、週期排列，有限長木條未驗；也收背面貼布，式子同圓孔板的工程近似。",
+      "properties": {
+        "backing_fabric_surface_mass_kg_m2": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "backing_fabric_surface_mass_kg_m2（背面貼布面密度，kg/m²；面密度先記錄、不進計算，與背面貼布面流阻同給同不給）",
+          "title": "Backing Fabric Surface Mass Kg M2"
+        },
+        "backing_fabric_flow_resistance_pa_s_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "backing_fabric_flow_resistance_pa_s_m（背面貼布面流阻，Pa·s/m；工程近似：板阻抗加布面流阻除板開孔率，布當不會動，沒有一手出處，長縫板同圓孔板）",
+          "title": "Backing Fabric Flow Resistance Pa S M"
+        },
+        "thickness_m": {
+          "description": "thickness_m（層厚度，m）",
+          "exclusiveMinimum": 0,
+          "title": "Thickness M",
+          "type": "number"
+        },
+        "open_area": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "open_area（開孔率，比例；嚴格大於零小於一，不是百分比，與孔距或縫距二擇一）",
+          "title": "Open Area"
+        },
+        "surface_mass_kg_m2": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "surface_mass_kg_m2（面密度，kg/m²：指整片板）",
+          "title": "Surface Mass Kg M2"
+        },
+        "kind": {
+          "const": "slotted",
+          "default": "slotted",
+          "description": "kind（層種類代號，slotted 表示 長縫板）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "slot_width_m": {
+          "description": "slot_width_m（縫寬，m；假設縫無限長、週期排列）",
+          "exclusiveMinimum": 0,
+          "title": "Slot Width M",
+          "type": "number"
+        },
+        "slot_spacing_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "slot_spacing_m（縫距，m；縫寬必須小於縫距，與開孔率二擇一）",
+          "title": "Slot Spacing M"
+        }
+      },
+      "required": [
+        "thickness_m",
+        "slot_width_m",
+        "kind"
+      ],
+      "title": "SlottedLayer",
       "type": "object"
     },
     "SourceCurveParameters": {

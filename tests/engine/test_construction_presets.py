@@ -103,7 +103,7 @@ def test_komatsu_outside_registry_is_refused_before_save(tmp_path: Path) -> None
         assert response.status_code == 422, response.text
         text = "；".join(row["text"] for row in response.json()["problems"])
         assert "地板" in text and "第 1 層" in text and "流阻" in text
-        assert f"{ranges.sample_flow_resistivity_min_pa_s_m2:g}" in text
+        assert f"{ranges.manual_flow_resistivity_min_pa_s_m2:g}" in text
         assert f"{ranges.sample_flow_resistivity_max_pa_s_m2:g}" in text and "Pa·s/m²" in text
         assert "komatsu" not in text
     assert not (tmp_path / "schemes" / "out-of-range.json").exists()

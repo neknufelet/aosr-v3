@@ -2,7 +2,7 @@
 from copy import deepcopy
 import json
 import re
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 
@@ -51,15 +51,21 @@ def test_saved_header_seams_differences_and_chinese() -> None:
     assert not ENGLISH.search(visible) and not re.search(r'\d+\.\d{13,}', shown)
 
 
-def test_measured_saved_class_note_is_chinese_without_changing_construction_text() -> None:
+@pytest.mark.parametrize("code", ("komatsu_material_class_outside_fit", "komatsu_flow_below_samples"))
+def test_measured_saved_class_note_is_chinese_without_changing_construction_text(code: Literal["komatsu_material_class_outside_fit", "komatsu_flow_below_samples"]) -> None:
     from aosr.gui.result_view import _construction_notes
     result = saved_result()
     message = '底構造第 1 層：泡棉材料類別不在 Komatsu（小松）纖維模型擬合範圍，照算但不宣稱準確性'
-    note = ConstructionNote(code='komatsu_material_class_outside_fit', layer_index=1,
+    note = ConstructionNote(code=code, layer_index=1,
                             material_class='foam', message=message)
     pairs = tuple(pair.model_copy(update={'report': pair.report.model_copy(update={
         'construction_notes_by_wall': {'floor': (note,)}})}) for pair in result.pairs)
     lines = _construction_notes(result.model_copy(update={'pairs': pairs}))
+    if code == 'komatsu_flow_below_samples':
+        from aosr.gui.measured_view import build_measured_view
+        view = build_measured_view(result.model_copy(update={'pairs': pairs}))
+        assert view is not None
+        assert '流阻低於原研究樣品範圍' in '；'.join(view[0].header_lines)
     assert lines and all('小松纖維模型' in line and not ENGLISH.search(line) for line in lines)
     assert all('照算但不宣稱準確性' in line for line in lines)
     data = document()

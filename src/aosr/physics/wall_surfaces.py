@@ -82,8 +82,8 @@ def extrapolated_frequency_text(frequencies_hz: tuple[float, ...], *,
                                 table_bounds_hz: tuple[float, float] | None = None) -> str:
     """外推頻點寫成低、高兩段（「20–27 Hz、8400–11313.5 Hz」），中間照常算的頻率不連進去。
 
-    Komatsu 的 f/σ 界線由量測頻率與樣品流阻推導，流阻又只收樣品範圍內的值，
-    所以低段外推必在量測頻率下限以下、高段必在上限以上：用下限切開恰好是兩段。
+    Komatsu 的 f/σ 界線由量測頻率與樣品流阻推導，手動流阻另允許低於樣品下限的工程試算。
+    外推窗仍由樣品範圍推得；低段在量測頻率下限以下，高段可能低於量測上限，仍用下限切成兩段。
     """
     if table_bounds_hz is not None:
         lower, upper = table_bounds_hz

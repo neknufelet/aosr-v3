@@ -15,6 +15,7 @@ def test_original_numbers_and_provenance() -> None:
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     k = ranges.komatsu
     assert (k.sample_flow_resistivity_min_pa_s_m2, k.sample_flow_resistivity_max_pa_s_m2) == (6000, 72900)
+    assert k.manual_flow_resistivity_min_pa_s_m2 == 4000
     assert (k.measured_frequency_min_hz, k.measured_frequency_max_hz) == (100, 5000)
     assert k.fitted_material_class == "fibrous"
     assert set(k.fitted_materials) == {"glass wool", "rock wool"}
@@ -31,6 +32,7 @@ def test_original_numbers_and_provenance() -> None:
 
 
 @pytest.mark.parametrize("old,new", [
+    ("manual_flow_resistivity_min_pa_s_m2 = 4000", "manual_flow_resistivity_min_pa_s_m2 = 6000"),
     ("measured_frequency_min_hz = 100", ""),
     ("measured_frequency_min_hz = 100", "measured_frequency_min_hz = 100\nextra = 1"),
     ("measured_frequency_min_hz = 100", "measured_frequency_min_hz = 6000"),
