@@ -15,6 +15,9 @@ from tests.engine.test_construction_facings_models import FACING_CASES
 
 BACKING = {"backing_fabric_surface_mass_kg_m2": .063, "backing_fabric_flow_resistance_pa_s_m": 236.}
 AIR = {"kind": "air", "thickness_m": .03}
+# 孔徑 8 mm、孔距 20 mm（長方格排距 30 mm）、縫寬 6 mm 縫距 40 mm，照幾何手算的開孔率。
+PATTERN_AREA = {"square": np.pi / 4 * .16, "staggered_60": np.pi / (2 * np.sqrt(3)) * .16, "staggered_45": np.pi / 2 * .16,
+    "rectangular": np.pi / 4 * .008 ** 2 / (.02 * .03), "slotted": .006 / .04}
 
 
 def facing_requests() -> dict[str, dict[str, object]]:
@@ -39,6 +42,7 @@ def facing_requests() -> dict[str, dict[str, object]]:
             if pattern == "rectangular":
                 base["hole_spacing_2_m"] = .03
             rows["pattern_" + pattern] = _request([base, AIR], direct=True)
+            rows["pattern_" + pattern + "_backed"] = _request([base | BACKING, AIR], direct=True)
             for field in ("slot_spacing_m",) if kind == "slotted" else ("hole_spacing_m", "hole_spacing_2_m") if pattern == "rectangular" else ("hole_spacing_m",):
                 rows["pattern_" + pattern + field] = _request([base | {field: cast(float, base[field]) * 1.01}, AIR])
     for sigma in (3999.99, 4000., 5999.99, 6000.):
@@ -100,6 +104,9 @@ def test_spacing_is_used_in_core(results: dict[str, dict[str, object]], pattern:
     assert row["value"] == row["direct"]
     for field in ("slot_spacing_m",) if pattern == "slotted" else ("hole_spacing_m", "hole_spacing_2_m") if pattern == "rectangular" else ("hole_spacing_m",):
         assert np.any(_value(row) != _value(results["pattern_" + pattern + field]))
+    backed = results["pattern_" + pattern + "_backed"]
+    assert backed["value"] == backed["direct"]
+    np.testing.assert_allclose(_value(backed) - _value(row), 236. / PATTERN_AREA[pattern], rtol=2e-12, atol=2e-10)
 
 
 def test_manual_komatsu_boundaries_and_original_extrapolation_window(results: dict[str, dict[str, object]]) -> None:

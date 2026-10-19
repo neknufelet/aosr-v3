@@ -77,16 +77,16 @@ def test_pattern_open_area_uses_independent_geometry(pattern: str, constant: flo
     assert accepts(schema, data, schema)
 
 
-@pytest.mark.parametrize("pattern", ["square", "staggered_60", "staggered_45", "rectangular"])
-def test_holes_cannot_touch_but_arbitrarily_small_gap_is_accepted(pattern: str) -> None:
+@pytest.mark.parametrize(("pattern", "field"), [("square", "hole_spacing_m"), ("staggered_60", "hole_spacing_m"),
+    ("staggered_45", "hole_spacing_m"), ("rectangular", "hole_spacing_m"), ("rectangular", "hole_spacing_2_m")])
+def test_holes_cannot_touch_but_arbitrarily_small_gap_is_accepted(pattern: str, field: str) -> None:
     data = {key: value for key, value in FACING_CASES["perforated"].items() if key != "open_area"}
     p = .008 * math.sqrt(2) if pattern == "staggered_45" else .008
-    data |= {"hole_pattern": pattern, "hole_spacing_m": p}
-    if pattern == "rectangular":
-        data["hole_spacing_2_m"] = .02
+    data |= {"hole_pattern": pattern, "hole_spacing_m": .02, "hole_spacing_2_m": .02} if pattern == "rectangular" else {"hole_pattern": pattern}
+    data[field] = p
     with pytest.raises(ValidationError, match="孔.*重疊|孔距"):
         TypeAdapter(Layer).validate_python(data)
-    TypeAdapter(Layer).validate_python(data | {"hole_spacing_m": p * (1 + 1e-10)})
+    TypeAdapter(Layer).validate_python(data | {field: p * (1 + 1e-10)})
 
 
 @pytest.mark.parametrize("kind", ["micro_perforated", "perforated", "slotted"])
@@ -156,6 +156,7 @@ def test_mainline_scheme_round_trip_and_unspecified_scene_fingerprint() -> None:
     scheme = Scheme.model_validate_json(original)
     assert json.dumps(scheme.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n" == original
     baseline = scene_fingerprint(load_input_document(pair(scheme), CAPABILITIES, DIRECTIVITY))
+    assert baseline == "6bef52b01c613234a228f1bbe65ef5d0bf42eff564900614b6122ce975b2dfc8"  # 721c009c 主線實跑
     data = json.loads(original)
     data["scene"]["surface_zones_by_wall"]["floor"][0]["material"]["layers"][0]["flow_resistivity_source"] = "unspecified"
     changed = Scheme.model_validate(data)

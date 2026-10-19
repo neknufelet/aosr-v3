@@ -11,7 +11,7 @@ from aosr.gui.app import GuiSettings, create_app
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.construction_input import material_field_values, material_input_problems, wall_materials
-from aosr.gui.problem_text import plain_problems
+from aosr.gui.problem_text import material_form_spec, plain_problems
 from aosr.reporting.validation import SchemeProblem, validate_scheme
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES, reference_document
@@ -298,3 +298,45 @@ def test_new_facing_api_save_reload_preview_and_defaults(tmp_path: Path, kind: s
 @pytest.mark.parametrize("kind", ("fabric", "micro_perforated", "perforated", "slotted"))
 def test_new_facing_api_errors_are_plain_chinese(tmp_path: Path, kind: str) -> None:
     asyncio.run(_new_facing_api_errors(tmp_path, kind))
+
+
+HOLE_PATTERN_WORDS = {"square": "方格", "staggered_60": "交錯 60°", "staggered_45": "交錯 45°", "rectangular": "長方格"}
+PATTERN_LAYERS: dict[str, dict[str, object]] = {
+    "staggered-45-backed": {"kind": "perforated", "thickness_m": .0125, "hole_diameter_m": .008, "hole_spacing_m": .02,
+        "hole_pattern": "staggered_45", "backing_fabric_surface_mass_kg_m2": .063, "backing_fabric_flow_resistance_pa_s_m": 236.},
+    "micro-rectangular": {"kind": "micro_perforated", "thickness_m": .0005, "hole_diameter_m": .0005, "hole_spacing_m": .005,
+        "hole_pattern": "rectangular", "hole_spacing_2_m": .006},
+    "slot-spacing": {"kind": "slotted", "thickness_m": .0125, "slot_width_m": .006, "slot_spacing_m": .03},
+}
+
+
+async def _pattern_api_roundtrip(tmp_path: Path, name: str) -> None:
+    layer = deepcopy(PATTERN_LAYERS[name])
+    data = preset_document({"kind": "assembly", "layers": [layer, {"kind": "air", "thickness_m": .05}], "backing": "rigid"}) | {"scheme_id": name}
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
+        defaults = await client.get("/api/input-defaults")
+        assert defaults.status_code == 200
+        for kind in ("micro_perforated", "perforated"):
+            assert defaults.json()["material_form"][kind]["fields"]["hole_pattern"]["options"] == HOLE_PATTERN_WORDS
+        preview = await client.post("/api/input-preview", json=data)
+        assert preview.status_code == 200, preview.text
+        saved = await client.put(f"/api/schemes/{name}", json=data)
+        assert saved.status_code == 200, saved.text
+        loaded = await client.get(f"/api/schemes/{name}")
+        assert loaded.status_code == 200
+        assert loaded.json()["scheme"]["scene"]["surface_zones_by_wall"]["floor"][0]["material"]["layers"][0] == layer
+        assert (await client.post("/api/input-preview", json=loaded.json()["scheme"])).status_code == 200
+
+
+def test_hole_pattern_options_are_plain_chinese() -> None:
+    forms = material_form_spec()
+    for kind in ("micro_perforated", "perforated"):
+        fields = cast(dict[str, dict[str, object]], forms[kind]["fields"])
+        assert fields["hole_pattern"]["options"] == HOLE_PATTERN_WORDS
+
+
+@pytest.mark.parametrize("name", PATTERN_LAYERS)
+def test_pattern_route_api_save_reload_preview(tmp_path: Path, name: str) -> None:
+    """孔距＋排法或縫距那條路：存進去、讀回逐欄相等、讀回再預覽也收。"""
+    asyncio.run(_pattern_api_roundtrip(tmp_path, name))
