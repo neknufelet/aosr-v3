@@ -8,7 +8,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from aosr.scoring.stage_one_low_frequency_contract import StageOneSpeakerPayload
+from aosr.scoring.stage_one_low_frequency_contract import (
+    STAGE_ONE_SURROUNDING_DIRECTIONS,
+    StageOneSpeakerCurves,
+    StageOneSpeakerPayload,
+)
 from tests.engine._stage_one_low_frequency_curves import (
     AXIS_HZ,
     DIRECTIONS,
@@ -20,6 +24,7 @@ from tests.engine._stage_one_low_frequency_curves import (
     independent_own_line_answer,
     independent_weights,
     measured_payload,
+    seat,
     speaker,
     tilted_db,
 )
@@ -116,3 +121,47 @@ def test_worst_direction_is_listed_and_does_not_eliminate() -> None:
         sum(per_direction.values()) / len(DIRECTIONS), rel=1e-12
     )
     assert payload.seat_robustness_rms_db < payload.worst_direction.difference_rms_db
+
+
+def test_difference_curve_is_surrounding_minus_primary_frequency_by_frequency() -> None:
+    """逐頻差的正負與頻率配對照紙：周圍－主位。前方整條高 3 dB → 每個頻率都是 +3；
+    上方在 60 Hz 多一個峰、下方在 60 Hz 多一個谷 → 那些頻率分別是正、負，而且就是造進去的那條。"""
+    level = demo_curve_db()
+    bump = gaussian_db(AXIS_HZ, 60.0, 5.0, 0.1)
+    payload = measured_payload(candidate(speaker(
+        level, {"front": level + 3.0, "up": level + bump, "down": level - bump}
+    )))
+    curves = {item.direction_relative_to_primary: item.difference_curve_db for item in payload.directions}
+    axis = [float(value) for value in AXIS_HZ]
+
+    assert [frequency for frequency, _ in curves["front"]] == axis
+    assert [value for _, value in curves["front"]] == pytest.approx([3.0] * len(axis), abs=1e-12)
+    assert [value for _, value in curves["up"]] == pytest.approx(bump.tolist(), abs=1e-12)
+    assert [value for _, value in curves["down"]] == pytest.approx((-bump).tolist(), abs=1e-12)
+    peak = int(np.argmax(bump))
+    assert curves["up"][peak][0] == pytest.approx(60.0, rel=0.02)
+    assert curves["up"][peak][1] > 4.0 and curves["down"][peak][1] < -4.0
+
+
+def test_surrounding_directions_are_exactly_the_six_named_ones() -> None:
+    """周圍方向是具名集合前後左右上下；照座位組現成的六點才收得進來。"""
+    assert STAGE_ONE_SURROUNDING_DIRECTIONS == {"front", "back", "left", "right", "up", "down"}
+    assert {item.direction_relative_to_primary for item in speaker(demo_curve_db()).surrounding} == set(DIRECTIONS)
+
+
+@pytest.mark.parametrize("change", ["missing_down", "extra_diagonal", "down_renamed"])
+def test_surrounding_directions_missing_or_extra_are_rejected(change: str) -> None:
+    """漏交下方、多一個斜角、或把下方改名：建構就拒收，不回一個只平均五點或七點的正式穩健性。
+    （下方比主位高 15 dB 時，六點平均是 2.5 dB；漏交下方若照收，會錯報 0。）"""
+    level = demo_curve_db()
+    full = speaker(level, {"down": level + 15.0})
+    assert measured_payload(candidate(full)).seat_robustness_rms_db == pytest.approx(2.5, abs=1e-12)
+    others = tuple(item for item in full.surrounding if item.direction_relative_to_primary != "down")
+    surrounding = {
+        "missing_down": others,
+        "extra_diagonal": (*full.surrounding, seat("front-left", "front-left", AXIS_HZ, level)),
+        "down_renamed": (*others, seat("down", "below", AXIS_HZ, level + 15.0)),
+    }[change]
+
+    with pytest.raises(ValueError, match="周圍方向必須剛好是"):
+        StageOneSpeakerCurves(speaker_id="left", primary=full.primary, surrounding=surrounding)

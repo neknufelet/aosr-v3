@@ -80,4 +80,5 @@ def test_assumption_label_is_carried_on_every_result() -> None:
         assert result.assumption_text == IDEAL_SOURCE_ASSUMPTION_TEXT == _BOSS_SENTENCE
         assert "與喇叭無關" not in result.assumption_text
         assert result.energy_column == "fem_energy"
-    assert result.speakers[0].reason_codes == (StageOneReasonCode.SCORING_RANGE_GAP,)
+        assert result.low_frequency_axis == "search_octave_48"
+    assert result.speakers[0].reason_codes == (StageOneReasonCode.MISSING_DECLARED_POINT,)

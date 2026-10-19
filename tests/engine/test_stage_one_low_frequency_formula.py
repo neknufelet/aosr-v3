@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ, LowFrequencyAxis
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.stage_one_low_frequency_contract import StageOneReasonCode, StageOneSeatCurve
 from tests.engine._stage_one_low_frequency_curves import (
@@ -23,6 +23,7 @@ from tests.engine._stage_one_low_frequency_curves import (
     seat,
     speaker,
     tilted_db,
+    with_energy,
 )
 
 
@@ -87,6 +88,14 @@ def test_points_outside_the_scoring_range_change_nothing() -> None:
     assert evaluate(candidate(noisy)).model_dump() == clean.model_dump()
 
 
+def _bumped_flat_line() -> tuple[np.ndarray, tuple[int, int]]:
+    """70 dB 平線，在 48 點軸索引 50、52（約 41.17、42.38 Hz）各加 12 dB：只有這兩點不平。"""
+    pair = (50, 52)
+    level = np.full(len(AXIS_HZ), 70.0)
+    level[list(pair)] += 12.0
+    return level, pair
+
+
 @pytest.mark.parametrize("how", ["row_dropped", "value_missing"])
 def test_missing_axis_point_inside_the_range_is_unavailable(how: str) -> None:
     """範圍中間少一個軸點（整列沒交，或有限元素值是 None）：不可估、帶原因，不內插補值。"""
@@ -96,34 +105,67 @@ def test_missing_axis_point_inside_the_range_is_unavailable(how: str) -> None:
         keep = np.arange(len(AXIS_HZ)) != drop
         data = candidate(speaker(level[keep], frequencies=AXIS_HZ[keep]))
     else:
-        full = speaker(level)
-
-        def holed(curve: StageOneSeatCurve) -> StageOneSeatCurve:
-            energy = tuple(None if index == drop else value for index, value in enumerate(curve.fem_energy))
-            return curve.model_copy(update={"fem_energy": energy})
-
-        data = candidate(full.model_copy(update={
-            "primary": holed(full.primary),
-            "surrounding": tuple(holed(item) for item in full.surrounding),
-        }))
+        data = candidate(with_energy(speaker(level), {drop: None}))
 
     result = evaluate(data).speakers[0]
 
     assert (result.state, result.payload, result.reason_codes) == (
-        "unavailable", None, (StageOneReasonCode.SCORING_RANGE_GAP,)
+        "unavailable", None, (StageOneReasonCode.MISSING_DECLARED_POINT,)
     )
+
+
+@pytest.mark.parametrize("how", ["row_dropped", "value_missing"])
+def test_two_missing_points_cannot_vouch_for_each_other(how: str) -> None:
+    """七條一起少掉隔一點的兩列（索引 50、52）：兩個大間距互相當參考會逃過間距判洞，
+    把唯二不平的兩點丟掉就成了一條完美直線。照宣告軸逐點核，這裡必須不可估。"""
+    level, pair = _bumped_flat_line()
+    complete = measured_payload(candidate(speaker(level)))
+    assert complete.own_line_ripple_rms_db > 1.0
+    if how == "row_dropped":
+        keep = ~np.isin(np.arange(len(AXIS_HZ)), pair)
+        data = candidate(speaker(level[keep], frequencies=AXIS_HZ[keep]))
+    else:
+        data = candidate(with_energy(speaker(level), dict.fromkeys(pair)))
+
+    assert evaluate(data).speakers[0].reason_codes == (StageOneReasonCode.MISSING_DECLARED_POINT,)
+
+
+def test_missing_value_at_the_lower_endpoint_is_unavailable() -> None:
+    """20 Hz 那一點七個座位全是 None：端點也是宣告點，不可估，不從 21 Hz 起算。"""
+    data = candidate(with_energy(speaker(demo_curve_db()), {0: None}))
+
+    assert AXIS_HZ[0] == 20.0
+    assert evaluate(data).speakers[0].reason_codes == (StageOneReasonCode.MISSING_DECLARED_POINT,)
+
+
+def test_missing_value_at_only_some_seats_is_unavailable() -> None:
+    """只有前方與上方在 41.17 Hz 是 None、其餘座位都有值：一樣不可估，不拿其他座位頂替。"""
+    level, pair = _bumped_flat_line()
+    data = candidate(with_energy(speaker(level), {pair[0]: None}, frozenset({"front", "up"})))
+
+    assert evaluate(data).speakers[0].reason_codes == (StageOneReasonCode.MISSING_DECLARED_POINT,)
 
 
 def test_search_axis_ending_below_the_upper_bound_is_measured_and_not_extrapolated() -> None:
     """48 點軸止於 297.71 Hz、24 點軸止於 293.44 Hz：上下界當虛擬點判洞，照樣可估；
     payload 記資料真正蓋到的範圍，不把末點說成 300 Hz。資料只到 250 Hz 才是缺段。"""
-    for axis in (AXIS_HZ, np.asarray(FEM_LANE_FREQUENCIES_HZ, dtype=np.float64)):
-        payload = measured_payload(candidate(speaker(demo_curve_db(axis), frequencies=axis)))
+    for identity, axis in (
+        (LowFrequencyAxis.SEARCH_48, AXIS_HZ),
+        (LowFrequencyAxis.SEARCH, np.asarray(FEM_LANE_FREQUENCIES_HZ, dtype=np.float64)),
+    ):
+        payload = measured_payload(candidate(speaker(demo_curve_db(axis), frequencies=axis), axis=identity))
         assert axis[-1] < SCORING_RANGE_HZ[1]
         assert payload.data_range_hz == (float(axis[0]), float(axis[-1]))
 
     short = AXIS_HZ <= 250.0
     result = evaluate(candidate(speaker(demo_curve_db()[short], frequencies=AXIS_HZ[short])))
+    assert result.speakers[0].reason_codes == (StageOneReasonCode.MISSING_DECLARED_POINT,)
+
+
+def test_declared_axis_that_stops_far_below_the_upper_bound_is_a_gap() -> None:
+    """計分上界拉到 400 Hz：宣告軸的有限元素段止於 297.71 Hz，蓋不住範圍，不外插、不可估。"""
+    result = evaluate(candidate(speaker(demo_curve_db())), (20.0, 400.0))
+
     assert result.speakers[0].reason_codes == (StageOneReasonCode.SCORING_RANGE_GAP,)
 
 
@@ -177,13 +219,19 @@ def test_non_positive_energy_inside_the_range_is_unavailable() -> None:
 
 
 def test_seat_axes_that_differ_are_unavailable_not_interpolated() -> None:
-    """只有一個周圍點少交一個軸點：七點的軸對不上，不可估，不內插去對齊。"""
+    """只有前方少交一個軸點：缺宣告點，不可估；前方多一個宣告軸沒有的頻率：軸對不上，不內插去對齊。"""
     full = speaker(demo_curve_db())
     keep = np.arange(len(AXIS_HZ)) != 40
     shorter = seat("front", "front", AXIS_HZ[keep], demo_curve_db()[keep])
-    data = candidate(full.model_copy(update={"surrounding": (shorter, *full.surrounding[1:])}))
+    extra_axis = np.sort(np.append(AXIS_HZ, 100.3))
+    longer = seat("front", "front", extra_axis, demo_curve_db(extra_axis))
 
-    assert evaluate(data).speakers[0].reason_codes == (StageOneReasonCode.FREQUENCY_AXIS_MISMATCH,)
+    for front, reason in (
+        (shorter, StageOneReasonCode.MISSING_DECLARED_POINT),
+        (longer, StageOneReasonCode.FREQUENCY_AXIS_MISMATCH),
+    ):
+        data = candidate(full.model_copy(update={"surrounding": (front, *full.surrounding[1:])}))
+        assert evaluate(data).speakers[0].reason_codes == (reason,)
 
 
 def test_one_unavailable_speaker_leaves_the_other_measured() -> None:

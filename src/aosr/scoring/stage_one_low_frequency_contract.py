@@ -12,6 +12,7 @@ from typing import Annotated, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.scoring.contract import Feature
 from aosr.scoring.contract_base import FrequencyRange
 from aosr.scoring.contract_base import FrozenModel as _FrozenModel
@@ -31,19 +32,26 @@ IdealSourceAssumptionText = Literal[
 # 吃哪一欄：報表逐點表的有限元素能量（FEM energy，有限元素那一路的能量），不吃三路接合的總能量
 # ——總能量在交接帶混進幾何路，聲源用解析指向性時還帶指向性，跟「理想聲源、沒有額外聲源修正」衝突。
 EnergyColumn = Literal["fem_energy"]
+# 主位四周的周圍點方向（direction，相對主位的方向字）：老闆定「沿用七點、各方向 10 公分」，前後左右上下
+# 六個都要在、不多不少，方向字照座位組 ``receiver_set.primary_cross`` 的寫法。
+STAGE_ONE_SURROUNDING_DIRECTIONS: Final[frozenset[str]] = frozenset(
+    {"front", "back", "left", "right", "up", "down"}
+)
 _CurveInputConfig = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
 
 class StageOneReasonCode(StrEnum):
     """一支喇叭第一階段低音不可估的原因；不填零、不內插、不外插。"""
 
-    # 主位與周圍點在計分範圍裡的頻率軸不是逐點相同（不內插去對齊）。
+    # 曲線在計分範圍裡出現宣告軸上沒有的頻率（不內插去對齊）。
     FREQUENCY_AXIS_MISMATCH = "frequency_axis_mismatch"
+    # 宣告軸在計分範圍裡的某個點，有座位沒交那一列或有限元素值是 None（少交的頻率不補成假資料）。
+    MISSING_DECLARED_POINT = "missing_declared_point"
     # 計分範圍裡的能量有非有限或非正的值（取不了 dB）。
     NON_POSITIVE_ENERGY = "non_positive_energy"
     # 計分範圍裡的點少到定不出一條直線。
     INSUFFICIENT_POINTS = "insufficient_points"
-    # 計分範圍裡（上下界當虛擬點）有缺段：少交的頻率不補成假資料。
+    # 宣告軸本身蓋不住計分範圍（上下界當虛擬點判出缺段）：不外插。
     SCORING_RANGE_GAP = "scoring_range_gap"
 
 
@@ -78,7 +86,12 @@ class StageOneSeatCurve(BaseModel):
 
 
 class StageOneSpeakerCurves(BaseModel):
-    """一支喇叭在主位與周圍點的曲線；周圍點的代號與方向都不可重複，也不可跟主位同代號。"""
+    """一支喇叭在主位與周圍點的曲線；周圍點的方向必須剛好是前後左右上下，代號不可重複。
+
+    周圍方向缺或多一律拒收（建構就丟錯），不回不可估：座位組是第一階段量法本身的定義，
+    交錯了是呼叫端接錯座位組，不是這一份資料缺；某一點真的沒算出來，用 ``fem_energy`` 的 None 表達，
+    評估器回不可估。
+    """
 
     model_config = _CurveInputConfig
 
@@ -96,6 +109,10 @@ class StageOneSpeakerCurves(BaseModel):
         directions = [seat.direction_relative_to_primary for seat in self.surrounding]
         if len(ids) != len(set(ids)) or len(directions) != len(set(directions)):
             raise ValueError("座位代號與周圍方向都不可重複")
+        if set(directions) != STAGE_ONE_SURROUNDING_DIRECTIONS:
+            raise ValueError(
+                f"周圍方向必須剛好是 {sorted(STAGE_ONE_SURROUNDING_DIRECTIONS)}，收到 {sorted(map(str, directions))}"
+            )
         return self
 
     @property
@@ -107,11 +124,17 @@ class StageOneSpeakerCurves(BaseModel):
 
 
 class StageOneLowFrequencyInput(BaseModel):
-    """一個候選每支喇叭 × 主位＋周圍點的低頻能量；每支喇叭用同一組座位。"""
+    """一個候選每支喇叭 × 主位＋周圍點的低頻能量；每支喇叭用同一組座位。
+
+    ``low_frequency_axis`` 是報表宣告的低頻軸身分（axis identity，哪一條取樣軸）：評估器由它現算
+    有限元素那一段的宣告頻率，計分範圍裡每個宣告點每個座位都要有正值，少一列或是 None 就不可估——
+    不靠相鄰間距互相參照判洞（連刪兩列會互相當參考逃過）。
+    """
 
     model_config = _CurveInputConfig
 
     candidate_id: str = Field(min_length=1)
+    low_frequency_axis: LowFrequencyAxis
     speakers: tuple[StageOneSpeakerCurves, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -195,6 +218,7 @@ class StageOneLowFrequencyEvaluation(_FrozenModel):
     evaluator_version: Literal["aosr.scoring.stage_one_low_frequency.v1"]
     candidate_id: str = Field(min_length=1)
     energy_column: EnergyColumn
+    low_frequency_axis: LowFrequencyAxis
     scoring_range_hz: FrequencyRange
     primary_receiver_id: str = Field(min_length=1)
     assumption: IdealSourceAssumption

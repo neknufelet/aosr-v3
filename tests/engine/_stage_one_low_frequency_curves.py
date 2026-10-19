@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from aosr.config.frequency_axis import SEARCH_48_FEM_FREQUENCIES_HZ
+from aosr.config.frequency_axis import SEARCH_48_FEM_FREQUENCIES_HZ, LowFrequencyAxis
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.stage_one_low_frequency_contract import (
     StageOneLowFrequencyEvaluation,
@@ -83,8 +83,28 @@ def speaker(
     )
 
 
-def candidate(*speakers: StageOneSpeakerCurves) -> StageOneLowFrequencyInput:
-    return StageOneLowFrequencyInput(candidate_id="candidate-a", speakers=speakers)
+def candidate(
+    *speakers: StageOneSpeakerCurves, axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH_48
+) -> StageOneLowFrequencyInput:
+    """一個候選；宣告軸預設是 48 點搜尋軸（跟 ``AXIS_HZ`` 同一條）。"""
+    return StageOneLowFrequencyInput(candidate_id="candidate-a", low_frequency_axis=axis, speakers=speakers)
+
+
+def with_energy(
+    curves: StageOneSpeakerCurves, update: dict[int, float | None], seats: frozenset[str] | None = None
+) -> StageOneSpeakerCurves:
+    """把指定索引的能量換掉（例如 None＝明確缺值）；``seats`` 沒給就七個座位一起換。"""
+
+    def replaced(curve: StageOneSeatCurve) -> StageOneSeatCurve:
+        if seats is not None and curve.receiver_id not in seats:
+            return curve
+        energy = tuple(update.get(index, value) for index, value in enumerate(curve.fem_energy))
+        return curve.model_copy(update={"fem_energy": energy})
+
+    return curves.model_copy(update={
+        "primary": replaced(curves.primary),
+        "surrounding": tuple(replaced(item) for item in curves.surrounding),
+    })
 
 
 def evaluate(
