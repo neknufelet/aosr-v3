@@ -273,6 +273,29 @@ evidence = []
 note = "量法照 #345 五格；門檻與目標全是 baseline；鑑別力對型錄候選未量。它吃的三路報表那一列是 experimental，這一條不准比它高。考卷 tests/engine/test_scoring_timbre.py 全用程式造的曲線、不跑物理，所以只證明量法照定義跑，不證明對真報表的鑑別力；真報表接線的整合考卷在 #359。這個評估器與房型、材料無關，room 固定寫 none，materials 寫它吃的是哪一種資料。"
 
 [[entry]]
+name = "stage_one_low_frequency_evaluator"
+module = "aosr.scoring.stage_one_low_frequency"
+note = "第一階段低音量測（票 #558）：吃一個候選每支喇叭 × 主位＋周圍點的有限元素低頻能量，每支喇叭回兩個分項——主位扣自己最小平方直線後的起伏均方根、周圍點對主位逐頻 dB 差均方根的等權平均（座位穩健性）——左右兩支不在這一層合成一個數，不排名。未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；低頻拖尾不進第一階段自動排名，入選後檢查。這些限制寫在這裡而不放 not_modeled／manual_checks：那兩格會匯總顯示在方案結果頁，而方案計算沒有用到這個評估器。"
+
+[[entry.capability]]
+room = "none"
+materials = "three_lane_report_fem_energy"
+# 範圍寫的是它吃的那一段：三路報表的有限元素那一路（20 Hz 起、不高於 300 Hz 的軸點）；
+# 計分範圍由呼叫端給、不住這張表，資料末點沒到範圍上界時照實記資料真正蓋到的範圍、不外插。
+frequency_hz = [20.0, 300.0]
+outputs = [
+  "own_line_ripple_rms_db",
+  "seat_robustness_rms_db",
+  "direction_difference_curves",
+  "worst_direction",
+  "own_line_slope_db_per_octave",
+  "features",
+]
+status = "experimental"
+evidence = []
+note = "量法照三階段紙第一階段那條老闆定的五題；考卷 tests/engine/test_stage_one_low_frequency_formula.py、test_stage_one_low_frequency_source.py、test_stage_one_seat_robustness.py 全用程式造的曲線、不跑物理，只證明量法照定義跑，不證明對真報表的鑑別力。它吃的三路報表那幾列是 experimental，這一條不准比它高。座位穩健性兩點逐頻差的數值準度（10 公分小於 300 Hz 網格格子）沒有精度契約。評估器與房型、材料無關，room 固定寫 none，materials 寫它吃的是哪一欄。"
+
+[[entry]]
 name = "reflections_and_echo_evaluator"
 module = "aosr.scoring.reflections"
 not_modeled = ["家具只算一次反射；家具與牆的混合反射未納入", "空氣吸收"]
