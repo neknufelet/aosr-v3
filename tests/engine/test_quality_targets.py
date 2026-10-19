@@ -43,6 +43,16 @@ _REFLECTION_FLUTTER_SOURCE = (
     "票 #351：由「跟本房同一帶殘響比」推出的一致性要求（報表 t20_s 是外推到 60 dB 的時間），"
     "不是老闆拍的數字；目前作為產品基線"
 )
+# 第一階段（#558）那一段的三句出處：老闆拍的是產品選擇、沒有外部出處，所以只准是基線。
+_STAGE_ONE_RANGE_SOURCE = (
+    "票 #558 老闆 2026-10-19 回低音分數第 2 題（重問）「1」＝選項 1：20～300 Hz，跟有限元素算的範圍一樣；是產品選擇、沒有外部出處，所以登記成基線"
+)
+_STAGE_ONE_REFERENCE_SOURCE = (
+    "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「實作要核對參考尺度：兩項各增加 1 dB，對代價的增量應相同。不能權重填 1:1，卻因各自除以不同尺度而變成另一種比例。」較差參考只為無單位化，兩項取同一個值、合分程式不相等就報錯；代價數字本身沒有意義，顯示分項一律用原始 dB"
+)
+_STAGE_ONE_WEIGHT_SOURCE = (
+    "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
+)
 # 還掛著這幾句出處的條目只准是基線（沒查證過、或不是老闆拍的數字）。
 _BASELINE_SOURCES = frozenset({
     _SOURCE,
@@ -54,6 +64,9 @@ _BASELINE_SOURCES = frozenset({
     _REFLECTION_WEIGHT_SOURCE,
     _REFLECTION_FLUTTER_SOURCE,
     _REFLECTION_FLUTTER_BANDS_SOURCE,
+    _STAGE_ONE_RANGE_SOURCE,
+    _STAGE_ONE_REFERENCE_SOURCE,
+    _STAGE_ONE_WEIGHT_SOURCE,
 })
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
@@ -231,6 +244,39 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
     assert isinstance(coverage, SettingEntry)
     assert coverage.value == (20.0, 8000.0)
+
+
+def test_stage_one_section_is_baseline_with_rostered_sources() -> None:
+    """第一階段那一段不在用途裡，上一題的名冊走不到它：這裡逐列守同一把尺，而且整段沒有一格是正式數字。"""
+    registry = _load(_REGISTRY)
+    section = registry.stage_one("dedicated_two_channel_listening_room")
+    assert {entry.key for entry in section.entries} >= {
+        "stage_one_low_frequency.scored_range_hz",
+        "stage_one_low_frequency.own_line_ripple_rms_db",
+        "stage_one_low_frequency.seat_robustness_rms_db",
+        "stage_one_low_frequency.component_weights",
+    }
+    for entry in section.records:
+        assert entry.source in _BASELINE_SOURCES, entry.source
+        assert entry.status == "baseline", entry.source
+    assert {
+        entry.key for entry in (*section.setting, *section.target, *section.qualification)
+        if entry.status == "calibrated"
+    } | {
+        f"{table.key}.{item.name}" for table in section.weight for item in table.item
+        if item.status == "calibrated"
+    } <= _CALIBRATED_KEYS
+
+
+def test_stage_one_section_must_name_a_known_purpose(tmp_path: Path) -> None:
+    """第一階段那一段掛的用途不在登記簿就拒收：用途仍是房間的使用情境，不拿來裝階段。"""
+    text = _REGISTRY.read_text(encoding="utf-8")
+    head, marker, tail = text.partition("\n[[stage_one]]\nname = ")
+    assert marker
+    changed = head + marker + tail.replace('"dedicated_two_channel_listening_room"', '"stage_one_room_screening"', 1)
+
+    with pytest.raises(ValidationError, match="第一階段那一段的用途不在登記簿"):
+        _load(_write(tmp_path / "quality_targets.toml", changed))
 
 
 def test_ripple_scoring_reaches_the_registered_diagnostic_ceiling() -> None:

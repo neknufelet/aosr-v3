@@ -235,6 +235,13 @@ class QualityTargets(BaseModel):
 
     schema_version: Literal[1]
     purposes: tuple[QualityPurpose, ...] = Field(alias="purpose", min_length=1)
+    # 第一階段（房型篩選，票 #558）那一段：每塊照用途分、形狀同一個用途，但不進 purpose（用途查詢）、
+    # 不進用途快照，也不進下面的整份指紋（exclude，序列化時略過）——第二階段的音色設定指紋、排名表頭、
+    # 聲道匹配與結果檔都抄整份指紋，第一階段的條目放進來會讓第二階段的比較身分跟著變。
+    # 這一段的身分由第一階段合分只雜湊自己讀的那幾格記（``aosr.scoring.stage_one_score``）。
+    stage_one_sections: tuple[QualityPurpose, ...] = Field(
+        default=(), alias="stage_one", exclude=True
+    )
 
     @model_validator(mode="after")
     def _purpose_names_are_unique(self) -> Self:
@@ -246,6 +253,19 @@ class QualityTargets(BaseModel):
             seen.add(item.name)
         return self
 
+    @model_validator(mode="after")
+    def _stage_one_sections_name_known_purposes(self) -> Self:
+        """第一階段每一塊掛在一個既有用途下、一個用途只准一塊；用途仍只是房間的使用情境。"""
+        known = {item.name for item in self.purposes}
+        seen: set[str] = set()
+        for item in self.stage_one_sections:
+            if item.name not in known:
+                raise ValueError(f"第一階段那一段的用途不在登記簿：{item.name}")
+            if item.name in seen:
+                raise ValueError(f"第一階段那一段重複用途：{item.name}")
+            seen.add(item.name)
+        return self
+
     def purpose(self, name: str) -> QualityPurpose:
         """回傳指名用途；沒有預設用途或替代用途。"""
         for item in self.purposes:
@@ -253,9 +273,19 @@ class QualityTargets(BaseModel):
                 return item
         raise KeyError(f"品質登記簿沒有這個用途：{name}")
 
+    def stage_one(self, name: str) -> QualityPurpose:
+        """回傳指名用途的第一階段那一塊；沒有就報錯，不拿第二階段的用途頂替。"""
+        for item in self.stage_one_sections:
+            if item.name == name:
+                return item
+        raise KeyError(f"品質登記簿沒有這個用途的第一階段那一段：{name}")
+
     @property
     def fingerprint(self) -> str:
-        """驗證後內容的正規化 JSON（資料交換格式）SHA-256 十六進位指紋。"""
+        """驗證後內容的正規化 JSON（資料交換格式）SHA-256 十六進位指紋。
+
+        收全部用途；第一階段那一段不收（見 ``stage_one_sections``），所以加減那一段這個值不變。
+        """
         normalized = self.model_copy(
             update={
                 "purposes": tuple(
