@@ -8,7 +8,9 @@ from typing import NoReturn
 
 import pytest
 
+from aosr import runtime
 from aosr.config.paths import config_path
+from aosr.reporting import scheme_cli
 from aosr.gui import jobs
 from aosr.gui.app import GuiHandlers, GuiSettings
 from aosr.search import modal_attach, worker
@@ -79,6 +81,26 @@ def test_search_default_commands_reach_formal_entry(
         assert argv[argv.index('--slices') + 1] == '1'
     else:
         assert argv[argv.index('--search-id') + 1] == 'test'
+
+
+def test_stage_one_command_configures_before_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """第一階段尚未接搜尋，搜尋的子行程表不列它；直接驗正式入口先設定計算精度才分派。"""
+    import argparse
+    events: list[str] = []
+    configure = runtime.configure_calculation_jax
+    def configured() -> None:
+        configure()
+        events.append('configured')
+    def reached(args: argparse.Namespace) -> int:
+        assert events == ['configured']
+        assert args.command == 'stage-one'
+        assert args.scheme == tmp_path / 'scheme.json'
+        return 0
+    monkeypatch.setattr(runtime, 'configure_calculation_jax', configured)
+    monkeypatch.setattr(scheme_cli, '_stage_one', reached)
+    code = scheme_cli.main(['stage-one', str(tmp_path / 'scheme.json'), '--out', str(tmp_path / 'result.json'),
+        '--capabilities', str(config_path('capabilities.toml')), '--engine-commit', 'test'])
+    assert code == 0
 
 
 def test_modal_attach_default_command_reaches_formal_entry(
