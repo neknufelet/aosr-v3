@@ -43,6 +43,9 @@ def _parser() -> argparse.ArgumentParser:
     stage.add_argument("--engine-commit", required=True)
     stage.add_argument("--run-date", type=date.fromisoformat)
     stage.add_argument("--fem-parts", type=Path, nargs="+")
+    stage.add_argument("--search-id")
+    stage.add_argument("--trial-number", type=int)
+    stage.add_argument("--placement-shift", help="搜尋擺位移位點的具名移位")
     sliced = sub.add_parser("fem-slice", help="批次求解一段有限元素頻率並原子存檔")
     sliced.add_argument("schemes", type=Path, nargs="+")
     sliced.add_argument("--slice", dest="slice_index", type=int, required=True)
@@ -283,7 +286,7 @@ def _stage_one(args: argparse.Namespace) -> int:
         result = run_stage_one(scheme, capabilities=table, directivity=directivity,
             registry=load_quality_targets(config_path("quality_targets.toml")),
             physics_identity=physics_before, program_fingerprint=before, engine_commit=args.engine_commit,
-            run_date=args.run_date or date.today(),
+            run_date=args.run_date or date.today(), origin=_origin(args),
             shards=None if args.fem_parts is None else _read_fem_parts(args.fem_parts))
     except ShardIdentityMismatch as exc:
         return _changed(str(exc))
@@ -504,7 +507,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "modal":
         return _modal(args)
-    if args.command == "run":
+    if args.command in ("run", "stage-one"):
         if args.trial_number is not None and (args.search_id is None or args.trial_number < 0):
             parser.error("trial_number 必須非負且同時提供 search_id")
         if args.search_id is not None and not args.search_id.strip():

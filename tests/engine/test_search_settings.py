@@ -53,7 +53,7 @@ def test_sampler_settings_match(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("field,value", [
-    ("purpose", "production"), ("seed", 1), ("n_startup_trials", 4), ("constant_liar", False),
+    ("stage", "stage_one_fem_only"), ("purpose", "production"), ("seed", 1), ("n_startup_trials", 4), ("constant_liar", False),
     ("batch_size", 4), ("max_workers", 2), ("budget", 12), ("convergence_run", 6),
     ("layout", {"front_wall": "y0"}),
     ("layout", {"seat_locked": True}),

@@ -1,4 +1,4 @@
-"""產品預設的五條開行程路徑都交給會先設定精度的正式命令列入口。"""
+"""產品預設的開行程路徑都交給會先設定精度的正式命令列入口。"""
 from __future__ import annotations
 
 import sys
@@ -60,16 +60,23 @@ def test_gui_default_commands_reach_formal_entry(
         assert argv[argv.index('--cache-dir') + 1] == str(handlers.modal_jobs.cache_dir)
 
 
-@pytest.mark.parametrize('command', ['run', 'fem-slice'])
+@pytest.mark.parametrize('command', ['run', 'fem-slice', 'stage-one'])
 def test_search_default_commands_reach_formal_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str,
 ) -> None:
     compute = worker.SubprocessCompute(capabilities_path=config_path('capabilities.toml'),
         engine_commit='test', search_id='test', fem_root=tmp_path / 'fem')
+    if command == 'stage-one':
+        from aosr.search.stage_one_worker import StageOneCompute
+        from aosr.search.store import SearchIdentity
+        from tests.engine._search_store_cases import purpose_settings
+        compute = StageOneCompute(capabilities_path=config_path('capabilities.toml'), engine_commit='test',
+            search_id='test', fem_root=tmp_path / 'fem',
+            identity=SearchIdentity('physics', 'program', purpose_settings('listening'))).processes
     job = CandidateJob(1, scheme(), tmp_path / 'result.json')
     captured = _capture_popen(monkeypatch, worker)
     with pytest.raises(_PopenReached):
-        if command == 'run':
+        if command in ('run', 'stage-one'):
             compute._start(job)
         else:
             compute._slices((job,), max_workers=1)
@@ -84,7 +91,7 @@ def test_search_default_commands_reach_formal_entry(
 
 
 def test_stage_one_command_configures_before_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """第一階段尚未接搜尋，搜尋的子行程表不列它；直接驗正式入口先設定計算精度才分派。"""
+    """搜尋子行程表已列第一階段；另外驗正式入口先設定計算精度才分派。"""
     import argparse
     events: list[str] = []
     configure = runtime.configure_calculation_jax
