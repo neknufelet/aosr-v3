@@ -116,19 +116,25 @@ def _total(score: StageOneScore) -> float:
     return score.screening_total
 
 
-def _rewrite(tmp_path: Path, block_marker: str, field: str, new_value: object) -> Path:
-    """臨時登記簿：把第一階段那一段裡含 ``block_marker`` 的那一塊的 ``field`` 那一行換掉。"""
+def _rewrite_many(tmp_path: Path, changes: list[tuple[str, str, object]]) -> Path:
+    """臨時登記簿：第一階段那一段裡，每筆（含 ``block_marker`` 的那一塊、``field``、新值）換掉那一行。"""
     text = _REGISTRY.read_text(encoding="utf-8")
     head, marker, rest = text.partition("\n[[stage_one]]\n")
     section, purposes, tail = rest.partition("\n[[purpose]]\n")
     assert marker and purposes
     blocks = section.split("\n[[")
-    hit, = (index for index, block in enumerate(blocks) if block_marker in block)
-    blocks[hit], count = re.subn(rf"(?m)^{field} = .*$", f"{field} = {new_value!r}", blocks[hit])
-    assert count == 1, (block_marker, field)
+    for block_marker, field, new_value in changes:
+        hit, = (index for index, block in enumerate(blocks) if block_marker in block)
+        blocks[hit], count = re.subn(rf"(?m)^{field} = .*$", f"{field} = {new_value!r}", blocks[hit])
+        assert count == 1, (block_marker, field)
     path = tmp_path / "quality_targets.toml"
     path.write_text(head + marker + "\n[[".join(blocks) + purposes + tail, encoding="utf-8")
     return path
+
+
+def _rewrite(tmp_path: Path, block_marker: str, field: str, new_value: object) -> Path:
+    """只換一格的 ``_rewrite_many``。"""
+    return _rewrite_many(tmp_path, [(block_marker, field, new_value)])
 
 
 def test_smaller_principal_ranks_first_at_equal_robustness() -> None:
@@ -171,6 +177,41 @@ def test_one_db_on_either_component_adds_the_same_cost() -> None:
     assert principal == pytest.approx(robustness, rel=1e-12)
 
 
+# 考卷自己的較差參考：兩項相等但不是 1，「整個漏掉除以較差參考」才分得出來（正式值是 1 時除了等於沒除）。
+_OWN_WORSE_REFERENCE_DB = 2.0
+
+
+def test_equal_references_other_than_one_still_normalize(tmp_path: Path) -> None:
+    """臨時登記簿兩個較差參考都改成同一個不是 1 的值：分項、每支小計、合計與 +1 dB 增量都照「dB ÷ 較差參考」。
+
+    答案從考卷寫的那份 TOML 直接算；同一組數字不除較差參考會得到另一個合計，這裡先確認兩者真的分得開。
+    """
+    path = _rewrite_many(tmp_path, [
+        (f'key = "{_PREFIX}{name}"', "worse_reference", _OWN_WORSE_REFERENCE_DB) for name in (_PRINCIPAL, _ROBUSTNESS)
+    ])
+    raw = _raw(path)
+    assert raw.reference == {_PRINCIPAL: _OWN_WORSE_REFERENCE_DB, _ROBUSTNESS: _OWN_WORSE_REFERENCE_DB}
+    values = {_PRINCIPAL: 2.0, _ROBUSTNESS: 4.0}
+    expected_parts = {name: raw.weight[name] * values[name] / raw.reference[name] for name in COMPONENT_NAMES}
+    expected = sum(expected_parts.values())
+    unnormalized = sum(raw.weight[name] * values[name] for name in COMPONENT_NAMES)
+    assert expected != pytest.approx(unnormalized)
+    settings = _settings(path)
+    base = _two_speakers()
+    score = score_stage_one(_with_values(base, {side: values for side in ("left", "right")}), settings)
+
+    assert {item.name: item.weighted_cost for item in score.components} == pytest.approx(expected_parts, rel=1e-12)
+    assert {item.name: item.worse_reference_db for item in score.components} == raw.reference
+    assert {channel.speaker_id: channel.screening_subtotal for channel in score.channels} == pytest.approx(
+        {"left": expected, "right": expected}, rel=1e-12)
+    assert _total(score) == pytest.approx(expected, rel=1e-12)
+    for name in COMPONENT_NAMES:
+        bumped = {**values, name: values[name] + 1.0}
+        increment = _total(score_stage_one(
+            _with_values(base, {side: bumped for side in ("left", "right")}), settings)) - _total(score)
+        assert increment == pytest.approx(raw.weight[name] / raw.reference[name], rel=1e-12), name
+
+
 def test_unequal_worse_references_are_rejected(tmp_path: Path) -> None:
     """有人只改一格較差參考，權重 1:1 就變成別的比例：讀登記簿時直接報錯。"""
     reference = _raw().reference[_ROBUSTNESS]
@@ -205,6 +246,25 @@ def test_channels_are_averaged_and_the_worst_is_only_listed() -> None:
     assert score.worst_channel.speaker_id == "right"
     assert score.worst_channel.screening_subtotal == pytest.approx(_expected_total(right), rel=1e-12)
     assert score.principal_only_sort_key_db == pytest.approx(mean[_PRINCIPAL], rel=1e-12)
+
+
+@pytest.mark.parametrize("order", ["left_first", "right_first"])
+def test_worse_left_channel_is_listed_whatever_the_input_order(order: str) -> None:
+    """左聲道比較差時最差那一支是左聲道；喇叭交進來的先後換過也一樣（不是固定挑第一支或最後一支）。"""
+    left = {_PRINCIPAL: 3.0, _ROBUSTNESS: 2.5}
+    right = {_PRINCIPAL: 1.0, _ROBUSTNESS: 0.5}
+    evaluation = _with_values(_two_speakers(), {"left": left, "right": right})
+    if order == "right_first":
+        evaluation = evaluation.model_copy(update={"speakers": tuple(reversed(evaluation.speakers))})
+    assert [item.speaker_id for item in evaluation.speakers][-1] == ("right" if order == "left_first" else "left")
+    score = score_stage_one(evaluation, _settings())
+    assert {channel.speaker_id: channel.screening_subtotal for channel in score.channels} == pytest.approx(
+        {"left": _expected_total(left), "right": _expected_total(right)}, rel=1e-12)
+    assert score.worst_channel is not None
+    assert score.worst_channel.speaker_id == "left"
+    assert score.worst_channel.screening_subtotal == pytest.approx(_expected_total(left), rel=1e-12)
+    mean = {name: (left[name] + right[name]) / 2.0 for name in COMPONENT_NAMES}
+    assert _total(score) == pytest.approx(_expected_total(mean), rel=1e-12)
 
 
 def test_principal_only_key_orders_by_the_principal_alone() -> None:
