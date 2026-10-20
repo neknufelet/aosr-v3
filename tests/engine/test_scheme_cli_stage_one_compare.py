@@ -124,3 +124,15 @@ def test_bad_input_reports_stderr_and_failure(tmp_path: Path, capsys: pytest.Cap
     assert code == 1
     error = capsys.readouterr().err
     assert error.strip() and reason in error
+
+
+def test_third_result_with_other_identity_still_refuses_table(
+        pair: tuple[Path, Path, results.StageOneResult, results.StageOneResult], capsys: pytest.CaptureFixture[str]) -> None:
+    a, b, first, _ = pair
+    c = a.with_name("third.json")
+    results.save_stage_one_result(first.model_copy(update={"physics_identity": "phys-v1:" + "2" * 64}), c)
+    assert not scheme_cli.main(_args(a, b, c))
+    text = capsys.readouterr().out
+    assert f"不能同表：{c.name} 跟 {a.name} 的 物理身分 不同" in text
+    assert f"不能同表：{b.name}" not in text
+    assert "名次 |" not in text

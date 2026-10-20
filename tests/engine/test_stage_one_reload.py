@@ -230,3 +230,27 @@ def test_room_size_and_absolute_positions_remain_comparable(saved: tuple[Path, r
         scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"room_m": Room(room.Lx + 1., room.Ly + 1., room.Lz + 1.)})})
     changed = results.StageOneResult.model_validate({**stored.model_dump(), "scheme": scheme})
     assert results.identity_differences(results.stage_one_comparison_identity(stored), results.stage_one_comparison_identity(changed)) == ()
+
+
+def test_unscored_evaluation_change_still_remeasures(saved: tuple[Path, results.StageOneResult]) -> None:
+    path, original = saved
+    document = json.loads(path.read_text())
+    document["evaluation"]["speakers"][0]["payload"]["own_line_slope_db_per_octave"] += 1.0
+    path.write_text(json.dumps(document))
+    stored = results.load_stage_one_result(path)
+    assert stored.evaluation != original.evaluation
+    assert stored.score == original.score
+    loaded = results.reload_stage_one_result(path, registry=cases.run_kwargs()["registry"], physics_identity=stored.physics_identity)
+    assert loaded.standing is ResultStanding.REMEASURED
+    assert loaded.result.evaluation == original.evaluation
+    assert loaded.result.score == original.score
+
+
+def test_identity_keeps_wall_order_when_impedances_differ(saved: tuple[Path, results.StageOneResult]) -> None:
+    _, stored = saved
+    # 六面各不相同、也不照大小排，換順序或排序都會對不上。
+    values = {"floor": 6.0, "ceiling": 1.0, "x0": 5.0, "xL": 2.0, "y0": 4.0, "yL": 3.0}
+    scene = stored.scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": values})
+    changed = stored.model_copy(update={"scheme": stored.scheme.model_copy(update={"scene": scene})})
+    walls = results.stage_one_comparison_identity(changed).wall_and_air_assumptions[:6]
+    assert walls == tuple(value.hex() for value in (6.0, 1.0, 5.0, 2.0, 4.0, 3.0))
