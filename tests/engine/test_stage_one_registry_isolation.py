@@ -59,6 +59,21 @@ def _reevaluated(result: SchemeResult, registry: Path) -> str:
     return json.dumps(candidate.model_dump(mode="json"), sort_keys=True)
 
 
+def _differing_leaves(a: object, b: object, path: str = "$") -> list[str]:
+    """兩份 JSON（資料交換格式）逐格比，回不同的那幾格的路徑。
+
+    不讓 pytest 對兩條整包 JSON 字串算逐字差異：候選包是一行幾百 KB 的字串，那個差異演算法是平方級，
+    植錯時會卡在出錯訊息裡跑好幾小時（#558 PR-2 植錯實測）。
+    """
+    if isinstance(a, dict) and isinstance(b, dict):
+        keys = sorted(set(a) | set(b))
+        return [hit for key in keys for hit in _differing_leaves(a.get(key), b.get(key), f"{path}.{key}")]
+    if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        return [hit for index, (x, y) in enumerate(zip(a, b, strict=True))
+                for hit in _differing_leaves(x, y, f"{path}[{index}]")]
+    return [] if a == b else [path]
+
+
 def test_stage_one_section_leaves_registry_and_purpose_identity_unchanged(registries: tuple[Path, Path]) -> None:
     """整份登記簿指紋（音色設定指紋、排名表頭、結果檔都抄它）與第二階段用途快照，有沒有那一段都一樣。"""
     without, with_section = registries
@@ -72,7 +87,10 @@ def test_stage_two_reevaluation_and_ranking_are_byte_identical(
         wall_1: SchemeResult, registries: tuple[Path, Path]) -> None:
     """同一份第二階段結果在兩份登記簿上重評：候選包逐字相同；排名的總代價與比較身分也相同。"""
     without, with_section = registries
-    assert _reevaluated(wall_1, without) == _reevaluated(wall_1, with_section)
+    first, second = _reevaluated(wall_1, without), _reevaluated(wall_1, with_section)
+    same_candidate = first == second
+    # 只印不同那幾格的路徑（前十格），不印整包字串。
+    assert same_candidate, _differing_leaves(json.loads(first), json.loads(second))[:10]
     candidate = reevaluate(wall_1, quality_targets_path=without,
                            capabilities=load_capabilities(config_path("capabilities.toml")),
                            directivity=DIRECTIVITY)
@@ -81,7 +99,8 @@ def test_stage_two_reevaluation_and_ranking_are_byte_identical(
                           run_date=date(2026, 10, 20), engine_version="control", pinned=None)
         for path in (without, with_section)
     ]
-    assert outcomes[0] == outcomes[1]
+    same_outcome = outcomes[0] == outcomes[1]
+    assert same_outcome, "兩份登記簿排出來的總代價或比較身分不同"
     assert outcomes[0][1] is not None, "控制組要排得進表，比較身分才有東西比"
 
 
