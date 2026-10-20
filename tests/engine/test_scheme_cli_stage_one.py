@@ -1,6 +1,7 @@
 """第一階段命令列保留身分紀律，壞分片不退回求解。"""
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from pathlib import Path
@@ -39,8 +40,15 @@ def test_shuffled_parts_equal_regular_and_print_assumptions(
     assert "在這個牆面假設下：六面同一個頻率無關實數阻抗 4.0 ρc（ρc 是空氣特性阻抗）" in text
     for speaker in item.speakers:
         assert speaker in text
-    for label in ("主項", "穩健性", "最差方向", "合分"):
-        assert label in text
+    saved = importlib.import_module("aosr.reporting.stage_one_result").load_stage_one_result(regular)
+    for speaker, channel in zip(saved.evaluation.speakers, saved.score.channels, strict=True):
+        payload = speaker.payload
+        assert payload is not None
+        assert (f"{speaker.speaker_id}：主項 {payload.own_line_ripple_rms_db} dB；"
+                f"穩健性 {payload.seat_robustness_rms_db} dB；"
+                f"最差方向 {payload.worst_direction.direction_relative_to_primary}；"
+                f"合分 {channel.screening_subtotal}") in text
+    assert f"第一階段合分 {saved.score.screening_total}" in text
 
 
 @pytest.mark.parametrize("damage", ["missing", "truncated", "identity", "axis", "coordinates", "overlap"])

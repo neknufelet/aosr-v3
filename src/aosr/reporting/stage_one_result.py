@@ -150,10 +150,7 @@ def run_stage_one(
         physics_identity=physics_identity)]
     if not parts:
         raise ValueError("分片不能為空")
-    axis = scheme.scene.low_frequency_axis or LowFrequencyAxis.SEARCH
-    expected = tuple(float(value).hex() for value in low_frequency_axis_frequencies(axis)[0])
-    if any(part.fem_key.frequency_hex != expected for part in parts):
-        raise ValueError("宣告的低頻軸與分片有限元素頻率不同")
+    # 每一片的頻率由合併逐點對方案的軸核，不同就拒收；組輸入時再對 fem_key 核一次。
     energies = fem_slices.energies_from_shards(parts, scheme=scheme, capabilities=capabilities,
         directivity=directivity, physics_identity=physics_identity)
     data = stage_one_input(scheme, energies, parts[0].fem_key)
