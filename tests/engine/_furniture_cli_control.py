@@ -6,7 +6,7 @@ save_result 成 wall-1.json、wall-2.json；scheme_cli.main(compare, 兩份路�
 --capabilities config_path("capabilities.toml"), --run-date 2026-09-27)，capsys 取 stdout。
 下列常數保留原文每一行與末尾換行，不以雜湊取代字句斷言。
 
-#668（音色起伏計分範圍下限 40→20 Hz，老闆 2026-10-20）：在 HEAD（675c233fe702d2982244a59b74abb355a618b8b2）上，同一棵樹只把品質登記簿換回
+#668（音色起伏計分範圍下限 40→20 Hz，老闆 2026-10-20）：在主線 f2dfffd7 加本票前兩顆提交（登記簿改值、網頁標示）上，同一棵樹只把品質登記簿換回
 改動前主線那份同跑，照上面的錄法重現舊原文（代價逐位相同）；換新登記簿同法重錄兩份原文，只有代價數字變了
 （工作區 668-ripple-from-20 底下 record 目錄的 record_furniture_cli.py）。
 """
