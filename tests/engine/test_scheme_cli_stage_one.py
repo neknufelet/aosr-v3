@@ -4,14 +4,16 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
 from aosr.config.frequency_axis import LowFrequencyAxis
-from aosr.reporting import scheme_cli
+from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.reporting import fem_slices, scheme_cli
 from tests.engine import _stage_one_cases as cases
-from tests.engine._fem_cli_cases import forbid_fem
+from tests.engine._fem_cli_cases import fake_slices, forbid_fem
 
 
 def test_shuffled_parts_equal_regular_and_print_assumptions(
@@ -131,3 +133,32 @@ def test_prerequisite_refusal_happens_before_solving(
     assert not out.exists()
     assert calls == []
     assert "全向" in capsys.readouterr().err
+
+
+def test_each_speaker_line_prints_its_own_subtotal(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """兩支喇叭的替身能量刻意不同（右聲道乘一個隨頻率起伏的倍數），各自那一行要印自己的合分。"""
+    def uneven(
+        *, room: Room, candidates: Mapping[str, tuple[Mapping[str, Point], Mapping[str, Point]]],
+        wall_impedances: Mapping[Wall, float], frequencies_hz: tuple[float, ...],
+        density_kg_m3: float, sound_speed_m_s: float, frequency_indices: Sequence[int],
+    ) -> dict[str, dict[tuple[str, str], tuple[float, ...]]]:
+        found = fake_slices(room=room, candidates=candidates, wall_impedances=wall_impedances,
+                            frequencies_hz=frequencies_hz, density_kg_m3=density_kg_m3,
+                            sound_speed_m_s=sound_speed_m_s, frequency_indices=frequency_indices)
+        return {name: {pair: tuple(value * (2.0 + (-1.0) ** index) if pair[0] == "right" else value
+                                   for value, index in zip(values, frequency_indices, strict=True))
+                       for pair, values in pairs.items()} for name, pairs in found.items()}
+
+    item = cases.scheme()
+    monkeypatch.setattr(fem_slices, "solve_fem_energies_many", uneven)
+    path, out = tmp_path / "scheme.json", tmp_path / "result.json"
+    path.write_text(item.model_dump_json())
+    assert scheme_cli.main(cases.cli_args(path, out)) == 0
+    text = capsys.readouterr().out
+    saved = importlib.import_module("aosr.reporting.stage_one_result").load_stage_one_result(out)
+    subtotals = {channel.speaker_id: channel.screening_subtotal for channel in saved.score.channels}
+    assert subtotals["left"] != subtotals["right"]
+    for speaker, subtotal in subtotals.items():
+        line = next(row for row in text.splitlines() if row.startswith(f"{speaker}："))
+        assert line.endswith(f"合分 {subtotal}")
