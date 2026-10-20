@@ -236,7 +236,7 @@ def _rebuilt(
 
 
 @pytest.mark.parametrize(("damage", "reason"), [
-    ("missing-weight", "各一次"), ("duplicate-weight", "各一次"), ("missing-target", "各一次"),
+    ("missing-weight", "各一次"), ("duplicate-weight", "各一次"), ("repeated-weight", "各一次"), ("missing-target", "各一次"),
     ("duplicate-target", "各一次"), ("cost-shape", "less_is_better"), ("unequal-references", "較差參考必須相等"),
     ("reversed-range", "遞增"),
 ])
@@ -250,6 +250,9 @@ def test_settings_guard_their_own_shape(damage: str, reason: str) -> None:
             _rebuilt(settings, weights=settings.weights[1:])
         elif damage == "duplicate-weight":
             _rebuilt(settings, weights=(*settings.weights, (name, 0.0)))
+        elif damage == "repeated-weight":
+            # 總數照樣兩個，但同一個分項出現兩次、另一個不見。
+            _rebuilt(settings, weights=(settings.weights[0], settings.weights[0]))
         elif damage == "missing-target":
             _rebuilt(settings, targets=tuple(others))
         elif damage == "duplicate-target":
