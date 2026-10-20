@@ -36,6 +36,13 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--trial-number", type=int)
     run.add_argument("--placement-shift", help="搜尋擺位移位點的具名移位")
     run.add_argument("--fem-parts", type=Path, nargs="+")
+    stage = sub.add_parser("stage-one", help="單一方案只算有限元素並存第一階段分數")
+    stage.add_argument("scheme", type=Path)
+    stage.add_argument("--out", type=Path, required=True)
+    stage.add_argument("--capabilities", type=Path, required=True)
+    stage.add_argument("--engine-commit", required=True)
+    stage.add_argument("--run-date", type=date.fromisoformat)
+    stage.add_argument("--fem-parts", type=Path, nargs="+")
     sliced = sub.add_parser("fem-slice", help="批次求解一段有限元素頻率並原子存檔")
     sliced.add_argument("schemes", type=Path, nargs="+")
     sliced.add_argument("--slice", dest="slice_index", type=int, required=True)
@@ -259,6 +266,41 @@ def _fem_slice(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stage_one(args: argparse.Namespace) -> int:
+    """有限元素第一階段沿用求解前後的兩種身分核對。"""
+    before, table, directivity, physics_before = _calculation_start(args.capabilities)
+    from aosr.config.paths import config_path
+    from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.fem_slices import ShardIdentityMismatch
+    from aosr.reporting.scheme import load_scheme
+    from aosr.reporting.stage_one_result import check_stage_one_prerequisites, run_stage_one, save_stage_one_result
+    scheme = load_scheme(args.scheme)
+    check_stage_one_prerequisites(scheme)
+    try:
+        result = run_stage_one(scheme, capabilities=table, directivity=directivity,
+            registry=load_quality_targets(config_path("quality_targets.toml")),
+            physics_identity=physics_before, program_fingerprint=before, engine_commit=args.engine_commit,
+            run_date=args.run_date or date.today(),
+            shards=None if args.fem_parts is None else _read_fem_parts(args.fem_parts))
+    except ShardIdentityMismatch as exc:
+        return _changed(str(exc))
+    if _identities_changed(args.capabilities, before, physics_before):
+        return PROGRAM_CHANGED_EXIT
+    save_stage_one_result(result, args.out)
+    print(result.wall_assumption_text)
+    print(result.score.assumption_text)
+    for speaker, channel in zip(result.evaluation.speakers, result.score.channels, strict=True):
+        payload = speaker.payload
+        if payload is None:
+            print(f"{speaker.speaker_id}：不可估；原因 {','.join(reason.value for reason in speaker.reason_codes)}")
+        else:
+            print(f"{speaker.speaker_id}：主項 {payload.own_line_ripple_rms_db} dB；"
+                  f"穩健性 {payload.seat_robustness_rms_db} dB；"
+                  f"最差方向 {payload.worst_direction.direction_relative_to_primary}；合分 {channel.screening_subtotal}")
+    print(f"第一階段合分 {result.score.screening_total}")
+    return 0
+
+
 def _comparison_table(results: list[SchemeResult], ranking: RankingResult, *, own_costs: bool = False,
                       notes: dict[str, dict[QualityCategory, str]] | None = None) -> None:
     """同一類橫向列各份代價；不能同表的格子明印狀態。"""
@@ -402,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
             except ValidationError as error:
                 parser.error(str(error))
         return _execute_calculation(args)
-    if args.command == "fem-slice":
+    if args.command in ("fem-slice", "stage-one"):
         return _execute_calculation(args)
     if args.command == "identity":
         return _identity(args)
@@ -440,6 +482,8 @@ def _execute_calculation(args: argparse.Namespace) -> int:
     if args.command == "run" and args.fem_parts is None:
         return _run(args)
     try:
+        if args.command == "stage-one":
+            return _stage_one(args)
         return _fem_slice(args) if args.command == "fem-slice" else _run(args)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         sys.stderr.write(f"{exc}\n")
