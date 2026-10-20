@@ -129,7 +129,8 @@ def test_prerequisite_refusal_happens_before_solving(
     path, out = tmp_path / "scheme.json", tmp_path / "result.json"
     path.write_text(item.model_dump_json())
     calls = forbid_fem(monkeypatch)
-    assert scheme_cli.main(cases.cli_args(path, out)) == 1
+    code = scheme_cli.main(cases.cli_args(path, out))
+    assert code == 1
     assert not out.exists()
     assert calls == []
     assert "全向" in capsys.readouterr().err
@@ -154,7 +155,7 @@ def test_each_speaker_line_prints_its_own_subtotal(
     monkeypatch.setattr(fem_slices, "solve_fem_energies_many", uneven)
     path, out = tmp_path / "scheme.json", tmp_path / "result.json"
     path.write_text(item.model_dump_json())
-    assert scheme_cli.main(cases.cli_args(path, out)) == 0
+    assert not scheme_cli.main(cases.cli_args(path, out))
     text = capsys.readouterr().out
     saved = importlib.import_module("aosr.reporting.stage_one_result").load_stage_one_result(out)
     subtotals = {channel.speaker_id: channel.screening_subtotal for channel in saved.score.channels}

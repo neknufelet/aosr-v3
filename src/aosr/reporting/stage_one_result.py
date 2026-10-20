@@ -97,7 +97,7 @@ def stage_one_input(
 def additions_round_once() -> bool:
     """這台機器的浮點加法是不是每一步只捨入一次（沒有先捨到延伸精度、再捨到雙精度的雙重捨入）。
 
-    用 CPython 自己考卷偵測雙重捨入的那一組數（``Lib/test/test_math.py`` 的 ``HAVE_DOUBLE_ROUNDING``）：
+    用 CPython 自己考卷偵測雙重捨入的那一組數（標準庫考卷 test_math 裡的 ``HAVE_DOUBLE_ROUNDING``）：
     1e16 + 2.9999 只捨一次是 1e16 + 2，雙重捨入會變成 1e16 + 4。``math.fsum`` 只在沒有雙重捨入時保證正確捨入。
     """
     x, y = 1e16, 2.9999
