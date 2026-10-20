@@ -40,6 +40,7 @@ def test_sampler_receives_saved_screening_total(tmp_path: Path, monkeypatch: pyt
     assert not store.baseline_path.exists()
     assert status.baseline_outcome == "not_computed"
     rows = ledger.read_for(store).rows
+    assert any(row.result_file for row in rows)
     for row in rows:
         if row.result_file:
             result = load_stage_one_result(store.candidate_path(row.trial_number))

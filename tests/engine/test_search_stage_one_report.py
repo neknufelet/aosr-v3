@@ -1,6 +1,7 @@
 """第一階段只讀報告、完整峰谷寬度與現有網頁的相容性。"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from collections.abc import Callable
 from typing import NoReturn
@@ -84,8 +85,8 @@ def test_existing_search_page_and_best_endpoint(tmp_path: Path, monkeypatch: pyt
     cases.run(store, cases.FakeCompute(store, monkeypatch))
     view = build_search_view(store.path, server_physics=store.identity.physics_identity,
                              server_program=store.identity.program_fingerprint)
-    assert view.blocks
-    (tmp_path / "view.json").write_text(view.model_dump_json())
+    best = next(block for block in view.blocks if block.key == "search-best")
+    assert any("試算 0" in line for line in best.lines) and not best.warning
     # 沙箱不開網路與背景事件迴圈；只把執行緒排程改成同緒，端點與結果讀取照真流程。
     async def inline(function: Callable[..., object], *args: object, **kwargs: object) -> object:
         return function(*args, **kwargs)
@@ -93,4 +94,8 @@ def test_existing_search_page_and_best_endpoint(tmp_path: Path, monkeypatch: pyt
     handlers = GuiHandlers(GuiSettings(data_dir=tmp_path, engine_commit="a" * 40))
     request = Request({"type": "http", "path_params": {"search_id": store.search_id}, "query_string": b""})
     response = asyncio.run(handlers.search_best(request))
-    assert response.status_code == 400
+    # 端點不拋錯（200）；三張圖各自寫明讀不到第一階段結果檔，不冒充第二階段的圖（版面是之後的事）。
+    assert response.status_code == 200
+    body = json.loads(bytes(response.body))
+    assert {key: body[key] for key in ("frequency", "rfz", "plan")} == dict.fromkeys(
+        ("frequency", "rfz", "plan"), {"error": "讀不到：結果檔版本不認得"})
