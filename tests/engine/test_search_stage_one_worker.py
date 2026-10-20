@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -58,8 +59,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str = "") -> 
     return worker, CandidateJob(0, item, tmp_path / "result.json")
 
 
-def test_two_waves_only_slice_then_stage_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    worker, job = setup(tmp_path, monkeypatch)
+def _second_job(tmp_path: Path, job: CandidateJob) -> CandidateJob:
     other = CandidateJob(1, job.scheme.model_copy(update={"scheme_id": "other"}), tmp_path / "other.json")
     document = json.loads((tmp_path / "template").read_bytes())
     document["scheme"]["scheme_id"] = "other"
@@ -67,6 +67,12 @@ def test_two_waves_only_slice_then_stage_one(tmp_path: Path, monkeypatch: pytest
     document["score"]["candidate_id"] = "other"
     document["origin"]["trial_number"] = 1
     (tmp_path / "template-1").write_text(json.dumps(document))
+    return other
+
+
+def test_two_waves_only_slice_then_stage_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker, job = setup(tmp_path, monkeypatch)
+    other = _second_job(tmp_path, job)
     results = list(worker((job, other), 2))
     assert {r.job.trial_number for r in results} == {job.trial_number, other.trial_number}
     slices = list(tmp_path.glob("fem-slice-*"))
@@ -106,3 +112,17 @@ def test_child_identity_exit_is_interruption(tmp_path: Path, monkeypatch: pytest
     (tmp_path / (phase + "-changed")).touch()
     with pytest.raises(IdentityChanged):
         list(worker((job,), 1))
+
+
+def test_candidate_seconds_stop_when_the_child_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 父行程晚 5 秒才讀第二個完成通知；那 5 秒不准算進第二個候選的秒數（第二階段用子行程自己記的耗時）。
+    worker, job = setup(tmp_path, monkeypatch)
+    other = _second_job(tmp_path, job)
+    results = worker((job, other), 2)
+    next(results)
+    deadline = time.monotonic() + 60
+    while not (job.result_path.exists() and other.result_path.exists()) and time.monotonic() < deadline:
+        time.sleep(.05)
+    time.sleep(5.)
+    assert next(results).seconds < 5.
+    assert not list(results)

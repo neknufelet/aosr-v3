@@ -41,7 +41,7 @@ def test_sampler_receives_saved_screening_total(tmp_path: Path, monkeypatch: pyt
     assert not store.baseline_path.exists()
     assert status.baseline_outcome == "not_computed"
     rows = ledger.read_for(store).rows
-    assert any(row.result_file for row in rows)
+    assert len({row.score for row in rows if row.result_file}) > 1  # 替身合分要分得開，傳錯人才考得出來
     for row in rows:
         if row.result_file:
             result = load_stage_one_result(store.candidate_path(row.trial_number))
@@ -150,6 +150,31 @@ def test_killed_search_resumes_with_same_comparison_rows_and_state(tmp_path: Pat
         probe=lambda: interrupted.identity, registry_path=config_path("quality_targets.toml"),
         run_date=stage.run_kwargs()["run_date"], engine_version=interrupted.identity.program_fingerprint)
     assert resumed.comparison_trial == json.loads(control.status_path.read_bytes())["comparison_trial"]
+    assert _stable_rows(control) == _stable_rows(interrupted)
+    assert control.status_path.read_bytes() == interrupted.status_path.read_bytes()
+
+
+def test_killed_between_pin_save_and_first_row_resumes_identically(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 釘住編號已存、第一列還沒落帳就被砍：接續讀同一份結果再釘，帳本與狀態跟沒被砍的那一跑一樣。
+    from uuid import UUID
+    from aosr.search.stage_one_run import _StageOneRunner, resume_stage_one_search
+    monkeypatch.setattr("uuid.uuid4", lambda: UUID(int=123))
+    monkeypatch.setattr("aosr.search.timings._now", lambda: 0.)
+    control = cases.make_store(tmp_path / "control", workers=3)
+    interrupted = cases.make_store(tmp_path / "interrupted", workers=3)
+    cases.run(control, cases.FakeCompute(control, monkeypatch))
+    record = _StageOneRunner.record
+    def killed(self: _StageOneRunner, *args: object, **kwargs: object) -> None:
+        raise cases.Killed()
+    monkeypatch.setattr(_StageOneRunner, "record", killed)
+    with pytest.raises(cases.Killed):
+        cases.run(interrupted, cases.FakeCompute(interrupted, monkeypatch))
+    assert json.loads(interrupted.status_path.read_bytes())["comparison_trial"] is not None
+    assert not ledger.read_for(interrupted).rows
+    monkeypatch.setattr(_StageOneRunner, "record", record)
+    resume_stage_one_search(interrupted, compute=cases.FakeCompute(interrupted, monkeypatch),
+        probe=lambda: interrupted.identity, registry_path=config_path("quality_targets.toml"),
+        run_date=stage.run_kwargs()["run_date"], engine_version=interrupted.identity.program_fingerprint)
     assert _stable_rows(control) == _stable_rows(interrupted)
     assert control.status_path.read_bytes() == interrupted.status_path.read_bytes()
 

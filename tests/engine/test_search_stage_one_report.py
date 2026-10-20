@@ -29,6 +29,7 @@ def test_report_assumptions_order_scores_and_cli_dispatch(tmp_path: Path, monkey
     assert all(word not in text for word in ("原方案", "與喇叭無關", "第二階段子集"))
     expected = sorted((load_stage_one_result(p).score.screening_total, int(p.stem.split('-')[-1]))
                       for p in (store.path / "candidates").glob("trial-*.json") if "-scheme" not in p.stem)
+    assert len({total for total, _ in expected}) > 1  # 替身合分要分得開，升降序才考得出來
     assert [row.trial_number for row in report.ranked] == [number for _, number in expected]
     def forbidden(*args: object, **kwargs: object) -> NoReturn:
         raise AssertionError("第一階段不可進第二階段報告")
@@ -73,6 +74,25 @@ def test_unassessed_and_unreadable_results_keep_their_rows(tmp_path: Path, monke
     assert "試算 1：不可估" in text
     assert "non_positive_energy" in text
     assert "試算 2" in text
+
+
+@pytest.mark.parametrize("damage", ["swapped", "identity"])
+def test_result_file_must_belong_to_its_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
+    # 放錯檔（別的試算的合法結果）或身分不同，這一列只寫讀回失敗，不印別人的主項與峰谷。
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    store = cases.make_store(tmp_path)
+    cases.run(store, cases.FakeCompute(store, monkeypatch))
+    target = store.candidate_path(0)
+    assert target.is_file() and store.candidate_path(1).is_file()
+    if damage == "swapped":
+        target.write_bytes(store.candidate_path(1).read_bytes())
+    else:
+        result = load_stage_one_result(target)
+        target.write_text(result.model_copy(update={"program_fingerprint": "calc-v1:" + "a" * 64}).model_dump_json())
+    report = build_stage_one_report(store)
+    row = next(item for item in (*report.ranked, *report.excluded) if item.trial_number == 0)
+    assert row.result is None and row.error is not None and row.error.startswith("結果讀回失敗：結果檔的")
+    assert f"試算 0：{row.error}" in render_stage_one_text(report)
 
 
 def test_existing_search_page_and_best_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,6 +1,7 @@
 """第一階段考卷的造數方案與有限元素替身；不讀工作區方案。"""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import TypedDict
@@ -29,8 +30,10 @@ def scheme() -> Scheme:
         primary_position_m=original.receiver_set.primary.position_m, offset_m=0.1)})
 
 
-def shards(monkeypatch: pytest.MonkeyPatch, item: Scheme, slices: int = 2) -> list[fem_slices.FemShard]:
-    monkeypatch.setattr(fem_slices, "solve_fem_energies_many", fake_slices)
+def shards(monkeypatch: pytest.MonkeyPatch, item: Scheme, slices: int = 2,
+           solver: Callable[..., dict[str, dict[tuple[str, str], tuple[float, ...]]]] = fake_slices,
+           ) -> list[fem_slices.FemShard]:
+    monkeypatch.setattr(fem_slices, "solve_fem_energies_many", solver)
     return [fem_slices.solve_slice(
         [item], capabilities=load_capabilities(config_path("capabilities.toml")),
         directivity=DIRECTIVITY, slices=slices, slice_index=index,

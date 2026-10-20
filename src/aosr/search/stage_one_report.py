@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from aosr.reporting.result import ResultOrigin
 from aosr.reporting.stage_one_result import StageOneResult, load_stage_one_result, wall_assumption_text
 from aosr.scoring.contract import Feature
 from aosr.scoring.contract_base import Flag
 from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT, StageOneSpeakerPayload
 from aosr.search import ledger
+from aosr.search.labels import SEARCH_STATES, counts_text
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 
@@ -33,11 +35,19 @@ class StageOneSearchReport:
 
 
 def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
+    """結果檔要對回這一列的試算與搜尋快照；放錯檔不准把別人的峰谷印在這一列。"""
+    number = row.trial_number
     try:
-        result = load_stage_one_result(store.candidate_path(row.trial_number))
-        return StageOneReportRow(row.trial_number, row, result, None)
+        result = load_stage_one_result(store.candidate_path(number))
+        origin = ResultOrigin(kind="search_candidate", search_id=store.search_id, trial_number=number)
+        if result.origin != origin or result.scheme.scheme_id != f"{store.search_id}-trial-{number:06d}":
+            raise ValueError("結果檔的出處或方案代號不是這一列的試算")
+        if (result.physics_identity, result.program_fingerprint) != (
+                store.identity.physics_identity, store.identity.program_fingerprint):
+            raise ValueError("結果檔的物理身分或整支程式指紋跟搜尋快照不同")
+        return StageOneReportRow(number, row, result, None)
     except (OSError, ValueError) as error:
-        return StageOneReportRow(row.trial_number, row, None, f"結果讀回失敗：{error}")
+        return StageOneReportRow(number, row, None, f"結果讀回失敗：{error}")
 
 
 def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
@@ -81,9 +91,9 @@ def _speaker_lines(result: StageOneResult) -> list[str]:
 def render_stage_one_text(report: StageOneSearchReport) -> str:
     """明列所有得分候選，峰谷高度對每支喇叭自己那條直線量。"""
     status = report.status
-    reasons = "、".join(f"{reason} {count}" for reason, count in sorted(status.illegal_reasons.items())) or "無"
+    reasons = counts_text(dict(sorted(status.illegal_reasons.items())))
     lines = [report.wall_text, IDEAL_SOURCE_ASSUMPTION_TEXT, "低頻拖尾不進自動排名，入選後要另外檢查",
-        f"停止原因：{status.state}；{status.message}",
+        f"停止原因：{SEARCH_STATES.get(status.state, status.state)}；{status.message}",
         f"問過 {status.asked}；算完 {status.computed}；不合法 {status.illegal}（各原因：{reasons}）；"
         f"不可估 {status.excluded.get('unassessed', 0)}；不能同表 {status.excluded.get('incomparable', 0)}",
         "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜合分",

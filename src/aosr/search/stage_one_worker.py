@@ -29,6 +29,18 @@ class StageOneComputed:
 StageOneComputeFunction: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[StageOneComputed]]
 
 
+class _StampedQueue(Queue[_Active]):
+    """完成通知排進佇列那一刻記牆鐘；父行程多久之後才讀出來，不算進候選秒數。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ended: dict[int, float] = {}
+
+    def put(self, item: _Active, block: bool = True, timeout: float | None = None) -> None:
+        self.ended[item.process.pid] = time.monotonic()
+        super().put(item, block, timeout)
+
+
 def check_stage_one_result(result: StageOneResult, job: CandidateJob, search_id: str, identity: SearchIdentity) -> None:
     """候選出處、代號與計算快照核對；第一階段合分設定由程式指紋涵蓋。"""
     origin = ResultOrigin(kind="search_candidate", search_id=search_id, trial_number=job.trial_number)
@@ -50,9 +62,8 @@ class StageOneCompute:
         self.processes = SubprocessCompute(capabilities_path=capabilities_path, engine_commit=engine_commit,
             search_id=search_id, fem_root=fem_root, runner=runner, slice_runner=slice_runner, poll_s=poll_s, lock_fd=lock_fd)
 
-    def _result(self, item: _Active, started: float) -> StageOneComputed:
+    def _result(self, item: _Active, seconds: float) -> StageOneComputed:
         _check_exit(item, f"試算 {item.job.trial_number}")
-        seconds = time.monotonic() - started
         try:
             result = load_stage_one_result(item.job.result_path)
         except (OSError, ValueError) as error:
@@ -71,7 +82,7 @@ class StageOneCompute:
         pending = iter(jobs)
         active: list[_Active] = []
         starts: dict[int, float] = {}
-        completed: Queue[_Active] = Queue()
+        completed = _StampedQueue()
         order = Lock()
         exhausted = False
         try:
@@ -92,7 +103,8 @@ class StageOneCompute:
                     finished = completed.get(timeout=self.processes.poll_s)
                 except Empty:
                     continue
-                result = self._result(finished, starts.pop(finished.process.pid))
+                pid = finished.process.pid
+                result = self._result(finished, completed.ended.pop(pid) - starts.pop(pid))
                 _stop_all((finished,))
                 active.remove(finished)
                 yield result
