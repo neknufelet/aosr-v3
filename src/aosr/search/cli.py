@@ -20,7 +20,7 @@ from datetime import date
 from importlib.metadata import version
 from pathlib import Path
 from types import FrameType
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 import optuna
 
@@ -52,6 +52,10 @@ from aosr.search.placement_stability_attach import (
 )
 from aosr.search.placement_stability_record import STOPPED_NOTE as STABILITY_STOPPED_NOTE
 
+if TYPE_CHECKING:
+    from aosr.search.stage_one_worker import StageOneComputeFunction
+
+StageOneComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], "StageOneComputeFunction"]
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
 
@@ -176,7 +180,7 @@ def _failed(store: SearchStore | None, error: Exception) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | None = None,
+def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | StageOneComputeFactory | None = None,
          modal_runner: tuple[str, ...] = DEFAULT_RUNNER,
          stability_compute_factory: StabilityComputeFactory | None = None) -> int:
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
@@ -192,7 +196,14 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
         # 錯誤出口本身再出錯時照舊往外丟，不在這裡再接一次（複查：重複寫失敗、蓋掉原本的錯誤追蹤）。
         try:
             store = _create(args) if args.command == "start" else SearchStore.open(args.search)
+            if store.settings.stage is not None:
+                _reject_stage_one(store, args.command)
             if args.command == "report":
+                if store.settings.stage is not None:
+                    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+
+                    sys.stdout.write(render_stage_one_text(build_stage_one_report(store)))
+                    return 0
                 report = build_report(store, quality_targets_path=registry_path, run_date=date.today(),
                                       precision_contracts_path=args.contracts)
                 sys.stdout.write(render_text(report))
@@ -211,10 +222,36 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
                 _stderr(f"{prefix}失敗：{error}\n")
                 return 1
             return _failed(store, error)
-        factory = compute_factory or (lambda opened, capabilities, commit:
+        if store.settings.stage is not None:
+            return _stage_one_command(args, store, cast(StageOneComputeFactory | None, compute_factory),
+                                      registry_path, lock_fd=lock_fd)
+        factory = cast(ComputeFactory | None, compute_factory) or (lambda opened, capabilities, commit:
                                       _compute(opened, capabilities, commit, lock_fd=lock_fd))
         return _mutating_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner,
                                  stability_compute_factory=stability_compute_factory)
+
+
+def _reject_stage_one(store: SearchStore, command: str) -> None:
+    names = {"refine": "細算", "auto": "自動外圈", "feedback": "回饋", "select": "入選"}
+    if store.settings.stage is not None and command in names:
+        raise ValueError(f"這是第一階段搜尋資料夾，{names[command]}還沒接上第一階段")
+
+
+def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
+                       registry_path: Path, *, lock_fd: int) -> int:
+    from aosr.search.stage_one_worker import StageOneCompute
+    from aosr.search.stage_one_run import start_stage_one_search, resume_stage_one_search
+
+    try:
+        compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
+            StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
+                search_id=store.search_id, fem_root=store.fem_path, identity=store.identity, lock_fd=lock_fd))
+        entry = start_stage_one_search if args.command == "start" else resume_stage_one_search
+        status = entry(store, compute=compute, probe=lambda: _identity(store.project.purpose, args.capabilities),
+            registry_path=registry_path, run_date=date.today(), engine_version=store.identity.program_fingerprint)
+        return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
+    except Exception as error:
+        return _failed(store, error)
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
@@ -385,6 +422,7 @@ def _select_command(args: argparse.Namespace) -> int:
     """選入拒絕只回原文，不走會改動搜尋或細算狀態的出口。"""
     try:
         store = SearchStore.open(args.search)
+        _reject_stage_one(store, "select")
         outcome = select_refined(store, None if args.baseline else args.trial, args.data_dir)
         action = "已放進結果清單" if outcome.is_new else "已在結果清單"
         sys.stdout.write(f"{action}：代號 {outcome.run_id}\n")

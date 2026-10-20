@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_serializer, model_serializer, model_validator
 
@@ -42,6 +42,7 @@ class SearchSettings(BaseModel):
     max_workers: int = Field(ge=1, strict=True)
     budget: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
     convergence_run: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
+    stage: Literal["stage_one_fem_only"] | None = Field(default=None, exclude_if=lambda value: value is None)
     refine: RefineSettings | None = None
     feedback: FeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
@@ -67,6 +68,8 @@ class SearchSettings(BaseModel):
     def _snapshot_refine(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
         """頂層未設細算就省略，JSON 快照不增加 null，保留舊設定形狀。"""
         document: dict[str, object] = handler(self)
+        if self.stage is None:
+            document.pop("stage", None)
         if self.refine is None:
             document.pop("refine", None)
         if self.feedback is None:

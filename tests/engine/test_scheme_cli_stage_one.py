@@ -163,3 +163,23 @@ def test_each_speaker_line_prints_its_own_subtotal(
     for speaker, subtotal in subtotals.items():
         line = next(row for row in text.splitlines() if row.startswith(f"{speaker}："))
         assert line.endswith(f"合分 {subtotal}")
+
+
+@pytest.mark.parametrize("extra,kind", [([], "run"), (["--search-id", "test", "--trial-number", "3"], "search_candidate")])
+def test_stage_one_origin_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: list[str], kind: str) -> None:
+    item = cases.scheme()
+    cases.shards(monkeypatch, item)
+    path, out = tmp_path / "scheme.json", tmp_path / "result.json"
+    path.write_text(item.model_dump_json())
+    assert not scheme_cli.main([*cases.cli_args(path, out), *extra])
+    result = importlib.import_module("aosr.reporting.stage_one_result").load_stage_one_result(out)
+    assert result.origin.kind == kind
+    if extra:
+        assert result.origin.search_id == "test"
+        assert result.origin.trial_number == 3
+
+
+def test_stage_one_trial_without_search_id_is_parser_error(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as caught:
+        scheme_cli.main([*cases.cli_args(tmp_path / "scheme.json", tmp_path / "out.json"), "--trial-number", "3"])
+    assert caught.value.code == 2

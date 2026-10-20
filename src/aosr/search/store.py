@@ -179,6 +179,17 @@ class SearchStore:
         if project.scene.low_frequency_axis is None:
             project = project.model_copy(update={"scene": project.scene.model_copy(
                 update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
+        if settings.stage is not None:
+            from aosr.config.paths import config_path
+            from aosr.config.quality_targets import load_quality_targets
+            from aosr.reporting.stage_one_result import check_stage_one_prerequisites
+            from aosr.scoring.stage_one_score import stage_one_score_settings
+
+            check_stage_one_prerequisites(project)
+            try:
+                stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+            except KeyError as error:
+                raise ValueError(str(error)) from error
         check_project_furniture_layout(project)
         settings = SearchSettings.model_validate(settings.canonical())
         _check_speaker_settings(project, settings.layout)
