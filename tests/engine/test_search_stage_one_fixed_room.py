@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from collections.abc import Mapping
-from aosr.search.sampler import Outcome
+from collections.abc import Mapping, Sequence
+from aosr.search.sampler import Outcome, Proposal
 
 import pytest
 
 from aosr.config.paths import config_path
 from aosr.reporting.stage_one_result import load_stage_one_result
 from aosr.search import ledger
+from aosr.search.run import CandidateJob
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SearchIdentity, SearchStore
 from tests.engine import _search_stage_one_cases as cases
@@ -198,3 +199,26 @@ def test_cli_start_resume_and_stop_use_stage_one_factory(tmp_path: Path, monkeyp
     assert SearchStatus.model_validate_json((folder / "status.json").read_bytes()).state == "budget_exhausted"
     assert not cli.main(["stop", str(folder)])
     assert (folder / "stop").exists()
+
+
+@pytest.mark.parametrize("illegal", [0, 4])
+def test_illegal_rows_are_recorded_before_and_after_pin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, illegal: int) -> None:
+    # 試算 0 落在還沒釘比較身分的第一批、試算 4 落在已釘之後；兩種都要落帳一次、不送去算。
+    from aosr.search.constraints import Reason, Violation, to_illegal
+    from aosr.search.stage_one_run import _StageOneRunner
+    prepare = _StageOneRunner._prepare
+    def blocked(self: _StageOneRunner, proposals: Sequence[Proposal], saved: Sequence[ledger.LedgerRow]
+                ) -> tuple[dict[int, Outcome], dict[int, CandidateJob], dict[int, dict[str, float]]]:
+        outcomes, jobs, meters = prepare(self, proposals, saved)
+        if jobs.pop(illegal, None) is not None:
+            outcomes[illegal] = to_illegal((Violation(Reason.WALL_GAP, .1),))
+        return outcomes, jobs, meters
+    monkeypatch.setattr(_StageOneRunner, "_prepare", blocked)
+    store = cases.make_store(tmp_path)
+    compute = cases.FakeCompute(store, monkeypatch)
+    status = cases.run(store, compute)
+    rows = ledger.read_for(store).rows
+    assert sorted(row.trial_number for row in rows) == list(range(store.settings.budget))
+    row = next(row for row in rows if row.trial_number == illegal)
+    assert row.outcome == "illegal" and row.result_file is None and illegal not in compute.calls
+    assert status.comparison_trial == (1 if illegal == 0 else 0)
