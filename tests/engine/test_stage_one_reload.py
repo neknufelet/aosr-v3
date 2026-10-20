@@ -248,8 +248,8 @@ def test_unscored_evaluation_change_still_remeasures(saved: tuple[Path, results.
 
 def test_identity_keeps_wall_order_when_impedances_differ(saved: tuple[Path, results.StageOneResult]) -> None:
     _, stored = saved
-    # 六面各不相同、也不照大小排，換順序或排序都會對不上。
-    values = {"floor": 6.0, "ceiling": 1.0, "x0": 5.0, "xL": 2.0, "y0": 4.0, "yL": 3.0}
+    # 六面各不相同、也不照大小排，字典也故意不照牆序寫；換順序、排序或照插入順序取值都會對不上。
+    values = {"yL": 3.0, "x0": 5.0, "floor": 6.0, "xL": 2.0, "ceiling": 1.0, "y0": 4.0}
     scene = stored.scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": values})
     changed = stored.model_copy(update={"scheme": stored.scheme.model_copy(update={"scene": scene})})
     walls = results.stage_one_comparison_identity(changed).wall_and_air_assumptions[:6]
