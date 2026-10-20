@@ -19,7 +19,10 @@ from aosr.config.quality_targets import (
 
 _REGISTRY = config_path("quality_targets.toml")
 _SOURCE = "測試基線，未查證；正式值等 #358"
-_RIPPLE_SOURCE = f"{_SOURCE}；上限 8000 由票 #345/#347 拍板"
+_RIPPLE_SOURCE = (
+    f"{_SOURCE}；上限 8000 由票 #345/#347 拍板；下限 20 Hz：票 #668 老闆 2026-10-20「音色改 傾斜不改」，"
+    "對齊 #347 老闆 2026-09-18 拍的音色評估範圍 20～8,000 Hz"
+)
 _LISTENING_AREA_SOURCE = (
     f"{_SOURCE}；in_range_best 的代價 1 落在容許帶外再加上 "
     "worse_reference，不是落在 worse_reference"

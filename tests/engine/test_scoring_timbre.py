@@ -57,14 +57,14 @@ _PROVENANCE = InputProvenance(
 DbCurve = Callable[[np.ndarray], np.ndarray]
 
 
-def _setting(key: str) -> SettingEntry:
-    entry = load_quality_targets(_REGISTRY).purpose(_PURPOSE).entry(key)
+def _setting(key: str, registry: Path = _REGISTRY) -> SettingEntry:
+    entry = load_quality_targets(registry).purpose(_PURPOSE).entry(key)
     assert isinstance(entry, SettingEntry)
     return entry
 
 
-def _range_setting(key: str) -> tuple[float, float]:
-    value = _setting(key).value
+def _range_setting(key: str, registry: Path = _REGISTRY) -> tuple[float, float]:
+    value = _setting(key, registry).value
     assert isinstance(value, tuple)
     lower, upper = value
     return lower, upper
@@ -179,13 +179,32 @@ def _minus_one_db_per_octave(frequencies: np.ndarray) -> np.ndarray:
     return np.asarray(-np.log2(frequencies / frequencies[0]), dtype=np.float64)
 
 
-def _registry_with(tmp_path: Path, old: str, new: str) -> Path:
-    """複製一份登記簿、只改一處文字；改不到就紅，免得考卷靜靜比了兩份一樣的設定。"""
-    original = _REGISTRY.read_text(encoding="utf-8")
-    assert old in original
+def _registry_with(tmp_path: Path, old: str, new: str, *more: tuple[str, str]) -> Path:
+    """複製一份登記簿、改指定的幾處文字；任一處改不到就紅，免得考卷靜靜比了兩份一樣的設定。"""
+    changed = _REGISTRY.read_text(encoding="utf-8")
+    for before, after in ((old, new), *more):
+        assert before in changed
+        changed = changed.replace(before, after, 1)
+    tmp_path.mkdir(parents=True, exist_ok=True)
     changed_path = tmp_path / "quality_targets.toml"
-    changed_path.write_text(original.replace(old, new, 1), encoding="utf-8")
+    changed_path.write_text(changed, encoding="utf-8")
     return changed_path
+
+
+def _ripple_lower_raised_to_tilt_lower() -> tuple[str, str]:
+    """把起伏下限拉到傾斜擬合下限的那一處改動（造數用的設定，不是正式值）。
+
+    正式登記簿自票 #668（老闆 2026-10-20「音色改 傾斜不改」）起，起伏從頻率軸第一點算、跟診斷
+    下限重合：起伏一平滑，半窗就伸到軸外；診斷範圍裡也不再有「在兩個計分範圍外」的那一段。要考
+    這兩種情形的機制，得先在暫存登記簿裡把起伏下限拉高，讓兩者之間空出一段。
+    """
+    ripple_lower_hz, ripple_upper_hz = _range_setting("timbre_balance.ripple_range_hz")
+    tilt_lower_hz, _tilt_upper_hz = _range_setting("timbre_balance.tilt_fit_range_hz")
+    key = 'key = "timbre_balance.ripple_range_hz"\n'
+    return (
+        f"{key}value = [{ripple_lower_hz:.1f}, {ripple_upper_hz:.1f}]",
+        f"{key}value = [{tilt_lower_hz:.1f}, {ripple_upper_hz:.1f}]",
+    )
 
 
 def test_flat_curve_measures_zero_shape_and_target_deviation() -> None:
@@ -239,7 +258,8 @@ def test_linear_curve_residual_is_only_the_smoothing_width_level_gap(tmp_path: P
     """若起伏分支沒扣擬合線，純傾斜會被當成起伏；扣了之後只剩兩個平滑寬度的準位差。
 
     能量域平均對斜線會墊高一個跟視窗寬度有關的常數；傾斜與起伏兩支寬度不同，殘差就是
-    這兩個常數的差。把兩個寬度改成一樣，這個差歸零、殘差只剩捨入。
+    這兩個常數的差。把兩個寬度改成一樣，這個差歸零、殘差只剩捨入。起伏一平滑就要半窗，暫存
+    登記簿同時把起伏下限拉高（見 ``_ripple_lower_raised_to_tilt_lower``）。
     """
     input_data = _curve_input(_minus_one_db_per_octave)
     dip = _payload(_curve_input(_gaussian_feature(100.0, -3.0, 1.0 / 3.0)))
@@ -248,6 +268,7 @@ def test_linear_curve_residual_is_only_the_smoothing_width_level_gap(tmp_path: P
         tmp_path,
         'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.0',
         f'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = {tilt_width!r}',
+        _ripple_lower_raised_to_tilt_lower(),
     )
 
     assert _payload(input_data).residual_rms_db < dip.residual_rms_db
@@ -345,15 +366,21 @@ def test_one_dip_is_one_local_extremum_not_every_point_below_the_line() -> None:
 
 
 def test_ripple_smoothing_width_is_independent_of_the_tilt_branch(tmp_path: Path) -> None:
-    """起伏那一支若偷用傾斜那一支的平滑結果，改起伏的平滑寬度就不會動到殘差。"""
+    """起伏那一支若偷用傾斜那一支的平滑結果，改起伏的平滑寬度就不會動到殘差。
+
+    兩份暫存登記簿都把起伏下限拉高（起伏一平滑就要半窗），只差在起伏的平滑寬度。
+    """
+    raised_lower = _ripple_lower_raised_to_tilt_lower()
+    raw = _registry_with(tmp_path / "raw", *raised_lower)
     narrower = _registry_with(
-        tmp_path,
+        tmp_path / "narrower",
         'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.0',
         'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.08333333333333333',
+        raised_lower,
     )
     input_data = _curve_input(_gaussian_feature(100.0, -3.0, 1.0 / 3.0), point_count=481)
 
-    before = _payload(input_data)
+    before = _payload(input_data, registry=raw)
     after = _payload(input_data, registry=narrower)
 
     assert after.tilt_db_per_octave == before.tilt_db_per_octave
@@ -393,18 +420,23 @@ def test_hole_inside_scored_range_is_unavailable_and_flagged_short_coverage() ->
     assert Flag.DATA_COVERAGE_SHORT not in _evaluate(full).flags
 
 
-def test_hole_outside_scored_ranges_stays_measured_and_flagged() -> None:
-    """診斷覆蓋範圍裡的洞若完全在兩個計分範圍外，只掛覆蓋不足旗標。"""
+def test_hole_outside_scored_ranges_stays_measured_and_flagged(tmp_path: Path) -> None:
+    """診斷覆蓋範圍裡的洞若完全在兩個計分範圍外，只掛覆蓋不足旗標。
+
+    正式登記簿裡已經沒有這一段（起伏下限等於診斷下限，票 #668），用拉高起伏下限的暫存登記簿造出來。
+    """
+    registry = _registry_with(tmp_path, *_ripple_lower_raised_to_tilt_lower())
     coverage_lower_hz, _coverage_upper_hz = _range_setting(
         "timbre_balance.coverage_range_hz"
     )
     ripple_lower_hz, _ripple_upper_hz = _range_setting(
-        "timbre_balance.ripple_range_hz"
+        "timbre_balance.ripple_range_hz", registry
     )
     hole_lower_hz = coverage_lower_hz * 1.05
     hole_upper_hz = (coverage_lower_hz + ripple_lower_hz) / 2.0
+    assert hole_lower_hz < hole_upper_hz
     evaluation = _evaluate(
-        _without_span(_flat_input(), hole_lower_hz, hole_upper_hz)
+        _without_span(_flat_input(), hole_lower_hz, hole_upper_hz), registry=registry
     )
 
     assert evaluation.state is EvaluationState.MEASURED
@@ -493,16 +525,21 @@ def test_dip_touching_ripple_boundary_keeps_unknown_width() -> None:
     assert Flag.FEATURE_BOUNDARY_INCOMPLETE in evaluation.flags
 
 
-def test_short_data_range_is_flagged_but_remains_measured() -> None:
-    """診斷下緣短一段但依賴範圍完整時，仍應量測並明確掛覆蓋不足。"""
+def test_short_data_range_is_flagged_but_remains_measured(tmp_path: Path) -> None:
+    """診斷下緣短一段但依賴範圍完整時，仍應量測並明確掛覆蓋不足。
+
+    正式登記簿裡診斷下限到計分下限之間已經沒有空隙（票 #668），用拉高起伏下限的暫存登記簿造出來。
+    """
+    registry = _registry_with(tmp_path, *_ripple_lower_raised_to_tilt_lower())
     coverage_lower_hz, coverage_upper_hz = _range_setting(
         "timbre_balance.coverage_range_hz"
     )
     ripple_lower_hz, _ripple_upper_hz = _range_setting(
-        "timbre_balance.ripple_range_hz"
+        "timbre_balance.ripple_range_hz", registry
     )
     short_lower_hz = (coverage_lower_hz + ripple_lower_hz) / 2.0
-    evaluation = _evaluate(_flat_input(lower_hz=short_lower_hz))
+    assert coverage_lower_hz < short_lower_hz
+    evaluation = _evaluate(_flat_input(lower_hz=short_lower_hz), registry=registry)
 
     assert evaluation.state == EvaluationState.MEASURED
     assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
