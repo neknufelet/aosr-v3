@@ -118,8 +118,14 @@ class StageOneResult(BaseModel):
             raise ValueError("結果低頻軸與方案不同")
         if self.wall_assumption_text != wall_assumption_text(self.scheme):
             raise ValueError("結果牆面假設與方案不同")
-        if {item.speaker_id for item in self.curves} != set(self.scheme.speakers):
-            raise ValueError("結果原始曲線的喇叭與方案不同")
+        speakers = sorted(self.scheme.speakers)
+        for part, ids in (("原始曲線", [item.speaker_id for item in self.curves]),
+                          ("評估", [item.speaker_id for item in self.evaluation.speakers]),
+                          ("分數", [item.speaker_id for item in self.score.channels])):
+            if sorted(ids) != speakers:
+                raise ValueError(f"結果{part}的喇叭與方案不同（不可多、不可少、不可重複）")
+        if self.score.worst_channel is not None and self.score.worst_channel.speaker_id not in speakers:
+            raise ValueError("結果分數的最差聲道不是方案裡的喇叭")
         frequencies = tuple(float(value).hex() for value in low_frequency_axis_frequencies(axis)[0])
         points = {point.receiver_id: point.direction_relative_to_primary for point in self.scheme.receiver_set.points}
         for speaker in self.curves:
@@ -131,6 +137,21 @@ class StageOneResult(BaseModel):
                 if (seat.report_id != f"fem-{speaker.speaker_id}-{seat.receiver_id}"
                         or tuple(value.hex() for value in seat.frequencies_hz) != frequencies):
                     raise ValueError("結果原始曲線的代號或頻率與方案不同")
+        primary_id = self.scheme.receiver_set.primary.receiver_id
+        surrounding = {(point.receiver_id, point.direction_relative_to_primary)
+                       for point in self.scheme.receiver_set.points if point.receiver_id != primary_id}
+        for item in self.evaluation.speakers:
+            payload = item.payload
+            if payload is None:
+                continue
+            # 評估裡指的每一條曲線與方向都要指回這份結果自己存的曲線（代號規則同上）。
+            if (payload.primary_report_id != f"fem-{item.speaker_id}-{primary_id}"
+                    or any(entry.report_id != f"fem-{item.speaker_id}-{entry.receiver_id}" for entry in payload.directions)
+                    or {(entry.receiver_id, entry.direction_relative_to_primary) for entry in payload.directions}
+                    != surrounding or len(payload.directions) != len(surrounding)
+                    or points.get(payload.worst_direction.receiver_id)
+                    != payload.worst_direction.direction_relative_to_primary):
+                raise ValueError("結果評估引用的曲線、座位或方向跟原始曲線對不上")
         if (self.evaluation.candidate_id != self.scheme.scheme_id or self.score.candidate_id != self.scheme.scheme_id
                 or self.evaluation.primary_receiver_id != self.scheme.receiver_set.primary.receiver_id):
             raise ValueError("結果評估與分數的方案或主位代號不同")

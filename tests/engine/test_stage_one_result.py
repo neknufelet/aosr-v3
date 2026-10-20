@@ -1,6 +1,7 @@
 """第一階段只合併有限元素原值；評估、分數與結果格式各有獨立裁判。"""
 from __future__ import annotations
 
+import copy
 import importlib
 from pathlib import Path
 
@@ -172,7 +173,11 @@ def test_energies_must_cover_exactly_every_speaker_and_seat(monkeypatch: pytest.
             module.stage_one_input(item, damaged, parts[0].fem_key)
 
 
-@pytest.mark.parametrize("damage", ["wall", "speakers", "seats", "report-id", "frequency", "candidate"])
+@pytest.mark.parametrize("damage", [
+    "wall", "speakers", "seats", "report-id", "frequency", "candidate", "duplicate-curves",
+    "evaluation-speaker", "score-speaker", "worst-channel", "primary-report", "direction-report",
+    "direction-label", "worst-direction", "duplicate-direction",
+])
 def test_result_file_that_disagrees_with_its_scheme_is_refused(
         monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     """結果檔各欄都要對得上它自己帶的方案；只改一格就拒收。"""
@@ -194,7 +199,31 @@ def test_result_file_that_disagrees_with_its_scheme_is_refused(
         first["primary"]["report_id"] = "fem-other-main"
     elif damage == "frequency":
         first["primary"]["frequencies_hz"][0] += 0.5
-    else:
+    elif damage == "candidate":
         data["evaluation"]["candidate_id"] = "other"
+    elif damage == "duplicate-curves":
+        data["curves"].append(copy.deepcopy(first))
+    elif damage == "evaluation-speaker":
+        data["evaluation"]["speakers"][0]["speaker_id"] = "center"
+    elif damage == "score-speaker":
+        data["score"]["channels"][0]["speaker_id"] = "center"
+    elif damage == "worst-channel":
+        data["score"]["worst_channel"]["speaker_id"] = "center"
+    else:
+        payload = data["evaluation"]["speakers"][0]["payload"]
+        one, two = payload["directions"][:2]
+        if damage == "primary-report":
+            payload["primary_report_id"] = one["report_id"]
+        elif damage == "direction-report":
+            one["report_id"] = two["report_id"]
+        elif damage == "duplicate-direction":
+            payload["directions"].append(copy.deepcopy(one))
+        elif damage == "direction-label":
+            one["direction_relative_to_primary"], two["direction_relative_to_primary"] = (
+                two["direction_relative_to_primary"], one["direction_relative_to_primary"])
+        else:
+            worst = payload["worst_direction"]
+            other = next(entry for entry in payload["directions"] if entry["receiver_id"] != worst["receiver_id"])
+            worst["direction_relative_to_primary"] = other["direction_relative_to_primary"]
     with pytest.raises(ValidationError):
         module.StageOneResult.model_validate(data)
