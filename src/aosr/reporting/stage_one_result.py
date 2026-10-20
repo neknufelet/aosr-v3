@@ -25,7 +25,9 @@ from aosr.scoring.stage_one_low_frequency_contract import (
     STAGE_ONE_SURROUNDING_DIRECTIONS, StageOneLowFrequencyEvaluation, StageOneLowFrequencyInput,
     StageOneSeatCurve, StageOneSpeakerCurves,
 )
-from aosr.scoring.stage_one_score import StageOneScore, score_stage_one, stage_one_score_settings
+from aosr.scoring.stage_one_score import (
+    StageOneScore, StageOneScoreSettings, score_stage_one, stage_one_score_settings,
+)
 
 
 def check_stage_one_prerequisites(scheme: Scheme) -> None:
@@ -93,7 +95,11 @@ def stage_one_input(
 
 
 class StageOneResult(BaseModel):
-    """只跑有限元素的第一階段結果；與第二階段結果檔互相拒收。"""
+    """只跑有限元素的第一階段結果；與第二階段結果檔互相拒收。
+
+    讀回時守三層：每份清單與代號都對回方案與存下的原始曲線；分數用存下的評估與設定逐位重算
+    （純 Python 浮點，換機器也逐位相同）；評估跟原始曲線的數值是否一致，由讀回重評那一支從曲線重算判。
+    """
 
     model_config = FROZEN
     schema_version: Literal["aosr.stage_one_result.v1"]
@@ -107,6 +113,7 @@ class StageOneResult(BaseModel):
     curves: tuple[StageOneSpeakerCurves, ...] = Field(min_length=1)
     evaluation: StageOneLowFrequencyEvaluation
     score: StageOneScore
+    score_settings: StageOneScoreSettings
     wall_assumption_text: str
     run_date: date
 
@@ -120,12 +127,9 @@ class StageOneResult(BaseModel):
             raise ValueError("結果牆面假設與方案不同")
         speakers = sorted(self.scheme.speakers)
         for part, ids in (("原始曲線", [item.speaker_id for item in self.curves]),
-                          ("評估", [item.speaker_id for item in self.evaluation.speakers]),
-                          ("分數", [item.speaker_id for item in self.score.channels])):
+                          ("評估", [item.speaker_id for item in self.evaluation.speakers])):
             if sorted(ids) != speakers:
                 raise ValueError(f"結果{part}的喇叭與方案不同（不可多、不可少、不可重複）")
-        if self.score.worst_channel is not None and self.score.worst_channel.speaker_id not in speakers:
-            raise ValueError("結果分數的最差聲道不是方案裡的喇叭")
         frequencies = tuple(float(value).hex() for value in low_frequency_axis_frequencies(axis)[0])
         points = {point.receiver_id: point.direction_relative_to_primary for point in self.scheme.receiver_set.points}
         for speaker in self.curves:
@@ -155,6 +159,11 @@ class StageOneResult(BaseModel):
         if (self.evaluation.candidate_id != self.scheme.scheme_id or self.score.candidate_id != self.scheme.scheme_id
                 or self.evaluation.primary_receiver_id != self.scheme.receiver_set.primary.receiver_id):
             raise ValueError("結果評估與分數的方案或主位代號不同")
+        if self.score_settings.purpose != self.scheme.purpose:
+            raise ValueError("結果存下的計分設定不是這個方案用途的")
+        # 狀態、原因、分項、小計、合計、最差聲道、設定指紋全部由評估與設定重算後逐位相等，不逐格各寫一條。
+        if score_stage_one(self.evaluation, self.score_settings) != self.score:
+            raise ValueError("結果分數跟存下的評估與計分設定逐位重算不同")
         return self
 
 
@@ -181,7 +190,7 @@ def run_stage_one(
         scheme=scheme, origin=origin or ResultOrigin(kind="run"), engine_commit=engine_commit,
         physics_identity=physics_identity, program_fingerprint=program_fingerprint,
         low_frequency_axis=data.low_frequency_axis, curves=data.speakers, evaluation=evaluation,
-        score=score_stage_one(evaluation, settings), wall_assumption_text=wall_assumption_text(scheme), run_date=run_date)
+        score=score_stage_one(evaluation, settings), score_settings=settings, wall_assumption_text=wall_assumption_text(scheme), run_date=run_date)
 
 
 def save_stage_one_result(result: StageOneResult, path: Path) -> None:

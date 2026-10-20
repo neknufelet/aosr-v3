@@ -12,6 +12,7 @@ from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_freq
 from aosr.geometry.shoebox import Point, Wall
 from aosr.reporting.evaluation import load_result
 from aosr.reporting import fem_slices
+from aosr.reporting.stage_one_result import StageOneResult, run_stage_one
 from aosr.scoring.receiver_set import ReceiverRole
 from aosr.scoring.stage_one_low_frequency_contract import StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves
 from aosr.scoring.stage_one_score import score_stage_one_input, stage_one_score_settings
@@ -173,19 +174,21 @@ def test_energies_must_cover_exactly_every_speaker_and_seat(monkeypatch: pytest.
             module.stage_one_input(item, damaged, parts[0].fem_key)
 
 
+def _saved(monkeypatch: pytest.MonkeyPatch) -> StageOneResult:
+    """一份合法結果；先確認它的 JSON 形本身讀得回來，竄改後才有意義。"""
+    item = cases.scheme()
+    result = run_stage_one(item, shards=cases.shards(monkeypatch, item), **cases.run_kwargs())
+    StageOneResult.model_validate(result.model_dump(mode="json"))
+    return result
+
+
 @pytest.mark.parametrize("damage", [
-    "wall", "speakers", "seats", "report-id", "frequency", "candidate", "duplicate-curves",
-    "evaluation-speaker", "score-speaker", "worst-channel", "primary-report", "direction-report",
-    "direction-label", "worst-direction", "duplicate-direction",
+    "wall", "speakers", "seats", "report-id", "frequency", "candidate", "duplicate-curves", "evaluation-speaker",
 ])
 def test_result_file_that_disagrees_with_its_scheme_is_refused(
         monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
-    """結果檔各欄都要對得上它自己帶的方案；只改一格就拒收。"""
-    module = importlib.import_module("aosr.reporting.stage_one_result")
-    item = cases.scheme()
-    result = module.run_stage_one(item, shards=cases.shards(monkeypatch, item), **cases.run_kwargs())
-    data = result.model_dump(mode="json")
-    module.StageOneResult.model_validate(data)
+    """第一層：清單與代號都要對回它自己帶的方案；只改一格就拒收。"""
+    data = _saved(monkeypatch).model_dump(mode="json")
     first = data["curves"][0]
     if damage == "wall":
         data["wall_assumption_text"] += "。"
@@ -203,27 +206,64 @@ def test_result_file_that_disagrees_with_its_scheme_is_refused(
         data["evaluation"]["candidate_id"] = "other"
     elif damage == "duplicate-curves":
         data["curves"].append(copy.deepcopy(first))
-    elif damage == "evaluation-speaker":
-        data["evaluation"]["speakers"][0]["speaker_id"] = "center"
-    elif damage == "score-speaker":
-        data["score"]["channels"][0]["speaker_id"] = "center"
-    elif damage == "worst-channel":
-        data["score"]["worst_channel"]["speaker_id"] = "center"
     else:
-        payload = data["evaluation"]["speakers"][0]["payload"]
-        one, two = payload["directions"][:2]
-        if damage == "primary-report":
-            payload["primary_report_id"] = one["report_id"]
-        elif damage == "direction-report":
-            one["report_id"] = two["report_id"]
-        elif damage == "duplicate-direction":
-            payload["directions"].append(copy.deepcopy(one))
-        elif damage == "direction-label":
-            one["direction_relative_to_primary"], two["direction_relative_to_primary"] = (
-                two["direction_relative_to_primary"], one["direction_relative_to_primary"])
-        else:
-            worst = payload["worst_direction"]
-            other = next(entry for entry in payload["directions"] if entry["receiver_id"] != worst["receiver_id"])
-            worst["direction_relative_to_primary"] = other["direction_relative_to_primary"]
+        data["evaluation"]["speakers"][0]["speaker_id"] = "center"
     with pytest.raises(ValidationError):
-        module.StageOneResult.model_validate(data)
+        StageOneResult.model_validate(data)
+
+
+@pytest.mark.parametrize("damage", [
+    "primary-report", "direction-report", "duplicate-direction", "direction-label", "worst-direction",
+])
+def test_evaluation_reference_that_points_off_the_curves_is_refused(
+        monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
+    """第一層：評估裡指的曲線、座位、方向都要指回存下的原始曲線。"""
+    data = _saved(monkeypatch).model_dump(mode="json")
+    payload = data["evaluation"]["speakers"][0]["payload"]
+    one, two = payload["directions"][:2]
+    if damage == "primary-report":
+        payload["primary_report_id"] = one["report_id"]
+    elif damage == "direction-report":
+        one["report_id"] = two["report_id"]
+    elif damage == "duplicate-direction":
+        payload["directions"].append(copy.deepcopy(one))
+    elif damage == "direction-label":
+        one["direction_relative_to_primary"], two["direction_relative_to_primary"] = (
+            two["direction_relative_to_primary"], one["direction_relative_to_primary"])
+    else:
+        worst = payload["worst_direction"]
+        other = next(entry for entry in payload["directions"] if entry["receiver_id"] != worst["receiver_id"])
+        worst["direction_relative_to_primary"] = other["direction_relative_to_primary"]
+    with pytest.raises(ValidationError):
+        StageOneResult.model_validate(data)
+
+
+@pytest.mark.parametrize("damage", [
+    "score-speaker", "worst-channel", "evaluation-unavailable", "channel-components",
+    "total-duplicate-component", "settings-weight", "settings-fingerprint", "settings-purpose",
+])
+def test_score_that_does_not_recompute_from_the_saved_evaluation_is_refused(
+        monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
+    """第二層：分數要等於用存下的評估與計分設定逐位重算的結果（審查複現的「不可估卻有分數」在這裡）。"""
+    data = _saved(monkeypatch).model_dump(mode="json")
+    score = data["score"]
+    if damage == "score-speaker":
+        score["channels"][0]["speaker_id"] = "center"
+    elif damage == "worst-channel":
+        score["worst_channel"]["speaker_id"] = "center"
+    elif damage == "evaluation-unavailable":
+        data["evaluation"]["speakers"][0].update(
+            {"state": "unavailable", "payload": None, "reason_codes": ["non_positive_energy"]})
+    elif damage == "channel-components":
+        score["channels"][0]["components"] = score["channels"][0]["components"][:1]
+    elif damage == "total-duplicate-component":
+        score["components"].append(copy.deepcopy(score["components"][0]))
+    elif damage == "settings-weight":
+        name, _weight = data["score_settings"]["weights"][0]
+        data["score_settings"]["weights"][0] = [name, 2.0]
+    elif damage == "settings-fingerprint":
+        data["score_settings"]["fingerprint"] = "0" * 64
+    else:
+        data["score_settings"]["purpose"] = "other_room"
+    with pytest.raises(ValidationError):
+        StageOneResult.model_validate(data)
