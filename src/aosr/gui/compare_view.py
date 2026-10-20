@@ -37,6 +37,7 @@ from aosr.scoring.contract import QualityCategory
 from aosr.scoring.reflections_cost import comparison_support
 from aosr.scoring.ranking_models import NotComparableRow, RankableRow, RankingResult
 from aosr.scoring.recommendation import RecommendationStatus, ReviewStatus
+from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT
 
 
 class SideIdentity(ViewModel):
@@ -167,6 +168,8 @@ class CompareView(ViewModel):
     labels: dict[str, str]
     # 頻響疊圖的音量基準但書：頁面、匯出圖片、摘要 CSV 共用這一句，匯出去的東西也帶著它。
     level_note: str
+    # 第一階段那句理想聲源標示，跟結果頁同一句（字串只住第一階段契約）；摘要判哪一份比較好，排名就帶這個前提。
+    ideal_source_note: str
     run_notices: tuple[str, ...]
 
 
@@ -899,4 +902,4 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         overlay=overlay, categories=categories, table=table,
         notes=(REVERBERATION_ROOM_NOTE, *fallback_notes, *_setup_notes(a, view_a, b, view_b),
                *((FURNITURE_REASON,) if a.scheme.furniture or b.scheme.furniture else ())), labels=LABELS,
-        level_note=LEVEL_NOTE, run_notices=notices)
+        level_note=LEVEL_NOTE, ideal_source_note=IDEAL_SOURCE_ASSUMPTION_TEXT, run_notices=notices)

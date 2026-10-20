@@ -16,6 +16,8 @@ from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine._search_run_cases import FakeCompute, make_store, run
 from tests.engine._search_blocked_cases import SavedFurnitureCompute, blocked_store
 FURNITURE_MODEL_NOTE = "家具模型：近似"  # 決策紙第 13 條原文。
+# 老闆 2026-10-19 原話逐字（#558 第 ② 塊第 3 題之二）；考卷自己抄一份，不從程式讀。
+IDEAL_SOURCE_SENTENCE = "未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同"
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.result import save_result
 from tests.engine.test_scheme_pipeline import _run_control
@@ -168,5 +170,22 @@ def test_modal_attachment_polling_and_screenshot(tmp_path: Path, browser: Browse
         assert modal_box["width"] == stage_box["width"]
         page.screenshot(path=str(tmp_path / "683-modal-progress.png"), full_page=True)
         page.locator("#modal").screenshot(path=str(tmp_path / "683-modal-block.png"))
+        _assert_text_is_formatted(page)
+        _assert_quiet(watched)
+
+
+def test_stage_block_shows_the_ideal_source_sentence(tmp_path: Path, browser: Browser) -> None:
+    """票 #668：搜尋與細算的名次也只適用於理想聲源基準；「目前階段」那一塊每一場都印那一句、一開就看得到。"""
+    store, registry = make_store(tmp_path, budget=3)
+    run(store, registry, FakeCompute(store))
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}") as watched:
+        page = watched.page
+        page.locator("#stage").wait_for()
+        line = page.locator("#stage p", has_text=IDEAL_SOURCE_SENTENCE)
+        # 定位器是嚴格模式：印成兩行、或一行都沒有，inner_text 都會直接紅。
+        assert line.inner_text() == IDEAL_SOURCE_SENTENCE
+        assert line.is_visible()
+        # 不是警示：這一行不標紅。
+        assert "notice" not in (line.get_attribute("class") or "")
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
