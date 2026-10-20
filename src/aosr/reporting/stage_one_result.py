@@ -1,9 +1,11 @@
 """第一階段有限元素結果：獨立格式、保留原始能量與理想聲源和牆面假設。"""
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, fields
 from datetime import date
 from pathlib import Path
 from typing import Literal, Self
@@ -17,6 +19,7 @@ from aosr.config.quality_targets import QualityTargets
 from aosr.geometry.shoebox import Wall
 from aosr.reporting import fem_slices
 from aosr.reporting.fem_slices import FemKey, FemShard
+from aosr.reporting.evaluation import ResultStanding
 from aosr.reporting.result import ResultOrigin
 from aosr.reporting.scheme import FROZEN, Scheme
 from aosr.scoring.receiver_set import ReceiverRole
@@ -109,7 +112,7 @@ class StageOneResult(BaseModel):
 
     讀回時守三層：每份清單與代號都對回方案與存下的原始曲線；分數用存下的評估與設定逐位重算——
     計分只用 Python 浮點的乘除與 ``math.fsum``，在每步只捨入一次的機器上逐位相同，有雙重捨入的機器
-    直接拒收、不判成壞檔；評估跟原始曲線的數值是否一致，由讀回重評那一支從曲線重算判。存下的計分設定
+    直接拒收、不判成壞檔；評估跟原始曲線的數值是否一致，由 ``reload_stage_one_result`` 從曲線重算判。存下的計分設定
     只守形狀（見 ``StageOneScoreSettings``），它是不是當時登記簿那一份，讀回時不查現行登記簿。
     """
 
@@ -224,3 +227,81 @@ def save_stage_one_result(result: StageOneResult, path: Path) -> None:
 def load_stage_one_result(path: Path) -> StageOneResult:
     """讀回第一階段獨立格式，不接受第二階段結果。"""
     return StageOneResult.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+@dataclass(frozen=True)
+class LoadedStageOneResult:
+    """現行量法與合分重建的結果、讀回狀態，以及通過完整性檢查的存檔原件。"""
+
+    result: StageOneResult
+    standing: ResultStanding
+    stored: StageOneResult
+
+
+def reload_stage_one_result(
+    path: Path, *, registry: QualityTargets, physics_identity: str,
+) -> LoadedStageOneResult:
+    """只用存下的曲線重評，不重新求解；先判物理，再判量測、合分是否改變。"""
+    document = json.loads(path.read_text(encoding="utf-8"))
+    version = document.get("schema_version") if isinstance(document, dict) else None
+    if version != "aosr.stage_one_result.v1":
+        if isinstance(version, str) and version.startswith("aosr.scheme_result.v"):
+            raise ValueError("這是第二階段結果檔，請用 compare")
+        raise ValueError("認不得的結果檔格式")
+    stored = load_stage_one_result(path)
+    data = StageOneLowFrequencyInput(candidate_id=stored.scheme.scheme_id,
+        low_frequency_axis=stored.low_frequency_axis, speakers=stored.curves)
+    try:
+        settings = stage_one_score_settings(registry, stored.scheme.purpose)
+    except KeyError as exc:
+        raise ValueError(f"品質登記簿第一階段那一段找不到方案用途或設定：{stored.scheme.purpose}；{exc}") from exc
+    evaluation = evaluate_stage_one_low_frequency(data, scoring_range_hz=settings.scored_range_hz)
+    score = score_stage_one(evaluation, settings)
+    if stored.physics_identity != physics_identity:
+        standing = ResultStanding.NEEDS_PHYSICS
+    elif evaluation != stored.evaluation:
+        standing = ResultStanding.REMEASURED
+    elif score != stored.score:
+        standing = ResultStanding.RERANKED
+    else:
+        standing = ResultStanding.CURRENT
+    result = StageOneResult.model_validate({**stored.model_dump(), "evaluation": evaluation,
+        "score": score, "score_settings": settings})
+    return LoadedStageOneResult(result=result, standing=standing, stored=stored)
+
+
+@dataclass(frozen=True)
+class StageOneComparisonIdentity:
+    """同表必須固定的量法、聲道、相對座位與材料；房型與絕對擺位留給比較。"""
+
+    physics_identity: str = field(metadata={"label": "物理身分"})
+    score_version: str = field(metadata={"label": "合分版本"})
+    evaluator_version: str = field(metadata={"label": "評估器版本"})
+    settings_fingerprint: str = field(metadata={"label": "合分設定指紋"})
+    channel_group_fingerprint: str = field(metadata={"label": "聲道組指紋"})
+    receiver_layout_fingerprint: str = field(metadata={"label": "座位相對佈局"})
+    low_frequency_axis: LowFrequencyAxis = field(metadata={"label": "低頻軸"})
+    energy_column: str = field(metadata={"label": "能量欄"})
+    wall_and_air_assumptions: tuple[str, ...] = field(metadata={"label": "牆面與空氣假設"})
+
+
+def stage_one_comparison_identity(result: StageOneResult) -> StageOneComparisonIdentity:
+    """六面依牆面固定順序、空氣條件逐位取十六進位浮點字串。"""
+    scene = result.scheme.scene
+    walls = scene.impedance_pa_s_per_m_by_wall
+    if walls is None:
+        raise ValueError("第一階段比較缺少六面固定阻抗")
+    wall_and_air = (*(float(walls[wall.wall_name()]).hex() for wall in Wall.all()),
+                   float(scene.density_kg_m3).hex(), float(scene.sound_speed_m_s).hex())
+    return StageOneComparisonIdentity(
+        physics_identity=result.physics_identity, score_version=result.score.score_version,
+        evaluator_version=result.evaluation.evaluator_version, settings_fingerprint=result.score.settings_fingerprint,
+        channel_group_fingerprint=result.scheme.channel_group.fingerprint,
+        receiver_layout_fingerprint=result.scheme.receiver_set.layout_fingerprint,
+        low_frequency_axis=result.low_frequency_axis, energy_column=result.evaluation.energy_column,
+        wall_and_air_assumptions=wall_and_air)
+
+
+def identity_differences(a: StageOneComparisonIdentity, b: StageOneComparisonIdentity) -> tuple[str, ...]:
+    """逐欄比身分，以白話欄名指出不能同表的原因；空清單代表可比。"""
+    return tuple(str(item.metadata["label"]) for item in fields(a) if getattr(a, item.name) != getattr(b, item.name))

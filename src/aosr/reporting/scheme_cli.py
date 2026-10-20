@@ -54,6 +54,9 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("results", type=Path, nargs="+")
     compare.add_argument("--capabilities", type=Path, required=True)
     compare.add_argument("--run-date", type=date.fromisoformat)
+    stage_compare = sub.add_parser("stage-one-compare", help="讀回重評並排比較第一階段結果")
+    stage_compare.add_argument("results", type=Path, nargs="+")
+    stage_compare.add_argument("--capabilities", type=Path, required=True)
     identity = sub.add_parser("identity", help="印物理身分與整支程式指紋")
     identity.add_argument("--capabilities", type=Path, required=True)
     modal = sub.add_parser("modal", help="低頻模態診斷，不計分；共用快取路徑必給")
@@ -301,6 +304,75 @@ def _stage_one(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_stage_one_comparison_result(result: StageOneResult) -> None:
+    """每份列自己的聲道分項與合分，不可估時保留原因碼。"""
+    print(f"方案 {result.scheme.scheme_id}")
+    channels = {channel.speaker_id: channel for channel in result.score.channels}
+    for speaker in result.evaluation.speakers:
+        payload = speaker.payload
+        channel = channels[speaker.speaker_id]
+        if payload is None:
+            print(f"{speaker.speaker_id}：不可估；原因 {'、'.join(reason.value for reason in speaker.reason_codes)}")
+        else:
+            print(f"{speaker.speaker_id}：主項 {payload.own_line_ripple_rms_db} dB；"
+                  f"穩健性 {payload.seat_robustness_rms_db} dB；合分小計 {channel.screening_subtotal}")
+    if result.score.screening_total is None:
+        print(f"第一階段合分 不可估；原因 {'、'.join(reason.value for reason in result.score.reason_codes)}")
+    else:
+        print(f"第一階段合分 {result.score.screening_total}")
+
+
+def _stage_one_comparison_table(entries: list[tuple[Path, StageOneResult]]) -> None:
+    """用現行合分由小到大排，不可估放最後且不給名次。"""
+    ordered = sorted(entries, key=lambda entry: (
+        entry[1].score.screening_total is None,
+        entry[1].score.screening_total if entry[1].score.screening_total is not None else float("inf")))
+    print("名次 | 檔名 | 方案代號 | 合分 | 主項（逐聲道平均） | 穩健性（逐聲道平均） | 最差聲道")
+    rank = 0
+    for path, result in ordered:
+        score = result.score
+        if score.screening_total is None:
+            print(f"— | {path.name} | {result.scheme.scheme_id} | 不可估 | — | — | —")
+            continue
+        rank += 1
+        values = {item.name: item.value_db for item in score.components}
+        worst = score.worst_channel.speaker_id if score.worst_channel is not None else "—"
+        print(f"{rank} | {path.name} | {result.scheme.scheme_id} | {score.screening_total} | "
+              f"{values['own_line_ripple_rms_db']} | {values['seat_robustness_rms_db']} | {worst}")
+
+
+def _stage_one_compare(args: argparse.Namespace) -> int:
+    """只收第一階段結果，重評後先查身分；拒同表是正常結論。"""
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.config.paths import config_path
+    from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.physics_identity import physics_identity
+    from aosr.reporting.stage_one_result import identity_differences, reload_stage_one_result, stage_one_comparison_identity
+    table = load_capabilities(args.capabilities)
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    physics = physics_identity(capabilities=table, directivity=directivity)
+    registry = load_quality_targets(config_path("quality_targets.toml"))
+    loaded = [reload_stage_one_result(path, registry=registry, physics_identity=physics) for path in args.results]
+    entries = [(path, item.result) for path, item in zip(args.results, loaded, strict=True)]
+    for path, item in zip(args.results, loaded, strict=True):
+        print(f"{path.name} | 讀回等級 {item.standing.value}")
+        _print_stage_one_comparison_result(item.result)
+    first_path, first = entries[0]
+    identity = stage_one_comparison_identity(first)
+    comparable = True
+    for path, result in entries[1:]:
+        differences = identity_differences(identity, stage_one_comparison_identity(result))
+        if differences:
+            comparable = False
+            print(f"不能同表：{path.name} 跟 {first_path.name} 的 {'、'.join(differences)} 不同")
+    if comparable:
+        _stage_one_comparison_table(entries)
+        print(first.wall_assumption_text)
+        print(first.score.assumption_text)
+    return 0
+
+
 def _comparison_table(results: list[SchemeResult], ranking: RankingResult, *, own_costs: bool = False,
                       notes: dict[str, dict[QualityCategory, str]] | None = None) -> None:
     """同一類橫向列各份代價；不能同表的格子明印狀態。"""
@@ -448,6 +520,14 @@ def main(argv: list[str] | None = None) -> int:
         return _execute_calculation(args)
     if args.command == "identity":
         return _identity(args)
+    if args.command == "stage-one-compare":
+        if len(args.results) < 2:
+            parser.error("stage-one-compare 至少需要兩份結果")
+        try:
+            return _stage_one_compare(args)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 1
     if len(args.results) < 2:
         parser.error("compare 至少需要兩份結果")
     return _compare(args)
@@ -495,6 +575,7 @@ if TYPE_CHECKING:
     from aosr.config.directivity_defaults import DirectivityDefaults
     from aosr.reporting.fem_slices import FemShard
     from aosr.reporting.result import ResultOrigin, SchemeResult
+    from aosr.reporting.stage_one_result import StageOneResult
     from aosr.scoring.ranking_models import RankingResult
     from aosr.scoring.contract import CategoryEvaluation, QualityCategory
 
