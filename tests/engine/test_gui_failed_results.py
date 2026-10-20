@@ -200,9 +200,10 @@ def test_result_notice_only_for_unfinished_and_survives_rejection(
 
 def _assert_finished_control(data: dict[str, object]) -> None:
     # 主對話於改動前主線 8f99845 用同一組 pair 實跑取得；答案不從 build_compare_view 重算。
+    # #668（音色起伏計分範圍下限 40→20 Hz）：只換品質登記簿回改動前那份同跑仍是 0.519，新登記簿重錄為 0.507。
     table = data["table"]
     assert isinstance(table, dict)
-    assert table["verdict_text"] == "A 比較好：總代價比 B 低 0.519"
+    assert table["verdict_text"] == "A 比較好：總代價比 B 低 0.507"
     assert table["better"] == "a"
     categories = data["categories"]
     assert isinstance(categories, list)

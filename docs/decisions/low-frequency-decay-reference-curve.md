@@ -1,7 +1,7 @@
 ---
 title: 低頻拖尾的參考曲線：專用兩聲道聆聽室以 Fazenda 2015 音樂線為工程目標
 date_created: 2026-10-06
-date_modified: 2026-10-06
+date_modified: 2026-10-20
 status: accepted
 kind: governance
 supersedes: ""
@@ -43,7 +43,7 @@ summary: "低頻拖尾從哪裡開始算超出：專用兩聲道聆聽室的預�
    - 只有錨點與內插、沒有延伸；32～200 Hz 以外未評估。
 4. 範圍外照方法紙第 9 條，不外推。
    - 32 Hz 以下、250 Hz 以上未評估：讀值零件回空值，報表標「未評估」，不進分數，也不顯示成通過。
-   - 40 Hz 以下的頻響峰與 32 Hz 以下的共振，目前沒有任何一類的代價看得到，另記 #668。
+   - 頻響峰：2026-10-20 起音色起伏從 20 Hz 起算（#668），20～40 Hz 的頻響峰（含 32 Hz 以下共振造成的峰）已由起伏計到；32 Hz 以下共振的拖尾照上一行未評估；20 Hz 以下不在報表頻率軸上，任何一類的代價都看不到。
 5. T60 是單一共振衰減 60 dB 的秒數。原文的定義是「time taken for an individual resonance to reduce in amplitude by 60dB」，跟方法紙鎖的 T60＝3 ln 10／Im ω 是同一個量。
 6. 數字只住品質登記簿 `src/aosr/config/data/quality_targets.toml`。
    - 六條都升 calibrated、帶結構化出處；`verification_digest` 是工作區 669-lf-reference-curve 查證紀錄的整檔 sha256；紀錄寫完即凍結，更正另寫新檔。審查後補引兩句原文，由補充紀錄承接，延伸值與人工線那三條改指補充紀錄。

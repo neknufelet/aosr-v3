@@ -163,6 +163,7 @@ function drawCategories() {
   $("ranking-state").textContent = view.ranking_text;
   $("ranking-approximation").textContent = view.ranking_approximation_text;
   $("ranking-approximation").hidden = !view.ranking_approximation_text;
+  $("ideal-source-note").textContent = view.ideal_source_note;
   $("cost-note").textContent = view.cost_note;
   table($("categories"), ["類別", "狀態", "代價", "注意事項", "說明"],
     view.categories.map((item) => [label(item.category), item.state_label, item.cost_text,

@@ -222,6 +222,23 @@ def _registry_with_limits(directory: Path, name: str, limit_db: str) -> Path:
     return path
 
 
+def _registry_with_ripple_lower_at_tilt_lower(directory: Path) -> Path:
+    """複製正式登記簿、只把起伏下限拉到傾斜擬合下限（造數用）；改不到就紅。"""
+    text = _REGISTRY_PATH.read_text(encoding="utf-8")
+    purpose = load_quality_targets(_REGISTRY_PATH).purpose(_PURPOSE)
+    ripple = purpose.entry("timbre_balance.ripple_range_hz")
+    tilt = purpose.entry("timbre_balance.tilt_fit_range_hz")
+    assert isinstance(ripple, SettingEntry) and isinstance(ripple.value, tuple)
+    assert isinstance(tilt, SettingEntry) and isinstance(tilt.value, tuple)
+    key = 'key = "timbre_balance.ripple_range_hz"\n'
+    old = f"{key}value = [{float(ripple.value[0]):.1f}, {float(ripple.value[1]):.1f}]"
+    assert old in text
+    new = f"{key}value = [{float(tilt.value[0]):.1f}, {float(ripple.value[1]):.1f}]"
+    path = directory / "ripple-lower-raised.toml"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    return path
+
+
 @pytest.fixture(scope="module")
 def integrated_candidates() -> tuple[_IntegratedCandidate, ...]:
     """三個材料候選只算一次；每一題仍各自重跑評估與排名入口以外的判斷。"""
@@ -527,14 +544,17 @@ def test_official_baseline_registry_marks_the_whole_real_result_uncalibrated(
 
 
 def test_report_axis_short_of_registry_ceiling_keeps_coverage_flag_on_rankable_row(
-    integrated_candidates: tuple[_IntegratedCandidate, ...],
+    integrated_candidates: tuple[_IntegratedCandidate, ...], tmp_path: Path,
 ) -> None:
     """報表細軸沒蓋滿診斷覆蓋範圍時，覆蓋不足標記必須從評估一路留在可排名列。
 
     正式細軸現在蓋到起伏計分上限（票 #347），高端不再短；只有診斷下限（20 Hz）到計分下限之間
-    那一段可以短而仍可估，所以拿掉報表低端的點來造例子。
+    那一段可以短而仍可估，所以拿掉報表低端的點來造例子。正式登記簿自票 #668 起起伏下限等於
+    診斷下限、那一段沒有了，所以評估與排名都用一份把起伏下限拉到傾斜擬合下限的暫存登記簿
+    （造數用的設定，不是正式值）。
     """
-    registry = load_quality_targets(_REGISTRY_PATH)
+    registry_path = _registry_with_ripple_lower_at_tilt_lower(tmp_path)
+    registry = load_quality_targets(registry_path)
     purpose = registry.purpose(_PURPOSE)
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
     ripple = purpose.entry("timbre_balance.ripple_range_hz")
@@ -565,13 +585,13 @@ def test_report_axis_short_of_registry_ceiling_keeps_coverage_flag_on_rankable_r
         }
     )
     evaluation = evaluate_timbre(
-        truncated, purpose=_PURPOSE, quality_targets_path=_REGISTRY_PATH
+        truncated, purpose=_PURPOSE, quality_targets_path=registry_path
     )
     assert isinstance(evaluation.payload, TimbrePayload)
     assert evaluation.payload.data_range_hz[0] > evaluation.payload.coverage_range_hz[0]
     assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
 
-    result = _rank(evaluation, registry=load_quality_targets(_REGISTRY_PATH))
+    result = _rank(evaluation, registry=registry)
 
     assert result.status_of(evaluation.candidate_id) is CandidateStatus.RANKABLE
     row = next(item for item in result.rankable if item.candidate_id == evaluation.candidate_id)

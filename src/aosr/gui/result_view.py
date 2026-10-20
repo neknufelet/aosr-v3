@@ -42,6 +42,7 @@ from aosr.scoring.ranking_models import MissingCategory
 from aosr.scoring.reflections_contract import ReflectionPath, ReflectionsAndEchoPayload
 from aosr.scoring.review_alert import FlutterReviewAlert, ListeningAreaReviewAlert, PeakDipReviewAlert
 from aosr.scoring.reverberation_cost import target_intervals
+from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT
 
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -272,6 +273,9 @@ class ResultView(ViewModel):
     missing_categories: tuple[str, ...]
     # 排名那一行的白話：排名位置、有才說的淘汰原因與擋住排名的類、沒有代價的類不算進總代價。
     ranking_text: str
+    # 第一階段那句理想聲源標示（老闆原話逐字，字串只住第一階段契約）：喇叭模型在 40 Hz 以下照樣全力發聲，
+    # 起伏自票 #668 起從 20 Hz 算，第二階段的排名也只適用於這個基準。
+    ideal_source_note: str
     cost_note: str
     categories: tuple[CategoryView, ...]
     alerts: tuple[AlertView, ...]
@@ -919,6 +923,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         ranking_status=status, ranking_reasons=reasons,
         missing_categories=tuple(item.category.value for item in missing),
         ranking_text=_ranking_text(status, reasons, missing, categories),
+        ideal_source_note=IDEAL_SOURCE_ASSUMPTION_TEXT,
         cost_note=COST_NOTE, categories=categories,
         alerts=seat_alerts, flutter_groups=flutter_groups,
         reverberation=_reverberation(result, registry, ranked.get(QualityCategory.REVERBERATION)),

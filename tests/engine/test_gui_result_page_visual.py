@@ -438,3 +438,29 @@ def test_peer_pairs_live_in_one_select_beside_the_buttons(tmp_path: Path, browse
         assert "chosen" not in (select.get_attribute("class") or "")
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
+
+
+# 老闆 2026-10-19 原話逐字（#558 第 ② 塊第 3 題之二）；考卷自己抄一份，不從程式讀——程式那一句少一個字這題就紅。
+_IDEAL_SOURCE_SENTENCE = "未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同"
+
+
+def test_results_section_shows_the_ideal_source_sentence(tmp_path: Path, browser: Browser,
+                                                         result: SchemeResult) -> None:
+    """票 #668：起伏從 20 Hz 起算、喇叭模型 40 Hz 以下照樣全力發聲，結果頁「各類結果」那一節一開就看得到那一句。
+
+    放在排名那一行旁邊、不收在「技術細節」摺疊區裡，也不靠版面隱藏。
+    """
+    _save(tmp_path, result)
+    with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}",
+                                         viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#content").wait_for(state="visible")
+        note = page.locator("#ideal-source-note")
+        assert note.is_visible()
+        assert note.inner_text() == _IDEAL_SOURCE_SENTENCE
+        assert note.evaluate("e => e.closest('details') === null")
+        section = page.locator("section", has=page.locator("#ranking-state"))
+        assert section.locator("h2").inner_text() == "各類結果"
+        # 定位器是嚴格模式：這一節裡有兩個同名元素就直接紅。
+        assert section.locator("#ideal-source-note").inner_text() == _IDEAL_SOURCE_SENTENCE
+        _assert_quiet(watched)

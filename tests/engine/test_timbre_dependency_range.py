@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from typing import Callable
 
@@ -16,6 +17,7 @@ from aosr.config.frequency_axis import (
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
 from aosr.config.paths import config_path
+from aosr.config.physics_constants import load_physics_constants
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
 from aosr.scoring import timbre
 from aosr.scoring.contract import (
@@ -40,6 +42,11 @@ _PROVENANCE = InputProvenance(
     receiver_id="seat-a",
 )
 DbCurve = Callable[[np.ndarray], np.ndarray]
+# 造房間模態曲線用的鞋盒房（公尺）：品質登記簿起伏那幾條的量測條件寫的參考房 6×4×3。
+# 聲源與接收點跟 ``_input_on_axis`` 帶的位置相同。
+_ROOM_M = (6.0, 4.0, 3.0)
+_SOURCE_M = (1.2, 1.3, 1.1)
+_RECEIVER_M = (4.7, 2.8, 1.4)
 
 
 def _setting(key: str, registry: Path = _QUALITY_TARGETS) -> SettingEntry:
@@ -425,3 +432,63 @@ def test_validation_must_cover_the_tilt_dependency_even_when_ripple_range_hides_
     assert isinstance(evaluation.payload, TimbrePayload)
     assert evaluation.payload.model_validation_status is ModelValidationStatus.VALIDATED
     assert Flag.UNVALIDATED in evaluation.flags
+
+
+def _room_mode_db(frequencies: np.ndarray) -> np.ndarray:
+    """鞋盒房的模態疊加（每個模態一個二階共振、Q＝10），300 Hz 以上用一個平的擴散場墊底。
+
+    不是物理求解，只是有房間形狀的曲線：最低那個軸向模態（6 公尺那一邊）落在 20～40 Hz，
+    往上模態越來越密。Q 與 300 Hz 是造曲線的選擇，不是產品設定。
+    """
+    sound_speed = load_physics_constants(config_path("physics_constants.toml")).sound_speed_m_s
+    upper_mode_hz = 300.0
+    quality_factor = 10.0
+    pressure = np.zeros_like(frequencies, dtype=np.complex128)
+    orders = (range(int(2.0 * length * upper_mode_hz / sound_speed) + 1) for length in _ROOM_M)
+    for order in itertools.product(*orders):
+        if not any(order):
+            continue
+        mode_hz = 0.5 * sound_speed * float(
+            np.sqrt(sum((n / length) ** 2 for n, length in zip(order, _ROOM_M, strict=True)))
+        )
+        if mode_hz > upper_mode_hz:
+            continue
+        shape = float(np.prod([
+            np.cos(np.pi * n * source / length) * np.cos(np.pi * n * receiver / length)
+            for n, source, receiver, length in zip(order, _SOURCE_M, _RECEIVER_M, _ROOM_M, strict=True)
+        ]))
+        pressure += shape / (mode_hz**2 - frequencies**2 + 1j * frequencies * mode_hz / quality_factor)
+    energy = np.abs(pressure) ** 2
+    diffuse = float(np.median(energy[(frequencies >= 100.0) & (frequencies <= upper_mode_hz)]))
+    return np.asarray(10.0 * np.log10(energy + diffuse), dtype=np.float64)
+
+
+def test_official_ripple_range_starts_at_the_axis_first_point_and_scores_a_room_curve() -> None:
+    """票 #668（老闆 2026-10-20「音色改 傾斜不改」）：起伏從正式頻率軸第一點（20 Hz）起算。
+
+    下限若還停在舊值，20～40 Hz 那一段（房間第一個共振常在這裡）的頻響峰沒有任何一類的代價看得到。
+    起伏不平滑（寬度 0），依賴範圍就是計分範圍本身，要剛好落在正式細軸裡；有房間模態形狀的曲線
+    要評得出來（不是未評估），而且最低那個軸向模態的峰要進峰谷清單。
+    """
+    ripple_lower_hz, ripple_upper_hz = _range_setting("timbre_balance.ripple_range_hz")
+    assert ripple_lower_hz == GEOMETRIC_LANE_FREQUENCIES_HZ[0]
+    assert _setting("timbre_balance.smoothing_width_octave_ripple").value == 0.0
+
+    evaluation = _evaluate(_official_input(_room_mode_db))
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert evaluation.reason_codes == ()
+    assert isinstance(evaluation.payload, TimbrePayload)
+    payload = evaluation.payload
+    assert payload.ripple_dependency_range_hz == (ripple_lower_hz, ripple_upper_hz)
+    assert GEOMETRIC_LANE_FREQUENCIES_HZ[0] <= payload.ripple_dependency_range_hz[0]
+    assert payload.ripple_dependency_range_hz[1] <= GEOMETRIC_LANE_FREQUENCIES_HZ[-1]
+    sound_speed = load_physics_constants(config_path("physics_constants.toml")).sound_speed_m_s
+    first_mode_hz = sound_speed / (2.0 * max(_ROOM_M))
+    step = GEOMETRIC_LANE_FREQUENCIES_HZ[1] / GEOMETRIC_LANE_FREQUENCIES_HZ[0]
+    assert ripple_lower_hz < first_mode_hz
+    assert any(
+        feature.kind == "peak"
+        and first_mode_hz / step <= feature.center_frequency_hz <= first_mode_hz * step
+        for feature in payload.features
+    )

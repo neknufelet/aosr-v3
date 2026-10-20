@@ -195,6 +195,7 @@ function drawSummary() {
     $(id).hidden = !text;
   }
   $("table-calibration").textContent = view.table.calibration_text;
+  $("ideal-source-note").textContent = view.ideal_source_note;
 }
 // 寬螢幕兩欄：「座位與聲道設定核對」接在右欄「改了哪裡」下面、左欄摘要下面、或兩欄底下橫跨整排，
 // 三種擺法挑兩欄高度最接近的那一種（改了很多處時接在摘要下面，摘要卡下面不留一大片空白）；

@@ -33,6 +33,9 @@ def _axis_with_dense_low_frequencies(coarse: np.ndarray) -> np.ndarray:
     stop = float(np.log2(300.0))
     dense_octaves = np.arange(start, stop + 1.0 / 480.0, 1.0 / 240.0)
     dense = 2.0**dense_octaves
+    # 2**log2(20) 是 20.000000000000004：起伏自票 #668 起從軸第一點（20 Hz）算，第一點高一根頭髮
+    # 就包不住計分下界、整條變不可估。釘回粗軸的第一點（正式三條報表軸的第一點都恰好是 20.0）。
+    dense[0] = coarse[0]
     return np.unique(np.concatenate((dense[dense <= 300.0], coarse[coarse > 300.0])))
 
 

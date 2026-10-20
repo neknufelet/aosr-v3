@@ -33,6 +33,7 @@ from aosr.search.crossover_record import TITLE as CROSSOVER_TITLE
 from aosr.search.report_stability import TITLE as STABILITY_TITLE, stability_report
 from aosr.search.labels import PARAM_LABELS
 from aosr.search.report_crossover import crossover_report
+from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
 INTERRUPTED = "狀態檔說還在跑，但沒有計算行程拿著這個資料夾：上次中斷了，要接續請叫助理"
@@ -255,6 +256,8 @@ def _stage(search: Read[SearchStatus], refine: Read[RefineStatus], outer: Read[O
         if outer.value.conclusion is not None and conclusion.startswith("未判定"):
             lines.append(f"先前結論（已過期）：{OUTER_MESSAGES[outer.value.conclusion]}")
     lines.append("品質合格：本頁未判定；停止或細算完成不代表品質合格，也不是最終推薦")
+    # 第一階段那句理想聲源標示（字串只住第一階段契約）：搜尋與細算的名次也只適用於理想聲源基準（票 #668）。
+    lines.append(IDEAL_SOURCE_ASSUMPTION_TEXT)
     if search.value is not None and search.value.baseline_outcome == BASELINE_BLOCKED:
         lines.append(BASELINE_BLOCKED_TEXT)
     warning = bool(search.error or refine.error or outer.error or process.held is None)

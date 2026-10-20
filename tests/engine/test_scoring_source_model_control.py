@@ -340,7 +340,7 @@ def _assert_section(name: str, found: dict[str, object], expected: dict[str, obj
 def test_omnidirectional_scoring_and_ranking_match_main(monkeypatch: pytest.MonkeyPatch) -> None:
     """全向兩候選：骨架逐字相同；機器相關浮點依葉子順序逐格在評分層③級內。
     每一格各用答案的尺，不受其他格大小、分組權重或抵銷影響；鍵、型別、位置、順序與判定仍逐字。
-    不證明跨處理器逐位相同；SUMMARY 逐字，HEADLINE 手算答案照舊、逐格比③級。
+    不證明跨處理器逐位相同；SUMMARY 逐字，HEADLINE 逐格比③級（原為手算答案，#668 起改錄產品在新登記簿下算出的值，出身見答案檔）。
     """
     for module, name, stand_in in control.STAND_INS:
         monkeypatch.setattr(module, name, stand_in)

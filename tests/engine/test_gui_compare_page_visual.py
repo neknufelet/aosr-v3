@@ -257,3 +257,22 @@ def test_csv_links_look_like_the_png_button() -> None:
     rule = css[css.index("#compare-exports a{"):]
     rule = rule[:rule.index("}")]
     assert "text-decoration:none" in rule and "background:#15617b" in rule and "color:white" in rule
+
+
+# 老闆 2026-10-19 原話逐字（#558 第 ② 塊第 3 題之二）；考卷自己抄一份，不從程式讀。
+_IDEAL_SOURCE_SENTENCE = "未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同"
+
+
+def test_summary_shows_the_ideal_source_sentence(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """票 #668：摘要判哪一份比較好，那個判斷也只適用於理想聲源基準；摘要卡一開就看得到那一句。"""
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+            _has_lines(page)
+            note = page.locator("#compare-summary #ideal-source-note")
+            assert note.is_visible()
+            assert note.inner_text() == _IDEAL_SOURCE_SENTENCE
+            _assert_quiet(watched)
