@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -13,6 +13,7 @@ from aosr.reporting.stage_one_result import run_stage_one
 from aosr.search.run import CandidateJob, ComputeFailed, IdentityChanged
 from aosr.search.stage_one_worker import StageOneCompute
 from aosr.search.store import SearchIdentity, SearchStore
+from aosr.search.worker import _Active
 from tests.engine import _stage_one_cases as cases
 from tests.engine._search_store_cases import purpose_settings
 
@@ -115,14 +116,20 @@ def test_child_identity_exit_is_interruption(tmp_path: Path, monkeypatch: pytest
 
 
 def test_candidate_seconds_stop_when_the_child_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # 父行程晚 5 秒才讀第二個完成通知；那 5 秒不准算進第二個候選的秒數（第二階段用子行程自己記的耗時）。
+    # 兩個完成通知都排進佇列之後才把時鐘撥快 100 秒；父行程這時才讀第二個，那 100 秒不准算進它的秒數。
+    from aosr.search import stage_one_worker
+    now = [0.]
+    monkeypatch.setattr(stage_one_worker, "_clock", lambda: now[0])
+    queued = threading.Semaphore(0)
+    put = stage_one_worker._StampedQueue.put
+    def counted(self: stage_one_worker._StampedQueue, item: _Active, block: bool = True, timeout: float | None = None) -> None:
+        put(self, item, block, timeout)
+        queued.release()
+    monkeypatch.setattr(stage_one_worker._StampedQueue, "put", counted)
     worker, job = setup(tmp_path, monkeypatch)
-    other = _second_job(tmp_path, job)
-    results = worker((job, other), 2)
-    next(results)
-    deadline = time.monotonic() + 60
-    while not (job.result_path.exists() and other.result_path.exists()) and time.monotonic() < deadline:
-        time.sleep(.05)
-    time.sleep(5.)
-    assert next(results).seconds < 5.
+    results = worker((job, _second_job(tmp_path, job)), 2)
+    assert next(results).seconds == 0.
+    assert queued.acquire(timeout=60) and queued.acquire(timeout=60)
+    now[0] = 100.
+    assert next(results).seconds == 0.
     assert not list(results)

@@ -27,17 +27,21 @@ class StageOneComputed:
 
 
 StageOneComputeFunction: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[StageOneComputed]]
+_clock = time.monotonic
 
 
 class _StampedQueue(Queue[_Active]):
-    """完成通知排進佇列那一刻記牆鐘；父行程多久之後才讀出來，不算進候選秒數。"""
+    """完成通知排進佇列那一刻記牆鐘；父行程多久之後才讀出來，不算進候選秒數。
+
+    鍵用工作物件本身的身分（id）：行程已收掉、通知還在佇列時，pid 可能被下一個候選重用。
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.ended: dict[int, float] = {}
 
     def put(self, item: _Active, block: bool = True, timeout: float | None = None) -> None:
-        self.ended[item.process.pid] = time.monotonic()
+        self.ended[id(item)] = _clock()
         super().put(item, block, timeout)
 
 
@@ -92,10 +96,10 @@ class StageOneCompute:
                     if job is None:
                         exhausted = True
                     else:
-                        started = time.monotonic()
+                        started = _clock()
                         item = self.processes._start(job, parts)
                         active.append(item)
-                        starts[item.process.pid] = started
+                        starts[id(item)] = started
                         _watch(item, completed, order)
                 if not active:
                     break
@@ -103,8 +107,7 @@ class StageOneCompute:
                     finished = completed.get(timeout=self.processes.poll_s)
                 except Empty:
                     continue
-                pid = finished.process.pid
-                result = self._result(finished, completed.ended.pop(pid) - starts.pop(pid))
+                result = self._result(finished, completed.ended.pop(id(finished)) - starts.pop(id(finished)))
                 _stop_all((finished,))
                 active.remove(finished)
                 yield result
