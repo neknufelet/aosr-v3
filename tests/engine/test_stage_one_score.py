@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import load_quality_targets
+from aosr.config.quality_targets import TargetEntry, load_quality_targets
 from aosr.scoring.recommendation import NotFinalReason
 from aosr.scoring.stage_one_low_frequency_contract import (
     StageOneLowFrequencyEvaluation,
@@ -22,6 +22,7 @@ from aosr.scoring.stage_one_low_frequency_contract import (
 )
 from aosr.scoring.stage_one_score import (
     COMPONENT_NAMES,
+    ComponentName,
     StageOneScore,
     StageOneScoreSettings,
     score_stage_one,
@@ -218,6 +219,50 @@ def test_unequal_worse_references_are_rejected(tmp_path: Path) -> None:
     path = _rewrite(tmp_path, f'key = "{_PREFIX}{_ROBUSTNESS}"', "worse_reference", reference * 2.0)
     with pytest.raises(ValueError, match="較差參考必須相等"):
         _settings(path)
+
+
+def _rebuilt(
+    settings: StageOneScoreSettings, *, targets: tuple[tuple[ComponentName, TargetEntry], ...] | None = None,
+    weights: tuple[tuple[ComponentName, float], ...] | None = None,
+    scored_range_hz: tuple[float, float] | None = None,
+) -> StageOneScoreSettings:
+    """照原設定逐欄重建，只換指定的那一欄；讀回結果檔建設定也是走建構子、不經讀登記簿那一支。"""
+    return StageOneScoreSettings(
+        purpose=settings.purpose, scored_range_hz=scored_range_hz or settings.scored_range_hz,
+        targets=settings.targets if targets is None else targets,
+        weights=settings.weights if weights is None else weights,
+        status=settings.status, fingerprint=settings.fingerprint,
+    )
+
+
+@pytest.mark.parametrize(("damage", "reason"), [
+    ("missing-weight", "各一次"), ("duplicate-weight", "各一次"), ("missing-target", "各一次"),
+    ("duplicate-target", "各一次"), ("cost-shape", "less_is_better"), ("unequal-references", "較差參考必須相等"),
+    ("reversed-range", "遞增"),
+])
+def test_settings_guard_their_own_shape(damage: str, reason: str) -> None:
+    """設定自己守形狀（審查第三輪：讀回結果檔不經讀登記簿那一支）；控制組原樣重建照常建得起來。"""
+    settings = _settings()
+    assert _rebuilt(settings) == settings
+    (name, entry), *others = settings.targets
+    with pytest.raises(ValueError, match=reason):
+        if damage == "missing-weight":
+            _rebuilt(settings, weights=settings.weights[1:])
+        elif damage == "duplicate-weight":
+            _rebuilt(settings, weights=(*settings.weights, (name, 0.0)))
+        elif damage == "missing-target":
+            _rebuilt(settings, targets=tuple(others))
+        elif damage == "duplicate-target":
+            _rebuilt(settings, targets=(*settings.targets, (name, entry)))
+        elif damage == "cost-shape":
+            _rebuilt(settings, targets=((name, entry.model_copy(update={"cost_shape": "beyond_threshold_only"})),
+                                        *others))
+        elif damage == "unequal-references":
+            _rebuilt(settings, targets=((name, entry.model_copy(update={"worse_reference": entry.worse_reference * 2.0})),
+                                        *others))
+        else:
+            lower, upper = settings.scored_range_hz
+            _rebuilt(settings, scored_range_hz=(upper, lower))
 
 
 def test_total_follows_weights_in_a_temporary_registry(tmp_path: Path) -> None:

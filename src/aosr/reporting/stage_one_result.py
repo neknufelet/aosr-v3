@@ -94,11 +94,23 @@ def stage_one_input(
     return StageOneLowFrequencyInput(candidate_id=scheme.scheme_id, low_frequency_axis=axis, speakers=tuple(speakers))
 
 
+def additions_round_once() -> bool:
+    """這台機器的浮點加法是不是每一步只捨入一次（沒有先捨到延伸精度、再捨到雙精度的雙重捨入）。
+
+    用 CPython 自己考卷偵測雙重捨入的那一組數（``Lib/test/test_math.py`` 的 ``HAVE_DOUBLE_ROUNDING``）：
+    1e16 + 2.9999 只捨一次是 1e16 + 2，雙重捨入會變成 1e16 + 4。``math.fsum`` 只在沒有雙重捨入時保證正確捨入。
+    """
+    x, y = 1e16, 2.9999
+    return x + y != 1e16 + 4
+
+
 class StageOneResult(BaseModel):
     """只跑有限元素的第一階段結果；與第二階段結果檔互相拒收。
 
-    讀回時守三層：每份清單與代號都對回方案與存下的原始曲線；分數用存下的評估與設定逐位重算
-    （純 Python 浮點，換機器也逐位相同）；評估跟原始曲線的數值是否一致，由讀回重評那一支從曲線重算判。
+    讀回時守三層：每份清單與代號都對回方案與存下的原始曲線；分數用存下的評估與設定逐位重算——
+    計分只用 Python 浮點的乘除與 ``math.fsum``，在每步只捨入一次的機器上逐位相同，有雙重捨入的機器
+    直接拒收、不判成壞檔；評估跟原始曲線的數值是否一致，由讀回重評那一支從曲線重算判。存下的計分設定
+    只守形狀（見 ``StageOneScoreSettings``），它是不是當時登記簿那一份，讀回時不查現行登記簿。
     """
 
     model_config = FROZEN
@@ -161,6 +173,8 @@ class StageOneResult(BaseModel):
             raise ValueError("結果評估與分數的方案或主位代號不同")
         if self.score_settings.purpose != self.scheme.purpose:
             raise ValueError("結果存下的計分設定不是這個方案用途的")
+        if not additions_round_once():
+            raise ValueError("這台機器的浮點加法有雙重捨入，第一階段分數無法逐位重算核對；請在每步只捨入一次的機器上讀")
         # 狀態、原因、分項、小計、合計、最差聲道、設定指紋全部由評估與設定重算後逐位相等，不逐格各寫一條。
         if score_stage_one(self.evaluation, self.score_settings) != self.score:
             raise ValueError("結果分數跟存下的評估與計分設定逐位重算不同")

@@ -64,7 +64,11 @@ CoherentSumNotEvaluatedText = Literal["左右相干疊加未評估：報表只�
 
 @dataclass(frozen=True)
 class StageOneScoreSettings:
-    """從登記簿第一階段那一段讀出的計分範圍、兩個目標與權重；``status`` 是讀到的格子裡最低的狀態。"""
+    """從登記簿第一階段那一段讀出的計分範圍、兩個目標與權重；``status`` 是讀到的格子裡最低的狀態。
+
+    形狀由這一型自己守，讀登記簿與讀回結果檔都經過這裡：目標與權重各剛好兩個具名分項、各一次，
+    兩個目標都是 ``less_is_better`` 而且較差參考相等，計分範圍遞增為正。
+    """
 
     purpose: str
     scored_range_hz: tuple[float, float]
@@ -72,6 +76,22 @@ class StageOneScoreSettings:
     weights: tuple[tuple[ComponentName, float], ...]
     status: EntryStatus
     fingerprint: str
+
+    def __post_init__(self) -> None:
+        for part, names in (("目標", [name for name, _ in self.targets]),
+                            ("權重", [name for name, _ in self.weights])):
+            if len(names) != len(COMPONENT_NAMES) or set(names) != COMPONENT_NAMES:
+                raise ValueError(f"計分設定的{part}必須剛好是 {sorted(COMPONENT_NAMES)} 各一次，這裡是 {names}")
+        for _, entry in self.targets:
+            if entry.cost_shape != "less_is_better":
+                raise ValueError(f"{entry.key} 的代價形狀必須是 less_is_better")
+        if len({entry.worse_reference for _, entry in self.targets}) != 1:
+            raise ValueError(
+                "兩個分項的較差參考必須相等：較差參考只為無單位化，不相等時權重的比例就不是登記的那個比例"
+            )
+        lower, upper = self.scored_range_hz
+        if not 0.0 < lower < upper:
+            raise ValueError(f"計分範圍必須是遞增的正頻率範圍，這裡是 {self.scored_range_hz}")
 
     def target(self, name: ComponentName) -> TargetEntry:
         return dict(self.targets)[name]
@@ -83,28 +103,17 @@ class StageOneScoreSettings:
 def _scored_range(entry: SettingEntry) -> tuple[float, float]:
     if entry.unit != "Hz" or not isinstance(entry.value, tuple) or len(entry.value) != 2:
         raise ValueError(f"{entry.key} 必須是兩個端點的 Hz 範圍")
-    lower, upper = float(entry.value[0]), float(entry.value[1])
-    if not 0.0 < lower < upper:
-        raise ValueError(f"{entry.key} 必須是遞增的正頻率範圍")
-    return lower, upper
+    return float(entry.value[0]), float(entry.value[1])
 
 
 def stage_one_score_settings(registry: QualityTargets, purpose_name: str) -> StageOneScoreSettings:
-    """讀第一階段那一段；兩個較差參考不相等、權重表的分項不等於兩個具名分項，一律報錯。"""
+    """讀第一階段那一段；權重表的分項不等於兩個具名分項報錯，其餘形狀由 ``StageOneScoreSettings`` 守。"""
     section = registry.stage_one(purpose_name)
     scored = section.entry(SCORED_RANGE_KEY)
     if not isinstance(scored, SettingEntry):
         raise TypeError(f"{SCORED_RANGE_KEY} 不是量法設定")
     names: tuple[ComponentName, ...] = (PRINCIPAL, ROBUSTNESS)
     targets = tuple((name, target(section, _PREFIX + name, "dB")) for name in names)
-    for _, entry in targets:
-        if entry.cost_shape != "less_is_better":
-            raise ValueError(f"{entry.key} 的代價形狀必須是 less_is_better")
-    references = {entry.worse_reference for _, entry in targets}
-    if len(references) != 1:
-        raise ValueError(
-            "兩個分項的較差參考必須相等：較差參考只為無單位化，不相等時權重的比例就不是登記的那個比例"
-        )
     table = weight_table(section, WEIGHTS_KEY)
     rows = {item.name: item for item in table.item}
     if set(rows) != COMPONENT_NAMES:

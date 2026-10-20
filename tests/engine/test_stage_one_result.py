@@ -267,3 +267,40 @@ def test_score_that_does_not_recompute_from_the_saved_evaluation_is_refused(
         data["score_settings"]["purpose"] = "other_room"
     with pytest.raises(ValidationError):
         StageOneResult.model_validate(data)
+
+
+@pytest.mark.parametrize("part", ["weights", "targets"])
+def test_saved_settings_with_a_duplicate_component_are_refused(monkeypatch: pytest.MonkeyPatch, part: str) -> None:
+    """審查第三輪的複現：設定多塞一個同名分項，分數也補上權重 0 的那一份，逐位重算照樣相等；
+    要靠存下的設定自己守「兩個分項各一次」才擋得住。"""
+    data = _saved(monkeypatch).model_dump(mode="json")
+    settings = data["score_settings"]
+    if part == "weights":
+        name, _weight = settings["weights"][0]
+        settings["weights"].append([name, 0.0])
+        for owner in (data["score"], *data["score"]["channels"]):
+            same = next(item for item in owner["components"] if item["name"] == name)
+            owner["components"].append({**same, "weight": 0.0, "weighted_cost": 0.0})
+    else:
+        settings["targets"].append(copy.deepcopy(settings["targets"][0]))
+    with pytest.raises(ValidationError, match="各一次"):
+        StageOneResult.model_validate(data)
+
+
+def test_this_machine_adds_with_a_single_rounding() -> None:
+    """讀回逐位重算的前提：每步只捨入一次；雲端跑這一題就是在雲端那台機器上驗。"""
+    module = importlib.import_module("aosr.reporting.stage_one_result")
+    assert module.additions_round_once()
+
+
+def _rounds_twice() -> bool:
+    return False
+
+
+def test_double_rounding_machine_refuses_instead_of_judging_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """有雙重捨入的機器不拿逐位重算判檔案好壞，直接說這台機器讀不了。"""
+    module = importlib.import_module("aosr.reporting.stage_one_result")
+    data = _saved(monkeypatch).model_dump(mode="json")
+    monkeypatch.setattr(module, "additions_round_once", _rounds_twice)
+    with pytest.raises(ValidationError, match="雙重捨入"):
+        StageOneResult.model_validate(data)
