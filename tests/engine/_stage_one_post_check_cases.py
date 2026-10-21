@@ -1,6 +1,7 @@
 """第一階段入選後檢查的明列診斷與串行子行程替身。"""
 from pathlib import Path
 import json
+import os
 import sys
 
 import pytest
@@ -33,6 +34,7 @@ def diagnosis(store: SearchStore, number: int) -> ModalDiagnosis:
 def runner(root: Path, store: SearchStore, *, state: str = "diagnosed_not_scored", code: int = 0,
            stop_after: bool = False, lock_fd: int | None = None) -> tuple[str, ...]:
     root.mkdir(parents=True, exist_ok=True)
+    identity = None if lock_fd is None else (os.fstat(lock_fd).st_dev, os.fstat(lock_fd).st_ino)
     for number, _, _, _ in ROWS:
         if not store.scheme_path_for(store.refine_result_path(number)).exists():
             continue
@@ -47,7 +49,8 @@ def runner(root: Path, store: SearchStore, *, state: str = "diagnosed_not_scored
         "scheme=Path(sys.argv[1])\nnumber=int(scheme.name.split('-')[1])\n"
         "with (root/'calls').open('a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
         "assert os.environ['OMP_NUM_THREADS']=='1'\nassert os.getsid(0)==os.getpid()\n"
-        f"if {lock_fd!r} is not None: os.fstat({lock_fd!r})\n"
+        # 核的是同一個物件（裝置與節點相同），不是號碼剛好被別的檔重用。
+        f"if {lock_fd!r} is not None: assert (os.fstat({lock_fd!r}).st_dev, os.fstat({lock_fd!r}).st_ino) == {identity!r}\n"
         "out=Path(sys.argv[sys.argv.index('--out')+1])\n"
         "shutil.copyfile(root/f'{number}.json',out)\ntime.sleep(.01)\n"
         f"if {stop_after!r}: Path({str(store.refine_stop_path)!r}).touch()\n"

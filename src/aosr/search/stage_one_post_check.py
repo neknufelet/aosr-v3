@@ -116,8 +116,8 @@ def run_stage_one_post_check(store: SearchStore, *, cache_dir: Path, lock_fd: in
         else:
             seats[index] = _reuse(store, previous, seat, schemes[seat.trial_number], identity) or seat
     summary = StageOnePostCheckSummary(selection=refined.selection, modal_identity=identity, seats=tuple(seats))
-    write_summary(store.path, summary)
     try:
+        write_summary(store.path, summary)
         for index, seat in enumerate(seats):
             if seat.state != "not_started":
                 continue

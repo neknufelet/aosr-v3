@@ -320,3 +320,24 @@ def test_unexpected_error_closes_summary_as_failed(tmp_path: Path, monkeypatch: 
         module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
     saved = StageOnePostCheckSummary.model_validate_json((store.path / "stage-one-check" / "summary.json").read_bytes())
     assert saved.state == "failed" and "disk failure" in saved.message
+
+
+def test_interrupt_on_first_write_closes_as_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 第一份摘要寫入時按一次 Ctrl-C：當次摘要要收成停止，沿用的席照舊、要重算的那席記停止。
+    from aosr.search import stage_one_post_check as module
+    store = prepared(tmp_path, monkeypatch); first = run(store, tmp_path / "first")
+    folder = store.path / "stage-one-check"
+    (folder / str(first.seats[0].diagnosis_file)).write_text("{")
+    real = module.write_summary
+    hit: list[bool] = []
+    def interrupted(path: Path, summary: StageOnePostCheckSummary) -> None:
+        if not hit:
+            hit.append(True)
+            real(path, summary)
+            raise KeyboardInterrupt
+        real(path, summary)
+    monkeypatch.setattr(module, "write_summary", interrupted)
+    result = module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
+    saved = StageOnePostCheckSummary.model_validate_json((folder / "summary.json").read_bytes())
+    assert hit and result.state == "stopped" and saved == result
+    assert result.seats[0].state == "stopped" and result.seats[1:] == first.seats[1:]
