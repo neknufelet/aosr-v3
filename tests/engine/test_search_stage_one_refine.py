@@ -241,13 +241,22 @@ def test_cli_error_exit_preserves_search_files(tmp_path: Path, monkeypatch: pyte
     assert {p: after[p] for p in before} == before
 
 
-@pytest.mark.parametrize("damage", ["missing", "wrong_origin", "changed_identity"])
+@pytest.mark.parametrize("damage", ["missing", "wrong_origin", "changed_identity", "search_axis"])
 def test_resume_recomputes_bad_saved_verification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     store = pool(tmp_path, monkeypatch, ROWS)
     refine(store, search.FakeCompute(store, monkeypatch))
     target = store.refine_result_path(8)
     if damage == "missing":
         target.unlink()
+    elif damage == "search_axis":
+        # 搜尋軸那份改成細算代號：出處、代號、身分都對得上，只有軸與方案不同，接續必須重算、不准沿用。
+        document = json.loads(store.candidate_path(8).read_bytes())
+        renamed = refine_scheme_id(store.search_id, 8)
+        document["scheme"]["scheme_id"] = renamed
+        document["evaluation"]["candidate_id"] = renamed
+        document["score"]["candidate_id"] = renamed
+        target.write_text(json.dumps(document))
+        assert load_stage_one_result(target).low_frequency_axis != LowFrequencyAxis.VERIFICATION
     else:
         document = json.loads(target.read_bytes())
         if damage == "wrong_origin":
