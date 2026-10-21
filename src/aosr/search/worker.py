@@ -95,6 +95,27 @@ def _watch(item: _Process, completed: Queue[_Process], order: Lock) -> None:
     item.watcher.start()
 
 
+def _settle(finished: _Slice, active: list[_Slice]) -> None:
+    """收一片分片：失敗就先停掉整批還活著的再丟錯；成功就收乾淨、移出名單。"""
+    if finished.process.returncode != 0:
+        _stop_all(active)
+        _check_exit(finished, f"分片 {finished.slice_index}")
+    _stop_all((finished,))
+    active.remove(finished)
+
+
+def _drain(completed: Queue[_Slice], active: list[_Slice]) -> None:
+    """開下一片之前先讀完已排隊的完成通知，已經失敗就不再開新的一片。
+
+    檢查之後、開出下一片之前才到的失敗，這一片照開，讀到失敗時跟其他片一起停掉。"""
+    while True:
+        try:
+            finished = completed.get_nowait()
+        except Empty:
+            return
+        _settle(finished, active)
+
+
 def _check_exit(item: _Active | _Slice, label: str) -> None:
     code = item.process.returncode
     if code == 0:
@@ -202,6 +223,7 @@ class SubprocessCompute:
         try:
             while active or not exhausted:
                 while len(active) < max_workers and not exhausted:
+                    _drain(completed, active)
                     task = next(pending, None)
                     if task is None:
                         exhausted = True
@@ -217,16 +239,7 @@ class SubprocessCompute:
                     finished = completed.get(timeout=self.poll_s)
                 except Empty:
                     continue
-                while True:
-                    if finished.process.returncode != 0:
-                        _stop_all(active)
-                        _check_exit(finished, f"分片 {finished.slice_index}")
-                    _stop_all((finished,))
-                    active.remove(finished)
-                    try:
-                        finished = completed.get_nowait()
-                    except Empty:
-                        break
+                _settle(finished, active)
             return tuple(parts_by_key[key] for key in keys)
         finally:
             _stop_all(active)

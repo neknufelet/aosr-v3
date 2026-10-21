@@ -68,6 +68,25 @@ def capture_commands(worker: SubprocessCompute, monkeypatch: pytest.MonkeyPatch)
     return commands
 
 
+def count_unreaped_slices(worker: SubprocessCompute, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """每開一片分片之前，記下之前開過、父行程還沒收掉的分片有幾支。"""
+    unreaped: list[int] = []
+    spawned: list[subprocess.Popen[bytes]] = []
+    spawn = worker._spawn
+
+    def observed(command: Sequence[str], stderr_path: Path) -> subprocess.Popen[bytes]:
+        is_slice = "--slice" in command
+        if is_slice:
+            unreaped.append(sum(process.returncode is None for process in spawned))
+        process = spawn(command, stderr_path)
+        if is_slice:
+            spawned.append(process)
+        return process
+
+    monkeypatch.setattr(worker, "_spawn", observed)
+    return unreaped
+
+
 def expected_group(
     worker: SubprocessCompute, jobs: Sequence[CandidateJob], limit: int,
     records: Sequence[SliceEvent], commands: Sequence[tuple[str, ...]],

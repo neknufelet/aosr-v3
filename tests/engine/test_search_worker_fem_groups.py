@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import signal
+import subprocess
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from queue import Queue
@@ -20,6 +22,7 @@ from aosr.search.worker import _watch as real_watch
 from tests.engine._search_worker_group_cases import (
     capture_commands,
     configure_slices,
+    count_unreaped_slices,
     expected_candidate,
     expected_group,
     mixed_rooms,
@@ -94,7 +97,10 @@ def test_all_groups_share_worker_limit_and_each_slice_runs_once(tmp_path: Path, 
     limit = 3
     configure_slices(tmp_path, worker, {f"slice-{index}": {"sleep": 0.15} for index in range(limit)})
     commands = capture_commands(worker, monkeypatch)
+    unreaped = count_unreaped_slices(worker, monkeypatch)
     list(worker(jobs, limit))
+    # 父行程開每一片之前，還沒收掉（returncode 仍是 None）的分片都算活著，這是上限的保守量法（審查）。
+    assert unreaped and max(unreaped) == limit - 1
     records = slice_events(tmp_path)
     parts = (*expected_group(worker, (jobs[0], jobs[2]), limit, records, commands),
              *expected_group(worker, (jobs[1],), limit, records, commands))
@@ -187,6 +193,49 @@ def test_queued_failure_is_checked_before_refilling(tmp_path: Path, monkeypatch:
     groups_are_dead(slice_events(tmp_path))
 
 
+def test_failure_queued_between_refills_stops_the_next_slice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
+    jobs = mixed_rooms(jobs)
+    limit = 3
+    configure_slices(tmp_path, worker, {"job-0-slice-0": {"hold": "release-failure", "exit": 7}})
+    commands = capture_commands(worker, monkeypatch)
+    observed = worker._spawn
+    released: list[bool] = []
+    queues: list[Queue[_Slice]] = []
+    second = str(SearchStore.scheme_path_for(jobs[1].result_path.resolve()))
+
+    def wait_initial_wave(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
+        # 第一組三片都開了以後，等兩片成功的通知都排進來，主迴圈一次讀完、一次補兩個位置。
+        queues.append(completed)
+        real_watch(item, completed, order)
+        if item.slice_index != limit - 1 or released:
+            return
+        deadline = time.monotonic() + 20
+        while completed.qsize() < limit - 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    def release_while_spawning(command: Sequence[str], stderr_path: Path) -> subprocess.Popen[bytes]:
+        process = observed(command, stderr_path)
+        if "--slice" in command and second in command and not released:
+            # 第二組第一片剛開出去，第一組那片才失敗：失敗通知排進佇列之後才回到主迴圈。
+            released.append(True)
+            (tmp_path / "release-failure").touch()
+            deadline = time.monotonic() + 20
+            while queues[0].empty() and time.monotonic() < deadline:
+                time.sleep(0.01)
+        return process
+
+    monkeypatch.setattr("aosr.search.worker._watch", wait_initial_wave)
+    monkeypatch.setattr(worker, "_spawn", release_while_spawning)
+    with pytest.raises(ComputeFailed, match="分片 0"):
+        list(worker(jobs, limit))
+    assert released
+    assert [command[command.index("--slice") + 1] for command in commands
+            if "--slice" in command and second in command] == ["0"]
+    assert not events(tmp_path)
+    groups_are_dead(slice_events(tmp_path))
+
+
 @pytest.mark.parametrize("interruption", ["keyboard", "close", "sigterm"])
 def test_interruption_during_mixed_first_wave_stops_all_groups(tmp_path: Path, interruption: str) -> None:
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
@@ -230,8 +279,10 @@ def test_interruption_during_mixed_first_wave_stops_all_groups(tmp_path: Path, i
 
 def test_legacy_slices_refuses_mixed_scenes_without_starting(tmp_path: Path) -> None:
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
+    mixed = mixed_rooms(jobs)
     with pytest.raises(ValueError, match="同一場景"):
-        worker._slices(mixed_rooms(jobs), 2)
+        worker._slices(mixed, 2)
+    assert not any(SearchStore.scheme_path_for(job.result_path.resolve()).exists() for job in mixed)
     assert not slice_events(tmp_path)
     assert not worker.fem_root.exists()
 
