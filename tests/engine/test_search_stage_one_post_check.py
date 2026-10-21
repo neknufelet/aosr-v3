@@ -26,7 +26,8 @@ def test_sequential_all_seats_correct_schemes_cache_and_no_search_writes(tmp_pat
     root = tmp_path / "child"
     descriptor = os.open(store.path, os.O_RDONLY)
     try:
-        result = run_stage_one_post_check(store, cache_dir=root / "cache", lock_fd=descriptor, runner=runner(root, store))
+        result = run_stage_one_post_check(store, cache_dir=root / "cache", lock_fd=descriptor,
+                                          runner=runner(root, store, lock_fd=descriptor))
     finally:
         os.close(descriptor)
     assert result.state == "done"
@@ -83,6 +84,8 @@ def test_unreadable_seat_skipped_others_continue(tmp_path: Path, monkeypatch: py
         doc["results"][0]["state"] = damage; path.write_text(json.dumps(doc))
     result = run(store, tmp_path / "child")
     assert result.seats[0].state == "skipped" and result.seats[0].reason_text
+    if damage in ("pending", "unreadable"):
+        assert {"pending": "細算狀態 還沒算", "unreadable": "細算狀態 讀不回"}[damage] in result.seats[0].reason_text
     skipped = result.seats[0]
     assert skipped.diagnosis_file is not None
     document = store.path / "stage-one-check" / skipped.diagnosis_file
@@ -123,6 +126,9 @@ def test_reuse_requires_selection_identity_and_valid_placement(tmp_path: Path, m
                 pair["speaker_position_m"][0] += .1
             target.write_text(json.dumps(content))
     elif damage == "outside":
+        # 資料夾外放一份合法的診斷檔：只靠讀不到檔會放過「不限附件資料夾」的錯。
+        source = path.parent / doc["seats"][0]["diagnosis_file"]
+        (store.path / "elsewhere.json").write_bytes(source.read_bytes())
         doc["seats"][0]["diagnosis_file"] = str(Path("..") / "elsewhere.json")
     path.write_text(json.dumps(doc))
     root = tmp_path / "second"
@@ -256,3 +262,61 @@ def test_finish_keeps_two_generations_and_foreign_files(tmp_path: Path, monkeypa
     assert second.exists() and third.exists() and third.with_suffix(".stderr").exists()
     assert foreign.exists()
     assert all((folder / str(seat.diagnosis_file)).exists() for seat in result.seats)
+
+
+def test_scheme_file_must_match_refined_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 細算結果照舊讀得回，但 verification 裡試算 8 的方案檔被換成試算 2 的：不准拿去診斷。
+    store = prepared(tmp_path, monkeypatch)
+    target = store.scheme_path_for(store.refine_result_path(8))
+    target.write_bytes(store.scheme_path_for(store.refine_result_path(2)).read_bytes())
+    result = run(store, tmp_path / "child")
+    assert result.seats[0].state == "skipped" and "細算方案檔跟細算結果裡的方案不同" in result.seats[0].reason_text
+    assert [Path(args[0]).name for args in calls(tmp_path / "child")] == [f"trial-{n:06d}-scheme.json" for n in (2, 1, 5)]
+
+
+def test_rerun_killed_after_first_write_keeps_reuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 重跑剛寫完第一份摘要就被砍：沿用的診斷要已經在那一份裡，下次不必再開子行程，也不會被當孤檔清掉。
+    from aosr.search import stage_one_post_check as module
+    store = prepared(tmp_path, monkeypatch); first = run(store, tmp_path / "first")
+    real = module.write_summary
+    def killed(folder: Path, summary: StageOnePostCheckSummary) -> None:
+        real(folder, summary)
+        raise KeyboardInterrupt
+    monkeypatch.setattr(module, "write_summary", killed)
+    with pytest.raises(KeyboardInterrupt):
+        module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
+    monkeypatch.setattr(module, "write_summary", real)
+    result = module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
+    assert result.state == "done" and result.seats == first.seats
+    assert all((store.path / "stage-one-check" / str(seat.diagnosis_file)).is_file() for seat in result.seats)
+
+
+def test_interrupt_while_saving_keeps_finished_seat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 第一席診斷完、存摘要那一刻按 Ctrl-C：第一席照舊是已診斷、指著它自己的文件，其餘記停止。
+    from aosr.search import stage_one_post_check as module
+    store = prepared(tmp_path, monkeypatch)
+    real = module.write_summary
+    hit: list[bool] = []
+    def interrupted(folder: Path, summary: StageOnePostCheckSummary) -> None:
+        if not hit and summary.seats[0].state == "diagnosed_not_scored":
+            hit.append(True)
+            raise KeyboardInterrupt
+        real(folder, summary)
+    monkeypatch.setattr(module, "write_summary", interrupted)
+    result = module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=runner(tmp_path / "child", store))
+    assert hit and result.state == "stopped"
+    assert result.seats[0].state == "diagnosed_not_scored"
+    assert json.loads((store.path / "stage-one-check" / str(result.seats[0].diagnosis_file)).read_bytes())["state"] == "diagnosed_not_scored"
+    assert all(s.state == "stopped" for s in result.seats[1:])
+
+
+def test_unexpected_error_closes_summary_as_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import stage_one_post_check as module
+    store = prepared(tmp_path, monkeypatch)
+    def broken(*args: object, **kwargs: object) -> None:
+        raise OSError("disk failure")
+    monkeypatch.setattr(module, "_diagnose", broken)
+    with pytest.raises(OSError, match="disk failure"):
+        module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
+    saved = StageOnePostCheckSummary.model_validate_json((store.path / "stage-one-check" / "summary.json").read_bytes())
+    assert saved.state == "failed" and "disk failure" in saved.message

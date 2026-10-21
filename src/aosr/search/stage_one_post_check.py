@@ -20,6 +20,7 @@ from aosr.search.stage_one_refine_record import StageOneRefineStatus, read_stage
 from aosr.search.store import SearchStore
 
 STOPPED = "入選後檢查已停止，細算結果不受影響"
+REFINE_STATE_TEXT = {"pending": "還沒算", "unreadable": "讀不回"}
 
 
 def _seat_inputs(store: SearchStore, refined: StageOneRefineStatus) -> tuple[list[PostCheckSeat], dict[int, Scheme]]:
@@ -33,9 +34,13 @@ def _seat_inputs(store: SearchStore, refined: StageOneRefineStatus) -> tuple[lis
         row = results.get(number)
         try:
             if row is None or row.state not in ("scored", "unassessed", "incomparable"):
-                raise ValueError("細算沒有可讀結果" if row is None else f"細算狀態 {row.state}：{row.reason}")
-            read_stage_one_refined_result(store, number)
+                raise ValueError("細算沒有可讀結果" if row is None else
+                                 f"細算狀態 {REFINE_STATE_TEXT.get(row.state, row.state)}：{row.reason}")
+            result = read_stage_one_refined_result(store, number)
             scheme = load_scheme(path)
+            # 結果的核對從 candidates 重建工作，不看 verification 的方案檔；送去診斷的這一份要另外對上結果裡的方案。
+            if scheme != result.scheme:
+                raise ValueError("細算方案檔跟細算結果裡的方案不同")
             seat = seat.model_copy(update={"placement_digest": placement_digest(scheme)})
             schemes[number] = scheme
         except (OSError, ValueError, ComputeFailed, IdentityChanged) as error:
@@ -104,48 +109,59 @@ def run_stage_one_post_check(store: SearchStore, *, cache_dir: Path, lock_fd: in
     if previous is not None and (previous.selection != refined.selection or previous.modal_identity != identity):
         previous = None
     seats, schemes = _seat_inputs(store, refined)
+    # 沿用與跳過在第一份摘要之前定好：重跑在任何一步被砍，已完成的診斷都還有摘要指著，不會變孤檔被清掉。
+    for index, seat in enumerate(seats):
+        if seat.state == "skipped":
+            seats[index] = _uncomputed(store, seat)
+        else:
+            seats[index] = _reuse(store, previous, seat, schemes[seat.trial_number], identity) or seat
     summary = StageOnePostCheckSummary(selection=refined.selection, modal_identity=identity, seats=tuple(seats))
     write_summary(store.path, summary)
     try:
         for index, seat in enumerate(seats):
-            if store.refine_stop_path.exists():
-                return _stopped(store, summary, seats, index)
-            if seat.state == "skipped":
-                seats[index] = _uncomputed(store, seat)
-                write_summary(store.path, summary.model_copy(update={"seats": tuple(seats)}))
+            if seat.state != "not_started":
                 continue
-            scheme = schemes[seat.trial_number]
-            kept = _reuse(store, previous, seat, scheme, identity)
-            if kept is not None:
-                seats[index] = kept
-            else:
-                seats[index] = seat.model_copy(update={"state": "running"})
-                write_summary(store.path, summary.model_copy(update={"seats": tuple(seats)}))
-                seats[index] = _diagnose(store, seat, scheme, cache_dir=cache_dir.resolve(), lock_fd=lock_fd,
-                                         runner=runner, identity=identity)
-            if seats[index].state == "stopped":
-                return _stopped(store, summary, seats, index + 1)
+            if store.refine_stop_path.exists():
+                return _stopped(store, summary, seats)
+            seats[index] = seat.model_copy(update={"state": "running"})
             write_summary(store.path, summary.model_copy(update={"seats": tuple(seats)}))
+            seats[index] = _diagnose(store, seat, schemes[seat.trial_number], cache_dir=cache_dir.resolve(),
+                                     lock_fd=lock_fd, runner=runner, identity=identity)
+            if seats[index].state == "stopped":
+                return _stopped(store, summary, seats)
+            write_summary(store.path, summary.model_copy(update={"seats": tuple(seats)}))
+        failed = any(seat.state == "failed" for seat in seats)
+        summary = summary.model_copy(update={"state": "failed" if failed else "done", "seats": tuple(seats),
+            "message": "入選後檢查有診斷失敗，原因見各席" if failed else "入選後檢查已收尾；不計分、不改名次"})
+        write_summary(store.path, summary)
     except KeyboardInterrupt:
-        return _stopped(store, summary, seats, index)
-    failed = any(seat.state == "failed" for seat in seats)
-    summary = summary.model_copy(update={"state": "failed" if failed else "done", "seats": tuple(seats),
-        "message": "入選後檢查有診斷失敗，原因見各席" if failed else "入選後檢查已收尾；不計分、不改名次"})
-    write_summary(store.path, summary)
+        return _stopped(store, summary, seats)
+    except Exception as error:
+        # 上層會接住並印出；摘要先收成失敗，不留在「開始過、沒有收尾」。收尾本身再寫不進去就照原錯往外丟。
+        try:
+            write_summary(store.path, summary.model_copy(update={"state": "failed", "seats": tuple(seats),
+                "message": f"入選後檢查失敗：{error}"}))
+        except OSError:
+            pass
+        raise
     prune(store.path, summary, last)
     return summary
 
 
-def _stopped(store: SearchStore, summary: StageOnePostCheckSummary, seats: list[PostCheckSeat], index: int) -> StageOnePostCheckSummary:
-    seats[index:] = [_uncomputed(store, seat.model_copy(update={"state": "stopped", "reason_text": STOPPED}))
-                     for seat in seats[index:]]
+def _stopped(store: SearchStore, summary: StageOnePostCheckSummary, seats: list[PostCheckSeat]) -> StageOnePostCheckSummary:
+    """沒算完的席（還沒開始、開始了沒收尾）記停止；已算完、沿用、跳過的照舊。"""
+    for index, seat in enumerate(seats):
+        if seat.state in ("not_started", "running"):
+            seats[index] = _uncomputed(store, seat.model_copy(update={"state": "stopped", "reason_text": STOPPED}))
     summary = summary.model_copy(update={"state": "stopped", "message": STOPPED, "seats": tuple(seats)})
     write_summary(store.path, summary)
     return summary
 
 
 def _output(store: SearchStore, seat: PostCheckSeat) -> Path:
-    output = summary_path(store.path).parent / f"trial-{seat.trial_number:06d}-{uuid4().hex}.json"
+    folder = summary_path(store.path).parent
+    folder.mkdir(parents=True, exist_ok=True)
+    output = folder / f"trial-{seat.trial_number:06d}-{uuid4().hex}.json"
     output.with_suffix(".stderr").touch()
     return output
 

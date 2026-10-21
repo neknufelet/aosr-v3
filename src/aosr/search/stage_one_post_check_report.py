@@ -16,6 +16,7 @@ from aosr.search.store import SearchStore
 TITLE = "入選後檢查（低頻模態診斷）"
 PARTICIPATION = "主位參與門檻（『主位參與大』的量法與數值）還沒定，超線的先全列；每一席的主位參與附在下面，只排序、不設 dB 切線"
 SUMMARY_STATE_TEXT = {"running": "開始過、沒有收尾紀錄", "done": "已收尾", "stopped": "已停止", "failed": "有診斷失敗"}
+RELATIVE = "主位參與的 dB 是相對值：相對同一支喇叭到同一個座位最強的那根共振（每一席、每支喇叭各自為基準）"
 OLD_IDENTITY = "這一段的診斷是舊版模態程式算的（模態身分跟現在的程式不同）；再跑一次細算會整段重算"
 
 
@@ -80,6 +81,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
             lines.append(OLD_IDENTITY)
         reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
         room_lines: list[str] = []
+        room: tuple[ResonanceReadout, ...] | None = None
         placement_lines: list[str] = []
         for seat in summary.seats:
             label = f"試算 {seat.trial_number}"
@@ -96,8 +98,11 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
                         raise ValueError("診斷狀態與摘要不同")
                     readout = read_modal_diagnosis(diagnosis, reference)
                     if state == "diagnosed_not_scored":
-                        if not room_lines:
+                        if room is None:
+                            room = readout.resonances
                             room_lines = _room_lines(readout, _reference_span(reference))
+                        elif readout.resonances != room:
+                            raise ValueError("這一席的房間層跟上面那份不同，不能共用同一張超線表")
                         placement_lines.extend(_placement_lines(label, scheme, readout))
                 state_text = MODAL_STATE_TEXT.get(state, {"not_started": "未開始", "running": "開始過、沒有收尾紀錄",
                     "stopped": "未計算：已停止", "skipped": "跳過"}.get(state, state))
@@ -105,7 +110,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
             except (OSError, ValueError, KeyError, StopIteration) as error:
                 lines.append(f"{label}：失敗；診斷文件讀不回或內容不完整：{error}")
         lines.extend(room_lines or ["房間層尚無可讀診斷，未評估"])
-        lines.append(PARTICIPATION)
+        lines.extend((PARTICIPATION, RELATIVE))
         lines.extend(placement_lines)
         seconds = [seat.seconds for seat in summary.seats if seat.seconds is not None]
         lines.append(f"總秒數：{sum(seconds):.6f} 秒（有計時的席加總）；沒有計時紀錄 {sum(seat.seconds is None for seat in summary.seats)} 份")

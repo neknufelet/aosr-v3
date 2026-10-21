@@ -283,9 +283,9 @@ def _stage_one_refine_command(args: argparse.Namespace, store: SearchStore, fact
         return 1
     if status.state != "done":
         return 3 if status.state == "interrupted" else 1
-    from aosr.search.stage_one_post_check import run_stage_one_post_check
-
     try:
+        from aosr.search.stage_one_post_check import run_stage_one_post_check
+
         checked = run_stage_one_post_check(store, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
         if checked.state in ("failed", "stopped"):
             _stderr(f"入選後檢查{'失敗' if checked.state == 'failed' else '已停止'}，細算結果不受影響：{checked.message}\n")

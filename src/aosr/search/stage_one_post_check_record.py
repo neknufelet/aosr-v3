@@ -5,9 +5,9 @@ import os
 import re
 from pathlib import Path
 from tempfile import mkstemp
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.modal_lookup import placement_matches
@@ -39,7 +39,15 @@ class StageOnePostCheckSummary(BaseModel):
     modal_identity: str
     state: Literal["running", "done", "stopped", "failed"] = "running"
     message: str = ""
-    seats: tuple[PostCheckSeat, ...] = ()
+    seats: tuple[PostCheckSeat, ...]
+
+    @model_validator(mode="after")
+    def _seats_follow_selection(self) -> Self:
+        """每一入選席恰好一筆、照挑席順序、角色相同；缺席或多席就是內容不完整。"""
+        expected = tuple((row.trial_number, row.roles) for row in self.selection.candidates)
+        if tuple((seat.trial_number, seat.roles) for seat in self.seats) != expected:
+            raise ValueError("摘要的席次跟挑席不同")
+        return self
 
 
 def summary_path(folder: Path) -> Path:
