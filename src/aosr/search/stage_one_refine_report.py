@@ -72,7 +72,7 @@ def stage_one_refine_lines(store: SearchStore) -> tuple[str, ...]:
         return ("還沒細算",)
     lines = ["細算（每 1 Hz 一點，只算有限元素）",
         "大峰＝最強峰高出這支喇叭自己那條直線多少，左右兩支取較差",
-        "房間固定，面積對照不適用", "入選後檢查（低頻模態診斷）還沒做"]
+        "房間固定，面積對照不適用", "入選後檢查見下一段"]
     try:
         status = StageOneRefineStatus.model_validate_json(path.read_bytes())
     except (OSError, ValueError) as error:

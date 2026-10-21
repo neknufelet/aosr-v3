@@ -13,7 +13,7 @@ from aosr.search.stage_one_selection_contract import FROZEN, StageOneSelection, 
 from aosr.search.stage_one_worker import check_stage_one_result
 from aosr.search.store import SearchStore
 
-PENDING_CHECK = "入選後檢查還沒做"
+PENDING_CHECK = "入選後檢查見下一段"
 
 
 class RefinedSeat(BaseModel):

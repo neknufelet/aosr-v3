@@ -13,6 +13,7 @@ from aosr.search.labels import SEARCH_STATES, counts_text
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.stage_one_refine_report import stage_one_refine_lines
+from aosr.search.stage_one_post_check_report import stage_one_post_check_lines
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class StageOneSearchReport:
     ranked: tuple[StageOneReportRow, ...]
     excluded: tuple[StageOneReportRow, ...]
     refine_lines: tuple[str, ...] = ()
+    post_check_lines: tuple[str, ...] = ()
 
 
 def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
@@ -70,7 +72,8 @@ def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
     status = SearchStatus.model_validate_json(store.status_path.read_bytes())
     scored, excluded = _sorted_rows(store)
     return StageOneSearchReport(wall_assumption_text(store.project), status,
-        tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded), stage_one_refine_lines(store))
+        tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded),
+        stage_one_refine_lines(store), stage_one_post_check_lines(store))
 
 
 def _feature(feature: Feature) -> str:
@@ -129,4 +132,5 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
             detail = "缺少結果"
         lines.append(f"試算 {item.trial_number}：{label}；{detail}")
     lines.extend(report.refine_lines)
+    lines.extend(report.post_check_lines)
     return "\n".join(lines) + "\n"
