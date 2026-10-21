@@ -23,6 +23,7 @@ def test_report_required_text_order_values_participation_and_view(tmp_path: Path
         assert required in text
     for forbidden in ("好聽", "通過", "合格", "救得了", "救不了", "建議處理"):
         assert forbidden not in text
+    assert "入選後檢查狀態：已收尾；" in text and "舊版模態程式" not in text
     sample = diagnosis(store, 8); assert sample.room_layer is not None
     reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
     # 答案從原始 T60 與參考線獨立計算，不借 readout（讀回）的排序或超出量。
@@ -89,3 +90,46 @@ def test_report_untimed_is_not_zero_seconds(tmp_path: Path, monkeypatch: pytest.
     timed = [s.seconds for s in result.seats[1:] if s.seconds is not None]
     text = render_stage_one_text(build_stage_one_report(store))
     assert f"總秒數：{sum(timed):.6f} 秒（有計時的席加總）；沒有計時紀錄 1 份" in text
+
+
+def test_old_modal_identity_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 模態程式改版：摘要與診斷彼此一致、都是舊身分；報告照樣讀得回，但要說是舊版算的。
+    from aosr.search import stage_one_post_check_report as module
+    store = prepared(tmp_path, monkeypatch); run(store, tmp_path / "child")
+    monkeypatch.setattr(module, "modal_identity", lambda: "modal-v1:" + "c" * 64)
+    text = "\n".join(module.stage_one_post_check_lines(store))
+    assert module.OLD_IDENTITY in text
+    assert "試算 2／前 N（搜尋第 2 名）：已診斷不計分" in text
+
+
+def test_reference_span_and_below_line_follow_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 範圍字照登記簿讀；拖尾低於參考線（超出量為零）的那一根不算超線。
+    import dataclasses
+    import json
+    from aosr.config.quality_targets import QualityPurpose
+    from aosr.scoring.low_frequency_decay_reference import LowFrequencyDecayReference
+    from aosr.search import stage_one_post_check_report as module
+    from aosr.search.stage_one_post_check import run_stage_one_post_check
+    from tests.engine._stage_one_post_check_cases import runner
+    store = prepared(tmp_path, monkeypatch); root = tmp_path / "child"
+    command = runner(root, store)
+    for fixture in root.glob("*.json"):
+        doc = json.loads(fixture.read_bytes())
+        doc["room_layer"]["modes"][1]["t60_s"] = .05
+        fixture.write_text(json.dumps(doc))
+    assert run_stage_one_post_check(store, cache_dir=root / "cache", lock_fd=None, runner=command).state == "done"
+    original = load_reference
+    def shifted(purpose: QualityPurpose) -> LowFrequencyDecayReference:
+        reference = original(purpose)
+        assert reference.target.extension is not None
+        low, high, t60 = reference.target.extension
+        return dataclasses.replace(reference, target=dataclasses.replace(reference.target, extension=(low + 8, high, t60)))
+    monkeypatch.setattr(module, "load_reference", shifted)
+    text = "\n".join(module.stage_one_post_check_lines(store))
+    reference = shifted(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
+    assert reference.target.extension is not None
+    span = f"{reference.target.extension[0]:g}～{reference.target.frequencies_hz[-1]:g} Hz"
+    assert span != "32～250 Hz" and f"參考線範圍外（{span} 以外），未評估" in text
+    rows = [line for line in text.splitlines() if line.endswith("改善能力尚未確認")]
+    assert [row.split("｜")[0] for row in rows] == ["108.00 Hz"]
+    assert "超過參考線 1 個" in text

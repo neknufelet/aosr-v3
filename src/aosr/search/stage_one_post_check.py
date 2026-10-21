@@ -14,7 +14,7 @@ from aosr.search.modal_attach import DEFAULT_RUNNER, _compute, _nonzero_diagnosi
 from aosr.search.modal_record import ModalRole, RoleInput
 from aosr.search.run import ComputeFailed, IdentityChanged
 from aosr.search.stage_one_post_check_record import (
-    PostCheckSeat, StageOnePostCheckSummary, read_diagnosis, read_summary, summary_path, write_summary,
+    PostCheckSeat, StageOnePostCheckSummary, prune, read_diagnosis, read_summary, summary_path, write_summary,
 )
 from aosr.search.stage_one_refine_record import StageOneRefineStatus, read_stage_one_refined_result
 from aosr.search.store import SearchStore
@@ -100,6 +100,7 @@ def run_stage_one_post_check(store: SearchStore, *, cache_dir: Path, lock_fd: in
         previous = read_summary(store.path)
     except (OSError, ValueError):
         previous = None
+    last = previous
     if previous is not None and (previous.selection != refined.selection or previous.modal_identity != identity):
         previous = None
     seats, schemes = _seat_inputs(store, refined)
@@ -131,6 +132,7 @@ def run_stage_one_post_check(store: SearchStore, *, cache_dir: Path, lock_fd: in
     summary = summary.model_copy(update={"state": "failed" if failed else "done", "seats": tuple(seats),
         "message": "入選後檢查有診斷失敗，原因見各席" if failed else "入選後檢查已收尾；不計分、不改名次"})
     write_summary(store.path, summary)
+    prune(store.path, summary, last)
     return summary
 
 

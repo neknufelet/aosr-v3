@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from tempfile import mkstemp
 from typing import Literal
@@ -14,6 +15,8 @@ from aosr.reporting.scheme import Scheme
 from aosr.search.modal_record import AttachmentState
 from aosr.search.stage_one_selection_contract import Role as SelectionRole, StageOneSelection
 from aosr.search.store import FROZEN
+
+OWNED_FILE = re.compile(r"trial-\d{6}-[0-9a-f]{32}\.(?:json|stderr)\Z")
 
 
 class PostCheckSeat(BaseModel):
@@ -76,3 +79,13 @@ def read_diagnosis(folder: Path, seat: PostCheckSeat, scheme: Scheme, *, identit
     if diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED and not placement_matches(diagnosis, scheme, identity=identity):
         raise ValueError("診斷的房間、身分或擺位與方案不符")
     return diagnosis
+
+
+def prune(folder: Path, *summaries: StageOnePostCheckSummary | None) -> None:
+    """收尾才清：只留這一代與上一代摘要指到的文件（報告不拿鎖，可能剛讀完上一份摘要、還沒讀它指到的文件），
+    只刪自己命名樣式的檔，資料夾不會一直長。"""
+    referenced = {Path(seat.diagnosis_file).stem for summary in summaries if summary is not None
+                  for seat in summary.seats if seat.diagnosis_file is not None}
+    for path in summary_path(folder).parent.iterdir():
+        if OWNED_FILE.fullmatch(path.name) and path.stem not in referenced and path.is_file():
+            path.unlink(missing_ok=True)

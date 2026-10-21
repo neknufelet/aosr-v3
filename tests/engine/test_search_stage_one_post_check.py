@@ -237,3 +237,22 @@ def test_preexisting_stop_opens_no_child_and_remains(tmp_path: Path, monkeypatch
     result = run(store, tmp_path / "child")
     assert result.state == "stopped" and all(s.state == "stopped" for s in result.seats)
     assert not calls(tmp_path / "child") and store.refine_stop_path.exists()
+
+
+def test_finish_keeps_two_generations_and_foreign_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 每一輪弄壞試算 8 的診斷逼它重算；收尾只留這一代與上一代指到的文件，不碰別人的檔。
+    store = prepared(tmp_path, monkeypatch)
+    folder = store.path / "stage-one-check"
+    names = [run(store, tmp_path / "round-0").seats[0].diagnosis_file]
+    foreign = folder / "notes.json"; foreign.write_text("{}")
+    for round_ in (1, 2):
+        (folder / str(names[-1])).write_text("{")
+        result = run(store, tmp_path / f"round-{round_}")
+        assert result.state == "done"
+        names.append(result.seats[0].diagnosis_file)
+    first, second, third = (folder / str(name) for name in names)
+    assert len({first, second, third}) == len(names)
+    assert not first.exists() and not first.with_suffix(".stderr").exists()
+    assert second.exists() and third.exists() and third.with_suffix(".stderr").exists()
+    assert foreign.exists()
+    assert all((folder / str(seat.diagnosis_file)).exists() for seat in result.seats)

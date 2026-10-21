@@ -4,9 +4,10 @@ from __future__ import annotations
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.display import MODAL_STATE_TEXT, speaker_label
+from aosr.reporting.modal_diagnosis import modal_identity
 from aosr.reporting.modal_diagnosis_readout import DiagnosisReadout, ResonanceReadout, read_modal_diagnosis
 from aosr.reporting.scheme import Scheme, load_scheme
-from aosr.scoring.low_frequency_decay_reference import load_reference
+from aosr.scoring.low_frequency_decay_reference import LowFrequencyDecayReference, load_reference
 from aosr.search.modal_record import NOT_SCORED
 from aosr.search.stage_one_post_check_record import PostCheckSeat, read_diagnosis, read_summary
 from aosr.search.stage_one_selection_contract import StageOneSelection
@@ -14,6 +15,8 @@ from aosr.search.store import SearchStore
 
 TITLE = "入選後檢查（低頻模態診斷）"
 PARTICIPATION = "主位參與門檻（『主位參與大』的量法與數值）還沒定，超線的先全列；每一席的主位參與附在下面，只排序、不設 dB 切線"
+SUMMARY_STATE_TEXT = {"running": "開始過、沒有收尾紀錄", "done": "已收尾", "stopped": "已停止", "failed": "有診斷失敗"}
+OLD_IDENTITY = "這一段的診斷是舊版模態程式算的（模態身分跟現在的程式不同）；再跑一次細算會整段重算"
 
 
 def _label(seat: PostCheckSeat, selection: StageOneSelection) -> str:
@@ -27,7 +30,14 @@ def _exceeding(readout: DiagnosisReadout) -> tuple[ResonanceReadout, ...]:
                         key=lambda row: (-float(row.excess_t60_s or 0), row.frequency_hz, row.mode_index)))
 
 
-def _room_lines(readout: DiagnosisReadout) -> list[str]:
+def _reference_span(reference: LowFrequencyDecayReference) -> str:
+    """參考線涵蓋的頻段照登記簿讀：延伸段下端到最高錨點；報告不另抄一份數字。"""
+    line = reference.target
+    low = line.extension[0] if line.extension is not None else line.frequencies_hz[0]
+    return f"{low:g}～{line.frequencies_hz[-1]:g} Hz"
+
+
+def _room_lines(readout: DiagnosisReadout, span: str) -> list[str]:
     resonances = readout.resonances or ()
     exceeding = _exceeding(readout)
     outside = sum(row.target_t60_s is None for row in resonances)
@@ -37,7 +47,7 @@ def _room_lines(readout: DiagnosisReadout) -> list[str]:
                  f"超出量 {row.excess_t60_s:.6f} 秒；改善能力尚未確認" for row in exceeding)
     if not exceeding:
         lines.append("這份診斷沒有超線共振")
-    lines.append(f"{outside} 根參考線範圍外（32～250 Hz 以外），未評估")
+    lines.append(f"{outside} 根參考線範圍外（{span} 以外），未評估")
     return lines
 
 
@@ -65,7 +75,9 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
         summary = read_summary(store.path)
         if summary is None:
             return (*lines, "入選後檢查還沒做")
-        lines.append(f"入選後檢查狀態：{summary.state}；{summary.message}")
+        lines.append(f"入選後檢查狀態：{SUMMARY_STATE_TEXT[summary.state]}；{summary.message}")
+        if summary.modal_identity != modal_identity():
+            lines.append(OLD_IDENTITY)
         reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
         room_lines: list[str] = []
         placement_lines: list[str] = []
@@ -85,7 +97,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
                     readout = read_modal_diagnosis(diagnosis, reference)
                     if state == "diagnosed_not_scored":
                         if not room_lines:
-                            room_lines = _room_lines(readout)
+                            room_lines = _room_lines(readout, _reference_span(reference))
                         placement_lines.extend(_placement_lines(label, scheme, readout))
                 state_text = MODAL_STATE_TEXT.get(state, {"not_started": "未開始", "running": "開始過、沒有收尾紀錄",
                     "stopped": "未計算：已停止", "skipped": "跳過"}.get(state, state))
