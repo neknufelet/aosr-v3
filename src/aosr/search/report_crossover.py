@@ -9,6 +9,8 @@ from aosr.search.crossover_record import (
 from aosr.search.run import SearchStatus
 from aosr.search.store import FROZEN, SearchStore
 
+STAGE_ONE_OUT_OF_SCOPE = "範圍外：第一階段只算有限元素（20～300 Hz），沒有 300 Hz 交接，這一項不適用"
+
 
 class CrossoverReport(BaseModel):
     model_config = FROZEN
@@ -18,6 +20,8 @@ class CrossoverReport(BaseModel):
 
 
 def crossover_report(store: SearchStore, status: SearchStatus) -> CrossoverReport:
+    if store.settings.stage is not None:
+        return CrossoverReport(lines=(STAGE_ONE_OUT_OF_SCOPE,))
     try:
         summary: CrossoverSummary | None = read_summary(store.path)
         lines = summary_lines(summary, seat_locked=store.settings.layout.seat_locked)

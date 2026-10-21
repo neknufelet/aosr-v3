@@ -19,6 +19,8 @@ from aosr.search.placement_stability_record import (
 from aosr.search.run import SearchStatus
 from aosr.search.store import FROZEN, SearchStore
 
+STAGE_ONE_OUT_OF_SCOPE = "範圍外：擺位穩定性是第二階段的檢查；第一階段的座位穩健性已在合分裡（主位前後左右上下六點）"
+
 class StabilityReport(BaseModel):
     model_config = FROZEN
     lines: tuple[str, ...] = (ABSENT,)
@@ -179,6 +181,8 @@ def _finalist_lines(summary: StabilitySummary, store: SearchStore) -> tuple[str,
 
 
 def stability_report(store: SearchStore, status: SearchStatus) -> StabilityReport:
+    if store.settings.stage is not None:
+        return StabilityReport(lines=(STAGE_ONE_OUT_OF_SCOPE,))
     try:
         summary = read_summary(store.path)
         if summary is None:

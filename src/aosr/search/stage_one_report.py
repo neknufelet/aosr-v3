@@ -10,6 +10,10 @@ from aosr.scoring.contract_base import Flag
 from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT, StageOneSpeakerPayload
 from aosr.search import ledger
 from aosr.search.labels import SEARCH_STATES, counts_text
+from aosr.search.crossover_record import TITLE as CROSSOVER_TITLE
+from aosr.search.outer_status import conclusion_message
+from aosr.search.report_crossover import STAGE_ONE_OUT_OF_SCOPE as CROSSOVER_OUT_OF_SCOPE
+from aosr.search.report_stability import STAGE_ONE_OUT_OF_SCOPE as STABILITY_OUT_OF_SCOPE, TITLE as STABILITY_TITLE
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.stage_one_refine_report import stage_one_refine_lines
@@ -109,6 +113,7 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
     reasons = counts_text(dict(sorted(status.illegal_reasons.items())))
     lines = [report.wall_text, IDEAL_SOURCE_ASSUMPTION_TEXT, "低頻拖尾不進自動排名，入選後要另外檢查",
         f"停止原因：{SEARCH_STATES.get(status.state, status.state)}；{status.message}",
+        f"外圈結論：{conclusion_message(status)}",
         f"問過 {status.asked}；算完 {status.computed}；不合法 {status.illegal}（各原因：{reasons}）；"
         f"不可估 {status.excluded.get('unassessed', 0)}；不能同表 {status.excluded.get('incomparable', 0)}",
         "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜合分",
@@ -133,4 +138,5 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
         lines.append(f"試算 {item.trial_number}：{label}；{detail}")
     lines.extend(report.refine_lines)
     lines.extend(report.post_check_lines)
+    lines.extend((CROSSOVER_TITLE, CROSSOVER_OUT_OF_SCOPE, STABILITY_TITLE, STABILITY_OUT_OF_SCOPE))
     return "\n".join(lines) + "\n"

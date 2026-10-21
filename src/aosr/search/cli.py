@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Sta
 def _reject_stage_one(store: SearchStore, command: str) -> None:
     if store.settings.stage is not None and command == "refine" and store.settings.stage_one_refine is None:
         raise ValueError("這個第一階段搜尋沒有設定細算（stage_one_refine），不能細算")
-    names = {"auto": "自動外圈", "feedback": "回饋", "select": "入選"}
+    names = {"feedback": "回饋", "select": "入選"}
     if store.settings.stage is not None and command in names:
         raise ValueError(f"這是第一階段搜尋資料夾，{names[command]}還沒接上第一階段")
 
@@ -252,6 +252,8 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
 
     if args.command == "refine":
         return _stage_one_refine_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
+    if args.command == "auto":
+        return _stage_one_auto_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
 
     try:
         compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
@@ -292,6 +294,39 @@ def _stage_one_refine_command(args: argparse.Namespace, store: SearchStore, fact
     except (Exception, KeyboardInterrupt) as error:
         _stderr(f"入選後檢查{'已停止' if isinstance(error, KeyboardInterrupt) else '失敗'}：{error}；細算結果不受影響\n")
     return 0
+
+
+def _stage_one_auto_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
+                            registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
+    """第一階段外圈拒收只報錯；入選後檢查不改結論或離開碼。"""
+    from aosr.search.stage_one_outer import auto_stage_one_search
+    from aosr.search.stage_one_worker import StageOneCompute
+
+    try:
+        compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
+            StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
+                search_id=store.search_id, fem_root=store.fem_path, identity=store.identity, lock_fd=lock_fd))
+        status = auto_stage_one_search(store, compute=compute,
+            probe=lambda: _identity(store.project.purpose, args.capabilities), registry_path=registry_path,
+            run_date=date.today(), engine_version=store.identity.program_fingerprint)
+    except Exception as error:
+        # 狀態檔裡的結論可能是上一次判的，不拿來當這次不跑的原因。
+        _stderr(f"自動外圈失敗：{error}\n入選後檢查這次不跑：自動外圈沒有正常收尾\n")
+        return 1
+    conclusion = status.outer.conclusion
+    code = 3 if conclusion in ("search_interrupted", "refine_interrupted") else 1 if conclusion in ("search_failed", "refine_failed") else 0
+    if conclusion != "complete":
+        _stderr(f"入選後檢查這次不跑：{OUTER_MESSAGES[conclusion] if conclusion is not None else '未判定'}\n")
+        return code
+    try:
+        from aosr.search.stage_one_post_check import run_stage_one_post_check
+
+        checked = run_stage_one_post_check(store, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
+        if checked.state in ("failed", "stopped"):
+            _stderr(f"入選後檢查{'失敗' if checked.state == 'failed' else '已停止'}，細算結果不受影響：{checked.message}\n")
+    except (Exception, KeyboardInterrupt) as error:
+        _stderr(f"入選後檢查{'已停止' if isinstance(error, KeyboardInterrupt) else '失敗'}：{error}；細算結果不受影響\n")
+    return code
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
