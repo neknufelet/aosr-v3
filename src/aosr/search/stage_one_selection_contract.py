@@ -48,13 +48,18 @@ class StageOneSelection(BaseModel):
 
 
 def big_peak(result: StageOneResult) -> float | None:
-    """每支自己的最強峰，兩支取較差；任一支量不到就不產生數值。"""
+    """每支自己的最強峰，兩支取較差；任一支量不到就不產生數值。
+
+    先核完每一支的索引才判量不到：前一支量不到就提早回，後一支壞掉的索引會被放過。
+    """
+    payloads = [speaker.payload for speaker in result.evaluation.speakers]
+    for speaker, payload in zip(result.evaluation.speakers, payloads, strict=True):
+        if payload is not None and payload.strongest_peak_index is not None \
+                and payload.strongest_peak_index >= len(payload.features):
+            raise ValueError(f"{speaker.speaker_id} 的最強峰索引超出峰谷清單")
     values = []
-    for speaker in result.evaluation.speakers:
-        payload = speaker.payload
+    for payload in payloads:
         if payload is None or payload.strongest_peak_index is None:
             return None
-        if payload.strongest_peak_index >= len(payload.features):
-            raise ValueError(f"{speaker.speaker_id} 的最強峰索引超出峰谷清單")
         values.append(payload.features[payload.strongest_peak_index].depth_db)
     return max(values)

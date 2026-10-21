@@ -101,11 +101,16 @@ def test_seeded_selection_invariants(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert sum("top_n" not in s.roles for s in chosen.candidates) <= 2
 
 
-def test_bad_peak_index_only_spoils_its_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    store = pool(tmp_path, monkeypatch, [(0, 1., 5., .5), (1, 2., 7., .6), (2, 3., 3., .9)])
+# 壞的那支在第一支、或第一支量不到而壞的在第二支（量不到不准讓後面壞掉的索引被放過）。
+@pytest.mark.parametrize("peak,broken", [(3., 0), (None, 1)])
+def test_bad_peak_index_only_spoils_its_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                            peak: float | None, broken: int) -> None:
+    store = pool(tmp_path, monkeypatch, [(0, 1., 5., .5), (1, 2., 7., .6), (2, 3., peak, .9)])
     path = store.candidate_path(2)
     document = json.loads(path.read_bytes())
-    document["evaluation"]["speakers"][0]["payload"]["features"] = []
+    speakers = document["evaluation"]["speakers"]
+    assert (speakers[0]["payload"]["strongest_peak_index"] is None) == (peak is None)
+    speakers[broken]["payload"]["features"] = []
     path.write_text(json.dumps(document))
     load_stage_one_result(path)  # 模型只核索引非負，這份壞檔照樣讀得回：考的是挑席自己的隔離。
     chosen = select(store)

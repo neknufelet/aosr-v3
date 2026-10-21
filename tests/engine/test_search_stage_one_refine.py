@@ -241,7 +241,8 @@ def test_cli_error_exit_preserves_search_files(tmp_path: Path, monkeypatch: pyte
     assert {p: after[p] for p in before} == before
 
 
-@pytest.mark.parametrize("damage", ["missing", "wrong_origin", "changed_identity", "search_axis", "bad_peak_index"])
+@pytest.mark.parametrize("damage", ["missing", "wrong_origin", "changed_identity", "search_axis", "bad_peak_index",
+    "bad_peak_index_after_unmeasured"])
 def test_resume_recomputes_bad_saved_verification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     store = pool(tmp_path, monkeypatch, ROWS)
     refine(store, search.FakeCompute(store, monkeypatch))
@@ -257,9 +258,14 @@ def test_resume_recomputes_bad_saved_verification(tmp_path: Path, monkeypatch: p
         document["score"]["candidate_id"] = renamed
         target.write_text(json.dumps(document))
         assert load_stage_one_result(target).low_frequency_axis != LowFrequencyAxis.VERIFICATION
-    elif damage == "bad_peak_index":
+    elif damage in ("bad_peak_index", "bad_peak_index_after_unmeasured"):
         document = json.loads(target.read_bytes())
-        document["evaluation"]["speakers"][0]["payload"]["features"] = []
+        speakers = document["evaluation"]["speakers"]
+        if damage == "bad_peak_index":
+            speakers[0]["payload"]["features"] = []
+        else:  # 第一支量不到、第二支索引壞：不准因為先看到量不到就放過
+            speakers[0]["payload"]["strongest_peak_index"] = None
+            speakers[1]["payload"]["features"] = []
         target.write_text(json.dumps(document))
         load_stage_one_result(target)  # 模型讀得回；要靠細算自己的讀回核對抓到峰谷摘要壞了
     else:
