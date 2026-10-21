@@ -18,7 +18,6 @@ from aosr.reporting.scheme_cli import PROGRAM_CHANGED_EXIT, PROGRAM_CHANGED_MARK
 from aosr.search.run import CandidateJob, ComputeFailed, IdentityChanged
 from aosr.search.store import SearchStore
 from aosr.search.worker import _check_exit as real_check_exit
-from aosr.search.worker import _notify_finished as real_notify
 from aosr.search.worker import _Slice
 from aosr.search.worker import _watch as real_watch
 from tests.engine._search_worker_group_cases import (
@@ -98,12 +97,21 @@ def test_all_groups_share_worker_limit_and_each_slice_runs_once(tmp_path: Path, 
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
     jobs = mixed_rooms(jobs)
     limit = 3
-    # 第一組每一片都要等到三片都起跑才結束：開第三片時前兩片一定還活著，滿載不靠碰運氣（複查）。
-    options: dict[str, object] = {f"job-0-slice-{index}": {"wait_for": limit} for index in range(limit)}
+    # 第一組各片等主迴圈真的停下來等通知（阻塞的 get）才准結束：正確程式滿載時一定先走到那一步，
+    # 多開一支的程式會在那之前開第四片，那時前三片一定還沒收掉（複查二）。
+    options: dict[str, object] = {f"job-0-slice-{index}": {"hold": "release-first-group"} for index in range(limit)}
     options.update({f"job-1-slice-{index}": {"sleep": 0.15} for index in range(limit)})
     configure_slices(tmp_path, worker, options)
     commands = capture_commands(worker, monkeypatch)
     unreaped = count_unreaped_slices(worker, monkeypatch)
+    release = tmp_path / "release-first-group"
+
+    class ReleasingQueue(Queue[_Slice]):
+        def get(self, block: bool = True, timeout: float | None = None) -> _Slice:
+            release.touch()
+            return super().get(block, timeout)
+
+    monkeypatch.setattr("aosr.search.worker.Queue", ReleasingQueue)
     list(worker(jobs, limit))
     # 父行程開每一片之前，還沒收掉（returncode 仍是 None）的分片都算活著，這是上限的保守量法（審查）。
     assert unreaped and max(unreaped) < limit
@@ -224,16 +232,15 @@ def test_failure_queued_between_refills_stops_the_next_slice(tmp_path: Path, mon
         process = observed(command, stderr_path)
         if "--slice" in command and second in command and not released:
             # 第二組第一片剛開出去，第一組那片才失敗；它的監看還沒建，佇列裡只可能是第一片的失敗。
-            released.append(True)
             (tmp_path / "release-failure").touch()
-            assert wait_until(lambda: not queues[0].empty()), "第一片的失敗通知沒到"
+            released.append(wait_until(lambda: not queues[0].empty()))
         return process
 
     monkeypatch.setattr("aosr.search.worker._watch", wait_initial_wave)
     monkeypatch.setattr(worker, "_spawn", release_while_spawning)
     with pytest.raises(ComputeFailed, match="分片 0 離開碼 7"):
         list(worker(jobs, limit))
-    assert released
+    assert released == [True], "第一片的失敗通知沒到"
     assert [command[command.index("--slice") + 1] for command in commands
             if "--slice" in command and second in command] == ["0"]
     assert not events(tmp_path)
@@ -272,22 +279,30 @@ def test_failure_stops_other_slices_before_reading_the_error(tmp_path: Path, mon
 def test_slice_watchers_finish_before_parts_are_returned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
     jobs = mixed_rooms(jobs)
-    threads: list[Thread | None] = []
+    threads: list[Thread] = []
+    joined: list[Thread] = []
 
-    def slow_notify(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
-        # 通知排進佇列之後，監看執行緒還要一會兒才結束；回傳之前要等它們都結束（審查：植錯存活補題）。
-        real_notify(item, completed, order)
-        time.sleep(0.3)
+    class RecordingThread(Thread):
+        # 監看執行緒被等到結束（join）就記下來；回傳分片之前每一條都要記到（審查：植錯存活補題）。
+        def join(self, timeout: float | None = None) -> None:
+            super().join(timeout)
+            if not self.is_alive():
+                joined.append(self)
 
     def watched(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
         real_watch(item, completed, order)
+        assert isinstance(item.watcher, RecordingThread)
         threads.append(item.watcher)
 
-    monkeypatch.setattr("aosr.search.worker._notify_finished", slow_notify)
+    monkeypatch.setattr("aosr.search.worker.Thread", RecordingThread)
     monkeypatch.setattr("aosr.search.worker._watch", watched)
-    parts = worker._parts_by_job(jobs, 2)
-    assert parts and threads
-    assert all(thread is not None and not thread.is_alive() for thread in threads)
+    try:
+        parts = worker._parts_by_job(jobs, 2)
+        assert parts and threads
+        assert all(any(thread is done for done in joined) for thread in threads)
+    finally:
+        for thread in threads:
+            thread.join(timeout=20)
     groups_are_dead(slice_events(tmp_path))
 
 
