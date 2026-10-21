@@ -105,10 +105,15 @@ def test_all_groups_share_worker_limit_and_each_slice_runs_once(tmp_path: Path, 
     commands = capture_commands(worker, monkeypatch)
     unreaped = count_unreaped_slices(worker, monkeypatch)
     release = tmp_path / "release-first-group"
+    released_after: list[int] = []
 
     class ReleasingQueue(Queue[_Slice]):
         def get(self, block: bool = True, timeout: float | None = None) -> _Slice:
-            release.touch()
+            # 標準 Queue.get_nowait() 就是 self.get(block=False)，排水也會走到這裡；
+            # 只有阻塞的 get 才放行，並記下放行時已經開了幾片（複查三）。
+            if block and not release.exists():
+                released_after.append(len(unreaped))
+                release.touch()
             return super().get(block, timeout)
 
     monkeypatch.setattr("aosr.search.worker.Queue", ReleasingQueue)
@@ -116,6 +121,8 @@ def test_all_groups_share_worker_limit_and_each_slice_runs_once(tmp_path: Path, 
     # 父行程開每一片之前，還沒收掉（returncode 仍是 None）的分片都算活著，這是上限的保守量法（審查）。
     assert unreaped and max(unreaped) < limit
     assert unreaped[limit - 1] == limit - 1
+    # 上面兩條的前提：放行之前第一組一片都結束不了，第一次放行時恰好開滿一輪；前提不成立也紅（複查三）。
+    assert released_after == [limit]
     records = slice_events(tmp_path)
     parts = (*expected_group(worker, (jobs[0], jobs[2]), limit, records, commands),
              *expected_group(worker, (jobs[1],), limit, records, commands))
