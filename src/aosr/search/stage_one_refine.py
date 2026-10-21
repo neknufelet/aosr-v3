@@ -13,6 +13,7 @@ from aosr.search.run import (CandidateJob, ComputeFailed, IdentityChanged, Ident
     _check_identity, _resume_inputs)
 from aosr.search.stage_one_refine_record import (PENDING_CHECK, RefinedSeat, StageOneRefineStatus,
     read_stage_one_refined_result, save_stage_one_refine)
+from aosr.search.stage_one_refine_stop import StageOneRefineStopped
 from aosr.search.stage_one_selection import select_stage_one_candidates
 from aosr.search.stage_one_selection_contract import big_peak
 from aosr.search.stage_one_worker import StageOneComputeFunction, check_stage_one_result
@@ -82,8 +83,11 @@ class _Refiner:
 
 
 def refine_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunction, probe: IdentityProbe,
-                            registry_path: Path, run_date: date, engine_version: str) -> StageOneRefineStatus:
+                            registry_path: Path, run_date: date, engine_version: str,
+                            keep_stop_marker: bool = False) -> StageOneRefineStatus:
     """前提與選席變動先拒收，開始後僅寫第一階段細算摘要與驗證結果。"""
+    if keep_stop_marker and store.refine_stop_path.exists():
+        raise StageOneRefineStopped()
     _prerequisites(store)
     selection = select_stage_one_candidates(store, registry_path=registry_path)
     path = store.path / "stage_one_refine.json"
@@ -101,6 +105,8 @@ def refine_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunct
         if engine_version != store.identity.program_fingerprint:
             raise IdentityChanged("engine_version 與搜尋快照的 program_fingerprint 不同")
         if store.refine_stop_path.exists():
+            if keep_stop_marker:
+                raise StageOneRefineStopped()
             store.refine_stop_path.unlink()
             runner.note = "；已刪除殘留的細算停止記號"
         runner.save("selected", "已挑席")
@@ -109,6 +115,8 @@ def refine_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunct
             store.refine_dir.mkdir(exist_ok=True)
             _compute_batch(runner, jobs, compute)
         return runner.save("done", "細算完成")
+    except StageOneRefineStopped:
+        raise
     except (KeyboardInterrupt, IdentityChanged) as error:
         return runner.save("interrupted", f"細算中斷：{error}")
     except Exception as error:
