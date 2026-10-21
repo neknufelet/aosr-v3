@@ -16,6 +16,14 @@ name = "dedicated_two_channel_listening_room"
 qualification = []
 
 [[stage_one.setting]]
+key = "stage_one_selection.big_peak_control_margin_db"
+value = 1.0
+unit = "dB"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "票 #558 老闆 2026-10-20 回評價規格第二題「Ａ」：對照那一間＝前 5 間以外、大峰比前 5 間裡最低的還低 1 dB 以上的候選中合分最好的一間；1 dB 是主對話暫定（10-05 舊搜尋兩軸峰高差最大 0.73 dB），第一批跑完再看"
+
+[[stage_one.setting]]
 key = "stage_one_low_frequency.scored_range_hz"
 value = [20.0, 300.0]
 unit = "Hz"

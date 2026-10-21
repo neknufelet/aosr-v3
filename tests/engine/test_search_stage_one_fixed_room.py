@@ -100,8 +100,7 @@ def test_invalid_prerequisites_create_nothing(tmp_path: Path, damage: str, reaso
     assert not (tmp_path / "searches").exists()
 
 
-@pytest.mark.parametrize("command,label,extra", [("refine", "細算", ["--engine-commit", "test"]),
-    ("auto", "自動外圈", ["--engine-commit", "test", "--modal-cache-dir", "cache"]),
+@pytest.mark.parametrize("command,label,extra", [("auto", "自動外圈", ["--engine-commit", "test", "--modal-cache-dir", "cache"]),
     ("feedback", "回饋", []), ("select", "入選", ["--trial", "0", "--data-dir", "data"])])
 def test_unsupported_commands_preserve_every_byte(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                 command: str, label: str, extra: list[str]) -> None:

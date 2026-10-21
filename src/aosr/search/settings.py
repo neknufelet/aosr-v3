@@ -18,6 +18,15 @@ class RefineSettings(BaseModel):
     budget: int = Field(ge=1, strict=True, description="第五節第 5、6 條待定，要實跑後問老闆；必填，不自編預設")
 
 
+class StageOneRefineSettings(BaseModel):
+    """第一階段保留名額與較遠對照的工程分界；開搜尋時固定。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    top_n: int = Field(ge=1, strict=True)
+    far_control_min_front_distance_m: float = Field(gt=0,
+        description="較遠對照的選席分界（聲學中心離前牆，公尺）；工程暫定，老闆 2026-10-21")
+
+
 class FeedbackSettings(BaseModel):
     """單位空間的回饋偏移量；暫行，要實跑後問老闆。"""
 
@@ -43,6 +52,7 @@ class SearchSettings(BaseModel):
     budget: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
     convergence_run: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
     stage: Literal["stage_one_fem_only"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    stage_one_refine: StageOneRefineSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     refine: RefineSettings | None = None
     feedback: FeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
@@ -50,6 +60,8 @@ class SearchSettings(BaseModel):
     def _nonblank_purpose(self) -> Self:
         if not self.purpose.strip():
             raise ValueError("purpose must not be blank")
+        if self.stage_one_refine is not None and self.stage is None:
+            raise ValueError("stage_one_refine 必須設定 stage（第一階段）")
         return self
 
     def sampler_settings(self) -> SamplerSettings:

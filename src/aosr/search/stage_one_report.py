@@ -12,6 +12,7 @@ from aosr.search import ledger
 from aosr.search.labels import SEARCH_STATES, counts_text
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
+from aosr.search.stage_one_refine_report import stage_one_refine_lines
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class StageOneSearchReport:
     status: SearchStatus
     ranked: tuple[StageOneReportRow, ...]
     excluded: tuple[StageOneReportRow, ...]
+    refine_lines: tuple[str, ...] = ()
 
 
 def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
@@ -58,7 +60,7 @@ def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
                     key=lambda row: (row.score if row.score is not None else float("inf"), row.trial_number))
     excluded = sorted((row for row in rows if row.outcome == "excluded"), key=lambda row: row.trial_number)
     return StageOneSearchReport(wall_assumption_text(store.project), status,
-        tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded))
+        tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded), stage_one_refine_lines(store))
 
 
 def _feature(feature: Feature) -> str:
@@ -116,4 +118,5 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
         else:
             detail = "缺少結果"
         lines.append(f"試算 {item.trial_number}：{label}；{detail}")
+    lines.extend(report.refine_lines)
     return "\n".join(lines) + "\n"

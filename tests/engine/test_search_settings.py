@@ -53,6 +53,7 @@ def test_sampler_settings_match(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("field,value", [
+    ("stage_one_refine", {"top_n": 2, "far_control_min_front_distance_m": .8}),
     ("stage", "stage_one_fem_only"), ("purpose", "production"), ("seed", 1), ("n_startup_trials", 4), ("constant_liar", False),
     ("batch_size", 4), ("max_workers", 2), ("budget", 12), ("convergence_run", 6),
     ("layout", {"front_wall": "y0"}),
@@ -66,7 +67,8 @@ def test_fingerprint_tracks_every_setting(tmp_path: Path, field: str, value: obj
     if field == "layout":
         assert isinstance(value, dict)
         value = original.layout.model_dump(mode="json") | value
-    changed = SearchSettings.model_validate(document | {field: value})
+    changed = SearchSettings.model_validate(document | {field: value} |
+        ({"stage": "stage_one_fem_only"} if field == "stage_one_refine" else {}))
     assert changed.fingerprint != original.fingerprint
     assert SearchSettings.model_validate(dict(reversed(tuple(document.items())))).fingerprint == original.fingerprint
     assert original.canonical() == document

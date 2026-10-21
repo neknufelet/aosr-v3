@@ -232,7 +232,9 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Sta
 
 
 def _reject_stage_one(store: SearchStore, command: str) -> None:
-    names = {"refine": "細算", "auto": "自動外圈", "feedback": "回饋", "select": "入選"}
+    if store.settings.stage is not None and command == "refine" and store.settings.stage_one_refine is None:
+        raise ValueError("這個第一階段搜尋沒有設定細算（stage_one_refine），不能細算")
+    names = {"auto": "自動外圈", "feedback": "回饋", "select": "入選"}
     if store.settings.stage is not None and command in names:
         raise ValueError(f"這是第一階段搜尋資料夾，{names[command]}還沒接上第一階段")
 
@@ -241,6 +243,9 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
                        registry_path: Path, *, lock_fd: int) -> int:
     from aosr.search.stage_one_worker import StageOneCompute
     from aosr.search.stage_one_run import start_stage_one_search, resume_stage_one_search
+
+    if args.command == "refine":
+        return _stage_one_refine_command(args, store, factory, registry_path, lock_fd=lock_fd)
 
     try:
         compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
@@ -252,6 +257,25 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
         return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
         return _failed(store, error)
+
+
+def _stage_one_refine_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
+                              registry_path: Path, *, lock_fd: int) -> int:
+    """細算拒跑只報錯；不能經搜尋失敗出口改動狀態。"""
+    from aosr.search.stage_one_worker import StageOneCompute
+    from aosr.search.stage_one_refine import refine_stage_one_search
+
+    try:
+        compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
+            StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
+                search_id=store.search_id, fem_root=store.fem_path, identity=store.identity, lock_fd=lock_fd))
+        status = refine_stage_one_search(store, compute=compute,
+            probe=lambda: _identity(store.project.purpose, args.capabilities), registry_path=registry_path,
+            run_date=date.today(), engine_version=store.identity.program_fingerprint)
+        return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
+    except Exception as error:
+        _stderr(f"細算失敗：{error}\n")
+        return 1
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
