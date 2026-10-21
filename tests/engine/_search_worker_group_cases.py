@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
@@ -66,6 +67,14 @@ def capture_commands(worker: SubprocessCompute, monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(worker, "_spawn", observed)
     return commands
+
+
+def wait_until(condition: Callable[[], bool], seconds: float = 20) -> bool:
+    """等到條件成立或逾時；回傳最後一次的結果，呼叫端自己斷言（逾時不准無聲通過）。"""
+    deadline = time.monotonic() + seconds
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return condition()
 
 
 def count_unreaped_slices(worker: SubprocessCompute, monkeypatch: pytest.MonkeyPatch) -> list[int]:

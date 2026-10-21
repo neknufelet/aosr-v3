@@ -17,6 +17,8 @@ from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_freq
 from aosr.reporting.scheme_cli import PROGRAM_CHANGED_EXIT, PROGRAM_CHANGED_MARKER
 from aosr.search.run import CandidateJob, ComputeFailed, IdentityChanged
 from aosr.search.store import SearchStore
+from aosr.search.worker import _check_exit as real_check_exit
+from aosr.search.worker import _notify_finished as real_notify
 from aosr.search.worker import _Slice
 from aosr.search.worker import _watch as real_watch
 from tests.engine._search_worker_group_cases import (
@@ -26,10 +28,11 @@ from tests.engine._search_worker_group_cases import (
     expected_candidate,
     expected_group,
     mixed_rooms,
+    wait_until,
     with_axis,
 )
 from tests.engine.test_search_stage_one_worker import setup as setup_stage_one
-from tests.engine.test_search_worker import events, setup_worker
+from tests.engine.test_search_worker import assert_dead, events, setup_worker
 from tests.engine.test_search_worker_fem import groups_are_dead, slice_events
 
 
@@ -95,12 +98,16 @@ def test_all_groups_share_worker_limit_and_each_slice_runs_once(tmp_path: Path, 
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
     jobs = mixed_rooms(jobs)
     limit = 3
-    configure_slices(tmp_path, worker, {f"slice-{index}": {"sleep": 0.15} for index in range(limit)})
+    # 第一組每一片都要等到三片都起跑才結束：開第三片時前兩片一定還活著，滿載不靠碰運氣（複查）。
+    options: dict[str, object] = {f"job-0-slice-{index}": {"wait_for": limit} for index in range(limit)}
+    options.update({f"job-1-slice-{index}": {"sleep": 0.15} for index in range(limit)})
+    configure_slices(tmp_path, worker, options)
     commands = capture_commands(worker, monkeypatch)
     unreaped = count_unreaped_slices(worker, monkeypatch)
     list(worker(jobs, limit))
     # 父行程開每一片之前，還沒收掉（returncode 仍是 None）的分片都算活著，這是上限的保守量法（審查）。
-    assert unreaped and max(unreaped) == limit - 1
+    assert unreaped and max(unreaped) < limit
+    assert unreaped[limit - 1] == limit - 1
     records = slice_events(tmp_path)
     parts = (*expected_group(worker, (jobs[0], jobs[2]), limit, records, commands),
              *expected_group(worker, (jobs[1],), limit, records, commands))
@@ -167,25 +174,23 @@ def test_queued_failure_is_checked_before_refilling(tmp_path: Path, monkeypatch:
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
     jobs = mixed_rooms(jobs)
     limit = 3
-    expected_slices = range(min(limit, len(low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[0])))
-    configure_slices(tmp_path, worker, {"job-0-slice-2": {"hold": "release-failure", "exit": 7}})
+    # 前兩片等第三片開出來才准成功：主迴圈被擋在第三片的監看裡，成功通知不會先被讀走（複查）。
+    configure_slices(tmp_path, worker, {"job-0-slice-0": {"hold": "release-successes"},
+                                        "job-0-slice-1": {"hold": "release-successes"},
+                                        "job-0-slice-2": {"hold": "release-failure", "exit": 7}})
     commands = capture_commands(worker, monkeypatch)
 
     def wait_initial_wave(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
         real_watch(item, completed, order)
         if item.slice_index != limit - 1:
             return
-        deadline = time.monotonic() + 20
-        while completed.qsize() < limit - 1 and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert completed.qsize() == len(expected_slices) - 1
+        (tmp_path / "release-successes").touch()
+        assert wait_until(lambda: completed.qsize() >= limit - 1), "前兩片的成功通知沒到"
         (tmp_path / "release-failure").touch()
-        while completed.qsize() < limit and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert completed.qsize() == len(expected_slices)
+        assert wait_until(lambda: completed.qsize() >= limit), "第三片的失敗通知沒到"
 
     monkeypatch.setattr("aosr.search.worker._watch", wait_initial_wave)
-    with pytest.raises(ComputeFailed, match="分片 2"):
+    with pytest.raises(ComputeFailed, match="分片 2 離開碼 7"):
         list(worker(jobs, limit))
     assert not events(tmp_path)
     first_schemes = tuple(str(SearchStore.scheme_path_for(job.result_path)) for job in (jobs[0], jobs[2]))
@@ -197,7 +202,10 @@ def test_failure_queued_between_refills_stops_the_next_slice(tmp_path: Path, mon
     worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
     jobs = mixed_rooms(jobs)
     limit = 3
-    configure_slices(tmp_path, worker, {"job-0-slice-0": {"hold": "release-failure", "exit": 7}})
+    # 第一片等放行才失敗；後兩片等第三片開出來才准成功，主迴圈才會一次空出兩個位置（複查）。
+    configure_slices(tmp_path, worker, {"job-0-slice-0": {"hold": "release-failure", "exit": 7},
+                                        "job-0-slice-1": {"hold": "release-successes"},
+                                        "job-0-slice-2": {"hold": "release-successes"}})
     commands = capture_commands(worker, monkeypatch)
     observed = worker._spawn
     released: list[bool] = []
@@ -205,34 +213,81 @@ def test_failure_queued_between_refills_stops_the_next_slice(tmp_path: Path, mon
     second = str(SearchStore.scheme_path_for(jobs[1].result_path.resolve()))
 
     def wait_initial_wave(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
-        # 第一組三片都開了以後，等兩片成功的通知都排進來，主迴圈一次讀完、一次補兩個位置。
         queues.append(completed)
         real_watch(item, completed, order)
         if item.slice_index != limit - 1 or released:
             return
-        deadline = time.monotonic() + 20
-        while completed.qsize() < limit - 1 and time.monotonic() < deadline:
-            time.sleep(0.01)
+        (tmp_path / "release-successes").touch()
+        assert wait_until(lambda: completed.qsize() >= limit - 1), "後兩片的成功通知沒到"
 
     def release_while_spawning(command: Sequence[str], stderr_path: Path) -> subprocess.Popen[bytes]:
         process = observed(command, stderr_path)
         if "--slice" in command and second in command and not released:
-            # 第二組第一片剛開出去，第一組那片才失敗：失敗通知排進佇列之後才回到主迴圈。
+            # 第二組第一片剛開出去，第一組那片才失敗；它的監看還沒建，佇列裡只可能是第一片的失敗。
             released.append(True)
             (tmp_path / "release-failure").touch()
-            deadline = time.monotonic() + 20
-            while queues[0].empty() and time.monotonic() < deadline:
-                time.sleep(0.01)
+            assert wait_until(lambda: not queues[0].empty()), "第一片的失敗通知沒到"
         return process
 
     monkeypatch.setattr("aosr.search.worker._watch", wait_initial_wave)
     monkeypatch.setattr(worker, "_spawn", release_while_spawning)
-    with pytest.raises(ComputeFailed, match="分片 0"):
+    with pytest.raises(ComputeFailed, match="分片 0 離開碼 7"):
         list(worker(jobs, limit))
     assert released
     assert [command[command.index("--slice") + 1] for command in commands
             if "--slice" in command and second in command] == ["0"]
     assert not events(tmp_path)
+    groups_are_dead(slice_events(tmp_path))
+
+
+def test_failure_stops_other_slices_before_reading_the_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
+    jobs = mixed_rooms(jobs)
+    limit = 3
+    configure_slices(tmp_path, worker, {"job-0-slice-0": {"wait_for": limit, "exit": 7, "child": True},
+                                        "job-0-slice-1": {"sleep": 120, "child": True},
+                                        "job-0-slice-2": {"sleep": 120, "child": True}})
+    checked: list[int] = []
+
+    def check_after_others_stopped(item: _Slice, label: str) -> None:
+        # 讀失敗那片的錯誤尾巴時，其他片與它們派生的子行程都已經停了（審查：植錯存活補題）。
+        for record in slice_events(tmp_path):
+            if record["pid"] == item.process.pid:
+                continue
+            assert_dead(record["pid"])
+            if record["child"] is not None:
+                assert_dead(record["child"])
+            checked.append(record["pid"])
+        real_check_exit(item, label)
+
+    monkeypatch.setattr("aosr.search.worker._check_exit", check_after_others_stopped)
+    with pytest.raises(ComputeFailed, match="分片 0 離開碼 7"):
+        list(worker(jobs, limit))
+    records = slice_events(tmp_path)
+    assert sorted(checked) == sorted(row["pid"] for row in records if row["slice"] != 0)
+    assert not events(tmp_path)
+    groups_are_dead(records)
+
+
+def test_slice_watchers_finish_before_parts_are_returned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker, jobs = setup_worker(tmp_path, {}, (0, 1, 2))
+    jobs = mixed_rooms(jobs)
+    threads: list[Thread | None] = []
+
+    def slow_notify(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
+        # 通知排進佇列之後，監看執行緒還要一會兒才結束；回傳之前要等它們都結束（審查：植錯存活補題）。
+        real_notify(item, completed, order)
+        time.sleep(0.3)
+
+    def watched(item: _Slice, completed: Queue[_Slice], order: Lock) -> None:
+        real_watch(item, completed, order)
+        threads.append(item.watcher)
+
+    monkeypatch.setattr("aosr.search.worker._notify_finished", slow_notify)
+    monkeypatch.setattr("aosr.search.worker._watch", watched)
+    parts = worker._parts_by_job(jobs, 2)
+    assert parts and threads
+    assert all(thread is not None and not thread.is_alive() for thread in threads)
     groups_are_dead(slice_events(tmp_path))
 
 
