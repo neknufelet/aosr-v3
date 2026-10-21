@@ -337,7 +337,10 @@ def test_interrupt_on_first_write_closes_as_stopped(tmp_path: Path, monkeypatch:
             raise KeyboardInterrupt
         real(path, summary)
     monkeypatch.setattr(module, "write_summary", interrupted)
-    result = module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
+    try:
+        result = module.run_stage_one_post_check(store, cache_dir=tmp_path / "cache", lock_fd=None, runner=("must-not-run",))
+    except KeyboardInterrupt:
+        pytest.fail("第一份摘要寫入時的 Ctrl-C 漏到外面，沒有收成停止")
     saved = StageOnePostCheckSummary.model_validate_json((folder / "summary.json").read_bytes())
     assert hit and result.state == "stopped" and saved == result
     assert result.seats[0].state == "stopped" and result.seats[1:] == first.seats[1:]
