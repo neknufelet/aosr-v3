@@ -172,3 +172,40 @@ def test_refine_report_incomparable_and_bad_verification_file(tmp_path: Path, mo
     store.refine_result_path(8).write_bytes(store.candidate_path(8).read_bytes())
     text = render_stage_one_text(build_stage_one_report(store))
     assert "細算結果讀不回" in text
+
+
+def test_refine_report_flags_result_swapped_after_refine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_refine_report import stage_one_refine_lines
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    refine(store, cases.FakeCompute(store, monkeypatch))
+    summary = store.path / "stage_one_refine.json"
+    kept = summary.read_bytes()
+    # 換成同方案、同出處、同物理與程式指紋、只有合分設定指紋不同的自洽結果，再放回舊摘要。
+    store.refine_result_path(8).unlink()
+    summary.unlink()
+    refine(store, cases.FakeCompute(store, monkeypatch, different=frozenset({8})))
+    summary.write_bytes(kept)
+    row = next(line for line in stage_one_refine_lines(store) if "｜試算 8｜" in line)
+    assert row.startswith("—｜") and "細算結果跟摘要記的比較身分不同" in row
+
+
+def test_malformed_summary_spoils_only_refine_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.config.paths import config_path
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    from aosr.search.stage_one_selection import select_stage_one_candidates
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    refine(store, cases.FakeCompute(store, monkeypatch))
+    summary = store.path / "stage_one_refine.json"
+    document = json.loads(summary.read_bytes())
+    del document["selection"]["candidates"][0]["params_m"]["spacing"]
+    summary.write_text(json.dumps(document))
+    assert "細算摘要內容不完整" in render_stage_one_text(build_stage_one_report(store))
+    document["selection"]["missing"]["far_control"] = "本次未取得較遠對照"  # 有取到較遠對照又寫沒取到：模型拒收
+    summary.write_text(json.dumps(document))
+    assert "細算摘要讀不回" in render_stage_one_text(build_stage_one_report(store))
+    # 壞的細算摘要不准擋住重新挑席。
+    assert select_stage_one_candidates(store, registry_path=config_path("quality_targets.toml")).candidates

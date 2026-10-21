@@ -241,7 +241,7 @@ def test_cli_error_exit_preserves_search_files(tmp_path: Path, monkeypatch: pyte
     assert {p: after[p] for p in before} == before
 
 
-@pytest.mark.parametrize("damage", ["missing", "wrong_origin", "changed_identity", "search_axis"])
+@pytest.mark.parametrize("damage", ["missing", "wrong_origin", "changed_identity", "search_axis", "bad_peak_index"])
 def test_resume_recomputes_bad_saved_verification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     store = pool(tmp_path, monkeypatch, ROWS)
     refine(store, search.FakeCompute(store, monkeypatch))
@@ -257,6 +257,11 @@ def test_resume_recomputes_bad_saved_verification(tmp_path: Path, monkeypatch: p
         document["score"]["candidate_id"] = renamed
         target.write_text(json.dumps(document))
         assert load_stage_one_result(target).low_frequency_axis != LowFrequencyAxis.VERIFICATION
+    elif damage == "bad_peak_index":
+        document = json.loads(target.read_bytes())
+        document["evaluation"]["speakers"][0]["payload"]["features"] = []
+        target.write_text(json.dumps(document))
+        load_stage_one_result(target)  # 模型讀得回；要靠細算自己的讀回核對抓到峰谷摘要壞了
     else:
         document = json.loads(target.read_bytes())
         if damage == "wrong_origin":
@@ -268,3 +273,33 @@ def test_resume_recomputes_bad_saved_verification(tmp_path: Path, monkeypatch: p
     status = refine(store, fake)
     assert status.state == "done"
     assert fake.calls == [8]
+
+
+def test_rerank_follows_1hz_score_not_number_or_search_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [(8, 1., 5., .5), (2, 2., 8., .6), (12, 3., 4.5, .7), (5, 4., 7., .8), (3, 5., 6., .4)]
+    store = pool(tmp_path, monkeypatch, rows, top_n=4)
+    status = refine(store, search.FakeCompute(store, monkeypatch))
+    top = [8, 2, 12, 5]
+    scores = {n: load_stage_one_result(store.refine_result_path(n)).score.screening_total for n in top}
+    expected = sorted(top, key=lambda n: (scores[n], n))
+    # 前提：替身真的分得出，而且答案跟「照編號」「照搜尋名次」都不同，排錯才會紅。
+    assert len(set(scores.values())) == len(top)
+    assert expected not in (sorted(top), top)
+    ranked = sorted((s for s in status.results if s.refine_rank is not None), key=lambda s: s.refine_rank or 0)
+    assert [s.trial_number for s in ranked] == expected
+
+
+def test_killed_after_result_saved_lists_untimed_seat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_refine_report import stage_one_refine_lines
+    store = pool(tmp_path, monkeypatch, ROWS)
+    fake = search.FakeCompute(store, monkeypatch)
+    def killed(jobs: Sequence[CandidateJob], workers: int) -> Iterator[StageOneComputed]:
+        next(fake(jobs, workers))  # 結果檔已存好，計算器還沒交回、摘要還沒記到秒數就被砍
+        raise KeyboardInterrupt
+        yield
+    assert refine(store, killed).state == "interrupted"
+    status = refine(store, search.FakeCompute(store, monkeypatch))
+    assert status.state == "done"
+    assert next(s for s in status.results if s.trial_number == fake.calls[0]).seconds is None
+    text = "\n".join(stage_one_refine_lines(store))
+    assert f"總秒數：{.25 * (len(ROWS) - 1):.6f} 秒" in text and "另有 1 份沒有計時紀錄" in text

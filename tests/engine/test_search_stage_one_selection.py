@@ -1,10 +1,12 @@
 """選席答案直接從指定合分、峰高與距離推導。"""
 from pathlib import Path
+import json
 import random
 
 import pytest
 
 from aosr.config.paths import config_path
+from aosr.reporting.stage_one_result import load_stage_one_result
 from aosr.search.store import SearchStore
 from aosr.search.stage_one_selection_contract import StageOneSelection
 from tests.engine._stage_one_refine_cases import pool
@@ -30,6 +32,7 @@ def test_unmeasurable_peak_is_not_a_number(tmp_path: Path, monkeypatch: pytest.M
     store = pool(tmp_path, monkeypatch, [(0, 1., None, .5), (1, 2., None, .6), (2, 3., 1., .7)],
                  missing_payload=missing_payload)
     selected = select(store)
+    assert selected.candidates
     assert all(s.big_peak_db is None and s.peak_reason for s in selected.candidates)
     assert selected.big_peak_threshold_db is None
     assert selected.missing["big_peak_control"] == "前 N 名都量不到大峰"
@@ -93,5 +96,19 @@ def test_seeded_selection_invariants(tmp_path: Path, monkeypatch: pytest.MonkeyP
     for batch in range(5):
         rows = [(i, rng.random(), rng.uniform(1., 10.), rng.uniform(.3, 1.)) for i in range(9)]
         chosen = select(pool(tmp_path / str(batch), monkeypatch, rows))
+        assert chosen.candidates
         assert len(chosen.candidates) <= chosen.top_n + 2
         assert sum("top_n" not in s.roles for s in chosen.candidates) <= 2
+
+
+def test_bad_peak_index_only_spoils_its_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = pool(tmp_path, monkeypatch, [(0, 1., 5., .5), (1, 2., 7., .6), (2, 3., 3., .9)])
+    path = store.candidate_path(2)
+    document = json.loads(path.read_bytes())
+    document["evaluation"]["speakers"][0]["payload"]["features"] = []
+    path.write_text(json.dumps(document))
+    load_stage_one_result(path)  # 模型只核索引非負，這份壞檔照樣讀得回：考的是挑席自己的隔離。
+    chosen = select(store)
+    assert "索引超出" in chosen.unreadable[2]
+    assert [s.trial_number for s in chosen.candidates] == [0, 1]
+    assert chosen.missing["far_control"] == "本次未取得較遠對照"

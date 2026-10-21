@@ -7,6 +7,7 @@ import pytest
 from aosr.reporting.result import ResultOrigin
 from aosr.reporting.stage_one_result import run_stage_one, save_stage_one_result
 from aosr.scoring.contract import Feature
+from aosr.scoring.receiver_set import primary_cross
 from aosr.scoring.stage_one_low_frequency_contract import StageOneReasonCode
 from aosr.scoring.stage_one_score import score_stage_one
 from aosr.search import ledger
@@ -29,8 +30,11 @@ def pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: Sequence[tuple[i
         versions={"python": "test", "numpy": "test", "optuna": "test"})
     template = run_stage_one(project, shards=stage.shards(monkeypatch, project), **kwargs)
     book = ledger.create_for(store)
+    x, y, z = project.receiver_set.primary.position_m
     for number, score, peak, distance in rows:
-        scheme = project.model_copy(update={"scheme_id": f"{store.search_id}-trial-{number:06d}"})
+        # 每個試算的主位往旁邊挪一點：細算替身的能量跟著喇叭到座位的距離變，1 Hz 合分才會各不相同。
+        scheme = project.model_copy(update={"scheme_id": f"{store.search_id}-trial-{number:06d}",
+            "receiver_set": primary_cross(primary_position_m=(x + .03 * (number % 11), y, z), offset_m=.1)})
         speakers = []
         for index, speaker in enumerate(template.evaluation.speakers):
             assert speaker.payload is not None

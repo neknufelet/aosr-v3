@@ -52,13 +52,23 @@ def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
         return StageOneReportRow(number, row, None, f"結果讀回失敗：{error}")
 
 
-def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
-    """排名採帳本合分，分項與峰谷只讀已存結果。"""
-    status = SearchStatus.model_validate_json(store.status_path.read_bytes())
+def _sorted_rows(store: SearchStore) -> tuple[list[ledger.LedgerRow], list[ledger.LedgerRow]]:
     rows = ledger.read_for(store).rows
     scored = sorted((row for row in rows if row.outcome == "scored"),
                     key=lambda row: (row.score if row.score is not None else float("inf"), row.trial_number))
     excluded = sorted((row for row in rows if row.outcome == "excluded"), key=lambda row: row.trial_number)
+    return scored, excluded
+
+
+def stage_one_ranked(store: SearchStore) -> tuple[StageOneReportRow, ...]:
+    """報告的名次與讀回守門；挑席只拿這一段，不碰細算摘要（壞的摘要不准擋住重新挑席）。"""
+    return tuple(_read(store, row) for row in _sorted_rows(store)[0])
+
+
+def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
+    """排名採帳本合分，分項與峰谷只讀已存結果。"""
+    status = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    scored, excluded = _sorted_rows(store)
     return StageOneSearchReport(wall_assumption_text(store.project), status,
         tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded), stage_one_refine_lines(store))
 

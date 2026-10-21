@@ -12,7 +12,7 @@ MARGIN_KEY = "stage_one_selection.big_peak_control_margin_db"
 
 def select_stage_one_candidates(store: SearchStore, *, registry_path: Path) -> StageOneSelection:
     """候選順序與讀回守門一律取自搜尋報告；前段壞檔不遞補。"""
-    from aosr.search.stage_one_report import build_stage_one_report
+    from aosr.search.stage_one_report import stage_one_ranked
 
     settings = store.settings.stage_one_refine
     if store.settings.stage is None or settings is None:
@@ -21,14 +21,18 @@ def select_stage_one_candidates(store: SearchStore, *, registry_path: Path) -> S
     if not isinstance(entry, SettingEntry) or entry.unit != "dB" or not isinstance(entry.value, (int, float)) or entry.value <= 0:
         raise ValueError(f"{MARGIN_KEY} 必須是正的 dB 差距設定")
     margin = float(entry.value)
-    ranked = build_stage_one_report(store).ranked
     seats = []
-    for rank, item in enumerate(ranked, 1):
-        peak = big_peak(item.result) if item.result is not None else None
+    for rank, item in enumerate(stage_one_ranked(store), 1):
+        error, peak = item.error, None
+        if item.result is not None:
+            try:
+                peak = big_peak(item.result)
+            except ValueError as exc:  # 壞的結果檔只讓這一列讀不回，不中斷整個挑席。
+                error = f"結果讀回失敗：{exc}"
         assert item.row.score is not None
         seats.append(SelectionSeat(trial_number=item.trial_number, roles=(), search_rank=rank,
-            search_score=item.row.score, big_peak_db=peak, params_m=item.row.params_m, error=item.error,
-            peak_reason=(item.error or "任一支喇叭量不到最強峰") if peak is None else None))
+            search_score=item.row.score, big_peak_db=peak, params_m=item.row.params_m, error=error,
+            peak_reason=(error or "任一支喇叭量不到最強峰") if peak is None else None))
     top = seats[:settings.top_n]
     peaks = [seat.big_peak_db for seat in top if seat.big_peak_db is not None]
     threshold = min(peaks) - margin if peaks else None

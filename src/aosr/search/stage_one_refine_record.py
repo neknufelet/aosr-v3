@@ -9,7 +9,7 @@ from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.reporting.stage_one_result import StageOneComparisonIdentity, StageOneResult, load_stage_one_result
 from aosr.search.refine_run import _job
 from aosr.search.run import ComputeFailed
-from aosr.search.stage_one_selection_contract import FROZEN, StageOneSelection
+from aosr.search.stage_one_selection_contract import FROZEN, StageOneSelection, big_peak
 from aosr.search.stage_one_worker import check_stage_one_result
 from aosr.search.store import SearchStore
 
@@ -65,5 +65,8 @@ def read_stage_one_refined_result(store: SearchStore, number: int) -> StageOneRe
     check_stage_one_result(result, job, store.search_id, store.identity)
     if result.low_frequency_axis != LowFrequencyAxis.VERIFICATION or result.scheme != job.scheme:
         raise ComputeFailed("細算結果的驗證軸或方案跟工作不同")
+    try:
+        big_peak(result)
+    except ValueError as error:
+        raise ComputeFailed(f"細算結果的峰谷摘要壞了：{error}") from error
     return result
-
