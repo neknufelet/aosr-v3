@@ -82,11 +82,16 @@ class _Refiner:
         return jobs
 
 
+def _marked(store: SearchStore) -> bool:
+    # 自動外圈兩種記號都算使用者停止（外圈查完之後才放的搜尋記號也一樣，複查）。
+    return store.stop_path.exists() or store.refine_stop_path.exists()
+
+
 def refine_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunction, probe: IdentityProbe,
                             registry_path: Path, run_date: date, engine_version: str,
                             keep_stop_marker: bool = False) -> StageOneRefineStatus:
     """前提與選席變動先拒收，開始後僅寫第一階段細算摘要與驗證結果。"""
-    if keep_stop_marker and store.refine_stop_path.exists():
+    if keep_stop_marker and _marked(store):
         raise StageOneRefineStopped()
     _prerequisites(store)
     selection = select_stage_one_candidates(store, registry_path=registry_path)
@@ -104,9 +109,9 @@ def refine_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunct
             raise IdentityChanged(f"搜尋快照或帳本不同：{error}") from error
         if engine_version != store.identity.program_fingerprint:
             raise IdentityChanged("engine_version 與搜尋快照的 program_fingerprint 不同")
+        if keep_stop_marker and _marked(store):
+            raise StageOneRefineStopped()
         if store.refine_stop_path.exists():
-            if keep_stop_marker:
-                raise StageOneRefineStopped()
             store.refine_stop_path.unlink()
             runner.note = "；已刪除殘留的細算停止記號"
         runner.save("selected", "已挑席")

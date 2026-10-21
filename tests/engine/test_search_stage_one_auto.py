@@ -122,8 +122,10 @@ def test_refine_marker_during_search_prevents_any_refine(tmp_path: Path, monkeyp
     assert not store.refine_dir.exists() and not (store.path / "stage-one-check").exists()
 
 
+@pytest.mark.parametrize("marker", ["search", "refine"])
 @pytest.mark.parametrize("saved", [False, True])
-def test_refine_marker_after_auto_check_preserves_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved: bool) -> None:
+def test_marker_after_auto_check_preserves_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved: bool,
+                                                 marker: str) -> None:
     from aosr.search import stage_one_refine
     from aosr.search.stage_one_refine import refine_stage_one_search as real
     store = prepared(tmp_path, monkeypatch) if saved else pool(tmp_path, monkeypatch, ROWS)
@@ -131,17 +133,18 @@ def test_refine_marker_after_auto_check_preserves_bytes(tmp_path: Path, monkeypa
     if saved:
         doc = json.loads(path.read_bytes()); doc["state"] = "selected"; path.write_text(json.dumps(doc))
     before = path.read_bytes() if path.exists() else None
-    # 真細算入口前的最後窄縫，外圈已讀完記號與摘要。
+    stop = store.stop_path if marker == "search" else store.refine_stop_path
+    # 真細算入口前的最後窄縫，外圈已讀完記號與摘要；兩種記號都要照停（複查）。
     def entry(opened: SearchStore, *, compute: StageOneComputeFunction, probe: IdentityProbe,
               registry_path: Path, run_date: date, engine_version: str,
               keep_stop_marker: bool = False) -> StageOneRefineStatus:
-        store.refine_stop_path.touch()
+        stop.touch()
         return real(opened, compute=compute, probe=probe, registry_path=registry_path, run_date=run_date,
                     engine_version=engine_version, keep_stop_marker=keep_stop_marker)
     monkeypatch.setattr(stage_one_refine, "refine_stage_one_search", entry)
     code = invoke(store, tmp_path, monkeypatch, compute=no_compute())
     assert not code
-    assert read(store).outer.conclusion == "user_stopped" and store.refine_stop_path.exists()
+    assert read(store).outer.conclusion == "user_stopped" and stop.exists()
     assert (path.read_bytes() if path.exists() else None) == before
     assert not (store.path / "stage-one-check").exists()
 

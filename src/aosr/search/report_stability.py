@@ -19,7 +19,7 @@ from aosr.search.placement_stability_record import (
 from aosr.search.run import SearchStatus
 from aosr.search.store import FROZEN, SearchStore
 
-STAGE_ONE_OUT_OF_SCOPE = "範圍外：擺位穩定性是第二階段的檢查；第一階段的座位穩健性已在合分裡（主位周圍六點各 10 公分）"
+STAGE_ONE_OUT_OF_SCOPE = "範圍外：擺位穩定性是第二階段的檢查；第一階段的座位穩健性已在合分裡（主位前後左右上下六點）"
 
 class StabilityReport(BaseModel):
     model_config = FROZEN

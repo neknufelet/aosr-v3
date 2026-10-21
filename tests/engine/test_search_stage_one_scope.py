@@ -14,7 +14,7 @@ from tests.engine._stage_one_refine_cases import pool, snapshot
 from tests.engine.test_search_stage_one_refine import ROWS
 
 CROSSOVER = "範圍外：第一階段只算有限元素（20～300 Hz），沒有 300 Hz 交接，這一項不適用"
-STABILITY = "範圍外：擺位穩定性是第二階段的檢查；第一階段的座位穩健性已在合分裡（主位周圍六點各 10 公分）"
+STABILITY = "範圍外：擺位穩定性是第二階段的檢查；第一階段的座位穩健性已在合分裡（主位前後左右上下六點）"
 
 
 @pytest.mark.parametrize("payload", [None, "broken", "stage_two"])
