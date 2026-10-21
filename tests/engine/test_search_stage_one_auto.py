@@ -260,3 +260,22 @@ def test_exception_with_new_stop_marker_concludes_user_stop(tmp_path: Path, monk
     assert not code and read(store).outer.conclusion == "user_stopped"
     assert store.refine_stop_path.exists() and not (store.path / "stage_one_refine.json").exists()
     assert not (store.path / "stage-one-check").exists()
+
+
+def test_refine_marker_after_last_check_is_never_deleted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import stage_one_refine
+    from aosr.search.stage_one_refine import _marked as real
+    store = pool(tmp_path, monkeypatch, ROWS)
+    seen: list[bool] = []
+    def late(opened: SearchStore) -> bool:
+        marked = real(opened)
+        seen.append(marked)
+        if len(seen) == 2:
+            opened.refine_stop_path.touch()  # 第二道看完、細算開始之前才放：自動路徑不准刪
+        return marked
+    monkeypatch.setattr(stage_one_refine, "_marked", late)
+    code = invoke(store, tmp_path, monkeypatch)
+    assert not code
+    assert seen == [False, False]
+    assert store.refine_stop_path.exists() and read(store).outer.conclusion == "user_stopped"
+    assert not (store.path / "stage-one-check").exists()

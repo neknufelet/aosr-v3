@@ -109,9 +109,11 @@ def refine_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunct
             raise IdentityChanged(f"搜尋快照或帳本不同：{error}") from error
         if engine_version != store.identity.program_fingerprint:
             raise IdentityChanged("engine_version 與搜尋快照的 program_fingerprint 不同")
-        if keep_stop_marker and _marked(store):
-            raise StageOneRefineStopped()
-        if store.refine_stop_path.exists():
+        if keep_stop_marker:
+            # 自動外圈不走刪記號那一支：這一道看完之後才放的記號也不准刪（複查）。
+            if _marked(store):
+                raise StageOneRefineStopped()
+        elif store.refine_stop_path.exists():
             store.refine_stop_path.unlink()
             runner.note = "；已刪除殘留的細算停止記號"
         runner.save("selected", "已挑席")
