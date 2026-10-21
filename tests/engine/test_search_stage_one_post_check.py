@@ -278,7 +278,7 @@ def test_rerun_killed_after_first_write_keeps_reuse(tmp_path: Path, monkeypatch:
     # 重跑剛寫完第一份摘要就被砍：沿用的診斷要已經在那一份裡，下次不必再開子行程，也不會被當孤檔清掉。
     from aosr.search import stage_one_post_check as module
     store = prepared(tmp_path, monkeypatch); first = run(store, tmp_path / "first")
-    real = module.write_summary
+    from aosr.search.stage_one_post_check_record import write_summary as real
     def killed(folder: Path, summary: StageOnePostCheckSummary) -> None:
         real(folder, summary)
         raise KeyboardInterrupt
@@ -295,7 +295,7 @@ def test_interrupt_while_saving_keeps_finished_seat(tmp_path: Path, monkeypatch:
     # 第一席診斷完、存摘要那一刻按 Ctrl-C：第一席照舊是已診斷、指著它自己的文件，其餘記停止。
     from aosr.search import stage_one_post_check as module
     store = prepared(tmp_path, monkeypatch)
-    real = module.write_summary
+    from aosr.search.stage_one_post_check_record import write_summary as real
     hit: list[bool] = []
     def interrupted(folder: Path, summary: StageOnePostCheckSummary) -> None:
         if not hit and summary.seats[0].state == "diagnosed_not_scored":
@@ -328,7 +328,7 @@ def test_interrupt_on_first_write_closes_as_stopped(tmp_path: Path, monkeypatch:
     store = prepared(tmp_path, monkeypatch); first = run(store, tmp_path / "first")
     folder = store.path / "stage-one-check"
     (folder / str(first.seats[0].diagnosis_file)).write_text("{")
-    real = module.write_summary
+    from aosr.search.stage_one_post_check_record import write_summary as real
     hit: list[bool] = []
     def interrupted(path: Path, summary: StageOnePostCheckSummary) -> None:
         if not hit:
