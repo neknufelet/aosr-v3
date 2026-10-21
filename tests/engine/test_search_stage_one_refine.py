@@ -51,7 +51,7 @@ def test_selection_saved_before_compute_and_top_only_rerank(tmp_path: Path, monk
     assert {p: after[p] for p in before} == before
     saved = type(status).model_validate_json((store.path / "stage_one_refine.json").read_bytes())
     assert saved == status
-    assert "入選後檢查還沒做" in status.message
+    assert "入選後檢查見下一段" in status.message
 
 
 def test_different_comparison_identity_excluded_from_rerank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,7 +125,7 @@ def test_missing_settings_cli_rejected_unchanged(tmp_path: Path, monkeypatch: py
     before = snapshot(store)
     with pytest.raises(ValueError, match="這個第一階段搜尋沒有設定細算（stage_one_refine），不能細算"):
         refine(store, search.FakeCompute(store, monkeypatch))
-    code = main(["refine", str(store.path), "--engine-commit", "test"])
+    code = main(["refine", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")])
     assert code == 1
     assert "這個第一階段搜尋沒有設定細算（stage_one_refine），不能細算" in capsys.readouterr().err
     assert snapshot(store) == before
@@ -218,10 +218,13 @@ def test_two_wave_subcommands_and_verification_schemes(tmp_path: Path, monkeypat
 
 def test_cli_refine_dispatch_and_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from aosr.search import cli
+    from tests.engine._modal_cases import runner
+    from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
     store = pool(tmp_path, monkeypatch, ROWS)
     monkeypatch.setattr(cli, "_identity", lambda *a: store.identity)
-    assert not cli.main(["refine", str(store.path), "--engine-commit", "test"],
-        compute_factory=lambda *a: search.FakeCompute(store, monkeypatch))
+    assert not cli.main(["refine", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")],
+        compute_factory=lambda *a: search.FakeCompute(store, monkeypatch),
+        modal_runner=runner(tmp_path / "modal", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))
     assert json.loads((store.path / "stage_one_refine.json").read_bytes())["state"] == "done"
 
 
@@ -235,7 +238,8 @@ def test_cli_error_exit_preserves_search_files(tmp_path: Path, monkeypatch: pyte
     def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[StageOneComputed]:
         raise error
         yield
-    code = cli.main(["refine", str(store.path), "--engine-commit", "test"], compute_factory=lambda *a: compute)
+    code = cli.main(["refine", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")],
+                    compute_factory=lambda *a: compute)
     assert code == expected
     after = snapshot(store)
     assert {p: after[p] for p in before} == before

@@ -135,7 +135,7 @@ def test_refine_report_required_labels_and_existing_view(tmp_path: Path, monkeyp
         "細算名次", "搜尋名次", "角色", "搜尋軸合分", "1 Hz 合分", "主項／穩健性", "大峰（搜尋軸／1 Hz）",
         "前 N 裡最低的大峰減差距", "4.000000", "總秒數", "1.000000",
         "較遠對照＝試算 5：主搜尋已採到的較遠候選中最佳（離前牆至少 0.8 m；0.8 是工程暫定的選席分界）",
-        "大峰對照＝試算 1：", "房間固定，面積對照不適用", "入選後檢查（低頻模態診斷）還沒做"):
+        "大峰對照＝試算 1：", "房間固定，面積對照不適用", "入選後檢查見下一段"):
         assert phrase in text
     assert "本次未取得" not in text
     assert all(word not in text for word in ("原方案", "與喇叭無關", "第二階段子集", "較遠區最佳", "較遠區的最佳解"))

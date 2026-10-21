@@ -111,6 +111,7 @@ def _parser() -> argparse.ArgumentParser:
     resume.add_argument("search", type=Path)
     refine = commands.add_parser("refine", help="接續細算與重排已停的搜尋")
     refine.add_argument("search", type=Path)
+    refine.add_argument("--modal-cache-dir", type=Path, help="第一階段入選後檢查與網頁共用的低頻模態快取資料夾")
     auto = commands.add_parser("auto", help="自動接續搜尋、細算與回饋，寫外圈結論")
     auto.add_argument("search", type=Path)
     auto.add_argument("--modal-cache-dir", type=Path, required=True, help="網頁與搜尋共用的低頻模態快取資料夾")
@@ -196,6 +197,11 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Sta
         # 錯誤出口本身再出錯時照舊往外丟，不在這裡再接一次（複查：重複寫失敗、蓋掉原本的錯誤追蹤）。
         try:
             store = _create(args) if args.command == "start" else SearchStore.open(args.search)
+            if args.command == "refine":
+                if store.settings.stage is not None and args.modal_cache_dir is None:
+                    raise ValueError("第一階段細算要給 --modal-cache-dir（入選後檢查用的低頻模態快取資料夾，跟網頁共用）")
+                if store.settings.stage is None and args.modal_cache_dir is not None:
+                    raise ValueError("第二階段細算不收 --modal-cache-dir")
             if store.settings.stage is not None:
                 _reject_stage_one(store, args.command)
             if args.command == "report":
@@ -224,7 +230,7 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Sta
             return _failed(store, error)
         if store.settings.stage is not None:
             return _stage_one_command(args, store, cast(StageOneComputeFactory | None, compute_factory),
-                                      registry_path, lock_fd=lock_fd)
+                                      registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
         factory = cast(ComputeFactory | None, compute_factory) or (lambda opened, capabilities, commit:
                                       _compute(opened, capabilities, commit, lock_fd=lock_fd))
         return _mutating_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner,
@@ -240,12 +246,12 @@ def _reject_stage_one(store: SearchStore, command: str) -> None:
 
 
 def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
-                       registry_path: Path, *, lock_fd: int) -> int:
+                       registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
     from aosr.search.stage_one_worker import StageOneCompute
     from aosr.search.stage_one_run import start_stage_one_search, resume_stage_one_search
 
     if args.command == "refine":
-        return _stage_one_refine_command(args, store, factory, registry_path, lock_fd=lock_fd)
+        return _stage_one_refine_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
 
     try:
         compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
@@ -260,7 +266,7 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
 
 
 def _stage_one_refine_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
-                              registry_path: Path, *, lock_fd: int) -> int:
+                              registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
     """細算拒跑只報錯；不能經搜尋失敗出口改動狀態。"""
     from aosr.search.stage_one_worker import StageOneCompute
     from aosr.search.stage_one_refine import refine_stage_one_search
@@ -272,10 +278,20 @@ def _stage_one_refine_command(args: argparse.Namespace, store: SearchStore, fact
         status = refine_stage_one_search(store, compute=compute,
             probe=lambda: _identity(store.project.purpose, args.capabilities), registry_path=registry_path,
             run_date=date.today(), engine_version=store.identity.program_fingerprint)
-        return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
         _stderr(f"細算失敗：{error}\n")
         return 1
+    if status.state != "done":
+        return 3 if status.state == "interrupted" else 1
+    from aosr.search.stage_one_post_check import run_stage_one_post_check
+
+    try:
+        checked = run_stage_one_post_check(store, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
+        if checked.state in ("failed", "stopped"):
+            _stderr(f"入選後檢查{'失敗' if checked.state == 'failed' else '已停止'}，細算結果不受影響：{checked.message}\n")
+    except (Exception, KeyboardInterrupt) as error:
+        _stderr(f"入選後檢查{'已停止' if isinstance(error, KeyboardInterrupt) else '失敗'}：{error}；細算結果不受影響\n")
+    return 0
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
