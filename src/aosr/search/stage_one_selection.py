@@ -3,11 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
+from aosr.search.stage_one_selection_contract import Role, SelectionSeat, StageOneSelection, big_peak
 from aosr.search.store import SearchStore
-
-from aosr.search.stage_one_selection_contract import SelectionSeat, StageOneSelection, Role, big_peak
 
 MARGIN_KEY = "stage_one_selection.big_peak_control_margin_db"
 

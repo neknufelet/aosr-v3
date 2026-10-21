@@ -134,9 +134,10 @@ def test_refine_report_required_labels_and_existing_view(tmp_path: Path, monkeyp
     for phrase in ("細算（每 1 Hz 一點，只算有限元素）", "大峰＝最強峰高出這支喇叭自己那條直線多少，左右兩支取較差",
         "細算名次", "搜尋名次", "角色", "搜尋軸合分", "1 Hz 合分", "主項／穩健性", "大峰（搜尋軸／1 Hz）",
         "前 N 裡最低的大峰減差距", "4.000000", "總秒數", "1.000000",
-        "主搜尋已採到的較遠候選中最佳（離前牆至少 0.8 m；0.8 是工程暫定的選席分界）",
-        "房間固定，面積對照不適用", "入選後檢查（低頻模態診斷）還沒做"):
+        "較遠對照＝試算 5：主搜尋已採到的較遠候選中最佳（離前牆至少 0.8 m；0.8 是工程暫定的選席分界）",
+        "大峰對照＝試算 1：", "房間固定，面積對照不適用", "入選後檢查（低頻模態診斷）還沒做"):
         assert phrase in text
+    assert "本次未取得" not in text
     assert all(word not in text for word in ("原方案", "與喇叭無關", "第二階段子集", "較遠區最佳", "較遠區的最佳解"))
     view = build_search_view(store.path, server_physics=store.identity.physics_identity,
         server_program=store.identity.program_fingerprint)
@@ -153,6 +154,9 @@ def test_refine_report_missing_controls_and_reasons(tmp_path: Path, monkeypatch:
     text = render_stage_one_text(build_stage_one_report(store))
     assert "本次未取得大峰對照：前 N 名都量不到大峰" in text
     assert "本次未取得較遠對照，不因此判定較遠區不好" in text
+    # 沒取到的席不留標籤：較遠的那句標籤與「大峰對照＝試算」都不准出現。
+    assert "主搜尋已採到的較遠候選中最佳" not in text and "大峰對照＝試算" not in text
+    assert "大峰對照門檻：無" in text
     assert "不可估" in text and "non_positive_energy" in text
     assert "讀不回" in text and "結果讀回失敗" in text
 

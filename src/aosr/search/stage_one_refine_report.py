@@ -78,12 +78,19 @@ def stage_one_refine_lines(store: SearchStore) -> tuple[str, ...]:
 def _control_lines(status: StageOneRefineStatus) -> list[str]:
     selected = status.selection
     threshold = selected.big_peak_threshold_db
-    lines = [f"大峰對照門檻：{_number(threshold)} dB；前 N 裡最低的大峰減差距 "
-        f"{selected.big_peak_control_margin_db:g} dB"]
-    if "big_peak_control" in selected.missing:
+    shown = "無" if threshold is None else f"{threshold:.6f} dB"
+    lines = [f"大峰對照門檻：{shown}；前 N 裡最低的大峰減差距 {selected.big_peak_control_margin_db:g} dB"]
+    # 標籤只掛在真的取到的那一席；沒取到時只印原因，不留一行沒有候選的標籤。
+    control = next((seat for seat in selected.candidates if "big_peak_control" in seat.roles), None)
+    if control is None:
         lines.append(f"本次未取得大峰對照：{selected.missing['big_peak_control']}")
+    else:
+        lines.append(f"大峰對照＝試算 {control.trial_number}：前 N 名以外、大峰低過門檻的候選中搜尋軸合分最好")
     x = selected.far_control_min_front_distance_m
-    lines.append(f"主搜尋已採到的較遠候選中最佳（離前牆至少 {x:g} m；{x:g} 是工程暫定的選席分界）")
-    if "far_control" in selected.missing:
-        lines.append("本次未取得較遠對照，不因此判定較遠區不好")
+    far = next((seat for seat in selected.candidates if "far_control" in seat.roles), None)
+    if far is None:
+        lines.append(f"本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 {x:g} m，工程暫定）")
+    else:
+        lines.append(f"較遠對照＝試算 {far.trial_number}：主搜尋已採到的較遠候選中最佳"
+                     f"（離前牆至少 {x:g} m；{x:g} 是工程暫定的選席分界）")
     return lines

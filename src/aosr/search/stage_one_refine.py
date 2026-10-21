@@ -6,19 +6,17 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-
 from aosr.reporting.stage_one_result import (StageOneComparisonIdentity, StageOneResult,
     identity_differences, stage_one_comparison_identity)
 from aosr.search.refine_run import _job
 from aosr.search.run import (CandidateJob, ComputeFailed, IdentityChanged, IdentityProbe, SearchStatus,
     _check_identity, _resume_inputs)
+from aosr.search.stage_one_refine_record import (PENDING_CHECK, RefinedSeat, StageOneRefineStatus,
+    read_stage_one_refined_result, save_stage_one_refine)
 from aosr.search.stage_one_selection import select_stage_one_candidates
 from aosr.search.stage_one_selection_contract import big_peak
 from aosr.search.stage_one_worker import StageOneComputeFunction, check_stage_one_result
 from aosr.search.store import SearchStore
-
-from aosr.search.stage_one_refine_record import (PENDING_CHECK, RefinedSeat, StageOneRefineStatus,
-    read_stage_one_refined_result, save_stage_one_refine)
 
 
 def _prerequisites(store: SearchStore) -> None:
