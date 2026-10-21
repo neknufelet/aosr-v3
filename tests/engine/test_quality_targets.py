@@ -58,6 +58,7 @@ _STAGE_ONE_WEIGHT_SOURCE = (
 )
 # 還掛著這幾句出處的條目只准是基線（沒查證過、或不是老闆拍的數字）。
 _BASELINE_SOURCES = frozenset({
+    '票 #558 老闆 2026-10-20 回評價規格第二題「Ａ」：對照那一間＝前 5 間以外、大峰比前 5 間裡最低的還低 1 dB 以上的候選中合分最好的一間；1 dB 是主對話暫定（10-05 舊搜尋兩軸峰高差最大 0.73 dB），第一批跑完再看',
     _SOURCE,
     _RIPPLE_SOURCE,
     _LISTENING_AREA_SOURCE,

@@ -119,3 +119,93 @@ def test_existing_search_page_and_best_endpoint(tmp_path: Path, monkeypatch: pyt
     body = json.loads(bytes(response.body))
     assert {key: body[key] for key in ("frequency", "rfz", "plan")} == dict.fromkeys(
         ("frequency", "rfz", "plan"), {"error": "讀不到：結果檔版本不認得"})
+
+
+def test_refine_report_required_labels_and_existing_view(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    from aosr.gui.search_view import build_search_view
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    assert "還沒細算" in render_stage_one_text(build_stage_one_report(store))
+    status = refine(store, cases.FakeCompute(store, monkeypatch))
+    text = render_stage_one_text(build_stage_one_report(store))
+    assert status.state == "done"
+    for phrase in ("細算（每 1 Hz 一點，只算有限元素）", "大峰＝最強峰高出這支喇叭自己那條直線多少，左右兩支取較差",
+        "細算名次", "搜尋名次", "角色", "搜尋軸合分", "1 Hz 合分", "主項／穩健性", "大峰（搜尋軸／1 Hz）",
+        "前 N 裡最低的大峰減差距", "4.000000", "總秒數", "1.000000",
+        "較遠對照＝試算 5：主搜尋已採到的較遠候選中最佳（離前牆至少 0.8 m；0.8 是工程暫定的選席分界）",
+        "大峰對照＝試算 1：", "房間固定，面積對照不適用", "入選後檢查（低頻模態診斷）還沒做"):
+        assert phrase in text
+    assert "本次未取得" not in text
+    assert all(word not in text for word in ("原方案", "與喇叭無關", "第二階段子集", "較遠區最佳", "較遠區的最佳解"))
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+        server_program=store.identity.program_fingerprint)
+    assert view.blocks
+
+
+def test_refine_report_missing_controls_and_reasons(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import refine
+    store = pool(tmp_path, monkeypatch, [(0, 1., None, .5), (1, 2., None, .6)])
+    store.candidate_path(0).write_text("broken")
+    refine(store, cases.FakeCompute(store, monkeypatch, unavailable=frozenset({1})))
+    text = render_stage_one_text(build_stage_one_report(store))
+    assert "本次未取得大峰對照：前 N 名都量不到大峰" in text
+    assert "本次未取得較遠對照，不因此判定較遠區不好" in text
+    # 沒取到的席不留標籤：較遠的那句標籤與「大峰對照＝試算」都不准出現。
+    assert "主搜尋已採到的較遠候選中最佳" not in text and "大峰對照＝試算" not in text
+    assert "大峰對照門檻：無" in text
+    assert "不可估" in text and "non_positive_energy" in text
+    assert "讀不回" in text and "結果讀回失敗" in text
+
+
+def test_refine_report_incomparable_and_bad_verification_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    refine(store, cases.FakeCompute(store, monkeypatch, different=frozenset({2})))
+    text = render_stage_one_text(build_stage_one_report(store))
+    assert "不能同表：合分設定指紋" in text
+    store.refine_result_path(8).write_bytes(store.candidate_path(8).read_bytes())
+    text = render_stage_one_text(build_stage_one_report(store))
+    assert "細算結果讀不回" in text
+
+
+def test_refine_report_flags_result_swapped_after_refine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_refine_report import stage_one_refine_lines
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    refine(store, cases.FakeCompute(store, monkeypatch))
+    summary = store.path / "stage_one_refine.json"
+    kept = summary.read_bytes()
+    # 換成同方案、同出處、同物理與程式指紋、只有合分設定指紋不同的自洽結果，再放回舊摘要。
+    store.refine_result_path(8).unlink()
+    summary.unlink()
+    refine(store, cases.FakeCompute(store, monkeypatch, different=frozenset({8})))
+    summary.write_bytes(kept)
+    row = next(line for line in stage_one_refine_lines(store) if "｜試算 8｜" in line)
+    assert row.startswith("—｜") and "細算結果跟摘要記的比較身分不同" in row
+
+
+def test_malformed_summary_spoils_only_refine_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.config.paths import config_path
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    from aosr.search.stage_one_selection import select_stage_one_candidates
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    refine(store, cases.FakeCompute(store, monkeypatch))
+    summary = store.path / "stage_one_refine.json"
+    document = json.loads(summary.read_bytes())
+    del document["selection"]["candidates"][0]["params_m"]["spacing"]
+    summary.write_text(json.dumps(document))
+    assert "細算摘要內容不完整" in render_stage_one_text(build_stage_one_report(store))
+    document["selection"]["missing"]["far_control"] = "本次未取得較遠對照"  # 有取到較遠對照又寫沒取到：模型拒收
+    summary.write_text(json.dumps(document))
+    assert "細算摘要讀不回" in render_stage_one_text(build_stage_one_report(store))
+    # 壞的細算摘要不准擋住重新挑席。
+    assert select_stage_one_candidates(store, registry_path=config_path("quality_targets.toml")).candidates
