@@ -82,8 +82,8 @@ class StageOneCompute:
             return
         if any(job.trial_number is None or job.shift_name is not None for job in jobs):
             raise ValueError("第一階段搜尋只收候選試算")
-        parts = self.processes._slices(jobs, max_workers)
-        pending = iter(jobs)
+        parts_by_job = self.processes._parts_by_job(jobs, max_workers)
+        pending = iter(zip(jobs, parts_by_job, strict=True))
         active: list[_Active] = []
         starts: dict[int, float] = {}
         completed = _StampedQueue()
@@ -92,10 +92,11 @@ class StageOneCompute:
         try:
             while active or not exhausted:
                 while len(active) < max_workers and not exhausted:
-                    job = next(pending, None)
-                    if job is None:
+                    task = next(pending, None)
+                    if task is None:
                         exhausted = True
                     else:
+                        job, parts = task
                         started = _clock()
                         item = self.processes._start(job, parts)
                         active.append(item)

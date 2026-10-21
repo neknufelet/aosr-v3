@@ -153,7 +153,14 @@ class SubprocessCompute:
         return _Active(job, process, stderr_path)
 
     def _slices(self, jobs: Sequence[CandidateJob], max_workers: int) -> tuple[Path, ...]:
-        """整批先寫方案；全部分片成功、整群收乾淨後才准開始候選報表。"""
+        """保留單組分片介面；混合場景須用按候選對齊的介面，不能誤拿別組分片。"""
+        if any(job.scheme.scene.model_dump_json() != jobs[0].scheme.scene.model_dump_json() for job in jobs):
+            raise ValueError("_slices 只收同一場景")
+        return self._parts_by_job(jobs, max_workers)[0]
+
+    def _slice_commands(self, jobs: Sequence[CandidateJob], max_workers: int
+                        ) -> tuple[tuple[Path, ...], tuple[tuple[str, ...], ...]]:
+        """為一組場景寫方案並規劃命令；版面、軸預設與分片公式沿用單組行為。"""
         schemes = tuple(SearchStore.scheme_path_for(job.result_path.resolve()) for job in jobs)
         for job, path in zip(jobs, schemes, strict=True):
             path.write_text(job.scheme.model_dump_json() + "\n", encoding="utf-8")
@@ -163,30 +170,64 @@ class SubprocessCompute:
         batch = self.fem_root.resolve() / uuid4().hex
         batch.mkdir()
         parts = tuple(batch / f"slice-{index}{JSON_SUFFIX}" for index in range(count))
+        commands = tuple((*self.slice_runner, *(str(path) for path in schemes),
+                          "--slice", str(index), "--slices", str(count), "--out", str(part),
+                          "--capabilities", str(self.capabilities_path.resolve()),
+                          "--engine-commit", self.engine_commit) for index, part in enumerate(parts))
+        return parts, commands
+
+    def _parts_by_job(self, jobs: Sequence[CandidateJob], max_workers: int) -> tuple[tuple[Path, ...], ...]:
+        """按場景序列化位元組分組，所有分片成功、整群收乾淨後回傳與候選對齊的路徑。
+
+        場景鍵比有限元素鍵細：散射、反射階數、軸未給與明寫預設均會分組，只會多算。
+        搜尋層不重建有限元素鍵；若將來場景鍵變粗，分片子行程原有的核鍵拒收仍會報錯。
+        組照首次出現、組內照分片序共用一條佇列，同時活著的分片不超過 max_workers。
+        """
+        keys = tuple(job.scheme.scene.model_dump_json() for job in jobs)
+        groups: dict[str, list[CandidateJob]] = {}
+        for key, job in zip(keys, jobs, strict=True):
+            groups.setdefault(key, []).append(job)
+        parts_by_key: dict[str, tuple[Path, ...]] = {}
+        commands: list[tuple[int, Path, tuple[str, ...]]] = []
+        for key, group in groups.items():
+            parts, group_commands = self._slice_commands(group, max_workers)
+            parts_by_key[key] = parts
+            commands.extend((index, part, command) for index, (part, command)
+                            in enumerate(zip(parts, group_commands, strict=True)))
+        pending = iter(commands)
         active: list[_Slice] = []
         completed: Queue[_Slice] = Queue()
         order = Lock()
+        exhausted = False
         try:
-            for index, part in enumerate(parts):
-                command = [*self.slice_runner, *(str(path) for path in schemes),
-                           "--slice", str(index), "--slices", str(count), "--out", str(part),
-                           "--capabilities", str(self.capabilities_path.resolve()),
-                           "--engine-commit", self.engine_commit]
-                stderr_path = SearchStore.stderr_path_for(part)
-                item = _Slice(index, self._spawn(command, stderr_path), stderr_path)
-                active.append(item)
-                _watch(item, completed, order)
-            remaining = len(active)
-            while remaining:
+            while active or not exhausted:
+                while len(active) < max_workers and not exhausted:
+                    task = next(pending, None)
+                    if task is None:
+                        exhausted = True
+                    else:
+                        index, part, command = task
+                        stderr_path = SearchStore.stderr_path_for(part)
+                        item = _Slice(index, self._spawn(command, stderr_path), stderr_path)
+                        active.append(item)
+                        _watch(item, completed, order)
+                if not active:
+                    break
                 try:
                     finished = completed.get(timeout=self.poll_s)
                 except Empty:
                     continue
-                if finished.process.returncode != 0:
-                    _stop_all(active)
-                    _check_exit(finished, f"分片 {finished.slice_index}")
-                remaining -= 1
-            return parts
+                while True:
+                    if finished.process.returncode != 0:
+                        _stop_all(active)
+                        _check_exit(finished, f"分片 {finished.slice_index}")
+                    _stop_all((finished,))
+                    active.remove(finished)
+                    try:
+                        finished = completed.get_nowait()
+                    except Empty:
+                        break
+            return tuple(parts_by_key[key] for key in keys)
         finally:
             _stop_all(active)
 
@@ -211,8 +252,8 @@ class SubprocessCompute:
             raise ValueError("max_workers 必須為正整數")
         if not jobs:
             return
-        parts = self._slices(jobs, max_workers)
-        pending = iter(jobs)
+        parts_by_job = self._parts_by_job(jobs, max_workers)
+        pending = iter(zip(jobs, parts_by_job, strict=True))
         active: list[_Active] = []
         completed: Queue[_Active] = Queue()
         order = Lock()
@@ -220,10 +261,11 @@ class SubprocessCompute:
         try:
             while active or not exhausted:
                 while len(active) < max_workers and not exhausted:
-                    job = next(pending, None)
-                    if job is None:
+                    task = next(pending, None)
+                    if task is None:
                         exhausted = True
                     else:
+                        job, parts = task
                         item = self._start(job, parts)
                         active.append(item)
                         _watch(item, completed, order)
