@@ -91,7 +91,7 @@ def test_finished_best_uses_saved_primary_curves_and_axis(tmp_path: Path, monkey
     assert _snapshot(store.path) == before
 
 
-@pytest.mark.parametrize("state", ["absent", "selected", "failed", "broken"])
+@pytest.mark.parametrize("state", ["absent", "selected", "failed", "broken", "unscored"])
 def test_no_ranked_refine_defaults_to_search(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     store = _finished(tmp_path, monkeypatch)
     target = store.path / "stage_one_refine.json"
@@ -100,6 +100,10 @@ def test_no_ranked_refine_defaults_to_search(tmp_path: Path, monkeypatch: pytest
         target.unlink()
     elif state == "broken":
         target.write_text("{")
+    elif state == "unscored":
+        # 寫入端只給已計分的席排名，檔案格式不擋；名次 1 那席不是已計分就不算第一名（植錯存活補的）。
+        next(row for row in raw["results"] if row["refine_rank"] == 1)["state"] = "unreadable"
+        target.write_text(json.dumps(raw))
     else:
         raw.update(state=state, results=[])
         target.write_text(json.dumps(raw))
@@ -107,7 +111,11 @@ def test_no_ranked_refine_defaults_to_search(tmp_path: Path, monkeypatch: pytest
     assert default == "search"
     assert search_view.build_search_view(store.path, server_physics="", server_program="").best_default == "search"
     assert versions["refine"].error.startswith("讀不到：")
-    if state != "broken":
+    if state == "broken":
+        # 摘要讀不回照實寫讀不回的原因，不寫成還沒有第一名（植錯存活補的）。
+        assert versions["refine"].error == search_view._stage_one_refined(store.path).error
+        assert versions["refine"].error != "讀不到：尚無細算第一名"
+    else:
         assert versions["refine"].error == "讀不到：尚無細算第一名"
     assert best(store)["which"] == "search"
     assert best(store)["rfz"] == {"error": "", "absent": ABSENT}
