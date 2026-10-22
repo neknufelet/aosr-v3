@@ -344,10 +344,14 @@ def test_post_check_red_follows_states_not_reason_words(tmp_path: Path, monkeypa
             assert seat["state"] == "diagnosed_not_scored" and f"房間 長×寬×高（公尺）：{dimensions}；房間層：共振 " in line
 
 
-@pytest.mark.parametrize("state,expected", [("done", "外圈結論：細算完成"), ("failed", None), ("interrupted", None),
-    ("absent", None), ("broken", None)])
+STALE = "外圈結論：未判定（判定之後第一階段細算的狀態又變了）"
+
+
+@pytest.mark.parametrize("state,held,expected", [("done", False, "外圈結論：細算完成"), ("failed", False, STALE),
+    ("interrupted", False, STALE), ("absent", False, STALE), ("broken", False, STALE), ("selected", True, STALE),
+    ("selected", False, "外圈結論：未判定（計算行程未確認）")])
 def test_outer_conclusion_expires_when_stage_one_refine_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                                state: str, expected: str | None) -> None:
+                                                                state: str, held: bool, expected: str) -> None:
     # 外圈快照只記第二階段的細算：第一階段細算重跑、失敗或讀不回之後，舊的「細算完成」不准跟新的細算行並存（審查反例）。
     from aosr.search.outer import conclude
     store = _finished(tmp_path, monkeypatch)
@@ -360,9 +364,16 @@ def test_outer_conclusion_expires_when_stage_one_refine_changes(tmp_path: Path, 
         path.write_text("{")
     else:
         path.write_text(json.dumps(raw | {"state": state}))
-    lines = blocks(store)["stage"].lines
+    # 重跑中（selected）有行程拿著資料夾時也不准留著舊的「細算完成」（複查反例）。
+    descriptor = store.open_folder_lock()
+    try:
+        if held:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lines = blocks(store)["stage"].lines
+    finally:
+        os.close(descriptor)
     outer = [line for line in lines if line.startswith(("外圈結論：", "先前結論"))]
-    assert outer == ([expected] if expected else ["外圈結論：未判定（判定之後第一階段細算的狀態又變了）", "先前結論（已過期）：細算完成"])
+    assert outer == ([expected] if state == "done" else [expected, "先前結論（已過期）：細算完成"])
 
 
 def test_unreadable_post_check_folder_only_breaks_its_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
