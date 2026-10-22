@@ -44,6 +44,9 @@ def test_stage_one_table_scope_pause_and_screenshot(tmp_path: Path, monkeypatch:
         assert page.locator("#search-content section").evaluate_all("nodes => nodes.every(e => e.scrollWidth <= e.clientWidth)")
         wrapper = page.locator("#shortlist .table-scroll")
         assert wrapper.evaluate("e => e.scrollWidth > e.clientWidth")
+        # 清單是全寬一塊，跟目前階段同寬，不是擠進兩欄的半格（植錯存活補的）。
+        widths = page.evaluate("() => ['#stage', '#shortlist'].map(id => document.querySelector(id).getBoundingClientRect().width)")
+        assert widths[0] == widths[1]
         page.screenshot(path=str(tmp_path / f"stage-one-{width}.png"), full_page=True)
         wrapper.evaluate("e => { e.scrollLeft = e.scrollWidth; }")
         page.locator("#shortlist").screenshot(path=str(tmp_path / f"stage-one-ratios-{width}.png"))
