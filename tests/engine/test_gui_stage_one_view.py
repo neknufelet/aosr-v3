@@ -118,6 +118,14 @@ def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch:
     assert shown["stage"].warning == (state == "broken")
     assert shown["counts"].warning == (state == "broken")
     assert shown["reasons"].warning == (state == "broken")
+    # 細算失敗或中斷時，停止原因那一塊要寫是細算那一段停的；沒停的不准有這一行（植錯存活補的）。
+    stops = [line for line in shown["reasons"].lines if line.startswith("停止段落：細算")]
+    if state in ("failed", "interrupted"):
+        assert stops == [f"停止段落：細算{label}"]
+    elif state == "selected" and not held:
+        assert [line.split("；")[0] for line in stops] == ["停止段落：細算"]
+    else:
+        assert stops == []
     assert shown["shortlist"].warning == (state == "broken")
     assert not shown["modal"].warning and not shown["identity"].warning
     if state == "absent":
