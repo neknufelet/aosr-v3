@@ -355,7 +355,7 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
 
 
 def room_start(project: Scheme, settings: LayoutSettings) -> Mapping[str, float] | None:
-    """專案房間在外框內且面積夠時，將既有起點加上房間單位座標；本支尚未接執行迴圈。"""
+    """專案房間在外框內且面積夠時，將既有起點加上房間單位座標；來回須逐位保留三邊。"""
     limits = settings.room_range
     if limits is None:
         raise ValueError("room_start 需要 room_range")
@@ -366,7 +366,13 @@ def room_start(project: Scheme, settings: LayoutSettings) -> Mapping[str, float]
     if limits.min_floor_area_m2 is not None and room.Lx * room.Ly < limits.min_floor_area_m2:
         return None
     params = standard_start(project, settings)
-    return None if params is None else unit_from_params(params, settings, room=room)
+    if params is None:
+        return None
+    unit = unit_from_params(params, settings, room=room)
+    restored = room_from_unit(unit, settings, project)
+    if (restored.Lx.hex(), restored.Ly.hex(), restored.Lz.hex()) != (room.Lx.hex(), room.Ly.hex(), room.Lz.hex()):
+        return None
+    return unit
 
 
 def _locked_spacing_interval(settings: LayoutSettings, listening: float) -> tuple[float, float] | None:

@@ -155,7 +155,12 @@ class SearchStatus(BaseModel):
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
     """一般保存與快照讀失敗共用起點訊息規則，避免漏句或重複加句。"""
     note = "起點不在搜尋範圍或夾角、耳距限制內，沒有排入"
-    if layout.standard_start(store.project, store.settings.layout) is None and note not in status.message:
+    if store.settings.layout.room_range is None:
+        missing = layout.standard_start(store.project, store.settings.layout) is None
+    else:
+        note = "起點不在搜尋範圍或夾角、耳距限制內，或專案房間不在房間範圍內、地板面積不足，沒有排入"
+        missing = layout.room_start(store.project, store.settings.layout) is None
+    if missing and note not in status.message:
         return status.model_copy(update={"message": status.message + "；" + note})
     return status
 
@@ -225,6 +230,11 @@ def _progress(status: SearchStatus, rows: Sequence[ledger.LedgerRow]) -> SearchS
 
 def _adapter(store: SearchStore) -> tuple[SamplerAdapter, bool]:
     adapter = SamplerAdapter(layout.space_for(store.settings.layout), store.settings.sampler_settings())
+    if store.settings.layout.room_range is not None:
+        unit = layout.room_start(store.project, store.settings.layout)
+        if unit is not None:
+            adapter.enqueue(unit)
+        return adapter, unit is not None
     start = layout.standard_start(store.project, store.settings.layout)
     if start is not None:
         adapter.enqueue(layout.unit_from_params(start, store.settings.layout))
@@ -603,9 +613,16 @@ def _new_runner(store: SearchStore, compute: Compute, probe: IdentityProbe, regi
                    book, SearchStatus(timed_from_start=True), clock)
 
 
+def _reject_room_range(store: SearchStore) -> None:
+    """第二階段搜尋照專案房間擺位；帶房間範圍的資料夾只走第一階段，函式庫直接呼叫也在寫任何檔之前拒。"""
+    if store.settings.layout.room_range is not None:
+        raise ValueError("房間範圍只准第一階段搜尋；第二階段搜尋不能接帶房間範圍的資料夾")
+
+
 def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                  registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """新帳本、原方案、釘住比較身分、排入起點，再依批次搜尋。"""
+    _reject_room_range(store)
     clock = WallClock()
     book = ledger.create_for(store)
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, book, clock)
@@ -643,6 +660,7 @@ def _has_candidate_rows(store: SearchStore) -> bool:
 def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                   registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """先核表頭與快照、讀回原方案重排；完整批重播、末批逐位核對後只算缺列。"""
+    _reject_room_range(store)
     clock = WallClock()
     previous = SearchStatus()
     try:

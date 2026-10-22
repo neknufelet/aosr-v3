@@ -1,4 +1,4 @@
-"""固定房間的第一階段搜尋；只按候選合分排名，首批依編號釘比較身分。"""
+"""固定房間或每題一間房的第一階段搜尋；只按候選合分排名，首批依編號釘比較身分。"""
 from __future__ import annotations
 
 import math
@@ -81,13 +81,19 @@ class _StageOneRunner(_Runner):
             if number in outcomes:
                 continue
             params = layout.params_from_unit(proposal.params, self.store.settings.layout, project=self.store.project)
-            meters[number] = layout.params_to_meters(params)
-            placement = layout.place(self.store.project, self.store.settings.layout, params)
-            violations = constraints.check(self.store.project, self.store.settings.layout, placement)
+            project = self.store.project
+            if self.store.settings.layout.room_range is None:
+                meters[number] = layout.params_to_meters(params)
+            else:
+                room = layout.room_from_unit(proposal.params, self.store.settings.layout, project)
+                project = layout.project_in(project, room)
+                meters[number] = layout.params_to_meters(params, room)
+            placement = layout.place(project, self.store.settings.layout, params)
+            violations = constraints.check(project, self.store.settings.layout, placement)
             if violations:
                 outcomes[number] = constraints.to_illegal(violations)
             else:
-                scheme = layout.to_scheme(self.store.project, placement, f"{self.store.search_id}-trial-{number:06d}")
+                scheme = layout.to_scheme(project, placement, f"{self.store.search_id}-trial-{number:06d}")
                 jobs[number] = CandidateJob(number, scheme, self.store.candidate_path(number))
         return outcomes, jobs, meters
 

@@ -63,7 +63,8 @@ STABILITY_MINIMAX_INCOMPLETE = "最差情況不完整"
 STABILITY_STATES = {"running": "進行中", "done": "完成", "skipped": "跳過", "failed": "失敗", "stopped": "停止"}
 STABILITY_IDENTITIES = {"physics_identity": "物理身分", "program_fingerprint": "整支程式指紋",
                         "purpose_settings": "評分設定"}
-PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離"}
+PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離",
+                "room_Lx": "房間長（x 向）", "room_Ly": "房間寬（y 向）", "room_Lz": "房間高"}
 STABILITY_LIMITATION = "只移單一個量（單軸），不證明整個 ±2 公分範圍都穩；±2 公分是穩定性測試範圍，不是施工公差；喇叭跟著移位後的主位重新對準"
 STABILITY_MODEL_NOTE = "多半是幾何聲學近似造成的突變，不直接當成真實聲音的變化"
 

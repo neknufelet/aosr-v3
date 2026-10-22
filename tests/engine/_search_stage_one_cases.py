@@ -14,6 +14,7 @@ from aosr.reporting.result import ResultOrigin
 from aosr.reporting.stage_one_result import run_stage_one, save_stage_one_result
 from aosr.search.run import CandidateJob, SearchStatus
 from aosr.search.stage_one_worker import StageOneComputed
+from aosr.search.layout_settings import LayoutSettings
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SearchIdentity, SearchStore
 from tests.engine import _stage_one_cases as cases
@@ -36,11 +37,11 @@ def placed_slices(*, room: Room, candidates: Mapping[str, tuple[Mapping[str, Poi
         for name, (sources, receivers) in candidates.items()}
 
 
-def make_store(tmp_path: Path, *, workers: int = 1, budget: int = 9) -> SearchStore:
+def make_store(tmp_path: Path, *, workers: int = 1, budget: int = 9, layout: LayoutSettings | None = None) -> SearchStore:
     item = cases.scheme()
     settings = SearchSettings.model_validate(settings_document() | {
         "purpose": item.purpose, "stage": "stage_one_fem_only", "max_workers": workers,
-        "budget": budget, "convergence_run": 100})
+        "budget": budget, "convergence_run": 100} | ({} if layout is None else {"layout": layout}))
     kwargs = cases.run_kwargs()
     return SearchStore.create(tmp_path / "searches", project=item, settings=settings,
         identity=SearchIdentity(kwargs["physics_identity"], kwargs["program_fingerprint"], purpose_settings(item.purpose)),
