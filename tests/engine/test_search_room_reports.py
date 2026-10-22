@@ -118,11 +118,15 @@ def test_same_room_key_still_rejects_changed_resonances() -> None:
         _group_room(groups, diagnosis.key, read_modal_diagnosis(changed, reference), "合成參考線", variable=True)
 
 
-def test_nonrankable_room_rows_still_show_dimensions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("kind,zone", [("unavailable", "unassessed"), ("different", "incomparable")])
+def test_unassessed_and_incomparable_room_rows_show_dimensions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                               kind: str, zone: str) -> None:
     store = search.make_store(tmp_path, layout=layout_for())
-    search.run(store, search.FakeCompute(store, monkeypatch, unavailable=frozenset({1})))
+    search.run(store, search.FakeCompute(store, monkeypatch,
+        unavailable=frozenset({1}) if kind == "unavailable" else frozenset(),
+        different=frozenset({1}) if kind == "different" else frozenset()))
     report = build_stage_one_report(store)
-    assert report.excluded
+    assert any(item.trial_number == 1 and item.row.reason == zone for item in report.excluded)
     text = render_stage_one_text(report)
     for item in report.excluded:
         room = "×".join(f"{item.row.params_m[name]:.6f}" for name in ROOM_KEYS)
@@ -160,3 +164,18 @@ def test_fixed_room_keeps_one_table_compared_by_resonances(changed: bool) -> Non
         _group_room(groups, second_key, read_modal_diagnosis(second, reference), "合成參考線", variable=False)
     assert [group.key for group in groups] == [base_key]
     assert not any(line.startswith("房間鍵：") for line in groups[0].lines)
+
+
+def test_search_table_prints_room_on_header_and_each_ranked_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 細算那段也印房間欄；這題逐字核搜尋表自己那一行表頭與每一名次列，不靠整份文字裡出現過。
+    store = search.make_store(tmp_path, layout=layout_for())
+    search.run(store, search.FakeCompute(store, monkeypatch))
+    report = build_stage_one_report(store)
+    assert report.ranked
+    lines = render_stage_one_text(report).splitlines()
+    assert "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜房間 長×寬×高（公尺）｜合分" in lines
+    for rank, item in enumerate(report.ranked, 1):
+        meters = item.row.params_m
+        room = "×".join(f"{meters[name]:.6f}" for name in ROOM_KEYS)
+        assert (f"{rank}｜試算 {item.trial_number}｜{meters['front_distance']:.6f}／{meters['spacing']:.6f}／"
+                f"{meters['listening_distance']:.6f}｜{room}｜{item.row.score}") in lines

@@ -175,8 +175,6 @@ class SearchStore:
     def create(cls, root: Path, *, project: Scheme, settings: SearchSettings,
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
-        if settings.layout.room_range is not None:
-            settings = SearchSettings.model_validate(settings.canonical())
         project = Scheme.model_validate(project)
         if project.scene.low_frequency_axis is None:
             project = project.model_copy(update={"scene": project.scene.model_copy(

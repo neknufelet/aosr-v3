@@ -165,3 +165,22 @@ def test_room_search_resume_is_bit_exact(tmp_path: Path, monkeypatch: pytest.Mon
     for row in ledger.read_for(control).rows:
         if row.result_file is not None:
             assert control.candidate_path(row.trial_number).read_bytes() == interrupted.candidate_path(row.trial_number).read_bytes()
+
+
+@pytest.mark.parametrize("entry", ["start", "resume"])
+def test_stage_two_search_refuses_room_folder_before_writing(tmp_path: Path, entry: str) -> None:
+    # 命令列已把第一階段資料夾分去第一階段；函式庫直接呼叫第二階段入口也不准拿專案房間擺位。
+    from aosr.search.run import ComputedCandidate, resume_search, start_search
+
+    store = search.make_store(tmp_path, layout=layout_for())
+    before = {path: path.read_bytes() for path in store.path.rglob("*") if path.is_file()}
+    calls: list[CandidateJob] = []
+    def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
+        calls.extend(jobs)
+        yield from ()
+    chosen = start_search if entry == "start" else resume_search
+    with pytest.raises(ValueError, match="房間範圍只准第一階段搜尋"):
+        chosen(store, compute=compute, probe=lambda: store.identity, registry_path=config_path("quality_targets.toml"),
+               run_date=stage.run_kwargs()["run_date"], engine_version=store.identity.program_fingerprint)
+    assert not calls
+    assert {path: path.read_bytes() for path in store.path.rglob("*") if path.is_file()} == before

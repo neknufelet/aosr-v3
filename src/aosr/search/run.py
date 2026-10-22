@@ -613,9 +613,16 @@ def _new_runner(store: SearchStore, compute: Compute, probe: IdentityProbe, regi
                    book, SearchStatus(timed_from_start=True), clock)
 
 
+def _reject_room_range(store: SearchStore) -> None:
+    """第二階段搜尋照專案房間擺位；帶房間範圍的資料夾只走第一階段，函式庫直接呼叫也在寫任何檔之前拒。"""
+    if store.settings.layout.room_range is not None:
+        raise ValueError("房間範圍只准第一階段搜尋；第二階段搜尋不能接帶房間範圍的資料夾")
+
+
 def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                  registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """新帳本、原方案、釘住比較身分、排入起點，再依批次搜尋。"""
+    _reject_room_range(store)
     clock = WallClock()
     book = ledger.create_for(store)
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, book, clock)
@@ -653,6 +660,7 @@ def _has_candidate_rows(store: SearchStore) -> bool:
 def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                   registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """先核表頭與快照、讀回原方案重排；完整批重播、末批逐位核對後只算缺列。"""
+    _reject_room_range(store)
     clock = WallClock()
     previous = SearchStatus()
     try:

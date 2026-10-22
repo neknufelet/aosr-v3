@@ -330,7 +330,7 @@ def test_room_range_is_frozen() -> None:
 
 
 @pytest.mark.parametrize("stage", [None, "stage_one_fem_only"])
-def test_search_rejects_room_range_before_creating_folder(tmp_path: Path, stage: str | None) -> None:
+def test_room_range_allowed_only_in_stage_one(tmp_path: Path, stage: str | None) -> None:
     from aosr.search.store import SearchIdentity, SearchStore
 
     from tests.engine._search_stage_one_cases import make_store
@@ -343,6 +343,7 @@ def test_search_rejects_room_range_before_creating_folder(tmp_path: Path, stage:
     message = "房間範圍只准第一階段（stage_one_fem_only）"
     with pytest.raises(ValidationError, match=message):
         SearchSettings.model_validate(document)
+    # 即使呼叫者繞過總表驗證，建檔入口仍須重驗，不能留下資料夾。
     original = SearchSettings.model_validate(search_document(settings()))
     forged = original.model_copy(update={"layout": settings(room_range=RANGES), "stage": stage})
     root = tmp_path / "searches"
