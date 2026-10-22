@@ -1,7 +1,7 @@
 """座位鎖定、喇叭放桌面與型號適用聆聽距離的建檔前核對；只在搜尋層拒收整場不可能成立的輸入。"""
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.geometry.furniture import FurnitureKind, contact_margin_m
-from aosr.geometry.shoebox import Point, Wall, distance
+from aosr.geometry.shoebox import Point, Room, Wall, distance
 from aosr.reporting.furniture_layout import furniture_boxes
 from aosr.reporting.scheme import ListenerPlacement, Scheme, project_facing
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError
@@ -178,6 +178,12 @@ def check_listening_reach(project: Scheme, settings: LayoutSettings) -> None:
     limits = settings.listening_range_m
     if limits is None:
         return
+    envelope = settings.room_range
+    if envelope is not None:
+        original = project.scene.room_m
+        maximum = Room(*(edge if span is None else span.high for edge, span in zip(
+            (original.Lx, original.Ly, original.Lz), (envelope.Lx, envelope.Ly, envelope.Lz), strict=True)))
+        project = layout.project_in(project, maximum)
     room = project.scene.room_m
     margin = contact_margin_m((room.Lx, room.Ly, room.Lz),
                               contact_rel=furniture_contact_rel(default_precision_contracts_path()))
@@ -195,6 +201,25 @@ def check_listening_reach(project: Scheme, settings: LayoutSettings) -> None:
         raise SchemeValidationError((SchemeProblem("settings.layout.listening_range_m",
             f"型號適用聆聽距離 {limits.low!r}～{limits.high!r} m（喇叭聲學中心到主位的三維距離）跟搜尋範圍碰不到："
             f"範圍兩端擺出來的三維距離只有 {nearest!r}～{farthest!r} m"),))
+
+
+def check_room_range(project: Scheme, settings: LayoutSettings) -> None:
+    """建目錄前只擋外框必定全滅的面積或耳距；專案房間本身不必落在外框內。"""
+    limits = settings.room_range
+    if limits is None:
+        return
+    room = project.scene.room_m
+    minimum = limits.min_floor_area_m2
+    if minimum is not None:
+        if limits.Lx is None and limits.Ly is None and room.Lx * room.Ly < minimum:
+            raise SchemeValidationError((SchemeProblem("settings.layout.room_range",
+                f"地板兩邊都不可調：專案地板面積 {room.Lx * room.Ly!r} m² 小於最小地板面積 {minimum!r} m²"),))
+        maximum_x = room.Lx if limits.Lx is None else limits.Lx.high
+        maximum_y = room.Ly if limits.Ly is None else limits.Ly.high
+        if maximum_x * maximum_y < minimum:
+            raise SchemeValidationError((SchemeProblem("settings.layout.room_range",
+                f"外框最大地板面積 {maximum_x * maximum_y!r} m² 小於最小地板面積 {minimum!r} m²"),))
+    check_listening_reach(project, settings)
 
 
 def check_seat_lock(project: Scheme, settings: LayoutSettings) -> None:

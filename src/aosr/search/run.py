@@ -533,7 +533,8 @@ class _Runner:
     def record(self, index: int, proposal: Proposal, meters: dict[str, float], outcome: Outcome,
                seconds: float, result_file: str | None) -> None:
         self.book.append(ledger.row_from_outcome(batch_index=index, proposal=proposal, params_m=meters,
-                                                outcome=outcome, seconds=seconds, result_file=result_file))
+                                                outcome=outcome, seconds=seconds, result_file=result_file,
+                                                header=ledger.header_for(self.store)))
 
     def refresh(self) -> None:
         self.status = _progress(self.status, ledger.read_for(self.store).rows)

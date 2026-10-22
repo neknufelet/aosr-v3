@@ -84,6 +84,7 @@ REFINE_STOP_REASONS = {
     "candidates_exhausted": "沒有候選可以再細算", "user_stopped": "使用者停止",
 }
 COUNT_REASONS = {
+    "floor_area_below_minimum": "地板面積不足",
     "cabinet_outside_room": "箱體越界", "wall_gap": "離牆間隙不足",
     "cabinets_overlap": "箱體重疊", "cabinet_in_keep_out": "箱體進入禁區",
     "seat_in_keep_out": "座位進入禁區", "seat_outside_room": "座位越界",

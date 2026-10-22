@@ -164,6 +164,9 @@ class SearchStore:
 
     def __init__(self, path: Path, project: Scheme, settings: SearchSettings,
                  identity: SearchIdentity, snapshot: _IdentitySnapshot) -> None:
+        if settings.layout.room_range is not None:
+            # 建檔與開檔入口本來就拒；直接造的也拒，接續、外圈、細算、入選、回饋都拿不到這種物件（6b-2 接上執行迴圈時拿掉）。
+            raise ValueError("房間進搜尋還沒接上第一階段執行迴圈（6b-2），不能開這種搜尋資料夾")
         self._path = path
         self._project = project.model_copy(deep=True)
         self._settings = settings.model_copy(deep=True)
@@ -175,6 +178,8 @@ class SearchStore:
     def create(cls, root: Path, *, project: Scheme, settings: SearchSettings,
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
+        if settings.layout.room_range is not None:
+            settings = SearchSettings.model_validate(settings.canonical())
         project = Scheme.model_validate(project)
         if project.scene.low_frequency_axis is None:
             project = project.model_copy(update={"scene": project.scene.model_copy(
@@ -193,11 +198,13 @@ class SearchStore:
         check_project_furniture_layout(project)
         settings = SearchSettings.model_validate(settings.canonical())
         _check_speaker_settings(project, settings.layout)
-        from aosr.search.seat_lock import check_desk_reach, check_listening_reach, check_seat_lock
+        from aosr.search.seat_lock import check_desk_reach, check_listening_reach, check_room_range, check_seat_lock
 
         check_seat_lock(project, settings.layout)
         check_desk_reach(project, settings.layout)
-        check_listening_reach(project, settings.layout)
+        check_room_range(project, settings.layout)
+        if settings.layout.room_range is None:
+            check_listening_reach(project, settings.layout)
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)
         check_search_axis(project)

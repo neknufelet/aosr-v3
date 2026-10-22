@@ -17,11 +17,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import groupby
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Final, Literal, Self, TypeAlias
+from typing import BinaryIO, ClassVar, Final, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from aosr.search.constraints import Reason
+from aosr.search.constraints import ROOM_REASONS, Reason
 from aosr.search.layout import LOCKED_UNIT_SPACE, UNIT_SPACE, meter_quantities_for, space_for
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, RankingZone, SamplerSettings, Scored
 from aosr.search.store import CANDIDATES_DIR, SearchStore, candidate_name
@@ -123,6 +123,8 @@ class LedgerRow(BaseModel):
     """候選一列；result_file 是相對搜尋資料夾的 candidates（候選資料夾）內檔名。"""
 
     model_config = FROZEN
+    # 第一版是固定房間的帳本，只在房間進搜尋時才會出現的原因不收。
+    _REASON_CODES: ClassVar[frozenset[str]] = frozenset(reason.value for reason in Reason if reason not in ROOM_REASONS)
     batch_index: int = Field(ge=0, strict=True)
     trial_number: int = Field(ge=0, strict=True)
     unit_params_hex: dict[str, str]
@@ -172,7 +174,7 @@ class LedgerRow(BaseModel):
         if self.outcome == "illegal" and self.reason is not None:
             # 不合法的原因只認硬限制的八種原因代碼，依字母排、用 + 連（constraints.to_illegal 的寫法）。
             parts = self.reason.split("+")
-            if parts != sorted(set(parts)) or not set(parts) <= {reason.value for reason in Reason}:
+            if parts != sorted(set(parts)) or not set(parts) <= self._REASON_CODES:
                 raise ValueError("illegal reason must be sorted constraint reason codes joined by +")
         if self.outcome == "scored":
             if self.score is None or self.reason is not None or self.violation_m is not None or self.result_file is None:
@@ -191,6 +193,8 @@ class LedgerRow(BaseModel):
 
 class LedgerRowV2(LedgerRow):
     """保留第一版其餘欄位規則；量名與界限交由帶表頭的操作入口驗。"""
+
+    _REASON_CODES: ClassVar[frozenset[str]] = frozenset(reason.value for reason in Reason)
 
     @field_validator("unit_params_hex")
     @classmethod
@@ -255,7 +259,8 @@ def row_outcome(row: LedgerRow) -> Outcome:
 
 
 def row_from_outcome(*, batch_index: int, proposal: Proposal, params_m: Mapping[str, float],
-                     outcome: Outcome, seconds: float, result_file: str | None) -> LedgerRow:
+                     outcome: Outcome, seconds: float, result_file: str | None,
+                     header: LedgerHeaderType | None = None) -> LedgerRow:
     """第 4 步完成候選後組列；十六進位參數只取自原始 Proposal（取樣提案）。"""
     kind: Literal["scored", "illegal", "excluded"]
     if isinstance(outcome, Scored):
@@ -264,7 +269,8 @@ def row_from_outcome(*, batch_index: int, proposal: Proposal, params_m: Mapping[
         kind, score, reason, violation = "illegal", None, outcome.reason, outcome.violation
     else:
         kind, score, reason, violation = "excluded", None, outcome.zone.value, None
-    return LedgerRow(
+    row_type = LedgerRowV2 if isinstance(header, LedgerHeaderV2) else LedgerRow
+    return row_type(
         batch_index=batch_index, trial_number=proposal.trial_number,
         unit_params_hex={key: value.hex() for key, value in proposal.params.items()}, params_m=dict(params_m),
         outcome=kind, score=score, reason=reason, violation_m=violation, seconds=seconds, result_file=result_file,
