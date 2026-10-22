@@ -19,7 +19,8 @@ from aosr.search.run import (
     _has_candidate_rows, _resume_inputs,
 )
 from aosr.search.sampler import Excluded, Outcome, Proposal, ReplayMismatch, Scored
-from aosr.search.stage_one_worker import StageOneComputed, StageOneComputeFunction, check_stage_one_result
+from aosr.search.stage_one_worker import CandidateTimeLimit, StageOneComputed, StageOneComputeFunction, check_stage_one_result
+from aosr.search.stage_one_time_limit import save_time_limit, time_limit_message
 from aosr.search.store import SearchStore, candidate_name, check_search_axis
 from aosr.search.timings import WallClock
 
@@ -30,6 +31,7 @@ class _StageOneRunner(_Runner):
 
     stage_compute: StageOneComputeFunction | None = None
     comparison: StageOneComparisonIdentity | None = None
+    batch_index: int | None = None
 
     def baseline(self, *, resume: bool) -> bool:
         self.status = self.status.model_copy(update={"baseline_outcome": "not_computed"})
@@ -111,6 +113,7 @@ class _StageOneRunner(_Runner):
         return Scored(score.screening_total)
 
     def batch(self, index: int, proposals: Sequence[Proposal], saved: Sequence[ledger.LedgerRow]) -> None:
+        self.batch_index = index
         outcomes, jobs, meters = self._prepare(proposals, saved)
         reused = {row.trial_number for row in saved}
         by_number = {p.trial_number: p for p in proposals}
@@ -163,6 +166,11 @@ def _execute(runner: _StageOneRunner, recorded: ledger.LedgerRead | None = None)
         runner.baseline(resume=recorded is not None)
         index, partial = (0, ()) if recorded is None else runner.replay(recorded)
         return runner.loop(index, partial)
+    except CandidateTimeLimit as error:
+        record = error.record.model_copy(update={"batch": runner.batch_index})
+        save_time_limit(runner.store, record)
+        runner.refresh()
+        return runner.save(state="paused_time_limit", message=time_limit_message(record))
     except (IdentityChanged, ReplayMismatch) as error:
         runner.refresh()
         return runner.save(state="interrupted", message=f"搜尋中斷：{error}")

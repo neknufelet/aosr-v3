@@ -13,7 +13,8 @@ import os
 import signal
 import subprocess
 import sys
-from collections.abc import Generator, Sequence
+import time
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
@@ -27,6 +28,8 @@ from aosr.reporting.scheme_cli import PROGRAM_CHANGED_EXIT, PROGRAM_CHANGED_MARK
 from aosr.runtime import child_process_env
 from aosr.search.run import CandidateJob, ComputedCandidate, ComputeFailed, IdentityChanged
 from aosr.search.store import JSON_SUFFIX, SearchIdentity, SearchStore
+
+_clock = time.monotonic
 
 
 @dataclass
@@ -45,6 +48,16 @@ class _Slice:
     stderr_path: Path
     watcher: Thread | None = None
     lock: Lock = field(default_factory=Lock)
+    started: float | None = None
+    ended: float | None = None
+
+
+class _SliceStampedQueue(Queue[_Slice]):
+    """只有搜尋成本觀測路徑使用，完成通知入列時凍結分片耗時。"""
+
+    def put(self, item: _Slice, block: bool = True, timeout: float | None = None) -> None:
+        item.ended = _clock()
+        super().put(item, block, timeout)
 
 
 _Process = TypeVar("_Process", _Active, _Slice)
@@ -113,6 +126,18 @@ def _drain(completed: Queue[_Slice], active: list[_Slice]) -> None:
             finished = completed.get_nowait()
         except Empty:
             return
+        _settle(finished, active)
+
+
+def _drain_observed(completed: Queue[_Slice], active: list[_Slice], wake: Callable[[float], None]) -> None:
+    """只在啟用觀測時使用：逐筆通知與沒有通知的醒來，都先查上限再開新分片。"""
+    while True:
+        try:
+            finished = completed.get_nowait()
+        except Empty:
+            wake(_clock())
+            return
+        wake(_clock())
         _settle(finished, active)
 
 
@@ -197,50 +222,76 @@ class SubprocessCompute:
                           "--engine-commit", self.engine_commit) for index, part in enumerate(parts))
         return parts, commands
 
-    def _parts_by_job(self, jobs: Sequence[CandidateJob], max_workers: int) -> tuple[tuple[Path, ...], ...]:
-        """按場景序列化位元組分組，所有分片成功、整群收乾淨後回傳與候選對齊的路徑。
+    def _plan_parts(self, jobs: Sequence[CandidateJob], max_workers: int,
+                    observe: Callable[[Sequence[CandidateJob], int, _Slice | None], None] | None
+                    ) -> tuple[tuple[tuple[Path, ...], ...], dict[str, tuple[Path, ...]],
+                               list[tuple[int, Path, tuple[str, ...], list[CandidateJob]]]]:
+        """沿用場景位元組分組與指令順序；觀測者另收到每組的完整題號與片數。
 
-        場景鍵比有限元素鍵細：散射、反射階數、軸未給與明寫預設均會分組，只會多算。
-        搜尋層不重建有限元素鍵；若將來場景鍵變粗，分片子行程原有的核鍵拒收仍會報錯。
-        組照首次出現、組內照分片序共用一條佇列，同時活著的分片不超過 max_workers。
+        與候選對齊的路徑用規劃時那一次序列化的鍵查，不在分片跑完後重新序列化場景。
         """
         keys = tuple(job.scheme.scene.model_dump_json() for job in jobs)
         groups: dict[str, list[CandidateJob]] = {}
         for key, job in zip(keys, jobs, strict=True):
             groups.setdefault(key, []).append(job)
         parts_by_key: dict[str, tuple[Path, ...]] = {}
-        commands: list[tuple[int, Path, tuple[str, ...]]] = []
+        commands: list[tuple[int, Path, tuple[str, ...], list[CandidateJob]]] = []
         for key, group in groups.items():
             parts, group_commands = self._slice_commands(group, max_workers)
             parts_by_key[key] = parts
-            commands.extend((index, part, command) for index, (part, command)
+            if observe is not None:
+                observe(group, len(parts), None)
+            commands.extend((index, part, command, group) for index, (part, command)
                             in enumerate(zip(parts, group_commands, strict=True)))
+        return tuple(parts_by_key[key] for key in keys), parts_by_key, commands
+
+    def _parts_by_job(self, jobs: Sequence[CandidateJob], max_workers: int, *,
+                      observe: Callable[[Sequence[CandidateJob], int, _Slice | None], None] | None = None,
+                      wake: Callable[[float], None] | None = None) -> tuple[tuple[Path, ...], ...]:
+        """按場景序列化位元組分組，所有分片成功、整群收乾淨後回傳與候選對齊的路徑。
+
+        場景鍵比有限元素鍵細：散射、反射階數、軸未給與明寫預設均會分組，只會多算。
+        搜尋層不重建有限元素鍵；若將來場景鍵變粗，分片子行程原有的核鍵拒收仍會報錯。
+        組照首次出現、組內照分片序共用一條佇列，同時活著的分片不超過 max_workers。
+        """
+        by_job, parts_by_key, commands = self._plan_parts(jobs, max_workers, observe)
         pending = iter(commands)
         active: list[_Slice] = []
-        completed: Queue[_Slice] = Queue()
+        completed: Queue[_Slice] = Queue() if observe is None else _SliceStampedQueue()
         order = Lock()
         exhausted = False
         try:
             while active or not exhausted:
                 while len(active) < max_workers and not exhausted:
-                    _drain(completed, active)
+                    if wake is None:
+                        _drain(completed, active)
+                    else:
+                        _drain_observed(completed, active, wake)
                     task = next(pending, None)
                     if task is None:
                         exhausted = True
                     else:
-                        index, part, command = task
+                        index, part, command, group = task
                         stderr_path = SearchStore.stderr_path_for(part)
+                        started = _clock() if observe is not None else None
                         item = _Slice(index, self._spawn(command, stderr_path), stderr_path)
+                        item.started = started
                         active.append(item)
+                        if observe is not None:
+                            observe(group, len(parts_by_key[group[0].scheme.scene.model_dump_json()]), item)
                         _watch(item, completed, order)
                 if not active:
                     break
                 try:
                     finished = completed.get(timeout=self.poll_s)
                 except Empty:
+                    if wake is not None:
+                        wake(_clock())
                     continue
+                if wake is not None:
+                    wake(_clock())
                 _settle(finished, active)
-            return tuple(parts_by_key[key] for key in keys)
+            return by_job
         finally:
             _stop_all(active)
 

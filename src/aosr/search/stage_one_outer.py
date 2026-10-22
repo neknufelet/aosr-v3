@@ -19,6 +19,8 @@ def _terminal(store: SearchStore, status: SearchStatus) -> OuterConclusion | Non
         return "search_failed"
     if status.state == "interrupted":
         return "search_interrupted"
+    if status.state == "paused_time_limit":
+        return "search_paused_time_limit"
     if status.state in ("converged", "budget_exhausted"):
         path = store.path / "stage_one_refine.json"
         refined = StageOneRefineStatus.model_validate_json(path.read_bytes()) if path.exists() else None
@@ -33,7 +35,8 @@ def _terminal(store: SearchStore, status: SearchStatus) -> OuterConclusion | Non
 
 
 def auto_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunction, probe: IdentityProbe,
-                          registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
+                          registry_path: Path, run_date: date, engine_version: str,
+                          refine_compute: StageOneComputeFunction) -> SearchStatus:
     """每步重讀既有紀錄，沒有回饋步驟，不為對照追加搜尋。
 
     第一階段 complete（細算完成）＝搜尋收斂或用完預算，且第一階段細算 done（完成）；
@@ -51,7 +54,7 @@ def auto_stage_one_search(store: SearchStore, *, compute: StageOneComputeFunctio
                 resume_stage_one_search(store, compute=compute, probe=probe, registry_path=registry_path,
                     run_date=run_date, engine_version=engine_version)
             else:
-                refine_stage_one_search(store, compute=compute, probe=probe, registry_path=registry_path,
+                refine_stage_one_search(store, compute=refine_compute, probe=probe, registry_path=registry_path,
                     run_date=run_date, engine_version=engine_version, keep_stop_marker=True)
         except StageOneRefineStopped:
             continue

@@ -74,6 +74,7 @@ def trial_label(number: int | None) -> str:
 SEARCH_STATES = {
     "running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",
     "user_stopped": "使用者停止", "failed": "失敗", "interrupted": "中斷",
+    "paused_time_limit": "因單題時間上限暫停",
 }
 REFINE_STATES = {
     "not_started": "未開始", "running": "進行中", "stopped": "已停",
