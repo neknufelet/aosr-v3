@@ -400,36 +400,44 @@ def test_row_uses_v2_header_and_roundtrips(tmp_path: Path, outcome: Outcome) -> 
     assert Ledger.read(path) == (header, (row,))
 
 
-def test_runner_records_against_its_snapshot_header(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_runner_records_against_its_snapshot_header(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                    version: str) -> None:
     from datetime import date
 
     from aosr.config.quality_targets import QualityTargets
     from aosr.search.ledger import header_for
     from aosr.search.run import SearchStatus, _Runner
-    from aosr.search.store import SearchIdentity, SearchStore, _IdentitySnapshot
+    from aosr.search.store import SearchIdentity, _IdentitySnapshot
     from aosr.search.timings import WallClock
 
-    original = SearchSettings.model_validate(search_document(settings()))
-    # 只建立記憶體快照供落帳測試；不走搜尋建立入口、不啟動尚未接好的房間執行迴圈。
-    future = original.model_copy(update={"layout": settings(room_range=RANGES)})
+    # 帶房間外框的搜尋資料夾物件 6b-2 前造不出來；第二版改由換掉 header_for 驗 record 照它回的表頭建列。
     identity = SearchIdentity("physical", "program", purpose_settings("listening"))
     snapshot = _IdentitySnapshot.model_validate({"store_version": "aosr.search_store.v1", "search_id": "synthetic",
         "physics_identity": "physical", "program_fingerprint": "program",
         "versions": {"python": "test", "optuna": "test", "numpy": "test"}})
-    store = SearchStore(tmp_path, project(), future, identity, snapshot)
-    header = header_for(store)
-    assert isinstance(header, LedgerHeaderV2)
+    store = SearchStore(tmp_path, project(), SearchSettings.model_validate(search_document(settings())), identity, snapshot)
+    if version == "v2":
+        header: LedgerHeader | LedgerHeaderV2 = LedgerHeaderV2.model_validate(header_document() | {
+            "ledger_version": "aosr.search_ledger.v2", "search_space": dict.fromkeys(ALL_METERS, (0.0, 1.0)),
+            "meter_quantities": ALL_METERS})
+        monkeypatch.setattr("aosr.search.ledger.header_for", lambda chosen: header)
+        unit = UNIT | dict.fromkeys(ROOM_KEYS, 0.5)
+        meters = dict(zip(ALL_METERS, (1.0, 1.0, 2.0, 6.0, 4.0, 3.0), strict=True))
+    else:
+        header = header_for(store)
+        unit = UNIT
+        meters = {"front_distance": 1.0, "spacing": 1.0, "listening_distance": 2.0}
+    assert type(header) is (LedgerHeaderV2 if version == "v2" else LedgerHeader)
     book = Ledger.create(store.ledger_path, header)
     registry = QualityTargets.model_validate({"schema_version": 1,
         "purpose": [{"name": "listening", "setting": [], "target": [], "weight": [], "qualification": []}]})
     runner = _Runner(store, lambda jobs, workers: iter(()), lambda: identity, registry,
                      date(2026, 10, 22), "program", book, SearchStatus(), WallClock())
-    unit = UNIT | dict.fromkeys(ROOM_KEYS, 0.5)
-    meters = dict(zip(ALL_METERS, (1.0, 1.0, 2.0, 6.0, 4.0, 3.0), strict=True))
     runner.record(0, Proposal(0, unit), meters, Illegal("wall_gap", 0.125), 0.25, None)
     read_header, rows = Ledger.read(store.ledger_path)
     assert read_header == header
-    assert tuple(type(row) for row in rows) == (LedgerRowV2,)
+    assert tuple(type(row) for row in rows) == ((LedgerRowV2,) if version == "v2" else (LedgerRow,))
     assert tuple(row.params_m for row in rows) == (meters,)
 
 
@@ -443,7 +451,7 @@ def test_v1_row_rejects_room_only_reason(explicit_header: bool) -> None:
 
 
 def _bypass_store(root: Path) -> SearchStore:
-    """略過建檔入口、直接造帶房間外框的搜尋資料夾物件（建檔入口會拒）。"""
+    """略過建檔入口、直接造帶房間外框的搜尋資料夾物件（6b-2 前建構子就拒）。"""
     from aosr.search.store import SearchIdentity, _IdentitySnapshot
 
     future = SearchSettings.model_validate(search_document(settings())).model_copy(
@@ -454,40 +462,12 @@ def _bypass_store(root: Path) -> SearchStore:
     return SearchStore(root, project(), future, SearchIdentity("physical", "program", purpose_settings("listening")), snapshot)
 
 
-@pytest.mark.parametrize("entry", ["ledger", "stage_one", "stage_two"])
-def test_bypassed_room_store_writes_nothing_before_6b2(tmp_path: Path, entry: str) -> None:
-    from collections.abc import Iterator, Sequence
-    from datetime import date
-
-    from aosr.search.ledger import create_for
-    from aosr.search.run import CandidateJob, ComputedCandidate, start_search
-    from aosr.search.stage_one_run import start_stage_one_search
-    from aosr.search.stage_one_worker import StageOneComputed
-    from aosr.search.store import SearchIdentity
-
+def test_room_store_object_cannot_be_built_before_6b2(tmp_path: Path) -> None:
+    # 建檔與開檔入口都拒；直接造搜尋資料夾物件也拒，所以接續、外圈、細算、入選、回饋都拿不到它、寫不了檔。
     root = tmp_path / "search"
     root.mkdir()
-    store = _bypass_store(root)
-
-    def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
-        raise AssertionError("拒收前不准呼叫計算")
-
-    def stage_compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[StageOneComputed]:
-        raise AssertionError("拒收前不准呼叫計算")
-
-    def probe() -> SearchIdentity:
-        raise AssertionError("拒收前不准呼叫身分探針")
-
-    registry = tmp_path / "absent-registry"
     with pytest.raises(ValueError, match="6b-2"):
-        if entry == "ledger":
-            create_for(store)
-        elif entry == "stage_one":
-            start_stage_one_search(store, compute=stage_compute, probe=probe, registry_path=registry,
-                                   run_date=date(2026, 10, 22), engine_version="program")
-        else:
-            start_search(store, compute=compute, probe=probe, registry_path=registry,
-                         run_date=date(2026, 10, 22), engine_version="program")
+        _bypass_store(root)
     assert list(root.iterdir()) == []
 
 

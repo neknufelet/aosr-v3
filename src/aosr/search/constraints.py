@@ -215,7 +215,7 @@ def _base_angle_amount(settings: LayoutSettings, placement: Placement) -> float:
 def _floor_area_amount(room: Room, settings: LayoutSettings) -> float:
     """面積不足時，只拉長一個可調地板邊所需的最短延長量；兩邊固定時兩邊都算。
 
-    用「缺的面積÷另一邊」算：乘積只要小於下限，缺的面積就是正數，延長量不會被捨入成 0 而漏判。
+    用「缺的面積÷另一邊」算：乘積只要小於下限，缺的面積就是正數；邊長在實際房間尺度（不是次正規浮點）時，延長量不會被捨入成 0 而漏判。
     """
     limits = settings.room_range
     if limits is None or limits.min_floor_area_m2 is None:

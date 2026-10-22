@@ -164,6 +164,9 @@ class SearchStore:
 
     def __init__(self, path: Path, project: Scheme, settings: SearchSettings,
                  identity: SearchIdentity, snapshot: _IdentitySnapshot) -> None:
+        if settings.layout.room_range is not None:
+            # 建檔與開檔入口本來就拒；直接造的也拒，接續、外圈、細算、入選、回饋都拿不到這種物件（6b-2 接上執行迴圈時拿掉）。
+            raise ValueError("房間進搜尋還沒接上第一階段執行迴圈（6b-2），不能開這種搜尋資料夾")
         self._path = path
         self._project = project.model_copy(deep=True)
         self._settings = settings.model_copy(deep=True)

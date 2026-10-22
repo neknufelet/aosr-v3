@@ -428,9 +428,6 @@ def header_for(store: SearchStore) -> LedgerHeaderType:
 
 def create_for(store: SearchStore) -> Ledger:
     """在搜尋資料夾裡開新帳本，表頭照資料夾的快照寫。"""
-    if store.settings.layout.room_range is not None:
-        # 建檔入口已拒；略過建檔入口直接造的搜尋資料夾物件也不准寫帳本（6b-2 接上執行迴圈時拿掉）。
-        raise ValueError("房間進搜尋還沒接上第一階段執行迴圈（6b-2），不開帳本")
     return Ledger.create(store.ledger_path, header_for(store))
 
 
