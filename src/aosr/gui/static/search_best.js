@@ -23,11 +23,14 @@
     return [{label: x, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))},
       {label: y, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))}];
   }
+  const STANDARD_FREQUENCIES = [1, 10, 100, 1000, 10000].flatMap((scale) => [1, 2, 3, 4, 5, 6, 7, 8, 9].map((lead) => lead * scale));
   function frequencyAxes(frequencies) {
     // 跨不到兩個十倍（第一階段 20～300 Hz）時圖表庫只標 100 一格（看真資料截圖抓到）；改標首位 1、2、3、5、不帶小數。第二階段跨三個十倍以上，照舊。
     const result = axes("頻率（Hz）", "聲級（dB）");
     const low = frequencies[0], high = frequencies[frequencies.length - 1];
     if (!(low > 0 && high / low < 100)) return result;
+    // 拖曳縮放後圖表庫的分割點從可見下界起算（21、31…，審查抓到），所以分割點自己排在 1～9 乘十的次方上。
+    result[0].splits = (u, axisIdx, min, max) => STANDARD_FREQUENCIES.filter((v) => v >= min && v <= max);
     result[0].filter = (u, splits) => splits.map((v) => /^[1235]0*$/.test(String(v)) ? v : null);
     result[0].values = (u, values) => values.map((v) => v === null ? "" : String(v));
     return result;
