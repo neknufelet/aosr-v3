@@ -1,6 +1,7 @@
 """目前最佳的已存結果投影：分圖驗欄位，不求解、不重評、不拿搜尋鎖。"""
 from __future__ import annotations
 
+import math
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
@@ -59,7 +60,8 @@ class BestCache:
                     if (after.st_mtime_ns, after.st_size) != key[1:3]:
                         raise ValueError("結果檔正在更新，請等下一次讀取")
                     self._items[key] = document
-                except (OSError, ValueError, UnicodeError) as error:
+                # 第一階段模型驗證會用存下的分項重算合分，數值大到溢位時丟 OverflowError（審查）；一樣只算這份檔讀不到。
+                except (OSError, ValueError, UnicodeError, OverflowError) as error:
                     self._items[key] = _reason(error)
             self._items.move_to_end(key)
             while len(self._items) > self.capacity:
@@ -116,14 +118,18 @@ def _stage_one_frequency(document: dict[str, object]) -> dict[str, object]:
         raise ValueError("主位報表與方案聲道對不上")
     curves = [{"role": roles[speaker.speaker_id],
         "label": f"{'左' if roles[speaker.speaker_id] == 'left' else '右'}聲道 → 主位",
-        "points": [[frequency, level_db(energy) if energy is not None else None]
+        "points": [[frequency, _level(energy)]
             for frequency, energy in zip(speaker.primary.frequencies_hz, speaker.primary.fem_energy, strict=True)]}
         for speaker in speakers]
-    levels = [[level_db(energy) if energy is not None else None for energy in speaker.primary.fem_energy]
-        for speaker in speakers]
+    levels = [[_level(energy) for energy in speaker.primary.fem_energy] for speaker in speakers]
     return {"curves": curves, "data": [list(speakers[0].primary.frequencies_hz), *levels],
         "axis_text": _stage_one_axis(document), "note": document["wall_assumption_text"],
         "furniture_note": FURNITURE_MODEL_NOTE if scheme.furniture else ""}
+
+
+def _level(energy: float | None) -> float | None:
+    """跟第二階段同一個 level_db；能量模型准收非有限值，正無限大換成 dB 還是無限大、回應寫不成 JSON，當缺點（審查）。"""
+    return level_db(energy) if energy is not None and math.isfinite(energy) else None
 
 
 def _stage_one_axis(document: dict[str, object]) -> str:
