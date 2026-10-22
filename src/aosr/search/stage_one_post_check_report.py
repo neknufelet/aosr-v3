@@ -80,8 +80,8 @@ class _RoomGroup:
 
 
 def _group_room(groups: list[_RoomGroup], key: ModalKey, readout: DiagnosisReadout, span: str, *, variable: bool) -> None:
-    """完整房間鍵相等才共用一張表；組內共振不同仍是壞診斷。"""
-    group = next((group for group in groups if group.key == key), None)
+    """完整房間鍵相等才共用一張表；組內共振不同仍是壞診斷。固定房間照舊只有一張表、每席跟第一份比共振。"""
+    group = next((group for group in groups if group.key == key), None) if variable else next(iter(groups), None)
     if group is not None:
         if group.resonances != readout.resonances:
             raise ValueError("這一席的房間層跟上面那份不同，不能共用同一張超線表")

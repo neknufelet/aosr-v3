@@ -127,3 +127,36 @@ def test_nonrankable_room_rows_still_show_dimensions(tmp_path: Path, monkeypatch
     for item in report.excluded:
         room = "×".join(f"{item.row.params_m[name]:.6f}" for name in ROOM_KEYS)
         assert any(line.startswith(f"試算 {item.trial_number}：") and room in line for line in text.splitlines())
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_fixed_room_keeps_one_table_compared_by_resonances(changed: bool) -> None:
+    # 固定房間照改動前的規則：不看鑰匙，只有第一份房間層，之後每席跟它比共振。
+    import math
+    from aosr.geometry.shoebox import Room
+    from aosr.reporting.modal_diagnosis_model import ModalDiagnosis
+    from aosr.reporting.modal_diagnosis_readout import read_modal_diagnosis
+    from aosr.search.layout import project_in
+    from aosr.search.stage_one_post_check_report import _RoomGroup, _group_room
+    from tests.engine import _modal_cases as modal, _stage_one_cases as stage
+
+    project = stage.scheme()
+    reference = load_reference(stage.run_kwargs()["registry"].purpose(project.purpose))
+    first = project.scene.room_m
+    other = Room(Lx=math.nextafter(first.Lx, math.inf), Ly=first.Ly, Lz=first.Lz)
+    base, second = (modal.sample(project_in(project, room))[0] for room in (first, other))
+    base_key, second_key = base.key, second.key
+    assert base_key is not None and second_key is not None and base_key != second_key
+    if changed:
+        document = second.model_dump(mode="json")
+        document["room_layer"]["modes"][1]["t60_s"] = 20.
+        second = ModalDiagnosis.model_validate(document)
+    groups: list[_RoomGroup] = []
+    _group_room(groups, base_key, read_modal_diagnosis(base, reference), "合成參考線", variable=False)
+    if changed:
+        with pytest.raises(ValueError, match="這一席的房間層跟上面那份不同"):
+            _group_room(groups, second_key, read_modal_diagnosis(second, reference), "合成參考線", variable=False)
+    else:
+        _group_room(groups, second_key, read_modal_diagnosis(second, reference), "合成參考線", variable=False)
+    assert [group.key for group in groups] == [base_key]
+    assert not any(line.startswith("房間鍵：") for line in groups[0].lines)
