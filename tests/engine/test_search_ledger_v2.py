@@ -19,7 +19,7 @@ from aosr.search.ledger import (
     Ledger, LedgerHeader, LedgerHeaderV2, LedgerRow, LedgerRowV2, create_for, header_for, read_for, replay_history,
     row_outcome,
 )
-from aosr.search.sampler import Excluded, Outcome, Proposal, SamplerAdapter, Scored
+from aosr.search.sampler import Excluded, Outcome, Proposal, RankingZone, SamplerAdapter, Scored
 from aosr.search.store import candidate_name
 from tests.engine._search_ledger_v2_cases import METERS, SPACE, header_document, row_document, store_in
 from tests.engine._search_run_cases import FakeCompute, run
@@ -210,7 +210,7 @@ def test_v2_preserves_other_row_rules(tmp_path: Path) -> None:
         ("excluded", {"reason": "unassessed", "violation_m": None, "result_file": candidate_name(0)}),
     ):
         row = LedgerRowV2.model_validate(row_document() | {"outcome": kind} | updates)
-        assert isinstance(row_outcome(row), Scored if kind == "scored" else Excluded)
+        assert row_outcome(row) == (Scored(0.5) if kind == "scored" else Excluded(RankingZone.UNASSESSED))
     for update in ({"seconds": -1.0}, {"reason": "unknown"}, {"violation_m": 0.0},
                    {"score": 0.5}, {"result_file": candidate_name(1)}):
         with pytest.raises(ValueError):
@@ -295,12 +295,14 @@ def test_v1_bad_row_rejected_before_ledger_is_touched(tmp_path: Path, state: str
 @pytest.mark.parametrize("first_line", [
     b'{"ledger_version": "aosr.search_ledger.v1",}\n', b"\xff\n", b"{}\n", b"[]\n",
     b'{"ledger_version": "unexpected-ledger-version"}\n',
-])
+    b'{"ledger_version": "aosr.search_ledger.v1", "extra": ' + b"[" * 20000 + b"0" + b"]" * 20000 + b"}\n",
+], ids=["trailing_comma", "bad_utf8", "empty_object", "array", "unknown_version", "deep_nesting"])
 def test_unreadable_header_keeps_v1_validation_error(tmp_path: Path, first_line: bytes) -> None:
     """改動前表頭一律走第一版的 JSON 驗證入口：壞 JSON、壞編碼、缺欄位、未知版號都是驗證錯誤。"""
     path = tmp_path / "ledger"
     path.write_bytes(first_line)
-    with pytest.raises(ValidationError):
+    # 錯誤由第一版表頭類別報（改動前的入口），不是看版號那一步自己的錯。
+    with pytest.raises(ValidationError, match="for LedgerHeader\n"):
         Ledger.read(path)
 
 

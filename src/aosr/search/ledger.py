@@ -219,13 +219,20 @@ def _header_from_document(document: object) -> LedgerHeaderType:
     return LedgerHeader.model_validate(document)
 
 
+class _VersionPeek(BaseModel):
+    """只看表頭版號，其餘欄位不驗；跟各版表頭用同一個 JSON 解析器。"""
+
+    model_config = ConfigDict(extra="ignore")
+    ledger_version: object = None
+
+
 def _header_from_line(line: bytes) -> LedgerHeaderType:
-    """表頭那一行：先寬鬆看版號，驗證仍走各版的 JSON 入口，壞 JSON 與第一版的錯誤跟改動前相同。"""
+    """表頭那一行：版號是第二版才走第二版；其餘原樣交第一版的 JSON 入口，錯誤跟改動前相同。"""
     try:
-        document = json.loads(line)
-    except ValueError:
-        document = None
-    if isinstance(document, dict) and document.get("ledger_version") == LEDGER_VERSION_V2:
+        version = _VersionPeek.model_validate_json(line).ledger_version
+    except Exception:  # 看不出版號就交給第一版入口，由它報改動前的那個錯。
+        version = None
+    if version == LEDGER_VERSION_V2:
         return LedgerHeaderV2.model_validate_json(line)
     return LedgerHeader.model_validate_json(line)
 
