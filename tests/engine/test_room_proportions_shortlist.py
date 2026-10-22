@@ -13,7 +13,7 @@ from tests.engine._stage_one_refine_cases import snapshot
 from tests.engine.test_stage_one_shortlist import _finished, _numbers
 
 
-EXPLANATION = "比例提醒照 ITU-R BS.1116-3 與 EBU Tech 3276 對參考聆聽室的建議，只提醒、不改名次與分數，也不表示哪個比例較好"
+EXPLANATION = "比例提醒照 ITU-R BS.1116-3 與 EBU Tech 3276 對參考聆聽室的建議，只提醒、不改名次與分數，也不拿來評比例的高下"
 WARNING = "這個房間的比例可能產生模態重合，請仔細檢查低頻結果"
 LABELS = {"l/w": "長寬比", "l/h": "長高比", "w/h": "寬高比"}
 
@@ -99,7 +99,7 @@ def test_each_room_notice_and_legacy_columns_are_independent(tmp_path: Path, mon
         assert legacy == "｜".join(expected_columns)
         _check_notice_text(notice, expected)
     assert snapshot(store) == before
-    text = "\n".join(lines).replace(EXPLANATION, "")
+    text = "\n".join(lines)
     assert all(word not in text for word in ("不合格", "不符標準", "違規", "比例較好", "最佳比例", "黃金比例"))
 
 

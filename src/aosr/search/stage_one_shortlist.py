@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from aosr.config.paths import config_path
-from aosr.config.room_proportions import load_room_proportions
+from aosr.config.room_proportions import RoomProportions, load_room_proportions
 from aosr.scoring.stage_one_score import PRINCIPAL, ROBUSTNESS
 from aosr.search.room_proportions import (
     PROPORTION_EXPLANATION, RoomProportionNotice, room_proportion_notice, room_proportion_text,
@@ -14,8 +14,6 @@ from aosr.search.stage_one_refine_record import RefinedSeat, StageOneRefineStatu
 from aosr.search.stage_one_refine_report import _mismatch
 from aosr.search.stage_one_selection_contract import SelectionSeat
 from aosr.search.store import SearchStore
-
-_ROOM_PROPORTIONS = load_room_proportions(config_path("room_proportions.toml"))
 
 TITLE = "入選清單（細算後；前 {top_n} 席照細算名次，對照列出來、不算入選）"
 # 這兩句是主對話定的報告字樣；不是決策紙所引的老闆原話。
@@ -82,7 +80,7 @@ class StageOneShortlist:
 
 
 def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat,
-         refined: RefinedSeat | None) -> ShortlistRow:
+         refined: RefinedSeat | None, proportions: RoomProportions) -> ShortlistRow:
     roles = {"top_n": f"前 N（搜尋第 {seat.search_rank} 名）", "big_peak_control": "大峰對照", "far_control": "較遠對照"}
     state = refined.state if refined is not None else "pending"
     reason = refined.reason if refined is not None else ""
@@ -105,7 +103,7 @@ def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat,
         values = ShortlistValues(room.Lx, room.Ly, room.Lz, area, area * room.Lz,
             parts[PRINCIPAL], parts[ROBUSTNESS], score.screening_total, score.principal_only_sort_key_db)
         return replace(row, refine_rank=refined.refine_rank if row.is_top_n else None, values=values,
-            proportion=room_proportion_notice(values.length_m, values.width_m, values.height_m, _ROOM_PROPORTIONS))
+            proportion=room_proportion_notice(values.length_m, values.width_m, values.height_m, proportions))
     except (OSError, ValueError, KeyError, ComputeFailed, IdentityChanged) as error:
         return replace(row, state="unreadable", reason=f"細算結果讀不回：{error}")
 
@@ -127,7 +125,8 @@ def stage_one_shortlist(store: SearchStore) -> StageOneShortlist | None:
         return None
     status = StageOneRefineStatus.model_validate_json(path.read_bytes())
     results = {seat.trial_number: seat for seat in status.results}
-    rows = [_row(store, status, seat, results.get(seat.trial_number)) for seat in status.selection.candidates]
+    proportions = load_room_proportions(config_path("room_proportions.toml"))
+    rows = [_row(store, status, seat, results.get(seat.trial_number), proportions) for seat in status.selection.candidates]
     top = sorted((row for row in rows if row.is_top_n),
         key=lambda row: row.refine_rank if row.refine_rank is not None else float("inf"))
     controls = [row for row in rows if not row.is_top_n]

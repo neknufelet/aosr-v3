@@ -10,7 +10,7 @@ from aosr.config.room_proportions import RoomProportionRule, RoomProportions
 
 
 PROPORTION_WARNING = "這個房間的比例可能產生模態重合，請仔細檢查低頻結果"
-PROPORTION_EXPLANATION = "比例提醒照 ITU-R BS.1116-3 與 EBU Tech 3276 對參考聆聽室的建議，只提醒、不改名次與分數，也不表示哪個比例較好"
+PROPORTION_EXPLANATION = "比例提醒照 ITU-R BS.1116-3 與 EBU Tech 3276 對參考聆聽室的建議，只提醒、不改名次與分數，也不拿來評比例的高下"
 NO_VALUES = "無數值，不判"
 Ratio = Literal["l/w", "l/h", "w/h"]
 RATIO_LABELS: dict[Ratio, str] = {"l/w": "長寬比", "l/h": "長高比", "w/h": "寬高比"}
@@ -65,6 +65,12 @@ def room_proportion_notice(length_m: float, width_m: float, height_m: float,
     return RoomProportionNotice(tuple(hits))
 
 
+def _decimal(value: Fraction | None) -> str:
+    """門檻照表上的十進位寫法印，不印成分數。"""
+    assert value is not None
+    return f"{float(value):g}"
+
+
 def _hit_text(hit: RoomProportionHit) -> str:
     label = f"{RATIO_LABELS[hit.ratio]} {float(hit.value):.6f}"
     limits = hit.rule.thresholds
@@ -72,9 +78,10 @@ def _hit_text(hit: RoomProportionHit) -> str:
         assert limits.relative_width is not None
         detail = f"在整數 {hit.near_integer} 的 ±{float(limits.relative_width * 100):g}% 內"
     elif hit.rule.kind == "band":
-        detail = f"在建議比例帶 {limits.lower_factor}·w/h ≤ l/h ≤ {limits.upper_factor}·w/h − {limits.upper_offset} 之外"
+        detail = (f"在建議比例帶 {_decimal(limits.lower_factor)}·w/h ≤ l/h ≤ {_decimal(limits.upper_factor)}·w/h − "
+                  f"{_decimal(limits.upper_offset)} 之外")
     else:
-        detail = f"達到建議上限 {limits.upper}（建議小於此值）"
+        detail = f"達到建議上限 {_decimal(limits.upper)}（建議小於此值）"
     return f"{label} {detail}（{'；'.join(STANDARD_LABELS[name] for name in hit.rule.standard)}）"
 
 

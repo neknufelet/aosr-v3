@@ -142,13 +142,16 @@ def test_hand_calculated_rooms(dimensions: tuple[float, float, float], kinds: tu
         assert room_proportion_text(notice) == "無"
     text = room_proportion_text(notice)
     height_ratio = Fraction(max(dimensions[:2])) / Fraction(dimensions[2])
+    # 門檻照表上的十進位字串印（不是 11/10 這種分數），從表的原文字串組答案。
+    with config_path("room_proportions.toml").open("rb") as source:
+        raw = {entry["kind"]: entry["thresholds"] for entry in tomllib.load(source)["entry"]}
     if "band" in kinds:
-        assert f"長高比 {float(height_ratio):.6f} 在建議比例帶" in text
-        assert "ITU-R BS.1116-3" in text and "EBU Tech 3276" in text
+        band = raw["band"]
+        assert (f"長高比 {float(height_ratio):.6f} 在建議比例帶 {band['lower_factor']}·w/h ≤ l/h ≤ "
+                f"{band['upper_factor']}·w/h − {band['upper_offset']} 之外（ITU-R BS.1116-3；EBU Tech 3276）") in text
     if "below" in kinds:
-        upper = next(entry.thresholds.upper for entry in rules.entries if entry.kind == "below")
-        assert f"長高比 {float(height_ratio):.6f} 達到建議上限 {upper}（建議小於此值）" in text
-        assert "ITU-R BS.1116-3" in text and "EBU Tech 3276" in text
+        assert (f"長高比 {float(height_ratio):.6f} 達到建議上限 {raw['below']['upper']}（建議小於此值）"
+                "（ITU-R BS.1116-3；EBU Tech 3276）") in text
     if dimensions[0] == dimensions[1]:
         assert any(hit.ratio == "l/w" and hit.near_integer == 1 for hit in notice.hits)
 
