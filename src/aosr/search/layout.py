@@ -55,6 +55,17 @@ def space_for(settings: LayoutSettings) -> Mapping[str, tuple[float, float]]:
     return LOCKED_UNIT_SPACE if settings.seat_locked else UNIT_SPACE
 
 
+def meter_quantities_for(settings: LayoutSettings) -> tuple[str, ...]:
+    """一般與座位鎖定都記三個公尺量；鎖定只少取樣量，衍生量仍保留。"""
+    return SEARCH_QUANTITIES
+
+
+def params_to_meters(params: LayoutParams) -> dict[str, float]:
+    """擺位公尺量的唯一出處；保留既有量名、順序與浮點值。"""
+    return dict(zip(SEARCH_QUANTITIES,
+                    (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
+
+
 def _spans(settings: LayoutSettings) -> tuple[Span, ...]:
     spans = (settings.front_distance_m, settings.spacing_m)
     if settings.seat_locked:

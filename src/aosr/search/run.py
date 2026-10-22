@@ -432,7 +432,7 @@ class _Runner:
                 outcomes[number] = ledger.row_outcome(reused[number])
                 continue
             params = layout.params_from_unit(proposal.params, self.store.settings.layout, project=self.store.project)
-            meters = dict(zip(layout.SEARCH_QUANTITIES, (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
+            meters = layout.params_to_meters(params)
             placement = layout.place(self.store.project, self.store.settings.layout, params)
             violations = constraints.check(self.store.project, self.store.settings.layout, placement)
             if violations:
@@ -485,8 +485,7 @@ class _Runner:
             if number in reused:
                 continue
             params = layout.params_from_unit(proposal.params, self.store.settings.layout, project=self.store.project)
-            meters[number] = dict(zip(layout.SEARCH_QUANTITIES,
-                                      (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
+            meters[number] = layout.params_to_meters(params)
             placement = layout.place(self.store.project, self.store.settings.layout, params)
             violations = constraints.check(self.store.project, self.store.settings.layout, placement)
             if not violations:
