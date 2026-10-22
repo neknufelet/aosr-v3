@@ -9,6 +9,7 @@ from aosr.runtime import configure_calculation_jax
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser
 from tests.engine.test_stage_one_shortlist import _finished
+from aosr.search.stage_one_shortlist import RANK_AND_QUALITY
 from tests.engine._search_room_loop_cases import layout_for
 from tests.engine.test_gui_stage_one_view import second_stage
 
@@ -34,6 +35,9 @@ def test_stage_one_table_scope_pause_and_screenshot(tmp_path: Path, monkeypatch:
         assert page.locator("#search-scope").inner_text() == "第一階段：房間尺寸與喇叭、座位擺位一起搜尋，只算 20～300 Hz 有限元素"
         pause = page.locator("#stage p", has_text="搜尋：因單題時間上限暫停")
         assert "notice" in (pause.get_attribute("class") or "")
+        # 清單的固定說明句帶「未確認」三個字，但不是出錯，不准標紅（主對話看截圖抓到）。
+        explanation = page.locator("#shortlist p", has_text=RANK_AND_QUALITY)
+        assert "未確認" in RANK_AND_QUALITY and "notice" not in (explanation.get_attribute("class") or "")
         assert page.locator("body").evaluate("e => e.scrollWidth <= window.innerWidth")
         assert page.locator("#search-content section").evaluate_all("nodes => nodes.every(e => e.scrollWidth <= e.clientWidth)")
         wrapper = page.locator("#shortlist .table-scroll")

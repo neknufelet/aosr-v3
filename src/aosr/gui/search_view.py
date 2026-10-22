@@ -46,6 +46,8 @@ from aosr.search.room_proportions import PROPORTION_EXPLANATION
 from aosr.search.stage_one_post_check_report import TITLE as POST_CHECK_TITLE, stage_one_post_check_summary
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
+# 第一階段細算與入選後檢查各寫自己的檔；跑那一個多小時裡最後更新時間要跟著動，還沒開始就不該存在。
+STAGE_ONE_LATER = ("stage_one_refine.json", "stage-one-check/summary.json")
 INTERRUPTED = "狀態檔說還在跑，但沒有計算行程拿著這個資料夾：上次中斷了，要接續請叫助理"
 _T = TypeVar("_T")
 
@@ -330,11 +332,12 @@ def _timings(search: Read[SearchStatus], refine: Read[RefineStatus]) -> Block:
     return Block(key="timings", title="已用時間", lines=tuple(lines), warning=bool(search.error or refine.error))
 
 
-def _updated(path: Path, now: float, not_yet: tuple[str, ...] = ()) -> Block:
+def _updated(path: Path, now: float, not_yet: tuple[str, ...] = (),
+             names: tuple[str, ...] = ("status.json", "ledger.jsonl", "refine.jsonl")) -> Block:
     """not_yet 列的是本來就還不該存在的檔（細算還沒開始時的細算帳）：不存在就略過，不寫讀不到。"""
     times: list[float] = []
     lines: list[str] = []
-    for name in ("status.json", "ledger.jsonl", "refine.jsonl"):
+    for name in names:
         if name in not_yet and not (path / name).exists():
             continue
         timestamp = _read(lambda: (path / name).stat().st_mtime)
@@ -470,13 +473,24 @@ def _shortlist(store: SearchStore) -> Block:
             lines=("入選清單讀不回：" + "；".join(str(error).splitlines()),), warning=True)
 
 
-def _stage_one_stage(stage: Block, store: SearchStore, refined: Read[StageOneRefineStatus], process: Process) -> Block:
+def _stage_one_refined(path: Path) -> Read[StageOneRefineStatus]:
+    file = path / "stage_one_refine.json"
+    return _read(lambda: StageOneRefineStatus.model_validate_json(file.read_bytes())) if file.exists() else Read()
+
+
+def _stage_one_refine_lines(lines: tuple[str, ...], refined: Read[StageOneRefineStatus], process: Process) -> list[str]:
+    """第二階段的「細算：」行換成第一階段細算的狀態；搜尋清單頁與搜尋頁共用。"""
     state = refined.value.state if refined.value else "not_started"
     # selected 是第一階段的在跑狀態；沿用第二階段的核心行程查核。
     text = (_phase("running", {"running": STAGE_ONE_REFINE_STATES[state]}, process, "細算") if state == "selected"
             else STAGE_ONE_REFINE_STATES[state])
-    lines = [f"細算：{refined.error or text}" if line.startswith("細算：") else line for line in stage.lines
-             if not line.startswith("細算停止原因：")]
+    return [f"細算：{refined.error or text}" if line.startswith("細算：") else line for line in lines
+            if not line.startswith("細算停止原因：")]
+
+
+def _stage_one_stage(stage: Block, store: SearchStore, refined: Read[StageOneRefineStatus], process: Process) -> Block:
+    state = refined.value.state if refined.value else "not_started"
+    lines = _stage_one_refine_lines(stage.lines, refined, process)
     if state == "selected" and process.held is not True:
         lines = ["外圈結論：未判定（計算行程未確認）" if line.startswith("外圈結論：") else line for line in lines]
     wall = _read(lambda: wall_assumption_text(store.project))
@@ -514,9 +528,7 @@ def _stage_one_reasons(search: Read[SearchStatus], refined: Read[StageOneRefineS
 
 
 def _stage_one_view(view: SearchView, store: SearchStore, search: Read[SearchStatus], process: Process, now: float) -> SearchView:
-    path = store.path / "stage_one_refine.json"
-    refined: Read[StageOneRefineStatus] = (_read(lambda: StageOneRefineStatus.model_validate_json(path.read_bytes()))
-                                          if path.exists() else Read())
+    refined = _stage_one_refined(store.path)
     existing = {block.key: block for block in view.blocks}
     stage = _stage_one_stage(existing["stage"], store, refined, process)
     counts = _stage_one_counts(existing["counts"], refined)
@@ -524,12 +536,11 @@ def _stage_one_view(view: SearchView, store: SearchStore, search: Read[SearchSta
     refine_time = "細算時間：未開始" if refined.value is None and not refined.error else "第一階段細算的時間還沒上網頁"
     timings = timings.model_copy(update={"lines": tuple(line for line in timings.lines if "細算" not in line)
         + (refine_time,)})
-    modal_lines = stage_one_post_check_summary(store)
-    modal = Block(key="modal", title=POST_CHECK_TITLE, lines=modal_lines,
-                  warning=any("讀不回" in line or "失敗" in line for line in modal_lines))
+    post_check = stage_one_post_check_summary(store)
+    modal = Block(key="modal", title=POST_CHECK_TITLE, lines=post_check.lines, warning=post_check.warning)
     replacements = {"stage": stage, "counts": counts, "timings": timings, "refine-best": _shortlist(store),
         "reasons": _stage_one_reasons(search, refined, process), "modal": modal,
-        "updated": _updated(store.path, now, ("refine.jsonl",))}
+        "updated": _updated(store.path, now, STAGE_ONE_LATER, ("status.json", "ledger.jsonl", *STAGE_ONE_LATER))}
     scope = "第一階段：" + ("房間尺寸與" if store.settings.layout.room_range is not None else "")
     return view.model_copy(update={"blocks": tuple(replacements.get(block.key, block) for block in view.blocks),
         "stage_text": "；".join(stage.lines[1:3]),
@@ -574,14 +585,16 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
 
 
 def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
-    """清單頁一場一列：只讀快照名字與狀態檔，不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
+    """清單頁一場一列：只讀快照名字與狀態檔（第一階段另讀細算狀態小檔），不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
     process = (Process(None, f"判不出有沒有行程在跑：{locks.error.removeprefix('讀不到：')}") if locks.value is None
                else folder_process(path, locks.value))
     store = _read(lambda: SearchStore.open(path))
     search, refine, outer = _status_parts(_read(lambda: _document(path / "status.json")))
-    stage = _stage(search, refine, outer, process)
+    lines = _stage(search, refine, outer, process).lines
+    if store.value is not None and store.value.settings.stage == "stage_one_fem_only":
+        lines = tuple(_stage_one_refine_lines(lines, _stage_one_refined(path), process))
     return {"search_id": path.name, "name": store.value.project.scheme_id if store.value else path.name,
-            "stage_text": "；".join(stage.lines[:3]), "url": f"/searches/{path.name}"}
+            "stage_text": "；".join(lines[:3]), "url": f"/searches/{path.name}"}
 
 
 def list_searches(root: Path) -> dict[str, object]:

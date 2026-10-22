@@ -35,8 +35,10 @@ function drawDetail(data) {
       // 伺服器標成警示的那一塊整塊標紅；其他塊裡帶這幾個字的那一行也標紅（複查）。
       // 交接與擺位附件只把讀取或計算失敗標紅；暫時、舊了與模型不連續按預設不標紅。
       const summaryBlock = ["crossover", "stability"].includes(block.key);
+      // 入選清單的行都是固定說明（「改善能力尚未確認」不是出錯）：只有伺服器標警示才標紅。
+      const fixedText = block.key === "shortlist";
       const warningWords = summaryBlock ? ["讀不到", "失敗"] : ["讀不到", "中斷", "失敗", "判不出", "未確認", "已過期", "暫停"];
-      if ((block.warning && !summaryBlock) || warningWords.some((word) => line.includes(word))) {
+      if ((block.warning && !summaryBlock) || (!fixedText && warningWords.some((word) => line.includes(word)))) {
         p.className = "notice";
       }
       section.append(p);

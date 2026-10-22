@@ -21,6 +21,12 @@ PARTICIPATION = "主位參與門檻（『主位參與大』的量法與數值）
 SUMMARY_STATE_TEXT = {"running": "開始過、沒有收尾紀錄", "done": "已收尾", "stopped": "已停止", "failed": "有診斷失敗"}
 RELATIVE = "主位參與的 dB 是相對值：相對同一支喇叭到同一個座位最強的那根共振（每一席、每支喇叭各自為基準）"
 OLD_IDENTITY = "這一段的診斷是舊版模態程式算的（模態身分跟現在的程式不同）；再跑一次細算會整段重算"
+NO_DIAGNOSIS = ("not_started", "running", "stopped", "skipped")
+_NO_DIAGNOSIS_TEXT = {"not_started": "未開始", "running": "開始過、沒有收尾紀錄", "stopped": "未計算：已停止", "skipped": "跳過"}
+
+
+def _state_text(state: str) -> str:
+    return MODAL_STATE_TEXT.get(state, _NO_DIAGNOSIS_TEXT.get(state, state))
 
 
 def _label(seat: PostCheckSeat, selection: StageOneSelection) -> str:
@@ -111,7 +117,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
             try:
                 label = _label(seat, summary.selection)
                 state, reason = seat.state, seat.reason_text
-                if state not in ("not_started", "running", "stopped", "skipped"):
+                if state not in NO_DIAGNOSIS:
                     expected = store.scheme_path_for(store.refine_result_path(seat.trial_number))
                     if seat.scheme_file != expected.relative_to(store.path).as_posix():
                         raise ValueError("摘要的方案路徑不是這一席的細算方案")
@@ -125,9 +131,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
                         _group_room(rooms, diagnosis.key, readout, _reference_span(reference),
                                     variable=store.settings.layout.room_range is not None)
                         placement_lines.extend(_placement_lines(label, scheme, readout))
-                state_text = MODAL_STATE_TEXT.get(state, {"not_started": "未開始", "running": "開始過、沒有收尾紀錄",
-                    "stopped": "未計算：已停止", "skipped": "跳過"}.get(state, state))
-                lines.append(f"{label}：{state_text}；{reason or '無附加原因'}")
+                lines.append(f"{label}：{_state_text(state)}；{reason or '無附加原因'}")
             except (OSError, ValueError, KeyError, StopIteration) as error:
                 lines.append(f"{label}：失敗；診斷文件讀不回或內容不完整：{error}")
         lines.extend([line for room in rooms for line in room.lines] or ["房間層尚無可讀診斷，未評估"])
@@ -140,42 +144,54 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
     return tuple(line.replace("\r", " ").replace("\n", "；") for line in lines)
 
 
-def stage_one_post_check_summary(store: SearchStore) -> tuple[str, ...]:
-    """網頁摘要：狀態與逐席房間層，沿用命令列的角色、狀態與共振計數。"""
+@dataclass(frozen=True)
+class PostCheckSummaryText:
+    """警示照狀態判（讀不回、診斷失敗），不照字面：寫入端的原因原文本來就可能寫「讀不回」。"""
+
+    lines: tuple[str, ...]
+    warning: bool
+
+
+def stage_one_post_check_summary(store: SearchStore) -> PostCheckSummaryText:
+    """網頁摘要：狀態與逐席房間層，沿用命令列的角色、狀態、讀檔核對與共振計數；壞一席只壞那一行。"""
     lines: list[str] = []
+    warning = False
     try:
         summary = read_summary(store.path)
         if summary is None:
-            return ("入選後檢查還沒做",)
+            return PostCheckSummaryText(("入選後檢查還沒做",), False)
+        warning = summary.state == "failed"
         lines.append(f"入選後檢查狀態：{SUMMARY_STATE_TEXT[summary.state]}；{summary.message}")
         if summary.modal_identity != modal_identity():
             lines.append(OLD_IDENTITY)
         reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
         for seat in summary.seats:
-            label = _label(seat, summary.selection)
+            label = f"試算 {seat.trial_number}"
             try:
+                label = _label(seat, summary.selection)
                 state = seat.state
-                state_text = MODAL_STATE_TEXT.get(state, {"not_started": "未開始", "running": "開始過、沒有收尾紀錄",
-                    "stopped": "未計算：已停止", "skipped": "跳過"}.get(state, state))
-                expected = store.scheme_path_for(store.refine_result_path(seat.trial_number))
-                if seat.scheme_file != expected.relative_to(store.path).as_posix():
-                    raise ValueError("摘要的方案路徑不是這一席的細算方案")
-                scheme = load_scheme(expected)
-                room = scheme.scene.room_m
-                dimensions = f"{room.Lx:.6f}×{room.Ly:.6f}×{room.Lz:.6f}"
                 room_text = "房間層尚無可讀診斷，未評估"
-                if state not in ("not_started", "running", "stopped", "skipped"):
+                # 沒有診斷的席（含細算讀不回而跳過的）不讀方案，跟命令列一樣；房間尺寸看入選清單。
+                if state not in NO_DIAGNOSIS:
+                    expected = store.scheme_path_for(store.refine_result_path(seat.trial_number))
+                    if seat.scheme_file != expected.relative_to(store.path).as_posix():
+                        raise ValueError("摘要的方案路徑不是這一席的細算方案")
+                    scheme = load_scheme(expected)
                     diagnosis = read_diagnosis(store.path, seat, scheme, identity=summary.modal_identity)
                     if diagnosis.state.value != state:
                         raise ValueError("診斷狀態與摘要不同")
+                    readout = read_modal_diagnosis(diagnosis, reference)
+                    room = scheme.scene.room_m
+                    room_text = f"房間 長×寬×高（公尺）：{room.Lx:.6f}×{room.Ly:.6f}×{room.Lz:.6f}"
                     if state == "diagnosed_not_scored":
-                        readout = read_modal_diagnosis(diagnosis, reference)
-                        room_text = _room_lines(readout, _reference_span(reference))[0]
-                lines.append(f"{label}：{state_text}；{seat.reason_text or '無附加原因'}；"
-                             f"房間 長×寬×高（公尺）：{dimensions}；{room_text}")
-            except (OSError, ValueError, KeyError) as error:
+                        room_text += "；" + _room_lines(readout, _reference_span(reference))[0]
+                lines.append(f"{label}：{_state_text(state)}；{seat.reason_text or '無附加原因'}；{room_text}")
+                warning = warning or state == "failed"
+            except (OSError, ValueError, KeyError, StopIteration) as error:
                 lines.append(f"{label}：失敗；診斷文件讀不回或內容不完整：{error}")
+                warning = True
         lines.append("每個超線共振的頻率與 T60 清單還沒上網頁")
     except (OSError, ValueError, KeyError) as error:
         lines.append(f"入選後檢查摘要讀不回或內容不完整：{error}")
-    return tuple(line.replace("\r", " ").replace("\n", "；") for line in lines)
+        warning = True
+    return PostCheckSummaryText(tuple(line.replace("\r", " ").replace("\n", "；") for line in lines), warning)

@@ -308,6 +308,59 @@ def masked_json(store: SearchStore, monkeypatch: pytest.MonkeyPatch) -> str:
 SECOND_STAGE = {'False': '{"search_id":"00000000000000000000000000000001","name":"reference-room-original","fetched_text":"22:14:20","stage_text":"搜尋：因預算停止；第 1 輪；細算：未開始","blocks":[{"key":"stage","title":"目前階段","lines":["沒有計算行程拿著這個資料夾","搜尋：因預算停止；第 1 輪","細算：未開始","外圈結論：未判定","品質合格：本頁未判定；停止或細算完成不代表品質合格，也不是最終推薦","未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同"],"warning":false},{"key":"counts","title":"候選處理數量","lines":["問過 0 題（到狀態最後存檔為止）","算完 0 個；不合法 0 個","不合法各原因數：沒有","被淘汰或排除 0 個；各區數：沒有","細算帳：還沒有（細算還沒開始）"],"warning":false},{"key":"timings","title":"已用時間","lines":["到最後一次存檔為止；不是目前行程的即時計時","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）","各輪搜尋花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","各輪細算花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）"],"warning":false},{"key":"updated","title":"最後更新時間","lines":["最後更新：2023-11-14 22:13:20 UTC；距今 1 分 0 秒"],"warning":false},{"key":"search-best","title":"搜尋最佳","lines":["本次預算內最佳：沒有取得篩選分數的候選"],"warning":false},{"key":"refine-best","title":"細算最佳","lines":["尚無可排名的細算第一名"],"warning":false},{"key":"crossover","title":"300 Hz 交接敏感度（不改名次）","lines":["只看換接法時名次會不會變，正式接法、分數與名次不變","交接影響尚未驗證","未開始（搜尋正常收尾後才補）","距離近不等於聲音接近；這裡只看算法選擇對排名的影響，不是誤差界，也不是聽感比較"],"warning":false},{"key":"stability","title":"擺位穩定性（±2 公分，不改名次）","lines":["這場搜尋沒有擺位穩定性結果（這一段在 #699 合併後才有）"],"warning":false},{"key":"reasons","title":"停止或失敗原因","lines":["搜尋訊息原文：考卷停止原因","細算訊息原文：細算未開始：還沒有任何候選用驗證軸細算"],"warning":false},{"key":"modal","title":"低頻模態診斷（不計分）","lines":["不計分、不改名次；搜尋結果與外圈結論不受診斷影響","原方案：未開始（搜尋正常收尾後才補）","搜尋第一名：未開始（搜尋正常收尾後才補）","細算第一名：未開始（搜尋正常收尾後才補）","其他座位與完整排序放進結果清單後到網頁結果頁看"],"warning":false},{"key":"identity","title":"身分","lines":["伺服器現在的物理身分：現在物理","伺服器程式指紋：現在程式","資料夾物理身分：phys-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","資料夾程式指紋：calc-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","這場搜尋用的是較舊的程式（指紋與伺服器不同；這是備查資訊）","這場搜尋的物理身分與伺服器不同（備查資訊）"],"warning":false}],"best_default":"search","best_versions":{"search":{"which":"search","candidate":"","result_file":"","version":"讀不到：尚無搜尋第一名","error":"讀不到：尚無搜尋第一名"},"refine":{"which":"refine","candidate":"","result_file":"","version":"讀不到：尚無細算第一名","error":"讀不到：尚無細算第一名"}}}', 'True': '{"search_id":"00000000000000000000000000000002","name":"reference-room-original","fetched_text":"22:14:20","stage_text":"搜尋：因預算停止；第 1 輪；細算：未開始","blocks":[{"key":"stage","title":"目前階段","lines":["沒有計算行程拿著這個資料夾","搜尋：因預算停止；第 1 輪","細算：未開始","外圈結論：未判定","品質合格：本頁未判定；停止或細算完成不代表品質合格，也不是最終推薦","未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同","座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出"],"warning":false},{"key":"counts","title":"候選處理數量","lines":["問過 0 題（到狀態最後存檔為止）","算完 0 個；不合法 0 個","不合法各原因數：沒有","被淘汰或排除 0 個；各區數：沒有","細算帳：還沒有（細算還沒開始）"],"warning":false},{"key":"timings","title":"已用時間","lines":["到最後一次存檔為止；不是目前行程的即時計時","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）","各輪搜尋花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","各輪細算花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）"],"warning":false},{"key":"updated","title":"最後更新時間","lines":["最後更新：2023-11-14 22:13:20 UTC；距今 1 分 0 秒"],"warning":false},{"key":"search-best","title":"搜尋最佳","lines":["本次預算內最佳：沒有取得篩選分數的候選"],"warning":false},{"key":"refine-best","title":"細算最佳","lines":["尚無可排名的細算第一名"],"warning":false},{"key":"crossover","title":"300 Hz 交接敏感度（不改名次）","lines":["只看換接法時名次會不會變，正式接法、分數與名次不變","交接影響尚未驗證","未開始（搜尋正常收尾後才補）","距離近不等於聲音接近；這裡只看算法選擇對排名的影響，不是誤差界，也不是聽感比較"],"warning":false},{"key":"stability","title":"擺位穩定性（±2 公分，不改名次）","lines":["這場搜尋沒有擺位穩定性結果（這一段在 #699 合併後才有）"],"warning":false},{"key":"reasons","title":"停止或失敗原因","lines":["搜尋訊息原文：考卷停止原因","細算訊息原文：細算未開始：還沒有任何候選用驗證軸細算"],"warning":false},{"key":"modal","title":"低頻模態診斷（不計分）","lines":["不計分、不改名次；搜尋結果與外圈結論不受診斷影響","原方案：未開始（搜尋正常收尾後才補）","搜尋第一名：未開始（搜尋正常收尾後才補）","細算第一名：未開始（搜尋正常收尾後才補）","其他座位與完整排序放進結果清單後到網頁結果頁看"],"warning":false},{"key":"identity","title":"身分","lines":["伺服器現在的物理身分：現在物理","伺服器程式指紋：現在程式","資料夾物理身分：phys-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","資料夾程式指紋：calc-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","這場搜尋用的是較舊的程式（指紋與伺服器不同；這是備查資訊）","這場搜尋的物理身分與伺服器不同（備查資訊）"],"warning":false}],"best_default":"search","best_versions":{"search":{"which":"search","candidate":"","result_file":"","version":"讀不到：尚無搜尋第一名","error":"讀不到：尚無搜尋第一名"},"refine":{"which":"refine","candidate":"","result_file":"","version":"讀不到：尚無細算第一名","error":"讀不到：尚無細算第一名"}}}'}
 
 
+@pytest.mark.parametrize("state", ["skipped", "failed"])
+def test_post_check_red_follows_states_not_reason_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
+    # 寫入端照規矩跳過細算結果讀不回的那一席，原因原文寫「讀不回」：不是這一塊的檢查失敗；診斷真的失敗才標紅。
+    configure_calculation_jax()
+    store = prepared(tmp_path, monkeypatch)
+    if state == "skipped":
+        store.refine_result_path(8).unlink()
+    run(store, tmp_path / "child", state="failed" if state == "failed" else "diagnosed_not_scored")
+    raw = json.loads((store.path / "stage-one-check" / "summary.json").read_bytes())
+    modal = blocks(store)["modal"]
+    assert modal.warning == (state == "failed")
+    for seat in raw["seats"]:
+        line = next(line for line in modal.lines if line.startswith(f"試算 {seat['trial_number']}／"))
+        scheme = json.loads((store.path / seat["scheme_file"]).read_bytes())
+        dimensions = "×".join(f"{scheme['scene']['room_m'][key]:.6f}" for key in ("Lx", "Ly", "Lz"))
+        if state == "failed":
+            assert seat["state"] == "failed"
+            assert line.endswith(f"：失敗；{seat['reason_text']}；房間 長×寬×高（公尺）：{dimensions}")
+        elif seat == raw["seats"][0]:
+            assert seat["state"] == "skipped" and "讀不回" in seat["reason_text"]
+            assert line == f"{line.split('：')[0]}：跳過；{seat['reason_text']}；房間層尚無可讀診斷，未評估"
+        else:
+            assert seat["state"] == "diagnosed_not_scored" and f"房間 長×寬×高（公尺）：{dimensions}；房間層：共振 " in line
+
+
+def test_updated_follows_stage_one_refine_and_post_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 細算與入選後檢查各跑幾十分鐘、只寫自己的檔：最後更新時間要跟著它們動，不能停在搜尋收尾那一刻。
+    configure_calculation_jax()
+    store = prepared(tmp_path, monkeypatch)
+    run(store, tmp_path / "child")
+    refine, summary = store.path / "stage_one_refine.json", store.path / "stage-one-check" / "summary.json"
+    base = int(time.time()) - 3600
+    for name, offset in (("status.json", 0), ("ledger.jsonl", 0), ("stage_one_refine.json", 600),
+                         ("stage-one-check/summary.json", 1200)):
+        os.utime(store.path / name, (base + offset, base + offset))
+    # 兩個檔依序拿掉（還沒做的檔本來就不存在）：最新時間跟著退回，也不寫讀不到。
+    for newest, later in ((base + 1200, summary), (base + 600, refine), (base, None)):
+        updated = blocks(store)["updated"]
+        assert updated.lines[0].startswith(f"最後更新：{datetime.fromtimestamp(newest).astimezone():%Y-%m-%d %H:%M:%S %Z}")
+        assert len(updated.lines) == 1 and not updated.warning
+        if later is not None:
+            later.unlink()
+
+
+def test_search_list_reads_stage_one_refine_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _finished(tmp_path, monkeypatch)
+    searches = view.list_searches(store.path.parent)["searches"]
+    assert isinstance(searches, list)
+    item = next(item for item in searches if item["search_id"] == store.path.name)
+    assert "細算：完成" in item["stage_text"] and "細算：未開始" not in item["stage_text"]
+    assert item["stage_text"] == "；".join(blocks(store)["stage"].lines[:3])
+
+
 @pytest.mark.parametrize("locked", [False, True])
 def test_second_stage_json_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked: bool) -> None:
     store = second_stage(tmp_path, locked)

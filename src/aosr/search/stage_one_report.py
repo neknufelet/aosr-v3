@@ -23,6 +23,7 @@ from aosr.search.stage_one_time_limit import time_limit_lines
 
 DECAY_NOTICE = "低頻拖尾不進自動排名，入選後要另外檢查"
 
+
 @dataclass(frozen=True)
 class StageOneReportRow:
     """保留帳本與讀回錯誤，壞掉的一列不妨礙其他候選。"""
