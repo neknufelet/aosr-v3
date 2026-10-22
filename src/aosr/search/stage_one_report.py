@@ -18,6 +18,7 @@ from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.stage_one_refine_report import stage_one_refine_lines
 from aosr.search.stage_one_post_check_report import stage_one_post_check_lines
+from aosr.search.stage_one_shortlist import stage_one_shortlist_lines
 from aosr.search.stage_one_time_limit import time_limit_lines
 
 
@@ -43,6 +44,7 @@ class StageOneSearchReport:
     post_check_lines: tuple[str, ...] = ()
     time_limit_lines: tuple[str, ...] = ()
     room_range: bool = False
+    shortlist_lines: tuple[str, ...] = ()
 
 
 def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
@@ -81,7 +83,7 @@ def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
     return StageOneSearchReport(wall_assumption_text(store.project), status,
         tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded),
         stage_one_refine_lines(store), stage_one_post_check_lines(store), time_limit_lines(store),
-        room_range=store.settings.layout.room_range is not None)
+        room_range=store.settings.layout.room_range is not None, shortlist_lines=stage_one_shortlist_lines(store))
 
 
 def _feature(feature: Feature) -> str:
@@ -148,6 +150,7 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
         lines.append(f"試算 {item.trial_number}：{label}；{detail}{room}")
     lines.extend(report.time_limit_lines)
     lines.extend(report.refine_lines)
+    lines.extend(report.shortlist_lines)
     lines.extend(report.post_check_lines)
     lines.extend((CROSSOVER_TITLE, CROSSOVER_OUT_OF_SCOPE, STABILITY_TITLE, STABILITY_OUT_OF_SCOPE))
     return "\n".join(lines) + "\n"
