@@ -87,11 +87,9 @@ def test_shortlist_every_cell_from_raw_result(tmp_path: Path, monkeypatch: pytes
         + "喇叭、座位擺位一起搜尋，只算 20～300 Hz 有限元素")
 
 
-@pytest.mark.parametrize("state,held,label", [("absent", False, "未開始"), ("selected", True, "進行中"),
-    ("selected", False, "細算中斷："), ("done", False, "完成"), ("interrupted", False, "中斷"),
-    ("failed", False, "失敗"), ("broken", False, "讀不到：")])
-def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                   state: str, held: bool, label: str) -> None:
+def _refine_shown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str,
+                  held: bool) -> tuple[SearchStore, dict[str, view.Block]]:
+    """把細算文件改成指定狀態（不存在、壞掉或改狀態欄），照要求拿著或放開資料夾鎖，組一次網頁。"""
     store = _finished(tmp_path, monkeypatch)
     path = store.path / "stage_one_refine.json"
     raw = json.loads(path.read_bytes())
@@ -108,9 +106,17 @@ def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch:
     try:
         if held:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        shown = blocks(store)
+        return store, blocks(store)
     finally:
         os.close(descriptor)
+
+
+@pytest.mark.parametrize("state,held,label", [("absent", False, "未開始"), ("selected", True, "進行中"),
+    ("selected", False, "細算中斷："), ("done", False, "完成"), ("interrupted", False, "中斷"),
+    ("failed", False, "失敗"), ("broken", False, "讀不到：")])
+def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                   state: str, held: bool, label: str) -> None:
+    store, shown = _refine_shown(tmp_path, monkeypatch, state, held)
     assert next(line for line in shown["stage"].lines if line.startswith("細算：")).startswith("細算：" + label)
     result = view.build_search_view(store.path, server_physics="測試", server_program="測試")
     if not held:
@@ -118,14 +124,6 @@ def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch:
     assert shown["stage"].warning == (state == "broken")
     assert shown["counts"].warning == (state == "broken")
     assert shown["reasons"].warning == (state == "broken")
-    # 細算失敗或中斷時，停止原因那一塊要寫是細算那一段停的；沒停的不准有這一行（植錯存活補的）。
-    stops = [line for line in shown["reasons"].lines if line.startswith("停止段落：細算")]
-    if state in ("failed", "interrupted"):
-        assert stops == [f"停止段落：細算{label}"]
-    elif state == "selected" and not held:
-        assert [line.split("；")[0] for line in stops] == ["停止段落：細算"]
-    else:
-        assert stops == []
     assert shown["shortlist"].warning == (state == "broken")
     assert not shown["modal"].warning and not shown["identity"].warning
     if state == "absent":
@@ -139,6 +137,7 @@ def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch:
         assert any("讀不到" in line for line in shown["counts"].lines)
         assert any("讀不到" in line for line in shown["reasons"].lines)
     else:
+        raw = json.loads((store.path / "stage_one_refine.json").read_bytes())
         assert "細算訊息原文：第一階段細算原始原因" in shown["reasons"].lines
         assert f"第一階段細算：前 {raw['selection']['top_n']} 席設定；共 {len(raw['selection']['candidates'])} 席（含對照）" in shown["counts"].lines
         for status, text in (("pending", "尚未完成"), ("scored", "已計分"), ("unassessed", "不可估"),
@@ -149,6 +148,22 @@ def test_refine_states_counts_reasons_and_isolation(tmp_path: Path, monkeypatch:
             assert f"{text} {count} 席" in shown["counts"].lines[-1]
     assert ("細算時間：未開始" if state == "absent" else "第一階段細算的時間還沒上網頁") in shown["timings"].lines
     assert not any("各輪細算" in line or "搜尋＋細算合計" in line for line in shown["timings"].lines)
+
+
+@pytest.mark.parametrize("state,held,expected", [("failed", False, ["停止段落：細算失敗"]),
+    ("interrupted", False, ["停止段落：細算中斷"]), ("selected", False, ["停止段落：細算"]), ("selected", True, []),
+    ("done", False, [])])
+def test_stage_one_refine_stop_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, held: bool,
+                                       expected: list[str]) -> None:
+    # 細算失敗或中斷時，停止原因那一塊要寫是細算那一段停的；在跑而沒有行程拿著資料夾時寫細算加原因；
+    # 有行程在跑或已完成就沒有這一行（植錯存活補的）。
+    _, shown = _refine_shown(tmp_path, monkeypatch, state, held)
+    stops = [line for line in shown["reasons"].lines if line.startswith("停止段落：細算")]
+    if state == "selected" and not held:
+        # 在跑卻沒有行程拿著資料夾那一格，後面接原因原文（中斷或讀不到行程），只核分號前那一段。
+        assert [line.split("；")[0] for line in stops if "；" in line] == expected
+    else:
+        assert stops == expected
 
 
 @pytest.mark.parametrize("broken_wall", [False, True])
