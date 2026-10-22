@@ -33,6 +33,25 @@ class Box(BaseModel):
     z: Span
 
 
+class RoomRange(BaseModel):
+    """房間外框；省略的邊沿用專案，至少一邊可調，地板面積可另設下限。"""
+
+    model_config = FROZEN
+    Lx: Span | None = None
+    Ly: Span | None = None
+    Lz: Span | None = None
+    min_floor_area_m2: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def _adjustable_edges(self) -> Self:
+        spans = tuple(span for span in (self.Lx, self.Ly, self.Lz) if span is not None)
+        if not spans:
+            raise ValueError("room_range 至少一邊可調")
+        if any(span.low <= 0.0 for span in spans):
+            raise ValueError("room_range 可調邊的 low 必須大於 0")
+        return self
+
+
 class Cabinet(BaseModel):
     """第二節第 5 條：只供施工檢查，求解的聲源仍是聲學中心的點。
 
@@ -84,6 +103,8 @@ class LayoutSettings(BaseModel):
         description="喇叭連線到主位水平距離；未鎖定必填，鎖定時省略、由座位推出")
     seat_locked: bool = Field(default=False, strict=True, exclude_if=lambda value: value is False,
         description="鎖定原方案座位，只搜尋離前牆與間距")
+    room_range: RoomRange | None = Field(default=None, exclude_if=lambda value: value is None,
+        description="房間可調邊的外框與最小地板面積；未設沿用專案房間")
     cabinet: Cabinet = Field(description="第二節第 5 條：只供幾何檢查的箱體")
     wall_gap_m: float = Field(
         default=0.0, ge=0.0, description="第二節第 1 條：箱體到四面牆（不含地板、天花板）的必要間隙",
@@ -116,4 +137,10 @@ class LayoutSettings(BaseModel):
                 raise ValueError("search distances require low > 0")
         if self.speaker_areas == ():
             raise ValueError("declared speaker areas must contain an available box")
+        return self
+
+    @model_validator(mode="after")
+    def _room_coordinates(self) -> Self:
+        if self.room_range is not None and (self.seat_locked or self.keep_out or self.speaker_areas is not None):
+            raise ValueError("room_range 不可與 seat_locked、非空 keep_out 或 speaker_areas 同設：它們使用房間絕對座標")
         return self

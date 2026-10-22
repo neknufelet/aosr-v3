@@ -36,6 +36,7 @@ class Reason(StrEnum):
     CABINET_OFF_TABLE = "cabinet_off_table"
     STAND_SPACE_OCCUPIED = "stand_space_occupied"
     FURNITURE_IN_KEEP_OUT = "furniture_in_keep_out"
+    FLOOR_AREA_BELOW_MINIMUM = "floor_area_below_minimum"
 
 
 @dataclass(frozen=True)
@@ -207,11 +208,26 @@ def _base_angle_amount(settings: LayoutSettings, placement: Placement) -> float:
     return (left_radius + right_radius) / 2.0 * math.radians(difference)
 
 
+def _floor_area_amount(room: Room, settings: LayoutSettings) -> float:
+    """面積不足時，只拉長一個可調地板邊所需的最短延長量；兩邊固定時兩邊都算。"""
+    limits = settings.room_range
+    if limits is None or limits.min_floor_area_m2 is None or room.Lx * room.Ly >= limits.min_floor_area_m2:
+        return 0.0
+    fixed_floor = limits.Lx is None and limits.Ly is None
+    amounts = []
+    if limits.Lx is not None or fixed_floor:
+        amounts.append(limits.min_floor_area_m2 / room.Ly - room.Lx)
+    if limits.Ly is not None or fixed_floor:
+        amounts.append(limits.min_floor_area_m2 / room.Lx - room.Ly)
+    return min(amounts)
+
+
 def check(project: Scheme, settings: LayoutSettings, placement: Placement) -> tuple[Violation, ...]:
     """空 tuple＝合法；每種原因只回最大違反量，不建方案、不求解、不評分。"""
     amounts: dict[Reason, float] = {}
     _record(amounts, Reason.BASE_ANGLE_OUT_OF_RANGE, _base_angle_amount(settings, placement))
     room = project.scene.room_m
+    _record(amounts, Reason.FLOOR_AREA_BELOW_MINIMUM, _floor_area_amount(room, settings))
     margin = contact_margin_m((room.Lx, room.Ly, room.Lz),
                               contact_rel=furniture_contact_rel(default_precision_contracts_path()))
     speakers = (placement.left, placement.right)

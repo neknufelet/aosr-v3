@@ -62,6 +62,8 @@ class SearchSettings(BaseModel):
             raise ValueError("purpose must not be blank")
         if self.stage_one_refine is not None and self.stage is None:
             raise ValueError("stage_one_refine 必須設定 stage（第一階段）")
+        if self.layout.room_range is not None:
+            raise ValueError("房間進搜尋還沒接上第一階段執行迴圈（6b-2），這一版不能開這種搜尋")
         return self
 
     def sampler_settings(self) -> SamplerSettings:
@@ -70,10 +72,12 @@ class SearchSettings(BaseModel):
 
     @field_serializer("layout", mode="wrap", when_used="json")
     def _snapshot_layout(self, layout: LayoutSettings, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
-        """存下的 JSON 設定也只省略未設夾角，使快照形狀與 canonical 的指紋輸入一致。"""
+        """JSON 快照省略未設夾角與房間外框，與 canonical 的指紋輸入一致。"""
         document: dict[str, object] = handler(layout)
         if layout.base_angle_deg is None:
             document.pop("base_angle_deg", None)
+        if layout.room_range is None:
+            document.pop("room_range", None)
         return document
 
     @model_serializer(mode="wrap", when_used="json")
@@ -91,13 +95,14 @@ class SearchSettings(BaseModel):
     def canonical(self) -> dict[str, object]:
         """所有欄位的 JSON（交換資料格式）形狀，不混入摘要本身。
 
-        未設夾角時只省略這一格：舊搜尋資料夾存的是沒有這一格時算的指紋，
+        未設夾角與房間外框時省略它們：舊搜尋資料夾存的是沒有這些格時算的指紋，
         多一格 null 會讓 SearchStore.open 判設定被改過；其餘未設欄位仍保留。
         """
         # 細算也是選填：未設時不進指紋，設了才釘住兩個必填停止設定。
         excluded: dict[str, bool | set[str]] = {}
-        if self.layout.base_angle_deg is None:
-            excluded["layout"] = {"base_angle_deg"}
+        layout_excluded = {name for name in ("base_angle_deg", "room_range") if getattr(self.layout, name) is None}
+        if layout_excluded:
+            excluded["layout"] = layout_excluded
         if self.refine is None:
             excluded["refine"] = True
         if self.feedback is None:

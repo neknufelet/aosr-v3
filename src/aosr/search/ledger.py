@@ -255,7 +255,8 @@ def row_outcome(row: LedgerRow) -> Outcome:
 
 
 def row_from_outcome(*, batch_index: int, proposal: Proposal, params_m: Mapping[str, float],
-                     outcome: Outcome, seconds: float, result_file: str | None) -> LedgerRow:
+                     outcome: Outcome, seconds: float, result_file: str | None,
+                     header: LedgerHeaderType | None = None) -> LedgerRow:
     """第 4 步完成候選後組列；十六進位參數只取自原始 Proposal（取樣提案）。"""
     kind: Literal["scored", "illegal", "excluded"]
     if isinstance(outcome, Scored):
@@ -264,7 +265,8 @@ def row_from_outcome(*, batch_index: int, proposal: Proposal, params_m: Mapping[
         kind, score, reason, violation = "illegal", None, outcome.reason, outcome.violation
     else:
         kind, score, reason, violation = "excluded", None, outcome.zone.value, None
-    return LedgerRow(
+    row_type = LedgerRowV2 if isinstance(header, LedgerHeaderV2) else LedgerRow
+    return row_type(
         batch_index=batch_index, trial_number=proposal.trial_number,
         unit_params_hex={key: value.hex() for key, value in proposal.params.items()}, params_m=dict(params_m),
         outcome=kind, score=score, reason=reason, violation_m=violation, seconds=seconds, result_file=result_file,

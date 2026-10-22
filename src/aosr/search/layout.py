@@ -1,4 +1,8 @@
-"""固定單位搜尋空間換成對稱擺位；只在限制檢查通過後才建方案。"""
+"""單位搜尋空間換成候選房間與對稱擺位；限制檢查通過後才建正式方案。
+
+原點固定在 x0、y0 與地板的交角；可調邊移動 xL、yL、天花板。
+前牆選 xL 或 yL 時，place 讀牆在候選房間的平面，前牆隨房間移動。
+"""
 
 from __future__ import annotations
 
@@ -8,13 +12,14 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-from aosr.geometry.shoebox import Point, Wall
+from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.reporting.scheme import Scheme, project_facing, project_midpoint, speaker_pair_ids
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.search.layout_settings import LayoutSettings, Span
 
 
 SEARCH_QUANTITIES = ("front_distance", "spacing", "listening_distance")
+ROOM_QUANTITIES = ("room_Lx", "room_Ly", "room_Lz")
 UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(SEARCH_QUANTITIES, (0.0, 1.0)))
 LOCKED_QUANTITIES = ("front_distance", "spacing")
 LOCKED_UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(LOCKED_QUANTITIES, (0.0, 1.0)))
@@ -50,20 +55,39 @@ class Placement:
     facing: tuple[float, float]
 
 
-def space_for(settings: LayoutSettings) -> Mapping[str, tuple[float, float]]:
+def placement_space_for(settings: LayoutSettings) -> Mapping[str, tuple[float, float]]:
     """三維常數保留原意；鎖定只給取樣器兩個量。"""
     return LOCKED_UNIT_SPACE if settings.seat_locked else UNIT_SPACE
 
 
+def _room_spans(settings: LayoutSettings) -> tuple[tuple[str, Span], ...]:
+    limits = settings.room_range
+    if limits is None:
+        return ()
+    return tuple((name, span) for name, span in zip(ROOM_QUANTITIES, (limits.Lx, limits.Ly, limits.Lz), strict=True)
+                 if span is not None)
+
+
+def space_for(settings: LayoutSettings) -> Mapping[str, tuple[float, float]]:
+    """保留擺位量同名同序，再接可調房間邊；未設外框回原常數物件。"""
+    placement = placement_space_for(settings)
+    if settings.room_range is None:
+        return placement
+    return MappingProxyType(dict(placement) | dict.fromkeys((name for name, _ in _room_spans(settings)), (0.0, 1.0)))
+
+
 def meter_quantities_for(settings: LayoutSettings) -> tuple[str, ...]:
-    """一般與座位鎖定都記三個公尺量；鎖定只少取樣量，衍生量仍保留。"""
-    return SEARCH_QUANTITIES
+    """擺位一律記三個公尺量；有房間外框時三邊全記，包含不可調邊。"""
+    return SEARCH_QUANTITIES if settings.room_range is None else (*SEARCH_QUANTITIES, *ROOM_QUANTITIES)
 
 
-def params_to_meters(params: LayoutParams) -> dict[str, float]:
-    """擺位公尺量的唯一出處；保留既有量名、順序與浮點值。"""
-    return dict(zip(SEARCH_QUANTITIES,
+def params_to_meters(params: LayoutParams, room: Room | None = None) -> dict[str, float]:
+    """保留擺位量名、順序與浮點值；給房間時另接三邊公尺值。"""
+    meters = dict(zip(SEARCH_QUANTITIES,
                     (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
+    if room is not None:
+        meters.update(zip(ROOM_QUANTITIES, (room.Lx, room.Ly, room.Lz), strict=True))
+    return meters
 
 
 def _spans(settings: LayoutSettings) -> tuple[Span, ...]:
@@ -84,15 +108,21 @@ def derived_listening_distance(project: Scheme, settings: LayoutSettings, front:
     return primary - along if inward > 0.0 else along - primary
 
 
-def params_from_unit(unit: Mapping[str, float], settings: LayoutSettings, *, project: Scheme | None = None) -> LayoutParams:
-    """抽到的量獨立用 low + u * (high-low) 換算；鎖定時另外從方案推出 L。"""
+def _check_unit(unit: Mapping[str, float], settings: LayoutSettings) -> None:
     if unit.keys() != space_for(settings).keys():
         raise ValueError("unit parameters must name exactly the search quantities")
-    values = []
-    for name, span in zip(space_for(settings), _spans(settings), strict=True):
+    for name in space_for(settings):
         value = unit[name]
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"unit parameter {name} must be in [0, 1]")
+
+
+def params_from_unit(unit: Mapping[str, float], settings: LayoutSettings, *, project: Scheme | None = None) -> LayoutParams:
+    """抽到的量獨立用 low + u * (high-low) 換算；鎖定時另外從方案推出 L。"""
+    _check_unit(unit, settings)
+    values = []
+    for name, span in zip(placement_space_for(settings), _spans(settings), strict=True):
+        value = unit[name]
         # 夾回範圍內：u=1 時 low + (high-low) 可能比 high 多出最末一位。
         values.append(min(span.high, max(span.low, span.low + value * (span.high - span.low))))
     if settings.seat_locked:
@@ -102,15 +132,45 @@ def params_from_unit(unit: Mapping[str, float], settings: LayoutSettings, *, pro
     return LayoutParams(*values)
 
 
-def unit_from_params(params: LayoutParams, settings: LayoutSettings) -> Mapping[str, float]:
+def room_from_unit(unit: Mapping[str, float], settings: LayoutSettings, project: Scheme) -> Room:
+    """可調邊線性換算並夾回外框；固定邊抄專案，擺位量不改房間。"""
+    if settings.room_range is None:
+        raise ValueError("room_from_unit 需要 room_range")
+    _check_unit(unit, settings)
+    edges = dict(zip(ROOM_QUANTITIES, (project.scene.room_m.Lx, project.scene.room_m.Ly, project.scene.room_m.Lz), strict=True))
+    for name, span in _room_spans(settings):
+        edges[name] = min(span.high, max(span.low, span.low + unit[name] * (span.high - span.low)))
+    return Room(*(edges[name] for name in ROOM_QUANTITIES))
+
+
+def project_in(project: Scheme, room: Room) -> Scheme:
+    """略過驗證換房間，只給擺位、硬限制與預檢用；回傳值不准存檔、不准交給計算。
+
+    原座位或喇叭可能在小房外；正式方案必須用 to_scheme 換擺位並整份驗證。
+    """
+    return project.model_copy(update={"scene": project.scene.model_copy(update={"room_m": room})})
+
+
+def unit_from_params(params: LayoutParams, settings: LayoutSettings, *, room: Room | None = None) -> Mapping[str, float]:
     """反算固定比例供起點入列；不裁切範圍外的參數。"""
     values = ((params.front_distance_m, params.spacing_m) if settings.seat_locked
               else (params.front_distance_m, params.spacing_m, params.listening_distance_m))
     unit: dict[str, float] = {}
-    for name, span, value in zip(space_for(settings), _spans(settings), values, strict=True):
+    for name, span, value in zip(placement_space_for(settings), _spans(settings), values, strict=True):
         if not span.low <= value <= span.high:
             raise ValueError(f"parameter {name} is outside its search range")
         unit[name] = (value - span.low) / (span.high - span.low)
+    if settings.room_range is not None:
+        if room is None:
+            raise ValueError("room_range 的反算需要 room")
+        edges = dict(zip(ROOM_QUANTITIES, (room.Lx, room.Ly, room.Lz), strict=True))
+        for name, span in _room_spans(settings):
+            value = edges[name]
+            if not span.low <= value <= span.high:
+                raise ValueError(f"parameter {name} is outside its search range")
+            unit[name] = (value - span.low) / (span.high - span.low)
+    elif room is not None:
+        raise ValueError("未設 room_range 時不可給 room")
     return MappingProxyType(unit)
 
 
@@ -216,7 +276,8 @@ def _start_rounding_clear(project: Scheme, settings: LayoutSettings, params: Lay
     from aosr.search.constraints import Reason, check
 
     try:
-        actual = params_from_unit(unit_from_params(params, settings), settings, project=project)
+        room = project.scene.room_m if settings.room_range is not None else None
+        actual = params_from_unit(unit_from_params(params, settings, room=room), settings, project=project)
     except ValueError:
         return False
     own = {Reason.BASE_ANGLE_OUT_OF_RANGE, Reason.LISTENING_DISTANCE_OUT_OF_RANGE}
@@ -291,6 +352,21 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     if settings.seat_locked:
         return _locked_start(project, settings, front, angle)
     return _validated_start(project, settings, front, math.hypot(left.x - right.x, left.y - right.y), angle)
+
+
+def room_start(project: Scheme, settings: LayoutSettings) -> Mapping[str, float] | None:
+    """專案房間在外框內且面積夠時，將既有起點加上房間單位座標；本支尚未接執行迴圈。"""
+    limits = settings.room_range
+    if limits is None:
+        raise ValueError("room_start 需要 room_range")
+    room = project.scene.room_m
+    edges = dict(zip(ROOM_QUANTITIES, (room.Lx, room.Ly, room.Lz), strict=True))
+    if any(not span.low <= edges[name] <= span.high for name, span in _room_spans(settings)):
+        return None
+    if limits.min_floor_area_m2 is not None and room.Lx * room.Ly < limits.min_floor_area_m2:
+        return None
+    params = standard_start(project, settings)
+    return None if params is None else unit_from_params(params, settings, room=room)
 
 
 def _locked_spacing_interval(settings: LayoutSettings, listening: float) -> tuple[float, float] | None:
