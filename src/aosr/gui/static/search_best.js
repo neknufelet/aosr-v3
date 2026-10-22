@@ -13,7 +13,7 @@
     }
     else if (key === "rfz") {
       $("best-rfz-charts").replaceChildren(); $("rfz-zones").replaceChildren(); $("rfz-window").textContent = "";
-      $("best-rfz-absent").textContent = ""; $("best-rfz-absent").hidden = true;
+      $("best-rfz-absent").textContent = ""; $("best-rfz-absent").hidden = true; $("rfz-explain").hidden = false;
     }
     else $("best-plan-content").hidden = true;
     $("best-" + key).querySelector(".chart-error").textContent = "";
@@ -23,6 +23,15 @@
     return [{label: x, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))},
       {label: y, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))}];
   }
+  function frequencyAxes(frequencies) {
+    // 跨不到兩個十倍（第一階段 20～300 Hz）時圖表庫只標 100 一格（看真資料截圖抓到）；改標首位 1、2、3、5、不帶小數。第二階段跨三個十倍以上，照舊。
+    const result = axes("頻率（Hz）", "聲級（dB）");
+    const low = frequencies[0], high = frequencies[frequencies.length - 1];
+    if (!(low > 0 && high / low < 100)) return result;
+    result[0].filter = (u, splits) => splits.map((v) => /^[1235]0*$/.test(String(v)) ? v : null);
+    result[0].values = (u, values) => values.map((v) => v === null ? "" : String(v));
+    return result;
+  }
   function frequency(data) {
     $("best-frequency-furniture-note").textContent = data.furniture_note;
     $("best-frequency-furniture-note").hidden = !data.furniture_note;
@@ -31,7 +40,7 @@
     const target = $("best-frequency-chart");
     plots.frequency.push(new uPlot({width: target.clientWidth, height: 340, legend: {live: false},
       scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
-      axes: axes("頻率（Hz）", "聲級（dB）"),
+      axes: frequencyAxes(data.data[0]),
       series: [{}, ...data.curves.map((curve, i) => ({label: curve.label, stroke: colors[i], width: 1.5}))]}, data.data, target));
   }
   function reflectionPlot(target, channel, data) {
@@ -68,7 +77,7 @@
   }
   function rfz(data) {
     if (data.absent) {
-      $("best-rfz-absent").textContent = data.absent; $("best-rfz-absent").hidden = false;
+      $("best-rfz-absent").textContent = data.absent; $("best-rfz-absent").hidden = false; $("rfz-explain").hidden = true;
       return;
     }
     $("rfz-window").textContent = data.window_text;

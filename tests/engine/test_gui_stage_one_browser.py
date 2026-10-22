@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 
 import pytest
-from playwright.sync_api import Browser
+from playwright.sync_api import Browser, Page
 
 from aosr.runtime import configure_calculation_jax
 from tests.engine._gui_cache import gui_startup_identity_memo
@@ -45,6 +45,21 @@ TWO_CURVE_COLORS = """() => {
   }
   return found.every(Boolean);
 }"""
+# 頻率軸刻度畫在畫布上讀不到；考卷自己包一層圖表庫，記下每張圖，讀它算好的刻度字（空字是不標的那格）。
+CHART_SPY = """(() => {
+  let wrapped;
+  Object.defineProperty(window, "uPlot", {configurable: true, get: () => wrapped, set: (real) => {
+    wrapped = function (opts, data, target) { const plot = new real(opts, data, target); (window.testCharts ||= []).push(plot); return plot; };
+    Object.assign(wrapped, real);
+  }});
+})()"""
+FREQUENCY_TICKS = """() => window.testCharts.filter(plot => plot.root.closest('#best-frequency-chart')).at(-1)
+  .axes[0]._values.filter(Boolean)"""
+
+
+def watch_charts(page: Page) -> None:
+    page.add_init_script(CHART_SPY)
+    page.reload(wait_until="networkidle")
 
 
 @pytest.mark.parametrize("width", [1440, 900])
@@ -57,6 +72,7 @@ def test_stage_one_best_charts_switch_without_errors(tmp_path: Path, monkeypatch
     search = json.loads(store.status_path.read_bytes())
     with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=width) as watched:
         page = watched.page
+        watch_charts(page)
         for which in ("refine", "search", "refine"):
             if which == "search" or page.locator("#best-search").get_attribute("aria-pressed") == "true":
                 page.locator(f"#best-{which}").click()
@@ -70,6 +86,11 @@ def test_stage_one_best_charts_switch_without_errors(tmp_path: Path, monkeypatch
             assert page.locator("#live-best .chart-error").all_text_contents() == ["" for _ in ("frequency", "rfz", "plan")]
             assert page.locator("#best-frequency-note").inner_text() == raw["wall_assumption_text"]
             assert page.locator("#best-rfz-absent").inner_text() == ABSENT
+            # 沒有反射圖就不留「怎麼讀反射圖」那一句；20～300 Hz 標首位 1、2、3、5 的刻度（主對話看真資料截圖抓到）。
+            assert page.locator("#rfz-explain").is_hidden()
+            frequencies = raw["curves"][0]["primary"]["frequencies_hz"]
+            assert page.evaluate(FREQUENCY_TICKS) == [str(lead * 10 ** power) for power in (1, 2, 3) for lead in (1, 2, 3, 5)
+                                                      if frequencies[0] <= lead * 10 ** power <= frequencies[-1]]
             for selector in ("#best-frequency-note", "#best-rfz-absent"):
                 assert page.locator(selector).is_visible()
                 assert page.locator(selector).evaluate("e => getComputedStyle(e).color === getComputedStyle(document.body).color")
@@ -82,6 +103,8 @@ def test_stage_one_best_charts_switch_without_errors(tmp_path: Path, monkeypatch
         page.wait_for_function("() => [...document.querySelectorAll('#live-best .chart-error')].every(e => e.textContent.startsWith('讀不到：'))", timeout=12000)
         assert page.locator("#best-frequency-note").is_hidden()
         assert page.locator("#best-rfz-absent").is_hidden()
+        # 讀不到時不知道是哪一階段的圖，說明句跟第二階段一樣留著。
+        assert page.locator("#rfz-explain").is_visible()
         assert page.locator("#best-frequency-chart canvas").all() == []
         assert page.locator("#best-plan-content").is_hidden()
         _assert_text_is_formatted(page)
