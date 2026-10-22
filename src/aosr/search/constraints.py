@@ -39,6 +39,10 @@ class Reason(StrEnum):
     FLOOR_AREA_BELOW_MINIMUM = "floor_area_below_minimum"
 
 
+# 只在房間進搜尋時才會出現的原因；固定房間的第一版帳本不收。
+ROOM_REASONS: frozenset[Reason] = frozenset({Reason.FLOOR_AREA_BELOW_MINIMUM})
+
+
 @dataclass(frozen=True)
 class Violation:
     """某一種硬限制的最大違反量；不准用零、非數字或假分數冒充。"""
@@ -209,16 +213,22 @@ def _base_angle_amount(settings: LayoutSettings, placement: Placement) -> float:
 
 
 def _floor_area_amount(room: Room, settings: LayoutSettings) -> float:
-    """面積不足時，只拉長一個可調地板邊所需的最短延長量；兩邊固定時兩邊都算。"""
+    """面積不足時，只拉長一個可調地板邊所需的最短延長量；兩邊固定時兩邊都算。
+
+    用「缺的面積÷另一邊」算：乘積只要小於下限，缺的面積就是正數，延長量不會被捨入成 0 而漏判。
+    """
     limits = settings.room_range
-    if limits is None or limits.min_floor_area_m2 is None or room.Lx * room.Ly >= limits.min_floor_area_m2:
+    if limits is None or limits.min_floor_area_m2 is None:
+        return 0.0
+    missing = limits.min_floor_area_m2 - room.Lx * room.Ly
+    if missing <= 0.0:
         return 0.0
     fixed_floor = limits.Lx is None and limits.Ly is None
     amounts = []
     if limits.Lx is not None or fixed_floor:
-        amounts.append(limits.min_floor_area_m2 / room.Ly - room.Lx)
+        amounts.append(missing / room.Ly)
     if limits.Ly is not None or fixed_floor:
-        amounts.append(limits.min_floor_area_m2 / room.Lx - room.Ly)
+        amounts.append(missing / room.Lx)
     return min(amounts)
 
 

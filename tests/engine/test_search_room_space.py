@@ -20,7 +20,7 @@ from aosr.search.layout_settings import LayoutSettings
 from aosr.search.ledger import Ledger, LedgerHeader, LedgerHeaderV2, LedgerRow, LedgerRowV2, row_from_outcome
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, RankingZone, Scored
 from aosr.search.settings import SearchSettings
-from aosr.search.store import candidate_name
+from aosr.search.store import SearchStore, candidate_name
 from tests.engine._search_room_cases import header_document, project, search_document, settings
 from tests.engine._search_store_cases import purpose_settings
 
@@ -48,6 +48,15 @@ def test_room_settings_accept_declared_range() -> None:
     chosen = settings(room_range={"Lx": RANGES["Lx"]})
     assert chosen.model_dump()["room_range"] == {
         "Lx": RANGES["Lx"], "Ly": None, "Lz": None, "min_floor_area_m2": None}
+
+
+def test_unset_room_leaves_no_key_in_saved_settings() -> None:
+    # 舊考卷的預期設定是拿產品自己的 model_dump 組的，抓不到「兩層省略都拿掉」；這裡直接看存檔形狀有沒有這一格。
+    chosen = settings()
+    assert "room_range" not in chosen.model_dump()
+    assert "room_range" not in json.loads(chosen.model_dump_json())
+    saved = json.loads(SearchSettings.model_validate(search_document(chosen)).model_dump_json())
+    assert "layout" in saved and "room_range" not in saved["layout"]
 
 
 @pytest.mark.parametrize("locked", [False, True])
@@ -209,6 +218,21 @@ def test_floor_area_equal_by_product_is_legal_even_if_division_overshoots() -> N
     assert check(candidate, chosen, place(candidate, chosen, LayoutParams(1.0, 1.0, 2.0))) == ()
 
 
+def test_floor_area_just_below_minimum_is_never_rounded_to_legal() -> None:
+    # 乘積比下限少最末一位；用「下限÷另一邊－這一邊」會捨入成 0 而漏判，缺的面積÷另一邊才保得住正數。
+    from aosr.search.layout import project_in
+
+    room = Room(Lx=2.1, Ly=3.3, Lz=3.0)
+    minimum = 6.930000000000001
+    assert room.Lx * room.Ly < minimum and minimum / room.Ly - room.Lx == 0.0
+    chosen = settings(room_range={"Lx": {"low": 2.0, "high": 3.0}, "min_floor_area_m2": minimum})
+    candidate = project_in(project(), room)
+    floor = [violation for violation in check(candidate, chosen, place(candidate, chosen, LayoutParams(0.5, 1.0, 0.5)))
+             if violation.reason == Reason.FLOOR_AREA_BELOW_MINIMUM]
+    assert [violation.amount_m.hex() for violation in floor] == [((minimum - room.Lx * room.Ly) / room.Ly).hex()]
+    assert floor[0].amount_m > 0.0
+
+
 @pytest.mark.parametrize("edges,amount", [(("Lx", "Ly"), 2.0), (("Lx",), 3.0),
                                           (("Ly",), 2.0), (("Lz",), 2.0)])
 def test_floor_deficit_is_shortest_single_adjustable_edge_extension(edges: tuple[str, ...], amount: float) -> None:
@@ -365,6 +389,10 @@ def test_row_uses_v2_header_and_roundtrips(tmp_path: Path, outcome: Outcome) -> 
     row = row_from_outcome(batch_index=0, proposal=Proposal(0, unit), params_m=meters, outcome=outcome,
                            seconds=0.25, result_file=None if isinstance(outcome, Illegal) else candidate_name(0), header=header)
     assert type(row) is LedgerRowV2
+    expected = {Illegal: ("illegal", None, "floor_area_below_minimum", 2.0, None),
+                Scored: ("scored", 0.5, None, None, candidate_name(0)),
+                Excluded: ("excluded", None, "eliminated", None, candidate_name(0))}[type(outcome)]
+    assert (row.outcome, row.score, row.reason, row.violation_m, row.result_file) == expected
     assert row.unit_params_hex == {key: value.hex() for key, value in unit.items()}
     assert row.params_m == meters
     path = tmp_path / "ledger"
@@ -403,6 +431,54 @@ def test_runner_records_against_its_snapshot_header(tmp_path: Path) -> None:
     assert read_header == header
     assert tuple(type(row) for row in rows) == (LedgerRowV2,)
     assert tuple(row.params_m for row in rows) == (meters,)
+
+
+@pytest.mark.parametrize("explicit_header", [False, True])
+def test_v1_row_rejects_room_only_reason(explicit_header: bool) -> None:
+    header = LedgerHeader.model_validate(header_document()) if explicit_header else None
+    with pytest.raises(ValidationError, match="for LedgerRow\n.*illegal reason must be sorted constraint reason codes"):
+        row_from_outcome(batch_index=0, proposal=Proposal(0, UNIT),
+            params_m={"front_distance": 1.0, "spacing": 1.0, "listening_distance": 2.0},
+            outcome=Illegal("floor_area_below_minimum", 2.0), seconds=0.25, result_file=None, header=header)
+
+
+def _bypass_store(root: Path) -> SearchStore:
+    """略過建檔入口、直接造帶房間外框的搜尋資料夾物件（建檔入口會拒）。"""
+    from aosr.search.store import SearchIdentity, _IdentitySnapshot
+
+    future = SearchSettings.model_validate(search_document(settings())).model_copy(
+        update={"layout": settings(room_range=RANGES)})
+    snapshot = _IdentitySnapshot.model_validate({"store_version": "aosr.search_store.v1", "search_id": "synthetic",
+        "physics_identity": "physical", "program_fingerprint": "program",
+        "versions": {"python": "test", "optuna": "test", "numpy": "test"}})
+    return SearchStore(root, project(), future, SearchIdentity("physical", "program", purpose_settings("listening")), snapshot)
+
+
+@pytest.mark.parametrize("entry", ["ledger", "stage_one", "stage_two"])
+def test_bypassed_room_store_writes_nothing_before_6b2(tmp_path: Path, entry: str) -> None:
+    from datetime import date
+
+    from aosr.search.ledger import create_for
+    from aosr.search.run import start_search
+    from aosr.search.stage_one_run import start_stage_one_search
+
+    root = tmp_path / "search"
+    root.mkdir()
+    store = _bypass_store(root)
+
+    def never(*args: object) -> object:
+        raise AssertionError("拒收前不准呼叫計算或身分探針")
+
+    kwargs = {"probe": never, "registry_path": tmp_path / "absent-registry", "run_date": date(2026, 10, 22),
+              "engine_version": "program"}
+    with pytest.raises(ValueError, match="6b-2"):
+        if entry == "ledger":
+            create_for(store)
+        elif entry == "stage_one":
+            start_stage_one_search(store, compute=never, **kwargs)
+        else:
+            start_search(store, compute=never, **kwargs)
+    assert list(root.iterdir()) == []
 
 
 @pytest.mark.parametrize("explicit_header", [False, True])
