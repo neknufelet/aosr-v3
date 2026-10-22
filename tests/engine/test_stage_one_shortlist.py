@@ -347,3 +347,29 @@ def test_unscored_order_uses_selection_order_and_dimensions_ignore_selection_met
     row = next(row for row in shortlist.rows if row.trial_number == ranked["trial_number"])
     assert row.values is not None
     assert (row.values.length_m, row.values.width_m, row.values.height_m) == _numbers(store, row.trial_number)[:3]
+
+
+@pytest.mark.parametrize("damage", ["control_rank", "selection_error"])
+def test_contradicting_summary_keeps_selection_roles_and_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                              damage: str) -> None:
+    from aosr.search.stage_one_shortlist import stage_one_shortlist
+    # 寫入端不會寫出這兩種摘要；手改或壞檔時，純對照照挑席角色不給細算名次，挑席時記下的讀不回照舊算讀不回。
+    store = pool(tmp_path, monkeypatch, [(8, 1., 5., .9), (2, 2., 8., .6),
+                                           (1, 3., 3., .7), (5, 4., 7., .8)])
+    refine(store, search.FakeCompute(store, monkeypatch))
+    path = store.path / "stage_one_refine.json"
+    summary = json.loads(path.read_bytes())
+    number = 1 if damage == "control_rank" else 2
+    if damage == "control_rank":
+        next(seat for seat in summary["results"] if seat["trial_number"] == number)["refine_rank"] = 1
+    else:
+        next(seat for seat in summary["selection"]["candidates"] if seat["trial_number"] == number)["error"] = "挑席時讀不回"
+    path.write_text(json.dumps(summary))
+    shortlist = stage_one_shortlist(store)
+    assert shortlist is not None
+    row = next(row for row in shortlist.rows if row.trial_number == number)
+    if damage == "control_rank":
+        assert row.roles == ("大峰對照",) and row.refine_rank is None and row.values is not None
+    else:
+        assert "top_n" in next(seat["roles"] for seat in summary["selection"]["candidates"] if seat["trial_number"] == number)
+        assert (row.state, row.reason, row.values, row.refine_rank) == ("unreadable", "挑席時讀不回", None, None)
