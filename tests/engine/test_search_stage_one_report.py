@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from collections.abc import Callable
 from typing import NoReturn
@@ -114,11 +115,18 @@ def test_existing_search_page_and_best_endpoint(tmp_path: Path, monkeypatch: pyt
     handlers = GuiHandlers(GuiSettings(data_dir=tmp_path, engine_commit="a" * 40))
     request = Request({"type": "http", "path_params": {"search_id": store.search_id}, "query_string": b""})
     response = asyncio.run(handlers.search_best(request))
-    # 端點不拋錯（200）；三張圖各自寫明讀不到第一階段結果檔，不冒充第二階段的圖（版面是之後的事）。
+    # 原本釘的是改動前三圖讀不到的行為；現在由搜尋第一名原始能量獨立算頻響答案。
     assert response.status_code == 200
     body = json.loads(bytes(response.body))
-    assert {key: body[key] for key in ("frequency", "rfz", "plan")} == dict.fromkeys(
-        ("frequency", "rfz", "plan"), {"error": "讀不到：結果檔版本不認得"})
+    status = json.loads(store.status_path.read_bytes())
+    raw = json.loads(store.candidate_path(status["best_trial"]).read_bytes())
+    assert body["frequency"]["error"] == ""
+    assert [curve["points"] for curve in body["frequency"]["curves"]] == [
+        [[f, 10 * math.log10(e) if e is not None and e > 0 else None]
+            for f, e in zip(curve["primary"]["frequencies_hz"], curve["primary"]["fem_energy"], strict=True)]
+        for curve in raw["curves"]]
+    assert body["rfz"] == {"error": "", "absent": "第一階段只算 20～300 Hz 有限元素，沒有早期反射，這張圖不適用"}
+    assert body["plan"]["error"] == "" and body["plan"]["data"]["room"] == raw["scheme"]["scene"]["room_m"]
 
 
 def test_refine_report_required_labels_and_existing_view(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

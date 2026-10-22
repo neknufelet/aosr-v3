@@ -16,10 +16,12 @@ from aosr.gui.plan_view import plan_for
 from aosr.gui.result_view import frequency_responses_for
 from aosr.gui.search_view import _document, _reason, best_versions
 from aosr.reporting.result import PairResult, RESULT_SCHEMA_VERSION, SchemeResult
-from aosr.reporting.display import FURNITURE_MODEL_NOTE, FURNITURE_REFLECTION_NOTE
+from aosr.reporting.display import FURNITURE_MODEL_NOTE, FURNITURE_REFLECTION_NOTE, level_db
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.stage_one_result import StageOneResult
 from aosr.scoring.contract import CandidateEvaluation, QualityCategory
 from aosr.scoring.reflections_contract import ReflectionChannel, ReflectionsAndEchoPayload
+from aosr.scoring.stage_one_low_frequency_contract import StageOneSpeakerCurves
 
 ZONES = {"front": "前方", "lateral": "側方", "rear": "後方", "vertical": "上下"}
 
@@ -31,23 +33,30 @@ class BestCache:
         if capacity < 1:
             raise ValueError("快取容量必須為正整數")
         self.capacity = capacity
-        self._items: OrderedDict[tuple[Path, int, int], dict[str, object] | str] = OrderedDict()
+        self._items: OrderedDict[tuple[Path, int, int, bool], dict[str, object] | str] = OrderedDict()
         self._lock = Lock()
 
-    def read(self, path: Path) -> dict[str, object]:
+    def read(self, path: Path, *, stage_one: bool = False) -> dict[str, object]:
         stat = path.stat()
-        key = (path.resolve(), stat.st_mtime_ns, stat.st_size)
+        key = (path.resolve(), stat.st_mtime_ns, stat.st_size, stage_one)
         with self._lock:
             if key not in self._items:
                 try:
                     document = _document(path)
-                    if document.get("schema_version") != RESULT_SCHEMA_VERSION:
-                        raise ValueError("結果檔版本不認得")
-                    unknown = document.keys() - SchemeResult.model_fields.keys()
-                    if unknown:
-                        raise ValueError(f"結果檔欄位不認得：{'、'.join(sorted(unknown))}")
+                    if stage_one:
+                        if document.get("schema_version") == RESULT_SCHEMA_VERSION:
+                            raise ValueError("這是第一階段搜尋資料夾，結果檔卻是第二階段的格式")
+                        if document.get("schema_version") != "aosr.stage_one_result.v1":
+                            raise ValueError("結果檔版本不認得")
+                        StageOneResult.model_validate(document)
+                    else:
+                        if document.get("schema_version") != RESULT_SCHEMA_VERSION:
+                            raise ValueError("結果檔版本不認得")
+                        unknown = document.keys() - SchemeResult.model_fields.keys()
+                        if unknown:
+                            raise ValueError(f"結果檔欄位不認得：{'、'.join(sorted(unknown))}")
                     after = path.stat()
-                    if (after.st_mtime_ns, after.st_size) != key[1:]:
+                    if (after.st_mtime_ns, after.st_size) != key[1:3]:
                         raise ValueError("結果檔正在更新，請等下一次讀取")
                     self._items[key] = document
                 except (OSError, ValueError, UnicodeError) as error:
@@ -97,6 +106,28 @@ def _frequency(document: dict[str, object]) -> dict[str, object]:
                         for curve in curves],
             "data": data,
             "axis_text": "、".join(sorted({LOW_FREQUENCY_AXES[pair.report.top.low_frequency_axis.value] for pair in pairs}))}
+
+
+def _stage_one_frequency(document: dict[str, object]) -> dict[str, object]:
+    scheme = _scheme(document)
+    speakers = TypeAdapter(tuple[StageOneSpeakerCurves, ...]).validate_python(document["curves"])
+    roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
+    if {speaker.speaker_id for speaker in speakers} != roles.keys() or len(speakers) != len(roles):
+        raise ValueError("主位報表與方案聲道對不上")
+    curves = [{"role": roles[speaker.speaker_id],
+        "label": f"{'左' if roles[speaker.speaker_id] == 'left' else '右'}聲道 → 主位",
+        "points": [[frequency, level_db(energy) if energy is not None else None]
+            for frequency, energy in zip(speaker.primary.frequencies_hz, speaker.primary.fem_energy, strict=True)]}
+        for speaker in speakers]
+    levels = [[level_db(energy) if energy is not None else None for energy in speaker.primary.fem_energy]
+        for speaker in speakers]
+    return {"curves": curves, "data": [list(speakers[0].primary.frequencies_hz), *levels],
+        "axis_text": _stage_one_axis(document), "note": document["wall_assumption_text"],
+        "furniture_note": FURNITURE_MODEL_NOTE if scheme.furniture else ""}
+
+
+def _stage_one_axis(document: dict[str, object]) -> str:
+    return LOW_FREQUENCY_AXES[TypeAdapter(LowFrequencyAxis).validate_python(document["low_frequency_axis"]).value]
 
 
 def _setting(purpose: QualityPurpose, key: str, unit: str) -> float:
@@ -177,11 +208,13 @@ def build_best_view(path: Path, *, which: str | None, cache: BestCache, directiv
         if selected.error or store.value is None:
             raise ValueError(selected.error.removeprefix("讀不到：") or store.error.removeprefix("讀不到："))
         content = store.value.identity.purpose_settings.content
-        document = cache.read(path / selected.result_file)
-        axis = _chart(lambda: {"text": _axis(document)})
+        stage_one = store.value.settings.stage == "stage_one_fem_only"
+        document = cache.read(path / selected.result_file, stage_one=stage_one)
+        axis = _chart(lambda: {"text": _stage_one_axis(document) if stage_one else _axis(document)})
         title += f"／{axis.get('text', axis['error'])}"
-        charts = {"frequency": _chart(lambda: _frequency(document)),
-                  "rfz": _chart(lambda: _rfz(document, content)),
+        charts = {"frequency": _chart(lambda: _stage_one_frequency(document) if stage_one else _frequency(document)),
+                  "rfz": ({"error": "", "absent": "第一階段只算 20～300 Hz 有限元素，沒有早期反射，這張圖不適用"}
+                          if stage_one else _chart(lambda: _rfz(document, content))),
                   "plan": _chart(lambda: {"data": plan_for(_scheme(document), directivity)})}
     except (OSError, ValueError, UnicodeError) as error:
         charts = {key: {"error": f"讀不到：{_reason(error)}"} for key in ("frequency", "rfz", "plan")}

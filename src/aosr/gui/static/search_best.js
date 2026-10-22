@@ -7,8 +7,14 @@
   let plots = {frequency: [], rfz: []}, selected = null, versions = null, shown = "", loading = "", requestNumber = 0;
   function clearChart(key) {
     (plots[key] || []).forEach((plot) => plot.destroy()); plots[key] = [];
-    if (key === "frequency") { $("best-frequency-chart").replaceChildren(); $("best-frequency-furniture-note").hidden = true; $("best-frequency-furniture-note").textContent = ""; }
-    else if (key === "rfz") { $("best-rfz-charts").replaceChildren(); $("rfz-zones").replaceChildren(); $("rfz-window").textContent = ""; }
+    if (key === "frequency") {
+      $("best-frequency-chart").replaceChildren(); $("best-frequency-furniture-note").hidden = true; $("best-frequency-furniture-note").textContent = "";
+      $("best-frequency-note").textContent = ""; $("best-frequency-note").hidden = true;
+    }
+    else if (key === "rfz") {
+      $("best-rfz-charts").replaceChildren(); $("rfz-zones").replaceChildren(); $("rfz-window").textContent = "";
+      $("best-rfz-absent").textContent = ""; $("best-rfz-absent").hidden = true;
+    }
     else $("best-plan-content").hidden = true;
     $("best-" + key).querySelector(".chart-error").textContent = "";
   }
@@ -20,6 +26,8 @@
   function frequency(data) {
     $("best-frequency-furniture-note").textContent = data.furniture_note;
     $("best-frequency-furniture-note").hidden = !data.furniture_note;
+    $("best-frequency-note").textContent = data.note || "";
+    $("best-frequency-note").hidden = !data.note;
     const target = $("best-frequency-chart");
     plots.frequency.push(new uPlot({width: target.clientWidth, height: 340, legend: {live: false},
       scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
@@ -59,6 +67,10 @@
       }]}}, [x, ...values], target));
   }
   function rfz(data) {
+    if (data.absent) {
+      $("best-rfz-absent").textContent = data.absent; $("best-rfz-absent").hidden = false;
+      return;
+    }
     $("rfz-window").textContent = data.window_text;
     data.zones.forEach((zone, i) => {
       const span = document.createElement("span"); span.textContent = zone.text; span.style.borderColor = colors[i]; $("rfz-zones").append(span);
