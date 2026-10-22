@@ -224,8 +224,12 @@ class SubprocessCompute:
 
     def _plan_parts(self, jobs: Sequence[CandidateJob], max_workers: int,
                     observe: Callable[[Sequence[CandidateJob], int, _Slice | None], None] | None
-                    ) -> tuple[dict[str, tuple[Path, ...]], list[tuple[int, Path, tuple[str, ...], list[CandidateJob]]]]:
-        """沿用場景位元組分組與指令順序；觀測者另收到每組的完整題號與片數。"""
+                    ) -> tuple[tuple[tuple[Path, ...], ...], dict[str, tuple[Path, ...]],
+                               list[tuple[int, Path, tuple[str, ...], list[CandidateJob]]]]:
+        """沿用場景位元組分組與指令順序；觀測者另收到每組的完整題號與片數。
+
+        與候選對齊的路徑用規劃時那一次序列化的鍵查，不在分片跑完後重新序列化場景。
+        """
         keys = tuple(job.scheme.scene.model_dump_json() for job in jobs)
         groups: dict[str, list[CandidateJob]] = {}
         for key, job in zip(keys, jobs, strict=True):
@@ -239,7 +243,7 @@ class SubprocessCompute:
                 observe(group, len(parts), None)
             commands.extend((index, part, command, group) for index, (part, command)
                             in enumerate(zip(parts, group_commands, strict=True)))
-        return parts_by_key, commands
+        return tuple(parts_by_key[key] for key in keys), parts_by_key, commands
 
     def _parts_by_job(self, jobs: Sequence[CandidateJob], max_workers: int, *,
                       observe: Callable[[Sequence[CandidateJob], int, _Slice | None], None] | None = None,
@@ -250,7 +254,7 @@ class SubprocessCompute:
         搜尋層不重建有限元素鍵；若將來場景鍵變粗，分片子行程原有的核鍵拒收仍會報錯。
         組照首次出現、組內照分片序共用一條佇列，同時活著的分片不超過 max_workers。
         """
-        parts_by_key, commands = self._plan_parts(jobs, max_workers, observe)
+        by_job, parts_by_key, commands = self._plan_parts(jobs, max_workers, observe)
         pending = iter(commands)
         active: list[_Slice] = []
         completed: Queue[_Slice] = Queue() if observe is None else _SliceStampedQueue()
@@ -287,7 +291,7 @@ class SubprocessCompute:
                 if wake is not None:
                     wake(_clock())
                 _settle(finished, active)
-            return tuple(parts_by_key[job.scheme.scene.model_dump_json()] for job in jobs)
+            return by_job
         finally:
             _stop_all(active)
 

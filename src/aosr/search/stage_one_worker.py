@@ -142,6 +142,15 @@ class StageOneCompute:
 
         return self.processes._parts_by_job(jobs, max_workers, observe=tracker.observe, wake=wake)
 
+    def _finished(self, item: _Active, seconds: float, record: StageOneTimeLimit | None) -> StageOneComputed:
+        """已有超限時跟分片那一段一樣超限優先：失敗的結果不交回，暫停紀錄照存，原錯誤接在例外鏈上。"""
+        try:
+            return self._result(item, seconds)
+        except (ComputeFailed, IdentityChanged) as error:
+            if record is None:
+                raise
+            raise CandidateTimeLimit(record) from error
+
     def _capped(self, jobs: Sequence[CandidateJob], max_workers: int,
                 cap_s: float) -> Generator[StageOneComputed, None, None]:
         tracker = TimeLimitTracker(jobs, cap_s)
@@ -177,7 +186,7 @@ class StageOneCompute:
                 record = tracker.candidates_limit(active, starts, completed.ended, now, finished=finished)
                 result = None
                 if finished is not None:
-                    result = self._result(finished, completed.ended.pop(id(finished)) - starts.pop(id(finished)))
+                    result = self._finished(finished, completed.ended.pop(id(finished)) - starts.pop(id(finished)), record)
                     tracker.accept(finished, result.seconds)
                     if record is not None:
                         record = tracker.snapshot("candidates", now)

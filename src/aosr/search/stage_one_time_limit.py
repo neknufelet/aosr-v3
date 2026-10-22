@@ -76,17 +76,21 @@ class _Group:
     count: int
     items: list[_Slice] = field(default_factory=list)
     timing: SliceGroupTiming | None = None
+    running: bool = False
 
     def snapshot(self, now: float) -> SliceGroupTiming:
         if self.timing is not None:
             return self.timing
+        # 看守執行緒隨時會寫 ended：只讀一次，耗時與完成片數才出自同一刻，不會把沒算完時的耗時當成最終值存下。
+        ended = [item.ended for item in self.items]
         starts = [item.started for item in self.items if item.started is not None]
-        ends = [item.ended if item.ended is not None else now for item in self.items]
+        ends = [end if end is not None else now for end in ended]
+        self.running = any(end is None for end in ended)
         durations = [end - start for end, start in zip(ends, starts, strict=True)]
         longest = max(durations) if durations else None
         window = max(ends) - min(starts) if starts else None
         result = SliceGroupTiming(trial_numbers=self.numbers, slices=self.count,
-            completed_slices=sum(item.ended is not None for item in self.items),
+            completed_slices=sum(end is not None for end in ended),
             longest_slice_s=longest, window_s=window,
             queue_s=window - longest if window is not None and longest is not None else None)
         if result.completed_slices == self.count:
@@ -124,7 +128,7 @@ class TimeLimitTracker:
             over = service is not None and service > self.cap_s
             state: CandidateState = "交回但超限" if over else "交回"
             if number not in self.returned:
-                slicing = phase == "slices" and any(item.ended is None for item in self.groups[key].items)
+                slicing = phase == "slices" and self.groups[key].running
                 started = number in self.starts or slicing
                 state = "超限" if over else "一起停下" if started else "沒開始"
             rows.append(CandidateTiming(trial_number=number, state=state,
@@ -169,10 +173,14 @@ def time_limit_message(record: StageOneTimeLimit) -> str:
 
 
 def time_limit_lines(store: SearchStore) -> tuple[str, ...]:
+    """紀錄缺席不印；紀錄壞掉只影響這一段（同細算摘要），不拖垮整份報告。"""
     path = store.path / TIME_LIMIT_FILE
     if not path.exists():
         return ()
-    record = StageOneTimeLimit.model_validate_json(path.read_bytes())
+    try:
+        record = StageOneTimeLimit.model_validate_json(path.read_bytes())
+    except (OSError, ValueError) as error:
+        return (f"單題搜尋成本上限紀錄讀不回：{error}",)
     lines = [f"單題搜尋成本上限：{record.cap_s} 秒；搜尋暫停，未完成"]
     for row in record.candidates:
         lines.append(f"試算 {row.trial_number}：{row.state}；服務 {row.service_s} 秒"

@@ -27,10 +27,13 @@ if phase == 'candidates':
         delay = specific_delay
 if delay.exists():
     time.sleep(float(delay.read_text()))
+(root / (phase + '-' + str(os.getpid()) + '.done')).write_text('')
 if phase == 'slices':
     out.write_text('{}')
 else:
     number = args[args.index('--trial-number') + 1]
+    if (root / ('candidates-' + number + '-fail')).exists():
+        sys.exit(7)
     specific = root / ('template-' + number)
     out.write_bytes((specific if specific.exists() else root / 'template').read_bytes())
 '''
@@ -68,6 +71,8 @@ def test_slice_overrun_stops_whole_batch_before_candidates(tmp_path: Path, monke
     assert [(item.trial_number, item.state) for item in record.candidates] == [(0, "超限"), (1, "沒開始")]
     assert record.batch is None
     assert not tuple(tmp_path.glob("candidates-*.pid"))
+    # 分片還在睡就被停掉，不是等它自己算完才發現超限。
+    assert not tuple(tmp_path.glob("slices-*.done"))
     assert_no_children(tmp_path)
 
 
@@ -326,4 +331,158 @@ def test_queued_overrun_is_returned_when_its_completion_is_read(tmp_path: Path,
     with pytest.raises(CandidateTimeLimit) as caught:
         next(results)
     assert [(row.trial_number, row.state) for row in caught.value.record.candidates] == [(0, "交回"), (1, "交回但超限")]
+    assert_no_children(tmp_path)
+
+
+def test_slice_finishing_between_reads_is_not_cached_short(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.stage_one_time_limit import TimeLimitTracker
+    from aosr.search.worker import _Slice
+    _, job = capped(tmp_path, monkeypatch, 600.)
+
+    class FinishesWhileRead(_Slice):
+        """第一次讀 ended 時還沒算完、讀完那一刻才蓋上 601：看守執行緒剛好在快照中途寫入。"""
+
+        def __getattribute__(self, name: str) -> object:
+            value = super().__getattribute__(name)
+            if name == "ended" and value is None:
+                object.__setattr__(self, "ended", 601.)
+            return value
+
+    tracker = TimeLimitTracker((job,), 600.)
+    with subprocess.Popen((sys.executable, "-c", "pass")) as process:
+        process.wait()
+        tracker.observe((job,), 1, None)
+        tracker.observe((job,), 1, FinishesWhileRead(0, process, tmp_path / "stderr", started=0.))
+        # 第一次讀到還在算：當下是 599 秒、同批一起停下，而且不准把 599 存成最終值。
+        assert [(row.state, row.service_s) for row in tracker.snapshot("slices", 599.).candidates] == [("一起停下", 599.)]
+        record = tracker.slices_limit(599.5)
+    assert record is not None
+    assert [(group.longest_slice_s, group.completed_slices) for group in record.groups] == [(601., 1)]
+    assert [(row.trial_number, row.state, row.service_s) for row in record.candidates] == [(0, "超限", 601.)]
+
+
+@pytest.mark.parametrize("candidate_end,over", [(10., False), (10.25, True)])
+def test_failed_candidate_keeps_pause_record_only_when_over(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                          candidate_end: float, over: bool) -> None:
+    from aosr.search import worker as slices, stage_one_worker as candidates
+    from aosr.search.run import ComputeFailed
+    from aosr.search.stage_one_worker import CandidateTimeLimit
+    from tests.engine.test_search_stage_one_worker import _second_job
+    worker, job = capped(tmp_path, monkeypatch, 10.)
+    other = _second_job(tmp_path, job)
+    (tmp_path / "candidates-0-fail").write_text("")
+    monkeypatch.setattr(slices, "_clock", lambda: 0. if current_thread() is main_thread() else 4.)
+    monkeypatch.setattr(candidates, "_clock", lambda: 4. if current_thread() is main_thread() else candidate_end)
+    results = worker((job, other), 1)
+    if over:
+        with pytest.raises(CandidateTimeLimit) as caught:
+            next(results)
+        assert [(row.trial_number, row.state, row.service_s) for row in caught.value.record.candidates] == [
+            (0, "超限", 10.25), (1, "沒開始", 4.)]
+        assert isinstance(caught.value.__cause__, ComputeFailed)
+    else:
+        with pytest.raises(ComputeFailed, match="試算 0"):
+            next(results)
+    assert not other.result_path.exists()
+    assert_no_children(tmp_path)
+
+
+def test_slice_paths_use_keys_planned_before_slices_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker, job = capped(tmp_path, monkeypatch, None)
+    scattering = {"floor": .1}
+    scheme = job.scheme.model_copy(update={"scene": job.scheme.scene.model_copy(update={"scattering_by_wall": scattering})})
+    jobs = (CandidateJob(0, scheme, tmp_path / "a.json"), CandidateJob(1, scheme, tmp_path / "b.json"))
+    planned: list[tuple[Path, ...]] = []
+    plan, spawn = worker.processes._slice_commands, worker.processes._spawn
+    def recorded(group: Sequence[CandidateJob], workers: int) -> tuple[tuple[Path, ...], tuple[tuple[str, ...], ...]]:
+        parts, commands = plan(group, workers)
+        planned.append(parts)
+        return parts, commands
+    def mutating(command: Sequence[str], stderr: Path) -> subprocess.Popen[bytes]:
+        scattering["ceiling"] = .2
+        return spawn(command, stderr)
+    monkeypatch.setattr(worker.processes, "_slice_commands", recorded)
+    monkeypatch.setattr(worker.processes, "_spawn", mutating)
+    parts = worker.processes._parts_by_job(jobs, 1)
+    assert "ceiling" in scattering
+    assert parts == (planned[0], planned[0]) and planned == [planned[0]]
+    assert_no_children(tmp_path)
+
+
+def test_queued_overrun_blocks_launching_pending_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from threading import Event, Semaphore
+    from aosr.search import worker as slices, stage_one_worker as candidates
+    from aosr.search.stage_one_worker import CandidateTimeLimit, _StampedQueue
+    from aosr.search.worker import _Active
+    from tests.engine.test_search_stage_one_worker import _second_job
+    worker, job = capped(tmp_path, monkeypatch, 10.)
+    other = _second_job(tmp_path, job)
+    third = CandidateJob(2, job.scheme, tmp_path / "third.json")
+    first_queued, queued = Event(), Semaphore(0)
+    thread_time = local()
+    monkeypatch.setattr(slices, "_clock", lambda: 0. if current_thread() is main_thread() else 4.)
+    monkeypatch.setattr(candidates, "_clock", lambda: 4. if current_thread() is main_thread() else float(thread_time.value))
+    put, get = _StampedQueue.put, _StampedQueue.get
+    def stamped(self: _StampedQueue, item: _Active, block: bool = True, timeout: float | None = None) -> None:
+        thread_time.value = 5. if item.job.trial_number == 0 else 10.25
+        put(self, item, block, timeout)
+        queued.release()
+        if item.job.trial_number == 0:
+            first_queued.set()
+    start = worker.processes._start
+    launched: list[int | None] = []
+    def after_first(job: CandidateJob, parts: Sequence[Path] = ()) -> _Active:
+        launched.append(job.trial_number)
+        if job.trial_number == 1:
+            assert first_queued.wait(timeout=2.)
+        return start(job, parts)
+    ready = [False]
+    def both_ready(self: _StampedQueue, block: bool = True, timeout: float | None = None) -> _Active:
+        if not ready[0]:
+            assert queued.acquire(timeout=2.) and queued.acquire(timeout=2.)
+            ready[0] = True
+        return get(self, block, timeout)
+    monkeypatch.setattr(worker.processes, "_start", after_first)
+    monkeypatch.setattr(_StampedQueue, "put", stamped)
+    monkeypatch.setattr(_StampedQueue, "get", both_ready)
+    results = worker((job, other, third), 2)
+    assert next(results).job == job
+    # 第一題交回後空出一個位置，但第二題超限的完成通知已在排隊：不准再開第三題。
+    assert next(results).job == other
+    with pytest.raises(CandidateTimeLimit) as caught:
+        next(results)
+    assert [(row.trial_number, row.state) for row in caught.value.record.candidates] == [
+        (0, "交回"), (1, "交回但超限"), (2, "沒開始")]
+    assert launched == [0, 1]
+    assert not third.result_path.exists()
+    assert_no_children(tmp_path)
+
+
+def test_peers_are_stopped_before_overrun_result_is_returned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import worker as slices, stage_one_worker as candidates
+    from aosr.search.stage_one_worker import CandidateTimeLimit
+    from aosr.search.worker import _Active
+    from tests.engine.test_search_stage_one_worker import _second_job
+    worker, job = capped(tmp_path, monkeypatch, 10.)
+    other = _second_job(tmp_path, job)
+    (tmp_path / "candidates-1-sleep").write_text("10")
+    monkeypatch.setattr(slices, "_clock", lambda: 0. if current_thread() is main_thread() else 4.)
+    monkeypatch.setattr(candidates, "_clock", lambda: 4. if current_thread() is main_thread() else 10.25)
+    start = worker.processes._start
+    launched: list[_Active] = []
+    def capture(job: CandidateJob, parts: Sequence[Path] = ()) -> _Active:
+        item = start(job, parts)
+        launched.append(item)
+        return item
+    monkeypatch.setattr(worker.processes, "_start", capture)
+    results = worker((job, other), 2)
+    assert next(results).job == job
+    # 交回「算完但超限」那題的時候，同批還在算的那題已經停掉，不是等呼叫端下一次要題才停。
+    assert [item.job.trial_number for item in launched] == [0, 1]
+    assert launched[1].process.poll() is not None
+    with pytest.raises(CandidateTimeLimit) as caught:
+        next(results)
+    assert [(row.trial_number, row.state) for row in caught.value.record.candidates] == [(0, "交回但超限"), (1, "一起停下")]
+    assert not other.result_path.exists()
+    assert not (tmp_path / f"candidates-{launched[1].process.pid}.done").exists()
     assert_no_children(tmp_path)

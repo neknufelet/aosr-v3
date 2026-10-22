@@ -152,6 +152,22 @@ def test_report_snapshot_and_web_stopping_phase(tmp_path: Path) -> None:
     assert "停止段落：搜尋因單題時間上限暫停" in reasons.lines
 
 
+def test_broken_pause_record_only_breaks_its_own_section(tmp_path: Path) -> None:
+    from aosr.search.run import SearchStatus
+    from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+    store = search.make_store(tmp_path)
+    ledger.create_for(store)
+    store.status_path.write_text(SearchStatus(state="paused_time_limit", message="單題搜尋成本超限").model_dump_json())
+    before = render_stage_one_text(build_stage_one_report(store))
+    (store.path / "stage_one_time_limit.json").write_text("{")
+    text = render_stage_one_text(build_stage_one_report(store))
+    lines, expected = text.splitlines(), before.splitlines()
+    start = next(index for index, line in enumerate(lines) if line.startswith("單題搜尋成本上限紀錄讀不回："))
+    # 錯誤原文可能跨好幾行；拿掉那一段之後，其餘逐行等於沒有紀錄時的報告。
+    end = start + len(lines) - len(expected)
+    assert end > start and lines[:start] + lines[end:] == expected
+
+
 def test_empty_report_without_record_stays_byte_identical() -> None:
     from aosr.search.run import SearchStatus
     from aosr.search.stage_one_report import StageOneSearchReport, render_stage_one_text
