@@ -127,6 +127,8 @@ def test_reference_room_is_on_closed_band_but_has_integer_height_ratio() -> None
     ((4.5, 4.25, 3.), ("band",)),
     ((9., 6., 3.), ("below", "near_integer")),
     ((6., 6., 3.), ("band", "near_integer")),
+    ((5.5, 5., 3.), ()),
+    ((math.nextafter(5.5, -math.inf), 5., 3.), ("band",)),
 ])
 def test_hand_calculated_rooms(dimensions: tuple[float, float, float], kinds: tuple[str, ...]) -> None:
     from aosr.config.room_proportions import load_room_proportions
@@ -134,6 +136,8 @@ def test_hand_calculated_rooms(dimensions: tuple[float, float, float], kinds: tu
     # 全守房：l/w=13/9、l/h=13/6、w/h=3/2；帶內，三比皆遠離正整數。
     # 下緣外：l/h=3/2，小於 lower_factor*(17/12)，三比仍都遠離整數。
     # 上限房：l/h=3，嚴格小於的條件不成立；正方形房 l/w=1 也要提醒。
+    # 下緣房：l/h=11/6 正好等於 lower_factor*(5/3)，含端點不提醒；l/w=11/10、l/h、w/h 都離整數夠遠。
+    # 長邊少一個最小位就掉出下緣，只提醒比例帶。
     rules = load_room_proportions(config_path("room_proportions.toml"))
     notice = room_proportion_notice(*dimensions, rules)
     assert {hit.rule.kind for hit in notice.hits} == set(kinds)
@@ -154,6 +158,13 @@ def test_hand_calculated_rooms(dimensions: tuple[float, float, float], kinds: tu
                 "（ITU-R BS.1116-3；EBU Tech 3276）") in text
     if dimensions[0] == dimensions[1]:
         assert any(hit.ratio == "l/w" and hit.near_integer == 1 for hit in notice.hits)
+
+
+def test_threshold_text_keeps_table_decimals() -> None:
+    from aosr.search.room_proportions import _decimal
+    # 審查反例：浮點的 g 格式會把 1.234567 捨成 1.23457、把 0.0000001 印成 1e-07。
+    for text in ("1.1", "4.5", "4", "3", "0.05", "1.234567", "0.0000001", "12345678.125"):
+        assert _decimal(Fraction(text)) == text
 
 
 @pytest.mark.parametrize("length,integers", [

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from fractions import Fraction
 import math
 from typing import Literal
@@ -66,9 +67,9 @@ def room_proportion_notice(length_m: float, width_m: float, height_m: float,
 
 
 def _decimal(value: Fraction | None) -> str:
-    """門檻照表上的十進位寫法印，不印成分數。"""
+    """門檻照表上的十進位寫法印，不印成分數、不捨入、不用科學記號（表上的門檻都是有限小數）。"""
     assert value is not None
-    return f"{float(value):g}"
+    return f"{Decimal(value.numerator) / Decimal(value.denominator):f}"
 
 
 def _hit_text(hit: RoomProportionHit) -> str:
