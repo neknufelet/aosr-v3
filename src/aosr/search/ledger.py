@@ -28,6 +28,7 @@ from aosr.search.store import CANDIDATES_DIR, SearchStore, candidate_name
 
 
 LEDGER_VERSION: Final = "aosr.search_ledger.v1"
+LEDGER_VERSION_V2: Final = "aosr.search_ledger.v2"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 History: TypeAlias = tuple[tuple[tuple[Proposal, ...], dict[int, Outcome]], ...]
 
@@ -212,13 +213,21 @@ class LedgerRowV2(LedgerRow):
 
 
 def _header_from_document(document: object) -> LedgerHeaderType:
-    """只依第一列版號選類別，不猜欄位形狀。"""
-    version = document.get("ledger_version") if isinstance(document, dict) else None
-    if version == LEDGER_VERSION:
-        return LedgerHeader.model_validate(document)
-    if version == "aosr.search_ledger.v2":
+    """版號是第二版才用第二版類別；其餘一律照第一版驗，錯誤型別與訊息跟改動前相同（未知版號由版號欄的固定值拒收）。"""
+    if isinstance(document, dict) and document.get("ledger_version") == LEDGER_VERSION_V2:
         return LedgerHeaderV2.model_validate(document)
-    raise ValueError(f"unsupported ledger version: {version!r}")
+    return LedgerHeader.model_validate(document)
+
+
+def _header_from_line(line: bytes) -> LedgerHeaderType:
+    """表頭那一行：先寬鬆看版號，驗證仍走各版的 JSON 入口，壞 JSON 與第一版的錯誤跟改動前相同。"""
+    try:
+        document = json.loads(line)
+    except ValueError:
+        document = None
+    if isinstance(document, dict) and document.get("ledger_version") == LEDGER_VERSION_V2:
+        return LedgerHeaderV2.model_validate_json(line)
+    return LedgerHeader.model_validate_json(line)
 
 
 def _row_from_document(header: LedgerHeaderType, document: object) -> LedgerRow:
@@ -293,7 +302,7 @@ def _read_handle(handle: BinaryIO) -> LedgerRead:
     lines = handle.readlines()
     if not lines or not lines[0].endswith(b"\n"):
         raise ValueError("missing or incomplete ledger header")
-    header = _header_from_document(json.loads(lines[0]))
+    header = _header_from_line(lines[0])
     rows: list[LedgerRow] = []
     valid_bytes = len(lines[0])
     dropped = False
@@ -349,6 +358,8 @@ class Ledger:
         整段握排他檔案鎖：設計上只有一個主行程寫帳本，鎖讓「不小心有第二個」變成排隊，
         而不是兩邊照各自算的位置寫、互相蓋掉一列。
         """
+        # 開檔前先照列自己的版本重驗：壞列的錯誤先後與型別跟改動前相同；上鎖讀表頭後再照表頭驗一次。
+        row = (LedgerRowV2 if isinstance(row, LedgerRowV2) else LedgerRow).model_validate(row.model_dump())
         with self._path.open("r+b") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             status = _read_handle(handle)
@@ -385,7 +396,7 @@ def header_for(store: SearchStore) -> LedgerHeaderType:
     space = dict(space_for(settings.layout))
     if space != UNIT_SPACE and space != LOCKED_UNIT_SPACE:
         return LedgerHeaderV2(
-            ledger_version="aosr.search_ledger.v2", search_id=store.search_id,
+            ledger_version=LEDGER_VERSION_V2, search_id=store.search_id,
             settings_fingerprint=settings.fingerprint,
             project_fingerprint=hashlib.sha256(project.encode("utf-8")).hexdigest(),
             sampler=settings.sampler_settings(), batch_size=settings.batch_size, search_space=space,

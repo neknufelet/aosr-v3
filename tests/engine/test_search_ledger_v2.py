@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.reporting.scheme import Scheme
@@ -18,7 +19,7 @@ from aosr.search.ledger import (
     Ledger, LedgerHeader, LedgerHeaderV2, LedgerRow, LedgerRowV2, create_for, header_for, read_for, replay_history,
     row_outcome,
 )
-from aosr.search.sampler import Outcome, Proposal, SamplerAdapter, Scored
+from aosr.search.sampler import Excluded, Outcome, Proposal, SamplerAdapter, Scored
 from aosr.search.store import candidate_name
 from tests.engine._search_ledger_v2_cases import METERS, SPACE, header_document, row_document, store_in
 from tests.engine._search_run_cases import FakeCompute, run
@@ -77,6 +78,8 @@ def test_today_search_stays_v1_bit_exact(tmp_path: Path, locked: bool, monkeypat
     assert lines[0] == (json.dumps(header.model_dump(mode="json"), ensure_ascii=False, allow_nan=False) + "\n").encode()
     assert json.loads(lines[0])["ledger_version"] == "aosr.search_ledger.v1"
     rows = read_for(store).rows
+    # 非空：預算內每一題都要題、都落帳，空跑不准綠。
+    assert rows and len(rows) == len(proposals) == store.settings.budget
     assert {row.trial_number: row.unit_params_hex for row in rows} == proposals
     assert all(type(row) is LedgerRow for row in rows)
 
@@ -207,7 +210,7 @@ def test_v2_preserves_other_row_rules(tmp_path: Path) -> None:
         ("excluded", {"reason": "unassessed", "violation_m": None, "result_file": candidate_name(0)}),
     ):
         row = LedgerRowV2.model_validate(row_document() | {"outcome": kind} | updates)
-        assert row_outcome(row)
+        assert isinstance(row_outcome(row), Scored if kind == "scored" else Excluded)
     for update in ({"seconds": -1.0}, {"reason": "unknown"}, {"violation_m": 0.0},
                    {"score": 0.5}, {"result_file": candidate_name(1)}):
         with pytest.raises(ValueError):
@@ -267,3 +270,45 @@ def test_meter_source_preserves_names_order_and_bits(tmp_path: Path, locked: boo
     assert meter_quantities_for(store.settings.layout) == tuple(expected)
     assert tuple(actual) == tuple(expected)
     assert {key: value.hex() for key, value in actual.items()} == {key: value.hex() for key, value in expected.items()}
+
+
+V1_UNIT = {"front_distance": 0.25.hex(), "spacing": 0.5.hex(), "listening_distance": 0.75.hex()}
+V1_METERS = {"front_distance": 0.5, "spacing": 1.0, "listening_distance": 2.0}
+
+
+@pytest.mark.parametrize("state", ["missing", "empty", "valid"])
+def test_v1_bad_row_rejected_before_ledger_is_touched(tmp_path: Path, state: str) -> None:
+    """改動前：壞的第一版列在開檔之前就被列驗證拒收（不論帳本缺檔、空檔或正常）。"""
+    store, _ = store_in(tmp_path)
+    path = tmp_path / "ledger"
+    if state == "empty":
+        path.write_bytes(b"")
+    if state == "valid":
+        Ledger.create(path, header_for(store))
+    before = path.read_bytes() if path.exists() else None
+    good = LedgerRow.model_validate(row_document() | {"unit_params_hex": V1_UNIT, "params_m": V1_METERS})
+    with pytest.raises(ValidationError, match="seconds"):
+        Ledger(path).append(good.model_copy(update={"seconds": -1.0}))
+    assert (path.read_bytes() if path.exists() else None) == before
+
+
+@pytest.mark.parametrize("first_line", [
+    b'{"ledger_version": "aosr.search_ledger.v1",}\n', b"\xff\n", b"{}\n", b"[]\n",
+    b'{"ledger_version": "unexpected-ledger-version"}\n',
+])
+def test_unreadable_header_keeps_v1_validation_error(tmp_path: Path, first_line: bytes) -> None:
+    """改動前表頭一律走第一版的 JSON 驗證入口：壞 JSON、壞編碼、缺欄位、未知版號都是驗證錯誤。"""
+    path = tmp_path / "ledger"
+    path.write_bytes(first_line)
+    with pytest.raises(ValidationError):
+        Ledger.read(path)
+
+
+def test_tampered_v1_header_keeps_v1_validation_error(tmp_path: Path) -> None:
+    store, _ = store_in(tmp_path)
+    tampered = header_for(store).model_copy(update={"ledger_version": "unexpected-ledger-version"})
+    with pytest.raises(ValidationError, match="unexpected-ledger-version"):
+        Ledger.create(tmp_path / "ledger", tampered)
+    with pytest.raises(ValidationError, match="unexpected-ledger-version"):
+        replay_history(tampered, ())
+    assert not (tmp_path / "ledger").exists()
