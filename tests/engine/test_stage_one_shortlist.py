@@ -223,7 +223,10 @@ def test_bad_result_only_breaks_one_seat_and_missing_winner_is_not_replaced(tmp_
     for row in shortlist.rows:
         assert (row.values is None) == (row.trial_number == number)
         assert row.delta is None
-    line = next(line for line in stage_one_shortlist_lines(store) if line.startswith(f"試算 {number}｜"))
+    lines = stage_one_shortlist_lines(store)
+    # 壞 JSON 的錯誤訊息本身跨好幾行；清單每一席只准一行。
+    assert not any("\n" in line for line in lines)
+    line = next(line for line in lines if line.startswith(f"試算 {number}｜"))
     assert "讀不回" in line and "沒有細算第一名，不算差值" in line
 
 
