@@ -13,7 +13,7 @@ OuterConclusion: TypeAlias = Literal[
     "complete", "stable_but_search_budget", "refine_budget", "refine_candidates_exhausted",
     "feedback_blocked_by_budget", "feedback_not_configured", "feedback_unavailable",
     "baseline_first", "no_rankable_first", "user_stopped", "search_failed", "search_interrupted",
-    "refine_failed", "refine_interrupted",
+    "refine_failed", "refine_interrupted", "search_paused_time_limit",
 ]
 
 OUTER_MESSAGES: dict[OuterConclusion, str] = {
@@ -29,6 +29,7 @@ OUTER_MESSAGES: dict[OuterConclusion, str] = {
     "user_stopped": "使用者停止，未完成",
     "search_failed": "搜尋失敗，未完成",
     "search_interrupted": "搜尋中斷，未完成",
+    "search_paused_time_limit": "單題搜尋成本超過上限，搜尋暫停，未完成",
     "refine_failed": "細算失敗，未完成",
     "refine_interrupted": "細算中斷，未完成",
 }

@@ -80,7 +80,7 @@ class ComputedCandidate:
 
 Compute: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[ComputedCandidate]]
 IdentityProbe: TypeAlias = Callable[[], SearchIdentity]
-State: TypeAlias = Literal["running", "converged", "budget_exhausted", "user_stopped", "failed", "interrupted"]
+State: TypeAlias = Literal["running", "converged", "budget_exhausted", "user_stopped", "failed", "interrupted", "paused_time_limit"]
 RefineState: TypeAlias = Literal["not_started", "running", "stopped", "failed", "interrupted"]
 # 細算停止原因用固定代碼，外圈與報告靠代碼分辨，不比對訊息字串（中文對照在 report.py）。
 RefineStopReason: TypeAlias = Literal["stable", "refine_budget", "candidates_exhausted", "user_stopped"]

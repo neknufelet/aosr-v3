@@ -400,7 +400,7 @@ def _reasons(search: Read[SearchStatus], refine: Read[RefineStatus], process: Pr
              f"細算訊息原文：{refine.value.message}" if refine.value else f"細算訊息：{refine.error}"]
     phases: tuple[tuple[str, SearchStatus | RefineStatus | None], ...] = (("搜尋", search.value), ("細算", refine.value))
     for phase, status in phases:
-        if status is not None and status.state in {"failed", "interrupted"}:
+        if status is not None and status.state in {"failed", "interrupted", "paused_time_limit"}:
             lines.append(f"停止段落：{phase}{SEARCH_STATES[status.state]}")
         if status is not None and status.state == "running" and process.held is not True:
             lines.append(f"停止段落：{phase}；{INTERRUPTED if process.held is False else process.text}")

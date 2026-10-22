@@ -1,6 +1,7 @@
 """第一階段兩波計算：共用有限元素分片，再只合併與合分。"""
 from __future__ import annotations
 
+import math
 import sys
 import time
 from collections.abc import Callable, Generator, Iterator, Sequence
@@ -8,13 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock
-from typing import TypeAlias
+from typing import Final, TypeAlias
 
 from aosr.reporting.result import ResultOrigin
 from aosr.reporting.stage_one_result import StageOneResult, load_stage_one_result
 from aosr.search.run import CandidateJob, ComputeFailed, IdentityChanged
 from aosr.search.store import SearchIdentity
 from aosr.search.worker import SubprocessCompute, _Active, _check_exit, _stop_all, _watch
+from aosr.search.stage_one_time_limit import StageOneTimeLimit, TimeLimitTracker
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,16 @@ class StageOneComputed:
 
 StageOneComputeFunction: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[StageOneComputed]]
 _clock = time.monotonic
+# 老闆先定為每個候選 10 分鐘搜尋成本上限；不套細算與模態診斷。
+SEARCH_CANDIDATE_CAP_S: Final = 600.0
+
+
+class CandidateTimeLimit(Exception):
+    """搜尋成本已超限，保存觀測快照後暫停整批；不屬於計算或身分失敗。"""
+
+    def __init__(self, record: StageOneTimeLimit) -> None:
+        super().__init__("單題搜尋成本超過上限")
+        self.record = record
 
 
 class _StampedQueue(Queue[_Active]):
@@ -61,7 +73,10 @@ class StageOneCompute:
                  identity: SearchIdentity,
                  runner: Sequence[str] = (sys.executable, "-m", "aosr.reporting.scheme_cli", "stage-one"),
                  slice_runner: Sequence[str] = (sys.executable, "-m", "aosr.reporting.scheme_cli", "fem-slice"),
-                 poll_s: float = .5, lock_fd: int | None = None) -> None:
+                 poll_s: float = .5, lock_fd: int | None = None, search_cap_s: float | None = None) -> None:
+        if search_cap_s is not None and (not math.isfinite(search_cap_s) or search_cap_s <= 0):
+            raise ValueError("search_cap_s 必須有限且為正數")
+        self.search_cap_s = search_cap_s
         self.identity, self.search_id = identity, search_id
         self.processes = SubprocessCompute(capabilities_path=capabilities_path, engine_commit=engine_commit,
             search_id=search_id, fem_root=fem_root, runner=runner, slice_runner=slice_runner, poll_s=poll_s, lock_fd=lock_fd)
@@ -82,6 +97,9 @@ class StageOneCompute:
             return
         if any(job.trial_number is None or job.shift_name is not None for job in jobs):
             raise ValueError("第一階段搜尋只收候選試算")
+        if self.search_cap_s is not None:
+            yield from self._capped(jobs, max_workers, self.search_cap_s)
+            return
         parts_by_job = self.processes._parts_by_job(jobs, max_workers)
         pending = iter(zip(jobs, parts_by_job, strict=True))
         active: list[_Active] = []
@@ -112,5 +130,64 @@ class StageOneCompute:
                 _stop_all((finished,))
                 active.remove(finished)
                 yield result
+        finally:
+            _stop_all(active)
+
+    def _limited_parts(self, jobs: Sequence[CandidateJob], max_workers: int,
+                       tracker: TimeLimitTracker) -> tuple[tuple[Path, ...], ...]:
+        def wake(now: float) -> None:
+            record = tracker.slices_limit(now)
+            if record is not None:
+                raise CandidateTimeLimit(record)
+
+        return self.processes._parts_by_job(jobs, max_workers, observe=tracker.observe, wake=wake)
+
+    def _capped(self, jobs: Sequence[CandidateJob], max_workers: int,
+                cap_s: float) -> Generator[StageOneComputed, None, None]:
+        tracker = TimeLimitTracker(jobs, cap_s)
+        parts = self._limited_parts(jobs, max_workers, tracker)
+        pending = iter(zip(jobs, parts, strict=True))
+        active: list[_Active] = []
+        starts: dict[int, float] = {}
+        completed = _StampedQueue()
+        order = Lock()
+        exhausted = False
+        try:
+            while active or not exhausted:
+                while len(active) < max_workers and not exhausted:
+                    if tracker.candidates_limit(active, starts, completed.ended, _clock(), include_queued=True) is not None:
+                        break
+                    task = next(pending, None)
+                    if task is None:
+                        exhausted = True
+                    else:
+                        job, paths = task
+                        started = _clock()
+                        item = self.processes._start(job, paths)
+                        active.append(item)
+                        starts[id(item)] = started
+                        _watch(item, completed, order)
+                if not active:
+                    break
+                try:
+                    finished = completed.get(timeout=self.processes.poll_s)
+                except Empty:
+                    finished = None
+                now = _clock()
+                record = tracker.candidates_limit(active, starts, completed.ended, now, finished=finished)
+                result = None
+                if finished is not None:
+                    result = self._result(finished, completed.ended.pop(id(finished)) - starts.pop(id(finished)))
+                    tracker.accept(finished, result.seconds)
+                    if record is not None:
+                        record = tracker.snapshot("candidates", now)
+                    _stop_all((finished,))
+                    active.remove(finished)
+                if record is not None:
+                    _stop_all(active)
+                if result is not None:
+                    yield result
+                if record is not None:
+                    raise CandidateTimeLimit(record)
         finally:
             _stop_all(active)

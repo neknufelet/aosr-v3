@@ -1,7 +1,7 @@
 """搜尋命令列：開始、接續、停止；正常結果只在搜尋資料夾的狀態檔與離開碼。
 
 出錯時把錯誤原文寫到標準錯誤（主對話判斷：出錯就報錯看原文，搜尋資料夾還沒建好時也看得到）。
-達到停止條件、因預算停止、使用者停止回 0；失敗回 1；參數錯誤回 2；中斷回 3。
+達到停止條件、因預算停止、使用者停止回 0；失敗回 1；參數錯誤回 2；中斷回 3；因單題時間上限暫停回 4。
 """
 
 from __future__ import annotations
@@ -245,9 +245,19 @@ def _reject_stage_one(store: SearchStore, command: str) -> None:
         raise ValueError(f"這是第一階段搜尋資料夾，{names[command]}還沒接上第一階段")
 
 
+def _stage_one_compute(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None, *,
+                       lock_fd: int, search_cap_s: float | None) -> StageOneComputeFunction:
+    """搜尋與細算明確分開成本上限；注入工廠的既有簽名不變。"""
+    from aosr.search.stage_one_worker import StageOneCompute
+    return (factory(store, args.capabilities, args.engine_commit) if factory is not None else
+        StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
+            search_id=store.search_id, fem_root=store.fem_path, identity=store.identity,
+            lock_fd=lock_fd, search_cap_s=search_cap_s))
+
+
 def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
                        registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
-    from aosr.search.stage_one_worker import StageOneCompute
+    from aosr.search.stage_one_worker import SEARCH_CANDIDATE_CAP_S
     from aosr.search.stage_one_run import start_stage_one_search, resume_stage_one_search
 
     if args.command == "refine":
@@ -256,13 +266,11 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
         return _stage_one_auto_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
 
     try:
-        compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
-            StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
-                search_id=store.search_id, fem_root=store.fem_path, identity=store.identity, lock_fd=lock_fd))
+        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=SEARCH_CANDIDATE_CAP_S)
         entry = start_stage_one_search if args.command == "start" else resume_stage_one_search
         status = entry(store, compute=compute, probe=lambda: _identity(store.project.purpose, args.capabilities),
             registry_path=registry_path, run_date=date.today(), engine_version=store.identity.program_fingerprint)
-        return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
+        return 4 if status.state == "paused_time_limit" else 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
         return _failed(store, error)
 
@@ -270,13 +278,10 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
 def _stage_one_refine_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
                               registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
     """細算拒跑只報錯；不能經搜尋失敗出口改動狀態。"""
-    from aosr.search.stage_one_worker import StageOneCompute
     from aosr.search.stage_one_refine import refine_stage_one_search
 
     try:
-        compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
-            StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
-                search_id=store.search_id, fem_root=store.fem_path, identity=store.identity, lock_fd=lock_fd))
+        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=None)
         status = refine_stage_one_search(store, compute=compute,
             probe=lambda: _identity(store.project.purpose, args.capabilities), registry_path=registry_path,
             run_date=date.today(), engine_version=store.identity.program_fingerprint)
@@ -300,13 +305,13 @@ def _stage_one_auto_command(args: argparse.Namespace, store: SearchStore, factor
                             registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
     """第一階段外圈拒收只報錯；入選後檢查不改結論或離開碼。"""
     from aosr.search.stage_one_outer import auto_stage_one_search
-    from aosr.search.stage_one_worker import StageOneCompute
+    from aosr.search.stage_one_worker import SEARCH_CANDIDATE_CAP_S
 
     try:
-        compute = (factory(store, args.capabilities, args.engine_commit) if factory is not None else
-            StageOneCompute(capabilities_path=args.capabilities, engine_commit=args.engine_commit,
-                search_id=store.search_id, fem_root=store.fem_path, identity=store.identity, lock_fd=lock_fd))
-        status = auto_stage_one_search(store, compute=compute,
+        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=SEARCH_CANDIDATE_CAP_S)
+        refine_compute = compute if factory is not None else _stage_one_compute(args, store, None,
+            lock_fd=lock_fd, search_cap_s=None)
+        status = auto_stage_one_search(store, compute=compute, refine_compute=refine_compute,
             probe=lambda: _identity(store.project.purpose, args.capabilities), registry_path=registry_path,
             run_date=date.today(), engine_version=store.identity.program_fingerprint)
     except Exception as error:
@@ -314,6 +319,9 @@ def _stage_one_auto_command(args: argparse.Namespace, store: SearchStore, factor
         _stderr(f"自動外圈失敗：{error}\n入選後檢查這次不跑：自動外圈沒有正常收尾\n")
         return 1
     conclusion = status.outer.conclusion
+    if conclusion == "search_paused_time_limit":
+        _stderr(f"入選後檢查這次不跑：{OUTER_MESSAGES[conclusion]}\n")
+        return 4
     code = 3 if conclusion in ("search_interrupted", "refine_interrupted") else 1 if conclusion in ("search_failed", "refine_failed") else 0
     if conclusion != "complete":
         _stderr(f"入選後檢查這次不跑：{OUTER_MESSAGES[conclusion] if conclusion is not None else '未判定'}\n")
