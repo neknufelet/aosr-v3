@@ -1,10 +1,13 @@
-"""入選後檢查的唯讀報告；房間層一次、每席主位超線共振全部列出。"""
+"""入選後檢查的唯讀報告；依房間鍵各列一份房間層、每席主位超線共振全部列出。"""
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.display import MODAL_STATE_TEXT, speaker_label
 from aosr.reporting.modal_diagnosis import modal_identity
+from aosr.reporting.modal_diagnosis_model import ModalKey
 from aosr.reporting.modal_diagnosis_readout import DiagnosisReadout, ResonanceReadout, read_modal_diagnosis
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.scoring.low_frequency_decay_reference import LowFrequencyDecayReference, load_reference
@@ -69,6 +72,27 @@ def _placement_lines(label: str, scheme: Scheme, readout: DiagnosisReadout) -> l
     return lines
 
 
+@dataclass
+class _RoomGroup:
+    key: ModalKey
+    resonances: tuple[ResonanceReadout, ...] | None
+    lines: list[str]
+
+
+def _group_room(groups: list[_RoomGroup], key: ModalKey, readout: DiagnosisReadout, span: str, *, variable: bool) -> None:
+    """完整房間鍵相等才共用一張表；組內共振不同仍是壞診斷。"""
+    group = next((group for group in groups if group.key == key), None)
+    if group is not None:
+        if group.resonances != readout.resonances:
+            raise ValueError("這一席的房間層跟上面那份不同，不能共用同一張超線表")
+        return
+    lines = _room_lines(readout, span)
+    if variable:
+        dimensions = "×".join(f"{float.fromhex(value):.6f}" for value in key.room_hex)
+        lines = [f"房間 長×寬×高（公尺）：{dimensions}", f"房間鍵：{key.digest}", *lines]
+    groups.append(_RoomGroup(key, readout.resonances, lines))
+
+
 def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
     """壞摘要只壞這段；壞診斷只壞那席，其他名次與診斷繼續顯示。"""
     lines = [TITLE, NOT_SCORED]
@@ -80,8 +104,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
         if summary.modal_identity != modal_identity():
             lines.append(OLD_IDENTITY)
         reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
-        room_lines: list[str] = []
-        room: tuple[ResonanceReadout, ...] | None = None
+        rooms: list[_RoomGroup] = []
         placement_lines: list[str] = []
         for seat in summary.seats:
             label = f"試算 {seat.trial_number}"
@@ -98,18 +121,16 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
                         raise ValueError("診斷狀態與摘要不同")
                     readout = read_modal_diagnosis(diagnosis, reference)
                     if state == "diagnosed_not_scored":
-                        if room is None:
-                            room = readout.resonances
-                            room_lines = _room_lines(readout, _reference_span(reference))
-                        elif readout.resonances != room:
-                            raise ValueError("這一席的房間層跟上面那份不同，不能共用同一張超線表")
+                        assert diagnosis.key is not None
+                        _group_room(rooms, diagnosis.key, readout, _reference_span(reference),
+                                    variable=store.settings.layout.room_range is not None)
                         placement_lines.extend(_placement_lines(label, scheme, readout))
                 state_text = MODAL_STATE_TEXT.get(state, {"not_started": "未開始", "running": "開始過、沒有收尾紀錄",
                     "stopped": "未計算：已停止", "skipped": "跳過"}.get(state, state))
                 lines.append(f"{label}：{state_text}；{reason or '無附加原因'}")
             except (OSError, ValueError, KeyError, StopIteration) as error:
                 lines.append(f"{label}：失敗；診斷文件讀不回或內容不完整：{error}")
-        lines.extend(room_lines or ["房間層尚無可讀診斷，未評估"])
+        lines.extend([line for room in rooms for line in room.lines] or ["房間層尚無可讀診斷，未評估"])
         lines.extend((PARTICIPATION, RELATIVE))
         lines.extend(placement_lines)
         seconds = [seat.seconds for seat in summary.seats if seat.seconds is not None]

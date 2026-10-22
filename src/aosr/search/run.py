@@ -155,7 +155,12 @@ class SearchStatus(BaseModel):
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
     """一般保存與快照讀失敗共用起點訊息規則，避免漏句或重複加句。"""
     note = "起點不在搜尋範圍或夾角、耳距限制內，沒有排入"
-    if layout.standard_start(store.project, store.settings.layout) is None and note not in status.message:
+    if store.settings.layout.room_range is None:
+        missing = layout.standard_start(store.project, store.settings.layout) is None
+    else:
+        note = "起點不在搜尋範圍或夾角、耳距限制內，或專案房間不在房間範圍內、地板面積不足，沒有排入"
+        missing = layout.room_start(store.project, store.settings.layout) is None
+    if missing and note not in status.message:
         return status.model_copy(update={"message": status.message + "；" + note})
     return status
 
@@ -225,6 +230,11 @@ def _progress(status: SearchStatus, rows: Sequence[ledger.LedgerRow]) -> SearchS
 
 def _adapter(store: SearchStore) -> tuple[SamplerAdapter, bool]:
     adapter = SamplerAdapter(layout.space_for(store.settings.layout), store.settings.sampler_settings())
+    if store.settings.layout.room_range is not None:
+        unit = layout.room_start(store.project, store.settings.layout)
+        if unit is not None:
+            adapter.enqueue(unit)
+        return adapter, unit is not None
     start = layout.standard_start(store.project, store.settings.layout)
     if start is not None:
         adapter.enqueue(layout.unit_from_params(start, store.settings.layout))

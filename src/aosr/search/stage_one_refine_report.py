@@ -60,9 +60,11 @@ def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat, 
                     detail += f"；{refined.reason}"
     if seat.peak_reason is not None:
         detail += f"；搜尋軸大峰量不到：{seat.peak_reason}"
+    room = (f"{meters['room_Lx']:.6f}×{meters['room_Ly']:.6f}×{meters['room_Lz']:.6f}｜"
+            if store.settings.layout.room_range is not None else "")
     return (f"{rank}｜試算 {seat.trial_number}｜{seat.search_rank}｜{roles}｜"
         f"{meters['front_distance']:.6f}／{meters['spacing']:.6f}／{meters['listening_distance']:.6f}｜"
-        f"{seat.search_score:.6f}｜{score}｜{detail}｜{_number(seat.big_peak_db)}／{peak}")
+        f"{room}{seat.search_score:.6f}｜{score}｜{detail}｜{_number(seat.big_peak_db)}／{peak}")
 
 
 def stage_one_refine_lines(store: SearchStore) -> tuple[str, ...]:
@@ -72,7 +74,8 @@ def stage_one_refine_lines(store: SearchStore) -> tuple[str, ...]:
         return ("還沒細算",)
     lines = ["細算（每 1 Hz 一點，只算有限元素）",
         "大峰＝最強峰高出這支喇叭自己那條直線多少，左右兩支取較差",
-        "房間固定，面積對照不適用", "入選後檢查見下一段"]
+        ("房間固定，面積對照不適用" if store.settings.layout.room_range is None else "房間隨候選而變，面積對照不適用"),
+        "入選後檢查見下一段"]
     try:
         status = StageOneRefineStatus.model_validate_json(path.read_bytes())
     except (OSError, ValueError) as error:
@@ -88,7 +91,8 @@ def _status_lines(store: SearchStore, status: StageOneRefineStatus) -> list[str]
     lines: list[str] = []
     lines.extend([f"細算狀態：{status.state}；{status.message}",
         f"前 N 設定 {selected.top_n}；本次實際 {selected.actual_top_n} 個",
-        "細算名次｜試算｜搜尋名次｜角色｜離前牆／喇叭間距／聆聽距離（公尺）｜搜尋軸合分｜1 Hz 合分｜"
+        "細算名次｜試算｜搜尋名次｜角色｜離前牆／喇叭間距／聆聽距離（公尺）｜"
+        + ("房間 長×寬×高（公尺）｜" if store.settings.layout.room_range is not None else "") + "搜尋軸合分｜1 Hz 合分｜"
         "每支喇叭主項／穩健性｜大峰（搜尋軸／1 Hz）"])
     results = {seat.trial_number: seat for seat in status.results}
     top = [seat for seat in selected.candidates if "top_n" in seat.roles]

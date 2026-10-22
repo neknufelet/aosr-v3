@@ -333,14 +333,20 @@ def test_room_range_is_frozen() -> None:
 def test_search_rejects_room_range_before_creating_folder(tmp_path: Path, stage: str | None) -> None:
     from aosr.search.store import SearchIdentity, SearchStore
 
+    from tests.engine._search_stage_one_cases import make_store
+
+    if stage is not None:
+        store = make_store(tmp_path, layout=settings(room_range=RANGES))
+        assert SearchStore.open(store.path).settings.layout.room_range == settings(room_range=RANGES).room_range
+        return
     document = search_document(settings(room_range=RANGES)) | {"stage": stage}
-    with pytest.raises(ValidationError, match="6b-2"):
+    message = "房間範圍只准第一階段（stage_one_fem_only）"
+    with pytest.raises(ValidationError, match=message):
         SearchSettings.model_validate(document)
-    # 即使呼叫者繞過總表驗證，建檔入口仍須重驗，不能留下半接線資料夾。
     original = SearchSettings.model_validate(search_document(settings()))
     forged = original.model_copy(update={"layout": settings(room_range=RANGES), "stage": stage})
     root = tmp_path / "searches"
-    with pytest.raises(ValidationError, match="6b-2"):
+    with pytest.raises(ValidationError, match="房間範圍只准第一階段"):
         SearchStore.create(root, project=project(), settings=forged,
             identity=SearchIdentity("physical", "program", purpose_settings("listening")),
             versions={"python": "test", "optuna": "test", "numpy": "test"})
@@ -401,33 +407,30 @@ def test_row_uses_v2_header_and_roundtrips(tmp_path: Path, outcome: Outcome) -> 
 
 
 @pytest.mark.parametrize("version", ["v1", "v2"])
-def test_runner_records_against_its_snapshot_header(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                    version: str) -> None:
+def test_runner_records_against_its_snapshot_header(tmp_path: Path, version: str) -> None:
     from datetime import date
 
     from aosr.config.quality_targets import QualityTargets
     from aosr.search.ledger import header_for
     from aosr.search.run import SearchStatus, _Runner
-    from aosr.search.store import SearchIdentity, _IdentitySnapshot
+    from aosr.search.store import SearchIdentity
     from aosr.search.timings import WallClock
 
-    # 帶房間外框的搜尋資料夾物件 6b-2 前造不出來；第二版改由換掉 header_for 驗 record 照它回的表頭建列。
-    identity = SearchIdentity("physical", "program", purpose_settings("listening"))
-    snapshot = _IdentitySnapshot.model_validate({"store_version": "aosr.search_store.v1", "search_id": "synthetic",
-        "physics_identity": "physical", "program_fingerprint": "program",
-        "versions": {"python": "test", "optuna": "test", "numpy": "test"}})
-    store = SearchStore(tmp_path, project(), SearchSettings.model_validate(search_document(settings())), identity, snapshot)
+    from tests.engine._search_stage_one_cases import make_store
+
     if version == "v2":
-        header: LedgerHeader | LedgerHeaderV2 = LedgerHeaderV2.model_validate(header_document() | {
-            "ledger_version": "aosr.search_ledger.v2", "search_space": dict.fromkeys(ALL_METERS, (0.0, 1.0)),
-            "meter_quantities": ALL_METERS})
-        monkeypatch.setattr("aosr.search.ledger.header_for", lambda chosen: header)
+        store = make_store(tmp_path, layout=settings(room_range=RANGES))
         unit = UNIT | dict.fromkeys(ROOM_KEYS, 0.5)
         meters = dict(zip(ALL_METERS, (1.0, 1.0, 2.0, 6.0, 4.0, 3.0), strict=True))
     else:
-        header = header_for(store)
+        store = SearchStore.create(tmp_path / "searches", project=project(),
+            settings=SearchSettings.model_validate(search_document(settings())),
+            identity=SearchIdentity("physical", "program", purpose_settings("listening")),
+            versions={"python": "test", "optuna": "test", "numpy": "test"})
         unit = UNIT
         meters = {"front_distance": 1.0, "spacing": 1.0, "listening_distance": 2.0}
+    identity = store.identity
+    header = header_for(store)
     assert type(header) is (LedgerHeaderV2 if version == "v2" else LedgerHeader)
     book = Ledger.create(store.ledger_path, header)
     registry = QualityTargets.model_validate({"schema_version": 1,
@@ -448,28 +451,6 @@ def test_v1_row_rejects_room_only_reason(explicit_header: bool) -> None:
         row_from_outcome(batch_index=0, proposal=Proposal(0, UNIT),
             params_m={"front_distance": 1.0, "spacing": 1.0, "listening_distance": 2.0},
             outcome=Illegal("floor_area_below_minimum", 2.0), seconds=0.25, result_file=None, header=header)
-
-
-def _bypass_store(root: Path) -> SearchStore:
-    """略過建檔入口、直接造帶房間外框的搜尋資料夾物件（6b-2 前建構子就拒）。"""
-    from aosr.search.store import SearchIdentity, _IdentitySnapshot
-
-    future = SearchSettings.model_validate(search_document(settings())).model_copy(
-        update={"layout": settings(room_range=RANGES)})
-    snapshot = _IdentitySnapshot.model_validate({"store_version": "aosr.search_store.v1", "search_id": "synthetic",
-        "physics_identity": "physical", "program_fingerprint": "program",
-        "versions": {"python": "test", "optuna": "test", "numpy": "test"}})
-    return SearchStore(root, project(), future, SearchIdentity("physical", "program", purpose_settings("listening")), snapshot)
-
-
-def test_room_store_object_cannot_be_built_before_6b2(tmp_path: Path) -> None:
-    # 建檔與開檔入口都拒；直接造搜尋資料夾物件也拒，所以接續、外圈、細算、入選、回饋都拿不到它、寫不了檔。
-    root = tmp_path / "search"
-    root.mkdir()
-    with pytest.raises(ValueError, match="6b-2"):
-        _bypass_store(root)
-    assert list(root.iterdir()) == []
-
 
 @pytest.mark.parametrize("explicit_header", [False, True])
 def test_v1_row_bytes_stay_identical(explicit_header: bool) -> None:

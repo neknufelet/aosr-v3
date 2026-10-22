@@ -62,8 +62,8 @@ class SearchSettings(BaseModel):
             raise ValueError("purpose must not be blank")
         if self.stage_one_refine is not None and self.stage is None:
             raise ValueError("stage_one_refine 必須設定 stage（第一階段）")
-        if self.layout.room_range is not None:
-            raise ValueError("房間進搜尋還沒接上第一階段執行迴圈（6b-2），這一版不能開這種搜尋")
+        if self.layout.room_range is not None and self.stage != "stage_one_fem_only":
+            raise ValueError("房間範圍只准第一階段（stage_one_fem_only）")
         return self
 
     def sampler_settings(self) -> SamplerSettings:

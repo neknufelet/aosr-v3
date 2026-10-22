@@ -42,6 +42,7 @@ class StageOneSearchReport:
     refine_lines: tuple[str, ...] = ()
     post_check_lines: tuple[str, ...] = ()
     time_limit_lines: tuple[str, ...] = ()
+    room_range: bool = False
 
 
 def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
@@ -79,7 +80,8 @@ def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
     scored, excluded = _sorted_rows(store)
     return StageOneSearchReport(wall_assumption_text(store.project), status,
         tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded),
-        stage_one_refine_lines(store), stage_one_post_check_lines(store), time_limit_lines(store))
+        stage_one_refine_lines(store), stage_one_post_check_lines(store), time_limit_lines(store),
+        room_range=store.settings.layout.room_range is not None)
 
 
 def _feature(feature: Feature) -> str:
@@ -118,12 +120,15 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
         f"外圈結論：{conclusion_message(status)}",
         f"問過 {status.asked}；算完 {status.computed}；不合法 {status.illegal}（各原因：{reasons}）；"
         f"不可估 {status.excluded.get('unassessed', 0)}；不能同表 {status.excluded.get('incomparable', 0)}",
-        "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜合分",
+        "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜"
+        + ("房間 長×寬×高（公尺）｜" if report.room_range else "") + "合分",
         "每支喇叭：主項／穩健性；最強峰／最深谷（頻率 Hz、高度 dB 對自己那條直線、寬度八度）"]
     for rank, item in enumerate(report.ranked, 1):
         meters = item.row.params_m
+        room = (f"{meters['room_Lx']:.6f}×{meters['room_Ly']:.6f}×{meters['room_Lz']:.6f}｜"
+                if report.room_range else "")
         lines.append(f"{rank}｜試算 {item.trial_number}｜{meters['front_distance']:.6f}／"
-            f"{meters['spacing']:.6f}／{meters['listening_distance']:.6f}｜{item.row.score}")
+            f"{meters['spacing']:.6f}／{meters['listening_distance']:.6f}｜{room}{item.row.score}")
         if item.error:
             lines.append(f"試算 {item.trial_number}：{item.error}")
         elif item.result is not None:
@@ -137,7 +142,10 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
             detail = ",".join(code.value for code in item.result.score.reason_codes)
         else:
             detail = "缺少結果"
-        lines.append(f"試算 {item.trial_number}：{label}；{detail}")
+        meters = item.row.params_m
+        room = (f"；房間 長×寬×高（公尺）：{meters['room_Lx']:.6f}×{meters['room_Ly']:.6f}×{meters['room_Lz']:.6f}"
+                if report.room_range else "")
+        lines.append(f"試算 {item.trial_number}：{label}；{detail}{room}")
     lines.extend(report.time_limit_lines)
     lines.extend(report.refine_lines)
     lines.extend(report.post_check_lines)

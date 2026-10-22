@@ -5,14 +5,15 @@ import pytest
 
 from aosr.search import cli
 from aosr.search.run import SearchStatus
+from aosr.search.layout_settings import LayoutSettings
 from aosr.search.settings import SearchSettings
 from aosr.search.stage_one_worker import StageOneComputeFunction
 from aosr.search.store import SearchStore
 from tests.engine import _search_stage_one_cases as search
 
 
-def running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SearchStore:
-    source = search.make_store(tmp_path / "source", budget=4)
+def running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, layout: LayoutSettings | None = None) -> SearchStore:
+    source = search.make_store(tmp_path / "source", budget=4, layout=layout)
     settings = SearchSettings.model_validate(source.settings.model_dump(mode="json") | {
         "stage_one_refine": {"top_n": 2, "far_control_min_front_distance_m": .8}})
     store = SearchStore.create(tmp_path / "searches", project=source.project, settings=settings,
