@@ -3,6 +3,7 @@ from pathlib import Path
 from collections.abc import Iterator, Sequence
 from dataclasses import FrozenInstanceError, replace
 import json
+import re
 
 import pytest
 
@@ -119,7 +120,8 @@ def test_principal_rank_can_disagree_with_total_and_ties_use_trial_number(tmp_pa
     for row in top:
         assert row.values is not None
         assert (row.values.principal_db, row.values.robustness_db) == pairs[row.trial_number]
-    assert all(row.principal_rank is None for row in shortlist.rows if row.trial_number == 5)
+    control = [row for row in shortlist.rows if row.trial_number == 5]
+    assert control and all(row.principal_rank is None for row in control)
 
 
 def test_fixed_room_keeps_seats_and_zero_space_deltas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,18 +227,53 @@ def test_bad_result_only_breaks_one_seat_and_missing_winner_is_not_replaced(tmp_
     assert "讀不回" in line and "沒有細算第一名，不算差值" in line
 
 
-def test_missing_summary_leaves_report_byte_identical_to_original(tmp_path: Path,
-                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+# 控制組：改動前主線 64c6e4ff 用同一份資料夾（_finished，再刪掉細算摘要）印出的全文。
+# 帶小數點的數字遮成「#」：新錄控制組不錄跨機器逐位的小數；字樣、順序、行數與整數照釘。
+_SPEAKER = "主項 # dB；穩健性 # dB；最強峰 # Hz，# dB，# 八度；最深谷 # Hz，# dB，"
+_BEFORE_SHORTLIST = (
+    "在這個牆面假設下：六面同一個頻率無關實數阻抗 # ρc（ρc 是空氣特性阻抗）\n"
+    "未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同\n"
+    "低頻拖尾不進自動排名，入選後要另外檢查\n"
+    "停止原因：因預算停止；因預算停止（第一名是本次預算內最佳，不代表找到全域最佳）\n"
+    "外圈結論：未判定\n"
+    "問過 4；算完 4；不合法 0（各原因：沒有）；不可估 0；不能同表 0\n"
+    "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜房間 長×寬×高（公尺）｜合分\n"
+    "每支喇叭：主項／穩健性；最強峰／最深谷（頻率 Hz、高度 dB 對自己那條直線、寬度八度）\n"
+    "1｜試算 3｜#／#／#｜#×#×#｜#\n"
+    "  left：" + _SPEAKER + "# 八度\n"
+    "  right：" + _SPEAKER + "# 八度\n"
+    "2｜試算 2｜#／#／#｜#×#×#｜#\n"
+    "  left：" + _SPEAKER + "量不到（邊界不完整）\n"
+    "  right：" + _SPEAKER + "量不到（邊界不完整）\n"
+    "3｜試算 1｜#／#／#｜#×#×#｜#\n"
+    "  left：" + _SPEAKER + "# 八度\n"
+    "  right：" + _SPEAKER + "# 八度\n"
+    "4｜試算 0｜#／#／#｜#×#×#｜#\n"
+    "  left：" + _SPEAKER + "# 八度\n"
+    "  right：" + _SPEAKER + "# 八度\n"
+    "不可排名候選（不給名次）\n"
+    "還沒細算\n"
+    "入選後檢查（低頻模態診斷）\n"
+    "不計分、不改名次；搜尋結果與外圈結論不受診斷影響\n"
+    "入選後檢查還沒做\n"
+    "300 Hz 交接敏感度（不改名次）\n"
+    "範圍外：第一階段只算有限元素（20～300 Hz），沒有 300 Hz 交接，這一項不適用\n"
+    "擺位穩定性（±2 公分，不改名次）\n"
+    "範圍外：擺位穩定性是第二階段的檢查；第一階段的座位穩健性已在合分裡（主位前後左右上下六點）\n")
+
+
+def _masked(text: str) -> str:
+    return re.sub(r"-?\d+\.\d+", "#", text)
+
+
+def test_missing_summary_leaves_report_text_as_before_shortlist(tmp_path: Path,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
     from aosr.search.stage_one_shortlist import stage_one_shortlist_lines
     store = _finished(tmp_path, monkeypatch)
     (store.path / "stage_one_refine.json").unlink()
     report = build_stage_one_report(store)
     assert stage_one_shortlist_lines(store) == () and report.shortlist_lines == ()
-    # 重建舊版組字順序：每一段的原文都由既有報告提供，這裡不呼叫新清單算答案。
-    original = render_stage_one_text(replace(report, refine_lines=(), post_check_lines=()))
-    marker = "300 Hz 交接敏感度（不改名次）\n"
-    original = original.replace(marker, "\n".join((*report.refine_lines, *report.post_check_lines)) + "\n" + marker)
-    assert render_stage_one_text(report).encode() == original.encode()
+    assert _masked(render_stage_one_text(report)) == _BEFORE_SHORTLIST
 
 
 def test_exact_notices_and_no_ratio_claims_or_repeated_assumptions(tmp_path: Path,
