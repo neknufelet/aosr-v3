@@ -456,28 +456,38 @@ def _bypass_store(root: Path) -> SearchStore:
 
 @pytest.mark.parametrize("entry", ["ledger", "stage_one", "stage_two"])
 def test_bypassed_room_store_writes_nothing_before_6b2(tmp_path: Path, entry: str) -> None:
+    from collections.abc import Iterator, Sequence
     from datetime import date
 
     from aosr.search.ledger import create_for
-    from aosr.search.run import start_search
+    from aosr.search.run import CandidateJob, ComputedCandidate, start_search
     from aosr.search.stage_one_run import start_stage_one_search
+    from aosr.search.stage_one_worker import StageOneComputed
+    from aosr.search.store import SearchIdentity
 
     root = tmp_path / "search"
     root.mkdir()
     store = _bypass_store(root)
 
-    def never(*args: object) -> object:
-        raise AssertionError("拒收前不准呼叫計算或身分探針")
+    def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
+        raise AssertionError("拒收前不准呼叫計算")
 
-    kwargs = {"probe": never, "registry_path": tmp_path / "absent-registry", "run_date": date(2026, 10, 22),
-              "engine_version": "program"}
+    def stage_compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[StageOneComputed]:
+        raise AssertionError("拒收前不准呼叫計算")
+
+    def probe() -> SearchIdentity:
+        raise AssertionError("拒收前不准呼叫身分探針")
+
+    registry = tmp_path / "absent-registry"
     with pytest.raises(ValueError, match="6b-2"):
         if entry == "ledger":
             create_for(store)
         elif entry == "stage_one":
-            start_stage_one_search(store, compute=never, **kwargs)
+            start_stage_one_search(store, compute=stage_compute, probe=probe, registry_path=registry,
+                                   run_date=date(2026, 10, 22), engine_version="program")
         else:
-            start_search(store, compute=never, **kwargs)
+            start_search(store, compute=compute, probe=probe, registry_path=registry,
+                         run_date=date(2026, 10, 22), engine_version="program")
     assert list(root.iterdir()) == []
 
 
