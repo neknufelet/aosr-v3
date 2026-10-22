@@ -74,6 +74,7 @@ def test_shortlist_every_cell_from_raw_result(tmp_path: Path, monkeypatch: pytes
             "×".join(f"{v:.6f}" for v in values[:3]), *(f"{v:.6f}" for v in values[3:]),
             "／".join(f"{values[i] - base[i]:+.6f}" for i in (5, 6, 7, 3, 4)), proportion(values)))
     shown = blocks(store)["shortlist"]
+    assert shown.red == "warning_only"
     assert shown.title == f"入選清單（細算後；前 {raw['selection']['top_n']} 席照細算名次，對照列出來、不算入選）"
     assert shown.lines == (NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE, VARIABLE_ROOM if variable else FIXED_ROOM,
         PROPORTION_EXPLANATION)
@@ -194,6 +195,7 @@ def test_unscored_shortlist_cells_have_no_fabricated_numbers(tmp_path: Path, mon
     raw.update(state="selected", results=[])
     path.write_text(json.dumps(raw))
     table = blocks(store)["shortlist"].model_dump()["table"]
+    assert sorted(row[0] for row in table["rows"]) == sorted(f"試算 {seat['trial_number']}" for seat in raw["selection"]["candidates"])
     for row in table["rows"]:
         assert row[3:6] == ("無", "無", "尚未完成；細算結果尚未完成")
         assert row[6:13] == tuple("無" for heading in HEADINGS[6:13])
@@ -245,6 +247,7 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
             (path.parent / raw["seats"][0]["diagnosis_file"]).write_text("{")
     shown = blocks(store)
     modal = shown["modal"]
+    assert modal.red == "warning_only" and all(block.red is None for key, block in shown.items() if key not in ("modal", "shortlist"))
     assert modal.title == "入選後檢查（低頻模態診斷）"
     assert modal.warning == (state in ("broken", "one_file"))
     assert all(not block.warning for key, block in shown.items() if key != "modal")
@@ -308,7 +311,7 @@ def masked_json(store: SearchStore, monkeypatch: pytest.MonkeyPatch) -> str:
 SECOND_STAGE = {'False': '{"search_id":"00000000000000000000000000000001","name":"reference-room-original","fetched_text":"22:14:20","stage_text":"搜尋：因預算停止；第 1 輪；細算：未開始","blocks":[{"key":"stage","title":"目前階段","lines":["沒有計算行程拿著這個資料夾","搜尋：因預算停止；第 1 輪","細算：未開始","外圈結論：未判定","品質合格：本頁未判定；停止或細算完成不代表品質合格，也不是最終推薦","未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同"],"warning":false},{"key":"counts","title":"候選處理數量","lines":["問過 0 題（到狀態最後存檔為止）","算完 0 個；不合法 0 個","不合法各原因數：沒有","被淘汰或排除 0 個；各區數：沒有","細算帳：還沒有（細算還沒開始）"],"warning":false},{"key":"timings","title":"已用時間","lines":["到最後一次存檔為止；不是目前行程的即時計時","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）","各輪搜尋花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","各輪細算花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）"],"warning":false},{"key":"updated","title":"最後更新時間","lines":["最後更新：2023-11-14 22:13:20 UTC；距今 1 分 0 秒"],"warning":false},{"key":"search-best","title":"搜尋最佳","lines":["本次預算內最佳：沒有取得篩選分數的候選"],"warning":false},{"key":"refine-best","title":"細算最佳","lines":["尚無可排名的細算第一名"],"warning":false},{"key":"crossover","title":"300 Hz 交接敏感度（不改名次）","lines":["只看換接法時名次會不會變，正式接法、分數與名次不變","交接影響尚未驗證","未開始（搜尋正常收尾後才補）","距離近不等於聲音接近；這裡只看算法選擇對排名的影響，不是誤差界，也不是聽感比較"],"warning":false},{"key":"stability","title":"擺位穩定性（±2 公分，不改名次）","lines":["這場搜尋沒有擺位穩定性結果（這一段在 #699 合併後才有）"],"warning":false},{"key":"reasons","title":"停止或失敗原因","lines":["搜尋訊息原文：考卷停止原因","細算訊息原文：細算未開始：還沒有任何候選用驗證軸細算"],"warning":false},{"key":"modal","title":"低頻模態診斷（不計分）","lines":["不計分、不改名次；搜尋結果與外圈結論不受診斷影響","原方案：未開始（搜尋正常收尾後才補）","搜尋第一名：未開始（搜尋正常收尾後才補）","細算第一名：未開始（搜尋正常收尾後才補）","其他座位與完整排序放進結果清單後到網頁結果頁看"],"warning":false},{"key":"identity","title":"身分","lines":["伺服器現在的物理身分：現在物理","伺服器程式指紋：現在程式","資料夾物理身分：phys-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","資料夾程式指紋：calc-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","這場搜尋用的是較舊的程式（指紋與伺服器不同；這是備查資訊）","這場搜尋的物理身分與伺服器不同（備查資訊）"],"warning":false}],"best_default":"search","best_versions":{"search":{"which":"search","candidate":"","result_file":"","version":"讀不到：尚無搜尋第一名","error":"讀不到：尚無搜尋第一名"},"refine":{"which":"refine","candidate":"","result_file":"","version":"讀不到：尚無細算第一名","error":"讀不到：尚無細算第一名"}}}', 'True': '{"search_id":"00000000000000000000000000000002","name":"reference-room-original","fetched_text":"22:14:20","stage_text":"搜尋：因預算停止；第 1 輪；細算：未開始","blocks":[{"key":"stage","title":"目前階段","lines":["沒有計算行程拿著這個資料夾","搜尋：因預算停止；第 1 輪","細算：未開始","外圈結論：未判定","品質合格：本頁未判定；停止或細算完成不代表品質合格，也不是最終推薦","未加入實際喇叭的低頻衰減，排名只適用於本次理想聲源基準；換播放系統後可能不同","座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出"],"warning":false},{"key":"counts","title":"候選處理數量","lines":["問過 0 題（到狀態最後存檔為止）","算完 0 個；不合法 0 個","不合法各原因數：沒有","被淘汰或排除 0 個；各區數：沒有","細算帳：還沒有（細算還沒開始）"],"warning":false},{"key":"timings","title":"已用時間","lines":["到最後一次存檔為止；不是目前行程的即時計時","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）","各輪搜尋花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","各輪細算花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）","這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）"],"warning":false},{"key":"updated","title":"最後更新時間","lines":["最後更新：2023-11-14 22:13:20 UTC；距今 1 分 0 秒"],"warning":false},{"key":"search-best","title":"搜尋最佳","lines":["本次預算內最佳：沒有取得篩選分數的候選"],"warning":false},{"key":"refine-best","title":"細算最佳","lines":["尚無可排名的細算第一名"],"warning":false},{"key":"crossover","title":"300 Hz 交接敏感度（不改名次）","lines":["只看換接法時名次會不會變，正式接法、分數與名次不變","交接影響尚未驗證","未開始（搜尋正常收尾後才補）","距離近不等於聲音接近；這裡只看算法選擇對排名的影響，不是誤差界，也不是聽感比較"],"warning":false},{"key":"stability","title":"擺位穩定性（±2 公分，不改名次）","lines":["這場搜尋沒有擺位穩定性結果（這一段在 #699 合併後才有）"],"warning":false},{"key":"reasons","title":"停止或失敗原因","lines":["搜尋訊息原文：考卷停止原因","細算訊息原文：細算未開始：還沒有任何候選用驗證軸細算"],"warning":false},{"key":"modal","title":"低頻模態診斷（不計分）","lines":["不計分、不改名次；搜尋結果與外圈結論不受診斷影響","原方案：未開始（搜尋正常收尾後才補）","搜尋第一名：未開始（搜尋正常收尾後才補）","細算第一名：未開始（搜尋正常收尾後才補）","其他座位與完整排序放進結果清單後到網頁結果頁看"],"warning":false},{"key":"identity","title":"身分","lines":["伺服器現在的物理身分：現在物理","伺服器程式指紋：現在程式","資料夾物理身分：phys-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","資料夾程式指紋：calc-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","這場搜尋用的是較舊的程式（指紋與伺服器不同；這是備查資訊）","這場搜尋的物理身分與伺服器不同（備查資訊）"],"warning":false}],"best_default":"search","best_versions":{"search":{"which":"search","candidate":"","result_file":"","version":"讀不到：尚無搜尋第一名","error":"讀不到：尚無搜尋第一名"},"refine":{"which":"refine","candidate":"","result_file":"","version":"讀不到：尚無細算第一名","error":"讀不到：尚無細算第一名"}}}'}
 
 
-@pytest.mark.parametrize("state", ["skipped", "failed"])
+@pytest.mark.parametrize("state", ["skipped", "failed", "room_differs"])
 def test_post_check_red_follows_states_not_reason_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     # 寫入端照規矩跳過細算結果讀不回的那一席，原因原文寫「讀不回」：不是這一塊的檢查失敗；診斷真的失敗才標紅。
     configure_calculation_jax()
@@ -317,8 +320,14 @@ def test_post_check_red_follows_states_not_reason_words(tmp_path: Path, monkeypa
         store.refine_result_path(8).unlink()
     run(store, tmp_path / "child", state="failed" if state == "failed" else "diagnosed_not_scored")
     raw = json.loads((store.path / "stage-one-check" / "summary.json").read_bytes())
+    if state == "room_differs":
+        # 第二席的房間層被改過、其他欄位合法：跟命令列一樣算那一席讀不回（同一道核對）。
+        target = store.path / "stage-one-check" / raw["seats"][1]["diagnosis_file"]
+        doc = json.loads(target.read_bytes())
+        doc["room_layer"]["modes"][1]["t60_s"] = 20.
+        target.write_text(json.dumps(doc))
     modal = blocks(store)["modal"]
-    assert modal.warning == (state == "failed")
+    assert modal.warning == (state in ("failed", "room_differs"))
     for seat in raw["seats"]:
         line = next(line for line in modal.lines if line.startswith(f"試算 {seat['trial_number']}／"))
         scheme = json.loads((store.path / seat["scheme_file"]).read_bytes())
@@ -326,11 +335,52 @@ def test_post_check_red_follows_states_not_reason_words(tmp_path: Path, monkeypa
         if state == "failed":
             assert seat["state"] == "failed"
             assert line.endswith(f"：失敗；{seat['reason_text']}；房間 長×寬×高（公尺）：{dimensions}")
-        elif seat == raw["seats"][0]:
+        elif state == "room_differs" and seat == raw["seats"][1]:
+            assert line.endswith("：失敗；診斷文件讀不回或內容不完整：這一席的房間層跟上面那份不同，不能共用同一張超線表")
+        elif state == "skipped" and seat == raw["seats"][0]:
             assert seat["state"] == "skipped" and "讀不回" in seat["reason_text"]
             assert line == f"{line.split('：')[0]}：跳過；{seat['reason_text']}；房間層尚無可讀診斷，未評估"
         else:
             assert seat["state"] == "diagnosed_not_scored" and f"房間 長×寬×高（公尺）：{dimensions}；房間層：共振 " in line
+
+
+@pytest.mark.parametrize("state,expected", [("done", "外圈結論：細算完成"), ("failed", None), ("interrupted", None),
+    ("absent", None), ("broken", None)])
+def test_outer_conclusion_expires_when_stage_one_refine_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                state: str, expected: str | None) -> None:
+    # 外圈快照只記第二階段的細算：第一階段細算重跑、失敗或讀不回之後，舊的「細算完成」不准跟新的細算行並存（審查反例）。
+    from aosr.search.outer import conclude
+    store = _finished(tmp_path, monkeypatch)
+    conclude(store, SearchStatus.model_validate_json(store.status_path.read_bytes()), "complete")
+    path = store.path / "stage_one_refine.json"
+    raw = json.loads(path.read_bytes())
+    if state == "absent":
+        path.unlink()
+    elif state == "broken":
+        path.write_text("{")
+    else:
+        path.write_text(json.dumps(raw | {"state": state}))
+    lines = blocks(store)["stage"].lines
+    outer = [line for line in lines if line.startswith(("外圈結論：", "先前結論"))]
+    assert outer == ([expected] if expected else ["外圈結論：未判定（判定之後第一階段細算的狀態又變了）", "先前結論（已過期）：細算完成"])
+
+
+def test_unreadable_post_check_folder_only_breaks_its_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 入選後檢查的資料夾沒有權限時，只壞最後更新那一行與入選後檢查那一塊，整頁照樣組得出來（審查反例：exists() 會拋權限錯誤）。
+    configure_calculation_jax()
+    store = prepared(tmp_path, monkeypatch)
+    run(store, tmp_path / "child")
+    folder = store.path / "stage-one-check"
+    folder.chmod(0)
+    try:
+        shown = blocks(store)
+    finally:
+        folder.chmod(0o755)
+    # 最後更新照既有規矩：讀得到別的檔就不整塊標紅，讀不到的那一行寫出來（畫面照「讀不到」標紅那一行）。
+    name = (folder / "summary.json").relative_to(store.path).as_posix()
+    assert any(line.startswith(f"{name}：讀不到") for line in shown["updated"].lines)
+    assert shown["modal"].warning and shown["modal"].lines[0].startswith("入選後檢查摘要讀不回或內容不完整")
+    assert not any(block.warning for key, block in shown.items() if key != "modal")
 
 
 def test_updated_follows_stage_one_refine_and_post_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

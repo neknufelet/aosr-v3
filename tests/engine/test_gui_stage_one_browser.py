@@ -12,6 +12,8 @@ from tests.engine.test_stage_one_shortlist import _finished
 from aosr.search.stage_one_shortlist import RANK_AND_QUALITY
 from tests.engine._search_room_loop_cases import layout_for
 from tests.engine.test_gui_stage_one_view import second_stage
+from tests.engine._stage_one_post_check_cases import prepared
+from tests.engine.test_search_stage_one_post_check import run
 
 
 @pytest.mark.parametrize("width", [1440, 900])
@@ -60,4 +62,24 @@ def test_old_python_without_optional_fields_keeps_second_stage_scope(tmp_path: P
         assert page.locator("#search-scope").inner_text() == "第二階段子集：房間與材料固定，只搜尋對稱的喇叭與座位擺位。"
         page.screenshot(path=str(tmp_path / "stage-two-1440.png"), full_page=True)
         _assert_text_is_formatted(page)
+        _assert_quiet(watched)
+
+
+def test_post_check_reason_words_do_not_turn_red(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, browser: Browser) -> None:
+    # 入選後檢查的原因是寫入端原文（例如跳過時寫「讀不到細算結果」）：伺服器沒標警示就不准因字面標紅（審查反例）。
+    configure_calculation_jax()
+    store = prepared(tmp_path, monkeypatch)
+    run(store, tmp_path / "child")
+    path = store.path / "stage-one-check" / "summary.json"
+    raw = json.loads(path.read_bytes())
+    raw["seats"][0]["reason_text"] = "考卷：原因原文寫讀不到也失敗過，但這一席照常診斷"
+    path.write_text(json.dumps(raw))
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}") as watched:
+        page = watched.page
+        line = page.locator("#modal p", has_text="考卷：原因原文寫讀不到也失敗過")
+        line.wait_for()
+        data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
+        modal = next(block for block in data["blocks"] if block["key"] == "modal")
+        assert modal["red"] == "warning_only" and modal["warning"] is False
+        assert "notice" not in (line.get_attribute("class") or "")
         _assert_quiet(watched)

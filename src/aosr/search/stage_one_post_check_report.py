@@ -21,6 +21,7 @@ PARTICIPATION = "主位參與門檻（『主位參與大』的量法與數值）
 SUMMARY_STATE_TEXT = {"running": "開始過、沒有收尾紀錄", "done": "已收尾", "stopped": "已停止", "failed": "有診斷失敗"}
 RELATIVE = "主位參與的 dB 是相對值：相對同一支喇叭到同一個座位最強的那根共振（每一席、每支喇叭各自為基準）"
 OLD_IDENTITY = "這一段的診斷是舊版模態程式算的（模態身分跟現在的程式不同）；再跑一次細算會整段重算"
+NOT_YET = "入選後檢查還沒做"
 NO_DIAGNOSIS = ("not_started", "running", "stopped", "skipped")
 _NO_DIAGNOSIS_TEXT = {"not_started": "未開始", "running": "開始過、沒有收尾紀錄", "stopped": "未計算：已停止", "skipped": "跳過"}
 
@@ -105,7 +106,7 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
     try:
         summary = read_summary(store.path)
         if summary is None:
-            return (*lines, "入選後檢查還沒做")
+            return (*lines, NOT_YET)
         lines.append(f"入選後檢查狀態：{SUMMARY_STATE_TEXT[summary.state]}；{summary.message}")
         if summary.modal_identity != modal_identity():
             lines.append(OLD_IDENTITY)
@@ -159,12 +160,13 @@ def stage_one_post_check_summary(store: SearchStore) -> PostCheckSummaryText:
     try:
         summary = read_summary(store.path)
         if summary is None:
-            return PostCheckSummaryText(("入選後檢查還沒做",), False)
+            return PostCheckSummaryText((NOT_YET,), False)
         warning = summary.state == "failed"
         lines.append(f"入選後檢查狀態：{SUMMARY_STATE_TEXT[summary.state]}；{summary.message}")
         if summary.modal_identity != modal_identity():
             lines.append(OLD_IDENTITY)
         reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
+        rooms: list[_RoomGroup] = []
         for seat in summary.seats:
             label = f"試算 {seat.trial_number}"
             try:
@@ -184,6 +186,10 @@ def stage_one_post_check_summary(store: SearchStore) -> PostCheckSummaryText:
                     room = scheme.scene.room_m
                     room_text = f"房間 長×寬×高（公尺）：{room.Lx:.6f}×{room.Ly:.6f}×{room.Lz:.6f}"
                     if state == "diagnosed_not_scored":
+                        assert diagnosis.key is not None
+                        # 同一間房的診斷要一致才算數（命令列共用超線表時同一道核對）。
+                        _group_room(rooms, diagnosis.key, readout, _reference_span(reference),
+                                    variable=store.settings.layout.room_range is not None)
                         room_text += "；" + _room_lines(readout, _reference_span(reference))[0]
                 lines.append(f"{label}：{_state_text(state)}；{seat.reason_text or '無附加原因'}；{room_text}")
                 warning = warning or state == "failed"
