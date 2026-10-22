@@ -138,3 +138,44 @@ def stage_one_post_check_lines(store: SearchStore) -> tuple[str, ...]:
     except (OSError, ValueError, KeyError) as error:
         lines.append(f"入選後檢查摘要讀不回或內容不完整：{error}")
     return tuple(line.replace("\r", " ").replace("\n", "；") for line in lines)
+
+
+def stage_one_post_check_summary(store: SearchStore) -> tuple[str, ...]:
+    """網頁摘要：狀態與逐席房間層，沿用命令列的角色、狀態與共振計數。"""
+    lines: list[str] = []
+    try:
+        summary = read_summary(store.path)
+        if summary is None:
+            return ("入選後檢查還沒做",)
+        lines.append(f"入選後檢查狀態：{SUMMARY_STATE_TEXT[summary.state]}；{summary.message}")
+        if summary.modal_identity != modal_identity():
+            lines.append(OLD_IDENTITY)
+        reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
+        for seat in summary.seats:
+            label = _label(seat, summary.selection)
+            try:
+                state = seat.state
+                state_text = MODAL_STATE_TEXT.get(state, {"not_started": "未開始", "running": "開始過、沒有收尾紀錄",
+                    "stopped": "未計算：已停止", "skipped": "跳過"}.get(state, state))
+                expected = store.scheme_path_for(store.refine_result_path(seat.trial_number))
+                if seat.scheme_file != expected.relative_to(store.path).as_posix():
+                    raise ValueError("摘要的方案路徑不是這一席的細算方案")
+                scheme = load_scheme(expected)
+                room = scheme.scene.room_m
+                dimensions = f"{room.Lx:.6f}×{room.Ly:.6f}×{room.Lz:.6f}"
+                room_text = "房間層尚無可讀診斷，未評估"
+                if state not in ("not_started", "running", "stopped", "skipped"):
+                    diagnosis = read_diagnosis(store.path, seat, scheme, identity=summary.modal_identity)
+                    if diagnosis.state.value != state:
+                        raise ValueError("診斷狀態與摘要不同")
+                    if state == "diagnosed_not_scored":
+                        readout = read_modal_diagnosis(diagnosis, reference)
+                        room_text = _room_lines(readout, _reference_span(reference))[0]
+                lines.append(f"{label}：{state_text}；{seat.reason_text or '無附加原因'}；"
+                             f"房間 長×寬×高（公尺）：{dimensions}；{room_text}")
+            except (OSError, ValueError, KeyError) as error:
+                lines.append(f"{label}：失敗；診斷文件讀不回或內容不完整：{error}")
+        lines.append("每個超線共振的頻率與 T60 清單還沒上網頁")
+    except (OSError, ValueError, KeyError) as error:
+        lines.append(f"入選後檢查摘要讀不回或內容不完整：{error}")
+    return tuple(line.replace("\r", " ").replace("\n", "；") for line in lines)

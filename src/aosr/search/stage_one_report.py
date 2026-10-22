@@ -21,6 +21,7 @@ from aosr.search.stage_one_post_check_report import stage_one_post_check_lines
 from aosr.search.stage_one_shortlist import stage_one_shortlist_lines
 from aosr.search.stage_one_time_limit import time_limit_lines
 
+DECAY_NOTICE = "低頻拖尾不進自動排名，入選後要另外檢查"
 
 @dataclass(frozen=True)
 class StageOneReportRow:
@@ -117,7 +118,7 @@ def render_stage_one_text(report: StageOneSearchReport) -> str:
     """明列所有得分候選，峰谷高度對每支喇叭自己那條直線量。"""
     status = report.status
     reasons = counts_text(dict(sorted(status.illegal_reasons.items())))
-    lines = [report.wall_text, IDEAL_SOURCE_ASSUMPTION_TEXT, "低頻拖尾不進自動排名，入選後要另外檢查",
+    lines = [report.wall_text, IDEAL_SOURCE_ASSUMPTION_TEXT, DECAY_NOTICE,
         f"停止原因：{SEARCH_STATES.get(status.state, status.state)}；{status.message}",
         f"外圈結論：{conclusion_message(status)}",
         f"問過 {status.asked}；算完 {status.computed}；不合法 {status.illegal}（各原因：{reasons}）；"

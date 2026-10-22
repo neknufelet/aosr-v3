@@ -25,6 +25,9 @@ VARIABLE_ROOM = "房間隨候選而變，面積與容積照每一席自己的房
 NO_WINNER = "沒有細算第一名，不算差值"
 STATE_TEXT = {"pending": "尚未完成", "scored": "已計分", "unassessed": "不可估",
               "incomparable": "不能同表", "unreadable": "讀不回"}
+HEADINGS = ("試算編號", "角色", "搜尋名次", "細算名次", "主項單獨名次", "細算狀態", "房間 長×寬×高（公尺）",
+    "地板面積 m²", "容積 m³", "主項 dB", "座位穩健性 dB", "合分", "主項單獨排序鍵 dB",
+    "Δ主項 dB／Δ座位穩健性 dB／合分差／Δ地板面積 m²／Δ容積 m³", "比例提醒")
 
 
 @dataclass(frozen=True)
@@ -143,7 +146,8 @@ def _rank(value: int | None) -> str:
     return "無" if value is None else str(value)
 
 
-def _line(row: ShortlistRow, *, has_winner: bool) -> str:
+def shortlist_cells(row: ShortlistRow, *, has_winner: bool) -> tuple[str, ...]:
+    """命令列與網頁共用同一列已格式化的字串格子。"""
     reason = "；".join(row.reason.splitlines())
     state = STATE_TEXT[row.state] + (f"；{reason}" if row.state != "scored" else "")
     fields = [f"試算 {row.trial_number}", "、".join(row.roles), str(row.search_rank),
@@ -164,7 +168,11 @@ def _line(row: ShortlistRow, *, has_winner: bool) -> str:
     else:
         fields.append("此席沒有可用細算分數，不算差值")
     fields.append(room_proportion_text(row.proportion))
-    return "｜".join(fields)
+    return tuple(fields)
+
+
+def _line(row: ShortlistRow, *, has_winner: bool) -> str:
+    return "｜".join(shortlist_cells(row, has_winner=has_winner))
 
 
 def stage_one_shortlist_lines(store: SearchStore) -> tuple[str, ...]:
@@ -176,9 +184,7 @@ def stage_one_shortlist_lines(store: SearchStore) -> tuple[str, ...]:
         lines = [TITLE.format(top_n=shortlist.top_n), NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE,
             VARIABLE_ROOM if shortlist.room_range else FIXED_ROOM,
             PROPORTION_EXPLANATION,
-            "試算編號｜角色｜搜尋名次｜細算名次｜主項單獨名次｜細算狀態｜房間 長×寬×高（公尺）｜"
-            "地板面積 m²｜容積 m³｜主項 dB｜座位穩健性 dB｜合分｜主項單獨排序鍵 dB｜"
-            "Δ主項 dB／Δ座位穩健性 dB／合分差／Δ地板面積 m²／Δ容積 m³｜比例提醒"]
+            "｜".join(HEADINGS)]
         has_winner = any(row.refine_rank == 1 for row in shortlist.rows)
         return (*lines, *(_line(row, has_winner=has_winner) for row in shortlist.rows))
     except (OSError, ValueError, KeyError) as error:

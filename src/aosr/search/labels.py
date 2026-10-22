@@ -8,6 +8,9 @@ from aosr.reporting.display import (
     FURNITURE_FACES as FURNITURE_FACES, LISTENING_POINTS as LISTENING_POINTS, SPEAKERS as SPEAKERS,
 )
 
+STAGE_ONE_REFINE_STATES = {"not_started": "未開始", "selected": "進行中", "done": "完成",
+                          "interrupted": "中斷", "failed": "失敗"}
+
 # 喇叭設定的欄名與選項只有這一份；輸入頁、比較頁、搜尋頁與報告共用。
 SPEAKER_SETUP = {
     "speaker_setup": "喇叭類型與擺法", "kind": "喇叭類型", "mount": "喇叭擺法",

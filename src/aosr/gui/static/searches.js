@@ -10,8 +10,21 @@ function node(tag, text) {
   value.textContent = text;
   return value;
 }
+function tableElement(headings, rows) {
+  const element = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const value of headings) head.append(node("th", value));
+  element.append(head);
+  for (const row of rows) {
+    const line = document.createElement("tr");
+    for (const value of row) line.append(node("td", value));
+    element.append(line);
+  }
+  return element;
+}
 function drawDetail(data) {
   $("title").textContent = `搜尋進度：${data.name}`;
+  if (data.scope_text) $("search-scope").textContent = data.scope_text;
   $("search-content").replaceChildren();
   for (const block of data.blocks) {
     const section = node("section", "");
@@ -22,11 +35,20 @@ function drawDetail(data) {
       // 伺服器標成警示的那一塊整塊標紅；其他塊裡帶這幾個字的那一行也標紅（複查）。
       // 交接與擺位附件只把讀取或計算失敗標紅；暫時、舊了與模型不連續按預設不標紅。
       const summaryBlock = ["crossover", "stability"].includes(block.key);
-      const warningWords = summaryBlock ? ["讀不到", "失敗"] : ["讀不到", "中斷", "失敗", "判不出", "未確認", "已過期"];
+      const warningWords = summaryBlock ? ["讀不到", "失敗"] : ["讀不到", "中斷", "失敗", "判不出", "未確認", "已過期", "暫停"];
       if ((block.warning && !summaryBlock) || warningWords.some((word) => line.includes(word))) {
         p.className = "notice";
       }
       section.append(p);
+    }
+    if (block.table) {
+      const wrapper = node("div", "");
+      wrapper.className = "table-scroll";
+      wrapper.tabIndex = 0;
+      wrapper.setAttribute("role", "region");
+      wrapper.setAttribute("aria-label", block.title);
+      wrapper.append(tableElement(block.table.headings, block.table.rows));
+      section.append(wrapper);
     }
     $("search-content").append(section);
   }

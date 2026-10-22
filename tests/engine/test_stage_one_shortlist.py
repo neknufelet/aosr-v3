@@ -8,6 +8,7 @@ import re
 import pytest
 
 from aosr.search.settings import SearchSettings
+from aosr.search.layout_settings import LayoutSettings
 from aosr.reporting.stage_one_result import save_stage_one_result
 from aosr.scoring.stage_one_score import score_stage_one
 from aosr.search.run import CandidateJob
@@ -20,10 +21,11 @@ from tests.engine._stage_one_refine_cases import pool, snapshot
 from tests.engine.test_search_stage_one_refine import refine
 
 
-def _finished(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, variable: bool = True) -> SearchStore:
-    source = search.make_store(tmp_path / "source", budget=4, layout=layout_for() if variable else None)
+def _finished(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, variable: bool = True,
+              budget: int = 4, top_n: int = 3, layout: LayoutSettings | None = None) -> SearchStore:
+    source = search.make_store(tmp_path / "source", budget=budget, layout=layout or (layout_for() if variable else None))
     settings = SearchSettings.model_validate(source.settings.model_dump(mode="json") | {
-        "stage_one_refine": {"top_n": 3, "far_control_min_front_distance_m": .8}})
+        "stage_one_refine": {"top_n": top_n, "far_control_min_front_distance_m": .8}})
     store = SearchStore.create(tmp_path / "searches", project=source.project, settings=settings,
         identity=source.identity, versions={"python": "test", "numpy": "test", "optuna": "test"})
     search.run(store, search.FakeCompute(store, monkeypatch))
