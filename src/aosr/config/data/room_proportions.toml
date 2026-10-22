@@ -1,0 +1,42 @@
+# ITU-R BS.1116-3 (02/2015) §8.2.2.3，PDF 頁 15；
+# EBU Tech 3276, 2nd edition (1998) Appendix 2 §2，PDF 頁 10。
+# 原文與符號由主對話核過；來源欄同位置配對。門檻為十進位字串，精確載入。
+# 僅供第一階段報告提醒，不接第二階段擺位檢查、物理計算、選席與評分。
+
+[[entry]]
+id = "room_ratio_band"
+standard = ["ITU-R BS.1116-3 (02/2015)", "EBU Tech 3276, 2nd edition (1998)"]
+clause = ["§8.2.2.3", "Appendix 2 §2"]
+pdf_page = [15, 10]
+quote = [
+  "The following dimension ratios should be observed to ensure a reasonably uniform distribution of the low-frequency eigentones of the room: 1.1 w / h ≤ l / h ≤ 4.5 w / h – 4 where: l : length w : width h : height.",
+  "To ensure a reasonably uniform distribution of the low–frequency eigentones, the proportions of the room must lie within controlled limits. The following limits for the length to height and the width to height ratios should be observed: 1.1w/h ≤ l/h ≤ 4.5 w/h – 4 l <3 h w <3 h where: l = length (larger dimension of floor plan, irrespective of orientation) w = width (shorter dimension of floor plan, irrespective of orientation) h = height.",
+]
+kind = "band"
+description = "主對話讀法：依 EBU 定義，l 為地板長邊、w 為短邊，不管朝向，h 為高度；ITU 同式照此讀。尺寸取該席細算結果方案的房間，浮點尺寸轉精確有理數，門檻從十進位字串轉精確有理數；含兩端的比例帶之外才提醒。這是參考聆聽室建議，不推論比例優劣。"
+[entry.thresholds]
+lower_factor = "1.1"
+upper_factor = "4.5"
+upper_offset = "4"
+
+[[entry]]
+id = "room_height_ratios"
+standard = ["ITU-R BS.1116-3 (02/2015)", "EBU Tech 3276, 2nd edition (1998)"]
+clause = ["§8.2.2.3", "Appendix 2 §2"]
+pdf_page = [15, 10]
+quote = ["Additionally, the conditions l / h < 3 and w / h < 3 should apply.", "l <3 h w <3 h"]
+kind = "below"
+description = "主對話讀法：l、w、h 同比例帶的長短邊與高度定義；長高比或寬高比達到上限就各自提醒，嚴格小於才不提醒；全部使用精確有理數。"
+[entry.thresholds]
+upper = "3"
+
+[[entry]]
+id = "room_integer_ratios"
+standard = ["EBU Tech 3276, 2nd edition (1998)"]
+clause = ["Appendix 2 §2"]
+pdf_page = [10]
+quote = ["In addition, ratios of l, w and h which are within ±5% of integer values should also be avoided."]
+kind = "near_integer"
+description = "主對話讀法：對長寬比、長高比、寬高比各自檢查每個正整數 n，含一；比值與 n 的絕對差不超過 relative_width 乘 n 就提醒，含邊界。採相對讀法，不採固定絕對差，並列出全部命中的整數；全部使用精確有理數。"
+[entry.thresholds]
+relative_width = "0.05"

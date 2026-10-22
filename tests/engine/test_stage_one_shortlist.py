@@ -296,7 +296,10 @@ def test_exact_notices_and_no_ratio_claims_or_repeated_assumptions(tmp_path: Pat
     assert module.FIXED_ROOM == "房間固定，下列是同一間房的不同擺法"
     assert module.NO_WINNER == "沒有細算第一名，不算差值"
     text = "\n".join(lines)
-    assert all(word not in text for word in ("比例較好", "最佳比例", "黃金比例", "比例最好",
+    # PR-7c 指定說明句含否定語「不表示哪個比例較好」；只排除這一句，其他禁語照舊核。
+    checked_text = text.replace("比例提醒照 ITU-R BS.1116-3 與 EBU Tech 3276 對參考聆聽室的建議，"
+        "只提醒、不改名次與分數，也不表示哪個比例較好", "")
+    assert all(word not in checked_text for word in ("比例較好", "最佳比例", "黃金比例", "比例最好",
                                             "在這個牆面假設下", "未加入實際喇叭的低頻衰減", "低頻拖尾不進自動排名"))
 
 

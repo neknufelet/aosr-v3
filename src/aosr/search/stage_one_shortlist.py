@@ -3,12 +3,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from aosr.config.paths import config_path
+from aosr.config.room_proportions import load_room_proportions
 from aosr.scoring.stage_one_score import PRINCIPAL, ROBUSTNESS
+from aosr.search.room_proportions import (
+    PROPORTION_EXPLANATION, RoomProportionNotice, room_proportion_notice, room_proportion_text,
+)
 from aosr.search.run import ComputeFailed, IdentityChanged
 from aosr.search.stage_one_refine_record import RefinedSeat, StageOneRefineStatus, read_stage_one_refined_result
 from aosr.search.stage_one_refine_report import _mismatch
 from aosr.search.stage_one_selection_contract import SelectionSeat
 from aosr.search.store import SearchStore
+
+_ROOM_PROPORTIONS = load_room_proportions(config_path("room_proportions.toml"))
 
 TITLE = "入選清單（細算後；前 {top_n} 席照細算名次，對照列出來、不算入選）"
 # 這兩句是主對話定的報告字樣；不是決策紙所引的老闆原話。
@@ -62,6 +69,7 @@ class ShortlistRow:
     values: ShortlistValues | None = None
     principal_rank: int | None = None
     delta: ShortlistDelta | None = None
+    proportion: RoomProportionNotice | None = None
 
 
 @dataclass(frozen=True)
@@ -96,7 +104,8 @@ def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat,
         area = room.Lx * room.Ly
         values = ShortlistValues(room.Lx, room.Ly, room.Lz, area, area * room.Lz,
             parts[PRINCIPAL], parts[ROBUSTNESS], score.screening_total, score.principal_only_sort_key_db)
-        return replace(row, refine_rank=refined.refine_rank if row.is_top_n else None, values=values)
+        return replace(row, refine_rank=refined.refine_rank if row.is_top_n else None, values=values,
+            proportion=room_proportion_notice(values.length_m, values.width_m, values.height_m, _ROOM_PROPORTIONS))
     except (OSError, ValueError, KeyError, ComputeFailed, IdentityChanged) as error:
         return replace(row, state="unreadable", reason=f"細算結果讀不回：{error}")
 
@@ -155,6 +164,7 @@ def _line(row: ShortlistRow, *, has_winner: bool) -> str:
             delta.screening_total, delta.floor_area_m2, delta.volume_m3)))
     else:
         fields.append("此席沒有可用細算分數，不算差值")
+    fields.append(room_proportion_text(row.proportion))
     return "｜".join(fields)
 
 
@@ -166,9 +176,10 @@ def stage_one_shortlist_lines(store: SearchStore) -> tuple[str, ...]:
             return ()
         lines = [TITLE.format(top_n=shortlist.top_n), NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE,
             VARIABLE_ROOM if shortlist.room_range else FIXED_ROOM,
+            PROPORTION_EXPLANATION,
             "試算編號｜角色｜搜尋名次｜細算名次｜主項單獨名次｜細算狀態｜房間 長×寬×高（公尺）｜"
             "地板面積 m²｜容積 m³｜主項 dB｜座位穩健性 dB｜合分｜主項單獨排序鍵 dB｜"
-            "Δ主項 dB／Δ座位穩健性 dB／合分差／Δ地板面積 m²／Δ容積 m³"]
+            "Δ主項 dB／Δ座位穩健性 dB／合分差／Δ地板面積 m²／Δ容積 m³｜比例提醒"]
         has_winner = any(row.refine_rank == 1 for row in shortlist.rows)
         return (*lines, *(_line(row, has_winner=has_winner) for row in shortlist.rows))
     except (OSError, ValueError, KeyError) as error:
