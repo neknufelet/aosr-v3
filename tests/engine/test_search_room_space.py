@@ -197,6 +197,18 @@ def test_floor_area_at_or_above_minimum_is_legal(minimum: float) -> None:
     assert check(project(), chosen, place(project(), chosen, LayoutParams(1.0, 1.0, 2.0))) == ()
 
 
+def test_floor_area_equal_by_product_is_legal_even_if_division_overshoots() -> None:
+    # 乘積剛好等於下限就合法；這組邊反除回去兩邊各多出最末一位，不准因此記成面積不足。
+    from aosr.search.layout import project_in
+
+    room = Room(Lx=6.975, Ly=3.665, Lz=3.0)
+    minimum = room.Lx * room.Ly
+    assert minimum / room.Ly - room.Lx > 0.0 and minimum / room.Lx - room.Ly > 0.0
+    chosen = settings(room_range={"Lx": RANGES["Lx"], "Ly": RANGES["Ly"], "min_floor_area_m2": minimum})
+    candidate = project_in(project(), room)
+    assert check(candidate, chosen, place(candidate, chosen, LayoutParams(1.0, 1.0, 2.0))) == ()
+
+
 @pytest.mark.parametrize("edges,amount", [(("Lx", "Ly"), 2.0), (("Lx",), 3.0),
                                           (("Ly",), 2.0), (("Lz",), 2.0)])
 def test_floor_deficit_is_shortest_single_adjustable_edge_extension(edges: tuple[str, ...], amount: float) -> None:
