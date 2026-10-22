@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, Inexact, localcontext
 from fractions import Fraction
 import math
 from typing import Literal
@@ -67,9 +67,15 @@ def room_proportion_notice(length_m: float, width_m: float, height_m: float,
 
 
 def _decimal(value: Fraction | None) -> str:
-    """門檻照表上的十進位寫法印，不印成分數、不捨入、不用科學記號（表上的門檻都是有限小數）。"""
+    """門檻照表上的十進位數值印，不印成分數、不用科學記號；尾端的零不留（"0.050" 印成 0.05）。
+
+    表上的門檻都是有限小數，分母只有 2 與 5：商的位數不超過分子位數加三倍分母位數，
+    精度給到這麼多、不精確就拋錯，所以不會像預設 28 位那樣把長門檻捨掉。
+    """
     assert value is not None
-    return f"{Decimal(value.numerator) / Decimal(value.denominator):f}"
+    with localcontext(prec=len(str(value.numerator)) + 3 * len(str(value.denominator))) as context:
+        context.traps[Inexact] = True
+        return f"{Decimal(value.numerator) / Decimal(value.denominator):f}"
 
 
 def _hit_text(hit: RoomProportionHit) -> str:

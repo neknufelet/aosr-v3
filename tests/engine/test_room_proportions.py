@@ -162,8 +162,10 @@ def test_hand_calculated_rooms(dimensions: tuple[float, float, float], kinds: tu
 
 def test_threshold_text_keeps_table_decimals() -> None:
     from aosr.search.room_proportions import _decimal
-    # 審查反例：浮點的 g 格式會把 1.234567 捨成 1.23457、把 0.0000001 印成 1e-07。
-    for text in ("1.1", "4.5", "4", "3", "0.05", "1.234567", "0.0000001", "12345678.125"):
+    # 審查反例：浮點的 g 格式會把 1.234567 捨成 1.23457、把 0.0000001 印成 1e-07；
+    # 預設 28 位精度會把 29 位的整數捨掉最後一位；2 的負二十次方的分母短、商卻有十四位有效數字。
+    for text in ("1.1", "4.5", "4", "3", "0.05", "1.234567", "0.0000001", "12345678.125",
+                 "10000000000000000000000000001", "0.00000095367431640625"):
         assert _decimal(Fraction(text)) == text
 
 
