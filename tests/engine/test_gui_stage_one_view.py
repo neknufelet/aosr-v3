@@ -340,14 +340,13 @@ def test_updated_follows_stage_one_refine_and_post_check(tmp_path: Path, monkeyp
     run(store, tmp_path / "child")
     refine, summary = store.path / "stage_one_refine.json", store.path / "stage-one-check" / "summary.json"
     base = int(time.time()) - 3600
-    for name, offset in (("status.json", 0), ("ledger.jsonl", 0), ("stage_one_refine.json", 600),
-                         ("stage-one-check/summary.json", 1200)):
-        os.utime(store.path / name, (base + offset, base + offset))
+    for file, offset in ((store.path / "status.json", 0), (store.path / "ledger.jsonl", 0), (refine, 600), (summary, 1200)):
+        os.utime(file, (base + offset, base + offset))
     # 兩個檔依序拿掉（還沒做的檔本來就不存在）：最新時間跟著退回，也不寫讀不到。
     for newest, later in ((base + 1200, summary), (base + 600, refine), (base, None)):
         updated = blocks(store)["updated"]
         assert updated.lines[0].startswith(f"最後更新：{datetime.fromtimestamp(newest).astimezone():%Y-%m-%d %H:%M:%S %Z}")
-        assert len(updated.lines) == 1 and not updated.warning
+        assert updated.lines[1:] == () and not updated.warning
         if later is not None:
             later.unlink()
 

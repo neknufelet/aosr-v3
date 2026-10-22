@@ -44,10 +44,11 @@ from aosr.search.stage_one_shortlist import (
 )
 from aosr.search.room_proportions import PROPORTION_EXPLANATION
 from aosr.search.stage_one_post_check_report import TITLE as POST_CHECK_TITLE, stage_one_post_check_summary
+from aosr.search.stage_one_post_check_record import summary_path
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
 # 第一階段細算與入選後檢查各寫自己的檔；跑那一個多小時裡最後更新時間要跟著動，還沒開始就不該存在。
-STAGE_ONE_LATER = ("stage_one_refine.json", "stage-one-check/summary.json")
+STAGE_ONE_LATER = ("stage_one_refine.json", summary_path(Path()).as_posix())
 INTERRUPTED = "狀態檔說還在跑，但沒有計算行程拿著這個資料夾：上次中斷了，要接續請叫助理"
 _T = TypeVar("_T")
 
