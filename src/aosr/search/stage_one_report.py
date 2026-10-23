@@ -17,6 +17,7 @@ from aosr.search.report_stability import STAGE_ONE_OUT_OF_SCOPE as STABILITY_OUT
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.stage_one_refine_report import stage_one_refine_lines
+from aosr.search.stage_one_refine_record import StageOneRefineStatus, stale_conclusion_lines
 from aosr.search.stage_one_post_check_report import stage_one_post_check_lines
 from aosr.search.stage_one_shortlist import stage_one_shortlist_lines
 from aosr.search.stage_one_time_limit import time_limit_lines
@@ -47,6 +48,7 @@ class StageOneSearchReport:
     time_limit_lines: tuple[str, ...] = ()
     room_range: bool = False
     shortlist_lines: tuple[str, ...] = ()
+    refine_state: str | None = None  # 第一階段細算摘要現在的狀態；沒有或讀不回是 None，外圈結論照網頁同一條判過期
 
 
 def _read(store: SearchStore, row: ledger.LedgerRow) -> StageOneReportRow:
@@ -85,7 +87,15 @@ def build_stage_one_report(store: SearchStore) -> StageOneSearchReport:
     return StageOneSearchReport(wall_assumption_text(store.project), status,
         tuple(_read(store, row) for row in scored), tuple(_read(store, row) for row in excluded),
         stage_one_refine_lines(store), stage_one_post_check_lines(store), time_limit_lines(store),
-        room_range=store.settings.layout.room_range is not None, shortlist_lines=stage_one_shortlist_lines(store))
+        room_range=store.settings.layout.room_range is not None, shortlist_lines=stage_one_shortlist_lines(store),
+        refine_state=_refine_state(store))
+
+
+def _refine_state(store: SearchStore) -> str | None:
+    try:
+        return StageOneRefineStatus.model_validate_json((store.path / "stage_one_refine.json").read_bytes()).state
+    except (OSError, ValueError):
+        return None
 
 
 def _feature(feature: Feature) -> str:
@@ -115,13 +125,19 @@ def _speaker_lines(result: StageOneResult) -> list[str]:
     return lines
 
 
+def _conclusion_lines(report: StageOneSearchReport) -> tuple[str, ...]:
+    line = f"外圈結論：{conclusion_message(report.status)}"
+    stale = stale_conclusion_lines(report.status.outer.conclusion, report.refine_state)
+    return stale if stale is not None and not line.startswith("外圈結論：未判定") else (line,)
+
+
 def render_stage_one_text(report: StageOneSearchReport) -> str:
     """明列所有得分候選，峰谷高度對每支喇叭自己那條直線量。"""
     status = report.status
     reasons = counts_text(dict(sorted(status.illegal_reasons.items())))
     lines = [report.wall_text, IDEAL_SOURCE_ASSUMPTION_TEXT, DECAY_NOTICE,
         f"停止原因：{SEARCH_STATES.get(status.state, status.state)}；{status.message}",
-        f"外圈結論：{conclusion_message(status)}",
+        *_conclusion_lines(report),
         f"問過 {status.asked}；算完 {status.computed}；不合法 {status.illegal}（各原因：{reasons}）；"
         f"不可估 {status.excluded.get('unassessed', 0)}；不能同表 {status.excluded.get('incomparable', 0)}",
         "名次｜試算編號｜離前牆／喇叭間距／聆聽距離（公尺）｜"

@@ -13,6 +13,7 @@ from aosr.reporting.stage_one_result import load_stage_one_result, save_stage_on
 from aosr.scoring.contract import Feature
 from aosr.scoring.contract_base import Flag
 from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT
+from aosr.search.outer_status import OuterConclusion
 from tests.engine import _search_stage_one_cases as cases
 
 
@@ -241,3 +242,32 @@ def test_area_report_lines_show_spread_and_reason(tmp_path: Path, monkeypatch: p
     assert _area_lines(selection, room_varies=True) == [
         f"面積對照門檻：前 N 面積跨度（最大減最小，再除以最小）{spread}，不超過 10% 才開；10%、15% 是工程暫定", reason]
     assert _area_lines(selection, room_varies=False) == ["房間固定，面積對照不適用"]
+
+
+@pytest.mark.parametrize("conclusion,state,stale", [("complete", "done", False), ("complete", "failed", True),
+    ("complete", "interrupted", True), ("complete", "selected", True), ("complete", "absent", True),
+    ("complete", "broken", True), ("user_stopped", "failed", False)])
+def test_cli_outer_conclusion_expires_like_the_web_when_stage_one_refine_changes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        conclusion: OuterConclusion, state: str, stale: bool) -> None:
+    # #895：外圈快照只記第二階段細算；第一階段細算重跑、失敗或讀不回之後，命令列報告不准再印舊的「細算完成」（網頁同一道核對）。
+    from aosr.search.cli import main
+    from aosr.search.outer import conclude
+    from aosr.search.outer_status import OUTER_MESSAGES, conclusion_message
+    from aosr.search.run import SearchStatus
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_refine import ROWS, refine
+    store = pool(tmp_path, monkeypatch, ROWS)
+    assert refine(store, cases.FakeCompute(store, monkeypatch)).state == "done"
+    concluded = conclude(store, SearchStatus.model_validate_json(store.status_path.read_bytes()), conclusion)
+    path = store.path / "stage_one_refine.json"
+    if state == "absent":
+        path.unlink()
+    elif state == "broken":
+        path.write_text("{")
+    else:
+        path.write_text(json.dumps(json.loads(path.read_bytes()) | {"state": state}))
+    assert main(["report", "--search", str(store.path)]) == 0
+    outer = [line for line in capsys.readouterr().out.splitlines() if line.startswith(("外圈結論：", "先前結論"))]
+    assert outer == (["外圈結論：未判定（判定之後第一階段細算的狀態又變了）", f"先前結論（已過期）：{OUTER_MESSAGES[conclusion]}"]
+        if stale else [f"外圈結論：{conclusion_message(concluded)}"])
