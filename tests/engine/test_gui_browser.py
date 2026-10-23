@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 import threading
@@ -21,7 +22,7 @@ import pytest
 import uvicorn
 from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, Route, sync_playwright
 
-from aosr.gui.app import GuiSettings, create_app
+from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
@@ -434,6 +435,86 @@ def test_template_save_does_not_overwrite_same_name_scheme(tmp_path: Path, brows
         page.locator("#save").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
         assert (tmp_path / "schemes" / f"{name}.json").read_bytes() == before
+        assert all("409" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
+def _load_template(page: Page) -> None:
+    # 先清掉旁邊上一次的字，等的才是這一次載入寫的那句。
+    page.evaluate("() => { document.getElementById('template-note').textContent = ''; }")
+    page.locator("#load-template").click()
+    page.wait_for_function("() => document.querySelector('#template-note').textContent.startsWith('已載入')")
+
+
+def test_template_load_failure_keeps_form(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#room-Lx").fill("5.5")
+        # 範本讀不到：表單原樣、原因寫在按鈕旁邊。
+        page.route(lambda url: "template=" in url,
+                   lambda route: route.fulfill(status=400, json={"error": "範本壞了"}))
+        page.locator("#template-list").select_option("stage_one")
+        page.locator("#load-template").click()
+        page.wait_for_function("() => document.querySelector('#template-note').textContent.startsWith('沒有載入範本')")
+        assert "範本壞了" in str(page.locator("#template-note").text_content())
+        assert page.locator("#room-Lx").input_value() == "5.5"
+        assert page.locator("#save-id").input_value() == "reference-room-original"
+        # 瀏覽器記的那一筆「載入失敗」是考卷自己造的 400；JS 自己不准拋錯。
+        assert [re.findall(r"status of (\d+)", text) for text in watched.console_errors] == [["400"]]
+        assert watched.page_errors == []
+
+
+def test_stage_one_template_loads_and_never_overwrites(tmp_path: Path, browser: Browser) -> None:
+    raw = json.loads((repo_root() / "blueprint" / "scheme_stage_one_template.json").read_text(encoding="utf-8"))
+    walls = raw["scene"]["impedance_pa_s_per_m_by_wall"]
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        assert page.locator("#save-id").input_value() == "reference-room-original"
+        page.locator("#room-Lx").fill("5.5")
+        # 換範本跟「打開」一樣：上一份的量測草稿、結果連結、封存提示都收掉。
+        page.locator("#material-kind-ceiling").select_option("measured_impedance")
+        page.wait_for_selector("#measured-cancel-ceiling")
+        page.evaluate("() => { for (const id of ['result-link', 'result-stale', 'scheme-archive-notice'])"
+                      " document.getElementById(id).hidden = false; }")
+        page.locator("#template-list").select_option("stage_one")
+        _load_template(page)
+        assert page.locator("#template-note").text_content() == \
+            "已載入「第一階段範本（六面 30ρc、全向聲源、無家具）」；要留下來請按「另存新名字」"
+        assert page.locator("#save-id").input_value() == raw["scheme_id"]
+        assert page.locator("#source-model").input_value() == raw["source_model"]
+        assert page.locator("#room-Lx").input_value() == f"{raw['scene']['room_m']['Lx']:g}"
+        for wall, value in walls.items():
+            assert float(page.locator(f"#wall-{wall}").input_value()) == value
+        assert page.locator("#measured-cancel-ceiling").count() == 0
+        for hidden in ("#result-link", "#result-stale", "#scheme-archive-notice"):
+            assert page.locator(hidden).is_hidden(), hidden
+        # 牆換成構造再換回固定阻抗：填回去的是載入範本的 30ρc，不是開頁時參考房的值。
+        page.locator("#material-kind-floor").select_option("assembly")
+        page.wait_for_selector("#wall-editor-floor [data-layer-field]")
+        page.locator("#material-kind-floor").select_option("constant_impedance")
+        page.wait_for_selector("#wall-floor")
+        assert float(page.locator("#wall-floor").input_value()) == walls["floor"]
+        page.locator("#material-kind-floor").select_option("assembly")
+        page.wait_for_selector("#wall-editor-floor [data-layer-field]")
+        # 第一次按「儲存」照名字存一份；再載入一次範本、改了按「儲存」不准蓋掉那一份。
+        _load_template(page)
+        assert page.locator("#wall-floor").count() == 1
+        page.locator("#save").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
+        saved = tmp_path / "schemes" / f"{raw['scheme_id']}.json"
+        before = saved.read_bytes()
+        assert json.loads(before)["scene"]["impedance_pa_s_per_m_by_wall"] == walls
+        _load_template(page)
+        page.locator("#room-Lx").fill("5.5")
+        page.locator("#save").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
+        assert saved.read_bytes() == before
+        assert page.locator("#template-note").text_content() == ""
+        # 換回參考房：整張表單跟開頁時一樣。
+        page.locator("#template-list").select_option("reference")
+        _load_template(page)
+        assert page.locator("#save-id").input_value() == "reference-room-original"
+        assert page.locator("#source-model").input_value() == "product_default"
         assert all("409" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
 

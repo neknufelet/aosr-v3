@@ -83,6 +83,33 @@ def test_page_example_validation_and_scheme_routes(tmp_path: Path) -> None:
         assert client.put("/api/schemes/..", json=document).status_code != 200
 
 
+def test_example_template_reads_only_registered_names(tmp_path: Path) -> None:
+    raw = json.loads((repo_root() / "blueprint" / "scheme_stage_one_template.json").read_text(encoding="utf-8"))
+    rho_c = raw["scene"]["density_kg_m3"] * raw["scene"]["sound_speed_m_s"]
+    with _app(tmp_path) as client:
+        # 沒給範本就是參考房，跟明寫 reference 整份相同（開頁預設不變）。
+        default = client.get("/api/example").json()
+        assert default["scheme"]["scheme_id"] == "reference-room-original"
+        assert client.get("/api/example?template=reference").json() == default
+        stage_one = client.get("/api/example?template=stage_one")
+        assert stage_one.status_code == 200
+        scheme = stage_one.json()["scheme"]
+        for key in ("scheme_id", "source_model", "speakers", "channel_group"):
+            assert scheme[key] == raw[key]
+        assert scheme["scheme_id"] == "stage-one-template" and scheme["source_model"] == "omnidirectional"
+        assert scheme["scene"]["room_m"] == raw["scene"]["room_m"]
+        walls = scheme["scene"]["impedance_pa_s_per_m_by_wall"]
+        assert walls == raw["scene"]["impedance_pa_s_per_m_by_wall"]
+        assert set(walls) == {"floor", "ceiling", "x0", "xL", "y0", "yL"}
+        assert all(value == pytest.approx(30 * rho_c) for value in walls.values())
+        assert stage_one.json()["rho_c"] == rho_c
+        # 不認得的名字（含路徑樣子、空字串）一律 400，不去讀檔。
+        for name in ("../scheme_reference_room", "scheme_stage_one_template.json", "", "STAGE_ONE"):
+            refused = client.get("/api/example", params={"template": name})
+            assert refused.status_code == 400
+            assert refused.json() == {"error": f"不認得的範本：{name}"}
+
+
 def test_feature_match_note_follows_example_tolerance(tmp_path: Path,
                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     fake_repo = tmp_path / "repo"

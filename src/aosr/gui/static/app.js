@@ -348,11 +348,11 @@ async function updateMultiples() {
   }
 }
 // 訊息列：成功（存好了、檢查通過、算完了）用 .ok，警示與錯誤用 .notice；兩種都是內文字級。
-// 訊息列換了新的一句，「打開」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
+// 訊息列換了新的一句，「打開」「載入範本」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
 function say(text, kind) {
   $("messages").textContent = text;
   $("messages").className = kind;
-  for (const note of ["open-note", "save-as-note"]) sayBeside(note, "", "");
+  for (const note of ["open-note", "template-note", "save-as-note"]) sayBeside(note, "", "");
 }
 // 「打開」與「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它們的結果（沒打開的原因、空名字、
 // 檢查沒過、撞名、存好了）寫在按鈕旁邊，用那一列自己的字眼。
@@ -419,6 +419,30 @@ async function openScheme() {
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
   await refreshPlan();
+}
+async function loadTemplate() {
+  // 範本換掉整張表單（同「打開」）；不是存過的方案，按「儲存」會另開新檔、不蓋掉同名的。
+  const select = $("template-list");
+  const label = select.options[select.selectedIndex].text;
+  let example;
+  if (!await changeInputScheme(async () => {
+    example = await api(`/api/example?template=${encodeURIComponent(select.value)}`);
+    return example.scheme;
+  })) {
+    sayBeside("template-note", `沒有載入範本：${$("messages").textContent}`, "notice");
+    return;
+  }
+  // 牆改回「固定阻抗」時填的預設值跟著載入的範本（第一階段範本是 30ρc）。
+  fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
+  for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
+  renderWalls();
+  openedId = null;
+  $("scheme-archive-notice").hidden = true;
+  $("result-link").hidden = true;
+  $("result-stale").hidden = true;
+  // 檢查會換訊息列、清掉旁邊的字，所以載入成功那句等檢查完才寫。
+  await refreshPlan();
+  sayBeside("template-note", `已載入「${label}」；要留下來請按「另存新名字」`, "ok");
 }
 async function saveAs() {
   const name = $("save-as-id").value.trim();
@@ -744,6 +768,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
   $("open-scheme").onclick = () => action(openScheme);
+  $("load-template").onclick = () => action(loadTemplate);
   $("archive-scheme").onclick = () => action(() => archiveScheme($("scheme-list").value));
   $("scheme-list").onchange = () => { $("archive-scheme").disabled = !$("scheme-list").value; };
   $("save-as").onclick = () => action(saveAs);
