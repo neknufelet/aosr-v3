@@ -23,4 +23,5 @@
 .best-plan-grid svg{width:100%;height:280px;box-sizing:border-box}
 #best-plan-legend{display:flex;flex-wrap:wrap;gap:.4rem 1.5rem;font-size:.9rem}
 #best-plan-detail{white-space:pre-line}
+#best-frequency-note,#best-rfz-absent{color:inherit;overflow-wrap:anywhere}
 @media(max-width:800px){#best-rfz-charts,.best-plan-grid{grid-template-columns:1fr}}

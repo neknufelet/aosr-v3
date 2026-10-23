@@ -7,8 +7,14 @@
   let plots = {frequency: [], rfz: []}, selected = null, versions = null, shown = "", loading = "", requestNumber = 0;
   function clearChart(key) {
     (plots[key] || []).forEach((plot) => plot.destroy()); plots[key] = [];
-    if (key === "frequency") { $("best-frequency-chart").replaceChildren(); $("best-frequency-furniture-note").hidden = true; $("best-frequency-furniture-note").textContent = ""; }
-    else if (key === "rfz") { $("best-rfz-charts").replaceChildren(); $("rfz-zones").replaceChildren(); $("rfz-window").textContent = ""; }
+    if (key === "frequency") {
+      $("best-frequency-chart").replaceChildren(); $("best-frequency-furniture-note").hidden = true; $("best-frequency-furniture-note").textContent = "";
+      $("best-frequency-note").textContent = ""; $("best-frequency-note").hidden = true;
+    }
+    else if (key === "rfz") {
+      $("best-rfz-charts").replaceChildren(); $("rfz-zones").replaceChildren(); $("rfz-window").textContent = "";
+      $("best-rfz-absent").textContent = ""; $("best-rfz-absent").hidden = true; $("rfz-explain").hidden = false;
+    }
     else $("best-plan-content").hidden = true;
     $("best-" + key).querySelector(".chart-error").textContent = "";
   }
@@ -17,13 +23,27 @@
     return [{label: x, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))},
       {label: y, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))}];
   }
+  const STANDARD_FREQUENCIES = [1, 10, 100, 1000, 10000].flatMap((scale) => [1, 2, 3, 4, 5, 6, 7, 8, 9].map((lead) => lead * scale));
+  function frequencyAxes(frequencies) {
+    // 跨不到兩個十倍（第一階段 20～300 Hz）時圖表庫只標 100 一格（看真資料截圖抓到）；改標首位 1、2、3、5、不帶小數。第二階段跨三個十倍以上，照舊。
+    const result = axes("頻率（Hz）", "聲級（dB）");
+    const low = frequencies[0], high = frequencies[frequencies.length - 1];
+    if (!(low > 0 && high / low < 100)) return result;
+    // 拖曳縮放後圖表庫的分割點從可見下界起算（21、31…，審查抓到），所以分割點自己排在 1～9 乘十的次方上。
+    result[0].splits = (u, axisIdx, min, max) => STANDARD_FREQUENCIES.filter((v) => v >= min && v <= max);
+    result[0].filter = (u, splits) => splits.map((v) => /^[1235]0*$/.test(String(v)) ? v : null);
+    result[0].values = (u, values) => values.map((v) => v === null ? "" : String(v));
+    return result;
+  }
   function frequency(data) {
     $("best-frequency-furniture-note").textContent = data.furniture_note;
     $("best-frequency-furniture-note").hidden = !data.furniture_note;
+    $("best-frequency-note").textContent = data.note || "";
+    $("best-frequency-note").hidden = !data.note;
     const target = $("best-frequency-chart");
     plots.frequency.push(new uPlot({width: target.clientWidth, height: 340, legend: {live: false},
       scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
-      axes: axes("頻率（Hz）", "聲級（dB）"),
+      axes: frequencyAxes(data.data[0]),
       series: [{}, ...data.curves.map((curve, i) => ({label: curve.label, stroke: colors[i], width: 1.5}))]}, data.data, target));
   }
   function reflectionPlot(target, channel, data) {
@@ -59,6 +79,10 @@
       }]}}, [x, ...values], target));
   }
   function rfz(data) {
+    if (data.absent) {
+      $("best-rfz-absent").textContent = data.absent; $("best-rfz-absent").hidden = false; $("rfz-explain").hidden = true;
+      return;
+    }
     $("rfz-window").textContent = data.window_text;
     data.zones.forEach((zone, i) => {
       const span = document.createElement("span"); span.textContent = zone.text; span.style.borderColor = colors[i]; $("rfz-zones").append(span);

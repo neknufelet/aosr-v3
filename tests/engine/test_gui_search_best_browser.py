@@ -7,6 +7,7 @@ from aosr.reporting.result import SchemeResult
 from tests.engine._gui_best_cases import best_result, best_store
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser
+from tests.engine.test_gui_stage_one_browser import FREQUENCY_TICKS, watch_charts
 
 
 def _colored_canvas(selector: str) -> str:
@@ -23,8 +24,14 @@ def test_best_charts_switch_poll_only_versions_and_clear_missing(tmp_path: Path,
     store = best_store(tmp_path, best_result, "baseline")
     with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
         page = watched.page
+        watch_charts(page)
         page.wait_for_function("() => document.getElementById('best-title').textContent.includes('細算第一名／原方案')")
         page.wait_for_function(_colored_canvas("#best-frequency-chart"))
+        # 第二階段跨三個十倍以上，頻率軸照圖表庫原樣只標十的次方、帶一位小數；反射圖說明句照留（第一階段改刻度與藏說明句時補的）。
+        frequencies = page.request.get(f"{base}/api/searches/{store.search_id}/best?which=refine").json()["frequency"]["data"][0]
+        assert frequencies[-1] / frequencies[0] >= 100
+        assert page.evaluate(FREQUENCY_TICKS) == [f"{10 ** power:.1f}" for power in range(1, 6) if frequencies[0] <= 10 ** power <= frequencies[-1]]
+        assert page.locator("#rfz-explain").is_visible()
         page.wait_for_function(_colored_canvas("#best-rfz-charts"))
         rfz_data = page.request.get(f"{base}/api/searches/{store.search_id}/best?which=refine").json()["rfz"]
         assert page.locator("#best-rfz-charts h4").all_text_contents() == [channel["label"] for channel in rfz_data["channels"]]

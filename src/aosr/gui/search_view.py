@@ -134,6 +134,8 @@ def _versions(path: Path, store: Read[SearchStore], search: Read[SearchStatus], 
                 if row is None or row.outcome != "scored" or row.score != status.best_score or row.result_file is None:
                     raise ValueError("狀態的搜尋第一名與搜尋帳不一致，可能正在更新")
                 candidate, filename = str(status.best_trial), row.result_file
+            elif store.value.settings.stage == "stage_one_fem_only":
+                candidate, filename = _stage_one_best_refined(path)
             else:
                 # 先看狀態有沒有第一名：細算還沒開始時細算帳本來就不存在，不寫成讀不到帳（同 #652）。
                 if refine.value is None:
@@ -155,13 +157,31 @@ def _versions(path: Path, store: Read[SearchStore], search: Read[SearchStatus], 
     return output
 
 
+def _stage_one_best_refined(path: Path) -> tuple[str, str]:
+    refined = _stage_one_refined(path)
+    if refined.error:
+        raise ValueError(refined.error.removeprefix("讀不到："))
+    winner = next((seat for seat in refined.value.results if seat.state == "scored" and seat.refine_rank == 1), None) if refined.value else None
+    if winner is None:
+        raise ValueError("尚無細算第一名")
+    return str(winner.trial_number), winner.result_file
+
+
+def _stage_one_best_default(versions: dict[str, BestVersion]) -> str:
+    """第一階段有細算第一名那一席就預設看它；結果檔讀不到時照樣預設，三張圖寫讀不到、可切回搜尋（同第二階段）。"""
+    return "refine" if versions["refine"].candidate else "search"
+
+
 def best_versions(path: Path) -> tuple[Read[SearchStore], dict[str, BestVersion], str]:
     store = _read(lambda: SearchStore.open(path))
     search, refine, _ = _status_parts(_read(lambda: _document(path / "status.json")))
     book = _read(lambda: ledger.read_for(store.value) if store.value else ledger.Ledger.read_status(path / "ledger.jsonl"))
     refined = _read(lambda: _refine_book(path, store.value))
     default = "refine" if refine.value and refine.value.best is not None else "search"
-    return store, _versions(path, store, search, refine, book, refined), default
+    versions = _versions(path, store, search, refine, book, refined)
+    if store.value is not None and store.value.settings.stage == "stage_one_fem_only":
+        default = _stage_one_best_default(versions)
+    return store, versions, default
 
 
 def read_proc_locks() -> str:
@@ -558,7 +578,7 @@ def _stage_one_view(view: SearchView, store: SearchStore, search: Read[SearchSta
         "updated": _updated(store.path, now, STAGE_ONE_LATER, ("status.json", "ledger.jsonl", *STAGE_ONE_LATER))}
     scope = "第一階段：" + ("房間尺寸與" if store.settings.layout.room_range is not None else "")
     return view.model_copy(update={"blocks": tuple(replacements.get(block.key, block) for block in view.blocks),
-        "stage_text": "；".join(stage.lines[1:3]),
+        "best_default": _stage_one_best_default(view.best_versions), "stage_text": "；".join(stage.lines[1:3]),
         "scope_text": scope + "喇叭、座位擺位一起搜尋，只算 20～300 Hz 有限元素"})
 
 
