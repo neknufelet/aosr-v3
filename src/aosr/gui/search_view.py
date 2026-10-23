@@ -39,10 +39,8 @@ from aosr.search.labels import STAGE_ONE_REFINE_STATES
 from aosr.search.stage_one_refine_record import REFINE_CONCLUSIONS, StageOneRefineStatus
 from aosr.search.stage_one_report import DECAY_NOTICE
 from aosr.search.stage_one_shortlist import (
-    TITLE as SHORTLIST_TITLE, HEADINGS, NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE, FIXED_ROOM, VARIABLE_ROOM,
-    STATE_TEXT, stage_one_shortlist, shortlist_cells,
+    TITLE as SHORTLIST_TITLE, HEADINGS, STATE_TEXT, stage_one_shortlist, shortlist_cells, shortlist_notes,
 )
-from aosr.search.room_proportions import PROPORTION_EXPLANATION
 from aosr.search.stage_one_post_check_report import (
     RESONANCE_HEADINGS, TITLE as POST_CHECK_TITLE, stage_one_post_check_summary,
 )
@@ -491,8 +489,7 @@ def _shortlist(store: SearchStore) -> Block:
             return Block(key="shortlist", title=title, lines=("還沒細算",), red="warning_only")
         has_winner = any(row.refine_rank == 1 for row in shortlist.rows)
         table = Table(headings=HEADINGS, rows=tuple(shortlist_cells(row, has_winner=has_winner) for row in shortlist.rows))
-        return Block(key="shortlist", title=title, lines=(NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE,
-            VARIABLE_ROOM if shortlist.room_range else FIXED_ROOM, PROPORTION_EXPLANATION), table=table, red="warning_only")
+        return Block(key="shortlist", title=title, lines=(*shortlist_notes(shortlist), *shortlist.missing), table=table, red="warning_only")
     except (OSError, ValueError, KeyError) as error:
         return Block(key="shortlist", title=title,
             lines=("入選清單讀不回：" + "；".join(str(error).splitlines()),), warning=True, red="warning_only")

@@ -4,7 +4,7 @@ from __future__ import annotations
 from aosr.reporting.stage_one_result import StageOneResult, stage_one_comparison_identity
 from aosr.search.run import ComputeFailed, IdentityChanged
 from aosr.search.stage_one_refine_record import (RefinedSeat, StageOneRefineStatus, read_stage_one_refined_result)
-from aosr.search.stage_one_selection_contract import SelectionSeat, big_peak
+from aosr.search.stage_one_selection_contract import CONTROLS, Role, SelectionSeat, StageOneSelection, big_peak, percent, role_text
 from aosr.search.store import SearchStore
 
 
@@ -37,8 +37,7 @@ def _mismatch(result: StageOneResult, refined: RefinedSeat, status: StageOneRefi
 
 def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat, refined: RefinedSeat | None) -> str:
     meters = seat.params_m
-    roles = "、".join({"top_n": f"前 N（搜尋第 {seat.search_rank} 名）", "big_peak_control": "大峰對照",
-                       "far_control": "較遠對照"}[role] for role in seat.roles)
+    roles = "、".join(role_text(role, seat.search_rank) for role in seat.roles)
     rank = str(refined.refine_rank) if refined is not None and refined.refine_rank is not None else "—"
     detail, score, peak = "尚未完成", "—", "量不到"
     if seat.error is not None:
@@ -74,7 +73,6 @@ def stage_one_refine_lines(store: SearchStore) -> tuple[str, ...]:
         return ("還沒細算",)
     lines = ["細算（每 1 Hz 一點，只算有限元素）",
         "大峰＝最強峰高出這支喇叭自己那條直線多少，左右兩支取較差",
-        ("房間固定，面積對照不適用" if store.settings.layout.room_range is None else "房間隨候選而變，面積對照不適用"),
         "入選後檢查見下一段"]
     try:
         status = StageOneRefineStatus.model_validate_json(path.read_bytes())
@@ -103,6 +101,7 @@ def _status_lines(store: SearchStore, status: StageOneRefineStatus) -> list[str]
     lines.extend(_row(store, status, seat, results.get(seat.trial_number))
                  for seat in selected.candidates if "top_n" not in seat.roles)
     lines.extend(_control_lines(status))
+    lines.extend(_area_lines(selected, room_varies=store.settings.layout.room_range is not None))
     timed = [seat.seconds for seat in status.results if seat.seconds is not None]
     # 結果檔存好、摘要還沒記到秒數就被砍：接續沿用那份結果，秒數查不回來，照實列出、不當成 0。
     untimed = sum(seat.seconds is None and seat.state in ("scored", "unassessed", "incomparable") for seat in status.results)
@@ -119,14 +118,47 @@ def _control_lines(status: StageOneRefineStatus) -> list[str]:
     # 標籤只掛在真的取到的那一席；沒取到時只印原因，不留一行沒有候選的標籤。
     control = next((seat for seat in selected.candidates if "big_peak_control" in seat.roles), None)
     if control is None:
-        lines.append(f"本次未取得大峰對照：{selected.missing['big_peak_control']}")
+        lines.append(missing_control_text(selected, "big_peak_control"))
     else:
         lines.append(f"大峰對照＝試算 {control.trial_number}：前 N 名以外、大峰低過門檻的候選中搜尋軸合分最好")
     x = selected.far_control_min_front_distance_m
     far = next((seat for seat in selected.candidates if "far_control" in seat.roles), None)
     if far is None:
-        lines.append(f"本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 {x:g} m，工程暫定）")
+        lines.append(missing_control_text(selected, "far_control"))
     else:
         lines.append(f"較遠對照＝試算 {far.trial_number}：主搜尋已採到的較遠候選中最佳"
                      f"（離前牆至少 {x:g} m；{x:g} 是工程暫定的選席分界）")
+    return lines
+
+
+def missing_control_text(selected: StageOneSelection, role: Role) -> str:
+    """沒取到的對照一句原因；細算報告與網頁的入選清單共用同一句（老闆只看網頁）。"""
+    if role == "big_peak_control":
+        return f"本次未取得大峰對照：{selected.missing[role]}"
+    if role == "far_control":
+        x = selected.far_control_min_front_distance_m
+        return f"本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 {x:g} m，工程暫定）"
+    return selected.missing[role]
+
+
+def missing_control_lines(selected: StageOneSelection) -> tuple[str, ...]:
+    return tuple(missing_control_text(selected, role) for role in CONTROLS if role in selected.missing)
+
+
+def _area_lines(selected: StageOneSelection, *, room_varies: bool) -> list[str]:
+    limit, difference = selected.area_control_max_spread, selected.area_control_min_difference
+    if not room_varies:
+        return ["房間固定，面積對照不適用"]
+    if limit is None or difference is None:
+        return ["這次搜尋設定沒有面積對照的兩個門檻（設定早於面積對照），不開這一席"]
+    spread = "無" if selected.top_n_area_spread is None else f"{selected.top_n_area_spread * 100:.2f}%"
+    lines = [f"面積對照門檻：前 N 面積跨度（最大減最小，再除以最小）{spread}，不超過 {percent(limit)} 才開；"
+             f"{percent(limit)}、{percent(difference)} 是工程暫定"]
+    area = next((seat for seat in selected.candidates if "area_control" in seat.roles), None)
+    if area is None:
+        lines.append(missing_control_text(selected, "area_control"))
+    else:
+        lines.append(f"面積對照＝試算 {area.trial_number}：前 N 以外、面積比前 N 最小再小至少 {percent(difference)}"
+                     f"、或比最大再大至少 {percent(difference)} 的候選中搜尋軸合分最好；"
+                     "只用來比較空間代價，不宣稱已證明哪種大小或比例最好；跟細算第一名的面積差、分數差與分項見入選清單")
     return lines

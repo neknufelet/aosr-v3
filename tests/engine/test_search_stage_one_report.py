@@ -167,6 +167,14 @@ def test_refine_report_missing_controls_and_reasons(tmp_path: Path, monkeypatch:
     assert "大峰對照門檻：無" in text
     assert "不可估" in text and "non_positive_energy" in text
     assert "讀不回" in text and "結果讀回失敗" in text
+    # 老闆只看網頁：沒取到的兩席原因也要接在網頁入選清單的說明行後面（命令列已印在細算那一段，清單不重印）。
+    from aosr.gui.search_view import build_search_view
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+        server_program=store.identity.program_fingerprint)
+    lines = next(block for block in view.blocks if block.key == "shortlist").lines
+    assert lines[-2:] == ("本次未取得大峰對照：前 N 名都量不到大峰",
+                          "本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 0.8 m，工程暫定）")
+    assert [line for line in text.splitlines() if line.startswith("本次未取得大峰對照")] == ["本次未取得大峰對照：前 N 名都量不到大峰"]
 
 
 def test_refine_report_incomparable_and_bad_verification_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,3 +225,19 @@ def test_malformed_summary_spoils_only_refine_section(tmp_path: Path, monkeypatc
     assert "細算摘要讀不回" in render_stage_one_text(build_stage_one_report(store))
     # 壞的細算摘要不准擋住重新挑席。
     assert select_stage_one_candidates(store, registry_path=config_path("quality_targets.toml")).candidates
+
+
+@pytest.mark.parametrize("lengths,spread,reason", [
+    ((5., 6., 4., 4.), "20.00%", "前 N 面積跨度超過 10%，面積本來就不接近，不開這一席"),
+    ((5., 5.5, 4.25 + 1e-9, 6.), "10.00%",
+     "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 15%、或比最大再大至少 15% 的候選")])
+def test_area_report_lines_show_spread_and_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                  lengths: tuple[float, ...], spread: str, reason: str) -> None:
+    from aosr.search.stage_one_refine_report import _area_lines
+    from tests.engine._stage_one_refine_cases import pool
+    from tests.engine.test_search_stage_one_selection import ROOM_ROWS, select
+    rooms = {number: (length, 4.) for number, length in enumerate(lengths)}
+    selection = select(pool(tmp_path, monkeypatch, ROOM_ROWS, rooms=rooms, area=(.1, .15)))
+    assert _area_lines(selection, room_varies=True) == [
+        f"面積對照門檻：前 N 面積跨度（最大減最小，再除以最小）{spread}，不超過 10% 才開；10%、15% 是工程暫定", reason]
+    assert _area_lines(selection, room_varies=False) == ["房間固定，面積對照不適用"]

@@ -81,8 +81,13 @@ def test_shortlist_every_cell_from_raw_result(tmp_path: Path, monkeypatch: pytes
     shown = blocks(store)["shortlist"]
     assert shown.red == "warning_only"
     assert shown.title == f"入選清單（細算後；前 {raw['selection']['top_n']} 席照細算名次，對照列出來、不算入選）"
+    # 沒取到的對照照摘要的原因接在說明行後面（這份設定沒有面積門檻，只會有大峰、較遠兩種）。
+    missing = raw["selection"]["missing"]
+    assert set(missing) <= {"big_peak_control", "far_control"}
+    reasons = tuple(text for key, text in (("big_peak_control", f"本次未取得大峰對照：{missing.get('big_peak_control')}"),
+        ("far_control", "本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 0.8 m，工程暫定）")) if key in missing)
     assert shown.lines == (NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE, VARIABLE_ROOM if variable else FIXED_ROOM,
-        PROPORTION_EXPLANATION)
+        PROPORTION_EXPLANATION, *reasons)
     table = shown.model_dump()["table"]
     assert table == {"headings": HEADINGS, "rows": tuple(expected)}
     result = view.build_search_view(store.path, server_physics="測試", server_program="測試")

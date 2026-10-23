@@ -12,10 +12,11 @@ from aosr.search.store import SearchStore
 from tests.engine import _search_stage_one_cases as search
 
 
-def running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, layout: LayoutSettings | None = None) -> SearchStore:
+def running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, layout: LayoutSettings | None = None,
+            area: dict[str, float] | None = None) -> SearchStore:
     source = search.make_store(tmp_path / "source", budget=4, layout=layout)
     settings = SearchSettings.model_validate(source.settings.model_dump(mode="json") | {
-        "stage_one_refine": {"top_n": 2, "far_control_min_front_distance_m": .8}})
+        "stage_one_refine": {"top_n": 2, "far_control_min_front_distance_m": .8, **(area or {})}})
     store = SearchStore.create(tmp_path / "searches", project=source.project, settings=settings,
         identity=source.identity, versions={"python": "test", "numpy": "test", "optuna": "test"})
     with pytest.raises(search.Killed):

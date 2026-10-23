@@ -11,8 +11,8 @@ from aosr.search.room_proportions import (
 )
 from aosr.search.run import ComputeFailed, IdentityChanged
 from aosr.search.stage_one_refine_record import RefinedSeat, StageOneRefineStatus, read_stage_one_refined_result
-from aosr.search.stage_one_refine_report import _mismatch
-from aosr.search.stage_one_selection_contract import SelectionSeat
+from aosr.search.stage_one_refine_report import _mismatch, missing_control_lines
+from aosr.search.stage_one_selection_contract import CONTROL_TEXT, SelectionSeat, role_text
 from aosr.search.store import SearchStore
 
 TITLE = "入選清單（細算後；前 {top_n} 席照細算名次，對照列出來、不算入選）"
@@ -23,6 +23,7 @@ DELTA_NOTICE = "差值都對細算第一名，用 1 Hz 驗證軸；分項是原�
 FIXED_ROOM = "房間固定，下列是同一間房的不同擺法"
 VARIABLE_ROOM = "房間隨候選而變，面積與容積照每一席自己的房間算"
 NO_WINNER = "沒有細算第一名，不算差值"
+AREA_NOTICE = "面積對照只用來比較空間代價，不宣稱已證明哪種大小或比例最好"
 STATE_TEXT = {"pending": "尚未完成", "scored": "已計分", "unassessed": "不可估",
               "incomparable": "不能同表", "unreadable": "讀不回"}
 HEADINGS = ("試算編號", "角色", "搜尋名次", "細算名次", "主項單獨名次", "細算狀態", "房間 長×寬×高（公尺）",
@@ -80,16 +81,17 @@ class StageOneShortlist:
     top_n: int
     room_range: bool
     rows: tuple[ShortlistRow, ...]
+    # 沒取到的對照各一句原因：命令列已印在細算那一段，只有網頁另外接在說明行後面。
+    missing: tuple[str, ...] = ()
 
 
 def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat,
          refined: RefinedSeat | None, proportions: RoomProportions) -> ShortlistRow:
-    roles = {"top_n": f"前 N（搜尋第 {seat.search_rank} 名）", "big_peak_control": "大峰對照", "far_control": "較遠對照"}
     state = refined.state if refined is not None else "pending"
     reason = refined.reason if refined is not None else ""
     if seat.error is not None:
         state, reason = "unreadable", seat.error
-    row = ShortlistRow(seat.trial_number, tuple(roles[role] for role in seat.roles), "top_n" in seat.roles,
+    row = ShortlistRow(seat.trial_number, tuple(role_text(role, seat.search_rank) for role in seat.roles), "top_n" in seat.roles,
         seat.search_rank, None, state, reason)
     if state != "scored" or refined is None:
         return replace(row, reason=reason or f"細算結果{STATE_TEXT[state]}")
@@ -139,7 +141,7 @@ def stage_one_shortlist(store: SearchStore) -> StageOneShortlist | None:
     return StageOneShortlist(status.selection.top_n, store.settings.layout.room_range is not None,
         tuple(replace(row, principal_rank=ranks.get(row.trial_number),
             delta=_delta(row.values, base) if row.values is not None and base is not None else None)
-            for row in (*top, *controls)))
+            for row in (*top, *controls)), missing_control_lines(status.selection))
 
 
 def _rank(value: int | None) -> str:
@@ -171,6 +173,13 @@ def shortlist_cells(row: ShortlistRow, *, has_winner: bool) -> tuple[str, ...]:
     return tuple(fields)
 
 
+def shortlist_notes(shortlist: StageOneShortlist) -> tuple[str, ...]:
+    """命令列與網頁共用的說明行；有面積對照那一席才多一行它只比空間代價。"""
+    area = any(CONTROL_TEXT["area_control"] in row.roles for row in shortlist.rows)
+    return (NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE, VARIABLE_ROOM if shortlist.room_range else FIXED_ROOM,
+            *((AREA_NOTICE,) if area else ()), PROPORTION_EXPLANATION)
+
+
 def _line(row: ShortlistRow, *, has_winner: bool) -> str:
     return "｜".join(shortlist_cells(row, has_winner=has_winner))
 
@@ -181,10 +190,7 @@ def stage_one_shortlist_lines(store: SearchStore) -> tuple[str, ...]:
         shortlist = stage_one_shortlist(store)
         if shortlist is None:
             return ()
-        lines = [TITLE.format(top_n=shortlist.top_n), NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE,
-            VARIABLE_ROOM if shortlist.room_range else FIXED_ROOM,
-            PROPORTION_EXPLANATION,
-            "｜".join(HEADINGS)]
+        lines = [TITLE.format(top_n=shortlist.top_n), *shortlist_notes(shortlist), "｜".join(HEADINGS)]
         has_winner = any(row.refine_rank == 1 for row in shortlist.rows)
         return (*lines, *(_line(row, has_winner=has_winner) for row in shortlist.rows))
     except (OSError, ValueError, KeyError) as error:

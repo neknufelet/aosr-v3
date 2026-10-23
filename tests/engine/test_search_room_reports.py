@@ -14,6 +14,7 @@ from aosr.search.layout import room_from_unit
 from aosr.search.run import CandidateJob
 from aosr.search.stage_one_worker import StageOneComputed
 from aosr.search.stage_one_report import build_stage_one_report, render_stage_one_text
+from aosr.search.store import SearchStore
 from tests.engine import _search_stage_one_cases as search
 from tests.engine._search_room_loop_cases import ROOM_COLUMN, ROOM_KEYS, layout_for
 from tests.engine._stage_one_auto_cases import invoke, read, running
@@ -21,8 +22,8 @@ from tests.engine._stage_one_post_check_cases import diagnosis, runner
 from tests.engine._stage_one_refine_cases import snapshot
 
 
-def test_room_auto_reports_group_by_exact_modal_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    store = running(tmp_path, monkeypatch, layout=layout_for())
+def _finish(store: SearchStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """跑完搜尋、細算與入選後檢查；每席細算時順手放一份假診斷給檢查讀。"""
     root = tmp_path / "child"
     command = runner(root, store)
     fake = search.FakeCompute(store, monkeypatch)
@@ -35,6 +36,11 @@ def test_room_auto_reports_group_by_exact_modal_key(tmp_path: Path, monkeypatch:
             yield item
     assert not invoke(store, tmp_path, monkeypatch, compute=compute, runner=command)
     assert read(store).outer.conclusion == "complete"
+
+
+def test_room_auto_reports_group_by_exact_modal_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = running(tmp_path, monkeypatch, layout=layout_for())
+    _finish(store, tmp_path, monkeypatch)
     report = build_stage_one_report(store)
     text = render_stage_one_text(report)
     rows = {row.trial_number: row for row in ledger.read_for(store).rows}
@@ -59,8 +65,9 @@ def test_room_auto_reports_group_by_exact_modal_key(tmp_path: Path, monkeypatch:
     assert {line.removeprefix("房間鍵：") for line in report.post_check_lines if line.startswith("房間鍵：")} == expected_keys
     assert sum(line == "超過聽感參考線的共振（照超出量排序）" for line in report.post_check_lines) == len(expected_keys)
     assert ROOM_COLUMN in text and ROOM_COLUMN in "\n".join(report.refine_lines)
-    assert "房間隨候選而變，面積對照不適用" in text
+    assert "這次搜尋設定沒有面積對照的兩個門檻（設定早於面積對照），不開這一席" in text
     assert "房間固定，面積對照不適用" not in text and "這一席的房間層跟上面那份不同" not in text
+    assert "面積對照只用來比較空間代價" not in text
     before = snapshot(store)
     view = build_search_view(store.path, server_physics=store.identity.physics_identity,
         server_program=store.identity.program_fingerprint)
@@ -71,6 +78,54 @@ def test_room_auto_reports_group_by_exact_modal_key(tmp_path: Path, monkeypatch:
     for name, label in zip(ROOM_KEYS, ("房間長（x 向）", "房間寬（y 向）", "房間高"), strict=True):
         assert f"{label}：{best_row.params_m[name]:.3f} 公尺" in best.lines
     assert snapshot(store) == before
+
+
+def test_room_auto_area_control_rides_refine_shortlist_and_post_check(tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    # 跨度門檻放寬到一定會開：答案照帳本自己重算（前 2 名的面積範圍外、合分最好的那一題），不從挑席程式抄。
+    store = running(tmp_path, monkeypatch, layout=layout_for(),
+                    area={"area_control_max_spread": 10., "area_control_min_difference": 1e-6})
+    _finish(store, tmp_path, monkeypatch)
+    scored = sorted((row for row in ledger.read_for(store).rows if row.outcome == "scored"),
+                    key=lambda row: (row.score if row.score is not None else float("inf"), row.trial_number))
+    def area(row: ledger.LedgerRow) -> float:
+        return row.params_m["room_Lx"] * row.params_m["room_Ly"]
+    low, high = min(map(area, scored[:2])), max(map(area, scored[:2]))
+    expected = next(row.trial_number for row in scored[2:] if (low - area(row)) / low >= 1e-6 or (area(row) - high) / high >= 1e-6)
+    report = build_stage_one_report(store)
+    text = render_stage_one_text(report)
+    assert f"面積對照門檻：前 N 面積跨度（最大減最小，再除以最小）{(high - low) / low * 100:.2f}%，不超過 1000% 才開；" in text
+    assert any(line.startswith(f"面積對照＝試算 {expected}：") and "不宣稱已證明哪種大小或比例最好" in line for line in report.refine_lines)
+    assert any(line.split("｜")[0] == f"試算 {expected}" and "面積對照" in line.split("｜")[1] for line in report.shortlist_lines)
+    assert "面積對照只用來比較空間代價，不宣稱已證明哪種大小或比例最好" in report.shortlist_lines
+    assert any(line.startswith(f"試算 {expected}／") and "面積對照：已診斷不計分" in line for line in report.post_check_lines)
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+        server_program=store.identity.program_fingerprint)
+    block = next(block for block in view.blocks if block.key == "shortlist")
+    assert "面積對照只用來比較空間代價，不宣稱已證明哪種大小或比例最好" in block.lines
+    assert block.table is not None and any(row[0] == f"試算 {expected}" and "面積對照" in row[1] for row in block.table.rows)
+    assert not any(line.startswith("本次未找到面積對照") for line in block.lines)
+
+
+def test_room_auto_area_control_not_found_is_shown_on_web(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 照老闆「沒有就明列本次未找到」：網頁說明行要寫，不留面積對照的角色與提醒。範圍裡做得到差 99%，
+    # 所以「這場真的沒有符合的」先照帳本自己驗，不靠房間範圍。
+    store = running(tmp_path, monkeypatch, layout=layout_for(),
+                    area={"area_control_max_spread": 10., "area_control_min_difference": .99})
+    _finish(store, tmp_path, monkeypatch)
+    scored = sorted((row for row in ledger.read_for(store).rows if row.outcome == "scored"),
+                    key=lambda row: (row.score if row.score is not None else float("inf"), row.trial_number))
+    areas = [row.params_m["room_Lx"] * row.params_m["room_Ly"] for row in scored]
+    low, high = min(areas[:2]), max(areas[:2])
+    assert areas[2:] and not any((low - area) / low >= .99 or (area - high) / high >= .99 for area in areas[2:])
+    reason = "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 99%、或比最大再大至少 99% 的候選"
+    report = build_stage_one_report(store)
+    assert reason in report.refine_lines and reason not in report.shortlist_lines
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+        server_program=store.identity.program_fingerprint)
+    block = next(block for block in view.blocks if block.key == "shortlist")
+    assert reason in block.lines and "面積對照只用來比較空間代價，不宣稱已證明哪種大小或比例最好" not in block.lines
+    assert block.table is not None and all("面積對照" not in row[1] for row in block.table.rows)
 
 
 def test_rounded_room_dimensions_cannot_merge_different_keys() -> None:

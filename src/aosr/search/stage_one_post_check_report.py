@@ -13,7 +13,7 @@ from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.scoring.low_frequency_decay_reference import LowFrequencyDecayReference, load_reference
 from aosr.search.modal_record import NOT_SCORED
 from aosr.search.stage_one_post_check_record import PostCheckSeat, read_diagnosis, read_summary
-from aosr.search.stage_one_selection_contract import StageOneSelection
+from aosr.search.stage_one_selection_contract import StageOneSelection, role_text
 from aosr.search.store import SearchStore
 
 TITLE = "入選後檢查（低頻模態診斷）"
@@ -38,8 +38,7 @@ def _state_text(state: str) -> str:
 
 def _label(seat: PostCheckSeat, selection: StageOneSelection) -> str:
     selected = next(row for row in selection.candidates if row.trial_number == seat.trial_number)
-    roles = {"top_n": f"前 N（搜尋第 {selected.search_rank} 名）", "big_peak_control": "大峰對照", "far_control": "較遠對照"}
-    return f"試算 {seat.trial_number}／" + "、".join(roles[role] for role in seat.roles)
+    return f"試算 {seat.trial_number}／" + "、".join(role_text(role, selected.search_rank) for role in seat.roles)
 
 
 def _exceeding(readout: DiagnosisReadout) -> tuple[ResonanceReadout, ...]:
