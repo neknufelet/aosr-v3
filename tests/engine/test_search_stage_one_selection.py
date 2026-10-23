@@ -150,7 +150,8 @@ def test_area_control_skips_unreadable_and_needs_thresholds_and_room_search(tmp_
     assert [s.trial_number for s in select(store).candidates if "area_control" in s.roles] == [3]
     # 舊設定沒有兩個門檻：不開、不寫原因，三格都不進摘要，舊挑席讀回逐位相同。
     old = select(pool(tmp_path / "old", monkeypatch, ROOM_ROWS, rooms=rooms))
-    assert "area_control" not in old.model_dump_json() and "area_control" not in old.missing
+    assert not {"area_control_max_spread", "area_control_min_difference", "top_n_area_spread"} & json.loads(
+        old.model_dump_json()).keys() and "area_control" not in old.missing
     fixed = select(pool(tmp_path / "fixed", monkeypatch, ROOM_ROWS, area=(.1, .15)))
     assert fixed.missing["area_control"] == "房間固定，面積對照不適用" and fixed.top_n_area_spread is None
     assert all("area_control" not in s.roles for s in (*old.candidates, *fixed.candidates))
