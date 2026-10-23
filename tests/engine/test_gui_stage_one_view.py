@@ -16,7 +16,7 @@ from aosr.gui import search_view as view
 from aosr.reporting.stage_one_result import wall_assumption_text
 from aosr.runtime import configure_calculation_jax
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import load_quality_targets
+from aosr.config.quality_targets import QualityTargets, SettingEntry, load_quality_targets
 from aosr.scoring.low_frequency_decay_reference import LowFrequencyDecayReference, load_reference
 from aosr.search import ledger
 from aosr.search.run import SearchStatus
@@ -28,7 +28,7 @@ from tests.engine.test_room_proportions_shortlist import _expected, WARNING, LAB
 from aosr.physics.modal_convention import ModalKind
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis
 from aosr.reporting.scheme import Scheme, load_scheme
-from aosr.search.stage_one_post_check_report import PARTICIPATION, RELATIVE
+from aosr.search.stage_one_post_check_report import PRIORITY, PRIORITY_KEY, RELATIVE
 from tests.engine._stage_one_post_check_cases import prepared
 from tests.engine.test_search_stage_one_post_check import run
 from tests.engine._search_run_cases import make_store
@@ -278,7 +278,7 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
     assert modal.title == "入選後檢查（低頻模態診斷）"
     assert modal.warning == (state in ("broken", "one_file"))
     if state == "quiet":
-        assert modal.table is not None and all(row[1:] == ("這一席沒有超線共振", "", "", "", "", "") for row in modal.table.rows)
+        assert modal.table is not None and all(row[1:] == ("這一席沒有超線共振", "", "", "", "", "", "") for row in modal.table.rows)
     assert all(not block.warning for key, block in shown.items() if key != "modal")
     assert not any(word in "\n".join(modal.lines) for word in ("原方案：", "搜尋第一名：", "細算第一名：", "舊版模態程式"))
     if state == "absent":
@@ -289,7 +289,9 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
         assert modal.table is not None
         expected_rows: list[tuple[str, ...]] = []
         assert modal.lines[0].startswith("入選後檢查狀態：" + ("開始過、沒有收尾紀錄" if state == "running" else "已收尾"))
-        reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
+        registry = load_quality_targets(config_path("quality_targets.toml"))
+        reference = load_reference(registry.purpose(store.settings.purpose))
+        threshold = _threshold(registry, store.settings.purpose)
         for seat in raw["seats"]:
             line = next(line for line in modal.lines if line.startswith(f"試算 {seat['trial_number']}／"))
             if seat["state"] == "running":
@@ -306,13 +308,15 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
             room = scheme["scene"]["room_m"]
             assert "×".join(f"{room[key]:.6f}" for key in ("Lx", "Ly", "Lz")) in line
             assert f"房間層：共振 {len(modes)} 個；超過參考線 {len(exceeding)} 個" in line
-            expected_rows.extend(_resonance_rows(f"試算 {seat['trial_number']}", ModalDiagnosis.model_validate(document),
-                                                 load_scheme(store.path / seat["scheme_file"]), reference))
+            seat_rows = _resonance_rows(f"試算 {seat['trial_number']}", ModalDiagnosis.model_validate(document),
+                                        load_scheme(store.path / seat["scheme_file"]), reference, threshold)
+            _assert_priority_count(line, seat_rows)
+            expected_rows.extend(seat_rows)
         assert modal.table.rows == tuple(expected_rows) and modal.table.headings[0] == "席"
         target_line = reference.target
         low = target_line.extension[0] if target_line.extension is not None else target_line.frequencies_hz[0]
-        assert modal.lines[-3:] == (f"下表每一席列出超過聽感參考線的共振（照超出量排序，席的角色見上面各行）；參考線範圍（{low:g}～{target_line.frequencies_hz[-1]:g} Hz）"
-            "以外的共振未評估，只在上面計個數", PARTICIPATION, RELATIVE)
+        assert modal.lines[-3:] == ("下表每一席列出超過聽感參考線的共振：先列優先組、再列其餘超線，組內照超出量排序（席的角色見上面各行）；"
+            f"參考線範圍（{low:g}～{target_line.frequencies_hz[-1]:g} Hz）以外的共振未評估，只在上面計個數", PRIORITY.format(threshold=threshold), RELATIVE)
 
 
 def test_post_check_without_diagnosed_seat_has_no_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -323,7 +327,7 @@ def test_post_check_without_diagnosed_seat_has_no_table(tmp_path: Path, monkeypa
     raw = json.loads((store.path / "stage-one-check" / "summary.json").read_bytes())
     modal = blocks(store)["modal"]
     assert modal.table is None and not modal.warning
-    assert not any(line in modal.lines for line in (PARTICIPATION, RELATIVE))
+    assert RELATIVE not in modal.lines and not any(line.startswith("優先組＝") for line in modal.lines)
     assert not any(line.startswith("下表") for line in modal.lines)
     for seat in raw["seats"]:
         line = next(line for line in modal.lines if line.startswith(f"試算 {seat['trial_number']}／"))
@@ -358,8 +362,22 @@ def _vary_fixture(files: list[Path], *, quiet: bool) -> None:
         file.write_text(json.dumps(document))
 
 
-def _resonance_rows(label: str, document: ModalDiagnosis, scheme: Scheme, reference: LowFrequencyDecayReference) -> list[tuple[str, ...]]:
-    """從診斷文件原始欄位重算：只有振盪共振、超出參考線的列，照超出量排；主位參與＝自己對同一配對最強那根的 20·log10。"""
+def _assert_priority_count(line: str, rows: list[tuple[str, ...]]) -> None:
+    """每席那一行以優先組個數收尾，零個時多一句提醒；個數從獨立重算的表列數來。"""
+    priority = [row for row in rows if row[1] == "優先組"]
+    assert line.endswith(f"；優先組 {len(priority)} 個" + ("" if priority else "（優先組為零，不表示沒有問題）"))
+
+
+def _threshold(registry: QualityTargets, purpose: str) -> float:
+    entry = registry.stage_one(purpose).entry(PRIORITY_KEY)
+    assert isinstance(entry, SettingEntry) and isinstance(entry.value, float)
+    return entry.value
+
+
+def _resonance_rows(label: str, document: ModalDiagnosis, scheme: Scheme, reference: LowFrequencyDecayReference,
+                    threshold: float) -> list[tuple[str, ...]]:
+    """從診斷文件原始欄位重算：只有振盪共振、超出參考線的列，照超出量排；主位參與＝自己對同一配對最強那根的 20·log10。
+    兩支喇叭的有限值取較大、不低於門檻的先列（優先組），其餘超線接在後面，兩組各自照超出量排。"""
     assert document.room_layer is not None and document.placement_layer is not None
     over = []
     for mode in document.room_layer.modes:
@@ -369,16 +387,21 @@ def _resonance_rows(label: str, document: ModalDiagnosis, scheme: Scheme, refere
     over.sort(key=lambda item: (-(item[1] - item[2]), item[0].frequency_hz, item[0].mode_index))
     roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
     pairs = [pair for pair in document.placement_layer.pairs if pair.receiver_id == scheme.receiver_set.primary.receiver_id]
-    rows: list[tuple[str, ...]] = []
+    first: list[tuple[str, ...]] = []
+    rest: list[tuple[str, ...]] = []
     for mode, t60, target in over:
-        parts = []
+        parts, finite = [], []
         for pair in pairs:
             own = dict(zip(pair.resonance_indices, pair.resonance_magnitude, strict=True))[mode.mode_index]
             strongest = max(pair.resonance_magnitude)
             name = {"left": "左聲道喇叭", "right": "右聲道喇叭"}[roles[pair.speaker_id]]
-            parts.append(f"{name} " + ("無有限相對值" if own == 0 or strongest == 0 else f"{20 * math.log10(own / strongest):.1f}"))
-        rows.append((label, f"{mode.frequency_hz:.2f}", f"{t60:.3f}", f"{target:.3f}", f"{t60 - target:.3f}", "／".join(parts), "尚未確認"))
-    return rows or [(label, "這一席沒有超線共振", "", "", "", "", "")]
+            if own != 0 and strongest != 0:
+                finite.append(20 * math.log10(own / strongest))
+            parts.append(f"{name} " + (f"{finite[-1]:.1f}" if own != 0 and strongest != 0 else "無有限相對值"))
+        group = first if finite and max(finite) >= threshold else rest
+        group.append((label, "優先組" if group is first else "其餘超線", f"{mode.frequency_hz:.2f}", f"{t60:.3f}", f"{target:.3f}",
+                      f"{t60 - target:.3f}", "／".join(parts), "尚未確認"))
+    return [*first, *rest] or [(label, "這一席沒有超線共振", "", "", "", "", "", "")]
 
 
 def second_stage(tmp_path: Path, locked: bool) -> SearchStore:

@@ -365,7 +365,8 @@ def test_changed_scoring_settings_do_not_rerank_refined_results(tmp_path: Path,
     store, registry = _store(tmp_path)
     _refined(store, ((None, 8.0), (2, 1.0), (1, 2.0)))
     text = registry.read_text(encoding="utf-8")
-    changed = text.replace("value = -10.0", "value = -11.0", 1)
+    # 改第二階段用途裡的一格（第一階段那一段也有 -10.0，在檔案較前面，不能盲換第一個）。
+    changed = text.replace("key = \"reflections_and_echo.zone_threshold_db.front\"\nvalue = -10.0", "key = \"reflections_and_echo.zone_threshold_db.front\"\nvalue = -11.0", 1)
     assert changed != text
     registry.write_text(changed, encoding="utf-8")
 
