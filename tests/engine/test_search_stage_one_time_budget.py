@@ -131,11 +131,13 @@ def test_time_budget_finishes_a_partial_batch_before_stopping(tmp_path: Path, mo
 
 
 # 被砍在某一批存檔之後、停止那一次存檔之前：狀態檔還是進行中。接續時一題都不用再問，舊的停法也成立，時間用完照樣標因預算停止。
-@pytest.mark.parametrize("extra,stopped_as", [({"convergence_run": 1}, "converged"), ({}, "budget_exhausted")])
+# 第一段問到 6 題就收斂：接續停在迴圈頂；問滿 12 題（題數用完，或最後一批才收斂）：接續不進迴圈、停在迴圈外（複查）。
+@pytest.mark.parametrize("extra,stopped_as,asked", [({"convergence_run": 1}, "converged", 6), ({}, "budget_exhausted", 12),
+                                                    ({"convergence_run": 3}, "converged", 12)])
 def test_time_budget_wins_when_a_resume_starts_with_an_older_stop_already_reached(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, object], stopped_as: str) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, object], stopped_as: str, asked: int) -> None:
     store, first = _first_run(tmp_path, monkeypatch, extra, kill_after=None)
-    assert first is not None and first.state == stopped_as and sum(first.search_seconds.values()) == 0.
+    assert first is not None and first.state == stopped_as and first.asked == asked and sum(first.search_seconds.values()) == 0.
     status, compute = _saved_then_resumed(store, monkeypatch, 5 * HOUR)
     assert compute.batches == [] and status.asked == first.asked
     assert status.state == "budget_exhausted" and status.message == _time_message(2 * HOUR, 5)
