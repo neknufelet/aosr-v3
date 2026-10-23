@@ -23,7 +23,13 @@ RELATIVE = "主位參與的 dB 是相對值：相對同一支喇叭到同一個�
 OLD_IDENTITY = "這一段的診斷是舊版模態程式算的（模態身分跟現在的程式不同）；再跑一次細算會整段重算"
 NOT_YET = "入選後檢查還沒做"
 NO_DIAGNOSIS = ("not_started", "running", "stopped", "skipped")
+RESONANCE_HEADINGS = ("席", "頻率（Hz）", "T60（秒）", "參考線 T60（秒）", "超出量（秒）", "主位參與（相對 dB）", "改善能力")
+TABLE_NOTE = "下表每一席列出超過聽感參考線的共振（照超出量排序，席的角色見上面各行）；參考線範圍（{span}）以外的共振未評估，只在上面計個數"
 _NO_DIAGNOSIS_TEXT = {"not_started": "未開始", "running": "開始過、沒有收尾紀錄", "stopped": "未計算：已停止", "skipped": "跳過"}
+
+
+def _one_line(text: str) -> str:
+    return text.replace("\r", " ").replace("\n", "；")
 
 
 def _state_text(state: str) -> str:
@@ -60,6 +66,30 @@ def _room_lines(readout: DiagnosisReadout, span: str) -> list[str]:
         lines.append("這份診斷沒有超線共振")
     lines.append(f"{outside} 根參考線範圍外（{span} 以外），未評估")
     return lines
+
+
+def _participation(scheme: Scheme, readout: DiagnosisReadout) -> dict[int, str]:
+    """每根超線共振到主位的相對 dB，各支喇叭並列；跟命令列同一份讀回。"""
+    roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
+    parts: dict[int, list[str]] = {row.mode_index: [] for row in _exceeding(readout)}
+    for pair in readout.placements or ():
+        if pair.receiver_id != scheme.receiver_set.primary.receiver_id:
+            continue
+        sizes = {row.mode_index: row.db_relative_to_pair_strongest_resonance for row in pair.sorted_resonances}
+        speaker = speaker_label(roles.get(pair.speaker_id, pair.speaker_id))
+        for index, values in parts.items():
+            db = sizes[index]
+            values.append(f"{speaker} " + ("無有限相對值" if db is None else f"{db:.1f}"))
+    return {index: "／".join(values) or "沒有主位配對" for index, values in parts.items()}
+
+
+def _resonance_rows(trial_number: int, scheme: Scheme, readout: DiagnosisReadout) -> list[tuple[str, ...]]:
+    participation = _participation(scheme, readout)
+    label = f"試算 {trial_number}"
+    rows: list[tuple[str, ...]] = [(label, f"{row.frequency_hz:.2f}", f"{row.t60_s:.3f}", f"{row.target_t60_s:.3f}", f"{row.excess_t60_s:.3f}",
+             participation[row.mode_index], "尚未確認") for row in _exceeding(readout)
+            if row.target_t60_s is not None and row.excess_t60_s is not None]
+    return rows or [(label, "這一席沒有超線共振", "", "", "", "", "")]
 
 
 def _placement_lines(label: str, scheme: Scheme, readout: DiagnosisReadout) -> list[str]:
@@ -151,11 +181,13 @@ class PostCheckSummaryText:
 
     lines: tuple[str, ...]
     warning: bool
+    rows: tuple[tuple[str, ...], ...] = ()
 
 
 def stage_one_post_check_summary(store: SearchStore) -> PostCheckSummaryText:
-    """網頁摘要：狀態與逐席房間層，沿用命令列的角色、狀態、讀檔核對與共振計數；壞一席只壞那一行。"""
+    """網頁摘要：狀態與逐席房間層，沿用命令列的角色、狀態、讀檔核對與共振計數；壞一席只壞那一行，表上也沒有那一席。"""
     lines: list[str] = []
+    rows: list[tuple[str, ...]] = []
     warning = False
     try:
         summary = read_summary(store.path)
@@ -185,19 +217,25 @@ def stage_one_post_check_summary(store: SearchStore) -> PostCheckSummaryText:
                     readout = read_modal_diagnosis(diagnosis, reference)
                     room = scheme.scene.room_m
                     room_text = f"房間 長×寬×高（公尺）：{room.Lx:.6f}×{room.Ly:.6f}×{room.Lz:.6f}"
+                    seat_rows: list[tuple[str, ...]] = []
                     if state == "diagnosed_not_scored":
                         assert diagnosis.key is not None
                         # 同一間房的診斷要一致才算數（命令列共用超線表時同一道核對）。
                         _group_room(rooms, diagnosis.key, readout, _reference_span(reference),
                                     variable=store.settings.layout.room_range is not None)
                         room_text += "；" + _room_lines(readout, _reference_span(reference))[0]
+                        seat_rows = _resonance_rows(seat.trial_number, scheme, readout)
+                    rows.extend(seat_rows)
                 lines.append(f"{label}：{_state_text(state)}；{seat.reason_text or '無附加原因'}；{room_text}")
                 warning = warning or state == "failed"
             except (OSError, ValueError, KeyError, StopIteration) as error:
                 lines.append(f"{label}：失敗；診斷文件讀不回或內容不完整：{error}")
                 warning = True
-        lines.append("每個超線共振的頻率與 T60 清單還沒上網頁")
+        if rows:
+            lines.extend((TABLE_NOTE.format(span=_reference_span(reference)), PARTICIPATION, RELATIVE))
     except (OSError, ValueError, KeyError) as error:
         lines.append(f"入選後檢查摘要讀不回或內容不完整：{error}")
         warning = True
-    return PostCheckSummaryText(tuple(line.replace("\r", " ").replace("\n", "；") for line in lines), warning)
+        rows = []
+    return PostCheckSummaryText(tuple(_one_line(line) for line in lines), warning,
+                                tuple(tuple(_one_line(cell) for cell in row) for row in rows))

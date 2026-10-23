@@ -25,6 +25,9 @@ function tableElement(headings, rows) {
 function drawDetail(data) {
   $("title").textContent = `搜尋進度：${data.name}`;
   if (data.scope_text) $("search-scope").textContent = data.scope_text;
+  // 每 5 秒整塊重畫；表框自己的捲動位置照區塊記住、畫完放回去，不然捲到一半會被拉回最上面（審查抓到）。
+  const scrolled = new Map([...$("search-content").querySelectorAll("section > .table-scroll")]
+    .map((box) => [box.parentElement.id, [box.scrollTop, box.scrollLeft]]));
   $("search-content").replaceChildren();
   for (const block of data.blocks) {
     const section = node("section", "");
@@ -53,6 +56,8 @@ function drawDetail(data) {
       section.append(wrapper);
     }
     $("search-content").append(section);
+    const kept = scrolled.get(block.key);
+    if (kept && block.table) [section.lastChild.scrollTop, section.lastChild.scrollLeft] = kept;
   }
 }
 function drawList(data) {
