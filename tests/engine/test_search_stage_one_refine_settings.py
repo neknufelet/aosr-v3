@@ -72,3 +72,24 @@ def test_selection_entry_keeps_comparison_identity(tmp_path: Path, monkeypatch: 
     after = run_stage_one(scheme, shards=parts, **kwargs)
     assert stage_one_comparison_identity(before) == stage_one_comparison_identity(after)
     assert tmp_path.is_dir()
+
+
+AREA = {"area_control_max_spread": .1, "area_control_min_difference": .15}
+
+
+def test_area_thresholds_are_optional_and_paired() -> None:
+    # 更動前（主線 64c6e4ff 的 settings.py）：同一份 stage 加 REFINE 的指紋。沒設面積門檻的舊設定，指紋與快照都不變。
+    document = settings_document() | {"stage": "stage_one_fem_only", "stage_one_refine": REFINE}
+    old = SearchSettings.model_validate(document)
+    assert old.fingerprint == "313a9bd555f6e1c7cfad432aade73095a5976ab16a25ca8c3af1c3e531f728ed"
+    assert json.loads(old.model_dump_json())["stage_one_refine"] == REFINE == old.canonical()["stage_one_refine"]
+    new = SearchSettings.model_validate(document | {"stage_one_refine": REFINE | AREA})
+    assert json.loads(new.model_dump_json())["stage_one_refine"] == REFINE | AREA == new.canonical()["stage_one_refine"]
+    assert new.fingerprint != old.fingerprint
+    for field in AREA:
+        with pytest.raises(ValidationError, match="一起設定"):
+            SearchSettings.model_validate(document | {"stage_one_refine": REFINE | {field: AREA[field]}})
+    for field, value in (("area_control_max_spread", 0), ("area_control_min_difference", 0),
+                         ("area_control_min_difference", 1), ("area_control_max_spread", float("nan"))):
+        with pytest.raises(ValidationError):
+            SearchSettings.model_validate(document | {"stage_one_refine": REFINE | AREA | {field: value}})

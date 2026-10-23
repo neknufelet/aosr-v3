@@ -1,6 +1,6 @@
 """直接造帳本與結果；不用搜尋輸出決定選席答案。"""
 from pathlib import Path
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -15,15 +15,20 @@ from aosr.search.run import SearchStatus
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SearchIdentity, SearchStore
 from tests.engine import _stage_one_cases as stage
+from tests.engine._search_room_loop_cases import layout_for
 from tests.engine._search_store_cases import settings_document, purpose_settings
 
 
 def pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: Sequence[tuple[int, float, float | None, float]], *,
-         top_n: int = 2, missing_payload: bool = False, enabled: bool = True) -> SearchStore:
+         top_n: int = 2, missing_payload: bool = False, enabled: bool = True,
+         rooms: Mapping[int, tuple[float, float]] | None = None, area: tuple[float, float] | None = None) -> SearchStore:
+    """rooms 給了就換成房間搜尋：帳本每題記自己的長寬（高固定 3 m），挑席的面積照帳本算。"""
     project = stage.scheme()
+    thresholds = {} if area is None else {"area_control_max_spread": area[0], "area_control_min_difference": area[1]}
     settings = SearchSettings.model_validate(settings_document() | {"purpose": project.purpose,
         "stage": "stage_one_fem_only", **({"stage_one_refine": {"top_n": top_n,
-        "far_control_min_front_distance_m": .8}} if enabled else {})})
+        "far_control_min_front_distance_m": .8, **thresholds}} if enabled else {}),
+        **({} if rooms is None else {"layout": layout_for().model_dump(mode="json")})})
     kwargs = stage.run_kwargs()
     store = SearchStore.create(tmp_path / "searches", project=project, settings=settings,
         identity=SearchIdentity(kwargs["physics_identity"], kwargs["program_fingerprint"], purpose_settings(project.purpose)),
@@ -52,9 +57,10 @@ def pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: Sequence[tuple[i
                 kind="search_candidate", search_id=store.search_id, trial_number=number)})
         SearchStore.scheme_path_for(store.candidate_path(number)).write_text(scheme.model_dump_json())
         save_stage_one_result(result, store.candidate_path(number))
-        book.append(ledger.LedgerRow(batch_index=0, trial_number=number,
-            unit_params_hex={key: .5.hex() for key in ("front_distance", "spacing", "listening_distance")},
-            params_m={"front_distance": distance, "spacing": 1., "listening_distance": 2.}, outcome="scored",
+        room = {} if rooms is None else dict(zip(("room_Lx", "room_Ly", "room_Lz"), (*rooms[number], 3.), strict=True))
+        book.append((ledger.LedgerRow if rooms is None else ledger.LedgerRowV2)(batch_index=0, trial_number=number,
+            unit_params_hex={key: .5.hex() for key in ("front_distance", "spacing", "listening_distance", *room)},
+            params_m={"front_distance": distance, "spacing": 1., "listening_distance": 2., **room}, outcome="scored",
             score=score, reason=None, violation_m=None, seconds=.25, result_file=f"candidates/trial-{number:06d}.json"))
     store.status_path.write_text(SearchStatus(state="budget_exhausted").model_dump_json())
     return store

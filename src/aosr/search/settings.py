@@ -25,6 +25,17 @@ class StageOneRefineSettings(BaseModel):
     top_n: int = Field(ge=1, strict=True)
     far_control_min_front_distance_m: float = Field(gt=0,
         description="較遠對照的選席分界（聲學中心離前牆，公尺）；工程暫定，老闆 2026-10-21")
+    # 面積對照（老闆 2026-10-23）：兩個比例一起設或一起不設；舊設定沒有這兩格，指紋與挑席照舊。
+    area_control_max_spread: float | None = Field(default=None, gt=0, exclude_if=lambda value: value is None,
+        description="前 N 面積跨度（最大減最小，再除以最小）不超過這個比例才開面積對照；工程暫定，老闆 2026-10-23")
+    area_control_min_difference: float | None = Field(default=None, gt=0, lt=1, exclude_if=lambda value: value is None,
+        description="比前 N 最小再小、或比最大再大至少這個比例才算面積明顯不同；工程暫定，老闆 2026-10-23")
+
+    @model_validator(mode="after")
+    def _area_pair(self) -> Self:
+        if (self.area_control_max_spread is None) != (self.area_control_min_difference is None):
+            raise ValueError("面積對照的兩個比例要一起設定")
+        return self
 
 
 class FeedbackSettings(BaseModel):

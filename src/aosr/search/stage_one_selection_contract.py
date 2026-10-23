@@ -1,11 +1,22 @@
 """選席可序列化契約與搜尋軸大峰量法；不讀檔、不依賴報告。"""
 from __future__ import annotations
 from typing import Literal, Self
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from aosr.reporting.stage_one_result import StageOneResult
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-Role = Literal["top_n", "big_peak_control", "far_control"]
+Role = Literal["top_n", "big_peak_control", "far_control", "area_control"]
+CONTROLS = ("big_peak_control", "far_control", "area_control")
+CONTROL_TEXT = {"big_peak_control": "大峰對照", "far_control": "較遠對照", "area_control": "面積對照"}
+
+
+def role_text(role: Role, search_rank: int) -> str:
+    """細算報告、入選清單與入選後檢查共用的角色字樣。"""
+    return f"前 N（搜尋第 {search_rank} 名）" if role == "top_n" else CONTROL_TEXT[role]
+
+
+def percent(value: float) -> str:
+    return f"{value * 100:g}%"
 
 
 class SelectionSeat(BaseModel):
@@ -34,16 +45,25 @@ class StageOneSelection(BaseModel):
     candidates: tuple[SelectionSeat, ...]
     missing: dict[str, str]
     unreadable: dict[int, str]
+    # 舊設定沒有面積門檻：三格都不寫，舊挑席讀回、重挑都跟原本逐位相同。
+    area_control_max_spread: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    area_control_min_difference: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    top_n_area_spread: float | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _each_control_is_chosen_or_explained(self) -> Self:
         # 摘要是要給報告與接續讀回的：一席沒取到卻沒寫原因，報告就只能當機或亂印，讀回時就拒收。
-        for role in ("big_peak_control", "far_control"):
+        if (self.area_control_max_spread is None) != (self.area_control_min_difference is None):
+            raise ValueError("面積對照的兩個比例要一起記")
+        for role in CONTROLS:
             chosen = sum(role in seat.roles for seat in self.candidates)
-            if chosen > 1 or (chosen == 1) == (role in self.missing):
+            if role == "area_control" and self.area_control_max_spread is None:
+                if chosen or role in self.missing:
+                    raise ValueError("沒有面積門檻就不開面積對照，也不寫原因")
+            elif chosen > 1 or (chosen == 1) == (role in self.missing):
                 raise ValueError(f"{role} 必須剛好取到一席、或寫明沒取到的原因")
-        if set(self.missing) - {"big_peak_control", "far_control"}:
-            raise ValueError("missing 只收兩席對照的原因")
+        if set(self.missing) - set(CONTROLS):
+            raise ValueError("missing 只收三席對照的原因")
         return self
 
 

@@ -117,3 +117,55 @@ def test_bad_peak_index_only_spoils_its_row(tmp_path: Path, monkeypatch: pytest.
     assert "索引超出" in chosen.unreadable[2]
     assert [s.trial_number for s in chosen.candidates] == [0, 1]
     assert chosen.missing["far_control"] == "本次未取得較遠對照"
+
+
+ROOM_ROWS = [(0, 1., 5., .5), (1, 2., 9., .6), (2, 3., 4., .7), (3, 4., 4., .9)]
+
+
+# 面積＝帳本記的長×寬（寬都是 4 m）；兩個門檻都含等號（「不超過 10%」「至少 15%」），差 1e-9 m 就跨過去。
+@pytest.mark.parametrize("lengths,expected,roles,reason", [
+    ((5., 5.5, 4.25, 4.25), 2, ("big_peak_control", "area_control"), None),
+    ((5., 5., 5.75 - 1e-9, 5.75), 3, ("far_control", "area_control"), None),
+    ((5., 5.5 + 1e-9, 4.25, 4.25), None, (), "前 N 面積跨度超過 10%，面積本來就不接近，不開這一席"),
+    ((5., 5.5, 4.25 + 1e-9, 5.75), None, (),
+     "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 15%、或比最大再大至少 15% 的候選")])
+def test_area_control_inclusive_thresholds_and_shared_roles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        lengths: tuple[float, ...], expected: int | None, roles: tuple[str, ...], reason: str | None) -> None:
+    rooms = {number: (length, 4.) for number, length in enumerate(lengths)}
+    chosen = select(pool(tmp_path, monkeypatch, ROOM_ROWS, rooms=rooms, area=(.1, .15)))
+    area = [s for s in chosen.candidates if "area_control" in s.roles]
+    assert [(s.trial_number, s.roles) for s in area] == ([] if expected is None else [(expected, roles)])
+    assert chosen.missing.get("area_control") == reason
+    low, high = min(lengths[:2]) * 4, max(lengths[:2]) * 4
+    assert chosen.top_n_area_spread == (high - low) / low
+    assert (chosen.area_control_max_spread, chosen.area_control_min_difference) == (.1, .15)
+    assert type(chosen).model_validate_json(chosen.model_dump_json()) == chosen
+
+
+def test_area_control_skips_unreadable_and_needs_thresholds_and_room_search(tmp_path: Path,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    rooms = {0: (5., 4.), 1: (5., 4.), 2: (4.25, 4.), 3: (4.25, 4.)}
+    store = pool(tmp_path / "broken", monkeypatch, ROOM_ROWS, rooms=rooms, area=(.1, .15))
+    store.candidate_path(2).write_text("broken")
+    assert [s.trial_number for s in select(store).candidates if "area_control" in s.roles] == [3]
+    # 舊設定沒有兩個門檻：不開、不寫原因，三格都不進摘要，舊挑席讀回逐位相同。
+    old = select(pool(tmp_path / "old", monkeypatch, ROOM_ROWS, rooms=rooms))
+    assert "area_control" not in old.model_dump_json() and "area_control" not in old.missing
+    fixed = select(pool(tmp_path / "fixed", monkeypatch, ROOM_ROWS, area=(.1, .15)))
+    assert fixed.missing["area_control"] == "房間固定，面積對照不適用" and fixed.top_n_area_spread is None
+    assert all("area_control" not in s.roles for s in (*old.candidates, *fixed.candidates))
+
+
+def test_area_seat_must_be_chosen_or_explained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rooms = {0: (5., 4.), 1: (5., 4.), 2: (4.25, 4.), 3: (5., 4.)}
+    document = json.loads(select(pool(tmp_path, monkeypatch, ROOM_ROWS, rooms=rooms, area=(.1, .15))).model_dump_json())
+    for seat in document["candidates"]:
+        seat["roles"] = [role for role in seat["roles"] if role != "area_control"]
+    with pytest.raises(ValueError, match="area_control"):
+        StageOneSelection.model_validate(document)
+    document["missing"]["area_control"] = "本次未找到面積對照"
+    StageOneSelection.model_validate(document)
+    with pytest.raises(ValueError, match="一起記"):
+        StageOneSelection.model_validate(document | {"area_control_min_difference": None})
+    with pytest.raises(ValueError, match="不開面積對照"):
+        StageOneSelection.model_validate(document | {"area_control_max_spread": None, "area_control_min_difference": None})
