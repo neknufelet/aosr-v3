@@ -179,6 +179,10 @@ def _problems_response(problems: tuple[SchemeProblem, ...], document: object) ->
     return JSONResponse({"problems": plain_problems(problems, document)}, status_code=422)
 
 
+# 輸入頁「範本」選單的兩份：第二階段的參考房、第一階段的六面 30ρc 全向聲源範本（#558）。
+TEMPLATES = {"reference": "scheme_reference_room.json", "stage_one": "scheme_stage_one_template.json"}
+
+
 def _bad(exc: Exception, code: int = 400) -> JSONResponse:
     if isinstance(exc, SchemeValidationError):
         document = exc.document if isinstance(exc, SchemeProblemsError) else None
@@ -400,8 +404,11 @@ class GuiHandlers:
             return _bad(ValueError(INPUT_SHAPE_ERROR))
 
     async def example(self, request: Request) -> Response:
-        loaded: object = json.loads((repo_root() / "blueprint" /
-                                     "scheme_reference_room.json").read_text(encoding="utf-8"))
+        # 範本只認登記的名字，不收路徑；沒給就是參考房（開頁預設）。
+        name = request.query_params.get("template", "reference")
+        if name not in TEMPLATES:
+            return _bad(ValueError(f"不認得的範本：{name}"))
+        loaded: object = json.loads((repo_root() / "blueprint" / TEMPLATES[name]).read_text(encoding="utf-8"))
         scheme = Scheme.model_validate(loaded)
         # 峰谷配對容差：同種的兩個峰（或兩個谷）中心頻率相差不超過它就算同一個，
         # 左右聲道之間（src/aosr/scoring/channel_matching.py::_matched_features）與
