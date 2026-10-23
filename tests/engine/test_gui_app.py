@@ -18,7 +18,7 @@ from starlette.testclient import TestClient
 
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.gui.app import STATIC, GuiSettings, create_app, repo_root
+from aosr.gui.app import STATIC, TEMPLATES, GuiSettings, create_app, repo_root
 from aosr.gui.labels import label_tables, listening_point_label, speaker_label
 from aosr.gui.plan_view import _plan_views, plan_for as _plan
 from aosr.reporting.scheme import Scheme
@@ -103,6 +103,10 @@ def test_example_template_reads_only_registered_names(tmp_path: Path) -> None:
         assert set(walls) == {"floor", "ceiling", "x0", "xL", "y0", "yL"}
         assert all(value == pytest.approx(30 * rho_c) for value in walls.values())
         assert stage_one.json()["rho_c"] == rho_c
+        # 網頁牆改回固定阻抗時的預設值讀範本的六面值（app.js 的 fixedWallDefaults），登記的每份都要是這種寫法。
+        for registered in TEMPLATES:
+            scene = client.get("/api/example", params={"template": registered}).json()["scheme"]["scene"]
+            assert set(scene["impedance_pa_s_per_m_by_wall"]) == {"floor", "ceiling", "x0", "xL", "y0", "yL"}, registered
         # 不認得的名字（含路徑樣子、空字串）一律 400，不去讀檔。
         for name in ("../scheme_reference_room", "scheme_stage_one_template.json", "", "STAGE_ONE"):
             refused = client.get("/api/example", params={"template": name})
