@@ -23,6 +23,15 @@ status = "baseline"
 source_kind = "engineering_recommendation"
 source = "票 #558 老闆 2026-10-20 回評價規格第二題「Ａ」：對照那一間＝前 5 間以外、大峰比前 5 間裡最低的還低 1 dB 以上的候選中合分最好的一間；1 dB 是主對話暫定（10-05 舊搜尋兩軸峰高差最大 0.73 dB），第一批跑完再看"
 
+# 入選後檢查的優先組：報告每次顯示時讀這一格（src/aosr/search/stage_one_post_check_report.py），不進合分、不改名次。
+[[stage_one.setting]]
+key = "stage_one_post_check.priority_participation_db"
+value = -10.0
+unit = "dB"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "票 #558 老闆 2026-10-23 回「主位參與大」門檻：「好，先採 −10 dB，登記為暫定工程的「優先檢視門檻」，不是聽感門檻或聲學合格線。」量法沿用各喇叭對主位、相對同一喇叭到同一主位最強的共振換算 dB、左右取較大；拖尾超線且參與 ≥−10 dB 列優先組，其餘超線完整保留在後面；文獻沒有直接支持哪個數字，第一批跑完看名單再調"
+
 [[stage_one.setting]]
 key = "stage_one_low_frequency.scored_range_hz"
 value = [20.0, 300.0]
