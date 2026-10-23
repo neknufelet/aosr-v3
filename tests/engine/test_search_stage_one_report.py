@@ -267,7 +267,7 @@ def test_cli_outer_conclusion_expires_like_the_web_when_stage_one_refine_changes
         path.write_text("{")
     else:
         path.write_text(json.dumps(json.loads(path.read_bytes()) | {"state": state}))
-    assert main(["report", "--search", str(store.path)]) == 0
+    assert not main(["report", "--search", str(store.path)])
     outer = [line for line in capsys.readouterr().out.splitlines() if line.startswith(("外圈結論：", "先前結論"))]
     assert outer == (["外圈結論：未判定（判定之後第一階段細算的狀態又變了）", f"先前結論（已過期）：{OUTER_MESSAGES[conclusion]}"]
         if stale else [f"外圈結論：{conclusion_message(concluded)}"])
@@ -289,7 +289,7 @@ def test_cli_keeps_a_single_undecided_line_when_the_outer_snapshot_itself_moved(
     store.status_path.write_text(moved.model_dump_json())
     path = store.path / "stage_one_refine.json"
     path.write_text(json.dumps(json.loads(path.read_bytes()) | {"state": "failed"}))
-    assert main(["report", "--search", str(store.path)]) == 0
+    assert not main(["report", "--search", str(store.path)])
     outer = [line for line in capsys.readouterr().out.splitlines() if line.startswith(("外圈結論：", "先前結論"))]
     assert outer == [f"外圈結論：{conclusion_message(moved)}"]
     assert conclusion_message(moved).startswith("未判定")
