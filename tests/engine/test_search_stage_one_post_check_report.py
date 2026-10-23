@@ -200,7 +200,8 @@ def test_priority_group_splits_by_larger_speaker_and_registry_threshold(
     primary = load_scheme(store.scheme_path_for(store.refine_result_path(2))).receiver_set.primary.receiver_id
     # 超線的是 100 Hz（大小 4）與 108 Hz（大小 0，兩支都沒有有限相對值）。試算 2：第一支喇叭 100 Hz 改成 0，只剩另一支；
     # 試算 1：第一支喇叭 100 Hz 改成 0.5（-21.6 dB），另一支 -3.5 dB，取較大才進優先組；試算 8 不動，留給剛好等於門檻那一題。
-    for number, index, size in ((2, 1, 0.), (1, 1, .5)):
+    # 試算 5：第一支喇叭 100 Hz 改成 20（變成最強、0 dB）、108 Hz 改成 16（-1.9 dB）：兩根都進優先組，組內要照超出量排（審查補題）。
+    for number, index, size in ((2, 1, 0.), (1, 1, .5), (5, 1, 20.), (5, 2, 16.)):
         path = root / f"{number}.json"
         doc = json.loads(path.read_bytes())
         pair = next(pair for pair in doc["placement_layer"]["pairs"] if pair["receiver_id"] == primary)
@@ -211,6 +212,8 @@ def test_priority_group_splits_by_larger_speaker_and_registry_threshold(
     monkeypatch.setattr(module, "config_path", lambda name: _registry_with(tmp_path, threshold))
     text = "\n".join(module.stage_one_post_check_lines(store))
     assert f"不低於 {threshold:g} dB 的共振" in text
+    web = module.stage_one_post_check_summary(store)
+    assert module.PRIORITY.format(threshold=threshold) in web.lines
     reference = load_reference(load_quality_targets(config_path("quality_targets.toml")).purpose(store.settings.purpose))
     seen = []
     for seat in result.seats:
@@ -227,11 +230,16 @@ def test_priority_group_splits_by_larger_speaker_and_registry_threshold(
         assert head == f"超過參考線 {len(over)} 個、優先組 {len(first)} 個" + ("" if first else "（優先組為零，不表示沒有問題）")
         assert [part.split("（")[0] for part in shown_first.split("、")] == (first or ["沒有"])
         assert [part.split("（")[0] for part in shown_rest.split("、")] == (rest or ["沒有"])
+        # 網頁表與每席那一行照同一個門檻分（審查補題：改了登記簿，網頁也要跟著重新分組）。
+        assert [(row[1], row[2] + " Hz") for row in web.rows if row[0] == f"試算 {seat.trial_number}"] == \
+            [("優先組", f) for f in first] + [("其餘超線", f) for f in rest]
+        web_line = next(line for line in web.lines if line.startswith(f"試算 {seat.trial_number}／"))
+        assert web_line.endswith(f"；優先組 {len(first)} 個" + ("" if first else "（優先組為零，不表示沒有問題）"))
         seen.append((seat.trial_number, first))
     # 每個門檻各自的分組（從上面的原始算式來，這裡只核這組門檻真的走到了想測的分支）。
-    usual = [(8, []), (2, ["100.00 Hz"]), (1, ["100.00 Hz"]), (5, ["100.00 Hz"])]
+    usual = [(8, []), (2, ["100.00 Hz"]), (1, ["100.00 Hz"]), (5, ["108.00 Hz", "100.00 Hz"])]
     expected = {-10.: usual, EDGE: [(8, ["100.00 Hz"]), *usual[1:]], math.nextafter(EDGE, 0.): usual,
-                0.: [(8, []), (2, []), (1, []), (5, [])]}
+                0.: [(8, []), (2, []), (1, []), (5, ["100.00 Hz"])]}
     assert seen == expected[threshold]
 
 

@@ -82,12 +82,13 @@ def test_unverified_defences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ch
                 if r.trial_number == 9 and r.total_cost is not None else r for r in rows)
         _rewrite_rows(store, selected)
     elif change in ("settings", "purpose_settings"):
-        registry.write_text(registry.read_text().replace("value = -10.0", "value = -11.0", 1))
+        # 改第二階段用途裡的一格（第一階段那一段也有 -10.0，在檔案較前面，不能盲換第一個）。
+        registry.write_text(registry.read_text().replace("key = \"reflections_and_echo.zone_threshold_db.front\"\nvalue = -10.0", "key = \"reflections_and_echo.zone_threshold_db.front\"\nvalue = -11.0", 1))
         if change == "purpose_settings":
             result = SchemeResult.model_validate_json(path.read_bytes())
             result = result.model_copy(update={"purpose_settings": purpose_settings(registry, result.scheme.purpose)})
             path.write_text(result.model_dump_json())
-            registry.write_text(registry.read_text().replace("value = -11.0", "value = -10.0", 1))
+            registry.write_text(registry.read_text().replace("key = \"reflections_and_echo.zone_threshold_db.front\"\nvalue = -11.0", "key = \"reflections_and_echo.zone_threshold_db.front\"\nvalue = -10.0", 1))
     elif change == "unreadable":
         path.write_text("{")
     elif change == "header":
