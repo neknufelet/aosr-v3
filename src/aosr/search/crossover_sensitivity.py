@@ -31,7 +31,7 @@ from aosr.search.run import SearchStatus
 from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, IDENTICAL_CROSSOVER_REASON
 from aosr.search.sampler import Excluded, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchStore, refine_scheme_id
+from aosr.search.store import SearchStore, refine_scheme_id, reject_stage_one
 
 
 class CrossoverUnverified(Exception):
@@ -301,6 +301,7 @@ def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path
 
 def attach_crossover(store: SearchStore, *, status: SearchStatus, quality_targets_path: Path) -> CrossoverSummary:
     """由 auto 在鎖裡呼叫；只有比較關卡記完成的未驗證，重評出錯交給命令列記失敗。"""
+    reject_stage_one(store, "300 Hz 交接敏感度附件")
     summary = fresh_summary(store, status)
     try:
         previous = read_summary(store.path)

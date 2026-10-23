@@ -7,6 +7,7 @@ from typing import NoReturn
 import pytest
 
 from aosr.config.paths import config_path
+from aosr.search.crossover_sensitivity import attach_crossover
 from aosr.search.feedback import feedback_search
 from aosr.search.modal_attach import attach_modal
 from aosr.search.outer import auto_search
@@ -60,6 +61,10 @@ def _modal(store: SearchStore, tmp_path: Path) -> object:
     return attach_modal(store, status=_status(store), cache_dir=tmp_path / "cache", runner=("must-not-run",))
 
 
+def _crossover(store: SearchStore, tmp_path: Path) -> object:
+    return attach_crossover(store, status=_status(store), quality_targets_path=REGISTRY)
+
+
 def _stability(store: SearchStore, tmp_path: Path) -> object:
     return attach_stability(store, status=_status(store), quality_targets_path=REGISTRY,
         run_date=stage.run_kwargs()["run_date"], probe=lambda: store.identity, compute_factory=_never)
@@ -68,7 +73,7 @@ def _stability(store: SearchStore, tmp_path: Path) -> object:
 ENTRIES: dict[str, tuple[str, Callable[[SearchStore, Path], object]]] = {
     "start": ("搜尋", _start), "resume": ("搜尋", _resume), "auto": ("自動外圈", _auto), "refine": ("細算", _refine),
     "select": ("入選", _select), "feedback": ("回饋", _feedback), "modal": ("模態附件", _modal),
-    "stability": ("擺位穩定性附件", _stability)}
+    "crossover": ("300 Hz 交接敏感度附件", _crossover), "stability": ("擺位穩定性附件", _stability)}
 
 
 def _tree(tmp_path: Path) -> dict[Path, bytes | None]:
