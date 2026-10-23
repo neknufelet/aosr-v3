@@ -184,7 +184,7 @@ def _largest_db(pairs: list[dict[str, list[float]]], index: int) -> float | None
     return max(values, default=None)
 
 
-# 門檻：登記簿原值、剛好等於試算 8 那根 4／13 的相對 dB（等於也算優先組）、比它高一個最小浮點間隔、0（只有最強那根，它在範圍外）。
+# 門檻：登記簿原值、剛好等於試算 8 那根 4／13 的相對 dB（等於也算優先組）、比它高一個最小浮點間隔、0（只剩改成最強那根的試算 5 那根 100 Hz）。
 EDGE = 20 * math.log10(4 / 13)
 
 
