@@ -126,6 +126,12 @@ def check_project_furniture_layout(project: Scheme) -> None:
         raise SchemeValidationError(problems)
 
 
+def reject_stage_one(store: SearchStore, entry: str) -> None:
+    """第二階段的函式庫入口在寫任何檔之前拒收第一階段資料夾，跟命令列分流同一條；函式庫直接呼叫也擋（#884）。"""
+    if store.settings.stage is not None:
+        raise ValueError(f"這是第一階段搜尋資料夾，第二階段的{entry}不接第一階段")
+
+
 def speaker_height(project: Scheme) -> float:
     """搜尋只有一個固定高度；用方案座標原值，左右不同先拒收。"""
     left_id, right_id = speaker_pair_ids(project)

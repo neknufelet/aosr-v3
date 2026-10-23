@@ -25,7 +25,7 @@ from aosr.search.run import (
 )
 from aosr.search.sampler import Excluded, RankingZone, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchStore, check_project_furniture_layout, refine_result_name, refine_scheme_id
+from aosr.search.store import SearchStore, check_project_furniture_layout, refine_result_name, refine_scheme_id, reject_stage_one
 from aosr.search.timings import WallClock
 
 
@@ -340,6 +340,7 @@ def refine_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
 
     keep_stop_marker：自動外圈呼叫時為真——開頭看到的記號可能是使用者剛放的，不當殘留刪，照停止處理。
     """
+    reject_stage_one(store, "細算")
     clock = WallClock()
     previous = refinement_status(store)
     runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous, clock)

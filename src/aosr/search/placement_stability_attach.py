@@ -33,7 +33,7 @@ from aosr.search.report_comparison import read_refinement_rows
 from aosr.search.run import CandidateJob, Compute, ComputedCandidate, IdentityChanged, IdentityProbe, SearchStatus, _check_computed, _check_identity
 from aosr.search.sampler import Excluded, RankingZone, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchIdentity, SearchStore
+from aosr.search.store import SearchIdentity, SearchStore, reject_stage_one
 from aosr.search.timings import WallClock
 
 ComputeFactory = Callable[[Path], Compute]
@@ -342,6 +342,7 @@ def attach_stability(store: SearchStore, *, status: SearchStatus, quality_target
                      run_date: date, probe: IdentityProbe, compute_factory: ComputeFactory,
                      capabilities_path: Path | None = None) -> StabilitySummary:
     """由收尾持鎖呼叫；計算工廠在跳過、身分與整份重用之後才建立。"""
+    reject_stage_one(store, "擺位穩定性附件")
     previous = _previous(store.path)
     reason = attachment_skip_reason(status.outer.conclusion)
     observed = None if reason else probe()

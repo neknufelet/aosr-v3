@@ -21,7 +21,7 @@ from aosr.search.modal_record import (
 from aosr.search.outer_status import attachment_skip_reason, snapshot_of
 from aosr.search.labels import BASELINE_BLOCKED_TEXT
 from aosr.search.run import SearchStatus
-from aosr.search.store import SearchStore
+from aosr.search.store import SearchStore, reject_stage_one
 
 DEFAULT_RUNNER = (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
 STOPPED_NOTE = "低頻診斷被停止，搜尋結果不受影響"
@@ -280,7 +280,9 @@ def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, l
     """在 auto 持有的鎖內執行；只讀兩本帳及結果，另存附件與每次新檔名。
 
     出錯或被停時照上一份摘要收尾（保留還對得上的已診斷、上一份指到的文件不清），再丟 AttachmentRecorded。
+    拒收第一階段資料夾在收尾之前：收尾會寫附件。
     """
+    reject_stage_one(store, "模態附件")
     cache_dir = cache_dir.resolve()
     try:
         previous = read_summary(store.path)
