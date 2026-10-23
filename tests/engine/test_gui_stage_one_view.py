@@ -310,8 +310,7 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
             assert f"房間層：共振 {len(modes)} 個；超過參考線 {len(exceeding)} 個" in line
             seat_rows = _resonance_rows(f"試算 {seat['trial_number']}", ModalDiagnosis.model_validate(document),
                                         load_scheme(store.path / seat["scheme_file"]), reference, threshold)
-            priority = sum(row[1] == "優先組" for row in seat_rows)
-            assert line.endswith(f"；優先組 {priority} 個" + ("" if priority else "（優先組為零，不表示沒有問題）"))
+            _assert_priority_count(line, seat_rows)
             expected_rows.extend(seat_rows)
         assert modal.table.rows == tuple(expected_rows) and modal.table.headings[0] == "席"
         target_line = reference.target
@@ -361,6 +360,12 @@ def _vary_fixture(files: list[Path], *, quiet: bool) -> None:
                 if mode["kind"] == "oscillating_resonance":
                     mode["t60_s"] = 0.01
         file.write_text(json.dumps(document))
+
+
+def _assert_priority_count(line: str, rows: list[tuple[str, ...]]) -> None:
+    """每席那一行以優先組個數收尾，零個時多一句提醒；個數從獨立重算的表列數來。"""
+    priority = [row for row in rows if row[1] == "優先組"]
+    assert line.endswith(f"；優先組 {len(priority)} 個" + ("" if priority else "（優先組為零，不表示沒有問題）"))
 
 
 def _threshold(registry: QualityTargets, purpose: str) -> float:
