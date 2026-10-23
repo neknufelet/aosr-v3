@@ -258,6 +258,13 @@ def _stop_message(convergence_run: int) -> str:
     return f"達到停止條件：連續 {convergence_run} 個候選沒有嚴格改善（暫行的工程停止設定，不代表找到全域最佳）"
 
 
+def _time_budget_message(budget_s: float, used_s: float, scored: bool) -> str:
+    """時間預算用完：批界才停，最後一批可能跨過預算；照實寫用了多久，不說收斂。"""
+    head = (f"因預算停止：搜尋時間預算 {budget_s / 3600:g} 小時用完（到這一批結束，搜尋已用 {used_s / 3600:.2f} 小時；"
+            "批界才停，最後一批可能跨過）")
+    return head + ("；第一名是本次預算內最佳，不代表已收斂，也不代表找到全域最佳" if scored else "；沒有任何候選拿到分數")
+
+
 def _budget_message(scored: bool) -> str:
     """預算用完：有第一名才說它是本次預算內最佳；沒有任何候選拿到分數就照實說。"""
     if scored:
@@ -578,6 +585,11 @@ class _Runner:
             # 未完成批不能提前判收斂；先補齊後才按全批編號判斷。
             if not partial and self.status.best_score is not None and self.status.streak >= settings.convergence_run:
                 return self.save(state="converged", message=_stop_message(settings.convergence_run))
+            # 時間預算只在批界看（未完成批先補齊）；秒數是每次存檔累加的搜尋牆鐘，接續也算進去。
+            used = sum(self.status.search_seconds.values())
+            if not partial and settings.search_time_budget_s is not None and used >= settings.search_time_budget_s:
+                return self.save(state="budget_exhausted",
+                                 message=_time_budget_message(settings.search_time_budget_s, used, self.status.best_score is not None))
             if not self.boundary():
                 return self.status
             size = min(settings.batch_size, settings.budget - self.status.asked)

@@ -257,7 +257,6 @@ def _stage_one_compute(args: argparse.Namespace, store: SearchStore, factory: St
 
 def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: StageOneComputeFactory | None,
                        registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
-    from aosr.search.stage_one_worker import SEARCH_CANDIDATE_CAP_S
     from aosr.search.stage_one_run import start_stage_one_search, resume_stage_one_search
 
     if args.command == "refine":
@@ -266,7 +265,7 @@ def _stage_one_command(args: argparse.Namespace, store: SearchStore, factory: St
         return _stage_one_auto_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
 
     try:
-        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=SEARCH_CANDIDATE_CAP_S)
+        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=store.settings.stage_one_search_cap_s)
         entry = start_stage_one_search if args.command == "start" else resume_stage_one_search
         status = entry(store, compute=compute, probe=lambda: _identity(store.project.purpose, args.capabilities),
             registry_path=registry_path, run_date=date.today(), engine_version=store.identity.program_fingerprint)
@@ -305,10 +304,9 @@ def _stage_one_auto_command(args: argparse.Namespace, store: SearchStore, factor
                             registry_path: Path, *, lock_fd: int, modal_runner: tuple[str, ...]) -> int:
     """第一階段外圈拒收只報錯；入選後檢查不改結論或離開碼。"""
     from aosr.search.stage_one_outer import auto_stage_one_search
-    from aosr.search.stage_one_worker import SEARCH_CANDIDATE_CAP_S
 
     try:
-        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=SEARCH_CANDIDATE_CAP_S)
+        compute = _stage_one_compute(args, store, factory, lock_fd=lock_fd, search_cap_s=store.settings.stage_one_search_cap_s)
         refine_compute = compute if factory is not None else _stage_one_compute(args, store, None,
             lock_fd=lock_fd, search_cap_s=None)
         status = auto_stage_one_search(store, compute=compute, refine_compute=refine_compute,
