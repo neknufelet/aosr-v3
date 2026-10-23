@@ -4,7 +4,7 @@ from __future__ import annotations
 from aosr.reporting.stage_one_result import StageOneResult, stage_one_comparison_identity
 from aosr.search.run import ComputeFailed, IdentityChanged
 from aosr.search.stage_one_refine_record import (RefinedSeat, StageOneRefineStatus, read_stage_one_refined_result)
-from aosr.search.stage_one_selection_contract import SelectionSeat, StageOneSelection, big_peak, percent, role_text
+from aosr.search.stage_one_selection_contract import CONTROLS, Role, SelectionSeat, StageOneSelection, big_peak, percent, role_text
 from aosr.search.store import SearchStore
 
 
@@ -118,17 +118,31 @@ def _control_lines(status: StageOneRefineStatus) -> list[str]:
     # 標籤只掛在真的取到的那一席；沒取到時只印原因，不留一行沒有候選的標籤。
     control = next((seat for seat in selected.candidates if "big_peak_control" in seat.roles), None)
     if control is None:
-        lines.append(f"本次未取得大峰對照：{selected.missing['big_peak_control']}")
+        lines.append(missing_control_text(selected, "big_peak_control"))
     else:
         lines.append(f"大峰對照＝試算 {control.trial_number}：前 N 名以外、大峰低過門檻的候選中搜尋軸合分最好")
     x = selected.far_control_min_front_distance_m
     far = next((seat for seat in selected.candidates if "far_control" in seat.roles), None)
     if far is None:
-        lines.append(f"本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 {x:g} m，工程暫定）")
+        lines.append(missing_control_text(selected, "far_control"))
     else:
         lines.append(f"較遠對照＝試算 {far.trial_number}：主搜尋已採到的較遠候選中最佳"
                      f"（離前牆至少 {x:g} m；{x:g} 是工程暫定的選席分界）")
     return lines
+
+
+def missing_control_text(selected: StageOneSelection, role: Role) -> str:
+    """沒取到的對照一句原因；細算報告與網頁的入選清單共用同一句（老闆只看網頁）。"""
+    if role == "big_peak_control":
+        return f"本次未取得大峰對照：{selected.missing[role]}"
+    if role == "far_control":
+        x = selected.far_control_min_front_distance_m
+        return f"本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 {x:g} m，工程暫定）"
+    return selected.missing[role]
+
+
+def missing_control_lines(selected: StageOneSelection) -> tuple[str, ...]:
+    return tuple(missing_control_text(selected, role) for role in CONTROLS if role in selected.missing)
 
 
 def _area_lines(selected: StageOneSelection, *, room_varies: bool) -> list[str]:
@@ -142,7 +156,7 @@ def _area_lines(selected: StageOneSelection, *, room_varies: bool) -> list[str]:
              f"{percent(limit)}、{percent(difference)} 是工程暫定"]
     area = next((seat for seat in selected.candidates if "area_control" in seat.roles), None)
     if area is None:
-        lines.append(selected.missing["area_control"])
+        lines.append(missing_control_text(selected, "area_control"))
     else:
         lines.append(f"面積對照＝試算 {area.trial_number}：前 N 以外、面積比前 N 最小再小至少 {percent(difference)}"
                      f"、或比最大再大至少 {percent(difference)} 的候選中搜尋軸合分最好；"

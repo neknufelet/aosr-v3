@@ -82,7 +82,7 @@ def test_room_auto_reports_group_by_exact_modal_key(tmp_path: Path, monkeypatch:
 
 def test_room_auto_area_control_rides_refine_shortlist_and_post_check(tmp_path: Path,
                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    # 門檻放寬到一定會開：答案照帳本自己重算（前 2 名的面積範圍外、合分最好的那一題），不從挑席程式抄。
+    # 跨度門檻放寬到一定會開：答案照帳本自己重算（前 2 名的面積範圍外、合分最好的那一題），不從挑席程式抄。
     store = running(tmp_path, monkeypatch, layout=layout_for(),
                     area={"area_control_max_spread": 10., "area_control_min_difference": 1e-6})
     _finish(store, tmp_path, monkeypatch)
@@ -104,6 +104,22 @@ def test_room_auto_area_control_rides_refine_shortlist_and_post_check(tmp_path: 
     block = next(block for block in view.blocks if block.key == "shortlist")
     assert "面積對照只用來比較空間代價，不宣稱已證明哪種大小或比例最好" in block.lines
     assert block.table is not None and any(row[0] == f"試算 {expected}" and "面積對照" in row[1] for row in block.table.rows)
+    assert not any(line.startswith("本次未找到面積對照") for line in block.lines)
+
+
+def test_room_auto_area_control_not_found_is_shown_on_web(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 「至少 99%」在房間範圍內不可能做到：照老闆「沒有就明列本次未找到」，網頁說明行要寫，不留面積對照的角色與提醒。
+    store = running(tmp_path, monkeypatch, layout=layout_for(),
+                    area={"area_control_max_spread": 10., "area_control_min_difference": .99})
+    _finish(store, tmp_path, monkeypatch)
+    reason = "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 99%、或比最大再大至少 99% 的候選"
+    report = build_stage_one_report(store)
+    assert reason in report.refine_lines and reason not in report.shortlist_lines
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+        server_program=store.identity.program_fingerprint)
+    block = next(block for block in view.blocks if block.key == "shortlist")
+    assert reason in block.lines and "面積對照只用來比較空間代價，不宣稱已證明哪種大小或比例最好" not in block.lines
+    assert block.table is not None and all("面積對照" not in row[1] for row in block.table.rows)
 
 
 def test_rounded_room_dimensions_cannot_merge_different_keys() -> None:

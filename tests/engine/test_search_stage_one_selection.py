@@ -122,21 +122,24 @@ def test_bad_peak_index_only_spoils_its_row(tmp_path: Path, monkeypatch: pytest.
 ROOM_ROWS = [(0, 1., 5., .5), (1, 2., 9., .6), (2, 3., 4., .7), (3, 4., 4., .9)]
 
 
-# 面積＝帳本記的長×寬（寬都是 4 m）；兩個門檻都含等號（「不超過 10%」「至少 15%」），差 1e-9 m 就跨過去。
-@pytest.mark.parametrize("lengths,expected,roles,reason", [
-    ((5., 5.5, 4.25, 4.25), 2, ("big_peak_control", "area_control"), None),
-    ((5., 5., 5.75 - 1e-9, 5.75), 3, ("far_control", "area_control"), None),
-    ((5., 5.5 + 1e-9, 4.25, 4.25), None, (), "前 N 面積跨度超過 10%，面積本來就不接近，不開這一席"),
-    ((5., 5.5, 4.25 + 1e-9, 5.75), None, (),
-     "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 15%、或比最大再大至少 15% 的候選")])
+# 面積＝帳本記的長×寬（高都是 3 m）；兩個門檻都含等號（「不超過 10%」「至少 15%」），差 1e-9 m 就跨過去。
+# 第五格分得出「大的那邊除以最大」（25.1 比 22 大 14%、比 20 大 15.5%）；第六格寬不一樣，面積改用長×高就挑錯人。
+@pytest.mark.parametrize("sizes,expected,roles,reason", [
+    (((5., 4.), (5.5, 4.), (4.25, 4.), (4.25, 4.)), 2, ("big_peak_control", "area_control"), None),
+    (((5., 4.), (5., 4.), (5.75 - 1e-9, 4.), (5.75, 4.)), 3, ("far_control", "area_control"), None),
+    (((5., 4.), (5.5 + 1e-9, 4.), (4.25, 4.), (4.25, 4.)), None, (), "前 N 面積跨度超過 10%，面積本來就不接近，不開這一席"),
+    (((5., 4.), (5.5, 4.), (4.25 + 1e-9, 4.), (5.75, 4.)), None, (),
+     "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 15%、或比最大再大至少 15% 的候選"),
+    (((5., 4.), (5.5, 4.), (6.275, 4.), (4.25, 4.)), 3, ("far_control", "area_control"), None),
+    (((5., 4.), (5.5, 4.), (4., 5.), (4.25, 4.)), 3, ("far_control", "area_control"), None)])
 def test_area_control_inclusive_thresholds_and_shared_roles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        lengths: tuple[float, ...], expected: int | None, roles: tuple[str, ...], reason: str | None) -> None:
-    rooms = {number: (length, 4.) for number, length in enumerate(lengths)}
+        sizes: tuple[tuple[float, float], ...], expected: int | None, roles: tuple[str, ...], reason: str | None) -> None:
+    rooms = dict(enumerate(sizes))
     chosen = select(pool(tmp_path, monkeypatch, ROOM_ROWS, rooms=rooms, area=(.1, .15)))
     area = [s for s in chosen.candidates if "area_control" in s.roles]
     assert [(s.trial_number, s.roles) for s in area] == ([] if expected is None else [(expected, roles)])
     assert chosen.missing.get("area_control") == reason
-    low, high = min(lengths[:2]) * 4, max(lengths[:2]) * 4
+    low, high = min(x * y for x, y in sizes[:2]), max(x * y for x, y in sizes[:2])
     assert chosen.top_n_area_spread == (high - low) / low
     assert (chosen.area_control_max_spread, chosen.area_control_min_difference) == (.1, .15)
     assert type(chosen).model_validate_json(chosen.model_dump_json()) == chosen

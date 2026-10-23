@@ -489,7 +489,7 @@ def _shortlist(store: SearchStore) -> Block:
             return Block(key="shortlist", title=title, lines=("還沒細算",), red="warning_only")
         has_winner = any(row.refine_rank == 1 for row in shortlist.rows)
         table = Table(headings=HEADINGS, rows=tuple(shortlist_cells(row, has_winner=has_winner) for row in shortlist.rows))
-        return Block(key="shortlist", title=title, lines=shortlist_notes(shortlist), table=table, red="warning_only")
+        return Block(key="shortlist", title=title, lines=(*shortlist_notes(shortlist), *shortlist.missing), table=table, red="warning_only")
     except (OSError, ValueError, KeyError) as error:
         return Block(key="shortlist", title=title,
             lines=("入選清單讀不回：" + "；".join(str(error).splitlines()),), warning=True, red="warning_only")

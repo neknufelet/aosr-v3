@@ -11,7 +11,7 @@ from aosr.search.room_proportions import (
 )
 from aosr.search.run import ComputeFailed, IdentityChanged
 from aosr.search.stage_one_refine_record import RefinedSeat, StageOneRefineStatus, read_stage_one_refined_result
-from aosr.search.stage_one_refine_report import _mismatch
+from aosr.search.stage_one_refine_report import _mismatch, missing_control_lines
 from aosr.search.stage_one_selection_contract import CONTROL_TEXT, SelectionSeat, role_text
 from aosr.search.store import SearchStore
 
@@ -81,6 +81,8 @@ class StageOneShortlist:
     top_n: int
     room_range: bool
     rows: tuple[ShortlistRow, ...]
+    # 沒取到的對照各一句原因：命令列已印在細算那一段，只有網頁另外接在說明行後面。
+    missing: tuple[str, ...] = ()
 
 
 def _row(store: SearchStore, status: StageOneRefineStatus, seat: SelectionSeat,
@@ -139,7 +141,7 @@ def stage_one_shortlist(store: SearchStore) -> StageOneShortlist | None:
     return StageOneShortlist(status.selection.top_n, store.settings.layout.room_range is not None,
         tuple(replace(row, principal_rank=ranks.get(row.trial_number),
             delta=_delta(row.values, base) if row.values is not None and base is not None else None)
-            for row in (*top, *controls)))
+            for row in (*top, *controls)), missing_control_lines(status.selection))
 
 
 def _rank(value: int | None) -> str:

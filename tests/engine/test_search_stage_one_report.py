@@ -167,6 +167,14 @@ def test_refine_report_missing_controls_and_reasons(tmp_path: Path, monkeypatch:
     assert "大峰對照門檻：無" in text
     assert "不可估" in text and "non_positive_energy" in text
     assert "讀不回" in text and "結果讀回失敗" in text
+    # 老闆只看網頁：沒取到的兩席原因也要接在網頁入選清單的說明行後面（命令列已印在細算那一段，清單不重印）。
+    from aosr.gui.search_view import build_search_view
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+        server_program=store.identity.program_fingerprint)
+    lines = next(block for block in view.blocks if block.key == "shortlist").lines
+    assert lines[-2:] == ("本次未取得大峰對照：前 N 名都量不到大峰",
+                          "本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 0.8 m，工程暫定）")
+    assert text.count("本次未取得大峰對照") == 1
 
 
 def test_refine_report_incomparable_and_bad_verification_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

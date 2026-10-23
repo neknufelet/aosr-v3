@@ -6,7 +6,7 @@ from aosr.reporting.stage_one_result import StageOneResult
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Role = Literal["top_n", "big_peak_control", "far_control", "area_control"]
-CONTROLS = ("big_peak_control", "far_control", "area_control")
+CONTROLS: tuple[Role, ...] = ("big_peak_control", "far_control", "area_control")
 CONTROL_TEXT = {"big_peak_control": "大峰對照", "far_control": "較遠對照", "area_control": "面積對照"}
 
 
