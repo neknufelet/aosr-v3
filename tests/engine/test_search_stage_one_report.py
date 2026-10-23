@@ -174,7 +174,7 @@ def test_refine_report_missing_controls_and_reasons(tmp_path: Path, monkeypatch:
     lines = next(block for block in view.blocks if block.key == "shortlist").lines
     assert lines[-2:] == ("本次未取得大峰對照：前 N 名都量不到大峰",
                           "本次未取得較遠對照，不因此判定較遠區不好（選席分界：離前牆至少 0.8 m，工程暫定）")
-    assert text.count("本次未取得大峰對照") == 1
+    assert [line for line in text.splitlines() if line.startswith("本次未取得大峰對照")] == ["本次未取得大峰對照：前 N 名都量不到大峰"]
 
 
 def test_refine_report_incomparable_and_bad_verification_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

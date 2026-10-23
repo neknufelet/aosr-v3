@@ -108,10 +108,16 @@ def test_room_auto_area_control_rides_refine_shortlist_and_post_check(tmp_path: 
 
 
 def test_room_auto_area_control_not_found_is_shown_on_web(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # 「至少 99%」在房間範圍內不可能做到：照老闆「沒有就明列本次未找到」，網頁說明行要寫，不留面積對照的角色與提醒。
+    # 照老闆「沒有就明列本次未找到」：網頁說明行要寫，不留面積對照的角色與提醒。範圍裡做得到差 99%，
+    # 所以「這場真的沒有符合的」先照帳本自己驗，不靠房間範圍。
     store = running(tmp_path, monkeypatch, layout=layout_for(),
                     area={"area_control_max_spread": 10., "area_control_min_difference": .99})
     _finish(store, tmp_path, monkeypatch)
+    scored = sorted((row for row in ledger.read_for(store).rows if row.outcome == "scored"),
+                    key=lambda row: (row.score if row.score is not None else float("inf"), row.trial_number))
+    areas = [row.params_m["room_Lx"] * row.params_m["room_Ly"] for row in scored]
+    low, high = min(areas[:2]), max(areas[:2])
+    assert areas[2:] and not any((low - area) / low >= .99 or (area - high) / high >= .99 for area in areas[2:])
     reason = "本次未找到面積對照：前 N 以外沒有面積比前 N 最小再小至少 99%、或比最大再大至少 99% 的候選"
     report = build_stage_one_report(store)
     assert reason in report.refine_lines and reason not in report.shortlist_lines
