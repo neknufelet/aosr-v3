@@ -256,7 +256,7 @@ def test_counts_include_each_nonzero_seat_state(tmp_path: Path, monkeypatch: pyt
         assert blocks(store)["counts"].lines[-1] == expected
 
 
-@pytest.mark.parametrize("state", ["absent", "running", "done", "broken", "one_file"])
+@pytest.mark.parametrize("state", ["absent", "running", "done", "broken", "one_file", "quiet"])
 def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     # 真網頁 main 先做同一設定，避免在行程內直接組頁時誤認為舊模態程式。
     configure_calculation_jax()
@@ -265,20 +265,15 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
         run(store, tmp_path / "child")
         path = store.path / "stage-one-check" / "summary.json"
         raw = json.loads(path.read_bytes())
-        _distinct_pair_sizes([path.parent / seat["diagnosis_file"] for seat in raw["seats"]])
-        if state == "broken":
-            path.write_text("{")
-        elif state == "running":
-            raw.update(state="running", message="正在逐席檢查")
-            raw["seats"][0].update(state="running", diagnosis_file=None)
-            path.write_text(json.dumps(raw))
-        elif state == "one_file":
-            (path.parent / raw["seats"][0]["diagnosis_file"]).write_text("{")
+        _vary_fixture([path.parent / seat["diagnosis_file"] for seat in raw["seats"]], quiet=state == "quiet")
+        _damage(path, raw, state)
     shown = blocks(store)
     modal = shown["modal"]
     assert modal.red == "warning_only" and all(block.red is None for key, block in shown.items() if key not in ("modal", "shortlist"))
     assert modal.title == "入選後檢查（低頻模態診斷）"
     assert modal.warning == (state in ("broken", "one_file"))
+    if state == "quiet":
+        assert modal.table is not None and all(row[1:] == ("這一席沒有超線共振", "", "", "", "", "") for row in modal.table.rows)
     assert all(not block.warning for key, block in shown.items() if key != "modal")
     assert not any(word in "\n".join(modal.lines) for word in ("原方案：", "搜尋第一名：", "細算第一名：", "舊版模態程式"))
     if state == "absent":
@@ -315,12 +310,46 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
             "以外的共振未評估，只在上面計個數", PARTICIPATION, RELATIVE)
 
 
-def _distinct_pair_sizes(files: list[Path]) -> None:
-    """測試資料每一對的大小都一樣，喇叭拿錯座位也看不出來（審查抓到）：每一對照各自的樣式改大小，相對 dB 才會不同。"""
+def test_post_check_without_diagnosed_seat_has_no_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 每席都不是「已診斷」（範圍外）：沒有超線表，也沒有表的說明行；每席那一行照樣列（植錯存活補題）。
+    configure_calculation_jax()
+    store = prepared(tmp_path, monkeypatch)
+    run(store, tmp_path / "child", state="out_of_scope")
+    raw = json.loads((store.path / "stage-one-check" / "summary.json").read_bytes())
+    modal = blocks(store)["modal"]
+    assert modal.table is None and not modal.warning
+    assert not any(line in modal.lines for line in (PARTICIPATION, RELATIVE))
+    assert not any(line.startswith("下表") for line in modal.lines)
+    for seat in raw["seats"]:
+        line = next(line for line in modal.lines if line.startswith(f"試算 {seat['trial_number']}／"))
+        assert seat["state"] == "out_of_scope" and "房間層" not in line
+
+
+def _damage(path: Path, raw: dict[str, object], state: str) -> None:
+    """摘要整份壞、第一席還在跑、第一席的診斷文件壞；其他狀態不動。"""
+    seats = raw["seats"]
+    assert isinstance(seats, list)
+    if state == "broken":
+        path.write_text("{")
+    elif state == "running":
+        raw.update(state="running", message="正在逐席檢查")
+        seats[0].update(state="running", diagnosis_file=None)
+        path.write_text(json.dumps(raw))
+    elif state == "one_file":
+        (path.parent / seats[0]["diagnosis_file"]).write_text("{")
+
+
+def _vary_fixture(files: list[Path], *, quiet: bool) -> None:
+    """測試資料每一對的大小都一樣，喇叭拿錯座位也看不出來（審查抓到）：每一對的大小乘上隨配對號長的斜率，相對 dB 各不相同。
+    quiet：每席的共振都壓到參考線以下（同一間房，要每席一起改），表上每席一列「沒有超線共振」。"""
     for file in files:
         document = json.loads(file.read_bytes())
         for k, pair in enumerate(document["placement_layer"]["pairs"]):
-            pair["resonance_magnitude"] = [m * (1 + (i + 3 * k) % 5 * 0.4) for i, m in enumerate(pair["resonance_magnitude"])]
+            pair["resonance_magnitude"] = [m * (1 + 0.05 * i * (k + 1)) for i, m in enumerate(pair["resonance_magnitude"])]
+        if quiet:
+            for mode in document["room_layer"]["modes"]:
+                if mode["kind"] == "oscillating_resonance":
+                    mode["t60_s"] = 0.01
         file.write_text(json.dumps(document))
 
 
