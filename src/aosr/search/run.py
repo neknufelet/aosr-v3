@@ -43,7 +43,7 @@ from aosr.search import constraints, furniture_prefilter, layout, ledger
 from aosr.search.outer_status import OuterStatus
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis
+from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis, reject_stage_one
 from aosr.search.timings import RoundNumber, Seconds, WallClock
 
 
@@ -645,6 +645,7 @@ def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                  registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """新帳本、原方案、釘住比較身分、排入起點，再依批次搜尋。"""
     _reject_room_range(store)
+    reject_stage_one(store, "搜尋")
     clock = WallClock()
     book = ledger.create_for(store)
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, book, clock)
@@ -683,6 +684,7 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                   registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """先核表頭與快照、讀回原方案重排；完整批重播、末批逐位核對後只算缺列。"""
     _reject_room_range(store)
+    reject_stage_one(store, "搜尋")
     clock = WallClock()
     previous = SearchStatus()
     try:

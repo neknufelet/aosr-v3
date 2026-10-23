@@ -9,7 +9,7 @@ from aosr.search.feedback import FeedbackUnavailable, comparison_trial, feedback
 from aosr.search.outer_status import OUTER_MESSAGES, OuterConclusion, OuterStatus, snapshot_of
 from aosr.search.refine_run import refine_search
 from aosr.search.run import Compute, IdentityProbe, SearchStatus, _write_status, resume_search
-from aosr.search.store import SearchStore
+from aosr.search.store import SearchStore, reject_stage_one
 
 
 def _terminal(status: SearchStatus, stopped: bool) -> OuterConclusion | None:
@@ -72,6 +72,7 @@ def _stopped(store: SearchStore) -> bool:
 def auto_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                 registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """每步各自可接續；訊號與被砍不捕捉、不另寫結論。"""
+    reject_stage_one(store, "自動外圈")
     while True:
         status = _read(store)
         terminal = _terminal(status, _stopped(store))

@@ -26,7 +26,7 @@ from aosr.search.labels import BASELINE_BLOCKED_TEXT
 from aosr.search.ledger_io import read_rows, write_line
 from aosr.search.refine import RefineLedger
 from aosr.search.refine_run import header_for
-from aosr.search.store import FROZEN, JSON_SUFFIX, JSONL_SUFFIX, SearchStore, refine_result_name, refine_scheme_id
+from aosr.search.store import FROZEN, JSON_SUFFIX, JSONL_SUFFIX, SearchStore, refine_result_name, refine_scheme_id, reject_stage_one
 
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 SELECT_LEDGER_FILE = f"select{JSONL_SUFFIX}"
@@ -194,6 +194,7 @@ def select_refined(store: SearchStore, trial_number: int | None, data_dir: Path)
     先寫帳再發布：發布失敗就把帳截回原位；萬一兩步之間整台當掉，帳上有列而目標不在，
     下次會走「目標不存在、由人決定」，不會默默放出第二份。
     """
+    reject_stage_one(store, "入選")
     source, digest = _validated_source(store, trial_number)
     data_dir = data_dir.expanduser().resolve()  # 跟網頁層一樣展開 ~，免得寫進目前目錄底下的「~」資料夾
     with selection_ledger_path(store).open("a+b") as handle:

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, StrictStr, model_validator
 from aosr.search import layout, ledger
 from aosr.search.ledger_io import write_line as _write_line
 from aosr.search.run import RoundRecord, SearchStatus, _write_status
-from aosr.search.store import FROZEN, SearchStore
+from aosr.search.store import FROZEN, SearchStore, reject_stage_one
 from aosr.search.sampler import ReplayMismatch
 
 
@@ -192,6 +192,7 @@ def replay_enqueues(store: SearchStore, status: SearchStatus, rows: Sequence[led
 
 def feedback_search(store: SearchStore) -> SearchStatus:
     """先驗全部前提與帳本，再記事件與新狀態；細算子物件原封保留。"""
+    reject_stage_one(store, "回饋")
     status = _accepted_status(store)
     recorded = ledger.read_for(store)
     size = store.settings.batch_size
