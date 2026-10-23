@@ -440,10 +440,12 @@ def test_template_save_does_not_overwrite_same_name_scheme(tmp_path: Path, brows
 
 
 def _load_template(page: Page) -> None:
-    # 先清掉旁邊上一次的字，等的才是這一次載入寫的那句。
-    page.evaluate("() => { document.getElementById('template-note').textContent = ''; }")
+    # 先清掉旁邊與訊息列上一次的字：載入最後一步是檢查（寫訊息列、清旁邊），
+    # 兩格同時有這一次的字才算載完，成功那句被檢查清掉就等不到。
+    page.evaluate("() => { for (const id of ['template-note', 'messages']) document.getElementById(id).textContent = ''; }")
     page.locator("#load-template").click()
-    page.wait_for_function("() => document.querySelector('#template-note').textContent.startsWith('已載入')")
+    page.wait_for_function("() => document.querySelector('#messages').textContent !== ''"
+                           " && document.querySelector('#template-note').textContent.startsWith('已載入')")
 
 
 def test_template_load_failure_keeps_form(tmp_path: Path, browser: Browser) -> None:
@@ -485,9 +487,10 @@ def test_stage_one_template_loads_and_never_overwrites(tmp_path: Path, browser: 
         assert page.locator("#room-Lx").input_value() == f"{raw['scene']['room_m']['Lx']:g}"
         for wall, value in walls.items():
             assert float(page.locator(f"#wall-{wall}").input_value()) == value
-        assert page.locator("#measured-cancel-ceiling").count() == 0
-        for hidden in ("#result-link", "#result-stale", "#scheme-archive-notice"):
-            assert page.locator(hidden).is_hidden(), hidden
+        assert page.evaluate("() => document.getElementById('measured-cancel-ceiling')") is None
+        # 直接讀 hidden 屬性：沒有字的提示框本來就量不到大小，用「看不看得到」會放過沒藏的。
+        for hidden in ("result-link", "result-stale", "scheme-archive-notice"):
+            assert page.evaluate("id => document.getElementById(id).hidden", hidden) is True, hidden
         # 牆換成構造再換回固定阻抗：填回去的是載入範本的 30ρc，不是開頁時參考房的值。
         page.locator("#material-kind-floor").select_option("assembly")
         page.wait_for_selector("#wall-editor-floor [data-layer-field]")
@@ -498,7 +501,7 @@ def test_stage_one_template_loads_and_never_overwrites(tmp_path: Path, browser: 
         page.wait_for_selector("#wall-editor-floor [data-layer-field]")
         # 第一次按「儲存」照名字存一份；再載入一次範本、改了按「儲存」不准蓋掉那一份。
         _load_template(page)
-        assert page.locator("#wall-floor").count() == 1
+        assert page.locator("#wall-floor").is_visible()
         page.locator("#save").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
         saved = tmp_path / "schemes" / f"{raw['scheme_id']}.json"
