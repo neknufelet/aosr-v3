@@ -194,10 +194,12 @@ def test_second_stage_report_accepts_paused_state(tmp_path: Path) -> None:
     assert "因單題時間上限暫停" in render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
 
 
+# 搜尋那一個帶設定檔的單題上限（#902：沒寫照老闆 10-22 的 600 秒），細算那一個不帶。
+@pytest.mark.parametrize("configured", [None, 420.])
 @pytest.mark.parametrize("command,expected_caps", [
-    ("start", [600.]), ("resume", [600.]), ("refine", [None]), ("auto", [600., None])])
-def test_cli_constructs_distinct_search_and_refine_computes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                          command: str, expected_caps: list[float | None]) -> None:
+    ("start", ["search"]), ("resume", ["search"]), ("refine", [None]), ("auto", ["search", None])])
+def test_cli_constructs_distinct_search_and_refine_computes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str,
+                                                          expected_caps: list[str | None], configured: float | None) -> None:
     from types import SimpleNamespace
     from aosr.search import cli, stage_one_worker, stage_one_refine, stage_one_outer, stage_one_run
     from aosr.search.run import SearchStatus
@@ -206,7 +208,8 @@ def test_cli_constructs_distinct_search_and_refine_computes(tmp_path: Path, monk
     from aosr.search.settings import SearchSettings
     store = SearchStore.create(tmp_path / "configured", project=store.project,
         settings=SearchSettings.model_validate(store.settings.model_dump(mode="json") | {
-            "stage_one_refine": {"top_n": 2, "far_control_min_front_distance_m": .8}}),
+            "stage_one_refine": {"top_n": 2, "far_control_min_front_distance_m": .8}}
+            | ({} if configured is None else {"stage_one_candidate_cap_s": configured})),
         identity=store.identity, versions={"python": "test", "numpy": "test", "optuna": "test"})
     constructed: list[RecordingCompute] = []
     used: list[StageOneComputeFunction] = []
@@ -239,7 +242,8 @@ def test_cli_constructs_distinct_search_and_refine_computes(tmp_path: Path, monk
     extra = ["--modal-cache-dir", str(tmp_path / "cache")] if command in ("refine", "auto") else []
     code = cli.main([command, *target, "--engine-commit", "test", *extra])
     assert code == (3 if command == "refine" else 4)
-    assert [compute.cap for compute in constructed] == expected_caps
+    search_cap = 600. if configured is None else configured
+    assert [compute.cap for compute in constructed] == [search_cap if cap == "search" else None for cap in expected_caps]
     assert used == constructed
 
 

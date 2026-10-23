@@ -258,6 +258,13 @@ def _stop_message(convergence_run: int) -> str:
     return f"達到停止條件：連續 {convergence_run} 個候選沒有嚴格改善（暫行的工程停止設定，不代表找到全域最佳）"
 
 
+def _time_budget_message(budget_s: float, used_s: float, scored: bool) -> str:
+    """時間預算用完：批界才停，最後一批可能跨過預算；照實寫用了多久，不說收斂。"""
+    head = (f"因預算停止：搜尋時間預算 {budget_s / 3600:g} 小時用完（到這一批結束，搜尋已用 {used_s / 3600:.2f} 小時；"
+            "批界才停，最後一批可能跨過）")
+    return head + ("；第一名是本次預算內最佳，不代表已收斂，也不代表找到全域最佳" if scored else "；沒有任何候選拿到分數")
+
+
 def _budget_message(scored: bool) -> str:
     """預算用完：有第一名才說它是本次預算內最佳；沒有任何候選拿到分數就照實說。"""
     if scored:
@@ -572,9 +579,20 @@ class _Runner:
         self.status = _progress(self.status.model_copy(update={"asked": asked}), recorded.rows)
         return len(history), partial
 
+    def time_spent(self) -> SearchStatus | None:
+        """搜尋時間預算用完就存成因預算停止；秒數是每次存檔累加的搜尋牆鐘，接續也算進去。"""
+        budget = self.store.settings.search_time_budget_s
+        used = sum(self.status.search_seconds.values())
+        if budget is None or used < budget:
+            return None
+        return self.save(state="budget_exhausted", message=_time_budget_message(budget, used, self.status.best_score is not None))
+
     def loop(self, index: int = 0, partial: Sequence[ledger.LedgerRow] = ()) -> SearchStatus:
         settings = self.store.settings
         while self.status.asked < settings.budget:
+            # 時間預算與收斂都只在批界看（未完成批先補齊）；時間先看：同一批兩個都成立時標因預算停止。
+            if not partial and (spent := self.time_spent()) is not None:
+                return spent
             # 未完成批不能提前判收斂；先補齊後才按全批編號判斷。
             if not partial and self.status.best_score is not None and self.status.streak >= settings.convergence_run:
                 return self.save(state="converged", message=_stop_message(settings.convergence_run))
@@ -591,9 +609,13 @@ class _Runner:
             self.status = self.status.model_copy(update={"asked": self.status.asked + size})
             self.save()
             self.batch(index, proposals, partial)
+            if (spent := self.time_spent()) is not None:
+                return spent
             if self.status.best_score is not None and self.status.streak >= settings.convergence_run:
                 return self.save(state="converged", message=_stop_message(settings.convergence_run))
             index, partial = index + 1, ()
+        if not partial and (spent := self.time_spent()) is not None:
+            return spent
         if not partial and self.status.best_score is not None and self.status.streak >= settings.convergence_run:
             return self.save(state="converged", message=_stop_message(settings.convergence_run))
         return self.save(state="budget_exhausted", message=_budget_message(self.status.best_score is not None))

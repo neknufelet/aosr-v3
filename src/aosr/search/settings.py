@@ -2,12 +2,15 @@
 
 import hashlib
 import json
-from typing import Literal, Self
+from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_serializer, model_serializer, model_validator
 
 from aosr.search.layout_settings import LayoutSettings
 from aosr.search.sampler import SamplerSettings
+
+# 老闆 2026-10-22 先定每個候選 10 分鐘搜尋成本上限（不套細算與模態診斷）；設定沒寫這一格時照這個值，#902 之前開的搜尋也是。
+DEFAULT_STAGE_ONE_CANDIDATE_CAP_S: Final = 600.0
 
 
 class RefineSettings(BaseModel):
@@ -66,6 +69,11 @@ class SearchSettings(BaseModel):
     stage_one_refine: StageOneRefineSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     refine: RefineSettings | None = None
     feedback: FeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    # 第一階段（老闆 2026-10-23）：搜尋階段的時間預算與單題搜尋成本上限住設定檔；舊設定沒有這兩格，指紋照舊。
+    search_time_budget_s: float | None = Field(default=None, gt=0, exclude_if=lambda value: value is None,
+        description="搜尋階段的牆鐘預算（秒，接續也累計）；用完就在批界停、標因預算停止，不代表已收斂；不含細算與入選後檢查")
+    stage_one_candidate_cap_s: float | None = Field(default=None, gt=0, exclude_if=lambda value: value is None,
+        description="每個候選的搜尋成本上限（秒）；沒寫照 600 秒（老闆 2026-10-22 的 10 分鐘），不套細算與入選後檢查")
 
     @model_validator(mode="after")
     def _nonblank_purpose(self) -> Self:
@@ -75,7 +83,14 @@ class SearchSettings(BaseModel):
             raise ValueError("stage_one_refine 必須設定 stage（第一階段）")
         if self.layout.room_range is not None and self.stage != "stage_one_fem_only":
             raise ValueError("房間範圍只准第一階段（stage_one_fem_only）")
+        if self.stage is None and (self.search_time_budget_s is not None or self.stage_one_candidate_cap_s is not None):
+            raise ValueError("搜尋時間預算與單題搜尋成本上限只准第一階段（stage_one_fem_only）")
         return self
+
+    @property
+    def stage_one_search_cap_s(self) -> float:
+        """第一階段搜尋每個候選的成本上限；設定沒寫照老闆 10-22 的 600 秒。"""
+        return DEFAULT_STAGE_ONE_CANDIDATE_CAP_S if self.stage_one_candidate_cap_s is None else self.stage_one_candidate_cap_s
 
     def sampler_settings(self) -> SamplerSettings:
         """把三個取樣欄位交給既有取樣器轉接設定。"""

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock
-from typing import Final, TypeAlias
+from typing import TypeAlias
 
 from aosr.reporting.result import ResultOrigin
 from aosr.reporting.stage_one_result import StageOneResult, load_stage_one_result
@@ -30,8 +30,6 @@ class StageOneComputed:
 
 StageOneComputeFunction: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[StageOneComputed]]
 _clock = time.monotonic
-# 老闆先定為每個候選 10 分鐘搜尋成本上限；不套細算與模態診斷。
-SEARCH_CANDIDATE_CAP_S: Final = 600.0
 
 
 class CandidateTimeLimit(Exception):
