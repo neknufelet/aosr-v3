@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from aosr.search import ledger
 from aosr.reporting.display import FURNITURE_MODEL_NOTE
@@ -34,8 +34,21 @@ from aosr.search.report_stability import TITLE as STABILITY_TITLE, stability_rep
 from aosr.search.labels import PARAM_LABELS
 from aosr.search.report_crossover import crossover_report
 from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT
+from aosr.reporting.stage_one_result import wall_assumption_text
+from aosr.search.labels import STAGE_ONE_REFINE_STATES
+from aosr.search.stage_one_refine_record import REFINE_CONCLUSIONS, StageOneRefineStatus
+from aosr.search.stage_one_report import DECAY_NOTICE
+from aosr.search.stage_one_shortlist import (
+    TITLE as SHORTLIST_TITLE, HEADINGS, NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE, FIXED_ROOM, VARIABLE_ROOM,
+    STATE_TEXT, stage_one_shortlist, shortlist_cells,
+)
+from aosr.search.room_proportions import PROPORTION_EXPLANATION
+from aosr.search.stage_one_post_check_report import TITLE as POST_CHECK_TITLE, stage_one_post_check_summary
+from aosr.search.stage_one_post_check_record import summary_path
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
+# 第一階段細算與入選後檢查各寫自己的檔；跑那一個多小時裡最後更新時間要跟著動，還沒開始就不該存在。
+STAGE_ONE_LATER = ("stage_one_refine.json", summary_path(Path()).as_posix())
 INTERRUPTED = "狀態檔說還在跑，但沒有計算行程拿著這個資料夾：上次中斷了，要接續請叫助理"
 _T = TypeVar("_T")
 
@@ -52,12 +65,21 @@ class Process:
     text: str
 
 
+class Table(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    headings: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+
 class Block(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     key: str
     title: str
     lines: tuple[str, ...]
     warning: bool = False
+    table: Table | None = Field(default=None, exclude_if=lambda value: value is None)
+    # 行裡是固定說明或寫入端的原因原文時，畫面只照 warning 標紅，不照字面（「改善能力尚未確認」「跳過：讀不到…」不是出錯）。
+    red: Literal["warning_only"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SearchView(BaseModel):
@@ -69,6 +91,7 @@ class SearchView(BaseModel):
     blocks: tuple[Block, ...]
     best_default: str
     best_versions: dict[str, BestVersion]
+    scope_text: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class BestVersion(BaseModel):
@@ -312,12 +335,13 @@ def _timings(search: Read[SearchStatus], refine: Read[RefineStatus]) -> Block:
     return Block(key="timings", title="已用時間", lines=tuple(lines), warning=bool(search.error or refine.error))
 
 
-def _updated(path: Path, now: float, not_yet: tuple[str, ...] = ()) -> Block:
+def _updated(path: Path, now: float, not_yet: tuple[str, ...] = (),
+             names: tuple[str, ...] = ("status.json", "ledger.jsonl", "refine.jsonl")) -> Block:
     """not_yet 列的是本來就還不該存在的檔（細算還沒開始時的細算帳）：不存在就略過，不寫讀不到。"""
     times: list[float] = []
     lines: list[str] = []
-    for name in ("status.json", "ledger.jsonl", "refine.jsonl"):
-        if name in not_yet and not (path / name).exists():
+    for name in names:
+        if name in not_yet and _read(lambda: (path / name).exists()).value is False:
             continue
         timestamp = _read(lambda: (path / name).stat().st_mtime)
         if timestamp.value is None:
@@ -436,6 +460,108 @@ def _modal(path: Path, process: Process, store: Read[SearchStore], document: Rea
     return Block(key="modal", title=TITLE, lines=(*lines, RESULT_PAGE), warning=bool(summary.error))
 
 
+def _shortlist(store: SearchStore) -> Block:
+    top_n = store.settings.stage_one_refine.top_n if store.settings.stage_one_refine is not None else 0
+    title = SHORTLIST_TITLE.format(top_n=top_n)
+    try:
+        shortlist = stage_one_shortlist(store)
+        if shortlist is None:
+            return Block(key="shortlist", title=title, lines=("還沒細算",), red="warning_only")
+        has_winner = any(row.refine_rank == 1 for row in shortlist.rows)
+        table = Table(headings=HEADINGS, rows=tuple(shortlist_cells(row, has_winner=has_winner) for row in shortlist.rows))
+        return Block(key="shortlist", title=title, lines=(NOT_FINAL, RANK_AND_QUALITY, DELTA_NOTICE,
+            VARIABLE_ROOM if shortlist.room_range else FIXED_ROOM, PROPORTION_EXPLANATION), table=table, red="warning_only")
+    except (OSError, ValueError, KeyError) as error:
+        return Block(key="shortlist", title=title,
+            lines=("入選清單讀不回：" + "；".join(str(error).splitlines()),), warning=True, red="warning_only")
+
+
+def _stage_one_refined(path: Path) -> Read[StageOneRefineStatus]:
+    file = path / "stage_one_refine.json"
+    present = _read(file.exists)
+    if present.value is None:
+        return Read(error=present.error)
+    return _read(lambda: StageOneRefineStatus.model_validate_json(file.read_bytes())) if present.value else Read()
+
+
+def _stage_one_refine_lines(lines: tuple[str, ...], refined: Read[StageOneRefineStatus], process: Process) -> list[str]:
+    """第二階段的「細算：」行換成第一階段細算的狀態；搜尋清單頁與搜尋頁共用。"""
+    state = refined.value.state if refined.value else "not_started"
+    # selected 是第一階段的在跑狀態；沿用第二階段的核心行程查核。
+    text = (_phase("running", {"running": STAGE_ONE_REFINE_STATES[state]}, process, "細算") if state == "selected"
+            else STAGE_ONE_REFINE_STATES[state])
+    return [f"細算：{refined.error or text}" if line.startswith("細算：") else line for line in lines
+            if not line.startswith("細算停止原因：")]
+
+
+def _stage_one_stage(stage: Block, store: SearchStore, refined: Read[StageOneRefineStatus], process: Process,
+                     outer: Read[OuterStatus]) -> Block:
+    state = refined.value.state if refined.value else "not_started"
+    lines = _stage_one_refine_lines(stage.lines, refined, process)
+    conclusion = outer.value.conclusion if outer.value is not None else None
+    index = next(number for number, line in enumerate(lines) if line.startswith("外圈結論："))
+    # 細算收尾推出來的結論，細算之後重跑、失敗或讀不回就不再成立（快照不記第一階段細算）。
+    if (conclusion is not None and conclusion in REFINE_CONCLUSIONS.values() and REFINE_CONCLUSIONS.get(state) != conclusion
+            and not lines[index].startswith("外圈結論：未判定")):
+        lines[index:index + 1] = ["外圈結論：未判定（判定之後第一階段細算的狀態又變了）",
+                                  f"先前結論（已過期）：{OUTER_MESSAGES[conclusion]}"]
+    if state == "selected" and process.held is not True:
+        lines = ["外圈結論：未判定（計算行程未確認）" if line.startswith("外圈結論：") else line for line in lines]
+    wall = _read(lambda: wall_assumption_text(store.project))
+    index = lines.index(IDEAL_SOURCE_ASSUMPTION_TEXT) + 1
+    lines[index:index] = [wall.value if wall.value is not None else f"牆面假設{wall.error}", DECAY_NOTICE]
+    return stage.model_copy(update={"lines": tuple(lines), "warning": bool(stage.warning or refined.error or wall.error)})
+
+
+def _stage_one_counts(block: Block, refined: Read[StageOneRefineStatus]) -> Block:
+    lines = [line for line in block.lines if not line.startswith("細算")]
+    if refined.error:
+        lines.append(f"第一階段細算：{refined.error}")
+    elif refined.value is None:
+        lines.append("細算：未開始")
+    else:
+        status = refined.value
+        counts: Counter[str] = Counter(seat.state for seat in status.results)
+        counts["pending"] += len(status.selection.candidates) - len(status.results)
+        lines.extend((f"第一階段細算：前 {status.selection.top_n} 席設定；共 {len(status.selection.candidates)} 席（含對照）",
+                      "；".join(f"{label} {counts[state]} 席" for state, label in STATE_TEXT.items())))
+    return block.model_copy(update={"lines": tuple(lines), "warning": bool(block.warning or refined.error)})
+
+
+def _stage_one_reasons(search: Read[SearchStatus], refined: Read[StageOneRefineStatus], process: Process) -> Block:
+    block = _reasons(search, Read(value=RefineStatus()), process)
+    text = refined.error or (refined.value.message if refined.value else "未開始")
+    lines = [f"細算訊息原文：{text}" if line.startswith("細算訊息原文：") else line for line in block.lines]
+    if refined.value is not None:
+        state = refined.value.state
+        if state in ("failed", "interrupted"):
+            lines.append(f"停止段落：細算{STAGE_ONE_REFINE_STATES[state]}")
+        if state == "selected" and process.held is not True:
+            lines.append(f"停止段落：細算；{INTERRUPTED if process.held is False else process.text}")
+    return block.model_copy(update={"lines": tuple(lines), "warning": bool(refined.error)})
+
+
+def _stage_one_view(view: SearchView, store: SearchStore, search: Read[SearchStatus], process: Process, now: float,
+                    outer: Read[OuterStatus]) -> SearchView:
+    refined = _stage_one_refined(store.path)
+    existing = {block.key: block for block in view.blocks}
+    stage = _stage_one_stage(existing["stage"], store, refined, process, outer)
+    counts = _stage_one_counts(existing["counts"], refined)
+    timings = _timings(search, Read(value=RefineStatus()))
+    refine_time = "細算時間：未開始" if refined.value is None and not refined.error else "第一階段細算的時間還沒上網頁"
+    timings = timings.model_copy(update={"lines": tuple(line for line in timings.lines if "細算" not in line)
+        + (refine_time,)})
+    post_check = stage_one_post_check_summary(store)
+    modal = Block(key="modal", title=POST_CHECK_TITLE, lines=post_check.lines, warning=post_check.warning, red="warning_only")
+    replacements = {"stage": stage, "counts": counts, "timings": timings, "refine-best": _shortlist(store),
+        "reasons": _stage_one_reasons(search, refined, process), "modal": modal,
+        "updated": _updated(store.path, now, STAGE_ONE_LATER, ("status.json", "ledger.jsonl", *STAGE_ONE_LATER))}
+    scope = "第一階段：" + ("房間尺寸與" if store.settings.layout.room_range is not None else "")
+    return view.model_copy(update={"blocks": tuple(replacements.get(block.key, block) for block in view.blocks),
+        "stage_text": "；".join(stage.lines[1:3]),
+        "scope_text": scope + "喇叭、座位擺位一起搜尋，只算 20～300 Hz 有限元素"})
+
+
 def build_search_view(path: Path, *, server_physics: str, server_program: str) -> SearchView:
     """只開快照、狀態與兩本帳；每塊讀不到都留原因，其餘照常。"""
     now = time.time()
@@ -444,17 +570,20 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     store = _read(lambda: SearchStore.open(path))
     document = _read(lambda: _document(path / "status.json"))
     search, refine, outer = _status_parts(document)
+    stage_one = store.value is not None and store.value.settings.stage == "stage_one_fem_only"
+    if stage_one:
+        refine = Read(value=RefineStatus())
     book = _read(lambda: ledger.read_for(store.value) if store.value is not None else ledger.Ledger.read_status(path / "ledger.jsonl"))
-    refined = _read(lambda: _refine_book(path, store.value))
+    refined = Read[RefineRead]() if stage_one else _read(lambda: _refine_book(path, store.value))
     stage = _stage(search, refine, outer, process)
     if store.value is not None and store.value.project.speaker_setup is not None:
         stage = stage.model_copy(update={"lines": (*stage.lines, speaker_setup_text(store.value.project.speaker_setup))})
     if store.value is not None and store.value.settings.layout.seat_locked:
         stage = stage.model_copy(update={"lines": (*stage.lines, SEAT_LOCKED_NOTE)})
     furniture = store.value is not None and store.value.project.furniture is not None
-    refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
-                      and not (path / "refine.jsonl").exists())
-    return SearchView(search_id=path.name, name=store.value.project.scheme_id if store.value else path.name,
+    refine_not_yet = stage_one or (refine.value is not None and refine.value.state == "not_started"
+                                  and not (path / "refine.jsonl").exists())
+    view = SearchView(search_id=path.name, name=store.value.project.scheme_id if store.value else path.name,
                       best_default="refine" if refine.value and refine.value.best is not None else "search",
                       best_versions=_versions(path, store, search, refine, book, refined),
                       fetched_text=datetime.fromtimestamp(now).astimezone().strftime("%H:%M:%S"),
@@ -465,17 +594,22 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                               _crossover(store, document), _stability(store, document), _reasons(search, refine, process),
                               _modal(path, process, store, document),
                               _identity(store, server_physics, server_program)))
+    if store.value is not None and store.value.settings.stage == "stage_one_fem_only":
+        return _stage_one_view(view, store.value, search, process, now, outer)
+    return view
 
 
 def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
-    """清單頁一場一列：只讀快照名字與狀態檔，不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
+    """清單頁一場一列：只讀快照名字與狀態檔（第一階段另讀細算狀態小檔），不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
     process = (Process(None, f"判不出有沒有行程在跑：{locks.error.removeprefix('讀不到：')}") if locks.value is None
                else folder_process(path, locks.value))
     store = _read(lambda: SearchStore.open(path))
     search, refine, outer = _status_parts(_read(lambda: _document(path / "status.json")))
-    stage = _stage(search, refine, outer, process)
+    lines = _stage(search, refine, outer, process).lines
+    if store.value is not None and store.value.settings.stage == "stage_one_fem_only":
+        lines = tuple(_stage_one_refine_lines(lines, _stage_one_refined(path), process))
     return {"search_id": path.name, "name": store.value.project.scheme_id if store.value else path.name,
-            "stage_text": "；".join(stage.lines[:3]), "url": f"/searches/{path.name}"}
+            "stage_text": "；".join(lines[:3]), "url": f"/searches/{path.name}"}
 
 
 def list_searches(root: Path) -> dict[str, object]:

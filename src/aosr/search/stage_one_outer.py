@@ -5,7 +5,7 @@ from pathlib import Path
 from aosr.search.outer import _read, _stopped, conclude
 from aosr.search.outer_status import OuterConclusion
 from aosr.search.run import IdentityProbe, SearchStatus
-from aosr.search.stage_one_refine_record import StageOneRefineStatus
+from aosr.search.stage_one_refine_record import REFINE_CONCLUSIONS, StageOneRefineStatus
 from aosr.search.stage_one_refine_stop import StageOneRefineStopped
 from aosr.search.stage_one_run import resume_stage_one_search
 from aosr.search.stage_one_worker import StageOneComputeFunction
@@ -24,13 +24,8 @@ def _terminal(store: SearchStore, status: SearchStatus) -> OuterConclusion | Non
     if status.state in ("converged", "budget_exhausted"):
         path = store.path / "stage_one_refine.json"
         refined = StageOneRefineStatus.model_validate_json(path.read_bytes()) if path.exists() else None
-        if refined is not None:
-            if refined.state == "done":
-                return "complete"
-            if refined.state == "failed":
-                return "refine_failed"
-            if refined.state == "interrupted":
-                return "refine_interrupted"
+        if refined is not None and refined.state in REFINE_CONCLUSIONS:
+            return REFINE_CONCLUSIONS[refined.state]
     return None
 
 

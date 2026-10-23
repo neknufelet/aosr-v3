@@ -14,6 +14,9 @@ from aosr.search.stage_one_worker import check_stage_one_result
 from aosr.search.store import SearchStore
 
 PENDING_CHECK = "入選後檢查見下一段"
+# 第一階段細算的三種收尾各對一個外圈結論；外圈快照只記第二階段的細算，細算重跑後要拿這張表核結論過期沒有。
+REFINE_CONCLUSIONS: dict[str, Literal["complete", "refine_failed", "refine_interrupted"]] = {
+    "done": "complete", "failed": "refine_failed", "interrupted": "refine_interrupted"}
 
 
 class RefinedSeat(BaseModel):

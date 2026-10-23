@@ -1,7 +1,12 @@
 .search-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 .search-grid section{margin:0;min-width:0;overflow-wrap:anywhere}
 .search-grid section p{margin:.5rem 0}
-#stage,#updated,#reasons,#identity,#modal,#stability{grid-column:1 / -1}
+#stage,#updated,#reasons,#identity,#modal,#stability,#shortlist{grid-column:1 / -1}
+#shortlist .table-scroll{overflow-x:auto;max-width:100%}
+#shortlist table{width:max-content;table-layout:fixed}
+#shortlist th,#shortlist td{min-width:7rem;max-width:16rem;vertical-align:top}
+#shortlist th:nth-child(7),#shortlist td:nth-child(7){min-width:19rem}
+#shortlist th:last-child,#shortlist td:last-child{min-width:32rem;max-width:32rem}
 #identity p{font-size:.9rem}
 #search-list a{display:inline-block;padding:.6rem 0}
 #search-list section p{overflow-wrap:anywhere}
