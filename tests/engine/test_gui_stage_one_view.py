@@ -265,6 +265,7 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
         run(store, tmp_path / "child")
         path = store.path / "stage-one-check" / "summary.json"
         raw = json.loads(path.read_bytes())
+        _distinct_pair_sizes([path.parent / seat["diagnosis_file"] for seat in raw["seats"]])
         if state == "broken":
             path.write_text("{")
         elif state == "running":
@@ -312,6 +313,15 @@ def test_post_check_summary_from_diagnosis(tmp_path: Path, monkeypatch: pytest.M
         low = target_line.extension[0] if target_line.extension is not None else target_line.frequencies_hz[0]
         assert modal.lines[-3:] == (f"下表每一席列出超過聽感參考線的共振（照超出量排序，席的角色見上面各行）；參考線範圍（{low:g}～{target_line.frequencies_hz[-1]:g} Hz）"
             "以外的共振未評估，只在上面計個數", PARTICIPATION, RELATIVE)
+
+
+def _distinct_pair_sizes(files: list[Path]) -> None:
+    """測試資料每一對的大小都一樣，喇叭拿錯座位也看不出來（審查抓到）：每一對照各自的樣式改大小，相對 dB 才會不同。"""
+    for file in files:
+        document = json.loads(file.read_bytes())
+        for k, pair in enumerate(document["placement_layer"]["pairs"]):
+            pair["resonance_magnitude"] = [m * (1 + (i + 3 * k) % 5 * 0.4) for i, m in enumerate(pair["resonance_magnitude"])]
+        file.write_text(json.dumps(document))
 
 
 def _resonance_rows(label: str, document: ModalDiagnosis, scheme: Scheme, reference: LowFrequencyDecayReference) -> list[tuple[str, ...]]:

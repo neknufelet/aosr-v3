@@ -207,4 +207,12 @@ def test_post_check_reason_words_do_not_turn_red(tmp_path: Path, monkeypatch: py
         cells = page.locator("#modal .table-scroll table tr").evaluate_all(
             "rows => rows.map(row => [...row.children].map(cell => cell.textContent))")
         assert modal["table"]["rows"] and cells == [modal["table"]["headings"], *modal["table"]["rows"]]
+        # 每 5 秒整塊重畫：框內捲動位置要留著（審查抓到捲到一半被拉回最上面）。框改矮才捲得動。
+        page.add_style_tag(content="#modal .table-scroll{max-height:4rem}")
+        box = page.locator("#modal .table-scroll")
+        old = box.element_handle()
+        top = box.evaluate("element => { element.scrollTop = element.scrollHeight; return element.scrollTop; }")
+        assert top > 0
+        page.wait_for_function("element => !element.isConnected", arg=old, timeout=20000)
+        assert box.evaluate("element => element.scrollTop") == top
         _assert_quiet(watched)
