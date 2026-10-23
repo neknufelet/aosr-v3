@@ -203,4 +203,8 @@ def test_post_check_reason_words_do_not_turn_red(tmp_path: Path, monkeypatch: py
         modal = next(block for block in data["blocks"] if block["key"] == "modal")
         assert modal["red"] == "warning_only" and modal["warning"] is False
         assert "notice" not in (line.get_attribute("class") or "")
+        # 超線共振表照伺服器給的格子逐格畫出，包在可橫捲的框裡。
+        cells = page.locator("#modal .table-scroll table tr").evaluate_all(
+            "rows => rows.map(row => [...row.children].map(cell => cell.textContent))")
+        assert modal["table"]["rows"] and cells == [modal["table"]["headings"], *modal["table"]["rows"]]
         _assert_quiet(watched)

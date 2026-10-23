@@ -43,7 +43,9 @@ from aosr.search.stage_one_shortlist import (
     STATE_TEXT, stage_one_shortlist, shortlist_cells,
 )
 from aosr.search.room_proportions import PROPORTION_EXPLANATION
-from aosr.search.stage_one_post_check_report import TITLE as POST_CHECK_TITLE, stage_one_post_check_summary
+from aosr.search.stage_one_post_check_report import (
+    RESONANCE_HEADINGS, TITLE as POST_CHECK_TITLE, stage_one_post_check_summary,
+)
 from aosr.search.stage_one_post_check_record import summary_path
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
@@ -572,7 +574,8 @@ def _stage_one_view(view: SearchView, store: SearchStore, search: Read[SearchSta
     timings = timings.model_copy(update={"lines": tuple(line for line in timings.lines if "細算" not in line)
         + (refine_time,)})
     post_check = stage_one_post_check_summary(store)
-    modal = Block(key="modal", title=POST_CHECK_TITLE, lines=post_check.lines, warning=post_check.warning, red="warning_only")
+    modal = Block(key="modal", title=POST_CHECK_TITLE, lines=post_check.lines, warning=post_check.warning, red="warning_only",
+                  table=Table(headings=RESONANCE_HEADINGS, rows=post_check.rows) if post_check.rows else None)
     replacements = {"stage": stage, "counts": counts, "timings": timings, "refine-best": _shortlist(store),
         "reasons": _stage_one_reasons(search, refined, process), "modal": modal,
         "updated": _updated(store.path, now, STAGE_ONE_LATER, ("status.json", "ledger.jsonl", *STAGE_ONE_LATER))}
