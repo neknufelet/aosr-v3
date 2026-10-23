@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.reporting.stage_one_result import StageOneComparisonIdentity, StageOneResult, load_stage_one_result
+from aosr.search.outer_status import OUTER_MESSAGES, OuterConclusion
 from aosr.search.refine_run import _job
 from aosr.search.run import ComputeFailed
 from aosr.search.stage_one_selection_contract import FROZEN, StageOneSelection, big_peak
@@ -17,6 +18,19 @@ PENDING_CHECK = "入選後檢查見下一段"
 # 第一階段細算的三種收尾各對一個外圈結論；外圈快照只記第二階段的細算，細算重跑後要拿這張表核結論過期沒有。
 REFINE_CONCLUSIONS: dict[str, Literal["complete", "refine_failed", "refine_interrupted"]] = {
     "done": "complete", "failed": "refine_failed", "interrupted": "refine_interrupted"}
+STALE_CONCLUSION = "外圈結論：未判定（判定之後第一階段細算的狀態又變了）"
+
+
+def stale_conclusion_lines(conclusion: OuterConclusion | None, refine_state: str | None) -> tuple[str, str] | None:
+    """細算收尾推出來的外圈結論，細算之後重跑、失敗或讀不回就不再成立；網頁與命令列報告共用這一道核對（#895）。
+
+    refine_state：第一階段細算摘要現在的狀態，沒有或讀不回給 None。過期回兩行（未判定、標已過期的先前結論），沒過期回 None。
+    """
+    if conclusion is None or conclusion not in REFINE_CONCLUSIONS.values():
+        return None
+    if refine_state is not None and REFINE_CONCLUSIONS.get(refine_state) == conclusion:
+        return None
+    return STALE_CONCLUSION, f"先前結論（已過期）：{OUTER_MESSAGES[conclusion]}"
 
 
 class RefinedSeat(BaseModel):

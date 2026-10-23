@@ -36,7 +36,7 @@ from aosr.search.report_crossover import crossover_report
 from aosr.scoring.stage_one_low_frequency_contract import IDEAL_SOURCE_ASSUMPTION_TEXT
 from aosr.reporting.stage_one_result import wall_assumption_text
 from aosr.search.labels import STAGE_ONE_REFINE_STATES
-from aosr.search.stage_one_refine_record import REFINE_CONCLUSIONS, StageOneRefineStatus
+from aosr.search.stage_one_refine_record import StageOneRefineStatus, stale_conclusion_lines
 from aosr.search.stage_one_report import DECAY_NOTICE
 from aosr.search.stage_one_shortlist import (
     TITLE as SHORTLIST_TITLE, HEADINGS, STATE_TEXT, stage_one_shortlist, shortlist_cells, shortlist_notes,
@@ -519,11 +519,10 @@ def _stage_one_stage(stage: Block, store: SearchStore, refined: Read[StageOneRef
     lines = _stage_one_refine_lines(stage.lines, refined, process)
     conclusion = outer.value.conclusion if outer.value is not None else None
     index = next(number for number, line in enumerate(lines) if line.startswith("外圈結論："))
-    # 細算收尾推出來的結論，細算之後重跑、失敗或讀不回就不再成立（快照不記第一階段細算）。
-    if (conclusion is not None and conclusion in REFINE_CONCLUSIONS.values() and REFINE_CONCLUSIONS.get(state) != conclusion
-            and not lines[index].startswith("外圈結論：未判定")):
-        lines[index:index + 1] = ["外圈結論：未判定（判定之後第一階段細算的狀態又變了）",
-                                  f"先前結論（已過期）：{OUTER_MESSAGES[conclusion]}"]
+    # 細算收尾推出來的結論，細算之後重跑、失敗或讀不回就不再成立（快照不記第一階段細算）；命令列報告共用同一道核對。
+    stale = stale_conclusion_lines(conclusion, refined.value.state if refined.value else None)
+    if stale is not None and not lines[index].startswith("外圈結論：未判定"):
+        lines[index:index + 1] = list(stale)
     if state == "selected" and process.held is not True:
         lines = ["外圈結論：未判定（計算行程未確認）" if line.startswith("外圈結論：") else line for line in lines]
     wall = _read(lambda: wall_assumption_text(store.project))
