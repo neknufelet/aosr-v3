@@ -696,7 +696,7 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
     except FileNotFoundError:
         # 建帳本後、第一次寫狀態前被砍：沒有上一份狀態，照帳本接。任何版本都是先寫狀態才算候選，
         # 帳本沒有列就是從頭都有計時；有列（狀態檔後來被刪）才可能有沒計時的舊段（複查）。
-        # 原方案單獨存、不佔帳本列：它已存檔也表示先寫過狀態、後來才遺失，算過的原方案時間追不回來（審查）。
+        # 原方案單獨存、不佔帳本列：它已存檔就表示算過，不管狀態檔是後來遺失還是一直沒寫成，那段時間都追不回來（審查）。
         previous = SearchStatus(timed_from_start=not (_has_candidate_rows(store) or store.baseline_path.exists()))
     except (OSError, ValueError) as error:
         # 壞掉或認不得的狀態檔不准當成「進行中」：已失敗或已停的搜尋會被悄悄重試。
