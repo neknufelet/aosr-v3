@@ -70,8 +70,9 @@ class SearchSettings(BaseModel):
     refine: RefineSettings | None = None
     feedback: FeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     # 第一階段（老闆 2026-10-23）：搜尋階段的時間預算與單題搜尋成本上限住設定檔；舊設定沒有這兩格，指紋照舊。
+    # 時間預算第二階段也收（老闆 2026-10-24，#558 房 109 受控試跑：搜尋三小時，用完要能接細算）；單題上限仍只准第一階段。
     search_time_budget_s: float | None = Field(default=None, gt=0, exclude_if=lambda value: value is None,
-        description="搜尋階段的牆鐘預算（秒，接續也累計）；用完就在批界停、標因預算停止，不代表已收斂；不含細算與入選後檢查")
+        description="搜尋階段的牆鐘預算（秒，接續也累計）；用完就在批界停、標因預算停止，不代表已收斂；不含細算、入選後檢查與附件")
     stage_one_candidate_cap_s: float | None = Field(default=None, gt=0, exclude_if=lambda value: value is None,
         description="每個候選的搜尋成本上限（秒）；沒寫照 600 秒（老闆 2026-10-22 的 10 分鐘），不套細算與入選後檢查")
 
@@ -83,8 +84,8 @@ class SearchSettings(BaseModel):
             raise ValueError("stage_one_refine 必須設定 stage（第一階段）")
         if self.layout.room_range is not None and self.stage != "stage_one_fem_only":
             raise ValueError("房間範圍只准第一階段（stage_one_fem_only）")
-        if self.stage is None and (self.search_time_budget_s is not None or self.stage_one_candidate_cap_s is not None):
-            raise ValueError("搜尋時間預算與單題搜尋成本上限只准第一階段（stage_one_fem_only）")
+        if self.stage is None and self.stage_one_candidate_cap_s is not None:
+            raise ValueError("單題搜尋成本上限只准第一階段（stage_one_fem_only）")
         return self
 
     @property
