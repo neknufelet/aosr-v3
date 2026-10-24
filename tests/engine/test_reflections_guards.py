@@ -15,7 +15,7 @@ from aosr.scoring.contract_base import Flag, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone
 from aosr.scoring.reflections import ReflectionInput
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, ReflectionSource
-from test_reflections import (  # type: ignore[import-not-found]  # expires=2026-10-24 reason=pytest-test-module-path
+from tests.engine.test_reflections import (
     _AXIS, _SMALL, _evaluate, _pair, _record, _set_entry,
 )
 

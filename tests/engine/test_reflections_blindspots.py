@@ -17,7 +17,7 @@ from aosr.scoring.reflections import ReflectionInput
 from aosr.scoring.reflections_contract import (
     ReflectionChannel, ReflectionsAndEchoPayload, ReflectionSource,
 )
-from test_reflections import (  # type: ignore[import-not-found]  # expires=2026-10-24 reason=pytest-test-module-path
+from tests.engine.test_reflections import (
     _AXIS, _ROOM, _evaluate, _pair, _record, _third_decay, _vary_pair,
 )
 
@@ -158,13 +158,15 @@ def test_wall_delay_comes_from_geometry_and_t20_uses_its_own_band() -> None:
         changed.append(replace(item, report=report, third_octave_decay=_third_decay(report)))
     result = _evaluate(tuple(changed))
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    decay = changed[0].third_octave_decay
+    assert decay is not None
     for pair in result.payload.wall_pairs:
         dimension = {("x0", "xL"): "Lx", ("y0", "yL"): "Ly",
                      ("floor", "ceiling"): "Lz"}[pair.walls]
         expected_delay = 2.0 * _ROOM[dimension] / 343.0
         assert pair.round_trip_delay_s.value == pytest.approx(expected_delay)
         for band in pair.bands:
-            source = next(row for row in changed[0].third_octave_decay.rows
+            source = next(row for row in decay.rows
                           if row.band.nominal_center_hz == band.nominal_center_hz)
             assert band.room_t20_s.value == pytest.approx(source.t20_s)
             if band.round_trip_loss_db.value is not None:
@@ -255,6 +257,7 @@ def test_each_channel_keeps_its_computed_order_coverage_and_validation() -> None
     local_result = _evaluate((main_left, main_right, around_left, around_right))
     local = _channel(local_result, receiver="around")
     assert local.state is MetricState.UNAVAILABLE
+    assert around_left.window is not None
     assert local.computed_order_k == around_left.window.computed_order_k
     assert local.coverage == "not_provable"
     assert local.validation == "unvalidated"
