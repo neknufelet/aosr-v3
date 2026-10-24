@@ -580,8 +580,12 @@ class _Runner:
         return len(history), partial
 
     def time_spent(self) -> SearchStatus | None:
-        """搜尋時間預算用完就存成因預算停止；秒數是每次存檔累加的搜尋牆鐘，接續也算進去。"""
+        """搜尋時間預算用完就存成因預算停止；秒數是每次存檔累加的搜尋牆鐘，接續也算進去。
+
+        先把上次存檔後的經過時間記上再比：原方案那一題與重播算完都沒存檔就進迴圈，只讀已存秒數會多派一整批（審查）。
+        """
         budget = self.store.settings.search_time_budget_s
+        self.status = self.clock.record(self.status, "search")
         used = sum(self.status.search_seconds.values())
         if budget is None or used < budget:
             return None
@@ -692,7 +696,8 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
     except FileNotFoundError:
         # 建帳本後、第一次寫狀態前被砍：沒有上一份狀態，照帳本接。任何版本都是先寫狀態才算候選，
         # 帳本沒有列就是從頭都有計時；有列（狀態檔後來被刪）才可能有沒計時的舊段（複查）。
-        previous = SearchStatus(timed_from_start=not _has_candidate_rows(store))
+        # 原方案單獨存、不佔帳本列：它已存檔也表示先寫過狀態、後來才遺失，算過的原方案時間追不回來（審查）。
+        previous = SearchStatus(timed_from_start=not (_has_candidate_rows(store) or store.baseline_path.exists()))
     except (OSError, ValueError) as error:
         # 壞掉或認不得的狀態檔不准當成「進行中」：已失敗或已停的搜尋會被悄悄重試。
         raise ValueError(f"狀態檔讀不回來（{error}），不能判斷這次搜尋停了沒，拒絕接續") from error

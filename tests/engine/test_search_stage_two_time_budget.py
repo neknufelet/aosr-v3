@@ -69,7 +69,8 @@ def _auto(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, budget_s: float | Non
     monkeypatch.setattr(timings, "_now", lambda: clock[0])
     store, registry = _seed(tmp_path, budget_s)
     compute = TimedOuterCompute(store, clock)
-    assert _invoke(store, registry, monkeypatch, compute) == 0
+    code = _invoke(store, registry, monkeypatch, compute)
+    assert code == 0
     return store, SearchStatus.model_validate_json(store.status_path.read_bytes()), compute
 
 
@@ -99,14 +100,53 @@ def test_time_budget_stops_search_then_auto_refines_and_attaches(tmp_path: Path,
     assert summary is not None and summary.state == "done" and summary.completed
 
 
-def test_resume_refuses_budgeted_search_whose_status_was_rebuilt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+REFUSED = "先前用掉的搜尋時間追不回來，拒絕接續"
+
+
+def _files(store: SearchStore) -> dict[Path, bytes]:
+    return {path.relative_to(store.path): path.read_bytes() for path in store.path.rglob("*") if path.is_file()}
+
+
+def test_resume_refuses_budgeted_search_whose_status_was_rebuilt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                capsys: pytest.CaptureFixture[str]) -> None:
     """狀態檔遺失後重建（不是從開搜尋起就計時）：先前用掉的搜尋時間追不回來，拒絕接續、不寫任何檔。"""
     store, registry = _seed(tmp_path, 2 * HOUR)
     _write_status(store, SearchStatus())
-    before = {path.relative_to(store.path): path.read_bytes() for path in store.path.rglob("*") if path.is_file()}
-    assert _invoke(store, registry, monkeypatch, TimedOuterCompute(store, [0.])) == 1
-    after = {path.relative_to(store.path): path.read_bytes() for path in store.path.rglob("*") if path.is_file()}
-    assert after == before
+    before = _files(store)
+    code = _invoke(store, registry, monkeypatch, TimedOuterCompute(store, [0.]))
+    assert code == 1 and REFUSED in capsys.readouterr().err
+    assert _files(store) == before
+
+
+def test_resume_refuses_when_only_the_baseline_was_saved_before_the_status_was_lost(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """原方案單獨存、不佔帳本列：原方案算完、第一個候選還沒落帳就被砍，狀態檔又遺失，帳本沒有列也不准當成從頭計時。"""
+    from aosr.search import cli
+    from aosr.search.run import resume_search
+    from tests.engine._search_run_cases import ENGINE, RUN_DATE, Killed
+    clock = [0.]
+    monkeypatch.setattr(timings, "_now", lambda: clock[0])
+    store, registry = _seed(tmp_path, 2 * HOUR)
+    killed = TimedOuterCompute(store, clock)
+    killed.kill_after = 1
+    with pytest.raises(Killed):
+        resume_search(store, compute=killed, probe=lambda: store.identity, registry_path=registry,
+                      run_date=RUN_DATE, engine_version=ENGINE)
+    assert store.baseline_path.is_file() and not ledger.read_for(store).rows
+    store.status_path.unlink()
+    before = _files(store)
+    monkeypatch.setattr(cli, "_identity", lambda *a: store.identity)
+    code = cli.main(["resume", str(store.path), "--engine-commit", "test"], compute_factory=lambda *a: TimedOuterCompute(store, clock))
+    assert code == 1 and REFUSED in capsys.readouterr().err
+    assert _files(store) == before
+
+
+def test_baseline_that_already_spent_the_budget_asks_no_batch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """原方案那一題算完就超過預算：批界先記上原方案的時間，一批都不派，標因預算停止，細算照接。"""
+    _, status, compute = _auto(tmp_path, monkeypatch, HOUR / 2)
+    assert status.state == "budget_exhausted" and status.asked == 0
+    assert compute.search_batches == 1 and status.search_seconds[1] == HOUR
+    assert status.refine.state == "stopped" and status.outer.conclusion != "complete"
 
 
 def test_stage_two_settings_take_the_time_budget_but_not_the_candidate_cap(tmp_path: Path) -> None:
