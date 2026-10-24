@@ -698,6 +698,9 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         raise ValueError(f"狀態檔讀不回來（{error}），不能判斷這次搜尋停了沒，拒絕接續") from error
     if previous.state != "running":
         raise ValueError(f"搜尋已停止（{previous.state}），不能接續")
+    if store.settings.search_time_budget_s is not None and not previous.timed_from_start:
+        # 跟第一階段同一道（stage_one_run.py）：狀態檔遺失後重建的秒數是空的，不把不知道的成本當零再跑一整份預算。
+        raise ValueError("設了搜尋時間預算，但狀態檔不是從開搜尋起就有計時（遺失後重建），先前用掉的搜尋時間追不回來，拒絕接續")
     try:
         recorded = _resume_inputs(store)
     except (OSError, ValueError) as error:

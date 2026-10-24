@@ -159,7 +159,7 @@ def test_resume_refuses_a_time_budget_when_the_status_was_lost(tmp_path: Path, m
     assert {path.relative_to(store.path): path.read_bytes() for path in store.path.rglob("*") if path.is_file()} == before
 
 
-def test_settings_fields_are_optional_stage_one_only_and_each_enters_the_fingerprint(tmp_path: Path) -> None:
+def test_settings_fields_are_optional_cap_stage_one_only_and_each_enters_the_fingerprint(tmp_path: Path) -> None:
     store = search.make_store(tmp_path)
     document = store.settings.model_dump(mode="json")
     assert "search_time_budget_s" not in document and "stage_one_candidate_cap_s" not in document
@@ -169,10 +169,11 @@ def test_settings_fields_are_optional_stage_one_only_and_each_enters_the_fingerp
     for field, value in (("search_time_budget_s", 3 * HOUR), ("stage_one_candidate_cap_s", 450.)):
         assert SearchSettings.model_validate(document | {field: value}).fingerprint != store.settings.fingerprint
     assert SearchSettings.model_validate(configured.model_dump(mode="json")) == configured
+    # 時間預算 2026-10-24 起第二階段也收（test_search_stage_two_time_budget.py）；單題上限仍只准第一階段。
     second_stage = {key: value for key, value in document.items() if key != "stage"}
+    with pytest.raises(ValueError, match="單題搜尋成本上限只准第一階段"):
+        SearchSettings.model_validate(second_stage | {"stage_one_candidate_cap_s": 60.})
     for field in ("search_time_budget_s", "stage_one_candidate_cap_s"):
-        with pytest.raises(ValueError, match="只准第一階段"):
-            SearchSettings.model_validate(second_stage | {field: 60.})
         for bad in (0., -1.):
             with pytest.raises(ValueError):
                 SearchSettings.model_validate(document | {field: bad})
