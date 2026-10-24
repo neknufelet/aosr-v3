@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from aosr.scoring.contract import EvaluationState
 from aosr.scoring.direction_zones import DirectionZone
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
-from test_reflections import (  # type: ignore[import-not-found]  # expires=2026-10-24 reason=pytest-test-module-path
+from tests.engine.test_reflections import (
     _evaluate, _pair,
 )
 

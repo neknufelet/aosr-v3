@@ -14,7 +14,7 @@ from aosr.physics.third_octave_decay import third_octave_bands
 from aosr.scoring.contract import EvaluationState, MetricState, ReasonCode
 from aosr.scoring.reflections import ReflectionInput
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
-from test_reflections import (  # type: ignore[import-not-found]  # expires=2026-10-24 reason=pytest-test-module-path
+from tests.engine.test_reflections import (
     _evaluate, _pair, _record, _set_entry, _small_reflection_registry, _vary_pair,
 )
 
