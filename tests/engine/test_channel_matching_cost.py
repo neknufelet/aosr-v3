@@ -15,6 +15,7 @@ from aosr.config.quality_targets import (
     load_quality_targets,
 )
 from aosr.scoring.channel_matching_cost import cost_channel_matching_evaluation
+from aosr.scoring.channel_matching_settings import RIPPLE_KEY
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
@@ -623,7 +624,10 @@ def test_channel_matching_registry_entries_are_all_provisional_and_keep_switch_o
     switch = purpose.entry("channel_matching.direct_time_cost_enabled")
 
     assert {record.status for record in records} == {"baseline"}
-    assert {record.source for record in records} == {_SOURCE}
+    # #558：起伏範圍由老闆另拍，仍是基線；出處從寫入的登記簿讀，不複製字串。
+    ripple = purpose.entry(RIPPLE_KEY)
+    assert isinstance(ripple, SettingEntry)
+    assert {record.source for record in records} == {_SOURCE, ripple.source}
     # 開關是量法設定；先縮型別再讀值（union 直接取 .value 型別警衛會擋）。
     assert isinstance(switch, SettingEntry)
     assert switch.value == 0

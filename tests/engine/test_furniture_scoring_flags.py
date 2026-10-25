@@ -104,7 +104,8 @@ def test_existing_unions_propagate_approximation_without_changing_support() -> N
         assert all(flag not in feature.flags for feature in single.payload.features)
 
 
-@pytest.mark.parametrize("category", [QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY])
+@pytest.mark.parametrize("category", [QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY,
+                                      QualityCategory.LOW_FREQUENCY_RESPONSE])
 def test_non_geometry_categories_reject_furniture_approximation(category: QualityCategory) -> None:
     document = timbres._single("left").model_dump(mode="python")
     document.update(category=category, source_model_fingerprint=None,

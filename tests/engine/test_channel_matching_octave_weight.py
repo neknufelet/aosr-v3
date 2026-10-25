@@ -9,7 +9,10 @@ import pytest
 
 from aosr.config.frequency_axis import frequency_axis
 from aosr.scoring.channel_matching_settings import _load_settings
+from aosr.scoring.timbre import _octave_mean_level_db, timbre_ripple_coverage_reason
+from aosr.scoring.contract import EvaluationState
 from tests.engine import test_channel_matching as fixtures
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL, assert_within, cell
 
 _RANGE_HZ = (20.0, 8000.0)  # 等於登記簿 channel_matching.broadband_range_hz；下面那題守兩者一致
 _PEAK_HZ = 257.3
@@ -52,7 +55,18 @@ def _broadband_db(
         left_frequencies_hz=frequencies,
         right_frequencies_hz=frequencies,
     )
-    payload = fixtures._payload(fixtures._evaluate(receivers, group, (main, front)))
+    evaluation = fixtures._evaluate(receivers, group, (main, front))
+    settings = _load_settings(fixtures._TARGETS, fixtures._PURPOSE)
+    reason = timbre_ripple_coverage_reason(np.asarray(frequencies), settings.ripple_range_hz, settings.timbre)
+    if reason is not None:
+        # #558：短軸蓋不滿左右匹配自己的起伏範圍，整類一定不可估——先斷言真的是這個原因、不是默默繞過
+        # 一條可估的軸，再只考寬頻那一支的八度加權（答案都是下面各題獨立推的比值）。
+        # 寬頻函式接進評估器這一段，由完整軸的題目（含 test_full_axis_evaluator_uses_the_broadband_function）守。
+        assert evaluation.state is EvaluationState.UNAVAILABLE
+        assert reason in evaluation.reason_codes
+        return (_octave_mean_level_db(np.asarray(frequencies), np.asarray(left_energy), settings.broadband_range_hz)
+                - _octave_mean_level_db(np.asarray(frequencies), np.asarray(right_energy), settings.broadband_range_hz))
+    payload = fixtures._payload(evaluation)
     result = next(item for item in payload.point_results if item.receiver_id == "main")
     assert result.broadband_level_difference_db is not None
     return result.broadband_level_difference_db
@@ -75,6 +89,25 @@ def test_range_constant_matches_registry() -> None:
     settings = _load_settings(fixtures._TARGETS, fixtures._PURPOSE)
 
     assert settings.broadband_range_hz == _RANGE_HZ
+
+
+def test_full_axis_evaluator_uses_the_broadband_function() -> None:
+    """#558 接線題：完整軸上評估器報的寬頻音量差，逐位等於寬頻函式對左右兩條曲線在登記範圍內各算一次再相減；
+    短軸題只考寬頻函式本身，這一題補「評估器真的用它、用的是登記範圍」那一段。"""
+    coarse = _coarse_axis()
+    left, right = _with_narrow_peak(coarse), _pink(coarse)
+    settings = _load_settings(fixtures._TARGETS, fixtures._PURPOSE)
+    assert timbre_ripple_coverage_reason(np.asarray(coarse), settings.ripple_range_hz, settings.timbre) is None
+    wired = (_octave_mean_level_db(np.asarray(coarse), np.asarray(left), settings.broadband_range_hz)
+             - _octave_mean_level_db(np.asarray(coarse), np.asarray(right), settings.broadband_range_hz))
+    # 數值另對考卷自己的八度平均（不呼叫產品），照評分層容差；寬頻函式算錯時上面那個逐位等式攔不住（#558 複查席）。
+    independent = 10.0 * math.log10(
+        fixtures._independent_octave_mean(coarse, left, settings.broadband_range_hz)
+        / fixtures._independent_octave_mean(coarse, right, settings.broadband_range_hz))
+    actual = _broadband_db(coarse, left, right)
+
+    assert actual == wired
+    assert_within([cell("broadband_level_difference_db", actual, independent, rel=SCORING_REL, abs_=SCORING_ABS)])
 
 
 def test_densifying_low_frequencies_keeps_a_smooth_answer() -> None:

@@ -48,14 +48,16 @@ from aosr.scoring.placement import (
     merge_or_empty,
     merge_placements,
 )
-from aosr.scoring.timbre import _octave_mean_level_db, _smooth_energy
+from aosr.scoring.timbre import (
+    _octave_mean_level_db, _smooth_energy, measure_timbre_ripple, timbre_ripple_coverage_reason,
+)
 
 
 from aosr.scoring.source_model_identity import (
     distinct_source_model_fingerprints, unique_source_model_fingerprint,
 )
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v8"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v9"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 INPUT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
@@ -225,6 +227,7 @@ def _settings_fingerprint(
     canonical = json.dumps(
         {
             "registry": settings.registry_fingerprint,
+            "ripple_range_hz": settings.ripple_range_hz,
             "channel_group": group.fingerprint,
             "timbre": timbre_fingerprint,
             "listening_area": listening_fingerprint,
@@ -372,7 +375,7 @@ def _unmatched_features(
 def _data_reason(
     left: ChannelResponse,
     right: ChannelResponse,
-    broadband_range: tuple[float, float],
+    settings: _Settings,
 ) -> ReasonCode | None:
     evaluations = (left.timbre_evaluation, right.timbre_evaluation)
     if any(
@@ -392,11 +395,13 @@ def _data_reason(
     ):
         return ReasonCode.INVALID_DIRECT_DISTANCE
     if not any(
-        broadband_range[0] <= frequency <= broadband_range[1]
+        settings.broadband_range_hz[0] <= frequency <= settings.broadband_range_hz[1]
         for frequency in left.frequencies_hz
     ):
         return ReasonCode.INSUFFICIENT_COVERAGE
-    return None
+    return timbre_ripple_coverage_reason(
+        np.asarray(left.frequencies_hz), settings.ripple_range_hz, settings.timbre
+    )
 
 
 def _point_reason_codes(
@@ -452,8 +457,9 @@ def _measured_point(
         right_payload, TimbrePayload
     ):
         raise TypeError("可估聲道必須帶 TimbrePayload")
-    # 已查第一層：這兩個摘要各自用音色登記簿的傾斜／起伏平滑寬度算完；
-    # 這裡才做左減右，不能回頭拿原始能量曲線冒充未平滑摘要。
+    # 已查第一層：傾斜差仍讀音色酬載；起伏差依老闆 2026-10-25 #558 第二則決定，
+    # 由同一支音色函式、同一套音色設定，用左右匹配自己登記的範圍重算，才做左減右。
+    # 這是完整重做正規化、平滑與擬線，不是拿原始能量曲線冒充未平滑摘要。
     # 寬頻音量每八度等權（#450）：加密低頻不會讓低頻在寬頻音量裡多拿票。
     frequencies = np.asarray(left.frequencies_hz, dtype=np.float64)
     bounds = settings.broadband_range_hz
@@ -471,7 +477,8 @@ def _measured_point(
             left_payload.tilt_db_per_octave - right_payload.tilt_db_per_octave
         ),
         ripple_rms_difference_db=(
-            left_payload.residual_rms_db - right_payload.residual_rms_db
+            measure_timbre_ripple(frequencies, np.asarray(left.total_energy), settings.ripple_range_hz, settings.timbre).residual_rms_db
+            - measure_timbre_ripple(frequencies, np.asarray(right.total_energy), settings.ripple_range_hz, settings.timbre).residual_rms_db
         ),
         broadband_level_difference_db=left_db - right_db,
         direct_time_difference_ms=(
@@ -521,7 +528,7 @@ def _point_unavailability_reasons(
     receiver_set: ReceiverSet,
     points: Sequence[ChannelPointInput],
     group: ChannelGroup,
-    broadband_range: tuple[float, float],
+    settings: _Settings,
 ) -> tuple[ReasonCode, ...]:
     by_receiver = {point.receiver_id: point for point in points}
     found: list[ReasonCode] = []
@@ -533,7 +540,7 @@ def _point_unavailability_reasons(
             reason = _data_reason(
                 responses[comparison.left_role],
                 responses[comparison.right_role],
-                broadband_range,
+                settings,
             )
             if reason is not None:
                 found.extend(
@@ -586,13 +593,13 @@ def _support_reasons(
     receiver_set: ReceiverSet,
     points: Sequence[ChannelPointInput],
     group: ChannelGroup,
-    broadband_range: tuple[float, float],
+    settings: _Settings,
 ) -> tuple[ChannelBroadbandSupport | None, tuple[ReasonCode, ...]]:
-    support, reason = _common_broadband_support(points, broadband_range)
+    support, reason = _common_broadband_support(points, settings.broadband_range_hz)
     if reason is not None:
         return None, (reason,)
     return support, _point_unavailability_reasons(
-        receiver_set, points, group, broadband_range
+        receiver_set, points, group, settings
     )
 
 
@@ -829,6 +836,18 @@ def _evaluate_measured(
     )
 
 
+def _checked_timbre_settings(
+    points: Sequence[ChannelPointInput], path: str | Path, purpose: str,
+) -> _Settings:
+    """重算只准用產生音色酬載的同一套設定；其他輸入身分仍走原原因碼。"""
+    settings = _load_settings(path, purpose)
+    if any(response.timbre_evaluation.settings_fingerprint != settings.timbre.fingerprint
+           for point in points for response in point.responses
+           if isinstance(response.timbre_evaluation.payload, TimbrePayload)):
+        raise TypeError("左右匹配重算起伏必須使用產生酬載的同一套音色設定")
+    return settings
+
+
 def evaluate_channel_matching(
     receiver_set: ReceiverSet,
     points: Sequence[ChannelPointInput],
@@ -853,7 +872,7 @@ def evaluate_channel_matching(
         raise ValueError("sound_speed_m_s 必須是有限正數")
     if not channel_group.comparisons:
         raise ValueError("聲道匹配至少要一組比較對；單聲道的聲道組只給聲道音色彙總用")
-    settings = _load_settings(quality_targets_path, purpose)
+    settings = _checked_timbre_settings(points, quality_targets_path, purpose)
     fingerprint = _settings_fingerprint(
         settings,
         receiver_set,
@@ -875,7 +894,7 @@ def evaluate_channel_matching(
     support = None
     if not reasons:
         support, reasons = _support_reasons(
-            receiver_set, points, channel_group, settings.broadband_range_hz
+            receiver_set, points, channel_group, settings
         )
     if reasons or support is None:
         return _unavailable(

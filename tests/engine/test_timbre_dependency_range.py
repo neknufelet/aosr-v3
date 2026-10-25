@@ -256,6 +256,7 @@ def test_wider_registered_ripple_smoothing_widens_payload_and_rejects_old_data(
     dependency_ranges = (
         original_payload.tilt_dependency_range_hz,
         original_payload.ripple_dependency_range_hz,
+        original_payload.feature_dependency_range_hz,
     )
     lower_hz = min(bounds[0] for bounds in dependency_ranges)
     upper_hz = max(bounds[1] for bounds in dependency_ranges)
@@ -288,12 +289,16 @@ def test_wider_registered_ripple_smoothing_widens_payload_and_rejects_old_data(
         "timbre_balance.smoothing_width_octave_ripple",
         changed_registry,
     )
-    wider_axis = tuple(
-        float(value)
-        for value in np.geomspace(expected_changed[0], expected_changed[1], 481)
+    feature_changed = _expected_dependency_range(
+        "timbre_balance.feature_range_hz", "timbre_balance.smoothing_width_octave_ripple", changed_registry
     )
+    tilt_changed = _expected_dependency_range(
+        "timbre_balance.tilt_fit_range_hz", "timbre_balance.smoothing_width_octave_tilt", changed_registry
+    )
+    expected_changed = (min(expected_changed[0], tilt_changed[0]), max(expected_changed[1], tilt_changed[1]))
+    wider_axis = tuple(float(value) for value in np.geomspace(feature_changed[0], feature_changed[1], 481))
     changed_full = _payload(_input_on_axis(wider_axis, np.zeros_like), changed_registry)
-    assert changed_full.ripple_dependency_range_hz[0] < before.ripple_dependency_range_hz[0]
+    assert changed_full.feature_dependency_range_hz[0] < before.feature_dependency_range_hz[0]
     assert changed_full.ripple_dependency_range_hz[1] > before.ripple_dependency_range_hz[1]
     assert changed_full.ripple_dependency_range_hz == pytest.approx(expected_changed)
 
@@ -324,21 +329,19 @@ def test_validated_nominal_scoring_range_does_not_cover_dependency_ranges() -> N
 def test_registered_dependency_ranges_fit_inside_the_official_frequency_axis() -> None:
     """品質登記簿若只拉高計分範圍、沒先拉正式細軸，完整報表會在合併前變紅。"""
     payload = _payload(_official_input(np.zeros_like))
-    expected = (
-        _expected_dependency_range(
-            "timbre_balance.tilt_fit_range_hz",
-            "timbre_balance.smoothing_width_octave_tilt",
-        ),
-        _expected_dependency_range(
-            "timbre_balance.ripple_range_hz",
-            "timbre_balance.smoothing_width_octave_ripple",
-        ),
+    tilt = _expected_dependency_range(
+        "timbre_balance.tilt_fit_range_hz", "timbre_balance.smoothing_width_octave_tilt",
     )
-
-    actual = (
-        payload.tilt_dependency_range_hz,
-        payload.ripple_dependency_range_hz,
+    ripple = _expected_dependency_range(
+        "timbre_balance.ripple_range_hz", "timbre_balance.smoothing_width_octave_ripple",
     )
+    feature = _expected_dependency_range(
+        "timbre_balance.feature_range_hz", "timbre_balance.smoothing_width_octave_ripple",
+    )
+    # 起伏還要讀擬線，酬載記外包；峰谷依賴自己外擴，三段都必須落在正式細軸裡。
+    expected = (tilt, (min(tilt[0], ripple[0]), max(tilt[1], ripple[1])), feature)
+    actual = (payload.tilt_dependency_range_hz, payload.ripple_dependency_range_hz,
+              payload.feature_dependency_range_hz)
     for actual_bounds, expected_bounds in zip(actual, expected, strict=True):
         assert actual_bounds == pytest.approx(expected_bounds)
         lower_hz, upper_hz = actual_bounds
@@ -377,7 +380,7 @@ def test_raw_ripple_data_ending_exactly_at_the_scoring_bounds_is_measured() -> N
     """
     ripple_width = _setting("timbre_balance.smoothing_width_octave_ripple").value
     assert ripple_width == 0.0
-    ripple_lower_hz, ripple_upper_hz = _range_setting("timbre_balance.ripple_range_hz")
+    ripple_lower_hz, ripple_upper_hz = _range_setting("timbre_balance.feature_range_hz")
     tilt_lower_hz, tilt_upper_hz = _expected_dependency_range(
         "timbre_balance.tilt_fit_range_hz",
         "timbre_balance.smoothing_width_octave_tilt",
@@ -394,7 +397,7 @@ def test_raw_ripple_data_ending_exactly_at_the_scoring_bounds_is_measured() -> N
 
     assert evaluation.state is EvaluationState.MEASURED
     assert isinstance(evaluation.payload, TimbrePayload)
-    assert evaluation.payload.ripple_dependency_range_hz == (ripple_lower_hz, ripple_upper_hz)
+    assert evaluation.payload.feature_dependency_range_hz == (ripple_lower_hz, ripple_upper_hz)
     assert Flag.UNVALIDATED not in evaluation.flags
 
 
@@ -470,7 +473,7 @@ def test_official_ripple_range_starts_at_the_axis_first_point_and_scores_a_room_
     起伏不平滑（寬度 0），依賴範圍就是計分範圍本身，要剛好落在正式細軸裡；有房間模態形狀的曲線
     要評得出來（不是未評估），而且最低那個軸向模態的峰要進峰谷清單。
     """
-    ripple_lower_hz, ripple_upper_hz = _range_setting("timbre_balance.ripple_range_hz")
+    ripple_lower_hz, ripple_upper_hz = _range_setting("timbre_balance.feature_range_hz")
     assert ripple_lower_hz == GEOMETRIC_LANE_FREQUENCIES_HZ[0]
     assert _setting("timbre_balance.smoothing_width_octave_ripple").value == 0.0
 
@@ -480,7 +483,8 @@ def test_official_ripple_range_starts_at_the_axis_first_point_and_scores_a_room_
     assert evaluation.reason_codes == ()
     assert isinstance(evaluation.payload, TimbrePayload)
     payload = evaluation.payload
-    assert payload.ripple_dependency_range_hz == (ripple_lower_hz, ripple_upper_hz)
+    # #558：原 #668 的低頻峰谷保障留下；直接起伏範圍改由新考卷守。
+    assert payload.feature_dependency_range_hz == (ripple_lower_hz, ripple_upper_hz)
     assert GEOMETRIC_LANE_FREQUENCIES_HZ[0] <= payload.ripple_dependency_range_hz[0]
     assert payload.ripple_dependency_range_hz[1] <= GEOMETRIC_LANE_FREQUENCIES_HZ[-1]
     sound_speed = load_physics_constants(config_path("physics_constants.toml")).sound_speed_m_s

@@ -14,6 +14,7 @@ from aosr.config.quality_targets import (
     QualityPurpose,
     QualityTargets,
     Unit,
+    WeightTable,
 )
 from aosr.scoring.category_registry import (
     CATEGORY_REGISTRY,
@@ -45,6 +46,8 @@ from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_TARGET_UNITS,
     _listening_area_principal_weights,
 )
+from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
+from aosr.scoring.stage_one_score import WEIGHTS_KEY
 from aosr.scoring import recommendation as rec
 from aosr.scoring.ranking_alerts import collect_review_alerts
 from aosr.scoring.review_alert import ReviewAlert
@@ -220,7 +223,7 @@ def _timbre_channel_lines(
 def _component_lines(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[ComponentLine, ...]:
-    """類內分項逐條列出；音色照角色表，別類的已算代價原樣標「reported」。"""
+    """類內分項逐條列出；音色照角色表，低頻列原值與權重，別類的已算代價原樣標「reported」。"""
     cost = evaluation.category_cost
     if cost is None:
         raise ValueError("只有 costed 評估有分項")
@@ -231,6 +234,15 @@ def _component_lines(
                                      else None)
     if isinstance(payload, TimbreChannelsPayload):
         return _timbre_channel_lines(cost, payload, purpose)
+    if isinstance(payload, LowFrequencyResponsePayload):
+        table = purpose.entry(WEIGHTS_KEY)
+        if not isinstance(table, WeightTable):
+            raise TypeError(f"{WEIGHTS_KEY} 必須是權重表")
+        weights = {item.name: item.value for item in table.item}
+        raw = {item.name: item.value for item in evaluation.raw_quantities}
+        return tuple(ComponentLine(name=name, role="principal", raw_value=raw.get(name), raw_unit="dB",
+                                   cost=value, weight=weights[name])
+                     for name, value in cost.components.items())
     return tuple(
         ComponentLine(
             name=name,
@@ -251,6 +263,7 @@ class _Rules(NamedTuple):
     """這一跑從登記簿讀進來的全部規則。"""
 
     purpose: QualityPurpose
+    registry: QualityTargets
     registry_fingerprint: str
     mandatory: frozenset[QualityCategory]
     optional: frozenset[QualityCategory]
@@ -281,7 +294,19 @@ def _read_rules(registry: QualityTargets, purpose_name: str) -> _Rules:
         item.name: item.value
         for item in _weight_table(purpose, _CATEGORY_WEIGHTS_KEY).item
     }
-    return _Rules(purpose, registry.fingerprint, mandatory, optional, weights)
+    return _Rules(purpose, registry, registry.fingerprint, mandatory, optional, weights)
+
+
+def _section(category: QualityCategory, rules: _Rules) -> QualityPurpose:
+    """這一類讀哪一段設定：註冊成第一階段那一段的讀同用途的第一階段段，其餘讀用途段。"""
+    registration = CATEGORY_REGISTRY.get(category)
+    if registration is not None and registration.settings_scope == "stage_one":
+        try:
+            return rules.registry.stage_one(rules.purpose.name)
+        except KeyError as error:
+            # 登記簿缺這一段是排名層的設定錯，報 ValueError：搜尋報告照原文寫「排名失敗」，不整份當掉（審查補）。
+            raise ValueError(f"{category.value} 讀第一階段那一段，登記簿沒有用途 {rules.purpose.name} 的那一段") from error
+    return rules.purpose
 
 
 def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation:
@@ -292,9 +317,7 @@ def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation
         document.update(state=EvaluationState.MEASURED, category_cost=None)
         evaluation = CategoryEvaluation.model_validate(document)
     if evaluation.state is EvaluationState.MEASURED and registration is not None:
-        return registration.coster(
-            evaluation, rules.purpose, rules.registry_fingerprint
-        )
+        return registration.coster(evaluation, _section(evaluation.category, rules), rules.registry_fingerprint)
     return evaluation
 
 
@@ -319,7 +342,7 @@ def _category_line(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryLin
         category_cost=cost.value,
         category_weight=weight,
         weighted_cost=cost.value * weight,
-        components=_component_lines(evaluation, rules.purpose),
+        components=_component_lines(evaluation, _section(evaluation.category, rules)),
         component_directions=cost.component_directions,
         unassessed_bands=cost.unassessed_bands,
         evaluation=evaluation,
@@ -548,7 +571,8 @@ def _registry_sources(
         if registration is not None:
             sources.extend(
                 CalibrationSource(kind="registry", key=key, status=status)
-                for key, status in registration.registry_sources(purpose)
+                for key, status in registration.registry_sources(
+                    rules.registry.stage_one(purpose.name) if registration.settings_scope == "stage_one" else purpose)
             )
     return sources
 

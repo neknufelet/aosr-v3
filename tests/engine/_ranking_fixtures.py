@@ -157,6 +157,8 @@ def _single_timbre(
                 "residual_rms_db": residual,
                 "ripple_range_hz": [40.0, 4000.0],
                 "ripple_dependency_range_hz": [37.0, 4240.0],
+                "feature_range_hz": [40.0, 4000.0],
+                "feature_dependency_range_hz": [37.0, 4240.0],
                 "features": chosen,
                 "strongest_peak_index": peaks[0] if peaks else None,
                 "deepest_dip_index": dips[0] if dips else None,

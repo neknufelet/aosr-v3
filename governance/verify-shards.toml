@@ -88,6 +88,7 @@ files = [
   "tests/engine/test_gui_search_speaker_setup_browser.py",
   "tests/engine/test_gui_search_stability_browser.py",
   "tests/engine/test_gui_stage_one_browser.py",
+  "tests/engine/test_gui_low_frequency_browser.py",
 ]
 
 [[group]]

@@ -153,3 +153,34 @@ def test_remeasured_listening_payload_gets_full_result_validation(
     monkeypatch.setattr(evaluation, "reevaluate", lambda *args, **kwargs: candidate)
     with pytest.raises(ValueError, match="聆聽區彙總 provenance"):
         load_document(tmp_path, result.model_dump(mode="json"), result.physics_identity)
+
+
+def test_frequency_split_reads_v8_payload_without_new_feature_fields(
+    tmp_path: Path, result: SchemeResult,
+) -> None:
+    """#558：舊 v8 音色與 v3 契約沒有峰谷範圍；依既有零件重評路徑讀回，不改寫舊檔。"""
+    from aosr.scoring.timbre import TIMBRE_EVALUATOR_VERSION
+    old = json.loads((Path(__file__).parents[2] / "blueprint/558-frequency-split-control.json").read_text())["timbre"]
+    document = result.model_dump(mode="json")
+
+    def retire(node: object) -> None:
+        if isinstance(node, dict):
+            node.pop("feature_range_hz", None)
+            node.pop("feature_dependency_range_hz", None)
+            if node.get("evaluator_version") == TIMBRE_EVALUATOR_VERSION:
+                node["evaluator_version"] = old["evaluator_version"]
+            if "schema_version" in node:
+                node["schema_version"] = old["schema_version"]
+            for item in node.values():
+                retire(item)
+        elif isinstance(node, list):
+            for item in node:
+                retire(item)
+
+    retire(document["candidate"])
+    loaded = load_document(tmp_path, document, result.physics_identity)
+    path = tmp_path / "saved.json"
+    assert json.loads(path.read_text()) == document
+    assert loaded.stored_candidate is None
+    assert loaded.standing is ResultStanding.REMEASURED
+    assert loaded.result.candidate == result.candidate

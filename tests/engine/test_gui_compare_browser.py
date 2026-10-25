@@ -14,6 +14,7 @@ from playwright.sync_api import Browser, Page, Response, Route
 
 from aosr.gui.compare_view import CATEGORY_HEADINGS, CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.compare import comparison_problems
+from aosr.scoring.contract import QualityCategory
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import (
@@ -211,6 +212,19 @@ def _assert_summary_sentences(page: Page, data: CompareView) -> None:
     assert not page.locator("#fingerprints table").all()
 
 
+def _assert_category_table(page: Page, data: CompareView) -> None:
+    # 分項表跟摘要 CSV 同一套欄位；說明欄每一類都空著時不畫（CSV 照樣有）；「哪一份較好」照伺服器給的字。
+    # #558 第二段 B：只有新類多詳情；其餘七類原格逐字不動，新增說明欄留空。
+    assert {item.category for item in data.categories if item.note_text} == {QualityCategory.LOW_FREQUENCY_RESPONSE.value}
+    assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS)
+    category_rows = [row.locator("td").all_inner_texts() for row in
+                     page.locator("#categories tr").all()[1:]]
+    assert category_rows == [[item.label, item.a.state_label, item.a.cost_text,
+                              item.b.state_label, item.b.cost_text, item.better_text,
+                              "低頻頻響詳情" if item.category == QualityCategory.LOW_FREQUENCY_RESPONSE.value else ""]
+                             for item in data.categories]
+
+
 def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
                                          pair: tuple[SchemeResult, SchemeResult]) -> None:
     with _serve(tmp_path) as base:
@@ -259,14 +273,7 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             _assert_summary_sentences(page, data)
             assert all(value in text for change in data.changes
                        for value in (change.label, change.a_text, change.b_text))
-            # 分項表跟摘要 CSV 同一套欄位；說明欄每一類都空著時不畫（CSV 照樣有）；「哪一份較好」照伺服器給的字。
-            assert not [item for item in data.categories if item.note_text]
-            assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS[:-1])
-            category_rows = [row.locator("td").all_inner_texts() for row in
-                             page.locator("#categories tr").all()[1:]]
-            assert category_rows == [[item.label, item.a.state_label, item.a.cost_text,
-                                      item.b.state_label, item.b.cost_text, item.better_text]
-                                     for item in data.categories]
+            _assert_category_table(page, data)
             # 比較好的那一邊（伺服器判）加上標記：總代價框與分項表那一格代價。
             assert {side for side in ("a", "b")
                     if "better" in str(page.locator(f"#table-{side}").get_attribute("class"))} == (
@@ -925,4 +932,25 @@ def test_home_page_picks_a_and_b_then_opens_compare(tmp_path: Path, browser: Bro
             assert link.get_attribute("href") == f"/compare/{A_ID}/{B_ID}"
             link.click()
             _has_lines(page)
+            _assert_quiet(watched)
+
+
+def test_all_empty_category_notes_still_hide_column(tmp_path: Path, browser: Browser,
+                                                     pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 原本「全部說明為空就不畫說明欄」的分支保留；只把伺服器資料中的說明清空。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            def clear_notes(route: Route) -> None:
+                response = route.fetch()
+                data = response.json()
+                for row in data["categories"]:
+                    row["note_text"] = ""
+                route.fulfill(response=response, json=data)
+            page.route(f"**/api/compare/{A_ID}/{B_ID}", clear_notes)
+            page.reload(wait_until="networkidle")
+            page.locator("#content").wait_for(state="visible")
+            assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS[:-1])
             _assert_quiet(watched)

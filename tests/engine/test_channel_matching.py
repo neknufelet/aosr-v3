@@ -8,9 +8,12 @@ from datetime import date
 from typing import Final, Literal
 
 import pytest
+import numpy as np
+
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.config.quality_targets import QualityTargets, SettingEntry, load_quality_targets
 from aosr.scoring.category_registry import EliminationReason
 from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
@@ -43,7 +46,7 @@ from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE: Final[str] = "candidate-a"
-_TIMBRE_SETTINGS: Final[str] = "timbre-settings-a"
+_TIMBRE_SETTINGS: Final[str] = load_quality_targets(config_path("quality_targets.toml")).fingerprint
 _LISTENING_SETTINGS: Final[str] = "listening-settings-a"
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 _SCENE_FINGERPRINT: Final[str] = "a" * 64
@@ -117,6 +120,8 @@ def _timbre(
         residual_rms_db=ripple,
         ripple_range_hz=(40.0, 4000.0),
         ripple_dependency_range_hz=(37.0, 4240.0),
+        feature_range_hz=(40.0, 4000.0),
+        feature_dependency_range_hz=(37.0, 4240.0),
         features=tuple(features),
         strongest_peak_index=None,
         deepest_dip_index=None,
@@ -149,6 +154,20 @@ def _timbre(
     )
 
 
+def _independent_octave_mean(
+    frequencies_hz: tuple[float, ...], energy: tuple[float, ...], bounds: tuple[float, float],
+) -> float:
+    """考卷自己的每八度等權平均能量（線性），不呼叫產品：範圍內的點才組格子，
+    內點以鄰居中點為界，兩端各往外延半個鄰距、再切到範圍上下界（#450 的定義）。"""
+    kept = [(math.log2(f), e) for f, e in zip(frequencies_hz, energy, strict=True) if bounds[0] <= f <= bounds[1]]
+    x = [octave for octave, _ in kept]
+    edges = [max(math.log2(bounds[0]), x[0] - (x[1] - x[0]) / 2),
+             *[(a + b) / 2 for a, b in zip(x, x[1:])],
+             min(math.log2(bounds[1]), x[-1] + (x[-1] - x[-2]) / 2)]
+    widths = [b - a for a, b in zip(edges, edges[1:])]
+    return sum(w * e for w, (_, e) in zip(widths, kept, strict=True)) / sum(widths)
+
+
 def _response(
     receiver_id: str,
     role: str,
@@ -157,12 +176,23 @@ def _response(
     ripple: float,
     energy: tuple[float, ...],
     distance_m: float,
-    frequencies_hz: tuple[float, ...] = (100.0, 200.0),
+    frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
     features: Sequence[Feature] = (),
     candidate_id: str = _CANDIDATE,
     settings_fingerprint: str = _TIMBRE_SETTINGS,
     evaluator_version: str = "timbre-fixture-v1",
 ) -> ChannelResponse:
+    # #558：摘要由手造原料提供，重算起伏則須有完整原始軸。兩點能源展成線性能量曲線，
+    # 共同音量校準到舊兩點平均，保留原寬頻音量考題；明交的短軸保留給拒算考題。
+    # 校準用考卷自己的八度平均（_independent_octave_mean），不拿被測的寬頻函式定答案（#558 找碴席）。
+    if frequencies_hz == GEOMETRIC_LANE_FREQUENCIES_HZ and len(energy) == 2:
+        f = np.asarray(frequencies_hz)
+        expanded = np.interp(np.log2(f), np.log2((100.0, 200.0)), energy)
+        bounds = load_quality_targets(_TARGETS).purpose(_PURPOSE).entry("channel_matching.broadband_range_hz")
+        assert isinstance(bounds, SettingEntry) and isinstance(bounds.value, tuple)
+        span = (float(bounds.value[0]), float(bounds.value[1]))
+        expanded *= (sum(energy) / len(energy)) / _independent_octave_mean(frequencies_hz, tuple(expanded), span)
+        energy = tuple(float(v) for v in expanded)
     return ChannelResponse(
         role=role,
         timbre_evaluation=_timbre(
@@ -194,8 +224,8 @@ def _point(
     right_energy: tuple[float, ...] = (1.0, 1.0),
     left_distance_m: float = 2.0,
     right_distance_m: float = 2.0,
-    left_frequencies_hz: tuple[float, ...] = (100.0, 200.0),
-    right_frequencies_hz: tuple[float, ...] = (100.0, 200.0),
+    left_frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
+    right_frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
     candidate_id: str = _CANDIDATE,
     timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
     listening_area_settings_fingerprint: str = _LISTENING_SETTINGS,
@@ -361,6 +391,11 @@ def test_channel_matching_identity_tracks_upstream_measurement_method(
     receivers = _receivers()
     group = _group()
     original = _evaluate(receivers, group, _channel_points(receivers, group))
+    if changed_settings != _TIMBRE_SETTINGS:
+        with pytest.raises(TypeError, match="同一套音色設定"):
+            _evaluate(receivers, group, _channel_points(receivers, group, timbre_settings_fingerprint=changed_settings),
+                      timbre_settings_fingerprint=changed_settings)
+        return
     changed = _evaluate(
         receivers,
         group,
@@ -693,8 +728,12 @@ def test_missing_bad_surrounding_point_cannot_erase_level_floor_or_win_ranking()
     assert ranked.status_of("level-missing") is CandidateStatus.NOT_EVALUATED
 
 
-def test_symmetric_high_frequency_crop_stays_measured_but_separates_tables() -> None:
-    """左右同步砍掉 4.5 kHz 以上仍可估，但實際寬頻支撐不同所以不可同表。"""
+def test_symmetric_high_frequency_crop_inside_the_ripple_range_is_not_evaluated() -> None:
+    """原題（#558 前，題名 test_symmetric_high_frequency_crop_stays_measured_but_separates_tables）：
+    左右同步砍掉 4.5 kHz 以上仍可估，但實際寬頻支撐不同所以不可同表。
+
+    #558 起左右匹配用自己登記的範圍（20～8000 Hz）從原始曲線重算起伏，砍在範圍裡面兩份都不可估；
+    原題「已量但支撐不同就分表」改由 tests/engine/test_channel_matching_support_sequence.py 的完整軸考卷守。"""
     receivers = _receivers()
     group = _group()
     full_axis = (100.0, 200.0, 1000.0, 4000.0, 6000.0)
@@ -725,13 +764,11 @@ def test_symmetric_high_frequency_crop_stays_measured_but_separates_tables() -> 
         _ranking_context(receivers, group),
     )
 
-    assert full.state is EvaluationState.MEASURED
-    assert cropped.state is EvaluationState.MEASURED
-    assert comparison_support(full) != comparison_support(cropped)
-    assert {
-        result.status_of("full-axis"),
-        result.status_of("cropped-axis"),
-    } == {CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
+    # #558：原題只給手造已量摘要；原始起伏範圍缺段，現在兩份都必須拒算。
+    assert full.state is cropped.state is EvaluationState.UNAVAILABLE
+    assert ReasonCode.INSUFFICIENT_COVERAGE in full.reason_codes
+    assert ReasonCode.INSUFFICIENT_COVERAGE in cropped.reason_codes
+    assert {result.status_of("full-axis"), result.status_of("cropped-axis")} == {CandidateStatus.NOT_EVALUATED}
 
 
 def test_each_receiver_is_compared_before_opposite_differences_are_aggregated() -> None:
@@ -779,7 +816,17 @@ def test_tilt_and_ripple_compare_each_channels_smoothed_timbre_summary() -> None
     # 兩點原始能量若未經第一層各自平滑與擬合，左右一八度斜率差會是 40 dB/oct。
     assert result.tilt_difference_db_per_octave == pytest.approx(3.0)
     assert result.tilt_difference_db_per_octave != pytest.approx(40.0)
-    assert result.ripple_rms_difference_db == pytest.approx(3.0)
+    # #558：傾斜仍讀摘要，起伏必須重算；不再讀夾具手填的 4−1。
+    assert result.ripple_rms_difference_db != pytest.approx(3.0)
+    from tests.engine._frequency_split_control import curve_input
+    from tests.engine.test_frequency_split import bounds, compare, independent_rms
+    own_range = bounds("channel_matching.ripple_range_hz")
+    values = []
+    for response in main.responses:
+        data = curve_input().model_copy(update={"frequencies_hz": response.frequencies_hz,
+                                               "total_energy": response.total_energy})
+        values.append(independent_rms(data, own_range))
+    compare(result.ripple_rms_difference_db, values[0] - values[1])
 
 
 def test_direct_time_difference_is_left_minus_right_and_positive_when_right_arrives_first() -> None:
@@ -863,8 +910,12 @@ def test_broadband_support_must_match_across_required_receivers() -> None:
     assert evaluation.reason_codes == (ReasonCode.FREQUENCY_AXIS_MISMATCH,)
 
 
-def test_matching_broadband_support_is_recorded_without_requiring_range_ceiling() -> None:
-    """所有點與聲道同樣只到 4 kHz 仍可估，payload 必須記下實際最低、最高與點數。"""
+def test_broadband_support_short_of_the_range_ceiling_is_recorded_but_the_category_needs_the_ripple_range() -> None:
+    """原題（#558 前，題名 test_matching_broadband_support_is_recorded_without_requiring_range_ceiling）：
+    所有點與聲道同樣只到 4 kHz 仍可估，payload 必須記下實際最低、最高與點數。
+
+    #558 起整類要整段起伏範圍才可估，只到 4 kHz 整類不可估；寬頻支撐本身不要求蓋到範圍上緣這件事，
+    改直接考算支撐的那一支（範圍用登記簿的寬頻範圍），整類另斷言不可估與原因。"""
     receivers = _receivers()
     group = _group()
     frequencies = (100.0, 200.0, 1000.0, 4000.0)
@@ -881,12 +932,18 @@ def test_matching_broadband_support_is_recorded_without_requiring_range_ceiling(
         for receiver_id in ("main", "front")
     )
 
-    payload = _payload(_evaluate(receivers, group, points))
-
-    assert payload.broadband_support.lowest_frequency_hz == 100.0
-    assert payload.broadband_support.highest_frequency_hz == 4000.0
-    assert payload.broadband_support.frequency_count == len(frequencies)
-    assert payload.broadband_support.frequencies_hz == frequencies
+    # #558：寬頻支撐仍可量，整類因起伏範圍有洞而不可估。
+    from aosr.scoring.channel_matching import _broadband_support
+    from aosr.scoring.channel_matching_settings import _load_settings
+    support = _broadband_support(points[0].responses[0], _load_settings(_TARGETS, _PURPOSE).broadband_range_hz)
+    assert support is not None
+    assert support.lowest_frequency_hz == 100.0
+    assert support.highest_frequency_hz == 4000.0
+    assert support.frequency_count == len(frequencies)
+    assert support.frequencies_hz == frequencies
+    evaluation = _evaluate(receivers, group, points)
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert ReasonCode.INSUFFICIENT_COVERAGE in evaluation.reason_codes
 
 
 def test_extra_channel_is_preserved_but_not_automatically_added_to_comparisons() -> None:

@@ -43,6 +43,8 @@ def _timbre_payload() -> dict[str, object]:
         "residual_rms_db": 1.0,
         "ripple_range_hz": [40.0, 4000.0],
         "ripple_dependency_range_hz": [37.0, 4240.0],
+        "feature_range_hz": [40.0, 4000.0],
+        "feature_dependency_range_hz": [37.0, 4240.0],
         "features": [
             {
                 "kind": "dip",
@@ -436,6 +438,7 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "timbre_balance",
         "listening_area_stability",
         "low_frequency_decay",
+        "low_frequency_response",
         "reflections_and_echo",
         "reverberation",
         "channel_matching",

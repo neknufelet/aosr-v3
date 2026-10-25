@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, Self
 
@@ -50,12 +51,13 @@ from aosr.scoring.source_model_identity import source_model_fingerprint, timbre_
 from aosr.scoring.furniture_model_state import furniture_model_state
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v8"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v9"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
     "tilt_fit_range_hz": "Hz",
     "ripple_range_hz": "Hz",
+    "feature_range_hz": "Hz",
     "smoothing_width_octave_tilt": "oct",
     "smoothing_width_octave_ripple": "oct",
     "feature_min_width_octave": "oct",
@@ -75,7 +77,7 @@ _TARGET_TILT_UNIT: Final[Unit] = "dB/oct"
 _WINDOW_ROUNDING_OCT: Final[float] = 64.0 * float(np.finfo(float).eps)
 
 FloatArray = NDArray[np.float64]
-_DependencyRanges = tuple[FrequencyRange, FrequencyRange]
+_DependencyRanges = tuple[FrequencyRange, FrequencyRange, FrequencyRange]
 
 
 class TimbreInput(BaseModel):
@@ -156,14 +158,15 @@ class TargetCurve(BaseModel):
         return self
 
 
-class _Settings(BaseModel):
-    """評估這一次用到的登記簿條目，收成有名字的欄位；只在本模組內用。"""
+class TimbreSettings(BaseModel):
+    """評估這一次用到的登記簿條目，收成有名字的欄位；#558 起也供左右匹配共用。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
     coverage_range_hz: tuple[float, float]
     tilt_fit_range_hz: tuple[float, float]
     ripple_range_hz: tuple[float, float]
+    feature_range_hz: tuple[float, float]
     smoothing_width_octave_tilt: float
     smoothing_width_octave_ripple: float
     feature_min_width_octave: float
@@ -248,15 +251,15 @@ def _scalar_value(entry: SettingEntry | TargetEntry) -> float:
     return float(value)
 
 
-def _load_settings(
-    path: str | Path, purpose_name: str, target: TargetCurve | None
-) -> _Settings:
+def load_timbre_settings(
+    path: str | Path, purpose_name: str, target: TargetCurve | None = None
+) -> TimbreSettings:
     """讀登記簿裡 timbre_balance.* 那幾條；目標沒給才讀預設目標，也才算「用到」那一條。"""
     registry = load_quality_targets(path)
     purpose = registry.purpose(purpose_name)
     ranges = {
         name: _setting_entry(purpose, name, _SETTING_UNITS[name])
-        for name in ("coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz")
+        for name in ("coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz", "feature_range_hz")
     }
     widths = {
         name: _setting_entry(purpose, name, _SETTING_UNITS[name])
@@ -291,10 +294,11 @@ def _load_settings(
         value = _scalar_value(entry)
         if value < 0.0 or (floor is None and value <= 0.0):
             raise ValueError(f"{entry.key} 必須為{'非負' if floor is not None else '正'}")
-    return _Settings(
+    return TimbreSettings(
         coverage_range_hz=_range_value(ranges["coverage_range_hz"]),
         tilt_fit_range_hz=_range_value(ranges["tilt_fit_range_hz"]),
         ripple_range_hz=_range_value(ranges["ripple_range_hz"]),
+        feature_range_hz=_range_value(ranges["feature_range_hz"]),
         smoothing_width_octave_tilt=_scalar_value(widths["smoothing_width_octave_tilt"]),
         smoothing_width_octave_ripple=_scalar_value(widths["smoothing_width_octave_ripple"]),
         feature_min_width_octave=_scalar_value(widths["feature_min_width_octave"]),
@@ -320,8 +324,11 @@ def _smoothing_half_width_octave(width_octave: float) -> float:
     return 0.5 * width_octave + _WINDOW_ROUNDING_OCT
 
 
-def _dependency_ranges(settings: _Settings) -> _DependencyRanges:
-    """從本次登記設定現算傾斜與起伏各自真正讀到的頻率範圍。"""
+def _dependency_ranges(settings: TimbreSettings) -> _DependencyRanges:
+    """從本次登記設定現算傾斜與起伏各自真正讀到的頻率範圍。
+
+    #558：判定分三段——傾斜依賴、起伏直接範圍外擴、峰谷依賴；起伏酬載另記含擬線依賴的外包。
+    """
 
     def expanded(bounds: FrequencyRange, width_octave: float) -> FrequencyRange:
         factor = 2.0 ** _smoothing_half_width_octave(width_octave)
@@ -330,6 +337,7 @@ def _dependency_ranges(settings: _Settings) -> _DependencyRanges:
     return (
         expanded(settings.tilt_fit_range_hz, settings.smoothing_width_octave_tilt),
         expanded(settings.ripple_range_hz, settings.smoothing_width_octave_ripple),
+        expanded(settings.feature_range_hz, settings.smoothing_width_octave_ripple),
     )
 
 
@@ -492,7 +500,7 @@ _AXIS_RESOLUTION_POINTS: Final[float] = 2.0
 def _features(
     frequencies: FloatArray, residual: FloatArray, min_width_octave: float
 ) -> tuple[Feature, ...]:
-    """起伏評估範圍內殘差的每一個局部極值各成一個特徵；各自照半深度量寬、不做巢狀。
+    """起伏評估範圍（#558 起獨立為峰谷範圍）內殘差的每一個局部極值各成一個特徵；各自照半深度量寬、不做巢狀。
 
     兩端點只看得到一側，不算局部極值。任一側找不到半深度交點的寬度記 None 並標邊界不完整。
     兩種寬度標記：比登記簿的最小寬度窄的標 ``FEATURE_TOO_NARROW``（代價會略過它；老闆
@@ -550,7 +558,7 @@ def _rms(values: FloatArray, weights: FloatArray) -> float:
 
 
 def _unavailable(
-    data: TimbreInput, settings: _Settings, reason: ReasonCode, flags: tuple[Flag, ...]
+    data: TimbreInput, settings: TimbreSettings, reason: ReasonCode, flags: tuple[Flag, ...]
 ) -> CategoryEvaluation:
     """不可估：payload 空、沒有原始量、不填零也不捏造，只帶原因與可回查的身分。"""
     return CategoryEvaluation(
@@ -611,10 +619,14 @@ def _dependency_range_has_gap(
 
 
 def _dependency_ranges_have_gap(
-    frequencies: FloatArray, dependency_ranges: _DependencyRanges, settings: _Settings
+    frequencies: FloatArray, dependency_ranges: _DependencyRanges, settings: TimbreSettings
 ) -> bool:
-    """傾斜那一段用傾斜的寬度判、起伏那一段用起伏的寬度判——起伏是 0 時就是「少一點就是洞」。"""
-    widths = (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple)
+    """傾斜那一段用傾斜的寬度判、起伏那一段用起伏的寬度判——起伏是 0 時就是「少一點就是洞」。
+
+    #558 峰谷依賴另成第三段，也用起伏平滑寬度，低頻少一點仍須拒算。
+    """
+    widths = (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple,
+              settings.smoothing_width_octave_ripple)
     return any(
         _dependency_range_has_gap(frequencies, bounds, width)
         for bounds, width in zip(dependency_ranges, widths, strict=True)
@@ -628,7 +640,7 @@ def _unique_flags(flags: Sequence[Flag]) -> tuple[Flag, ...]:
 def _model_is_validated(
     data: TimbreInput, dependency_ranges: _DependencyRanges
 ) -> bool:
-    """狀態是驗過，而且報表宣告的範圍把兩段計分依賴範圍各自完整包住（含端點）才成立。
+    """狀態是驗過，而且報表宣告的範圍把三段計分依賴範圍各自完整包住（含端點）才成立。
 
     payload 照抄報表的原始狀態與宣告範圍、不降級；「這一次評估算不算驗過」只看旗標。
     """
@@ -645,7 +657,7 @@ def _tilt_and_line(
     frequencies: FloatArray,
     relative: FloatArray,
     weights: FloatArray,
-    settings: _Settings,
+    settings: TimbreSettings,
 ) -> tuple[float, float]:
     """傾斜分支：能量域平滑 → dB → 在擬合範圍對 log2(f) 擬直線；回斜率與截距。"""
     octaves = np.log2(frequencies)
@@ -670,7 +682,7 @@ def _ripple(
     relative: FloatArray,
     weights: FloatArray,
     line: tuple[float, float],
-    settings: _Settings,
+    settings: TimbreSettings,
 ) -> tuple[float, tuple[Feature, ...]]:
     """起伏分支：從原始能量另起平滑 → dB → 扣傾斜擬合線 → 範圍內均方根與峰谷清單。"""
     octaves = np.log2(frequencies)
@@ -684,14 +696,56 @@ def _ripple(
     )
     residual = smoothed_db - (line[0] * octaves + line[1])
     mask = _in_range(frequencies, settings.ripple_range_hz)
-    features = _features(frequencies[mask], residual[mask], settings.feature_min_width_octave)
+    feature_mask = _in_range(frequencies, settings.feature_range_hz)
+    features = _features(frequencies[feature_mask], residual[feature_mask], settings.feature_min_width_octave)
     return _rms(residual[mask], _weights_in_range(octaves, mask, settings.ripple_range_hz)), features
+
+
+def timbre_ripple_coverage_reason(
+    frequencies: FloatArray, bounds: FrequencyRange, settings: TimbreSettings,
+) -> ReasonCode | None:
+    """指定起伏範圍的可估性；左右匹配走原有不可估路徑，不捏造稀疏／缺段資料的數字。"""
+    dependencies = _dependency_ranges(settings.model_copy(update={"ripple_range_hz": bounds}))[:2]
+    if any(np.count_nonzero(_in_range(frequencies, span)) < settings.min_points
+           for span in (*dependencies, settings.tilt_fit_range_hz, bounds)):
+        return ReasonCode.INSUFFICIENT_COVERAGE
+    widths = (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple)
+    if any(_dependency_range_has_gap(frequencies, span, width)
+           for span, width in zip(dependencies, widths, strict=True)):
+        return ReasonCode.TIMBRE_SCORING_RANGE_GAP
+    return None
+
+
+@dataclass(frozen=True)
+class TimbreRippleMeasurement:
+    """起伏均方根，以及音色酬載還需要的同次擬線／峰谷／相對能量；避免主線重做另一條路。"""
+
+    residual_rms_db: float
+    tilt_db_per_octave: float
+    features: tuple[Feature, ...]
+    relative_energy: FloatArray
+
+
+def measure_timbre_ripple(
+    frequencies: FloatArray, energy: FloatArray, bounds: FrequencyRange, settings: TimbreSettings,
+) -> TimbreRippleMeasurement:
+    """同一條音色起伏路徑：除最大能量、按音色設定擬線、扣線後每八度等權的均方根。
+
+    呼叫端先檢查正有限能量與覆蓋；範圍由呼叫端明交，音色與左右匹配共用本函式（#558）。
+    回均方根並保留本次中間量，讓音色主線的傾斜、峰谷與目標偏差也取同一次計算的原料。
+    """
+    relative = energy / float(np.max(energy))
+    weights = _octave_weights(np.log2(frequencies))
+    line = _tilt_and_line(frequencies, relative, weights, settings)
+    rms, features = _ripple(frequencies, relative, weights, line,
+                            settings.model_copy(update={"ripple_range_hz": bounds}))
+    return TimbreRippleMeasurement(rms, line[0], features, relative)
 
 
 def _target_deviation(
     frequencies: FloatArray,
     relative: FloatArray,
-    settings: _Settings,
+    settings: TimbreSettings,
 ) -> tuple[float, tuple[tuple[float, float], ...]]:
     """對目標分支：不平滑的原始 dB 減目標曲線，扣掉覆蓋範圍內的平均（不管音量）再算均方根。"""
     mask = _in_range(frequencies, settings.coverage_range_hz)
@@ -717,7 +771,7 @@ def _raw_quantities(payload: TimbrePayload) -> tuple[RawQuantity, ...]:
 
 def _measured(
     data: TimbreInput,
-    settings: _Settings,
+    settings: TimbreSettings,
     payload: TimbrePayload,
     flags: Sequence[Flag],
 ) -> CategoryEvaluation:
@@ -751,7 +805,7 @@ def evaluate_timbre(
 
     ``target_curve`` 沒給就用登記簿該用途的預設目標傾斜。登記簿路徑由呼叫端必給。
     """
-    settings = _load_settings(quality_targets_path, purpose, target_curve)
+    settings = load_timbre_settings(quality_targets_path, purpose, target_curve)
     dependency_ranges = _dependency_ranges(settings)
     frequencies = np.asarray(data.frequencies_hz, dtype=np.float64)
     energy = np.asarray(data.total_energy, dtype=np.float64)
@@ -767,7 +821,8 @@ def evaluate_timbre(
         flags.append(Flag.BASELINE_SETTINGS)
     if not bool(np.all(np.isfinite(energy) & (energy > 0.0))):
         return _unavailable(data, settings, ReasonCode.NON_POSITIVE_ENERGY, _unique_flags(flags))
-    for bounds in (settings.tilt_fit_range_hz, settings.ripple_range_hz):
+    # 三段依賴都守最少點數，也保留名義擬合／起伏／峰谷點數下限，鄰窗點不能冒充擬合點。
+    for bounds in (*dependency_ranges, settings.tilt_fit_range_hz, settings.ripple_range_hz, settings.feature_range_hz):
         if int(np.count_nonzero(_in_range(frequencies, bounds))) < settings.min_points:
             return _unavailable(
                 data, settings, ReasonCode.INSUFFICIENT_COVERAGE, _unique_flags(flags)
@@ -777,24 +832,27 @@ def evaluate_timbre(
             data, settings, ReasonCode.TIMBRE_SCORING_RANGE_GAP, _unique_flags(flags)
         )
     # 只在模組內除掉共同音量（除以最大能量）：相對量不帶絕對級，平直曲線因此剛好是零 dB。
-    relative = energy / float(np.max(energy))
-    weights = _octave_weights(np.log2(frequencies))
-    line = _tilt_and_line(frequencies, relative, weights, settings)
-    residual_rms, features = _ripple(frequencies, relative, weights, line, settings)
+    measurement = measure_timbre_ripple(frequencies, energy, settings.ripple_range_hz, settings)
+    features = measurement.features
     deviation_rms, deviation_curve = _target_deviation(
-        frequencies, relative, settings
+        frequencies, measurement.relative_energy, settings
     )
     payload = TimbrePayload(
         category="timbre_balance",
-        tilt_db_per_octave=line[0],
+        tilt_db_per_octave=measurement.tilt_db_per_octave,
         tilt_fit_range_hz=settings.tilt_fit_range_hz,
         tilt_dependency_range_hz=dependency_ranges[0],
         target_tilt_db_per_octave=settings.target.tilt_db_per_octave,
         target_deviation_rms_db=deviation_rms,
         deviation_curve=deviation_curve,
-        residual_rms_db=residual_rms,
+        residual_rms_db=measurement.residual_rms_db,
         ripple_range_hz=settings.ripple_range_hz,
-        ripple_dependency_range_hz=dependency_ranges[1],
+        ripple_dependency_range_hz=(
+            min(dependency_ranges[0][0], dependency_ranges[1][0]),
+            max(dependency_ranges[0][1], dependency_ranges[1][1]),
+        ),
+        feature_range_hz=settings.feature_range_hz,
+        feature_dependency_range_hz=dependency_ranges[2],
         features=features,
         strongest_peak_index=_summary_index(features, "peak"),
         deepest_dip_index=_summary_index(features, "dip"),

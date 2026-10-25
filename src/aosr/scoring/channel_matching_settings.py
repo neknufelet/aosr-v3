@@ -6,13 +6,16 @@ from pathlib import Path
 from typing import Final
 
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, Unit, load_quality_targets
+from aosr.scoring.timbre import TimbreSettings, load_timbre_settings
 
 _PREFIX: Final[str] = "channel_matching."
 BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
+RIPPLE_KEY: Final[str] = _PREFIX + "ripple_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
 _SWITCH_KEY: Final[str] = _PREFIX + "direct_time_cost_enabled"
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     BROADBAND_KEY: "Hz",
+    RIPPLE_KEY: "Hz",
     _SMOOTHING_KEY: "oct",
     _SWITCH_KEY: "1",
 }
@@ -21,6 +24,8 @@ SETTING_KEYS: Final[tuple[str, ...]] = tuple(_SETTING_UNITS)
 @dataclass(frozen=True)
 class _Settings:
     broadband_range_hz: tuple[float, float]
+    ripple_range_hz: tuple[float, float]
+    timbre: TimbreSettings
     smoothing_width_octave: float
     direct_time_cost_enabled: bool
     any_baseline: bool
@@ -59,6 +64,7 @@ def _load_settings(path: str | Path, purpose_name: str) -> _Settings:
     registry = load_quality_targets(path)
     purpose = registry.purpose(purpose_name)
     broadband = _setting(purpose, BROADBAND_KEY, _SETTING_UNITS[BROADBAND_KEY])
+    ripple = _setting(purpose, RIPPLE_KEY, _SETTING_UNITS[RIPPLE_KEY])
     smoothing = _setting(purpose, _SMOOTHING_KEY, _SETTING_UNITS[_SMOOTHING_KEY])
     switch = _setting(purpose, _SWITCH_KEY, _SETTING_UNITS[_SWITCH_KEY])
     if switch.value not in (0, 1):
@@ -66,9 +72,11 @@ def _load_settings(path: str | Path, purpose_name: str) -> _Settings:
     # 左右差異曲線用的是音色那一格「起伏的平滑寬度」：0＝看原始曲線（票 #432，老闆拍「用原始檔」），負的紅。
     if _number(smoothing) < 0.0:
         raise ValueError(f"{smoothing.key} 不准是負的")
-    used = (broadband, smoothing, switch)
+    used = (broadband, ripple, smoothing, switch)
     return _Settings(
         broadband_range_hz=_range(broadband),
+        ripple_range_hz=_range(ripple),
+        timbre=load_timbre_settings(path, purpose_name),
         smoothing_width_octave=_number(smoothing),
         direct_time_cost_enabled=bool(switch.value),
         any_baseline=any(item.status == "baseline" for item in used),

@@ -131,6 +131,8 @@ def test_plain_incompatible_compare_matches_every_mainline_output_line(
     pair = (moved, plain) if reverse else (plain, moved)
     text = _compare_text(pair, tmp_path, capsys, "2026-09-27")
     expected = MOVED_THEN_PLAIN if reverse else PLAIN_THEN_MOVED
+    # #558 第二段 B 新增低頻中文說明行由低頻顯示考卷獨立核；原有每一行（含比較表）仍照舊答案逐字。
+    text = "\n".join(line for line in text.split("\n") if not line.startswith("  低頻頻響："))
     lines, answer_lines = (_COST.sub("<代價>", item).splitlines(keepends=True) for item in (text, expected))
     assert lines == answer_lines
     assert_within(cell(f"代價第 {index} 個", float(found.group()), float(answer.group()),
@@ -208,15 +210,16 @@ def test_three_results_mark_only_the_incompatible_candidates_own_categories(
     furnished = scheme_pair[1]
     text = _compare_text((plain, moved, furnished), tmp_path, capsys)
     blocks = _blocks(text)
-    assert blocks[moved.scheme.scheme_id][0].endswith("：rankable")
-    assert "評分條件不同" not in "\n".join(blocks[moved.scheme.scheme_id])
+    # #558：新登記簿指紋讓等人數分表的主表換邊；各方案自己的舊類代價未變。
+    assert blocks[plain.scheme.scheme_id][0].endswith("：rankable")
+    assert "評分條件不同" not in "\n".join(blocks[plain.scheme.scheme_id])
     for category in ("timbre_balance", "reflections_and_echo"):
-        line = next(line for line in blocks[plain.scheme.scheme_id] if line.startswith(f"  {category} | "))
+        line = next(line for line in blocks[moved.scheme.scheme_id] if line.startswith(f"  {category} | "))
         assert "評分條件不同" not in line
         assert "兩者計算涵蓋範圍不同" not in line
-        assert "評分條件不同" not in _table_cells(text, category)[plain.scheme.scheme_id]
+        assert "評分條件不同" not in _table_cells(text, category)[moved.scheme.scheme_id]
     for category in ("listening_area_stability", "channel_matching"):
-        line = next(line for line in blocks[plain.scheme.scheme_id] if line.startswith(f"  {category} | "))
+        line = next(line for line in blocks[moved.scheme.scheme_id] if line.startswith(f"  {category} | "))
         assert " | 評分條件不同" in line
         assert "兩者計算涵蓋範圍不同" not in line
     reflection = next(line for line in blocks[furnished.scheme.scheme_id] if line.startswith("  reflections_and_echo | "))

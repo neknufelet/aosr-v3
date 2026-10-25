@@ -13,9 +13,13 @@ from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
+from aosr.reporting.low_frequency_display import low_frequency_response_lines
+from aosr.scoring.contract import QualityCategory
 from aosr.reporting.furniture_display import furniture_report_notes
 from aosr.reporting.display import (
+    LABELS,
     LOW_FREQUENCY_DECAY_NOTE,
+    low_frequency_response_description,
 )
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
@@ -91,6 +95,7 @@ class CandidateQuality(_FrozenModel):
     review_status: ReviewStatus | None = None
     recommendation_status: RecommendationStatus | None = None
     not_final_reasons: tuple[NotFinalReason, ...] = ()
+    category_lines: tuple[str, ...] = ()
 
 
 class QualityReport(_FrozenModel):
@@ -159,11 +164,22 @@ def _candidate_quality(result: SchemeResult, ranking: RankingResult,
     candidate_id = result.candidate.candidate_id
     zone = ranking.status_of(candidate_id)
     row = next((row for row in ranking.rankable if row.candidate_id == candidate_id), None)
+    # 這一跑合過分的評估：可排名列的各類，或淘汰列留下的評估（先合分才判底線）；未評估、不可同表兩區沒有這一跑的代價（審查補）。
+    settled = (tuple(line.evaluation for line in row.categories) if row is not None else next(
+        (item.evaluations for item in ranking.eliminated if item.candidate_id == candidate_id), ()))
+    low_frequency = next((item for item in settled if item.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None)
+    evaluation = low_frequency if low_frequency is not None else next(
+        (item for item in result.candidate.evaluations if item.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None)
+    cost = None if low_frequency is None else low_frequency.category_cost
+    cost_text = "未計代價" if cost is None else f"代價 {cost.value:.3f}"
     return CandidateQuality(
         message=message, zone=zone,
         review_status=None if row is None else row.review_status,
         recommendation_status=None if row is None else row.recommendation_status,
         not_final_reasons=() if row is None else row.not_final_reasons,
+        category_lines=() if evaluation is None else (
+            f"{LABELS[QualityCategory.LOW_FREQUENCY_RESPONSE.value]}：{cost_text}",
+            *low_frequency_response_lines(evaluation)),
     )
 
 
@@ -192,7 +208,11 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
     try:
         # 數這次搜尋快照裡的那一本：搜尋開跑後登記簿改過，現在那一本不是這次用的尺（複查）。
         snapshot = QualityPurpose.model_validate(store.identity.purpose_settings.content)
-        progress: CalibrationProgress | None = calibration_progress(snapshot)
+        try:
+            stage_one = registry.stage_one(snapshot.name)
+        except KeyError:
+            stage_one = None
+        progress: CalibrationProgress | None = calibration_progress(snapshot, stage_one=stage_one)
     except ValueError:
         progress = None
     quality = QualityReport(message="列出排名層現有欄位作為依據，尚未判定合格", calibration=progress,
@@ -219,11 +239,14 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
         return quality.model_copy(update={"message": message, **updates})
     try:
         ranking = compare_results(results, quality_targets=registry, run_date=run_date)
-    except ValueError as error:
+    except (KeyError, ValueError) as error:
         # 排名層自己的錯（例如登記簿設定矛盾）不是不能同表；照原文寫，不猜所在區。
+        # 登記簿缺格時排名層丟 KeyError（例如第一階段那一段少一格，搜尋快照不收那一段），一樣照原文寫（複查補）。
         return quality.model_copy(update={"message": "排名失敗，這份報告不重排：" + _named(str(error), original, best)})
+    description = low_frequency_response_description(registry, store.settings.purpose)
     return quality.model_copy(update={
         "header": ranking.header,
+        "message": quality.message + "\n" + description,
         "original": original_info if original is None else _candidate_quality(original, ranking, original_info.message),
         "best": best_info if best is None else _candidate_quality(best, ranking, best_info.message),
     })
@@ -319,6 +342,7 @@ def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
                NotFinalReason.NO_FINALIZING_PROCESS: "最終推薦的核定機制尚未建立"}
     lines = [f"{label}：{candidate.message}",
              f"{label}所在區：{'未重排，無區別資料' if candidate.zone is None else zones[candidate.zone]}"]
+    lines.extend(f"{label}{line}" for line in candidate.category_lines)
     if candidate.review_status is not None:
         review = ("目前沒有產生複核警戒；不代表各類都已查完" if candidate.review_status == ReviewStatus.CLEAR
                   else "待複核：有未解除的警戒")

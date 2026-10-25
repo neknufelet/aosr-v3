@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.scoring.channel_matching_cost import comparison_support
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.scoring.channel_matching_settings import _load_settings
 from aosr.scoring.contract import (
     CategoryEvaluation,
@@ -17,8 +18,10 @@ from aosr.scoring.ranking import CandidateStatus, rank_candidates
 from tests.engine import test_channel_matching as fixtures
 
 # 頭、尾、點數都一樣，只有中間那一點不同（1000 對 1500 Hz）。
-_AXIS_A = (100.0, 200.0, 1000.0, 4000.0, 6000.0)
-_AXIS_B = (100.0, 200.0, 1500.0, 4000.0, 6000.0)
+_AXIS_A = GEOMETRIC_LANE_FREQUENCIES_HZ
+_CHANGED = min(range(len(_AXIS_A)), key=lambda i: abs(_AXIS_A[i] - 1000.0))
+# #558：完整依賴軸才可重算；同樣只換一個中間頻點，移動量不造成缺段。
+_AXIS_B = tuple(f * 1.002 if i == _CHANGED else f for i, f in enumerate(_AXIS_A))
 
 
 def _evaluated(candidate_id: str, axis_main: tuple[float, ...],
@@ -106,7 +109,8 @@ def test_support_summary_must_match_the_sequence(change: str) -> None:
 def test_support_keeps_only_frequencies_inside_the_broadband_range() -> None:
     """支撐只列寬頻範圍裡的頻率：主位與周圍點只在範圍外不同，照樣可估、支撐相同。"""
     below, above = _outside_range()
-    inside = (100.0, 200.0, 1000.0)
+    low, high = _load_settings(fixtures._TARGETS, fixtures._PURPOSE).broadband_range_hz
+    inside = tuple(f for f in GEOMETRIC_LANE_FREQUENCIES_HZ if low <= f <= high)
     main_axis = (below, *inside, above)
     front_axis = (below * 1.5, *inside, above * 1.05)
     evaluation = _evaluated("outside-differs", main_axis, front_axis)

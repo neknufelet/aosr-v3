@@ -43,7 +43,7 @@ NEW_FIELDS = {"furniture", "furniture_reason", "furniture_notes", "furniture_flu
               "frequency_note", "ranking_approximation_text", "surface_text", "coverage_text",
               "validation_text", "a_state_text", "b_state_text", "overlay_note", "no_changes_text",
               "speaker_setup_line", "ideal_source_note"}
-NEW_LABELS = {"direction_zones", "ranking"}
+NEW_LABELS = {"direction_zones", "ranking", "own_line_ripple_rms_db", "seat_robustness_rms_db"}
 
 CAPABILITY_TEXT_CHANGES = {
     "牆面局部分區（這一版每面只收整面一區）": "隨頻率改變的牆面材料（這一版每面一個與頻率無關的阻抗）",
@@ -64,6 +64,10 @@ def _physics_text_changes() -> dict[str, str]:
 
 def _original_fields(value: object, root: bool = True, labels: bool = False) -> object:
     if isinstance(value, dict):
+        # #558 第二段 B 只投影掉低頻新說明；其餘七類每一格與原數值骨架照舊。
+        # 新字句、原值與登記簿數字另由 test_low_frequency_response_display 獨立求答案。
+        if value.get("category") == "low_frequency_response":
+            value = {key: "" if key in {"note", "note_text"} else item for key, item in value.items()}
         return {key: _original_fields(item, False, key == "labels") for key, item in value.items()
                 if (key not in NEW_FIELDS or key == "furniture" and not root)
                 and (not labels or key not in NEW_LABELS)}

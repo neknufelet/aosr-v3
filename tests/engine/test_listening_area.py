@@ -108,6 +108,8 @@ def _timbre(
         residual_rms_db=ripple,
         ripple_range_hz=(40.0, 4000.0),
         ripple_dependency_range_hz=(37.0, 4240.0),
+        feature_range_hz=(40.0, 4000.0),
+        feature_dependency_range_hz=(37.0, 4240.0),
         features=tuple(features),
         strongest_peak_index=None,
         deepest_dip_index=None,

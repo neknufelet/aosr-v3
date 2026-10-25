@@ -30,6 +30,7 @@ from aosr.reporting.evaluation import (
     evaluate_point_timbres, read_registry_settings, receiver_point_results,
 )
 from aosr.reporting.result import PairResult, SchemeResult, Timings
+from aosr.reporting.low_frequency_display import low_frequency_response_note
 from aosr.reporting.scheme import Scheme
 from aosr.search.labels import speaker_setup_text
 from aosr.scoring.contract import (
@@ -274,7 +275,8 @@ class ResultView(ViewModel):
     # 排名那一行的白話：排名位置、有才說的淘汰原因與擋住排名的類、沒有代價的類不算進總代價。
     ranking_text: str
     # 第一階段那句理想聲源標示（老闆原話逐字，字串只住第一階段契約）：喇叭模型在 40 Hz 以下照樣全力發聲，
-    # 起伏自票 #668 起從 20 Hz 算，第二階段的排名也只適用於這個基準。
+    # 起伏原自票 #668 起從 20 Hz 算；#558（2026-10-25）改為音色起伏 300～8000 Hz、
+    # 峰谷 20～8000 Hz、左右匹配起伏 20～8000 Hz，第二階段排名只適用於所記錄的設定。
     ideal_source_note: str
     cost_note: str
     categories: tuple[CategoryView, ...]
@@ -379,11 +381,13 @@ def frequency_responses_for(scheme: Scheme, pairs: tuple[PairResult, ...]) -> tu
 
 
 def _categories(result: SchemeResult, costs: dict[QualityCategory, float],
-                ranked: dict[QualityCategory, CategoryEvaluation]) -> tuple[CategoryView, ...]:
+                ranked: dict[QualityCategory, CategoryEvaluation], registry: QualityTargets) -> tuple[CategoryView, ...]:
     evaluations = {item.category: item for item in result.candidate.evaluations}
     evaluations.update(ranked)
     notes = {QualityCategory.LOW_FREQUENCY_DECAY: LOW_FREQUENCY_DECAY_NOTE,
              QualityCategory.SPATIAL_IMPRESSION: SPATIAL_IMPRESSION_NOTE}
+    notes[QualityCategory.LOW_FREQUENCY_RESPONSE] = low_frequency_response_note(
+        evaluations.get(QualityCategory.LOW_FREQUENCY_RESPONSE), registry, result.scheme.purpose)
     if result.scheme.furniture:
         notes[QualityCategory.REVERBERATION] = FURNITURE_REVERBERATION_NOTE
     labels = {"measured": "已量", "costed": "已算代價", "unavailable": "不可估"}
@@ -891,7 +895,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
                           if item.candidate_id == result.scheme.scheme_id), None)
     missing = eliminated.missing if eliminated else not_evaluated.missing if not_evaluated else ()
     responses = _frequency_responses(result)
-    categories = _categories(result, costs, ranked)
+    categories = _categories(result, costs, ranked, registry)
     status = ranking.status_of(result.scheme.scheme_id).value
     reasons = tuple(reason.value for reason in eliminated.reasons) if eliminated else ()
     seat_alerts, flutter_groups = _alert_sections(

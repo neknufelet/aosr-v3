@@ -100,11 +100,20 @@ source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.setting]]
 key = "timbre_balance.ripple_range_hz"
+value = [300.0, 8000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+# 原出處：source = "測試基線，未查證；正式值等 #358；上限 8000 由票 #345/#347 拍板；下限 20 Hz：票 #668 老闆 2026-10-20「音色改 傾斜不改」，對齊 #347 老闆 2026-09-18 拍的音色評估範圍 20～8,000 Hz"
+source = "老闆 2026-10-25（#558）：音色起伏的直接計分範圍改為 300 Hz 以上，修訂 #668 的 20 Hz；20～300 Hz 改由第一階段量法計分"
+
+[[purpose.setting]]
+key = "timbre_balance.feature_range_hz"
 value = [20.0, 8000.0]
 unit = "Hz"
 status = "baseline"
 source_kind = "product_choice"
-source = "測試基線，未查證；正式值等 #358；上限 8000 由票 #345/#347 拍板；下限 20 Hz：票 #668 老闆 2026-10-20「音色改 傾斜不改」，對齊 #347 老闆 2026-09-18 拍的音色評估範圍 20～8,000 Hz"
+source = "老闆 2026-10-25（#558）：「傾斜、整體音量及其他分項不連帶改動」「完整頻響…仍保留展示」；主對話讀法：峰谷清單（features）與它衍生的複核警戒、聽區的峰谷追蹤、左右的未配對峰谷都是「其他分項」，維持今天 20～8000 Hz"
 
 [[purpose.setting]]
 key = "timbre_balance.smoothing_width_octave_tilt"
@@ -151,6 +160,14 @@ unit = "1"
 status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "channel_matching.ripple_range_hz"
+value = [20.0, 8000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "老闆 2026-10-25（#558）：左右匹配的起伏差暫採 B，保留原本 20 Hz 起算的量法，獨立記錄所用範圍"
 
 [[purpose.setting]]
 key = "channel_matching.broadband_range_hz"
@@ -611,6 +628,14 @@ source_kind = "product_choice"
 source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.weight.item]]
+name = "low_frequency_response"
+value = 0.25
+note = "暫定工程選擇，不宣稱聽感校準"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "老闆 2026-10-25（#558）：新增低頻代價先採 0.25 ×（主位起伏＋座位差異），兩項等權、不除以二，沿用第一階段的聲道與座位彙整；0.25 登記為暫定工程選擇，不宣稱聽感校準"
+
+[[purpose.weight.item]]
 name = "low_frequency_decay"
 value = 1.0
 note = "七類等權是試驗基線、不是中立"
@@ -662,6 +687,7 @@ key = "ranking.optional_categories"
 value = [
   "listening_area_stability",
   "low_frequency_decay",
+  "low_frequency_response",
   "reflections_and_echo",
   "reverberation",
   "channel_matching",

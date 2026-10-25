@@ -18,6 +18,7 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document, solver_inputs
+from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
 from aosr.scoring.channel_matching_settings import BROADBAND_KEY
 from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
@@ -31,6 +32,7 @@ from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.result import (RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult,
                                   check_declared_axes)
+from aosr.reporting.low_frequency_response import evaluate_result_low_frequency
 from aosr.reporting.scheme import Scheme
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import SurfaceMaterial
@@ -208,6 +210,7 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
             timbre_settings_fingerprint=settings,
         ),
         listening, reflections,
+        evaluate_result_low_frequency(result, quality_targets_path, scene),
         evaluate_channel_matching(
             scheme.receiver_set, _channel_points(result, timbres, listening),
             candidate_id=scheme.scheme_id, scene_fingerprint=scene,
@@ -230,7 +233,7 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
 
 def reevaluate(result: SchemeResult, *, quality_targets_path: Path,
                capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
-    """只讀保存的報表與反射零件，重跑五類評估。"""
+    """只讀保存的報表與反射零件，重跑六類評估。"""
     settings_values = read_registry_settings(quality_targets_path, result.scheme.purpose)
     inputs = load_input_document(result.pairs[0].input_document, capabilities, directivity)
     materials = solver_inputs(inputs).materials_by_wall
@@ -273,7 +276,7 @@ class LoadedResult:
 
 EVALUATOR_VERSION = re.compile(
     r"(aosr\.scoring\.(?:timbre|timbre_channels|listening_area|listening_area_channels|"
-    r"channel_matching|reflections|reverberation))"
+    r"channel_matching|reflections|reverberation|low_frequency_response))"
     r"\.v[0-9]+"
 )
 RESULT_VERSION = re.compile(r"aosr\.scheme_result\.v([0-9]+)\Z")
@@ -315,12 +318,25 @@ def _same_measurement(a: CandidateEvaluation, b: CandidateEvaluation) -> bool:
     """逐字比量出的內容，設定身分與評估器版尾另由讀回分級處理。
 
     每類 settings_fingerprint 的值在整份包（包含內嵌 JSON 字串）換成類名佔位字；
-    登記簿整份指紋換成 registry 佔位字，七支評估器的 .v數字換成 .v*。
+    登記簿整份指紋換成 registry 佔位字，八支評估器的 .v數字換成 .v*。
     聆聽區聲道彙總評估器也用同一規則摺疊版尾。
     只變權重、出處、未使用用途或評估器版尾而量出的內容相同，會判成相同；
     數字、狀態、旗標、原因碼與其他指紋任何一格改動都判成不同。
     """
     return _measurement(a) == _measurement(b)
+
+
+def _stage_one_settings_changed(stored: CandidateEvaluation, remeasured: CandidateEvaluation) -> bool:
+    """讀第一階段那一段設定的類別，評估設定指紋變了就是排名可能變了。
+
+    用途設定指紋不收第一階段那一段（``QualityTargets.fingerprint`` 刻意排除），只改那一段的權重或
+    較差參考時量出的數字相同、用途指紋也相同，不另判就會冒充 current（照舊）。
+    """
+    scoped = {category for category, registration in CATEGORY_REGISTRY.items()
+              if registration.settings_scope == "stage_one"}
+    before = {item.category: item.settings_fingerprint for item in stored.evaluations if item.category in scoped}
+    after = {item.category: item.settings_fingerprint for item in remeasured.evaluations if item.category in scoped}
+    return before != after
 
 
 def _check_result_version(document: object) -> None:
@@ -358,7 +374,8 @@ def load_result(path: Path, *, capabilities: CapabilityTable,
         standing = ResultStanding.NEEDS_PHYSICS
     elif stored is None or (stored != remeasured and not _same_measurement(stored, remeasured)):
         standing = ResultStanding.REMEASURED
-    elif result.purpose_settings.fingerprint != current_settings.fingerprint:
+    elif (result.purpose_settings.fingerprint != current_settings.fingerprint
+          or (stored is not None and _stage_one_settings_changed(stored, remeasured))):
         standing = ResultStanding.RERANKED
     else:
         standing = ResultStanding.CURRENT

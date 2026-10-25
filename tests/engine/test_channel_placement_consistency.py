@@ -9,6 +9,8 @@ from typing import Final
 import pytest
 
 from aosr.config.paths import config_path
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
+from aosr.config.quality_targets import load_quality_targets
 from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
     ChannelPointInput, ChannelResponse, evaluate_channel_matching,
@@ -34,7 +36,7 @@ from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 _CANDIDATE: Final[str] = "candidate-placement"
 _SCENE: Final[str] = "a" * 64
-_TIMBRE_SETTINGS: Final[str] = "timbre-settings"
+_TIMBRE_SETTINGS: Final[str] = load_quality_targets(config_path("quality_targets.toml")).fingerprint
 _LISTENING_SETTINGS: Final[str] = "listening-settings"
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 _SPEAKERS = {
@@ -90,6 +92,8 @@ def _payload() -> TimbrePayload:
         residual_rms_db=0.0,
         ripple_range_hz=(40.0, 4000.0),
         ripple_dependency_range_hz=(37.0, 4240.0),
+        feature_range_hz=(40.0, 4000.0),
+        feature_dependency_range_hz=(37.0, 4240.0),
         features=(),
         strongest_peak_index=None,
         deepest_dip_index=None,
@@ -143,8 +147,8 @@ def _points(receivers: ReceiverSet, group: ChannelGroup) -> tuple[ChannelPointIn
                 ChannelResponse(
                     role=role,
                     timbre_evaluation=_timbre(receiver_id, role),
-                    frequencies_hz=(100.0, 200.0),
-                    total_energy=(1.0, 1.0),
+                    frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
+                    total_energy=(1.0,) * len(GEOMETRIC_LANE_FREQUENCIES_HZ),
                     direct_distance_m=2.0,
                 )
                 for role in ("left", "right")
@@ -227,7 +231,8 @@ def test_two_different_mistakes_give_same_output_in_either_order() -> None:
     group = _group()
     points = list(_points(receivers, group))
     points[0] = _with_timbre_update(points[0], {"candidate_id": "wrong-candidate"})
-    points[1] = _with_timbre_update(points[1], {"settings_fingerprint": "wrong-settings"})
+    # #558：酬載指紋不等於載入設定時改為 TypeError；這題繼續考批次身分原因的穩定順序。
+    points[1] = points[1].model_copy(update={"timbre_settings_fingerprint": "wrong-settings"})
 
     forward = _evaluate(receivers, group, tuple(points))
     reversed_input = _evaluate(receivers, group, tuple(reversed(points)))

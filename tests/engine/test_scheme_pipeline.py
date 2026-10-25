@@ -21,8 +21,9 @@ from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, Cha
 from aosr.scoring.channel_matching import (
     ChannelPointInput, ChannelResponse, evaluate_channel_matching,
 )
+from aosr.scoring.contract_base import ReasonCode
 from aosr.scoring.contract import (
-    CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation,
+    CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, EvaluationState,
     InputProvenance, ListeningAreaChannelsPayload, QualityCategory,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
@@ -149,9 +150,22 @@ def wall_2(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeRe
     return shared_control_result(tmp_path_factory, worker_id, "wall-2")
 
 
+def _original_categories(result: SchemeResult) -> CandidateEvaluation:
+    """舊五類保持原控制組逐格比較；新增類的不可估另釘，不把新增列餵進巨大差異文字。"""
+    # #558：獨立控制組原有五類逐格不變；兩座輸入的新類明確不可估、不拿別支喇叭湊。
+    low, = (item for item in result.candidate.evaluations
+            if item.category is QualityCategory.LOW_FREQUENCY_RESPONSE)
+    assert low.state is EvaluationState.UNAVAILABLE
+    assert low.reason_codes == (ReasonCode.LOW_FREQUENCY_SEAT_LAYOUT_INVALID,)
+    original_categories = result.candidate.model_copy(update={"evaluations": tuple(
+        item for item in result.candidate.evaluations if item.category is not QualityCategory.LOW_FREQUENCY_RESPONSE)})
+    return original_categories
+
+
 def _assert_control(result: SchemeResult, expected: CandidateEvaluation, tmp_path: Path) -> None:
-    assert result.candidate == expected
-    assert result.candidate.model_dump_json() == expected.model_dump_json()
+    original_categories = _original_categories(result)
+    assert original_categories == expected
+    assert original_categories.model_dump_json() == expected.model_dump_json()
     shared = result.pairs[0].report
     assert all(pair.report.top.f_s_hz == shared.top.f_s_hz
                and pair.report.top.eyring_t60_by_band_s == shared.top.eyring_t60_by_band_s
@@ -438,7 +452,8 @@ def test_pipeline_analytic_source_uses_speaker_ids_and_all_roles(
     result = pipeline.run_scheme(scheme, capabilities=table, directivity=DIRECTIVITY,
         quality_targets_path=control.TARGETS, engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64,
         run_date=date(2026, 9, 27))
-    assert result.candidate == expected
+    original_categories = _original_categories(result)
+    assert original_categories == expected
     listening = next(item for item in result.candidate.evaluations
                      if item.category is QualityCategory.LISTENING_AREA_STABILITY)
     assert isinstance(listening.payload, ListeningAreaChannelsPayload)
@@ -452,4 +467,4 @@ def test_pipeline_analytic_source_uses_speaker_ids_and_all_roles(
     assert {name for name in _named_strings(candidate_document, "role")
             if name in {"left", "right"}} == {"left", "right"}
     assert all(item.state.value == "measured" and not item.reason_codes
-               for item in result.candidate.evaluations)
+               for item in original_categories.evaluations)

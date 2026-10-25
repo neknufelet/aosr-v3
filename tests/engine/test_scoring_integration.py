@@ -235,7 +235,12 @@ def _registry_with_ripple_lower_at_tilt_lower(directory: Path) -> Path:
     assert old in text
     new = f"{key}value = [{float(tilt.value[0]):.1f}, {float(ripple.value[1]):.1f}]"
     path = directory / "ripple-lower-raised.toml"
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    feature = purpose.entry("timbre_balance.feature_range_hz")
+    assert isinstance(feature, SettingEntry) and isinstance(feature.value, tuple)
+    old_feature = f'key = "timbre_balance.feature_range_hz"\nvalue = {list(feature.value)}'
+    new_feature = new.replace("ripple_range_hz", "feature_range_hz")
+    # #558：這題原本的共用遮罩現在明列峰谷範圍，仍考覆蓋旗標而非拒算。
+    path.write_text(text.replace(old, new, 1).replace(old_feature, new_feature, 1), encoding="utf-8")
     return path
 
 

@@ -13,7 +13,7 @@ from typing import Annotated, Final, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
-from aosr.scoring.contract import Feature
+from aosr.scoring.contract_base import Feature
 from aosr.scoring.contract_base import FrequencyRange
 from aosr.scoring.contract_base import FrozenModel as _FrozenModel
 

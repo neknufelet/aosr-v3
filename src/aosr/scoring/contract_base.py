@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,6 +56,10 @@ class ReasonCode(StrEnum):
     # 音色的計分依賴範圍未完整覆蓋，或範圍內有缺段。
     TIMBRE_SCORING_RANGE_GAP = "timbre_scoring_range_gap"
     MISSING_POINTS = "missing_points"
+    MISSING_DECLARED_POINT = "missing_declared_point"
+    INSUFFICIENT_POINTS = "insufficient_points"
+    SCORING_RANGE_GAP = "scoring_range_gap"
+    LOW_FREQUENCY_SEAT_LAYOUT_INVALID = "low_frequency_seat_layout_invalid"
     NON_POSITIVE_ENERGY = "non_positive_energy"
     SOLVER_UNAVAILABLE = "solver_unavailable"
     EVALUATOR_NOT_IMPLEMENTED = "evaluator_not_implemented"
@@ -119,3 +123,20 @@ class InputProvenance(_FrozenModel):
     engine_commit: str = Field(min_length=1)
     speaker_id: str = Field(min_length=1)
     receiver_id: str = Field(min_length=1)
+
+
+class Feature(_FrozenModel):
+    """音色殘差曲線上的一個峰或谷；寬度未知（邊界不完整）才是 None，否則必須為正。"""
+
+    kind: Literal["peak", "dip"]
+    center_frequency_hz: Annotated[float, Field(gt=0.0)]
+    depth_db: float
+    width_octave: Annotated[float, Field(gt=0.0)] | None
+    flags: tuple[Flag, ...]
+
+
+class WorstChannel(_FrozenModel):
+    """小計最大的那一支；只提醒，不淘汰、不改合計。"""
+
+    speaker_id: str = Field(min_length=1)
+    screening_subtotal: Annotated[float, Field(ge=0.0)]

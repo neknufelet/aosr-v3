@@ -185,6 +185,12 @@ def _registry_with(tmp_path: Path, old: str, new: str, *more: tuple[str, str]) -
     for before, after in ((old, new), *more):
         assert before in changed
         changed = changed.replace(before, after, 1)
+        if 'key = "timbre_balance.ripple_range_hz"' in before:
+            # #558：這些既有範圍夾具考的是原本共用遮罩的邊界；現在明交峰谷遮罩。
+            import re
+            feature_value = after.split("value = ", 1)[1].split("\n", 1)[0]
+            changed = re.sub(r'(key = "timbre_balance.feature_range_hz"\nvalue = )[^\n]+',
+                             lambda match: match[1] + feature_value, changed)
     tmp_path.mkdir(parents=True, exist_ok=True)
     changed_path = tmp_path / "quality_targets.toml"
     changed_path.write_text(changed, encoding="utf-8")
@@ -508,7 +514,7 @@ def test_default_settings_keep_narrow_peak_scored_and_mark_axis_resolution() -> 
 
 def test_dip_touching_ripple_boundary_keeps_unknown_width() -> None:
     """若寬度搜尋越過評估範圍，邊界凹陷會被捏造成完整寬度。"""
-    lower_hz, _ = _range_setting("timbre_balance.ripple_range_hz")
+    lower_hz, _ = _range_setting("timbre_balance.feature_range_hz")
     minimum = 1.0 / 6.0  # 造凹陷用的寬度；登記簿的最小寬度現在是 0，不拿它當尺
     center_hz = float(lower_hz) * 2.0 ** (minimum / 4.0)
     evaluation = _evaluate(_curve_input(_gaussian_feature(center_hz, -6.0, minimum), point_count=481))
@@ -764,6 +770,7 @@ def test_validated_capability_must_cover_every_scoring_range() -> None:
     dependency_ranges = (
         reference.tilt_dependency_range_hz,
         reference.ripple_dependency_range_hz,
+        reference.feature_dependency_range_hz,
     )
     required_lower_hz = min(bounds[0] for bounds in dependency_ranges)
     required_upper_hz = max(bounds[1] for bounds in dependency_ranges)
@@ -793,6 +800,7 @@ def test_validated_capability_covering_exactly_the_scored_ranges_is_not_flagged(
     dependency_ranges = (
         reference.tilt_dependency_range_hz,
         reference.ripple_dependency_range_hz,
+        reference.feature_dependency_range_hz,
     )
     declared = (
         min(bounds[0] for bounds in dependency_ranges),

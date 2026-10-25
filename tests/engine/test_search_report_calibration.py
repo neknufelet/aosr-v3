@@ -23,12 +23,16 @@ PURPOSE = "dedicated_two_channel_listening_room"
 NONE_FULL = "沒有任何一類用到的尺（含評估器與排名層讀到的別類尺）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
 # 評估器那一層跨類讀的尺（#633，兩位查核員從 evaluate_parts 與每一處 QualityPurpose.entry 各追一次的結果），手列不照抄宣告。
 TIMBRE_EVALUATOR = tuple(f"timbre_balance.{name}" for name in (
-    "coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz", "smoothing_width_octave_tilt",
+    "coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz", "feature_range_hz", "smoothing_width_octave_tilt",
     "smoothing_width_octave_ripple", "feature_min_width_octave", "min_points", "target_tilt_db_per_octave"))
 REFLECTIONS_EVALUATOR = ("reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
                          "reflections_and_echo.flutter_decay_db", "reflections_and_echo.flutter_alert_band_centers_hz",
                          "direction_zones.vertical_min_abs_elevation_deg", "direction_zones.front_max_abs_azimuth_deg",
                          "direction_zones.rear_min_abs_azimuth_deg")
+LOW_FREQUENCY_EVALUATOR = (
+    "stage_one_low_frequency.scored_range_hz", "stage_one_low_frequency.own_line_ripple_rms_db",
+    "stage_one_low_frequency.seat_robustness_rms_db", "stage_one_low_frequency.component_weights",
+)
 CROSS_READ = {"listening_area_stability": (*TIMBRE_EVALUATOR, "channel_matching.broadband_range_hz"),
               "channel_matching": (*TIMBRE_EVALUATOR, *REFLECTIONS_EVALUATOR)}
 
@@ -56,6 +60,18 @@ def _raw_counts(raw: Raw) -> dict[str, tuple[int, int]]:
         calibrated, total = counts.get(key.split(".")[0], (0, 0))
         counts[key.split(".")[0]] = (calibrated + int(status == "calibrated"), total + 1)
     return counts
+
+
+def _low_frequency_source_count() -> int:
+    # #558 第二段 B：答案直接數 TOML 第一階段那幾格；不呼叫校準格式化函式。
+    with config_path("quality_targets.toml").open("rb") as handle:
+        document = tomllib.load(handle)
+    section = next(item for item in document["stage_one"] if item["name"] == PURPOSE)
+    ordinary = sum(entry["key"] in LOW_FREQUENCY_EVALUATOR
+                   for kind in ("setting", "target") for entry in section[kind])
+    weighted = sum(1 for table in section["weight"] if table["key"] in LOW_FREQUENCY_EVALUATOR
+                   for _ in table["item"])
+    return ordinary + weighted
 
 
 def _promoted(prefixes: tuple[str, ...], baseline: str = "") -> QualityPurpose:
@@ -209,7 +225,8 @@ def test_old_snapshot_missing_a_ruler_keeps_the_report(
     section = _sections(render_text(build_report(store, quality_targets_path=current, run_date=RUN_DATE)))["品質合不合格"]
     lines = section.splitlines()
     raw_total = sum(total for _, total in _raw_counts(_raw_purpose()).values())
-    assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1} 條")
+    assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1 + _low_frequency_source_count()} 條")
+    assert "低頻頻響採現在登記簿的第一階段尺；搜尋快照未保存該段" in lines[3]
     assert lines[5].startswith("這次搜尋快照裡的登記簿跟現在的評分程式（評估器與排名層）對不上（") and missing in lines[5]
     assert "評分設定跟搜尋快照不同" in section
 
@@ -252,3 +269,18 @@ def test_a_declared_weight_table_counts_every_item(
     closing = calibration_lines(calibration_progress(_promoted(promoted)))[2]
     assert closing == (NONE_FULL if named is None else
                        f"用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）")
+
+
+def test_low_frequency_dependencies_use_the_shared_stage_one_section() -> None:
+    registration = CATEGORY_REGISTRY[QualityCategory.LOW_FREQUENCY_RESPONSE]
+    assert registration.evaluator_keys == LOW_FREQUENCY_EVALUATOR
+    assert registration.settings_scope == "stage_one"
+    from aosr.config.quality_targets import load_quality_targets
+    registry = load_quality_targets(config_path("quality_targets.toml"))
+    sources = dict(registration.registry_sources(registry.stage_one(PURPOSE)))
+    assert set(sources) == {
+        "stage_one_low_frequency.scored_range_hz", "stage_one_low_frequency.own_line_ripple_rms_db",
+        "stage_one_low_frequency.seat_robustness_rms_db",
+        "stage_one_low_frequency.component_weights.own_line_ripple_rms_db",
+        "stage_one_low_frequency.component_weights.seat_robustness_rms_db",
+    }
