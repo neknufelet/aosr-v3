@@ -1,6 +1,6 @@
 {
   "commit": "5f3b3cf7b3b7a72e6b063b4159d23b192bc4f2ac",
-  "command": "uv run --no-sync python: tests.engine._frequency_split_control measured/channel/listening",
+  "command": "git archive 5f3b3cf7 src tests 解到一個空資料夾，放進本提交的 tests/engine/_frequency_split_control.py（只造曲線、呼叫既有評估器，不含產品程式）；用樹裡的 .venv/bin/python -I、把副本的 src 與根放在 sys.path 最前面，呼叫 measured(curve_input())、channel()、listening() 各一次並 model_dump(mode=\"json\")，三份依序存成 timbre、channel、listening。2026-10-25 主對話另照這個做法重錄，三份逐位相同。",
   "timbre": {
     "schema_version": "aosr.scoring.contract.v3",
     "candidate_id": "split-control",

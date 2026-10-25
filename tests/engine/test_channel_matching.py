@@ -11,7 +11,6 @@ import pytest
 import numpy as np
 
 from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
-from aosr.scoring.timbre import _octave_mean_level_db
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, SettingEntry, load_quality_targets
@@ -155,6 +154,20 @@ def _timbre(
     )
 
 
+def _independent_octave_mean(
+    frequencies_hz: tuple[float, ...], energy: tuple[float, ...], bounds: tuple[float, float],
+) -> float:
+    """考卷自己的每八度等權平均能量（線性），不呼叫產品：範圍內的點才組格子，
+    內點以鄰居中點為界，兩端各往外延半個鄰距、再切到範圍上下界（#450 的定義）。"""
+    kept = [(math.log2(f), e) for f, e in zip(frequencies_hz, energy, strict=True) if bounds[0] <= f <= bounds[1]]
+    x = [octave for octave, _ in kept]
+    edges = [max(math.log2(bounds[0]), x[0] - (x[1] - x[0]) / 2),
+             *[(a + b) / 2 for a, b in zip(x, x[1:])],
+             min(math.log2(bounds[1]), x[-1] + (x[-1] - x[-2]) / 2)]
+    widths = [b - a for a, b in zip(edges, edges[1:])]
+    return sum(w * e for w, (_, e) in zip(widths, kept, strict=True)) / sum(widths)
+
+
 def _response(
     receiver_id: str,
     role: str,
@@ -171,14 +184,14 @@ def _response(
 ) -> ChannelResponse:
     # #558：摘要由手造原料提供，重算起伏則須有完整原始軸。兩點能源展成線性能量曲線，
     # 共同音量校準到舊兩點平均，保留原寬頻音量考題；明交的短軸保留給拒算考題。
+    # 校準用考卷自己的八度平均（_independent_octave_mean），不拿被測的寬頻函式定答案（#558 找碴席）。
     if frequencies_hz == GEOMETRIC_LANE_FREQUENCIES_HZ and len(energy) == 2:
         f = np.asarray(frequencies_hz)
         expanded = np.interp(np.log2(f), np.log2((100.0, 200.0)), energy)
         bounds = load_quality_targets(_TARGETS).purpose(_PURPOSE).entry("channel_matching.broadband_range_hz")
         assert isinstance(bounds, SettingEntry) and isinstance(bounds.value, tuple)
         span = (float(bounds.value[0]), float(bounds.value[1]))
-        measured_db = _octave_mean_level_db(f, expanded, span)
-        expanded *= (sum(energy) / len(energy)) / (10.0 ** (measured_db / 10.0))
+        expanded *= (sum(energy) / len(energy)) / _independent_octave_mean(frequencies_hz, tuple(expanded), span)
         energy = tuple(float(v) for v in expanded)
     return ChannelResponse(
         role=role,
@@ -715,8 +728,12 @@ def test_missing_bad_surrounding_point_cannot_erase_level_floor_or_win_ranking()
     assert ranked.status_of("level-missing") is CandidateStatus.NOT_EVALUATED
 
 
-def test_symmetric_high_frequency_crop_stays_measured_but_separates_tables() -> None:
-    """左右同步砍掉 4.5 kHz 以上仍可估，但實際寬頻支撐不同所以不可同表。"""
+def test_symmetric_high_frequency_crop_inside_the_ripple_range_is_not_evaluated() -> None:
+    """原題（#558 前，題名 test_symmetric_high_frequency_crop_stays_measured_but_separates_tables）：
+    左右同步砍掉 4.5 kHz 以上仍可估，但實際寬頻支撐不同所以不可同表。
+
+    #558 起左右匹配用自己登記的範圍（20～8000 Hz）從原始曲線重算起伏，砍在範圍裡面兩份都不可估；
+    原題「已量但支撐不同就分表」改由 tests/engine/test_channel_matching_support_sequence.py 的完整軸考卷守。"""
     receivers = _receivers()
     group = _group()
     full_axis = (100.0, 200.0, 1000.0, 4000.0, 6000.0)
@@ -893,8 +910,12 @@ def test_broadband_support_must_match_across_required_receivers() -> None:
     assert evaluation.reason_codes == (ReasonCode.FREQUENCY_AXIS_MISMATCH,)
 
 
-def test_matching_broadband_support_is_recorded_without_requiring_range_ceiling() -> None:
-    """所有點與聲道同樣只到 4 kHz 仍可估，payload 必須記下實際最低、最高與點數。"""
+def test_broadband_support_short_of_the_range_ceiling_is_recorded_but_the_category_needs_the_ripple_range() -> None:
+    """原題（#558 前，題名 test_matching_broadband_support_is_recorded_without_requiring_range_ceiling）：
+    所有點與聲道同樣只到 4 kHz 仍可估，payload 必須記下實際最低、最高與點數。
+
+    #558 起整類要整段起伏範圍才可估，只到 4 kHz 整類不可估；寬頻支撐本身不要求蓋到範圍上緣這件事，
+    改直接考算支撐的那一支（範圍用登記簿的寬頻範圍），整類另斷言不可估與原因。"""
     receivers = _receivers()
     group = _group()
     frequencies = (100.0, 200.0, 1000.0, 4000.0)
@@ -913,7 +934,8 @@ def test_matching_broadband_support_is_recorded_without_requiring_range_ceiling(
 
     # #558：寬頻支撐仍可量，整類因起伏範圍有洞而不可估。
     from aosr.scoring.channel_matching import _broadband_support
-    support = _broadband_support(points[0].responses[0], (min(frequencies), max(frequencies)))
+    from aosr.scoring.channel_matching_settings import _load_settings
+    support = _broadband_support(points[0].responses[0], _load_settings(_TARGETS, _PURPOSE).broadband_range_hz)
     assert support is not None
     assert support.lowest_frequency_hz == 100.0
     assert support.highest_frequency_hz == 4000.0

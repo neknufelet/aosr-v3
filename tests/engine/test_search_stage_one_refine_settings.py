@@ -48,7 +48,9 @@ def test_refine_requires_stage_and_is_frozen() -> None:
 def test_selection_entry_does_not_change_score_or_registry_identity() -> None:
     # 更動前：load_quality_targets(config_path(...)).fingerprint 與 stage_one_score_settings 的 fingerprint。
     registry = load_quality_targets(config_path("quality_targets.toml"))
-    assert registry.fingerprint == "fffdea5cd8b942248a046dc2ae8539c1ac08d46ea103ee19ab5448ad02a9575e"
+    # #558（2026-10-25）登記簿改了音色起伏範圍、加了峰谷與左右匹配起伏兩鍵，整份指紋照新登記簿重錄；
+    # 第一階段合分指紋（下一行）沒變，證明第二階段的改動沒碰到第一階段那一段。
+    assert registry.fingerprint == "e86222e5a184b0549521dc816abd4554dd8a03fbb90b8bc3871a43f635545da7"
     assert stage_one_score_settings(registry, "dedicated_two_channel_listening_room").fingerprint == (
         "2d9c47e3be7e3ffcb29f4c6f57fc17fb55da1c0fb77f7bb25a449cc2673f98ea")
     entry = registry.stage_one("dedicated_two_channel_listening_room").entry(

@@ -23,7 +23,7 @@ PURPOSE = "dedicated_two_channel_listening_room"
 NONE_FULL = "沒有任何一類用到的尺（含評估器與排名層讀到的別類尺）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
 # 評估器那一層跨類讀的尺（#633，兩位查核員從 evaluate_parts 與每一處 QualityPurpose.entry 各追一次的結果），手列不照抄宣告。
 TIMBRE_EVALUATOR = tuple(f"timbre_balance.{name}" for name in (
-    "coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz", "smoothing_width_octave_tilt",
+    "coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz", "feature_range_hz", "smoothing_width_octave_tilt",
     "smoothing_width_octave_ripple", "feature_min_width_octave", "min_points", "target_tilt_db_per_octave"))
 REFLECTIONS_EVALUATOR = ("reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
                          "reflections_and_echo.flutter_decay_db", "reflections_and_echo.flutter_alert_band_centers_hz",

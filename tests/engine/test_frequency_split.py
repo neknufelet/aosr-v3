@@ -168,6 +168,16 @@ def test_listening_keeps_other_metrics_and_follows_new_timbre_rms() -> None:
     expected = abs(independent_rms(curve_input("main"), bounds("timbre_balance.ripple_range_hz")) -
                    independent_rms(curve_input("front"), bounds("timbre_balance.ripple_range_hz")))
     compare(ripple["primary_to_surrounding"]["weighted_mean_deviation"], expected)
+    # 只有一個周圍點：最差那一格與兩個原始量也都是這個差；指到的座位與參考照舊（#558 找碴席）。
+    compare(ripple["primary_to_surrounding"]["worst_deviation"]["value"], expected)
+    for side in ("receiver", "reference"):
+        assert ripple["primary_to_surrounding"]["worst_deviation"][side] == old["primary_to_surrounding"]["worst_deviation"][side]
+    assert {key: value for key, value in ripple.items() if key != "primary_to_surrounding"} == {
+        key: value for key, value in old.items() if key != "primary_to_surrounding"}
+    raw = {q["name"]: q for q in got["raw_quantities"] if q["name"].startswith("ripple_rms")}
+    assert raw.keys() == {q["name"] for q in want["raw_quantities"] if q["name"].startswith("ripple_rms")}
+    for quantity in raw.values():
+        compare(quantity["value"], expected)
     for document in (got, want):
         document["raw_quantities"] = [q for q in document["raw_quantities"] if not q["name"].startswith("ripple_rms")]
     compare(got, want)
