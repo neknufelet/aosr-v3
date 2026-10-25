@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from aosr.config.quality_targets import QualityPurpose, load_quality_targets
 from aosr.reporting.compare import compare_results
 from aosr.reporting.display import LABELS
@@ -17,7 +19,6 @@ from aosr.search.report_calibration import calibration_lines, calibration_progre
 from aosr.search.run import SearchStatus
 from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine._stage_one_low_frequency_curves import DIRECTIONS, speaker
-from tests.engine.test_gui_compare_view import _renamed
 from tests.engine.test_low_frequency_response_display import (
     TARGETS, ZEROS, assert_details, expected_description, low_frequency, measured,
 )
@@ -108,7 +109,10 @@ def test_registry_without_stage_one_section_keeps_the_report(saved: SchemeResult
     assert marker and purposes
     bare = tmp_path / "bare.toml"
     bare.write_text(head + purposes + tail, encoding="utf-8")
-    store.status_path.write_text(SearchStatus(best_trial=0).model_dump_json())
+    # 排名層自己把缺段報成設定錯（ValueError），網頁與搜尋報告都照「排名失敗」接。
+    with pytest.raises(ValueError, match="第一階段那一段"):
+        compare_results((saved,), quality_targets=load_quality_targets(bare), run_date=RUN_DATE)
+    store.status_path.write_text(SearchStatus().model_dump_json())
     unavailable = low_frequency(saved).model_copy(update={"state": EvaluationState.UNAVAILABLE,
         "payload": None, "raw_quantities": (), "category_cost": None,
         "reason_codes": (ReasonCode.SCORING_RANGE_GAP,)})
@@ -116,10 +120,26 @@ def test_registry_without_stage_one_section_keeps_the_report(saved: SchemeResult
         unavailable if item.category is LF else item for item in saved.candidate.evaluations)})})
     for original, answer in ((quiet, "低頻頻響的範圍與類權重說明從缺"), (saved, "排名失敗，這份報告不重排")):
         store.baseline_path.write_text(original.model_dump_json())
-        store.candidate_path(0).write_text(_renamed(original, "other").model_dump_json())
         text = render_text(build_report(store, quality_targets_path=bare, run_date=RUN_DATE))
         assert "低頻頻響沒數：現在的登記簿沒有這個用途的第一階段尺" in text
         assert answer in text
+
+
+def test_stage_one_section_missing_a_source_keeps_the_full_report(saved: SchemeResult, tmp_path: Path) -> None:
+    # 第一階段那一段在、但少計分範圍那一格：可估的低頻讓排名丟錯，整份報告照原文寫「排名失敗」，
+    # 校準進度照實說判不出，不整份當掉（複查補）。
+    store, path = make_store(tmp_path / "search")
+    blocks = path.read_text(encoding="utf-8").split("\n[[")
+    kept = [block for block in blocks if f'key = "{SCORED_RANGE_KEY}"' not in block]
+    assert len(kept) == len(blocks) - 1
+    short = tmp_path / "short.toml"
+    short.write_text("\n[[".join(kept), encoding="utf-8")
+    store.status_path.write_text(SearchStatus().model_dump_json())
+    store.baseline_path.write_text(saved.model_dump_json())
+    text = render_text(build_report(store, quality_targets_path=short, run_date=RUN_DATE))
+    assert "排名失敗，這份報告不重排" in text
+    assert "這次搜尋快照裡的登記簿跟現在的評分程式（評估器與排名層）對不上（" in text
+    assert SCORED_RANGE_KEY in text
 
 
 def test_stage_one_section_missing_a_source_says_unjudged(saved: SchemeResult) -> None:

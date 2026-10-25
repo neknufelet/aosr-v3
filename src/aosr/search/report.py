@@ -239,8 +239,9 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
         return quality.model_copy(update={"message": message, **updates})
     try:
         ranking = compare_results(results, quality_targets=registry, run_date=run_date)
-    except ValueError as error:
+    except (KeyError, ValueError) as error:
         # 排名層自己的錯（例如登記簿設定矛盾）不是不能同表；照原文寫，不猜所在區。
+        # 登記簿缺格時排名層丟 KeyError（例如第一階段那一段少一格，搜尋快照不收那一段），一樣照原文寫（複查補）。
         return quality.model_copy(update={"message": "排名失敗，這份報告不重排：" + _named(str(error), original, best)})
     description = low_frequency_response_description(registry, store.settings.purpose)
     return quality.model_copy(update={
