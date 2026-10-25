@@ -15,7 +15,8 @@ from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 from aosr.reporting.evaluation import ResultStanding, load_result, purpose_settings, reevaluate
 from aosr.reporting.result import SchemeResult
 from aosr.scoring.contract import QualityCategory
-from aosr.scoring.ranking import RankingContext, rank_candidates
+from aosr.scoring.ranking import rank_candidates
+from aosr.scoring.ranking_models import RankingContext
 from aosr.search.run import IdentityChanged, _check_identity
 from aosr.search.store import SearchIdentity
 from tests.engine._directivity import DIRECTIVITY
@@ -166,11 +167,22 @@ def test_new_category_version_or_category_weight_only_keeps_existing_reload_poli
     assert loaded.standing is ResultStanding.RERANKED
 
 
-def test_settings_fingerprint_only_change_does_not_remeasure_identical_numbers(
-    saved: SchemeResult, tmp_path: Path,
+@pytest.mark.parametrize(("block_marker", "new_value", "standing", "cost_changes"), (
+    # 主項權重 1→2：dB 原值不變、類代價真的變；評估輸出記著最差聲道的合分小計（加權值），
+    # 權重一改評估輸出就不同，判 remeasured（重新量測，比重新排名更強的提醒）。
+    ('name = "own_line_ripple_rms_db"', 2.0, ResultStanding.REMEASURED, True),
+    # less_is_better（越小越好）不讀目標的 value，但設定身分仍收它：評估輸出與代價都不變，
+    # 只有第一階段那一段的身分變了，判 reranked（重新排名），不准冒充 current（照舊）。
+    ('key = "stage_one_low_frequency.own_line_ripple_rms_db"', 0.2, ResultStanding.RERANKED, False),
+))
+def test_stage_one_settings_change_never_reads_back_as_current(
+    saved: SchemeResult, tmp_path: Path, block_marker: str, new_value: float,
+    standing: ResultStanding, cost_changes: bool,
 ) -> None:
-    # less_is_better（越小越好）不讀目標的 value，但設定身分仍收它；只變身分不能冒充重量測。
-    changed = _rewrite(tmp_path, 'key = "stage_one_low_frequency.own_line_ripple_rms_db"', "value", 0.2)
+    changed = _rewrite(tmp_path, block_marker, "value", new_value)
+    # 前置：用途設定指紋看不到第一階段那一段，只靠用途指紋會判成 current（照舊）。
+    purpose = saved.scheme.purpose
+    assert purpose_settings(changed, purpose).fingerprint == purpose_settings(TARGETS, purpose).fingerprint
     path = tmp_path / "same-numbers.json"
     path.write_text(saved.model_dump_json(), encoding="utf-8")
     loaded = load_result(path, capabilities=CAPABILITIES, directivity=DIRECTIVITY,
@@ -179,4 +191,9 @@ def test_settings_fingerprint_only_change_does_not_remeasure_identical_numbers(
     after, = (e for e in loaded.result.candidate.evaluations if e.category is QualityCategory.LOW_FREQUENCY_RESPONSE)
     assert before.settings_fingerprint != after.settings_fingerprint
     assert before.raw_quantities == after.raw_quantities
-    assert loaded.standing is ResultStanding.CURRENT
+    assert loaded.standing is standing
+    old_row, = rank_candidates([saved.candidate], load_quality_targets(TARGETS), _context(saved)).rankable
+    new_row, = rank_candidates([loaded.result.candidate], load_quality_targets(changed), _context(saved)).rankable
+    old_line, = (c for c in old_row.categories if c.identity.category is QualityCategory.LOW_FREQUENCY_RESPONSE)
+    new_line, = (c for c in new_row.categories if c.identity.category is QualityCategory.LOW_FREQUENCY_RESPONSE)
+    assert (old_line.category_cost != new_line.category_cost) is cost_changes

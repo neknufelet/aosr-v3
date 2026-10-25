@@ -1,6 +1,7 @@
 """#558 第二段 A：漏接低頻、除以二或讀錯能量都要紅；答案獨立從造曲線求。"""
 from __future__ import annotations
 
+import itertools
 import math
 from pathlib import Path
 
@@ -11,10 +12,15 @@ from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_freq
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualificationEntry, WeightTable, load_quality_targets
 from aosr.scoring.contract import QualityCategory
+from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole
+from aosr.scoring.stage_one_low_frequency_contract import (
+    StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
+)
 from aosr.scoring.stage_one_score import score_stage_one, stage_one_score_settings
 from tests.engine._stage_one_low_frequency_curves import (
     candidate, speaker, independent_own_line_answer, DIRECTIONS,
 )
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL
 from tests.engine._placement import POINT_PLACEMENT
 from tests.engine.test_ranking_recost import _PROVENANCE
 from tests.engine.test_low_frequency_response_reload import saved as saved
@@ -55,11 +61,11 @@ def test_two_channels_independent_formula_and_stage_one_components(axis: LowFreq
     seat = ((1 + 2 + 3 + 4 + 5 + 6) / 6 / 3) * ((1 + 2) / 2)
     expected = own + seat
     assert costed.category_cost is not None
-    assert costed.category_cost.value == pytest.approx(expected, rel=5e-13)
+    assert costed.category_cost.value == pytest.approx(expected, rel=SCORING_REL, abs=SCORING_ABS)
     weights = registry.purpose(PURPOSE).entry("ranking.category_weights")
     assert isinstance(weights, WeightTable)
     weight = next(row.value for row in weights.item if row.name == QualityCategory.LOW_FREQUENCY_RESPONSE.value)
-    assert weight * costed.category_cost.value == pytest.approx(0.25 * expected, rel=5e-13)
+    assert weight * costed.category_cost.value == pytest.approx(0.25 * expected, rel=SCORING_REL, abs=SCORING_ABS)
     payload = measured.payload
     from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
     assert isinstance(payload, LowFrequencyResponsePayload)
@@ -101,7 +107,6 @@ def test_low_frequency_cost_flips_ranking_without_affecting_other_costs() -> Non
             scene_fingerprint=base.scene_fingerprint, placement=POINT_PLACEMENT, provenance=_PROVENANCE)
         enriched.append(_candidate(*base.evaluations, lf))
     rows = _rank(*enriched, registry=registry).rankable
-    from tests.engine._cross_cpu_tolerance import SCORING_REL, SCORING_ABS
     assert [r.candidate_id for r in rows] == ["b", "a"]
     assert {r.candidate_id: r.total_cost for r in rows} == pytest.approx(
         {"b": 0.5, "a": 0.75}, rel=SCORING_REL, abs=SCORING_ABS)
@@ -118,9 +123,8 @@ def test_report_adapter_preserves_unavailable_reasons_and_optional_ranking(
 ) -> None:
     from aosr.reporting.low_frequency_response import evaluate_result_low_frequency
     from aosr.scoring.contract import EvaluationState
-    from aosr.scoring.ranking import CandidateStatus, rank_candidates
-    from tests.engine._stage_one_cases import scheme
-    from tests.engine.test_scheme_pipeline import _run_control
+    from aosr.scoring.ranking import rank_candidates
+    from aosr.scoring.ranking_models import CandidateStatus
     from tests.engine.test_low_frequency_response_reload import _context
     item = saved
     if damage == "missing_direction":
@@ -155,11 +159,63 @@ def test_report_adapter_preserves_unavailable_reasons_and_optional_ranking(
         assert QualityCategory.LOW_FREQUENCY_RESPONSE in {u.category for u in row.uncovered}
 
 
+def _expected_input(item: SchemeResult, curves: dict[tuple[str, str], tuple[float, ...]],
+                    frequencies: dict[tuple[str, str], tuple[float, ...]]) -> StageOneLowFrequencyInput:
+    receivers = item.scheme.receiver_set
+
+    def seat(speaker: str, point: ReceiverPoint) -> StageOneSeatCurve:
+        key = (speaker, point.receiver_id)
+        return StageOneSeatCurve(receiver_id=point.receiver_id,
+            direction_relative_to_primary=point.direction_relative_to_primary,
+            report_id=f"fem-{speaker}-{point.receiver_id}", frequencies_hz=frequencies[key], fem_energy=curves[key])
+    return StageOneLowFrequencyInput(candidate_id=item.scheme.scheme_id,
+        low_frequency_axis=item.scheme.scene.low_frequency_axis or LowFrequencyAxis.SEARCH,
+        speakers=tuple(StageOneSpeakerCurves(speaker_id=speaker, primary=seat(speaker, receivers.primary),
+            surrounding=tuple(seat(speaker, p) for p in receivers.points if p.role is ReceiverRole.SURROUNDING))
+            for speaker in item.scheme.speakers))
+
+
+def test_report_adapter_maps_every_curve_to_its_own_speaker_and_seat(saved: SchemeResult) -> None:
+    from aosr.reporting.low_frequency_response import evaluate_result_low_frequency
+    from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
+    from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
+    # 控制組左右主位曲線相同、上下對稱：每一對乘一條形狀不同的係數，接反任一對整份評估就不同。
+    pairs = []
+    for k, pair in enumerate(saved.pairs, start=1):
+        assert pair.report.points is not None
+        points = tuple(p if p.fem_energy is None else p.model_copy(update={
+            "fem_energy": p.fem_energy * (1 + 0.1 * k * (1 + index % 5))})
+            for index, p in enumerate(pair.report.points))
+        pairs.append(pair.model_copy(update={"report": pair.report.model_copy(update={"points": points})}))
+    item = saved.model_copy(update={"pairs": tuple(pairs)})
+    # 答案按每一對自己記的喇叭代號與座位代號組，不經聲道角色對照。
+    curves: dict[tuple[str, str], tuple[float, ...]] = {}
+    frequencies: dict[tuple[str, str], tuple[float, ...]] = {}
+    for pair in item.pairs:
+        assert pair.report.points is not None
+        curves[pair.speaker_id, pair.receiver_id] = tuple(
+            p.fem_energy for p in pair.report.points if p.fem_energy is not None)
+        frequencies[pair.speaker_id, pair.receiver_id] = tuple(
+            p.frequency_hz for p in pair.report.points if p.fem_energy is not None)
+    assert all(curves[a] != curves[b] for a, b in itertools.combinations(curves, 2))
+    settings = stage_one_score_settings(load_quality_targets(TARGETS), item.scheme.purpose)
+    result = evaluate_result_low_frequency(item, TARGETS, item.candidate.scene_fingerprint)
+    assert isinstance(result.payload, LowFrequencyResponsePayload)
+    expected = evaluate_stage_one_low_frequency(_expected_input(item, curves, frequencies),
+                                                scoring_range_hz=settings.scored_range_hz)
+    assert result.payload.evaluation == expected
+    # 控制：左右兩支的曲線互換，整份評估必須不同（考卷真的分得出接反）。
+    left, right = item.scheme.speakers
+    other = {left: right, right: left}
+    crossed = evaluate_stage_one_low_frequency(_expected_input(
+        item, {(other[s], r): v for (s, r), v in curves.items()}, frequencies), scoring_range_hz=settings.scored_range_hz)
+    assert result.payload.evaluation != crossed
+
+
 def test_no_low_frequency_difference_keeps_head_control_costs_and_order() -> None:
     from aosr.scoring.ranking import rank_candidates
     from tests.engine.test_low_frequency_response_reload import _context
     from tests.engine.test_scheme_pipeline import _control_result
-    from tests.engine._cross_cpu_tolerance import SCORING_REL, SCORING_ABS
     # 改動前 HEAD 7d966858 實跑 _control_result + rank_candidates 的逐格原值。
     # 兩座控制組新類不可估，沒有低頻項差異；其他五類每格及名次必須保留。
     expected = {
@@ -183,7 +239,6 @@ def test_no_low_frequency_difference_keeps_head_control_costs_and_order() -> Non
 
 def test_common_input_rejects_other_seat_beyond_the_six_directions() -> None:
     from aosr.scoring.low_frequency_input import low_frequency_input
-    from aosr.scoring.receiver_set import ReceiverRole
     from tests.engine._stage_one_cases import scheme
     item = scheme()
     extra = item.receiver_set.points[-1].model_copy(update={

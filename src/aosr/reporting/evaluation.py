@@ -18,6 +18,7 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document, solver_inputs
+from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
 from aosr.scoring.channel_matching_settings import BROADBAND_KEY
 from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
@@ -325,6 +326,19 @@ def _same_measurement(a: CandidateEvaluation, b: CandidateEvaluation) -> bool:
     return _measurement(a) == _measurement(b)
 
 
+def _stage_one_settings_changed(stored: CandidateEvaluation, remeasured: CandidateEvaluation) -> bool:
+    """讀第一階段那一段設定的類別，評估設定指紋變了就是排名可能變了。
+
+    用途設定指紋不收第一階段那一段（``QualityTargets.fingerprint`` 刻意排除），只改那一段的權重或
+    較差參考時量出的數字相同、用途指紋也相同，不另判就會冒充 current（照舊）。
+    """
+    scoped = {category for category, registration in CATEGORY_REGISTRY.items()
+              if registration.settings_scope == "stage_one"}
+    before = {item.category: item.settings_fingerprint for item in stored.evaluations if item.category in scoped}
+    after = {item.category: item.settings_fingerprint for item in remeasured.evaluations if item.category in scoped}
+    return before != after
+
+
 def _check_result_version(document: object) -> None:
     version = document.get("schema_version") if isinstance(document, dict) else None
     if version == RESULT_SCHEMA_VERSION:
@@ -360,7 +374,8 @@ def load_result(path: Path, *, capabilities: CapabilityTable,
         standing = ResultStanding.NEEDS_PHYSICS
     elif stored is None or (stored != remeasured and not _same_measurement(stored, remeasured)):
         standing = ResultStanding.REMEASURED
-    elif result.purpose_settings.fingerprint != current_settings.fingerprint:
+    elif (result.purpose_settings.fingerprint != current_settings.fingerprint
+          or (stored is not None and _stage_one_settings_changed(stored, remeasured))):
         standing = ResultStanding.RERANKED
     else:
         standing = ResultStanding.CURRENT
