@@ -62,6 +62,19 @@ def _raw_counts(raw: Raw) -> dict[str, tuple[int, int]]:
     return counts
 
 
+
+def _low_frequency_source_count() -> int:
+    # #558 第二段 B：答案直接數 TOML 第一階段那幾格；不呼叫校準格式化函式。
+    with config_path("quality_targets.toml").open("rb") as handle:
+        document = tomllib.load(handle)
+    section = next(item for item in document["stage_one"] if item["name"] == PURPOSE)
+    ordinary = sum(entry["key"] in LOW_FREQUENCY_EVALUATOR
+                   for kind in ("setting", "target") for entry in section[kind])
+    weighted = sum(1 for table in section["weight"] if table["key"] in LOW_FREQUENCY_EVALUATOR
+                   for _ in table["item"])
+    return ordinary + weighted
+
+
 def _promoted(prefixes: tuple[str, ...], baseline: str = "") -> QualityPurpose:
     """把鍵名前綴命中的每一條升成 calibrated，結構化出處照抄一條已校準的；鍵名等於 baseline 的那一條反過來
     設成基線值（今天已校準的也一樣）；仍走登記簿的驗證。"""
@@ -213,7 +226,8 @@ def test_old_snapshot_missing_a_ruler_keeps_the_report(
     section = _sections(render_text(build_report(store, quality_targets_path=current, run_date=RUN_DATE)))["品質合不合格"]
     lines = section.splitlines()
     raw_total = sum(total for _, total in _raw_counts(_raw_purpose()).values())
-    assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1} 條")
+    assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1 + _low_frequency_source_count()} 條")
+    assert "低頻頻響採本次排名讀取的第一階段尺；搜尋快照未保存該段" in lines[3]
     assert lines[5].startswith("這次搜尋快照裡的登記簿跟現在的評分程式（評估器與排名層）對不上（") and missing in lines[5]
     assert "評分設定跟搜尋快照不同" in section
 

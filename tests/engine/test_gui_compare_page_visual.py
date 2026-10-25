@@ -99,6 +99,9 @@ def test_narrow_screen_stacks_summary_changes_then_chart(
             lines = cast(list[list[object]], page.evaluate(
                 LINES_PER_CELL_JS, "#categories th, #categories td, #changes th, #changes td"))
             assert [item for item in lines if item[1] != 1] == []
+            low = page.locator("#categories tr").filter(has=page.get_by_text("低頻頻響", exact=True))
+            assert low.locator("summary").inner_text() == "低頻頻響詳情"
+            assert not low.locator("details").evaluate("node => node.open")
             assert cast(int, page.evaluate("() => document.documentElement.scrollWidth")) <= 390
             _assert_quiet(watched)
 
@@ -108,7 +111,11 @@ LINES_PER_CELL_JS = """selector => [...document.querySelectorAll(selector)]
   .filter((cell) => cell.textContent.trim())
   .map((cell) => {
     const range = document.createRange();
-    range.selectNodeContents(cell);
+    // 低頻新增摺疊詳情：只量實際可見的摘要；其他七類仍量整格。
+    const details = cell.querySelector("details");
+    const target = details && cell.parentElement.cells[0].textContent === "低頻頻響" ?
+      details.querySelector("summary") : cell;
+    range.selectNodeContents(target);
     const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
     return [cell.textContent, tops.size];
   })"""

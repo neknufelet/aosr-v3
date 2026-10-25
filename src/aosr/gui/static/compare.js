@@ -240,6 +240,12 @@ function drawCategories() {
     if (withNotes) {
       cells.push(node("td", item.note_text));
       cells[cells.length - 1].classList.add("note");
+      if (item.category === "low_frequency_response") {
+        const details = document.createElement("details");
+        details.append(node("summary", `${item.label}詳情`));
+        for (const text of item.note_text.split("\n")) details.append(node("p", text));
+        cells[cells.length - 1].replaceChildren(details);
+      }
     }
     // 代價比較低的那一格加重（伺服器判）：A 代價是第 3 格、B 代價是第 5 格。
     if (item.better === "a") cells[2].classList.add("better");

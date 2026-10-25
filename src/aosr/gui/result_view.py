@@ -30,6 +30,7 @@ from aosr.reporting.evaluation import (
     evaluate_point_timbres, read_registry_settings, receiver_point_results,
 )
 from aosr.reporting.result import PairResult, SchemeResult, Timings
+from aosr.reporting.low_frequency_display import low_frequency_response_note
 from aosr.reporting.scheme import Scheme
 from aosr.search.labels import speaker_setup_text
 from aosr.scoring.contract import (
@@ -380,11 +381,13 @@ def frequency_responses_for(scheme: Scheme, pairs: tuple[PairResult, ...]) -> tu
 
 
 def _categories(result: SchemeResult, costs: dict[QualityCategory, float],
-                ranked: dict[QualityCategory, CategoryEvaluation]) -> tuple[CategoryView, ...]:
+                ranked: dict[QualityCategory, CategoryEvaluation], registry: QualityTargets) -> tuple[CategoryView, ...]:
     evaluations = {item.category: item for item in result.candidate.evaluations}
     evaluations.update(ranked)
     notes = {QualityCategory.LOW_FREQUENCY_DECAY: LOW_FREQUENCY_DECAY_NOTE,
              QualityCategory.SPATIAL_IMPRESSION: SPATIAL_IMPRESSION_NOTE}
+    notes[QualityCategory.LOW_FREQUENCY_RESPONSE] = low_frequency_response_note(
+        evaluations.get(QualityCategory.LOW_FREQUENCY_RESPONSE), registry, result.scheme.purpose)
     if result.scheme.furniture:
         notes[QualityCategory.REVERBERATION] = FURNITURE_REVERBERATION_NOTE
     labels = {"measured": "已量", "costed": "已算代價", "unavailable": "不可估"}
@@ -892,7 +895,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
                           if item.candidate_id == result.scheme.scheme_id), None)
     missing = eliminated.missing if eliminated else not_evaluated.missing if not_evaluated else ()
     responses = _frequency_responses(result)
-    categories = _categories(result, costs, ranked)
+    categories = _categories(result, costs, ranked, registry)
     status = ranking.status_of(result.scheme.scheme_id).value
     reasons = tuple(reason.value for reason in eliminated.reasons) if eliminated else ()
     seat_alerts, flutter_groups = _alert_sections(

@@ -779,6 +779,8 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
             better, better_text = (("same", "相同") if a.cost_text == b.cost_text
                                    else ("a", "A 較好") if a.cost < b.cost else ("b", "B 較好"))
         notes: tuple[str, ...] = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
+        if kind is QualityCategory.LOW_FREQUENCY_RESPONSE:
+            notes = (f"A：{a.note}", f"B：{b.note}", comparison)
         if kind is QualityCategory.REVERBERATION and bool(view_a.furniture_reason) != bool(view_b.furniture_reason):
             side = "A" if view_a.furniture_reason else "B"
             # 家具紙第 23 條 2026-10-16（#842）拿掉「改善量」那句提醒，有家具那一邊照舊附殘響說明。
@@ -787,7 +789,8 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
                                 a_state_text=a.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in a.flags else ""),
                                 b_state_text=b.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in b.flags else ""),
                                 comparison_text=comparison, better=better, better_text=better_text,
-                                note_text="；".join(dict.fromkeys(note for note in notes if note))))
+                                note_text=("\n" if kind is QualityCategory.LOW_FREQUENCY_RESPONSE else "；").join(
+                                    dict.fromkeys(note for note in notes if note))))
     return tuple(rows), pending
 
 

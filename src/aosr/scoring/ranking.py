@@ -14,6 +14,7 @@ from aosr.config.quality_targets import (
     QualityPurpose,
     QualityTargets,
     Unit,
+    WeightTable,
 )
 from aosr.scoring.category_registry import (
     CATEGORY_REGISTRY,
@@ -45,6 +46,8 @@ from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_TARGET_UNITS,
     _listening_area_principal_weights,
 )
+from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
+from aosr.scoring.stage_one_score import WEIGHTS_KEY
 from aosr.scoring import recommendation as rec
 from aosr.scoring.ranking_alerts import collect_review_alerts
 from aosr.scoring.review_alert import ReviewAlert
@@ -220,7 +223,7 @@ def _timbre_channel_lines(
 def _component_lines(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[ComponentLine, ...]:
-    """類內分項逐條列出；音色照角色表，別類的已算代價原樣標「reported」。"""
+    """類內分項逐條列出；音色照角色表，低頻列原值與權重，別類的已算代價原樣標「reported」。"""
     cost = evaluation.category_cost
     if cost is None:
         raise ValueError("只有 costed 評估有分項")
@@ -231,6 +234,15 @@ def _component_lines(
                                      else None)
     if isinstance(payload, TimbreChannelsPayload):
         return _timbre_channel_lines(cost, payload, purpose)
+    if isinstance(payload, LowFrequencyResponsePayload):
+        table = purpose.entry(WEIGHTS_KEY)
+        if not isinstance(table, WeightTable):
+            raise TypeError(f"{WEIGHTS_KEY} 必須是權重表")
+        weights = {item.name: item.value for item in table.item}
+        raw = {item.name: item.value for item in evaluation.raw_quantities}
+        return tuple(ComponentLine(name=name, role="principal", raw_value=raw[name], raw_unit="dB",
+                                   cost=value, weight=weights[name])
+                     for name, value in cost.components.items())
     return tuple(
         ComponentLine(
             name=name,
@@ -322,7 +334,8 @@ def _category_line(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryLin
         category_cost=cost.value,
         category_weight=weight,
         weighted_cost=cost.value * weight,
-        components=_component_lines(evaluation, rules.purpose),
+        components=_component_lines(evaluation, rules.registry.stage_one(rules.purpose.name)
+            if registration is not None and registration.settings_scope == "stage_one" else rules.purpose),
         component_directions=cost.component_directions,
         unassessed_bands=cost.unassessed_bands,
         evaluation=evaluation,

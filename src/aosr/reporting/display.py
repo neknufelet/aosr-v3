@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 import json
 
+from aosr.config.quality_targets import QualityTargets, WeightTable
+from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.physics.fem_modal_check import FemModalCheck
 from aosr.reporting.modal_diagnosis_model import CheckSummary, ModalDiagnosis
 from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis
@@ -58,6 +60,8 @@ CONDITIONS_DIFFER_TEXT = "評分條件不同"
 
 
 LABELS = {
+    "own_line_ripple_rms_db": "主位起伏",
+    "seat_robustness_rms_db": "座位差異",
     "low_frequency_response": "低頻頻響",
     "missing_declared_point": "低頻軸缺少有限元素點",
     "insufficient_points": "低頻資料點不足",
@@ -148,6 +152,17 @@ LABELS = {
     "floor": "地板", "ceiling": "天花", "x0": "x 起點牆", "xL": "x 終點牆",
     "y0": "y 起點牆", "yL": "y 終點牆",
 }
+
+
+def low_frequency_response_description(registry: QualityTargets, purpose: str) -> str:
+    """低頻類說明的範圍與類權重只讀登記簿。"""
+    low, high = stage_one_score_settings(registry, purpose).scored_range_hz
+    table = registry.purpose(purpose).entry("ranking.category_weights")
+    if not isinstance(table, WeightTable):
+        raise TypeError("ranking.category_weights 必須是權重表")
+    weight = next(item.value for item in table.item if item.name == "low_frequency_response")
+    return (f"{low:g}～{high:g} Hz 的{LABELS['own_line_ripple_rms_db']}與{LABELS['seat_robustness_rms_db']}，"
+            f"量法沿用第一階段；類權重 {weight:g} 是暫定工程選擇，不宣稱聽感校準")
 
 
 def reflection_models_differ(a_support: str, b_support: str) -> bool:

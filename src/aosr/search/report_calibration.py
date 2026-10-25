@@ -7,6 +7,8 @@
 （數字、狀態、旗標、診斷欄位）就可能不同就算；整份登記簿的指紋不算。這是保守方向，多算只會晚一點說「全部校準」。
 方向分區、排名規則是判定共用的尺，不當成會判過不過的品質類（複查）。低頻拖尾這類登記簿已有尺、還沒接進評分的品質類
 另列一組，不跟共用的尺混在一起（#669）。
+#558 第二段 B：低頻頻響跨到第一階段設定段，從排名註冊表 registry_sources 取來源逐格數；
+搜尋快照尚未保存該段，傳入本次排名用的設定段時必須明示來源，不把現在的尺冒充舊快照。
 """
 
 from pydantic import BaseModel
@@ -20,7 +22,7 @@ from aosr.reporting.display import LABELS
 # 類別名稱直接取 reporting.display 的 LABELS，與網頁結果頁共用同一份。
 CATEGORY_LABELS = {key: LABELS[key] for key in (
     "timbre_balance", "channel_matching", "reverberation", "reflections_and_echo",
-    "listening_area_stability", "low_frequency_decay", "direction_zones", "ranking",
+    "listening_area_stability", "low_frequency_response", "low_frequency_decay", "direction_zones", "ranking",
 )}
 
 
@@ -39,6 +41,7 @@ class CalibrationProgress(BaseModel):
     total: int
     categories: tuple[CategoryProgress, ...]
     dependency_error: str | None = None
+    low_frequency_source_note: str = ""
 
 
 def _statuses(purpose: QualityPurpose) -> list[tuple[str, str]]:
@@ -55,7 +58,7 @@ def _key_statuses(purpose: QualityPurpose, key: str) -> list[EntryStatus]:
     return [item.status for item in entry.item] if isinstance(entry, WeightTable) else [entry.status]
 
 
-def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
+def calibration_progress(purpose: QualityPurpose, *, stage_one: QualityPurpose | None = None) -> CalibrationProgress:
     """各類取鍵名第一段數自己的尺；品質類另看「自己的尺＋排名層與評估器讀的依賴」是不是全部校準。"""
     keyed = _statuses(purpose)
     counts: dict[str, tuple[int, int]] = {}
@@ -64,6 +67,10 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
         calibrated, total = counts.get(category, (0, 0))
         counts[category] = (calibrated + (status == "calibrated"), total + 1)
     judged = {category.value: registration for category, registration in CATEGORY_REGISTRY.items()}
+    low_frequency = QualityCategory.LOW_FREQUENCY_RESPONSE.value
+    if stage_one is not None:
+        sources = judged[low_frequency].registry_sources(stage_one)
+        counts[low_frequency] = (sum(status == "calibrated" for _, status in sources), len(sources))
     known = [name for name in CATEGORY_LABELS if name in counts]
     order = known + sorted(name for name in counts if name not in CATEGORY_LABELS)
     categories = []
@@ -73,8 +80,11 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
         if name in judged and dependency_error is None:
             own = [status for key, status in keyed if key.split(".", 1)[0] == name]
             try:
-                depends = [status for _, status in judged[name].registry_sources(purpose)]
-                depends += [status for key in judged[name].evaluator_keys for status in _key_statuses(purpose, key)]
+                section = stage_one if judged[name].settings_scope == "stage_one" else purpose
+                if section is None:
+                    raise KeyError("搜尋快照未保存第一階段尺")
+                depends = [status for _, status in judged[name].registry_sources(section)]
+                depends += [status for key in judged[name].evaluator_keys for status in _key_statuses(section, key)]
             except (KeyError, TypeError, ValueError) as error:
                 # 快照是舊版登記簿、現在的評估器或排名層要讀它沒有的尺：照實說判不出，不讓整份報告失敗（複查）。
                 dependency_error = str(error)
@@ -86,7 +96,9 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
         categories = [item.model_copy(update={"uses_all_calibrated": False}) for item in categories]
     return CalibrationProgress(calibrated=sum(item.calibrated for item in categories),
                                total=sum(item.total for item in categories), categories=tuple(categories),
-                               dependency_error=dependency_error)
+                               dependency_error=dependency_error,
+                               low_frequency_source_note=("低頻頻響採本次排名讀取的第一階段尺；搜尋快照未保存該段"
+                                                          if stage_one is not None else ""))
 
 
 def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
@@ -110,4 +122,5 @@ def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
                if not full else
                "用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：" + "、".join(full) + "；這幾類過不過還沒接進報告（等 #358）")
     return (f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {progress.total} 條，已校準 {progress.calibrated} 條、"
-            f"未校準 {progress.total - progress.calibrated} 條", breakdown, closing)
+            f"未校準 {progress.total - progress.calibrated} 條"
+            + (f"；{progress.low_frequency_source_note}" if progress.low_frequency_source_note else ""), breakdown, closing)

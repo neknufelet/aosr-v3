@@ -74,9 +74,12 @@ def _parser() -> argparse.ArgumentParser:
 
 def _print_result(result: SchemeResult, ranking: RankingResult, *, emit_furniture_reason: bool = True,
                   own_costs: bool = False, notes: dict[QualityCategory, str] | None = None) -> None:
-    from aosr.reporting.display import FURNITURE_REVERBERATION_REPORT_NOTE, LOW_FREQUENCY_DECAY_NOTE
+    from aosr.reporting.display import FURNITURE_REVERBERATION_REPORT_NOTE, LOW_FREQUENCY_DECAY_NOTE, LABELS
     from aosr.reporting.furniture_display import furniture_report_notes
     from aosr.scoring.contract import QualityCategory
+    from aosr.config.paths import config_path
+    from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.low_frequency_display import low_frequency_response_note
     print(f"方案 {result.scheme.scheme_id}：{ranking.status_of(result.scheme.scheme_id).value}")
     costed = _result_costs(result, ranking, own_costs=own_costs) or {}
     for evaluation in result.candidate.evaluations:
@@ -87,6 +90,9 @@ def _print_result(result: SchemeResult, ranking: RankingResult, *, emit_furnitur
               + _category_suffix(evaluation, notes or {})
               + (f" | {FURNITURE_REVERBERATION_REPORT_NOTE}"
                  if result.scheme.furniture and evaluation.category is QualityCategory.REVERBERATION else ""))
+        if evaluation.category is QualityCategory.LOW_FREQUENCY_RESPONSE:
+            print(f"  {LABELS[evaluation.category.value]}：" + low_frequency_response_note(evaluation,
+                load_quality_targets(config_path("quality_targets.toml")), result.scheme.purpose).replace("\n", "；"))
     if emit_furniture_reason and result.scheme.furniture:
         print("\n".join(furniture_report_notes(result)))
     print(LOW_FREQUENCY_DECAY_NOTE)

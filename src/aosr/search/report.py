@@ -13,6 +13,9 @@ from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
+from aosr.reporting.low_frequency_display import low_frequency_response_lines
+from aosr.reporting.display import LABELS, low_frequency_response_description
+from aosr.scoring.contract import QualityCategory
 from aosr.reporting.furniture_display import furniture_report_notes
 from aosr.reporting.display import (
     LOW_FREQUENCY_DECAY_NOTE,
@@ -91,6 +94,7 @@ class CandidateQuality(_FrozenModel):
     review_status: ReviewStatus | None = None
     recommendation_status: RecommendationStatus | None = None
     not_final_reasons: tuple[NotFinalReason, ...] = ()
+    category_lines: tuple[str, ...] = ()
 
 
 class QualityReport(_FrozenModel):
@@ -159,11 +163,18 @@ def _candidate_quality(result: SchemeResult, ranking: RankingResult,
     candidate_id = result.candidate.candidate_id
     zone = ranking.status_of(candidate_id)
     row = next((row for row in ranking.rankable if row.candidate_id == candidate_id), None)
+    low_frequency = next((line for line in row.categories if line.identity.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None) if row else None
+    evaluation = low_frequency.evaluation if low_frequency is not None else next(
+        (item for item in result.candidate.evaluations if item.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None)
+    cost_text = f"代價 {low_frequency.category_cost:.3f}" if low_frequency is not None else "未計代價"
     return CandidateQuality(
         message=message, zone=zone,
         review_status=None if row is None else row.review_status,
         recommendation_status=None if row is None else row.recommendation_status,
         not_final_reasons=() if row is None else row.not_final_reasons,
+        category_lines=() if evaluation is None else (
+            f"{LABELS[QualityCategory.LOW_FREQUENCY_RESPONSE.value]}：{cost_text}",
+            *low_frequency_response_lines(evaluation)),
     )
 
 
@@ -192,7 +203,11 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
     try:
         # 數這次搜尋快照裡的那一本：搜尋開跑後登記簿改過，現在那一本不是這次用的尺（複查）。
         snapshot = QualityPurpose.model_validate(store.identity.purpose_settings.content)
-        progress: CalibrationProgress | None = calibration_progress(snapshot)
+        try:
+            stage_one = registry.stage_one(snapshot.name)
+        except KeyError:
+            stage_one = None
+        progress: CalibrationProgress | None = calibration_progress(snapshot, stage_one=stage_one)
     except ValueError:
         progress = None
     quality = QualityReport(message="列出排名層現有欄位作為依據，尚未判定合格", calibration=progress,
@@ -222,8 +237,10 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
     except ValueError as error:
         # 排名層自己的錯（例如登記簿設定矛盾）不是不能同表；照原文寫，不猜所在區。
         return quality.model_copy(update={"message": "排名失敗，這份報告不重排：" + _named(str(error), original, best)})
+    description = low_frequency_response_description(registry, store.settings.purpose)
     return quality.model_copy(update={
         "header": ranking.header,
+        "message": quality.message + "\n" + description,
         "original": original_info if original is None else _candidate_quality(original, ranking, original_info.message),
         "best": best_info if best is None else _candidate_quality(best, ranking, best_info.message),
     })
@@ -319,6 +336,7 @@ def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
                NotFinalReason.NO_FINALIZING_PROCESS: "最終推薦的核定機制尚未建立"}
     lines = [f"{label}：{candidate.message}",
              f"{label}所在區：{'未重排，無區別資料' if candidate.zone is None else zones[candidate.zone]}"]
+    lines.extend(f"{label}{line}" for line in candidate.category_lines)
     if candidate.review_status is not None:
         review = ("目前沒有產生複核警戒；不代表各類都已查完" if candidate.review_status == ReviewStatus.CLEAR
                   else "待複核：有未解除的警戒")

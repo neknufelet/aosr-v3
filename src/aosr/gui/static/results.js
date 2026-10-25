@@ -165,9 +165,15 @@ function drawCategories() {
   $("ranking-approximation").hidden = !view.ranking_approximation_text;
   $("ideal-source-note").textContent = view.ideal_source_note;
   $("cost-note").textContent = view.cost_note;
-  table($("categories"), ["類別", "狀態", "代價", "注意事項", "說明"],
+  const categories = table($("categories"), ["類別", "狀態", "代價", "注意事項", "說明"],
     view.categories.map((item) => [label(item.category), item.state_label, item.cost_text,
       item.flags_text, item.note]));
+  view.categories.forEach((item, index) => {
+    if (item.category !== "low_frequency_response") return;
+    const content = document.createElement("div");
+    for (const text of item.note.split("\n")) content.append(node("p", text));
+    categories.rows[index + 1].cells[4].replaceChildren(folded(`${label(item.category)}詳情`, content));
+  });
   // 評估器版本與原因碼是給查問題用的，收在「技術細節」摺疊區。
   table($("category-technical"), ["類別", "評估器版本", "原因碼"],
     view.categories.map((item) => [label(item.category), item.evaluator_version || "—",

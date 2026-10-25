@@ -315,16 +315,16 @@ name = "scheme_pipeline"
 module = "aosr.reporting.pipeline"
 not_modeled = ["低頻拖尾不計分，另有模態診斷報告", "製作用途與多人座位尚未評估"]
 manual_checks = ["螢幕視線與觀看角度", "工作姿勢與桌面高度", "門、窗、走道是否被擋"]
-note = "一個兩聲道具體方案接批次三路報表與五類評估；聆聽區左右聲道各自評估，再彙總類代價。低頻拖尾不計分，另有模態診斷報告；空間感尚未評估。"
+note = "一個兩聲道具體方案接批次三路報表與六類評估（音色、聆聽區、反射、殘響、左右匹配、低頻頻響）；聆聽區左右聲道各自評估，再彙總類代價。低頻拖尾不計分，另有模態診斷報告；空間感尚未評估。"
 
 [[entry.capability]]
 room = "shoebox"
 materials = "real_frequency_independent_impedance"
 frequency_hz = [20.0, 11166.0]
-outputs = ["timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching", "reverberation"]
+outputs = ["timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching", "reverberation", "low_frequency_response"]
 status = "experimental"
 evidence = []
-note = "只接既有物理報表與評估器；聆聽區左右聲道各自評估，低頻拖尾不計分，另有模態診斷報告；空間感尚未評估。"
+note = "只接既有物理報表與評估器；低頻頻響沿用第一階段量法與合分，以暫定類權重參與第二階段；聆聽區左右聲道各自評估，低頻拖尾不計分，另有模態診斷報告；空間感尚未評估。"
 
 [[entry]]
 name = "modal_diagnosis"

@@ -131,6 +131,8 @@ def test_plain_incompatible_compare_matches_every_mainline_output_line(
     pair = (moved, plain) if reverse else (plain, moved)
     text = _compare_text(pair, tmp_path, capsys, "2026-09-27")
     expected = MOVED_THEN_PLAIN if reverse else PLAIN_THEN_MOVED
+    # #558 第二段 B 新增低頻中文說明行由低頻顯示考卷獨立核；原有每一行（含比較表）仍照舊答案逐字。
+    text = "\n".join(line for line in text.split("\n") if not line.startswith("  低頻頻響："))
     lines, answer_lines = (_COST.sub("<代價>", item).splitlines(keepends=True) for item in (text, expected))
     assert lines == answer_lines
     assert_within(cell(f"代價第 {index} 個", float(found.group()), float(answer.group()),
