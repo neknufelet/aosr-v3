@@ -197,6 +197,8 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
         "timbre_balance.coverage_range_hz",
         "timbre_balance.tilt_fit_range_hz",
         "timbre_balance.ripple_range_hz",
+        "timbre_balance.feature_range_hz",
+        "channel_matching.ripple_range_hz",
         "timbre_balance.smoothing_width_octave_tilt",
         "timbre_balance.smoothing_width_octave_ripple",
         "timbre_balance.feature_min_width_octave",
@@ -226,6 +228,11 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
         "verification_digest",
     )
     for entry in purpose.records:
+        if isinstance(entry, SettingEntry) and entry.key in {"timbre_balance.ripple_range_hz", "timbre_balance.feature_range_hz", "channel_matching.ripple_range_hz"}:
+            # #558：產品選擇沒有外部文獻欄；新考卷核對登記出處，這裡仍擋偷偷升正式。
+            assert entry.status == "baseline" and entry.source_kind == "product_choice"
+            assert "2026-10-25" in entry.source and "#558" in entry.source
+            continue
         if entry.source in _BASELINE_SOURCES:
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source

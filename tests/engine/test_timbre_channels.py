@@ -88,6 +88,8 @@ def _payload(
         residual_rms_db=residual,
         ripple_range_hz=(40.0, 4000.0),
         ripple_dependency_range_hz=(37.0, 4240.0),
+        feature_range_hz=(40.0, 4000.0),
+        feature_dependency_range_hz=(37.0, 4240.0),
         features=features,
         strongest_peak_index=peak,
         deepest_dip_index=dip,

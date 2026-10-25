@@ -132,7 +132,7 @@ def test_axis_flag_threshold_is_two_points_not_three() -> None:
 
 def test_boundary_incomplete_feature_never_gets_the_axis_flag() -> None:
     """寬度未知（邊界不完整）的特徵沒有寬度可比，不准同時掛「窄於軸解析度」。"""
-    lower_hz, _ = _range_setting("timbre_balance.ripple_range_hz")
+    lower_hz, _ = _range_setting("timbre_balance.feature_range_hz")
     center_hz = float(lower_hz) * 2.0 ** (1.0 / 24.0)
     input_data = _curve_input(_gaussian_feature(center_hz, -6.0, 1.0 / 6.0), point_count=481)
 

@@ -39,7 +39,7 @@ from aosr.scoring.listening_area_contract import ListeningAreaChannel as Listeni
 from aosr.scoring.listening_area_contract import ListeningAreaChannelsPayload as ListeningAreaChannelsPayload
 
 
-CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
+CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v4"
 CostDirection = Literal["below_range", "within_range", "above_range"]
 SceneFingerprint = Annotated[
     str, Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
@@ -124,6 +124,8 @@ class TimbrePayload(_FrozenModel):
     residual_rms_db: Annotated[float, Field(ge=0.0)]
     ripple_range_hz: FrequencyRange
     ripple_dependency_range_hz: FrequencyRange
+    feature_range_hz: FrequencyRange
+    feature_dependency_range_hz: FrequencyRange
     features: tuple[Feature, ...]
     strongest_peak_index: Annotated[int, Field(ge=0)] | None
     deepest_dip_index: Annotated[int, Field(ge=0)] | None
@@ -149,6 +151,8 @@ class TimbrePayload(_FrozenModel):
             "tilt_dependency_range_hz",
             "ripple_range_hz",
             "ripple_dependency_range_hz",
+            "feature_range_hz",
+            "feature_dependency_range_hz",
             "data_range_hz",
             "coverage_range_hz",
         ):

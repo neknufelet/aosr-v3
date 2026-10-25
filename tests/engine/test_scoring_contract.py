@@ -43,6 +43,8 @@ def _timbre_payload() -> dict[str, object]:
         "residual_rms_db": 1.0,
         "ripple_range_hz": [40.0, 4000.0],
         "ripple_dependency_range_hz": [37.0, 4240.0],
+        "feature_range_hz": [40.0, 4000.0],
+        "feature_dependency_range_hz": [37.0, 4240.0],
         "features": [
             {
                 "kind": "dip",
