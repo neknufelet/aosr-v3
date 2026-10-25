@@ -1,4 +1,4 @@
-"""#558 第二段 B：真伺服器與瀏覽器展開低頻詳情，截圖只放 repo 外。"""
+"""#558 第二段 B：真伺服器與瀏覽器展開低頻詳情；截圖寫進這題自己的暫存目錄，要親眼看就用 --basetemp 指一個資料夾。"""
 from pathlib import Path
 
 import pytest
@@ -32,7 +32,7 @@ def test_low_frequency_row_and_expanded_details(tmp_path: Path, browser: Browser
             text = details.inner_text()
             assert_details(text, low_frequency(saved))
             assert "理想聲源" not in text
-            shot = Path("/tmp/558-2b-shots") / ("compare.png" if comparison else "result.png")
-            shot.parent.mkdir(parents=True, exist_ok=True)
+            shot = tmp_path / ("compare.png" if comparison else "result.png")
             page.locator("#categories").locator("..").screenshot(path=str(shot))
+            assert shot.stat().st_size > 0
             _assert_quiet(watched)

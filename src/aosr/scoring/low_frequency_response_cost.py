@@ -5,6 +5,7 @@ import hashlib
 
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, WeightTable
 from aosr.scoring.contract import CategoryCost, CategoryEvaluation, EvaluationState
+from aosr.scoring.cost_shapes import shape_cost
 from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
 from aosr.scoring.stage_one_score import SETTING_KEYS, score_stage_one, stage_one_settings_from_section
 
@@ -31,7 +32,9 @@ def cost_evaluation(
     return CategoryEvaluation.model_validate({**evaluation.model_dump(),
         "state": EvaluationState.COSTED,
         "category_cost": CategoryCost(value=score.screening_total,
-            components={item.name: item.weighted_cost for item in score.components},
+            # 分項跟別類同一個寫法：未乘權重的代價，權重另列；分項乘權重加總才是類代價。
+            components={item.name: shape_cost(settings.target(item.name), (item.value_db,))
+                        for item in score.components},
             cost_settings_fingerprint=fingerprint)})
 
 

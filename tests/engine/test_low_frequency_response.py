@@ -70,7 +70,12 @@ def test_two_channels_independent_formula_and_stage_one_components(axis: LowFreq
     from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
     assert isinstance(payload, LowFrequencyResponsePayload)
     first = score_stage_one(payload.evaluation, settings)
-    assert costed.category_cost.components == {item.name: item.weighted_cost for item in first.components}
+    # 分項是未乘權重的代價（原始 dB ÷ 較差參考），乘第一階段權重加總才是類代價；跟別類同一個寫法。
+    assert costed.category_cost.components == pytest.approx(
+        {item.name: item.value_db / item.worse_reference_db for item in first.components},
+        rel=SCORING_REL, abs=SCORING_ABS)
+    assert math.fsum(costed.category_cost.components[name] * weight for name, weight in settings.weights) == (
+        pytest.approx(costed.category_cost.value, rel=SCORING_REL, abs=SCORING_ABS))
     assert payload.worst_channel == first.worst_channel
     assert first.screening_total is not None
     assert costed.category_cost.value.hex() == first.screening_total.hex()

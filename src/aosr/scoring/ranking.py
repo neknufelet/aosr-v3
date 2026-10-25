@@ -297,6 +297,14 @@ def _read_rules(registry: QualityTargets, purpose_name: str) -> _Rules:
     return _Rules(purpose, registry, registry.fingerprint, mandatory, optional, weights)
 
 
+def _section(category: QualityCategory, rules: _Rules) -> QualityPurpose:
+    """這一類讀哪一段設定：註冊成第一階段那一段的讀同用途的第一階段段，其餘讀用途段。"""
+    registration = CATEGORY_REGISTRY.get(category)
+    if registration is not None and registration.settings_scope == "stage_one":
+        return rules.registry.stage_one(rules.purpose.name)
+    return rules.purpose
+
+
 def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation:
     """先丟掉上游代價；有註冊代價器的類再用這一跑的登記簿重算。"""
     registration = CATEGORY_REGISTRY.get(evaluation.category)
@@ -305,11 +313,7 @@ def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation
         document.update(state=EvaluationState.MEASURED, category_cost=None)
         evaluation = CategoryEvaluation.model_validate(document)
     if evaluation.state is EvaluationState.MEASURED and registration is not None:
-        return registration.coster(
-            evaluation,
-            rules.registry.stage_one(rules.purpose.name) if registration.settings_scope == "stage_one" else rules.purpose,
-            rules.registry_fingerprint
-        )
+        return registration.coster(evaluation, _section(evaluation.category, rules), rules.registry_fingerprint)
     return evaluation
 
 
@@ -334,8 +338,7 @@ def _category_line(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryLin
         category_cost=cost.value,
         category_weight=weight,
         weighted_cost=cost.value * weight,
-        components=_component_lines(evaluation, rules.registry.stage_one(rules.purpose.name)
-            if registration is not None and registration.settings_scope == "stage_one" else rules.purpose),
+        components=_component_lines(evaluation, _section(evaluation.category, rules)),
         component_directions=cost.component_directions,
         unassessed_bands=cost.unassessed_bands,
         evaluation=evaluation,

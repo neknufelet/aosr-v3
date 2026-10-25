@@ -1,12 +1,13 @@
 """#558 第二段 B：顯示答案從原始量與登記簿推，排名除分項展示外逐格不變。"""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityPurpose, SettingEntry, WeightTable, load_quality_targets
+from aosr.config.quality_targets import QualityPurpose, SettingEntry, TargetEntry, WeightTable, load_quality_targets
 from aosr.gui.result_view import build_result_view
 from aosr.reporting import scheme_cli
 from aosr.reporting.compare import compare_results
@@ -17,12 +18,15 @@ from aosr.scoring.contract_base import ReasonCode
 from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
 from aosr.scoring.ranking_models import ComponentLine
 from aosr.scoring.stage_one_score import PRINCIPAL, ROBUSTNESS, SCORED_RANGE_KEY, WEIGHTS_KEY
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL
 from tests.engine.test_gui_compare_view import _renamed, _view
 from tests.engine.test_low_frequency_response_reload import saved as saved
 
 TARGETS = config_path("quality_targets.toml")
 LF = QualityCategory.LOW_FREQUENCY_RESPONSE
 NAMES: dict[str, str] = {PRINCIPAL: "主位起伏", ROBUSTNESS: "座位差異"}
+# 最差聲道照喇叭代號印中文；代號不在表裡就照印代號。
+SPEAKER_NAMES: dict[str, str] = {"left": "左聲道喇叭", "right": "右聲道喇叭"}
 
 
 def low_frequency(result: SchemeResult) -> CategoryEvaluation:
@@ -56,20 +60,35 @@ def test_shared_labels_and_description_read_registry(saved: SchemeResult, tmp_pa
             f"類權重 {weight:g} 是暫定工程選擇，不宣稱聽感校準")
 
 
-def test_component_values_weights_and_unchanged_ranking(saved: SchemeResult, monkeypatch: pytest.MonkeyPatch) -> None:
-    registry = load_quality_targets(TARGETS)
+@pytest.mark.parametrize("own_weight", (None, 2.0), ids=("registry", "own-weight-2"))
+def test_component_values_weights_and_unchanged_ranking(saved: SchemeResult, monkeypatch: pytest.MonkeyPatch,
+                                                         tmp_path: Path, own_weight: float | None) -> None:
+    from tests.engine.test_stage_one_score import _rewrite
+    path = TARGETS if own_weight is None else _rewrite(tmp_path, f'name = "{PRINCIPAL}"', "value", own_weight)
+    registry = load_quality_targets(path)
     pair = (saved, _renamed(saved, "other"))
     after = compare_results(pair, quality_targets=registry, run_date=saved.run_date)
-    table = registry.stage_one(saved.scheme.purpose).entry(WEIGHTS_KEY)
+    section = registry.stage_one(saved.scheme.purpose)
+    table = section.entry(WEIGHTS_KEY)
     assert isinstance(table, WeightTable)
     weights = {item.name: item.value for item in table.item}
+    if own_weight is not None:
+        assert weights[PRINCIPAL] == own_weight
+    references: dict[str, float] = {}
+    for name in NAMES:
+        entry = section.entry(f"stage_one_low_frequency.{name}")
+        assert isinstance(entry, TargetEntry) and entry.cost_shape == "less_is_better" and entry.value == 0.0
+        references[name] = entry.worse_reference
     for row in after.rankable:
         line = next(item for item in row.categories if item.identity.category is LF)
         raw = {item.name: item.value for item in line.evaluation.raw_quantities}
         assert {item.name: (item.raw_value, item.raw_unit, item.weight, item.role) for item in line.components} == {
             name: (value, "dB", weights[name], "principal") for name, value in raw.items()}
-        assert line.evaluation.category_cost is not None
-        assert {item.name: item.cost for item in line.components} == line.evaluation.category_cost.components
+        # 分項代價未乘權重（原始 dB ÷ 較差參考），乘上權重加總才是類代價；跟別類同一個寫法，權重不是 1 也成立。
+        assert {item.name: item.cost for item in line.components} == pytest.approx(
+            {name: value / references[name] for name, value in raw.items()}, rel=SCORING_REL, abs=SCORING_ABS)
+        assert math.fsum(item.cost * weights[item.name] for item in line.components) == pytest.approx(
+            line.category_cost, rel=SCORING_REL, abs=SCORING_ABS)
     original = ranking._component_lines
 
     def before(evaluation: CategoryEvaluation, purpose: QualityPurpose) -> tuple[ComponentLine, ...]:
@@ -98,8 +117,8 @@ def assert_details(text: str, evaluation: CategoryEvaluation) -> None:
         assert f"{NAMES[item.name]} {item.value:.3f} dB" in text
     payload = evaluation.payload
     assert isinstance(payload, LowFrequencyResponsePayload)
-    assert f"最差聲道 {payload.worst_channel.speaker_id}" in text
-    assert "只提醒、不淘汰" in text
+    worst = payload.worst_channel.speaker_id
+    assert f"最差聲道 {SPEAKER_NAMES.get(worst, worst)}（只提醒、不淘汰）" in text
     low, high = payload.scored_range_hz
     assert f"計分範圍 {low:g}～{high:g} Hz" in text
     assert payload.channel_summation_text in text

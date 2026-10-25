@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from aosr.config.quality_targets import QualityPurpose, load_quality_targets
+from aosr.reporting.compare import compare_results
 from aosr.reporting.display import LABELS
 from aosr.reporting.result import SchemeResult
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
@@ -14,7 +15,6 @@ from aosr.search.run import SearchStatus
 from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine.test_low_frequency_response_display import TARGETS, assert_details, low_frequency
 from tests.engine.test_low_frequency_response_reload import saved as saved
-from aosr.reporting.compare import compare_results
 
 LF = QualityCategory.LOW_FREQUENCY_RESPONSE
 

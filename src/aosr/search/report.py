@@ -14,11 +14,12 @@ from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_qua
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
 from aosr.reporting.low_frequency_display import low_frequency_response_lines
-from aosr.reporting.display import LABELS, low_frequency_response_description
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.furniture_display import furniture_report_notes
 from aosr.reporting.display import (
+    LABELS,
     LOW_FREQUENCY_DECAY_NOTE,
+    low_frequency_response_description,
 )
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus

@@ -1,6 +1,6 @@
 """低頻頻響的呈現：只讀評估原值與酬載，不重算量法或合分。"""
 from aosr.config.quality_targets import QualityTargets
-from aosr.reporting.display import LABELS, low_frequency_response_description
+from aosr.reporting.display import LABELS, low_frequency_response_description, speaker_label
 from aosr.scoring.contract import CategoryEvaluation
 from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
 
@@ -12,7 +12,7 @@ def low_frequency_response_lines(evaluation: CategoryEvaluation) -> tuple[str, .
         return ("不可估：" + "、".join(LABELS[reason.value] for reason in evaluation.reason_codes),)
     low, high = payload.scored_range_hz
     return (*(f"{LABELS[item.name]} {item.value:.3f} dB（逐聲道平均）" for item in evaluation.raw_quantities),
-            f"最差聲道 {payload.worst_channel.speaker_id}（只提醒、不淘汰）",
+            f"最差聲道 {speaker_label(payload.worst_channel.speaker_id)}（只提醒、不淘汰）",
             f"計分範圍 {low:g}～{high:g} Hz", payload.channel_summation_text)
 
 

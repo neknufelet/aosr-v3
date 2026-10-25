@@ -62,7 +62,6 @@ def _raw_counts(raw: Raw) -> dict[str, tuple[int, int]]:
     return counts
 
 
-
 def _low_frequency_source_count() -> int:
     # #558 第二段 B：答案直接數 TOML 第一階段那幾格；不呼叫校準格式化函式。
     with config_path("quality_targets.toml").open("rb") as handle:
