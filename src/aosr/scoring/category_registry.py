@@ -12,6 +12,7 @@ from aosr.config.quality_targets import EntryStatus, QualityPurpose
 from aosr.scoring import (
     channel_matching_cost,
     listening_area_cost,
+    low_frequency_response_cost,
     reflections_cost,
     reverberation_cost,
     timbre_cost,
@@ -100,6 +101,7 @@ class CategoryRegistration:
     floor_reasons: FloorChecker
     review_alerts: ReviewAlerter
     comparison_support: ComparisonSupport
+    settings_scope: str
 
 
 def _no_eligibility(
@@ -132,6 +134,7 @@ def _registration(module: ModuleType) -> CategoryRegistration:
     """依共同名字讀類別模組；資格、底線、複核警戒與比較支撐接點都可省略。"""
     return CategoryRegistration(
         coster=cast(CategoryCoster, module.cost_evaluation),
+        settings_scope=getattr(module, "settings_scope", "purpose"),
         eligibility_reasons=cast(
             EligibilityChecker,
             getattr(module, "eligibility_reasons", _no_eligibility),
@@ -159,6 +162,7 @@ _CATEGORY_MODULES: Final[dict[QualityCategory, ModuleType]] = {
     QualityCategory.TIMBRE_BALANCE: timbre_cost,
     QualityCategory.LISTENING_AREA_STABILITY: listening_area_cost,
     QualityCategory.REVERBERATION: reverberation_cost,
+    QualityCategory.LOW_FREQUENCY_RESPONSE: low_frequency_response_cost,
     QualityCategory.CHANNEL_MATCHING: channel_matching_cost,
     QualityCategory.REFLECTIONS_AND_ECHO: reflections_cost,
 }

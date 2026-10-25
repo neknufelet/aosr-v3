@@ -22,11 +22,12 @@ from aosr.reporting.fem_slices import FemKey, FemShard
 from aosr.reporting.evaluation import ResultStanding
 from aosr.reporting.result import ResultOrigin
 from aosr.reporting.scheme import FROZEN, Scheme
+from aosr.scoring.low_frequency_input import low_frequency_input
 from aosr.scoring.receiver_set import ReceiverRole
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.stage_one_low_frequency_contract import (
     STAGE_ONE_SURROUNDING_DIRECTIONS, StageOneLowFrequencyEvaluation, StageOneLowFrequencyInput,
-    StageOneSeatCurve, StageOneSpeakerCurves,
+    StageOneSpeakerCurves,
 )
 from aosr.scoring.stage_one_score import (
     StageOneScore, StageOneScoreSettings, score_stage_one, stage_one_score_settings,
@@ -77,24 +78,9 @@ def stage_one_input(
 ) -> StageOneLowFrequencyInput:
     """補軸名字、座位方向與曲線代號；頻率逐位核對，能量原樣交給評估器。"""
     check_stage_one_prerequisites(scheme)
-    axis = scheme.scene.low_frequency_axis or LowFrequencyAxis.SEARCH
-    frequencies = low_frequency_axis_frequencies(axis)[0]
-    if tuple(float(value).hex() for value in frequencies) != fem_key.frequency_hex:
-        raise ValueError("宣告的低頻軸與分片有限元素頻率不同，請用同一條軸重算")
-    expected = {(speaker, point.receiver_id) for speaker in scheme.speakers for point in scheme.receiver_set.points}
-    if set(energies) != expected:
-        raise ValueError("有限元素能量必須剛好包含每支喇叭與每個座位")
-    speakers = []
-    for speaker in scheme.speakers:
-        seats = {point.receiver_id: StageOneSeatCurve(
-            receiver_id=point.receiver_id, direction_relative_to_primary=point.direction_relative_to_primary,
-            report_id=f"fem-{speaker}-{point.receiver_id}", frequencies_hz=frequencies,
-            fem_energy=energies[speaker, point.receiver_id]) for point in scheme.receiver_set.points}
-        speakers.append(StageOneSpeakerCurves(
-            speaker_id=speaker, primary=seats[scheme.receiver_set.primary.receiver_id],
-            surrounding=tuple(seats[point.receiver_id] for point in scheme.receiver_set.points
-                              if point.role == ReceiverRole.SURROUNDING)))
-    return StageOneLowFrequencyInput(candidate_id=scheme.scheme_id, low_frequency_axis=axis, speakers=tuple(speakers))
+    return low_frequency_input(candidate_id=scheme.scheme_id, speaker_ids=tuple(scheme.speakers),
+        receiver_set=scheme.receiver_set, axis=scheme.scene.low_frequency_axis or LowFrequencyAxis.SEARCH,
+        energies=energies, frequency_hex=fem_key.frequency_hex)
 
 
 def additions_round_once() -> bool:

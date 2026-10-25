@@ -31,6 +31,7 @@ from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.result import (RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult,
                                   check_declared_axes)
+from aosr.reporting.low_frequency_response import evaluate_result_low_frequency
 from aosr.reporting.scheme import Scheme
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import SurfaceMaterial
@@ -208,6 +209,7 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
             timbre_settings_fingerprint=settings,
         ),
         listening, reflections,
+        evaluate_result_low_frequency(result, quality_targets_path, scene),
         evaluate_channel_matching(
             scheme.receiver_set, _channel_points(result, timbres, listening),
             candidate_id=scheme.scheme_id, scene_fingerprint=scene,
@@ -230,7 +232,7 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
 
 def reevaluate(result: SchemeResult, *, quality_targets_path: Path,
                capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
-    """只讀保存的報表與反射零件，重跑五類評估。"""
+    """只讀保存的報表與反射零件，重跑六類評估。"""
     settings_values = read_registry_settings(quality_targets_path, result.scheme.purpose)
     inputs = load_input_document(result.pairs[0].input_document, capabilities, directivity)
     materials = solver_inputs(inputs).materials_by_wall
@@ -273,7 +275,7 @@ class LoadedResult:
 
 EVALUATOR_VERSION = re.compile(
     r"(aosr\.scoring\.(?:timbre|timbre_channels|listening_area|listening_area_channels|"
-    r"channel_matching|reflections|reverberation))"
+    r"channel_matching|reflections|reverberation|low_frequency_response))"
     r"\.v[0-9]+"
 )
 RESULT_VERSION = re.compile(r"aosr\.scheme_result\.v([0-9]+)\Z")
@@ -315,7 +317,7 @@ def _same_measurement(a: CandidateEvaluation, b: CandidateEvaluation) -> bool:
     """逐字比量出的內容，設定身分與評估器版尾另由讀回分級處理。
 
     每類 settings_fingerprint 的值在整份包（包含內嵌 JSON 字串）換成類名佔位字；
-    登記簿整份指紋換成 registry 佔位字，七支評估器的 .v數字換成 .v*。
+    登記簿整份指紋換成 registry 佔位字，八支評估器的 .v數字換成 .v*。
     聆聽區聲道彙總評估器也用同一規則摺疊版尾。
     只變權重、出處、未使用用途或評估器版尾而量出的內容相同，會判成相同；
     數字、狀態、旗標、原因碼與其他指紋任何一格改動都判成不同。

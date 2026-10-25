@@ -29,6 +29,10 @@ REFLECTIONS_EVALUATOR = ("reflections_and_echo.window_upper_ms", "reflections_an
                          "reflections_and_echo.flutter_decay_db", "reflections_and_echo.flutter_alert_band_centers_hz",
                          "direction_zones.vertical_min_abs_elevation_deg", "direction_zones.front_max_abs_azimuth_deg",
                          "direction_zones.rear_min_abs_azimuth_deg")
+LOW_FREQUENCY_EVALUATOR = (
+    "stage_one_low_frequency.scored_range_hz", "stage_one_low_frequency.own_line_ripple_rms_db",
+    "stage_one_low_frequency.seat_robustness_rms_db", "stage_one_low_frequency.component_weights",
+)
 CROSS_READ = {"listening_area_stability": (*TIMBRE_EVALUATOR, "channel_matching.broadband_range_hz"),
               "channel_matching": (*TIMBRE_EVALUATOR, *REFLECTIONS_EVALUATOR)}
 
@@ -252,3 +256,18 @@ def test_a_declared_weight_table_counts_every_item(
     closing = calibration_lines(calibration_progress(_promoted(promoted)))[2]
     assert closing == (NONE_FULL if named is None else
                        f"用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）")
+
+
+def test_low_frequency_dependencies_use_the_shared_stage_one_section() -> None:
+    registration = CATEGORY_REGISTRY[QualityCategory.LOW_FREQUENCY_RESPONSE]
+    assert registration.evaluator_keys == LOW_FREQUENCY_EVALUATOR
+    assert registration.settings_scope == "stage_one"
+    from aosr.config.quality_targets import load_quality_targets
+    registry = load_quality_targets(config_path("quality_targets.toml"))
+    sources = dict(registration.registry_sources(registry.stage_one(PURPOSE)))
+    assert set(sources) == {
+        "stage_one_low_frequency.scored_range_hz", "stage_one_low_frequency.own_line_ripple_rms_db",
+        "stage_one_low_frequency.seat_robustness_rms_db",
+        "stage_one_low_frequency.component_weights.own_line_ripple_rms_db",
+        "stage_one_low_frequency.component_weights.seat_robustness_rms_db",
+    }

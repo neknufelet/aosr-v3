@@ -438,6 +438,7 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "timbre_balance",
         "listening_area_stability",
         "low_frequency_decay",
+        "low_frequency_response",
         "reflections_and_echo",
         "reverberation",
         "channel_matching",

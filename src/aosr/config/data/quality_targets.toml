@@ -628,6 +628,14 @@ source_kind = "product_choice"
 source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.weight.item]]
+name = "low_frequency_response"
+value = 0.25
+note = "暫定工程選擇，不宣稱聽感校準"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "老闆 2026-10-25（#558）：新增低頻代價先採 0.25 ×（主位起伏＋座位差異），兩項等權、不除以二，沿用第一階段的聲道與座位彙整；0.25 登記為暫定工程選擇，不宣稱聽感校準"
+
+[[purpose.weight.item]]
 name = "low_frequency_decay"
 value = 1.0
 note = "七類等權是試驗基線、不是中立"
@@ -679,6 +687,7 @@ key = "ranking.optional_categories"
 value = [
   "listening_area_stability",
   "low_frequency_decay",
+  "low_frequency_response",
   "reflections_and_echo",
   "reverberation",
   "channel_matching",

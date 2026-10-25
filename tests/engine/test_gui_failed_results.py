@@ -211,6 +211,7 @@ def _assert_finished_control(data: dict[str, object]) -> None:
     assert [(row["category"], row["better"], row["better_text"]) for row in categories] == [
         ("timbre_balance", "a", "A 較好"),
         ("listening_area_stability", "b", "B 較好"),
+        ("low_frequency_response", "", ""),
         ("low_frequency_decay", "", ""),
         ("reflections_and_echo", "a", "A 較好"),
         ("reverberation", "same", "相同"),

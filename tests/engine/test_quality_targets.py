@@ -9,10 +9,11 @@ from pydantic import ValidationError
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import (
-    QualityTargets,
+    QualityTargets, QualityPurpose,
     SettingEntry,
     TargetEntry,
     WeightTable,
+    WeightItem,
     load_quality_targets,
 )
 
@@ -188,6 +189,40 @@ def _write(path: Path, document: str) -> Path:
     return path
 
 
+def _assert_formal_sources(purpose: QualityPurpose) -> None:
+    """逐列核出處；保留原檢查原文，新增工程基線不冒充文獻校準。"""
+    structured_source_fields = (
+        "source_id",
+        "source_version",
+        "locator",
+        "conditions",
+        "frequency_range_hz",
+        "context",
+        "verification_digest",
+    )
+    for entry in purpose.records:
+        if isinstance(entry, WeightItem) and entry.name == "low_frequency_response":
+            # #558：新增類權重是暫定工程選擇，沒有冒充文獻校準；只放行這一列並守住出處。
+            assert entry.status == "baseline" and entry.source_kind == "engineering_recommendation"
+            assert entry.note == "暫定工程選擇，不宣稱聽感校準"
+            assert "2026-10-25" in entry.source and "#558" in entry.source
+            continue
+        if isinstance(entry, SettingEntry) and entry.key in {"timbre_balance.ripple_range_hz", "timbre_balance.feature_range_hz", "channel_matching.ripple_range_hz"}:
+            # #558：產品選擇沒有外部文獻欄；新考卷核對登記出處，這裡仍擋偷偷升正式。
+            assert entry.status == "baseline" and entry.source_kind == "product_choice"
+            assert "2026-10-25" in entry.source and "#558" in entry.source
+            continue
+        if entry.source in _BASELINE_SOURCES:
+            # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
+            assert entry.status == "baseline", entry.source
+            continue
+        for field in structured_source_fields:
+            value = getattr(entry, field)
+            assert value is not None, field
+            if isinstance(value, str):
+                assert value.strip(), field
+
+
 def test_formal_registry_loads_with_baseline_provenance() -> None:
     """佔位那一句不准被蓋成正式數字，拍完的那一條必須帶齊出處。"""
     registry = _load(_REGISTRY)
@@ -218,30 +253,7 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     }
 
     assert required <= keys
-    structured_source_fields = (
-        "source_id",
-        "source_version",
-        "locator",
-        "conditions",
-        "frequency_range_hz",
-        "context",
-        "verification_digest",
-    )
-    for entry in purpose.records:
-        if isinstance(entry, SettingEntry) and entry.key in {"timbre_balance.ripple_range_hz", "timbre_balance.feature_range_hz", "channel_matching.ripple_range_hz"}:
-            # #558：產品選擇沒有外部文獻欄；新考卷核對登記出處，這裡仍擋偷偷升正式。
-            assert entry.status == "baseline" and entry.source_kind == "product_choice"
-            assert "2026-10-25" in entry.source and "#558" in entry.source
-            continue
-        if entry.source in _BASELINE_SOURCES:
-            # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
-            assert entry.status == "baseline", entry.source
-            continue
-        for field in structured_source_fields:
-            value = getattr(entry, field)
-            assert value is not None, field
-            if isinstance(value, str):
-                assert value.strip(), field
+    _assert_formal_sources(purpose)
     calibrated = {
         entry.key
         for entry in (*purpose.setting, *purpose.target, *purpose.qualification)

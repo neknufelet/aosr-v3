@@ -58,6 +58,11 @@ CONDITIONS_DIFFER_TEXT = "評分條件不同"
 
 
 LABELS = {
+    "low_frequency_response": "低頻頻響",
+    "missing_declared_point": "低頻軸缺少有限元素點",
+    "insufficient_points": "低頻資料點不足",
+    "scoring_range_gap": "低頻計分範圍有缺段",
+    "low_frequency_seat_layout_invalid": "低頻量法需要主位加前後左右上下六方向",
     "frequency_axis": "頻率（Hz）", "level_axis": "聲級（dB）",
     "left": "左聲道", "right": "右聲道", "primary": "主位",
     "surrounding": "周圍點", "other_seat": "其他座位",

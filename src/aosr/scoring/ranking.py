@@ -251,6 +251,7 @@ class _Rules(NamedTuple):
     """這一跑從登記簿讀進來的全部規則。"""
 
     purpose: QualityPurpose
+    registry: QualityTargets
     registry_fingerprint: str
     mandatory: frozenset[QualityCategory]
     optional: frozenset[QualityCategory]
@@ -281,7 +282,7 @@ def _read_rules(registry: QualityTargets, purpose_name: str) -> _Rules:
         item.name: item.value
         for item in _weight_table(purpose, _CATEGORY_WEIGHTS_KEY).item
     }
-    return _Rules(purpose, registry.fingerprint, mandatory, optional, weights)
+    return _Rules(purpose, registry, registry.fingerprint, mandatory, optional, weights)
 
 
 def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation:
@@ -293,7 +294,9 @@ def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation
         evaluation = CategoryEvaluation.model_validate(document)
     if evaluation.state is EvaluationState.MEASURED and registration is not None:
         return registration.coster(
-            evaluation, rules.purpose, rules.registry_fingerprint
+            evaluation,
+            rules.registry.stage_one(rules.purpose.name) if registration.settings_scope == "stage_one" else rules.purpose,
+            rules.registry_fingerprint
         )
     return evaluation
 
@@ -548,7 +551,8 @@ def _registry_sources(
         if registration is not None:
             sources.extend(
                 CalibrationSource(kind="registry", key=key, status=status)
-                for key, status in registration.registry_sources(purpose)
+                for key, status in registration.registry_sources(
+                    rules.registry.stage_one(purpose.name) if registration.settings_scope == "stage_one" else purpose)
             )
     return sources
 

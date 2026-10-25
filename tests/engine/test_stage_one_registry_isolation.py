@@ -3,6 +3,10 @@
 控制組：同一份第二階段控制組結果，在「拿掉第一階段那一段」與「正式登記簿（有那一段）」兩份登記簿上
 各重評一次、各排一次、各讀回一次，量出的內容、比較身分、用途快照、整份登記簿指紋與讀回分級逐字相同。
 拿掉那一段的登記簿就是加條目以前的形狀；兩份都寫在 ``tmp_path``，不寫進真的 repo。
+
+以上是 2026-10-20 的隔離設計。2026-10-25 老闆 #558 決定新類讀共享低頻設定後，整份與用途指紋
+仍守「拿掉整段也不變」；重評與讀回改以未被第二階段讀取的挑席尺作控制組，保留共享低頻設定。
+共享低頻範圍變動的數字與重評分級另由 test_low_frequency_response_reload 守住。
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import json
 import tomllib
 from datetime import date
 from pathlib import Path
+import re
 
 import pytest
 
@@ -52,6 +57,21 @@ def registries(tmp_path: Path) -> tuple[Path, Path]:
     return without, with_section
 
 
+@pytest.fixture
+def measurement_registries(registries: tuple[Path, Path], tmp_path: Path) -> tuple[Path, Path]:
+    """保留新類必讀的共享低頻設定，只改第一階段挑席專用尺；第二階段量測、排名、讀回應完全相同。"""
+    _, full = registries
+    text = full.read_text(encoding="utf-8")
+    head, marker, rest = text.partition('key = "stage_one_selection.big_peak_control_margin_db"')
+    assert marker
+    block, boundary, tail = rest.partition("[[")
+    changed = re.sub(r"(?m)^value = .*$", "value = 2.0", block)
+    assert changed != block
+    path = tmp_path / "changed_unread_stage_one.toml"
+    path.write_text(head + marker + changed + boundary + tail, encoding="utf-8")
+    return path, full
+
+
 def _reevaluated(result: SchemeResult, registry: Path) -> str:
     candidate = reevaluate(result, quality_targets_path=registry,
                            capabilities=load_capabilities(config_path("capabilities.toml")),
@@ -84,9 +104,9 @@ def test_stage_one_section_leaves_registry_and_purpose_identity_unchanged(regist
 
 
 def test_stage_two_reevaluation_and_ranking_are_byte_identical(
-        wall_1: SchemeResult, registries: tuple[Path, Path]) -> None:
+        wall_1: SchemeResult, measurement_registries: tuple[Path, Path]) -> None:
     """同一份第二階段結果在兩份登記簿上重評：候選包逐字相同；排名的總代價與比較身分也相同。"""
-    without, with_section = registries
+    without, with_section = measurement_registries
     first, second = _reevaluated(wall_1, without), _reevaluated(wall_1, with_section)
     same_candidate = first == second
     # 只印不同那幾格的路徑（前十格），不印整包字串。
@@ -105,7 +125,7 @@ def test_stage_two_reevaluation_and_ranking_are_byte_identical(
 
 
 def test_saved_stage_two_result_reload_standing_is_unchanged(
-        wall_1: SchemeResult, registries: tuple[Path, Path], tmp_path: Path) -> None:
+        wall_1: SchemeResult, measurement_registries: tuple[Path, Path], tmp_path: Path) -> None:
     """第二階段的存檔在兩份登記簿上讀回都是「目前」（current），不是「只重新排名」。"""
     saved = tmp_path / "saved.json"
     saved.write_text(wall_1.model_dump_json(), encoding="utf-8")
@@ -113,7 +133,15 @@ def test_saved_stage_two_result_reload_standing_is_unchanged(
         path.name: load_result(saved, capabilities=load_capabilities(config_path("capabilities.toml")),
                                directivity=DIRECTIVITY, quality_targets_path=path,
                                physics_identity=wall_1.physics_identity).standing
-        for path in registries
+        for path in measurement_registries
     }
     assert set(standings.values()) == {ResultStanding.CURRENT}
-    assert wall_1.quality_targets_fingerprint == load_quality_targets(registries[0]).fingerprint
+    assert wall_1.quality_targets_fingerprint == load_quality_targets(measurement_registries[0]).fingerprint
+
+
+def test_missing_shared_low_frequency_settings_cannot_silently_drop_the_new_category(
+    wall_1: SchemeResult, registries: tuple[Path, Path],
+) -> None:
+    without, _ = registries
+    with pytest.raises(KeyError, match="第一階段"):
+        _reevaluated(wall_1, without)

@@ -11,7 +11,9 @@
 ``docs/decisions/listening-area-channels-mean-and-worst-deviations-are-review-alerts.md``）；任一支不可估整個候選
 不可估，不拿另一支湊。左右相干疊加今天算不了（報表只存能量），結果標「未評估」。
 
-登記簿條目住第一階段那一段（``QualityTargets.stage_one``），不另開用途、也不放進第二階段的用途：
+登記簿條目住第一階段那一段（``QualityTargets.stage_one``），不另開用途、也不複製到第二階段的用途。
+從 2026-10-25（#558，老闆決定第二階段總分加入低頻）起，第二階段低頻頻響類讀同一段設定，
+身分由新類自己的評估與代價設定指紋收；第一階段那一段仍不進整份登記簿指紋。原先分開存放的理由仍是：
 音色設定指紋（``timbre.py`` 的 ``fingerprint=registry.fingerprint``）、排名表頭（``ranking.py`` 的 ``_read_rules``）
 與聲道匹配（``channel_matching_settings.py`` 的 ``registry_fingerprint``）都抄整份登記簿指紋，另開一個用途照樣會
 動到第二階段的比較身分；用途本身是房間的使用情境，拿來裝階段也不對題。這一支的設定指紋只雜湊自己讀的
@@ -27,8 +29,9 @@ from typing import Annotated, Final, Literal, Self
 
 from pydantic import Field, model_validator
 
-from aosr.config.quality_targets import EntryStatus, QualityTargets, SettingEntry, TargetEntry
+from aosr.config.quality_targets import EntryStatus, QualityPurpose, QualityTargets, SettingEntry, TargetEntry
 from aosr.scoring.contract_base import FrequencyRange
+from aosr.scoring.contract_base import WorstChannel as WorstChannel
 from aosr.scoring.contract_base import FrozenModel as _FrozenModel
 from aosr.scoring.cost_shapes import shape_cost, target, weight_table
 from aosr.scoring.recommendation import NotFinalReason, not_final_reasons
@@ -108,7 +111,12 @@ def _scored_range(entry: SettingEntry) -> tuple[float, float]:
 
 def stage_one_score_settings(registry: QualityTargets, purpose_name: str) -> StageOneScoreSettings:
     """讀第一階段那一段；權重表的分項不等於兩個具名分項報錯，其餘形狀由 ``StageOneScoreSettings`` 守。"""
-    section = registry.stage_one(purpose_name)
+    return stage_one_settings_from_section(registry.stage_one(purpose_name))
+
+
+def stage_one_settings_from_section(section: QualityPurpose) -> StageOneScoreSettings:
+    """同一份第一階段條目讀法，供排名註冊表從已保存的設定段取尺。"""
+    purpose_name = section.name
     scored = section.entry(SCORED_RANGE_KEY)
     if not isinstance(scored, SettingEntry):
         raise TypeError(f"{SCORED_RANGE_KEY} 不是量法設定")
@@ -164,13 +172,6 @@ class StageOneChannelScore(_FrozenModel):
         if scored != bool(self.components):
             raise ValueError("scored 必帶分項；unavailable 不帶")
         return self
-
-
-class WorstChannel(_FrozenModel):
-    """小計最大的那一支；只提醒，不淘汰、不改合計。"""
-
-    speaker_id: str = Field(min_length=1)
-    screening_subtotal: Annotated[float, Field(ge=0.0)]
 
 
 class StageOneScore(_FrozenModel):

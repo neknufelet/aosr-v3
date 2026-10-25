@@ -16,58 +16,64 @@ save_result 成 wall-1.json、wall-2.json；scheme_cli.main(compare, 兩份路�
 
 PLAIN_THEN_MOVED = """wall-1.json | 讀回等級 current
 wall-2.json | 讀回等級 current
-wall-1.json | 座位組指紋 73cf50d5ea73b32e97fc427faf368c49e38fdc1f9a6caa690cac398a606f95c4 | 與第一份相同 | not_comparable | 原因 與主表的比較身分不同：同一類但身分不同 channel_matching,listening_area_stability
-wall-2.json | 座位組指紋 ddfff11df207287eba3de4f6649bdcb1e113b32167485caf9ebbc1da40f29a60 | 與第一份不同 | rankable | 原因 無
-方案 wall-1：not_comparable
+wall-1.json | 座位組指紋 73cf50d5ea73b32e97fc427faf368c49e38fdc1f9a6caa690cac398a606f95c4 | 與第一份相同 | rankable | 原因 無
+wall-2.json | 座位組指紋 ddfff11df207287eba3de4f6649bdcb1e113b32167485caf9ebbc1da40f29a60 | 與第一份不同 | not_comparable | 原因 與主表的比較身分不同：同一類但身分不同 channel_matching,listening_area_stability
+方案 wall-1：rankable
+  timbre_balance | measured | 代價 3.8578387728610535 | 原因 無
+  listening_area_stability | measured | 代價 0.14832994797740873 | 原因 無
+  reflections_and_echo | measured | 代價 0.15162092979796526 | 原因 無
+  low_frequency_response | unavailable | 代價 未計 | 原因 low_frequency_seat_layout_invalid
+  channel_matching | measured | 代價 0.07616984431420677 | 原因 無
+  reverberation | measured | 代價 0.015514454510611286 | 原因 無
+低頻拖尾不計分，另有模態診斷報告
+低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>
+方案 wall-2：not_comparable
   timbre_balance | measured | 代價 未計 | 原因 無
   listening_area_stability | measured | 代價 未計 | 原因 無
   reflections_and_echo | measured | 代價 未計 | 原因 無
+  low_frequency_response | unavailable | 代價 未計 | 原因 low_frequency_seat_layout_invalid
   channel_matching | measured | 代價 未計 | 原因 無
   reverberation | measured | 代價 未計 | 原因 無
 低頻拖尾不計分，另有模態診斷報告
 低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>
-方案 wall-2：rankable
-  timbre_balance | measured | 代價 4.509141235677662 | 原因 無
-  listening_area_stability | measured | 代價 0.19365196716071925 | 原因 無
-  reflections_and_echo | measured | 代價 0.31047979363252864 | 原因 無
-  channel_matching | measured | 代價 0.040995172929975565 | 原因 無
-  reverberation | measured | 代價 0.015514454510611286 | 原因 無
-低頻拖尾不計分，另有模態診斷報告
-低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>
 類別 | wall-1 | wall-2
-timbre_balance | not_comparable | 4.509141235677662
-listening_area_stability | not_comparable | 0.19365196716071925
-reflections_and_echo | not_comparable | 0.31047979363252864
-reverberation | not_comparable | 0.015514454510611286
-channel_matching | not_comparable | 0.040995172929975565
-spatial_impression | not_comparable | 未評估
+timbre_balance | 3.8578387728610535 | not_comparable
+listening_area_stability | 0.14832994797740873 | not_comparable
+low_frequency_response | unavailable：low_frequency_seat_layout_invalid | not_comparable
+reflections_and_echo | 0.15162092979796526 | not_comparable
+reverberation | 0.015514454510611286 | not_comparable
+channel_matching | 0.07616984431420677 | not_comparable
+spatial_impression | 未評估 | not_comparable
 """
 
 MOVED_THEN_PLAIN = """wall-2.json | 讀回等級 current
 wall-1.json | 讀回等級 current
-wall-2.json | 座位組指紋 ddfff11df207287eba3de4f6649bdcb1e113b32167485caf9ebbc1da40f29a60 | 與第一份相同 | rankable | 原因 無
-wall-1.json | 座位組指紋 73cf50d5ea73b32e97fc427faf368c49e38fdc1f9a6caa690cac398a606f95c4 | 與第一份不同 | not_comparable | 原因 與主表的比較身分不同：同一類但身分不同 channel_matching,listening_area_stability
-方案 wall-2：rankable
-  timbre_balance | measured | 代價 4.509141235677662 | 原因 無
-  listening_area_stability | measured | 代價 0.19365196716071925 | 原因 無
-  reflections_and_echo | measured | 代價 0.31047979363252864 | 原因 無
-  channel_matching | measured | 代價 0.040995172929975565 | 原因 無
-  reverberation | measured | 代價 0.015514454510611286 | 原因 無
-低頻拖尾不計分，另有模態診斷報告
-低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>
-方案 wall-1：not_comparable
+wall-2.json | 座位組指紋 ddfff11df207287eba3de4f6649bdcb1e113b32167485caf9ebbc1da40f29a60 | 與第一份相同 | not_comparable | 原因 與主表的比較身分不同：同一類但身分不同 channel_matching,listening_area_stability
+wall-1.json | 座位組指紋 73cf50d5ea73b32e97fc427faf368c49e38fdc1f9a6caa690cac398a606f95c4 | 與第一份不同 | rankable | 原因 無
+方案 wall-2：not_comparable
   timbre_balance | measured | 代價 未計 | 原因 無
   listening_area_stability | measured | 代價 未計 | 原因 無
   reflections_and_echo | measured | 代價 未計 | 原因 無
+  low_frequency_response | unavailable | 代價 未計 | 原因 low_frequency_seat_layout_invalid
   channel_matching | measured | 代價 未計 | 原因 無
   reverberation | measured | 代價 未計 | 原因 無
 低頻拖尾不計分，另有模態診斷報告
 低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>
+方案 wall-1：rankable
+  timbre_balance | measured | 代價 3.8578387728610535 | 原因 無
+  listening_area_stability | measured | 代價 0.14832994797740873 | 原因 無
+  reflections_and_echo | measured | 代價 0.15162092979796526 | 原因 無
+  low_frequency_response | unavailable | 代價 未計 | 原因 low_frequency_seat_layout_invalid
+  channel_matching | measured | 代價 0.07616984431420677 | 原因 無
+  reverberation | measured | 代價 0.015514454510611286 | 原因 無
+低頻拖尾不計分，另有模態診斷報告
+低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>
 類別 | wall-2 | wall-1
-timbre_balance | 4.509141235677662 | not_comparable
-listening_area_stability | 0.19365196716071925 | not_comparable
-reflections_and_echo | 0.31047979363252864 | not_comparable
-reverberation | 0.015514454510611286 | not_comparable
-channel_matching | 0.040995172929975565 | not_comparable
-spatial_impression | 未評估 | not_comparable
+timbre_balance | not_comparable | 3.8578387728610535
+listening_area_stability | not_comparable | 0.14832994797740873
+low_frequency_response | not_comparable | unavailable：low_frequency_seat_layout_invalid
+reflections_and_echo | not_comparable | 0.15162092979796526
+reverberation | not_comparable | 0.015514454510611286
+channel_matching | not_comparable | 0.07616984431420677
+spatial_impression | not_comparable | 未評估
 """

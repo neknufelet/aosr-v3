@@ -720,23 +720,23 @@ def test_ranking_line_says_which_categories_are_not_counted(result: SchemeResult
     view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
     # 考卷結果可排名、低頻拖尾與空間感尚未評估：那一行不說「缺的類：無」（跟表上兩個「尚未評估」互相矛盾），
     # 而是說哪幾類還沒評、不算進總代價；沒有淘汰原因就不寫「淘汰原因：無」。
-    assert view.ranking_text == f"排名位置：可排名；{LOW_FREQUENCY_DECAY_NOTE}；尚未評估、不算進總代價：空間感"
+    assert view.ranking_text == f"排名位置：可排名；{LOW_FREQUENCY_DECAY_NOTE}；不可估、不算進總代價：低頻頻響；尚未評估、不算進總代價：空間感"
     assert {LABELS[item.category] for item in view.categories if item.state == "not_evaluated"} == {"低頻拖尾", "空間感"}
     # 其他沒有代價的類照表上的狀態另列一段。
     unavailable = tuple(item.model_copy(update={"state": "unavailable", "state_label": "不可估", "cost": None,
                                                 "cost_text": "—"}) if item.category == "reverberation" else item
                         for item in view.categories)
     assert _ranking_text("rankable", (), (), unavailable) == (
-        f"排名位置：可排名；{LOW_FREQUENCY_DECAY_NOTE}；不可估、不算進總代價：殘響；尚未評估、不算進總代價：空間感")
+        f"排名位置：可排名；{LOW_FREQUENCY_DECAY_NOTE}；不可估、不算進總代價：低頻頻響、殘響；尚未評估、不算進總代價：空間感")
     # 淘汰或擋住排名時：原因與擋住排名的類照伺服器的標籤列出；沒有總代價就不提總代價。
     assert _ranking_text("eliminated", ("external_floor_failed",), (), view.categories) == (
-        f"排名位置：淘汰；淘汰原因：外部底線未過；{LOW_FREQUENCY_DECAY_NOTE}；尚未評估：空間感")
+        f"排名位置：淘汰；淘汰原因：外部底線未過；{LOW_FREQUENCY_DECAY_NOTE}；不可估：低頻頻響；尚未評估：空間感")
     missing = (MissingCategory(category=QualityCategory.REVERBERATION, reason=NotEvaluatedReason.COST_NOT_COMPUTED,
                                evaluator_reason_codes=()),)
     blocked = tuple(item.model_copy(update={"cost": None}) if item.category == "reverberation" else item
                     for item in view.categories)
     assert _ranking_text("not_evaluated", (), missing, blocked) == (
-        f"排名位置：未評估；擋住排名的類：殘響（代價尚未算出）；{LOW_FREQUENCY_DECAY_NOTE}；尚未評估：空間感")
+        f"排名位置：未評估；擋住排名的類：殘響（代價尚未算出）；{LOW_FREQUENCY_DECAY_NOTE}；不可估：低頻頻響；尚未評估：空間感")
 
 
 def test_labels_have_no_bare_english_abbreviation() -> None:

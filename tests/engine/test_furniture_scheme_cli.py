@@ -208,15 +208,16 @@ def test_three_results_mark_only_the_incompatible_candidates_own_categories(
     furnished = scheme_pair[1]
     text = _compare_text((plain, moved, furnished), tmp_path, capsys)
     blocks = _blocks(text)
-    assert blocks[moved.scheme.scheme_id][0].endswith("：rankable")
-    assert "評分條件不同" not in "\n".join(blocks[moved.scheme.scheme_id])
+    # #558：新登記簿指紋讓等人數分表的主表換邊；各方案自己的舊類代價未變。
+    assert blocks[plain.scheme.scheme_id][0].endswith("：rankable")
+    assert "評分條件不同" not in "\n".join(blocks[plain.scheme.scheme_id])
     for category in ("timbre_balance", "reflections_and_echo"):
-        line = next(line for line in blocks[plain.scheme.scheme_id] if line.startswith(f"  {category} | "))
+        line = next(line for line in blocks[moved.scheme.scheme_id] if line.startswith(f"  {category} | "))
         assert "評分條件不同" not in line
         assert "兩者計算涵蓋範圍不同" not in line
-        assert "評分條件不同" not in _table_cells(text, category)[plain.scheme.scheme_id]
+        assert "評分條件不同" not in _table_cells(text, category)[moved.scheme.scheme_id]
     for category in ("listening_area_stability", "channel_matching"):
-        line = next(line for line in blocks[plain.scheme.scheme_id] if line.startswith(f"  {category} | "))
+        line = next(line for line in blocks[moved.scheme.scheme_id] if line.startswith(f"  {category} | "))
         assert " | 評分條件不同" in line
         assert "兩者計算涵蓋範圍不同" not in line
     reflection = next(line for line in blocks[furnished.scheme.scheme_id] if line.startswith("  reflections_and_echo | "))

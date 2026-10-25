@@ -50,7 +50,8 @@ def test_selection_entry_does_not_change_score_or_registry_identity() -> None:
     registry = load_quality_targets(config_path("quality_targets.toml"))
     # #558（2026-10-25）登記簿改了音色起伏範圍、加了峰谷與左右匹配起伏兩鍵，整份指紋照新登記簿重錄；
     # 第一階段合分指紋（下一行）沒變，證明第二階段的改動沒碰到第一階段那一段。
-    assert registry.fingerprint == "e86222e5a184b0549521dc816abd4554dd8a03fbb90b8bc3871a43f635545da7"
+    # 第二段 A 又加了 ranking.category_weights 的 low_frequency_response＝0.25 與選算類一項，整份指紋再照新登記簿重錄一次。
+    assert registry.fingerprint == "2e9bd2d4f0411968b314881aafdfcc4cb64cecb5b1b9e6aa1af06a39455aed32"
     assert stage_one_score_settings(registry, "dedicated_two_channel_listening_room").fingerprint == (
         "2d9c47e3be7e3ffcb29f4c6f57fc17fb55da1c0fb77f7bb25a449cc2673f98ea")
     entry = registry.stage_one("dedicated_two_channel_listening_room").entry(

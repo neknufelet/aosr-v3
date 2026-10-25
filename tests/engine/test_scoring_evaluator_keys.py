@@ -28,6 +28,10 @@ from tests.engine.test_scheme_pipeline import shared_control_result
 
 # 每一條改成另一個合法值（照現在登記簿的值挑，改了要確實跟原值不同）；評估器多讀一條，這裡要補一種改法。
 CHANGED: dict[str, object] = {
+    "stage_one_low_frequency.scored_range_hz": [40.0, 250.0],
+    "stage_one_low_frequency.own_line_ripple_rms_db": 0.2,
+    "stage_one_low_frequency.seat_robustness_rms_db": 0.2,
+    "stage_one_low_frequency.component_weights": 1.5,
     "timbre_balance.coverage_range_hz": [40.0, 8000.0],
     "timbre_balance.tilt_fit_range_hz": [100.0, 4000.0],
     "timbre_balance.ripple_range_hz": [50.0, 8000.0],
@@ -78,6 +82,11 @@ def _outputs(candidate: CandidateEvaluation) -> dict[QualityCategory, str]:
 
 def _with_value(text: str, key: str, value: object) -> str:
     """登記簿 TOML 裡含這個鍵的那一個條目區塊，把 value 那一行換掉（每個用途各一塊，全部換）。"""
+    if key == "stage_one_low_frequency.component_weights":
+        head, marker, rest = text.partition(f'key = "{key}"')
+        assert marker
+        rest = re.sub(r"(?m)^value = .*$", f"value = {json.dumps(value)}", rest, count=1)
+        return head + marker + rest
     blocks = text.split("\n[[")
     hits = [index for index, block in enumerate(blocks) if f'key = "{key}"\n' in block]
     assert hits, key

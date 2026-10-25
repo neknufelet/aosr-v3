@@ -13,11 +13,13 @@ from pydantic import Field, model_validator
 
 from aosr.config.quality_targets import Unit
 from aosr.scoring.placement import Placement, merge_placements
+from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
 from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetry
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload as ReflectionsAndEchoPayload
 # 共用底座搬去 contract_base（#351：新的類別 payload 住自己的模組、不准回頭拿這一支）；
 # 這裡用原名明示再匯出，既有呼叫端（含考卷）不必跟著改匯入來源。
 from aosr.scoring.contract_base import FROZEN as FROZEN
+from aosr.scoring.contract_base import Feature as Feature
 from aosr.scoring.contract_base import Flag as Flag
 from aosr.scoring.contract_base import FrequencyRange as FrequencyRange
 from aosr.scoring.contract_base import FrozenModel as _FrozenModel
@@ -48,10 +50,16 @@ SourceModelFingerprint = SceneFingerprint
 
 
 class QualityCategory(StrEnum):
-    """完整七類聆聽品質的受控名稱。"""
+    """完整七類聆聽品質的受控名稱。
+
+    老闆 2026-10-25 #558 決定第二階段總分加入低頻，所以評估類別多一個；它承接
+    ①音色與頻率平衡、②聆聽區穩定性在 20～300 Hz 的那一段，七類需求本身不變。
+    這是主對話讀法，與七類品質決策紙第 1 條「七類是完整需求」一致。
+    """
 
     TIMBRE_BALANCE = "timbre_balance"
     LISTENING_AREA_STABILITY = "listening_area_stability"
+    LOW_FREQUENCY_RESPONSE = "low_frequency_response"
     LOW_FREQUENCY_DECAY = "low_frequency_decay"
     REFLECTIONS_AND_ECHO = "reflections_and_echo"
     REVERBERATION = "reverberation"
@@ -62,6 +70,7 @@ class QualityCategory(StrEnum):
 # 殘響只讀 T20/T30：晚期能量乘 g 也不改衰減斜率；低頻有限元素維持全向。
 SOURCE_MODEL_INDEPENDENT_CATEGORIES: Final[frozenset[QualityCategory]] = frozenset({
     QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY,
+    QualityCategory.LOW_FREQUENCY_RESPONSE,
 })
 
 
@@ -96,16 +105,6 @@ class RawQuantity(_FrozenModel):
     name: str = Field(min_length=1)
     value: float
     unit: Unit
-
-
-class Feature(_FrozenModel):
-    """音色殘差曲線上的一個峰或谷；寬度未知（邊界不完整）才是 None，否則必須為正。"""
-
-    kind: Literal["peak", "dip"]
-    center_frequency_hz: Annotated[float, Field(gt=0.0)]
-    depth_db: float
-    width_octave: Annotated[float, Field(gt=0.0)] | None
-    flags: tuple[Flag, ...]
 
 
 ModelValidationFrequencyRange = FrequencyRange | tuple[()]
@@ -647,6 +646,7 @@ CategoryPayload = Annotated[
     | TimbreChannelsPayload
     | ListeningAreaStabilityPayload
     | ListeningAreaChannelsPayload
+    | LowFrequencyResponsePayload
     | LowFrequencyDecayPayload
     | ReflectionsAndEchoPayload
     | ReverberationPayload
@@ -660,6 +660,7 @@ _PAYLOAD_OUTER_CATEGORIES: Final[dict[str, QualityCategory]] = {
     "timbre_balance_channels": QualityCategory.TIMBRE_BALANCE,
     "listening_area_stability": QualityCategory.LISTENING_AREA_STABILITY,
     "listening_area_stability_channels": QualityCategory.LISTENING_AREA_STABILITY,
+    "low_frequency_response": QualityCategory.LOW_FREQUENCY_RESPONSE,
     "low_frequency_decay": QualityCategory.LOW_FREQUENCY_DECAY,
     "reflections_and_echo": QualityCategory.REFLECTIONS_AND_ECHO,
     "reverberation": QualityCategory.REVERBERATION,
@@ -722,15 +723,17 @@ class CategoryEvaluation(_FrozenModel):
     def _furniture_approximation_matches_category(self) -> Self:
         """殘響與低頻衰減照現狀不帶家具近似旗標，不反向補旗標。
 
+        低頻頻響只吃未含家具的有限元素能量，也不帶家具近似旗標。
+
         殘響吃外露面積後要不要掛近似待老闆定（家具紙第 13 條）。"""
-        if self.category in (QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY):
+        if self.category in SOURCE_MODEL_INDEPENDENT_CATEGORIES:
             if Flag.FURNITURE_MODEL_APPROXIMATE in self.flags:
-                raise ValueError("殘響與低頻衰減不准帶家具近似旗標")
+                raise ValueError("殘響與低頻衰減、低頻頻響不准帶家具近似旗標")
         return self
 
     @model_validator(mode="after")
     def _source_model_identity_matches_category(self) -> Self:
-        """不變條件 10：殘響只讀 T20/T30 斜率，低頻有限元素維持全向；兩類不帶模型身分。
+        """不變條件 10：殘響只讀 T20/T30 斜率，低頻有限元素維持全向；這些類不帶模型身分。
 
         其他類可估時必帶；不可估若上游衝突或缺失，可留空而不冒認其中一筆。
         """
