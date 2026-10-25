@@ -12,6 +12,7 @@ from aosr.scoring.channel_matching_settings import _load_settings
 from aosr.scoring.timbre import _octave_mean_level_db, timbre_ripple_coverage_reason
 from aosr.scoring.contract import EvaluationState
 from tests.engine import test_channel_matching as fixtures
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL, assert_within, cell
 
 _RANGE_HZ = (20.0, 8000.0)  # 等於登記簿 channel_matching.broadband_range_hz；下面那題守兩者一致
 _PEAK_HZ = 257.3
@@ -97,10 +98,16 @@ def test_full_axis_evaluator_uses_the_broadband_function() -> None:
     left, right = _with_narrow_peak(coarse), _pink(coarse)
     settings = _load_settings(fixtures._TARGETS, fixtures._PURPOSE)
     assert timbre_ripple_coverage_reason(np.asarray(coarse), settings.ripple_range_hz, settings.timbre) is None
-    expected = (_octave_mean_level_db(np.asarray(coarse), np.asarray(left), settings.broadband_range_hz)
-                - _octave_mean_level_db(np.asarray(coarse), np.asarray(right), settings.broadband_range_hz))
+    wired = (_octave_mean_level_db(np.asarray(coarse), np.asarray(left), settings.broadband_range_hz)
+             - _octave_mean_level_db(np.asarray(coarse), np.asarray(right), settings.broadband_range_hz))
+    # 數值另對考卷自己的八度平均（不呼叫產品），照評分層容差；寬頻函式算錯時上面那個逐位等式攔不住（#558 複查席）。
+    independent = 10.0 * math.log10(
+        fixtures._independent_octave_mean(coarse, left, settings.broadband_range_hz)
+        / fixtures._independent_octave_mean(coarse, right, settings.broadband_range_hz))
+    actual = _broadband_db(coarse, left, right)
 
-    assert _broadband_db(coarse, left, right) == expected
+    assert actual == wired
+    assert_within([cell("broadband_level_difference_db", actual, independent, rel=SCORING_REL, abs_=SCORING_ABS)])
 
 
 def test_densifying_low_frequencies_keeps_a_smooth_answer() -> None:

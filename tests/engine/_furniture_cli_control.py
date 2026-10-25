@@ -11,7 +11,7 @@ save_result 成 wall-1.json、wall-2.json；scheme_cli.main(compare, 兩份路�
 （工作區 668-ripple-from-20 底下 record 目錄的 record_furniture_cli.py）。
 
 #558（音色起伏計分範圍改 300～8000 Hz，峰谷與左右匹配起伏留 20 Hz，老闆 2026-10-25）：先實跑確認只有 wall-2 的音色與聆聽區兩格代價變，
-其餘每一行逐字不變；兩格換成同一棵樹新登記簿實跑的值（原文在外部工作區 558-stage2-lf-cost/checks/compare-r300.txt）。
+其餘每一行逐字不變；兩格換成同一棵樹新登記簿實跑的值（原文在外部工作區 558-stage2-lf-cost 底下 checks 目錄的 compare-r300.txt）。
 """
 
 PLAIN_THEN_MOVED = """wall-1.json | 讀回等級 current

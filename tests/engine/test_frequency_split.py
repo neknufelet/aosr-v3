@@ -174,12 +174,11 @@ def test_listening_keeps_other_metrics_and_follows_new_timbre_rms() -> None:
         assert ripple["primary_to_surrounding"]["worst_deviation"][side] == old["primary_to_surrounding"]["worst_deviation"][side]
     assert {key: value for key, value in ripple.items() if key != "primary_to_surrounding"} == {
         key: value for key, value in old.items() if key != "primary_to_surrounding"}
-    raw = {q["name"]: q for q in got["raw_quantities"] if q["name"].startswith("ripple_rms")}
-    assert raw.keys() == {q["name"] for q in want["raw_quantities"] if q["name"].startswith("ripple_rms")}
-    for quantity in raw.values():
-        compare(quantity["value"], expected)
-    for document in (got, want):
-        document["raw_quantities"] = [q for q in document["raw_quantities"] if not q["name"].startswith("ripple_rms")]
+    # 起伏原始量整筆照改動前對照（名稱、單位與其餘欄位都比），只把預期數值換成獨立算的新值（#558 複查席）。
+    ripple_raw = [q for q in want["raw_quantities"] if q["name"].startswith("ripple_rms")]
+    assert ripple_raw
+    for quantity in ripple_raw:
+        quantity["value"] = expected
     compare(got, want)
 
 
