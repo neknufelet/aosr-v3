@@ -240,7 +240,7 @@ def _component_lines(
             raise TypeError(f"{WEIGHTS_KEY} 必須是權重表")
         weights = {item.name: item.value for item in table.item}
         raw = {item.name: item.value for item in evaluation.raw_quantities}
-        return tuple(ComponentLine(name=name, role="principal", raw_value=raw[name], raw_unit="dB",
+        return tuple(ComponentLine(name=name, role="principal", raw_value=raw.get(name), raw_unit="dB",
                                    cost=value, weight=weights[name])
                      for name, value in cost.components.items())
     return tuple(
@@ -301,7 +301,11 @@ def _section(category: QualityCategory, rules: _Rules) -> QualityPurpose:
     """這一類讀哪一段設定：註冊成第一階段那一段的讀同用途的第一階段段，其餘讀用途段。"""
     registration = CATEGORY_REGISTRY.get(category)
     if registration is not None and registration.settings_scope == "stage_one":
-        return rules.registry.stage_one(rules.purpose.name)
+        try:
+            return rules.registry.stage_one(rules.purpose.name)
+        except KeyError as error:
+            # 登記簿缺這一段是排名層的設定錯，報 ValueError：搜尋報告照原文寫「排名失敗」，不整份當掉（審查補）。
+            raise ValueError(f"{category.value} 讀第一階段那一段，登記簿沒有用途 {rules.purpose.name} 的那一段") from error
     return rules.purpose
 
 

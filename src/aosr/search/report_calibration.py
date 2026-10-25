@@ -24,6 +24,9 @@ CATEGORY_LABELS = {key: LABELS[key] for key in (
     "timbre_balance", "channel_matching", "reverberation", "reflections_and_echo",
     "listening_area_stability", "low_frequency_response", "low_frequency_decay", "direction_zones", "ranking",
 )}
+# 搜尋快照沒存第一階段那一段，低頻頻響的尺只能讀現在的登記簿；讀到、讀不到都照實寫在進度那一行。
+LOW_FREQUENCY_SOURCE_NOTE = "低頻頻響採現在登記簿的第一階段尺；搜尋快照未保存該段"
+LOW_FREQUENCY_SOURCE_MISSING = "低頻頻響沒數：現在的登記簿沒有這個用途的第一階段尺，搜尋快照也未保存該段"
 
 
 class CategoryProgress(BaseModel):
@@ -68,13 +71,18 @@ def calibration_progress(purpose: QualityPurpose, *, stage_one: QualityPurpose |
         counts[category] = (calibrated + (status == "calibrated"), total + 1)
     judged = {category.value: registration for category, registration in CATEGORY_REGISTRY.items()}
     low_frequency = QualityCategory.LOW_FREQUENCY_RESPONSE.value
+    dependency_error: str | None = None
     if stage_one is not None:
-        sources = judged[low_frequency].registry_sources(stage_one)
-        counts[low_frequency] = (sum(status == "calibrated" for _, status in sources), len(sources))
+        try:
+            sources = judged[low_frequency].registry_sources(stage_one)
+        except (KeyError, TypeError, ValueError) as error:
+            # 第一階段那一段缺格：跟舊快照缺尺同一個處理，照實說判不出，不讓整份報告失敗（審查補）。
+            dependency_error = str(error)
+        else:
+            counts[low_frequency] = (sum(status == "calibrated" for _, status in sources), len(sources))
     known = [name for name in CATEGORY_LABELS if name in counts]
     order = known + sorted(name for name in counts if name not in CATEGORY_LABELS)
     categories = []
-    dependency_error: str | None = None
     for name in order:
         uses_all = False
         if name in judged and dependency_error is None:
@@ -97,8 +105,8 @@ def calibration_progress(purpose: QualityPurpose, *, stage_one: QualityPurpose |
     return CalibrationProgress(calibrated=sum(item.calibrated for item in categories),
                                total=sum(item.total for item in categories), categories=tuple(categories),
                                dependency_error=dependency_error,
-                               low_frequency_source_note=("低頻頻響採本次排名讀取的第一階段尺；搜尋快照未保存該段"
-                                                          if stage_one is not None else ""))
+                               low_frequency_source_note=(LOW_FREQUENCY_SOURCE_NOTE if stage_one is not None
+                                                          else LOW_FREQUENCY_SOURCE_MISSING))
 
 
 def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:

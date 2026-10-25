@@ -155,7 +155,9 @@ LABELS = {
 
 
 def low_frequency_response_description(registry: QualityTargets, purpose: str) -> str:
-    """低頻類說明的範圍與類權重只讀登記簿。"""
+    """低頻類說明的範圍與類權重只讀登記簿；這個用途沒有第一階段那一段就照實說從缺。"""
+    if purpose not in {item.name for item in registry.stage_one_sections}:
+        return "登記簿沒有這個用途的第一階段尺，低頻頻響的範圍與類權重說明從缺"
     low, high = stage_one_score_settings(registry, purpose).scored_range_hz
     table = registry.purpose(purpose).entry("ranking.category_weights")
     if not isinstance(table, WeightTable):

@@ -16,7 +16,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole
 from aosr.scoring.stage_one_low_frequency_contract import (
     StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
 )
-from aosr.scoring.stage_one_score import score_stage_one, stage_one_score_settings
+from aosr.scoring.stage_one_score import PRINCIPAL, ROBUSTNESS, score_stage_one, stage_one_score_settings
 from tests.engine._stage_one_low_frequency_curves import (
     candidate, speaker, independent_own_line_answer, DIRECTIONS,
 )
@@ -71,8 +71,10 @@ def test_two_channels_independent_formula_and_stage_one_components(axis: LowFreq
     assert isinstance(payload, LowFrequencyResponsePayload)
     first = score_stage_one(payload.evaluation, settings)
     # 分項是未乘權重的代價（原始 dB ÷ 較差參考），乘第一階段權重加總才是類代價；跟別類同一個寫法。
+    # 分項答案用上面獨立算的 own、seat 配登記簿的較差參考，不取被測合分的分項（審查補）。
     assert costed.category_cost.components == pytest.approx(
-        {item.name: item.value_db / item.worse_reference_db for item in first.components},
+        {PRINCIPAL: own / settings.target(PRINCIPAL).worse_reference,
+         ROBUSTNESS: seat / settings.target(ROBUSTNESS).worse_reference},
         rel=SCORING_REL, abs=SCORING_ABS)
     assert math.fsum(costed.category_cost.components[name] * weight for name, weight in settings.weights) == (
         pytest.approx(costed.category_cost.value, rel=SCORING_REL, abs=SCORING_ABS))

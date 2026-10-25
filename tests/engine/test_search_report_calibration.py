@@ -226,7 +226,7 @@ def test_old_snapshot_missing_a_ruler_keeps_the_report(
     lines = section.splitlines()
     raw_total = sum(total for _, total in _raw_counts(_raw_purpose()).values())
     assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1 + _low_frequency_source_count()} 條")
-    assert "低頻頻響採本次排名讀取的第一階段尺；搜尋快照未保存該段" in lines[3]
+    assert "低頻頻響採現在登記簿的第一階段尺；搜尋快照未保存該段" in lines[3]
     assert lines[5].startswith("這次搜尋快照裡的登記簿跟現在的評分程式（評估器與排名層）對不上（") and missing in lines[5]
     assert "評分設定跟搜尋快照不同" in section
 

@@ -164,10 +164,14 @@ def _candidate_quality(result: SchemeResult, ranking: RankingResult,
     candidate_id = result.candidate.candidate_id
     zone = ranking.status_of(candidate_id)
     row = next((row for row in ranking.rankable if row.candidate_id == candidate_id), None)
-    low_frequency = next((line for line in row.categories if line.identity.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None) if row else None
-    evaluation = low_frequency.evaluation if low_frequency is not None else next(
+    # 這一跑合過分的評估：可排名列的各類，或淘汰列留下的評估（先合分才判底線）；未評估、不可同表兩區沒有這一跑的代價（審查補）。
+    settled = (tuple(line.evaluation for line in row.categories) if row is not None else next(
+        (item.evaluations for item in ranking.eliminated if item.candidate_id == candidate_id), ()))
+    low_frequency = next((item for item in settled if item.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None)
+    evaluation = low_frequency if low_frequency is not None else next(
         (item for item in result.candidate.evaluations if item.category is QualityCategory.LOW_FREQUENCY_RESPONSE), None)
-    cost_text = f"代價 {low_frequency.category_cost:.3f}" if low_frequency is not None else "未計代價"
+    cost = None if low_frequency is None else low_frequency.category_cost
+    cost_text = "未計代價" if cost is None else f"代價 {cost.value:.3f}"
     return CandidateQuality(
         message=message, zone=zone,
         review_status=None if row is None else row.review_status,
