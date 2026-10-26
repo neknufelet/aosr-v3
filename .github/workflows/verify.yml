@@ -184,7 +184,8 @@ jobs:
           path: ${{ runner.temp }}/browser-apt-archives
           key: ${{ steps.apt_archives_key.outputs.key }}
       # 放回前先記下 gmsh 等先前的安裝包，封存時扣掉；清單在快取目錄外。
-      # 命中也只放回下載檔；apt 仍核對檔名、大小與雜湊，失效的包照常重抓，安裝與驗收照跑。
+      # 命中也只放回下載檔，而且放回前逐支跟 apt 索引核 SHA256（apt 對已有的檔只比檔名與大小）；
+      # 對不上或索引裡沒有這一版就不放回、逐支印原因，apt 照常下載。安裝與驗收照跑。
       - name: 放回瀏覽器安裝包並記下先前清單
         run: uv run python -m governance.status.record_step --name apt_archives_restore --out-dir governance/receipts/steps -- uv run python -m governance.status.apt_archives restore
       - name: 裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）
