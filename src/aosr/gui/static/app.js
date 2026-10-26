@@ -4,6 +4,7 @@ let openedId = null;
 let runId;
 let timer;
 let otherTimer;
+let otherAsking = false;
 // 這一次開算之後表單有沒有被改過；改過的話算完不把連結掛在表單旁邊。
 let runEdited = false;
 // 最近一次圖面檢查沒過時伺服器寫的問題（已照印在訊息列）；「另存新名字」旁邊照抄同一段。
@@ -672,7 +673,15 @@ async function resumeRuns() {
 }
 async function showOtherRuns() {
   // 主畫面只跟一筆；其餘還在算的每筆一行，按「改看這一筆」就換過去，停止鈕也跟著換（#796）。
-  const others = (await api("/api/runs")).running.filter((item) => item.run_id !== runId);
+  // 一次只讓一個請求在路上：上一個還沒回來就不再問，回來時照當下跟的那筆過濾，重問也只由它排，只留一條。
+  if (otherAsking) return;
+  otherAsking = true;
+  let others;
+  try {
+    others = (await api("/api/runs")).running.filter((item) => item.run_id !== runId);
+  } finally {
+    otherAsking = false;
+  }
   const list = $("other-runs");
   list.replaceChildren(...others.map((item) => {
     const row = document.createElement("li");
@@ -685,7 +694,7 @@ async function showOtherRuns() {
     return row;
   }));
   list.hidden = !others.length;
-  // 列著別筆時每兩秒重問一次，算完的那筆就從這裡拿掉，不留過期的「計算中」；回覆到了才換計時器，只留一條。
+  // 列著別筆時每兩秒重問一次，算完的那筆就從這裡拿掉，不留過期的「計算中」。
   clearTimeout(otherTimer);
   if (others.length) otherTimer = setTimeout(() => action(showOtherRuns), 2000);
 }
@@ -693,6 +702,9 @@ async function follow(id) {
   runId = id; $("stop").disabled = false;
   clearInterval(timer);
   await poll();
+  // 等回覆時又換了別筆（連按兩個「改看這一筆」）：計時器歸最後換的那一次排，這一次不再排一條（#796 審查）。
+  if (runId !== id) return;
+  clearInterval(timer);
   if (!$("stop").disabled) timer = setInterval(() => action(poll), 1000);
   await showOtherRuns();
 }
@@ -816,6 +828,8 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     // 上一筆的計時器先停：留著的話它會每秒去跑算完那一段，蓋掉訊息、藏掉舊結果標示。
     clearInterval(timer);
     await poll();
+    // 等回覆時按了「改看這一筆」：計時器歸那一次排（#796 審查）。
+    if (runId !== state.run_id) return;
     if (!$("stop").disabled) timer = setInterval(() => action(poll), 1000);
     // 上一筆若還在算，換到底下那一列，停得掉（#796）。
     await showOtherRuns();

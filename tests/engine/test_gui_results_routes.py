@@ -1,17 +1,21 @@
 """結果清單、讀回拒收與同方案重算的端點考卷。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
 from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui.app import RUN_ID, GuiHandlers, GuiSettings, _result_paths, create_app
-from aosr.gui.jobs import JobManager
+from aosr.gui.jobs import JobManager, ResultStatus
+from aosr.gui.result_list import ResultList, ResultSummary, SchemeLookup
 from aosr.gui.result_view import ResultView, build_result_view
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.evaluation import LoadedResult, ResultStanding
@@ -357,35 +361,59 @@ def test_rerun_problems_keep_one_per_line() -> None:
     assert "#rerun-state{white-space:pre-line}" in (STATIC / "style.css").read_text()
 
 
+
+def _slow_listing(monkeypatch: pytest.MonkeyPatch) -> tuple[threading.Event, threading.Event]:
+    """清單解析卡在工作鎖裡面（真的持鎖那一段），等考卷放行；回傳「已卡住」與「放行」兩個旗號。"""
+    entered, release = threading.Event(), threading.Event()
+    original = ResultList.list
+
+    def slow(self: ResultList, paths: list[Path], result_status: Callable[[str], ResultStatus],
+             saved_scheme: SchemeLookup) -> list[ResultSummary]:
+        entered.set()
+        release.wait(20)
+        return original(self, paths, result_status, saved_scheme)
+
+    monkeypatch.setattr(ResultList, "list", slow)
+    return entered, release
+
+
+async def _loop_stays_free(tmp_path: Path, entered: threading.Event, release: threading.Event,
+                           listing_route: str, waiting_routes: tuple[str, ...]) -> None:
+    # 清單持鎖慢讀時，先送出要等同一把鎖的請求，再問不拿鎖的名稱表：名稱表要先回來，等鎖的請求要還沒回來。
+    # 放一筆已結束的計算紀錄：計算清單要逐筆查狀態才會去拿鎖，資料夾空的時候它根本不拿。
+    run_id = "d" * 32
+    (tmp_path / "runs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runs" / f"{run_id}.json").write_text(json.dumps({
+        "run_id": run_id, "scheme_id": "wall-1", "status": "done", "started_at": 0, "finished_at": 1,
+        "pid": 0, "exit_code": 0, "result_path": str(tmp_path / "results" / f"{run_id}.json"),
+        "stderr_path": str(tmp_path / "runs" / f"{run_id}.stderr")}))
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+        listing = asyncio.create_task(client.get(listing_route))
+        assert await asyncio.to_thread(entered.wait, 20)
+        waiting = [asyncio.create_task(client.get(route)) for route in waiting_routes]
+        await asyncio.sleep(0.05)
+        labels = await client.get("/api/labels")
+        pending = [not task.done() for task in (listing, *waiting)]
+        release.set()
+        assert labels.status_code == 200
+        assert all(pending)
+        assert (await listing).status_code == 200
+        await asyncio.gather(*waiting)
+
+
 @pytest.mark.parametrize("route", ["/api/results", "/api/archive"])
 def test_result_lists_are_read_off_the_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                   route: str) -> None:
     # #796：清單逐檔解析很慢時，別的請求照樣要回；解析卡在主迴圈上的話，名稱表要等清單讀完才回得來。
-    import asyncio
-    import threading
-    from httpx import ASGITransport, AsyncClient
-    from aosr.gui.result_list import ResultSummary
+    entered, release = _slow_listing(monkeypatch)
+    asyncio.run(_loop_stays_free(tmp_path, entered, release, route, ()))
 
-    entered, release = threading.Event(), threading.Event()
-    original = GuiHandlers._result_summaries
 
-    def slow(self: GuiHandlers, archived: bool = False) -> list[ResultSummary]:
-        entered.set()
-        release.wait(5)
-        return original(self, archived)
-
-    monkeypatch.setattr(GuiHandlers, "_result_summaries", slow)
-
-    async def check() -> None:
-        app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
-            listing = asyncio.create_task(client.get(route))
-            assert await asyncio.to_thread(entered.wait, 5)
-            labels = await client.get("/api/labels")
-            listing_already_done = listing.done()
-            release.set()
-            assert labels.status_code == 200
-            assert not listing_already_done
-            assert (await listing).status_code == 200
-
-    asyncio.run(check())
+@pytest.mark.parametrize("route", ["/api/runs", "/api/schemes", f"/api/runs/{'c' * 32}"])
+def test_routes_waiting_on_the_job_lock_do_not_block_the_event_loop(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str) -> None:
+    # #796 審查：清單在執行緒裡持工作鎖慢讀時，首頁會反覆打的這幾條也要等同一把鎖；
+    # 在主迴圈上等的話整個網頁跟著停，所以要在執行緒裡等。
+    entered, release = _slow_listing(monkeypatch)
+    asyncio.run(_loop_stays_free(tmp_path, entered, release, "/api/results", (route,)))
