@@ -17,7 +17,8 @@ from governance.exit_codes import CLEAN, VIOLATION, note
 CACHE_SUBDIR = 'browser-apt-archives'
 BASELINE_FILENAME = 'browser-apt-baseline.json'
 ARCHIVES_DIR = Path('/var/cache/apt/archives')
-DPKG_FORMAT = '${binary:Package}\t${Version}\t${Status}\n'
+DPKG_FORMAT = '${Package}\t${Architecture}\t${Version}\t${Status}\n'
+NOT_INSTALLED = '-\t沒裝（archives 裡有這支安裝包，dpkg 沒裝上；命中時多半是快取放回的舊包這一跑用不到）'
 
 
 def _required(value: str, field: str) -> str:
@@ -72,23 +73,39 @@ def _browser_archives(runner_temp: Path, archives: Path) -> list[Path]:
     return packages
 
 
-def _package_name(path: Path) -> str:
-    """deb 的標準檔名帶套件、版本、架構；查詢時指定架構，字型的 all 則用套件名。"""
+def _package_key(path: Path) -> tuple[str, str]:
+    """deb 的標準檔名帶套件、版本、架構；字型這類不分架構的包，架構就是 all。"""
     fields = path.stem.rsplit('_', 2)
     if len(fields) != 3 or not all(fields):
         raise ValueError(f'無法從安裝包檔名辨認套件：{path.name}')
     package, _, architecture = fields
-    return package if architecture == 'all' else f'{package}:{architecture}'
+    return package, architecture
+
+
+def _installed(run_command: Callable[[Sequence[str]], str]) -> dict[tuple[str, str], str]:
+    """整份 dpkg 資料庫按（套件, 架構）查版本與狀態。
+
+    不帶套件名：帶名字時只要一支沒裝，dpkg-query 就整條非零。命中那一跑，快取放回的舊包裡
+    可能有一支這一跑已經用不到（同一版映像裡套件站換了相依），那不是安裝失敗。
+    """
+    installed: dict[tuple[str, str], str] = {}
+    for row in run_command(['dpkg-query', '-W', f'-f={DPKG_FORMAT}']).splitlines():
+        fields = row.split('\t')
+        # 只核格數：資料庫裡跟瀏覽器無關的套件哪一格空著，不該讓這一步紅。
+        if len(fields) != 4:
+            raise ValueError(f'dpkg-query 傳回的一行不是套件、架構、版本、狀態四格：{row!r}')
+        package, architecture, version, status = fields
+        installed[(package, architecture)] = f'{version}\t{status}'
+    if not installed:
+        raise ValueError('dpkg-query 沒有傳回任何套件')
+    return installed
 
 
 def stash(runner_temp: Path, archives: Path, run_command: Callable[[Sequence[str]], str]) -> None:
     """只留瀏覽器安裝包，印排序的檔案與實裝版本，讓雲端兩跑逐行比。"""
     packages = _browser_archives(runner_temp, archives)
-    names = sorted({_package_name(path) for path in packages})
-    versions = run_command(['dpkg-query', '-W', f'-f={DPKG_FORMAT}', '--', *names])
-    rows = sorted(versions.splitlines())
-    if not rows or any(len(row.split('\t')) != 3 for row in rows):
-        raise ValueError('dpkg-query 沒有傳回完整的套件、版本與狀態清單')
+    wanted = sorted({_package_key(path) for path in packages})
+    installed = _installed(run_command)
     cache = runner_temp / CACHE_SUBDIR
     cache.mkdir(parents=True, exist_ok=True)
     for stale in cache.glob('*.deb'):
@@ -96,8 +113,8 @@ def stash(runner_temp: Path, archives: Path, run_command: Callable[[Sequence[str
     for path in packages:
         shutil.copyfile(path, cache / path.name)
         note(f'DEB\t{path.name}\t{path.stat().st_size}')
-    for row in rows:
-        note(f'PACKAGE\t{row}')
+    for package, architecture in wanted:
+        note(f'PACKAGE\t{package}:{architecture}\t{installed.get((package, architecture), NOT_INSTALLED)}')
 
 
 def main(argv: Sequence[str] | None = None, *, environ: Mapping[str, str] | None = None,

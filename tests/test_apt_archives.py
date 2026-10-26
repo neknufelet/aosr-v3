@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from governance.exit_codes import CLEAN
-from governance.status.apt_archives import BASELINE_FILENAME, CACHE_SUBDIR, DPKG_FORMAT, main
+from governance.status.apt_archives import BASELINE_FILENAME, CACHE_SUBDIR, DPKG_FORMAT, NOT_INSTALLED, main
 
 
 @pytest.fixture
@@ -120,7 +120,13 @@ def test_restore_without_cache_records_baseline_and_continues(
 
 class PackageCommands:
     """真複製檔案、假裝 sudo 與查套件資料；不執行外部命令。"""
-    def __init__(self) -> None:
+    def __init__(self, database: str = (
+        'zlib\tamd64\t2.0\tinstall ok installed\n'
+        'zlib\ti386\t1.9\tinstall ok installed\n'
+        'unrelated\tamd64\t\t\n'
+        'fonts-a\tall\t1.0\tinstall ok installed\n'
+    )) -> None:
+        self.database = database
         self.queries: list[tuple[str, ...]] = []
 
     def __call__(self, argv: Sequence[str]) -> str:
@@ -128,11 +134,8 @@ class PackageCommands:
             for source in argv[3:-1]:
                 shutil.copyfile(source, Path(argv[-1]) / Path(source).name)
             return ''
-        assert list(argv[:4]) == ['dpkg-query', '-W', f'-f={DPKG_FORMAT}', '--']
-        self.queries.append(tuple(argv[4:]))
-        rows = {'zlib:amd64': 'zlib:amd64\t2.0\tinstall ok installed\n',
-                'fonts-a': 'fonts-a\t1.0\tinstall ok installed\n'}
-        return ''.join(rows[name] for name in reversed(argv[4:]))
+        self.queries.append(tuple(argv))
+        return self.database
 
 
 def test_restore_and_stash_keep_only_browser_packages_and_sorted_versions(
@@ -159,12 +162,39 @@ def test_restore_and_stash_keep_only_browser_packages_and_sorted_versions(
     assert {path.name: path.read_bytes() for path in cache.glob('*.deb')} == cached
     log = capsys.readouterr().err
     assert 'libglu1-mesa' not in log
-    assert commands.queries == [('fonts-a', 'zlib:amd64')]
+    # 不帶套件名查整份資料庫；同名別架構（i386）與無關的套件不印。
+    assert commands.queries == [('dpkg-query', '-W', f'-f={DPKG_FORMAT}')]
     assert [line for line in log.splitlines() if '\t' in line] == [
         *[f'NOTE: DEB\t{name}\t{len(cached[name])}' for name in sorted(cached)],
-        'NOTE: PACKAGE\tfonts-a\t1.0\tinstall ok installed',
+        'NOTE: PACKAGE\tfonts-a:all\t1.0\tinstall ok installed',
         'NOTE: PACKAGE\tzlib:amd64\t2.0\tinstall ok installed',
     ]
+
+
+def test_stash_reports_a_restored_package_this_run_did_not_install(
+    environment: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """命中時放回的舊包這一跑沒裝：照實印「沒裝」那一行，不把它當安裝失敗、也不假裝有版本。"""
+    assert invoke('restore', environment, tmp_path) == CLEAN
+    for name in ('fonts-a_1.0_all.deb', 'dropped_3.0_amd64.deb'):
+        (tmp_path / name).write_bytes(b'deb')
+    capsys.readouterr()
+    assert invoke('stash', environment, tmp_path, PackageCommands()) == CLEAN
+    rows = [line for line in capsys.readouterr().err.splitlines() if line.startswith('NOTE: PACKAGE')]
+    assert rows == ['NOTE: PACKAGE\tdropped:amd64\t' + NOT_INSTALLED,
+                    'NOTE: PACKAGE\tfonts-a:all\t1.0\tinstall ok installed']
+
+
+@pytest.mark.parametrize('database', ['', 'fonts-a\tall\t1.0\n'])
+def test_stash_refuses_an_empty_or_malformed_package_database(
+    environment: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str], database: str,
+) -> None:
+    assert invoke('restore', environment, tmp_path) == CLEAN
+    (tmp_path / 'fonts-a_1.0_all.deb').write_bytes(b'deb')
+    capsys.readouterr()
+    assert invoke('stash', environment, tmp_path, PackageCommands(database)) != CLEAN
+    assert 'dpkg-query' in capsys.readouterr().err
+    assert not (Path(environment['RUNNER_TEMP']) / CACHE_SUBDIR).exists()
 
 
 def test_stash_collects_fresh_download_after_cache_miss(
