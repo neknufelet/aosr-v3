@@ -1,0 +1,4 @@
+這一份唯一的違規是：版控裡的 tests/test_c.py 在兩片合併收據裡一題都沒有。
+green_must_be_real_green.py::_file_collection_problems 死了，這一份就會變綠。
+從兩片綠控制樹只加一支函式已改名成 check_ 的考卷檔；expected.txt、pytest.args、兩片 junit 與封存內容均照留。
+地板與倍數照留，不推算題數。同一支檔少幾題但沒少光，這一條抓不到，仍靠地板。

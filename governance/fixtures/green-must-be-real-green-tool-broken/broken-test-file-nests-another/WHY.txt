@@ -1,0 +1,6 @@
+這一份唯一的問題是：考卷檔 tests/test_a.py 的模組路徑是 tests/test_a/TestThing_test.py 的前綴。
+收據裡 classname 為 tests.test_a.TestThing_test 的那一題，其實是 test_a.py 裡類別 TestThing_test 的題，
+可是它跟「tests/test_a/ 底下那支 TestThing_test.py 的題」長得一模一樣：取最長符合會讓那支空檔冒領，
+取最短會把有題的檔誤報成沒題（#137 審查實測）。判不出來就不判，所以回 2。
+green_must_be_real_green.py::_assert_test_files_do_not_nest 死了，這一份就會變綠（兩支檔都被當成收到題）。
+其餘底子與 case-test-file-collected-nowhere-single 相同：收據十一題、地板貼齊、倍數照留。

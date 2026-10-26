@@ -1,0 +1,3 @@
+這一份唯一的違規是：pyproject.toml 的 python_files 改了考卷檔的檔名樣式，規則還只認 pytest 預設名單。
+green_must_be_real_green.py::_assert_default_python_files 死了，這一份就會變綠。
+其餘底子與兩片綠控制樹相同；只改未封存的 pytest 設定，不改任何封存內容。

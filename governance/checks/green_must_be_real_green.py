@@ -54,6 +54,20 @@
    兩邊都報。刻意不改成「地板 = 卡數 × 回合數」由機器算：回合數今天是 6，明天多一回合就要
    改程式，而且 ``tests/`` 底下不只後設測試那幾支，算出來的數字會跟實跑數對不上（issue #35）。
 9. ``failures``／``errors`` 都必須是 0。真綠的定義裡沒有「有紅但我當它綠」這一種。
+9-2. 版控掃描面上 ``tests/`` 任意深度、檔名符合 pytest 預設 ``test_*.py`` 或
+   ``*_test.py`` 的每支考卷檔，都要在收據裡收到至少一題；整支沒收到就紅。比的是檔案名單與
+   ``classname`` 名單，不是 #35 否掉的推算總題數。檔案路徑換成模組段後，沿用
+   :func:`_segments` 逐段比 ``classname`` 的前綴，取最長符合；巢狀類別算同一支檔，
+   ``tests.test_ab`` 不算 ``tests/`` 裡的 ``test_a.py``，空 ``classname`` 不算任何檔。零 testcase
+   時這一條不報，只留原本的零收集判準。**抓得到**整支檔沒題（全改名、刪光、被排除或漏收）；
+   **抓不到**同一支檔少幾題但沒少光，仍靠地板；地板與過期倍數照留。輔助檔與
+   ``conftest.py`` 不算考卷。``pyproject.toml`` 若宣告 ``python_files``（``[tool.pytest]`` 那一層或
+   ``ini_options`` 那一層都算），回 2：考卷檔的檔名樣式被改了，這條規則的名單跟著改之前不判。
+   **抓不到**把 ``-o python_files=…`` 寫進 ``addopts`` 或 ``PYTEST_ADDOPTS`` 那一種改法。
+   一支考卷檔的模組路徑是另一支的前綴（``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔）也回 2：
+   那時類別底下的題講不出是哪一支檔的，取最長會讓空檔冒領；兩支檔換成同一條模組路徑（資料夾名字帶點，
+   資料夾 ``a.b`` 與 ``a`` 的子資料夾 ``b`` 各一支 ``test_x.py``）同樣回 2。
+   單機與分片合併收據共用同一份名單。
 
 ``skipped``、收集數 0、``failures``／``errors`` 這三條刻意留在**整份收據**這一層（不逐籃報），
 因為它們判的是 v2 那幾筆事故的形狀——整份收據的 skip／collect error／紅；逐籃報會讓同一筆病依
@@ -121,11 +135,13 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import tomllib
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator
+from fnmatch import fnmatchcase
 from pathlib import Path
 
-from governance.checks.green_finalizer_mode import finalizer_problems, read_settings
+from governance.checks.green_finalizer_mode import JudgeReceipt, finalizer_problems, read_settings
 from governance.exit_codes import ToolBroken, run
 from governance.loader import RULES_DIR, Card, card_problems, load_card
 
@@ -170,6 +186,8 @@ PYTHON_SUFFIX = ".py"
 # 考卷樹在掃描根底下的哪一層。第三組要讀的就是這裡底下的 ``.py``（由 pytest 的 ``testpaths``
 # 決定、寫在 ``pyproject.toml``）。這不是門檻，是這棵樹的座標。
 TEST_DIR = "tests"
+# 這是 pytest 的預設 python_files，不是門檻；設定改過就回 2，不拿舊名單判。
+PYTEST_DEFAULT_PYTHON_FILES = ("test_*.py", "*_test.py")
 
 
 def _segments(dotted: str) -> tuple[str, ...]:
@@ -607,8 +625,107 @@ def _split_testcases(
     return counts, unassigned, unlabelled, cases
 
 
-def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
-    """第一組：收據本身講的是真綠嗎。這裡只讀檔，判樹交給 :func:`_judge_receipt`。"""
+def _collection_files(scan_root: Path, sources: list[Path]) -> tuple[str, ...]:
+    """從已列舉的考卷樹 Python 檔挑 pytest 預設檔名；不額外擴大掃描面。"""
+    return tuple(
+        path.relative_to(scan_root).as_posix() for path in sources
+        if any(fnmatchcase(path.name, pattern) for pattern in PYTEST_DEFAULT_PYTHON_FILES)
+    )
+
+
+def _assert_default_python_files(scan_root: Path, files: list[Path]) -> None:
+    """改過 python_files 就沒有可用的固定名單，判收據之前回 ToolBroken。"""
+    home = scan_root / PYTEST_CONFIG_HOME
+    if home not in files:
+        return
+    try:
+        options = tomllib.loads(_read(home, PYTEST_CONFIG_HOME))
+    except tomllib.TOMLDecodeError as exc:
+        raise ToolBroken(f"{PYTEST_CONFIG_HOME} 不是解得開的 TOML（{exc}）") from exc
+    tables: list[dict[str, object]] = []
+    for key in ("tool", "pytest", "ini_options"):
+        section = options.get(key, {})
+        if not isinstance(section, dict):
+            raise ToolBroken(f"{PYTEST_CONFIG_HOME} 的 {key} 不是設定表，考卷檔的名單判不出來")
+        options = section
+        tables.append(options)
+    # pytest 9 起 [tool.pytest] 那一層本身也收原生設定，跟 ini_options 那一層同一批鍵，所以兩層都看。
+    if any("python_files" in table for table in tables[1:]):
+        raise ToolBroken(
+            f"{PYTEST_CONFIG_HOME} 設了 python_files：考卷檔的檔名樣式被改了，"
+            "這條規則的名單跟著改之前不判（這一跑不算數）"
+        )
+
+
+def _file_modules(test_files: tuple[str, ...]) -> dict[tuple[str, ...], str]:
+    """考卷檔路徑換成模組段（``tests/engine/test_reverberation_cost.py`` → ``("tests", "engine", "test_reverberation_cost")``）。"""
+    return {
+        _segments(path.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR)): path
+        for path in test_files
+    }
+
+
+def _assert_test_files_do_not_nest(test_files: tuple[str, ...]) -> None:
+    """兩支考卷檔換算出同一串模組段，或一支的模組段是另一支的前綴，就回 ToolBroken。
+
+    相同：資料夾名字帶點時（``tests/`` 底下資料夾 ``a.b`` 與 ``a`` 的子資料夾 ``b`` 各一支 ``test_x.py``）兩支都換成
+    ``tests.a.b.test_x``，查表會蓋掉其中一支，把有題的檔誤報成沒題（#137 第二輪審查實測）。
+    前綴：``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔——``tests.test_a.TestThing_test`` 講不出
+    是 ``test_a.py`` 裡的類別，還是 ``test_a/`` 底下那支 ``TestThing_test.py``：取最長會讓空檔冒領別支檔
+    的題，取最短會把有題的檔誤報成沒題（#137 第一輪審查實測）。
+    判不出來就不判，跟籃子前綴撞上模組檔（:func:`_bucket_prefix_collision`）同一個處理。
+    """
+    seen: dict[tuple[str, ...], str] = {}
+    for path in test_files:
+        segments = _segments(path.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR))
+        twin = seen.setdefault(segments, path)
+        if twin != path:
+            raise ToolBroken(
+                f"考卷檔 {twin} 與 {path} 換成模組路徑都是 {MODULE_SEPARATOR.join(segments)}——"
+                "收據裡的 classname 講不出是哪一支檔收到的。判不出來就不判：這一跑不算數。"
+                "改掉其中一支的名字或位置（資料夾名字不要帶點）"
+            )
+    modules = _file_modules(test_files)
+    for segments, inner in modules.items():
+        for depth in range(1, len(segments)):
+            outer = modules.get(segments[:depth])
+            if outer is not None:
+                raise ToolBroken(
+                    f"考卷檔 {outer} 的模組路徑是 {inner} 的前綴——收據裡 {outer} 的類別底下的題，"
+                    f"classname 可能跟 {inner} 的題長得一模一樣，講不出是哪一支檔收到的。"
+                    "判不出來就不判：這一跑不算數。改掉其中一支的名字或位置"
+                )
+
+
+def _file_collection_problems(rel: str, root: ET.Element, test_files: tuple[str, ...]) -> list[str]:
+    """整支檔在收據裡沒題才報；逐段比 classname 前綴，一題只歸最長符合的檔。
+
+    考卷檔換算出相同模組段或互相巢狀時查表會蓋掉或冒領，那兩種樹由 :func:`_assert_test_files_do_not_nest`
+    先回 2；排除之後一個 classname 至多命中一支檔，取最長只是查表的寫法。
+    """
+    cases = list(root.iter("testcase"))
+    if not cases:
+        return []
+    modules = _file_modules(test_files)
+    missing = set(test_files)
+    for case in cases:
+        segments = _segments(case.get("classname") or "")
+        for depth in range(len(segments), 0, -1):
+            matched = modules.get(segments[:depth])
+            if matched is not None:
+                missing.discard(matched)
+                break
+    return [
+        f"{rel} 裡 {path} 一題都沒有——這支考卷檔在版控裡，收據裡卻沒有它的題；"
+        "可能是檔裡的測試全被改名或刪光、被 conftest 排掉、或收集清單沒收它。"
+        "修法是讓它真的有題；若它不是考卷，就改名成非 test_ 開頭且不符合 *_test.py 的輔助檔。"
+        "同一支檔少幾題但沒少光，這一條抓不到，靠的是地板"
+        for path in sorted(missing)
+    ]
+
+
+def _receipt_problems(card: Card, scan_root: Path, judge_receipt: JudgeReceipt) -> list[str]:
+    """第一組：這裡只讀檔，判樹交給 check() 組好的共用判官，不能漏傳檔案名單。"""
     rel = card.junit_path
     target = scan_root / rel
     if not target.is_file():
@@ -616,7 +733,7 @@ def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
             f"卡 {card.id} 宣告的收據 {rel} 不存在——沒有收據就是沒有綠。"
             "「檔不存在就當乾淨」是 v2 假綠的病根，這支檢查也不准自己補一份"
         ]
-    return _judge_receipt(card, rel, _receipt_root(target, rel))
+    return judge_receipt(card, rel, _receipt_root(target, rel))
 
 
 def _judge_receipt(card: Card, rel: str, root: ET.Element) -> list[str]:
@@ -684,14 +801,22 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             f"{scan_root}/{RULES_DIR} 底下沒有任何一張讀得出來的卡宣告 [junit]"
             "——收據路徑與地板只寫在卡上，這支檢查沒有預設值，所以這一跑沒東西可判"
         )
+    _assert_default_python_files(scan_root, files)
+    sources = _test_files(scan_root, files)
+    test_files = _collection_files(scan_root, sources)
+    _assert_test_files_do_not_nest(test_files)
+
+    def judge_receipt(card: Card, rel: str, root: ET.Element) -> list[str]:
+        return _judge_receipt(card, rel, root) + _file_collection_problems(rel, root, test_files)
+
     bad: list[str] = []
     for card in cards:
         # 分籃講不出唯一答案的時候先停：判不出來就不判（回 2），不是挑一邊當答案。
         _assert_buckets_name_directories(card, scan_root, files)
-        finalized = finalizer_problems(card, scan_root, _judge_receipt)
-        bad += _receipt_problems(card, scan_root) if finalized is None else finalized
+        finalized = finalizer_problems(card, scan_root, judge_receipt)
+        bad += _receipt_problems(card, scan_root, judge_receipt) if finalized is None else finalized
         bad += _source_problems(card, scan_root, files)
-        bad += _placement_group_problems(card, scan_root, _test_files(scan_root, files))
+        bad += _placement_group_problems(card, scan_root, sources)
     return bad
 
 
