@@ -12,3 +12,4 @@ input:disabled{background:#edf1f2;color:#53636b;cursor:default}
 #readonly-furniture li{line-height:1.6;margin:.4rem 0}
 #representative-state{align-self:center}
 .shortcut-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+#other-runs{padding-left:1.2rem}#other-runs li{margin:.3rem 0}#other-runs button{margin-left:.6rem;padding:.3rem .7rem}

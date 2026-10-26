@@ -276,8 +276,12 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
         for _ in range(2):
             with page.expect_request(lambda request: request.url == f"{base}/api/runs/{second_id}"):
                 pass
+        # #796：第一筆還在算，換到底下那一列；兩筆都算完後那一列拿掉。
+        page.wait_for_function("() => !document.querySelector('#other-runs').hidden")
+        assert [text.startswith("另一筆：") and "計算中" in text for text in page.locator("#other-runs li").all_inner_texts()] == [True]
         (tmp_path / "release").touch()
         page.locator("#result-link").wait_for(state="visible", timeout=15_000)
+        page.wait_for_function("() => document.querySelector('#other-runs').hidden", timeout=10_000)
         polled: list[str] = []
         page.on("request", lambda request: polled.append(request.url) if "/api/runs/" in request.url else None)
         page.wait_for_timeout(2500)
@@ -599,6 +603,50 @@ def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) 
             if page.request.get(f"{base}/api/runs/{run_id}").json()["status"] == "running":
                 page.request.post(f"{base}/api/runs/{run_id}/stop", data="{}",
                                   headers={"Content-Type": "application/json"})
+
+
+def test_reload_lists_every_running_job_and_follows_the_chosen_one(tmp_path: Path, browser: Browser) -> None:
+    # #796：同時在算兩筆時重新整理，主畫面跟最新開的那一筆，另一筆列在底下；改看那一筆之後停得掉，
+    # 底下換成列原本那一筆；那筆在別處停掉，幾秒內就從底下拿掉。
+    script = tmp_path / "sleep-runner.py"
+    script.write_text("import time\ntime.sleep(60)\n")
+    headers = {"Content-Type": "application/json"}
+    started: list[str] = []
+    with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        try:
+            document = page.request.get(f"{base}/api/example").json()["scheme"]
+            for name in ("older", "newer"):
+                document["scheme_id"] = name
+                assert page.request.put(f"{base}/api/schemes/{name}", data=json.dumps(document), headers=headers).ok
+                reply = page.request.post(f"{base}/api/runs", data=json.dumps({"scheme_id": name}), headers=headers)
+                assert reply.ok
+                started.append(reply.json()["run_id"])
+                time.sleep(0.05)
+            older, newer = started
+            page.reload(wait_until="networkidle")
+            page.wait_for_function("() => !document.querySelector('#other-runs').hidden")
+            assert page.evaluate("() => runId") == newer
+            assert "計算中" in page.locator("#run-state").inner_text()
+            assert [text.startswith("另一筆：「older」計算中") and text.endswith("改看這一筆")
+                    for text in page.locator("#other-runs li").all_inner_texts()] == [True]
+            page.locator("#other-runs button").click()
+            page.wait_for_function("() => document.querySelector('#other-runs').textContent.includes('「newer」')")
+            assert page.evaluate("() => runId") == older
+            assert [text.startswith("另一筆：「newer」計算中")
+                    for text in page.locator("#other-runs li").all_inner_texts()] == [True]
+            page.locator("#stop").click()
+            page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('已停止')")
+            assert page.request.get(f"{base}/api/runs/{older}").json()["status"] != "running"
+            assert page.request.get(f"{base}/api/runs/{newer}").json()["status"] == "running"
+            assert page.request.post(f"{base}/api/runs/{newer}/stop", data="{}", headers=headers).ok
+            page.wait_for_function("() => document.querySelector('#other-runs').hidden", timeout=10_000)
+            assert page.locator("#other-runs li").all_inner_texts() == []
+            _assert_quiet(watched)
+        finally:
+            for run_id in started:
+                if page.request.get(f"{base}/api/runs/{run_id}").json()["status"] == "running":
+                    page.request.post(f"{base}/api/runs/{run_id}/stop", data="{}", headers=headers)
 
 
 def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
