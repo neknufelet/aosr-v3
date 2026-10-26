@@ -733,8 +733,11 @@ def test_switching_twice_before_the_first_answer_leaves_one_poller(tmp_path: Pat
             page.reload(wait_until="networkidle")
             page.wait_for_function("() => document.querySelectorAll('#other-runs li').length >= 2")
             page.evaluate(_GATED_PAGE, f"^/api/runs/{ids['second']}$")
-            for name in clicks:
-                page.locator("#other-runs li", has_text=f"「{name}」").locator("button").click()
+            # 兩下在同一段頁面腳本裡按：中間若輪到每兩秒的清單重問，回來會把正在看的那一列拿掉，同一列的第二下就按不到。
+            page.evaluate("""(names) => {
+              const rows = [...document.querySelectorAll('#other-runs li')];
+              for (const name of names) rows.find((row) => row.textContent.includes(`「${name}」`)).querySelector('button').click();
+            }""", list(clicks))
             page.evaluate("() => openGate()")
             page.wait_for_function("() => window.followsDone >= 2")
             assert page.evaluate("() => runId") == ids[clicks[-1]]
