@@ -378,3 +378,31 @@ def test_real_command_boundary_raises_on_nonzero_and_returns_stdout() -> None:
     with pytest.raises(subprocess.CalledProcessError) as caught:
         _run_command([sys.executable, '-c', 'import sys; sys.stderr.write("boom"); sys.exit(3)'])
     assert caught.value.stderr == 'boom'
+
+
+def test_restore_accepts_a_hash_from_any_stanza_of_that_version(
+    environment: dict[str, str], tmp_path: Path,
+) -> None:
+    """同一版在兩個來源各有一節：第二節對得上也算，不是只看第一節。"""
+    cache = Path(environment['RUNNER_TEMP']) / CACHE_SUBDIR
+    cache.mkdir(parents=True)
+    (cache / 'fonts-a_1.0_all.deb').write_bytes(b'font')
+    commands = PackageCommands(index={'fonts-a:all=1.0': stanza(b'other source') + '\n' + stanza(b'font')})
+    assert invoke('restore', environment, tmp_path, commands) == CLEAN
+    assert commands.copied == ['fonts-a_1.0_all.deb']
+
+
+def test_restore_without_apt_cache_program_is_nonzero(
+    environment: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """apt-cache 這支程式根本不在：不是「索引裡沒有」，要回非零、不放回。"""
+    cache = Path(environment['RUNNER_TEMP']) / CACHE_SUBDIR
+    cache.mkdir(parents=True)
+    (cache / 'fonts-a_1.0_all.deb').write_bytes(b'font')
+
+    def missing_program(argv: Sequence[str]) -> str:
+        raise FileNotFoundError(2, 'No such file or directory', argv[0])
+
+    assert invoke('restore', environment, tmp_path, missing_program) != CLEAN
+    assert 'apt-cache' in capsys.readouterr().err
+    assert not list(tmp_path.glob('*.deb'))

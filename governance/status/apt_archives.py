@@ -58,7 +58,7 @@ def _index_sha256(path: Path, run_command: Callable[[Sequence[str]], str]) -> se
 def restore(runner_temp: Path, archives: Path, run_command: Callable[[Sequence[str]], str]) -> None:
     """先記下 gmsh 等早先下載的包；快取裡的包逐支跟 apt 索引核過雜湊，才交給 apt 的 archives。
 
-    apt 對 archives 裡已有的檔只比檔名與大小就直接用（apt 原始碼 apt-pkg/acquire-item.cc 的
+    apt 對 archives 裡已有的檔只比檔名與大小就直接用（apt 原始碼 apt-pkg 那一層的 acquire-item.cc，
     pkgAcqArchive::QueueNext），不核雜湊；所以雜湊在這裡核。對不上、或索引裡沒有這一版就不放回，
     逐支印出原因，apt 照常下載。
     """
