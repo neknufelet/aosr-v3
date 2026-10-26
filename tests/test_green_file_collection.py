@@ -147,3 +147,11 @@ def test_shared_name_start_is_not_nesting() -> None:
     beside = str(Path('tests') / 'test_ab' / 'test_x.py')
     longer = str(Path('tests') / 'test_a_more.py')
     _assert_test_files_do_not_nest((TEST_A, beside, longer))
+
+
+def test_two_files_with_the_same_module_path_are_tool_broken() -> None:
+    """資料夾名字帶點時兩支檔換成同一串模組段，查表會蓋掉一支、把有題的檔誤報成沒題（#137 第二輪審查）。"""
+    dotted = str(Path('tests') / 'a.b' / 'test_x.py')
+    nested = str(Path('tests') / 'a' / 'b' / 'test_x.py')
+    with pytest.raises(ToolBroken, match='換成模組路徑都是 tests.a.b.test_x'):
+        _assert_test_files_do_not_nest((dotted, nested))

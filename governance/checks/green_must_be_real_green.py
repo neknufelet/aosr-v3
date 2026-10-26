@@ -65,7 +65,8 @@
    ``ini_options`` 那一層都算），回 2：考卷檔的檔名樣式被改了，這條規則的名單跟著改之前不判。
    **抓不到**把 ``-o python_files=…`` 寫進 ``addopts`` 或 ``PYTEST_ADDOPTS`` 那一種改法。
    一支考卷檔的模組路徑是另一支的前綴（``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔）也回 2：
-   那時類別底下的題講不出是哪一支檔的，取最長會讓空檔冒領。
+   那時類別底下的題講不出是哪一支檔的，取最長會讓空檔冒領；兩支檔換成同一條模組路徑（資料夾名字帶點，
+   資料夾 ``a.b`` 與 ``a`` 的子資料夾 ``b`` 各一支 ``test_x.py``）同樣回 2。
    單機與分片合併收據共用同一份名單。
 
 ``skipped``、收集數 0、``failures``／``errors`` 這三條刻意留在**整份收據**這一層（不逐籃報），
@@ -665,12 +666,25 @@ def _file_modules(test_files: tuple[str, ...]) -> dict[tuple[str, ...], str]:
 
 
 def _assert_test_files_do_not_nest(test_files: tuple[str, ...]) -> None:
-    """一支考卷檔的模組段是另一支的前綴就回 ToolBroken（``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔）。
+    """兩支考卷檔換算出同一串模組段，或一支的模組段是另一支的前綴，就回 ToolBroken。
 
-    那時 ``tests.test_a.TestThing_test`` 講不出是 ``test_a.py`` 裡的類別，還是 ``test_a/`` 底下那支
-    ``TestThing_test.py``：取最長會讓空檔冒領別支檔的題，取最短會把有題的檔誤報成沒題（#137 審查實測）。
+    相同：資料夾名字帶點時（``tests/`` 底下資料夾 ``a.b`` 與 ``a`` 的子資料夾 ``b`` 各一支 ``test_x.py``）兩支都換成
+    ``tests.a.b.test_x``，查表會蓋掉其中一支，把有題的檔誤報成沒題（#137 第二輪審查實測）。
+    前綴：``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔——``tests.test_a.TestThing_test`` 講不出
+    是 ``test_a.py`` 裡的類別，還是 ``test_a/`` 底下那支 ``TestThing_test.py``：取最長會讓空檔冒領別支檔
+    的題，取最短會把有題的檔誤報成沒題（#137 第一輪審查實測）。
     判不出來就不判，跟籃子前綴撞上模組檔（:func:`_bucket_prefix_collision`）同一個處理。
     """
+    seen: dict[tuple[str, ...], str] = {}
+    for path in test_files:
+        segments = _segments(path.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR))
+        twin = seen.setdefault(segments, path)
+        if twin != path:
+            raise ToolBroken(
+                f"考卷檔 {twin} 與 {path} 換成模組路徑都是 {MODULE_SEPARATOR.join(segments)}——"
+                "收據裡的 classname 講不出是哪一支檔收到的。判不出來就不判：這一跑不算數。"
+                "改掉其中一支的名字或位置（資料夾名字不要帶點）"
+            )
     modules = _file_modules(test_files)
     for segments, inner in modules.items():
         for depth in range(1, len(segments)):
@@ -686,7 +700,7 @@ def _assert_test_files_do_not_nest(test_files: tuple[str, ...]) -> None:
 def _file_collection_problems(rel: str, root: ET.Element, test_files: tuple[str, ...]) -> list[str]:
     """整支檔在收據裡沒題才報；逐段比 classname 前綴，一題只歸最長符合的檔。
 
-    考卷檔互相巢狀時「最長符合」會讓空檔冒領，那種樹由 :func:`_assert_test_files_do_not_nest`
+    考卷檔換算出相同模組段或互相巢狀時查表會蓋掉或冒領，那兩種樹由 :func:`_assert_test_files_do_not_nest`
     先回 2；排除之後一個 classname 至多命中一支檔，取最長只是查表的寫法。
     """
     cases = list(root.iter("testcase"))
