@@ -8,6 +8,7 @@ import pytest
 
 from governance.checks.green_must_be_real_green import (
     _assert_default_python_files,
+    _assert_test_files_do_not_nest,
     _collection_files,
     _file_collection_problems,
     _test_files,
@@ -132,3 +133,17 @@ def test_python_files_override_is_tool_broken() -> None:
     root = FIXTURES / 'green-must-be-real-green-tool-broken' / 'broken-python-files-overridden'
     with pytest.raises(ToolBroken, match='考卷檔的檔名樣式被改了'):
         check(root, _files(root))
+
+
+def test_nested_test_files_are_tool_broken() -> None:
+    """test_a.py 與 test_a/ 底下的考卷檔並存時，類別底下的題講不出是誰的；取最長會讓空檔冒領（#137 審查）。"""
+    root = FIXTURES / 'green-must-be-real-green-tool-broken' / 'broken-test-file-nests-another'
+    with pytest.raises(ToolBroken, match='的模組路徑是 .* 的前綴'):
+        check(root, _files(root))
+
+
+def test_shared_name_start_is_not_nesting() -> None:
+    """巢狀是逐段比；test_ab/ 底下的檔不算 test_a.py 的下一層，不能誤回 2。"""
+    beside = str(Path('tests') / 'test_ab' / 'test_x.py')
+    longer = str(Path('tests') / 'test_a_more.py')
+    _assert_test_files_do_not_nest((TEST_A, beside, longer))

@@ -64,6 +64,8 @@
    ``conftest.py`` 不算考卷。``pyproject.toml`` 若宣告 ``python_files``（``[tool.pytest]`` 那一層或
    ``ini_options`` 那一層都算），回 2：考卷檔的檔名樣式被改了，這條規則的名單跟著改之前不判。
    **抓不到**把 ``-o python_files=…`` 寫進 ``addopts`` 或 ``PYTEST_ADDOPTS`` 那一種改法。
+   一支考卷檔的模組路徑是另一支的前綴（``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔）也回 2：
+   那時類別底下的題講不出是哪一支檔的，取最長會讓空檔冒領。
    單機與分片合併收據共用同一份名單。
 
 ``skipped``、收集數 0、``failures``／``errors`` 這三條刻意留在**整份收據**這一層（不逐籃報），
@@ -654,15 +656,43 @@ def _assert_default_python_files(scan_root: Path, files: list[Path]) -> None:
         )
 
 
-def _file_collection_problems(rel: str, root: ET.Element, test_files: tuple[str, ...]) -> list[str]:
-    """整支檔在收據裡沒題才報；逐段比 classname 前綴，一題只歸最長符合的檔。"""
-    cases = list(root.iter("testcase"))
-    if not cases:
-        return []
-    modules = {
+def _file_modules(test_files: tuple[str, ...]) -> dict[tuple[str, ...], str]:
+    """考卷檔路徑換成模組段（``tests/engine/test_reverberation_cost.py`` → ``("tests", "engine", "test_reverberation_cost")``）。"""
+    return {
         _segments(path.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR)): path
         for path in test_files
     }
+
+
+def _assert_test_files_do_not_nest(test_files: tuple[str, ...]) -> None:
+    """一支考卷檔的模組段是另一支的前綴就回 ToolBroken（``tests/`` 裡的 ``test_a.py`` 與 ``test_a/`` 底下的考卷檔）。
+
+    那時 ``tests.test_a.TestThing_test`` 講不出是 ``test_a.py`` 裡的類別，還是 ``test_a/`` 底下那支
+    ``TestThing_test.py``：取最長會讓空檔冒領別支檔的題，取最短會把有題的檔誤報成沒題（#137 審查實測）。
+    判不出來就不判，跟籃子前綴撞上模組檔（:func:`_bucket_prefix_collision`）同一個處理。
+    """
+    modules = _file_modules(test_files)
+    for segments, inner in modules.items():
+        for depth in range(1, len(segments)):
+            outer = modules.get(segments[:depth])
+            if outer is not None:
+                raise ToolBroken(
+                    f"考卷檔 {outer} 的模組路徑是 {inner} 的前綴——收據裡 {outer} 的類別底下的題，"
+                    f"classname 可能跟 {inner} 的題長得一模一樣，講不出是哪一支檔收到的。"
+                    "判不出來就不判：這一跑不算數。改掉其中一支的名字或位置"
+                )
+
+
+def _file_collection_problems(rel: str, root: ET.Element, test_files: tuple[str, ...]) -> list[str]:
+    """整支檔在收據裡沒題才報；逐段比 classname 前綴，一題只歸最長符合的檔。
+
+    考卷檔互相巢狀時「最長符合」會讓空檔冒領，那種樹由 :func:`_assert_test_files_do_not_nest`
+    先回 2；排除之後一個 classname 至多命中一支檔，取最長只是查表的寫法。
+    """
+    cases = list(root.iter("testcase"))
+    if not cases:
+        return []
+    modules = _file_modules(test_files)
     missing = set(test_files)
     for case in cases:
         segments = _segments(case.get("classname") or "")
@@ -760,6 +790,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     _assert_default_python_files(scan_root, files)
     sources = _test_files(scan_root, files)
     test_files = _collection_files(scan_root, sources)
+    _assert_test_files_do_not_nest(test_files)
 
     def judge_receipt(card: Card, rel: str, root: ET.Element) -> list[str]:
         return _judge_receipt(card, rel, root) + _file_collection_problems(rel, root, test_files)
