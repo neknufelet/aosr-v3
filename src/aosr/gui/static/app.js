@@ -704,7 +704,6 @@ async function follow(id) {
   await poll();
   // 等回覆時又換了別筆（連按兩個「改看這一筆」）：計時器歸最後換的那一次排，這一次不再排一條（#796 審查）。
   if (runId !== id) return;
-  clearInterval(timer);
   if (!$("stop").disabled) timer = setInterval(() => action(poll), 1000);
   await showOtherRuns();
 }
