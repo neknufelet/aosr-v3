@@ -276,8 +276,12 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
         for _ in range(2):
             with page.expect_request(lambda request: request.url == f"{base}/api/runs/{second_id}"):
                 pass
+        # #796：第一筆還在算，換到底下那一列；兩筆都算完後那一列拿掉。
+        page.wait_for_function("() => !document.querySelector('#other-runs').hidden")
+        assert [text.startswith("另一筆：") and "計算中" in text for text in page.locator("#other-runs li").all_inner_texts()] == [True]
         (tmp_path / "release").touch()
         page.locator("#result-link").wait_for(state="visible", timeout=15_000)
+        page.wait_for_function("() => document.querySelector('#other-runs').hidden", timeout=10_000)
         polled: list[str] = []
         page.on("request", lambda request: polled.append(request.url) if "/api/runs/" in request.url else None)
         page.wait_for_timeout(2500)

@@ -448,10 +448,13 @@ class GuiHandlers:
                              "impedance_labels": labels})
 
     async def schemes(self, request: Request) -> Response:
+        # 要拿工作鎖的路由放到執行緒等鎖：結果清單在執行緒裡持鎖慢讀時，主迴圈不能卡在這裡（#796）。
+        return JSONResponse({"schemes": await run_in_threadpool(self._scheme_names)})
+
+    def _scheme_names(self) -> list[str]:
         with self.jobs._lock:
-            names = sorted(path.stem for path in (self.data_dir / "schemes").glob("*.json")
-                           if SAFE_ID.fullmatch(path.stem))
-        return JSONResponse({"schemes": names})
+            return sorted(path.stem for path in (self.data_dir / "schemes").glob("*.json")
+                          if SAFE_ID.fullmatch(path.stem))
 
     async def scheme_item(self, request: Request) -> Response:
         try:
@@ -531,7 +534,8 @@ class GuiHandlers:
 
     async def runs(self, request: Request) -> Response:
         if request.method == "GET":
-            return JSONResponse(self.jobs.list_recent())
+            # 首頁輪詢會打這裡；同上，放到執行緒等鎖（#796）。
+            return JSONResponse(await run_in_threadpool(self.jobs.list_recent))
         body = cast(object, await request.json())
         if not isinstance(body, dict) or not isinstance(body.get("scheme_id"), str):
             return _bad(ValueError("需要 scheme_id"))
@@ -551,8 +555,8 @@ class GuiHandlers:
         if not re.fullmatch(r"[0-9a-f]{32}", run_id):
             return _bad(ValueError("計算代號無效"))
         try:
-            state = (await run_in_threadpool(self.jobs.stop, run_id) if request.method == "POST"
-                     else self.jobs.get(run_id))
+            # 停與查都拿工作鎖，一律在執行緒裡等（#796）。
+            state = await run_in_threadpool(self.jobs.stop if request.method == "POST" else self.jobs.get, run_id)
             return JSONResponse(state)
         except (ValueError, KeyError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
@@ -563,7 +567,8 @@ class GuiHandlers:
         return self.data_dir / "results" / f"{run_id}.json"
 
     async def results(self, request: Request) -> Response:
-        found = self._result_summaries()
+        # 結果檔多或大時解析要一陣子：放到執行緒讀，主迴圈照樣回別的請求（#796）。
+        found = await run_in_threadpool(self._result_summaries)
         data: dict[str, object] = {"results": [item.model_dump() for item in found]}
         if self._server_stale():
             data["server_notice"] = SERVER_UPDATED
@@ -585,6 +590,10 @@ class GuiHandlers:
                     if archived else found)
 
     async def archive(self, request: Request) -> Response:
+        # 封存清單一樣逐檔解析，跟結果清單同一個理由放到執行緒（#796）。
+        return await run_in_threadpool(self._archive_listing)
+
+    def _archive_listing(self) -> Response:
         try:
             with self.jobs._lock:
                 return JSONResponse(self.archive_delete.listing(
