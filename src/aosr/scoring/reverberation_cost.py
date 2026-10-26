@@ -298,6 +298,13 @@ def reverberation_eligibility_reasons(
         isinstance(center, float) for center in critical_bands
     ):
         raise TypeError("殘響關鍵頻帶必須是浮點數清單")
+    # 資格條目沒有單位欄（#405）：關鍵頻帶只認登記簿的殘響目標中心頻率（那一條標 Hz、讀的時候核單位），
+    # 寫成 kHz 或打錯字時當場報錯，不默默讓每個候選都踩「關鍵頻帶不可估」。
+    unknown = sorted(set(critical_bands) - target_centers)
+    if unknown:
+        raise ValueError(
+            f"殘響關鍵頻帶 {unknown} 不是殘響目標中心頻率（Hz）之一：{sorted(target_centers)}"
+        )
     reasons: list[ReverberationEligibilityReason] = []
     if len(unavailable_centers) > max_unavailable:
         reasons.append(ReverberationEligibilityReason.TOO_MANY_UNAVAILABLE_BANDS)
