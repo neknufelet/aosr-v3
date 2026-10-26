@@ -413,6 +413,16 @@ def test_unavailable_critical_band_blocks_ranking_without_adding_cost() -> None:
     )
 
 
+@pytest.mark.parametrize("critical_bands", [(0.125,), (125.0, 0.25), (120.0,)])
+def test_critical_band_outside_the_target_centers_is_an_error_not_a_silent_failure(
+    critical_bands: tuple[float, ...],
+) -> None:
+    # #405：資格條目沒有單位欄；關鍵頻帶寫成 kHz（0.125）或打錯字（120）時，
+    # 每個候選都會默默踩「關鍵頻帶不可估」。改成當場報錯，指名不認得的那幾個。
+    with pytest.raises(ValueError, match="殘響關鍵頻帶 .* 不是殘響目標中心頻率"):
+        _rank(_reverberation((1.0,) * len(_CENTERS)), _registry(critical_bands=critical_bands))
+
+
 def test_too_few_valid_bands_blocks_ranking_without_adding_cost() -> None:
     _assert_eligibility_failure(
         (1.0,) + (None,) * (len(_CENTERS) - 1),
