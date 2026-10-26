@@ -355,3 +355,37 @@ def test_rerun_state_shows_original_scheme_id_or_invalid_label(tmp_path: Path, r
 def test_rerun_problems_keep_one_per_line() -> None:
     from aosr.gui.app import STATIC
     assert "#rerun-state{white-space:pre-line}" in (STATIC / "style.css").read_text()
+
+
+@pytest.mark.parametrize("route", ["/api/results", "/api/archive"])
+def test_result_lists_are_read_off_the_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                  route: str) -> None:
+    # #796：清單逐檔解析很慢時，別的請求照樣要回；解析卡在主迴圈上的話，名稱表要等清單讀完才回得來。
+    import asyncio
+    import threading
+    from httpx import ASGITransport, AsyncClient
+    from aosr.gui.result_list import ResultSummary
+
+    entered, release = threading.Event(), threading.Event()
+    original = GuiHandlers._result_summaries
+
+    def slow(self: GuiHandlers, archived: bool = False) -> list[ResultSummary]:
+        entered.set()
+        release.wait(5)
+        return original(self, archived)
+
+    monkeypatch.setattr(GuiHandlers, "_result_summaries", slow)
+
+    async def check() -> None:
+        app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+            listing = asyncio.create_task(client.get(route))
+            assert await asyncio.to_thread(entered.wait, 5)
+            labels = await client.get("/api/labels")
+            listing_already_done = listing.done()
+            release.set()
+            assert labels.status_code == 200
+            assert not listing_already_done
+            assert (await listing).status_code == 200
+
+    asyncio.run(check())

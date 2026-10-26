@@ -563,7 +563,8 @@ class GuiHandlers:
         return self.data_dir / "results" / f"{run_id}.json"
 
     async def results(self, request: Request) -> Response:
-        found = self._result_summaries()
+        # 結果檔多或大時解析要一陣子：放到執行緒讀，主迴圈照樣回別的請求（#796）。
+        found = await run_in_threadpool(self._result_summaries)
         data: dict[str, object] = {"results": [item.model_dump() for item in found]}
         if self._server_stale():
             data["server_notice"] = SERVER_UPDATED
@@ -585,6 +586,10 @@ class GuiHandlers:
                     if archived else found)
 
     async def archive(self, request: Request) -> Response:
+        # 封存清單一樣逐檔解析，跟結果清單同一個理由放到執行緒（#796）。
+        return await run_in_threadpool(self._archive_listing)
+
+    def _archive_listing(self) -> Response:
         try:
             with self.jobs._lock:
                 return JSONResponse(self.archive_delete.listing(
