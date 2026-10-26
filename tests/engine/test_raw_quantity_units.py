@@ -98,6 +98,7 @@ def test_raw_quantity_units_match_the_registry(category: str) -> None:
         if quantity.unit != entry.unit:
             mismatched.append((quantity.name, quantity.unit, entry.unit))
     assert mismatched == []
-    # 每一條有門檻的鍵都要真的被這份評估蓋到（只蓋到一部分的話，沒蓋到的那幾條等於沒核）。
+    # 每一條有對應原始量的門檻鍵都要真的被這份評估蓋到（只蓋到一部分的話，沒蓋到的那幾條等於沒核）。
+    # 音色的峰谷深度兩條鍵（peak_depth_db、dip_depth_db）讀的是每個峰谷自己的深度，沒有對應的原始量，不在這裡核。
     assert covered == expected_keys
     assert unmapped <= keyless
