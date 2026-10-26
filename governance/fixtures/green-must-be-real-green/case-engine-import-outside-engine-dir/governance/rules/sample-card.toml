@@ -17,7 +17,7 @@ engine_bucket = "tests.engine."
 
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 16
+collected_floor = 18
 
 [[junit.bucket]]
 prefix = "tests.engine."

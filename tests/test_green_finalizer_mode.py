@@ -25,11 +25,13 @@ WANTED_PACKAGES = "['receipts-123-2-shard-a', 'receipts-123-2-shard-b']"
 WANTED_CASES = [(f'tests.test_{letter}', f'test_{index}') for letter in ('a', 'b') for index in range(9)]
 TEST_A = str(Path('tests') / 'test_a.py')
 TEST_B = str(Path('tests') / 'test_b.py')
+TEST_C = str(Path('tests') / 'test_c.py')
 ARGS_A = (TEST_A + '\n').encode()
 ARGS_BOTH = (TEST_A + '\n' + TEST_B + '\n').encode()
 SHARD_JUNIT_FLAG = f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'
 SHARD_ARGS_FLAG = f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}'
 RED_WORDS = {
+    'case-test-file-collected-nowhere': (f"{MERGED} 裡 {TEST_C} 一題都沒有",),
     'case-part-junit-rewritten-after-pytest': (
         f"片 shard-b {Path(PART_B) / 'steps' / 'pytest.json'}.pytest.output=",
         '正式考卷那一跑結束時的 junit 跟封存的不是同一份：中間有別的步驟重跑或改寫'),
@@ -85,6 +87,7 @@ RED_WORDS = {
     'case-finalizer-formal-receipt-present': ("卡 minimal-card governance/receipts/pytest.junit.xml: 收尾的正式收據在場",),
 }
 BROKEN_WORDS = {
+    'broken-python-files-overridden': '考卷檔的檔名樣式被改了.*名單跟著改之前不判',
     'broken-needs-json-unparseable': re.escape('needs') + '.*JSON',
     'broken-manifest-unparseable': re.escape(str(Path('shard') / 'manifest.json')) + '.*JSON',
     'broken-fixture-run-file-missing-field': re.escape('fixture-finalizer-run.json.env') + '.*' + re.escape("缺 ['GITHUB_RUN_ATTEMPT']；多 []"),
