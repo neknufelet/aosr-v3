@@ -172,6 +172,22 @@ jobs:
       - name: 新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹
         # 層次表與「機器設定」那幾個名字只住在那張卡的 [settings]，這一步讀不到就回 2，不回 0。
         run: uv run python -m governance.status.record_step --name layers_import_downward_only --out-dir governance/receipts/steps -- uv run python -m governance.checks.layers_import_downward_only --scan-root .
+      # #928 老闆 10-26：只快取 Ubuntu 安裝包；25 分鐘、字型與畫面驗收不改。
+      # 鑰匙區分作業系統、映像版本、架構與實裝 playwright；沒有完全相符的快取就照常下載。
+      - name: 計算瀏覽器安裝包快取鑰匙
+        id: apt_archives_key
+        run: uv run python -m governance.status.record_step --name apt_archives_key --out-dir governance/receipts/steps -- uv run python -m governance.status.apt_archives key
+      - name: 讀取瀏覽器安裝包快取
+        id: apt_archives_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/browser-apt-archives
+          key: ${{ steps.apt_archives_key.outputs.key }}
+      # 放回前先記下 gmsh 等先前的安裝包，封存時扣掉；清單在快取目錄外。
+      # 命中也只放回下載檔，而且放回前逐支跟 apt 索引核 SHA256（apt 對已有的檔只比檔名與大小）；
+      # 對不上或索引裡沒有這一版就不放回、逐支印原因，apt 照常下載。安裝與驗收照跑。
+      - name: 放回瀏覽器安裝包並記下先前清單
+        run: uv run python -m governance.status.record_step --name apt_archives_restore --out-dir governance/receipts/steps -- uv run python -m governance.status.apt_archives restore
       - name: 裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）
         # 畫面考卷（引擎那一籃的 test_gui_browser）用無頭 Chromium（Chrome 的核心、不開視窗）開本機網頁；
         # 這裡刻意不寫考卷的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡長得像腳本的 token 收進掃描面。
@@ -179,6 +195,16 @@ jobs:
         # --with-deps 讓 playwright 自己用 apt 補瀏覽器要的系統函式庫；--only-shell 只裝無頭版，不裝有視窗的那一份。
         # 包抄寫員，離開碼進收據；這一步不印判決行，名字登記在 receipt-schema-complete 的 report_optional_names。
         run: uv run python -m governance.status.record_step --name install_browser --out-dir governance/receipts/steps -- uv run playwright install --with-deps --only-shell chromium
+      # 印排序的檔名、大小與實裝套件／字型版本、狀態；下載量與耗時看安裝那一步 apt 的原文。
+      # 沒有安裝包就明確失敗，不能存空快取；考卷前存好，考卷後來逾時也已留存。
+      - name: 封存瀏覽器安裝包並記錄實裝版本
+        run: uv run python -m governance.status.record_step --name apt_archives_stash --out-dir governance/receipts/steps -- uv run python -m governance.status.apt_archives stash
+      - name: 儲存瀏覽器安裝包快取（僅未命中）
+        if: steps.apt_archives_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/browser-apt-archives
+          key: ${{ steps.apt_archives_key.outputs.key }}
       # 新 checkout 的證據目錄由清點自行新建；非空即回 2，不換提交。
       - name: 全套清點與分片參數
         run: uv run python -m governance.status.record_step --name prepare --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_prepare --shard shard-a

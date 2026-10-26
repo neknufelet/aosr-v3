@@ -290,6 +290,8 @@ push_max_attempts = 5
 # 兩片的失敗證據上傳（收尾的步驟條件不在這裡，由 finalizer_jobs 的 step_if 管）。
 [settings.allowed_required_step_ifs.shard-a]
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
+# #928：官方快取不可覆寫，只有完全未命中才儲存；安裝與驗收步驟不加條件。
+"儲存瀏覽器安裝包快取（僅未命中）" = "steps.apt_archives_cache.outputs.cache-hit != 'true'"
 
 [settings.allowed_required_step_ifs.shard-b]
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"

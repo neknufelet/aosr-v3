@@ -119,3 +119,62 @@ def test_shard_pytest_and_finalizer_match_registries() -> None:
     verdict = _recorded(finalizer)['green_must_be_real_green']
     assert verdict['run'] == registration['verdict_run']
     assert cast(dict[str, str], verdict['env'])[registration['verdict_env_name']] == registration['verdict_env_value']
+
+
+def test_browser_archive_cache_order_and_exact_restore() -> None:
+    """#928：只在 a 片、安裝前放回，考卷前存好；命中仍跑原來的安裝命令。"""
+    jobs = _jobs()
+    steps = _steps(jobs['shard-a'])
+    records = _recorded(jobs['shard-a'])
+    restore = next(step for step in steps if step.get('uses') == 'actions/cache/restore@v4')
+    save = next(step for step in steps if step.get('uses') == 'actions/cache/save@v4')
+    sequence = [records['apt_archives_key'], restore, records['apt_archives_restore'],
+                records['install_browser'], records['apt_archives_stash'], save]
+    start = steps.index(sequence[0])
+    assert steps[start:steps.index(save) + 1] == sequence
+    assert steps.index(save) < steps.index(records['pytest'])
+    key = records['apt_archives_key']
+    assert key['id'] == 'apt_archives_key'
+    assert restore['id'] == 'apt_archives_cache'
+    for step in (restore, save):
+        options = cast(dict[str, str], step['with'])
+        assert options['key'] == '${{ steps.apt_archives_key.outputs.key }}'
+        assert 'restore-keys' not in options
+    assert save['with'] == restore['with']
+    assert save['if'] == "steps.apt_archives_cache.outputs.cache-hit != 'true'"
+    ci = tomllib.loads((ROOT / 'governance/rules/ci-jobs-cannot-die-quietly.toml').read_text(encoding='utf-8'))
+    assert save['if'] == ci['settings']['allowed_required_step_ifs']['shard-a'][save['name']]
+    assert records['install_browser']['run'] == (
+        'uv run python -m governance.status.record_step --name install_browser '
+        '--out-dir governance/receipts/steps -- uv run playwright install --with-deps --only-shell chromium'
+    )
+    for command in ('key', 'restore', 'stash'):
+        step = records[f'apt_archives_{command}']
+        assert step['run'] == (
+            f'uv run python -m governance.status.record_step --name apt_archives_{command} '
+            f'--out-dir governance/receipts/steps -- uv run python -m governance.status.apt_archives {command}'
+        )
+        assert 'if' not in step
+    assert all('apt_archives' not in str(step) and 'actions/cache/' not in str(step)
+               for step in _steps(jobs['shard-b']))
+
+
+def test_browser_archive_cache_path_matches_module() -> None:
+    """#928：快取 action 與模組必須讀寫同一個暫存子目錄。"""
+    from governance.status.apt_archives import CACHE_SUBDIR
+
+    steps = _steps(_jobs()['shard-a'])
+    cache_steps = [step for step in steps if str(step.get('uses', '')).startswith('actions/cache/')]
+    assert cache_steps
+    for step in cache_steps:
+        assert cast(dict[str, str], step['with'])['path'] == f'${{{{ runner.temp }}}}/{CACHE_SUBDIR}'
+
+
+def test_browser_archive_records_are_registered_without_verdict_lines() -> None:
+    """#928：實際抄寫名單與收據規矩同步，新增的套件紀錄不冒充治理判決。"""
+    settings = tomllib.loads((ROOT / 'governance/rules/receipt-schema-complete.toml').read_text(encoding='utf-8'))
+    names = set(settings['settings']['report_optional_names'])
+    for command in ('key', 'restore', 'stash'):
+        name = f'apt_archives_{command}'
+        assert name in _recorded(_jobs()['shard-a'])
+        assert name in names
