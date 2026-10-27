@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """決策紙一題一檔：格式齊、狀態只認三個值、取代關係雙向、鏈不成環、同題只一份生效。
 
-決策紙 docs/decisions/one-decision-one-paper-may-merge-many.md 的機器版。掃描面是活的與封存的決策紙那兩層的 md
+決策紙 docs/decisions/docs-classes-decision-papers-and-entry-files.md 的機器版。掃描面是活的與封存的決策紙那兩層的 md
 （哪兩層寫在卡上）加上所有規矩卡（必填欄位與段落名住在卡上，這支檢查要打開每一張卡去找
 自己那一張）。名單全部只寫在卡的 ``[settings]``，讀不到就回 2（工具自壞），不回 0。
 
