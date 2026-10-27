@@ -471,7 +471,9 @@ prefix = "tests.engine."
 # 只有 manifest 已在時一個檔都不新建 1 題、相鄰 1/3 八度帶共用界值且界上頻點兩帶都算 1 題；未移除。單行程 collect-only 實數 9797。
 # 9797→9802：#562 第二支鏡像法反射振幅的 JAX 版——雙精度子行程一題（契約、dtype、jit／vmap、梯度）、單精度有限與直達恰 1 一題、
 # 單精度 jit／vmap 逐位一題、路徑表拒收一題、變異考卷一題；未移除。單行程 collect-only 實數 9802。
-collected_floor = 9802
+# 9802→9804：#562 審查修補——沒用到的反彈格填 −ρc 等值時梯度有限且恰為 0 一題、裁判的零值政策（參考反射乘積恰為 0）一題；未移除。
+# 單行程 collect-only 實數 9804。
+collected_floor = 9804
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

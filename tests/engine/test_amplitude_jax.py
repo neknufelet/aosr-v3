@@ -22,6 +22,7 @@ import math
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -60,7 +61,12 @@ def _stub_paths(order: list[int], delay: list[float], refl: np.ndarray, pressure
 
 def contract_violations(reference: dict[str, np.ndarray], candidate: dict[str, np.ndarray], order: list[int],
                         delay: list[float], frequencies: tuple[float, ...], base: float) -> tuple[list[str], dict[str, float]]:
-    """候選對參考逐格比；回（超界清單、每種量「差÷界線」最大值）。參考值是現有 Python 雙精度實作。"""
+    """候選對參考逐格比；回（超界清單、每種量「差÷界線」最大值）。參考值是現有 Python 雙精度實作。
+
+    零值政策：參考的反射乘積恰為 0 時（例如垂直入射打到 Z=ρc 的牆），壓力界線公式的 1/|反射乘積| 那一項沒定義，
+    那一格的反射乘積與壓力界線都當 0——差也必須恰為 0 才過；總壓力與反射能量的平方相加只收那個頻點反射乘積
+    非零的路徑（零的那幾條已在逐格要求差恰為 0）；反射路徑壓力和恰為 0 時反射能量界線也當 0。
+    """
     paths = _stub_paths(order, delay, reference["refl"], reference["pressure"])
     violations: list[str] = []
     worst = dict.fromkeys(("refl", "pressure", "total", "direct_energy", "reflected_energy"), 0.0)
@@ -73,21 +79,24 @@ def contract_violations(reference: dict[str, np.ndarray], candidate: dict[str, n
     for i, path in enumerate(paths):
         for k, f in enumerate(frequencies):
             ref, got = reference["refl"][i, k], candidate["refl"][i, k]
-            bound = amp.reflection_tolerance(f, path.delay_s, abs(ref), base)
+            zero = ref == 0
+            bound = 0.0 if zero else amp.reflection_tolerance(f, path.delay_s, abs(ref), base)
             for slot, a, b in (("real", ref.real, got.real), ("imag", ref.imag, got.imag)):
                 judge("refl", f"[{i},{k}].{slot}", abs(a - b), bound)
             p_ref = reference["pressure"][i, k]
-            rel = amp.pressure_tolerance(f, path.delay_s, abs(ref), base)
+            rel = 0.0 if zero else amp.pressure_tolerance(f, path.delay_s, abs(ref), base)
             judge("pressure", f"[{i},{k}]", abs(candidate["pressure"][i, k] - p_ref), rel * abs(p_ref))
     for k in range(len(frequencies)):
+        live = [p for p in paths if p.reflection_product[k] != 0]
         judge("total", f"[{k}]", abs(candidate["total"][k] - reference["total"][k]),
-              tot.total_pressure_tolerance(paths, k, frequencies, base))
+              tot.total_pressure_tolerance(live, k, frequencies, base))
         direct = reference["direct_energy"][k]
         judge("direct_energy", f"[{k}]", abs(candidate["direct_energy"][k] - direct),
               tot.direct_energy_tolerance(paths, k, frequencies, base) * direct)
         reflected = reference["reflected_energy"][k]
-        judge("reflected_energy", f"[{k}]", abs(candidate["reflected_energy"][k] - reflected),
-              tot.reflected_energy_tolerance(paths, k, frequencies, base, base) * reflected)
+        reflected_bound = 0.0 if reflected == 0 else (
+            tot.reflected_energy_tolerance(live, k, frequencies, base, base) * reflected)
+        judge("reflected_energy", f"[{k}]", abs(candidate["reflected_energy"][k] - reflected), reflected_bound)
     return violations, worst
 
 
@@ -233,6 +242,75 @@ def test_path_table_rejects_bad_inputs(tmp_path: Path) -> None:
     without_direct = aj.build_path_table([p for p in paths if p.order > 0], receiver, (125.0,))
     with pytest.raises(ValueError, match="直達路徑不是恰好一條"):
         without_direct.direct_index()
+
+
+def _gradient_energy(table: aj.PathTable, rho_c: float) -> Callable[[jax.Array], jax.Array]:
+    def energy(z: jax.Array) -> jax.Array:
+        result = aj.amplitudes(table, z, rho_c)
+        return jnp.sum(jnp.abs(result.total_pressure) ** 2) + jnp.sum(result.reflected_energy)
+    return energy
+
+
+def test_unused_bounce_cells_never_poison_gradient(tmp_path: Path) -> None:
+    """抓：沒用到的反彈格在遮罩之前就做除法——那一格填 −ρc（cos 填 1，分母恰為 0）時前向照樣有限，梯度卻整個變 NaN。
+
+    沒用到的格填 −ρc、任意值與正常值三種，eager 與 jit 的梯度都要全部有限、沒用到的格梯度恰為 0、
+    有用的格梯度與前向結果跟填正常值時逐位相同。
+    """
+    _paths, table, z_wall, rho_c = _flat_case(tmp_path)
+    base = np.asarray(aj.bounce_impedances(table, jnp.asarray(z_wall)))
+    unused = ~table.bounce_mask
+    assert unused.any(), "路徑表沒有沒用到的格，這題測不到東西"
+    energy = _gradient_energy(table, rho_c)
+    runs = {}
+    for label, fill in (("normal", complex(4.0 * rho_c, 0.0)), ("minus_rho_c", complex(-rho_c, 0.0)),
+                        ("arbitrary", complex(-123.0, 45.0))):
+        z = base.copy()
+        z[unused] = fill
+        eager = np.asarray(jax.grad(energy)(jnp.asarray(z)))
+        jitted = np.asarray(jax.jit(jax.grad(energy))(jnp.asarray(z)))
+        assert np.isfinite(eager).all() and np.isfinite(jitted).all(), label
+        assert (eager[unused] == 0).all() and (jitted[unused] == 0).all(), label
+        runs[label] = (eager, jitted, aj.amplitudes(table, jnp.asarray(z), rho_c))
+    reference_eager, reference_jit, reference_out = runs["normal"]
+    used = table.bounce_mask
+    for label, (eager, jitted, out) in runs.items():
+        assert eager[used].tobytes() == reference_eager[used].tobytes(), label
+        assert jitted[used].tobytes() == reference_jit[used].tobytes(), label
+        assert all(np.asarray(a).tobytes() == np.asarray(b).tobytes() for a, b in zip(out, reference_out, strict=True)), label
+
+
+def test_contract_judge_zero_reference_policy(tmp_path: Path) -> None:
+    """抓：參考反射乘積恰為 0（垂直入射打到 Z=ρc 的牆）時裁判除以零炸掉，或把零當成不用比。
+
+    聲源與接收點在同一條垂直線上，地板與天花板一階路徑垂直入射；六面牆 Z=ρc，那兩條的反射乘積恰為 0。
+    自己比自己要過；那一格的反射乘積或壓力推一點點要紅。
+    """
+    path = tmp_path / "room-flat.json"
+    path.write_text(json.dumps(_input_case("flat"), sort_keys=True), encoding="utf-8")
+    inp = load_room_input(path)
+    assert inp.materials is not None
+    rho_c, frequencies = inp.materials.rho_c, inp.materials.frequencies_hz
+    walls = {wall: (complex(rho_c, 0.0),) * len(frequencies) for wall in amp.CANONICAL_WALLS}
+    source = replace(inp.source, z=inp.room.Lz * 0.25)
+    receiver = replace(source, z=inp.room.Lz * 0.75)
+    paths = image_source_paths(inp.room, source, receiver, inp.sound_speed, 1,
+                               amp.Materials(rho_c, frequencies, walls))
+    reference = _python_reference(paths)
+    zeros = np.argwhere(reference["refl"] == 0)
+    assert zeros.size, "沒有反射乘積恰為 0 的格，這題測不到零值政策"
+    i, k = (int(v) for v in zeros[0])
+    order, delay = [p.order for p in paths], [p.delay_s for p in paths]
+    clean, _ = contract_violations(reference, reference, order, delay, frequencies, _BASE)
+    assert clean == []
+    nudged_refl = {**reference, "refl": reference["refl"].copy()}
+    nudged_refl["refl"][i, k] = complex(5e-324, 0.0)
+    violations, _ = contract_violations(reference, nudged_refl, order, delay, frequencies, _BASE)
+    assert any(v.startswith(f"refl[{i},{k}]") for v in violations), violations
+    nudged_pressure = {**reference, "pressure": reference["pressure"].copy()}
+    nudged_pressure["pressure"][i, k] = complex(5e-324, 0.0)
+    violations, _ = contract_violations(reference, nudged_pressure, order, delay, frequencies, _BASE)
+    assert any(v.startswith(f"pressure[{i},{k}]") for v in violations), violations
 
 
 # ── 變異考卷 ──────────────────────────────────────────────────────────────────

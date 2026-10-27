@@ -52,7 +52,8 @@ class PathTable:
     """固定路徑表：全是 CPU 雙精度算好的 numpy 常數，``P`` 條路徑、每條最多 ``B`` 次反彈、``F`` 個頻點。
 
     ``bounce_wall`` 是牆在 :data:`aosr.physics.amplitude.CANONICAL_WALLS` 裡的序號；沒用到的反彈格
-    ``bounce_mask`` 為 False，牆序號填 0、cos 填 1（只為了讓沒選到的那一支分母有限，梯度不出 NaN）。
+    ``bounce_mask`` 為 False，牆序號填 0、cos 填 1；那幾格的 Z 在 :func:`reflection_products` 裡先換成 ρc 再算，
+    所以不管呼叫端在那裡填什麼，前向與梯度都有限、梯度恰為 0。
     ``inverse_distance`` 是 ``1/dist``、``phase`` 是 ``exp(−i·2πf·τ)``，跟現有壓力算式同一種寫法先算好。
     要 ``jax.jit`` 就用閉包把整張表帶進去（陣列成為編譯常數），不要當成要追蹤的參數。
     """
@@ -205,7 +206,10 @@ def reflection_products(table: PathTable, z_bounce: jax.Array, rho_c: float) -> 
         raise ValueError(f"逐反彈阻抗的形狀要是 (…, {expected[0]}, {expected[1]}, {expected[2]})，收到 {z.shape}")
     cos = jnp.asarray(table.bounce_cos, dtype=_real_dtype(z))[:, :, None]
     mask = jnp.asarray(table.bounce_mask)[:, :, None]
-    z_cos = z * cos
+    # 沒用到的反彈格先換成 ρc 再除：除法若在 where 之後才遮，那一格的 Z 剛好是 −ρc 時前向有限、梯度卻是 NaN，
+    # 而且 NaN 會經過 where 的反向傳遍整個梯度。換成 ρc 後那一格的 R 有限，梯度恰為 0。
+    z_safe = jnp.where(mask, z, jnp.asarray(rho_c, dtype=z.dtype))
+    z_cos = z_safe * cos
     r = jnp.where(mask, (z_cos - rho_c) / (z_cos + rho_c), jnp.ones((), dtype=z.dtype))
     product = jnp.ones(z.shape[:-3] + (expected[0], expected[2]), dtype=z.dtype)
     for bounce in range(expected[1]):
