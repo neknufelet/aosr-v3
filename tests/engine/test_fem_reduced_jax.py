@@ -152,6 +152,7 @@ def test_template_chain_matches_numpy_and_has_two_live_gradients(model: ReducedM
     """玻璃棉＋空腔與穿孔板各一個厚度探點：對獨立重建構造的中央差分，兩面兩邊都非零。"""
     row = runs["templates"]
     mask = np.asarray(row["mask"], dtype=bool)
+    assert row["mask_from_templates_identical"] is True and mask.tolist() == [False, True, True, True, False, True]
     z = _decode(row["impedances"])
     assert _within(_decode(row["pressure"]), _numpy(model, z, mask))
     assert _within(_decode(row["jit"]), _decode(row["pressure"]))
@@ -217,13 +218,31 @@ def test_single_precision_in_parent_process(model: ReducedModel) -> None:
 def test_rejects_shapes_and_frequency_mismatch(model: ReducedModel) -> None:
     """抓非六面、缺頻點、批次誤塞、遮罩形狀及常數矩陣形狀錯誤。"""
     constants = reduced.reduced_constants(model)
+    none_rigid = jnp.zeros(6, dtype=bool)
     for shape in ((5, len(AXIS)), (6,), (6, len(AXIS) - 1), (2, 6, len(AXIS))):
         with pytest.raises(ValueError, match="形狀"):
-            reduced.reduced_pressures(constants, jnp.ones(shape, dtype=jnp.complex64))
+            reduced.reduced_pressures(constants, jnp.ones(shape, dtype=jnp.complex64), rigid_mask=none_rigid)
     with pytest.raises(ValueError, match="遮罩"):
         reduced.wall_coefficients(constants, jnp.ones((6, len(AXIS)), dtype=jnp.complex64), rigid_mask=jnp.zeros(5, dtype=bool))
     with pytest.raises(TypeError, match="複數"):
-        reduced.reduced_pressures(constants, jnp.ones((6, len(AXIS)), dtype=jnp.int32))
+        reduced.reduced_pressures(constants, jnp.ones((6, len(AXIS)), dtype=jnp.int32), rigid_mask=none_rigid)
+
+
+def test_mask_cannot_be_omitted_and_template_bundle_is_finite(model: ReducedModel) -> None:
+    """審查反例：樣板入口給零當剛性佔位，省略遮罩曾靜默算出全 NaN；現在遮罩必填、樣板一包交出。"""
+    constants = reduced.reduced_constants(model)
+    z, mask = _case("several_rigid")
+    values = jnp.asarray(z, dtype=jnp.complex64)
+    with pytest.raises(TypeError, match="rigid_mask"):
+        reduced.reduced_pressures(constants, values)  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="rigid_mask"):
+        reduced.wall_coefficients(constants, values)  # type: ignore[call-arg]
+    bundle = reduced.TemplateImpedances(values, jnp.asarray(mask))
+    pressure = reduced.reduced_pressures(constants, bundle.values, rigid_mask=bundle.rigid_mask)
+    assert np.isfinite(np.asarray(pressure)).all()
+    # 同一組零佔位、遮罩寫成全 False（就是「忘了遮」的意思）：係數必須非有限，證明遮罩不是裝飾。
+    coefficients = reduced.wall_coefficients(constants, values, rigid_mask=jnp.zeros(6, dtype=bool))
+    assert not np.isfinite(np.asarray(coefficients)[:, mask]).all()
     with pytest.raises(ValueError, match="矩陣"):
         reduced.reduced_constants(replace(model, matrices=replace(model.matrices, boundary=model.matrices.boundary[:5])))
     with pytest.raises(ValueError, match="頻率軸"):

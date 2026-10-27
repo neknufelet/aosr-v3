@@ -64,7 +64,7 @@ def _rejections(templates: tuple[ConstructionTemplate | None, ...], parameters: 
                 frequencies: jax.Array) -> dict[str, str]:
     air = load_physics_constants(config_path("physics_constants.toml"))
     def run(t: tuple[ConstructionTemplate | None, ...], p: Parameters, f: jax.Array) -> jax.Array:
-        return reduced.wall_impedances_from_templates(t, p, f, air=air)
+        return reduced.wall_impedances_from_templates(t, p, f, air=air).values
     bad_keys = ({"wrong": jnp.asarray(0.05)}, *parameters[1:])
     bad_rigid = (*parameters[:1], {"wrong": jnp.asarray(0.05)}, *parameters[2:])
     calls: dict[str, Callable[[], object]] = {
@@ -89,10 +89,9 @@ def _template_gradients(constants: reduced.ReducedConstants, templates: tuple[Co
                         parameters: Parameters, step: float) -> list[Record]:
     air = load_physics_constants(config_path("physics_constants.toml"))
     frequencies = jnp.asarray(constants.frequencies_hz)
-    mask = reduced.rigid_mask_from_templates(templates)
     def energy(values: Parameters) -> jax.Array:
-        z = reduced.wall_impedances_from_templates(templates, values, frequencies, air=air)
-        return jnp.sum(jnp.abs(reduced.reduced_pressures(constants, z, rigid_mask=mask)) ** 2)
+        walls = reduced.wall_impedances_from_templates(templates, values, frequencies, air=air)
+        return jnp.sum(jnp.abs(reduced.reduced_pressures(constants, walls.values, rigid_mask=walls.rigid_mask)) ** 2)
     gradient = jax.jit(jax.grad(energy))(parameters)
     rows = []
     for wall, name in ((0, "layer2.thickness_m"), (4, "layer1.thickness_m")):
@@ -101,7 +100,7 @@ def _template_gradients(constants: reduced.ReducedConstants, templates: tuple[Co
         variable = next(v for v in template.variables if v.name == name)
         impedances = []
         for sign in (1.0, -1.0):
-            z = np.asarray(reduced.wall_impedances_from_templates(templates, parameters, frequencies, air=air)).copy()
+            z = np.asarray(reduced.wall_impedances_from_templates(templates, parameters, frequencies, air=air).values).copy()
             layers = list(template.material.layers)
             layer = layers[variable.layer_index - 1]
             layers[variable.layer_index - 1] = layer.model_copy(update={variable.field: variable.baseline * (1.0 + sign * step)})
@@ -125,17 +124,19 @@ def _templates(constants: reduced.ReducedConstants, step: float) -> Record:
     panel = build_template(adapter.validate_python(presets["perforated_0p8mm_d10_gw24k_50mm"]), frequencies, air=air, ranges=ranges)
     templates = (glass, None, None, None, panel, None)
     parameters = tuple({} if t is None else t.baseline_parameters() for t in templates)
-    mask = reduced.rigid_mask_from_templates(templates)
+    bundle = reduced.wall_impedances_from_templates(templates, parameters, frequencies, air=air)
     def pressures(values: Parameters, axis: jax.Array) -> jax.Array:
-        z = reduced.wall_impedances_from_templates(templates, values, axis, air=air)
-        return reduced.reduced_pressures(constants, z, rigid_mask=mask)
+        # 樣板那一包直接交進求值：阻抗與遮罩同一包，沒有第二條路可以漏接遮罩。
+        walls = reduced.wall_impedances_from_templates(templates, values, axis, air=air)
+        return reduced.reduced_pressures(constants, walls.values, rigid_mask=walls.rigid_mask)
     compiled = jax.jit(pressures)
     single = jax.tree.map(lambda value: value.astype(jnp.float32), parameters)
     single_frequencies = frequencies.astype(jnp.float32)
     single_gradient = jax.jit(jax.grad(lambda p: jnp.sum(jnp.abs(pressures(p, single_frequencies)) ** 2)))(single)
     return {
-        "mask": np.asarray(mask).tolist(),
-        "impedances": _bits(reduced.wall_impedances_from_templates(templates, parameters, frequencies, air=air)),
+        "mask": np.asarray(bundle.rigid_mask).tolist(),
+        "mask_from_templates_identical": np.asarray(bundle.rigid_mask).tolist() == np.asarray(reduced.rigid_mask_from_templates(templates)).tolist(),
+        "impedances": _bits(bundle.values),
         "pressure": _bits(pressures(parameters, frequencies)),
         "jit": _bits(compiled(parameters, frequencies)), "jit_again": _bits(compiled(parameters, frequencies)),
         "single": _bits(compiled(single, single_frequencies)),
@@ -158,7 +159,8 @@ def main(directory: Path, step: float) -> None:
         output[name] = _case(constants, z, jnp.asarray(row["mask"]))
     output["templates"] = _templates(constants, step)
     compiled = jax.jit(reduced.reduced_pressures)
-    output["materials"] = {"pressures": [_bits(compiled(constants, jnp.asarray([walls[w] for w in Wall.all()])))
+    none_rigid = jnp.zeros((len(Wall.all()),), dtype=bool)
+    output["materials"] = {"pressures": [_bits(compiled(constants, jnp.asarray([walls[w] for w in Wall.all()]), rigid_mask=none_rigid))
         for walls in [*TRAINING, *HOLDOUT]]}
     (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
 

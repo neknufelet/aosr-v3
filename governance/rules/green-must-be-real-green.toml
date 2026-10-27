@@ -476,7 +476,9 @@ prefix = "tests.engine."
 # 9804→9823：#561 替身求值可微路——同一份小房間替身、雙精度對 numpy、單精度與編譯重跑、
 # Z 實虛部與兩面不同構造的參數梯度、剛性安全遮罩、形狀及參數拒收、全批訓練與留出、變異考卷；未移除。
 # 單行程 collect-only 逐檔加總實數 9823（新檔 19 題）。
-collected_floor = 9823
+# 9823→9824：#561 審查修補——遮罩改必填、樣板一包交出，省略遮罩要報錯、全 False 遮罩下零佔位係數非有限一題；未移除。
+# 單行程 collect-only 逐檔加總實數 9824。
+collected_floor = 9824
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

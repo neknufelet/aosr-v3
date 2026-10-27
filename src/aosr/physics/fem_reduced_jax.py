@@ -6,8 +6,9 @@
 精度跟阻抗輸入走，矩陣乘法指定最高精度；本模組不改全域設定。
 
 牆序固定 ``Wall.all()``。剛性面由 ``rigid_mask`` 明確標示，除法前先換成安全分母，
-所以那面的係數與梯度恰為零，即使該列阻抗填零或非有限數也不污染其他面。
-六面樣板入口回 ``(6,F)`` 阻抗，另用 :func:`rigid_mask_from_templates` 取得同一組遮罩。
+所以那面的係數與梯度恰為零，即使該列阻抗填零或非有限數也不污染其他面。遮罩是**必填**：
+沒有「不給就當全部不剛性」的預設——六面樣板入口把零佔位的剛性面與遮罩一包
+（:class:`TemplateImpedances`）交出，漏接遮罩會在呼叫時就被擋，不會靜默算出 jωρ/0。
 求值只檢查靜態形狀與型別；頻率、空氣、材料參數與未遮阻抗的合法值由呼叫端守。
 決策紙 ``docs/decisions/fem-reduced-model-jax-evaluation-for-stage-three.md``。
 """
@@ -45,6 +46,13 @@ class ReducedConstants(NamedTuple):
     wall_numerator: NDArray[np.complex128]
 
 
+class TemplateImpedances(NamedTuple):
+    """六面樣板算出的阻抗 ``(6,F)`` 與同一組剛性遮罩 ``(6,)``：一包交出，求值入口兩個一起收。"""
+
+    values: jax.Array
+    rigid_mask: jax.Array
+
+
 def reduced_constants(model: ReducedModel) -> ReducedConstants:
     """打包已建替身；k² 與 jωρ 用 numpy 唯一那份係數入口，單位阻抗得到分子。"""
     axis = checked_axis(model.frequencies_hz)
@@ -78,10 +86,10 @@ def _checked_impedances(constants: ReducedConstants, impedance_by_wall: jax.Arra
 
 
 def wall_coefficients(constants: ReducedConstants, impedance_by_wall: jax.Array, *,
-                      rigid_mask: jax.Array | None = None) -> jax.Array:
-    """``(6,F)`` 阻抗 → ``(F,6)`` 的 jωρ/Z；可選 ``(6,)`` 布林遮罩，True 是剛性。"""
+                      rigid_mask: jax.Array) -> jax.Array:
+    """``(6,F)`` 阻抗 → ``(F,6)`` 的 jωρ/Z；``(6,)`` 布林遮罩必填，True 是剛性（全不剛性就給全 False）。"""
     z = _checked_impedances(constants, impedance_by_wall)
-    mask = jnp.zeros((len(Wall.all()),), dtype=bool) if rigid_mask is None else jnp.asarray(rigid_mask)
+    mask = jnp.asarray(rigid_mask)
     if mask.shape != (len(Wall.all()),) or mask.dtype != jnp.bool_:
         raise ValueError("剛性遮罩必須是 (6,) 布林陣列")
     safe = jnp.where(mask[:, None], jnp.ones((), dtype=z.dtype), z)
@@ -90,8 +98,8 @@ def wall_coefficients(constants: ReducedConstants, impedance_by_wall: jax.Array,
 
 
 def reduced_pressures(constants: ReducedConstants, impedance_by_wall: jax.Array, *,
-                      rigid_mask: jax.Array | None = None) -> jax.Array:
-    """逐頻解小系統，回（頻率,喇叭,座位）複數聲壓；可 jit、grad 與外層 vmap。"""
+                      rigid_mask: jax.Array) -> jax.Array:
+    """逐頻解小系統，回（頻率,喇叭,座位）複數聲壓；可 jit、grad 與外層 vmap。遮罩必填。"""
     z = _checked_impedances(constants, impedance_by_wall)
     coefficients = wall_coefficients(constants, z, rigid_mask=rigid_mask)
     real_dtype = z.real.dtype
@@ -118,13 +126,13 @@ def rigid_mask_from_templates(templates: Sequence[ConstructionTemplate | None]) 
 def wall_impedances_from_templates(
     templates: Sequence[ConstructionTemplate | None], parameters: Sequence[Mapping[str, jax.Array]],
     frequencies: jax.Array, *, air: PhysicsConstants,
-) -> jax.Array:
-    """六面構造參數 → 垂直入射阻抗 ``(6,F)``；None 面填零、參數必須空字典。
+) -> TemplateImpedances:
+    """六面構造參數 → 垂直入射阻抗 ``(6,F)`` 與剛性遮罩一包；None 面填零、參數必須空字典。
 
-    零是剛性面的佔位值，求值時必須同時給 ``rigid_mask_from_templates(templates)``；
+    零只是剛性面的佔位值，遮罩跟阻抗同一包交出、求值時兩個一起給；
     不以無窮大代表剛性，避免除法反向傳播產生非有限梯度。
     """
-    rigid_mask_from_templates(templates)
+    mask = rigid_mask_from_templates(templates)
     if len(parameters) != len(Wall.all()):
         raise ValueError("參數必須照 Wall.all() 給齊六面")
     axis = jnp.asarray(frequencies)
@@ -140,4 +148,4 @@ def wall_impedances_from_templates(
             rows.append(jnp.zeros(axis.shape, dtype=jnp.result_type(axis.dtype, jnp.complex64)))
         else:
             rows.append(surface_impedance_from_parameters(template, values, axis, air=air))
-    return jnp.stack(rows)
+    return TemplateImpedances(jnp.stack(rows), mask)
