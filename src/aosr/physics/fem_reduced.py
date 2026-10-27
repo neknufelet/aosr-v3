@@ -1,6 +1,6 @@
 """有限元素替身方程式（投影式降階）：完整模型快照 → 實數 SVD 基底 → 投影小矩陣（#561）。
 
-決策紙 ``docs/decisions/fem-reduced-model-for-stage-three.md``。公式照 #610 實驗：
+決策紙 ``docs/decisions/fem-reduced-model-jax-evaluation-for-stage-three.md``。公式照 #610 實驗：
 ``A(ω) = K − k²M + Σ_w (jωρ/Z_w) B_w``，``k² = (ω/c)²``；K、M、六面 B 跟頻率與材料無關，
 所以投影一次 ``Vᵀ K V``、``Vᵀ M V``、``Vᵀ B_w V``、``Vᵀ b``、``c V`` 之後，每個頻點只解 r×r 的小系統。
 完整解一律走產品的 :func:`~aosr.physics.fem_helmholtz.assemble_helmholtz_system` 與 pydiso，
