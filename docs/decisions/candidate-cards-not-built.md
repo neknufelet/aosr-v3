@@ -1,7 +1,7 @@
 ---
 title: 不立的候選卡：五張砍掉、身分字串那張收窄改寫（四張舊紙合成一張）
 date_created: 2026-09-21
-date_modified: 2026-10-16
+date_modified: 2026-10-28
 status: accepted
 kind: governance
 supersedes: "drop-handoff-replayable-card.md, drop-review-findings-card.md, drop-text-format-consistent-card.md, drop-two-ticket-cards-keep-identity-strings.md"
@@ -13,7 +13,7 @@ summary: "五張候選卡不立（文字格式一致、交接單可重播、審�
 
 ## 問題
 
-2026-09-09 到 09-10 老闆分四次拍了「哪幾張候選卡不立」，一次一張紙。2026-09-21 決策紙份數滿了（票 #412），老闆拍板讓一張新紙合併取代好幾張舊紙（`docs/decisions/one-decision-one-paper-may-merge-many.md`）。這四張同一族：都在回答「這張候選卡有沒有牙、沒有的話它的牙歸誰」。這一張把四張仍然有效的決定搬過來，句子重新組過、**決定的內容沒有改**；四張舊紙在封存區，當時的原文、選項與完整理由看那裡。
+2026-09-09 到 09-10 老闆分四次拍了「哪幾張候選卡不立」，一次一張紙。2026-09-21 決策紙份數滿了（票 #412），老闆拍板讓一張新紙合併取代好幾張舊紙（`docs/decisions/docs-classes-decision-papers-and-entry-files.md`）。這四張同一族：都在回答「這張候選卡有沒有牙、沒有的話它的牙歸誰」。這一張把四張仍然有效的決定搬過來，句子重新組過、**決定的內容沒有改**；四張舊紙在封存區，當時的原文、選項與完整理由看那裡。
 
 ## 選項
 

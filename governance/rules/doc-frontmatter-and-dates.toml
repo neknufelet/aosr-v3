@@ -1,6 +1,6 @@
 # 規矩卡：docs 底下的設計文件與知識文件要有齊全的標頭；份數逐類與總量都有上限；
 #         docs 各類與兩份入口檔的每一行有字元上限；各類裡面不准再分層
-# 決策紙：docs/decisions/docs-four-classes-archive-for-superseded.md（docs 只准各類、平行不分層、三道柵欄）。
+# 決策紙：docs/decisions/docs-classes-decision-papers-and-entry-files.md（docs 只准各類、平行不分層、三道柵欄）。
 #         這張卡是那張紙第二道柵欄（限數量）的機器版，加上「標頭齊全」這一條。
 #
 # 2026-09-10 老闆拍板：暫緩卡 doc-size-cap 不另立，它沒人守的兩顆牙併進這張卡

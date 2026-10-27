@@ -1,11 +1,11 @@
 ---
 title: docs/ 加第四類封存區：被取代的決策紙必須搬過去，活的目錄只放還算數的決定
 date_created: 2026-09-15
-date_modified: 2026-09-15
-status: accepted
+date_modified: 2026-10-28
+status: superseded
 kind: governance
 supersedes: "docs-three-classes.md"
-superseded_by: ""
+superseded_by: "docs-classes-decision-papers-and-entry-files.md"
 summary: "docs/ 從三類變四類：多一個 docs/archive/ 封存區，只收標了 superseded 的決策紙；標了 superseded 的紙不准留在 docs/decisions/，開新紙取代舊紙的那支合併請求就得把舊紙搬走，機器守；取代鏈跨兩層找、檔名共用一個空間；決策紙上限 60 數的是活的那一層，封存區另設上限、總量跟著提。三類的其餘決定（平行不分層、限種類、算得出來的不存檔）照舊。"
 ---
 

@@ -1,11 +1,11 @@
 ---
 title: 入口原稿只生成規矩節，第二份入口是指路牌，全檔上限 120 行
 date_created: 2026-09-21
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-10-28
+status: superseded
 kind: governance
 supersedes: "rules-section-generated-rest-handwritten.md, entry-file-line-cap-120.md, agents-md-is-a-pointer.md"
-superseded_by: ""
+superseded_by: "docs-classes-decision-papers-and-entry-files.md"
 summary: "CLAUDE.md 的規矩節由卡片生成、其餘手寫；AGENTS.md 只由同一產生器寫固定指路牌；兩份入口檔各自不得超過 120 行。"
 ---
 

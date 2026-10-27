@@ -1,11 +1,11 @@
 ---
 title: 決定一題一張紙，一張新紙可以合併取代好幾張舊紙
 date_created: 2026-09-21
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-10-28
+status: superseded
 kind: governance
 supersedes: "one-decision-one-paper.md"
-superseded_by: ""
+superseded_by: "docs-classes-decision-papers-and-entry-files.md"
 summary: "決策放 docs/decisions/，一題一檔、固定段落、同題只一份有效（沿用）；新增：取代誰那一格可以列好幾個檔名，同族舊紙合併成一張、舊紙同一支合併請求搬去封存，份數上限不調。"
 ---
 
