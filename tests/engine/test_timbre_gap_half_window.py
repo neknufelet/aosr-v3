@@ -105,6 +105,25 @@ def test_neighbours_the_smoothing_window_reaches_are_not_a_gap(
     assert timbre._has_gap(axis, width) is False
 
 
+@pytest.mark.parametrize(
+    ("width", "frequencies"),
+    [(0.1, (248.9811671479444, 257.7614690453565)), (1.0, (214.43518721782374, 303.25715001346305))],
+    ids=["tenth-octave-across-256-hz", "one-octave-across-256-hz"],
+)
+def test_one_sided_window_miss_is_a_gap(width: float, frequencies: tuple[float, float]) -> None:
+    """右點的對數跨過 8（256 Hz）那一格，浮點間隔變兩倍：左點的視窗收得到右點、右點的收不到左點。
+
+    只要有一邊收不到，那一點的平滑值就只剩自己——算洞，不准只看其中一邊。
+    """
+    axis = np.asarray(frequencies)
+
+    smoothed = timbre._smooth_energy(np.log2(axis), np.asarray([1.0, 4.0]), width)
+
+    assert smoothed[0] == pytest.approx(2.5, rel=1e-12)
+    assert smoothed[1] == 4.0
+    assert timbre._has_gap(axis, width) is True
+
+
 @pytest.mark.parametrize("width_name", list(_WIDTHS))
 @pytest.mark.parametrize("base_octave", [7.0, 9.0, 12.0])
 def test_gap_matches_the_smoothing_window_at_floating_point_edges(width_name: str, base_octave: float) -> None:
