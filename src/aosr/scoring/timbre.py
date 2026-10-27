@@ -589,17 +589,21 @@ _RAW_GAP_STEPS: Final[float] = 1.5
 def _has_gap(frequencies: FloatArray, width_octave: float) -> bool:
     """資料軸中間有沒有洞。
 
-    有平滑：相鄰兩點的距離（八度）超出平滑半窗（含捨入護欄，跟 :func:`_smooth_energy` 同一支
-    :func:`_smoothing_half_width_octave` 算）就是洞——視窗收不到隔壁那一點，平滑值只剩這一側
-    （票 #401：原本的尺是整個視窗寬，寬一倍）。不平滑（寬度 0）：相鄰距離比它左右鄰近間距的
-    較大者還大 ``_RAW_GAP_STEPS`` 倍就是洞——原始曲線少交一點不准變成沒有那個峰，而軸由疏變密不算洞。
-    只看首末兩點會把「中間整段缺點」當成完整覆蓋（找碴席實測）。
+    有平滑：相鄰兩點有一點的平滑視窗收不到另一點就是洞，平滑值只剩這一側（票 #401：原本的尺是
+    整個視窗寬，寬一倍）。半窗（含捨入護欄）跟 :func:`_smooth_energy` 同一支
+    :func:`_smoothing_half_width_octave` 算，比法也一樣是中心加減半窗再跟鄰點比——先相減再比半窗，
+    浮點上會差一個捨入，把平滑收得到的鄰點判成洞（審查席實測）。不平滑（寬度 0）：相鄰距離比它
+    左右鄰近間距的較大者還大 ``_RAW_GAP_STEPS`` 倍就是洞——原始曲線少交一點不准變成沒有那個峰，
+    而軸由疏變密不算洞。只看首末兩點會把「中間整段缺點」當成完整覆蓋（找碴席實測）。
     """
-    steps = np.diff(np.log2(frequencies))
+    octaves = np.log2(frequencies)
+    steps = np.diff(octaves)
     if len(steps) == 0:
         return False
     if width_octave > 0.0:
-        return bool(np.any(steps > _smoothing_half_width_octave(width_octave)))
+        half = _smoothing_half_width_octave(width_octave)
+        left, right = octaves[:-1], octaves[1:]
+        return bool(np.any((right > left + half) | (left < right - half)))
     if len(steps) == 1:
         return False
     left = np.concatenate(([steps[1]], steps[:-1]))

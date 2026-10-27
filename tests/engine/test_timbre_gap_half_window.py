@@ -77,6 +77,55 @@ def test_gap_and_smoothing_window_share_one_half_width(width_name: str, step_nam
         assert smoothed == pytest.approx([2.5, 2.5], rel=1e-12)
 
 
+def _windows_miss_each_other(frequencies: np.ndarray, width: float) -> bool:
+    """兩點各自的平滑視窗有沒有一邊收不到另一點：收不到的那一點平滑值逐位元等於原始值。"""
+    energy = np.asarray([1.0, 4.0])
+    smoothed = timbre._smooth_energy(np.log2(frequencies), energy, width)
+    return bool(smoothed[0] == energy[0] or smoothed[1] == energy[1])
+
+
+@pytest.mark.parametrize(
+    ("width", "frequencies"),
+    [
+        (1.0 / 3.0, (128.0, 143.6751421836012)),
+        (0.1, (512.0, 530.0556410067908)),
+        (1.0, tuple(2.0 ** np.asarray([9.0, 9.0 + timbre._smoothing_half_width_octave(1.0)]))),
+    ],
+    ids=["tilt-third-octave-one-rounding-past", "tenth-octave-one-rounding-past", "one-octave-exactly-half-plus-guard"],
+)
+def test_neighbours_the_smoothing_window_reaches_are_not_a_gap(
+    width: float, frequencies: tuple[float, float]
+) -> None:
+    """審查席造的三對：先相減比半窗會多出一個捨入、或剛好相等；平滑兩邊都收得到，就不准判成洞。"""
+    axis = np.asarray(frequencies)
+
+    smoothed = timbre._smooth_energy(np.log2(axis), np.asarray([1.0, 4.0]), width)
+
+    assert smoothed == pytest.approx([2.5, 2.5], rel=1e-12)
+    assert timbre._has_gap(axis, width) is False
+
+
+@pytest.mark.parametrize("width_name", list(_WIDTHS))
+@pytest.mark.parametrize("base_octave", [7.0, 9.0, 12.0])
+def test_gap_matches_the_smoothing_window_at_floating_point_edges(width_name: str, base_octave: float) -> None:
+    """第二點從「剛好半窗＋護欄」往兩側一次挪一個浮點間隔：每一步判洞都要跟平滑收不收得到同一個答案。"""
+    width = _WIDTHS[width_name] or _tilt_width()
+    edge = 2.0 ** (base_octave + timbre._smoothing_half_width_octave(width))
+    second = [edge]
+    for _ in range(12):
+        second.insert(0, float(np.nextafter(second[0], 0.0)))
+        second.append(float(np.nextafter(second[-1], np.inf)))
+    answers = set()
+
+    for frequency in second:
+        axis = np.asarray([2.0**base_octave, frequency])
+        expected = _windows_miss_each_other(axis, width)
+        answers.add(expected)
+        assert timbre._has_gap(axis, width) is expected, frequency
+
+    assert answers == {True, False}  # 掃過的範圍真的跨過門檻
+
+
 def test_even_axis_at_exactly_the_half_window_is_complete() -> None:
     """相鄰剛好半窗的等距軸：取對數相減有幾段多出一根頭髮，靠同一個捨入護欄吸收，不算缺。"""
     axis = _even_axis(_half_window_per_octave())
