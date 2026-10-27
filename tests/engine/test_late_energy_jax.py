@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TypedDict, cast
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -216,6 +217,18 @@ def test_rejects_wrong_shape_and_integer_absorption() -> None:
         late_energy_jax.late_energy_arrays(geometry, jnp.full((6,), 0.2, dtype=jnp.float32))
     with pytest.raises(TypeError, match="浮點"):
         late_energy_jax.late_energy_arrays(geometry, jnp.zeros((6, 3), dtype=jnp.int32))
+
+
+def test_eyring_ratio_at_zero_absorption_has_finite_gradient() -> None:
+    """ᾱ=0 回 1，而且那一點的梯度是有限數：沒走的那一支 0/0 不准把 NaN 漏進梯度。
+
+    整條晚期能量在 α 全 0 時 I−F 奇異，到不了這一點，所以直接考 Eyring 比值這一段。
+    """
+    zero = jnp.zeros(3, dtype=jnp.float32)
+    ratio = late_energy_jax._eyring_ratio(zero)
+    gradient = jax.grad(lambda values: jnp.sum(late_energy_jax._eyring_ratio(values)))(zero)
+    assert np.array_equal(np.asarray(ratio), np.ones(3, dtype=np.float32))
+    assert np.all(np.isfinite(np.asarray(gradient)))
 
 
 def test_mutant_beyond_tolerance_is_red() -> None:
