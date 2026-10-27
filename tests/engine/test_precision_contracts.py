@@ -122,6 +122,8 @@ def test_registry_has_the_named_contracts() -> None:
         "modal_rectangle_frequency",
         "modal_rectangle_decay",
         "modal_trapezoid_vs_fenics",
+        "fem_reduced_holdout_frequency_db",
+        "fem_reduced_holdout_band_db",
     }
 
 
