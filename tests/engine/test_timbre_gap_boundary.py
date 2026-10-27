@@ -48,8 +48,9 @@ _KNOWN_TRANSITION_DEFECTS: dict[LowFrequencyAxis, tuple[float, ...]] = {
 
 def _room_curve(frequencies: np.ndarray) -> np.ndarray:
     """傾斜加兩條正弦：傾斜、起伏、對目標偏差都不是零，刪一點才看得出數字變沒變。"""
-    octaves = np.log2(frequencies)
-    return -1.0 * (octaves - np.log2(1000.0)) + 3.0 * np.sin(2.7 * octaves) + 1.5 * np.sin(11.0 * octaves)
+    octaves = np.log2(np.asarray(frequencies, dtype=np.float64))
+    curve = -1.0 * (octaves - np.log2(1000.0)) + 3.0 * np.sin(2.7 * octaves) + 1.5 * np.sin(11.0 * octaves)
+    return np.asarray(curve, dtype=np.float64)
 
 
 def _settings() -> timbre.TimbreSettings:
@@ -125,7 +126,7 @@ def test_missing_point_next_to_a_bound_is_a_gap(side: str, offset: float) -> Non
 
 @pytest.mark.parametrize("side", ["lower", "upper"])
 def test_missing_the_first_real_point_outside_a_bound_is_a_gap(side: str) -> None:
-    """界外緊鄰那一點缺了也算洞：判不出缺的那一點落在界內還是界外，寧可不估、不當成分數（決策紙寫明）。"""
+    """不平滑時，界外緊鄰那一點缺了，跨界那一步超過鄰距 1.5 倍也算洞：判不出缺的那一點落在界內還是界外，寧可不估（決策紙寫明）。"""
     frequencies, bounds, inner = _off_grid_axis(side, 0.45)
     outer = inner - 1 if side == "lower" else inner + 1
 
