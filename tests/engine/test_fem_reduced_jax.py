@@ -10,6 +10,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from collections.abc import Callable
 from typing import cast
 
 import jax
@@ -233,10 +234,11 @@ def test_mask_cannot_be_omitted_and_template_bundle_is_finite(model: ReducedMode
     constants = reduced.reduced_constants(model)
     z, mask = _case("several_rigid")
     values = jnp.asarray(z, dtype=jnp.complex64)
-    with pytest.raises(TypeError, match="rigid_mask"):
-        reduced.reduced_pressures(constants, values)  # type: ignore[call-arg]
-    with pytest.raises(TypeError, match="rigid_mask"):
-        reduced.wall_coefficients(constants, values)  # type: ignore[call-arg]
+    # 故意漏給遮罩：型別檢查器會擋這種呼叫，所以用不帶簽名的呼叫型別繞過它、讓執行期自己擋。
+    for entry in (reduced.reduced_pressures, reduced.wall_coefficients):
+        untyped = cast(Callable[..., jax.Array], entry)
+        with pytest.raises(TypeError, match="rigid_mask"):
+            untyped(constants, values)
     bundle = reduced.TemplateImpedances(values, jnp.asarray(mask))
     pressure = reduced.reduced_pressures(constants, bundle.values, rigid_mask=bundle.rigid_mask)
     assert np.isfinite(np.asarray(pressure)).all()
