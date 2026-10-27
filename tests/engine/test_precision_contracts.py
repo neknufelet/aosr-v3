@@ -126,6 +126,7 @@ def test_registry_has_the_named_contracts() -> None:
         "fem_reduced_holdout_band_db",
         "fem_reduced_jax_vs_numpy",
         "amplitude_jax_vs_python",
+        "stage_one_objective_jax_vs_python",
     }
 
 
