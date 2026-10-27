@@ -462,7 +462,9 @@ prefix = "tests.engine."
 # 9758→9759：#562 植錯存活補題——Eyring 比值在 ᾱ=0 回 1 且梯度有限（拿掉安全分母時梯度變 NaN）1 題；未移除。單行程 collect-only 實數 9759。
 # 9759→9765：#561 可微構造入口新檔 tests/engine/test_construction_diff.py 六題——基準逐位等於既有入口、
 # 多孔與空腔變數在、梯度對中央差分、jit 與 vmap、單精度路、拒收與只放一個變數；未移除。單行程 collect-only 逐檔加總 9765。
-collected_floor = 9765
+# 9765→9766：#561 審查補題——單參數擾動對「直接改那一格、走既有入口」逐位相同 1 題（梯度那題另加每個變數至少一個非零探點，不增題數）；
+# 未移除。單行程 collect-only 逐檔加總 9766。
+collected_floor = 9766
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

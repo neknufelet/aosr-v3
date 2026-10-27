@@ -87,14 +87,43 @@ def test_template_exposes_porous_and_cavity_variables(identity: dict[str, dict[s
                 assert f"layer{index}.thickness_m" in names, name
 
 
-def test_gradients_match_central_difference(tmp_path: Path) -> None:
-    """每筆預設的每個變數、垂直與 60 度、80 與 1000 Hz：jit(grad) 對中央差分，斷線或抓錯欄位必須紅。"""
+def test_gradients_match_central_difference(tmp_path: Path, identity: dict[str, dict[str, object]]) -> None:
+    """每筆預設的每個變數、垂直與 60 度、80 與 1000 Hz：jit(grad) 對中央差分，斷線或抓錯欄位必須紅。
+
+    兩邊同為零也會過容差，所以另守：每個變數至少一個探點自動微分與中央差分都非零。
+    「非零」取絕對值大於 GRADIENT_ABS：那是同一把尺給近零導數的絕對項，小於它的量在這把尺下跟零分不開；
+    不另立新數字。參數沒接進公式時兩邊都是精確的零，一定落在它底下。
+    """
     rows = cast(list[dict[str, object]], _run("gradients", tmp_path))
     assert {cast(str, row["preset"]) for row in rows} == set(_presets())
+    nonzero: dict[str, set[str]] = {name: set() for name in identity}
     for row in rows:
         automatic, central = float(cast(float, row["automatic_scaled"])), float(cast(float, row["central_scaled"]))
         assert np.isfinite(automatic) and np.isfinite(central), row
         np.testing.assert_allclose(automatic, central, rtol=GRADIENT_REL, atol=GRADIENT_ABS, err_msg=str(row))
+        if abs(automatic) > GRADIENT_ABS and abs(central) > GRADIENT_ABS:
+            nonzero[cast(str, row["preset"])].add(cast(str, row["variable"]))
+    for name, row in identity.items():
+        variables = set(cast(list[str], row["variables"]))
+        assert {cast(str, r["variable"]) for r in rows if r["preset"] == name} == variables, name
+        assert nonzero[name] == variables, (name, sorted(variables - nonzero[name]))
+
+
+def test_single_parameter_perturbation_matches_rebuilt_existing_entry(
+        tmp_path: Path, identity: dict[str, dict[str, object]]) -> None:
+    """每個變數單獨乘 1.01：可微入口對「那一層那一格直接改成同一個值、重新驗證、走既有入口」逐位相同，
+    而且阻抗真的變了。換錯層、換錯欄位、參數被忽略都會紅。"""
+    rows = cast(dict[str, dict[str, dict[str, object]]], _run("perturb", tmp_path))
+    assert set(rows) == set(identity)
+    for name, row in rows.items():
+        assert set(row) == set(cast(list[str], identity[name]["variables"])), name
+        for variable, values in row.items():
+            assert values["changed"] is True, (name, variable)
+            for key in ("normal", "angles"):
+                ours, existing = cast(dict[str, object], values[key]), cast(dict[str, object], values[f"{key}_existing"])
+                assert ours["dtype"] == existing["dtype"] == "complex128", (name, variable, key)
+                assert ours["shape"] == existing["shape"], (name, variable, key)
+                np.testing.assert_array_equal(_decode(ours), _decode(existing), err_msg=f"{name}:{variable}:{key}")
 
 
 def test_jit_and_vmap_preserve_direct_results(tmp_path: Path) -> None:

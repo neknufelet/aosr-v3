@@ -29,6 +29,9 @@ FREQUENCIES = np.geomspace(20., 8000., 61)
 GRADIENT_FREQUENCIES = (80., 1000.)
 OBLIQUE_DEG = 60.
 STEP = 1e-5  # 中央差分相對步長，同 _transfer_matrix_probe.gradients。
+# 單參數擾動倍數：夠小讓預設仍過既有入口的格式與範圍檢查（縫寬小於縫距、孔徑分界、Komatsu 流阻範圍），
+# 又遠大於捨入，參數沒接進公式時阻抗一定會變。不是容差。
+PERTURB = 1.01
 
 Parameters = dict[str, jax.Array]
 
@@ -138,6 +141,34 @@ def single(templates: dict[str, ConstructionTemplate], air: PhysicsConstants) ->
     return rows
 
 
+def perturb(templates: dict[str, ConstructionTemplate], air: PhysicsConstants) -> dict[str, object]:
+    """每個變數單獨乘 PERTURB：可微入口對「那一層那一格改成同一個值、重新驗證、走既有入口」；換錯層、換錯欄位、參數被忽略都對不上。"""
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    frequencies, angles = jnp.asarray(FREQUENCIES), tmm.diffuse_incidence_angles_deg(method="paris")
+    rows: dict[str, object] = {}
+    for name, template in templates.items():
+        base = template.baseline_parameters()
+        baseline = surface_impedance_from_parameters(template, base, frequencies, air=air)
+        row: dict[str, object] = {}
+        for variable in template.variables:
+            value = variable.baseline * PERTURB
+            document = template.material.model_dump()
+            document["layers"][variable.layer_index - 1][variable.field] = value
+            rebuilt = adapter.validate_python(document)
+            parameters = {**base, variable.name: jnp.asarray(value)}
+            normal = surface_impedance_from_parameters(template, parameters, frequencies, air=air)
+            row[variable.name] = {
+                "normal": _bits(normal),
+                "normal_existing": _bits(construction.surface_impedance(rebuilt, frequencies, air=air, ranges=ranges)[0]),
+                "angles": _bits(surface_impedance_from_parameters(template, parameters, frequencies, air=air, incidence_angles_deg=angles)),
+                "angles_existing": _bits(construction.surface_impedance_at_angles(rebuilt, frequencies, angles, air=air, ranges=ranges)[0]),
+                "changed": not bool(jnp.array_equal(normal, baseline)),
+            }
+        rows[name] = row
+    return rows
+
+
 def _error(action: Callable[[], object]) -> str:
     try:
         action()
@@ -178,7 +209,7 @@ def main() -> None:
     air = load_physics_constants(config_path("physics_constants.toml"))
     templates = _templates(air)
     actions = {"identity": identity, "gradients": gradients, "transforms": transforms, "single": single,
-               "rejections": rejections}
+               "rejections": rejections, "perturb": perturb}
     result = {"dtype": str(jnp.asarray(0.).dtype), "rows": actions[mode](templates, air)}
     Path(output).write_text(json.dumps(result, allow_nan=False))
 
