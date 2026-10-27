@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,6 +25,7 @@ from aosr.scoring import timbre
 from aosr.scoring.channel_matching_settings import _load_settings
 from aosr.scoring.contract import EvaluationState, Flag, ReasonCode, TimbrePayload
 from tests.engine import test_channel_matching as channel_fixtures
+from tests.engine.test_scoring_timbre import _registry_with
 from tests.engine.test_timbre_dependency_range import _PURPOSE, _QUALITY_TARGETS, _evaluate, _input_on_axis
 from tests.engine.test_timbre_gap_half_window import _tilt_width
 
@@ -130,6 +132,15 @@ def test_missing_the_first_real_point_outside_a_bound_is_a_gap(side: str) -> Non
     assert timbre._dependency_range_has_gap(np.delete(frequencies, outer), bounds, 0.0) is True
 
 
+@pytest.mark.parametrize("side", ["lower", "upper"])
+def test_point_exactly_on_a_bound_needs_nothing_beyond_it(side: str) -> None:
+    """界上剛好有一點，範圍就收齊了：界外那一點缺了不算洞（界外緊鄰算洞只發生在界落在兩點之間）。"""
+    frequencies, bounds, inner = _off_grid_axis(side, 0.0)
+    outer = inner - 1 if side == "lower" else inner + 1
+
+    assert timbre._dependency_range_has_gap(np.delete(frequencies, outer), bounds, 0.0) is False
+
+
 def test_coarse_point_outside_does_not_mask_a_missing_point_inside() -> None:
     """只接界外真實點的話，界外那一點離得遠，界內緊貼界的缺點會被當成由疏變密放過；虛擬界那一次要判得出來。"""
     low = 9.0
@@ -158,6 +169,32 @@ def test_smoothed_range_needs_a_real_neighbour_outside_within_its_half_window(si
 
     assert gap(0.9) is False
     assert gap(1.5) is True
+
+
+def test_ripple_segment_judges_gaps_with_its_own_unsmoothed_ruler(tmp_path: Path) -> None:
+    """起伏那段用起伏的尺（不平滑、少一點就是洞），不借傾斜的半窗。
+
+    今天峰谷那段（也不平滑）把起伏範圍整個包住，起伏那段借錯尺也看不出來；這裡把峰谷範圍縮到起伏下界，
+    起伏範圍上半只剩起伏自己那一段在判。
+    """
+    settings = _settings()
+    feature, ripple = settings.feature_range_hz, settings.ripple_range_hz
+    key = 'key = "timbre_balance.feature_range_hz"\nvalue = '
+    registry = _registry_with(
+        tmp_path, f"{key}[{feature[0]!r}, {feature[1]!r}]", f"{key}[{feature[0]!r}, {ripple[0]!r}]"
+    )
+    tilt_high = timbre._dependency_ranges(settings)[0][1]
+    lone = min(f for f in GEOMETRIC_LANE_FREQUENCIES_HZ if f > tilt_high)
+    assert lone < ripple[1]
+
+    complete = _evaluate(_input_on_axis(GEOMETRIC_LANE_FREQUENCIES_HZ, _room_curve), registry)
+    missing = _evaluate(
+        _input_on_axis(tuple(f for f in GEOMETRIC_LANE_FREQUENCIES_HZ if f != lone), _room_curve), registry
+    )
+
+    assert complete.state is EvaluationState.MEASURED
+    assert missing.state is EvaluationState.UNAVAILABLE
+    assert missing.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
 
 
 @pytest.mark.parametrize("axis", list(LowFrequencyAxis))
