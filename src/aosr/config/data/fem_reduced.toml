@@ -1,5 +1,5 @@
 # 有限元素替身方程式（投影式降階）建模設定（#561）。
-# 決策紙：docs/decisions/fem-reduced-model-for-stage-three.md。
+# 決策紙：docs/decisions/fem-reduced-model-jax-evaluation-for-stage-three.md。
 # 數字照 #610 實驗那一版建模腳本（工作區 610-rom 的建模程式）抄來，是工程暫定，不是驗證門檻；
 # 替身準不準由精度契約登記簿那兩條留出材料的尺判，不由這裡的停止值判。
 

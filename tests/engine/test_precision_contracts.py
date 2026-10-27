@@ -124,6 +124,7 @@ def test_registry_has_the_named_contracts() -> None:
         "modal_trapezoid_vs_fenics",
         "fem_reduced_holdout_frequency_db",
         "fem_reduced_holdout_band_db",
+        "fem_reduced_jax_vs_numpy",
         "amplitude_jax_vs_python",
     }
 

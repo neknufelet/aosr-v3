@@ -2,10 +2,10 @@
 title: 第三階段長方形房的有限元素用替身方程式（投影式降階），留出材料對完整解當尺
 date_created: 2026-10-28
 date_modified: 2026-10-28
-status: accepted
+status: superseded
 kind: product
 supersedes: ""
-superseded_by: ""
+superseded_by: "fem-reduced-model-jax-evaluation-for-stage-three.md"
 summary: "長方形房第三階段改牆面材料時，有限元素先用完整模型解一批快照、做實數 SVD 基底、把 K、M、六面邊界矩陣、聲源與座位列投影成小矩陣，之後每個頻點只解小系統；終點仍用完整模型驗。建模程式住 src/aosr/physics/fem_reduced*.py，設定住 fem_reduced.toml；準不準用留出材料逐頻完整解判，兩把暫定的尺 fem_reduced_holdout_frequency_db（0.224 dB）與 fem_reduced_holdout_band_db（0.011 dB）住精度契約登記簿，數字取自 #610 補快照後那一次量測。"
 ---
 
