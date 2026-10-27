@@ -106,21 +106,29 @@ def test_neighbours_the_smoothing_window_reaches_are_not_a_gap(
 
 
 @pytest.mark.parametrize(
-    ("width", "frequencies"),
-    [(0.1, (248.9811671479444, 257.7614690453565)), (1.0, (214.43518721782374, 303.25715001346305))],
-    ids=["tenth-octave-across-256-hz", "one-octave-across-256-hz"],
+    ("width", "frequencies", "alone_index"),
+    [
+        (0.1, (248.9811671479444, 257.7614690453565), 1),
+        (1.0, (214.43518721782374, 303.25715001346305), 1),
+        (0.5 + 2.0**-49, (512.0, 608.8740428814), 0),
+    ],
+    ids=["tenth-octave-across-256-hz", "one-octave-across-256-hz", "half-octave-rounding-tie"],
 )
-def test_one_sided_window_miss_is_a_gap(width: float, frequencies: tuple[float, float]) -> None:
-    """右點的對數跨過 8（256 Hz）那一格，浮點間隔變兩倍：左點的視窗收得到右點、右點的收不到左點。
+def test_one_sided_window_miss_is_a_gap(
+    width: float, frequencies: tuple[float, float], alone_index: int
+) -> None:
+    """浮點上兩點的視窗可能只有一邊收得到另一點：右點的對數跨過 8（256 Hz）那一格時是右點收不到左點，
+    捨入剛好落在中點（複查席造的）時是左點收不到右點。
 
     只要有一邊收不到，那一點的平滑值就只剩自己——算洞，不准只看其中一邊。
     """
     axis = np.asarray(frequencies)
+    energy = np.asarray([1.0, 4.0])
 
-    smoothed = timbre._smooth_energy(np.log2(axis), np.asarray([1.0, 4.0]), width)
+    smoothed = timbre._smooth_energy(np.log2(axis), energy, width)
 
-    assert smoothed[0] == pytest.approx(2.5, rel=1e-12)
-    assert smoothed[1] == 4.0
+    assert smoothed[alone_index] == energy[alone_index]
+    assert smoothed[1 - alone_index] == pytest.approx(2.5, rel=1e-12)
     assert timbre._has_gap(axis, width) is True
 
 
