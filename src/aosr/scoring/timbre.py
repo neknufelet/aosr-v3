@@ -51,7 +51,7 @@ from aosr.scoring.source_model_identity import source_model_fingerprint, timbre_
 from aosr.scoring.furniture_model_state import furniture_model_state
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v10"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v11"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -615,12 +615,29 @@ def _has_gap(frequencies: FloatArray, width_octave: float) -> bool:
 def _dependency_range_has_gap(
     frequencies: FloatArray, bounds: tuple[float, float], width_octave: float
 ) -> bool:
-    """資料要完整包住依賴範圍；範圍內再把上下界當成虛擬點判缺段。尺是這一段自己的平滑半窗（:func:`_has_gap`）。"""
+    """資料要完整包住依賴範圍，範圍裡不准有洞；尺是這一段自己的平滑半窗（:func:`_has_gap`）。
+
+    範圍兩端判兩次、任一有洞就是洞（票 #419）：①上下界當虛擬點接在範圍內的點兩端；②改接範圍外
+    最近的真實點（界上剛好有點就是那一點）。只判①，緊貼界內那一點缺了，前一點到虛擬界還不到鄰距
+    1.5 倍就放過（8000 Hz 前那一點，實測）；只判②，範圍外那一點離得遠時，界內緊鄰的缺點會被當成
+    「由疏變密」放過（顧問席造的例）。取或只會比只判①嚴。②的代價：範圍外緊鄰那一點缺了、或範圍外
+    本來就疏，跨界那一步也可能超出這一段的尺而判洞——判不出缺的那一點落在界內還是界外，寧可不估。
+    """
     if frequencies[0] > bounds[0] or frequencies[-1] < bounds[1]:
         return True
     scoped = frequencies[_in_range(frequencies, bounds)]
     with_boundaries = np.concatenate(([bounds[0]], scoped, [bounds[1]]))
-    return _has_gap(with_boundaries, width_octave)
+    lower = int(np.searchsorted(frequencies, bounds[0], side="right")) - 1
+    upper = int(np.searchsorted(frequencies, bounds[1], side="left"))
+    return _has_gap(with_boundaries, width_octave) or _has_gap(
+        frequencies[lower:upper + 1], width_octave
+    )
+
+
+def _dependency_gap_widths(settings: TimbreSettings) -> tuple[float, float, float]:
+    """三段依賴各自判洞的尺，順序同 :func:`_dependency_ranges`：傾斜用傾斜平滑寬度，起伏與峰谷用起伏的。"""
+    return (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple,
+            settings.smoothing_width_octave_ripple)
 
 
 def _dependency_ranges_have_gap(
@@ -630,11 +647,9 @@ def _dependency_ranges_have_gap(
 
     #558 峰谷依賴另成第三段，也用起伏平滑寬度，低頻少一點仍須拒算。
     """
-    widths = (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple,
-              settings.smoothing_width_octave_ripple)
     return any(
         _dependency_range_has_gap(frequencies, bounds, width)
-        for bounds, width in zip(dependency_ranges, widths, strict=True)
+        for bounds, width in zip(dependency_ranges, _dependency_gap_widths(settings), strict=True)
     )
 
 

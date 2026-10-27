@@ -107,12 +107,17 @@ def test_support_summary_must_match_the_sequence(change: str) -> None:
 
 
 def test_support_keeps_only_frequencies_inside_the_broadband_range() -> None:
-    """支撐只列寬頻範圍裡的頻率：主位與周圍點只在範圍外不同，照樣可估、支撐相同。"""
-    below, above = _outside_range()
+    """支撐只列寬頻範圍裡的頻率：主位與周圍點只在範圍外不同，照樣可估、支撐相同。
+
+    範圍外的點貼著軸的間距放（一格、一又四分之一格）：#419 起判缺段會接範圍外最近的真實點，
+    範圍外只放一個很遠的點時分不出邊界旁有沒有缺點，判不可估（決策紙寫明的保守代價）。
+    """
     low, high = _load_settings(fixtures._TARGETS, fixtures._PURPOSE).broadband_range_hz
     inside = tuple(f for f in GEOMETRIC_LANE_FREQUENCIES_HZ if low <= f <= high)
-    main_axis = (below, *inside, above)
-    front_axis = (below * 1.5, *inside, above * 1.05)
+    step = GEOMETRIC_LANE_FREQUENCIES_HZ[1] / GEOMETRIC_LANE_FREQUENCIES_HZ[0]
+    main_axis = (inside[0] / step, *inside, inside[-1] * step)
+    front_axis = (inside[0] / step**1.25, *inside, inside[-1] * step**1.25)
+    assert main_axis[0] < low and main_axis[-1] > high and front_axis[0] < low and front_axis[-1] > high
     evaluation = _evaluated("outside-differs", main_axis, front_axis)
     assert evaluation.state is EvaluationState.MEASURED
     support = fixtures._payload(evaluation).broadband_support
