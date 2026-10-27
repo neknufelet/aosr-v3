@@ -264,7 +264,7 @@ def test_reflection_rejects_internal_model_kind_mismatch(part: str) -> None:
 
 
 @pytest.mark.parametrize(("actual", "expected"), (
-    (TIMBRE_EVALUATOR_VERSION, "aosr.scoring.timbre.v10"),
+    (TIMBRE_EVALUATOR_VERSION, "aosr.scoring.timbre.v11"),
     (TIMBRE_CHANNELS_EVALUATOR_VERSION, "aosr.scoring.timbre_channels.v2"),
     (LISTENING_AREA_EVALUATOR_VERSION, "aosr.scoring.listening_area.v6"),
     (CHANNEL_MATCHING_EVALUATOR_VERSION, "aosr.scoring.channel_matching.v9"),
