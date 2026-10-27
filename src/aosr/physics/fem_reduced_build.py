@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -41,11 +42,15 @@ class _Build:
         ("snapshot", "svd", "projection", "greedy"), 0.0))
 
     def solve(self, pending: Sequence[Point2]) -> None:
+        """完整解（解次上限內）並補進快照；上一輪記下實際解了幾點。"""
         start = time.perf_counter()
-        for material, index in pending[:max(0, self.settings.max_full_solves - self.solver.solves)]:
+        chosen = pending[:max(0, self.settings.max_full_solves - self.solver.solves)]
+        for material, index in chosen:
             solutions = self.solver.solve(self.axis[index], walls_at(self.training[material], index))
             self.snapshots.extend(solutions)
             self.seen.add((material, index))
+        if self.rounds:
+            self.rounds[-1] = dataclasses.replace(self.rounds[-1], solved=len(chosen))
         self.seconds["snapshot"] += elapsed_since(start)
 
     def reduce(self) -> tuple[NDArray[np.float64], ReducedMatrices]:
@@ -90,7 +95,7 @@ class _Build:
         self.rounds.append(GreedyRound(
             round=len(self.rounds), snapshots=len(self.snapshots), rank=basis.shape[1],
             candidates=len(scored), max_residual=values[0], median_residual=float(np.median(values)),
-            selected=len(selected)))
+            proposed=len(selected), solved=0))
         return values[0], selected
 
 

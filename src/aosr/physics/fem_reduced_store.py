@@ -2,8 +2,9 @@
 
 ``<名>.npz`` 存五個陣列；``<名>.manifest.json`` 存格式版本、喇叭與座位順序、牆序、頻率軸與空氣的 hex、
 網格雜湊、物理身分、輸入雜湊、建模帳、每個陣列的 dtype／形狀／SHA-256、整份 npz 的 SHA-256，
-最後一格是 manifest 其餘內容的 SHA-256。讀回時三層都核：manifest 自己、整份 npz、逐陣列；
-任何一位不同就拒收（這是防損壞與誤配，不是防有心竄改）。寫入不覆寫既有檔。
+最後一格是 manifest 其餘內容的 SHA-256。存之前與讀回時都核每個陣列的 dtype 與形狀（K、M、B 是 float64，
+f_r 是 complex128，c_r 是 float64；r 取建模帳），不符就拒收、不轉型。讀回時雜湊三層都核：manifest 自己、整份 npz、逐陣列；
+任何一位不同就拒收（這是防損壞與誤配，不是防有心竄改）。寫入前先確認兩個檔都不在，不覆寫既有檔。
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import hashlib
 import io
 import json
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +25,24 @@ from aosr.physics.fem_reduced import BuildLedger, GreedyRound, ReducedMatrices, 
 FORMAT_VERSION = 1
 _ARRAYS = ("stiffness", "mass", "boundary", "sources", "receivers")
 _DIGEST_FIELD = "manifest_sha256"
+_FLOAT = np.dtype(np.float64)
+_COMPLEX = np.dtype(np.complex128)
+
+
+def _required(sources: int, receivers: int, rank: int) -> dict[str, tuple[np.dtype[np.generic], tuple[int, ...]]]:
+    """每個陣列必須的 dtype 與形狀：S＝喇叭名數、R＝座位名數、r＝建模帳的基底大小、牆數照 ``Wall.all()``。"""
+    walls = len(Wall.all())
+    return {"stiffness": (_FLOAT, (rank, rank)), "mass": (_FLOAT, (rank, rank)),
+            "boundary": (_FLOAT, (walls, rank, rank)), "sources": (_COMPLEX, (sources, rank)),
+            "receivers": (_FLOAT, (receivers, rank))}
+
+
+def _check_arrays(arrays: Mapping[str, NDArray[np.generic]], sources: int, receivers: int, rank: int) -> None:
+    """dtype 與形狀逐格比，不符就 ValueError；這裡不轉型。"""
+    for name, (dtype, shape) in _required(sources, receivers, rank).items():
+        array = arrays[name]
+        if array.dtype != dtype or array.shape != shape:
+            raise ValueError(f"替身陣列 {name} 必須是 {dtype} {shape}，收到 {array.dtype} {array.shape}")
 
 
 def manifest_path(npz_path: Path) -> Path:
@@ -45,10 +65,18 @@ def _ledger_document(ledger: BuildLedger) -> dict[str, object]:
 
 
 def save_reduced(model: ReducedModel, npz_path: Path) -> Path:
-    """寫 npz 與 manifest，回 manifest 路徑；兩個檔有任何一個已經在就報錯，不覆寫。"""
+    """寫 npz 與 manifest，回 manifest 路徑。
+
+    陣列 dtype 或形狀不合（見 :func:`_required`）、或兩個檔有任何一個已經在，就在寫任何東西之前報錯，不覆寫。
+    """
     target = manifest_path(npz_path)
+    arrays: dict[str, NDArray[np.generic]] = {
+        name: np.ascontiguousarray(getattr(model.matrices, name)) for name in _ARRAYS}
+    _check_arrays(arrays, len(model.source_names), len(model.receiver_names), model.ledger.rank)
+    for path in (npz_path, target):
+        if path.exists():
+            raise FileExistsError(f"替身檔已存在，不覆寫：{path}")
     buffer = io.BytesIO()
-    arrays = {name: np.ascontiguousarray(getattr(model.matrices, name)) for name in _ARRAYS}
     np.savez(buffer, allow_pickle=False, **arrays)
     payload = buffer.getvalue()
     document: dict[str, object] = {
@@ -63,10 +91,15 @@ def save_reduced(model: ReducedModel, npz_path: Path) -> Path:
         "npz_sha256": _sha(payload),
     }
     document[_DIGEST_FIELD] = _sha(_canonical(document))
+    text = json.dumps(document, ensure_ascii=False, sort_keys=True, indent=1, allow_nan=False) + "\n"
     with npz_path.open("xb") as handle:
         handle.write(payload)
-    with target.open("x", encoding="utf-8") as handle:
-        handle.write(json.dumps(document, ensure_ascii=False, sort_keys=True, indent=1, allow_nan=False) + "\n")
+    try:
+        with target.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+    except BaseException:
+        npz_path.unlink()
+        raise
     return target
 
 
@@ -122,20 +155,35 @@ def load_reduced(npz_path: Path, *, expected_mesh_hash: str | None = None,
     frequencies = document["frequencies_hex"]
     if not isinstance(frequencies, list):
         raise ValueError("替身 manifest 頻率軸格式不符")
+    source_names = tuple(str(name) for name in _list(document, "source_names"))
+    receiver_names = tuple(str(name) for name in _list(document, "receiver_names"))
+    ledger = _ledger(document)
+    # 逐陣列雜湊已核過 manifest 記的 dtype／形狀等於實際陣列；這裡再比必須的那一套，不符就拒收、不轉型。
+    _check_arrays(arrays, len(source_names), len(receiver_names), ledger.rank)
     return ReducedModel(
         matrices=ReducedMatrices(
-            stiffness=np.asarray(arrays["stiffness"], dtype=np.float64),
-            mass=np.asarray(arrays["mass"], dtype=np.float64),
-            boundary=np.asarray(arrays["boundary"], dtype=np.float64),
-            sources=np.asarray(arrays["sources"], dtype=np.complex128),
-            receivers=np.asarray(arrays["receivers"], dtype=np.float64)),
-        source_names=tuple(str(name) for name in _list(document, "source_names")),
-        receiver_names=tuple(str(name) for name in _list(document, "receiver_names")),
+            stiffness=_floats(arrays["stiffness"]), mass=_floats(arrays["mass"]),
+            boundary=_floats(arrays["boundary"]), sources=_complexes(arrays["sources"]),
+            receivers=_floats(arrays["receivers"])),
+        source_names=source_names, receiver_names=receiver_names,
         frequencies_hz=tuple(float.fromhex(str(value)) for value in frequencies),
         density_kg_m3=float.fromhex(str(document["density_hex"])),
         sound_speed_m_s=float.fromhex(str(document["speed_hex"])),
         mesh_hash=str(document["mesh_hash"]), physics_identity=str(document["physics_identity"]),
-        input_hash=str(document["input_hash"]), ledger=_ledger(document))
+        input_hash=str(document["input_hash"]), ledger=ledger)
+
+
+def _floats(array: NDArray[np.generic]) -> NDArray[np.float64]:
+    """型別已由 :func:`_check_arrays` 核過；這裡只給型別檢查器看，不是轉型。"""
+    if array.dtype != _FLOAT:
+        raise ValueError(f"替身陣列必須是 float64，收到 {array.dtype}")
+    return np.asarray(array, dtype=np.float64)
+
+
+def _complexes(array: NDArray[np.generic]) -> NDArray[np.complex128]:
+    if array.dtype != _COMPLEX:
+        raise ValueError(f"替身陣列必須是 complex128，收到 {array.dtype}")
+    return np.asarray(array, dtype=np.complex128)
 
 
 def _list(document: dict[str, object], key: str) -> list[object]:

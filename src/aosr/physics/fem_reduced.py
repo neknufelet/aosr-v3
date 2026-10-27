@@ -81,7 +81,11 @@ class ReducedMatrices:
 
 @dataclass(frozen=True)
 class GreedyRound:
-    """一輪殘差貪婪：當時的快照數與基底大小、抽了幾個候選、抽到的殘差、這輪挑了幾個去完整解。"""
+    """一輪殘差貪婪：當時的快照數與基底大小、抽了幾個候選、抽到的殘差。
+
+    ``proposed`` 是殘差最大、準備完整解的點數；``solved`` 是之後實際完整解的點數——這輪殘差已在停止值內
+    就是 0，解次上限只剩幾次就只解那幾次。
+    """
 
     round: int
     snapshots: int
@@ -89,7 +93,8 @@ class GreedyRound:
     candidates: int
     max_residual: float
     median_residual: float
-    selected: int
+    proposed: int
+    solved: int
 
 
 @dataclass(frozen=True)

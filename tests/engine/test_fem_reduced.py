@@ -17,9 +17,11 @@ import hashlib
 import math
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from aosr.config.fem_reduced import ReducedModelSettings, load_reduced_model_settings
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, FEM_LANE_FREQUENCIES_HZ
@@ -27,10 +29,14 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances, interpolate_pressure, point_source_load
 from aosr.physics.fem_reduced import (
-    FullOperators, ReducedMatrices, ReducedModel, evaluate_reduced, export_room_operators, system_coefficients,
+    FullOperators, ReducedMatrices, ReducedModel, even_indices, evaluate_reduced, export_room_operators,
+    system_coefficients,
 )
 from aosr.physics.fem_reduced_build import build_reduced_model
-from aosr.physics.fem_reduced_check import ValidationReport, validate_reduced, within_reduced_contract
+from aosr.physics import fem_reduced_store
+from aosr.physics.fem_reduced_check import (
+    ValidationReport, third_octave_bands, validate_reduced, within_reduced_contract,
+)
 from aosr.physics.fem_reduced_store import load_reduced, manifest_path, save_reduced
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
@@ -108,7 +114,7 @@ def test_settings_file_loads_and_guards(tmp_path: Path) -> None:
 
 
 def test_build_ledger_records_solves_rounds_and_rank(model: ReducedModel) -> None:
-    """抓建模帳漏記：完整解次數在上限內、每輪殘差有記、最後一輪的殘差就是停下來的理由。"""
+    """抓建模帳漏記或記錯：完整解次數＝起點＋每輪實際解的點數、停在殘差的那一輪實際解 0 點。"""
     ledger = model.ledger
     assert 0 < ledger.full_solves <= ledger.settings.max_full_solves
     assert ledger.rounds and ledger.rounds[-1].max_residual <= TEST_STOP_RESIDUAL
@@ -116,6 +122,12 @@ def test_build_ledger_records_solves_rounds_and_rank(model: ReducedModel) -> Non
     assert all(item.max_residual >= item.median_residual for item in ledger.rounds)
     assert ledger.rank == model.matrices.stiffness.shape[0] == model.matrices.receivers.shape[1]
     assert ledger.snapshots == ledger.full_solves * len(SOURCES)
+    settings = ledger.settings
+    initial = (len(even_indices(settings.initial_impedance_count, len(TRAINING)))
+               * len(even_indices(settings.initial_frequency_count, len(AXIS))))
+    assert ledger.full_solves == initial + sum(item.solved for item in ledger.rounds)
+    assert all(item.solved <= item.proposed for item in ledger.rounds)
+    assert not ledger.rounds[-1].solved and ledger.rounds[-1].proposed  # 停在殘差的那一輪準備了但沒有再解
     assert set(ledger.seconds) == {"snapshot", "svd", "projection", "greedy", "total"}
     assert model.source_names == tuple(SOURCES) and model.receiver_names == tuple(SEATS)
 
@@ -281,3 +293,52 @@ def test_export_from_scheme_matches_product_operators() -> None:
         expected = interpolate_pressure(exported.p2, Point(*seat.position_m), field)
         assert abs(exported.receivers[seat.receiver_id] @ field - expected) <= 1e-12 * abs(expected)
     assert len(exported.mesh_hash) == len(hashlib.sha256().hexdigest()) and int(exported.mesh_hash, 16) >= 0
+
+
+def _bad_matrices(model: ReducedModel, kind: str) -> ReducedModel:
+    m = model.matrices
+    wrong: dict[str, NDArray[np.generic]] = {
+        "float32": m.stiffness.astype(np.float32), "complex": m.stiffness + 1j, "not_square": m.stiffness[:, :1]}
+    # 故意塞錯型別進去：cast 只是讓型別檢查器放行這個壞樣本，執行時陣列照原樣。
+    return dataclasses.replace(model, matrices=dataclasses.replace(m, stiffness=cast(NDArray[np.float64], wrong[kind])))
+
+
+@pytest.mark.parametrize("kind", ("float32", "complex", "not_square"))
+def test_save_refuses_wrong_dtype_or_shape(model: ReducedModel, tmp_path: Path, kind: str) -> None:
+    """抓存讀默默轉型：K 存成 float32、複數、或非方陣，存之前就拒收，一個檔都不留。"""
+    path = tmp_path / "rom.npz"
+    with pytest.raises(ValueError, match="stiffness"):
+        save_reduced(_bad_matrices(model, kind), path)
+    assert not path.exists() and not manifest_path(path).exists()
+
+
+@pytest.mark.parametrize("kind", ("float32", "complex", "not_square"))
+def test_load_refuses_wrong_dtype_or_shape(
+        model: ReducedModel, tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓讀回只核雜湊不核型別：關掉存檔那一關硬存進去（三層雜湊全對），讀回仍要拒收，不准轉成 float64 或丟虛部。"""
+    path = tmp_path / "rom.npz"
+    with monkeypatch.context() as patch:
+        patch.setattr(fem_reduced_store, "_check_arrays", lambda *args: None)
+        save_reduced(_bad_matrices(model, kind), path)
+    with pytest.raises(ValueError, match="stiffness"):
+        load_reduced(path)
+
+
+def test_save_with_existing_manifest_writes_nothing(model: ReducedModel, tmp_path: Path) -> None:
+    """抓只有 manifest 已存在時先寫了 npz 才發現：拒絕之前一個檔都不新建。"""
+    path = tmp_path / "rom.npz"
+    manifest_path(path).write_text("{}\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        save_reduced(model, path)
+    assert not path.exists()
+
+
+def test_adjacent_bands_share_one_edge_and_edge_points_count_twice() -> None:
+    """抓相鄰帶界各自算浮點、差幾個 ulp：帶 n 的上界就是帶 n+1 的下界，落在界上的頻點兩帶都算。"""
+    bands = third_octave_bands(AXIS)
+    assert all(left.upper_hz == right.lower_hz for left, right in zip(bands, bands[1:]))
+    for edge in (left.upper_hz for left in bands[:-1]):
+        axis = (AXIS[0], edge, AXIS[-1])
+        containing = [band for band in third_octave_bands(axis) if 1 in band.indices]
+        assert [band.upper_hz for band in containing][:1] == [edge]
+        assert [band.lower_hz for band in containing][1:] == [edge]

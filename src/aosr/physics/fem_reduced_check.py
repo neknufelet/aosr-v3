@@ -1,6 +1,6 @@
 """替身對完整解：留出材料逐頻完整解，量每個座位的最大 dB 差與 1/3 八度帶能量差（#561）。
 
-帶界用以 1000 Hz 為基準的正確二進位 1/3 八度：中心 ``1000·2^(n/3)``、帶界 ``中心·2^(±1/6)``；
+帶界用以 1000 Hz 為基準的正確二進位 1/3 八度：中心 ``1000·2^(n/3)``、帶界 ``1000·2^((2n±1)/6)``，相鄰兩帶共用同一個界值；
 帶內頻點取閉區間（落在帶界上的點兩帶都算）。帶界整個在頻率軸裡的叫「完整覆蓋」，判尺只看這些帶；
 軸端只覆蓋一部分的帶另列，不判。尺（精度契約）由呼叫端從登記簿讀進來傳給 :func:`within_reduced_contract`。
 """
@@ -52,10 +52,10 @@ def third_octave_bands(frequencies_hz: Sequence[float]) -> tuple[Band, ...]:
     axis = np.asarray(frequencies_hz, dtype=np.float64)
     first = math.floor(3 * math.log2(float(axis.min()) / THIRD_OCTAVE_REFERENCE_HZ))
     last = math.ceil(3 * math.log2(float(axis.max()) / THIRD_OCTAVE_REFERENCE_HZ))
+    # 先算整串帶界，帶 n 的上界與帶 n+1 的下界是同一個浮點數，落在界上的點兩帶都算、不會因捨入只進一帶。
+    edges = [THIRD_OCTAVE_REFERENCE_HZ * 2.0 ** ((2 * number - 1) / 6) for number in range(first, last + 2)]
     bands = []
-    for number in range(first, last + 1):
-        center = THIRD_OCTAVE_REFERENCE_HZ * 2.0 ** (number / 3)
-        lower, upper = center * 2.0 ** (-1 / 6), center * 2.0 ** (1 / 6)
+    for lower, upper in zip(edges, edges[1:]):
         inside = np.flatnonzero((axis >= lower) & (axis <= upper))
         if inside.size:
             bands.append(Band(lower_hz=lower, upper_hz=upper, indices=tuple(int(i) for i in inside),
