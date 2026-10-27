@@ -13,7 +13,7 @@ save_result 成 wall-1.json、wall-2.json；scheme_cli.main(compare, 兩份路�
 #558（音色起伏計分範圍改 300～8000 Hz，峰谷與左右匹配起伏留 20 Hz，老闆 2026-10-25）：先實跑確認只有 wall-2 的音色與聆聽區兩格代價變，
 其餘每一行逐字不變；兩格換成同一棵樹新登記簿實跑的值（原文在外部工作區 558-stage2-lf-cost 底下 checks 目錄的 compare-r300.txt）。
 
-#419（音色評估器版號 v10→v11，老闆 2026-10-27）：版號進比較身分，兩份各一人的分表在同人數時取身分字典序最小那張當主表（ranking._split_tables），主表換到 wall-2 那邊。先實跑確認每個方案自己的狀態、原因與代價逐字不變，只有主表換邊（哪一份 rankable、兩個方案區塊先後、比較表兩欄左右）；同一棵樹只把版號換回 v10，舊答案全過。兩份原文換成同一棵樹實跑（外部工作區 419-target-deviation-range 底下 furniture-record 目錄，expected 是舊答案、actual 是新原文）。
+#419（音色評估器版號 v10→v11，老闆 2026-10-27）：版號進比較身分，兩份各一人的分表在同人數時取身分字典序最小那張當主表（ranking._split_tables），主表換到 wall-2 那邊。原文核對：新舊原文只差主表資格與代價顯示換邊（哪一份 rankable、哪一份印代價、比較表的數字從一欄換到另一欄），方案區塊與比較表欄的先後不變，每個方案自己的狀態與原因逐字不變；同一棵樹只把版號換回 v10，舊答案全過。另行驗證的數值：wall-2 新印出的代價在舊原文是「未計」，原文核對證不了，所以 wall-1、wall-2 各自跟改名複本比，在改動前主線與本票分支的程式各跑一次，整份輸出逐字相同。原文都在外部工作區 419-target-deviation-range 底下 furniture-record 目錄（expected 是舊答案、actual 是新原文、self-old 與 self-new 是自己比自己）。
 """
 
 PLAIN_THEN_MOVED = """wall-1.json | 讀回等級 current

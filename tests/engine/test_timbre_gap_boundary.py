@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable
 from pathlib import Path
@@ -15,16 +16,24 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from aosr.config.capabilities import load_capabilities
 from aosr.config.frequency_axis import (
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     LowFrequencyAxis,
     low_frequency_axis_frequencies,
 )
+from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
+from aosr.reporting.evaluation import LoadedResult, ResultStanding, load_result
+from aosr.reporting.result import SchemeResult, save_result
 from aosr.scoring import timbre
 from aosr.scoring.channel_matching_settings import _load_settings
-from aosr.scoring.contract import EvaluationState, Flag, ReasonCode, TimbrePayload
+from aosr.scoring.contract import EvaluationState, Flag, QualityCategory, ReasonCode, TimbrePayload
+from tests.engine import _scoring_source_model_control as control
 from tests.engine import test_channel_matching as channel_fixtures
+from tests.engine._directivity import DIRECTIVITY
+from tests.engine.test_result_axis_identity import _report
+from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine.test_scoring_timbre import _registry_with
 from tests.engine.test_timbre_dependency_range import _PURPOSE, _QUALITY_TARGETS, _evaluate, _input_on_axis
 from tests.engine.test_timbre_gap_half_window import _tilt_width
@@ -314,3 +323,57 @@ def test_channel_matching_rejects_the_missing_point_next_to_its_upper_bound() ->
     assert timbre.timbre_ripple_coverage_reason(
         missing, channel.ripple_range_hz, channel.timbre
     ) is ReasonCode.TIMBRE_SCORING_RANGE_GAP
+
+
+# 讀回時物理身分跟現在對不上的舊結果（存檔內容不必真舊，只換這一格）。
+_OLDER_PHYSICS = "phys-v1:" + "0" * 64
+
+
+@pytest.fixture(scope="module")
+def wall_1(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    return shared_control_result(tmp_path_factory, worker_id, "wall-1")
+
+
+def _reload_older_physics(wall_1: SchemeResult, tmp_path: Path, missing: float | None) -> tuple[LoadedResult, bool]:
+    """存成物理身分過期的結果，第一組報表逐點表刪掉 ``missing`` 那一點（None 不刪）；回讀回結果與存檔有沒有原封不動。"""
+    path = tmp_path / "older-physics.json"
+    save_result(wall_1.model_copy(update={"physics_identity": _OLDER_PHYSICS}), path)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    report = _report(document, 0)
+    points = report["points"]
+    assert isinstance(points, list)
+    report["points"] = [point for point in points if point["frequency_hz"] != missing]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    before = path.read_bytes()
+    loaded = load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY,
+                         quality_targets_path=control.TARGETS, physics_identity=wall_1.physics_identity)
+    return loaded, path.read_bytes() == before
+
+
+def _states(loaded: LoadedResult) -> dict[QualityCategory, tuple[EvaluationState, tuple[ReasonCode, ...]]]:
+    return {evaluation.category: (evaluation.state, evaluation.reason_codes)
+            for evaluation in loaded.result.candidate.evaluations}
+
+
+def test_older_physics_readback_missing_the_point_past_the_bound_is_unavailable_not_a_score(
+    wall_1: SchemeResult, tmp_path: Path
+) -> None:
+    """讀回不核宣告軸的那一支：物理身分過期的舊結果不逐點對宣告軸（#494 只核物理身分相同的），報表曲線直接進音色。
+    界外緊鄰那一點缺了（範圍外本來就疏也一樣），邊界接真實鄰點那一次照樣判缺段——決策紙寫明的保守代價；處置是整份標
+    要重算、音色與左右匹配標不可估，不變成分數，存檔不改。同一份不刪點是控制組，照量。刪的是正式搜尋軸上依賴範圍上界
+    外第一個實點：只判虛擬界時前一點到界不到鄰距 1.5 倍，照算。#419 合併前掃過當時外部工作區全部存檔，沒有這種形狀。
+    """
+    upper = max(high for _, high in timbre._dependency_ranges(_settings()))
+    first_outside = min(f for f in _report_axis(LowFrequencyAxis.SEARCH) if f >= upper)
+
+    complete, complete_untouched = _reload_older_physics(wall_1, tmp_path, None)
+    missing, missing_untouched = _reload_older_physics(wall_1, tmp_path, first_outside)
+
+    assert complete.standing is ResultStanding.NEEDS_PHYSICS
+    assert missing.standing is ResultStanding.NEEDS_PHYSICS
+    assert complete_untouched and missing_untouched
+    assert _states(complete)[QualityCategory.TIMBRE_BALANCE] == (EvaluationState.MEASURED, ())
+    for category in (QualityCategory.TIMBRE_BALANCE, QualityCategory.CHANNEL_MATCHING):
+        state, reasons = _states(missing)[category]
+        assert state is EvaluationState.UNAVAILABLE
+        assert ReasonCode.TIMBRE_SCORING_RANGE_GAP in reasons

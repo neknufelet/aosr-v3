@@ -451,7 +451,7 @@ def test_hole_outside_scored_ranges_stays_measured_and_flagged(tmp_path: Path) -
 
 
 def test_missing_scored_range_lower_boundary_is_unavailable() -> None:
-    """只看範圍內相鄰資料點會漏掉下邊界到第一點的缺段；資料從 200 Hz 才開始、沒包住依賴範圍的下邊界，就是缺段。"""
+    """只看範圍內相鄰資料點會漏掉下邊界到第一點的缺段；刪掉 200 Hz 以下資料、沒包住依賴範圍的下邊界，就是缺段。"""
     full = _flat_input()
     started_at_200_hz = _without_span(full, 0.0, 200.0)
 
