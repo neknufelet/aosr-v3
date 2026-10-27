@@ -460,7 +460,9 @@ prefix = "tests.engine."
 # 梯度對 numpy 中央差分、jit 前後只差最後幾位、單精度路有限，共 25 格，加形狀與型別拒收 1 題、變異考卷 1 題；未移除。
 # 單行程 collect-only 實數 9758。
 # 9758→9759：#562 植錯存活補題——Eyring 比值在 ᾱ=0 回 1 且梯度有限（拿掉安全分母時梯度變 NaN）1 題；未移除。單行程 collect-only 實數 9759。
-collected_floor = 9759
+# 9759→9765：#561 可微構造入口新檔 tests/engine/test_construction_diff.py 六題——基準逐位等於既有入口、
+# 多孔與空腔變數在、梯度對中央差分、jit 與 vmap、單精度路、拒收與只放一個變數；未移除。單行程 collect-only 逐檔加總 9765。
+collected_floor = 9765
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
