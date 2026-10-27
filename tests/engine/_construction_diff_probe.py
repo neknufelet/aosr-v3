@@ -30,7 +30,7 @@ GRADIENT_FREQUENCIES = (80., 1000.)
 OBLIQUE_DEG = 60.
 STEP = 1e-5  # 中央差分相對步長，同 _transfer_matrix_probe.gradients。
 # 單參數擾動倍數：夠小讓預設仍過既有入口的格式與範圍檢查（縫寬小於縫距、孔徑分界、Komatsu 流阻範圍），
-# 又遠大於捨入，參數沒接進公式時阻抗一定會變。不是容差。
+# 又遠大於捨入：參數有接進公式時阻抗一定會變，沒接進去時 changed 為 False、考卷紅。不是容差。
 PERTURB = 1.01
 
 Parameters = dict[str, jax.Array]
