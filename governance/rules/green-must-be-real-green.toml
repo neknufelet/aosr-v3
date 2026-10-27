@@ -456,7 +456,11 @@ prefix = "tests.engine."
 # 三種合法軸逐點刪三格、已知缺陷 #943 四格、刪段刪點截斷五格、覆蓋外刪點偏差不變 1 題、左右匹配上界旁缺點 1 題；未移除。
 # 9730→9731：#419 複查補題——物理身分過期的舊結果讀回、上界外第一個實點缺了：要重算、音色與左右匹配不可估 1 題；未移除。
 # 單行程 collect-only 實數 9731。
-collected_floor = 9731
+# 9731→9758：#562 晚期混響 JAX 版新檔 tests/engine/test_late_energy_jax.py——五題（三份凍結題目、兩組隨機吸音率）各對 numpy 雙精度在契約內、精度跟輸入走、
+# 梯度對 numpy 中央差分、jit 前後只差最後幾位、單精度路有限，共 25 格，加形狀與型別拒收 1 題、變異考卷 1 題；未移除。
+# 單行程 collect-only 實數 9758。
+# 9758→9759：#562 植錯存活補題——Eyring 比值在 ᾱ=0 回 1 且梯度有限（拿掉安全分母時梯度變 NaN）1 題；未移除。單行程 collect-only 實數 9759。
+collected_floor = 9759
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
