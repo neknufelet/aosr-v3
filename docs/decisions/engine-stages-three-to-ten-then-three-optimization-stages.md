@@ -50,7 +50,7 @@ summary: "第三到第十段都已交付，從舊段序紙只搬仍有效的：�
 | 第九段 | 三路接合與物理量報表 | #280 由 #300 關（2026-09-15） |
 | 第十段 | 分格材料與多接收點 | #219 由 #231 關（2026-09-13；同批 #227、#230） |
 
-各段後來照哪張活紙（主對話整理）：有限元素的頻率上限與取點照三階段紙表二及其 2026-10-16（#435）修正（算到 300 Hz），正式路徑的契約照 `docs/decisions/fem-contract-fenics-frozen-answers.md`，數值工具照 `docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md`；晚期混響照 `docs/decisions/late-energy-random-incidence-reciprocal-form-factors.md`；三路接合與交接照 `docs/decisions/stage-nine-reflection-order-is-a-setting.md`。
+各段後來照哪張活紙（主對話整理）：有限元素的頻率上限與取點照三階段紙表二及其 2026-10-16（#435）修正（算到 300 Hz），正式路徑的契約照 `docs/decisions/fem-contract-fenics-frozen-answers.md`，數值工具照 `docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md`；晚期混響照 `docs/decisions/late-energy-random-incidence-reciprocal-cpu-double-reference.md`；三路接合與交接照 `docs/decisions/stage-nine-reflection-order-is-a-setting.md`。
 
 ### 二、從舊紙搬過來、仍有效的
 
@@ -94,7 +94,7 @@ summary: "第三到第十段都已交付，從舊段序紙只搬仍有效的：�
   - 第三、四、五段的開工順序（先參考答案、再契約、再 v3）與第五段「分格材料等有人真的需要再排」：都已走完，第十段已交付分格。
   - 第六段「採上一代的細頻率軸並到 250 Hz 上限」：現行照三階段紙表二與 `docs/decisions/stage-nine-reflection-order-is-a-setting.md` 第 1 條算到 300 Hz。
   - 第七段「採哪一個數值函式庫另作一張決定」：已由 `docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md` 定。
-  - 第八段「走上一代的 ART（聲線追蹤晚期混響）路徑並含 Eyring（艾林）修正」：已交付，現行定義照 `docs/decisions/late-energy-random-incidence-reciprocal-form-factors.md`。
+  - 第八段「走上一代的 ART（聲線追蹤晚期混響）路徑並含 Eyring（艾林）修正」：已交付，現行定義照 `docs/decisions/late-energy-random-incidence-reciprocal-cpu-double-reference.md`。
   - 第九段「鏡像法與晚期混響靠能量衰減自然交接」：已由 `docs/decisions/stage-nine-reflection-order-is-a-setting.md` 改成按反射階數分工、交接階數是設定；舊紙同段「有限元素與幾何路用 Schroeder（施羅德）頻率、半個八度平滑並在能量域相加」的交接區間，也已由同一張紙第 1 條改成下端 `max(f_s, 150 Hz)`、上端 300 Hz（f_s 是 Schroeder 交接頻率）；第 2 條寫明平滑階梯沿用上一代、只換區間，總和照舊在能量域相加（同一張紙「總和以能量域計算」那段）。
   - 第六到第十段每段走的「參考答案 → 契約 → v3 → 考卷 → 找碴 → 雲端綠 → 合」：那幾段的流程，已走完；最佳化各塊的考卷怎麼建，照 `docs/decisions/legacy-answers-three-roles.md` 開工時在票上判類（主對話讀法）。
   - 舊紙代價段「第六段若證明有限元素形狀不同，必須回來改紙」：第六、七段已交付。

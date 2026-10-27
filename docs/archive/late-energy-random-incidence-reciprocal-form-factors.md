@@ -2,10 +2,10 @@
 title: 晚期混響改用無規入射吸音率、形狀因子守互易，上一代答案改為相容紀錄
 date_created: 2026-09-15
 date_modified: 2026-10-16
-status: accepted
+status: superseded
 kind: governance
 supersedes: "precision-contract-art-late-energy-exact-solve.md"
-superseded_by: ""
+superseded_by: "late-energy-random-incidence-reciprocal-cpu-double-reference.md"
 summary: "晚期混響（ART）的牆面吸收率由垂直入射改為 Paris 無規入射，形狀因子改成對稱交換矩陣再對稱縮放以守面積加權互易；上一代答案降為照量、照留、不擋合併的相容紀錄，改由互易、列和、Sabine 擴散場、吸收功率守恆、分格等於整牆五項獨立性質擋合併，界線 2^-30。"
 ---
 

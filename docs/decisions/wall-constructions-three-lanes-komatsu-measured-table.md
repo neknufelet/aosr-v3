@@ -1,7 +1,7 @@
 ---
 title: 牆面構造接進三路：各路取 TMM 的哪個量、預設多孔模型 Komatsu 與範圍、三種牆面輸入、實測阻抗表表外補值
 date_created: 2026-10-15
-date_modified: 2026-10-20
+date_modified: 2026-10-28
 status: accepted
 kind: governance
 supersedes: ""
@@ -42,7 +42,7 @@ summary: "票 #309 到 2026-10-17 的決定、轉貼（實測表八點經老闆�
 1. 【主對話依老闆評語採用，老闆 10-16 確認】有限元素用垂直入射阻抗 Z(f,0°)，當局部反應邊界的近似，保留並註明限制。
 2. 【主對話依老闆評語採用，老闆 10-16 確認】鏡像法用 Z(f,θ)：每條路徑按它的入射角取複數反射係數，保留空腔內法向波數隨角度改變的效應。
 3. 【主對話依老闆評語採用，老闆 10-16 確認】構造的晚期混響用 TMM 的 Paris 角度加權吸音率 α_diffuse(f)，不是 `field_impedance`（原套件的場阻抗函式）；仍假設合適的擴散場角度分布。
-   - 【工程項】固定阻抗與實測表表內的複數阻抗，沿用 `docs/decisions/late-energy-random-incidence-reciprocal-form-factors.md` 的既有 Paris 積分；構造與實測表表外的底構造走 TMM 角度積分（`src/aosr/materials/construction.py`）。本紙補充不同輸入的取量方式，不取代既有晚期混響決定。
+   - 【工程項】固定阻抗與實測表表內的複數阻抗，沿用 `docs/decisions/late-energy-random-incidence-reciprocal-cpu-double-reference.md` 的既有 Paris 積分；構造與實測表表外的底構造走 TMM 角度積分（`src/aosr/materials/construction.py`）。本紙補充不同輸入的取量方式，不取代既有晚期混響決定。
 4. 【採用】顧問附的三項要求：
    - A 留作回歸與物理對照：挑典型多孔材、穿孔板＋空腔、膜＋空腔，比 A、B 在不同頻率與角度的反射係數與吸音率；不能宣稱所有材料用 B 都更準。
    - 交接頻率另驗：在交接附近比聲壓、頻帶能量與材料吸收效應；必要時調交接方法，不為了表面連續犧牲角度物理。
@@ -204,7 +204,7 @@ summary: "票 #309 到 2026-10-17 的決定、轉貼（實測表八點經老闆�
 - 第三階段怎麼找不在本紙：#561 兩則留言（10-15 凌晨，後一則取代前一則）都寫明，接進計算時寫進第三階段的決策紙，取代 `docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md` 表一第③列「找法」那一格。
   - 替身方程式的方向與精度契約也寫進第三階段的決策紙；本紙不碰它，若該紙取代 `docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md`，活的決策紙份數不增。
 - 決策紙份數（2026-10-15 以 `git ls-files` 數）：活的 58 份、上限 60，本紙進去是 59；封存 65 份、上限 100；docs 底下總量 126 份、上限 160，本紙進去是 127。
-- 跟既有紙的分工：型錄吸音率反推照 `docs/decisions/catalog-absorption-random-incidence-paris-inversion.md`；固定阻抗與實測表表內阻抗的晚期無規入射積分照 `docs/decisions/late-energy-random-incidence-reciprocal-form-factors.md`；第三階段顯卡精度照 `docs/decisions/material-stage-tmm-gpu-single-precision.md`。本紙不取代這些決定，supersedes 維持空字串。
+- 跟既有紙的分工：型錄吸音率反推照 `docs/decisions/catalog-absorption-random-incidence-paris-inversion.md`；固定阻抗與實測表表內阻抗的晚期無規入射積分照 `docs/decisions/late-energy-random-incidence-reciprocal-cpu-double-reference.md`；第三階段顯卡精度照 `docs/decisions/material-stage-tmm-gpu-single-precision.md`。本紙不取代這些決定，supersedes 維持空字串。
   - `docs/decisions/material-stage-tmm-gpu-single-precision.md` 的「代價」段寫產品預設多孔材模型在 #309 定、老闆傾向 Miki；這是歷史傾向，現在以本紙的 Komatsu 為準。
 
 ## 還沒拍
