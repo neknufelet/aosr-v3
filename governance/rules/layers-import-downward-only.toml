@@ -95,6 +95,8 @@ package_name = "aosr"
 # `runtime` 是新的：上一代沒有這個資料夾，它就是「唯一能動全域開關」的那個家。
 # `gui` 也是新的（#516 GUI 第一版，本機網頁，#517 A）：它只拿 reporting 那一組的東西（方案、
 # 結果、比較、顯示用的換算），沒有人拿它；放最上面自成一層，任何一層去拿它都是往上拿、紅。
+# `gradient` 也是新的（#561 第三階段梯度搜尋）：整條可微鏈要在行程內拿物理與評分做自動微分，
+# 而 #585 讓 search 不直接拿物理（有限元素交給子行程），所以另開一個資料夾、跟 search 站同一組。
 layers = [
   ["runtime"],
   ["config"],
@@ -103,7 +105,7 @@ layers = [
   ["physics"],
   ["scoring"],
   ["dsp", "records", "reporting"],
-  ["calibration", "search", "zoning"],
+  ["calibration", "gradient", "search", "zoning"],
   ["gui"],
 ]
 
