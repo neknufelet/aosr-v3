@@ -32,8 +32,15 @@ from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_R
 
 # 差分相對步長沿用傳遞矩陣考卷；不是產品精度契約。
 DIFFERENCE_STEP = 1e-5
-# 樣板的穿孔板厚度只有 0.8 mm，1e-5 步長的能量相減受捨入影響；1e-4 實量兩探點相對差均約 2e-8。
-TEMPLATE_DIFFERENCE_STEP = 1e-4
+# 樣板兩個探點各自的差分相對步長（#956 步長掃）：取本機步長掃觀察到「截斷誤差還跟 h² 一起縮、捨入還沒主導」的最小一格（掃描結果，不是必然結論）。
+# 玻璃棉構造的空腔厚度（layer2，空氣層）無量綱導數尺度約 5.5e3，3e-5 時逐頻最差約 1.5e-9；
+# 穿孔板厚度（layer1，0.8 mm）尺度只有約 2.5，1e-2 以下就被能量相減的捨入主導，要 3e-2 才回到 h² 區。
+# 本次掃描沒有一格能讓兩探點同時落在 h² 區；共用 1e-4 時穿孔板那格已在捨入區，雲端 Xeon 就是這樣紅的。不是產品精度契約。
+TEMPLATE_DIFFERENCE_STEPS = {"layer2.thickness_m": 3e-5, "layer1.thickness_m": 3e-2}
+# 反向模式（總能量的 grad）對前向模式（逐頻能量的 jvp）加總：同一函式兩種自動微分模式，差的是不同微分模式與運算次序的浮點捨入、
+# 不含有限差分截斷。分母用逐頻導數絕對值總和，正負相消時不被放大；本機實量約 1.5e-15，留近三個數量級。
+# 不是產品精度契約。
+REVERSE_FORWARD_REL = 1e-12
 CASES = ("training", "holdout", "one_rigid", "several_rigid")
 Record = dict[str, object]
 
@@ -83,7 +90,7 @@ def runs(model: ReducedModel, tmp_path_factory: pytest.TempPathFactory) -> dict[
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["TMPDIR"], env["PYTHONDONTWRITEBYTECODE"] = str(directory), "1"
     env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
-    process = subprocess.run([sys.executable, str(Path(__file__).with_name("_fem_reduced_jax_probe.py")), str(directory), str(TEMPLATE_DIFFERENCE_STEP)],
+    process = subprocess.run([sys.executable, str(Path(__file__).with_name("_fem_reduced_jax_probe.py")), str(directory), json.dumps(TEMPLATE_DIFFERENCE_STEPS)],
                              cwd=directory, env=env, capture_output=True, text=True, timeout=100)
     assert process.returncode == 0, process.stdout + process.stderr
     return cast(dict[str, Record], json.loads((directory / "output.json").read_text(encoding="utf-8")))
@@ -150,7 +157,7 @@ def test_impedance_gradient_matches_numpy_difference(model: ReducedModel, runs: 
 
 
 def test_template_chain_matches_numpy_and_has_two_live_gradients(model: ReducedModel, runs: dict[str, Record]) -> None:
-    """玻璃棉＋空腔與穿孔板各一個厚度探點：對獨立重建構造的中央差分，兩面兩邊都非零。"""
+    """空腔厚度與穿孔板厚度兩個探點：前向逐頻導數對獨立重建構造的逐頻中央差分，反向總和接前向，兩面兩邊都非零。"""
     row = runs["templates"]
     mask = np.asarray(row["mask"], dtype=bool)
     assert row["mask_from_templates_identical"] is True and mask.tolist() == [False, True, True, True, False, True]
@@ -158,14 +165,27 @@ def test_template_chain_matches_numpy_and_has_two_live_gradients(model: ReducedM
     assert _within(_decode(row["pressure"]), _numpy(model, z, mask))
     assert _within(_decode(row["jit"]), _decode(row["pressure"]))
     assert _decode(row["jit"]).tobytes() == _decode(row["jit_again"]).tobytes()
-    for probe in cast(list[Record], row["gradients"]):
+    probes = cast(list[Record], row["gradients"])
+    assert sorted(cast(str, probe["name"]) for probe in probes) == sorted(TEMPLATE_DIFFERENCE_STEPS)
+    for probe in probes:
+        name = cast(str, probe["name"])
+        step = TEMPLATE_DIFFERENCE_STEPS[name]
+        assert probe["step"] == step, name
         baseline = float(cast(float, probe["baseline"]))
-        upper = np.sum(np.abs(_numpy(model, _decode(probe["upper"]), mask)) ** 2)
-        lower = np.sum(np.abs(_numpy(model, _decode(probe["lower"]), mask)) ** 2)
-        central = (upper - lower) / (2.0 * TEMPLATE_DIFFERENCE_STEP * baseline)
-        automatic = float(cast(float, probe["automatic"]))
-        assert abs(automatic * baseline) > GRADIENT_ABS and abs(central * baseline) > GRADIENT_ABS
-        np.testing.assert_allclose(automatic * baseline, central * baseline, rtol=GRADIENT_REL, atol=GRADIENT_ABS)
+        # 總能量一個純量相減會只剩有效位數的尾巴（#956：雲端 8.75e-8 誤擋），改逐頻：每個頻點的能量各自差分。
+        upper = np.sum(np.abs(_numpy(model, _decode(probe["upper"]), mask)) ** 2, axis=(1, 2))
+        lower = np.sum(np.abs(_numpy(model, _decode(probe["lower"]), mask)) ** 2, axis=(1, 2))
+        expected = (upper - lower) / (2.0 * step)
+        forward = _decode(probe["automatic_per_frequency"])
+        assert forward.shape == (len(AXIS),) and np.isfinite(forward).all() and np.all(forward.imag == 0), name
+        actual = forward.real * baseline
+        # 乘基準值成無量綱；照上面那題，探點內取頻點上最大絕對值當尺度，導數過零的頻點不被捨入支配；尺仍從傳遞矩陣考卷讀。
+        scale = np.max(np.abs(expected))
+        assert np.all(np.abs(actual - expected) <= GRADIENT_REL * scale + GRADIENT_ABS), name
+        assert np.max(np.abs(actual)) > GRADIENT_ABS and scale > GRADIENT_ABS, name
+        # 反向模式經前向模式接到獨立 numpy 參考。
+        reverse = float(cast(float, probe["automatic"]))
+        assert abs(reverse - np.sum(forward.real)) <= REVERSE_FORWARD_REL * np.sum(np.abs(forward.real)), name
     assert cast(Record, row["single"])["dtype"] == "complex64"
     assert np.isfinite(_decode(row["single"])).all()
     assert row["single_gradient_dtype"] == "float32" and row["single_gradient_finite"] is True

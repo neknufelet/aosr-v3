@@ -25,7 +25,7 @@ from aosr.physics.fem_reduced_store import load_reduced
 
 Record = dict[str, object]
 Parameters = tuple[Mapping[str, jax.Array], ...]
-# 差分步長由父行程傳入；探針只交出擾動點的阻抗，不做差分或判決。
+# 差分步長由父行程傳入（每個探點一個，以變數鍵為索引）；探針只交出擾動點的阻抗，不做差分或判決。
 
 
 def _bits(value: jax.Array | np.ndarray) -> Record:
@@ -86,18 +86,29 @@ def _rejections(templates: tuple[ConstructionTemplate | None, ...], parameters: 
 
 
 def _template_gradients(constants: reduced.ReducedConstants, templates: tuple[ConstructionTemplate | None, ...],
-                        parameters: Parameters, step: float) -> list[Record]:
+                        parameters: Parameters, steps: Mapping[str, float]) -> list[Record]:
     air = load_physics_constants(config_path("physics_constants.toml"))
     frequencies = jnp.asarray(constants.frequencies_hz)
+    def per_frequency(values: Parameters) -> jax.Array:
+        walls = reduced.wall_impedances_from_templates(templates, values, frequencies, air=air)
+        return jnp.sum(jnp.abs(reduced.reduced_pressures(constants, walls.values, rigid_mask=walls.rigid_mask)) ** 2, axis=(1, 2))
     def energy(values: Parameters) -> jax.Array:
         walls = reduced.wall_impedances_from_templates(templates, values, frequencies, air=air)
         return jnp.sum(jnp.abs(reduced.reduced_pressures(constants, walls.values, rigid_mask=walls.rigid_mask)) ** 2)
     gradient = jax.jit(jax.grad(energy))(parameters)
+    def forward(wall: int, name: str) -> jax.Array:
+        # 只把這一個參數換成自變數，其餘照基準值；jvp（前向模式：切向量乘雅可比）切向量取 1，
+        # 一次拿到每個頻點能量對這個參數的導數，形狀＝頻率軸。
+        def along(value: jax.Array) -> jax.Array:
+            return per_frequency(tuple({**p, name: value} if w == wall else p for w, p in enumerate(parameters)))
+        point = parameters[wall][name]
+        return jnp.asarray(jax.jvp(along, (point,), (jnp.ones_like(point),))[1])
     rows = []
     for wall, name in ((0, "layer2.thickness_m"), (4, "layer1.thickness_m")):
         template = templates[wall]
         assert template is not None
         variable = next(v for v in template.variables if v.name == name)
+        step = steps[name]
         impedances = []
         for sign in (1.0, -1.0):
             z = np.asarray(reduced.wall_impedances_from_templates(templates, parameters, frequencies, air=air).values).copy()
@@ -109,12 +120,13 @@ def _template_gradients(constants: reduced.ReducedConstants, templates: tuple[Co
             z[wall] = np.asarray(surface_impedance(material, frequencies, air=air,
                 ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")))[0])
             impedances.append(_bits(z))
-        rows.append({"wall": wall, "name": name, "baseline": variable.baseline,
-                     "automatic": float(gradient[wall][name]), "upper": impedances[0], "lower": impedances[1]})
+        rows.append({"wall": wall, "name": name, "baseline": variable.baseline, "step": step,
+                     "automatic": float(gradient[wall][name]), "automatic_per_frequency": _bits(forward(wall, name)),
+                     "upper": impedances[0], "lower": impedances[1]})
     return rows
 
 
-def _templates(constants: reduced.ReducedConstants, step: float) -> Record:
+def _templates(constants: reduced.ReducedConstants, steps: Mapping[str, float]) -> Record:
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
@@ -142,12 +154,12 @@ def _templates(constants: reduced.ReducedConstants, step: float) -> Record:
         "single": _bits(compiled(single, single_frequencies)),
         "single_gradient_dtype": str(jax.tree.leaves(single_gradient)[0].dtype),
         "single_gradient_finite": all(bool(jnp.isfinite(v)) for v in jax.tree.leaves(single_gradient)),
-        "gradients": _template_gradients(constants, templates, parameters, step),
+        "gradients": _template_gradients(constants, templates, parameters, steps),
         "rejections": _rejections(templates, parameters, frequencies),
     }
 
 
-def main(directory: Path, step: float) -> None:
+def main(directory: Path, steps: Mapping[str, float]) -> None:
     from aosr.geometry.shoebox import Wall
     from tests.engine.test_fem_reduced import HOLDOUT, TRAINING
 
@@ -157,7 +169,7 @@ def main(directory: Path, step: float) -> None:
     for name, row in problem.items():
         z = jnp.asarray(np.asarray(row["real"]) + 1j * np.asarray(row["imag"]))
         output[name] = _case(constants, z, jnp.asarray(row["mask"]))
-    output["templates"] = _templates(constants, step)
+    output["templates"] = _templates(constants, steps)
     compiled = jax.jit(reduced.reduced_pressures)
     none_rigid = jnp.zeros((len(Wall.all()),), dtype=bool)
     output["materials"] = {"pressures": [_bits(compiled(constants, jnp.asarray([walls[w] for w in Wall.all()]), rigid_mask=none_rigid))
@@ -166,4 +178,4 @@ def main(directory: Path, step: float) -> None:
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), float(sys.argv[2]))
+    main(Path(sys.argv[1]), {name: float(step) for name, step in cast(dict[str, float], json.loads(sys.argv[2])).items()})
