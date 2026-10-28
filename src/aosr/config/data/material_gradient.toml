@@ -34,6 +34,11 @@ max_rounds = 10
 # 求值次數上限（算次數不算秒數；值＋梯度算一次，線搜尋每個試探都算一次）；限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多；下一輪最壞情況會超過就不開、記「求值到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
 max_evaluations = 2000
 
+[export]
+# 終點把六面規格匯出成材料時，空腔小於這個深度（公尺）就整層拿掉、不放空氣層；等於或大於就照原值放（辛二，2026-10-29）。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段；替身求值用的匯出 θ 走同一條規則。
+min_cavity_m = 0.001
+
 # 樣板家族：同一種材料（同流阻）不同厚度、有沒有空腔；第一版只有玻璃棉三個密度。
 # 棉板合法厚度照 construction_presets.toml 有的產品厚度；空腔是連續量。
 
