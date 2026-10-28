@@ -20,7 +20,6 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, NamedTuple
-from weakref import WeakKeyDictionary
 
 import jax
 import jax.numpy as jnp
@@ -356,19 +355,23 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
 
 # ---- 投影梯度下降 ----
 
-_EVALUATORS: WeakKeyDictionary[ChainObjective, Evaluator] = WeakKeyDictionary()
+# 編譯好的評估函式掛在目標函式物件自己身上的屬性名。
+_EVALUATOR_ATTRIBUTE: Final = "aosr_compiled_evaluator"
 
 
 def compiled_evaluator(objective: ChainObjective) -> Evaluator:
     """``θ → ((值, 分項), 梯度)`` 的編譯版；同一個目標函式物件只包一次 ``jax.jit``，之後每段下降共用同一份編譯。
 
     每段下降都重新包一次會每段重新追蹤、重新編譯（候選確認一輪最多四段）；共用不改數值：同一個函式、
-    同一個形狀與精度，編譯出同一份程式。目標函式被丟掉時快取跟著消失。
+    同一個形狀與精度，編譯出同一份程式。編譯版掛在目標函式自己的屬性上，不放模組層的表：編譯版強抓著目標，
+    放在以目標為鍵的弱參照表裡鍵永遠不會死（#561 審查）；掛在自己身上是「目標 → 編譯版 → 目標」的循環，
+    外面沒人抓著目標時垃圾回收連編譯版一起收。目標必須是能掛屬性的函式物件（``def`` 或 lambda）。
     """
-    evaluator = _EVALUATORS.get(objective)
-    if evaluator is None:
-        evaluator = jax.jit(jax.value_and_grad(objective, has_aux=True))
-        _EVALUATORS[objective] = evaluator
+    cached: Evaluator | None = getattr(objective, _EVALUATOR_ATTRIBUTE, None)
+    if cached is not None:
+        return cached
+    evaluator: Evaluator = jax.jit(jax.value_and_grad(objective, has_aux=True))
+    setattr(objective, _EVALUATOR_ATTRIBUTE, evaluator)
     return evaluator
 
 

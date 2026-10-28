@@ -421,7 +421,7 @@ def _check_should_continue(decision: RoundDecision, start: _LoopStart, designs: 
 
 def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
                   ledger_path: Path, header: MaterialGradientHeader) -> LoopResult:
-    """讀回帳本接著跑：標頭（替身、面、變數、設定指紋）跟這一次不一樣就拒收。
+    """讀回帳本接著跑：標頭（替身、面、變數、設定指紋、評分常數指紋）跟這一次不一樣就拒收。
 
     最後一列決定之前的輪算完成，之後沒寫完的半輪丟掉（帳本截到那一列）重跑；沒有任何決定列就從前段最後一列起跑。
     已經以停止原因收尾的帳本不再求值，直接交回。θ 從帳本讀回是雙精度；累計求值次數接帳本記的（丟掉的半輪不算）。
