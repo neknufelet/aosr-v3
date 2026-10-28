@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import cast
 
@@ -111,9 +112,11 @@ def _synthetic(directory: Path, name: str, case: Record, base: MaterialGradientS
     objective = synthetic_objective(designs, counter)
     path = directory / f"{name}.jsonl"
     start = _start_ledger(path, header, designs, objective, gradient_search.baseline_theta(designs))
-    before = counter[0]
+    before, clock = counter[0], time.perf_counter()
     result = loop.run_rounds(objective, start, designs, settings, path, header)
-    row: Record = {"ledger": path.name, "calls": counter[0] - before, "result": _result(result)}
+    row: Record = {"ledger": path.name, "calls": counter[0] - before, "result": _result(result),
+                   "seconds": {"run": time.perf_counter() - clock}}
+    seconds = cast(dict[str, object], row["seconds"])
     if case.get("again"):
         again = directory / f"{name}.again.jsonl"
         _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
@@ -121,12 +124,15 @@ def _synthetic(directory: Path, name: str, case: Record, base: MaterialGradientS
         row["again"] = again.name
     if case.get("resume_every_row"):
         total = len(path.read_bytes().splitlines()) - 1
-        resumed = []
+        resumed, each = [], []
         for keep in range(1, total + 1):
             cut = _cut_copy(path, directory / f"{name}.cut{keep:04d}.jsonl", keep)
+            clock = time.perf_counter()
             loop.resume_rounds(objective, designs, settings, cut, header)
+            each.append(time.perf_counter() - clock)
             resumed.append(cut.name)
         row["resumed"] = resumed
+        seconds["resume_each"] = each
     if case.get("single_round"):
         before = counter[0]
         single = loop.confirmation_round(objective, start, designs, settings, budget_left=10**6)
@@ -147,20 +153,31 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")), frequencies=model.frequencies_hz)
     header = ledger.header_for(model, designs, base)
     main, again = directory / "surrogate.jsonl", directory / "surrogate.again.jsonl"
+    seconds: dict[str, object] = {}
+    clock = time.perf_counter()
     start = _start_ledger(main, header, designs, objective, gradient_search.baseline_theta(designs))
     result = loop.run_rounds(objective, start, designs, base, main, header)
+    seconds["run_first_with_compile"] = time.perf_counter() - clock
+    clock = time.perf_counter()
     _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
     loop.run_rounds(objective, start, designs, base, again, header)
+    seconds["run_again"] = time.perf_counter() - clock
     _, rows = ledger.read_ledger(main)
     after_first = next(index for index, item in enumerate(rows) if item.phase == "round_decision") + 1
     mid_second = next(index for index, item in enumerate(rows) if item.round == 1 and item.phase == "candidate_jump") + 1
-    resumed = []
+    resumed, each = [], []
     for keep in (after_first, mid_second):
         cut = _cut_copy(main, directory / f"surrogate.cut{keep:04d}.jsonl", keep)
+        clock = time.perf_counter()
         loop.resume_rounds(objective, designs, base, cut, header)
+        each.append(time.perf_counter() - clock)
         resumed.append(cut.name)
+    seconds["resume_each"] = each
+    clock = time.perf_counter()
     single = loop.confirmation_round(objective, start.astype(np.float32), designs, base, budget_left=10**6)
+    seconds["float32_round_with_compile"] = time.perf_counter() - clock
     return {"ledger": main.name, "again": again.name, "resumed": resumed, "result": _result(result),
+            "seconds": seconds,
             "single": {"dtype": str(single.theta.dtype), "theta": _hex(single.theta),
                        "baseline_dtype": str(single.baseline.theta.dtype) if single.baseline is not None else None,
                        "value": float(cast(float, single.value)).hex(), "evaluations": single.evaluations,
@@ -170,10 +187,14 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
 def main(directory: Path) -> None:
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     base = load_material_gradient_settings(config_path("material_gradient.toml"))
+    clock = time.perf_counter()
     output: Record = {"synthetic": {name: _synthetic(directory, name, cast(Record, case), base)
                                     for name, case in cast(dict[str, object], problem["synthetic"]).items()}}
+    synthetic_seconds = time.perf_counter() - clock
     if problem.get("surrogate"):
+        clock = time.perf_counter()
         output["surrogate"] = _surrogate(directory, problem, base)
+        output["seconds"] = {"synthetic_all": synthetic_seconds, "surrogate_all": time.perf_counter() - clock}
     (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
     shutil.rmtree(directory / "__pycache__", ignore_errors=True)
 

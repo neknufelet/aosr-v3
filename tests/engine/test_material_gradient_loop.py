@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
@@ -31,6 +33,7 @@ from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
 from tests.engine.test_fem_reduced import model as model, operators as operators
+from tests.engine._scheme_cache import shared_json
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _presets, _receivers, _settings,
 )
@@ -69,20 +72,49 @@ def _problem() -> Record:
             "receivers": _receivers().model_dump(mode="json")}
 
 
-@pytest.fixture(scope="module")
-def runs(model: ReducedModel, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Record]:
-    directory = tmp_path_factory.mktemp("material-gradient-loop")
-    save_reduced(_chain_model(model), directory / "model.npz")
+def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
+    """建衍生替身、跑探針，回探針輸出加上父行程用同一份替身算的標頭與建替身秒數（JSON 文字）。
+
+    只有算的那個工人會走到這裡、才去拿 ``model``（約 70 秒）；等的工人不建替身。目錄先清空：
+    帳本是獨佔建檔，上一個拿鎖的工人若算到一半掛了，留下的半份不能被這一次接著用。
+    """
+    shutil.rmtree(directory, ignore_errors=True)
+    directory.mkdir(parents=True)
+    clock = time.perf_counter()
+    chain_model = _chain_model(cast(ReducedModel, request.getfixturevalue("model")))
+    model_seconds = time.perf_counter() - clock
+    save_reduced(chain_model, directory / "model.npz")
     (directory / "problem.json").write_text(json.dumps(_problem()), encoding="utf-8")
     env = child_process_env(threads=1).copy()
     env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["TMPDIR"], env["PYTHONDONTWRITEBYTECODE"] = str(directory), "1"
     env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
+    clock = time.perf_counter()
     process = subprocess.run([sys.executable, str(PROBE), str(directory)], cwd=directory, env=env,
                              capture_output=True, text=True, timeout=1500)
     assert process.returncode == 0, process.stdout + process.stderr
-    return directory, cast(Record, json.loads((directory / "output.json").read_text(encoding="utf-8")))
+    output = cast(Record, json.loads((directory / "output.json").read_text(encoding="utf-8")))
+    output["chain_header"] = ledger.header_for(chain_model, _designs(DESCENT_CASE), _settings()).model_dump(mode="json")
+    output["parent_seconds"] = {"model": model_seconds, "probe": time.perf_counter() - clock}
+    text = json.dumps(output)
+    (directory / "fixture.json").write_text(text, encoding="utf-8")
+    return text
+
+
+@pytest.fixture(scope="module")
+def runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+         ) -> tuple[Path, Record]:
+    """一場 pytest 只建一次替身、跑一次探針，平行的工人共用（#561 庚二修補一）。
+
+    worksteal 會把這一模組的題分給每一個工人，模組級夾具在每個工人各算一次、彼此搶 CPU（本機全套一題記到 836 秒）。
+    共用照既有的 ``_scheme_cache.shared_json``：檔案鎖、共用檔放在這一場的共同暫存根；``-n 0``（master）不共用，
+    用自己的暫存目錄（basetemp 的上一層會跨場殘留，不能拿來共用）。帳本檔放在共用目錄，讀的人只讀不改。
+    """
+    directory = (tmp_path_factory.mktemp("material-gradient-loop") if worker_id == "master"
+                 else tmp_path_factory.getbasetemp().parent / "material-gradient-loop-shared")
+    text = shared_json(tmp_path_factory, worker_id, "material-gradient-loop", lambda: _compute(directory, request))
+    return directory, cast(Record, json.loads(text))
 
 
 def _synthetic(runs: tuple[Path, Record], name: str) -> Record:
@@ -445,8 +477,9 @@ def test_ledger_v2_rejects_other_surrogate_and_v1(chain_header: ledger.MaterialG
 
 
 @pytest.fixture(scope="module")
-def chain_header(model: ReducedModel) -> ledger.MaterialGradientHeader:
-    return ledger.header_for(_chain_model(model), _designs(DESCENT_CASE), _settings())
+def chain_header(runs: tuple[Path, Record]) -> ledger.MaterialGradientHeader:
+    """父行程（算的那個工人）用同一份衍生替身算的標頭，跟探針子行程寫進帳本的那份各算各的；不另建替身。"""
+    return ledger.MaterialGradientHeader.model_validate(runs[1]["chain_header"])
 
 
 # ---- 接續 ----
