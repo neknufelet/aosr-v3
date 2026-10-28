@@ -20,6 +20,12 @@ from aosr.scoring.receiver_set import ReceiverRole, ReceiverSet
 from aosr.scoring.stage_one_low_frequency_contract import STAGE_ONE_SURROUNDING_DIRECTIONS
 from aosr.scoring.stage_one_score import PRINCIPAL, ROBUSTNESS, StageOneScoreSettings
 
+# 均方根零判的地板倍數：地板＝倍數 × 輸入精度的 eps × 該喇叭所有座位、範圍內頻點 |dB| 的最大值
+# （下限 1 dB，能量約 1 時 dB 約 0 也要有地板）。座位穩健性在六座位、F=188 時約 √(6·188)≈34 個
+# dB 捨入項疊加，取上面最近的 2 的冪——啟發式的工程餘裕，不是誤差上界。由 dtype 推出，不是登記的數，也不從契約的尺推：
+# 編譯後相同曲線相減剩捨入殘差，在近零的均方根上除以 sqrt 會放大成 O(1) 的假梯度。
+_RMS_FLOOR_EPS_MULTIPLE = 64.0
+
 
 class StageOneObjectiveConstants(NamedTuple):
     """可直接交進編譯的樹狀資料；頻點與聲道索引的長度保留輸入形狀，整數不當動態尺寸。
@@ -91,10 +97,10 @@ def _energy_shape(constants: StageOneObjectiveConstants) -> tuple[int, int, int]
             constants.log2_frequencies.shape[0])
 
 
-def _weighted_rms(values: jax.Array, weights: jax.Array) -> jax.Array:
-    """沿最後一軸的加權均方根；恰零時取零次梯度，未走的 sqrt(0) 不污染反向傳播。"""
+def _weighted_rms(values: jax.Array, weights: jax.Array, floor: jax.Array) -> jax.Array:
+    """沿最後一軸的加權均方根；不到地板的值與梯度一起歸零，未走的 sqrt 不污染反向傳播。"""
     square = jnp.sum(weights * values * values, axis=-1) / jnp.sum(weights)
-    is_zero = square == 0.0
+    is_zero = square <= floor * floor
     safe_square = jnp.where(is_zero, jnp.ones_like(square), square)
     return jnp.where(is_zero, jnp.zeros_like(square), jnp.sqrt(safe_square))
 
@@ -106,6 +112,7 @@ def objective_from_energies(
 
     主位用 dB 對 log2(f) 的加權平均、協方差／變異數擬合自己的直線；六點各自減主位後
     取加權均方根再等權平均。合分為 Σ 權重 × 聲道平均／較差參考，外層類權重不在這裡乘。
+    兩項的均方根低於 ``_RMS_FLOOR_EPS_MULTIPLE`` × eps × 該喇叭 max|dB|（下限 1）時，值與梯度都當 0。
     """
     values = jnp.asarray(energies)
     if not jnp.issubdtype(values.dtype, jnp.floating):
@@ -129,8 +136,10 @@ def objective_from_energies(
     slope = covariance / variance
     intercept = y_mean - slope * x_mean
     residual = primary - (slope[:, None] * x + intercept[:, None])
-    ripple = _weighted_rms(residual, weights)
-    robustness = jnp.mean(_weighted_rms(surrounding - primary[:, None, :], weights), axis=-1)
+    scale = jnp.maximum(jnp.max(jnp.abs(levels), axis=(1, 2)), jnp.ones((), dtype=dtype))
+    floor = _RMS_FLOOR_EPS_MULTIPLE * float(np.finfo(dtype).eps) * scale
+    ripple = _weighted_rms(residual, weights, floor)
+    robustness = jnp.mean(_weighted_rms(surrounding - primary[:, None, :], weights, floor[:, None]), axis=-1)
     means = jnp.stack((jnp.mean(ripple), jnp.mean(robustness)))
     component_weights = jnp.asarray(constants.component_weights, dtype=dtype)
     references = jnp.asarray(constants.worse_references, dtype=dtype)

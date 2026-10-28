@@ -35,10 +35,28 @@ from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_R
 FloatArray = NDArray[np.float64]
 _PROBE = Path(__file__).with_name("_stage_one_objective_jax_probe.py")
 _BASE_CASES = ("demo", "tilted", "gaussian", "random_561", "random_562")
-_CASES = (*_BASE_CASES, "reordered", "clipped", "settings")
+# 七座位交進完全相同的曲線、而且不在單位能量（全 7、全用 demo 主位那條）：修前編譯後相同曲線相減
+# 剩約 7e-16 的捨入殘差，在近零均方根上放大成 O(1) 的假梯度；座位穩健性的真值恰 0。
+_IDENTICAL_CASES = ("identical_seven", "identical_demo")
+# 能量約 1（dB 約 0，地板取下限 1 dB，雙精度約 1.4e-14 dB）時第 k 個周圍點差 k·1e-6 dB：
+# 比地板高八個數量級，值與梯度都不准被歸零。不用 demo 的 80 dB：那裡 dB 的末位約 1e-14，
+# 對 1e-6 的差就是 1e-8 的相對差，量的是 log10 兩種寫法的末位，不是地板。
+_NUDGED = "nudged_unit"
+_NUDGE_DB = 1e-6
+_CASES = (*_BASE_CASES, "reordered", "clipped", "settings", *_IDENTICAL_CASES, _NUDGED)
 _QUANTITIES = (PRINCIPAL, ROBUSTNESS, "mean_" + PRINCIPAL, "mean_" + ROBUSTNESS, "screening_total")
 # 中央差分以每一格能量本身為尺度，h/E=1e-5；比 E·∂total/∂E，避免大能量掩蓋錯梯度。
 _DIFFERENCE_STEP = 1e-5
+# 七座位同乘 exp(s)，起伏與座位差都不變，對 s 的梯度數學上恰 0，每一組輸入都成立。雙精度上限 1e-9：
+# 修後全部十一組只剩擬合與加總的捨入（本機實量最大約 1.1e-14），上限離它四個數量級以上；
+# 修前座位相同的兩組編譯後是 −4.489、−0.987，離上限九個數量級。單精度上限 2^-14（約 6.1e-5）：
+# 正常輸入本機實量最大約 2.0e-6（約 17 個 eps），上限留三十倍給換機器；單精度修前最大只到 −1.38e-6、
+# 沒有 O(1) 的錯，這條只擋單精度炸開，單精度的修補由「座位穩健性恰 0」那題抓。
+_GAIN_GRADIENT_BOUND = 1e-9
+_SINGLE_GAIN_GRADIENT_BOUND = 2.0 ** -14
+# 沿單一周圍點的增益 exp(t) 走：座位差逐頻同加 10/ln10·t dB，h=1e-7 只推 4.3e-7 dB、
+# 小於最小的 1e-6 dB 差，均方根在這一段是直線，中央差分沒有曲率誤差。
+_SEAT_GAIN_STEP = 1e-7
 
 
 class CaseRun(TypedDict):
@@ -46,6 +64,9 @@ class CaseRun(TypedDict):
     jit: dict[str, list[str]]
     jit_again: dict[str, list[str]]
     single: dict[str, list[str]]
+    single_eager: dict[str, list[str]]
+    gain_gradient: list[str]
+    single_gain_gradient: list[str]
     gradient: list[str]
     single_gradient: list[str]
     double_dtypes: list[str]
@@ -80,7 +101,20 @@ def _receivers(name: str = "demo") -> ReceiverSet:
     return base
 
 
+def _surrounding(name: str) -> list[int]:
+    return [index for index, point in enumerate(_receivers(name).points) if point.role == ReceiverRole.SURROUNDING]
+
+
 def _energies(name: str) -> FloatArray:
+    shape = (2, len(DIRECTIONS) + 1, len(AXIS_HZ))
+    if name in _IDENTICAL_CASES:
+        curve = np.full(len(AXIS_HZ), 7.0) if name == "identical_seven" else 10.0 ** (demo_curve_db() / 10.0)
+        return np.asarray(np.broadcast_to(curve, shape), dtype=np.float64).copy()
+    if name == _NUDGED:
+        nudged = np.ones(shape, dtype=np.float64)
+        for rank, index in enumerate(_surrounding(name)):
+            nudged[:, index, :] = 10.0 ** ((rank + 1) * _NUDGE_DB / 10.0)
+        return nudged
     if name.startswith("random_"):
         rng = np.random.default_rng(int(name.removeprefix("random_")))
         return np.asarray(np.exp(rng.normal(1.0, 1.2, (2, len(DIRECTIONS) + 1, len(AXIS_HZ)))), dtype=np.float64)
@@ -240,6 +274,53 @@ def test_pure_line_ripple_is_near_zero_in_both_implementations(jax_runs: dict[st
             arrays = jax_runs["tilted"][mode]
             assert isinstance(arrays, dict)
             assert np.all(np.abs(_decode(arrays[quantity])) <= tolerance)
+
+
+@pytest.mark.parametrize("name", _CASES)
+def test_common_gain_has_zero_compiled_gradient(jax_runs: dict[str, CaseRun], name: str) -> None:
+    """七座位同乘 exp(s)、s=0 對 s 的編譯梯度：抓近零均方根上捨入殘差被放大的假梯度。"""
+    run = jax_runs[name]
+    assert abs(_decode(run["gain_gradient"])[0]) <= _GAIN_GRADIENT_BOUND, name
+    assert abs(_decode(run["single_gain_gradient"])[0]) <= _SINGLE_GAIN_GRADIENT_BOUND, name
+
+
+@pytest.mark.parametrize("name", _IDENTICAL_CASES)
+def test_identical_seats_have_exact_zero_robustness(jax_runs: dict[str, CaseRun], name: str) -> None:
+    """座位完全相同時 Python 給恰 0；編譯與不編譯、雙與單精度都要恰 0，主位起伏不受影響。"""
+    tolerance = contract_value("stage_one_objective_jax_vs_python")
+    run = jax_runs[name]
+    assert np.array_equal(_numpy_arrays(name)[ROBUSTNESS], np.zeros(2))
+    for mode in ("eager", "jit", "single", "single_eager"):
+        assert np.array_equal(_decode(run[mode][ROBUSTNESS]), np.zeros(2)), (name, mode)
+        assert np.array_equal(_decode(run[mode]["mean_" + ROBUSTNESS]), np.zeros(1)), (name, mode)
+        assert np.all(np.isfinite(_decode(run[mode][PRINCIPAL]))), (name, mode)
+    # 編譯會改變擬合直線那幾個總和的合併順序，主位起伏對不編譯只守登記的尺（實量不逐位）。
+    assert _within_contract(_decode(run["jit"][PRINCIPAL]), _decode(run["eager"][PRINCIPAL]), tolerance)
+
+
+def test_seat_difference_above_floor_keeps_value_and_gradient(jax_runs: dict[str, CaseRun]) -> None:
+    """座位差 1e-6 dB 起跳、遠在地板之上：值對 Python 守契約，沿每個周圍點增益的梯度對差分。"""
+    tolerance = contract_value("stage_one_objective_jax_vs_python")
+    run = jax_runs[_NUDGED]
+    expected = _numpy_arrays(_NUDGED)
+    assert np.all(expected[ROBUSTNESS] > 0.0)
+    for mode in ("eager", "jit"):
+        actual = _decode(run[mode][ROBUSTNESS])
+        assert np.all(actual > 0.0), mode
+        assert _within_contract(actual, expected[ROBUSTNESS], tolerance), mode
+    energies = _gradient_energies(_NUDGED)
+    automatic = _decode(run["gradient"]).reshape(energies.shape) * energies
+    for channel in range(energies.shape[0]):
+        for index in _surrounding(_NUDGED):
+            plus, minus = energies.copy(), energies.copy()
+            plus[channel, index] *= math.exp(_SEAT_GAIN_STEP)
+            minus[channel, index] *= math.exp(-_SEAT_GAIN_STEP)
+            central = (_numpy_arrays(_NUDGED, plus)["screening_total"][0] -
+                       _numpy_arrays(_NUDGED, minus)["screening_total"][0]) / (2.0 * _SEAT_GAIN_STEP)
+            directional = float(np.sum(automatic[channel, index]))
+            assert directional != 0.0, (channel, index)
+            np.testing.assert_allclose(directional, central, rtol=GRADIENT_REL, atol=GRADIENT_ABS,
+                                       err_msg=str((channel, index)))
 
 
 def _central_difference(name: str) -> FloatArray:
