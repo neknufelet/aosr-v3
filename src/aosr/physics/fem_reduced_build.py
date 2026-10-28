@@ -2,7 +2,7 @@
 
 照 #610 實驗那一版：起點是平均挑的幾組訓練材料 × 平均挑的幾個頻點；之後每輪用固定種子從還沒解過的
 （材料、頻點）抽候選，以完整矩陣直接形成 ``b − A(Vq)`` 量替身殘差，取最大的一批完整解補進快照。
-抽到的最大殘差不超過停止值、完整解次數到上限、或候選用完就停。停止值只是選點用的，不是驗證門檻；
+抽到的最大殘差不超過停止值、完整解次數到上限（記「預算停止、殘差目標未達」）、或候選用完就停。停止值只是選點用的，不是驗證門檻；
 替身準不準由 :mod:`aosr.physics.fem_reduced_check` 用留出材料對完整解判。
 """
 from __future__ import annotations
@@ -121,7 +121,7 @@ def build_reduced_model(
         build.solve(pending)
         basis, matrices = build.reduce()
         if build.solver.solves >= settings.max_full_solves:
-            stop = "完整解次數到上限"
+            stop = "預算停止、殘差目標未達"
             break
         outcome = build.greedy_round(rng, basis, matrices)
         if outcome is None:
