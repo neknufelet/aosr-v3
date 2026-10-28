@@ -74,6 +74,13 @@ def _run_case(case: Case) -> dict[str, object]:
     def total(values: jax.Array) -> jax.Array:
         return objective_from_energies(constants, values).screening_total
 
+    def gained_total(gain: jax.Array, values: jax.Array) -> jax.Array:
+        return objective_from_energies(constants, values * jnp.exp(gain)).screening_total
+
+    single_eager = objective_from_energies(constants, energies.astype(jnp.float32))
+    gain_gradient = jax.jit(jax.grad(gained_total))(jnp.zeros((), dtype=jnp.float64), energies)
+    single_gain_gradient = jax.jit(jax.grad(gained_total))(jnp.zeros((), dtype=jnp.float32),
+                                                           energies.astype(jnp.float32))
     gradient = jax.jit(jax.grad(total))(_energy_array(case["gradient_energies"]))
     single_gradient = jax.jit(jax.grad(total))(_energy_array(case["gradient_energies"]).astype(jnp.float32))
     pressure, pressure_energy = _pressure_pair(constants, energies)
@@ -82,9 +89,13 @@ def _run_case(case: Case) -> dict[str, object]:
     vectorized = jax.jit(jax.vmap(objective_from_energies, in_axes=(None, 0)))(constants, batch)
     return {
         "eager": _arrays(eager), "jit": _arrays(first), "jit_again": _arrays(second), "single": _arrays(single),
+        "single_eager": _arrays(single_eager),
         "gradient": _hex(gradient), "single_gradient": _hex(single_gradient),
-        "double_dtypes": [str(value.dtype) for result in (eager, first, pressure) for value in result] + [str(gradient.dtype)],
-        "single_dtypes": [str(value.dtype) for result in (single, single_pressure) for value in result] + [str(single_gradient.dtype)],
+        "gain_gradient": _hex(gain_gradient), "single_gain_gradient": _hex(single_gain_gradient),
+        "double_dtypes": [str(value.dtype) for result in (eager, first, pressure) for value in result] +
+                         [str(gradient.dtype), str(gain_gradient.dtype)],
+        "single_dtypes": [str(value.dtype) for result in (single, single_eager, single_pressure) for value in result] +
+                         [str(single_gradient.dtype), str(single_gain_gradient.dtype)],
         "pressure": _arrays(pressure), "pressure_energy": _arrays(pressure_energy),
         "single_pressure": _arrays(single_pressure), "single_pressure_energy": _arrays(single_pressure_energy),
         "vmap": _arrays(vectorized), "loop": [_arrays(compiled(constants, row)) for row in batch],
