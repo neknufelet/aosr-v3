@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 from typing import cast
@@ -223,8 +224,16 @@ def _descent(runs: tuple[Path, dict[str, Record]], key: str = "descent") -> Reco
     return cast(Record, runs[1][DESCENT_CASE][key])
 
 
+def _pairs(names: Sequence[str]) -> list[tuple[int, int]]:
+    """同一面的棉板格與空腔格（樣板 layer1 是棉板、layer2 是空腔）；從變數名自己配，不借產品的總深度限制表。"""
+    index = {name: position for position, name in enumerate(names)}
+    return [(position, index[name.replace("layer1.", "layer2.")]) for name, position in index.items()
+            if name.endswith("layer1.thickness_m") and name.replace("layer1.", "layer2.") in index]
+
+
 def test_descent_monotone_inside_box_and_stop_reason_matches_numbers(runs: tuple[Path, dict[str, Record]]) -> None:
-    """抓值上升、跳出盒界、停止原因跟記下的數字對不上（記梯度夠小但最後範數不小、記步數到上限但沒走滿）。"""
+    """抓值上升、跳出盒界或總深度、停止原因跟記下的數字對不上（記梯度夠小但最後範數不小、記步數到上限但沒走滿）、
+    求值次數比走過的步還少。"""
     descent = _descent(runs)
     settings = _settings().descent
     row = runs[1][DESCENT_CASE]
@@ -237,6 +246,10 @@ def test_descent_monotone_inside_box_and_stop_reason_matches_numbers(runs: tuple
     assert np.all(np.diff(values) <= 0.0)
     assert values[-1] < values[0]
     assert all(np.all((lower <= theta) & (theta <= upper)) for theta in thetas)
+    top = _settings().family[0].max_total_depth_m
+    pairs = _pairs(cast(list[str], row["names"]))
+    assert pairs and all(theta[t] + theta[c] <= top for theta in thetas for t, c in pairs)
+    assert cast(int, descent["evaluations"]) >= len(thetas)
     assert np.all(sizes[1:] >= settings.min_step) and np.all(sizes[1:] <= settings.initial_step)
     taken = len(thetas) - 1
     reason = descent["stop_reason"]
@@ -257,34 +270,77 @@ def test_descent_monotone_inside_box_and_stop_reason_matches_numbers(runs: tuple
 
 def _masked_norm(theta: NDArray[np.float64], gradient: NDArray[np.float64], lower: NDArray[np.float64],
                  upper: NDArray[np.float64]) -> float:
-    """考卷自己算的投影梯度範數：貼下界還往外推（梯度 > 0）、貼上界還往外推（梯度 < 0）的分量歸零。"""
+    """只守盒界的投影梯度範數：貼下界還往外推（梯度 > 0）、貼上界還往外推（梯度 < 0）的分量歸零。"""
     blocked = ((theta <= lower) & (gradient > 0)) | ((theta >= upper) & (gradient < 0))
     return float(np.linalg.norm(np.where(blocked, 0.0, gradient)))
 
 
+def _cone_norm(direction: NDArray[np.float64], normals: Sequence[NDArray[np.float64]]) -> float:
+    """方向投到錐 {u：每條法向 n·u ≤ 0} 的長度＝錐裡單位方向 u 上 direction·u 的最大值（不小於 0）。
+
+    線性函數在錐與單位圓交出的弧上，最大值落在不受限的方向或弧的端點（每條作用中限制那條線上的兩個方向），
+    逐一試；跟產品「逐條邊投影取最近」是兩種算法。
+    """
+    trials = [direction / np.linalg.norm(direction)] if np.linalg.norm(direction) > 0.0 else []
+    for normal in normals:
+        tangent = np.asarray([-normal[1], normal[0]]) / np.linalg.norm(normal)
+        trials.extend((tangent, -tangent))
+    feasible = [unit for unit in trials if all(float(normal @ unit) <= 1e-12 for normal in normals)]
+    return max([0.0, *(float(direction @ unit) for unit in feasible)])
+
+
+def _on_slant(theta: NDArray[np.float64], t: int, c: int, top: float) -> bool:
+    """貼在「厚度＋空腔＝上限」那條斜邊上：和不超過上限、離上限在 4 個上限的浮點間距內（實數意義的貼邊，
+    不是「再大一個浮點數放不放得下」——0.1＋0.04999999999999999 再加一個末位仍捨入成 0.15）。"""
+    total = theta[t] + theta[c]
+    return bool(total <= top and top - total <= 4.0 * np.spacing(top))
+
+
+def _tangent_norm(theta: NDArray[np.float64], gradient: NDArray[np.float64], lower: NDArray[np.float64],
+                  upper: NDArray[np.float64], pairs: Sequence[tuple[int, int]], top: float) -> float:
+    """考卷自己算的投影梯度範數：盒界逐格遮；「厚度＋空腔」離上限在幾個浮點間距內的面算貼斜邊，整面負梯度投到
+    盒界與斜邊（法向 (1,1)）圍成的錐上再量長度。"""
+    masked = np.where(((theta <= lower) & (gradient > 0)) | ((theta >= upper) & (gradient < 0)), 0.0, gradient)
+    total = float(masked @ masked)
+    for t, c in pairs:
+        if not _on_slant(theta, t, c, top):
+            continue
+        normals = [np.asarray([1.0, 1.0])]
+        for axis, index in enumerate((t, c)):
+            unit = np.eye(2)[axis]
+            normals += [-unit] if theta[index] <= lower[index] else []
+            normals += [unit] if theta[index] >= upper[index] else []
+        total += _cone_norm(-gradient[[t, c]], normals) ** 2 - masked[t] ** 2 - masked[c] ** 2
+    return float(np.sqrt(total))
+
+
 def test_descent_gradient_norm_is_projected(runs: tuple[Path, dict[str, Record]]) -> None:
-    """抓投影梯度的遮罩被拿掉：每一步記的範數要等於考卷用 numpy 重算的遮罩後範數；
-    停在「梯度夠小」那一步有空腔貼著 0.150 上界還被往外推，未遮範數要嚴格大於遮罩後。
+    """抓投影梯度的遮罩被拿掉、或貼斜邊往外推的法向分量沒去掉：每一步記的範數要等於考卷重算的投影梯度範數；
+    停在「梯度夠小」那一步有一面貼在「厚度＋空腔＝上限」的斜邊上、負梯度往斜邊外推，未遮範數嚴格大於投影後。
 
     梯度是探針用另一支編譯函式在同一個 θ 重算的，跟下降內部那一支可能差末位，所以不逐位、
     用梯度那把尺（GRADIENT_REL 相對＋GRADIENT_ABS）；遮罩拿掉時差的是整個貼界分量，遠大於這把尺。
+    （庚二改：連續段守總深度之後終點不再貼 0.150 的空腔上界，改核斜邊。）
     """
     row = runs[1][DESCENT_CASE]
     descent = _descent(runs)
     lower, upper = _decode(row["lower"]), _decode(row["upper"])
+    pairs, top = _pairs(cast(list[str], row["names"])), _settings().family[0].max_total_depth_m
     thetas = [_decode(step) for step in cast(list[list[str]], descent["theta"])]
     gradients = [_decode(item) for item in cast(list[list[str]], row["descent_gradients"])]
     recorded = _decode(descent["gradient_norm"])
     for theta, gradient, norm in zip(thetas, gradients, recorded, strict=True):
-        expected = _masked_norm(theta, gradient, lower, upper)
+        expected = _tangent_norm(theta, gradient, lower, upper, pairs, top)
         assert abs(norm - expected) <= GRADIENT_REL * expected + GRADIENT_ABS, (norm, expected)
     assert descent["stop_reason"] == gradient_search.STOP_GRADIENT
     final_theta, final_gradient = thetas[-1], gradients[-1]
-    pushed_out = ((final_theta >= upper) & (final_gradient < 0)) | ((final_theta <= lower) & (final_gradient > 0))
-    assert np.any(pushed_out & (final_theta >= upper))
-    unmasked = float(np.linalg.norm(final_gradient))
-    assert unmasked > _masked_norm(final_theta, final_gradient, lower, upper)
-    assert recorded[-1] < _settings().descent.gradient_norm_stop <= unmasked
+    on_slant_pushed = [(t, c) for t, c in pairs if _on_slant(final_theta, t, c, top)
+                       and final_gradient[t] + final_gradient[c] < 0.0]
+    assert on_slant_pushed
+    projected = _tangent_norm(final_theta, final_gradient, lower, upper, pairs, top)
+    assert float(np.linalg.norm(final_gradient)) > projected
+    assert _masked_norm(final_theta, final_gradient, lower, upper) > projected
+    assert recorded[-1] < _settings().descent.gradient_norm_stop
 
 
 def test_descent_rerun_is_bitwise_identical(runs: tuple[Path, dict[str, Record]]) -> None:
@@ -315,7 +371,7 @@ def test_armijo_backtracks_when_first_trial_only_slightly_decreases() -> None:
     bounds = (np.asarray([-10.0]), np.asarray([10.0]))
     first_trial = start - np.float32(settings.initial_step) * np.float32(curvature) * start
     assert float(objective(jnp.asarray(first_trial))[0]) < float(objective(jnp.asarray(start))[0])
-    result = gradient_search.projected_descent(objective, start, bounds, settings)
+    result = gradient_search.projected_descent(objective, start, bounds, settings, limits=())
     expected_step = settings.initial_step * settings.backtrack_ratio
     assert result.steps[1].step_size == expected_step
     expected_theta = jnp.clip(jnp.asarray(start) - jnp.asarray(expected_step, dtype=jnp.float32)
@@ -475,6 +531,7 @@ def _tampered(source: Path, target: Path, edit: str) -> Path:
         document = json.loads(lines[1])
         document["stop_reason"] = gradient_search.STOP_MAX_STEPS
         document["final_trial_step"] = 0.0
+        document["evaluations"] = 1
         lines[1] = json.dumps(document, ensure_ascii=False) + "\n"
     target.write_text("".join(lines), encoding="utf-8")
     return target
@@ -588,7 +645,8 @@ def test_rejections() -> None:
     with pytest.raises(ValueError, match="有限"):
         gradient_search.checked_theta(np.full(theta.shape, np.nan), designs)
     with pytest.raises(ValueError, match="盒界"):
-        gradient_search.projected_descent(_never_called, outside, gradient_search.design_bounds(designs), settings.descent)
+        gradient_search.projected_descent(_never_called, outside, gradient_search.design_bounds(designs), settings.descent,
+                                          limits=gradient_search.depth_limits(designs))
 
 
 def test_surface_design_thickness_bounds_must_span_legal_thicknesses() -> None:

@@ -1,8 +1,9 @@
 """第三階段牆面材料梯度搜尋的前半段（#561）：整條可微鏈、投影梯度下降、取規格聯合重調空腔。
 
 找法照決策紙 ``stage-three-gradient-objective-low-frequency-lane.md``「決定」第 3 條：全牆聯合梯度為主；
-連續厚度轉合法規格時，總深度限制在取規格時一起滿足、之後空腔聯合重調，不准各面各自取最近就交付。
-候選確認、停止原因的接續與終點完整模型重算不在這裡（下一支、再下一支）。
+連續下降每一步投影到「盒界 ∩ 每面厚度＋空腔 ≤ 總深度上限」（老闆 2026-10-28 回 A）；連續厚度轉合法規格時，
+總深度限制在取規格時一起滿足、之後空腔聯合重調，不准各面各自取最近就交付。
+候選確認迴圈與接續在 ``material_gradient_loop``；終點完整模型重算不在這裡（下一支）。
 
 設計以「一串面（surfaces）」寫，長度不寫死：扁平化、下降、取規格、重調與帳本對任何面數都成立。
 只有最底下接替身那一層（:func:`chain_objective`）因為替身現在只有六面，才要求剛好照 ``Wall.all()``
@@ -19,6 +20,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, NamedTuple
+from weakref import WeakKeyDictionary
 
 import jax
 import jax.numpy as jnp
@@ -45,9 +47,19 @@ STOP_STEP: Final = "步長到下限"
 STOP_MAX_STEPS: Final = "步數到上限"
 StopReason = Literal["梯度夠小", "步長到下限", "步數到上限"]
 STOP_REASONS: Final[tuple[StopReason, ...]] = (STOP_GRADIENT, STOP_STEP, STOP_MAX_STEPS)
+# 候選確認迴圈（``material_gradient_loop``）整場的停止原因，封閉集合；字面只說做過的事：
+# 「已確認」只指重調過、跟同步數重調的基準比過的候選。
+LOOP_STOP_NO_IMPROVEMENT: Final = "已確認候選內沒有超過門檻"
+LOOP_STOP_NO_CANDIDATES: Final = "沒有候選"
+LOOP_STOP_MAX_ROUNDS: Final = "輪數到上限"
+LOOP_STOP_MAX_EVALUATIONS: Final = "求值到上限"
+LoopStopReason = Literal["已確認候選內沒有超過門檻", "沒有候選", "輪數到上限", "求值到上限"]
+LOOP_STOP_REASONS: Final[tuple[LoopStopReason, ...]] = (
+    LOOP_STOP_NO_IMPROVEMENT, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_MAX_EVALUATIONS)
 _THICKNESS = "thickness_m"
 
 ChainObjective = Callable[[jax.Array], tuple[jax.Array, StageOneObjectiveArrays]]
+Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, StageOneObjectiveArrays], jax.Array]]
 FloatVector = NDArray[np.floating]
 
 
@@ -139,12 +151,25 @@ class DescentStep(NamedTuple):
 
 
 class DescentResult(NamedTuple):
-    """最後的 θ（與起點同精度）、每一步紀錄、停止原因、最後一次試的步長。"""
+    """最後的 θ（與起點同精度）、每一步紀錄、停止原因、最後一次試的步長、這段一共求了幾次目標。
+
+    ``evaluations`` 數的是真的叫目標（值＋梯度一起算）的次數：起點一次、線搜尋每一個試探一次
+    （過了的與沒過的都算）。
+    """
 
     theta: FloatVector
     steps: tuple[DescentStep, ...]
     stop_reason: StopReason
     final_trial_step: float
+    evaluations: int
+
+
+class DepthLimit(NamedTuple):
+    """一面的總深度限制：θ 裡厚度那一格、空腔那一格（沒有空腔層是 None）、「厚度＋空腔」上限（公尺）。"""
+
+    thickness_index: int
+    cavity_index: int | None
+    max_total_m: float
 
 
 # ---- 一串面：從 preset 組設計 ----
@@ -226,6 +251,19 @@ def design_bounds(designs: Sequence[SurfaceDesign]) -> tuple[NDArray[np.float64]
     lower = [value for design in designs for value in design.lower]
     upper = [value for design in designs for value in design.upper]
     return np.asarray(lower, dtype=np.float64), np.asarray(upper, dtype=np.float64)
+
+
+def depth_limits(designs: Sequence[SurfaceDesign]) -> tuple[DepthLimit, ...]:
+    """每個有樣板的面一條總深度限制（θ 的格號照 :func:`design_names`）；剛性面沒有。"""
+    limits = []
+    offset = 0
+    for design in designs:
+        if design.material is None or design.max_total_depth_m is None:
+            continue
+        cavity = offset + 1 if design.cavity_variable is not None else None
+        limits.append(DepthLimit(offset, cavity, design.max_total_depth_m))
+        offset += len(design.variables)
+    return tuple(limits)
 
 
 def baseline_theta(designs: Sequence[SurfaceDesign]) -> FloatVector:
@@ -318,15 +356,133 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
 
 # ---- 投影梯度下降 ----
 
-def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.Array, upper: jax.Array) -> float:
-    """貼著下界還往外推（梯度為正）、貼著上界還往外推（梯度為負）的分量歸零後的範數。"""
+_EVALUATORS: WeakKeyDictionary[ChainObjective, Evaluator] = WeakKeyDictionary()
+
+
+def compiled_evaluator(objective: ChainObjective) -> Evaluator:
+    """``θ → ((值, 分項), 梯度)`` 的編譯版；同一個目標函式物件只包一次 ``jax.jit``，之後每段下降共用同一份編譯。
+
+    每段下降都重新包一次會每段重新追蹤、重新編譯（候選確認一輪最多四段）；共用不改數值：同一個函式、
+    同一個形狀與精度，編譯出同一份程式。目標函式被丟掉時快取跟著消失。
+    """
+    evaluator = _EVALUATORS.get(objective)
+    if evaluator is None:
+        evaluator = jax.jit(jax.value_and_grad(objective, has_aux=True))
+        _EVALUATORS[objective] = evaluator
+    return evaluator
+
+
+def _limit_room(values: FloatVector, limit: DepthLimit) -> np.floating:
+    """這一面在 θ 的精度下還能放的最大空腔（沒有空腔層時是厚度能到的最大值）。"""
+    dtype = values.dtype.type
+    if limit.cavity_index is None:
+        return dtype(limit.max_total_m)
+    return _depth_room(dtype(limit.max_total_m), values[limit.thickness_index])
+
+
+def _within_limits(values: FloatVector, limits: Sequence[DepthLimit]) -> bool:
+    """每面「厚度＋空腔 ≤ 上限」（在 θ 的精度下算，跟 :func:`is_feasible` 同一個判法）。"""
+    dtype = values.dtype.type
+    return all(values[limit.thickness_index] + (values[limit.cavity_index] if limit.cavity_index is not None
+                                                else dtype(0.0)) <= dtype(limit.max_total_m) for limit in limits)
+
+
+def _checked_limits(limits: Sequence[DepthLimit], size: int) -> tuple[DepthLimit, ...]:
+    used: list[int] = []
+    for limit in limits:
+        indices = [limit.thickness_index] + ([] if limit.cavity_index is None else [limit.cavity_index])
+        if any(not 0 <= index < size for index in indices) or not limit.max_total_m > 0.0:
+            raise ValueError(f"總深度限制的格號要在 θ 長度 {size} 內、上限要是正數：{limit}")
+        used.extend(indices)
+    if len(set(used)) != len(used):
+        raise ValueError("一格 θ 最多屬於一條總深度限制")
+    return tuple(limits)
+
+
+def project_to_limits(moved: FloatVector, lower: FloatVector, upper: FloatVector,
+                      limits: Sequence[DepthLimit]) -> FloatVector:
+    """盒界 ∩ 每面「厚度＋空腔 ≤ 上限」的精確最近點（在 ``moved`` 的精度下算，回同精度）。
+
+    每面是一個二維凸多邊形，面與面之間沒有共用變數，所以逐面各自投。先投到盒界；盒界上的點已在斜邊內，
+    它就是答案（多邊形是盒的子集）。否則最近點一定在斜邊上（盒的最近點不在半平面裡，最近點就落在半平面的邊界），
+    在「斜邊 ∩ 盒界」那一段線段上找：原點投到直線 t＋c＝上限、再夾到線段的兩個端點之間（端點也收）。
+    空腔取「上限減厚度」在這個精度下不超過上限的最大值；沒有空腔層的面只把厚度夾到上限。
+    """
+    values = np.asarray(moved)
+    dtype = values.dtype.type
+    low = np.asarray(lower, dtype=values.dtype)
+    high = np.asarray(upper, dtype=values.dtype)
+    result = np.clip(values, low, high)
+    for limit in limits:
+        thickness_index, cavity_index, top = limit.thickness_index, limit.cavity_index, dtype(limit.max_total_m)
+        if cavity_index is None:
+            result[thickness_index] = min(result[thickness_index], top)
+            continue
+        if result[thickness_index] + result[cavity_index] <= top:
+            continue
+        thickness_low = max(low[thickness_index], top - high[cavity_index])
+        thickness_high = min(high[thickness_index], top - low[cavity_index])
+        if thickness_low > thickness_high:
+            raise ValueError(f"總深度限制 {limit} 跟盒界沒有交集")
+        along = (values[thickness_index] + top - values[cavity_index]) / dtype(2.0)
+        thickness = min(max(along, thickness_low), thickness_high)
+        cavity = min(_depth_room(top, thickness), high[cavity_index])
+        if cavity < low[cavity_index]:
+            cavity = low[cavity_index]
+            thickness = min(_depth_room(top, cavity), high[thickness_index])
+        result[thickness_index], result[cavity_index] = thickness, cavity
+    return result
+
+
+def _cone_projection(direction: NDArray[np.float64], normals: Sequence[NDArray[np.float64]]) -> NDArray[np.float64]:
+    """把一個方向投到「每條作用中限制的法向 · 方向 ≤ 0」的錐上（二維，逐一試每條邊與頂點、取最近的可行點）。"""
+    if all(float(normal @ direction) <= 0.0 for normal in normals):
+        return direction
+    best, best_distance = np.zeros_like(direction), float(direction @ direction)
+    for index, normal in enumerate(normals):
+        point = direction - float(normal @ direction) / float(normal @ normal) * normal
+        feasible = all(float(other @ point) <= 0.0 for position, other in enumerate(normals) if position != index)
+        distance = float((direction - point) @ (direction - point))
+        if feasible and distance < best_distance:
+            best, best_distance = point, distance
+    return best
+
+
+def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.Array, upper: jax.Array,
+                             limits: Sequence[DepthLimit] = ()) -> float:
+    """可下降方向的梯度範數：貼著界還往外推的分量去掉。
+
+    盒界逐格：貼著下界還往外推（梯度為正）、貼著上界還往外推（梯度為負）的分量歸零。貼在斜邊上的面
+    （空腔已是「上限減厚度」）改成整面一起投：負梯度投到那一面作用中限制（盒界與斜邊，法向 (1,1)/√2）
+    圍成的錐上，往外推的法向分量去掉——不然在斜邊上永遠停不下來。沒有任何一面貼斜邊時跟只守盒界逐位相同。
+    """
     blocked = ((theta <= lower) & (gradient > 0)) | ((theta >= upper) & (gradient < 0))
-    return float(jnp.linalg.norm(jnp.where(blocked, jnp.zeros_like(gradient), gradient)))
+    masked = jnp.where(blocked, jnp.zeros_like(gradient), gradient)
+    values, raw = np.asarray(theta), np.asarray(gradient)
+    on_edge = [limit for limit in limits if values[limit.thickness_index if limit.cavity_index is None
+                                                   else limit.cavity_index] >= _limit_room(values, limit)]
+    if not on_edge:
+        return float(jnp.linalg.norm(masked))
+    adjusted = np.asarray(masked).copy()
+    low, high = np.asarray(lower), np.asarray(upper)
+    for limit in on_edge:
+        indices = [limit.thickness_index] + ([] if limit.cavity_index is None else [limit.cavity_index])
+        normals = [np.ones(len(indices))]
+        for axis, index in enumerate(indices):
+            unit = np.zeros(len(indices))
+            unit[axis] = 1.0
+            if values[index] <= low[index]:
+                normals.append(-unit)
+            if values[index] >= high[index]:
+                normals.append(unit)
+        descent = -np.asarray(raw[indices], dtype=np.float64)
+        adjusted[indices] = -_cone_projection(descent, normals)
+    return float(jnp.linalg.norm(jnp.asarray(adjusted)))
 
 
 def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
              bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
-             max_steps: int, stop_on_gradient: bool) -> DescentResult:
+             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = ()) -> DescentResult:
     start = jnp.asarray(theta0)
     if start.ndim != 1 or not jnp.issubdtype(start.dtype, jnp.floating):
         raise ValueError("θ 起點必須是一維浮點陣列")
@@ -337,16 +493,23 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
         raise ValueError(f"盒界長度必須等於 θ 長度 {start.shape[0]}")
     if not bool(jnp.all(jnp.isfinite(start))) or not bool(jnp.all((lower <= start) & (start <= upper))):
         raise ValueError("θ 起點必須有限且在盒界內")
-    evaluate = jax.jit(jax.value_and_grad(objective, has_aux=True))
+    limits = _checked_limits(limits, start.shape[0])
+    lower_values, upper_values = np.asarray(lower), np.asarray(upper)
+    if not _within_limits(np.asarray(start), limits):
+        # 起點超過總深度上限就先投回可行域（精確最近點）：預設樣板「50 mm 棉板＋100 mm 空腔」在雙精度是
+        # 0.15000000000000002，比上限多一個末位；盒界外仍照舊拒收。
+        start = jnp.asarray(project_to_limits(np.asarray(start), lower_values, upper_values, limits))
+    evaluate = compiled_evaluator(objective)
 
     def record(index: int, theta: jax.Array, value: jax.Array, aux: StageOneObjectiveArrays,
                gradient: jax.Array, step: float, seconds: float) -> DescentStep:
         return DescentStep(index, tuple(float(x) for x in np.asarray(theta)), float(value),
                            (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db)),
-                           _projected_gradient_norm(theta, gradient, lower, upper), step, seconds)
+                           _projected_gradient_norm(theta, gradient, lower, upper, limits), step, seconds)
 
     clock = time.perf_counter()
     (value, aux), gradient = evaluate(start)
+    evaluations = 1
     theta = start
     steps = [record(0, theta, value, aux, gradient, 0.0, time.perf_counter() - clock)]
     trial = 0.0
@@ -362,9 +525,13 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
         trial = settings.initial_step
         accepted = False
         while trial >= settings.min_step:
-            candidate = jnp.clip(theta - jnp.asarray(trial, dtype=dtype) * gradient, lower, upper)
+            moved = theta - jnp.asarray(trial, dtype=dtype) * gradient
+            candidate = (jnp.clip(moved, lower, upper) if not limits else
+                         jnp.asarray(project_to_limits(np.asarray(moved), lower_values, upper_values, limits)))
             (new_value, new_aux), new_gradient = evaluate(candidate)
-            # 投影弧上的 Armijo：梯度乘實際位移；每一格位移與梯度異號或為零，所以右邊不大於舊值。
+            evaluations += 1
+            # 投影弧上的 Armijo：梯度乘實際位移。投到凸集合上的位移跟梯度的內積不大於零（投影的性質），
+            # 所以右邊不大於舊值；只守盒界時每一格位移與梯度異號或為零。
             predicted = float(jnp.sum(gradient * (candidate - theta)))
             if bool(jnp.isfinite(new_value)) and float(new_value) <= float(value) + settings.armijo_constant * predicted:
                 accepted = True
@@ -375,18 +542,23 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
             break
         theta, value, aux, gradient = candidate, new_value, new_aux, new_gradient
         steps.append(record(len(steps), theta, value, aux, gradient, trial, time.perf_counter() - clock))
-    return DescentResult(np.asarray(theta), tuple(steps), reason, trial)
+    return DescentResult(np.asarray(theta), tuple(steps), reason, trial, evaluations)
 
 
 def projected_descent(objective: ChainObjective, theta0: jax.Array | FloatVector,
-                      bounds: tuple[FloatVector, FloatVector], settings: DescentSettings) -> DescentResult:
-    """投影到盒界的梯度下降＋回溯線搜尋（Armijo）。
+                      bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
+                      limits: Sequence[DepthLimit]) -> DescentResult:
+    """投影到「盒界 ∩ 每面厚度＋空腔 ≤ 總深度上限」的梯度下降＋回溯線搜尋（Armijo）。
 
+    ``limits`` 一般是 :func:`depth_limits` 由設計清單算出來的；空的就只守盒界（合成目標的考卷用）。
+    每一步的試探點用 :func:`project_to_limits` 投回可行域（精確最近點）；起點要在盒界內，超過總深度上限的先投回。
     每一步從 ``initial_step`` 起試、沒過就乘 ``backtrack_ratio``；步長小於 ``min_step`` 仍沒過就不走這一步、
-    停在「步長到下限」。投影梯度範數小於 ``gradient_norm_stop`` 停在「梯度夠小」；走滿 ``max_steps`` 停在
-    「步數到上限」。值單調不增；同一起點重跑逐位相同（秒數除外）。
+    停在「步長到下限」。投影梯度範數（貼界、貼斜邊還往外推的分量去掉）小於 ``gradient_norm_stop`` 停在
+    「梯度夠小」；走滿 ``max_steps`` 停在「步數到上限」。值單調不增；同一起點重跑逐位相同（秒數除外）。
+    取規格那一步照舊保留：厚度仍要取合法值，連續段只是不再跑到總深度外面。
     """
-    return _descend(objective, theta0, bounds, settings, max_steps=settings.max_steps, stop_on_gradient=True)
+    return _descend(objective, theta0, bounds, settings, max_steps=settings.max_steps, stop_on_gradient=True,
+                    limits=limits)
 
 
 # ---- 取規格與空腔重調 ----
@@ -397,6 +569,11 @@ def _depth_room(max_total: np.floating, thickness: np.floating) -> np.floating:
     while thickness + room > max_total:
         room = np.nextafter(room, -np.inf)
     return room
+
+
+def depth_room(max_total: np.floating, thickness: np.floating) -> np.floating:
+    """公開版的 :func:`_depth_room`：給候選產生用同一條「空腔切到上限減厚度」的規則（在 θ 的精度下算）。"""
+    return _depth_room(max_total, thickness)
 
 
 def snap_to_specs(theta: jax.Array | FloatVector, designs: Sequence[SurfaceDesign]) -> SnapResult:

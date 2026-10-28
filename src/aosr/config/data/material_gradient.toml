@@ -1,4 +1,4 @@
-# 第三階段牆面材料梯度搜尋的前半段設定（#561）：連續下降、取規格、空腔聯合重調。
+# 第三階段牆面材料梯度搜尋設定（#561）：連續下降、取規格、空腔聯合重調、候選確認迴圈。
 # 決策紙：docs/decisions/stage-three-gradient-objective-low-frequency-lane.md（「決定」第 3 條是找法）。
 # 這份檔裡每一個數字都是工程暫定、調整走 PR，依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段
 # （「候選數 3、改善門檻、步數、預算都是工程暫定，數字住設定檔、要調走 PR；沒有理論保證」）。
@@ -22,6 +22,17 @@ min_step = 1.0e-6
 [retune]
 # 取規格之後，厚度固定、只有空腔是變數，同一個投影下降最多走幾步（不因梯度小提早停；線搜尋退到步長下限就停、原因進帳本）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
 steps = 5
+
+[candidates]
+# 候選確認迴圈（在可行解用「梯度 × 實際規格跳距」挑候選、各自重調空腔後跟同步數重調的基準比）。
+# 每一輪最多確認幾個候選（決策紙第 3 條「第一版預設 3 個，沒有理論保證」）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_per_round = 3
+# 改善門檻：基準重調後的合分減候選重調後的合分要「超過」這個值才換（合分的絕對差，單位同 screening_total）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+improvement_threshold = 0.05
+# 最多跑幾輪；到了停、停止原因記「輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_rounds = 10
+# 整場最多求幾次目標（算次數不算秒數；值＋梯度算一次，線搜尋每個試探都算一次）；下一輪最壞情況會超過就不開、記「求值到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_evaluations = 2000
 
 # 樣板家族：同一種材料（同流阻）不同厚度、有沒有空腔；第一版只有玻璃棉三個密度。
 # 棉板合法厚度照 construction_presets.toml 有的產品厚度；空腔是連續量。

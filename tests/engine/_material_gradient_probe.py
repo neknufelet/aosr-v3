@@ -47,6 +47,7 @@ def _steps(result: gradient_search.DescentResult) -> Record:
         "step_size": [step.step_size.hex() for step in result.steps],
         "final_theta": _hex(result.theta), "final_dtype": str(result.theta.dtype),
         "stop_reason": result.stop_reason, "final_trial_step": result.final_trial_step.hex(),
+        "evaluations": result.evaluations,
     }
 
 
@@ -110,16 +111,18 @@ def main(directory: Path) -> None:
             start = gradient_search.baseline_theta(designs)
             bounds = gradient_search.design_bounds(designs)
             clock = time.perf_counter()
-            first = gradient_search.projected_descent(objective, start, bounds, settings.descent)
+            limits = gradient_search.depth_limits(designs)
+            first = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=limits)
             descent_seconds = time.perf_counter() - clock
-            again = gradient_search.projected_descent(objective, start, bounds, settings.descent)
+            again = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=limits)
             # 每一步 θ 的梯度另外重算交回，父行程用它逐步核 Armijo 不等式。
             step_gradient = jax.jit(jax.grad(lambda values: objective(values)[0]))
             descent_gradients = [_hex(step_gradient(jnp.asarray(step.theta))) for step in first.steps]
             snapped = gradient_search.snap_to_specs(first.theta, designs)
             snapped_value, snapped_aux = objective(jnp.asarray(snapped.theta))
             retuned = gradient_search.retune_cavities(objective, snapped.theta, designs, settings)
-            single_descent = gradient_search.projected_descent(objective, start.astype(np.float32), bounds, settings.descent)
+            single_descent = gradient_search.projected_descent(objective, start.astype(np.float32), bounds, settings.descent,
+                                                               limits=limits)
             rows = (*ledger.descent_rows(first, "descent", 0),
                     ledger.snap_row(snapped, float(snapped_value), (float(snapped_aux.mean_own_line_ripple_rms_db),
                                     float(snapped_aux.mean_seat_robustness_rms_db)), 0.0, len(first.steps)),
