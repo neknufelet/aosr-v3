@@ -4,6 +4,8 @@
 一口氣跑完的參考資料夾，與在第 N 次求值之前放停止記號、再接續的資料夾，都在這同一個行程、同一份環境裡跑
 （逐位比較要同一條路徑）。N 不寫死：先跑參考、記下每一次查停止時帳本最後一列的階段，每一種階段取第一次出現的那一次。
 另外把參考帳本截成「前段只寫了一半」的幾份接續，與標頭被改過的一份接續（要拒收）。
+空氣（修補二）：方案場景的密度與聲速換成另一組，重建的目標在樣板起點的值要逐位等於這裡自己用設定層配方
+（``construction_environment``）造的那一份，並跟原方案（空氣等於產品預設）重建的不同。
 """
 from __future__ import annotations
 
@@ -13,12 +15,25 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import jax.numpy as jnp
+import numpy as np
+
+from aosr.config.construction_environment import construction_environment
+from aosr.config.paths import config_path
+from aosr.config.quality_targets import load_quality_targets
 from aosr.gradient import cli
+from aosr.gradient.material_gradient import ChainObjective, baseline_theta, chain_objective
 from aosr.gradient.material_gradient_ledger import read_ledger
-from aosr.gradient.run import LEDGER_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, stop_requested
+from aosr.gradient.run import (
+    LEDGER_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, check_inputs, file_sha256, load_problem, read_project,
+    stop_requested,
+)
+from aosr.scoring.stage_one_objective_jax import objective_constants
+from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.gradient.worker import run_worker
 
 Record = dict[str, object]
+OTHER_DENSITY, OTHER_SPEED = 1.18, 340.0
 
 
 def _folder(directory: Path, name: str, source: Path) -> Path:
@@ -107,6 +122,31 @@ def _other_header(directory: Path, source: Path, reference: Path) -> Record:
             "ledger_unchanged": (folder / LEDGER_FILE).read_bytes() == before}
 
 
+def _air(directory: Path, source: Path) -> Record:
+    """方案場景的空氣換成另一組、project.json 指過去（雜湊重量），重建目標；值以 hex 交給父行程比。"""
+    project = read_project(source)
+    document = json.loads(Path(project.scheme_path).read_text(encoding="utf-8"))
+    document["scene"].update({"density_kg_m3": OTHER_DENSITY, "sound_speed_m_s": OTHER_SPEED})
+    scheme_path = directory / "scheme-other-air.json"
+    scheme_path.write_text(json.dumps(document), encoding="utf-8")
+    changed = project.model_copy(update={"scheme_path": str(scheme_path), "scheme_sha256": file_sha256(scheme_path)})
+    problem = load_problem(changed)
+    scheme, model, _ = check_inputs(changed)
+    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), changed.purpose)
+    constants = objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
+                                    len(model.source_names))
+    air, ranges = construction_environment(density_kg_m3=OTHER_DENSITY, sound_speed_m_s=OTHER_SPEED)
+    expected = chain_objective(model, problem.designs, constants, air=air, ranges=ranges,
+                               frequencies=model.frequencies_hz)
+    theta = jnp.asarray(baseline_theta(problem.designs))
+
+    def value(objective: ChainObjective) -> str:
+        return float(objective(theta)[0]).hex()
+
+    return {"rebuilt": value(problem.objective),
+            "expected": value(expected), "original": value(load_problem(project).objective)}
+
+
 def main(directory: Path) -> None:
     source = directory / "source"
     reference, phases = _reference(directory, source)
@@ -120,7 +160,8 @@ def main(directory: Path) -> None:
     keeps = sorted({max(1, snap // 2), snap, snap + 1, (snap + 1 + len(pre_loop)) // 2})
     cuts = [_cut(directory, source, reference_folder, f"cut-{keep:04d}", keep) for keep in keeps if keep < len(pre_loop)]
     output = {"reference": reference, "phases": phases, "stops": stops, "cuts": cuts,
-              "pre_loop_rows": len(pre_loop), "other_header": _other_header(directory, source, reference_folder)}
+              "pre_loop_rows": len(pre_loop), "other_header": _other_header(directory, source, reference_folder),
+              "air": _air(directory, source)}
     (directory / "output.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
     shutil.rmtree(directory / "__pycache__", ignore_errors=True)
 

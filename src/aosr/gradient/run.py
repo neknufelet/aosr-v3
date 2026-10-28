@@ -37,8 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
-from aosr.config.physics_constants import load_physics_constants
-from aosr.config.porous_model_ranges import load_porous_model_ranges
+from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gradient.material_gradient import (
@@ -253,11 +252,15 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
                          "目標常數會取錯座位，拒收")
     if sorted(model.source_names) != sorted(scheme.speakers):
         raise ValueError(f"替身的喇叭 {list(model.source_names)} 跟方案的 {sorted(scheme.speakers)} 不同，拒收")
-    expected = scheme_points_hex(scheme)
-    for label, given, wanted in (("喇叭", points.sources, expected.sources), ("座位", points.receivers, expected.receivers)):
-        for name in sorted(set(given) | set(wanted)):
-            if given.get(name) != wanted.get(name):
-                raise ValueError(f"{label} {name} 交給閘門的座標 {given.get(name)} 跟方案的 {wanted.get(name)} 不同，拒收")
+    _check_same_points(points, scheme_points_hex(scheme), "交給閘門的")
+
+
+def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> None:
+    """逐名逐座標比，第一個不同的就點名是哪一支喇叭或哪一個座位。"""
+    for label, recorded, wanted in (("喇叭", given.sources, scheme.sources), ("座位", given.receivers, scheme.receivers)):
+        for name in sorted(set(recorded) | set(wanted)):
+            if recorded.get(name) != wanted.get(name):
+                raise ValueError(f"{label} {name} 的座標：{what}是 {recorded.get(name)}，方案是 {wanted.get(name)}，拒收")
 
 
 def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
@@ -268,8 +271,7 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
         raise ValueError(f"方案檔 {scheme_path} 跟開始時不同（scheme_sha256 變了），不接續")
     scheme = load_scheme(scheme_path)
     points = scheme_points_hex(scheme)
-    if points != SchemePoints(project.source_points, project.receiver_points):
-        raise ValueError("方案的喇叭或座位座標跟 project.json 記的不同，不接續")
+    _check_same_points(SchemePoints(project.source_points, project.receiver_points), points, "project.json 記的")
     model = gated_surrogate(surrogate, mesh_hash=project.mesh_hash, physics_identity=project.physics_identity,
                             points=points)
     if manifest_sha256(surrogate) != project.surrogate_manifest_sha256:
@@ -289,15 +291,19 @@ def designs_for(presets: Sequence[str | None], settings: MaterialGradientSetting
 
 
 def load_problem(project: GradientProject) -> GradientProblem:
-    """照 ``project.json`` 重建目標；輸入先過 :func:`check_inputs`。要在雙精度已開的行程裡叫。"""
+    """照 ``project.json`` 重建目標；輸入先過 :func:`check_inputs`。要在雙精度已開的行程裡叫。
+
+    空氣的密度與聲速取方案場景那一格（``export_operators`` 建完整模型、替身建模用的同一組），熱黏常數與多孔範圍
+    走設定層的 ``construction_environment``；這裡不自己拿產品預設的空氣。
+    """
     scheme, model, settings = check_inputs(project)
     score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
     constants = objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
                                     len(model.source_names))
     designs = designs_for(project.presets, settings)
-    objective = chain_objective(
-        model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
-        ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")), frequencies=model.frequencies_hz)
+    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
+                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
                                                                     objective_constants=constants))
 

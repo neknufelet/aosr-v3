@@ -292,7 +292,24 @@ def _rejections(directory: Path, folder: Path) -> Record:
     records["resume_other_identity"] = {**_run(directory, _command("resume", str(tampered))),
                                         "entries": sorted(path.name for path in tampered.iterdir())}
     records["resume_scheme_changed"] = _scheme_changed(directory, folder)
+    for kind, name in (("source_points", MOVED_SPEAKER), ("receiver_points", MOVED_SEAT)):
+        records[f"resume_project_{kind}"] = _project_points_tampered(directory, folder, kind, name)
     return records
+
+
+def _project_points_tampered(directory: Path, folder: Path, kind: str, name: str) -> Record:
+    """抄一份跑完的資料夾，只改 project.json 記的一支喇叭或一個座位的 x（換成另一個正規 hex），方案檔、替身、
+    收據都不動，再接續：要拒收並點名那一支或那一座，帳本與狀態檔一個位元組都不動。"""
+    copied = directory / f"tampered-{kind}" / folder.name
+    shutil.copytree(folder, copied)
+    project = json.loads((copied / "project.json").read_text(encoding="utf-8"))
+    x = project[kind][name][0]
+    project[kind][name][0] = (float.fromhex(x) + MOVE_M).hex()
+    (copied / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    before = {item: (copied / item).read_bytes() for item in ("ledger.jsonl", "status.json")}
+    record = _run(directory, _command("resume", str(copied)))
+    record["unchanged"] = all((copied / item).read_bytes() == data for item, data in before.items())
+    return record
 
 
 def _scheme_changed(directory: Path, folder: Path) -> Record:
@@ -670,6 +687,17 @@ def test_resume_rejects_changed_scheme_file(runs: tuple[Path, Record]) -> None:
     assert record["unchanged"] is True
 
 
+@pytest.mark.parametrize(("kind", "label", "name"), (("source_points", "喇叭", MOVED_SPEAKER),
+                                                    ("receiver_points", "座位", MOVED_SEAT)))
+def test_resume_rejects_tampered_project_points(runs: tuple[Path, Record], kind: str, label: str, name: str) -> None:
+    """審查另記：只改 project.json 記的一支喇叭或一個座位的座標（方案檔、替身、收據都不動，方案雜湊照樣對），
+    resume 回 1、點名那一支或那一座，帳本與狀態檔原始位元組不變（父行程起子行程之前就拒收）。"""
+    record = _rejection(runs, f"resume_project_{kind}")
+    assert record["code"] == 1, record["stderr"]
+    assert f"{label} {name} 的座標：project.json 記的" in str(record["stderr"])
+    assert record["unchanged"] is True
+
+
 def test_same_root_other_settings_gets_own_folder(runs: tuple[Path, Record]) -> None:
     """抓資料夾名沒把設定算進去（換一份設定開始，撞進同一個資料夾被當成「已存在」、或蓋掉前一場）：同一個根、
     同一份方案與替身、另一份設定，start 也要回 0，根底下兩個資料夾名不同，各自的 project.json 記各自的設定指紋。"""
@@ -677,12 +705,14 @@ def test_same_root_other_settings_gets_own_folder(runs: tuple[Path, Record]) -> 
     assert record["code"] == 0, record["stderr"]
     first = _folder(runs)
     folders = cast(list[str], record["folders"])
-    assert first.name in folders and len(set(folders)) == len(folders) == len({first.name, *folders})
-    other = next(first.parent / name for name in folders if name != first.name)
-    fingerprints = {_json(folder / "project.json")["settings_fingerprint"] for folder in (first, other)}
-    assert fingerprints == {load_material_gradient_settings(runs[0] / name).fingerprint
-                            for name in ("settings.toml", "settings-other.toml")}
-    assert _json(other / "status.json")["state"] == "finished"
+    others = [name for name in folders if name != first.name]
+    assert first.name in folders and others, folders
+    other = first.parent / others[0]
+    assert other.name != first.name and other.parent == first.parent == runs[0] / "root-a"
+    for folder, settings in ((first, "settings.toml"), (other, "settings-other.toml")):
+        assert _json(folder / "project.json")["settings_fingerprint"] == load_material_gradient_settings(
+            runs[0] / settings).fingerprint, folder.name
+        assert _json(folder / "status.json")["state"] == "finished", folder.name
 
 
 def test_sigterm_to_cli_terminates_child_and_records_interrupted(runs: tuple[Path, Record]) -> None:
@@ -785,6 +815,14 @@ def test_rejects_root_under_web_searches(runs: tuple[Path, Record]) -> None:
     """抓梯度資料夾放進網頁讀的 searches/（網頁會把它當擺位搜尋讀、報錯）：回 1、什麼都沒建。"""
     case = _rejection(runs, "under_searches")
     assert case["code"] == 1 and "searches" in str(case["stderr"]) and case["created"] is False
+
+
+def test_objective_uses_scheme_air_through_config_layer(runs: tuple[Path, Record]) -> None:
+    """抓重建目標時自己拿產品預設空氣（替身是用方案的空氣建的）：方案場景的密度與聲速換成 1.18／340 後重建的目標，
+    在樣板起點的值逐位等於探針自己用設定層配方（construction_environment）造的那一份，而且跟原方案重建的不同。"""
+    air = cast(Record, _probe_section(runs, "air"))
+    assert air["rebuilt"] == air["expected"]
+    assert air["rebuilt"] != air["original"]
 
 
 def test_stop_checked_before_every_evaluation(runs: tuple[Path, Record]) -> None:
