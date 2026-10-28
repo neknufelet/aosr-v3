@@ -189,6 +189,9 @@ _GATE_CASES: tuple[tuple[str, Callable[[Path], HoldoutRulers], str], ...] = (
      "收據數字兩份不一致"),
     ("bad_hex", _change(lambda d: _section(d, "seats", FIRST_SEAT, "band_db").__setitem__("hex", "zz")),
      "hex 不合法"),
+    ("overflow_hex", _change(
+        lambda d: _section(d, "seats", FIRST_SEAT, "band_db").__setitem__("hex", "0x1p+999999999")),
+     "hex 不合法"),
 )
 
 

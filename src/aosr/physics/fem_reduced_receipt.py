@@ -190,7 +190,7 @@ def _hex_value(name: str, field: str, number: object) -> float:
         raise ReducedModelNotValidated(f"驗證收據座位 {name} 的 {field} 格式不符")
     try:
         value = float.fromhex(str(number["hex"]))
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:  # 超大指數是 OverflowError，一樣是不合法的 hex
         raise ReducedModelNotValidated(f"驗證收據座位 {name} 的 {field} hex 不合法") from exc
     decimal = number.get("decimal")
     expected = value if math.isfinite(value) else None
