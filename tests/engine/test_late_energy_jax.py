@@ -51,7 +51,23 @@ _FLAG_N_PER_WALL = 6
 _FLAG_FREQUENCIES_HZ = (125.0,)
 _ROUNDED_AWAY_ALPHA = 3.2928e-9
 _SMALL_ALPHA = 1e-3
-_FLAG_CASES = {"rounded_away_alpha": _ROUNDED_AWAY_ALPHA, "small_alpha": _SMALL_ALPHA}
+# 單精度捨得掉、雙精度分得開的另一個極小值，只放在一面牆上。
+_ONE_WALL_TINY_ALPHA = 1e-9
+_WALL_COUNT = len(Wall.wall_names())
+
+
+def _one_wall(value: float) -> tuple[float, ...]:
+    """第一面牆是 ``value``、其餘五面 1e-3。"""
+    return (value,) + (_SMALL_ALPHA,) * (_WALL_COUNT - 1)
+
+
+# 每組題逐面一個吸音率（牆的順序照 Wall.wall_names）；剛性面 α 恰為 0 是合法輸入。
+_FLAG_CASES = {
+    "rounded_away_alpha": (_ROUNDED_AWAY_ALPHA,) * _WALL_COUNT,
+    "small_alpha": (_SMALL_ALPHA,) * _WALL_COUNT,
+    "one_rigid_wall": _one_wall(0.0),
+    "one_tiny_wall": _one_wall(_ONE_WALL_TINY_ALPHA),
+}
 
 
 class FlagRun(TypedDict):
@@ -100,7 +116,7 @@ def _flag_inputs(name: str) -> late_energy.LateEnergyInputs:
     """有效範圍旗標那間房：六面同一個吸音率、單一頻帶。"""
     base = late_energy.load_late_energy_inputs(_answer_path("flat"))
     inputs = replace(base, room=_FLAG_ROOM, n_per_wall=_FLAG_N_PER_WALL, frequencies_hz=_FLAG_FREQUENCIES_HZ)
-    alpha = np.full((len(Wall.wall_names()), len(_FLAG_FREQUENCIES_HZ)), _FLAG_CASES[name], dtype=np.float64)
+    alpha = np.tile(np.asarray(_FLAG_CASES[name], dtype=np.float64)[:, None], (1, len(_FLAG_FREQUENCIES_HZ)))
     return _with_alpha(inputs, alpha)
 
 
@@ -114,6 +130,11 @@ def _inputs(name: str) -> late_energy.LateEnergyInputs:
 
 def _single_alpha(value: float, frequency_count: int) -> jax.Array:
     return jnp.full((len(Wall.wall_names()), frequency_count), value, dtype=jnp.float32)
+
+
+def _single_case_alpha(name: str) -> jax.Array:
+    rows = np.asarray(_FLAG_CASES[name], dtype=np.float32)[:, None]
+    return jnp.asarray(np.tile(rows, (1, len(_FLAG_FREQUENCIES_HZ))), dtype=jnp.float32)
 
 
 def _numpy_arrays(inputs: late_energy.LateEnergyInputs) -> dict[str, NDArray[np.float64]]:
@@ -139,7 +160,7 @@ def _within_contract(actual: NDArray[np.float64], expected: NDArray[np.float64],
 
 @pytest.fixture(scope="module")
 def jax_runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, JaxCaseRun]:
-    """一個雙精度子行程把五題與兩組旗標題的 JAX 結果一次算完。"""
+    """一個雙精度子行程把五題與旗標題的 JAX 結果一次算完。"""
     directory = tmp_path_factory.mktemp("late-energy-jax")
     problem = {}
     for name in _CASES + tuple(_FLAG_CASES):
@@ -396,19 +417,41 @@ def test_flag_stays_out_of_gradient() -> None:
     assert np.array_equal(masked, plain)
 
 
-def test_each_clause_alone_turns_flag_false() -> None:
-    """旗標兩個條件各自單獨就能翻成 False（拿掉任何一個條件，這題就紅）。
 
-    - 只有一面牆的 α 被單精度捨掉、其餘五面 1e-3：能量是正的，但照定義「任一分格的 1−α 在工作精度下
-      不小於 1」就是 False（保守：剛好有一面全反射的房也落在這裡）。
-    - α=1.5 超出 [0,1]（呼叫端責任，這裡只拿來單獨考第二個條件）：每格 1−α 都小於 1，能量卻不大於 0。
+def test_rigid_wall_is_resolved_in_both_precisions(jax_runs: dict[str, JaxCaseRun]) -> None:
+    """一面牆 α 恰為 0（剛性面，合法輸入）、其餘五面 1e-3：沒有吸音被捨掉，兩種精度旗標都 True、能量為正。"""
+    geometry = late_energy_jax.late_energy_geometry(_FLAG_ROOM, _FLAG_N_PER_WALL)
+    result = late_energy_jax.late_energy_arrays(geometry, _single_case_alpha("one_rigid_wall"))
+    assert np.all(np.asarray(result.dissipation_resolved))
+    assert np.all(np.asarray(result.late_reverberant_energy) > 0.0)
+    run = jax_runs["one_rigid_wall"]
+    for path, flag in run["resolved"].items():
+        assert flag["values"] and all(flag["values"]), path
+    assert np.all(_decode(run["eager"]["late_reverberant_energy"]) > 0.0)
+    assert np.all(_decode(run["single"]["late_reverberant_energy"]) > 0.0)
+
+
+def test_one_rounded_away_wall_is_flagged_in_single_precision_only(jax_runs: dict[str, JaxCaseRun]) -> None:
+    """一面牆 α=1e-9、其餘五面 1e-3：單精度那一面的吸音被捨掉，旗標 False（能量照回、不要求正負）；
+    雙精度分得開，旗標 True、能量為正。拿掉「吸音被捨掉」那個條件這題就紅（能量本身是正的）。
+    """
+    assert np.float32(1.0) - np.float32(_ONE_WALL_TINY_ALPHA) == np.float32(1.0)
+    geometry = late_energy_jax.late_energy_geometry(_FLAG_ROOM, _FLAG_N_PER_WALL)
+    result = late_energy_jax.late_energy_arrays(geometry, _single_case_alpha("one_tiny_wall"))
+    assert not np.any(np.asarray(result.dissipation_resolved))
+    assert np.all(np.isfinite(np.asarray(result.late_reverberant_energy)))
+    run = jax_runs["one_tiny_wall"]
+    assert run["resolved"]["single"]["values"] and not any(run["resolved"]["single"]["values"])
+    for path in ("eager", "jit"):
+        assert run["resolved"][path]["values"] and all(run["resolved"][path]["values"]), path
+    assert np.all(_decode(run["eager"]["late_reverberant_energy"]) > 0.0)
+
+
+def test_nonpositive_energy_alone_turns_flag_false() -> None:
+    """α=1.5 超出 [0,1]（呼叫端責任，這裡只拿來單獨考能量那個條件）：沒有一格吸音被捨掉，能量卻不大於 0，
+    旗標 False。拿掉「能量有限且大於 0」那個條件這題就紅。
     """
     geometry = late_energy_jax.late_energy_geometry(_FLAG_ROOM, _FLAG_N_PER_WALL)
-    frequency_count = len(_FLAG_FREQUENCIES_HZ)
-    one_wall = _single_alpha(_SMALL_ALPHA, frequency_count).at[0].set(jnp.float32(_ROUNDED_AWAY_ALPHA))
-    mixed = late_energy_jax.late_energy_arrays(geometry, one_wall)
-    assert np.all(np.asarray(mixed.late_reverberant_energy) > 0.0)
-    assert not np.any(np.asarray(mixed.dissipation_resolved))
-    beyond = late_energy_jax.late_energy_arrays(geometry, _single_alpha(1.5, frequency_count))
+    beyond = late_energy_jax.late_energy_arrays(geometry, _single_alpha(1.5, len(_FLAG_FREQUENCIES_HZ)))
     assert np.all(np.asarray(beyond.late_reverberant_energy) <= 0.0)
     assert not np.any(np.asarray(beyond.dissipation_resolved))

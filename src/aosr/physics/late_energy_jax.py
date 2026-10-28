@@ -19,11 +19,12 @@ reflected-only 的 ``Ry`` 做面積加權平均，再乘 Eyring 比值。
 在開機前經 runtime 那一層打開。jit 裡無法依數值報錯，所以 ``α`` 有限且在 ``[0,1]``
 這件事由呼叫端負責，這裡只驗形狀與型別。
 
-有效範圍用精度講、不用數字：每一格的反射率 ``1−α`` 要在工作精度（``α`` 的 dtype）下跟 1
-分得開。分不開時（例如單精度下極小的 ``α`` 被捨成 0、反射率恰為 1）耗散消失、``I−R`` 近奇異，
-求解沒有定義，但線性解照樣回一個有限的數、可能是負的。這裡不夾 ``α`` 下限、不把能量截成 0，
-原始數字照算照回，另回逐頻旗標 ``dissipation_resolved``：分不開、或晚期能量非有限或不大於 0，
-那一頻就是 False，呼叫端要自己查這一格。
+有效範圍用精度講、不用數字：``α > 0`` 的每一格，反射率 ``1−α`` 要在工作精度（``α`` 的 dtype）
+下跟 1 分得開。分不開時（例如單精度下極小的 ``α`` 被捨掉、反射率恰為 1）那一格的吸音丟了，
+全部丟光時耗散消失、``I−R`` 近奇異，求解沒有定義，但線性解照樣回一個有限的數、可能是負的。
+``α`` 恰為 0 的剛性面是合法輸入，本來就沒有吸音可丟，不算。這裡不夾 ``α`` 下限、不把能量截成 0，
+原始數字照算照回，另回逐頻旗標 ``dissipation_resolved``：有一格吸音被捨掉、或晚期能量非有限或
+不大於 0，那一頻就是 False，呼叫端要自己查這一格。
 """
 from __future__ import annotations
 
@@ -55,7 +56,7 @@ class LateEnergyGeometry(NamedTuple):
 class LateEnergyArrays(NamedTuple):
     """逐頻輸出，每格形狀 ``(F,)``；前四格對應 ``LateEnergyBand`` 同名欄位。
 
-    ``dissipation_resolved`` 是布林：那一頻每一格的 ``1−α`` 在工作精度下都小於 1、而且
+    ``dissipation_resolved`` 是布林：那一頻 ``α > 0`` 的每一格 ``1−α`` 在工作精度下都小於 1、而且
     晚期能量有限且大於 0 才是 True。False 的那一頻求解沒有定義，前四格照算照回、不准當答案用。
     """
 
@@ -107,8 +108,9 @@ def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array) -> LateEn
     ``alpha`` 形狀 ``(6, F)``，牆的順序照 :meth:`Wall.wall_names`。輸出精度等於 ``alpha``
     的精度。逐頻反射算子 ``R_f[i,j] = (1−α_{w(i),f})·F_ij`` 疊成 ``(F, P, P)`` 一次批次直接解。
 
-    ``1−α`` 要在工作精度下跟 1 分得開；分不開時求解沒有定義、``dissipation_resolved`` 為
-    False，呼叫端要自己查這格。旗標只由比較算出，不參與梯度，前四格的算法與它無關。
+    ``α > 0`` 的格，``1−α`` 要在工作精度下跟 1 分得開；分不開（吸音被捨掉）時求解沒有定義、
+    ``dissipation_resolved`` 為 False，呼叫端要自己查這格。``α`` 恰為 0 的剛性面合法、不算。
+    旗標只由比較算出，不參與梯度，前四格的算法與它無關。
     """
     values = _checked_alpha(geometry, alpha)
     dtype = values.dtype
@@ -119,7 +121,8 @@ def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array) -> LateEn
     frequency_count = values.shape[1]
     total_area = jnp.sum(patch_areas)
 
-    reflectance = (1.0 - values[jnp.asarray(geometry.wall_index), :]).T
+    patch_alpha = values[jnp.asarray(geometry.wall_index), :].T
+    reflectance = 1.0 - patch_alpha
     transfer = reflectance[:, :, None] * form_factors[None, :, :]
     system = jnp.eye(patch_count, dtype=dtype)[None, :, :] - transfer
     source = jnp.broadcast_to(jnp.ones(patch_count, dtype=dtype) / total_area, (frequency_count, patch_count))
@@ -132,8 +135,8 @@ def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array) -> LateEn
     ratio = _eyring_ratio(alpha_bar)
     late = raw * ratio
     # 看實際參與求解的那一份反射率，不另算 1−α：「工作精度下分不分得開」就是這一份說了算。
-    separated = jnp.all(reflectance < 1.0, axis=1)
-    resolved = separated & jnp.isfinite(late) & (late > 0.0)
+    absorption_lost = jnp.any((patch_alpha > 0.0) & (reflectance >= 1.0), axis=1)
+    resolved = ~absorption_lost & jnp.isfinite(late) & (late > 0.0)
     return LateEnergyArrays(
         alpha_bar=alpha_bar,
         raw_reverberant_energy=raw,
