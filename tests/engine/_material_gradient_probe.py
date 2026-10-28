@@ -1,9 +1,11 @@
 """牆面材料梯度鏈雙精度子行程；只叫公開入口、存原始數值，差分、比對與判決在父行程。"""
 from __future__ import annotations
 
+import gc
 import json
 import sys
 import time
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -20,9 +22,10 @@ from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.config.quality_targets import load_quality_targets
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import Assembly
+from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.stage_one_objective_jax import objective_constants
+from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, objective_constants
 from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
@@ -81,6 +84,31 @@ def _box_only(objective: gradient_search.ChainObjective, start: np.ndarray,
             "box_only_gradients": [_hex(step_gradient(jnp.asarray(step.theta))) for step in box_only.steps]}
 
 
+def _evaluator_cache(model: ReducedModel, designs: tuple[gradient_search.SurfaceDesign, ...],
+                     constants: StageOneObjectiveConstants, theta: jax.Array) -> Record:
+    """編譯快取（#561 審查）：真目標拿編譯版算一次，丟掉目標與編譯版、垃圾回收後量目標的弱參照死了沒；
+    同一個目標連叫兩次是不是同一個物件、兩個不同目標是不是不同物件。目標各自新建，不跟後面的下降共用。"""
+    air = load_physics_constants(config_path("physics_constants.toml"))
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+
+    def build() -> gradient_search.ChainObjective:
+        return gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges,
+                                               frequencies=model.frequencies_hz)
+
+    objective = build()
+    evaluator = gradient_search.compiled_evaluator(objective)
+    (value, _), gradient = evaluator(theta)
+    alive = weakref.ref(objective)
+    del objective, evaluator
+    gc.collect()
+    first, second = build(), build()
+    shared = gradient_search.compiled_evaluator(first)
+    return {"value": float(value).hex(), "gradient_finite": bool(np.isfinite(np.asarray(gradient)).all()),
+            "released": alive() is None,
+            "same_objective_same_evaluator": gradient_search.compiled_evaluator(first) is shared,
+            "other_objective_other_evaluator": gradient_search.compiled_evaluator(second) is not shared}
+
+
 def main(directory: Path) -> None:
     problem = cast(dict[str, object], json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
@@ -120,8 +148,7 @@ def main(directory: Path) -> None:
         if case.get("descent"):
             start = gradient_search.baseline_theta(designs)
             bounds = gradient_search.design_bounds(designs)
-            clock = time.perf_counter()
-            limits = gradient_search.depth_limits(designs)
+            clock, limits = time.perf_counter(), gradient_search.depth_limits(designs)
             first = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=limits)
             descent_seconds = time.perf_counter() - clock
             again = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=limits)
@@ -137,11 +164,12 @@ def main(directory: Path) -> None:
                     ledger.snap_row(snapped, float(snapped_value), (float(snapped_aux.mean_own_line_ripple_rms_db),
                                     float(snapped_aux.mean_seat_robustness_rms_db)), 0.0, len(first.steps)),
                     *ledger.descent_rows(retuned, "retune", len(first.steps) + 1))
-            ledger.write_ledger(directory / f"{name}.ledger.jsonl", ledger.header_for(model, designs, settings), rows)
+            header = ledger.header_for(model, designs, settings, objective_constants=constants)
+            ledger.write_ledger(directory / f"{name}.ledger.jsonl", header, rows)
             row.update({
                 "start": _hex(start), "lower": _hex(bounds[0]), "upper": _hex(bounds[1]),
                 "descent": _steps(first), "descent_again": _steps(again), "descent_seconds": descent_seconds,
-                "descent_gradients": descent_gradients,
+                "descent_gradients": descent_gradients, "evaluator_cache": _evaluator_cache(model, designs, constants, theta),
                 "snap": {"theta": _hex(snapped.theta), "surfaces": [choice._asdict() for choice in snapped.surfaces],
                          "value": float(snapped_value).hex()},
                 "retune": _steps(retuned), "single_descent": _steps(single_descent),

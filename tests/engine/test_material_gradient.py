@@ -45,7 +45,7 @@ from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequenc
 from aosr.scoring.stage_one_low_frequency_contract import (
     StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
 )
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays, objective_constants
+from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays, StageOneObjectiveConstants, objective_constants
 from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one, stage_one_score_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
@@ -94,6 +94,17 @@ def _receivers() -> ReceiverSet:
 
 def _designs(name: str) -> tuple[gradient_search.SurfaceDesign, ...]:
     return gradient_search.wall_designs_from_presets(CASES[name], _settings(), _presets())
+
+
+def _objective_constants(model: ReducedModel, score: StageOneScoreSettings | None = None,
+                         ) -> StageOneObjectiveConstants:
+    """跟探針同一份算法：替身的頻率軸、正式計分設定（或給的那一份）、同一組座位、替身的喇叭數。"""
+    return objective_constants(model.frequencies_hz, score or _score(), _receivers(), len(model.source_names))
+
+
+def _header(model: ReducedModel, score: StageOneScoreSettings | None = None) -> ledger.MaterialGradientHeader:
+    return ledger.header_for(model, _designs(DESCENT_CASE), _settings(),
+                             objective_constants=_objective_constants(model, score))
 
 
 def _chain_model(model: ReducedModel) -> ReducedModel:
@@ -580,7 +591,7 @@ def test_ledger_round_trip_matches_probe(chain_model: ReducedModel, runs: tuple[
     """抓帳本漏寫或改寫：子行程寫的帳本讀回，θ、值逐位等於那一次的結果，標頭等於父行程照同一份輸入算的。"""
     directory, output = runs
     designs = _designs(DESCENT_CASE)
-    expected = ledger.header_for(chain_model, designs, _settings())
+    expected = _header(chain_model)
     header, rows = ledger.read_ledger(directory / f"{DESCENT_CASE}.ledger.jsonl", expected_header=expected)
     row = output[DESCENT_CASE]
     descent, retune = cast(Record, row["descent"]), cast(Record, row["retune"])
@@ -634,13 +645,100 @@ def test_ledger_rejects_header_with_other_surrogate(chain_model: ReducedModel, r
     source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
     other = dataclasses.replace(chain_model, input_hash="0" * 64)
     with pytest.raises(ValueError, match="input_hash"):
-        ledger.read_ledger(source, expected_header=ledger.header_for(other, _designs(DESCENT_CASE), _settings()))
+        ledger.read_ledger(source, expected_header=_header(other))
     header, rows = ledger.read_ledger(source)
     with pytest.raises(FileExistsError):
         ledger.write_ledger(source, header, rows)
     copy = tmp_path / "copy.jsonl"
     ledger.write_ledger(copy, header, rows)
     assert copy.read_bytes() == source.read_bytes()
+
+
+def _reweighted(score: StageOneScoreSettings) -> StageOneScoreSettings:
+    """分項權重改了：第一個分項的權重加倍（另一個不動）。"""
+    return dataclasses.replace(score, weights=tuple(
+        (name, value * 2.0 if index == 0 else value) for index, (name, value) in enumerate(score.weights)))
+
+
+def _narrowed(score: StageOneScoreSettings, frequencies: Sequence[float]) -> StageOneScoreSettings:
+    """計分頻帶改了：下緣移到範圍內頭兩個頻點中間，少掉範圍內第一個頻點。"""
+    inside = [value for value in frequencies if score.scored_range_hz[0] <= value <= score.scored_range_hz[1]]
+    return dataclasses.replace(score, scored_range_hz=((inside[0] + inside[1]) / 2.0, score.scored_range_hz[1]))
+
+
+def test_ledger_rejects_header_with_other_scoring_constants(chain_model: ReducedModel,
+                                                            runs: tuple[Path, dict[str, Record]]) -> None:
+    """抓帳本標頭不認評分設定（#561 審查）：替身、面、搜尋設定都一樣，只改分項權重或計分頻帶，預期標頭就要拒收、
+    訊息點名評分指紋；同一組常數算兩次，指紋逐字相同，原樣的標頭照收。"""
+    source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
+    assert (ledger.objective_fingerprint(_objective_constants(chain_model))
+            == ledger.objective_fingerprint(_objective_constants(chain_model)))
+    ledger.read_ledger(source, expected_header=_header(chain_model))
+    for score in (_reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz)):
+        other = _header(chain_model, score)
+        assert other.model_dump() | {"objective_fingerprint": None} == (
+            _header(chain_model).model_dump() | {"objective_fingerprint": None})
+        with pytest.raises(ValueError, match="objective_fingerprint"):
+            ledger.read_ledger(source, expected_header=other)
+
+
+def _nudged(values: NDArray[np.generic]) -> NDArray[np.generic]:
+    """改一個元素：整數加 1、浮點加一個 np.spacing；其餘逐位不動、dtype 與形狀不變。"""
+    changed = np.array(values, copy=True)
+    first = changed.flat[0]
+    changed.flat[0] = first + 1 if np.issubdtype(changed.dtype, np.integer) else first + np.spacing(first)
+    assert changed.dtype == values.dtype and changed.shape == values.shape and changed.tobytes() != values.tobytes()
+    return changed
+
+
+def test_objective_fingerprint_changes_with_every_field() -> None:
+    """抓指紋漏餵某一欄：評分常數逐欄各改一個元素，每改一欄指紋都變、彼此也不同（欄位照 NamedTuple 走，不寫死欄位數）。"""
+    constants = objective_constants(FEM_LANE_FREQUENCIES_HZ, _score(), _receivers(), 2)
+    baseline = ledger.objective_fingerprint(constants)
+    seen = {baseline}
+    for index, name in enumerate(constants._fields):
+        fields: list[NDArray[np.generic]] = list(constants)
+        fields[index] = _nudged(fields[index])
+        fingerprint = ledger.objective_fingerprint(StageOneObjectiveConstants._make(fields))
+        assert fingerprint not in seen, name
+        seen.add(fingerprint)
+    assert ledger.objective_fingerprint(constants) == baseline
+
+
+def test_ledger_rejects_v2_header_without_objective_fingerprint(runs: tuple[Path, dict[str, Record]],
+                                                                tmp_path: Path) -> None:
+    """抓舊帳本照收：v2 標頭（沒有評分指紋那一格）讀回拒收、訊息講明少了評分指紋；版本寫 v3 卻缺那一格也拒收。"""
+    source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
+    lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+    header = json.loads(lines[0])
+    del header["objective_fingerprint"]
+    for version, match in (("aosr.material_gradient_ledger.v2", "評分常數指紋"), (ledger.LEDGER_VERSION, "objective_fingerprint")):
+        target = tmp_path / f"{version}.jsonl"
+        target.write_text(json.dumps({**header, "ledger_version": version}, ensure_ascii=False) + "\n" + "".join(lines[1:]),
+                          encoding="utf-8")
+        with pytest.raises(ValueError, match=match):
+            ledger.read_ledger(target)
+
+
+# ---- 編譯快取 ----
+
+def _evaluator_cache(runs: tuple[Path, dict[str, Record]]) -> Record:
+    return cast(Record, runs[1][DESCENT_CASE]["evaluator_cache"])
+
+
+def test_compiled_evaluator_released_with_objective(runs: tuple[Path, dict[str, Record]]) -> None:
+    """抓編譯快取不釋放（#561 審查）：小房間替身的真目標（雙精度子行程裡建）拿編譯版算一次，丟掉目標與編譯版、
+    垃圾回收後，目標的弱參照要死。父行程是單精度、建不了真目標，所以量在探針、判在這裡。"""
+    cache = _evaluator_cache(runs)
+    assert np.isfinite(float.fromhex(cast(str, cache["value"]))) and cache["gradient_finite"] is True
+    assert cache["released"] is True
+
+
+def test_compiled_evaluator_is_shared_per_objective(runs: tuple[Path, dict[str, Record]]) -> None:
+    """抓每段下降重新編譯或不同目標共用編譯版：同一個真目標連叫兩次回同一個物件，兩個不同目標回不同物件。"""
+    cache = _evaluator_cache(runs)
+    assert cache["same_objective_same_evaluator"] is True
+    assert cache["other_objective_other_evaluator"] is True
 
 
 # ---- 單精度：只量不登記 ----

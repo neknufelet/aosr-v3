@@ -9,9 +9,13 @@ v2（庚二）：前段照舊是連續下降、取規格、重調（``descent``�
 每一輪「基準重調（``baseline_retune``）→ 每個候選一列跳點（``candidate_jump``）接它的重調（``candidate_retune``）
 → 一列決定（``round_decision``）」；一個候選都沒有的輪只有決定那一列。每段下降的最後一列帶停止原因、
 最後一次試的步長與這段求值次數；整場最後一列（決定列）帶迴圈的停止原因。v1 檔一律拒收、不做相容。
+
+v3：標頭多一格評分常數指紋（``objective_fingerprint``）。目標函式吃的計分頻帶、權重、座位與喇叭索引、
+頻率軸（:class:`StageOneObjectiveConstants`）改了，替身與搜尋設定都一樣也不准接續舊帳本；v2 標頭少這一格，一律拒收。
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -20,17 +24,20 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import BinaryIO, Final, Literal, Self
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.physics.fem_reduced import ReducedModel
+from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
     LOOP_STOP_REASONS, STOP_REASONS, DescentResult, SnapResult, SurfaceDesign, design_names,
 )
 
 
-LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v2"
+LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v3"
+_V2_VERSION: Final = "aosr.material_gradient_ledger.v2"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Phase = Literal["descent", "snap", "retune", "baseline_retune", "candidate_jump", "candidate_retune", "round_decision"]
 SegmentPhase = Literal["descent", "retune", "baseline_retune", "candidate_retune"]
@@ -41,16 +48,17 @@ _CANDIDATE_ID: Final = re.compile(r"^(?P<surface>.+):(?P<direction>thinner|thick
 
 
 class MaterialGradientHeader(BaseModel):
-    """帳本第一列：替身身分、每面（面代號, preset id 或 None）、θ 變數名順序、設定指紋。"""
+    """帳本第一列：替身身分、每面（面代號, preset id 或 None）、θ 變數名順序、設定指紋、評分常數指紋。"""
 
     model_config = _FROZEN
-    ledger_version: Literal["aosr.material_gradient_ledger.v2"]
+    ledger_version: Literal["aosr.material_gradient_ledger.v3"]
     input_hash: str = Field(min_length=1)
     mesh_hash: str = Field(min_length=1)
     physics_identity: str = Field(min_length=1)
     surfaces: tuple[tuple[str, str | None], ...] = Field(min_length=1)
     variable_names: tuple[str, ...]
     settings_fingerprint: str = Field(min_length=1)
+    objective_fingerprint: str = Field(min_length=1)
 
     @field_validator("variable_names")
     @classmethod
@@ -214,14 +222,30 @@ class MaterialGradientRow(BaseModel):
 
 # ---- 造列 ----
 
-def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign],
-               settings: MaterialGradientSettings) -> MaterialGradientHeader:
-    """這一次搜尋的標頭：全由替身、設計清單與設定算出來。"""
+def objective_fingerprint(constants: StageOneObjectiveConstants) -> str:
+    """評分常數的 SHA-256（十六進位）：照 NamedTuple 欄位順序，每欄餵欄位名、dtype、形狀與連續排列的原始位元組。
+
+    每一段前面帶長度，段界不會混；不餵 Python 的 repr（印法會變）。欄位數不寫死，NamedTuple 加欄位自動算進來。
+    """
+    digest = hashlib.sha256()
+    for name, value in zip(constants._fields, constants, strict=True):
+        array = np.ascontiguousarray(np.asarray(value))
+        for part in (name.encode("utf-8"), str(array.dtype).encode("ascii"),
+                     ",".join(str(size) for size in array.shape).encode("ascii"), array.tobytes()):
+            digest.update(len(part).to_bytes(8, "big"))
+            digest.update(part)
+    return digest.hexdigest()
+
+
+def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
+               objective_constants: StageOneObjectiveConstants) -> MaterialGradientHeader:
+    """這一次搜尋的標頭：全由替身、設計清單、搜尋設定與評分常數算出來。"""
     return MaterialGradientHeader(
         ledger_version=LEDGER_VERSION, input_hash=model.input_hash, mesh_hash=model.mesh_hash,
         physics_identity=model.physics_identity,
         surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
-        variable_names=design_names(designs), settings_fingerprint=settings.fingerprint)
+        variable_names=design_names(designs), settings_fingerprint=settings.fingerprint,
+        objective_fingerprint=objective_fingerprint(objective_constants))
 
 
 def _row(**fields: object) -> MaterialGradientRow:
@@ -490,9 +514,9 @@ def truncate_rows(path: Path, header: MaterialGradientHeader, keep: int) -> None
 
 def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = None,
                 ) -> tuple[MaterialGradientHeader, tuple[MaterialGradientRow, ...]]:
-    """逐列驗型別與順序；給了預期標頭就逐格比（替身換了、設定換了都拒收）。壞列一律報錯，不捨棄。
+    """逐列驗型別與順序；給了預期標頭就逐格比（替身換了、設定換了、評分常數換了都拒收）。壞列一律報錯，不捨棄。
 
-    標頭先看版本：不是這一版（例如 v1）就拒收、訊息講明版本，不做舊版相容。
+    標頭先看版本：不是這一版（例如 v1）就拒收、訊息講明版本，不做舊版相容；v2 另外講明少了評分常數指紋。
     """
     with path.open("rb") as handle:
         lines = handle.readlines()
@@ -500,6 +524,9 @@ def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = 
         raise ValueError("帳本是空的或有一列沒寫完")
     document = json.loads(lines[0])
     version = document.get("ledger_version") if isinstance(document, dict) else None
+    if version == _V2_VERSION:
+        raise ValueError(f"帳本版本是 {version!r}，標頭少了評分常數指紋（objective_fingerprint）：計分頻帶或權重改了也認不出來，"
+                         f"不能接續；這一版只收 {LEDGER_VERSION}，要重跑")
     if version != LEDGER_VERSION:
         raise ValueError(f"帳本版本是 {version!r}，這一版只收 {LEDGER_VERSION}；舊版帳本不做相容，要重跑")
     header = MaterialGradientHeader.model_validate_json(lines[0])

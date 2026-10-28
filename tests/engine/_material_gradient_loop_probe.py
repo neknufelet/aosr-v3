@@ -49,11 +49,12 @@ def _settings(base: MaterialGradientSettings, override: object) -> MaterialGradi
 
 def synthetic_header(designs: tuple[gradient_search.SurfaceDesign, ...],
                      settings: MaterialGradientSettings) -> ledger.MaterialGradientHeader:
-    """合成目標沒有替身，標頭的替身三格填固定字樣；其他照正式算。"""
+    """合成目標沒有替身也沒有評分常數，標頭的替身三格與評分指紋填固定字樣；其他照正式算。"""
     return ledger.MaterialGradientHeader(
         ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic",
         physics_identity="synthetic", surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
-        variable_names=gradient_search.design_names(designs), settings_fingerprint=settings.fingerprint)
+        variable_names=gradient_search.design_names(designs), settings_fingerprint=settings.fingerprint,
+        objective_fingerprint="synthetic")
 
 
 def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], counter: list[int],
@@ -151,7 +152,7 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
     objective = gradient_search.chain_objective(
         model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")), frequencies=model.frequencies_hz)
-    header = ledger.header_for(model, designs, base)
+    header = ledger.header_for(model, designs, base, objective_constants=constants)
     main, again = directory / "surrogate.jsonl", directory / "surrogate.again.jsonl"
     seconds: dict[str, object] = {}
     clock = time.perf_counter()

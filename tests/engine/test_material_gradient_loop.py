@@ -35,7 +35,8 @@ from aosr.gradient import material_gradient_loop as loop
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_material_gradient import (
-    CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _presets, _receivers, _settings,
+    CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _header, _narrowed, _presets, _receivers, _reweighted, _score,
+    _settings,
 )
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
@@ -99,7 +100,9 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
                              capture_output=True, text=True, timeout=1500)
     assert process.returncode == 0, process.stdout + process.stderr
     output = cast(Record, json.loads((directory / "output.json").read_text(encoding="utf-8")))
-    output["chain_header"] = ledger.header_for(chain_model, _designs(DESCENT_CASE), _settings()).model_dump(mode="json")
+    output["chain_header"] = _header(chain_model).model_dump(mode="json")
+    output["scoring_variant_headers"] = [_header(chain_model, score).model_dump(mode="json") for score in (
+        _reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz))]
     output["parent_seconds"] = {"model": model_seconds, "probe": time.perf_counter() - clock}
     text = json.dumps(output)
     (directory / "fixture.json").write_text(text, encoding="utf-8")
@@ -441,7 +444,7 @@ def test_ledger_v2_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None
     """抓帳本漏寫或改寫：讀回再寫一份逐位相同，讀回的停止原因、最後 θ、累計次數等於探針那一次的結果。"""
     source = runs[0] / str(_surrogate(runs)["ledger"])
     header, rows = ledger.read_ledger(source)
-    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v2"
+    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v3"
     copy = tmp_path / "copy.jsonl"
     ledger.write_ledger(copy, header, rows)
     assert copy.read_bytes() == source.read_bytes()
@@ -614,6 +617,28 @@ def test_resume_finished_ledger_returns_without_evaluating(runs: tuple[Path, Rec
         loop.resume_rounds(_never_called, _designs(DESCENT_CASE), _with_candidates(max_rounds=2), copy,
                            ledger.MaterialGradientHeader.model_validate(
                                {**chain_header.model_dump(), "settings_fingerprint": "f" * 64}))
+
+
+def test_resume_rejects_ledger_with_other_scoring_constants(runs: tuple[Path, Record],
+                                                            chain_header: ledger.MaterialGradientHeader,
+                                                            tmp_path: Path) -> None:
+    """抓接續不認評分設定（#561 審查）：替身、面、搜尋設定都一樣，只改分項權重或計分頻帶（父行程用同一份替身算的標頭），
+    接續一本沒收尾的帳本要在求值前拒收、訊息點名評分指紋、檔案逐位不動；不會把舊分數當這一次的結果交回。"""
+    source = runs[0] / str(_surrogate(runs)["ledger"])
+    lines = source.read_bytes().splitlines(keepends=True)
+    first_decision = next(index for index, row in enumerate(_rows(runs, source.name)) if row.phase == "round_decision")
+    copy = tmp_path / "unfinished.jsonl"
+    copy.write_bytes(b"".join(lines[:first_decision + 2]))
+    before = copy.read_bytes()
+    variants = [ledger.MaterialGradientHeader.model_validate(item)
+                for item in cast(list[object], runs[1]["scoring_variant_headers"])]
+    assert variants
+    for header in variants:
+        assert header.objective_fingerprint != chain_header.objective_fingerprint
+        assert header.model_copy(update={"objective_fingerprint": chain_header.objective_fingerprint}) == chain_header
+        with pytest.raises(ValueError, match="objective_fingerprint"):
+            loop.resume_rounds(_never_called, _designs(DESCENT_CASE), _settings(), copy, header)
+        assert copy.read_bytes() == before
 
 
 @pytest.mark.parametrize(("source", "fill_bound", "match"), (
