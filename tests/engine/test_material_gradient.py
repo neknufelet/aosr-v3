@@ -705,6 +705,41 @@ def test_objective_fingerprint_changes_with_every_field() -> None:
     assert ledger.objective_fingerprint(constants) == baseline
 
 
+def _fingerprint_with(constants: StageOneObjectiveConstants, index: int, value: NDArray[np.generic]) -> str:
+    fields: list[NDArray[np.generic]] = list(constants)
+    fields[index] = value
+    return ledger.objective_fingerprint(StageOneObjectiveConstants._make(fields))
+
+
+def test_objective_fingerprint_keeps_scalar_shape() -> None:
+    """抓指紋丟掉形狀（#561 審查 P2）：主位索引由純量 () 改成一個元素的 (1,)，位元組相同、分數不同，指紋要不同
+    （審查原樣重現）；每一欄各補一個長度 1 的尾軸（純量那幾欄就是 () → (1,)），位元組不變、指紋都要變。"""
+    constants = objective_constants(FEM_LANE_FREQUENCIES_HZ, _score(), _receivers(), 2)
+    baseline = ledger.objective_fingerprint(constants)
+    assert constants.primary_index.shape == ()
+    assert ledger.objective_fingerprint(constants._replace(primary_index=constants.primary_index.reshape(1))) != baseline
+    scalars = [name for name, value in zip(constants._fields, constants, strict=True) if np.asarray(value).ndim == 0]
+    assert scalars
+    for index, name in enumerate(constants._fields):
+        original = np.asarray(constants[index])
+        reshaped = original.reshape((*original.shape, 1))
+        assert reshaped.tobytes() == original.tobytes() and reshaped.dtype == original.dtype
+        assert _fingerprint_with(constants, index, reshaped) != baseline, name
+
+
+def test_objective_fingerprint_distinguishes_dtype_with_same_bytes() -> None:
+    """抓指紋漏餵 dtype：每一欄換成同寬的另一種 dtype 的視圖（float64 ↔ int64），形狀與位元組完全相同，指紋都要變；
+    審查舉的例子是計分頻帶權重 float64 視成 int64。"""
+    constants = objective_constants(FEM_LANE_FREQUENCIES_HZ, _score(), _receivers(), 2)
+    baseline = ledger.objective_fingerprint(constants)
+    for index, name in enumerate(constants._fields):
+        original = np.asarray(constants[index])
+        other = np.int64 if original.dtype == np.float64 else np.float64
+        viewed = original.view(other)
+        assert viewed.tobytes() == original.tobytes() and viewed.shape == original.shape and viewed.dtype != original.dtype
+        assert _fingerprint_with(constants, index, viewed) != baseline, name
+
+
 def test_ledger_rejects_v2_header_without_objective_fingerprint(runs: tuple[Path, dict[str, Record]],
                                                                 tmp_path: Path) -> None:
     """抓舊帳本照收：v2 標頭（沒有評分指紋那一格）讀回拒收、訊息講明少了評分指紋；版本寫 v3 卻缺那一格也拒收。"""
@@ -718,6 +753,21 @@ def test_ledger_rejects_v2_header_without_objective_fingerprint(runs: tuple[Path
                           encoding="utf-8")
         with pytest.raises(ValueError, match=match):
             ledger.read_ledger(target)
+
+
+@pytest.mark.parametrize("fingerprint", ("synthetic", "", "0" * 63, "F" * 64))
+def test_ledger_rejects_malformed_objective_fingerprint(runs: tuple[Path, dict[str, Record]], tmp_path: Path,
+                                                        fingerprint: str) -> None:
+    """抓評分指紋格式放寬：v3 標頭的評分指紋不是 64 位小寫十六進位（任意字樣、空字串、63 位、大寫）讀回一律拒收。"""
+    source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
+    lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+    header = json.loads(lines[0])
+    ledger.read_ledger(source)
+    target = tmp_path / "malformed.jsonl"
+    target.write_text(json.dumps({**header, "objective_fingerprint": fingerprint}, ensure_ascii=False) + "\n"
+                      + "".join(lines[1:]), encoding="utf-8")
+    with pytest.raises(ValueError, match="objective_fingerprint"):
+        ledger.read_ledger(target)
 
 
 # ---- 編譯快取 ----

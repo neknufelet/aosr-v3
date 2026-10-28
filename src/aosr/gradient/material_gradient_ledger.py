@@ -58,7 +58,7 @@ class MaterialGradientHeader(BaseModel):
     surfaces: tuple[tuple[str, str | None], ...] = Field(min_length=1)
     variable_names: tuple[str, ...]
     settings_fingerprint: str = Field(min_length=1)
-    objective_fingerprint: str = Field(min_length=1)
+    objective_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @field_validator("variable_names")
     @classmethod
@@ -226,12 +226,15 @@ def objective_fingerprint(constants: StageOneObjectiveConstants) -> str:
     """評分常數的 SHA-256（十六進位）：照 NamedTuple 欄位順序，每欄餵欄位名、dtype、形狀與連續排列的原始位元組。
 
     每一段前面帶長度，段界不會混；不餵 Python 的 repr（印法會變）。欄位數不寫死，NamedTuple 加欄位自動算進來。
+    dtype 與形狀取自原陣列，不取轉成連續排列之後的：``np.ascontiguousarray`` 會把純量 ``()`` 變成 ``(1,)``，
+    而主位索引是純量或一個元素的向量，算出來的分數不同（#561 審查 P2）。
     """
     digest = hashlib.sha256()
     for name, value in zip(constants._fields, constants, strict=True):
-        array = np.ascontiguousarray(np.asarray(value))
+        array = np.asarray(value)
         for part in (name.encode("utf-8"), str(array.dtype).encode("ascii"),
-                     ",".join(str(size) for size in array.shape).encode("ascii"), array.tobytes()):
+                     ",".join(str(size) for size in array.shape).encode("ascii"),
+                     np.ascontiguousarray(array).tobytes()):
             digest.update(len(part).to_bytes(8, "big"))
             digest.update(part)
     return digest.hexdigest()
@@ -239,7 +242,11 @@ def objective_fingerprint(constants: StageOneObjectiveConstants) -> str:
 
 def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
                objective_constants: StageOneObjectiveConstants) -> MaterialGradientHeader:
-    """這一次搜尋的標頭：全由替身、設計清單、搜尋設定與評分常數算出來。"""
+    """這一次搜尋的標頭：綁替身身分（輸入雜湊、網格雜湊、物理身分）、設計清單、搜尋設定與評分常數。
+
+    呼叫端另外注入目標函式的空氣常數（``air``）與多孔材範圍（``ranges``）不在標頭內，只靠替身物理身分裡
+    那幾份資料檔的雜湊守：沿用舊替身、另外注入新的常數時，標頭照樣相同、守不到（#561 審查另記的既存缺口）。
+    """
     return MaterialGradientHeader(
         ledger_version=LEDGER_VERSION, input_hash=model.input_hash, mesh_hash=model.mesh_hash,
         physics_identity=model.physics_identity,

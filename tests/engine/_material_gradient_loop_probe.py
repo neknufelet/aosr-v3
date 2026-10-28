@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sys
@@ -49,12 +50,13 @@ def _settings(base: MaterialGradientSettings, override: object) -> MaterialGradi
 
 def synthetic_header(designs: tuple[gradient_search.SurfaceDesign, ...],
                      settings: MaterialGradientSettings) -> ledger.MaterialGradientHeader:
-    """合成目標沒有替身也沒有評分常數，標頭的替身三格與評分指紋填固定字樣；其他照正式算。"""
+    """合成目標沒有替身也沒有評分常數：標頭的替身三格填固定字樣，評分指紋填固定字樣的 SHA-256（格式跟正式一樣）；
+    其他照正式算。"""
     return ledger.MaterialGradientHeader(
         ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic",
         physics_identity="synthetic", surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
         variable_names=gradient_search.design_names(designs), settings_fingerprint=settings.fingerprint,
-        objective_fingerprint="synthetic")
+        objective_fingerprint=hashlib.sha256(b"synthetic").hexdigest())
 
 
 def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], counter: list[int],
