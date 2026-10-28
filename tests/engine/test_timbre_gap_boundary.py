@@ -31,6 +31,7 @@ from aosr.scoring.channel_matching_settings import _load_settings
 from aosr.scoring.contract import EvaluationState, Flag, QualityCategory, ReasonCode, TimbrePayload
 from tests.engine import _scoring_source_model_control as control
 from tests.engine import test_channel_matching as channel_fixtures
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL, assert_within, cell
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_result_axis_identity import _report
 from tests.engine.test_scheme_pipeline import shared_control_result
@@ -41,7 +42,10 @@ from tests.engine.test_timbre_gap_half_window import _tilt_width
 # 合成軸的鄰距（八度），跟正式細軸同一級；被考的是界與缺點的相對位置，不是這個數。
 _STEP = 1.0 / 24.0
 # 控制組：三種合法軸整條、``_room_curve`` 那條曲線，主線 36970513（評估器 v10，改界判法之前）算出的
-# 傾斜、起伏、對目標偏差。完整資料不碰新加的那一次判洞，三個數要逐位相同。
+# 傾斜、起伏、對目標偏差。完整資料不碰新加的那一次判洞，三個數要跟這份答案在跨處理器評分容差內
+# （決策紙 verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 6 條③級，tests/engine/_cross_cpu_tolerance.py）。
+# 原本逐位比（#955）：外部審查 10-28 在另一顆處理器一般設定下差 4.44e-16～8.88e-16（每八度 48 點與 1 Hz 兩軸），
+# 同機 #944 前後的程式逐位相同；本機差 0。
 _MAIN_ANSWERS: dict[LowFrequencyAxis, tuple[str, str, str]] = {
     LowFrequencyAxis.SEARCH: ("-0x1.0ea7c8e951319p+0", "0x1.330f0115c3a52p+1", "0x1.ace3ba86ef771p+1"),
     LowFrequencyAxis.SEARCH_48: ("-0x1.0e56db257deeap+0", "0x1.32fbc804db258p+1", "0x1.ace2a019c20bep+1"),
@@ -209,7 +213,7 @@ def test_ripple_segment_judges_gaps_with_its_own_unsmoothed_ruler(tmp_path: Path
 
 @pytest.mark.parametrize("axis", list(LowFrequencyAxis))
 def test_complete_legal_axes_pass_every_gap_check_and_keep_main_answers(axis: LowFrequencyAxis) -> None:
-    """三種合法報表軸整條：每一段依賴範圍、左右匹配那一段都不是洞，量出來的三個數跟改動前主線逐位相同。"""
+    """三種合法報表軸整條：每一段依賴範圍、左右匹配那一段都不是洞，量出來的三個數跟改動前主線在跨處理器評分容差內。"""
     frequencies = np.asarray(_report_axis(axis))
     settings = _settings()
     channel = _load_settings(channel_fixtures._TARGETS, channel_fixtures._PURPOSE)
@@ -225,7 +229,9 @@ def test_complete_legal_axes_pass_every_gap_check_and_keep_main_answers(axis: Lo
     assert isinstance(evaluation.payload, TimbrePayload)
     payload = evaluation.payload
     measured = (payload.tilt_db_per_octave, payload.residual_rms_db, payload.target_deviation_rms_db)
-    assert tuple(value.hex() for value in measured) == _MAIN_ANSWERS[axis]
+    names = ("tilt_db_per_octave", "residual_rms_db", "target_deviation_rms_db")
+    assert_within(cell(f"{axis.name} {name}", value, answer, rel=SCORING_REL, abs_=SCORING_ABS)
+                  for name, value, answer in zip(names, measured, _MAIN_ANSWERS[axis], strict=True))
 
 
 @pytest.mark.parametrize("axis", list(LowFrequencyAxis))
