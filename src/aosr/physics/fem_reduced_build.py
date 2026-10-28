@@ -2,7 +2,9 @@
 
 照 #610 實驗那一版：起點是平均挑的幾組訓練材料 × 平均挑的幾個頻點；之後每輪用固定種子從還沒解過的
 （材料、頻點）抽候選，以完整矩陣直接形成 ``b − A(Vq)`` 量替身殘差，取最大的一批完整解補進快照。
-抽到的最大殘差不超過停止值、完整解次數到上限、或候選用完就停。停止值只是選點用的，不是驗證門檻；
+每輪補完快照、重做基底之後先抽候選量殘差，再決定停不停：候選用完記「候選用完」；抽到的最大殘差不超過停止值記
+「抽到的候選殘差都在停止值內」（同時到預算也記這個，殘差是量到的事實）；否則完整解用滿預算記「預算停止、殘差目標未達」
+（這時殘差真的量過、真的沒達，那一輪準備了下一批但不解，``solved`` 記 0）。停止值只是選點用的，不是驗證門檻；
 替身準不準由 :mod:`aosr.physics.fem_reduced_check` 用留出材料對完整解判。
 """
 from __future__ import annotations
@@ -120,9 +122,7 @@ def build_reduced_model(
     while True:
         build.solve(pending)
         basis, matrices = build.reduce()
-        if build.solver.solves >= settings.max_full_solves:
-            stop = "完整解次數到上限"
-            break
+        # 先量這份基底的殘差再判預算：到上限時記「殘差目標未達」之前，殘差一定量過。
         outcome = build.greedy_round(rng, basis, matrices)
         if outcome is None:
             stop = "候選用完"
@@ -130,6 +130,9 @@ def build_reduced_model(
         largest, pending = outcome
         if largest <= settings.stop_residual:
             stop = "抽到的候選殘差都在停止值內"
+            break
+        if build.solver.solves >= settings.max_full_solves:
+            stop = "預算停止、殘差目標未達"
             break
     ledger = BuildLedger(
         full_solves=build.solver.solves, snapshots=len(build.snapshots), rank=basis.shape[1],
