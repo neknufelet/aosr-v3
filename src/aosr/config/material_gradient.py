@@ -1,4 +1,4 @@
-"""第三階段牆面材料梯度搜尋（前半段）設定的唯讀載入（#561）。
+"""第三階段牆面材料梯度搜尋設定的唯讀載入（#561）：連續下降、重調、候選確認迴圈、樣板家族。
 
 路徑必給（``docs/decisions/config-loaders-keep-path-required.md``）；正式檔是
 ``config_path("material_gradient.toml")``。數字全是工程暫定，依據紙
@@ -56,6 +56,20 @@ class RetuneSettings(BaseModel):
     steps: StrictInt = Field(ge=1)
 
 
+class CandidateSettings(BaseModel):
+    """候選確認迴圈：每輪最多確認幾個候選、改善門檻（合分絕對差）、最多幾輪、求值次數上限。
+
+    求值次數算次數不算秒數：值＋梯度算一次，線搜尋的每一個試探都算一次。求值次數上限限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
+    """
+
+    model_config = _FROZEN
+
+    max_per_round: StrictInt = Field(ge=1)
+    improvement_threshold: ExactFloat = Field(gt=0.0)
+    max_rounds: StrictInt = Field(ge=1)
+    max_evaluations: StrictInt = Field(ge=1)
+
+
 class FamilySettings(BaseModel):
     """一個樣板家族：哪些 preset、合法棉板厚度、空腔範圍、每面總深度上限（公尺）。"""
 
@@ -83,12 +97,13 @@ class FamilySettings(BaseModel):
 
 
 class MaterialGradientSettings(BaseModel):
-    """三節：下降、重調、家族；一個 preset 最多屬於一個家族。"""
+    """四節：下降、重調、候選確認、家族；一個 preset 最多屬於一個家族。"""
 
     model_config = _FROZEN
 
     descent: DescentSettings
     retune: RetuneSettings
+    candidates: CandidateSettings
     family: tuple[FamilySettings, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -111,7 +126,7 @@ class MaterialGradientSettings(BaseModel):
 
 
 def load_material_gradient_settings(path: str | Path) -> MaterialGradientSettings:
-    """讀 ``[descent]``、``[retune]``、``[[family]]``；缺節、多欄或數字不合就報錯。"""
+    """讀 ``[descent]``、``[retune]``、``[candidates]``、``[[family]]``；缺節、多欄或數字不合就報錯。"""
     with Path(path).open("rb") as config_file:
         data = tomllib.load(config_file)
     return MaterialGradientSettings.model_validate(data)
