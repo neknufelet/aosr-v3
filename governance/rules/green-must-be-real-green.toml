@@ -482,7 +482,10 @@ prefix = "tests.engine."
 # 同一份編譯逐位、編譯對未編譯、逐格梯度對中央差分、範圍外梯度恰零、聲壓轉能量、
 # 批次、單精度有限與型別、壞輸入、純直線零值政策及契約兩側變異；未移除。
 # 單行程 collect-only 以逐檔列的題數加總為 9892，末尾機器摘要不列入。
-collected_floor = 9892
+# 9892→9899：#562 晚期混響 JAX 版有效範圍旗標 dissipation_resolved 七題——五題原案三條路旗標都 True、
+# α=3.2928e-9 單精度旗標 False 且能量為負、同一個 α 雙精度旗標 True 且對 numpy 在契約內、α=1e-3 兩種精度都 True、
+# jit／vmap 下形狀與遮罩、旗標不進梯度、兩個條件各自單獨翻 False；未移除。單行程 collect-only 逐檔加總 9899。
+collected_floor = 9899
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

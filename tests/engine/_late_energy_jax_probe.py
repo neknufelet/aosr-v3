@@ -23,16 +23,25 @@ class Case(TypedDict):
     alpha: list[list[str]]
 
 
+# 布林旗標另外交回；四個浮點量的編碼與 dtype 名單不收它。
+_FLAG = "dissipation_resolved"
+
+
 def _hex(values: jax.Array) -> list[str]:
     return [float(value).hex() for value in np.asarray(values, dtype=np.float64).reshape(-1)]
 
 
 def _arrays(result: late_energy_jax.LateEnergyArrays) -> dict[str, list[str]]:
-    return {name: _hex(value) for name, value in result._asdict().items()}
+    return {name: _hex(value) for name, value in result._asdict().items() if name != _FLAG}
 
 
 def _dtypes(result: late_energy_jax.LateEnergyArrays) -> list[str]:
-    return sorted({str(value.dtype) for value in result})
+    return sorted({str(value.dtype) for name, value in result._asdict().items() if name != _FLAG})
+
+
+def _flags(result: late_energy_jax.LateEnergyArrays) -> dict[str, object]:
+    flag = result.dissipation_resolved
+    return {"dtype": str(flag.dtype), "values": [bool(value) for value in np.asarray(flag).reshape(-1)]}
 
 
 def _run_case(case: Case) -> dict[str, object]:
@@ -60,6 +69,7 @@ def _run_case(case: Case) -> dict[str, object]:
         "single_gradient": _hex(single_gradient),
         "double_dtypes": _dtypes(eager) + _dtypes(first) + [str(gradient.dtype)],
         "single_dtypes": _dtypes(single_result) + [str(single_gradient.dtype)],
+        "resolved": {"eager": _flags(eager), "jit": _flags(first), "single": _flags(single_result)},
     }
 
 
