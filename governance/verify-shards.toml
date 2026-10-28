@@ -120,3 +120,11 @@ files = [
   "tests/engine/test_transfer_matrix_step3_reference.py",
   "tests/engine/test_wall_surfaces.py",
 ]
+
+[[group]]
+name = "balance-shard-b-2026-10-29"
+shard = "shard-b"
+why = "手動配平（2026-10-29，#561 第三階段的探針考卷讓 shard-a 變重）：雲端 run 40739292368 兩片 junit 逐題時間總和 shard-a 3,473 秒、shard-b 2,887 秒，pytest 步驟 929 秒對 768 秒；同一份程式的下一跑（40742557769）shard-a 的 pytest 步驟 23 分鐘被 25 分鐘上限砍掉。這支檔在 shard-a 占 346 秒（第一重），依路徑雜湊落在 shard-a，登記到 shard-b 後兩片總和 3,127 秒對 3,233 秒。上限 25 分鐘是老闆 10-14 定的（#786）、不動；跑 shard_balance 要每片 steps 收據的機器行，收據鏡像現在沒存那一行，所以這次手算、數字從 junit 與收據鏡像來。"
+files = [
+  "tests/engine/test_material_gradient_loop.py",
+]
