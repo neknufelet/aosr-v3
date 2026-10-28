@@ -17,6 +17,12 @@
 對不到這份替身、驗證區塊缺或次數對不上、狀態不是「通過」、``within_contract`` 不是 True、數字兩份不一致、
 或拿收據抄的每座位數字用這次讀進來的尺重判不過，一律拋 :class:`ReducedModelNotValidated`。
 閘門不看建模的停止原因：預算停止、殘差目標未達但收據通過照樣准用；殘差達標但收據不通過照樣拒用。
+
+版本 2（#561 辛一審查 B1）：``reduced_model`` 區多記喇叭與座位座標（名字 → 三個 ``float.hex()``，從驗證報告抄，
+報告是從完整模型的算子取的）。網格雜湊與物理身分都不含位置，同一間房把喇叭移 0.1 m 的方案拿舊替身會照樣過、
+目標靜默算錯；呼叫端給了 ``expected_source_points``／``expected_receiver_points`` 就逐名逐座標字串比，
+不同就拒用並點名哪一支喇叭或哪一個座位。版本 1 收據沒有座標：呼叫端沒給預期座標時照舊放行，
+給了就一律拒（收據沒記座標，驗證未完成不能當成通過）。
 """
 from __future__ import annotations
 
@@ -28,10 +34,12 @@ from pathlib import Path
 from typing import TypeGuard
 
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.physics.fem_reduced_check import ValidationReport, seats_within_contract, within_reduced_contract
+from aosr.physics.fem_reduced_check import PointHex, ValidationReport, seats_within_contract, within_reduced_contract
 from aosr.physics.fem_reduced_store import load_reduced, manifest_path, matrices_digest
 
-RECEIPT_FORMAT_VERSION = 1
+RECEIPT_FORMAT_VERSION = 2
+_READABLE_VERSIONS = (1, 2)
+_POINT_KINDS = (("source_points", "喇叭"), ("receiver_points", "座位"))
 RECEIPT_STATUSES = ("通過", "不通過")
 _PASSED = RECEIPT_STATUSES[0]
 _UNFINISHED = "驗證未完成不能當成通過"
@@ -99,6 +107,10 @@ def _checked_report(report: ValidationReport, model: ReducedModel, seconds: floa
     values = (*report.frequency_db_by_seat.values(), *report.band_db_by_seat.values())
     if not all(math.isfinite(value) for value in values):
         raise ValueError(f"驗證報告有座位的逐頻或帶數字不是有限數：{_UNFINISHED}")
+    for points, names, label in ((report.source_points, model.source_names, "喇叭"),
+                                 (report.receiver_points, model.receiver_names, "座位")):
+        if set(points) != set(names) or not all(_is_point_hex(list(value)) for value in points.values()):
+            raise ValueError(f"驗證報告的{label}座標跟替身的{label}不同或不是三個有限的 float.hex：{_UNFINISHED}")
 
 
 def save_validation_receipt(npz_path: Path, report: ValidationReport, *, rulers: HoldoutRulers,
@@ -120,7 +132,10 @@ def save_validation_receipt(npz_path: Path, report: ValidationReport, *, rulers:
         for name in model.receiver_names}
     document: dict[str, object] = {
         "format_version": RECEIPT_FORMAT_VERSION,
-        "reduced_model": _model_identity(npz_path, model),
+        "reduced_model": {
+            **_model_identity(npz_path, model),
+            "source_points": {name: list(report.source_points[name]) for name in model.source_names},
+            "receiver_points": {name: list(report.receiver_points[name]) for name in model.receiver_names}},
         "build": {"full_solves": ledger.full_solves, "stop_reason": ledger.stop_reason, "rank": ledger.rank,
                   "seconds": dict(ledger.seconds), "max_full_solves": ledger.settings.max_full_solves,
                   "stop_residual": ledger.settings.stop_residual},
@@ -160,13 +175,56 @@ def _read_receipt(npz_path: Path) -> dict[str, object]:
     if not isinstance(document, dict):
         raise ReducedModelNotValidated(f"驗證收據讀不開：{path}")
     version = document.get("format_version")
-    if type(version) is not int or version != RECEIPT_FORMAT_VERSION:
+    if type(version) is not int or version not in _READABLE_VERSIONS:
         raise ReducedModelNotValidated("驗證收據格式版本不符")
     return document
 
 
 def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_point_hex(value: object) -> bool:
+    """三個字串、每個都是正規化的有限 ``float.hex()``。"""
+    if not isinstance(value, list) or len(value) != len(("x", "y", "z")):
+        return False
+    for item in value:
+        if not isinstance(item, str):
+            return False
+        try:
+            number = float.fromhex(item)
+        except (ValueError, OverflowError):
+            return False
+        if not math.isfinite(number) or number.hex() != item:
+            return False
+    return True
+
+
+def _check_points(document: Mapping[str, object], model: ReducedModel,
+                  expected: Mapping[str, Mapping[str, PointHex] | None]) -> None:
+    """版本 2 收據的座標要齊、格式要對；呼叫端給了預期座標就逐名逐座標比（版本 1 收據沒有座標，給了預期就拒）。"""
+    recorded = _section(document, "reduced_model")
+    if document.get("format_version") == 1:
+        if any(value is not None for value in expected.values()):
+            raise ReducedModelNotValidated(f"驗證收據是版本 1，收據沒記座標，{_UNFINISHED}（這次要核喇叭與座位座標），拒用")
+        return
+    for key, label in _POINT_KINDS:
+        points = recorded.get(key)
+        names = model.source_names if key == "source_points" else model.receiver_names
+        if (not isinstance(points, dict) or set(points) != set(names)
+                or not all(_is_point_hex(value) for value in points.values())):
+            raise ReducedModelNotValidated(f"驗證收據的{label}座標缺、名字跟替身不同或不是 float.hex，拒用")
+        wanted = expected[key]
+        if wanted is None:
+            continue
+        if set(wanted) != set(points):
+            raise ReducedModelNotValidated(
+                f"這次方案的{label} {sorted(wanted)} 跟驗證收據記的 {sorted(points)} 不同，拒用")
+        for name in names:
+            if points[name] != list(wanted[name]):
+                raise ReducedModelNotValidated(
+                    f"{label} {name} 的座標跟驗證收據記的不同（收據 {points[name]}、這次方案 {list(wanted[name])}）："
+                    "替身是別的位置建的，拒用")
 
 
 def _check_validation(document: Mapping[str, object], model: ReducedModel) -> None:
@@ -234,9 +292,12 @@ def _check_verdict(document: Mapping[str, object], model: ReducedModel, rulers: 
 
 
 def load_validated_reduced(npz_path: Path, *, rulers: HoldoutRulers, expected_mesh_hash: str | None = None,
-                           expected_physics_identity: str | None = None) -> ReducedModel:
+                           expected_physics_identity: str | None = None,
+                           expected_source_points: Mapping[str, PointHex] | None = None,
+                           expected_receiver_points: Mapping[str, PointHex] | None = None) -> ReducedModel:
     """准用閘門：:func:`load_reduced` 核完替身，再核驗證收據；任何一條不過都拋 :class:`ReducedModelNotValidated`
-    （替身本身讀不進來也包成它，原錯誤留在 ``__cause__``）。"""
+    （替身本身讀不進來也包成它，原錯誤留在 ``__cause__``）。給了預期的喇叭或座位座標（名字 → 三個 ``float.hex()``）
+    就跟收據記的逐名逐座標比；版本 1 收據沒有座標，給了預期一律拒。"""
     try:
         model = load_reduced(npz_path, expected_mesh_hash=expected_mesh_hash,
                              expected_physics_identity=expected_physics_identity)
@@ -248,6 +309,8 @@ def load_validated_reduced(npz_path: Path, *, rulers: HoldoutRulers, expected_me
     for field, value in identity.items():
         if recorded.get(field) != value:
             raise ReducedModelNotValidated(f"驗證收據對不到這份替身：{field} 不同（替身換過或收據是別份的），拒用")
+    _check_points(document, model, {"source_points": expected_source_points,
+                                    "receiver_points": expected_receiver_points})
     _check_validation(document, model)
     _check_verdict(document, model, rulers)
     return model

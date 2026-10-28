@@ -3,6 +3,7 @@
 沿用 ``test_fem_reduced`` 的小房間替身與留出材料（``HOLDOUT``）；尺一律從精度契約登記簿讀，收據只抄錄。
 閘門只看收據不看建模停止原因：預算停止、殘差目標未達但收據通過照樣准用；殘差達標但收據不通過照樣拒用。
 修補一（獨立審查三條）：別份替身的報告寫不成收據、沒做完的驗證寫不成也過不了閘門、到預算之前先量殘差。
+收據版本 2（#561 辛一審查 B1）：記喇叭與座位座標，閘門拿呼叫端給的預期座標逐名逐座標比；版本 1 收據給了預期一律拒。
 """
 from __future__ import annotations
 
@@ -16,9 +17,10 @@ import pytest
 
 from aosr.physics.fem_reduced import FullOperators, ReducedModel, even_indices
 from aosr.physics.fem_reduced_build import build_reduced_model
-from aosr.physics.fem_reduced_check import ValidationReport
+from aosr.physics.fem_reduced_check import PointHex, ValidationReport, points_hex
 from aosr.physics.fem_reduced_receipt import (
-    HoldoutRulers, ReducedModelNotValidated, Ruler, load_validated_reduced, receipt_path, save_validation_receipt,
+    RECEIPT_FORMAT_VERSION, HoldoutRulers, ReducedModelNotValidated, Ruler, load_validated_reduced, receipt_path,
+    save_validation_receipt,
 )
 from aosr.physics.fem_reduced_store import load_reduced, manifest_path, matrices_digest, save_reduced
 from tests.engine._precision_contracts import contract_value
@@ -58,17 +60,29 @@ def _same_matrices(left: ReducedModel, right: ReducedModel) -> bool:
                for name in ARRAYS)
 
 
+def _sources(operators: FullOperators) -> dict[str, PointHex]:
+    return points_hex(operators.source_points)
+
+
+def _receivers(operators: FullOperators) -> dict[str, PointHex]:
+    return points_hex({name: operators.receiver_points[name] for name in SEATS})
+
+
 def test_receipt_roundtrip_bitwise_and_solve_counts_apart(
-        model: ReducedModel, holdout_report: ValidationReport, tmp_path: Path) -> None:
-    """抓收據掉位、身分從呼叫端抄、建模與驗證次數混成一格：每座位 hex 逐位等於報告，六格身分等於 manifest 與模型。"""
+        model: ReducedModel, holdout_report: ValidationReport, operators: FullOperators, tmp_path: Path) -> None:
+    """抓收據掉位、身分從呼叫端抄、建模與驗證次數混成一格：每座位 hex 逐位等於報告，六格身分等於 manifest 與模型，
+    喇叭與座位座標逐字等於完整模型算子的 float.hex。"""
     path = tmp_path / "rom.npz"
     receipt = _saved(model, holdout_report, path)
     assert receipt == receipt_path(path)
     document = json.loads(receipt.read_text(encoding="utf-8"))
     manifest = json.loads(manifest_path(path).read_text(encoding="utf-8"))
     assert holdout_report.model_digest == matrices_digest(model.matrices)
+    assert document["format_version"] == RECEIPT_FORMAT_VERSION
     assert document["reduced_model"] == {
-        **{field: manifest[field] for field in IDENTITY}, "matrices_digest": holdout_report.model_digest}
+        **{field: manifest[field] for field in IDENTITY}, "matrices_digest": holdout_report.model_digest,
+        "source_points": {name: list(point) for name, point in _sources(operators).items()},
+        "receiver_points": {name: list(point) for name, point in _receivers(operators).items()}}
     for name in SEATS:
         seat = document["seats"][name]
         for field, values in (("frequency_db", holdout_report.frequency_db_by_seat),
@@ -189,6 +203,10 @@ _GATE_CASES: tuple[tuple[str, Callable[[Path], HoldoutRulers], str], ...] = (
      "收據數字兩份不一致"),
     ("bad_hex", _change(lambda d: _section(d, "seats", FIRST_SEAT, "band_db").__setitem__("hex", "zz")),
      "hex 不合法"),
+    ("point_not_float_hex", _change(lambda d: _section(d, "reduced_model", "receiver_points").__setitem__(
+        FIRST_SEAT, ["1.0", "0x0.0p+0", "0x0.0p+0"])), "座位座標缺、名字跟替身不同或不是 float.hex"),
+    ("point_missing", _change(lambda d: _section(d, "reduced_model").pop("source_points")),
+     "喇叭座標缺"),
     ("overflow_hex", _change(
         lambda d: _section(d, "seats", FIRST_SEAT, "band_db").__setitem__("hex", "0x1p+999999999")),
      "hex 不合法"),
@@ -285,3 +303,60 @@ def test_gate_returns_same_model_as_load_reduced(
     for name in ARRAYS:
         assert getattr(loaded.matrices, name).shape == getattr(gated.matrices, name).shape
     assert dataclasses.replace(gated, matrices=loaded.matrices) == loaded
+
+
+def test_gate_reads_back_recorded_points(
+        model: ReducedModel, holdout_report: ValidationReport, operators: FullOperators, tmp_path: Path) -> None:
+    """抓座標寫進去讀不回來：拿完整模型算子的座標當預期，閘門放行。"""
+    path = tmp_path / "rom.npz"
+    _saved(model, holdout_report, path)
+    gated = load_validated_reduced(path, rulers=RULERS, expected_source_points=_sources(operators),
+                                   expected_receiver_points=_receivers(operators))
+    assert _same_matrices(gated, load_reduced(path))
+
+
+def _moved(points: dict[str, PointHex], name: str) -> dict[str, PointHex]:
+    x, y, z = points[name]
+    return {**points, name: ((float.fromhex(x) + 0.1).hex(), y, z)}
+
+
+@pytest.mark.parametrize("kind", ("source_points", "receiver_points"))
+@pytest.mark.parametrize("where", ("receipt", "expected"))
+def test_gate_rejects_moved_point_naming_it(
+        model: ReducedModel, holdout_report: ValidationReport, operators: FullOperators, tmp_path: Path,
+        kind: str, where: str) -> None:
+    """審查 B1：收據裡一支喇叭或一個座位的 x 改 0.1 m，或呼叫端預期的那一格移 0.1 m，閘門拒用並點名是哪一支／哪一座。"""
+    path = tmp_path / "rom.npz"
+    _saved(model, holdout_report, path)
+    expected = {"source_points": _sources(operators), "receiver_points": _receivers(operators)}
+    name = next(iter(expected[kind]))
+    moved = _moved(expected[kind], name)
+    if where == "receipt":
+        _edit(path, lambda d: _section(d, "reduced_model").__setitem__(
+            kind, {key: list(value) for key, value in moved.items()}))
+    else:
+        expected[kind] = moved
+    label = "喇叭" if kind == "source_points" else "座位"
+    with pytest.raises(ReducedModelNotValidated, match=f"{label} {name} 的座標跟驗證收據記的不同"):
+        load_validated_reduced(path, rulers=RULERS, expected_source_points=expected["source_points"],
+                               expected_receiver_points=expected["receiver_points"])
+
+
+def _version_one(document: dict[str, object]) -> None:
+    document["format_version"] = 1
+    identity = _section(document, "reduced_model")
+    identity.pop("source_points")
+    identity.pop("receiver_points")
+
+
+def test_version_one_receipt_without_points_rejected_when_points_expected(
+        model: ReducedModel, holdout_report: ValidationReport, operators: FullOperators, tmp_path: Path) -> None:
+    """抓舊收據蒙混：版本 1 收據沒記座標，呼叫端給了預期座標（任一種）一律拒；沒給預期照舊放行。"""
+    path = tmp_path / "rom.npz"
+    _saved(model, holdout_report, path)
+    _edit(path, _version_one)
+    assert _same_matrices(load_validated_reduced(path, rulers=RULERS), load_reduced(path))
+    with pytest.raises(ReducedModelNotValidated, match=f"收據沒記座標，{UNFINISHED}"):
+        load_validated_reduced(path, rulers=RULERS, expected_source_points=_sources(operators))
+    with pytest.raises(ReducedModelNotValidated, match=f"收據沒記座標，{UNFINISHED}"):
+        load_validated_reduced(path, rulers=RULERS, expected_receiver_points=_receivers(operators))
