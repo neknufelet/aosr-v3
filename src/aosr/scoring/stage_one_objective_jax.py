@@ -13,7 +13,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 
 from aosr.scoring import timbre
 from aosr.scoring.receiver_set import ReceiverRole, ReceiverSet
@@ -97,6 +97,15 @@ def _energy_shape(constants: StageOneObjectiveConstants) -> tuple[int, int, int]
             constants.log2_frequencies.shape[0])
 
 
+def rms_floor_factor(dtype: DTypeLike) -> float:
+    """均方根零判地板的倍率：地板＝倍率 × max(該喇叭所有座位、範圍內頻點 |dB| 的最大值, 1)，單位 dB。
+
+    倍率是 ``_RMS_FLOOR_EPS_MULTIPLE`` × ``dtype`` 的 eps；:func:`objective_from_energies` 與要推分數差上界的
+    呼叫端（梯度搜尋終點）共用這一份，不各自再寫一次。
+    """
+    return _RMS_FLOOR_EPS_MULTIPLE * float(np.finfo(dtype).eps)
+
+
 def _weighted_rms(values: jax.Array, weights: jax.Array, floor: jax.Array) -> jax.Array:
     """沿最後一軸的加權均方根；不到地板的值與梯度一起歸零，未走的 sqrt 不污染反向傳播。"""
     square = jnp.sum(weights * values * values, axis=-1) / jnp.sum(weights)
@@ -137,7 +146,7 @@ def objective_from_energies(
     intercept = y_mean - slope * x_mean
     residual = primary - (slope[:, None] * x + intercept[:, None])
     scale = jnp.maximum(jnp.max(jnp.abs(levels), axis=(1, 2)), jnp.ones((), dtype=dtype))
-    floor = _RMS_FLOOR_EPS_MULTIPLE * float(np.finfo(dtype).eps) * scale
+    floor = rms_floor_factor(dtype) * scale
     ripple = _weighted_rms(residual, weights, floor)
     robustness = jnp.mean(_weighted_rms(surrounding - primary[:, None, :], weights, floor[:, None]), axis=-1)
     means = jnp.stack((jnp.mean(ripple), jnp.mean(robustness)))

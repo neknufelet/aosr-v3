@@ -32,7 +32,7 @@ from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
 from tests.engine.test_fem_reduced import DENSITY, ROOM, SEATS, SOUND_SPEED, SOURCES
-from tests.engine.test_material_gradient_endpoint import chain_operators
+from tests.engine.test_material_gradient_endpoint import chain_operators, floor_case_pressures
 
 
 Record = dict[str, object]
@@ -65,7 +65,7 @@ def _zero_cavity(case: Record, model: ReducedModel, constants: StageOneObjective
     template = build_template(design.material, jnp.asarray(axis), air=air, ranges=ranges, variables=design.variables)
     parameters = {design.thickness_variable: jnp.asarray(theta_gap[0]), design.cavity_variable: jnp.asarray(0.0)}
     chain_impedance = surface_impedance_from_parameters(template, parameters, jnp.asarray(axis), air=air)
-    materials = endpoint.materials_from_surfaces(endpoint.surface_specs(with_gap, theta_gap), presets, settings)
+    materials = endpoint.materials_from_surfaces(with_gap, theta_gap, settings)
     exported = materials[Wall.all()[0]]
     assert exported is not None
     exported_impedance, _ = surface_impedance(exported, jnp.asarray(axis), air=air, ranges=ranges)
@@ -97,9 +97,8 @@ def main(directory: Path) -> None:
     theta = _theta(case["theta"])
     result = endpoint.endpoint_check(
         operators, designs, theta, model=model, score_settings=score, receiver_set=receivers,
-        low_frequency_axis=LowFrequencyAxis(str(problem["axis"])), presets=presets, settings=settings, air=air,
-        ranges=ranges)
-    materials = endpoint.materials_from_surfaces(endpoint.surface_specs(designs, theta), presets, settings)
+        low_frequency_axis=LowFrequencyAxis(str(problem["axis"])), settings=settings, air=air, ranges=ranges)
+    materials = endpoint.materials_from_surfaces(designs, theta, settings)
     direct = endpoint.full_model_pressures(
         operators, materials, axis, air=air, ranges=ranges,
         max_relative_residual=model.ledger.settings.full_solve_max_relative_residual)
@@ -114,6 +113,8 @@ def main(directory: Path) -> None:
         "full": _complex(result.full_pressure), "reduced": _complex(result.reduced_pressure),
         "direct": _complex(direct), "reference": _complex(reference.full_pressure[0]),
         "direct_total": float(objective_from_pressures(constants, jnp.asarray(direct)).screening_total).hex(),
+        "floor_case": [float(objective_from_pressures(constants, jnp.asarray(values)).screening_total).hex()
+                       for values in floor_case_pressures(axis, receivers)],
         "zero_cavity": _zero_cavity(cast(Record, problem["zero_cavity"]), model, constants, settings, presets,
                                     air, ranges),
     }

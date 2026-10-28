@@ -6,7 +6,16 @@
 
 只報數字、不下判決：替身準不準由決策紙 ``fem-reduced-model-jax-evaluation-for-stage-three.md`` 的兩把尺管，
 大峰門檻 #451 說先不訂。分數一律走第一階段低頻目標同一把尺（``objective_from_pressures``），大峰走第一階段
-評分程式（``low_frequency_input`` → ``evaluate_stage_one_low_frequency`` 的最強峰），不另寫算式。
+評分程式的低頻量測零件（``low_frequency_input`` → ``evaluate_stage_one_low_frequency`` 的最強峰），不另寫算式。
+只用那幾個零件：第一階段整條入口（``reporting.stage_one_result`` 的前提檢查）今天不收構造牆，這是既有限制，
+這一支不宣稱匯出的方案能直接走第一階段整條。
+
+材料只有一個來源：每面的 ``SurfaceDesign.material``（替身鏈用的那一份），匯出時只換棉板厚度、照設定檔
+``[export] min_cavity_m`` 決定空氣層放不放；設計清單必須照 ``Wall.all()`` 的順序給六面。
+材料求阻抗用的空氣（``air``）必須跟完整模型算子、替身同一組密度與聲速，不等就拒收。
+
+方案格式沒有「剛性」的寫法（表面分區每面一種材料、固定阻抗欄只收正數），所以 :func:`scene_with_materials`
+遇到剛性面（None）刻意拒收；「沒設計的面保留方案原本的牆面」要從計算起就一致，由接線那支定，這一支不做。
 
 完整模型的算子由呼叫端給（方案走 ``reporting.fem_reduced_scheme.export_operators``，跟建替身同一份或同網格重匯出）；
 替身與算子的網格、喇叭、座位、空氣一致性由 :func:`aosr.physics.fem_reduced_check.validate_reduced` 核。
@@ -14,6 +23,7 @@
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Final, NamedTuple
 
@@ -21,19 +31,18 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict
 
-from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.material_gradient import (
-    FloatVector, SurfaceDesign, chain_objective, checked_theta, is_feasible,
+    FloatVector, SurfaceDesign, chain_objective, checked_theta, is_feasible, wall_surface_ids,
 )
 from aosr.materials.construction import surface_impedance
-from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, FullSolver, ReducedModel, impedance_rows, walls_at
 from aosr.physics.fem_reduced_check import validate_reduced
@@ -44,20 +53,18 @@ from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.stage_one_objective_jax import (
     StageOneObjectiveArrays, StageOneObjectiveConstants, objective_constants, objective_from_pressures,
+    rms_floor_factor,
 )
 from aosr.scoring.stage_one_score import StageOneScoreSettings
 
-# 空腔匯出規則（工程定法，#561 辛二派工單，不問老闆）：家族的空腔是連續量（``FamilySettings.cavity_range_m`` 只有上下限、
-# 沒有分級刻度），所以用「小於 1 mm 就不放空氣層」；家族以後有了空腔刻度，改成「小於最小一格」。
-MIN_CAVITY_M: Final = 0.001
 _CANDIDATE_ID: Final = "gradient-endpoint"
 
 
 class SurfaceSpec(NamedTuple):
     """一面的規格：面代號（牆名）、preset id、棉板厚度與空腔（公尺）；剛性面 preset 與兩個數都是 None。
 
-    ``cavity_m`` 是搜尋給的原值（可能是 0 或小於 :data:`MIN_CAVITY_M`）；放不放空氣層由
-    :func:`materials_from_surfaces` 照 :func:`kept_cavity` 決定。樣板沒有空氣層的面 ``cavity_m`` 是 None。
+    ``cavity_m`` 是搜尋給的原值（可能是 0 或小於設定的最小空腔）；放不放空氣層由 :func:`kept_cavity` 決定。
+    樣板沒有空氣層的面 ``cavity_m`` 是 None。
     """
 
     surface_id: str
@@ -66,15 +73,26 @@ class SurfaceSpec(NamedTuple):
     cavity_m: float | None
 
 
-def kept_cavity(cavity_m: float) -> float | None:
-    """空腔匯出規則：小於 :data:`MIN_CAVITY_M`（含 0）就不放空氣層、回 None；否則原值照放。負數拒收。"""
-    if not cavity_m >= 0.0:
+def kept_cavity(cavity_m: float, min_cavity_m: float) -> float | None:
+    """空腔匯出規則：小於 ``min_cavity_m``（設定檔 ``[export]``，含 0）就不放空氣層、回 None；否則原值照放。
+
+    非有限數或負數拒收。
+    """
+    if not math.isfinite(cavity_m) or cavity_m < 0.0:
         raise ValueError(f"空腔必須是非負有限數，收到 {cavity_m}")
-    return None if cavity_m < MIN_CAVITY_M else float(cavity_m)
+    return None if cavity_m < min_cavity_m else float(cavity_m)
+
+
+def checked_wall_designs(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceDesign, ...]:
+    """設計清單的面代號必須照 ``Wall.all()`` 的順序剛好是六面牆名：替身鏈照位置配牆，匯出照名字配牆，兩邊要同一個序。"""
+    ids = tuple(design.surface_id for design in designs)
+    if ids != wall_surface_ids():
+        raise ValueError(f"設計清單必須照 Wall.all() 的順序給六面 {list(wall_surface_ids())}，收到 {list(ids)}")
+    return tuple(designs)
 
 
 def surface_specs(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector) -> tuple[SurfaceSpec, ...]:
-    """θ（照 :func:`~aosr.gradient.material_gradient.design_names` 的格序）切回每面規格；剛性面四格只有面代號。"""
+    """θ（照 :func:`~aosr.gradient.material_gradient.design_names` 的格序）切回每面規格；剛性面只有面代號。"""
     values = checked_theta(theta, designs)
     specs = []
     offset = 0
@@ -88,7 +106,8 @@ def surface_specs(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVect
     return tuple(specs)
 
 
-def exported_theta(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector) -> FloatVector:
+def exported_theta(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector,
+                   settings: MaterialGradientSettings) -> FloatVector:
     """匯出後的 θ（與輸入同精度）：照 :func:`kept_cavity` 被拿掉空氣層的那幾格空腔設成 0，其餘逐位不變。
 
     替身鏈在空腔 0 跟「沒有空氣層」是同一個阻抗（傳遞矩陣厚度 0 是單位矩陣，終點考卷驗），
@@ -99,67 +118,55 @@ def exported_theta(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVec
     for design in designs:
         if design.material is None:
             continue
-        if design.cavity_variable is not None and kept_cavity(float(values[offset + 1])) is None:
+        if (design.cavity_variable is not None
+                and kept_cavity(float(values[offset + 1]), settings.export.min_cavity_m) is None):
             values[offset + 1] = values.dtype.type(0.0)
         offset += len(design.variables)
     return values
 
 
-def _preset_assembly(preset_id: str, presets: Mapping[str, ConstructionPreset],
-                     settings: MaterialGradientSettings) -> Assembly:
-    preset = presets.get(preset_id)
-    if preset is None:
-        raise ValueError(f"preset id 不認識：{preset_id}")
-    if settings.family_of(preset_id) is None:
-        raise ValueError(f"preset {preset_id} 不在家族清單裡（設定檔 [[family]]）")
-    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
-    material = adapter.validate_python(preset.material)
-    if not isinstance(material, Assembly):
-        raise ValueError(f"preset {preset_id} 不是多層構造")
+def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: float) -> Assembly | None:
+    """這一面的構造：從 ``design.material``（替身鏈同一份）換棉板厚度，空氣層照規則換厚度或拿掉。"""
+    material = design.material
+    if material is None:
+        return None
     kinds = [type(layer) for layer in material.layers]
     if kinds.count(PorousLayer) != 1 or kinds.count(AirLayer) > 1 or set(kinds) - {PorousLayer, AirLayer}:
-        raise ValueError(f"preset {preset_id} 必須是一層棉板、最多一層空腔，沒有別的層")
-    return material
-
-
-def _spec_material(spec: SurfaceSpec, presets: Mapping[str, ConstructionPreset],
-                   settings: MaterialGradientSettings) -> Assembly | None:
-    if spec.preset_id is None:
-        if spec.thickness_m is not None or spec.cavity_m is not None:
-            raise ValueError(f"剛性面 {spec.surface_id} 不收厚度或空腔")
-        return None
-    template = _preset_assembly(spec.preset_id, presets, settings)
-    has_air = any(isinstance(layer, AirLayer) for layer in template.layers)
-    if spec.thickness_m is None or not spec.thickness_m > 0.0:
-        raise ValueError(f"面 {spec.surface_id} 的棉板厚度必須是正數")
-    if has_air != (spec.cavity_m is not None):
-        raise ValueError(f"面 {spec.surface_id}：樣板{'有' if has_air else '沒有'}空氣層，空腔就要{'給' if has_air else '是 None'}")
-    cavity = None if spec.cavity_m is None else kept_cavity(spec.cavity_m)
+        raise ValueError(f"面 {design.surface_id} 的構造必須是一層棉板、最多一層空腔，沒有別的層")
+    if spec.thickness_m is None or (AirLayer in kinds) != (spec.cavity_m is not None):
+        raise ValueError(f"面 {design.surface_id} 的規格跟樣板的層對不上")
+    cavity = None if spec.cavity_m is None else kept_cavity(spec.cavity_m, min_cavity_m)
     layers: list[PorousLayer | AirLayer] = []
-    for layer in template.layers:
+    for layer in material.layers:
         if isinstance(layer, PorousLayer):
             layers.append(PorousLayer.model_validate({**layer.model_dump(), "thickness_m": float(spec.thickness_m)}))
         elif cavity is not None:
             layers.append(AirLayer(thickness_m=cavity))
-    return Assembly(layers=tuple(layers), backing=template.backing)
+    return Assembly(layers=tuple(layers), backing=material.backing)
 
 
-def materials_from_surfaces(surfaces: Sequence[SurfaceSpec], presets: Sequence[ConstructionPreset],
+def materials_from_surfaces(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector,
                             settings: MaterialGradientSettings) -> dict[Wall, Assembly | None]:
-    """六面規格 → 每面牆的構造層清單（照 ``Wall.all()`` 排）；剛性面是 None。
+    """六面設計＋θ → 每面牆的構造層清單（照 ``Wall.all()`` 排）；剛性面是 None。
 
-    每面拿那個 preset 的構造當樣板：棉板層換成規格厚度；空氣層照**空腔匯出規則**——空腔小於
-    :data:`MIN_CAVITY_M`（1 mm，含 0）就整層拿掉、不放 ``AirLayer``（構造格式的空氣層厚度必須大於 0），
-    否則放 ``AirLayer(thickness_m=空腔)``。家族的空腔是連續量、沒有分級刻度，所以門檻是 1 mm 而不是「最小一格」。
-    面代號必須剛好是六面牆名，各一次；preset 必須在家族清單裡、是一層棉板加最多一層空腔。
+    材料只從 ``design.material`` 來（替身鏈建樣板的同一份），不再拿 preset id 去另一份清單重查：棉板層換成
+    θ 的厚度；空氣層照**空腔匯出規則**——空腔小於設定檔 ``[export] min_cavity_m``（含 0）就整層拿掉、
+    不放 ``AirLayer``（構造格式的空氣層厚度必須大於 0），否則放 ``AirLayer(thickness_m=空腔)``。
+    設計清單必須照 ``Wall.all()`` 的順序給六面（:func:`checked_wall_designs`）。
     """
-    walls = {wall.wall_name(): wall for wall in Wall.all()}
-    ids = [spec.surface_id for spec in surfaces]
-    if sorted(ids) != sorted(walls):
-        raise ValueError(f"面代號必須剛好是六面牆名各一次 {sorted(walls)}，收到 {ids}")
-    by_id = {preset.id: preset for preset in presets}
-    by_wall = {walls[spec.surface_id]: _spec_material(spec, by_id, settings) for spec in surfaces}
-    return {wall: by_wall[wall] for wall in Wall.all()}
+    checked = checked_wall_designs(designs)
+    specs = surface_specs(checked, theta)
+    minimum = settings.export.min_cavity_m
+    return {wall: _design_material(design, spec, minimum)
+            for wall, design, spec in zip(Wall.all(), checked, specs, strict=True)}
+
+
+def checked_air(air: PhysicsConstants, *, density_kg_m3: float, sound_speed_m_s: float, source: str) -> None:
+    """材料求阻抗用的空氣必須跟有限元素那一份同密度、同聲速（逐位相等）；不等就拒收、訊息列出兩邊的值。"""
+    if air.air_density_kg_m3 != density_kg_m3 or air.sound_speed_m_s != sound_speed_m_s:
+        raise ValueError(
+            f"材料的空氣（密度 {air.air_density_kg_m3}、聲速 {air.sound_speed_m_s}）跟{source}"
+            f"（密度 {density_kg_m3}、聲速 {sound_speed_m_s}）不同，阻抗與有限元素會用兩組空氣")
 
 
 def material_impedances(materials: Mapping[Wall, Assembly | None], frequencies_hz: Sequence[float], *,
@@ -184,7 +191,10 @@ def full_model_pressures(operators: FullOperators, materials: Mapping[Wall, Asse
 
     跟 :func:`~aosr.physics.fem_reduced_check.validate_reduced` 的完整解同一條路：阻抗過產品閘門
     （``impedance_rows``）、``FullSolver.solve`` 後乘座位取值列。頻率軸由呼叫端給（用替身的軸），不自己造。
+    ``air`` 必須跟算子同密度、同聲速（:func:`checked_air`）。
     """
+    checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
+                source="完整模型算子")
     axis = tuple(float(value) for value in frequencies_hz)
     rows = impedance_rows([material_impedances(materials, axis, air=air, ranges=ranges)], axis)[0]
     solver = FullSolver(operators, max_relative_residual=max_relative_residual)
@@ -233,18 +243,32 @@ def worst_big_peak(peaks: Mapping[str, float | None]) -> float | None:
     return max(value for value in values if value is not None)
 
 
-def score_difference_bound(constants: StageOneObjectiveConstants, level_db: float) -> float:
-    """座位聲壓逐頻 dB 差都不超過 ``level_db``（ε）時，兩邊合分之差的上界 ε·(w_主/ref_主 + 2·w_穩/ref_穩)。
+def objective_floor_db(*pressures: NDArray[np.complex128]) -> float:
+    """這幾組聲壓交目標時，均方根零判地板的上限（dB）：目標同一個倍率（``rms_floor_factor``，雙精度）
+    × max(各組全軸、全喇叭、全座位 |10·log10|p|²| 的最大值, 1)。
+
+    目標的地板逐喇叭、只看計分範圍內的頻點，這裡取所有組、全軸的最大值，不會比任何一支喇叭的地板小。
+    """
+    scale = max(1.0, *(float(np.max(np.abs(10.0 * np.log10(np.abs(np.asarray(values)) ** 2))))
+                       for values in pressures))
+    return rms_floor_factor(np.float64) * scale
+
+
+def score_difference_bound(constants: StageOneObjectiveConstants, level_db: float, floor_db: float) -> float:
+    """座位聲壓逐頻 dB 差都不超過 ``level_db``（ε）、兩邊的均方根零判地板都不超過 ``floor_db``（F）時，
+    兩邊合分之差的上界 (ε+F)·w_主/ref_主 + (2ε+F)·w_穩/ref_穩。
 
     推導：dB 差就是能量 dB（10·log10|p|²＝20·log10|p|）的差，每格不超過 ε。主項是主位曲線扣加權最小平方直線後的
     加權均方根；扣直線是同一個加權內積下的正交投影（範數不增），加權均方根是那個內積的範數，三角不等式給
-    「主項之差 ≤ ε」。座位穩健性是周圍點減主位的加權均方根，每格差不超過 2ε，所以「穩健性之差 ≤ 2ε」；
-    聲道平均、等權平均都不放大。合分是兩項聲道平均各自乘權重除較差參考相加，權重與參考取 ``constants`` 那一份。
-    沒算均方根零判的地板（雙精度約 1e-12 dB 量級）。
+    「未歸零的主項之差 ≤ ε」。座位穩健性是周圍點減主位的加權均方根，每格差不超過 2ε，所以「未歸零之差 ≤ 2ε」。
+    目標把不高於地板的均方根當 0（#959）：兩邊都歸零差 0；都沒歸零差不變；一邊歸零時另一邊的值不超過
+    「它的未歸零值 ≤ 歸零那邊的未歸零值＋差 ≤ F＋差」，所以每一項之差再加最多 F。聲道平均、等權平均都不放大。
+    合分是兩項聲道平均各自乘權重除較差參考相加，權重與參考取 ``constants`` 那一份（主項、穩健性的固定順序）。
     """
     weights = np.asarray(constants.component_weights, dtype=np.float64)
     references = np.asarray(constants.worse_references, dtype=np.float64)
-    return float(level_db * (weights[0] / references[0] + 2.0 * weights[1] / references[1]))
+    return float((level_db + floor_db) * weights[0] / references[0]
+                 + (2.0 * level_db + floor_db) * weights[1] / references[1])
 
 
 def _components(result: StageOneObjectiveArrays) -> tuple[float, float]:
@@ -256,8 +280,9 @@ class EndpointReport(BaseModel):
 
     ``reduced_*`` 是替身鏈（``chain_objective``）在 ``exported_theta`` 的值；``full_*`` 是完整模型解同一組匯出材料、
     交同一把尺（``objective_from_pressures``）的值；``total_difference`` ＝完整減替身。``max_frequency_db`` 是
-    每座位、喇叭、頻點 |20·log10(|p_替身|/|p_完整|)| 的最大值（全軸），``total_difference_bound`` 由它照
-    :func:`score_difference_bound` 推得。大峰是完整模型的。非有限數不收（驗證時拒收，不靜默報一個壞數）。
+    每座位、喇叭、頻點 |20·log10(|p_替身|/|p_完整|)| 的最大值（全軸），``rms_floor_db`` 是兩邊聲壓的均方根零判
+    地板上限，``total_difference_bound`` 由兩者照 :func:`score_difference_bound` 推得。大峰是完整模型的。
+    非有限數不收（驗證時拒收，不靜默報一個壞數）。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -276,6 +301,7 @@ class EndpointReport(BaseModel):
     total_difference: float
     total_difference_bound: float
     max_frequency_db: float
+    rms_floor_db: float
     frequency_db_by_seat: dict[str, float]
     band_db_by_seat: dict[str, float]
     partial_band_db_by_seat: dict[str, float]
@@ -296,8 +322,13 @@ class EndpointResult(NamedTuple):
     reduced_pressure: NDArray[np.complex128]
 
 
-def _checked_endpoint_inputs(model: ReducedModel, designs: Sequence[SurfaceDesign],
-                             theta: jax.Array | FloatVector, receiver_set: ReceiverSet) -> FloatVector:
+def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, designs: Sequence[SurfaceDesign],
+                             theta: jax.Array | FloatVector, receiver_set: ReceiverSet,
+                             air: PhysicsConstants) -> FloatVector:
+    checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
+                source="完整模型算子")
+    checked_air(air, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s, source="替身")
+    checked_wall_designs(designs)
     values = checked_theta(theta, designs)
     if not is_feasible(values, designs):
         raise ValueError("終點的 θ 必須是取過規格的可行解（厚度是合法值、厚度＋空腔不超過總深度上限）")
@@ -308,40 +339,44 @@ def _checked_endpoint_inputs(model: ReducedModel, designs: Sequence[SurfaceDesig
 
 def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector, *,
                    model: ReducedModel, score_settings: StageOneScoreSettings, receiver_set: ReceiverSet,
-                   low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
-                   settings: MaterialGradientSettings, air: PhysicsConstants,
+                   low_frequency_axis: LowFrequencyAxis, settings: MaterialGradientSettings, air: PhysicsConstants,
                    ranges: PorousModelRanges) -> EndpointResult:
     """同一組可行規格：替身值與完整模型值並列、兩者的差與差的上界、每座位逐頻最大 dB 差、每支喇叭的大峰。
 
-    θ 先照空腔匯出規則變成材料（:func:`materials_from_surfaces`）；完整模型與替身都對**匯出的材料**算
-    （替身用 :func:`exported_theta`），差裡只有替身誤差、沒有匯出的捨入。目標常數由 ``objective_constants``
-    以替身的頻率軸、``score_settings``、``receiver_set`` 現算，跟搜尋那邊同一份；完整解殘差上限沿用建替身當次的設定。
-    完整解用 :func:`~aosr.physics.fem_reduced_check.validate_reduced`（同時給替身聲壓、逐頻與帶能量 dB 差）。
+    入口先核：``air`` 跟算子、替身同密度同聲速；設計清單照 ``Wall.all()`` 六面；θ 是可行解；座位順序一致。
+    θ 照空腔匯出規則變成材料（:func:`materials_from_surfaces`，材料只從 ``design.material`` 來）；完整模型與替身都對
+    **匯出的材料**算（替身用 :func:`exported_theta`），差裡只有替身誤差、沒有匯出的捨入。目標常數由
+    ``objective_constants`` 以替身的頻率軸、``score_settings``、``receiver_set`` 現算，跟搜尋那邊同一份；
+    完整解殘差上限沿用建替身當次的設定。完整解用 :func:`~aosr.physics.fem_reduced_check.validate_reduced`
+    （同時給替身聲壓、逐頻與帶能量 dB 差）。
     """
-    values = _checked_endpoint_inputs(model, designs, theta, receiver_set)
+    values = _checked_endpoint_inputs(operators, model, designs, theta, receiver_set, air)
     axis = tuple(float(value) for value in model.frequencies_hz)
     specs = surface_specs(designs, values)
-    materials = materials_from_surfaces(specs, presets, settings)
+    materials = materials_from_surfaces(designs, values, settings)
     validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)])
     full, reduced = validation.full_pressure[0], validation.reduced_pressure[0]
     constants = objective_constants(axis, score_settings, receiver_set, len(model.source_names))
-    exported = exported_theta(designs, values)
+    exported = exported_theta(designs, values, settings)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=axis)
     reduced_total, reduced_result = objective(jnp.asarray(exported))
     full_result = objective_from_pressures(constants, jnp.asarray(full))
     level_db = max(validation.frequency_db_by_seat.values())
+    floor_db = objective_floor_db(full, reduced)
     peaks = big_peaks(full, speaker_ids=model.source_names, receiver_set=receiver_set, frequencies_hz=axis,
                       low_frequency_axis=low_frequency_axis, scoring_range_hz=score_settings.scored_range_hz)
+    minimum = settings.export.min_cavity_m
     report = EndpointReport(
         low_frequency_axis=low_frequency_axis, speaker_ids=model.source_names, receiver_ids=model.receiver_names,
         search_theta=tuple(float(value) for value in values),
         exported_theta=tuple(float(value) for value in exported), surfaces=specs,
         dropped_cavities=tuple(spec.surface_id for spec in specs
-                               if spec.cavity_m is not None and kept_cavity(spec.cavity_m) is None),
+                               if spec.cavity_m is not None and kept_cavity(spec.cavity_m, minimum) is None),
         reduced_total=float(reduced_total), reduced_components=_components(reduced_result),
         full_total=float(full_result.screening_total), full_components=_components(full_result),
         total_difference=float(full_result.screening_total) - float(reduced_total),
-        total_difference_bound=score_difference_bound(constants, level_db), max_frequency_db=level_db,
+        total_difference_bound=score_difference_bound(constants, level_db, floor_db), max_frequency_db=level_db,
+        rms_floor_db=floor_db,
         frequency_db_by_seat=dict(validation.frequency_db_by_seat), band_db_by_seat=dict(validation.band_db_by_seat),
         partial_band_db_by_seat=dict(validation.partial_band_db_by_seat),
         big_peak_db_by_speaker=peaks, big_peak_db=worst_big_peak(peaks),

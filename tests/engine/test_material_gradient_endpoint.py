@@ -1,5 +1,6 @@
 """梯度搜尋終點（#561 辛二）：空腔匯出規則、空腔 0 的替身鏈對「拿掉空氣層」、完整模型重算對替身、
-完整解路徑逐位、大峰走第一階段評分程式、方案牆面來回。
+完整解路徑逐位、大峰走第一階段評分程式、方案牆面來回；修補一加：門檻讀設定檔、材料只從設計來、面序與空氣核對、
+分數差上界含目標的均方根地板。
 
 替身用 ``test_material_gradient`` 的衍生替身（小房間 fixture、七個座位列是三個真座位列的線性組合、
 頻率軸是整條正式有限元素軸）；完整模型的座位列用同一組線性組合從三個真座位列做出來（投影是線性的，
@@ -22,6 +23,10 @@ import pytest
 from numpy.typing import NDArray
 
 from aosr.config.frequency_axis import LowFrequencyAxis
+from aosr.config.material_gradient import ExportSettings, MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.paths import config_path
+from aosr.config.physics_constants import PhysicsConstants, load_physics_constants
+from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Point, Wall
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
@@ -31,12 +36,12 @@ from aosr.physics.fem_reduced_check import seats_within_contract
 from aosr.physics.fem_reduced_store import save_reduced
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env, configure_jax
-from aosr.scoring.receiver_set import ReceiverRole
+from aosr.scoring.receiver_set import ReceiverRole, ReceiverSet
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.stage_one_low_frequency_contract import (
     StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
 )
-from aosr.scoring.stage_one_objective_jax import objective_constants
+from aosr.scoring.stage_one_objective_jax import objective_constants, rms_floor_factor
 from tests.engine._precision_contracts import contract_value
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine.test_material_gradient import CASES, PURPOSE, _chain_model, _presets, _receivers, _score, _settings
@@ -78,6 +83,25 @@ def chain_operators(full: FullOperators) -> FullOperators:
     return dataclasses.replace(
         full, receivers={point.receiver_id: row for point, row in zip(points, rows, strict=True)},
         receiver_points={point.receiver_id: Point(*point.position_m) for point in points})
+
+
+def floor_case_pressures(frequencies_hz: tuple[float, ...],
+                         receivers: ReceiverSet) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+    """審查反例（跨均方根地板）：兩支喇叭、主位各頻 100 dB，六個周圍點各頻 100＋100·spacing(100) 對
+    100＋101·spacing(100)；p＝10^(dB/20)。回兩組 (F, 喇叭, 座位) 聲壓。"""
+    pair = []
+    for steps in (100, 101):
+        levels = np.full((len(frequencies_hz), 2, len(receivers.points)), 100.0)
+        for index, point in enumerate(receivers.points):
+            if point.role == ReceiverRole.SURROUNDING:
+                levels[:, :, index] = 100.0 + steps * np.spacing(100.0)
+        pair.append((10.0 ** (levels / 20.0)).astype(np.complex128))
+    return pair[0], pair[1]
+
+
+def _minimum() -> float:
+    """設定檔讀到的最小空腔（不從產品程式的常數取）。"""
+    return load_material_gradient_settings(config_path("material_gradient.toml")).export.min_cavity_m
 
 
 def _decode(values: object) -> NDArray[np.float64]:
@@ -128,12 +152,11 @@ def _report(probe: Record) -> endpoint.EndpointReport:
 
 # ---- 空腔匯出規則 ----
 
-def _one_face(cavity: float) -> list[tuple[str, float]]:
+def _one_face(cavity: float, settings: MaterialGradientSettings | None = None) -> list[tuple[str, float]]:
     """第一面 48K 棉板 50 mm＋給定空腔，其餘五面剛性；回第一面匯出構造的（層種類, 厚度）清單，房間側起。"""
-    walls = [wall.wall_name() for wall in Wall.all()]
-    specs = [endpoint.SurfaceSpec(walls[0], "glass_wool_48k_50mm_gap50", 0.05, cavity),
-             *(endpoint.SurfaceSpec(name, None, None, None) for name in walls[1:])]
-    materials = endpoint.materials_from_surfaces(specs, _presets(), _settings())
+    designs = gradient_search.wall_designs_from_presets(
+        ("glass_wool_48k_50mm_gap50", *(None,) * (len(Wall.all()) - 1)), _settings(), _presets())
+    materials = endpoint.materials_from_surfaces(designs, np.asarray([0.05, cavity]), settings or _settings())
     material = materials[Wall.all()[0]]
     assert material is not None and material.backing == "rigid"
     assert all(materials[wall] is None for wall in Wall.all()[1:])
@@ -150,14 +173,94 @@ def test_zero_cavity_exports_no_air_layer() -> None:
 
 
 def test_cavity_of_one_step_keeps_air_layer() -> None:
-    """抓門檻往上偏（等於一格也被拿掉）：空腔恰好等於最小一格（1 mm）時放 ``AirLayer``、厚度原值。"""
-    assert _one_face(endpoint.MIN_CAVITY_M) == [("porous", 0.05), ("air", endpoint.MIN_CAVITY_M)]
+    """抓門檻往上偏（等於一格也被拿掉）：空腔恰好等於設定檔的最小空腔時放 ``AirLayer``、厚度原值。"""
+    assert _one_face(_minimum()) == [("porous", 0.05), ("air", _minimum())]
 
 
 def test_cavity_below_one_step_drops_air_layer() -> None:
-    """抓只拿掉恰好 0、不管小於一格的正空腔：0.5 mm 不放空氣層；而 40 mm 照放原值。"""
-    assert _one_face(endpoint.MIN_CAVITY_M / 2) == [("porous", 0.05)]
+    """抓只拿掉恰好 0、不管小於一格的正空腔：設定檔最小空腔的一半不放空氣層；而 40 mm 照放原值。"""
+    assert _one_face(_minimum() / 2) == [("porous", 0.05)]
     assert _one_face(0.04) == [("porous", 0.05), ("air", 0.04)]
+
+
+def test_cavity_rule_follows_settings_not_a_constant() -> None:
+    """抓規則沒跟著設定檔走（程式裡另寫一個數）：自訂設定的最小空腔改成 2 mm，1.5 mm 拿掉、2 mm 留下；
+    匯出 θ 走同一條規則。"""
+    custom = _settings().model_copy(update={"export": ExportSettings(min_cavity_m=0.002)})
+    assert _one_face(0.0015, custom) == [("porous", 0.05)]
+    assert _one_face(0.002, custom) == [("porous", 0.05), ("air", 0.002)]
+    assert _one_face(0.0015) == [("porous", 0.05), ("air", 0.0015)]
+    designs = gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets())
+    theta = np.asarray([0.1, 0.0015, 0.05, 0.04, 0.05, 0.05])
+    assert endpoint.exported_theta(designs, theta, custom)[1] == 0.0
+    assert endpoint.exported_theta(designs, theta, _settings())[1] == 0.0015
+
+
+def test_min_cavity_setting_is_within_family_cavity_ranges() -> None:
+    """抓設定檔的最小空腔填成不合理的值：要是正數，而且不超過每個家族的空腔上限（不然空腔永遠放不進去）；
+    非有限的空腔一律拒收。"""
+    minimum = _minimum()
+    assert 0.0 < minimum <= min(family.cavity_range_m[1] for family in _settings().family)
+    for bad in (math.inf, math.nan, -minimum):
+        with pytest.raises(ValueError, match="非負有限數"):
+            endpoint.kept_cavity(bad, minimum)
+
+
+# ---- 材料來源、面序、空氣 ----
+
+def test_exported_material_comes_from_design_material() -> None:
+    """抓匯出材料拿 preset id 去另一份清單重查（審查重現：設計的棉板流阻乘二、preset 不動）：匯出的構造跟著
+    ``design.material``（替身鏈用的那一份）走，流阻是乘二後的值。"""
+    designs = list(gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets()))
+    first = designs[0]
+    assert first.material is not None
+    porous = first.material.layers[0]
+    assert isinstance(porous, PorousLayer)
+    doubled = porous.model_copy(update={"flow_resistivity_pa_s_m2": 2.0 * porous.flow_resistivity_pa_s_m2})
+    designs[0] = dataclasses.replace(first, material=first.material.model_copy(
+        update={"layers": (doubled, *first.material.layers[1:])}))
+    materials = endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
+    exported = materials[Wall.all()[0]]
+    assert exported is not None and isinstance(exported.layers[0], PorousLayer)
+    assert exported.layers[0].flow_resistivity_pa_s_m2 == doubled.flow_resistivity_pa_s_m2
+
+
+def test_designs_out_of_wall_order_are_rejected(chain_model: ReducedModel, operators: FullOperators) -> None:
+    """抓面序沒核（鏈照位置配牆、匯出照名字配牆）：設計清單換掉兩面的順序，匯出與終點都拒收。"""
+    designs = list(gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets()))
+    designs[1], designs[4] = designs[4], designs[1]
+    with pytest.raises(ValueError, match="Wall.all"):
+        endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
+    with pytest.raises(ValueError, match="Wall.all"):
+        _endpoint(chain_model, operators, designs, _air())
+
+
+def _air() -> PhysicsConstants:
+    return load_physics_constants(config_path("physics_constants.toml"))
+
+
+def _endpoint(chain_model: ReducedModel, operators: FullOperators, designs: list[gradient_search.SurfaceDesign],
+              air: PhysicsConstants) -> endpoint.EndpointResult:
+    return endpoint.endpoint_check(
+        chain_operators(operators), designs, np.asarray(ENDPOINT_THETA), model=chain_model, score_settings=_score(),
+        receiver_set=_receivers(), low_frequency_axis=AXIS_ID, settings=_settings(), air=air,
+        ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")))
+
+
+def test_material_air_must_match_finite_element_air(chain_model: ReducedModel, operators: FullOperators) -> None:
+    """抓材料的空氣跟有限元素的空氣不同還照算（審查重現：材料聲速 350、模型 343）：終點與完整解入口都拒收，
+    訊息列出兩邊的聲速。"""
+    designs = list(gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets()))
+    assert _air().sound_speed_m_s == chain_model.sound_speed_m_s
+    other = _air().model_copy(update={"sound_speed_m_s": 350.0})
+    with pytest.raises(ValueError, match="350.0.*343.0"):
+        _endpoint(chain_model, operators, designs, other)
+    materials = endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
+    with pytest.raises(ValueError, match="350.0.*343.0"):
+        endpoint.full_model_pressures(
+            chain_operators(operators), materials, chain_model.frequencies_hz, air=other,
+            ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")),
+            max_relative_residual=chain_model.ledger.settings.full_solve_max_relative_residual)
 
 
 # ---- 空腔 0：替身鏈對「拿掉空氣層」 ----
@@ -194,9 +297,9 @@ def test_endpoint_full_value_within_holdout_ruler(probe: Record, chain_model: Re
     """抓終點把替身值當完整模型值、或差與上界接錯：完整模型合分等於獨立完整解交同一把尺的值（逐位）；
     每座位逐頻最大 dB 差在留出尺內、等於考卷從兩邊聲壓重算的；合分之差不超過由逐頻差推得的上界。
 
-    上界推導（``score_difference_bound``）：dB 差每格不超過 ε 時，主項（扣加權直線＝同一內積下的正交投影，
-    範數不增）之差 ≤ ε、座位穩健性之差 ≤ 2ε，合分之差 ≤ ε·(w_主/ref_主 + 2·w_穩/ref_穩)。替身值走 JAX 鏈、
-    逐頻差用 numpy 替身聲壓，兩者的差由目標 JAX 版那把尺補上。
+    上界推導（``score_difference_bound``）：dB 差每格不超過 ε、均方根零判地板不超過 F 時，主項（扣加權直線＝同一
+    內積下的正交投影，範數不增）之差 ≤ ε＋F、座位穩健性之差 ≤ 2ε＋F，合分之差 ≤ (ε+F)·w_主/ref_主 + (2ε+F)·w_穩/ref_穩。
+    考卷這端不加餘量：上界自己要成立。地板由考卷從兩邊聲壓重算（目標同一個倍率 × max(max|dB|, 1)）。
     """
     report = _report(probe)
     full, reduced = _decode_complex(probe["full"]), _decode_complex(probe["reduced"])
@@ -211,13 +314,38 @@ def test_endpoint_full_value_within_holdout_ruler(probe: Record, chain_model: Re
     assert seats_within_contract(report.frequency_db_by_seat, report.band_db_by_seat, frequency_db=FREQUENCY_RULER,
                                  band_db=contract_value("fem_reduced_holdout_band_db"))
     constants = objective_constants(chain_model.frequencies_hz, _score(), _receivers(), len(chain_model.source_names))
-    weights, references = constants.component_weights, constants.worse_references
-    expected_bound = report.max_frequency_db * (weights[0] / references[0] + 2.0 * weights[1] / references[1])
-    assert report.total_difference_bound == expected_bound
-    slack = contract_value("stage_one_objective_jax_vs_python") * abs(report.full_total)
-    assert abs(report.total_difference) <= report.total_difference_bound + slack
-    assert report.total_difference_bound <= endpoint.score_difference_bound(constants, FREQUENCY_RULER)
+    scale = max(1.0, float(np.max(np.abs(10.0 * np.log10(np.abs(np.concatenate((full, reduced))) ** 2)))))
+    assert report.rms_floor_db == rms_floor_factor(np.float64) * scale
+    assert report.total_difference_bound == endpoint.score_difference_bound(
+        constants, report.max_frequency_db, report.rms_floor_db)
+    assert abs(report.total_difference) <= report.total_difference_bound
+    assert report.total_difference_bound <= endpoint.score_difference_bound(constants, FREQUENCY_RULER,
+                                                                             report.rms_floor_db)
     assert report.full_solves == len(chain_model.frequencies_hz)
+
+
+def test_score_bound_holds_across_rms_floor(probe: Record, chain_model: ReducedModel) -> None:
+    """抓上界漏了均方根地板（審查反例：逐格差約 1.7e-14 dB、分數差約 1.4e-12，沒地板的上界只有約 5e-14）：
+    兩組跨地板的聲壓交同一把尺（雙精度子行程算），分數差不超過含地板的上界；拿掉地板項的上界真的比分數差小
+    （這一題才分得出地板項有沒有進去）。"""
+    first, second = floor_case_pressures(chain_model.frequencies_hz, _receivers())
+    scores = [float.fromhex(value) for value in cast(list[str], probe["floor_case"])]
+    difference = abs(scores[1] - scores[0])
+    level = float(np.max(np.abs(20.0 * np.log10(np.abs(first) / np.abs(second)))))
+    constants = objective_constants(chain_model.frequencies_hz, _score(), _receivers(), len(chain_model.source_names))
+    floor = endpoint.objective_floor_db(first, second)
+    assert difference <= endpoint.score_difference_bound(constants, level, floor)
+    assert difference > endpoint.score_difference_bound(constants, level, 0.0)
+
+
+def test_score_bound_uses_each_weight_with_its_own_reference(chain_model: ReducedModel) -> None:
+    """抓主項與穩健性的權重、參考接反（原 fixture 權重與參考都是 1，交換抓不到）：權重 0.7／0.3、參考 2.0／0.5 時，
+    上界等於考卷手算的 (ε+F)·0.7/2.0 + (2ε+F)·0.3/0.5。"""
+    constants = objective_constants(chain_model.frequencies_hz, _score(), _receivers(), len(chain_model.source_names))
+    custom = constants._replace(component_weights=np.asarray([0.7, 0.3]), worse_references=np.asarray([2.0, 0.5]))
+    level, floor = 0.01, 0.001
+    expected = (level + floor) * 0.7 / 2.0 + (2.0 * level + floor) * 0.3 / 0.5
+    assert endpoint.score_difference_bound(custom, level, floor) == pytest.approx(expected, rel=1e-12)
 
 
 def test_endpoint_reports_dropped_cavity_and_exported_theta(probe: Record) -> None:
@@ -288,7 +416,7 @@ def test_endpoint_big_peak_matches_stage_one_evaluator(probe: Record, chain_mode
 def _lined_materials() -> dict[Wall, Assembly | None]:
     designs = gradient_search.wall_designs_from_presets(CASES["all_lined"], _settings(), _presets())
     theta = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
-    return endpoint.materials_from_surfaces(endpoint.surface_specs(designs, theta), _presets(), _settings())
+    return endpoint.materials_from_surfaces(designs, theta, _settings())
 
 
 def test_scene_with_materials_round_trip() -> None:
