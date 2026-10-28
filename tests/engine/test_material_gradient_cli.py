@@ -7,6 +7,9 @@
 空氣），座位組換成同一組主位加六點——匯出完整模型的網格雜湊就跟替身相同。搜尋設定把連續下降與重調的步數上限調小
 （只為了考卷快；其他照正式設定檔），寫在暫存資料夾、用 ``--settings`` 給。
 
+修補一（審查 B1、B2）：替身驗證收據記喇叭與座位座標，方案把一支喇叭或一個座位移 0.1 m（網格雜湊不變）要被
+start 拒收；接續前方案檔換過要拒收；同一個根、不同設定落在不同資料夾；建子行程到等待之間的中斷也要收子行程。
+
 命令列一律開真的子行程跑（``python -m aosr.gradient.cli``），雙精度子行程由它自己起。逐位比較只比同一條路徑跑出來的：
 命令列跑的跟命令列跑的比；「第 N 次求值時放停止記號」與「前段只寫一半」在探針（``_material_gradient_cli_probe``，
 雙精度子行程、只叫產品入口）裡跟同一個探針跑的參考比。一場 pytest 只建一次、平行的工人共用（``shared_json``）。
@@ -28,7 +31,8 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
+from types import FrameType
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
@@ -38,7 +42,8 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
-from aosr.geometry.shoebox import Wall
+from aosr.geometry.shoebox import Point, Wall
+from aosr.gradient import cli
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient.report import FULL_MODEL_LINE
@@ -48,6 +53,8 @@ from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, save_validation_receipt
 from aosr.physics.fem_reduced_store import manifest_path, save_reduced
 from aosr.reporting import physics_identity as identity_module
+from aosr.reporting.scheme import Scheme
+from aosr.scoring.receiver_set import ReceiverSet
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine import _fem_shared_cases as shared_cases
 from tests.engine._precision_contracts import contract_value
@@ -57,6 +64,9 @@ from tests.engine.test_material_gradient import CASES, DESCENT_CASE, PURPOSE, _c
 from tests.engine.test_material_gradient_loop import _without_seconds
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
+if TYPE_CHECKING:
+    from _typeshed import TraceFunction
+
 PROBE = Path(__file__).with_name("_material_gradient_cli_probe.py")
 Record = dict[str, object]
 PRESETS: tuple[str | None, ...] = CASES[DESCENT_CASE]
@@ -65,6 +75,9 @@ OUTSIDE_FAMILY = "fabric_pet_a_gap100"  # construction_presets.toml 有、materi
 FREQUENCY_NAME, BAND_NAME = "fem_reduced_holdout_frequency_db", "fem_reduced_holdout_band_db"
 # 考卷只為了快把兩個步數上限調小（正式 30 與 5）；其他設定照正式設定檔。
 NARROWED_STEPS = {"max_steps": 3, "steps": 2}
+# 同一個根、另一份設定（只差下降步數上限）：資料夾名要跟著不同。
+OTHER_STEPS = {"max_steps": 2, "steps": 2}
+MOVED_SPEAKER, MOVED_SEAT, MOVE_M = "left", "front", 0.1
 WAIT_S = 600.0
 
 
@@ -89,7 +102,10 @@ def _chain_operators(full: FullOperators, chain: ReducedModel) -> FullOperators:
     """完整模型的座位取值列換成衍生替身同樣的七個組合（``_chain_model`` 的組法），名字照衍生替身。"""
     front, back, side = (full.receivers[name] for name in ("front", "back", "side"))
     rows = [front, back, side, (front + back) / 2, (front + side) / 2, (back + side) / 2, (front + back + side) / 3]
-    return dataclasses.replace(full, receivers=dict(zip(chain.receiver_names, rows, strict=True)))
+    points = {point.receiver_id: Point(*point.position_m) for point in _receivers().points}
+    assert tuple(points) == chain.receiver_names
+    return dataclasses.replace(full, receivers=dict(zip(chain.receiver_names, rows, strict=True)),
+                               receiver_points=points)
 
 
 def _current_identity() -> str:
@@ -112,15 +128,38 @@ def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
             save_validation_receipt(directory / name / "rom.npz", report, rulers=rulers, seconds=1.0)
 
 
-def _inputs(directory: Path) -> None:
+def _moved(point: Point) -> Point:
+    return Point(point.x + MOVE_M, point.y, point.z)
+
+
+def _moved_seat(receivers: ReceiverSet) -> ReceiverSet:
+    points = tuple(point.model_copy(update={"position_m": _moved(Point(*point.position_m)).as_tuple()})
+                   if point.receiver_id == MOVED_SEAT else point for point in receivers.points)
+    return receivers.model_copy(update={"points": points})
+
+
+def _schemes() -> dict[str, Scheme]:
+    """正式方案，與同一間房（網格雜湊不變）只把一支喇叭或一個座位的 x 移 0.1 m 的兩份。"""
     scheme = shared_cases.small_scheme().model_copy(update={"receiver_set": _receivers(), "purpose": PURPOSE})
-    (directory / "scheme.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    speakers = {**scheme.speakers, MOVED_SPEAKER: _moved(scheme.speakers[MOVED_SPEAKER])}
+    return {"scheme.json": scheme, "scheme-moved-speaker.json": scheme.model_copy(update={"speakers": speakers}),
+            "scheme-moved-seat.json": scheme.model_copy(update={"receiver_set": _moved_seat(scheme.receiver_set)})}
+
+
+def _settings_text(steps: dict[str, int]) -> str:
     text = config_path("material_gradient.toml").read_text(encoding="utf-8")
-    for key, value in NARROWED_STEPS.items():
+    for key, value in steps.items():
         text = re.sub(rf"(?m)^{key} = \d+$", f"{key} = {value}", text)
-    (directory / "settings.toml").write_text(text, encoding="utf-8")
-    narrowed = load_material_gradient_settings(directory / "settings.toml")
-    assert {"max_steps": narrowed.descent.max_steps, "steps": narrowed.retune.steps} == NARROWED_STEPS
+    return text
+
+
+def _inputs(directory: Path) -> None:
+    for name, scheme in _schemes().items():
+        (directory / name).write_text(scheme.model_dump_json(), encoding="utf-8")
+    for name, steps in (("settings.toml", NARROWED_STEPS), ("settings-other.toml", OTHER_STEPS)):
+        (directory / name).write_text(_settings_text(steps), encoding="utf-8")
+        narrowed = load_material_gradient_settings(directory / name)
+        assert {"max_steps": narrowed.descent.max_steps, "steps": narrowed.retune.steps} == steps
 
 
 def _env(directory: Path) -> dict[str, str]:
@@ -136,10 +175,11 @@ def _command(*args: str) -> list[str]:
     return [sys.executable, "-m", "aosr.gradient.cli", *args]
 
 
-def _start_args(directory: Path, root: Path, surrogate: str = "good", presets: str = PRESET_TEXT) -> list[str]:
-    return _command("start", "--scheme", str(directory / "scheme.json"), "--surrogate",
+def _start_args(directory: Path, root: Path, surrogate: str = "good", presets: str = PRESET_TEXT,
+                scheme: str = "scheme.json", settings: str = "settings.toml") -> list[str]:
+    return _command("start", "--scheme", str(directory / scheme), "--surrogate",
                     str(directory / surrogate / "rom.npz"), "--presets", presets, "--purpose", PURPOSE,
-                    "--root", str(root), "--settings", str(directory / "settings.toml"), "--engine-commit", "test")
+                    "--root", str(root), "--settings", str(directory / settings), "--engine-commit", "test")
 
 
 def _run(directory: Path, argv: list[str]) -> Record:
@@ -230,14 +270,16 @@ def _cli_stop(directory: Path, source: Path) -> Record:
 
 def _rejections(directory: Path, folder: Path) -> Record:
     """拒收：每一個 start 用自己的資料夾根，事後看根底下有沒有被建任何東西。"""
-    cases = {"unvalidated": ("unvalidated", PRESET_TEXT),
-             "zero_identity": ("zero-identity", PRESET_TEXT),
-             "outside_family": ("good", PRESET_TEXT.replace("glass_wool_24k_50mm", OUTSIDE_FAMILY)),
-             "five_presets": ("good", ",".join(PRESET_TEXT.split(",")[:-1]))}
+    cases = {"unvalidated": ("unvalidated", PRESET_TEXT, "scheme.json"),
+             "zero_identity": ("zero-identity", PRESET_TEXT, "scheme.json"),
+             "outside_family": ("good", PRESET_TEXT.replace("glass_wool_24k_50mm", OUTSIDE_FAMILY), "scheme.json"),
+             "five_presets": ("good", ",".join(PRESET_TEXT.split(",")[:-1]), "scheme.json"),
+             "moved_speaker": ("good", PRESET_TEXT, "scheme-moved-speaker.json"),
+             "moved_seat": ("good", PRESET_TEXT, "scheme-moved-seat.json")}
     records: Record = {}
-    for name, (surrogate, presets) in cases.items():
+    for name, (surrogate, presets, scheme) in cases.items():
         root = directory / f"reject-{name}"
-        record = _run(directory, _start_args(directory, root, surrogate, presets))
+        record = _run(directory, _start_args(directory, root, surrogate, presets, scheme))
         record["root_entries"] = sorted(path.name for path in root.iterdir()) if root.exists() else []
         records[name] = record
     searches = directory / "data" / "searches"
@@ -249,7 +291,53 @@ def _rejections(directory: Path, folder: Path) -> Record:
     (tampered / "project.json").write_text(json.dumps(project), encoding="utf-8")
     records["resume_other_identity"] = {**_run(directory, _command("resume", str(tampered))),
                                         "entries": sorted(path.name for path in tampered.iterdir())}
+    records["resume_scheme_changed"] = _scheme_changed(directory, folder)
     return records
+
+
+def _scheme_changed(directory: Path, folder: Path) -> Record:
+    """抄一份跑完的資料夾、方案檔也抄一份給它（project.json 指過去，雜湊仍是開始時量的那個），接著改方案檔的內容
+    （同樣的方案、換縮排），再接續：要拒收、帳本與狀態檔都不動。"""
+    copied = directory / "scheme-changed" / folder.name
+    shutil.copytree(folder, copied)
+    scheme = directory / "scheme-changed" / "scheme.json"
+    shutil.copyfile(directory / "scheme.json", scheme)
+    project = json.loads((copied / "project.json").read_text(encoding="utf-8"))
+    project["scheme_path"] = str(scheme)
+    (copied / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    before = {name: (copied / name).read_bytes() for name in ("ledger.jsonl", "status.json", "result.json")}
+    scheme.write_text(json.dumps(json.loads(scheme.read_text(encoding="utf-8")), indent=2), encoding="utf-8")
+    record = _run(directory, _command("resume", str(copied)))
+    record["unchanged"] = all((copied / name).read_bytes() == data for name, data in before.items())
+    return record
+
+
+def _other_settings(directory: Path) -> Record:
+    """同一個根（開始那一份的根）、同一份方案與替身，換一份設定再開始一次：要另開一個資料夾跑完。"""
+    root = directory / "root-a"
+    record = _run(directory, _start_args(directory, root, settings="settings-other.toml"))
+    record["folders"] = sorted(path.name for path in root.iterdir())
+    return record
+
+
+def _interrupted(directory: Path) -> Record:
+    """開始一次，子行程寫完 running 就對命令列（父行程）送 SIGTERM：子行程要被收掉、寫 interrupted，命令列回 3。"""
+    root = directory / "root-term"
+    with subprocess.Popen(_start_args(directory, root), cwd=directory, env=_env(directory), text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        folder = _first_folder(root, process)
+        child = _running_pid(folder, process)
+        began = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        _, stderr = process.communicate(timeout=WAIT_S)
+        seconds = time.monotonic() - began
+    try:
+        os.killpg(child, 0)
+        alive = True
+    except ProcessLookupError:
+        alive = False
+    return {"code": process.returncode, "stderr": stderr, "seconds": seconds, "child_alive": alive,
+            "status": json.loads((folder / "status.json").read_text(encoding="utf-8"))}
 
 
 def _probe(directory: Path, folder: Path) -> Record:
@@ -270,6 +358,8 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     output: Record = {"concurrent": _concurrent_start(directory)}
     folder = Path(str(cast(Record, output["concurrent"])["folder"]))
     output["report"] = _run(directory, _command("report", "--folder", str(folder)))
+    output["other_settings"] = _other_settings(directory)
+    output["interrupted"] = _interrupted(directory)
     output["cli_stop"] = _cli_stop(directory, folder)
     output["rejections"] = _rejections(directory, folder)
     output["probe"] = _probe(directory, folder)
@@ -358,6 +448,15 @@ def test_start_project_records_inputs_and_identities(runs: tuple[Path, Record]) 
     assert project["mesh_hash"] == manifest["mesh_hash"]
     assert project["presets"] == list(PRESETS) and project["purpose"] == PURPOSE
     assert project["gradient_id"] == folder.name
+    scheme_document = Scheme.model_validate_json(scheme.read_text(encoding="utf-8"))
+    assert project["source_points"] == {name: [float(value).hex() for value in point.as_tuple()]
+                                        for name, point in scheme_document.speakers.items()}
+    assert project["receiver_points"] == {point.receiver_id: [float(value).hex() for value in point.position_m]
+                                          for point in scheme_document.receiver_set.points}
+    receipt_model = _json(receipt)["reduced_model"]
+    assert isinstance(receipt_model, dict)
+    assert (receipt_model["source_points"], receipt_model["receiver_points"]) == (
+        project["source_points"], project["receiver_points"])
 
 
 def _sha256(path: Path) -> str:
@@ -435,12 +534,13 @@ def _probe_folder(runs: tuple[Path, Record], name: object) -> Path:
     return runs[0] / "probe" / str(name)
 
 
-def test_stop_marker_at_any_evaluation_then_resume_matches_one_shot(runs: tuple[Path, Record]) -> None:
+def test_stop_marker_sampled_per_phase_then_resume_matches_one_shot(runs: tuple[Path, Record]) -> None:
     """抓停止記號沒在求值之間看（跑完才停或根本不停）、停下時寫了半段、接續後跟一口氣跑完的不同。
 
-    探針先一口氣跑完一份參考、記下每一次查停止時帳本最後一列的階段；每一種階段的第一次與最後一次，各開一份
-    用產品的 stop 命令在那一次放記號：要回 3、狀態 stopped、記號還在；接續要回 0、帳本（扣秒數）與結果
-    （扣帳本雜湊）逐位等於參考。
+    不是每一次求值都停一次（那要多跑幾十場），是按階段抽樣：探針先一口氣跑完一份參考、記下每一次查停止時帳本
+    最後一列的階段；每一種階段的第一次查、再加整場最後一次查，各開一份用產品的 stop 命令在那一次放記號：
+    要回 3、狀態 stopped、記號還在；接續要回 0、帳本（扣秒數）與結果（扣帳本雜湊）逐位等於參考。每一次求值之前
+    都有查，由 ``test_stop_checked_before_every_evaluation`` 的次數守。
     """
     reference = cast(Record, _probe_section(runs, "reference"))
     assert reference["code"] == 0
@@ -548,6 +648,97 @@ def test_rejects_other_physics_identity(runs: tuple[Path, Record]) -> None:
     resumed = _rejection(runs, "resume_other_identity")
     assert resumed["code"] == 1 and "物理身分" in str(resumed["stderr"])
     assert resumed["entries"] == ["project.json"]
+
+
+@pytest.mark.parametrize(("case", "label", "name"), (("moved_speaker", "喇叭", MOVED_SPEAKER),
+                                                    ("moved_seat", "座位", MOVED_SEAT)))
+def test_rejects_scheme_with_moved_speaker_or_seat(runs: tuple[Path, Record], case: str, label: str, name: str) -> None:
+    """審查 B1 原樣重現：同一間房、同樣的喇叭與座位名字（網格雜湊不變），只把一支喇叭或一個座位的 x 移 0.1 m，
+    拿原來那份驗過的替身 start：回 1，標準錯誤是准用閘門點名那一支或那一座，沒建任何資料夾。"""
+    record = _rejection(runs, case)
+    assert record["code"] == 1, record["stderr"]
+    stderr = str(record["stderr"])
+    assert "ReducedModelNotValidated" in stderr and f"{label} {name} 的座標跟驗證收據記的不同" in stderr
+    assert record["root_entries"] == []
+
+
+def test_resume_rejects_changed_scheme_file(runs: tuple[Path, Record]) -> None:
+    """抓接續不核方案檔：開始之後方案檔內容換過（同一份方案換縮排，雜湊就不同），resume 回 1、點名 scheme_sha256，
+    帳本、狀態檔、結果檔都不動（父行程起子行程之前就拒收）。"""
+    record = _rejection(runs, "resume_scheme_changed")
+    assert record["code"] == 1 and "scheme_sha256" in str(record["stderr"])
+    assert record["unchanged"] is True
+
+
+def test_same_root_other_settings_gets_own_folder(runs: tuple[Path, Record]) -> None:
+    """抓資料夾名沒把設定算進去（換一份設定開始，撞進同一個資料夾被當成「已存在」、或蓋掉前一場）：同一個根、
+    同一份方案與替身、另一份設定，start 也要回 0，根底下兩個資料夾名不同，各自的 project.json 記各自的設定指紋。"""
+    record = _section(runs, "other_settings")
+    assert record["code"] == 0, record["stderr"]
+    first = _folder(runs)
+    folders = cast(list[str], record["folders"])
+    assert first.name in folders and len(set(folders)) == len(folders) == len({first.name, *folders})
+    other = next(first.parent / name for name in folders if name != first.name)
+    fingerprints = {_json(folder / "project.json")["settings_fingerprint"] for folder in (first, other)}
+    assert fingerprints == {load_material_gradient_settings(runs[0] / name).fingerprint
+                            for name in ("settings.toml", "settings-other.toml")}
+    assert _json(other / "status.json")["state"] == "finished"
+
+
+def test_sigterm_to_cli_terminates_child_and_records_interrupted(runs: tuple[Path, Record]) -> None:
+    """抓命令列被終止時留下孤兒、或子行程收不到 SIGTERM（建子行程時擋著的訊號遮罩沒在子行程放開，它要等寬限過了
+    被 SIGKILL）：子行程寫完 running 就對命令列送 SIGTERM，命令列回 3、子行程寫 interrupted、整群已不在，
+    而且在寬限秒數之內收完。"""
+    record = _section(runs, "interrupted")
+    assert record["code"] == 3, record["stderr"]
+    assert cast(Record, record["status"])["state"] == "interrupted"
+    assert record["child_alive"] is False
+    assert cast(float, record["seconds"]) < cli.TERMINATE_GRACE_S
+
+
+class _FakeProcess:
+    pid = 2 ** 22 + 7
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+def test_interrupt_between_spawn_and_wait_terminates_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """審查 B2：子行程建好（Popen 回來、還沒進等待）之後的第一個沒擋訊號的行就來中斷，也要收子行程。
+
+    Popen 換成假行程，``sys.settrace`` 在 ``_spawn_and_wait`` 裡、``process`` 已拿到、而且這一刻沒有擋住 SIGINT 的
+    第一行注入 KeyboardInterrupt（擋著的時候真的訊號送不進來，所以那幾行不注入）：要叫到收子行程、回 3，
+    事後這個行程的訊號遮罩跟叫之前一樣。"""
+    fake = _FakeProcess()
+    terminated: list[object] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: fake)
+    monkeypatch.setattr(cli, "_terminate", terminated.append)
+    target = cli._spawn_and_wait.__code__
+    injected: list[int] = []
+
+    def local(frame: FrameType, event: str, arg: object) -> TraceFunction | None:
+        unblocked = signal.SIGINT not in signal.pthread_sigmask(signal.SIG_BLOCK, ())
+        if event == "line" and not injected and frame.f_locals.get("process") is fake and unblocked:
+            injected.append(frame.f_lineno)
+            raise KeyboardInterrupt
+        return local
+
+    def tracer(frame: FrameType, event: str, arg: object) -> TraceFunction | None:
+        return local if frame.f_code is target else None
+
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, ())
+    code: int | None = None
+    sys.settrace(tracer)
+    try:
+        code = cli._spawn_and_wait(tmp_path, "start", 0)
+    except KeyboardInterrupt:
+        pass  # 中斷漏出 _spawn_and_wait＝沒收子行程；留給下面的斷言判紅，不讓 pytest 當成整場被中斷
+    finally:
+        sys.settrace(None)
+    assert injected, "沒有注入到（process 拿到之後沒有下一行）"
+    assert terminated == [fake], f"第 {injected} 行中斷，子行程沒被收"
+    assert code == cli.EXIT_STOPPED
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, ()) == before
 
 
 def test_rejects_preset_outside_family(runs: tuple[Path, Record]) -> None:

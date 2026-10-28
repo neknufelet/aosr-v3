@@ -5,6 +5,9 @@
 不是就失敗、不算。狀態檔只由這裡寫：開始寫 running（帶自己的行程編號），收尾寫 finished／stopped／failed／interrupted；
 進度數字（帳本記的累計求值次數、做完幾輪、最後一列的值）在寫的那一刻從帳本讀。
 
+起它的父行程建子行程時擋著 SIGINT、SIGTERM、SIGHUP（遮罩會繼承），所以入口裝好轉換就把這三個放開；
+擋著那段收到的訊號放開時才送到，照樣轉成中斷。
+
 離開碼：0 跑完（也寫 ``result.json``）、1 失敗（錯誤原文寫標準錯誤、也記進狀態檔）、3 停止記號或中斷（SIGTERM、SIGHUP
 在 ``__main__`` 轉成 KeyboardInterrupt）。停止記號在每兩次求值之間查；帳本停在最後一列寫完整的地方。
 """
@@ -86,4 +89,5 @@ def _interrupt(signum: int, frame: FrameType | None) -> None:
 if __name__ == "__main__":
     for termination in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(termination, _interrupt)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, (signal.SIGINT, signal.SIGTERM, signal.SIGHUP))
     raise SystemExit(main(sys.argv[1:]))

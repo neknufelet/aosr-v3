@@ -2,10 +2,11 @@
 
 - ``start --scheme <方案檔> --surrogate <替身 npz> --presets <六個 id，逗號分隔，剛性面寫 none> --purpose <用途>
   --root <資料夾根> [--settings <material_gradient.toml>] [--capabilities <能力表>] [--engine-commit <提交>]``：
-  先核輸入（preset 在家族裡、用途認得、方案匯出完整模型拿網格雜湊與物理身分、替身過准用閘門而且對得上兩格、
-  替身座位與喇叭對得上方案），都過才建 ``<root>/<32 位十六進位>/``（名字由輸入算，同一組輸入同一個資料夾），
+  先核輸入（preset 在家族裡、用途認得、方案匯出完整模型拿網格雜湊、物理身分與喇叭座位座標、替身過准用閘門而且
+  對得上這幾格、替身座位與喇叭的名字對得上方案），都過才建 ``<root>/<32 位十六進位>/``（名字由輸入算，同一組輸入同一個資料夾），
   寫 ``project.json``，在雙精度子行程把整條鏈跑完。拒收不建資料夾。
-- ``resume <資料夾>``：拿鎖、重算現在的物理身分跟 ``project.json`` 比（不同就拒收），清掉留下的 ``stop`` 記號，
+- ``resume <資料夾>``：拿鎖、重算現在的物理身分跟 ``project.json`` 比（不同就拒收），再逐格核輸入（方案檔雜湊、
+  方案座標、替身過閘門、manifest 與收據摘要、設定指紋；子行程重建目標前會再核一次），清掉留下的 ``stop`` 記號，
   子行程照帳本接著跑（標頭對不上拒收；前段沒寫完重跑前段）。
 - ``stop <資料夾>``：建 ``stop`` 記號，不拿鎖，回 0；子行程在下一次求值之前停。
 - ``report --folder <資料夾>``：只讀，印人看的文字，最後一行固定是終點完整模型重算未做（辛二）。
@@ -15,6 +16,10 @@
 ``start`` 在暫存名的資料夾裡先拿鎖、寫好 ``project.json`` 再換成正式名，所以看得到的資料夾一出現就有鎖：
 另一個 ``start`` 撞到同名資料夾時，鎖被拿著就報「還有計算在跑」，沒被拿著就報「已存在、用 resume」，兩種都回 1。
 父行程收到 SIGTERM、SIGHUP（只在 ``__main__`` 轉成中斷）就對子行程群送 SIGTERM，等它寫完 interrupted 再回 3。
+建子行程那一刻把 SIGINT、SIGTERM、SIGHUP 暫時擋住（``pthread_sigmask``），建好、``process`` 拿到手才放開：
+中斷不會落在「子行程已經起了、父行程還不知道它」的那一段，所以不留孤兒（審查 B2）；子行程繼承了擋住的遮罩，
+子行程入口裝好轉換之後自己放開。``TERMINATE_GRACE_S`` 是送 SIGTERM 之後等子行程寫完 interrupted、自己結束的寬限
+秒數，過了才 SIGKILL；它是收行程的耐心，不是精度門檻。
 
 資料夾根由 ``--root`` 給，不放進網頁讀的 ``searches/``：網頁會把 32 位十六進位資料夾當擺位搜尋去讀，
 這裡沒有那邊的檔，會報讀取錯誤。
@@ -33,7 +38,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Set
 from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
@@ -52,6 +57,7 @@ RIGID: Final = "none"
 SEARCHES_DIR: Final = "searches"
 TERMINATE_GRACE_S: Final = 60.0
 _REPO_ROOT: Final = Path(__file__).resolve().parents[3]
+FORWARDED_SIGNALS: Final[Set[signal.Signals]] = frozenset((signal.SIGINT, signal.SIGTERM, signal.SIGHUP))
 
 
 class FolderBusy(Exception):
@@ -120,17 +126,39 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+@contextmanager
+def _keep_signal_handlers() -> Iterator[None]:
+    """區塊結束時照 Python 記的處置把 SIGINT、SIGTERM、SIGHUP 重裝一次。
+
+    匯出完整模型會叫網格程式庫（gmsh），它收尾時在 C 層把訊號處置改回預設，Python 這邊卻還以為轉換裝著：
+    之後父行程一收到 SIGTERM 就直接死、子行程變孤兒（修補一的端到端考卷量到的）。
+    """
+    saved = {number: signal.getsignal(number) for number in FORWARDED_SIGNALS}
+    try:
+        yield
+    finally:
+        for number, handler in saved.items():
+            if handler is not None:
+                signal.signal(number, handler)
+
+
 def _spawn_and_wait(folder: Path, mode: str, lock_fd: int) -> int:
     """起雙精度子行程（單緒、新的行程群、繼承鎖），等它結束、把離開碼傳出來。"""
     env = runtime.child_process_env(threads=1)
     runtime.configure_jax(platforms="cpu", enable_x64=True, env=env)
-    process = subprocess.Popen([sys.executable, "-m", "aosr.gradient.worker", str(folder), mode], env=env,
-                               start_new_session=True, pass_fds=(lock_fd,), cwd=_REPO_ROOT,
-                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    process: subprocess.Popen[bytes] | None = None
     try:
+        previous = signal.pthread_sigmask(signal.SIG_BLOCK, FORWARDED_SIGNALS)
+        try:
+            process = subprocess.Popen([sys.executable, "-m", "aosr.gradient.worker", str(folder), mode], env=env,
+                                       start_new_session=True, pass_fds=(lock_fd,), cwd=_REPO_ROOT,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous)
         code = process.wait()
     except KeyboardInterrupt:
-        _terminate(process)
+        if process is not None:
+            _terminate(process)
         return EXIT_STOPPED
     if code < 0:
         sys.stderr.write(f"梯度子行程被訊號 {-code} 結束（例如記憶體上限）；狀態檔停在它最後寫的那一份\n")
@@ -144,7 +172,8 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.material_gradient import load_material_gradient_settings
     from aosr.config.quality_targets import load_quality_targets
     from aosr.gradient import run
-    from aosr.physics.fem_reduced_receipt import load_validated_reduced, receipt_path
+    from aosr.physics.fem_reduced_check import points_hex
+    from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.reporting.scheme import load_scheme
     from aosr.scoring.stage_one_score import stage_one_score_settings
@@ -156,13 +185,14 @@ def _start(args: argparse.Namespace) -> int:
     settings = load_material_gradient_settings(settings_path)
     run.designs_for(args.presets, settings)
     stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), args.purpose)
-    operators = export_operators(scheme, capabilities=load_capabilities(args.capabilities),
-                                 directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    with _keep_signal_handlers():
+        operators = export_operators(scheme, capabilities=load_capabilities(args.capabilities),
+                                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
     physics, mesh = operators.physics_identity, operators.mesh_hash
+    points = run.SchemePoints(points_hex(operators.source_points), points_hex(operators.receiver_points))
     del operators
-    model = load_validated_reduced(surrogate, rulers=run.holdout_rulers(), expected_mesh_hash=mesh,
-                                   expected_physics_identity=physics)
-    run.check_surrogate_matches_scheme(model, scheme)
+    model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points)
+    run.check_surrogate_matches_scheme(model, scheme, points)
     del model
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
@@ -173,7 +203,7 @@ def _start(args: argparse.Namespace) -> int:
         receipt_sha256=run.file_sha256(receipt_path(surrogate)), presets=args.presets, purpose=args.purpose,
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
-        engine_commit=args.engine_commit, started_at=run.now_text())
+        source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text())
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)
@@ -222,6 +252,7 @@ def _resume(args: argparse.Namespace) -> int:
             sys.stderr.write(f"物理身分跟開始時不同（現在 {current}，開始時 {project.physics_identity}），"
                              "替身是舊程式建的，不接續\n")
             return EXIT_FAILED
+        run.check_inputs(project)
         (folder / run.STOP_FILE).unlink(missing_ok=True)
         return _spawn_and_wait(folder, "resume", descriptor)
 

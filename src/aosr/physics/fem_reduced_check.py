@@ -3,6 +3,9 @@
 帶界用以 1000 Hz 為基準的正確二進位 1/3 八度：中心 ``1000·2^(n/3)``、帶界 ``1000·2^((2n±1)/6)``，相鄰兩帶共用同一個界值；
 帶內頻點取閉區間（落在帶界上的點兩帶都算）。帶界整個在頻率軸裡的叫「完整覆蓋」，判尺只看這些帶；
 軸端只覆蓋一部分的帶另列，不判。尺（精度契約）由呼叫端從登記簿讀進來傳給 :func:`within_reduced_contract`。
+
+報告另記完整模型的喇叭與座位座標（每個座標一個 ``float.hex()``）：替身矩陣是那幾個點的點源與取值列，
+網格雜湊與物理身分都不含位置，驗證收據靠這兩格把替身綁到建模那份方案的位置（#561 辛一審查 B1）。
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from aosr.geometry.shoebox import Point
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import (
     FullOperators, FullSolver, ReducedModel, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
@@ -20,6 +24,12 @@ from aosr.physics.fem_reduced import (
 from aosr.physics.fem_reduced_store import matrices_digest
 
 THIRD_OCTAVE_REFERENCE_HZ = 1000.0
+PointHex = tuple[str, str, str]
+
+
+def points_hex(points: Mapping[str, Point]) -> dict[str, PointHex]:
+    """名字 → 三個座標的 ``float.hex()``（逐位，不經十進位）。"""
+    return {name: (float(point.x).hex(), float(point.y).hex(), float(point.z).hex()) for name, point in points.items()}
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,8 @@ class ValidationReport:
     full_pressure: NDArray[np.complex128]
     reduced_pressure: NDArray[np.complex128]
     model_digest: str
+    source_points: Mapping[str, PointHex]
+    receiver_points: Mapping[str, PointHex]
 
 
 def third_octave_bands(frequencies_hz: Sequence[float]) -> tuple[Band, ...]:
@@ -71,6 +83,8 @@ def _checked_pairing(model: ReducedModel, operators: FullOperators) -> None:
         raise ValueError("替身的網格雜湊跟完整模型不同")
     if model.source_names != tuple(operators.sources) or model.receiver_names != tuple(operators.receivers):
         raise ValueError("替身的喇叭或座位跟完整模型不同")
+    if set(operators.source_points) != set(operators.sources) or set(operators.receiver_points) != set(operators.receivers):
+        raise ValueError("完整模型的喇叭或座位座標跟它的點源、取值列名字不同")
     if (model.density_kg_m3 != operators.density_kg_m3
             or model.sound_speed_m_s != operators.sound_speed_m_s):
         raise ValueError("替身的空氣條件跟完整模型不同")
@@ -123,7 +137,9 @@ def validate_reduced(
         partial_band_db_by_seat={} if partial is None else {
             name: float(partial[i]) for i, name in enumerate(names)},
         bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced,
-        model_digest=matrices_digest(model.matrices))
+        model_digest=matrices_digest(model.matrices),
+        source_points=points_hex({name: operators.source_points[name] for name in model.source_names}),
+        receiver_points=points_hex({name: operators.receiver_points[name] for name in names}))
 
 
 def within_reduced_contract(report: ValidationReport, *, frequency_db: float, band_db: float) -> bool:

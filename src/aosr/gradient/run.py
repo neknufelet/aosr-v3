@@ -9,7 +9,9 @@
 （``load_validated_reduced``，兩把尺從精度契約登記簿讀），而且要對得上 ``project.json`` 記的網格雜湊、物理身分、
 manifest 摘要與驗證收據摘要；方案檔與搜尋設定也要跟記的雜湊、指紋相同，任何一格不同就拒收、不跑。
 替身的喇叭與座位要跟方案逐一對上（座位照方案座位組的順序）：目標常數照座位組的索引取替身的列，
-順序不同會默默算錯座位。
+順序不同會默默算錯座位。位置也要對上（審查 B1）：網格雜湊與物理身分都不含喇叭與座位座標，同一間房把喇叭移 0.1 m
+拿舊替身會照樣過閘門、目標靜默算錯；所以開始、接續（父行程與子行程）都把方案的座標（``float.hex()``）交給閘門，
+跟驗證收據記的逐名逐座標比，``project.json`` 也記一份。
 
 ``stop`` 記號（:func:`stop_requested`）在每兩次求值之間查一次，為真拋 ``SearchStopped``；帳本停在最後一列寫完整的地方，
 不寫停止原因（迴圈停止原因是封閉集合，不含「人叫停」）。狀態檔與結果檔只由子行程寫，寫完整檔再換名（原子）。
@@ -50,8 +52,10 @@ from aosr.gradient.material_gradient_ledger import (
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
 from aosr.physics.fem_reduced import ReducedModel
+from aosr.physics.fem_reduced_check import PointHex, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
+from aosr.reporting.fem_reduced_scheme import scheme_points
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.scoring.stage_one_objective_jax import objective_constants
 from aosr.scoring.stage_one_score import stage_one_score_settings
@@ -90,6 +94,8 @@ class GradientProject(BaseModel):
     capabilities_path: str
     physics_identity: str = Field(min_length=1)
     mesh_hash: str = Field(min_length=1)
+    source_points: dict[str, PointHex]
+    receiver_points: dict[str, PointHex]
     engine_commit: str | None
     started_at: str
 
@@ -143,6 +149,13 @@ class GradientResult(BaseModel):
     evaluations: int = Field(ge=0, strict=True)
     rounds: int = Field(ge=1, strict=True)
     ledger_sha256: str = Field(pattern=_SHA256)
+
+
+class SchemePoints(NamedTuple):
+    """方案的喇叭與座位座標：名字 → 三個 ``float.hex()``。"""
+
+    sources: dict[str, PointHex]
+    receivers: dict[str, PointHex]
 
 
 class GradientProblem(NamedTuple):
@@ -218,14 +231,56 @@ def write_json_atomic(path: Path, value: BaseModel) -> None:
 
 # ---- 替身與方案 ----
 
-def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme) -> None:
-    """替身的座位要照方案座位組的順序逐一相同、喇叭要是方案的那幾支；不然目標常數會取錯列。"""
+def scheme_points_hex(scheme: Scheme) -> SchemePoints:
+    """方案的喇叭與座位座標（跟匯出完整模型算子同一個取法）。"""
+    sources, receivers = scheme_points(scheme)
+    return SchemePoints(points_hex(sources), points_hex(receivers))
+
+
+def gated_surrogate(surrogate: Path, *, mesh_hash: str, physics_identity: str, points: SchemePoints) -> ReducedModel:
+    """准用閘門：兩把尺從登記簿讀，網格雜湊、物理身分、喇叭與座位座標都要跟驗證收據對上。"""
+    return load_validated_reduced(surrogate, rulers=holdout_rulers(), expected_mesh_hash=mesh_hash,
+                                  expected_physics_identity=physics_identity, expected_source_points=points.sources,
+                                  expected_receiver_points=points.receivers)
+
+
+def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: SchemePoints) -> None:
+    """替身的座位要照方案座位組的順序逐一相同、喇叭要是方案的那幾支（不然目標常數會取錯列）；
+    交給閘門比的座標要就是這份方案的座標（不然閘門比的是別的位置）。"""
     seats = tuple(point.receiver_id for point in scheme.receiver_set.points)
     if model.receiver_names != seats:
         raise ValueError(f"替身的座位 {list(model.receiver_names)} 跟方案座位組 {list(seats)} 不同（名字或順序），"
                          "目標常數會取錯座位，拒收")
     if sorted(model.source_names) != sorted(scheme.speakers):
         raise ValueError(f"替身的喇叭 {list(model.source_names)} 跟方案的 {sorted(scheme.speakers)} 不同，拒收")
+    expected = scheme_points_hex(scheme)
+    for label, given, wanted in (("喇叭", points.sources, expected.sources), ("座位", points.receivers, expected.receivers)):
+        for name in sorted(set(given) | set(wanted)):
+            if given.get(name) != wanted.get(name):
+                raise ValueError(f"{label} {name} 交給閘門的座標 {given.get(name)} 跟方案的 {wanted.get(name)} 不同，拒收")
+
+
+def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
+    """接續前逐格核輸入（父行程起子行程前、子行程重建目標前各核一次）：方案檔雜湊、方案座標跟 ``project.json`` 記的、
+    替身過閘門（網格雜湊、物理身分、座標）、manifest 與收據摘要、設定指紋、替身對得上方案。任何一格不同就拒收。"""
+    scheme_path, surrogate = Path(project.scheme_path), Path(project.surrogate_path)
+    if file_sha256(scheme_path) != project.scheme_sha256:
+        raise ValueError(f"方案檔 {scheme_path} 跟開始時不同（scheme_sha256 變了），不接續")
+    scheme = load_scheme(scheme_path)
+    points = scheme_points_hex(scheme)
+    if points != SchemePoints(project.source_points, project.receiver_points):
+        raise ValueError("方案的喇叭或座位座標跟 project.json 記的不同，不接續")
+    model = gated_surrogate(surrogate, mesh_hash=project.mesh_hash, physics_identity=project.physics_identity,
+                            points=points)
+    if manifest_sha256(surrogate) != project.surrogate_manifest_sha256:
+        raise ValueError("替身跟開始時不同（manifest 摘要變了），不接續")
+    if file_sha256(receipt_path(surrogate)) != project.receipt_sha256:
+        raise ValueError("替身的驗證收據跟開始時不同（SHA-256 變了），不接續")
+    settings = load_material_gradient_settings(project.settings_path)
+    if settings.fingerprint != project.settings_fingerprint:
+        raise ValueError("搜尋設定跟開始時不同（設定指紋變了），不接續")
+    check_surrogate_matches_scheme(model, scheme, points)
+    return scheme, model, settings
 
 
 def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings) -> tuple[SurfaceDesign, ...]:
@@ -234,21 +289,8 @@ def designs_for(presets: Sequence[str | None], settings: MaterialGradientSetting
 
 
 def load_problem(project: GradientProject) -> GradientProblem:
-    """照 ``project.json`` 重建目標；方案、替身、收據、設定跟記的不同就拒收。要在雙精度已開的行程裡叫。"""
-    scheme_path, surrogate = Path(project.scheme_path), Path(project.surrogate_path)
-    if file_sha256(scheme_path) != project.scheme_sha256:
-        raise ValueError(f"方案檔 {scheme_path} 跟開始時不同（SHA-256 變了），不接續")
-    model = load_validated_reduced(surrogate, rulers=holdout_rulers(), expected_mesh_hash=project.mesh_hash,
-                                   expected_physics_identity=project.physics_identity)
-    if manifest_sha256(surrogate) != project.surrogate_manifest_sha256:
-        raise ValueError("替身跟開始時不同（manifest 摘要變了），不接續")
-    if file_sha256(receipt_path(surrogate)) != project.receipt_sha256:
-        raise ValueError("替身的驗證收據跟開始時不同（SHA-256 變了），不接續")
-    settings = load_material_gradient_settings(project.settings_path)
-    if settings.fingerprint != project.settings_fingerprint:
-        raise ValueError("搜尋設定跟開始時不同（設定指紋變了），不接續")
-    scheme = load_scheme(scheme_path)
-    check_surrogate_matches_scheme(model, scheme)
+    """照 ``project.json`` 重建目標；輸入先過 :func:`check_inputs`。要在雙精度已開的行程裡叫。"""
+    scheme, model, settings = check_inputs(project)
     score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
     constants = objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
                                     len(model.source_names))
