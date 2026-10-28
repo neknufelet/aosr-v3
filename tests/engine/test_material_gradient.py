@@ -46,8 +46,8 @@ from aosr.scoring.stage_one_low_frequency_contract import (
 )
 from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays, objective_constants
 from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one, stage_one_score_settings
-from aosr.search import material_gradient as gradient_search
-from aosr.search import material_gradient_ledger as ledger
+from aosr.gradient import material_gradient as gradient_search
+from aosr.gradient import material_gradient_ledger as ledger
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._precision_contracts import contract_value
 from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL

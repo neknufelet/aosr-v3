@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.search.material_gradient import STOP_REASONS, DescentResult, SnapResult, SurfaceDesign, design_names
+from aosr.gradient.material_gradient import STOP_REASONS, DescentResult, SnapResult, SurfaceDesign, design_names
 
 
 LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v1"

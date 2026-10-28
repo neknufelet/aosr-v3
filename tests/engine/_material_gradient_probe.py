@@ -23,8 +23,8 @@ from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.stage_one_objective_jax import objective_constants
 from aosr.scoring.stage_one_score import stage_one_score_settings
-from aosr.search import material_gradient as gradient_search
-from aosr.search import material_gradient_ledger as ledger
+from aosr.gradient import material_gradient as gradient_search
+from aosr.gradient import material_gradient_ledger as ledger
 
 
 Record = dict[str, object]
