@@ -17,6 +17,7 @@ from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import (
     FullOperators, FullSolver, ReducedModel, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
 )
+from aosr.physics.fem_reduced_store import matrices_digest
 
 THIRD_OCTAVE_REFERENCE_HZ = 1000.0
 
@@ -35,7 +36,8 @@ class Band:
 class ValidationReport:
     """每個座位（跨材料、喇叭、頻點取最大）的逐頻 dB 差與帶能量 dB 差，以及兩邊的原始複數聲壓。
 
-    聲壓陣列形狀是 (材料, 頻點, 喇叭, 座位)。
+    聲壓陣列形狀是 (材料, 頻點, 喇叭, 座位)。``model_digest`` 是被驗那份替身的模型內容摘要
+    （:func:`aosr.physics.fem_reduced_store.matrices_digest`），驗證收據靠它確認報告是對哪一份做的。
     """
 
     frequency_db_by_seat: Mapping[str, float]
@@ -45,6 +47,7 @@ class ValidationReport:
     full_solves: int
     full_pressure: NDArray[np.complex128]
     reduced_pressure: NDArray[np.complex128]
+    model_digest: str
 
 
 def third_octave_bands(frequencies_hz: Sequence[float]) -> tuple[Band, ...]:
@@ -119,7 +122,8 @@ def validate_reduced(
         band_db_by_seat={name: float(complete[i]) for i, name in enumerate(names)},
         partial_band_db_by_seat={} if partial is None else {
             name: float(partial[i]) for i, name in enumerate(names)},
-        bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced)
+        bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced,
+        model_digest=matrices_digest(model.matrices))
 
 
 def within_reduced_contract(report: ValidationReport, *, frequency_db: float, band_db: float) -> bool:
