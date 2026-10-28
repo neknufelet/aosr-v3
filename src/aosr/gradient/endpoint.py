@@ -11,7 +11,9 @@
 這一支不宣稱匯出的方案能直接走第一階段整條。
 
 材料只有一個來源：每面的 ``SurfaceDesign.material``（替身鏈用的那一份），匯出時只換棉板厚度、照設定檔
-``[export] min_cavity_m`` 決定空氣層放不放；設計清單必須照 ``Wall.all()`` 的順序給六面。
+``[export] min_cavity_m`` 決定空氣層放不放；設計清單必須照 ``Wall.all()`` 的順序給六面。終點入口另外核身分：
+每面的樣板構造必須等於它 preset id 在構造預設清單裡的那一份（:func:`checked_design_identity`），報告每面再記
+樣板構造的摘要（``material_digest``），preset id 跟實際用的材料不會脫鉤。
 材料求阻抗用的空氣（``air``）必須跟完整模型算子、替身同一組密度與聲速，不等就拒收。
 
 方案格式沒有「剛性」的寫法（表面分區每面一種材料、固定阻抗欄只收正數），所以 :func:`scene_with_materials`
@@ -23,6 +25,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Final, NamedTuple
@@ -31,8 +35,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
+from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.config.physics_constants import PhysicsConstants
@@ -42,7 +47,7 @@ from aosr.gradient.material_gradient import (
     FloatVector, SurfaceDesign, chain_objective, checked_theta, is_feasible, wall_surface_ids,
 )
 from aosr.materials.construction import surface_impedance
-from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
+from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, FullSolver, ReducedModel, impedance_rows, walls_at
 from aosr.physics.fem_reduced_check import validate_reduced
@@ -61,16 +66,25 @@ _CANDIDATE_ID: Final = "gradient-endpoint"
 
 
 class SurfaceSpec(NamedTuple):
-    """一面的規格：面代號（牆名）、preset id、棉板厚度與空腔（公尺）；剛性面 preset 與兩個數都是 None。
+    """一面的規格：面代號（牆名）、preset id、棉板厚度與空腔（公尺）、樣板構造摘要；剛性面後四格都是 None。
 
     ``cavity_m`` 是搜尋給的原值（可能是 0 或小於設定的最小空腔）；放不放空氣層由 :func:`kept_cavity` 決定。
-    樣板沒有空氣層的面 ``cavity_m`` 是 None。
+    樣板沒有空氣層的面 ``cavity_m`` 是 None。``material_digest`` 是換 θ 之前的樣板構造（``design.material``）
+    的 :func:`material_digest`。
     """
 
     surface_id: str
     preset_id: str | None
     thickness_m: float | None
     cavity_m: float | None
+    material_digest: str | None
+
+
+def material_digest(material: SurfaceMaterial) -> str:
+    """構造的身分摘要：驗證後內容的正規化 JSON（鍵排序、緊湊分隔、不轉義非 ASCII）做 SHA-256 十六進位。"""
+    content = json.dumps(material.model_dump(mode="json"), sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def kept_cavity(cavity_m: float, min_cavity_m: float) -> float | None:
@@ -91,6 +105,22 @@ def checked_wall_designs(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceDesig
     return tuple(designs)
 
 
+def checked_design_identity(designs: Sequence[SurfaceDesign], presets: Sequence[ConstructionPreset]) -> None:
+    """每面的樣板構造（``design.material``，換 θ 之前）必須等於它 preset id 在 ``presets`` 裡的構造（驗證後逐欄相等）；
+    preset id 找不到或構造不同就拒收，訊息指名面與 preset id。只核身分，匯出材料仍只從 ``design.material`` 來。"""
+    by_id = {preset.id: preset for preset in presets}
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    for design in designs:
+        if design.material is None or design.preset_id is None:
+            continue
+        preset = by_id.get(design.preset_id)
+        if preset is None:
+            raise ValueError(f"面 {design.surface_id} 的 preset {design.preset_id} 不在構造預設清單裡")
+        if adapter.validate_python(preset.material) != design.material:
+            raise ValueError(f"面 {design.surface_id} 的樣板構造跟 preset {design.preset_id} 的構造不同，"
+                             "報告的 preset id 會認不出實際用的材料")
+
+
 def surface_specs(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector) -> tuple[SurfaceSpec, ...]:
     """θ（照 :func:`~aosr.gradient.material_gradient.design_names` 的格序）切回每面規格；剛性面只有面代號。"""
     values = checked_theta(theta, designs)
@@ -98,10 +128,11 @@ def surface_specs(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVect
     offset = 0
     for design in designs:
         if design.material is None:
-            specs.append(SurfaceSpec(design.surface_id, None, None, None))
+            specs.append(SurfaceSpec(design.surface_id, None, None, None, None))
             continue
         cavity = float(values[offset + 1]) if design.cavity_variable is not None else None
-        specs.append(SurfaceSpec(design.surface_id, design.preset_id, float(values[offset]), cavity))
+        specs.append(SurfaceSpec(design.surface_id, design.preset_id, float(values[offset]), cavity,
+                                 material_digest(design.material)))
         offset += len(design.variables)
     return tuple(specs)
 
@@ -282,6 +313,7 @@ class EndpointReport(BaseModel):
     交同一把尺（``objective_from_pressures``）的值；``total_difference`` ＝完整減替身。``max_frequency_db`` 是
     每座位、喇叭、頻點 |20·log10(|p_替身|/|p_完整|)| 的最大值（全軸），``rms_floor_db`` 是兩邊聲壓的均方根零判
     地板上限，``total_difference_bound`` 由兩者照 :func:`score_difference_bound` 推得。大峰是完整模型的。
+    ``surfaces`` 每面帶 preset id 與樣板構造摘要（``material_digest``），入口已核兩者是同一份構造。
     非有限數不收（驗證時拒收，不靜默報一個壞數）。
     """
 
@@ -339,11 +371,13 @@ def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, desi
 
 def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector, *,
                    model: ReducedModel, score_settings: StageOneScoreSettings, receiver_set: ReceiverSet,
-                   low_frequency_axis: LowFrequencyAxis, settings: MaterialGradientSettings, air: PhysicsConstants,
+                   low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
+                   settings: MaterialGradientSettings, air: PhysicsConstants,
                    ranges: PorousModelRanges) -> EndpointResult:
     """同一組可行規格：替身值與完整模型值並列、兩者的差與差的上界、每座位逐頻最大 dB 差、每支喇叭的大峰。
 
-    入口先核：``air`` 跟算子、替身同密度同聲速；設計清單照 ``Wall.all()`` 六面；θ 是可行解；座位順序一致。
+    入口先核：``air`` 跟算子、替身同密度同聲速；設計清單照 ``Wall.all()`` 六面；每面樣板構造等於它的 preset
+    （``presets`` 只用來核身分，:func:`checked_design_identity`）；θ 是可行解；座位順序一致。
     θ 照空腔匯出規則變成材料（:func:`materials_from_surfaces`，材料只從 ``design.material`` 來）；完整模型與替身都對
     **匯出的材料**算（替身用 :func:`exported_theta`），差裡只有替身誤差、沒有匯出的捨入。目標常數由
     ``objective_constants`` 以替身的頻率軸、``score_settings``、``receiver_set`` 現算，跟搜尋那邊同一份；
@@ -351,6 +385,7 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     （同時給替身聲壓、逐頻與帶能量 dB 差）。
     """
     values = _checked_endpoint_inputs(operators, model, designs, theta, receiver_set, air)
+    checked_design_identity(designs, presets)
     axis = tuple(float(value) for value in model.frequencies_hz)
     specs = surface_specs(designs, values)
     materials = materials_from_surfaces(designs, values, settings)

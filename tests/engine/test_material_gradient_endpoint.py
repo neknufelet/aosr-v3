@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import math
 import os
@@ -21,6 +22,7 @@ from typing import cast
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from pydantic import TypeAdapter
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.material_gradient import ExportSettings, MaterialGradientSettings, load_material_gradient_settings
@@ -30,7 +32,7 @@ from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Point, Wall
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
-from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
+from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_check import seats_within_contract
 from aosr.physics.fem_reduced_store import save_reduced
@@ -208,9 +210,8 @@ def test_min_cavity_setting_is_within_family_cavity_ranges() -> None:
 
 # ---- 材料來源、面序、空氣 ----
 
-def test_exported_material_comes_from_design_material() -> None:
-    """抓匯出材料拿 preset id 去另一份清單重查（審查重現：設計的棉板流阻乘二、preset 不動）：匯出的構造跟著
-    ``design.material``（替身鏈用的那一份）走，流阻是乘二後的值。"""
+def _doubled_designs() -> list[gradient_search.SurfaceDesign]:
+    """審查重現：第一面樣板的棉板流阻乘二、preset id 不動，其餘照終點那一組。"""
     designs = list(gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets()))
     first = designs[0]
     assert first.material is not None
@@ -219,10 +220,46 @@ def test_exported_material_comes_from_design_material() -> None:
     doubled = porous.model_copy(update={"flow_resistivity_pa_s_m2": 2.0 * porous.flow_resistivity_pa_s_m2})
     designs[0] = dataclasses.replace(first, material=first.material.model_copy(
         update={"layers": (doubled, *first.material.layers[1:])}))
+    return designs
+
+
+def test_exported_material_comes_from_design_material() -> None:
+    """抓匯出材料拿 preset id 去另一份清單重查：``materials_from_surfaces`` 只照 ``design.material``（替身鏈用的那一份）
+    走——樣板流阻乘二、preset 不動時，匯出的流阻是乘二後的值（身分核對在終點入口，見下一題）。"""
+    designs = _doubled_designs()
+    template = designs[0].material
+    assert template is not None and isinstance(template.layers[0], PorousLayer)
     materials = endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
     exported = materials[Wall.all()[0]]
     assert exported is not None and isinstance(exported.layers[0], PorousLayer)
-    assert exported.layers[0].flow_resistivity_pa_s_m2 == doubled.flow_resistivity_pa_s_m2
+    assert exported.layers[0].flow_resistivity_pa_s_m2 == template.layers[0].flow_resistivity_pa_s_m2
+
+
+def test_endpoint_rejects_design_material_unlike_its_preset(chain_model: ReducedModel,
+                                                            operators: FullOperators) -> None:
+    """抓報告的 preset id 跟實際材料脫鉤（複查重現：流阻乘二、preset 不動，終點照算、報告仍寫原 preset）：
+    終點入口拒收，訊息指名那一面與 preset id。"""
+    designs = _doubled_designs()
+    with pytest.raises(ValueError, match=f"{designs[0].surface_id}.*{designs[0].preset_id}"):
+        _endpoint(chain_model, operators, designs, _air())
+
+
+def test_report_material_digest_matches_preset_material(probe: Record) -> None:
+    """抓摘要算錯面或沒記：正常設計的報告每面 ``material_digest`` 等於考卷自己從構造預設清單那一份材料算的摘要
+    （驗證後內容的正規化 JSON 的 SHA-256）；剛性面是 None。"""
+    by_id = {preset.id: preset for preset in _presets()}
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    report = _report(probe)
+    for spec, preset_id in zip(report.surfaces, ENDPOINT_PRESETS, strict=True):
+        assert spec.preset_id == preset_id
+        if preset_id is None:
+            assert spec.material_digest is None
+            continue
+        content = adapter.validate_python(by_id[preset_id].material).model_dump(mode="json")
+        text = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        assert spec.material_digest == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    digests = [spec.material_digest for spec in report.surfaces if spec.material_digest is not None]
+    assert len(set(digests)) > 1, "各面摘要都一樣，摘要算錯面的植錯驗不出來"
 
 
 def test_designs_out_of_wall_order_are_rejected(chain_model: ReducedModel, operators: FullOperators) -> None:
@@ -243,22 +280,38 @@ def _endpoint(chain_model: ReducedModel, operators: FullOperators, designs: list
               air: PhysicsConstants) -> endpoint.EndpointResult:
     return endpoint.endpoint_check(
         chain_operators(operators), designs, np.asarray(ENDPOINT_THETA), model=chain_model, score_settings=_score(),
-        receiver_set=_receivers(), low_frequency_axis=AXIS_ID, settings=_settings(), air=air,
+        receiver_set=_receivers(), low_frequency_axis=AXIS_ID, presets=_presets(), settings=_settings(), air=air,
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")))
 
 
-def test_material_air_must_match_finite_element_air(chain_model: ReducedModel, operators: FullOperators) -> None:
-    """抓材料的空氣跟有限元素的空氣不同還照算（審查重現：材料聲速 350、模型 343）：終點與完整解入口都拒收，
-    訊息列出兩邊的聲速。"""
+# 每一案：材料空氣改哪一格、替身的聲速改成多少（None 是不改）、拒收訊息要對到的值。
+AIR_CASES: dict[str, tuple[dict[str, float], float | None, str]] = {
+    "material_speed": ({"sound_speed_m_s": 350.0}, None, "350.0.*343.0"),
+    "material_density": ({"air_density_kg_m3": 1.25}, None, "1.25.*1.2"),
+    "surrogate_speed": ({}, 350.0, "跟替身.*350.0"),
+}
+
+
+@pytest.mark.parametrize("case", AIR_CASES)
+def test_material_air_must_match_finite_element_air(chain_model: ReducedModel, operators: FullOperators,
+                                                    case: str) -> None:
+    """抓材料的空氣跟有限元素的空氣不同還照算（審查重現：材料聲速 350、模型 343；另只改材料密度、只改替身的聲速）：
+    終點入口拒收，訊息是材料空氣那一條、列出兩邊的值；材料空氣跟算子不同時，完整解入口也拒收。"""
+    material_change, surrogate_speed, message = AIR_CASES[case]
     designs = list(gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets()))
-    assert _air().sound_speed_m_s == chain_model.sound_speed_m_s
-    other = _air().model_copy(update={"sound_speed_m_s": 350.0})
-    with pytest.raises(ValueError, match="350.0.*343.0"):
-        _endpoint(chain_model, operators, designs, other)
+    assert (_air().air_density_kg_m3, _air().sound_speed_m_s) == (chain_model.density_kg_m3,
+                                                                   chain_model.sound_speed_m_s)
+    air = _air().model_copy(update=material_change)
+    model = chain_model if surrogate_speed is None else dataclasses.replace(chain_model,
+                                                                            sound_speed_m_s=surrogate_speed)
+    with pytest.raises(ValueError, match=f"材料的空氣.*{message}"):
+        _endpoint(model, operators, designs, air)
+    if not material_change:
+        return
     materials = endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
-    with pytest.raises(ValueError, match="350.0.*343.0"):
+    with pytest.raises(ValueError, match=f"材料的空氣.*{message}"):
         endpoint.full_model_pressures(
-            chain_operators(operators), materials, chain_model.frequencies_hz, air=other,
+            chain_operators(operators), materials, chain_model.frequencies_hz, air=air,
             ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")),
             max_relative_residual=chain_model.ledger.settings.full_solve_max_relative_residual)
 
@@ -346,6 +399,17 @@ def test_score_bound_uses_each_weight_with_its_own_reference(chain_model: Reduce
     level, floor = 0.01, 0.001
     expected = (level + floor) * 0.7 / 2.0 + (2.0 * level + floor) * 0.3 / 0.5
     assert endpoint.score_difference_bound(custom, level, floor) == pytest.approx(expected, rel=1e-12)
+
+
+@pytest.mark.parametrize("louder", ["first", "second"])
+def test_objective_floor_takes_the_louder_side(chain_model: ReducedModel, louder: str) -> None:
+    """抓地板只看一邊（例如只看完整模型或只看替身）：一組聲壓比另一組大 40 dB，不管大的那組在前或在後，
+    地板都等於目標倍率 × 大的那組的 max|dB|（考卷從大的那組自己算）。"""
+    loud, quiet = floor_case_pressures(chain_model.frequencies_hz, _receivers())
+    quiet = quiet / 100.0
+    pair = (loud, quiet) if louder == "first" else (quiet, loud)
+    expected = rms_floor_factor(np.float64) * float(np.max(np.abs(10.0 * np.log10(np.abs(loud) ** 2))))
+    assert endpoint.objective_floor_db(*pair) == expected
 
 
 def test_endpoint_reports_dropped_cavity_and_exported_theta(probe: Record) -> None:

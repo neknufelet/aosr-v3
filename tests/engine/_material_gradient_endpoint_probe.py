@@ -97,7 +97,8 @@ def main(directory: Path) -> None:
     theta = _theta(case["theta"])
     result = endpoint.endpoint_check(
         operators, designs, theta, model=model, score_settings=score, receiver_set=receivers,
-        low_frequency_axis=LowFrequencyAxis(str(problem["axis"])), settings=settings, air=air, ranges=ranges)
+        low_frequency_axis=LowFrequencyAxis(str(problem["axis"])), presets=presets, settings=settings, air=air,
+        ranges=ranges)
     materials = endpoint.materials_from_surfaces(designs, theta, settings)
     direct = endpoint.full_model_pressures(
         operators, materials, axis, air=air, ranges=ranges,
