@@ -1,0 +1,57 @@
+# 第三階段牆面材料梯度搜尋的前半段設定（#561）：連續下降、取規格、空腔聯合重調。
+# 決策紙：docs/decisions/stage-three-gradient-objective-low-frequency-lane.md（「決定」第 3 條是找法）。
+# 這份檔裡每一個數字都是工程暫定、調整走 PR，依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段
+# （「候選數 3、改善門檻、步數、預算都是工程暫定，數字住設定檔、要調走 PR；沒有理論保證」）。
+# 總價、重量這類跨牆限制沒有資料，第一版不做；每面只守「棉板＋空腔」的總深度上限。
+
+[descent]
+# 投影梯度下降最多走幾步；到了停、停止原因記「步數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_steps = 30
+# 每一步回溯線搜尋的起始步長（公尺 × 分數⁻¹，乘在梯度上）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+initial_step = 0.01
+# 線搜尋沒過就把步長乘上這個比例再試。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+backtrack_ratio = 0.5
+# Armijo 充分下降常數：新值要不大於舊值加這個常數乘「梯度 · 實際位移」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+armijo_constant = 1.0e-4
+# 投影梯度（貼著盒界往外推的分量歸零）的範數小於這個值就停，記「梯度夠小」；單位是合分／公尺，
+# 0.5 的意思是全部變數一起再動 1 cm、合分最多約變 0.005；這個值是在考卷的小房間替身上實量挑的，真房間要重挑。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+gradient_norm_stop = 0.5
+# 回溯到步長小於這個值仍沒過就停、這一步不走，記「步長到下限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+min_step = 1.0e-6
+
+[retune]
+# 取規格之後，厚度固定、只有空腔是變數，同一個投影下降最多走幾步（不因梯度小提早停；線搜尋退到步長下限就停、原因進帳本）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+steps = 5
+
+# 樣板家族：同一種材料（同流阻）不同厚度、有沒有空腔；第一版只有玻璃棉三個密度。
+# 棉板合法厚度照 construction_presets.toml 有的產品厚度；空腔是連續量。
+
+[[family]]
+id = "glass_wool_48k"
+presets = ["glass_wool_48k_50mm", "glass_wool_48k_50mm_gap50", "glass_wool_48k_50mm_gap100", "glass_wool_48k_100mm"]
+# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+thicknesses_m = [0.050, 0.100]
+# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+cavity_range_m = [0.0, 0.150]
+# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_total_depth_m = 0.150
+
+[[family]]
+id = "glass_wool_24k"
+presets = ["glass_wool_24k_50mm"]
+# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+thicknesses_m = [0.050]
+# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+cavity_range_m = [0.0, 0.150]
+# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_total_depth_m = 0.150
+
+[[family]]
+id = "glass_wool_96k"
+presets = ["glass_wool_96k_50mm"]
+# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+thicknesses_m = [0.050]
+# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+cavity_range_m = [0.0, 0.150]
+# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+max_total_depth_m = 0.150
