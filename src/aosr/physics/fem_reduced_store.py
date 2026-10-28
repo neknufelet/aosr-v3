@@ -58,6 +58,15 @@ def _canonical(document: dict[str, object]) -> bytes:
                       allow_nan=False).encode()
 
 
+def matrices_digest(matrices: ReducedMatrices) -> str:
+    """模型內容摘要：五個小矩陣照固定順序，各取 C 順序位元組的 SHA-256（同 manifest 逐陣列那一格的算法），
+    再把五個十六進位串接起來 SHA-256 一次。驗證報告與驗證收據靠它綁到被驗的那一份替身。"""
+    digest = hashlib.sha256()
+    for name in _ARRAYS:
+        digest.update(_sha(np.ascontiguousarray(getattr(matrices, name)).tobytes()).encode())
+    return digest.hexdigest()
+
+
 def _ledger_document(ledger: BuildLedger) -> dict[str, object]:
     return {"full_solves": ledger.full_solves, "snapshots": ledger.snapshots, "rank": ledger.rank,
             "rounds": [vars(item) for item in ledger.rounds], "stop_reason": ledger.stop_reason,

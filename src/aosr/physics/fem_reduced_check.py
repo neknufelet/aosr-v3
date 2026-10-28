@@ -17,6 +17,7 @@ from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import (
     FullOperators, FullSolver, ReducedModel, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
 )
+from aosr.physics.fem_reduced_store import matrices_digest
 
 THIRD_OCTAVE_REFERENCE_HZ = 1000.0
 
@@ -35,7 +36,8 @@ class Band:
 class ValidationReport:
     """每個座位（跨材料、喇叭、頻點取最大）的逐頻 dB 差與帶能量 dB 差，以及兩邊的原始複數聲壓。
 
-    聲壓陣列形狀是 (材料, 頻點, 喇叭, 座位)。
+    聲壓陣列形狀是 (材料, 頻點, 喇叭, 座位)。``model_digest`` 是被驗那份替身的模型內容摘要
+    （:func:`aosr.physics.fem_reduced_store.matrices_digest`），驗證收據靠它確認報告是對哪一份做的。
     """
 
     frequency_db_by_seat: Mapping[str, float]
@@ -45,6 +47,7 @@ class ValidationReport:
     full_solves: int
     full_pressure: NDArray[np.complex128]
     reduced_pressure: NDArray[np.complex128]
+    model_digest: str
 
 
 def third_octave_bands(frequencies_hz: Sequence[float]) -> tuple[Band, ...]:
@@ -119,7 +122,8 @@ def validate_reduced(
         band_db_by_seat={name: float(complete[i]) for i, name in enumerate(names)},
         partial_band_db_by_seat={} if partial is None else {
             name: float(partial[i]) for i, name in enumerate(names)},
-        bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced)
+        bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced,
+        model_digest=matrices_digest(model.matrices))
 
 
 def within_reduced_contract(report: ValidationReport, *, frequency_db: float, band_db: float) -> bool:
@@ -127,7 +131,14 @@ def within_reduced_contract(report: ValidationReport, *, frequency_db: float, ba
 
     兩把尺都由呼叫端從精度契約登記簿讀進來；部分覆蓋的軸端帶只報不判。不是有限數一律判不過。
     """
-    values = (*report.frequency_db_by_seat.values(), *report.band_db_by_seat.values())
+    return seats_within_contract(report.frequency_db_by_seat, report.band_db_by_seat,
+                                 frequency_db=frequency_db, band_db=band_db)
+
+
+def seats_within_contract(frequency_db_by_seat: Mapping[str, float], band_db_by_seat: Mapping[str, float], *,
+                          frequency_db: float, band_db: float) -> bool:
+    """同 :func:`within_reduced_contract`，只吃每座位的兩格數字；驗證收據的准用閘門用它拿抄下的數字重判。"""
+    values = (*frequency_db_by_seat.values(), *band_db_by_seat.values())
     return (all(math.isfinite(value) for value in values)
-            and all(value <= frequency_db for value in report.frequency_db_by_seat.values())
-            and all(value <= band_db for value in report.band_db_by_seat.values()))
+            and all(value <= frequency_db for value in frequency_db_by_seat.values())
+            and all(value <= band_db for value in band_db_by_seat.values()))
