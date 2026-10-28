@@ -398,6 +398,34 @@ def test_near_slant_interior_point_is_not_on_edge() -> None:
         assert abs(norm - np.sqrt(0.5)) <= 1e-6, (ulps, norm)
 
 
+def _below_by_floats(top: float, count: int) -> np.float64:
+    """上限往下數 ``count`` 個浮點數（不是 count 倍間距：二的冪次處往下的間距只有一半）。"""
+    value = np.float64(top)
+    for _ in range(count):
+        value = np.nextafter(value, -np.inf)
+    return value
+
+
+def test_depth_edge_tolerance_is_four_spacings_fixed() -> None:
+    """抓貼邊容差被放寬（#561 差異複查另記 1）：這題的距離是寫死的，不讀產品常數——參照跟產品共用常數時，
+    常數改成 16 兩邊一起寬、沒有題紅。契約是「厚度＋空腔 ≥ 上限 − 4·spacing(上限)」：
+    D=0.15 時離上限 4 個間距算貼邊、5 與 12 個不算；D=0.125 是二的冪次，往下 5 個浮點數只離 2.5 個間距、仍算貼邊，
+    往下 9 個（4.5 個間距）不算。
+    """
+    for top, inside_floats, outside_floats in ((0.15, (0, 4), (5, 12)), (0.125, (0, 5, 8), (9, 12))):
+        limit = gradient_search.DepthLimit(0, 1, top)
+        spacing = np.spacing(np.float64(top))
+        for count in inside_floats:
+            total = _below_by_floats(top, count)
+            assert top - total <= 4.0 * spacing
+            # 厚度 0、空腔就是和：加法不捨入，量的就是這個距離。
+            assert gradient_search.on_depth_edge(np.asarray([np.float64(0.0), total]), limit), (top, count)
+        for count in outside_floats:
+            total = _below_by_floats(top, count)
+            assert top - total > 4.0 * spacing
+            assert not gradient_search.on_depth_edge(np.asarray([np.float64(0.0), total]), limit), (top, count)
+
+
 def test_descent_rerun_is_bitwise_identical(runs: tuple[Path, dict[str, Record]]) -> None:
     """抓下降帶非決定性（亂數、字典序、計時進判斷）：同一起點重跑，θ、值、範數、步長、停止原因逐位相同。"""
     assert _descent(runs) == _descent(runs, "descent_again")
