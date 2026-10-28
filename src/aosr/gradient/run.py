@@ -245,6 +245,8 @@ def gated_surrogate(surrogate: Path, *, mesh_hash: str, physics_identity: str, p
 
 def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: SchemePoints) -> None:
     """替身的座位要照方案座位組的順序逐一相同、喇叭要是方案的那幾支（不然目標常數會取錯列）；
+    替身建模用的空氣（密度、聲速）要逐位等於方案場景的（不然材料阻抗用方案的空氣、縮減方程係數用替身的空氣，
+    一個目標混用兩組條件；網格不取密度，同網格、同座標、另一組空氣建的合法替身真的存在）；
     交給閘門比的座標要就是這份方案的座標（不然閘門比的是別的位置）。"""
     seats = tuple(point.receiver_id for point in scheme.receiver_set.points)
     if model.receiver_names != seats:
@@ -252,6 +254,11 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
                          "目標常數會取錯座位，拒收")
     if sorted(model.source_names) != sorted(scheme.speakers):
         raise ValueError(f"替身的喇叭 {list(model.source_names)} 跟方案的 {sorted(scheme.speakers)} 不同，拒收")
+    built = (model.density_kg_m3, model.sound_speed_m_s)
+    wanted = (scheme.scene.density_kg_m3, scheme.scene.sound_speed_m_s)
+    if built != wanted:
+        raise ValueError(f"替身建模用的空氣跟方案的不同（替身 密度 {built[0]!r}、聲速 {built[1]!r}；"
+                         f"方案 密度 {wanted[0]!r}、聲速 {wanted[1]!r}），拒收")
     _check_same_points(points, scheme_points_hex(scheme), "交給閘門的")
 
 

@@ -78,6 +78,10 @@ NARROWED_STEPS = {"max_steps": 3, "steps": 2}
 # 同一個根、另一份設定（只差下降步數上限）：資料夾名要跟著不同。
 OTHER_STEPS = {"max_steps": 2, "steps": 2}
 MOVED_SPEAKER, MOVED_SEAT, MOVE_M = "left", "front", 0.1
+OTHER_DENSITY, OTHER_SPEED = 1.18, 340.0
+# 同網格、同座標、另一組空氣建的替身（各有合格收據）：探針用的那份空氣兩格都換，拒收題各只換一格。
+AIR_SURROGATES = {"air-other": (OTHER_DENSITY, OTHER_SPEED), "other-density": (OTHER_DENSITY, SOUND_SPEED),
+                  "other-speed": (DENSITY, OTHER_SPEED)}
 WAIT_S = 600.0
 
 
@@ -114,7 +118,8 @@ def _current_identity() -> str:
 
 
 def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
-    """三份替身：驗過的（現在的物理身分＋收據）、沒有收據的、物理身分全零但有收據的。"""
+    """替身：驗過的（現在的物理身分＋收據）、沒有收據的、物理身分全零但有收據的，與同網格同座標、另一組空氣建的
+    三份（完整模型算子的空氣跟著換、各自做留出驗證寫收據）。"""
     base = _chain_model(cast(ReducedModel, request.getfixturevalue("model")))
     chain = dataclasses.replace(base, physics_identity=_current_identity())
     report = validate_reduced(chain, _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain),
@@ -126,6 +131,14 @@ def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
         save_reduced(surrogate, directory / name / "rom.npz")
         if receipt:
             save_validation_receipt(directory / name / "rom.npz", report, rulers=rulers, seconds=1.0)
+    full = _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain)
+    for name, (density, speed) in AIR_SURROGATES.items():
+        other = dataclasses.replace(chain, density_kg_m3=density, sound_speed_m_s=speed)
+        operators = dataclasses.replace(full, density_kg_m3=density, sound_speed_m_s=speed)
+        (directory / name).mkdir()
+        save_reduced(other, directory / name / "rom.npz")
+        save_validation_receipt(directory / name / "rom.npz", validate_reduced(other, operators, _holdouts()),
+                                rulers=rulers, seconds=1.0)
 
 
 def _moved(point: Point) -> Point:
@@ -275,7 +288,9 @@ def _rejections(directory: Path, folder: Path) -> Record:
              "outside_family": ("good", PRESET_TEXT.replace("glass_wool_24k_50mm", OUTSIDE_FAMILY), "scheme.json"),
              "five_presets": ("good", ",".join(PRESET_TEXT.split(",")[:-1]), "scheme.json"),
              "moved_speaker": ("good", PRESET_TEXT, "scheme-moved-speaker.json"),
-             "moved_seat": ("good", PRESET_TEXT, "scheme-moved-seat.json")}
+             "moved_seat": ("good", PRESET_TEXT, "scheme-moved-seat.json"),
+             "other_density": ("other-density", PRESET_TEXT, "scheme.json"),
+             "other_speed": ("other-speed", PRESET_TEXT, "scheme.json")}
     records: Record = {}
     for name, (surrogate, presets, scheme) in cases.items():
         root = directory / f"reject-{name}"
@@ -361,7 +376,7 @@ def _probe(directory: Path, folder: Path) -> Record:
     work = directory / "probe"
     (work / "source").mkdir(parents=True)
     shutil.copyfile(folder / "project.json", work / "source" / "project.json")
-    process = subprocess.run([sys.executable, str(PROBE), str(work)], cwd=work, env=_env(work),
+    process = subprocess.run([sys.executable, str(PROBE), str(work), str(directory / "air-other" / "rom.npz")], cwd=work, env=_env(work),
                              capture_output=True, text=True, timeout=WAIT_S * 3)
     assert process.returncode == 0, process.stdout + process.stderr
     return cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
@@ -698,6 +713,19 @@ def test_resume_rejects_tampered_project_points(runs: tuple[Path, Record], kind:
     assert record["unchanged"] is True
 
 
+@pytest.mark.parametrize(("case", "surrogate"), (("other_density", "other-density"), ("other_speed", "other-speed")))
+def test_start_rejects_surrogate_built_with_other_air(runs: tuple[Path, Record], case: str, surrogate: str) -> None:
+    """審查（修補三）：同網格、同座標、物理身分相同、收據合格，只有建模用的密度或聲速跟方案不同的替身拿來 start：
+    回 1，標準錯誤說替身建模用的空氣跟方案的不同並列出兩邊的值，根底下沒建資料夾。接續那一側走同一個核對函式。"""
+    record = _rejection(runs, case)
+    assert record["code"] == 1, record["stderr"]
+    density, speed = AIR_SURROGATES[surrogate]
+    stderr = str(record["stderr"])
+    assert "替身建模用的空氣跟方案的不同" in stderr
+    assert f"替身 密度 {density!r}、聲速 {speed!r}；方案 密度 {DENSITY!r}、聲速 {SOUND_SPEED!r}" in stderr
+    assert record["root_entries"] == []
+
+
 def test_same_root_other_settings_gets_own_folder(runs: tuple[Path, Record]) -> None:
     """抓資料夾名沒把設定算進去（換一份設定開始，撞進同一個資料夾被當成「已存在」、或蓋掉前一場）：同一個根、
     同一份方案與替身、另一份設定，start 也要回 0，根底下兩個資料夾名不同，各自的 project.json 記各自的設定指紋。"""
@@ -818,8 +846,8 @@ def test_rejects_root_under_web_searches(runs: tuple[Path, Record]) -> None:
 
 
 def test_objective_uses_scheme_air_through_config_layer(runs: tuple[Path, Record]) -> None:
-    """抓重建目標時自己拿產品預設空氣（替身是用方案的空氣建的）：方案場景的密度與聲速換成 1.18／340 後重建的目標，
-    在樣板起點的值逐位等於探針自己用設定層配方（construction_environment）造的那一份，而且跟原方案重建的不同。"""
+    """抓重建目標時自己拿產品預設空氣：方案場景與替身建模的空氣都換成 1.18／340（替身另建、有合格收據）後重建的目標，
+    在樣板起點的值逐位等於探針自己用設定層配方（construction_environment）造的那一份，而且跟原方案原替身重建的不同。"""
     air = cast(Record, _probe_section(runs, "air"))
     assert air["rebuilt"] == air["expected"]
     assert air["rebuilt"] != air["original"]
