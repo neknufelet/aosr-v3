@@ -50,6 +50,7 @@ from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one,
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from tests.engine.test_fem_reduced import model as model, operators as operators
+from tests.engine._scheme_cache import shared_json
 from tests.engine._precision_contracts import contract_value
 from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
@@ -143,8 +144,19 @@ def chain_model(model: ReducedModel) -> ReducedModel:
 
 
 @pytest.fixture(scope="module")
-def runs(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, Record]]:
-    directory = tmp_path_factory.mktemp("material-gradient")
+def runs(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+         ) -> tuple[Path, dict[str, Record]]:
+    """一場 pytest 只跑一次探針，平行的工人共用（照 test_material_gradient_loop 的做法、用 _scheme_cache.shared_json）：
+    worksteal 會把這一模組的題分給每一個工人，模組級夾具在每個工人各跑一次五分鐘的探針、彼此搶 CPU，
+    題數一多雲端那一片就撞上限。``-n 0``（master）不共用；讀的人只讀共用目錄、改檔一律先抄到自己的 tmp_path。"""
+    directory = (tmp_path_factory.mktemp("material-gradient") if worker_id == "master"
+                 else tmp_path_factory.getbasetemp().parent / "material-gradient-shared")
+    text = shared_json(tmp_path_factory, worker_id, "material-gradient", lambda: _probe(chain_model, directory))
+    return directory, cast(dict[str, Record], json.loads(text))
+
+
+def _probe(chain_model: ReducedModel, directory: Path) -> str:
+    directory.mkdir(parents=True, exist_ok=True)
     save_reduced(chain_model, directory / "model.npz")
     cases = {name: {"presets": list(presets), "theta": [value.hex() for value in _probe_point(_designs(name))],
                     "step": DIFFERENCE_STEP, "descent": name == DESCENT_CASE} for name, presets in CASES.items()}
@@ -158,7 +170,7 @@ def runs(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory) ->
     process = subprocess.run([sys.executable, str(PROBE), str(directory)], cwd=directory, env=env,
                              capture_output=True, text=True, timeout=600)
     assert process.returncode == 0, process.stdout + process.stderr
-    return directory, cast(dict[str, Record], json.loads((directory / "output.json").read_text(encoding="utf-8")))
+    return (directory / "output.json").read_text(encoding="utf-8")
 
 
 # ---- numpy 參考：既有替身求值＋既有評分程式 ----
