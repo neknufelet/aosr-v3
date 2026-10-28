@@ -31,7 +31,7 @@ max_per_round = 3
 improvement_threshold = 0.05
 # 最多跑幾輪；到了停、停止原因記「輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
 max_rounds = 10
-# 整場最多求幾次目標（算次數不算秒數；值＋梯度算一次，線搜尋每個試探都算一次）；下一輪最壞情況會超過就不開、記「求值到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 求值次數上限（算次數不算秒數；值＋梯度算一次，線搜尋每個試探都算一次）；限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多；下一輪最壞情況會超過就不開、記「求值到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
 max_evaluations = 2000
 
 # 樣板家族：同一種材料（同流阻）不同厚度、有沒有空腔；第一版只有玻璃棉三個密度。

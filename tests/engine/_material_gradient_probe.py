@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -12,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.construction_presets import load_construction_presets
-from aosr.config.material_gradient import load_material_gradient_settings
+from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
 from aosr.config.porous_model_ranges import load_porous_model_ranges
@@ -69,6 +70,15 @@ def _impedances(designs: tuple[gradient_search.SurfaceDesign, ...], theta: np.nd
         rows.append(np.asarray(surface_impedance(material, jnp.asarray(frequencies), air=air, ranges=ranges)[0]))
         offset += len(design.variables)
     return _complex(np.asarray(rows))
+
+
+def _box_only(objective: gradient_search.ChainObjective, start: np.ndarray,
+              bounds: tuple[np.ndarray, np.ndarray], settings: MaterialGradientSettings,
+              step_gradient: Callable[[jax.Array], jax.Array]) -> Record:
+    """只守盒界（limits=()）的獨立一段：空腔會貼 0.150 上界被往外推，守的是盒界遮罩本身（#561 審查第 9 條）。"""
+    box_only = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=())
+    return {"box_only": _steps(box_only),
+            "box_only_gradients": [_hex(step_gradient(jnp.asarray(step.theta))) for step in box_only.steps]}
 
 
 def main(directory: Path) -> None:
@@ -136,6 +146,7 @@ def main(directory: Path) -> None:
                          "value": float(snapped_value).hex()},
                 "retune": _steps(retuned), "single_descent": _steps(single_descent),
             })
+            row.update(_box_only(objective, start, bounds, settings, step_gradient))
         output[name] = row
     (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
 

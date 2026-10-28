@@ -372,12 +372,22 @@ def compiled_evaluator(objective: ChainObjective) -> Evaluator:
     return evaluator
 
 
-def _limit_room(values: FloatVector, limit: DepthLimit) -> np.floating:
-    """這一面在 θ 的精度下還能放的最大空腔（沒有空腔層時是厚度能到的最大值）。"""
+DEPTH_EDGE_ULPS: Final = 4
+
+
+def on_depth_edge(values: FloatVector, limit: DepthLimit) -> bool:
+    """這一面貼在總深度那條邊上：「厚度＋空腔」（沒有空腔層就是厚度）不小於上限減 ``DEPTH_EDGE_ULPS`` 個
+    上限的浮點間距（在 θ 的精度下算）。
+
+    投影與投影梯度共用這一個契約：:func:`project_to_limits` 投到斜邊上的點（含空腔切到下界的那個角）
+    一定滿足它，:func:`_projected_gradient_norm` 也只用它判哪一面貼邊。容差是浮點捨入的量級：斜邊上的點
+    「上限減厚度」往下退成可行時離上限一兩個間距；離邊超過容差的內點不算貼邊（#561 審查 B1）。
+    """
     dtype = values.dtype.type
-    if limit.cavity_index is None:
-        return dtype(limit.max_total_m)
-    return _depth_room(dtype(limit.max_total_m), values[limit.thickness_index])
+    top = dtype(limit.max_total_m)
+    total = values[limit.thickness_index] + (values[limit.cavity_index] if limit.cavity_index is not None
+                                             else dtype(0.0))
+    return bool(total >= top - dtype(DEPTH_EDGE_ULPS) * np.spacing(top))
 
 
 def _within_limits(values: FloatVector, limits: Sequence[DepthLimit]) -> bool:
@@ -428,6 +438,8 @@ def project_to_limits(moved: FloatVector, lower: FloatVector, upper: FloatVector
         thickness = min(max(along, thickness_low), thickness_high)
         cavity = min(_depth_room(top, thickness), high[cavity_index])
         if cavity < low[cavity_index]:
+            # 空腔切到下界：空腔就放在下界（角上，下界那條限制也要判得到作用），厚度回算成「上限減下界」的
+            # 最大可行值；這個角離上限在捨入量級內，on_depth_edge 判得到貼斜邊（#561 審查 B1）。
             cavity = low[cavity_index]
             thickness = min(_depth_room(top, cavity), high[thickness_index])
         result[thickness_index], result[cavity_index] = thickness, cavity
@@ -459,8 +471,7 @@ def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.A
     blocked = ((theta <= lower) & (gradient > 0)) | ((theta >= upper) & (gradient < 0))
     masked = jnp.where(blocked, jnp.zeros_like(gradient), gradient)
     values, raw = np.asarray(theta), np.asarray(gradient)
-    on_edge = [limit for limit in limits if values[limit.thickness_index if limit.cavity_index is None
-                                                   else limit.cavity_index] >= _limit_room(values, limit)]
+    on_edge = [limit for limit in limits if on_depth_edge(values, limit)]
     if not on_edge:
         return float(jnp.linalg.norm(masked))
     adjusted = np.asarray(masked).copy()

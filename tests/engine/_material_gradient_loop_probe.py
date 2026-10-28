@@ -184,6 +184,47 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
                        "candidate_values": [item.value.hex() for item in single.confirmed]}}
 
 
+def _edge(problem: Record, base: MaterialGradientSettings) -> Record:
+    """審查 B1 的重現參數：空腔切到下界那個角。投影後在那裡量投影梯度範數（下降 0 步那一列記的），
+    再用線性目標 −2t−c 下降，看停在哪一個原因、走了幾步。"""
+    case = cast(Record, problem["edge"])
+    top = float.fromhex(cast(str, case["top"]))
+    lower = np.asarray([float.fromhex(value) for value in cast(list[str], case["lower"])])
+    upper = np.asarray([top, top])
+    limits = (gradient_search.DepthLimit(0, 1, top),)
+    theta = gradient_search.project_to_limits(np.asarray([1.0, -1.0]), lower, upper, limits)
+    settings = base.descent.model_copy(update={"max_steps": 3, "gradient_norm_stop": 0.1})
+    rows: Record = {"theta": _hex(theta)}
+    for name, weights in (("flat", (1.0, 1.0)), ("linear", (2.0, 1.0))):
+        def objective(values: jax.Array, weights: tuple[float, float] = weights) -> tuple[
+                jax.Array, StageOneObjectiveArrays]:
+            value = -weights[0] * values[0] - weights[1] * values[1]
+            return value, StageOneObjectiveArrays(value[None], value[None], value, value, value)
+        result = gradient_search.projected_descent(objective, theta, (lower, upper), settings, limits=limits)
+        rows[name] = {"stop_reason": result.stop_reason, "steps": len(result.steps) - 1,
+                      "norms": [step.gradient_norm.hex() for step in result.steps]}
+    return rows
+
+
+def _threshold_edge(problem: Record, base: MaterialGradientSettings) -> Record:
+    """改善恰等於門檻不接受：同一輪先量最好的改善 X，門檻設 X 再跑一次、設比 X 小一個浮點數再跑一次。"""
+    presets = load_construction_presets(config_path("construction_presets.toml"))
+    surfaces = tuple((str(item[0]), item[1]) for item in cast(list[list[str | None]], problem["threshold_surfaces"]))
+    designs = gradient_search.designs_from_presets(surfaces, base, presets)
+    objective = synthetic_objective(designs, [0])
+    start = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
+    first = loop.confirmation_round(objective, start, designs, base, budget_left=10**6)
+    best = max(item.improvement for item in first.confirmed)
+    rows: Record = {"best": best.hex()}
+    for name, threshold in (("equal", best), ("below", float(np.nextafter(best, -np.inf)))):
+        settings = _settings(base, {"improvement_threshold": threshold})
+        again = loop.confirmation_round(objective, start, designs, settings, budget_left=10**6)
+        rows[name] = {"threshold": threshold.hex(), "best": max(item.improvement for item in again.confirmed).hex(),
+                      "accepted": again.accepted.candidate_id if again.accepted is not None else None,
+                      "stop_reason": again.stop_reason}
+    return rows
+
+
 def main(directory: Path) -> None:
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     base = load_material_gradient_settings(config_path("material_gradient.toml"))
@@ -191,6 +232,8 @@ def main(directory: Path) -> None:
     output: Record = {"synthetic": {name: _synthetic(directory, name, cast(Record, case), base)
                                     for name, case in cast(dict[str, object], problem["synthetic"]).items()}}
     synthetic_seconds = time.perf_counter() - clock
+    output["edge"] = _edge(problem, base)
+    output["threshold_edge"] = _threshold_edge(problem, base)
     if problem.get("surrogate"):
         clock = time.perf_counter()
         output["surrogate"] = _surrogate(directory, problem, base)

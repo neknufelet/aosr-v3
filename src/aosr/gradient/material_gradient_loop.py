@@ -3,11 +3,12 @@
 找法照決策紙 ``stage-three-gradient-objective-low-frequency-lane.md``「決定」第 3 條：在可行解重算梯度，
 用「梯度 × 實際規格跳距（帶方向）」估每面換規格的變化、提出少量候選；入選候選從目前解出發、所有面的空腔
 做有限步數的梯度重調、再用整房目標比，基準方案也用同樣步數重調，改善超過門檻才接受；在設定的候選數與
-計算預算內沒有找到超過門檻的可行替換就停；候選數、輪數、總求值次數都有上限，停下時記原因。
+計算預算內沒有找到超過門檻的可行替換就停；候選數、輪數、求值次數都有上限，停下時記原因。求值次數上限
+限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
 
 候選的**產生**（:func:`candidates_from_gradient`）跟候選的**確認、停止與帳本**（:func:`confirmation_round`、
 :func:`run_rounds`）分開：今天候選只有「同一面、同一家族、換到相鄰的合法厚度」一種，不換樣板（紙第 4 條）。
-這裡只比替身的低頻目標、**不查大峰**——大峰要完整 Python 評分，是終點完整模型重算那一支的事。
+本模組只執行替身低頻目標的候選比較；尚未實作決策紙第 2 條要求的候選確認與終點大峰檢查，待完整模型確認階段補齊。
 
 純函式，沒有命令列、沒有行程、不印東西；同一起點重跑逐位相同（秒數除外）。帳本是唯一的接續來源：
 :func:`resume_rounds` 讀回帳本、丟掉最後一列決定之後的半輪、從那裡重跑，跑完的帳本跟一口氣跑完的逐值相同。
@@ -194,7 +195,8 @@ def line_search_trials(settings: DescentSettings) -> int:
 def round_evaluation_bound(settings: MaterialGradientSettings, candidate_count: int) -> int:
     """一輪最壞要求幾次目標：梯度一次；基準與每個候選各一段重調，每段起點一次＋最多 K 步 × 每步最多試探數。
 
-    沒有候選的輪只有梯度那一次。預算照這個最壞值判：開得了的輪一定跑得完，整場求值次數不會超過上限。
+    沒有候選的輪只有梯度那一次。預算照這個最壞值判：開得了的輪一定跑得完，帳本記的求值次數不會超過上限——
+    限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
     """
     if candidate_count < 0:
         raise ValueError("候選數不可為負")
@@ -316,8 +318,9 @@ def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequ
         if result.opened:
             reason, bound = _loop_stop(result, round_index + 1, total, designs, settings)
             theta = result.theta
-            value = result.value if result.value is not None else value
-            components = result.components if result.components is not None else components
+            if result.baseline is not None and result.value is not None and result.components is not None:
+                # 有重調才換值；沒有候選的輪 θ 原樣，值與分項沿用起點那一列（帳本核的就是這件事）。
+                value, components = result.value, result.components
         else:
             reason, bound = LOOP_STOP_MAX_EVALUATIONS, result.bound
         decision = RoundDecision(
@@ -387,6 +390,7 @@ def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVecto
 
     ``ledger_path`` 要已經寫好前段（庚一的連續下降、取規格、重調），最後一列的 θ 要逐位等於 ``theta_feasible``——
     帳本是接續的唯一來源，起點要在帳本裡。停止原因是封閉集合（``LOOP_STOP_REASONS``）。回的結果從帳本讀回組成。
+    求值次數上限限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
     """
     theta = checked_theta(theta_feasible, designs)
     _, rows = read_ledger(ledger_path, expected_header=header)
@@ -399,12 +403,29 @@ def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVecto
     return _read_result(ledger_path, header)
 
 
+def _check_should_continue(decision: RoundDecision, start: _LoopStart, designs: Sequence[SurfaceDesign],
+                           settings: MaterialGradientSettings) -> None:
+    """最後一列決定沒有停止原因時，照設定重算一次「該不該停」：輪數到上限、或下一輪最壞值放不進剩下的預算、
+    或記的下一輪最壞值跟重算的不同，都是帳本跟設定矛盾，拒收、不開輪（#561 審查 B2）。"""
+    limits = settings.candidates
+    if start.round >= limits.max_rounds:
+        raise ValueError(f"帳本最後一列決定（第 {start.round - 1} 輪）沒有停止原因，但照設定已到輪數上限 "
+                         f"{limits.max_rounds}（應記「{LOOP_STOP_MAX_ROUNDS}」）；帳本與設定矛盾，不接續")
+    bound = round_evaluation_bound(settings, _candidate_count(start.theta, designs, settings))
+    if start.total + bound > limits.max_evaluations:
+        raise ValueError(f"帳本最後一列決定沒有停止原因，但累計 {start.total} 次加下一輪最壞 {bound} 次超過求值上限 "
+                         f"{limits.max_evaluations}（應記「{LOOP_STOP_MAX_EVALUATIONS}」）；帳本與設定矛盾，不接續")
+    if decision.next_round_bound != bound:
+        raise ValueError(f"帳本記的下一輪最壞求值次數 {decision.next_round_bound} 跟照設定重算的 {bound} 不同，不接續")
+
+
 def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
                   ledger_path: Path, header: MaterialGradientHeader) -> LoopResult:
     """讀回帳本接著跑：標頭（替身、面、變數、設定指紋）跟這一次不一樣就拒收。
 
     最後一列決定之前的輪算完成，之後沒寫完的半輪丟掉（帳本截到那一列）重跑；沒有任何決定列就從前段最後一列起跑。
     已經以停止原因收尾的帳本不再求值，直接交回。θ 從帳本讀回是雙精度；累計求值次數接帳本記的（丟掉的半輪不算）。
+    最後一列決定沒有停止原因、但照設定該停（輪數或預算）的帳本拒收，不開輪。
     """
     _, rows = read_ledger(ledger_path, expected_header=header)
     finished = _finished(rows)
@@ -418,8 +439,9 @@ def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], s
         last = rows[decisions[-1]]
         if last.decision is None or last.round is None:
             raise ValueError("決定列缺內容")
-        truncate_rows(ledger_path, header, decisions[-1] + 1)
         start = _LoopStart(np.asarray(last.theta(), dtype=np.float64), last.value, last.components, last.round + 1,
                            last.decision.total_evaluations, decisions[-1] + 1)
+        _check_should_continue(last.decision, start, designs, settings)
+        truncate_rows(ledger_path, header, decisions[-1] + 1)
     _continue_rounds(objective, start, designs, settings, ledger_path, header)
     return _read_result(ledger_path, header)

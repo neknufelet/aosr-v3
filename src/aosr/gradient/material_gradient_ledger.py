@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.gradient.material_gradient import (
+    LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
     LOOP_STOP_REASONS, STOP_REASONS, DescentResult, SnapResult, SurfaceDesign, design_names,
 )
 
@@ -130,6 +131,8 @@ class RoundDecision(BaseModel):
             raise ValueError("有候選才有基準重調，沒有候選就沒有基準值")
         if self.round_evaluations > self.total_evaluations:
             raise ValueError("這一輪的求值次數不可大於累計")
+        if not self.outcomes and self.round_evaluations not in (0, 1):
+            raise ValueError("沒有候選結果的輪求值只能是 0 次（沒開）或 1 次（只算了梯度、沒有候選）")
         if self.baseline_value is not None and any(
                 outcome.improvement != self.baseline_value - outcome.value for outcome in self.outcomes):
             raise ValueError("改善必須等於基準重調後的值減候選重調後的值")
@@ -318,13 +321,14 @@ def _round_blocks(rows: Sequence[MaterialGradientRow], first: int) -> list[list[
     return blocks
 
 
-def _check_round(block: Sequence[MaterialGradientRow], start_theta: tuple[str, ...] | None,
-                 is_last_row_of_ledger: bool) -> tuple[str, ...] | None:
+def _check_round(block: Sequence[MaterialGradientRow], start: MaterialGradientRow | None,
+                 is_last_row_of_ledger: bool) -> MaterialGradientRow | None:
     """一輪的列序：（基準重調＋（跳點＋候選重調）×n＋決定）或只有決定；最後一輪可以沒寫完。
 
-    基準的起點、零候選輪的 θ 都要等於上一輪交出去的 θ（或前段最後一列）；跳點的 θ 要等於它的重調起點；
-    決定列的基準值、每個候選的值與順序、接受的 θ 要跟前面的列一致。回這一輪交出去的 θ（沒寫完回 None）。
+    ``start`` 是這一輪的起點列（上一輪的決定列，第 0 輪是前段最後一列）。基準的起點要等於它的 θ；
+    跳點的 θ 要等於它的重調起點；決定列跟前面的列一致（見 :func:`_check_decision`）。回這一輪的決定列（沒寫完回 None）。
     """
+    start_theta = start.theta_hex if start is not None else None
     label = f"第 {block[0].round} 輪"
     decision_row_ = block[-1] if block[-1].phase == "round_decision" else None
     body = block[:-1] if decision_row_ is not None else block
@@ -356,11 +360,34 @@ def _check_round(block: Sequence[MaterialGradientRow], start_theta: tuple[str, .
         candidates.append((str(jump.candidate), jump, retune))
     if decision_row_ is None:
         return None
-    _check_decision(label, decision_row_, start_theta, baseline, candidates, is_last_row_of_ledger)
-    return decision_row_.theta_hex
+    _check_decision(label, decision_row_, start, baseline, candidates, is_last_row_of_ledger)
+    return decision_row_
 
 
-def _check_decision(label: str, row: MaterialGradientRow, start_theta: tuple[str, ...] | None,
+def _check_stop_reason(label: str, row: MaterialGradientRow, decision: RoundDecision) -> None:
+    """停止原因要跟決定內容對得上（#561 審查 B3）：
+
+    「沒有候選」⇔ 沒有候選結果、沒有基準值、這一輪求值恰 1 次（梯度那一次）；
+    「求值到上限」而這一輪沒開 ⇔ 沒有候選結果、求值 0 次、記了下一輪最壞值；
+    「已確認候選內沒有超過門檻」⇔ 有候選結果、沒接受；接受了候選時停止原因只准沒有、「輪數到上限」或「求值到上限」，
+    沒有停止原因與「求值到上限」要記下一輪最壞值（判預算用的那個數）。
+    """
+    reason, empty = row.stop_reason, not decision.outcomes
+    if (reason == LOOP_STOP_NO_CANDIDATES) != (empty and decision.round_evaluations == 1):
+        raise ValueError(f"{label}：「{LOOP_STOP_NO_CANDIDATES}」只配沒有候選結果、求值恰 1 次的輪，記的是「{reason}」")
+    not_opened = empty and decision.round_evaluations == 0
+    if not_opened and (reason != LOOP_STOP_MAX_EVALUATIONS or decision.next_round_bound is None):
+        raise ValueError(f"{label}：沒開的輪只能記「{LOOP_STOP_MAX_EVALUATIONS}」並帶下一輪最壞值")
+    if (reason == LOOP_STOP_NO_IMPROVEMENT) != (not empty and decision.accepted is None):
+        raise ValueError(f"{label}：「{LOOP_STOP_NO_IMPROVEMENT}」只配有候選結果、沒有接受的輪，記的是「{reason}」")
+    if decision.accepted is not None:
+        if reason not in (None, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_MAX_EVALUATIONS):
+            raise ValueError(f"{label}：接受了候選的輪不可記「{reason}」")
+        if (decision.next_round_bound is None) != (reason == LOOP_STOP_MAX_ROUNDS):
+            raise ValueError(f"{label}：接受了候選而沒停或停在求值上限的輪要記下一輪最壞值，停在輪數上限的不記")
+
+
+def _check_decision(label: str, row: MaterialGradientRow, start: MaterialGradientRow | None,
                     baseline: Sequence[MaterialGradientRow],
                     candidates: Sequence[tuple[str, MaterialGradientRow, Sequence[MaterialGradientRow]]],
                     is_last_row_of_ledger: bool) -> None:
@@ -377,10 +404,14 @@ def _check_decision(label: str, row: MaterialGradientRow, start_theta: tuple[str
         raise ValueError(f"{label}：決定列的基準值不是基準重調最後一列的值")
     if baseline:
         chosen = next((retune for name, _, retune in candidates if name == decision.accepted), baseline)
-        if row.theta_hex != chosen[-1].theta_hex or row.value != chosen[-1].value:
-            raise ValueError(f"{label}：決定列交出去的 θ 不是{'接受的候選' if decision.accepted else '基準'}重調後的 θ")
-    elif start_theta is not None and row.theta_hex != start_theta:
-        raise ValueError(f"{label}：沒有候選的輪交出去的 θ 必須是原樣")
+        if (row.theta_hex, row.value, row.components) != (chosen[-1].theta_hex, chosen[-1].value,
+                                                          chosen[-1].components):
+            raise ValueError(f"{label}：決定列交出去的 θ、值或分項不是"
+                             f"{'接受的候選' if decision.accepted else '基準'}重調末列的")
+    elif start is not None and (row.theta_hex, row.value, row.components) != (
+            start.theta_hex, start.value, start.components):
+        raise ValueError(f"{label}：沒有重調的輪交出去的 θ、值與分項必須是起點那一列的原樣")
+    _check_stop_reason(label, row, decision)
     if row.stop_reason is not None and not is_last_row_of_ledger:
         raise ValueError(f"{label}：帶迴圈停止原因的決定列必須是整本帳的最後一列")
     if row.stop_reason is None and decision.accepted is None:
@@ -400,10 +431,10 @@ def check_rows(header: MaterialGradientHeader, rows: Sequence[MaterialGradientRo
             raise ValueError(f"第 {index} 列的 Δθ 長度不等於變數數")
     _check_segments(rows)
     pre_loop = _check_pre_loop(rows, surface_ids)
-    start_theta = rows[pre_loop - 1].theta_hex if pre_loop else None
+    start = rows[pre_loop - 1] if pre_loop else None
     total = 0
     for block in _round_blocks(rows, pre_loop):
-        start_theta = _check_round(block, start_theta, block[-1] is rows[-1])
+        start = _check_round(block, start, block[-1] is rows[-1])
         last = block[-1]
         if last.decision is not None:
             spent = 1 + sum(row.evaluations or 0 for row in block) if last.decision.outcomes else (

@@ -48,6 +48,9 @@ SINGLE_THICKNESS: list[list[str | None]] = [["floor", "glass_wool_24k_50mm"], ["
                                             ["xL", "glass_wool_24k_50mm"], ["y0", "glass_wool_96k_50mm"],
                                             ["yL", None], ["ceiling", "glass_wool_24k_50mm"]]
 SEGMENTS = ("baseline_retune", "candidate_retune")
+# 審查 B1 的重現參數：一個厚度＋空腔，上界都是總深 D、空腔下界比厚度下界高，投 [1, −1] 會走到「空腔切到下界」那個角。
+EDGE_TOP = 0.10300852633199976
+EDGE_LOWER = (0.001, 0.037896731460315546)
 
 
 def _hand_round_bound(settings: MaterialGradientSettings, candidates: int) -> int:
@@ -68,7 +71,8 @@ def _problem() -> Record:
         "max_evaluations": {"surfaces": FOUR_SURFACES, "override": {"max_evaluations": bound}},
         "budget_too_small": {"surfaces": FOUR_SURFACES, "override": {"max_evaluations": bound - 1}},
     }
-    return {"synthetic": synthetic, "surrogate": True, "presets": list(CASES[DESCENT_CASE]), "purpose": PURPOSE,
+    edge = {"top": EDGE_TOP.hex(), "lower": [value.hex() for value in EDGE_LOWER]}
+    return {"synthetic": synthetic, "edge": edge, "threshold_surfaces": FOUR_SURFACES, "surrogate": True, "presets": list(CASES[DESCENT_CASE]), "purpose": PURPOSE,
             "receivers": _receivers().model_dump(mode="json")}
 
 
@@ -331,6 +335,19 @@ def test_round_accepts_only_above_threshold_and_hands_over_retuned_theta(runs: t
         assert rows[-1].stop_reason == gradient_search.LOOP_STOP_NO_IMPROVEMENT and [row.round for row in _decisions(rows)] == [0]
 
 
+def test_improvement_exactly_at_threshold_is_not_accepted(runs: tuple[Path, Record]) -> None:
+    """抓「超過」寫成「不小於」（#561 審查第 11 條）：同一輪先量最好的改善 X，門檻設成 X 再跑一輪不接受、
+    原因「已確認候選內沒有超過門檻」；門檻設成比 X 小一個浮點數就接受。兩次重跑量到的 X 逐位相同。"""
+    edge = cast(Record, runs[1]["threshold_edge"])
+    best = float.fromhex(cast(str, edge["best"]))
+    equal, below = cast(Record, edge["equal"]), cast(Record, edge["below"])
+    assert best > _settings().candidates.improvement_threshold
+    assert equal["threshold"] == equal["best"] == below["best"] == edge["best"]
+    assert equal["accepted"] is None and equal["stop_reason"] == gradient_search.LOOP_STOP_NO_IMPROVEMENT
+    assert float.fromhex(cast(str, below["threshold"])) == np.nextafter(best, -np.inf)
+    assert below["accepted"] is not None and below["stop_reason"] is None
+
+
 def test_round_evaluation_count_equals_actual_calls(runs: tuple[Path, Record]) -> None:
     """抓求值次數少數線搜尋的試探或多數：合成目標包一層每執行一次就加一的回呼，整場與單獨一輪各對一次；
     每輪記的次數也要等於梯度 1 次加各段下降記的次數，最壞值等於考卷自己數的。"""
@@ -462,6 +479,85 @@ def test_ledger_v2_rejects_tampered_rows(runs: tuple[Path, Record], tmp_path: Pa
         ledger.read_ledger(_tamper(source, tmp_path / "tampered.jsonl", edit))
 
 
+def _last_decision(documents: list[dict[str, object]]) -> dict[str, object]:
+    return next(item for item in reversed(documents) if item["phase"] == "round_decision")
+
+
+def _contradict(source: Path, target: Path, edit: str) -> Path:
+    """改決定列讓停止原因、分項或計數跟決定內容矛盾（#561 審查 B3），其他列不動。"""
+    documents = _documents(source)
+    row = _last_decision(documents)
+    decision = cast(dict[str, object], row["decision"])
+    if edit == "wrong_stop_reason":
+        row["stop_reason"] = gradient_search.LOOP_STOP_NO_CANDIDATES
+    elif edit == "accepted_but_no_improvement":
+        row["stop_reason"] = gradient_search.LOOP_STOP_NO_IMPROVEMENT
+    elif edit == "unopened_but_no_improvement":
+        row["stop_reason"] = gradient_search.LOOP_STOP_NO_IMPROVEMENT
+    elif edit == "unopened_without_bound":
+        decision["next_round_bound"] = None
+    elif edit == "no_candidates_zero_evaluations":
+        decision["round_evaluations"] = decision["total_evaluations"] = 0
+    elif edit == "empty_outcomes_two_evaluations":
+        decision["round_evaluations"] = decision["total_evaluations"] = 2
+    elif edit == "empty_outcomes_fabricated":
+        decision["round_evaluations"] = decision["total_evaluations"] = 700
+        row["value"] = 999.0
+    elif edit in ("wrong_components", "no_candidates_wrong_components"):
+        row["components"] = [999.0, 999.0]
+    elif edit == "no_candidates_wrong_value":
+        row["value"] = 999.0
+    return _rewrite(source, target, None, documents)
+
+
+@pytest.mark.parametrize(("source", "edit", "match"), (
+    ("surrogate", "wrong_stop_reason", "沒有候選"),
+    ("max_rounds", "accepted_but_no_improvement", "已確認候選內沒有超過門檻"),
+    ("budget_too_small", "unopened_but_no_improvement", "沒開的輪"),
+    ("budget_too_small", "unopened_without_bound", "沒開的輪"),
+    ("no_candidates", "no_candidates_zero_evaluations", "沒有候選"),
+    ("no_candidates", "empty_outcomes_two_evaluations", "0 次"),
+    ("no_candidates", "empty_outcomes_fabricated", "0 次"),
+    ("surrogate", "wrong_components", "分項"),
+    ("no_candidates", "no_candidates_wrong_components", "原樣"),
+    ("no_candidates", "no_candidates_wrong_value", "原樣"),
+))
+def test_ledger_v2_rejects_decision_contradictions(runs: tuple[Path, Record], tmp_path: Path, source: str, edit: str,
+                                                   match: str) -> None:
+    """抓讀回只驗結構、不驗停止原因與決定內容（#561 審查 B3，含審查者的三個實測）：有候選的輪改記「沒有候選」、
+    接受了候選卻記「沒有超過門檻」、沒開的輪記別的原因或缺下一輪最壞值、「沒有候選」的輪求值不是 1 次、
+    沒有候選結果的輪求值 2 次或捏造成 700 次、決定列分項不是被選重調末列的、沒重調的輪值或分項不是起點的，都拒收。
+    原檔照讀得進（竄改前是好帳本），接續也一樣拒收、檔案不被截。"""
+    record = _surrogate(runs) if source == "surrogate" else _synthetic(runs, source)
+    original = runs[0] / str(record["ledger"])
+    ledger.read_ledger(original)
+    tampered = _contradict(original, tmp_path / "contradicted.jsonl", edit)
+    with pytest.raises(ValueError, match=match):
+        ledger.read_ledger(tampered)
+    before = tampered.read_bytes()
+    with pytest.raises(ValueError, match=match):
+        loop.resume_rounds(_never_called, _record_designs(source), _record_settings(source), tampered,
+                           ledger.MaterialGradientHeader.model_validate(json.loads(before.splitlines()[0])))
+    assert tampered.read_bytes() == before
+
+
+def _record_designs(source: str) -> tuple[gradient_search.SurfaceDesign, ...]:
+    if source == "surrogate":
+        return _designs(DESCENT_CASE)
+    surfaces = SINGLE_THICKNESS if source == "no_candidates" else FOUR_SURFACES
+    return gradient_search.designs_from_presets(tuple((str(item[0]), item[1]) for item in surfaces), _settings(),
+                                                _presets())
+
+
+def _record_settings(source: str) -> MaterialGradientSettings:
+    """合成題各自的設定覆寫（跟 :func:`_problem` 同一份），標頭的設定指紋才對得上。"""
+    if source == "surrogate":
+        return _settings()
+    case = cast(dict[str, Record], _problem()["synthetic"])[source]
+    override = cast(dict[str, object], case["override"])
+    return _with_candidates(**override)
+
+
 def test_ledger_v2_rejects_other_surrogate_and_v1(chain_header: ledger.MaterialGradientHeader,
                                                   runs: tuple[Path, Record], tmp_path: Path) -> None:
     """抓拿別的替身的帳本接著用、v1 帳本照收：預期標頭替身雜湊不同拒收；標頭版本是 v1 拒收、訊息講明版本。"""
@@ -520,6 +616,30 @@ def test_resume_finished_ledger_returns_without_evaluating(runs: tuple[Path, Rec
                                {**chain_header.model_dump(), "settings_fingerprint": "f" * 64}))
 
 
+@pytest.mark.parametrize(("source", "fill_bound", "match"), (
+    ("max_rounds", False, "下一輪最壞值"),
+    ("max_rounds", True, "輪數上限"),
+    ("max_evaluations", False, "求值上限"),
+))
+def test_resume_rejects_ledger_that_should_have_stopped(runs: tuple[Path, Record], tmp_path: Path, source: str,
+                                                        fill_bound: bool, match: str) -> None:
+    """抓接續不重查輪數與預算（#561 審查 B2）：把「輪數到上限」（max_rounds=1）或「求值到上限」那一列的停止原因改成
+    null 再接續，不准開下一輪，要拒收、訊息講明是哪一條、檔案逐位不動。審查者的原樣重現（只清停止原因）在讀回就被拒
+    （接受了候選沒停卻沒記下一輪最壞值）；再補上下一輪最壞值讓讀回過關，接續照設定重算輪數仍拒收。"""
+    original = runs[0] / str(_synthetic(runs, source)["ledger"])
+    documents = _documents(original)
+    row = _last_decision(documents)
+    row["stop_reason"] = None
+    if fill_bound:
+        cast(dict[str, object], row["decision"])["next_round_bound"] = _hand_round_bound(_settings(), 3)
+    tampered = _rewrite(original, tmp_path / "unstopped.jsonl", None, documents)
+    before = tampered.read_bytes()
+    header = ledger.MaterialGradientHeader.model_validate(json.loads(before.splitlines()[0]))
+    with pytest.raises(ValueError, match=match):
+        loop.resume_rounds(_never_called, _record_designs(source), _record_settings(source), tampered, header)
+    assert tampered.read_bytes() == before
+
+
 # ---- 單精度：只量不登記 ----
 
 def test_single_precision_round_stays_float32_and_finite(runs: tuple[Path, Record]) -> None:
@@ -543,15 +663,24 @@ def _brute_nearest(point: NDArray[np.float64], low: NDArray[np.float64], high: N
     return float(min(distances.min(), edge.min()))
 
 
-def test_total_depth_projection_is_exact_nearest_point() -> None:
+@pytest.mark.parametrize("box", ("cavity_floor_zero", "cavity_floor_reachable"))
+def test_total_depth_projection_is_exact_nearest_point(box: str) -> None:
     """抓投影只切空腔、只投斜邊不夾端點、或投到斜邊外：隨機點（盒內外、斜邊兩側、靠端點）投完要可行，
-    距離不大於細格點暴力找的最近距離（相對差 1e-12 內），也不比它小超過格距（不是投到更近的不可行點）。"""
-    low, high, top = np.asarray([0.05, 0.0]), np.asarray([0.1, 0.15]), 0.15
+    距離不大於細格點暴力找的最近距離（相對差 1e-12 內），也不比它小超過格距（不是投到更近的不可行點）；
+    盒投影違反總深度的點，投完要被產品貼邊判法認成貼斜邊（投影與判法同一份契約，#561 審查 B1）。
+    第二個盒是審查者的參數：空腔下界夠高、斜邊端點落在空腔下界上，「空腔切到下界再回算厚度」那條路一定走到
+    （[1, −1] 投到那個角：空腔恰等於下界）；第一個盒的空腔下界 0 到不了那條路（審查第 1 條）。"""
+    if box == "cavity_floor_zero":
+        low, high, top = np.asarray([0.05, 0.0]), np.asarray([0.1, 0.15]), 0.15
+        extra = [np.asarray([0.2, 0.0]), np.asarray([0.12, 0.2]), np.asarray([0.0, 0.2]), np.asarray([0.09, 0.08])]
+    else:
+        low, high, top = np.asarray(EDGE_LOWER), np.asarray([EDGE_TOP, EDGE_TOP]), EDGE_TOP
+        extra = [np.asarray([1.0, -1.0]), np.asarray([0.2, -0.05]), np.asarray([0.09, 0.03]), np.asarray([0.2, 0.2])]
     limit = gradient_search.DepthLimit(0, 1, top)
     rng = np.random.default_rng(561)
-    points = [*rng.uniform([-0.05, -0.1], [0.25, 0.3], size=(60, 2)), np.asarray([0.2, 0.0]),
-              np.asarray([0.12, 0.2]), np.asarray([0.0, 0.2]), np.asarray([0.09, 0.08])]
+    points = [*rng.uniform([-0.05, -0.1], [0.25, 0.3], size=(60, 2)), *extra]
     spacing = float(np.hypot(*(high - low))) / 800
+    corner_hits = 0
     for point in points:
         projected = gradient_search.project_to_limits(np.asarray(point), low, high, (limit,))
         assert np.all(low <= projected) and np.all(projected <= high) and projected[0] + projected[1] <= top
@@ -559,6 +688,29 @@ def test_total_depth_projection_is_exact_nearest_point() -> None:
         brute = _brute_nearest(np.asarray(point), low, high, top)
         assert ours <= brute * (1.0 + 1e-12) + 1e-15, (point, projected)
         assert brute - ours <= spacing, (point, projected)
+        clipped = np.clip(point, low, high)
+        if clipped[0] + clipped[1] > top:
+            assert gradient_search.on_depth_edge(projected, limit), (point, projected)
+            corner_hits += int(projected[1] == low[1])
+    if box == "cavity_floor_reachable":
+        corner = gradient_search.project_to_limits(np.asarray([1.0, -1.0]), low, high, (limit,))
+        assert corner[1] == low[1] and gradient_search.on_depth_edge(corner, limit)
+        assert corner_hits
+
+
+def test_projected_corner_is_on_edge_and_linear_descent_stops(runs: tuple[Path, Record]) -> None:
+    """抓投影端點跟貼邊判法不同一份契約（#561 審查 B1，用審查者的參數，雙精度子行程）：[1, −1] 投到「空腔切到
+    下界」那個角，在那裡負梯度 [1, 1]／[2, 1] 都被斜邊與空腔下界擋住，投影梯度範數是 0；線性目標 −t−c 與 −2t−c
+    從那裡下降，第一步就停在「梯度夠小」、0 步，不是原地不動記「步數到上限」。"""
+    edge = cast(Record, runs[1]["edge"])
+    theta = np.asarray([float.fromhex(value) for value in cast(list[str], edge["theta"])])
+    limit = gradient_search.DepthLimit(0, 1, EDGE_TOP)
+    assert theta[1] == EDGE_LOWER[1] and theta[0] + theta[1] <= EDGE_TOP
+    assert gradient_search.on_depth_edge(theta, limit)
+    for name in ("flat", "linear"):
+        result = cast(Record, edge[name])
+        assert result["stop_reason"] == gradient_search.STOP_GRADIENT and result["steps"] == 0, (name, result)
+        assert [float.fromhex(value) for value in cast(list[str], result["norms"])] == [0.0], name
 
 
 def test_projection_leaves_feasible_points_and_single_variable_faces() -> None:
