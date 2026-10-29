@@ -403,7 +403,7 @@ def test_score_bound_holds_across_rms_floor(probe: Record, chain_model: ReducedM
 
 def test_score_bound_uses_each_weight_with_its_own_reference(chain_model: ReducedModel) -> None:
     """抓主項與穩健性的權重、參考接反（原 fixture 權重與參考都是 1，交換抓不到）：權重 0.7／0.3、參考 2.0／0.5 時，
-    上界等於考卷手算的 (ε+F)·0.7/2.0 + (2ε+F)·0.3/0.5。"""
+    上界等於考卷手算的 (ε+F)·0.7÷2.0 + (2ε+F)·0.3÷0.5。"""
     constants = objective_constants(chain_model.frequencies_hz, _score(), _receivers(), len(chain_model.source_names))
     custom = constants._replace(component_weights=np.asarray([0.7, 0.3]), worse_references=np.asarray([2.0, 0.5]))
     level, floor = 0.01, 0.001
