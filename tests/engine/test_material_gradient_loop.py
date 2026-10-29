@@ -441,11 +441,11 @@ def _renumbered(documents: list[dict[str, object]]) -> list[dict[str, object]]:
     return [{**item, "step": index} for index, item in enumerate(documents)]
 
 
-def test_ledger_v3_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None:
+def test_ledger_v4_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None:
     """抓帳本漏寫或改寫：讀回再寫一份逐位相同，讀回的停止原因、最後 θ、累計次數等於探針那一次的結果。"""
     source = runs[0] / str(_surrogate(runs)["ledger"])
     header, rows = ledger.read_ledger(source)
-    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v3"
+    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v4"
     copy = tmp_path / "copy.jsonl"
     ledger.write_ledger(copy, header, rows)
     assert copy.read_bytes() == source.read_bytes()

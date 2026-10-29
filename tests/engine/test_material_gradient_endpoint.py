@@ -32,7 +32,7 @@ from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Point, Wall
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
-from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, ConstantImpedance, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_check import seats_within_contract
 from aosr.physics.fem_reduced_store import save_reduced
@@ -66,6 +66,10 @@ ZERO_WITH_GAP = ("glass_wool_48k_50mm_gap50", *CASES["two_rigid"][1:])
 ZERO_WITHOUT_GAP = ("glass_wool_48k_50mm", *CASES["two_rigid"][1:])
 ZERO_THETA_WITH_GAP = (0.1, 0.0, 0.05, 0.04, 0.05, 0.05)
 ZERO_THETA_WITHOUT_GAP = (0.1, 0.05, 0.04, 0.05, 0.05)
+# 不貼（#561 辛三）：終點那一組的兩個 None 面改成保留原牆，一面固定阻抗、一面拿 96K 棉板 preset 的構造當原牆
+# （隨頻率變），兩種原牆都走到。數值只是一面牆，不是產品設定。
+KEPT_CONSTANT_PA_S_M = 1646.4
+KEPT_ASSEMBLY_PRESET = "glass_wool_96k_50mm"
 
 
 def _combined(front: NDArray[np.float64], back: NDArray[np.float64],
@@ -119,6 +123,16 @@ def _hex_list(values: tuple[float, ...]) -> list[str]:
     return [float(value).hex() for value in values]
 
 
+def _kept() -> dict[str, SurfaceMaterial]:
+    """終點那一組 None 面的原牆：第一面固定阻抗、第二面 96K 棉板構造（照構造預設清單那一份）。"""
+    constant_face, assembly_face = (
+        wall.wall_name() for wall, preset in zip(Wall.all(), ENDPOINT_PRESETS, strict=True) if preset is None)
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    by_id = {preset.id: preset for preset in _presets()}
+    return {constant_face: ConstantImpedance(impedance_pa_s_m=KEPT_CONSTANT_PA_S_M),
+            assembly_face: adapter.validate_python(by_id[KEPT_ASSEMBLY_PRESET].material)}
+
+
 @pytest.fixture(scope="module")
 def chain_model(model: ReducedModel) -> ReducedModel:
     return _chain_model(model)
@@ -135,6 +149,8 @@ def probe(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory) -
         "zero_cavity": {"with_gap": list(ZERO_WITH_GAP), "without_gap": list(ZERO_WITHOUT_GAP),
                         "theta_with_gap": _hex_list(ZERO_THETA_WITH_GAP),
                         "theta_without_gap": _hex_list(ZERO_THETA_WITHOUT_GAP)},
+        "kept": {"presets": list(ENDPOINT_PRESETS), "theta": _hex_list(ENDPOINT_THETA),
+                 "materials": {name: material.model_dump(mode="json") for name, material in _kept().items()}},
     }
     (directory / "problem.json").write_text(json.dumps(problem), encoding="utf-8")
     env = child_process_env(threads=1).copy()
@@ -160,7 +176,7 @@ def _one_face(cavity: float, settings: MaterialGradientSettings | None = None) -
         ("glass_wool_48k_50mm_gap50", *(None,) * (len(Wall.all()) - 1)), _settings(), _presets())
     materials = endpoint.materials_from_surfaces(designs, np.asarray([0.05, cavity]), settings or _settings())
     material = materials[Wall.all()[0]]
-    assert material is not None and material.backing == "rigid"
+    assert isinstance(material, Assembly) and material.backing == "rigid"
     assert all(materials[wall] is None for wall in Wall.all()[1:])
     layers: list[tuple[str, float]] = []
     for layer in material.layers:
@@ -231,7 +247,7 @@ def test_exported_material_comes_from_design_material() -> None:
     assert template is not None and isinstance(template.layers[0], PorousLayer)
     materials = endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
     exported = materials[Wall.all()[0]]
-    assert exported is not None and isinstance(exported.layers[0], PorousLayer)
+    assert isinstance(exported, Assembly) and isinstance(exported.layers[0], PorousLayer)
     assert exported.layers[0].flow_resistivity_pa_s_m2 == template.layers[0].flow_resistivity_pa_s_m2
 
 
@@ -487,7 +503,7 @@ def test_endpoint_big_peak_matches_stage_one_evaluator(probe: Record, chain_mode
 
 # ---- 方案牆面 ----
 
-def _lined_materials() -> dict[Wall, Assembly | None]:
+def _lined_materials() -> dict[Wall, SurfaceMaterial | None]:
     designs = gradient_search.wall_designs_from_presets(CASES["all_lined"], _settings(), _presets())
     theta = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
     return endpoint.materials_from_surfaces(designs, theta, _settings())
@@ -520,6 +536,45 @@ def test_scene_with_materials_rejects_rigid_wall() -> None:
     rigid = Wall.all()[-1]
     with pytest.raises(ValueError, match=rigid.wall_name()):
         endpoint.scene_with_materials(scheme.scene, {**materials, rigid: None})
+
+
+# ---- 不貼：保留方案原本的牆（#561 辛三） ----
+
+def test_kept_surface_chain_uses_original_wall_impedance(probe: Record) -> None:
+    """抓不貼的面在替身鏈裡被當剛性、或用了別的阻抗：兩面帶原牆（固定阻抗與構造各一）的鏈在同一個 θ 的值，逐位等於
+    把同一份產品 ``surface_impedance`` 算的原牆阻抗列直接換進樣板阻抗、遮罩那兩格放開，餵 ``reduced_pressures``＋
+    ``objective_from_pressures`` 的值；而且跟同兩面剛性（設計不帶原牆）的值不同。"""
+    kept = cast(Record, probe["kept"])
+    assert kept["chain_value"] == kept["control_value"]
+    assert kept["chain_value"] != kept["rigid_value"]
+
+
+def test_kept_surface_endpoint_impedance_equals_chain_row(probe: Record, chain_model: ReducedModel) -> None:
+    """抓終點完整模型用的原牆阻抗跟替身鏈不是同一份（換了頻率軸寫法或另一支函式）：``material_impedances`` 對不貼的面
+    交出的逐頻阻抗，逐位等於替身鏈建目標時用的那一列（``kept_impedance_rows``）；兩面都在、都不是剛性。"""
+    kept = cast(Record, probe["kept"])
+    endpoint_rows, chain_rows = cast(Record, kept["endpoint_rows"]), cast(Record, kept["chain_rows"])
+    assert set(endpoint_rows) == set(chain_rows) == set(_kept())
+    for name in _kept():
+        row = _decode_complex(chain_rows[name])
+        assert row.shape == (len(chain_model.frequencies_hz),) and np.all(np.isfinite(row)), name
+        np.testing.assert_array_equal(_decode_complex(endpoint_rows[name]), row)
+
+
+def test_scene_with_materials_writes_kept_walls_back() -> None:
+    """抓不貼的面匯出時寫成別的材料（或被當剛性拒收）：兩面帶原牆的設計匯出、寫進方案、存成 JSON 讀回，不貼的兩面
+    材料等於原牆那一份（固定阻抗與構造各一），有樣板的面等於 ``materials_from_surfaces`` 那一面。"""
+    scheme = Scheme.model_validate(_document())
+    designs = gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets(), kept=_kept())
+    materials = endpoint.materials_from_surfaces(designs, np.asarray(ENDPOINT_THETA), _settings())
+    document = scheme.model_dump(mode="json")
+    document["scene"] = endpoint.scene_with_materials(scheme.scene, materials).model_dump(mode="json")
+    zones = Scheme.model_validate(json.loads(json.dumps(document))).scene.surface_zones_by_wall
+    assert zones is not None
+    kept = _kept()
+    for wall, preset in zip(Wall.all(), ENDPOINT_PRESETS, strict=True):
+        name = wall.wall_name()
+        assert zones[name][0].material == (kept[name] if preset is None else materials[wall]), name
 
 
 def test_chain_operators_rows_match_chain_model(model: ReducedModel, chain_model: ReducedModel) -> None:

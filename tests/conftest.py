@@ -404,6 +404,7 @@ def real_repo_left_untouched() -> Iterator[None]:
 # 第四段：共用慢夾具的檔，照這個順序排在整份收集的最前面（相對順序照寫的）。
 SHARED_FIXTURE_FIRST = (
     "tests/engine/test_material_gradient_cli.py",
+    "tests/engine/test_material_gradient_endpoint_cli.py",
     "tests/engine/test_material_gradient_loop.py",
 )
 

@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import cast
 
+from pydantic import TypeAdapter
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -22,8 +24,10 @@ from aosr.config.porous_model_ranges import PorousModelRanges, load_porous_model
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction import surface_impedance
+from aosr.materials.construction_models import Assembly, SurfaceMaterial
 from aosr.materials.construction_diff import build_template, surface_impedance_from_parameters
 from aosr.physics.fem_reduced import ReducedModel, export_room_operators
+from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
@@ -67,7 +71,7 @@ def _zero_cavity(case: Record, model: ReducedModel, constants: StageOneObjective
     chain_impedance = surface_impedance_from_parameters(template, parameters, jnp.asarray(axis), air=air)
     materials = endpoint.materials_from_surfaces(with_gap, theta_gap, settings)
     exported = materials[Wall.all()[0]]
-    assert exported is not None
+    assert isinstance(exported, Assembly)
     exported_impedance, _ = surface_impedance(exported, jnp.asarray(axis), air=air, ranges=ranges)
     gap_value, _ = gradient_search.chain_objective(model, with_gap, constants, air=air, ranges=ranges,
                                                    frequencies=axis)(jnp.asarray(theta_gap))
@@ -76,6 +80,48 @@ def _zero_cavity(case: Record, model: ReducedModel, constants: StageOneObjective
     return {"chain_impedance": _complex(chain_impedance), "exported_impedance": _complex(exported_impedance),
             "exported_layers": [layer.kind for layer in exported.layers],
             "chain_value_with_gap": float(gap_value).hex(), "chain_value_without_gap": float(plain_value).hex()}
+
+
+def _kept(case: Record, model: ReducedModel, constants: StageOneObjectiveConstants,
+          settings: MaterialGradientSettings, presets: tuple[ConstructionPreset, ...],
+          air: PhysicsConstants, ranges: PorousModelRanges) -> Record:
+    """不貼（保留原牆）：鏈的值、同兩面剛性的鏈值、控制組（樣板阻抗換進原牆那幾列、遮罩放開，直接交求值與目標）；
+    終點 ``material_impedances`` 與鏈建目標時那幾列各一份。"""
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    kept = {name: adapter.validate_python(material) for name, material in cast(Record, case["materials"]).items()}
+    preset_ids = cast(list[str | None], case["presets"])
+    kept_designs = gradient_search.wall_designs_from_presets(preset_ids, settings, presets, kept=kept)
+    rigid_designs = gradient_search.wall_designs_from_presets(preset_ids, settings, presets)
+    theta = jnp.asarray(_theta(case["theta"]))
+    axis = np.asarray(model.frequencies_hz, dtype=np.float64)
+
+    def chain(designs: tuple[gradient_search.SurfaceDesign, ...]) -> str:
+        value, _ = gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges,
+                                                   frequencies=axis)(theta)
+        return float(value).hex()
+
+    reduced = reduced_constants(model)
+    double_axis = jnp.asarray(axis)
+    templates = tuple(None if design.material is None else build_template(
+        design.material, double_axis, air=air, ranges=ranges, variables=design.variables) for design in rigid_designs)
+    impedances = wall_impedances_from_templates(
+        templates, gradient_search.surface_parameters(rigid_designs, theta),
+        jnp.asarray(reduced.frequencies_hz, dtype=theta.dtype), air=air)
+    walls, mask = impedances.values, impedances.rigid_mask
+    for index, wall in enumerate(Wall.all()):
+        material = kept.get(wall.wall_name())
+        if material is not None:
+            row, _ = surface_impedance(material, double_axis, air=air, ranges=ranges)
+            walls, mask = walls.at[index].set(row), mask.at[index].set(False)
+    control = objective_from_pressures(constants, reduced_pressures(reduced, walls, rigid_mask=mask)).screening_total
+    materials = endpoint.materials_from_surfaces(kept_designs, _theta(case["theta"]), settings)
+    endpoint_rows = endpoint.material_impedances(materials, tuple(model.frequencies_hz), air=air, ranges=ranges)
+    chain_rows = gradient_search.kept_impedance_rows(kept_designs, axis, air=air, ranges=ranges)
+    by_wall = {wall.wall_name(): (wall, index) for index, wall in enumerate(Wall.all())}
+    return {"chain_value": chain(kept_designs), "rigid_value": chain(rigid_designs),
+            "control_value": float(control).hex(),
+            "endpoint_rows": {name: _complex(endpoint_rows[by_wall[name][0]]) for name in kept},
+            "chain_rows": {name: _complex(chain_rows[by_wall[name][1]]) for name in kept}}
 
 
 def main(directory: Path) -> None:
@@ -118,6 +164,7 @@ def main(directory: Path) -> None:
                        for values in floor_case_pressures(axis, receivers)],
         "zero_cavity": _zero_cavity(cast(Record, problem["zero_cavity"]), model, constants, settings, presets,
                                     air, ranges),
+        "kept": _kept(cast(Record, problem["kept"]), model, constants, settings, presets, air, ranges),
     }
     (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
 
