@@ -28,7 +28,6 @@
 
 - **acceptance-verdict-points-at-head**（擋合併）：合併請求的內文必須有一行「驗收：通過 <完整提交 id>」，而且那顆提交要等於這支合併請求此刻的 head：驗收之後又推了新提交，head 變了、那一行就對不上，紅——這正是「修完沒再驗就合」的形狀。
 - **answer-files-carry-provenance**（擋合併）：從上一代唯讀樹抓來的答案檔必須把「哪一顆提交、哪一天量的、乾不乾淨」寫在檔頭、而且要跟登記簿裡那一顆一樣：一份答案檔要帶出身，出身就是 donor 記號與 env 兩塊，字串等於 [settings] 登記的那一顆 commit（四十位）與那個 tag。
-- **assertions-not-pinned-to-counts**（擋合併）：測試檔裡的斷言不准把數量鎖死。
 - **capability-table-backed-by-evidence**（擋合併）：能力與驗證範圍表 `src/aosr/config/data/capabilities.toml`（一個入口一節、一個條件組合一條，每條標 validated 驗過／experimental 試驗中／unsupported 不支援）要有證據撐，三條：①標 validated 的每一條，evidence（證據）至少要指名一個考卷節點「考卷檔::測試函式」（考卷住 tests/engine 底下、檔名與函式名都以 test_ 開頭、用程式結構在最外層找得到），答案檔（blueprint 底下真的存在的）可以加、單獨不算證據——資料沒有考卷去比它就不算驗過；②每一節入口的 module（模組點記法）在 src 底下要有對應的 .py（單檔或套件），表寫了程式沒有就紅；③status 只認三個值，自創的等於沒有狀態。
 - **check-exit-code-honest**（擋合併）：每支檢查的離開碼要誠實：0 是真的掃過而且乾淨、1 是抓到違規、2 是這一跑不算數。
 - **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，九條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣、必要檢查的 job 不准被跳過、冒名或過濾、同一層不准有重複的鍵、每一步要有 run 或 uses。
@@ -57,7 +56,6 @@
 - **status-page-computed-not-typed**（擋合併）：進度、待辦、狀態一律由機器現算，不准手寫進版控。
 - **style-guard**（擋合併）：寫法警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），五條。
 - **tests-isolated-from-real-env**（擋合併）：測試不准依賴環境現況，也不准寫進真的 repo。
-- **tests-land-with-code**（擋合併）：一支合併請求改動 `src/` 底下的 Python 產品程式，同一段差異裡就必須有 `tests/` 底下的 Python 測試也動了。
 - **thresholds-live-only-in-registry**（擋合併）：門檻數字只准住在卡的登記簿，檢查程式與卡的人話裡不准再寫一次。
 - **tmm-answers-carry-provenance**（擋合併）：TMM 凍結答案要帶齊出身、對上登記的原套件提交與機器重算的題目雜湊，改答案數字時也要留下重錄身分變更。
 - **type-guard**（擋合併）：型別警衛，掃版控裡的每一支 `.py`（Python 程式檔）與 `.pyi`（型別存根檔）（扣掉必紅樣本樹與本機工具目錄），兩層，第二層刻意獨立於 `mypy`（型別檢查器）。

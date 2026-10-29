@@ -42,7 +42,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.checks.tests_land_with_code import (
+from governance.git_range import (
     _fixture_env,
     _merge_base,
     _rev_parse,

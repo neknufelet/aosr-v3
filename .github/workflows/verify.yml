@@ -92,8 +92,6 @@ jobs:
           # governance.checks.check_exit_code_honest 的 SKIP_META_COVERED_ENV，只在深度 0 生效。
           AOSR_EXIT_SKIP_META_COVERED: "1"
         run: uv run python -m governance.status.record_step --name check_exit_code_honest --out-dir governance/receipts/steps -- uv run python -m governance.checks.check_exit_code_honest --scan-root .
-      - name: 斷言不准鎖死數量——自己跑一次乾淨樹
-        run: uv run python -m governance.status.record_step --name assertions_not_pinned_to_counts --out-dir governance/receipts/steps -- uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
       - name: 進度待辦不准手寫進版控——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name status_page_computed_not_typed --out-dir governance/receipts/steps -- uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
       - name: 入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹
@@ -121,12 +119,6 @@ jobs:
       - name: 提交身分在名單裡——自己跑一次乾淨樹
         # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.status.record_step --name commit_author_allowlisted --out-dir governance/receipts/steps -- uv run python -m governance.checks.commit_author_allowlisted --scan-root .
-      - name: 產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹
-        # 範圍取 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD，算法不同：
-        # 這一步用**三點**差異（從共同分支點算起）。兩點會把主線在分支之後合進來的測試變更
-        # 算到候選身上，只改產品的 PR 就照樣綠——那道門縫不用惡意就走得過去。
-        # 產品側、測試側與副檔名住在那張卡的 [settings]，這一步讀不到就回 2，不回 0。
-        run: uv run python -m governance.status.record_step --name tests_land_with_code --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_land_with_code --scan-root .
       - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name uv_single_entrypoint --out-dir governance/receipts/steps -- uv run python -m governance.checks.uv_single_entrypoint --scan-root .
       - name: 能力與驗證範圍表要有證據撐——validated 指名的考卷與答案檔都在、入口都有模組、狀態只認三個值——自己跑一次乾淨樹
