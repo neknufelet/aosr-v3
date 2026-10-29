@@ -43,6 +43,17 @@
    **只有這裡設它**：CI 上跑檢查那幾步身上沒有這一格，雲端那一跑每一句都真的去問伺服器。
    重播不會讓判準變寬——它一樣要求那支工具真的在 ``PATH`` 上，所以第 4 回合（抽掉外部工具
    必須回 2）在快取是熱的時候照樣回 2。這兩句話由 ``tests/test_gh_replay.py`` 咬。
+
+**第四段：共用慢夾具的檔排在收集順序最前面（#972）。**
+
+牆面梯度的命令列與迴圈兩支考卷各有一個 module 級夾具，整跑只算一次、寫進工人共用的暫存檔
+（``_scheme_cache.shared_json``，拿 flock 排隊）；後到的工人不是重算，是**停在鎖上等**。
+worksteal 開跑時把收集順序切成連續幾段、一人一段，之後只從別人佇列的**尾端**偷；兩支檔原本
+落在字母序中段，段界切在它們身上時三個工人同時到、等的那幾個就空轉。雲端 #971 那一跑的
+junit 量得到：命令列那檔 455 秒裡 130 秒是等、迴圈那檔 703 秒裡 441 秒是等。把這兩支挪到最
+前面，它們整段落在第一個工人的段頭，別人只會在最後偷到尾端、那時暫存檔早就在了。只改順序，
+不改任何一題；``pytest_collection_modifyitems`` 在主控與每個工人身上都跑、結果一樣，xdist
+要求各工人收集順序一致這一條照舊成立。
 """
 from __future__ import annotations
 
@@ -388,3 +399,26 @@ def real_repo_left_untouched() -> Iterator[None]:
             "就在規矩卡 tests-isolated-from-real-env 的 [[settings.allow]] 開一條，"
             "而且那個路徑要被 .gitignore 蓋住"
         )
+
+
+# 第四段：共用慢夾具的檔，照這個順序排在整份收集的最前面（相對順序照寫的）。
+SHARED_FIXTURE_FIRST = (
+    "tests/engine/test_material_gradient_cli.py",
+    "tests/engine/test_material_gradient_loop.py",
+)
+
+
+def _shared_fixture_rank(item: pytest.Item) -> int:
+    """在 SHARED_FIXTURE_FIRST 裡的檔回它的位置，其餘回清單長度（排在後面、彼此順序不動）。"""
+    try:
+        relative = item.path.resolve().relative_to(REPO).as_posix()
+    except ValueError:
+        return len(SHARED_FIXTURE_FIRST)
+    if relative in SHARED_FIXTURE_FIRST:
+        return SHARED_FIXTURE_FIRST.index(relative)
+    return len(SHARED_FIXTURE_FIRST)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """把共用慢夾具的檔挪到最前面；sort 是穩定的，其餘題目相對順序不變。"""
+    items.sort(key=_shared_fixture_rank)

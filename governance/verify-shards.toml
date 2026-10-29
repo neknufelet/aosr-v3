@@ -102,7 +102,7 @@ files = [
 [[group]]
 name = "balance-shard-b"
 shard = "shard-b"
-why = "照 governance/status/shard_balance 依雲端歷史耗時印出的建議貼上；重算後整群換掉，改動走合併請求。"
+why = "照 governance/status/shard_balance 依雲端歷史耗時印出的建議貼上；重算後整群換掉，改動走合併請求。2026-10-29（#972）手算加一支：shard_balance 要每片 steps 收據的機器行、鏡像沒存，改用 #971 雲端兩片 junit 逐檔秒數、按減量後本機逐檔比例縮放，再扣掉兩支共用夾具檔的等鎖時間（收集順序挪到最前面）；減量後 shard-a 約 3,520 秒、shard-b 約 3,220 秒（junit 逐題累計、#971 那台機器的尺），把 test_stage_one_objective_jax.py（170 秒、未登記、原本雜湊落 shard-a）登記到這一片，兩片約 3,350 對 3,390。"
 files = [
   "tests/engine/test_fem_complex.py",
   "tests/engine/test_fem_fenics_answers.py",
@@ -112,6 +112,7 @@ files = [
   "tests/engine/test_search_blocked_recovery.py",
   "tests/engine/test_search_pipeline_integration.py",
   "tests/engine/test_search_report_completion.py",
+  "tests/engine/test_stage_one_objective_jax.py",
   "tests/engine/test_three_lane_report.py",
   "tests/engine/test_transfer_matrix_reference.py",
   "tests/engine/test_transfer_matrix_step2_reference.py",
