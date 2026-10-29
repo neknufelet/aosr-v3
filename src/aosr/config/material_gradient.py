@@ -70,6 +70,14 @@ class CandidateSettings(BaseModel):
     max_evaluations: StrictInt = Field(ge=1)
 
 
+class ExportSettings(BaseModel):
+    """終點把六面規格匯出成材料：空腔小於 ``min_cavity_m``（公尺）就整層拿掉、不放空氣層。"""
+
+    model_config = _FROZEN
+
+    min_cavity_m: ExactFloat = Field(gt=0.0)
+
+
 class FamilySettings(BaseModel):
     """一個樣板家族：哪些 preset、合法棉板厚度、空腔範圍、每面總深度上限（公尺）。"""
 
@@ -97,13 +105,14 @@ class FamilySettings(BaseModel):
 
 
 class MaterialGradientSettings(BaseModel):
-    """四節：下降、重調、候選確認、家族；一個 preset 最多屬於一個家族。"""
+    """五節：下降、重調、候選確認、匯出、家族；一個 preset 最多屬於一個家族。"""
 
     model_config = _FROZEN
 
     descent: DescentSettings
     retune: RetuneSettings
     candidates: CandidateSettings
+    export: ExportSettings
     family: tuple[FamilySettings, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -126,7 +135,7 @@ class MaterialGradientSettings(BaseModel):
 
 
 def load_material_gradient_settings(path: str | Path) -> MaterialGradientSettings:
-    """讀 ``[descent]``、``[retune]``、``[candidates]``、``[[family]]``；缺節、多欄或數字不合就報錯。"""
+    """讀 ``[descent]``、``[retune]``、``[candidates]``、``[export]``、``[[family]]``；缺節、多欄或數字不合就報錯。"""
     with Path(path).open("rb") as config_file:
         data = tomllib.load(config_file)
     return MaterialGradientSettings.model_validate(data)
