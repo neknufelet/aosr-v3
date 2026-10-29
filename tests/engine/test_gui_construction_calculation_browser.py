@@ -23,6 +23,7 @@ from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import reference_document
 from tests.engine._construction_gui_server import _stop_calculations, calculation_group_exists, real_server
+from tests.engine.test_construction_cli_end_to_end import environment
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
 from tests.engine.test_measured_web_input import floor
@@ -160,6 +161,30 @@ def calculate(page: Page, folder: Path, deadline: float) -> tuple[str, SchemeRes
 
 # 網頁填的值（不是預設）：地板第 1 層玻璃棉厚度，預設樣板是 0.05 m。
 TYPED_THICKNESS = .08
+PROBE = Path(__file__).with_name("_typed_thickness_probe.py")
+
+
+def recompute_floor_thickness(tmp_path: Path, mode: str, result: SchemeResult, thicknesses: tuple[float, float]) -> list[object]:
+    """對照小重算：拿這份結果自己的求解輸入，只把地板第 1 層厚度換成填的值與預設值各算一次（雙精度子行程，
+    跟正式計算同一支函式，不解有限元素）。求解器若偷用預設厚度，存下來的數字會跟兩次重算都相等。"""
+    path = tmp_path / f"{mode}-input.json"
+    path.write_text(json.dumps(result.pairs[0].input_document))
+    start = time.perf_counter()
+    child = subprocess.run([sys.executable, "-B", str(PROBE), mode, str(path), *map(str, thicknesses)],
+                           cwd=tmp_path, env=environment(tmp_path), capture_output=True, text=True, timeout=120)
+    assert child.returncode == 0, child.stderr
+    note(f"對照小重算（{mode}，厚度 {thicknesses}）牆鐘：{time.perf_counter() - start:.3f} 秒")
+    return cast(list[object], json.loads(child.stdout))
+
+
+def check_solver_used_typed_thickness(tmp_path: Path, result: SchemeResult, default_thickness: float) -> None:
+    """算出來的艾林 T60（施羅德兩帶，由六面無規吸音算）等於「填的厚度」重算、不等於「預設厚度」重算：
+    求解器偷用預設厚度就紅。小房間沒有家具，重算不必加家具吸收項（重算那支有家具就停）。"""
+    assert default_thickness != TYPED_THICKNESS
+    typed, default = recompute_floor_thickness(tmp_path, "t60", result, (TYPED_THICKNESS, default_thickness))
+    for pair in result.pairs:
+        assert pair.report.top.eyring_t60_by_band_s == typed
+        assert pair.report.top.eyring_t60_by_band_s != default
 
 
 def check_typed_thickness_reached_calculation(saved: dict[str, object], result: SchemeResult) -> None:
@@ -182,8 +207,8 @@ def check_typed_thickness_reached_calculation(saved: dict[str, object], result: 
 def test_web_save_reload_one_real_calculation_uses_typed_layer_and_shows_notes(tmp_path: Path, browser: Browser) -> None:
     """#972 施工二：只留一次真算。「改構造後三路都變」交給命令列考卷
     test_construction_cli_end_to_end::test_board_cavity_wall_changes_every_lane；小松外推註記的字與兩種格式交給
-    test_construction_cli_end_to_end::test_porous_extrapolation_survives_report_and_text。這一題守網頁填的厚度真的進了計算、
-    結果頁顯示的是這一次的結果。"""
+    test_construction_cli_end_to_end::test_porous_extrapolation_survives_report_and_text。這一題守網頁填的厚度真的進了計算（存檔、求解輸入，
+    以及算出來的 T60 等於填的厚度重算、不等於預設厚度重算）、結果頁顯示的是這一次的結果。"""
     (tmp_path / "schemes").mkdir()
     (tmp_path / "schemes" / "small.json").write_text(Scheme.model_validate(small_document()).model_dump_json())
     before = time.perf_counter()
@@ -197,13 +222,15 @@ def test_web_save_reload_one_real_calculation_uses_typed_layer_and_shows_notes(t
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", "glass_wool_96k_50mm")
         saved = _save_readback(page, "construction-a")
-        assert cast(list[dict[str, object]], floor(saved)["layers"])[0]["thickness_m"] != TYPED_THICKNESS
+        preset_thickness = cast(float, cast(list[dict[str, object]], floor(saved)["layers"])[0]["thickness_m"])
+        assert preset_thickness != TYPED_THICKNESS
         # 改厚度後不另外按存檔：「計算」自己先存目前的表單再起算，改了沒進計算就會紅。
         page.locator("#layer-floor-0-thickness_m").fill(str(TYPED_THICKNESS))
         identifier, result = calculate(page, tmp_path, before + 600)
         assert page.locator("#result-link").get_attribute("href") == f"/results/{identifier}"
         check_typed_thickness_reached_calculation(
             json.loads((tmp_path / "schemes" / "construction-a.json").read_text()), result)
+        check_solver_used_typed_thickness(tmp_path, result, preset_thickness)
         with _open(browser, f"{base}/results/{identifier}") as result_page:
             shown = result_page.page
             expect(shown.locator("#identity")).to_have_text(f"方案：{result.scheme.scheme_id}；日期：{result.run_date}")

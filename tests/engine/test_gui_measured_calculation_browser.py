@@ -12,7 +12,7 @@ from aosr.reporting.scheme import Scheme
 from governance.exit_codes import note
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import LONG_DECIMAL, RAW_VALUES, _open, browser as browser
-from tests.engine.test_gui_construction_calculation_browser import calculate, small_document
+from tests.engine.test_gui_construction_calculation_browser import calculate, recompute_floor_thickness, small_document
 from tests.engine.test_gui_input_setup_browser import _save_readback
 from tests.engine.test_gui_measured_input_browser import _filled_draft_preset, apply_draft, start_draft, table_points
 from tests.engine.test_measured_web_input import floor
@@ -52,8 +52,9 @@ TYPED_BASE_THICKNESS = .08
 
 
 def check_typed_values_reached_calculation(saved: dict[str, object], result: SchemeResult) -> None:
-    """存檔與結果檔裡記的那幾格等於網頁填的值、不是預設；而且計算真的吃到了：結果檔保存的表端點接縫值
-    （計算時從表端點取的，不在顯示時重算）等於填的那一格。網頁輸入被丟掉、偷用預設值都會紅。"""
+    """存檔與結果檔裡記的那幾格等於網頁填的值、不是預設；而且計算真的吃到了表那一格：結果檔保存的表端點接縫值
+    （計算時從表端點取的，不在顯示時重算）等於填的那一格。網頁輸入在存檔或交給計算時被丟掉會紅；
+    求解器拿到填的厚度卻偷用預設厚度，由 check_solver_used_typed_base_thickness 的對照小重算守。"""
     material = floor(saved)
     points = cast(list[dict[str, float]], material['points'])
     layers = cast(list[dict[str, object]], cast(dict[str, object], material['base_assembly'])['layers'])
@@ -68,6 +69,20 @@ def check_typed_values_reached_calculation(saved: dict[str, object], result: Sch
         assert seams is not None
         assert seams['floor'][0].frequency_hz == points[0]['frequency_hz']
         assert seams['floor'][0].measured.real_pa_s_m == TYPED_REAL
+
+
+def check_solver_used_typed_base_thickness(tmp_path: Path, result: SchemeResult, default_thickness: float) -> None:
+    """結果檔保存的接縫底構造值（表兩端點的阻抗實部、虛部與無規吸音率，計算時由底構造求的）等於「填的厚度」
+    重算、不等於「預設厚度」重算：求解器偷用預設厚度就紅。"""
+    assert default_thickness != TYPED_BASE_THICKNESS
+    typed, default = recompute_floor_thickness(tmp_path, 'seams', result, (TYPED_BASE_THICKNESS, default_thickness))
+    for pair in result.pairs:
+        seams = pair.report.measured_seams_by_wall
+        assert seams is not None
+        saved = [[seam.base_assembly.real_pa_s_m, seam.base_assembly.imag_pa_s_m, seam.base_assembly.random_absorption]
+                 for seam in seams['floor']]
+        assert saved == typed
+        assert saved != default
 
 
 def check_page_shows_this_result(page: Page, identifier: str, result: SchemeResult) -> None:
@@ -85,8 +100,8 @@ def check_page_shows_this_result(page: Page, identifier: str, result: SchemeResu
 def test_fill_save_reload_one_real_run_and_result_pages(tmp_path: Path, browser: Browser) -> None:
     """#972 施工二：只留一次真算。改表後三路變、表內外與底構造互不干擾交給命令列考卷
     test_measured_cli_end_to_end::test_measured_three_real_cli_runs_isolate_each_frequency；比較頁的表差異列
-    交給 test_gui_compare_browser::test_measured_table_changes_render_on_both_sides。這一題守網頁填的值真的進了計算、
-    結果頁顯示的是這一次的結果。"""
+    交給 test_gui_compare_browser::test_measured_table_changes_render_on_both_sides。這一題守網頁填的值真的進了計算（存檔、求解輸入、
+    表端點接縫，以及接縫底構造值等於填的厚度重算、不等於預設厚度重算）、結果頁顯示的是這一次的結果。"""
     (tmp_path / 'schemes').mkdir()
     (tmp_path / 'schemes' / 'small.json').write_text(Scheme.model_validate(small_document()).model_dump_json())
     start = time.perf_counter()
@@ -101,6 +116,8 @@ def test_fill_save_reload_one_real_run_and_result_pages(tmp_path: Path, browser:
         apply_draft(page)
         saved = _save_readback(page, 'measured-a')
         assert floor(saved)['points'] == table_points() and 'fill_rule' in floor(saved)
+        base_layers = cast(list[dict[str, object]], cast(dict[str, object], floor(saved)['base_assembly'])['layers'])
+        preset_thickness = cast(float, base_layers[0]['thickness_m'])
         # 改兩格後不另外按存檔：「計算」自己先存目前的表單再起算，改了沒進計算就會紅。
         page.locator('#point-floor-0-real_pa_s_m').fill(str(TYPED_REAL))
         page.locator('#layer-floor-0-thickness_m').fill(str(TYPED_BASE_THICKNESS))
@@ -108,6 +125,7 @@ def test_fill_save_reload_one_real_run_and_result_pages(tmp_path: Path, browser:
         assert page.locator('#result-link').get_attribute('href') == f'/results/{identifier}'
         on_disk = json.loads((tmp_path / 'schemes' / 'measured-a.json').read_text())
         check_typed_values_reached_calculation(on_disk, result)
+        check_solver_used_typed_base_thickness(tmp_path, result, preset_thickness)
         for width in (1400, 390):
             with _open(browser, f'{base}/results/{identifier}', viewport_width=width) as shown:
                 check_result_page(shown.page)
