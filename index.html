@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-10-29 15:05）</title>
+<title>aosr-v3 現況（2026-10-29 15:27）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;--bad-bg:#fbe9e7;--warn-bg:#fff3e0;}
@@ -62,7 +62,7 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="meta">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<div class="today warn">今天：主線最近一次雲端檢查（verify）還在跑或沒有結論。這一跑沒有結論，不算綠。最新合進去的是「#561 辛二：梯度搜尋終點用完整模型重算、量大峰、六面規格匯出成材料 (#973)」（2026-10-29 15:02）。有 8 題要老闆拍板。</div>
+<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「#561 辛二：梯度搜尋終點用完整模型重算、量大峰、六面規格匯出成材料 (#973)」（2026-10-29 15:02）。有 8 題要老闆拍板。</div>
 <h2>要你回的</h2>
 <p>要老闆拍板的題（標籤 decision）：</p>
 <ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/831">#831</a>　第三階段材料最佳化：細算發現漏峰或名次翻轉時怎麼回頭修正（做法、判準、額外成本提案）　<span class="meta">最後動過 2026-10-17 09:36</span>　<span class="tag">decision</span></li>
@@ -85,8 +85,9 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/137">#137</a>　測試的「最少題數」改成機器自己數，取代手填的總數 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/934">#934</a>（合併請求）合進主線，關掉時間 2026-10-26 23:52</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/916">#916</a>　四支反射考卷的型別放行 10-24 到期，主線紅 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/917">#917</a>（合併請求）合進主線，關掉時間 2026-10-25 03:55</li></ul>
 <h2>正在做</h2>
-<p>開著的合併請求（PR，等人看等人合）：沒有。</p><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（55 張）</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/970">#970</a>　候選：gmsh 切網格後作業系統的訊號處置被改回預設、Python 不知道，命令列收 SIGTERM 直接死留孤兒（病根在 shoebox_mesh，兩支命令列可能同病）　<span class="meta">最後動過 2026-10-29 04:03</span>　—</li>
+<p>開著的合併請求（PR，等人看等人合）：沒有。</p><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（56 張）</p>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/977">#977</a>　退兩張規矩卡：assertions-not-pinned-to-counts、tests-land-with-code　<span class="meta">最後動過 2026-10-29 15:06</span>　—</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/970">#970</a>　候選：gmsh 切網格後作業系統的訊號處置被改回預設、Python 不知道，命令列收 SIGTERM 直接死留孤兒（病根在 shoebox_mesh，兩支命令列可能同病）　<span class="meta">最後動過 2026-10-29 04:03</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/943">#943</a>　#419 接續：音色缺段判定在 300 Hz 疏密交界缺一點仍照算（改用宣告軸逐點核對）　<span class="meta">最後動過 2026-10-28 01:04</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/939">#939</a>　候選：關票檢查碰到 GitHub 伺服器錯誤（504／502）就回 2、整片 shard-a 紅，沒有重試（10-27 本機 7 跑 4 次、雲端 1 次）　<span class="meta">最後動過 2026-10-27 02:35</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/935">#935</a>　候選：抄寫員等子命令結束才轉印輸出——整個 job 被逾時砍掉時，那一步的原文與片段可能都不見　<span class="meta">最後動過 2026-10-27 00:36</span>　—</li>
@@ -142,7 +143,7 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/15">#15</a>　shell-scripts-in-repo: repo 裡零支 shell 腳本，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/10">#10</a>　design-report-exists: v3 自己的設計報告還沒產出，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li></ul>
 <h2>健康燈</h2>
-<div class="light warn">主線最近一次雲端檢查（verify）：琥珀——還在跑或沒有結論。這一跑沒有結論，不算綠。那一跑從首個工作開始到末個工作結束共 0 秒（0 秒）。</div>
+<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑從首個工作開始到末個工作結束共 約 24 分鐘（1469 秒）。</div>
 <details><summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary><div class="fold"><div class="scroll"><table>
 <tr><th>工作（job）</th><th>那一步</th><th>結論</th><th>跑了多久</th></tr>
 <tr><td>shard-a</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
@@ -189,11 +190,12 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>shard-a</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>29 秒</td></tr>
-<tr><td>shard-a</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>封存本片來源與證據</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>Post Run actions/checkout@v4</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1035 秒</td></tr>
+<tr><td>shard-a</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-a</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-a</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-a</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-b</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-b</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>shard-b</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>11 秒</td></tr>
@@ -204,21 +206,32 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>shard-b</td><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>16 秒</td></tr>
 <tr><td>shard-b</td><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>65 秒</td></tr>
 <tr><td>shard-b</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>35 秒</td></tr>
-<tr><td>shard-b</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-b</td><td>封存本片來源與證據</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-b</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-b</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>shard-b</td><td>Post Run actions/checkout@v4</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
+<tr><td>shard-b</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1256 秒</td></tr>
+<tr><td>shard-b</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-b</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-b</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-b</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-b</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>verify</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>verify</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>verify</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>verify</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
+<tr><td>verify</td><td>下載本跑本次兩片的證據包</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>verify</td><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>verify</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>verify</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>verify</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>verify</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 </table></div>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/40832865250">雲端那一跑（run 40832865250）</a>，狀態 in_progress　開始 2026-10-29 15:02　對著提交（commit）e8c5b9d3de74　收工 2026-10-29 15:02。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light bad">收據（雲端那一跑留下的成績單）不齊：最近 19 跑裡，有 3 跑在收據分支上沒有收據——run 40830531219、run 40750461390、run 40671356895。那一跑等於沒有留下每一步的離開碼，收據不是掉了就是根本沒寫成。</div>
-<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（1305 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/40832865250">雲端那一跑（run 40832865250）</a>，狀態 completed　開始 2026-10-29 15:02　對著提交（commit）e8c5b9d3de74　收工 2026-10-29 15:26。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light bad">收據（雲端那一跑留下的成績單）不齊：最近 20 跑裡，有 3 跑在收據分支上沒有收據——run 40830531219、run 40750461390、run 40671356895。那一跑等於沒有留下每一步的離開碼，收據不是掉了就是根本沒寫成。</div>
+<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（1306 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
 <div class="scroll"><table>
 <tr><th>那一跑（run）</th><th>結論</th><th>開始</th><th>對著的提交（commit）</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/actions/runs/40830531219">雲端那一跑（run 40830531219）</a></td><td><span class="warn">被取消</span></td><td>2026-10-29 14:39</td><td>6ff352a729e3</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/actions/runs/40750461390">雲端那一跑（run 40750461390）</a></td><td><span class="warn">被取消</span></td><td>2026-10-29 03:01</td><td>31c3696d6336</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/actions/runs/40671356895">雲端那一跑（run 40671356895）</a></td><td><span class="warn">被取消</span></td><td>2026-10-28 18:20</td><td>af01af897d8c</td></tr>
 </table></div></div></details><div class="light bad">關掉的票串不起綠收據的有 2 張：有 PR 做掉它、但收據串不起來的有 2 張（#974、#972）——票關了，東西有沒有進主線只能靠人記得。</div>
-<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（1305 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
+<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（1306 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
 <div class="scroll"><table>
 <tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th><th>併出來那一顆提交（commit）</th><th>綠收據</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/974">#974</a></td><td>雲端機器映像換了、系統 Python 變 3.14：釘 Python 3.12 與 ubuntu-24.04，不重錄答案</td><td>2026-10-29 14:39</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/976">#976</a></td><td><code>6ff352a729e3</code></td><td><span class="bad">PR #976 併出來的 6ff352a729e3 在收據分支上沒有收據</span></td></tr>
@@ -310,7 +323,7 @@ border:1px solid var(--line);border-radius:10px}
 <h2>主線（repo：neknufelet/aosr-v3）</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
 <p>最新一筆（提交）：<code>e8c5b9d3de74</code>　#561 辛二：梯度搜尋終點用完整模型重算、量大峰、六面規格匯出成材料 (#973)　（2026-10-29 15:02）</p>
-<p class="foot">算出時間：2026-10-29 15:05（台北時間）。算這一頁的是：雲端 run 40833175701（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/40833175701。這一頁反映的是：main 的 e8c5b9d3de74（#561 辛二：梯度搜尋終點用完整模型重算、量大峰、六面規格匯出成材料 (#973)）；接在 verify run 40830531219 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
+<p class="foot">算出時間：2026-10-29 15:27（台北時間）。算這一頁的是：雲端 run 40835484513（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/40835484513。這一頁反映的是：main 的 e8c5b9d3de74（#561 辛二：梯度搜尋終點用完整模型重算、量大峰、六面規格匯出成材料 (#973)）；接在 verify run 40832865250 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 </div>
 </body>
 </html>
