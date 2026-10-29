@@ -48,8 +48,7 @@ from aosr.gradient import cli
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
-from aosr.gradient.endpoint_run import EndpointRecord
-from aosr.gradient.report import ENDPOINT_HEADING, FULL_MODEL_LINE, STALE_ENDPOINT_LINE
+from aosr.gradient.report import FULL_MODEL_LINE
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
@@ -382,7 +381,6 @@ def _probe(directory: Path, folder: Path) -> Record:
     work = directory / "probe"
     (work / "source").mkdir(parents=True)
     shutil.copyfile(folder / "project.json", work / "source" / "project.json")
-    shutil.copyfile(folder / "result.json", work / "cli-result.json")
     process = subprocess.run([sys.executable, str(PROBE), str(work), str(directory / "air-other" / "rom.npz")], cwd=work, env=_env(work),
                              capture_output=True, text=True, timeout=WAIT_S * 3)
     assert process.returncode == 0, process.stdout + process.stderr
@@ -397,7 +395,6 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     output: Record = {"concurrent": _concurrent_start(directory)}
     folder = Path(str(cast(Record, output["concurrent"])["folder"]))
     output["report"] = _run(directory, _command("report", "--folder", str(folder)))
-    output["endpoint"] = _endpoint_runs(directory, folder)
     output["other_settings"] = _other_settings(directory)
     output["interrupted"] = _interrupted(directory)
     output["cli_stop"] = _cli_stop(directory, folder)
@@ -440,6 +437,13 @@ def _json(path: Path) -> Record:
 def _without_hash(result: Record) -> Record:
     """結果檔扣掉帳本整份雜湊（帳本的秒數每跑不同，雜湊跟著不同）。"""
     return {key: value for key, value in result.items() if key != "ledger_sha256"}
+
+
+def _kept_materials(runs: tuple[Path, Record]) -> dict[str, SurfaceMaterial]:
+    """控制組：考卷方案舊欄的六面固定阻抗，自己換成 ConstantImpedance（不走產品的 scene_wall_materials）。"""
+    fixed = load_scheme(runs[0] / "scheme.json").scene.impedance_pa_s_per_m_by_wall
+    assert fixed is not None
+    return {name: ConstantImpedance(impedance_pa_s_m=value) for name, value in fixed.items()}
 
 
 def _settings_path(runs: tuple[Path, Record]) -> Path:
@@ -884,116 +888,3 @@ def test_stop_checked_before_every_evaluation(runs: tuple[Path, Record]) -> None
     assert reference["checks"] == segments + snaps + last.total_evaluations
     phases = set(cast(list[str], _probe_section(runs, "phases")))
     assert {"header", "descent", "snap", "retune"} <= phases
-
-
-# ---- 終點：命令列 endpoint、終點報告、匯出方案、結果檔的材料摘要 ----
-
-def _endpoint_runs(directory: Path, folder: Path) -> Record:
-    """跑完的資料夾跑 endpoint、再印一次報告；另抄一份只有 project.json 的資料夾跑 endpoint（沒有結果檔要拒收）。"""
-    record: Record = {"run": _run(directory, _command("endpoint", str(folder)))}
-    record["report_after"] = _run(directory, _command("report", "--folder", str(folder)))
-    bare = directory / "no-result" / folder.name
-    bare.mkdir(parents=True)
-    shutil.copyfile(folder / "project.json", bare / "project.json")
-    record["no_result"] = {**_run(directory, _command("endpoint", str(bare))),
-                           "entries": sorted(path.name for path in bare.iterdir())}
-    return record
-
-
-def _kept_materials(runs: tuple[Path, Record]) -> dict[str, SurfaceMaterial]:
-    """控制組：考卷方案舊欄的六面固定阻抗，自己換成 ConstantImpedance（不走產品的 scene_wall_materials）。"""
-    fixed = load_scheme(runs[0] / "scheme.json").scene.impedance_pa_s_per_m_by_wall
-    assert fixed is not None
-    return {name: ConstantImpedance(impedance_pa_s_m=value) for name, value in fixed.items()}
-
-
-def _record(runs: tuple[Path, Record]) -> EndpointRecord:
-    return EndpointRecord.model_validate_json((_folder(runs) / "endpoint.json").read_bytes())
-
-
-def test_endpoint_writes_record_bound_to_result_ledger(runs: tuple[Path, Record]) -> None:
-    """抓 endpoint 沒跑完、endpoint.json 讀不回、沒綁結果檔的帳本摘要（帳本變了認不出過期）：回 0、模型讀回、
-    ``result_ledger_sha256`` 等於 result.json 的；改善等於基準減終點；匯出方案檔的 SHA-256 等於考卷自己量的。"""
-    case = _section(runs, "endpoint", "run")
-    assert case["code"] == 0, case["stderr"]
-    folder, record = _folder(runs), _record(runs)
-    result = _json(folder / "result.json")
-    assert record.result_ledger_sha256 == result["ledger_sha256"] == _sha256(folder / "ledger.jsonl")
-    assert record.gradient_id == folder.name
-    assert record.improvement.total == record.baseline.full_total - record.report.full_total
-    assert record.improvement.components == tuple(
-        base - end for base, end in zip(record.baseline.full_components, record.report.full_components, strict=True))
-    assert record.exported_scheme_sha256 == _sha256(folder / record.exported_scheme)
-
-
-def test_endpoint_report_and_baseline_equal_direct_calls(runs: tuple[Path, Record]) -> None:
-    """抓命令列終點接錯輸入（θ、設計、評分設定、空氣、軸）、基準用了替身或不是方案原本的六面：endpoint.json 的報告逐位
-    等於探針用同一份輸入（同一份 result.json 的 θ、preset 加原牆）直接叫 ``endpoint_check`` 的；基準值、兩分項、大峰
-    逐位等於探針用完整模型解原方案六面（考卷自己從舊欄換成固定阻抗）交同一把尺、同一支大峰的；完整解次數等於軸長。"""
-    probe, record = cast(Record, _probe_section(runs, "endpoint")), _record(runs)
-    assert json.loads(record.report.to_json()) == probe["report"]
-    assert record.baseline.full_total.hex() == probe["baseline_total"]
-    assert [value.hex() for value in record.baseline.full_components] == probe["baseline_components"]
-    assert record.baseline.big_peak_db_by_speaker == probe["baseline_peaks"]
-    assert record.baseline.full_solves == len(FEM_LANE_FREQUENCIES_HZ)
-
-
-def test_exported_scheme_keeps_original_walls_and_writes_specs(runs: tuple[Path, Record]) -> None:
-    """抓匯出方案的「不貼」面寫成別的材料、有樣板的面不是終點那一套、或方案代號跟原方案一樣（會混淆）：
-    ``scheme-endpoint.json`` 用 ``load_scheme`` 讀回；不貼的面材料摘要等於原方案那一面的；有樣板的面等於
-    ``materials_from_surfaces``（同一份結果檔的 θ）那一面的摘要；``scheme_id`` 不等於原方案；房間、喇叭、座位不動。"""
-    folder, original = _folder(runs), load_scheme(runs[0] / "scheme.json")
-    exported = load_scheme(folder / _record(runs).exported_scheme)
-    assert exported.scheme_id != original.scheme_id
-    assert (exported.scene.room_m, exported.speakers, exported.receiver_set) == (
-        original.scene.room_m, original.speakers, original.receiver_set)
-    zones = exported.scene.surface_zones_by_wall
-    assert zones is not None
-    theta = np.asarray([float.fromhex(value) for value in cast(list[str], _json(folder / "result.json")["theta_hex"])])
-    settings, kept = load_material_gradient_settings(_settings_path(runs)), _kept_materials(runs)
-    designs = gradient_search.wall_designs_from_presets(PRESETS, settings, _presets(), kept=kept)
-    materials = endpoint.materials_from_surfaces(designs, theta, settings)
-    for wall, preset in zip(Wall.all(), PRESETS, strict=True):
-        name = wall.wall_name()
-        wanted = kept[name] if preset is None else materials[wall]
-        assert wanted is not None
-        assert endpoint.material_digest(zones[name][0].material) == endpoint.material_digest(wanted), name
-    assert any(preset is None for preset in PRESETS) and any(preset is not None for preset in PRESETS)
-
-
-def test_report_after_endpoint_prints_endpoint_section(runs: tuple[Path, Record]) -> None:
-    """抓報告不讀 endpoint.json、或印了終點還留著「未做」那行：有終點一節（替身值、完整模型值、基準、改善、匯出方案），
-    數字由考卷從 endpoint.json 自己格式化。"""
-    report = _section(runs, "endpoint", "report_after")
-    assert report["code"] == 0, report["stderr"]
-    lines = str(report["stdout"]).splitlines()
-    record = _record(runs)
-    assert FULL_MODEL_LINE not in lines
-    assert any(line.startswith(ENDPOINT_HEADING) for line in lines)
-    assert any(f"替身值 {record.report.reduced_total:.6f}" in line and f"完整模型值 {record.report.full_total:.6f}" in line
-               for line in lines)
-    assert any(f"基準（方案原本六面，完整模型）：值 {record.baseline.full_total:.6f}" in line for line in lines)
-    assert any(f"改善（基準減終點，完整模型）：{record.improvement.total:+.6f}" in line for line in lines)
-    assert any(f"匯出方案：{record.exported_scheme}" in line for line in lines)
-
-
-def test_report_marks_endpoint_stale_when_ledger_changed(runs: tuple[Path, Record], tmp_path: Path) -> None:
-    """抓報告不比帳本摘要（帳本變了照印舊終點）：抄一份跑完 endpoint 的資料夾，把 result.json 的帳本摘要換成另一個值
-    （模擬再接續過、結果檔換了），報告印「終點報告過期（帳本變了）」、不印終點數字。"""
-    folder = tmp_path / _folder(runs).name
-    shutil.copytree(_folder(runs), folder)
-    result = _json(folder / "result.json")
-    result["ledger_sha256"] = "0" * 64
-    (folder / "result.json").write_text(json.dumps(result), encoding="utf-8")
-    report = _run(tmp_path, _command("report", "--folder", str(folder)))
-    assert report["code"] == 0, report["stderr"]
-    lines = str(report["stdout"]).splitlines()
-    assert lines[-1] == STALE_ENDPOINT_LINE
-    assert not any(line.startswith(ENDPOINT_HEADING) for line in lines)
-
-
-def test_endpoint_without_result_fails_and_names_it(runs: tuple[Path, Record]) -> None:
-    """抓沒有結果檔也照算：只有 project.json 的資料夾跑 endpoint 回 1、標準錯誤點名 result.json、沒多出任何檔。"""
-    case = _section(runs, "endpoint", "no_result")
-    assert case["code"] == 1 and "result.json" in str(case["stderr"])
-    assert case["entries"] == ["project.json"]

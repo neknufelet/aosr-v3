@@ -361,7 +361,8 @@ def kept_impedance_rows(designs: Sequence[SurfaceDesign], frequencies: Sequence[
     """每面「保留原牆」那一列垂直入射阻抗（雙精度複數，``(F,)``）；其餘面 None。
 
     走產品 ``surface_impedance``（非可微入口），頻率軸照終點 ``material_impedances`` 同一個寫法轉成雙精度 JAX 陣列：
-    替身鏈建目標時用的常數列與終點完整模型用的阻抗是同一支函式、同一個輸入算的。要在雙精度已開的行程裡呼叫。
+    替身鏈建目標時用的常數列與終點完整模型用的阻抗是同一支函式、同一個輸入算的，雙精度行程下逐位相同（θ 是單精度時，
+    目標函式裡換進去的是這一列轉成 complex64 的版本）。要在雙精度已開的行程裡呼叫。
     """
     axis = jnp.asarray(np.asarray(frequencies, dtype=np.float64))
     rows: list[NDArray[np.complex128] | None] = []

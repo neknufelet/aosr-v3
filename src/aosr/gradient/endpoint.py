@@ -219,7 +219,7 @@ def material_impedances(materials: Mapping[Wall, SurfaceMaterial | None], freque
                         air: PhysicsConstants, ranges: PorousModelRanges) -> FrequencyWallImpedances:
     """每面材料走產品 ``surface_impedance``（非可微入口）求垂直入射阻抗，攤成逐頻 Python 複數；剛性面 None。
 
-    「不貼」面的阻抗跟替身鏈建目標時那一列（``kept_impedance_rows``）同一支函式、同一個頻率軸寫法，逐位相同。
+    「不貼」面的阻抗跟替身鏈建目標時那一列（``kept_impedance_rows``）同一支函式、同一個頻率軸寫法，雙精度行程下逐位相同（單精度 θ 時鏈裡那一列轉成 complex64，是這一列的降精度版）。
     """
     axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
     impedances: dict[Wall, tuple[complex, ...] | None] = {}

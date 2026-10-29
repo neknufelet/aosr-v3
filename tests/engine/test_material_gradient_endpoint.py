@@ -125,12 +125,12 @@ def _hex_list(values: tuple[float, ...]) -> list[str]:
 
 def _kept() -> dict[str, SurfaceMaterial]:
     """終點那一組 None 面的原牆：第一面固定阻抗、第二面 96K 棉板構造（照構造預設清單那一份）。"""
-    names = [wall.wall_name() for wall, preset in zip(Wall.all(), ENDPOINT_PRESETS, strict=True) if preset is None]
-    assert len(names) == 2
+    constant_face, assembly_face = (
+        wall.wall_name() for wall, preset in zip(Wall.all(), ENDPOINT_PRESETS, strict=True) if preset is None)
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
     by_id = {preset.id: preset for preset in _presets()}
-    return {names[0]: ConstantImpedance(impedance_pa_s_m=KEPT_CONSTANT_PA_S_M),
-            names[1]: adapter.validate_python(by_id[KEPT_ASSEMBLY_PRESET].material)}
+    return {constant_face: ConstantImpedance(impedance_pa_s_m=KEPT_CONSTANT_PA_S_M),
+            assembly_face: adapter.validate_python(by_id[KEPT_ASSEMBLY_PRESET].material)}
 
 
 @pytest.fixture(scope="module")

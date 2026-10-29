@@ -1,16 +1,18 @@
 """牆面材料梯度搜尋的終點接線（#561 辛三）：命令列 ``endpoint <資料夾>`` 的子行程那一段。
 
 搜尋跑完（有 ``result.json``）之後，在雙精度子行程裡：輸入走同一道閘門（:func:`aosr.gradient.run.check_inputs`）；
-方案匯出完整模型算子，網格雜湊與物理身分要等於 ``project.json`` 記的；結果檔的 θ 交 ``endpoint.endpoint_check``
+``result.json`` 不只信它自己說的——從帳本（標頭等於這一次重建的）最後決定列重建整份結果、跟檔裡整個相等才收，
+用重建那份的 θ；方案匯出完整模型算子，網格雜湊與物理身分要等於 ``project.json`` 記的；θ 交 ``endpoint.endpoint_check``
 （替身值對完整模型值、差與上界、大峰）；基準是方案原本的六面（全部保留原牆）用完整模型解同一條軸、交同一份目標常數；
-最後把終點那一套寫成完整方案檔 ``scheme-endpoint.json``，數字寫成 ``endpoint.json``（綁 ``result.json`` 的帳本摘要，
-帳本變了它就過期）。兩個檔都整檔寫完再換名。不寫 ``status.json``：終點不是搜尋狀態機的一段。
+最後把終點那一套寫成完整方案檔 ``scheme-endpoint.json``，數字寫成 ``endpoint.json``（綁帳本檔與 ``result.json`` 檔的摘要，
+任一變了它就過期）。兩個檔都整檔寫完再換名。不寫 ``status.json``：終點不是搜尋狀態機的一段。
 
 分數一律 ``objective_from_pressures``、大峰一律 ``endpoint.big_peaks``，不另寫算式。要在雙精度已開的行程裡叫。
 """
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Final, Literal
 
@@ -29,13 +31,15 @@ from aosr.gradient.endpoint import (
     EndpointReport, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
     worst_big_peak,
 )
+from aosr.gradient.material_gradient import SurfaceDesign
+from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, header_for
 from aosr.gradient.run import (
-    LEDGER_FILE, RESULT_FILE, GradientResult, check_inputs, designs_for, file_sha256, now_text, read_project,
-    write_json_atomic,
+    RESULT_FILE, GradientResult, check_inputs, designs_for, file_sha256, now_text, read_project, result_from_ledger,
+    scene_wall_materials, search_objective_constants, write_json_atomic,
 )
 from aosr.physics.report_surfaces import validation_content
 from aosr.reporting.fem_reduced_scheme import export_operators
-from aosr.reporting.scheme import Scene, Scheme, scene_wall_materials
+from aosr.reporting.scheme import Scene, Scheme
 from aosr.scoring.stage_one_objective_jax import objective_constants, objective_from_pressures
 from aosr.scoring.stage_one_score import stage_one_score_settings
 
@@ -77,7 +81,8 @@ class EndpointSeconds(BaseModel):
 class EndpointRecord(BaseModel):
     """``endpoint.json``：終點報告、原牆基準、改善、匯出方案檔與它的 SHA-256、各段秒數。
 
-    ``result_ledger_sha256`` 抄 ``result.json`` 的 ``ledger_sha256``：之後帳本變了（再接續過），報告就認得出這份過期。
+    ``result_ledger_sha256`` 抄 ``result.json`` 的 ``ledger_sha256``（終點已核它等於當時帳本檔的摘要），``result_sha256`` 是
+    終點讀的那份 ``result.json`` 檔的摘要：報告拿現在的帳本檔、結果檔與搜尋身分逐件比，任一件變了就認得出這份過期。
     ``engine_commit`` 是 ``project.json`` 記的（開始時給的那一個），終點不另量。
     """
 
@@ -85,6 +90,7 @@ class EndpointRecord(BaseModel):
     format_version: Literal["aosr.material_gradient_endpoint.v1"]
     gradient_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     result_ledger_sha256: str = Field(pattern=_SHA256)
+    result_sha256: str = Field(pattern=_SHA256)
     report: EndpointReport
     baseline: EndpointBaseline
     improvement: EndpointImprovement
@@ -111,29 +117,40 @@ def exported_scheme(scheme: Scheme, scene: Scene, gradient_id: str) -> Scheme:
     return Scheme.model_validate({**content, "scene": scene, "scheme_id": f"{scheme.scheme_id}-gradient-{gradient_id[:8]}"})
 
 
+def checked_result(folder: Path, given: GradientResult, header: MaterialGradientHeader,
+                   designs: Sequence[SurfaceDesign]) -> GradientResult:
+    """結果檔不能只信它自己說的：從帳本（標頭要等於這一次重建的）最後決定列重建整份結果，跟檔裡那份整個模型相等才收，
+    回重建那一份；不等就拒收、列出哪幾格不同。"""
+    rebuilt = result_from_ledger(folder, designs, expected_header=header)
+    if rebuilt != given:
+        actual, expected = given.model_dump(), rebuilt.model_dump()
+        differing = sorted(name for name in expected if actual.get(name) != expected[name])
+        raise ValueError(f"{RESULT_FILE} 跟帳本對不上（{differing} 不同）：結果檔要由帳本重建，先把搜尋跑完再跑 endpoint")
+    return rebuilt
+
+
 def run_endpoint(folder: Path) -> EndpointRecord:
     """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
     project = read_project(folder)
     scheme, model, settings = check_inputs(project)
     if not (folder / RESULT_FILE).exists():
         raise ValueError(f"資料夾 {folder} 沒有 {RESULT_FILE}：先把搜尋跑完（start 或 resume）再跑 endpoint")
-    result = read_result(folder)
-    if result.gradient_id != project.gradient_id:
-        raise ValueError(f"{RESULT_FILE} 的 gradient_id 跟 project.json 不同，拒收")
-    if file_sha256(folder / LEDGER_FILE) != result.ledger_sha256:
-        raise ValueError(f"{RESULT_FILE} 跟現在的帳本對不上（ledger_sha256 不同），先把搜尋跑完再跑 endpoint")
+    result_sha256 = file_sha256(folder / RESULT_FILE)
     axis_id = scheme.scene.low_frequency_axis
     if axis_id is None:
         raise ValueError("方案場景沒有 low_frequency_axis（低頻軸），終點量大峰要它，拒收")
+    capabilities = load_capabilities(project.capabilities_path)
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    kept = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
+    designs = designs_for(project.presets, settings, kept=kept)
+    result = checked_result(folder, read_result(folder), header_for(
+        model, designs, settings, objective_constants=search_objective_constants(project, scheme, model)), designs)
     clock = time.perf_counter()
     with keep_signal_handlers():
-        operators = export_operators(scheme, capabilities=load_capabilities(project.capabilities_path),
-                                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+        operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     export_seconds = time.perf_counter() - clock
     if operators.mesh_hash != project.mesh_hash or operators.physics_identity != project.physics_identity:
         raise ValueError("方案匯出的完整模型跟開始時記的網格雜湊或物理身分不同，拒收")
-    kept = scene_wall_materials(scheme.scene)
-    designs = designs_for(project.presets, settings, kept=kept)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
@@ -163,6 +180,7 @@ def run_endpoint(folder: Path) -> EndpointRecord:
     write_json_atomic(folder / EXPORTED_SCHEME_FILE, exported)
     record = EndpointRecord(
         format_version=ENDPOINT_VERSION, gradient_id=project.gradient_id, result_ledger_sha256=result.ledger_sha256,
+        result_sha256=result_sha256,
         report=report, baseline=baseline,
         improvement=EndpointImprovement(
             total=baseline.full_total - report.full_total,

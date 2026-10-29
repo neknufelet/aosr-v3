@@ -5,7 +5,7 @@
 厚度 mm、空腔 mm；不貼的面印方案原本那面牆的材料）、值與分項。帳本照 ``read_ledger`` 逐列驗，壞列照樣報錯。
 最後可行點：有決定列取最後一列決定，否則取前段收好的重調末列，再否則取規格那一列。
 不貼的面讀 ``project.json`` 記的方案檔（讀，不核雜湊；方案檔事後換過，這裡印的是現在那一份）。
-最後一節是終點：``endpoint.json`` 綁的帳本摘要等於現在 ``result.json`` 的就印終點數字，對不上印過期，
+最後一節是終點：``endpoint.json`` 綁的搜尋身分、帳本檔與結果檔摘要都等於現在的就印終點數字，任一件對不上印過期，
 沒有 ``endpoint.json`` 最後一行是 :data:`FULL_MODEL_LINE`。
 """
 from __future__ import annotations
@@ -20,14 +20,14 @@ from aosr.geometry.shoebox import Wall
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointRecord, read_endpoint, read_result
 from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, MaterialGradientRow, read_ledger
 from aosr.gradient.run import (
-    LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, GradientProject, GradientStatus, ledger_progress, read_project,
-    surface_specs,
+    LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, GradientProject, GradientStatus, file_sha256, ledger_progress,
+    project_wall_materials, read_project, surface_specs,
 )
 from aosr.materials.construction_models import Assembly, ConstantImpedance, SurfaceMaterial
-from aosr.reporting.scheme import load_scheme, scene_wall_materials
+from aosr.reporting.scheme import load_scheme
 
 FULL_MODEL_LINE: Final = "終點完整模型重算：未做（跑 endpoint <資料夾>）"
-STALE_ENDPOINT_LINE: Final = "終點報告過期（帳本變了）：endpoint.json 綁的帳本摘要跟現在的 result.json 不同，要重跑 endpoint"
+STALE_ENDPOINT_LINE: Final = "終點報告過期：endpoint.json 跟現在的帳本、結果檔或搜尋身分對不上，要重跑 endpoint"
 ENDPOINT_HEADING: Final = "終點完整模型重算（"
 _MM: Final = 1000.0
 
@@ -105,7 +105,7 @@ def material_text(material: SurfaceMaterial) -> str:
 def _kept_texts(project: GradientProject) -> dict[str, str]:
     """不貼的面那一句：方案檔那一面原本的牆；方案檔讀不到時每面都說讀不到（報告照印，不中斷）。"""
     try:
-        materials = scene_wall_materials(load_scheme(Path(project.scheme_path)).scene)
+        materials = project_wall_materials(project, load_scheme(Path(project.scheme_path)))
     except (OSError, ValueError) as error:
         return {wall.wall_name(): f"不貼（保留原牆；方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()}
     return {wall.wall_name(): f"不貼（保留原牆：{material_text(material)}）" for wall, material in materials.items()}
@@ -166,15 +166,34 @@ def _endpoint_section(record: EndpointRecord) -> list[str]:
     ]
 
 
-def _endpoint_lines(folder: Path) -> list[str]:
-    """有 endpoint.json 且綁的帳本摘要等於現在 result.json 的就印終點一節；對不上（或沒有 result.json）印過期；
+def stale_reasons(folder: Path, project: GradientProject, record: EndpointRecord) -> list[str]:
+    """endpoint.json 對現在這個資料夾還算不算數：四件都要對，回對不上的那幾件（空的就是有效）。
+
+    搜尋身分（endpoint.json 與 result.json 的 ``gradient_id`` 都等於 project.json 的）、現在帳本檔的 SHA-256 等於終點綁的、
+    現在 result.json 檔的 SHA-256 等於終點讀的那一份。只讀檔、量摘要，不求值。
+    """
+    reasons = []
+    if record.gradient_id != project.gradient_id:
+        reasons.append("endpoint.json 的 gradient_id 不是這次搜尋的")
+    ledger, result = folder / LEDGER_FILE, folder / RESULT_FILE
+    if not ledger.exists() or file_sha256(ledger) != record.result_ledger_sha256:
+        reasons.append("帳本檔跟終點綁的不同")
+    if not result.exists() or file_sha256(result) != record.result_sha256:
+        reasons.append("result.json 跟終點讀的不同")
+    elif read_result(folder).gradient_id != project.gradient_id:
+        reasons.append("result.json 的 gradient_id 不是這次搜尋的")
+    return reasons
+
+
+def _endpoint_lines(folder: Path, project: GradientProject) -> list[str]:
+    """有 endpoint.json 且 :func:`stale_reasons` 是空的就印終點一節；有對不上的印過期（指名哪幾件）；
     沒有 endpoint.json 印「未做」那一行。"""
     if not (folder / ENDPOINT_FILE).exists():
         return [FULL_MODEL_LINE]
     record = read_endpoint(folder)
-    current = read_result(folder).ledger_sha256 if (folder / RESULT_FILE).exists() else None
-    if current != record.result_ledger_sha256:
-        return [STALE_ENDPOINT_LINE]
+    reasons = stale_reasons(folder, project, record)
+    if reasons:
+        return [STALE_ENDPOINT_LINE, f"  對不上的：{'、'.join(reasons)}"]
     return _endpoint_section(record)
 
 
@@ -195,5 +214,5 @@ def render_report(folder: Path) -> str:
     lines.append(f"累計求值次數（帳本記的、不含前段）：{evaluations}；做完 {rounds} 輪")
     lines.append(f"停止原因：{reason}" if reason is not None else "停止原因：還沒收尾")
     lines += _point_lines(header, _feasible(rows), _kept_texts(project))
-    lines += _endpoint_lines(folder)
+    lines += _endpoint_lines(folder, project)
     return "\n".join(lines) + "\n"

@@ -17,7 +17,7 @@ manifest 摘要與驗證收據摘要；方案檔與搜尋設定也要跟記的�
 不寫停止原因（迴圈停止原因是封閉集合，不含「人叫停」）。狀態檔與結果檔只由子行程寫，寫完整檔再換名（原子）。
 ``result.json`` 是交給終點的接口：最後可行點的每面 preset、厚度與空腔（公尺；空腔 0 照記 0、沒有空腔層記 None）、
 材料摘要、θ 的 hex、值與分項、停止原因、求值次數；終點完整模型重算、量大峰、材料匯出在 ``endpoint_run``。
-preset 寫 none 的面是「不貼、保留方案原本的牆」（#561 辛三）：每面設計帶方案場景那一面的材料（``scene_wall_materials``），
+preset 寫 none 的面是「不貼、保留方案原本的牆」（#561 辛三）：每面設計帶方案那一面原本的材料（:func:`scene_wall_materials`），
 從替身鏈起就用它的阻抗，不是剛性。
 """
 from __future__ import annotations
@@ -36,7 +36,9 @@ import jax.numpy as jnp
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.construction_presets import load_construction_presets
+from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.config.construction_environment import construction_environment
@@ -59,9 +61,11 @@ from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_check import PointHex, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
+from aosr.physics.report_io import solver_inputs
 from aosr.reporting.fem_reduced_scheme import scheme_points
-from aosr.reporting.scheme import Scheme, load_scheme, scene_wall_materials
-from aosr.scoring.stage_one_objective_jax import objective_constants
+from aosr.reporting.scheme import Scheme, load_scheme
+from aosr.reporting.validation import checked_inputs
+from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, objective_constants
 from aosr.scoring.stage_one_score import stage_one_score_settings
 
 
@@ -303,6 +307,28 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     return scheme, model, settings
 
 
+def scene_wall_materials(scheme: Scheme, *, capabilities: CapabilityTable,
+                         directivity: DirectivityDefaults) -> dict[Wall, SurfaceMaterial]:
+    """方案原本六面的牆面材料（照 ``Wall.all()``）：走報表求解入口那一條——``checked_inputs`` 驗方案、取第一對輸入
+    （跟 ``export_operators`` 同一個取法）交 ``report_io.solver_inputs``，用它的 ``materials_by_wall``；
+    固定阻抗只在那裡建，這裡不另轉。"""
+    _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
+    return dict(solver_inputs(next(iter(documents.values()))[1]).materials_by_wall)
+
+
+def project_wall_materials(project: GradientProject, scheme: Scheme) -> dict[Wall, SurfaceMaterial]:
+    """:func:`scene_wall_materials`，能力表取 ``project.json`` 記的、指向性取產品預設（跟 ``resume`` 核物理身分同一組）。"""
+    return scene_wall_materials(scheme, capabilities=load_capabilities(project.capabilities_path),
+                                directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+
+
+def search_objective_constants(project: GradientProject, scheme: Scheme,
+                               model: ReducedModel) -> StageOneObjectiveConstants:
+    """這一次搜尋的目標常數：替身的頻率軸、``project.purpose`` 的評分設定、方案座位組、替身的喇叭數。"""
+    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+    return objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set, len(model.source_names))
+
+
 def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings, *,
                 kept: Mapping[Wall, SurfaceMaterial]) -> tuple[SurfaceDesign, ...]:
     """六面（照 ``Wall.all()``）的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
@@ -318,10 +344,8 @@ def load_problem(project: GradientProject) -> GradientProblem:
     走設定層的 ``construction_environment``；這裡不自己拿產品預設的空氣。
     """
     scheme, model, settings = check_inputs(project)
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
-    constants = objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
-                                    len(model.source_names))
-    designs = designs_for(project.presets, settings, kept=scene_wall_materials(scheme.scene))
+    constants = search_objective_constants(project, scheme, model)
+    designs = designs_for(project.presets, settings, kept=project_wall_materials(project, scheme))
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
@@ -426,17 +450,19 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
     return evaluations, len(decisions), rows[-1].value if rows else None, stop_reason
 
 
-def write_result(folder: Path, designs: Sequence[SurfaceDesign]) -> GradientResult:
-    """從帳本最後一列決定（要帶停止原因）組 ``result.json``；帳本沒收尾就丟錯、不寫。每面材料摘要從這一次的設計清單
-    （``endpoint.design_digest``）來，設計清單的面要跟帳本標頭同一串。"""
+def result_from_ledger(folder: Path, designs: Sequence[SurfaceDesign], *,
+                       expected_header: MaterialGradientHeader | None = None) -> GradientResult:
+    """從帳本最後一列決定（要帶停止原因）重建整份結果，不寫檔；帳本沒收尾就丟錯。給了 ``expected_header`` 帳本標頭要
+    逐格相等。每面材料摘要從設計清單（``endpoint.design_digest``）來，設計清單的面要跟帳本標頭同一串。
+    寫 ``result.json`` 與終點核結果檔都走這一支（終點拿它跟檔裡那份整個比）。"""
     path = folder / LEDGER_FILE
-    header, rows = read_ledger(path)
+    header, rows = read_ledger(path, expected_header=expected_header)
     if tuple((design.surface_id, design.preset_id) for design in designs) != header.surfaces:
         raise ValueError("設計清單的面跟帳本標頭不同，不寫結果")
     last = rows[-1] if rows else None
     if last is None or last.phase != "round_decision" or last.stop_reason is None or last.decision is None:
         raise ValueError("帳本沒有以帶停止原因的決定列結尾，沒有結果可寫")
-    result = GradientResult(
+    return GradientResult(
         format_version=RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
         surfaces=surface_specs(header, last.theta(),
                                digests={design.surface_id: design_digest(design) for design in designs}),
@@ -445,5 +471,10 @@ def write_result(folder: Path, designs: Sequence[SurfaceDesign]) -> GradientResu
         components=Components(own_line_ripple_rms_db=last.components[0], seat_robustness_rms_db=last.components[1]),
         stop_reason=last.stop_reason, evaluations=last.decision.total_evaluations,
         rounds=sum(1 for row in rows if row.decision is not None), ledger_sha256=file_sha256(path))
+
+
+def write_result(folder: Path, designs: Sequence[SurfaceDesign]) -> GradientResult:
+    """:func:`result_from_ledger` 重建、原子寫成 ``result.json``。"""
+    result = result_from_ledger(folder, designs)
     write_json_atomic(folder / RESULT_FILE, result)
     return result

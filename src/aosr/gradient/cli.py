@@ -185,19 +185,23 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.physics.fem_reduced_check import points_hex
     from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
-    from aosr.reporting.scheme import load_scheme, scene_wall_materials
+    from aosr.reporting.scheme import load_scheme
     from aosr.scoring.stage_one_score import stage_one_score_settings
 
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     if SEARCHES_DIR in args.root.resolve().parts:
         raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
     scheme = load_scheme(scheme_path)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
     settings = load_material_gradient_settings(settings_path)
-    run.designs_for(args.presets, settings, kept=scene_wall_materials(scheme.scene))
+    capabilities = load_capabilities(args.capabilities)
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    run.designs_for(args.presets, settings,
+                    kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity))
     stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), args.purpose)
     with keep_signal_handlers():
-        operators = export_operators(scheme, capabilities=load_capabilities(args.capabilities),
-                                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+        operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     physics, mesh = operators.physics_identity, operators.mesh_hash
     points = run.SchemePoints(points_hex(operators.source_points), points_hex(operators.receiver_points))
     del operators
