@@ -11,8 +11,10 @@
 ``worker.run_endpoint_worker`` 跑一份終點、再直接叫 ``endpoint_check`` 與完整模型基準，這兩份同一行程、同一組處理器
 釘選，逐位比。命令列 ``endpoint`` 的子行程走 ``runtime.child_process_env``，刻意只繼承白名單環境、不帶三格處理器釘選
 （NPY_DISABLE_CPU_FEATURES、OPENBLAS_CORETYPE、XLA_FLAGS），有 AVX-512 的機器上 JAX 走另一套指令、替身那幾格差在
-最後幾位，所以命令列那一份只跟探針的產品入口那一份比：非浮點逐字，浮點用精度契約登記簿的
-``stage_one_objective_jax_vs_python``（JAX 評分路徑留給換機器的尺；近零的 dB 量照那條契約以 1 dB 為尺度）。
+最後幾位，所以命令列那一份只跟探針的產品入口那一份比：非浮點逐字，浮點用 ``|差| ≤ 2^-36 × max(|參考值|, 1)``。
+2^-36 這個數字借自精度契約登記簿的 ``stage_one_objective_jax_vs_python``（JAX 對 Python 評分路徑留給換機器的尺），
+但只借它的數值大小、另採混合比較規則（dB 欄以 1 dB 為尺度、無因次合分以 1 為尺度），不是逐字遵守那條契約；
+這是 2026-10-30 明確批准、僅限這一張考卷的容差例外，不視為原契約已自動涵蓋，正式歸屬另記候選票 #985。
 """
 from __future__ import annotations
 
@@ -61,8 +63,10 @@ COMPUTED_FLOATS: dict[str, tuple[str, ...]] = {
     "improvement": ("total", "components"),
 }
 COMPUTED_PATHS = [[part, name] for part, names in COMPUTED_FLOATS.items() for name in names]
-# stage_one_objective_jax_vs_python 契約對近零 dB 量的尺度（登記簿 truth 那一句「改用 |差|/(1 dB)」）。
-DB_SCALE = 1.0
+# 近零參考值的尺度：dB 欄（分項、大峰、逐頻與帶差）是 1 dB，無因次合分（total、full_total、reduced_total、
+# total_difference）是 1；兩種單位同一個數字，不是全部都 1 dB。借 stage_one_objective_jax_vs_python 契約
+# truth 那一句「改用 |差|/(1 dB)」的形狀，混合規則見模組說明與候選票 #985。
+UNIT_SCALE = 1.0
 # 報告過期的六種改法 → 報告「對不上的」那一行要點名的原因（照 stale_reasons 的順序）。
 # result_claim、unclosed 兩種連 endpoint.json 的摘要欄一起改成跟改後的檔一致（只剩結果↔帳本對不上）。
 STALE_CASES: dict[str, tuple[str, ...]] = {
@@ -306,7 +310,9 @@ def _leaves(prefix: str, node: object) -> dict[str, object]:
 def test_cli_endpoint_matches_entry_within_contract(runs: tuple[Path, Record]) -> None:
     """抓命令列終點跟產品入口算的不是同一件事：命令列 endpoint.json 跟探針產品入口那一份，非浮點（身分、摘要、檔名、
     完整解次數、喇叭與座位名、每面規格、丟掉的空腔、θ）逐字相等；終點、基準、改善的浮點每一格
-    ``|差| ≤ 尺 × max(|探針那一格|, 1 dB)``（尺是登記簿 ``stage_one_objective_jax_vs_python``）。不比秒數與完成時間。"""
+    ``|差| ≤ 尺 × max(|探針那一格|, 1)``（尺的數字借自登記簿 ``stage_one_objective_jax_vs_python``；1 在 dB 欄是 1 dB、
+    在無因次合分是 1；僅限本考卷的一次性例外，見模組說明）。同一行程的產品入口對直接呼叫另一題仍逐位比。
+    不比秒數與完成時間。"""
     tolerance = contract_value("stage_one_objective_jax_vs_python")
     cli = _leaves("", _without(_json(_folder(runs) / "endpoint.json")))
     entry = _leaves("", _without(cast(Record, _section(runs, "probe")["worker_record"])))
@@ -328,7 +334,7 @@ def _within(actual: object, expected: object, tolerance: float) -> bool:
     if actual is None or expected is None:
         return actual is None and expected is None
     assert isinstance(actual, float) and isinstance(expected, float), (actual, expected)
-    return abs(actual - expected) <= tolerance * max(abs(expected), DB_SCALE)
+    return abs(actual - expected) <= tolerance * max(abs(expected), UNIT_SCALE)
 
 
 def test_exported_scheme_keeps_original_walls_and_writes_specs(runs: tuple[Path, Record]) -> None:
