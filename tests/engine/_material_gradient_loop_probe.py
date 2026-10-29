@@ -96,14 +96,17 @@ def _start_ledger(path: Path, header: ledger.MaterialGradientHeader, designs: tu
 
 def boundary_class(phases: Sequence[tuple[str, int | None, str | None]], keep: int) -> tuple[int, str, str]:
     """列界 ``keep``（留前 ``keep`` 列）的語意類別，全從帳本欄位算：（最後留下那一列的輪號，前段記 -1；它的 phase；
-    它在同一段——phase、輪號、候選都相同的連續列——裡的位置：只一列／段首／段中／段尾）。
-    段尾的 candidate_retune 就是「決定前」，round_decision 就是「決定後」，其餘是「半輪中途」。"""
+    它在同一段——phase、輪號、候選都相同的連續列——裡的位置：只一列／段首／段中／段尾／決定前）。
+    「決定前」是下一列就是 round_decision 的那一列（每輪最後一個候選的最後一列），跟別的候選的段尾分開；
+    round_decision 自己就是「決定後」，其餘是「半輪中途」。"""
     index = keep - 1
     phase, round_index, _ = phases[index]
     same_before = index > 0 and phases[index - 1] == phases[index]
     same_after = index + 1 < len(phases) and phases[index + 1] == phases[index]
     position = {(False, False): "只一列", (False, True): "段首", (True, True): "段中", (True, False): "段尾"}[
         (same_before, same_after)]
+    if index + 1 < len(phases) and phases[index + 1][0] == "round_decision":
+        position = "決定前"
     return (-1 if round_index is None else round_index, phase, position)
 
 

@@ -2,7 +2,7 @@
 
 替身照 ``test_material_gradient`` 從 ``test_fem_reduced`` 的小房間衍生（同一個 ``_chain_model``），六面 two_rigid、
 從預設樣板取規格起跑、正式設定。另有合成目標（加權二次式，探針裡定義），求值便宜，給「每一類列界都接續一次」
-（類別＝輪號、phase、段內位置，從帳本欄位算）與四種停止原因用。雙精度的迴圈、帳本與接續在子行程（只叫公開入口）；比對與判決在父行程。
+（類別＝輪號、phase、段內位置含「決定前」，從帳本欄位算）與四種停止原因用。雙精度的迴圈、帳本與接續在子行程（只叫公開入口）；比對與判決在父行程。
 候選產生、總深度投影、帳本竄改與拒收不必求值，父行程直接跑。單精度只量不登記。
 """
 from __future__ import annotations
@@ -595,6 +595,8 @@ def test_resume_at_every_boundary_class_matches_one_shot(runs: tuple[Path, Recor
     classes = {boundary_class(phases, keep) for keep in range(1, len(rows) + 1)}
     keeps = cast(list[int], multi["resume_keeps"])
     assert {boundary_class(phases, keep) for keep in keeps} == classes
+    # 每輪決定前的最後一列自成一類（#972 修補一補）：留到決定列前一列的那幾個列界都要接續過。
+    assert {index for index, row in enumerate(rows) if row.phase == "round_decision"} <= set(keeps)
     resumed = cast(list[str], multi["resumed"])
     assert [f"multi.cut{keep:04d}.jsonl" for keep in keeps] == resumed
     for name in resumed:
