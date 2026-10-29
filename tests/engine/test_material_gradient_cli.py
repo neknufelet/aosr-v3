@@ -126,11 +126,15 @@ def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
                               _holdouts())
     rulers = HoldoutRulers(frequency=Ruler(FREQUENCY_NAME, contract_value(FREQUENCY_NAME)),
                            band=Ruler(BAND_NAME, contract_value(BAND_NAME)))
-    for name, surrogate, receipt in (("good", chain, True), ("unvalidated", chain, False), ("zero-identity", base, True)):
+    # 物理身分全零那份要自己驗一次：報告帶驗證當下的計算條件指紋（含物理身分），借 chain 的報告寫不成它的收據（#983）。
+    zero_report = validate_reduced(
+        base, _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), base), _holdouts())
+    for name, surrogate, surrogate_report in (("good", chain, report), ("unvalidated", chain, None),
+                                              ("zero-identity", base, zero_report)):
         (directory / name).mkdir()
         save_reduced(surrogate, directory / name / "rom.npz")
-        if receipt:
-            save_validation_receipt(directory / name / "rom.npz", report, rulers=rulers, seconds=1.0)
+        if surrogate_report is not None:
+            save_validation_receipt(directory / name / "rom.npz", surrogate_report, rulers=rulers, seconds=1.0)
     full = _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain)
     for name, (density, speed) in AIR_SURROGATES.items():
         other = dataclasses.replace(chain, density_kg_m3=density, sound_speed_m_s=speed)

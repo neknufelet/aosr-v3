@@ -67,6 +67,21 @@ def matrices_digest(matrices: ReducedMatrices) -> str:
     return digest.hexdigest()
 
 
+def computation_digest(model: ReducedModel) -> str:
+    """計算條件指紋：小矩陣摘要、頻率軸逐點 ``float.hex()``（照順序）、密度與聲速的 ``float.hex()``、喇叭與座位名照順序、
+    網格雜湊、物理身分、輸入雜湊，正規 JSON 做 SHA-256（#983，顧問 #967）。
+
+    驗證報告在驗證當下用被驗的模型算這一格，寫收據時對載入的模型重算比對：矩陣相同、頻率軸或空氣或喇叭座位序不同的
+    替身寫不成同一份報告的收據。綁住的是實際欄位本身；``input_hash`` 只是出身之一，它是從 manifest 抄進來的字串，
+    不能拿它代替頻率軸與空氣。"""
+    return _sha(_canonical({
+        "matrices_digest": matrices_digest(model.matrices),
+        "frequencies_hex": [float(value).hex() for value in model.frequencies_hz],
+        "density_hex": float(model.density_kg_m3).hex(), "speed_hex": float(model.sound_speed_m_s).hex(),
+        "source_names": list(model.source_names), "receiver_names": list(model.receiver_names),
+        "mesh_hash": model.mesh_hash, "physics_identity": model.physics_identity, "input_hash": model.input_hash}))
+
+
 def _ledger_document(ledger: BuildLedger) -> dict[str, object]:
     return {"full_solves": ledger.full_solves, "snapshots": ledger.snapshots, "rank": ledger.rank,
             "rounds": [vars(item) for item in ledger.rounds], "stop_reason": ledger.stop_reason,

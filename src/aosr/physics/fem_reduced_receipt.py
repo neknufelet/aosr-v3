@@ -35,7 +35,7 @@ from typing import TypeGuard
 
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_check import PointHex, ValidationReport, seats_within_contract, within_reduced_contract
-from aosr.physics.fem_reduced_store import load_reduced, manifest_path, matrices_digest
+from aosr.physics.fem_reduced_store import computation_digest, load_reduced, manifest_path, matrices_digest
 
 RECEIPT_FORMAT_VERSION = 2
 _READABLE_VERSIONS = (1, 2)
@@ -89,6 +89,8 @@ def _checked_report(report: ValidationReport, model: ReducedModel, seconds: floa
     """報告要對這份替身、而且整份做完；不然就不寫收據。"""
     if report.model_digest != matrices_digest(model.matrices):
         raise ValueError("驗證報告不是對這份替身做的（模型內容摘要不同）")
+    if report.computation_digest != computation_digest(model):
+        raise ValueError("驗證報告不是對這份替身的計算條件做的（頻率軸、空氣、喇叭／座位順序或出身不同）")
     seats = set(model.receiver_names)
     if set(report.frequency_db_by_seat) != seats or set(report.band_db_by_seat) != seats:
         raise ValueError("驗證報告的座位跟替身不同")
