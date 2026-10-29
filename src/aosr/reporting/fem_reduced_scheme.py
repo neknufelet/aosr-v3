@@ -17,6 +17,11 @@ from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 
 
+def scheme_points(scheme: Scheme) -> tuple[dict[str, Point], dict[str, Point]]:
+    """方案的喇叭與座位座標（名字 → 點，座位照座位組的順序）：匯出算子與核替身位置走同一個取法。"""
+    return dict(scheme.speakers), {point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points}
+
+
 def export_operators(
     scheme: Scheme, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     max_frequency_hz: float = FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -24,9 +29,8 @@ def export_operators(
     """K、M、六面 B、每支喇叭的點源右側、每個座位的取值列、網格雜湊與物理身分。"""
     checked, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
     solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    sources, receivers = scheme_points(checked)
     return export_room_operators(
-        solved.room, dict(checked.speakers),
-        {point.receiver_id: Point(*point.position_m) for point in checked.receiver_set.points},
-        density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s,
+        solved.room, sources, receivers, density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s,
         physics_identity=physics_identity(capabilities=capabilities, directivity=directivity),
         max_frequency_hz=max_frequency_hz)

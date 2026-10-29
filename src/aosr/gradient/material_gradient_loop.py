@@ -27,8 +27,8 @@ import numpy as np
 from aosr.config.material_gradient import DescentSettings, MaterialGradientSettings
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
-    ChainObjective, DescentResult, FloatVector, LoopStopReason, SurfaceDesign, checked_theta, depth_room,
-    compiled_evaluator, is_feasible, retune_cavities,
+    ChainObjective, DescentResult, FloatVector, LoopStopReason, StopCheck, SurfaceDesign, check_stop, checked_theta,
+    depth_room, compiled_evaluator, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_ledger import (
     CandidateJump, CandidateOutcome, MaterialGradientHeader, MaterialGradientRow, RoundDecision, append_rows,
@@ -215,12 +215,13 @@ def _candidate_count(theta: FloatVector, designs: Sequence[SurfaceDesign], setti
 
 def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | FloatVector,
                        designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
-                       budget_left: int) -> RoundResult:
+                       budget_left: int, should_stop: StopCheck | None = None) -> RoundResult:
     """在目前可行 θ 算梯度（一次求值）、產候選，基準與每個候選各自從自己的起點做最多 K 步空腔重調再比。
 
     基準＝目前 θ 原樣重調（不問前面重調過沒有）；候選＝跳到候選點再重調；改善＝基準重調後的值減候選重調後的值。
     最好的候選改善「超過」門檻才接受、交出它重調後的 θ；都沒超過就交出重調後的基準。沒有候選時不重調、θ 原樣。
     最壞求值次數（:func:`round_evaluation_bound`）大於 ``budget_left`` 就不開這一輪、不求值，記「求值到上限」。
+    給了 ``should_stop`` 就在每次求值之前查一次（梯度那一次與每段重調裡的每一次），為真拋 ``SearchStopped``。
     """
     theta = checked_theta(theta_feasible, designs)
     if not is_feasible(theta, designs):
@@ -230,6 +231,7 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
     bound = round_evaluation_bound(settings, _candidate_count(theta, designs, settings))
     if bound > budget_left:
         return RoundResult(False, bound, None, (), None, (), None, theta, None, None, 0, 0.0, LOOP_STOP_MAX_EVALUATIONS)
+    check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), gradient = compiled_evaluator(objective)(jnp.asarray(theta))
     start_value = float(value)
@@ -238,12 +240,12 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
         components = (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db))
         return RoundResult(True, bound, start_value, (), None, (), None, theta, start_value, components, 1,
                            time.perf_counter() - clock, LOOP_STOP_NO_CANDIDATES)
-    baseline = retune_cavities(objective, theta, designs, settings)
+    baseline = retune_cavities(objective, theta, designs, settings, should_stop=should_stop)
     base_value = baseline.steps[-1].value
     confirmed = []
     for candidate in candidates:
         jumped = apply_candidate(theta, candidate, designs)
-        retuned = retune_cavities(objective, jumped, designs, settings)
+        retuned = retune_cavities(objective, jumped, designs, settings, should_stop=should_stop)
         confirmed.append(ConfirmedCandidate(candidate, jumped, retuned, retuned.steps[-1].value,
                                             base_value - retuned.steps[-1].value))
     best = max(confirmed, key=lambda item: item.improvement)
@@ -305,12 +307,13 @@ def _loop_stop(result: RoundResult, rounds_done: int, total: int, designs: Seque
 
 
 def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequence[SurfaceDesign],
-                     settings: MaterialGradientSettings, ledger_path: Path, header: MaterialGradientHeader) -> None:
+                     settings: MaterialGradientSettings, ledger_path: Path, header: MaterialGradientHeader,
+                     should_stop: StopCheck | None) -> None:
     theta, value, components = start.theta, start.value, start.components
     round_index, total, step = start.round, start.total, start.next_step
     while True:
         result = confirmation_round(objective, theta, designs, settings,
-                                    budget_left=settings.candidates.max_evaluations - total)
+                                    budget_left=settings.candidates.max_evaluations - total, should_stop=should_stop)
         for batch in _segment_rows(result, round_index, step):
             append_rows(ledger_path, header, batch)
             step += len(batch)
@@ -385,12 +388,15 @@ def _pre_loop_start(rows: Sequence[MaterialGradientRow], designs: Sequence[Surfa
 
 
 def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVector, designs: Sequence[SurfaceDesign],
-               settings: MaterialGradientSettings, ledger_path: Path, header: MaterialGradientHeader) -> LoopResult:
+               settings: MaterialGradientSettings, ledger_path: Path, header: MaterialGradientHeader, *,
+               should_stop: StopCheck | None = None) -> LoopResult:
     """一輪接一輪直到停，每一段下降與每一輪的決定都接在帳本後面寫（每批 flush 與 fsync）。
 
     ``ledger_path`` 要已經寫好前段（庚一的連續下降、取規格、重調），最後一列的 θ 要逐位等於 ``theta_feasible``——
     帳本是接續的唯一來源，起點要在帳本裡。停止原因是封閉集合（``LOOP_STOP_REASONS``）。回的結果從帳本讀回組成。
     求值次數上限限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
+    給了 ``should_stop`` 就在每次求值之前查一次，為真拋 ``SearchStopped``：一輪的列等整輪算完才寫，
+    所以帳本停在上一列決定（或前段末列），不寫停止原因；接續用 :func:`resume_rounds`。
     """
     theta = checked_theta(theta_feasible, designs)
     _, rows = read_ledger(ledger_path, expected_header=header)
@@ -399,7 +405,7 @@ def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVecto
     start = _pre_loop_start(rows, designs)
     if [value.hex() for value in np.asarray(theta, dtype=np.float64)] != list(rows[-1].theta_hex):
         raise ValueError("起點 θ 要逐位等於帳本前段最後一列的 θ")
-    _continue_rounds(objective, start._replace(theta=theta), designs, settings, ledger_path, header)
+    _continue_rounds(objective, start._replace(theta=theta), designs, settings, ledger_path, header, should_stop)
     return _read_result(ledger_path, header)
 
 
@@ -420,12 +426,14 @@ def _check_should_continue(decision: RoundDecision, start: _LoopStart, designs: 
 
 
 def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
-                  ledger_path: Path, header: MaterialGradientHeader) -> LoopResult:
-    """讀回帳本接著跑：標頭（替身、面、變數、設定指紋）跟這一次不一樣就拒收。
+                  ledger_path: Path, header: MaterialGradientHeader, *,
+                  should_stop: StopCheck | None = None) -> LoopResult:
+    """讀回帳本接著跑：標頭（替身、面、變數、設定指紋、評分常數指紋）跟這一次不一樣就拒收。
 
     最後一列決定之前的輪算完成，之後沒寫完的半輪丟掉（帳本截到那一列）重跑；沒有任何決定列就從前段最後一列起跑。
     已經以停止原因收尾的帳本不再求值，直接交回。θ 從帳本讀回是雙精度；累計求值次數接帳本記的（丟掉的半輪不算）。
     最後一列決定沒有停止原因、但照設定該停（輪數或預算）的帳本拒收，不開輪。
+    ``should_stop`` 同 :func:`run_rounds`。
     """
     _, rows = read_ledger(ledger_path, expected_header=header)
     finished = _finished(rows)
@@ -443,5 +451,5 @@ def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], s
                            last.decision.total_evaluations, decisions[-1] + 1)
         _check_should_continue(last.decision, start, designs, settings)
         truncate_rows(ledger_path, header, decisions[-1] + 1)
-    _continue_rounds(objective, start, designs, settings, ledger_path, header)
+    _continue_rounds(objective, start, designs, settings, ledger_path, header, should_stop)
     return _read_result(ledger_path, header)

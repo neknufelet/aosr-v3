@@ -20,7 +20,6 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, NamedTuple
-from weakref import WeakKeyDictionary
 
 import jax
 import jax.numpy as jnp
@@ -61,6 +60,21 @@ _THICKNESS = "thickness_m"
 ChainObjective = Callable[[jax.Array], tuple[jax.Array, StageOneObjectiveArrays]]
 Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, StageOneObjectiveArrays], jax.Array]]
 FloatVector = NDArray[np.floating]
+StopCheck = Callable[[], bool]
+
+
+class SearchStopped(Exception):
+    """人叫停（停止記號）：在兩次求值之間查到 ``should_stop`` 為真就拋這個，不是停止原因。
+
+    迴圈的停止原因是封閉集合（``LOOP_STOP_REASONS``），「人叫停」不在裡面、不寫進帳本；
+    拋出時帳本停在最後一列寫完整的地方，接續照既有規則丟掉沒寫完的半輪重跑。
+    """
+
+
+def check_stop(should_stop: StopCheck | None) -> None:
+    """每次求值之前叫一次：給了 ``should_stop`` 而它回真就拋 :class:`SearchStopped`。"""
+    if should_stop is not None and should_stop():
+        raise SearchStopped("停止記號：在兩次求值之間停下")
 
 
 @dataclass(frozen=True)
@@ -356,19 +370,23 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
 
 # ---- 投影梯度下降 ----
 
-_EVALUATORS: WeakKeyDictionary[ChainObjective, Evaluator] = WeakKeyDictionary()
+# 編譯好的評估函式掛在目標函式物件自己身上的屬性名。
+_EVALUATOR_ATTRIBUTE: Final = "aosr_compiled_evaluator"
 
 
 def compiled_evaluator(objective: ChainObjective) -> Evaluator:
     """``θ → ((值, 分項), 梯度)`` 的編譯版；同一個目標函式物件只包一次 ``jax.jit``，之後每段下降共用同一份編譯。
 
     每段下降都重新包一次會每段重新追蹤、重新編譯（候選確認一輪最多四段）；共用不改數值：同一個函式、
-    同一個形狀與精度，編譯出同一份程式。目標函式被丟掉時快取跟著消失。
+    同一個形狀與精度，編譯出同一份程式。編譯版掛在目標函式自己的屬性上，不放模組層的表：編譯版強抓著目標，
+    放在以目標為鍵的弱參照表裡鍵永遠不會死（#561 審查）；掛在自己身上是「目標 → 編譯版 → 目標」的循環，
+    外面沒人抓著目標時垃圾回收連編譯版一起收。目標必須是能掛屬性的函式物件（``def`` 或 lambda）。
     """
-    evaluator = _EVALUATORS.get(objective)
-    if evaluator is None:
-        evaluator = jax.jit(jax.value_and_grad(objective, has_aux=True))
-        _EVALUATORS[objective] = evaluator
+    cached: Evaluator | None = getattr(objective, _EVALUATOR_ATTRIBUTE, None)
+    if cached is not None:
+        return cached
+    evaluator: Evaluator = jax.jit(jax.value_and_grad(objective, has_aux=True))
+    setattr(objective, _EVALUATOR_ATTRIBUTE, evaluator)
     return evaluator
 
 
@@ -493,7 +511,8 @@ def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.A
 
 def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
              bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
-             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = ()) -> DescentResult:
+             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
+             should_stop: StopCheck | None = None) -> DescentResult:
     start = jnp.asarray(theta0)
     if start.ndim != 1 or not jnp.issubdtype(start.dtype, jnp.floating):
         raise ValueError("θ 起點必須是一維浮點陣列")
@@ -518,6 +537,7 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
                            (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db)),
                            _projected_gradient_norm(theta, gradient, lower, upper, limits), step, seconds)
 
+    check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), gradient = evaluate(start)
     evaluations = 1
@@ -539,6 +559,7 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
             moved = theta - jnp.asarray(trial, dtype=dtype) * gradient
             candidate = (jnp.clip(moved, lower, upper) if not limits else
                          jnp.asarray(project_to_limits(np.asarray(moved), lower_values, upper_values, limits)))
+            check_stop(should_stop)
             (new_value, new_aux), new_gradient = evaluate(candidate)
             evaluations += 1
             # 投影弧上的 Armijo：梯度乘實際位移。投到凸集合上的位移跟梯度的內積不大於零（投影的性質），
@@ -558,7 +579,7 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
 
 def projected_descent(objective: ChainObjective, theta0: jax.Array | FloatVector,
                       bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
-                      limits: Sequence[DepthLimit]) -> DescentResult:
+                      limits: Sequence[DepthLimit], should_stop: StopCheck | None = None) -> DescentResult:
     """投影到「盒界 ∩ 每面厚度＋空腔 ≤ 總深度上限」的梯度下降＋回溯線搜尋（Armijo）。
 
     ``limits`` 一般是 :func:`depth_limits` 由設計清單算出來的；空的就只守盒界（合成目標的考卷用）。
@@ -567,9 +588,10 @@ def projected_descent(objective: ChainObjective, theta0: jax.Array | FloatVector
     停在「步長到下限」。投影梯度範數（貼界、貼斜邊還往外推的分量去掉）小於 ``gradient_norm_stop`` 停在
     「梯度夠小」；走滿 ``max_steps`` 停在「步數到上限」。值單調不增；同一起點重跑逐位相同（秒數除外）。
     取規格那一步照舊保留：厚度仍要取合法值，連續段只是不再跑到總深度外面。
+    給了 ``should_stop`` 就在每次求值之前查一次，為真拋 :class:`SearchStopped`（這一段不交出結果）。
     """
     return _descend(objective, theta0, bounds, settings, max_steps=settings.max_steps, stop_on_gradient=True,
-                    limits=limits)
+                    limits=limits, should_stop=should_stop)
 
 
 # ---- 取規格與空腔重調 ----
@@ -666,13 +688,15 @@ def retune_bounds(theta_feasible: jax.Array | FloatVector,
 
 
 def retune_cavities(objective: ChainObjective, theta_feasible: jax.Array | FloatVector,
-                    designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings) -> DescentResult:
+                    designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
+                    should_stop: StopCheck | None = None) -> DescentResult:
     """厚度固定在規格、所有面的空腔一起走同一個投影下降，**最多** ``[retune].steps`` 步。
 
     不因梯度小提早停；線搜尋退到步長下限仍沒過就不走這一步、停在「步長到下限」（起點就不可下降時是 0 步、
     θ 原樣），停止原因與最後一次試的步長都交回、進帳本；走滿上限停在「步數到上限」。不硬湊步數。
     厚度的上下界相等，投影把它釘回原值、逐位不變；空腔上界收在總深度內，所以每一步都可行。
+    ``should_stop`` 同 :func:`projected_descent`：每次求值之前查一次。
     """
     bounds = retune_bounds(theta_feasible, designs)
     return _descend(objective, np.asarray(theta_feasible), bounds, settings.descent,
-                    max_steps=settings.retune.steps, stop_on_gradient=False)
+                    max_steps=settings.retune.steps, stop_on_gradient=False, should_stop=should_stop)
