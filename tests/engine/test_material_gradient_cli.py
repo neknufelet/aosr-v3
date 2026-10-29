@@ -58,6 +58,7 @@ from aosr.physics.fem_reduced_store import manifest_path, save_reduced
 from aosr.reporting import physics_identity as identity_module
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.scoring.receiver_set import ReceiverSet
+from aosr.scoring.stage_one_low_frequency_contract import StageOneReasonCode
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine import _fem_shared_cases as shared_cases
 from tests.engine._precision_contracts import contract_value
@@ -85,15 +86,20 @@ OTHER_DENSITY, OTHER_SPEED = 1.18, 340.0
 # 同網格、同座標、另一組空氣建的替身（各有合格收據）：探針用的那份空氣兩格都換，拒收題各只換一格。
 AIR_SURROGATES = {"air-other": (OTHER_DENSITY, OTHER_SPEED), "other-density": (OTHER_DENSITY, SOUND_SPEED),
                   "other-speed": (DENSITY, OTHER_SPEED)}
+# 顧問 #971 的隔離反例（只交 80、100、125 Hz）與宣告軸拿掉中間一點：各自在自己的軸上做留出驗證、收據合格，
+# start 與 resume 都要拒收，理由碼照低頻評估器的宣告點判法。
+AXIS_SURROGATES = {"narrow-axis": ((80.0, 100.0, 125.0), StageOneReasonCode.FREQUENCY_AXIS_MISMATCH),
+                   "missing-point": (FEM_LANE_FREQUENCIES_HZ[:47] + FEM_LANE_FREQUENCIES_HZ[48:],
+                                     StageOneReasonCode.MISSING_DECLARED_POINT)}
 WAIT_S = 600.0
 
 
 # ---- 夾具：替身、方案、設定、命令列各跑一次 ----
 
-def _holdouts() -> list[FrequencyWallImpedances]:
-    """留出材料：同 ``test_fem_reduced`` 的抽法與種子（99），頻率軸換成整條正式有限元素軸（衍生替身的軸）。"""
+def _holdouts(axis: tuple[float, ...] = FEM_LANE_FREQUENCIES_HZ) -> list[FrequencyWallImpedances]:
+    """留出材料：同 ``test_fem_reduced`` 的抽法與種子（99），頻率軸預設是整條正式有限元素軸（衍生替身的軸）。"""
     rng = np.random.default_rng(99)
-    frequencies = np.asarray(FEM_LANE_FREQUENCIES_HZ)
+    frequencies = np.asarray(axis)
     sets: list[FrequencyWallImpedances] = []
     for _ in range(2):
         walls = {}
@@ -145,6 +151,12 @@ def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
         (directory / name).mkdir()
         save_reduced(other, directory / name / "rom.npz")
         save_validation_receipt(directory / name / "rom.npz", validate_reduced(other, operators, _holdouts()),
+                                rulers=rulers, seconds=1.0)
+    for name, (axis, _) in AXIS_SURROGATES.items():
+        other = dataclasses.replace(chain, frequencies_hz=axis)
+        (directory / name).mkdir()
+        save_reduced(other, directory / name / "rom.npz")
+        save_validation_receipt(directory / name / "rom.npz", validate_reduced(other, full, _holdouts(axis)),
                                 rulers=rulers, seconds=1.0)
 
 
@@ -299,7 +311,8 @@ def _rejections(directory: Path, folder: Path) -> Record:
              "moved_speaker": ("good", PRESET_TEXT, "scheme-moved-speaker.json"),
              "moved_seat": ("good", PRESET_TEXT, "scheme-moved-seat.json"),
              "other_density": ("other-density", PRESET_TEXT, "scheme.json"),
-             "other_speed": ("other-speed", PRESET_TEXT, "scheme.json")}
+             "other_speed": ("other-speed", PRESET_TEXT, "scheme.json"),
+             **{name: (name, PRESET_TEXT, "scheme.json") for name in AXIS_SURROGATES}}
     records: Record = {}
     for name, (surrogate, presets, scheme) in cases.items():
         root = directory / f"reject-{name}"
@@ -318,7 +331,26 @@ def _rejections(directory: Path, folder: Path) -> Record:
     records["resume_scheme_changed"] = _scheme_changed(directory, folder)
     for kind, name in (("source_points", MOVED_SPEAKER), ("receiver_points", MOVED_SEAT)):
         records[f"resume_project_{kind}"] = _project_points_tampered(directory, folder, kind, name)
+    records["resume_narrow_axis"] = _surrogate_swapped(directory, folder, "narrow-axis")
     return records
+
+
+def _surrogate_swapped(directory: Path, folder: Path, surrogate: str) -> Record:
+    """抄一份跑完的資料夾，project.json 指到另一份替身、連 manifest 與收據摘要一起換成它的（前面幾格核對照樣過），
+    再接續：要拒收，資料夾裡每一個檔的位元組都不變、不多出檔。"""
+    copied = directory / f"swapped-{surrogate}" / folder.name
+    shutil.copytree(folder, copied)
+    project = json.loads((copied / "project.json").read_text(encoding="utf-8"))
+    npz = (directory / surrogate / "rom.npz").resolve()
+    receipt = npz.with_name("rom.validation.json")
+    manifest = json.loads(manifest_path(npz).read_text(encoding="utf-8"))
+    project.update(surrogate_path=str(npz), receipt_path=str(receipt), receipt_sha256=_sha256(receipt),
+                   surrogate_manifest_sha256=manifest["manifest_sha256"])
+    (copied / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    before = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in copied.iterdir()}
+    record = _run(directory, _command("resume", str(copied)))
+    record["unchanged"] = before == {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in copied.iterdir()}
+    return record
 
 
 def _project_points_tampered(directory: Path, folder: Path, kind: str, name: str) -> Record:
@@ -750,6 +782,26 @@ def test_start_rejects_surrogate_built_with_other_air(runs: tuple[Path, Record],
     assert "替身建模用的空氣跟方案的不同" in stderr
     assert f"替身 密度 {density!r}、聲速 {speed!r}；方案 密度 {DENSITY!r}、聲速 {SOUND_SPEED!r}" in stderr
     assert record["root_entries"] == []
+
+
+@pytest.mark.parametrize("surrogate", tuple(AXIS_SURROGATES))
+def test_start_rejects_surrogate_axis_short_of_declared_points(runs: tuple[Path, Record], surrogate: str) -> None:
+    """顧問 #971：計分範圍 20–300 Hz，替身只交 80、100、125 Hz（或宣告軸中間少一點），收據照樣合格；start 要回 1、
+    標準錯誤點名低頻評估器的理由碼與宣告軸，根底下沒建資料夾（不准拿剩下的頻點代替整段）。"""
+    record = _rejection(runs, surrogate)
+    assert record["code"] == 1, record["stderr"]
+    stderr = str(record["stderr"])
+    assert AXIS_SURROGATES[surrogate][1].value in stderr and LowFrequencyAxis.SEARCH.value in stderr
+    assert record["root_entries"] == []
+
+
+def test_resume_rejects_surrogate_axis_short_of_declared_points(runs: tuple[Path, Record]) -> None:
+    """接續那一側：跑完的資料夾把 project.json 指到窄軸替身（摘要一起換，前面幾格核對都過），resume 回 1、
+    點名理由碼，資料夾裡每一個檔的 SHA-256 前後相同、沒多出檔（父行程起子行程之前就拒收）。"""
+    record = _rejection(runs, "resume_narrow_axis")
+    assert record["code"] == 1, record["stderr"]
+    assert AXIS_SURROGATES["narrow-axis"][1].value in str(record["stderr"])
+    assert record["unchanged"] is True
 
 
 def test_same_root_other_settings_gets_own_folder(runs: tuple[Path, Record]) -> None:

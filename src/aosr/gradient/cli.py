@@ -199,7 +199,7 @@ def _start(args: argparse.Namespace) -> int:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     run.designs_for(args.presets, settings,
                     kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity))
-    stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), args.purpose)
+    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     physics, mesh = operators.physics_identity, operators.mesh_hash
@@ -207,6 +207,7 @@ def _start(args: argparse.Namespace) -> int:
     del operators
     model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points)
     run.check_surrogate_matches_scheme(model, scheme, points)
+    run.check_surrogate_axis_covers_scoring(model, scheme, score)
     del model
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,

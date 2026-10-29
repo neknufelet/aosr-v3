@@ -65,8 +65,9 @@ from aosr.physics.report_io import solver_inputs
 from aosr.reporting.fem_reduced_scheme import scheme_points
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.reporting.validation import checked_inputs
+from aosr.scoring.stage_one_low_frequency import axis_reason_not_measurable
 from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, objective_constants
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.stage_one_score import StageOneScoreSettings, stage_one_score_settings
 
 
 PROJECT_FILE: Final = "project.json"
@@ -277,6 +278,26 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
     _check_same_points(points, scheme_points_hex(scheme), "交給閘門的")
 
 
+def check_surrogate_axis_covers_scoring(model: ReducedModel, scheme: Scheme, score: StageOneScoreSettings) -> None:
+    """替身的頻率軸要算得了這一次的計分（#984，顧問 #971）：照方案場景宣告的低頻軸、計分範圍，走低頻評估器的
+    宣告點與缺段判法（:func:`axis_reason_not_measurable`）；不可估就拒收，不拿剩下的頻點代替整段。"""
+    axis = scheme.scene.low_frequency_axis
+    if axis is None:
+        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
+    bounds = score.scored_range_hz
+    reason = axis_reason_not_measurable(model.frequencies_hz, axis, bounds)
+    if reason is not None:
+        inside = sum(1 for frequency in model.frequencies_hz if bounds[0] <= frequency <= bounds[1])
+        raise ValueError(f"替身的頻率軸算不了這一次的計分（{reason.value}）：宣告軸 {axis.value}、"
+                         f"計分範圍 {bounds[0]!r} 到 {bounds[1]!r} Hz；替身共 {len(model.frequencies_hz)} 點、"
+                         f"範圍內 {inside} 點，拒收")
+
+
+def search_score_settings(purpose: str) -> StageOneScoreSettings:
+    """這一次搜尋用途的第一階段評分設定（品質登記簿那一段）。"""
+    return stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), purpose)
+
+
 def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> None:
     """逐名逐座標比，第一個不同的就點名是哪一支喇叭或哪一個座位。"""
     for label, recorded, wanted in (("喇叭", given.sources, scheme.sources), ("座位", given.receivers, scheme.receivers)):
@@ -287,7 +308,8 @@ def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> 
 
 def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
     """接續前逐格核輸入（父行程起子行程前、子行程重建目標前各核一次）：方案檔雜湊、方案座標跟 ``project.json`` 記的、
-    替身過閘門（網格雜湊、物理身分、座標）、manifest 與收據摘要、設定指紋、替身對得上方案。任何一格不同就拒收。"""
+    替身過閘門（網格雜湊、物理身分、座標）、manifest 與收據摘要、設定指紋、替身對得上方案、替身頻率軸算得了
+    這一次的計分。任何一格不同就拒收。"""
     scheme_path, surrogate = Path(project.scheme_path), Path(project.surrogate_path)
     if file_sha256(scheme_path) != project.scheme_sha256:
         raise ValueError(f"方案檔 {scheme_path} 跟開始時不同（scheme_sha256 變了），不接續")
@@ -304,6 +326,7 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     if settings.fingerprint != project.settings_fingerprint:
         raise ValueError("搜尋設定跟開始時不同（設定指紋變了），不接續")
     check_surrogate_matches_scheme(model, scheme, points)
+    check_surrogate_axis_covers_scoring(model, scheme, search_score_settings(project.purpose))
     return scheme, model, settings
 
 
@@ -325,7 +348,7 @@ def project_wall_materials(project: GradientProject, scheme: Scheme) -> dict[Wal
 def search_objective_constants(project: GradientProject, scheme: Scheme,
                                model: ReducedModel) -> StageOneObjectiveConstants:
     """這一次搜尋的目標常數：替身的頻率軸、``project.purpose`` 的評分設定、方案座位組、替身的喇叭數。"""
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+    score = search_score_settings(project.purpose)
     return objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set, len(model.source_names))
 
 

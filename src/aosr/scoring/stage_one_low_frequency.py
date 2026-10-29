@@ -96,6 +96,20 @@ def _reason_not_measurable(
     return None
 
 
+def axis_reason_not_measurable(
+    frequencies_hz: Sequence[float], axis: LowFrequencyAxis, bounds: FrequencyRange
+) -> StageOneReasonCode | None:
+    """一條頻率軸（例如替身的）夠不夠算這個計分範圍：範圍裡的每個頻點當一列正能量佔位，交給
+    :func:`_reason_not_measurable` 照宣告軸 ``axis`` 判，原樣回它的理由碼；夠就回 None。
+
+    跟評估器同一套判法：多出宣告軸沒有的點、宣告點缺、點太少、宣告軸蓋不住範圍（上下界當虛擬點判洞），
+    不要求末點剛好到上界。範圍外的點不看。"""
+    row: dict[float, float | None] = {
+        float(frequency): 1.0 for frequency in frequencies_hz if bounds[0] <= frequency <= bounds[1]
+    }
+    return _reason_not_measurable([row], _declared_in_range(axis, bounds), bounds)
+
+
 def _direction_difference(
     seat: StageOneSeatCurve,
     level_db: FloatArray,
