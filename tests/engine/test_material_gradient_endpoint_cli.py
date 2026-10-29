@@ -6,6 +6,13 @@
 與縮小步數的設定、開始一次、跑 endpoint 與報告；改檔的情境都先抄一份資料夾再改。控制組（同一份輸入直接叫
 ``endpoint_check``、原方案六面完整模型解）在雙精度探針 ``_material_gradient_endpoint_cli_probe``。一場 pytest 只建一次、
 平行的工人共用（``shared_json``）。
+
+終點數字分兩層比（照辛一「逐位只比同一條路徑」的做法）：探針在自己的行程裡先叫產品入口
+``worker.run_endpoint_worker`` 跑一份終點、再直接叫 ``endpoint_check`` 與完整模型基準，這兩份同一行程、同一組處理器
+釘選，逐位比。命令列 ``endpoint`` 的子行程走 ``runtime.child_process_env``，刻意只繼承白名單環境、不帶三格處理器釘選
+（NPY_DISABLE_CPU_FEATURES、OPENBLAS_CORETYPE、XLA_FLAGS），有 AVX-512 的機器上 JAX 走另一套指令、替身那幾格差在
+最後幾位，所以命令列那一份只跟探針的產品入口那一份比：非浮點逐字，浮點用精度契約登記簿的
+``stage_one_objective_jax_vs_python``（JAX 評分路徑留給換機器的尺；近零的 dB 量照那條契約以 1 dB 為尺度）。
 """
 from __future__ import annotations
 
@@ -45,12 +52,26 @@ from tests.engine.test_material_gradient_cli import (
 )
 
 PROBE = Path(__file__).with_name("_material_gradient_endpoint_cli_probe.py")
-# 報告過期的四種改法 → 報告「對不上的」那一行要點名的原因（照 stale_reasons 的順序）。
+# 終點紀錄裡經過替身鏈或完整模型求值的浮點欄（命令列對產品入口用登記簿的尺比）；其餘欄逐字比。
+COMPUTED_FLOATS: dict[str, tuple[str, ...]] = {
+    "report": ("reduced_total", "reduced_components", "full_total", "full_components", "total_difference",
+               "total_difference_bound", "max_frequency_db", "rms_floor_db", "frequency_db_by_seat", "band_db_by_seat",
+               "partial_band_db_by_seat", "big_peak_db_by_speaker", "big_peak_db"),
+    "baseline": ("full_total", "full_components", "big_peak_db_by_speaker", "big_peak_db"),
+    "improvement": ("total", "components"),
+}
+COMPUTED_PATHS = [[part, name] for part, names in COMPUTED_FLOATS.items() for name in names]
+# stage_one_objective_jax_vs_python 契約對近零 dB 量的尺度（登記簿 truth 那一句「改用 |差|/(1 dB)」）。
+DB_SCALE = 1.0
+# 報告過期的六種改法 → 報告「對不上的」那一行要點名的原因（照 stale_reasons 的順序）。
+# result_claim、unclosed 兩種連 endpoint.json 的摘要欄一起改成跟改後的檔一致（只剩結果↔帳本對不上）。
 STALE_CASES: dict[str, tuple[str, ...]] = {
-    "ledger": ("帳本檔跟終點綁的不同",),
+    "ledger": ("帳本檔跟終點綁的不同", "帳本沒收尾", "結果宣稱的帳本不是現在這本"),
     "result": ("result.json 跟終點讀的不同",),
     "endpoint_id": ("endpoint.json 的 gradient_id 不是這次搜尋的",),
     "project_id": ("endpoint.json 的 gradient_id 不是這次搜尋的", "result.json 的 gradient_id 不是這次搜尋的"),
+    "result_claim": ("結果宣稱的帳本不是現在這本",),
+    "unclosed": ("帳本沒收尾", "結果宣稱的帳本不是現在這本"),
 }
 
 
@@ -97,6 +118,12 @@ def _with_theta(path: Path, theta_hex: list[str]) -> None:
     path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
 
 
+def _with_field(path: Path, key: str, value: str) -> None:
+    document = _json(path)
+    document[key] = value
+    path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+
+
 def _endpoint_runs(directory: Path, folder: Path) -> Record:
     """跑完的資料夾跑 endpoint、再印一次報告；另抄一份只有 project.json 的資料夾跑 endpoint（沒有結果檔要拒收）。"""
     record: Record = {"run": _run(directory, _command("endpoint", str(folder)))}
@@ -122,12 +149,19 @@ def _swapped(directory: Path, pristine: Path, theta_hex: list[str]) -> Record:
 
 
 def _stale(directory: Path, folder: Path, case: str, theta_hex: list[str]) -> Record:
-    """抄一份跑完終點的資料夾、照 ``case`` 改一個檔、印報告。"""
+    """抄一份跑完終點的資料夾、照 ``case`` 改檔、印報告。result_claim：結果檔的帳本摘要換掉，endpoint.json 的
+    ``result_sha256`` 同步成改後結果檔的摘要；unclosed：帳本截掉最後一列，endpoint.json 的 ``result_ledger_sha256``
+    同步成截後帳本的摘要。"""
     copy = directory / "stale" / case / folder.name
     shutil.copytree(folder, copy)
-    if case == "ledger":
+    if case in ("ledger", "unclosed"):
         lines = (copy / "ledger.jsonl").read_bytes().splitlines(keepends=True)
         (copy / "ledger.jsonl").write_bytes(b"".join(lines[:-1]))
+        if case == "unclosed":
+            _with_field(copy / "endpoint.json", "result_ledger_sha256", _sha256(copy / "ledger.jsonl"))
+    elif case == "result_claim":
+        _with_field(copy / "result.json", "ledger_sha256", "0" * 64)
+        _with_field(copy / "endpoint.json", "result_sha256", _sha256(copy / "result.json"))
     elif case == "result":
         _with_theta(copy / "result.json", theta_hex)
     else:
@@ -153,11 +187,11 @@ def _kept_resume(directory: Path, folder: Path) -> Record:
 
 
 def _probe(directory: Path, folder: Path) -> Record:
+    """跑完搜尋的資料夾整份抄給探針（不帶命令列那一次的終點檔，探針自己用產品入口再寫一份）。"""
     work = directory / "probe"
-    (work / "source").mkdir(parents=True)
-    shutil.copyfile(folder / "project.json", work / "source" / "project.json")
-    shutil.copyfile(folder / "result.json", work / "cli-result.json")
-    process = subprocess.run([sys.executable, str(PROBE), str(work)], cwd=work, env=_env(work),
+    work.mkdir()
+    shutil.copytree(folder, work / folder.name, ignore=shutil.ignore_patterns("endpoint.json", "scheme-endpoint*.json"))
+    process = subprocess.run([sys.executable, str(PROBE), str(work), folder.name], cwd=work, env=_env(work),
                              capture_output=True, text=True, timeout=WAIT_S * 2)
     assert process.returncode == 0, process.stdout + process.stderr
     return cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
@@ -244,15 +278,57 @@ def test_endpoint_writes_record_bound_to_result_and_ledger_files(runs: tuple[Pat
 
 
 def test_endpoint_report_and_baseline_equal_direct_calls(runs: tuple[Path, Record]) -> None:
-    """抓命令列終點接錯輸入（θ、設計、評分設定、空氣、軸）、基準用了替身或不是方案原本的六面：endpoint.json 的報告逐位
-    等於探針用同一份輸入（同一份 result.json 的 θ、preset 加原牆）直接叫 ``endpoint_check`` 的；基準值、兩分項、大峰
-    逐位等於探針用完整模型解原方案六面（考卷自己從舊欄換成固定阻抗）交同一把尺、同一支大峰的；完整解次數等於軸長。"""
-    probe, record = _section(runs, "probe", "endpoint"), _record(_folder(runs))
+    """抓終點接錯輸入（θ、設計、評分設定、空氣、軸）、基準用了替身或不是方案原本的六面：探針同一行程裡產品入口
+    （``run_endpoint_worker``）寫的 endpoint.json，報告逐位等於直接叫 ``endpoint_check``（同一份 result.json 的 θ、preset
+    加考卷自己從舊欄換的原牆）的；基準值、兩分項、大峰逐位等於完整模型解原方案六面交同一把尺、同一支大峰的；
+    完整解次數等於軸長。"""
+    probe = _section(runs, "probe")
+    assert probe["worker_code"] == 0
+    record = EndpointRecord.model_validate(probe["worker_record"])
+    probe = _section(runs, "probe", "endpoint")
     assert json.loads(record.report.to_json()) == probe["report"]
     assert record.baseline.full_total.hex() == probe["baseline_total"]
     assert [value.hex() for value in record.baseline.full_components] == probe["baseline_components"]
     assert record.baseline.big_peak_db_by_speaker == probe["baseline_peaks"]
     assert record.baseline.full_solves == len(FEM_LANE_FREQUENCIES_HZ)
+
+
+def _leaves(prefix: str, node: object) -> dict[str, object]:
+    """攤平成「路徑 → 葉」；字典照鍵、序列照位置。"""
+    if isinstance(node, dict):
+        return {key: value for name, child in node.items() for key, value in _leaves(f"{prefix}.{name}", child).items()}
+    if isinstance(node, list):
+        return {key: value for index, child in enumerate(node)
+                for key, value in _leaves(f"{prefix}[{index}]", child).items()}
+    return {prefix: node}
+
+
+def test_cli_endpoint_matches_entry_within_contract(runs: tuple[Path, Record]) -> None:
+    """抓命令列終點跟產品入口算的不是同一件事：命令列 endpoint.json 跟探針產品入口那一份，非浮點（身分、摘要、檔名、
+    完整解次數、喇叭與座位名、每面規格、丟掉的空腔、θ）逐字相等；終點、基準、改善的浮點每一格
+    ``|差| ≤ 尺 × max(|探針那一格|, 1 dB)``（尺是登記簿 ``stage_one_objective_jax_vs_python``）。不比秒數與完成時間。"""
+    tolerance = contract_value("stage_one_objective_jax_vs_python")
+    cli = _leaves("", _without(_json(_folder(runs) / "endpoint.json")))
+    entry = _leaves("", _without(cast(Record, _section(runs, "probe")["worker_record"])))
+    assert cli.keys() == entry.keys()
+    near = {key for key in cli if key.split("[", 1)[0].split(".")[1:3] in COMPUTED_PATHS}
+    differing = {key: (cli[key], entry[key]) for key in cli.keys() - near if cli[key] != entry[key]}
+    assert not differing, differing
+    outside = {key: (cli[key], entry[key]) for key in near if not _within(cli[key], entry[key], tolerance)}
+    assert not outside, outside
+    assert near
+
+
+def _without(record: Record) -> Record:
+    """不比的欄：各段秒數與完成時間。"""
+    return {key: value for key, value in record.items() if key not in ("seconds", "finished_at")}
+
+
+def _within(actual: object, expected: object, tolerance: float) -> bool:
+    if actual is None or expected is None:
+        return actual is None and expected is None
+    assert isinstance(actual, float) and isinstance(expected, float), (actual, expected)
+    return abs(actual - expected) <= tolerance * max(abs(expected), DB_SCALE)
 
 
 def test_exported_scheme_keeps_original_walls_and_writes_specs(runs: tuple[Path, Record]) -> None:
@@ -322,8 +398,9 @@ def test_endpoint_rejects_result_with_swapped_theta_then_accepts_restored(runs: 
 @pytest.mark.parametrize("case", list(STALE_CASES))
 def test_report_marks_endpoint_stale_and_names_what_changed(runs: tuple[Path, Record], case: str) -> None:
     """抓報告只比結果檔記的帳本摘要（帳本檔真的變了、結果檔換了 θ、endpoint.json 或 project.json 的搜尋身分換了都照印
-    舊終點）：跑完終點的資料夾抄一份、只改一個檔（帳本截掉最後一列、結果檔換 θ、endpoint.json 或 project.json 的
-    ``gradient_id`` 換一個），報告印過期那一行、下一行點名對不上的那幾件，不印終點數字。"""
+    舊終點），或只比各檔對 endpoint.json 的摘要、不比結果↔帳本（摘要欄同步改過之後，結果宣稱的帳本不是現在這本、
+    帳本沒收尾照印舊終點）：跑完終點的資料夾抄一份照情境改檔，報告印過期那一行、下一行點名對不上的那幾件，
+    不印終點數字。"""
     lines = _report_lines(_section(runs, "stale", case))
     index = lines.index(STALE_ENDPOINT_LINE)
     assert lines[index + 1] == f"  對不上的：{'、'.join(STALE_CASES[case])}"

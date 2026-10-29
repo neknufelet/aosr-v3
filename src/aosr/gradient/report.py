@@ -5,7 +5,8 @@
 厚度 mm、空腔 mm；不貼的面印方案原本那面牆的材料）、值與分項。帳本照 ``read_ledger`` 逐列驗，壞列照樣報錯。
 最後可行點：有決定列取最後一列決定，否則取前段收好的重調末列，再否則取規格那一列。
 不貼的面讀 ``project.json`` 記的方案檔（讀，不核雜湊；方案檔事後換過，這裡印的是現在那一份）。
-最後一節是終點：``endpoint.json`` 綁的搜尋身分、帳本檔與結果檔摘要都等於現在的就印終點數字，任一件對不上印過期，
+最後一節是終點：``endpoint.json`` 綁的搜尋身分、帳本檔與結果檔摘要都等於現在的、帳本有收尾、結果檔宣稱的帳本就是
+現在這本，才印終點數字，任一件對不上印過期，
 沒有 ``endpoint.json`` 最後一行是 :data:`FULL_MODEL_LINE`。
 """
 from __future__ import annotations
@@ -167,21 +168,33 @@ def _endpoint_section(record: EndpointRecord) -> list[str]:
 
 
 def stale_reasons(folder: Path, project: GradientProject, record: EndpointRecord) -> list[str]:
-    """endpoint.json 對現在這個資料夾還算不算數：四件都要對，回對不上的那幾件（空的就是有效）。
+    """endpoint.json 對現在這個資料夾還算不算數：六件都要對，回對不上的那幾件（空的就是有效）。
 
     搜尋身分（endpoint.json 與 result.json 的 ``gradient_id`` 都等於 project.json 的）、現在帳本檔的 SHA-256 等於終點綁的、
-    現在 result.json 檔的 SHA-256 等於終點讀的那一份。只讀檔、量摘要，不求值。
+    現在帳本有收尾（最後一列是帶停止原因與決定的 ``round_decision``）、現在 result.json 檔的 SHA-256 等於終點讀的那一份、
+    result.json 宣稱出自的帳本（``ledger_sha256``）就是現在這本。三份檔各自的摘要都對上、彼此也一致才算數；
+    三份檔一起偽造到內部一致擋不住（本機摘要不是簽章）。只讀檔、量摘要，不求值。
     """
     reasons = []
     if record.gradient_id != project.gradient_id:
         reasons.append("endpoint.json 的 gradient_id 不是這次搜尋的")
     ledger, result = folder / LEDGER_FILE, folder / RESULT_FILE
-    if not ledger.exists() or file_sha256(ledger) != record.result_ledger_sha256:
+    current = file_sha256(ledger) if ledger.exists() else None
+    if current != record.result_ledger_sha256:
         reasons.append("帳本檔跟終點綁的不同")
-    if not result.exists() or file_sha256(result) != record.result_sha256:
+    rows = read_ledger(ledger)[1] if current is not None else ()
+    last = rows[-1] if rows else None
+    if last is None or last.phase != "round_decision" or last.stop_reason is None or last.decision is None:
+        reasons.append("帳本沒收尾")
+    if not result.exists():
+        return [*reasons, "result.json 跟終點讀的不同"]
+    if file_sha256(result) != record.result_sha256:
         reasons.append("result.json 跟終點讀的不同")
-    elif read_result(folder).gradient_id != project.gradient_id:
+    claimed = read_result(folder)
+    if claimed.gradient_id != project.gradient_id:
         reasons.append("result.json 的 gradient_id 不是這次搜尋的")
+    if claimed.ledger_sha256 != current:
+        reasons.append("結果宣稱的帳本不是現在這本")
     return reasons
 
 
