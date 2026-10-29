@@ -7,11 +7,41 @@ import pytest
 
 from aosr.gui.problem_text import field_name, plain_problems
 from aosr.gui.compare_view import scheme_differences
+from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeProblem
 from tests.engine import _speaker_setup_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine.test_gui_compare_routes import _client as compare_client, _csv_rows, _files
 from tests.engine.test_gui_problem_text import _client
+from tests.engine.test_scheme_pipeline import shared_control_result
+
+# 比較頁喇叭差異列的手寫答案（#559 施工單）：A 書架喇叭放腳架（代表模型），B 落地喇叭放地面（實際型號）。
+SPEAKER_ROWS = {
+    "喇叭類型": ("書架喇叭", "落地喇叭"), "喇叭擺法": ("腳架", "地面"),
+    "代表模型": ("代表模型，非實際型號", "實際型號"),
+    "箱寬": ("0.21 公尺", "0.25 公尺"), "箱深": ("0.28 公尺", "0.38 公尺"),
+    "箱高": ("0.355 公尺", "1.605 公尺"), "聲學中心離前面板": ("0 公尺", "0.01 公尺"),
+    "聲學中心離箱底": ("0.205 公尺", "1.25 公尺"),
+}
+
+
+def compare_setups() -> tuple[dict[str, object], dict[str, object]]:
+    """比較兩邊的喇叭設定：左邊預設書架喇叭，右邊落地喇叭換成手寫箱體尺寸。"""
+    left_setup = cases.setup()
+    right_setup = cases.setup("floorstanding", "floor", representative=False)
+    cabinet = cast(dict[str, object], right_setup["cabinet"])
+    cabinet.update(width_m=0.25, depth_m=0.38, height_m=1.605,
+                   acoustic_center_behind_front_m=0.01, acoustic_center_above_bottom_m=1.25)
+    return left_setup, right_setup
+
+
+def changed_result(original: SchemeResult, identifier: str, setup: dict[str, object] | None) -> SchemeResult:
+    # 只改不進逐對物理輸入的 metadata（方案描述）；沿用實跑結果與座標，不偽造求解答案。
+    document = original.scheme.model_dump(mode="json") | {"scheme_id": identifier, "speaker_setup": setup}
+    scheme = Scheme.model_validate(document)
+    return original.model_copy(update={"scheme": scheme, "candidate": original.candidate.model_copy(
+        update={"candidate_id": identifier, "purpose": scheme.purpose})})
 
 
 @pytest.mark.parametrize("mount", ["desk", "floor"])
@@ -85,6 +115,31 @@ def test_speaker_difference_survives_simultaneous_purpose_change() -> None:
     assert rows["speaker_setup.representative"] == ("代表模型", "代表模型，非實際型號", "實際型號")
     assert rows["purpose"][0] == "方案用途"
     assert "other_settings" not in rows
+
+
+def test_compare_route_marks_unset_speaker_side_in_rows_and_csv(
+        tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    """只有一邊設了喇叭：比較端點的差異列與匯出的摘要 CSV 每一格都是「未設定」對另一邊的值（#972 由
+    test_gui_speaker_setup_browser 的 compare[one] 搬來；網頁照印差異列這一段由那支瀏覽器考卷的 [both] 守）。"""
+    original = shared_control_result(tmp_path_factory, worker_id, "wall-1")
+    left = changed_result(original, "speaker-a", None)
+    right = changed_result(original, "speaker-b", compare_setups()[1])
+    expected = {title: ("未設定", values[1]) for title, values in SPEAKER_ROWS.items()}
+    a_id, b_id = "b" * 32, "c" * 32
+    with compare_client(tmp_path) as client:
+        _files(tmp_path, left, a_id)
+        _files(tmp_path, right, b_id)
+        response = client.get(f"/api/compare/{a_id}/{b_id}")
+        exported = client.get(f"/api/compare/{a_id}/{b_id}/export/summary")
+    assert response.status_code == 200, response.text
+    rows = {row["label"]: (row["a_text"], row["b_text"]) for row in response.json()["changes"]}
+    for title, values in expected.items():
+        assert rows[title] == values, title
+    assert "其他設定（未逐項列出）" not in rows
+    assert exported.status_code == 200, exported.text
+    csv_rows = _csv_rows(exported)
+    for title, values in expected.items():
+        assert any(title in row and list(values) == row[-2:] for row in csv_rows), title
 
 
 def test_furniture_kind_choices_do_not_borrow_speaker_words(tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 """候選確認迴圈雙精度子行程；只叫公開入口、寫帳本與原始數值，比對與判決在父行程。
 
 兩組題：小房間替身（同一份衍生替身、六面 two_rigid、從預設樣板取規格起跑、正式設定）與合成目標（加權二次式，
-一面一個目標厚度與目標空腔，求值便宜，給每一個列界都接續一次與四種停止原因用）。合成目標包一層
+一面一個目標厚度與目標空腔，求值便宜，給每一類列界的接續與四種停止原因用）。合成目標包一層
 ``jax.debug.callback`` 數真的被執行了幾次（編譯後每叫一次跑一次，追蹤不算）。
 """
 from __future__ import annotations
@@ -11,6 +11,7 @@ import json
 import shutil
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -93,6 +94,30 @@ def _start_ledger(path: Path, header: ledger.MaterialGradientHeader, designs: tu
     return snapped.theta
 
 
+def boundary_class(phases: Sequence[tuple[str, int | None, str | None]], keep: int) -> tuple[int, str, str]:
+    """列界 ``keep``（留前 ``keep`` 列）的語意類別，全從帳本欄位算：（最後留下那一列的輪號，前段記 -1；它的 phase；
+    它在同一段——phase、輪號、候選都相同的連續列——裡的位置：只一列／段首／段中／段尾／決定前）。
+    「決定前」是下一列就是 round_decision 的那一列（每輪最後一個候選的最後一列），跟別的候選的段尾分開；
+    round_decision 自己就是「決定後」，其餘是「半輪中途」。"""
+    index = keep - 1
+    phase, round_index, _ = phases[index]
+    same_before = index > 0 and phases[index - 1] == phases[index]
+    same_after = index + 1 < len(phases) and phases[index + 1] == phases[index]
+    position = {(False, False): "只一列", (False, True): "段首", (True, True): "段中", (True, False): "段尾"}[
+        (same_before, same_after)]
+    if index + 1 < len(phases) and phases[index + 1][0] == "round_decision":
+        position = "決定前"
+    return (-1 if round_index is None else round_index, phase, position)
+
+
+def resume_boundaries(phases: Sequence[tuple[str, int | None, str | None]]) -> list[int]:
+    """接續要截的列界：每一類取第一個列界（不抽樣，類別見 :func:`boundary_class`）。父行程用同一個分類核每類都有。"""
+    first: dict[tuple[int, str, str], int] = {}
+    for keep in range(1, len(phases) + 1):
+        first.setdefault(boundary_class(phases, keep), keep)
+    return sorted(first.values())
+
+
 def _cut_copy(source: Path, target: Path, rows: int) -> Path:
     """一口氣跑完的帳本留標頭與前 ``rows`` 列，另存一份給接續。"""
     lines = source.read_bytes().splitlines(keepends=True)
@@ -125,16 +150,17 @@ def _synthetic(directory: Path, name: str, case: Record, base: MaterialGradientS
         _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
         loop.run_rounds(objective, start, designs, settings, again, header)
         row["again"] = again.name
-    if case.get("resume_every_row"):
-        total = len(path.read_bytes().splitlines()) - 1
+    if case.get("resume_each_class"):
+        _, rows = ledger.read_ledger(path)
+        keeps = resume_boundaries([(item.phase, item.round, item.candidate) for item in rows])
         resumed, each = [], []
-        for keep in range(1, total + 1):
+        for keep in keeps:
             cut = _cut_copy(path, directory / f"{name}.cut{keep:04d}.jsonl", keep)
             clock = time.perf_counter()
             loop.resume_rounds(objective, designs, settings, cut, header)
             each.append(time.perf_counter() - clock)
             resumed.append(cut.name)
-        row["resumed"] = resumed
+        row["resumed"], row["resume_keeps"] = resumed, keeps
         seconds["resume_each"] = each
     if case.get("single_round"):
         before = counter[0]
@@ -166,10 +192,9 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
     loop.run_rounds(objective, start, designs, base, again, header)
     seconds["run_again"] = time.perf_counter() - clock
     _, rows = ledger.read_ledger(main)
-    after_first = next(index for index, item in enumerate(rows) if item.phase == "round_decision") + 1
     mid_second = next(index for index, item in enumerate(rows) if item.round == 1 and item.phase == "candidate_jump") + 1
     resumed, each = [], []
-    for keep in (after_first, mid_second):
+    for keep in (mid_second,):
         cut = _cut_copy(main, directory / f"surrogate.cut{keep:04d}.jsonl", keep)
         clock = time.perf_counter()
         loop.resume_rounds(objective, designs, base, cut, header)

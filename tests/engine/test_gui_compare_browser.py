@@ -107,11 +107,12 @@ def test_compare_plans_side_by_side_on_one_scale(
         tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
     shorter = shorter_room_result(tmp_path_factory, worker_id)
     # 兩種順序都開：大房在 A 或在 B，只拿某一邊的房間當比例的寫法總有一種對不上。
-    for a_result, b_result in ((pair[0], shorter), (shorter, pair[0])):
-        with _serve(tmp_path / a_result.scheme.scheme_id) as base:
-            _files(tmp_path / a_result.scheme.scheme_id, a_result, A_ID)
-            _files(tmp_path / a_result.scheme.scheme_id, b_result, B_ID)
-            with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+    # 同一台伺服器存兩份，網址對調就是另一種順序（#972：不再為第二種順序另起一台伺服器）。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, shorter, B_ID)
+        for a_result, b_result, first, second in ((pair[0], shorter, A_ID, B_ID), (shorter, pair[0], B_ID, A_ID)):
+            with _open(browser, f"{base}/compare/{first}/{second}") as watched:
                 page = watched.page
                 page.locator("#plan-a-xy g[data-keys]").first.wait_for()
                 for side in ("a", "b"):
@@ -588,9 +589,12 @@ def test_split_tables_show_same_status_and_mark_categories(
 def test_problems_show_reasons_and_outdated_side_rerun(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
+    """物理不同（A 舊）、方案代號重複、只有 B 物理舊三種拒收頁，同一台伺服器各存一組計算代號（#972 由三題合成；
+    三種的斷言照原樣，只是不再各起一台伺服器）。"""
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
                         pair[0].program_fingerprint)
     altered = pair[0].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
+    same_a, same_b, stale_b = "d" * 32, "e" * 32, "f" * 32
     with _serve(tmp_path) as base:
         _files(tmp_path, altered, A_ID)
         _files(tmp_path, pair[0], B_ID)
@@ -613,25 +617,19 @@ def test_problems_show_reasons_and_outdated_side_rerun(
             assert page.locator("#reject-reason").is_visible()
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
-
-
-def test_duplicate_scheme_and_repairable_fingerprint_buttons(
-        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
-        monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        pair[0].program_fingerprint)
-    with _serve(tmp_path) as base:
-        _files(tmp_path, pair[0], A_ID)
-        _files(tmp_path, pair[0], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        # 方案代號重複：A、B 是同一份。
+        _files(tmp_path, pair[0], same_a)
+        _files(tmp_path, pair[0], same_b)
+        with _open(browser, f"{base}/compare/{same_a}/{same_b}") as watched:
             page = watched.page
             page.locator("#rejection").wait_for(state="visible")
             assert "A 和 B 的方案代號相同" in page.locator("#reject-reason").inner_text()
             assert "候選代號重複" in (page.locator("#reject-reason details.technical").text_content() or "")
             assert not page.locator("#rerun-holder button").all()
+        # 只有 B 物理舊：只給 B 的重算鈕。
         different = pair[1].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
-        _files(tmp_path, different, B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        _files(tmp_path, different, stale_b)
+        with _open(browser, f"{base}/compare/{same_a}/{stale_b}") as watched:
             page = watched.page
             page.locator("#rejection").wait_for(state="visible")
             assert "B（wall-2）存下的物理結果跟現在不同，要重算物理" in page.locator("#reject-reason").inner_text()
@@ -656,61 +654,135 @@ def test_successful_comparison_still_names_both_old_results(
             assert "兩份物理身分相同，彼此可以比較" in text
 
 
+def _rejected_side_offers_rerun(tmp_path: Path, browser: Browser, base: str,
+                                pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """B 讀回被拒收：白話標題、技術細節摺起、重算鈕三次回覆各自的白話。"""
+    _files(tmp_path, pair[0], A_ID)
+    _files(tmp_path, pair[1], B_ID)
+    path = next(path for path in (tmp_path / "results").iterdir() if path.stem == B_ID)
+    document = json.loads(path.read_text())
+    document["purpose_settings"]["fingerprint"] = "f" * 64
+    path.write_text(json.dumps(document))
+    with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        page = watched.page
+        response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
+        assert response.status == 409
+        # 主畫面一句白話說是哪一份、怎麼辦；伺服器的技術原因收在摺起來的技術細節。
+        assert page.locator("#rejection-title").inner_text() == "B 那一份現在的程式讀不了"
+        text = page.locator("#rejection").inner_text()
+        assert "B 那份結果檔的內容跟現在的程式對不上" in text
+        assert "讀回被拒收" not in text and response.json()["reason"] not in text
+        assert response.json()["reason"] in (
+            page.locator("#reject-reason details.technical").text_content() or "")
+        requested: list[str] = []
+        # 第一次按：結果檔在頁面開著時被移走（伺服器 404 只回計算代號）→ 印一句白話、不印代號，按鈕還能再按；
+        # 第二次按：檔案讀不懂（伺服器回英文原因）→ 白話一句，英文收進摺起來的重算技術細節；第三次按：開始重算。
+        english = "Expecting value: line 1 column 1 (char 0)"
+        replies = [(404, json.dumps({"error": B_ID})), (400, json.dumps({"error": english})),
+                   (200, '{"run_id":"started"}')]
+        def capture(route: Route) -> None:
+            requested.append(route.request.url)
+            assert route.request.method == "POST"
+            status, body = replies.pop(0)
+            route.fulfill(status=status, content_type="application/json", body=body)
+        page.route("**/api/results/*/rerun", capture)
+        button = page.get_by_role("button", name="用現在的程式重算 B 這一份")
+        button.click()
+        page.locator("#rerun-state").filter(has_text="重算沒有開始").wait_for()
+        assert page.locator("#rerun-state").inner_text() == (
+            "重算沒有開始：這份結果檔找不到（可能已被移走），請回方案輸入頁的結果清單重新選")
+        assert button.is_enabled()
+        button.click()
+        page.locator("#rerun-state").filter(has_text="這份結果檔讀不了").wait_for()
+        assert english not in page.locator("#rejection").inner_text()
+        assert english in (page.locator("#rerun-detail details.technical").text_content() or "")
+        assert button.is_enabled()
+        button.click()
+        page.locator("#rerun-state").filter(has_text="已開始重算").wait_for()
+        assert not page.locator("#rerun-detail > *").all()
+        rerun_url = f"{base}{response.json()['rerun_url']}"
+        assert requested == [rerun_url, rerun_url, rerun_url]
+        # 開始之後按鈕停用（不會重複開好幾份），不印計算代號，寫明算完去哪裡找。
+        assert button.is_disabled()
+        state = page.locator("#rerun-state").inner_text()
+        assert "started" not in state and not re.search(r"[0-9a-f]{32}", state)
+        assert "回方案輸入頁的結果清單" in state
+        assert watched.page_errors == []
+        assert all(any(code in error for code in ("409", "404", "400")) for error in watched.console_errors)
+
+
+def _old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser: Browser, base: str,
+                                                    pair: tuple[SchemeResult, SchemeResult], old_a: str,
+                                                    old_b: str) -> None:
+    """B 是舊格式：照伺服器白話、不貼欄位名、重算鈕寫明是 B。"""
+    # 舊格式那一份：畫面寫伺服器給的白話（句首是哪一份），不貼欄位名 schema_version；重算按鈕寫明是哪一份。
+    _files(tmp_path, pair[0], old_a)
+    _files(tmp_path, pair[1], old_b)
+    path = next(path for path in (tmp_path / "results").iterdir() if path.stem == old_b)
+    document = json.loads(path.read_text())
+    document["schema_version"] = "aosr.scheme_result.v2"
+    path.write_text(json.dumps(document))
+    with _open(browser, f"{base}/compare/{old_a}/{old_b}") as watched:
+        page = watched.page
+        response = page.request.get(f"{base}/api/compare/{old_a}/{old_b}")
+        assert response.status == 409 and response.json()["reason_kind"] == "old_format"
+        page.locator("#rejection").wait_for(state="visible")
+        assert page.locator("#reject-reason").inner_text() == response.json()["reason_text"]
+        assert page.locator("#rejection-title").inner_text() == "要先重算才能比較"
+        assert "schema_version" not in page.locator("#rejection").inner_text()
+        assert page.get_by_role("button", name="用現在的程式重算 B 這一份").is_visible()
+        assert watched.page_errors == []
+        assert all("409" in error for error in watched.console_errors)
+
+
+def _rejection_page_says_each_problem_in_plain_words(tmp_path: Path, browser: Browser, base: str,
+                                                     pair: tuple[SchemeResult, SchemeResult], plain_a: str,
+                                                     plain_b: str) -> None:
+    """比較層的各種拒收理由：每種一句 A、B 的白話，原句摺進技術細節。"""
+    # 不能直接比的原因拿比較層真的拒收理由餵頁面（同一個方案代號、用途不同、聲道設定不同、物理身分不同，
+    # 再加一句頁面不認得的）：主畫面每種一句 A、B 的白話，不印英文欄名、雜湊、「第 1 份」與「物理身分」；
+    # 原句收在摺起來的技術細節。
+    scheme = pair[0].scheme
+    altered = pair[0].model_copy(update={
+        "scheme": scheme.model_copy(update={
+            "purpose": "other_purpose",
+            "channel_group": scheme.channel_group.model_copy(update={"feature_match_tolerance_hz": 99.0})}),
+        "physics_identity": "phys-v1:" + "1" * 64})
+    problems = [*comparison_problems((pair[0], altered)), "第 2 份 wall-1 的 some_field 不同：abcdef1／1234567"]
+    rejection_body = {"problems": problems, "rerun_urls": {}, "outdated_sides": ["b"],
+            "outdated_schemes": {"b": "wall-1"}}
+    _files(tmp_path, pair[0], plain_a)
+    _files(tmp_path, pair[1], plain_b)
+    with _open(browser, f"{base}/compare/{plain_a}/{plain_b}", viewport_width=1440) as watched:
+        page = watched.page
+        page.route(f"**/api/compare/{plain_a}/{plain_b}", lambda route: route.fulfill(
+            status=409, content_type="application/json", body=json.dumps(rejection_body)))
+        page.reload(wait_until="networkidle")
+        page.locator("#rejection").wait_for(state="visible")
+        assert page.locator("#rejection-title").inner_text() == "這兩份不能直接比較"
+        items = page.locator("#reject-reason > ul li").all_inner_texts()
+        assert {item.split("；")[0].split("（")[0] for item in items} == {
+            "A 和 B 的物理不同", "A 和 B 的方案代號相同", "A 和 B 的方案用途不同",
+            "A 和 B 的聲道設定不同", "A 和 B 有一項固定設定對不上，不能直接比較"}
+        shown = page.locator("#rejection").inner_text()
+        assert "B（wall-1）存下的物理結果跟現在不同，要重算物理" in shown
+        assert not re.search(r"[0-9a-f]{7,}|[a-z]+_[a-z]+|物理身分|第 1 份|purpose|候選代號", shown)
+        folded = page.locator("#reject-reason details.technical")
+        assert folded.evaluate("el => el.open") is False
+        assert all(problem in (folded.text_content() or "") for problem in problems)
+        assert not page.locator("#rerun-holder button").all()
+        assert watched.page_errors == []
+        assert all("409" in error for error in watched.console_errors)
+
+
 def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Browser,
                                                    pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """B 讀回被拒收、B 是舊格式、比較層的各種拒收理由三種拒收頁，同一台伺服器各存一組計算代號（#972 由三題合成；
+    各段斷言照原樣，只是不再各起一台伺服器）。"""
     with _serve(tmp_path) as base:
-        _files(tmp_path, pair[0], A_ID)
-        _files(tmp_path, pair[1], B_ID)
-        path = next(path for path in (tmp_path / "results").iterdir() if path.stem == B_ID)
-        document = json.loads(path.read_text())
-        document["purpose_settings"]["fingerprint"] = "f" * 64
-        path.write_text(json.dumps(document))
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
-            page = watched.page
-            response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
-            assert response.status == 409
-            # 主畫面一句白話說是哪一份、怎麼辦；伺服器的技術原因收在摺起來的技術細節。
-            assert page.locator("#rejection-title").inner_text() == "B 那一份現在的程式讀不了"
-            text = page.locator("#rejection").inner_text()
-            assert "B 那份結果檔的內容跟現在的程式對不上" in text
-            assert "讀回被拒收" not in text and response.json()["reason"] not in text
-            assert response.json()["reason"] in (
-                page.locator("#reject-reason details.technical").text_content() or "")
-            requested: list[str] = []
-            # 第一次按：結果檔在頁面開著時被移走（伺服器 404 只回計算代號）→ 印一句白話、不印代號，按鈕還能再按；
-            # 第二次按：檔案讀不懂（伺服器回英文原因）→ 白話一句，英文收進摺起來的重算技術細節；第三次按：開始重算。
-            english = "Expecting value: line 1 column 1 (char 0)"
-            replies = [(404, json.dumps({"error": B_ID})), (400, json.dumps({"error": english})),
-                       (200, '{"run_id":"started"}')]
-            def capture(route: Route) -> None:
-                requested.append(route.request.url)
-                assert route.request.method == "POST"
-                status, body = replies.pop(0)
-                route.fulfill(status=status, content_type="application/json", body=body)
-            page.route("**/api/results/*/rerun", capture)
-            button = page.get_by_role("button", name="用現在的程式重算 B 這一份")
-            button.click()
-            page.locator("#rerun-state").filter(has_text="重算沒有開始").wait_for()
-            assert page.locator("#rerun-state").inner_text() == (
-                "重算沒有開始：這份結果檔找不到（可能已被移走），請回方案輸入頁的結果清單重新選")
-            assert button.is_enabled()
-            button.click()
-            page.locator("#rerun-state").filter(has_text="這份結果檔讀不了").wait_for()
-            assert english not in page.locator("#rejection").inner_text()
-            assert english in (page.locator("#rerun-detail details.technical").text_content() or "")
-            assert button.is_enabled()
-            button.click()
-            page.locator("#rerun-state").filter(has_text="已開始重算").wait_for()
-            assert not page.locator("#rerun-detail > *").all()
-            rerun_url = f"{base}{response.json()['rerun_url']}"
-            assert requested == [rerun_url, rerun_url, rerun_url]
-            # 開始之後按鈕停用（不會重複開好幾份），不印計算代號，寫明算完去哪裡找。
-            assert button.is_disabled()
-            state = page.locator("#rerun-state").inner_text()
-            assert "started" not in state and not re.search(r"[0-9a-f]{32}", state)
-            assert "回方案輸入頁的結果清單" in state
-            assert watched.page_errors == []
-            assert all(any(code in error for code in ("409", "404", "400")) for error in watched.console_errors)
+        _rejected_side_offers_rerun(tmp_path, browser, base, pair)
+        _old_format_side_shows_plain_sentence_and_rerun(tmp_path, browser, base, pair, "d" * 32, "e" * 32)
+        _rejection_page_says_each_problem_in_plain_words(tmp_path, browser, base, pair, "1" * 32, "2" * 32)
 
 
 def test_rerun_that_fails_the_check_prints_the_plain_problem_lines(
@@ -829,68 +901,6 @@ def test_plan_key_says_what_the_marks_on_the_plans_are(
             _assert_quiet(watched)
 
 
-def test_old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser: Browser,
-                                                       pair: tuple[SchemeResult, SchemeResult]) -> None:
-    # 舊格式那一份：畫面寫伺服器給的白話（句首是哪一份），不貼欄位名 schema_version；重算按鈕寫明是哪一份。
-    with _serve(tmp_path) as base:
-        _files(tmp_path, pair[0], A_ID)
-        _files(tmp_path, pair[1], B_ID)
-        path = next(path for path in (tmp_path / "results").iterdir() if path.stem == B_ID)
-        document = json.loads(path.read_text())
-        document["schema_version"] = "aosr.scheme_result.v2"
-        path.write_text(json.dumps(document))
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
-            page = watched.page
-            response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
-            assert response.status == 409 and response.json()["reason_kind"] == "old_format"
-            page.locator("#rejection").wait_for(state="visible")
-            assert page.locator("#reject-reason").inner_text() == response.json()["reason_text"]
-            assert page.locator("#rejection-title").inner_text() == "要先重算才能比較"
-            assert "schema_version" not in page.locator("#rejection").inner_text()
-            assert page.get_by_role("button", name="用現在的程式重算 B 這一份").is_visible()
-            assert watched.page_errors == []
-            assert all("409" in error for error in watched.console_errors)
-
-
-def test_rejection_page_says_each_problem_in_plain_words(
-        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
-    # 不能直接比的原因拿比較層真的拒收理由餵頁面（同一個方案代號、用途不同、聲道設定不同、物理身分不同，
-    # 再加一句頁面不認得的）：主畫面每種一句 A、B 的白話，不印英文欄名、雜湊、「第 1 份」與「物理身分」；
-    # 原句收在摺起來的技術細節。
-    scheme = pair[0].scheme
-    altered = pair[0].model_copy(update={
-        "scheme": scheme.model_copy(update={
-            "purpose": "other_purpose",
-            "channel_group": scheme.channel_group.model_copy(update={"feature_match_tolerance_hz": 99.0})}),
-        "physics_identity": "phys-v1:" + "1" * 64})
-    problems = [*comparison_problems((pair[0], altered)), "第 2 份 wall-1 的 some_field 不同：abcdef1／1234567"]
-    body = {"problems": problems, "rerun_urls": {}, "outdated_sides": ["b"],
-            "outdated_schemes": {"b": "wall-1"}}
-    with _serve(tmp_path) as base:
-        _files(tmp_path, pair[0], A_ID)
-        _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
-            page = watched.page
-            page.route(f"**/api/compare/{A_ID}/{B_ID}", lambda route: route.fulfill(
-                status=409, content_type="application/json", body=json.dumps(body)))
-            page.reload(wait_until="networkidle")
-            page.locator("#rejection").wait_for(state="visible")
-            assert page.locator("#rejection-title").inner_text() == "這兩份不能直接比較"
-            items = page.locator("#reject-reason > ul li").all_inner_texts()
-            assert {item.split("；")[0].split("（")[0] for item in items} == {
-                "A 和 B 的物理不同", "A 和 B 的方案代號相同", "A 和 B 的方案用途不同",
-                "A 和 B 的聲道設定不同", "A 和 B 有一項固定設定對不上，不能直接比較"}
-            shown = page.locator("#rejection").inner_text()
-            assert "B（wall-1）存下的物理結果跟現在不同，要重算物理" in shown
-            assert not re.search(r"[0-9a-f]{7,}|[a-z]+_[a-z]+|物理身分|第 1 份|purpose|候選代號", shown)
-            folded = page.locator("#reject-reason details.technical")
-            assert folded.evaluate("el => el.open") is False
-            assert all(problem in (folded.text_content() or "") for problem in problems)
-            assert not page.locator("#rerun-holder button").all()
-            assert watched.page_errors == []
-            assert all("409" in error for error in watched.console_errors)
-
-
 def test_page_that_cannot_load_prints_a_plain_sentence(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
     # 讀不到（連不上伺服器、伺服器回的不是資料）：主畫面一句白話說怎麼辦，瀏覽器的英文錯誤收進技術細節。
@@ -953,4 +963,36 @@ def test_all_empty_category_notes_still_hide_column(tmp_path: Path, browser: Bro
             page.reload(wait_until="networkidle")
             page.locator("#content").wait_for(state="visible")
             assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS[:-1])
+            _assert_quiet(watched)
+
+
+def test_measured_table_changes_render_on_both_sides(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """#972 施工二：實測表逐頻差異列原本只在實測真算那一題（兩份真算再開比較頁）考。差異內容由
+    test_measured_web_view::test_compare_details_* 守（scheme_differences 逐頻對齊、捨入藏不住、底構造換了要點名）；
+    這一題守比較頁把伺服器給的每一條差異細項，A、B 兩格各自原樣印出來（不重算、不只印第一條）。
+    比較資料是真伺服器回的那一份，只在第一列差異加上兩條可辨識的細項。"""
+    details = [["300 Hz", "未設定", "阻抗實部 500、阻抗虛部 -30 Pa·s/m"],
+               ["1000 Hz", "阻抗實部 800、阻抗虛部 100 Pa·s/m", "阻抗實部 800、阻抗虛部 70 Pa·s/m"]]
+
+    def with_details(route: Route) -> None:
+        response = route.fetch()
+        body = response.json()
+        assert body["changes"], "這一對要有差異列，細項才有地方掛"
+        body["changes"][0]["details"] = details
+        route.fulfill(response=response, json=body)
+
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/") as watched:
+            page = watched.page
+            page.route(f"{base}/api/compare/{A_ID}/{B_ID}", with_details)
+            page.goto(f"{base}/compare/{A_ID}/{B_ID}", wait_until="networkidle")
+            row = page.locator("#changes tr").nth(1)
+            for side, cell in ((1, row.locator("td").nth(1)), (2, row.locator("td").nth(2))):
+                assert cell.locator(".measured-changes p").all_text_contents() == [
+                    f"{detail[0]}：{detail[side]}" for detail in details]
+            # 細項只掛在那一列：別列、別處不准多印。
+            assert page.locator(".measured-changes").count() == row.locator(".measured-changes").count()
             _assert_quiet(watched)

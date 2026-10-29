@@ -1,8 +1,8 @@
 """牆面材料梯度搜尋後半段（#561 庚二）：候選產生、一輪確認、整場停止原因、帳本 v2、接續、連續段的總深度投影、拒收。
 
 替身照 ``test_material_gradient`` 從 ``test_fem_reduced`` 的小房間衍生（同一個 ``_chain_model``），六面 two_rigid、
-從預設樣板取規格起跑、正式設定。另有合成目標（加權二次式，探針裡定義），求值便宜，給「每一個列界都接續一次」
-與四種停止原因用。雙精度的迴圈、帳本與接續在子行程（只叫公開入口）；比對與判決在父行程。
+從預設樣板取規格起跑、正式設定。另有合成目標（加權二次式，探針裡定義），求值便宜，給「每一類列界都接續一次」
+（類別＝輪號、phase、段內位置含「決定前」，從帳本欄位算）與四種停止原因用。雙精度的迴圈、帳本與接續在子行程（只叫公開入口）；比對與判決在父行程。
 候選產生、總深度投影、帳本竄改與拒收不必求值，父行程直接跑。單精度只量不登記。
 """
 from __future__ import annotations
@@ -34,6 +34,7 @@ from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
+from tests.engine._material_gradient_loop_probe import boundary_class
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _header, _narrowed, _presets, _receivers, _reweighted, _score,
     _settings,
@@ -64,7 +65,7 @@ def _hand_round_bound(settings: MaterialGradientSettings, candidates: int) -> in
 def _problem() -> Record:
     bound = _hand_round_bound(_settings(), 3)
     synthetic: dict[str, Record] = {
-        "multi": {"surfaces": FOUR_SURFACES, "override": {}, "again": True, "resume_every_row": True,
+        "multi": {"surfaces": FOUR_SURFACES, "override": {}, "again": True, "resume_each_class": True,
                   "single_round": True},
         "huge_threshold": {"surfaces": FOUR_SURFACES, "override": {"improvement_threshold": 1.0e6}},
         "no_candidates": {"surfaces": SINGLE_THICKNESS, "override": {}},
@@ -583,13 +584,21 @@ def chain_header(runs: tuple[Path, Record]) -> ledger.MaterialGradientHeader:
 
 # ---- 接續 ----
 
-def test_resume_at_every_row_boundary_matches_one_shot(runs: tuple[Path, Record]) -> None:
-    """抓接續丟錯列、輪號或累計次數接錯、半輪沒丟乾淨：合成題在每一個列界截斷各接續一次、替身題在兩個列界，
+def test_resume_at_every_boundary_class_matches_one_shot(runs: tuple[Path, Record]) -> None:
+    """抓接續丟錯列、輪號或累計次數接錯、半輪沒丟乾淨：合成題的列界按語意分類（輪號、phase、段內位置，
+    見探針 ``boundary_class``，從一口氣跑完那本帳本的欄位算），每一類至少有一個列界被截斷接續過；替身題在第 1 輪第一個跳點之後。
     接續完的帳本都跟一口氣跑完的逐值相同（θ 的 float.hex、值、分項、停止原因、決定；秒數除外）。"""
     multi = _synthetic(runs, "multi")
-    expected = _without_seconds(_rows(runs, multi["ledger"]))
+    rows = _rows(runs, multi["ledger"])
+    expected = _without_seconds(rows)
+    phases = [(row.phase, row.round, row.candidate) for row in rows]
+    classes = {boundary_class(phases, keep) for keep in range(1, len(rows) + 1)}
+    keeps = cast(list[int], multi["resume_keeps"])
+    assert {boundary_class(phases, keep) for keep in keeps} == classes
+    # 每輪決定前的最後一列自成一類（#972 修補一補）：留到決定列前一列的那幾個列界都要接續過。
+    assert {index for index, row in enumerate(rows) if row.phase == "round_decision"} <= set(keeps)
     resumed = cast(list[str], multi["resumed"])
-    assert len(resumed) == len(expected)
+    assert [f"multi.cut{keep:04d}.jsonl" for keep in keeps] == resumed
     for name in resumed:
         assert _without_seconds(_rows(runs, name)) == expected, name
     surrogate = _surrogate(runs)

@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   issue-guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作極少
     # （問一句圖查詢、必要時重開一張票），取跟別的 job 同一個上限。
     timeout-minutes: 15

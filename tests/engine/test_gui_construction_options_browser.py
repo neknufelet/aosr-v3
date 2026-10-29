@@ -39,8 +39,10 @@ def take_shots(page: Page, folder: Path, name: str) -> None:
     page.locator("#construction-floor").screenshot(path=str(folder / f"{name}-layers.png"))
 
 
-@pytest.mark.parametrize("width", (1400, 390))
-def test_p1_selects_clear_optional_save_reload_preview(tmp_path: Path, browser: Browser, width: int) -> None:
+def test_p1_selects_clear_optional_save_reload_preview(tmp_path: Path, browser: Browser) -> None:
+    # #972：原本另跑 390 寬一格，斷言與 1400 完全相同、截圖只寫暫存不比對；窄畫面上構造編輯器能操作
+    # 由 test_gui_construction_input_browser::test_select_edit_save_reload_and_reverse_lookup[390] 守。
+    width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
         _filled(page, "#material-kind-floor", "assembly")

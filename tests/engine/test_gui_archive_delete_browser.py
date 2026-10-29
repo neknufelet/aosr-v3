@@ -68,6 +68,9 @@ def test_clear_keeps_skipped_packages_and_tables_fit(
     _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        messages = _confirm(page)
+        if width == 390:
+            _narrow_legacy_only_hides_empty_package_table(page, base, tmp_path, result)
         complete = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
         _saved(tmp_path, result)
         incomplete = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
@@ -97,14 +100,13 @@ def test_clear_keeps_skipped_packages_and_tables_fit(
                 }""")
         for date in page.locator("#archived .finished-date").all():
             _assert_text_on_one_line(date)
-        messages = _confirm(page)
         page.get_by_role("button", name="全部清除封存", exact=True).click()
         expect(page.locator(f'tr[data-package-id="{complete["package_id"]}"]')).not_to_be_attached()
         expect(_row(page, "a" * 32, True)).not_to_be_attached()
         expect(page.locator("#messages")).to_have_class("notice")
         expect(page.locator("#messages")).to_contain_text("跳過")
-        assert WARNING in messages[0] and "1 包方案（共 0 筆結果）和 1 筆舊的單筆封存" in messages[0]
-        assert "另有 2 包" in messages[0]
+        assert WARNING in messages[-1] and "1 包方案（共 0 筆結果）和 1 筆舊的單筆封存" in messages[-1]
+        assert "另有 2 包" in messages[-1]
         expect(page.get_by_role("button", name="全部清除封存", exact=True)).to_be_hidden()
         expect(page.locator("#archived")).to_be_visible()
         for package_id in (incomplete["package_id"], broken.name):
@@ -178,25 +180,23 @@ def _record_posts(page: Page) -> None:
     }""")
 
 
-def test_narrow_legacy_only_hides_empty_package_table(
-        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
-    _bundle(tmp_path / "archive", result, "a" * 32)
-    with _serve(tmp_path) as base, _open(browser, base, viewport_width=390) as watched:
-        page = watched.page
-        page.locator("#archived summary").click()
-        expect(_row(page, "a" * 32, True)).to_be_visible()
-        expect(page.locator("#archived-packages")).to_be_hidden()
-        _saved(tmp_path, result)
-        package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
-        page.reload(wait_until="networkidle")
-        page.locator("#archived summary").click()
-        _confirm(page)
-        page.locator(f'tr[data-package-id="{package["package_id"]}"]').get_by_role(
-            "button", name="永久刪除", exact=True).click()
-        expect(page.locator("#archived-packages-list tr")).not_to_be_attached()
-        expect(page.locator("#archived-packages")).to_be_hidden()
-        expect(_row(page, "a" * 32, True)).to_be_visible()
-        _assert_quiet(watched)
+def _narrow_legacy_only_hides_empty_package_table(page: Page, base: str, tmp_path: Path, result: SchemeResult) -> None:
+    """窄畫面只有舊的單筆封存時不畫空的方案包表格；刪掉最後一包後表格也收起來、舊的單筆照留
+    （#972 原 test_narrow_legacy_only_hides_empty_package_table 併進 clear_keeps[390] 開頭，斷言原樣保留）。
+    呼叫前頁面已掛好自動按確定的對話框處理。"""
+    page.locator("#archived summary").click()
+    expect(_row(page, "a" * 32, True)).to_be_visible()
+    expect(page.locator("#archived-packages")).to_be_hidden()
+    _saved(tmp_path, result)
+    package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
+    page.reload(wait_until="networkidle")
+    page.locator("#archived summary").click()
+    page.locator(f'tr[data-package-id="{package["package_id"]}"]').get_by_role(
+        "button", name="永久刪除", exact=True).click()
+    expect(page.locator("#archived-packages-list tr")).not_to_be_attached()
+    expect(page.locator("#archived-packages")).to_be_hidden()
+    expect(_row(page, "a" * 32, True)).to_be_visible()
+    _saved(tmp_path, result)
 
 
 @pytest.mark.parametrize("legacy", [False, True])

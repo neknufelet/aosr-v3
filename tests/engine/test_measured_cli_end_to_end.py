@@ -74,6 +74,27 @@ def run_documents(tmp_path: Path, documents_by_name: dict[str, dict[str, object]
     return outputs
 
 
+def check_table_changes_interference_in_every_band(original: ReportOutput, table: ReportOutput) -> None:
+    """改表那一格之後，整帶落在表內的每一個八度帶干涉都要變（原畫面題 verify_table_lanes_changed 那條）。"""
+    inside_bands = []
+    for band, changed_band in zip(original.bands, table.bands, strict=True):
+        axis = geometric_band_frequencies(band.center_frequency_hz)
+        if 75. <= min(axis) and max(axis) <= 1500.:
+            inside_bands.append(band.center_frequency_hz)
+            assert band.interference_energy != changed_band.interference_energy, band.center_frequency_hz
+    assert inside_bands
+
+
+def check_fill_frequencies_follow_only_the_table(original: ReportOutput, base: ReportOutput) -> None:
+    """補值頻點都在表外；換底構造前後補值頻點的集合相同（原畫面題 verify_crossover_and_base_isolation 那條）：
+    補哪幾個頻點只看表的涵蓋範圍。"""
+    assert original.construction_notes_by_wall is not None and base.construction_notes_by_wall is not None
+    fill = next(n for n in original.construction_notes_by_wall['x0'] if n.code == 'measured_table_model_fill')
+    assert fill.frequencies_hz and all(f < 75. or f > 1500. for f in fill.frequencies_hz)
+    base_fill = next(n for n in base.construction_notes_by_wall['x0'] if n.code == 'measured_table_model_fill')
+    assert set(fill.frequencies_hz) == set(base_fill.frequencies_hz)
+
+
 def test_measured_three_real_cli_runs_isolate_each_frequency(tmp_path: Path) -> None:
     original, table, base = run_variants(tmp_path)
     assert original.points is not None and table.points is not None and base.points is not None
@@ -107,14 +128,13 @@ def test_measured_three_real_cli_runs_isolate_each_frequency(tmp_path: Path) -> 
                 assert a.fem_energy != c.fem_energy
                 assert a.fem_energy == b.fem_energy
     assert inside and outside and inside_fem and outside_fem
+    check_table_changes_interference_in_every_band(original, table)
     assert original.top.f_s_hz == base.top.f_s_hz
     assert original.measured_seams_by_wall is not None and base.measured_seams_by_wall is not None
     for old_seam, new_seam in zip(original.measured_seams_by_wall['x0'], base.measured_seams_by_wall['x0'], strict=True):
         assert old_seam.measured == new_seam.measured
         assert old_seam.base_assembly != new_seam.base_assembly
-    assert original.construction_notes_by_wall is not None
-    fill = next(n for n in original.construction_notes_by_wall['x0'] if n.code == 'measured_table_model_fill')
-    assert fill.frequencies_hz and all(f < 75. or f > 1500. for f in fill.frequencies_hz)
+    check_fill_frequencies_follow_only_the_table(original, base)
     note('逐頻表內隔離通過；施羅德兩帶均位於表內，此題交接權重無跨頻變動。')
 
 

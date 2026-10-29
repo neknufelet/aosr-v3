@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   acceptance:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 沒有上限等於可以無聲卡死；上限數字登記在規矩卡 ci-jobs-cannot-die-quietly 的 [settings]。
     # 這一支只裝依賴、跑一支檢查，實際一分鐘內；10 分鐘是寬的上限。
     timeout-minutes: 10

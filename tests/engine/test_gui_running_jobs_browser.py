@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Page
 
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from aosr.reporting.result import SchemeResult, save_result
+from aosr.reporting.scheme import Scheme
+from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser, result
 
 
 def test_reload_lists_every_running_job_and_follows_the_chosen_one(tmp_path: Path, browser: Browser) -> None:
@@ -201,3 +203,44 @@ def test_other_runs_list_keeps_one_request_in_flight(tmp_path: Path, browser: Br
             _assert_quiet(watched)
         finally:
             _stop_runs(page, base, started)
+
+
+def test_each_calculation_runs_the_form_on_screen(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """#972 施工二：網頁自己的狀態接線，不交給命令列考卷。假計算把收到的方案檔原文記下來再交出考卷結果：
+    改了表單直接按計算（不另外存）、另存成別的名字再算，每一筆子行程收到的都是那一刻畫面上的方案，不是上一筆的參數；
+    算完的連結指向這一筆自己的計算代號，不是上一筆的。"""
+    source = tmp_path / "fixture-result.json"
+    save_result(result, source)
+    log = tmp_path / "received.jsonl"
+    script = tmp_path / "record-and-copy.py"
+    script.write_text("import json,shutil,sys\nfrom pathlib import Path\n"
+                      f"with open({str(log)!r}, 'a') as handle:\n"
+                      "    handle.write(json.dumps({'path': sys.argv[1], 'scheme': json.loads(Path(sys.argv[1]).read_text())}) + '\\n')\n"
+                      f"shutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n")
+    with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        links = []
+        for step, (lx, save_as) in enumerate(((None, None), ("5.5", None), ("5.6", "next"))):
+            if lx is not None:
+                page.locator("#room-Lx").fill(lx)
+            if save_as is not None:
+                page.locator("#save-as-id").fill(save_as)
+                page.locator("#save-as").click()
+                page.wait_for_function("name => document.querySelector('#save-id').value === name", arg=save_as)
+            shown = page.evaluate("collect()")
+            with page.expect_response(lambda response: response.url == f"{base}/api/runs"
+                                      and response.request.method == "POST") as started:
+                page.locator("#calculate").click()
+            run_id = started.value.json()["run_id"]
+            page.wait_for_function("id => !document.querySelector('#result-link').hidden && "
+                                   "document.querySelector('#result-link').getAttribute('href') === `/results/${id}`",
+                                   arg=run_id, timeout=15_000)
+            links.append(page.locator("#result-link").get_attribute("href"))
+            received = [json.loads(line) for line in log.read_text().splitlines()]
+            assert len(received) == step + 1
+            assert Path(received[-1]["path"]).name == f"{shown['scheme_id']}.json"
+            assert received[-1]["scheme"] == Scheme.model_validate(shown).model_dump(mode="json")
+            if lx is not None:
+                assert received[-1]["scheme"]["scene"]["room_m"]["Lx"] == float(lx)
+        assert len(set(links)) == len(links)
+        _assert_quiet(watched)

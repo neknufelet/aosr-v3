@@ -11,7 +11,8 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser
+from tests.engine.test_gui_result_page_visual import assert_capability_lists
 from tests.engine.test_gui_compare_browser import A_ID, B_ID, _data, _has_lines
 from tests.engine.test_gui_compare_routes import _files
 from tests.engine.test_scheme_pipeline import shared_control_result
@@ -272,7 +273,8 @@ _IDEAL_SOURCE_SENTENCE = "未加入實際喇叭的低頻衰減，排名只適用
 
 def test_summary_shows_the_ideal_source_sentence(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
-    """票 #668：摘要判哪一份比較好，那個判斷也只適用於理想聲源基準；摘要卡一開就看得到那一句。"""
+    """票 #668：摘要判哪一份比較好，那個判斷也只適用於理想聲源基準；摘要卡一開就看得到那一句。
+    同一頁另核能力表兩份清單（兩份合併去重，#972 由 test_gui_capability_lists_browser 併入）。"""
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
@@ -282,4 +284,6 @@ def test_summary_shows_the_ideal_source_sentence(
             note = page.locator("#compare-summary #ideal-source-note")
             assert note.is_visible()
             assert note.inner_text() == _IDEAL_SOURCE_SENTENCE
+            assert_capability_lists(page, compare=True)
+            _assert_text_is_formatted(page)
             _assert_quiet(watched)

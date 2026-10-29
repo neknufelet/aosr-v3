@@ -21,7 +21,10 @@ def test_crossover_browser_verdicts_distances_and_screenshot(tmp_path: Path, mon
     store, registry, status = prepared(tmp_path)
     monkeypatch.setattr(module, "reevaluate", evaluate)
     summary = module.attach_crossover(store, status=status, quality_targets_path=registry)
-    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
+    # 第一個狀態就是「敏感」（審查狀態那題的 sensitive 格併進這裡，#972）；之後每次換狀態用假時鐘快轉一個輪詢週期。
+    assert summary.verdict == "sensitive"
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440,
+                                         fake_clock=True) as watched:
         page = watched.page
         block = page.locator("#crossover")
         block.wait_for()
@@ -33,24 +36,29 @@ def test_crossover_browser_verdicts_distances_and_screenshot(tmp_path: Path, mon
         for verdict in ("stable", "unverified"):
             changed = summary.model_copy(update={"verdict": verdict})
             write_summary(store.path, changed)
+            page.clock.run_for(5000)
             page.wait_for_function("text => document.getElementById('crossover').textContent.includes(text)", arg=VERDICTS[verdict], timeout=12000)
             assert not block.locator("p.notice").all()
         write_summary(store.path, summary.model_copy(update={"completed": False}))
+        page.clock.run_for(5000)
         page.wait_for_function("text => document.getElementById('crossover').textContent.includes(text)", arg=INCOMPLETE, timeout=12000)
         assert not block.locator("p.notice").all()
         block.screenshot(path=str(tmp_path / "688-crossover-incomplete.png"))
         store.status_path.write_text(status.model_copy(update={"asked": status.asked + 1}).model_dump_json())
+        page.clock.run_for(5000)
         page.wait_for_function("text => document.getElementById('crossover').textContent.includes(text)", arg=STALE, timeout=12000)
         assert not block.locator("p.notice").all()
         block.screenshot(path=str(tmp_path / "688-crossover-stale.png"))
         summary_path(store.path).write_text("{")
+        page.clock.run_for(5000)
         page.wait_for_function("() => document.querySelector('#crossover p.notice') !== null", timeout=12000)
         assert "讀不到" in block.inner_text()
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
 
 
-@pytest.mark.parametrize("scenario", ["sensitive", "excluded", "failed"])
+# sensitive 那格跟上一題第一個狀態同一份資料同一組斷言，併過去了（#972）。
+@pytest.mark.parametrize("scenario", ["excluded", "failed"])
 def test_crossover_review_browser_states_and_screenshots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                         browser: Browser, scenario: str) -> None:
     store, registry, status = prepared(tmp_path, swap=scenario != "excluded")
@@ -83,8 +91,6 @@ def test_crossover_review_browser_states_and_screenshots(tmp_path: Path, monkeyp
         if scenario == "excluded":
             assert VERDICTS["unverified"] in shown and "上一代接法" in shown
             assert "正式第一名在此接法被淘汰" in shown and "距離：" not in shown
-        elif scenario == "sensitive":
-            assert VERDICTS["sensitive"] in shown and all(f"{label}相距" in shown for label in SPEAKERS.values())
         else:
             assert "交接敏感度計算失敗：KeyError：" in shown
         assert bool(block.locator("p.notice").all()) is (scenario == "failed")
