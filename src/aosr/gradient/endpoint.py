@@ -70,7 +70,7 @@ class SurfaceSpec(NamedTuple):
 
     ``cavity_m`` 是搜尋給的原值（可能是 0 或小於設定的最小空腔）；放不放空氣層由 :func:`kept_cavity` 決定。
     樣板沒有空氣層的面 ``cavity_m`` 是 None。``material_digest`` 是換 θ 之前的樣板構造（``design.material``）
-    的 :func:`material_digest`。
+    的 :func:`material_digest`：這是換 θ 之前的樣板摘要，只改 θ 不會變；實際求解用的是換厚度、處理空腔後的材料。
     """
 
     surface_id: str
@@ -107,12 +107,15 @@ def checked_wall_designs(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceDesig
 
 def checked_design_identity(designs: Sequence[SurfaceDesign], presets: Sequence[ConstructionPreset]) -> None:
     """每面的樣板構造（``design.material``，換 θ 之前）必須等於它 preset id 在 ``presets`` 裡的構造（驗證後逐欄相等）；
-    preset id 找不到或構造不同就拒收，訊息指名面與 preset id。只核身分，匯出材料仍只從 ``design.material`` 來。"""
+    只有剛性面（``material`` 是 None）略過；有樣板構造卻沒有 preset id、preset id 找不到或構造不同都拒收，訊息指名面
+    （與 preset id）。只核身分，匯出材料仍只從 ``design.material`` 來。"""
     by_id = {preset.id: preset for preset in presets}
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
     for design in designs:
-        if design.material is None or design.preset_id is None:
+        if design.material is None:
             continue
+        if design.preset_id is None:
+            raise ValueError(f"面 {design.surface_id} 有樣板構造但沒有 preset id，終點不收沒核過身分的材料")
         preset = by_id.get(design.preset_id)
         if preset is None:
             raise ValueError(f"面 {design.surface_id} 的 preset {design.preset_id} 不在構造預設清單裡")
@@ -313,7 +316,8 @@ class EndpointReport(BaseModel):
     交同一把尺（``objective_from_pressures``）的值；``total_difference`` ＝完整減替身。``max_frequency_db`` 是
     每座位、喇叭、頻點 |20·log10(|p_替身|/|p_完整|)| 的最大值（全軸），``rms_floor_db`` 是兩邊聲壓的均方根零判
     地板上限，``total_difference_bound`` 由兩者照 :func:`score_difference_bound` 推得。大峰是完整模型的。
-    ``surfaces`` 每面帶 preset id 與樣板構造摘要（``material_digest``），入口已核兩者是同一份構造。
+    ``surfaces`` 每面帶 preset id 與樣板構造摘要（``material_digest``），入口已核兩者是同一份構造；這是換 θ 之前的
+    樣板摘要，只改 θ 不會變，實際求解用的是換厚度、處理空腔後的材料。
     非有限數不收（驗證時拒收，不靜默報一個壞數）。
     """
 

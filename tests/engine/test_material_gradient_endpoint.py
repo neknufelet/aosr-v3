@@ -244,6 +244,16 @@ def test_endpoint_rejects_design_material_unlike_its_preset(chain_model: Reduced
         _endpoint(chain_model, operators, designs, _air())
 
 
+def test_endpoint_rejects_material_without_preset_id(chain_model: ReducedModel, operators: FullOperators) -> None:
+    """抓有樣板構造但沒有 preset id 的面繞過身分核對（複驗重現：正常設計第一面改成 ``preset_id=None``、材料照舊，
+    終點照算、報告 preset id 是 None）：終點入口拒收，訊息指名那一面；不跳過、不補預設 id。"""
+    designs = list(gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets()))
+    assert designs[0].material is not None
+    designs[0] = dataclasses.replace(designs[0], preset_id=None)
+    with pytest.raises(ValueError, match=f"面 {designs[0].surface_id} 有樣板構造但沒有 preset id"):
+        _endpoint(chain_model, operators, designs, _air())
+
+
 def test_report_material_digest_matches_preset_material(probe: Record) -> None:
     """抓摘要算錯面或沒記：正常設計的報告每面 ``material_digest`` 等於考卷自己從構造預設清單那一份材料算的摘要
     （驗證後內容的正規化 JSON 的 SHA-256）；剛性面是 None。"""
