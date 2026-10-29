@@ -1,6 +1,6 @@
-"""牆面材料梯度搜尋命令列（#561 辛一）：``python -m aosr.gradient.cli start|resume|stop|report``。
+"""牆面材料梯度搜尋命令列（#561 辛一、辛三）：``python -m aosr.gradient.cli start|resume|stop|endpoint|report``。
 
-- ``start --scheme <方案檔> --surrogate <替身 npz> --presets <六個 id，逗號分隔，剛性面寫 none> --purpose <用途>
+- ``start --scheme <方案檔> --surrogate <替身 npz> --presets <六個 id，逗號分隔，不貼的面寫 none> --purpose <用途>
   --root <資料夾根> [--settings <material_gradient.toml>] [--capabilities <能力表>] [--engine-commit <提交>]``：
   先核輸入（preset 在家族裡、用途認得、方案匯出完整模型拿網格雜湊、物理身分與喇叭座位座標、替身過准用閘門而且
   對得上這幾格、替身座位與喇叭的名字對得上方案），都過才建 ``<root>/<32 位十六進位>/``（名字由輸入算，同一組輸入同一個資料夾），
@@ -9,7 +9,14 @@
   方案座標、替身過閘門、manifest 與收據摘要、設定指紋；子行程重建目標前會再核一次），清掉留下的 ``stop`` 記號，
   子行程照帳本接著跑（標頭對不上拒收；前段沒寫完重跑前段）。
 - ``stop <資料夾>``：建 ``stop`` 記號，不拿鎖，回 0；子行程在下一次求值之前停。
-- ``report --folder <資料夾>``：只讀，印人看的文字，最後一行固定是終點完整模型重算未做（辛二）。
+- ``endpoint <資料夾>``：搜尋跑完之後拿鎖、起雙精度子行程做終點（``endpoint_run``）：同一道輸入閘門、完整模型重算
+  ``result.json`` 那一點、方案原本六面的完整模型基準、匯出完整方案檔 ``scheme-endpoint.json``、寫 ``endpoint.json``；
+  不動 ``status.json``。沒有 ``result.json`` 就失敗。
+- ``report --folder <資料夾>``：只讀，印人看的文字；有對得上帳本的 ``endpoint.json`` 就印終點一節，對不上印過期，
+  沒有就最後一行說終點還沒做。
+
+``--presets`` 寫 ``none`` 的面是「不貼、保留方案原本的牆」（老闆 10-28：不貼算一個選項、用現在的六面當起點）：
+搜尋、終點、匯出都用方案場景那一面原本的材料，不是剛性。
 
 離開碼跟擺位搜尋命令列同一套：0 完成、1 失敗（含替身准用閘門拒用，錯誤原文寫標準錯誤）、2 參數錯、3 中斷或停止記號。
 資料夾鎖：資料夾本身的描述子 ``flock``，子行程經 ``pass_fds`` 繼承；父行程只關自己那一份、不解鎖。
@@ -53,7 +60,7 @@ if TYPE_CHECKING:
 
 EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
-RIGID: Final = "none"
+KEEP_WALL: Final = "none"
 SEARCHES_DIR: Final = "searches"
 TERMINATE_GRACE_S: Final = 60.0
 _REPO_ROOT: Final = Path(__file__).resolve().parents[3]
@@ -65,13 +72,13 @@ class FolderBusy(Exception):
 
 
 def _presets(text: str) -> tuple[str | None, ...]:
-    """``a,b,none,...`` → 六個 preset id（``none`` 是剛性面）；個數不是牆數就是參數錯（離開碼 2）。"""
+    """``a,b,none,...`` → 六個 preset id（``none`` 是不貼、保留方案原本的牆）；個數不是牆數就是參數錯（離開碼 2）。"""
     items = tuple(item.strip() for item in text.split(","))
     walls = [wall.wall_name() for wall in Wall.all()]
     if len(items) != len(walls) or any(not item for item in items):
         raise argparse.ArgumentTypeError(
-            f"--presets 要照 {','.join(walls)} 給 {len(walls)} 個非空的 preset id（剛性面寫 {RIGID}），收到 {len(items)} 個")
-    return tuple(None if item == RIGID else item for item in items)
+            f"--presets 要照 {','.join(walls)} 給 {len(walls)} 個非空的 preset id（不貼的面寫 {KEEP_WALL}），收到 {len(items)} 個")
+    return tuple(None if item == KEEP_WALL else item for item in items)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -80,7 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     start = commands.add_parser("start", help="開始牆面材料梯度搜尋")
     start.add_argument("--scheme", type=Path, required=True, help="方案檔（座位組要一主位加六周圍點）")
     start.add_argument("--surrogate", type=Path, required=True, help="驗過的替身 npz（旁邊要有 manifest 與驗證收據）")
-    start.add_argument("--presets", type=_presets, required=True, help="六面 preset id，照 Wall.all()，剛性面寫 none")
+    start.add_argument("--presets", type=_presets, required=True, help="六面 preset id，照 Wall.all()，不貼（保留方案原本的牆）寫 none")
     start.add_argument("--purpose", required=True, help="用途（評分設定）")
     start.add_argument("--root", type=Path, required=True, help="資料夾根（不要放在網頁讀的 searches/ 底下）")
     start.add_argument("--settings", type=Path, default=config_path("material_gradient.toml"))
@@ -90,6 +97,8 @@ def _parser() -> argparse.ArgumentParser:
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
     stop.add_argument("folder", type=Path)
+    endpoint = commands.add_parser("endpoint", help="終點：完整模型重算、原牆基準、匯出方案檔")
+    endpoint.add_argument("folder", type=Path)
     report = commands.add_parser("report", help="只讀報告")
     report.add_argument("--folder", type=Path, required=True)
     return parser
@@ -127,11 +136,12 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
 
 
 @contextmanager
-def _keep_signal_handlers() -> Iterator[None]:
+def keep_signal_handlers() -> Iterator[None]:
     """區塊結束時照 Python 記的處置把 SIGINT、SIGTERM、SIGHUP 重裝一次。
 
     匯出完整模型會叫網格程式庫（gmsh），它收尾時在 C 層把訊號處置改回預設，Python 這邊卻還以為轉換裝著：
-    之後父行程一收到 SIGTERM 就直接死、子行程變孤兒（修補一的端到端考卷量到的）。
+    之後父行程一收到 SIGTERM 就直接死、子行程變孤兒（修補一的端到端考卷量到的）。終點子行程匯出完整模型也包這一層
+    （不然匯出後 SIGTERM 不再轉成中斷）。
     """
     saved = {number: signal.getsignal(number) for number in FORWARDED_SIGNALS}
     try:
@@ -175,7 +185,7 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.physics.fem_reduced_check import points_hex
     from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
-    from aosr.reporting.scheme import load_scheme
+    from aosr.reporting.scheme import load_scheme, scene_wall_materials
     from aosr.scoring.stage_one_score import stage_one_score_settings
 
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
@@ -183,9 +193,9 @@ def _start(args: argparse.Namespace) -> int:
         raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
     scheme = load_scheme(scheme_path)
     settings = load_material_gradient_settings(settings_path)
-    run.designs_for(args.presets, settings)
+    run.designs_for(args.presets, settings, kept=scene_wall_materials(scheme.scene))
     stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), args.purpose)
-    with _keep_signal_handlers():
+    with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=load_capabilities(args.capabilities),
                                      directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
     physics, mesh = operators.physics_identity, operators.mesh_hash
@@ -267,6 +277,16 @@ def _stop(args: argparse.Namespace) -> int:
     return 0
 
 
+def _endpoint(args: argparse.Namespace) -> int:
+    """拿資料夾鎖、起終點子行程（同一條 ``_spawn_and_wait``）；輸入閘門與結果檔核對在子行程裡做。"""
+    from aosr.gradient import run
+
+    folder = args.folder.resolve()
+    run.read_project(folder)
+    with _locked(folder) as descriptor:
+        return _spawn_and_wait(folder, "endpoint", descriptor)
+
+
 def _report(args: argparse.Namespace) -> int:
     from aosr.gradient.report import render_report
 
@@ -275,7 +295,8 @@ def _report(args: argparse.Namespace) -> int:
 
 
 _COMMANDS: Final[dict[str, tuple[str, Callable[[argparse.Namespace], int]]]] = {
-    "start": ("開始", _start), "resume": ("接續", _resume), "stop": ("停止", _stop), "report": ("報告", _report)}
+    "start": ("開始", _start), "resume": ("接續", _resume), "stop": ("停止", _stop), "endpoint": ("終點", _endpoint),
+    "report": ("報告", _report)}
 
 
 def main(argv: list[str] | None = None) -> int:

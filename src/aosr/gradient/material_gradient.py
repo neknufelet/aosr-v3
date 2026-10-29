@@ -10,7 +10,9 @@
 六面給、長度不對就拒收——那是替身的限制，不是設計的限制。
 
 設計變數只有每面棉板厚度（多孔層）與空腔深度（空氣層），樣板有那一層才有那個變數；
-流阻與板材幾何固定、每面樣板固定、剛性面（None）沒有變數。θ 是一維浮點陣列，順序照面序、
+流阻與板材幾何固定、每面樣板固定、沒有樣板的面沒有變數。沒有樣板的面有兩種：帶 ``kept_material``
+（保留方案原本的牆，#561 辛三：產品路徑 preset 寫 none 的面一律是這種）整條鏈用那份材料的垂直入射阻抗（常數）；
+兩個都沒有才是剛性（合成題用）。θ 是一維浮點陣列，順序照面序、
 每面先厚度後空腔，:func:`design_names` 列出來。精度跟 θ 走：雙精度 θ 給雙精度目標，
 單精度 θ 給單精度；本模組不碰 JAX 全域設定。純函式，沒有命令列、沒有行程、不印東西。
 """
@@ -32,6 +34,7 @@ from aosr.config.material_gradient import DescentSettings, MaterialGradientSetti
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
+from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, variable_name
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
@@ -79,10 +82,13 @@ def check_stop(should_stop: StopCheck | None) -> None:
 
 @dataclass(frozen=True)
 class SurfaceDesign:
-    """一個面的設計：樣板（剛性面是 None）、哪些樣板變數是設計變數、各自上下界、合法厚度與總深度上限。
+    """一個面的設計：樣板（沒有樣板是 None）、哪些樣板變數是設計變數、各自上下界、合法厚度與總深度上限、
+    保留的原牆材料。
 
     ``variables`` 照「厚度、空腔」的順序，名字是樣板的 ``layer<層號>.<欄位>``；
     厚度界是合法厚度的最薄到最厚，空腔界是家族的空腔範圍（公尺）。
+    ``material`` 是 None 時：``kept_material`` 有值就是「不貼、保留方案原本的牆」（整條鏈用這份材料的垂直入射阻抗，
+    常數、沒有變數），兩個都 None 才是剛性面。有樣板的面不收 ``kept_material``。
     """
 
     surface_id: str
@@ -96,6 +102,7 @@ class SurfaceDesign:
     cavity_variable: str | None
     legal_thicknesses_m: tuple[float, ...]
     max_total_depth_m: float | None
+    kept_material: SurfaceMaterial | None = None
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():
@@ -104,8 +111,10 @@ class SurfaceDesign:
             if (self.preset_id is not None or self.family_id is not None or self.variables or self.lower
                     or self.upper or self.thickness_variable is not None or self.cavity_variable is not None
                     or self.legal_thicknesses_m or self.max_total_depth_m is not None):
-                raise ValueError(f"剛性面 {self.surface_id} 不收樣板、變數、界或規格")
+                raise ValueError(f"沒有樣板的面 {self.surface_id} 不收 preset、變數、界或規格")
             return
+        if self.kept_material is not None:
+            raise ValueError(f"面 {self.surface_id} 有樣板構造，不收保留原牆的材料")
         kinds = _variable_kinds(self.material)
         unknown = [name for name in self.variables if name not in kinds]
         if unknown:
@@ -229,9 +238,24 @@ def _surface_design(surface_id: str, preset_id: str, settings: MaterialGradientS
         legal_thicknesses_m=family.thicknesses_m, max_total_depth_m=family.max_total_depth_m)
 
 
+def _plain_design(surface_id: str, kept: Mapping[str, SurfaceMaterial] | None) -> SurfaceDesign:
+    """preset 是 None 的面：給了 ``kept`` 就是保留原牆（``kept`` 一定要有這一面），沒給才是剛性。"""
+    if kept is None:
+        return SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None)
+    material = kept.get(surface_id)
+    if material is None:
+        raise ValueError(f"面 {surface_id} 不貼，但保留原牆的材料清單沒有這一面")
+    return SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None, kept_material=material)
+
+
 def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
-                         presets: Sequence[ConstructionPreset]) -> tuple[SurfaceDesign, ...]:
-    """一串（面代號, preset id 或 None）→ 每面的設計；None 是剛性面。面數不限，面代號不可重複。"""
+                         presets: Sequence[ConstructionPreset], *,
+                         kept: Mapping[str, SurfaceMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
+    """一串（面代號, preset id 或 None）→ 每面的設計。面數不限，面代號不可重複。
+
+    preset 是 None 的面：給了 ``kept``（面代號 → 方案原本的材料）就是「不貼、保留原牆」，``kept`` 缺這一面就拒收；
+    沒給 ``kept`` 才是剛性面（合成題用）。有 preset 的面不看 ``kept``。
+    """
     if not surfaces:
         raise ValueError("至少要有一個面")
     ids = [surface_id for surface_id, _ in surfaces]
@@ -239,24 +263,26 @@ def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: M
         raise ValueError(f"面代號重複：{ids}")
     by_id = {preset.id: preset for preset in presets}
     return tuple(
-        SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None) if preset_id is None
+        _plain_design(surface_id, kept) if preset_id is None
         else _surface_design(surface_id, preset_id, settings, by_id)
         for surface_id, preset_id in surfaces)
 
 
 def wall_designs_from_presets(preset_ids: Sequence[str | None], settings: MaterialGradientSettings,
-                              presets: Sequence[ConstructionPreset]) -> tuple[SurfaceDesign, ...]:
-    """今天的替身只有六面：照 ``Wall.all()`` 給六個 preset id（或 None），面代號是牆名。"""
+                              presets: Sequence[ConstructionPreset], *,
+                              kept: Mapping[str, SurfaceMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
+    """今天的替身只有六面：照 ``Wall.all()`` 給六個 preset id（或 None），面代號是牆名；``kept`` 同
+    :func:`designs_from_presets`（鍵是牆名）。"""
     names = wall_surface_ids()
     if len(preset_ids) != len(names):
         raise ValueError(f"六面牆要給 {len(names)} 個 preset id（照 Wall.all()），收到 {len(preset_ids)} 個")
-    return designs_from_presets(tuple(zip(names, preset_ids, strict=True)), settings, presets)
+    return designs_from_presets(tuple(zip(names, preset_ids, strict=True)), settings, presets, kept=kept)
 
 
 # ---- 扁平化 ----
 
 def design_names(designs: Sequence[SurfaceDesign]) -> tuple[str, ...]:
-    """θ 每一格的名字 ``<面代號>.<樣板變數名>``，照面序、每面先厚度後空腔；剛性面不占格。"""
+    """θ 每一格的名字 ``<面代號>.<樣板變數名>``，照面序、每面先厚度後空腔；沒有樣板的面不占格。"""
     return tuple(f"{design.surface_id}.{name}" for design in designs for name in design.variables)
 
 
@@ -330,6 +356,24 @@ def surface_parameters(designs: Sequence[SurfaceDesign], theta: jax.Array) -> tu
 
 # ---- 整條可微鏈（替身那一層：今天只有六面） ----
 
+def kept_impedance_rows(designs: Sequence[SurfaceDesign], frequencies: Sequence[float] | NDArray[np.float64], *,
+                        air: PhysicsConstants, ranges: PorousModelRanges) -> tuple[NDArray[np.complex128] | None, ...]:
+    """每面「保留原牆」那一列垂直入射阻抗（雙精度複數，``(F,)``）；其餘面 None。
+
+    走產品 ``surface_impedance``（非可微入口），頻率軸照終點 ``material_impedances`` 同一個寫法轉成雙精度 JAX 陣列：
+    替身鏈建目標時用的常數列與終點完整模型用的阻抗是同一支函式、同一個輸入算的。要在雙精度已開的行程裡呼叫。
+    """
+    axis = jnp.asarray(np.asarray(frequencies, dtype=np.float64))
+    rows: list[NDArray[np.complex128] | None] = []
+    for design in designs:
+        if design.kept_material is None:
+            rows.append(None)
+            continue
+        values, _ = surface_impedance(design.kept_material, axis, air=air, ranges=ranges)
+        rows.append(np.asarray(values, dtype=np.complex128))
+    return tuple(rows)
+
+
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: StageOneObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64]) -> ChainObjective:
@@ -337,7 +381,8 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
 
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 第一階段低頻目標（``objective_from_pressures``）。樣板用具體值建，要在雙精度已開的行程裡呼叫；
-    設計清單照 ``Wall.all()`` 對到替身的六面。
+    設計清單照 ``Wall.all()`` 對到替身的六面。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
+    目標函式裡轉成 θ 對應的複數精度、換進那一列，剛性遮罩那一格是 False；求值入口的語意（None 樣板＝剛性）不動。
     """
     walls = Wall.all()
     if len(designs) != len(walls):
@@ -355,13 +400,20 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         else build_template(design.material, double_axis, air=air, ranges=ranges, variables=design.variables)
         for design in designs)
     frozen_designs = tuple(designs)
+    kept_rows = tuple((index, row) for index, row in enumerate(kept_impedance_rows(designs, axis, air=air, ranges=ranges))
+                      if row is not None)
+    not_kept = jnp.asarray([design.kept_material is None for design in designs], dtype=bool)
 
     def objective(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
         values = jnp.asarray(theta)
         parameters = surface_parameters(frozen_designs, values)
         frequency_axis = jnp.asarray(constants.frequencies_hz, dtype=values.dtype)
         impedances = wall_impedances_from_templates(templates, parameters, frequency_axis, air=air)
-        pressures = reduced_pressures(constants, impedances.values, rigid_mask=impedances.rigid_mask)
+        walls = impedances.values
+        for index, row in kept_rows:
+            walls = walls.at[index].set(jnp.asarray(row, dtype=walls.dtype))
+        rigid = jnp.logical_and(impedances.rigid_mask, not_kept)
+        pressures = reduced_pressures(constants, walls, rigid_mask=rigid)
         result = objective_from_pressures(objective_constants, pressures)
         return result.screening_total, result
 

@@ -7,6 +7,9 @@
 空氣（修補二、三）：方案場景的密度與聲速換成另一組、替身換成用同一組空氣建的那份（父行程建好、第二個參數給路徑），
 重建的目標在樣板起點的值要逐位等於這裡自己用設定層配方（``construction_environment``）造的那一份，並跟原方案原替身
 （空氣等於產品預設）重建的不同。
+終點（辛三）：父行程把命令列跑完的 ``result.json`` 抄成 ``cli-result.json``，這裡用同一份 θ、preset 加方案原本的牆
+（考卷自己從方案舊欄換成固定阻抗，不走產品的 ``scene_wall_materials``）直接叫 ``endpoint_check``，並用完整模型解原方案
+六面、交同一把尺與同一支大峰，當命令列 ``endpoint`` 的控制組。
 """
 from __future__ import annotations
 
@@ -19,19 +22,28 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
+from aosr.config.capabilities import load_capabilities
 from aosr.config.construction_environment import construction_environment
+from aosr.config.construction_presets import load_construction_presets
+from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
+from aosr.geometry.shoebox import Wall
 from aosr.gradient import cli
-from aosr.gradient.material_gradient import ChainObjective, baseline_theta, chain_objective
+from aosr.gradient import endpoint
+from aosr.gradient.material_gradient import (
+    ChainObjective, baseline_theta, chain_objective, wall_designs_from_presets,
+)
 from aosr.gradient.material_gradient_ledger import read_ledger
 from aosr.gradient.run import (
-    LEDGER_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, check_inputs, file_sha256, load_problem, manifest_sha256,
-    read_project, stop_requested,
+    LEDGER_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientResult, check_inputs, file_sha256, load_problem,
+    manifest_sha256, read_project, stop_requested,
 )
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import load_reduced
-from aosr.scoring.stage_one_objective_jax import objective_constants
+from aosr.scoring.stage_one_objective_jax import objective_constants, objective_from_pressures
 from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.gradient.worker import run_worker
 
@@ -155,6 +167,41 @@ def _air(directory: Path, source: Path, surrogate: Path) -> Record:
             "expected": value(expected), "original": value(load_problem(project).objective)}
 
 
+def _endpoint(directory: Path, source: Path) -> Record:
+    """命令列 endpoint 的控制組：同一份輸入直接叫 ``endpoint_check``；原方案六面完整模型解交同一把尺、同一支大峰。"""
+    project = read_project(source)
+    scheme, model, settings = check_inputs(project)
+    result = GradientResult.model_validate_json((directory / "cli-result.json").read_bytes())
+    fixed = scheme.scene.impedance_pa_s_per_m_by_wall
+    axis_id = scheme.scene.low_frequency_axis
+    assert fixed is not None and axis_id is not None
+    kept: dict[str, SurfaceMaterial] = {name: ConstantImpedance(impedance_pa_s_m=value) for name, value in fixed.items()}
+    designs = wall_designs_from_presets(project.presets, settings,
+                                        load_construction_presets(config_path("construction_presets.toml")), kept=kept)
+    operators = export_operators(scheme, capabilities=load_capabilities(project.capabilities_path),
+                                 directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
+                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
+    checked = endpoint.endpoint_check(
+        operators, designs, theta, model=model, score_settings=score, receiver_set=scheme.receiver_set,
+        low_frequency_axis=axis_id, presets=load_construction_presets(config_path("construction_presets.toml")),
+        settings=settings, air=air, ranges=ranges)
+    axis = tuple(model.frequencies_hz)
+    pressures = endpoint.full_model_pressures(
+        operators, {wall: kept[wall.wall_name()] for wall in Wall.all()}, axis, air=air, ranges=ranges,
+        max_relative_residual=model.ledger.settings.full_solve_max_relative_residual)
+    constants = objective_constants(axis, score, scheme.receiver_set, len(model.source_names))
+    base = objective_from_pressures(constants, jnp.asarray(pressures))
+    peaks = endpoint.big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
+                               frequencies_hz=axis, low_frequency_axis=axis_id, scoring_range_hz=score.scored_range_hz)
+    return {"report": json.loads(checked.report.to_json()), "baseline_total": float(base.screening_total).hex(),
+            "baseline_components": [float(base.mean_own_line_ripple_rms_db).hex(),
+                                    float(base.mean_seat_robustness_rms_db).hex()],
+            "baseline_peaks": peaks}
+
+
 def main(directory: Path, air_surrogate: Path) -> None:
     source = directory / "source"
     reference, phases = _reference(directory, source)
@@ -169,7 +216,7 @@ def main(directory: Path, air_surrogate: Path) -> None:
     cuts = [_cut(directory, source, reference_folder, f"cut-{keep:04d}", keep) for keep in keeps if keep < len(pre_loop)]
     output = {"reference": reference, "phases": phases, "stops": stops, "cuts": cuts,
               "pre_loop_rows": len(pre_loop), "other_header": _other_header(directory, source, reference_folder),
-              "air": _air(directory, source, air_surrogate)}
+              "air": _air(directory, source, air_surrogate), "endpoint": _endpoint(directory, source)}
     (directory / "output.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
     shutil.rmtree(directory / "__pycache__", ignore_errors=True)
 

@@ -15,8 +15,10 @@ manifest 摘要與驗證收據摘要；方案檔與搜尋設定也要跟記的�
 
 ``stop`` 記號（:func:`stop_requested`）在每兩次求值之間查一次，為真拋 ``SearchStopped``；帳本停在最後一列寫完整的地方，
 不寫停止原因（迴圈停止原因是封閉集合，不含「人叫停」）。狀態檔與結果檔只由子行程寫，寫完整檔再換名（原子）。
-``result.json`` 是交給辛二的接口：最後可行點的每面 preset、厚度與空腔（公尺；空腔 0 照記 0、沒有空腔層記 None）、
-θ 的 hex、值與分項、停止原因、求值次數；終點完整模型重算、量大峰、材料匯出不在這裡做。
+``result.json`` 是交給終點的接口：最後可行點的每面 preset、厚度與空腔（公尺；空腔 0 照記 0、沒有空腔層記 None）、
+材料摘要、θ 的 hex、值與分項、停止原因、求值次數；終點完整模型重算、量大峰、材料匯出在 ``endpoint_run``。
+preset 寫 none 的面是「不貼、保留方案原本的牆」（#561 辛三）：每面設計帶方案場景那一面的材料（``scene_wall_materials``），
+從替身鏈起就用它的阻抗，不是剛性。
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final, Literal, NamedTuple
@@ -40,6 +42,8 @@ from aosr.config.paths import config_path
 from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
+from aosr.geometry.shoebox import Wall
+from aosr.gradient.endpoint import design_digest
 from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, chain_objective, check_stop,
     compiled_evaluator, depth_limits, design_bounds, projected_descent, retune_cavities, snap_to_specs,
@@ -50,12 +54,13 @@ from aosr.gradient.material_gradient_ledger import (
     truncate_rows, write_ledger,
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
+from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_check import PointHex, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.reporting.fem_reduced_scheme import scheme_points
-from aosr.reporting.scheme import Scheme, load_scheme
+from aosr.reporting.scheme import Scheme, load_scheme, scene_wall_materials
 from aosr.scoring.stage_one_objective_jax import objective_constants
 from aosr.scoring.stage_one_score import stage_one_score_settings
 
@@ -66,7 +71,7 @@ STATUS_FILE: Final = "status.json"
 RESULT_FILE: Final = "result.json"
 STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
-RESULT_VERSION: Final = "aosr.material_gradient_result.v1"
+RESULT_VERSION: Final = "aosr.material_gradient_result.v2"
 FREQUENCY_RULER: Final = "fem_reduced_holdout_frequency_db"
 BAND_RULER: Final = "fem_reduced_holdout_band_db"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -116,13 +121,16 @@ class GradientStatus(BaseModel):
 
 
 class SurfaceSpec(BaseModel):
-    """一面的規格：面代號、preset（剛性面 None）、棉板厚度與空腔（公尺；剛性面都是 None、沒有空腔層的空腔是 None）。"""
+    """一面的規格：面代號、preset（不貼的面 None）、棉板厚度與空腔（公尺；不貼的面都是 None、沒有空腔層的空腔是 None）、
+    材料摘要（``endpoint.design_digest``：有樣板的面是換 θ 之前的樣板構造的、不貼的面是保留的原牆材料的；
+    報告只要厚度與空腔時是 None）。"""
 
     model_config = _FROZEN
     surface_id: str
     preset_id: str | None
     thickness_m: float | None
     cavity_m: float | None
+    material_digest: str | None
 
 
 class Components(BaseModel):
@@ -134,10 +142,13 @@ class Components(BaseModel):
 
 
 class GradientResult(BaseModel):
-    """``result.json``：交給辛二的最後可行點（帳本最後一列決定），與它出自哪一本帳本（整份 SHA-256）。"""
+    """``result.json``：交給終點的最後可行點（帳本最後一列決定），與它出自哪一本帳本（整份 SHA-256）。
+
+    v2（#561 辛三）每面多了材料摘要；v1 的檔沒有在用、不收。
+    """
 
     model_config = _FROZEN
-    format_version: Literal["aosr.material_gradient_result.v1"]
+    format_version: Literal["aosr.material_gradient_result.v2"]
     gradient_id: str
     surfaces: tuple[SurfaceSpec, ...]
     variable_names: tuple[str, ...]
@@ -292,9 +303,12 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     return scheme, model, settings
 
 
-def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings) -> tuple[SurfaceDesign, ...]:
-    """六面（照 ``Wall.all()``）的設計；preset 不認識或不在家族清單裡就拒收。"""
-    return wall_designs_from_presets(presets, settings, load_construction_presets(config_path("construction_presets.toml")))
+def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings, *,
+                kept: Mapping[Wall, SurfaceMaterial]) -> tuple[SurfaceDesign, ...]:
+    """六面（照 ``Wall.all()``）的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
+    那一面的材料（方案原本的牆，``scene_wall_materials``），是「不貼、保留原牆」，不是剛性。"""
+    return wall_designs_from_presets(presets, settings, load_construction_presets(config_path("construction_presets.toml")),
+                                     kept={wall.wall_name(): material for wall, material in kept.items()})
 
 
 def load_problem(project: GradientProject) -> GradientProblem:
@@ -307,7 +321,7 @@ def load_problem(project: GradientProject) -> GradientProblem:
     score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
     constants = objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
                                     len(model.source_names))
-    designs = designs_for(project.presets, settings)
+    designs = designs_for(project.presets, settings, kept=scene_wall_materials(scheme.scene))
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
@@ -342,11 +356,13 @@ def _fresh(problem: GradientProblem, path: Path, should_stop: StopCheck | None) 
 
 
 def run_search(folder: Path, *, should_stop: StopCheck | None) -> LoopResult:
-    """開始：帳本獨佔建檔（已有帳本就丟錯）、先寫標頭，再跑前段與迴圈。"""
+    """開始：帳本獨佔建檔（已有帳本就丟錯）、先寫標頭，再跑前段與迴圈；跑完寫 ``result.json``。"""
     problem = load_problem(read_project(folder))
     path = folder / LEDGER_FILE
     write_ledger(path, problem.header, ())
-    return _fresh(problem, path, should_stop)
+    result = _fresh(problem, path, should_stop)
+    write_result(folder, problem.designs)
+    return result
 
 
 def pre_loop_complete(rows: Sequence[MaterialGradientRow]) -> bool:
@@ -357,9 +373,15 @@ def pre_loop_complete(rows: Sequence[MaterialGradientRow]) -> bool:
 
 
 def resume_search(folder: Path, *, should_stop: StopCheck | None) -> LoopResult:
-    """接續：沒有帳本就從頭；標頭跟這一次重建的不同就拒收；前段不完整就截到標頭重跑前段；否則 ``resume_rounds``。"""
+    """接續：沒有帳本就從頭；標頭跟這一次重建的不同就拒收；前段不完整就截到標頭重跑前段；否則 ``resume_rounds``。
+    跑完寫 ``result.json``。"""
     problem = load_problem(read_project(folder))
-    path = folder / LEDGER_FILE
+    result = _resume(problem, folder / LEDGER_FILE, should_stop)
+    write_result(folder, problem.designs)
+    return result
+
+
+def _resume(problem: GradientProblem, path: Path, should_stop: StopCheck | None) -> LoopResult:
     if not path.exists():
         write_ledger(path, problem.header, ())
         return _fresh(problem, path, should_stop)
@@ -373,8 +395,10 @@ def resume_search(folder: Path, *, should_stop: StopCheck | None) -> LoopResult:
 
 # ---- 讀帳本：每面規格、進度、結果 ----
 
-def surface_specs(header: MaterialGradientHeader, theta: Sequence[float]) -> tuple[SurfaceSpec, ...]:
-    """θ 切回每面規格：每面的變數照「厚度、空腔」排（變數名 ``<面代號>.<樣板變數名>``），剛性面沒有變數。"""
+def surface_specs(header: MaterialGradientHeader, theta: Sequence[float], *,
+                  digests: Mapping[str, str | None] | None = None) -> tuple[SurfaceSpec, ...]:
+    """θ 切回每面規格：每面的變數照「厚度、空腔」排（變數名 ``<面代號>.<樣板變數名>``），不貼的面沒有變數。
+    ``digests``（面代號 → 材料摘要）給了就照填、缺一面拒收；沒給（報告只要厚度與空腔）摘要是 None。"""
     if len(theta) != len(header.variable_names):
         raise ValueError("θ 長度跟標頭的變數數不同")
     specs = []
@@ -382,12 +406,15 @@ def surface_specs(header: MaterialGradientHeader, theta: Sequence[float]) -> tup
         values = [value for name, value in zip(header.variable_names, theta, strict=True)
                   if name.split(".", 1)[0] == surface_id]
         if preset_id is None and values:
-            raise ValueError(f"剛性面 {surface_id} 不該有變數")
+            raise ValueError(f"不貼的面 {surface_id} 不該有變數")
+        if digests is not None and surface_id not in digests:
+            raise ValueError(f"材料摘要缺面 {surface_id}")
         if preset_id is not None and not 1 <= len(values) <= 2:
             raise ValueError(f"面 {surface_id} 的變數要是厚度或厚度加空腔")
         specs.append(SurfaceSpec(surface_id=surface_id, preset_id=preset_id,
                                  thickness_m=values[0] if values else None,
-                                 cavity_m=values[1] if len(values) > 1 else None))
+                                 cavity_m=values[1] if len(values) > 1 else None,
+                                 material_digest=None if digests is None else digests[surface_id]))
     return tuple(specs)
 
 
@@ -399,16 +426,21 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
     return evaluations, len(decisions), rows[-1].value if rows else None, stop_reason
 
 
-def write_result(folder: Path) -> GradientResult:
-    """從帳本最後一列決定（要帶停止原因）組 ``result.json``；帳本沒收尾就丟錯、不寫。"""
+def write_result(folder: Path, designs: Sequence[SurfaceDesign]) -> GradientResult:
+    """從帳本最後一列決定（要帶停止原因）組 ``result.json``；帳本沒收尾就丟錯、不寫。每面材料摘要從這一次的設計清單
+    （``endpoint.design_digest``）來，設計清單的面要跟帳本標頭同一串。"""
     path = folder / LEDGER_FILE
     header, rows = read_ledger(path)
+    if tuple((design.surface_id, design.preset_id) for design in designs) != header.surfaces:
+        raise ValueError("設計清單的面跟帳本標頭不同，不寫結果")
     last = rows[-1] if rows else None
     if last is None or last.phase != "round_decision" or last.stop_reason is None or last.decision is None:
         raise ValueError("帳本沒有以帶停止原因的決定列結尾，沒有結果可寫")
     result = GradientResult(
         format_version=RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
-        surfaces=surface_specs(header, last.theta()), variable_names=header.variable_names,
+        surfaces=surface_specs(header, last.theta(),
+                               digests={design.surface_id: design_digest(design) for design in designs}),
+        variable_names=header.variable_names,
         theta_hex=last.theta_hex, value=last.value,
         components=Components(own_line_ripple_rms_db=last.components[0], seat_robustness_rms_db=last.components[1]),
         stop_reason=last.stop_reason, evaluations=last.decision.total_evaluations,

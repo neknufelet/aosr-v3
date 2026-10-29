@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, ModelWrapValidatorHandler, St
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.geometry.furniture import FurnitureKind
-from aosr.geometry.shoebox import Point, Room
+from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.report_furniture import (
     AbsoluteFurniture, CardinalYaw, FiniteCoordinate, FurnitureRecord, normalized_furniture,
 )
@@ -74,6 +75,19 @@ class Scene(BaseModel):
     @classmethod
     def _normalized_surfaces(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
         return handler(normalized_surfaces(value))
+
+
+def scene_wall_materials(scene: Scene) -> dict[Wall, SurfaceMaterial]:
+    """方案場景六面原本的牆面材料（照 ``Wall.all()``）：舊欄每面固定阻抗 → ``ConstantImpedance``，新欄 → 那一區的材料。
+
+    跟報表求解入口（``report_io.solver_inputs``）同一個轉法；驗過的場景恰好有一欄。
+    """
+    zones, fixed = scene.surface_zones_by_wall, scene.impedance_pa_s_per_m_by_wall
+    if zones is not None:
+        return {wall: zones[wall.wall_name()][0].material for wall in Wall.all()}
+    if fixed is None:
+        raise ValueError("場景沒有牆面欄位（固定阻抗或表面分區）")
+    return {wall: ConstantImpedance(impedance_pa_s_m=fixed[wall.wall_name()]) for wall in Wall.all()}
 
 
 class SpeakerCabinet(BaseModel):
