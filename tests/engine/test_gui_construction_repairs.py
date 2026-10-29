@@ -140,6 +140,21 @@ def test_missing_layer_list_is_plain_refusal(tmp_path: Path, layers: object, rou
     assert "第 1 層" not in text and "layers" not in text
 
 
+def test_preview_layer_range_error_is_plain_400(tmp_path: Path) -> None:
+    """流阻超出範圍時預覽回白話 400：點名牆、層與欄位中文名，不漏模型代號與英文欄名（#972 由
+    test_gui_construction_input_browser 的 layer_error[range] 搬來；字由伺服器組，網頁只印這一行，
+    網頁印字那一段仍由那支瀏覽器考卷的 [half] 守）。"""
+    with _app(tmp_path) as client:
+        material = deepcopy(client.get("/api/input-defaults").json()["construction_presets"][0]["material"])
+        ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
+        material["layers"][0]["flow_resistivity_pa_s_m2"] = ranges.sample_flow_resistivity_max_pa_s_m2 * 2
+        response = client.post("/api/input-preview", json=preset_document(material))
+    assert response.status_code == 400, response.text
+    text = response.json()["error"]
+    assert "地板材料構造 › 第 1 層" in text and "流阻" in text
+    assert "komatsu" not in text and "flow_resistivity_pa_s_m2" not in text
+
+
 @pytest.mark.parametrize("case", ("half", "range"))
 @pytest.mark.parametrize("other_wall", (False, True))
 def test_preset_replaces_bad_target_but_keeps_other_wall_errors(tmp_path: Path, case: str, other_wall: bool) -> None:

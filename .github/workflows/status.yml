@@ -44,7 +44,7 @@ jobs:
   receipt:
     # 只在 verify 跑完之後（或手動指定了某一跑）合成收據。job 層的 if 只做這個篩選，不漂綠。
     if: ${{ github.event_name == 'workflow_run' || inputs.verify_run_id != '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作很少
     # （下載一份 artifact、問兩支 GitHub API、寫一份 JSON、推一筆提交），取跟 verify 同一個上限。
     timeout-minutes: 15
@@ -119,7 +119,7 @@ jobs:
     # 把它列成禁字，而且 always() 連「這一跑被使用者取消」都照跑，那才是把紅漂成綠。
     # 括號裡是原本的篩選：只認主線那一跑；手動觸發而沒指定 run id 時也重算一頁。
     if: ${{ !cancelled() && ((github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.verify_run_id == '')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作比 verify 少
     # （一支程式問幾支 GitHub API、寫一份 HTML、推一筆提交），取跟 verify 同一個上限。
     timeout-minutes: 15

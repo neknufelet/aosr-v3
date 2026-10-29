@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Dialog, Locator, Page, expect
+from playwright.sync_api import Browser, Dialog, Locator, Page, Request, expect
 
 from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
@@ -17,39 +17,63 @@ from tests.engine.test_gui_browser import BUTTON_LOOK_JS, _assert_quiet, _open, 
 from tests.engine.test_gui_failed_results import _path, _runner
 
 
-@pytest.mark.parametrize("run_status", ["no_result", "failed", "done"])
+def _renamed(result: SchemeResult, name: str) -> SchemeResult:
+    return result.model_copy(update={"scheme": result.scheme.model_copy(update={"scheme_id": name})})
+
+
+def _expand_archived(page: Page) -> None:
+    """展開「已封存」：跟人一樣點標題；同一頁第二次以後它可能還開著，再點會收起來，所以只在收著時點。"""
+    expect(page.locator("#archived")).to_be_visible()
+    if not page.locator("#archived").evaluate("node => node.open"):
+        page.locator("#archived summary").click()
+
+
+def _clear_messages(page: Page) -> None:
+    # 同一頁做下一段前清掉訊息列，「方案已儲存」這類等待才等得到這一段的字、不被上一段的字放行。
+    page.evaluate("() => { document.getElementById('messages').textContent = ''; }")
+
+
 def test_open_form_archive_restore_then_save_keeps_unsaved_changes(
-        tmp_path: Path, browser: Browser, result: SchemeResult, run_status: str) -> None:
-    name = result.scheme.scheme_id
-    _saved(tmp_path, result)
-    if run_status != "no_result":
-        _bundle(tmp_path, result, "a" * 32, run_status)
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """三種結果狀態（沒結果、失敗、算完）在同一頁輪流做（#972 由三格參數合成一題，每格斷言原樣保留）。"""
+    cases = {run_status: _renamed(result, f"{result.scheme.scheme_id}-{run_status}")
+             for run_status in ("no_result", "failed", "done")}
+    for index, (run_status, item) in enumerate(cases.items()):
+        _saved(tmp_path, item)
+        if run_status != "no_result":
+            _bundle(tmp_path, item, f"{index:x}" * 32, run_status)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(name)
-        page.locator("#open-scheme").click()
-        expect(page.locator("#save-id")).to_have_value(name)
-        page.locator("#room-Lx").fill("6.7")
         _confirm(page)
-        page.get_by_role("button", name="封存這個方案", exact=True).click()
-        expect(page.locator("#scheme-archive-notice")).to_be_visible()
-        page.locator("#archived summary").click()
-        _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
-        expect(page.locator("#scheme-archive-notice")).to_be_hidden()
-        expect(page.locator("#room-Lx")).to_have_value("6.7")
-        with page.expect_request(lambda request: request.method == "PUT" and request.url.endswith(f"/api/schemes/{name}")) as saved:
-            page.locator("#save").click()
-        assert "if-none-match" not in saved.value.headers
-        if run_status == "done":
-            expect(page.locator("#messages")).to_contain_text("已經有算好的結果")
-            assert page.request.get(f"{base}/api/schemes/{name}").json()["scheme"] == result.scheme.model_dump(mode="json")
-            assert watched.page_errors == []
-            assert all("409" in error for error in watched.console_errors)
-            return
-        expect(page.locator("#messages")).to_have_text("方案已儲存")
-        document = page.request.get(f"{base}/api/schemes/{name}").json()["scheme"]
-        assert document["scene"]["room_m"]["Lx"] == float("6.7")
-        _assert_quiet(watched)
+        for run_status, item in cases.items():
+            name = item.scheme.scheme_id
+            page.locator("#scheme-list").select_option(name)
+            page.locator("#open-scheme").click()
+            expect(page.locator("#save-id")).to_have_value(name)
+            page.locator("#room-Lx").fill("6.7")
+            page.get_by_role("button", name="封存這個方案", exact=True).click()
+            expect(page.locator("#scheme-archive-notice")).to_be_visible()
+            _expand_archived(page)
+            _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
+            expect(page.locator("#scheme-archive-notice")).to_be_hidden()
+            expect(page.locator("#room-Lx")).to_have_value("6.7")
+            _clear_messages(page)
+            def is_save(request: Request, name: str = name) -> bool:
+                return request.method == "PUT" and request.url.endswith(f"/api/schemes/{name}")
+            with page.expect_request(is_save) as saved:
+                page.locator("#save").click()
+            assert "if-none-match" not in saved.value.headers, run_status
+            if run_status == "done":
+                expect(page.locator("#messages")).to_contain_text("已經有算好的結果")
+                assert page.request.get(f"{base}/api/schemes/{name}").json()["scheme"] == \
+                    item.scheme.model_dump(mode="json")
+                continue
+            expect(page.locator("#messages")).to_have_text("方案已儲存")
+            document = page.request.get(f"{base}/api/schemes/{name}").json()["scheme"]
+            assert document["scene"]["room_m"]["Lx"] == float("6.7"), run_status
+        # 只有算完那一格撞 409（伺服器照設計回）；JS 自己不准拋錯。
+        assert watched.page_errors == []
+        assert all("409" in error for error in watched.console_errors), watched.console_errors
 
 
 def test_restore_other_package_does_not_reconnect_open_form(
@@ -82,24 +106,29 @@ def test_restore_other_package_does_not_reconnect_open_form(
         _assert_quiet(watched)
 
 
-@pytest.mark.parametrize("identity_source", ["state", "snapshot"])
 def test_archive_confirmation_uses_server_count_for_broken_result(
-        tmp_path: Path, browser: Browser, result: SchemeResult, identity_source: str) -> None:
-    name, run_id = result.scheme.scheme_id, "a" * 32
-    _saved(tmp_path, result)
-    _bundle(tmp_path, result, run_id, "failed" if identity_source == "state" else "none")
-    _path(tmp_path, "results", run_id).write_text("{")
-    expected_results = [run_id]
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """身分來源（狀態檔、快照）兩格在同一頁輪流封存（#972 由兩格參數合成一題，每格斷言原樣保留）。"""
+    cases = {identity_source: (_renamed(result, f"{result.scheme.scheme_id}-{identity_source}"), run_id)
+             for identity_source, run_id in (("state", "a" * 32), ("snapshot", "b" * 32))}
+    for identity_source, (item, run_id) in cases.items():
+        _saved(tmp_path, item)
+        _bundle(tmp_path, item, run_id, "failed" if identity_source == "state" else "none")
+        _path(tmp_path, "results", run_id).write_text("{")
+    expected_results = ["a" * 32]
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(name)
         messages = _confirm(page)
-        page.get_by_role("button", name="封存這個方案", exact=True).click()
-        expect(page.locator(f'#scheme-list option[value="{name}"]')).not_to_be_attached()
-        assert f"{len(expected_results)} 筆結果" in messages[0]
-        expect(page.locator("#messages")).to_contain_text(f"{len(expected_results)} 筆結果")
-        page.locator("#archived summary").click()
-        expect(_package_row(page, name).locator("td").nth(2)).to_have_text(f"{len(expected_results)} 筆")
+        for index, (identity_source, (item, _)) in enumerate(cases.items()):
+            name = item.scheme.scheme_id
+            page.locator("#scheme-list").select_option(name)
+            _clear_messages(page)
+            page.get_by_role("button", name="封存這個方案", exact=True).click()
+            expect(page.locator(f'#scheme-list option[value="{name}"]')).not_to_be_attached()
+            assert f"{len(expected_results)} 筆結果" in messages[index], identity_source
+            expect(page.locator("#messages")).to_contain_text(f"{len(expected_results)} 筆結果")
+            _expand_archived(page)
+            expect(_package_row(page, name).locator("td").nth(2)).to_have_text(f"{len(expected_results)} 筆")
         _assert_quiet(watched)
 
 
@@ -261,23 +290,41 @@ def test_legacy_single_archive_label_and_restore(
         _assert_quiet(watched)
 
 
-@pytest.mark.parametrize("side", ["A", "B"])
-def test_archive_clears_selected_compare_side(
-        tmp_path: Path, browser: Browser, result: SchemeResult, side: str) -> None:
-    run_id, other_id = "a" * 32, "b" * 32
-    _bundle(tmp_path, result, run_id)
-    _bundle(tmp_path, result.model_copy(update={"scheme": result.scheme.model_copy(
-        update={"scheme_id": "other-scheme"})}), other_id)
+def test_archive_clears_selected_compare_sides(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """封存清掉比較選擇（#972 由 clears_selected_compare_side[A]／[B] 與 clears_both_compare_choices_from_same_scheme
+    三題合成一題，同一頁三段）：封存 A 那份只清 A、封存 B 那份只清 B、兩邊同一份方案就兩邊都清。"""
+    first, other, third, both = "a" * 32, "b" * 32, "c" * 32, ("d" * 32, "e" * 32)
+    _bundle(tmp_path, result, first)
+    _bundle(tmp_path, _renamed(result, "other-scheme"), other)
+    _bundle(tmp_path, _renamed(result, "third-scheme"), third)
+    for run_id in both:
+        _bundle(tmp_path, _renamed(result, "same-scheme"), run_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _confirm(page)
-        other_side = "B" if side == "A" else "A"
-        _row(page, run_id).get_by_role("button", name=f"選為 {side}", exact=True).click()
-        _row(page, other_id).get_by_role("button", name=f"選為 {other_side}", exact=True).click()
+        # 原 [A]：封存選為 A 的那份，A 回到未選、B 不動。
+        _row(page, first).get_by_role("button", name="選為 A", exact=True).click()
+        _row(page, other).get_by_role("button", name="選為 B", exact=True).click()
         expect(page.locator("#compare-link")).to_be_visible()
-        _row(page, run_id).get_by_role("button", name="封存方案", exact=True).click()
-        expect(page.locator(f"#compare-{side.lower()}")).to_have_text(f"{side}：未選")
-        expect(page.locator(f"#compare-{other_side.lower()}")).to_contain_text("other-scheme")
+        _row(page, first).get_by_role("button", name="封存方案", exact=True).click()
+        expect(page.locator("#compare-a")).to_have_text("A：未選")
+        expect(page.locator("#compare-b")).to_contain_text("other-scheme")
+        expect(page.locator("#compare-link")).to_be_hidden()
+        # 原 [B]：封存選為 B 的那份，B 回到未選、A 不動。
+        _row(page, third).get_by_role("button", name="選為 A", exact=True).click()
+        expect(page.locator("#compare-link")).to_be_visible()
+        _row(page, other).get_by_role("button", name="封存方案", exact=True).click()
+        expect(page.locator("#compare-b")).to_have_text("B：未選")
+        expect(page.locator("#compare-a")).to_contain_text("third-scheme")
+        expect(page.locator("#compare-link")).to_be_hidden()
+        # 原 clears_both：兩邊是同一份方案的兩筆結果，封存一次兩邊都清。
+        _row(page, both[0]).get_by_role("button", name="選為 A", exact=True).click()
+        _row(page, both[1]).get_by_role("button", name="選為 B", exact=True).click()
+        expect(page.locator("#compare-link")).to_be_visible()
+        _row(page, both[0]).get_by_role("button", name="封存方案", exact=True).click()
+        for side in ("a", "b"):
+            expect(page.locator(f"#compare-{side}")).to_have_text(f"{side.upper()}：未選")
         expect(page.locator("#compare-link")).to_be_hidden()
         _assert_quiet(watched)
 
@@ -394,31 +441,31 @@ def test_changed_scheme_row_says_it_was_computed_before_the_change(
         _assert_quiet(watched)
 
 
-@pytest.mark.parametrize("scheme_text", ["改之前的方案算的", ""])
-def test_finished_rerun_of_old_scheme_is_not_attached_to_the_form(
-        tmp_path: Path, browser: Browser, scheme_text: str) -> None:
+def test_finished_rerun_of_old_scheme_is_not_attached_to_the_form(tmp_path: Path, browser: Browser) -> None:
     # #755 審查：名字放開後，重算的可能是改之前的方案；那一筆在清單上標了，算完就不掛在同名表單旁邊。
     # 只換掉頁面的 api（伺服器回什麼由考卷手寫），驗 poll 照清單那一格決定掛不掛。
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
-        shown = page.evaluate("""async (schemeText) => {
-          const row = {run_id: "r".repeat(32), scheme_id: scheme.scheme_id, finished_text: "2026-10-10 12:00",
-            duration_text: "1.000 秒", calculation_text: "跟現在相同", calculation_detail: "",
-            registry_text: "跟現在相同", result_url: "/results/" + "r".repeat(32), run_status: "done",
-            status_text: "", scheme_text: schemeText};
-          api = async (path) => path.startsWith("/api/runs/") ? {scheme_id: scheme.scheme_id, status: "done",
-            stderr_tail: [], display_text: "完成", result_url: row.result_url}
-            : path === "/api/results" ? {results: [row]} : {results: []};
-          runId = row.run_id; openedId = scheme.scheme_id; runEdited = false;
-          await poll();
-          return {link: !document.getElementById("result-link").hidden,
-                  message: document.getElementById("messages").textContent};
-        }""", scheme_text)
-        if scheme_text:
-            assert shown == {"link": False, "message": f"「{page.evaluate('scheme.scheme_id')}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單"}
-        else:
-            assert shown["link"] is True and "算完了，按下面的「查看結果頁」看結果" in shown["message"]
+        # 清單那一格有字（改之前的方案算的）與沒字兩格，同一頁輪流（#972 由兩格參數合成一題）。
+        for scheme_text in ("改之前的方案算的", ""):
+            shown = page.evaluate("""async (schemeText) => {
+              const row = {run_id: "r".repeat(32), scheme_id: scheme.scheme_id, finished_text: "2026-10-10 12:00",
+                duration_text: "1.000 秒", calculation_text: "跟現在相同", calculation_detail: "",
+                registry_text: "跟現在相同", result_url: "/results/" + "r".repeat(32), run_status: "done",
+                status_text: "", scheme_text: schemeText};
+              api = async (path) => path.startsWith("/api/runs/") ? {scheme_id: scheme.scheme_id, status: "done",
+                stderr_tail: [], display_text: "完成", result_url: row.result_url}
+                : path === "/api/results" ? {results: [row]} : {results: []};
+              runId = row.run_id; openedId = scheme.scheme_id; runEdited = false;
+              await poll();
+              return {link: !document.getElementById("result-link").hidden,
+                      message: document.getElementById("messages").textContent};
+            }""", scheme_text)
+            if scheme_text:
+                assert shown == {"link": False, "message": f"「{page.evaluate('scheme.scheme_id')}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單"}
+            else:
+                assert shown["link"] is True and "算完了，按下面的「查看結果頁」看結果" in shown["message"]
         _assert_quiet(watched)
 
 
@@ -487,22 +534,6 @@ def test_poll_and_save_survive_list_races_and_failures(tmp_path: Path, browser: 
         assert "算完了，但結果清單讀不到：封存清單讀不到" in outcome["failed"]["message"]
         assert outcome["saved"] is True
 
-
-
-def test_archive_clears_both_compare_choices_from_same_scheme(
-        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
-    for run_id in ("a" * 32, "b" * 32):
-        _bundle(tmp_path, result, run_id)
-    with _serve(tmp_path) as base, _open(browser, base) as watched:
-        page = watched.page
-        _confirm(page)
-        _row(page, "a" * 32).get_by_role("button", name="選為 A", exact=True).click()
-        _row(page, "b" * 32).get_by_role("button", name="選為 B", exact=True).click()
-        _row(page, "a" * 32).get_by_role("button", name="封存方案", exact=True).click()
-        for side in ("a", "b"):
-            expect(page.locator(f"#compare-{side}")).to_have_text(f"{side.upper()}：未選")
-        expect(page.locator("#compare-link")).to_be_hidden()
-        _assert_quiet(watched)
 
 
 def test_archived_open_form_can_save_same_name_as_new_scheme(

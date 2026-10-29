@@ -5,8 +5,6 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, expect
 
-from aosr.config.paths import config_path
-from aosr.config.porous_model_ranges import load_porous_model_ranges
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
@@ -42,19 +40,18 @@ def test_select_edit_save_reload_and_reverse_lookup(tmp_path: Path, browser: Bro
         assert watched.page_errors == []
 
 
-@pytest.mark.parametrize("case", ("half", "range"))
-def test_layer_error_is_visible_plain_400(tmp_path: Path, browser: Browser, case: str) -> None:
+def test_layer_error_is_visible_plain_400(tmp_path: Path, browser: Browser) -> None:
+    """層厚度清空時網頁照樣把伺服器的白話 400 印在訊息列（#972：原 [range] 那格的字由伺服器組，搬去
+    test_gui_construction_repairs::test_preview_layer_range_error_is_plain_400；網頁印字這一段由這一格守）。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _filled(page, "#material-kind-floor", "assembly")
-        ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
-        field = "thickness_m" if case == "half" else "flow_resistivity_pa_s_m2"
-        value = "" if case == "half" else str(ranges.sample_flow_resistivity_max_pa_s_m2 * 2)
+        field = "thickness_m"
         with page.expect_response("**/api/input-preview") as response:
-            page.locator(f"#layer-floor-0-{field}").fill(value)
+            page.locator(f"#layer-floor-0-{field}").fill("")
         assert response.value.status == 400, response.value.text()
         expect(page.locator("#messages")).to_contain_text("地板材料構造 › 第 1 層")
         text = page.locator("#messages").inner_text()
-        assert ("層厚度" if case == "half" else "流阻") in text
+        assert "層厚度" in text
         assert "komatsu" not in text and field not in text
         assert watched.page_errors == []

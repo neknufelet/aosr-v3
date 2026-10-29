@@ -1,7 +1,7 @@
 """後設測試：每張規矩卡都要跑完八回合，任一回合不符就紅。
 
 八回合（退出碼約定見 governance/exit_codes.py）：
-  1. 乾淨樹（真 repo 根）        = 0（宣告了 [junit] 的卡固定改為 = 1，見下）
+  1. 乾淨樹（真 repo 根）        = 0（只跑雲端那一步沒有等價覆蓋的卡，見下；宣告了 [junit] 的卡固定改為 = 1）
   2. 卡宣告的每一份必紅樣本      = 1
   3. 掃描根換成不存在的路徑      = 2
   4. 抽掉卡宣告的外部工具        = 2（卡宣告 external_tools = [] 時改為斷言「宣告為空」並記一行，不 skip）
@@ -10,7 +10,13 @@
   7. 新候選的必紅樣本不被既有檢查咬到 = 沒有未宣告重疊
   8. 每份必紅樣本至少有一個檔落在卡的 scope
 
-正式八回合不認識任何一張卡的內容，全部從卡的欄位讀（例外：第 1 回對離開碼誠實開「跳過三針」的開關，理由寫在那一題）；只有第七回控制組刻意拿真卡證明裁判會紅、且回 2 不算命中。
+正式八回合不認識任何一張卡的內容，全部從卡的欄位讀；只有第七回控制組刻意拿真卡證明裁判會紅、且回 2 不算命中。
+
+第 1 回只跑兩種卡（由卡的欄位決定，不點名）：宣告了 `[junit]` 的，和宣告了 `clean_tree_unset_env` 的。
+其餘卡的「真 repo 根要回 0」跟 `.github/workflows/verify.yml` 每張卡那一步是同一題：同一顆提交、同樣的
+掃描根；開關只有 rule-card-required-fields 那一步明設遞迴深度，其餘卡不讀（離開碼誠實那張啟動的子檢查會繼承它，雲端沒設就是沒上限、只會更嚴）；同樣要回 0，
+而雲端那一步才是算數的那一方；本機再考一次只是把同一題考兩遍（#972 量到
+那一回佔全套 163 秒）。這兩種卡留下來是因為雲端那一步跟它們考的不是同一題，見下。
 
 第 1 回有一個由卡的欄位決定的分支：卡宣告了 `[junit]`（要判一份 pytest 收據）時，固定斷言
 「收據此刻不存在，而且檢查必須回 1」——沒有收據就是沒有綠。這一跑真的收據由
@@ -32,7 +38,6 @@ from pathlib import Path
 import pytest
 
 from governance.checks import secrets_never_committed
-from governance.checks.check_exit_code_honest import SKIP_META_COVERED_ENV
 from governance.checks.rule_card_required_fields import BITE_TIMEOUT, DEPTH_ENV, MAX_BITE_DEPTH
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 from governance.loader import Card, expand_scope, load_all_cards
@@ -147,9 +152,20 @@ def test_there_is_at_least_one_card() -> None:
     assert CARDS, "governance/rules/ 裡一張卡都沒有——後設測試會變成永遠回綠的空跑"
 
 
-@pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
+# 第 1 回只收雲端那一步沒有等價覆蓋的卡：宣告 [junit] 的（這裡判「沒收據不准綠」，雲端那一步判真收據）
+# 與宣告 clean_tree_unset_env 的（這裡拿掉事件變數跑「樹乾不乾淨」那一種模式，雲端那一步帶著事件跑另一種）。
+ROUND1_CARDS = [card for card in CARDS if card.junit or card.clean_tree_unset_env]
+ROUND1_CARD_IDS = [card.id for card in ROUND1_CARDS]
+
+
+def test_round1_still_has_cards() -> None:
+    """第 1 回的名單由卡的欄位算出來；算成空集合這一回就沒在考，要看得見。"""
+    assert ROUND1_CARDS, "沒有任何卡宣告 [junit] 或 clean_tree_unset_env——第 1 回變成空跑"
+
+
+@pytest.mark.parametrize("card", ROUND1_CARDS, ids=ROUND1_CARD_IDS)
 def test_round1_clean_tree_is_green(card: Card) -> None:
-    """第 1 回：乾淨樹（真 repo 根）必須回 0。
+    """第 1 回：乾淨樹（真 repo 根）必須回 0（只跑雲端那一步沒有等價覆蓋的卡，名單見上）。
 
     例外：卡宣告了 `[junit]` 時，固定斷言收據不存在、檢查必須回 1。真的收據留給 CI
     在 pytest 之後判；這裡只證明「沒有收據就是沒有綠」。
@@ -166,14 +182,7 @@ def test_round1_clean_tree_is_green(card: Card) -> None:
             f"——沒有收據就是沒有綠，不准當乾淨：{_tail(proc)}"
         )
         return
-    # 唯一點名一張卡的地方（#586）：離開碼誠實的三針跟第 3、4、5 回同輸入同期待，第 1 回跟 CI 那一步
-    # 一樣跳過；卡改名只會讓第 1 回多跑三針（變慢，不變弱）。這個設定本身由
-    # tests/test_fixture_runner_ci_settings.py 逐份餵樣本守。
-    extra_env = {SKIP_META_COVERED_ENV: "1"} if card.id == "check-exit-code-honest" else None
-    proc = _run(
-        card, REPO, unset_env=card.clean_tree_unset_env,
-        bite_depth=str(MAX_BITE_DEPTH), extra_env=extra_env,
-    )
+    proc = _run(card, REPO, unset_env=card.clean_tree_unset_env, bite_depth=str(MAX_BITE_DEPTH))
     _assert_report_line(proc)
     assert proc.returncode == CLEAN, f"{card.id} 在乾淨樹回 {proc.returncode}，應為 0：{_tail(proc)}"
 

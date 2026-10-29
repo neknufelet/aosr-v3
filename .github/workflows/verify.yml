@@ -18,7 +18,7 @@ permissions:
 # 兩台分攤考卷（#595）：shard-a、shard-b 各跑一半，收尾 verify 判決；必要檢查 verify 就是收尾那個 job。
 jobs:
   shard-a:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 沒有上限等於可以無聲卡死（GitHub 的預設 360 分鐘不是宣告，是沒人想過這件事）。
     # 由規矩卡 ci-jobs-cannot-die-quietly 帶進來，上限數字登記在那張卡的 [settings]。
     # 20 分鐘的來源：#520 加速後（2026-09-28）成功跑完全套的這個 job 每次 611～824 秒（最長約 13.7 分鐘）；
@@ -225,7 +225,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   shard-b:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 上限來由見 shard-a。
     timeout-minutes: 25
     env:
@@ -310,7 +310,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [shard-a, shard-b]
     if: ${{ always() }}
     timeout-minutes: 10

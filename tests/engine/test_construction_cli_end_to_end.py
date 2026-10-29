@@ -120,13 +120,12 @@ def test_porous_extrapolation_survives_report_and_text(tmp_path: Path, sigma: fl
     path.write_text(json.dumps(document), encoding="utf-8")
     probe = Path(__file__).with_name("_construction_report_probe.py")
     env = environment(tmp_path)
-    results = {}
     before = time.perf_counter()
-    for format_name in ("json", "text"):
-        child = subprocess.run([sys.executable, "-B", str(probe), str(path), format_name],
-                               cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
-        assert child.returncode == 0, child.stderr
-        results[format_name] = child.stdout
+    # 同一個子行程依序跑兩種格式（#972）：各自完整讀檔、求解、輸出，只省第二次匯入與編譯。
+    child = subprocess.run([sys.executable, "-B", str(probe), str(path), "json", "text"],
+                           cwd=tmp_path, env=env, capture_output=True, text=True, timeout=180)
+    assert child.returncode == 0, child.stdout + child.stderr
+    results = {name: (tmp_path / f"C.{name}.out").read_text(encoding="utf-8") for name in ("json", "text")}
     report = ReportOutput.model_validate_json(results["json"])
     assert report.construction_notes_by_wall is not None
     assert set(report.construction_notes_by_wall) == {"x0"}

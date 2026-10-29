@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
@@ -184,8 +185,10 @@ def derivative_rows(
     name: str,
     *,
     scale_floor: float = 1.0,
+    gradient: Callable[[jax.Array], jax.Array] | None = None,
 ) -> list[dict[str, object]]:
-    automatic = jax.jit(jax.grad(objective))(p)
+    """``gradient`` 給了就用它（已編譯、可跨呼叫共用的自動微分）；沒給就就地編譯 ``objective`` 的梯度。"""
+    automatic = (gradient or jax.jit(jax.grad(objective)))(p)
     rows = []
     for index in range(p.size):
         scale = jnp.maximum(jnp.abs(p[index]), scale_floor)
@@ -208,14 +211,22 @@ def gradients(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
     for name, c in problem["cases"].items():
         if c.get("quantity") == "simpson" or c["incidence"] == "diffuse":
             continue
+
+        def loss(p: jax.Array, f: jax.Array, case: Case = c) -> jax.Array:
+            z, _, a = spectrum(case, f, air, p)
+            return jnp.sum((z.real + 0.3 * z.imag) / air.rho_c + 0.7 * a)
+
+        # 頻率是編譯後的動態參數：每個案例只編譯一次梯度（#972），三個頻點共用；中央差分照舊逐點直接算。
+        compiled = jax.jit(jax.grad(loss))
         for frequency in (20.0, 730.0, 8000.0):
-
-            def loss(p: jax.Array) -> jax.Array:
-                z, _, a = spectrum(c, jnp.asarray(frequency), air, p)
-                return jnp.sum((z.real + 0.3 * z.imag) / air.rho_c + 0.7 * a)
-
+            f = jnp.asarray(frequency)
             rows.extend(
-                derivative_rows(loss, jnp.asarray([37.0]), f"{name}::{frequency}")
+                derivative_rows(
+                    partial(loss, f=f),
+                    jnp.asarray([37.0]),
+                    f"{name}::{frequency}",
+                    gradient=partial(compiled, f=f),
+                )
             )
     for count in (5, 6):
         p = jnp.asarray(np.linspace(7.0, 77.0, count))

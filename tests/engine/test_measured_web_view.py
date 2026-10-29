@@ -169,12 +169,34 @@ def test_compare_details_name_a_base_assembly_change_on_the_same_wall() -> None:
     assert rows['同一面牆的底構造'][1] != rows['同一面牆的底構造'][2]
 
 
-def test_construction_and_fixed_result_json_omit_measured_block(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+@pytest.fixture(scope='module')
+def fixed(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    """全場共用的控制組結果（固定阻抗）；讀回驗證一次要幾秒，這個模組的兩題共用一份。"""
+    from tests.engine.test_scheme_pipeline import shared_control_result
+    return shared_control_result(tmp_path_factory, worker_id, 'wall-1')
+
+
+def test_compare_api_json_sends_measured_details_to_the_page(fixed: SchemeResult) -> None:
+    """比較頁的實測細項是前端從 /api/compare 的 JSON 讀的：走那支 handler 回傳用的同一支 _compare_json_response，
+    JSON 的 changes[].details 要逐條等於物件的 .details（序列化把細項丟掉就紅；瀏覽器那題是攔截後自己塞的，守不到這一層）。"""
+    from aosr.gui.app import _compare_json_response
+    from tests.engine.test_gui_compare_view import _view
+    a, b = document(), document()
+    points = cast(list[dict[str, object]], floor(b)['points'])
+    points.insert(1, {'frequency_hz': 300., 'real_pa_s_m': 500., 'imag_pa_s_m': -30.})
+    points[-1]['imag_pa_s_m'] = 70.
+    changes = scheme_differences(Scheme.model_validate(a), Scheme.model_validate(b))
+    assert changes and all(change.details for change in changes)
+    view = _view((fixed, fixed)).model_copy(update={'changes': changes})
+    body = json.loads(bytes(_compare_json_response(view, {}, {}, {}, '').body))
+    assert [change.get('details') for change in body['changes']] == [
+        [list(row) for row in change.details] for change in changes]
+
+
+def test_construction_and_fixed_result_json_omit_measured_block(fixed: SchemeResult) -> None:
     from aosr.config.paths import config_path
     from aosr.gui.result_view import build_result_view
     from aosr.gui.input_setup import input_defaults
-    from tests.engine.test_scheme_pipeline import shared_control_result
-    fixed = shared_control_result(tmp_path_factory, worker_id, 'wall-1')
     presets = input_defaults()['construction_presets']
     assert isinstance(presets, list)
     data = fixed.scheme.model_dump(mode='json')

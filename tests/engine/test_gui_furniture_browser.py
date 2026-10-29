@@ -70,54 +70,57 @@ def test_real_furniture_result_page_and_plain_control(
         page.screenshot(path=str(tmp_path / f"result-{'furniture' if furnished else 'plain'}.png"), full_page=True)
 
 
-@pytest.mark.parametrize(("furnished", "reverse"), [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize("furnished", [False, True])
 def test_real_furniture_compare_page_exports_and_plain_control(
     browser: Browser, tmp_path: Path, scheme_pair: tuple[SchemeResult, ...], furnished: bool,
-    tmp_path_factory: pytest.TempPathFactory, worker_id: str, reverse: bool,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
-    results = tuple(reversed(scheme_pair)) if reverse else scheme_pair
-    results = results if furnished else tuple(shared_control_result(tmp_path_factory, worker_id, name)
-                                                   for name in ("wall-1", "wall-2"))
+    """有家具時 A／B 兩種順序同一台伺服器輪流開（#972 由 [True-False]／[True-True] 兩格合成，斷言原樣保留）。"""
+    results = scheme_pair if furnished else tuple(shared_control_result(tmp_path_factory, worker_id, name)
+                                                  for name in ("wall-1", "wall-2"))
     (tmp_path / "results").mkdir()
     for letter, result in zip(("a", "b"), results, strict=True):
         save_result(result, tmp_path / "results" / f"{letter * 32}.json")
-    with _serve(tmp_path) as url, _open(browser, f"{url}/compare/{'a' * 32}/{'b' * 32}") as watched:
-        page = watched.page
-        page.wait_for_selector("#content", state="visible")
-        _has_lines(page)
-        text = page.locator("body").inner_text()
-        assert page.locator("#overlay-furniture-note").is_visible() == furnished
-        assert not page.locator("#ranking-approximation").is_visible()
-        if furnished:
-            assert "兩份方案設定相同" not in page.locator("#summary-text").inner_text()
-            assert "沙發（seat）" in page.locator("#changes").inner_text()
-            assert "兩者計算涵蓋範圍不同" in page.locator("#categories").inner_text()
-            assert REASON in page.locator("#notes p").all_inner_texts()
-            before, after = page.locator("body").inner_text().split(REASON)
-            assert REASON not in before + after
-            for row in page.locator("#categories tr").all()[1:]:
-                cells = row.locator("td").all_inner_texts()
-                assert "近似" not in cells[3 if reverse else 1]
-                assert ("近似" in cells[1 if reverse else 3]) == (cells[0] in {"音色平衡", "聆聽區穩定性", "反射與回聲", "聲道匹配"})
-            expected_note = "A：家具模型：近似" if reverse else "B：家具模型：近似"
-            assert expected_note in text
-            page.evaluate("""() => { window.paintedText = []; const original = CanvasRenderingContext2D.prototype.fillText;
-                CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
-                    window.paintedText.push(String(text)); return original.call(this, text, ...args); }; }""")
-            with page.expect_download() as event:
-                page.locator("#download-png").click()
-            event.value.save_as(tmp_path / "compare-furniture-export.png")
-            assert expected_note in page.evaluate("window.paintedText")
-            response = page.request.get(f"{url}/api/compare/{'a' * 32}/{'b' * 32}/export/curves")
-            assert response.text().splitlines()[-1] == expected_note
-            summary = page.request.get(f"{url}/api/compare/{'a' * 32}/{'b' * 32}/export/summary").text().splitlines()
-            assert expected_note in summary[summary.index("說明") + 1:]
-        else:
-            assert not page.locator("#overlay-furniture-note").is_visible()
-            assert REASON not in page.locator("body").inner_text()
-        _assert_text_is_formatted(page)
-        _assert_quiet(watched)
-        page.screenshot(path=str(tmp_path / f"compare-{'furniture' if furnished else 'plain'}.png"), full_page=True)
+    orders = ((False, "a" * 32, "b" * 32), (True, "b" * 32, "a" * 32)) if furnished else ((False, "a" * 32, "b" * 32),)
+    with _serve(tmp_path) as url:
+        for reverse, left, right in orders:
+            with _open(browser, f"{url}/compare/{left}/{right}") as watched:
+                page = watched.page
+                page.wait_for_selector("#content", state="visible")
+                _has_lines(page)
+                text = page.locator("body").inner_text()
+                assert page.locator("#overlay-furniture-note").is_visible() == furnished
+                assert not page.locator("#ranking-approximation").is_visible()
+                if furnished:
+                    assert "兩份方案設定相同" not in page.locator("#summary-text").inner_text()
+                    assert "沙發（seat）" in page.locator("#changes").inner_text()
+                    assert "兩者計算涵蓋範圍不同" in page.locator("#categories").inner_text()
+                    assert REASON in page.locator("#notes p").all_inner_texts()
+                    before, after = page.locator("body").inner_text().split(REASON)
+                    assert REASON not in before + after
+                    for row in page.locator("#categories tr").all()[1:]:
+                        cells = row.locator("td").all_inner_texts()
+                        assert "近似" not in cells[3 if reverse else 1]
+                        assert ("近似" in cells[1 if reverse else 3]) == (cells[0] in {"音色平衡", "聆聽區穩定性", "反射與回聲", "聲道匹配"})
+                    expected_note = "A：家具模型：近似" if reverse else "B：家具模型：近似"
+                    assert expected_note in text
+                    page.evaluate("""() => { window.paintedText = []; const original = CanvasRenderingContext2D.prototype.fillText;
+                        CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
+                            window.paintedText.push(String(text)); return original.call(this, text, ...args); }; }""")
+                    with page.expect_download() as event:
+                        page.locator("#download-png").click()
+                    event.value.save_as(tmp_path / f"compare-furniture-export-{left[0]}.png")
+                    assert expected_note in page.evaluate("window.paintedText")
+                    response = page.request.get(f"{url}/api/compare/{left}/{right}/export/curves")
+                    assert response.text().splitlines()[-1] == expected_note
+                    summary = page.request.get(f"{url}/api/compare/{left}/{right}/export/summary").text().splitlines()
+                    assert expected_note in summary[summary.index("說明") + 1:]
+                else:
+                    assert not page.locator("#overlay-furniture-note").is_visible()
+                    assert REASON not in page.locator("body").inner_text()
+                _assert_text_is_formatted(page)
+                _assert_quiet(watched)
+                page.screenshot(path=str(tmp_path / f"compare-{'furniture' if furnished else 'plain'}-{left[0]}.png"), full_page=True)
 
 
 def test_furniture_flutter_paragraph_is_printed_before_no_alerts_return(

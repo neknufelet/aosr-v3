@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Request, Route
+from playwright.sync_api import Browser, Request, Response, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
@@ -115,31 +115,35 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
         assert watched.page_errors == []
 
 
-@pytest.mark.parametrize("selector", ["#shortcut-working", "#shortcut-listening", "#use-speaker-setup"])
-def test_failed_preview_keeps_shortcut_and_speaker_setup_old(browser: Browser, tmp_path: Path,
-                                                           selector: str) -> None:
+def test_failed_preview_keeps_shortcut_and_speaker_setup_old(browser: Browser, tmp_path: Path) -> None:
+    """兩個捷徑與「用擺法」三個入口同一頁輪流（#972 由三格參數合成一題，每格斷言原樣保留）：預覽失敗時表單留舊的、
+    存檔也是舊的。每一格前清掉訊息列，「換不過去」才等得到這一格的字。"""
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.route("**/api/input-preview", lambda route: route.fulfill(status=503, json={"error": "預覽暫時讀不到"}), times=1)
-        with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as edited:
-            page.locator(selector).click()
-        assert edited.value.ok
-        page.wait_for_function("!document.querySelector('main').inert && document.getElementById('messages').textContent.includes('換不過去')")
-        assert_chinese_lines(page.locator("#messages").inner_text().splitlines())
-        assert page.locator("#receiver-main-z").input_value() == "1.2"
-        assert not page.locator("#use-speaker-setup").is_checked()
-        assert not page.locator("#furniture-sofa").is_checked()
-        assert page.locator("#furniture-table-kind").input_value() == "none"
-        page.locator("#save-as-id").fill("unchanged")
-        with page.expect_response(lambda response: response.url.endswith("/api/schemes/unchanged")
-                                  and response.request.method == "PUT") as saved:
-            page.locator("#save-as").click()
-        assert saved.value.ok, saved.value.text()
-        document = page.request.get(f"{url}/api/schemes/unchanged").json()["scheme"]
-        assert document["furniture"] is None
-        assert "speaker_setup" not in document
-        assert {point["receiver_id"]: point["position_m"][2] for point in document["receiver_set"]["points"]} == {
-            "main": 1.2, "front": 1.2, "back": 1.2, "left": 1.2, "right": 1.2, "up": 1.3, "down": 1.1}
+        for index, selector in enumerate(("#shortcut-working", "#shortcut-listening", "#use-speaker-setup")):
+            page.evaluate("() => { document.getElementById('messages').textContent = ''; }")
+            page.route("**/api/input-preview", lambda route: route.fulfill(status=503, json={"error": "預覽暫時讀不到"}), times=1)
+            with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as edited:
+                page.locator(selector).click()
+            assert edited.value.ok, selector
+            page.wait_for_function("!document.querySelector('main').inert && document.getElementById('messages').textContent.includes('換不過去')")
+            assert_chinese_lines(page.locator("#messages").inner_text().splitlines())
+            assert page.locator("#receiver-main-z").input_value() == "1.2", selector
+            assert not page.locator("#use-speaker-setup").is_checked(), selector
+            assert not page.locator("#furniture-sofa").is_checked(), selector
+            assert page.locator("#furniture-table-kind").input_value() == "none", selector
+            name = f"unchanged-{index}"
+            page.locator("#save-as-id").fill(name)
+            def is_save(response: Response, name: str = name) -> bool:
+                return response.url.endswith(f"/api/schemes/{name}") and response.request.method == "PUT"
+            with page.expect_response(is_save) as saved:
+                page.locator("#save-as").click()
+            assert saved.value.ok, saved.value.text()
+            document = page.request.get(f"{url}/api/schemes/{name}").json()["scheme"]
+            assert document["furniture"] is None, selector
+            assert "speaker_setup" not in document, selector
+            assert {point["receiver_id"]: point["position_m"][2] for point in document["receiver_set"]["points"]} == {
+                "main": 1.2, "front": 1.2, "back": 1.2, "left": 1.2, "right": 1.2, "up": 1.3, "down": 1.1}, selector
         assert watched.page_errors == []
 
 

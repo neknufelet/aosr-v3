@@ -44,6 +44,20 @@ def _populate_four(tmp_path: Path, result: SchemeResult, other: SchemeResult
     return failed, stopped, done, untracked
 
 
+@pytest.fixture(scope="module")
+def pair_runs(tmp_path_factory: pytest.TempPathFactory, pair: tuple[SchemeResult, SchemeResult]
+              ) -> tuple[Path, tuple[str, str, str, str, str]]:
+    """比較那一對的四種狀態加一筆 A 方案正常算完，模組內只做一次（#972：原本兩格 PNG 與兩份未完成比較各做一次）。
+    用的題只讀這個資料夾、不改。"""
+    folder = tmp_path_factory.mktemp("failed-results-pair")
+    failed, stopped, done, untracked = _populate_four(folder, *pair)
+    runner = _runner(folder, {pair[0].scheme.scheme_id: (pair[0], 0, False)})
+    with _client(folder, runner) as client:
+        finished_a = _start(client, pair[0])
+        _wait_state(client, finished_a, "done")
+    return folder, (failed, stopped, done, untracked, finished_a)
+
+
 def _result_row(page: Page, run_id: str) -> Locator:
     return page.locator("#results-list tr").filter(has=page.locator(f'a[href="/results/{run_id}"]'))
 
@@ -104,9 +118,9 @@ def test_failed_compare_has_notice_and_no_better_elements(
 
 
 def test_two_unfinished_compare_shows_both_notices(
-        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
-    failed, stopped, _, _ = _populate_four(tmp_path, *pair)
-    with _serve(tmp_path) as base, _open(browser, f"{base}/compare/{failed}/{stopped}") as watched:
+        browser: Browser, pair_runs: tuple[Path, tuple[str, str, str, str, str]]) -> None:
+    folder, (failed, stopped, _, _, _) = pair_runs
+    with _serve(folder) as base, _open(browser, f"{base}/compare/{failed}/{stopped}") as watched:
         notices = watched.page.locator("#run-notices")
         expect(notices).to_contain_text("A：這一筆計算回報失敗（離開碼 3）")
         expect(notices).to_contain_text("B：這一筆計算被停止")
@@ -161,33 +175,29 @@ def _assert_png_texts(page: Page, expected: list[str]) -> None:
         assert 0 < y and y + font_size * 0.25 <= float(cast(float, item["canvasHeight"]))
 
 
-@pytest.mark.parametrize("width, scale", [(1440, 1), (390, 2)])
 def test_png_download_keeps_all_failure_notices_and_finished_control(
-        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
-        width: int, scale: int) -> None:
-    failed, stopped, done, untracked = _populate_four(tmp_path, *pair)
-    runner = _runner(tmp_path, {pair[0].scheme.scheme_id: (pair[0], 0, False)})
-    with _client(tmp_path, runner) as client:
-        finished_a = _start(client, pair[0])
-        _wait_state(client, finished_a, "done")
+        browser: Browser, pair_runs: tuple[Path, tuple[str, str, str, str, str]]) -> None:
+    """兩種寬度與縮放（1440×1、390×2）同一場輪流（#972 由兩格參數合成一題、計算只做一次，每格斷言原樣保留）。"""
+    folder, (failed, stopped, done, untracked, finished_a) = pair_runs
     failed_notice = "A：" + RESULT_RUN_LABELS["failed"][2].format(exit_text=RUN_EXIT_TEXT.format(code=3))
     stopped_notice = "B：" + RESULT_RUN_LABELS["stopped"][2]
-    with _serve(tmp_path) as base:
-        page = browser.new_page(viewport={"width": width, "height": 900}, device_scale_factor=scale)
-        try:
-            page.add_init_script(PNG_TEXT_RECORDER)
-            for left, right, expected in ((failed, done, [failed_notice]),
-                                           (failed, stopped, [failed_notice, stopped_notice]),
-                                           (untracked, done, []), (finished_a, done, [])):
-                page.goto(f"{base}/compare/{left}/{right}", wait_until="networkidle")
-                _has_lines(page)
-                page.evaluate("() => { window.pngTexts = []; }")
-                with page.expect_download() as event:
-                    page.get_by_role("button", name="下載曲線圖片（PNG）").click()
-                assert event.value.path().read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-                _assert_png_texts(page, expected)
-        finally:
-            page.close()
+    with _serve(folder) as base:
+        for width, scale in ((1440, 1), (390, 2)):
+            page = browser.new_page(viewport={"width": width, "height": 900}, device_scale_factor=scale)
+            try:
+                page.add_init_script(PNG_TEXT_RECORDER)
+                for left, right, expected in ((failed, done, [failed_notice]),
+                                               (failed, stopped, [failed_notice, stopped_notice]),
+                                               (untracked, done, []), (finished_a, done, [])):
+                    page.goto(f"{base}/compare/{left}/{right}", wait_until="networkidle")
+                    _has_lines(page)
+                    page.evaluate("() => { window.pngTexts = []; }")
+                    with page.expect_download() as event:
+                        page.get_by_role("button", name="下載曲線圖片（PNG）").click()
+                    assert event.value.path().read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), (width, left, right)
+                    _assert_png_texts(page, expected)
+            finally:
+                page.close()
 
 
 def test_failure_notices_visible_above_rejected_result_and_compare(
