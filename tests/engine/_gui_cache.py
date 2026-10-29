@@ -65,7 +65,8 @@ _loaded_result = _memoize(load_result, serializer=_result_argument)
 def gui_load_result_memo(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     """只供瀏覽器與畫面考卷；讀回分級考卷不掛，題內 load_result 替身仍能蓋過。
 
-    重驗、重評與分級由 test_result_standing、test_result_reload_compatibility 及三支不掛記憶的 GUI 題守。
+    重驗、重評與分級由 test_result_standing、test_result_reload_compatibility 及 test_gui_result_standing_browser
+    裡不掛記憶的 GUI 題守（#972 起剩兩格；remeasured 那格改由 test_gui_result_standing 的路由題真重讀）。
     """
     filename = request.node.path.name
     if filename == "test_gui_result_standing_browser.py" or not (

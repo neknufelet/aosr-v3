@@ -151,14 +151,14 @@ def main(directory: Path) -> None:
             clock, limits = time.perf_counter(), gradient_search.depth_limits(designs)
             first = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=limits)
             descent_seconds = time.perf_counter() - clock
-            again = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=limits)
             # 每一步 θ 的梯度另外重算交回，父行程用它逐步核 Armijo 不等式。
             step_gradient = jax.jit(jax.grad(lambda values: objective(values)[0]))
             descent_gradients = [_hex(step_gradient(jnp.asarray(step.theta))) for step in first.steps]
             snapped = gradient_search.snap_to_specs(first.theta, designs)
             snapped_value, snapped_aux = objective(jnp.asarray(snapped.theta))
             retuned = gradient_search.retune_cavities(objective, snapped.theta, designs, settings)
-            single_descent = gradient_search.projected_descent(objective, start.astype(np.float32), bounds, settings.descent,
+            one_step = settings.descent.model_copy(update={"max_steps": 1})  # 單精度只量型別與有限（#972）
+            single_descent = gradient_search.projected_descent(objective, start.astype(np.float32), bounds, one_step,
                                                                limits=limits)
             rows = (*ledger.descent_rows(first, "descent", 0),
                     ledger.snap_row(snapped, float(snapped_value), (float(snapped_aux.mean_own_line_ripple_rms_db),
@@ -168,7 +168,7 @@ def main(directory: Path) -> None:
             ledger.write_ledger(directory / f"{name}.ledger.jsonl", header, rows)
             row.update({
                 "start": _hex(start), "lower": _hex(bounds[0]), "upper": _hex(bounds[1]),
-                "descent": _steps(first), "descent_again": _steps(again), "descent_seconds": descent_seconds,
+                "descent": _steps(first), "descent_seconds": descent_seconds,
                 "descent_gradients": descent_gradients, "evaluator_cache": _evaluator_cache(model, designs, constants, theta),
                 "snap": {"theta": _hex(snapped.theta), "surfaces": [choice._asdict() for choice in snapped.surfaces],
                          "value": float(snapped_value).hex()},

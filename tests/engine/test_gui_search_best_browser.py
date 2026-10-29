@@ -22,7 +22,9 @@ def _colored_canvas(selector: str) -> str:
 def test_best_charts_switch_poll_only_versions_and_clear_missing(tmp_path: Path, browser: Browser,
                                                               best_result: SchemeResult) -> None:
     store = best_store(tmp_path, best_result, "baseline")
-    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
+    # 假時鐘（#972）：輪詢 5 秒一次改用 run_for 快轉，不再真等；時間照常走，快轉只是不必等。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440,
+                                         fake_clock=True) as watched:
         page = watched.page
         watch_charts(page)
         page.wait_for_function("() => document.getElementById('best-title').textContent.includes('細算第一名／原方案')")
@@ -43,7 +45,11 @@ def test_best_charts_switch_poll_only_versions_and_clear_missing(tmp_path: Path,
         assert "dB" in page.locator("#rfz-zones").inner_text()
         requests: list[str] = []
         page.on("request", lambda request: requests.append(request.url) if "/best?" in request.url else None)
-        page.wait_for_timeout(5500)
+        # 快轉一個輪詢週期，等到那一次輪詢的回覆真的回來（證明輪詢有發生），再留一點真時間給回覆後的頁面腳本：
+        # 版本沒變就不准重抓三張圖。
+        with page.expect_response(lambda response: response.url == f"{base}/api/searches/{store.search_id}"):
+            page.clock.run_for(5000)
+        page.wait_for_timeout(500)
         assert requests == []
         page.locator("#best-search").click()
         page.wait_for_function("() => document.getElementById('best-title').textContent.includes('搜尋第一名／試算 0')")
@@ -59,6 +65,7 @@ def test_best_charts_switch_poll_only_versions_and_clear_missing(tmp_path: Path,
                 if box["id"] != other["id"]:
                     assert box["y"] + box["h"] <= other["y"] or other["y"] + other["h"] <= box["y"]
         store.candidate_path(0).unlink()
+        page.clock.run_for(5000)
         page.wait_for_function("() => [...document.querySelectorAll('#live-best .chart-error')].every(p=>p.textContent.includes('讀不到：檔案不存在'))", timeout=12000)
         assert page.locator("#live-best canvas").all() == []
         assert page.locator("#best-plan-content").is_hidden()

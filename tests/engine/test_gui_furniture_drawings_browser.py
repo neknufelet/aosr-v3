@@ -12,7 +12,7 @@ from aosr.reporting.scheme import Scheme
 from tests.engine._gui_best_cases import best_store
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._gui_furniture_drawings import listening_document, working_document
-from tests.engine._furniture_cases import relative_item
+from tests.engine._furniture_cases import cloud_item, relative_item
 from tests.engine.test_scheme_furniture import _validation_document
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser as browser,
@@ -165,11 +165,25 @@ def test_input_undefined_cabinet_note_keeps_other_cabinet(browser: Browser, tmp_
         _assert_quiet(watched)
 
 
+def _blocked_line_meters(page: Page) -> dict[str, list[list[float]]]:
+    return cast(dict[str, list[list[float]]], page.locator("#plan-xz").evaluate(r"""svg => {
+      const room = svg.querySelector('rect'), scale = Number(room.getAttribute('width')) / 8;
+      return Object.fromEntries([...svg.querySelectorAll('path.blocked-direct')].map(path => {
+        const values = path.getAttribute('d').match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi).map(Number);
+        return [path.dataset.receiver, [[values[0], values[1]], [values[2], values[3]]].map(([x,z]) =>
+          [(x - Number(room.getAttribute('x'))) / scale,
+           (Number(room.getAttribute('y')) + Number(room.getAttribute('height')) - z) / scale])];
+      }));
+    }"""))
+
+
 def test_input_outside_and_blocked_furniture_remains_visible(browser: Browser, tmp_path: Path) -> None:
+    """出界家具與擋直達的家具都照畫；擋住的每一對喇叭→座位各一條紅線（#972 併入
+    test_gui_furniture_input_browser 的直達路徑題：同一份方案再加一片天雲，天雲不擋、照原色）。"""
     content = _validation_document("both") | {"scheme_id": "mix"}
-    # 一件在 x 負側完全出界，另一件擋直達。
+    # 一件在 x 負側完全出界，另一件擋直達；再加一片不擋路的天雲。
     content["furniture"] = [*cast(list[dict[str, object]], content["furniture"]),
-        relative_item(placement={"forward_m": 1, "left_m": 4, "bottom_height_m": 0, "yaw_deg": 0})]
+        relative_item(placement={"forward_m": 1, "left_m": 4, "bottom_height_m": 0, "yaw_deg": 0}), cloud_item()]
     scheme = Scheme.model_validate(content)
     (tmp_path / "schemes").mkdir()
     (tmp_path / "schemes" / "mix.json").write_text(scheme.model_dump_json())
@@ -180,18 +194,41 @@ def test_input_outside_and_blocked_furniture_remains_visible(browser: Browser, t
         page.wait_for_selector('#plan-xy [data-furniture="seat"]')
         page.locator("#check").click()
         page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間')")
+        page.wait_for_function("document.getElementById('messages').textContent.includes('直達路徑被家具')")
         messages = page.locator("#messages").inner_text()
-        # 網頁只重寫顯示：點名第二件家具，驗證原句仍留在技術明細。
-        assert "第 2 件家具（沙發，seat）：超出房間接觸界線" in messages
-        assert "直達路徑被家具 desk 擋住" in messages
+        # 網頁只重寫顯示：照送出去那份方案的家具順序點名第幾件，驗證原句仍留在技術明細。
+        # 加了天雲之後沙發不再是方案檔裡的第 2 件（#972 合併時實測頁面寫第 3 件）；件序從頁面自己收集送出的那份算。
+        sent = [item["furniture_id"] for item in page.evaluate("collect().furniture")]
+        assert f"第 {sent.index('seat') + 1} 件家具（沙發，seat）：超出房間接觸界線" in messages
+        # 直達問題逐對一行、照伺服器順序；不說成「沒有聲音」。
+        assert [line for line in messages.splitlines() if "直達路徑" in line] == [
+            "左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
+            "左聲道喇叭 → 座位 side：不符合擺位要求：直達路徑被家具 desk 擋住",
+        ]
+        assert "沒有聲音" not in messages
         for selector in ("#plan-xy", "#plan-xz"):
             svg = page.locator(selector)
             assert svg.locator('[data-furniture="desk"] .blocked-furniture').is_visible()
+            assert svg.locator('[data-furniture="desk"] .blocked-furniture').get_attribute("stroke") == "#c62828"
             assert svg.locator('[data-furniture="seat"] .blocked-furniture').all() == []
+            assert {(node.get_attribute("data-speaker"), node.get_attribute("data-receiver"))
+                    for node in svg.locator("path.blocked-direct").all()} == {("left", "main"), ("left", "side")}
+            assert {node.get_attribute("stroke") for node in svg.locator("path.blocked-direct").all()} == {"#c62828"}
+            assert svg.locator('[data-furniture="cloud"] .blocked-furniture').all() == []
+            assert svg.locator('[data-furniture="cloud"] polygon').get_attribute("stroke") == "#697e6a"
             assert svg.evaluate("svg => [...svg.querySelectorAll('polygon')].every(p => [...p.points].every(q => q.x > 0 && q.y > 0 && q.x < svg.viewBox.baseVal.width && q.y < svg.viewBox.baseVal.height))")
             svg.locator('[data-furniture="seat"] polygon').click()
             assert "沙發（seat）" in page.locator("#plan-detail").inner_text()
         page.locator('#plan-xz [data-furniture="seat"]').evaluate("node => node.blur()")
+        # 側面 x–z 的兩條線端點皆 z=1.2；y=5→3 不能當高度。
+        lines = _blocked_line_meters(page)
+        assert lines.keys() == {"main", "side"}
+        expected_lines: dict[str, list[tuple[float, float]]] = {
+            "main": [(2, 1.2), (3, 1.2)], "side": [(2, 1.2), (3.1, 1.2)]}
+        for receiver, expected in expected_lines.items():
+            for actual, point in zip(lines[receiver], expected, strict=True):
+                assert actual == pytest.approx(point)
+        # 平面圖驗證照設計拒收為 422；只准這一種網路錯，頁面程式不能拋例外。
         assert not watched.page_errors
         assert all("422" in error for error in watched.console_errors), watched.console_errors
         page.locator("#messages").screenshot(path=str(tmp_path / "outside-blocked-messages.png"))

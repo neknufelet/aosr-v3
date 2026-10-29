@@ -12,9 +12,12 @@ from itertools import combinations
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Locator, Route
+from playwright.sync_api import Browser, Locator, Page, Route
 
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
+from aosr.config.capabilities import load_capabilities
+from aosr.config.paths import config_path
+from aosr.gui.capability_view import capability_lists
 from aosr.gui.labels import DIRECTIONS
 from aosr.gui.result_view import (FlutterGroupView, PairView, ResultView, _flutter_groups, _pair_choices,
                                   build_result_view)
@@ -24,6 +27,7 @@ from aosr.scoring.review_alert import FlutterReviewAlert
 from tests.engine.test_gui_browser import (RUN_ID, _assert_quiet, _assert_text_is_formatted,
                                            _check_rerun_starts_once, _legend_labels, _open, _save, _serve,
                                            _wait_for_lines, browser)
+from tests.engine.test_construction_report_notes import note as construction_note
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 WIDTH = 1440
@@ -448,13 +452,22 @@ def test_results_section_shows_the_ideal_source_sentence(tmp_path: Path, browser
                                                          result: SchemeResult) -> None:
     """票 #668：起伏從 20 Hz 起算、喇叭模型 40 Hz 以下照樣全力發聲，結果頁「各類結果」那一節一開就看得到那一句。
 
-    放在排名那一行旁邊、不收在「技術細節」摺疊區裡，也不靠版面隱藏。
+    放在排名那一行旁邊、不收在「技術細節」摺疊區裡，也不靠版面隱藏。同一頁另核能力表兩份清單
+    （:func:`assert_capability_lists`）與存檔裡的構造外推註記。
     """
-    _save(tmp_path, result)
+    first = result.pairs[0]
+    with_note = first.model_copy(update={"report": first.report.model_copy(update={
+        "construction_notes_by_wall": {"x0": (construction_note((20., 40.)),)}})})
+    _save(tmp_path, result.model_copy(update={"pairs": (with_note, *result.pairs[1:])}))
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}",
                                          viewport_width=WIDTH) as watched:
         page = watched.page
         page.locator("#content").wait_for(state="visible")
+        # 存檔裡的構造外推註記由網頁畫成一行（#972 由 test_gui_construction_browser 併入；字由伺服器組，
+        # test_construction_report_notes 守字，這裡守網頁真的畫出來）。
+        lines = page.locator("#construction-note-lines")
+        lines.wait_for(state="visible")
+        assert lines.inner_text() == "x 起點牆第 1 層：20–40 Hz 超出材料模型原研究的量測範圍，仍以外推照算"
         note = page.locator("#ideal-source-note")
         assert note.is_visible()
         assert note.inner_text() == _IDEAL_SOURCE_SENTENCE
@@ -463,4 +476,17 @@ def test_results_section_shows_the_ideal_source_sentence(tmp_path: Path, browser
         assert section.locator("h2").inner_text() == "各類結果"
         # 定位器是嚴格模式：這一節裡有兩個同名元素就直接紅。
         assert section.locator("#ideal-source-note").inner_text() == _IDEAL_SOURCE_SENTENCE
+        assert_capability_lists(page, compare=False)
+        _assert_text_is_formatted(page)
         _assert_quiet(watched)
+
+
+def assert_capability_lists(page: Page, *, compare: bool) -> None:
+    """能力表的兩份原文清單真的畫在頁上（#972 由 test_gui_capability_lists_browser 併入）：
+    結果頁逐條照原文、比較頁兩份合併去重；「模型沒算到」與「要人工確認」兩個標題字在頁上。"""
+    page.locator("#not-modeled li").first.wait_for()
+    for field, items in capability_lists(load_capabilities(config_path("capabilities.toml"))).items():
+        actual = page.locator(f"#{field.replace('_', '-')} li").all_inner_texts()
+        assert actual == (list(dict.fromkeys(items)) if compare else list(items)), field
+    assert "模型沒算到" in page.locator("body").inner_text()
+    assert "要人工確認" in page.locator("body").inner_text()

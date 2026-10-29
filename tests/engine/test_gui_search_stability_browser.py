@@ -64,7 +64,8 @@ def test_stability_browser_states_and_screenshots(tmp_path: Path, monkeypatch: p
 
 def test_stability_browser_polling_and_warning_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, browser: Browser) -> None:
     store, _, status, summary, _ = report_case(tmp_path, monkeypatch, fail_after=1)
-    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}") as watched:
+    # 假時鐘（#972）：每次改寫入端之後快轉一個輪詢週期（5 秒），不再真等；等待條件與斷言照舊。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", fake_clock=True) as watched:
         page = watched.page
         block = page.locator("#stability")
         block.wait_for()
@@ -73,16 +74,20 @@ def test_stability_browser_polling_and_warning_words(tmp_path: Path, monkeypatch
         # 停止原文同樣由寫入端記錄，暫時與舊了不能被「中斷」字眼誤標紅。
         from aosr.search.placement_stability_attach import record_stability_error
         record_stability_error(store, status, KeyboardInterrupt())
+        page.clock.run_for(5000)
         page.wait_for_function("() => document.querySelector('#stability').textContent.includes('狀態：停止')", timeout=12000)
         assert not block.locator("p.notice").all()
         store.status_path.write_text(status.model_copy(update={"outer": OuterStatus(conclusion="refine_budget")}).model_dump_json())
+        page.clock.run_for(5000)
         page.wait_for_function("text => document.querySelector('#stability').textContent.includes(text)", arg=STALE, timeout=12000)
         assert not block.locator("p.notice").all()
         summary_path(store.path).unlink()
+        page.clock.run_for(5000)
         page.wait_for_function("text => document.querySelector('#stability').textContent.includes(text)", arg=ABSENT, timeout=12000)
         assert not block.locator("p.notice").all()
         write_summary(store.path, summary)
         summary_path(store.path).write_text("{")
+        page.clock.run_for(5000)
         page.wait_for_function("() => document.querySelector('#stability p.notice') !== null", timeout=12000)
         assert "讀不到" in block.inner_text()
         _assert_text_is_formatted(page)

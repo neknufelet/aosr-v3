@@ -100,12 +100,11 @@ def test_search_list_links_to_individual_progress(tmp_path: Path, browser: Brows
         _assert_quiet(watched)
 
 
-@pytest.mark.parametrize("blocked", [False, True])
-def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
-    tmp_path: Path, browser: Browser, blocked: bool,
-) -> None:
-    store, registry = blocked_store(tmp_path, budget=3, blocked=blocked)
-    status = run(store, registry, SavedFurnitureCompute(store) if blocked else FakeCompute(store))
+def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(tmp_path: Path, browser: Browser) -> None:
+    # 只留原方案被家具擋住那一格（#972）：家具註記落在哪幾塊，原本兩格斷言相同、這一格另外多核擋住的原因；
+    # 沒擋住那一格的註記字由 test_search_furniture_end_to_end 的搜尋畫面資料守，畫上頁由這一格守。
+    store, registry = blocked_store(tmp_path, budget=3, blocked=True)
+    status = run(store, registry, SavedFurnitureCompute(store))
     assert status.best_trial is not None
     from aosr.search import layout, ledger
 
@@ -124,16 +123,15 @@ def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
         page.wait_for_function("() => document.querySelector('#best-frequency canvas') !== null")
         assert FURNITURE_MODEL_NOTE in page.locator("#best-frequency").inner_text()
         assert set(page.locator("#live-best .chart-error").all_inner_texts()) == {""}
-        assert ("原方案不符合擺位要求" in page.locator("#stage").inner_text()) == blocked
-        if blocked:
-            assert "原方案：跳過；原方案不符合擺位要求" in page.locator("#modal").inner_text()
-            assert "原方案：未開始" not in page.locator("#modal").inner_text()
+        assert "原方案不符合擺位要求" in page.locator("#stage").inner_text()
+        assert "原方案：跳過；原方案不符合擺位要求" in page.locator("#modal").inner_text()
+        assert "原方案：未開始" not in page.locator("#modal").inner_text()
         data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
         assert {block["key"] for block in data["blocks"]} == {
             "stage", "counts", "timings", "updated", "search-best", "refine-best",
             "crossover", "stability", "reasons", "modal", "identity",
         }
-        page.screenshot(path=str(tmp_path / f"559-furniture-{'blocked' if blocked else 'clear'}.png"), full_page=True)
+        page.screenshot(path=str(tmp_path / "559-furniture-blocked.png"), full_page=True)
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
 

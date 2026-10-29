@@ -1,7 +1,7 @@
 """候選確認迴圈雙精度子行程；只叫公開入口、寫帳本與原始數值，比對與判決在父行程。
 
 兩組題：小房間替身（同一份衍生替身、六面 two_rigid、從預設樣板取規格起跑、正式設定）與合成目標（加權二次式，
-一面一個目標厚度與目標空腔，求值便宜，給每一個列界都接續一次與四種停止原因用）。合成目標包一層
+一面一個目標厚度與目標空腔，求值便宜，給抽樣列界的接續與四種停止原因用）。合成目標包一層
 ``jax.debug.callback`` 數真的被執行了幾次（編譯後每叫一次跑一次，追蹤不算）。
 """
 from __future__ import annotations
@@ -93,6 +93,18 @@ def _start_ledger(path: Path, header: ledger.MaterialGradientHeader, designs: tu
     return snapped.theta
 
 
+def resume_boundaries(phases: list[tuple[str, int | None]], seed: int, count: int) -> list[int]:
+    """接續要截的列界（留前 ``keep`` 列，``keep`` 從 1 到總列數）：必含頭（只剩前段那一列）、尾（整本收尾）、
+    每一列決定之後、第 1 輪第一個跳點之後；其餘用固定種子從剩下的列界補到 ``count`` 個。父行程照同一套規則重算核對。"""
+    total = len(phases)
+    must = {1, total} | {index + 1 for index, (phase, _) in enumerate(phases) if phase == "round_decision"}
+    must |= {next(index for index, (phase, round_index) in enumerate(phases)
+                  if round_index == 1 and phase == "candidate_jump") + 1}
+    rest = sorted(set(range(1, total + 1)) - must)
+    extra = np.random.default_rng(seed).choice(rest, size=min(len(rest), max(0, count - len(must))), replace=False)
+    return sorted(must | {int(value) for value in extra})
+
+
 def _cut_copy(source: Path, target: Path, rows: int) -> Path:
     """一口氣跑完的帳本留標頭與前 ``rows`` 列，另存一份給接續。"""
     lines = source.read_bytes().splitlines(keepends=True)
@@ -125,16 +137,18 @@ def _synthetic(directory: Path, name: str, case: Record, base: MaterialGradientS
         _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
         loop.run_rounds(objective, start, designs, settings, again, header)
         row["again"] = again.name
-    if case.get("resume_every_row"):
-        total = len(path.read_bytes().splitlines()) - 1
+    sample = cast(dict[str, int] | None, case.get("resume_sample"))
+    if sample is not None:
+        _, rows = ledger.read_ledger(path)
+        keeps = resume_boundaries([(item.phase, item.round) for item in rows], sample["seed"], sample["count"])
         resumed, each = [], []
-        for keep in range(1, total + 1):
+        for keep in keeps:
             cut = _cut_copy(path, directory / f"{name}.cut{keep:04d}.jsonl", keep)
             clock = time.perf_counter()
             loop.resume_rounds(objective, designs, settings, cut, header)
             each.append(time.perf_counter() - clock)
             resumed.append(cut.name)
-        row["resumed"] = resumed
+        row["resumed"], row["resume_keeps"] = resumed, keeps
         seconds["resume_each"] = each
     if case.get("single_round"):
         before = counter[0]
@@ -155,21 +169,17 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
         model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")), frequencies=model.frequencies_hz)
     header = ledger.header_for(model, designs, base, objective_constants=constants)
-    main, again = directory / "surrogate.jsonl", directory / "surrogate.again.jsonl"
+    main = directory / "surrogate.jsonl"
     seconds: dict[str, object] = {}
     clock = time.perf_counter()
     start = _start_ledger(main, header, designs, objective, gradient_search.baseline_theta(designs))
     result = loop.run_rounds(objective, start, designs, base, main, header)
     seconds["run_first_with_compile"] = time.perf_counter() - clock
-    clock = time.perf_counter()
-    _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
-    loop.run_rounds(objective, start, designs, base, again, header)
-    seconds["run_again"] = time.perf_counter() - clock
+    # 替身不再整場重跑一次（#972）：重跑逐位交給合成題的 again 與下面這一次接續（第 1 輪中途起重算到收尾、逐值比一口氣跑完）。
     _, rows = ledger.read_ledger(main)
-    after_first = next(index for index, item in enumerate(rows) if item.phase == "round_decision") + 1
     mid_second = next(index for index, item in enumerate(rows) if item.round == 1 and item.phase == "candidate_jump") + 1
     resumed, each = [], []
-    for keep in (after_first, mid_second):
+    for keep in (mid_second,):
         cut = _cut_copy(main, directory / f"surrogate.cut{keep:04d}.jsonl", keep)
         clock = time.perf_counter()
         loop.resume_rounds(objective, designs, base, cut, header)
@@ -179,7 +189,7 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
     clock = time.perf_counter()
     single = loop.confirmation_round(objective, start.astype(np.float32), designs, base, budget_left=10**6)
     seconds["float32_round_with_compile"] = time.perf_counter() - clock
-    return {"ledger": main.name, "again": again.name, "resumed": resumed, "result": _result(result),
+    return {"ledger": main.name, "resumed": resumed, "result": _result(result),
             "seconds": seconds,
             "single": {"dtype": str(single.theta.dtype), "theta": _hex(single.theta),
                        "baseline_dtype": str(single.baseline.theta.dtype) if single.baseline is not None else None,

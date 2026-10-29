@@ -88,9 +88,10 @@ def _filled_draft_preset(page: Page, preset: str) -> None:
     expect(page.locator('#preset-state-floor')).to_contain_text('使用預設')
 
 
-@pytest.mark.parametrize('width', (1400, 390))
 @pytest.mark.parametrize('case', ['paste', 'ascending', 'real', 'source', 'base', 'range'])
-def test_refusal_keeps_draft_and_original_scheme(tmp_path: Path, browser: Browser, case: str, width: int) -> None:
+def test_refusal_keeps_draft_and_original_scheme(tmp_path: Path, browser: Browser, case: str) -> None:
+    # #972：拒收邏輯跟寬度無關，只跑 1400；窄畫面上實測編輯器能操作由 test_draft_edit_roundtrip_switch_and_paste_formats[390] 守。
+    width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
         start_draft(page)
@@ -120,8 +121,9 @@ def test_refusal_keeps_draft_and_original_scheme(tmp_path: Path, browser: Browse
         assert watched.page_errors == []
 
 
-@pytest.mark.parametrize('width', (1400, 390))
-def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser: Browser, width: int) -> None:
+def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser: Browser) -> None:
+    # #972：拒收邏輯跟寬度無關，只跑 1400；窄畫面上實測編輯器能操作由 test_draft_edit_roundtrip_switch_and_paste_formats[390] 守。
+    width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
         start_draft(page)
@@ -139,9 +141,10 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
         assert watched.page_errors == []
 
 
-@pytest.mark.parametrize('width', (1400, 390))
 def test_raw_point_and_base_values_survive_save_and_parser_errors_keep_line_numbers(
-        tmp_path: Path, browser: Browser, width: int) -> None:
+        tmp_path: Path, browser: Browser) -> None:
+    # #972：拒收邏輯跟寬度無關，只跑 1400；窄畫面上實測編輯器能操作由 test_draft_edit_roundtrip_switch_and_paste_formats[390] 守。
+    width = 1400
     from aosr.reporting.scheme import Scheme
     data = document() | {'scheme_id': 'precision'}
     points = cast(list[dict[str, float]], floor(data)['points'])

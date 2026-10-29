@@ -1,15 +1,17 @@
-"""結果頁四態實際瀏覽器、只查快取自動請求、補算與原结果保持可見。"""
+"""結果頁四態實際瀏覽器、只查快取自動請求、補算與原结果保持可見。
+
+#972：原本另有「計算行程被殺、結果頁寫出離開原因」一題。被殺的狀態、不能補算與原因原文（離開碼在錯誤輸出之前）
+由路由考卷 test_gui_modal_jobs::test_stopped_and_killed_jobs_show_cause[kill] 守；網頁把失敗原因印進 #modal-reason、
+藏補算鈕由本檔四態題的 FAILED 格守；輪詢途中換狀態由補算那一題（停止→未計算、放行→已診斷不計分）守。
+"""
 from __future__ import annotations
 
-import os
-import signal
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser
 
-from aosr.gui.labels import RUN_EXIT_TEXT
 from aosr.physics.fem_modal_check import FemModalCheck
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.result import SchemeResult
@@ -98,29 +100,3 @@ def test_button_computes_without_hiding_original_result(tmp_path: Path, browser:
         page.wait_for_function("() => document.querySelector('#modal-state').textContent === '已診斷不計分'")
         assert page.locator("#ranking-state").inner_text() == before
         _assert_quiet(watched)
-
-
-def test_killed_modal_process_shows_exit_cause_screenshot(tmp_path: Path, browser: Browser,
-                                                       result: SchemeResult) -> None:
-    _save(tmp_path, result)
-    original = "Transforming over 1000 vertices to C_CONTIGUOUS.\nTransforming over 1000 elements to C_CONTIGUOUS.\n"
-    command = runner(tmp_path, sample(result.scheme)[0], wait=True, stderr=original)
-    with _serve(tmp_path, modal_runner=command) as base, _open(browser, f"{base}/results/{RUN_ID}") as watched:
-        page = watched.page
-        state = next((tmp_path / "modal-jobs" / "runs").glob("*.json"))
-        import json
-        job = json.loads(state.read_text())
-        try:
-            wait_for_args(job)
-            os.killpg(int(job["pid"]), signal.SIGKILL)
-            page.wait_for_function("() => document.querySelector('#modal-state').textContent === '失敗'")
-            reason = page.locator("#modal-reason").inner_text()
-            assert RUN_EXIT_TEXT.format(code=-signal.SIGKILL) in reason
-            assert "錯誤輸出原文" in reason
-            assert original.strip() in (page.locator("#modal-reason").text_content() or "")
-            assert not page.locator("#modal-calculate").is_visible()
-            page.locator("#modal-diagnosis").scroll_into_view_if_needed()
-            page.screenshot(path=str(tmp_path / "modal-killed.png"))
-            _assert_quiet(watched)
-        finally:
-            page.request.post(f"{base}/api/modal-jobs/{job['run_id']}/stop", data={})

@@ -1,4 +1,4 @@
-"""構造註記、白話比較列與輸入拒收在真瀏覽器顯示。"""
+"""構造白話比較列與輸入頁開構造方案在真瀏覽器顯示（結果頁的構造註記一行已併進 test_gui_result_page_visual）。"""
 from pathlib import Path
 
 import pytest
@@ -10,24 +10,9 @@ from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_load_result_memo as gui_load_result_memo, gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import mixed_scheme
 from tests.engine._furniture_cases import reference_document
-from tests.engine.test_construction_report_notes import note
-from tests.engine.test_gui_browser import _open, _serve, browser as browser, result as result
+from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_compare_browser import A_ID, B_ID, pair as pair
 from tests.engine.test_gui_compare_routes import _files
-
-
-def test_result_shows_saved_wall_layer_and_extrapolation(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
-    first = result.pairs[0]
-    changed = first.model_copy(update={"report": first.report.model_copy(update={
-        "construction_notes_by_wall": {"x0": (note((20., 40.)),)}})})
-    saved = result.model_copy(update={"pairs": (changed, *result.pairs[1:])})
-    with _serve(tmp_path) as base:
-        _files(tmp_path, saved, A_ID)
-        with _open(browser, f"{base}/results/{A_ID}") as watched:
-            lines = watched.page.locator("#construction-note-lines")
-            lines.wait_for(state="visible")
-            assert lines.inner_text() == "x 起點牆第 1 層：20–40 Hz 超出材料模型原研究的量測範圍，仍以外推照算"
-            assert watched.page_errors == []
 
 
 @pytest.mark.parametrize("width", (1440, 390))
