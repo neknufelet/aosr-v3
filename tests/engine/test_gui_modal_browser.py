@@ -2,7 +2,7 @@
 
 #972：原本另有「計算行程被殺、結果頁寫出離開原因」一題。被殺的狀態、不能補算與原因原文（離開碼在錯誤輸出之前）
 由路由考卷 test_gui_modal_jobs::test_stopped_and_killed_jobs_show_cause[kill] 守；網頁把失敗原因印進 #modal-reason、
-藏補算鈕由本檔四態題的 FAILED 格守；輪詢途中換狀態由補算那一題（停止→未計算、放行→已診斷不計分）守。
+多行錯誤原文經輪詢逐行印出、藏補算鈕由本檔四態題的 FAILED 格守（原因改成多行，#972 修補一）；輪詢途中換狀態由補算那一題（停止→未計算、放行→已診斷不計分）守。
 """
 from __future__ import annotations
 
@@ -23,6 +23,11 @@ from tests.engine.test_gui_modal_jobs import wait_for_args
 from tests.engine.test_gui_modal_view import checked_sample
 
 
+# 失敗原因用多行錯誤原文（原本殺行程那一題的錯誤輸出），抓網頁只印第一行或把換行吃掉。
+FAILED_REASON = ("ValueError('查位置原始錯誤')\nTransforming over 1000 vertices to C_CONTIGUOUS.\n"
+                 "Transforming over 1000 elements to C_CONTIGUOUS.")
+
+
 @pytest.fixture(scope="module")
 def result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
     return shared_control_result(tmp_path_factory, worker_id, "wall-1")
@@ -33,7 +38,7 @@ def test_result_modal_four_states_screenshot(tmp_path: Path, browser: Browser, r
                                             state: ModalDiagnosisState) -> None:
     _save(tmp_path, result)
     diagnosis = sample(result.scheme)[0] if state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED else ModalDiagnosis(
-        state=state, reason_text="ValueError('查位置原始錯誤')" if state is ModalDiagnosisState.FAILED else None,
+        state=state, reason_text=FAILED_REASON if state is ModalDiagnosisState.FAILED else None,
         reason_code="unsupported_impedance" if state is ModalDiagnosisState.OUT_OF_SCOPE else None)
     if state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED:
         check = sample(result.scheme)[1].spectrum.check
@@ -62,7 +67,9 @@ def test_result_modal_four_states_screenshot(tmp_path: Path, browser: Browser, r
             page.locator("#modal-report summary").first.click()
             assert "參考線範圍外，未評估" in page.locator("#modal-report").inner_text()
         if state is ModalDiagnosisState.FAILED:
-            assert page.locator("#modal-reason").inner_text() == diagnosis.reason_text
+            assert page.locator("#modal-reason").text_content() == diagnosis.reason_text
+            shown = page.locator("#modal-reason").inner_text()
+            assert all(line in shown for line in FAILED_REASON.splitlines())
         page.locator("#modal-diagnosis").scroll_into_view_if_needed()
         page.screenshot(path=str(tmp_path / f"modal-{state.value}.png"))
         _assert_text_is_formatted(page)

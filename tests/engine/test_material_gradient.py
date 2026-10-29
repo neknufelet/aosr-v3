@@ -449,6 +449,11 @@ def test_depth_edge_tolerance_is_four_spacings_fixed() -> None:
             assert not gradient_search.on_depth_edge(np.asarray([np.float64(0.0), total]), limit), (top, count)
 
 
+def test_descent_rerun_is_bitwise_identical(runs: tuple[Path, dict[str, Record]]) -> None:
+    """抓下降帶非決定性（亂數、字典序、計時進判斷）：同一起點重跑，θ、值、範數、步長、停止原因逐位相同。"""
+    assert _descent(runs) == _descent(runs, "descent_again")
+
+
 # ---- 合成目標（不走替身，父行程單精度） ----
 
 def _aux(value: jax.Array) -> StageOneObjectiveArrays:
@@ -802,7 +807,7 @@ def test_compiled_evaluator_is_shared_per_objective(runs: tuple[Path, dict[str, 
 
 @pytest.mark.parametrize("name", CASES)
 def test_single_precision_stays_float32_and_finite(runs: tuple[Path, dict[str, Record]], name: str) -> None:
-    """抓單精度被悄悄提升或算出非有限：值與梯度都是 float32、有限；下降結果的 θ 也是 float32（下降最多 1 步，#972）。"""
+    """抓單精度被悄悄提升或算出非有限：值與梯度都是 float32、有限；下降結果的 θ 也是 float32。"""
     single = cast(Record, runs[1][name]["single"])
     assert single["dtype"] == "float32" and single["gradient_dtype"] == "float32"
     assert np.isfinite(float.fromhex(cast(str, single["value"]))) and np.isfinite(_decode(single["gradient"])).all()

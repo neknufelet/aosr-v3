@@ -152,12 +152,11 @@ def test_readonly_extra_item_survives_browser_collect_and_save(browser: Browser,
         assert watched.page_errors == []
 
 
-def test_shortcut_browser_and_saved_fields(browser: Browser, tmp_path: Path) -> None:
-    # #972：原本另跑 listening 一格。那一格的家具、高度與存回欄位由路由考卷
-    # test_gui_input_setup::test_shortcut_handwritten_heights_roundtrip_without_new_fields[listening] 守；
-    # 按鈕接線由 test_readonly_table_mount_drawn_and_preserved_through_shortcuts（兩個捷徑都按）守；
-    # 輸入框浮點尾差走同一個顯示函式，這一格（1.2＋0.1）照樣考。
-    shortcut, kinds, ear, up, down = "working", ["desk"], 1.2, 1.3, 1.1
+@pytest.mark.parametrize("shortcut,kinds,ear,up,down", [
+    ("working", ["desk"], 1.2, 1.3, 1.1), ("listening", ["sofa", "coffee_table"], 1.05, 1.15, 0.95),
+])
+def test_shortcut_browser_and_saved_fields(browser: Browser, tmp_path: Path, shortcut: str,
+                                         kinds: list[str], ear: float, up: float, down: float) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
         with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as response:
