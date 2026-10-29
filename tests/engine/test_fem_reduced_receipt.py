@@ -4,6 +4,7 @@
 閘門只看收據不看建模停止原因：預算停止、殘差目標未達但收據通過照樣准用；殘差達標但收據不通過照樣拒用。
 修補一（獨立審查三條）：別份替身的報告寫不成收據、沒做完的驗證寫不成也過不了閘門、到預算之前先量殘差。
 收據版本 2（#561 辛一審查 B1）：記喇叭與座位座標，閘門拿呼叫端給的預期座標逐名逐座標比；版本 1 收據給了預期一律拒。
+#983（顧問 #967）：報告帶驗證當下的計算條件指紋，矩陣相同但密度、聲速或同點數頻率軸不同的替身寫不成收據。
 """
 from __future__ import annotations
 
@@ -22,7 +23,9 @@ from aosr.physics.fem_reduced_receipt import (
     RECEIPT_FORMAT_VERSION, HoldoutRulers, ReducedModelNotValidated, Ruler, load_validated_reduced, receipt_path,
     save_validation_receipt,
 )
-from aosr.physics.fem_reduced_store import load_reduced, manifest_path, matrices_digest, save_reduced
+from aosr.physics.fem_reduced_store import (
+    computation_digest, load_reduced, manifest_path, matrices_digest, save_reduced,
+)
 from tests.engine._precision_contracts import contract_value
 # holdout_report、model、operators 是借來的 module 範圍 fixture（本檔各建一次，不跟原檔共用）。
 from tests.engine.test_fem_reduced import (
@@ -117,6 +120,46 @@ def test_report_from_other_model_cannot_write_receipt(
     with pytest.raises(ValueError, match="驗證報告不是對這份替身做的"):
         save_validation_receipt(path, holdout_report, rulers=RULERS, seconds=VALIDATION_SECONDS)
     assert not receipt_path(path).exists()
+
+
+def _denser_air(model: ReducedModel) -> ReducedModel:
+    return dataclasses.replace(model, density_kg_m3=model.density_kg_m3 * 13.0 / 12.0)
+
+
+def _slower_sound(model: ReducedModel) -> ReducedModel:
+    return dataclasses.replace(model, sound_speed_m_s=model.sound_speed_m_s - 3.0)
+
+
+def _shifted_axis(model: ReducedModel) -> ReducedModel:
+    return dataclasses.replace(model, frequencies_hz=tuple(value * 1.01 for value in model.frequencies_hz))
+
+
+CONDITION_CHANGES = (_denser_air, _slower_sound, _shifted_axis)
+CONDITION_IDS = ("density", "sound_speed", "frequency_axis")
+
+
+@pytest.mark.parametrize("change", CONDITION_CHANGES, ids=CONDITION_IDS)
+def test_report_from_other_conditions_cannot_write_receipt(
+        model: ReducedModel, holdout_report: ValidationReport, tmp_path: Path,
+        change: Callable[[ReducedModel], ReducedModel]) -> None:
+    """#983（顧問 #967）原樣重現：矩陣不變，只改密度、只改聲速、或換成點數相同但值不同的頻率軸另存一份，
+    拿原替身的合格報告替它寫收據要被拒，收據不准出現（寫出來就是新檔雜湊配舊條件的誤差數字）。"""
+    other = change(model)  # 小矩陣原封不動、頻點數不變：舊的模型內容摘要與形狀檢查都攔不到
+    path = tmp_path / "other.npz"
+    save_reduced(other, path)
+    with pytest.raises(ValueError, match="計算條件"):
+        save_validation_receipt(path, holdout_report, rulers=RULERS, seconds=VALIDATION_SECONDS)
+    assert not receipt_path(path).exists()
+
+
+def test_report_carries_computation_digest_of_validated_model(
+        model: ReducedModel, holdout_report: ValidationReport) -> None:
+    """抓報告沒帶或帶錯計算條件指紋：validate_reduced 回來的那一格等於被驗模型現算的指紋；只改密度、聲速、
+    或同點數的頻率軸，指紋各自跟原模型不同（純函式，不解）。"""
+    original = computation_digest(model)
+    assert holdout_report.computation_digest == original
+    for change in CONDITION_CHANGES:
+        assert computation_digest(change(model)) != original, change.__name__
 
 
 def _empty(report: ValidationReport) -> tuple[ValidationReport, float]:

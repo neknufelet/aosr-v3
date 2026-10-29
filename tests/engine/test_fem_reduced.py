@@ -154,8 +154,8 @@ def _report(frequency: Sequence[float], band: Sequence[float]) -> ValidationRepo
     return ValidationReport(
         frequency_db_by_seat=dict(zip(SEATS, frequency, strict=True)),
         band_db_by_seat=dict(zip(SEATS, band, strict=True)), partial_band_db_by_seat={}, bands=(),
-        full_solves=0, full_pressure=empty, reduced_pressure=empty, model_digest="", source_points={},
-        receiver_points={})
+        full_solves=0, full_pressure=empty, reduced_pressure=empty, model_digest="", computation_digest="",
+        source_points={}, receiver_points={})
 
 
 def _holds(report: ValidationReport) -> bool:

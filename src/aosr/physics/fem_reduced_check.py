@@ -21,7 +21,7 @@ from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import (
     FullOperators, FullSolver, ReducedModel, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
 )
-from aosr.physics.fem_reduced_store import matrices_digest
+from aosr.physics.fem_reduced_store import computation_digest, matrices_digest
 
 THIRD_OCTAVE_REFERENCE_HZ = 1000.0
 PointHex = tuple[str, str, str]
@@ -48,6 +48,8 @@ class ValidationReport:
 
     聲壓陣列形狀是 (材料, 頻點, 喇叭, 座位)。``model_digest`` 是被驗那份替身的模型內容摘要
     （:func:`aosr.physics.fem_reduced_store.matrices_digest`），驗證收據靠它確認報告是對哪一份做的。
+    ``computation_digest`` 是驗證當下被驗模型的計算條件指紋（:func:`aosr.physics.fem_reduced_store.computation_digest`：
+    矩陣、頻率軸、空氣、喇叭與座位序、出身），驗證收據對載入的模型重算比對，矩陣相同但條件不同的替身寫不成收據（#983）。
     """
 
     frequency_db_by_seat: Mapping[str, float]
@@ -58,6 +60,7 @@ class ValidationReport:
     full_pressure: NDArray[np.complex128]
     reduced_pressure: NDArray[np.complex128]
     model_digest: str
+    computation_digest: str
     source_points: Mapping[str, PointHex]
     receiver_points: Mapping[str, PointHex]
 
@@ -138,6 +141,7 @@ def validate_reduced(
             name: float(partial[i]) for i, name in enumerate(names)},
         bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced,
         model_digest=matrices_digest(model.matrices),
+        computation_digest=computation_digest(model),
         source_points=points_hex({name: operators.source_points[name] for name in model.source_names}),
         receiver_points=points_hex({name: operators.receiver_points[name] for name in names}))
 
