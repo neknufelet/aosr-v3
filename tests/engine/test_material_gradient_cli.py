@@ -36,24 +36,27 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
-from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ, LowFrequencyAxis
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Wall
 from aosr.gradient import cli
+from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient.report import FULL_MODEL_LINE
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, save_validation_receipt
 from aosr.physics.fem_reduced_store import manifest_path, save_reduced
 from aosr.reporting import physics_identity as identity_module
-from aosr.reporting.scheme import Scheme
+from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine import _fem_shared_cases as shared_cases
@@ -152,8 +155,10 @@ def _moved_seat(receivers: ReceiverSet) -> ReceiverSet:
 
 
 def _schemes() -> dict[str, Scheme]:
-    """正式方案，與同一間房（網格雜湊不變）只把一支喇叭或一個座位的 x 移 0.1 m 的兩份。"""
-    scheme = shared_cases.small_scheme().model_copy(update={"receiver_set": _receivers(), "purpose": PURPOSE})
+    """正式方案（場景補搜尋低頻軸：終點量大峰要它），與同一間房只把一支喇叭或一個座位的 x 移 0.1 m 的兩份。"""
+    base = shared_cases.small_scheme()
+    scene = base.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH})
+    scheme = base.model_copy(update={"receiver_set": _receivers(), "purpose": PURPOSE, "scene": scene})
     speakers = {**scheme.speakers, MOVED_SPEAKER: _moved(scheme.speakers[MOVED_SPEAKER])}
     return {"scheme.json": scheme, "scheme-moved-speaker.json": scheme.model_copy(update={"speakers": speakers}),
             "scheme-moved-seat.json": scheme.model_copy(update={"receiver_set": _moved_seat(scheme.receiver_set)})}
@@ -434,6 +439,13 @@ def _without_hash(result: Record) -> Record:
     return {key: value for key, value in result.items() if key != "ledger_sha256"}
 
 
+def _kept_materials(runs: tuple[Path, Record]) -> dict[str, SurfaceMaterial]:
+    """控制組：考卷方案舊欄的六面固定阻抗，自己換成 ConstantImpedance（不走產品的 scene_wall_materials）。"""
+    fixed = load_scheme(runs[0] / "scheme.json").scene.impedance_pa_s_per_m_by_wall
+    assert fixed is not None
+    return {name: ConstantImpedance(impedance_pa_s_m=value) for name, value in fixed.items()}
+
+
 def _settings_path(runs: tuple[Path, Record]) -> Path:
     return runs[0] / "settings.toml"
 
@@ -496,10 +508,13 @@ def _sha256(path: Path) -> str:
 
 
 def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None:
-    """抓結果檔取錯列、每面厚度空腔切錯面、取到不可行的點、停止原因或求值次數抄錯。
+    """抓結果檔取錯列、每面厚度空腔切錯面、取到不可行的點、停止原因或求值次數抄錯、材料摘要算錯面或不貼面記成 None。
 
-    考卷自己從帳本最後一列決定的 θ 照設計清單切回每面，並用設定與 preset 重建設計判可行。
+    考卷自己從帳本最後一列決定的 θ 照設計清單切回每面，並用設定與 preset 重建設計判可行；材料摘要：有樣板的面是
+    ``endpoint.material_digest``（構造預設清單那一份 preset 的構造），不貼的面是原方案那面牆的。
     """
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    by_id, kept = {preset.id: preset for preset in _presets()}, _kept_materials(runs)
     folder = _folder(runs)
     result, rows = _json(folder / "result.json"), _rows(folder)
     last = rows[-1]
@@ -514,8 +529,11 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
     for design in designs:
         size = len(design.variables)
         values = [float(value) for value in theta[offset:offset + size]]
+        material = (kept[design.surface_id] if design.preset_id is None
+                    else adapter.validate_python(by_id[design.preset_id].material))
         expected.append({"surface_id": design.surface_id, "preset_id": design.preset_id,
-                         "thickness_m": values[0] if values else None, "cavity_m": values[1] if size > 1 else None})
+                         "thickness_m": values[0] if values else None, "cavity_m": values[1] if size > 1 else None,
+                         "material_digest": endpoint.material_digest(material)})
         offset += size
     assert result["surfaces"] == expected
     assert (result["value"], result["stop_reason"], result["evaluations"]) == (
@@ -526,9 +544,10 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
 
 
 def test_report_prints_segments_rounds_stop_reason_and_final_point(runs: tuple[Path, Record]) -> None:
-    """抓報告漏段、漏停止原因、最後可行點切錯面或單位錯（公尺當毫米）、最後一行不是辛二那一行。
+    """抓報告漏段、漏停止原因、最後可行點切錯面或單位錯（公尺當毫米）、不貼的面印成剛性、endpoint 之前最後一行
+    不是「未做」那一行。
 
-    每面那一行由考卷自己從結果檔換算成毫米；停止原因與累計求值次數從帳本取。
+    每面那一行由考卷自己從結果檔換算成毫米；不貼的面由考卷從方案舊欄的固定阻抗自己格式化；停止原因與累計求值次數從帳本取。
     """
     report = _section(runs, "report")
     assert report["code"] == 0, report["stderr"]
@@ -543,9 +562,12 @@ def test_report_prints_segments_rounds_stop_reason_and_final_point(runs: tuple[P
         assert any(line.strip().startswith(f"{segment}：") and "還沒寫進帳本" not in line for line in lines), segment
     assert f"停止原因：{last.stop_reason}" in lines
     assert f"累計求值次數（帳本記的、不含前段）：{last.decision.total_evaluations}" in text
+    kept = _kept_materials(runs)
     for spec in cast(list[Record], result["surfaces"]):
         if spec["preset_id"] is None:
-            assert f"  {spec['surface_id']}：剛性面" in lines
+            material = kept[str(spec["surface_id"])]
+            assert isinstance(material, ConstantImpedance)
+            assert f"  {spec['surface_id']}：不貼（保留原牆：固定阻抗 {material.impedance_pa_s_m:.3f} Pa·s/m）" in lines
             continue
         thickness = f"棉板 {float(cast(float, spec['thickness_m'])) * 1000.0:.3f} mm"
         cavity = ("沒有空腔層" if spec["cavity_m"] is None
@@ -836,7 +858,6 @@ def test_lock_held_by_other_process_rejects_resume_but_not_stop(runs: tuple[Path
     assert resumed["code"] == 1 and "還有計算在跑" in str(resumed["stderr"])
     assert (folder / "ledger.jsonl").read_bytes() == before
     assert stopped["code"] == 0 and (folder / "stop").exists()
-
 
 
 def test_rejects_root_under_web_searches(runs: tuple[Path, Record]) -> None:

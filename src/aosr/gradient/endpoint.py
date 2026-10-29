@@ -11,13 +11,15 @@
 這一支不宣稱匯出的方案能直接走第一階段整條。
 
 材料只有一個來源：每面的 ``SurfaceDesign.material``（替身鏈用的那一份），匯出時只換棉板厚度、照設定檔
-``[export] min_cavity_m`` 決定空氣層放不放；設計清單必須照 ``Wall.all()`` 的順序給六面。終點入口另外核身分：
+``[export] min_cavity_m`` 決定空氣層放不放；「不貼」的面（``kept_material``，保留方案原本的牆）原樣交出那份材料，
+替身鏈與完整模型都用同一支 ``surface_impedance`` 求它的阻抗；設計清單必須照 ``Wall.all()`` 的順序給六面。終點入口另外核身分：
 每面的樣板構造必須等於它 preset id 在構造預設清單裡的那一份（:func:`checked_design_identity`），報告每面再記
 樣板構造的摘要（``material_digest``），preset id 跟實際用的材料不會脫鉤。
 材料求阻抗用的空氣（``air``）必須跟完整模型算子、替身同一組密度與聲速，不等就拒收。
 
 方案格式沒有「剛性」的寫法（表面分區每面一種材料、固定阻抗欄只收正數），所以 :func:`scene_with_materials`
-遇到剛性面（None）刻意拒收；「沒設計的面保留方案原本的牆面」要從計算起就一致，由接線那支定，這一支不做。
+遇到真剛性面（樣板與保留原牆都沒有）刻意拒收；「沒設計的面保留方案原本的牆」從替身鏈起就一致（#561 辛三：
+``SurfaceDesign.kept_material``），匯出時那一面寫回原材料。
 
 完整模型的算子由呼叫端給（方案走 ``reporting.fem_reduced_scheme.export_operators``，跟建替身同一份或同網格重匯出）；
 替身與算子的網格、喇叭、座位、空氣一致性由 :func:`aosr.physics.fem_reduced_check.validate_reduced` 核。
@@ -66,7 +68,8 @@ _CANDIDATE_ID: Final = "gradient-endpoint"
 
 
 class SurfaceSpec(NamedTuple):
-    """一面的規格：面代號（牆名）、preset id、棉板厚度與空腔（公尺）、樣板構造摘要；剛性面後四格都是 None。
+    """一面的規格：面代號（牆名）、preset id、棉板厚度與空腔（公尺）、材料摘要；沒有樣板的面前三格是 None，
+    摘要在「不貼」面是保留原牆那份材料的、在真剛性面是 None。
 
     ``cavity_m`` 是搜尋給的原值（可能是 0 或小於設定的最小空腔）；放不放空氣層由 :func:`kept_cavity` 決定。
     樣板沒有空氣層的面 ``cavity_m`` 是 None。``material_digest`` 是換 θ 之前的樣板構造（``design.material``）
@@ -85,6 +88,13 @@ def material_digest(material: SurfaceMaterial) -> str:
     content = json.dumps(material.model_dump(mode="json"), sort_keys=True, separators=(",", ":"),
                          ensure_ascii=False, allow_nan=False)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def design_digest(design: SurfaceDesign) -> str | None:
+    """一面設計的材料摘要：有樣板是換 θ 之前的樣板構造（``design.material``）的，「不貼」是保留的原牆材料的，
+    真剛性 None。終點報告與 ``result.json`` 用同一個定義。"""
+    material = design.material if design.material is not None else design.kept_material
+    return None if material is None else material_digest(material)
 
 
 def kept_cavity(cavity_m: float, min_cavity_m: float) -> float | None:
@@ -107,8 +117,8 @@ def checked_wall_designs(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceDesig
 
 def checked_design_identity(designs: Sequence[SurfaceDesign], presets: Sequence[ConstructionPreset]) -> None:
     """每面的樣板構造（``design.material``，換 θ 之前）必須等於它 preset id 在 ``presets`` 裡的構造（驗證後逐欄相等）；
-    只有剛性面（``material`` 是 None）略過；有樣板構造卻沒有 preset id、preset id 找不到或構造不同都拒收，訊息指名面
-    （與 preset id）。只核身分，匯出材料仍只從 ``design.material`` 來。"""
+    沒有樣板的面（``material`` 是 None：真剛性或「不貼」保留原牆，不是 preset）略過；有樣板構造卻沒有 preset id、
+    preset id 找不到或構造不同都拒收，訊息指名面（與 preset id）。只核身分，匯出材料仍只從 ``design.material`` 來。"""
     by_id = {preset.id: preset for preset in presets}
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
     for design in designs:
@@ -125,17 +135,18 @@ def checked_design_identity(designs: Sequence[SurfaceDesign], presets: Sequence[
 
 
 def surface_specs(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector) -> tuple[SurfaceSpec, ...]:
-    """θ（照 :func:`~aosr.gradient.material_gradient.design_names` 的格序）切回每面規格；剛性面只有面代號。"""
+    """θ（照 :func:`~aosr.gradient.material_gradient.design_names` 的格序）切回每面規格；沒有樣板的面只有面代號
+    與摘要（「不貼」面是保留原牆材料的摘要，真剛性面 None）。"""
     values = checked_theta(theta, designs)
     specs = []
     offset = 0
     for design in designs:
         if design.material is None:
-            specs.append(SurfaceSpec(design.surface_id, None, None, None, None))
+            specs.append(SurfaceSpec(design.surface_id, None, None, None, design_digest(design)))
             continue
         cavity = float(values[offset + 1]) if design.cavity_variable is not None else None
         specs.append(SurfaceSpec(design.surface_id, design.preset_id, float(values[offset]), cavity,
-                                 material_digest(design.material)))
+                                 design_digest(design)))
         offset += len(design.variables)
     return tuple(specs)
 
@@ -159,11 +170,12 @@ def exported_theta(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVec
     return values
 
 
-def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: float) -> Assembly | None:
-    """這一面的構造：從 ``design.material``（替身鏈同一份）換棉板厚度，空氣層照規則換厚度或拿掉。"""
+def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: float) -> SurfaceMaterial | None:
+    """這一面的材料：從 ``design.material``（替身鏈同一份）換棉板厚度，空氣層照規則換厚度或拿掉；
+    「不貼」面原樣交出保留的原牆材料，真剛性面 None。"""
     material = design.material
     if material is None:
-        return None
+        return design.kept_material
     kinds = [type(layer) for layer in material.layers]
     if kinds.count(PorousLayer) != 1 or kinds.count(AirLayer) > 1 or set(kinds) - {PorousLayer, AirLayer}:
         raise ValueError(f"面 {design.surface_id} 的構造必須是一層棉板、最多一層空腔，沒有別的層")
@@ -180,8 +192,8 @@ def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: flo
 
 
 def materials_from_surfaces(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector,
-                            settings: MaterialGradientSettings) -> dict[Wall, Assembly | None]:
-    """六面設計＋θ → 每面牆的構造層清單（照 ``Wall.all()`` 排）；剛性面是 None。
+                            settings: MaterialGradientSettings) -> dict[Wall, SurfaceMaterial | None]:
+    """六面設計＋θ → 每面牆的材料（照 ``Wall.all()`` 排）；「不貼」面是保留的原牆材料，真剛性面是 None。
 
     材料只從 ``design.material`` 來（替身鏈建樣板的同一份），不再拿 preset id 去另一份清單重查：棉板層換成
     θ 的厚度；空氣層照**空腔匯出規則**——空腔小於設定檔 ``[export] min_cavity_m``（含 0）就整層拿掉、
@@ -203,9 +215,12 @@ def checked_air(air: PhysicsConstants, *, density_kg_m3: float, sound_speed_m_s:
             f"（密度 {density_kg_m3}、聲速 {sound_speed_m_s}）不同，阻抗與有限元素會用兩組空氣")
 
 
-def material_impedances(materials: Mapping[Wall, Assembly | None], frequencies_hz: Sequence[float], *,
+def material_impedances(materials: Mapping[Wall, SurfaceMaterial | None], frequencies_hz: Sequence[float], *,
                         air: PhysicsConstants, ranges: PorousModelRanges) -> FrequencyWallImpedances:
-    """每面構造走產品 ``surface_impedance``（非可微入口）求垂直入射阻抗，攤成逐頻 Python 複數；剛性面 None。"""
+    """每面材料走產品 ``surface_impedance``（非可微入口）求垂直入射阻抗，攤成逐頻 Python 複數；剛性面 None。
+
+    「不貼」面的阻抗跟替身鏈建目標時那一列（``kept_impedance_rows``）同一支函式、同一個頻率軸寫法，雙精度行程下逐位相同（單精度 θ 時鏈裡那一列轉成 complex64，是這一列的降精度版）。
+    """
     axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
     impedances: dict[Wall, tuple[complex, ...] | None] = {}
     for wall in Wall.all():
@@ -218,7 +233,7 @@ def material_impedances(materials: Mapping[Wall, Assembly | None], frequencies_h
     return impedances
 
 
-def full_model_pressures(operators: FullOperators, materials: Mapping[Wall, Assembly | None],
+def full_model_pressures(operators: FullOperators, materials: Mapping[Wall, SurfaceMaterial | None],
                          frequencies_hz: Sequence[float], *, air: PhysicsConstants, ranges: PorousModelRanges,
                          max_relative_residual: float) -> NDArray[np.complex128]:
     """完整模型逐頻解（每頻一次 pydiso 分解），回座位聲壓 ``(F, 喇叭, 座位)``。
@@ -423,10 +438,11 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     return EndpointResult(report, full, reduced)
 
 
-def scene_with_materials(scene: Scene, materials: Mapping[Wall, Assembly | None]) -> Scene:
-    """把六面構造寫進方案場景的牆面欄位：每面一區（``whole_wall``，#309 構造牆進方案的格式），舊的固定阻抗欄拿掉。
+def scene_with_materials(scene: Scene, materials: Mapping[Wall, SurfaceMaterial | None]) -> Scene:
+    """把六面材料寫進方案場景的牆面欄位：每面一區（``whole_wall``，#309 構造牆進方案的格式），舊的固定阻抗欄拿掉；
+    「不貼」面寫回保留的原牆材料（六面全是固定阻抗時，方案格式自己折回舊欄）。
 
-    方案格式沒有「剛性」的寫法（表面分區每面必須是一種材料，固定阻抗欄只收正數），所以剛性面（None）拒收：
+    方案格式沒有「剛性」的寫法（表面分區每面必須是一種材料，固定阻抗欄只收正數），所以真剛性面（None）拒收：
     替身與完整模型都把那一面當剛性算過，寫成任何別的材料，匯出的方案就不再是剛才驗過的那一組。其餘場景欄位不動。
     """
     given = {wall: material for wall in Wall.all() if (material := materials.get(wall)) is not None}

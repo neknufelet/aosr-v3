@@ -12,6 +12,10 @@ v2（庚二）：前段照舊是連續下降、取規格、重調（``descent``�
 
 v3：標頭多一格評分常數指紋（``objective_fingerprint``）。目標函式吃的計分頻帶、權重、座位與喇叭索引、
 頻率軸（:class:`StageOneObjectiveConstants`）改了，替身與搜尋設定都一樣也不准接續舊帳本；v2 標頭少這一格，一律拒收。
+
+v4（#561 辛三）：標頭多一格 ``kept_digests``（不貼的面 → 保留的原牆材料摘要，``endpoint.design_digest``）。
+preset 寫 none 的面從「剛性」改成「保留方案原本的牆」，方案檔位元組沒變、物理身分也沒變，舊語意的 v3 帳本只靠版本擋：
+一律拒收、要重跑；原牆材料換了（同一方案、同一組 preset）標頭就不同，接續拒收。
 """
 from __future__ import annotations
 
@@ -34,9 +38,10 @@ from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
     LOOP_STOP_REASONS, STOP_REASONS, DescentResult, SnapResult, SurfaceDesign, design_names,
 )
+from aosr.gradient.endpoint import design_digest
 
 
-LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v3"
+LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v4"
 _V2_VERSION: Final = "aosr.material_gradient_ledger.v2"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Phase = Literal["descent", "snap", "retune", "baseline_retune", "candidate_jump", "candidate_retune", "round_decision"]
@@ -48,10 +53,11 @@ _CANDIDATE_ID: Final = re.compile(r"^(?P<surface>.+):(?P<direction>thinner|thick
 
 
 class MaterialGradientHeader(BaseModel):
-    """帳本第一列：替身身分、每面（面代號, preset id 或 None）、θ 變數名順序、設定指紋、評分常數指紋。"""
+    """帳本第一列：替身身分、每面（面代號, preset id 或 None）、θ 變數名順序、設定指紋、評分常數指紋、
+    不貼的面各自保留的原牆材料摘要。"""
 
     model_config = _FROZEN
-    ledger_version: Literal["aosr.material_gradient_ledger.v3"]
+    ledger_version: Literal["aosr.material_gradient_ledger.v4"]
     input_hash: str = Field(min_length=1)
     mesh_hash: str = Field(min_length=1)
     physics_identity: str = Field(min_length=1)
@@ -59,6 +65,7 @@ class MaterialGradientHeader(BaseModel):
     variable_names: tuple[str, ...]
     settings_fingerprint: str = Field(min_length=1)
     objective_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    kept_digests: dict[str, str]
 
     @field_validator("variable_names")
     @classmethod
@@ -252,7 +259,9 @@ def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: 
         physics_identity=model.physics_identity,
         surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
         variable_names=design_names(designs), settings_fingerprint=settings.fingerprint,
-        objective_fingerprint=objective_fingerprint(objective_constants))
+        objective_fingerprint=objective_fingerprint(objective_constants),
+        kept_digests={design.surface_id: digest for design in designs
+                      if design.kept_material is not None and (digest := design_digest(design)) is not None})
 
 
 def _row(**fields: object) -> MaterialGradientRow:
