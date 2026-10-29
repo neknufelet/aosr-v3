@@ -30,7 +30,10 @@ jobs:
     # 重開兩台分攤考卷（#595），施工期間暫放 30（過渡上限，上線後依實測重定；不得自動繼續放寬，沿用 10-02 的原則）。
     # 切換成兩片後每片各自一個上限。10-14 兩台照歷史耗時配平（#595）後收到 25；老闆 10-14 回 #786 原話：
     # 「25 分鐘可以作這次收緊的方案，但不預先承諾下一輪必收 20 分鐘」。實測數字寫在卡上那一格的註解。
-    timeout-minutes: 25
+    # 10-29 測試減量（#976）後慢機器一片仍跑到 24 分 34 秒、主線一跑被 25 分鐘砍掉；老闆 10-29 回 #980 A：
+    # 兩片上限改 30、不加第三片，「不宣稱加速」「不把估算的七分鐘寫成保證」「若之後正常工作仍反覆碰到 30 分鐘，
+    # 再帶實測討論，不自動繼續放寬」。
+    timeout-minutes: 30
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
@@ -219,7 +222,7 @@ jobs:
   shard-b:
     runs-on: ubuntu-24.04
     # 上限來由見 shard-a。
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
