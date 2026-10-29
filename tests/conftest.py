@@ -295,7 +295,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         return
 
     # 三張收據卡讀的是 status 分支上的機器收據；開跑前先鏡到被忽略的目錄（不上網，只讀本機的 ref）。
-    # 鏡不成就停：那三張卡的第一回合會拿不到收據而回 2，第一回合要 0——與其在那裡紅，不如在這裡說清楚。
+    # 鏡不成就停：讀鏡像的檢查與考卷會拿不到收據而回 2——與其在那裡紅，不如在這裡說清楚。
     try:
         mirror_receipts.mirror(REPO, mirror_receipts.DEFAULT_REF, REPO / mirror_receipts.DEFAULT_OUT, MIRROR_TIMEOUT)
     except ToolBroken as exc:
