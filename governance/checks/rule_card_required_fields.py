@@ -104,7 +104,6 @@ POSITIVE_INT_SHAPE = re.compile(r"-?\d+")
 # 名單不是門檻，所以不必登記進 thresholds-live-only-in-registry 的例外清單。
 LEGACY_CARD_NAMES = frozenset(
     {
-        "assertions-not-pinned-to-counts",
         "check-exit-code-honest",
         "ci-jobs-cannot-die-quietly",
         "commit-author-allowlisted",

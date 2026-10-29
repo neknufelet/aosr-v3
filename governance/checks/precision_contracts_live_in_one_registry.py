@@ -11,7 +11,7 @@
    （模組層級常數、類別身體、函式簽章預設值；藏在模組層的 ``if``／``try`` 底下一樣算），名字命中
    ``constant_name_patterns`` 任一樣式即紅。判形狀不判數值：v2 的病是同一個數字住三個地方，
    抓的是「第二個家」這件事，不是某個值。
-2. **登記簿改值要帶新紙**——本次提交範圍（``base...head``，跟 tests-land-with-code 同一種三點差異）
+2. **登記簿改值要帶新紙**——本次提交範圍（``base...head``，三點差異，零件在 ``governance/git_range.py``）
    裡登記簿有哪幾條的值或人看寫法變了（含新增），每一條指名的決策紙必須是同範圍**新增**的檔、
    住在 ``decision_dirs`` 之一、內文出現那條的名字與新的人看寫法、``status`` 是 ``status_accepted``。
    一份無關的紙不算：紙上要對得上「哪個契約、新值」。
@@ -22,9 +22,9 @@
    precision-contract-rulers-live-in-one-registry.md 第二節）。
 
 借的零件：範圍解析（含 AOSR_RANGE_BASE／AOSR_RANGE_HEAD／GITHUB_EVENT_NAME 三個環境變數的判法）借
-tests-land-with-code 那支，模組載入時就算好的數字借 thresholds-live-only-in-registry 那支；那兩支改行為這張卡跟著變。
+``governance/git_range.py``（原 tests-land-with-code 那支的零件，那張卡 2026-10-29 退了），模組載入時就算好的數字借 thresholds-live-only-in-registry 那支；那兩支改行為這張卡跟著變。
 
-**範圍怎麼定**：真的 git 工作樹走 tests-land-with-code 那條路（環境變數給 base／head，不然從主線
+**範圍怎麼定**：真的 git 工作樹走 ``git_range.resolve_range`` 那條路（環境變數給 base／head，不然從主線
 分支點算），舊登記簿從**共同分支點**讀——主線在分支之後自己改過的值不算這支合併請求改的；
 必紅樣本用 ``fixture_history_file`` 宣告快照（base 與 head 各一棵子樹，選填一棵 main 代表主線在分支點
 之後自己動過），檢查在系統暫存區重建真的提交再比。真的 git 工作樹根出現那份宣告檔一律回 2。
@@ -42,7 +42,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.checks.tests_land_with_code import (
+from governance.git_range import (
     _fixture_env,
     _merge_base,
     _rev_parse,
@@ -436,7 +436,7 @@ def _range_problems(source: Source, files_in_head: dict[str, str], settings: Set
 
 
 def _added_files(source: Source) -> dict[str, str]:
-    """差異裡每個路徑的狀態字母。不做改名偵測（新紙被配對成改名會誤紅），剖析借 tests-land-with-code 的。"""
+    """差異裡每個路徑的狀態字母。不做改名偵測（新紙被配對成改名會誤紅），剖析借 ``governance/git_range.py`` 的。"""
     out = _run_git(["diff", "--name-status", "-z", "--no-renames", source.spec], source.work_tree, what=f"量 {source.label} 的差異", env=source.env).stdout
     seen: dict[str, str] = {}
     for entry in parse_diff(out):

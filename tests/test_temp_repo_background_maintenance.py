@@ -27,8 +27,9 @@ CARDS = load_all_cards(REPO)
 # 刻意不從 governance.exit_codes 拿：那一份被清空時，寫的那端跟量的那端會一起變空，這一題照綠。
 QUIET = {"maintenance.auto": "false", "gc.auto": "0"}
 
-# #810 在雲端紅的就是這一張：它的控制樣本一筆 commit 都沒記到，就是假 git 沒接上，其他卡的綠不算數。
-KNOWN_COMMITTER = "tests-land-with-code"
+# #810 在雲端紅的是 tests-land-with-code：它的控制樣本一筆 commit 都沒記到，就是假 git 沒接上，其他卡的綠不算數。
+# 那張卡 2026-10-29 退了（#977），改拿同樣會在暫存 repo 建提交歷史的 commit-author-allowlisted 當已知的那一張。
+KNOWN_COMMITTER = "commit-author-allowlisted"
 
 SHIM = '''#!{python}
 """假 git：commit 之前先記下那顆 repo 此刻兩格的生效值，再原樣交給真 git。"""
