@@ -964,3 +964,35 @@ def test_all_empty_category_notes_still_hide_column(tmp_path: Path, browser: Bro
             page.locator("#content").wait_for(state="visible")
             assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS[:-1])
             _assert_quiet(watched)
+
+
+def test_measured_table_changes_render_on_both_sides(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """#972 施工二：實測表逐頻差異列原本只在實測真算那一題（兩份真算再開比較頁）考。差異內容由
+    test_measured_web_view::test_compare_details_* 守（scheme_differences 逐頻對齊、捨入藏不住、底構造換了要點名）；
+    這一題守比較頁把伺服器給的每一條差異細項，A、B 兩格各自原樣印出來（不重算、不只印第一條）。
+    比較資料是真伺服器回的那一份，只在第一列差異加上兩條可辨識的細項。"""
+    details = [["300 Hz", "未設定", "阻抗實部 500、阻抗虛部 -30 Pa·s/m"],
+               ["1000 Hz", "阻抗實部 800、阻抗虛部 100 Pa·s/m", "阻抗實部 800、阻抗虛部 70 Pa·s/m"]]
+
+    def with_details(route: Route) -> None:
+        response = route.fetch()
+        body = response.json()
+        assert body["changes"], "這一對要有差異列，細項才有地方掛"
+        body["changes"][0]["details"] = details
+        route.fulfill(response=response, json=body)
+
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/") as watched:
+            page = watched.page
+            page.route(f"{base}/api/compare/{A_ID}/{B_ID}", with_details)
+            page.goto(f"{base}/compare/{A_ID}/{B_ID}", wait_until="networkidle")
+            row = page.locator("#changes tr").nth(1)
+            for side, cell in ((1, row.locator("td").nth(1)), (2, row.locator("td").nth(2))):
+                assert cell.locator(".measured-changes p").all_text_contents() == [
+                    f"{detail[0]}：{detail[side]}" for detail in details]
+            # 細項只掛在那一列：別列、別處不准多印。
+            assert page.locator(".measured-changes").count() == row.locator(".measured-changes").count()
+            _assert_quiet(watched)

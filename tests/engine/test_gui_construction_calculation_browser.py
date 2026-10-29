@@ -1,4 +1,4 @@
-"""網頁正式方案管線真算兩份小房間，只有一層厚度不同，三路與保存註記都要改變。"""
+"""網頁正式方案管線真算一份小房間：網頁填的構造厚度進了計算、結果頁顯示的是這一份（#972 施工二）。"""
 from __future__ import annotations
 
 import contextlib
@@ -25,6 +25,7 @@ from tests.engine._furniture_cases import reference_document
 from tests.engine._construction_gui_server import _stop_calculations, calculation_group_exists, real_server
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
+from tests.engine.test_measured_web_input import floor
 
 
 def test_real_server_cleans_calculation_group_when_exam_raises(tmp_path: Path) -> None:
@@ -157,35 +158,36 @@ def calculate(page: Page, folder: Path, deadline: float) -> tuple[str, SchemeRes
     return identifier, result
 
 
-def assert_lanes_changed(a: SchemeResult, b: SchemeResult) -> None:
-    assert a.scheme.scene.room_m == b.scheme.scene.room_m
-    assert a.scheme.scene != b.scheme.scene
-    for old, new in zip(a.pairs, b.pairs, strict=True):
-        assert (old.speaker_id, old.receiver_id) == (new.speaker_id, new.receiver_id)
-        assert old.report.scene.scene_fingerprint != new.report.scene.scene_fingerprint
-        assert old.report.points is not None and new.report.points is not None
-        left = {p.frequency_hz: p.fem_energy for p in old.report.points if p.fem_energy is not None}
-        right = {p.frequency_hz: p.fem_energy for p in new.report.points if p.fem_energy is not None}
-        common = left.keys() & right.keys()
-        assert common and all(left[f] != right[f] for f in common)
-        for x, y in zip(old.report.bands, new.report.bands, strict=True):
-            assert x.center_frequency_hz == y.center_frequency_hz
-            for field in ("reflected_energy", "interference_energy", "late_energy"):
-                assert getattr(x, field) != getattr(y, field), field
-        assert all(value != new.report.top.eyring_t60_by_band_s[f]
-                   for f, value in old.report.top.eyring_t60_by_band_s.items())
-        for pair in (old, new):
-            notes = pair.report.construction_notes_by_wall
-            assert notes is not None and "floor" in notes
-            assert any(n.code == "komatsu_frequency_extrapolation" and n.layer_index == 1 and n.frequencies_hz
-                       for n in notes["floor"])
+# 網頁填的值（不是預設）：地板第 1 層玻璃棉厚度，預設樣板是 0.05 m。
+TYPED_THICKNESS = .08
 
 
-def test_web_save_reload_real_calculation_changes_all_lanes_and_shows_notes(tmp_path: Path, browser: Browser) -> None:
+def check_typed_thickness_reached_calculation(saved: dict[str, object], result: SchemeResult) -> None:
+    """存檔與結果檔裡記的地板第 1 層厚度等於網頁填的值、不是預設；結果檔記的方案就是存下來那一份。
+    計算真的吃到構造的證據：每一對的報表都帶「地板第 1 層小松外推」註記（計算時才產生，原方案是內建阻抗、沒有這條）。"""
+    material = floor(saved)
+    layers = cast(list[dict[str, object]], material["layers"])
+    assert layers[0]["thickness_m"] == TYPED_THICKNESS
+    assert result.scheme.model_dump(mode="json") == Scheme.model_validate(saved).model_dump(mode="json")
+    for pair in result.pairs:
+        # 子行程實際讀進求解的那一份輸入（結果模型另核它跟方案逐格相同）：地板第 1 層厚度就是填的值。
+        zones = cast(dict[str, list[dict[str, dict[str, object]]]], pair.input_document["surface_zones_by_wall"])
+        assert cast(list[dict[str, object]], zones["floor"][0]["material"]["layers"])[0]["thickness_m"] == TYPED_THICKNESS
+        notes = pair.report.construction_notes_by_wall
+        assert notes is not None and "floor" in notes
+        assert any(n.code == "komatsu_frequency_extrapolation" and n.layer_index == 1 and n.frequencies_hz
+                   for n in notes["floor"])
+
+
+def test_web_save_reload_one_real_calculation_uses_typed_layer_and_shows_notes(tmp_path: Path, browser: Browser) -> None:
+    """#972 施工二：只留一次真算。「改構造後三路都變」交給命令列考卷
+    test_construction_cli_end_to_end::test_board_cavity_wall_changes_every_lane；小松外推註記的字與兩種格式交給
+    test_construction_cli_end_to_end::test_porous_extrapolation_survives_report_and_text。這一題守網頁填的厚度真的進了計算、
+    結果頁顯示的是這一次的結果。"""
     (tmp_path / "schemes").mkdir()
     (tmp_path / "schemes" / "small.json").write_text(Scheme.model_validate(small_document()).model_dump_json())
     before = time.perf_counter()
-    # 等待上限只防卡死、不是時間預算：本機整題約 58 秒，雲端機器較慢，牆鐘照實印在 note。
+    # 等待上限只防卡死、不是時間預算：牆鐘照實印在 note。
     with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         page.locator("#scheme-list").select_option("small")
@@ -194,19 +196,21 @@ def test_web_save_reload_real_calculation_changes_all_lanes_and_shows_notes(tmp_
         page.wait_for_function("!document.querySelector('main').inert")
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", "glass_wool_96k_50mm")
-        _save_readback(page, "construction-a")
-        first_id, a = calculate(page, tmp_path, before + 600)
-        page.locator("#layer-floor-0-thickness_m").fill("0.08")
-        _save_readback(page, "construction-b")
-        second_id, b = calculate(page, tmp_path, before + 600)
-        assert first_id != second_id
-        assert_lanes_changed(a, b)
-        for identifier in (first_id, second_id):
-            with _open(browser, f"{base}/results/{identifier}") as result_page:
-                expect(result_page.page.locator("#construction-note-lines")).to_contain_text("地板第 1 層")
-                expect(result_page.page.locator("#construction-note-lines")).to_contain_text("外推照算")
-                expect(result_page.page.locator("#material-research-notice")).to_be_visible()
-                expect(result_page.page.locator("#material-research-notice")).to_have_text("小松纖維模型：原論文只量到 100 Hz 以上")
-                assert result_page.page_errors == []
+        saved = _save_readback(page, "construction-a")
+        assert cast(list[dict[str, object]], floor(saved)["layers"])[0]["thickness_m"] != TYPED_THICKNESS
+        # 改厚度後不另外按存檔：「計算」自己先存目前的表單再起算，改了沒進計算就會紅。
+        page.locator("#layer-floor-0-thickness_m").fill(str(TYPED_THICKNESS))
+        identifier, result = calculate(page, tmp_path, before + 600)
+        assert page.locator("#result-link").get_attribute("href") == f"/results/{identifier}"
+        check_typed_thickness_reached_calculation(
+            json.loads((tmp_path / "schemes" / "construction-a.json").read_text()), result)
+        with _open(browser, f"{base}/results/{identifier}") as result_page:
+            shown = result_page.page
+            expect(shown.locator("#identity")).to_have_text(f"方案：{result.scheme.scheme_id}；日期：{result.run_date}")
+            expect(shown.locator("#construction-note-lines")).to_contain_text("地板第 1 層")
+            expect(shown.locator("#construction-note-lines")).to_contain_text("外推照算")
+            expect(shown.locator("#material-research-notice")).to_be_visible()
+            expect(shown.locator("#material-research-notice")).to_have_text("小松纖維模型：原論文只量到 100 Hz 以上")
+            assert result_page.page_errors == []
         assert watched.page_errors == []
-    note(f"填表、存讀、兩份真計算與結果顯示整題牆鐘：{time.perf_counter() - before:.3f} 秒")
+    note(f"填表、存讀、一份真計算與結果顯示整題牆鐘：{time.perf_counter() - before:.3f} 秒")

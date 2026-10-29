@@ -1,13 +1,12 @@
-"""實測表由填表、存讀到三份真算；隔離表內材料與表外底構造的影響。"""
+"""實測表由填表、存讀到一份真算：網頁填的值進了計算、結果頁顯示的是這一份（#972 施工二）。"""
+import json
 from pathlib import Path
 import time
 from typing import cast
 
 from playwright.sync_api import Browser, Page, expect
 
-from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, geometric_band_frequencies
-from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
-from aosr.gui.measured_view import measured_materials
+from aosr.gui.measured_view import build_measured_view
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from governance.exit_codes import note
@@ -17,61 +16,6 @@ from tests.engine.test_gui_construction_calculation_browser import calculate, sm
 from tests.engine.test_gui_input_setup_browser import _save_readback
 from tests.engine.test_gui_measured_input_browser import _filled_draft_preset, apply_draft, start_draft, table_points
 from tests.engine.test_measured_web_input import floor
-
-
-def verify_crossover_and_base_isolation(a: SchemeResult, c: SchemeResult) -> None:
-    assert a.scheme.scene.room_m == c.scheme.scene.room_m
-    left, right = measured_materials(a.scheme)['floor'], measured_materials(c.scheme)['floor']
-    assert left.points == right.points and left.source_and_conditions == right.source_and_conditions
-    assert left.fill_rule == right.fill_rule and left.base_assembly != right.base_assembly
-    for old, changed in zip(a.pairs, c.pairs, strict=True):
-        x, y = old.report, changed.report
-        material = measured_materials(a.scheme)['floor']
-        low, high = material.points[0].frequency_hz, material.points[-1].frequency_hz
-        assert all(low <= f <= high for f in (500., 1000.))
-        assert x.top.f_s_hz == y.top.f_s_hz
-        assert x.top.crossover_lower_hz == y.top.crossover_lower_hz == max(x.top.f_s_hz, CROSSOVER_LOWER_FLOOR_HZ)
-        assert x.top.crossover_upper_hz == y.top.crossover_upper_hz == FEM_GEOMETRIC_CROSSOVER_CAP_HZ
-        assert x.points is not None and y.points is not None
-        inside, outside = [], []
-        for p, q in zip(x.points, y.points, strict=True):
-            assert p.frequency_hz == q.frequency_hz
-            if low <= p.frequency_hz <= high:
-                inside.append(p)
-                for field in ('fem_energy', 'reflected_energy', 'interference_energy', 'late_energy', 'total_energy'):
-                    assert getattr(p, field) == getattr(q, field), (p.frequency_hz, field)
-            else:
-                outside.append(p.total_energy != q.total_energy)
-        assert inside and any(p.fem_energy is not None for p in inside) and any(outside)
-        for band, changed_band in zip(x.bands, y.bands, strict=True):
-            axis = geometric_band_frequencies(band.center_frequency_hz)
-            if low <= min(axis) and max(axis) <= high:
-                for field in ('fem_energy', 'reflected_energy', 'interference_energy', 'late_energy'):
-                    assert getattr(band, field) == getattr(changed_band, field)
-        assert x.measured_seams_by_wall is not None and y.measured_seams_by_wall is not None
-        for seam, changed_seam in zip(x.measured_seams_by_wall['floor'], y.measured_seams_by_wall['floor'], strict=True):
-            assert seam.measured == changed_seam.measured and seam.base_assembly != changed_seam.base_assembly
-        assert x.construction_notes_by_wall is not None and y.construction_notes_by_wall is not None
-        fills = [next(n for n in notes['floor'] if n.code == 'measured_table_model_fill')
-                 for notes in (x.construction_notes_by_wall, y.construction_notes_by_wall)]
-        assert set(fills[0].frequencies_hz) == set(fills[1].frequencies_hz)
-
-
-def verify_table_lanes_changed(a: SchemeResult, b: SchemeResult) -> None:
-    for old, changed in zip(a.pairs, b.pairs, strict=True):
-        assert old.report.points is not None and changed.report.points is not None
-        seen_fem, seen_bands = [], []
-        for p, q in zip(old.report.points, changed.report.points, strict=True):
-            if 75. < p.frequency_hz < 1500. and p.fem_energy is not None:
-                seen_fem.append(p.frequency_hz)
-                assert p.fem_energy != q.fem_energy
-        for band, changed_band in zip(old.report.bands, changed.report.bands, strict=True):
-            axis = geometric_band_frequencies(band.center_frequency_hz)
-            if 75. <= min(axis) and max(axis) <= 1500.:
-                seen_bands.append(band.center_frequency_hz)
-                for field in ('reflected_energy', 'interference_energy', 'late_energy'):
-                    assert getattr(band, field) != getattr(changed_band, field)
-        assert seen_fem and seen_bands
 
 
 def check_result_page(page: Page) -> None:
@@ -102,7 +46,47 @@ def check_mobile_seam_scroll(page: Page) -> None:
     wrapper.evaluate('box => {box.scrollLeft=0;}')
 
 
-def test_fill_save_reload_three_real_runs_and_result_pages(tmp_path: Path, browser: Browser) -> None:
+# 網頁填的值（都不是預設）：表的 75 Hz 端點實部（預設 400）與底構造第 1 層厚度（玻璃棉預設 0.05 m）。
+TYPED_REAL = 1100.
+TYPED_BASE_THICKNESS = .08
+
+
+def check_typed_values_reached_calculation(saved: dict[str, object], result: SchemeResult) -> None:
+    """存檔與結果檔裡記的那幾格等於網頁填的值、不是預設；而且計算真的吃到了：結果檔保存的表端點接縫值
+    （計算時從表端點取的，不在顯示時重算）等於填的那一格。網頁輸入被丟掉、偷用預設值都會紅。"""
+    material = floor(saved)
+    points = cast(list[dict[str, float]], material['points'])
+    layers = cast(list[dict[str, object]], cast(dict[str, object], material['base_assembly'])['layers'])
+    assert points[0]['real_pa_s_m'] == TYPED_REAL != table_points()[0]['real_pa_s_m']
+    assert layers[0]['thickness_m'] == TYPED_BASE_THICKNESS
+    assert result.scheme.model_dump(mode='json') == Scheme.model_validate(saved).model_dump(mode='json')
+    for pair in result.pairs:
+        # 子行程實際讀進求解的那一份輸入（結果模型另核它跟方案逐格相同）：表端點與底構造厚度就是填的值。
+        zones = cast(dict[str, list[dict[str, dict[str, object]]]], pair.input_document['surface_zones_by_wall'])
+        assert zones['floor'][0]['material'] == material
+        seams = pair.report.measured_seams_by_wall
+        assert seams is not None
+        assert seams['floor'][0].frequency_hz == points[0]['frequency_hz']
+        assert seams['floor'][0].measured.real_pa_s_m == TYPED_REAL
+
+
+def check_page_shows_this_result(page: Page, identifier: str, result: SchemeResult) -> None:
+    """結果頁顯示的是這一次算出來的那份：方案代號、日期，以及接縫表每一格都等於這份結果檔保存的數字。"""
+    assert page.url.endswith(f'/results/{identifier}')
+    expect(page.locator('#identity')).to_have_text(f'方案：{result.scheme.scheme_id}；日期：{result.run_date}')
+    views = build_measured_view(result)
+    assert views is not None
+    shown = page.locator('.measured-seams').first.evaluate(
+        "table => [...table.querySelectorAll('tr')].filter(row => row.querySelector('td'))"
+        ".map(row => [...row.cells].map(cell => cell.textContent))")
+    assert shown == [list(row) for row in views[0].rows]
+
+
+def test_fill_save_reload_one_real_run_and_result_pages(tmp_path: Path, browser: Browser) -> None:
+    """#972 施工二：只留一次真算。改表後三路變、表內外與底構造互不干擾交給命令列考卷
+    test_measured_cli_end_to_end::test_measured_three_real_cli_runs_isolate_each_frequency；比較頁的表差異列
+    交給 test_gui_compare_browser::test_measured_table_changes_render_on_both_sides。這一題守網頁填的值真的進了計算、
+    結果頁顯示的是這一次的結果。"""
     (tmp_path / 'schemes').mkdir()
     (tmp_path / 'schemes' / 'small.json').write_text(Scheme.model_validate(small_document()).model_dump_json())
     start = time.perf_counter()
@@ -117,24 +101,18 @@ def test_fill_save_reload_three_real_runs_and_result_pages(tmp_path: Path, brows
         apply_draft(page)
         saved = _save_readback(page, 'measured-a')
         assert floor(saved)['points'] == table_points() and 'fill_rule' in floor(saved)
-        aid, a = calculate(page, tmp_path, start + 600)
-        page.locator('#point-floor-1-real_pa_s_m').fill('1100')
-        _save_readback(page, 'measured-b')
-        bid, b = calculate(page, tmp_path, start + 600)
-        verify_table_lanes_changed(a, b)
-        page.locator('#point-floor-1-real_pa_s_m').fill(str(table_points()[1]['real_pa_s_m']))
-        page.locator('#layer-floor-0-thickness_m').fill('0.08')
-        _save_readback(page, 'measured-c')
-        cid, c = calculate(page, tmp_path, start + 600)
-        verify_crossover_and_base_isolation(a, c)
-        for identifier in (aid, bid, cid):
-            for width in (1400, 390):
-                with _open(browser, f'{base}/results/{identifier}', viewport_width=width) as shown:
-                    check_result_page(shown.page)
-                    shown.page.locator('#measured-walls').screenshot(path=tmp_path / f'result-{identifier}-{width}.png')
-                    assert shown.page_errors == []
-        with _open(browser, f'{base}/compare/{aid}/{bid}') as compared:
-            expect(compared.page.locator('.measured-changes')).to_contain_text(['300 Hz', '300 Hz'])
-            assert compared.page_errors == []
+        # 改兩格後不另外按存檔：「計算」自己先存目前的表單再起算，改了沒進計算就會紅。
+        page.locator('#point-floor-0-real_pa_s_m').fill(str(TYPED_REAL))
+        page.locator('#layer-floor-0-thickness_m').fill(str(TYPED_BASE_THICKNESS))
+        identifier, result = calculate(page, tmp_path, start + 600)
+        assert page.locator('#result-link').get_attribute('href') == f'/results/{identifier}'
+        on_disk = json.loads((tmp_path / 'schemes' / 'measured-a.json').read_text())
+        check_typed_values_reached_calculation(on_disk, result)
+        for width in (1400, 390):
+            with _open(browser, f'{base}/results/{identifier}', viewport_width=width) as shown:
+                check_result_page(shown.page)
+                check_page_shows_this_result(shown.page, identifier, result)
+                shown.page.locator('#measured-walls').screenshot(path=tmp_path / f'result-{identifier}-{width}.png')
+                assert shown.page_errors == []
         assert watched.page_errors == []
-    note(f'實測填表、存讀、三份真算與結果頁整題牆鐘：{time.perf_counter() - start:.3f} 秒')
+    note(f'實測填表、存讀、一份真算與結果頁整題牆鐘：{time.perf_counter() - start:.3f} 秒')
