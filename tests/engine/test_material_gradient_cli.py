@@ -77,10 +77,10 @@ PRESETS: tuple[str | None, ...] = CASES[DESCENT_CASE]
 PRESET_TEXT = ",".join("none" if preset is None else preset for preset in PRESETS)
 OUTSIDE_FAMILY = "fabric_pet_a_gap100"  # construction_presets.toml 有、material_gradient.toml 的家族清單沒有
 FREQUENCY_NAME, BAND_NAME = "fem_reduced_holdout_frequency_db", "fem_reduced_holdout_band_db"
-# 考卷只為了快把兩個步數上限調小（正式 30 與 5）；其他設定照正式設定檔。
-NARROWED_STEPS = {"max_steps": 3, "steps": 2}
+# 考卷只為了快把兩個步數上限調小（正式 30 與 5），換樣板段的求值上限調成 1（第 0 輪就停、不求值，庚三另有考卷）。
+NARROWED_STEPS = {"descent.max_steps": 3, "retune.steps": 2, "templates.max_evaluations": 1}
 # 同一個根、另一份設定（只差下降步數上限）：資料夾名要跟著不同。
-OTHER_STEPS = {"max_steps": 2, "steps": 2}
+OTHER_STEPS = {"descent.max_steps": 2, "retune.steps": 2, "templates.max_evaluations": 1}
 MOVED_SPEAKER, MOVED_SEAT, MOVE_M = "left", "front", 0.1
 OTHER_DENSITY, OTHER_SPEED = 1.18, 340.0
 # 同網格、同座標、另一組空氣建的替身（各有合格收據）：探針用的那份空氣兩格都換，拒收題各只換一格。
@@ -182,8 +182,8 @@ def _schemes() -> dict[str, Scheme]:
 
 def _settings_text(steps: dict[str, int]) -> str:
     text = config_path("material_gradient.toml").read_text(encoding="utf-8")
-    for key, value in steps.items():
-        text = re.sub(rf"(?m)^{key} = \d+$", f"{key} = {value}", text)
+    for (section, name), value in ((key.split(".", 1), value) for key, value in steps.items()):  # 鍵寫「表.鍵」
+        text = re.sub(rf"(?ms)(^\[{section}\]$.*?^){name} = \d+$", rf"\g<1>{name} = {value}", text, count=1)
     return text
 
 
@@ -193,7 +193,7 @@ def _inputs(directory: Path) -> None:
     for name, steps in (("settings.toml", NARROWED_STEPS), ("settings-other.toml", OTHER_STEPS)):
         (directory / name).write_text(_settings_text(steps), encoding="utf-8")
         narrowed = load_material_gradient_settings(directory / name)
-        assert {"max_steps": narrowed.descent.max_steps, "steps": narrowed.retune.steps} == steps
+        assert (narrowed.descent.max_steps, narrowed.retune.steps, narrowed.templates.max_evaluations) == (*steps.values(),)
 
 
 def _env(directory: Path) -> dict[str, str]:
@@ -471,8 +471,8 @@ def _json(path: Path) -> Record:
 
 
 def _without_hash(result: Record) -> Record:
-    """結果檔扣掉帳本整份雜湊（帳本的秒數每跑不同，雜湊跟著不同）。"""
-    return {key: value for key, value in result.items() if key != "ledger_sha256"}
+    """結果檔扣掉兩本帳的整份雜湊（帳本的秒數每跑不同，雜湊跟著不同）。"""
+    return {key: value for key, value in result.items() if key not in ("ledger_sha256", "template_ledger_sha256")}
 
 
 def _kept_materials(runs: tuple[Path, Record]) -> dict[str, SurfaceMaterial]:
@@ -572,7 +572,7 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
                          "material_digest": endpoint.material_digest(material)})
         offset += size
     assert result["surfaces"] == expected
-    assert (result["value"], result["stop_reason"], result["evaluations"]) == (
+    assert (result["value"], result["round_stop_reason"], result["evaluations"]) == (
         last.value, last.stop_reason, last.decision.total_evaluations)
     assert result["components"] == {"own_line_ripple_rms_db": last.components[0],
                                     "seat_robustness_rms_db": last.components[1]}

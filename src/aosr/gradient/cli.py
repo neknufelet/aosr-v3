@@ -1,4 +1,4 @@
-"""牆面材料梯度搜尋命令列（#561 辛一、辛三）：``python -m aosr.gradient.cli start|resume|stop|endpoint|report``。
+"""牆面材料梯度搜尋命令列（#561 辛一、辛三、庚三）：``python -m aosr.gradient.cli start|resume|stop|endpoint|report``。
 
 - ``start --scheme <方案檔> --surrogate <替身 npz> --presets <六個 id，逗號分隔，不貼的面寫 none> --purpose <用途>
   --root <資料夾根> [--settings <material_gradient.toml>] [--capabilities <能力表>] [--engine-commit <提交>]``：
@@ -7,7 +7,8 @@
   寫 ``project.json``，在雙精度子行程把整條鏈跑完。拒收不建資料夾。
 - ``resume <資料夾>``：拿鎖、重算現在的物理身分跟 ``project.json`` 比（不同就拒收），再逐格核輸入（方案檔雜湊、
   方案座標、替身過閘門、manifest 與收據摘要、設定指紋；子行程重建目標前會再核一次），清掉留下的 ``stop`` 記號，
-  子行程照帳本接著跑（標頭對不上拒收；前段沒寫完重跑前段）。
+  子行程照帳本接著跑（標頭對不上拒收；前段沒寫完重跑前段）；庚二帳本已收尾、還沒有 ``templates.jsonl`` 的資料夾
+  （庚三之前跑完的）接續就開換樣板段，跑完把 ``result.json`` 覆寫成 v3。介面跟庚三之前一樣。
 - ``stop <資料夾>``：建 ``stop`` 記號，不拿鎖，回 0；子行程在下一次求值之前停。
 - ``endpoint <資料夾>``：搜尋跑完之後拿鎖、起雙精度子行程做終點（``endpoint_run``）：同一道輸入閘門、完整模型重算
   ``result.json`` 那一點、方案原本六面的完整模型基準、匯出完整方案檔 ``scheme-endpoint.json``、寫 ``endpoint.json``；
