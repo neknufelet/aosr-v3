@@ -79,6 +79,40 @@ status = "baseline"
 source_kind = "product_choice"
 source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
 
+# 第三階段牆面材料梯度搜尋專用的三格（鍵前綴 stage_three_gradient.，2026-10-30 老闆拍 B：大峰的平滑代理進梯度目標當試驗）。
+# 只有梯度目標的 JAX 版讀這三格；第一階段合分（src/aosr/scoring/stage_one_score.py）與第二階段低頻頻響類只讀 stage_one_low_frequency.* 那幾格、
+# 兩邊的設定指紋都不含這三格，所以加這三格不動第一階段名次、也不動第二階段的比較身分。代理＝主位扣自己直線後的殘差、計分範圍內部點（去掉兩端）、
+# 左右兩支一起取的軟最大值（溫度 T 的 log-sum-exp），真大峰（timbre._features 最高峰）夾在 [代理 − T·ln N, 代理] 之間；誰能判它錯：終點完整模型同時印代理與真大峰，
+# 代理降而真大峰升就是代理錯。權重 0.25 是老闆 2026-10-30 的初始試驗值，不是聽感數字；第三場表要同時列舊分數（兩分項）與新分數（加代理項）。
+[[stage_one.setting]]
+key = "stage_three_gradient.big_peak_proxy_temperature_db"
+value = 0.25
+unit = "dB"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "主對話 2026-10-30 暫定：軟最大值高估真大峰最多 T·ln N（N＝兩支喇叭的計分範圍內部點數，示範房 188 點軸約 2×186、ln 約 5.9），T＝0.25 dB 時最多約 1.5 dB；T 越小越貼近真大峰、目標越接近不平滑，第三場跑完再看要不要調"
+
+[[stage_one.target]]
+key = "stage_three_gradient.big_peak_proxy_db"
+value = 0.0
+unit = "dB"
+cost_shape = "less_is_better"
+worse_reference = 1.0
+status = "baseline"
+source_kind = "product_choice"
+source = "老闆 2026-10-30（對話，#562 下一塊那一題）：「選 B，是因為它是最小、能直接驗證目前問題的實驗。」「0.25 只能當初始試驗值。尤其第二場相對原牆約改善 0.494 分、最大峰指標卻惡化約 6.09 dB；如果代理剛好等於這個峰值，0.25 對這段變化的代價就是約 1.52 分，足以逆轉排名。所以第三場一定要同時列舊分數與新分數，避免只因加了權重、排名改變，就誤以為聲學真的改善。」較差參考取 1.0、跟兩個分項同一把尺，1 dB 的代理乘權重就是代價增量"
+
+[[stage_one.weight]]
+key = "stage_three_gradient.component_weights"
+
+[[stage_one.weight.item]]
+name = "big_peak_proxy_db"
+value = 0.25
+note = "大峰代理（主位殘差的軟最大值，左右一起取）在梯度目標裡的權重；初始試驗值，只進第三階段梯度目標，不進第一階段篩選分數、不進第二階段總分"
+status = "baseline"
+source_kind = "product_choice"
+source = "老闆 2026-10-30（對話，#562 下一塊那一題）：「選 B，是因為它是最小、能直接驗證目前問題的實驗。」「0.25 只能當初始試驗值。尤其第二場相對原牆約改善 0.494 分、最大峰指標卻惡化約 6.09 dB；如果代理剛好等於這個峰值，0.25 對這段變化的代價就是約 1.52 分，足以逆轉排名。所以第三場一定要同時列舊分數與新分數，避免只因加了權重、排名改變，就誤以為聲學真的改善。」較差參考取 1.0、跟兩個分項同一把尺，1 dB 的代理乘權重就是代價增量"
+
 [[purpose]]
 name = "dedicated_two_channel_listening_room"
 
