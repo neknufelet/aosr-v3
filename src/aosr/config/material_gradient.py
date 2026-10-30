@@ -21,6 +21,8 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, S
 
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+# 「不貼」（保留方案原本那面的牆）的保留目標代號：換樣板的目標是家族代號或它，所以家族不准叫這個名字。唯一一份來源。
+NONE_TARGET: Final = "none"
 
 
 def _exact_float(value: object) -> object:
@@ -117,6 +119,8 @@ class FamilySettings(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
+        if self.id == NONE_TARGET:
+            raise ValueError(f"家族代號不能用 {NONE_TARGET}：{NONE_TARGET} 是「不貼」的保留代號，家族不能用")
         if len(set(self.presets)) != len(self.presets):
             raise ValueError(f"家族 {self.id} 的 preset 重複")
         thicknesses = self.thicknesses_m

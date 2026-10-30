@@ -27,10 +27,10 @@ from typing import BinaryIO, Final, Literal, NamedTuple, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from aosr.config.material_gradient import MaterialGradientSettings
+from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
 from aosr.gradient.material_gradient import STOP_REASONS, DescentResult
 from aosr.gradient.template_rounds import (
-    CANDIDATE_SEPARATOR, NONE_TARGET, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
+    CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
     QuickScore, Surfaces, alternatives, next_round_bound, preset_for_target, retune_count,
 )

@@ -176,6 +176,21 @@ def test_alternatives_are_other_families_then_none_in_surface_order() -> None:
     assert list(rounds.alternatives(surfaces, settings)) == expected
 
 
+def test_family_id_none_is_reserved_for_keeping_the_wall() -> None:
+    """抓家族叫 none 也收下（「不貼」的代號被家族佔走：可換目標漏掉那個家族也漏掉不貼、換過去變成不貼）：
+    正式設定把第一個家族改名 none，重新驗證就拒收、訊息講明是保留代號。"""
+    document = _settings().model_dump()
+    document["family"][0]["id"] = "none"
+    with pytest.raises(ValueError, match="保留"):
+        MaterialGradientSettings.model_validate(document)
+
+
+def test_target_order_has_no_duplicate_ids() -> None:
+    """抓目標代號重複（家族代號撞「不貼」或彼此相撞）：正式設定的目標順序每個代號只出現一次、不貼在最後。"""
+    order = rounds.target_order(_settings())
+    assert len(set(order)) == len(order) and order[-1] == "none"
+
+
 def _swap_start() -> tuple[tuple[gradient_search.SurfaceDesign, ...], np.ndarray]:
     context = _context()
     designs = rounds.designs_for_surfaces(_surfaces(START), context)

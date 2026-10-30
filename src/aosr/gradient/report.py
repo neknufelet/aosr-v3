@@ -143,7 +143,7 @@ def _quick_label(row: TemplateRow, retuned: Mapping[str, tuple[float, float]]) -
     if row.candidate is None or row.candidate not in retuned:
         return QUICK_ONLY + ("" if row.swapped_retunable else f"、{NOT_RETUNABLE}")
     value, improvement = retuned[row.candidate]
-    note = "" if row.swapped_retunable else f"（換過去那面{NOT_RETUNABLE}，重調的是其他面的空腔）"
+    note = "" if row.swapped_retunable else f"（換過去那面{NOT_RETUNABLE}，重調照步數走其他面的空腔；整房都沒有空腔時是同一點重複求值）"
     return f"{RETUNED}{note}：重調後 {value:.6f}、改善 {improvement:+.6f}"
 
 

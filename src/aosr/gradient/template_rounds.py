@@ -7,13 +7,14 @@
 ``[templates].max_per_round`` 個進重調。基準＝目前配置 :func:`retune_cavities`；每個候選＝換過去再 :func:`retune_cavities`
 （同步數）。重調是全部面的空腔一起走（決策紙「決定」第 3 條：所有牆的空腔做有限步數的梯度重調、基準同步數），
 換過去那面若沒有空腔變數（24K、96K 的樣板沒有空氣層、合法厚度只有一種；「不貼」沒有變數），它本身沒有可重調的變數，
-重調動的是其他面的空腔。改善＝基準重調後的值減候選重調後的值，最好的「超過」``[candidates].improvement_threshold``
+重調照步數走其他面的空腔（整房都沒有空腔時是同一點重複求值）。改善＝基準重調後的值減候選重調後的值，最好的「超過」``[candidates].improvement_threshold``
 才接受、交出它重調後的配置與 θ；都沒超過就交出重調後的基準、停在 :data:`TEMPLATE_STOP_NO_IMPROVEMENT`（字面照老闆的話：
 只說在本輪已確認的單牆候選與預算內沒找到，不說排除了單牆換樣板，也沒涵蓋兩面一起換）。
 
 不同配置是不同的設計清單、不同的目標函式：每個（面, 目標）用 ``TemplateContext.objective_for`` 重建一份
 ``chain_objective``，編譯版掛在那份目標函式自己身上（``compiled_evaluator``），配置之間不共用快取、不會撞；
-快速評分完就丟、進重調的再重建一次（多幾次編譯，手上最多同時留「目前配置」與一個候選，記憶體可控）。
+快速評分完就丟；進重調的候選各自重建一份（多幾次編譯），最多 ``max_per_round`` 份同時在手（加上目前配置那一份）。
+「不貼」的保留代號 :data:`~aosr.config.material_gradient.NONE_TARGET` 只住在設定層（載入器拒收叫這個名字的家族）。
 
 純函式，沒有命令列、沒有行程、不印東西；給了 ``should_stop`` 就在每次求值之前查一次。精度跟 θ 走。
 整段、帳本與接續在 ``template_segment``、帳本格式在 ``template_ledger``。
@@ -29,7 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.construction_presets import ConstructionPreset
-from aosr.config.material_gradient import MaterialGradientSettings
+from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.material_gradient import (
     ChainObjective, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta,
@@ -40,7 +41,6 @@ from aosr.materials.construction_models import SurfaceMaterial
 from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays
 
 
-NONE_TARGET: Final = "none"
 TEMPLATE_STOP_NO_ALTERNATIVES: Final = "沒有可換的樣板"
 TEMPLATE_STOP_NO_IMPROVEMENT: Final = "在本輪已確認的單牆候選與計算預算內，未找到超過改善門檻的方案"
 TEMPLATE_STOP_MAX_EVALUATIONS: Final = "換樣板求值到上限"
