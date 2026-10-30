@@ -495,7 +495,7 @@ def test_descent_rerun_is_bitwise_identical(runs: tuple[Path, dict[str, Record]]
 # ---- 合成目標（不走替身，父行程單精度） ----
 
 def _aux(value: jax.Array) -> GradientObjectiveArrays:
-    return GradientObjectiveArrays(value[None], value[None], value, value, value, value, value)
+    return GradientObjectiveArrays(value[None], value[None], value, value, value, value, value, value)
 
 
 def test_armijo_backtracks_when_first_trial_only_slightly_decreases() -> None:
@@ -752,8 +752,9 @@ def test_ledger_rejects_header_with_other_scoring_constants(chain_model: Reduced
     ledger.read_ledger(source, expected_header=_header(chain_model))
     for score in (_reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz)):
         other = _header(chain_model, score)
-        assert other.model_dump() | {"objective_fingerprint": None} == (
-            _header(chain_model).model_dump() | {"objective_fingerprint": None})
+        # 評分指紋與標頭記的分數常數（#561 壬一審查 B）都從評分設定來，其餘逐格相同。
+        scoring = {"objective_fingerprint": None, "score_constants": None}
+        assert other.model_dump() | scoring == _header(chain_model).model_dump() | scoring
         with pytest.raises(ValueError, match="objective_fingerprint"):
             ledger.read_ledger(source, expected_header=other)
 

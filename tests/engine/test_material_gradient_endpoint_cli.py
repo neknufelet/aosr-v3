@@ -63,9 +63,10 @@ COMPUTED_FLOATS: dict[str, tuple[str, ...]] = {
     "report": ("reduced_total", "reduced_components", "full_total", "full_components", "total_difference",
                "total_difference_bound", "max_frequency_db", "rms_floor_db", "frequency_db_by_seat", "band_db_by_seat",
                "partial_band_db_by_seat", "big_peak_db_by_speaker", "big_peak_db", "reduced_objective_total",
-               "reduced_proxy_db", "full_objective_total", "full_proxy_db"),
+               "reduced_proxy_db", "full_objective_total", "full_proxy_db", "reduced_interior_max_db",
+               "full_interior_max_db"),
     "baseline": ("full_total", "full_components", "big_peak_db_by_speaker", "big_peak_db", "full_objective_total",
-                 "full_proxy_db"),
+                 "full_proxy_db", "full_interior_max_db"),
     "improvement": ("total", "components", "objective_total", "proxy_db"),
 }
 COMPUTED_PATHS = [[part, name] for part, names in COMPUTED_FLOATS.items() for name in names]
@@ -196,11 +197,16 @@ def _kept_resume(directory: Path, folder: Path) -> Record:
             "ledger_unchanged": (copy / "ledger.jsonl").read_bytes() == before}
 
 
+_PROXY_FIELDS = ("reduced_objective_total", "reduced_proxy_db", "full_objective_total", "full_proxy_db",
+                 "proxy_gap_bound_db", "reduced_interior_max_db", "full_interior_max_db")
+
+
 def _downgraded_ledger(path: Path, version: str) -> None:
     """帳本換回加代理之前的形狀：標頭版本換成上一版，每列拿掉舊合分、只留兩分項（值不動，只換形狀）。"""
     lines = path.read_bytes().splitlines()
     header = json.loads(lines[0])
     header["ledger_version"] = version
+    header.pop("score_constants")
     rows = []
     for line in lines[1:]:
         row = json.loads(line)
@@ -230,9 +236,8 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
     (copy / "result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     record = _json(copy / "endpoint.json")
     record["format_version"] = endpoint_run.LEGACY_ENDPOINT_VERSION
-    for part, names in (("report", ("reduced_objective_total", "reduced_proxy_db", "full_objective_total",
-                                    "full_proxy_db", "proxy_gap_bound_db")),
-                        ("baseline", ("full_objective_total", "full_proxy_db")),
+    for part, names in (("report", _PROXY_FIELDS), ("baseline", ("full_objective_total", "full_proxy_db",
+                                                                  "full_interior_max_db")),
                         ("improvement", ("objective_total", "proxy_db"))):
         for name in names:
             cast(Record, record[part]).pop(name)
@@ -356,8 +361,9 @@ def test_endpoint_report_and_baseline_equal_direct_calls(runs: tuple[Path, Recor
     assert json.loads(record.report.to_json()) == probe["report"]
     assert record.baseline.full_total.hex() == probe["baseline_total"]
     assert [value.hex() for value in record.baseline.full_components] == probe["baseline_components"]
-    assert [float(cast(float, value)).hex() for value in (record.baseline.full_objective_total,
-                                                           record.baseline.full_proxy_db)] == probe["baseline_objective"]
+    assert [float(cast(float, value)).hex() for value in (
+        record.baseline.full_objective_total, record.baseline.full_proxy_db,
+        record.baseline.full_interior_max_db)] == probe["baseline_objective"]
     assert record.baseline.big_peak_db_by_speaker == probe["baseline_peaks"]
     assert record.baseline.full_solves == len(FEM_LANE_FREQUENCIES_HZ)
 
@@ -427,7 +433,7 @@ def test_exported_scheme_keeps_original_walls_and_writes_specs(runs: tuple[Path,
 
 def test_report_after_endpoint_prints_endpoint_section(runs: tuple[Path, Record]) -> None:
     """抓報告不讀 endpoint.json、或印了終點還留著「未做」那行、或沒改檔也印過期：有終點一節（替身、完整模型各自的
-    舊合分／新合分／代理，完整模型另有真大峰與上界、「代理 − 真大峰」一行、基準、改善、匯出方案），數字由考卷從
+    舊合分／新合分／代理，完整模型另有真大峰與上界、「代理 − 內部最大殘差」與「真大峰」兩行、真大峰不大於代理、基準、改善、匯出方案），數字由考卷從
     endpoint.json 自己格式化；舊合分、新合分、代理、真大峰四個字樣都在（#561 壬一：舊分數與新分數並列）。"""
     lines = _report_lines(_section(runs, "endpoint", "report_after"))
     record = _record(_folder(runs))
@@ -444,8 +450,13 @@ def test_report_after_endpoint_prints_endpoint_section(runs: tuple[Path, Record]
     assert any(line.startswith(
         f"  完整模型：舊合分 {report.full_total:.6f}／新合分 {report.full_objective_total:.6f}／代理 {report.full_proxy_db:.3f} dB"
         f"／真大峰 {report.big_peak_db:.3f} dB／上界 {report.proxy_gap_bound_db:.3f} dB") for line in lines)
-    gap = report.full_proxy_db - report.big_peak_db
-    assert (f"  終點代理 − 真大峰 ＝ {gap:+.6f} dB（應在 0～上界 {report.proxy_gap_bound_db:.6f} dB 之間）") in lines
+    interior = report.full_interior_max_db
+    assert interior is not None
+    gap = report.full_proxy_db - interior
+    assert (f"  終點代理 − 內部最大殘差 ＝ {gap:+.6f} dB（應在 0～上界 {report.proxy_gap_bound_db:.6f} dB 之間）") in lines
+    assert any(line.startswith(f"  終點真大峰 {report.big_peak_db:.3f} dB（偵測器；低於內部最大殘差 {interior:.3f} dB")
+               for line in lines)
+    assert report.big_peak_db <= report.full_proxy_db
     assert any(f"基準（方案原本六面，完整模型）：舊合分 {baseline.full_total:.6f}／新合分 {baseline.full_objective_total:.6f}"
                in line for line in lines)
     assert any(f"改善（基準減終點，完整模型）：舊合分 {gain.total:+.6f}" in line
@@ -454,10 +465,6 @@ def test_report_after_endpoint_prints_endpoint_section(runs: tuple[Path, Record]
     text = "\n".join(lines)
     assert all(word in text for word in ("舊合分", "新合分", "代理", "真大峰"))
     assert any(f"匯出方案：{record.exported_scheme}" in line for line in lines)
-
-
-_PROXY_FIELDS = ("reduced_objective_total", "reduced_proxy_db", "full_objective_total", "full_proxy_db",
-                 "proxy_gap_bound_db")
 
 
 def test_endpoint_report_carries_proxy_fields_and_rejects_non_finite(runs: tuple[Path, Record]) -> None:

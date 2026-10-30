@@ -49,15 +49,22 @@ def _settings(base: MaterialGradientSettings, override: object) -> MaterialGradi
     return MaterialGradientSettings.model_validate({**base.model_dump(), "candidates": candidates.model_dump()})
 
 
+# 合成目標的分數常數：0.5·(v／1)＋0.5·(v／1)＝v（舊合分）、v＋代理權重·0（新合分）。
+SYNTHETIC_SCORES = ledger.ScoreConstants(component_weights=(0.5, 0.5), worse_references=(1.0, 1.0), proxy_weight=0.5,
+                                         proxy_worse_reference=1.0, proxy_temperature_db=0.5)
+
+
 def synthetic_header(designs: tuple[gradient_search.SurfaceDesign, ...],
                      settings: MaterialGradientSettings) -> ledger.MaterialGradientHeader:
     """合成目標沒有替身也沒有評分常數：標頭的替身三格填固定字樣，評分指紋填固定字樣的 SHA-256（格式跟正式一樣）；
-    合成面都是可調面、沒有原牆，原牆摘要是空表；其他照正式算。"""
+    合成面都是可調面、沒有原牆，原牆摘要是空表；其他照正式算。分數常數配合成目標（分項兩格都是值、代理 0、
+    舊合分＝值）：兩分項各半、較差參考 1，兩個恆等式恰好成立（:data:`SYNTHETIC_SCORES`）。"""
     return ledger.MaterialGradientHeader(
         ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic",
         physics_identity="synthetic", surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
         variable_names=gradient_search.design_names(designs), settings_fingerprint=settings.fingerprint,
-        objective_fingerprint=hashlib.sha256(b"synthetic").hexdigest(), kept_digests={})
+        objective_fingerprint=hashlib.sha256(b"synthetic").hexdigest(), kept_digests={},
+        score_constants=SYNTHETIC_SCORES)
 
 
 def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], counter: list[int],
@@ -78,7 +85,7 @@ def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], coun
         jax.debug.callback(tick, theta)
         shift = theta - jnp.asarray(target, dtype=theta.dtype)
         value = jnp.sum(jnp.asarray(weight, dtype=theta.dtype) * shift * shift)
-        return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value)
+        return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value, value * 0.0)
 
     return objective
 
@@ -227,7 +234,7 @@ def _edge(problem: Record, base: MaterialGradientSettings) -> Record:
         def objective(values: jax.Array, weights: tuple[float, float] = weights) -> tuple[
                 jax.Array, GradientObjectiveArrays]:
             value = -weights[0] * values[0] - weights[1] * values[1]
-            return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value)
+            return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value, value * 0.0)
         result = gradient_search.projected_descent(objective, theta, (lower, upper), settings, limits=limits)
         rows[name] = {"stop_reason": result.stop_reason, "steps": len(result.steps) - 1,
                       "norms": [step.gradient_norm.hex() for step in result.steps]}

@@ -338,7 +338,9 @@ class EndpointReport(BaseModel):
     每座位、喇叭、頻點 |20·log10(|p_替身|/|p_完整|)| 的最大值（全軸），``rms_floor_db`` 是兩邊聲壓的均方根零判
     地板上限，``total_difference_bound`` 由兩者照 :func:`score_difference_bound` 推得。大峰是完整模型的。
     ``*_total``、``*_components``、差與上界都是舊合分（第一階段兩分項）；``*_objective_total``、``*_proxy_db`` 是梯度目標的
-    新合分與大峰代理（#561 壬一），``proxy_gap_bound_db`` 是 T·ln N。加代理之前寫的報告（endpoint.json v2）沒有這五格，是 None；
+    新合分與大峰代理（#561 壬一），``*_interior_max_db`` 是代理夾擠的對象（內部最大殘差：同一個殘差、同一組內部點、
+    左右取較大），``proxy_gap_bound_db`` 是 T·ln N：內部最大殘差 ≤ 代理 ≤ 內部最大殘差 ＋ 上界。真大峰（偵測器）只保證
+    不大於內部最大殘差。加代理之前寫的報告（endpoint.json v2）沒有這七格，是 None；
     新版必帶（由 ``endpoint_run.EndpointRecord`` 照版本守）。
     ``surfaces`` 每面帶 preset id 與樣板構造摘要（``material_digest``），入口已核兩者是同一份構造；這是換 θ 之前的
     樣板摘要，只改 θ 不會變，實際求解用的是換厚度、處理空腔後的材料。
@@ -374,17 +376,19 @@ class EndpointReport(BaseModel):
     full_objective_total: float | None = None
     full_proxy_db: float | None = None
     proxy_gap_bound_db: float | None = None
+    reduced_interior_max_db: float | None = None
+    full_interior_max_db: float | None = None
 
     @model_validator(mode="after")
     def _proxy_fields_together(self) -> Self:
         if len({value is None for value in self.proxy_fields()}) != 1:
-            raise ValueError("梯度目標的新合分、代理與上界五格要一起有、或一起沒有（加代理之前的報告）")
+            raise ValueError("梯度目標的新合分、代理、內部最大殘差與上界七格要一起有、或一起沒有（加代理之前的報告）")
         return self
 
     def proxy_fields(self) -> tuple[float | None, ...]:
-        """梯度目標那五格（照欄位順序）；新版全有、舊版全 None。"""
+        """梯度目標那七格（照欄位順序）；新版全有、舊版全 None。"""
         return (self.reduced_objective_total, self.reduced_proxy_db, self.full_objective_total, self.full_proxy_db,
-                self.proxy_gap_bound_db)
+                self.proxy_gap_bound_db, self.reduced_interior_max_db, self.full_interior_max_db)
 
     def to_json(self) -> str:
         return self.model_dump_json()
@@ -465,7 +469,9 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
         full_solves=validation.full_solves, model_digest=validation.model_digest,
         reduced_objective_total=reduced.objective_total, reduced_proxy_db=reduced.components[2],
         full_objective_total=full_reading.objective_total, full_proxy_db=full_reading.components[2],
-        proxy_gap_bound_db=proxy_gap_bound_db(constants))
+        proxy_gap_bound_db=proxy_gap_bound_db(constants),
+        reduced_interior_max_db=float(reduced_result.interior_max_residual_db),
+        full_interior_max_db=float(full_result.interior_max_residual_db))
     return EndpointResult(report, full, reduced_pressure)
 
 

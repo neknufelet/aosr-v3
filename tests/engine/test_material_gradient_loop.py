@@ -655,7 +655,9 @@ def test_resume_rejects_ledger_with_other_scoring_constants(runs: tuple[Path, Re
     assert variants
     for header in variants:
         assert header.objective_fingerprint != chain_header.objective_fingerprint
-        assert header.model_copy(update={"objective_fingerprint": chain_header.objective_fingerprint}) == chain_header
+        # 評分指紋與標頭記的分數常數（#561 壬一審查 B）都從評分設定來，其餘逐格相同。
+        assert header.model_copy(update={"objective_fingerprint": chain_header.objective_fingerprint,
+                                         "score_constants": chain_header.score_constants}) == chain_header
         with pytest.raises(ValueError, match="objective_fingerprint"):
             loop.resume_rounds(_never_called, _designs(DESCENT_CASE), _settings(), copy, header)
         assert copy.read_bytes() == before

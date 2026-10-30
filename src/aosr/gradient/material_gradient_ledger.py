@@ -32,7 +32,7 @@ import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import BinaryIO, Final, Literal, Self
+from typing import BinaryIO, Final, Literal, Protocol, Self
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -60,6 +60,76 @@ _PRE_LOOP_ORDER: Final[dict[str, int]] = {"descent": 0, "snap": 1, "retune": 2}
 _SEGMENT_PHASES: Final = frozenset(("descent", "retune", "baseline_retune", "candidate_retune"))
 _ROUND_PHASES: Final = frozenset(("baseline_retune", "candidate_jump", "candidate_retune", "round_decision"))
 _CANDIDATE_ID: Final = re.compile(r"^(?P<surface>.+):(?P<direction>thinner|thicker)$")
+# 讀回帳本時重算兩個分數恆等式的容差：編譯後的新合分、舊合分跟 Python 浮點照同一組常數重算，差在幾個末位內
+# （加法與乘除的次序、XLA 可合成融合乘加）。尺是那一格本身的這麼多個末位（``np.spacing``）；考卷用同一個數。
+SCORE_IDENTITY_ULPS: Final = 4
+
+
+class ScoreConstants(BaseModel):
+    """帳本標頭記的分數常數（#561 壬一審查 B）：第一階段兩分項（主位起伏、座位穩健性）的權重與較差參考、
+    代理的權重、較差參考與溫度。從這一次的目標常數抄（:func:`score_constants`），不從登記簿再讀一次；
+    讀回時逐列重算 ``screening_total ＝ Σ w_i·(c_i／ref_i)`` 與 ``value ＝ screening_total ＋ w_P·P／ref_P``。"""
+
+    model_config = _FROZEN
+    component_weights: tuple[float, float]
+    worse_references: tuple[float, float]
+    proxy_weight: float = Field(ge=0.0)
+    proxy_worse_reference: float = Field(gt=0.0)
+    proxy_temperature_db: float = Field(gt=0.0)
+
+    @field_validator("worse_references")
+    @classmethod
+    def _positive(cls, value: tuple[float, float]) -> tuple[float, float]:
+        if not all(item > 0.0 for item in value):
+            raise ValueError("較差參考必須是正數")
+        return value
+
+    def screening(self, components: Sequence[float]) -> float:
+        """照目標同一個次序重算舊合分：Σ w_i·(c_i／ref_i)。"""
+        total = 0.0
+        for weight, value, reference in zip(self.component_weights, components[:2], self.worse_references,
+                                            strict=True):
+            total += weight * (value / reference)
+        return total
+
+    def objective(self, screening_total: float, proxy_db: float) -> float:
+        """新合分：舊合分 ＋ w_P·P／ref_P。"""
+        return screening_total + self.proxy_weight * proxy_db / self.proxy_worse_reference
+
+
+def score_constants(constants: GradientObjectiveConstants) -> ScoreConstants:
+    """從這一次的目標常數抄分數常數（標頭用）。"""
+    weights, references = np.asarray(constants.component_weights), np.asarray(constants.worse_references)
+    return ScoreConstants(
+        component_weights=(float(weights[0]), float(weights[1])),
+        worse_references=(float(references[0]), float(references[1])),
+        proxy_weight=float(constants.proxy_weight), proxy_worse_reference=float(constants.proxy_worse_reference),
+        proxy_temperature_db=float(constants.proxy_temperature_db))
+
+
+class ScoredRow(Protocol):
+    """帳本列（兩本都是）：交（新合分, 舊合分, 三分項）。"""
+
+    def scores(self) -> tuple[float, float, Components]: ...
+
+
+def _close(actual: float, expected: float) -> bool:
+    return abs(actual - expected) <= SCORE_IDENTITY_ULPS * float(np.spacing(max(abs(actual), abs(expected))))
+
+
+def check_scores(constants: ScoreConstants, rows: Sequence[ScoredRow]) -> None:
+    """逐列守兩個分數恆等式（兩本帳本共用）：舊合分＝分項加權和、值（新合分）＝舊合分＋代理項；不等就拒收，
+    訊息講哪一列哪一格。上一版的列（沒有舊合分）不在這裡驗。"""
+    for index, row in enumerate(rows):
+        value, screening, components = row.scores()
+        expected = constants.screening(components)
+        if not _close(screening, expected):
+            raise ValueError(f"第 {index} 列的舊合分 screening_total {screening!r} 不等於分項加權和 {expected!r}"
+                             f"（分項 {components[:2]}）")
+        objective = constants.objective(screening, components[2])
+        if not _close(value, objective):
+            raise ValueError(f"第 {index} 列的值 value {value!r} 不等於舊合分加代理項 {objective!r}"
+                             f"（代理 {components[2]!r}）")
 
 
 class MaterialGradientHeader(BaseModel):
@@ -76,6 +146,14 @@ class MaterialGradientHeader(BaseModel):
     settings_fingerprint: str = Field(min_length=1)
     objective_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     kept_digests: dict[str, str]
+    # v5 必帶、v4 沒有（加代理之前的標頭沒記分數常數）。
+    score_constants: ScoreConstants | None = None
+
+    @model_validator(mode="after")
+    def _score_constants_by_version(self) -> Self:
+        if (self.score_constants is None) != (self.ledger_version == LEGACY_LEDGER_VERSION):
+            raise ValueError(f"{LEDGER_VERSION} 的標頭要記分數常數（score_constants），上一版沒有")
+        return self
 
     @field_validator("variable_names")
     @classmethod
@@ -291,6 +369,7 @@ def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: 
         surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
         variable_names=design_names(designs), settings_fingerprint=settings.fingerprint,
         objective_fingerprint=objective_fingerprint(objective_constants),
+        score_constants=score_constants(objective_constants),
         kept_digests={design.surface_id: digest for design in designs
                       if design.kept_material is not None and (digest := design_digest(design)) is not None})
 
@@ -520,6 +599,8 @@ def check_rows(header: MaterialGradientHeader, rows: Sequence[MaterialGradientRo
             if last.decision.round_evaluations != spent or last.decision.total_evaluations != total + spent:
                 raise ValueError(f"第 {last.round} 輪的求值次數跟各段下降記的對不上（或累計沒有逐輪相加）")
             total = last.decision.total_evaluations
+    if header.score_constants is not None:
+        check_scores(header.score_constants, rows)
 
 
 # ---- 寫與讀 ----

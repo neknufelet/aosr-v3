@@ -260,13 +260,13 @@ def test_no_alternatives_round_is_not_opened_and_ledger_says_so(tmp_path: Path) 
     settings = _settings().model_copy(update={"family": ()})
     context = _context(settings)
     surfaces = tuple((str(item[0]), None) for item in START)
-    start = templates.TemplateStart(surfaces, (), 1.5, 1.25, (1.0, 2.0, 0.5))
+    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, (2.0, 4.0, 0.5))
     header = synthetic_header(settings, surfaces, kept_walls(KEPT))
     result = segment.run_template_rounds(context, tmp_path / "t.jsonl", header, start)
     assert (result.stop_reason, result.rounds, result.evaluations) == (rounds.TEMPLATE_STOP_NO_ALTERNATIVES, 1, 0)
     rows = templates.read_template_ledger(tmp_path / "t.jsonl", settings=settings, start=start)[1]
     assert len(rows) == 1 and rows[0].decision is not None
-    assert (rows[0].decision.quick_count, rows[0].decision.next_round_bound, rows[0].value) == (0, None, 1.5)
+    assert (rows[0].decision.quick_count, rows[0].decision.next_round_bound, rows[0].value) == (0, None, 4.25)
 
 
 # ---- 合成目標：一輪的內容 ----

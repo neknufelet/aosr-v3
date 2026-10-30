@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
-from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT
+from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT, ScoreConstants, check_scores
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
@@ -65,12 +65,16 @@ class TemplateHeader(BaseModel):
     base_ledger_sha256: str = Field(pattern=_SHA256)
     initial_surfaces: tuple[tuple[str, str | None], ...] = Field(min_length=1)
     kept_digests: dict[str, str]
+    # v2 必帶、v1 沒有：分數常數抄庚二帳本標頭那一份（讀回時逐列重算兩個分數恆等式）。
+    score_constants: ScoreConstants | None = None
 
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
         ids = [surface_id for surface_id, _ in self.initial_surfaces]
         if len(set(ids)) != len(ids) or sorted(self.kept_digests) != sorted(ids):
             raise ValueError("起點配置的面代號不可重複，原牆摘要要恰好每一面一個")
+        if (self.score_constants is None) != (self.ledger_version == LEGACY_TEMPLATE_LEDGER_VERSION):
+            raise ValueError(f"{TEMPLATE_LEDGER_VERSION} 的標頭要記分數常數（score_constants），上一版沒有")
         return self
 
 
@@ -534,6 +538,8 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
         if settings is not None:
             _check_settings(label, parts.decision, decision, total, seconds, settings)
         previous, surfaces, total = parts.decision, parts.decision.surfaces, decision.total_evaluations
+    if header.score_constants is not None:
+        check_scores(header.score_constants, rows)
 
 
 def decisions_seconds(rows: Sequence[TemplateRow]) -> float:

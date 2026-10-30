@@ -3,10 +3,15 @@
 子行程（``_gradient_objective_jax_probe.py``）只求值；父行程用既有評估器（``evaluate_stage_one_low_frequency``）
 與既有合分（``score_stage_one``）當參考，殘差由評估器交回的直線自己扣，不另抄目標公式。溫度、權重、較差參考
 一律從登記簿讀（正式那份、或權重改 0 的暫存副本），考卷不寫那幾個數字。
+
+夾擠的對象是內部最大殘差：max r_內部 ≤ P ≤ max r_內部 ＋ T·ln N 恆成立；真大峰（偵測器）≤ max r_內部 ≤ P 也恆成立，
+P − 真大峰 落在 [0, 上界] 只在內部最大值是嚴格局部極大時（審查的「肩膀」反例：端點旁那一點最大、但右鄰更高）。
+代理可以是負的（內部全在擬合直線下），不截零。
 """
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import math
 import subprocess
@@ -28,8 +33,9 @@ from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import template_ledger as templates
 from aosr.gradient import template_segment as segment
-from aosr.gradient.report import PROXY_MISMATCH, proxy_peak_line
+from aosr.gradient.report import LEGACY_ENDPOINT_NOTE, PROXY_MISMATCH, proxy_lines
 from aosr.runtime import child_process_env, configure_jax
+from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import (
     PROXY, PROXY_TARGET_KEY, SETTING_KEYS, TEMPERATURE_KEY, WEIGHTS_KEY, gradient_objective_settings,
 )
@@ -46,6 +52,7 @@ from tests.engine._material_gradient_templates_probe import kept_walls
 from tests.engine._material_gradient_templates_probe import synthetic_header as template_header
 from tests.engine._placement import POINT_PLACEMENT
 from tests.engine._precision_contracts import contract_value
+from tests.engine._scheme_cache import shared_json
 from tests.engine._stage_one_low_frequency_curves import (
     AXIS_HZ, DIRECTIONS, candidate, demo_curve_db, gaussian_db, speaker, tilted_db,
 )
@@ -62,11 +69,46 @@ _PROBE = Path(__file__).with_name("_gradient_objective_jax_probe.py")
 STAGE_ONE_FINGERPRINT = "2d9c47e3be7e3ffcb29f4c6f57fc17fb55da1c0fb77f7bb25a449cc2673f98ea"
 REGISTRY_FINGERPRINT = "2e9bd2d4f0411968b314881aafdfcc4cb64cecb5b1b9e6aa1af06a39455aed32"
 LOW_FREQUENCY_COST_FINGERPRINT = "39965da27931909ece3e92e68c8f98caab7aea8ddb2b6a78fcb9b41bd83b52e2"
+# 控制組（審查第 3 條）：主線 a1be64b5 的第一階段原函式（``objective_constants`` ＋ ``objective_from_energies``）對
+# 這一支考卷每一組能量算的舊合分（直接、編譯後，``float.hex``）與編譯後梯度（十六進位逐格以逗號接起來的 SHA-256）。
+# 在主線那一份原始碼上先算好再釘（考卷不叫 git）；加代理之後舊合分、權重 0 的新合分與梯度都要逐位等於它。
+_MAINLINE_SCREENING: dict[str, tuple[str, str, str]] = {
+    "interior_spike": ("0x1.8414e09e863d8p+0", "0x1.8414e09e863d8p+0",
+                       "911a91d87762815f0a7645e600120ba3142f518ac4e32831c8795de61d7d7196"),
+    "right_spike": ("0x1.88acde59e875ep+0", "0x1.88acde59e8762p+0",
+                    "5ce4396f160a285a7d320b47bdc85ef58b0c694c3840fc9cf6996532e7c0b625"),
+    "plateau": ("0x1.8e64359de60c6p+0", "0x1.8e64359de60c8p+0",
+                "0515fff1239fb82e0b6ba609d051ac5165bdb7c9721809fd21ecd22534a6f534"),
+    "demo": ("0x1.d4686369efce8p+1", "0x1.d4686369efcecp+1",
+             "eabeec4bab0ff9737969e6d4128a00786d31b93e68405cd46541129fe0c813b7"),
+    "shoulder": ("0x1.f2428db07725cp+0", "0x1.f2428db077259p+0",
+                 "8e1bee09230b76f8899ca086acee4c9fb32e6e6e3be0049b536e1fe88ac215ca"),
+    "endpoint_max": ("0x1.c672b32671427p+0", "0x1.c672b32671427p+0",
+                     "5d5476821474a36c0c6e935d8c61e3175bc4b3b9c0d33cb242bd9bbd69bba721"),
+    "flat": ("0x1.28a274d45e359p+0", "0x1.28a274d45e330p+0",
+             "2b49de7fff3922023f45ecef9276fb5ab0e32fcff64d36c14b73a0b9d570f994"),
+    "review_shoulder": ("0x1.204bd0187a4c2p+3", "0x1.204bd0187a4c2p+3",
+                        "894cd2268c0294fa1082b21b4cbae79b9c08e6ac4e795a50f60e8f6966176f99"),
+    "review_negative": ("0x1.fbfbf7ebc7566p+1", "0x1.fbfbf7ebc7558p+1",
+                        "2d3a90ccfedd8d1793bde4468eca1fec19c4f2f0964ad62e9a673ba82744cd43"),
+}
 
 # 合成殘差：主位曲線＝一條斜線（擬合直線吃掉它）加一個形狀；每支喇叭各一條。
 _SPIKE_CASES = ("interior_spike", "right_spike")
-_DETECTOR_CASES = (*_SPIKE_CASES, "plateau", "demo")
+# 內部最大值是嚴格局部極大（平台算它的左端點）：偵測器的真大峰等於它。
+_STRICT_CASES = (*_SPIKE_CASES, "plateau", "demo")
+# 肩膀：端點 ＋12、端點旁 ＋9（內部最大、但右鄰更高，不是局部極大）、中段一個小峰（偵測器讀到的那一個）。
+_DETECTOR_CASES = (*_STRICT_CASES, "shoulder")
 _CASES = (*_DETECTOR_CASES, "endpoint_max", "flat")
+# 審查的兩個 9 點反例（主對話算的數）：計分範圍兩端各一點、對數等距，格子權重就是梯形（端點半格），
+# 殘差逐點等於下面的形狀。兩支喇叭、七個座位同一條曲線。
+_REVIEW_PATTERNS: dict[str, tuple[float, ...]] = {
+    "review_shoulder": (12.0, 9.0, -32.0 / 3.0, 1.0, -32.0 / 3.0, 1.0, -32.0 / 3.0, 9.0, 12.0),
+    "review_negative": (12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 12.0),
+}
+# 肩膀那一條的嚴格局部極大只有兩個 1 dB（第 3、5 點）：主對話用偵測器量的真大峰。
+_REVIEW_SHOULDER_DETECTOR_DB = 1.0
+_ALL_CASES = (*_CASES, *_REVIEW_PATTERNS)
 # 溫度往 0 走：登記值乘 2 的負次方（不寫溫度的數字）。
 _HALVINGS = 7
 # 中央差分以每一格能量本身為尺度，h/E=1e-5（同 test_stage_one_objective_jax）。
@@ -105,6 +147,10 @@ def _curves(name: str) -> tuple[tuple[FloatArray, FloatArray], ...]:
         return (base + _bump([middle], 2.0), base), (base + _bump([three], 7.0), base)
     if name == "plateau":
         return (base + _bump(list(range(middle - 2, middle + 3)), 4.0), base), (base + _bump([quarter], 1.0), base)
+    if name == "shoulder":
+        last = int(np.flatnonzero(_inside())[-1])
+        return ((base + _bump([last], 12.0) + _bump([last - 1], 9.0) + _bump([middle], 3.0), base),
+                (base + _bump([quarter], 1.0), base))
     if name == "endpoint_max":
         return (base + _bump([np.flatnonzero(_inside())[-1]], 12.0), base), (base + _bump([middle], 1.0), base)
     if name == "flat":
@@ -128,6 +174,25 @@ def _energies(name: str) -> FloatArray:
         levels = {"main": primary, **_surrounding(background)}
         channels.append([10.0 ** (levels[point.receiver_id] / 10.0) for point in _receivers().points])
     return np.asarray(channels, dtype=np.float64)
+
+
+def _review_axis() -> FloatArray:
+    lower, upper = registry_objective().stage_one.scored_range_hz
+    axis = lower * (upper / lower) ** (np.arange(9, dtype=np.float64) / 8.0)
+    axis[0], axis[-1] = lower, upper
+    return axis
+
+
+def _review_energies(name: str) -> FloatArray:
+    level = 10.0 ** ((80.0 + np.asarray(_REVIEW_PATTERNS[name])) / 10.0)
+    return np.asarray([[level] * len(_receivers().points)] * 2, dtype=np.float64)
+
+
+def _case_problem(name: str) -> Record:
+    review = name in _REVIEW_PATTERNS
+    axis, energies = (_review_axis(), _review_energies(name)) if review else (AXIS_HZ, _energies(name))
+    return {"frequencies_hz": [float(value).hex() for value in axis],
+            "energies": [[[float(value).hex() for value in row] for row in channel] for channel in energies]}
 
 
 def _evaluator_input(energies: FloatArray) -> StageOneLowFrequencyInput:
@@ -211,15 +276,14 @@ def _zero_weight_registry(directory: Path) -> Path:
     return path
 
 
-def _run_probe(directory: Path) -> Record:
+def _run_probe(directory: Path) -> str:
+    directory.mkdir(parents=True, exist_ok=True)
     temperature = registry_objective().temperature_db
     problem = {
         "purpose": PURPOSE, "receiver_set": _receivers().model_dump(mode="json"),
-        "frequencies_hz": [float(value).hex() for value in AXIS_HZ],
         "temperatures": [(temperature * 2.0 ** -k).hex() for k in range(_HALVINGS)],
         "registries": {"real": str(config_path("quality_targets.toml")), "zero": str(_zero_weight_registry(directory))},
-        "cases": {name: [[[float(value).hex() for value in row] for row in channel] for channel in _energies(name)]
-                  for name in _CASES},
+        "cases": {name: _case_problem(name) for name in _ALL_CASES},
     }
     problem_path, output_path = directory / "problem.json", directory / "output.json"
     problem_path.write_text(json.dumps(problem), encoding="utf-8")
@@ -229,12 +293,16 @@ def _run_probe(directory: Path) -> Record:
     process = subprocess.run([sys.executable, str(_PROBE), str(problem_path), str(output_path)],
                              cwd=directory, env=env, capture_output=True, text=True, timeout=300)
     assert process.returncode == 0, process.stdout + process.stderr
-    return cast(Record, json.loads(output_path.read_text(encoding="utf-8")))
+    return output_path.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
-def probe(tmp_path_factory: pytest.TempPathFactory) -> Record:
-    return _run_probe(tmp_path_factory.mktemp("gradient-objective-jax"))
+def probe(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> Record:
+    """一場 pytest 只跑一次子行程，平行的工人共用（照 ``_scheme_cache.shared_json``）；``-n 0`` 用自己的暫存目錄。"""
+    directory = (tmp_path_factory.mktemp("gradient-objective-jax") if worker_id == "master"
+                 else tmp_path_factory.getbasetemp().parent / "gradient-objective-jax-shared")
+    return cast(Record, json.loads(shared_json(tmp_path_factory, worker_id, "gradient-objective-jax",
+                                               lambda: _run_probe(directory))))
 
 
 def _case(probe: Record, name: str, registry: str = "real") -> Record:
@@ -245,20 +313,40 @@ def _field(probe: Record, name: str, kind: str, field: str, registry: str = "rea
     return _decode(cast(Record, _case(probe, name, registry)[kind])[field])
 
 
+def _scalar(probe: Record, name: str, kind: str, field: str, registry: str = "real") -> float:
+    return float(_field(probe, name, kind, field, registry)[0])
+
+
+def _digest(values: object) -> str:
+    return hashlib.sha256(",".join(cast(list[str], values)).encode()).hexdigest()
+
+
+def _detector_peak(evaluation: StageOneLowFrequencyEvaluation) -> float:
+    """終點 ``worst_big_peak`` 的取法：評估器 ``features[strongest_peak_index].depth_db`` 兩支取較大。"""
+    depths = []
+    for item in evaluation.speakers:
+        payload = item.payload
+        assert payload is not None and payload.strongest_peak_index is not None
+        depths.append(payload.features[payload.strongest_peak_index].depth_db)
+    return max(depths)
+
+
 # ---- 1. 夾擠 ----
 
 @pytest.mark.parametrize("name", _CASES)
 def test_proxy_is_sandwiched_by_interior_max(probe: Record, name: str) -> None:
     """抓代理不是軟最大值（漏了溫度、少乘 T、加了頻率權重、只取一支喇叭）：max r_內部 ≤ P ≤ max r_內部 ＋ T·ln N，
-    N＝兩支喇叭的內部點數；r 由考卷從評估器交回的直線自己扣。上界數字等於考卷自己算的 T·ln N。"""
+    N＝兩支喇叭的內部點數；r 由考卷從評估器交回的直線自己扣。上界數字等於考卷自己算的 T·ln N；目標交回的內部最大
+    殘差（終點報告那一格）等於考卷自己取的 max r_內部。"""
     energies = _energies(name)
     residuals = _residuals(energies, _evaluate(energies))
     top = float(np.max(residuals[:, 1:-1]))
     bound = registry_objective().temperature_db * math.log(_interior_count())
     assert float.fromhex(cast(str, _case(probe, name)["bound"])) == bound
     for kind in ("eager", "jit"):
-        proxy = float(_field(probe, name, kind, "big_peak_proxy_db")[0])
+        proxy = _scalar(probe, name, kind, "big_peak_proxy_db")
         assert top - _ruler(top) <= proxy <= top + bound + _ruler(top), (kind, proxy, top, bound)
+        assert abs(_scalar(probe, name, kind, "interior_max_residual_db") - top) <= _ruler(top), kind
     assert np.allclose(_decode(_case(probe, name)["residual"]).reshape(residuals.shape), residuals,
                        rtol=0.0, atol=_ruler(float(np.max(np.abs(residuals)))))
 
@@ -295,41 +383,112 @@ def test_endpoint_maximum_is_not_followed(probe: Record) -> None:
 # ---- 2. 代理對偵測器 ----
 
 @pytest.mark.parametrize("name", _DETECTOR_CASES)
-def test_proxy_minus_detector_peak_is_within_bound(probe: Record, name: str) -> None:
-    """抓代理跟終點那支偵測器量的不是同一個量：評估器 ``features[strongest_peak_index].depth_db`` 兩支取較大
-    （終點 ``worst_big_peak`` 的取法），內部有嚴格局部極大時它等於內部最大殘差，0 ≤ P − 真大峰 ≤ T·ln N。"""
+def test_detector_peak_never_exceeds_proxy(probe: Record, name: str) -> None:
+    """抓代理比終點那支偵測器量到的真大峰還低（夾錯對象）：真大峰 ≤ max r_內部 ≤ P 恆成立，含肩膀那一組
+    （內部最大值不是局部極大、偵測器讀到的是較低的那一個峰）。這一題只斷言真大峰 ≤ P，不斷言差多少。"""
     energies = _energies(name)
     evaluation = _evaluate(energies)
-    depths = []
-    for item in evaluation.speakers:
-        payload = item.payload
-        assert payload is not None and payload.strongest_peak_index is not None
-        depths.append(payload.features[payload.strongest_peak_index].depth_db)
-    peak = max(depths)
+    peak = _detector_peak(evaluation)
     top = float(np.max(_residuals(energies, evaluation)[:, 1:-1]))
-    assert abs(peak - top) <= _ruler(top)
+    assert peak <= top + _ruler(top)
+    for kind in ("eager", "jit"):
+        assert peak <= _scalar(probe, name, kind, "big_peak_proxy_db") + _ruler(peak), kind
+
+
+@pytest.mark.parametrize("name", _STRICT_CASES)
+def test_proxy_minus_detector_peak_is_within_bound_when_interior_max_is_strict(probe: Record, name: str) -> None:
+    """抓代理跟偵測器量的不是同一個量：內部最大值是嚴格局部極大時（先斷言這個條件：偵測器的真大峰等於
+    max r_內部），0 ≤ P − 真大峰 ≤ T·ln N。"""
+    energies = _energies(name)
+    evaluation = _evaluate(energies)
+    peak = _detector_peak(evaluation)
+    top = float(np.max(_residuals(energies, evaluation)[:, 1:-1]))
+    assert abs(peak - top) <= _ruler(top), "條件不成立：這一組的內部最大值不是嚴格局部極大"
     bound = registry_objective().temperature_db * math.log(_interior_count())
-    gap = float(_field(probe, name, "jit", "big_peak_proxy_db")[0]) - peak
+    gap = _scalar(probe, name, "jit", "big_peak_proxy_db") - peak
     assert -_ruler(peak) <= gap <= bound + _ruler(peak), (gap, bound)
 
 
-def test_report_line_flags_mismatch_without_judging() -> None:
-    """抓報告那一行的判法接反：差在 0～上界（各放寬地板）裡不印「代理與偵測器對不上」，代理比真大峰低、
-    或高過上界才印；只是多印一句（函式照常交回一行字，不拋錯）。"""
+def test_shoulder_detector_peak_is_far_below_proxy(probe: Record) -> None:
+    """審查的肩膀反例在 48 點搜尋軸上（偵測器只吃宣告軸）：端點旁那一點是內部最大、但右鄰（端點）更高，
+    偵測器不報它、讀的是中段那個小峰；代理仍夾著內部最大值，所以 P − 真大峰 超過上界——
+    「P − 真大峰 ∈ [0, 上界]」不是恆等式。"""
+    energies = _energies("shoulder")
+    evaluation = _evaluate(energies)
+    residuals = _residuals(energies, evaluation)
+    top = float(np.max(residuals[:, 1:-1]))
+    position = np.unravel_index(int(np.argmax(residuals[:, 1:-1])), residuals[:, 1:-1].shape)
+    assert position[1] == residuals.shape[1] - 3 and residuals[position[0], -1] > top, "題目要讓最大值落在端點旁"
+    bound = registry_objective().temperature_db * math.log(_interior_count())
+    proxy = _scalar(probe, "shoulder", "jit", "big_peak_proxy_db")
+    assert top - _ruler(top) <= proxy
+    assert proxy - _detector_peak(evaluation) > bound + _ruler(top)
+
+
+def _review_bound() -> float:
+    return registry_objective().temperature_db * math.log(2 * (len(_review_axis()) - 2))
+
+
+def test_review_shoulder_counterexample(probe: Record) -> None:
+    """主對話的 9 點肩膀：殘差逐點等於 [12, 9, −32/3, 1, −32/3, 1, −32/3, 9, 12]，內部最大 9、代理 ＝ 考卷自己算的
+    T·logsumexp（≈ 9.3466）；嚴格局部極大只有 1 dB，P − 1 遠超過上界 T·ln N，P − 內部最大 在 [0, 上界] 裡。"""
+    pattern = np.asarray(_REVIEW_PATTERNS["review_shoulder"])
+    residual = _decode(_case(probe, "review_shoulder")["residual"]).reshape(2, -1)
+    assert np.allclose(residual, pattern, rtol=0.0, atol=_ruler(12.0))
+    temperature, bound = registry_objective().temperature_db, _review_bound()
+    expected = _numpy_proxy(np.asarray([pattern, pattern]), temperature)
+    for kind in ("eager", "jit"):
+        proxy = _scalar(probe, "review_shoulder", kind, "big_peak_proxy_db")
+        assert abs(_scalar(probe, "review_shoulder", kind, "interior_max_residual_db") - 9.0) <= _ruler(9.0), kind
+        assert abs(proxy - expected) <= _ruler(expected), (kind, proxy, expected)
+        assert 0.0 <= proxy - 9.0 <= bound + _ruler(9.0), kind
+        assert proxy - _REVIEW_SHOULDER_DETECTOR_DB > bound, kind
+
+
+def test_negative_proxy_is_not_clipped(probe: Record) -> None:
+    """抓代理被截在 0（或新合分被假設不小於舊合分）：主對話的 9 點題 [12, 0, …, 0, 12]，擬合後內部全是 −1.5 dB，
+    代理 ＝ −1.5 ＋ T·ln N（≈ −0.8402）是負的；新合分 ＝ 舊合分 ＋ w·P／ref 比舊合分小；值與梯度都有限。"""
+    residual = _decode(_case(probe, "review_negative")["residual"]).reshape(2, -1)
+    assert np.allclose(residual[:, 1:-1], -1.5, rtol=0.0, atol=_ruler(1.5))
+    settings = registry_objective()
+    expected = -1.5 + _review_bound()
+    for kind in ("eager", "jit"):
+        proxy = _scalar(probe, "review_negative", kind, "big_peak_proxy_db")
+        screening = _scalar(probe, "review_negative", kind, "screening_total")
+        total = _scalar(probe, "review_negative", kind, "objective_total")
+        assert proxy < 0.0 and abs(proxy - expected) <= _ruler(expected), (kind, proxy, expected)
+        assert total < screening, kind
+        objective = screening + settings.proxy_weight * proxy / settings.worse_reference
+        assert abs(total - objective) <= _ruler(objective), kind
+    for key in ("gradient", "proxy_gradient"):
+        gradient = _decode(_case(probe, "review_negative")[key])
+        assert np.all(np.isfinite(gradient)) and np.any(gradient != 0.0), key
+
+
+def test_report_lines_flag_mismatch_without_judging() -> None:
+    """抓報告的判法接反或比錯對象：兩行——第一行「代理 − 內部最大殘差」在 0～上界（各放寬地板）裡不印
+    「代理與內部最大殘差對不上」，代理比內部最大低、或高過上界才印；第二行是真大峰（偵測器），真大峰低於內部最大
+    （肩膀）不算對不上。只是多印一句、不拋錯。加代理之前的終點只印一行註記。"""
     bound = registry_objective().temperature_db * math.log(_interior_count())
     floor = 1e-9
-    assert PROXY_MISMATCH not in proxy_peak_line("終點", 10.0 + bound / 2.0, 10.0, bound, floor)
-    assert PROXY_MISMATCH in proxy_peak_line("終點", 10.0 - 1.0, 10.0, bound, floor)
-    assert PROXY_MISMATCH in proxy_peak_line("終點", 10.0 + bound + 1.0, 10.0, bound, floor)
+    inside = proxy_lines("終點", 10.0 + bound / 2.0, 10.0, 10.0, bound, floor)
+    assert len(inside) == 2 and PROXY_MISMATCH not in "".join(inside)
+    assert "代理 − 內部最大殘差" in inside[0] and "真大峰" in inside[1]
+    assert PROXY_MISMATCH not in "".join(proxy_lines("終點", 10.0 + bound / 2.0, 10.0, 1.0, bound, floor))
+    assert PROXY_MISMATCH in proxy_lines("終點", 10.0 - 1.0, 10.0, 10.0, bound, floor)[0]
+    assert PROXY_MISMATCH in proxy_lines("終點", 10.0 + bound + 1.0, 10.0, 10.0, bound, floor)[0]
+    assert PROXY_MISMATCH not in "".join(proxy_lines("終點", -0.84, -1.5, None, bound, floor))
+    assert proxy_lines("終點", None, None, 3.0, None, floor) == [f"  終點代理：{LEGACY_ENDPOINT_NOTE}"]
 
 
 # ---- 3. 權重 0 ----
 
-@pytest.mark.parametrize("name", _CASES)
+@pytest.mark.parametrize("name", _ALL_CASES)
 def test_zero_weight_objective_and_gradient_equal_screening_bitwise(probe: Record, name: str) -> None:
     """抓權重沒從登記簿讀、或權重 0 時代理項仍漏進目標：登記簿暫存副本把權重改 0，新合分逐位等於舊合分
-    （直接與編譯後），新合分的梯度逐位等於舊合分的梯度；指紋跟正式那份不同（只改這一格就不能接續），
-    第一階段設定指紋相同。"""
+    （直接與編譯後），新合分的梯度逐位等於舊合分的梯度；而且都逐位等於主線（加代理之前）釘下的答案
+    （``_MAINLINE_SCREENING``）——同一支程式自己比自己抓不到第一階段那把尺被一起改掉。指紋跟正式那份不同
+    （只改這一格就不能接續），第一階段設定指紋相同。"""
     zero = cast(Record, probe["zero"])
     assert float.fromhex(cast(str, zero["weight"])) == 0.0
     assert zero["fingerprint"] != cast(Record, probe["real"])["fingerprint"]
@@ -339,9 +498,25 @@ def test_zero_weight_objective_and_gradient_equal_screening_bitwise(probe: Recor
         arrays = cast(Record, case[kind])
         assert arrays["objective_total"] == arrays["screening_total"], kind
     assert case["gradient"] == case["screening_gradient"]
+    eager, jit, gradient = _MAINLINE_SCREENING[name]
+    assert cast(Record, case["eager"])["objective_total"] == [eager]
+    assert cast(Record, case["jit"])["objective_total"] == [jit]
+    assert _digest(case["gradient"]) == gradient
 
 
-@pytest.mark.parametrize("name", _CASES)
+@pytest.mark.parametrize("name", _ALL_CASES)
+def test_screening_total_and_gradient_equal_mainline_pins(probe: Record, name: str) -> None:
+    """抓加代理時第一階段那把尺被動到：正式登記簿與權重 0 的副本，舊合分（直接、編譯後）與舊合分的梯度都逐位
+    等於主線 a1be64b5 釘下的答案。"""
+    eager, jit, gradient = _MAINLINE_SCREENING[name]
+    for registry in ("real", "zero"):
+        case = _case(probe, name, registry)
+        assert cast(Record, case["eager"])["screening_total"] == [eager], registry
+        assert cast(Record, case["jit"])["screening_total"] == [jit], registry
+        assert _digest(case["screening_gradient"]) == gradient, registry
+
+
+@pytest.mark.parametrize("name", _ALL_CASES)
 def test_screening_total_is_bitwise_the_stage_one_function(probe: Record, name: str) -> None:
     """抓舊合分被代理碰到（第一階段那把尺要一位都不動）：正式登記簿與權重 0 的副本，舊合分都逐位等於第一階段
     原函式 ``objective_from_energies`` 的合分（直接對直接、編譯對編譯），舊合分的梯度逐位等於原函式的梯度。"""
@@ -465,6 +640,7 @@ def _downgrade(path: Path, target: Path, version: str) -> Path:
     lines = path.read_bytes().splitlines()
     header = json.loads(lines[0])
     header["ledger_version"] = version
+    header.pop("score_constants")
     rows = []
     for line in lines[1:]:
         row = json.loads(line)
@@ -485,7 +661,7 @@ def _material_ledger(directory: Path) -> tuple[Path, ledger.MaterialGradientHead
     snapped = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs)
     header = synthetic_header(designs, settings)
     path = directory / "ledger.jsonl"
-    ledger.write_ledger(path, header, (ledger.snap_row(snapped, 3.5, 3.0, (1.0, 2.0, 2.0), 0.0, 0),))
+    ledger.write_ledger(path, header, (ledger.snap_row(snapped, 3.5, 3.0, (2.0, 4.0, 1.0), 0.0, 0),))
     return path, header
 
 
@@ -519,7 +695,7 @@ def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_
     settings = load_material_gradient_settings(config_path("material_gradient.toml")).model_copy(update={"family": ()})
     context = _context(settings)
     surfaces = tuple((wall, None) for wall in gradient_search.wall_surface_ids())
-    start = templates.TemplateStart(surfaces, (), 1.5, 1.25, (1.0, 2.0, 0.5))
+    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, (2.0, 4.0, 0.5))
     header = template_header(settings, surfaces, kept_walls(KEPT))
     path = tmp_path / "templates.jsonl"
     segment.run_template_rounds(context, path, header, start)
@@ -537,3 +713,85 @@ def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
     with pytest.raises(ValueError, match="大峰代理"):
         templates.read_template_ledger(path, expected_header=other)
+
+
+# ---- 8. 帳本的分數恆等式（審查第 4 條）----
+
+def _mutations(row: ledger.ScoredRow) -> dict[str, tuple[object, str]]:
+    """審查的四種記憶體植錯（每一種一個欄位、拒收訊息要點名的字）：值、舊合分、代理改 999、分項少一格。"""
+    value, screening, components = row.scores()
+    return {
+        "value": ({"value": value + 1.0}, "value"),
+        "screening_total": ({"screening_total": screening + 1.0}, "screening_total"),
+        "proxy": ({"components": (components[0], components[1], 999.0)}, "代理"),
+        "length": ({"components": components[:2]}, "第 0 列"),
+    }
+
+
+@pytest.mark.parametrize("mutation", ["value", "screening_total", "proxy", "length"])
+def test_material_ledger_rejects_broken_score_identity(tmp_path: Path, mutation: str) -> None:
+    """抓帳本收下對不上分數常數的列：v5 標頭帶分數常數，逐列守 value ＝ screening_total ＋ w_P·P／ref_P 與
+    screening_total ＝ Σ w_i·c_i／ref_i（容差是那一格幾個末位，跟 ``_gradient_objective_rows`` 同一個數）；
+    植錯後 ``check_rows`` 拒收、訊息點名第幾列與哪一格。控制組：原列照收。"""
+    path, header = _material_ledger(tmp_path)
+    _, rows = ledger.read_ledger(path, expected_header=header)
+    ledger.check_rows(header, rows)
+    update, named = _mutations(rows[0])[mutation]
+    with pytest.raises(ValueError, match=named):
+        ledger.check_rows(header, [rows[0].model_copy(update=cast(dict[str, object], update))])
+
+
+def _template_ledger(directory: Path) -> tuple[Path, templates.TemplateHeader]:
+    """沒有可換目標的一輪（不求值）寫一本 v2 換樣板帳本；起點的分數照合成分數常數對得上兩個恆等式。"""
+    settings = load_material_gradient_settings(config_path("material_gradient.toml")).model_copy(update={"family": ()})
+    surfaces = tuple((wall, None) for wall in gradient_search.wall_surface_ids())
+    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, (2.0, 4.0, 0.5))
+    header = template_header(settings, surfaces, kept_walls(KEPT))
+    path = directory / "templates.jsonl"
+    segment.run_template_rounds(_context(settings), path, header, start)
+    return path, header
+
+
+@pytest.mark.parametrize("mutation", ["value", "screening_total", "proxy", "length"])
+def test_template_ledger_rejects_broken_score_identity(tmp_path: Path, mutation: str) -> None:
+    """同上一題，換樣板帳本（v2）：植錯後 ``check_template_rows`` 拒收、訊息點名第幾列與哪一格。"""
+    path, header = _template_ledger(tmp_path)
+    _, rows = templates.read_template_ledger(path, expected_header=header)
+    templates.check_template_rows(header, rows)
+    update, named = _mutations(rows[0])[mutation]
+    broken = [rows[0].model_copy(update=cast(dict[str, object], update)), *rows[1:]]
+    with pytest.raises(ValueError, match=named):
+        templates.check_template_rows(header, broken)
+
+
+def test_score_constants_are_copied_from_objective_and_pinned_in_header(tmp_path: Path) -> None:
+    """抓標頭的分數常數不是這一次目標用的那一組、或接續不比它：從目標常數抄出來的五格等於登記簿那幾格
+    （兩分項權重與較差參考、代理權重、較差參考、溫度）；預期標頭的分數常數改一格，兩本帳本接續都拒收；
+    上一版標頭帶分數常數、或這一版不帶，都拒收。"""
+    settings = registry_objective()
+    constants = ledger.score_constants(gradient_objective_constants(AXIS_HZ, settings, _receivers(), 2))
+    stage_one = settings.stage_one
+    assert constants.component_weights == (stage_one.weight(PRINCIPAL), stage_one.weight(ROBUSTNESS))
+    assert constants.worse_references == (stage_one.target(PRINCIPAL).worse_reference,
+                                          stage_one.target(ROBUSTNESS).worse_reference)
+    assert (constants.proxy_weight, constants.proxy_worse_reference, constants.proxy_temperature_db) == (
+        settings.proxy_weight, settings.worse_reference, settings.temperature_db)
+    path, header = _material_ledger(tmp_path)
+    assert header.score_constants is not None
+    changed = header.score_constants.model_copy(update={"proxy_weight": header.score_constants.proxy_weight * 2.0})
+    with pytest.raises(ValueError, match="score_constants"):
+        ledger.read_ledger(path, expected_header=header.model_copy(update={"score_constants": changed}))
+    with pytest.raises(ValueError):
+        ledger.MaterialGradientHeader.model_validate(header.model_dump() | {"score_constants": None})
+    with pytest.raises(ValueError):
+        ledger.MaterialGradientHeader.model_validate(
+            header.model_dump() | {"ledger_version": ledger.LEGACY_LEDGER_VERSION})
+    template_path, template = _template_ledger(tmp_path)
+    assert template.score_constants is not None
+    other = template.score_constants.model_copy(update={"proxy_temperature_db": template.score_constants
+                                                        .proxy_temperature_db * 2.0})
+    with pytest.raises(ValueError, match="score_constants"):
+        templates.read_template_ledger(template_path, expected_header=template.model_copy(
+            update={"score_constants": other}))
+    with pytest.raises(ValueError):
+        templates.TemplateHeader.model_validate(template.model_dump() | {"score_constants": None})

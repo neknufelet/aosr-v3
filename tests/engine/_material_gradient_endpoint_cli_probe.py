@@ -71,7 +71,8 @@ def _endpoint(source: Path) -> Record:
     return {"report": json.loads(checked.report.to_json()), "baseline_total": float(base.screening_total).hex(),
             "baseline_components": [float(base.mean_own_line_ripple_rms_db).hex(),
                                     float(base.mean_seat_robustness_rms_db).hex()],
-            "baseline_objective": [float(base.objective_total).hex(), float(base.big_peak_proxy_db).hex()],
+            "baseline_objective": [float(base.objective_total).hex(), float(base.big_peak_proxy_db).hex(),
+                                   float(base.interior_max_residual_db).hex()],
             "baseline_peaks": peaks}
 
 

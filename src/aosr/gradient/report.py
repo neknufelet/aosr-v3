@@ -14,8 +14,10 @@
 沒有 ``endpoint.json`` 最後一行是 :data:`FULL_MODEL_LINE`。
 
 #561 壬一（老闆 2026-10-30：「第三場一定要同時列舊分數與新分數，避免只因加了權重、排名改變，就誤以為聲學真的改善」）：
-每一列印「舊合分／新合分／代理」，終點段（完整模型）另印真大峰與上界 T·ln N，並列一行「代理 − 真大峰」，
-超出 0～上界（各放寬終點報告記的均方根零判地板 ``rms_floor_db``，兩邊程式捨入不同）就印 :data:`PROXY_MISMATCH`——只報不判。
+每一列印「舊合分／新合分／代理」，終點段（完整模型）另印真大峰與上界 T·ln N，並列兩行：「代理 − 內部最大殘差」
+（夾擠的對象是內部最大殘差：應在 0～上界，超出——兩端各放寬終點報告記的均方根零判地板 ``rms_floor_db``——就印
+:data:`PROXY_MISMATCH`，只報不判）與「真大峰」（偵測器的最高峰，只保證不大於內部最大殘差；低於它表示那個最大值
+不是嚴格局部極大，例如緊貼更高的端點）。
 報告只讀、不接續，所以加代理之前的資料夾（庚二帳本 v4、換樣板帳本 v1、結果 v3、終點 v2，示範房那一種）照樣讀得回，
 那些列印「舊合分」並註明沒有代理；接續與終點仍拒收它們。
 """
@@ -51,7 +53,7 @@ ENDPOINT_HEADING: Final = "終點完整模型重算（"
 LEGACY_SCORE_NOTE: Final = "加大峰代理之前的帳本：值就是舊合分，沒有新合分與代理（接續會拒收、要重跑）"
 LEGACY_ROW_MARK: Final = "（無代理）"
 LEGACY_ENDPOINT_NOTE: Final = "加大峰代理之前的終點：只有舊合分，沒有新合分、代理與上界"
-PROXY_MISMATCH: Final = "代理與偵測器對不上"
+PROXY_MISMATCH: Final = "代理與內部最大殘差對不上"
 _MM: Final = 1000.0
 
 
@@ -246,17 +248,20 @@ def _peak(value: float | None) -> str:
     return "量不到" if value is None else f"{value:.3f} dB"
 
 
-def proxy_peak_line(label: str, proxy_db: float | None, big_peak_db: float | None, bound_db: float | None,
-                    floor_db: float) -> str:
-    """「代理 − 真大峰 ＝ … dB（應在 0～上界之間）」一行；超出（兩端各放寬 ``floor_db``）加印 :data:`PROXY_MISMATCH`，不判。"""
-    if proxy_db is None or bound_db is None:
-        return f"  {label}代理 − 真大峰：{LEGACY_ENDPOINT_NOTE}"
-    if big_peak_db is None:
-        return f"  {label}代理 − 真大峰：真大峰量不到（代理 {proxy_db:.3f} dB）"
-    gap = proxy_db - big_peak_db
+def proxy_lines(label: str, proxy_db: float | None, interior_max_db: float | None, big_peak_db: float | None,
+                bound_db: float | None, floor_db: float) -> list[str]:
+    """兩行：「代理 − 內部最大殘差 ＝ … dB（應在 0～上界之間）」，超出（兩端各放寬 ``floor_db``）加印
+    :data:`PROXY_MISMATCH`、不判；「真大峰 … dB（偵測器……）」。加代理之前的終點只印一行註記。"""
+    if proxy_db is None or interior_max_db is None or bound_db is None:
+        return [f"  {label}代理：{LEGACY_ENDPOINT_NOTE}"]
+    gap = proxy_db - interior_max_db
     inside = -floor_db <= gap <= bound_db + floor_db
-    return (f"  {label}代理 − 真大峰 ＝ {gap:+.6f} dB（應在 0～上界 {bound_db:.6f} dB 之間）"
-            + ("" if inside else f"；{PROXY_MISMATCH}"))
+    return [
+        f"  {label}代理 − 內部最大殘差 ＝ {gap:+.6f} dB（應在 0～上界 {bound_db:.6f} dB 之間）"
+        + ("" if inside else f"；{PROXY_MISMATCH}"),
+        f"  {label}真大峰 {_peak(big_peak_db)}（偵測器；低於內部最大殘差 {interior_max_db:.3f} dB 表示那個最大值"
+        "不是嚴格局部極大）",
+    ]
 
 
 def _full_scores(total: float, objective_total: float | None, proxy_db: float | None, big_peak_db: float | None,
@@ -292,14 +297,16 @@ def _endpoint_section(record: EndpointRecord) -> list[str]:
         f"  替身：{_reduced_scores(report)}",
         f"  完整模型：{_full_scores(report.full_total, report.full_objective_total, report.full_proxy_db, report.big_peak_db, bound)}"
         f"（主位起伏 {report.full_components[0]:.6f} dB、座位穩健性 {report.full_components[1]:.6f} dB）",
-        proxy_peak_line("終點", report.full_proxy_db, report.big_peak_db, bound, report.rms_floor_db),
+        *proxy_lines("終點", report.full_proxy_db, report.full_interior_max_db, report.big_peak_db, bound,
+                     report.rms_floor_db),
         f"  舊合分的差（完整減替身）{report.total_difference:+.6f}；上界 {report.total_difference_bound:.6f}",
         f"  每座位最大逐頻差（替身對完整模型）：{_dbs(report.frequency_db_by_seat)}；"
         f"全部最大 {report.max_frequency_db:.6f} dB",
         f"  真大峰（完整模型）：{_dbs(report.big_peak_db_by_speaker)}；較差 {_peak(report.big_peak_db)}",
         f"  基準（方案原本六面，完整模型）：{_baseline_scores(baseline, bound)}（主位起伏 {baseline.full_components[0]:.6f} dB、"
         f"座位穩健性 {baseline.full_components[1]:.6f} dB）；真大峰 {_dbs(baseline.big_peak_db_by_speaker)}",
-        proxy_peak_line("基準", baseline.full_proxy_db, baseline.big_peak_db, bound, report.rms_floor_db),
+        *proxy_lines("基準", baseline.full_proxy_db, baseline.full_interior_max_db, baseline.big_peak_db, bound,
+                     report.rms_floor_db),
         f"  改善（基準減終點，完整模型）：舊合分 {gain.total:+.6f}（主位起伏 {gain.components[0]:+.6f} dB、"
         f"座位穩健性 {gain.components[1]:+.6f} dB）{new_gain}",
         f"  拿掉的空腔（小於最小空腔不放空氣層）：{dropped}",

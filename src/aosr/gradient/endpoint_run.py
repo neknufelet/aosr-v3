@@ -24,6 +24,7 @@ from typing import Final, Literal, Self
 
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import load_capabilities
@@ -49,7 +50,8 @@ from aosr.physics.report_surfaces import validation_content
 from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.reporting.scheme import Scene, Scheme
 from aosr.scoring.gradient_objective_jax import (
-    gradient_objective_constants, gradient_objective_from_pressures, objective_reading,
+    GradientObjectiveConstants, ObjectiveReading, gradient_objective_constants, gradient_objective_from_pressures,
+    objective_reading,
 )
 
 ENDPOINT_FILE: Final = "endpoint.json"
@@ -64,8 +66,8 @@ _SHA256 = r"^[0-9a-f]{64}$"
 class EndpointBaseline(BaseModel):
     """基準：方案原本六面（全部保留原牆）用完整模型解終點同一條軸、交同一份目標常數的值與分項、每支喇叭的大峰。
 
-    ``full_total``／``full_components`` 是舊合分與兩分項；``full_objective_total``／``full_proxy_db`` 是新合分與大峰代理
-    （v3 起，v2 沒有、是 None）。"""
+    ``full_total``／``full_components`` 是舊合分與兩分項；``full_objective_total``／``full_proxy_db`` 是新合分與大峰代理，
+    ``full_interior_max_db`` 是代理夾擠的對象（內部最大殘差）（v3 起，v2 沒有、是 None）。"""
 
     model_config = _FROZEN
     full_total: float
@@ -75,6 +77,7 @@ class EndpointBaseline(BaseModel):
     full_solves: int = Field(ge=1, strict=True)
     full_objective_total: float | None = None
     full_proxy_db: float | None = None
+    full_interior_max_db: float | None = None
 
 
 class EndpointImprovement(BaseModel):
@@ -127,7 +130,7 @@ class EndpointRecord(BaseModel):
     def _version_matches_content(self) -> Self:
         current = self.format_version == ENDPOINT_VERSION
         fields = (*self.report.proxy_fields(), self.baseline.full_objective_total, self.baseline.full_proxy_db,
-                  self.improvement.objective_total, self.improvement.proxy_db)
+                  self.baseline.full_interior_max_db, self.improvement.objective_total, self.improvement.proxy_db)
         if any((value is not None) != current for value in fields):
             raise ValueError(f"{ENDPOINT_VERSION} 的報告、基準與改善都要帶新合分與大峰代理；"
                              f"{LEGACY_ENDPOINT_VERSION} 都沒有")
@@ -171,6 +174,20 @@ def checked_result(folder: Path, given: GradientResult, header: MaterialGradient
     return rebuilt
 
 
+def _full_baseline(constants: GradientObjectiveConstants, pressures: NDArray[np.complex128],
+                   peaks: dict[str, float | None]) -> tuple[EndpointBaseline, ObjectiveReading]:
+    """原牆基準：完整模型聲壓 ``(F, 喇叭, 座位)`` 交同一份目標常數，記舊合分、兩分項、新合分、代理、內部最大殘差
+    與每支喇叭的大峰；一頻一解，解的次數就是 F。"""
+    arrays = gradient_objective_from_pressures(constants, jnp.asarray(pressures))
+    base = objective_reading(arrays)
+    baseline = EndpointBaseline(
+        full_total=base.screening_total, full_components=(base.components[0], base.components[1]),
+        big_peak_db_by_speaker=peaks, big_peak_db=worst_big_peak(peaks), full_solves=int(pressures.shape[0]),
+        full_objective_total=base.objective_total, full_proxy_db=base.components[2],
+        full_interior_max_db=float(arrays.interior_max_residual_db))
+    return baseline, base
+
+
 def run_endpoint(folder: Path) -> EndpointRecord:
     """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
     project = read_project(folder)
@@ -209,15 +226,11 @@ def run_endpoint(folder: Path) -> EndpointRecord:
     pressures = full_model_pressures(operators, kept, axis, air=air, ranges=ranges,
                                      max_relative_residual=model.ledger.settings.full_solve_max_relative_residual)
     constants = gradient_objective_constants(axis, objective, scheme.receiver_set, len(model.source_names))
-    base = objective_reading(gradient_objective_from_pressures(constants, jnp.asarray(pressures)))
     peaks = big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
                       frequencies_hz=axis, low_frequency_axis=axis_id,
                       scoring_range_hz=objective.stage_one.scored_range_hz)
+    baseline, base = _full_baseline(constants, pressures, peaks)
     baseline_seconds = time.perf_counter() - clock
-    baseline = EndpointBaseline(
-        full_total=base.screening_total, full_components=(base.components[0], base.components[1]),
-        big_peak_db_by_speaker=peaks, big_peak_db=worst_big_peak(peaks), full_solves=len(axis),
-        full_objective_total=base.objective_total, full_proxy_db=base.components[2])
     report = checked.report
     if report.full_objective_total is None or report.full_proxy_db is None:
         raise ValueError("終點報告沒有新合分或大峰代理")

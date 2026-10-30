@@ -90,7 +90,7 @@ def synthetic_factory(settings: MaterialGradientSettings, offsets: dict[str, flo
             shift = theta - jnp.asarray(target, dtype=theta.dtype)
             value = jnp.sum(jnp.asarray(weight, dtype=theta.dtype) * shift * shift) + offset
             return value, GradientObjectiveArrays(value[None], value[None], value, value * 0.5, value * 0.25,
-                                          value * 0.125, value)
+                                          value * 0.125, value, value * 0.125)
 
         made[surfaces] = objective
         return objective
@@ -98,15 +98,22 @@ def synthetic_factory(settings: MaterialGradientSettings, offsets: dict[str, flo
     return factory
 
 
+# 合成目標的分數常數：0.125·v＋0.25·(v／2)＝v／4（舊合分）、v／4＋6·(v／8)＝v（新合分）。
+SYNTHETIC_SCORES = ledger.ScoreConstants(component_weights=(0.125, 0.25), worse_references=(1.0, 1.0),
+                                         proxy_weight=6.0, proxy_worse_reference=1.0, proxy_temperature_db=0.5)
+
+
 def synthetic_header(settings: MaterialGradientSettings, surfaces: rounds.Surfaces,
                      kept: dict[str, SurfaceMaterial]) -> templates.TemplateHeader:
-    """合成目標沒有替身、評分常數與庚二帳本：那幾格填固定字樣（摘要格填固定字樣的 SHA-256）；其他照正式算。"""
+    """合成目標沒有替身、評分常數與庚二帳本：那幾格填固定字樣（摘要格填固定字樣的 SHA-256）；其他照正式算。
+    分數常數配合成目標（分項 v、v／2，代理 v／8，舊合分 v／4，新合分 v）：見 :data:`SYNTHETIC_SCORES`。"""
     return templates.TemplateHeader(
         ledger_version=templates.TEMPLATE_LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic",
         physics_identity="synthetic", settings_fingerprint=settings.full_fingerprint,
         objective_fingerprint=hashlib.sha256(b"synthetic").hexdigest(),
         base_ledger_sha256=hashlib.sha256(b"synthetic-base").hexdigest(), initial_surfaces=surfaces,
-        kept_digests={name: material_digest(material) for name, material in kept.items()})
+        kept_digests={name: material_digest(material) for name, material in kept.items()},
+        score_constants=SYNTHETIC_SCORES)
 
 
 def start_point(context: rounds.TemplateContext, surfaces: rounds.Surfaces) -> templates.TemplateStart:

@@ -387,7 +387,7 @@ def test_endpoint_full_value_within_holdout_ruler(probe: Record, chain_model: Re
     full, reduced = _decode_complex(probe["full"]), _decode_complex(probe["reduced"])
     assert report.full_total == float.fromhex(cast(str, probe["direct_total"]))
     # 新合分與代理（#561 壬一）：完整模型那兩格等於獨立完整解交梯度目標的值（逐位）；上界是 T·ln N。
-    assert [report.full_objective_total, report.full_proxy_db] == [
+    assert [report.full_objective_total, report.full_proxy_db, report.full_interior_max_db] == [
         float.fromhex(value) for value in cast(list[str], probe["direct_objective"])]
     gradient = gradient_objective_constants(chain_model.frequencies_hz, _objective(), _receivers(),
                                             len(chain_model.source_names))
@@ -454,7 +454,7 @@ def test_endpoint_reports_dropped_cavity_and_exported_theta(probe: Record) -> No
     report = _report(probe)
     at_export = float.fromhex(cast(str, probe["chain_at_expected_export"]))
     assert report.exported_theta == ENDPOINT_EXPORT and report.reduced_total == at_export
-    assert [report.reduced_objective_total, report.reduced_proxy_db] == [
+    assert [report.reduced_objective_total, report.reduced_proxy_db, report.reduced_interior_max_db] == [
         float.fromhex(value) for value in cast(list[str], probe["chain_objective_at_expected_export"])]
     assert at_export != float.fromhex(cast(str, probe["chain_at_search"]))
     designs = gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets())

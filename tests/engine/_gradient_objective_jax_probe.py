@@ -1,6 +1,6 @@
 """梯度目標子行程（#561 壬一）：只叫公開入口與 JAX 轉換，十六進位交回；不比對、不做判決。
 
-每一份登記簿（正式那份、權重改 0 的暫存副本）各讀一次梯度目標設定，每一組能量交：直接求值與編譯後求值的全部欄、
+每一份登記簿（正式那份、權重改 0 的暫存副本）各讀一次梯度目標設定，每一組（自己的頻率軸與能量）交：直接求值與編譯後求值的全部欄、
 第一階段原函式的合分（直接與編譯後）、主位殘差、對能量的編譯後梯度（新合分、舊合分、代理、第一階段原函式的合分）、
 溫度換成一串值時的代理，與上界 T·ln N。
 """
@@ -76,17 +76,20 @@ def _case(constants: GradientObjectiveConstants, energies: jax.Array, temperatur
 def main(problem_path: Path, output_path: Path) -> None:
     problem = cast(Record, json.loads(problem_path.read_text(encoding="utf-8")))
     receivers = ReceiverSet.model_validate(problem["receiver_set"])
-    frequencies = np.asarray([float.fromhex(value) for value in cast(list[str], problem["frequencies_hz"])])
     temperatures = [float.fromhex(value) for value in cast(list[str], problem["temperatures"])]
-    cases = cast(dict[str, object], problem["cases"])
+    cases = cast(dict[str, Record], problem["cases"])
     output: Record = {}
     for label, path in cast(dict[str, str], problem["registries"]).items():
         settings = gradient_objective_settings(load_quality_targets(path), str(problem["purpose"]))
-        constants = gradient_objective_constants(frequencies, settings, receivers, 2)
+        results: Record = {}
+        for name, case in cases.items():
+            # 每一組自己的頻率軸（48 點搜尋軸，或審查反例的 9 點軸）。
+            frequencies = np.asarray([float.fromhex(value) for value in cast(list[str], case["frequencies_hz"])])
+            constants = gradient_objective_constants(frequencies, settings, receivers, 2)
+            results[name] = _case(constants, _energies(case["energies"]), temperatures)
         output[label] = {
             "fingerprint": settings.fingerprint, "stage_one_fingerprint": settings.stage_one.fingerprint,
-            "weight": settings.proxy_weight.hex(),
-            "cases": {name: _case(constants, _energies(values), temperatures) for name, values in cases.items()},
+            "weight": settings.proxy_weight.hex(), "cases": results,
         }
     output_path.write_text(json.dumps(output), encoding="utf-8")
 

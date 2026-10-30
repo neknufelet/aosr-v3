@@ -564,7 +564,7 @@ def template_header_for(header: MaterialGradientHeader, settings: MaterialGradie
         ledger_version=TEMPLATE_LEDGER_VERSION, input_hash=header.input_hash, mesh_hash=header.mesh_hash,
         physics_identity=header.physics_identity, settings_fingerprint=settings.full_fingerprint,
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
-        initial_surfaces=header.surfaces,
+        initial_surfaces=header.surfaces, score_constants=header.score_constants,
         kept_digests={wall.wall_name(): material_digest(kept[wall]) for wall in Wall.all()})
 
 
