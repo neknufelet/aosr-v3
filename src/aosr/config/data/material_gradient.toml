@@ -1,58 +1,58 @@
 # 第三階段牆面材料梯度搜尋設定（#561）：連續下降、取規格、空腔聯合重調、候選確認迴圈。
-# 決策紙：docs/decisions/stage-three-gradient-objective-low-frequency-lane.md（「決定」第 3 條是找法）。
-# 這份檔裡每一個數字都是工程暫定、調整走 PR，依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段
+# 決策紙：docs/decisions/stage-three-gradient-search-objective-findings-and-template-rounds.md（「決定」第 3 條是找法）。
+# 這份檔裡每一個數字都是工程暫定、調整走 PR，依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段
 # （「候選數 3、改善門檻、步數、預算都是工程暫定，數字住設定檔、要調走 PR；沒有理論保證」）。
 # 總價、重量這類跨牆限制沒有資料，第一版不做；每面只守「棉板＋空腔」的總深度上限。
 
 [descent]
-# 投影梯度下降最多走幾步；到了停、停止原因記「步數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 投影梯度下降最多走幾步；到了停、停止原因記「步數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_steps = 30
-# 每一步回溯線搜尋的起始步長（公尺 × 分數⁻¹，乘在梯度上）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 每一步回溯線搜尋的起始步長（公尺 × 分數⁻¹，乘在梯度上）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 initial_step = 0.01
-# 線搜尋沒過就把步長乘上這個比例再試。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 線搜尋沒過就把步長乘上這個比例再試。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 backtrack_ratio = 0.5
-# Armijo 充分下降常數：新值要不大於舊值加這個常數乘「梯度 · 實際位移」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# Armijo 充分下降常數：新值要不大於舊值加這個常數乘「梯度 · 實際位移」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 armijo_constant = 1.0e-4
 # 投影梯度（貼著盒界往外推的分量歸零）的範數小於這個值就停，記「梯度夠小」；單位是合分／公尺，
-# 0.5 的意思是全部變數一起再動 1 cm、合分最多約變 0.005；這個值是在考卷的小房間替身上實量挑的，真房間要重挑。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 0.5 的意思是全部變數一起再動 1 cm、合分最多約變 0.005；這個值是在考卷的小房間替身上實量挑的，真房間要重挑。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 gradient_norm_stop = 0.5
-# 回溯到步長小於這個值仍沒過就停、這一步不走，記「步長到下限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 回溯到步長小於這個值仍沒過就停、這一步不走，記「步長到下限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 min_step = 1.0e-6
 
 [retune]
-# 取規格之後，厚度固定、只有空腔是變數，同一個投影下降最多走幾步（不因梯度小提早停；線搜尋退到步長下限就停、原因進帳本）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 取規格之後，厚度固定、只有空腔是變數，同一個投影下降最多走幾步（不因梯度小提早停；線搜尋退到步長下限就停、原因進帳本）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 steps = 5
 
 [candidates]
 # 候選確認迴圈（在可行解用「梯度 × 實際規格跳距」挑候選、各自重調空腔後跟同步數重調的基準比）。
-# 每一輪最多確認幾個候選（決策紙第 3 條「第一版預設 3 個，沒有理論保證」）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 每一輪最多確認幾個候選（決策紙第 3 條「第一版預設 3 個，沒有理論保證」）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_per_round = 3
-# 改善門檻：基準重調後的合分減候選重調後的合分要「超過」這個值才換（合分的絕對差，單位同 screening_total）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 改善門檻：基準重調後的合分減候選重調後的合分要「超過」這個值才換（合分的絕對差，單位同 screening_total）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 improvement_threshold = 0.05
-# 最多跑幾輪；到了停、停止原因記「輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 最多跑幾輪；到了停、停止原因記「輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_rounds = 10
-# 求值次數上限（算次數不算秒數；值＋梯度算一次，線搜尋每個試探都算一次）；限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多；下一輪最壞情況會超過就不開、記「求值到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 求值次數上限（算次數不算秒數；值＋梯度算一次，線搜尋每個試探都算一次）；限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多；下一輪最壞情況會超過就不開、記「求值到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_evaluations = 2000
 
 [export]
 # 終點把六面規格匯出成材料時，空腔小於這個深度（公尺）就整層拿掉、不放空氣層；等於或大於就照原值放（辛二，2026-10-29）。
-# 工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段；替身求值用的匯出 θ 走同一條規則。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段；替身求值用的匯出 θ 走同一條規則。
 min_cavity_m = 0.001
 
 [templates]
 # 庚三（#561）：換樣板的候選確認迴圈（老闆 2026-10-28 回「B 的候選範圍、但把重調次數、輪數和總時間限住」；
 # 2026-10-30 再定「保留原牆」要納入正式候選）。起點是庚二交出的整房方案；每輪把每一面換成別的家族或「不貼」各快速評分一次，
 # 最多 max_per_round 個進空腔重調（基準同預算）、一次只接受一個替換、再以新整房方案開下一輪。改善門檻沿用 [candidates].improvement_threshold。
-# 每個數字都是工程暫定、調整走 PR，依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
-# 每輪最多幾個單牆替換進重調。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 每個數字都是工程暫定、調整走 PR，依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
+# 每輪最多幾個單牆替換進重調。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_per_round = 3
-# 最多幾輪；到了停、停止原因記「換樣板輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 最多幾輪；到了停、停止原因記「換樣板輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_rounds = 6
 # 換樣板這一段的求值次數上限（算次數不算秒數；快速評分每個一次、重調照 [candidates] 同一種算法）；下一輪最壞情況會超過就不開。
-# 工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_evaluations = 1500
 # 換樣板這一段的總時間上限（秒），只在一輪結束時看帳本記的各輪秒數加總（不看牆鐘，接續才重現得出同一個決定）；超過就停、記「換樣板總時間到上限」。
-# 工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_seconds = 7200
 
 # 樣板家族：同一種材料（同流阻）不同厚度、有沒有空腔；第一版只有玻璃棉三個密度。
@@ -61,13 +61,13 @@ max_seconds = 7200
 [[family]]
 id = "glass_wool_48k"
 presets = ["glass_wool_48k_50mm", "glass_wool_48k_50mm_gap50", "glass_wool_48k_50mm_gap100", "glass_wool_48k_100mm"]
-# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 thicknesses_m = [0.050, 0.100]
-# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 cavity_range_m = [0.0, 0.150]
-# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_total_depth_m = 0.150
-# 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 template_preset = "glass_wool_48k_50mm_gap50"
 initial_thickness_m = 0.050
 initial_cavity_m = 0.050
@@ -75,25 +75,25 @@ initial_cavity_m = 0.050
 [[family]]
 id = "glass_wool_24k"
 presets = ["glass_wool_24k_50mm"]
-# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 thicknesses_m = [0.050]
-# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 cavity_range_m = [0.0, 0.150]
-# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_total_depth_m = 0.150
-# 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 template_preset = "glass_wool_24k_50mm"
 initial_thickness_m = 0.050
 
 [[family]]
 id = "glass_wool_96k"
 presets = ["glass_wool_96k_50mm"]
-# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 thicknesses_m = [0.050]
-# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 cavity_range_m = [0.0, 0.150]
-# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_total_depth_m = 0.150
-# 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-objective-low-frequency-lane.md 代價段。
+# 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 template_preset = "glass_wool_96k_50mm"
 initial_thickness_m = 0.050

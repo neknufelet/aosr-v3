@@ -406,6 +406,8 @@ SHARED_FIXTURE_FIRST = (
     "tests/engine/test_material_gradient_cli.py",
     "tests/engine/test_material_gradient_endpoint_cli.py",
     "tests/engine/test_material_gradient_loop.py",
+    "tests/engine/test_material_gradient_templates.py",
+    "tests/engine/test_material_gradient_templates_cli.py",
 )
 
 
