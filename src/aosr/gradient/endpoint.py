@@ -24,6 +24,11 @@
 完整模型的算子由呼叫端給（方案走 ``reporting.fem_reduced_scheme.export_operators``，跟建替身同一份或同網格重匯出）；
 替身與算子的網格、喇叭、座位、空氣一致性由 :func:`aosr.physics.fem_reduced_check.validate_reduced` 核。
 材料求阻抗要雙精度 JAX：在雙精度已開的行程裡呼叫。本模組不碰 JAX 全域設定、不印東西、沒有行程與檔案。
+
+#561 壬一（老闆 2026-10-30 拍 B）：梯度目標多了大峰的平滑代理項。終點報告的 ``*_total``／``*_components``
+仍是舊合分（第一階段兩分項，差與差的上界都只對它推）；另列替身與完整模型各自的新合分（``*_objective_total``）
+與代理（``*_proxy_db``），和代理比內部最大殘差最多高出的 ``proxy_gap_bound_db``（T·ln N）。真大峰
+（``big_peak_db*``）照舊由偵測器量，不動；代理對不對由報告並列「代理 − 真大峰」來看，只報不判。
 """
 from __future__ import annotations
 
@@ -31,13 +36,13 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
-from typing import Final, NamedTuple
+from typing import Final, NamedTuple, Self
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
 from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.frequency_axis import LowFrequencyAxis
@@ -58,11 +63,12 @@ from aosr.reporting.scheme import Scene
 from aosr.scoring.low_frequency_input import low_frequency_input
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
-from aosr.scoring.stage_one_objective_jax import (
-    StageOneObjectiveArrays, StageOneObjectiveConstants, objective_constants, objective_from_pressures,
-    rms_floor_factor,
+from aosr.scoring.gradient_objective_jax import (
+    GradientObjectiveArrays, gradient_objective_constants, gradient_objective_from_pressures, objective_reading,
+    proxy_gap_bound_db,
 )
-from aosr.scoring.stage_one_score import StageOneScoreSettings
+from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings
+from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, rms_floor_factor
 
 _CANDIDATE_ID: Final = "gradient-endpoint"
 
@@ -320,7 +326,7 @@ def score_difference_bound(constants: StageOneObjectiveConstants, level_db: floa
                  + (2.0 * level_db + floor_db) * weights[1] / references[1])
 
 
-def _components(result: StageOneObjectiveArrays) -> tuple[float, float]:
+def _components(result: GradientObjectiveArrays) -> tuple[float, float]:
     return float(result.mean_own_line_ripple_rms_db), float(result.mean_seat_robustness_rms_db)
 
 
@@ -331,6 +337,9 @@ class EndpointReport(BaseModel):
     交同一把尺（``objective_from_pressures``）的值；``total_difference`` ＝完整減替身。``max_frequency_db`` 是
     每座位、喇叭、頻點 |20·log10(|p_替身|/|p_完整|)| 的最大值（全軸），``rms_floor_db`` 是兩邊聲壓的均方根零判
     地板上限，``total_difference_bound`` 由兩者照 :func:`score_difference_bound` 推得。大峰是完整模型的。
+    ``*_total``、``*_components``、差與上界都是舊合分（第一階段兩分項）；``*_objective_total``、``*_proxy_db`` 是梯度目標的
+    新合分與大峰代理（#561 壬一），``proxy_gap_bound_db`` 是 T·ln N。加代理之前寫的報告（endpoint.json v2）沒有這五格，是 None；
+    新版必帶（由 ``endpoint_run.EndpointRecord`` 照版本守）。
     ``surfaces`` 每面帶 preset id 與樣板構造摘要（``material_digest``），入口已核兩者是同一份構造；這是換 θ 之前的
     樣板摘要，只改 θ 不會變，實際求解用的是換厚度、處理空腔後的材料。
     非有限數不收（驗證時拒收，不靜默報一個壞數）。
@@ -360,6 +369,22 @@ class EndpointReport(BaseModel):
     big_peak_db: float | None
     full_solves: int
     model_digest: str
+    reduced_objective_total: float | None = None
+    reduced_proxy_db: float | None = None
+    full_objective_total: float | None = None
+    full_proxy_db: float | None = None
+    proxy_gap_bound_db: float | None = None
+
+    @model_validator(mode="after")
+    def _proxy_fields_together(self) -> Self:
+        if len({value is None for value in self.proxy_fields()}) != 1:
+            raise ValueError("梯度目標的新合分、代理與上界五格要一起有、或一起沒有（加代理之前的報告）")
+        return self
+
+    def proxy_fields(self) -> tuple[float | None, ...]:
+        """梯度目標那五格（照欄位順序）；新版全有、舊版全 None。"""
+        return (self.reduced_objective_total, self.reduced_proxy_db, self.full_objective_total, self.full_proxy_db,
+                self.proxy_gap_bound_db)
 
     def to_json(self) -> str:
         return self.model_dump_json()
@@ -389,7 +414,7 @@ def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, desi
 
 
 def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector, *,
-                   model: ReducedModel, score_settings: StageOneScoreSettings, receiver_set: ReceiverSet,
+                   model: ReducedModel, objective_settings: GradientObjectiveSettings, receiver_set: ReceiverSet,
                    low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
                    settings: MaterialGradientSettings, air: PhysicsConstants,
                    ranges: PorousModelRanges) -> EndpointResult:
@@ -399,7 +424,7 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     （``presets`` 只用來核身分，:func:`checked_design_identity`）；θ 是可行解；座位順序一致。
     θ 照空腔匯出規則變成材料（:func:`materials_from_surfaces`，材料只從 ``design.material`` 來）；完整模型與替身都對
     **匯出的材料**算（替身用 :func:`exported_theta`），差裡只有替身誤差、沒有匯出的捨入。目標常數由
-    ``objective_constants`` 以替身的頻率軸、``score_settings``、``receiver_set`` 現算，跟搜尋那邊同一份；
+    ``gradient_objective_constants`` 以替身的頻率軸、``objective_settings``、``receiver_set`` 現算，跟搜尋那邊同一份；
     完整解殘差上限沿用建替身當次的設定。完整解用 :func:`~aosr.physics.fem_reduced_check.validate_reduced`
     （同時給替身聲壓、逐頻與帶能量 dB 差）。
     """
@@ -409,16 +434,18 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     specs = surface_specs(designs, values)
     materials = materials_from_surfaces(designs, values, settings)
     validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)])
-    full, reduced = validation.full_pressure[0], validation.reduced_pressure[0]
-    constants = objective_constants(axis, score_settings, receiver_set, len(model.source_names))
+    full, reduced_pressure = validation.full_pressure[0], validation.reduced_pressure[0]
+    constants = gradient_objective_constants(axis, objective_settings, receiver_set, len(model.source_names))
     exported = exported_theta(designs, values, settings)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=axis)
-    reduced_total, reduced_result = objective(jnp.asarray(exported))
-    full_result = objective_from_pressures(constants, jnp.asarray(full))
+    _, reduced_result = objective(jnp.asarray(exported))
+    full_result = gradient_objective_from_pressures(constants, jnp.asarray(full))
+    reduced, full_reading = objective_reading(reduced_result), objective_reading(full_result)
     level_db = max(validation.frequency_db_by_seat.values())
-    floor_db = objective_floor_db(full, reduced)
+    floor_db = objective_floor_db(full, reduced_pressure)
     peaks = big_peaks(full, speaker_ids=model.source_names, receiver_set=receiver_set, frequencies_hz=axis,
-                      low_frequency_axis=low_frequency_axis, scoring_range_hz=score_settings.scored_range_hz)
+                      low_frequency_axis=low_frequency_axis,
+                      scoring_range_hz=objective_settings.stage_one.scored_range_hz)
     minimum = settings.export.min_cavity_m
     report = EndpointReport(
         low_frequency_axis=low_frequency_axis, speaker_ids=model.source_names, receiver_ids=model.receiver_names,
@@ -426,16 +453,20 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
         exported_theta=tuple(float(value) for value in exported), surfaces=specs,
         dropped_cavities=tuple(spec.surface_id for spec in specs
                                if spec.cavity_m is not None and kept_cavity(spec.cavity_m, minimum) is None),
-        reduced_total=float(reduced_total), reduced_components=_components(reduced_result),
-        full_total=float(full_result.screening_total), full_components=_components(full_result),
-        total_difference=float(full_result.screening_total) - float(reduced_total),
-        total_difference_bound=score_difference_bound(constants, level_db, floor_db), max_frequency_db=level_db,
+        reduced_total=reduced.screening_total, reduced_components=_components(reduced_result),
+        full_total=full_reading.screening_total, full_components=_components(full_result),
+        total_difference=full_reading.screening_total - reduced.screening_total,
+        total_difference_bound=score_difference_bound(constants.stage_one(), level_db, floor_db),
+        max_frequency_db=level_db,
         rms_floor_db=floor_db,
         frequency_db_by_seat=dict(validation.frequency_db_by_seat), band_db_by_seat=dict(validation.band_db_by_seat),
         partial_band_db_by_seat=dict(validation.partial_band_db_by_seat),
         big_peak_db_by_speaker=peaks, big_peak_db=worst_big_peak(peaks),
-        full_solves=validation.full_solves, model_digest=validation.model_digest)
-    return EndpointResult(report, full, reduced)
+        full_solves=validation.full_solves, model_digest=validation.model_digest,
+        reduced_objective_total=reduced.objective_total, reduced_proxy_db=reduced.components[2],
+        full_objective_total=full_reading.objective_total, full_proxy_db=full_reading.components[2],
+        proxy_gap_bound_db=proxy_gap_bound_db(constants))
+    return EndpointResult(report, full, reduced_pressure)
 
 
 def scene_with_materials(scene: Scene, materials: Mapping[Wall, SurfaceMaterial | None]) -> Scene:

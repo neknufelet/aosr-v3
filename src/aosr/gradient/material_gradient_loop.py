@@ -27,13 +27,14 @@ import numpy as np
 from aosr.config.material_gradient import DescentSettings, MaterialGradientSettings
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
-    ChainObjective, DescentResult, FloatVector, LoopStopReason, StopCheck, SurfaceDesign, check_stop, checked_theta,
+    ChainObjective, Components, DescentResult, FloatVector, LoopStopReason, StopCheck, SurfaceDesign, check_stop, checked_theta,
     depth_room, compiled_evaluator, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_ledger import (
     CandidateJump, CandidateOutcome, MaterialGradientHeader, MaterialGradientRow, RoundDecision, append_rows,
     decision_row, descent_rows, jump_row, read_ledger, truncate_rows,
 )
+from aosr.scoring.gradient_objective_jax import objective_reading
 
 
 Direction = Literal["thinner", "thicker"]
@@ -67,7 +68,7 @@ class ConfirmedCandidate(NamedTuple):
 
 
 class RoundResult(NamedTuple):
-    """一輪的結果。``opened`` 為假時預算不夠、這一輪沒開（沒有求值，θ 原樣，值與分項是 None）。
+    """一輪的結果。``opened`` 為假時預算不夠、這一輪沒開（沒有求值，θ 原樣，值、舊合分與分項是 None）。
 
     ``stop_reason`` 是這一輪自己的結論：「求值到上限」（沒開）、「沒有候選」、「已確認候選內沒有超過門檻」，
     接受了某個候選時是 None。``theta`` 是這一輪交出去的 θ：接受了就是那個候選重調後的、沒接受就是重調後的基準、
@@ -83,7 +84,8 @@ class RoundResult(NamedTuple):
     accepted: Candidate | None
     theta: FloatVector
     value: float | None
-    components: tuple[float, float] | None
+    screening_total: float | None
+    components: Components | None
     evaluations: int
     seconds: float
     stop_reason: LoopStopReason | None
@@ -234,16 +236,17 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
         raise ValueError("剩下的求值次數必須是非負整數")
     bound = round_evaluation_bound(settings, _candidate_count(theta, designs, settings))
     if bound > budget_left:
-        return RoundResult(False, bound, None, (), None, (), None, theta, None, None, 0, 0.0, LOOP_STOP_MAX_EVALUATIONS)
+        return RoundResult(False, bound, None, (), None, (), None, theta, None, None, None, 0, 0.0,
+                           LOOP_STOP_MAX_EVALUATIONS)
     check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), gradient = compiled_evaluator(objective)(jnp.asarray(theta))
     start_value = float(value)
     candidates = candidates_from_gradient(theta, np.asarray(gradient), designs, settings)
     if not candidates:
-        components = (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db))
-        return RoundResult(True, bound, start_value, (), None, (), None, theta, start_value, components, 1,
-                           time.perf_counter() - clock, LOOP_STOP_NO_CANDIDATES)
+        reading = objective_reading(aux)
+        return RoundResult(True, bound, start_value, (), None, (), None, theta, start_value, reading.screening_total,
+                           reading.components, 1, time.perf_counter() - clock, LOOP_STOP_NO_CANDIDATES)
     baseline = retune_cavities(objective, theta, designs, settings, should_stop=should_stop)
     base_value = baseline.steps[-1].value
     confirmed = []
@@ -258,7 +261,8 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
     evaluations = 1 + baseline.evaluations + sum(item.retune.evaluations for item in confirmed)
     return RoundResult(True, bound, start_value, candidates, baseline, tuple(confirmed),
                        accepted.candidate if accepted is not None else None, chosen.theta, chosen.steps[-1].value,
-                       chosen.steps[-1].components, evaluations, time.perf_counter() - clock,
+                       chosen.steps[-1].screening_total, chosen.steps[-1].components, evaluations,
+                       time.perf_counter() - clock,
                        None if accepted is not None else LOOP_STOP_NO_IMPROVEMENT)
 
 
@@ -267,7 +271,8 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
 class _LoopStart(NamedTuple):
     theta: FloatVector
     value: float
-    components: tuple[float, float]
+    screening_total: float
+    components: Components
     round: int
     total: int
     next_step: int
@@ -289,7 +294,7 @@ def _segment_rows(result: RoundResult, round_index: int, first_step: int) -> lis
     for item in result.confirmed:
         start = item.retune.steps[0]
         batch = [jump_row(step, round_index, item.candidate.candidate_id, tuple(float(x) for x in item.jump_theta),
-                          start.value, start.components, _jump_model(item)),
+                          start.value, start.screening_total, start.components, _jump_model(item)),
                  *descent_rows(item.retune, "candidate_retune", step + 1, round=round_index,
                                candidate=item.candidate.candidate_id)]
         batches.append(batch)
@@ -313,7 +318,7 @@ def _loop_stop(result: RoundResult, rounds_done: int, total: int, designs: Seque
 def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequence[SurfaceDesign],
                      settings: MaterialGradientSettings, ledger_path: Path, header: MaterialGradientHeader,
                      should_stop: StopCheck | None) -> None:
-    theta, value, components = start.theta, start.value, start.components
+    theta, value, screening, components = start.theta, start.value, start.screening_total, start.components
     round_index, total, step = start.round, start.total, start.next_step
     while True:
         result = confirmation_round(objective, theta, designs, settings,
@@ -325,9 +330,10 @@ def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequ
         if result.opened:
             reason, bound = _loop_stop(result, round_index + 1, total, designs, settings)
             theta = result.theta
-            if result.baseline is not None and result.value is not None and result.components is not None:
-                # 有重調才換值；沒有候選的輪 θ 原樣，值與分項沿用起點那一列（帳本核的就是這件事）。
-                value, components = result.value, result.components
+            if (result.baseline is not None and result.value is not None and result.screening_total is not None
+                    and result.components is not None):
+                # 有重調才換值；沒有候選的輪 θ 原樣，值、舊合分與分項沿用起點那一列（帳本核的就是這件事）。
+                value, screening, components = result.value, result.screening_total, result.components
         else:
             reason, bound = LOOP_STOP_MAX_EVALUATIONS, result.bound
         decision = RoundDecision(
@@ -340,7 +346,7 @@ def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequ
             accepted=result.accepted.candidate_id if result.accepted is not None else None,
             round_evaluations=result.evaluations, total_evaluations=total, next_round_bound=bound)
         append_rows(ledger_path, header, [decision_row(step, round_index, tuple(float(x) for x in theta), value,
-                                                       components, result.seconds, decision, reason)])
+                                                       screening, components, result.seconds, decision, reason)])
         step += 1
         round_index += 1
         if reason is not None:
@@ -388,7 +394,7 @@ def _pre_loop_start(rows: Sequence[MaterialGradientRow], designs: Sequence[Surfa
     theta = np.asarray(last.theta(), dtype=np.float64)
     if not is_feasible(theta, designs):
         raise ValueError("帳本前段最後一列的 θ 不可行")
-    return _LoopStart(theta, last.value, last.components, 0, 0, len(pre_loop))
+    return _LoopStart(theta, *last.scores(), 0, 0, len(pre_loop))
 
 
 def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVector, designs: Sequence[SurfaceDesign],
@@ -451,7 +457,7 @@ def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], s
         last = rows[decisions[-1]]
         if last.decision is None or last.round is None:
             raise ValueError("決定列缺內容")
-        start = _LoopStart(np.asarray(last.theta(), dtype=np.float64), last.value, last.components, last.round + 1,
+        start = _LoopStart(np.asarray(last.theta(), dtype=np.float64), *last.scores(), last.round + 1,
                            last.decision.total_evaluations, decisions[-1] + 1)
         _check_should_continue(last.decision, start, designs, settings)
         truncate_rows(ledger_path, header, decisions[-1] + 1)

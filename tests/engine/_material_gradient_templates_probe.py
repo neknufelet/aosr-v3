@@ -30,8 +30,8 @@ from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays, objective_constants
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, gradient_objective_constants, objective_reading
+from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import template_ledger as templates
@@ -85,11 +85,12 @@ def synthetic_factory(settings: MaterialGradientSettings, offsets: dict[str, flo
         def tick(_: jax.Array) -> None:
             counter[0] += 1
 
-        def objective(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+        def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
             jax.debug.callback(tick, theta)
             shift = theta - jnp.asarray(target, dtype=theta.dtype)
             value = jnp.sum(jnp.asarray(weight, dtype=theta.dtype) * shift * shift) + offset
-            return value, StageOneObjectiveArrays(value[None], value[None], value, value * 0.5, value * 0.25)
+            return value, GradientObjectiveArrays(value[None], value[None], value, value * 0.5, value * 0.25,
+                                          value * 0.125, value)
 
         made[surfaces] = objective
         return objective
@@ -113,8 +114,9 @@ def start_point(context: rounds.TemplateContext, surfaces: rounds.Surfaces) -> t
     designs = rounds.designs_for_surfaces(surfaces, context)
     theta = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
     value, aux = context.objective_for(designs)(jnp.asarray(theta))
-    return templates.TemplateStart(surfaces, tuple(_hex(theta)), float(value),
-                                   (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db)))
+    reading = objective_reading(aux)
+    return templates.TemplateStart(surfaces, tuple(_hex(theta)), float(value), reading.screening_total,
+                                   reading.components)
 
 
 def _cut_copy(source: Path, target: Path, rows: int) -> Path:
@@ -132,7 +134,8 @@ def _result(result: segment.TemplateResult) -> Record:
 
 def _start_record(start: templates.TemplateStart) -> Record:
     return {"surfaces": [list(item) for item in start.surfaces], "theta_hex": list(start.theta_hex),
-            "value": start.value.hex(), "components": [value.hex() for value in start.components]}
+            "value": start.value.hex(), "screening_total": start.screening_total.hex(),
+            "components": [value.hex() for value in start.components]}
 
 
 def _counting_stop(checks: list[int], stop_at: int | None = None) -> Callable[[], bool]:
@@ -246,7 +249,7 @@ def _synthetic(directory: Path, name: str, spec: Record, base: MaterialGradientS
     if spec.get("single_round"):
         designs = rounds.designs_for_surfaces(case.surfaces, case.context)
         theta = np.asarray([float.fromhex(value) for value in case.start.theta_hex])
-        point = rounds.TemplatePoint(designs, theta, case.start.value, case.start.components)
+        point = rounds.TemplatePoint(designs, theta, case.start.value, case.start.screening_total, case.start.components)
         before = case.counter[0]
         single = rounds.template_round(case.context.objective_for(designs), point, case.context, budget_left=10**6)
         row["single_round"] = {"evaluations": single.evaluations, "calls": case.counter[0] - before,
@@ -260,7 +263,7 @@ def _threshold_edge(base: MaterialGradientSettings, presets: tuple[ConstructionP
     case = _Case(base, presets, problem, override)
     designs = rounds.designs_for_surfaces(case.surfaces, case.context)
     theta = np.asarray([float.fromhex(value) for value in case.start.theta_hex])
-    point = rounds.TemplatePoint(designs, theta, case.start.value, case.start.components)
+    point = rounds.TemplatePoint(designs, theta, case.start.value, case.start.screening_total, case.start.components)
     first = rounds.template_round(case.context.objective_for(designs), point, case.context, budget_left=10**6)
     best = max(item.improvement for item in first.retuned)
     found: Record = {"best": best.hex()}
@@ -280,8 +283,8 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings,
     settings = settings_with(base, spec["override"])
     model = load_reduced(directory / "model.npz")
     receivers = ReceiverSet.model_validate(problem["receivers"])
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
-    constants = objective_constants(np.asarray(model.frequencies_hz), score, receivers, len(model.source_names))
+    score = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
+    constants = gradient_objective_constants(np.asarray(model.frequencies_hz), score, receivers, len(model.source_names))
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     builds: list[float] = []

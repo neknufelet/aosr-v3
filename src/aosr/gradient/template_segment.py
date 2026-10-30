@@ -17,7 +17,9 @@ from typing import NamedTuple
 
 import numpy as np
 
-from aosr.gradient.material_gradient import FloatVector, StopCheck, SurfaceDesign, design_names, is_feasible
+from aosr.gradient.material_gradient import (
+    Components, FloatVector, StopCheck, SurfaceDesign, design_names, is_feasible,
+)
 from aosr.gradient.template_ledger import (
     TemplateDecision, TemplateHeader, TemplateOutcome, TemplateRow, TemplateStart, append_template_rows,
     create_template_ledger, decision_row, decisions_seconds, quick_row, read_template_ledger, segment_rows,
@@ -31,13 +33,15 @@ from aosr.gradient.template_rounds import (
 
 
 class TemplateResult(NamedTuple):
-    """整段（從帳本讀回）：最後的配置、變數名、θ（雙精度）、值與兩分項、停止原因、做完幾輪、累計求值次數、總秒數。"""
+    """整段（從帳本讀回）：最後的配置、變數名、θ（雙精度）、值（新合分）、舊合分與三分項、停止原因、做完幾輪、
+    累計求值次數、總秒數。"""
 
     surfaces: Surfaces
     variable_names: tuple[str, ...]
     theta: FloatVector
     value: float
-    components: tuple[float, float]
+    screening_total: float
+    components: Components
     stop_reason: TemplateStopReason
     rounds: int
     evaluations: int
@@ -45,7 +49,7 @@ class TemplateResult(NamedTuple):
 
 
 class _Cursor(NamedTuple):
-    """接著跑的位置：這一輪起點那一點（配置、θ 的 hex、值、兩分項）、第幾輪、累計求值次數、累計秒數、下一列的步序。"""
+    """接著跑的位置：這一輪起點那一點（配置、θ 的 hex、值、舊合分與三分項）、第幾輪、累計求值次數、累計秒數、下一列的步序。"""
 
     point: TemplateStart
     round: int
@@ -62,8 +66,8 @@ def finished_result(rows: Sequence[TemplateRow]) -> TemplateResult | None:
     if last.decision is None:
         return None
     reason = next(item for item in TEMPLATE_STOP_REASONS if item == last.stop_reason)
-    return TemplateResult(last.surfaces, last.variable_names, np.asarray(last.theta(), dtype=np.float64), last.value,
-                          last.components, reason, sum(1 for row in rows if row.decision is not None),
+    return TemplateResult(last.surfaces, last.variable_names, np.asarray(last.theta(), dtype=np.float64),
+                          *last.scores(), reason, sum(1 for row in rows if row.decision is not None),
                           last.decision.total_evaluations, decisions_seconds(rows))
 
 
@@ -118,12 +122,12 @@ def _decision(result: TemplateRoundResult, threshold: float, total: int, bound: 
 
 
 def _point_of(start: TemplateStart, context: TemplateContext) -> TemplatePoint:
-    """帳本記的那一點（配置、θ 的 hex、值、分項）→ 重建設計；變數名跟 θ 長度要對得上、θ 要可行。"""
+    """帳本記的那一點（配置、θ 的 hex、值、舊合分與分項）→ 重建設計；變數名跟 θ 長度要對得上、θ 要可行。"""
     designs = designs_for_surfaces(start.surfaces, context)
     theta = np.asarray([float.fromhex(value) for value in start.theta_hex], dtype=np.float64)
     if len(theta) != len(design_names(designs)) or not is_feasible(theta, designs):
         raise ValueError("帳本記的配置與 θ 對不上重建的設計，或 θ 不可行")
-    return TemplatePoint(designs, theta, start.value, start.components)
+    return TemplatePoint(designs, theta, start.value, start.screening_total, start.components)
 
 
 def _continue(context: TemplateContext, path: Path, header: TemplateHeader, origin: TemplateStart,
@@ -145,7 +149,7 @@ def _continue(context: TemplateContext, path: Path, header: TemplateHeader, orig
         row = decision_row(step, round_index, surfaces=surfaces_of(chosen.designs),
                            variable_names=design_names(chosen.designs),
                            theta_hex=tuple(float(value).hex() for value in chosen.theta), value=chosen.value,
-                           components=chosen.components, seconds=result.seconds,
+                           screening_total=chosen.screening_total, components=chosen.components, seconds=result.seconds,
                            decision=_decision(result, settings.candidates.improvement_threshold, total, bound),
                            stop_reason=reason)
         append_template_rows(path, header, [row], settings=settings, start=origin)
@@ -192,7 +196,7 @@ def resume_template_rounds(context: TemplateContext, path: Path, header: Templat
         last = rows[decisions[-1]]
         if last.decision is None:
             raise ValueError("決定列缺內容")
-        cursor = _Cursor(TemplateStart(last.surfaces, last.theta_hex, last.value, last.components), last.round + 1,
+        cursor = _Cursor(TemplateStart(last.surfaces, last.theta_hex, *last.scores()), last.round + 1,
                          last.decision.total_evaluations, decisions_seconds(rows[:decisions[-1] + 1]),
                          decisions[-1] + 1)
     truncate_template_rows(path, header, cursor.next_step)

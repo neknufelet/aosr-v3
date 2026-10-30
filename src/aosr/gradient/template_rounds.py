@@ -33,12 +33,12 @@ from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.material_gradient import (
-    ChainObjective, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta,
+    ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta,
     compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_loop import retune_evaluation_bound
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays
+from aosr.scoring.gradient_objective_jax import objective_reading
 
 
 TEMPLATE_STOP_NO_ALTERNATIVES: Final = "沒有可換的樣板"
@@ -69,16 +69,18 @@ class TemplateContext(NamedTuple):
 
 
 class TemplatePoint(NamedTuple):
-    """一個整房配置：每面設計、可行 θ、值與兩分項（主位起伏、座位穩健性的聲道平均）。"""
+    """一個整房配置：每面設計、可行 θ、值（新合分）、舊合分與三分項（主位起伏、座位穩健性的聲道平均、大峰代理）。"""
 
     designs: tuple[SurfaceDesign, ...]
     theta: FloatVector
     value: float
-    components: tuple[float, float]
+    screening_total: float
+    components: Components
 
 
 class QuickScore(NamedTuple):
-    """一個（面, 目標）的快速評分：換過去的配置、變數名、θ、值與兩分項、秒數（重建目標、編譯與求值一起量）。"""
+    """一個（面, 目標）的快速評分：換過去的配置、變數名、θ、值（新合分）、舊合分與三分項、秒數
+    （重建目標、編譯與求值一起量）。"""
 
     surface_id: str
     target: str
@@ -86,7 +88,8 @@ class QuickScore(NamedTuple):
     variable_names: tuple[str, ...]
     theta: FloatVector
     value: float
-    components: tuple[float, float]
+    screening_total: float
+    components: Components
     seconds: float
 
     @property
@@ -217,13 +220,9 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
 
 # ---- 快速評分與取前幾個 ----
 
-def _components(aux: StageOneObjectiveArrays) -> tuple[float, float]:
-    return float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db)
-
-
 def quick_scores(point: TemplatePoint, context: TemplateContext, *,
                  should_stop: StopCheck | None = None) -> tuple[QuickScore, ...]:
-    """每個（面, 目標）各求值一次（不重調）：換過去、重建目標、編譯、求值；記值、兩分項與秒數。目標用完就丟。
+    """每個（面, 目標）各求值一次（不重調）：換過去、重建目標、編譯、求值；記值、舊合分、三分項與秒數。目標用完就丟。
 
     非有限的值拒收（帳本不收、也排不出名次）。順序照 :func:`alternatives`。
     """
@@ -236,8 +235,9 @@ def quick_scores(point: TemplatePoint, context: TemplateContext, *,
         number = float(value)
         if not math.isfinite(number):
             raise ValueError(f"快速評分 {candidate_id(surface_id, target)} 的值不是有限數：{number}")
+        reading = objective_reading(aux)
         found.append(QuickScore(surface_id, target, surfaces_of(designs), design_names(designs), theta, number,
-                                _components(aux), time.perf_counter() - clock))
+                                reading.screening_total, reading.components, time.perf_counter() - clock))
     return tuple(found)
 
 
@@ -309,11 +309,12 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     accepted = best if best.improvement > settings.candidates.improvement_threshold else None
     evaluations = len(scores) + baseline.evaluations + sum(item.retune.evaluations for item in retuned)
     if accepted is None:
-        chosen = TemplatePoint(designs, baseline.theta, base_value, baseline.steps[-1].components)
+        chosen = TemplatePoint(designs, baseline.theta, base_value, baseline.steps[-1].screening_total,
+                               baseline.steps[-1].components)
         chosen_objective = objective
     else:
         chosen = TemplatePoint(accepted.designs, accepted.retune.theta, accepted.value,
-                               accepted.retune.steps[-1].components)
+                               accepted.retune.steps[-1].screening_total, accepted.retune.steps[-1].components)
         chosen_objective = accepted.objective
     return TemplateRoundResult(True, bound, scores, baseline, tuple(retuned), accepted, chosen, chosen_objective,
                                evaluations, time.perf_counter() - clock,

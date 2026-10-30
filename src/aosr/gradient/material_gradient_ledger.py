@@ -16,6 +16,12 @@ v3：標頭多一格評分常數指紋（``objective_fingerprint``）。目標�
 v4（#561 辛三）：標頭多一格 ``kept_digests``（不貼的面 → 保留的原牆材料摘要，``endpoint.design_digest``）。
 preset 寫 none 的面從「剛性」改成「保留方案原本的牆」，方案檔位元組沒變、物理身分也沒變，舊語意的 v3 帳本只靠版本擋：
 一律拒收、要重跑；原牆材料換了（同一方案、同一組 preset）標頭就不同，接續拒收。
+
+v5（#561 壬一，老闆 2026-10-30 拍 B）：梯度目標加了大峰的平滑代理項。每列的 ``value`` 是新合分（梯度沿它走），
+另帶 ``screening_total``（舊合分＝第一階段兩分項合分，原尺不動）與三分項 ``components``（主位起伏、座位穩健性、
+代理）；評分常數指紋改雜湊 :class:`GradientObjectiveConstants`（多了內部點與代理的溫度、權重、較差參考）。
+v4 帳本接續一律拒收（訊息講明梯度目標加了大峰代理項、要重跑）；只有報告（``legacy=True``）准讀 v4，
+那時每列只有兩分項、沒有舊合分（v4 的值就是舊合分）。
 """
 from __future__ import annotations
 
@@ -33,16 +39,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants
+from aosr.scoring.gradient_objective_jax import GradientObjectiveConstants
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
-    LOOP_STOP_REASONS, STOP_REASONS, DescentResult, SnapResult, SurfaceDesign, design_names,
+    LOOP_STOP_REASONS, STOP_REASONS, Components, DescentResult, SnapResult, SurfaceDesign, design_names,
 )
 from aosr.gradient.endpoint import design_digest
 
 
-LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v4"
+LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v5"
+# 上一版（梯度目標還沒有大峰代理項）：報告准讀，接續拒收。
+LEGACY_LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v4"
 _V2_VERSION: Final = "aosr.material_gradient_ledger.v2"
+# 接續碰到上一版帳本、或標頭的評分常數指紋不同時，訊息要講明的那一句。
+PROXY_RERUN_TEXT: Final = "評分常數指紋不同：梯度目標加了大峰代理項，要重跑"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Phase = Literal["descent", "snap", "retune", "baseline_retune", "candidate_jump", "candidate_retune", "round_decision"]
 SegmentPhase = Literal["descent", "retune", "baseline_retune", "candidate_retune"]
@@ -57,7 +67,7 @@ class MaterialGradientHeader(BaseModel):
     不貼的面各自保留的原牆材料摘要。"""
 
     model_config = _FROZEN
-    ledger_version: Literal["aosr.material_gradient_ledger.v4"]
+    ledger_version: Literal["aosr.material_gradient_ledger.v5", "aosr.material_gradient_ledger.v4"]
     input_hash: str = Field(min_length=1)
     mesh_hash: str = Field(min_length=1)
     physics_identity: str = Field(min_length=1)
@@ -159,8 +169,11 @@ class RoundDecision(BaseModel):
 
 
 class MaterialGradientRow(BaseModel):
-    """一列：全帳本第幾列（從 0 起連號）、階段、第幾輪、哪個候選、θ（float.hex）、值與兩分項、梯度範數、步長、
-    秒數、停止原因、最後一次試的步長、這段求值次數、取法、跳點、決定。
+    """一列：全帳本第幾列（從 0 起連號）、階段、第幾輪、哪個候選、θ（float.hex）、值（新合分）、舊合分、三分項、
+    梯度範數、步長、秒數、停止原因、最後一次試的步長、這段求值次數、取法、跳點、決定。
+
+    v5 列帶 ``screening_total`` 與三分項（主位起伏、座位穩健性、大峰代理）；上一版（v4，只准報告讀）沒有舊合分、
+    只有兩分項。哪一種由標頭版本決定（:func:`check_rows` 逐列守），同一列兩種形狀不准混。
 
     ``snap`` 列沒有梯度範數與步長、要帶每面取法；四種下降段（``descent``、``retune``、``baseline_retune``、
     ``candidate_retune``）帶梯度範數與步長，停止原因、最後一次試的步長與這段求值次數三格同進同出、只在每段的最後一列；
@@ -175,7 +188,8 @@ class MaterialGradientRow(BaseModel):
     candidate: str | None
     theta_hex: tuple[str, ...]
     value: float
-    components: tuple[float, float]
+    screening_total: float | None = None
+    components: tuple[float, float, float] | tuple[float, float]
     gradient_norm: float | None = Field(ge=0.0)
     step_size: float | None = Field(ge=0.0)
     seconds: float = Field(ge=0.0)
@@ -193,6 +207,8 @@ class MaterialGradientRow(BaseModel):
 
     @model_validator(mode="after")
     def _phase_fields(self) -> Self:
+        if (self.screening_total is None) != (len(self.components) == 2):
+            raise ValueError("舊合分與三分項同進同出（v5）；上一版的列只有兩分項、沒有舊合分")
         in_round = self.phase in _ROUND_PHASES
         if (self.round is not None) != in_round:
             raise ValueError(f"{self.phase} 列{'要' if in_round else '不'}帶輪號")
@@ -226,10 +242,25 @@ class MaterialGradientRow(BaseModel):
     def theta(self) -> tuple[float, ...]:
         return tuple(float.fromhex(encoded) for encoded in self.theta_hex)
 
+    def is_legacy(self) -> bool:
+        """上一版（v4）的列：只有兩分項、沒有舊合分。"""
+        return self.screening_total is None
+
+    def scores(self) -> tuple[float, float, Components]:
+        """v5 列的（新合分, 舊合分, 三分項）；上一版的列拒收（接續與起點只用這一版的列）。"""
+        components = self.components
+        if self.screening_total is None or len(components) != 3:
+            raise ValueError(f"第 {self.step} 列是上一版帳本的列（沒有大峰代理）；{PROXY_RERUN_TEXT}")
+        return self.value, self.screening_total, (components[0], components[1], components[2])
+
+    def proxy_db(self) -> float | None:
+        """大峰代理（dB）；上一版的列沒有，是 None。"""
+        return None if self.screening_total is None else self.components[-1]
+
 
 # ---- 造列 ----
 
-def objective_fingerprint(constants: StageOneObjectiveConstants) -> str:
+def objective_fingerprint(constants: GradientObjectiveConstants) -> str:
     """評分常數的 SHA-256（十六進位）：照 NamedTuple 欄位順序，每欄餵欄位名、dtype、形狀與連續排列的原始位元組。
 
     每一段前面帶長度，段界不會混；不餵 Python 的 repr（印法會變）。欄位數不寫死，NamedTuple 加欄位自動算進來。
@@ -248,7 +279,7 @@ def objective_fingerprint(constants: StageOneObjectiveConstants) -> str:
 
 
 def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
-               objective_constants: StageOneObjectiveConstants) -> MaterialGradientHeader:
+               objective_constants: GradientObjectiveConstants) -> MaterialGradientHeader:
     """這一次搜尋的標頭：綁替身身分（輸入雜湊、網格雜湊、物理身分）、設計清單、搜尋設定與評分常數。
 
     呼叫端另外注入目標函式的空氣常數（``air``）與多孔材範圍（``ranges``）不在標頭內，只靠替身物理身分裡
@@ -277,36 +308,37 @@ def descent_rows(result: DescentResult, phase: SegmentPhase, first_step: int, *,
     last = len(result.steps) - 1
     return tuple(_row(
         step=first_step + offset, phase=phase, round=round, candidate=candidate,
-        theta_hex=tuple(value.hex() for value in item.theta), value=item.value, components=item.components,
-        gradient_norm=item.gradient_norm, step_size=item.step_size, seconds=item.seconds,
+        theta_hex=tuple(value.hex() for value in item.theta), value=item.value,
+        screening_total=item.screening_total, components=item.components, gradient_norm=item.gradient_norm, step_size=item.step_size, seconds=item.seconds,
         stop_reason=result.stop_reason if offset == last else None,
         final_trial_step=result.final_trial_step if offset == last else None,
         evaluations=result.evaluations if offset == last else None,
     ) for offset, item in enumerate(result.steps))
 
 
-def snap_row(snapped: SnapResult, value: float, components: tuple[float, float], seconds: float,
+def snap_row(snapped: SnapResult, value: float, screening_total: float, components: Components, seconds: float,
              step: int) -> MaterialGradientRow:
-    """取規格一列：取到的 θ、在那裡重算的值與分項、每面取法。"""
+    """取規格一列：取到的 θ、在那裡重算的值、舊合分與分項、每面取法。"""
     return _row(step=step, phase="snap", theta_hex=tuple(float(value).hex() for value in snapped.theta),
-                value=value, components=components, seconds=seconds,
+                value=value, screening_total=screening_total, components=components, seconds=seconds,
                 snap=tuple(SnapChoice(**choice._asdict()) for choice in snapped.surfaces))
 
 
-def jump_row(step: int, round: int, candidate: str, theta: Sequence[float], value: float,
-             components: tuple[float, float], jump: CandidateJump) -> MaterialGradientRow:
+def jump_row(step: int, round: int, candidate: str, theta: Sequence[float], value: float, screening_total: float,
+             components: Components, jump: CandidateJump) -> MaterialGradientRow:
     """跳點一列：跳到的 θ 與那裡的值（就是候選重調的起點那一次求值，不另外求）。"""
     return _row(step=step, phase="candidate_jump", round=round, candidate=candidate,
-                theta_hex=tuple(float(value).hex() for value in theta), value=value, components=components,
-                seconds=0.0, jump=jump)
+                theta_hex=tuple(float(value).hex() for value in theta), value=value, screening_total=screening_total,
+                components=components, seconds=0.0, jump=jump)
 
 
-def decision_row(step: int, round: int, theta: Sequence[float], value: float, components: tuple[float, float],
-                 seconds: float, decision: RoundDecision, stop_reason: str | None) -> MaterialGradientRow:
-    """決定一列：這一輪交出去的 θ 與值、決定內容；整場停在這一輪時帶迴圈的停止原因。"""
+def decision_row(step: int, round: int, theta: Sequence[float], value: float, screening_total: float,
+                 components: Components, seconds: float, decision: RoundDecision,
+                 stop_reason: str | None) -> MaterialGradientRow:
+    """決定一列：這一輪交出去的 θ、值、舊合分與分項、決定內容；整場停在這一輪時帶迴圈的停止原因。"""
     return _row(step=step, phase="round_decision", round=round,
-                theta_hex=tuple(float(value).hex() for value in theta), value=value, components=components,
-                seconds=seconds, stop_reason=stop_reason, decision=decision)
+                theta_hex=tuple(float(value).hex() for value in theta), value=value, screening_total=screening_total,
+                components=components, seconds=seconds, stop_reason=stop_reason, decision=decision)
 
 
 # ---- 讀回驗證 ----
@@ -427,6 +459,10 @@ def _check_stop_reason(label: str, row: MaterialGradientRow, decision: RoundDeci
             raise ValueError(f"{label}：接受了候選而沒停或停在求值上限的輪要記下一輪最壞值，停在輪數上限的不記")
 
 
+def _point(row: MaterialGradientRow) -> tuple[object, ...]:
+    return (row.theta_hex, row.value, row.screening_total, row.components)
+
+
 def _check_decision(label: str, row: MaterialGradientRow, start: MaterialGradientRow | None,
                     baseline: Sequence[MaterialGradientRow],
                     candidates: Sequence[tuple[str, MaterialGradientRow, Sequence[MaterialGradientRow]]],
@@ -444,13 +480,11 @@ def _check_decision(label: str, row: MaterialGradientRow, start: MaterialGradien
         raise ValueError(f"{label}：決定列的基準值不是基準重調最後一列的值")
     if baseline:
         chosen = next((retune for name, _, retune in candidates if name == decision.accepted), baseline)
-        if (row.theta_hex, row.value, row.components) != (chosen[-1].theta_hex, chosen[-1].value,
-                                                          chosen[-1].components):
-            raise ValueError(f"{label}：決定列交出去的 θ、值或分項不是"
+        if _point(row) != _point(chosen[-1]):
+            raise ValueError(f"{label}：決定列交出去的 θ、值、舊合分或分項不是"
                              f"{'接受的候選' if decision.accepted else '基準'}重調末列的")
-    elif start is not None and (row.theta_hex, row.value, row.components) != (
-            start.theta_hex, start.value, start.components):
-        raise ValueError(f"{label}：沒有重調的輪交出去的 θ、值與分項必須是起點那一列的原樣")
+    elif start is not None and _point(row) != _point(start):
+        raise ValueError(f"{label}：沒有重調的輪交出去的 θ、值、舊合分與分項必須是起點那一列的原樣")
     _check_stop_reason(label, row, decision)
     if row.stop_reason is not None and not is_last_row_of_ledger:
         raise ValueError(f"{label}：帶迴圈停止原因的決定列必須是整本帳的最後一列")
@@ -462,7 +496,11 @@ def check_rows(header: MaterialGradientHeader, rows: Sequence[MaterialGradientRo
     """全帳本連號、θ 長度等於變數數、前段階段不倒退、每段下降的停止原因恰在最後一列、迴圈一輪一輪的列序與決定一致、
     累計求值次數逐輪相加。最後一輪可以沒寫完（寫到一半斷掉的帳本，接續時丟掉那半輪）。"""
     surface_ids = tuple(surface_id for surface_id, _ in header.surfaces)
+    legacy = header.ledger_version == LEGACY_LEDGER_VERSION
     for index, row in enumerate(rows):
+        if row.is_legacy() != legacy:
+            raise ValueError(f"第 {index} 列的形狀跟標頭版本 {header.ledger_version} 不同"
+                             f"（{'上一版只有兩分項、沒有舊合分' if legacy else 'v5 要帶舊合分與三分項'}）")
         if row.step != index:
             raise ValueError(f"第 {index} 列的步序是 {row.step}，帳本列必須從 0 連號")
         if len(row.theta_hex) != len(header.variable_names):
@@ -492,8 +530,14 @@ def _write_line(handle: BinaryIO, value: BaseModel) -> None:
     os.fsync(handle.fileno())
 
 
+def _current(header: MaterialGradientHeader) -> None:
+    if header.ledger_version != LEDGER_VERSION:
+        raise ValueError(f"只寫 {LEDGER_VERSION} 的帳本，收到 {header.ledger_version}；{PROXY_RERUN_TEXT}")
+
+
 def write_ledger(path: Path, header: MaterialGradientHeader, rows: Sequence[MaterialGradientRow]) -> None:
-    """獨佔建檔（已有檔案即丟錯），先驗整段再逐列寫，每列 flush 與 fsync。"""
+    """獨佔建檔（已有檔案即丟錯），先驗整段再逐列寫，每列 flush 與 fsync；只寫這一版。"""
+    _current(header)
     checked_header = MaterialGradientHeader.model_validate(header.model_dump())
     checked = tuple(MaterialGradientRow.model_validate(row.model_dump()) for row in rows)
     check_rows(checked_header, checked)
@@ -505,6 +549,7 @@ def write_ledger(path: Path, header: MaterialGradientHeader, rows: Sequence[Mate
 
 def append_rows(path: Path, header: MaterialGradientHeader, rows: Sequence[MaterialGradientRow]) -> None:
     """接在既有帳本後面寫：先讀回整本（標頭要等於 ``header``），連同新列一起驗，再逐列寫、每列 flush 與 fsync。"""
+    _current(header)
     _, existing = read_ledger(path, expected_header=header)
     checked = tuple(MaterialGradientRow.model_validate(row.model_dump()) for row in rows)
     check_rows(header, (*existing, *checked))
@@ -528,11 +573,13 @@ def truncate_rows(path: Path, header: MaterialGradientHeader, keep: int) -> None
     read_ledger(path, expected_header=header)
 
 
-def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = None,
+def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = None, legacy: bool = False,
                 ) -> tuple[MaterialGradientHeader, tuple[MaterialGradientRow, ...]]:
     """逐列驗型別與順序；給了預期標頭就逐格比（替身換了、設定換了、評分常數換了都拒收）。壞列一律報錯，不捨棄。
 
-    標頭先看版本：不是這一版（例如 v1）就拒收、訊息講明版本，不做舊版相容；v2 另外講明少了評分常數指紋。
+    標頭先看版本：不是這一版（例如 v1）就拒收、訊息講明版本，不做舊版相容；v2 另外講明少了評分常數指紋；
+    v4（梯度目標加大峰代理項之前）講明要重跑。``legacy=True`` 只給報告用：准讀 v4（不給預期標頭時），照 v4 的列形狀驗。
+    評分常數指紋不同時訊息講明大峰代理那一句（:data:`PROXY_RERUN_TEXT`）。
     """
     with path.open("rb") as handle:
         lines = handle.readlines()
@@ -543,13 +590,17 @@ def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = 
     if version == _V2_VERSION:
         raise ValueError(f"帳本版本是 {version!r}，標頭少了評分常數指紋（objective_fingerprint）：計分頻帶或權重改了也認不出來，"
                          f"不能接續；這一版只收 {LEDGER_VERSION}，要重跑")
-    if version != LEDGER_VERSION:
+    if version == LEGACY_LEDGER_VERSION and not (legacy and expected_header is None):
+        raise ValueError(f"帳本版本是 {version!r}（梯度目標加大峰代理項之前），{PROXY_RERUN_TEXT}；"
+                         f"這一版只收 {LEDGER_VERSION}")
+    if version not in (LEDGER_VERSION, LEGACY_LEDGER_VERSION):
         raise ValueError(f"帳本版本是 {version!r}，這一版只收 {LEDGER_VERSION}；舊版帳本不做相容，要重跑")
     header = MaterialGradientHeader.model_validate_json(lines[0])
     if expected_header is not None and header != expected_header:
         actual, expected = header.model_dump(), expected_header.model_dump()
         differing = sorted(name for name in actual if actual[name] != expected[name])
-        raise ValueError(f"帳本標頭跟這一次對不上：{differing}")
+        note = f"；{PROXY_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
+        raise ValueError(f"帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(MaterialGradientRow.model_validate_json(line) for line in lines[1:])
     check_rows(header, rows)
     return header, rows

@@ -6,7 +6,8 @@
   對得上這幾格、替身座位與喇叭的名字對得上方案），都過才建 ``<root>/<32 位十六進位>/``（名字由輸入算，同一組輸入同一個資料夾），
   寫 ``project.json``，在雙精度子行程把整條鏈跑完。拒收不建資料夾。
 - ``resume <資料夾>``：拿鎖、重算現在的物理身分跟 ``project.json`` 比（不同就拒收），再逐格核輸入（方案檔雜湊、
-  方案座標、替身過閘門、manifest 與收據摘要、設定指紋；子行程重建目標前會再核一次），清掉留下的 ``stop`` 記號，
+  方案座標、替身過閘門、manifest 與收據摘要、設定指紋、梯度目標設定指紋——#561 壬一加大峰代理之前開始的資料夾沒有這一格，
+  一律拒收；子行程重建目標前會再核一次），清掉留下的 ``stop`` 記號，
   子行程照帳本接著跑（標頭對不上拒收；前段沒寫完重跑前段）；庚二帳本已收尾、還沒有 ``templates.jsonl`` 的資料夾
   （庚三之前跑完的）接續就開換樣板段，跑完把 ``result.json`` 覆寫成 v3。介面跟庚三之前一樣。
 - ``stop <資料夾>``：建 ``stop`` 記號，不拿鎖，回 0；子行程在下一次求值之前停。
@@ -181,13 +182,11 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.material_gradient import load_material_gradient_settings
-    from aosr.config.quality_targets import load_quality_targets
     from aosr.gradient import run
     from aosr.physics.fem_reduced_check import points_hex
     from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.reporting.scheme import load_scheme
-    from aosr.scoring.stage_one_score import stage_one_score_settings
 
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     if SEARCHES_DIR in args.root.resolve().parts:
@@ -200,7 +199,7 @@ def _start(args: argparse.Namespace) -> int:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     run.designs_for(args.presets, settings,
                     kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity))
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), args.purpose)
+    objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     physics, mesh = operators.physics_identity, operators.mesh_hash
@@ -208,18 +207,20 @@ def _start(args: argparse.Namespace) -> int:
     del operators
     model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points)
     run.check_surrogate_matches_scheme(model, scheme, points)
-    run.check_surrogate_axis_covers_scoring(model, scheme, score)
+    run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     del model
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
-                               settings_fingerprint=settings.fingerprint, physics_identity=physics)
+                               settings_fingerprint=settings.fingerprint, physics_identity=physics,
+                               objective_settings_fingerprint=objective.fingerprint)
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
         receipt_sha256=run.file_sha256(receipt_path(surrogate)), presets=args.presets, purpose=args.purpose,
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
-        source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text())
+        source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
+        objective_settings_fingerprint=objective.fingerprint)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)

@@ -114,28 +114,35 @@ def _weighted_rms(values: jax.Array, weights: jax.Array, floor: jax.Array) -> ja
     return jnp.where(is_zero, jnp.zeros_like(square), jnp.sqrt(safe_square))
 
 
-def objective_from_energies(
-    constants: StageOneObjectiveConstants, energies: jax.Array,
-) -> StageOneObjectiveArrays:
-    """輸入 ``(喇叭, 座位, F)`` 浮點正能量，回逐喇叭兩項、逐聲道平均與第一階段合分。
+class _PrimaryFit(NamedTuple):
+    """主位擬合的中間量（都只含計分範圍內的頻點）：全部座位的 dB ``(喇叭, 座位, F內)``、主位 dB ``(喇叭, F內)``、
+    頻率權重 ``(F內,)``、主位扣自己加權最小平方直線後的殘差 ``(喇叭, F內)``。"""
 
-    主位用 dB 對 log2(f) 的加權平均、協方差／變異數擬合自己的直線；六點各自減主位後
-    取加權均方根再等權平均。合分為 Σ 權重 × 聲道平均／較差參考，外層類權重不在這裡乘。
-    兩項的均方根低於 ``_RMS_FLOOR_EPS_MULTIPLE`` × eps × 該喇叭 max|dB|（下限 1）時，值與梯度都當 0。
-    """
+    levels: jax.Array
+    primary: jax.Array
+    weights: jax.Array
+    residual: jax.Array
+
+
+def _checked_energies(constants: StageOneObjectiveConstants, energies: jax.Array) -> jax.Array:
     values = jnp.asarray(energies)
     if not jnp.issubdtype(values.dtype, jnp.floating):
         raise TypeError(f"能量必須是浮點陣列，收到 {values.dtype}")
     expected = _energy_shape(constants)
     if values.shape != expected:
         raise ValueError(f"能量形狀必須是 {expected}（喇叭, 座位, F），收到 {values.shape}")
+    return values
+
+
+def _primary_fit(constants: StageOneObjectiveConstants, values: jax.Array) -> _PrimaryFit:
+    """主位用 dB 對 log2(f) 的加權平均、協方差／變異數擬合自己的直線；:func:`objective_from_energies` 與
+    :func:`primary_residual_db` 共用這一份算式（同一串運算、同一個順序）。"""
     dtype = values.dtype
     indices = jnp.asarray(constants.frequency_indices)
     x = jnp.take(jnp.asarray(constants.log2_frequencies, dtype=dtype), indices)
     weights = jnp.asarray(constants.frequency_weights, dtype=dtype)
     levels = 10.0 * jnp.log10(jnp.take(values, indices, axis=-1))
     primary = jnp.take(levels, jnp.asarray(constants.primary_index), axis=1)
-    surrounding = jnp.take(levels, jnp.asarray(constants.surrounding_indices), axis=1)
     weight_sum = jnp.sum(weights)
     x_mean = jnp.sum(weights * x) / weight_sum
     y_mean = jnp.sum(weights * primary, axis=-1) / weight_sum
@@ -145,6 +152,31 @@ def objective_from_energies(
     slope = covariance / variance
     intercept = y_mean - slope * x_mean
     residual = primary - (slope[:, None] * x + intercept[:, None])
+    return _PrimaryFit(levels, primary, weights, residual)
+
+
+def primary_residual_db(constants: StageOneObjectiveConstants, energies: jax.Array) -> jax.Array:
+    """``(喇叭, 座位, F)`` 正能量 → 每支喇叭主位扣自己直線後的殘差 ``(喇叭, F內)``（dB，只含計分範圍內的頻點）。
+
+    就是主項均方根底下那一個量（:func:`objective_from_energies` 用同一份 :func:`_primary_fit`），給要看殘差本身的
+    呼叫端（梯度目標的大峰代理）；不歸零、不加地板。
+    """
+    return _primary_fit(constants, _checked_energies(constants, energies)).residual
+
+
+def objective_from_energies(
+    constants: StageOneObjectiveConstants, energies: jax.Array,
+) -> StageOneObjectiveArrays:
+    """輸入 ``(喇叭, 座位, F)`` 浮點正能量，回逐喇叭兩項、逐聲道平均與第一階段合分。
+
+    主位用 dB 對 log2(f) 的加權平均、協方差／變異數擬合自己的直線；六點各自減主位後
+    取加權均方根再等權平均。合分為 Σ 權重 × 聲道平均／較差參考，外層類權重不在這裡乘。
+    兩項的均方根低於 ``_RMS_FLOOR_EPS_MULTIPLE`` × eps × 該喇叭 max|dB|（下限 1）時，值與梯度都當 0。
+    """
+    values = _checked_energies(constants, energies)
+    dtype = values.dtype
+    levels, primary, weights, residual = _primary_fit(constants, values)
+    surrounding = jnp.take(levels, jnp.asarray(constants.surrounding_indices), axis=1)
     scale = jnp.maximum(jnp.max(jnp.abs(levels), axis=(1, 2)), jnp.ones((), dtype=dtype))
     floor = rms_floor_factor(dtype) * scale
     ripple = _weighted_rms(residual, weights, floor)

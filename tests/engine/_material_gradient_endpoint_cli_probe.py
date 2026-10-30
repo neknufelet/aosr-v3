@@ -33,8 +33,8 @@ from aosr.gradient.run import RESULT_FILE, GradientResult, check_inputs, read_pr
 from aosr.gradient.worker import run_endpoint_worker
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.reporting.fem_reduced_scheme import export_operators
-from aosr.scoring.stage_one_objective_jax import objective_constants, objective_from_pressures
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.gradient_objective_jax import gradient_objective_constants, gradient_objective_from_pressures
+from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 
 Record = dict[str, object]
 
@@ -52,25 +52,26 @@ def _endpoint(source: Path) -> Record:
                                         load_construction_presets(config_path("construction_presets.toml")), kept=kept)
     operators = export_operators(scheme, capabilities=load_capabilities(project.capabilities_path),
                                  directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+    score = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     checked = endpoint.endpoint_check(
-        operators, designs, theta, model=model, score_settings=score, receiver_set=scheme.receiver_set,
+        operators, designs, theta, model=model, objective_settings=score, receiver_set=scheme.receiver_set,
         low_frequency_axis=axis_id, presets=load_construction_presets(config_path("construction_presets.toml")),
         settings=settings, air=air, ranges=ranges)
     axis = tuple(model.frequencies_hz)
     pressures = endpoint.full_model_pressures(
         operators, {wall: kept[wall.wall_name()] for wall in Wall.all()}, axis, air=air, ranges=ranges,
         max_relative_residual=model.ledger.settings.full_solve_max_relative_residual)
-    constants = objective_constants(axis, score, scheme.receiver_set, len(model.source_names))
-    base = objective_from_pressures(constants, jnp.asarray(pressures))
+    constants = gradient_objective_constants(axis, score, scheme.receiver_set, len(model.source_names))
+    base = gradient_objective_from_pressures(constants, jnp.asarray(pressures))
     peaks = endpoint.big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
-                               frequencies_hz=axis, low_frequency_axis=axis_id, scoring_range_hz=score.scored_range_hz)
+                               frequencies_hz=axis, low_frequency_axis=axis_id, scoring_range_hz=score.stage_one.scored_range_hz)
     return {"report": json.loads(checked.report.to_json()), "baseline_total": float(base.screening_total).hex(),
             "baseline_components": [float(base.mean_own_line_ripple_rms_db).hex(),
                                     float(base.mean_seat_robustness_rms_db).hex()],
+            "baseline_objective": [float(base.objective_total).hex(), float(base.big_peak_proxy_db).hex()],
             "baseline_peaks": peaks}
 
 

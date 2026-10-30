@@ -28,7 +28,7 @@ from aosr.config.paths import config_path
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_store import save_reduced
 from aosr.runtime import child_process_env, configure_jax
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays
+from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
@@ -39,6 +39,7 @@ from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _header, _narrowed, _presets, _receivers, _reweighted, _score,
     _settings,
 )
+from tests.engine._gradient_objective_rows import assert_rows_split_scores
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
 
@@ -441,11 +442,21 @@ def _renumbered(documents: list[dict[str, object]]) -> list[dict[str, object]]:
     return [{**item, "step": index} for index, item in enumerate(documents)]
 
 
-def test_ledger_v4_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None:
+def test_surrogate_rows_carry_both_scores_and_value_is_screening_plus_proxy(runs: tuple[Path, Record]) -> None:
+    """抓帳本值不是新合分、舊合分漏記或代理項接錯（#561 壬一）：小房間替身那一場整場跑完，每一列的值等於
+    舊合分 ＋ w·代理／ref（w、ref 從登記簿讀；容差見 ``assert_rows_split_scores``），舊合分每列都在、可以單獨排序。"""
+    source = runs[0] / str(_surrogate(runs)["ledger"])
+    header, rows = ledger.read_ledger(source)
+    assert header.ledger_version == ledger.LEDGER_VERSION
+    assert rows[-1].stop_reason in gradient_search.LOOP_STOP_REASONS
+    assert_rows_split_scores(rows)
+
+
+def test_ledger_v5_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None:
     """抓帳本漏寫或改寫：讀回再寫一份逐位相同，讀回的停止原因、最後 θ、累計次數等於探針那一次的結果。"""
     source = runs[0] / str(_surrogate(runs)["ledger"])
     header, rows = ledger.read_ledger(source)
-    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v4"
+    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v5"
     copy = tmp_path / "copy.jsonl"
     ledger.write_ledger(copy, header, rows)
     assert copy.read_bytes() == source.read_bytes()
@@ -508,7 +519,7 @@ def _contradict(source: Path, target: Path, edit: str) -> Path:
         decision["round_evaluations"] = decision["total_evaluations"] = 700
         row["value"] = 999.0
     elif edit in ("wrong_components", "no_candidates_wrong_components"):
-        row["components"] = [999.0, 999.0]
+        row["components"] = [999.0, 999.0, 999.0]
     elif edit == "no_candidates_wrong_value":
         row["value"] = 999.0
     return _rewrite(source, target, None, documents)
@@ -607,7 +618,7 @@ def test_resume_at_every_boundary_class_matches_one_shot(runs: tuple[Path, Recor
         assert _without_seconds(_rows(runs, name)) == expected, name
 
 
-def _never_called(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+def _never_called(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
     raise AssertionError("這裡不該求值")
 
 

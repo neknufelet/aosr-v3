@@ -64,7 +64,9 @@ from tests.engine import _fem_shared_cases as shared_cases
 from tests.engine._precision_contracts import contract_value
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_fem_reduced import DENSITY, SOUND_SPEED, model as model, operators as operators
-from tests.engine.test_material_gradient import CASES, DESCENT_CASE, PURPOSE, _chain_model, _presets, _receivers
+from tests.engine.test_material_gradient import (
+    CASES, DESCENT_CASE, PURPOSE, _chain_model, _gradient_settings, _presets, _receivers,
+)
 from tests.engine.test_material_gradient_loop import _without_seconds
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
@@ -524,6 +526,7 @@ def test_start_project_records_inputs_and_identities(runs: tuple[Path, Record]) 
     assert project["surrogate_manifest_sha256"] == manifest["manifest_sha256"]
     assert project["receipt_path"] == str(receipt.resolve()) and project["receipt_sha256"] == _sha256(receipt)
     assert project["settings_fingerprint"] == load_material_gradient_settings(_settings_path(runs)).fingerprint
+    assert project["objective_settings_fingerprint"] == _gradient_settings().fingerprint
     assert project["physics_identity"] == manifest["physics_identity"] == _current_identity()
     assert project["mesh_hash"] == manifest["mesh_hash"]
     assert project["presets"] == list(PRESETS) and project["purpose"] == PURPOSE
@@ -575,7 +578,9 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
     assert (result["value"], result["round_stop_reason"], result["evaluations"]) == (
         last.value, last.stop_reason, last.decision.total_evaluations)
     assert result["components"] == {"own_line_ripple_rms_db": last.components[0],
-                                    "seat_robustness_rms_db": last.components[1]}
+                                    "seat_robustness_rms_db": last.components[1],
+                                    "big_peak_proxy_db": last.proxy_db()}
+    assert result["screening_total"] == last.screening_total
     assert result["ledger_sha256"] == _sha256(folder / "ledger.jsonl")
 
 
@@ -611,7 +616,8 @@ def test_report_prints_segments_rounds_stop_reason_and_final_point(runs: tuple[P
         assert f"  {spec['surface_id']}：{spec['preset_id']}，{thickness}，{cavity}" in lines
     for row in rows:
         if row.decision is not None:
-            assert any(line.startswith(f"第 {row.round} 輪：交出的值 {row.value:.6f}") for line in lines)
+            assert any(line.startswith(f"第 {row.round} 輪：交出 舊合分 {row.screening_total:.6f}／新合分 {row.value:.6f}"
+                                       f"／代理 {row.proxy_db():.3f} dB") for line in lines)
 
 
 # ---- 停止記號與接續 ----

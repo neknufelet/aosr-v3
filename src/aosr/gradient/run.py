@@ -23,6 +23,11 @@ manifest 摘要與驗證收據摘要；方案檔與搜尋設定也要跟記的�
 求值次數與帳本摘要；終點完整模型重算、量大峰、材料匯出在 ``endpoint_run``。
 preset 寫 none 的面是「不貼、保留方案原本的牆」（#561 辛三）：每面設計帶方案那一面原本的材料（:func:`scene_wall_materials`），
 從替身鏈起就用它的阻抗，不是剛性。
+
+#561 壬一（老闆 2026-10-30 拍 B）：梯度目標＝第一階段兩分項合分＋權重 × 大峰代理（``scoring.gradient_objective_jax``）。
+``result.json`` 升 v4：``value`` 是新合分，另帶 ``screening_total``（舊合分）與三分項（含代理）；報告讀得回 v3（沒有代理）。
+``project.json`` 多記梯度目標設定指紋（``objective_settings_fingerprint``：登記簿那三格加第一階段設定），資料夾名也算進去；
+接續時重算比對，沒記（加代理之前開始的）或不同就拒收、講明梯度目標加了大峰代理項要重跑。
 """
 from __future__ import annotations
 
@@ -34,11 +39,11 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Final, Literal, NamedTuple, Protocol
+from typing import Final, Literal, NamedTuple, Protocol, Self
 
 import jax.numpy as jnp
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
@@ -56,7 +61,7 @@ from aosr.gradient.material_gradient import (
     wall_designs_from_presets,
 )
 from aosr.gradient.material_gradient_ledger import (
-    MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
+    PROXY_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
     truncate_rows, write_ledger,
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
@@ -76,9 +81,12 @@ from aosr.physics.report_io import solver_inputs
 from aosr.reporting.fem_reduced_scheme import scheme_points
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.reporting.validation import checked_inputs
+from aosr.scoring.gradient_objective_jax import (
+    GradientObjectiveConstants, gradient_objective_constants, objective_reading,
+)
+from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, gradient_objective_settings
 from aosr.scoring.stage_one_low_frequency import axis_reason_not_measurable
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, objective_constants
-from aosr.scoring.stage_one_score import StageOneScoreSettings, stage_one_score_settings
+from aosr.scoring.stage_one_score import StageOneScoreSettings
 
 
 PROJECT_FILE: Final = "project.json"
@@ -88,7 +96,9 @@ STATUS_FILE: Final = "status.json"
 RESULT_FILE: Final = "result.json"
 STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
-RESULT_VERSION: Final = "aosr.material_gradient_result.v3"
+RESULT_VERSION: Final = "aosr.material_gradient_result.v4"
+# 上一版（梯度目標還沒有大峰代理項）：報告准讀，終點與接續不收。
+LEGACY_RESULT_VERSION: Final = "aosr.material_gradient_result.v3"
 FREQUENCY_RULER: Final = "fem_reduced_holdout_frequency_db"
 BAND_RULER: Final = "fem_reduced_holdout_band_db"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -97,7 +107,11 @@ State = Literal["running", "finished", "stopped", "failed", "interrupted"]
 
 
 class GradientProject(BaseModel):
-    """``project.json``：這一次搜尋的輸入與身分。路徑一律絕對路徑；雜湊是開始時量的，接續時逐格再比。"""
+    """``project.json``：這一次搜尋的輸入與身分。路徑一律絕對路徑；雜湊是開始時量的，接續時逐格再比。
+
+    ``objective_settings_fingerprint`` 是梯度目標設定的指紋（#561 壬一）；加代理之前開始的資料夾沒有這一格（讀成 None，
+    報告照讀），接續時一律拒收。
+    """
 
     model_config = _FROZEN
     format_version: Literal["aosr.material_gradient_project.v1"]
@@ -119,6 +133,7 @@ class GradientProject(BaseModel):
     receiver_points: dict[str, PointHex]
     engine_commit: str | None
     started_at: str
+    objective_settings_fingerprint: str | None = Field(default=None, pattern=_SHA256)
 
 
 class GradientStatus(BaseModel):
@@ -154,11 +169,12 @@ class SurfaceSpec(BaseModel):
 
 
 class Components(BaseModel):
-    """兩分項（聲道平均）：主位自己那條線的起伏、座位穩健性。"""
+    """分項（聲道平均）：主位自己那條線的起伏、座位穩健性、大峰代理（v4 起；v3 的結果檔沒有，是 None）。"""
 
     model_config = _FROZEN
     own_line_ripple_rms_db: float
     seat_robustness_rms_db: float
+    big_peak_proxy_db: float | None = None
 
 
 class GradientResult(BaseModel):
@@ -166,17 +182,20 @@ class GradientResult(BaseModel):
 
     v3（#561 庚三）：``surfaces``／``variable_names``／``theta_hex``／``value``／``components`` 都是**最後配置**的；
     ``round_stop_reason``、``evaluations``、``rounds`` 是庚二候選確認迴圈的（求值次數照庚二帳本記的）；``stop_reason`` 是
-    換樣板段的（整場的停止原因），``template_rounds``、``template_evaluations`` 是換樣板帳本記的。v2 與更舊的檔不收
-    （:func:`parse_result` 講明版本；接續會從帳本重建、覆寫成 v3）。
+    換樣板段的（整場的停止原因），``template_rounds``、``template_evaluations`` 是換樣板帳本記的。
+    v4（#561 壬一）：``value`` 是新合分（第一階段兩分項合分＋權重 × 大峰代理），``screening_total`` 是舊合分，
+    ``components`` 多了代理。v3 只准報告讀（:func:`parse_result` 的 ``legacy``），那時沒有舊合分與代理（v3 的值就是舊合分）。
+    v2 與更舊的檔不收。
     """
 
     model_config = _FROZEN
-    format_version: Literal["aosr.material_gradient_result.v3"]
+    format_version: Literal["aosr.material_gradient_result.v4", "aosr.material_gradient_result.v3"]
     gradient_id: str
     surfaces: tuple[SurfaceSpec, ...]
     variable_names: tuple[str, ...]
     theta_hex: tuple[str, ...]
     value: float
+    screening_total: float | None = None
     components: Components
     round_stop_reason: str
     stop_reason: str
@@ -186,6 +205,14 @@ class GradientResult(BaseModel):
     template_evaluations: int = Field(ge=0, strict=True)
     ledger_sha256: str = Field(pattern=_SHA256)
     template_ledger_sha256: str = Field(pattern=_SHA256)
+
+    @model_validator(mode="after")
+    def _version_matches_content(self) -> Self:
+        current = self.format_version == RESULT_VERSION
+        filled = (self.screening_total is not None, self.components.big_peak_proxy_db is not None)
+        if any(item != current for item in filled):
+            raise ValueError(f"{RESULT_VERSION} 要帶舊合分與大峰代理；{LEGACY_RESULT_VERSION} 兩個都沒有")
+        return self
 
 
 class SchemePoints(NamedTuple):
@@ -244,13 +271,15 @@ def holdout_rulers() -> HoldoutRulers:
 
 
 def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: Sequence[str | None], purpose: str,
-                settings_fingerprint: str, physics_identity: str) -> str:
-    """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分）正規化 JSON 的 SHA-256 前 32 位。
+                settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str) -> str:
+    """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
-    同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。
+    同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
+    登記簿的代理三格與第一階段設定）算進來：只改那三格就是另一個資料夾，不會撞到加代理之前的那一個。
     """
     content = json.dumps({"scheme": scheme_sha256, "surrogate": surrogate_manifest_sha256, "presets": list(presets),
-                          "purpose": purpose, "settings": settings_fingerprint, "physics": physics_identity},
+                          "purpose": purpose, "settings": settings_fingerprint, "physics": physics_identity,
+                          "objective": objective_settings_fingerprint},
                          sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:32]
 
@@ -265,11 +294,15 @@ def read_project(folder: Path) -> GradientProject:
     return GradientProject.model_validate_json((folder / PROJECT_FILE).read_bytes())
 
 
-def parse_result(content: bytes) -> GradientResult:
-    """讀 ``result.json`` 的內容：先看版本，不是這一版（v2 或更舊）就拒收、訊息講明版本與怎麼補（接續會覆寫成 v3）。"""
+def parse_result(content: bytes, *, legacy: bool = False) -> GradientResult:
+    """讀 ``result.json`` 的內容：先看版本，不是這一版就拒收、訊息講明版本。``legacy=True`` 只給報告用，准讀 v3
+    （加大峰代理之前）；v3 交給終點或接續一律拒收（梯度目標加了大峰代理項，要重跑）。"""
     document = json.loads(content)
     version = document.get("format_version") if isinstance(document, dict) else None
-    if version != RESULT_VERSION:
+    if version == LEGACY_RESULT_VERSION and not legacy:
+        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}（梯度目標加大峰代理項之前），{PROXY_RERUN_TEXT}；"
+                         f"這一版只收 {RESULT_VERSION}")
+    if version not in (RESULT_VERSION, LEGACY_RESULT_VERSION):
         raise ValueError(f"{RESULT_FILE} 版本是 {version!r}，這一版只收 {RESULT_VERSION}（最後配置與換樣板段的欄位）；"
                          "跑 resume 會從帳本重建、覆寫成這一版")
     return GradientResult.model_validate_json(content)
@@ -338,9 +371,9 @@ def check_surrogate_axis_covers_scoring(model: ReducedModel, scheme: Scheme, sco
                          f"範圍內 {inside} 點，拒收")
 
 
-def search_score_settings(purpose: str) -> StageOneScoreSettings:
-    """這一次搜尋用途的第一階段評分設定（品質登記簿那一段）。"""
-    return stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), purpose)
+def search_objective_settings(purpose: str) -> GradientObjectiveSettings:
+    """這一次搜尋用途的梯度目標設定（品質登記簿第一階段那一段：兩分項加代理三格）。"""
+    return gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), purpose)
 
 
 def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> None:
@@ -370,8 +403,12 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     settings = load_material_gradient_settings(project.settings_path)
     if settings.fingerprint != project.settings_fingerprint:
         raise ValueError("搜尋設定跟開始時不同（設定指紋變了），不接續")
+    objective = search_objective_settings(project.purpose)
+    if project.objective_settings_fingerprint != objective.fingerprint:
+        recorded = "沒記（加大峰代理之前開始的）" if project.objective_settings_fingerprint is None else "跟現在不同"
+        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了），不接續")
     check_surrogate_matches_scheme(model, scheme, points)
-    check_surrogate_axis_covers_scoring(model, scheme, search_score_settings(project.purpose))
+    check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     return scheme, model, settings
 
 
@@ -391,10 +428,10 @@ def project_wall_materials(project: GradientProject, scheme: Scheme) -> dict[Wal
 
 
 def search_objective_constants(project: GradientProject, scheme: Scheme,
-                               model: ReducedModel) -> StageOneObjectiveConstants:
-    """這一次搜尋的目標常數：替身的頻率軸、``project.purpose`` 的評分設定、方案座位組、替身的喇叭數。"""
-    score = search_score_settings(project.purpose)
-    return objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set, len(model.source_names))
+                               model: ReducedModel) -> GradientObjectiveConstants:
+    """這一次搜尋的目標常數：替身的頻率軸、``project.purpose`` 的梯度目標設定、方案座位組、替身的喇叭數。"""
+    return gradient_objective_constants(np.asarray(model.frequencies_hz), search_objective_settings(project.purpose),
+                                        scheme.receiver_set, len(model.source_names))
 
 
 def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings, *,
@@ -448,9 +485,9 @@ def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | Non
     check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), _ = compiled_evaluator(objective)(jnp.asarray(snapped.theta))
-    components = (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db))
-    append_rows(path, header, (snap_row(snapped, float(value), components, time.perf_counter() - clock,
-                                        len(descent.steps)),))
+    reading = objective_reading(aux)
+    append_rows(path, header, (snap_row(snapped, float(value), reading.screening_total, reading.components,
+                                        time.perf_counter() - clock, len(descent.steps)),))
     retune = retune_cavities(objective, snapped.theta, designs, settings, should_stop=should_stop)
     append_rows(path, header, descent_rows(retune, "retune", len(descent.steps) + 1))
     return retune.theta
@@ -512,11 +549,11 @@ def _resume(problem: GradientProblem, path: Path, should_stop: StopCheck | None)
 # ---- 換樣板段 ----
 
 def template_start(header: MaterialGradientHeader, rows: Sequence[MaterialGradientRow]) -> TemplateStart:
-    """換樣板的起點：庚二帳本收尾那一列的 θ、值與分項，配置是庚二標頭的（＝``project.presets``）；沒收尾就拒收。"""
+    """換樣板的起點：庚二帳本收尾那一列的 θ、值、舊合分與分項，配置是庚二標頭的（＝``project.presets``）；沒收尾就拒收。"""
     if not ledger_closed(rows):
         raise ValueError(f"{LEDGER_FILE} 沒有以帶停止原因的決定列結尾，換樣板段不知道從哪個點起跑")
     last = rows[-1]
-    return TemplateStart(header.surfaces, last.theta_hex, last.value, last.components)
+    return TemplateStart(header.surfaces, last.theta_hex, *last.scores())
 
 
 def template_header_for(header: MaterialGradientHeader, settings: MaterialGradientSettings,
@@ -606,6 +643,7 @@ def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: M
     if final is None or last.decision is None or last.stop_reason is None:
         raise ValueError(f"{TEMPLATES_FILE} 沒有以帶停止原因的決定列結尾，沒有結果可寫")
     closing = template_rows[-1]
+    value, screening, components = closing.scores()
     designs = final_designs(final.surfaces, settings, kept)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
@@ -613,8 +651,9 @@ def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: M
         format_version=RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
         surfaces=surface_specs(closing, closing.theta(),
                                digests={design.surface_id: design_digest(design) for design in designs}),
-        variable_names=closing.variable_names, theta_hex=closing.theta_hex, value=closing.value,
-        components=Components(own_line_ripple_rms_db=closing.components[0], seat_robustness_rms_db=closing.components[1]),
+        variable_names=closing.variable_names, theta_hex=closing.theta_hex, value=value, screening_total=screening,
+        components=Components(own_line_ripple_rms_db=components[0], seat_robustness_rms_db=components[1],
+                              big_peak_proxy_db=components[2]),
         round_stop_reason=last.stop_reason, stop_reason=final.stop_reason, evaluations=last.decision.total_evaluations,
         rounds=sum(1 for row in rows if row.decision is not None), template_rounds=final.rounds,
         template_evaluations=final.evaluations, ledger_sha256=file_sha256(path),

@@ -49,8 +49,11 @@ def _inputs(directory: Path) -> None:
 
 
 def v2_result(v3: Record) -> Record:
-    """考卷自己把 v3 結果檔換回庚三之前的 v2 形狀：版本字串、停止原因是庚二的、沒有換樣板那幾欄。"""
-    document = {key: value for key, value in v3.items() if key not in V3_ONLY}
+    """考卷自己把結果檔換回庚三之前的 v2 形狀：版本字串、停止原因是庚二的、沒有換樣板那幾欄，
+    也沒有壬一加的舊合分與大峰代理。"""
+    document = {key: value for key, value in v3.items() if key not in (*V3_ONLY, "screening_total")}
+    document["components"] = {key: value for key, value in cast(Record, v3["components"]).items()
+                              if key != "big_peak_proxy_db"}
     document["format_version"] = "aosr.material_gradient_result.v2"
     document["stop_reason"] = v3["round_stop_reason"]
     return document
@@ -145,7 +148,7 @@ def _accepted(rows: tuple[templates.TemplateRow, ...]) -> list[str]:
 
 # ---- start：兩本帳與結果檔 ----
 
-def test_start_closes_template_segment_and_result_v3_matches_ledgers(runs: tuple[Path, Record]) -> None:
+def test_start_closes_template_segment_and_result_v4_matches_ledgers(runs: tuple[Path, Record]) -> None:
     """抓換樣板段沒接上（start 只跑到庚二）、結果檔還是 v2、最後配置不是換樣板帳本最後一列決定的、兩個停止原因混在一起、
     求值次數拿錯本帳、帳本摘要沒綁。"""
     folder = _folder(runs)
@@ -153,7 +156,7 @@ def test_start_closes_template_segment_and_result_v3_matches_ledgers(runs: tuple
     result, status = _json(folder / "result.json"), _json(folder / "status.json")
     last = rows[-1]
     assert last.decision is not None and last.stop_reason is not None
-    assert result["format_version"] == "aosr.material_gradient_result.v3"
+    assert result["format_version"] == "aosr.material_gradient_result.v4"
     assert result["stop_reason"] == last.stop_reason
     assert [[item["surface_id"], item["preset_id"]] for item in cast(list[Record], result["surfaces"])] == [
         list(item) for item in last.surfaces]
@@ -190,7 +193,7 @@ def test_resume_of_pre_template_folder_opens_segment_and_overwrites_v2(runs: tup
     copy, folder = Path(str(case["folder"])), _folder(runs)
     assert _without_seconds(_template_rows(copy)) == _without_seconds(_template_rows(folder))
     rewritten = _json(copy / "result.json")
-    assert rewritten["format_version"] == "aosr.material_gradient_result.v3"
+    assert rewritten["format_version"] == "aosr.material_gradient_result.v4"
     assert _without_hashes(rewritten) == _without_hashes(_json(folder / "result.json"))
     assert rewritten["template_ledger_sha256"] == _sha256(copy / "templates.jsonl")
 
@@ -246,7 +249,9 @@ def test_report_template_section_labels_each_candidate(runs: tuple[Path, Record]
             continue
         decision = next(item.decision for item in rows if item.round == row.round and item.decision is not None)
         retuned = {outcome.candidate for outcome in decision.outcomes}
-        line = next(text for text in section if text.startswith(f"    {row.candidate}：快速評分 {row.value:.6f}，"))
+        line = next(text for text in section if text.startswith(
+            f"    {row.candidate}：快速評分 舊合分 {row.screening_total:.6f}／新合分 {row.value:.6f}"
+            f"／代理 {row.proxy_db():.3f} dB，"))
         if row.candidate in retuned:
             assert RETUNED in line and QUICK_ONLY not in line, line
         else:
