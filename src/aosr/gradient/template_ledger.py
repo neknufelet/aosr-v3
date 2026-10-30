@@ -14,6 +14,10 @@
 快速評分列另帶 ``swapped_retunable``：換過去那一面有沒有空腔變數（24K、96K 的樣板沒有空氣層、「不貼」沒有變數，都是 false
 ＝「無可重調變數」）；讀回時從那一列自己的變數名重算比對，記錯就拒收。
 決定列的 ``seconds`` 是整輪的牆鐘秒數，總時間＝各決定列 ``seconds`` 加總（只在一輪寫完決定列時比上限、不看牆鐘）。
+
+v2（#561 壬一，老闆 2026-10-30 拍 B）：梯度目標加了大峰的平滑代理項。每列的 ``value`` 是新合分，另帶
+``screening_total``（舊合分）與三分項（主位起伏、座位穩健性、代理），跟庚二帳本 v5 同一個形狀；評分常數指紋跟著換。
+v1 帳本接續一律拒收（訊息講明梯度目標加了大峰代理項）；只有報告（``legacy=True``）准讀 v1（兩分項、沒有舊合分）。
 """
 from __future__ import annotations
 
@@ -28,7 +32,8 @@ from typing import BinaryIO, Final, Literal, NamedTuple, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
-from aosr.gradient.material_gradient import STOP_REASONS, DescentResult
+from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
+from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT, ScoreConstants, check_scores
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
@@ -36,7 +41,9 @@ from aosr.gradient.template_rounds import (
 )
 
 
-TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v1"
+TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v2"
+# 上一版（梯度目標還沒有大峰代理項）：報告准讀，接續拒收。
+LEGACY_TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v1"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 _SHA256 = r"^[0-9a-f]{64}$"
 TemplatePhase = Literal["quick_score", "baseline_retune", "candidate_retune", "template_decision"]
@@ -49,7 +56,7 @@ class TemplateHeader(BaseModel):
     """帳本第一列：替身身分、完整設定指紋、評分常數指紋、庚二帳本摘要、起點配置、六面原牆材料摘要。"""
 
     model_config = _FROZEN
-    ledger_version: Literal["aosr.material_gradient_templates.v1"]
+    ledger_version: Literal["aosr.material_gradient_templates.v2", "aosr.material_gradient_templates.v1"]
     input_hash: str = Field(min_length=1)
     mesh_hash: str = Field(min_length=1)
     physics_identity: str = Field(min_length=1)
@@ -58,12 +65,16 @@ class TemplateHeader(BaseModel):
     base_ledger_sha256: str = Field(pattern=_SHA256)
     initial_surfaces: tuple[tuple[str, str | None], ...] = Field(min_length=1)
     kept_digests: dict[str, str]
+    # v2 必帶、v1 沒有：分數常數抄庚二帳本標頭那一份（讀回時逐列重算兩個分數恆等式）。
+    score_constants: ScoreConstants | None = None
 
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
         ids = [surface_id for surface_id, _ in self.initial_surfaces]
         if len(set(ids)) != len(ids) or sorted(self.kept_digests) != sorted(ids):
             raise ValueError("起點配置的面代號不可重複，原牆摘要要恰好每一面一個")
+        if (self.score_constants is None) != (self.ledger_version == LEGACY_TEMPLATE_LEDGER_VERSION):
+            raise ValueError(f"{TEMPLATE_LEDGER_VERSION} 的標頭要記分數常數（score_constants），上一版沒有")
         return self
 
 
@@ -127,8 +138,10 @@ def _canonical_hex(value: tuple[str, ...]) -> tuple[str, ...]:
 
 
 class TemplateRow(BaseModel):
-    """一列：全帳本第幾列（從 0 起連號）、階段、第幾輪、哪個候選、這一列的配置與變數名、θ（float.hex）、值與兩分項、
-    梯度範數、步長、秒數、停止原因、最後一次試的步長、這段求值次數、決定。
+    """一列：全帳本第幾列（從 0 起連號）、階段、第幾輪、哪個候選、這一列的配置與變數名、θ（float.hex）、值（新合分）、
+    舊合分與三分項、梯度範數、步長、秒數、停止原因、最後一次試的步長、這段求值次數、決定。
+
+    v2 列帶 ``screening_total`` 與三分項；上一版（v1，只准報告讀）沒有舊合分、只有兩分項，由標頭版本決定。
 
     快速評分列帶候選、不帶梯度範數與步長；兩種重調段帶梯度範數與步長，停止原因、最後一次試的步長與這段求值次數三格
     同進同出、只在每段的最後一列；候選重調帶候選；決定列帶決定，停止原因只認換樣板那一組、只在整段最後一列。
@@ -143,7 +156,8 @@ class TemplateRow(BaseModel):
     variable_names: tuple[str, ...]
     theta_hex: tuple[str, ...]
     value: float
-    components: tuple[float, float]
+    screening_total: float | None = None
+    components: tuple[float, float, float] | tuple[float, float]
     gradient_norm: float | None = Field(ge=0.0)
     step_size: float | None = Field(ge=0.0)
     seconds: float = Field(ge=0.0)
@@ -160,6 +174,8 @@ class TemplateRow(BaseModel):
 
     @model_validator(mode="after")
     def _phase_fields(self) -> Self:
+        if (self.screening_total is None) != (len(self.components) == 2):
+            raise ValueError("舊合分與三分項同進同出（v2）；上一版的列只有兩分項、沒有舊合分")
         with_candidate = self.phase in ("quick_score", "candidate_retune")
         if (self.candidate is not None) != with_candidate:
             raise ValueError(f"{self.phase} 列{'要' if with_candidate else '不'}帶候選代號")
@@ -190,6 +206,21 @@ class TemplateRow(BaseModel):
     def theta(self) -> tuple[float, ...]:
         return tuple(float.fromhex(encoded) for encoded in self.theta_hex)
 
+    def is_legacy(self) -> bool:
+        """上一版（v1）的列：只有兩分項、沒有舊合分。"""
+        return self.screening_total is None
+
+    def scores(self) -> tuple[float, float, Components]:
+        """v2 列的（新合分, 舊合分, 三分項）；上一版的列拒收。"""
+        components = self.components
+        if self.screening_total is None or len(components) != 3:
+            raise ValueError(f"第 {self.step} 列是上一版換樣板帳本的列（沒有大峰代理）；{PROXY_RERUN_TEXT}")
+        return self.value, self.screening_total, (components[0], components[1], components[2])
+
+    def proxy_db(self) -> float | None:
+        """大峰代理（dB）；上一版的列沒有，是 None。"""
+        return None if self.screening_total is None else self.components[-1]
+
 
 def swapped_retunable(candidate: str | None, names: Sequence[str]) -> bool:
     """候選換過去的那一面有沒有可重調的空腔變數（那一面的變數有兩格：厚度、空腔）；候選代號不合格式就拒收。"""
@@ -218,12 +249,13 @@ def _check_layout(surfaces: Surfaces, names: Sequence[str]) -> None:
 
 
 class TemplateStart(NamedTuple):
-    """換樣板的起點：庚二帳本收尾那一列的配置、θ（float.hex）、值與兩分項。"""
+    """換樣板的起點：庚二帳本收尾那一列的配置、θ（float.hex）、值（新合分）、舊合分與三分項。"""
 
     surfaces: Surfaces
     theta_hex: tuple[str, ...]
     value: float
-    components: tuple[float, float]
+    screening_total: float
+    components: Components
 
 
 # ---- 造列 ----
@@ -236,10 +268,11 @@ def _row(**fields: object) -> TemplateRow:
 
 
 def quick_row(step: int, round: int, score: QuickScore) -> TemplateRow:
-    """快速評分一列：換過去的配置、變數名、θ、值與兩分項、秒數。"""
+    """快速評分一列：換過去的配置、變數名、θ、值、舊合分與三分項、秒數。"""
     return _row(step=step, phase="quick_score", round=round, candidate=score.candidate_id, surfaces=score.surfaces,
                 variable_names=score.variable_names, theta_hex=tuple(float(value).hex() for value in score.theta),
-                value=score.value, components=score.components, seconds=score.seconds,
+                value=score.value, screening_total=score.screening_total, components=score.components,
+                seconds=score.seconds,
                 swapped_retunable=swapped_retunable(score.candidate_id, score.variable_names))
 
 
@@ -250,7 +283,7 @@ def segment_rows(result: DescentResult, phase: SegmentPhase, first_step: int, *,
     return tuple(_row(
         step=first_step + offset, phase=phase, round=round, candidate=candidate, surfaces=surfaces,
         variable_names=variable_names, theta_hex=tuple(value.hex() for value in item.theta), value=item.value,
-        components=item.components, gradient_norm=item.gradient_norm, step_size=item.step_size, seconds=item.seconds,
+        screening_total=item.screening_total, components=item.components, gradient_norm=item.gradient_norm, step_size=item.step_size, seconds=item.seconds,
         stop_reason=result.stop_reason if offset == last else None,
         final_trial_step=result.final_trial_step if offset == last else None,
         evaluations=result.evaluations if offset == last else None,
@@ -258,18 +291,18 @@ def segment_rows(result: DescentResult, phase: SegmentPhase, first_step: int, *,
 
 
 def decision_row(step: int, round: int, *, surfaces: Surfaces, variable_names: tuple[str, ...],
-                 theta_hex: tuple[str, ...], value: float, components: tuple[float, float], seconds: float,
-                 decision: TemplateDecision, stop_reason: str | None) -> TemplateRow:
-    """決定一列：這一輪交出去的配置、θ 與值、整輪秒數、決定內容；整段停在這一輪時帶換樣板的停止原因。"""
+                 theta_hex: tuple[str, ...], value: float, screening_total: float, components: Components,
+                 seconds: float, decision: TemplateDecision, stop_reason: str | None) -> TemplateRow:
+    """決定一列：這一輪交出去的配置、θ、值、舊合分與分項、整輪秒數、決定內容；整段停在這一輪時帶換樣板的停止原因。"""
     return _row(step=step, phase="template_decision", round=round, surfaces=surfaces, variable_names=variable_names,
-                theta_hex=theta_hex, value=value, components=components, seconds=seconds, stop_reason=stop_reason,
-                decision=decision)
+                theta_hex=theta_hex, value=value, screening_total=screening_total, components=components,
+                seconds=seconds, stop_reason=stop_reason, decision=decision)
 
 
 # ---- 讀回驗證 ----
 
 def _point(row: TemplateRow | TemplateStart) -> tuple[object, ...]:
-    return (row.surfaces, row.theta_hex, row.value, row.components)
+    return (row.surfaces, row.theta_hex, row.value, row.screening_total, row.components)
 
 
 def _check_segments(rows: Sequence[TemplateRow]) -> None:
@@ -408,10 +441,10 @@ def _check_decision(label: str, parts: _Round, start: TemplateRow | TemplateStar
     if parts.baseline:
         chosen = next((segment for name, segment in parts.candidates if name == decision.accepted), parts.baseline)
         if (*_point(row), row.variable_names) != (*_point(chosen[-1]), chosen[-1].variable_names):
-            raise ValueError(f"{label}：決定列交出去的配置、θ、值或分項不是"
+            raise ValueError(f"{label}：決定列交出去的配置、θ、值、舊合分或分項不是"
                              f"{'接受的候選' if decision.accepted else '基準'}重調末列的")
     elif start is not None and _point(row) != _point(start):
-        raise ValueError(f"{label}：沒開的輪交出去的配置、θ、值與分項必須是起點原樣")
+        raise ValueError(f"{label}：沒開的輪交出去的配置、θ、值、舊合分與分項必須是起點原樣")
     spent = len(parts.quick) + sum(item[-1].evaluations or 0 for item in (
         parts.baseline, *(segment for _, segment in parts.candidates)) if item)
     if decision.round_evaluations != spent or decision.total_evaluations != previous_total + spent:
@@ -483,7 +516,11 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
     ids = [surface_id for surface_id, _ in header.initial_surfaces]
     if start is not None and start.surfaces != header.initial_surfaces:
         raise ValueError("起點配置跟標頭記的不同")
+    legacy = header.ledger_version == LEGACY_TEMPLATE_LEDGER_VERSION
     for index, row in enumerate(rows):
+        if row.is_legacy() != legacy:
+            raise ValueError(f"第 {index} 列的形狀跟標頭版本 {header.ledger_version} 不同"
+                             f"（{'上一版只有兩分項、沒有舊合分' if legacy else 'v2 要帶舊合分與三分項'}）")
         if row.step != index:
             raise ValueError(f"第 {index} 列的步序是 {row.step}，帳本列必須從 0 連號")
         if [surface_id for surface_id, _ in row.surfaces] != ids:
@@ -501,6 +538,8 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
         if settings is not None:
             _check_settings(label, parts.decision, decision, total, seconds, settings)
         previous, surfaces, total = parts.decision, parts.decision.surfaces, decision.total_evaluations
+    if header.score_constants is not None:
+        check_scores(header.score_constants, rows)
 
 
 def decisions_seconds(rows: Sequence[TemplateRow]) -> float:
@@ -520,8 +559,14 @@ def _write_line(handle: BinaryIO, value: BaseModel) -> None:
     os.fsync(handle.fileno())
 
 
+def _current(header: TemplateHeader) -> None:
+    if header.ledger_version != TEMPLATE_LEDGER_VERSION:
+        raise ValueError(f"只寫 {TEMPLATE_LEDGER_VERSION} 的換樣板帳本，收到 {header.ledger_version}；{PROXY_RERUN_TEXT}")
+
+
 def create_template_ledger(path: Path, header: TemplateHeader) -> None:
-    """獨佔建檔（已有檔案即丟錯），只寫標頭。"""
+    """獨佔建檔（已有檔案即丟錯），只寫標頭；只寫這一版。"""
+    _current(header)
     checked = TemplateHeader.model_validate(header.model_dump())
     with path.open("xb") as handle:
         _write_line(handle, checked)
@@ -530,6 +575,7 @@ def create_template_ledger(path: Path, header: TemplateHeader) -> None:
 def append_template_rows(path: Path, header: TemplateHeader, rows: Sequence[TemplateRow], *,
                          settings: MaterialGradientSettings | None = None, start: TemplateStart | None = None) -> None:
     """接在既有帳本後面寫：先讀回整本（標頭要等於 ``header``），連同新列一起驗，再逐列寫、每列 flush 與 fsync。"""
+    _current(header)
     _, existing = read_template_ledger(path, expected_header=header, settings=settings, start=start)
     checked = tuple(TemplateRow.model_validate(row.model_dump()) for row in rows)
     check_template_rows(header, (*existing, *checked), settings=settings, start=start)
@@ -555,22 +601,27 @@ def truncate_template_rows(path: Path, header: TemplateHeader, keep: int) -> Non
 
 def read_template_ledger(path: Path, *, expected_header: TemplateHeader | None = None,
                          settings: MaterialGradientSettings | None = None, start: TemplateStart | None = None,
-                         ) -> tuple[TemplateHeader, tuple[TemplateRow, ...]]:
+                         legacy: bool = False) -> tuple[TemplateHeader, tuple[TemplateRow, ...]]:
     """逐列驗型別與順序；給了預期標頭就逐格比（替身、設定、評分常數、庚二帳本、起點配置、原牆換了都拒收）。
-    壞列一律報錯，不捨棄；版本不是這一版就拒收、訊息講明版本。``settings``、``start`` 同 :func:`check_template_rows`。"""
+    壞列一律報錯，不捨棄；版本不是這一版就拒收、訊息講明版本（v1 講明梯度目標加了大峰代理項）。
+    ``legacy=True`` 只給報告用：不給預期標頭與起點時准讀 v1。``settings``、``start`` 同 :func:`check_template_rows`。"""
     with path.open("rb") as handle:
         lines = handle.readlines()
     if not lines or any(not line.endswith(b"\n") for line in lines):
         raise ValueError("換樣板帳本是空的或有一列沒寫完")
     document = json.loads(lines[0])
     version = document.get("ledger_version") if isinstance(document, dict) else None
-    if version != TEMPLATE_LEDGER_VERSION:
+    if version == LEGACY_TEMPLATE_LEDGER_VERSION and not (legacy and expected_header is None and start is None):
+        raise ValueError(f"換樣板帳本版本是 {version!r}（梯度目標加大峰代理項之前），{PROXY_RERUN_TEXT}；"
+                         f"這一版只收 {TEMPLATE_LEDGER_VERSION}")
+    if version not in (TEMPLATE_LEDGER_VERSION, LEGACY_TEMPLATE_LEDGER_VERSION):
         raise ValueError(f"換樣板帳本版本是 {version!r}，這一版只收 {TEMPLATE_LEDGER_VERSION}")
     header = TemplateHeader.model_validate_json(lines[0])
     if expected_header is not None and header != expected_header:
         actual, expected = header.model_dump(), expected_header.model_dump()
         differing = sorted(name for name in actual if actual[name] != expected[name])
-        raise ValueError(f"換樣板帳本標頭跟這一次對不上：{differing}")
+        note = f"；{PROXY_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
+        raise ValueError(f"換樣板帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(TemplateRow.model_validate_json(line) for line in lines[1:])
     check_template_rows(header, rows, settings=settings, start=start)
     return header, rows

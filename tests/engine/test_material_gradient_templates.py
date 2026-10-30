@@ -37,6 +37,7 @@ from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
 from tests.engine._material_gradient_templates_probe import kept_walls, synthetic_header
 from tests.engine.test_material_gradient import CASES, DESCENT_CASE, PURPOSE, _chain_model, _presets, _receivers, _settings
+from tests.engine._gradient_objective_rows import assert_rows_split_scores
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
 
@@ -137,9 +138,10 @@ def _surfaces(value: object) -> rounds.Surfaces:
 
 def _start(case: Record) -> templates.TemplateStart:
     start = cast(Record, case["start"])
-    first, second = (float.fromhex(value) for value in cast(list[str], start["components"]))
+    first, second, proxy = (float.fromhex(value) for value in cast(list[str], start["components"]))
     return templates.TemplateStart(_surfaces(start["surfaces"]), tuple(cast(list[str], start["theta_hex"])),
-                                   float.fromhex(str(start["value"])), (first, second))
+                                   float.fromhex(str(start["value"])), float.fromhex(str(start["screening_total"])),
+                                   (first, second, proxy))
 
 
 def _context(settings: MaterialGradientSettings | None = None) -> rounds.TemplateContext:
@@ -258,13 +260,13 @@ def test_no_alternatives_round_is_not_opened_and_ledger_says_so(tmp_path: Path) 
     settings = _settings().model_copy(update={"family": ()})
     context = _context(settings)
     surfaces = tuple((str(item[0]), None) for item in START)
-    start = templates.TemplateStart(surfaces, (), 1.5, (1.0, 2.0))
+    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, (2.0, 4.0, 0.5))
     header = synthetic_header(settings, surfaces, kept_walls(KEPT))
     result = segment.run_template_rounds(context, tmp_path / "t.jsonl", header, start)
     assert (result.stop_reason, result.rounds, result.evaluations) == (rounds.TEMPLATE_STOP_NO_ALTERNATIVES, 1, 0)
     rows = templates.read_template_ledger(tmp_path / "t.jsonl", settings=settings, start=start)[1]
     assert len(rows) == 1 and rows[0].decision is not None
-    assert (rows[0].decision.quick_count, rows[0].decision.next_round_bound, rows[0].value) == (0, None, 1.5)
+    assert (rows[0].decision.quick_count, rows[0].decision.next_round_bound, rows[0].value) == (0, None, 4.25)
 
 
 # ---- 合成目標：一輪的內容 ----
@@ -521,6 +523,8 @@ def test_small_room_template_segment_runs_in_double_and_resumes(runs: tuple[Path
     templates.read_template_ledger(runs[0] / str(case["ledger"]), settings=settings, start=origin)
     assert origin_rows[-1].stop_reason in rounds.TEMPLATE_STOP_REASONS
     assert _without_seconds(_rows(runs, case["resumed"])) == _without_seconds(origin_rows)
+    # #561 壬一：每一列的值是新合分＝舊合分 ＋ w·代理／ref，舊合分每列都在、可以單獨排序。
+    assert_rows_split_scores(origin_rows)
 
 
 def _preset_ids(presets: Sequence[ConstructionPreset]) -> set[str]:

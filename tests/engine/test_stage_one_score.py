@@ -62,8 +62,9 @@ def _section(path: Path = _REGISTRY) -> dict[str, list[dict[str, object]]]:
 
 def _raw(path: Path = _REGISTRY) -> _Raw:
     section = _section(path)
+    # 只取第一階段那幾格：同一段還住著第三階段梯度目標的代理（stage_three_gradient.*，#561 壬一），不是這支的分項。
     references = {str(item["key"]).removeprefix(_PREFIX): float(str(item["worse_reference"]))
-                  for item in section["target"]}
+                  for item in section["target"] if str(item["key"]).startswith(_PREFIX)}
     table, = (item for item in section["weight"] if item["key"] == _PREFIX + "component_weights")
     rows = table["item"]
     assert isinstance(rows, list)
@@ -367,13 +368,14 @@ def test_components_other_than_the_two_named_are_rejected(tmp_path: Path, change
     text = _REGISTRY.read_text(encoding="utf-8")
     marker = f'[[stage_one.weight.item]]\nname = "{_ROBUSTNESS}"\n'
     head, found, tail = text.partition(marker)
-    block, purposes, rest = tail.partition("\n[[purpose]]\n")
-    assert found and purposes
+    # 只切到這一列結尾的空行：後面同一段還有第三階段梯度目標的三格（#561 壬一），複製進來會變成重複鍵。
+    block, blank, rest = tail.partition("\n\n")
+    assert found and blank
     decay = '[[stage_one.weight.item]]\nname = "low_frequency_decay_excess"\n'
     if change == "added":
-        changed = head + found + block + "\n" + decay + block + purposes + rest
+        changed = head + found + block + "\n" + decay + block + blank + rest
     else:
-        changed = head + decay + block + purposes + rest
+        changed = head + decay + block + blank + rest
     path = tmp_path / "quality_targets.toml"
     path.write_text(changed, encoding="utf-8")
     with pytest.raises(ValueError, match="分項必須剛好是"):

@@ -31,8 +31,11 @@ from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, w
 from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, objective_constants, objective_from_pressures
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.gradient_objective_jax import (
+    GradientObjectiveConstants, gradient_objective_constants, gradient_objective_from_pressures,
+)
+from aosr.scoring.gradient_objective_settings import gradient_objective_settings
+from aosr.scoring.stage_one_objective_jax import objective_from_pressures
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
 from tests.engine.test_fem_reduced import DENSITY, ROOM, SEATS, SOUND_SPEED, SOURCES
@@ -55,7 +58,7 @@ def _theta(values: object) -> np.ndarray:
     return np.asarray([float.fromhex(value) for value in cast(list[str], values)], dtype=np.float64)
 
 
-def _zero_cavity(case: Record, model: ReducedModel, constants: StageOneObjectiveConstants,
+def _zero_cavity(case: Record, model: ReducedModel, constants: GradientObjectiveConstants,
                  settings: MaterialGradientSettings, presets: tuple[ConstructionPreset, ...],
                  air: PhysicsConstants, ranges: PorousModelRanges) -> Record:
     """空腔 0：替身樣板（厚度 0 的空氣層）對「拿掉空氣層」的構造；阻抗層級與整條鏈層級各一份。"""
@@ -82,7 +85,7 @@ def _zero_cavity(case: Record, model: ReducedModel, constants: StageOneObjective
             "chain_value_with_gap": float(gap_value).hex(), "chain_value_without_gap": float(plain_value).hex()}
 
 
-def _kept(case: Record, model: ReducedModel, constants: StageOneObjectiveConstants,
+def _kept(case: Record, model: ReducedModel, constants: GradientObjectiveConstants,
           settings: MaterialGradientSettings, presets: tuple[ConstructionPreset, ...],
           air: PhysicsConstants, ranges: PorousModelRanges) -> Record:
     """不貼（保留原牆）：鏈的值、同兩面剛性的鏈值、控制組（樣板阻抗換進原牆那幾列、遮罩放開，直接交求值與目標）；
@@ -96,9 +99,9 @@ def _kept(case: Record, model: ReducedModel, constants: StageOneObjectiveConstan
     axis = np.asarray(model.frequencies_hz, dtype=np.float64)
 
     def chain(designs: tuple[gradient_search.SurfaceDesign, ...]) -> str:
-        value, _ = gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges,
-                                                   frequencies=axis)(theta)
-        return float(value).hex()
+        _, aux = gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges,
+                                                 frequencies=axis)(theta)
+        return float(aux.screening_total).hex()
 
     reduced = reduced_constants(model)
     double_axis = jnp.asarray(axis)
@@ -113,7 +116,7 @@ def _kept(case: Record, model: ReducedModel, constants: StageOneObjectiveConstan
         if material is not None:
             row, _ = surface_impedance(material, double_axis, air=air, ranges=ranges)
             walls, mask = walls.at[index].set(row), mask.at[index].set(False)
-    control = objective_from_pressures(constants, reduced_pressures(reduced, walls, rigid_mask=mask)).screening_total
+    control = objective_from_pressures(constants.stage_one(), reduced_pressures(reduced, walls, rigid_mask=mask)).screening_total
     materials = endpoint.materials_from_surfaces(kept_designs, _theta(case["theta"]), settings)
     endpoint_rows = endpoint.material_impedances(materials, tuple(model.frequencies_hz), air=air, ranges=ranges)
     chain_rows = gradient_search.kept_impedance_rows(kept_designs, axis, air=air, ranges=ranges)
@@ -135,14 +138,14 @@ def main(directory: Path) -> None:
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     receivers = ReceiverSet.model_validate(problem["receivers"])
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
+    score = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
     axis = tuple(model.frequencies_hz)
-    constants = objective_constants(axis, score, receivers, len(model.source_names))
+    constants = gradient_objective_constants(axis, score, receivers, len(model.source_names))
     case = cast(Record, problem["endpoint"])
     designs = gradient_search.wall_designs_from_presets(cast(list[str | None], case["presets"]), settings, presets)
     theta = _theta(case["theta"])
     result = endpoint.endpoint_check(
-        operators, designs, theta, model=model, score_settings=score, receiver_set=receivers,
+        operators, designs, theta, model=model, objective_settings=score, receiver_set=receivers,
         low_frequency_axis=LowFrequencyAxis(str(problem["axis"])), presets=presets, settings=settings, air=air,
         ranges=ranges)
     materials = endpoint.materials_from_surfaces(designs, theta, settings)
@@ -152,15 +155,23 @@ def main(directory: Path) -> None:
     reference = validate_reduced(model, operators, [endpoint.material_impedances(materials, axis, air=air,
                                                                                   ranges=ranges)])
     objective = gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=axis)
+    at_export = objective(jnp.asarray(_theta(case["expected_export"])))[1]
+    direct_objective = gradient_objective_from_pressures(constants, jnp.asarray(direct))
     output: Record = {
-        "chain_at_search": float(objective(jnp.asarray(theta))[0]).hex(),
-        "chain_at_expected_export": float(objective(jnp.asarray(_theta(case["expected_export"])))[0]).hex(),
+        "chain_at_search": float(objective(jnp.asarray(theta))[1].screening_total).hex(),
+        "chain_at_expected_export": float(at_export.screening_total).hex(),
+        "chain_objective_at_expected_export": [float(at_export.objective_total).hex(),
+                                               float(at_export.big_peak_proxy_db).hex(),
+                                               float(at_export.interior_max_residual_db).hex()],
+        "direct_objective": [float(direct_objective.objective_total).hex(),
+                             float(direct_objective.big_peak_proxy_db).hex(),
+                             float(direct_objective.interior_max_residual_db).hex()],
         "mesh_hash_equal": operators.mesh_hash == model.mesh_hash,
         "report": json.loads(result.report.to_json()),
         "full": _complex(result.full_pressure), "reduced": _complex(result.reduced_pressure),
         "direct": _complex(direct), "reference": _complex(reference.full_pressure[0]),
-        "direct_total": float(objective_from_pressures(constants, jnp.asarray(direct)).screening_total).hex(),
-        "floor_case": [float(objective_from_pressures(constants, jnp.asarray(values)).screening_total).hex()
+        "direct_total": float(objective_from_pressures(constants.stage_one(), jnp.asarray(direct)).screening_total).hex(),
+        "floor_case": [float(objective_from_pressures(constants.stage_one(), jnp.asarray(values)).screening_total).hex()
                        for values in floor_case_pressures(axis, receivers)],
         "zero_cavity": _zero_cavity(cast(Record, problem["zero_cavity"]), model, constants, settings, presets,
                                     air, ranges),

@@ -43,10 +43,13 @@ from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequenc
 from aosr.scoring.stage_one_low_frequency_contract import (
     StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
 )
+from aosr.scoring.gradient_objective_jax import gradient_objective_constants, proxy_gap_bound_db
 from aosr.scoring.stage_one_objective_jax import objective_constants, rms_floor_factor
 from tests.engine._precision_contracts import contract_value
 from tests.engine.test_fem_reduced import model as model, operators as operators
-from tests.engine.test_material_gradient import CASES, PURPOSE, _chain_model, _presets, _receivers, _score, _settings
+from tests.engine.test_material_gradient import (
+    CASES, PURPOSE, _chain_model, _objective, _presets, _receivers, _score, _settings,
+)
 from tests.engine.test_scheme_model import _document
 from tests.engine.test_transfer_matrix_reference import IMPEDANCE_ABS, REFERENCE_REL
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
@@ -305,7 +308,7 @@ def _air() -> PhysicsConstants:
 def _endpoint(chain_model: ReducedModel, operators: FullOperators, designs: list[gradient_search.SurfaceDesign],
               air: PhysicsConstants) -> endpoint.EndpointResult:
     return endpoint.endpoint_check(
-        chain_operators(operators), designs, np.asarray(ENDPOINT_THETA), model=chain_model, score_settings=_score(),
+        chain_operators(operators), designs, np.asarray(ENDPOINT_THETA), model=chain_model, objective_settings=_objective(),
         receiver_set=_receivers(), low_frequency_axis=AXIS_ID, presets=_presets(), settings=_settings(), air=air,
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")))
 
@@ -383,6 +386,12 @@ def test_endpoint_full_value_within_holdout_ruler(probe: Record, chain_model: Re
     report = _report(probe)
     full, reduced = _decode_complex(probe["full"]), _decode_complex(probe["reduced"])
     assert report.full_total == float.fromhex(cast(str, probe["direct_total"]))
+    # 新合分與代理（#561 壬一）：完整模型那兩格等於獨立完整解交梯度目標的值（逐位）；上界是 T·ln N。
+    assert [report.full_objective_total, report.full_proxy_db, report.full_interior_max_db] == [
+        float.fromhex(value) for value in cast(list[str], probe["direct_objective"])]
+    gradient = gradient_objective_constants(chain_model.frequencies_hz, _objective(), _receivers(),
+                                            len(chain_model.source_names))
+    assert report.proxy_gap_bound_db == proxy_gap_bound_db(gradient)
     assert report.total_difference == report.full_total - report.reduced_total
     level = np.abs(20.0 * np.log10(np.abs(reduced) / np.abs(full)))
     by_seat = np.max(level, axis=(0, 1))
@@ -445,6 +454,8 @@ def test_endpoint_reports_dropped_cavity_and_exported_theta(probe: Record) -> No
     report = _report(probe)
     at_export = float.fromhex(cast(str, probe["chain_at_expected_export"]))
     assert report.exported_theta == ENDPOINT_EXPORT and report.reduced_total == at_export
+    assert [report.reduced_objective_total, report.reduced_proxy_db, report.reduced_interior_max_db] == [
+        float.fromhex(value) for value in cast(list[str], probe["chain_objective_at_expected_export"])]
     assert at_export != float.fromhex(cast(str, probe["chain_at_search"]))
     designs = gradient_search.wall_designs_from_presets(ENDPOINT_PRESETS, _settings(), _presets())
     names = gradient_search.design_names(designs)

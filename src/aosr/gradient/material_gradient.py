@@ -39,8 +39,8 @@ from aosr.materials.construction_diff import ConstructionTemplate, build_templat
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
-from aosr.scoring.stage_one_objective_jax import (
-    StageOneObjectiveArrays, StageOneObjectiveConstants, objective_from_pressures,
+from aosr.scoring.gradient_objective_jax import (
+    GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures, objective_reading,
 )
 
 
@@ -60,8 +60,10 @@ LOOP_STOP_REASONS: Final[tuple[LoopStopReason, ...]] = (
     LOOP_STOP_NO_IMPROVEMENT, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_MAX_EVALUATIONS)
 _THICKNESS = "thickness_m"
 
-ChainObjective = Callable[[jax.Array], tuple[jax.Array, StageOneObjectiveArrays]]
-Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, StageOneObjectiveArrays], jax.Array]]
+ChainObjective = Callable[[jax.Array], tuple[jax.Array, GradientObjectiveArrays]]
+Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]]
+# 三分項：主位起伏、座位穩健性（聲道平均，dB）、大峰代理（dB）。
+Components = tuple[float, float, float]
 FloatVector = NDArray[np.floating]
 StopCheck = Callable[[], bool]
 
@@ -162,12 +164,14 @@ class SnapResult(NamedTuple):
 
 
 class DescentStep(NamedTuple):
-    """一步：第幾步（0 是起點）、θ、值、兩分項（主位起伏、座位穩健性的聲道平均）、投影梯度範數、步長、秒數。"""
+    """一步：第幾步（0 是起點）、θ、值（梯度目標的新合分）、舊合分（第一階段兩分項合分）、三分項（主位起伏、
+    座位穩健性的聲道平均、大峰代理）、投影梯度範數、步長、秒數。"""
 
     step: int
     theta: tuple[float, ...]
     value: float
-    components: tuple[float, float]
+    screening_total: float
+    components: Components
     gradient_norm: float
     step_size: float
     seconds: float
@@ -376,12 +380,13 @@ def kept_impedance_rows(designs: Sequence[SurfaceDesign], frequencies: Sequence[
 
 
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
-                    objective_constants: StageOneObjectiveConstants, *, air: PhysicsConstants,
+                    objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64]) -> ChainObjective:
-    """回 ``θ → (screening_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、精度跟 θ 走。
+    """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、精度跟 θ 走。
 
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
-    → 第一階段低頻目標（``objective_from_pressures``）。樣板用具體值建，要在雙精度已開的行程裡呼叫；
+    → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
+    梯度沿新合分走；舊合分（``screening_total``）同一次求值一起交回。樣板用具體值建，要在雙精度已開的行程裡呼叫；
     設計清單照 ``Wall.all()`` 對到替身的六面。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
     目標函式裡轉成 θ 對應的複數精度、換進那一列，剛性遮罩那一格是 False；求值入口的語意（None 樣板＝剛性）不動。
     """
@@ -405,7 +410,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                       if row is not None)
     not_kept = jnp.asarray([design.kept_material is None for design in designs], dtype=bool)
 
-    def objective(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+    def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
         values = jnp.asarray(theta)
         parameters = surface_parameters(frozen_designs, values)
         frequency_axis = jnp.asarray(constants.frequencies_hz, dtype=values.dtype)
@@ -415,8 +420,8 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
             walls = walls.at[index].set(jnp.asarray(row, dtype=walls.dtype))
         rigid = jnp.logical_and(impedances.rigid_mask, not_kept)
         pressures = reduced_pressures(constants, walls, rigid_mask=rigid)
-        result = objective_from_pressures(objective_constants, pressures)
-        return result.screening_total, result
+        result = gradient_objective_from_pressures(objective_constants, pressures)
+        return result.objective_total, result
 
     return objective
 
@@ -562,6 +567,14 @@ def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.A
     return float(jnp.linalg.norm(jnp.asarray(adjusted)))
 
 
+def _descent_step(index: int, theta: jax.Array, value: jax.Array, aux: GradientObjectiveArrays, gradient_norm: float,
+                  step: float, seconds: float) -> DescentStep:
+    """一步的紀錄：值（新合分）照目標函式交回的那一個，舊合分與三分項從同一次求值的分項讀。"""
+    reading = objective_reading(aux)
+    return DescentStep(index, tuple(float(x) for x in np.asarray(theta)), float(value), reading.screening_total,
+                       reading.components, gradient_norm, step, seconds)
+
+
 def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
              bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
              max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
@@ -584,11 +597,10 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
         start = jnp.asarray(project_to_limits(np.asarray(start), lower_values, upper_values, limits))
     evaluate = compiled_evaluator(objective)
 
-    def record(index: int, theta: jax.Array, value: jax.Array, aux: StageOneObjectiveArrays,
+    def record(index: int, theta: jax.Array, value: jax.Array, aux: GradientObjectiveArrays,
                gradient: jax.Array, step: float, seconds: float) -> DescentStep:
-        return DescentStep(index, tuple(float(x) for x in np.asarray(theta)), float(value),
-                           (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db)),
-                           _projected_gradient_norm(theta, gradient, lower, upper, limits), step, seconds)
+        return _descent_step(index, theta, value, aux, _projected_gradient_norm(theta, gradient, lower, upper, limits),
+                             step, seconds)
 
     check_stop(should_stop)
     clock = time.perf_counter()

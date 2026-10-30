@@ -31,8 +31,8 @@ from aosr.gradient.run import (
 )
 from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import load_reduced
-from aosr.scoring.stage_one_objective_jax import objective_constants
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.gradient_objective_jax import gradient_objective_constants
+from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient.worker import run_worker
 
 Record = dict[str, object]
@@ -140,9 +140,9 @@ def _air(directory: Path, source: Path, surrogate: Path) -> Record:
         "receipt_sha256": file_sha256(receipt_path(surrogate))})
     problem = load_problem(changed)
     scheme, model, _ = check_inputs(changed)
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), changed.purpose)
-    constants = objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
-                                    len(model.source_names))
+    score = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), changed.purpose)
+    constants = gradient_objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
+                                             len(model.source_names))
     air, ranges = construction_environment(density_kg_m3=density, sound_speed_m_s=speed)
     expected = chain_objective(model, problem.designs, constants, air=air, ranges=ranges,
                                frequencies=model.frequencies_hz)

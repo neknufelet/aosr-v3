@@ -7,7 +7,8 @@
 
 雙精度的梯度、下降、取規格、重調與帳本寫入在子行程（只叫公開入口）；中央差分、比對與判決在父行程，
 差分走 numpy 版 ``evaluate_reduced``＋既有評分程式（``evaluate_stage_one_low_frequency``＋``score_stage_one``），
-不走 JAX。梯度的尺沿用傳遞矩陣考卷那兩把；單精度只量不登記。
+不走 JAX；#561 壬一起鏈的值是梯度目標的新合分，考卷自己用 numpy 加上大峰代理（評估器交回的直線係數重算主位殘差、
+內部點、左右一起的 log-sum-exp），T、權重、較差參考讀登記簿那三格。梯度的尺沿用傳遞矩陣考卷那兩把；單精度只量不登記。
 """
 from __future__ import annotations
 
@@ -43,9 +44,12 @@ from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.receiver_set import ReceiverRole, ReceiverSet, primary_cross
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.stage_one_low_frequency_contract import (
-    StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
+    StageOneLowFrequencyEvaluation, StageOneLowFrequencyInput, StageOneSeatCurve, StageOneSpeakerCurves,
 )
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays, StageOneObjectiveConstants, objective_constants
+from aosr.scoring.gradient_objective_jax import (
+    GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_constants,
+)
+from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, gradient_objective_settings
 from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one, stage_one_score_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
@@ -97,10 +101,21 @@ def _designs(name: str) -> tuple[gradient_search.SurfaceDesign, ...]:
     return gradient_search.wall_designs_from_presets(CASES[name], _settings(), _presets())
 
 
+@cache
+def _gradient_settings() -> GradientObjectiveSettings:
+    return gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), PURPOSE)
+
+
+def _objective(score: StageOneScoreSettings | None = None) -> GradientObjectiveSettings:
+    """梯度目標設定：正式那一份，給了第一階段設定就換掉那一半（代理三格不動）。"""
+    base = _gradient_settings()
+    return base if score is None else dataclasses.replace(base, stage_one=score)
+
+
 def _objective_constants(model: ReducedModel, score: StageOneScoreSettings | None = None,
-                         ) -> StageOneObjectiveConstants:
+                         ) -> GradientObjectiveConstants:
     """跟探針同一份算法：替身的頻率軸、正式計分設定（或給的那一份）、同一組座位、替身的喇叭數。"""
-    return objective_constants(model.frequencies_hz, score or _score(), _receivers(), len(model.source_names))
+    return gradient_objective_constants(model.frequencies_hz, _objective(score), _receivers(), len(model.source_names))
 
 
 def _header(model: ReducedModel, score: StageOneScoreSettings | None = None) -> ledger.MaterialGradientHeader:
@@ -197,9 +212,32 @@ def _numpy_total(model: ReducedModel, impedances: NDArray[np.complex128], mask: 
             surrounding=tuple(curve for key, curve in seats.items() if key != primary)))
     data = StageOneLowFrequencyInput(candidate_id="material-gradient", low_frequency_axis=LowFrequencyAxis.SEARCH,
                                      speakers=tuple(speakers))
-    score = score_stage_one(evaluate_stage_one_low_frequency(data, scoring_range_hz=_score().scored_range_hz), _score())
+    evaluation = evaluate_stage_one_low_frequency(data, scoring_range_hz=_score().scored_range_hz)
+    score = score_stage_one(evaluation, _score())
     assert score.state == "scored" and score.screening_total is not None, score.reason_codes
-    return score.screening_total
+    objective = _gradient_settings()
+    return score.screening_total + objective.proxy_weight * _numpy_proxy(
+        model.frequencies_hz, energies, evaluation, objective.temperature_db) / objective.worse_reference
+
+
+def _numpy_proxy(frequencies: Sequence[float], energies: NDArray[np.float64], evaluation: StageOneLowFrequencyEvaluation,
+                 temperature: float) -> float:
+    """考卷自己的代理：每支喇叭主位能量（計分範圍內）轉 dB、扣評估器交回的直線（斜率、截距），去掉第一與最後一點，
+    兩支一起取 T·log Σ exp(r/T)（先減最大值再取指數）。"""
+    axis = np.asarray(frequencies, dtype=np.float64)
+    lower, upper = _score().scored_range_hz
+    inside = (axis >= lower) & (axis <= upper)
+    primary = next(index for index, point in enumerate(_receivers().points) if point.role == ReceiverRole.PRIMARY)
+    residuals = []
+    for speaker_index, speaker in enumerate(evaluation.speakers):
+        payload = speaker.payload
+        assert payload is not None
+        level = 10.0 * np.log10(energies[inside, speaker_index, primary])
+        line = payload.own_line_slope_db_per_octave * np.log2(axis[inside]) + payload.own_line_intercept_db
+        residuals.append((level - line)[1:-1])
+    values = np.concatenate(residuals)
+    top = float(np.max(values))
+    return top + temperature * float(np.log(np.sum(np.exp((values - top) / temperature))))
 
 
 def _mask(name: str) -> NDArray[np.bool_]:
@@ -456,8 +494,8 @@ def test_descent_rerun_is_bitwise_identical(runs: tuple[Path, dict[str, Record]]
 
 # ---- 合成目標（不走替身，父行程單精度） ----
 
-def _aux(value: jax.Array) -> StageOneObjectiveArrays:
-    return StageOneObjectiveArrays(value[None], value[None], value, value, value)
+def _aux(value: jax.Array) -> GradientObjectiveArrays:
+    return GradientObjectiveArrays(value[None], value[None], value, value, value, value, value, value)
 
 
 def test_armijo_backtracks_when_first_trial_only_slightly_decreases() -> None:
@@ -469,7 +507,7 @@ def test_armijo_backtracks_when_first_trial_only_slightly_decreases() -> None:
     settings = _settings().descent
     curvature = (2.0 - settings.armijo_constant) / settings.initial_step
 
-    def objective(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+    def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
         value = 0.5 * curvature * jnp.sum(theta * theta)
         return value, _aux(value)
 
@@ -500,7 +538,7 @@ def test_retune_from_non_descending_start_takes_zero_steps() -> None:
     # 一次項給每格梯度 1（往空腔變淺、在盒內），二次項的曲率大到任何 α ≥ 步長下限都讓值上升。
     curvature = 1.0 / (settings.descent.min_step * settings.descent.backtrack_ratio ** 4)
 
-    def objective(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+    def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
         shift = theta - anchor
         value = jnp.sum(shift) + curvature * jnp.sum(shift * shift)
         return value, _aux(value)
@@ -591,6 +629,32 @@ def test_retune_moves_only_cavities_at_most_k_steps(runs: tuple[Path, dict[str, 
         assert taken == _settings().retune.steps
     else:
         assert float.fromhex(cast(str, retune["final_trial_step"])) < _settings().descent.min_step
+    assert all(np.array_equal(theta[~cavities], start[~cavities]) for theta in thetas)
+    assert all(gradient_search.is_feasible(theta, designs) for theta in thetas)
+    assert np.all(np.diff(_decode(retune["value"])) <= 0.0)
+    # 取規格那一點的空腔若已貼在總深度上限（新目標下「兩面剛性」第一步就把棉板推到 0.1 m、空腔 0.05 m＝上限），
+    # 投影梯度是零、空腔走不動：此時明說「釘在上限」，不讓「有動」這一句變成空的；有空間時照舊要動。
+    upper = _decode(row["retune_upper"])
+    if float.fromhex(cast(list[str], retune["gradient_norm"])[0]) == 0.0:
+        assert np.array_equal(thetas[-1][cavities], upper[cavities])
+        assert np.array_equal(start[cavities], upper[cavities])
+    else:
+        assert not np.array_equal(thetas[-1][cavities], start[cavities])
+
+
+def test_retune_with_cavity_room_moves_cavities(runs: tuple[Path, dict[str, Record]]) -> None:
+    """抓重調其實不動空腔（只在貼界的起點看不出來）：空腔放在重調盒界正中間起跑，空腔要動、厚度逐位不變、
+    值不升、每步可行、最多 K 步。"""
+    row = runs[1][DESCENT_CASE]
+    retune = cast(Record, row["retune_slack"])
+    designs = _designs(DESCENT_CASE)
+    thetas = [_decode(step) for step in cast(list[list[str]], retune["theta"])]
+    names = gradient_search.design_names(designs)
+    cavities = np.asarray([name.endswith("layer2.thickness_m") for name in names])
+    upper = _decode(row["retune_upper"])
+    start = thetas[0]
+    assert np.all(start[cavities] < upper[cavities])
+    assert len(thetas) - 1 <= _settings().retune.steps
     assert all(np.array_equal(theta[~cavities], start[~cavities]) for theta in thetas)
     assert all(gradient_search.is_feasible(theta, designs) for theta in thetas)
     assert np.all(np.diff(_decode(retune["value"])) <= 0.0)
@@ -688,8 +752,9 @@ def test_ledger_rejects_header_with_other_scoring_constants(chain_model: Reduced
     ledger.read_ledger(source, expected_header=_header(chain_model))
     for score in (_reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz)):
         other = _header(chain_model, score)
-        assert other.model_dump() | {"objective_fingerprint": None} == (
-            _header(chain_model).model_dump() | {"objective_fingerprint": None})
+        # 評分指紋與標頭記的分數常數（#561 壬一審查 B）都從評分設定來，其餘逐格相同。
+        scoring = {"objective_fingerprint": None, "score_constants": None}
+        assert other.model_dump() | scoring == _header(chain_model).model_dump() | scoring
         with pytest.raises(ValueError, match="objective_fingerprint"):
             ledger.read_ledger(source, expected_header=other)
 
@@ -705,28 +770,28 @@ def _nudged(values: NDArray[np.generic]) -> NDArray[np.generic]:
 
 def test_objective_fingerprint_changes_with_every_field() -> None:
     """抓指紋漏餵某一欄：評分常數逐欄各改一個元素，每改一欄指紋都變、彼此也不同（欄位照 NamedTuple 走，不寫死欄位數）。"""
-    constants = objective_constants(FEM_LANE_FREQUENCIES_HZ, _score(), _receivers(), 2)
+    constants = gradient_objective_constants(FEM_LANE_FREQUENCIES_HZ, _objective(), _receivers(), 2)
     baseline = ledger.objective_fingerprint(constants)
     seen = {baseline}
     for index, name in enumerate(constants._fields):
         fields: list[NDArray[np.generic]] = list(constants)
         fields[index] = _nudged(fields[index])
-        fingerprint = ledger.objective_fingerprint(StageOneObjectiveConstants._make(fields))
+        fingerprint = ledger.objective_fingerprint(GradientObjectiveConstants._make(fields))
         assert fingerprint not in seen, name
         seen.add(fingerprint)
     assert ledger.objective_fingerprint(constants) == baseline
 
 
-def _fingerprint_with(constants: StageOneObjectiveConstants, index: int, value: NDArray[np.generic]) -> str:
+def _fingerprint_with(constants: GradientObjectiveConstants, index: int, value: NDArray[np.generic]) -> str:
     fields: list[NDArray[np.generic]] = list(constants)
     fields[index] = value
-    return ledger.objective_fingerprint(StageOneObjectiveConstants._make(fields))
+    return ledger.objective_fingerprint(GradientObjectiveConstants._make(fields))
 
 
 def test_objective_fingerprint_keeps_scalar_shape() -> None:
     """抓指紋丟掉形狀（#561 審查 P2）：主位索引由純量 () 改成一個元素的 (1,)，位元組相同、分數不同，指紋要不同
     （審查原樣重現）；每一欄各補一個長度 1 的尾軸（純量那幾欄就是 () → (1,)），位元組不變、指紋都要變。"""
-    constants = objective_constants(FEM_LANE_FREQUENCIES_HZ, _score(), _receivers(), 2)
+    constants = gradient_objective_constants(FEM_LANE_FREQUENCIES_HZ, _objective(), _receivers(), 2)
     baseline = ledger.objective_fingerprint(constants)
     assert constants.primary_index.shape == ()
     assert ledger.objective_fingerprint(constants._replace(primary_index=constants.primary_index.reshape(1))) != baseline
@@ -742,7 +807,7 @@ def test_objective_fingerprint_keeps_scalar_shape() -> None:
 def test_objective_fingerprint_distinguishes_dtype_with_same_bytes() -> None:
     """抓指紋漏餵 dtype：每一欄換成同寬的另一種 dtype 的視圖（float64 ↔ int64），形狀與位元組完全相同，指紋都要變；
     審查舉的例子是計分頻帶權重 float64 視成 int64。"""
-    constants = objective_constants(FEM_LANE_FREQUENCIES_HZ, _score(), _receivers(), 2)
+    constants = gradient_objective_constants(FEM_LANE_FREQUENCIES_HZ, _objective(), _receivers(), 2)
     baseline = ledger.objective_fingerprint(constants)
     for index, name in enumerate(constants._fields):
         original = np.asarray(constants[index])
@@ -849,7 +914,7 @@ def test_chain_rejects_surface_count_other_than_surrogate_walls(chain_model: Red
     designs = gradient_search.designs_from_presets(
         (("x0.zone1", "glass_wool_48k_50mm_gap50"), ("x0.zone2", None), ("y0", "glass_wool_24k_50mm")),
         _settings(), _presets())
-    constants = objective_constants(chain_model.frequencies_hz, _score(), _receivers(), len(chain_model.source_names))
+    constants = _objective_constants(chain_model)
     with pytest.raises(ValueError, match="替身"):
         gradient_search.chain_objective(
             chain_model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
@@ -859,7 +924,7 @@ def test_chain_rejects_surface_count_other_than_surrogate_walls(chain_model: Red
 
 # ---- 拒收 ----
 
-def _never_called(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+def _never_called(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
     raise AssertionError("起點超界要在求值之前就拒收")
 
 

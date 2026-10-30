@@ -25,8 +25,10 @@ from aosr.materials.construction_models import Assembly
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, objective_constants
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.gradient_objective_jax import (
+    GradientObjectiveConstants, gradient_objective_constants, objective_reading,
+)
+from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 
@@ -85,7 +87,7 @@ def _box_only(objective: gradient_search.ChainObjective, start: np.ndarray,
 
 
 def _evaluator_cache(model: ReducedModel, designs: tuple[gradient_search.SurfaceDesign, ...],
-                     constants: StageOneObjectiveConstants, theta: jax.Array) -> Record:
+                     constants: GradientObjectiveConstants, theta: jax.Array) -> Record:
     """編譯快取（#561 審查）：真目標拿編譯版算一次，丟掉目標與編譯版、垃圾回收後量目標的弱參照死了沒；
     同一個目標連叫兩次是不是同一個物件、兩個不同目標是不是不同物件。目標各自新建，不跟後面的下降共用。"""
     air = load_physics_constants(config_path("physics_constants.toml"))
@@ -109,6 +111,28 @@ def _evaluator_cache(model: ReducedModel, designs: tuple[gradient_search.Surface
             "other_objective_other_evaluator": gradient_search.compiled_evaluator(second) is not shared}
 
 
+def _difference_points(designs: tuple[gradient_search.SurfaceDesign, ...], theta: np.ndarray, step: float,
+                       frequencies: np.ndarray) -> Record:
+    """每個參數上下各推一個相對步長，交那一點的每面阻抗（父行程拿去做 numpy 差分）。"""
+    points: Record = {}
+    for index in range(theta.shape[0]):
+        for sign, label in ((1.0, "upper"), (-1.0, "lower")):
+            moved = theta.copy()
+            moved[index] += sign * step * moved[index]
+            points[f"{index}.{label}"] = _impedances(designs, moved, frequencies)
+    return points
+
+
+def _retune_with_room(objective: gradient_search.ChainObjective, snapped: np.ndarray,
+                      designs: tuple[gradient_search.SurfaceDesign, ...], settings: MaterialGradientSettings) -> Record:
+    """空腔留空間的起點：取過規格的 θ、每面空腔放在重調盒界的正中間再重調一次（取規格那一點可能貼在總深度上限，
+    那裡投影梯度是零、空腔走不動；這一跑另外守「空腔真的會動」）。重調盒界的上界一起交回。"""
+    lower, upper = gradient_search.retune_bounds(snapped, designs)
+    start = np.where(lower < upper, (lower + upper) / 2.0, snapped)
+    return {"retune_slack": _steps(gradient_search.retune_cavities(objective, start, designs, settings)),
+            "retune_upper": _hex(upper)}
+
+
 def main(directory: Path) -> None:
     problem = cast(dict[str, object], json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
@@ -117,9 +141,10 @@ def main(directory: Path) -> None:
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     receivers = ReceiverSet.model_validate(problem["receivers"])
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
+    objective_settings = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")),
+                                                     str(problem["purpose"]))
     frequencies = np.asarray(model.frequencies_hz, dtype=np.float64)
-    constants = objective_constants(frequencies, score, receivers, len(model.source_names))
+    constants = gradient_objective_constants(frequencies, objective_settings, receivers, len(model.source_names))
     output: Record = {}
     for name, case in cast(dict[str, Record], problem["cases"]).items():
         designs = gradient_search.wall_designs_from_presets(cast(list[str | None], case["presets"]), settings, presets)
@@ -128,18 +153,14 @@ def main(directory: Path) -> None:
         step = float(cast(float, case["step"]))
         (value, aux), automatic = jax.jit(jax.value_and_grad(objective, has_aux=True))(theta)
         eager_value, _ = objective(theta)
-        points = {}
-        for index in range(theta.shape[0]):
-            for sign, label in ((1.0, "upper"), (-1.0, "lower")):
-                moved = np.asarray(theta).copy()
-                moved[index] += sign * step * moved[index]
-                points[f"{index}.{label}"] = _impedances(designs, moved, frequencies)
+        points = _difference_points(designs, np.asarray(theta), step, frequencies)
         single = theta.astype(jnp.float32)
         (single_value, _), single_gradient = jax.jit(jax.value_and_grad(objective, has_aux=True))(single)
         row: Record = {
             "names": list(gradient_search.design_names(designs)),
             "value": float(value).hex(), "eager_value": float(eager_value).hex(), "gradient": _hex(automatic),
-            "components": [float(aux.mean_own_line_ripple_rms_db).hex(), float(aux.mean_seat_robustness_rms_db).hex()],
+            "components": [value.hex() for value in objective_reading(aux).components],
+            "screening_total": float(aux.screening_total).hex(),
             "dtype": str(value.dtype), "gradient_dtype": str(automatic.dtype),
             "center": _impedances(designs, np.asarray(theta), frequencies), "points": points,
             "single": {"value": float(single_value).hex(), "gradient": _hex(single_gradient),
@@ -161,8 +182,8 @@ def main(directory: Path) -> None:
             single_descent = gradient_search.projected_descent(objective, start.astype(np.float32), bounds, settings.descent,
                                                                limits=limits)
             rows = (*ledger.descent_rows(first, "descent", 0),
-                    ledger.snap_row(snapped, float(snapped_value), (float(snapped_aux.mean_own_line_ripple_rms_db),
-                                    float(snapped_aux.mean_seat_robustness_rms_db)), 0.0, len(first.steps)),
+                    ledger.snap_row(snapped, float(snapped_value), objective_reading(snapped_aux).screening_total,
+                                    objective_reading(snapped_aux).components, 0.0, len(first.steps)),
                     *ledger.descent_rows(retuned, "retune", len(first.steps) + 1))
             header = ledger.header_for(model, designs, settings, objective_constants=constants)
             ledger.write_ledger(directory / f"{name}.ledger.jsonl", header, rows)
@@ -173,6 +194,7 @@ def main(directory: Path) -> None:
                 "snap": {"theta": _hex(snapped.theta), "surfaces": [choice._asdict() for choice in snapped.surfaces],
                          "value": float(snapped_value).hex()},
                 "retune": _steps(retuned), "single_descent": _steps(single_descent),
+                **_retune_with_room(objective, snapped.theta, designs, settings),
             })
             row.update(_box_only(objective, start, bounds, settings, step_gradient))
         output[name] = row

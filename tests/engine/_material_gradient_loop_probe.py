@@ -27,8 +27,8 @@ from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.config.quality_targets import load_quality_targets
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.stage_one_objective_jax import StageOneObjectiveArrays, objective_constants
-from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, gradient_objective_constants, objective_reading
+from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
@@ -49,15 +49,22 @@ def _settings(base: MaterialGradientSettings, override: object) -> MaterialGradi
     return MaterialGradientSettings.model_validate({**base.model_dump(), "candidates": candidates.model_dump()})
 
 
+# 合成目標的分數常數：0.5·(v／1)＋0.5·(v／1)＝v（舊合分）、v＋代理權重·0（新合分）。
+SYNTHETIC_SCORES = ledger.ScoreConstants(component_weights=(0.5, 0.5), worse_references=(1.0, 1.0), proxy_weight=0.5,
+                                         proxy_worse_reference=1.0, proxy_temperature_db=0.5)
+
+
 def synthetic_header(designs: tuple[gradient_search.SurfaceDesign, ...],
                      settings: MaterialGradientSettings) -> ledger.MaterialGradientHeader:
     """合成目標沒有替身也沒有評分常數：標頭的替身三格填固定字樣，評分指紋填固定字樣的 SHA-256（格式跟正式一樣）；
-    合成面都是可調面、沒有原牆，原牆摘要是空表；其他照正式算。"""
+    合成面都是可調面、沒有原牆，原牆摘要是空表；其他照正式算。分數常數配合成目標（分項兩格都是值、代理 0、
+    舊合分＝值）：兩分項各半、較差參考 1，兩個恆等式恰好成立（:data:`SYNTHETIC_SCORES`）。"""
     return ledger.MaterialGradientHeader(
         ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic",
         physics_identity="synthetic", surfaces=tuple((design.surface_id, design.preset_id) for design in designs),
         variable_names=gradient_search.design_names(designs), settings_fingerprint=settings.fingerprint,
-        objective_fingerprint=hashlib.sha256(b"synthetic").hexdigest(), kept_digests={})
+        objective_fingerprint=hashlib.sha256(b"synthetic").hexdigest(), kept_digests={},
+        score_constants=SYNTHETIC_SCORES)
 
 
 def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], counter: list[int],
@@ -74,11 +81,11 @@ def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], coun
     def tick(_: jax.Array) -> None:
         counter[0] += 1
 
-    def objective(theta: jax.Array) -> tuple[jax.Array, StageOneObjectiveArrays]:
+    def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
         jax.debug.callback(tick, theta)
         shift = theta - jnp.asarray(target, dtype=theta.dtype)
         value = jnp.sum(jnp.asarray(weight, dtype=theta.dtype) * shift * shift)
-        return value, StageOneObjectiveArrays(value[None], value[None], value, value, value)
+        return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value, value * 0.0)
 
     return objective
 
@@ -88,9 +95,9 @@ def _start_ledger(path: Path, header: ledger.MaterialGradientHeader, designs: tu
     """前段只有一列：預設樣板取規格的可行點與那裡的值。"""
     snapped = gradient_search.snap_to_specs(theta, designs)
     value, aux = objective(jnp.asarray(snapped.theta))
+    reading = objective_reading(aux)
     ledger.write_ledger(path, header, (ledger.snap_row(
-        snapped, float(value), (float(aux.mean_own_line_ripple_rms_db), float(aux.mean_seat_robustness_rms_db)),
-        0.0, 0),))
+        snapped, float(value), reading.screening_total, reading.components, 0.0, 0),))
     return snapped.theta
 
 
@@ -174,8 +181,8 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
     model = load_reduced(directory / "model.npz")
     presets = load_construction_presets(config_path("construction_presets.toml"))
     receivers = ReceiverSet.model_validate(problem["receivers"])
-    score = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
-    constants = objective_constants(np.asarray(model.frequencies_hz), score, receivers, len(model.source_names))
+    score = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
+    constants = gradient_objective_constants(np.asarray(model.frequencies_hz), score, receivers, len(model.source_names))
     designs = gradient_search.wall_designs_from_presets(cast(list[str | None], problem["presets"]), base, presets)
     objective = gradient_search.chain_objective(
         model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
@@ -225,9 +232,9 @@ def _edge(problem: Record, base: MaterialGradientSettings) -> Record:
     rows: Record = {"theta": _hex(theta)}
     for name, weights in (("flat", (1.0, 1.0)), ("linear", (2.0, 1.0))):
         def objective(values: jax.Array, weights: tuple[float, float] = weights) -> tuple[
-                jax.Array, StageOneObjectiveArrays]:
+                jax.Array, GradientObjectiveArrays]:
             value = -weights[0] * values[0] - weights[1] * values[1]
-            return value, StageOneObjectiveArrays(value[None], value[None], value, value, value)
+            return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value, value * 0.0)
         result = gradient_search.projected_descent(objective, theta, (lower, upper), settings, limits=limits)
         rows[name] = {"stop_reason": result.stop_reason, "steps": len(result.steps) - 1,
                       "norms": [step.gradient_norm.hex() for step in result.steps]}
