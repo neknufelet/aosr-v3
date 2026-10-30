@@ -3,7 +3,8 @@
 由 ``aosr.gradient.cli`` 起：環境是 ``child_process_env(threads=1)`` 再寫中央處理器＋雙精度，``start_new_session``，
 資料夾鎖的描述子經 ``pass_fds`` 繼承（父行程不解鎖、子行程活著鎖就在）。這裡先核 JAX 真的是中央處理器＋雙精度，
 不是就失敗、不算。狀態檔只由這裡寫：開始寫 running（帶自己的行程編號），收尾寫 finished／stopped／failed／interrupted；
-進度數字（帳本記的累計求值次數、做完幾輪、最後一列的值）在寫的那一刻從帳本讀。
+進度數字（帳本記的累計求值次數、做完幾輪、最後一列的值；庚三多兩欄：換樣板帳本記的累計求值次數與做完幾輪）在寫的那一刻
+從帳本讀。
 
 起它的父行程建子行程時擋著 SIGINT、SIGTERM、SIGHUP（遮罩會繼承），所以入口裝好轉換就把這三個放開；
 擋著那段收到的訊號放開時才送到，照樣轉成中斷。
@@ -29,7 +30,7 @@ from aosr.gradient.material_gradient import SearchStopped, StopCheck
 from aosr.gradient.material_gradient_ledger import read_ledger
 from aosr.gradient.run import (
     LEDGER_FILE, STATUS_FILE, GradientStatus, State, ledger_progress, now_text, resume_search, run_search,
-    stop_requested, write_json_atomic,
+    stop_requested, template_ledger_progress, write_json_atomic,
 )
 
 Mode = Literal["start", "resume"]
@@ -41,15 +42,22 @@ EXIT_STOPPED: Final = 3
 
 
 def _status(folder: Path, state: State, started_at: str, message: str | None = None) -> None:
-    """寫狀態檔；進度從帳本讀（沒有帳本或讀不開時是零、None——帳本壞了由計算本身報錯）。"""
+    """寫狀態檔；進度從兩本帳讀（沒有帳本或讀不開時是零、None——帳本壞了由計算本身報錯）。
+
+    ``stop_reason`` 照舊是庚二迴圈收尾的停止原因；換樣板那段的進度是另兩欄（停止原因在 ``result.json``）。"""
     try:
         _, rows = read_ledger(folder / LEDGER_FILE)
     except (OSError, ValueError):
         rows = ()
     evaluations, rounds, value, reason = ledger_progress(rows)
+    try:
+        template_evaluations, template_rounds, _ = template_ledger_progress(folder)
+    except (OSError, ValueError):
+        template_evaluations, template_rounds = 0, 0
     write_json_atomic(folder / STATUS_FILE, GradientStatus(
         state=state, started_at=started_at, updated_at=now_text(), evaluations=evaluations, rounds_done=rounds,
-        last_value=value, stop_reason=reason, pid=os.getpid(), message=message))
+        last_value=value, stop_reason=reason, template_evaluations=template_evaluations,
+        template_rounds_done=template_rounds, pid=os.getpid(), message=message))
 
 
 def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:

@@ -210,6 +210,6 @@ name = "stage_one_objective_jax_vs_python"
 value = 1.4551915228366852e-11
 display = "2^-36"
 unit = "relative"
-decision_paper = "stage-three-gradient-objective-low-frequency-lane.md"
+decision_paper = "stage-three-gradient-search-objective-findings-and-template-rounds.md"
 truth = "工程暫定（#561）：中央處理器 JAX 雙精度對 evaluate_stage_one_low_frequency 加 score_stage_one 的 numpy/Python 雙精度結果；每八度 48 點搜尋軸、七座位、兩聲道的 demo／tilted／gaussian 與固定種子 561、562 隨機正能量，另考座位重排、裁切範圍及替換設定。比逐喇叭 own_line_ripple_rms_db、seat_robustness_rms_db、兩項逐聲道等權平均與 screening_total，非零真值用 |差|/|Python|；純直線主項與其平均接近零，改用 |差|/(1 dB)，真值恰零的其他量要求恰零。同尺用於編譯對未編譯、批次對逐組；同一份編譯重跑另要求逐位相同。2026-10-28 本機前向最大相對差 5.75e-15，純直線主項最大絕對差 1.15e-14 dB；取 2^-36 留約千倍餘裕給換機器，非物理誤差；單精度只量不登記"
 mutant_test = "tests/engine/test_stage_one_objective_jax.py::test_mutant_beyond_tolerance_is_red"

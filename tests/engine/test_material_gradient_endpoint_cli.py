@@ -418,9 +418,8 @@ def test_result_from_ledger_equals_written_result(runs: tuple[Path, Record]) -> 
     等於讀回的 result.json，JSON 內容也逐格相等。"""
     folder = _folder(runs)
     project = run.read_project(folder)
-    designs = run.designs_for(project.presets, load_material_gradient_settings(Path(project.settings_path)),
-                              kept=_by_wall(_kept_materials(runs)))
-    rebuilt = run.result_from_ledger(folder, designs)
+    rebuilt = run.result_from_ledger(folder, load_material_gradient_settings(Path(project.settings_path)),
+                                     _by_wall(_kept_materials(runs)))
     assert rebuilt == read_result(folder)
     assert json.loads(rebuilt.model_dump_json()) == _json(folder / "result.json")
 

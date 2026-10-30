@@ -192,8 +192,13 @@ def line_search_trials(settings: DescentSettings) -> int:
     return trials
 
 
+def retune_evaluation_bound(settings: MaterialGradientSettings) -> int:
+    """一段空腔重調最壞要求幾次目標：起點一次＋最多 K 步 × 每步最多試探數（庚二候選確認與庚三換樣板共用）。"""
+    return 1 + settings.retune.steps * line_search_trials(settings.descent)
+
+
 def round_evaluation_bound(settings: MaterialGradientSettings, candidate_count: int) -> int:
-    """一輪最壞要求幾次目標：梯度一次；基準與每個候選各一段重調，每段起點一次＋最多 K 步 × 每步最多試探數。
+    """一輪最壞要求幾次目標：梯度一次；基準與每個候選各一段重調，每段照 :func:`retune_evaluation_bound`。
 
     沒有候選的輪只有梯度那一次。預算照這個最壞值判：開得了的輪一定跑得完，帳本記的求值次數不會超過上限——
     限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
@@ -202,8 +207,7 @@ def round_evaluation_bound(settings: MaterialGradientSettings, candidate_count: 
         raise ValueError("候選數不可為負")
     if candidate_count == 0:
         return 1
-    per_retune = 1 + settings.retune.steps * line_search_trials(settings.descent)
-    return 1 + (candidate_count + 1) * per_retune
+    return 1 + (candidate_count + 1) * retune_evaluation_bound(settings)
 
 
 def _candidate_count(theta: FloatVector, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings) -> int:

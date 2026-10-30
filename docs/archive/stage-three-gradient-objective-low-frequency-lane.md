@@ -1,11 +1,11 @@
 ---
 title: 第三階段梯度搜尋的目標與找法：第一輪只用低頻那一路的第一階段分數、全牆聯合梯度為主、取規格聯合重調空腔、少量候選確認；目標 JAX 版對 Python 版另立尺
 date_created: 2026-10-28
-date_modified: 2026-10-29
-status: accepted
+date_modified: 2026-10-30
+status: superseded
 kind: product
 supersedes: ""
-superseded_by: ""
+superseded_by: "stage-three-gradient-search-objective-findings-and-template-rounds.md"
 summary: "第三階段牆面材料用梯度找。第一輪的梯度目標只用有限元素那一路的第一階段低頻分數（主位扣自己直線的起伏、周圍六點對主位的差，逐聲道等權、合分照登記簿），大峰不進梯度目標、只在候選確認時查；找法照 2026-10-15 定的定義：全牆聯合梯度為主、連續厚度取合法規格時聯合重調空腔、在可行解用梯度乘跳距挑少量候選確認、改善超過門檻才換、停下時記原因、終點用完整模型重算同一套分數。目標的 JAX 版對現行 Python 評分程式另立尺，住精度契約登記簿。"
 ---
 

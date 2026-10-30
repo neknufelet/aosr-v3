@@ -1,12 +1,16 @@
-"""牆面材料梯度搜尋的人看報告（#561 辛一、辛三）：只讀資料夾裡的 ``project.json``、``status.json``、帳本、方案檔、
+"""牆面材料梯度搜尋的人看報告（#561 辛一、辛三、庚三）：只讀資料夾裡的 ``project.json``、``status.json``、兩本帳、方案檔、
 ``result.json`` 與 ``endpoint.json``，不求值、不寫檔。
 
 每一段（下降幾步、取規格前後值、重調幾步）、每一輪的決定、累計求值次數、停止原因、最後的可行點（每面 preset、
 厚度 mm、空腔 mm；不貼的面印方案原本那面牆的材料）、值與分項。帳本照 ``read_ledger`` 逐列驗，壞列照樣報錯。
-最後可行點：有決定列取最後一列決定，否則取前段收好的重調末列，再否則取規格那一列。
+換樣板一節（庚三）：每輪列全部快速評分的值，沒進重調的標「只快速評分」、進重調的標「重調過」（重調後的值與改善），
+換過去那面沒有空腔變數的另標「無可重調變數」；基準重調後的值、門檻、決定、累計求值次數、停止原因照字面。換樣板帳本讀不開
+時這一節印讀不開的原因（不中斷，終點那一節照樣判過期）。這裡的值都是替身算的；完整模型確認只在終點那一節。
+最後可行點：換樣板帳本有決定列取它最後一列決定（配置照那一列），否則庚二帳本有決定列取最後一列決定，否則取前段收好的
+重調末列，再否則取規格那一列。
 不貼的面讀 ``project.json`` 記的方案檔（讀，不核雜湊；方案檔事後換過，這裡印的是現在那一份）。
-最後一節是終點：``endpoint.json`` 綁的搜尋身分、帳本檔與結果檔摘要都等於現在的、帳本有收尾、結果檔宣稱的帳本就是
-現在這本，才印終點數字，任一件對不上印過期，
+最後一節是終點：``endpoint.json`` 綁的搜尋身分、兩本帳與結果檔摘要都等於現在的、兩本帳都有收尾、結果檔宣稱的兩本帳就是
+現在這兩本，才印終點數字，任一件對不上印過期，
 沒有 ``endpoint.json`` 最後一行是 :data:`FULL_MODEL_LINE`。
 """
 from __future__ import annotations
@@ -21,14 +25,19 @@ from aosr.geometry.shoebox import Wall
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointRecord, read_endpoint, read_result
 from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, MaterialGradientRow, read_ledger
 from aosr.gradient.run import (
-    LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, GradientProject, GradientStatus, file_sha256, ledger_progress,
-    project_wall_materials, read_project, surface_specs,
+    LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, TEMPLATES_FILE, GradientProject, GradientStatus, Layout,
+    file_sha256, ledger_progress, project_wall_materials, read_project, surface_specs,
 )
+from aosr.gradient.template_ledger import TemplateRow, decisions_seconds, read_template_ledger, template_progress
 from aosr.materials.construction_models import Assembly, ConstantImpedance, SurfaceMaterial
 from aosr.reporting.scheme import load_scheme
 
 FULL_MODEL_LINE: Final = "終點完整模型重算：未做（跑 endpoint <資料夾>）"
 STALE_ENDPOINT_LINE: Final = "終點報告過期：endpoint.json 跟現在的帳本、結果檔或搜尋身分對不上，要重跑 endpoint"
+TEMPLATE_HEADING: Final = "換樣板（替身快速評分與重調；完整模型確認只在終點那一節）："
+QUICK_ONLY: Final = "只快速評分"
+RETUNED: Final = "重調過"
+NOT_RETUNABLE: Final = "無可重調變數"
 ENDPOINT_HEADING: Final = "終點完整模型重算（"
 _MM: Final = 1000.0
 
@@ -112,12 +121,13 @@ def _kept_texts(project: GradientProject) -> dict[str, str]:
     return {wall.wall_name(): f"不貼（保留原牆：{material_text(material)}）" for wall, material in materials.items()}
 
 
-def _point_lines(header: MaterialGradientHeader, row: MaterialGradientRow | None,
+def _point_lines(layout: Layout, row: MaterialGradientRow | TemplateRow | None,
                  kept: dict[str, str]) -> list[str]:
     if row is None:
         return ["最後的可行點：還沒有（取規格還沒寫進帳本）"]
-    lines = [f"最後的可行點（帳本第 {row.step} 列 {row.phase}）："]
-    for spec in surface_specs(header, row.theta()):
+    book = "換樣板帳本" if isinstance(row, TemplateRow) else "帳本"
+    lines = [f"最後的可行點（{book}第 {row.step} 列 {row.phase}）："]
+    for spec in surface_specs(layout, row.theta()):
         if spec.preset_id is None:
             lines.append(f"  {spec.surface_id}：{kept.get(spec.surface_id, '不貼（保留原牆；方案沒有這一面）')}")
             continue
@@ -128,13 +138,66 @@ def _point_lines(header: MaterialGradientHeader, row: MaterialGradientRow | None
     return lines
 
 
+def _quick_label(row: TemplateRow, retuned: Mapping[str, tuple[float, float]]) -> str:
+    """一個快速評分候選的標記：沒進重調「只快速評分」、進了「重調過」（重調後的值、改善）；換過去那面沒有空腔變數另標。"""
+    if row.candidate is None or row.candidate not in retuned:
+        return QUICK_ONLY + ("" if row.swapped_retunable else f"、{NOT_RETUNABLE}")
+    value, improvement = retuned[row.candidate]
+    note = "" if row.swapped_retunable else f"（換過去那面{NOT_RETUNABLE}，重調照步數走其他面的空腔；整房都沒有空腔時是同一點重複求值）"
+    return f"{RETUNED}{note}：重調後 {value:.6f}、改善 {improvement:+.6f}"
+
+
+def _template_round_lines(rows: Sequence[TemplateRow]) -> list[str]:
+    lines: list[str] = []
+    for round_index in sorted({row.round for row in rows}):
+        block = [row for row in rows if row.round == round_index]
+        decision_row = block[-1] if block[-1].decision is not None else None
+        decision = decision_row.decision if decision_row is not None else None
+        retuned = {outcome.candidate: (outcome.value, outcome.improvement)
+                   for outcome in (decision.outcomes if decision is not None else ())}
+        lines.append(f"換樣板第 {round_index} 輪：" + ("進行中（還沒有決定列，接續時這半輪會丟掉重跑）" if decision is None
+                                                    else f"這輪求值 {decision.round_evaluations} 次、累計 {decision.total_evaluations} 次"))
+        for row in block:
+            if row.phase == "quick_score":
+                lines.append(f"  {row.candidate}：快速評分 {row.value:.6f}，{_quick_label(row, retuned)}")
+        if decision_row is None or decision is None:
+            continue
+        if decision.baseline_value is not None:
+            lines.append(f"  基準（本輪起點配置）重調後 {decision.baseline_value:.6f}（門檻 {decision.threshold}）")
+        accepted = f"接受 {decision.accepted}" if decision.accepted is not None else "沒有接受"
+        if decision.quick_count == 0:
+            accepted = "沒開（沒有快速評分）"
+        reason = f"；停止原因「{decision_row.stop_reason}」" if decision_row.stop_reason is not None else ""
+        lines.append(f"  決定：{accepted}；交出的值 {decision_row.value:.6f}{reason}")
+    return lines
+
+
+def _template_lines(folder: Path) -> tuple[list[str], TemplateRow | None]:
+    """換樣板一節與它最後一列決定（沒有就 None）；帳本沒有或讀不開時印一行原因。"""
+    path = folder / TEMPLATES_FILE
+    if not path.exists():
+        return [TEMPLATE_HEADING, "  換樣板帳本：還沒有"], None
+    try:
+        _, rows = read_template_ledger(path)
+    except (OSError, ValueError) as error:
+        return [TEMPLATE_HEADING, f"  換樣板帳本讀不開：{type(error).__name__}：{error}"], None
+    evaluations, rounds, reason = template_progress(rows)
+    lines = [TEMPLATE_HEADING, *("  " + line for line in _template_round_lines(rows)),
+             f"  換樣板累計求值次數（換樣板帳本記的，不含庚二）：{evaluations}；做完 {rounds} 輪；"
+             f"各輪秒數加總 {decisions_seconds(rows):.1f}",
+             f"  換樣板停止原因：{reason}" if reason is not None else "  換樣板停止原因：還沒收尾"]
+    decisions = [row for row in rows if row.decision is not None]
+    return lines, (decisions[-1] if decisions else None)
+
+
 def _status_line(folder: Path) -> str:
     try:
         status = GradientStatus.model_validate_json((folder / STATUS_FILE).read_bytes())
     except (OSError, ValidationError) as error:
         return f"狀態：讀不到狀態檔（{type(error).__name__}）"
     note = f"；{status.message}" if status.message else ""
-    return f"狀態：{status.state}（子行程 {status.pid}，這次開始 {status.started_at}、最後寫 {status.updated_at}{note}）"
+    return (f"狀態：{status.state}（子行程 {status.pid}，這次開始 {status.started_at}、最後寫 {status.updated_at}；"
+            f"換樣板求值 {status.template_evaluations} 次、做完 {status.template_rounds_done} 輪{note}）")
 
 
 def _dbs(values: Mapping[str, float | None]) -> str:
@@ -168,12 +231,14 @@ def _endpoint_section(record: EndpointRecord) -> list[str]:
 
 
 def stale_reasons(folder: Path, project: GradientProject, record: EndpointRecord) -> list[str]:
-    """endpoint.json 對現在這個資料夾還算不算數：六件都要對，回對不上的那幾件（空的就是有效）。
+    """endpoint.json 對現在這個資料夾還算不算數：九件都要對，回對不上的那幾件（空的就是有效）。
 
     搜尋身分（endpoint.json 與 result.json 的 ``gradient_id`` 都等於 project.json 的）、現在帳本檔的 SHA-256 等於終點綁的、
     現在帳本有收尾（最後一列是帶停止原因與決定的 ``round_decision``）、現在 result.json 檔的 SHA-256 等於終點讀的那一份、
-    result.json 宣稱出自的帳本（``ledger_sha256``）就是現在這本。三份檔各自的摘要都對上、彼此也一致才算數；
-    三份檔一起偽造到內部一致擋不住（本機摘要不是簽章）。只讀檔、量摘要，不求值。
+    result.json 宣稱出自的帳本（``ledger_sha256``）就是現在這本；庚三再三件：現在換樣板帳本檔的 SHA-256 等於終點綁的、
+    換樣板帳本有收尾（讀得開、最後一列是帶停止原因的決定列）、result.json 宣稱的換樣板帳本（``template_ledger_sha256``）
+    就是現在這本。各檔的摘要都對上、彼此也一致才算數；幾份檔一起偽造到內部一致擋不住（本機摘要不是簽章）。
+    只讀檔、量摘要，不求值。
     """
     reasons = []
     if record.gradient_id != project.gradient_id:
@@ -186,6 +251,12 @@ def stale_reasons(folder: Path, project: GradientProject, record: EndpointRecord
     last = rows[-1] if rows else None
     if last is None or last.phase != "round_decision" or last.stop_reason is None or last.decision is None:
         reasons.append("帳本沒收尾")
+    templates = folder / TEMPLATES_FILE
+    current_templates = file_sha256(templates) if templates.exists() else None
+    if current_templates != record.result_template_ledger_sha256:
+        reasons.append("換樣板帳本檔跟終點綁的不同")
+    if current_templates is None or not _templates_closed(templates):
+        reasons.append("換樣板帳本沒收尾")
     if not result.exists():
         return [*reasons, "result.json 跟終點讀的不同"]
     if file_sha256(result) != record.result_sha256:
@@ -195,16 +266,29 @@ def stale_reasons(folder: Path, project: GradientProject, record: EndpointRecord
         reasons.append("result.json 的 gradient_id 不是這次搜尋的")
     if claimed.ledger_sha256 != current:
         reasons.append("結果宣稱的帳本不是現在這本")
+    if claimed.template_ledger_sha256 != current_templates:
+        reasons.append("結果宣稱的換樣板帳本不是現在這本")
     return reasons
+
+
+def _templates_closed(path: Path) -> bool:
+    try:
+        rows = read_template_ledger(path)[1]
+    except (OSError, ValueError):
+        return False
+    return template_progress(rows)[2] is not None
 
 
 def _endpoint_lines(folder: Path, project: GradientProject) -> list[str]:
     """有 endpoint.json 且 :func:`stale_reasons` 是空的就印終點一節；有對不上的印過期（指名哪幾件）；
-    沒有 endpoint.json 印「未做」那一行。"""
+    沒有 endpoint.json 印「未做」那一行；endpoint.json 或 result.json 讀不開（例如庚三之前的舊版本）也印過期、附原因。"""
     if not (folder / ENDPOINT_FILE).exists():
         return [FULL_MODEL_LINE]
-    record = read_endpoint(folder)
-    reasons = stale_reasons(folder, project, record)
+    try:
+        record = read_endpoint(folder)
+        reasons = stale_reasons(folder, project, record)
+    except (OSError, ValueError) as error:
+        return [STALE_ENDPOINT_LINE, f"  讀不開：{type(error).__name__}：{error}"]
     if reasons:
         return [STALE_ENDPOINT_LINE, f"  對不上的：{'、'.join(reasons)}"]
     return _endpoint_section(record)
@@ -226,6 +310,9 @@ def render_report(folder: Path) -> str:
     lines += _round_lines(rows)
     lines.append(f"累計求值次數（帳本記的、不含前段）：{evaluations}；做完 {rounds} 輪")
     lines.append(f"停止原因：{reason}" if reason is not None else "停止原因：還沒收尾")
-    lines += _point_lines(header, _feasible(rows), _kept_texts(project))
+    template_lines, template_last = _template_lines(folder)
+    lines += template_lines
+    layout: Layout = template_last if template_last is not None else header
+    lines += _point_lines(layout, template_last if template_last is not None else _feasible(rows), _kept_texts(project))
     lines += _endpoint_lines(folder, project)
     return "\n".join(lines) + "\n"

@@ -1,9 +1,12 @@
 """牆面材料梯度搜尋的產品接線（#561 辛一）：從資料夾裡的 ``project.json`` 重建目標、把整條鏈跑完、寫帳本與結果。
 
-整條：每面樣板當起點 → 連續下降（投影到盒界 ∩ 總深度）→ 取規格 → 空腔聯合重調 → 候選確認迴圈。
+整條：每面樣板當起點 → 連續下降（投影到盒界 ∩ 總深度）→ 取規格 → 空腔聯合重調 → 候選確認迴圈（庚二）
+→ 換樣板（庚三，``template_segment``，寫 ``templates.jsonl``）→ 寫結果。
 前段三段照帳本的 ``_PRE_LOOP_ORDER``（descent、snap、retune）分三批寫，迴圈交給 ``material_gradient_loop``；
 帳本是唯一的接續來源。前段是一個單位：帳本前段沒有以「收好的重調段」結尾（沒有帳本、只有標頭、
 只到下降或取規格、重調沒寫完），接續就截到標頭、從頭重跑前段；前段完整或已進迴圈就交給 ``resume_rounds``。
+接續看資料夾在哪一段：``ledger.jsonl`` 沒收尾就接庚二（這時 ``templates.jsonl`` 在是矛盾、拒收）；收尾了、``templates.jsonl``
+不在就開換樣板段（以庚二收尾那一列的 θ 與 ``project.json`` 的六面當起點）；在就接它。
 
 重建目標要在雙精度已開的行程裡（子行程入口 ``aosr.gradient.worker`` 核過才叫這裡）。替身一律經准用閘門
 （``load_validated_reduced``，兩把尺從精度契約登記簿讀），而且要對得上 ``project.json`` 記的網格雜湊、物理身分、
@@ -15,8 +18,9 @@ manifest 摘要與驗證收據摘要；方案檔與搜尋設定也要跟記的�
 
 ``stop`` 記號（:func:`stop_requested`）在每兩次求值之間查一次，為真拋 ``SearchStopped``；帳本停在最後一列寫完整的地方，
 不寫停止原因（迴圈停止原因是封閉集合，不含「人叫停」）。狀態檔與結果檔只由子行程寫，寫完整檔再換名（原子）。
-``result.json`` 是交給終點的接口：最後可行點的每面 preset、厚度與空腔（公尺；空腔 0 照記 0、沒有空腔層記 None）、
-材料摘要、θ 的 hex、值與分項、停止原因、求值次數；終點完整模型重算、量大峰、材料匯出在 ``endpoint_run``。
+``result.json``（v3）是交給終點的接口：**最後的**整房配置（換樣板帳本最後一列決定）的每面 preset、厚度與空腔
+（公尺；空腔 0 照記 0、沒有空腔層記 None）、材料摘要、變數名、θ 的 hex、值與分項；庚二與換樣板兩段各自的停止原因、輪數、
+求值次數與帳本摘要；終點完整模型重算、量大峰、材料匯出在 ``endpoint_run``。
 preset 寫 none 的面是「不貼、保留方案原本的牆」（#561 辛三）：每面設計帶方案那一面原本的材料（:func:`scene_wall_materials`），
 從替身鏈起就用它的阻抗，不是剛性。
 """
@@ -30,14 +34,14 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Final, Literal, NamedTuple
+from typing import Final, Literal, NamedTuple, Protocol
 
 import jax.numpy as jnp
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
-from aosr.config.construction_presets import load_construction_presets
+from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -45,10 +49,10 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.endpoint import design_digest
+from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, chain_objective, check_stop,
-    compiled_evaluator, depth_limits, design_bounds, projected_descent, retune_cavities, snap_to_specs,
+    compiled_evaluator, depth_limits, design_bounds, design_names, projected_descent, retune_cavities, snap_to_specs,
     wall_designs_from_presets,
 )
 from aosr.gradient.material_gradient_ledger import (
@@ -56,6 +60,13 @@ from aosr.gradient.material_gradient_ledger import (
     truncate_rows, write_ledger,
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
+from aosr.gradient.template_ledger import (
+    TEMPLATE_LEDGER_VERSION, TemplateHeader, TemplateStart, read_template_ledger, template_progress,
+)
+from aosr.gradient.template_rounds import TemplateContext
+from aosr.gradient.template_segment import (
+    TemplateResult, finished_result, resume_template_rounds, run_template_rounds,
+)
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_check import PointHex, points_hex
@@ -72,11 +83,12 @@ from aosr.scoring.stage_one_score import StageOneScoreSettings, stage_one_score_
 
 PROJECT_FILE: Final = "project.json"
 LEDGER_FILE: Final = "ledger.jsonl"
+TEMPLATES_FILE: Final = "templates.jsonl"
 STATUS_FILE: Final = "status.json"
 RESULT_FILE: Final = "result.json"
 STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
-RESULT_VERSION: Final = "aosr.material_gradient_result.v2"
+RESULT_VERSION: Final = "aosr.material_gradient_result.v3"
 FREQUENCY_RULER: Final = "fem_reduced_holdout_frequency_db"
 BAND_RULER: Final = "fem_reduced_holdout_band_db"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -110,8 +122,9 @@ class GradientProject(BaseModel):
 
 
 class GradientStatus(BaseModel):
-    """``status.json``：狀態、這一次子行程開始與最後寫的時間、帳本記的累計求值次數、做完幾輪、帳本最後一列的值、
-    迴圈收尾的停止原因（收尾才有）、子行程編號、失敗時的錯誤原文。"""
+    """``status.json``：狀態、這一次子行程開始與最後寫的時間、庚二帳本記的累計求值次數、做完幾輪、帳本最後一列的值、
+    迴圈收尾的停止原因（收尾才有）、換樣板帳本記的累計求值次數與做完幾輪（另兩欄，沒有換樣板帳本是 0）、
+    子行程編號、失敗時的錯誤原文。庚三之前寫的狀態檔沒有那兩欄，讀成 0（報告照印；下一次子行程寫的時候補上）。"""
 
     model_config = _FROZEN
     state: State
@@ -121,6 +134,8 @@ class GradientStatus(BaseModel):
     rounds_done: int = Field(ge=0, strict=True)
     last_value: float | None
     stop_reason: str | None
+    template_evaluations: int = Field(default=0, ge=0, strict=True)
+    template_rounds_done: int = Field(default=0, ge=0, strict=True)
     pid: int = Field(ge=1, strict=True)
     message: str | None = None
 
@@ -147,23 +162,30 @@ class Components(BaseModel):
 
 
 class GradientResult(BaseModel):
-    """``result.json``：交給終點的最後可行點（帳本最後一列決定），與它出自哪一本帳本（整份 SHA-256）。
+    """``result.json``：交給終點的最後整房配置（換樣板帳本最後一列決定），與它出自哪兩本帳本（各自整份 SHA-256）。
 
-    v2（#561 辛三）每面多了材料摘要；v1 的檔沒有在用、不收。
+    v3（#561 庚三）：``surfaces``／``variable_names``／``theta_hex``／``value``／``components`` 都是**最後配置**的；
+    ``round_stop_reason``、``evaluations``、``rounds`` 是庚二候選確認迴圈的（求值次數照庚二帳本記的）；``stop_reason`` 是
+    換樣板段的（整場的停止原因），``template_rounds``、``template_evaluations`` 是換樣板帳本記的。v2 與更舊的檔不收
+    （:func:`parse_result` 講明版本；接續會從帳本重建、覆寫成 v3）。
     """
 
     model_config = _FROZEN
-    format_version: Literal["aosr.material_gradient_result.v2"]
+    format_version: Literal["aosr.material_gradient_result.v3"]
     gradient_id: str
     surfaces: tuple[SurfaceSpec, ...]
     variable_names: tuple[str, ...]
     theta_hex: tuple[str, ...]
     value: float
     components: Components
+    round_stop_reason: str
     stop_reason: str
     evaluations: int = Field(ge=0, strict=True)
     rounds: int = Field(ge=1, strict=True)
+    template_rounds: int = Field(ge=1, strict=True)
+    template_evaluations: int = Field(ge=0, strict=True)
     ledger_sha256: str = Field(pattern=_SHA256)
+    template_ledger_sha256: str = Field(pattern=_SHA256)
 
 
 class SchemePoints(NamedTuple):
@@ -174,12 +196,25 @@ class SchemePoints(NamedTuple):
 
 
 class GradientProblem(NamedTuple):
-    """重建好的一次搜尋：每面設計、搜尋設定、目標函式、帳本標頭。"""
+    """重建好的一次搜尋：每面設計（``project.presets`` 的起點配置）、搜尋設定、目標函式、庚二帳本標頭、
+    方案原本六面的牆、換樣板要的固定材料（設計清單 → 目標函式的工廠）。"""
 
     designs: tuple[SurfaceDesign, ...]
     settings: MaterialGradientSettings
     objective: ChainObjective
     header: MaterialGradientHeader
+    kept: dict[Wall, SurfaceMaterial]
+    templates: TemplateContext
+
+
+class Layout(Protocol):
+    """帶配置與變數名的東西（庚二帳本標頭、換樣板帳本的列）。"""
+
+    @property
+    def surfaces(self) -> tuple[tuple[str, str | None], ...]: ...
+
+    @property
+    def variable_names(self) -> tuple[str, ...]: ...
 
 
 # ---- 小工具 ----
@@ -228,6 +263,16 @@ def stop_requested(folder: Path) -> StopCheck:
 
 def read_project(folder: Path) -> GradientProject:
     return GradientProject.model_validate_json((folder / PROJECT_FILE).read_bytes())
+
+
+def parse_result(content: bytes) -> GradientResult:
+    """讀 ``result.json`` 的內容：先看版本，不是這一版（v2 或更舊）就拒收、訊息講明版本與怎麼補（接續會覆寫成 v3）。"""
+    document = json.loads(content)
+    version = document.get("format_version") if isinstance(document, dict) else None
+    if version != RESULT_VERSION:
+        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}，這一版只收 {RESULT_VERSION}（最後配置與換樣板段的欄位）；"
+                         "跑 resume 會從帳本重建、覆寫成這一版")
+    return GradientResult.model_validate_json(content)
 
 
 def write_json_atomic(path: Path, value: BaseModel) -> None:
@@ -356,7 +401,7 @@ def designs_for(presets: Sequence[str | None], settings: MaterialGradientSetting
                 kept: Mapping[Wall, SurfaceMaterial]) -> tuple[SurfaceDesign, ...]:
     """六面（照 ``Wall.all()``）的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
     那一面的材料（方案原本的牆，``scene_wall_materials``），是「不貼、保留原牆」，不是剛性。"""
-    return wall_designs_from_presets(presets, settings, load_construction_presets(config_path("construction_presets.toml")),
+    return wall_designs_from_presets(presets, settings, presets_table(),
                                      kept={wall.wall_name(): material for wall, material in kept.items()})
 
 
@@ -364,23 +409,38 @@ def load_problem(project: GradientProject) -> GradientProblem:
     """照 ``project.json`` 重建目標；輸入先過 :func:`check_inputs`。要在雙精度已開的行程裡叫。
 
     空氣的密度與聲速取方案場景那一格（``export_operators`` 建完整模型、替身建模用的同一組），熱黏常數與多孔範圍
-    走設定層的 ``construction_environment``；這裡不自己拿產品預設的空氣。
+    走設定層的 ``construction_environment``；這裡不自己拿產品預設的空氣。換樣板的目標工廠用同一份替身、常數、空氣與範圍
+    對任何六面設計重建 ``chain_objective``（起點配置直接交回這一份目標，不重編譯）。
     """
     scheme, model, settings = check_inputs(project)
     constants = search_objective_constants(project, scheme, model)
-    designs = designs_for(project.presets, settings, kept=project_wall_materials(project, scheme))
+    kept = project_wall_materials(project, scheme)
+    designs = designs_for(project.presets, settings, kept=kept)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
+
+    def objective_for(candidate: tuple[SurfaceDesign, ...]) -> ChainObjective:
+        if candidate == designs:
+            return objective
+        return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
+
+    context = TemplateContext(settings, presets_table(), {wall.wall_name(): kept[wall] for wall in Wall.all()},
+                              objective_for)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
-                                                                    objective_constants=constants))
+                                                                    objective_constants=constants), kept, context)
+
+
+def presets_table() -> tuple[ConstructionPreset, ...]:
+    """產品的構造預設清單（``construction_presets.toml``）。"""
+    return load_construction_presets(config_path("construction_presets.toml"))
 
 
 # ---- 前段與整場 ----
 
 def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | None) -> FloatVector:
     """連續下降、取規格、重調三段，各自整段算完才寫成一批；回重調完的可行 θ（逐位等於帳本前段最後一列）。"""
-    designs, settings, objective, header = problem
+    designs, settings, objective, header = problem.designs, problem.settings, problem.objective, problem.header
     descent = projected_descent(objective, baseline_theta(designs), design_bounds(designs), settings.descent,
                                 limits=depth_limits(designs), should_stop=should_stop)
     append_rows(path, header, descent_rows(descent, "descent", 0))
@@ -402,14 +462,14 @@ def _fresh(problem: GradientProblem, path: Path, should_stop: StopCheck | None) 
                       should_stop=should_stop)
 
 
-def run_search(folder: Path, *, should_stop: StopCheck | None) -> LoopResult:
-    """開始：帳本獨佔建檔（已有帳本就丟錯）、先寫標頭，再跑前段與迴圈；跑完寫 ``result.json``。"""
+def run_search(folder: Path, *, should_stop: StopCheck | None) -> GradientResult:
+    """開始：帳本獨佔建檔（已有帳本就丟錯）、先寫標頭，再跑前段與迴圈、換樣板段；跑完寫 ``result.json``。"""
     problem = load_problem(read_project(folder))
     path = folder / LEDGER_FILE
     write_ledger(path, problem.header, ())
-    result = _fresh(problem, path, should_stop)
-    write_result(folder, problem.designs)
-    return result
+    _fresh(problem, path, should_stop)
+    _template_segment(problem, folder, should_stop)
+    return write_result(folder, problem)
 
 
 def pre_loop_complete(rows: Sequence[MaterialGradientRow]) -> bool:
@@ -419,13 +479,22 @@ def pre_loop_complete(rows: Sequence[MaterialGradientRow]) -> bool:
     return bool(rows) and rows[-1].phase == "retune" and rows[-1].stop_reason is not None
 
 
-def resume_search(folder: Path, *, should_stop: StopCheck | None) -> LoopResult:
-    """接續：沒有帳本就從頭；標頭跟這一次重建的不同就拒收；前段不完整就截到標頭重跑前段；否則 ``resume_rounds``。
-    跑完寫 ``result.json``。"""
+def ledger_closed(rows: Sequence[MaterialGradientRow]) -> bool:
+    """庚二帳本收尾了：最後一列是帶停止原因與決定的決定列。"""
+    return bool(rows) and rows[-1].phase == "round_decision" and rows[-1].stop_reason is not None and (
+        rows[-1].decision is not None)
+
+
+def resume_search(folder: Path, *, should_stop: StopCheck | None) -> GradientResult:
+    """接續：看資料夾在哪一段。沒有帳本就從頭；標頭跟這一次重建的不同就拒收；庚二沒收尾就接庚二（前段不完整截到標頭
+    重跑前段，否則 ``resume_rounds``），這時換樣板帳本在是矛盾、拒收；接著開或接換樣板段。跑完寫 ``result.json``（覆寫）。"""
     problem = load_problem(read_project(folder))
-    result = _resume(problem, folder / LEDGER_FILE, should_stop)
-    write_result(folder, problem.designs)
-    return result
+    path, templates = folder / LEDGER_FILE, folder / TEMPLATES_FILE
+    if templates.exists() and not (path.exists() and ledger_closed(read_ledger(path, expected_header=problem.header)[1])):
+        raise ValueError(f"{TEMPLATES_FILE} 在，{LEDGER_FILE} 卻沒收尾：換樣板段只能接在庚二收尾之後，帳本與資料夾矛盾，不接續")
+    _resume(problem, path, should_stop)
+    _template_segment(problem, folder, should_stop)
+    return write_result(folder, problem)
 
 
 def _resume(problem: GradientProblem, path: Path, should_stop: StopCheck | None) -> LoopResult:
@@ -440,17 +509,52 @@ def _resume(problem: GradientProblem, path: Path, should_stop: StopCheck | None)
     return _fresh(problem, path, should_stop)
 
 
+# ---- 換樣板段 ----
+
+def template_start(header: MaterialGradientHeader, rows: Sequence[MaterialGradientRow]) -> TemplateStart:
+    """換樣板的起點：庚二帳本收尾那一列的 θ、值與分項，配置是庚二標頭的（＝``project.presets``）；沒收尾就拒收。"""
+    if not ledger_closed(rows):
+        raise ValueError(f"{LEDGER_FILE} 沒有以帶停止原因的決定列結尾，換樣板段不知道從哪個點起跑")
+    last = rows[-1]
+    return TemplateStart(header.surfaces, last.theta_hex, last.value, last.components)
+
+
+def template_header_for(header: MaterialGradientHeader, settings: MaterialGradientSettings,
+                        kept: Mapping[Wall, SurfaceMaterial], *, base_ledger_sha256: str) -> TemplateHeader:
+    """換樣板帳本的標頭：替身身分與評分常數指紋抄庚二標頭、完整設定指紋（含 ``[templates]``）、庚二帳本整份摘要、
+    起點配置（庚二標頭的六面）、六面方案原本那面牆的材料摘要。"""
+    return TemplateHeader(
+        ledger_version=TEMPLATE_LEDGER_VERSION, input_hash=header.input_hash, mesh_hash=header.mesh_hash,
+        physics_identity=header.physics_identity, settings_fingerprint=settings.full_fingerprint,
+        objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
+        initial_surfaces=header.surfaces,
+        kept_digests={wall.wall_name(): material_digest(kept[wall]) for wall in Wall.all()})
+
+
+def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:
+    """庚二收尾之後：沒有 ``templates.jsonl`` 就開、有就接；起點與標頭由現在的庚二帳本算。"""
+    path = folder / LEDGER_FILE
+    _, rows = read_ledger(path, expected_header=problem.header)
+    origin = template_start(problem.header, rows)
+    header = template_header_for(problem.header, problem.settings, problem.kept, base_ledger_sha256=file_sha256(path))
+    templates = folder / TEMPLATES_FILE
+    if templates.exists():
+        return resume_template_rounds(problem.templates, templates, header, origin, should_stop=should_stop)
+    return run_template_rounds(problem.templates, templates, header, origin, should_stop=should_stop)
+
+
 # ---- 讀帳本：每面規格、進度、結果 ----
 
-def surface_specs(header: MaterialGradientHeader, theta: Sequence[float], *,
+def surface_specs(layout: Layout, theta: Sequence[float], *,
                   digests: Mapping[str, str | None] | None = None) -> tuple[SurfaceSpec, ...]:
-    """θ 切回每面規格：每面的變數照「厚度、空腔」排（變數名 ``<面代號>.<樣板變數名>``），不貼的面沒有變數。
-    ``digests``（面代號 → 材料摘要）給了就照填、缺一面拒收；沒給（報告只要厚度與空腔）摘要是 None。"""
-    if len(theta) != len(header.variable_names):
-        raise ValueError("θ 長度跟標頭的變數數不同")
+    """θ 切回每面規格（版面照 ``layout`` 的配置與變數名：庚二帳本標頭，或換樣板帳本的一列）：每面的變數照「厚度、空腔」排
+    （變數名 ``<面代號>.<樣板變數名>``），不貼的面沒有變數。``digests``（面代號 → 材料摘要）給了就照填、缺一面拒收；
+    沒給（報告只要厚度與空腔）摘要是 None。"""
+    if len(theta) != len(layout.variable_names):
+        raise ValueError("θ 長度跟版面的變數數不同")
     specs = []
-    for surface_id, preset_id in header.surfaces:
-        values = [value for name, value in zip(header.variable_names, theta, strict=True)
+    for surface_id, preset_id in layout.surfaces:
+        values = [value for name, value in zip(layout.variable_names, theta, strict=True)
                   if name.split(".", 1)[0] == surface_id]
         if preset_id is None and values:
             raise ValueError(f"不貼的面 {surface_id} 不該有變數")
@@ -473,31 +577,63 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
     return evaluations, len(decisions), rows[-1].value if rows else None, stop_reason
 
 
-def result_from_ledger(folder: Path, designs: Sequence[SurfaceDesign], *,
-                       expected_header: MaterialGradientHeader | None = None) -> GradientResult:
-    """從帳本最後一列決定（要帶停止原因）重建整份結果，不寫檔；帳本沒收尾就丟錯。給了 ``expected_header`` 帳本標頭要
-    逐格相等。每面材料摘要從設計清單（``endpoint.design_digest``）來，設計清單的面要跟帳本標頭同一串。
+def final_designs(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
+                  kept: Mapping[Wall, SurfaceMaterial]) -> tuple[SurfaceDesign, ...]:
+    """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆。"""
+    if tuple(surface_id for surface_id, _ in surfaces) != tuple(wall.wall_name() for wall in Wall.all()):
+        raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
+    return designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept)
+
+
+def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: Mapping[Wall, SurfaceMaterial], *,
+                       expected_header: MaterialGradientHeader | None = None,
+                       expected_template_header: TemplateHeader | None = None) -> GradientResult:
+    """從兩本帳重建整份結果，不寫檔：庚二帳本要收尾（給了 ``expected_header`` 標頭要逐格相等）；換樣板帳本要收尾、
+    標頭記的庚二帳本摘要等於現在那本、起點是庚二收尾那一點（給了 ``expected_template_header`` 要逐格相等），
+    最後配置與 θ 取它最後一列決定。每面材料摘要從最後配置重建的設計（``endpoint.design_digest``）來。
     寫 ``result.json`` 與終點核結果檔都走這一支（終點拿它跟檔裡那份整個比）。"""
-    path = folder / LEDGER_FILE
+    path, templates = folder / LEDGER_FILE, folder / TEMPLATES_FILE
     header, rows = read_ledger(path, expected_header=expected_header)
-    if tuple((design.surface_id, design.preset_id) for design in designs) != header.surfaces:
-        raise ValueError("設計清單的面跟帳本標頭不同，不寫結果")
-    last = rows[-1] if rows else None
-    if last is None or last.phase != "round_decision" or last.stop_reason is None or last.decision is None:
-        raise ValueError("帳本沒有以帶停止原因的決定列結尾，沒有結果可寫")
+    origin = template_start(header, rows)
+    last = rows[-1]
+    if not templates.exists():
+        raise ValueError(f"沒有 {TEMPLATES_FILE}：換樣板段還沒開，沒有結果可寫")
+    template_header, template_rows = read_template_ledger(templates, expected_header=expected_template_header,
+                                                          settings=settings, start=origin)
+    if template_header.base_ledger_sha256 != file_sha256(path):
+        raise ValueError(f"{TEMPLATES_FILE} 標頭記的庚二帳本摘要跟現在的 {LEDGER_FILE} 不同，不寫結果")
+    final = finished_result(template_rows)
+    if final is None or last.decision is None or last.stop_reason is None:
+        raise ValueError(f"{TEMPLATES_FILE} 沒有以帶停止原因的決定列結尾，沒有結果可寫")
+    closing = template_rows[-1]
+    designs = final_designs(final.surfaces, settings, kept)
+    if design_names(designs) != final.variable_names:
+        raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
     return GradientResult(
         format_version=RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
-        surfaces=surface_specs(header, last.theta(),
+        surfaces=surface_specs(closing, closing.theta(),
                                digests={design.surface_id: design_digest(design) for design in designs}),
-        variable_names=header.variable_names,
-        theta_hex=last.theta_hex, value=last.value,
-        components=Components(own_line_ripple_rms_db=last.components[0], seat_robustness_rms_db=last.components[1]),
-        stop_reason=last.stop_reason, evaluations=last.decision.total_evaluations,
-        rounds=sum(1 for row in rows if row.decision is not None), ledger_sha256=file_sha256(path))
+        variable_names=closing.variable_names, theta_hex=closing.theta_hex, value=closing.value,
+        components=Components(own_line_ripple_rms_db=closing.components[0], seat_robustness_rms_db=closing.components[1]),
+        round_stop_reason=last.stop_reason, stop_reason=final.stop_reason, evaluations=last.decision.total_evaluations,
+        rounds=sum(1 for row in rows if row.decision is not None), template_rounds=final.rounds,
+        template_evaluations=final.evaluations, ledger_sha256=file_sha256(path),
+        template_ledger_sha256=file_sha256(templates))
 
 
-def write_result(folder: Path, designs: Sequence[SurfaceDesign]) -> GradientResult:
-    """:func:`result_from_ledger` 重建、原子寫成 ``result.json``。"""
-    result = result_from_ledger(folder, designs)
+def write_result(folder: Path, problem: GradientProblem) -> GradientResult:
+    """:func:`result_from_ledger`（兩本帳的標頭都要等於這一次重建的）重建、原子寫成 ``result.json``。"""
+    template_header = template_header_for(problem.header, problem.settings, problem.kept,
+                                          base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
+    result = result_from_ledger(folder, problem.settings, problem.kept, expected_header=problem.header,
+                                expected_template_header=template_header)
     write_json_atomic(folder / RESULT_FILE, result)
     return result
+
+
+def template_ledger_progress(folder: Path) -> tuple[int, int, str | None]:
+    """換樣板帳本記的累計求值次數、做完幾輪、收尾的停止原因；沒有帳本是 (0, 0, None)。"""
+    path = folder / TEMPLATES_FILE
+    if not path.exists():
+        return 0, 0, None
+    return template_progress(read_template_ledger(path)[1])
