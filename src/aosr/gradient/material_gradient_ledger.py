@@ -22,6 +22,10 @@ v5（#561 壬一，老闆 2026-10-30 拍 B）：梯度目標加了大峰的平�
 代理）；評分常數指紋改雜湊 :class:`GradientObjectiveConstants`（多了內部點與代理的溫度、權重、較差參考）。
 v4 帳本接續一律拒收（訊息講明梯度目標加了大峰代理項、要重跑）；只有報告（``legacy=True``）准讀 v4，
 那時每列只有兩分項、沒有舊合分（v4 的值就是舊合分）。
+
+#990（版本不升）：標頭多一格安裝方式 ``mount``（每次搜尋一個值）。剛背不寫這一格（寫出的標頭逐位等於加這一格之前），
+缺這一格讀成剛背，所以舊帳本照舊接續；貼在原牆上寫 ``on_wall``，``kept_digests`` 另收貼樣板那幾面的原牆摘要
+（六面都綁），安裝方式或任一面原牆換了標頭就不同、接續拒收。
 """
 from __future__ import annotations
 
@@ -37,14 +41,14 @@ from typing import BinaryIO, Final, Literal, Protocol, Self
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from aosr.config.material_gradient import MaterialGradientSettings
+from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.scoring.gradient_objective_jax import GradientObjectiveConstants
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
-    LOOP_STOP_REASONS, STOP_REASONS, Components, DescentResult, SnapResult, SurfaceDesign, design_names,
+    LOOP_STOP_REASONS, STOP_REASONS, Components, DescentResult, SnapResult, SurfaceDesign, design_names, designs_mount,
 )
-from aosr.gradient.endpoint import design_digest
+from aosr.gradient.endpoint import design_digest, material_digest
 
 
 LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v5"
@@ -134,7 +138,8 @@ def check_scores(constants: ScoreConstants, rows: Sequence[ScoredRow]) -> None:
 
 class MaterialGradientHeader(BaseModel):
     """帳本第一列：替身身分、每面（面代號, preset id 或 None）、θ 變數名順序、設定指紋、評分常數指紋、
-    不貼的面各自保留的原牆材料摘要。"""
+    不貼的面各自保留的原牆材料摘要；安裝方式（剛背不寫、缺這一格讀成剛背；貼在原牆上時 ``kept_digests`` 也收
+    貼樣板那幾面背後的原牆）。"""
 
     model_config = _FROZEN
     ledger_version: Literal["aosr.material_gradient_ledger.v5", "aosr.material_gradient_ledger.v4"]
@@ -148,6 +153,7 @@ class MaterialGradientHeader(BaseModel):
     kept_digests: dict[str, str]
     # v5 必帶、v4 沒有（加代理之前的標頭沒記分數常數）。
     score_constants: ScoreConstants | None = None
+    mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
 
     @model_validator(mode="after")
     def _score_constants_by_version(self) -> Self:
@@ -370,8 +376,17 @@ def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: 
         variable_names=design_names(designs), settings_fingerprint=settings.fingerprint,
         objective_fingerprint=objective_fingerprint(objective_constants),
         score_constants=score_constants(objective_constants),
-        kept_digests={design.surface_id: digest for design in designs
-                      if design.kept_material is not None and (digest := design_digest(design)) is not None})
+        kept_digests=_kept_digests(designs), mount=designs_mount(designs))
+
+
+def _kept_digests(designs: Sequence[SurfaceDesign]) -> dict[str, str]:
+    """面 → 原牆材料摘要：不貼的面（保留原牆）；貼在原牆上時另加貼樣板那幾面背後的原牆。剛背只有不貼的面（同加安裝方式之前）。"""
+    digests = {design.surface_id: digest for design in designs
+               if design.kept_material is not None and (digest := design_digest(design)) is not None}
+    for design in designs:
+        if design.mount == MOUNT_ON_WALL and design.backing_material is not None:
+            digests[design.surface_id] = material_digest(design.backing_material)
+    return {design.surface_id: digests[design.surface_id] for design in designs if design.surface_id in digests}
 
 
 def _row(**fields: object) -> MaterialGradientRow:
@@ -678,8 +693,8 @@ def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = 
         raise ValueError(f"帳本版本是 {version!r}，這一版只收 {LEDGER_VERSION}；舊版帳本不做相容，要重跑")
     header = MaterialGradientHeader.model_validate_json(lines[0])
     if expected_header is not None and header != expected_header:
-        actual, expected = header.model_dump(), expected_header.model_dump()
-        differing = sorted(name for name in actual if actual[name] != expected[name])
+        differing = sorted(name for name in MaterialGradientHeader.model_fields
+                           if getattr(header, name) != getattr(expected_header, name))
         note = f"；{PROXY_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
         raise ValueError(f"帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(MaterialGradientRow.model_validate_json(line) for line in lines[1:])

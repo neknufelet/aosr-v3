@@ -13,6 +13,8 @@
 
 v3（#561 壬一）：梯度目標加了大峰代理項；終點報告、原牆基準與改善各自並列舊合分與新合分、代理（老闆 2026-10-30：
 「第三場一定要同時列舊分數與新分數」）。v2 只准報告讀（``legacy``），終點不收 v3 之前的結果檔。
+#990：設計照 ``project.json`` 的安裝方式建（貼在原牆上時匯出的面是 ``MountedOnWall``，背後是方案原本那面牆）；
+結果檔剛背是 v4（照舊，終點照收、讀成剛背）、貼在原牆上是 v5（每面帶安裝方式），兩種都要跟帳本重建的整份相等。
 """
 from __future__ import annotations
 
@@ -149,7 +151,7 @@ def read_endpoint(folder: Path, *, legacy: bool = False) -> EndpointRecord:
 
 
 def read_result(folder: Path, *, legacy: bool = False) -> GradientResult:
-    """讀 ``result.json``（:func:`aosr.gradient.run.parse_result`：v2 與更舊的講明版本拒收；``legacy`` 准讀 v3）。"""
+    """讀 ``result.json``（:func:`aosr.gradient.run.parse_result`：v2 與更舊的講明版本拒收；``legacy`` 准讀 v3；v4 剛背、v5 貼在原牆上）。"""
     return parse_result((folder / RESULT_FILE).read_bytes(), legacy=legacy)
 
 
@@ -201,10 +203,11 @@ def run_endpoint(folder: Path) -> EndpointRecord:
     capabilities = load_capabilities(project.capabilities_path)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    initial = designs_for(project.presets, settings, kept=kept)
+    initial = designs_for(project.presets, settings, kept=kept, mount=project.mount)
     result = checked_result(folder, read_result(folder), header_for(
         model, initial, settings, objective_constants=search_objective_constants(project, scheme, model)), settings, kept)
-    designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept)
+    designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
+                            mount=project.mount)
     clock = time.perf_counter()
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)

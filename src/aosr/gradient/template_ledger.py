@@ -18,6 +18,9 @@
 v2（#561 壬一，老闆 2026-10-30 拍 B）：梯度目標加了大峰的平滑代理項。每列的 ``value`` 是新合分，另帶
 ``screening_total``（舊合分）與三分項（主位起伏、座位穩健性、代理），跟庚二帳本 v5 同一個形狀；評分常數指紋跟著換。
 v1 帳本接續一律拒收（訊息講明梯度目標加了大峰代理項）；只有報告（``legacy=True``）准讀 v1（兩分項、沒有舊合分）。
+
+#990（版本不升）：標頭多一格安裝方式 ``mount``，抄庚二帳本標頭；剛背不寫（逐位等於加這一格之前）、缺這一格讀成剛背。
+換樣板沿用這一次搜尋的安裝方式（不列舉安裝方式）。
 """
 from __future__ import annotations
 
@@ -31,7 +34,7 @@ from typing import BinaryIO, Final, Literal, NamedTuple, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
+from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
 from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT, ScoreConstants, check_scores
 from aosr.gradient.template_rounds import (
@@ -53,7 +56,8 @@ _CANDIDATE: Final = re.compile(rf"^(?P<surface>.+){re.escape(CANDIDATE_SEPARATOR
 
 
 class TemplateHeader(BaseModel):
-    """帳本第一列：替身身分、完整設定指紋、評分常數指紋、庚二帳本摘要、起點配置、六面原牆材料摘要。"""
+    """帳本第一列：替身身分、完整設定指紋、評分常數指紋、庚二帳本摘要、起點配置、六面原牆材料摘要、安裝方式
+    （剛背不寫、缺這一格讀成剛背）。"""
 
     model_config = _FROZEN
     ledger_version: Literal["aosr.material_gradient_templates.v2", "aosr.material_gradient_templates.v1"]
@@ -67,6 +71,7 @@ class TemplateHeader(BaseModel):
     kept_digests: dict[str, str]
     # v2 必帶、v1 沒有：分數常數抄庚二帳本標頭那一份（讀回時逐列重算兩個分數恆等式）。
     score_constants: ScoreConstants | None = None
+    mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
 
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
@@ -618,8 +623,8 @@ def read_template_ledger(path: Path, *, expected_header: TemplateHeader | None =
         raise ValueError(f"換樣板帳本版本是 {version!r}，這一版只收 {TEMPLATE_LEDGER_VERSION}")
     header = TemplateHeader.model_validate_json(lines[0])
     if expected_header is not None and header != expected_header:
-        actual, expected = header.model_dump(), expected_header.model_dump()
-        differing = sorted(name for name in actual if actual[name] != expected[name])
+        differing = sorted(name for name in TemplateHeader.model_fields
+                           if getattr(header, name) != getattr(expected_header, name))
         note = f"；{PROXY_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
         raise ValueError(f"換樣板帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(TemplateRow.model_validate_json(line) for line in lines[1:])

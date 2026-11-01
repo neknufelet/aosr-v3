@@ -15,7 +15,7 @@ import hashlib
 import json
 import tomllib
 from pathlib import Path
-from typing import Annotated, Final, Self
+from typing import Annotated, Final, Literal, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
@@ -23,6 +23,12 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, S
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 # 「不貼」（保留方案原本那面的牆）的保留目標代號：換樣板的目標是家族代號或它，所以家族不准叫這個名字。唯一一份來源。
 NONE_TARGET: Final = "none"
+# 安裝方式（#990）：每次搜尋一個值（命令列 ``--mount``、``project.json``、兩本帳本標頭）。rigid＝樣板照原樣（剛背）；
+# on_wall＝貼在原牆上（新增層背後接方案原本那面牆）。唯一一份來源。
+Mount = Literal["rigid", "on_wall"]
+MOUNT_RIGID: Final = "rigid"
+MOUNT_ON_WALL: Final = "on_wall"
+MOUNTS: Final[tuple[Mount, ...]] = (MOUNT_RIGID, MOUNT_ON_WALL)
 
 
 def _exact_float(value: object) -> object:

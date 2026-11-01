@@ -531,6 +531,7 @@ def test_start_project_records_inputs_and_identities(runs: tuple[Path, Record]) 
     assert project["mesh_hash"] == manifest["mesh_hash"]
     assert project["presets"] == list(PRESETS) and project["purpose"] == PURPOSE
     assert project["gradient_id"] == folder.name
+    assert "mount" not in project  # #990：不給 --mount 就是剛背，剛背不寫這一格（逐位同加這一格之前）
     scheme_document = Scheme.model_validate_json(scheme.read_text(encoding="utf-8"))
     assert project["source_points"] == {name: [float(value).hex() for value in point.as_tuple()]
                                         for name, point in scheme_document.speakers.items()}
