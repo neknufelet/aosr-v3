@@ -334,10 +334,6 @@ class MeasuredImpedance(_ConstructionRecord):
         return points
 
 
-WallMaterial: TypeAlias = Assembly | ConstantImpedance | MeasuredImpedance
-"""WallMaterial（原牆材料型別）：貼上去之前那面牆的材料——多層構造、固定阻抗或實測阻抗表（不含貼在原牆上的構造，只有一層巢狀）。"""
-
-
 class MountedOnWall(_ConstructionRecord):
     """MountedOnWall（貼在原牆上的構造，#990）：新增層房間側 → 牆體側排列，最後一層背後接原牆的表面阻抗，不是剛背。
 
@@ -347,7 +343,7 @@ class MountedOnWall(_ConstructionRecord):
 
     kind: Literal["mounted_on_wall"] = Field(default="mounted_on_wall", description="kind（表面種類代號，mounted_on_wall 表示貼在原牆上的構造）")
     layers: tuple[Layer, ...] = Field(min_length=1, description="layers（至少一層，依房間側到牆體側排序）")
-    wall: Annotated[WallMaterial, Field(discriminator="kind")] = Field(
+    wall: Annotated[Assembly | ConstantImpedance | MeasuredImpedance, Field(discriminator="kind")] = Field(
         description="wall（原牆：貼上去之前那面牆的材料；最後一層背後接它的表面阻抗，收固定阻抗、實測阻抗表或多層構造）")
 
 

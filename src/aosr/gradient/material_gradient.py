@@ -42,7 +42,7 @@ from aosr.geometry.shoebox import Wall
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, variable_name
 from aosr.materials.construction_models import (
-    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial, WallMaterial,
+    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
@@ -66,6 +66,9 @@ LoopStopReason = Literal["已確認候選內沒有超過門檻", "沒有候選",
 LOOP_STOP_REASONS: Final[tuple[LoopStopReason, ...]] = (
     LOOP_STOP_NO_IMPROVEMENT, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_MAX_EVALUATIONS)
 _THICKNESS = "thickness_m"
+# 貼在原牆上時原牆收的型別（``MountedOnWall.wall``）：不收本身已是貼牆構造的材料（只有一層巢狀）。
+# 用 type 陳述式：只是型別別名、不在模組層建材料（材料只有一個出生地，``test_material_flow``）。
+type WallMaterial = Assembly | ConstantImpedance | MeasuredImpedance
 
 ChainObjective = Callable[[jax.Array], tuple[jax.Array, GradientObjectiveArrays]]
 Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]]
@@ -132,7 +135,7 @@ class SurfaceDesign:
             return
         if self.kept_material is not None:
             raise ValueError(f"面 {self.surface_id} 有樣板構造，不收保留原牆的材料")
-        if self.mount == MOUNT_ON_WALL and not isinstance(self.backing_material, WallMaterial):
+        if self.mount == MOUNT_ON_WALL and not isinstance(self.backing_material, (Assembly, ConstantImpedance, MeasuredImpedance)):
             raise ValueError(f"面 {self.surface_id} 貼在原牆上，要給那一面原本的牆（固定阻抗、實測阻抗表或多層構造）")
         if self.mount == MOUNT_ON_WALL and self.material.backing != "rigid":
             raise ValueError(f"面 {self.surface_id} 的樣板背後不是剛背（{self.material.backing}），不能改成貼在原牆上")
