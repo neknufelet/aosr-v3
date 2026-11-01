@@ -219,10 +219,12 @@ SINGLE_REL = 4 * float(np.finfo(np.float32).eps)
 
 def test_single_precision_close_knots_stay_finite_and_match_existing_entry(tmp_path: Path) -> None:
     """單精度下很近的表列（審查：1000 與 1000.0001220703125 Hz 取對數後相等、除以零出 NaN；另三案：兩列在單精度下
-    捨入成同一個值、求值點落在兩列重合之間、表中間兩列重合、表的下端存不下）：直接與 jit、垂直與角度，值有限而且新增層厚度 0 時等於既有入口（雙精度）
-    同一頻點的原牆值（照單精度的尺）；對新增層厚度的梯度在厚度 0 與 1 cm 都有限。"""
+    捨入成同一個值、求值點落在兩列重合之間、表中間兩列重合、表的下端存不下；#1000 一族：審查原例 999.999995 與 1000.00002 Hz
+    求 1000 Hz 不在中點（舊寫法固定取一半回 1500，既有入口 1200），以及兩列重合或差一兩個 ulp 時求兩列之間、命中、恰在外側）：
+    直接與 jit、垂直與角度，值有限，而且新增層厚度 0 時等於既有入口（雙精度）同一頻點的原牆值、1 cm 時等於既有入口貼上新增層的值
+    （都照單精度的尺）；對新增層厚度的梯度在厚度 0 與 1 cm 都有限。"""
     rows = cast(dict[str, dict[str, object]], _run("close_knots", tmp_path))
-    assert set(rows) == {"review", "collide", "straddle", "middle", "edge"}
+    assert set(rows) == {"review", "collide", "straddle", "middle", "edge", "asymmetric", "mirror", "one_ulp", "hit_one_ulp", "two_ulp"}
     for name, row in rows.items():
         results = cast(list[dict[str, object]], row["results"])
         assert len(results) == 8, name
@@ -231,16 +233,37 @@ def test_single_precision_close_knots_stay_finite_and_match_existing_entry(tmp_p
             assert bits["dtype"] == "complex64", (name, result)
             value = _decode(bits)
             assert np.all(np.isfinite(value)) and math.isfinite(cast(float, result["gradient"])), (name, result)
-            if result["thickness"] == 0.0 and name != "middle":
-                existing = _decode(row["existing_angles" if result["angles"] else "existing"])
-                np.testing.assert_allclose(value, existing, rtol=SINGLE_REL, atol=0, err_msg=f"{name}:{result}")
-            elif result["thickness"] == 0.0:
-                # 單精度下 1000 Hz 跟 1000.00001 Hz 那一列分不出（同一個可表示值），取那一列的表值 2000；
-                # 雙精度既有入口是 1999.99（差在頻率解析度以下）。挑錯段（照捨入後的表列找）會回 3000。
-                np.testing.assert_array_equal(value, np.full(value.shape, 2000.0 + 0j), err_msg=f"{name}:{result}")
+            # middle（#1000 改）：求值點的真值 1000 Hz 比 1000.00001 Hz 那一列小，答案是既有入口的 1999.99，不是那一列的表值 2000
+            # （舊考卷釘的，相對差約 5e-6，超過單精度的尺）；挑錯段（照捨入後的表列找）會回 3000。
+            key = ("existing" if result["thickness"] == 0.0 else "mounted") + ("_angles" if result["angles"] else "")
+            np.testing.assert_allclose(value, _decode(row[key]).reshape(value.shape), rtol=SINGLE_REL, atol=0, err_msg=f"{name}:{key}:{result}")
     np.testing.assert_allclose(_decode(rows["review"]["existing"]), [1500.0], rtol=SINGLE_REL)
     np.testing.assert_allclose(_decode(rows["straddle"]["existing"]), [1500.0], rtol=SINGLE_REL)
+    np.testing.assert_allclose(_decode(rows["asymmetric"]["existing"]), [1200.0], rtol=SINGLE_REL)
     assert abs(_decode(rows["edge"]["existing"])[0] - 1000.0) > 100.0  # 50 Hz 照真值在表外：既有入口走底構造，不是表值
+
+
+# 改動前主線（fb6f92d0）在同一個子行程開法下量的值：雙精度一般表（probe 的 CONTROL_TABLE）、新增層厚度 0，
+# 從寫入端（construction_diff.surface_impedance_from_parameters）取，十六進位逐位。表外兩點走底構造，直接與 jit 在虛部末幾位本來就不同，分開釘。
+TABLE_CONTROL: dict[str, dict[str, list[str]]] = {
+    "eager": {"real": ["0x1.9b99999999999p+8", "0x1.f400000000000p+9", "0x1.38790720d4c7fp+10", "0x1.76fdb10eadacbp+10", "0x1.7700000000000p+10",
+                       "0x1.9eaa9d08202afp+10", "0x1.e079329f74919p+10", "0x1.f400000000000p+10", "0x1.9b99999999999p+8"],
+              "imag": ["-0x1.4b6716802e873p-57", "0x0.0p+0", "-0x1.8fd360d21e991p+5", "-0x1.8ff89cfbc55bdp+6", "-0x1.9000000000000p+6",
+                       "-0x1.077761a699de5p+7", "-0x1.70c1ea98ba828p+7", "-0x1.9000000000000p+7", "-0x1.ba51b6cacfcbcp-50"]},
+    "jit": {"real": ["0x1.9b99999999999p+8", "0x1.f400000000000p+9", "0x1.38790720d4c7fp+10", "0x1.76fdb10eadacbp+10", "0x1.7700000000000p+10",
+                     "0x1.9eaa9d08202afp+10", "0x1.e079329f74919p+10", "0x1.f400000000000p+10", "0x1.9b99999999999p+8"],
+            "imag": ["-0x1.9960b9f5f5c0dp-50", "0x0.0p+0", "-0x1.8fd360d21e991p+5", "-0x1.8ff89cfbc55bdp+6", "-0x1.9000000000000p+6",
+                     "-0x1.077761a699de5p+7", "-0x1.70c1ea98ba828p+7", "-0x1.9000000000000p+7", "-0x1.eb74a7cbc7e62p-46"]},
+}
+
+
+def test_double_precision_table_is_unchanged_bit_for_bit(tmp_path: Path) -> None:
+    """控制組（#1000）：雙精度一般表的原牆值（表外兩端、三個命中表列、各段之間），直接與 jit 都逐位等於改動前主線釘住的值。"""
+    rows = cast(dict[str, dict[str, object]], _run("table_control", tmp_path))
+    for mode, pinned in TABLE_CONTROL.items():
+        bits = rows[mode]
+        assert bits["dtype"] == "complex128", mode
+        np.testing.assert_array_equal(_decode(bits), _decode(pinned), err_msg=mode)
 
 
 def _note_cases(tmp_path: Path) -> dict[str, tuple[SurfaceMaterial, tuple[ConstructionNote, ...]]]:
