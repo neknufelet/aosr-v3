@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -253,7 +254,8 @@ def test_missing_mount_reads_as_rigid_and_resumes(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(("written", "expected"), ((MOUNT_ON_WALL, MOUNT_RIGID), (MOUNT_RIGID, MOUNT_ON_WALL)))
 def test_ledgers_of_other_mount_are_rejected(tmp_path: Path, written: Mount, expected: Mount) -> None:
-    """抓接續不比安裝方式：帳本與換樣板帳本以一種安裝方式寫，拿另一種重建的標頭讀，拒收、訊息點名 ``mount``。"""
+    """抓接續不比安裝方式：帳本與換樣板帳本以一種安裝方式寫，拿另一種重建的標頭讀，拒收、訊息點名 ``mount``；
+    只差安裝方式那一格（別格都一樣，例如沒有一面貼樣板時原牆摘要不會跟著變）也拒收——不靠原牆摘要順便擋下。"""
     kept = _control_kept()
     header, other = _header(_designs(written)), _header(_designs(expected))
     _ledger_line(tmp_path / "ledger.jsonl", header)
@@ -262,6 +264,14 @@ def test_ledgers_of_other_mount_are_rejected(tmp_path: Path, written: Mount, exp
     _template_line(tmp_path / "templates.jsonl", _template_header(header, kept))
     with pytest.raises(ValueError, match="換樣板帳本標頭跟這一次對不上：.*'mount'"):
         templates.read_template_ledger(tmp_path / "templates.jsonl", expected_header=_template_header(other, kept))
+    alone = header.model_copy(update={"mount": expected})
+    _ledger_line(tmp_path / "alone.jsonl", alone)
+    with pytest.raises(ValueError, match=re.escape("帳本標頭跟這一次對不上：['mount']")):
+        ledger.read_ledger(tmp_path / "alone.jsonl", expected_header=header)
+    template = _template_header(header, kept)
+    _template_line(tmp_path / "alone-templates.jsonl", template.model_copy(update={"mount": expected}))
+    with pytest.raises(ValueError, match=re.escape("換樣板帳本標頭跟這一次對不上：['mount']")):
+        templates.read_template_ledger(tmp_path / "alone-templates.jsonl", expected_header=template)
 
 
 # ---- result.json v5 ----
