@@ -23,11 +23,12 @@
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.endpoint import EndpointReport
@@ -40,7 +41,7 @@ from aosr.gradient.run import (
     file_sha256, ledger_progress, project_wall_materials, read_project, surface_specs,
 )
 from aosr.gradient.template_ledger import TemplateRow, decisions_seconds, read_template_ledger, template_progress
-from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, Layer, MountedOnWall, SurfaceMaterial
 from aosr.reporting.scheme import load_scheme
 
 FULL_MODEL_LINE: Final = "終點完整模型重算：未做（跑 endpoint <資料夾>）"
@@ -139,15 +140,28 @@ def _feasible(rows: Sequence[MaterialGradientRow]) -> MaterialGradientRow | None
     return snaps[-1] if snaps else None
 
 
+def _word(model: type[BaseModel], field: str, value: str) -> str:
+    """從材料模型欄位描述取代號的中文（「代號 表示／是 中文」），不另建翻譯表；底層不能用網頁那一份。"""
+    match = re.search(rf"(?<![A-Za-z_]){re.escape(value)}\s*(?:表示|是)\s*([^，；）]+)", model.model_fields[field].description or "")
+    if match is None:
+        raise ValueError(f"材料模型描述缺少 {value!r} 的中文說明")
+    return match.group(1).strip()
+
+
+def _layers_text(layers: Sequence[Layer]) -> str:
+    return "、".join(_word(type(layer), "kind", layer.kind) for layer in layers)
+
+
 def material_text(material: SurfaceMaterial) -> str:
-    """原牆材料的一句話：固定阻抗印數值（Pa·s/m），構造與實測阻抗表印種類；貼在原牆上的構造另印它的原牆。"""
+    """原牆材料的一句話（中文，不印種類代號）：固定阻抗印數值（Pa·s/m），構造印各層與背後，實測阻抗表印涵蓋範圍；
+    貼在原牆上的構造另印它的原牆。"""
     if isinstance(material, ConstantImpedance):
         return f"固定阻抗 {material.impedance_pa_s_m:.3f} Pa·s/m"
     if isinstance(material, Assembly):
-        return f"構造（房間側起 {'、'.join(layer.kind for layer in material.layers)}；背後 {material.backing}）"
+        return f"多層構造（房間側起 {_layers_text(material.layers)}；背後{_word(Assembly, 'backing', material.backing)}）"
     if isinstance(material, MountedOnWall):
-        return f"貼在原牆上的構造（房間側起 {'、'.join(layer.kind for layer in material.layers)}；原牆 {material_text(material.wall)}）"
-    return f"實測阻抗表（種類 {material.kind}）"
+        return f"貼在原牆上的構造（房間側起 {_layers_text(material.layers)}；原牆 {material_text(material.wall)}）"
+    return material.coverage_text()
 
 
 def _kept_texts(project: GradientProject) -> dict[str, str]:

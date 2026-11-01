@@ -5,7 +5,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import patch
 
 from aosr.runtime import configure_calculation_jax
@@ -145,8 +145,22 @@ def rigid(air: PhysicsConstants) -> dict[str, object]:
     return rows
 
 
+def _paris(impedance: np.ndarray, angles_deg: np.ndarray, rho_c: float) -> list[float]:
+    """另寫一份 numpy 的 Paris 無規吸音（α=1−|r|²、r=(Z cosθ−ρc)/(Z cosθ+ρc)、sinθ cosθ 加權梯形平均），不經產品積分。"""
+    theta = np.radians(angles_deg)
+    z = impedance * np.cos(theta)
+    alpha = 1 - np.abs((z - rho_c) / (z + rho_c)) ** 2
+    weights = np.sin(theta) * np.cos(theta)
+    def trapezoid(values: np.ndarray) -> np.ndarray:
+        return np.asarray(np.sum(np.diff(theta) * (values[..., 1:] + values[..., :-1]) / 2, axis=-1))
+    return [float(value) for value in trapezoid(alpha * weights) / trapezoid(weights)]
+
+
 def paths(air: PhysicsConstants) -> dict[str, object]:
-    """基準參數上可微入口對非可微入口；三種原牆、垂直與 Paris 角度格，另帶無規吸音與註記。"""
+    """基準參數上可微入口對非可微入口；三種原牆、垂直與 Paris 角度格，另帶無規吸音的值與兩個對照、註記。
+
+    對照一：同一份角度阻抗另用 numpy 積 Paris；對照二（原牆是多層構造）：新增層＋原牆各層直接串成一個剛背構造。
+    """
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     frequencies, angles = jnp.asarray(FREQUENCIES), tmm.diffuse_incidence_angles_deg(method="paris")
     rows: dict[str, object] = {}
@@ -162,8 +176,13 @@ def paths(air: PhysicsConstants) -> dict[str, object]:
             "angles_existing": _bits(construction.surface_impedance_at_angles(material, frequencies, angles, air=air, ranges=ranges)[0]),
             "rigid_normal": _bits(construction.surface_impedance(Assembly(layers=material.layers, backing="rigid"),
                                                                  frequencies, air=air, ranges=ranges)[0]),
-            "diffuse_finite": bool(np.all(np.isfinite(np.asarray(alpha)))),
-            "diffuse_range": bool(np.all((np.asarray(alpha) >= 0) & (np.asarray(alpha) <= 1))),
+            "diffuse": [float(value) for value in np.asarray(alpha)],
+            "diffuse_reference": _paris(np.asarray(construction.surface_impedance_at_angles(
+                material, frequencies, angles, air=air, ranges=ranges)[0]), np.asarray(angles), air.rho_c),
+            "diffuse_concatenated": None if not isinstance(material.wall, Assembly) else [
+                float(value) for value in np.asarray(construction.random_incidence_absorption(
+                    Assembly(layers=(*material.layers, *material.wall.layers), backing=material.wall.backing),
+                    frequencies, air=air, ranges=ranges)[0])],
             "notes": [note.message for note in notes],
             "template_notes": [note.message for note in template.notes],
         }
@@ -211,10 +230,10 @@ def _error(action: Callable[[], object]) -> str:
 
 
 def rejections(air: PhysicsConstants) -> dict[str, object]:
-    """可微入口換頻率軸要拒收；樣板不是剛性面；原牆的拒收訊息帶「原牆」前綴。"""
+    """原牆是實測表時可微入口換頻率軸要拒收；樣板不是剛性面；原牆的拒收訊息帶「原牆」前綴。"""
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     frequencies = jnp.asarray(FREQUENCIES)
-    material = _mounted()["constant"]
+    material = _mounted()["measured"]
     template = build_template(material, frequencies, air=air, ranges=ranges)
     base = template.baseline_parameters()
     bad_wall = MountedOnWall(layers=_covering(), wall=Assembly(layers=(PorousLayer(
@@ -226,6 +245,68 @@ def rejections(air: PhysicsConstants) -> dict[str, object]:
         "bad_wall": _error(lambda: construction.surface_impedance(bad_wall, frequencies, air=air, ranges=ranges)),
         "rigid_mask": [bool(value) for value in np.asarray(mask)],
     }
+
+
+def _at_axis(template: ConstructionTemplate, parameters: Parameters, air: PhysicsConstants) -> Callable[[jax.Array], jax.Array]:
+    """頻率軸當 jit 的輸入（追蹤值），其他固定。"""
+    def evaluate(axis: jax.Array) -> jax.Array:
+        return surface_impedance_from_parameters(template, parameters, axis, air=air)
+    return evaluate
+
+
+def live_wall(air: PhysicsConstants) -> dict[str, object]:
+    """原牆負載在求值當下現算：換頻率軸（具體值與 jit 下）、換空氣條件，可微入口對非可微入口在新條件下的值。
+
+    固定阻抗與多層構造原牆：換軸（同長）在 jit 下也照新軸算；換空氣後垂直、0 度、既有入口三者一致。
+    實測表原牆：換空氣同樣一致（表外走底構造用當下空氣）；換軸是已知限制——jit 下看不到軸的內容，
+    回的是建樣板那條軸的表內值（審查的合成表：100／1000 Hz 兩列，在 100 Hz 建、jit 裡求 1000 Hz）。
+    """
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    frequencies = jnp.asarray(FREQUENCIES)
+    other = frequencies * 1.01
+    heavy = air.model_copy(update={"air_density_kg_m3": 2 * air.air_density_kg_m3})
+    rows: dict[str, object] = {}
+    for name, material in _mounted().items():
+        template = build_template(material, frequencies, air=air, ranges=ranges)
+        base = template.baseline_parameters()
+        row: dict[str, object] = {
+            "air_normal": _bits(surface_impedance_from_parameters(template, base, frequencies, air=heavy)),
+            "air_angle_zero": _bits(surface_impedance_from_parameters(template, base, frequencies, air=heavy,
+                                                                      incidence_angles_deg=jnp.asarray([0.]))[:, 0]),
+            "air_existing": _bits(construction.surface_impedance(material, frequencies, air=heavy, ranges=ranges)[0]),
+        }
+        if name != "measured":
+            row["jit_other_axis"] = _bits(jax.jit(_at_axis(template, base, air))(other))
+            row["other_axis_existing"] = _bits(construction.surface_impedance(material, other, air=air, ranges=ranges)[0])
+        rows[name] = row
+    table = MeasuredImpedance(points=(
+        MeasuredImpedancePoint(frequency_hz=100., real_pa_s_m=1000., imag_pa_s_m=0.),
+        MeasuredImpedancePoint(frequency_hz=1000., real_pa_s_m=2000., imag_pa_s_m=0.)),
+        base_assembly=Assembly(layers=(AirLayer(thickness_m=.1),), backing="air"), source_and_conditions="考卷假表")
+    synthetic = MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=table)
+    template = build_template(synthetic, jnp.asarray([100.]), air=air, ranges=ranges)
+    zero = {"layer1.thickness_m": jnp.asarray(0.)}
+    rows["measured_limitation"] = {
+        "jit_other_axis": _bits(jax.jit(_at_axis(template, zero, air))(jnp.asarray([1000.]))),
+        "eager_other_axis": _error(lambda: surface_impedance_from_parameters(template, zero, jnp.asarray([1000.]), air=air)),
+        "wall_at_other_axis": _bits(construction.surface_impedance(table, jnp.asarray([1000.]), air=air, ranges=ranges)[0]),
+    }
+    return rows
+
+
+def notes(air: PhysicsConstants) -> dict[str, object]:
+    """註記兩案（10 Hz）：新增第 1 層 foam 與原牆第 1 層 fibrous 同樣小松多孔層（同號註記）；
+    實測表原牆 50–500 Hz 的補值，底構造第 1 層同時是材料模型外推。"""
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    def porous(material_class: Literal["fibrous", "foam"]) -> PorousLayer:
+        return PorousLayer(thickness_m=.05, flow_resistivity_pa_s_m2=19100., material_class=material_class)
+    cases = {"collide": MountedOnWall(layers=(porous("foam"),), wall=Assembly(layers=(porous("fibrous"),), backing="rigid")),
+             "fill": MountedOnWall(layers=(AirLayer(thickness_m=.05),), wall=_walls()["measured"])}
+    rows: dict[str, object] = {}
+    for name, material in cases.items():
+        _, found = construction.surface_impedance(material, jnp.asarray([10.]), air=air, ranges=ranges)
+        rows[name] = {"material": material.model_dump(mode="json"), "notes": [note.model_dump(mode="json") for note in found]}
+    return rows
 
 
 def three_lane(air: PhysicsConstants) -> dict[str, object]:
@@ -263,7 +344,7 @@ def main() -> None:
     mode, output = sys.argv[1:]
     air = load_physics_constants(config_path("physics_constants.toml"))
     actions: dict[str, Callable[[PhysicsConstants], object]] = {
-        "control": control, "zero": zero, "rigid": rigid, "paths": paths, "gradients": gradients,
+        "control": control, "zero": zero, "rigid": rigid, "paths": paths, "gradients": gradients, "live_wall": live_wall, "notes": notes,
         "rejections": rejections, "three_lane": three_lane}
     result = {"dtype": str(jnp.asarray(0.).dtype), "rows": actions[mode](air)}
     Path(output).write_text(json.dumps(result, allow_nan=False))

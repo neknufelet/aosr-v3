@@ -218,12 +218,27 @@ def _wall_load(material: MountedOnWall, frequencies: jax.Array, angles: jax.Arra
     """原牆在同一頻率軸、同一組角度的表面阻抗，當新增層的有限負載；拒收訊息與註記加「原牆」前綴。
 
     固定阻抗與實測表照局部反應攤成角度形狀，多層構造用它自己的角度求；同一個入口、同一套檢查。
+    原牆註記的層編號接著新增層往牆體側數（原牆第 k 層記成第「新增層數＋k」層），跟新增層的同號註記
+    不撞合併鍵與輸出驗證鍵（同層同代號）；顯示端用 wall_note_place 把它寫回「原牆第 k 層」。
+    補值註記沒有層編號，一個構造只有原牆會出這一種，不會撞。
     """
     try:
         impedance, notes = _evaluate_impedance(material.wall, frequencies, angles, air, ranges)
     except ValueError as exc:
         raise ValueError(f"原牆{exc}") from exc
-    return impedance, tuple(note.model_copy(update={"message": "原牆" + note.message}) for note in notes)
+    offset = len(material.layers)
+    return impedance, tuple(note.model_copy(update={
+        "message": "原牆" + note.message,
+        **({} if note.layer_index is None else {"layer_index": offset + note.layer_index})}) for note in notes)
+
+
+def wall_note_place(material: MountedOnWall, layer_index: int) -> str:
+    """貼在原牆上的構造的註記層編號寫成白話位置：新增層「第 k 層」，原牆「原牆第 k 層」（實測表是「原牆底構造第 k 層」）。"""
+    offset = len(material.layers)
+    if layer_index <= offset:
+        return f"第 {layer_index} 層"
+    base = "底構造" if isinstance(material.wall, MeasuredImpedance) else ""
+    return f"原牆{base}第 {layer_index - offset} 層"
 
 
 def surface_impedance(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air: PhysicsConstants,
