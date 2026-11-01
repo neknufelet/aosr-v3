@@ -355,14 +355,17 @@ CONTROL_TABLE_AXIS = (50., 100., 141.4, 199.99, 200., 333.3, 777.7, 1000., 1500.
 
 
 def table_control(air: PhysicsConstants) -> dict[str, object]:
-    """雙精度一般表的原牆值（新增層厚度 0）：直接與 jit 各一次，父考卷對改動前主線釘住的位元。"""
+    """雙精度一般表的原牆值（新增層厚度 0）：直接與 jit 各一次；另回既有入口（雙精度）同一軸的原牆值與表外遮罩。
+    父考卷：表內對改動前主線釘住的位元，表外（走底構造）對既有入口照阻抗尺。"""
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     wall = MeasuredImpedance(points=tuple(MeasuredImpedancePoint(frequency_hz=f, real_pa_s_m=z, imag_pa_s_m=q) for f, z, q in CONTROL_TABLE),
                              base_assembly=Assembly(layers=(AirLayer(thickness_m=.1),), backing="air"), source_and_conditions="考卷假表")
     frequencies = jnp.asarray(CONTROL_TABLE_AXIS)
     template = build_template(MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=wall), frequencies, air=air, ranges=ranges)
     zero = {"layer1.thickness_m": jnp.asarray(0.)}
-    return {"eager": _bits(_at_axis(template, zero, air)(frequencies)), "jit": _bits(jax.jit(_at_axis(template, zero, air))(frequencies))}
+    return {"eager": _bits(_at_axis(template, zero, air)(frequencies)), "jit": _bits(jax.jit(_at_axis(template, zero, air))(frequencies)),
+            "existing": _bits(construction.surface_impedance(wall, frequencies, air=air, ranges=ranges)[0]),
+            "outside": [bool(value) for value in construction._outside_table(wall, frequencies)]}
 
 
 def notes(air: PhysicsConstants) -> dict[str, object]:
