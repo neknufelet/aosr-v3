@@ -11,7 +11,7 @@ from pydantic_core import PydanticCustomError
 from pydantic.config import JsonDict
 
 from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
+from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, MountedOnWall, SurfaceMaterial
 
 
 WHOLE_WALL_ONLY = "這一版每面只收整面一區；矩形分區是 #309 第二步"
@@ -159,7 +159,9 @@ def exclusive_wall_schema(schema: JsonDict) -> None:
 
 def report_materials_code(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> str:
     """查表與未查表的報表標籤使用同一個材料分類。"""
-    if any(isinstance(material, MeasuredImpedance) for material in materials_by_wall.values()):
+    # 貼在原牆上的構造（#990）照它的原牆分類：原牆是實測表就算實測表那一類，其餘算整面構造。
+    if any(isinstance(material, MeasuredImpedance) or isinstance(material, MountedOnWall) and isinstance(material.wall, MeasuredImpedance)
+           for material in materials_by_wall.values()):
         return "measured_impedance_by_wall"
     return ("real_frequency_independent_impedance" if all(isinstance(material, ConstantImpedance)
             for material in materials_by_wall.values()) else "assembly_by_wall")

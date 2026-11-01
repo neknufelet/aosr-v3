@@ -40,7 +40,7 @@ from aosr.gradient.run import (
     file_sha256, ledger_progress, project_wall_materials, read_project, surface_specs,
 )
 from aosr.gradient.template_ledger import TemplateRow, decisions_seconds, read_template_ledger, template_progress
-from aosr.materials.construction_models import Assembly, ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall, SurfaceMaterial
 from aosr.reporting.scheme import load_scheme
 
 FULL_MODEL_LINE: Final = "終點完整模型重算：未做（跑 endpoint <資料夾>）"
@@ -140,11 +140,13 @@ def _feasible(rows: Sequence[MaterialGradientRow]) -> MaterialGradientRow | None
 
 
 def material_text(material: SurfaceMaterial) -> str:
-    """原牆材料的一句話：固定阻抗印數值（Pa·s/m），構造與實測阻抗表印種類。"""
+    """原牆材料的一句話：固定阻抗印數值（Pa·s/m），構造與實測阻抗表印種類；貼在原牆上的構造另印它的原牆。"""
     if isinstance(material, ConstantImpedance):
         return f"固定阻抗 {material.impedance_pa_s_m:.3f} Pa·s/m"
     if isinstance(material, Assembly):
         return f"構造（房間側起 {'、'.join(layer.kind for layer in material.layers)}；背後 {material.backing}）"
+    if isinstance(material, MountedOnWall):
+        return f"貼在原牆上的構造（房間側起 {'、'.join(layer.kind for layer in material.layers)}；原牆 {material_text(material.wall)}）"
     return f"實測阻抗表（種類 {material.kind}）"
 
 

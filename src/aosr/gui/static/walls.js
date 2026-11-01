@@ -37,7 +37,24 @@ function showPresetState(name, material = assemblyMaterial(wallMaterial(name))) 
     }
   }
 }
+function wallText(material) {
+  // 貼在原牆上的構造（#990）唯讀的一行原牆摘要；欄名與種類中文都來自伺服器的模型描述。
+  const spec = inputDefaults.material_form;
+  return material.kind === "constant_impedance"
+    ? `${spec.constant_impedance.label} ${material.impedance_pa_s_m} ${spec.constant_impedance.fields.impedance_pa_s_m.unit}`
+    : spec[material.kind].label;
+}
 function renderAssembly(name, material, row, onPreset = null) {
+  const mounted = material.kind === "mounted_on_wall";
+  if (!mounted) renderPresetChoice(name, material, row, onPreset);
+  renderLayers(name, material, row);
+  if (mounted) return;
+  const notes = document.createElement("p"); notes.id = `preset-notes-${name}`; notes.className = "note"; row.append(notes);
+  const source = document.createElement("details"); const heading = document.createElement("summary"); heading.textContent = "預設數字的出處";
+  const body = document.createElement("div"); body.id = `preset-source-${name}`; source.append(heading, body); row.append(source);
+  showPresetState(name, material);
+}
+function renderPresetChoice(name, material, row, onPreset) {
   const matched = matchingPreset(material);
   const choices = {"": "自訂構造", ...Object.fromEntries(inputDefaults.construction_presets.map(p => [p.id, p.label]))};
   const selector = wallSelect(`preset-${name}`, `${wallNames[name]}構造預設`, choices, matched?.id ?? "");
@@ -47,6 +64,8 @@ function renderAssembly(name, material, row, onPreset = null) {
     : editInput("wall_preset", event.target.value, name));
   row.append(selector);
   const state = document.createElement("p"); state.id = `preset-state-${name}`; row.append(state);
+}
+function renderLayers(name, material, row) {
   const details = document.createElement("details"); details.id = `construction-${name}`; details.open = true;
   const summary = document.createElement("summary"); summary.textContent = "展開構造參數（從房間側排到牆體側）"; details.append(summary);
   const spec = inputDefaults.material_form;
@@ -79,12 +98,11 @@ function renderAssembly(name, material, row, onPreset = null) {
     }
     entry.append(fields); details.append(entry);
   });
-  const backing = document.createElement("p"); backing.textContent = `${spec.assembly.fields.backing.label}：${spec.assembly.fields.backing.options[material.backing]}`;
+  const backing = document.createElement("p");
+  backing.textContent = material.kind === "mounted_on_wall"
+    ? `${spec.mounted_on_wall.fields.wall.label}：${wallText(material.wall)}`
+    : `${spec.assembly.fields.backing.label}：${spec.assembly.fields.backing.options[material.backing]}`;
   details.append(backing); row.append(details);
-  const notes = document.createElement("p"); notes.id = `preset-notes-${name}`; notes.className = "note"; row.append(notes);
-  const source = document.createElement("details"); const heading = document.createElement("summary"); heading.textContent = "預設數字的出處";
-  const body = document.createElement("div"); body.id = `preset-source-${name}`; source.append(heading, body); row.append(source);
-  showPresetState(name, material);
 }
 function renderWalls() {
   $("walls").replaceChildren();
@@ -92,8 +110,10 @@ function renderWalls() {
   for (const name of Object.keys(wallNames)) {
     const material = wallMaterial(name);
     const row = document.createElement("div"); row.className = "wall-editor row"; row.id = `wall-editor-${name}`;
+    // 貼在原牆上的構造網頁上不能新選，只在方案已經是這一種時列出來顯示。
+    const kinds = ["constant_impedance", "assembly", "measured_impedance", ...(material.kind === "mounted_on_wall" ? ["mounted_on_wall"] : [])];
     const choice = wallSelect(`material-kind-${name}`, `${wallNames[name]}材料`,
-      Object.fromEntries(["constant_impedance", "assembly", "measured_impedance"].map(kind => [kind, spec[kind].label])), material.kind);
+      Object.fromEntries(kinds.map(kind => [kind, spec[kind].label])), material.kind);
     choice.querySelector("select").onchange = event => action(() => changeWallKind(name, event.target.value));
     row.append(choice); $("walls").append(row);
     if (measuredDrafts[name]) {
@@ -102,7 +122,7 @@ function renderWalls() {
     } else if (material.kind === "constant_impedance") {
       row.append(numberField(`wall-${name}`, `${wallNames[name]}阻抗（帕·秒／公尺）`, material.impedance_pa_s_m));
       const multiple = document.createElement("span"); multiple.id = `multiple-${name}`; row.append(multiple);
-    } else if (material.kind === "assembly") renderAssembly(name, material, row);
+    } else if (["assembly", "mounted_on_wall"].includes(material.kind)) renderAssembly(name, material, row);
     else if (material.kind === "measured_impedance") renderMeasured(name, material, row);
   }
 }
@@ -113,7 +133,7 @@ function collectWallMaterials() {
     if (material.kind === "constant_impedance") {
       if (scheme.scene.surface_zones_by_wall) material.impedance_pa_s_m = numericInput(`wall-${name}`);
       else scheme.scene.impedance_pa_s_per_m_by_wall[name] = numericInput(`wall-${name}`);
-    } else if (material.kind === "assembly") {
+    } else if (["assembly", "mounted_on_wall"].includes(material.kind)) {
       collectAssembly(name, material);
     } else if (material.kind === "measured_impedance") collectMeasured(name, material);
   }

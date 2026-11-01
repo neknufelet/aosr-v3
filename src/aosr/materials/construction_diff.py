@@ -12,7 +12,11 @@
 求值不再做具體值檢查（範圍、非有限、負實部都不擋），合法範圍由呼叫端（第三階段的
 搜尋）守；樣板上的註記只描述基準值。結果的精度跟著輸入走：雙精度輸入給 complex128，
 單精度（float32）的參數、頻率與角度給 complex64；本模組不轉型、不讀寫 JAX 全域設定。
-只收多層構造（Assembly）：固定阻抗與實測阻抗表沒有可微的層參數，建樣板時拒收。
+只收多層構造（Assembly）與貼在原牆上的構造（MountedOnWall，#990）：固定阻抗與實測阻抗表沒有可微的層參數，建樣板時拒收。
+貼在原牆上的構造：原牆不是變數。建樣板時用既有入口 surface_impedance 在樣板頻率軸上算一次原牆列存起來
+（跟梯度鏈「不貼」面的常數列同一支函式、同一個軸），求值時當新增層的有限負載；給角度時固定阻抗與實測表照局部反應
+把那一列攤成角度形狀，原牆是多層構造就走它自己的（沒有變數的）樣板求角度阻抗；實測表的表外頻點同既有入口，
+走底構造的樣板求角度阻抗。求值的頻率軸必須是樣板那一條。
 樣板建立要走既有入口，所以要在雙精度已開的行程裡建；單精度是「同一個行程裡交單精度陣列」。
 """
 from __future__ import annotations
@@ -22,12 +26,13 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.materials import transfer_matrix as tmm
-from aosr.materials.construction import _layer_matrix, _open_area, surface_impedance
-from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstructionNote, FabricLayer, Layer, MicroPerforatedLayer, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
+from aosr.materials.construction import _layer_matrix, _open_area, _outside_table, surface_impedance
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstructionNote, FabricLayer, Layer, MeasuredImpedance, MicroPerforatedLayer, MountedOnWall, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
 
 
 # 每種層會被 _layer_matrix 讀進計算的連續欄位；欄位值是空的（沒填）就不當變數。
@@ -58,11 +63,20 @@ class TemplateVariable:
 
 @dataclass(frozen=True)
 class ConstructionTemplate:
-    """凍結構造加上「哪些連續欄位是變數」；基準值已用既有入口驗過、註記已取得。"""
+    """凍結構造加上「哪些連續欄位是變數」；基準值已用既有入口驗過、註記已取得。
 
-    material: Assembly
+    貼在原牆上的構造另帶原牆列（``wall_row``，樣板頻率軸 ``wall_frequencies_hz`` 上的垂直入射阻抗）；
+    原牆是多層構造時再帶它沒有變數的樣板（``wall_template``），是實測表時帶底構造的樣板與表外頻點的索引
+    （``wall_outside``），給角度求值用。多層構造這幾格都是空的。
+    """
+
+    material: Assembly | MountedOnWall
     variables: tuple[TemplateVariable, ...]
     notes: tuple[ConstructionNote, ...]
+    wall_row: tuple[complex, ...] = ()
+    wall_frequencies_hz: tuple[float, ...] = ()
+    wall_template: ConstructionTemplate | None = None
+    wall_outside: tuple[int, ...] = ()
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -78,7 +92,7 @@ def variable_name(layer_index: int, field: str) -> str:
     return f"layer{layer_index}.{field}"
 
 
-def available_variables(material: Assembly) -> tuple[TemplateVariable, ...]:
+def available_variables(material: Assembly | MountedOnWall) -> tuple[TemplateVariable, ...]:
     """列出構造裡每一個有值、會進計算的連續欄位。"""
     variables = []
     for index, layer in enumerate(material.layers, start=1):
@@ -94,18 +108,36 @@ def build_template(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air:
     """用具體值跑一次 surface_impedance 把關並取註記；variables 不給就是全部可用變數。
 
     variables 給了就只放那幾個，其他欄位固定在基準值；名字不在可用清單裡就拒收。
+    貼在原牆上的構造另用 surface_impedance 在同一個頻率軸上算一次原牆列存進樣板（原牆不是變數）。
     """
-    if not isinstance(material, Assembly):
-        raise ValueError(f"可微入口只收多層構造（assembly），收到 {material.kind}；固定阻抗與實測阻抗表沒有可微的層參數")
+    if not isinstance(material, Assembly | MountedOnWall):
+        raise ValueError(f"可微入口只收多層構造（assembly）或貼在原牆上的構造（mounted_on_wall），收到 {material.kind}；"
+                         "固定阻抗與實測阻抗表沒有可微的層參數")
     _, notes = surface_impedance(material, frequencies_hz, air=air, ranges=ranges)
     available = available_variables(material)
     if variables is None:
-        return ConstructionTemplate(material, available, notes)
-    known = {variable.name: variable for variable in available}
-    unknown = [name for name in variables if name not in known]
-    if unknown or len(set(variables)) != len(variables):
-        raise ValueError(f"變數名不認識或重複：{unknown or list(variables)}；可用的是 {list(known)}")
-    return ConstructionTemplate(material, tuple(known[name] for name in variables), notes)
+        chosen = available
+    else:
+        known = {variable.name: variable for variable in available}
+        unknown = [name for name in variables if name not in known]
+        if unknown or len(set(variables)) != len(variables):
+            raise ValueError(f"變數名不認識或重複：{unknown or list(variables)}；可用的是 {list(known)}")
+        chosen = tuple(known[name] for name in variables)
+    if isinstance(material, Assembly):
+        return ConstructionTemplate(material, chosen, notes)
+    row, _ = surface_impedance(material.wall, frequencies_hz, air=air, ranges=ranges)
+    wall_template: ConstructionTemplate | None = None
+    outside: tuple[int, ...] = ()
+    if isinstance(material.wall, Assembly):
+        wall_template = build_template(material.wall, frequencies_hz, air=air, ranges=ranges, variables=())
+    elif isinstance(material.wall, MeasuredImpedance):
+        outside = tuple(int(index) for index in np.flatnonzero(_outside_table(material.wall, jnp.asarray(frequencies_hz))))
+        if outside:
+            wall_template = build_template(material.wall.base_assembly, jnp.asarray(frequencies_hz)[np.asarray(outside)],
+                                           air=air, ranges=ranges, variables=())
+    return ConstructionTemplate(material, chosen, notes, tuple(complex(value) for value in np.asarray(row)),
+                                tuple(float(value) for value in np.asarray(frequencies_hz, dtype=np.float64)),
+                                wall_template, outside)
 
 
 def _layer_with(layer: Layer, updates: dict[str, jax.Array]) -> Layer:
@@ -142,4 +174,30 @@ def surface_impedance_from_parameters(template: ConstructionTemplate, parameters
         updates.setdefault(variable.layer_index, {})[variable.field] = parameters[variable.name]
     matrices = [_matrix(_layer_with(layer, updates.get(index, {})), frequencies, air, angles)
                 for index, layer in enumerate(template.material.layers, start=1)]
+    if isinstance(template.material, MountedOnWall):
+        load = _wall_load(template, frequencies, angles, air)
+        return tmm.compute(matrices, air=air, load_impedance_pa_s_m=load, incidence_angles_deg=angles)[0]
     return tmm.compute(matrices, air=air, backing=template.material.backing, incidence_angles_deg=angles)[0]
+
+
+def _wall_load(template: ConstructionTemplate, frequencies: jax.Array, angles: jax.Array | None,
+               air: PhysicsConstants) -> jax.Array:
+    """原牆負載：樣板存的原牆列轉成求值的複數精度；給角度時局部反應攤開，多層構造原牆走它自己的樣板。
+
+    頻率軸要是樣板那一條（具體值逐點比、追蹤值只比長度）：原牆列只在那一條軸上算過。
+    """
+    expected = np.asarray(template.wall_frequencies_hz)
+    if frequencies.ndim != 1 or frequencies.shape[0] != expected.shape[0] or (
+            not isinstance(frequencies, jax.core.Tracer)
+            and not np.array_equal(np.asarray(frequencies), expected.astype(np.asarray(frequencies).dtype))):
+        raise ValueError("貼在原牆上的構造只能在建樣板的那一條頻率軸上求值（原牆列只在那裡算過）")
+    if angles is not None and template.wall_template is not None and not template.wall_outside:
+        return surface_impedance_from_parameters(template.wall_template, {}, frequencies, air=air, incidence_angles_deg=angles)
+    row = jnp.asarray(np.asarray(template.wall_row, dtype=np.complex128), dtype=jnp.result_type(frequencies.dtype, jnp.complex64))
+    load = tmm._broadcast_angles(row, angles)
+    if angles is None or template.wall_template is None:
+        return load
+    # 實測表原牆：表內照局部反應，表外同既有入口走底構造的角度阻抗。
+    outside = np.asarray(template.wall_outside)
+    base = surface_impedance_from_parameters(template.wall_template, {}, frequencies[outside], air=air, incidence_angles_deg=angles)
+    return load.at[outside].set(base.astype(load.dtype))

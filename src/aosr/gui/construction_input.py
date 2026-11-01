@@ -27,6 +27,7 @@ def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
 
 
 def _layers(material: dict[str, object]) -> list[object]:
+    """表單上的層：實測表取底構造的層；貼在原牆上的構造取新增層（原牆不上表單）。"""
     if material.get("kind") == "measured_impedance":
         base = material.get("base_assembly")
         material = base if isinstance(base, dict) else {}
@@ -48,7 +49,8 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
             model = layer.get("model", MATERIAL_MODELS["porous"].model_fields["model"].default)
             sigma = layer.get("flow_resistivity_pa_s_m2")
             if model == "komatsu" and isinstance(sigma, int | float) and not low <= sigma <= high:
-                branch = "measured_impedance.base_assembly" if material.get("kind") == "measured_impedance" else "assembly"
+                branch = {"measured_impedance": "measured_impedance.base_assembly",
+                          "mounted_on_wall": "mounted_on_wall"}.get(str(material.get("kind")), "assembly")
                 issues.append(SchemeProblem(f"scene.{ZONE_WALL_FIELD}.{wall}.0.material.{branch}.layers.{index}.porous.flow_resistivity_pa_s_m2",
                     f"小松纖維模型的流阻可用範圍為 {low:g}–{high:g} Pa·s/m²；手動下限是工程界線，上限沿用原研究樣品值，請改流阻或選合適模型"))
     return tuple(issues)

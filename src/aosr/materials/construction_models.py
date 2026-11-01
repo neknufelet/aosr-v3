@@ -334,8 +334,21 @@ class MeasuredImpedance(_ConstructionRecord):
         return points
 
 
-SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance | MeasuredImpedance, Field(discriminator="kind")]
-"""SurfaceMaterial（牆面材料型別）依 kind（表面種類代號）分辨構造、固定阻抗與實測表。"""
+class MountedOnWall(_ConstructionRecord):
+    """MountedOnWall（貼在原牆上的構造，#990）：新增層房間側 → 牆體側排列，最後一層背後接原牆的表面阻抗，不是剛背。
+
+    原牆是貼上去之前那面牆的材料：固定阻抗、實測阻抗表或多層構造；聯合型別不含本類別，只有一層巢狀。
+    沒有背後負載欄：負載就是原牆。多層構造的意思一個位元都不變。
+    """
+
+    kind: Literal["mounted_on_wall"] = Field(default="mounted_on_wall", description="kind（表面種類代號，mounted_on_wall 表示貼在原牆上的構造）")
+    layers: tuple[Layer, ...] = Field(min_length=1, description="layers（至少一層，依房間側到牆體側排序）")
+    wall: Annotated[Assembly | ConstantImpedance | MeasuredImpedance, Field(discriminator="kind")] = Field(
+        description="wall（原牆：貼上去之前那面牆的材料；最後一層背後接它的表面阻抗，收固定阻抗、實測阻抗表或多層構造）")
+
+
+SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance | MeasuredImpedance | MountedOnWall, Field(discriminator="kind")]
+"""SurfaceMaterial（牆面材料型別）依 kind（表面種類代號）分辨構造、固定阻抗、實測表與貼在原牆上的構造。"""
 
 
 def _note_schema(schema: JsonDict) -> None:
