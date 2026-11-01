@@ -299,8 +299,12 @@ def close_knots(air: PhysicsConstants) -> dict[str, object]:
     collide 1000 與 1000.00001 Hz（單精度下兩列捨入成同一個值，1000 存得下、另一列存不下）；
     straddle 999.99999 與 1000.00001 Hz（兩列都捨入成 1000，求 1000 Hz 落在兩列之間：分母是零那一支）；
     middle 999、1000.00001、1000.00002、1001 Hz（中間兩列重合，求 1000 Hz 要挑對段）；
-    edge 下端 50.000001 Hz 在單精度存不下（捨入成 50），求 50 Hz 照真值是表外（走底構造）。新增層厚度 0（等於原牆本身）與 1 cm 各求一次，
-    單精度頻率、角度與參數，直接與 jit、垂直與角度；回值、有限與否、對新增層厚度的梯度，與既有入口（雙精度）同一頻點的值。"""
+    edge 下端 50.000001 Hz 在單精度存不下（捨入成 50），求 50 Hz 照真值是表外（走底構造）。
+    #1000 一族（兩列在單精度下重合或相差一兩個 ulp）：asymmetric 審查原例 999.999995 與 1000.00002 Hz（重合，求 1000 Hz 在五分之一處，
+    雙精度既有入口 1200）；mirror 999.99998 與 1000.000005 Hz（重合，五分之四處）；one_ulp 1000.00001 與 1000.00009 Hz（差一個 ulp，
+    求兩列之間、下側外、上側外）；hit_one_ulp 1000、1000.00009、1000.0001220703125 Hz（頭尾存得下：命中兩端、求兩列之間）；
+    two_ulp 999.99995 與 1000.00006 Hz（差兩個 ulp，求兩列之間、下側外、上側外）。新增層厚度 0（等於原牆本身）與 1 cm 各求一次，
+    單精度頻率、角度與參數，直接與 jit、垂直與角度；回值、有限與否、對新增層厚度的梯度，與既有入口（雙精度）同一頻點的原牆值與貼上新增層的值。"""
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     base = Assembly(layers=(AirLayer(thickness_m=.1),), backing="air")
     cases: dict[str, tuple[tuple[tuple[float, float], ...], tuple[float, ...]]] = {
@@ -308,7 +312,13 @@ def close_knots(air: PhysicsConstants) -> dict[str, object]:
         "collide": (((1000., 1000.), (1000.00001, 2000.)), (1000., 1000.00006103515625)),
         "straddle": (((999.99999, 1000.), (1000.00001, 2000.)), (1000.,)),
         "middle": (((999., 1000.), (1000.00001, 2000.), (1000.00002, 3000.), (1001., 4000.)), (1000.,)),
-        "edge": (((50.000001, 1000.), (500., 2000.)), (50., 499.99997))}
+        "edge": (((50.000001, 1000.), (500., 2000.)), (50., 499.99997)),
+        "asymmetric": (((999.999995, 1000.), (1000.00002, 2000.)), (1000.,)),
+        "mirror": (((999.99998, 1000.), (1000.000005, 2000.)), (1000.,)),
+        "one_ulp": (((1000.00001, 1000.), (1000.00009, 2000.)), (1000., 1000.00006103515625, 1000.0001220703125)),
+        "hit_one_ulp": (((1000., 1000.), (1000.00009, 2000.), (1000.0001220703125, 3000.)),
+                        (1000., 1000.00006103515625, 1000.0001220703125)),
+        "two_ulp": (((999.99995, 1000.), (1000.00006, 2000.)), (999.99993896484375, 1000., 1000.00006103515625))}
     angles = jnp.asarray([0., 60.], dtype=jnp.float32)
     rows: dict[str, object] = {}
     for name, (points, axis) in cases.items():
@@ -316,7 +326,9 @@ def close_knots(air: PhysicsConstants) -> dict[str, object]:
                                               for f, z in points), base_assembly=base, source_and_conditions="考卷假表")
         frequencies = jnp.asarray(axis, dtype=jnp.float32)
         exact = jnp.asarray(np.asarray(frequencies, dtype=np.float64))
-        template = build_template(MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=wall), exact, air=air, ranges=ranges)
+        mounted = MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=wall)
+        template = build_template(mounted, exact, air=air, ranges=ranges)
+        exact_angles = jnp.asarray(np.asarray(angles, dtype=np.float64))
         results: list[dict[str, object]] = []
         for thickness in (0., .01):
             parameters = {"layer1.thickness_m": jnp.asarray(thickness, dtype=jnp.float32)}
@@ -330,9 +342,30 @@ def close_knots(air: PhysicsConstants) -> dict[str, object]:
                                     "gradient": float(gradient["layer1.thickness_m"])})
         rows[name] = {"results": results,
                       "existing": _bits(construction.surface_impedance(wall, exact, air=air, ranges=ranges)[0]),
-                      "existing_angles": _bits(construction.surface_impedance_at_angles(
-                          wall, exact, jnp.asarray(np.asarray(angles, dtype=np.float64)), air=air, ranges=ranges)[0])}
+                      "existing_angles": _bits(construction.surface_impedance_at_angles(wall, exact, exact_angles, air=air, ranges=ranges)[0]),
+                      "mounted": _bits(construction.surface_impedance(mounted, exact, air=air, ranges=ranges)[0]),
+                      "mounted_angles": _bits(construction.surface_impedance_at_angles(
+                          mounted, exact, exact_angles, air=air, ranges=ranges)[0])}
     return rows
+
+
+# 雙精度一般表（#1000 控制組）：三列 100／200／1000 Hz，求值含表外兩端、三個命中表列與各段之間。
+CONTROL_TABLE = ((100., 1000., 0.), (200., 1500., -100.), (1000., 2000., -200.))
+CONTROL_TABLE_AXIS = (50., 100., 141.4, 199.99, 200., 333.3, 777.7, 1000., 1500.)
+
+
+def table_control(air: PhysicsConstants) -> dict[str, object]:
+    """雙精度一般表的原牆值（新增層厚度 0）：直接與 jit 各一次；另回既有入口（雙精度）同一軸的原牆值與表外遮罩。
+    父考卷：表內對改動前主線釘住的位元，表外（走底構造）對既有入口照阻抗尺。"""
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    wall = MeasuredImpedance(points=tuple(MeasuredImpedancePoint(frequency_hz=f, real_pa_s_m=z, imag_pa_s_m=q) for f, z, q in CONTROL_TABLE),
+                             base_assembly=Assembly(layers=(AirLayer(thickness_m=.1),), backing="air"), source_and_conditions="考卷假表")
+    frequencies = jnp.asarray(CONTROL_TABLE_AXIS)
+    template = build_template(MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=wall), frequencies, air=air, ranges=ranges)
+    zero = {"layer1.thickness_m": jnp.asarray(0.)}
+    return {"eager": _bits(_at_axis(template, zero, air)(frequencies)), "jit": _bits(jax.jit(_at_axis(template, zero, air))(frequencies)),
+            "existing": _bits(construction.surface_impedance(wall, frequencies, air=air, ranges=ranges)[0]),
+            "outside": [bool(value) for value in construction._outside_table(wall, frequencies)]}
 
 
 def notes(air: PhysicsConstants) -> dict[str, object]:
@@ -386,6 +419,7 @@ def main() -> None:
     air = load_physics_constants(config_path("physics_constants.toml"))
     actions: dict[str, Callable[[PhysicsConstants], object]] = {
         "control": control, "zero": zero, "rigid": rigid, "paths": paths, "gradients": gradients, "live_wall": live_wall, "notes": notes, "close_knots": close_knots,
+        "table_control": table_control,
         "rejections": rejections, "three_lane": three_lane}
     result = {"dtype": str(jnp.asarray(0.).dtype), "rows": actions[mode](air)}
     Path(output).write_text(json.dumps(result, allow_nan=False))

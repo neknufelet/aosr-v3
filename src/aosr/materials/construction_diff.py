@@ -18,7 +18,7 @@
 固定阻抗是常數；多層構造原牆走它自己沒有變數的樣板；實測表的表內值照 construction._table_impedance 的規則用 JAX 現算
 （對數頻率上實部、虛部各自線性內插，命中表列照表值），表外判定照 construction._outside_table（嚴格在端點外），
 底構造在整條軸上都算、再依「是否表外」用 jnp.where 挑。表內內插跟 numpy 那一份的差在最後幾位（比例的寫法與對數函式
-的實作不同），不是逐位；考卷照阻抗尺比。單精度下很近的表列與重合的表列見 _table_impedance 的安全分母。
+的實作不同），不是逐位；考卷照阻抗尺比。單精度下很近的表列與重合的表列見 _table_impedance 的每段常數（#1000）。
 樣板建立要走既有入口，所以要在雙精度已開的行程裡建；單精度是「同一個行程裡交單精度陣列」。
 """
 from __future__ import annotations
@@ -196,33 +196,38 @@ def _table_impedance(material: MeasuredImpedance, frequencies: jax.Array) -> jax
     """construction._table_impedance 的 JAX 版（追蹤得過）：對數頻率上實部、虛部各自線性內插；命中表列照表值，包含端點。
 
     內插比例寫成 t = log1p((f−f左)/f左) ÷ log1p((f右−f左)/f左)，數學上就是 (log f − log f左)/(log f右 − log f左)，
-    但不先各自取對數再相減：單精度下很近的兩列取對數後會相等（審查：1000 與 1000.0001220703125 Hz 都變 3），
-    相減成零就除以零出 NaN；先減頻率再 log1p 保得住差。兩列在求值精度下本身重合時（分母是零）用安全分母、取等權（t=½），
-    兩支 jnp.where 都有限，梯度才不會沾到 NaN（例：單精度下 999.99999 與 1000.00001 Hz 都捨入成 1000，求 1000 Hz）。
+    但不先各自取對數再相減：單精度下很近的兩列取對數後會相等（審查：1000 與 1000.0001220703125 Hz 都變 3），相減成零就除以零出 NaN。
+    表列頻率是具體值，每段的常數在建陣列前用雙精度先算好（#1000），只有求值頻率是追蹤值：段長的比 (f右−f左)/f左 用雙精度算再轉成
+    求值精度（是正的小數，單精度也存得下，不會是零，所以沒有安全分母，也沒有固定取一半）；f左 拆成 hi（轉成求值精度的值）與
+    lo（雙精度的 f左−hi 再轉成求值精度），f−f左 寫成 (f−hi)−lo，f 跟 hi 很近時 f−hi 是精確的。這樣兩列在單精度下捨入成同一個值
+    也照真值內插（審查：999.999995 與 1000.00002 Hz 求 1000 Hz 是 1200，不是一半的 1500）。雙精度下 lo 是零、段長的比跟原寫法同一個值，
+    逐位不變。log1p 在選段之後才取，jit 跟直接執行走同一支核心。
     落在哪一段照頻率的真值找（_ceiling），不照捨入後的表列找，重合的表列才不會挑錯段。頻率先夾進表的範圍再算：表外的值本來就會被底構造換掉，
-    夾住讓零、負頻率或表外很遠的頻點也不會在這一支出非有限值。表至少兩列、頻率嚴格遞增且為正（格式驗證守）。
+    夾住讓零、負頻率或表外很遠的頻點也不會在這一支出非有限值（兩端夾住時 t 可能略出 [0, 1]，有限）。表至少兩列、頻率嚴格遞增且為正（格式驗證守）。
     表外判定見 _outside_table；命中表列只認求值精度存得下的表列頻率。
     """
-    knots = jnp.asarray([point.frequency_hz for point in material.points], dtype=frequencies.dtype)
+    dtype = frequencies.dtype
+    exact = np.asarray([point.frequency_hz for point in material.points], dtype=np.float64)
+    hi = exact.astype(dtype)
+    knots = jnp.asarray(hi)
+    lows = jnp.asarray((exact - hi.astype(np.float64)).astype(dtype))
+    ratios = jnp.asarray(((exact[1:] - exact[:-1]) / exact[:-1]).astype(dtype))
     x = jnp.clip(frequencies, knots[0], knots[-1])
     # 落在哪一段照真值找：表列 ≤ f 等於「不小於表列的最小可表示值」≤ f（雙精度下就是表列本身）。
-    ceilings = jnp.asarray([_ceiling(point.frequency_hz, frequencies.dtype) for point in material.points])
+    ceilings = jnp.asarray([_ceiling(point.frequency_hz, dtype) for point in material.points])
     left = jnp.clip(jnp.searchsorted(ceilings, x, side="right") - 1, 0, knots.size - 2)
-    low, high = knots[left], knots[left + 1]
-    span = jnp.log1p((high - low) / low)
-    degenerate = span == 0
-    fraction = jnp.where(degenerate, jnp.asarray(0.5, dtype=frequencies.dtype),
-                         jnp.log1p((x - low) / low) / jnp.where(degenerate, jnp.ones((), dtype=frequencies.dtype), span))
+    low = knots[left]
+    fraction = jnp.log1p(((x - low) - lows[left]) / low) / jnp.log1p(ratios[left])
 
     def interpolate(values: list[float]) -> jax.Array:
-        table = jnp.asarray(values, dtype=frequencies.dtype)
+        table = jnp.asarray(values, dtype=dtype)
         return (table[left + 1] - table[left]) * fraction + table[left]
 
     impedance = (interpolate([point.real_pa_s_m for point in material.points])
                  + 1j * interpolate([point.imag_pa_s_m for point in material.points]))
     for point in material.points:
         # 只有求值精度剛好存得下的表列頻率才可能被命中；存不下的（單精度下捨入成鄰近值）不覆寫，免得誤中別列。
-        if float(np.asarray(point.frequency_hz, dtype=frequencies.dtype)) == point.frequency_hz:
+        if float(np.asarray(point.frequency_hz, dtype=dtype)) == point.frequency_hz:
             impedance = jnp.where(frequencies == point.frequency_hz, complex(point.real_pa_s_m, point.imag_pa_s_m), impedance)
     return impedance
 
