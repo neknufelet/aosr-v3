@@ -21,6 +21,8 @@ EXEMPTIONS = {
     "scene.surface_zones_by_wall[][].area": "Literal 只收 whole_wall，其他分區都由三入口拒收考卷擋下。",
     "scene.surface_zones_by_wall[][].material.fill_rule": "Literal 只收第一版補值規則；實測格式考卷拒收其他值，預設值隨方案保存。",
     "scene.surface_zones_by_wall[][].material.base_assembly.kind": "底構造只收 Assembly；實測格式考卷拒收固定阻抗與巢狀實測表。",
+    "scene.surface_zones_by_wall[][].material.wall.fill_rule": "原牆是實測表時同頂層實測表：Literal 只收第一版補值規則，預設值隨方案保存。",
+    "scene.surface_zones_by_wall[][].material.wall.base_assembly.kind": "原牆是實測表時同頂層實測表：底構造只收 Assembly。",
     "schema_version": "Literal 固定版號，方案驗證器拒收其他值。",
     "scheme_id": "施工單明定排除方案代號；它不是方案設定。",
     "channel_group.channels[].role": "恰好兩個聲道且比較對引用角色，須連動修改。",
@@ -194,7 +196,7 @@ def _surface_fields(scheme: Scheme) -> set[str]:
     assert {row.path for row in scheme_differences(porous_scheme, changed)} == {f"scene.{NEW}.floor"}
     names = set(cases) | {f"layers[].{name}" for name in parameters} | {"layers[].model"}
     names |= {f"layers[].{name}" for name in _facing_fields(document, ("scene", NEW, "floor", 0, "material", "layers"))}
-    return {f"scene.{NEW}[][].material.{name}" for name in names} | _measured_surface_fields(document)
+    return {f"scene.{NEW}[][].material.{name}" for name in names} | _measured_surface_fields(document) | _mounted_surface_fields(document)
 
 
 # 布、微孔、一般圓孔（長方格＋背面貼布）、長縫與多孔流阻來源：起點層與要逐一改的欄位。
@@ -230,7 +232,54 @@ def _facing_fields(document: dict[str, Json], layers: tuple[str | int, ...]) -> 
     return names
 
 
-def _measured_surface_fields(document: dict[str, Json]) -> set[str]:
+def _mounted_surface_fields(document: dict[str, Json]) -> set[str]:
+    """貼在原牆上的構造（#990）：原牆（material.wall）的每一格各改一次——多層構造、固定阻抗與實測表三種原牆，
+    多孔參數與各新面層同頂層構造那一套，實測表那一套同頂層實測表；新增層的欄位名跟頂層構造同一組葉子。"""
+    from tests.engine._surface_zone_cases import NEW
+
+    floor: tuple[str | int, ...] = ("scene", NEW, "floor", 0, "material")
+    node: Json = cast(Json, document)
+    for key in floor:
+        node = cast(dict[str, Json], node)[key] if isinstance(key, str) else cast(list[Json], node)[key]
+    assembly = cast(dict[str, Json], deepcopy(node))
+    mounted: Json = {"kind": "mounted_on_wall", "layers": assembly["layers"], "wall": cast(Json, assembly)}
+    original = _change(document, floor, mounted)
+    data = cast(dict[str, Json], original.model_dump(mode="json"))
+    wall: tuple[str | int, ...] = (*floor, "wall")
+    porous: Json = {"kind": "porous", "thickness_m": 0.1, "flow_resistivity_pa_s_m2": 10000.0,
+                    "model": "wilson_2015", "material_class": "fibrous", "porosity": 0.98, "tortuosity": 1.1}
+    cases: dict[str, tuple[tuple[str | int, ...], Json]] = {
+        "backing": (("backing",), "air"),
+        "layers[].thickness_m": (("layers", 1, "thickness_m"), 0.2),
+        "layers[].surface_mass_kg_m2": (("layers", 0, "surface_mass_kg_m2"), 0.3),
+        "layers[].resistance_pa_s_m": (("layers", 0, "resistance_pa_s_m"), 90.0),
+        "kind": ((), {"kind": "constant_impedance", "impedance_pa_s_m": 2000.0}),
+        "layers[].kind": (("layers", 0), {"kind": "air", "thickness_m": 0.1}),
+    }
+    for name, (path, value) in cases.items():
+        rows = scheme_differences(original, _change(data, (*wall, *path), value))
+        assert {row.path for row in rows} == {f"scene.{NEW}.floor"}, name
+    porous_scheme = _change(data, (*wall, "layers", 0), porous)
+    porous_data = cast(dict[str, Json], porous_scheme.model_dump(mode="json"))
+    parameters: dict[str, Json] = {"flow_resistivity_pa_s_m2": 12000.0, "material_class": "foam", "porosity": 0.97, "tortuosity": 1.2}
+    for name, value in parameters.items():
+        rows = scheme_differences(porous_scheme, _change(porous_data, (*wall, "layers", 0, name), value))
+        assert {row.path for row in rows} == {f"scene.{NEW}.floor"}, name
+    miki: Json = {"kind": "porous", "thickness_m": 0.1, "flow_resistivity_pa_s_m2": 10000.0, "model": "miki", "material_class": "fibrous"}
+    rows = scheme_differences(porous_scheme, _change(porous_data, (*wall, "layers", 0), miki))
+    assert {row.path for row in rows} == {f"scene.{NEW}.floor"}
+    constant = _change(data, wall, {"kind": "constant_impedance", "impedance_pa_s_m": 2000.0})
+    rows = scheme_differences(constant, _change(cast(dict[str, Json], constant.model_dump(mode="json")), (*wall, "impedance_pa_s_m"), 2100.0))
+    assert {row.path for row in rows} == {f"scene.{NEW}.floor"}
+    names = set(cases) | {f"layers[].{name}" for name in parameters} | {"impedance_pa_s_m", "layers[].model"}
+    names |= {f"layers[].{name}" for name in _facing_fields(data, (*wall, "layers"))}
+    measured = {name.removeprefix(f"scene.{NEW}[][].material.") for name in _measured_surface_fields(data, wall)}
+    return {f"scene.{NEW}[][].material.wall.{name}" for name in names | measured}
+
+
+def _measured_surface_fields(document: dict[str, Json],
+                             prefix: tuple[str | int, ...] | None = None) -> set[str]:
+    """實測表的每一格各改一次；prefix 給了就是那一格材料（貼在原牆上的構造的原牆），回的名字照頂層實測表寫。"""
     from tests.engine.test_measured_impedance import measured
     from tests.engine._surface_zone_cases import NEW
     measured_material = measured()
@@ -238,7 +287,7 @@ def _measured_surface_fields(document: dict[str, Json]) -> set[str]:
     layers = cast(list[dict[str, object]], base['layers'])
     layers.append({'kind': 'porous', 'thickness_m': .05, 'flow_resistivity_pa_s_m2': 19100.,
         'material_class': 'fibrous', 'model': 'wilson_2015', 'porosity': .98, 'tortuosity': 1.1})
-    prefix: tuple[str | int, ...] = ('scene', NEW, 'floor', 0, 'material')
+    prefix = ('scene', NEW, 'floor', 0, 'material') if prefix is None else prefix
     original = _change(document, prefix, cast(Json, measured_material))
     data = cast(dict[str, Json], original.model_dump(mode='json'))
     cases: dict[str, tuple[tuple[str | int, ...], Json]] = {

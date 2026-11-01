@@ -10,6 +10,7 @@ Miki（纖維經驗模型）、Wilson 2015（鬆弛模型）、Mechel 1976（低
 本模組只查陣列型別，不讀寫全域設定。執行環境層須在載入陣列函式庫前開雙精度。
 三個入口共用 _layer_matrix（層轉矩陣函式），集中連續物理參數，留給後續梯度工作。
 固定阻抗的無規吸音沿用型錄既有換算；該函式實際使用高階積分，這裡不另造閉式。
+貼在原牆上的構造（#990）：先用同一頻率軸、同一組角度求原牆的阻抗，當新增層的有限負載 (A·Z+B)/(C·Z+D)。
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.materials import transfer_matrix as tmm
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
-from aosr.materials.construction_models import AirLayer, BoardLayer, ConstantImpedance, ConstructionNote, FabricLayer, Layer, MeasuredImpedance, MicroPerforatedLayer, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial, layer_open_area
+from aosr.materials.construction_models import AirLayer, BoardLayer, ConstantImpedance, ConstructionNote, FabricLayer, Layer, MeasuredImpedance, MicroPerforatedLayer, MountedOnWall, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial, layer_open_area
 
 
 # 布的兩個物性明給後不讀厚度；正數只滿足傳遞矩陣的必填位置。
@@ -60,6 +61,8 @@ def _context(material: SurfaceMaterial) -> str:
             descriptions.append(f"{prefix}：長縫板，厚度 {layer.thickness_m} m、縫寬 {layer.slot_width_m} m")
         else:
             raise ValueError("不認識的構造層，無法描述；請修正層種類")
+    if isinstance(material, MountedOnWall):
+        return "；".join(descriptions) + f"；背後負載為原牆（{_context(material.wall)}）"
     return "；".join(descriptions) + f"；背後負載為{'剛背' if material.backing == 'rigid' else '空氣'}"
 
 
@@ -198,11 +201,44 @@ def _evaluate_impedance(material: SurfaceMaterial, frequencies_hz: jax.Array, in
     notes = _komatsu_notes(material, frequencies, ranges)
     if isinstance(material, ConstantImpedance):
         impedance = tmm.constant_z(frequencies, jnp.asarray(material.impedance_pa_s_m, dtype=jnp.complex128), incidence_angles_deg=angles)
+    elif isinstance(material, MountedOnWall):
+        load, wall_notes = _wall_load(material, frequencies, angles, air, ranges)
+        matrices = [_layer_matrix(layer, frequencies, air, angles) for layer in material.layers]
+        impedance = tmm.compute(matrices, air=air, load_impedance_pa_s_m=load, incidence_angles_deg=angles)[0]
+        notes = (*notes, *wall_notes)
     else:
         matrices = [_layer_matrix(layer, frequencies, air, angles) for layer in material.layers]
         impedance = tmm.compute(matrices, air=air, backing=material.backing, incidence_angles_deg=angles)[0]
     _check_surface_impedance(impedance, frequencies, angles, context=context)
     return impedance, notes
+
+
+def _wall_load(material: MountedOnWall, frequencies: jax.Array, angles: jax.Array | None, air: PhysicsConstants,
+               ranges: PorousModelRanges) -> tuple[jax.Array, tuple[ConstructionNote, ...]]:
+    """原牆在同一頻率軸、同一組角度的表面阻抗，當新增層的有限負載；拒收訊息與註記加「原牆」前綴。
+
+    固定阻抗與實測表照局部反應攤成角度形狀，多層構造用它自己的角度求；同一個入口、同一套檢查。
+    原牆註記的層編號接著新增層往牆體側數（原牆第 k 層記成第「新增層數＋k」層），跟新增層的同號註記
+    不撞合併鍵與輸出驗證鍵（同層同代號）；顯示端用 wall_note_place 把它寫回「原牆第 k 層」。
+    補值註記沒有層編號，一個構造只有原牆會出這一種，不會撞。
+    """
+    try:
+        impedance, notes = _evaluate_impedance(material.wall, frequencies, angles, air, ranges)
+    except ValueError as exc:
+        raise ValueError(f"原牆{exc}") from exc
+    offset = len(material.layers)
+    return impedance, tuple(note.model_copy(update={
+        "message": "原牆" + note.message,
+        **({} if note.layer_index is None else {"layer_index": offset + note.layer_index})}) for note in notes)
+
+
+def wall_note_place(material: MountedOnWall, layer_index: int) -> str:
+    """貼在原牆上的構造的註記層編號寫成白話位置：新增層「第 k 層」，原牆「原牆第 k 層」（實測表是「原牆底構造第 k 層」）。"""
+    offset = len(material.layers)
+    if layer_index <= offset:
+        return f"第 {layer_index} 層"
+    base = "底構造" if isinstance(material.wall, MeasuredImpedance) else ""
+    return f"原牆{base}第 {layer_index - offset} 層"
 
 
 def surface_impedance(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air: PhysicsConstants,

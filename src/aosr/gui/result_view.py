@@ -849,7 +849,8 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     from aosr.gui.labels import WALLS
     from aosr.physics.wall_surfaces import extrapolated_frequency_text, merge_construction_notes
     from aosr.geometry.shoebox import Wall
-    from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance
+    from aosr.materials.construction import wall_note_place
+    from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance, MountedOnWall
 
     merged: dict[Wall, tuple[ConstructionNote, ...]] = {}
     for pair in result.pairs:
@@ -859,11 +860,19 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     for wall in Wall.all():
         zones = result.scheme.scene.surface_zones_by_wall
         material = zones[wall.wall_name()][0].material if zones is not None else None
+        table = material.wall if isinstance(material, MountedOnWall) else material
         for note in merged.get(wall, ()):
-            if note.code == "measured_table_model_fill" and isinstance(material, MeasuredImpedance):
-                bounds = material.points[0].frequency_hz, material.points[-1].frequency_hz
+            if note.code == "measured_table_model_fill" and isinstance(table, MeasuredImpedance):
+                bounds = table.points[0].frequency_hz, table.points[-1].frequency_hz
                 frequencies = extrapolated_frequency_text(note.frequencies_hz, table_bounds_hz=bounds)
                 lines.append(f"{WALLS[wall.wall_name()]}：{note.message}；模型補值頻點 {frequencies}")
+                continue
+            if isinstance(material, MountedOnWall) and note.layer_index is not None:
+                # 新增層與原牆同號註記各自一行：層編號接著往牆體側數，這裡寫回「原牆第 k 層」。
+                place = wall_note_place(material, note.layer_index)
+                text = (f"{extrapolated_frequency_text(note.frequencies_hz)} 超出材料模型原研究的量測範圍，仍以外推照算"
+                        if note.frequencies_hz else note.message.removeprefix(f"{place}："))
+                lines.append(f"{WALLS[wall.wall_name()]}{place}：{measured_note_text(text)}")
                 continue
             if note.frequencies_hz:
                 text = f"{extrapolated_frequency_text(note.frequencies_hz)} 超出材料模型原研究的量測範圍，仍以外推照算"

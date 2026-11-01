@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import cast, get_args
 
 from pydantic import BaseModel
-from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, FabricLayer, MeasuredImpedance, MeasuredImpedancePoint, MicroPerforatedLayer, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, FabricLayer, MeasuredImpedance, MeasuredImpedancePoint, MicroPerforatedLayer, MountedOnWall, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -87,6 +87,10 @@ def material_summary(material: SurfaceMaterial) -> str:
         return (f"{name}：{material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz，"
                 f"{len(material.points)} 列；{rows}；{source}：{material.source_and_conditions}；"
                 f"{base}：{material_summary(material.base_assembly)}")
+    if isinstance(material, MountedOnWall):
+        wall = material_field_text(material.kind, "wall")
+        layers = _model_summary(MountedOnWall, lambda name: None if name == "wall" else getattr(material, name))
+        return f"{layers}；{wall}：{material_summary(material.wall)}"
     return _model_summary(type(material), lambda name: getattr(material, name))
 
 
@@ -97,6 +101,10 @@ def _enum_word(description: str, value: object) -> str:
         if str(value) in {code.strip() for code in codes.split("、")}:
             return word.strip()
     raise ValueError(f"材料模型描述缺少 {value!r} 的中文說明")
+
+
+# 貼在原牆上的構造（#990）的分支名也換中文；字從模型描述解析，不另寫對照。
+PATH_WORDS["mounted_on_wall"] = _enum_word(MATERIAL_WORDS["mounted_on_wall"]["kind"], "mounted_on_wall")
 
 
 def material_field_text(kind: str, name: str) -> str:
