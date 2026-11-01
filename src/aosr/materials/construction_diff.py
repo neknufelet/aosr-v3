@@ -13,12 +13,12 @@
 搜尋）守；樣板上的註記只描述基準值。結果的精度跟著輸入走：雙精度輸入給 complex128，
 單精度（float32）的參數、頻率與角度給 complex64；本模組不轉型、不讀寫 JAX 全域設定。
 只收多層構造（Assembly）與貼在原牆上的構造（MountedOnWall，#990）：固定阻抗與實測阻抗表沒有可微的層參數，建樣板時拒收。
-貼在原牆上的構造：原牆不是變數，它的阻抗是新增層的有限負載，盡量在求值當下用當下的空氣與頻率（與角度）現算，
-垂直與各角度走同一條路：固定阻抗是常數；多層構造原牆走它自己沒有變數的樣板；實測表的表外頻點走底構造沒有變數的樣板。
-只有實測表的表內值是建樣板時在樣板頻率軸上算好存起來的（表內對數內插不在可微路徑上，跟空氣無關）。
-**已知限制**：原牆是實測表時，求值的頻率軸必須是建樣板那一條。具體值的軸逐點比、不同就拒收；
-在 jax.jit 等追蹤之下軸的內容看不到，只比得了長度——同長的另一條軸會靜默用舊的表內值（考卷釘成看得見的事實）。
-要換軸請重建樣板；呼叫端（第三階段搜尋）要保證建樣板與求值用同一條軸。固定阻抗與多層構造的原牆沒有這個限制。
+貼在原牆上的構造：原牆不是變數，它的阻抗是新增層的有限負載，一律在求值當下用當下的空氣與頻率（與角度）現算，
+垂直與各角度走同一條路，樣板不存任何原牆值，所以具體值與 jax.jit 追蹤下、換不換頻率軸都是同一個答案：
+固定阻抗是常數；多層構造原牆走它自己沒有變數的樣板；實測表的表內值照 construction._table_impedance 的規則用 JAX 現算
+（對數頻率上實部、虛部各自線性內插，命中表列照表值），表外判定照 construction._outside_table（嚴格在端點外），
+底構造在整條軸上都算、再依「是否表外」用 jnp.where 挑。表內內插跟 numpy 那一份的差在最後一兩位（對數函式的實作不同），
+不是逐位；考卷照阻抗尺比。
 樣板建立要走既有入口，所以要在雙精度已開的行程裡建；單精度是「同一個行程裡交單精度陣列」。
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ import numpy as np
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.materials import transfer_matrix as tmm
-from aosr.materials.construction import _layer_matrix, _open_area, _outside_table, _table_impedance, surface_impedance
+from aosr.materials.construction import _layer_matrix, _open_area, surface_impedance
 from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, ConstructionNote, FabricLayer, Layer, MeasuredImpedance, MicroPerforatedLayer, MountedOnWall, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
 
 
@@ -67,18 +67,14 @@ class TemplateVariable:
 class ConstructionTemplate:
     """凍結構造加上「哪些連續欄位是變數」；基準值已用既有入口驗過、註記已取得。
 
-    貼在原牆上的構造：原牆是多層構造時帶它沒有變數的樣板（``wall_template``）；是實測表時帶表內值
-    （``wall_table``，樣板頻率軸 ``wall_frequencies_hz`` 上的對數內插）、表外頻點的索引（``wall_outside``）
-    與底構造沒有變數的樣板（``wall_template``，表外有頻點才有）。固定阻抗原牆與多層構造這幾格都是空的。
+    貼在原牆上的構造：原牆是多層構造時帶它沒有變數的樣板（``wall_template``），是實測表時帶底構造沒有變數的樣板；
+    固定阻抗原牆與多層構造這一格是空的。原牆的值一律不存，求值時現算。
     """
 
     material: Assembly | MountedOnWall
     variables: tuple[TemplateVariable, ...]
     notes: tuple[ConstructionNote, ...]
-    wall_table: tuple[complex, ...] = ()
-    wall_frequencies_hz: tuple[float, ...] = ()
     wall_template: ConstructionTemplate | None = None
-    wall_outside: tuple[int, ...] = ()
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -110,7 +106,7 @@ def build_template(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air:
     """用具體值跑一次 surface_impedance 把關並取註記；variables 不給就是全部可用變數。
 
     variables 給了就只放那幾個，其他欄位固定在基準值；名字不在可用清單裡就拒收。
-    貼在原牆上的構造：原牆不是變數；多層構造原牆與實測表的底構造另建沒有變數的樣板，實測表另存表內值。
+    貼在原牆上的構造：原牆不是變數；多層構造原牆與實測表的底構造另建沒有變數的樣板。
     """
     if not isinstance(material, Assembly | MountedOnWall):
         raise ValueError(f"可微入口只收多層構造（assembly）或貼在原牆上的構造（mounted_on_wall），收到 {material.kind}；"
@@ -133,12 +129,8 @@ def build_template(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air:
     if isinstance(wall, Assembly):
         return ConstructionTemplate(material, chosen, notes,
                                     wall_template=build_template(wall, frequencies_hz, air=air, ranges=ranges, variables=()))
-    axis = jnp.asarray(frequencies_hz)
-    outside = tuple(int(index) for index in np.flatnonzero(_outside_table(wall, axis)))
-    base = (build_template(wall.base_assembly, axis[np.asarray(outside)], air=air, ranges=ranges, variables=())
-            if outside else None)
-    return ConstructionTemplate(material, chosen, notes, tuple(complex(value) for value in np.asarray(_table_impedance(wall, axis))),
-                                tuple(float(value) for value in np.asarray(axis, dtype=np.float64)), base, outside)
+    # 底構造的合法性已在上面 surface_impedance 那一次把關（表外頻點走既有入口）；這裡只當沒有變數的樣板用，不另算註記。
+    return ConstructionTemplate(material, chosen, notes, wall_template=ConstructionTemplate(wall.base_assembly, (), ()))
 
 
 def _layer_with(layer: Layer, updates: dict[str, jax.Array]) -> Layer:
@@ -183,7 +175,7 @@ def surface_impedance_from_parameters(template: ConstructionTemplate, parameters
 
 def _wall_load(template: ConstructionTemplate, frequencies: jax.Array, angles: jax.Array | None,
                air: PhysicsConstants) -> jax.Array:
-    """原牆負載（求值的複數精度）：固定阻抗與多層構造用當下的空氣、頻率與角度現算；實測表見模組說明的已知限制。"""
+    """原牆負載（求值的複數精度）：三種原牆都用當下的空氣、頻率與角度現算，追蹤值的軸也一樣（見模組說明）。"""
     assert isinstance(template.material, MountedOnWall)
     wall = template.material.wall
     dtype = jnp.result_type(frequencies.dtype, jnp.complex64)
@@ -192,15 +184,28 @@ def _wall_load(template: ConstructionTemplate, frequencies: jax.Array, angles: j
     if isinstance(wall, Assembly):
         assert template.wall_template is not None
         return surface_impedance_from_parameters(template.wall_template, {}, frequencies, air=air, incidence_angles_deg=angles)
-    expected = np.asarray(template.wall_frequencies_hz)
-    if frequencies.ndim != 1 or frequencies.shape[0] != expected.shape[0] or (
-            not isinstance(frequencies, jax.core.Tracer)
-            and not np.array_equal(np.asarray(frequencies), expected.astype(np.asarray(frequencies).dtype))):
-        raise ValueError("原牆是實測表時只能在建樣板的那一條頻率軸上求值（表內值只在那裡算過）；換軸請重建樣板")
-    # 表內照局部反應攤開，表外同既有入口走底構造（用當下的空氣）。
-    load = tmm._broadcast_angles(jnp.asarray(np.asarray(template.wall_table, dtype=np.complex128), dtype=dtype), angles)
-    if template.wall_template is None:
-        return load
-    outside = np.asarray(template.wall_outside)
-    base = surface_impedance_from_parameters(template.wall_template, {}, frequencies[outside], air=air, incidence_angles_deg=angles)
-    return load.at[outside].set(base.astype(load.dtype))
+    # 表內照局部反應攤開，表外同既有入口走底構造（用當下的空氣）；底構造整條軸都算，再依表外遮罩挑。
+    assert template.wall_template is not None
+    load = tmm._broadcast_angles(_table_impedance(wall, frequencies).astype(dtype), angles)
+    base = surface_impedance_from_parameters(template.wall_template, {}, frequencies, air=air, incidence_angles_deg=angles)
+    outside = (frequencies < wall.points[0].frequency_hz) | (frequencies > wall.points[-1].frequency_hz)
+    return jnp.where(outside if angles is None else outside[:, None], base.astype(dtype), load)
+
+
+def _table_impedance(material: MeasuredImpedance, frequencies: jax.Array) -> jax.Array:
+    """construction._table_impedance 的 JAX 版（追蹤得過）：對數頻率上實部、虛部各自線性內插，公式照 numpy.interp
+    （斜率乘距左端點加左端點值）；命中表列照表值，包含端點。表外的值會被底構造換掉，這裡照邊段延伸、不裁切。"""
+    knots = jnp.log10(jnp.asarray([point.frequency_hz for point in material.points], dtype=frequencies.dtype))
+    x = jnp.log10(frequencies)
+    left = jnp.clip(jnp.searchsorted(knots, x, side="right") - 1, 0, knots.size - 2)
+
+    def interpolate(values: list[float]) -> jax.Array:
+        table = jnp.asarray(values, dtype=frequencies.dtype)
+        slope = (table[left + 1] - table[left]) / (knots[left + 1] - knots[left])
+        return slope * (x - knots[left]) + table[left]
+
+    impedance = (interpolate([point.real_pa_s_m for point in material.points])
+                 + 1j * interpolate([point.imag_pa_s_m for point in material.points]))
+    for point in material.points:
+        impedance = jnp.where(frequencies == point.frequency_hz, complex(point.real_pa_s_m, point.imag_pa_s_m), impedance)
+    return impedance

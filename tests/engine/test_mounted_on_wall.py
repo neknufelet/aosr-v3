@@ -1,7 +1,7 @@
 """貼在原牆上的構造（#990）：新增層背後接原牆的表面阻抗，不是剛背。
 
 算數全在隔離的雙精度子行程（同 test_construction_diff 的開法），父考卷只讀它寫在 tmp 的結果。
-性質：新增層厚度歸零就是原牆、原牆阻抗越大越像剛背（差距照原牆倍數縮小）、可微與非可微兩條路逐位相同、
+性質：新增層厚度歸零就是原牆、原牆阻抗越大越像剛背（差距照原牆倍數縮小）、可微與非可微兩條路相同（實測表原牆的表內內插照阻抗尺，其餘逐位）、換軸換空氣照新條件現算、
 梯度對中央差分（尺從傳遞矩陣移植考卷 import，不另寫數字）、格式收拒、方案讀回、三路報表接得上；
 控制組：舊多層構造（剛背）的三個入口逐位等於改動前主線釘住的值。
 """
@@ -134,11 +134,13 @@ def test_stiff_wall_converges_to_rigid_backing(tmp_path: Path) -> None:
 
 
 def test_differentiable_path_equals_existing_entry(paths: dict[str, dict[str, object]]) -> None:
-    """基準參數上可微入口逐位等於非可微入口：三種原牆、垂直與 Paris 角度格；而且真的不是剛背。"""
+    """基準參數上可微入口等於非可微入口：三種原牆、垂直與 Paris 角度格；而且真的不是剛背。
+    固定阻抗與多層構造原牆逐位；實測表原牆的表內值是 JAX 現算的內插（對數函式跟 numpy 差最後一兩位），照阻抗尺。"""
     assert set(paths) == set(WALL_KINDS)
     for name, row in paths.items():
-        _same(row["normal"], row["normal_existing"], f"{name}:normal")
-        _same(row["angles"], row["angles_existing"], f"{name}:angles")
+        check = _close if name == "measured" else _same
+        check(row["normal"], row["normal_existing"], f"{name}:normal")
+        check(row["angles"], row["angles_existing"], f"{name}:angles")
         assert not np.array_equal(_decode(row["normal"]), _decode(row["rigid_normal"])), name
         assert row["variables"] == ["layer1.thickness_m", "layer1.flow_resistivity_pa_s_m2", "layer2.thickness_m"], name
 
@@ -177,11 +179,9 @@ def test_gradients_match_central_difference(tmp_path: Path) -> None:
         assert nonzero[name] == variables[name], (name, sorted(variables[name] - nonzero[name]))
 
 
-def test_template_rejects_other_axis_and_is_not_rigid(tmp_path: Path) -> None:
-    """原牆是實測表時表內值只在建樣板的頻率軸上算過，具體值換軸或換長度拒收；樣板交給替身時不是剛性面；原牆的錯帶「原牆」前綴。"""
+def test_template_is_not_rigid_and_wall_errors_are_prefixed(tmp_path: Path) -> None:
+    """樣板交給替身時不是剛性面；原牆的錯帶「原牆」前綴。"""
     rows = cast(dict[str, object], _run("rejections", tmp_path))
-    for key in ("other_axis", "shorter_axis"):
-        assert "建樣板的那一條頻率軸" in cast(str, rows[key]), rows[key]
     assert cast(str, rows["bad_wall"]).startswith("原牆") and "超出手動試算範圍" in cast(str, rows["bad_wall"])
     assert rows["rigid_mask"] == [False, True, True, True, True, True]
 
@@ -192,25 +192,25 @@ def live_wall(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, o
 
 
 def test_wall_load_is_computed_live_for_axis_and_air(live_wall: dict[str, dict[str, object]]) -> None:
-    """原牆負載求值當下現算：換空氣後三種原牆的垂直、0 度、非可微入口三者一致（審查：垂直用舊快取、0 度用新空氣）；
-    固定阻抗與多層構造原牆在 jit 裡換一條同長的軸，照新軸算，等於非可微入口在新軸上的值（審查：靜默用舊原牆列）。"""
+    """原牆負載求值當下現算，三種原牆都一樣：
+    換空氣後垂直、0 度、非可微入口三者一致（審查：垂直用舊快取、0 度用新空氣）；
+    jit 裡換一條同長的軸（含實測表的表列頻點、表內外分界不同），垂直與 Paris 角度格都等於非可微入口在新軸上的值
+    （審查：實測表原牆靜默用舊表內值）。實測表的表內內插是 JAX 現算，跟 numpy 那一份差在最後一兩位，所以照阻抗尺。"""
     for name in WALL_KINDS:
         row = live_wall[name]
-        _same(row["air_normal"], row["air_existing"], f"{name}:air_normal")
+        check = _close if name == "measured" else _same
+        check(row["air_normal"], row["air_existing"], f"{name}:air_normal")
         _close(row["air_angle_zero"], row["air_existing"], f"{name}:air_angle_zero")
-        if name != "measured":
-            _close(row["jit_other_axis"], row["other_axis_existing"], f"{name}:jit_other_axis")
-    assert "jit_other_axis" not in live_wall["measured"]
+        _close(row["jit_other_axis"], row["other_axis_existing"], f"{name}:jit_other_axis")
+        _close(row["jit_other_axis_angles"], row["other_axis_angles_existing"], f"{name}:jit_other_axis_angles")
 
 
-def test_known_limitation_measured_wall_axis_cannot_be_checked_under_jit(live_wall: dict[str, dict[str, object]]) -> None:
-    """已知限制（不是想要的行為，釘成看得見的事實）：原牆是實測表時，jit 追蹤下看不到頻率軸的內容，
-    換一條同長的軸會靜默用建樣板那條軸的表內值——100 Hz 建、jit 裡求 1000 Hz 回 1000 Pa·s/m（表在 100 Hz 的值），
-    不是原牆在 1000 Hz 的 2000。具體值的同一個呼叫會拒收。要換軸請重建樣板；接搜尋的呼叫端要保證同一條軸。"""
-    row = live_wall["measured_limitation"]
-    np.testing.assert_array_equal(_decode(row["jit_other_axis"]), [1000.0 + 0j])
+def test_review_synthetic_measured_wall_follows_the_new_axis(live_wall: dict[str, dict[str, object]]) -> None:
+    """審查的合成表（100／1000 Hz 兩列）：100 Hz 建樣板，jit 與具體值在 1000 Hz 求，都回原牆在 1000 Hz 的表值 2000（命中表列逐位）。"""
+    row = live_wall["review_synthetic"]
     np.testing.assert_array_equal(_decode(row["wall_at_other_axis"]), [2000.0 + 0j])
-    assert "建樣板的那一條頻率軸" in cast(str, row["eager_other_axis"]), row["eager_other_axis"]
+    for key in ("jit_other_axis", "eager_other_axis"):
+        _close(row[key], row["wall_at_other_axis"], key)
 
 
 def _note_cases(tmp_path: Path) -> dict[str, tuple[SurfaceMaterial, tuple[ConstructionNote, ...]]]:

@@ -42,6 +42,8 @@ OBLIQUE_DEG = 60.
 STEP = 1e-5  # 中央差分相對步長，同 _construction_diff_probe。
 # 剛性極限：原牆取三個相隔一千倍的有限大阻抗（Pa·s/m），父考卷看差距照同一個倍數縮小；不用無窮大。
 RIGID_LOADS = (1e6, 1e9, 1e12)
+# 換軸用的另一條軸：跟 FREQUENCIES 同長，夾進實測表原牆的三個表列頻點（50／200／500 Hz），表內外分界跟原軸不同。
+OTHER_AXIS = tuple(sorted((*np.geomspace(21., 1900., 22).tolist(), 50., 200., 500.)))
 # 控制組：改動前主線上量這兩筆預設的三個入口，父考卷對釘住的位元。
 CONTROL_PRESETS = ("glass_wool_48k_50mm_gap50", "perforated_0p8mm_d10_gw24k_50mm")
 CONTROL_FREQUENCIES = (31.5, 125., 1000.)
@@ -230,55 +232,53 @@ def _error(action: Callable[[], object]) -> str:
 
 
 def rejections(air: PhysicsConstants) -> dict[str, object]:
-    """原牆是實測表時可微入口換頻率軸要拒收；樣板不是剛性面；原牆的拒收訊息帶「原牆」前綴。"""
+    """樣板不是剛性面；原牆的拒收訊息帶「原牆」前綴。"""
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     frequencies = jnp.asarray(FREQUENCIES)
-    material = _mounted()["measured"]
-    template = build_template(material, frequencies, air=air, ranges=ranges)
-    base = template.baseline_parameters()
+    template = build_template(_mounted()["measured"], frequencies, air=air, ranges=ranges)
     bad_wall = MountedOnWall(layers=_covering(), wall=Assembly(layers=(PorousLayer(
         thickness_m=.05, flow_resistivity_pa_s_m2=100., material_class="fibrous"),), backing="rigid"))
     mask = rigid_mask_from_templates([template, None, None, None, None, None])
     return {
-        "other_axis": _error(lambda: surface_impedance_from_parameters(template, base, frequencies * 1.01, air=air)),
-        "shorter_axis": _error(lambda: surface_impedance_from_parameters(template, base, frequencies[:3], air=air)),
         "bad_wall": _error(lambda: construction.surface_impedance(bad_wall, frequencies, air=air, ranges=ranges)),
         "rigid_mask": [bool(value) for value in np.asarray(mask)],
     }
 
 
-def _at_axis(template: ConstructionTemplate, parameters: Parameters, air: PhysicsConstants) -> Callable[[jax.Array], jax.Array]:
+def _at_axis(template: ConstructionTemplate, parameters: Parameters, air: PhysicsConstants,
+             angles: jax.Array | None = None) -> Callable[[jax.Array], jax.Array]:
     """頻率軸當 jit 的輸入（追蹤值），其他固定。"""
     def evaluate(axis: jax.Array) -> jax.Array:
-        return surface_impedance_from_parameters(template, parameters, axis, air=air)
+        return surface_impedance_from_parameters(template, parameters, axis, air=air, incidence_angles_deg=angles)
     return evaluate
 
 
 def live_wall(air: PhysicsConstants) -> dict[str, object]:
-    """原牆負載在求值當下現算：換頻率軸（具體值與 jit 下）、換空氣條件，可微入口對非可微入口在新條件下的值。
+    """原牆負載在求值當下現算：換頻率軸（jit 下，軸是追蹤值）、換空氣條件，可微入口對非可微入口在新條件下的值。
 
-    固定阻抗與多層構造原牆：換軸（同長）在 jit 下也照新軸算；換空氣後垂直、0 度、既有入口三者一致。
-    實測表原牆：換空氣同樣一致（表外走底構造用當下空氣）；換軸是已知限制——jit 下看不到軸的內容，
-    回的是建樣板那條軸的表內值（審查的合成表：100／1000 Hz 兩列，在 100 Hz 建、jit 裡求 1000 Hz）。
+    三種原牆都比：換一條同長的軸（含實測表的三個表列頻點，表內外分界跟建樣板那條不同）在 jit 下照新軸算，
+    垂直與 Paris 角度格；換空氣後垂直、0 度、既有入口三者一致。另帶審查的合成表（100／1000 Hz 兩列，
+    100 Hz 建樣板、jit 裡求 1000 Hz）。
     """
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
-    frequencies = jnp.asarray(FREQUENCIES)
-    other = frequencies * 1.01
+    frequencies, angles = jnp.asarray(FREQUENCIES), tmm.diffuse_incidence_angles_deg(method="paris")
+    other = jnp.asarray(OTHER_AXIS)
     heavy = air.model_copy(update={"air_density_kg_m3": 2 * air.air_density_kg_m3})
     rows: dict[str, object] = {}
     for name, material in _mounted().items():
         template = build_template(material, frequencies, air=air, ranges=ranges)
         base = template.baseline_parameters()
-        row: dict[str, object] = {
+        rows[name] = {
             "air_normal": _bits(surface_impedance_from_parameters(template, base, frequencies, air=heavy)),
             "air_angle_zero": _bits(surface_impedance_from_parameters(template, base, frequencies, air=heavy,
                                                                       incidence_angles_deg=jnp.asarray([0.]))[:, 0]),
             "air_existing": _bits(construction.surface_impedance(material, frequencies, air=heavy, ranges=ranges)[0]),
+            "jit_other_axis": _bits(jax.jit(_at_axis(template, base, air))(other)),
+            "other_axis_existing": _bits(construction.surface_impedance(material, other, air=air, ranges=ranges)[0]),
+            "jit_other_axis_angles": _bits(jax.jit(_at_axis(template, base, air, angles))(other)),
+            "other_axis_angles_existing": _bits(construction.surface_impedance_at_angles(
+                material, other, angles, air=air, ranges=ranges)[0]),
         }
-        if name != "measured":
-            row["jit_other_axis"] = _bits(jax.jit(_at_axis(template, base, air))(other))
-            row["other_axis_existing"] = _bits(construction.surface_impedance(material, other, air=air, ranges=ranges)[0])
-        rows[name] = row
     table = MeasuredImpedance(points=(
         MeasuredImpedancePoint(frequency_hz=100., real_pa_s_m=1000., imag_pa_s_m=0.),
         MeasuredImpedancePoint(frequency_hz=1000., real_pa_s_m=2000., imag_pa_s_m=0.)),
@@ -286,9 +286,9 @@ def live_wall(air: PhysicsConstants) -> dict[str, object]:
     synthetic = MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=table)
     template = build_template(synthetic, jnp.asarray([100.]), air=air, ranges=ranges)
     zero = {"layer1.thickness_m": jnp.asarray(0.)}
-    rows["measured_limitation"] = {
+    rows["review_synthetic"] = {
         "jit_other_axis": _bits(jax.jit(_at_axis(template, zero, air))(jnp.asarray([1000.]))),
-        "eager_other_axis": _error(lambda: surface_impedance_from_parameters(template, zero, jnp.asarray([1000.]), air=air)),
+        "eager_other_axis": _bits(surface_impedance_from_parameters(template, zero, jnp.asarray([1000.]), air=air)),
         "wall_at_other_axis": _bits(construction.surface_impedance(table, jnp.asarray([1000.]), air=air, ranges=ranges)[0]),
     }
     return rows
