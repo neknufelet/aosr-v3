@@ -213,6 +213,36 @@ def test_review_synthetic_measured_wall_follows_the_new_axis(live_wall: dict[str
         _close(row[key], row["wall_at_other_axis"], key)
 
 
+# 單精度的尺：四個 float32 機器精度（相對）。值本身經過單精度的對數與內插，雙精度那一份當真值。
+SINGLE_REL = 4 * float(np.finfo(np.float32).eps)
+
+
+def test_single_precision_close_knots_stay_finite_and_match_existing_entry(tmp_path: Path) -> None:
+    """單精度下很近的表列（審查：1000 與 1000.0001220703125 Hz 取對數後相等、除以零出 NaN；另三案：兩列在單精度下
+    捨入成同一個值、求值點落在兩列重合之間、表中間兩列重合、表的下端存不下）：直接與 jit、垂直與角度，值有限而且新增層厚度 0 時等於既有入口（雙精度）
+    同一頻點的原牆值（照單精度的尺）；對新增層厚度的梯度在厚度 0 與 1 cm 都有限。"""
+    rows = cast(dict[str, dict[str, object]], _run("close_knots", tmp_path))
+    assert set(rows) == {"review", "collide", "straddle", "middle", "edge"}
+    for name, row in rows.items():
+        results = cast(list[dict[str, object]], row["results"])
+        assert len(results) == 8, name
+        for result in results:
+            bits = cast(dict[str, object], result["value"])
+            assert bits["dtype"] == "complex64", (name, result)
+            value = _decode(bits)
+            assert np.all(np.isfinite(value)) and math.isfinite(cast(float, result["gradient"])), (name, result)
+            if result["thickness"] == 0.0 and name != "middle":
+                existing = _decode(row["existing_angles" if result["angles"] else "existing"])
+                np.testing.assert_allclose(value, existing, rtol=SINGLE_REL, atol=0, err_msg=f"{name}:{result}")
+            elif result["thickness"] == 0.0:
+                # 單精度下 1000 Hz 跟 1000.00001 Hz 那一列分不出（同一個可表示值），取那一列的表值 2000；
+                # 雙精度既有入口是 1999.99（差在頻率解析度以下）。挑錯段（照捨入後的表列找）會回 3000。
+                np.testing.assert_array_equal(value, np.full(value.shape, 2000.0 + 0j), err_msg=f"{name}:{result}")
+    np.testing.assert_allclose(_decode(rows["review"]["existing"]), [1500.0], rtol=SINGLE_REL)
+    np.testing.assert_allclose(_decode(rows["straddle"]["existing"]), [1500.0], rtol=SINGLE_REL)
+    assert abs(_decode(rows["edge"]["existing"])[0] - 1000.0) > 100.0  # 50 Hz 照真值在表外：既有入口走底構造，不是表值
+
+
 def _note_cases(tmp_path: Path) -> dict[str, tuple[SurfaceMaterial, tuple[ConstructionNote, ...]]]:
     rows = cast(dict[str, dict[str, object]], _run("notes", tmp_path))
     return {name: (TypeAdapter(SurfaceMaterial).validate_python(row["material"]),

@@ -294,6 +294,47 @@ def live_wall(air: PhysicsConstants) -> dict[str, object]:
     return rows
 
 
+def close_knots(air: PhysicsConstants) -> dict[str, object]:
+    """單精度下很近的表列（審查修補二的擋項）四案：review 表列 1000 與 1000.0001220703125 Hz（對數後在單精度相等）；
+    collide 1000 與 1000.00001 Hz（單精度下兩列捨入成同一個值，1000 存得下、另一列存不下）；
+    straddle 999.99999 與 1000.00001 Hz（兩列都捨入成 1000，求 1000 Hz 落在兩列之間：分母是零那一支）；
+    middle 999、1000.00001、1000.00002、1001 Hz（中間兩列重合，求 1000 Hz 要挑對段）；
+    edge 下端 50.000001 Hz 在單精度存不下（捨入成 50），求 50 Hz 照真值是表外（走底構造）。新增層厚度 0（等於原牆本身）與 1 cm 各求一次，
+    單精度頻率、角度與參數，直接與 jit、垂直與角度；回值、有限與否、對新增層厚度的梯度，與既有入口（雙精度）同一頻點的值。"""
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    base = Assembly(layers=(AirLayer(thickness_m=.1),), backing="air")
+    cases: dict[str, tuple[tuple[tuple[float, float], ...], tuple[float, ...]]] = {
+        "review": (((1000., 1000.), (1000.0001220703125, 2000.)), (1000.00006103515625,)),
+        "collide": (((1000., 1000.), (1000.00001, 2000.)), (1000., 1000.00006103515625)),
+        "straddle": (((999.99999, 1000.), (1000.00001, 2000.)), (1000.,)),
+        "middle": (((999., 1000.), (1000.00001, 2000.), (1000.00002, 3000.), (1001., 4000.)), (1000.,)),
+        "edge": (((50.000001, 1000.), (500., 2000.)), (50., 499.99997))}
+    angles = jnp.asarray([0., 60.], dtype=jnp.float32)
+    rows: dict[str, object] = {}
+    for name, (points, axis) in cases.items():
+        wall = MeasuredImpedance(points=tuple(MeasuredImpedancePoint(frequency_hz=f, real_pa_s_m=z, imag_pa_s_m=0.)
+                                              for f, z in points), base_assembly=base, source_and_conditions="考卷假表")
+        frequencies = jnp.asarray(axis, dtype=jnp.float32)
+        exact = jnp.asarray(np.asarray(frequencies, dtype=np.float64))
+        template = build_template(MountedOnWall(layers=(AirLayer(thickness_m=.01),), wall=wall), exact, air=air, ranges=ranges)
+        results: list[dict[str, object]] = []
+        for thickness in (0., .01):
+            parameters = {"layer1.thickness_m": jnp.asarray(thickness, dtype=jnp.float32)}
+            for incidence in (None, angles):
+                def evaluate(values: Parameters, incidence: jax.Array | None = incidence) -> jax.Array:
+                    return surface_impedance_from_parameters(template, values, frequencies, air=air, incidence_angles_deg=incidence)
+                for mode, function in (("eager", evaluate), ("jit", jax.jit(evaluate))):
+                    value = function(parameters)
+                    gradient = jax.grad(lambda values, function=function: jnp.sum(jnp.real(function(values))))(parameters)
+                    results.append({"thickness": thickness, "angles": incidence is not None, "mode": mode, "value": _bits(value),
+                                    "gradient": float(gradient["layer1.thickness_m"])})
+        rows[name] = {"results": results,
+                      "existing": _bits(construction.surface_impedance(wall, exact, air=air, ranges=ranges)[0]),
+                      "existing_angles": _bits(construction.surface_impedance_at_angles(
+                          wall, exact, jnp.asarray(np.asarray(angles, dtype=np.float64)), air=air, ranges=ranges)[0])}
+    return rows
+
+
 def notes(air: PhysicsConstants) -> dict[str, object]:
     """註記兩案（10 Hz）：新增第 1 層 foam 與原牆第 1 層 fibrous 同樣小松多孔層（同號註記）；
     實測表原牆 50–500 Hz 的補值，底構造第 1 層同時是材料模型外推。"""
@@ -344,7 +385,7 @@ def main() -> None:
     mode, output = sys.argv[1:]
     air = load_physics_constants(config_path("physics_constants.toml"))
     actions: dict[str, Callable[[PhysicsConstants], object]] = {
-        "control": control, "zero": zero, "rigid": rigid, "paths": paths, "gradients": gradients, "live_wall": live_wall, "notes": notes,
+        "control": control, "zero": zero, "rigid": rigid, "paths": paths, "gradients": gradients, "live_wall": live_wall, "notes": notes, "close_knots": close_knots,
         "rejections": rejections, "three_lane": three_lane}
     result = {"dtype": str(jnp.asarray(0.).dtype), "rows": actions[mode](air)}
     Path(output).write_text(json.dumps(result, allow_nan=False))
