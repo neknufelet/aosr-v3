@@ -15,6 +15,8 @@
 替身鏈與完整模型都用同一支 ``surface_impedance`` 求它的阻抗；設計清單必須照 ``Wall.all()`` 的順序給六面。終點入口另外核身分：
 每面的樣板構造必須等於它 preset id 在構造預設清單裡的那一份（:func:`checked_design_identity`），報告每面再記
 樣板構造的摘要（``material_digest``），preset id 跟實際用的材料不會脫鉤。
+貼在原牆上（#990，``SurfaceDesign.mount`` 是 ``on_wall``）：匯出的材料是 ``MountedOnWall``（換過厚度與空腔的層加那一面原牆），
+完整模型、``scene_with_materials``、匯出方案與三路報表都走同一支 ``surface_impedance``；摘要是貼牆那份構造的（含原牆）。
 材料求阻抗用的空氣（``air``）必須跟完整模型算子、替身同一組密度與聲速，不等就拒收。
 
 方案格式沒有「剛性」的寫法（表面分區每面一種材料、固定阻抗欄只收正數），所以 :func:`scene_with_materials`
@@ -46,15 +48,16 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
 from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.frequency_axis import LowFrequencyAxis
-from aosr.config.material_gradient import MaterialGradientSettings
+from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.material_gradient import (
-    FloatVector, SurfaceDesign, chain_objective, checked_theta, is_feasible, wall_surface_ids,
+    FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, is_feasible,
+    wall_surface_ids,
 )
 from aosr.materials.construction import surface_impedance
-from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, FullSolver, ReducedModel, impedance_rows, walls_at
 from aosr.physics.fem_reduced_check import validate_reduced
@@ -97,9 +100,10 @@ def material_digest(material: SurfaceMaterial) -> str:
 
 
 def design_digest(design: SurfaceDesign) -> str | None:
-    """一面設計的材料摘要：有樣板是換 θ 之前的樣板構造（``design.material``）的，「不貼」是保留的原牆材料的，
-    真剛性 None。終點報告與 ``result.json`` 用同一個定義。"""
-    material = design.material if design.material is not None else design.kept_material
+    """一面設計的材料摘要：有樣板是換 θ 之前的樣板構造的（剛背是 ``design.material``；貼在原牆上是
+    ``MountedOnWall(樣板的層, 原牆)``，安裝方式與原牆都在裡面），「不貼」是保留的原牆材料的，真剛性 None。
+    終點報告與 ``result.json`` 用同一個定義。"""
+    material = design_template_material(design) if design.material is not None else design.kept_material
     return None if material is None else material_digest(material)
 
 
@@ -178,7 +182,7 @@ def exported_theta(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVec
 
 def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: float) -> SurfaceMaterial | None:
     """這一面的材料：從 ``design.material``（替身鏈同一份）換棉板厚度，空氣層照規則換厚度或拿掉；
-    「不貼」面原樣交出保留的原牆材料，真剛性面 None。"""
+    「不貼」面原樣交出保留的原牆材料，真剛性面 None；貼在原牆上的面交出 ``MountedOnWall``（換過的層加原牆）。"""
     material = design.material
     if material is None:
         return design.kept_material
@@ -194,6 +198,9 @@ def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: flo
             layers.append(PorousLayer.model_validate({**layer.model_dump(), "thickness_m": float(spec.thickness_m)}))
         elif cavity is not None:
             layers.append(AirLayer(thickness_m=cavity))
+    if design.mount == MOUNT_ON_WALL:
+        assert design.backing_material is not None
+        return MountedOnWall(layers=tuple(layers), wall=design.backing_material)
     return Assembly(layers=tuple(layers), backing=material.backing)
 
 

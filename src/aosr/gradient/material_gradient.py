@@ -12,7 +12,10 @@
 設計變數只有每面棉板厚度（多孔層）與空腔深度（空氣層），樣板有那一層才有那個變數；
 流阻與板材幾何固定、每面樣板固定、沒有樣板的面沒有變數。沒有樣板的面有兩種：帶 ``kept_material``
 （保留方案原本的牆，#561 辛三：產品路徑 preset 寫 none 的面一律是這種）整條鏈用那份材料的垂直入射阻抗（常數）；
-兩個都沒有才是剛性（合成題用）。θ 是一維浮點陣列，順序照面序、
+兩個都沒有才是剛性（合成題用）。
+安裝方式（#990，``Mount``）每次搜尋一個值：``rigid`` 是樣板照原樣剛背；``on_wall`` 是「貼在原牆上」——貼樣板的面
+新增層背後接那面牆在方案裡原本的材料（``SurfaceDesign.backing_material``），整條鏈與終點都用
+``MountedOnWall(layers=樣板的層, wall=原牆)``（:func:`design_template_material`）；不貼的面照舊保留原牆。θ 是一維浮點陣列，順序照面序、
 每面先厚度後空腔，:func:`design_names` 列出來。精度跟 θ 走：雙精度 θ 給雙精度目標，
 單精度 θ 給單精度；本模組不碰 JAX 全域設定。純函式，沒有命令列、沒有行程、不印東西。
 """
@@ -21,7 +24,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, Literal, NamedTuple
+from typing import Final, Literal, NamedTuple, TypeAlias
 
 import jax
 import jax.numpy as jnp
@@ -30,13 +33,17 @@ from numpy.typing import NDArray
 from pydantic import TypeAdapter
 
 from aosr.config.construction_presets import ConstructionPreset
-from aosr.config.material_gradient import DescentSettings, MaterialGradientSettings
+from aosr.config.material_gradient import (
+    MOUNT_ON_WALL, MOUNT_RIGID, MOUNTS, DescentSettings, MaterialGradientSettings, Mount,
+)
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, variable_name
-from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import (
+    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
+)
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import (
@@ -59,6 +66,8 @@ LoopStopReason = Literal["已確認候選內沒有超過門檻", "沒有候選",
 LOOP_STOP_REASONS: Final[tuple[LoopStopReason, ...]] = (
     LOOP_STOP_NO_IMPROVEMENT, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_MAX_EVALUATIONS)
 _THICKNESS = "thickness_m"
+# 貼在原牆上時原牆收的型別（``MountedOnWall.wall``）：不收本身已是貼牆構造的材料（只有一層巢狀）。
+WallMaterial: TypeAlias = Assembly | ConstantImpedance | MeasuredImpedance
 
 ChainObjective = Callable[[jax.Array], tuple[jax.Array, GradientObjectiveArrays]]
 Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]]
@@ -91,6 +100,8 @@ class SurfaceDesign:
     厚度界是合法厚度的最薄到最厚，空腔界是家族的空腔範圍（公尺）。
     ``material`` 是 None 時：``kept_material`` 有值就是「不貼、保留方案原本的牆」（整條鏈用這份材料的垂直入射阻抗，
     常數、沒有變數），兩個都 None 才是剛性面。有樣板的面不收 ``kept_material``。
+    ``mount`` 是這一次搜尋的安裝方式（#990）；``backing_material`` 是貼在原牆上時那一面原本的牆，只在 ``on_wall``
+    而且有樣板時必填，其他情況拒收。``material`` 仍是 preset 那份構造（終點照舊逐欄核身分）。
     """
 
     surface_id: str
@@ -105,10 +116,16 @@ class SurfaceDesign:
     legal_thicknesses_m: tuple[float, ...]
     max_total_depth_m: float | None
     kept_material: SurfaceMaterial | None = None
+    mount: Mount = MOUNT_RIGID
+    backing_material: WallMaterial | None = None
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():
             raise ValueError("面代號不可空白")
+        if self.mount not in MOUNTS:
+            raise ValueError(f"面 {self.surface_id} 的安裝方式只收 {list(MOUNTS)}，收到 {self.mount!r}")
+        if self.backing_material is not None and (self.material is None or self.mount != MOUNT_ON_WALL):
+            raise ValueError(f"面 {self.surface_id} 只有貼在原牆上而且有樣板時才收原牆")
         if self.material is None:
             if (self.preset_id is not None or self.family_id is not None or self.variables or self.lower
                     or self.upper or self.thickness_variable is not None or self.cavity_variable is not None
@@ -117,6 +134,8 @@ class SurfaceDesign:
             return
         if self.kept_material is not None:
             raise ValueError(f"面 {self.surface_id} 有樣板構造，不收保留原牆的材料")
+        if self.mount == MOUNT_ON_WALL and not isinstance(self.backing_material, WallMaterial):
+            raise ValueError(f"面 {self.surface_id} 貼在原牆上，要給那一面原本的牆（固定阻抗、實測阻抗表或多層構造）")
         kinds = _variable_kinds(self.material)
         unknown = [name for name in self.variables if name not in kinds]
         if unknown:
@@ -213,7 +232,8 @@ def wall_surface_ids() -> tuple[str, ...]:
 
 
 def _surface_design(surface_id: str, preset_id: str, settings: MaterialGradientSettings,
-                    presets: Mapping[str, ConstructionPreset]) -> SurfaceDesign:
+                    presets: Mapping[str, ConstructionPreset], *, mount: Mount = MOUNT_RIGID,
+                    kept: Mapping[str, SurfaceMaterial] | None = None) -> SurfaceDesign:
     preset = presets.get(preset_id)
     if preset is None:
         raise ValueError(f"preset id 不認識：{preset_id}")
@@ -239,26 +259,65 @@ def _surface_design(surface_id: str, preset_id: str, settings: MaterialGradientS
         surface_id=surface_id, preset_id=preset_id, family_id=family.id, material=material,
         variables=tuple(name for name in (thickness, cavity) if name is not None),
         lower=tuple(lower), upper=tuple(upper), thickness_variable=thickness, cavity_variable=cavity,
-        legal_thicknesses_m=family.thicknesses_m, max_total_depth_m=family.max_total_depth_m)
+        legal_thicknesses_m=family.thicknesses_m, max_total_depth_m=family.max_total_depth_m,
+        mount=mount, backing_material=_backing(surface_id, material, mount, kept))
 
 
-def _plain_design(surface_id: str, kept: Mapping[str, SurfaceMaterial] | None) -> SurfaceDesign:
+def _backing(surface_id: str, material: Assembly, mount: Mount,
+             kept: Mapping[str, SurfaceMaterial] | None) -> WallMaterial | None:
+    """貼在原牆上的面背後那面牆（``kept`` 那一面）；剛背 None。preset 不是剛背、缺原牆或原牆本身已是貼牆構造都拒收。"""
+    if mount != MOUNT_ON_WALL:
+        return None
+    if material.backing != "rigid":
+        raise ValueError(f"面 {surface_id} 的樣板背後不是剛背（{material.backing}），不能改成貼在原牆上")
+    wall = None if kept is None else kept.get(surface_id)
+    if wall is None:
+        raise ValueError(f"面 {surface_id} 貼在原牆上，但方案原本的牆的材料清單沒有這一面")
+    if isinstance(wall, MountedOnWall):
+        raise ValueError(f"面 {surface_id} 方案原本的牆已經是貼在原牆上的構造，不能再貼一層")
+    return wall
+
+
+def design_template_material(design: SurfaceDesign) -> Assembly | MountedOnWall | None:
+    """替身鏈建樣板、終點摘要用的構造（換 θ 之前）：剛背是 preset 那份 ``material``；貼在原牆上是
+    ``MountedOnWall(layers=那份的層, wall=原牆)``；沒有樣板 None。"""
+    if design.material is None:
+        return None
+    if design.mount != MOUNT_ON_WALL:
+        return design.material
+    assert design.backing_material is not None
+    return MountedOnWall(layers=design.material.layers, wall=design.backing_material)
+
+
+def designs_mount(designs: Sequence[SurfaceDesign]) -> Mount:
+    """一串設計的安裝方式（每次搜尋一個值）；混了兩種拒收。"""
+    found = {design.mount for design in designs}
+    if len(found) != 1:
+        raise ValueError(f"一次搜尋只有一種安裝方式，設計清單有 {sorted(found)}")
+    return found.pop()
+
+
+def _plain_design(surface_id: str, kept: Mapping[str, SurfaceMaterial] | None,
+                  mount: Mount = MOUNT_RIGID) -> SurfaceDesign:
     """preset 是 None 的面：給了 ``kept`` 就是保留原牆（``kept`` 一定要有這一面），沒給才是剛性。"""
     if kept is None:
-        return SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None)
+        return SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None, mount=mount)
     material = kept.get(surface_id)
     if material is None:
         raise ValueError(f"面 {surface_id} 不貼，但保留原牆的材料清單沒有這一面")
-    return SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None, kept_material=material)
+    return SurfaceDesign(surface_id, None, None, None, (), (), (), None, None, (), None, kept_material=material,
+                         mount=mount)
 
 
 def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
                          presets: Sequence[ConstructionPreset], *,
-                         kept: Mapping[str, SurfaceMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
+                         kept: Mapping[str, SurfaceMaterial] | None = None,
+                         mount: Mount = MOUNT_RIGID) -> tuple[SurfaceDesign, ...]:
     """一串（面代號, preset id 或 None）→ 每面的設計。面數不限，面代號不可重複。
 
     preset 是 None 的面：給了 ``kept``（面代號 → 方案原本的材料）就是「不貼、保留原牆」，``kept`` 缺這一面就拒收；
-    沒給 ``kept`` 才是剛性面（合成題用）。有 preset 的面不看 ``kept``。
+    沒給 ``kept`` 才是剛性面（合成題用）。有 preset 的面：剛背不看 ``kept``；``mount`` 是 ``on_wall`` 時背後接
+    ``kept`` 那一面（缺就拒收）。
     """
     if not surfaces:
         raise ValueError("至少要有一個面")
@@ -267,20 +326,21 @@ def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: M
         raise ValueError(f"面代號重複：{ids}")
     by_id = {preset.id: preset for preset in presets}
     return tuple(
-        _plain_design(surface_id, kept) if preset_id is None
-        else _surface_design(surface_id, preset_id, settings, by_id)
+        _plain_design(surface_id, kept, mount) if preset_id is None
+        else _surface_design(surface_id, preset_id, settings, by_id, mount=mount, kept=kept)
         for surface_id, preset_id in surfaces)
 
 
 def wall_designs_from_presets(preset_ids: Sequence[str | None], settings: MaterialGradientSettings,
                               presets: Sequence[ConstructionPreset], *,
-                              kept: Mapping[str, SurfaceMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
-    """今天的替身只有六面：照 ``Wall.all()`` 給六個 preset id（或 None），面代號是牆名；``kept`` 同
+                              kept: Mapping[str, SurfaceMaterial] | None = None,
+                              mount: Mount = MOUNT_RIGID) -> tuple[SurfaceDesign, ...]:
+    """今天的替身只有六面：照 ``Wall.all()`` 給六個 preset id（或 None），面代號是牆名；``kept``、``mount`` 同
     :func:`designs_from_presets`（鍵是牆名）。"""
     names = wall_surface_ids()
     if len(preset_ids) != len(names):
         raise ValueError(f"六面牆要給 {len(names)} 個 preset id（照 Wall.all()），收到 {len(preset_ids)} 個")
-    return designs_from_presets(tuple(zip(names, preset_ids, strict=True)), settings, presets, kept=kept)
+    return designs_from_presets(tuple(zip(names, preset_ids, strict=True)), settings, presets, kept=kept, mount=mount)
 
 
 # ---- 扁平化 ----
@@ -379,6 +439,16 @@ def kept_impedance_rows(designs: Sequence[SurfaceDesign], frequencies: Sequence[
     return tuple(rows)
 
 
+def design_templates(designs: Sequence[SurfaceDesign], frequencies_hz: jax.Array, *, air: PhysicsConstants,
+                     ranges: PorousModelRanges) -> tuple[ConstructionTemplate | None, ...]:
+    """每面的可微樣板（:func:`design_template_material` 那份構造、設計變數照 ``design.variables``）；沒有樣板的面 None。
+    用具體值建，要在雙精度已開的行程裡呼叫。"""
+    return tuple(
+        None if (material := design_template_material(design)) is None
+        else build_template(material, frequencies_hz, air=air, ranges=ranges, variables=design.variables)
+        for design in designs)
+
+
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64]) -> ChainObjective:
@@ -387,7 +457,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
     梯度沿新合分走；舊合分（``screening_total``）同一次求值一起交回。樣板用具體值建，要在雙精度已開的行程裡呼叫；
-    設計清單照 ``Wall.all()`` 對到替身的六面。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
+    設計清單照 ``Wall.all()`` 對到替身的六面。樣板照 :func:`design_templates`（貼在原牆上的面背後接原牆）。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
     目標函式裡轉成 θ 對應的複數精度、換進那一列，剛性遮罩那一格是 False；求值入口的語意（None 樣板＝剛性）不動。
     """
     walls = Wall.all()
@@ -401,10 +471,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         raise ValueError("目標常數的頻率軸長度跟替身不同")
     constants = reduced_constants(model)
     double_axis = jnp.asarray(axis)
-    templates: tuple[ConstructionTemplate | None, ...] = tuple(
-        None if design.material is None
-        else build_template(design.material, double_axis, air=air, ranges=ranges, variables=design.variables)
-        for design in designs)
+    templates = design_templates(designs, double_axis, air=air, ranges=ranges)
     frozen_designs = tuple(designs)
     kept_rows = tuple((index, row) for index, row in enumerate(kept_impedance_rows(designs, axis, air=air, ranges=ranges))
                       if row is not None)

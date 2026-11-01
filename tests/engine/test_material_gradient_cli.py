@@ -531,6 +531,7 @@ def test_start_project_records_inputs_and_identities(runs: tuple[Path, Record]) 
     assert project["mesh_hash"] == manifest["mesh_hash"]
     assert project["presets"] == list(PRESETS) and project["purpose"] == PURPOSE
     assert project["gradient_id"] == folder.name
+    assert "mount" not in project  # #990：不給 --mount 就是剛背，剛背不寫這一格（逐位同加這一格之前）
     scheme_document = Scheme.model_validate_json(scheme.read_text(encoding="utf-8"))
     assert project["source_points"] == {name: [float(value).hex() for value in point.as_tuple()]
                                         for name, point in scheme_document.speakers.items()}
@@ -572,7 +573,7 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
                     else adapter.validate_python(by_id[design.preset_id].material))
         expected.append({"surface_id": design.surface_id, "preset_id": design.preset_id,
                          "thickness_m": values[0] if values else None, "cavity_m": values[1] if size > 1 else None,
-                         "material_digest": endpoint.material_digest(material)})
+                         "material_digest": endpoint.material_digest(material), "mount": "rigid"})
         offset += size
     assert result["surfaces"] == expected
     assert (result["value"], result["round_stop_reason"], result["evaluations"]) == (

@@ -19,6 +19,9 @@
 
 ``--presets`` 寫 ``none`` 的面是「不貼、保留方案原本的牆」（老闆 10-28：不貼算一個選項、用現在的六面當起點）：
 搜尋、終點、匯出都用方案場景那一面原本的材料，不是剛性。
+``--mount``（#990，安裝方式，每次搜尋一個值，預設 ``rigid``）：``on_wall`` 是「貼在原牆上」——貼樣板的面新增層背後接
+方案場景那一面原本的牆（不是剛背），換樣板沿用；記進 ``project.json``，非剛背時資料夾名也不同。只有 ``start`` 會開新搜尋，
+``resume``／``endpoint`` 照 ``project.json`` 記的安裝方式。
 
 離開碼跟擺位搜尋命令列同一套：0 完成、1 失敗（含替身准用閘門拒用，錯誤原文寫標準錯誤）、2 參數錯、3 中斷或停止記號。
 資料夾鎖：資料夾本身的描述子 ``flock``，子行程經 ``pass_fds`` 繼承；父行程只關自己那一份、不解鎖。
@@ -56,6 +59,7 @@ from typing import TYPE_CHECKING, Final
 from aosr import runtime
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
+from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
 
 if TYPE_CHECKING:
     from aosr.gradient.run import GradientProject
@@ -95,6 +99,8 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--settings", type=Path, default=config_path("material_gradient.toml"))
     start.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     start.add_argument("--engine-commit", default=None)
+    start.add_argument("--mount", choices=MOUNTS, default=MOUNT_RIGID,
+                       help="安裝方式：rigid 樣板照原樣（剛背）；on_wall 貼在原牆上（新增層背後接方案原本那面牆）")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -198,7 +204,8 @@ def _start(args: argparse.Namespace) -> int:
     capabilities = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     run.designs_for(args.presets, settings,
-                    kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity))
+                    kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity),
+                    mount=args.mount)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -212,7 +219,7 @@ def _start(args: argparse.Namespace) -> int:
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
-                               objective_settings_fingerprint=objective.fingerprint)
+                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount)
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
@@ -220,7 +227,7 @@ def _start(args: argparse.Namespace) -> int:
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
-        objective_settings_fingerprint=objective.fingerprint)
+        objective_settings_fingerprint=objective.fingerprint, mount=args.mount)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)

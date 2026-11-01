@@ -20,6 +20,7 @@
 不是嚴格局部極大，例如緊貼更高的端點）。
 報告只讀、不接續，所以加代理之前的資料夾（庚二帳本 v4、換樣板帳本 v1、結果 v3、終點 v2，示範房那一種）照樣讀得回，
 那些列印「舊合分」並註明沒有代理；接續與終點仍拒收它們。
+#990：狀態之後一行印安裝方式（:func:`mount_line`，中文、不印代號）；貼在原牆上時最後可行點每個貼樣板的面另印它背後那面原牆。
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from typing import Final
 
 from pydantic import BaseModel, ValidationError
 
+from aosr.config.material_gradient import MOUNT_ON_WALL
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
@@ -54,6 +56,9 @@ ENDPOINT_HEADING: Final = "終點完整模型重算（"
 LEGACY_SCORE_NOTE: Final = "加大峰代理之前的帳本：值就是舊合分，沒有新合分與代理（接續會拒收、要重跑）"
 LEGACY_ROW_MARK: Final = "（無代理）"
 LEGACY_ENDPOINT_NOTE: Final = "加大峰代理之前的終點：只有舊合分，沒有新合分、代理與上界"
+MOUNT_ON_WALL_LINE: Final = "安裝方式：貼在原牆上（貼樣板的面新增層背後接方案原本那面牆，不是剛背；換樣板沿用）"
+MOUNT_RIGID_LINE: Final = "安裝方式：剛背（樣板照原樣，新增層背後是剛性牆）"
+MOUNTED_TEXT: Final = "貼在原牆上"
 PROXY_MISMATCH: Final = "代理與內部最大殘差對不上"
 _MM: Final = 1000.0
 
@@ -173,8 +178,24 @@ def _kept_texts(project: GradientProject) -> dict[str, str]:
     return {wall.wall_name(): f"不貼（保留原牆：{material_text(material)}）" for wall, material in materials.items()}
 
 
+def mount_line(project: GradientProject) -> str:
+    """安裝方式那一行（中文、不印代號）。"""
+    return MOUNT_ON_WALL_LINE if project.mount == MOUNT_ON_WALL else MOUNT_RIGID_LINE
+
+
+def _mounted_texts(project: GradientProject) -> dict[str, str]:
+    """貼在原牆上時，貼樣板的面那一行後面加的那一句（背後那面原牆）；剛背是空的。方案檔讀不到時每面都說讀不到。"""
+    if project.mount != MOUNT_ON_WALL:
+        return {}
+    try:
+        materials = project_wall_materials(project, load_scheme(Path(project.scheme_path)))
+    except (OSError, ValueError) as error:
+        return {wall.wall_name(): f"，{MOUNTED_TEXT}（方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()}
+    return {wall.wall_name(): f"，{MOUNTED_TEXT}（原牆：{material_text(material)}）" for wall, material in materials.items()}
+
+
 def _point_lines(layout: Layout, row: MaterialGradientRow | TemplateRow | None,
-                 kept: dict[str, str]) -> list[str]:
+                 kept: dict[str, str], mounted: Mapping[str, str]) -> list[str]:
     if row is None:
         return ["最後的可行點：還沒有（取規格還沒寫進帳本）"]
     book = "換樣板帳本" if isinstance(row, TemplateRow) else "帳本"
@@ -185,7 +206,7 @@ def _point_lines(layout: Layout, row: MaterialGradientRow | TemplateRow | None,
             continue
         cavity = "沒有空腔層" if spec.cavity_m is None else f"空腔 {spec.cavity_m * _MM:.3f} mm"
         thickness = f"{spec.thickness_m * _MM:.3f}" if spec.thickness_m is not None else "？"
-        lines.append(f"  {spec.surface_id}：{spec.preset_id}，棉板 {thickness} mm，{cavity}")
+        lines.append(f"  {spec.surface_id}：{spec.preset_id}，棉板 {thickness} mm，{cavity}{mounted.get(spec.surface_id, '')}")
     lines.append(f"  {_scores(row)}；分項：主位起伏 {row.components[0]:.6f} dB、座位穩健性 {row.components[1]:.6f} dB")
     return lines
 
@@ -398,7 +419,8 @@ def _endpoint_lines(folder: Path, project: GradientProject) -> list[str]:
 def render_report(folder: Path) -> str:
     """整份報告文字；最後是終點一節（或過期、或「未做」那一行）。"""
     project = read_project(folder)
-    lines = [f"梯度搜尋 {project.gradient_id}（用途 {project.purpose}，開始 {project.started_at}）", _status_line(folder)]
+    lines = [f"梯度搜尋 {project.gradient_id}（用途 {project.purpose}，開始 {project.started_at}）", _status_line(folder),
+             mount_line(project)]
     if (folder / STOP_FILE).exists():
         lines.append("停止記號：在（下一次求值之前會停；resume 會先清掉它）")
     ledger = folder / LEDGER_FILE
@@ -416,6 +438,7 @@ def render_report(folder: Path) -> str:
     template_lines, template_last = _template_lines(folder)
     lines += template_lines
     layout: Layout = template_last if template_last is not None else header
-    lines += _point_lines(layout, template_last if template_last is not None else _feasible(rows), _kept_texts(project))
+    lines += _point_lines(layout, template_last if template_last is not None else _feasible(rows), _kept_texts(project),
+                          _mounted_texts(project))
     lines += _endpoint_lines(folder, project)
     return "\n".join(lines) + "\n"

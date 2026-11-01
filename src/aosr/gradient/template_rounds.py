@@ -30,11 +30,10 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.construction_presets import ConstructionPreset
-from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings
+from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.material_gradient import (
-    ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta,
-    compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
+    ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_loop import retune_evaluation_bound
 from aosr.materials.construction_models import SurfaceMaterial
@@ -60,12 +59,14 @@ ObjectiveFactory = Callable[[tuple[SurfaceDesign, ...]], ChainObjective]
 
 class TemplateContext(NamedTuple):
     """換樣板要的固定材料：搜尋設定、構造預設清單、每一面方案原本的牆（面代號 → 材料，六面都要有）、
-    設計清單 → 目標函式的工廠（產品是 ``chain_objective``；考卷可給合成目標）。"""
+    設計清單 → 目標函式的工廠（產品是 ``chain_objective``；考卷可給合成目標）、這一次搜尋的安裝方式（#990：換樣板沿用它，
+    不列舉安裝方式；貼在原牆上時換過去的樣板背後接的仍是那一面原牆）。"""
 
     settings: MaterialGradientSettings
     presets: tuple[ConstructionPreset, ...]
     kept: Mapping[str, SurfaceMaterial]
     objective_for: ObjectiveFactory
+    mount: Mount = MOUNT_RIGID
 
 
 class TemplatePoint(NamedTuple):
@@ -171,7 +172,7 @@ def preset_for_target(target: str, settings: MaterialGradientSettings) -> str | 
 
 def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[SurfaceDesign, ...]:
     """配置 → 每面設計：有 preset 照家族建樣板設計、不貼的面帶方案原本那面的牆；要照 ``Wall.all()`` 給六面。"""
-    designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept)
+    designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept, mount=context.mount)
     return checked_wall_designs(designs)
 
 
