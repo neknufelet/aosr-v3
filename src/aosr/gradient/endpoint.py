@@ -53,7 +53,7 @@ from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.material_gradient import (
-    FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, is_feasible,
+    FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, designs_mount, is_feasible,
     wall_surface_ids,
 )
 from aosr.materials.construction import surface_impedance
@@ -211,9 +211,10 @@ def materials_from_surfaces(designs: Sequence[SurfaceDesign], theta: jax.Array |
     材料只從 ``design.material`` 來（替身鏈建樣板的同一份），不再拿 preset id 去另一份清單重查：棉板層換成
     θ 的厚度；空氣層照**空腔匯出規則**——空腔小於設定檔 ``[export] min_cavity_m``（含 0）就整層拿掉、
     不放 ``AirLayer``（構造格式的空氣層厚度必須大於 0），否則放 ``AirLayer(thickness_m=空腔)``。
-    設計清單必須照 ``Wall.all()`` 的順序給六面（:func:`checked_wall_designs`）。
+    設計清單必須照 ``Wall.all()`` 的順序給六面（:func:`checked_wall_designs`）、只有一種安裝方式（:func:`designs_mount`）。
     """
     checked = checked_wall_designs(designs)
+    designs_mount(checked)
     specs = surface_specs(checked, theta)
     minimum = settings.export.min_cavity_m
     return {wall: _design_material(design, spec, minimum)

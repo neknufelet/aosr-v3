@@ -42,7 +42,7 @@ from aosr.geometry.shoebox import Wall
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, variable_name
 from aosr.materials.construction_models import (
-    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
+    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial, WallMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
@@ -66,8 +66,6 @@ LoopStopReason = Literal["已確認候選內沒有超過門檻", "沒有候選",
 LOOP_STOP_REASONS: Final[tuple[LoopStopReason, ...]] = (
     LOOP_STOP_NO_IMPROVEMENT, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_MAX_EVALUATIONS)
 _THICKNESS = "thickness_m"
-# 貼在原牆上時原牆收的型別（``MountedOnWall.wall``）：不收本身已是貼牆構造的材料（只有一層巢狀）。
-WallMaterial: TypeAlias = Assembly | ConstantImpedance | MeasuredImpedance
 
 ChainObjective = Callable[[jax.Array], tuple[jax.Array, GradientObjectiveArrays]]
 Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]]
@@ -136,6 +134,8 @@ class SurfaceDesign:
             raise ValueError(f"面 {self.surface_id} 有樣板構造，不收保留原牆的材料")
         if self.mount == MOUNT_ON_WALL and not isinstance(self.backing_material, WallMaterial):
             raise ValueError(f"面 {self.surface_id} 貼在原牆上，要給那一面原本的牆（固定阻抗、實測阻抗表或多層構造）")
+        if self.mount == MOUNT_ON_WALL and self.material.backing != "rigid":
+            raise ValueError(f"面 {self.surface_id} 的樣板背後不是剛背（{self.material.backing}），不能改成貼在原牆上")
         kinds = _variable_kinds(self.material)
         unknown = [name for name in self.variables if name not in kinds]
         if unknown:
@@ -457,13 +457,15 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
     梯度沿新合分走；舊合分（``screening_total``）同一次求值一起交回。樣板用具體值建，要在雙精度已開的行程裡呼叫；
-    設計清單照 ``Wall.all()`` 對到替身的六面。樣板照 :func:`design_templates`（貼在原牆上的面背後接原牆）。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
+    設計清單照 ``Wall.all()`` 對到替身的六面、只有一種安裝方式（:func:`designs_mount`，混了拒收）。
+    樣板照 :func:`design_templates`（貼在原牆上的面背後接原牆）。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
     目標函式裡轉成 θ 對應的複數精度、換進那一列，剛性遮罩那一格是 False；求值入口的語意（None 樣板＝剛性）不動。
     """
     walls = Wall.all()
     if len(designs) != len(walls):
         raise ValueError(f"替身目前只有六面牆（Wall.all()），設計清單有 {len(designs)} 個面；"
                          "一面切成幾區要等替身支援更多面，這是替身的限制")
+    designs_mount(designs)
     axis = np.asarray(frequencies, dtype=np.float64)
     if axis.shape != (len(model.frequencies_hz),) or not np.array_equal(axis, np.asarray(model.frequencies_hz)):
         raise ValueError("頻率軸必須等於替身的頻率軸")

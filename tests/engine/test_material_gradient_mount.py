@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -27,6 +28,9 @@ from pydantic import ValidationError
 
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, Mount, load_material_gradient_settings
+from aosr.config.paths import config_path
+from aosr.config.physics_constants import load_physics_constants
+from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import cli, endpoint, run
 from aosr.gradient.endpoint_run import read_result
@@ -255,6 +259,38 @@ def test_surface_design_takes_the_wall_only_when_mounted_with_a_template() -> No
         _designs(MOUNT_ON_WALL, nested)
     with pytest.raises(ValueError, match="一次搜尋只有一種安裝方式"):
         gradient_search.designs_mount((*_designs(MOUNT_ON_WALL)[:3], *rigid[3:]))
+
+
+def test_surface_design_rejects_mounting_a_template_that_is_not_rigid_backed() -> None:
+    """抓直接建構設計時繞過工廠的剛背檢查（審查不擋第 1 條）：貼在原牆上的地板設計換成背後是空氣的同一份樣板
+    （``dataclasses.replace`` 重跑建構子，原牆照舊），設計本身就拒收；剛背的同一份設計照收（不改既有行為）。"""
+    design = _designs(MOUNT_ON_WALL)[0]
+    assert design.material is not None and design.material.backing == "rigid"
+    air = Assembly.model_validate({**design.material.model_dump(), "backing": "air"})
+    with pytest.raises(ValueError, match=re.escape(f"面 {design.surface_id} 的樣板背後不是剛背（air），不能改成貼在原牆上")):
+        dataclasses.replace(design, material=air)
+    rigid = _designs(MOUNT_RIGID)[0]
+    assert dataclasses.replace(rigid, material=air).material == air
+
+
+def test_mixed_mounts_are_rejected_by_export_and_chain(chain_model: ReducedModel) -> None:
+    """抓混合安裝方式從底層入口溜過去（審查不擋第 2 條）：地板貼在原牆上、其餘五面剛背（六面順序與 θ 都合法），
+    終點匯出（``materials_from_surfaces``）與可微鏈（``chain_objective``，用考卷的衍生替身）都拒收；
+    同一組各自單一安裝方式的設計匯出照收。"""
+    mixed = (_designs(MOUNT_ON_WALL)[0], *_designs(MOUNT_RIGID)[1:])
+    theta = _probe_point(mixed)
+    message = re.escape("一次搜尋只有一種安裝方式，設計清單有 ['on_wall', 'rigid']")
+    with pytest.raises(ValueError, match=message):
+        endpoint.materials_from_surfaces(mixed, theta, _settings())
+    axis = np.asarray(chain_model.frequencies_hz, dtype=np.float64)
+    constants = gradient_objective_constants(axis, _gradient_settings(), _receivers(), len(chain_model.source_names))
+    air = load_physics_constants(config_path("physics_constants.toml"))
+    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    with pytest.raises(ValueError, match=message):
+        gradient_search.chain_objective(chain_model, mixed, constants, air=air, ranges=ranges, frequencies=axis)
+    for mount in (MOUNT_RIGID, MOUNT_ON_WALL):
+        designs = _designs(mount)
+        assert len(endpoint.materials_from_surfaces(designs, _probe_point(designs), _settings())) == len(Wall.all())
 
 
 # ---- 讀回：缺安裝方式讀成剛背；安裝方式不同拒收接續 ----
