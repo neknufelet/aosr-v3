@@ -573,7 +573,7 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
                     else adapter.validate_python(by_id[design.preset_id].material))
         expected.append({"surface_id": design.surface_id, "preset_id": design.preset_id,
                          "thickness_m": values[0] if values else None, "cavity_m": values[1] if size > 1 else None,
-                         "material_digest": endpoint.material_digest(material), "mount": "rigid"})
+                         "material_digest": endpoint.material_digest(material)})
         offset += size
     assert result["surfaces"] == expected
     assert (result["value"], result["round_stop_reason"], result["evaluations"]) == (

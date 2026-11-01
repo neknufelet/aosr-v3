@@ -229,8 +229,6 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
     _downgraded_ledger(copy / "templates.jsonl", templates.LEGACY_TEMPLATE_LEDGER_VERSION)
     result = _json(copy / "result.json")
     result["format_version"] = run.LEGACY_RESULT_VERSION
-    for spec in cast(list[Record], result["surfaces"]):
-        spec.pop("mount")  # #990 v5 才有每面安裝方式
     result.pop("screening_total")
     cast(Record, result["components"]).pop("big_peak_proxy_db")
     result["ledger_sha256"] = _sha256(copy / "ledger.jsonl")

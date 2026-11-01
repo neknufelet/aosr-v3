@@ -32,7 +32,8 @@ preset 寫 none 的面是「不貼、保留方案原本的牆」（#561 辛三�
 #990：安裝方式（``mount``，每次搜尋一個值）。``on_wall`` 是「貼在原牆上」：貼樣板的面新增層背後接那一面原本的牆
 （:func:`scene_wall_materials`），換樣板沿用；``rigid`` 是原本的行為。新方式的分數不准沿用舊的：資料夾名只在非剛背時
 多雜湊 ``"mount"``（剛背逐位不變）；``project.json`` 記 ``mount``（剛背不寫、缺這一格讀成剛背，舊資料夾照舊接續），
-接續時跟帳本標頭逐格比（標頭也記安裝方式）；``result.json`` 升 v5：每面記安裝方式、摘要是貼牆構造的。v4、v3 只准報告讀。
+接續時跟帳本標頭逐格比（標頭也記安裝方式）。``result.json``：剛背照舊寫 v4（逐位等於加這一格之前，v4 就是剛背的
+正式結果，終點照收）；貼在原牆上寫 v5，每面記安裝方式、摘要是貼牆構造的。v3 只准報告讀。
 """
 from __future__ import annotations
 
@@ -53,7 +54,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
-from aosr.config.material_gradient import MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings
+from aosr.config.material_gradient import (
+    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings,
+)
 from aosr.config.paths import config_path
 from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
@@ -101,10 +104,10 @@ STATUS_FILE: Final = "status.json"
 RESULT_FILE: Final = "result.json"
 STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
-RESULT_VERSION: Final = "aosr.material_gradient_result.v5"
-# 上一版（每面還沒有安裝方式，#990 之前）：報告准讀，終點與接續不收（resume 從帳本重建、覆寫成這一版）。
-PRE_MOUNT_RESULT_VERSION: Final = "aosr.material_gradient_result.v4"
-# 加大峰代理之前那一版：報告准讀，終點與接續不收。
+RESULT_VERSION: Final = "aosr.material_gradient_result.v4"
+# 貼在原牆上（#990）的結果：每面帶安裝方式。剛背仍寫 RESULT_VERSION（安裝方式不改剛背的分數，位元組同加這一格之前）。
+MOUNTED_RESULT_VERSION: Final = "aosr.material_gradient_result.v5"
+# 上一版（梯度目標還沒有大峰代理項）：報告准讀，終點與接續不收。
 LEGACY_RESULT_VERSION: Final = "aosr.material_gradient_result.v3"
 FREQUENCY_RULER: Final = "fem_reduced_holdout_frequency_db"
 BAND_RULER: Final = "fem_reduced_holdout_band_db"
@@ -166,7 +169,8 @@ class GradientStatus(BaseModel):
 class SurfaceSpec(BaseModel):
     """一面的規格：面代號、preset（不貼的面 None）、棉板厚度與空腔（公尺；不貼的面都是 None、沒有空腔層的空腔是 None）、
     材料摘要（``endpoint.design_digest``：有樣板的面是換 θ 之前的樣板構造的——貼在原牆上是貼牆構造的、不貼的面是保留的
-    原牆材料的；報告只要厚度與空腔時是 None）、安裝方式（v5 起每面照抄這一次搜尋的；v4 與更舊的結果檔沒有，是 None）。"""
+    原牆材料的；報告只要厚度與空腔時是 None）、安裝方式（只有貼在原牆上的 v5 每面記 ``on_wall``；剛背的 v4 與更舊的沒有
+這一格，是 None、寫出時也不寫）。"""
 
     model_config = _FROZEN
     surface_id: str
@@ -174,7 +178,7 @@ class SurfaceSpec(BaseModel):
     thickness_m: float | None
     cavity_m: float | None
     material_digest: str | None
-    mount: Mount | None = None
+    mount: Mount | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class Components(BaseModel):
@@ -194,8 +198,8 @@ class GradientResult(BaseModel):
     換樣板段的（整場的停止原因），``template_rounds``、``template_evaluations`` 是換樣板帳本記的。
     v4（#561 壬一）：``value`` 是新合分（第一階段兩分項合分＋權重 × 大峰代理），``screening_total`` 是舊合分，
     ``components`` 多了代理。v3 只准報告讀（:func:`parse_result` 的 ``legacy``），那時沒有舊合分與代理（v3 的值就是舊合分）。
-    v5（#990）：每面多了安裝方式（``surfaces[].mount``），貼在原牆上的面摘要是貼牆構造的；v4 只准報告讀（沒有安裝方式，
-    就是剛背）。v2 與更舊的檔不收。
+    v5（#990）：貼在原牆上的搜尋寫這一版，每面多了安裝方式（``surfaces[].mount`` 都是 ``on_wall``），貼樣板的面摘要是
+    貼牆構造的；剛背的搜尋照舊寫 v4（沒有安裝方式那一格就是剛背，終點照收）。v2 與更舊的檔不收。
     """
 
     model_config = _FROZEN
@@ -222,12 +226,18 @@ class GradientResult(BaseModel):
         proxied = self.format_version != LEGACY_RESULT_VERSION
         filled = (self.screening_total is not None, self.components.big_peak_proxy_db is not None)
         if any(item != proxied for item in filled):
-            raise ValueError(f"{RESULT_VERSION} 與 {PRE_MOUNT_RESULT_VERSION} 要帶舊合分與大峰代理；"
+            raise ValueError(f"{MOUNTED_RESULT_VERSION} 與 {RESULT_VERSION} 要帶舊合分與大峰代理；"
                              f"{LEGACY_RESULT_VERSION} 兩個都沒有")
-        mounted = self.format_version == RESULT_VERSION
-        if any((spec.mount is not None) != mounted for spec in self.surfaces):
-            raise ValueError(f"{RESULT_VERSION} 每面要帶安裝方式；{PRE_MOUNT_RESULT_VERSION} 與更舊的沒有")
+        expected = MOUNT_ON_WALL if self.format_version == MOUNTED_RESULT_VERSION else None
+        if any(spec.mount != expected for spec in self.surfaces):
+            raise ValueError(f"{MOUNTED_RESULT_VERSION} 每面要帶安裝方式 {MOUNT_ON_WALL}；"
+                             f"{RESULT_VERSION}（剛背）與更舊的沒有這一格")
         return self
+
+    @property
+    def mount(self) -> Mount:
+        """這份結果的安裝方式：v5 是貼在原牆上；v4（與報告准讀的 v3）沒有這一格，是剛背。"""
+        return MOUNT_ON_WALL if self.format_version == MOUNTED_RESULT_VERSION else MOUNT_RIGID
 
 
 class SchemePoints(NamedTuple):
@@ -315,20 +325,17 @@ def read_project(folder: Path) -> GradientProject:
 
 
 def parse_result(content: bytes, *, legacy: bool = False) -> GradientResult:
-    """讀 ``result.json`` 的內容：先看版本，不是這一版就拒收、訊息講明版本。``legacy=True`` 只給報告用，准讀 v4
-    （每面還沒有安裝方式）與 v3（加大峰代理之前）；v4 交給終點或接續拒收（跑 resume 從帳本重建成這一版），
-    v3 一律拒收（梯度目標加了大峰代理項，要重跑）。"""
+    """讀 ``result.json`` 的內容：先看版本，不是這一版就拒收、訊息講明版本。v4（剛背）與 v5（貼在原牆上）都是這一版
+    的正式結果。``legacy=True`` 只給報告用，准讀 v3（加大峰代理之前）；v3 交給終點或接續一律拒收（梯度目標加了大峰
+    代理項，要重跑）。"""
     document = json.loads(content)
     version = document.get("format_version") if isinstance(document, dict) else None
     if version == LEGACY_RESULT_VERSION and not legacy:
         raise ValueError(f"{RESULT_FILE} 版本是 {version!r}（梯度目標加大峰代理項之前），{PROXY_RERUN_TEXT}；"
-                         f"這一版只收 {RESULT_VERSION}")
-    if version == PRE_MOUNT_RESULT_VERSION and not legacy:
-        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}（每面還沒有安裝方式），這一版只收 {RESULT_VERSION}；"
-                         "跑 resume 會從帳本重建、覆寫成這一版")
-    if version not in (RESULT_VERSION, PRE_MOUNT_RESULT_VERSION, LEGACY_RESULT_VERSION):
-        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}，這一版只收 {RESULT_VERSION}（最後配置與換樣板段的欄位）；"
-                         "跑 resume 會從帳本重建、覆寫成這一版")
+                         f"這一版只收 {RESULT_VERSION}（剛背）與 {MOUNTED_RESULT_VERSION}（貼在原牆上）")
+    if version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION, LEGACY_RESULT_VERSION):
+        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}，這一版只收 {RESULT_VERSION}（剛背）與 "
+                         f"{MOUNTED_RESULT_VERSION}（貼在原牆上）；跑 resume 會從帳本重建、覆寫成這一版")
     return GradientResult.model_validate_json(content)
 
 
@@ -611,7 +618,7 @@ def surface_specs(layout: Layout, theta: Sequence[float], *, digests: Mapping[st
                   mount: Mount | None = None) -> tuple[SurfaceSpec, ...]:
     """θ 切回每面規格（版面照 ``layout`` 的配置與變數名：庚二帳本標頭，或換樣板帳本的一列）：每面的變數照「厚度、空腔」排
     （變數名 ``<面代號>.<樣板變數名>``），不貼的面沒有變數。``digests``（面代號 → 材料摘要）給了就照填、缺一面拒收；
-    沒給（報告只要厚度與空腔）摘要是 None。``mount`` 每面照抄（v5 結果檔要它；報告不給是 None）。"""
+    沒給（報告只要厚度與空腔）摘要是 None。``mount`` 每面照抄（貼在原牆上的 v5 結果檔要它；剛背與報告不給是 None）。"""
     if len(theta) != len(layout.variable_names):
         raise ValueError("θ 長度跟版面的變數數不同")
     specs = []
@@ -652,7 +659,8 @@ def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: M
                        expected_template_header: TemplateHeader | None = None) -> GradientResult:
     """從兩本帳重建整份結果，不寫檔：庚二帳本要收尾（給了 ``expected_header`` 標頭要逐格相等）；換樣板帳本要收尾、
     標頭記的庚二帳本摘要等於現在那本、起點是庚二收尾那一點（給了 ``expected_template_header`` 要逐格相等），
-    最後配置與 θ 取它最後一列決定。每面材料摘要從最後配置重建的設計（``endpoint.design_digest``）來，安裝方式照庚二帳本標頭。
+    最後配置與 θ 取它最後一列決定。每面材料摘要從最後配置重建的設計（``endpoint.design_digest``）來，安裝方式照庚二帳本標頭：
+    剛背寫 v4、每面不帶安裝方式（逐位同加這一格之前），貼在原牆上寫 v5、每面帶 ``on_wall``。
     寫 ``result.json`` 與終點核結果檔都走這一支（終點拿它跟檔裡那份整個比）。"""
     path, templates = folder / LEDGER_FILE, folder / TEMPLATES_FILE
     header, rows = read_ledger(path, expected_header=expected_header)
@@ -672,11 +680,12 @@ def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: M
     designs = final_designs(final.surfaces, settings, kept, mount=header.mount)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
+    mounted = header.mount == MOUNT_ON_WALL
     return GradientResult(
-        format_version=RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
+        format_version=MOUNTED_RESULT_VERSION if mounted else RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
         surfaces=surface_specs(closing, closing.theta(),
                                digests={design.surface_id: design_digest(design) for design in designs},
-                               mount=header.mount),
+                               mount=header.mount if mounted else None),
         variable_names=closing.variable_names, theta_hex=closing.theta_hex, value=value, screening_total=screening,
         components=Components(own_line_ripple_rms_db=components[0], seat_robustness_rms_db=components[1],
                               big_peak_proxy_db=components[2]),

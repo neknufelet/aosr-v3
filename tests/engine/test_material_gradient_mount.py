@@ -29,6 +29,7 @@ from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, Mount, load_material_gradient_settings
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import cli, endpoint, run
+from aosr.gradient.endpoint_run import read_result
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import template_ledger as templates
@@ -75,6 +76,14 @@ CONTROL_DIGESTS = {
 CONTROL_LEDGER_HEADER = "a417256b0f40af5ab6703348c833bfb468d1e19593a3079061df943a849c2fe5"
 CONTROL_TEMPLATE_HEADER = "304b40fe88bb01f381ebce0962f3c0c3cf544151bb63f018769cf0bfe21ece3c"
 CONTROL_PROJECT = "d51fbff4611f4915537fc6df82b5de4c1822dcb1b3c334c6245c9eb4f5979485"
+# 剛背 result.json 整檔的 SHA-256（主線 692d1f42 寫入端：``surface_specs`` 切每面、``GradientResult``、``write_json_atomic``；
+# θ 是 0.05＋0.01×序號、值與分項與次數照 ``_rigid_result``）、它的版本字串、頂層與每面的鍵（同一份檔讀回量的）。
+CONTROL_RESULT = "3ab492f75fd0110baca094025e12070f68264a8f6fa195b0a744473270121bb4"
+CONTROL_RESULT_VERSION = "aosr.material_gradient_result.v4"
+CONTROL_RESULT_KEYS = ["components", "evaluations", "format_version", "gradient_id", "ledger_sha256", "round_stop_reason",
+                       "rounds", "screening_total", "stop_reason", "surfaces", "template_evaluations",
+                       "template_ledger_sha256", "template_rounds", "theta_hex", "value", "variable_names"]
+CONTROL_SURFACE_KEYS = ["cavity_m", "material_digest", "preset_id", "surface_id", "thickness_m"]
 CODE_WORDS = ("on_wall", "rigid", "mounted_on_wall", "constant_impedance", "assembly")
 
 
@@ -141,10 +150,25 @@ def _digest(data: bytes) -> str:
 
 # ---- 控制組：剛背逐位不變 ----
 
+def _rigid_result(header: ledger.MaterialGradientHeader,
+                  designs: tuple[gradient_search.SurfaceDesign, ...]) -> run.GradientResult:
+    """主線量控制組那一份的寫法：``surface_specs`` 切每面（不給安裝方式）、版本 ``RESULT_VERSION``。"""
+    theta = tuple(0.05 + 0.01 * index for index in range(len(header.variable_names)))
+    return run.GradientResult(
+        format_version=run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID,
+        surfaces=run.surface_specs(header, theta, digests={design.surface_id: endpoint.design_digest(design)
+                                                           for design in designs}),
+        variable_names=header.variable_names, theta_hex=tuple(value.hex() for value in theta), value=1.5,
+        screening_total=1.25, components=run.Components(own_line_ripple_rms_db=1.0, seat_robustness_rms_db=2.0,
+                                                        big_peak_proxy_db=3.0),
+        round_stop_reason="沒有候選", stop_reason="沒有可換的樣板", evaluations=3, rounds=1, template_rounds=1,
+        template_evaluations=0, ledger_sha256="1" * 64, template_ledger_sha256="2" * 64)
+
+
 def test_rigid_identities_equal_mainline_bit_for_bit(tmp_path: Path) -> None:
-    """抓剛背的身分被這一刀改到（資料夾名永遠加 mount、標頭或 project.json 永遠寫安裝方式、摘要換算法）：同一組固定輸入，
-    資料夾名、每面材料摘要、帳本標頭列、換樣板帳本標頭列、project.json 整檔，都逐位等於改動前主線從寫入端量的值；
-    不給安裝方式（預設）與明給剛背一樣。"""
+    """抓剛背的身分被這一刀改到（資料夾名永遠加 mount、標頭或 project.json 永遠寫安裝方式、摘要換算法、結果檔升版或每面
+    多一格）：同一組固定輸入，資料夾名、每面材料摘要、帳本標頭列、換樣板帳本標頭列、project.json 整檔、result.json 整檔，
+    都逐位等於改動前主線從寫入端量的值；不給安裝方式（預設）與明給剛背一樣。"""
     assert _control_id() == _control_id(MOUNT_RIGID) == CONTROL_GRADIENT_ID
     designs = _designs(MOUNT_RIGID)
     assert designs == gradient_search.wall_designs_from_presets(PRESETS, _settings(), _presets(), kept=_control_kept())
@@ -156,6 +180,10 @@ def test_rigid_identities_equal_mainline_bit_for_bit(tmp_path: Path) -> None:
     assert _digest(template_line) == CONTROL_TEMPLATE_HEADER and b"mount" not in template_line
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project())
     assert _digest((tmp_path / run.PROJECT_FILE).read_bytes()) == CONTROL_PROJECT
+    run.write_json_atomic(tmp_path / run.RESULT_FILE, _rigid_result(header, designs))
+    data = (tmp_path / run.RESULT_FILE).read_bytes()
+    assert _digest(data) == CONTROL_RESULT and b"mount" not in data
+    assert run.parse_result(data).mount == MOUNT_RIGID
 
 
 # ---- 身分：貼在原牆上是另一個身分，六面原牆都綁 ----
@@ -274,14 +302,16 @@ def test_ledgers_of_other_mount_are_rejected(tmp_path: Path, written: Mount, exp
         templates.read_template_ledger(tmp_path / "alone-templates.jsonl", expected_header=template)
 
 
-# ---- result.json v5 ----
+# ---- result.json：剛背 v4、貼在原牆上 v5 ----
 
 def _result(mount: Mount) -> run.GradientResult:
+    mounted = mount == MOUNT_ON_WALL
     specs = tuple(run.SurfaceSpec(surface_id=wall.wall_name(), preset_id=preset, thickness_m=None if preset is None else 0.05,
-                                  cavity_m=None, material_digest=CONTROL_DIGESTS[wall.wall_name()], mount=mount)
+                                  cavity_m=None, material_digest=CONTROL_DIGESTS[wall.wall_name()],
+                                  mount=mount if mounted else None)
                   for wall, preset in zip(Wall.all(), PRESETS, strict=True))
     return run.GradientResult(
-        format_version=run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID, surfaces=specs, variable_names=("floor.layer1.thickness_m",),
+        format_version=run.MOUNTED_RESULT_VERSION if mounted else run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID, surfaces=specs, variable_names=("floor.layer1.thickness_m",),
         theta_hex=((0.05).hex(),), value=1.5, screening_total=1.25, components=run.Components(
             own_line_ripple_rms_db=1.0, seat_robustness_rms_db=2.0, big_peak_proxy_db=3.0),
         round_stop_reason="沒有候選", stop_reason="沒有可換的樣板", evaluations=3, rounds=1, template_rounds=1,
@@ -289,11 +319,11 @@ def _result(mount: Mount) -> run.GradientResult:
 
 
 def _older(document: Record, version: str, *, proxy: bool) -> bytes:
-    """考卷自己把 v5 換回舊形狀：每面拿掉安裝方式；v3 另拿掉舊合分與代理。"""
+    """考卷自己把結果檔換成別的版本字串：每面拿掉安裝方式（有的話）；v3 另拿掉舊合分與代理。"""
     older = json.loads(json.dumps(document))
     older["format_version"] = version
     for spec in cast(list[Record], older["surfaces"]):
-        spec.pop("mount")
+        spec.pop("mount", None)
     if not proxy:
         older.pop("screening_total")
         cast(Record, older["components"]).pop("big_peak_proxy_db")
@@ -301,27 +331,35 @@ def _older(document: Record, version: str, *, proxy: bool) -> bytes:
 
 
 @pytest.mark.parametrize("mount", (MOUNT_RIGID, MOUNT_ON_WALL))
-def test_result_v5_reads_back_and_older_versions_are_legacy(mount: Mount) -> None:
-    """抓 v5 讀不回、舊版被當新版收（終點與接續吃到沒有安裝方式的結果）或報告讀不回舊版：v5 每面帶安裝方式、讀回整個相等；
-    v4 與 v3 交給終點的讀法拒收、訊息講版本，報告的讀法（``legacy``）讀得回、版本標成舊版、每面沒有安裝方式；
-    v5 少了安裝方式、v4 多了安裝方式都拒收。"""
+def test_result_version_follows_the_mount_and_v4_is_rigid(mount: Mount) -> None:
+    """抓剛背結果檔被升版或多寫安裝方式、v4 被當舊版擋在終點外、或讀不出是哪一種：剛背寫 v4、每面沒有安裝方式那一格；
+    貼在原牆上寫 v5、每面記 ``on_wall``；兩種都用終點的讀法（不是報告的 ``legacy``）讀回整個相等、讀成各自的安裝方式；
+    v3 交給終點拒收、訊息講版本，報告的讀法讀得回（剛背）；版本與每面安裝方式對不上（v5 缺、v4 多、v5 記剛背）都拒收。"""
     result = _result(mount)
     document = result.model_dump(mode="json")
-    assert all(spec["mount"] == mount for spec in cast(list[Record], document["surfaces"]))
-    assert run.parse_result(json.dumps(document).encode("utf-8")) == result
-    for version, proxy in ((run.PRE_MOUNT_RESULT_VERSION, True), (run.LEGACY_RESULT_VERSION, False)):
-        content = _older(document, version, proxy=proxy)
-        with pytest.raises(ValueError, match=version.replace(".", r"\.")):
-            run.parse_result(content)
-        legacy = run.parse_result(content, legacy=True)
-        assert legacy.format_version == version and all(spec.mount is None for spec in legacy.surfaces)
-        assert legacy.surfaces == tuple(spec.model_copy(update={"mount": None}) for spec in result.surfaces)
-    unmounted = json.loads(_older(document, run.RESULT_VERSION, proxy=True))
-    with pytest.raises(ValidationError, match="每面要帶安裝方式"):
-        run.parse_result(json.dumps(unmounted).encode("utf-8"))
-    with pytest.raises(ValidationError, match="每面要帶安裝方式"):
-        run.parse_result(json.dumps({**document, "format_version": run.PRE_MOUNT_RESULT_VERSION}).encode("utf-8"),
-                         legacy=True)
+    surfaces = cast(list[Record], document["surfaces"])
+    if mount == MOUNT_RIGID:
+        assert document["format_version"] == CONTROL_RESULT_VERSION
+        assert all(sorted(spec) == CONTROL_SURFACE_KEYS for spec in surfaces)
+    else:
+        assert document["format_version"] == run.MOUNTED_RESULT_VERSION != CONTROL_RESULT_VERSION
+        assert all(spec["mount"] == MOUNT_ON_WALL for spec in surfaces)
+    parsed = run.parse_result(json.dumps(document).encode("utf-8"))
+    assert parsed == result and parsed.mount == mount
+    content = _older(document, run.LEGACY_RESULT_VERSION, proxy=False)
+    with pytest.raises(ValueError, match=run.LEGACY_RESULT_VERSION.replace(".", r"\.")):
+        run.parse_result(content)
+    legacy = run.parse_result(content, legacy=True)
+    assert legacy.format_version == run.LEGACY_RESULT_VERSION and legacy.mount == MOUNT_RIGID
+    assert legacy.surfaces == tuple(spec.model_copy(update={"mount": None}) for spec in result.surfaces)
+    mounted = _result(MOUNT_ON_WALL).model_dump(mode="json")
+    wrong = (_older(mounted, run.MOUNTED_RESULT_VERSION, proxy=True),
+             json.dumps({**mounted, "format_version": run.RESULT_VERSION}).encode("utf-8"),
+             json.dumps({**mounted, "surfaces": [{**spec, "mount": MOUNT_RIGID}
+                                                 for spec in cast(list[Record], mounted["surfaces"])]}).encode("utf-8"))
+    for item in wrong:
+        with pytest.raises(ValidationError, match="每面要帶安裝方式"):
+            run.parse_result(item, legacy=True)
 
 
 # ---- 換樣板：沿用這一次搜尋的安裝方式 ----
@@ -511,7 +549,7 @@ def test_three_lane_report_runs_on_the_exported_mounted_scheme(probe: Record) ->
         assert values.size and np.all(np.isfinite(values)) and np.all(values >= 0), key
 
 
-# ---- 命令列整條：start --mount on_wall、endpoint、report、改安裝方式再接續 ----
+# ---- 命令列整條：start --mount on_wall、endpoint、report、改安裝方式再接續；同一組輸入的剛背 start、endpoint ----
 
 def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     shutil.rmtree(directory, ignore_errors=True)
@@ -538,6 +576,15 @@ def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     before = {name: _sha256(copy / name) for name in kept}
     output["other_mount"] = {**_run(directory, _command("resume", str(copy))),
                              "unchanged": before == {name: _sha256(copy / name) for name in kept}}
+    rigid_root = directory / "root-rigid"
+    rigid = _command("start", "--scheme", str(directory / "scheme.json"), "--surrogate",
+                     str(directory / "good" / "rom.npz"), "--presets", PRESET_TEXT, "--purpose", PURPOSE,
+                     "--root", str(rigid_root), "--settings", str(directory / "settings.toml"), "--engine-commit", "test")
+    output["rigid_start"] = _run(directory, rigid)
+    folders = [path for path in rigid_root.iterdir() if not path.name.startswith(".")] if rigid_root.exists() else []
+    output["rigid_folder"] = str(folders[0]) if len(folders) == 1 else None
+    if output["rigid_folder"] is not None:
+        output["rigid_endpoint"] = _run(directory, _command("endpoint", str(folders[0])))
     return json.dumps(output, ensure_ascii=False)
 
 
@@ -583,7 +630,7 @@ def test_cli_on_wall_search_records_mount_everywhere(cli_runs: tuple[Path, Recor
     assert header.kept_digests == {name: endpoint.material_digest(material) for name, material in walls.items()}
     assert templates.read_template_ledger(folder / "templates.jsonl")[0].mount == MOUNT_ON_WALL
     result = run.parse_result((folder / "result.json").read_bytes())
-    assert result.format_version == run.RESULT_VERSION
+    assert result.format_version == run.MOUNTED_RESULT_VERSION and result.mount == MOUNT_ON_WALL
     settings = load_material_gradient_settings(directory / "settings.toml")
     by_wall: dict[Wall, SurfaceMaterial] = {wall: walls[wall.wall_name()] for wall in Wall.all()}
     designs = run.final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, by_wall,
@@ -649,6 +696,24 @@ def test_cli_resume_with_other_mount_is_rejected(cli_runs: tuple[Path, Record]) 
     assert case["code"] == 1, case
     assert "帳本標頭跟這一次對不上：" in str(case["stderr"]) and "'mount'" in str(case["stderr"]), case["stderr"]
     assert case["unchanged"] is True
+
+
+def test_cli_rigid_result_is_mainline_v4_and_endpoint_takes_it_as_rigid(cli_runs: tuple[Path, Record]) -> None:
+    """控制組（寫入端整條）：同一組輸入不給 ``--mount`` 跑完，result.json 的版本字串、頂層與每面的鍵都等於主線寫入端量的
+    （沒有安裝方式那一格、不升版），檔裡沒有 ``mount``；這份 v4 交給終點（``endpoint``）回 0，終點的讀法讀成剛背。
+    抓「剛背也寫 v5」與「v4 被當舊版擋在終點外」。"""
+    output = cli_runs[1]
+    start = cast(Record, output["rigid_start"])
+    assert start["code"] == 0, start
+    folder = Path(str(output["rigid_folder"]))
+    data = (folder / "result.json").read_bytes()
+    document = cast(Record, json.loads(data))
+    assert document["format_version"] == CONTROL_RESULT_VERSION and sorted(document) == CONTROL_RESULT_KEYS
+    assert all(sorted(spec) == CONTROL_SURFACE_KEYS for spec in cast(list[Record], document["surfaces"]))
+    assert b"mount" not in data and "mount" not in _json(folder / "project.json")
+    endpoint_case = cast(Record, output["rigid_endpoint"])
+    assert endpoint_case["code"] == 0, endpoint_case["stderr"]
+    assert read_result(folder).mount == MOUNT_RIGID
 
 
 def test_report_material_text_of_walls_has_no_codes() -> None:

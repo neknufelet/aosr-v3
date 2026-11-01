@@ -156,7 +156,7 @@ def test_start_closes_template_segment_and_result_v4_matches_ledgers(runs: tuple
     result, status = _json(folder / "result.json"), _json(folder / "status.json")
     last = rows[-1]
     assert last.decision is not None and last.stop_reason is not None
-    assert result["format_version"] == "aosr.material_gradient_result.v5"  # #990 升 v5（每面安裝方式）
+    assert result["format_version"] == "aosr.material_gradient_result.v4"
     assert result["stop_reason"] == last.stop_reason
     assert [[item["surface_id"], item["preset_id"]] for item in cast(list[Record], result["surfaces"])] == [
         list(item) for item in last.surfaces]
@@ -193,7 +193,7 @@ def test_resume_of_pre_template_folder_opens_segment_and_overwrites_v2(runs: tup
     copy, folder = Path(str(case["folder"])), _folder(runs)
     assert _without_seconds(_template_rows(copy)) == _without_seconds(_template_rows(folder))
     rewritten = _json(copy / "result.json")
-    assert rewritten["format_version"] == "aosr.material_gradient_result.v5"  # #990 升 v5
+    assert rewritten["format_version"] == "aosr.material_gradient_result.v4"
     assert _without_hashes(rewritten) == _without_hashes(_json(folder / "result.json"))
     assert rewritten["template_ledger_sha256"] == _sha256(copy / "templates.jsonl")
 
