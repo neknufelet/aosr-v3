@@ -38,8 +38,9 @@ def bitwise_equal(left: object, right: object) -> bool:
     """共用存檔的讀回檢查用：逐位相等，不是值相等（#996 審查：``==`` 把 +0.0 與 −0.0 判成相等）。
 
     兩邊型別要一樣；浮點比 ``float.hex()``、複數比實部虛部的 ``float.hex()``、numpy 陣列比 dtype／形狀／位元組；
-    dataclass 與 pydantic 模型逐欄、對照表逐鍵（鍵的順序也要一樣）、tuple／list 逐項遞迴；其餘（字串、整數、布林、
-    列舉、日期、None）同型而且 ``==``。
+    dataclass 與 pydantic 模型逐欄、對照表逐鍵、tuple／list 逐項遞迴；其餘（字串、整數、布林、
+    列舉、日期、None）同型而且 ``==``。對照表只比鍵的集合、不比鍵的順序：順序不是值的一部分（``dict`` 的 ``==`` 也不看），
+    而且替身 manifest 照產品寫法以 ``sort_keys`` 存，建模帳 ``seconds`` 讀回時鍵已排序、值逐位相同。
     """
     if type(left) is not type(right):
         return False
@@ -58,7 +59,7 @@ def bitwise_equal(left: object, right: object) -> bool:
                    for field in dataclasses.fields(left))
     if isinstance(left, Mapping):
         table = cast(Mapping[object, object], right)
-        return list(left) == list(table) and all(bitwise_equal(left[key], table[key]) for key in left)
+        return set(left) == set(table) and all(bitwise_equal(left[key], table[key]) for key in left)
     if isinstance(left, tuple | list):
         items = cast(tuple[object, ...] | list[object], right)
         return len(left) == len(items) and all(bitwise_equal(a, b) for a, b in zip(left, items, strict=True))
