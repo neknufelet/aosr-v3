@@ -27,7 +27,8 @@ from aosr.physics.fem_reduced_store import (
     computation_digest, load_reduced, manifest_path, matrices_digest, save_reduced,
 )
 from tests.engine._precision_contracts import contract_value
-# holdout_report、model、operators 是借來的 module 範圍 fixture（本檔各建一次，不跟原檔共用）。
+# holdout_report、model、operators 是借來的 module 範圍 fixture：holdout_report 與 operators 本檔各建一次；model 整場只建一次、
+# 經存檔共用，本檔讀回自己的一份（`_fem_reduced_cache.shared_model`）。
 from tests.engine.test_fem_reduced import (
     AXIS, HOLDOUT, SEATS, TRAINING, _settings, holdout_report, model, operators,
 )

@@ -20,6 +20,7 @@ from aosr.scoring.ranking_models import RankingContext
 from aosr.search.run import IdentityChanged, _check_identity
 from aosr.search.store import SearchIdentity
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._scheme_cache import shared_json
 from tests.engine._stage_one_cases import scheme
 from tests.engine.test_scheme_pipeline import _run_control
 from tests.engine.test_stage_one_score import _rewrite
@@ -29,8 +30,17 @@ CAPABILITIES = load_capabilities(config_path("capabilities.toml"))
 
 
 @pytest.fixture(scope="module")
-def saved() -> SchemeResult:
-    return _run_control(scheme())
+def saved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    """控制組低頻方案：一場 pytest 只跑一次、平行的工人經存檔共用（``shared_json``）；每份考卷讀回自己的一份。"""
+    def produce() -> str:
+        # 共用的是存成 JSON 的那一份；先確認剛算出來的跟它讀回來的逐欄相同（同 shared_control_result）。
+        calculated = _run_control(scheme())
+        text = calculated.model_dump_json()
+        assert SchemeResult.model_validate_json(text) == calculated
+        return text
+
+    return SchemeResult.model_validate_json(shared_json(tmp_path_factory, worker_id, "low-frequency-control-saved",
+                                                        produce))
 
 
 def _load(path: Path, registry: Path, original: SchemeResult) -> object:

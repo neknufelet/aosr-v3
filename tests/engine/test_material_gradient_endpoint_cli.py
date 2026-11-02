@@ -43,8 +43,7 @@ from aosr.gradient.report import (
     ENDPOINT_HEADING, FULL_MODEL_LINE, LEGACY_ENDPOINT_NOTE, LEGACY_SCORE_NOTE, PROXY_MISMATCH, STALE_ENDPOINT_LINE,
 )
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
-from aosr.physics.fem_reduced import FullOperators, ReducedModel
-from aosr.physics.fem_reduced_check import validate_reduced
+from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, save_validation_receipt
 from aosr.physics.fem_reduced_store import load_reduced, save_reduced
 from aosr.reporting.scheme import load_scheme
@@ -53,8 +52,8 @@ from tests.engine._scheme_cache import shared_json
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine.test_material_gradient import _chain_model, _presets
 from tests.engine.test_material_gradient_cli import (
-    BAND_NAME, FREQUENCY_NAME, NARROWED_STEPS, PRESETS, WAIT_S, Record, _chain_operators, _command, _current_identity,
-    _env, _holdouts, _json, _kept_materials, _run, _schemes, _settings_text, _sha256, _start_args,
+    BAND_NAME, FREQUENCY_NAME, NARROWED_STEPS, PRESETS, WAIT_S, Record, _command, _current_identity, _env,
+    _good_report, _json, _kept_materials, _run, _schemes, _settings_text, _sha256, _start_args,
 )
 
 PROBE = Path(__file__).with_name("_material_gradient_endpoint_cli_probe.py")
@@ -92,13 +91,11 @@ def _surrogate(directory: Path, request: pytest.FixtureRequest) -> None:
     """驗過的那一份替身：寫法照 ``test_material_gradient_cli._surrogates`` 的 good（現在的物理身分＋留出收據）。"""
     chain = dataclasses.replace(_chain_model(cast(ReducedModel, request.getfixturevalue("model"))),
                                 physics_identity=_current_identity())
-    full = _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain)
     rulers = HoldoutRulers(frequency=Ruler(FREQUENCY_NAME, contract_value(FREQUENCY_NAME)),
                            band=Ruler(BAND_NAME, contract_value(BAND_NAME)))
     (directory / "good").mkdir()
     save_reduced(chain, directory / "good" / "rom.npz")
-    save_validation_receipt(directory / "good" / "rom.npz", validate_reduced(chain, full, _holdouts()),
-                            rulers=rulers, seconds=1.0)
+    save_validation_receipt(directory / "good" / "rom.npz", _good_report(request, chain), rulers=rulers, seconds=1.0)
 
 
 def _inputs(directory: Path) -> None:

@@ -52,7 +52,7 @@ from aosr.gradient.report import FULL_MODEL_LINE
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
-from aosr.physics.fem_reduced_check import validate_reduced
+from aosr.physics.fem_reduced_check import ValidationReport, validate_reduced
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, save_validation_receipt
 from aosr.physics.fem_reduced_store import manifest_path, save_reduced
 from aosr.reporting import physics_identity as identity_module
@@ -61,6 +61,7 @@ from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.stage_one_low_frequency_contract import StageOneReasonCode
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine import _fem_shared_cases as shared_cases
+from tests.engine._fem_reduced_cache import shared_holdout_report
 from tests.engine._precision_contracts import contract_value
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_fem_reduced import DENSITY, SOUND_SPEED, model as model, operators as operators
@@ -128,13 +129,20 @@ def _current_identity() -> str:
                                             directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
 
 
+def _good_report(request: pytest.FixtureRequest, chain: ReducedModel) -> ValidationReport:
+    """驗過的那份替身（good）的留出驗證：本檔與終點命令列那份同一份輸入，一場 pytest 只做一次（指紋進共用名）。"""
+    return shared_holdout_report(
+        cast(pytest.TempPathFactory, request.getfixturevalue("tmp_path_factory")),
+        cast(str, request.getfixturevalue("worker_id")), chain,
+        _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain), _holdouts())
+
+
 def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
     """替身：驗過的（現在的物理身分＋收據）、沒有收據的、物理身分全零但有收據的，與同網格同座標、另一組空氣建的
     三份（完整模型算子的空氣跟著換、各自做留出驗證寫收據）。"""
     base = _chain_model(cast(ReducedModel, request.getfixturevalue("model")))
     chain = dataclasses.replace(base, physics_identity=_current_identity())
-    report = validate_reduced(chain, _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain),
-                              _holdouts())
+    report = _good_report(request, chain)
     rulers = HoldoutRulers(frequency=Ruler(FREQUENCY_NAME, contract_value(FREQUENCY_NAME)),
                            band=Ruler(BAND_NAME, contract_value(BAND_NAME)))
     # 物理身分全零那份要自己驗一次：報告帶驗證當下的計算條件指紋（含物理身分），借 chain 的報告寫不成它的收據（#983）。
