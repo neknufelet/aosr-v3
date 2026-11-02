@@ -471,6 +471,18 @@ def test_endpoint_reports_dropped_cavity_and_exported_theta(probe: Record) -> No
     assert [spec.surface_id for spec in report.surfaces] == [wall.wall_name() for wall in Wall.all()]
 
 
+
+def test_endpoint_surrogate_value_is_compiled_and_before_full_solve(probe: Record) -> None:
+    """抓終點替身那一次求值沒編譯、或又排回完整解之後（#990 終點記憶體：第四場 188 頻點、r=2265，沒編譯的峰值
+    比編譯過高約四成，排在完整解之後還跟算子與完整解疊在一起，被砍）。探針在雙精度子行程裡把終點模組的鏈包一層，
+    記下目標函式收到的 θ 是不是追蹤值（``jax.jit`` 編譯時交進來的是追蹤值；直接呼叫、或 θ 寫進閉包再編譯，收到的
+    都是具體陣列），完整解入口換成記下「那時替身求值做了幾次」就停。替身求值恰一次、收到追蹤值、在完整解之前。
+    不量記憶體（慢、不穩）。"""
+    order = cast(Record, probe["surrogate_order"])
+    assert order["stopped_at_full_solve"] is True
+    assert order["surrogate_calls_at_full_solve"] == [1]
+    assert order["traced"] == [True]
+
 # ---- 大峰 ----
 
 def _control_peaks(pressures: NDArray[np.complex128], model: ReducedModel) -> dict[str, float | None]:
