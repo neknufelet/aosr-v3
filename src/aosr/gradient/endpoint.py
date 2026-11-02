@@ -53,8 +53,8 @@ from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.material_gradient import (
-    FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, designs_mount, is_feasible,
-    wall_surface_ids,
+    ChainObjective, FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, designs_mount,
+    is_feasible, wall_surface_ids,
 )
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import AirLayer, Assembly, MountedOnWall, PorousLayer, SurfaceMaterial
@@ -67,8 +67,8 @@ from aosr.scoring.low_frequency_input import low_frequency_input
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.stage_one_low_frequency import evaluate_stage_one_low_frequency
 from aosr.scoring.gradient_objective_jax import (
-    GradientObjectiveArrays, gradient_objective_constants, gradient_objective_from_pressures, objective_reading,
-    proxy_gap_bound_db,
+    GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_constants, gradient_objective_from_pressures,
+    objective_reading, proxy_gap_bound_db,
 )
 from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings
 from aosr.scoring.stage_one_objective_jax import StageOneObjectiveConstants, rms_floor_factor
@@ -425,6 +425,19 @@ def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, desi
     return values
 
 
+def _reduced_objective(model: ReducedModel, designs: Sequence[SurfaceDesign], constants: GradientObjectiveConstants,
+                       exported: FloatVector, *, air: PhysicsConstants, ranges: PorousModelRanges,
+                       frequencies: tuple[float, ...]) -> GradientObjectiveArrays:
+    """替身鏈（``chain_objective``）在匯出 θ 的目標各分項：``jax.jit`` 包過再算、只要值（不求梯度）；θ 是編譯函式的引數。
+
+    獨立成一支是為了讓鏈的閉包與編譯函式在回到 :func:`endpoint_check` 之前就沒人引用，不跟完整解疊在一起。
+    """
+    compiled: ChainObjective = jax.jit(chain_objective(model, designs, constants, air=air, ranges=ranges,
+                                                       frequencies=frequencies))
+    _, result = compiled(jnp.asarray(exported))
+    return result
+
+
 def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector, *,
                    model: ReducedModel, objective_settings: GradientObjectiveSettings, receiver_set: ReceiverSet,
                    low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
@@ -439,18 +452,20 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     ``gradient_objective_constants`` 以替身的頻率軸、``objective_settings``、``receiver_set`` 現算，跟搜尋那邊同一份；
     完整解殘差上限沿用建替身當次的設定。完整解用 :func:`~aosr.physics.fem_reduced_check.validate_reduced`
     （同時給替身聲壓、逐頻與帶能量 dB 差）。
+    替身那一次求值（:func:`_reduced_objective`）只要值、先 ``jax.jit`` 再算，而且排在完整解之前（#990 終點記憶體）：
+    鏈逐頻 × r² 的暫存（第四場 188 頻點、r=2265）沒編譯時峰值比編譯過高約四成，排在完整解之後還跟算子與完整解
+    留下的記憶體疊在一起；它不需要完整解的任何東西。
     """
     values = _checked_endpoint_inputs(operators, model, designs, theta, receiver_set, air)
     checked_design_identity(designs, presets)
     axis = tuple(float(value) for value in model.frequencies_hz)
     specs = surface_specs(designs, values)
     materials = materials_from_surfaces(designs, values, settings)
-    validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)])
-    full, reduced_pressure = validation.full_pressure[0], validation.reduced_pressure[0]
     constants = gradient_objective_constants(axis, objective_settings, receiver_set, len(model.source_names))
     exported = exported_theta(designs, values, settings)
-    objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=axis)
-    _, reduced_result = objective(jnp.asarray(exported))
+    reduced_result = _reduced_objective(model, designs, constants, exported, air=air, ranges=ranges, frequencies=axis)
+    validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)])
+    full, reduced_pressure = validation.full_pressure[0], validation.reduced_pressure[0]
     full_result = gradient_objective_from_pressures(constants, jnp.asarray(full))
     reduced, full_reading = objective_reading(reduced_result), objective_reading(full_result)
     level_db = max(validation.frequency_db_by_seat.values())

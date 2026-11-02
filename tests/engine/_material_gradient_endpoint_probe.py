@@ -2,18 +2,23 @@
 
 完整模型算子在這裡用小房間 fixture 同一組參數重建（網格種子固定、網格雜湊要等於替身的），座位列照
 ``test_material_gradient._chain_model`` 同一組七個線性組合換掉——父行程交進來的替身就是那一份衍生替身。
+唯一的例外是 :func:`_surrogate_order`（#990 終點記憶體）：暫時換掉終點模組裡的鏈與完整解入口，只記順序與編譯，
+其餘各段在它之前、用真的入口算完。
 """
 from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import NoReturn, cast
 
 from pydantic import TypeAdapter
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, LowFrequencyAxis
@@ -26,13 +31,14 @@ from aosr.geometry.shoebox import Wall
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import Assembly, SurfaceMaterial
 from aosr.materials.construction_diff import build_template, surface_impedance_from_parameters
-from aosr.physics.fem_reduced import ReducedModel, export_room_operators
+from aosr.physics.fem_reduced import FullOperators, ReducedModel, export_room_operators
 from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
+from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings
 from aosr.scoring.gradient_objective_jax import (
-    GradientObjectiveConstants, gradient_objective_constants, gradient_objective_from_pressures,
+    GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_constants, gradient_objective_from_pressures,
 )
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.scoring.stage_one_objective_jax import objective_from_pressures
@@ -127,6 +133,47 @@ def _kept(case: Record, model: ReducedModel, constants: GradientObjectiveConstan
             "chain_rows": {name: _complex(chain_rows[by_wall[name][1]]) for name in kept}}
 
 
+class _FullSolveReached(Exception):
+    """替身求值檢查走到完整解就停（不真解）。"""
+
+
+def _surrogate_order(operators: FullOperators, model: ReducedModel, designs: tuple[gradient_search.SurfaceDesign, ...],
+                     theta: np.ndarray, score: GradientObjectiveSettings, receivers: ReceiverSet, axis_id: LowFrequencyAxis,
+                     settings: MaterialGradientSettings, presets: tuple[ConstructionPreset, ...],
+                     air: PhysicsConstants, ranges: PorousModelRanges) -> Record:
+    """終點替身那一次求值（#990 終點記憶體）：終點模組的鏈包一層，記下目標函式收到的 θ 是不是追蹤值（``jax.jit`` 編譯時
+    是追蹤值）；完整解入口換成記下「那時替身求值做了幾次」就停。只換終點模組裡的兩個名字，結束就換回。"""
+    traced: list[bool] = []
+    at_full_solve: list[int] = []
+
+    def recording_chain(chain_model: ReducedModel, chain_designs: Sequence[gradient_search.SurfaceDesign],
+                        constants: GradientObjectiveConstants, *, air: PhysicsConstants, ranges: PorousModelRanges,
+                        frequencies: Sequence[float]) -> gradient_search.ChainObjective:
+        real = gradient_search.chain_objective(chain_model, chain_designs, constants, air=air, ranges=ranges,
+                                               frequencies=frequencies)
+
+        def objective(value: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
+            traced.append(isinstance(value, jax.core.Tracer))
+            return real(value)
+        return objective
+
+    def stopped_full_solve(*args: object, **kwargs: object) -> NoReturn:
+        at_full_solve.append(len(traced))
+        raise _FullSolveReached
+
+    stopped = False
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(endpoint, "chain_objective", recording_chain)
+        patch.setattr(endpoint, "validate_reduced", stopped_full_solve)
+        try:
+            endpoint.endpoint_check(operators, designs, theta, model=model, objective_settings=score,
+                                    receiver_set=receivers, low_frequency_axis=axis_id, presets=presets,
+                                    settings=settings, air=air, ranges=ranges)
+        except _FullSolveReached:
+            stopped = True
+    return {"stopped_at_full_solve": stopped, "surrogate_calls_at_full_solve": at_full_solve, "traced": traced}
+
+
 def main(directory: Path) -> None:
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
@@ -155,7 +202,8 @@ def main(directory: Path) -> None:
     reference = validate_reduced(model, operators, [endpoint.material_impedances(materials, axis, air=air,
                                                                                   ranges=ranges)])
     objective = gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=axis)
-    at_export = objective(jnp.asarray(_theta(case["expected_export"])))[1]
+    # 跟終點同一條編譯路徑（#990：終點的替身求值先 jax.jit 再算），報告的替身值才逐位等於這一份。
+    at_export = jax.jit(objective)(jnp.asarray(_theta(case["expected_export"])))[1]
     direct_objective = gradient_objective_from_pressures(constants, jnp.asarray(direct))
     output: Record = {
         "chain_at_search": float(objective(jnp.asarray(theta))[1].screening_total).hex(),
@@ -176,6 +224,8 @@ def main(directory: Path) -> None:
         "zero_cavity": _zero_cavity(cast(Record, problem["zero_cavity"]), model, constants, settings, presets,
                                     air, ranges),
         "kept": _kept(cast(Record, problem["kept"]), model, constants, settings, presets, air, ranges),
+        "surrogate_order": _surrogate_order(operators, model, designs, theta, score, receivers,
+                                            LowFrequencyAxis(str(problem["axis"])), settings, presets, air, ranges),
     }
     (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
 
