@@ -38,6 +38,7 @@ from aosr.physics.fem_reduced_check import (
     ValidationReport, third_octave_bands, validate_reduced, within_reduced_contract,
 )
 from aosr.physics.fem_reduced_store import load_reduced, manifest_path, save_reduced
+from tests.engine._fem_reduced_cache import shared_model
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 DENSITY = 1.2
@@ -83,8 +84,10 @@ def operators() -> FullOperators:
 
 
 @pytest.fixture(scope="module")
-def model(operators: FullOperators) -> ReducedModel:
-    return build_reduced_model(operators, AXIS, TRAINING, settings=_settings())
+def model(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> ReducedModel:
+    """一場 pytest 只建一次、平行的工人經存檔共用（``_fem_reduced_cache.shared_model``）；每份考卷讀回自己的一份。"""
+    return shared_model(tmp_path_factory, worker_id, lambda: build_reduced_model(
+        cast(FullOperators, request.getfixturevalue("operators")), AXIS, TRAINING, settings=_settings()))
 
 
 @pytest.fixture(scope="module")

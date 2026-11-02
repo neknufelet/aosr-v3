@@ -246,7 +246,7 @@ def _expected_geometric(
     )
 
 
-def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
+def _assert_source_results(timed: _TimedReport, impedance: float) -> GeometricLaneResult:
     absorption = {
         wall: {
             500.0: _random_absorption(impedance),
@@ -279,6 +279,7 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
     assert actual.geometric_lane == expected_geometric
     assert actual.late_decay == expected_decay
     assert "每個細軸頻點" in actual.late_decay_frequency_policy
+    return expected_geometric  # 獨立幾何參考每組參數只算這一次，逐點接合沿用同一份
 
 
 def _assert_pointwise_stitch(
@@ -457,8 +458,7 @@ def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
 ) -> None:
     """兩組正式報表（有限元素用假能量）逐位守住來源、整條細軸、接合公式與頻帶平均。"""
     impedance = timed_report.impedance_multiple * RHO_C_PA_S_PER_M
-    _assert_source_results(timed_report, impedance)
-    expected_geometric = _expected_geometric(impedance)
+    expected_geometric = _assert_source_results(timed_report, impedance)
     expected_weights = crossover_weights(
         GEOMETRIC_LANE_FREQUENCIES_HZ, timed_report.report.f_s_hz
     )
