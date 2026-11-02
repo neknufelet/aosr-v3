@@ -8,10 +8,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import fcntl
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import cast
 
+import numpy as np
 import pytest
+from pydantic import BaseModel
 
 
 def shared_json(tmp_path_factory: pytest.TempPathFactory, worker_id: str, name: str,
@@ -28,3 +32,34 @@ def shared_json(tmp_path_factory: pytest.TempPathFactory, worker_id: str, name: 
         text = produce()
         path.write_text(text, encoding="utf-8")
         return text
+
+
+def bitwise_equal(left: object, right: object) -> bool:
+    """共用存檔的讀回檢查用：逐位相等，不是值相等（#996 審查：``==`` 把 +0.0 與 −0.0 判成相等）。
+
+    兩邊型別要一樣；浮點比 ``float.hex()``、複數比實部虛部的 ``float.hex()``、numpy 陣列比 dtype／形狀／位元組；
+    dataclass 與 pydantic 模型逐欄、對照表逐鍵（鍵的順序也要一樣）、tuple／list 逐項遞迴；其餘（字串、整數、布林、
+    列舉、日期、None）同型而且 ``==``。
+    """
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, float):
+        return left.hex() == cast(float, right).hex()
+    if isinstance(left, complex):
+        other = cast(complex, right)
+        return left.real.hex() == other.real.hex() and left.imag.hex() == other.imag.hex()
+    if isinstance(left, np.ndarray):
+        array = cast(np.ndarray, right)
+        return left.dtype == array.dtype and left.shape == array.shape and left.tobytes() == array.tobytes()
+    if isinstance(left, BaseModel):
+        return all(bitwise_equal(getattr(left, name), getattr(right, name)) for name in type(left).model_fields)
+    if dataclasses.is_dataclass(left):
+        return all(bitwise_equal(getattr(left, field.name), getattr(right, field.name))
+                   for field in dataclasses.fields(left))
+    if isinstance(left, Mapping):
+        table = cast(Mapping[object, object], right)
+        return list(left) == list(table) and all(bitwise_equal(left[key], table[key]) for key in left)
+    if isinstance(left, tuple | list):
+        items = cast(tuple[object, ...] | list[object], right)
+        return len(left) == len(items) and all(bitwise_equal(a, b) for a, b in zip(left, items, strict=True))
+    return bool(left == right)
