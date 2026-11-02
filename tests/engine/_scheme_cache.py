@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import fcntl
+import struct
 from collections.abc import Callable, Mapping
 from typing import cast
 
@@ -34,21 +35,26 @@ def shared_json(tmp_path_factory: pytest.TempPathFactory, worker_id: str, name: 
         return text
 
 
+def _bits(value: float) -> bytes:
+    return struct.pack("<d", value)
+
+
 def bitwise_equal(left: object, right: object) -> bool:
     """共用存檔的讀回檢查用：逐位相等，不是值相等（#996 審查：``==`` 把 +0.0 與 −0.0 判成相等）。
 
-    兩邊型別要一樣；浮點比 ``float.hex()``、複數比實部虛部的 ``float.hex()``、numpy 陣列比 dtype／形狀／位元組；
-    dataclass 與 pydantic 模型逐欄、對照表逐鍵、tuple／list 逐項遞迴；其餘（字串、整數、布林、
-    列舉、日期、None）同型而且 ``==``。對照表只比鍵的集合、不比鍵的順序：順序不是值的一部分（``dict`` 的 ``==`` 也不看），
-    而且替身 manifest 照產品寫法以 ``sort_keys`` 存，建模帳 ``seconds`` 讀回時鍵已排序、值逐位相同。
+    兩邊型別要一樣；浮點比 IEEE 754 雙精度的八個位元組（``float.hex()`` 分不出不同的 NaN，#996 第二輪審查）、
+    複數比實部與虛部各自的八個位元組、numpy 陣列比 dtype／形狀／位元組；dataclass 與 pydantic 模型逐欄、
+    對照表逐鍵而且**鍵的順序也要一樣**（產品會讀順序，例如 ``next(iter(scheme.speakers))``）、tuple／list 逐項遞迴；
+    其餘（字串、整數、布林、列舉、日期、None）同型而且 ``==``。這裡不為任何一處放寬：順序確定沒有語意的那一處
+    由呼叫端自己明講（見 ``_fem_reduced_cache.shared_model``）。
     """
     if type(left) is not type(right):
         return False
     if isinstance(left, float):
-        return left.hex() == cast(float, right).hex()
+        return _bits(left) == _bits(cast(float, right))
     if isinstance(left, complex):
         other = cast(complex, right)
-        return left.real.hex() == other.real.hex() and left.imag.hex() == other.imag.hex()
+        return _bits(left.real) == _bits(other.real) and _bits(left.imag) == _bits(other.imag)
     if isinstance(left, np.ndarray):
         array = cast(np.ndarray, right)
         return left.dtype == array.dtype and left.shape == array.shape and left.tobytes() == array.tobytes()
@@ -59,7 +65,7 @@ def bitwise_equal(left: object, right: object) -> bool:
                    for field in dataclasses.fields(left))
     if isinstance(left, Mapping):
         table = cast(Mapping[object, object], right)
-        return set(left) == set(table) and all(bitwise_equal(left[key], table[key]) for key in left)
+        return list(left) == list(table) and all(bitwise_equal(left[key], table[key]) for key in left)
     if isinstance(left, tuple | list):
         items = cast(tuple[object, ...] | list[object], right)
         return len(left) == len(items) and all(bitwise_equal(a, b) for a, b in zip(left, items, strict=True))

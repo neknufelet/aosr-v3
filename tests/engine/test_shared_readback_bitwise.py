@@ -1,4 +1,4 @@
-"""#996 共用存檔的讀回檢查是逐位的：只差一個浮點符號位（+0.0 對 −0.0）的兩份要判不同。
+"""#996 共用存檔的讀回檢查是逐位的：只差一個浮點符號位（+0.0 對 −0.0）、只差 NaN 位元、只差對照表鍵順序的兩份要判不同。
 
 三條讀回檢查——低頻控制組 ``SchemeResult``（``test_low_frequency_response_reload.saved``）、縮小的有限元素替身
 ``ReducedModel``（``_fem_reduced_cache.shared_model``）、留出驗證報告 ``ValidationReport``
@@ -7,6 +7,8 @@
 同一份做兩次的一對必須判相同（判準沒有寬到什麼都說不同）。
 """
 from __future__ import annotations
+
+import struct
 
 import numpy as np
 import pytest
@@ -20,6 +22,8 @@ from tests.engine._scheme_cache import bitwise_equal
 from tests.engine.test_low_frequency_response_reload import saved as saved
 
 ZERO, NEGATIVE_ZERO = 0.0, -0.0
+# 兩個只差位元的 NaN（審查第二輪的反例）：float.hex() 都印 "nan"。
+NAN_A, NAN_B = (struct.unpack(">d", bytes.fromhex(bits))[0] for bits in ("7ff8000000000001", "fff8000000000002"))
 
 
 def _model(total_s: float) -> ReducedModel:
@@ -50,11 +54,35 @@ def _result(saved: SchemeResult, solve_s: float) -> SchemeResult:
 
 
 @pytest.mark.parametrize("kind", ("scheme_result", "reduced_model", "validation_report"))
-def test_readback_check_tells_positive_from_negative_zero(saved: SchemeResult, kind: str) -> None:
-    """抓讀回檢查只比值：+0.0 與 −0.0 值相等、位元不同，三條檢查都要判不同；同值同位的兩份判相同。"""
+@pytest.mark.parametrize("pair", ((ZERO, NEGATIVE_ZERO), (NAN_A, NAN_B)), ids=("signed_zero", "nan_payload"))
+def test_readback_check_tells_bit_different_floats_apart(saved: SchemeResult, kind: str,
+                                                         pair: tuple[float, float]) -> None:
+    """抓讀回檢查只比值或只比 hex：+0.0 對 −0.0（== 相等）、兩個不同位元的 NaN（hex 相同），三條檢查都要判不同；
+    同一個值做兩份判相同。"""
     build = {"scheme_result": lambda value: _result(saved, value), "reduced_model": _model,
              "validation_report": _report}[kind]
-    assert not bitwise_equal(build(ZERO), build(NEGATIVE_ZERO))
-    assert not bitwise_equal(build(NEGATIVE_ZERO), build(ZERO))
-    assert bitwise_equal(build(NEGATIVE_ZERO), build(NEGATIVE_ZERO))
-    assert bitwise_equal(build(ZERO), build(ZERO))
+    first, second = pair
+    assert struct.pack("<d", first) != struct.pack("<d", second)
+    assert not bitwise_equal(build(first), build(second))
+    assert not bitwise_equal(build(second), build(first))
+    assert bitwise_equal(build(first), build(first))
+    assert bitwise_equal(build(second), build(second))
+
+
+def test_complex_parts_compared_by_bits() -> None:
+    """抓複數只比值或只比 hex：實部或虛部差一個 NaN 位元、或差一個零的符號，都要判不同。"""
+    assert not bitwise_equal(complex(NAN_A, 1.0), complex(NAN_B, 1.0))
+    assert not bitwise_equal(complex(1.0, NAN_A), complex(1.0, NAN_B))
+    assert not bitwise_equal(complex(1.0, ZERO), complex(1.0, NEGATIVE_ZERO))
+    assert bitwise_equal(complex(NAN_A, NAN_B), complex(NAN_A, NAN_B))
+
+
+def test_readback_check_tells_mapping_key_order_apart(saved: SchemeResult) -> None:
+    """抓對照表只比鍵的集合：兩份只差 ``scheme.speakers`` 鍵順序的結果，產品 ``next(iter(scheme.speakers))`` 會取到不同的
+    喇叭，必須判不同；原樣的一份判相同。"""
+    reversed_speakers = dict(reversed(list(saved.scheme.speakers.items())))
+    assert list(reversed_speakers) != list(saved.scheme.speakers) and reversed_speakers == saved.scheme.speakers
+    flipped = saved.model_copy(update={"scheme": saved.scheme.model_copy(update={"speakers": reversed_speakers})})
+    assert not bitwise_equal(flipped, saved)
+    assert not bitwise_equal(saved, flipped)
+    assert bitwise_equal(saved.model_copy(), saved)

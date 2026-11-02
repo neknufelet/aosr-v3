@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -34,6 +35,18 @@ def _directory(tmp_path_factory: pytest.TempPathFactory, worker_id: str, name: s
     return directory
 
 
+def _seconds_sorted(model: ReducedModel) -> ReducedModel:
+    """讀回比較唯一的例外：建模帳 ``seconds`` 的鍵照產品存檔的順序（排序）重建，值不動、照舊逐位比。
+
+    這一處的順序沒有語意：寫在 ``fem_reduced_store.save_reduced``（``_ledger_document`` 抄 ``dict(ledger.seconds)``，
+    整份 manifest ``json.dumps(..., sort_keys=True)``），讀在 ``fem_reduced_store._ledger``（照 manifest 的順序、也就是排序後）。
+    之後讀它的只有 ``fem_reduced_receipt.save_validation_receipt``（一樣 ``sort_keys=True`` 寫進收據）與
+    ``test_fem_reduced::test_build_ledger_records_solves_rounds_and_rank``（比鍵的集合），沒有誰照順序讀。
+    """
+    seconds = dict(sorted(model.ledger.seconds.items()))
+    return dataclasses.replace(model, ledger=dataclasses.replace(model.ledger, seconds=seconds))
+
+
 def shared_model(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
                  build: Callable[[], ReducedModel]) -> ReducedModel:
     """這一次 pytest 的那一份替身：第一個拿到鎖的工人建、用產品的 ``save_reduced`` 存，大家用 ``load_reduced`` 讀回。"""
@@ -44,7 +57,7 @@ def shared_model(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
         for stale in (path, manifest_path(path)):  # 前一個工人存完讀回不符就拋了，留下的檔不能擋住重算
             stale.unlink(missing_ok=True)
         save_reduced(calculated, path)
-        assert bitwise_equal(load_reduced(path), calculated)
+        assert bitwise_equal(load_reduced(path), _seconds_sorted(calculated))
         return str(path)
 
     return load_reduced(Path(shared_json(tmp_path_factory, worker_id, "fem-reduced-model", produce)))
