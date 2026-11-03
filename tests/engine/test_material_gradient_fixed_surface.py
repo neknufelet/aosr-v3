@@ -144,7 +144,7 @@ def test_carpet_fixed_floor_uses_catalog_material_and_distinct_identity() -> Non
 
 
 def test_carpet_random_absorption_stays_below_padded_carpet(tmp_path: Path) -> None:
-    """抓直接鋪地毯被改成比加墊更吸音；冷子行程開雙精度，不跑搜尋。"""
+    """抓直接鋪地毯的吸音跑出擬合窗（例如被減半、誤用垂直入射）或比加墊更吸音；冷子行程開雙精度，不跑搜尋。"""
     env = child_process_env(threads=1)
     env["TMPDIR"] = str(tmp_path)
     child = subprocess.run([sys.executable, "-B", "-m", "tests.engine._carpet_absorption_probe"],

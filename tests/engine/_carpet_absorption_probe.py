@@ -1,4 +1,4 @@
-"""冷子行程開雙精度，算地毯那一筆的無規入射吸音係數，守它不會比加墊的地毯更吸音。"""
+"""冷子行程開雙精度，算地毯那一筆的無規入射吸音係數：每帶要落在擬合的允收窗內，也不准比加墊的地毯更吸音。"""
 from aosr import runtime
 runtime.configure_calculation_jax()
 
@@ -18,6 +18,8 @@ from aosr.physics.report_surfaces import WholeWallZone
 OSHA_FREQUENCIES_HZ = (125., 250., 500.)
 OSHA_CARPET_ON_CONCRETE = (.02, .06, .14)
 OSHA_CARPET_WITH_UNDERLAYMENT = (.08, .24, .57)
+# 擬合允收窗：#990 地毯施工單訂的挑選條件，每帶跟目標的相對差不超過一半。
+FIT_WINDOW = .5
 
 
 def main() -> None:
@@ -29,6 +31,7 @@ def main() -> None:
     for frequency, actual, direct, padded in zip(OSHA_FREQUENCIES_HZ, np.asarray(absorption),
             OSHA_CARPET_ON_CONCRETE, OSHA_CARPET_WITH_UNDERLAYMENT, strict=True):
         assert 0 < actual < padded, (frequency, actual, direct, padded)
+        assert abs(actual / direct - 1) <= FIT_WINDOW, (frequency, actual, direct)
 
 
 if __name__ == "__main__":
