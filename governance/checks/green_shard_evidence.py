@@ -22,8 +22,9 @@ from typing import cast
 from governance.checks.ci_command_segments import (
     SEGMENT_SEP_RE, _command_lines, _command_text, _is_wrapped, _split_outside_quotes, is_pytest_argv,
 )
-from governance.exit_codes import ToolBroken
+from governance.exit_codes import ToolBroken, note
 from governance.verify_shards import Registry, _relative, _string, _table, render_inputs, run_identity
+from governance.shard_timing import assignment_hash, from_snapshot, validate_snapshot
 
 TestKey = tuple[str, str]
 IDENTITY_KEYS = frozenset({'repository', 'workflow_path', 'workflow_ref', 'event', 'run_id', 'run_attempt',
@@ -225,7 +226,8 @@ def _schema(row: Mapping[str, object], field: str, wanted: int) -> None:
 
 def _manifest(raw: bytes, where: str, settings: FinalizerSettings) -> dict[str, object]:
     """manifest 頂層與兩份檔案格的鍵、型別全部嚴格核對。"""
-    row = _table(_json(raw, where), where, MANIFEST_KEYS)
+    keys = MANIFEST_KEYS | {'timing_source', 'timing', 'assignment_sha256'} if settings.manifest_schema == 3 else MANIFEST_KEYS
+    row = _table(_json(raw, where), where, keys)
     _schema(row, where, settings.manifest_schema)
     for key in IDENTITY_KEYS | {'shard'}:
         _string(row[key], f'{where}.{key}')
@@ -513,7 +515,7 @@ def _cases(root: ET.Element, where: str) -> tuple[Counter[TestKey], list[str]]:
 
 
 def _coverage_inputs(expected: Expected, roots: Mapping[str, ET.Element], args: Mapping[str, bytes], registry: Registry,
-                     settings: FinalizerSettings) -> tuple[dict[str, Counter[TestKey]], list[str]]:
+                     settings: FinalizerSettings, assignments: Mapping[str, str] | None = None) -> tuple[dict[str, Counter[TestKey]], list[str]]:
     """逐片重算參數檔，逐題核所屬考卷檔；失敗訊息先於所有覆蓋率訊息。"""
     if set(roots) != set(registry.shards) or set(args) != set(registry.shards):
         raise ToolBroken(f'coverage: 必須提供全部登記片，實際 junit={sorted(roots)!r} args={sorted(args)!r}')
@@ -522,7 +524,7 @@ def _coverage_inputs(expected: Expected, roots: Mapping[str, ET.Element], args: 
     problems: list[str] = []
     files = dict(expected.files)
     for shard in registry.shards:
-        wanted = render_inputs(expected.nodeids, registry, shard).args.encode('utf-8')
+        wanted = render_inputs(expected.nodeids, registry, shard, assignments=assignments).args.encode('utf-8')
         try:
             args[shard].decode('utf-8')
         except (UnicodeError, AttributeError) as exc:
@@ -539,14 +541,14 @@ def _coverage_inputs(expected: Expected, roots: Mapping[str, ET.Element], args: 
 
 
 def coverage_problems(expected: Expected, roots: Mapping[str, ET.Element], args: Mapping[str, bytes], registry: Registry,
-                      settings: FinalizerSettings) -> list[str]:
+                      settings: FinalizerSettings, assignments: Mapping[str, str] | None = None) -> list[str]:
     """漏題、不明題、片內重複、跨片重複分開報，實跑篩題靠此關擋。"""
-    counts, bad = _coverage_inputs(expected, roots, args, registry, settings)
+    counts, bad = _coverage_inputs(expected, roots, args, registry, settings, assignments)
     files = dict(expected.files)
     wanted = set(files)
     actual = set().union(*(set(part) for part in counts.values()))
     owner = {file: shard for shard in registry.shards
-             for file in render_inputs(expected.nodeids, registry, shard).args.splitlines()}
+             for file in render_inputs(expected.nodeids, registry, shard, assignments=assignments).args.splitlines()}
     for key in sorted(wanted - actual):
         bad.append(_problem(f'片 {owner.get(files[key], registry.shards)} {registry.evidence.junit}', f'testcase{key!r}.漏題', [],
                             f'在 {files[key]} 恰好一次'))
@@ -595,3 +597,23 @@ def part_attr_problems(roots: Mapping[str, ET.Element], filename: str) -> list[s
         if declared != actual:
             bad.append(_problem(where, 'tests', declared, actual))
     return bad
+
+
+def timing_consensus(manifests: Mapping[str, Mapping[str, object]], files: tuple[str, ...],
+                     registry: Registry) -> tuple[dict[str, str] | None, list[str]]:
+    """來源、全部權重與分配摘要必須同一份；再由共同輸入重算，防止一致的假摘要。"""
+    if set(manifests) != set(registry.shards):
+        return None, ['耗時來源缺片或多片，不准判綠']
+    first = manifests[registry.shards[0]]
+    wanted = {key: first.get(key) for key in ('timing_source', 'timing', 'assignment_sha256')}
+    bad = [f'片 {shard} 耗時來源或分配雜湊不同' for shard, manifest in manifests.items()
+           if any(manifest.get(key) != value for key, value in wanted.items())]
+    snapshot = validate_snapshot(wanted['timing'])
+    assigned = from_snapshot(files, registry, snapshot)
+    if wanted['timing_source'] != snapshot['timing_source'] or wanted['assignment_sha256'] != assignment_hash(assigned):
+        bad.append('耗時來源標記或分配雜湊與重算不同')
+    if snapshot['timing_source'] == 'fallback':
+        note(f"耗時來源 fallback（退回登記簿加路徑雜湊）：{snapshot['reason']}")
+    else:
+        note(f"耗時來源：成功跑號 {snapshot['run_id']}；提交 {snapshot['sha']}")
+    return assigned, bad

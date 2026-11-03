@@ -1,1 +1,1 @@
-shards = ["shard-a", "shard-b"]
+shards = ["shard-a", "shard-b", "shard-c", "shard-d", "shard-e"]

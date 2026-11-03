@@ -300,7 +300,8 @@ def test_single_shard_needs_may_be_a_string(tmp_path: Path) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     (root / "governance" / "verify-shards.toml").write_text('shards = ["shard-a"]\n', encoding="utf-8")
     path, data = _workflow(root)
-    del data["jobs"]["shard-b"]
+    for shard in ("shard-b", "shard-c", "shard-d", "shard-e"):
+        del data["jobs"][shard]
     data["jobs"]["verify-sharded"]["needs"] = "shard-a"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert _check(root) == []
@@ -372,3 +373,34 @@ def test_verdict_step_must_equal_registered_run(tmp_path: Path, run: str) -> Non
     steps[1]["run"] = run
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert any("run 必須整串等於卡上登記的 verdict_run" in hit for hit in _check(root))
+
+
+def test_registered_history_dependency_is_exact_and_protected(tmp_path: Path) -> None:
+    from governance.checks.ci_required_gate import job_identity_problems
+    job: dict[str, object] = {'needs': ['timing-history']}
+    protected = frozenset({'shard-a'})
+    assert job_identity_problems('片', 'shard-a', job, protected, preparation='timing-history') == []
+    for needs in (None, ['other'], ['timing-history', 'other']):
+        candidate: dict[str, object] = {} if needs is None else {'needs': needs}
+        assert job_identity_problems('片', 'shard-a', candidate, protected, preparation='timing-history')
+    assert job_identity_problems('片', 'shard-a', job, protected)
+
+
+@pytest.mark.parametrize('case,reason', [
+    ('case-history-wrong-dependency', '耗時前置 needs'),
+    ('case-history-command-replaced', '完整快照命令'),
+    ('case-history-output-replaced', '不是同一份快照'),
+    ('case-history-input-missing', '準備步驟讀同一份'),
+    ('case-history-has-needs', '卻有 needs'),
+    ('case-history-has-strategy', '卻有 strategy'),
+    ('case-history-has-if', '卻有 job 層 if'),
+])
+def test_history_preparation_negative_fixtures(tmp_path: Path, case: str, reason: str) -> None:
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly', case)
+    bad = _check(root)
+    assert bad and all(reason in hit for hit in bad), bad
+
+
+def test_history_preparation_five_shard_control(tmp_path: Path) -> None:
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    assert _check(root) == []

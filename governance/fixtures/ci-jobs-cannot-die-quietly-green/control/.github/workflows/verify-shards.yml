@@ -32,11 +32,53 @@ jobs:
       with:
         name: receipts
         path: governance/receipts
+  shard-c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: 考卷
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: 上傳
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+  shard-d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: 考卷
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: 上傳
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+  shard-e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: 考卷
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: 上傳
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
   verify-sharded:
     name: verify-sharded
     needs:
     - shard-a
     - shard-b
+    - shard-c
+    - shard-d
+    - shard-e
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

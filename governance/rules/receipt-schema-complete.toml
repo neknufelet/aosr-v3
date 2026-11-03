@@ -43,7 +43,7 @@ sha256_hex_len = 64
 # 但它不是這個 repo 的檢查程式，不印 `scan_root=… files=… hits=…` 那一行；
 # install_browser 是 2026-09-28 為畫面考卷加的裝無頭瀏覽器那一步，同樣包了抄寫員、不是檢查）。
 # #928：鑰匙、放回與封存三步印快取／套件紀錄，不是治理判決；離開碼仍由抄寫員留存。
-report_optional_names = ["pytest", "mirror_receipts", "ruff", "install_browser", "prepare", "seal",
+report_optional_names = ["timing_history", "pytest", "mirror_receipts", "ruff", "install_browser", "prepare", "seal",
   "apt_archives_key", "apt_archives_restore", "apt_archives_stash"]
 
 # 必填欄位，按收據的 schema 版本列。收據比登記的最新版還新就回 2；比它舊的按它自己那版判。

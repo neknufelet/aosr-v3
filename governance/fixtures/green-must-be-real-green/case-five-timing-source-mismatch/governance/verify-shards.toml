@@ -1,0 +1,39 @@
+schema = 2
+shards = ["shard-a", "shard-b", "shard-c", "shard-d", "shard-e"]
+unregistered = "path-hash"
+[evidence]
+dir = "governance/receipts/shard"
+expected = "expected.txt"
+args = "pytest.args"
+junit = "junit.xml"
+manifest = "manifest.json"
+
+[[group]]
+name="group-a"
+shard="shard-a"
+why="控制組"
+files=["tests/test_a.py"]
+
+[[group]]
+name="group-b"
+shard="shard-b"
+why="控制組"
+files=["tests/test_b.py"]
+
+[[group]]
+name="group-c"
+shard="shard-c"
+why="控制組"
+files=["tests/test_c.py"]
+
+[[group]]
+name="group-d"
+shard="shard-d"
+why="控制組"
+files=["tests/test_d.py"]
+
+[[group]]
+name="group-e"
+shard="shard-e"
+why="控制組"
+files=["tests/test_e.py"]
