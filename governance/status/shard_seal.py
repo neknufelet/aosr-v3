@@ -18,6 +18,7 @@ from pathlib import Path
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
 from governance.verify_shards import Registry, load_registry, run_identity
+from governance.shard_timing import validate_snapshot
 
 def _file_evidence(out: Path, name: str) -> dict[str, object]:
     """對實際位元組封存，檔案不存在或讀不開不能留下假 manifest。"""
@@ -37,6 +38,17 @@ def seal(registry: Registry, shard: str, out: Path, *, env: Mapping[str, str], h
     if target.exists():
         raise ToolBroken(f'manifest: 已經存在 {str(target)!r}')
     manifest: dict[str, object] = {'schema': 2, 'shard': shard, **run_identity(env, head)}
+    timing_path = out.parent / 'timing.json'
+    if timing_path.exists():
+        try:
+            plan = json.loads(timing_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as exc:
+            raise ToolBroken(f'耗時分配封存讀不開：{exc}') from exc
+        if not isinstance(plan, dict) or plan.keys() != {'timing_source', 'timing', 'assignment_sha256'}:
+            raise ToolBroken('耗時分配封存欄位不完整')
+        validate_snapshot(plan['timing'])
+        manifest.update(plan)
+        manifest['schema'] = 3
     for key in ('expected', 'args'):
         manifest[key] = _file_evidence(out, getattr(registry.evidence, key))
     try:

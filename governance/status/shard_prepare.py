@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -13,6 +14,7 @@ import pytest
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
 from governance.verify_shards import Prepared, Registry, load_registry, render_inputs as render_inputs
+from governance.shard_timing import assignment_hash, from_snapshot, validate_snapshot
 
 
 # 環境帶進來的選項（可夾 -k、-o testpaths=…）與外掛（可在收集後悄悄刪題、不發 deselect）都會縮小全套。
@@ -61,9 +63,16 @@ def collect_nodeids(*, runner: Callable[..., int] = pytest.main, root: Path | No
     return collector.nodeids
 
 
-def prepare(nodeids: Iterable[str], registry: Registry, shard: str, out: Path) -> Prepared:
+def prepare(nodeids: Iterable[str], registry: Registry, shard: str, out: Path, *, timing: object = None) -> Prepared:
     """自行建目錄；非空目錄與不可寫輸出回 2，絕不覆蓋舊證據。"""
-    result = render_inputs(nodeids, registry, shard)
+    nodes = tuple(nodeids)
+    assignments = None
+    plan = None
+    if timing is not None:
+        snapshot = validate_snapshot(timing)
+        assignments = from_snapshot(tuple(sorted({node.partition('::')[0] for node in nodes})), registry, snapshot)
+        plan = {'timing_source': snapshot['timing_source'], 'timing': snapshot, 'assignment_sha256': assignment_hash(assignments)}
+    result = render_inputs(nodes, registry, shard, assignments=assignments)
     try:
         out.mkdir(parents=True, exist_ok=True)
         if any(out.iterdir()):
@@ -71,6 +80,9 @@ def prepare(nodeids: Iterable[str], registry: Registry, shard: str, out: Path) -
         for name, text in ((registry.evidence.expected, result.expected), (registry.evidence.args, result.args)):
             with (out / name).open('x', encoding='utf-8', newline='\n') as target:
                 target.write(text)
+        if plan is not None:
+            with (out.parent / 'timing.json').open('x', encoding='utf-8') as target:
+                json.dump(plan, target, ensure_ascii=False, sort_keys=True)
     except (OSError, ValueError) as exc:  # ValueError：路徑裡有 NUL
         raise ToolBroken(f'out {out}: 寫不了證據，實際 {exc}') from exc
     return result
@@ -94,7 +106,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.shard not in registry.shards:
             raise ToolBroken(f'shard: 未登記 {args.shard!r}')
         out = args.out if args.out is not None else root / registry.evidence.dir
-        prepare(collect_nodeids(root=root), registry, args.shard, out)
+        raw = os.environ.get('AOSR_TIMING_SNAPSHOT')
+        try:
+            timing = json.loads(raw) if raw is not None else None
+        except ValueError as exc:
+            raise ToolBroken(f'共用耗時快照讀不開：{exc}') from exc
+        prepare(collect_nodeids(root=root), registry, args.shard, out, timing=timing)
     except ToolBroken as exc:
         note(f'分片清點回 2（工具自壞）：{exc}')
         return TOOL_BROKEN

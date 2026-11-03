@@ -18,6 +18,7 @@ from xml.etree import ElementTree as ET
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
 from governance.verify_shards import Group, Registry, _groups, load_registry, render_inputs, unregistered_shard
+from governance.shard_timing import from_snapshot
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,10 @@ def _junit(path: Path, modules: dict[str, str]) -> tuple[float, dict[str, float]
     unmapped: list[str] = []
     total = 0.0
     for case in tree.iter('testcase'):
-        seconds = _seconds(float(case.get('time', '0')), f'{path} testcase.time')
+        raw = case.get('time')
+        if raw is None:
+            raise ToolBroken(f'{path} testcase.time: 缺 time（逐題秒數）屬性')
+        seconds = _seconds(float(raw), f'{path} testcase.time')
         total += seconds
         classname = case.get('classname', '')
         file = _class_file(classname, modules)
@@ -103,6 +107,26 @@ def _junit(path: Path, modules: dict[str, str]) -> tuple[float, dict[str, float]
         else:
             times[file] = times.get(file, 0.0) + seconds
     return total, times, unmapped
+
+
+def read_timing_junits(history: Path, files: tuple[str, ...]) -> dict[str, float]:
+    """固定一跑的全部分片共用既有逐題讀法；一片壞掉就拒收整跑。"""
+    modules = {file.removesuffix('.py').replace('/', '.'): file for file in files}
+    paths = sorted(history.glob('*/junit.xml'))
+    if not paths:
+        raise ToolBroken('歷史收據沒有分片考卷')
+    times: dict[str, float] = {}
+    try:
+        for path in paths:
+            tree = ET.parse(path)
+            if not list(tree.iter('testcase')) or any(list(tree.iter(tag)) for tag in ('failure', 'error', 'skipped')):
+                raise ToolBroken(f'歷史收據不是成功的完整考卷：{path}')
+            _, observed, _ = _junit(path, modules)
+            for file, seconds in observed.items():
+                times[file] = times.get(file, 0.0) + seconds
+    except (OSError, ValueError, ET.ParseError) as exc:
+        raise ToolBroken(f'歷史收據讀不開：{exc}') from exc
+    return times
 
 
 def _history(history: Path, registry: Registry, files: tuple[str, ...]) -> tuple[list[Sample], list[str], list[str]]:
@@ -372,12 +396,23 @@ def format_report(result: Balance, reference_cpu: str, text: str = '', applied: 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """輸入壞掉或資料不足依治理退出碼回二。"""
-    parser = argparse.ArgumentParser(description='依雲端歷史耗時提出兩台配平建議')
-    parser.add_argument('--history', type=Path, required=True)
+    parser = argparse.ArgumentParser(description='預覽這一跑的分配；舊式兩片離線報告保留供歷史比較')
+    parser.add_argument('--snapshot', type=Path)
+    parser.add_argument('--history', type=Path)
     parser.add_argument('--registry', type=Path, default=Path('governance/verify-shards.toml'))
-    parser.add_argument('--reference-cpu', required=True)
+    parser.add_argument('--reference-cpu')
     args = parser.parse_args(argv)
     try:
+        if args.snapshot is not None:
+            from governance.status.shard_prepare import collect_nodeids
+            registry = load_registry(args.registry)
+            files = tuple(sorted({node.partition('::')[0] for node in collect_nodeids(root=Path.cwd())}))
+            snapshot = json.loads(args.snapshot.read_text(encoding='utf-8'))
+            assigned = from_snapshot(files, registry, snapshot)
+            sys.stdout.write('本跑分配（共用雲端分配器）：\n' + ''.join(f'{file} → {shard}\n' for file, shard in assigned.items()))
+            return 0
+        if args.history is None or args.reference_cpu is None:
+            raise ToolBroken('須給共用快照，或舊式歷史目錄與參考型號')
         result = analyze(args.history, args.registry, Path.cwd(), args.reference_cpu)
         registry = load_registry(args.registry)
         check_registry_shape(args.registry.read_text(encoding='utf-8'), registry)

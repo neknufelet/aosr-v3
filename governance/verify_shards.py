@@ -194,7 +194,7 @@ def _collected_file(nodeid: str) -> str:
     return file
 
 
-def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str) -> Prepared:
+def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str, *, assignments: Mapping[str, str] | None = None) -> Prepared:
     """不套分片篩選的全套 expected；群檔加未登記檔的路徑雜湊形成 pytest.args。"""
     if shard not in registry.shards:
         raise ToolBroken(f'shard: 未登記 {shard!r}，實際 shards={registry.shards!r}')
@@ -211,6 +211,10 @@ def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str) -> Pre
     selected = {file for group in registry.groups if group.shard == shard for file in group.files}
     selected.update(file for file in files - registered
                     if unregistered_shard(file, registry.shards) == shard)
+    if assignments is not None:
+        if set(assignments) != files or set(assignments.values()) - set(registry.shards):
+            raise ToolBroken('耗時分配必須恰好覆蓋全套考卷且只用登記片名')
+        selected = {file for file in files if assignments[file] == shard}
     if not selected:
         raise ToolBroken(f'shard {shard!r}: 本片考卷集合是空的，空參數檔會跑全套')
     return Prepared('\n'.join(sorted(nodes)) + '\n', '\n'.join(sorted(selected)) + '\n')

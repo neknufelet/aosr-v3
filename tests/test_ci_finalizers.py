@@ -300,7 +300,8 @@ def test_single_shard_needs_may_be_a_string(tmp_path: Path) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     (root / "governance" / "verify-shards.toml").write_text('shards = ["shard-a"]\n', encoding="utf-8")
     path, data = _workflow(root)
-    del data["jobs"]["shard-b"]
+    for shard in ("shard-b", "shard-c", "shard-d", "shard-e"):
+        del data["jobs"][shard]
     data["jobs"]["verify-sharded"]["needs"] = "shard-a"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert _check(root) == []
@@ -372,3 +373,101 @@ def test_verdict_step_must_equal_registered_run(tmp_path: Path, run: str) -> Non
     steps[1]["run"] = run
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert any("run 必須整串等於卡上登記的 verdict_run" in hit for hit in _check(root))
+
+
+def test_registered_history_dependency_is_exact_and_protected(tmp_path: Path) -> None:
+    from governance.checks.ci_required_gate import job_identity_problems
+    job: dict[str, object] = {'needs': ['timing-history']}
+    protected = frozenset({'shard-a'})
+    assert job_identity_problems('片', 'shard-a', job, protected, preparation='timing-history') == []
+    for needs in (None, ['other'], ['timing-history', 'other']):
+        candidate: dict[str, object] = {} if needs is None else {'needs': needs}
+        assert job_identity_problems('片', 'shard-a', candidate, protected, preparation='timing-history')
+    assert job_identity_problems('片', 'shard-a', job, protected)
+
+
+@pytest.mark.parametrize('case,reason', [
+    ('case-history-wrong-dependency', '耗時前置 needs'),
+    ('case-history-command-replaced', '完整快照命令'),
+    ('case-history-output-replaced', '不是同一份快照'),
+    ('case-history-input-missing', '準備步驟讀同一份'),
+    ('case-history-prepare-command-spoofed', '準備步驟讀同一份'),
+    ('case-history-prepare-wrapper-help', '準備步驟讀同一份'),
+    ('case-history-prepare-wrapper-bogus', '準備步驟讀同一份'),
+    ('case-history-prepare-wrong-shard', '準備步驟讀同一份'),
+    ('case-history-has-needs', '卻有 needs'),
+    ('case-history-has-strategy', '卻有 strategy'),
+    ('case-history-has-if', '卻有 job 層 if'),
+])
+def test_history_preparation_negative_fixtures(tmp_path: Path, case: str, reason: str) -> None:
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly', case)
+    bad = _check(root)
+    assert bad and all(reason in hit for hit in bad), bad
+
+
+def test_history_preparation_five_shard_control(tmp_path: Path) -> None:
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    assert _check(root) == []
+
+
+@pytest.mark.parametrize('child', [
+    'uv run echo governance.status.shard_prepare --shard shard-a',
+    'uv run python -m governance.status.shard_prepare --shard shard-b',
+    'uv run python -m governance.status.shard_prepare --shard shard-a --help',
+])
+def test_history_prepare_child_must_execute_the_exact_shard_command(tmp_path: Path, child: str) -> None:
+    """只印模組名、借用別片或要求說明，都沒有執行本片準備，整支檢查必須拒絕。"""
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    assert _check(root) == []
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data['jobs']['shard-a']['steps'])
+    steps[0]['run'] = str(steps[0]['run']).partition(' -- ')[0] + ' -- ' + child
+    path.write_text(yaml.safe_dump(data))
+    bad = _check(root)
+    assert bad and all('準備步驟讀同一份' in hit for hit in bad), bad
+
+
+@pytest.mark.parametrize('variant', ['quoted-module', 'continuation', 'trailing-comment', 'extra-space'])
+def test_history_prepare_run_rejects_alternate_spellings(tmp_path: Path, variant: str) -> None:
+    """準備命令只收登記的單行字面寫法；接續行、註解與等價命令字也不放行。"""
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data['jobs']['shard-a']['steps'])
+    body = str(steps[0]['run'])
+    if variant == 'quoted-module':
+        body = body.replace('governance.status.shard_prepare', "'governance.status.shard_prepare'")
+    elif variant == 'continuation':
+        body = body.replace(' --shard', ' ' + chr(92) + chr(10) + ' --shard')
+    elif variant == 'trailing-comment':
+        body += ' # prepare'
+    else:
+        body = body.replace(' --name prepare', '  --name prepare')
+    steps[0]['run'] = body
+    path.write_text(yaml.safe_dump(data))
+    bad = _check(root)
+    assert bad and all('準備步驟讀同一份' in hit for hit in bad), bad
+
+
+def test_history_prepare_run_accepts_outer_whitespace(tmp_path: Path) -> None:
+    """只准忽略完整命令頭尾空白。"""
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data['jobs']['shard-a']['steps'])
+    steps[0]['run'] = '  ' + str(steps[0]['run']) + '  '
+    path.write_text(yaml.safe_dump(data))
+    assert _check(root) == []
+
+
+@pytest.mark.parametrize('value', [None, '', ' ', False, 'prepare without placeholder', 'prepare {shard} {shard}',
+                                  'prepare {shard}\ncontinued', 'prepare {shard}\rcontinued'])
+def test_history_prepare_run_template_requires_one_single_line_placeholder(tmp_path: Path, value: object) -> None:
+    """缺樣板、壞型別、缺代換或多行設定都必須回工具自壞。"""
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    files = [path for path in root.rglob('*') if path.is_file()]
+    settings = ci._card_settings(root, files)
+    if value is None:
+        settings.pop('prepare_run', None)
+    else:
+        settings['prepare_run'] = value
+    with pytest.raises(ToolBroken, match='prepare_run'):
+        ci._finalizer_settings_problems(settings, 'card.toml')

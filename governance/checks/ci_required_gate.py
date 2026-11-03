@@ -15,6 +15,7 @@ from governance.checks.ci_command_segments import (
 
 FINALIZER_KEY = "finalizer_jobs"
 FINALIZER_FIELDS = ("registry", "job_if", "step_if", "verdict_env_name", "verdict_env_value", "verdict_run")
+PREPARATION_FIELDS = ('preparation_job', 'preparation_run', 'preparation_output')
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ def _needs_match(job: dict[str, object], finalizer: Finalizer) -> bool:
 
 def job_identity_problems(
     where: str, job_id: str, job: dict[str, object], required: frozenset[str], finalizer: Finalizer | None = None,
+    *, preparation: str | None = None,
 ) -> list[str]:
     """GitHub 以 job name（未寫才用 id）比必要檢查名。"""
     raw_name = job.get("name")
@@ -74,7 +76,10 @@ def job_identity_problems(
         bad.append(f"{where} 是必要檢查，name: {raw_name!r} 與 job id {job_id!r} 不同——GitHub 按 name 比必要檢查")
     if actual in required and job_id != actual:
         bad.append(f"{where} 的 name: {actual!r} 冒用必要檢查名，跳過的冒名 job 也會回報 Success")
-    if job_id in required and "needs" in job and finalizer is None:
+    needs = job.get('needs')
+    if preparation is not None and needs not in (preparation, [preparation]):
+        bad.append(f'{where} 的耗時前置 needs 必須恰好是 {preparation!r}')
+    if job_id in required and "needs" in job and finalizer is None and preparation is None:
         bad.append(f"{where} 是必要檢查卻有 needs:——前置 job 被跳過會連帶跳過它並回報 Success")
     if finalizer is not None and not _needs_match(job, finalizer):
         bad.append(f"{where} 的收尾 needs 集合必須等於登記簿分片 {sorted(finalizer.shards)}")
@@ -178,8 +183,12 @@ def finalizer_problems(
             continue  # 缺席由唯一性判；非表由主檔回 2。
         where = f"{rel} 的收尾 job {job_id!r}"
         entry = finalizer.settings
-        if set(jobs) != finalizer.shards | {job_id}:
+        preparation = entry.get('preparation_job')
+        allowed = finalizer.shards | {job_id} | ({preparation} if preparation else set())
+        if set(jobs) != allowed:
             bad.append(f"{where} 所在 workflow 只准有收尾和分片，實際工作：{sorted(jobs)}")
+        if preparation:
+            bad.extend(preparation_problems(jobs, finalizer, settings))
         steps = job.get("steps")
         if not isinstance(steps, list):
             continue
@@ -202,6 +211,32 @@ def finalizer_problems(
             env = wrapped[0].get("env")
             if not isinstance(env, dict) or env.get(entry["verdict_env_name"]) != entry["verdict_env_value"]:
                 bad.append(f"{where} 的判決 env.{entry['verdict_env_name']} 必須整串等於 {entry['verdict_env_value']!r}")
+    return bad
+
+
+def preparation_problems(jobs: Mapping[str, object], finalizer: Finalizer, settings: dict[str, object]) -> list[str]:
+    """快照只准一份完整命令與輸出；各片只讀同一輸出，不准自行決定退回。"""
+    entry = finalizer.settings
+    name = entry['preparation_job']
+    job = jobs.get(name)
+    if not isinstance(job, dict) or not isinstance(job.get('steps'), list):
+        return [f'耗時前置 {name} 缺工作或步驟']
+    wrapped = [step for step in job['steps'] if isinstance(step, dict)
+               and _wrapped_step(step, setting_text(settings, 'wrapper_command'))]
+    if len(wrapped) != 1 or wrapped[0].get('run') != entry['preparation_run'] or wrapped[0].get('id') != 'history':
+        return [f'耗時前置 {name} 必須恰好執行登記的完整快照命令']
+    bad = []
+    if job.get('outputs') != {'snapshot': '${{ steps.history.outputs.snapshot }}'}:
+        bad.append(f'耗時前置 {name} 輸出不是同一份快照')
+    for shard in sorted(finalizer.shards):
+        part = jobs.get(shard)
+        steps = part.get('steps') if isinstance(part, dict) else None
+        readers = [step for step in steps if isinstance(step, dict) and isinstance(step.get('env'), dict)
+                   and step['env'].get('AOSR_TIMING_SNAPSHOT') == entry['preparation_output']] if isinstance(steps, list) else []
+        body = readers[0].get('run') if len(readers) == 1 else None
+        expected = setting_text(settings, 'prepare_run').replace('{shard}', shard)
+        if not isinstance(body, str) or body.strip() != expected:
+            bad.append(f'片 {shard} 必須由準備步驟讀同一份耗時前置快照；run（完整命令）須整串符合 prepare_run（準備樣板），認不出就紅')
     return bad
 
 

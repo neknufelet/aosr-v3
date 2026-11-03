@@ -125,11 +125,11 @@ from governance.checks.ci_command_segments import (
     _receipt_step_problems,
 )
 from governance.checks.ci_required_gate import (
-    FINALIZER_FIELDS, FINALIZER_KEY, Finalizer, finalizer_registry_paths,
+    FINALIZER_FIELDS, FINALIZER_KEY, PREPARATION_FIELDS, Finalizer, finalizer_registry_paths,
     finalizer_problems, job_identity_problems, protected_ids_unique, read_finalizers,
     required_trigger_problems, step_if_problems, upload_overwrite_problems,
 )
-from governance.loader import RULES_DIR, setting_int, setting_strings
+from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
 try:
     import yaml
@@ -182,7 +182,7 @@ TEXT_KEYS = ("wrapper_command", "required_child_prefix")
 REQUIRED_EVENTS_KEY = "required_pull_request_events"
 FORBIDDEN_FILTERS_KEY = "forbidden_pull_request_filters"
 STEP_IF_KEY = "allowed_required_step_ifs"
-SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY, FINALIZER_KEY)
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY, FINALIZER_KEY, 'prepare_run')
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -281,10 +281,15 @@ def _finalizer_settings_problems(settings: dict[str, object], rel: str) -> None:
     for job_id, entry in entries.items():
         if not isinstance(job_id, str) or not job_id.strip() or not isinstance(entry, dict):
             raise ToolBroken(f"{rel} 的 {FINALIZER_KEY} 必須是非空 job id 到設定表")
-        if set(entry) != set(FINALIZER_FIELDS) or not all(
-            isinstance(entry.get(key), str) and entry[key].strip() for key in FINALIZER_FIELDS
+        keys = set(FINALIZER_FIELDS) | (set(PREPARATION_FIELDS) if set(entry).intersection(PREPARATION_FIELDS) else set())
+        if set(entry) != keys or not all(
+            isinstance(entry.get(key), str) and entry[key].strip() for key in keys
         ):
             raise ToolBroken(f"{rel} 的 {FINALIZER_KEY}.{job_id} 必須剛好有非空整串設定 {list(FINALIZER_FIELDS)}")
+        if 'preparation_job' in entry:
+            template = setting_text(settings, 'prepare_run')
+            if template != template.strip() or '\n' in template or '\r' in template or template.count('{shard}') != 1:
+                raise ToolBroken(f'{rel} 的 prepare_run 必須是無頭尾空白的單行命令，且恰含一個 {{shard}} 代換記號')
         registry = Path(entry["registry"])
         if registry.is_absolute() or ".." in registry.parts:
             raise ToolBroken(f"{rel} 的 {FINALIZER_KEY}.{job_id}.registry 必須指向掃描根裡的相對路徑")
@@ -602,7 +607,8 @@ def _job_problems(
     bad += [] if name in finalizers else _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
     if name in required_jobs and "if" in job and name not in finalizers:
         bad.append(f"{where} 是必要檢查卻有 job 層 if:——條件跳過會回報 Success，沒驗就亮綠")
-    bad += job_identity_problems(where, name, job, required_jobs, finalizers.get(name))
+    preparation = next((f.settings.get('preparation_job') for f in finalizers.values() if name in f.shards), None)
+    bad += job_identity_problems(where, name, job, required_jobs, finalizers.get(name), preparation=preparation)
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
     # 第 5 條對受保護集合 P 成立：必要名單、卡上登記的收尾與分片，
@@ -616,7 +622,7 @@ def _job_problems(
             "——空 job 永遠綠，掛成 required check 就是一個只會回綠的閘"
         ]
 
-    does_work = name in finalizers  # 收尾的判決步驟改由完整形狀驗證，缺席只報該條。
+    does_work = name in finalizers or any(name == f.settings.get('preparation_job') for f in finalizers.values())
     markers = setting_strings(settings, "work_markers")
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
@@ -701,7 +707,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     if duplicates:
         return duplicates  # 結構已不可信，先報⑧；登記簿與其他判準下一跑再判。
     finalizers = read_finalizers(scan_root, files, settings)
-    protected = required_jobs | frozenset(finalizers) | frozenset(s for f in finalizers.values() for s in f.shards)
+    preparations = frozenset(f.settings['preparation_job'] for f in finalizers.values() if 'preparation_job' in f.settings)
+    protected = required_jobs | frozenset(finalizers) | frozenset(s for f in finalizers.values() for s in f.shards) | preparations
     bad = protected_ids_unique(parsed, protected)
     for rel, data, jobs in parsed:
         bad += required_trigger_problems(rel, data, jobs, protected, settings)

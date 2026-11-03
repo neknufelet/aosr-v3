@@ -80,7 +80,7 @@ def test_every_verify_card_check_runs_in_exactly_one_shard() -> None:
         else:
             assert where == 1, f'{card.id} 在兩片共跑了 {where} 次'
     names: Counter[str] = Counter(name for shard in shards for name in _recorded(jobs[shard]))
-    assert names['ruff'] == 1 and names['mirror_receipts'] == 1 and names['install_browser'] == 1
+    assert names['ruff'] == 1 and names['mirror_receipts'] == 1 and names['install_browser'] == len(shards)
 
 
 def test_receipt_cards_read_the_mirror_in_the_same_shard_and_browser_lives_in_a() -> None:
@@ -155,8 +155,9 @@ def test_browser_archive_cache_order_and_exact_restore() -> None:
             f'--out-dir governance/receipts/steps -- uv run python -m governance.status.apt_archives {command}'
         )
         assert 'if' not in step
-    assert all('apt_archives' not in str(step) and 'actions/cache/' not in str(step)
-               for step in _steps(jobs['shard-b']))
+    for shard in _shards():
+        assert 'install_browser' in _recorded(jobs[shard])
+        assert 'apt_archives_key' in _recorded(jobs[shard])
 
 
 def test_browser_archive_cache_path_matches_module() -> None:
@@ -178,3 +179,13 @@ def test_browser_archive_records_are_registered_without_verdict_lines() -> None:
         name = f'apt_archives_{command}'
         assert name in _recorded(_jobs()['shard-a'])
         assert name in names
+
+
+def test_five_explicit_shards_keep_two_required_checks() -> None:
+    """五台手寫工作、不改合併門的兩個名字或每片三十分鐘上限。"""
+    assert _shards() == [f'shard-{letter}' for letter in 'abcde']
+    jobs = _jobs()
+    for shard in _shards():
+        assert 'strategy' not in jobs[shard]
+        assert jobs[shard]['timeout-minutes'] == 30
+    assert [line for line in (ROOT / 'governance/required-status-checks.txt').read_text().splitlines() if line and not line.startswith('#')] == ['verify', 'acceptance']

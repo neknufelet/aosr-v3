@@ -31,6 +31,8 @@ ARGS_BOTH = (TEST_A + '\n' + TEST_B + '\n').encode()
 SHARD_JUNIT_FLAG = f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'
 SHARD_ARGS_FLAG = f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}'
 RED_WORDS = {
+    'case-five-timing-source-mismatch': ('片 shard-e 耗時來源或分配雜湊不同',),
+    'case-five-assignment-hash-mismatch': ('片 shard-e 耗時來源或分配雜湊不同',),
     'case-test-file-collected-nowhere': (f"{MERGED} 裡 {TEST_C} 一題都沒有",),
     'case-part-junit-rewritten-after-pytest': (
         f"片 shard-b {Path(PART_B) / 'steps' / 'pytest.json'}.pytest.output=",
@@ -150,7 +152,8 @@ def test_every_finalizer_fixture_has_its_words() -> None:
     found = {(root.parent.name, root.name) for root in FIXTURES.glob('green-must-be-real-green*/*') if (root / run_file).is_file()}
     listed = {('green-must-be-real-green', case) for case in RED_WORDS}
     listed |= {('green-must-be-real-green-tool-broken', case) for case in BROKEN_WORDS}
-    assert found - {('green-must-be-real-green-green', 'control'), ('green-must-be-real-green-green', 'shard-topology')} == listed
+    controls = {'control', 'shard-topology', 'five-history', 'five-fallback'}
+    assert found - {('green-must-be-real-green-green', name) for name in controls} == listed
 
 
 def test_wrapper_command_has_same_authority_in_both_cards() -> None:

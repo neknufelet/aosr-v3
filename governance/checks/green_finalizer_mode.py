@@ -216,7 +216,14 @@ def receipt_problems(card: Card, parts: Mapping[str, Path], registry: Registry, 
     for shard, root in roots.items():
         trees[shard] = evidence.read_junit(evidence._read_bytes(root / registry.evidence.junit, root), shard, registry.evidence.junit)
         args[shard] = evidence._read_bytes(root / registry.evidence.args, root)
-    bad = evidence.coverage_problems(expected, trees, args, registry, settings.evidence)
+    assignments = None
+    bad: list[str] = []
+    if settings.evidence.manifest_schema == 3:
+        manifests = {shard: evidence._manifest(evidence._read_bytes(root / registry.evidence.manifest, root),
+                                              f'片 {shard} 耗時清單', settings.evidence) for shard, root in roots.items()}
+        assignments, timing_bad = evidence.timing_consensus(manifests, tuple(sorted({file for _, file in expected.files})), registry)
+        bad.extend(timing_bad)
+    bad.extend(evidence.coverage_problems(expected, trees, args, registry, settings.evidence, assignments))
     bad.extend(evidence.part_attr_problems(trees, registry.evidence.junit))
     name = f'{len(trees)} 片合併 {sorted(trees)} {registry.evidence.junit}'
     bad.extend(judge_receipt(card, name, evidence.merged_receipt(trees)))
