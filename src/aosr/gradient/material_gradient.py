@@ -119,6 +119,8 @@ class SurfaceDesign:
     kept_material: SurfaceMaterial | None = None
     mount: Mount = MOUNT_RIGID
     backing_material: WallMaterial | None = None
+    # 固定面保留材料庫 id（跟保留原牆分開記身分），材料本身仍走 kept_material。
+    fixed_material_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():
@@ -127,6 +129,8 @@ class SurfaceDesign:
             raise ValueError(f"面 {self.surface_id} 的安裝方式只收 {list(MOUNTS)}，收到 {self.mount!r}")
         if self.backing_material is not None and (self.material is None or self.mount != MOUNT_ON_WALL):
             raise ValueError(f"面 {self.surface_id} 只有貼在原牆上而且有樣板時才收原牆")
+        if self.fixed_material_id is not None and (self.material is not None or self.kept_material is None):
+            raise ValueError(f"固定面 {self.surface_id} 要用無樣板的保留材料")
         if self.material is None:
             if (self.preset_id is not None or self.family_id is not None or self.variables or self.lower
                     or self.upper or self.thickness_variable is not None or self.cavity_variable is not None

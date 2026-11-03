@@ -62,6 +62,7 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.fixed_surfaces import FixedSurfaces, designs_with_fixed
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, chain_objective, check_stop,
@@ -145,6 +146,7 @@ class GradientProject(BaseModel):
     started_at: str
     objective_settings_fingerprint: str | None = Field(default=None, pattern=_SHA256)
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
+    fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
 
 
 class GradientStatus(BaseModel):
@@ -179,6 +181,7 @@ class SurfaceSpec(BaseModel):
     cavity_m: float | None
     material_digest: str | None
     mount: Mount | None = Field(default=None, exclude_if=lambda value: value is None)
+    fixed_material_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class Components(BaseModel):
@@ -297,7 +300,7 @@ def holdout_rulers() -> HoldoutRulers:
 
 def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: Sequence[str | None], purpose: str,
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
-                mount: Mount = MOUNT_RIGID) -> str:
+                mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -309,6 +312,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         "settings": settings_fingerprint, "physics": physics_identity, "objective": objective_settings_fingerprint}
     if mount != MOUNT_RIGID:
         identity["mount"] = mount
+    if fixed_surfaces:
+        identity["fixed_surfaces"] = dict(sorted(fixed_surfaces.items()))
     content = json.dumps(identity,
                          sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:32]
@@ -466,10 +471,17 @@ def search_objective_constants(project: GradientProject, scheme: Scheme,
 
 
 def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings, *,
-                kept: Mapping[Wall, SurfaceMaterial], mount: Mount = MOUNT_RIGID) -> tuple[SurfaceDesign, ...]:
+                kept: Mapping[Wall, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
+                fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
     """六面（照 ``Wall.all()``）的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
     那一面的材料（方案原本的牆，``scene_wall_materials``），是「不貼、保留原牆」，不是剛性；``mount`` 是貼在原牆上時，
     貼樣板的面背後接 ``kept`` 那一面。"""
+    if fixed_surfaces:
+        if len(presets) != len(Wall.all()):
+            raise ValueError("六面牆要給六個 preset id")
+        return designs_with_fixed(tuple(zip((wall.wall_name() for wall in Wall.all()), presets, strict=True)),
+                                  settings, presets_table(), kept={w.wall_name(): m for w, m in kept.items()},
+                                  mount=mount, fixed_surfaces=fixed_surfaces)
     return wall_designs_from_presets(presets, settings, presets_table(),
                                      kept={wall.wall_name(): material for wall, material in kept.items()}, mount=mount)
 
@@ -484,7 +496,8 @@ def load_problem(project: GradientProject) -> GradientProblem:
     scheme, model, settings = check_inputs(project)
     constants = search_objective_constants(project, scheme, model)
     kept = project_wall_materials(project, scheme)
-    designs = designs_for(project.presets, settings, kept=kept, mount=project.mount)
+    designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
+                          fixed_surfaces=project.fixed_surfaces)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
@@ -495,7 +508,7 @@ def load_problem(project: GradientProject) -> GradientProblem:
         return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
 
     context = TemplateContext(settings, presets_table(), {wall.wall_name(): kept[wall] for wall in Wall.all()},
-                              objective_for, project.mount)
+                              objective_for, project.mount, project.fixed_surfaces)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
                                                                     objective_constants=constants), kept, context)
 
@@ -597,7 +610,8 @@ def template_header_for(header: MaterialGradientHeader, settings: MaterialGradie
         physics_identity=header.physics_identity, settings_fingerprint=settings.full_fingerprint,
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
-        kept_digests={wall.wall_name(): material_digest(kept[wall]) for wall in Wall.all()}, mount=header.mount)
+        kept_digests={wall.wall_name(): material_digest(kept[wall]) for wall in Wall.all()}, mount=header.mount,
+        fixed_surfaces=header.fixed_surfaces)
 
 
 def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:
@@ -615,7 +629,8 @@ def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopC
 # ---- 讀帳本：每面規格、進度、結果 ----
 
 def surface_specs(layout: Layout, theta: Sequence[float], *, digests: Mapping[str, str | None] | None = None,
-                  mount: Mount | None = None) -> tuple[SurfaceSpec, ...]:
+                  mount: Mount | None = None,
+                  fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceSpec, ...]:
     """θ 切回每面規格（版面照 ``layout`` 的配置與變數名：庚二帳本標頭，或換樣板帳本的一列）：每面的變數照「厚度、空腔」排
     （變數名 ``<面代號>.<樣板變數名>``），不貼的面沒有變數。``digests``（面代號 → 材料摘要）給了就照填、缺一面拒收；
     沒給（報告只要厚度與空腔）摘要是 None。``mount`` 每面照抄（貼在原牆上的 v5 結果檔要它；剛背與報告不給是 None）。"""
@@ -634,7 +649,8 @@ def surface_specs(layout: Layout, theta: Sequence[float], *, digests: Mapping[st
         specs.append(SurfaceSpec(surface_id=surface_id, preset_id=preset_id,
                                  thickness_m=values[0] if values else None,
                                  cavity_m=values[1] if len(values) > 1 else None,
-                                 material_digest=None if digests is None else digests[surface_id], mount=mount))
+                                 material_digest=None if digests is None else digests[surface_id], mount=mount,
+                                 fixed_material_id=(fixed_surfaces or {}).get(surface_id)))
     return tuple(specs)
 
 
@@ -647,11 +663,13 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
 
 
 def final_designs(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
-                  kept: Mapping[Wall, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID) -> tuple[SurfaceDesign, ...]:
+                  kept: Mapping[Wall, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
+                  fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
     """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。"""
     if tuple(surface_id for surface_id, _ in surfaces) != tuple(wall.wall_name() for wall in Wall.all()):
         raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
-    return designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount)
+    return designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
+                       fixed_surfaces=fixed_surfaces)
 
 
 def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: Mapping[Wall, SurfaceMaterial], *,
@@ -677,7 +695,7 @@ def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: M
         raise ValueError(f"{TEMPLATES_FILE} 沒有以帶停止原因的決定列結尾，沒有結果可寫")
     closing = template_rows[-1]
     value, screening, components = closing.scores()
-    designs = final_designs(final.surfaces, settings, kept, mount=header.mount)
+    designs = final_designs(final.surfaces, settings, kept, mount=header.mount, fixed_surfaces=header.fixed_surfaces)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
     mounted = header.mount == MOUNT_ON_WALL
@@ -685,7 +703,7 @@ def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: M
         format_version=MOUNTED_RESULT_VERSION if mounted else RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
         surfaces=surface_specs(closing, closing.theta(),
                                digests={design.surface_id: design_digest(design) for design in designs},
-                               mount=header.mount if mounted else None),
+                               mount=header.mount if mounted else None, fixed_surfaces=header.fixed_surfaces),
         variable_names=closing.variable_names, theta_hex=closing.theta_hex, value=value, screening_total=screening,
         components=Components(own_line_ripple_rms_db=components[0], seat_robustness_rms_db=components[1],
                               big_peak_proxy_db=components[2]),
