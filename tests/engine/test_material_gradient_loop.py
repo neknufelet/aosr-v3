@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
@@ -34,6 +33,7 @@ from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
+from tests.engine._split_probe_cache import Sections
 from tests.engine._material_gradient_loop_probe import boundary_class
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _header, _narrowed, _presets, _receivers, _reweighted, _score,
@@ -79,51 +79,45 @@ def _problem() -> Record:
             "receivers": _receivers().model_dump(mode="json")}
 
 
-def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
-    """建衍生替身、跑探針，回探針輸出加上父行程用同一份替身算的標頭與建替身秒數（JSON 文字）。
-
-    只有算的那個工人會走到這裡、才去拿 ``model``（約 70 秒）；等的工人不建替身。目錄先清空：
-    帳本是獨佔建檔，上一個拿鎖的工人若算到一半掛了，留下的半份不能被這一次接著用。
-    """
+def _prepare(directory: Path, request: pytest.FixtureRequest) -> str:
+    """只建一次起點檔；各段不清空共用目錄，帳本各有自己的檔名。"""
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
-    clock = time.perf_counter()
     chain_model = _chain_model(cast(ReducedModel, request.getfixturevalue("model")))
-    model_seconds = time.perf_counter() - clock
     save_reduced(chain_model, directory / "model.npz")
     (directory / "problem.json").write_text(json.dumps(_problem()), encoding="utf-8")
+    return json.dumps({"chain_header": _header(chain_model).model_dump(mode="json"),
+                       "scoring_variant_headers": [_header(chain_model, score).model_dump(mode="json") for score in (
+                           _reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz))]})
+
+
+def _compute(directory: Path, part: str) -> Record:
     env = child_process_env(threads=1).copy()
     env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["TMPDIR"], env["PYTHONDONTWRITEBYTECODE"] = str(directory), "1"
     env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
-    clock = time.perf_counter()
-    process = subprocess.run([sys.executable, str(PROBE), str(directory)], cwd=directory, env=env,
+    process = subprocess.run([sys.executable, str(PROBE), str(directory), part], cwd=directory, env=env,
                              capture_output=True, text=True, timeout=1500)
     assert process.returncode == 0, process.stdout + process.stderr
-    output = cast(Record, json.loads((directory / "output.json").read_text(encoding="utf-8")))
-    output["chain_header"] = _header(chain_model).model_dump(mode="json")
-    output["scoring_variant_headers"] = [_header(chain_model, score).model_dump(mode="json") for score in (
-        _reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz))]
-    output["parent_seconds"] = {"model": model_seconds, "probe": time.perf_counter() - clock}
-    text = json.dumps(output)
-    (directory / "fixture.json").write_text(text, encoding="utf-8")
-    return text
+    return cast(Record, json.loads((directory / f"output-{part}.json").read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
 def runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
          ) -> tuple[Path, Record]:
-    """一場 pytest 只建一次替身、跑一次探針，平行的工人共用（#561 庚二修補一）。
-
-    worksteal 會把這一模組的題分給每一個工人，模組級夾具在每個工人各算一次、彼此搶 CPU（本機全套一題記到 836 秒）。
-    共用照既有的 ``_scheme_cache.shared_json``：檔案鎖、共用檔放在這一場的共同暫存根；``-n 0``（master）不共用，
-    用自己的暫存目錄（basetemp 的上一層會跨場殘留，不能拿來共用）。帳本檔放在共用目錄，讀的人只讀不改。
-    """
+    """各工人獨立取需要的段落；整場每段只算一次，依賴鏈在同一子行程。"""
     directory = (tmp_path_factory.mktemp("material-gradient-loop") if worker_id == "master"
                  else tmp_path_factory.getbasetemp().parent / "material-gradient-loop-shared")
-    text = shared_json(tmp_path_factory, worker_id, "material-gradient-loop", lambda: _compute(directory, request))
-    return directory, cast(Record, json.loads(text))
+    text = shared_json(tmp_path_factory, worker_id, "material-gradient-loop-split-v1-inputs",
+                       lambda: _prepare(directory, request))
+    sections = Sections(tmp_path_factory, worker_id, "material-gradient-loop", directory,
+                        lambda part: _compute(directory, part))
+    output = sections.record({key: "synthetic" for key in ("synthetic", "edge", "threshold_edge")})
+    output.update(cast(Record, json.loads(text)))
+    output["surrogate"] = sections.record({"ledger": "chain", "resumed": "chain", "result": "chain",
+                                            "seconds": "chain", "again": "again", "single": "single"})
+    return directory, output
 
 
 def _synthetic(runs: tuple[Path, Record], name: str) -> Record:
@@ -370,6 +364,13 @@ def test_round_evaluation_count_equals_actual_calls(runs: tuple[Path, Record]) -
 
 # ---- 整場：停止原因 ----
 
+@pytest.fixture
+def surrogate_again(runs: tuple[Path, Record]) -> None:
+    """本題先做獨立重跑，讓其他工人能同時計算主跑與接續鏈。"""
+    _surrogate(runs)["again"]
+
+
+@pytest.mark.usefixtures("surrogate_again")
 def test_stop_reason_no_improvement_and_rerun_is_bitwise(runs: tuple[Path, Record]) -> None:
     """抓正式設定在小房間上停不下來、記錯原因、重跑帶非決定性：替身與合成各跑兩次，帳本逐值相同（秒數除外），
     最後一輪沒接受任何候選、原因是「已確認候選內沒有超過門檻」，前面每一輪都接受了一個。"""

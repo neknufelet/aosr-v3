@@ -329,21 +329,21 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings,
                         "builds": builds}}
 
 
-def main(directory: Path) -> None:
+def main(directory: Path, part: str) -> None:
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     base = load_material_gradient_settings(config_path("material_gradient.toml"))
     presets = load_construction_presets(config_path("construction_presets.toml"))
     synthetic = cast(Record, problem["synthetic"])
-    clock = time.perf_counter()
-    output: Record = {"synthetic": {name: _synthetic(directory, name, cast(Record, spec), base, presets, synthetic)
-                                    for name, spec in cast(dict[str, object], problem["cases"]).items()}}
-    output["threshold_edge"] = _threshold_edge(base, presets, synthetic, problem["threshold_override"])
-    output["synthetic_seconds"] = time.perf_counter() - clock
-    if problem.get("surrogate"):
-        output["surrogate"] = _surrogate(directory, problem, base, presets)
-    (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
+    if part == "synthetic":
+        output: Record = {"synthetic": {name: _synthetic(directory, name, cast(Record, spec), base, presets, synthetic)
+                                        for name, spec in cast(dict[str, object], problem["cases"]).items()}}
+    elif part == "threshold_edge":
+        output = {"threshold_edge": _threshold_edge(base, presets, synthetic, problem["threshold_override"])}
+    else:
+        output = {"surrogate": _surrogate(directory, problem, base, presets)}
+    (directory / f"output-{part}.json").write_text(json.dumps(output), encoding="utf-8")
     shutil.rmtree(directory / "__pycache__", ignore_errors=True)
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    main(Path(sys.argv[1]), sys.argv[2])
