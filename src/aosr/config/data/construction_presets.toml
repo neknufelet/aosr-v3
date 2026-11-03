@@ -365,3 +365,34 @@ flow_resistivity_pa_s_m2 = 19100.0
 [[preset.material.layers]]
 kind = "air"
 thickness_m = 0.098
+
+[[preset]]
+id = "carpet_on_concrete"
+label = "地毯直接鋪混凝土（文獻擬合）"
+source = """
+OSHA Technical Manual（技術手冊）Sec III Ch 5 Table V-2（材料吸音係數表），列名 "Carpet, heavy, on concrete"。
+125／250／500 Hz 的無規入射吸音係數為 0.02／0.06／0.14；屬殘響室類資料的二手彙編，表下注明來源為 NIOSH 與 Cox、D'Antonio。
+Broda, et al. (2025), Materials 18(2), 315：ISO 10534-2（雙傳聲器阻抗管法）、80～5000 Hz。
+至 250 Hz 的原句："for all samples with and without the underlayment, the SAC achieves a low value below 0.1."
+SAC 是吸音係數；阻抗管為垂直入射，僅作低頻趨勢對照，不與 OSHA 無規入射數值混成擬合目標。
+"""
+links = ["https://www.osha.gov/otm/section-3-health-hazards/chapter-5", "https://doi.org/10.3390/ma18020315"]
+notes = [
+    "實際產品流阻可能差數倍",
+    "數字是擬合文獻吸音係數得來的，不是這款地毯的量測；實際地毯可能差很多。",
+    "Komatsu 模型原本擬合的是玻璃棉與岩棉，不是地毯絨毛；原研究只量到 100 Hz 以上，低頻是外推。",
+    "厚度 7 mm 是推測：出處沒給厚度，地毯絨毛常見約 5～10 mm（未驗，推測）。",
+    "加墊的地毯在 125／250／500 Hz 約 0.08／0.24／0.57（OSHA 同表），比這一筆吸得多，這次沒算。",
+    "流阻的挑法：厚度固定 7 mm，在 6,000～72,900 Pa·s/m² 取 30 個對數等距格點，選三帶對數誤差平方和最小的一點（約 7,769），再取整成 7,800 Pa·s/m²。",
+    "取整後 125／250／500 Hz 的無規入射吸音係數算出 0.021／0.056／0.128，跟目標 0.02／0.06／0.14 差 +6%／−7%／−9%。",
+    "有限元素用的是垂直入射：同三帶算出約 0.006／0.014／0.031，比無規入射更小。",
+]
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.007
+flow_resistivity_pa_s_m2 = 7800.0
