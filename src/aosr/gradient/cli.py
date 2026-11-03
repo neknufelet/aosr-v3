@@ -101,6 +101,8 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--engine-commit", default=None)
     start.add_argument("--mount", choices=MOUNTS, default=MOUNT_RIGID,
                        help="安裝方式：rigid 樣板照原樣（剛背）；on_wall 貼在原牆上（新增層背後接方案原本那面牆）")
+    start.add_argument("--fixed-surface", action="append", default=[], metavar="面=材料id",
+                       help="固定指定面的材料，不參與優化；可重複給不同面，材料 id 取現有材料庫")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -189,11 +191,13 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.material_gradient import load_material_gradient_settings
     from aosr.gradient import run
+    from aosr.gradient.fixed_surfaces import parse_fixed_surfaces
     from aosr.physics.fem_reduced_check import points_hex
     from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.reporting.scheme import load_scheme
 
+    fixed = parse_fixed_surfaces(args.fixed_surface)
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     if SEARCHES_DIR in args.root.resolve().parts:
         raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
@@ -205,7 +209,7 @@ def _start(args: argparse.Namespace) -> int:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     run.designs_for(args.presets, settings,
                     kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity),
-                    mount=args.mount)
+                    mount=args.mount, fixed_surfaces=fixed)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -219,7 +223,7 @@ def _start(args: argparse.Namespace) -> int:
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
-                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount)
+                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed)
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
@@ -227,7 +231,7 @@ def _start(args: argparse.Namespace) -> int:
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
-        objective_settings_fingerprint=objective.fingerprint, mount=args.mount)
+        objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)

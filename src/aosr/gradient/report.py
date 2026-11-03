@@ -171,11 +171,13 @@ def material_text(material: SurfaceMaterial) -> str:
 
 def _kept_texts(project: GradientProject) -> dict[str, str]:
     """不貼的面那一句：方案檔那一面原本的牆；方案檔讀不到時每面都說讀不到（報告照印，不中斷）。"""
+    fixed = {face: f"固定（材料 id：{material}）" for face, material in project.fixed_surfaces.items()}
     try:
         materials = project_wall_materials(project, load_scheme(Path(project.scheme_path)))
     except (OSError, ValueError) as error:
-        return {wall.wall_name(): f"不貼（保留原牆；方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()}
-    return {wall.wall_name(): f"不貼（保留原牆：{material_text(material)}）" for wall, material in materials.items()}
+        return {**{wall.wall_name(): f"不貼（保留原牆；方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()},
+                **fixed}
+    return {**{wall.wall_name(): f"不貼（保留原牆：{material_text(material)}）" for wall, material in materials.items()}, **fixed}
 
 
 def mount_line(project: GradientProject) -> str:
@@ -421,6 +423,8 @@ def render_report(folder: Path) -> str:
     project = read_project(folder)
     lines = [f"梯度搜尋 {project.gradient_id}（用途 {project.purpose}，開始 {project.started_at}）", _status_line(folder),
              mount_line(project)]
+    if project.fixed_surfaces:
+        lines.append("固定面：" + "、".join(f"{face}={material}" for face, material in project.fixed_surfaces.items()))
     if (folder / STOP_FILE).exists():
         lines.append("停止記號：在（下一次求值之前會停；resume 會先清掉它）")
     ledger = folder / LEDGER_FILE

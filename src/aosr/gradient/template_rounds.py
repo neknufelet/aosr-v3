@@ -31,6 +31,7 @@ import numpy as np
 
 from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
+from aosr.gradient.fixed_surfaces import designs_with_fixed
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
@@ -67,6 +68,8 @@ class TemplateContext(NamedTuple):
     kept: Mapping[str, SurfaceMaterial]
     objective_for: ObjectiveFactory
     mount: Mount = MOUNT_RIGID
+    # 固定面不列候選；重建時也使用同一份指定材料。
+    fixed_surfaces: Mapping[str, str] | None = None
 
 
 class TemplatePoint(NamedTuple):
@@ -156,10 +159,13 @@ def target_order(settings: MaterialGradientSettings) -> tuple[str, ...]:
     return (*(family.id for family in settings.family), NONE_TARGET)
 
 
-def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings) -> tuple[tuple[str, str], ...]:
+def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings,
+                 fixed_surfaces: Mapping[str, str] | None = None) -> tuple[tuple[str, str], ...]:
     """每一面可換的（面代號, 目標）：所有家族扣掉它現在的、再加不貼（它現在不是不貼時）；照面序、再照目標序。"""
     found: list[tuple[str, str]] = []
     for surface_id, preset_id in surfaces:
+        if surface_id in (fixed_surfaces or {}):
+            continue
         current = target_of(preset_id, settings)
         found.extend((surface_id, target) for target in target_order(settings) if target != current)
     return tuple(found)
@@ -172,6 +178,9 @@ def preset_for_target(target: str, settings: MaterialGradientSettings) -> str | 
 
 def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[SurfaceDesign, ...]:
     """配置 → 每面設計：有 preset 照家族建樣板設計、不貼的面帶方案原本那面的牆；要照 ``Wall.all()`` 給六面。"""
+    if context.fixed_surfaces:
+        return checked_wall_designs(designs_with_fixed(surfaces, context.settings, context.presets, kept=context.kept,
+                                                       mount=context.mount, fixed_surfaces=context.fixed_surfaces))
     designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept, mount=context.mount)
     return checked_wall_designs(designs)
 
@@ -186,6 +195,8 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
     樣板有空氣層、家族卻沒寫空腔初值（或反過來）拒收；新 θ 要在盒界內、可行（:func:`is_feasible`），不然拒收。
     換成它現在的家族（或現在就不貼還換不貼）不是替換，拒收。
     """
+    if surface_id in (context.fixed_surfaces or {}):
+        raise ValueError(f"固定面 {surface_id} 不參與換樣板")
     values = checked_theta(theta, designs)
     surfaces = surfaces_of(designs)
     ids = [item[0] for item in surfaces]
@@ -228,7 +239,7 @@ def quick_scores(point: TemplatePoint, context: TemplateContext, *,
     非有限的值拒收（帳本不收、也排不出名次）。順序照 :func:`alternatives`。
     """
     found = []
-    for surface_id, target in alternatives(surfaces_of(point.designs), context.settings):
+    for surface_id, target in alternatives(surfaces_of(point.designs), context.settings, context.fixed_surfaces):
         check_stop(should_stop)
         clock = time.perf_counter()
         designs, theta = swap(point.designs, point.theta, surface_id, target, context)
@@ -267,9 +278,10 @@ def template_round_bound(settings: MaterialGradientSettings, quick_count: int, r
     return quick_count + (retune_count + 1) * retune_evaluation_bound(settings)
 
 
-def next_round_bound(surfaces: Surfaces, settings: MaterialGradientSettings) -> int:
+def next_round_bound(surfaces: Surfaces, settings: MaterialGradientSettings,
+                     fixed_surfaces: Mapping[str, str] | None = None) -> int:
     """這個配置開下一輪的最壞求值數（候選有沒有只看配置，不求值）。"""
-    count = len(alternatives(surfaces, settings))
+    count = len(alternatives(surfaces, settings, fixed_surfaces))
     return template_round_bound(settings, count, retune_count(settings, count))
 
 
@@ -289,7 +301,7 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     designs = checked_wall_designs(point.designs)
     if not is_feasible(point.theta, designs):
         raise ValueError("換樣板要從可行的整房配置開始")
-    count = len(alternatives(surfaces_of(designs), settings))
+    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces))
     top = retune_count(settings, count)
     bound = template_round_bound(settings, count, top)
     if count == 0 or bound > budget_left:

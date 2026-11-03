@@ -28,7 +28,7 @@ import json
 import math
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import BinaryIO, Final, Literal, NamedTuple, Self
 
@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
 from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT, ScoreConstants, check_scores
+from aosr.gradient.fixed_surfaces import FixedSurfaces
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
@@ -72,6 +73,7 @@ class TemplateHeader(BaseModel):
     # v2 必帶、v1 沒有：分數常數抄庚二帳本標頭那一份（讀回時逐列重算兩個分數恆等式）。
     score_constants: ScoreConstants | None = None
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
+    fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
@@ -395,7 +397,7 @@ def _split_round(block: Sequence[TemplateRow], label: str) -> _Round:
 
 
 def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStart | None, start_surfaces: Surfaces,
-                 settings: MaterialGradientSettings | None) -> _Round:
+                 settings: MaterialGradientSettings | None, fixed_surfaces: Mapping[str, str]) -> _Round:
     """一輪的內容：快速評分照「可換的目標」（給了設定）、候選是快速評分前 k 名、各段起點對得上。"""
     label = f"第 {block[0].round} 輪"
     parts = _split_round(block, label)
@@ -407,7 +409,7 @@ def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStar
     decided = parts.decision.decision if parts.decision is not None else None
     complete = (decided is not None and decided.quick_count > 0) or bool(parts.baseline)
     if settings is not None:
-        wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings)]
+        wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings, fixed_surfaces)]
         if names != (wanted if complete else wanted[:len(names)]):
             raise ValueError(f"{label}：快速評分的候選與順序不是這個配置所有可換的目標")
     if parts.baseline and start is not None and _point(parts.baseline[0])[:2] != _point(start)[:2]:
@@ -480,7 +482,7 @@ def _check_stop_reason(label: str, row: TemplateRow, decision: TemplateDecision)
 
 
 def _check_settings(label: str, row: TemplateRow, decision: TemplateDecision, previous_total: int, seconds: float,
-                    settings: MaterialGradientSettings) -> None:
+                    settings: MaterialGradientSettings, fixed_surfaces: Mapping[str, str]) -> None:
     """給了設定：門檻、停止原因與下一輪最壞值都要照設定重算得出來，帳本跟設定矛盾就拒收。
 
     接受了候選的輪照「輪數 → 總時間（各決定列秒數加總，含這一輪）→ 下一輪最壞值放不放得進預算」的順序判停，
@@ -489,8 +491,8 @@ def _check_settings(label: str, row: TemplateRow, decision: TemplateDecision, pr
     reason, limits = row.stop_reason, settings.templates
     if decision.threshold != settings.candidates.improvement_threshold:
         raise ValueError(f"{label}：決定列記的門檻不是設定檔的改善門檻")
-    count = len(alternatives(row.surfaces, settings))
-    bound = next_round_bound(row.surfaces, settings)
+    count = len(alternatives(row.surfaces, settings, fixed_surfaces))
+    bound = next_round_bound(row.surfaces, settings, fixed_surfaces)
     if decision.quick_count == 0:
         expected = TEMPLATE_STOP_NO_ALTERNATIVES if count == 0 else (
             TEMPLATE_STOP_MAX_EVALUATIONS if bound > limits.max_evaluations - previous_total else None)
@@ -528,6 +530,8 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
                              f"（{'上一版只有兩分項、沒有舊合分' if legacy else 'v2 要帶舊合分與三分項'}）")
         if row.step != index:
             raise ValueError(f"第 {index} 列的步序是 {row.step}，帳本列必須從 0 連號")
+        if any(preset is not None for face, preset in row.surfaces if face in header.fixed_surfaces):
+            raise ValueError(f"第 {index} 列的固定面不可換樣板")
         if [surface_id for surface_id, _ in row.surfaces] != ids:
             raise ValueError(f"第 {index} 列的面序跟標頭的起點配置不同")
     _check_segments(rows)
@@ -535,13 +539,13 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
     surfaces, total, seconds = header.initial_surfaces, 0, 0.0
     for block in _round_blocks(rows):
         label = f"第 {block[0].round} 輪"
-        parts = _check_round(block, previous, surfaces, settings)
+        parts = _check_round(block, previous, surfaces, settings, header.fixed_surfaces)
         if parts.decision is None:
             continue
         decision = _check_decision(label, parts, previous, total, parts.decision is rows[-1])
         seconds += parts.decision.seconds
         if settings is not None:
-            _check_settings(label, parts.decision, decision, total, seconds, settings)
+            _check_settings(label, parts.decision, decision, total, seconds, settings, header.fixed_surfaces)
         previous, surfaces, total = parts.decision, parts.decision.surfaces, decision.total_evaluations
     if header.score_constants is not None:
         check_scores(header.score_constants, rows)
