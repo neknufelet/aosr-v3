@@ -35,7 +35,7 @@ from tests.engine.test_material_gradient_mount import (
 
 FIXED = {"floor": "glass_wool_24k_50mm"}
 PRESETS = ("glass_wool_48k_50mm_gap50",) * 6
-# 改動前主線的合成整場，見 .evidence/control-before.json 與 control-before.log。
+# 改動前主線（814d471a）跑的合成整場：三份產物的 SHA-256。擷取紀錄留在本票工作區的證據資料夾，不進版控。
 CONTROL: dict[str, str] = {'ledger.jsonl': '87362b54c36120c7bb78f6f4a180501635be884203e0c177c299e8cdd9f72b11', 'templates.jsonl': '65c2511a3dd47432f9bb78c6de22414af0bd8af0311a89c52d068e652b035a15', 'result.json': '3a7dcefbc6ee19ba59c301e5c50773772b4b0b48acd6461161420c3620cb7de3'}
 
 
@@ -172,4 +172,3 @@ def _invoke(directory: Path, part: str) -> None:
 def test_fixed_material_survives_every_row_resume_and_endpoint(tmp_path: Path) -> None:
     """合成整場在雙精度子行程，超過 60 秒直接失敗。"""
     _invoke(tmp_path, "fixed")
-
