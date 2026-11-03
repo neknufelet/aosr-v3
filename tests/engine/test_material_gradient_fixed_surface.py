@@ -25,6 +25,7 @@ from aosr.gradient import template_ledger as templates
 from aosr.gradient import template_rounds as rounds
 from aosr.gradient.endpoint import design_digest, materials_from_surfaces
 from aosr.gradient.endpoint_run import checked_result
+from aosr.gradient.fixed_surfaces import fixed_materials, parse_fixed_surfaces
 from aosr.gradient.report import _kept_texts
 from aosr.physics.report_surfaces import WholeWallZone
 from tests.engine._material_gradient_templates_probe import SYNTHETIC_SCORES, synthetic_factory
@@ -130,6 +131,25 @@ def test_fixed_identity_binds_face_material_and_sorted_mapping() -> None:
     assert len({_identity({}), _identity(FIXED), _identity({"floor": "glass_wool_96k_50mm"}),
                 _identity({"ceiling": FIXED["floor"]})}) == 4
     assert _identity({**FIXED, "x0": "glass_wool_96k_50mm"}) == _identity({"x0": "glass_wool_96k_50mm", **FIXED})
+
+
+def test_carpet_fixed_floor_uses_catalog_material_and_distinct_identity() -> None:
+    """抓地毯 id 被拒收、固定材料被換掉，或與玻璃棉撞搜尋身分。"""
+    fixed = parse_fixed_surfaces(["floor=carpet_on_concrete"])
+    assert fixed == {"floor": "carpet_on_concrete"}
+    raw = next(p.material for p in _presets() if p.id == "carpet_on_concrete")
+    expected = WholeWallZone.model_validate({"area": "whole_wall", "material": raw}).material
+    assert fixed_materials(fixed) == {"floor": expected}
+    assert _identity(fixed) != _identity(FIXED)
+
+
+def test_carpet_random_absorption_stays_below_padded_carpet(tmp_path: Path) -> None:
+    """抓直接鋪地毯被改成比加墊更吸音；冷子行程開雙精度，不跑搜尋。"""
+    env = child_process_env(threads=1)
+    env["TMPDIR"] = str(tmp_path)
+    child = subprocess.run([sys.executable, "-B", "-m", "tests.engine._carpet_absorption_probe"],
+        cwd=Path(__file__).resolve().parents[2], env=env, text=True, capture_output=True, timeout=120)
+    assert child.returncode == 0, child.stderr
 
 
 @pytest.mark.parametrize(("values", "message"), [

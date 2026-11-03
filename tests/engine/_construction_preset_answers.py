@@ -1,4 +1,4 @@
-"""八組材料的手寫答案；按施工二 decisions.md 第一節與 presets-spec.md 第二節逐欄核對。"""
+"""材料手寫答案；既有八組按施工二規格核對，地毯按 #990 固定厚度的流阻格點擬合。"""
 NEW_ROWS: dict[str, tuple[str, list[dict[str, object]]]] = {
     "fabric_pet_a_gap100": ("PET（聚酯）織布 A＋100 mm 空腔", [
         {"kind": "fabric", "surface_mass_kg_m2": .065, "flow_resistance_pa_s_m": 196.},
@@ -33,4 +33,7 @@ NEW_ROWS: dict[str, tuple[str, list[dict[str, object]]]] = {
         {"kind": "porous", "thickness_m": .040, "model": "komatsu", "material_class": "fibrous",
          "flow_resistivity_pa_s_m2": 19100.},
         {"kind": "air", "thickness_m": .098}]),
+    "carpet_on_concrete": ("地毯直接鋪混凝土（文獻擬合）", [
+        {"kind": "porous", "thickness_m": .007, "model": "komatsu", "material_class": "fibrous",
+         "flow_resistivity_pa_s_m2": 7800.}]),
 }
