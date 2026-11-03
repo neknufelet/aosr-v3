@@ -9,6 +9,8 @@ check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 scope = [".github/workflows", "governance/rules", "governance/required-status-checks.txt", "governance/verify-shards.toml"]
 
 [settings]
+# 準備命令只收單行字面樣板；多行接續、行尾註解或多加參數一律不合格，認不出就紅。
+prepare_run = "uv run python -m governance.status.record_step --name prepare --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_prepare --shard {shard}"
 
 # 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
 required_pull_request_events = { "timing-history" = ["opened", "synchronize", "reopened"], verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"], "verify-sharded" = ["opened", "synchronize", "reopened"], "shard-a" = ["opened", "synchronize", "reopened"], "shard-b" = ["opened", "synchronize", "reopened"], "shard-c" = ["opened", "synchronize", "reopened"], "shard-d" = ["opened", "synchronize", "reopened"], "shard-e" = ["opened", "synchronize", "reopened"] }

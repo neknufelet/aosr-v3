@@ -129,7 +129,7 @@ from governance.checks.ci_required_gate import (
     finalizer_problems, job_identity_problems, protected_ids_unique, read_finalizers,
     required_trigger_problems, step_if_problems, upload_overwrite_problems,
 )
-from governance.loader import RULES_DIR, setting_int, setting_strings
+from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
 try:
     import yaml
@@ -182,7 +182,7 @@ TEXT_KEYS = ("wrapper_command", "required_child_prefix")
 REQUIRED_EVENTS_KEY = "required_pull_request_events"
 FORBIDDEN_FILTERS_KEY = "forbidden_pull_request_filters"
 STEP_IF_KEY = "allowed_required_step_ifs"
-SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY, FINALIZER_KEY)
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY, FINALIZER_KEY, 'prepare_run')
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -286,6 +286,10 @@ def _finalizer_settings_problems(settings: dict[str, object], rel: str) -> None:
             isinstance(entry.get(key), str) and entry[key].strip() for key in keys
         ):
             raise ToolBroken(f"{rel} 的 {FINALIZER_KEY}.{job_id} 必須剛好有非空整串設定 {list(FINALIZER_FIELDS)}")
+        if 'preparation_job' in entry:
+            template = setting_text(settings, 'prepare_run')
+            if template != template.strip() or '\n' in template or '\r' in template or template.count('{shard}') != 1:
+                raise ToolBroken(f'{rel} 的 prepare_run 必須是無頭尾空白的單行命令，且恰含一個 {{shard}} 代換記號')
         registry = Path(entry["registry"])
         if registry.is_absolute() or ".." in registry.parts:
             raise ToolBroken(f"{rel} 的 {FINALIZER_KEY}.{job_id}.registry 必須指向掃描根裡的相對路徑")
