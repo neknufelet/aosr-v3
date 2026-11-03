@@ -177,7 +177,7 @@ def _synthetic(directory: Path, name: str, case: Record, base: MaterialGradientS
     return row
 
 
-def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings) -> Record:
+def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings, part: str) -> Record:
     model = load_reduced(directory / "model.npz")
     presets = load_construction_presets(config_path("construction_presets.toml"))
     receivers = ReceiverSet.model_validate(problem["receivers"])
@@ -188,16 +188,24 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
         model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")), frequencies=model.frequencies_hz)
     header = ledger.header_for(model, designs, base, objective_constants=constants)
-    main, again = directory / "surrogate.jsonl", directory / "surrogate.again.jsonl"
+    start = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
+    if part == "single":
+        single = loop.confirmation_round(objective, start.astype(np.float32), designs, base, budget_left=10**6)
+        return {"single": {"dtype": str(single.theta.dtype), "theta": _hex(single.theta),
+                           "baseline_dtype": str(single.baseline.theta.dtype) if single.baseline is not None else None,
+                           "value": float(cast(float, single.value)).hex(), "evaluations": single.evaluations,
+                           "candidate_values": [item.value.hex() for item in single.confirmed]}}
+    if part == "again":
+        again = directory / "surrogate.again.jsonl"
+        _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
+        loop.run_rounds(objective, start, designs, base, again, header)
+        return {"again": again.name}
+    main = directory / "surrogate.jsonl"
     seconds: dict[str, object] = {}
     clock = time.perf_counter()
     start = _start_ledger(main, header, designs, objective, gradient_search.baseline_theta(designs))
     result = loop.run_rounds(objective, start, designs, base, main, header)
     seconds["run_first_with_compile"] = time.perf_counter() - clock
-    clock = time.perf_counter()
-    _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
-    loop.run_rounds(objective, start, designs, base, again, header)
-    seconds["run_again"] = time.perf_counter() - clock
     _, rows = ledger.read_ledger(main)
     mid_second = next(index for index, item in enumerate(rows) if item.round == 1 and item.phase == "candidate_jump") + 1
     resumed, each = [], []
@@ -208,15 +216,7 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings)
         each.append(time.perf_counter() - clock)
         resumed.append(cut.name)
     seconds["resume_each"] = each
-    clock = time.perf_counter()
-    single = loop.confirmation_round(objective, start.astype(np.float32), designs, base, budget_left=10**6)
-    seconds["float32_round_with_compile"] = time.perf_counter() - clock
-    return {"ledger": main.name, "again": again.name, "resumed": resumed, "result": _result(result),
-            "seconds": seconds,
-            "single": {"dtype": str(single.theta.dtype), "theta": _hex(single.theta),
-                       "baseline_dtype": str(single.baseline.theta.dtype) if single.baseline is not None else None,
-                       "value": float(cast(float, single.value)).hex(), "evaluations": single.evaluations,
-                       "candidate_values": [item.value.hex() for item in single.confirmed]}}
+    return {"ledger": main.name, "resumed": resumed, "result": _result(result), "seconds": seconds}
 
 
 def _edge(problem: Record, base: MaterialGradientSettings) -> Record:
@@ -260,22 +260,19 @@ def _threshold_edge(problem: Record, base: MaterialGradientSettings) -> Record:
     return rows
 
 
-def main(directory: Path) -> None:
+def main(directory: Path, part: str) -> None:
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     base = load_material_gradient_settings(config_path("material_gradient.toml"))
-    clock = time.perf_counter()
-    output: Record = {"synthetic": {name: _synthetic(directory, name, cast(Record, case), base)
-                                    for name, case in cast(dict[str, object], problem["synthetic"]).items()}}
-    synthetic_seconds = time.perf_counter() - clock
-    output["edge"] = _edge(problem, base)
-    output["threshold_edge"] = _threshold_edge(problem, base)
-    if problem.get("surrogate"):
-        clock = time.perf_counter()
-        output["surrogate"] = _surrogate(directory, problem, base)
-        output["seconds"] = {"synthetic_all": synthetic_seconds, "surrogate_all": time.perf_counter() - clock}
-    (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
+    if part == "synthetic":
+        output: Record = {"synthetic": {name: _synthetic(directory, name, cast(Record, case), base)
+                                        for name, case in cast(dict[str, object], problem["synthetic"]).items()}}
+        output["edge"] = _edge(problem, base)
+        output["threshold_edge"] = _threshold_edge(problem, base)
+    else:
+        output = _surrogate(directory, problem, base, part)
+    (directory / f"output-{part}.json").write_text(json.dumps(output), encoding="utf-8")
     shutil.rmtree(directory / "__pycache__", ignore_errors=True)
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    main(Path(sys.argv[1]), sys.argv[2])

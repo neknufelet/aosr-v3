@@ -14,7 +14,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn, cast
@@ -35,6 +34,7 @@ from aosr.gradient import template_segment as segment
 from aosr.gradient.endpoint import material_digest
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
+from tests.engine._split_probe_cache import Sections
 from tests.engine._material_gradient_templates_probe import kept_walls, synthetic_header
 from tests.engine.test_material_gradient import CASES, DESCENT_CASE, PURPOSE, _chain_model, _presets, _receivers, _settings
 from tests.engine._gradient_objective_rows import assert_rows_split_scores
@@ -82,38 +82,38 @@ def _problem() -> Record:
             "purpose": PURPOSE, "receivers": _receivers().model_dump(mode="json")}
 
 
-def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
-    """建衍生替身、跑探針，回探針輸出（JSON 文字）。目錄先清空：帳本是獨佔建檔，上一次留下的半份不能被接著用。"""
+def _prepare(directory: Path, request: pytest.FixtureRequest) -> str:
+    """只建一次起點檔；各段不清空共用目錄，帳本各有自己的檔名。"""
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
-    clock = time.perf_counter()
     save_reduced(_chain_model(cast(ReducedModel, request.getfixturevalue("model"))), directory / "model.npz")
-    model_seconds = time.perf_counter() - clock
     (directory / "problem.json").write_text(json.dumps(_problem()), encoding="utf-8")
+    return "{}"
+
+
+def _compute(directory: Path, part: str) -> Record:
     env = child_process_env(threads=1).copy()
     env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["TMPDIR"], env["PYTHONDONTWRITEBYTECODE"] = str(directory), "1"
     env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
-    clock = time.perf_counter()
-    process = subprocess.run([sys.executable, str(PROBE), str(directory)], cwd=directory, env=env,
+    process = subprocess.run([sys.executable, str(PROBE), str(directory), part], cwd=directory, env=env,
                              capture_output=True, text=True, timeout=1500)
     assert process.returncode == 0, process.stdout + process.stderr
-    output = cast(Record, json.loads((directory / "output.json").read_text(encoding="utf-8")))
-    output["parent_seconds"] = {"model": model_seconds, "probe": time.perf_counter() - clock}
-    text = json.dumps(output)
-    (directory / "fixture.json").write_text(text, encoding="utf-8")
-    return text
+    return cast(Record, json.loads((directory / f"output-{part}.json").read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
 def runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
          ) -> tuple[Path, Record]:
-    """一場 pytest 只建一次替身、跑一次探針，平行的工人共用（``_scheme_cache.shared_json``）；讀的人只讀。"""
+    """各工人獨立取需要的段落；整場每段只算一次，小房間的一口氣與接續仍同一子行程。"""
     directory = (tmp_path_factory.mktemp("material-gradient-templates") if worker_id == "master"
                  else tmp_path_factory.getbasetemp().parent / "material-gradient-templates-shared")
-    text = shared_json(tmp_path_factory, worker_id, "material-gradient-templates", lambda: _compute(directory, request))
-    return directory, cast(Record, json.loads(text))
+    shared_json(tmp_path_factory, worker_id, "material-gradient-templates-split-v1-inputs",
+                lambda: _prepare(directory, request))
+    sections = Sections(tmp_path_factory, worker_id, "material-gradient-templates", directory,
+                        lambda part: _compute(directory, part))
+    return directory, sections.record({key: key for key in ("synthetic", "threshold_edge", "surrogate")})
 
 
 def _case(runs: tuple[Path, Record], name: str) -> Record:
@@ -161,6 +161,25 @@ def _blocks(rows: Sequence[templates.TemplateRow]) -> list[list[templates.Templa
 
 
 # ---- 可換的目標、換一面、最壞求值數（不求值，父行程） ----
+
+def test_small_room_template_segment_runs_in_double_and_resumes(runs: tuple[Path, Record]) -> None:
+    """抓替身路徑接不起來（每個配置重建 chain_objective、編譯快取撞）、不是雙精度、接續跟一口氣跑完不同。
+
+    小房間 two_rigid 從預設樣板取規格那一點起跑、輪數上限 2：帳本照設定與起點讀得回、停止原因在封閉集合裡、
+    截在第 0 輪基準重調第一列之後接續，扣秒數逐值相同。
+    """
+    case = cast(Record, runs[1]["surrogate"])
+    assert case["x64"] == "float64"
+    settings = _settings().model_copy(update={"templates": _settings().templates.model_copy(update={"max_rounds": 2})})
+    origin, origin_rows = _start(case), _rows(runs, case["ledger"])
+    assert origin.surfaces == tuple(zip(gradient_search.wall_surface_ids(), CASES[DESCENT_CASE], strict=True))
+    templates.read_template_ledger(runs[0] / str(case["ledger"]), settings=settings, start=origin)
+    assert origin_rows[-1].stop_reason in rounds.TEMPLATE_STOP_REASONS
+    assert _without_seconds(_rows(runs, case["resumed"])) == _without_seconds(origin_rows)
+    # #561 壬一：每一列的值是新合分＝舊合分 ＋ w·代理／ref，舊合分每列都在、可以單獨排序。
+    assert_rows_split_scores(origin_rows)
+
+
 
 def test_alternatives_are_other_families_then_none_in_surface_order() -> None:
     """抓漏了「不貼」、沒扣掉自己的家族、不貼的面還換不貼、順序不照面序再目標序（家族照設定檔、不貼最後）。"""
@@ -509,22 +528,6 @@ def test_stop_leaves_whole_rounds_and_resume_matches_one_shot(runs: tuple[Path, 
 
 # ---- 小房間替身（雙精度子行程） ----
 
-def test_small_room_template_segment_runs_in_double_and_resumes(runs: tuple[Path, Record]) -> None:
-    """抓替身路徑接不起來（每個配置重建 chain_objective、編譯快取撞）、不是雙精度、接續跟一口氣跑完不同。
-
-    小房間 two_rigid 從預設樣板取規格那一點起跑、輪數上限 2：帳本照設定與起點讀得回、停止原因在封閉集合裡、
-    截在第 0 輪基準重調第一列之後接續，扣秒數逐值相同。
-    """
-    case = cast(Record, runs[1]["surrogate"])
-    assert case["x64"] == "float64"
-    settings = _settings().model_copy(update={"templates": _settings().templates.model_copy(update={"max_rounds": 2})})
-    origin, origin_rows = _start(case), _rows(runs, case["ledger"])
-    assert origin.surfaces == tuple(zip(gradient_search.wall_surface_ids(), CASES[DESCENT_CASE], strict=True))
-    templates.read_template_ledger(runs[0] / str(case["ledger"]), settings=settings, start=origin)
-    assert origin_rows[-1].stop_reason in rounds.TEMPLATE_STOP_REASONS
-    assert _without_seconds(_rows(runs, case["resumed"])) == _without_seconds(origin_rows)
-    # #561 壬一：每一列的值是新合分＝舊合分 ＋ w·代理／ref，舊合分每列都在、可以單獨排序。
-    assert_rows_split_scores(origin_rows)
 
 
 def _preset_ids(presets: Sequence[ConstructionPreset]) -> set[str]:

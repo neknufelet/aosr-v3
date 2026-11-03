@@ -155,24 +155,39 @@ def _air(directory: Path, source: Path, surrogate: Path) -> Record:
             "expected": value(expected), "original": value(load_problem(project).objective)}
 
 
-def main(directory: Path, air_surrogate: Path) -> None:
+def main(directory: Path, air_surrogate: Path, part: str) -> None:
     source = directory / "source"
-    reference, phases = _reference(directory, source)
+    if part == "reference":
+        reference, phases = _reference(directory, source)
+        reference_folder = directory / str(reference["folder"])
+        _, rows = read_ledger(reference_folder / LEDGER_FILE)
+        pre_loop = [index for index, row in enumerate(rows) if row.round is None]
+        output: Record = {"reference": reference, "phases": phases,
+                          "pre_loop_rows": len(pre_loop),
+                          "other_header": _other_header(directory, source, reference_folder),
+                          "air": _air(directory, source, air_surrogate)}
+    else:
+        output = _after_reference(directory, source, part)
+    (directory / f"output-{part}.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
+    shutil.rmtree(directory / "__pycache__", ignore_errors=True)
+
+
+def _after_reference(directory: Path, source: Path, part: str) -> Record:
+    # 父行程已同步拿到 reference 的完成收據才會啟動這一段，不在子行程裡等待檔案。
+    output = json.loads((directory / "output-reference.json").read_text(encoding="utf-8"))
+    reference, phases = output["reference"], output["phases"]
     reference_folder = directory / str(reference["folder"])
-    firsts = {phase: index + 1 for index, phase in reversed(list(enumerate(phases)))}
-    chosen = sorted({*firsts.values(), len(phases)})
-    stops = [_stop_and_resume(directory, source, at, phases[at - 1]) for at in chosen]
+    if part == "stops":
+        firsts = {phase: index + 1 for index, phase in reversed(list(enumerate(phases)))}
+        chosen = sorted({*firsts.values(), len(phases)})
+        return {"stops": [_stop_and_resume(directory, source, at, phases[at - 1]) for at in chosen]}
     _, rows = read_ledger(reference_folder / LEDGER_FILE)
     pre_loop = [index for index, row in enumerate(rows) if row.round is None]
     snap = next(index for index, row in enumerate(rows) if row.phase == "snap")
     keeps = sorted({max(1, snap // 2), snap, snap + 1, (snap + 1 + len(pre_loop)) // 2})
     cuts = [_cut(directory, source, reference_folder, f"cut-{keep:04d}", keep) for keep in keeps if keep < len(pre_loop)]
-    output = {"reference": reference, "phases": phases, "stops": stops, "cuts": cuts,
-              "pre_loop_rows": len(pre_loop), "other_header": _other_header(directory, source, reference_folder),
-              "air": _air(directory, source, air_surrogate)}
-    (directory / "output.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
-    shutil.rmtree(directory / "__pycache__", ignore_errors=True)
+    return {"cuts": cuts}
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])

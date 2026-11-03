@@ -63,7 +63,6 @@ from aosr.runtime import child_process_env, configure_jax
 from tests.engine import _fem_shared_cases as shared_cases
 from tests.engine._fem_reduced_cache import shared_holdout_report
 from tests.engine._precision_contracts import contract_value
-from tests.engine._scheme_cache import shared_json
 from tests.engine.test_fem_reduced import DENSITY, SOUND_SPEED, model as model, operators as operators
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _gradient_settings, _presets, _receivers,
@@ -137,25 +136,28 @@ def _good_report(request: pytest.FixtureRequest, chain: ReducedModel) -> Validat
         _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain), _holdouts())
 
 
-def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
+def _surrogates(directory: Path, request: pytest.FixtureRequest, group: str) -> None:
     """替身：驗過的（現在的物理身分＋收據）、沒有收據的、物理身分全零但有收據的，與同網格同座標、另一組空氣建的
     三份（完整模型算子的空氣跟著換、各自做留出驗證寫收據）。"""
     base = _chain_model(cast(ReducedModel, request.getfixturevalue("model")))
     chain = dataclasses.replace(base, physics_identity=_current_identity())
-    report = _good_report(request, chain)
     rulers = HoldoutRulers(frequency=Ruler(FREQUENCY_NAME, contract_value(FREQUENCY_NAME)),
                            band=Ruler(BAND_NAME, contract_value(BAND_NAME)))
-    # 物理身分全零那份要自己驗一次：報告帶驗證當下的計算條件指紋（含物理身分），借 chain 的報告寫不成它的收據（#983）。
-    zero_report = validate_reduced(
-        base, _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), base), _holdouts())
-    for name, surrogate, surrogate_report in (("good", chain, report), ("unvalidated", chain, None),
-                                              ("zero-identity", base, zero_report)):
-        (directory / name).mkdir()
-        save_reduced(surrogate, directory / name / "rom.npz")
-        if surrogate_report is not None:
-            save_validation_receipt(directory / name / "rom.npz", surrogate_report, rulers=rulers, seconds=1.0)
+    if group == "base":
+        report = _good_report(request, chain)
+        # 物理身分全零那份要自己驗一次：報告帶驗證當下的計算條件指紋（含物理身分），借 chain 的報告寫不成它的收據（#983）。
+        zero_report = validate_reduced(
+            base, _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), base), _holdouts())
+        for name, surrogate, surrogate_report in (("good", chain, report), ("unvalidated", chain, None),
+                                                  ("zero-identity", base, zero_report)):
+            (directory / name).mkdir()
+            save_reduced(surrogate, directory / name / "rom.npz")
+            if surrogate_report is not None:
+                save_validation_receipt(directory / name / "rom.npz", surrogate_report, rulers=rulers, seconds=1.0)
     full = _chain_operators(cast(FullOperators, request.getfixturevalue("operators")), chain)
     for name, (density, speed) in AIR_SURROGATES.items():
+        if group != name:
+            continue
         other = dataclasses.replace(chain, density_kg_m3=density, sound_speed_m_s=speed)
         operators = dataclasses.replace(full, density_kg_m3=density, sound_speed_m_s=speed)
         (directory / name).mkdir()
@@ -163,6 +165,8 @@ def _surrogates(directory: Path, request: pytest.FixtureRequest) -> None:
         save_validation_receipt(directory / name / "rom.npz", validate_reduced(other, operators, _holdouts()),
                                 rulers=rulers, seconds=1.0)
     for name, (axis, _) in AXIS_SURROGATES.items():
+        if group != name:
+            continue
         other = dataclasses.replace(chain, frequencies_hz=axis)
         (directory / name).mkdir()
         save_reduced(other, directory / name / "rom.npz")
@@ -312,7 +316,7 @@ def _cli_stop(directory: Path, source: Path) -> Record:
             "marker_after_resume": (folder / "stop").exists()}
 
 
-def _rejections(directory: Path, folder: Path) -> Record:
+def _start_rejection(directory: Path, name: str) -> Record:
     """拒收：每一個 start 用自己的資料夾根，事後看根底下有沒有被建任何東西。"""
     cases = {"unvalidated": ("unvalidated", PRESET_TEXT, "scheme.json"),
              "zero_identity": ("zero-identity", PRESET_TEXT, "scheme.json"),
@@ -323,14 +327,19 @@ def _rejections(directory: Path, folder: Path) -> Record:
              "other_density": ("other-density", PRESET_TEXT, "scheme.json"),
              "other_speed": ("other-speed", PRESET_TEXT, "scheme.json"),
              **{name: (name, PRESET_TEXT, "scheme.json") for name in AXIS_SURROGATES}}
+    if name == "under_searches":
+        searches = directory / "data" / "searches"
+        return {**_run(directory, _start_args(directory, searches)), "created": searches.exists()}
+    surrogate, presets, scheme = cases[name]
+    root = directory / f"reject-{name}"
+    record = _run(directory, _start_args(directory, root, surrogate, presets, scheme))
+    record["root_entries"] = sorted(path.name for path in root.iterdir()) if root.exists() else []
+    return record
+
+
+def _rejections(directory: Path, folder: Path) -> Record:
+    """必須在開始那份完成之後，才抄它的資料夾做接續拒收。"""
     records: Record = {}
-    for name, (surrogate, presets, scheme) in cases.items():
-        root = directory / f"reject-{name}"
-        record = _run(directory, _start_args(directory, root, surrogate, presets, scheme))
-        record["root_entries"] = sorted(path.name for path in root.iterdir()) if root.exists() else []
-        records[name] = record
-    searches = directory / "data" / "searches"
-    records["under_searches"] = {**_run(directory, _start_args(directory, searches)), "created": searches.exists()}
     tampered = directory / "tampered" / folder.name
     tampered.mkdir(parents=True)
     project = json.loads((folder / "project.json").read_text(encoding="utf-8"))
@@ -423,42 +432,24 @@ def _interrupted(directory: Path) -> Record:
             "status": json.loads((folder / "status.json").read_text(encoding="utf-8"))}
 
 
-def _probe(directory: Path, folder: Path) -> Record:
+def _probe(directory: Path, folder: Path, part: str) -> Record:
     work = directory / "probe"
-    (work / "source").mkdir(parents=True)
-    shutil.copyfile(folder / "project.json", work / "source" / "project.json")
-    process = subprocess.run([sys.executable, str(PROBE), str(work), str(directory / "air-other" / "rom.npz")], cwd=work, env=_env(work),
+    if part == "reference":
+        (work / "source").mkdir(parents=True)
+        shutil.copyfile(folder / "project.json", work / "source" / "project.json")
+    process = subprocess.run([sys.executable, str(PROBE), str(work), str(directory / "air-other" / "rom.npz"), part], cwd=work, env=_env(work),
                              capture_output=True, text=True, timeout=WAIT_S * 3)
     assert process.returncode == 0, process.stdout + process.stderr
-    return cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
-
-
-def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
-    shutil.rmtree(directory, ignore_errors=True)
-    directory.mkdir(parents=True)
-    _surrogates(directory, request)
-    _inputs(directory)
-    output: Record = {"concurrent": _concurrent_start(directory)}
-    folder = Path(str(cast(Record, output["concurrent"])["folder"]))
-    output["report"] = _run(directory, _command("report", "--folder", str(folder)))
-    output["other_settings"] = _other_settings(directory)
-    output["interrupted"] = _interrupted(directory)
-    output["cli_stop"] = _cli_stop(directory, folder)
-    output["rejections"] = _rejections(directory, folder)
-    output["probe"] = _probe(directory, folder)
-    text = json.dumps(output, ensure_ascii=False)
-    (directory / "fixture.json").write_text(text, encoding="utf-8")
-    return text
+    return cast(Record, json.loads((work / f"output-{part}.json").read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
 def runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
          ) -> tuple[Path, Record]:
-    """一場 pytest 只建一次替身、跑一次命令列與探針，平行的工人共用；讀的人只讀，改檔先抄到自己的 tmp_path。"""
-    directory = (tmp_path_factory.mktemp("material-gradient-cli") if worker_id == "master"
-                 else tmp_path_factory.getbasetemp().parent / "material-gradient-cli-shared")
-    text = shared_json(tmp_path_factory, worker_id, "material-gradient-cli", lambda: _compute(directory, request))
-    return directory, cast(Record, json.loads(text))
+    """各段同步取鎖共用，資料夾依賴先做完才起下一個行程；沒有背景等檔。"""
+    from tests.engine._material_gradient_cli_split import split_runs
+
+    return split_runs(request, tmp_path_factory, worker_id)
 
 
 def _section(runs: tuple[Path, Record], *keys: str) -> Record:
