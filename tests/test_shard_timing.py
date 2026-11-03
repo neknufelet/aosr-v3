@@ -229,7 +229,8 @@ def test_five_shard_union_and_disjointness(tmp_path: Path, fault: str, word: str
     from xml.etree import ElementTree as ET
     from governance.checks import green_must_be_real_green as green
     source = Path(__file__).resolve().parents[1] / 'governance/fixtures/green-must-be-real-green-green/five-history'
-    root = Path(shutil.copytree(source, tmp_path / 'control'))
+    root = tmp_path / 'control'
+    shutil.copytree(source, root)
     parts = root / 'governance/receipts/parts'
     part = parts / 'receipts-123-2-shard-e'
     path = part / 'shard' / 'junit.xml'
@@ -261,3 +262,42 @@ def test_five_shard_finalizer_rejects_upstream_failure(tmp_path: Path, result: s
     assert green.needs_problems(json.dumps(needs), registry) == []
     needs['shard-e']['result'] = result
     assert green.needs_problems(json.dumps(needs), registry) == [f"片 shard-e needs.result={result!r}，預期 'success'"]
+
+
+@pytest.mark.parametrize('group_files,owners', [
+    ((), ('a', 'b', 'c', 'd', 'e', 'a', 'b', 'c', 'd', 'e')),
+    (FILES[:4], ('a', 'a', 'a', 'a', 'b', 'c', 'd', 'e', 'b', 'c')),
+], ids=['ten-independent-files', 'count-files-in-shared-group'])
+def test_zero_seconds_ties_prefer_fewer_files_before_shard_name(
+    tmp_path: Path, group_files: tuple[str, ...], owners: tuple[str, ...],
+) -> None:
+    """全零秒仍分到五片；共用群中的每個檔都要計數，不能只計群數。"""
+    groups = (Group('shared', 'shard-b', '共用前置', group_files),) if group_files else ()
+    registry = replace(registry_at(tmp_path), groups=groups)
+    expected = dict(zip(FILES, (f'shard-{letter}' for letter in owners), strict=True))
+    assigned = subject.assign(FILES, registry, dict.fromkeys(FILES, 0.0))
+    assert assigned == expected
+    assert subject.assign(tuple(reversed(FILES)), registry, dict.fromkeys(reversed(FILES), 0.0)) == expected
+    nodes = [f'{file}::test_one' for file in FILES]
+    for shard in registry.shards:
+        assert render_inputs(nodes, registry, shard, assignments=assigned).args.splitlines() == sorted(
+            file for file, owner in expected.items() if owner == shard)
+
+
+@pytest.mark.parametrize('time', [None, '-1', 'nan', 'inf'])
+def test_missing_or_invalid_junit_seconds_fall_back_for_the_whole_run(tmp_path: Path, time: str | None) -> None:
+    """前片有效、後片缺秒數或秒數壞掉時，不能留下局部歷史資料。"""
+    from governance.status.shard_balance import read_timing_junits
+    for shard, attribute in [('shard-a', ' time="3"'), ('shard-b', '' if time is None else f' time="{time}"')]:
+        folder = tmp_path / shard
+        folder.mkdir()
+        (folder / 'junit.xml').write_text(
+            f'<testsuite><testcase classname="tests.test_a" name="test_one"{attribute}/></testsuite>')
+    def reader(sha: str) -> tuple[str, dict[str, float]]:
+        return '42', read_timing_junits(tmp_path, FILES)
+    snapshot = subject.resolve_snapshot({'before': 'a' * 40}, reader)
+    assert snapshot['timing_source'] == 'fallback'
+    assert snapshot['times'] == {}
+    assert 'time' in str(snapshot['reason'])
+    if time is None:
+        assert '缺' in str(snapshot['reason'])

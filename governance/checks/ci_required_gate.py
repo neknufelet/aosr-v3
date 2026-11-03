@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+import shlex
 import tomllib
 from typing import cast
 
@@ -233,9 +234,25 @@ def preparation_problems(jobs: Mapping[str, object], finalizer: Finalizer, setti
         steps = part.get('steps') if isinstance(part, dict) else None
         readers = [step for step in steps if isinstance(step, dict) and isinstance(step.get('env'), dict)
                    and step['env'].get('AOSR_TIMING_SNAPSHOT') == entry['preparation_output']] if isinstance(steps, list) else []
-        if len(readers) != 1 or 'governance.status.shard_prepare ' not in str(readers[0].get('run')):
+        if len(readers) != 1 or not _prepares_shard(readers[0], shard, settings):
             bad.append(f'片 {shard} 必須由準備步驟讀同一份耗時前置快照')
     return bad
+
+
+def _prepares_shard(step: Mapping[str, object], shard: str, settings: dict[str, object]) -> bool:
+    """核對抄寫員開頭及分隔符後完整的子命令字；參數裡印模組名字不能冒充執行。"""
+    body = step.get('run')
+    if not isinstance(body, str):
+        return False
+    try:
+        tokens = shlex.split(body)
+        wrapper = shlex.split(setting_text(settings, 'wrapper_command'))
+        separator = tokens.index('--', len(wrapper))
+        child = shlex.split(setting_text(settings, 'required_child_prefix'))
+    except ValueError:
+        return False
+    return (tokens[:len(wrapper)] == wrapper
+            and tokens[separator + 1:] == child + ['python', '-m', 'governance.status.shard_prepare', '--shard', shard])
 
 
 def upload_overwrite_problems(rel: str, jobs: dict[str, object], protected: frozenset[str]) -> list[str]:

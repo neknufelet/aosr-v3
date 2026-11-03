@@ -391,6 +391,7 @@ def test_registered_history_dependency_is_exact_and_protected(tmp_path: Path) ->
     ('case-history-command-replaced', '完整快照命令'),
     ('case-history-output-replaced', '不是同一份快照'),
     ('case-history-input-missing', '準備步驟讀同一份'),
+    ('case-history-prepare-command-spoofed', '準備步驟讀同一份'),
     ('case-history-has-needs', '卻有 needs'),
     ('case-history-has-strategy', '卻有 strategy'),
     ('case-history-has-if', '卻有 job 層 if'),
@@ -403,4 +404,31 @@ def test_history_preparation_negative_fixtures(tmp_path: Path, case: str, reason
 
 def test_history_preparation_five_shard_control(tmp_path: Path) -> None:
     root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    assert _check(root) == []
+
+
+@pytest.mark.parametrize('child', [
+    'uv run echo governance.status.shard_prepare --shard shard-a',
+    'uv run python -m governance.status.shard_prepare --shard shard-b',
+    'uv run python -m governance.status.shard_prepare --shard shard-a --help',
+])
+def test_history_prepare_child_must_execute_the_exact_shard_command(tmp_path: Path, child: str) -> None:
+    """只印模組名、借用別片或要求說明，都沒有執行本片準備，整支檢查必須拒絕。"""
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    assert _check(root) == []
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data['jobs']['shard-a']['steps'])
+    steps[0]['run'] = str(steps[0]['run']).partition(' -- ')[0] + ' -- ' + child
+    path.write_text(yaml.safe_dump(data))
+    bad = _check(root)
+    assert bad and all('準備步驟讀同一份' in hit for hit in bad), bad
+
+
+def test_history_prepare_child_accepts_equivalent_quoted_tokens(tmp_path: Path) -> None:
+    """命令字相同的合法引號不改變執行的模組與片名。"""
+    root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly-green', 'history-control')
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data['jobs']['shard-a']['steps'])
+    steps[0]['run'] = str(steps[0]['run']).replace('governance.status.shard_prepare', "'governance.status.shard_prepare'")
+    path.write_text(yaml.safe_dump(data))
     assert _check(root) == []

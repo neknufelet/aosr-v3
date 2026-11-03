@@ -49,7 +49,7 @@ def resolve_snapshot(event: Mapping[str, object], reader: Callable[[str], tuple[
 
 
 def assign(files: Sequence[str], registry: Registry, times: Mapping[str, float]) -> dict[str, str]:
-    """每群或單檔是一個單位；秒數相同按完整路徑、負載相同按片名。"""
+    """每群或單檔是一個單位；秒數相同按完整路徑，負載相同先比檔數、再比片名。"""
     if not files or len(set(files)) != len(files):
         raise ToolBroken('考卷清單不得空白或重複')
     if any(isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in times.values()):
@@ -71,11 +71,13 @@ def assign(files: Sequence[str], registry: Registry, times: Mapping[str, float])
         units.append(tuple(sorted(group.files)))
     units.extend((file,) for file in sorted(set(files) - grouped))
     loads = dict.fromkeys(sorted(registry.shards), 0.0)
+    counts = dict.fromkeys(registry.shards, 0)
     assigned: dict[str, str] = {}
     for unit in sorted(units, key=lambda unit: (-sum(weights[file] for file in unit), unit)):
-        shard = min(loads, key=lambda name: (loads[name], name))
+        shard = min(loads, key=lambda name: (loads[name], counts[name], name))
         assigned.update((file, shard) for file in unit)
         loads[shard] += sum(weights[file] for file in unit)
+        counts[shard] += len(unit)
     return dict(sorted(assigned.items()))
 
 

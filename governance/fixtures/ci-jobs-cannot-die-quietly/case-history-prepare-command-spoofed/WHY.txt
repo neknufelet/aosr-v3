@@ -1,0 +1,1 @@
+必紅樣本：shard-a（第一片工作）的抄寫員子命令改成 uv run echo（只列印文字），把 governance.status.shard_prepare（分片準備模組）當參數，沒有真的執行準備。其餘設定沿用正控制，預期只報第一片的準備步驟違規。

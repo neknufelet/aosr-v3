@@ -95,7 +95,10 @@ def _junit(path: Path, modules: dict[str, str]) -> tuple[float, dict[str, float]
     unmapped: list[str] = []
     total = 0.0
     for case in tree.iter('testcase'):
-        seconds = _seconds(float(case.get('time', '0')), f'{path} testcase.time')
+        raw = case.get('time')
+        if raw is None:
+            raise ToolBroken(f'{path} testcase.time: 缺 time（逐題秒數）屬性')
+        seconds = _seconds(float(raw), f'{path} testcase.time')
         total += seconds
         classname = case.get('classname', '')
         file = _class_file(classname, modules)
