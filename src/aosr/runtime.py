@@ -19,9 +19,17 @@ JAX 第一次載入**之前**寫好才算數——先 ``import jax`` 再改設�
 from __future__ import annotations
 
 import ctypes
+import multiprocessing
 import os
 import sys
-from collections.abc import Mapping, MutableMapping
+import threading
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
+from functools import partial
+from itertools import islice
+from multiprocessing.synchronize import Event
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -36,6 +44,66 @@ TRUE_TEXT = "true"
 FALSE_TEXT = "false"
 DEFAULT_PARDISO_THREADS = 1
 _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPDIR")
+_CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", XLA_FLAGS_VAR)
+_SPAWN_LOCK = threading.Lock()
+
+
+def checked_workers(workers: int) -> int:
+    """完整解的工人數必須是正整數；布林也拒收。"""
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ValueError("workers 必須是正整數")
+    return workers
+
+
+def _spawn_ready() -> None:
+    """讓執行器在釘選環境的區段內真的開齊工人。"""
+
+
+def _spawn_initialize(initializer: Callable[[], None], gate: Event) -> None:
+    """父行程開齊工人前不准完成任何工作，避免執行器提早重用閒置工人。"""
+    gate.wait()
+    initializer()
+
+
+@contextmanager
+def spawn_pool(workers: int, *, initializer: Callable[[], None]) -> Iterator[ProcessPoolExecutor]:
+    """以 spawn 開工人；載入數值套件前繼承父行程的 CPU 三格並釘單緒。
+
+    啟動後立即還原父環境；鎖只覆蓋暫時換環境與開工人，不覆蓋計算。
+    執行器以原例外傳回工作錯誤，不重試；離開區段時等待並收回全部工人。
+    """
+    checked_workers(workers)
+    context = multiprocessing.get_context("spawn")
+    gate = context.Event()
+    with ProcessPoolExecutor(max_workers=workers, mp_context=context,
+                             initializer=partial(_spawn_initialize, initializer, gate)) as pool:
+        with _SPAWN_LOCK:
+            original = dict(os.environ)
+            child = child_process_env(threads=1)
+            child.update({name: original[name] for name in _CPU_PIN_VARS if name in original})
+            configure_calculation_jax(env=child)
+            try:
+                os.environ.clear()
+                os.environ.update(child)
+                ready = [pool.submit(_spawn_ready) for _ in range(workers)]
+            finally:
+                gate.set()
+                os.environ.clear()
+                os.environ.update(original)
+        for future in ready:
+            future.result()
+        yield pool
+
+
+def ordered_map[T, R](pool: ProcessPoolExecutor, function: Callable[[T], R], jobs: Sequence[T], *,
+                      pending: int) -> Iterator[R]:
+    """最多保留 pending 件未回收工作，照輸入順序回傳，避免完整場在父行程堆滿記憶體。"""
+    remaining = iter(jobs)
+    futures = deque(pool.submit(function, job) for job in islice(remaining, pending))
+    while futures:
+        yield futures.popleft().result()
+        for job in islice(remaining, 1):
+            futures.append(pool.submit(function, job))
 
 
 def child_process_env(*, threads: int | None = None, env: Mapping[str, str] | None = None) -> dict[str, str]:

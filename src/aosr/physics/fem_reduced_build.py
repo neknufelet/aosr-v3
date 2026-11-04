@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from aosr import runtime
 from aosr.config.fem_reduced import ReducedModelSettings
+from aosr.physics.fem_full_batch import FullSolveBatch
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
     BuildLedger, FullOperators, FullSolver, GreedyRound, ImpedanceRows, ReducedMatrices, ReducedModel,
@@ -37,6 +39,8 @@ class _Build:
     training: tuple[ImpedanceRows, ...]
     settings: ReducedModelSettings
     solver: FullSolver
+    batch_solver: FullSolveBatch
+    workers: int
     snapshots: list[NDArray[np.complex128]] = field(default_factory=list)
     seen: set[Point2] = field(default_factory=set)
     rounds: list[GreedyRound] = field(default_factory=list)
@@ -47,8 +51,12 @@ class _Build:
         """完整解（解次上限內）並補進快照；上一輪記下實際解了幾點。"""
         start = time.perf_counter()
         chosen = pending[:max(0, self.settings.max_full_solves - self.solver.solves)]
+        parallel = (self.batch_solver.map([
+            (self.axis[index], walls_at(self.training[material], index)) for material, index in chosen])
+            if self.workers > 1 else None)
         for material, index in chosen:
-            solutions = self.solver.solve(self.axis[index], walls_at(self.training[material], index))
+            solutions = (self.solver.solve(self.axis[index], walls_at(self.training[material], index))
+                         if parallel is None else next(parallel))
             self.snapshots.extend(solutions)
             self.seen.add((material, index))
         if self.rounds:
@@ -103,44 +111,47 @@ class _Build:
 
 def build_reduced_model(
     operators: FullOperators, frequencies_hz: Sequence[float],
-    training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings,
+    training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings, workers: int = 1,
 ) -> ReducedModel:
     """完整解快照（每點重新分解、殘差超過上限就報錯）→ 殘差貪婪補點 → 實數 SVD → 投影的小矩陣與建模帳。
 
     ``training_impedances`` 是呼叫端算好的一批材料，每組每面片各一條逐頻阻抗（面片鍵對整條頻率軸的列；六個整面仍接受 ``Wall``，
     或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。
     """
+    runtime.checked_workers(workers)
     start = time.perf_counter()
     axis = checked_axis(frequencies_hz)
     training = impedance_rows(training_impedances, axis, patch_keys=operators.patch_keys)
-    build = _Build(operators=operators, axis=axis, training=training, settings=settings,
-                   solver=FullSolver(operators, max_relative_residual=settings.full_solve_max_relative_residual))
-    rng = np.random.default_rng(settings.greedy_seed)
-    pending = [(material, index)
-               for material in even_indices(settings.initial_impedance_count, len(training))
-               for index in even_indices(settings.initial_frequency_count, len(axis))]
-    while True:
-        build.solve(pending)
-        basis, matrices = build.reduce()
-        # 先量這份基底的殘差再判預算：到上限時記「殘差目標未達」之前，殘差一定量過。
-        outcome = build.greedy_round(rng, basis, matrices)
-        if outcome is None:
-            stop = "候選用完"
-            break
-        largest, pending = outcome
-        if largest <= settings.stop_residual:
-            stop = "抽到的候選殘差都在停止值內"
-            break
-        if build.solver.solves >= settings.max_full_solves:
-            stop = "預算停止、殘差目標未達"
-            break
-    ledger = BuildLedger(
-        full_solves=build.solver.solves, snapshots=len(build.snapshots), rank=basis.shape[1],
-        rounds=tuple(build.rounds), stop_reason=stop,
-        seconds={**build.seconds, "total": elapsed_since(start)}, settings=settings)
-    return ReducedModel(
-        matrices=matrices, source_names=tuple(operators.sources), receiver_names=tuple(operators.receivers),
-        frequencies_hz=axis, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
-        mesh_hash=operators.mesh_hash, physics_identity=operators.physics_identity,
-        input_hash=input_hash(operators, axis, training, settings), ledger=ledger, patch_keys=operators.patch_keys)
+    with FullSolveBatch(operators, max_relative_residual=settings.full_solve_max_relative_residual,
+                       workers=workers) as batch_solver:
+        build = _Build(operators=operators, axis=axis, training=training, settings=settings,
+                       solver=batch_solver.solver, batch_solver=batch_solver, workers=workers)
+        rng = np.random.default_rng(settings.greedy_seed)
+        pending = [(material, index)
+                   for material in even_indices(settings.initial_impedance_count, len(training))
+                   for index in even_indices(settings.initial_frequency_count, len(axis))]
+        while True:
+            build.solve(pending)
+            basis, matrices = build.reduce()
+            # 先量這份基底的殘差再判預算：到上限時記「殘差目標未達」之前，殘差一定量過。
+            outcome = build.greedy_round(rng, basis, matrices)
+            if outcome is None:
+                stop = "候選用完"
+                break
+            largest, pending = outcome
+            if largest <= settings.stop_residual:
+                stop = "抽到的候選殘差都在停止值內"
+                break
+            if build.solver.solves >= settings.max_full_solves:
+                stop = "預算停止、殘差目標未達"
+                break
+        ledger = BuildLedger(
+            full_solves=build.solver.solves, snapshots=len(build.snapshots), rank=basis.shape[1],
+            rounds=tuple(build.rounds), stop_reason=stop,
+            seconds={**build.seconds, "total": elapsed_since(start)}, settings=settings)
+        return ReducedModel(
+            matrices=matrices, source_names=tuple(operators.sources), receiver_names=tuple(operators.receivers),
+            frequencies_hz=axis, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
+            mesh_hash=operators.mesh_hash, physics_identity=operators.physics_identity,
+            input_hash=input_hash(operators, axis, training, settings), ledger=ledger, patch_keys=operators.patch_keys)
 

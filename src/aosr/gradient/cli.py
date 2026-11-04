@@ -87,6 +87,13 @@ def _presets(text: str) -> tuple[str | None, ...]:
     return tuple(None if item == KEEP_WALL else item for item in items)
 
 
+def _workers(text: str) -> int:
+    try:
+        return runtime.checked_workers(int(text))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("--workers 必須是正整數") from error
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aosr.gradient.cli")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -109,6 +116,7 @@ def _parser() -> argparse.ArgumentParser:
     stop.add_argument("folder", type=Path)
     endpoint = commands.add_parser("endpoint", help="終點：完整模型重算、原牆基準、匯出方案檔")
     endpoint.add_argument("folder", type=Path)
+    endpoint.add_argument("--workers", type=_workers, default=1, help="完整解工人數；預設 1（單行程）")
     report = commands.add_parser("report", help="只讀報告")
     report.add_argument("--folder", type=Path, required=True)
     return parser
@@ -162,15 +170,18 @@ def keep_signal_handlers() -> Iterator[None]:
                 signal.signal(number, handler)
 
 
-def _spawn_and_wait(folder: Path, mode: str, lock_fd: int) -> int:
+def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1) -> int:
     """起雙精度子行程（單緒、新的行程群、繼承鎖），等它結束、把離開碼傳出來。"""
     env = runtime.child_process_env(threads=1)
     runtime.configure_jax(platforms="cpu", enable_x64=True, env=env)
+    command = [sys.executable, "-m", "aosr.gradient.worker", str(folder), mode]
+    if workers != 1:
+        command.extend(("--workers", str(runtime.checked_workers(workers))))
     process: subprocess.Popen[bytes] | None = None
     try:
         previous = signal.pthread_sigmask(signal.SIG_BLOCK, FORWARDED_SIGNALS)
         try:
-            process = subprocess.Popen([sys.executable, "-m", "aosr.gradient.worker", str(folder), mode], env=env,
+            process = subprocess.Popen(command, env=env,
                                        start_new_session=True, pass_fds=(lock_fd,), cwd=_REPO_ROOT,
                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         finally:
@@ -305,7 +316,9 @@ def _endpoint(args: argparse.Namespace) -> int:
     folder = args.folder.resolve()
     run.read_project(folder)
     with _locked(folder) as descriptor:
-        return _spawn_and_wait(folder, "endpoint", descriptor)
+        if args.workers == 1:
+            return _spawn_and_wait(folder, "endpoint", descriptor)
+        return _spawn_and_wait(folder, "endpoint", descriptor, workers=args.workers)
 
 
 def _report(args: argparse.Namespace) -> int:

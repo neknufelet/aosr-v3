@@ -85,12 +85,15 @@ def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
     return EXIT_DONE
 
 
-def run_endpoint_worker(folder: Path) -> int:
+def run_endpoint_worker(folder: Path, *, workers: int = 1) -> int:
     """終點一次：寫 ``scheme-endpoint.json`` 與 ``endpoint.json``，回離開碼；不寫狀態檔。"""
     try:
         if runtime.jax_settings() != ("cpu", True):
             raise RuntimeError(f"終點子行程要中央處理器＋雙精度，生效的是 {runtime.jax_settings()!r}")
-        run_endpoint(folder)
+        if workers == 1:
+            run_endpoint(folder)
+        else:
+            run_endpoint(folder, workers=workers)
     except KeyboardInterrupt:
         sys.stderr.write("終點被中斷；endpoint.json 沒寫（或還是上一份）\n")
         return EXIT_STOPPED
@@ -101,12 +104,21 @@ def run_endpoint_worker(folder: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[1] not in (*MODES, ENDPOINT_MODE):
+    if len(argv) not in (2, 4) or argv[1] not in (*MODES, ENDPOINT_MODE):
         sys.stderr.write("用法：python -m aosr.gradient.worker <資料夾> start|resume|endpoint\n")
         return 2
     folder = Path(argv[0]).resolve()
+    workers = 1
+    if len(argv) == 4:
+        if argv[1] != ENDPOINT_MODE or argv[2] != "--workers":
+            return 2
+        try:
+            workers = runtime.checked_workers(int(argv[3]))
+        except ValueError as error:
+            sys.stderr.write(f"{error}\n")
+            return 2
     if argv[1] == ENDPOINT_MODE:
-        return run_endpoint_worker(folder)
+        return run_endpoint_worker(folder) if workers == 1 else run_endpoint_worker(folder, workers=workers)
     mode: Mode = "start" if argv[1] == "start" else "resume"
     return run_worker(folder, mode, should_stop=stop_requested(folder))
 
