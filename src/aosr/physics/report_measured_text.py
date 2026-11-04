@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance, MountedOnWall
 from aosr.physics.report_measured import measured_seams
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
 
 if TYPE_CHECKING:
@@ -27,8 +28,7 @@ def _base_note_text(notes: tuple[ConstructionNote, ...]) -> str:
 
 def measured_text(inputs: ReportInput, notes_by_wall: Mapping[str, tuple[ConstructionNote, ...]] | None = None) -> list[str]:
     sections = []
-    for wall, zones in (inputs.surface_zones_by_wall or {}).items():
-        material = zones[0].material
+    for wall, material in whole_wall_materials(inputs.surface_zones_by_wall or {}).items():
         if not isinstance(material, MeasuredImpedance):
             continue
         lower, upper = material.points[0].frequency_hz, material.points[-1].frequency_hz
@@ -50,10 +50,10 @@ def measured_text(inputs: ReportInput, notes_by_wall: Mapping[str, tuple[Constru
 
 def construction_note_lines(inputs: ReportInput, notes_by_wall: dict[str, tuple[ConstructionNote, ...]]) -> list[str]:
     """貼在原牆上的構造：補值註記同實測牆（界線取原牆的表），其他註記的訊息自帶「第 k 層／原牆第 k 層」。"""
+    materials = whole_wall_materials(inputs.surface_zones_by_wall or {})
     lines = ["構造註記"]
     for wall, notes in notes_by_wall.items():
-        zones = inputs.surface_zones_by_wall
-        material = zones[wall][0].material if zones is not None else None
+        material = materials.get(wall)
         table = material.wall if isinstance(material, MountedOnWall) else material
         for note in notes:
             if note.code == "measured_table_model_fill" and isinstance(table, MeasuredImpedance):

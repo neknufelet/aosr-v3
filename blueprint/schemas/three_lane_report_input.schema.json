@@ -1207,6 +1207,89 @@
       "title": "PorousLayer",
       "type": "object"
     },
+    "RectangleZone": {
+      "additionalProperties": false,
+      "description": "人指定的牆面矩形，公尺座標；u 是欄、v 是列，軸向同 wall_grid_cell。",
+      "properties": {
+        "area": {
+          "const": "rectangle",
+          "title": "Area",
+          "type": "string"
+        },
+        "id": {
+          "description": "同面唯一代號：ASCII 英數、底線、連字號，不收句點",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "u_m": {
+          "description": "u 軸起、迄公尺；floor/ceiling 為 x，x0/xL 為 y，y0/yL 為 x",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "U M",
+          "type": "array"
+        },
+        "v_m": {
+          "description": "v 軸起、迄公尺；floor/ceiling 為 y，其餘為 z",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "V M",
+          "type": "array"
+        },
+        "material": {
+          "description": "分區材料：構造或固定阻抗",
+          "discriminator": {
+            "mapping": {
+              "assembly": "#/$defs/Assembly",
+              "constant_impedance": "#/$defs/ConstantImpedance",
+              "measured_impedance": "#/$defs/MeasuredImpedance",
+              "mounted_on_wall": "#/$defs/MountedOnWall"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Assembly"
+            },
+            {
+              "$ref": "#/$defs/ConstantImpedance"
+            },
+            {
+              "$ref": "#/$defs/MeasuredImpedance"
+            },
+            {
+              "$ref": "#/$defs/MountedOnWall"
+            }
+          ],
+          "title": "Material"
+        }
+      },
+      "required": [
+        "area",
+        "id",
+        "u_m",
+        "v_m",
+        "material"
+      ],
+      "title": "RectangleZone",
+      "type": "object"
+    },
     "SlottedLayer": {
       "additionalProperties": false,
       "allOf": [
@@ -1467,11 +1550,11 @@
     },
     "WholeWallZone": {
       "additionalProperties": false,
-      "description": "這一版每面恰好一區；材料直接採用既有構造型別。",
+      "description": "整面一區的舊寫法；材料直接採用既有構造型別。",
       "properties": {
         "area": {
           "const": "whole_wall",
-          "description": "這一版每面只收整面一區；矩形分區是 #309 第二步",
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區",
           "title": "Area",
           "type": "string"
         },
@@ -1512,7 +1595,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n新舊欄位恰好給一個：舊六個固定阻抗永遠照收，新表面分區每面只收整面一區、\n材料為構造或固定阻抗；實測阻抗表尚未拍板，全固定新寫法正規化成舊寫法。",
+  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n新舊欄位恰好給一個：舊六個固定阻抗永遠照收，新表面分區每面只收整面一區或完整矩形分區、\n材料為構造或固定阻抗；實測阻抗表尚未拍板，全固定新寫法正規化成舊寫法。",
   "oneOf": [
     {
       "not": {
@@ -1705,53 +1788,215 @@
     "surface_zones_by_wall": {
       "additionalProperties": false,
       "default": null,
-      "description": "六面表面分區清單；新舊恰好一個，每面整面一區，構造或固定阻抗；實測阻抗表不收",
+      "description": "六面表面分區清單；新舊恰好一個，每面整面一區或完整矩形分區，構造或固定阻抗；實測阻抗表不收",
       "properties": {
         "floor": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              "maxItems": 1
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            }
+          ],
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區；蓋滿與不重疊由程式以房間尺寸驗證",
           "items": {
-            "$ref": "#/$defs/WholeWallZone"
+            "discriminator": {
+              "mapping": {
+                "rectangle": "#/$defs/RectangleZone",
+                "whole_wall": "#/$defs/WholeWallZone"
+              },
+              "propertyName": "area"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            ]
           },
-          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         },
         "ceiling": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              "maxItems": 1
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            }
+          ],
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區；蓋滿與不重疊由程式以房間尺寸驗證",
           "items": {
-            "$ref": "#/$defs/WholeWallZone"
+            "discriminator": {
+              "mapping": {
+                "rectangle": "#/$defs/RectangleZone",
+                "whole_wall": "#/$defs/WholeWallZone"
+              },
+              "propertyName": "area"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            ]
           },
-          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         },
         "x0": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              "maxItems": 1
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            }
+          ],
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區；蓋滿與不重疊由程式以房間尺寸驗證",
           "items": {
-            "$ref": "#/$defs/WholeWallZone"
+            "discriminator": {
+              "mapping": {
+                "rectangle": "#/$defs/RectangleZone",
+                "whole_wall": "#/$defs/WholeWallZone"
+              },
+              "propertyName": "area"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            ]
           },
-          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         },
         "xL": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              "maxItems": 1
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            }
+          ],
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區；蓋滿與不重疊由程式以房間尺寸驗證",
           "items": {
-            "$ref": "#/$defs/WholeWallZone"
+            "discriminator": {
+              "mapping": {
+                "rectangle": "#/$defs/RectangleZone",
+                "whole_wall": "#/$defs/WholeWallZone"
+              },
+              "propertyName": "area"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            ]
           },
-          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         },
         "y0": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              "maxItems": 1
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            }
+          ],
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區；蓋滿與不重疊由程式以房間尺寸驗證",
           "items": {
-            "$ref": "#/$defs/WholeWallZone"
+            "discriminator": {
+              "mapping": {
+                "rectangle": "#/$defs/RectangleZone",
+                "whole_wall": "#/$defs/WholeWallZone"
+              },
+              "propertyName": "area"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            ]
           },
-          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         },
         "yL": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              "maxItems": 1
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            }
+          ],
+          "description": "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區；蓋滿與不重疊由程式以房間尺寸驗證",
           "items": {
-            "$ref": "#/$defs/WholeWallZone"
+            "discriminator": {
+              "mapping": {
+                "rectangle": "#/$defs/RectangleZone",
+                "whole_wall": "#/$defs/WholeWallZone"
+              },
+              "propertyName": "area"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WholeWallZone"
+              },
+              {
+                "$ref": "#/$defs/RectangleZone"
+              }
+            ]
           },
-          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         }

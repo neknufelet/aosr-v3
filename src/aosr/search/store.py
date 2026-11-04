@@ -13,6 +13,7 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.reporting.result import PurposeSettings
@@ -182,6 +183,7 @@ class SearchStore:
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project)
+        whole_wall_materials(project.scene.surface_zones_by_wall or {})
         if project.scene.low_frequency_axis is None:
             project = project.model_copy(update={"scene": project.scene.model_copy(
                 update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})

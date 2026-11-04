@@ -13,7 +13,7 @@ from aosr.geometry.shoebox import Point, Room
 from aosr.physics.report_furniture import (
     AbsoluteFurniture, CardinalYaw, FiniteCoordinate, FurnitureRecord, normalized_furniture,
 )
-from aosr.physics.report_surfaces import ZonesByWall, normalized_surfaces, validation_content
+from aosr.physics.report_surfaces import ZonesByWall, normalized_surfaces, validation_content, validate_surface_partition
 from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.receiver_set import ReceiverSet
 
@@ -73,7 +73,9 @@ class Scene(BaseModel):
     @model_validator(mode="wrap")
     @classmethod
     def _normalized_surfaces(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
-        return handler(normalized_surfaces(value))
+        result = handler(normalized_surfaces(value))
+        validate_surface_partition(result.room_m, result.surface_zones_by_wall)
+        return result
 
 
 class SpeakerCabinet(BaseModel):

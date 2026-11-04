@@ -317,13 +317,16 @@ def _wall_preset(document: dict[str, object], wall: str | None, value: str | boo
     if wall not in WALLS or preset is None or not isinstance(zones, dict):
         raise InputShapeError("請選六面牆之一與清單中的構造")
     entries = zones.get(wall)
-    if not isinstance(entries, list) or not entries or not isinstance(entries[0], dict):
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
         raise InputShapeError(INPUT_SHAPE_ERROR)
-    material = entries[0].get("material")
+    entry = entries[0]
+    if entry.get("area") != "whole_wall":
+        raise InputShapeError("這一段還不支援矩形分區（#561 之後幾步）")
+    material = entry.get("material")
     if isinstance(material, dict) and material.get("kind") == "measured_impedance":
         material["base_assembly"] = deepcopy(preset["material"])
     else:
-        entries[0]["material"] = deepcopy(preset["material"])
+        entry["material"] = deepcopy(preset["material"])
 
 
 def _readonly_text(item: dict[str, object]) -> str:

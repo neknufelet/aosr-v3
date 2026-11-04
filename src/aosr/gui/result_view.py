@@ -8,6 +8,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.measured_view import MeasuredWallView, build_measured_view, measured_note_text
@@ -857,9 +858,9 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
         for wall_name, notes in (pair.report.construction_notes_by_wall or {}).items():
             merge_construction_notes(merged, Wall.from_name(wall_name), notes)
     lines = []
+    materials = whole_wall_materials(result.scheme.scene.surface_zones_by_wall or {})
     for wall in Wall.all():
-        zones = result.scheme.scene.surface_zones_by_wall
-        material = zones[wall.wall_name()][0].material if zones is not None else None
+        material = materials.get(wall.wall_name())
         table = material.wall if isinstance(material, MountedOnWall) else material
         for note in merged.get(wall, ()):
             if note.code == "measured_table_model_fill" and isinstance(table, MeasuredImpedance):
