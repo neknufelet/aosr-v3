@@ -18,6 +18,7 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.geometry.furniture import FaceDirection, Vec3
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_surfaces import ZonesByWall
 from aosr.physics.wall_reflections import lane_reflection_sources
 from aosr.physics.furniture_paths import FurniturePath, direct_path_blockers, filter_room_paths, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_lane_inputs, furniture_pressure_with_directivity
@@ -193,6 +194,7 @@ def build_path_table(
     furniture_rows: bool = True,
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     density_kg_m3: float | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> PathTableData:
     """算每條路徑的 ``(1−散射)^階數 × |壓力|² ÷ 直達能量``。
 
@@ -204,7 +206,8 @@ def build_path_table(
         raise ValueError("路徑表的頻率軸與散射係數數量不同")
     metadata = _furniture_materials(furniture)
     sources = lane_reflection_sources(materials_by_wall, frequencies_hz,
-        rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3)
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
+        surface_zones_by_wall=surface_zones_by_wall, room=room)
     paths = image_source_paths(
         room,
         source,

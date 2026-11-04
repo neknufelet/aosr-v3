@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from aosr.physics import totals
 from aosr.physics.compare import _complex_hex_dec, _dec_hex
+from aosr.physics.report_surfaces import RectangleZonesUnsupported
 
 if TYPE_CHECKING:
     from aosr.geometry.shoebox import Bounce
@@ -20,6 +21,8 @@ def path_to_dict(path: RoomPath) -> dict[str, object]:
     有材料時多 ``reflection_product`` 與 ``path_pressure``（各六個頻帶的複數格，跟答案檔同形）；
     沒有材料時那兩格是空清單，不寫（保持第三段 ``--json`` 輸出逐位不變）。
     """
+    if path.rectangle_zone_walls:
+        raise RectangleZonesUnsupported(path.rectangle_zone_walls[0])
     body: dict[str, object] = {
         "index": path.index,
         "order": path.order,
@@ -140,6 +143,8 @@ def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> 
         f"{'img':<46} {'dist_m':>20} {'delay_s':>20}"
     ]
     for p in paths:
+        if p.rectangle_zone_walls:
+            raise RectangleZonesUnsupported(p.rectangle_zone_walls[0])
         wall_seq = (
             "direct"
             if not p.bounces

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from aosr.geometry.shoebox import Point, Wall
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.wall_surfaces import wall_normal_impedances
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import CANONICAL_WALLS, reflection_coefficient
 from aosr.physics.report_io import ReportInput, scene_fingerprint
@@ -154,6 +155,8 @@ def build_reflection_screen(
 
     篩查只看牆面；家具不改數值，場景指紋仍納入家具。
     """
+    if inputs.surface_zones_by_wall is not None:
+        whole_wall_materials(inputs.surface_zones_by_wall)
     normal = wall_normal_impedances(materials_by_wall, frequencies_hz,
         density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s)
     return ReflectionScreen(

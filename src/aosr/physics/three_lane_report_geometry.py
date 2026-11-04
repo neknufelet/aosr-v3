@@ -7,6 +7,7 @@ from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, GEOMETRIC_
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.construction_models import ConstructionNote, SurfaceMaterial
 from aosr.physics.wall_reflections import lane_reflection_sources
+from aosr.physics.report_surfaces import ZonesByWall
 from aosr.physics.geometric_lane import (
     GeometricEarlyResult, GeometricLaneResult, solve_geometric_early_lane, solve_geometric_lane,
 )
@@ -35,12 +36,13 @@ def _solve_geometric_report_lane(
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     density_kg_m3: float | None = None,
     notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> GeometricLaneResult:
     if furniture and contact_rel is None:
         raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     sources = lane_reflection_sources(materials_by_wall, frequencies_hz,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
-        notes_by_wall=notes_by_wall)
+        notes_by_wall=notes_by_wall, surface_zones_by_wall=surface_zones_by_wall, room=room)
     return solve_geometric_lane(
         source_model=source_model,
         room=room,
@@ -75,12 +77,13 @@ def _solve_dense_geometric_report_lane(
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     density_kg_m3: float | None = None,
     notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> GeometricEarlyResult:
     if furniture and contact_rel is None:
         raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     sources = lane_reflection_sources(materials_by_wall, GEOMETRIC_BAND_FREQUENCIES_HZ,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
-        notes_by_wall=notes_by_wall)
+        notes_by_wall=notes_by_wall, surface_zones_by_wall=surface_zones_by_wall, room=room)
     return solve_geometric_early_lane(
         source_model=source_model,
         room=room,
@@ -117,6 +120,7 @@ def _solve_both_geometric_report_lanes(
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     density_kg_m3: float | None = None,
     notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
     """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。
 
@@ -129,6 +133,7 @@ def _solve_both_geometric_report_lanes(
         source=source,
         receiver=receiver,
         materials_by_wall=materials_by_wall, density_kg_m3=density_kg_m3, notes_by_wall=notes_by_wall,
+        surface_zones_by_wall=surface_zones_by_wall,
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
@@ -144,6 +149,7 @@ def _solve_both_geometric_report_lanes(
         source=source,
         receiver=receiver,
         materials_by_wall=materials_by_wall, density_kg_m3=density_kg_m3, notes_by_wall=notes_by_wall,
+        surface_zones_by_wall=surface_zones_by_wall,
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,

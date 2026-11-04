@@ -141,6 +141,7 @@ class RoomPath:
     has_patch_materials: bool = False
     reflection_product: tuple[complex, ...] = ()
     path_pressure: tuple[complex, ...] = ()
+    rectangle_zone_walls: tuple[str, ...] = ()
 
 
 def _one_path(
@@ -242,7 +243,9 @@ def image_source_paths(
             raise ValueError("materials 與 reflection_sources 不可同時提供")
         if reflection_sources.sound_speed_m_s != c:
             raise ValueError("反射來源的聲速與路徑傳播聲速不同：構造 Z 與相位會用到兩組空氣")
-        if not reflection_sources.has_construction:
+        if reflection_sources.room is not None and reflection_sources.room != room:
+            raise ValueError("反射分區的房間尺寸與路徑房間不同")
+        if not reflection_sources.has_construction and not reflection_sources.has_rectangle_zones:
             materials = reflection_sources.fixed_materials
     paths = [
         _one_path(room, source, receiver, c, identity, materials)
@@ -266,7 +269,7 @@ def image_source_paths(
         )
         for i, p in enumerate(ordered)
     ]
-    if reflection_sources is not None and reflection_sources.has_construction:
+    if reflection_sources is not None and (reflection_sources.has_construction or reflection_sources.has_rectangle_zones):
         return reflection_sources.apply(numbered, receiver.as_tuple(), c)
     return numbered
 
