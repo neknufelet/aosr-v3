@@ -145,6 +145,16 @@ def test_zone_schema_has_two_exclusive_array_shapes() -> None:
         assert whole == {"items": {"$ref": "#/$defs/WholeWallZone"}, "maxItems": 1}
         assert rectangle == {"items": {"$ref": "#/$defs/RectangleZone"}}
         assert "蓋滿與不重疊由程式" in str(cell["description"])
+    # 沒有 JSON Schema 驗證器依賴，直接釘矩形定義：座標恰兩個數、代號樣式、必填欄。
+    rectangle_def = cast(dict[str, dict[str, object]], schema["$defs"])["RectangleZone"]
+    properties = cast(dict[str, dict[str, object]], rectangle_def["properties"])
+    for axis in ("u_m", "v_m"):
+        assert {key: properties[axis][key] for key in ("type", "minItems", "maxItems", "prefixItems")} == {
+            "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"type": "number"}, {"type": "number"}]}
+    assert properties["area"]["const"] == "rectangle"
+    assert properties["id"]["pattern"] == r"^[A-Za-z0-9_-]+$"
+    assert rectangle_def["additionalProperties"] is False
+    assert set(cast(list[str], rectangle_def["required"])) == {"area", "id", "u_m", "v_m", "material"}
 
 
 @pytest.mark.parametrize("coordinate", [False, "0"])

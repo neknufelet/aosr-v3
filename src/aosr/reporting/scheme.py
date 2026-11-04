@@ -13,7 +13,9 @@ from aosr.geometry.shoebox import Point, Room
 from aosr.physics.report_furniture import (
     AbsoluteFurniture, CardinalYaw, FiniteCoordinate, FurnitureRecord, normalized_furniture,
 )
-from aosr.physics.report_surfaces import ZonesByWall, normalized_surfaces, validation_content, validate_surface_partition
+from aosr.physics.report_surfaces import (
+    ZonesByWall, normalized_surfaces, validation_content, validate_surface_partition, whole_wall_materials,
+)
 from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.receiver_set import ReceiverSet
 
@@ -76,6 +78,10 @@ class Scene(BaseModel):
         result = handler(normalized_surfaces(value))
         validate_surface_partition(result.room_m, result.surface_zones_by_wall)
         return result
+
+    def require_whole_walls(self) -> None:
+        """還沒支援矩形分區的路先叫這一句；任何一面有矩形就丟 RectangleZonesUnsupported。"""
+        whole_wall_materials(self.surface_zones_by_wall or {})
 
 
 class SpeakerCabinet(BaseModel):
