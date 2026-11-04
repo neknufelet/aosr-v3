@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,21 +14,39 @@ import pytest
 from aosr.geometry.shoebox import Wall
 from aosr.physics.late_energy import solve_late_energy
 from aosr.runtime import child_process_env
+from tests.engine._late_zone_control import control_inputs
 from tests.engine._precision_contracts import contract_value
 from tests.engine.test_late_energy_zones import synthetic
 
 
-@pytest.fixture(scope="module")
-def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, object]:
-    directory = tmp_path_factory.mktemp("zone-jax")
+_CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
+
+
+def _child(directory: Path, *, environment_only: bool = False) -> dict[str, object]:
+    """同一條子行程接線供環境回讀與實際數值探針使用。"""
     output = directory / "output.json"
     probe = Path(__file__).with_name("_late_zone_jax_probe.py")
-    env = child_process_env(threads=1)
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
-    process = subprocess.run([sys.executable, str(probe), str(output)], cwd=directory,
+    env = child_process_env(threads=1).copy()
+    env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
+    env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
+    process = subprocess.run([sys.executable, str(probe), str(output), "env" if environment_only else "run"], cwd=directory,
         env=env, capture_output=True, text=True, timeout=60)
     assert process.returncode == 0, process.stdout + process.stderr
     return cast(dict[str, object], json.loads(output.read_text()))
+
+
+@pytest.fixture(scope="module")
+def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, object]:
+    return _child(tmp_path_factory.mktemp("zone-jax"))
+
+
+def test_probe_receives_all_cpu_pins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓子行程清理環境時遺失處理器釘選；回讀子行程，非只查父行程字典。"""
+    expected = {"NPY_DISABLE_CPU_FEATURES": "AVX512F", "OPENBLAS_CORETYPE": "Haswell",
+                "XLA_FLAGS": "--xla_cpu_enable_fast_math=false"}
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+    assert _child(tmp_path, environment_only=True) == expected
 
 
 @pytest.mark.parametrize("wall", Wall.all())
@@ -47,12 +66,20 @@ def test_zoned_jax_matches_numpy_and_jit(runs: dict[str, object], wall: Wall) ->
     assert run["dtype"] == "float64"
 
 
-def test_whole_wall_jax_control_is_bitwise_unchanged(runs: dict[str, object]) -> None:
-    """727acf825736dbd2da26280fabb88e97cd16e557 的 CPU 雙精度實量四格控制。"""
-    assert runs["control"] == CONTROL
-
-
-CONTROL = {'alpha_bar': ['0x1.1bc125ee2cc8ap-1', '0x1.1bc125ee2cc8ap-1', '0x1.1bc125ee2cc8ap-1'], 'raw_reverberant_energy': ['0x1.50e31309a7553p-2', '0x1.50e31309a7553p-2', '0x1.50e31309a7553p-2'], 'eyring_ratio': ['0x1.5f393b7bd5ab9p-1', '0x1.5f393b7bd5ab9p-1', '0x1.5f393b7bd5ab9p-1'], 'late_reverberant_energy': ['0x1.ce32a7f0c5402p-3', '0x1.ce32a7f0c5402p-3', '0x1.ce32a7f0c5402p-3']}
+def test_whole_wall_jax_control_matches_numpy_in_same_run(runs: dict[str, object]) -> None:
+    """XLA（JAX 編譯器）不錄跨處理器答案；四格與判定同次對 numpy。"""
+    bands = solve_late_energy(control_inputs()).bands
+    expected = {name: [getattr(band, name) for band in bands] for name in
+                ("alpha_bar", "raw_reverberant_energy", "eyring_ratio", "late_reverberant_energy")}
+    expected["dissipation_resolved"] = [band.in_domain for band in bands]
+    actual = cast(dict[str, list[float]], runs["control"])
+    assert actual.keys() == expected.keys()
+    for name in expected:
+        if name == "dissipation_resolved":
+            assert actual[name] == expected[name]
+        else:
+            np.testing.assert_allclose(actual[name], expected[name],
+                rtol=contract_value("late_energy_jax_vs_numpy"), atol=0.0, err_msg=name)
 
 
 def test_each_zone_uses_the_original_material_function_and_exact_frequency_selection(runs: dict[str, object]) -> None:

@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+
+# 在 runtime（執行環境）與 JAX 載入前回讀，直接驗證傳進來的三格。
+if __name__ == "__main__" and sys.argv[2] == "env":
+    Path(sys.argv[1]).write_text(json.dumps({name: os.environ.get(name) for name in
+        ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")}))
+    sys.exit(0)
 
 from aosr.runtime import configure_jax
 
@@ -64,8 +71,7 @@ def run() -> dict[str, object]:
     problem = control_inputs()
     control = late_energy_arrays(late_energy_geometry(problem.room, 6),
                                 jnp.asarray(list(problem.absorption_by_wall.values())))
-    result["control"] = {key: [float(v).hex() for v in values] for key, values in control._asdict().items()
-                         if key != "dissipation_resolved"}
+    result["control"] = {key: encode(values) for key, values in control._asdict().items()}
     from aosr.materials.construction_models import (
         AirLayer, Assembly, PorousLayer, MeasuredImpedance, MeasuredImpedancePoint, MountedOnWall, SurfaceMaterial,
     )

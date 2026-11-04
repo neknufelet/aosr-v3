@@ -1,4 +1,4 @@
-"""#561 晚期矩形：精確交集、材料來源與整面逐位控制。"""
+"""#561 晚期矩形：精確交集、材料來源與整面控制。"""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -117,13 +117,19 @@ def test_equivalent_absorption_and_eyring_use_area_weights() -> None:
     assert effective["floor"] == (0.375, 0.375)
 
 
-def test_whole_wall_control_is_bitwise_unchanged() -> None:
-    """起點 727acf825736dbd2da26280fabb88e97cd16e557 實跑；含 T20／T30 與家具吸音。
+def test_whole_wall_control_matches_base_per_cell() -> None:
+    """起點逐格回歸含 T20／T30 與家具吸音；抓超出各族容差的變動。"""
+    from tests.engine._late_zone_control import assert_control, control_inputs, control_values
+    assert_control(control_values(control_inputs()))
 
-    與 tests/conftest.py 同為數值單緒；該提交浮點輸出的 JSON 雜湊，不作四捨五入。
-    """
-    from tests.engine._late_zone_control import control_digest
-    assert control_digest() == "e6adee9547c7b696bf0ac4552598b08d62d335ddad71ca9b9c14c624978ff1e5"
+
+def test_whole_wall_zoned_entry_is_bitwise_unchanged_in_same_run() -> None:
+    """同次執行守整面入口：分區入口沒有矩形也不可多做面積乘除而改末位。"""
+    from tests.engine._late_zone_control import control_inputs, control_values, hex_snapshot
+    original, zoned = control_inputs(), control_inputs(zoned=True)
+    assert zoned.absorption_by_zone == {}
+    assert hex_snapshot(zoned.absorption_by_wall) == hex_snapshot(original.absorption_by_wall)
+    assert hex_snapshot(control_values(zoned)) == hex_snapshot(control_values(original))
 
 
 def test_furniture_whole_room_absorption_uses_zone_area_weights() -> None:
