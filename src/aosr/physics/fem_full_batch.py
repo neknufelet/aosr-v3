@@ -62,6 +62,7 @@ class FullSolveBatch:
     ``workers=1`` 只呼叫同一個 ``FullSolver.solve``；多行程只平行完整解，
     ``solver`` 保留父行程的 system 與累計解次，供建模貪婪殘差與帳本沿用。
     同一區段可 map 多輪；工人、稀疏錨點與求解器一直重用，離開區段時收回。
+    多行程批次出錯關閉後不可再 map；正在算的工作不會被中斷，可能在背景算完。
     """
 
     def __init__(self, operators: FullOperators, *, max_relative_residual: float, workers: int = 1) -> None:
@@ -71,6 +72,7 @@ class FullSolveBatch:
         self.solver = FullSolver(operators, max_relative_residual=max_relative_residual)
         self._stack = ExitStack()
         self._pool: ProcessPoolExecutor | None = None
+        self._failed = False
 
     def __enter__(self) -> FullSolveBatch:
         return self
@@ -81,6 +83,8 @@ class FullSolveBatch:
 
     def map(self, jobs: Sequence[FullSolveJob]) -> Iterator[NDArray[np.complex128]]:
         """照輸入順序回 (喇叭, N)，每個成功回收的頻點只計一次完整解。"""
+        if self._failed:
+            raise RuntimeError("完整解批次已因錯誤關閉，不能再次 map")
         if self._workers == 1:
             for job in jobs:
                 yield self.solver.solve(*job)
@@ -95,6 +99,7 @@ class FullSolveBatch:
                 self.solver.solves += 1
                 yield solution
         except Exception as error:
+            self._failed = True
             completed = getattr(error, "_aosr_full_solves", 0)
             if isinstance(completed, int):
                 self.solver.solves += completed

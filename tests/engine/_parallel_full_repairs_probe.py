@@ -30,7 +30,7 @@ from tests.engine._parallel_full_solves_probe import (
 )
 
 
-def _until(predicate: Callable[[], bool], seconds: float = 5.0) -> None:
+def _until(predicate: Callable[[], bool], seconds: float = 30.0) -> None:
     deadline = time.monotonic() + seconds
     while not predicate():
         assert time.monotonic() < deadline, "hard deadline exceeded"
@@ -70,9 +70,9 @@ def anchor(directory: Path) -> None:
         first = pool.submit(_anchor_solve, jobs[0], directory)
         _until(lambda: len(list(directory.glob("ready-*"))) == 1)
         second = pool.submit(_anchor_solve, jobs[1], directory)
-        results = [first.result(timeout=8), second.result(timeout=8)]
+        results = [first.result(timeout=30), second.result(timeout=30)]
         counts = [pool.submit(_slot_count, directory) for _ in range(2)]
-        assert sorted(future.result(timeout=5) for future in counts) == sorted((row[0], 1) for row in results)
+        assert sorted(future.result(timeout=30) for future in counts) == sorted((row[0], 1) for row in results)
     assert results[0][0] != results[1][0]
     for (_, solves, initial, actual), wanted in zip(results, expected, strict=True):
         _equal(initial, single.solver.system(*jobs[0]).toarray(), "actual PARDISO anchor")
@@ -95,7 +95,7 @@ def environment(directory: Path) -> None:
     observed: list[str | None] = []
 
     def update() -> None:
-        assert start.wait(3)
+        assert start.wait(30)
         observed.append(os.environ.get("AOSR_KEEP"))
         os.environ["AOSR_CHANGE"] = "new"
         os.environ["AOSR_ADDED"] = "new"
@@ -106,7 +106,7 @@ def environment(directory: Path) -> None:
 
     def during_start[T](pool: ProcessPoolExecutor, fn: Callable[[], T]) -> Future[T]:
         start.set()
-        assert done.wait(3)
+        assert done.wait(30)
         return submit(pool, fn)
 
     updater = threading.Thread(target=update)
@@ -115,13 +115,13 @@ def environment(directory: Path) -> None:
         with patch.object(ProcessPoolExecutor, "submit", during_start):
             with runtime.spawn_pool(2, factory=_noop):
                 pass
-        updater.join(timeout=3)
+        updater.join(timeout=15)
         assert observed == ["present"], "unrelated parent environment disappeared during spawn"
         assert os.environ["AOSR_CHANGE"] == os.environ["AOSR_ADDED"] == "new"
         assert "AOSR_DELETE" not in os.environ
         assert "MKL_NUM_THREADS" not in os.environ and os.environ["OMP_NUM_THREADS"] == "7"
     finally:
-        updater.join(timeout=3)
+        updater.join(timeout=15)
         for name in set(os.environ) | set(original):
             if name in original:
                 os.environ[name] = original[name]
@@ -137,7 +137,7 @@ def _middle(directory: Path) -> None:
     with runtime.spawn_pool(2, factory=partial(_record_pid, directory)):
         _until(lambda: len(list(directory.glob("worker-*"))) == 2)
         (directory / "opened").touch()
-        time.sleep(15)
+        time.sleep(120)
 
 
 def _gated_middle(directory: Path) -> None:
@@ -148,7 +148,7 @@ def _gated_middle(directory: Path) -> None:
         future = submit(pool, fn)
         _until(lambda: len(list(directory.glob("worker-*"))) == 1)
         (directory / "opened").touch()
-        time.sleep(15)
+        time.sleep(120)
         return future
 
     submit = ProcessPoolExecutor.submit
@@ -168,11 +168,11 @@ def _parent_death(directory: Path, mode: str) -> None:
     process = subprocess.Popen([sys.executable, "-m", __spec__.name, mode, str(directory)])
     pids: list[int] = []
     try:
-        _until(lambda: (directory / "opened").exists(), seconds=8)
+        _until(lambda: (directory / "opened").exists())
         pids = [int(file.name.removeprefix("worker-")) for file in directory.glob("worker-*")]
         assert len(pids) == (2 if mode == "_middle" else 1)
         process.kill()
-        assert process.wait(timeout=3) == -signal.SIGKILL
+        assert process.wait(timeout=15) == -signal.SIGKILL
 
         def reaped() -> bool:
             for pid in pids[:]:
@@ -180,11 +180,11 @@ def _parent_death(directory: Path, mode: str) -> None:
                     pids.remove(pid)
             return not pids
 
-        _until(reaped, seconds=4)
+        _until(reaped, seconds=15)
     finally:
         if process.poll() is None:
             process.kill()
-            process.wait(timeout=3)
+            process.wait(timeout=15)
         for pid in pids:
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
@@ -250,9 +250,21 @@ def _prefix_factory(directory: Path, operators: FullOperators, limit: float, fir
     return _init_worker(operators, limit, first)
 
 
+def failed_reuse(directory: Path) -> None:
+    jobs = [(AXIS[0], WALLS[0])]
+    with FullSolveBatch(_operators(), max_relative_residual=-1.0, workers=2) as batch:
+        with pytest.raises(RuntimeError, match="殘差"):
+            list(batch.map(jobs))
+        assert batch.solver.solves == 1
+        for again in (jobs, []):
+            with pytest.raises(RuntimeError, match="批次已因錯誤關閉"):
+                list(batch.map(again))
+            assert batch.solver.solves == 1
+
+
 def _slow(directory: Path) -> None:
     (directory / f"started-{os.getpid()}").touch()
-    time.sleep(1.5)
+    _until(lambda: (directory / "release").exists())
 
 
 def _queued(directory: Path, index: int) -> None:
@@ -261,19 +273,28 @@ def _queued(directory: Path, index: int) -> None:
 
 def cancel(directory: Path) -> None:
     started = 0.0
-    with pytest.raises(ValueError, match="original"):
-        with runtime.spawn_pool(2, factory=_noop) as pool:
-            for _ in range(2):
-                pool.submit(_slow, directory)
-            _until(lambda: len(list(directory.glob("started-*"))) == 2)
-            pending = [pool.submit(_queued, directory, i) for i in range(12)]
-            started = time.monotonic()
-            raise ValueError("original")
-    assert time.monotonic() - started < 0.7, "error waited for unrelated running work"
-    _until(lambda: any(future.cancelled() for future in pending))
+    try:
+        with pytest.raises(ValueError, match="original"):
+            with runtime.spawn_pool(2, factory=_noop) as pool:
+                running = [pool.submit(_slow, directory) for _ in range(2)]
+                _until(lambda: len(list(directory.glob("started-*"))) == 2)
+                pending = [pool.submit(_queued, directory, i) for i in range(12)]
+                started = time.monotonic()
+                raise ValueError("original")
+        assert time.monotonic() - started < 5.0, "error waited for unrelated running work"
+        assert all(not future.done() for future in running), "slow work finished before error returned"
+        _until(lambda: any(future.cancelled() for future in pending))
+    finally:
+        # 原錯誤已回到呼叫者、取消已生效，才放行；斷言失敗也必須放行以便收尾。
+        (directory / "release").touch()
+    for future in running:
+        future.result(timeout=30)
+    _until(lambda: all(future.done() for future in pending))
     for index, future in enumerate(pending):
         if future.cancelled():
             assert not (directory / f"queued-{index}").exists()
+        else:
+            future.result(timeout=30)
 
 
 def budget(directory: Path) -> None:

@@ -69,7 +69,7 @@ def worker_state[T](kind: type[T]) -> T:
 
 
 def _watch_parent(parent_pid: int) -> None:
-    """父行程死亡（含開閘前）便立即退出，避免卡在閘門或工作佇列。"""
+    """約每秒偵測父行程死亡（含開閘前），偵測到就退出；卡在原生呼叫時不保證。"""
     tick = threading.Event()
     while os.getppid() == parent_pid:
         tick.wait(1.0)
@@ -107,7 +107,8 @@ def spawn_pool(workers: int, *, factory: Callable[[], object]) -> Iterator[Proce
     """以 spawn 開工人；載入數值套件前繼承父行程的 CPU 三格並釘單緒。
 
     啟動後立即還原父環境；鎖只覆蓋暫時換環境與開工人，不覆蓋計算。
-    執行器以原例外傳回工作錯誤，不重試；正常等待回收，出錯取消未開始工作且立即回傳。
+    執行器以原例外傳回工作錯誤，不重試；正常等待回收，出錯取消可取消的未開始工作並回傳。
+    正在算的工作不會被中斷，可能在背景算完；錯誤返回不代表工人已全部收回。
     """
     checked_workers(workers)
     context = multiprocessing.get_context("spawn")
