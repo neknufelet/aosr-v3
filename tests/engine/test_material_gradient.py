@@ -197,6 +197,11 @@ def _numpy_total(model: ReducedModel, impedances: NDArray[np.complex128], mask: 
         k2, coefficients = system_coefficients(frequency, walls, density_kg_m3=model.density_kg_m3,
                                                sound_speed_m_s=model.sound_speed_m_s)
         pressures.append(evaluate_reduced(model.matrices, k2, coefficients))
+    return _numpy_score(model, np.asarray(pressures))
+
+
+def _numpy_score(model: ReducedModel, pressures: NDArray[np.complex128]) -> float:
+    """獨立 numpy 聲壓的非可微計分參考；整面與分區鏈共用。"""
     energies = np.abs(np.asarray(pressures)) ** 2
     points = _receivers().points
     speakers = []

@@ -41,7 +41,7 @@ from aosr.gradient.endpoint import (
     worst_big_peak,
 )
 from aosr.config.material_gradient import MaterialGradientSettings
-from aosr.geometry.shoebox import Wall
+from aosr.gradient.boundary import BoundaryKey
 from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, header_for
 from aosr.gradient.run import (
     LEDGER_FILE, RESULT_FILE, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
@@ -165,8 +165,8 @@ def exported_scheme(scheme: Scheme, scene: Scene, gradient_id: str) -> Scheme:
     return Scheme.model_validate({**content, "scene": scene, "scheme_id": f"{scheme.scheme_id}-gradient-{gradient_id[:8]}"})
 
 
-def checked_result(folder: Path, given: GradientResult, header: MaterialGradientHeader,
-                   settings: MaterialGradientSettings, kept: Mapping[Wall, SurfaceMaterial]) -> GradientResult:
+def checked_result[K: BoundaryKey](folder: Path, given: GradientResult, header: MaterialGradientHeader,
+                   settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial]) -> GradientResult:
     """結果檔不能只信它自己說的：從兩本帳（庚二帳本標頭要等於 ``header``；換樣板帳本標頭要等於照它與現在的庚二帳本摘要
     重建的）重建整份結果，跟檔裡那份整個模型相等才收，回重建那一份；不等就拒收、列出哪幾格不同。"""
     template_header = template_header_for(header, settings, kept, base_ledger_sha256=file_sha256(folder / LEDGER_FILE))

@@ -253,14 +253,14 @@ def test_partitioned_rigid_and_missing_materials_rejected(zoned_operators: reduc
         build_reduced_model(zoned_operators, AXIS, [values], settings=SETTINGS)
 
 
-def test_gradient_refuses_partitioned_model(zoned_model: reduced.ReducedModel) -> None:
+def test_gradient_refuses_mismatched_patch_list(zoned_model: reduced.ReducedModel) -> None:
     from aosr.gradient.material_gradient import chain_objective
     from tests.engine.test_material_gradient import _objective_constants
 
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
-    # 這裡應先拒收分區替身，不能走到樣板與評分。
-    with pytest.raises(ValueError, match="搜尋還不支援分區替身（#561 第六步）"):
+    # 空設計與替身的七片不符，必須在樣板與評分之前拒收。
+    with pytest.raises(ValueError, match="面片"):
         chain_objective(zoned_model, (), _objective_constants(zoned_model), air=air, ranges=ranges, frequencies=AXIS)
 
 
@@ -287,8 +287,8 @@ def test_scheme_exports_partitioned_operators_without_relaxing_solver_inputs() -
         report_io.solver_inputs(inputs)
 
 
-@pytest.mark.parametrize("entry", ["scheme", "axis", "ledger", "full", "endpoint"])
-def test_gradient_entry_points_refuse_partitioned_model(entry: str, zoned_model: reduced.ReducedModel,
+@pytest.mark.parametrize("entry", ["scheme", "ledger", "full", "endpoint"])
+def test_gradient_entry_points_refuse_mismatched_patch_list(entry: str, zoned_model: reduced.ReducedModel,
                                                        zoned_operators: reduced.FullOperators) -> None:
     from aosr.config.frequency_axis import LowFrequencyAxis
     from aosr.gradient import endpoint, material_gradient_ledger, run
@@ -299,7 +299,7 @@ def test_gradient_entry_points_refuse_partitioned_model(entry: str, zoned_model:
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     scheme = Scheme.model_validate(zone_document())
-    with pytest.raises(ValueError, match="搜尋還不支援分區替身（#561 第六步）"):
+    with pytest.raises(ValueError, match="面片"):
         if entry == "scheme":
             run.check_surrogate_matches_scheme(zoned_model, scheme, run.scheme_points_hex(scheme))
         elif entry == "axis":
@@ -316,7 +316,7 @@ def test_gradient_entry_points_refuse_partitioned_model(entry: str, zoned_model:
                 low_frequency_axis=LowFrequencyAxis.SEARCH_48, presets=_presets(), settings=_settings(), air=air, ranges=ranges)
 
 
-def test_gradient_gate_refuses_validated_partitioned_model(zoned_model: reduced.ReducedModel,
+def test_gradient_gate_accepts_validated_partitioned_model(zoned_model: reduced.ReducedModel,
                                                           zoned_operators: reduced.FullOperators, tmp_path: Path) -> None:
     from aosr.gradient import run
     from aosr.physics.fem_reduced_check import points_hex
@@ -326,9 +326,9 @@ def test_gradient_gate_refuses_validated_partitioned_model(zoned_model: reduced.
     save_reduced(zoned_model, path)
     report = validate_reduced(zoned_model, zoned_operators, _zoned_materials(99, 2))
     save_validation_receipt(path, report, rulers=run.holdout_rulers(), seconds=1.0)
-    with pytest.raises(ValueError, match="搜尋還不支援分區替身（#561 第六步）"):
-        run.gated_surrogate(path, mesh_hash=zoned_model.mesh_hash, physics_identity=zoned_model.physics_identity,
-            points=run.SchemePoints(points_hex(zoned_operators.source_points), points_hex(zoned_operators.receiver_points)))
+    loaded = run.gated_surrogate(path, mesh_hash=zoned_model.mesh_hash, physics_identity=zoned_model.physics_identity,
+        points=run.SchemePoints(points_hex(zoned_operators.source_points), points_hex(zoned_operators.receiver_points)))
+    assert loaded.patch_keys == zoned_model.patch_keys
 
 
 def test_manifest_missing_patch_list_is_rejected(zoned_model: reduced.ReducedModel, tmp_path: Path) -> None:

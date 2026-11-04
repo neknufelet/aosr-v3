@@ -33,6 +33,8 @@ from pydantic import BaseModel, ValidationError
 
 from aosr.config.material_gradient import MOUNT_ON_WALL
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.boundary import named_materials
+from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
 from aosr.gradient.material_gradient_ledger import (
@@ -177,7 +179,9 @@ def _kept_texts(project: GradientProject) -> dict[str, str]:
     except (OSError, ValueError) as error:
         return {**{wall.wall_name(): f"不貼（保留原牆；方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()},
                 **fixed}
-    return {**{wall.wall_name(): f"不貼（保留原牆：{material_text(material)}）" for wall, material in materials.items()}, **fixed}
+    fixed = {face: f"固定（材料 id：{material}）" for face, material in
+             expanded_fixed_surfaces(project.fixed_surfaces, tuple(named_materials(materials))).items()}
+    return {**{name: f"不貼（保留原牆：{material_text(material)}）" for name, material in named_materials(materials).items()}, **fixed}
 
 
 def mount_line(project: GradientProject) -> str:
@@ -193,7 +197,7 @@ def _mounted_texts(project: GradientProject) -> dict[str, str]:
         materials = project_wall_materials(project, load_scheme(Path(project.scheme_path)))
     except (OSError, ValueError) as error:
         return {wall.wall_name(): f"，{MOUNTED_TEXT}（方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()}
-    return {wall.wall_name(): f"，{MOUNTED_TEXT}（原牆：{material_text(material)}）" for wall, material in materials.items()}
+    return {name: f"，{MOUNTED_TEXT}（原牆：{material_text(material)}）" for name, material in named_materials(materials).items()}
 
 
 def _point_lines(layout: Layout, row: MaterialGradientRow | TemplateRow | None,

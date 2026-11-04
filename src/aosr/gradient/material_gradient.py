@@ -6,8 +6,7 @@
 候選確認迴圈與接續在 ``material_gradient_loop``；終點完整模型重算不在這裡（下一支）。
 
 設計以「一串面（surfaces）」寫，長度不寫死：扁平化、下降、取規格、重調與帳本對任何面數都成立。
-只有最底下接替身那一層（:func:`chain_objective`）因為替身現在只有六面，才要求剛好照 ``Wall.all()``
-六面給、長度不對就拒收——那是替身的限制，不是設計的限制。
+最底下接替身的 :func:`chain_objective` 核對完整有序面片清單；整面仍照 ``Wall.all()``，分區各有一個設計。
 
 設計變數只有每面棉板厚度（多孔層）與空腔深度（空氣層），樣板有那一層才有那個變數；
 流阻與板材幾何固定、每面樣板固定、沒有樣板的面沒有變數。沒有樣板的面有兩種：帶 ``kept_material``
@@ -39,14 +38,14 @@ from aosr.config.material_gradient import (
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.surrogate_guard import require_whole_surrogate
+from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.materials.construction import surface_impedance
-from aosr.materials.construction_diff import ConstructionTemplate, build_template, variable_name
+from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters, variable_name
 from aosr.materials.construction_models import (
     AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
+from aosr.physics.fem_reduced_jax import TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import (
     GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures, objective_reading,
 )
@@ -457,6 +456,15 @@ def design_templates(designs: Sequence[SurfaceDesign], frequencies_hz: jax.Array
         for design in designs)
 
 
+def _patch_impedances(templates: Sequence[ConstructionTemplate | None], parameters: Sequence[Mapping[str, jax.Array]],
+                      axis: jax.Array, *, air: PhysicsConstants) -> TemplateImpedances:
+    """面片樣板的阻抗；不貼片的零只作佔位，呼叫端隨後換入已驗過的原材料常數列。"""
+    rows = tuple(jnp.zeros(axis.shape, dtype=jnp.result_type(axis.dtype, jnp.complex64)) if template is None else
+                 surface_impedance_from_parameters(template, values, axis, air=air)
+                 for template, values in zip(templates, parameters, strict=True))
+    return TemplateImpedances(jnp.stack(rows), jnp.asarray([template is None for template in templates], dtype=bool))
+
+
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64]) -> ChainObjective:
@@ -465,15 +473,14 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
     梯度沿新合分走；舊合分（``screening_total``）同一次求值一起交回。樣板用具體值建，要在雙精度已開的行程裡呼叫；
-    設計清單照 ``Wall.all()`` 對到替身的六面、只有一種安裝方式（:func:`designs_mount`，混了拒收）。
+    設計清單照替身的有序面片清單、只有一種安裝方式（:func:`designs_mount`，混了拒收）。
     樣板照 :func:`design_templates`（貼在原牆上的面背後接原牆）。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
     目標函式裡轉成 θ 對應的複數精度、換進那一列，剛性遮罩那一格是 False；求值入口的語意（None 樣板＝剛性）不動。
     """
-    require_whole_surrogate(model)
-    walls = Wall.all()
-    if len(designs) != len(walls):
-        raise ValueError(f"替身目前只有六面牆（Wall.all()），設計清單有 {len(designs)} 個面；"
-                         "一面切成幾區要等替身支援更多面，這是替身的限制")
+    require_matching_patches(model, tuple(d.surface_id for d in designs))
+    for design, (_, zone) in zip(designs, model.patch_keys, strict=True):
+        if zone and design.material is None and design.kept_material is None:
+            raise ValueError(f"分區面片 {design.surface_id} 一定要有材料")
     designs_mount(designs)
     axis = np.asarray(frequencies, dtype=np.float64)
     if axis.shape != (len(model.frequencies_hz),) or not np.array_equal(axis, np.asarray(model.frequencies_hz)):
@@ -492,7 +499,9 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         values = jnp.asarray(theta)
         parameters = surface_parameters(frozen_designs, values)
         frequency_axis = jnp.asarray(constants.frequencies_hz, dtype=values.dtype)
-        impedances = wall_impedances_from_templates(templates, parameters, frequency_axis, air=air)
+        impedances = (_patch_impedances(templates, parameters, frequency_axis, air=air)
+                      if any(zone for _, zone in model.patch_keys) else
+                      wall_impedances_from_templates(templates, parameters, frequency_axis, air=air))
         walls = impedances.values
         for index, row in kept_rows:
             walls = walls.at[index].set(jnp.asarray(row, dtype=walls.dtype))

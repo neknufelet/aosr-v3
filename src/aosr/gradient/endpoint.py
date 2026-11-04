@@ -38,7 +38,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
-from typing import Final, NamedTuple, Self
+from typing import Final, NamedTuple, Self, cast
 
 import jax
 import jax.numpy as jnp
@@ -52,7 +52,9 @@ from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSetting
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.surrogate_guard import require_whole_surrogate
+from aosr.gradient.boundary import BoundaryKey, design_patch_keys, material_keys, patch_key
+from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances, boundary_patches
+from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, designs_mount,
     is_feasible, wall_surface_ids,
@@ -119,8 +121,11 @@ def kept_cavity(cavity_m: float, min_cavity_m: float) -> float | None:
 
 
 def checked_wall_designs(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceDesign, ...]:
-    """設計清單的面代號必須照 ``Wall.all()`` 的順序剛好是六面牆名：替身鏈照位置配牆，匯出照名字配牆，兩邊要同一個序。"""
+    """分區照共用面片序且六牆齊全；整面照 Wall.all()，鏈按位置、匯出按名字，必須同序。"""
     ids = tuple(design.surface_id for design in designs)
+    if any("@" in name for name in ids):
+        design_patch_keys(ids)
+        return tuple(designs)
     if ids != wall_surface_ids():
         raise ValueError(f"設計清單必須照 Wall.all() 的順序給六面 {list(wall_surface_ids())}，收到 {list(ids)}")
     return tuple(designs)
@@ -206,7 +211,7 @@ def _design_material(design: SurfaceDesign, spec: SurfaceSpec, min_cavity_m: flo
 
 
 def materials_from_surfaces(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector,
-                            settings: MaterialGradientSettings) -> dict[Wall, SurfaceMaterial | None]:
+                            settings: MaterialGradientSettings) -> dict[BoundaryKey, SurfaceMaterial | None]:
     """六面設計＋θ → 每面牆的材料（照 ``Wall.all()`` 排）；「不貼」面是保留的原牆材料，真剛性面是 None。
 
     材料只從 ``design.material`` 來（替身鏈建樣板的同一份），不再拿 preset id 去另一份清單重查：棉板層換成
@@ -218,6 +223,9 @@ def materials_from_surfaces(designs: Sequence[SurfaceDesign], theta: jax.Array |
     designs_mount(checked)
     specs = surface_specs(checked, theta)
     minimum = settings.export.min_cavity_m
+    if any("@" in design.surface_id for design in checked):
+        return {patch_key(design.surface_id): _design_material(design, spec, minimum)
+                for design, spec in zip(checked, specs, strict=True)}
     return {wall: _design_material(design, spec, minimum)
             for wall, design, spec in zip(Wall.all(), checked, specs, strict=True)}
 
@@ -230,25 +238,26 @@ def checked_air(air: PhysicsConstants, *, density_kg_m3: float, sound_speed_m_s:
             f"（密度 {density_kg_m3}、聲速 {sound_speed_m_s}）不同，阻抗與有限元素會用兩組空氣")
 
 
-def material_impedances(materials: Mapping[Wall, SurfaceMaterial | None], frequencies_hz: Sequence[float], *,
-                        air: PhysicsConstants, ranges: PorousModelRanges) -> FrequencyWallImpedances:
+def material_impedances[K: BoundaryKey](materials: Mapping[K, SurfaceMaterial | None], frequencies_hz: Sequence[float], *,
+                        air: PhysicsConstants, ranges: PorousModelRanges) -> FrequencyBoundaryImpedances:
     """每面材料走產品 ``surface_impedance``（非可微入口）求垂直入射阻抗，攤成逐頻 Python 複數；剛性面 None。
 
     「不貼」面的阻抗跟替身鏈建目標時那一列（``kept_impedance_rows``）同一支函式、同一個頻率軸寫法，雙精度行程下逐位相同（單精度 θ 時鏈裡那一列轉成 complex64，是這一列的降精度版）。
     """
     axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
-    impedances: dict[Wall, tuple[complex, ...] | None] = {}
-    for wall in Wall.all():
-        material = materials[wall]
+    by_key = cast(Mapping[BoundaryKey, SurfaceMaterial | None], materials)
+    impedances: dict[BoundaryKey, tuple[complex, ...] | None] = {}
+    for wall in (materials if any(isinstance(key, tuple) for key in materials) else Wall.all()):
+        material = by_key[wall]
         if material is None:
             impedances[wall] = None
             continue
         values, _ = surface_impedance(material, axis, air=air, ranges=ranges)
         impedances[wall] = tuple(complex(value) for value in np.asarray(values))
-    return impedances
+    return cast(FrequencyBoundaryImpedances, impedances)
 
 
-def full_model_pressures(operators: FullOperators, materials: Mapping[Wall, SurfaceMaterial | None],
+def full_model_pressures[K: BoundaryKey](operators: FullOperators, materials: Mapping[K, SurfaceMaterial | None],
                          frequencies_hz: Sequence[float], *, air: PhysicsConstants, ranges: PorousModelRanges,
                          max_relative_residual: float) -> NDArray[np.complex128]:
     """完整模型逐頻解（每頻一次 pydiso 分解），回座位聲壓 ``(F, 喇叭, 座位)``。
@@ -257,11 +266,13 @@ def full_model_pressures(operators: FullOperators, materials: Mapping[Wall, Surf
     （``impedance_rows``）、``FullSolver.solve`` 後乘座位取值列。頻率軸由呼叫端給（用替身的軸），不自己造。
     ``air`` 必須跟算子同密度、同聲速（:func:`checked_air`）。
     """
-    require_whole_surrogate(operators)
+    require_matching_patches(operators, keys=material_keys(materials))
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
                 source="完整模型算子")
     axis = tuple(float(value) for value in frequencies_hz)
-    rows = impedance_rows([material_impedances(materials, axis, air=air, ranges=ranges)], axis)[0]
+    values = material_impedances(materials, axis, air=air, ranges=ranges)
+    rows = (impedance_rows([values], axis, patch_keys=operators.patch_keys) if operators.patch_keys != boundary_patches()
+            else impedance_rows([values], axis))[0]
     solver = FullSolver(operators, max_relative_residual=max_relative_residual)
     receivers = np.asarray(list(operators.receivers.values()), dtype=np.float64)
     pressures = np.empty((len(axis), len(operators.sources), len(operators.receivers)), dtype=np.complex128)
@@ -415,7 +426,7 @@ class EndpointResult(NamedTuple):
 def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, designs: Sequence[SurfaceDesign],
                              theta: jax.Array | FloatVector, receiver_set: ReceiverSet,
                              air: PhysicsConstants) -> FloatVector:
-    require_whole_surrogate(operators)
+    require_matching_patches(operators, tuple(d.surface_id for d in designs))
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
                 source="完整模型算子")
     checked_air(air, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s, source="替身")
@@ -459,8 +470,8 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     鏈逐頻 × r² 的暫存（第四場 188 頻點、r=2265）沒編譯時峰值比編譯過高約四成，排在完整解之後還跟算子與完整解
     留下的記憶體疊在一起；它不需要完整解的任何東西。
     """
-    require_whole_surrogate(model)
-    require_whole_surrogate(operators)
+    require_matching_patches(model, tuple(d.surface_id for d in designs))
+    require_matching_patches(operators, tuple(d.surface_id for d in designs))
     values = _checked_endpoint_inputs(operators, model, designs, theta, receiver_set, air)
     checked_design_identity(designs, presets)
     axis = tuple(float(value) for value in model.frequencies_hz)
@@ -503,15 +514,41 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     return EndpointResult(report, full, reduced_pressure)
 
 
-def scene_with_materials(scene: Scene, materials: Mapping[Wall, SurfaceMaterial | None]) -> Scene:
+def scene_with_materials[K: BoundaryKey](scene: Scene, materials: Mapping[K, SurfaceMaterial | None]) -> Scene:
     """把六面材料寫進方案場景的牆面欄位：每面一區（``whole_wall``，#309 構造牆進方案的格式），舊的固定阻抗欄拿掉；
     「不貼」面寫回保留的原牆材料（六面全是固定阻抗時，方案格式自己折回舊欄）。
 
     方案格式沒有「剛性」的寫法（表面分區每面必須是一種材料，固定阻抗欄只收正數），所以真剛性面（None）拒收：
     替身與完整模型都把那一面當剛性算過，寫成任何別的材料，匯出的方案就不再是剛才驗過的那一組。其餘場景欄位不動。
     """
+    if any(isinstance(key, tuple) and key[1] for key in materials):
+        from aosr.gradient.boundary import named_materials
+        from aosr.physics.report_surfaces import RectangleZone
+
+        given_by_name = named_materials(materials)
+        original = scene.surface_zones_by_wall or {}
+        zones_by_wall = {}
+        expected = []
+        for wall in Wall.all():
+            rows = []
+            for zone in original[wall.wall_name()]:
+                name = wall.wall_name() + ("@" + zone.id if isinstance(zone, RectangleZone) else "")
+                expected.append(name)
+                material = given_by_name.get(name)
+                if material is None:
+                    raise ValueError(f"方案牆面要每個面片都有構造；缺或剛性：{name}")
+                rows.append({**zone.model_dump(), "material": material.model_dump()})
+            zones_by_wall[wall.wall_name()] = rows
+        if tuple(given_by_name) != tuple(expected):
+            raise ValueError("匯出材料的面片清單與輸入方案不同")
+        content = validation_content(scene)
+        if not isinstance(content, dict):
+            raise TypeError("場景內容必須是欄位字典")
+        document = {name: value for name, value in content.items() if name not in (OLD_WALL_FIELD, ZONE_WALL_FIELD)}
+        return Scene.model_validate({**document, ZONE_WALL_FIELD: zones_by_wall})
     whole_wall_materials(scene.surface_zones_by_wall or {})
-    given = {wall: material for wall in Wall.all() if (material := materials.get(wall)) is not None}
+    by_key = cast(Mapping[BoundaryKey, SurfaceMaterial | None], materials)
+    given = {wall: material for wall in Wall.all() if (material := by_key.get(wall)) is not None}
     absent = [wall.wall_name() for wall in Wall.all() if wall not in given]
     if absent:
         raise ValueError(f"方案牆面要六面都有構造；缺或剛性：{absent}（方案格式沒有剛性的寫法）")

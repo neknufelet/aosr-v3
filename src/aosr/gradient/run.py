@@ -45,7 +45,7 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Final, Literal, NamedTuple, Protocol, Self
+from typing import Final, Literal, NamedTuple, Protocol, Self, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -62,7 +62,7 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.surrogate_guard import require_whole_surrogate
+from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_surfaces import FixedSurfaces, designs_with_fixed
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
@@ -83,6 +83,9 @@ from aosr.gradient.template_segment import (
     TemplateResult, finished_result, resume_template_rounds, run_template_rounds,
 )
 from aosr.materials.construction_models import SurfaceMaterial
+from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials, partition_identity, scheme_patch_keys, surface_ids)
+from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
+from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_check import PointHex, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
@@ -259,7 +262,7 @@ class GradientProblem(NamedTuple):
     settings: MaterialGradientSettings
     objective: ChainObjective
     header: MaterialGradientHeader
-    kept: dict[Wall, SurfaceMaterial]
+    kept: dict[BoundaryKey, SurfaceMaterial]
     templates: TemplateContext
 
 
@@ -301,7 +304,8 @@ def holdout_rulers() -> HoldoutRulers:
 
 def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: Sequence[str | None], purpose: str,
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
-                mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None) -> str:
+                mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
+                patch_keys: PatchKeys = boundary_patches()) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -315,6 +319,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["mount"] = mount
     if fixed_surfaces:
         identity["fixed_surfaces"] = dict(sorted(fixed_surfaces.items()))
+    if patches := partition_identity(patch_keys):
+        identity["boundary_patches"] = patches
     content = json.dumps(identity,
                          sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:32]
@@ -372,7 +378,7 @@ def gated_surrogate(surrogate: Path, *, mesh_hash: str, physics_identity: str, p
     model = load_validated_reduced(surrogate, rulers=holdout_rulers(), expected_mesh_hash=mesh_hash,
                                   expected_physics_identity=physics_identity, expected_source_points=points.sources,
                                   expected_receiver_points=points.receivers)
-    require_whole_surrogate(model)
+    require_matching_patches(model)
     return model
 
 
@@ -381,7 +387,7 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
     替身建模用的空氣（密度、聲速）要逐位等於方案場景的（不然材料阻抗用方案的空氣、縮減方程係數用替身的空氣，
     一個目標混用兩組條件；網格不取密度，同網格、同座標、另一組空氣建的合法替身真的存在）；
     交給閘門比的座標要就是這份方案的座標（不然閘門比的是別的位置）。"""
-    require_whole_surrogate(model)
+    require_matching_patches(model, keys=scheme_patch_keys(scheme))
     seats = tuple(point.receiver_id for point in scheme.receiver_set.points)
     if model.receiver_names != seats:
         raise ValueError(f"替身的座位 {list(model.receiver_names)} 跟方案座位組 {list(seats)} 不同（名字或順序），"
@@ -399,7 +405,7 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
 def check_surrogate_axis_covers_scoring(model: ReducedModel, scheme: Scheme, score: StageOneScoreSettings) -> None:
     """替身的頻率軸要算得了這一次的計分（#984，顧問 #971）：照方案場景宣告的低頻軸、計分範圍，走低頻評估器的
     宣告點與缺段判法（:func:`axis_reason_not_measurable`）；不可估就拒收，不拿剩下的頻點代替整段。"""
-    require_whole_surrogate(model)
+    require_matching_patches(model)
     axis = scheme.scene.low_frequency_axis
     if axis is None:
         raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
@@ -454,15 +460,23 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
 
 
 def scene_wall_materials(scheme: Scheme, *, capabilities: CapabilityTable,
-                         directivity: DirectivityDefaults) -> dict[Wall, SurfaceMaterial]:
-    """方案原本六面的牆面材料（照 ``Wall.all()``）：走報表求解入口那一條——``checked_inputs`` 驗方案、取第一對輸入
-    （跟 ``export_operators`` 同一個取法）交 ``report_io.solver_inputs``，用它的 ``materials_by_wall``；
-    固定阻抗只在那裡建，這裡不另轉。"""
+                         directivity: DirectivityDefaults) -> dict[BoundaryKey, SurfaceMaterial]:
+    """沿 ``export_operators`` 的 checked_inputs 第一對輸入取材料；分區直接取每片的 material。
+
+    整面仍交 solver_inputs 取 materials_by_wall，不另轉固定阻抗；分區鍵與序由 boundary_patches 共用。
+    """
     _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-    return dict(solver_inputs(next(iter(documents.values()))[1]).materials_by_wall)
+    inputs = next(iter(documents.values()))[1]
+    keys = scheme_patch_keys(scheme)
+    if keys != boundary_patches():
+        zones = inputs.surface_zones_by_wall or {}
+        return {(wall, zone): next(z.material for z in zones[wall.wall_name()]
+                                  if (isinstance(z, RectangleZone) and z.id == zone) or
+                                  (not isinstance(z, RectangleZone) and not zone)) for wall, zone in keys}
+    return cast(dict[BoundaryKey, SurfaceMaterial], dict(solver_inputs(inputs).materials_by_wall))
 
 
-def project_wall_materials(project: GradientProject, scheme: Scheme) -> dict[Wall, SurfaceMaterial]:
+def project_wall_materials(project: GradientProject, scheme: Scheme) -> dict[BoundaryKey, SurfaceMaterial]:
     """:func:`scene_wall_materials`，能力表取 ``project.json`` 記的、指向性取產品預設（跟 ``resume`` 核物理身分同一組）。"""
     return scene_wall_materials(scheme, capabilities=load_capabilities(project.capabilities_path),
                                 directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
@@ -475,20 +489,28 @@ def search_objective_constants(project: GradientProject, scheme: Scheme,
                                         scheme.receiver_set, len(model.source_names))
 
 
-def designs_for(presets: Sequence[str | None], settings: MaterialGradientSettings, *,
-                kept: Mapping[Wall, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
+def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
+                kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
                 fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
-    """六面（照 ``Wall.all()``）的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
+    """有分區照共用面片序、整面照 ``Wall.all()`` 的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
     那一面的材料（方案原本的牆，``scene_wall_materials``），是「不貼、保留原牆」，不是剛性；``mount`` 是貼在原牆上時，
     貼樣板的面背後接 ``kept`` 那一面。"""
+    keys = material_keys(kept)
+    if keys != boundary_patches():
+        names = surface_ids(keys)
+        if len(presets) != len(names):
+            raise ValueError(f"面片清單要給 {len(names)} 個 preset id")
+        return designs_with_fixed(tuple(zip(names, presets, strict=True)), settings, presets_table(),
+                                  kept=named_materials(kept), mount=mount, fixed_surfaces=fixed_surfaces or {})
+    whole_kept = cast(Mapping[Wall, SurfaceMaterial], kept)
     if fixed_surfaces:
         if len(presets) != len(Wall.all()):
             raise ValueError("六面牆要給六個 preset id")
         return designs_with_fixed(tuple(zip((wall.wall_name() for wall in Wall.all()), presets, strict=True)),
-                                  settings, presets_table(), kept={w.wall_name(): m for w, m in kept.items()},
+                                  settings, presets_table(), kept={w.wall_name(): m for w, m in whole_kept.items()},
                                   mount=mount, fixed_surfaces=fixed_surfaces)
     return wall_designs_from_presets(presets, settings, presets_table(),
-                                     kept={wall.wall_name(): material for wall, material in kept.items()}, mount=mount)
+                                     kept={wall.wall_name(): material for wall, material in whole_kept.items()}, mount=mount)
 
 
 def load_problem(project: GradientProject) -> GradientProblem:
@@ -512,8 +534,10 @@ def load_problem(project: GradientProject) -> GradientProblem:
             return objective
         return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
 
-    context = TemplateContext(settings, presets_table(), {wall.wall_name(): kept[wall] for wall in Wall.all()},
-                              objective_for, project.mount, project.fixed_surfaces)
+    from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
+
+    context = TemplateContext(settings, presets_table(), named_materials(kept),
+                              objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, tuple(d.surface_id for d in designs)))
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
                                                                     objective_constants=constants), kept, context)
 
@@ -606,17 +630,21 @@ def template_start(header: MaterialGradientHeader, rows: Sequence[MaterialGradie
     return TemplateStart(header.surfaces, last.theta_hex, *last.scores())
 
 
-def template_header_for(header: MaterialGradientHeader, settings: MaterialGradientSettings,
-                        kept: Mapping[Wall, SurfaceMaterial], *, base_ledger_sha256: str) -> TemplateHeader:
+def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings: MaterialGradientSettings,
+                        kept: Mapping[K, SurfaceMaterial], *, base_ledger_sha256: str) -> TemplateHeader:
     """換樣板帳本的標頭：替身身分與評分常數指紋抄庚二標頭、完整設定指紋（含 ``[templates]``）、庚二帳本整份摘要、
     起點配置（庚二標頭的六面）、六面方案原本那面牆的材料摘要。"""
+    whole_kept = cast(Mapping[Wall, SurfaceMaterial], kept)
+    digests = ({name: material_digest(material) for name, material in named_materials(kept).items()}
+               if header.boundary_patches else
+               {wall.wall_name(): material_digest(whole_kept[wall]) for wall in Wall.all()})
     return TemplateHeader(
         ledger_version=TEMPLATE_LEDGER_VERSION, input_hash=header.input_hash, mesh_hash=header.mesh_hash,
         physics_identity=header.physics_identity, settings_fingerprint=settings.full_fingerprint,
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
-        kept_digests={wall.wall_name(): material_digest(kept[wall]) for wall in Wall.all()}, mount=header.mount,
-        fixed_surfaces=header.fixed_surfaces)
+        kept_digests=digests, mount=header.mount,
+        fixed_surfaces=header.fixed_surfaces, boundary_patches=header.boundary_patches)
 
 
 def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:
@@ -667,17 +695,17 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
     return evaluations, len(decisions), rows[-1].value if rows else None, stop_reason
 
 
-def final_designs(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
-                  kept: Mapping[Wall, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
+def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
+                  kept: Mapping[K, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
                   fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
     """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。"""
-    if tuple(surface_id for surface_id, _ in surfaces) != tuple(wall.wall_name() for wall in Wall.all()):
+    if tuple(surface_id for surface_id, _ in surfaces) != surface_ids(material_keys(kept)):
         raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
     return designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
                        fixed_surfaces=fixed_surfaces)
 
 
-def result_from_ledger(folder: Path, settings: MaterialGradientSettings, kept: Mapping[Wall, SurfaceMaterial], *,
+def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
                        expected_header: MaterialGradientHeader | None = None,
                        expected_template_header: TemplateHeader | None = None) -> GradientResult:
     """從兩本帳重建整份結果，不寫檔：庚二帳本要收尾（給了 ``expected_header`` 標頭要逐格相等）；換樣板帳本要收尾、
