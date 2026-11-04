@@ -117,7 +117,11 @@ def test_zone_lookup_uses_wall_axes_and_closes_only_outer_edges(wall: Wall) -> N
     zones = tuple(reversed(_grid(6., 4., 2., 2.)))
     axes = [a for a in range(3) if a != wall.axis()]
     for u, v, expected in ((2., 2., "r1c1"), (6., 4., "r1c1"), (6., 0., "r0c1"),
-                            (0., 4., "r1c0"), (0., 0., "r0c0"), (3., 1., "r0c1")):
+                            (0., 4., "r1c0"), (0., 0., "r0c0"), (3., 1., "r0c1"),
+                            # 分界兩側相鄰浮點與負零：查區不准取整或挪點。
+                            (math.nextafter(2., 0.), 1., "r0c0"), (math.nextafter(2., math.inf), 1., "r0c1"),
+                            (1., math.nextafter(2., 0.), "r0c0"), (1., math.nextafter(2., math.inf), "r1c0"),
+                            (-0., -0., "r0c0")):
         point = [0., 0., 0.]
         point[axes[0]], point[axes[1]] = u, v
         assert rectangle_zone_at(wall.wall_name(), (point[0], point[1], point[2]), zones).id == expected
@@ -154,6 +158,13 @@ def test_change_one_zone_only_changes_paths_hitting_it() -> None:
     before = _paths(zones)
     zones["floor"] = (grid[0].model_copy(update={"material": ConstantImpedance(impedance_pa_s_m=9000.)}), *grid[1:])
     after = _paths(zones)
+    # 沒打到分區牆的路徑要跟全整面來源逐位相同：確認它真的走舊算式。
+    whole = {p.identity: p for p in _paths(_whole())}
+    untouched = [p for p in before if not any("floor" in b.walls for b in p.bounces)]
+    assert untouched
+    for path in untouched:
+        assert _bits(path.reflection_product) == _bits(whole[path.identity].reflection_product)
+        assert _bits(path.path_pressure) == _bits(whole[path.identity].path_pressure)
     hit = miss = 0
     for old, new in zip(before, after, strict=True):
         touches = any("floor" in b.walls and b.point[0] < 2. and b.point[1] < 2. for b in old.bounces)
