@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Hashable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeVar
 
 import numpy as np
@@ -33,12 +33,17 @@ FrequencyWallImpedances = Mapping[Wall, Impedance | None | Sequence[Impedance | 
 
 @dataclass(frozen=True)
 class P2Operators:
-    """同一張網格上與頻率無關的 P2 基底、K、M 與六面邊界質量。"""
+    """同一張網格的 P2 基底、K、M 與邊界質量。
+
+    ``boundary_mass`` 仍每面一份；有分區的面照定義是 ``zone_boundary_mass``
+    依標記首現次序加總。整面一區不列入逐區映射，沿用原有組裝。
+    """
 
     basis: Basis
     stiffness: csr_matrix[np.float64]
     mass: csr_matrix[np.float64]
     boundary_mass: dict[Wall, csr_matrix[np.float64]]
+    zone_boundary_mass: Mapping[Wall, Mapping[str, csr_matrix[np.float64]]] = field(default_factory=dict)
 
 
 def _real_csr(matrix: csr_matrix[np.float64]) -> csr_matrix[np.float64]:
@@ -65,10 +70,14 @@ def _boundary_facets(
     mesh: ShoeboxMesh,
 ) -> dict[Wall, NDArray[np.int64]]:
     """把 ShoeboxMesh 三角形逐面映到 scikit-fem 的 facet 編號。"""
+    finite_boundary_facets = finite_mesh.boundary_facets()
+    if len(finite_boundary_facets) != len(mesh.boundary_triangles):
+        raise ValueError("四面體網格的邊界 facet 數與鞋盒邊界三角形數不同")
     facet_by_vertices = {
         tuple(sorted(int(node) for node in finite_mesh.facets[:, facet])): int(facet)
-        for facet in finite_mesh.boundary_facets()
+        for facet in finite_boundary_facets
     }
+    seen: set[int] = set()
     grouped: dict[Wall, list[int]] = {wall: [] for wall in Wall.all()}
     for triangle, wall_index in zip(
         mesh.boundary_triangles,
@@ -82,13 +91,51 @@ def _boundary_facets(
         except (KeyError, IndexError) as exc:
             raise ValueError("鞋盒邊界三角形或牆編號不屬於四面體網格") from exc
         grouped[wall].append(facet)
+        if facet in seen:
+            raise ValueError("鞋盒邊界三角形重複")
+        seen.add(facet)
     return {
         wall: np.asarray(facets, dtype=np.int64) for wall, facets in grouped.items()
     }
 
 
+def _zone_boundary_matrices(
+    mesh: ShoeboxMesh, basis: Basis, boundary_facets: Mapping[Wall, NDArray[np.int64]],
+) -> dict[Wall, dict[str, csr_matrix[np.float64]]]:
+    """只為標了分區的牆面組裝各區；facet 次序跟該面三角形相同。"""
+    labels = mesh.boundary_zone_ids
+    if labels is None:
+        return {}
+    if labels.shape != mesh.boundary_triangles.shape[:1]:
+        raise ValueError("邊界分區標記必須與三角形逐列對齊")
+    result = {}
+    for index, wall in enumerate(Wall.all()):
+        wall_labels = labels[mesh.boundary_wall_indices == index]
+        if not np.any(wall_labels != ""):
+            continue
+        if np.any(wall_labels == ""):
+            raise ValueError("同面邊界不得混用整面與矩形分區")
+        result[wall] = {
+            str(name): _zone_mass(basis, boundary_facets[wall][wall_labels == name])
+            for name in dict.fromkeys(wall_labels)
+        }
+    return result
+
+
+def _zone_mass(basis: Basis, facets: NDArray[np.int64]) -> csr_matrix[np.float64]:
+    """P2 邊界跡只支撐於面上自由度；去掉面外基底求值的浮點尾差。"""
+    matrix = _real_csr(asm(mass, FacetBasis(
+        basis.mesh, basis.elem, intorder=P2_PRODUCT_INTEGRATION_ORDER, facets=facets)))
+    active = np.zeros(basis.N, dtype=np.float64)
+    active[basis.get_dofs(facets=facets).all()] = 1.0
+    rows = csr_matrix(matrix.multiply(active[:, None]), dtype=np.float64)
+    result = _real_csr(csr_matrix(rows.multiply(active[None, :]), dtype=np.float64))
+    result.eliminate_zeros()
+    return result
+
+
 def assemble_p2_operators(mesh: ShoeboxMesh) -> P2Operators:
-    """以四階積分組裝 P2×P2 的 K、M 與每面牆的邊界質量。"""
+    """四階積分組裝；分區面的 boundary_mass 定義為各區矩陣依標記首現次序相加。"""
     finite_mesh = MeshTet(
         np.asarray(mesh.nodes, dtype=np.float64).T,
         np.asarray(mesh.tetrahedra, dtype=np.int64).T,
@@ -98,6 +145,7 @@ def assemble_p2_operators(mesh: ShoeboxMesh) -> P2Operators:
     element = ElementTetP2()
     basis = Basis(finite_mesh, element, intorder=P2_PRODUCT_INTEGRATION_ORDER)
     boundary_facets = _boundary_facets(finite_mesh, mesh)
+    zone_boundary_mass = _zone_boundary_matrices(mesh, basis, boundary_facets)
     boundary_mass = {
         wall: _real_csr(
             asm(
@@ -111,12 +159,21 @@ def assemble_p2_operators(mesh: ShoeboxMesh) -> P2Operators:
             )
         )
         for wall, facets in boundary_facets.items()
+        if wall not in zone_boundary_mass
     }
+    for wall, zones in zone_boundary_mass.items():
+        matrices = iter(zones.values())
+        total = next(matrices).copy()
+        for matrix in matrices:
+            total = total + matrix
+        boundary_mass[wall] = _real_csr(total)
+    boundary_mass = {wall: boundary_mass[wall] for wall in Wall.all()}
     return P2Operators(
         basis=basis,
         stiffness=_real_csr(asm(laplace, basis)),
         mass=_real_csr(asm(mass, basis)),
         boundary_mass=boundary_mass,
+        zone_boundary_mass=zone_boundary_mass,
     )
 
 
@@ -230,6 +287,40 @@ def assemble_helmholtz_system(
             boundary_term = operators.boundary_mass[wall].astype(np.complex128)
             boundary_term.data *= coefficient
             system = system + boundary_term
+    return _complex_csr(system.tocsr())
+
+
+def assemble_zoned_helmholtz_system(
+    operators: P2Operators, *, frequency_hz: float,
+    wall_impedances: SingleWallImpedances,
+    zone_impedances: Mapping[Wall, Mapping[str, Impedance]],
+    density_kg_m3: float, sound_speed_m_s: float,
+) -> csr_matrix[np.complex128]:
+    """逐區阻抗組裝；wall_impedances 恰好收未分區面，只有整面可給 None。
+
+    SingleWallImpedances 及既有整面入口的意義不變；逐區材料須完整、被動且非零。
+    """
+    expected = operators.zone_boundary_mass
+    if set(zone_impedances) != set(expected) or set(wall_impedances) != set(Wall.all()) - set(expected):
+        raise ValueError("整面與分區阻抗必須恰好覆蓋各自的牆面")
+    for wall, matrices in expected.items():
+        if set(zone_impedances[wall]) != set(matrices):
+            raise ValueError(f"{wall.wall_name()} 分區阻抗代號必須完整且無多餘")
+        for value in zone_impedances[wall].values():
+            if value is None:
+                raise ValueError("矩形分區一定要有材料阻抗，不能給 None")
+            _check_impedance(value, wall, frequency_hz)
+    whole = {wall: wall_impedances.get(wall) for wall in Wall.all()}
+    system = assemble_helmholtz_system(
+        operators, frequency_hz=frequency_hz, wall_impedances=whole,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    omega = 2.0 * math.pi * frequency_hz
+    for wall, matrices in expected.items():
+        for name, matrix in matrices.items():
+            coefficient = 1j * omega * density_kg_m3 / zone_impedances[wall][name]
+            term = matrix.astype(np.complex128)
+            term.data *= coefficient
+            system = system + term
     return _complex_csr(system.tocsr())
 
 

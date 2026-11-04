@@ -11,6 +11,7 @@ from pydantic_core import PydanticCustomError
 from pydantic.config import JsonDict
 
 from aosr.geometry.shoebox import Room, Wall
+from aosr.geometry.shoebox_mesh import MeshRectangle
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, MountedOnWall, SurfaceMaterial
 
 
@@ -91,6 +92,20 @@ def validate_surface_partition(room: Room, zones_by_wall: ZonesByWall | None) ->
         rectangles = [zone for zone in zones if isinstance(zone, RectangleZone)]
         if rectangles:
             _rectangle_partition(name, rectangles, *sizes[name])
+
+
+def mesh_partitions(
+    room: Room, zones_by_wall: Mapping[str, Sequence[SurfaceZone]],
+) -> dict[Wall, tuple[MeshRectangle, ...]]:
+    """驗完方案矩形後只交座標與代號給網格層；整面材料不送入 geometry。"""
+    result = {}
+    for wall in Wall.all():
+        rectangles = [zone for zone in zones_by_wall.get(wall.wall_name(), ()) if isinstance(zone, RectangleZone)]
+        if rectangles:
+            axes = [axis for axis in range(3) if axis != wall.axis()]
+            _rectangle_partition(wall.wall_name(), rectangles, *(room.length(axis) for axis in axes))
+            result[wall] = tuple((zone.id, zone.u_m, zone.v_m) for zone in rectangles)
+    return result
 
 
 def _rectangle_partition(name: str, rectangles: Sequence[RectangleZone], width: float, height: float) -> None:
