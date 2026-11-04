@@ -15,6 +15,11 @@ class model:
 
     class occ:
         @staticmethod
+        def fragment(
+            objectDimTags: list[tuple[int, int]], toolDimTags: list[tuple[int, int]],
+            tag: int = ..., removeObject: bool = ..., removeTool: bool = ...,
+        ) -> tuple[list[tuple[int, int]], list[list[tuple[int, int]]]]: ...
+        @staticmethod
         def addPoint(x: float, y: float, z: float, meshSize: float = ..., tag: int = ...) -> int: ...
         @staticmethod
         def addLine(startTag: int, endTag: int, tag: int = ...) -> int: ...

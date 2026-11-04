@@ -127,9 +127,15 @@ class ReducedModel:
 
 
 def mesh_hash(mesh: ShoeboxMesh) -> str:
-    """依節點、四面體、邊界三角形、牆編號的順序，串名稱、dtype、int64 形狀與 C 順序位元組做 SHA-256。"""
+    """串名稱、dtype、形狀與 C 順序位元組做 SHA-256；只有分區網格附加區代號。
+
+    整面（None 或全空字串）仍只量原有四欄，保持原雜湊逐位不變。
+    """
     digest = hashlib.sha256()
-    for name in _MESH_FIELDS:
+    fields: tuple[str, ...] = _MESH_FIELDS
+    if mesh.boundary_zone_ids is not None and np.any(mesh.boundary_zone_ids != ""):
+        fields = (*fields, "boundary_zone_ids")
+    for name in fields:
         array = np.ascontiguousarray(getattr(mesh, name))
         digest.update(name.encode())
         digest.update(str(array.dtype).encode())

@@ -29,8 +29,13 @@ class MeshTet:
 
 class ElementTetP2: ...
 
+class DofsView:
+    def all(self) -> _IntArray: ...
+
 class Basis:
     N: int
+    mesh: MeshTet
+    elem: ElementTetP2
     doflocs: _FloatArray
     def __init__(
         self,
@@ -44,6 +49,7 @@ class Basis:
         disable_doflocs: bool = ...,
     ) -> None: ...
     def probes(self, x: _FloatArray) -> csr_matrix[np.float64]: ...
+    def get_dofs(self, facets: _IntArray) -> DofsView: ...
 
 class FacetBasis:
     def __init__(
