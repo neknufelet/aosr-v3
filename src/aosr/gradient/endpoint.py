@@ -61,7 +61,7 @@ from aosr.materials.construction_models import AirLayer, Assembly, MountedOnWall
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, FullSolver, ReducedModel, impedance_rows, walls_at
 from aosr.physics.fem_reduced_check import validate_reduced
-from aosr.physics.report_surfaces import OLD_WALL_FIELD, ZONE_WALL_FIELD, WholeWallZone, validation_content
+from aosr.physics.report_surfaces import OLD_WALL_FIELD, ZONE_WALL_FIELD, WholeWallZone, validation_content, whole_wall_materials
 from aosr.reporting.scheme import Scene
 from aosr.scoring.low_frequency_input import low_frequency_input
 from aosr.scoring.receiver_set import ReceiverSet
@@ -505,6 +505,7 @@ def scene_with_materials(scene: Scene, materials: Mapping[Wall, SurfaceMaterial 
     方案格式沒有「剛性」的寫法（表面分區每面必須是一種材料，固定阻抗欄只收正數），所以真剛性面（None）拒收：
     替身與完整模型都把那一面當剛性算過，寫成任何別的材料，匯出的方案就不再是剛才驗過的那一組。其餘場景欄位不動。
     """
+    whole_wall_materials(scene.surface_zones_by_wall or {})
     given = {wall: material for wall in Wall.all() if (material := materials.get(wall)) is not None}
     absent = [wall.wall_name() for wall in Wall.all() if wall not in given]
     if absent:

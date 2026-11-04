@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.gui.labels import WALLS
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance, SurfaceMaterial
@@ -25,8 +26,8 @@ class MeasuredWallView(BaseModel):
 
 def measured_materials(scheme: Scheme) -> dict[str, MeasuredImpedance]:
     """沿用完整方案驗證過的模型，不另建材料物件。"""
-    return {wall: entries[0].material for wall, entries in (scheme.scene.surface_zones_by_wall or {}).items()
-            if isinstance(entries[0].material, MeasuredImpedance)}
+    return {wall: material for wall, material in whole_wall_materials(scheme.scene.surface_zones_by_wall or {}).items()
+            if isinstance(material, MeasuredImpedance)}
 
 
 def _saved_seams(result: SchemeResult, materials: dict[str, MeasuredImpedance]) -> dict[str, tuple[MeasuredSeam, ...]]:

@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.physics.report_surfaces import RectangleZonesUnsupported, whole_wall_materials
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
@@ -434,13 +435,14 @@ class GuiHandlers:
                                                     scene.sound_speed_m_s)
                          for wall, value in (scene.impedance_pa_s_per_m_by_wall or {}).items()}
             if scene.surface_zones_by_wall is not None:
-                for wall, zones in scene.surface_zones_by_wall.items():
-                    material = zones[0].material
+                for wall, material in whole_wall_materials(scene.surface_zones_by_wall).items():
                     if isinstance(material, ConstantImpedance):
                         multiples[wall] = impedance_multiple(material.impedance_pa_s_m,
                             scene.density_kg_m3, scene.sound_speed_m_s)
         except ValidationError:
             pass
+        except RectangleZonesUnsupported as exc:
+            return _bad(exc)
         labels = {wall: f"約 ρc 的 {multiple:.2f} 倍" if multiple is not None else ""
                   for wall, multiple in multiples.items()}
         return JSONResponse({"problems": plain_problems(problems, document),

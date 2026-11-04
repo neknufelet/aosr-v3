@@ -102,7 +102,7 @@ from aosr.physics.report_source import (
 )
 from aosr.physics.source_directivity import speaker_axis
 from aosr.physics.report_surfaces import (
-    ZonesByWall, exclusive_wall_schema, normalized_surfaces,
+    ZonesByWall, exclusive_wall_schema, normalized_surfaces, validate_surface_partition, whole_wall_materials,
 )
 from aosr.physics.report_validation import (
     FieldValueError, _checked_number, _checked_mapping, _number_is_finite,
@@ -120,7 +120,7 @@ class ReportInput(_FactsModel):
     """三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。
 
     驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；
-    新舊欄位恰好給一個：舊六個固定阻抗永遠照收，新表面分區每面只收整面一區、
+    新舊欄位恰好給一個：舊六個固定阻抗永遠照收，新表面分區每面只收整面一區或完整矩形分區、
     材料為構造或固定阻抗；實測阻抗表尚未拍板，全固定新寫法正規化成舊寫法。
     """
 
@@ -129,7 +129,9 @@ class ReportInput(_FactsModel):
     @model_validator(mode="wrap")
     @classmethod
     def _normalized_surfaces(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
-        return handler(normalized_surfaces(value, json_shape=True))
+        result = handler(normalized_surfaces(value, json_shape=True))
+        validate_surface_partition(result.room_m, result.surface_zones_by_wall)
+        return result
 
     room_m: Annotated[
         Room,
@@ -178,7 +180,7 @@ class ReportInput(_FactsModel):
     )
     surface_zones_by_wall: ZonesByWall | None = Field(
         default=None, exclude_if=lambda v: v is None,
-        description="六面表面分區清單；新舊恰好一個，每面整面一區，構造或固定阻抗；實測阻抗表不收",
+        description="六面表面分區清單；新舊恰好一個，每面整面一區或完整矩形分區，構造或固定阻抗；實測阻抗表不收",
         json_schema_extra=surface_zone_facts(),
     )
     scattering_by_wall: dict[str, float] | None = Field(
@@ -725,7 +727,8 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     """
     zones, fixed = inputs.surface_zones_by_wall, inputs.impedance_pa_s_per_m_by_wall
     if zones is not None:
-        materials = {wall: zones[wall.wall_name()][0].material for wall in Wall.all()}
+        by_name = whole_wall_materials(zones)
+        materials = {wall: by_name[wall.wall_name()] for wall in Wall.all()}
     else:
         assert fixed is not None
         materials = {wall: ConstantImpedance(impedance_pa_s_m=fixed[wall.wall_name()]) for wall in Wall.all()}

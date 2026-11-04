@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from typing import cast
 
+from pydantic import ValidationError
+
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.problem_text import MATERIAL_MODELS
-from aosr.physics.report_surfaces import ZONE_WALL_FIELD
+from aosr.physics.report_surfaces import RectangleZonesUnsupported, ZONE_WALL_FIELD, whole_wall_materials
+from aosr.reporting.scheme import Scene
 from aosr.reporting.validation import SchemeProblem, validate_scheme
 from aosr.materials.construction_models import layer_open_area
 
@@ -21,9 +24,13 @@ def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
     zones = scene.get(ZONE_WALL_FIELD)
     if not isinstance(zones, dict):
         return {}
-    return {name: cast(dict[str, object], entries[0]["material"])
-            for name, entries in zones.items() if isinstance(entries, list) and entries
-            and isinstance(entries[0], dict) and isinstance(entries[0].get("material"), dict)}
+    if any(isinstance(entry, dict) and entry.get("area") == "rectangle"
+           for entries in zones.values() if isinstance(entries, list) for entry in entries):
+        parsed = Scene.model_validate(scene)
+        whole_wall_materials(parsed.surface_zones_by_wall or {})
+    return {name: cast(dict[str, object], entry["material"])
+            for name, entries in zones.items() if isinstance(entries, list) and len(entries) == 1
+            for entry in entries if isinstance(entry, dict) and isinstance(entry.get("material"), dict)}
 
 
 def _layers(material: dict[str, object]) -> list[object]:
@@ -88,7 +95,13 @@ def web_scheme_problems(document: object, *, capabilities: CapabilityTable,
     只處理網頁傳來的層，包含實測底構造；不改方案檔格式的拒收契約。
     """
     if isinstance(document, dict):
-        for material in wall_materials(document).values():
+        try:
+            materials = wall_materials(document)
+        except ValidationError:
+            return validate_scheme(document, capabilities=capabilities, directivity=directivity)
+        except RectangleZonesUnsupported as exc:
+            return (SchemeProblem(f"scene.{ZONE_WALL_FIELD}", str(exc)),)
+        for material in materials.values():
             for layer in _layers(material):
                 if not isinstance(layer, dict):
                     continue

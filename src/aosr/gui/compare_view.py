@@ -1,6 +1,7 @@
 """兩份已驗結果的比較頁顯示資料。"""
 from __future__ import annotations
 
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.gui.plan_objects import changed_furniture_keys
 from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 
@@ -476,7 +477,7 @@ def _name_both_kinds(a: Scheme, b: Scheme, labels: dict[str, tuple[str, str]]) -
 def _wall_material_summaries(scheme: Scheme) -> dict[str, str]:
     """舊固定值與新構造清單轉成相同材料意義，僅供比較收集。"""
     if scheme.scene.surface_zones_by_wall is not None:
-        return {wall: material_summary(zones[0].material) for wall, zones in scheme.scene.surface_zones_by_wall.items()}
+        return {wall: material_summary(material) for wall, material in whole_wall_materials(scheme.scene.surface_zones_by_wall).items()}
     return {wall: fixed_material_summary(value)
             for wall, value in (scheme.scene.impedance_pa_s_per_m_by_wall or {}).items()}
 

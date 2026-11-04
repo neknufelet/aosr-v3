@@ -1,49 +1,119 @@
-"""整面表面分區的輸入格式與共用正規化；不載入材料求值或 JAX。"""
+"""表面分區的輸入格式與共用正規化；不載入材料求值或 JAX。"""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import fields, is_dataclass
-from typing import Annotated, Literal, TypeAlias, cast
+from typing import Annotated, Literal, Self, TypeAlias, cast
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictFloat, TypeAdapter, ValidationError, model_validator
 from pydantic_core import ErrorDetails
 from pydantic_core import PydanticCustomError
 from pydantic.config import JsonDict
 
-from aosr.geometry.shoebox import Wall
+from aosr.geometry.shoebox import Room, Wall
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, MountedOnWall, SurfaceMaterial
 
 
-WHOLE_WALL_ONLY = "這一版每面只收整面一區；矩形分區是 #309 第二步"
+WHOLE_WALL_ONLY = "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區"
 OLD_WALL_FIELD = "impedance_pa_s_per_m_by_wall"
 ZONE_WALL_FIELD = "surface_zones_by_wall"
 
 
 class WholeWallZone(BaseModel):
-    """這一版每面恰好一區；材料直接採用既有構造型別。"""
+    """整面一區的舊寫法；材料直接採用既有構造型別。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     area: Literal["whole_wall"] = Field(description=WHOLE_WALL_ONLY)
     material: SurfaceMaterial = Field(description="牆面材料：構造或固定阻抗")
 
-    @field_validator("area", mode="before")
-    @classmethod
-    def _whole_wall(cls, value: object) -> object:
-        if value != "whole_wall":
-            raise ValueError(WHOLE_WALL_ONLY)
-        return value
+
+class RectangleZone(BaseModel):
+    """人指定的牆面矩形，公尺座標；u 是欄、v 是列，軸向同 wall_grid_cell。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    area: Literal["rectangle"]
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]+$", description="同面唯一代號：ASCII 英數、底線、連字號，不收句點")
+    u_m: tuple[StrictFloat, StrictFloat] = Field(description="u 軸起、迄公尺；floor/ceiling 為 x，x0/xL 為 y，y0/yL 為 x")
+    v_m: tuple[StrictFloat, StrictFloat] = Field(description="v 軸起、迄公尺；floor/ceiling 為 y，其餘為 z")
+    material: SurfaceMaterial = Field(description="分區材料：構造或固定阻抗")
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if not self.u_m[0] < self.u_m[1] or not self.v_m[0] < self.v_m[1]:
+            raise ValueError(f"分區 {self.id}：起點必須小於迄點")
+        return self
 
 
+SurfaceZone: TypeAlias = Annotated[WholeWallZone | RectangleZone, Field(discriminator="area")]
 
-def _single_zone(value: object) -> object:
-    if not isinstance(value, (list, tuple)) or len(value) != 1:
+
+def _zone_list(value: object) -> object:
+    if not isinstance(value, (list, tuple)) or not value:
         raise ValueError(WHOLE_WALL_ONLY)
+    if len(value) == 1 and isinstance(value[0], Mapping) and "area" not in value[0]:
+        return value
+    areas = [item.get("area") if isinstance(item, Mapping) else getattr(item, "area", None) for item in value]
+    if areas != ["whole_wall"] and any(area != "rectangle" for area in areas):
+        ids = [str(item.get("id", "未填代號")) if isinstance(item, Mapping) else str(getattr(item, "id", "未填代號"))
+               for item in value]
+        raise ValueError(f"{WHOLE_WALL_ONLY}；分區 {'、'.join(ids)}")
     return value
 
 
 ZonesByWall: TypeAlias = dict[str, Annotated[
-    tuple[WholeWallZone, ...], BeforeValidator(_single_zone), Field(min_length=1, max_length=1)]]
+    tuple[SurfaceZone, ...], BeforeValidator(_zone_list), Field(min_length=1)]]
 _ZONES = TypeAdapter(ZonesByWall)
+
+
+class RectangleZonesUnsupported(ValueError):
+    """格式已收下矩形，這條計算或顯示路徑尚未支援。"""
+
+    def __init__(self, wall: str) -> None:
+        super().__init__(f"牆面 {wall}：這一段還不支援矩形分區（#561 之後幾步）")
+
+
+def whole_wall_materials(zones_by_wall: Mapping[str, Sequence[SurfaceZone]]) -> dict[str, SurfaceMaterial]:
+    """先核每面形狀再讀材料；任何矩形（含單一滿牆矩形）一律拒收。"""
+    materials = {}
+    for name, zones in zones_by_wall.items():
+        if len(zones) != 1 or not isinstance(zones[0], WholeWallZone) or zones[0].area != "whole_wall":
+            raise RectangleZonesUnsupported(name)
+        materials[name] = zones[0].material
+    return materials
+
+
+def validate_surface_partition(room: Room, zones_by_wall: ZonesByWall | None) -> None:
+    """文件／場景共用的精確覆蓋檢查；不以面積和或容差判斷。"""
+    sizes = {"floor": (room.Lx, room.Ly), "ceiling": (room.Lx, room.Ly),
+             "x0": (room.Ly, room.Lz), "xL": (room.Ly, room.Lz),
+             "y0": (room.Lx, room.Lz), "yL": (room.Lx, room.Lz)}
+    for name, zones in (zones_by_wall or {}).items():
+        rectangles = [zone for zone in zones if isinstance(zone, RectangleZone)]
+        if rectangles:
+            _rectangle_partition(name, rectangles, *sizes[name])
+
+
+def _rectangle_partition(name: str, rectangles: Sequence[RectangleZone], width: float, height: float) -> None:
+    ids: set[str] = set()
+    for zone in rectangles:
+        if zone.id in ids:
+            raise _located((ZONE_WALL_FIELD, name), f"牆面 {name} 分區 {zone.id}：代號重複", zone)
+        ids.add(zone.id)
+        if not (0 <= zone.u_m[0] < zone.u_m[1] <= width and 0 <= zone.v_m[0] < zone.v_m[1] <= height):
+            raise _located((ZONE_WALL_FIELD, name), f"牆面 {name} 分區 {zone.id}：座標超出牆面範圍", zone)
+    u_edges = sorted({edge for zone in rectangles for edge in zone.u_m})
+    v_edges = sorted({edge for zone in rectangles for edge in zone.v_m})
+    label = f"牆面 {name} 分區 {'、'.join(zone.id for zone in rectangles)}"
+    if u_edges[0] != 0 or u_edges[-1] != width or v_edges[0] != 0 or v_edges[-1] != height:
+        raise _located((ZONE_WALL_FIELD, name), f"{label}：外框必須正好蓋滿整面", rectangles)
+    for u0, u1 in zip(u_edges, u_edges[1:]):
+        for v0, v1 in zip(v_edges, v_edges[1:]):
+            owners = [zone.id for zone in rectangles
+                      if zone.u_m[0] <= u0 and u1 <= zone.u_m[1] and zone.v_m[0] <= v0 and v1 <= zone.v_m[1]]
+            if len(owners) > 1:
+                raise _located((ZONE_WALL_FIELD, name), f"牆面 {name} 分區 {'、'.join(owners)}：矩形重疊", rectangles)
+            if not owners:
+                raise _located((ZONE_WALL_FIELD, name), f"{label}：有留縫，必須蓋滿整面", rectangles)
 
 
 def _located(path: tuple[str, ...], message: str, value: object) -> ValidationError:
@@ -52,7 +122,7 @@ def _located(path: tuple[str, ...], message: str, value: object) -> ValidationEr
 
 
 def normalized_surfaces(value: object, *, json_shape: bool = False) -> object:
-    """先解析成已驗型別，再把全固定寫法折回六個浮點數；兩個模型共用且冪等。"""
+    """先解析成已驗型別，再把六面整面且全固定的寫法折回六個浮點數；兩個模型共用且冪等。"""
     value = validation_content(value, json_shape=json_shape)
     if not isinstance(value, Mapping):
         return value
@@ -75,11 +145,12 @@ def normalized_surfaces(value: object, *, json_shape: bool = False) -> object:
     except ValidationError as exc:
         # 保留 tagged union（依種類選型別）的完整位置，外加正式欄位名。
         raise ValidationError.from_exception_data("牆面輸入", [{
-            "type": PydanticCustomError("wall_input", _zone_error_message(error)),
-            "loc": (ZONE_WALL_FIELD, *error["loc"]), "input": error["input"]}
+            "type": PydanticCustomError("wall_input", _located_zone_message(error, new)),
+            "loc": (ZONE_WALL_FIELD, *_zone_location(error)), "input": error["input"]}
             for error in _primary_zone_errors(exc)]) from exc
     constants = {name: zone[0].material for name, zone in zones.items()
-                 if isinstance(zone[0].material, ConstantImpedance)}
+                 if len(zone) == 1 and isinstance(zone[0], WholeWallZone)
+                 and isinstance(zone[0].material, ConstantImpedance)}
     if constants.keys() == names:
         document[OLD_WALL_FIELD] = {name: material.impedance_pa_s_m for name, material in constants.items()}
         document.pop(ZONE_WALL_FIELD, None)
@@ -123,6 +194,26 @@ def _primary_zone_errors(exc: ValidationError) -> list[ErrorDetails]:
             for other in errors))]
 
 
+def _zone_location(error: ErrorDetails) -> tuple[int | str, ...]:
+    location = error["loc"]
+    if error["type"] == "union_tag_not_found" and len(location) == 2:
+        return (*location, "area")
+    return location[:2] + location[3:] if len(location) > 2 and location[2] in ("whole_wall", "rectangle") else location
+
+
+def _located_zone_message(error: ErrorDetails, walls: Mapping[str, object]) -> str:
+    location = error["loc"]
+    entries = walls.get(str(location[0]))
+    zone = (entries[location[1]] if len(location) > 1 and isinstance(location[1], int)
+            and isinstance(entries, (list, tuple)) else None)
+    label = f"牆面 {location[0]}"
+    if isinstance(zone, Mapping) and zone.get("area") == "rectangle":
+        label += f" 分區 {zone.get('id', '未填代號')}"
+    if error["type"] == "union_tag_not_found" and len(location) == 2:
+        return f"{label}：必填分區種類 area"
+    return f"{label}：{_zone_error_message(error)}"
+
+
 def zone_object_schema(schema: JsonDict) -> None:
     """將自動產生的每面陣列綱要保留，再展開六面封閉物件。"""
     variants = schema["anyOf"]
@@ -133,7 +224,14 @@ def zone_object_schema(schema: JsonDict) -> None:
     assert isinstance(cell, dict)
     # BeforeValidator（先驗清單）讓自動產生器把長度放錯關鍵字，這裡恢復陣列語意。
     cell["minItems"] = cell.pop("minLength", cell.get("minItems"))
-    cell["maxItems"] = cell.pop("maxLength", cell.get("maxItems"))
+    cell.pop("maxLength", None)
+    items = cell["items"]
+    assert isinstance(items, dict)
+    variants = items["oneOf"]
+    assert isinstance(variants, list)
+    whole, rectangle = variants
+    cell.update({"description": f"{WHOLE_WALL_ONLY}；蓋滿與不重疊由程式以房間尺寸驗證",
+                 "anyOf": [{"items": whole, "maxItems": 1}, {"items": rectangle}]})
     schema.pop("anyOf")
     schema.update({"type": "object", "additionalProperties": False,
         "required": [wall.wall_name() for wall in Wall.all()],
@@ -174,6 +272,7 @@ def _zone_error_message(error: Mapping[str, object]) -> str:
     if kind == "missing" or error.get("input") is None and kind not in ("value_error", "extra_forbidden", "literal_error"):
         return "必填：這一格不能空著"
     messages = {"float_type": "要填數字", "float_parsing": "要填數字",
+        "string_pattern_mismatch": "分區代號只准 ASCII 英數、底線、連字號，不收句點",
         "finite_number": "要填有限數字（不收無限大或非數值）",
         "string_type": "要填文字", "string_too_short": "必填：這一格不能空著",
         "union_tag_not_found": "必填材料或層的種類代號 kind（種類）",

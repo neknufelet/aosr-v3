@@ -176,7 +176,7 @@ def test_python_objects_cannot_bypass_nested_validation(forgery: str, entry: str
     if forgery in ("copy-area", "construct-area"):
         forged = (original.model_copy(update={"area": "rectangle"}) if forgery == "copy-area" else
                   WholeWallZone.model_construct(area="rectangle", material=original.material))
-        hint, leaf = "整面一區", "area"
+        hint, leaf = "必填", "id"
     else:
         material = ({"kind": "measured_impedance"} if forgery == "construct-measured" else
                     ConstantImpedance(impedance_pa_s_m=1646.4).model_copy(update={"kind": "measured_impedance"}))

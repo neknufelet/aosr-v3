@@ -1,14 +1,13 @@
 """實測表兩端的接縫資料；獨立端點求值，只報告、不訂警告門檻。"""
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 
 from pydantic import Field
 
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.materials.construction_models import MeasuredImpedance
 from aosr.physics.report_facts import FactsModel, NOT_MEASURED, facts
-from aosr.physics.report_surfaces import WholeWallZone
+from aosr.physics.report_surfaces import ZonesByWall, whole_wall_materials
 from aosr.physics.wall_surfaces import assembly_endpoint_responses
 
 
@@ -34,11 +33,11 @@ def _values(z: complex, alpha_random: float, rho_c: float) -> SeamValues:
         normal_absorption=1 - abs((z - rho_c) / (z + rho_c)) ** 2, random_absorption=alpha_random)
 
 
-def measured_seams(zones: Mapping[str, Sequence[WholeWallZone]] | None, *, density_kg_m3: float,
+def measured_seams(zones: ZonesByWall | None, *, density_kg_m3: float,
                    sound_speed_m_s: float) -> dict[str, tuple[MeasuredSeam, ...]] | None:
     """直接取表端點，不借三路頻率軸；空氣使用當次場景的密度與聲速。"""
-    walls = {wall: entries[0].material for wall, entries in (zones or {}).items()
-             if isinstance(entries[0].material, MeasuredImpedance)}
+    walls = {wall: material for wall, material in whole_wall_materials(zones or {}).items()
+             if isinstance(material, MeasuredImpedance)}
     if not walls:
         return None
     result = {}

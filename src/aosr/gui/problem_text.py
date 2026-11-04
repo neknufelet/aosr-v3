@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import cast, get_args
 
 from pydantic import BaseModel
+from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, FabricLayer, MeasuredImpedance, MeasuredImpedancePoint, MicroPerforatedLayer, MountedOnWall, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
@@ -200,7 +201,9 @@ class SchemeProblemsError(SchemeValidationError):
 def checked_scheme(document: object) -> Scheme:
     """跟檢查同一支驗方案；不過就丟帶著原文件的錯，讓回應能寫出表單上的中文名。"""
     try:
-        return validated_scheme(document)
+        scheme = validated_scheme(document)
+        whole_wall_materials(scheme.scene.surface_zones_by_wall or {})
+        return scheme
     except SchemeValidationError as exc:
         raise SchemeProblemsError(exc.problems, document) from exc
 

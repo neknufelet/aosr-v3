@@ -136,12 +136,12 @@ def test_all_porous_models_round_trip_without_inventing_unused_parameters(model:
 
 
 def test_null_area_keeps_zone_rejection_instead_of_generic_required() -> None:
-    scene, path, _ = invalid_scene("area")
+    scene, _, _ = invalid_scene("area")
     zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
     zones["floor"][0]["area"] = None
     with pytest.raises(SchemeValidationError) as caught:
         validated_scheme(reference_document() | {"scene": scene})
-    assert path in str(caught.value) and "矩形分區是 #309 第二步" in str(caught.value)
+    assert f"{NEW}.floor" in str(caught.value) and "每面只收整面一區" in str(caught.value)
 
 
 def test_supplied_null_alternative_is_still_two_fields() -> None:

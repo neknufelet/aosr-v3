@@ -150,7 +150,7 @@ def test_material_leaf_labels_are_model_descriptions_and_errors_are_plain() -> N
             label = field_name(f"scene.{NEW}.floor.0.material.assembly.layers.0.{name}", {})
             assert label is not None
             assert "地板" in label and name not in label
-    for message in ("實測阻抗表這一版還不收：請改填構造或固定阻抗", "這一版每面只收整面一區；矩形分區是 #309 第二步"):
+    for message in ("實測阻抗表這一版還不收：請改填構造或固定阻抗", "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區"):
         _, text = plain_problem(SchemeProblem(f"scene.{NEW}.floor.0.material", message), zone_document(mixed=True))
         assert message in text
 

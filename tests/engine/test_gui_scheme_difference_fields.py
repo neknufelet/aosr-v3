@@ -6,8 +6,10 @@ from dataclasses import fields, is_dataclass
 from typing import TypeAlias, cast, get_args, get_origin
 
 from pydantic import BaseModel
+import pytest
 
 from aosr.gui.compare_view import scheme_differences
+from aosr.physics.report_surfaces import RectangleZonesUnsupported
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
@@ -18,7 +20,6 @@ Json: TypeAlias = None | bool | str | int | float | list["Json"] | dict[str, "Js
 
 
 EXEMPTIONS = {
-    "scene.surface_zones_by_wall[][].area": "Literal 只收 whole_wall，其他分區都由三入口拒收考卷擋下。",
     "scene.surface_zones_by_wall[][].material.fill_rule": "Literal 只收第一版補值規則；實測格式考卷拒收其他值，預設值隨方案保存。",
     "scene.surface_zones_by_wall[][].material.base_assembly.kind": "底構造只收 Assembly；實測格式考卷拒收固定阻抗與巢狀實測表。",
     "scene.surface_zones_by_wall[][].material.wall.fill_rule": "原牆是實測表時同頂層實測表：Literal 只收第一版補值規則，預設值隨方案保存。",
@@ -100,8 +101,29 @@ def test_every_scheme_model_field_is_compared_or_has_named_reason(scheme_pair: t
     seen.update(_cloud_fields(scheme))
     seen.update(_speaker_fields(scheme))
     seen.update(_surface_fields(scheme))
+    seen.update(_rectangle_fields(scheme))
     assert _leaves(Scheme) == seen | EXEMPTIONS.keys()
     assert all(EXEMPTIONS.values())
+
+
+def _rectangle_fields(scheme: Scheme) -> set[str]:
+    """矩形的面積種類、代號、兩軸都由實際拒收守住，不加入欄位放行清單。"""
+    from tests.engine._surface_zone_cases import NEW, rectangle_document, rectangle_scene
+
+    for field in ("area", "id", "u_m", "v_m"):
+        scene = rectangle_scene(only_wall="x0")
+        zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
+        if field == "id":
+            zones["x0"][0]["id"] = "renamed"
+        elif field in ("u_m", "v_m"):
+            midpoint = 2.0 if field == "u_m" else 1.5
+            for zone in zones["x0"]:
+                zone[field] = [1.0 if edge == midpoint else edge for edge in cast(list[float], zone[field])]
+        rectangular = Scheme.model_validate(rectangle_document() | {"scene": scene})
+        for left, right in ((scheme, rectangular), (rectangular, scheme)):
+            with pytest.raises(RectangleZonesUnsupported, match="x0.*這一段還不支援矩形分區"):
+                scheme_differences(left, right)
+    return {f"scene.{NEW}[][].{field}" for field in ("area", "id", "u_m", "v_m")}
 
 
 def _speaker_fields(scheme: Scheme) -> set[str]:

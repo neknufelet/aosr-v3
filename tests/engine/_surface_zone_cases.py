@@ -31,6 +31,27 @@ def mixed_scheme() -> Scheme:
     return Scheme.model_validate(zone_document(mixed=True))
 
 
+def rectangle_scene(*, only_wall: str | None = None) -> dict[str, object]:
+    """6×4×3 公尺房間：五面各 2×2，地板整面；只指定一面時其餘也整面。"""
+    scene = zone_scene()
+    zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
+    sizes = {"ceiling": (6.0, 4.0), "x0": (4.0, 3.0), "xL": (4.0, 3.0),
+             "y0": (6.0, 3.0), "yL": (6.0, 3.0)}
+    for name, (u, v) in sizes.items():
+        if only_wall is not None and name != only_wall:
+            continue
+        material = deepcopy(zones[name][0]["material"])
+        zones[name] = [{"area": "rectangle", "id": f"r{row}_c{col}",
+                        "u_m": [col * u / 2, (col + 1) * u / 2],
+                        "v_m": [row * v / 2, (row + 1) * v / 2], "material": deepcopy(material)}
+                       for row in range(2) for col in range(2)]
+    return scene
+
+
+def rectangle_document() -> dict[str, object]:
+    return reference_document() | {"scene": rectangle_scene()}
+
+
 def invalid_scene(case: str) -> tuple[dict[str, object], str, str]:
     scene = zone_scene(mixed=True)
     zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
@@ -59,11 +80,11 @@ def invalid_scene(case: str) -> tuple[dict[str, object], str, str]:
     elif case == "two":
         zones["floor"].append(deepcopy(zones["floor"][0]))
         path += ".floor"
-        hint = "這一版每面只收整面一區；矩形分區是 #309 第二步"
+        hint = "每面只收整面一區，或一組蓋滿整面、互不重疊的矩形分區"
     elif case == "area":
         zones["floor"][0]["area"] = "rectangle"
-        path += ".floor.0.area"
-        hint = "這一版每面只收整面一區；矩形分區是 #309 第二步"
+        path += ".floor.0.id"
+        hint = "必填"
     elif case == "measured":
         zones["floor"][0]["material"] = {"kind": "measured_impedance", "arbitrary": True}
         path += ".floor.0.material.measured_impedance.points"

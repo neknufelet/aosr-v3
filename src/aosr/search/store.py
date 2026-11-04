@@ -182,6 +182,7 @@ class SearchStore:
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project)
+        project.scene.require_whole_walls()
         if project.scene.low_frequency_axis is None:
             project = project.model_copy(update={"scene": project.scene.model_copy(
                 update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})

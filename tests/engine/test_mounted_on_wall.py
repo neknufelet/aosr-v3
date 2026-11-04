@@ -287,6 +287,7 @@ def test_wall_notes_have_their_own_layer_numbers_and_show_as_wall(tmp_path: Path
     from aosr.physics.report_io import ReportInput, ReportOutput
     from aosr.reporting.result import SchemeResult
     from aosr.physics.report_measured_text import construction_note_lines
+    from aosr.physics.report_surfaces import WholeWallZone
     from aosr.physics.wall_surfaces import merge_construction_notes
 
     cases = _note_cases(tmp_path)
@@ -309,7 +310,8 @@ def test_wall_notes_have_their_own_layer_numbers_and_show_as_wall(tmp_path: Path
              ["x 起點牆：原牆模型補值：實測表涵蓋 50–500 Hz，表外以底構造計算；模型補值頻點 10 Hz",
               "x 起點牆原牆底構造第 1 層：10 Hz 超出"])):
         material, notes = cases[name]
-        zones = {wall.wall_name(): (SimpleNamespace(material=material if wall is Wall.X0 else None),) for wall in Wall.all()}
+        zones = {wall.wall_name(): (WholeWallZone(area="whole_wall", material=material if wall is Wall.X0 else
+                                  ConstantImpedance(impedance_pa_s_m=1000.0)),) for wall in Wall.all()}
         cli = construction_note_lines(cast(ReportInput, SimpleNamespace(surface_zones_by_wall=zones)), {"x0": notes})
         report = SimpleNamespace(construction_notes_by_wall={"x0": notes})
         web = _construction_notes(cast(SchemeResult, SimpleNamespace(
