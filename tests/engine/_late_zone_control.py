@@ -63,18 +63,41 @@ def hex_snapshot(values: object) -> dict[str, str | int | bool]:
     return {path: value.hex() if isinstance(value, float) else value for path, value in _leaves(values)}
 
 
+# 逐欄分級照決策紙第 6 條，看那一格實際經過的計算，不看它掛在哪一族底下：
+# 只經輸入與四則的逐位（碰撞頻率＝c·S／4V）；吸音率（Paris 積分）、面積平均 α、艾林比、家具、艾林 T60、交接是閉式①；
+# 輻射度能量、逐階能量、Perron 特徵值與衰減擬合經線性代數②。沒列到的欄位直接紅，不准默默落進較寬的那一級。
+_EXACT_FIELDS = frozenset({"frequency_hz", "collision_frequency_hz"})
+_GEOMETRIC_FIELDS = frozenset({"alpha_by_wall", "alpha_bar", "eyring_ratio"})
+_GEOMETRIC_FAMILIES = frozenset({"furniture", "t60", "fs"})
+_LINEAR_FIELDS = frozenset({"raw_reverberant_energy", "late_reverberant_energy", "energy_by_order", "tail_energy",
+                            "perron_t60_s", "slope_db_per_s", "soft_weight_sum", "t20_s", "t30_s",
+                            "t30_slope_db_per_s", "t30_soft_weight_sum"})
+
+
+def _float_tier(path: str) -> float | None:
+    """那一格的相對容差；``None`` 是逐位。"""
+    parts = set(path.split("."))
+    if parts & _EXACT_FIELDS:
+        return None
+    if path.split(".", 1)[0] in _GEOMETRIC_FAMILIES or parts & _GEOMETRIC_FIELDS:
+        return GEOMETRIC_REL
+    if parts & _LINEAR_FIELDS:
+        return LINEAR_SOLVE_REL
+    raise AssertionError(f"控制組欄位沒有分級：{path}")
+
+
 def assert_control(values: object) -> None:
-    """鍵、頻率與判定逐位；晚期家族②，閉式家具／艾林／交接①，不另造尺。"""
+    """鍵、頻率、旗標與只經四則的格逐位，其餘照 ``_float_tier`` 逐格比，不另造尺。"""
     actual = hex_snapshot(values)
     assert actual.keys() == CONTROL.keys(), "控制組欄位不同"
     cells = []
     for path, expected in CONTROL.items():
         value = actual[path]
         assert type(value) is type(expected), path
-        if isinstance(expected, str) and path.rsplit(".", 1)[-1] != "frequency_hz":
-            assert isinstance(value, str)
-            rel = LINEAR_SOLVE_REL if path.split(".", 1)[0] in {"late", "orders", "decay"} else GEOMETRIC_REL
-            cells.append(cell(path, value, expected, rel=rel, abs_=0.0))
-        else:
+        rel = _float_tier(path) if isinstance(expected, str) else None
+        if rel is None:
             assert value == expected, path
+        else:
+            assert isinstance(value, str)
+            cells.append(cell(path, value, expected, rel=rel, abs_=0.0))
     assert_within(cells)
