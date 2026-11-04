@@ -24,7 +24,7 @@ from tests.engine._precision_contracts import contract_value
 from tests.engine._zone_reflections_probe import AXIS, MODEL, RECEIVER, ROOM, SOURCE, materials
 from tests.engine.test_patch_materials import _patch_input, _write_input
 
-# 改產品前在 c6f5138a286de8a1c73cebd21a536de18759af53 實量；見 .evidence/baseline-snapshots.json。
+# 改產品前在 c6f5138a286de8a1c73cebd21a536de18759af53 實量（tests.engine._zone_reflections_probe 的 snapshot）。
 _BASELINES = {
     "fixed": ["7248c6d32b530121014dbb42cf3ef052f2ebcc13492ea3345de20e93dd75e831",
               "440880f5a23e0ae05b1400f846681db7713f2cdbeccfd74571627c9786265d49"],
