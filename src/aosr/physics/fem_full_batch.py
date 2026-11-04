@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from pydiso.mkl_solver import MKLPardisoSolver
 
 FullSolveJob = tuple[float, BoundaryImpedances]
-_WORKER: _WorkerSolver | None = None
 
 
 class _WorkerSolver(FullSolver):
@@ -29,32 +28,31 @@ class _WorkerSolver(FullSolver):
     def __init__(self, operators: FullOperators, limit: float, first: FullSolveJob) -> None:
         super().__init__(operators, max_relative_residual=limit)
         self._first = first
-        self._pattern: csr_matrix[np.complex128] | None = None
 
     def _refactored(self, system: csr_matrix[np.complex128]) -> MKLPardisoSolver:
         # 放在工作本體才組裝：錯誤經 future 原樣回傳，不在行程初始化時被包成 BrokenProcessPool。
-        if self._pattern is None:
-            self._pattern = self.system(*self._first)
-        if not (np.array_equal(system.indptr, self._pattern.indptr)
-                and np.array_equal(system.indices, self._pattern.indices)):
-            raise ValueError("有限元素矩陣非零位置與錨定矩陣不同")
+        if self._solver is None:
+            runtime.preload_mkl()
+            runtime.set_pardiso_threads()
+            from pydiso.mkl_solver import MKLPardisoSolver as solver_type
+
+            self._anchor = self.system(*self._first)
+            self._solver = solver_type(self._anchor, matrix_type="complex_symmetric", factor=False)
         return super()._refactored(system)
 
 
-def _init_worker(operators: FullOperators, limit: float, first: FullSolveJob) -> None:
-    global _WORKER
-    _WORKER = _WorkerSolver(operators, limit, first)
+def _init_worker(operators: FullOperators, limit: float, first: FullSolveJob) -> _WorkerSolver:
+    return _WorkerSolver(operators, limit, first)
 
 
 def _solve_worker(job: FullSolveJob) -> NDArray[np.complex128]:
-    if _WORKER is None:
-        raise RuntimeError("完整解工人尚未初始化")
-    before = _WORKER.solves
+    worker = runtime.worker_state(_WorkerSolver)
+    before = worker.solves
     try:
-        return _WORKER.solve(*job)
+        return worker.solve(*job)
     except Exception as error:
         # 殘差檢查失敗之前，FullSolver 已完成分解並計一次；保留原例外型別與訊息。
-        setattr(error, "_aosr_full_solves", _WORKER.solves - before)
+        setattr(error, "_aosr_full_solves", worker.solves - before)
         raise
 
 
@@ -79,7 +77,7 @@ class FullSolveBatch:
 
     def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None,
                  traceback: TracebackType | None) -> None:
-        self._stack.close()
+        self._stack.__exit__(exc_type, exc, traceback)
 
     def map(self, jobs: Sequence[FullSolveJob]) -> Iterator[NDArray[np.complex128]]:
         """照輸入順序回 (喇叭, N)，每個成功回收的頻點只計一次完整解。"""
@@ -90,7 +88,7 @@ class FullSolveBatch:
         if not jobs:
             return
         if self._pool is None:
-            self._pool = self._stack.enter_context(runtime.spawn_pool(self._workers, initializer=partial(
+            self._pool = self._stack.enter_context(runtime.spawn_pool(self._workers, factory=partial(
                 _init_worker, self._operators, self._limit, jobs[0])))
         try:
             for solution in runtime.ordered_map(self._pool, _solve_worker, jobs, pending=self._workers):
@@ -100,4 +98,5 @@ class FullSolveBatch:
             completed = getattr(error, "_aosr_full_solves", 0)
             if isinstance(completed, int):
                 self.solver.solves += completed
+            self._stack.__exit__(type(error), error, error.__traceback__)
             raise

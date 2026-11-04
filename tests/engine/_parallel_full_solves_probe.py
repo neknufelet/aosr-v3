@@ -229,7 +229,7 @@ def environment(directory: Path) -> None:
         return future
 
     with patch.object(ProcessPoolExecutor, "submit", staggered):
-        with runtime.spawn_pool(2, initializer=partial(_record_environment, directory)) as pool:
+        with runtime.spawn_pool(2, factory=partial(_record_environment, directory)) as pool:
             pid, method, env = pool.submit(_environment).result()
             assert pid != os.getpid() and method == "spawn"
     records = list(directory.glob("*.json"))
