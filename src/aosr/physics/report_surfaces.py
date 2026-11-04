@@ -83,6 +83,24 @@ def whole_wall_materials(zones_by_wall: Mapping[str, Sequence[SurfaceZone]]) -> 
     return materials
 
 
+def rectangle_zone_at(
+    wall: str, point: tuple[float, float, float], zones: Sequence[RectangleZone],
+) -> RectangleZone:
+    """已驗證分區的共用查點：沿用 shoebox.wall_grid_cell 的軸向與右上歸屬。
+
+    內界用左閉右開；只有牆的最外緣收右端點，所以同一面的一次反彈只取一區。
+    不加容差或挪動反彈點；牆與牆的交線由呼叫端逐面各查一次。
+    """
+    axes = [axis for axis in range(3) if axis != Wall.from_name(wall).axis()]
+    u, v = point[axes[0]], point[axes[1]]
+    width, height = max(zone.u_m[1] for zone in zones), max(zone.v_m[1] for zone in zones)
+    for zone in zones:
+        if (zone.u_m[0] <= u < zone.u_m[1] or u == zone.u_m[1] == width) and (
+                zone.v_m[0] <= v < zone.v_m[1] or v == zone.v_m[1] == height):
+            return zone
+    raise ValueError(f"牆面 {wall} 的反彈點不在分區內：{point!r}")
+
+
 def validate_surface_partition(room: Room, zones_by_wall: ZonesByWall | None) -> None:
     """文件／場景共用的精確覆蓋檢查；不以面積和或容差判斷。"""
     sizes = {"floor": (room.Lx, room.Ly), "ceiling": (room.Lx, room.Ly),

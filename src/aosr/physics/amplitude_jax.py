@@ -38,6 +38,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.geometry.shoebox import Wall, wall_count_signature
+from aosr.physics.report_surfaces import RectangleZonesUnsupported
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics import amplitude as amp
 from aosr.physics.wall_surfaces import wall_path_impedances
@@ -107,6 +108,8 @@ def build_path_table(
         raise ValueError("頻率軸必須非空且全為有限正數")
     per_path: list[list[tuple[int, float]]] = []
     for path in paths:
+        if path.rectangle_zone_walls:
+            raise RectangleZonesUnsupported(path.rectangle_zone_walls[0])
         if path.has_patch_materials:
             raise ValueError(f"路徑 {path.identity!r} 帶分格材料；逐反彈查格不在這一支的範圍")
         if path.dist_m == 0.0:
@@ -173,6 +176,8 @@ def bounce_impedances_from_sources(
     順序去重，交給同一支 :func:`aosr.physics.wall_surfaces.wall_path_impedances`。``paths`` 與 ``receiver``
     要跟打包 ``table`` 時同一份。
     """
+    if sources.rectangle_zones_by_wall:
+        raise RectangleZonesUnsupported(next(iter(sources.rectangle_zones_by_wall)).wall_name())
     axis = tuple(float(f) for f in table.frequencies_hz)
     if axis != sources.fixed_materials.frequencies_hz:
         raise ValueError("反射來源的頻率軸跟路徑表不同")
