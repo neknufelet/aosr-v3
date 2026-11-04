@@ -62,7 +62,8 @@ from aosr.gradient.material_gradient import (
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import AirLayer, Assembly, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
-from aosr.physics.fem_reduced import FullOperators, FullSolver, ReducedModel, impedance_rows, walls_at
+from aosr.physics.fem_reduced import FullOperators, ReducedModel, impedance_rows, walls_at
+from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers
 from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.report_surfaces import OLD_WALL_FIELD, ZONE_WALL_FIELD, WholeWallZone, validation_content, whole_wall_materials
 from aosr.reporting.scheme import Scene
@@ -259,13 +260,14 @@ def material_impedances[K: BoundaryKey](materials: Mapping[K, SurfaceMaterial | 
 
 def full_model_pressures[K: BoundaryKey](operators: FullOperators, materials: Mapping[K, SurfaceMaterial | None],
                          frequencies_hz: Sequence[float], *, air: PhysicsConstants, ranges: PorousModelRanges,
-                         max_relative_residual: float) -> NDArray[np.complex128]:
+                         max_relative_residual: float, workers: int = 1) -> NDArray[np.complex128]:
     """完整模型逐頻解（每頻一次 pydiso 分解），回座位聲壓 ``(F, 喇叭, 座位)``。
 
     跟 :func:`~aosr.physics.fem_reduced_check.validate_reduced` 的完整解同一條路：阻抗過產品閘門
     （``impedance_rows``）、``FullSolver.solve`` 後乘座位取值列。頻率軸由呼叫端給（用替身的軸），不自己造。
     ``air`` 必須跟算子同密度、同聲速（:func:`checked_air`）。
     """
+    checked_workers(workers)
     require_matching_patches(operators, keys=material_keys(materials))
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
                 source="完整模型算子")
@@ -273,11 +275,16 @@ def full_model_pressures[K: BoundaryKey](operators: FullOperators, materials: Ma
     values = material_impedances(materials, axis, air=air, ranges=ranges)
     rows = (impedance_rows([values], axis, patch_keys=operators.patch_keys) if operators.patch_keys != boundary_patches()
             else impedance_rows([values], axis))[0]
-    solver = FullSolver(operators, max_relative_residual=max_relative_residual)
-    receivers = np.asarray(list(operators.receivers.values()), dtype=np.float64)
-    pressures = np.empty((len(axis), len(operators.sources), len(operators.receivers)), dtype=np.complex128)
-    for index, frequency in enumerate(axis):
-        pressures[index] = solver.solve(frequency, walls_at(rows, index)) @ receivers.T
+    with FullSolveBatch(operators, max_relative_residual=max_relative_residual, workers=workers) as batch_solver:
+        solver = batch_solver.solver
+        parallel = (batch_solver.map([(frequency, walls_at(rows, index)) for index, frequency in enumerate(axis)])
+                    if workers > 1 else None)
+        receivers = np.asarray(list(operators.receivers.values()), dtype=np.float64)
+        pressures = np.empty((len(axis), len(operators.sources), len(operators.receivers)), dtype=np.complex128)
+        for index, frequency in enumerate(axis):
+            solutions = (solver.solve(frequency, walls_at(rows, index))
+                         if parallel is None else next(parallel))
+            pressures[index] = solutions @ receivers.T
     return pressures
 
 
@@ -456,7 +463,7 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
                    model: ReducedModel, objective_settings: GradientObjectiveSettings, receiver_set: ReceiverSet,
                    low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
                    settings: MaterialGradientSettings, air: PhysicsConstants,
-                   ranges: PorousModelRanges) -> EndpointResult:
+                   ranges: PorousModelRanges, workers: int = 1) -> EndpointResult:
     """同一組可行規格：替身值與完整模型值並列、兩者的差與差的上界、每座位逐頻最大 dB 差、每支喇叭的大峰。
 
     入口先核：``air`` 跟算子、替身同密度同聲速；設計清單照 ``Wall.all()`` 六面；每面樣板構造等於它的 preset
@@ -480,7 +487,8 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     constants = gradient_objective_constants(axis, objective_settings, receiver_set, len(model.source_names))
     exported = exported_theta(designs, values, settings)
     reduced_result = _reduced_objective(model, designs, constants, exported, air=air, ranges=ranges, frequencies=axis)
-    validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)])
+    validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)],
+                                  workers=workers)
     full, reduced_pressure = validation.full_pressure[0], validation.reduced_pressure[0]
     full_result = gradient_objective_from_pressures(constants, jnp.asarray(full))
     reduced, full_reading = objective_reading(reduced_result), objective_reading(full_result)

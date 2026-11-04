@@ -192,7 +192,7 @@ def _full_baseline(constants: GradientObjectiveConstants, pressures: NDArray[np.
     return baseline, base
 
 
-def run_endpoint(folder: Path) -> EndpointRecord:
+def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
     """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
     project = read_project(folder)
     scheme, model, settings = check_inputs(project)
@@ -225,12 +225,13 @@ def run_endpoint(folder: Path) -> EndpointRecord:
     checked = endpoint_check(operators, designs, theta, model=model, objective_settings=objective,
                              receiver_set=scheme.receiver_set, low_frequency_axis=axis_id,
                              presets=load_construction_presets(config_path("construction_presets.toml")),
-                             settings=settings, air=air, ranges=ranges)
+                             settings=settings, air=air, ranges=ranges, workers=workers)
     endpoint_seconds = time.perf_counter() - clock
     clock = time.perf_counter()
     axis = tuple(float(value) for value in model.frequencies_hz)
     pressures = full_model_pressures(operators, kept, axis, air=air, ranges=ranges,
-                                     max_relative_residual=model.ledger.settings.full_solve_max_relative_residual)
+                                     max_relative_residual=model.ledger.settings.full_solve_max_relative_residual,
+                                     workers=workers)
     constants = gradient_objective_constants(axis, objective, scheme.receiver_set, len(model.source_names))
     peaks = big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
                       frequencies_hz=axis, low_frequency_axis=axis_id,
