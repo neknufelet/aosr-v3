@@ -18,7 +18,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
@@ -44,7 +43,7 @@ from aosr.materials.construction_models import (
     SurfaceMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.physics.fem_reduced_store import save_reduced
+from aosr.physics.fem_reduced_store import load_reduced, save_reduced
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
@@ -114,8 +113,13 @@ def _control_id(mount: Mount | None = None) -> str:
 
 
 def _stand_in() -> ReducedModel:
-    """標頭只讀替身身分三格，用一份只有這三格的替身（不建替身）。"""
-    return cast(ReducedModel, SimpleNamespace(input_hash="input-x", mesh_hash="mesh-x", physics_identity="physics-x"))
+    """讀起點存下的六面小模型；只換標頭控制組的三格身分，不重建替身。"""
+    model = load_reduced(Path(__file__).with_name("data") / "zone_rom_v1.npz")
+    return ReducedModel(
+        matrices=model.matrices, source_names=model.source_names, receiver_names=model.receiver_names,
+        frequencies_hz=model.frequencies_hz, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s,
+        input_hash="input-x", mesh_hash="mesh-x", physics_identity="physics-x", ledger=model.ledger,
+        patch_keys=model.patch_keys)
 
 
 def _header(designs: tuple[gradient_search.SurfaceDesign, ...]) -> ledger.MaterialGradientHeader:

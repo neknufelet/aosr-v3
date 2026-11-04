@@ -18,7 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.fem_reduced import ReducedModelSettings
-from aosr.physics.fem_helmholtz import FrequencyWallImpedances
+from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
     BuildLedger, FullOperators, FullSolver, GreedyRound, ImpedanceRows, ReducedMatrices, ReducedModel,
     checked_axis, elapsed_since, even_indices, impedance_rows, input_hash, project, relative_residual,
@@ -71,7 +71,7 @@ class _Build:
         operators = self.operators
         k_squared, coefficients = system_coefficients(
             self.axis[index], walls, density_kg_m3=operators.density_kg_m3,
-            sound_speed_m_s=operators.sound_speed_m_s)
+            sound_speed_m_s=operators.sound_speed_m_s, patch_keys=operators.patch_keys)
         system = self.solver.system(self.axis[index], walls)
         coordinates = np.linalg.solve(
             matrices.stiffness - k_squared * matrices.mass + np.tensordot(coefficients, matrices.boundary, axes=1),
@@ -103,16 +103,16 @@ class _Build:
 
 def build_reduced_model(
     operators: FullOperators, frequencies_hz: Sequence[float],
-    training_impedances: Sequence[FrequencyWallImpedances], *, settings: ReducedModelSettings,
+    training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings,
 ) -> ReducedModel:
     """完整解快照（每點重新分解、殘差超過上限就報錯）→ 殘差貪婪補點 → 實數 SVD → 投影的小矩陣與建模帳。
 
-    ``training_impedances`` 是呼叫端算好的一批材料，每組六面各一條逐頻阻抗（``Wall`` 對整條頻率軸的列，
+    ``training_impedances`` 是呼叫端算好的一批材料，每組每面片各一條逐頻阻抗（面片鍵對整條頻率軸的列；六個整面仍接受 ``Wall``，
     或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。
     """
     start = time.perf_counter()
     axis = checked_axis(frequencies_hz)
-    training = impedance_rows(training_impedances, axis)
+    training = impedance_rows(training_impedances, axis, patch_keys=operators.patch_keys)
     build = _Build(operators=operators, axis=axis, training=training, settings=settings,
                    solver=FullSolver(operators, max_relative_residual=settings.full_solve_max_relative_residual))
     rng = np.random.default_rng(settings.greedy_seed)
@@ -142,5 +142,5 @@ def build_reduced_model(
         matrices=matrices, source_names=tuple(operators.sources), receiver_names=tuple(operators.receivers),
         frequencies_hz=axis, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
         mesh_hash=operators.mesh_hash, physics_identity=operators.physics_identity,
-        input_hash=input_hash(operators, axis, training, settings), ledger=ledger)
+        input_hash=input_hash(operators, axis, training, settings), ledger=ledger, patch_keys=operators.patch_keys)
 

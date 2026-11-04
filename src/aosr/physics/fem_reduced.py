@@ -1,7 +1,7 @@
 """有限元素替身方程式（投影式降階）：完整模型快照 → 實數 SVD 基底 → 投影小矩陣（#561）。
 
 決策紙 ``docs/decisions/fem-reduced-model-jax-evaluation-for-stage-three.md``。公式照 #610 實驗：
-``A(ω) = K − k²M + Σ_w (jωρ/Z_w) B_w``，``k² = (ω/c)²``；K、M、六面 B 跟頻率與材料無關，
+``A(ω) = K − k²M + Σ_w (jωρ/Z_w) B_w``，``k² = (ω/c)²``；K、M、各面片 B 跟頻率與材料無關，
 所以投影一次 ``Vᵀ K V``、``Vᵀ M V``、``Vᵀ B_w V``、``Vᵀ b``、``c V`` 之後，每個頻點只解 r×r 的小系統。
 完整解一律走產品的 :func:`~aosr.physics.fem_helmholtz.assemble_helmholtz_system` 與 pydiso，
 每個（材料、頻點）重新分解；殘差超過設定的上限就報錯，不收那個快照、不退回別的解法。
@@ -15,7 +15,7 @@ import json
 import math
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -27,16 +27,23 @@ from aosr import runtime
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.fem_reduced import ReducedModelSettings
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
+from aosr.geometry.shoebox_mesh import ShoeboxMesh, WallPartitions, generate_shoebox_mesh
 from aosr.physics.fem_helmholtz import (
-    FrequencyWallImpedances, Impedance, P2Operators, assemble_helmholtz_system, assemble_p2_operators,
-    checked_impedance_rows, point_source_load,
+    Impedance, P2Operators, assemble_helmholtz_system, assemble_p2_operators,
+    assemble_zoned_helmholtz_system, point_source_load,
 )
 
 if TYPE_CHECKING:
     from pydiso.mkl_solver import MKLPardisoSolver
 
-ImpedanceRows = Mapping[Wall, tuple[Impedance | None, ...]]
+from aosr.physics.fem_reduced_boundary import (
+    BoundaryImpedances, FrequencyBoundaryImpedances, PatchKeys, checked_patch_rows, patch_values,
+)
+from aosr.physics.fem_reduced_boundary import (
+    FrequencyPatchImpedances as FrequencyPatchImpedances, ImpedanceRows as ImpedanceRows,
+    boundary_patches as boundary_patches,
+)
+
 _MESH_FIELDS = ("nodes", "tetrahedra", "boundary_triangles", "boundary_wall_indices")
 
 
@@ -53,6 +60,7 @@ class FullOperators:
     sound_speed_m_s: float
     mesh_hash: str
     physics_identity: str
+    patch_keys: PatchKeys = boundary_patches()
 
     @property
     def stiffness(self) -> csr_matrix[np.float64]:
@@ -64,13 +72,14 @@ class FullOperators:
 
     @property
     def boundary(self) -> tuple[csr_matrix[np.float64], ...]:
-        """六面邊界質量，牆序固定為 ``Wall.all()``。"""
-        return tuple(self.p2.boundary_mass[wall] for wall in Wall.all())
+        """面片邊界質量，順序由方案的 ``patch_keys`` 指定。"""
+        return tuple(self.p2.zone_boundary_mass[wall][zone] if zone else self.p2.boundary_mass[wall]
+                     for wall, zone in self.patch_keys)
 
 
 @dataclass(frozen=True)
 class ReducedMatrices:
-    """投影後的小矩陣：K_r、M_r（r×r）、B_r（6×r×r）、f_r（喇叭×r）、c_r（座位×r）。"""
+    """投影後的小矩陣：K_r、M_r（r×r）、B_r（面片數×r×r）、f_r（喇叭×r）、c_r（座位×r）。"""
 
     stiffness: NDArray[np.float64]
     mass: NDArray[np.float64]
@@ -124,6 +133,7 @@ class ReducedModel:
     physics_identity: str
     input_hash: str
     ledger: BuildLedger
+    patch_keys: PatchKeys = boundary_patches()
 
 
 def mesh_hash(mesh: ShoeboxMesh) -> str:
@@ -153,31 +163,35 @@ def _probe_row(operators: P2Operators, point: Point) -> NDArray[np.float64]:
 def export_room_operators(
     room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point], *,
     density_kg_m3: float, sound_speed_m_s: float, physics_identity: str, max_frequency_hz: float,
+    partitions: WallPartitions | None = None,
 ) -> FullOperators:
     """用產品的網格（每波長格數與種子取 ``fem_lane``）與 P2 組裝，交出完整模型的全部算子。"""
     if not sources or not receivers:
         raise ValueError("喇叭與座位都不能是空的")
     mesh = generate_shoebox_mesh(
         room, max_frequency_hz=max_frequency_hz, elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
-        sound_speed_m_s=sound_speed_m_s, random_seed=FEM_MESH_RANDOM_SEED)
+        sound_speed_m_s=sound_speed_m_s, random_seed=FEM_MESH_RANDOM_SEED, partitions=partitions)
     p2 = assemble_p2_operators(mesh)
     return FullOperators(
         p2=p2, source_points=dict(sources), receiver_points=dict(receivers),
         sources={name: point_source_load(p2, point) for name, point in sources.items()},
         receivers={name: _probe_row(p2, point) for name, point in receivers.items()},
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
-        mesh_hash=mesh_hash(mesh), physics_identity=physics_identity)
+        mesh_hash=mesh_hash(mesh), physics_identity=physics_identity,
+        patch_keys=boundary_patches(None if partitions is None else
+                                    {wall: tuple(item[0] for item in zones) for wall, zones in partitions.items()}))
 
 
 def system_coefficients(
-    frequency_hz: float, wall_impedances: Mapping[Wall, Impedance | None], *,
-    density_kg_m3: float, sound_speed_m_s: float,
+    frequency_hz: float, wall_impedances: BoundaryImpedances, *,
+    density_kg_m3: float, sound_speed_m_s: float, patch_keys: PatchKeys = boundary_patches(),
 ) -> tuple[float, NDArray[np.complex128]]:
-    """回 ``k² = (2πf/c)²`` 與牆序 ``Wall.all()`` 的六個 ``jωρ/Z``（剛性為 0）；算式與產品組裝同序。"""
+    """回 ``k² = (2πf/c)²`` 與面片序的各個 ``jωρ/Z``（剛性為 0）；算式與產品組裝同序。"""
     omega = 2.0 * math.pi * frequency_hz
     wave_number = omega / sound_speed_m_s
-    coefficients = [0j if (value := wall_impedances[wall]) is None else 1j * omega * density_kg_m3 / value
-                    for wall in Wall.all()]
+    values = patch_values(wall_impedances, patch_keys)
+    coefficients = [0j if (value := values[key]) is None else 1j * omega * density_kg_m3 / value
+                    for key in patch_keys]
     return wave_number**2, np.asarray(coefficients, dtype=np.complex128)
 
 
@@ -195,7 +209,7 @@ def reduced_pressure(
 def evaluate_reduced(
     model: ReducedMatrices, k_squared: float, wall_coefficients: NDArray[np.complex128],
 ) -> NDArray[np.complex128]:
-    """一個頻點的替身聲壓 (喇叭, 座位)；``wall_coefficients`` 牆序為 ``Wall.all()``。"""
+    """一個頻點的替身聲壓 (喇叭, 座位)；``wall_coefficients`` 順序與面片邊界矩陣相同。"""
     return reduced_pressure(model.stiffness, model.mass, model.boundary, model.sources,
                             model.receivers, k_squared, wall_coefficients)
 
@@ -210,10 +224,27 @@ class FullSolver:
         self._solver: MKLPardisoSolver | None = None
         self.solves = 0
 
-    def system(self, frequency_hz: float, walls: Mapping[Wall, Impedance | None]) -> csr_matrix[np.complex128]:
+    def system(self, frequency_hz: float, walls: BoundaryImpedances) -> csr_matrix[np.complex128]:
         operators = self._operators
+        values = patch_values(walls, operators.patch_keys)
+        if operators.patch_keys != boundary_patches():
+            zones: dict[Wall, dict[str, Impedance]] = {}
+            for (wall, zone), value in values.items():
+                if zone:
+                    if value is None:
+                        raise ValueError("分區一定要有材料阻抗")
+                    zones.setdefault(wall, {})[zone] = value
+            ordered_p2 = replace(operators.p2, zone_boundary_mass={
+                wall: {zone: operators.p2.zone_boundary_mass[wall][zone] for zone in values}
+                for wall, values in zones.items()})
+            return assemble_zoned_helmholtz_system(
+                ordered_p2, frequency_hz=frequency_hz,
+                wall_impedances={wall: value for (wall, zone), value in values.items() if not zone},
+                zone_impedances=zones, density_kg_m3=operators.density_kg_m3,
+                sound_speed_m_s=operators.sound_speed_m_s)
         return assemble_helmholtz_system(
-            operators.p2, frequency_hz=frequency_hz, wall_impedances=walls,
+            operators.p2, frequency_hz=frequency_hz,
+            wall_impedances={wall: values[(wall, "")] for wall in Wall.all()},
             density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s)
 
     def _refactored(self, system: csr_matrix[np.complex128]) -> MKLPardisoSolver:
@@ -231,7 +262,7 @@ class FullSolver:
         self.solves += 1
         return self._solver
 
-    def solve(self, frequency_hz: float, walls: Mapping[Wall, Impedance | None]) -> NDArray[np.complex128]:
+    def solve(self, frequency_hz: float, walls: BoundaryImpedances) -> NDArray[np.complex128]:
         """回 (喇叭, N) 完整解；任何一支的相對殘差超過上限或不是有限數就報錯。"""
         system = self.system(frequency_hz, walls)
         solver = self._refactored(system)
@@ -285,21 +316,22 @@ def checked_axis(frequencies_hz: Sequence[float]) -> tuple[float, ...]:
     return axis
 
 
-def impedance_rows(sets: Sequence[FrequencyWallImpedances], axis: tuple[float, ...]) -> tuple[ImpedanceRows, ...]:
-    """每一組六面逐頻阻抗都過產品的閘門（被動、非零、同面不混剛性），攤成逐頻列。"""
+def impedance_rows(sets: Sequence[FrequencyBoundaryImpedances], axis: tuple[float, ...], *,
+                   patch_keys: PatchKeys = boundary_patches()) -> tuple[ImpedanceRows, ...]:
+    """每組每面片逐頻阻抗都過產品閘門，剛性只限整面面片。"""
     if not sets:
         raise ValueError("材料組不能是空的")
-    return tuple(checked_impedance_rows(walls, axis) for walls in sets)
+    return tuple(checked_patch_rows(values, axis, patch_keys) for values in sets)
 
 
-def walls_at(rows: ImpedanceRows, index: int) -> dict[Wall, Impedance | None]:
-    return {wall: rows[wall][index] for wall in Wall.all()}
+def walls_at(rows: ImpedanceRows, index: int) -> dict[tuple[Wall, str], Impedance | None]:
+    return {key: row[index] for key, row in rows.items()}
 
 
-def _hex_rows(rows: ImpedanceRows) -> list[object]:
-    return [None if rows[wall][0] is None else
-            [[complex(value).real.hex(), complex(value).imag.hex()] for value in rows[wall] if value is not None]
-            for wall in Wall.all()]
+def _hex_rows(rows: ImpedanceRows, keys: PatchKeys) -> list[object]:
+    return [None if row[0] is None else
+            [[complex(value).real.hex(), complex(value).imag.hex()] for value in row if value is not None]
+            for row in (rows[key] for key in keys)]
 
 
 def input_hash(operators: FullOperators, axis: tuple[float, ...], training: tuple[ImpedanceRows, ...],
@@ -310,13 +342,15 @@ def input_hash(operators: FullOperators, axis: tuple[float, ...], training: tupl
 
     document = {
         "frequencies_hex": [value.hex() for value in axis],
-        "training": [_hex_rows(rows) for rows in training],
+        "training": [_hex_rows(rows, operators.patch_keys) for rows in training],
         "settings": settings.model_dump(mode="json"),
         "density_hex": float(operators.density_kg_m3).hex(),
         "speed_hex": float(operators.sound_speed_m_s).hex(),
         "mesh_hash": operators.mesh_hash, "physics_identity": operators.physics_identity,
         "sources": points(operators.source_points), "receivers": points(operators.receiver_points),
     }
+    if operators.patch_keys != boundary_patches():
+        document["patches"] = [[wall.wall_name(), zone] for wall, zone in operators.patch_keys]
     text = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(text.encode()).hexdigest()
 

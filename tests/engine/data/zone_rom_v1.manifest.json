@@ -1,0 +1,98 @@
+{
+ "arrays": {
+  "boundary": {
+   "dtype": "float64",
+   "sha256": "0c3454a5db74157ec86565395a5c08680f8ef45d2bf58caf665c4c87b2bbf87d",
+   "shape": [
+    6,
+    64,
+    64
+   ]
+  },
+  "mass": {
+   "dtype": "float64",
+   "sha256": "0b5ce8cb3de8b4f3da9b569c31913329ec51b89ccd45874449c6d919ec43a796",
+   "shape": [
+    64,
+    64
+   ]
+  },
+  "receivers": {
+   "dtype": "float64",
+   "sha256": "f4cffc7daa4b465b7001139a223037da9a08ac81d3307812ab79321821c987c4",
+   "shape": [
+    1,
+    64
+   ]
+  },
+  "sources": {
+   "dtype": "complex128",
+   "sha256": "7af1fe670606cfe16b581651f815bf3772cf53574697b1cb65f68a0ec0dd82a5",
+   "shape": [
+    1,
+    64
+   ]
+  },
+  "stiffness": {
+   "dtype": "float64",
+   "sha256": "40af8f440ac8502880094bf94de6478e277a804747bc08d0561b4fad5b538cd4",
+   "shape": [
+    64,
+    64
+   ]
+  }
+ },
+ "density_hex": "0x1.3333333333333p+0",
+ "format_version": 1,
+ "frequencies_hex": [
+  "0x1.4000000000000p+5",
+  "0x1.9000000000000p+5",
+  "0x1.f800000000000p+5",
+  "0x1.4000000000000p+6"
+ ],
+ "input_hash": "4ac3251bd369c68d0dfbad3dd11a4089f4bbe249f170b9b1df89636ba1a3ff76",
+ "ledger": {
+  "full_solves": 32,
+  "rank": 64,
+  "rounds": [],
+  "seconds": {
+   "greedy": 0.0,
+   "projection": 0.0006701415404677391,
+   "snapshot": 0.04584907740354538,
+   "svd": 0.0011021029204130173,
+   "total": 0.04792914353311062
+  },
+  "settings": {
+   "batch": 32,
+   "candidates_per_round": 96,
+   "full_solve_max_relative_residual": 1e-09,
+   "greedy_seed": 61020261012,
+   "initial_frequency_count": 4,
+   "initial_impedance_count": 8,
+   "max_full_solves": 32,
+   "stop_residual": 0.001,
+   "svd_relative_cutoff": 1e-12
+  },
+  "snapshots": 32,
+  "stop_reason": "候選用完"
+ },
+ "manifest_sha256": "1ac7b7f3e2612cbf335f2dd300aea0e33cc3e5f9cdb80b74b0ba8e12ea1cffff",
+ "mesh_hash": "e420351f0ded693739bd989a3b934eddcc178e95dd6ac22d9e0ca366cded9e01",
+ "npz_sha256": "6b0306c2a359fb895ecfa313a5b964718e34dd7fe33877cb36043e738794310b",
+ "physics_identity": "phys-v1:0000000000000000000000000000000000000000000000000000000000000000",
+ "receiver_names": [
+  "seat"
+ ],
+ "source_names": [
+  "source"
+ ],
+ "speed_hex": "0x1.5700000000000p+8",
+ "walls": [
+  "floor",
+  "ceiling",
+  "x0",
+  "xL",
+  "y0",
+  "yL"
+ ]
+}

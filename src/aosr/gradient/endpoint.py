@@ -52,6 +52,7 @@ from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSetting
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.surrogate_guard import require_whole_surrogate
 from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, designs_mount,
     is_feasible, wall_surface_ids,
@@ -256,6 +257,7 @@ def full_model_pressures(operators: FullOperators, materials: Mapping[Wall, Surf
     （``impedance_rows``）、``FullSolver.solve`` 後乘座位取值列。頻率軸由呼叫端給（用替身的軸），不自己造。
     ``air`` 必須跟算子同密度、同聲速（:func:`checked_air`）。
     """
+    require_whole_surrogate(operators)
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
                 source="完整模型算子")
     axis = tuple(float(value) for value in frequencies_hz)
@@ -413,6 +415,7 @@ class EndpointResult(NamedTuple):
 def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, designs: Sequence[SurfaceDesign],
                              theta: jax.Array | FloatVector, receiver_set: ReceiverSet,
                              air: PhysicsConstants) -> FloatVector:
+    require_whole_surrogate(operators)
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
                 source="完整模型算子")
     checked_air(air, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s, source="替身")
@@ -456,6 +459,8 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     鏈逐頻 × r² 的暫存（第四場 188 頻點、r=2265）沒編譯時峰值比編譯過高約四成，排在完整解之後還跟算子與完整解
     留下的記憶體疊在一起；它不需要完整解的任何東西。
     """
+    require_whole_surrogate(model)
+    require_whole_surrogate(operators)
     values = _checked_endpoint_inputs(operators, model, designs, theta, receiver_set, air)
     checked_design_identity(designs, presets)
     axis = tuple(float(value) for value in model.frequencies_hz)

@@ -17,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.geometry.shoebox import Point
-from aosr.physics.fem_helmholtz import FrequencyWallImpedances
+from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
     FullOperators, FullSolver, ReducedModel, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
 )
@@ -82,6 +82,8 @@ def third_octave_bands(frequencies_hz: Sequence[float]) -> tuple[Band, ...]:
 
 
 def _checked_pairing(model: ReducedModel, operators: FullOperators) -> None:
+    if model.patch_keys != operators.patch_keys:
+        raise ValueError("替身的面片清單跟完整模型不同")
     if model.mesh_hash != operators.mesh_hash:
         raise ValueError("替身的網格雜湊跟完整模型不同")
     if model.source_names != tuple(operators.sources) or model.receiver_names != tuple(operators.receivers):
@@ -109,12 +111,12 @@ def _band_db(bands: Sequence[Band], full: NDArray[np.complex128], reduced: NDArr
 
 
 def validate_reduced(
-    model: ReducedModel, operators: FullOperators, holdout_impedances: Sequence[FrequencyWallImpedances],
+    model: ReducedModel, operators: FullOperators, holdout_impedances: Sequence[FrequencyBoundaryImpedances],
 ) -> ValidationReport:
     """每組留出材料、每個頻點都完整解一次（殘差上限沿用建模當次的設定），跟替身比。"""
     _checked_pairing(model, operators)
     axis = model.frequencies_hz
-    holdouts = impedance_rows(holdout_impedances, axis)
+    holdouts = impedance_rows(holdout_impedances, axis, patch_keys=operators.patch_keys)
     solver = FullSolver(operators, max_relative_residual=model.ledger.settings.full_solve_max_relative_residual)
     receivers = np.asarray(list(operators.receivers.values()), dtype=np.float64)
     full = np.empty((len(holdouts), len(axis), len(model.source_names), len(model.receiver_names)),
@@ -125,7 +127,7 @@ def validate_reduced(
             walls = walls_at(rows, index)
             full[material, index] = solver.solve(frequency, walls) @ receivers.T
             k_squared, coefficients = system_coefficients(
-                frequency, walls, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
+                frequency, walls, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s, patch_keys=model.patch_keys)
             reduced[material, index] = evaluate_reduced(model.matrices, k_squared, coefficients)
     frequency_db = np.max(np.abs(20.0 * np.log10(np.abs(reduced) / np.abs(full))), axis=(0, 1, 2))
     bands = third_octave_bands(axis)

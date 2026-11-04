@@ -39,6 +39,7 @@ from aosr.config.material_gradient import (
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.surrogate_guard import require_whole_surrogate
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, variable_name
 from aosr.materials.construction_models import (
@@ -468,6 +469,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
     樣板照 :func:`design_templates`（貼在原牆上的面背後接原牆）。保留原牆的面：建目標時用 :func:`kept_impedance_rows` 算一次當常數列，
     目標函式裡轉成 θ 對應的複數精度、換進那一列，剛性遮罩那一格是 False；求值入口的語意（None 樣板＝剛性）不動。
     """
+    require_whole_surrogate(model)
     walls = Wall.all()
     if len(designs) != len(walls):
         raise ValueError(f"替身目前只有六面牆（Wall.all()），設計清單有 {len(designs)} 個面；"
