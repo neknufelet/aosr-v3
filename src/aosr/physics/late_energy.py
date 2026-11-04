@@ -20,7 +20,9 @@ from numpy.typing import NDArray
 from aosr.config.art_lane import guard_art_patch_count
 from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
-from aosr.physics.wall_surfaces import impedance_absorption_rows, impedance_materials_code
+from aosr.physics.wall_surfaces import (
+    ZoneAbsorption, equivalent_absorption_rows, impedance_absorption_rows, impedance_materials_code, rectangle_patch_weights,
+)
 
 
 # 精度契約門檻不住這裡：晚期能量對上一代、五項物理性質兩條界線都住在
@@ -38,6 +40,7 @@ class LateEnergyInputs:
     n_per_wall: int
     domain_alpha_bar_max: float
     materials_code: str = "real_frequency_independent_impedance"
+    absorption_by_zone: ZoneAbsorption | None = None
 
 
 @dataclass(frozen=True)
@@ -383,11 +386,13 @@ def _form_factors(patches: _Patches) -> NDArray[np.float64]:
 
 def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
     """只驗牆面響應給的逐面逐頻α：形狀、有限性及[0,1]範圍。"""
-    if set(inputs.absorption_by_wall) != set(Wall.wall_names()):
+    absorption = (inputs.absorption_by_wall if not inputs.absorption_by_zone else
+                  equivalent_absorption_rows(inputs.room, inputs.absorption_by_wall, inputs.absorption_by_zone))
+    if set(absorption) != set(Wall.wall_names()):
         raise ValueError("absorption_by_wall 必須恰好包含六面牆")
     rows = []
     for wall in Wall.wall_names():
-        row = np.asarray(inputs.absorption_by_wall[wall], dtype=np.float64)
+        row = np.asarray(absorption[wall], dtype=np.float64)
         if row.shape != (len(inputs.frequencies_hz),):
             raise ValueError(f"{wall} 的吸音率頻帶數與 frequencies_hz 不同")
         rows.append(row)
@@ -395,6 +400,22 @@ def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
     if not np.all(np.isfinite(alpha)) or np.any((alpha < 0) | (alpha > 1)):
         raise ValueError("無規入射吸音率必須有限且落在 [0,1]")
     return alpha
+
+
+def _patch_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
+    """整面保留原索引；矩形只替換該牆小塊，交集權重由共用零件算。"""
+    alpha_by_wall = _wall_absorption(inputs)
+    wall_index = np.repeat(np.arange(len(Wall.all()), dtype=np.int64), inputs.n_per_wall**2)
+    alpha_patch = alpha_by_wall[wall_index, :]
+    for name, cells in (inputs.absorption_by_zone or {}).items():
+        weights = rectangle_patch_weights(inputs.room, name, cells, inputs.n_per_wall)
+        rows = np.asarray([cell.absorption for cell in cells], dtype=np.float64)
+        start = Wall.wall_names().index(name) * inputs.n_per_wall**2
+        for i, weight in enumerate(weights):
+            owners = np.flatnonzero(weight)
+            alpha_patch[start + i] = rows[owners[0]] if len(owners) == 1 else np.clip(
+                weight @ rows, np.min(rows[owners], axis=0), np.max(rows[owners], axis=0))
+    return alpha_patch
 
 
 def _raw_energy_and_orders(
@@ -453,7 +474,8 @@ def _reflection_problem(inputs: LateEnergyInputs) -> _ReflectionProblem:
     patches = _patch_geometry(inputs.room, inputs.n_per_wall)
     form_factors = _form_factors(patches)
     alpha_by_wall = _wall_absorption(inputs)
-    alpha_patch = alpha_by_wall[patches.wall_index, :]
+    alpha_patch = (alpha_by_wall[patches.wall_index, :] if not inputs.absorption_by_zone else
+                   _patch_absorption(inputs))
     transfer = np.asarray(
         (1.0 - alpha_patch)[:, None, :] * form_factors[:, :, None],
         dtype=np.float64,

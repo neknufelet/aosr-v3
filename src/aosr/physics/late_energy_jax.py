@@ -38,6 +38,7 @@ from numpy.typing import NDArray
 from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
 from aosr.physics.late_energy import _form_factors, _patch_geometry, _wall_areas
+from aosr.physics.wall_surfaces import ZoneAbsorption, rectangle_patch_weights, validate_zone_absorption
 
 _HIGHEST = jax.lax.Precision.HIGHEST
 # Eyring 比值的上夾點跟 numpy 版同一個數：1 減單精度的一個最小刻度，單雙精度都表示得出來。
@@ -102,7 +103,8 @@ def _eyring_ratio(alpha_bar: jax.Array) -> jax.Array:
     return jnp.where(is_zero, jnp.ones_like(guarded), safe / -jnp.log1p(-safe))
 
 
-def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array) -> LateEnergyArrays:
+def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array, *,
+                       alpha_by_patch: jax.Array | None = None) -> LateEnergyArrays:
     """逐頻回（面積加權平均吸音率, 原始混響能量, Eyring 比值, 修正後晚期能量）。
 
     ``alpha`` 形狀 ``(6, F)``，牆的順序照 :meth:`Wall.wall_names`。輸出精度等於 ``alpha``
@@ -121,7 +123,12 @@ def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array) -> LateEn
     frequency_count = values.shape[1]
     total_area = jnp.sum(patch_areas)
 
-    patch_alpha = values[jnp.asarray(geometry.wall_index), :].T
+    if alpha_by_patch is None:
+        patch_alpha = values[jnp.asarray(geometry.wall_index), :].T
+    else:
+        if alpha_by_patch.shape != (patch_count, frequency_count) or alpha_by_patch.dtype != dtype:
+            raise ValueError("小塊吸音率的形狀或精度與逐牆列不同")
+        patch_alpha = alpha_by_patch.T
     reflectance = 1.0 - patch_alpha
     transfer = reflectance[:, :, None] * form_factors[None, :, :]
     system = jnp.eye(patch_count, dtype=dtype)[None, :, :] - transfer
@@ -144,3 +151,63 @@ def late_energy_arrays(geometry: LateEnergyGeometry, alpha: jax.Array) -> LateEn
         late_reverberant_energy=late,
         dissipation_resolved=resolved,
     )
+
+
+class ZonedLateEnergyGeometry(NamedTuple):
+    """固定分區的交集權重；區域材料的列序是六面整面列後，按牆序接每面區序。"""
+
+    whole: LateEnergyGeometry
+    patch_weights: NDArray[np.float64]
+    wall_weights: NDArray[np.float64]
+
+
+def zoned_late_energy_geometry(room: Room, n_per_wall: int, absorption_by_zone: ZoneAbsorption) -> ZonedLateEnergyGeometry:
+    """只用矩形座標生成權重；固定分區大小不參與材料梯度。"""
+    whole = late_energy_geometry(room, n_per_wall)
+    count = next((len(cell.absorption) for cells in absorption_by_zone.values() for cell in cells), 0)
+    validate_zone_absorption(room, absorption_by_zone, count)
+    row_count = len(Wall.all()) + sum(len(cells) for cells in absorption_by_zone.values())
+    patches = np.zeros((len(whole.patch_areas), row_count), dtype=np.float64)
+    walls = np.zeros((len(Wall.all()), row_count), dtype=np.float64)
+    patches[np.arange(len(whole.patch_areas)), whole.wall_index] = 1.0
+    walls[:, :len(Wall.all())] = np.eye(len(Wall.all()))
+    offset = len(Wall.all())
+    for index, name in enumerate(Wall.wall_names()):
+        cells = absorption_by_zone.get(name, ())
+        if not cells:
+            continue
+        start = index * n_per_wall**2
+        patches[start:start+n_per_wall**2, index] = 0.0
+        patches[start:start+n_per_wall**2, offset:offset+len(cells)] = rectangle_patch_weights(room, name, cells, n_per_wall)
+        areas = [(cell.zone.u_m[1]-cell.zone.u_m[0]) *
+                 (cell.zone.v_m[1]-cell.zone.v_m[0]) for cell in cells]
+        walls[index, index] = 0.0
+        walls[index, offset:offset+len(cells)] = [area / sum(areas) for area in areas]
+        offset += len(cells)
+    return ZonedLateEnergyGeometry(whole, patches, walls)
+
+
+def _bounded_weighted_absorption(weights: NDArray[np.float64], values: jax.Array) -> jax.Array:
+    """分區凸組合只受正權重區的逐頻界約束；單一區直接取原列。"""
+    coefficients = jnp.asarray(weights, dtype=values.dtype)
+    active = coefficients > 0.0
+    average = jnp.matmul(coefficients, values, precision=_HIGHEST) / jnp.sum(coefficients, axis=1)[:, None]
+    lower = jnp.min(jnp.where(active[:, :, None], values[None, :, :], jnp.inf), axis=1)
+    upper = jnp.max(jnp.where(active[:, :, None], values[None, :, :], -jnp.inf), axis=1)
+    direct = values[jnp.argmax(coefficients, axis=1)]
+    return jnp.where(jnp.sum(active, axis=1)[:, None] == 1, direct, jnp.clip(average, lower, upper))
+
+
+def zoned_late_energy_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array) -> LateEnergyArrays:
+    """以固定交集對逐區 α 可微；六面整面列後，按 Wall.wall_names 與區宣告順序接矩形列。
+
+    分區牆的整面輸入列不參與結果；有效範圍與旗標沿用原函式，呼叫端仍須保證 α 有限且在 [0,1]。
+    """
+    values = jnp.asarray(alpha)
+    if not jnp.issubdtype(values.dtype, jnp.floating):
+        raise TypeError("吸音率必須是浮點陣列")
+    if values.ndim != 2 or values.shape[0] != geometry.wall_weights.shape[1] or values.shape[1] == 0:
+        raise ValueError("分區吸音率形狀與幾何權重不同")
+    walls = _bounded_weighted_absorption(geometry.wall_weights, values)
+    patches = _bounded_weighted_absorption(geometry.patch_weights, values)
+    return late_energy_arrays(geometry.whole, walls, alpha_by_patch=patches)
