@@ -30,7 +30,20 @@ class MeshTet:
 class ElementTetP2: ...
 
 class DofsView:
-    def all(self) -> _IntArray: ...
+    def __init__(
+        self,
+        obj: object = ...,
+        nodal_ix: _IntArray | slice = ...,
+        facet_ix: _IntArray | slice = ...,
+        edge_ix: _IntArray | slice = ...,
+        interior_ix: _IntArray | slice = ...,
+        nodal_rows: _IntArray | slice = ...,
+        facet_rows: _IntArray | slice = ...,
+        edge_rows: _IntArray | slice = ...,
+        interior_rows: _IntArray | slice = ...,
+        doflocs: object = ...,
+    ) -> None: ...
+    def all(self, key: str | None = ...) -> _IntArray: ...
 
 class Basis:
     N: int
@@ -49,7 +62,13 @@ class Basis:
         disable_doflocs: bool = ...,
     ) -> None: ...
     def probes(self, x: _FloatArray) -> csr_matrix[np.float64]: ...
-    def get_dofs(self, facets: _IntArray) -> DofsView: ...
+    def get_dofs(
+        self,
+        facets: _IntArray | None = ...,
+        elements: _IntArray | None = ...,
+        nodes: _IntArray | None = ...,
+        skip: list[str] | None = ...,
+    ) -> DofsView: ...
 
 class FacetBasis:
     def __init__(

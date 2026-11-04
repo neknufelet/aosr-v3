@@ -127,7 +127,13 @@ def test_zone_matrices_have_local_support_area_and_exact_wall_sum() -> None:
     # 沿用現有有限元素比較尺；不在此另立容差數字。
     limit = load_precision_contracts(default_precision_contracts_path())["fem_vs_fenics_frozen"].value
     ones = np.ones(operators.basis.N)
+    # 同一張網格拿掉區標記，走整面那條組裝；各區相加要跟這份獨立積分一致。
+    independent = fem.assemble_p2_operators(replace(mesh, boundary_zone_ids=None))
+    assert independent.zone_boundary_mass == {}
     for index, wall in enumerate(Wall.all()):
+        reference = independent.boundary_mass[wall]
+        difference = abs(operators.boundary_mass[wall] - reference).max()
+        assert difference <= limit * abs(reference).max()
         matrices = operators.zone_boundary_mass[wall]
         labels = mesh.boundary_zone_ids[mesh.boundary_wall_indices == index]
         sequence = iter(matrices.values())
@@ -148,16 +154,18 @@ def test_zone_matrices_have_local_support_area_and_exact_wall_sum() -> None:
 
 def test_same_zone_impedance_matches_whole_wall_and_changed_zone_changes_pressure() -> None:
     operators = fem.assemble_p2_operators(_mesh(True))
+    independent = fem.assemble_p2_operators(replace(_mesh(True), boundary_zone_ids=None))
     impedance = complex(PHYSICS.rho_c * 4.0, PHYSICS.rho_c)
     walls = {wall: impedance for wall in Wall.all()}
     zones = {wall: dict.fromkeys(operators.zone_boundary_mass[wall], impedance) for wall in Wall.all()}
     arguments = dict(frequency_hz=37.0, density_kg_m3=PHYSICS.air_density_kg_m3,
                      sound_speed_m_s=PHYSICS.sound_speed_m_s)
-    whole = fem.assemble_helmholtz_system(operators, wall_impedances=walls, **arguments)
+    whole = fem.assemble_helmholtz_system(independent, wall_impedances=walls, **arguments)
     zoned = fem.assemble_zoned_helmholtz_system(operators, wall_impedances={}, zone_impedances=zones, **arguments)
     load = fem.point_source_load(operators, Point(0.7, 0.6, 0.5))
     receiver = Point(2.1, 1.3, 0.8)
-    reference = fem.interpolate_pressure(operators, receiver, spsolve(whole, load))
+    reference = fem.interpolate_pressure(independent, receiver,
+                                         spsolve(whole, fem.point_source_load(independent, Point(0.7, 0.6, 0.5))))
     observed = fem.interpolate_pressure(operators, receiver, spsolve(zoned, load))
     limit = load_precision_contracts(default_precision_contracts_path())["fem_vs_fenics_frozen"].value
     assert abs(observed - reference) / abs(reference) <= limit
@@ -169,8 +177,8 @@ def test_same_zone_impedance_matches_whole_wall_and_changed_zone_changes_pressur
 def test_reverse_boundary_count_rejects_missing_or_duplicate_triangles() -> None:
     mesh = _mesh(False)
     missing = replace(mesh, boundary_triangles=mesh.boundary_triangles[:-1],
-                      boundary_wall_indices=mesh.boundary_wall_indices[:-1])
-    with pytest.raises(ValueError, match="邊界"):
+                      boundary_wall_indices=mesh.boundary_wall_indices[:-1], boundary_zone_ids=None)
+    with pytest.raises(ValueError, match="邊界 facet 數"):
         fem.assemble_p2_operators(missing)
     triangles = mesh.boundary_triangles.copy()
     triangles[-1] = triangles[0]
@@ -259,6 +267,8 @@ def test_nonbinary_rectangle_edges_have_exact_closed_vertex_membership() -> None
     assert mesh.boundary_zone_ids is not None
     for index, wall in enumerate(Wall.all()):
         axes = [axis for axis in range(3) if axis != wall.axis()]
+        expected_names = {name for name, _, _ in partitions.get(wall, ())} or {""}
+        assert set(mesh.boundary_zone_ids[mesh.boundary_wall_indices == index]) == expected_names
         for name, (u0, u1), (v0, v1) in partitions.get(wall, ()):
             selected = (mesh.boundary_wall_indices == index) & (mesh.boundary_zone_ids == name)
             vertices = mesh.nodes[mesh.boundary_triangles[selected]]
