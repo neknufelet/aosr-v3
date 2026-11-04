@@ -18,7 +18,6 @@ def _probe(case: str, tmp_path: Path) -> None:
     env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     if case == "environment":
         env.update(zip(_CPU_PIN_VARS, ("AVX2,FMA3", "Haswell", "--xla_cpu_multi_thread_eigen=false"), strict=True))
-        env.update({name: "2" for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")})
     result = subprocess.run(
         [sys.executable, "-m", "tests.engine._parallel_full_solves_probe", case, str(tmp_path)],
         env=env, capture_output=True, text=True, timeout=100, check=False)

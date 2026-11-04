@@ -19,17 +19,9 @@ JAX 第一次載入**之前**寫好才算數——先 ``import jax`` 再改設�
 from __future__ import annotations
 
 import ctypes
-import multiprocessing
 import os
 import sys
-import threading
-from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
-from collections import deque
-from concurrent.futures import ProcessPoolExecutor
-from contextlib import contextmanager
-from functools import partial
-from itertools import islice
-from multiprocessing.synchronize import Event
+from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -44,107 +36,6 @@ TRUE_TEXT = "true"
 FALSE_TEXT = "false"
 DEFAULT_PARDISO_THREADS = 1
 _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPDIR")
-_CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", XLA_FLAGS_VAR)
-_SPAWN_LOCK = threading.Lock()
-_WORKER_SLOT = threading.local()
-
-
-def checked_workers(workers: int) -> int:
-    """完整解的工人數必須是正整數；布林也拒收。"""
-    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
-        raise ValueError("workers 必須是正整數")
-    return workers
-
-
-def _spawn_ready() -> None:
-    """讓執行器在釘選環境的區段內真的開齊工人。"""
-
-
-def worker_state[T](kind: type[T]) -> T:
-    """取回本工人的工廠產物；狀態只由 runtime 持有，不放在計算模組全域。"""
-    state: object = getattr(_WORKER_SLOT, "value", None)
-    if not isinstance(state, kind):
-        raise RuntimeError("工人區域槽尚未初始化或型別不符")
-    return state
-
-
-def _watch_parent(parent_pid: int) -> None:
-    """約每秒偵測父行程死亡（含開閘前），偵測到就退出；卡在原生呼叫時不保證。"""
-    tick = threading.Event()
-    while os.getppid() == parent_pid:
-        tick.wait(1.0)
-    os._exit(1)
-
-
-def _spawn_initialize(factory: Callable[[], object], gate: Event, parent_pid: int) -> None:
-    """父行程開齊工人前不准完成任何工作，避免執行器提早重用閒置工人。"""
-    threading.Thread(target=_watch_parent, args=(parent_pid,), daemon=True).start()
-    gate.wait()
-    _WORKER_SLOT.value = factory()
-
-
-@contextmanager
-def _spawn_environment() -> Iterator[None]:
-    """只暫寫數值計算需要的鍵；其餘執行緒的環境讀寫完全保留。"""
-    child = child_process_env(threads=1)
-    overrides = {name: child[name] for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")}
-    overrides.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
-    configure_calculation_jax(env=overrides)
-    original = {name: os.environ.get(name) for name in overrides}
-    try:
-        os.environ.update(overrides)
-        yield
-    finally:
-        for name, value in original.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-
-
-@contextmanager
-def spawn_pool(workers: int, *, factory: Callable[[], object]) -> Iterator[ProcessPoolExecutor]:
-    """以 spawn 開工人；載入數值套件前繼承父行程的 CPU 三格並釘單緒。
-
-    啟動後立即還原父環境；鎖只覆蓋暫時換環境與開工人，不覆蓋計算。
-    執行器以原例外傳回工作錯誤，不重試；正常等待回收，出錯取消可取消的未開始工作並回傳。
-    正在算的工作不會被中斷，可能在背景算完；錯誤返回不代表工人已全部收回。
-    """
-    checked_workers(workers)
-    context = multiprocessing.get_context("spawn")
-    gate = context.Event()
-    pool = ProcessPoolExecutor(max_workers=workers, mp_context=context,
-                               initializer=partial(_spawn_initialize, factory, gate, os.getpid()))
-    try:
-        with _SPAWN_LOCK:
-            try:
-                with _spawn_environment():
-                    ready = [pool.submit(_spawn_ready) for _ in range(workers)]
-            finally:
-                gate.set()
-        for future in ready:
-            future.result()
-        yield pool
-    except BaseException:
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    else:
-        pool.shutdown(wait=True)
-
-
-def ordered_map[T, R](pool: ProcessPoolExecutor, function: Callable[[T], R], jobs: Sequence[T], *,
-                      pending: int) -> Iterator[R]:
-    """最多保留 pending 件未回收工作，照輸入順序回傳，避免完整場在父行程堆滿記憶體。"""
-    remaining = iter(jobs)
-    futures = deque(pool.submit(function, job) for job in islice(remaining, pending))
-    try:
-        while futures:
-            yield futures.popleft().result()
-            for job in islice(remaining, 1):
-                futures.append(pool.submit(function, job))
-    finally:
-        for future in futures:
-            future.cancel()
 
 
 def child_process_env(*, threads: int | None = None, env: Mapping[str, str] | None = None) -> dict[str, str]:

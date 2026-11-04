@@ -16,6 +16,7 @@ import pytest
 from numpy.typing import NDArray
 
 from aosr import runtime
+from aosr.physics import fem_full_batch
 from aosr.config.fem_reduced import ReducedModelSettings
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
@@ -203,7 +204,8 @@ def invalid(directory: Path) -> None:
 
 def _environment() -> tuple[int, str, dict[str, str | None]]:
     import multiprocessing
-    names = (*_CPU_PIN_VARS, "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+    names = (*_CPU_PIN_VARS, "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+             runtime.PLATFORMS_VAR, runtime.ENABLE_X64_VAR)
     return os.getpid(), multiprocessing.get_start_method(), {name: os.environ.get(name) for name in names}
 
 
@@ -229,16 +231,16 @@ def environment(directory: Path) -> None:
         return future
 
     with patch.object(ProcessPoolExecutor, "submit", staggered):
-        with runtime.spawn_pool(2, factory=partial(_record_environment, directory)) as pool:
+        with fem_full_batch.spawn_pool(2, factory=partial(_record_environment, directory)) as pool:
             pid, method, env = pool.submit(_environment).result()
             assert pid != os.getpid() and method == "spawn"
     records = list(directory.glob("*.json"))
-    assert len(records) == 2, "workers were created after the pinned environment was restored"
+    assert len(records) == 2, "spawn must create both workers before releasing the gate"
     for record in records:
         method, env = json.loads(record.read_text(encoding="utf-8"))
         assert method == "spawn"
-        for name in _CPU_PIN_VARS:
-            assert env[name] == before[name] and env[name]
+        for name, value in env.items():
+            assert value == before.get(name), name
         for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
             assert env[name] == "1"
     assert dict(os.environ) == before

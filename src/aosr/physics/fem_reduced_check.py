@@ -16,8 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from aosr import runtime
-from aosr.physics.fem_full_batch import FullSolveBatch
+from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers
 from aosr.geometry.shoebox import Point
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
@@ -117,7 +116,7 @@ def validate_reduced(
     *, workers: int = 1,
 ) -> ValidationReport:
     """每組留出材料、每個頻點都完整解一次（殘差上限沿用建模當次的設定），跟替身比。"""
-    runtime.checked_workers(workers)
+    checked_workers(workers)
     _checked_pairing(model, operators)
     axis = model.frequencies_hz
     holdouts = impedance_rows(holdout_impedances, axis, patch_keys=operators.patch_keys)

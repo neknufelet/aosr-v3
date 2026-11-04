@@ -25,6 +25,7 @@ from types import FrameType
 from typing import Final, Literal
 
 from aosr import runtime
+from aosr.physics.fem_full_batch import checked_workers
 from aosr.gradient.endpoint_run import run_endpoint
 from aosr.gradient.material_gradient import SearchStopped, StopCheck
 from aosr.gradient.material_gradient_ledger import read_ledger
@@ -113,7 +114,7 @@ def main(argv: list[str]) -> int:
         if argv[1] != ENDPOINT_MODE or argv[2] != "--workers":
             return 2
         try:
-            workers = runtime.checked_workers(int(argv[3]))
+            workers = checked_workers(int(argv[3]))
         except ValueError as error:
             sys.stderr.write(f"{error}\n")
             return 2

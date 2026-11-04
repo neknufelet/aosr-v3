@@ -63,8 +63,7 @@ from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import AirLayer, Assembly, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics.fem_reduced import FullOperators, ReducedModel, impedance_rows, walls_at
-from aosr import runtime
-from aosr.physics.fem_full_batch import FullSolveBatch
+from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers
 from aosr.physics.fem_reduced_check import validate_reduced
 from aosr.physics.report_surfaces import OLD_WALL_FIELD, ZONE_WALL_FIELD, WholeWallZone, validation_content, whole_wall_materials
 from aosr.reporting.scheme import Scene
@@ -268,7 +267,7 @@ def full_model_pressures[K: BoundaryKey](operators: FullOperators, materials: Ma
     （``impedance_rows``）、``FullSolver.solve`` 後乘座位取值列。頻率軸由呼叫端給（用替身的軸），不自己造。
     ``air`` 必須跟算子同密度、同聲速（:func:`checked_air`）。
     """
-    runtime.checked_workers(workers)
+    checked_workers(workers)
     require_matching_patches(operators, keys=material_keys(materials))
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
                 source="完整模型算子")

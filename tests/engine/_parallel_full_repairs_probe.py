@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import signal
 import subprocess
@@ -21,12 +22,13 @@ from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 
 from aosr import runtime
+from aosr.physics import fem_full_batch
 from aosr.physics import fem_reduced_build as builder
 from aosr.physics.fem_reduced_boundary import BoundaryImpedances
 from aosr.physics.fem_full_batch import FullSolveBatch, FullSolveJob, _WorkerSolver, _init_worker, _solve_worker
 from aosr.physics.fem_reduced import FullOperators, FullSolver
 from tests.engine._parallel_full_solves_probe import (
-    AXIS, SETTINGS, WALLS, _equal, _normal_time, _operators, _saved_pair,
+    AXIS, SETTINGS, WALLS, _environment, _equal, _normal_time, _operators, _record_environment, _saved_pair,
 )
 
 
@@ -53,7 +55,7 @@ def _anchor_solve(job: FullSolveJob, directory: Path) -> tuple[int, int, NDArray
         initial.append(matrix.toarray().copy())
         return MKLPardisoSolver(matrix, matrix_type=matrix_type, factor=factor)
 
-    solver = runtime.worker_state(_WorkerSolver)
+    solver = fem_full_batch.worker_state(_WorkerSolver)
     assert solver.solves == 0
     with patch("pydiso.mkl_solver.MKLPardisoSolver", tracked):
         solution = _solve_worker(job)
@@ -66,7 +68,7 @@ def anchor(directory: Path) -> None:
     jobs = [(AXIS[0], WALLS[0]), (AXIS[3], WALLS[2])]
     with FullSolveBatch(operators, max_relative_residual=1e-8, workers=1) as single:
         expected = list(single.map(jobs))
-    with runtime.spawn_pool(2, factory=partial(_init_worker, operators, 1e-8, jobs[0])) as pool:
+    with fem_full_batch.spawn_pool(2, factory=partial(_init_worker, operators, 1e-8, jobs[0])) as pool:
         first = pool.submit(_anchor_solve, jobs[0], directory)
         _until(lambda: len(list(directory.glob("ready-*"))) == 1)
         second = pool.submit(_anchor_solve, jobs[1], directory)
@@ -83,20 +85,22 @@ def anchor(directory: Path) -> None:
 def _slot_count(directory: Path) -> tuple[int, int]:
     (directory / f"count-{os.getpid()}").touch()
     _until(lambda: len(list(directory.glob("count-*"))) == 2)
-    return os.getpid(), runtime.worker_state(_WorkerSolver).solves
+    return os.getpid(), fem_full_batch.worker_state(_WorkerSolver).solves
 
 
 def environment(directory: Path) -> None:
     original = dict(os.environ)
     os.environ.update({"AOSR_KEEP": "present", "AOSR_CHANGE": "old", "AOSR_DELETE": "old"})
-    os.environ.pop("MKL_NUM_THREADS", None)
-    os.environ["OMP_NUM_THREADS"] = "7"
+    # 只驗環境繼承，不算數；用不同的精度設定抓到並行層擅自覆寫 JAX 設定。
+    os.environ[runtime.ENABLE_X64_VAR] = "false"
+    expected = _environment()[2]
     start, done = threading.Event(), threading.Event()
-    observed: list[str | None] = []
+    observed: list[dict[str, str | None]] = []
 
     def update() -> None:
         assert start.wait(30)
-        observed.append(os.environ.get("AOSR_KEEP"))
+        observed.append(_environment()[2])
+        assert os.environ.get("AOSR_KEEP") == "present"
         os.environ["AOSR_CHANGE"] = "new"
         os.environ["AOSR_ADDED"] = "new"
         os.environ.pop("AOSR_DELETE", None)
@@ -113,13 +117,18 @@ def environment(directory: Path) -> None:
     updater.start()
     try:
         with patch.object(ProcessPoolExecutor, "submit", during_start):
-            with runtime.spawn_pool(2, factory=_noop):
-                pass
+            with fem_full_batch.spawn_pool(2, factory=partial(_record_environment, directory)) as pool:
+                assert pool.submit(_environment).result()[2] == expected
         updater.join(timeout=15)
-        assert observed == ["present"], "unrelated parent environment disappeared during spawn"
+        assert observed == [expected], "parent numerical environment changed during spawn"
+        records = list(directory.glob("*.json"))
+        assert len(records) == 2
+        for record in records:
+            method, inherited = json.loads(record.read_text(encoding="utf-8"))
+            assert method == "spawn" and inherited == expected
         assert os.environ["AOSR_CHANGE"] == os.environ["AOSR_ADDED"] == "new"
         assert "AOSR_DELETE" not in os.environ
-        assert "MKL_NUM_THREADS" not in os.environ and os.environ["OMP_NUM_THREADS"] == "7"
+        assert _environment()[2] == expected
     finally:
         updater.join(timeout=15)
         for name in set(os.environ) | set(original):
@@ -134,7 +143,7 @@ def _record_pid(directory: Path) -> None:
 
 
 def _middle(directory: Path) -> None:
-    with runtime.spawn_pool(2, factory=partial(_record_pid, directory)):
+    with fem_full_batch.spawn_pool(2, factory=partial(_record_pid, directory)):
         _until(lambda: len(list(directory.glob("worker-*"))) == 2)
         (directory / "opened").touch()
         time.sleep(120)
@@ -142,7 +151,7 @@ def _middle(directory: Path) -> None:
 
 def _gated_middle(directory: Path) -> None:
     # 在 initializer 進去、閘門尚未開啟時留下 pid，再停住父行程的第二次提交。
-    from aosr import runtime as module
+    from aosr.physics import fem_full_batch as module
 
     def stalled[T](pool: ProcessPoolExecutor, fn: Callable[[], T]) -> Future[T]:
         future = submit(pool, fn)
@@ -159,7 +168,7 @@ def _gated_middle(directory: Path) -> None:
 
 def _record_before_gate(directory: Path, factory: Callable[[], object], gate: Event, parent_pid: int) -> None:
     _record_pid(directory)
-    runtime._spawn_initialize(factory, gate, parent_pid)
+    fem_full_batch._spawn_initialize(factory, gate, parent_pid)
 
 
 def _parent_death(directory: Path, mode: str) -> None:
@@ -275,7 +284,7 @@ def cancel(directory: Path) -> None:
     started = 0.0
     try:
         with pytest.raises(ValueError, match="original"):
-            with runtime.spawn_pool(2, factory=_noop) as pool:
+            with fem_full_batch.spawn_pool(2, factory=_noop) as pool:
                 running = [pool.submit(_slow, directory) for _ in range(2)]
                 _until(lambda: len(list(directory.glob("started-*"))) == 2)
                 pending = [pool.submit(_queued, directory, i) for i in range(12)]

@@ -57,6 +57,7 @@ from types import FrameType
 from typing import TYPE_CHECKING, Final
 
 from aosr import runtime
+from aosr.physics.fem_full_batch import checked_workers
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
@@ -89,7 +90,7 @@ def _presets(text: str) -> tuple[str | None, ...]:
 
 def _workers(text: str) -> int:
     try:
-        return runtime.checked_workers(int(text))
+        return checked_workers(int(text))
     except ValueError as error:
         raise argparse.ArgumentTypeError("--workers 必須是正整數") from error
 
@@ -176,7 +177,7 @@ def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1) 
     runtime.configure_jax(platforms="cpu", enable_x64=True, env=env)
     command = [sys.executable, "-m", "aosr.gradient.worker", str(folder), mode]
     if workers != 1:
-        command.extend(("--workers", str(runtime.checked_workers(workers))))
+        command.extend(("--workers", str(checked_workers(workers))))
     process: subprocess.Popen[bytes] | None = None
     try:
         previous = signal.pthread_sigmask(signal.SIG_BLOCK, FORWARDED_SIGNALS)

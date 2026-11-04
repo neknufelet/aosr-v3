@@ -17,9 +17,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
-from aosr import runtime
 from aosr.config.fem_reduced import ReducedModelSettings
-from aosr.physics.fem_full_batch import FullSolveBatch
+from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
     BuildLedger, FullOperators, FullSolver, GreedyRound, ImpedanceRows, ReducedMatrices, ReducedModel,
@@ -118,7 +117,7 @@ def build_reduced_model(
     ``training_impedances`` 是呼叫端算好的一批材料，每組每面片各一條逐頻阻抗（面片鍵對整條頻率軸的列；六個整面仍接受 ``Wall``，
     或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。
     """
-    runtime.checked_workers(workers)
+    checked_workers(workers)
     start = time.perf_counter()
     axis = checked_axis(frequencies_hz)
     training = impedance_rows(training_impedances, axis, patch_keys=operators.patch_keys)
