@@ -194,11 +194,6 @@ reason = "上一代那一棵樹的計畫文件（峰谷旋鈕的設計）。"
 expires = "2026-12-08"
 
 [[settings.allow]]
-path = "docs/p5_design_harden/f1-inc1-window-probe.log"
-reason = "上一代那一棵樹的探針紀錄（F1 全頻帶視窗）。`fem_lane.py` 的 `FULLBAND_FLATNESS_FMAX_HZ` 註解指向它。"
-expires = "2026-12-08"
-
-[[settings.allow]]
 path = "tests/test_response.py"
 reason = "上一代那一棵樹的考卷。`blueprint/generate_materials_cut1_answers.py` 的 docstring 說「在上一代唯一直接驗 response/source/registry 的 tests/test_response.py 只有 4 題」——那是 donor 樹的檔案，不是這一棵樹的引用。跟扣掉 v2-audit/ 是同一個理由：證物不是引用。"
 expires = "2026-12-08"
