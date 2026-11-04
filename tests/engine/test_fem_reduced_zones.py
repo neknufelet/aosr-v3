@@ -29,6 +29,7 @@ from aosr.physics.fem_reduced_store import computation_digest, load_reduced, man
 from tests.engine._precision_contracts import contract_value
 from tests.engine._zone_rom_case import AXIS, PARTITIONS, ROOM, SETTINGS, materials, operators, write_v1
 
+_CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
 EXPECTED_PATCHES = ((Wall.FLOOR, ""), (Wall.CEILING, ""), (Wall.X0, "right"), (Wall.X0, "left"),
                     (Wall.XL, ""), (Wall.Y0, ""), (Wall.YL, ""))
 CONTROL = ("4b85750757b9f3b51f883cf6a615969be9e1d93a686eb0efa394c82e81bfe2e6",
@@ -64,7 +65,8 @@ def zoned_model(zoned_operators: reduced.FullOperators) -> reduced.ReducedModel:
 def _jax(model: reduced.ReducedModel, z: np.ndarray, directory: Path) -> tuple[np.ndarray, np.ndarray]:
     save_reduced(model, directory / "model.npz")
     np.save(directory / "z.npy", z, allow_pickle=False)
-    env = child_process_env(threads=1)
+    env = child_process_env(threads=1).copy()
+    env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
     probe = Path(__file__).with_name("_zone_rom_jax_probe.py")
@@ -72,6 +74,22 @@ def _jax(model: reduced.ReducedModel, z: np.ndarray, directory: Path) -> tuple[n
                              env=env, capture_output=True, text=True, timeout=30)
     assert process.returncode == 0, process.stdout + process.stderr
     return np.load(directory / "pressure.npy", allow_pickle=False), np.load(directory / "jit.npy", allow_pickle=False)
+
+
+def _numpy_pressure(model: reduced.ReducedModel, values: reduced.FrequencyPatchImpedances) -> np.ndarray:
+    rows = reduced.impedance_rows([values], AXIS, patch_keys=model.patch_keys)[0]
+    m = model.matrices
+    expected = []
+    for index, frequency in enumerate(AXIS):
+        k2, coefficients = reduced.system_coefficients(frequency, reduced.walls_at(rows, index),
+            density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s, patch_keys=model.patch_keys)
+        expected.append(reduced.reduced_pressure(m.stiffness, m.mass, m.boundary, m.sources, m.receivers, k2, coefficients))
+    return np.asarray(expected)
+
+
+def _assert_jax_matches_numpy(pressures: tuple[np.ndarray, ...], reference: np.ndarray) -> None:
+    for pressure in pressures:
+        assert np.all(np.abs(pressure - reference) <= contract_value("fem_reduced_jax_vs_numpy") * np.abs(reference))
 
 
 def test_whole_model_is_bitwise_starting_commit(tmp_path: Path) -> None:
@@ -84,9 +102,11 @@ def test_whole_model_is_bitwise_starting_commit(tmp_path: Path) -> None:
     assert (matrices_digest(old.matrices), computation_digest(old), old.input_hash) == CONTROL
     for name in ("stiffness", "mass", "boundary", "sources", "receivers"):
         assert getattr(old.matrices, name).tobytes() == getattr(model.matrices, name).tobytes()
-    z = np.asarray([materials(99, 1)[0][wall] for wall in Wall.all()])
-    pressure, _ = _jax(model, z, tmp_path)
-    assert hashlib.sha256(np.asarray(pressure).tobytes()).hexdigest() == "68902640670a5137a93931b6f193dd9891048ccc25877dddd3e5b33fd131062b"
+    # JAX 求值走 XLA，跨處理器不錄逐位答案（verification-split-stand-in-wiring-and-cross-cpu-tolerance 第 2、6 條）：
+    # 改成同一次執行裡跟 numpy 比，尺是登記簿的 fem_reduced_jax_vs_numpy。
+    values = materials(99, 1)[0]
+    z = np.asarray([values[wall] for wall in Wall.all()])
+    _assert_jax_matches_numpy(_jax(model, z, tmp_path), _numpy_pressure(model, {(wall, ""): row for wall, row in values.items()}))
     assert old.patch_keys == reduced.boundary_patches()
 
 
@@ -171,16 +191,7 @@ def test_partitioned_roundtrip_and_layout_binding(zoned_model: reduced.ReducedMo
 def test_partitioned_jax_matches_numpy(zoned_model: reduced.ReducedModel, tmp_path: Path) -> None:
     values = _zoned_materials(99, 1)[0]
     z = np.asarray([values[key] for key in EXPECTED_PATCHES])
-    actual, compiled = _jax(zoned_model, z, tmp_path)
-    expected = []
-    rows = reduced.impedance_rows([values], AXIS, patch_keys=EXPECTED_PATCHES)[0]
-    for index, frequency in enumerate(AXIS):
-        k2, coefficients = reduced.system_coefficients(frequency, reduced.walls_at(rows, index),
-            density_kg_m3=zoned_model.density_kg_m3, sound_speed_m_s=zoned_model.sound_speed_m_s,
-            patch_keys=EXPECTED_PATCHES)
-        m = zoned_model.matrices
-        expected.append(reduced.reduced_pressure(m.stiffness, m.mass, m.boundary, m.sources, m.receivers, k2, coefficients))
-    reference = np.asarray(expected)
+    pressures = _jax(zoned_model, z, tmp_path)
     templates = np.load(tmp_path / "templates.npy", allow_pickle=False)
     reference_z = np.load(tmp_path / "template_reference.npy", allow_pickle=False)
     assert templates.shape == (7, len(AXIS))
@@ -189,8 +200,7 @@ def test_partitioned_jax_matches_numpy(zoned_model: reduced.ReducedModel, tmp_pa
     checks = json.loads((tmp_path / "templates.json").read_text(encoding="utf-8"))
     assert checks["mask"] == [True, False, False, False, False, False, False]
     assert checks["same_mask"] and len(checks["errors"]) == 3
-    for pressure in (actual, compiled):
-        assert np.all(np.abs(pressure - reference) <= contract_value("fem_reduced_jax_vs_numpy") * np.abs(reference))
+    _assert_jax_matches_numpy(pressures, _numpy_pressure(zoned_model, values))
 
 
 @pytest.mark.parametrize("entry", ["wall_coefficients", "reduced_pressures"])
