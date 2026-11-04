@@ -1,7 +1,7 @@
 """#561 第五步：面片排序、非均勻快照、舊檔、存讀與可微求值。
 
-控制答案及 tests/engine/data/zone_rom_v1.npz、tests/engine/data/zone_rom_v1.manifest.json：
-2026-11-04 在 c6f5138a286de8a1c73cebd21a536de18759af53 的產品程式單緒實量、原版 save_reduced 存檔。
+控制答案：2026-11-04 在 c6f5138a286de8a1c73cebd21a536de18759af53 的產品程式單緒實量。
+舊檔由 ``_zone_rom_case.write_v1`` 照起點 ``save_reduced`` 的寫法現產（第 1 版格式）。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from aosr.physics.fem_reduced_build import build_reduced_model
 from aosr.physics.fem_reduced_check import validate_reduced, within_reduced_contract
 from aosr.physics.fem_reduced_store import computation_digest, load_reduced, manifest_path, matrices_digest, save_reduced
 from tests.engine._precision_contracts import contract_value
-from tests.engine._zone_rom_case import AXIS, PARTITIONS, ROOM, SETTINGS, materials, operators
+from tests.engine._zone_rom_case import AXIS, PARTITIONS, ROOM, SETTINGS, materials, operators, write_v1
 
 EXPECTED_PATCHES = ((Wall.FLOOR, ""), (Wall.CEILING, ""), (Wall.X0, "right"), (Wall.X0, "left"),
                     (Wall.XL, ""), (Wall.Y0, ""), (Wall.YL, ""))
@@ -77,7 +77,10 @@ def _jax(model: reduced.ReducedModel, z: np.ndarray, directory: Path) -> tuple[n
 def test_whole_model_is_bitwise_starting_commit(tmp_path: Path) -> None:
     model = build_reduced_model(operators(), AXIS, materials(1, 8), settings=SETTINGS)
     assert (matrices_digest(model.matrices), computation_digest(model), model.input_hash) == CONTROL
-    old = load_reduced(Path(__file__).with_name("data") / "zone_rom_v1.npz")
+    write_v1(model, tmp_path / "v1.npz")
+    manifest = json.loads((tmp_path / "v1.manifest.json").read_text(encoding="utf-8"))
+    assert manifest["format_version"] == 1 and "patches" not in manifest
+    old = load_reduced(tmp_path / "v1.npz")
     assert (matrices_digest(old.matrices), computation_digest(old), old.input_hash) == CONTROL
     for name in ("stiffness", "mass", "boundary", "sources", "receivers"):
         assert getattr(old.matrices, name).tobytes() == getattr(model.matrices, name).tobytes()
