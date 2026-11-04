@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from aosr.config.art_lane import (
     ART_NEUMANN_K_MAX,
@@ -46,6 +46,7 @@ from aosr.config.three_lane_crossover import (
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.construction_models import ConstructionNote, SurfaceMaterial
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
+from aosr.physics.wall_surfaces import ZoneAbsorption
 from aosr.physics.crossover import (
     CrossoverWeights,
     crossover_weights,
@@ -552,6 +553,7 @@ def _solve_report_late_decay(
     *,
     room: Room,
     absorption_by_wall: Mapping[str, tuple[float, ...]],
+    absorption_by_zone: ZoneAbsorption | None = None,
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
 ) -> _ReportLateDecay:
@@ -574,6 +576,9 @@ def _solve_report_late_decay(
                                 for wall, row in absorption_by_wall.items()},
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
+            absorption_by_zone=({wall: tuple(replace(cell, absorption=tuple(cell.absorption[indices[f]]
+                for f in frequencies_hz)) for cell in cells) for wall, cells in absorption_by_zone.items()}
+                if absorption_by_zone else None),
         )
         try:
             result = solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s)

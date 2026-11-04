@@ -6,7 +6,7 @@
 ``lib.physics.ray_kernel_tracing`` 模組第 221–237 行；對數頻率上的 ``t²(3−2t)`` 見
 ``lib.scoring.crossover`` 模組第 42–46 行。
 
-這支只 import 標準庫、``config`` 與 ``geometry``（同層 ``physics`` 沒有反向依賴），
+整面路徑保留原計算；矩形吸音列由同層牆面響應先換成面積加權等效列，
 不讀檔、不改環境、不 print。所有輸出只由輸入決定。
 """
 from __future__ import annotations
@@ -23,6 +23,8 @@ from aosr.config.three_lane_crossover import (
 )
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.geometry.shoebox import Room, Wall
+
+from aosr.physics.wall_surfaces import ZoneAbsorption, equivalent_absorption_rows
 
 FaceAbsorption = Mapping[Wall, Mapping[float, float]]
 
@@ -102,6 +104,7 @@ def _absorption(value: float, wall: Wall, frequency_hz: float) -> float:
 def eyring_t60_by_band(
     room: Room,
     absorption_by_wall: FaceAbsorption,
+    *, absorption_by_zone: ZoneAbsorption | None = None,
 ) -> dict[float, float]:
     """由鞋盒六面每頻帶吸音率算面積加權 Eyring T60（秒）。
 
@@ -112,6 +115,10 @@ def eyring_t60_by_band(
     """
     volume, areas = _room_measures(room)
     frequencies = _validated_bands(absorption_by_wall)
+    if absorption_by_zone:
+        rows = equivalent_absorption_rows(room, {wall.wall_name(): tuple(absorption_by_wall[wall][f] for f in frequencies)
+                                                for wall in Wall.all()}, absorption_by_zone)
+        absorption_by_wall = {Wall.from_name(name): dict(zip(frequencies, row, strict=True)) for name, row in rows.items()}
     surface_area = sum(areas[wall] for wall in Wall.all())
     result: dict[float, float] = {}
     for frequency_hz in frequencies:

@@ -58,7 +58,8 @@ from aosr.physics.wall_reflections import WallReflectionSources
 from aosr.physics.furniture_paths import direct_path_blockers, filter_room_paths, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_pressure_with_directivity
 from aosr.physics.report_furniture import AbsoluteFurniture
-from aosr.physics.wall_surfaces import impedance_absorption_rows
+from aosr.physics.report_surfaces import RectangleZonesUnsupported
+from aosr.physics.wall_surfaces import ZoneAbsorption, impedance_absorption_rows
 from aosr.physics.late_energy import (
     LateEnergyInputs,
     LateEnergyOrderBand,
@@ -641,8 +642,8 @@ def solve_geometric_lane(
     reflection_order_k: int = REFLECTION_ORDER_K,
     late_result: LateEnergyOrderResult | None = None,
     absorption_by_wall: Mapping[str, tuple[float, ...]] | None = None,
-    furniture: FurnitureLaneInputs | None = None,
-    reflection_sources: WallReflectionSources | None = None,
+    absorption_by_zone: ZoneAbsorption | None = None,
+    furniture: FurnitureLaneInputs | None = None, reflection_sources: WallReflectionSources | None = None,
 ) -> GeometricLaneResult:
     """以既有鏡像法與晚期精確解計算細軸上的報表四欄與幾何能量。
 
@@ -652,6 +653,8 @@ def solve_geometric_lane(
     ``REFLECTION_ORDER_K``。可傳入同房間、同細軸、同 K 已算好的 ``late_result`` 共用；
     不給時以 absorption_by_wall（逐面吸音率）求解；舊阻抗呼叫由牆面響應換算。
     """
+    if absorption_by_zone:
+        raise RectangleZonesUnsupported(next(iter(absorption_by_zone)))
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     early = solve_geometric_early_lane(
         source_model=source_model,
@@ -709,6 +712,7 @@ def solve_geometric_late_energy(
     rho_c_pa_s_per_m: float,
     frequencies_hz: tuple[float, ...],
     absorption_by_wall: Mapping[str, tuple[float, ...]],
+    absorption_by_zone: ZoneAbsorption | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
 ) -> LateEnergyOrderResult:
     """以細軸吸音率算不依賴聲源與接收點的逐階晚期混響。"""
@@ -717,6 +721,7 @@ def solve_geometric_late_energy(
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         frequencies_hz=frequencies_hz,
         absorption_by_wall=absorption_by_wall,
+        absorption_by_zone=absorption_by_zone,
         reflection_order_k=reflection_order_k,
     )
 
@@ -727,6 +732,7 @@ def _solve_geometric_late_energy_rows(
     rho_c_pa_s_per_m: float,
     frequencies_hz: tuple[float, ...],
     absorption_by_wall: Mapping[str, tuple[float, ...]],
+    absorption_by_zone: ZoneAbsorption | None = None,
     reflection_order_k: int,
 ) -> LateEnergyOrderResult:
     """共用牆面響應給的吸音率列及晚期混響算式。"""
@@ -736,6 +742,7 @@ def _solve_geometric_late_energy_rows(
             rho_c_pa_s_per_m=rho_c_pa_s_per_m,
             frequencies_hz=frequencies_hz,
             absorption_by_wall=dict(absorption_by_wall),
+            absorption_by_zone=absorption_by_zone,
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         ),

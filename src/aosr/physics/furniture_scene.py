@@ -16,6 +16,7 @@ from aosr.config.paths import config_path
 from aosr.geometry.furniture import FurnitureBox, FurnitureKind, Vec3, contact_margin_m
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.crossover import _room_measures
+from aosr.physics.wall_surfaces import ZoneAbsorption, equivalent_absorption_rows
 from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis, furniture_impedance_on_axis
 from aosr.physics.furniture_paths import Furniture, FurniturePath, furniture_path_amplitude
 from aosr.physics.report_furniture import AbsoluteFurniture, normalized_furniture
@@ -138,12 +139,18 @@ def furniture_absorption_area_m2(items: Sequence[AbsoluteFurniture], frequencies
 def furniture_adjusted_absorption(
     room: Room, frequencies_hz: tuple[float, ...],
     absorption_by_wall: Mapping[Wall, tuple[float, ...]], absorption_area_m2: tuple[float, ...],
+    *, absorption_by_zone: ZoneAbsorption | None = None,
 ) -> dict[Wall, tuple[float, ...]]:
     """同一 ε 乘六面剩餘反射率；總吸音多 A_f，牆面積與體積都不改。
 
+    有逐區列時回面積等效的整房吸音列；不回逐區修正，不可拿這份列取代輻射度的逐區資料。
     供方案晚期一族與物理性質考卷共用。無家具時呼叫端直接跳過，不走 ε=0。
     全吸牆 ART 原可接受，但有家具的總量分配無剩餘反射率，必須拒收。
     """
+    if absorption_by_zone:
+        effective = equivalent_absorption_rows(room, {wall.wall_name(): row for wall, row in absorption_by_wall.items()},
+                                              absorption_by_zone)
+        absorption_by_wall = {Wall.from_name(name): row for name, row in effective.items()}
     _, areas = _room_measures(room)
     epsilon = []
     for i, (frequency, af) in enumerate(zip(frequencies_hz, absorption_area_m2, strict=True)):

@@ -15,9 +15,11 @@ from numpy.typing import NDArray
 from aosr.config.construction_environment import construction_environment
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
-from aosr.geometry.shoebox import Wall
+from aosr.geometry.shoebox import Room, Wall
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.materials.construction_models import Assembly, ConstantImpedance, ConstructionNote, MeasuredImpedance, SurfaceMaterial
+
+from aosr.physics.report_surfaces import RectangleZone, SurfaceZone, validate_surface_partition, whole_wall_materials
 
 
 @dataclass(frozen=True)
@@ -225,3 +227,136 @@ def assembly_endpoint_responses(
     diffuse, _ = random_incidence_absorption(material, axis, air=air, ranges=ranges)
     return (tuple(np.asarray(normal, dtype=np.complex128).tolist()),
             tuple(float(value) for value in np.asarray(diffuse, dtype=np.float64)), air.rho_c)
+
+
+@dataclass(frozen=True)
+class RectangleAbsorption:
+    """一個矩形的逐頻無規入射吸音率；保留材料、座標與當次構造註記。"""
+
+    zone: RectangleZone
+    absorption: tuple[float, ...]
+    notes: tuple[ConstructionNote, ...] = ()
+
+
+ZoneAbsorption = Mapping[str, tuple[RectangleAbsorption, ...]]
+
+
+@dataclass(frozen=True)
+class ZonedWallSurfaceResponse:
+    """每面等效列與逐區列同行；等效列只供需要整面總吸音量的公式。"""
+
+    equivalent: WallSurfaceResponse
+    absorption_by_zone: dict[str, tuple[RectangleAbsorption, ...]]
+
+    def named_rows(self, frequencies_hz: tuple[float, ...]) -> dict[str, tuple[float, ...]]:
+        """取面積平均後的整面列；輻射度必須另帶 named_zone_rows。"""
+        return self.equivalent.named_rows(frequencies_hz)
+
+    def band_rows(self, frequencies_hz: tuple[float, ...]) -> dict[Wall, dict[float, float]]:
+        """艾林公式只需面積加權的逐面逐帶列。"""
+        return self.equivalent.band_rows(frequencies_hz)
+
+    def named_zone_rows(self, frequencies_hz: tuple[float, ...]) -> dict[str, tuple[RectangleAbsorption, ...]]:
+        """逐區按精確頻點選列，不內插、不改矩形。"""
+        indices = {f: i for i, f in enumerate(self.equivalent.frequencies_hz)}
+        return {wall: tuple(RectangleAbsorption(cell.zone,
+                    tuple(cell.absorption[indices[f]] for f in frequencies_hz), cell.notes) for cell in cells)
+                for wall, cells in self.absorption_by_zone.items()}
+
+
+def _wall_size(room: Room, name: str) -> tuple[float, float]:
+    axes = [axis for axis in range(3) if axis != Wall.from_name(name).axis()]
+    return room.length(axes[0]), room.length(axes[1])
+
+
+def validate_zone_absorption(room: Room, rows: ZoneAbsorption, frequency_count: int) -> None:
+    """逐區列必須有效且蓋滿該牆；不收空清單、漏縫、重疊或錯頻帶。"""
+    if any(not math.isfinite(length) or length <= 0 for length in (room.Lx, room.Ly, room.Lz)):
+        raise ValueError("房間三軸必須是有限正數")
+    for name, cells in rows.items():
+        Wall.from_name(name)
+        if not cells:
+            raise ValueError(f"{name} 的分區吸音率不可為空")
+        for cell in cells:
+            if len(cell.absorption) != frequency_count:
+                raise ValueError(f"{name} 的分區吸音率頻帶數不同")
+            if any(not math.isfinite(a) or not 0.0 <= a <= 1.0 for a in cell.absorption):
+                raise ValueError(f"{name} 的分區吸音率必須有限且落在 [0,1]")
+        validate_surface_partition(room, {name: tuple(cell.zone for cell in cells)})
+
+
+def equivalent_absorption_rows(
+    room: Room, absorption_by_wall: Mapping[str, tuple[float, ...]],
+    absorption_by_zone: ZoneAbsorption,
+) -> dict[str, tuple[float, ...]]:
+    """Σ區面積×α／牆面積；未分區的牆直接保留原列，不做乘除。"""
+    if set(absorption_by_wall) != set(Wall.wall_names()):
+        raise ValueError("absorption_by_wall 必須恰好包含六面牆")
+    count = len(absorption_by_wall[Wall.FLOOR.wall_name()])
+    validate_zone_absorption(room, absorption_by_zone, count)
+    result = dict(absorption_by_wall)
+    for name, cells in absorption_by_zone.items():
+        width, height = _wall_size(room, name)
+        result[name] = tuple(sum((cell.zone.u_m[1] - cell.zone.u_m[0]) *
+            (cell.zone.v_m[1] - cell.zone.v_m[0]) * cell.absorption[i] for cell in cells) /
+            (width * height) for i in range(count))
+    return result
+
+
+def rectangle_patch_weights(
+    room: Room, name: str, cells: tuple[RectangleAbsorption, ...], n_per_wall: int,
+) -> NDArray[np.float64]:
+    """按既有小塊 u 外圈、v 內圈排序，矩形交集面積除以小塊面積。
+
+    只碰一區時直接給 1，確保邊界對齊後吸音率不多做浮點乘除。
+    """
+    width, height = _wall_size(room, name)
+    rows = []
+    for i in range(n_per_wall):
+        u0, u1 = width * i / n_per_wall, width * (i + 1) / n_per_wall
+        for j in range(n_per_wall):
+            v0, v1 = height * j / n_per_wall, height * (j + 1) / n_per_wall
+            overlaps = [max(0.0, min(u1, cell.zone.u_m[1]) - max(u0, cell.zone.u_m[0])) *
+                        max(0.0, min(v1, cell.zone.v_m[1]) - max(v0, cell.zone.v_m[0])) for cell in cells]
+            owners = [k for k, area in enumerate(overlaps) if area > 0.0]
+            rows.append([float(k == owners[0]) for k in range(len(cells))] if len(owners) == 1 else
+                        [area / ((u1 - u0) * (v1 - v0)) for area in overlaps])
+    return np.asarray(rows, dtype=np.float64)
+
+
+def zoned_wall_surface_response(
+    room: Room, zones_by_wall: Mapping[str, Sequence[SurfaceZone]], frequencies_hz: tuple[float, ...],
+    *, density_kg_m3: float, sound_speed_m_s: float,
+) -> ZonedWallSurfaceResponse:
+    """分區材料走原整面求值函式；每區保留註記，另算整面等效列。
+
+    整面方案只呼叫原入口一次。矩形材料依序以原六面入口求值，不複製 Paris 或構造算法。
+    """
+    if set(zones_by_wall) != set(Wall.wall_names()):
+        raise ValueError("zones_by_wall 必須恰好包含六面牆")
+    for name, cells in zones_by_wall.items():
+        if not cells or not all(isinstance(cell, RectangleZone) for cell in cells):
+            whole_wall_materials({name: cells})
+    validate_surface_partition(room, {name: tuple(cells) for name, cells in zones_by_wall.items()})
+    base = wall_surface_response({Wall.from_name(name): cells[0].material for name, cells in zones_by_wall.items()},
+        frequencies_hz, density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    rectangles = {}
+    notes = dict(base.notes_by_wall)
+    for name, cells in zones_by_wall.items():
+        wall = Wall.from_name(name)
+        rows = []
+        for i, zone in enumerate(cells):
+            if isinstance(zone, RectangleZone):
+                # 每區完全沿用整面函式；第一區的求值已在 base 完成。
+                response = base if i == 0 else wall_surface_response(
+                    {w: zone.material for w in Wall.all()}, frequencies_hz,
+                    density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+                rows.append(RectangleAbsorption(zone, response.absorption_by_wall[wall], response.notes_by_wall[wall]))
+                merge_construction_notes(notes, wall, response.notes_by_wall[wall])
+        if rows:
+            rectangles[name] = tuple(rows)
+    if not rectangles:
+        return ZonedWallSurfaceResponse(base, {})
+    effective = equivalent_absorption_rows(room, base.named_rows(frequencies_hz), rectangles)
+    return ZonedWallSurfaceResponse(WallSurfaceResponse(frequencies_hz,
+        {Wall.from_name(name): row for name, row in effective.items()}, notes), rectangles)
