@@ -1,6 +1,7 @@
 """#561 第五步：面片排序、非均勻快照、舊檔、存讀與可微求值。
 
-控制答案：2026-11-04 在 c6f5138a286de8a1c73cebd21a536de18759af53 的產品程式單緒實量。
+控制答案：2026-11-04 在 c6f5138a286de8a1c73cebd21a536de18759af53 的產品程式單緒實量，只留輸入雜湊；矩陣經有限元素
+直接解（PARDISO），跨處理器不逐位，不錄（verification-split-stand-in-wiring-and-cross-cpu-tolerance 第 2 條；雲端 Xeon 6975P 實紅過）。
 舊檔由 ``_zone_rom_case.write_v1`` 照起點 ``save_reduced`` 的寫法現產（第 1 版格式）。
 """
 from __future__ import annotations
@@ -32,9 +33,7 @@ from tests.engine._zone_rom_case import AXIS, PARTITIONS, ROOM, SETTINGS, materi
 _CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
 EXPECTED_PATCHES = ((Wall.FLOOR, ""), (Wall.CEILING, ""), (Wall.X0, "right"), (Wall.X0, "left"),
                     (Wall.XL, ""), (Wall.Y0, ""), (Wall.YL, ""))
-CONTROL = ("4b85750757b9f3b51f883cf6a615969be9e1d93a686eb0efa394c82e81bfe2e6",
-           "0b57de8a8514f72334acbd7b78919a6b524ef0fafc97ba5f2f530b832fa4d7e8",
-           "4ac3251bd369c68d0dfbad3dd11a4089f4bbe249f170b9b1df89636ba1a3ff76")
+CONTROL_INPUT_HASH = "4ac3251bd369c68d0dfbad3dd11a4089f4bbe249f170b9b1df89636ba1a3ff76"
 
 
 def _zoned_operators(reverse: bool = False) -> reduced.FullOperators:
@@ -92,14 +91,20 @@ def _assert_jax_matches_numpy(pressures: tuple[np.ndarray, ...], reference: np.n
         assert np.all(np.abs(pressure - reference) <= contract_value("fem_reduced_jax_vs_numpy") * np.abs(reference))
 
 
-def test_whole_model_is_bitwise_starting_commit(tmp_path: Path) -> None:
-    model = build_reduced_model(operators(), AXIS, materials(1, 8), settings=SETTINGS)
-    assert (matrices_digest(model.matrices), computation_digest(model), model.input_hash) == CONTROL
+def test_whole_model_input_pinned_v1_round_trip_and_holdout(tmp_path: Path) -> None:
+    whole = operators()
+    model = build_reduced_model(whole, AXIS, materials(1, 8), settings=SETTINGS)
+    assert model.input_hash == CONTROL_INPUT_HASH
+    # 矩陣不對起點逐位（見檔頭）；物理由留出組對完整解守，尺跟分區那題同一組登記值。
+    report = validate_reduced(model, whole, materials(99, 2))
+    assert within_reduced_contract(report, frequency_db=contract_value("fem_reduced_holdout_frequency_db"),
+                                  band_db=contract_value("fem_reduced_holdout_band_db")), report
     write_v1(model, tmp_path / "v1.npz")
     manifest = json.loads((tmp_path / "v1.manifest.json").read_text(encoding="utf-8"))
     assert manifest["format_version"] == 1 and "patches" not in manifest
     old = load_reduced(tmp_path / "v1.npz")
-    assert (matrices_digest(old.matrices), computation_digest(old), old.input_hash) == CONTROL
+    assert (matrices_digest(old.matrices), computation_digest(old), old.input_hash) == (
+        matrices_digest(model.matrices), computation_digest(model), model.input_hash)
     for name in ("stiffness", "mass", "boundary", "sources", "receivers"):
         assert getattr(old.matrices, name).tobytes() == getattr(model.matrices, name).tobytes()
     # JAX 求值走 XLA，跨處理器不錄逐位答案（verification-split-stand-in-wiring-and-cross-cpu-tolerance 第 2、6 條）：
