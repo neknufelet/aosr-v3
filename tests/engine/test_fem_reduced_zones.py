@@ -125,6 +125,16 @@ def test_nonuniform_holdout_within_registered_contract(zoned_model: reduced.Redu
     assert zoned_model.matrices.boundary.shape[0] == 7
 
 
+def test_partitioned_greedy_measures_remaining_candidates(zoned_operators: reduced.FullOperators) -> None:
+    # 少量起始快照留下候選；漏傳殘差路徑的 patch_keys（面片序）就會拒收這七片阻抗。
+    settings = SETTINGS.model_copy(update={"initial_impedance_count": 2, "initial_frequency_count": 2,
+                                          "candidates_per_round": 8, "batch": 2, "max_full_solves": 12})
+    model = build_reduced_model(zoned_operators, AXIS, _zoned_materials(1, 8), settings=settings)
+    assert model.patch_keys == EXPECTED_PATCHES
+    assert any(round.candidates > 0 and np.isfinite(round.max_residual) for round in model.ledger.rounds)
+    assert any(round.solved > 0 for round in model.ledger.rounds)
+
+
 def _resign(path: Path, document: dict[str, object]) -> None:
     document.pop("manifest_sha256", None)
     canonical = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -178,6 +188,41 @@ def test_partitioned_jax_matches_numpy(zoned_model: reduced.ReducedModel, tmp_pa
     assert checks["same_mask"] and len(checks["errors"]) == 3
     for pressure in (actual, compiled):
         assert np.all(np.abs(pressure - reference) <= contract_value("fem_reduced_jax_vs_numpy") * np.abs(reference))
+
+
+@pytest.mark.parametrize("entry", ["wall_coefficients", "reduced_pressures"])
+def test_partitioned_concrete_rigid_mask_rejected(entry: str, zoned_model: reduced.ReducedModel) -> None:
+    import jax.numpy as jnp
+    from aosr.physics import fem_reduced_jax
+
+    constants = fem_reduced_jax.reduced_constants(zoned_model)
+    assert isinstance(constants.partition_mask, np.ndarray) and constants.partition_mask.dtype == np.bool_
+    assert constants.partition_mask.tolist() == [False, False, True, True, False, False, False]
+    values = jnp.asarray([_zoned_materials(99, 1)[0][key] for key in EXPECTED_PATCHES], dtype=jnp.complex64)
+    evaluate = getattr(fem_reduced_jax, entry)
+    for index in (2, 3):
+        rigid = np.zeros(len(EXPECTED_PATCHES), dtype=bool)
+        rigid[index] = True
+        for mask in (rigid, jnp.asarray(rigid)):
+            with pytest.raises(ValueError, match="分區面片一定要有材料，不能是剛性"):
+                evaluate(constants, values, rigid_mask=mask)
+
+
+@pytest.mark.parametrize("entry", ["wall_coefficients", "reduced_pressures"])
+def test_partitioned_jit_ignores_zone_rigid_mask(entry: str, zoned_model: reduced.ReducedModel) -> None:
+    import jax
+    import jax.numpy as jnp
+    from aosr.physics import fem_reduced_jax
+
+    constants = fem_reduced_jax.reduced_constants(zoned_model)
+    values = jnp.asarray([_zoned_materials(99, 1)[0][key] for key in EXPECTED_PATCHES], dtype=jnp.complex64)
+    compiled = jax.jit(getattr(fem_reduced_jax, entry))
+    # 保留整面 FLOOR 的合法剛性，只把兩個分區位元從 False 翻成 True。
+    rigid = jnp.asarray([True, False, False, False, False, False, False])
+    expected = np.asarray(compiled(constants, values, rigid_mask=rigid))
+    actual = np.asarray(compiled(constants, values, rigid_mask=rigid.at[2:4].set(True)))
+    assert np.isfinite(expected).all()
+    assert actual.tobytes() == expected.tobytes()
 
 
 def test_partitioned_rigid_and_missing_materials_rejected(zoned_operators: reduced.FullOperators) -> None:
@@ -276,6 +321,28 @@ def test_manifest_missing_patch_list_is_rejected(zoned_model: reduced.ReducedMod
     _resign(path, document)
     with pytest.raises(ValueError, match="面片"):
         load_reduced(path)
+
+
+def test_manifest_reordered_patches_rejected_without_expected_keys(zoned_model: reduced.ReducedModel,
+                                                                  tmp_path: Path) -> None:
+    path = tmp_path / "model.npz"
+    save_reduced(zoned_model, path)
+    document = json.loads(manifest_path(path).read_text(encoding="utf-8"))
+    document["patches"][2:4] = list(reversed(document["patches"][2:4]))
+    _resign(path, document)
+    with pytest.raises(ValueError, match="面片清單與網格綁定不符"):
+        load_reduced(path)
+
+
+def test_input_hash_binds_patch_order_with_identical_zone_impedances(zoned_operators: reduced.FullOperators) -> None:
+    values = dict(_zoned_materials(1, 1)[0])
+    values[(Wall.X0, "left")] = values[(Wall.X0, "right")]
+    swapped = (*EXPECTED_PATCHES[:2], EXPECTED_PATCHES[3], EXPECTED_PATCHES[2], *EXPECTED_PATCHES[4:])
+    training = reduced.impedance_rows([values], AXIS, patch_keys=EXPECTED_PATCHES)
+    assert training[0][EXPECTED_PATCHES[2]] == training[0][EXPECTED_PATCHES[3]]
+    original = reduced.input_hash(zoned_operators, AXIS, training, SETTINGS)
+    reordered = reduced.input_hash(replace(zoned_operators, patch_keys=swapped), AXIS, training, SETTINGS)
+    assert reordered != original
 
 
 def test_patch_order_is_bound_to_input_and_computation(zoned_model: reduced.ReducedModel,

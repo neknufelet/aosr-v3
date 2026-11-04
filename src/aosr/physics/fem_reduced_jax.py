@@ -9,7 +9,8 @@
 所以那面的係數與梯度恰為零，即使該列阻抗填零或非有限數也不污染其他面。遮罩是**必填**：
 沒有「不給就當全部不剛性」的預設——面片樣板入口把零佔位的剛性面與遮罩一包
 （:class:`TemplateImpedances`）交出，漏接遮罩會在呼叫時就被擋，不會靜默算出 jωρ/0。
-求值只檢查靜態形狀與型別；頻率、空氣、材料參數與未遮阻抗的合法值由呼叫端守。
+具體遮罩拒收分區剛性；追蹤中的遮罩一律忽略分區的剛性位元。
+其餘只檢查靜態形狀與型別；頻率、空氣、材料參數與未遮阻抗的合法值由呼叫端守。
 決策紙 ``docs/decisions/fem-reduced-model-jax-evaluation-for-stage-three.md``。
 """
 from __future__ import annotations
@@ -32,7 +33,7 @@ _HIGHEST = jax.lax.Precision.HIGHEST
 
 
 class ReducedConstants(NamedTuple):
-    """材料無關的 numpy 雙精度常數；sources 為（喇叭,r）、receivers 為（座位,r）。"""
+    """材料無關的 numpy 常數；partition_mask 是分區片布林列，sources 為（喇叭,r）、receivers 為（座位,r）。"""
 
     stiffness: NDArray[np.float64]
     mass: NDArray[np.float64]
@@ -44,6 +45,7 @@ class ReducedConstants(NamedTuple):
     sound_speed_m_s: NDArray[np.float64]
     k_squared: NDArray[np.float64]
     wall_numerator: NDArray[np.complex128]
+    partition_mask: NDArray[np.bool_]
 
 
 class TemplateImpedances(NamedTuple):
@@ -73,7 +75,8 @@ def reduced_constants(model: ReducedModel) -> ReducedConstants:
         density_kg_m3=np.asarray(model.density_kg_m3, dtype=np.float64),
         sound_speed_m_s=np.asarray(model.sound_speed_m_s, dtype=np.float64),
         k_squared=np.asarray([pair[0] for pair in coefficients], dtype=np.float64),
-        wall_numerator=np.asarray([pair[1][0] for pair in coefficients], dtype=np.complex128))
+        wall_numerator=np.asarray([pair[1][0] for pair in coefficients], dtype=np.complex128),
+        partition_mask=np.asarray([bool(zone) for _, zone in keys], dtype=np.bool_))
 
 
 def _checked_impedances(constants: ReducedConstants, impedance_by_wall: jax.Array) -> jax.Array:
@@ -88,11 +91,19 @@ def _checked_impedances(constants: ReducedConstants, impedance_by_wall: jax.Arra
 
 def wall_coefficients(constants: ReducedConstants, impedance_by_wall: jax.Array, *,
                       rigid_mask: jax.Array) -> jax.Array:
-    """``(P,F)`` 阻抗 → ``(F,P)`` 的 jωρ/Z；``(P,)`` 布林遮罩必填，True 是剛性（全不剛性就給全 False）。"""
+    """``(P,F)`` 阻抗 → ``(F,P)`` 的 jωρ/Z；``(P,)`` 布林遮罩必填，True 是剛性。
+
+    具體遮罩若將分區片設成剛性就拒收；jit（編譯）追蹤時無法檢查值，
+    遮罩一律與「不是分區」取交集，分區片的剛性位元不生效，仍用該片阻抗。
+    """
     z = _checked_impedances(constants, impedance_by_wall)
     mask = jnp.asarray(rigid_mask)
     if mask.shape != (constants.boundary.shape[0],) or mask.dtype != jnp.bool_:
         raise ValueError("剛性遮罩必須是 (面片數,) 布林陣列")
+    if not isinstance(mask, jax.core.Tracer) and not isinstance(constants.partition_mask, jax.core.Tracer):
+        if np.any(np.asarray(mask) & constants.partition_mask):
+            raise ValueError("分區面片一定要有材料，不能是剛性")
+    mask = mask & ~jnp.asarray(constants.partition_mask)
     safe = jnp.where(mask[:, None], jnp.ones((), dtype=z.dtype), z)
     numerator = jnp.asarray(constants.wall_numerator, dtype=z.dtype)
     return jnp.where(mask[:, None], jnp.zeros((), dtype=z.dtype), numerator[None, :] / safe).T
@@ -100,7 +111,10 @@ def wall_coefficients(constants: ReducedConstants, impedance_by_wall: jax.Array,
 
 def reduced_pressures(constants: ReducedConstants, impedance_by_wall: jax.Array, *,
                       rigid_mask: jax.Array) -> jax.Array:
-    """逐頻解小系統，回（頻率,喇叭,座位）複數聲壓；可 jit、grad 與外層 vmap。遮罩必填。"""
+    """逐頻解小系統，回（頻率,喇叭,座位）複數聲壓；可 jit、grad 與外層 vmap。遮罩必填。
+
+    具體遮罩拒收分區剛性；jit（編譯）追蹤時分區剛性一律不生效，仍用材料阻抗，見 wall_coefficients。
+    """
     z = _checked_impedances(constants, impedance_by_wall)
     coefficients = wall_coefficients(constants, z, rigid_mask=rigid_mask)
     real_dtype = z.real.dtype
