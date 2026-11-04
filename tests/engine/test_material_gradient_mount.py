@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import os
@@ -18,7 +19,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
@@ -44,11 +44,13 @@ from aosr.materials.construction_models import (
     SurfaceMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
+from aosr.physics.fem_reduced_build import build_reduced_model
 from aosr.physics.fem_reduced_store import save_reduced
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from tests.engine._material_gradient_templates_probe import kept_walls
+from tests.engine import _zone_rom_case as zone_rom_case
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine.test_material_gradient import (
@@ -113,9 +115,20 @@ def _control_id(mount: Mount | None = None) -> str:
                            objective_settings_fingerprint="d" * 64, mount=mount)
 
 
+@functools.lru_cache(maxsize=1)
+def _whole_model() -> ReducedModel:
+    return build_reduced_model(zone_rom_case.operators(), zone_rom_case.AXIS, zone_rom_case.materials(1, 8),
+                               settings=zone_rom_case.SETTINGS)
+
+
 def _stand_in() -> ReducedModel:
-    """標頭只讀替身身分三格，用一份只有這三格的替身（不建替身）。"""
-    return cast(ReducedModel, SimpleNamespace(input_hash="input-x", mesh_hash="mesh-x", physics_identity="physics-x"))
+    """六面小替身（`_zone_rom_case` 的整面控制組）；只換標頭控制組的三格身分。"""
+    model = _whole_model()
+    return ReducedModel(
+        matrices=model.matrices, source_names=model.source_names, receiver_names=model.receiver_names,
+        frequencies_hz=model.frequencies_hz, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s,
+        input_hash="input-x", mesh_hash="mesh-x", physics_identity="physics-x", ledger=model.ledger,
+        patch_keys=model.patch_keys)
 
 
 def _header(designs: tuple[gradient_search.SurfaceDesign, ...]) -> ledger.MaterialGradientHeader:

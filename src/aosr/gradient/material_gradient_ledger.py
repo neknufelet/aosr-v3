@@ -42,6 +42,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount
+from aosr.gradient.surrogate_guard import require_whole_surrogate
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.scoring.gradient_objective_jax import GradientObjectiveConstants
 from aosr.gradient.fixed_surfaces import FixedSurfaces
@@ -371,6 +372,7 @@ def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: 
     呼叫端另外注入目標函式的空氣常數（``air``）與多孔材範圍（``ranges``）不在標頭內，只靠替身物理身分裡
     那幾份資料檔的雜湊守：沿用舊替身、另外注入新的常數時，標頭照樣相同、守不到（#561 審查另記的既存缺口）。
     """
+    require_whole_surrogate(model)
     return MaterialGradientHeader(
         ledger_version=LEDGER_VERSION, input_hash=model.input_hash, mesh_hash=model.mesh_hash,
         physics_identity=model.physics_identity,

@@ -11,6 +11,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io
+from aosr.physics.report_surfaces import mesh_partitions
 from aosr.physics.fem_reduced import FullOperators, export_room_operators
 from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.scheme import Scheme
@@ -26,9 +27,18 @@ def export_operators(
     scheme: Scheme, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     max_frequency_hz: float = FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
 ) -> FullOperators:
-    """K、M、六面 B、每支喇叭的點源右側、每個座位的取值列、網格雜湊與物理身分。"""
+    """K、M、每面片 B、每支喇叭的點源右側、每個座位的取值列、網格雜湊與物理身分。"""
     checked, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-    solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    inputs = next(iter(documents.values()))[1]
+    partitions = mesh_partitions(inputs.room_m, inputs.surface_zones_by_wall or {})
+    if partitions:
+        sources, receivers = scheme_points(checked)
+        return export_room_operators(
+            inputs.room_m, sources, receivers, density_kg_m3=inputs.density_kg_m3,
+            sound_speed_m_s=inputs.sound_speed_m_s,
+            physics_identity=physics_identity(capabilities=capabilities, directivity=directivity),
+            max_frequency_hz=max_frequency_hz, partitions=partitions)
+    solved = report_io.solver_inputs(inputs)
     sources, receivers = scheme_points(checked)
     return export_room_operators(
         solved.room, sources, receivers, density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s,

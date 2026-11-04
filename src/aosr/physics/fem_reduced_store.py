@@ -1,6 +1,6 @@
 """替身存讀：小矩陣進 npz，出身與建模帳進同名 manifest（#561）。
 
-``<名>.npz`` 存五個陣列；``<名>.manifest.json`` 存格式版本、喇叭與座位順序、牆序、頻率軸與空氣的 hex、
+``<名>.npz`` 存五個陣列；``<名>.manifest.json`` 存格式版本、喇叭與座位順序、面片序、頻率軸與空氣的 hex、
 網格雜湊、物理身分、輸入雜湊、建模帳、每個陣列的 dtype／形狀／SHA-256、整份 npz 的 SHA-256，
 最後一格是 manifest 其餘內容的 SHA-256。存之前與讀回時都核每個陣列的 dtype 與形狀（K、M、B 是 float64，
 f_r 是 complex128，c_r 是 float64；r 取建模帳），不符就拒收、不轉型。讀回時雜湊三層都核：manifest 自己、整份 npz、逐陣列；
@@ -22,24 +22,25 @@ from aosr.config.fem_reduced import ReducedModelSettings
 from aosr.geometry.shoebox import Wall
 from aosr.physics.fem_reduced import BuildLedger, GreedyRound, ReducedMatrices, ReducedModel
 
-FORMAT_VERSION = 1
+from aosr.physics.fem_reduced_boundary import PatchKeys, boundary_patches, checked_patch_keys
+
+FORMAT_VERSION = 2
 _ARRAYS = ("stiffness", "mass", "boundary", "sources", "receivers")
 _DIGEST_FIELD = "manifest_sha256"
 _FLOAT = np.dtype(np.float64)
 _COMPLEX = np.dtype(np.complex128)
 
 
-def _required(sources: int, receivers: int, rank: int) -> dict[str, tuple[np.dtype[np.generic], tuple[int, ...]]]:
-    """每個陣列必須的 dtype 與形狀：S＝喇叭名數、R＝座位名數、r＝建模帳的基底大小、牆數照 ``Wall.all()``。"""
-    walls = len(Wall.all())
+def _required(sources: int, receivers: int, rank: int, patches: int) -> dict[str, tuple[np.dtype[np.generic], tuple[int, ...]]]:
+    """每個陣列必須的 dtype 與形狀：S＝喇叭名數、R＝座位名數、r＝建模帳的基底大小、P＝面片數。"""
     return {"stiffness": (_FLOAT, (rank, rank)), "mass": (_FLOAT, (rank, rank)),
-            "boundary": (_FLOAT, (walls, rank, rank)), "sources": (_COMPLEX, (sources, rank)),
+            "boundary": (_FLOAT, (patches, rank, rank)), "sources": (_COMPLEX, (sources, rank)),
             "receivers": (_FLOAT, (receivers, rank))}
 
 
-def _check_arrays(arrays: Mapping[str, NDArray[np.generic]], sources: int, receivers: int, rank: int) -> None:
+def _check_arrays(arrays: Mapping[str, NDArray[np.generic]], sources: int, receivers: int, rank: int, patches: int) -> None:
     """dtype 與形狀逐格比，不符就 ValueError；這裡不轉型。"""
-    for name, (dtype, shape) in _required(sources, receivers, rank).items():
+    for name, (dtype, shape) in _required(sources, receivers, rank, patches).items():
         array = arrays[name]
         if array.dtype != dtype or array.shape != shape:
             raise ValueError(f"替身陣列 {name} 必須是 {dtype} {shape}，收到 {array.dtype} {array.shape}")
@@ -74,12 +75,15 @@ def computation_digest(model: ReducedModel) -> str:
     驗證報告在驗證當下用被驗的模型算這一格，寫收據時對載入的模型重算比對：矩陣相同、頻率軸或空氣或喇叭座位序不同的
     替身寫不成同一份報告的收據。綁住的是實際欄位本身；``input_hash`` 只是出身之一，它是從 manifest 抄進來的字串，
     不能拿它代替頻率軸與空氣。"""
-    return _sha(_canonical({
+    document: dict[str, object] = {
         "matrices_digest": matrices_digest(model.matrices),
         "frequencies_hex": [float(value).hex() for value in model.frequencies_hz],
         "density_hex": float(model.density_kg_m3).hex(), "speed_hex": float(model.sound_speed_m_s).hex(),
         "source_names": list(model.source_names), "receiver_names": list(model.receiver_names),
-        "mesh_hash": model.mesh_hash, "physics_identity": model.physics_identity, "input_hash": model.input_hash}))
+        "mesh_hash": model.mesh_hash, "physics_identity": model.physics_identity, "input_hash": model.input_hash}
+    if model.patch_keys != boundary_patches():
+        document["patches"] = _patch_document(model.patch_keys)
+    return _sha(_canonical(document))
 
 
 def _ledger_document(ledger: BuildLedger) -> dict[str, object]:
@@ -96,7 +100,8 @@ def save_reduced(model: ReducedModel, npz_path: Path) -> Path:
     target = manifest_path(npz_path)
     arrays: dict[str, NDArray[np.generic]] = {
         name: np.ascontiguousarray(getattr(model.matrices, name)) for name in _ARRAYS}
-    _check_arrays(arrays, len(model.source_names), len(model.receiver_names), model.ledger.rank)
+    checked_patch_keys(model.patch_keys)
+    _check_arrays(arrays, len(model.source_names), len(model.receiver_names), model.ledger.rank, len(model.patch_keys))
     for path in (npz_path, target):
         if path.exists():
             raise FileExistsError(f"替身檔已存在，不覆寫：{path}")
@@ -104,7 +109,8 @@ def save_reduced(model: ReducedModel, npz_path: Path) -> Path:
     np.savez(buffer, allow_pickle=False, **arrays)
     payload = buffer.getvalue()
     document: dict[str, object] = {
-        "format_version": FORMAT_VERSION, "walls": [wall.wall_name() for wall in Wall.all()],
+        "format_version": FORMAT_VERSION, "patches": _patch_document(model.patch_keys),
+        "mesh_patches_sha256": _mesh_patches_digest(model.mesh_hash, model.patch_keys),
         "source_names": list(model.source_names), "receiver_names": list(model.receiver_names),
         "frequencies_hex": [value.hex() for value in model.frequencies_hz],
         "density_hex": float(model.density_kg_m3).hex(), "speed_hex": float(model.sound_speed_m_s).hex(),
@@ -129,13 +135,18 @@ def save_reduced(model: ReducedModel, npz_path: Path) -> Path:
 
 def _checked_manifest(npz_path: Path) -> dict[str, object]:
     document = json.loads(manifest_path(npz_path).read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("format_version") != FORMAT_VERSION:
+    if not isinstance(document, dict) or document.get("format_version") not in (1, FORMAT_VERSION):
         raise ValueError("替身 manifest 格式版本不符")
     recorded = document.pop(_DIGEST_FIELD, None)
     if recorded != _sha(_canonical(document)):
         raise ValueError("替身 manifest 內容雜湊不符")
-    if document.get("walls") != [wall.wall_name() for wall in Wall.all()]:
-        raise ValueError("替身 manifest 牆序不符")
+    if document["format_version"] == 1:
+        if document.get("walls") != [wall.wall_name() for wall in Wall.all()]:
+            raise ValueError("替身 manifest 牆序不符")
+    else:
+        keys = _manifest_patches(document)
+        if document.get("mesh_patches_sha256") != _mesh_patches_digest(str(document["mesh_hash"]), keys):
+            raise ValueError("替身 manifest 面片清單與網格綁定不符")
     return document
 
 
@@ -168,9 +179,13 @@ def _ledger(document: dict[str, object]) -> BuildLedger:
 
 
 def load_reduced(npz_path: Path, *, expected_mesh_hash: str | None = None,
-                 expected_physics_identity: str | None = None) -> ReducedModel:
-    """核 manifest、整份 npz、逐陣列雜湊；給了網格雜湊或物理身分就再比，不同就拒收。"""
+                 expected_physics_identity: str | None = None,
+                 expected_patch_keys: PatchKeys | None = None) -> ReducedModel:
+    """核 manifest、整份 npz、逐陣列雜湊；v1 補回六個整面鍵，v2 核面片與網格綁定；呼叫端可另核網格、物理身分與面片序，不符拒收。"""
     document = _checked_manifest(npz_path)
+    keys = _manifest_patches(document)
+    if expected_patch_keys is not None and keys != expected_patch_keys:
+        raise ValueError("替身的面片清單跟這次的網格不同")
     arrays = _arrays(npz_path, document)
     if expected_mesh_hash is not None and document["mesh_hash"] != expected_mesh_hash:
         raise ValueError("替身的網格雜湊跟這次的網格不同")
@@ -183,7 +198,7 @@ def load_reduced(npz_path: Path, *, expected_mesh_hash: str | None = None,
     receiver_names = tuple(str(name) for name in _list(document, "receiver_names"))
     ledger = _ledger(document)
     # 逐陣列雜湊已核過 manifest 記的 dtype／形狀等於實際陣列；這裡再比必須的那一套，不符就拒收、不轉型。
-    _check_arrays(arrays, len(source_names), len(receiver_names), ledger.rank)
+    _check_arrays(arrays, len(source_names), len(receiver_names), ledger.rank, len(keys))
     return ReducedModel(
         matrices=ReducedMatrices(
             stiffness=_floats(arrays["stiffness"]), mass=_floats(arrays["mass"]),
@@ -194,7 +209,7 @@ def load_reduced(npz_path: Path, *, expected_mesh_hash: str | None = None,
         density_kg_m3=float.fromhex(str(document["density_hex"])),
         sound_speed_m_s=float.fromhex(str(document["speed_hex"])),
         mesh_hash=str(document["mesh_hash"]), physics_identity=str(document["physics_identity"]),
-        input_hash=str(document["input_hash"]), ledger=ledger)
+        input_hash=str(document["input_hash"]), ledger=ledger, patch_keys=keys)
 
 
 def _floats(array: NDArray[np.generic]) -> NDArray[np.float64]:
@@ -215,3 +230,27 @@ def _list(document: dict[str, object], key: str) -> list[object]:
     if not isinstance(value, list):
         raise ValueError(f"替身 manifest 的 {key} 格式不符")
     return value
+
+
+def _patch_document(keys: PatchKeys) -> list[list[str]]:
+    return [[wall.wall_name(), zone] for wall, zone in keys]
+
+
+def _mesh_patches_digest(mesh_hash: str, keys: PatchKeys) -> str:
+    return _sha(_canonical({"mesh_hash": mesh_hash, "patches": _patch_document(keys)}))
+
+
+def _manifest_patches(document: dict[str, object]) -> PatchKeys:
+    if document["format_version"] == 1:
+        return boundary_patches()
+    raw = document.get("patches")
+    if not isinstance(raw, list):
+        raise ValueError("替身 manifest 面片清單格式不符")
+    by_name = {wall.wall_name(): wall for wall in Wall.all()}
+    keys = []
+    for item in raw:
+        if (not isinstance(item, list) or len(item) != 2 or not isinstance(item[0], str)
+                or item[0] not in by_name or not isinstance(item[1], str)):
+            raise ValueError("替身 manifest 面片清單格式不符")
+        keys.append((by_name[item[0]], item[1]))
+    return checked_patch_keys(tuple(keys))

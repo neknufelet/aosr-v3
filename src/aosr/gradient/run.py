@@ -62,6 +62,7 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.surrogate_guard import require_whole_surrogate
 from aosr.gradient.fixed_surfaces import FixedSurfaces, designs_with_fixed
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
@@ -368,9 +369,11 @@ def scheme_points_hex(scheme: Scheme) -> SchemePoints:
 
 def gated_surrogate(surrogate: Path, *, mesh_hash: str, physics_identity: str, points: SchemePoints) -> ReducedModel:
     """准用閘門：兩把尺從登記簿讀，網格雜湊、物理身分、喇叭與座位座標都要跟驗證收據對上。"""
-    return load_validated_reduced(surrogate, rulers=holdout_rulers(), expected_mesh_hash=mesh_hash,
+    model = load_validated_reduced(surrogate, rulers=holdout_rulers(), expected_mesh_hash=mesh_hash,
                                   expected_physics_identity=physics_identity, expected_source_points=points.sources,
                                   expected_receiver_points=points.receivers)
+    require_whole_surrogate(model)
+    return model
 
 
 def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: SchemePoints) -> None:
@@ -378,6 +381,7 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
     替身建模用的空氣（密度、聲速）要逐位等於方案場景的（不然材料阻抗用方案的空氣、縮減方程係數用替身的空氣，
     一個目標混用兩組條件；網格不取密度，同網格、同座標、另一組空氣建的合法替身真的存在）；
     交給閘門比的座標要就是這份方案的座標（不然閘門比的是別的位置）。"""
+    require_whole_surrogate(model)
     seats = tuple(point.receiver_id for point in scheme.receiver_set.points)
     if model.receiver_names != seats:
         raise ValueError(f"替身的座位 {list(model.receiver_names)} 跟方案座位組 {list(seats)} 不同（名字或順序），"
@@ -395,6 +399,7 @@ def check_surrogate_matches_scheme(model: ReducedModel, scheme: Scheme, points: 
 def check_surrogate_axis_covers_scoring(model: ReducedModel, scheme: Scheme, score: StageOneScoreSettings) -> None:
     """替身的頻率軸要算得了這一次的計分（#984，顧問 #971）：照方案場景宣告的低頻軸、計分範圍，走低頻評估器的
     宣告點與缺段判法（:func:`axis_reason_not_measurable`）；不可估就拒收，不拿剩下的頻點代替整段。"""
+    require_whole_surrogate(model)
     axis = scheme.scene.low_frequency_axis
     if axis is None:
         raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
