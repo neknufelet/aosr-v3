@@ -29,6 +29,7 @@ from aosr.config.material_gradient import ExportSettings, MaterialGradientSettin
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import PhysicsConstants, load_physics_constants
 from aosr.config.porous_model_ranges import load_porous_model_ranges
+from aosr.gradient.boundary import BoundaryKey
 from aosr.geometry.shoebox import Point, Wall
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
@@ -526,7 +527,7 @@ def test_endpoint_big_peak_matches_stage_one_evaluator(probe: Record, chain_mode
 
 # ---- 方案牆面 ----
 
-def _lined_materials() -> dict[Wall, SurfaceMaterial | None]:
+def _lined_materials() -> dict[BoundaryKey, SurfaceMaterial | None]:
     designs = gradient_search.wall_designs_from_presets(CASES["all_lined"], _settings(), _presets())
     theta = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
     return endpoint.materials_from_surfaces(designs, theta, _settings())

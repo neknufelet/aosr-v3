@@ -6,7 +6,7 @@ import pytest
 
 from aosr.geometry.shoebox import Wall
 from aosr.gui.problem_text import checked_scheme
-from aosr.gradient import endpoint, run
+from aosr.gradient import endpoint
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics import report_io, report_surfaces
 from aosr.physics.report_measured import measured_seams
@@ -20,7 +20,7 @@ from tests.engine._furniture_cases import CAPABILITIES, pair
 from tests.engine._surface_zone_cases import rectangle_document
 
 
-@pytest.mark.parametrize("entry", ["scheme", "gradient-kept", "gradient-endpoint", "web-load", "seams", "text", "notes"])
+@pytest.mark.parametrize("entry", ["scheme", "gradient-endpoint", "web-load", "seams", "text", "notes"])
 def test_calculating_and_display_entries_refuse_rectangles(tmp_path: Path, entry: str) -> None:
     """抓任一路靜默取第一區；終點換材料也不能把分區覆蓋掉。"""
     scheme = Scheme.model_validate(rectangle_document())
@@ -30,8 +30,6 @@ def test_calculating_and_display_entries_refuse_rectangles(tmp_path: Path, entry
             run_scheme(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY,
                        quality_targets_path=Path("src/aosr/config/data/quality_targets.toml"), engine_commit="unused",
                        program_fingerprint="unused", physics_identity="unused", run_date=date(2026, 11, 4))
-        elif entry == "gradient-kept":
-            run.scene_wall_materials(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
         elif entry == "gradient-endpoint":
             endpoint.scene_with_materials(scheme.scene, {wall: ConstantImpedance(impedance_pa_s_m=1000.0) for wall in Wall.all()})
         elif entry == "web-load":

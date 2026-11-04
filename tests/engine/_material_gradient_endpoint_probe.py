@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn, cast
 
@@ -129,7 +129,7 @@ def _kept(case: Record, model: ReducedModel, constants: GradientObjectiveConstan
     by_wall = {wall.wall_name(): (wall, index) for index, wall in enumerate(Wall.all())}
     return {"chain_value": chain(kept_designs), "rigid_value": chain(rigid_designs),
             "control_value": float(control).hex(),
-            "endpoint_rows": {name: _complex(endpoint_rows[by_wall[name][0]]) for name in kept},
+            "endpoint_rows": {name: _complex(cast(Mapping[Wall, object], endpoint_rows)[by_wall[name][0]]) for name in kept},
             "chain_rows": {name: _complex(chain_rows[by_wall[name][1]]) for name in kept}}
 
 

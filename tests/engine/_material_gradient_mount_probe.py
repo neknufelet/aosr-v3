@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -35,6 +35,7 @@ from aosr.config.physics_constants import load_physics_constants
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.boundary import surface_id
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient.endpoint_run import exported_scheme
@@ -96,7 +97,7 @@ def _three_lane(preset_ids: list[str | None], theta: np.ndarray, scheme_document
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     walls = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     designs = gradient_search.wall_designs_from_presets(
-        preset_ids, settings, presets, kept={wall.wall_name(): material for wall, material in walls.items()},
+        preset_ids, settings, presets, kept={surface_id(wall): material for wall, material in walls.items()},
         mount=MOUNT_ON_WALL)
     materials = endpoint.materials_from_surfaces(designs, theta, settings)
     exported = exported_scheme(scheme, endpoint.scene_with_materials(scheme.scene, materials), "0" * 32)
@@ -118,8 +119,8 @@ def _three_lane(preset_ids: list[str | None], theta: np.ndarray, scheme_document
     x0 = solved.materials_by_wall[Wall.X0]
     expected = surface_impedance(x0, jnp.asarray(raw.fem_frequencies_hz), air=scene_air, ranges=ranges)[0]
     return {"zones": {name: zone[0].material.model_dump(mode="json") for name, zone in zones.items()},
-            "walls": {wall.wall_name(): material.model_dump(mode="json") for wall, material in walls.items()},
-            "exported": {wall.wall_name(): None if material is None else material.model_dump(mode="json")
+            "walls": {surface_id(wall): material.model_dump(mode="json") for wall, material in walls.items()},
+            "exported": {surface_id(wall): None if material is None else material.model_dump(mode="json")
                          for wall, material in materials.items()},
             "capability": raw.capability.materials,
             "x0_is_exported": seen[0][Wall.X0] == tuple(complex(z) for z in np.asarray(expected)),
@@ -161,7 +162,7 @@ def main(directory: Path) -> None:
                 jnp.asarray(reduced.frequencies_hz), air=air)
             materials = endpoint.materials_from_surfaces(designs, theta, settings)
             rows = endpoint.material_impedances(materials, tuple(model.frequencies_hz), air=air, ranges=ranges)
-            endpoint_rows = np.asarray([rows[wall] for wall in Wall.all()], dtype=np.complex128)
+            endpoint_rows = np.asarray([cast(Mapping[Wall, object], rows)[wall] for wall in Wall.all()], dtype=np.complex128)
             kept_rows = gradient_search.kept_impedance_rows(designs, axis, air=air, ranges=ranges)
             control = gradient_objective_from_pressures(constants, reduced_pressures(
                 reduced, jnp.asarray(endpoint_rows), rigid_mask=jnp.zeros(len(Wall.all()), dtype=bool)))

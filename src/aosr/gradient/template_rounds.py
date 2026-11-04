@@ -177,7 +177,7 @@ def preset_for_target(target: str, settings: MaterialGradientSettings) -> str | 
 
 
 def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[SurfaceDesign, ...]:
-    """配置 → 每面設計：有 preset 照家族建樣板設計、不貼的面帶方案原本那面的牆；要照 ``Wall.all()`` 給六面。"""
+    """配置 → 每面設計：有 preset 照家族建樣板設計、不貼片帶方案該片原材料；分區照完整面片序，整面照 Wall.all()。"""
     if context.fixed_surfaces:
         return checked_wall_designs(designs_with_fixed(surfaces, context.settings, context.presets, kept=context.kept,
                                                        mount=context.mount, fixed_surfaces=context.fixed_surfaces))

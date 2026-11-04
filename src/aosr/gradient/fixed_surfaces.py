@@ -11,6 +11,7 @@ from aosr.config.construction_presets import ConstructionPreset, load_constructi
 from aosr.config.material_gradient import MaterialGradientSettings, Mount
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.boundary import patch_key
 from aosr.gradient.material_gradient import SurfaceDesign, designs_from_presets
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.report_surfaces import WholeWallZone
@@ -19,10 +20,12 @@ from aosr.physics.report_surfaces import WholeWallZone
 def checked_fixed_surfaces(value: Mapping[str, str]) -> dict[str, str]:
     """面名與材料 id 都必須認得，至少留一面可換；排序使保存與身分不受選項順序影響。"""
     names = {wall.wall_name() for wall in Wall.all()}
-    unknown = value.keys() - names
-    if unknown:
-        raise ValueError(f"固定面的面名不認識：{sorted(unknown)}；只收 {sorted(names)}")
-    if len(value) == len(names):
+    for name in value:
+        patch_key(name)
+        wall, separator, _ = name.partition("@")
+        if separator and wall in value:
+            raise ValueError(f"同一面不能同時給牆名與面片代號：{wall}")
+    if names <= value.keys():
         raise ValueError("不能全部六面固定：至少留一面可換")
     ids = {preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))}
     for face, material in value.items():
@@ -59,7 +62,22 @@ def designs_with_fixed(surfaces: Sequence[tuple[str, str | None]], settings: Mat
                        presets: Sequence[ConstructionPreset], *, kept: Mapping[str, SurfaceMaterial], mount: Mount,
                        fixed_surfaces: Mapping[str, str]) -> tuple[SurfaceDesign, ...]:
     """固定面強制用無樣板、無變數的常數材料；其他面的原牆與安裝方式照舊。"""
+    fixed_surfaces = expanded_fixed_surfaces(fixed_surfaces, tuple(name for name, _ in surfaces))
     materials = fixed_materials(fixed_surfaces) if fixed_surfaces else {}
     selected = tuple((face, None if face in fixed_surfaces else preset) for face, preset in surfaces)
     designs = designs_from_presets(selected, settings, presets, kept={**kept, **materials}, mount=mount)
     return tuple(replace(design, fixed_material_id=fixed_surfaces.get(design.surface_id)) for design in designs)
+
+
+def expanded_fixed_surfaces(value: Mapping[str, str], names: Sequence[str]) -> dict[str, str]:
+    """牆名展成該牆所有面片；面片名只能命中一區，至少留一片可換。"""
+    checked_fixed_surfaces(value)
+    result: dict[str, str] = {}
+    for face, material in value.items():
+        matches = [name for name in names if name == face or ("@" not in face and name.partition("@")[0] == face)]
+        if not matches:
+            raise ValueError(f"固定面 {face} 不在搜尋面片清單")
+        result.update((name, material) for name in matches)
+    if len(result) == len(names):
+        raise ValueError("不能全部面片固定：至少留一面可換")
+    return dict(sorted(result.items()))

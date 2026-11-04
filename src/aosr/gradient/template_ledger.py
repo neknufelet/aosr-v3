@@ -75,6 +75,8 @@ class TemplateHeader(BaseModel):
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
 
+    boundary_patches: tuple[tuple[str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
+
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
         ids = [surface_id for surface_id, _ in self.initial_surfaces]

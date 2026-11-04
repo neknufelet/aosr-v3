@@ -78,10 +78,10 @@ class FolderBusy(Exception):
 
 
 def _presets(text: str) -> tuple[str | None, ...]:
-    """``a,b,none,...`` → 六個 preset id（``none`` 是不貼、保留方案原本的牆）；個數不是牆數就是參數錯（離開碼 2）。"""
+    """``a,b,none,...`` → 面片 preset；至少六片，確切片數載入方案後核對，none 保留該片材料。"""
     items = tuple(item.strip() for item in text.split(","))
     walls = [wall.wall_name() for wall in Wall.all()]
-    if len(items) != len(walls) or any(not item for item in items):
+    if len(items) < len(walls) or any(not item for item in items):
         raise argparse.ArgumentTypeError(
             f"--presets 要照 {','.join(walls)} 給 {len(walls)} 個非空的 preset id（不貼的面寫 {KEEP_WALL}），收到 {len(items)} 個")
     return tuple(None if item == KEEP_WALL else item for item in items)
@@ -93,7 +93,7 @@ def _parser() -> argparse.ArgumentParser:
     start = commands.add_parser("start", help="開始牆面材料梯度搜尋")
     start.add_argument("--scheme", type=Path, required=True, help="方案檔（座位組要一主位加六周圍點）")
     start.add_argument("--surrogate", type=Path, required=True, help="驗過的替身 npz（旁邊要有 manifest 與驗證收據）")
-    start.add_argument("--presets", type=_presets, required=True, help="六面 preset id，照 Wall.all()，不貼（保留方案原本的牆）寫 none")
+    start.add_argument("--presets", type=_presets, required=True, help="面片 preset id，照 boundary_patches 順序；整面照 Wall.all()，不貼寫 none")
     start.add_argument("--purpose", required=True, help="用途（評分設定）")
     start.add_argument("--root", type=Path, required=True, help="資料夾根（不要放在網頁讀的 searches/ 底下）")
     start.add_argument("--settings", type=Path, default=config_path("material_gradient.toml"))
@@ -210,6 +210,9 @@ def _start(args: argparse.Namespace) -> int:
     run.designs_for(args.presets, settings,
                     kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity),
                     mount=args.mount, fixed_surfaces=fixed)
+    from aosr.gradient.boundary import scheme_patch_keys
+
+    patch_keys = scheme_patch_keys(scheme)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -223,7 +226,7 @@ def _start(args: argparse.Namespace) -> int:
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
-                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed)
+                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, patch_keys=patch_keys)
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
