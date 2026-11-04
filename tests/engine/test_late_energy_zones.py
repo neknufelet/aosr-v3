@@ -118,12 +118,12 @@ def test_equivalent_absorption_and_eyring_use_area_weights() -> None:
 
 
 def test_whole_wall_control_is_bitwise_unchanged() -> None:
-    """起點 727acf825736dbd2da26280fabb88e97cd16e557 實跑；晚期、逐階、艾林與交接。
+    """起點 727acf825736dbd2da26280fabb88e97cd16e557 實跑；含 T20／T30 與家具吸音。
 
-    先量後改，常數由該提交的浮點輸出 JSON 雜湊；不借未版控證據作答案。
+    與 tests/conftest.py 同為數值單緒；該提交浮點輸出的 JSON 雜湊，不作四捨五入。
     """
     from tests.engine._late_zone_control import control_digest
-    assert control_digest() == "56b734d7a413fbe0ddb1df95f6cfe40f2f92ff165fef4516b3bdee7d6e5946b6"
+    assert control_digest() == "e6adee9547c7b696bf0ac4552598b08d62d335ddad71ca9b9c14c624978ff1e5"
 
 
 def test_furniture_whole_room_absorption_uses_zone_area_weights() -> None:

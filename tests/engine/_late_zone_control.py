@@ -7,6 +7,8 @@ from aosr.geometry.shoebox import Room, Wall
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics import late_energy, wall_surfaces
 from aosr.physics.crossover import eyring_t60_by_band, schroeder_frequency_hz
+from aosr.physics.furniture_scene import furniture_adjusted_absorption
+from aosr.physics.late_decay import solve_late_decay
 from tests.engine.test_late_energy_zones import CONSTANTS
 
 
@@ -29,5 +31,9 @@ def control_digest() -> str:
     t60 = eyring_t60_by_band(problem.room, bands)
     values = dict(late=asdict(late_energy.solve_late_energy(problem)),
         orders=asdict(late_energy.solve_late_energy_by_order(problem, max_order=3)),
+        decay=asdict(solve_late_decay(problem, sound_speed_m_s=CONSTANTS.sound_speed_m_s)),
+        furniture={wall.wall_name(): row for wall, row in furniture_adjusted_absorption(problem.room,
+            problem.frequencies_hz, {Wall.from_name(name): row for name, row in problem.absorption_by_wall.items()},
+            (1.0, 2.0, 3.0)).items()},
         t60=t60, fs=schroeder_frequency_hz(problem.room, t60))
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()

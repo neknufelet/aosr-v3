@@ -59,3 +59,25 @@ def test_each_zone_uses_the_original_material_function_and_exact_frequency_selec
     """固定、構造、實測與貼原牆四區：逐區吸音率與註記必須等於原整面函式。"""
     assert runs["material_rows_equal"] == [True] * 4
     assert runs["selected_rows_equal"] is True
+
+
+@pytest.mark.parametrize(("name", "alphas"), (("one", (1.0,) * 4), ("same", (0.7,) * 4),
+                                              ("mixed", (0.2, 0.4, 0.6, 0.8))))
+def test_jax_weighted_absorption_obeys_participating_bounds(
+    runs: dict[str, object], name: str, alphas: tuple[float, ...],
+) -> None:
+    """牆與小塊的浮點凸組合不得越界；均勻 α 必須恰等於原值。"""
+    from tests.engine.test_late_energy_zones_bounds import rounding_problem
+    run = cast(dict[str, object], cast(dict[str, object], runs["bounds"])[name])
+    bands = solve_late_energy(rounding_problem(alphas)).bands
+    expected = [[b.alpha_bar for b in bands], [b.raw_reverberant_energy for b in bands],
+                [b.eyring_ratio for b in bands], [b.late_reverberant_energy for b in bands]]
+    for mode in ("eager", "jit"):
+        averages = cast(dict[str, list[list[float]]], run[mode])
+        assert min(alphas) <= averages["walls"][0][0] <= max(alphas)
+        patches = np.asarray(averages["patches"])[:4, 0]
+        assert np.all(patches >= (alphas[0], alphas[1], alphas[2], alphas[3]))
+        assert np.all(patches <= max(alphas))
+        energy = cast(dict[str, list[list[float]]], run["energy"])[mode]
+        np.testing.assert_allclose(energy[:4], expected,
+            rtol=contract_value("late_energy_jax_vs_numpy"), atol=0.0)

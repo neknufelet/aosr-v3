@@ -14,7 +14,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.physics.late_energy_jax import (
-    late_energy_arrays, late_energy_geometry, zoned_late_energy_arrays, zoned_late_energy_geometry,
+    _bounded_weighted_absorption, late_energy_arrays, late_energy_geometry,
+    zoned_late_energy_arrays, zoned_late_energy_geometry,
 )
 from tests.engine._late_zone_control import control_inputs
 from tests.engine.test_late_energy_zones import ROOM, synthetic
@@ -26,8 +27,28 @@ def encode(values: object) -> object:
     return np.asarray(values).tolist()
 
 
-def run() -> dict[str, object]:
+def bounded_runs() -> dict[str, object]:
+    """凸組合界須同時守住整面與小塊；編譯前後都量實際進算子的 α。"""
+    from tests.engine.test_late_energy_zones_bounds import rounding_problem
     result: dict[str, object] = {}
+    for name, alphas in (("one", (1.0,) * 4), ("same", (0.7,) * 4), ("mixed", (0.2, 0.4, 0.6, 0.8))):
+        problem = rounding_problem(alphas)
+        assert problem.absorption_by_zone is not None
+        geometry = zoned_late_energy_geometry(problem.room, 2, problem.absorption_by_zone)
+        values = jnp.asarray(list(problem.absorption_by_wall.values()) + [(a,) for a in alphas])
+        outputs = {}
+        for mode, average in (("eager", _bounded_weighted_absorption),
+                              ("jit", jax.jit(_bounded_weighted_absorption))):
+            outputs[mode] = {"walls": encode(average(geometry.wall_weights, values)),
+                             "patches": encode(average(geometry.patch_weights, values))}
+        outputs["energy"] = {"eager": [encode(v) for v in zoned_late_energy_arrays(geometry, values)],
+                             "jit": [encode(v) for v in jax.jit(zoned_late_energy_arrays)(geometry, values)]}
+        result[name] = outputs
+    return result
+
+
+def run() -> dict[str, object]:
+    result: dict[str, object] = {"bounds": bounded_runs()}
     for wall in Wall.all():
         problem = synthetic(wall, 2, 1.0 / 3.0, 0.5)
         cells = problem.absorption_by_zone

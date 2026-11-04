@@ -289,24 +289,26 @@ def equivalent_absorption_rows(
     room: Room, absorption_by_wall: Mapping[str, tuple[float, ...]],
     absorption_by_zone: ZoneAbsorption,
 ) -> dict[str, tuple[float, ...]]:
-    """Σ區面積×α／牆面積；未分區的牆直接保留原列，不做乘除。"""
+    """Σ區面積×α／Σ區面積，強制凸組合界；未分區的牆直接保留原列。"""
     if set(absorption_by_wall) != set(Wall.wall_names()):
         raise ValueError("absorption_by_wall 必須恰好包含六面牆")
     count = len(absorption_by_wall[Wall.FLOOR.wall_name()])
     validate_zone_absorption(room, absorption_by_zone, count)
     result = dict(absorption_by_wall)
     for name, cells in absorption_by_zone.items():
-        width, height = _wall_size(room, name)
-        result[name] = tuple(sum((cell.zone.u_m[1] - cell.zone.u_m[0]) *
-            (cell.zone.v_m[1] - cell.zone.v_m[0]) * cell.absorption[i] for cell in cells) /
-            (width * height) for i in range(count))
+        areas = [(cell.zone.u_m[1] - cell.zone.u_m[0]) *
+                 (cell.zone.v_m[1] - cell.zone.v_m[0]) for cell in cells]
+        total = sum(areas)
+        result[name] = tuple(min(max(sum(area * cell.absorption[i] for area, cell in
+            zip(areas, cells, strict=True)) / total, min(cell.absorption[i] for cell in cells)),
+            max(cell.absorption[i] for cell in cells)) for i in range(count))
     return result
 
 
 def rectangle_patch_weights(
     room: Room, name: str, cells: tuple[RectangleAbsorption, ...], n_per_wall: int,
 ) -> NDArray[np.float64]:
-    """按既有小塊 u 外圈、v 內圈排序，矩形交集面積除以小塊面積。
+    """按既有小塊 u 外圈、v 內圈排序，矩形交集面積除以交集面積和。
 
     只碰一區時直接給 1，確保邊界對齊後吸音率不多做浮點乘除。
     """
@@ -320,7 +322,7 @@ def rectangle_patch_weights(
                         max(0.0, min(v1, cell.zone.v_m[1]) - max(v0, cell.zone.v_m[0])) for cell in cells]
             owners = [k for k, area in enumerate(overlaps) if area > 0.0]
             rows.append([float(k == owners[0]) for k in range(len(cells))] if len(owners) == 1 else
-                        [area / ((u1 - u0) * (v1 - v0)) for area in overlaps])
+                        [area / sum(overlaps) for area in overlaps])
     return np.asarray(rows, dtype=np.float64)
 
 

@@ -179,13 +179,23 @@ def zoned_late_energy_geometry(room: Room, n_per_wall: int, absorption_by_zone: 
         start = index * n_per_wall**2
         patches[start:start+n_per_wall**2, index] = 0.0
         patches[start:start+n_per_wall**2, offset:offset+len(cells)] = rectangle_patch_weights(room, name, cells, n_per_wall)
-        axes = [axis for axis in range(3) if axis != Wall.from_name(name).axis()]
-        wall_area = room.length(axes[0]) * room.length(axes[1])
+        areas = [(cell.zone.u_m[1]-cell.zone.u_m[0]) *
+                 (cell.zone.v_m[1]-cell.zone.v_m[0]) for cell in cells]
         walls[index, index] = 0.0
-        walls[index, offset:offset+len(cells)] = [(cell.zone.u_m[1]-cell.zone.u_m[0]) *
-            (cell.zone.v_m[1]-cell.zone.v_m[0]) / wall_area for cell in cells]
+        walls[index, offset:offset+len(cells)] = [area / sum(areas) for area in areas]
         offset += len(cells)
     return ZonedLateEnergyGeometry(whole, patches, walls)
+
+
+def _bounded_weighted_absorption(weights: NDArray[np.float64], values: jax.Array) -> jax.Array:
+    """分區凸組合只受正權重區的逐頻界約束；單一區直接取原列。"""
+    coefficients = jnp.asarray(weights, dtype=values.dtype)
+    active = coefficients > 0.0
+    average = jnp.matmul(coefficients, values, precision=_HIGHEST) / jnp.sum(coefficients, axis=1)[:, None]
+    lower = jnp.min(jnp.where(active[:, :, None], values[None, :, :], jnp.inf), axis=1)
+    upper = jnp.max(jnp.where(active[:, :, None], values[None, :, :], -jnp.inf), axis=1)
+    direct = values[jnp.argmax(coefficients, axis=1)]
+    return jnp.where(jnp.sum(active, axis=1)[:, None] == 1, direct, jnp.clip(average, lower, upper))
 
 
 def zoned_late_energy_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array) -> LateEnergyArrays:
@@ -198,6 +208,6 @@ def zoned_late_energy_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array
         raise TypeError("吸音率必須是浮點陣列")
     if values.ndim != 2 or values.shape[0] != geometry.wall_weights.shape[1] or values.shape[1] == 0:
         raise ValueError("分區吸音率形狀與幾何權重不同")
-    walls = jnp.matmul(jnp.asarray(geometry.wall_weights, dtype=values.dtype), values, precision=_HIGHEST)
-    patches = jnp.matmul(jnp.asarray(geometry.patch_weights, dtype=values.dtype), values, precision=_HIGHEST)
+    walls = _bounded_weighted_absorption(geometry.wall_weights, values)
+    patches = _bounded_weighted_absorption(geometry.patch_weights, values)
     return late_energy_arrays(geometry.whole, walls, alpha_by_patch=patches)

@@ -413,7 +413,8 @@ def _patch_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
         start = Wall.wall_names().index(name) * inputs.n_per_wall**2
         for i, weight in enumerate(weights):
             owners = np.flatnonzero(weight)
-            alpha_patch[start + i] = rows[owners[0]] if len(owners) == 1 else weight @ rows
+            alpha_patch[start + i] = rows[owners[0]] if len(owners) == 1 else np.clip(
+                weight @ rows, np.min(rows[owners], axis=0), np.max(rows[owners], axis=0))
     return alpha_patch
 
 

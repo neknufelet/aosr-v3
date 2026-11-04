@@ -106,4 +106,5 @@ PYTHON_MINOR = (3, 12)
 # #561 第三步物理變更：鏡像法逐反彈查矩形，按牆與分區計次；整面控制逐位不變。
 # 由正式 physics_identity_parts 實算；CLOSURE 與 DATA_FILES 不變，四份家具考卷的模態身分不變。
 # #561 第四步：逐區晚期能量、面積等效吸音；正式 physics_identity_parts 重算，閉包與資料清單不變。
-CODE_DIGEST = "e3f0dbe7847d1c2c85d1f07449168f041f8502e6646d90815ea50eb4115ba4db"
+# #561 審查修補：分區加權改用權重總和並守凸組合界；正式入口重錄，閉包與資料清單不變。
+CODE_DIGEST = "d6bbc1b61b5eb7d8fe018423bc7107b91dc7ea71479b49dc43929436b02d1724"
