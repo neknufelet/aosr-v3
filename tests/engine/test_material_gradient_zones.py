@@ -107,8 +107,28 @@ def test_zone_identity_and_export_bind_ids_and_order(tmp_path: Path) -> None:
     assert exported.scene.surface_zones_by_wall == scheme.scene.surface_zones_by_wall
 
 
-def test_partitioned_chain_search_templates_and_full_endpoint(tmp_path: Path) -> None:
-    """抓鏈未按片求阻抗、梯度斷線、帳本缺片、固定片進樣板輪、匯出遺失區座標。"""
+@pytest.mark.parametrize("surface_id", ("x0", "x0@right"))
+@pytest.mark.parametrize("valid", (False, True), ids=("missing-dot", "qualified"))
+def test_template_row_requires_dot_after_surface_id(surface_id: str, valid: bool) -> None:
+    """抓帳本把沒有「.變數」的整面或分區名字算成合法變數。"""
+    from aosr.gradient.template_ledger import TemplateRow
+
+    document = {"step": 0, "phase": "baseline_retune", "round": 0, "candidate": None,
+        "surfaces": ((surface_id, "glass_wool_48k_50mm"),),
+        "variable_names": (f"{surface_id}.layer1.thickness_m" if valid else surface_id,),
+        "theta_hex": (0.05.hex(),), "value": 1.0, "screening_total": 1.0, "components": (1.0, 0.0, 0.0),
+        "gradient_norm": 0.0, "step_size": 0.0, "seconds": 0.0, "stop_reason": None,
+        "final_trial_step": None, "evaluations": None, "decision": None, "swapped_retunable": None}
+    if valid:
+        row = TemplateRow.model_validate(document)
+        assert row.variable_names == document["variable_names"]
+    else:
+        with pytest.raises(ValueError, match="變數個數 0 不合"):
+            TemplateRow.model_validate(document)
+
+
+def _zone_probe(directory: Path, part: str) -> None:
+    """各段獨立雙精度子行程，沿用三格處理器釘選與原先的 55 秒上限。"""
     import os
     import subprocess
     import sys
@@ -121,10 +141,40 @@ def test_partitioned_chain_search_templates_and_full_endpoint(tmp_path: Path) ->
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
     probe = Path(__file__).with_name("_material_gradient_zones_probe.py")
-    result = subprocess.run([sys.executable, str(probe), str(tmp_path)], env=env, cwd=tmp_path,
+    result = subprocess.run([sys.executable, str(probe), str(directory), part], env=env, cwd=directory,
                              capture_output=True, text=True, timeout=55)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / "probe.json").exists()
+    assert (directory / f"{part}.json").exists()
+
+
+@pytest.fixture(scope="module")
+def zone_model(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """只建一次小房間替身；存檔由各子行程讀回，不共用編譯或求值結果。"""
+    directory = tmp_path_factory.mktemp("gradient-zones")
+    _zone_probe(directory, "build")
+    return directory
+
+
+@pytest.fixture(scope="module")
+def zone_search(zone_model: Path) -> Path:
+    """短搜尋及樣板輪只跑一次，終點從這一跑的帳本讀取最後配置。"""
+    _zone_probe(zone_model, "search")
+    return zone_model
+
+
+def test_partitioned_chain_and_central_difference(zone_model: Path) -> None:
+    """抓鏈未按片求阻抗、梯度斷線與面片清單不等仍通過。"""
+    _zone_probe(zone_model, "chain")
+
+
+def test_partitioned_search_and_templates(zone_search: Path) -> None:
+    """抓帳本缺片、目標不等於獨立替身參考、固定片進樣板輪。"""
+    assert (zone_search / "search.json").exists()
+
+
+def test_partitioned_full_endpoint_export_and_report(zone_search: Path) -> None:
+    """抓完整終點與逐片材料不符、匯出遺失座標、報告缺分區或固定標記。"""
+    _zone_probe(zone_search, "endpoint")
 
 
 def test_fixed_patches_validate_coverage_and_leave_one_searchable() -> None:

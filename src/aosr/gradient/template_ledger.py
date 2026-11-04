@@ -247,7 +247,7 @@ def _check_layout(surfaces: Surfaces, names: Sequence[str]) -> None:
     position = 0
     for surface_id, preset_id in surfaces:
         count = 0
-        while position < len(names) and names[position].split(".", 1)[0] == surface_id:
+        while position < len(names) and names[position].startswith(f"{surface_id}."):
             position += 1
             count += 1
         if (preset_id is None and count) or (preset_id is not None and not 1 <= count <= 2):

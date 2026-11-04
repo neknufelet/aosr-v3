@@ -23,6 +23,7 @@ from aosr.gradient.template_rounds import TemplateContext, alternatives, surface
 from aosr.gradient.template_ledger import read_template_ledger
 from aosr.physics import fem_reduced as reduced
 from aosr.physics.fem_reduced_build import build_reduced_model
+from aosr.physics.fem_reduced_store import load_reduced, save_reduced
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.scoring.gradient_objective_jax import GradientObjectiveConstants, gradient_objective_constants
@@ -113,17 +114,15 @@ def _saved_result_report(directory: Path, base: Scheme, problem: run.GradientPro
     (directory / "report.txt").write_text(text, encoding="utf-8")
 
 
-def _search_and_endpoint(directory: Path, base: Scheme, operators: reduced.FullOperators, model: reduced.ReducedModel,
-                         problem: run.GradientProblem) -> tuple[int, int, int]:
-    designs, settings, header, kept = problem.designs, problem.settings, problem.header, problem.kept
+def _search(directory: Path, model: reduced.ReducedModel, problem: run.GradientProblem) -> tuple[int, int]:
+    designs, settings, header = problem.designs, problem.settings, problem.header
     fixed = problem.templates.fixed_surfaces or {}
     fixed_patches = fixed
-    axis = model.frequencies_hz
-    air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
+    choices = alternatives(surfaces_of(designs), settings, fixed_patches)
+    assert choices and all(name in ("x0@right", "x0@left") for name, _ in choices)
     ledger.write_ledger(directory / run.LEDGER_FILE, header, ())
     run._fresh(problem, directory / run.LEDGER_FILE, None)
     run._template_segment(problem, directory, None)
-    _saved_result_report(directory, base, problem)
     _, rows = ledger.read_ledger(directory / run.LEDGER_FILE)
     def reference(point: np.ndarray) -> float:
         return _numpy_score(model, _reference(model, designs, point))
@@ -134,6 +133,17 @@ def _search_and_endpoint(directory: Path, base: Scheme, operators: reduced.FullO
         np.testing.assert_allclose(row.value, expected, rtol=GRADIENT_REL, atol=GRADIENT_ABS)
     _, template_rows = read_template_ledger(directory / run.TEMPLATES_FILE)
     assert all(row.candidate is None or row.candidate.split("->")[0] not in fixed_patches for row in template_rows)
+    return len(rows), len(template_rows)
+
+
+def _endpoint(directory: Path, base: Scheme, operators: reduced.FullOperators, model: reduced.ReducedModel,
+              problem: run.GradientProblem) -> int:
+    settings, kept = problem.settings, problem.kept
+    fixed = problem.templates.fixed_surfaces or {}
+    axis = model.frequencies_hz
+    air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
+    _saved_result_report(directory, base, problem)
+    _, template_rows = read_template_ledger(directory / run.TEMPLATES_FILE)
     final = template_rows[-1]
     final_designs = run.final_designs(final.surfaces, settings, kept, fixed_surfaces=fixed)
     theta = np.asarray(final.theta())
@@ -157,10 +167,10 @@ def _search_and_endpoint(directory: Path, base: Scheme, operators: reduced.FullO
     full = endpoint.full_model_pressures(operators, materials, axis, air=air, ranges=ranges,
                                         max_relative_residual=SETTINGS.full_solve_max_relative_residual)
     np.testing.assert_allclose(full, result.full_pressure, rtol=GRADIENT_REL, atol=GRADIENT_ABS)
-    return len(rows), len(template_rows), result.report.full_solves
+    return result.report.full_solves
 
 
-def main(directory: Path) -> None:
+def _build(directory: Path) -> reduced.ReducedModel:
     base = scheme()
     operators = export_operators(base, capabilities=CAPABILITIES, directivity=DIRECTIVITY, max_frequency_hz=80)
     axis = FEM_LANE_FREQUENCIES_HZ
@@ -168,10 +178,18 @@ def main(directory: Path) -> None:
     training = [{key: tuple(complex(z) for z in 411.6 * (rng.uniform(2, 12) - 1j * rng.uniform(0.5, 2) * 100 / np.asarray(axis)))
                  for key in operators.patch_keys} for _ in range(8)]
     model = build_reduced_model(operators, axis, training, settings=SETTINGS)
+    save_reduced(model, directory / "model.npz")
+    return model
+
+
+def _problem(model: reduced.ReducedModel) -> run.GradientProblem:
+    base = scheme()
+    axis = model.frequencies_hz
     settings = _settings()
     settings = settings.model_copy(update={
         "descent": settings.descent.model_copy(update={"max_steps": 1}),
-        "retune": settings.retune.model_copy(update={"max_steps": 1}),
+        # RetuneSettings 的欄位是 steps；max_steps 不會縮小原本的五步。
+        "retune": settings.retune.model_copy(update={"steps": 1}),
         "candidates": settings.candidates.model_copy(update={"max_rounds": 1, "max_per_round": 1}),
         "templates": settings.templates.model_copy(update={"max_rounds": 1, "max_per_round": 1}),
         "family": settings.family[:1]})
@@ -184,6 +202,14 @@ def main(directory: Path) -> None:
     def objective_for(items: tuple[gradient.SurfaceDesign, ...]) -> gradient.ChainObjective:
         return gradient.chain_objective(model, items, constants, air=air, ranges=ranges, frequencies=axis)
     objective = objective_for(designs)
+    header = ledger.header_for(model, designs, settings, objective_constants=constants)
+    fixed_patches = expanded_fixed_surfaces(fixed, tuple(d.surface_id for d in designs))
+    context = TemplateContext(settings, run.presets_table(), named_materials(kept), objective_for, "rigid", fixed_patches)
+    return run.GradientProblem(designs, settings, objective, header, kept, context)
+
+
+def _chain(model: reduced.ReducedModel, problem: run.GradientProblem) -> list[float]:
+    designs, objective, settings, kept = problem.designs, problem.objective, problem.settings, problem.kept
     theta = gradient.baseline_theta(designs)
     theta[:] = [0.071, 0.063]
     (value, _), automatic = jax.jit(jax.value_and_grad(objective, has_aux=True))(jnp.asarray(theta))
@@ -198,17 +224,31 @@ def main(directory: Path) -> None:
         lower[index] -= step
         central = (reference(upper) - reference(lower)) / (2 * step) * theta[index]
         np.testing.assert_allclose(float(automatic[index]) * theta[index], central, rtol=GRADIENT_REL, atol=GRADIENT_ABS)
-    header = ledger.header_for(model, designs, settings, objective_constants=constants)
-    _identities(model, designs, settings, constants, kept, objective_for)
-    fixed_patches = expanded_fixed_surfaces(fixed, tuple(d.surface_id for d in designs))
-    choices = alternatives(surfaces_of(designs), settings, fixed_patches)
-    assert choices and all(name in ("x0@right", "x0@left") for name, _ in choices)
-    context = TemplateContext(settings, run.presets_table(), named_materials(kept), objective_for, "rigid", fixed_patches)
-    problem = run.GradientProblem(designs, settings, objective, header, kept, context)
-    row_count, template_count, full_solves = _search_and_endpoint(directory, base, operators, model, problem)
-    (directory / "probe.json").write_text(json.dumps({"rows": row_count, "template_rows": template_count,
-        "patches": len(model.patch_keys), "gradient": np.asarray(automatic).tolist(), "full_solves": full_solves}), encoding="utf-8")
+    constants = gradient_objective_constants(model.frequencies_hz, _gradient_settings(), scheme().receiver_set, 2)
+    _identities(model, designs, settings, constants, kept, problem.templates.objective_for)
+    return [float(value) for value in np.asarray(automatic)]
+
+
+def main(directory: Path, part: str) -> None:
+    if part == "build":
+        model = _build(directory)
+        output: dict[str, object] = {"patches": len(model.patch_keys)}
+    else:
+        model = load_reduced(directory / "model.npz")
+        problem = _problem(model)
+        if part == "chain":
+            output = {"gradient": _chain(model, problem)}
+        elif part == "search":
+            row_count, template_count = _search(directory, model, problem)
+            output = {"rows": row_count, "template_rows": template_count}
+        elif part == "endpoint":
+            base = scheme()
+            operators = export_operators(base, capabilities=CAPABILITIES, directivity=DIRECTIVITY, max_frequency_hz=80)
+            output = {"full_solves": _endpoint(directory, base, operators, model, problem)}
+        else:
+            raise ValueError(f"未知探針段落：{part}")
+    (directory / f"{part}.json").write_text(json.dumps(output), encoding="utf-8")
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    main(Path(sys.argv[1]), sys.argv[2])
