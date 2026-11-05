@@ -2,7 +2,7 @@
 
 ``mount``（安裝方式）每次搜尋一個值：``rigid`` 是原本的行為，``on_wall`` 是貼樣板的面新增層背後接那一面方案原本的牆。
 控制組：剛背的資料夾名、帳本與換樣板帳本標頭、``project.json``、每面材料摘要，都逐位等於改動前主線（692d1f42）從
-寫入端量的值（同一組固定輸入，量法見各常數旁）。可微鏈與差分在雙精度子行程（``_material_gradient_mount_probe``），
+寫入端量的值（同一組固定輸入，量法見各常數旁）；#561 加深只更新兩份標頭內的家族設定指紋。可微鏈與差分在雙精度子行程（``_material_gradient_mount_probe``），
 替身用 ``test_material_gradient`` 的衍生替身；差分與 numpy 參考照那一份的寫法（``_numpy_total``），尺從傳遞矩陣考卷 import。
 命令列整條（start --mount on_wall、endpoint、report、改 project.json 的安裝方式再接續）照 ``test_material_gradient_endpoint_cli``
 那一份替身、方案與縮小步數的設定開真的子行程跑。
@@ -27,7 +27,7 @@ from numpy.typing import NDArray
 from pydantic import ValidationError
 
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
-from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, Mount, load_material_gradient_settings
+from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
 from aosr.config.porous_model_ranges import load_porous_model_ranges
@@ -79,8 +79,9 @@ CONTROL_DIGESTS = {
     "y0": "ff2d4e05a9194967576191b229274cb10a503955fadef73ed58fed7724f78d78",
     "yL": "9aa0be661d4d1836d45bda2695460415acb4847912bb17f78b140d673c4e4fec"}
 # 帳本標頭那一列、換樣板帳本標頭那一列（庚二帳本摘要給 "e"×64）、project.json 整檔的 SHA-256。
-CONTROL_LEDGER_HEADER = "a417256b0f40af5ab6703348c833bfb468d1e19593a3079061df943a849c2fe5"
-CONTROL_TEMPLATE_HEADER = "304b40fe88bb01f381ebce0962f3c0c3cf544151bb63f018769cf0bfe21ece3c"
+# #561 加深後只更新家族設定指紋；純標頭序列化，沒有求解或 XLA 運算。
+CONTROL_LEDGER_HEADER = "3411307712a67d9977692db67fd607a56d825727c7048bc94b117db189891f21"
+CONTROL_TEMPLATE_HEADER = "e97193100ab146a6f747045e022e21c6e89e9a3289d7c7dbf51f11dc8bbc3055"
 CONTROL_PROJECT = "d51fbff4611f4915537fc6df82b5de4c1822dcb1b3c334c6245c9eb4f5979485"
 # 剛背 result.json 整檔的 SHA-256（主線 692d1f42 寫入端：``surface_specs`` 切每面、``GradientResult``、``write_json_atomic``；
 # θ 是 0.05＋0.01×序號、值與分項與次數照 ``_rigid_result``）、它的版本字串、頂層與每面的鍵（同一份檔讀回量的）。
@@ -131,9 +132,10 @@ def _stand_in() -> ReducedModel:
         patch_keys=model.patch_keys)
 
 
-def _header(designs: tuple[gradient_search.SurfaceDesign, ...]) -> ledger.MaterialGradientHeader:
+def _header(designs: tuple[gradient_search.SurfaceDesign, ...],
+            settings: MaterialGradientSettings | None = None) -> ledger.MaterialGradientHeader:
     constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
-    return ledger.header_for(_stand_in(), designs, _settings(), objective_constants=constants)
+    return ledger.header_for(_stand_in(), designs, settings or _settings(), objective_constants=constants)
 
 
 def _template_header(header: ledger.MaterialGradientHeader, kept: dict[str, SurfaceMaterial]) -> templates.TemplateHeader:
@@ -185,7 +187,7 @@ def _rigid_result(header: ledger.MaterialGradientHeader,
 def test_rigid_identities_equal_mainline_bit_for_bit(tmp_path: Path) -> None:
     """抓剛背的身分被這一刀改到（資料夾名永遠加 mount、標頭或 project.json 永遠寫安裝方式、摘要換算法、結果檔升版或每面
     多一格）：同一組固定輸入，資料夾名、每面材料摘要、帳本標頭列、換樣板帳本標頭列、project.json 整檔、result.json 整檔，
-    都逐位等於改動前主線從寫入端量的值；不給安裝方式（預設）與明給剛背一樣。"""
+    除 #561 家族設定指紋外逐位等於改動前主線從寫入端量的值；不給安裝方式（預設）與明給剛背一樣。"""
     assert _control_id() == _control_id(MOUNT_RIGID) == CONTROL_GRADIENT_ID
     designs = _designs(MOUNT_RIGID)
     assert designs == gradient_search.wall_designs_from_presets(PRESETS, _settings(), _presets(), kept=_control_kept())

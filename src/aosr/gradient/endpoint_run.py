@@ -35,7 +35,7 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient.cli import keep_signal_handlers
-from aosr.gradient.fixed_surfaces import FixedSurfaces
+from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.endpoint import (
     EndpointReport, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
     worst_big_peak,
@@ -129,6 +129,7 @@ class EndpointRecord(BaseModel):
     finished_at: str
     engine_commit: str | None
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
+    max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _version_matches_content(self) -> Self:
@@ -206,11 +207,11 @@ def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces)
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     result = checked_result(folder, read_result(folder), header_for(
         model, initial, settings, objective_constants=search_objective_constants(project, scheme, model)), settings, kept)
     designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
-                            mount=project.mount, fixed_surfaces=project.fixed_surfaces)
+                            mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     clock = time.perf_counter()
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -257,6 +258,6 @@ def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
         exported_scheme=EXPORTED_SCHEME_FILE,
         exported_scheme_sha256=file_sha256(folder / EXPORTED_SCHEME_FILE),
         seconds=EndpointSeconds(export_operators=export_seconds, endpoint=endpoint_seconds, baseline=baseline_seconds),
-        finished_at=now_text(), engine_commit=project.engine_commit, fixed_surfaces=project.fixed_surfaces)
+        finished_at=now_text(), engine_commit=project.engine_commit, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     write_json_atomic(folder / ENDPOINT_FILE, record)
     return record

@@ -9,6 +9,7 @@
 差分走 numpy 版 ``evaluate_reduced``＋既有評分程式（``evaluate_stage_one_low_frequency``＋``score_stage_one``），
 不走 JAX；#561 壬一起鏈的值是梯度目標的新合分，考卷自己用 numpy 加上大峰代理（評估器交回的直線係數重算主位殘差、
 內部點、左右一起的 log-sum-exp），T、權重、較差參考讀登記簿那三格。梯度的尺沿用傳遞矩陣考卷那兩把；單精度只量不登記。
+``runs`` 用舊家族 0.150 m 盒界考機制；其餘題仍用正式設定，新盒界與深度另由 ``test_material_gradient_max_depth`` 守住。
 """
 from __future__ import annotations
 
@@ -53,6 +54,7 @@ from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, 
 from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one, stage_one_score_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
+from tests.engine._material_gradient_legacy import legacy_family_settings
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
 from tests.engine._precision_contracts import contract_value
@@ -97,8 +99,8 @@ def _receivers() -> ReceiverSet:
     return primary_cross(primary_position_m=(1.2, 0.7, 0.6), offset_m=0.1)
 
 
-def _designs(name: str) -> tuple[gradient_search.SurfaceDesign, ...]:
-    return gradient_search.wall_designs_from_presets(CASES[name], _settings(), _presets())
+def _designs(name: str, *, settings: MaterialGradientSettings | None = None) -> tuple[gradient_search.SurfaceDesign, ...]:
+    return gradient_search.wall_designs_from_presets(CASES[name], _settings() if settings is None else settings, _presets())
 
 
 @cache
@@ -118,8 +120,10 @@ def _objective_constants(model: ReducedModel, score: StageOneScoreSettings | Non
     return gradient_objective_constants(model.frequencies_hz, _objective(score), _receivers(), len(model.source_names))
 
 
-def _header(model: ReducedModel, score: StageOneScoreSettings | None = None) -> ledger.MaterialGradientHeader:
-    return ledger.header_for(model, _designs(DESCENT_CASE), _settings(),
+def _header(model: ReducedModel, score: StageOneScoreSettings | None = None, *, settings: MaterialGradientSettings | None = None
+            ) -> ledger.MaterialGradientHeader:
+    settings = _settings() if settings is None else settings
+    return ledger.header_for(model, _designs(DESCENT_CASE, settings=settings), settings,
                              objective_constants=_objective_constants(model, score))
 
 
@@ -161,9 +165,8 @@ def chain_model(model: ReducedModel) -> ReducedModel:
 @pytest.fixture(scope="module")
 def runs(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
          ) -> tuple[Path, dict[str, Record]]:
-    """一場 pytest 只跑一次探針，平行的工人共用（照 test_material_gradient_loop 的做法、用 _scheme_cache.shared_json）：
-    worksteal 會把這一模組的題分給每一個工人，模組級夾具在每個工人各跑一次五分鐘的探針、彼此搶 CPU，
-    題數一多雲端那一片就撞上限。``-n 0``（master）不共用；讀的人只讀共用目錄、改檔一律先抄到自己的 tmp_path。"""
+    """整批用舊家族設定考機制；用 _scheme_cache.shared_json 共用探針，避免 worksteal 工人重算、搶 CPU 撞雲端上限。
+    ``-n 0``（master）不共用；讀的人只讀共用目錄、改檔一律先抄到自己的 tmp_path。"""
     directory = (tmp_path_factory.mktemp("material-gradient") if worker_id == "master"
                  else tmp_path_factory.getbasetemp().parent / "material-gradient-shared")
     text = shared_json(tmp_path_factory, worker_id, "material-gradient", lambda: _probe(chain_model, directory))
@@ -173,7 +176,7 @@ def runs(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory, wo
 def _probe(chain_model: ReducedModel, directory: Path) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     save_reduced(chain_model, directory / "model.npz")
-    cases = {name: {"presets": list(presets), "theta": [value.hex() for value in _probe_point(_designs(name))],
+    cases = {name: {"presets": list(presets), "theta": [value.hex() for value in _probe_point(_designs(name, settings=legacy_family_settings(_settings())))],
                     "step": DIFFERENCE_STEP, "descent": name == DESCENT_CASE} for name, presets in CASES.items()}
     problem = {"cases": cases, "purpose": PURPOSE, "receivers": _receivers().model_dump(mode="json")}
     (directory / "problem.json").write_text(json.dumps(problem), encoding="utf-8")
@@ -259,7 +262,7 @@ def test_chain_gradient_matches_numpy_difference_per_parameter(
     關掉 #952 審查留下的「同一面弱頻點的錯梯度可躲過逐牆尺度」：這裡每一格是一個純量，沒有聚合可躲。
     """
     row = runs[1][name]
-    designs = _designs(name)
+    designs = _designs(name, settings=legacy_family_settings(_settings()))
     assert row["names"] == list(gradient_search.design_names(designs))
     assert row["dtype"] == "float64" and row["gradient_dtype"] == "float64"
     theta = _probe_point(designs)
@@ -312,7 +315,7 @@ def test_descent_monotone_inside_box_and_stop_reason_matches_numbers(runs: tuple
     assert np.all(np.diff(values) <= 0.0)
     assert values[-1] < values[0]
     assert all(np.all((lower <= theta) & (theta <= upper)) for theta in thetas)
-    top = _settings().family[0].max_total_depth_m
+    top = legacy_family_settings(_settings()).family[0].max_total_depth_m
     pairs = _pairs(cast(list[str], row["names"]))
     assert pairs and all(theta[t] + theta[c] <= top for theta in thetas for t, c in pairs)
     assert cast(int, descent["evaluations"]) >= len(thetas)
@@ -383,8 +386,7 @@ def _tangent_norm(theta: NDArray[np.float64], gradient: NDArray[np.float64], low
 
 def test_descent_gradient_norm_is_projected(runs: tuple[Path, dict[str, Record]]) -> None:
     """抓投影梯度的遮罩被拿掉、或貼斜邊往外推的法向分量沒去掉：每一步記的範數要等於考卷重算的投影梯度範數；
-    停在「梯度夠小」那一步有一面貼在「厚度＋空腔＝上限」的斜邊上、負梯度往斜邊外推，未遮範數嚴格大於投影後。
-
+    用舊家族總深度，停在「梯度夠小」那一步有一面貼在「厚度＋空腔＝上限」的斜邊上、負梯度往斜邊外推，未遮範數嚴格大於投影後。
     梯度是探針用另一支編譯函式在同一個 θ 重算的，跟下降內部那一支可能差末位，所以不逐位、
     用梯度那把尺（GRADIENT_REL 相對＋GRADIENT_ABS）；遮罩拿掉時差的是整個貼界分量，遠大於這把尺。
     （庚二改：連續段守總深度之後終點不再貼 0.150 的空腔上界，改核斜邊。）
@@ -392,7 +394,7 @@ def test_descent_gradient_norm_is_projected(runs: tuple[Path, dict[str, Record]]
     row = runs[1][DESCENT_CASE]
     descent = _descent(runs)
     lower, upper = _decode(row["lower"]), _decode(row["upper"])
-    pairs, top = _pairs(cast(list[str], row["names"])), _settings().family[0].max_total_depth_m
+    pairs, top = _pairs(cast(list[str], row["names"])), legacy_family_settings(_settings()).family[0].max_total_depth_m
     thetas = [_decode(step) for step in cast(list[list[str]], descent["theta"])]
     gradients = [_decode(item) for item in cast(list[list[str]], row["descent_gradients"])]
     recorded = _decode(descent["gradient_norm"])
@@ -411,7 +413,7 @@ def test_descent_gradient_norm_is_projected(runs: tuple[Path, dict[str, Record]]
 
 
 def test_descent_box_only_gradient_norm_masks_upper_bound(runs: tuple[Path, dict[str, Record]]) -> None:
-    """抓盒界遮罩被拿掉（#561 審查第 9 條補回的獨立案例）：同一起點只守盒界（``limits=()``）下降，每一步記的範數
+    """用舊家族盒界抓遮罩被拿掉（#561 審查第 9 條補回的獨立案例）：同一起點只守盒界（``limits=()``）下降，每一步記的範數
     等於考卷只遮盒界重算的；停在「梯度夠小」那一步有空腔貼 0.150 上界、負梯度往上界外推，而且未遮範數不小於停止門檻、
     記的範數小於門檻——停得下來是遮罩讓範數跨過門檻，不是本來就小。"""
     row = runs[1][DESCENT_CASE]
@@ -578,17 +580,17 @@ def test_snap_nearest_thickness() -> None:
 
 
 def test_snap_total_depth_clips_cavity_where_independent_rounding_violates() -> None:
-    """抓各面各自取最近就交付：厚度 0.09 取最近是 0.100，配空腔 0.080 超過上限 0.150；取規格要切空腔並記下被擋。"""
+    """抓各面各自取最近就交付：厚度 0.18 取最近是 0.200，配空腔 0.160 超過上限 0.300；取規格要切空腔並記下被擋。"""
     designs = _designs(DESCENT_CASE)
-    theta = _theta_for(designs, {"floor.layer1.thickness_m": 0.09, "floor.layer2.thickness_m": 0.080})
+    theta = _theta_for(designs, {"floor.layer1.thickness_m": 0.18, "floor.layer2.thickness_m": 0.160})
     independent = theta.copy()
-    independent[0] = 0.100
+    independent[0] = 0.200
     assert not gradient_search.is_feasible(independent, designs)
     snapped = gradient_search.snap_to_specs(theta, designs)
     assert gradient_search.is_feasible(snapped.theta, designs)
     floor = snapped.surfaces[0]
-    assert floor.thickness_m == 0.100 and floor.cavity_clipped and not floor.thickness_retreated
-    assert floor.cavity_m is not None and floor.cavity_m + 0.100 <= 0.150
+    assert floor.thickness_m == 0.200 and floor.cavity_clipped and not floor.thickness_retreated
+    assert floor.cavity_m is not None and floor.cavity_m + 0.200 <= 0.300
     assert [choice.surface_id for choice in snapped.surfaces if choice.blocked_by_total_depth] == ["floor"]
 
 
@@ -612,7 +614,7 @@ def test_snap_retreats_to_thinner_when_cavity_zero_still_exceeds() -> None:
 def test_descent_end_snaps_to_feasible(runs: tuple[Path, dict[str, Record]]) -> None:
     """子行程那一次的取規格結果：可行、厚度都是合法值。"""
     snap = cast(Record, runs[1][DESCENT_CASE]["snap"])
-    assert gradient_search.is_feasible(_decode(snap["theta"]), _designs(DESCENT_CASE))
+    assert gradient_search.is_feasible(_decode(snap["theta"]), _designs(DESCENT_CASE, settings=legacy_family_settings(_settings())))
 
 
 # ---- 重調 ----
@@ -621,7 +623,7 @@ def test_retune_moves_only_cavities_at_most_k_steps(runs: tuple[Path, dict[str, 
     """抓重調動到厚度、步數超過上限、值上升、走出總深度：厚度逐位不變、最多 K 步、原因與數字一致、值不升、每步可行。"""
     row = runs[1][DESCENT_CASE]
     retune = cast(Record, row["retune"])
-    designs = _designs(DESCENT_CASE)
+    designs = _designs(DESCENT_CASE, settings=legacy_family_settings(_settings()))
     start = _decode(cast(Record, row["snap"])["theta"])
     thetas = [_decode(step) for step in cast(list[list[str]], retune["theta"])]
     names = gradient_search.design_names(designs)
@@ -652,7 +654,7 @@ def test_retune_with_cavity_room_moves_cavities(runs: tuple[Path, dict[str, Reco
     值不升、每步可行、最多 K 步。"""
     row = runs[1][DESCENT_CASE]
     retune = cast(Record, row["retune_slack"])
-    designs = _designs(DESCENT_CASE)
+    designs = _designs(DESCENT_CASE, settings=legacy_family_settings(_settings()))
     thetas = [_decode(step) for step in cast(list[list[str]], retune["theta"])]
     names = gradient_search.design_names(designs)
     cavities = np.asarray([name.endswith("layer2.thickness_m") for name in names])
@@ -671,8 +673,8 @@ def test_retune_with_cavity_room_moves_cavities(runs: tuple[Path, dict[str, Reco
 def test_ledger_round_trip_matches_probe(chain_model: ReducedModel, runs: tuple[Path, dict[str, Record]]) -> None:
     """抓帳本漏寫或改寫：子行程寫的帳本讀回，θ、值逐位等於那一次的結果，標頭等於父行程照同一份輸入算的。"""
     directory, output = runs
-    designs = _designs(DESCENT_CASE)
-    expected = _header(chain_model)
+    designs = _designs(DESCENT_CASE, settings=legacy_family_settings(_settings()))
+    expected = _header(chain_model, settings=legacy_family_settings(_settings()))
     header, rows = ledger.read_ledger(directory / f"{DESCENT_CASE}.ledger.jsonl", expected_header=expected)
     row = output[DESCENT_CASE]
     descent, retune = cast(Record, row["descent"]), cast(Record, row["retune"])
@@ -726,7 +728,7 @@ def test_ledger_rejects_header_with_other_surrogate(chain_model: ReducedModel, r
     source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
     other = dataclasses.replace(chain_model, input_hash="0" * 64)
     with pytest.raises(ValueError, match="input_hash"):
-        ledger.read_ledger(source, expected_header=_header(other))
+        ledger.read_ledger(source, expected_header=_header(other, settings=legacy_family_settings(_settings())))
     header, rows = ledger.read_ledger(source)
     with pytest.raises(FileExistsError):
         ledger.write_ledger(source, header, rows)
@@ -754,12 +756,12 @@ def test_ledger_rejects_header_with_other_scoring_constants(chain_model: Reduced
     source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
     assert (ledger.objective_fingerprint(_objective_constants(chain_model))
             == ledger.objective_fingerprint(_objective_constants(chain_model)))
-    ledger.read_ledger(source, expected_header=_header(chain_model))
+    ledger.read_ledger(source, expected_header=_header(chain_model, settings=legacy_family_settings(_settings())))
     for score in (_reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz)):
-        other = _header(chain_model, score)
+        other = _header(chain_model, score, settings=legacy_family_settings(_settings()))
         # 評分指紋與標頭記的分數常數（#561 壬一審查 B）都從評分設定來，其餘逐格相同。
         scoring = {"objective_fingerprint": None, "score_constants": None}
-        assert other.model_dump() | scoring == _header(chain_model).model_dump() | scoring
+        assert other.model_dump() | scoring == _header(chain_model, settings=legacy_family_settings(_settings())).model_dump() | scoring
         with pytest.raises(ValueError, match="objective_fingerprint"):
             ledger.read_ledger(source, expected_header=other)
 
@@ -950,7 +952,7 @@ def test_rejections() -> None:
     with pytest.raises(ValueError, match="長度"):
         gradient_search.checked_theta(theta[:-1], designs)
     outside = theta.copy()
-    outside[1] = 0.2
+    outside[1] = 0.26
     with pytest.raises(ValueError, match="超出盒界"):
         gradient_search.snap_to_specs(outside, designs)
     with pytest.raises(TypeError, match="浮點"):

@@ -121,6 +121,8 @@ class SurfaceDesign:
     backing_material: WallMaterial | None = None
     # 固定面保留材料庫 id（跟保留原牆分開記身分），材料本身仍走 kept_material。
     fixed_material_id: str | None = None
+    # 使用者的面上限：不貼也保留，帳本與換家族不能遺失它；None 不改既有存檔。
+    max_depth_m: float | None = None
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():

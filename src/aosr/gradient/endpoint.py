@@ -222,6 +222,8 @@ def materials_from_surfaces(designs: Sequence[SurfaceDesign], theta: jax.Array |
     """
     checked = checked_wall_designs(designs)
     designs_mount(checked)
+    if any(design.max_depth_m is not None for design in checked) and not is_feasible(theta, checked):
+        raise ValueError("匯出 θ 不可行：棉厚須為合法規格，厚度＋空腔須守每面深度上限")
     specs = surface_specs(checked, theta)
     minimum = settings.export.min_cavity_m
     if any("@" in design.surface_id for design in checked):

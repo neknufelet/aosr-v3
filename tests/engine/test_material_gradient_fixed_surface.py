@@ -30,6 +30,7 @@ from aosr.gradient.report import _kept_texts
 from aosr.physics.report_surfaces import WholeWallZone
 from tests.engine._material_gradient_templates_probe import SYNTHETIC_SCORES, synthetic_factory
 from tests.engine.test_material_gradient import _presets, _settings
+from tests.engine._material_gradient_legacy import legacy_family_settings
 from tests.engine.test_material_gradient_mount import (
     _control_kept, _header, _project, test_rigid_identities_equal_mainline_bit_for_bit as _mount_control,
 )
@@ -41,12 +42,12 @@ CONTROL: dict[str, str] = {'ledger.jsonl': '87362b54c36120c7bb78f6f4a180501635be
 
 
 def _problem(fixed: dict[str, str] | None = None) -> run.GradientProblem:
-    settings = _settings()
+    settings = _settings() if fixed else legacy_family_settings(_settings())
     kept = _control_kept()
     designs = run.designs_for(PRESETS, settings, kept={wall: kept[wall.wall_name()] for wall in Wall.all()}, fixed_surfaces=fixed)
     factory = synthetic_factory(settings, {}, [0])
     context = rounds.TemplateContext(settings, _presets(), kept, factory, fixed_surfaces=fixed)
-    header = _header(designs).model_copy(update={"score_constants": SYNTHETIC_SCORES})
+    header = _header(designs, settings).model_copy(update={"score_constants": SYNTHETIC_SCORES})
     return run.GradientProblem(designs, settings, factory(designs), header,
                                {wall: kept[wall.wall_name()] for wall in Wall.all()}, context)
 

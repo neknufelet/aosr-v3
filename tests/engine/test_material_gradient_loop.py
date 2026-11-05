@@ -34,7 +34,7 @@ from aosr.gradient import material_gradient_loop as loop
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
 from tests.engine._split_probe_cache import Sections
-from tests.engine._material_gradient_loop_probe import boundary_class
+from tests.engine._material_gradient_loop_probe import boundary_class, single_thickness_settings
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _designs, _header, _narrowed, _presets, _receivers, _reweighted, _score,
     _settings,
@@ -69,7 +69,7 @@ def _problem() -> Record:
         "multi": {"surfaces": FOUR_SURFACES, "override": {}, "again": True, "resume_each_class": True,
                   "single_round": True},
         "huge_threshold": {"surfaces": FOUR_SURFACES, "override": {"improvement_threshold": 1.0e6}},
-        "no_candidates": {"surfaces": SINGLE_THICKNESS, "override": {}},
+        "no_candidates": {"surfaces": SINGLE_THICKNESS, "override": {}, "single_thickness": True},
         "max_rounds": {"surfaces": FOUR_SURFACES, "override": {"max_rounds": 1}},
         "max_evaluations": {"surfaces": FOUR_SURFACES, "override": {"max_evaluations": bound}},
         "budget_too_small": {"surfaces": FOUR_SURFACES, "override": {"max_evaluations": bound - 1}},
@@ -161,9 +161,9 @@ def _largest_cavity(top: float, thickness: float) -> float:
 
 
 def test_candidates_match_hand_calculation() -> None:
-    """抓候選位移只算厚度不算空腔、預測變化漏了空腔分量、厚到頂還給往厚、貼牆面不給候選、24K 給候選、排序錯。
+    """抓候選位移只算厚度不算空腔、預測變化漏了空腔分量、貼牆面不給候選、排序錯。
 
-    two_rigid：地板 0.05＋0.08、x0 0.1＋上限內最大空腔（厚到頂只有往薄）、xL 0.05 貼牆、yL 24K（只有一個合法厚度）。
+    two_rigid：地板 0.05＋0.08、x0 0.1＋上限內最大空腔、xL 0.05 貼牆、yL 24K；新三族皆可到 0.2。
     """
     designs = _designs(DESCENT_CASE)
     top = _settings().family[0].max_total_depth_m
@@ -171,7 +171,7 @@ def test_candidates_match_hand_calculation() -> None:
                              "x0.layer1.thickness_m": 0.1, "x0.layer2.thickness_m": _largest_cavity(top, 0.1),
                              "xL.layer1.thickness_m": 0.05, "yL.layer1.thickness_m": 0.05})
     gradient = np.asarray([-4.0, 2.0, 3.0, -1.0, -2.0, 7.0])
-    floor_cavity = _largest_cavity(top, 0.1)
+    floor_cavity = 0.08
     expected = [  # (代號, 新厚度, 新空腔, Δθ)
         ("floor:thicker", 0.1, floor_cavity, (0.1 - 0.05, floor_cavity - 0.08, 0.0, 0.0, 0.0, 0.0)),
         ("x0:thinner", 0.05, theta[3], (0.0, 0.0, 0.05 - 0.1, 0.0, 0.0, 0.0)),
@@ -197,7 +197,7 @@ def _with_candidates(**changes: object) -> MaterialGradientSettings:
 
 
 def _three_thickness_settings(**family_changes: object) -> MaterialGradientSettings:
-    """考卷自己組的 48K 家族：三個合法厚度 0.05／0.075／0.1（產品設定檔只有兩個）。"""
+    """考卷自己組的 48K 家族：三個合法厚度 0.05／0.075／0.1。"""
     base = _settings()
     family = FamilySettings.model_validate({**base.family[0].model_dump(), "thicknesses_m": (0.05, 0.075, 0.1),
                                             **family_changes})
@@ -231,7 +231,8 @@ def test_jump_that_cannot_fit_total_depth_is_not_a_candidate() -> None:
     """抓空腔切到下界以下仍當候選：空腔下界 0.06、總深度 0.15，厚度 0.05 → 0.1 時空腔最多 0.05，放不下，不是候選；
     往薄那一邊（0.05 是最薄）也沒有，所以這一面一個候選都沒有。"""
     settings = _settings()
-    family = FamilySettings.model_validate({**settings.family[0].model_dump(), "cavity_range_m": (0.06, 0.15)})
+    family = FamilySettings.model_validate({**settings.family[0].model_dump(), "cavity_range_m": (0.06, 0.15),
+                                           "max_total_depth_m": 0.15})
     settings = MaterialGradientSettings.model_validate({**settings.model_dump(), "family": [
         family.model_dump(), *(item.model_dump() for item in settings.family[1:])]})
     designs = gradient_search.designs_from_presets((("a", "glass_wool_48k_50mm_gap50"),), settings, _presets())
@@ -241,11 +242,12 @@ def test_jump_that_cannot_fit_total_depth_is_not_a_candidate() -> None:
 
 
 def test_single_thickness_families_have_no_candidates() -> None:
-    """抓 24K／96K 單一厚度的面給候選：六面全是單厚度家族（加一面剛性），回空 tuple。"""
-    designs = gradient_search.designs_from_presets(tuple((str(a), b) for a, b in SINGLE_THICKNESS), _settings(),
+    """抓單一厚度的面給候選：合成設定明給單厚度（正式三族現在皆可加厚），回空 tuple。"""
+    settings = single_thickness_settings(_settings())
+    designs = gradient_search.designs_from_presets(tuple((str(a), b) for a, b in SINGLE_THICKNESS), settings,
                                                    _presets())
     theta = gradient_search.baseline_theta(designs)
-    assert loop.candidates_from_gradient(theta, np.ones(theta.shape), designs, _settings()) == ()
+    assert loop.candidates_from_gradient(theta, np.ones(theta.shape), designs, settings) == ()
 
 
 # ---- 一輪 ----

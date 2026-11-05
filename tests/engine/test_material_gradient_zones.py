@@ -47,8 +47,9 @@ def test_whole_control_at_starting_commit(tmp_path: Path) -> None:
         "y0": "ff2d4e05a9194967576191b229274cb10a503955fadef73ed58fed7724f78d78",
         "yL": "9aa0be661d4d1836d45bda2695460415acb4847912bb17f78b140d673c4e4fec"}
     header = _header(designs)
-    assert _digest(_ledger_line(tmp_path / "ledger.jsonl", header)) == "a417256b0f40af5ab6703348c833bfb468d1e19593a3079061df943a849c2fe5"
-    assert _digest(_template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))) == "304b40fe88bb01f381ebce0962f3c0c3cf544151bb63f018769cf0bfe21ece3c"
+    # #561 只更新家族設定指紋；這兩格是純標頭序列化，沒有重錄求解答案。
+    assert _digest(_ledger_line(tmp_path / "ledger.jsonl", header)) == "3411307712a67d9977692db67fd607a56d825727c7048bc94b117db189891f21"
+    assert _digest(_template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))) == "e97193100ab146a6f747045e022e21c6e89e9a3289d7c7dbf51f11dc8bbc3055"
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project())
     assert _digest((tmp_path / run.PROJECT_FILE).read_bytes()) == "d51fbff4611f4915537fc6df82b5de4c1822dcb1b3c334c6245c9eb4f5979485"
 

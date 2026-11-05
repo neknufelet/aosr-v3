@@ -105,6 +105,8 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--purpose", required=True, help="用途（評分設定）")
     start.add_argument("--root", type=Path, required=True, help="資料夾根（不要放在網頁讀的 searches/ 底下）")
     start.add_argument("--settings", type=Path, default=config_path("material_gradient.toml"))
+    start.add_argument("--max-depth", action="append", default=[], metavar="面=公尺",
+                       help="每面總深度上限，可重複；整面或面片，例如 x0=0.08、x0@u0v0=0.08")
     start.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     start.add_argument("--engine-commit", default=None)
     start.add_argument("--mount", choices=MOUNTS, default=MOUNT_RIGID,
@@ -203,13 +205,14 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.material_gradient import load_material_gradient_settings
     from aosr.gradient import run
-    from aosr.gradient.fixed_surfaces import parse_fixed_surfaces
+    from aosr.gradient.fixed_surfaces import parse_fixed_surfaces, parse_max_depths
     from aosr.physics.fem_reduced_check import points_hex
     from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.reporting.scheme import load_scheme
 
     fixed = parse_fixed_surfaces(args.fixed_surface)
+    caps = parse_max_depths(args.max_depth)
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     if SEARCHES_DIR in args.root.resolve().parts:
         raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
@@ -221,7 +224,7 @@ def _start(args: argparse.Namespace) -> int:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     run.designs_for(args.presets, settings,
                     kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity),
-                    mount=args.mount, fixed_surfaces=fixed)
+                    mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
     from aosr.gradient.boundary import scheme_patch_keys
 
     patch_keys = scheme_patch_keys(scheme)
@@ -238,7 +241,8 @@ def _start(args: argparse.Namespace) -> int:
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
-                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, patch_keys=patch_keys)
+                               objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
+                               max_depths=caps, patch_keys=patch_keys)
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
@@ -246,7 +250,7 @@ def _start(args: argparse.Namespace) -> int:
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
-        objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed)
+        objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)
