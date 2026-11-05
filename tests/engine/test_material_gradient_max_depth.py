@@ -20,7 +20,8 @@ from aosr.gradient import fixed_surfaces as faces
 from aosr.gradient import template_rounds as rounds
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import template_ledger as templates
-from aosr.gradient.endpoint import materials_from_surfaces
+from aosr.gradient.endpoint import design_digest, materials_from_surfaces
+from aosr.gradient.endpoint_run import checked_result
 from aosr.gradient.report import render_report
 from aosr.materials.construction_models import Assembly, ConstantImpedance, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
@@ -42,6 +43,115 @@ def _settings() -> MaterialGradientSettings:
 
 def _kept() -> dict[Wall, SurfaceMaterial]:
     return {wall: ConstantImpedance(impedance_pa_s_m=12348.0) for wall in Wall.all()}
+
+
+def _unequal_family_settings() -> MaterialGradientSettings:
+    document = _settings().model_dump()
+    document["family"][1]["max_total_depth_m"] = 0.15
+    document["templates"].update(max_per_round=1, max_rounds=1)
+    return MaterialGradientSettings.model_validate(document)
+
+
+@pytest.mark.parametrize(("cap", "effective"), [(0.20, 0.15), (0.08, 0.08)])
+def test_swapped_family_final_designs_and_export_use_minimum_depth(cap: float, effective: float) -> None:
+    """抓終點重建誤用起跑拒收，或重建漏取家族與面上限較小值。"""
+    settings, kept = _unequal_family_settings(), _kept()
+    designs = run.designs_for((PRESET,) * 6, settings, kept=kept, max_depths={"x0": cap})
+    context = rounds.TemplateContext(settings, run.presets_table(), {w.wall_name(): m for w, m in kept.items()},
+                                     lambda designs: pytest.fail("不應求值"), max_depths={"x0": cap})
+    swapped, theta = rounds.swap(designs, search.baseline_theta(designs), "x0", "glass_wool_24k", context)
+    rebuilt = run.final_designs(rounds.surfaces_of(swapped), settings, kept, max_depths={"x0": cap})
+    assert rebuilt == swapped
+    assert rebuilt[2].max_depth_m == cap and rebuilt[2].max_total_depth_m == effective
+    assert search.depth_limits(rebuilt)[2].max_total_m == effective
+    material = materials_from_surfaces(rebuilt, theta, settings)[Wall.X0]
+    assert isinstance(material, Assembly)
+    assert isinstance(material.layers[0], PorousLayer) and material.layers[0].thickness_m == 0.05
+    theta[4] = 0.20
+    with pytest.raises(ValueError, match="深度|可行"):
+        materials_from_surfaces(rebuilt, theta, settings)
+
+
+def test_start_still_rejects_cap_above_initial_family_limit() -> None:
+    settings = _unequal_family_settings()
+    presets = list((PRESET,) * 6)
+    presets[2] = settings.family_by_id("glass_wool_24k").template_preset
+    with pytest.raises(ValueError, match="x0.*0.2.*glass_wool_24k.*0.15"):
+        run.designs_for(presets, settings, kept=_kept(), max_depths={"x0": 0.20})
+
+
+def _recorded_retune(theta: search.FloatVector, value: float) -> search.DescentResult:
+    """手給帳本輸入，不求值、不跑搜尋；兩分項等權相加，代理為零。"""
+    step = search.DescentStep(0, tuple(float(x) for x in theta), value, value,
+                              (value / 2, value / 2, 0.0), 0.0, 0.0, 0.0)
+    return search.DescentResult(theta, (step,), search.STOP_GRADIENT, 0.0, 1)
+
+
+def _write_swapped_template_ledger(folder: Path, header: ledger.MaterialGradientHeader,
+                                  designs: tuple[search.SurfaceDesign, ...], context: rounds.TemplateContext) -> None:
+    """合成一輪接受 x0 換 24K 的合法帳本；讀寫與換家族都走產品函式。"""
+    theta = search.baseline_theta(designs)
+    start = rounds.surfaces_of(designs)
+    th = run.template_header_for(header, context.settings, _kept(),
+                                 base_ledger_sha256=run.file_sha256(folder / run.LEDGER_FILE))
+    rows: list[templates.TemplateRow] = []
+    for face, target in rounds.alternatives(start, context.settings):
+        swapped, values = rounds.swap(designs, theta, face, target, context)
+        value = 1.0 if (face, target) == ("x0", "glass_wool_24k") else 3.0
+        score = rounds.QuickScore(face, target, rounds.surfaces_of(swapped), search.design_names(swapped), values,
+                                   value, value, (value / 2, value / 2, 0.0), 0.0)
+        rows.append(templates.quick_row(len(rows), 0, score))
+    rows.extend(templates.segment_rows(_recorded_retune(theta, 2.0), "baseline_retune", len(rows), round=0,
+                                       surfaces=start, variable_names=search.design_names(designs)))
+    chosen = next(row for row in rows if row.candidate == "x0->glass_wool_24k")
+    rows.extend(templates.segment_rows(_recorded_retune(np.asarray(chosen.theta()), 1.0), "candidate_retune",
+                                       len(rows), round=0, surfaces=chosen.surfaces,
+                                       variable_names=chosen.variable_names, candidate=chosen.candidate))
+    decision = templates.TemplateDecision(
+        baseline_value=2.0, quick_count=18,
+        outcomes=(templates.TemplateOutcome(candidate="x0->glass_wool_24k", quick_value=1.0, value=1.0, improvement=1.0),),
+        threshold=context.settings.candidates.improvement_threshold, accepted="x0->glass_wool_24k",
+        round_evaluations=20, total_evaluations=20, next_round_bound=None)
+    rows.append(templates.decision_row(len(rows), 0, surfaces=chosen.surfaces, variable_names=chosen.variable_names,
+                                       theta_hex=chosen.theta_hex, value=1.0, screening_total=1.0,
+                                       components=(0.5, 0.5, 0.0), seconds=0.0,
+                                       decision=decision, stop_reason=rounds.TEMPLATE_STOP_MAX_ROUNDS))
+    templates.create_template_ledger(folder / run.TEMPLATES_FILE, th)
+    templates.append_template_rows(folder / run.TEMPLATES_FILE, th, rows, settings=context.settings,
+                                    start=templates.TemplateStart(start, tuple(float(x).hex() for x in theta),
+                                                                  2.0, 2.0, (1.0, 1.0, 0.0)))
+
+
+def test_swapped_family_result_roundtrip_and_endpoint_check(tmp_path: Path) -> None:
+    """抓帳本結果重建或終點核對仍用起跑的家族上限拒收。"""
+    settings, kept = _unequal_family_settings(), _kept()
+    caps = {"x0": 0.20}
+    designs = run.designs_for((PRESET,) * 6, settings, kept=kept, max_depths=caps)
+    context = rounds.TemplateContext(settings, run.presets_table(), {w.wall_name(): m for w, m in kept.items()},
+                                     lambda designs: pytest.fail("不應求值"), max_depths=caps)
+    header = ledger.MaterialGradientHeader(
+        ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic", physics_identity="synthetic",
+        surfaces=rounds.surfaces_of(designs), variable_names=search.design_names(designs),
+        settings_fingerprint=settings.fingerprint, objective_fingerprint="a" * 64, kept_digests={}, max_depths=caps,
+        score_constants=ledger.ScoreConstants(component_weights=(1.0, 1.0), worse_references=(1.0, 1.0),
+                                               proxy_weight=0.25, proxy_worse_reference=1.0, proxy_temperature_db=0.25))
+    decision = ledger.RoundDecision(baseline_value=None, outcomes=(), threshold=settings.candidates.improvement_threshold,
+                                     accepted=None, round_evaluations=1, total_evaluations=1, next_round_bound=None)
+    row = ledger.decision_row(0, 0, tuple(float(x) for x in search.baseline_theta(designs)), 2.0, 2.0, (1.0, 1.0, 0.0),
+                               0.0, decision, search.LOOP_STOP_NO_CANDIDATES)
+    ledger.write_ledger(tmp_path / run.LEDGER_FILE, header, (row,))
+    _write_swapped_template_ledger(tmp_path, header, designs, context)
+    run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project().model_copy(update={"max_depths": caps}))
+    result = run.result_from_ledger(tmp_path, settings, kept, expected_header=header)
+    run.write_json_atomic(tmp_path / run.RESULT_FILE, result)
+    restored = run.parse_result((tmp_path / run.RESULT_FILE).read_bytes())
+    assert checked_result(tmp_path, restored, header, settings, kept) == result
+    final = run.final_designs([(s.surface_id, s.preset_id) for s in result.surfaces], settings, kept, max_depths=caps)
+    assert final[2].family_id == "glass_wool_24k" and final[2].max_total_depth_m == 0.15
+    assert result.surfaces[2].material_digest == design_digest(final[2])
+    material = materials_from_surfaces(final, np.asarray([float.fromhex(v) for v in result.theta_hex]), settings)[Wall.X0]
+    assert isinstance(material, Assembly)
+    assert isinstance(material.layers[0], PorousLayer) and material.layers[0].thickness_m == 0.05
 
 
 @pytest.mark.parametrize("family", ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k"])

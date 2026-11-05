@@ -527,7 +527,7 @@ def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: Materia
                 kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
                 fixed_surfaces: Mapping[str, str] | None = None,
                 max_depths: Mapping[str, float] | None = None) -> tuple[SurfaceDesign, ...]:
-    """照方案建立設計，再套每面總深上限；空設定沿用舊設計。"""
+    """建立起跑設計，驗證每面上限不超過起跑家族上限，再套入；空設定沿用舊設計。"""
     designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces)
     return designs_with_max_depths(designs, settings, max_depths or {})
 
@@ -719,11 +719,15 @@ def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], se
                   kept: Mapping[K, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
                   fixed_surfaces: Mapping[str, str] | None = None,
                   max_depths: Mapping[str, float] | None = None) -> tuple[SurfaceDesign, ...]:
-    """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。"""
+    """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。
+
+    每面上限已在起跑驗證，換家族後沿用換樣板的 min 規則，不再用新家族上限拒收原選項。
+    """
     if tuple(surface_id for surface_id, _ in surfaces) != surface_ids(material_keys(kept)):
         raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
-    return designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
-                       fixed_surfaces=fixed_surfaces, max_depths=max_depths)
+    designs = _uncapped_designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
+                                    fixed_surfaces=fixed_surfaces)
+    return designs_with_max_depths(designs, settings, max_depths or {}, check_family_upper=False)
 
 
 def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
