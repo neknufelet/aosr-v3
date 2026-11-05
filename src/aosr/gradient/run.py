@@ -63,7 +63,9 @@ from aosr.config.precision_contracts import default_precision_contracts_path, lo
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.surrogate_guard import require_matching_patches
-from aosr.gradient.fixed_surfaces import FixedSurfaces, designs_with_fixed
+from aosr.gradient.fixed_surfaces import (
+    FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_fixed, designs_with_max_depths,
+)
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, chain_objective, check_stop,
@@ -151,6 +153,12 @@ class GradientProject(BaseModel):
     objective_settings_fingerprint: str | None = Field(default=None, pattern=_SHA256)
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
+    max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
+
+    @model_validator(mode="after")
+    def _depth_not_fixed(self) -> Self:
+        check_fixed_depth_conflicts(self.fixed_surfaces, self.max_depths)
+        return self
 
 
 class GradientStatus(BaseModel):
@@ -305,7 +313,7 @@ def holdout_rulers() -> HoldoutRulers:
 def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: Sequence[str | None], purpose: str,
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
                 mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
-                patch_keys: PatchKeys = boundary_patches()) -> str:
+                patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -319,6 +327,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["mount"] = mount
     if fixed_surfaces:
         identity["fixed_surfaces"] = dict(sorted(fixed_surfaces.items()))
+    if max_depths:
+        identity["max_depths"] = dict(sorted(max_depths.items()))
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
     content = json.dumps(identity,
@@ -489,7 +499,7 @@ def search_objective_constants(project: GradientProject, scheme: Scheme,
                                         scheme.receiver_set, len(model.source_names))
 
 
-def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
+def _uncapped_designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
                 kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
                 fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
     """有分區照共用面片序、整面照 ``Wall.all()`` 的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
@@ -513,6 +523,15 @@ def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: Materia
                                      kept={wall.wall_name(): material for wall, material in whole_kept.items()}, mount=mount)
 
 
+def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
+                kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
+                fixed_surfaces: Mapping[str, str] | None = None,
+                max_depths: Mapping[str, float] | None = None) -> tuple[SurfaceDesign, ...]:
+    """照方案建立設計，再套每面總深上限；空設定沿用舊設計。"""
+    designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces)
+    return designs_with_max_depths(designs, settings, max_depths or {})
+
+
 def load_problem(project: GradientProject) -> GradientProblem:
     """照 ``project.json`` 重建目標；輸入先過 :func:`check_inputs`。要在雙精度已開的行程裡叫。
 
@@ -524,7 +543,7 @@ def load_problem(project: GradientProject) -> GradientProblem:
     constants = search_objective_constants(project, scheme, model)
     kept = project_wall_materials(project, scheme)
     designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces)
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
@@ -537,7 +556,8 @@ def load_problem(project: GradientProject) -> GradientProblem:
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
     context = TemplateContext(settings, presets_table(), named_materials(kept),
-                              objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, tuple(d.surface_id for d in designs)))
+                              objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, tuple(d.surface_id for d in designs)),
+                              max_depths=project.max_depths)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
                                                                     objective_constants=constants), kept, context)
 
@@ -644,7 +664,7 @@ def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
         kept_digests=digests, mount=header.mount,
-        fixed_surfaces=header.fixed_surfaces, boundary_patches=header.boundary_patches)
+        fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths, boundary_patches=header.boundary_patches)
 
 
 def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:
@@ -697,12 +717,13 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
 
 def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
                   kept: Mapping[K, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
-                  fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
+                  fixed_surfaces: Mapping[str, str] | None = None,
+                  max_depths: Mapping[str, float] | None = None) -> tuple[SurfaceDesign, ...]:
     """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。"""
     if tuple(surface_id for surface_id, _ in surfaces) != surface_ids(material_keys(kept)):
         raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
     return designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
-                       fixed_surfaces=fixed_surfaces)
+                       fixed_surfaces=fixed_surfaces, max_depths=max_depths)
 
 
 def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
@@ -728,7 +749,7 @@ def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientS
         raise ValueError(f"{TEMPLATES_FILE} 沒有以帶停止原因的決定列結尾，沒有結果可寫")
     closing = template_rows[-1]
     value, screening, components = closing.scores()
-    designs = final_designs(final.surfaces, settings, kept, mount=header.mount, fixed_surfaces=header.fixed_surfaces)
+    designs = final_designs(final.surfaces, settings, kept, mount=header.mount, fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
     mounted = header.mount == MOUNT_ON_WALL

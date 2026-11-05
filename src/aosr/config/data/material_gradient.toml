@@ -62,11 +62,11 @@ max_seconds = 7200
 id = "glass_wool_48k"
 presets = ["glass_wool_48k_50mm", "glass_wool_48k_50mm_gap50", "glass_wool_48k_50mm_gap100", "glass_wool_48k_100mm"]
 # 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-thicknesses_m = [0.050, 0.100]
+thicknesses_m = [0.050, 0.100, 0.200]
 # 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-cavity_range_m = [0.0, 0.150]
+cavity_range_m = [0.0, 0.250]
 # 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-max_total_depth_m = 0.150
+max_total_depth_m = 0.300
 # 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 template_preset = "glass_wool_48k_50mm_gap50"
 initial_thickness_m = 0.050
@@ -76,11 +76,11 @@ initial_cavity_m = 0.050
 id = "glass_wool_24k"
 presets = ["glass_wool_24k_50mm"]
 # 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-thicknesses_m = [0.050]
+thicknesses_m = [0.050, 0.100, 0.200]
 # 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-cavity_range_m = [0.0, 0.150]
+cavity_range_m = [0.0, 0.250]
 # 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-max_total_depth_m = 0.150
+max_total_depth_m = 0.300
 # 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 template_preset = "glass_wool_24k_50mm"
 initial_thickness_m = 0.050
@@ -89,11 +89,11 @@ initial_thickness_m = 0.050
 id = "glass_wool_96k"
 presets = ["glass_wool_96k_50mm"]
 # 合法棉板厚度（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-thicknesses_m = [0.050]
+thicknesses_m = [0.050, 0.100, 0.200]
 # 空腔深度範圍（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-cavity_range_m = [0.0, 0.150]
+cavity_range_m = [0.0, 0.250]
 # 每面「棉板＋空腔」總深度上限（公尺）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-max_total_depth_m = 0.150
+max_total_depth_m = 0.300
 # 換樣板時這個家族用哪個樣板當構造（要在 presets 清單裡）與合法初值（厚度要是合法厚度、厚度＋空腔不超過總深度上限；樣板沒有空氣層的家族不給空腔初值）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 template_preset = "glass_wool_96k_50mm"
 initial_thickness_m = 0.050

@@ -6,7 +6,7 @@
 方案原本那面的牆，不是剛性）——每個（面, 目標）各求值一次（快速評分、不重調），照值由小到大取前
 ``[templates].max_per_round`` 個進重調。基準＝目前配置 :func:`retune_cavities`；每個候選＝換過去再 :func:`retune_cavities`
 （同步數）。重調是全部面的空腔一起走（決策紙「決定」第 3 條：所有牆的空腔做有限步數的梯度重調、基準同步數），
-換過去那面若沒有空腔變數（24K、96K 的樣板沒有空氣層、合法厚度只有一種；「不貼」沒有變數），它本身沒有可重調的變數，
+換過去那面若沒有空腔變數（24K、96K 的樣板沒有空氣層；「不貼」沒有變數），它本身沒有可重調的變數，
 重調照步數走其他面的空腔（整房都沒有空腔時是同一點重複求值）。改善＝基準重調後的值減候選重調後的值，最好的「超過」``[candidates].improvement_threshold``
 才接受、交出它重調後的配置與 θ；都沒超過就交出重調後的基準、停在 :data:`TEMPLATE_STOP_NO_IMPROVEMENT`（字面照老闆的話：
 只說在本輪已確認的單牆候選與預算內沒找到，不說排除了單牆換樣板，也沒涵蓋兩面一起換）。
@@ -31,7 +31,7 @@ import numpy as np
 
 from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
-from aosr.gradient.fixed_surfaces import designs_with_fixed
+from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
@@ -70,6 +70,7 @@ class TemplateContext(NamedTuple):
     mount: Mount = MOUNT_RIGID
     # 固定面不列候選；重建時也使用同一份指定材料。
     fixed_surfaces: Mapping[str, str] | None = None
+    max_depths: Mapping[str, float] | None = None
 
 
 class TemplatePoint(NamedTuple):
@@ -179,9 +180,11 @@ def preset_for_target(target: str, settings: MaterialGradientSettings) -> str | 
 def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[SurfaceDesign, ...]:
     """配置 → 每面設計：有 preset 照家族建樣板設計、不貼片帶方案該片原材料；分區照完整面片序，整面照 Wall.all()。"""
     if context.fixed_surfaces:
-        return checked_wall_designs(designs_with_fixed(surfaces, context.settings, context.presets, kept=context.kept,
-                                                       mount=context.mount, fixed_surfaces=context.fixed_surfaces))
-    designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept, mount=context.mount)
+        designs = designs_with_fixed(surfaces, context.settings, context.presets, kept=context.kept,
+                                     mount=context.mount, fixed_surfaces=context.fixed_surfaces)
+    else:
+        designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept, mount=context.mount)
+    designs = designs_with_max_depths(designs, context.settings, context.max_depths or {}, check_family_upper=False)
     return checked_wall_designs(designs)
 
 
@@ -225,6 +228,16 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
                 pieces.append(dtype(family.initial_cavity_m))
         offset += size
     new_theta = checked_theta(np.asarray(pieces, dtype=values.dtype), new_designs)
+    if context.max_depths and new_designs[index].material is not None:
+        # 家族初值不改；只投影新換那一面，其他面的 θ 逐位照搬。
+        from aosr.gradient.material_gradient import depth_limits, design_bounds, project_to_limits, snap_to_specs
+
+        selected = (new_designs[index],)
+        start = sum(len(design.variables) for design in new_designs[:index])
+        stop = start + len(selected[0].variables)
+        lower, upper = design_bounds(selected)
+        new_theta[start:stop] = snap_to_specs(project_to_limits(new_theta[start:stop], lower.astype(values.dtype),
+                                                               upper.astype(values.dtype), depth_limits(selected)), selected).theta
     if not is_feasible(new_theta, new_designs):
         raise ValueError(f"面 {surface_id} 換成 {target} 的初值不可行（厚度不是合法值或厚度＋空腔超過總深度上限）")
     return new_designs, new_theta

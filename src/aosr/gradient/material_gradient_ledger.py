@@ -46,7 +46,7 @@ from aosr.gradient.boundary import partition_identity
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.scoring.gradient_objective_jax import GradientObjectiveConstants
-from aosr.gradient.fixed_surfaces import FixedSurfaces
+from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
     LOOP_STOP_REASONS, STOP_REASONS, Components, DescentResult, SnapResult, SurfaceDesign, design_names, designs_mount,
@@ -158,6 +158,7 @@ class MaterialGradientHeader(BaseModel):
     score_constants: ScoreConstants | None = None
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
+    max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     boundary_patches: tuple[tuple[str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
 
@@ -384,7 +385,8 @@ def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: 
         objective_fingerprint=objective_fingerprint(objective_constants),
         score_constants=score_constants(objective_constants),
         kept_digests=_kept_digests(designs), mount=designs_mount(designs),
-        fixed_surfaces=dict(sorted((d.surface_id, d.fixed_material_id) for d in designs if d.fixed_material_id is not None)))
+        fixed_surfaces=dict(sorted((d.surface_id, d.fixed_material_id) for d in designs if d.fixed_material_id is not None)),
+        max_depths=dict(sorted((d.surface_id, d.max_depth_m) for d in designs if d.max_depth_m is not None)))
 
 
 def _kept_digests(designs: Sequence[SurfaceDesign]) -> dict[str, str]:

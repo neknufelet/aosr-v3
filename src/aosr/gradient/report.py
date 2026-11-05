@@ -34,7 +34,7 @@ from pydantic import BaseModel, ValidationError
 from aosr.config.material_gradient import MOUNT_ON_WALL
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import named_materials
-from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
+from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces, expanded_max_depths
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
 from aosr.gradient.material_gradient_ledger import (
@@ -422,6 +422,35 @@ def _endpoint_lines(folder: Path, project: GradientProject) -> list[str]:
     return _endpoint_section(record)
 
 
+def _depth_lines(project: GradientProject, surfaces: Sequence[tuple[str, str | None]]) -> list[str]:
+    """目前配置每面生效上限；不貼沒有新增層，但仍顯示保存的上限。"""
+    from aosr.config.material_gradient import load_material_gradient_settings
+
+    try:
+        settings = load_material_gradient_settings(project.settings_path)
+    except (OSError, ValueError) as error:
+        return [f"每面總深度上限：設定讀不到（{type(error).__name__}）"]
+    if settings.fingerprint != project.settings_fingerprint:
+        return ["每面總深度上限：設定指紋不同，無法確認這一跑的家族上限"]
+    caps = expanded_max_depths(project.max_depths, tuple(face for face, _ in surfaces))
+    fixed = expanded_fixed_surfaces(project.fixed_surfaces, tuple(face for face, _ in surfaces))
+    lines = []
+    for face, preset in surfaces:
+        if face in fixed:
+            lines.append(f"  {face}：固定面（不參與深度搜尋）")
+            continue
+        family = None if preset is None else settings.family_of(preset)
+        cap = caps.get(face)
+        if family is not None:
+            effective = family.max_total_depth_m if cap is None else min(family.max_total_depth_m, cap)
+            lines.append(f"  {face}：總深度上限 {effective:g} m")
+        elif cap is not None:
+            lines.append(f"  {face}：總深度上限 {cap:g} m（目前不貼，換家族仍套用）")
+        else:
+            lines.append(f"  {face}：不貼（無新增層深度）")
+    return lines
+
+
 def render_report(folder: Path) -> str:
     """整份報告文字；最後是終點一節（或過期、或「未做」那一行）。"""
     project = read_project(folder)
@@ -433,6 +462,17 @@ def render_report(folder: Path) -> str:
         lines.append("停止記號：在（下一次求值之前會停；resume 會先清掉它）")
     ledger = folder / LEDGER_FILE
     if not ledger.exists():
+        from aosr.gradient.boundary import scheme_patch_keys, surface_ids
+        from aosr.gradient.material_gradient import wall_surface_ids
+
+        try:
+            names = surface_ids(scheme_patch_keys(load_scheme(Path(project.scheme_path))))
+        except (OSError, ValueError):
+            names = wall_surface_ids()
+        if len(names) == len(project.presets):
+            lines += _depth_lines(project, tuple(zip(names, project.presets, strict=True)))
+        else:
+            lines.append("每面總深度上限：方案讀不到，無法重建面片清單")
         lines.append("帳本：還沒有")
         return "\n".join([*lines, FULL_MODEL_LINE]) + "\n"
     header, rows = read_ledger(ledger, legacy=True)
@@ -446,6 +486,7 @@ def render_report(folder: Path) -> str:
     template_lines, template_last = _template_lines(folder)
     lines += template_lines
     layout: Layout = template_last if template_last is not None else header
+    lines += _depth_lines(project, layout.surfaces)
     lines += _point_lines(layout, template_last if template_last is not None else _feasible(rows), _kept_texts(project),
                           _mounted_texts(project))
     lines += _endpoint_lines(folder, project)

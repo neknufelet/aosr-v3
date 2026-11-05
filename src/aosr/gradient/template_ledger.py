@@ -37,7 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
 from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT, ScoreConstants, check_scores
-from aosr.gradient.fixed_surfaces import FixedSurfaces
+from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
@@ -74,6 +74,7 @@ class TemplateHeader(BaseModel):
     score_constants: ScoreConstants | None = None
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
+    max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     boundary_patches: tuple[tuple[str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
 

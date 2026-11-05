@@ -578,17 +578,17 @@ def test_snap_nearest_thickness() -> None:
 
 
 def test_snap_total_depth_clips_cavity_where_independent_rounding_violates() -> None:
-    """抓各面各自取最近就交付：厚度 0.09 取最近是 0.100，配空腔 0.080 超過上限 0.150；取規格要切空腔並記下被擋。"""
+    """抓各面各自取最近就交付：厚度 0.18 取最近是 0.200，配空腔 0.160 超過上限 0.300；取規格要切空腔並記下被擋。"""
     designs = _designs(DESCENT_CASE)
-    theta = _theta_for(designs, {"floor.layer1.thickness_m": 0.09, "floor.layer2.thickness_m": 0.080})
+    theta = _theta_for(designs, {"floor.layer1.thickness_m": 0.18, "floor.layer2.thickness_m": 0.160})
     independent = theta.copy()
-    independent[0] = 0.100
+    independent[0] = 0.200
     assert not gradient_search.is_feasible(independent, designs)
     snapped = gradient_search.snap_to_specs(theta, designs)
     assert gradient_search.is_feasible(snapped.theta, designs)
     floor = snapped.surfaces[0]
-    assert floor.thickness_m == 0.100 and floor.cavity_clipped and not floor.thickness_retreated
-    assert floor.cavity_m is not None and floor.cavity_m + 0.100 <= 0.150
+    assert floor.thickness_m == 0.200 and floor.cavity_clipped and not floor.thickness_retreated
+    assert floor.cavity_m is not None and floor.cavity_m + 0.200 <= 0.300
     assert [choice.surface_id for choice in snapped.surfaces if choice.blocked_by_total_depth] == ["floor"]
 
 
@@ -950,7 +950,7 @@ def test_rejections() -> None:
     with pytest.raises(ValueError, match="長度"):
         gradient_search.checked_theta(theta[:-1], designs)
     outside = theta.copy()
-    outside[1] = 0.2
+    outside[1] = 0.26
     with pytest.raises(ValueError, match="超出盒界"):
         gradient_search.snap_to_specs(outside, designs)
     with pytest.raises(TypeError, match="浮點"):

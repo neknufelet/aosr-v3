@@ -137,7 +137,17 @@ def _result(result: loop.LoopResult) -> Record:
             "rounds": len(result.rounds)}
 
 
+def single_thickness_settings(base: MaterialGradientSettings) -> MaterialGradientSettings:
+    """沒有候選的合成題明給單厚度家族；正式三族現在皆可加厚。"""
+    document = base.model_dump()
+    for family in document["family"]:
+        family["thicknesses_m"] = (0.05,)
+    return MaterialGradientSettings.model_validate(document)
+
+
 def _synthetic(directory: Path, name: str, case: Record, base: MaterialGradientSettings) -> Record:
+    if case.get("single_thickness"):
+        base = single_thickness_settings(base)
     presets = load_construction_presets(config_path("construction_presets.toml"))
     surfaces = tuple((str(item[0]), item[1]) for item in cast(list[list[str | None]], case["surfaces"]))
     designs = gradient_search.designs_from_presets(surfaces, base, presets)
