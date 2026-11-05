@@ -31,6 +31,7 @@ from aosr.scoring.gradient_objective_jax import (
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
+from tests.engine._material_gradient_legacy import legacy_family_settings
 
 
 Record = dict[str, object]
@@ -80,7 +81,7 @@ def _impedances(designs: tuple[gradient_search.SurfaceDesign, ...], theta: np.nd
 def _box_only(objective: gradient_search.ChainObjective, start: np.ndarray,
               bounds: tuple[np.ndarray, np.ndarray], settings: MaterialGradientSettings,
               step_gradient: Callable[[jax.Array], jax.Array]) -> Record:
-    """只守盒界（limits=()）的獨立一段：空腔會貼 0.150 上界被往外推，守的是盒界遮罩本身（#561 審查第 9 條）。"""
+    """用舊家族只守盒界（limits=()）：空腔貼 0.150 上界被往外推，考盒界遮罩機制（#561 審查第 9 條）。"""
     box_only = gradient_search.projected_descent(objective, start, bounds, settings.descent, limits=())
     return {"box_only": _steps(box_only),
             "box_only_gradients": [_hex(step_gradient(jnp.asarray(step.theta))) for step in box_only.steps]}
@@ -136,7 +137,7 @@ def _retune_with_room(objective: gradient_search.ChainObjective, snapped: np.nda
 def main(directory: Path) -> None:
     problem = cast(dict[str, object], json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
-    settings = load_material_gradient_settings(config_path("material_gradient.toml"))
+    settings = legacy_family_settings(load_material_gradient_settings(config_path("material_gradient.toml")))
     presets = load_construction_presets(config_path("construction_presets.toml"))
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
