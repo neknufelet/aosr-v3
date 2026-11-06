@@ -597,3 +597,32 @@ def test_start_without_low_frequency_axis_fails_before_search(runs: tuple[Path, 
     case = _section(runs, "no_axis")
     assert case["code"] == 1 and "low_frequency_axis" in str(case["stderr"]), case["stderr"]
     assert case["root_exists"] is False
+
+
+def _batch_probe(folder: Path, mode: str, directory: Path) -> Record:
+    result = subprocess.run([sys.executable, "-m", "tests.engine._frequency_batch_probe", mode, str(folder)],
+                            cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=100)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return cast(Record, json.loads(result.stdout))
+
+
+def test_saved_batch_reaches_resumed_objectives(runs: tuple[Path, Record], tmp_path: Path) -> None:
+    """雙精度子行程只換求解邊界：接續讀 project、起點與換樣板鏈都必須傳入同一批量。"""
+    source = Path(str(runs[1]["folder"]))
+    project = run.GradientProject.model_validate({**run.read_project(source).model_dump(), "frequency_batch": 7})
+    run.write_json_atomic(tmp_path / run.PROJECT_FILE, project)
+    output = _batch_probe(tmp_path, "resume", tmp_path)
+    assert output["batches"] == [7, 7]
+    assert output["paths"] == ["initial", "candidate"]
+
+
+def test_saved_batch_reaches_endpoint_chain(runs: tuple[Path, Record], tmp_path: Path) -> None:
+    """從存檔跑終點，經 endpoint_check 與編譯目標，直到求解邊界才停；漏任何一層接線都抓。"""
+    source = Path(str(runs[1]["folder"]))
+    folder = tmp_path / "endpoint-batch"
+    shutil.copytree(source, folder)
+    project = run.GradientProject.model_validate({**run.read_project(folder).model_dump(), "frequency_batch": 7})
+    run.write_json_atomic(folder / run.PROJECT_FILE, project)
+    output = _batch_probe(folder, "endpoint", tmp_path)
+    assert output["batches"] == [7]
+    assert output["paths"] == ["endpoint"]

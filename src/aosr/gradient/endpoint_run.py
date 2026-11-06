@@ -226,7 +226,7 @@ def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
     checked = endpoint_check(operators, designs, theta, model=model, objective_settings=objective,
                              receiver_set=scheme.receiver_set, low_frequency_axis=axis_id,
                              presets=load_construction_presets(config_path("construction_presets.toml")),
-                             settings=settings, air=air, ranges=ranges, workers=workers)
+                             settings=settings, air=air, ranges=ranges, workers=workers, frequency_batch=project.frequency_batch)
     endpoint_seconds = time.perf_counter() - clock
     clock = time.perf_counter()
     axis = tuple(float(value) for value in model.frequencies_hz)

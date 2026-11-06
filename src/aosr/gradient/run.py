@@ -154,6 +154,7 @@ class GradientProject(BaseModel):
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
     max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
+    frequency_batch: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _depth_not_fixed(self) -> Self:
@@ -313,7 +314,8 @@ def holdout_rulers() -> HoldoutRulers:
 def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: Sequence[str | None], purpose: str,
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
                 mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
-                patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None) -> str:
+                patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None,
+                frequency_batch: int | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -329,6 +331,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["fixed_surfaces"] = dict(sorted(fixed_surfaces.items()))
     if max_depths:
         identity["max_depths"] = dict(sorted(max_depths.items()))
+    if frequency_batch is not None:
+        identity["frequency_batch"] = frequency_batch
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
     content = json.dumps(identity,
@@ -546,12 +550,14 @@ def load_problem(project: GradientProject) -> GradientProblem:
                           fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
-    objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
+    objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
+                                frequency_batch=project.frequency_batch)
 
     def objective_for(candidate: tuple[SurfaceDesign, ...]) -> ChainObjective:
         if candidate == designs:
             return objective
-        return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz)
+        return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
+                               frequency_batch=project.frequency_batch)
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
