@@ -38,6 +38,7 @@ from aosr.config.material_gradient import (
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters, variable_name
@@ -45,7 +46,7 @@ from aosr.materials.construction_models import (
     AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.physics.fem_reduced_jax import TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
+from aosr.physics.fem_reduced_jax import ReducedConstants, TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import (
     GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures, objective_reading,
 )
@@ -470,8 +471,10 @@ def _patch_impedances(templates: Sequence[ConstructionTemplate | None], paramete
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64],
-                    frequency_batch: int | None = None) -> ChainObjective:
-    """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、精度跟 θ 走。
+                    frequency_batch: int | None = None, single_precision: bool = False) -> ChainObjective:
+    """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、預設精度跟 θ 走。
+
+    顯卡模式的材料與替身求解維持單精度，聲壓轉成 complex128 後才進既有評分；帳本恆等式仍用雙精度守。
 
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
@@ -498,10 +501,10 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                       if row is not None)
     not_kept = jnp.asarray([design.kept_material is None for design in designs], dtype=bool)
 
-    def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
+    def objective(theta: jax.Array, reduced: ReducedConstants = constants) -> tuple[jax.Array, GradientObjectiveArrays]:
         values = jnp.asarray(theta)
         parameters = surface_parameters(frozen_designs, values)
-        frequency_axis = jnp.asarray(constants.frequencies_hz, dtype=values.dtype)
+        frequency_axis = jnp.asarray(reduced.frequencies_hz, dtype=values.dtype)
         impedances = (_patch_impedances(templates, parameters, frequency_axis, air=air)
                       if any(zone for _, zone in model.patch_keys) else
                       wall_impedances_from_templates(templates, parameters, frequency_axis, air=air))
@@ -509,11 +512,13 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         for index, row in kept_rows:
             walls = walls.at[index].set(jnp.asarray(row, dtype=walls.dtype))
         rigid = jnp.logical_and(impedances.rigid_mask, not_kept)
-        pressures = reduced_pressures(constants, walls, rigid_mask=rigid, frequency_batch=frequency_batch)
+        pressures = reduced_pressures(reduced, walls, rigid_mask=rigid, frequency_batch=frequency_batch)
+        if single_precision:
+            pressures = pressures.astype(jnp.complex128)
         result = gradient_objective_from_pressures(objective_constants, pressures)
         return result.objective_total, result
 
-    return objective
+    return SinglePrecisionObjective(objective, constants) if single_precision else objective
 
 
 # ---- 投影梯度下降 ----
@@ -530,6 +535,8 @@ def compiled_evaluator(objective: ChainObjective) -> Evaluator:
     放在以目標為鍵的弱參照表裡鍵永遠不會死（#561 審查）；掛在自己身上是「目標 → 編譯版 → 目標」的循環，
     外面沒人抓著目標時垃圾回收連編譯版一起收。目標必須是能掛屬性的函式物件（``def`` 或 lambda）。
     """
+    if isinstance(objective, SinglePrecisionObjective):
+        return objective.evaluate
     cached: Evaluator | None = getattr(objective, _EVALUATOR_ATTRIBUTE, None)
     if cached is not None:
         return cached

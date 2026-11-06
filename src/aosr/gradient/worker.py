@@ -1,7 +1,7 @@
 """牆面材料梯度搜尋的雙精度子行程（#561 辛一、辛三）：``python -m aosr.gradient.worker <資料夾> start|resume|endpoint``。
 
 由 ``aosr.gradient.cli`` 起：環境是 ``child_process_env(threads=1)`` 再寫中央處理器＋雙精度，``start_new_session``，
-資料夾鎖的描述子經 ``pass_fds`` 繼承（父行程不解鎖、子行程活著鎖就在）。這裡先核 JAX 真的是中央處理器＋雙精度，
+資料夾鎖的描述子經 ``pass_fds`` 繼承（父行程不解鎖、子行程活著鎖就在）。搜尋依 project 的裝置核 JAX 平台與雙精度；顯卡只讓計算鏈用單精度，終點仍是中央處理器＋雙精度，
 不是就失敗、不算。狀態檔只由這裡寫：開始寫 running（帶自己的行程編號），收尾寫 finished／stopped／failed／interrupted；
 進度數字（帳本記的累計求值次數、做完幾輪、最後一列的值；庚三多兩欄：換樣板帳本記的累計求值次數與做完幾輪）在寫的那一刻
 從帳本讀。
@@ -24,6 +24,8 @@ from pathlib import Path
 from types import FrameType
 from typing import Final, Literal
 
+import jax
+
 from aosr import runtime
 from aosr.physics.fem_full_batch import checked_workers
 from aosr.gradient.endpoint_run import run_endpoint
@@ -31,7 +33,7 @@ from aosr.gradient.material_gradient import SearchStopped, StopCheck
 from aosr.gradient.material_gradient_ledger import read_ledger
 from aosr.gradient.run import (
     LEDGER_FILE, STATUS_FILE, GradientStatus, State, ledger_progress, now_text, resume_search, run_search,
-    stop_requested, template_ledger_progress, write_json_atomic,
+    read_project, stop_requested, template_ledger_progress, write_json_atomic,
 )
 
 Mode = Literal["start", "resume"]
@@ -66,8 +68,12 @@ def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
     started = now_text()
     _status(folder, "running", started)
     try:
-        if runtime.jax_settings() != ("cpu", True):
-            raise RuntimeError(f"梯度子行程要中央處理器＋雙精度，生效的是 {runtime.jax_settings()!r}")
+        project = read_project(folder)
+        platforms = "cuda,cpu" if project.device == "gpu" else "cpu"
+        if runtime.jax_settings() != (platforms, True):
+            raise RuntimeError(f"梯度子行程要 {platforms}＋雙精度，生效的是 {runtime.jax_settings()!r}")
+        if project.device == "gpu" and jax.default_backend() != "gpu":
+            raise RuntimeError("顯卡搜尋需要 GPU 裝置，不能退回 CPU")
         (run_search if mode == "start" else resume_search)(folder, should_stop=should_stop)
     except SearchStopped:
         _status(folder, "stopped", started, "停止記號：在兩次求值之間停下，帳本停在最後一列寫完整的地方")

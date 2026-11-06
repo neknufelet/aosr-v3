@@ -35,17 +35,17 @@ _HIGHEST = jax.lax.Precision.HIGHEST
 class ReducedConstants(NamedTuple):
     """材料無關的 numpy 常數；partition_mask 是分區片布林列，sources 為（喇叭,r）、receivers 為（座位,r）。"""
 
-    stiffness: NDArray[np.float64]
-    mass: NDArray[np.float64]
-    boundary: NDArray[np.float64]
-    sources: NDArray[np.complex128]
-    receivers: NDArray[np.float64]
-    frequencies_hz: NDArray[np.float64]
-    density_kg_m3: NDArray[np.float64]
-    sound_speed_m_s: NDArray[np.float64]
-    k_squared: NDArray[np.float64]
-    wall_numerator: NDArray[np.complex128]
-    partition_mask: NDArray[np.bool_]
+    stiffness: NDArray[np.float64] | jax.Array
+    mass: NDArray[np.float64] | jax.Array
+    boundary: NDArray[np.float64] | jax.Array
+    sources: NDArray[np.complex128] | jax.Array
+    receivers: NDArray[np.float64] | jax.Array
+    frequencies_hz: NDArray[np.float64] | jax.Array
+    density_kg_m3: NDArray[np.float64] | jax.Array
+    sound_speed_m_s: NDArray[np.float64] | jax.Array
+    k_squared: NDArray[np.float64] | jax.Array
+    wall_numerator: NDArray[np.complex128] | jax.Array
+    partition_mask: NDArray[np.bool_] | jax.Array
 
 
 class TemplateImpedances(NamedTuple):

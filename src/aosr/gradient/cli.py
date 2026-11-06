@@ -57,6 +57,7 @@ from types import FrameType
 from typing import TYPE_CHECKING, Final
 
 from aosr import runtime
+from aosr.gradient.gpu import Device
 from aosr.physics.fem_full_batch import checked_workers
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
@@ -116,6 +117,7 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--purpose", required=True, help="用途（評分設定）")
     start.add_argument("--root", type=Path, required=True, help="資料夾根（不要放在網頁讀的 searches/ 底下）")
     start.add_argument("--settings", type=Path, default=config_path("material_gradient.toml"))
+    start.add_argument("--device", choices=("cpu", "gpu"), default="cpu", help="搜尋裝置：cpu 雙精度；gpu 單精度鏈")
     start.add_argument("--frequency-batch", type=_frequency_batch, default=None, metavar="N",
                        help="替身每批求解的頻點數（正整數）；反傳逐批重算")
     start.add_argument("--max-depth", action="append", default=[], metavar="面=公尺",
@@ -186,10 +188,11 @@ def keep_signal_handlers() -> Iterator[None]:
                 signal.signal(number, handler)
 
 
-def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1) -> int:
+def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1, device: Device = "cpu") -> int:
     """起雙精度子行程（單緒、新的行程群、繼承鎖），等它結束、把離開碼傳出來。"""
     env = runtime.child_process_env(threads=1)
-    runtime.configure_jax(platforms="cpu", enable_x64=True, env=env)
+    runtime.configure_jax(platforms="cuda,cpu" if device == "gpu" and mode != "endpoint" else "cpu",
+                          enable_x64=True, env=env)
     command = [sys.executable, "-m", "aosr.gradient.worker", str(folder), mode]
     if workers != 1:
         command.extend(("--workers", str(checked_workers(workers))))
@@ -255,16 +258,17 @@ def _start(args: argparse.Namespace) -> int:
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
-                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch)
+                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch, device=args.device)
     project = run.GradientProject(
-        format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
+        format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
+        scheme_sha256=hashes["scheme_sha256"], surrogate_manifest_sha256=hashes["surrogate_manifest_sha256"],
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
         receipt_sha256=run.file_sha256(receipt_path(surrogate)), presets=args.presets, purpose=args.purpose,
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
         objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
-        frequency_batch=args.frequency_batch)
+        frequency_batch=args.frequency_batch, device=args.device)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)
@@ -288,7 +292,7 @@ def _create_and_run(root: Path, project: GradientProject) -> int:
             if folder.exists():
                 return _existing(folder)
             raise
-        return _spawn_and_wait(folder, "start", descriptor)
+        return _spawn_and_wait(folder, "start", descriptor, device=project.device)
 
 
 def _existing(folder: Path) -> int:
@@ -315,7 +319,7 @@ def _resume(args: argparse.Namespace) -> int:
             return EXIT_FAILED
         run.check_inputs(project)
         (folder / run.STOP_FILE).unlink(missing_ok=True)
-        return _spawn_and_wait(folder, "resume", descriptor)
+        return _spawn_and_wait(folder, "resume", descriptor, device=project.device)
 
 
 def _stop(args: argparse.Namespace) -> int:

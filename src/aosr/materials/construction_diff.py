@@ -145,7 +145,7 @@ def _matrix(layer: Layer, frequencies: jax.Array, air: PhysicsConstants, angles:
     panel = _layer_matrix(layer.model_copy(update={_BACKING_FIELD: None}), frequencies, air, angles)
     # 同 construction._backed_sheet：板後串聯布面流阻除板開孔率；零加上去不改任何位元。
     impedance = jnp.zeros_like(frequencies) + 0j + jnp.asarray(layer.backing_fabric_flow_resistance_pa_s_m) / _open_area(layer)
-    return panel @ tmm._sheet_layer(tmm._broadcast_angles(impedance, angles))
+    return jnp.matmul(panel, tmm._sheet_layer(tmm._broadcast_angles(impedance, angles)), precision=jax.lax.Precision.HIGHEST)
 
 
 def surface_impedance_from_parameters(template: ConstructionTemplate, parameters: Mapping[str, jax.Array],
