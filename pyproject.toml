@@ -84,6 +84,11 @@ dependencies = [
     "uvicorn==0.54.0",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "jax[cuda12]==0.10.1",
+]
+
 [dependency-groups]
 # ruff：規矩卡 style-guard 的另一半。那張卡自己那幾條（print 只准在輸出層、字串不准拼路徑、
 # 開檔一律 with、函式不准超過門檻、整支檔不准超過行數上限）由

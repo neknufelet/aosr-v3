@@ -19,7 +19,7 @@ summary: "票 #309 到 2026-10-17 的決定、轉貼（實測表八點經老闆�
 
 本紙要定的：三條路各取 TMM 的哪個量；產品預設的多孔材模型與它的範圍外怎麼辦；非多孔面怎麼算；預設清單；牆面怎麼填；實測阻抗表沒涵蓋的頻點怎麼補。
 
-本紙不管的：型錄頻帶吸音率怎麼換成阻抗，照 `docs/decisions/catalog-absorption-random-incidence-paris-inversion.md`；第三階段 TMM 在顯卡上的精度，照 `docs/decisions/material-stage-tmm-gpu-single-precision.md`；第三階段怎麼找（規格離散加空腔連續）與替身方程式的精度，歸票 #561（見「代價」講第三階段的那一條）。
+本紙不管的：型錄頻帶吸音率怎麼換成阻抗，照 `docs/decisions/catalog-absorption-random-incidence-paris-inversion.md`；第三階段 TMM 在顯卡上的精度，照 `docs/decisions/material-stage-tmm-gpu-single-precision-search-ruler.md`；第三階段怎麼找（規格離散加空腔連續）與替身方程式的精度，歸票 #561（見「代價」講第三階段的那一條）。
 
 ## 選項
 
@@ -162,7 +162,7 @@ summary: "票 #309 到 2026-10-17 的決定、轉貼（實測表八點經老闆�
    - 負的虛部（我們的符號下像彈簧）是正常物理，完整保留。
 3. 時間慣例沿用 TMM 原套件的 e^{+jωt}，引擎兩邊一致，有考卷證明（`tests/engine/test_fem_complex.py`：共軛寫法的差要大於正確寫法十倍以上）。實測表的虛部照 e^{+jωt} 填，e^{−iωt} 的表要把虛部變號。
 4. 模態診斷遇到構造或實測表的牆，回「範圍外」（原因碼 construction_walls，`src/aosr/reporting/modal_lookup.py`），不當成計算失敗、不偷偷挑一個 Z。
-5. 現行正式入口的計算行程用中央處理器＋雙精度，JAX 的設定記進身分（#790）；第三階段材料最佳化的 TMM 顯卡與精度另照 `docs/decisions/material-stage-tmm-gpu-single-precision.md`，不由本條擴張限制。
+5. 現行正式入口的計算行程用中央處理器＋雙精度，JAX 的設定記進身分（#790）；第三階段材料最佳化的 TMM 顯卡與精度另照 `docs/decisions/material-stage-tmm-gpu-single-precision-search-ruler.md`，不由本條擴張限制。
 6. 物理身分：方案檔存完整構造參數；物理那一路會載入的程式也在身分裡，所以改材料程式時所有方案的身分都換、已存的結果標成要重算物理；固定阻抗與構造方案算出的數字要逐位不變，用考卷守。
 
 ## 為什麼
@@ -210,8 +210,8 @@ summary: "票 #309 到 2026-10-17 的決定、轉貼（實測表八點經老闆�
 - 第三階段怎麼找不在本紙：#561 兩則留言（10-15 凌晨，後一則取代前一則）都寫明，接進計算時寫進第三階段的決策紙，取代 `docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md` 表一第③列「找法」那一格。
   - 替身方程式的方向與精度契約也寫進第三階段的決策紙；本紙不碰它，若該紙取代 `docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md`，活的決策紙份數不增。
 - 決策紙份數（2026-10-15 以 `git ls-files` 數）：活的 58 份、上限 60，本紙進去是 59；封存 65 份、上限 100；docs 底下總量 126 份、上限 160，本紙進去是 127。
-- 跟既有紙的分工：型錄吸音率反推照 `docs/decisions/catalog-absorption-random-incidence-paris-inversion.md`；固定阻抗與實測表表內阻抗的晚期無規入射積分照 `docs/decisions/late-energy-random-incidence-reciprocal-cpu-double-reference.md`；第三階段顯卡精度照 `docs/decisions/material-stage-tmm-gpu-single-precision.md`。本紙不取代這些決定，supersedes 維持空字串。
-  - `docs/decisions/material-stage-tmm-gpu-single-precision.md` 的「代價」段寫產品預設多孔材模型在 #309 定、老闆傾向 Miki；這是歷史傾向，現在以本紙的 Komatsu 為準。
+- 跟既有紙的分工：型錄吸音率反推照 `docs/decisions/catalog-absorption-random-incidence-paris-inversion.md`；固定阻抗與實測表表內阻抗的晚期無規入射積分照 `docs/decisions/late-energy-random-incidence-reciprocal-cpu-double-reference.md`；第三階段顯卡精度照 `docs/decisions/material-stage-tmm-gpu-single-precision-search-ruler.md`。本紙不取代這些決定，supersedes 維持空字串。
+  - `docs/decisions/material-stage-tmm-gpu-single-precision-search-ruler.md` 的「代價」段寫產品預設多孔材模型在 #309 定、老闆傾向 Miki；這是歷史傾向，現在以本紙的 Komatsu 為準。
 
 ## 還沒拍
 

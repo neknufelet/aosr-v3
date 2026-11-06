@@ -62,6 +62,8 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.gpu import Device, PrecisionComparison
+from aosr.gradient.gpu_preflight import ensure_start_precision
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_surfaces import (
     FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_fixed, designs_with_max_depths,
@@ -154,6 +156,8 @@ class GradientProject(BaseModel):
     mount: Mount = Field(default=MOUNT_RIGID, exclude_if=lambda value: value == MOUNT_RIGID)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
     max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
+    device: Device = Field(default="cpu", exclude_if=lambda value: value == "cpu")
+    precision_check: PrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
     frequency_batch: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
@@ -315,7 +319,7 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
                 mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
                 patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None,
-                frequency_batch: int | None = None) -> str:
+                frequency_batch: int | None = None, device: Device = "cpu") -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -331,6 +335,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["fixed_surfaces"] = dict(sorted(fixed_surfaces.items()))
     if max_depths:
         identity["max_depths"] = dict(sorted(max_depths.items()))
+    if device == "gpu":
+        identity["device"] = device
     if frequency_batch is not None:
         identity["frequency_batch"] = frequency_batch
     if patches := partition_identity(patch_keys):
@@ -551,13 +557,13 @@ def load_problem(project: GradientProject) -> GradientProblem:
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
-                                frequency_batch=project.frequency_batch)
+                                frequency_batch=project.frequency_batch, single_precision=project.device == "gpu")
 
     def objective_for(candidate: tuple[SurfaceDesign, ...]) -> ChainObjective:
         if candidate == designs:
             return objective
         return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
-                               frequency_batch=project.frequency_batch)
+                               frequency_batch=project.frequency_batch, single_precision=project.device == "gpu")
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
@@ -601,7 +607,9 @@ def _fresh(problem: GradientProblem, path: Path, should_stop: StopCheck | None) 
 
 def run_search(folder: Path, *, should_stop: StopCheck | None) -> GradientResult:
     """開始：帳本獨佔建檔（已有帳本就丟錯）、先寫標頭，再跑前段與迴圈、換樣板段；跑完寫 ``result.json``。"""
-    problem = load_problem(read_project(folder))
+    project = read_project(folder)
+    problem = load_problem(project)
+    ensure_start_precision(folder, project, problem)
     path = folder / LEDGER_FILE
     write_ledger(path, problem.header, ())
     _fresh(problem, path, should_stop)
@@ -625,7 +633,9 @@ def ledger_closed(rows: Sequence[MaterialGradientRow]) -> bool:
 def resume_search(folder: Path, *, should_stop: StopCheck | None) -> GradientResult:
     """接續：看資料夾在哪一段。沒有帳本就從頭；標頭跟這一次重建的不同就拒收；庚二沒收尾就接庚二（前段不完整截到標頭
     重跑前段，否則 ``resume_rounds``），這時換樣板帳本在是矛盾、拒收；接著開或接換樣板段。跑完寫 ``result.json``（覆寫）。"""
-    problem = load_problem(read_project(folder))
+    project = read_project(folder)
+    problem = load_problem(project)
+    ensure_start_precision(folder, project, problem)
     path, templates = folder / LEDGER_FILE, folder / TEMPLATES_FILE
     if templates.exists() and not (path.exists() and ledger_closed(read_ledger(path, expected_header=problem.header)[1])):
         raise ValueError(f"{TEMPLATES_FILE} 在，{LEDGER_FILE} 卻沒收尾：換樣板段只能接在庚二收尾之後，帳本與資料夾矛盾，不接續")

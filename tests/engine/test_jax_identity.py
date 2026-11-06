@@ -104,6 +104,23 @@ def test_entry_configures_before_jax(tmp_path: Path, module: str) -> None:
     assert process.returncode == 0, process.stdout + process.stderr
 
 
+def test_gradient_cli_import_does_not_load_jax(tmp_path: Path) -> None:
+    process = subprocess.run(
+        [sys.executable, '-c', "import sys, aosr.gradient.cli; assert 'jax' not in sys.modules"],
+        cwd=tmp_path, env=runtime.child_process_env(threads=1), capture_output=True, text=True, timeout=45)
+    assert process.returncode == 0, process.stdout + process.stderr
+
+
+def test_gradient_cli_report_configures_clean_process(tmp_path: Path) -> None:
+    process = subprocess.run(
+        [sys.executable, '-m', 'aosr.gradient.cli', 'report', '--folder', str(tmp_path)],
+        cwd=tmp_path, env=runtime.child_process_env(threads=1), capture_output=True, text=True, timeout=45)
+    assert process.returncode == 1
+    assert '梯度搜尋報告失敗：FileNotFoundError' in process.stderr, process.stdout + process.stderr
+    assert 'project.json' in process.stderr
+    assert 'JAX 已載入' not in process.stderr
+
+
 @pytest.mark.parametrize('module', ENTRIES)
 def test_removing_entry_configuration_is_detected(tmp_path: Path, module: str) -> None:
     root = Path(shutil.copytree(Path(str(aosr.__file__)).parent, tmp_path / 'aosr',

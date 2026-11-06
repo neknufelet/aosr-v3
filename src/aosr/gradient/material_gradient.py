@@ -38,6 +38,7 @@ from aosr.config.material_gradient import (
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters, variable_name
@@ -45,7 +46,7 @@ from aosr.materials.construction_models import (
     AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
 )
 from aosr.physics.fem_reduced import ReducedModel
-from aosr.physics.fem_reduced_jax import TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
+from aosr.physics.fem_reduced_jax import ReducedConstants, TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import (
     GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures, objective_reading,
 )
@@ -470,8 +471,10 @@ def _patch_impedances(templates: Sequence[ConstructionTemplate | None], paramete
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64],
-                    frequency_batch: int | None = None) -> ChainObjective:
-    """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、精度跟 θ 走。
+                    frequency_batch: int | None = None, single_precision: bool = False) -> ChainObjective:
+    """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、預設精度跟 θ 走。
+
+    顯卡模式的材料與替身求解維持單精度，聲壓轉成 complex128 後才進既有評分；帳本恆等式仍用雙精度守。
 
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
@@ -498,10 +501,10 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                       if row is not None)
     not_kept = jnp.asarray([design.kept_material is None for design in designs], dtype=bool)
 
-    def objective(theta: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
+    def objective(theta: jax.Array, reduced: ReducedConstants = constants) -> tuple[jax.Array, GradientObjectiveArrays]:
         values = jnp.asarray(theta)
         parameters = surface_parameters(frozen_designs, values)
-        frequency_axis = jnp.asarray(constants.frequencies_hz, dtype=values.dtype)
+        frequency_axis = jnp.asarray(reduced.frequencies_hz, dtype=values.dtype)
         impedances = (_patch_impedances(templates, parameters, frequency_axis, air=air)
                       if any(zone for _, zone in model.patch_keys) else
                       wall_impedances_from_templates(templates, parameters, frequency_axis, air=air))
@@ -509,11 +512,13 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         for index, row in kept_rows:
             walls = walls.at[index].set(jnp.asarray(row, dtype=walls.dtype))
         rigid = jnp.logical_and(impedances.rigid_mask, not_kept)
-        pressures = reduced_pressures(constants, walls, rigid_mask=rigid, frequency_batch=frequency_batch)
+        pressures = reduced_pressures(reduced, walls, rigid_mask=rigid, frequency_batch=frequency_batch)
+        if single_precision:
+            pressures = pressures.astype(jnp.complex128)
         result = gradient_objective_from_pressures(objective_constants, pressures)
         return result.objective_total, result
 
-    return objective
+    return SinglePrecisionObjective(objective, constants) if single_precision else objective
 
 
 # ---- 投影梯度下降 ----
@@ -530,6 +535,8 @@ def compiled_evaluator(objective: ChainObjective) -> Evaluator:
     放在以目標為鍵的弱參照表裡鍵永遠不會死（#561 審查）；掛在自己身上是「目標 → 編譯版 → 目標」的循環，
     外面沒人抓著目標時垃圾回收連編譯版一起收。目標必須是能掛屬性的函式物件（``def`` 或 lambda）。
     """
+    if isinstance(objective, SinglePrecisionObjective):
+        return objective.evaluate
     cached: Evaluator | None = getattr(objective, _EVALUATOR_ATTRIBUTE, None)
     if cached is not None:
         return cached
@@ -665,10 +672,9 @@ def _descent_step(index: int, theta: jax.Array, value: jax.Array, aux: GradientO
                        reading.components, gradient_norm, step, seconds)
 
 
-def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
-             bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
-             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
-             should_stop: StopCheck | None = None) -> DescentResult:
+def descent_start(theta0: jax.Array | FloatVector, bounds: tuple[FloatVector, FloatVector],
+                  limits: Sequence[DepthLimit] = ()) -> jax.Array:
+    """實際第一次求值的 θ：保留輸入精度、檢查盒界，超過總深度才投回；把關與下降共用。"""
     start = jnp.asarray(theta0)
     if start.ndim != 1 or not jnp.issubdtype(start.dtype, jnp.floating):
         raise ValueError("θ 起點必須是一維浮點陣列")
@@ -685,6 +691,19 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
         # 起點超過總深度上限就先投回可行域（精確最近點）：預設樣板「50 mm 棉板＋100 mm 空腔」在雙精度是
         # 0.15000000000000002，比上限多一個末位；盒界外仍照舊拒收。
         start = jnp.asarray(project_to_limits(np.asarray(start), lower_values, upper_values, limits))
+    return start
+
+
+def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
+             bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
+             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
+             should_stop: StopCheck | None = None) -> DescentResult:
+    start = descent_start(theta0, bounds, limits)
+    dtype = start.dtype
+    lower = jnp.asarray(np.asarray(bounds[0]), dtype=dtype)
+    upper = jnp.asarray(np.asarray(bounds[1]), dtype=dtype)
+    limits = tuple(limits)
+    lower_values, upper_values = np.asarray(lower), np.asarray(upper)
     evaluate = compiled_evaluator(objective)
 
     def record(index: int, theta: jax.Array, value: jax.Array, aux: GradientObjectiveArrays,
