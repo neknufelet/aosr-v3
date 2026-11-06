@@ -219,6 +219,6 @@ name = "rom_search_gpu_single_vs_cpu_double"
 value = 0.001
 display = "0.001"
 unit = "absolute"
-decision_paper = "material-stage-tmm-gpu-single-precision.md"
+decision_paper = "material-stage-tmm-gpu-single-precision-search-ruler.md"
 truth = "同一 θ、同一替身與搜尋設定，顯卡單精度鏈（矩陣乘法全精度）對 CPU 雙精度的 objective_total 絕對差，單位 dB。2026-11-06 實測 2.0e-5 dB，對登記尺有 50 倍餘裕；只守目標值，不宣稱梯度誤差界。"
 mutant_test = "tests/engine/test_material_gradient_gpu.py::test_perturbed_constant_exceeds_single_precision_contract"

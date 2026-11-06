@@ -672,10 +672,9 @@ def _descent_step(index: int, theta: jax.Array, value: jax.Array, aux: GradientO
                        reading.components, gradient_norm, step, seconds)
 
 
-def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
-             bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
-             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
-             should_stop: StopCheck | None = None) -> DescentResult:
+def descent_start(theta0: jax.Array | FloatVector, bounds: tuple[FloatVector, FloatVector],
+                  limits: Sequence[DepthLimit] = ()) -> jax.Array:
+    """實際第一次求值的 θ：保留輸入精度、檢查盒界，超過總深度才投回；把關與下降共用。"""
     start = jnp.asarray(theta0)
     if start.ndim != 1 or not jnp.issubdtype(start.dtype, jnp.floating):
         raise ValueError("θ 起點必須是一維浮點陣列")
@@ -692,6 +691,19 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
         # 起點超過總深度上限就先投回可行域（精確最近點）：預設樣板「50 mm 棉板＋100 mm 空腔」在雙精度是
         # 0.15000000000000002，比上限多一個末位；盒界外仍照舊拒收。
         start = jnp.asarray(project_to_limits(np.asarray(start), lower_values, upper_values, limits))
+    return start
+
+
+def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
+             bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
+             max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
+             should_stop: StopCheck | None = None) -> DescentResult:
+    start = descent_start(theta0, bounds, limits)
+    dtype = start.dtype
+    lower = jnp.asarray(np.asarray(bounds[0]), dtype=dtype)
+    upper = jnp.asarray(np.asarray(bounds[1]), dtype=dtype)
+    limits = tuple(limits)
+    lower_values, upper_values = np.asarray(lower), np.asarray(upper)
     evaluate = compiled_evaluator(objective)
 
     def record(index: int, theta: jax.Array, value: jax.Array, aux: GradientObjectiveArrays,

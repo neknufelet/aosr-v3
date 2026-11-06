@@ -1,15 +1,15 @@
 ---
-title: 第三階段 TMM 在顯卡上用單精度、矩陣乘法設全精度，材料與三路一起放顯卡
-date_created: 2026-10-11
+title: 第三階段 TMM 在顯卡上用單精度、矩陣乘法設全精度；#561 搜尋單精度尺 0.001 dB
+date_created: 2026-11-06
 date_modified: 2026-11-06
 status: accepted
 kind: governance
-supersedes: ""
+supersedes: "material-stage-tmm-gpu-single-precision.md"
 superseded_by: ""
-summary: "第三階段材料最佳化把 TMM（傳遞矩陣法）放在顯卡上，用單精度複數（實部、虛部各一個 fp32），而且單精度矩陣乘法一律設全精度、不走 TF32；材料與有限元素、鏡像法、晚期混響一起在顯卡上跑。雙精度移植考卷照舊在中央處理器上守「跟原套件一致」，顯卡單精度另立驗收尺，接進計算時登記。補 optimization-stages-room-with-positions-then-layout-then-zoned-materials.md 表二沒寫的 TMM 那一路，不取代它。"
+summary: "第三階段材料最佳化把 TMM（傳遞矩陣法）放在顯卡上，用單精度複數（實部、虛部各一個 fp32），而且單精度矩陣乘法一律設全精度、不走 TF32；材料與有限元素、鏡像法、晚期混響一起在顯卡上跑。雙精度移植考卷照舊在中央處理器上守「跟原套件一致」，顯卡單精度另立驗收尺，接進計算時登記。補 optimization-stages-room-with-positions-then-layout-then-zoned-materials.md 表二沒寫的 TMM 那一路，不取代它。 2026-11-06 起只補一件：#561 搜尋選用顯卡時的尺 rom_search_gpu_single_vs_cpu_double＝0.001 dB（同一 θ 的 objective_total，顯卡單精度對中央處理器雙精度），附工程依據與驗證範圍。"
 ---
 
-# 第三階段 TMM 在顯卡上用單精度、矩陣乘法設全精度，材料與三路一起放顯卡
+# 第三階段 TMM 在顯卡上用單精度、矩陣乘法設全精度；#561 搜尋單精度尺 0.001 dB
 
 ## 問題
 
@@ -32,7 +32,7 @@ summary: "第三階段材料最佳化把 TMM（傳遞矩陣法）放在顯卡上
   - 這一條也套到鏡像法、晚期混響與有限元素在顯卡上的單精度路：同一個預設可能讓它們一樣失準（未驗，推測）。這是助理補定，老闆拍的是 TMM。
 - 材料與有限元素、鏡像法、晚期混響一起在顯卡上跑（老闆原話「全部丟一起跑」）。有限元素在顯卡上用單精度還是雙精度，照舊等票 #253 量完再拍；本紙不改表二那一格。
 - 現有雙精度的移植考卷（三份凍結答案）照舊在中央處理器上跑，守「跟原套件一致」。這一條與下一條是給老闆選的 A 原本就寫明的內容。
-- 顯卡單精度另立自己的驗收尺。尺的數字在接進計算時（票 #561）照 `docs/decisions/precision-contract-rulers-live-in-one-registry.md` 登記到 `blueprint/precision_contracts.toml`，帶一張紙與一支變異考卷；本紙不訂數字。
+- 顯卡單精度另立自己的驗收尺。尺的數字在接進計算時（票 #561）照 `docs/decisions/precision-contract-rulers-live-in-one-registry.md` 登記到 `blueprint/precision_contracts.toml`，帶一張紙與一支變異考卷。#561 搜尋的那一把見文末「#561 登記的搜尋單精度尺」。
 - 顯卡上 `JAX_PLATFORMS` 要寫成 `cuda,cpu`：TMM 在 jit 裡的輸入檢查靠 `jax.debug.callback`，它要有 CPU 裝置，只給 `cuda` 時整支呼叫會失敗（#774）。這一條是助理補定。
 
 ## 為什麼
@@ -74,12 +74,33 @@ summary: "第三階段材料最佳化把 TMM（傳遞矩陣法）放在顯卡上
 
 ## #561 登記的搜尋單精度尺
 
+本紙取代 `docs/archive/material-stage-tmm-gpu-single-precision.md`，上面各節照抄，只補這一節（登記新尺要帶新紙）。
+
 2026-11-06 老闆核准：同一 θ、同一替身與搜尋設定，顯卡單精度鏈對中央處理器雙精度的
 `objective_total` 絕對差不得超過 0.001 dB。唯一數值來源是 `blueprint/precision_contracts.toml` 的
 `rom_search_gpu_single_vs_cpu_double`；登記單位為 absolute，truth 明記比較量的單位是 dB。
 
-當日 109 號房、2×2 分區、秩 3303、188 頻點、每批 16 頻點的起點實測差為 2.0e-5 dB，
-有 50 倍餘裕。這條只約束目標值，沒有把梯度方向或誤差另當精度契約。
+### 工程依據
+
+| 參照 | 數字 | 出處 | 0.001 dB 是它的幾分之一 |
+|---|---|---|---|
+| 搜尋換方案的改善門檻 | 0.05 dB | `src/aosr/config/data/material_gradient.toml` 的 `improvement_threshold` | 1/50 |
+| 替身對完整模型的帶能量尺 | 0.011 dB | 登記簿 `fem_reduced_holdout_band_db` | 約 1/11 |
+| 替身對完整模型的逐頻尺 | 0.224 dB | 登記簿 `fem_reduced_holdout_frequency_db` | 約 1/224 |
+| 顯卡單精度實差（109 號房起點） | 2.0e-5 dB | 外部工作區 `~/aosr-v3-work/561-rom-gpu-search/evidence/` | 尺留 50 倍 |
+
+推論（工程暫定）：單精度誤差在 0.001 dB 以內，比搜尋做決定的門檻小 50 倍，也比替身本身被允許的誤差小一個數量級，
+不會讓「換不換方案」翻盤。最後設計照舊用完整模型在中央處理器雙精度驗算，單精度不進最後的數字。
+
+### 驗證範圍
+
+- 已量：109 號房、2×2 分區、秩 3303、188 頻點、每批 16 頻點的起點一個點；目標值差 2.0e-5 dB；
+  梯度 40 格方向 0 翻號、餘弦 0.999999998（梯度不登記，只量）。
+- 不涵蓋：別間房、別的替身、別的秩；換替身要重量。單精度在 Mechel 1976 的 C＝60 跳階可能選到另一邊的公式，
+  這份搜尋的玻璃棉三族用 komatsu 模型，不經過那個跳階。
+- 每次 `start --device gpu` 在搜尋前把關同一起點（下降實際第一個 θ），超尺拒跑；這只守起點，不守整條路徑。
+
+### 怎麼接
 
 搜尋預設中央處理器雙精度；選顯卡時才把鏈內參數與替身常數轉成單精度，
 材料與替身求解維持單精度，求出的聲壓轉成 complex128 後才進既有雙精度評分；
@@ -88,6 +109,6 @@ summary: "第三階段材料最佳化把 TMM（傳遞矩陣法）放在顯卡上
 矩陣乘法全精度以鏈內的區域設定涵蓋，身分閉包與全域設定不變。
 
 開始搜尋前兩路各算同一起點一次，兩值、絕對差與 θ 寫進 project.json 的 precision_check；
-超尺或非有限值拒跑。接續缺記錄就重測，有拒收記錄仍拒跑。終點完整模型維持中央處理器雙精度。
+超尺或非有限值拒跑。接續缺記錄或記錄的起點不同就重測，有拒收記錄仍拒跑。終點完整模型維持中央處理器雙精度。
 雲端考卷在中央處理器同程序比較單雙精度，並用擾動常數的變異題守拒收、編譯表示守大常數不嵌入；
 顯卡硬體上的實跑另由本機驗證。

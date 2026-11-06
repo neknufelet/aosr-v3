@@ -57,13 +57,13 @@ from types import FrameType
 from typing import TYPE_CHECKING, Final
 
 from aosr import runtime
-from aosr.gradient.gpu import Device
 from aosr.physics.fem_full_batch import checked_workers
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
 
 if TYPE_CHECKING:
+    from aosr.gradient.gpu import Device
     from aosr.gradient.run import GradientProject
 
 EXIT_FAILED: Final = 1

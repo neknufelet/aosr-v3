@@ -190,6 +190,70 @@ def test_cpu_reference_environment_and_same_theta(monkeypatch: pytest.MonkeyPatc
     assert cpu_reference(project, theta) == 3.25
 
 
+@pytest.mark.parametrize("cached_start", (False, True))
+def test_preflight_theta_matches_first_descent_ledger_row(tmp_path: Path, cached_start: bool) -> None:
+    import os
+    import sys
+    from aosr.runtime import child_process_env, configure_jax
+
+    env = child_process_env(threads=1)
+    configure_jax(platforms="cpu", enable_x64=True, env=env)
+    env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
+    source = """
+from pathlib import Path
+import sys
+import pytest
+from tests.engine.test_material_gradient_gpu import _assert_preflight_start
+with pytest.MonkeyPatch.context() as patch:
+    _assert_preflight_start(Path.cwd(), patch, cached_start=sys.argv[1] == 'cached')
+"""
+    result = subprocess.run([sys.executable, "-c", source, "cached" if cached_start else "fresh"], cwd=tmp_path, env=env,
+                            capture_output=True, text=True, timeout=45)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _assert_preflight_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, cached_start: bool) -> None:
+    from types import SimpleNamespace
+    from typing import cast
+    import jax.numpy as jnp
+    from aosr.gradient import gpu_preflight, material_gradient as search, material_gradient_ledger as ledger
+    from aosr.gradient.gpu import precision_comparison
+    from tests.engine._material_gradient_loop_probe import synthetic_header, synthetic_objective
+    from tests.engine.test_material_gradient_max_depth import PRESET, _kept, _settings
+
+    settings = _settings()
+    designs = run.designs_for((PRESET,) * 6, settings, kept=_kept(), max_depths={"x0": 0.08})
+    objective = synthetic_objective(designs, [0])
+    problem = cast(run.GradientProblem, SimpleNamespace(designs=designs, objective=objective))
+    project = run.GradientProject.model_validate({**_project().model_dump(), "device": "gpu", "max_depths": {"x0": 0.08}})
+    if cached_start:
+        project = project.model_copy(update={"precision_check": precision_comparison(
+            cpu_double=0.0, gpu_single=0.0, theta=tuple(float(x) for x in search.baseline_theta(designs)))})
+    run.write_json_atomic(tmp_path / run.PROJECT_FILE, project)
+    reference_points: list[tuple[str, ...]] = []
+
+    def reference(project: run.GradientProject, theta: tuple[float, ...]) -> float:
+        reference_points.append(tuple(value.hex() for value in theta))
+        return float(objective(jnp.asarray(theta))[0])
+
+    monkeypatch.setattr(gpu_preflight, "cpu_reference", reference)
+    gpu_preflight.ensure_start_precision(tmp_path, project, problem)
+    result = search.projected_descent(objective, search.baseline_theta(designs), search.design_bounds(designs),
+        settings.descent.model_copy(update={"max_steps": 1}), limits=search.depth_limits(designs))
+    header = synthetic_header(designs, settings).model_copy(update={"max_depths": {"x0": 0.08}})
+    ledger.write_ledger(tmp_path / run.LEDGER_FILE, header, ledger.descent_rows(result, "descent", 0))
+    _, rows = ledger.read_ledger(tmp_path / run.LEDGER_FILE)
+    saved = run.read_project(tmp_path).precision_check
+    assert saved is not None
+    assert rows[0].theta()[4] == 0.05 and sum(rows[0].theta()[4:6]) <= 0.08
+    assert rows[0].theta_hex != tuple(float(x).hex() for x in search.baseline_theta(designs))
+    assert saved.theta_hex == rows[0].theta_hex, (saved.theta_hex, rows[0].theta_hex)
+    assert reference_points == [rows[0].theta_hex]
+    assert saved.gpu_single == float(objective(jnp.asarray(rows[0].theta()))[0])
+    monkeypatch.setattr(gpu_preflight, "measure_start", lambda *args: pytest.fail("起點相符的把關記錄不應重測"))
+    gpu_preflight.ensure_start_precision(tmp_path, run.read_project(tmp_path), problem)
+
+
 def test_create_forwards_persisted_gpu_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     project = run.GradientProject.model_validate({**_project().model_dump(), "device": "gpu"})
