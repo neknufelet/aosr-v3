@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import Final, Literal, NamedTuple
+from typing import Final, Literal, NamedTuple, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -33,6 +33,7 @@ from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
+from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
@@ -104,11 +105,11 @@ class QuickScore(NamedTuple):
 
 
 class RetunedTemplate(NamedTuple):
-    """進重調的候選：它的快速評分、設計清單、目標函式、重調、重調後的值、改善（基準重調後的值減它）。"""
+    """進重調的候選；單精度淘汰目標在一輪決定後清空，只留重調數值與改善供寫帳本。"""
 
     quick: QuickScore
     designs: tuple[SurfaceDesign, ...]
-    objective: ChainObjective
+    objective: ChainObjective | None
     retune: DescentResult
     value: float
     improvement: float
@@ -341,7 +342,10 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     else:
         chosen = TemplatePoint(accepted.designs, accepted.retune.theta, accepted.value,
                                accepted.retune.steps[-1].screening_total, accepted.retune.steps[-1].components)
-        chosen_objective = accepted.objective
+        chosen_objective = cast(ChainObjective, accepted.objective)
+    if isinstance(objective, SinglePrecisionObjective):
+        # 淘汰目標不必隨帳本數值活到下一輪；勝出者由 accepted 與 objective 繼續持有。
+        retuned = [item if item is accepted else item._replace(objective=None) for item in retuned]
     return TemplateRoundResult(True, bound, scores, baseline, tuple(retuned), accepted, chosen, chosen_objective,
                                evaluations, time.perf_counter() - clock,
                                None if accepted is not None else TEMPLATE_STOP_NO_IMPROVEMENT)

@@ -517,7 +517,8 @@ prefix = "tests.engine."
 # 10140→10546：#561 替身分頻批次合計新增 22 題（新檔 test_frequency_batch.py 19、終點命令列接線 2、max-depth 參數化淨增 1）；地板原落後主線實數（10546−22＝10524），單行程 collect-only 逐檔加總實數 10546。
 # 10546→10567：#561 顯卡搜尋單精度新增 21 題（含修補一帳本恆等式）；未移除，整個引擎籃 collect-only 實數 10567。
 # 10567→10571：#561 修補二新增冷入口匯入與報告兩題、把關起點對下降帳本逐位（含舊記錄重測）兩格；未移除，整個引擎籃 collect-only 實數 10571。
-collected_floor = 10571
+# 10571→10577：#1028 新增共用常數物件、活陣列位元組、兩種分批逐位對照、接受與拒絕後釋放淘汰目標六題；未移除，引擎籃 collect-only 實數 10577。
+collected_floor = 10577
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

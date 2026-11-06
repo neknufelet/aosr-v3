@@ -62,7 +62,7 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.gpu import Device, PrecisionComparison
+from aosr.gradient.gpu import Device, PrecisionComparison, single_precision_constants
 from aosr.gradient.gpu_preflight import ensure_start_precision
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_surfaces import (
@@ -91,6 +91,7 @@ from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials,
 from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.fem_reduced import ReducedModel
+from aosr.physics.fem_reduced_jax import reduced_constants
 from aosr.physics.fem_reduced_check import PointHex, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
@@ -556,14 +557,17 @@ def load_problem(project: GradientProject) -> GradientProblem:
                           fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    device_constants = single_precision_constants(reduced_constants(model)) if project.device == "gpu" else None
     objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
-                                frequency_batch=project.frequency_batch, single_precision=project.device == "gpu")
+                                frequency_batch=project.frequency_batch, single_precision=project.device == "gpu",
+                                device_constants=device_constants)
 
     def objective_for(candidate: tuple[SurfaceDesign, ...]) -> ChainObjective:
         if candidate == designs:
             return objective
         return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
-                               frequency_batch=project.frequency_batch, single_precision=project.device == "gpu")
+                               frequency_batch=project.frequency_batch, single_precision=project.device == "gpu",
+                               device_constants=device_constants)
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 

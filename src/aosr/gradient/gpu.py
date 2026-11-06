@@ -19,6 +19,15 @@ Kernel = Callable[[jax.Array, ReducedConstants], tuple[jax.Array, GradientObject
 Evaluation = tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]
 
 
+def single_precision_constants(constants: ReducedConstants) -> ReducedConstants:
+    """一次轉換並放上裝置；呼叫端持有這一包，供整次搜尋的目標共用。"""
+    def put(value: np.ndarray | jax.Array) -> jax.Array:
+        dtype = jnp.complex64 if np.issubdtype(value.dtype, np.complexfloating) else (
+            jnp.bool_ if np.issubdtype(value.dtype, np.bool_) else jnp.float32)
+        return cast(jax.Array, jax.device_put(jnp.asarray(value, dtype=dtype)))
+    return cast(ReducedConstants, jax.tree.map(put, constants))
+
+
 class SinglePrecisionObjective:
     """只有鏈用單精度；外部 θ、回傳值與梯度為雙精度。常數不關入 jit 的閉包。
 
@@ -26,12 +35,9 @@ class SinglePrecisionObjective:
     有範圍的乘法設定只在追蹤這條鏈時生效，涵蓋身分閉包內的 TMM 與求解反傳。
     """
 
-    def __init__(self, kernel: Kernel, constants: ReducedConstants) -> None:
-        def put(value: np.ndarray | jax.Array) -> jax.Array:
-            dtype = jnp.complex64 if np.issubdtype(value.dtype, np.complexfloating) else (
-                jnp.bool_ if np.issubdtype(value.dtype, np.bool_) else jnp.float32)
-            return cast(jax.Array, jax.device_put(jnp.asarray(value, dtype=dtype)))
-        self.constants = cast(ReducedConstants, jax.tree.map(put, constants))
+    def __init__(self, kernel: Kernel, constants: ReducedConstants, *,
+                 device_constants: ReducedConstants | None = None) -> None:
+        self.constants = single_precision_constants(constants) if device_constants is None else device_constants
 
         def single(theta: jax.Array, arrays: ReducedConstants) -> tuple[jax.Array, GradientObjectiveArrays]:
             with jax.default_matmul_precision("highest"):
