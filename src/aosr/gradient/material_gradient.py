@@ -471,10 +471,12 @@ def _patch_impedances(templates: Sequence[ConstructionTemplate | None], paramete
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64],
-                    frequency_batch: int | None = None, single_precision: bool = False) -> ChainObjective:
+                    frequency_batch: int | None = None, single_precision: bool = False,
+                    device_constants: ReducedConstants | None = None) -> ChainObjective:
     """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、預設精度跟 θ 走。
 
     顯卡模式的材料與替身求解維持單精度，聲壓轉成 complex128 後才進既有評分；帳本恆等式仍用雙精度守。
+    ``device_constants`` 是同一替身已轉單精度的裝置常數；搜尋工廠明確傳入，所有配置共用。
 
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
     → 梯度目標（``gradient_objective_from_pressures``：第一階段兩分項合分原樣，加權重 × 大峰代理；#561 壬一）。
@@ -518,7 +520,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         result = gradient_objective_from_pressures(objective_constants, pressures)
         return result.objective_total, result
 
-    return SinglePrecisionObjective(objective, constants) if single_precision else objective
+    return SinglePrecisionObjective(objective, constants, device_constants=device_constants) if single_precision else objective
 
 
 # ---- 投影梯度下降 ----

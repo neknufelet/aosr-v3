@@ -23,8 +23,7 @@ from aosr.physics.fem_reduced import BuildLedger, ReducedMatrices, ReducedModel
 from tests.engine.test_material_gradient import _designs, _objective_constants, _receivers
 
 
-def model() -> ReducedModel:
-    rank = 16
+def model(rank: int = 16) -> ReducedModel:
     rng = np.random.default_rng(561)
     basis = rng.normal(size=(6, rank, rank))
     matrices = ReducedMatrices(
