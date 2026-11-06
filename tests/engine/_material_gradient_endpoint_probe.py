@@ -148,9 +148,9 @@ def _surrogate_order(operators: FullOperators, model: ReducedModel, designs: tup
 
     def recording_chain(chain_model: ReducedModel, chain_designs: Sequence[gradient_search.SurfaceDesign],
                         constants: GradientObjectiveConstants, *, air: PhysicsConstants, ranges: PorousModelRanges,
-                        frequencies: Sequence[float]) -> gradient_search.ChainObjective:
+                        frequencies: Sequence[float], frequency_batch: int | None = None) -> gradient_search.ChainObjective:
         real = gradient_search.chain_objective(chain_model, chain_designs, constants, air=air, ranges=ranges,
-                                               frequencies=frequencies)
+                                               frequencies=frequencies, frequency_batch=frequency_batch)
 
         def objective(value: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
             traced.append(isinstance(value, jax.core.Tracer))

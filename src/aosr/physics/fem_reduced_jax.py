@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -110,11 +110,16 @@ def wall_coefficients(constants: ReducedConstants, impedance_by_wall: jax.Array,
 
 
 def reduced_pressures(constants: ReducedConstants, impedance_by_wall: jax.Array, *,
-                      rigid_mask: jax.Array) -> jax.Array:
+                      rigid_mask: jax.Array, frequency_batch: int | None = None) -> jax.Array:
     """逐頻解小系統，回（頻率,喇叭,座位）複數聲壓；可 jit、grad 與外層 vmap。遮罩必填。
 
     具體遮罩拒收分區剛性；jit（編譯）追蹤時分區剛性一律不生效，仍用材料阻抗，見 wall_coefficients。
+    frequency_batch 指定正整數時逐批解；checkpoint（反傳時重算）不保存每頻的系統矩陣與 LU 分解。
+    lax.map（逐批映射）處理尾批；批量大於等於頻數仍走重算路徑，視為一批。
+    批量是靜態參數：jit（編譯）時關入閉包，或用 static_argnames 指定 frequency_batch。
     """
+    if frequency_batch is not None and (type(frequency_batch) is not int or frequency_batch <= 0):
+        raise ValueError("frequency_batch 必須是正整數或 None")
     z = _checked_impedances(constants, impedance_by_wall)
     coefficients = wall_coefficients(constants, z, rigid_mask=rigid_mask)
     real_dtype = z.real.dtype
@@ -128,7 +133,10 @@ def reduced_pressures(constants: ReducedConstants, impedance_by_wall: jax.Array,
         system = stiffness - k2 * mass + jnp.tensordot(walls, boundary, axes=1, precision=_HIGHEST)
         coordinates = jnp.linalg.solve(system, sources.T)
         return jnp.matmul(receivers, coordinates, precision=_HIGHEST).T
-    return jax.vmap(solve)(k_squared, coefficients)
+    if frequency_batch is None:
+        return jax.vmap(solve)(k_squared, coefficients)
+    return cast(jax.Array, jax.lax.map(lambda pair: jax.checkpoint(solve)(*pair), (k_squared, coefficients),
+                                     batch_size=min(frequency_batch, k_squared.shape[0])))
 
 
 def rigid_mask_from_templates(templates: Sequence[ConstructionTemplate | None], *,

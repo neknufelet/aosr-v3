@@ -95,6 +95,17 @@ def _workers(text: str) -> int:
         raise argparse.ArgumentTypeError("--workers 必須是正整數") from error
 
 
+def _frequency_batch(text: str) -> int:
+    """命令列頻點批量：只收正整數。"""
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("frequency_batch 必須是正整數") from error
+    if value <= 0:
+        raise argparse.ArgumentTypeError("frequency_batch 必須是正整數")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aosr.gradient.cli")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -105,6 +116,8 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--purpose", required=True, help="用途（評分設定）")
     start.add_argument("--root", type=Path, required=True, help="資料夾根（不要放在網頁讀的 searches/ 底下）")
     start.add_argument("--settings", type=Path, default=config_path("material_gradient.toml"))
+    start.add_argument("--frequency-batch", type=_frequency_batch, default=None, metavar="N",
+                       help="替身每批求解的頻點數（正整數）；反傳逐批重算")
     start.add_argument("--max-depth", action="append", default=[], metavar="面=公尺",
                        help="每面總深度上限，可重複；整面或面片，例如 x0=0.08、x0@u0v0=0.08")
     start.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
@@ -242,7 +255,7 @@ def _start(args: argparse.Namespace) -> int:
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
-                               max_depths=caps, patch_keys=patch_keys)
+                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch)
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path), **hashes,
         surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
@@ -250,7 +263,8 @@ def _start(args: argparse.Namespace) -> int:
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
-        objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
+        objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
+        frequency_batch=args.frequency_batch)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)
@@ -327,8 +341,11 @@ def _endpoint(args: argparse.Namespace) -> int:
 
 
 def _report(args: argparse.Namespace) -> int:
+    from aosr.gradient.run import read_project
     from aosr.gradient.report import render_report
 
+    if (batch := read_project(args.folder.resolve()).frequency_batch) is not None:
+        sys.stdout.write(f"替身頻點分批：每批 {batch} 點（反傳逐批重算）\n")
     sys.stdout.write(render_report(args.folder.resolve()))
     return 0
 

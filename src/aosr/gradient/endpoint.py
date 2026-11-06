@@ -450,13 +450,13 @@ def _checked_endpoint_inputs(operators: FullOperators, model: ReducedModel, desi
 
 def _reduced_objective(model: ReducedModel, designs: Sequence[SurfaceDesign], constants: GradientObjectiveConstants,
                        exported: FloatVector, *, air: PhysicsConstants, ranges: PorousModelRanges,
-                       frequencies: tuple[float, ...]) -> GradientObjectiveArrays:
+                       frequencies: tuple[float, ...], frequency_batch: int | None = None) -> GradientObjectiveArrays:
     """替身鏈（``chain_objective``）在匯出 θ 的目標各分項：``jax.jit`` 包過再算、只要值（不求梯度）；θ 是編譯函式的引數。
 
     獨立成一支是為了讓鏈的閉包與編譯函式在回到 :func:`endpoint_check` 之前就沒人引用，不跟完整解疊在一起。
     """
     compiled: ChainObjective = jax.jit(chain_objective(model, designs, constants, air=air, ranges=ranges,
-                                                       frequencies=frequencies))
+                                                       frequencies=frequencies, frequency_batch=frequency_batch))
     _, result = compiled(jnp.asarray(exported))
     return result
 
@@ -465,7 +465,7 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
                    model: ReducedModel, objective_settings: GradientObjectiveSettings, receiver_set: ReceiverSet,
                    low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
                    settings: MaterialGradientSettings, air: PhysicsConstants,
-                   ranges: PorousModelRanges, workers: int = 1) -> EndpointResult:
+                   ranges: PorousModelRanges, workers: int = 1, frequency_batch: int | None = None) -> EndpointResult:
     """同一組可行規格：替身值與完整模型值並列、兩者的差與差的上界、每座位逐頻最大 dB 差、每支喇叭的大峰。
 
     入口先核：``air`` 跟算子、替身同密度同聲速；設計清單照 ``Wall.all()`` 六面；每面樣板構造等於它的 preset
@@ -488,7 +488,8 @@ def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], t
     materials = materials_from_surfaces(designs, values, settings)
     constants = gradient_objective_constants(axis, objective_settings, receiver_set, len(model.source_names))
     exported = exported_theta(designs, values, settings)
-    reduced_result = _reduced_objective(model, designs, constants, exported, air=air, ranges=ranges, frequencies=axis)
+    reduced_result = _reduced_objective(model, designs, constants, exported, air=air, ranges=ranges, frequencies=axis,
+                                       frequency_batch=frequency_batch)
     validation = validate_reduced(model, operators, [material_impedances(materials, axis, air=air, ranges=ranges)],
                                   workers=workers)
     full, reduced_pressure = validation.full_pressure[0], validation.reduced_pressure[0]

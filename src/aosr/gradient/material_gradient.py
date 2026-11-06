@@ -469,7 +469,8 @@ def _patch_impedances(templates: Sequence[ConstructionTemplate | None], paramete
 
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
-                    ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64]) -> ChainObjective:
+                    ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64],
+                    frequency_batch: int | None = None) -> ChainObjective:
     """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、精度跟 θ 走。
 
     θ → 每面參數 → 垂直入射阻抗（``wall_impedances_from_templates``）→ 替身聲壓（``reduced_pressures``）
@@ -508,7 +509,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
         for index, row in kept_rows:
             walls = walls.at[index].set(jnp.asarray(row, dtype=walls.dtype))
         rigid = jnp.logical_and(impedances.rigid_mask, not_kept)
-        pressures = reduced_pressures(constants, walls, rigid_mask=rigid)
+        pressures = reduced_pressures(constants, walls, rigid_mask=rigid, frequency_batch=frequency_batch)
         result = gradient_objective_from_pressures(objective_constants, pressures)
         return result.objective_total, result
 

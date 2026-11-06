@@ -341,7 +341,9 @@ def test_cli_rejects_before_export_or_creating_folder(value: str, fixed: str | N
     assert not (tmp_path / "out").exists()
 
 
-def test_cli_saves_cap_and_binds_run_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("frequency_batch", (None, 7))
+def test_cli_saves_cap_and_binds_run_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                            frequency_batch: int | None) -> None:
     """只隔離網格匯出、替身載入與起行程；驗參數、身分及 project 寫入走實際產品函式。"""
     from aosr.reporting import fem_reduced_scheme
     from aosr.physics.fem_reduced_store import manifest_path
@@ -366,13 +368,16 @@ def test_cli_saves_cap_and_binds_run_identity(tmp_path: Path, monkeypatch: pytes
     root = tmp_path / "out"
     args = ["start", "--scheme", str(scheme), "--surrogate", str(surrogate), "--presets", ",".join([PRESET] * 6),
             "--purpose", _project().purpose, "--root", str(root), "--max-depth", "x0=0.08"]
+    if frequency_batch is not None:
+        args.extend(["--frequency-batch", str(frequency_batch)])
     assert cli.main(args) == 0
     project = run.read_project(root)
     assert project.max_depths == {"x0": 0.08}
+    assert project.frequency_batch == frequency_batch
     expected = run.gradient_id(scheme_sha256=project.scheme_sha256, surrogate_manifest_sha256="b" * 64,
                                presets=project.presets, purpose=project.purpose, settings_fingerprint=_settings().fingerprint,
                                physics_identity="physics-x", objective_settings_fingerprint=cast(str, project.objective_settings_fingerprint),
-                               max_depths={"x0": 0.08})
+                               max_depths={"x0": 0.08}, frequency_batch=frequency_batch)
     assert project.gradient_id == expected
 
 
