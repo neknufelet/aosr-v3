@@ -62,7 +62,7 @@ def _section(path: Path = _REGISTRY) -> dict[str, list[dict[str, object]]]:
 
 def _raw(path: Path = _REGISTRY) -> _Raw:
     section = _section(path)
-    # 只取第一階段那幾格：同一段還住著第三階段梯度目標的代理（stage_three_gradient.*，#561 壬一），不是這支的分項。
+    # 只取第一階段那幾格：同一段還住著第三階段梯度目標的代理與專用計分範圍（stage_three_gradient.*，#561 壬一、#1032），不是這支的分項。
     references = {str(item["key"]).removeprefix(_PREFIX): float(str(item["worse_reference"]))
                   for item in section["target"] if str(item["key"]).startswith(_PREFIX)}
     table, = (item for item in section["weight"] if item["key"] == _PREFIX + "component_weights")

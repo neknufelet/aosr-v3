@@ -328,6 +328,27 @@ def _baseline_scores(baseline: EndpointBaseline, bound_db: float | None) -> str:
                         baseline.big_peak_db, bound_db)
 
 
+def _unscored_lines(record: EndpointRecord) -> list[str]:
+    """加註只顯示 v4 有保存的資料，舊報告不現算或補猜。"""
+    notes, original = record.report.below_scoring, record.baseline.below_scoring
+    if notes is None or original is None:
+        return []
+    lines = []
+    for name, row in notes.by_speaker.items():
+        base = original.by_speaker[name]
+        peak = ("沒有可辨識峰" if row.strongest_peak is None else
+                f"最強峰 {row.strongest_peak.frequency_hz:.1f} Hz、比自己的擬合線高 {row.strongest_peak.db:.3f} dB")
+        base_peak = ("沒有可辨識峰" if base.strongest_peak is None else
+                     f"{base.strongest_peak.frequency_hz:.1f} Hz、比自己的擬合線高 {base.strongest_peak.db:.3f} dB")
+        energy = ("無可用值" if row.seat_mean_max is None else
+                  f"{row.seat_mean_max.frequency_hz:.1f} Hz、{row.seat_mean_max.db:.3f} dB")
+        base_energy = ("無可用值" if base.seat_mean_max is None else
+                       f"{base.seat_mean_max.frequency_hz:.1f} Hz、{base.seat_mean_max.db:.3f} dB")
+        lines.append(f"  {name}：{notes.range_hz[1]:g} Hz 以下（不計分），自 {notes.range_hz[0]:g} Hz 起："
+                     f"{peak}；原牆 {base_peak}；座位平均能量最高 {energy}，原牆 {base_energy}。")
+    return lines
+
+
 def _endpoint_section(record: EndpointRecord) -> list[str]:
     report, baseline, gain, seconds = record.report, record.baseline, record.improvement, record.seconds
     dropped = "、".join(report.dropped_cavities) if report.dropped_cavities else "沒有"
@@ -352,6 +373,7 @@ def _endpoint_section(record: EndpointRecord) -> list[str]:
                      report.rms_floor_db),
         f"  改善（基準減終點，完整模型）：舊合分 {gain.total:+.6f}（主位起伏 {gain.components[0]:+.6f} dB、"
         f"座位穩健性 {gain.components[1]:+.6f} dB）{new_gain}",
+        *_unscored_lines(record),
         f"  拿掉的空腔（小於最小空腔不放空氣層）：{dropped}",
         f"  匯出方案：{record.exported_scheme}（SHA-256 {record.exported_scheme_sha256}）",
         f"  秒數：匯出算子 {seconds.export_operators:.1f}、終點重算 {seconds.endpoint:.1f}、基準 {seconds.baseline:.1f}",

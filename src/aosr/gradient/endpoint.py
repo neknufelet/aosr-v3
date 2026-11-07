@@ -363,6 +363,89 @@ def _components(result: GradientObjectiveArrays) -> tuple[float, float]:
     return float(result.mean_own_line_ripple_rms_db), float(result.mean_seat_robustness_rms_db)
 
 
+class FrequencyLevel(BaseModel):
+    """一個頻點與能量或對擬線峰高的 dB；定義由所在欄位決定。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    frequency_hz: float
+    db: float
+
+
+class UnscoredSpeaker(BaseModel):
+    """不計分段：主位對自己擬線的最強峰、座位平均能量的最大頻點。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    strongest_peak: FrequencyLevel | None
+    seat_mean_max: FrequencyLevel | None
+
+
+class UnscoredBand(BaseModel):
+    """只加註、不計分；範圍左含右不含，沒有峰或無可用能量就記 None。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    range_hz: tuple[float, float]
+    by_speaker: dict[str, UnscoredSpeaker]
+
+
+class UnscoredImprovement(BaseModel):
+    """原牆減終點的 dB 差；任一側缺值就不報差。峰中心可不同，各比該段最強峰。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    strongest_peak_db: float | None
+    seat_mean_max_db: float | None
+
+
+def below_scoring_notes(
+    pressures: NDArray[np.complex128], *, speaker_ids: Sequence[str], receiver_set: ReceiverSet,
+    frequencies_hz: Sequence[float], low_frequency_axis: LowFrequencyAxis,
+    stage_one_range_hz: tuple[float, float], stage_three_lower_hz: float,
+) -> UnscoredBand:
+    """完整第一階段範圍量峰後篩出不計分段；座位間先平均 |p|² 再轉 dB，不改輸入、不進分數。"""
+    values = np.asarray(pressures)
+    if values.shape != (len(frequencies_hz), len(speaker_ids), len(receiver_set.points)):
+        raise ValueError("不計分加註的聲壓形狀必須是 (F, 喇叭, 座位)")
+    lower = stage_one_range_hz[0]
+    if not math.isfinite(stage_three_lower_hz) or stage_three_lower_hz < lower:
+        raise ValueError("第三階段下界不得低於第一階段下界")
+    energies = np.abs(values) ** 2
+    data = low_frequency_input(
+        candidate_id=_CANDIDATE_ID, speaker_ids=tuple(speaker_ids), receiver_set=receiver_set,
+        axis=low_frequency_axis,
+        energies={(speaker, point.receiver_id): tuple(float(value) for value in energies[:, s, r])
+                  for s, speaker in enumerate(speaker_ids) for r, point in enumerate(receiver_set.points)},
+        frequency_hex=tuple(float(value).hex() for value in frequencies_hz))
+    measured = evaluate_stage_one_low_frequency(data, scoring_range_hz=stage_one_range_hz)
+    frequencies = np.asarray(frequencies_hz, dtype=np.float64)
+    indices = np.flatnonzero((frequencies >= lower) & (frequencies < stage_three_lower_hz))
+    notes: dict[str, UnscoredSpeaker] = {}
+    for s, speaker in enumerate(measured.speakers):
+        peaks = ([] if speaker.payload is None else [feature for feature in speaker.payload.features
+                 if feature.kind == "peak" and lower <= feature.center_frequency_hz < stage_three_lower_hz])
+        peak = max(peaks, key=lambda feature: feature.depth_db) if peaks else None
+        strongest = None if peak is None else FrequencyLevel(frequency_hz=peak.center_frequency_hz, db=peak.depth_db)
+        maximum = None
+        mean = np.mean(energies[indices, s, :], axis=1)
+        if mean.size and np.all(np.isfinite(mean)) and np.all(mean >= 0.0) and np.max(mean) > 0.0:
+            index = int(np.argmax(mean))
+            maximum = FrequencyLevel(frequency_hz=float(frequencies[indices[index]]), db=float(10.0 * np.log10(mean[index])))
+        notes[speaker.speaker_id] = UnscoredSpeaker(strongest_peak=strongest, seat_mean_max=maximum)
+    return UnscoredBand(range_hz=(lower, stage_three_lower_hz), by_speaker=notes)
+
+
+def below_scoring_improvement(baseline: UnscoredBand, report: UnscoredBand) -> dict[str, UnscoredImprovement]:
+    """原牆減終點，正數代表終點較低；頻段與喇叭必須相同。"""
+    if baseline.range_hz != report.range_hz or baseline.by_speaker.keys() != report.by_speaker.keys():
+        raise ValueError("不計分加註的頻段與喇叭必須相同才可比差")
+
+    def difference(base: FrequencyLevel | None, end: FrequencyLevel | None) -> float | None:
+        return None if base is None or end is None else base.db - end.db
+
+    return {name: UnscoredImprovement(
+        strongest_peak_db=difference(base.strongest_peak, report.by_speaker[name].strongest_peak),
+        seat_mean_max_db=difference(base.seat_mean_max, report.by_speaker[name].seat_mean_max))
+        for name, base in baseline.by_speaker.items()}
+
+
 class EndpointReport(BaseModel):
     """終點重算的數字（只報不判）：替身值、完整模型值、差與差的上界、每座位逐頻最大 dB 差、帶能量差、大峰。
 
@@ -411,6 +494,7 @@ class EndpointReport(BaseModel):
     proxy_gap_bound_db: float | None = None
     reduced_interior_max_db: float | None = None
     full_interior_max_db: float | None = None
+    below_scoring: UnscoredBand | None = None
 
     @model_validator(mode="after")
     def _proxy_fields_together(self) -> Self:

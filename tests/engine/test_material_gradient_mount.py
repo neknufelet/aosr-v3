@@ -79,9 +79,9 @@ CONTROL_DIGESTS = {
     "y0": "ff2d4e05a9194967576191b229274cb10a503955fadef73ed58fed7724f78d78",
     "yL": "9aa0be661d4d1836d45bda2695460415acb4847912bb17f78b140d673c4e4fec"}
 # 帳本標頭那一列、換樣板帳本標頭那一列（庚二帳本摘要給 "e"×64）、project.json 整檔的 SHA-256。
-# #561 加深後只更新家族設定指紋；純標頭序列化，沒有求解或 XLA 運算。
-CONTROL_LEDGER_HEADER = "3411307712a67d9977692db67fd607a56d825727c7048bc94b117db189891f21"
-CONTROL_TEMPLATE_HEADER = "e97193100ab146a6f747045e022e21c6e89e9a3289d7c7dbf51f11dc8bbc3055"
+# #561 更新家族設定指紋；#1032 更新計分範圍的目標常數指紋；純標頭序列化，沒有求解或 XLA 運算。
+CONTROL_LEDGER_HEADER = "1e8c6edf1569caa3e3c4e8e8bb310d0d59c7f194216689f35a0c9b6160d0c4df"
+CONTROL_TEMPLATE_HEADER = "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
 CONTROL_PROJECT = "d51fbff4611f4915537fc6df82b5de4c1822dcb1b3c334c6245c9eb4f5979485"
 # 剛背 result.json 整檔的 SHA-256（主線 692d1f42 寫入端：``surface_specs`` 切每面、``GradientResult``、``write_json_atomic``；
 # θ 是 0.05＋0.01×序號、值與分項與次數照 ``_rigid_result``）、它的版本字串、頂層與每面的鍵（同一份檔讀回量的）。

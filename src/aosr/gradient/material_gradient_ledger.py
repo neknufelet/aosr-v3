@@ -59,6 +59,7 @@ LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v5"
 LEGACY_LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v4"
 _V2_VERSION: Final = "aosr.material_gradient_ledger.v2"
 # 接續碰到上一版帳本、或標頭的評分常數指紋不同時，訊息要講明的那一句。
+SCORED_RANGE_RERUN_TEXT: Final = "第三階段計分範圍改了（#1032），舊範圍資料夾要重新開始搜尋"
 PROXY_RERUN_TEXT: Final = "評分常數指紋不同：梯度目標加了大峰代理項，要重跑"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Phase = Literal["descent", "snap", "retune", "baseline_retune", "candidate_jump", "candidate_retune", "round_decision"]
@@ -705,7 +706,7 @@ def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = 
     if expected_header is not None and header != expected_header:
         differing = sorted(name for name in MaterialGradientHeader.model_fields
                            if getattr(header, name) != getattr(expected_header, name))
-        note = f"；{PROXY_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
+        note = f"；{PROXY_RERUN_TEXT}；{SCORED_RANGE_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
         raise ValueError(f"帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(MaterialGradientRow.model_validate_json(line) for line in lines[1:])
     check_rows(header, rows)

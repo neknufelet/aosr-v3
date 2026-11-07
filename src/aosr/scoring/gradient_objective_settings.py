@@ -1,10 +1,11 @@
-"""第三階段梯度目標的登記簿讀法（#561 壬一）：第一階段兩分項的設定，加上大峰代理的溫度、目標與權重三格。
+"""第三階段梯度目標的登記簿讀法（#561 壬一）：第一階段兩分項的設定，加上專用計分範圍與大峰代理的溫度、目標、權重。
 
-老闆 2026-10-30 拍 B：大峰的平滑代理進梯度目標當試驗。三格住品質登記簿第一階段那一段、鍵前綴
+老闆 2026-10-30 拍 B：大峰的平滑代理進梯度目標當試驗；#1032 再加專用計分範圍。四格住品質登記簿第一階段那一段、鍵前綴
 ``stage_three_gradient.``；只有梯度目標讀它們——第一階段合分（``stage_one_score``）與第二階段低頻頻響類只讀
-``stage_one_low_frequency.*``，兩邊的設定指紋都不含這三格，加這三格不動第一階段名次與第二階段的比較身分。
+``stage_one_low_frequency.*``，兩邊的設定指紋都不含這四格，加這四格不動第一階段名次與第二階段的比較身分。
+#1032：第三階段以專用範圍重建兩分項設定與指紋；第一階段原設定不變。
 
-這一支只讀具名的三個鍵、不列舉整段；指紋只雜湊自己讀的三格與第一階段設定的指紋（照 ``stage_one_score``
+這一支只讀具名的四個鍵、不列舉整段；指紋只雜湊自己讀的四格與第一階段設定的指紋（照 ``stage_one_score``
 「指紋只收自己讀的那幾格」）。代理的較差參考必須等於第一階段兩分項那個值：較差參考只為無單位化，
 不相等時權重就不是登記的那個比例（同 ``StageOneScoreSettings`` 守兩分項相等的理由）。
 程式裡不寫任何溫度、權重或較差參考的數字。
@@ -20,7 +21,7 @@ from typing import Final
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, QualityTargets, SettingEntry, TargetEntry
 from aosr.scoring.cost_shapes import target, weight_table
 from aosr.scoring.stage_one_score import (
-    PRINCIPAL, StageOneScoreSettings, stage_one_settings_from_section,
+    PRINCIPAL, SCORED_RANGE_KEY as STAGE_ONE_RANGE_KEY, StageOneScoreSettings, stage_one_settings_from_section,
 )
 
 GRADIENT_OBJECTIVE_VERSION: Final = "aosr.scoring.gradient_objective.v1"
@@ -29,14 +30,15 @@ PROXY: Final = "big_peak_proxy_db"
 TEMPERATURE_KEY: Final[str] = _PREFIX + "big_peak_proxy_temperature_db"
 PROXY_TARGET_KEY: Final[str] = _PREFIX + PROXY
 WEIGHTS_KEY: Final[str] = _PREFIX + "component_weights"
-# 這一支讀的登記簿條目（三格）；第一階段那幾格由 ``stage_one_score.SETTING_KEYS`` 管。
-SETTING_KEYS: Final[tuple[str, ...]] = (TEMPERATURE_KEY, PROXY_TARGET_KEY, WEIGHTS_KEY)
+SCORED_RANGE_KEY: Final[str] = _PREFIX + "scored_range_hz"
+# 這一支讀的登記簿條目（四格）；第一階段那幾格由 ``stage_one_score.SETTING_KEYS`` 管。
+SETTING_KEYS: Final[tuple[str, ...]] = (TEMPERATURE_KEY, PROXY_TARGET_KEY, WEIGHTS_KEY, SCORED_RANGE_KEY)
 
 
 @dataclass(frozen=True)
 class GradientObjectiveSettings:
     """梯度目標的設定：第一階段兩分項那一份、代理的溫度（dB）、代理的目標條目、代理的權重；
-    ``status`` 是三格與第一階段裡最低的狀態，``fingerprint`` 雜湊三格與第一階段設定的指紋。"""
+    ``status`` 是四格與第一階段裡最低的狀態，``fingerprint`` 雜湊四格與第一階段設定的指紋。"""
 
     stage_one: StageOneScoreSettings
     temperature_db: float
@@ -72,13 +74,28 @@ def _temperature(entry: object) -> tuple[SettingEntry, float]:
 
 
 def gradient_objective_settings(registry: QualityTargets, purpose_name: str) -> GradientObjectiveSettings:
-    """讀第一階段那一段：第一階段兩分項照 ``stage_one_settings_from_section``，再讀三個具名鍵。"""
+    """讀第一階段那一段：第一階段兩分項照 ``stage_one_settings_from_section``，再讀四個具名鍵。"""
     return gradient_objective_settings_from_section(registry.stage_one(purpose_name))
 
 
 def gradient_objective_settings_from_section(section: QualityPurpose) -> GradientObjectiveSettings:
     """同一份讀法，從已取出的第一階段那一段讀；權重表的列不是剛好代理那一列就報錯。"""
-    stage_one = stage_one_settings_from_section(section)
+    original = stage_one_settings_from_section(section)
+    scored = section.entry(SCORED_RANGE_KEY)
+    if not isinstance(scored, SettingEntry):
+        raise TypeError(f"{SCORED_RANGE_KEY} 不是量法設定")
+    if scored.unit != "Hz" or not isinstance(scored.value, tuple) or len(scored.value) != 2:
+        raise ValueError(f"{SCORED_RANGE_KEY} 必須是兩個端點的 Hz 範圍")
+    lower, upper = scored.value
+    if not all(math.isfinite(value) for value in scored.value) or not 0.0 < lower < upper:
+        raise ValueError("第三階段計分範圍必須是遞增的有限正頻率範圍")
+    if lower < original.scored_range_hz[0]:
+        raise ValueError("第三階段計分範圍下界不得低於第一階段下界")
+    # 交既有讀法重建兩分項的設定與指紋，不把舊指紋貼在新範圍上；原 section 不變。
+    effective = section.model_copy(update={"setting": tuple(
+        scored.model_copy(update={"key": STAGE_ONE_RANGE_KEY}) if entry.key == STAGE_ONE_RANGE_KEY else entry
+        for entry in section.setting)})
+    stage_one = stage_one_settings_from_section(effective)
     temperature, temperature_db = _temperature(section.entry(TEMPERATURE_KEY))
     proxy = target(section, PROXY_TARGET_KEY, "dB")
     table = weight_table(section, WEIGHTS_KEY)
@@ -90,6 +107,7 @@ def gradient_objective_settings_from_section(section: QualityPurpose) -> Gradien
     canonical = json.dumps({
         "objective_version": GRADIENT_OBJECTIVE_VERSION,
         "stage_one_fingerprint": stage_one.fingerprint,
+        "scored_range": {"key": scored.key, "value": scored.value, "unit": scored.unit, "status": scored.status},
         "temperature": {"value": temperature.value, "unit": temperature.unit, "status": temperature.status},
         "proxy_target": {"value": proxy.value, "unit": proxy.unit, "cost_shape": proxy.cost_shape,
                          "worse_reference": proxy.worse_reference, "status": proxy.status},

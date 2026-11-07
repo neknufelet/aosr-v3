@@ -41,6 +41,7 @@ from aosr.materials.construction_models import ConstantImpedance, SurfaceMateria
 from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants, gradient_objective_from_pressures
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
+from aosr.scoring.stage_one_score import stage_one_score_settings
 
 Record = dict[str, object]
 
@@ -74,7 +75,14 @@ def _endpoint(source: Path) -> Record:
     base = gradient_objective_from_pressures(constants, jnp.asarray(pressures))
     peaks = endpoint.big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
                                frequencies_hz=axis, low_frequency_axis=axis_id, scoring_range_hz=score.stage_one.scored_range_hz)
-    return {"report": json.loads(checked.report.to_json()), "baseline_total": float(base.screening_total).hex(),
+    original = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+    def notes(values: NDArray[np.complex128]) -> endpoint.UnscoredBand:
+        return endpoint.below_scoring_notes(values, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
+                                            frequencies_hz=axis, low_frequency_axis=axis_id,
+                                            stage_one_range_hz=original.scored_range_hz,
+                                            stage_three_lower_hz=score.stage_one.scored_range_hz[0])
+    report = checked.report.model_copy(update={"below_scoring": notes(checked.full_pressure)})
+    return {"report": json.loads(report.to_json()), "baseline_below_scoring": notes(pressures).model_dump(mode="json"), "baseline_total": float(base.screening_total).hex(),
             "baseline_components": [float(base.mean_own_line_ripple_rms_db).hex(),
                                     float(base.mean_seat_robustness_rms_db).hex()],
             "baseline_objective": [float(base.objective_total).hex(), float(base.big_peak_proxy_db).hex(),

@@ -13,6 +13,7 @@
 
 v3（#561 壬一）：梯度目標加了大峰代理項；終點報告、原牆基準與改善各自並列舊合分與新合分、代理（老闆 2026-10-30：
 「第三場一定要同時列舊分數與新分數」）。v2 只准報告讀（``legacy``），終點不收 v3 之前的結果檔。
+v4（#1032）：終點與原牆各加低於第三階段計分下界的觀察，改善另列；v3、v2 僅准報告讀。
 #990：設計照 ``project.json`` 的安裝方式建（貼在原牆上時匯出的面是 ``MountedOnWall``，背後是方案原本那面牆）；
 結果檔剛背是 v4（照舊，終點照收、讀成剛背）、貼在原牆上是 v5（每面帶安裝方式），兩種都要跟帳本重建的整份相等。
 """
@@ -34,13 +35,15 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
+from aosr.config.quality_targets import load_quality_targets
+from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.gradient.cli import keep_signal_handlers
 from aosr.gradient.gpu import Device
 from aosr.physics.fem_full_batch import checked_device_workers
 from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.endpoint import (
-    EndpointReport, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
-    worst_big_peak,
+    EndpointReport, EndpointResult, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
+    UnscoredBand, UnscoredImprovement, below_scoring_improvement, below_scoring_notes, worst_big_peak,
 )
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.gradient.boundary import BoundaryKey
@@ -52,6 +55,8 @@ from aosr.gradient.run import (
 )
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.report_surfaces import validation_content
+from aosr.physics.fem_reduced import ReducedModel
+from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings
 from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.reporting.scheme import Scene, Scheme
 from aosr.scoring.gradient_objective_jax import (
@@ -61,7 +66,8 @@ from aosr.scoring.gradient_objective_jax import (
 
 ENDPOINT_FILE: Final = "endpoint.json"
 EXPORTED_SCHEME_FILE: Final = "scheme-endpoint.json"
-ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v3"
+ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v4"
+PRE_RANGE_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v3"
 # 上一版（梯度目標還沒有大峰代理項）：報告准讀。
 LEGACY_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v2"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -83,6 +89,7 @@ class EndpointBaseline(BaseModel):
     full_objective_total: float | None = None
     full_proxy_db: float | None = None
     full_interior_max_db: float | None = None
+    below_scoring: UnscoredBand | None = None
 
 
 class EndpointImprovement(BaseModel):
@@ -95,6 +102,7 @@ class EndpointImprovement(BaseModel):
     components: tuple[float, float]
     objective_total: float | None = None
     proxy_db: float | None = None
+    below_scoring: dict[str, UnscoredImprovement] | None = None
 
 
 class EndpointSeconds(BaseModel):
@@ -117,7 +125,8 @@ class EndpointRecord(BaseModel):
     """
 
     model_config = _FROZEN
-    format_version: Literal["aosr.material_gradient_endpoint.v3", "aosr.material_gradient_endpoint.v2"]
+    format_version: Literal["aosr.material_gradient_endpoint.v4", "aosr.material_gradient_endpoint.v3",
+                            "aosr.material_gradient_endpoint.v2"]
     gradient_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     result_ledger_sha256: str = Field(pattern=_SHA256)
     result_template_ledger_sha256: str = Field(pattern=_SHA256)
@@ -138,22 +147,31 @@ class EndpointRecord(BaseModel):
 
     @model_validator(mode="after")
     def _version_matches_content(self) -> Self:
-        current = self.format_version == ENDPOINT_VERSION
+        proxy = self.format_version != LEGACY_ENDPOINT_VERSION
         fields = (*self.report.proxy_fields(), self.baseline.full_objective_total, self.baseline.full_proxy_db,
                   self.baseline.full_interior_max_db, self.improvement.objective_total, self.improvement.proxy_db)
-        if any((value is not None) != current for value in fields):
+        if any((value is not None) != proxy for value in fields):
             raise ValueError(f"{ENDPOINT_VERSION} 的報告、基準與改善都要帶新合分與大峰代理；"
                              f"{LEGACY_ENDPOINT_VERSION} 都沒有")
+        notes = (self.report.below_scoring, self.baseline.below_scoring, self.improvement.below_scoring)
+        if any((value is not None) != (self.format_version == ENDPOINT_VERSION) for value in notes):
+            raise ValueError("v4 的報告、原牆與改善都要帶不計分低頻加註；v3、v2 都沒有")
+        if self.report.below_scoring is not None and self.baseline.below_scoring is not None:
+            expected = below_scoring_improvement(self.baseline.below_scoring, self.report.below_scoring)
+            if self.improvement.below_scoring != expected:
+                raise ValueError("不計分低頻改善必須是原牆減終點")
+            if set(self.report.below_scoring.by_speaker) != set(self.report.speaker_ids):
+                raise ValueError("不計分低頻加註必須涵蓋報告每支喇叭")
         return self
 
 
 def read_endpoint(folder: Path, *, legacy: bool = False) -> EndpointRecord:
     """讀 ``endpoint.json``：先看版本，不是這一版就拒收、訊息講明版本（要重跑 endpoint）；
-    ``legacy=True`` 只給報告用，准讀 v2（加大峰代理之前）。"""
+    ``legacy=True`` 只給報告用，准讀 v3（加低頻加註之前）與 v2（加大峰代理之前）。"""
     content = (folder / ENDPOINT_FILE).read_bytes()
     document = json.loads(content)
     version = document.get("format_version") if isinstance(document, dict) else None
-    if version != ENDPOINT_VERSION and not (legacy and version == LEGACY_ENDPOINT_VERSION):
+    if version != ENDPOINT_VERSION and not (legacy and version in (PRE_RANGE_ENDPOINT_VERSION, LEGACY_ENDPOINT_VERSION)):
         raise ValueError(f"{ENDPOINT_FILE} 版本是 {version!r}，這一版只收 {ENDPOINT_VERSION}；要重跑 endpoint")
     return EndpointRecord.model_validate_json(content)
 
@@ -207,7 +225,28 @@ def _improvement(baseline: EndpointBaseline, report: EndpointReport, base: Objec
         components=(baseline.full_components[0] - report.full_components[0],
                     baseline.full_components[1] - report.full_components[1]),
         objective_total=base.objective_total - report.full_objective_total,
-        proxy_db=base.components[2] - report.full_proxy_db)
+        proxy_db=base.components[2] - report.full_proxy_db,
+        below_scoring=(None if baseline.below_scoring is None or report.below_scoring is None
+                       else below_scoring_improvement(baseline.below_scoring, report.below_scoring)))
+
+
+def _annotate_endpoint(checked: EndpointResult, baseline: EndpointBaseline, pressures: NDArray[np.complex128],
+                       model: ReducedModel, scheme: Scheme, objective: GradientObjectiveSettings,
+                       ) -> tuple[EndpointReport, EndpointBaseline]:
+    """把兩份已算好的完整聲壓各交純加註函式一次，不再解模型。"""
+    axis_id = scheme.scene.low_frequency_axis
+    if axis_id is None:
+        raise ValueError("終點加註需要方案宣告的低頻軸")
+    axis = tuple(float(value) for value in model.frequencies_hz)
+    original = stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), objective.stage_one.purpose)
+    def notes(values: NDArray[np.complex128]) -> UnscoredBand:
+        return below_scoring_notes(values, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
+                                   frequencies_hz=axis, low_frequency_axis=axis_id,
+                                   stage_one_range_hz=original.scored_range_hz,
+                                   stage_three_lower_hz=objective.stage_one.scored_range_hz[0])
+    report = checked.report.model_copy(update={"below_scoring": notes(checked.full_pressure)})
+    baseline = baseline.model_copy(update={"below_scoring": notes(pressures)})
+    return report, baseline
 
 
 def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> EndpointRecord:
@@ -259,7 +298,7 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
                       scoring_range_hz=objective.stage_one.scored_range_hz)
     baseline, base = _full_baseline(constants, pressures, peaks)
     baseline_seconds = time.perf_counter() - clock
-    report = checked.report
+    report, baseline = _annotate_endpoint(checked, baseline, pressures, model, scheme, objective)
     improvement = _improvement(baseline, report, base)
     materials = materials_from_surfaces(designs, theta, settings)
     exported = exported_scheme(scheme, scene_with_materials(scheme.scene, materials), project.gradient_id)

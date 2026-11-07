@@ -400,17 +400,17 @@ def test_headers_bind_expanded_caps_and_preserve_legacy_bytes(tmp_path: Path) ->
         assert ("max_depths" in template.model_dump()) == bool(caps)
     with pytest.raises(ValueError, match="標頭.*對不上"):
         ledger.read_ledger(tmp_path / "plain.jsonl", expected_header=header)
-    # 歷史控制組只有序列化與設定指紋，沒有線性代數或 XLA 的固定答案。
+    # 歷史控制組只有序列化與設定指紋；#1032 僅重釘目標常數指紋，沒有線性代數或 XLA 的固定答案。
     legacy = legacy_family_settings(settings)
     project = _project()
     kept = {wall: ConstantImpedance(impedance_pa_s_m=12348.0 + i) for i, wall in enumerate(Wall.all())}
     designs = run.designs_for(project.presets, legacy, kept=kept)
     header = ledger.header_for(model, designs, legacy, objective_constants=constants)
     ledger.write_ledger(tmp_path / "legacy.jsonl", header, ())
-    assert hashlib.sha256((tmp_path / "legacy.jsonl").read_bytes()).hexdigest() == "a417256b0f40af5ab6703348c833bfb468d1e19593a3079061df943a849c2fe5"
+    assert hashlib.sha256((tmp_path / "legacy.jsonl").read_bytes()).hexdigest() == "0c252b60fb6852e47dc200063192bfde70af8ca2a163814dee20dbf1cbfa2d26"
     template = run.template_header_for(header, legacy, kept, base_ledger_sha256="e" * 64)
     templates.create_template_ledger(tmp_path / "legacy-templates.jsonl", template)
-    assert hashlib.sha256((tmp_path / "legacy-templates.jsonl").read_bytes()).hexdigest() == "304b40fe88bb01f381ebce0962f3c0c3cf544151bb63f018769cf0bfe21ece3c"
+    assert hashlib.sha256((tmp_path / "legacy-templates.jsonl").read_bytes()).hexdigest() == "b62a9e6f05ea67315c28b4fdcb9e716369e5497aa2e150427587857eb666d15a"
     current_designs = run.designs_for(project.presets, settings, kept=kept)
     current = ledger.header_for(model, current_designs, settings, objective_constants=constants)
     assert current.model_dump() == {**header.model_dump(), "settings_fingerprint": settings.fingerprint}
@@ -418,7 +418,7 @@ def test_headers_bind_expanded_caps_and_preserve_legacy_bytes(tmp_path: Path) ->
     assert current_template.model_dump() == {**template.model_dump(), "settings_fingerprint": settings.full_fingerprint}
     ledger.write_ledger(tmp_path / "current.jsonl", current, ())
     templates.create_template_ledger(tmp_path / "current-templates.jsonl", current_template)
-    assert hashlib.sha256((tmp_path / "current.jsonl").read_bytes()).hexdigest() == "3411307712a67d9977692db67fd607a56d825727c7048bc94b117db189891f21"
-    assert hashlib.sha256((tmp_path / "current-templates.jsonl").read_bytes()).hexdigest() == "e97193100ab146a6f747045e022e21c6e89e9a3289d7c7dbf51f11dc8bbc3055"
+    assert hashlib.sha256((tmp_path / "current.jsonl").read_bytes()).hexdigest() == "1e8c6edf1569caa3e3c4e8e8bb310d0d59c7f194216689f35a0c9b6160d0c4df"
+    assert hashlib.sha256((tmp_path / "current-templates.jsonl").read_bytes()).hexdigest() == "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
     run.write_json_atomic(tmp_path / "result.json", _rigid_result(current, current_designs))
     assert hashlib.sha256((tmp_path / "result.json").read_bytes()).hexdigest() == "3ab492f75fd0110baca094025e12070f68264a8f6fa195b0a744473270121bb4"
