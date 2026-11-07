@@ -80,6 +80,8 @@ dependencies = [
     # starlette：GUI 第一版（#516，本機網頁 #517 A）的伺服器框架——只收輸入、下指令、回 JSON 與靜態頁，
     # 計算與評分一律走引擎。產品執行時直接 import，放正式依賴；版本釘死避免 API 漂移。
     "starlette==1.7.0",
+    # threadpoolctl：替身建模與留出驗證的稠密代數段臨時放開 BLAS 緒數（#1036），其他段照舊單緒；產品執行時直接 import，放正式依賴、釘版本。
+    "threadpoolctl==3.6.0",
     # uvicorn：跑 GUI 那支本機伺服器的 ASGI 執行器（只綁 127.0.0.1）；GUI 啟動時直接用，放正式依賴、釘版本。
     "uvicorn==0.54.0",
 ]
