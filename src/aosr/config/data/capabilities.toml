@@ -407,8 +407,7 @@ note = "V1 不支援逐頻阻抗；頻率範圍只供定位，不宣稱已驗。
 [[entry]]
 name = "material_gradient_endpoint_gpu"
 module = "aosr.gradient.endpoint_run"
-not_modeled = ["非長方形房間", "多顯卡或多行程完整解", "顯卡建替身"]
-note = "#1030 終點可選 gpu；CPU 預設不變。cuDSS complex64 分解搭配 CPU complex128 殘差修正；不收斂直接拒收，不退回 CPU。"
+note = "#1030 終點可選 gpu；CPU 預設不變。cuDSS complex64 分解搭配 CPU complex128 殘差修正；不收斂直接拒收，不退回 CPU。只單張顯卡、單工人；建替身不走顯卡（#1031）。"
 
 [[entry.capability]]
 room = "shoebox"

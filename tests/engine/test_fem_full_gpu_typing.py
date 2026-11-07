@@ -35,10 +35,13 @@ def test_nvmath_factory_rejects_invalid_calls_with_mypy(tmp_path: Path) -> None:
          "options='bad_options'", "[arg-type]"),
         ("DirectSolverMatrixType.SYMMETRIC", "DirectSolverMatrixType.SYMETRIC", "[attr-defined]"),
     ]
-    for original, replacement, diagnostic in mistakes:
+    # 每個反例各用一個新檔名：同一路徑在同一秒內覆寫，mypy 快取可能沿用正例結果而假紅。
+    for index, (original, replacement, diagnostic) in enumerate(mistakes):
         assert original in correct
-        probe.write_text(replacement.join(correct.split(original)), encoding="utf-8")
-        wrong = subprocess.run(command, cwd=REPO, capture_output=True, text=True, check=False)
+        wrong_probe = tmp_path / f"nvmath_probe_wrong_{index}.py"
+        wrong_probe.write_text(replacement.join(correct.split(original)), encoding="utf-8")
+        wrong = subprocess.run([*command[:-1], str(wrong_probe)], cwd=REPO, capture_output=True, text=True,
+                               check=False)
         output = wrong.stdout + wrong.stderr
         assert wrong.returncode == 1, f"{replacement}: mypy accepted an invalid call\n{output}"
         assert diagnostic in output, output
