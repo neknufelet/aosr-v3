@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Protocol, cast
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,7 +35,10 @@ FactorFactory = Callable[[csr_matrix[np.complex64], NDArray[np.complex64]], Sing
 
 def nvmath_factor(a: csr_matrix[np.complex64], b: NDArray[np.complex64]) -> SinglePrecisionFactor:
     """只有選 GPU 並真的解第一題才載入選用依賴；複數對稱不是 Hermitian（共軛對稱）。"""
-    import nvmath.sparse.advanced as advanced
+    if TYPE_CHECKING:
+        advanced: ModuleType
+    else:
+        import nvmath.sparse.advanced as advanced
 
     return cast(SinglePrecisionFactor, advanced.DirectSolver(a, b, options=advanced.DirectSolverOptions(
         sparse_system_type=advanced.DirectSolverMatrixType.SYMMETRIC)))
