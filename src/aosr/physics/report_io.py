@@ -102,7 +102,7 @@ from aosr.physics.report_source import (
 )
 from aosr.physics.source_directivity import speaker_axis
 from aosr.physics.report_surfaces import (
-    ZonesByWall, exclusive_wall_schema, normalized_surfaces, validate_surface_partition, whole_wall_materials,
+    RectangleZone, ZonesByWall, exclusive_wall_schema, normalized_surfaces, validate_surface_partition, whole_wall_materials,
 )
 from aosr.physics.report_validation import (
     FieldValueError, _checked_number, _checked_mapping, _number_is_finite,
@@ -712,6 +712,7 @@ class SolverInputs(NamedTuple):
     low_frequency_axis: LowFrequencyAxis
     materials_by_wall: dict[Wall, SurfaceMaterial]
     furniture: tuple[AbsoluteFurniture, ...] | None = None
+    surface_zones_by_wall: ZonesByWall | None = None
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
@@ -726,7 +727,10 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     方案、搜尋與物理命令列各自守其入口的家具範圍。
     """
     zones, fixed = inputs.surface_zones_by_wall, inputs.impedance_pa_s_per_m_by_wall
-    if zones is not None:
+    rectangles = zones is not None and any(isinstance(cell, RectangleZone) for cells in zones.values() for cell in cells)
+    if rectangles:
+        materials = {}
+    elif zones is not None:
         by_name = whole_wall_materials(zones)
         materials = {wall: by_name[wall.wall_name()] for wall in Wall.all()}
     else:
@@ -755,6 +759,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
         low_frequency_axis=inputs.low_frequency_axis,
         materials_by_wall=materials,
         furniture=inputs.furniture,
+        surface_zones_by_wall=zones if rectangles else None,
     )
 
 

@@ -58,8 +58,7 @@ from aosr.physics.wall_reflections import WallReflectionSources
 from aosr.physics.furniture_paths import direct_path_blockers, filter_room_paths, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_pressure_with_directivity
 from aosr.physics.report_furniture import AbsoluteFurniture
-from aosr.physics.report_surfaces import RectangleZonesUnsupported
-from aosr.physics.wall_surfaces import ZoneAbsorption, impedance_absorption_rows
+from aosr.physics.wall_surfaces import ZoneAbsorption, impedance_absorption_rows, zoned_wall_surface_response
 from aosr.physics.late_energy import (
     LateEnergyInputs,
     LateEnergyOrderBand,
@@ -550,7 +549,37 @@ def _source_normal_rows(
         raise ValueError("反射來源的頻率軸與幾何路不同")
     if sources.fixed_materials.rho_c != rho_c_pa_s_per_m:
         raise ValueError("反射來源的 rho_c 與幾何路不同：反射與房間散射會用到兩組空氣")
-    return sources.normal_rows()
+    return {} if sources.has_rectangle_zones else sources.normal_rows()
+
+
+def _partition_scattering(
+    room: Room, sources: WallReflectionSources, scattering: dict[str, tuple[float, ...]],
+) -> tuple[float, ...]:
+    """#562：原 _scattering_at 算式，以面積×垂直入射反射能量逐區加權。"""
+    if sources.room != room:
+        raise ValueError("分區反射來源的房間與幾何路不同")
+    whole, zones = sources.partition_normal_rows()
+    areas = _wall_areas(room)
+    entries = []
+    for wall in Wall.all():
+        name = wall.wall_name()
+        if wall in zones:
+            for zone in (sources.rectangle_zones_by_wall or {})[wall]:
+                entries.append((name, (zone.u_m[1]-zone.u_m[0])*(zone.v_m[1]-zone.v_m[0]), zones[wall][zone.id]))
+        else:
+            z = whole[wall]
+            assert z is not None
+            entries.append((name, areas[name], z))
+    result = []
+    rho_c = sources.fixed_materials.rho_c
+    for i in range(len(sources.fixed_materials.frequencies_hz)):
+        weights = tuple(area*abs(((z if isinstance(z, float) else z[i])-rho_c)/
+            ((z if isinstance(z, float) else z[i])+rho_c))**2 for _name, area, z in entries)
+        values = tuple(scattering[name][i] for name, _area, _z in entries)
+        denominator = sum(weights)
+        result.append(0.0 if denominator == 0.0 else values[0] if all(s == values[0] for s in values)
+                      else sum(w*s for w, s in zip(weights, values, strict=True))/denominator)
+    return tuple(result)
 
 def solve_geometric_early_lane(
     *,
@@ -575,7 +604,8 @@ def solve_geometric_early_lane(
     給了 ``reflection_sources`` 時，路徑反射與房間散射的阻抗都從它拿，``impedance_by_wall`` 只過格式檢查；
     它的頻率軸與 ρc 要跟這一路相同，不同就丟 ``ValueError``。
     """
-    impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
+    impedance_rows = (_impedance_rows(impedance_by_wall, frequencies_hz)
+                      if reflection_sources is None or not reflection_sources.has_rectangle_zones else {})
     scattering_rows = _scattering_rows(scattering_by_wall or {}, frequencies_hz)
     materials = (Materials(rho_c_pa_s_per_m, frequencies_hz, impedance_rows)
                  if reflection_sources is None else None)
@@ -599,13 +629,14 @@ def solve_geometric_early_lane(
             source=source, aim=aim, params=curve,
         )
     path_totals, pressure_sums = totals_and_pressure_sums_from_paths(paths)
-    scattering = _room_scattering(
+    scattering = (_partition_scattering(room, reflection_sources, scattering_rows)
+        if reflection_sources is not None and reflection_sources.has_rectangle_zones else _room_scattering(
         room,
         rho_c_pa_s_per_m,
         impedance_rows,
         scattering_rows,
         frequencies_hz,
-    )
+    ))
     reflected_pressure = _order_scaled_reflected_pressure(
         pressure_sums.reflected_pressure_by_order,
         scattering,
@@ -653,14 +684,12 @@ def solve_geometric_lane(
     ``REFLECTION_ORDER_K``。可傳入同房間、同細軸、同 K 已算好的 ``late_result`` 共用；
     不給時以 absorption_by_wall（逐面吸音率）求解；舊阻抗呼叫由牆面響應換算。
     """
-    if absorption_by_zone:
-        raise RectangleZonesUnsupported(next(iter(absorption_by_zone)))
-    impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
+    if absorption_by_zone and (reflection_sources is None or not reflection_sources.has_rectangle_zones):
+        raise ValueError("分區吸音率必須同時提供分區反射來源，不能用整面阻抗代替早期反射")
+    impedance_rows = (_impedance_rows(impedance_by_wall, frequencies_hz)
+                      if reflection_sources is None or not reflection_sources.has_rectangle_zones else {})
     early = solve_geometric_early_lane(
-        source_model=source_model,
-        room=room,
-        source=source,
-        receiver=receiver,
+        source_model=source_model, room=room, source=source, receiver=receiver,
         sound_speed_m_s=sound_speed_m_s,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         frequencies_hz=frequencies_hz,
@@ -670,12 +699,14 @@ def solve_geometric_lane(
         furniture=furniture, reflection_sources=reflection_sources,
     )
     if late_result is None:
+        absorption_by_wall, absorption_by_zone = _late_absorption_rows(room, frequencies_hz,
+            sound_speed_m_s, reflection_sources, absorption_by_wall, absorption_by_zone, impedance_rows, rho_c_pa_s_per_m)
         late_result = _solve_geometric_late_energy_rows(
             room=room,
             rho_c_pa_s_per_m=rho_c_pa_s_per_m,
             frequencies_hz=frequencies_hz,
-            absorption_by_wall=(absorption_by_wall if absorption_by_wall is not None else
-                                impedance_absorption_rows(impedance_rows, rho_c_pa_s_per_m)),
+            absorption_by_wall=absorption_by_wall,
+            absorption_by_zone=absorption_by_zone,
             reflection_order_k=reflection_order_k,
         )
     if late_result.max_order != reflection_order_k or tuple(
@@ -704,6 +735,22 @@ def solve_geometric_lane(
         source_model=source_model,
         furniture=early.furniture,
     )
+
+
+def _late_absorption_rows(
+    room: Room, frequencies_hz: tuple[float, ...], sound_speed_m_s: float,
+    reflection_sources: WallReflectionSources | None, absorption_by_wall: Mapping[str, tuple[float, ...]] | None,
+    absorption_by_zone: ZoneAbsorption | None, impedance_rows: Mapping[str, tuple[complex, ...]], rho_c: float,
+) -> tuple[Mapping[str, tuple[float, ...]], ZoneAbsorption | None]:
+    """未提供晚期列時，分區來源用逐區響應；原整面入口仍沿原阻抗換算。"""
+    if absorption_by_wall is None and reflection_sources is not None and reflection_sources.has_rectangle_zones:
+        surfaces = zoned_wall_surface_response(room, reflection_sources.surface_partition(), frequencies_hz,
+            density_kg_m3=reflection_sources.density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+        absorption_by_wall = surfaces.named_rows(frequencies_hz)
+        if absorption_by_zone is None:
+            absorption_by_zone = surfaces.named_zone_rows(frequencies_hz)
+    return (absorption_by_wall if absorption_by_wall is not None else impedance_absorption_rows(impedance_rows, rho_c),
+            absorption_by_zone)
 
 
 def solve_geometric_late_energy(

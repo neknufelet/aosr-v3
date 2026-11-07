@@ -70,7 +70,7 @@ class RectangleZonesUnsupported(ValueError):
     """格式已收下矩形，這條計算或顯示路徑尚未支援。"""
 
     def __init__(self, wall: str) -> None:
-        super().__init__(f"牆面 {wall}：這一段還不支援矩形分區（#561 之後幾步）")
+        super().__init__(f"牆面 {wall}：分區還不支援這一頁／這一路")
 
 
 def whole_wall_materials(zones_by_wall: Mapping[str, Sequence[SurfaceZone]]) -> dict[str, SurfaceMaterial]:
@@ -288,14 +288,17 @@ def exclusive_wall_schema(schema: JsonDict) -> None:
                        {"required": [ZONE_WALL_FIELD], "not": {"required": [OLD_WALL_FIELD]}}]
 
 
-def report_materials_code(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> str:
+def report_materials_code(materials_by_wall: Mapping[Wall, SurfaceMaterial],
+                          surface_zones_by_wall: ZonesByWall | None = None) -> str:
     """查表與未查表的報表標籤使用同一個材料分類。"""
+    materials = (tuple(z.material for cells in surface_zones_by_wall.values() for z in cells)
+                 if surface_zones_by_wall else tuple(materials_by_wall.values()))
     # 貼在原牆上的構造（#990）照它的原牆分類：原牆是實測表就算實測表那一類，其餘算整面構造。
     if any(isinstance(material, MeasuredImpedance) or isinstance(material, MountedOnWall) and isinstance(material.wall, MeasuredImpedance)
-           for material in materials_by_wall.values()):
+           for material in materials):
         return "measured_impedance_by_wall"
     return ("real_frequency_independent_impedance" if all(isinstance(material, ConstantImpedance)
-            for material in materials_by_wall.values()) else "assembly_by_wall")
+            for material in materials) else "assembly_by_wall")
 
 
 def _zone_error_message(error: Mapping[str, object]) -> str:

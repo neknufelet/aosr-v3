@@ -362,3 +362,25 @@ def zoned_wall_surface_response(
     effective = equivalent_absorption_rows(room, base.named_rows(frequencies_hz), rectangles)
     return ZonedWallSurfaceResponse(WallSurfaceResponse(frequencies_hz,
         {Wall.from_name(name): row for name, row in effective.items()}, notes), rectangles)
+
+
+def zoned_wall_normal_impedances(
+    room: Room, zones_by_wall: Mapping[str, Sequence[SurfaceZone]], frequencies_hz: tuple[float, ...],
+    *, density_kg_m3: float, sound_speed_m_s: float,
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
+) -> tuple[dict[Wall, float | None | tuple[complex, ...]], dict[Wall, dict[str, float | tuple[complex, ...]]]]:
+    """逐區沿用垂直入射求值；分區牆的整面格給 None，絕不以平均阻抗代替分區。"""
+    validate_surface_partition(room, {name: tuple(cells) for name, cells in zones_by_wall.items()})
+    base = wall_normal_impedances({Wall.from_name(name): cells[0].material for name, cells in zones_by_wall.items()},
+        frequencies_hz, density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s, notes_by_wall=notes_by_wall)
+    rectangles: dict[Wall, dict[str, float | tuple[complex, ...]]] = {}
+    for name, cells in zones_by_wall.items():
+        wall = Wall.from_name(name)
+        for index, cell in enumerate(cells):
+            if isinstance(cell, RectangleZone):
+                row = base[wall] if index == 0 else wall_normal_impedances(
+                    dict.fromkeys(Wall.all(), cell.material), frequencies_hz, density_kg_m3=density_kg_m3,
+                    sound_speed_m_s=sound_speed_m_s)[wall]
+                assert row is not None
+                rectangles.setdefault(wall, {})[cell.id] = row
+    return {wall: None if wall in rectangles else row for wall, row in base.items()}, rectangles

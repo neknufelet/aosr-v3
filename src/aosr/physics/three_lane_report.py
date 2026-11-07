@@ -72,7 +72,7 @@ from aosr.physics.late_decay import (
     solve_late_decay_t20,
 )
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
-from aosr.physics.report_surfaces import report_materials_code
+from aosr.physics.report_surfaces import ZonesByWall, report_materials_code
 from aosr.physics.report_source import SourceModelSpec
 from aosr.physics.three_lane_report_materials import (
     _wall_impedances as _wall_impedances,
@@ -673,12 +673,13 @@ def _report_result(
     )
 
 
-def _unchecked_capability(materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None) -> ReportCapability:
+def _unchecked_capability(materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+                          surface_zones_by_wall: ZonesByWall | None = None) -> ReportCapability:
     """沒有能力表可查時的回報：record 留 None，不假裝 validated、也不自創第四個狀態。"""
     return ReportCapability(
         entry="three_lane_report",
         room="shoebox",
-        materials=report_materials_code(materials_by_wall or {}),
+        materials=report_materials_code(materials_by_wall or {}, surface_zones_by_wall),
         record=None,
     )
 
@@ -707,6 +708,7 @@ def solve_three_lane_report(
     low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
     furniture: tuple[AbsoluteFurniture, ...] | None = None,
     contact_rel: float | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> ThreeLaneReport:
     """計算一個接收點的三路細軸結果與七個八度帶報表。
 
@@ -735,7 +737,7 @@ def solve_three_lane_report(
         reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
         batch_fem=False,
-        furniture=furniture, contact_rel=contact_rel,
+        furniture=furniture, contact_rel=contact_rel, surface_zones_by_wall=surface_zones_by_wall,
     )[("source", "receiver")]
 
 
@@ -756,6 +758,7 @@ def solve_three_lane_reports(
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
     furniture: tuple[AbsoluteFurniture, ...] | None = None,
     contact_rel: float | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> dict[tuple[str, str], ThreeLaneReport]:
     """同一候選共用房間、有限元素分解與晚期混響，回傳每組位置的完整報表。"""
     from aosr.physics.three_lane_report_batch import solve_reports
@@ -774,5 +777,5 @@ def solve_three_lane_reports(
         low_frequency_axis=low_frequency_axis,
         batch_fem=True,
         fem_energies=fem_energies,
-        furniture=furniture, contact_rel=contact_rel,
+        furniture=furniture, contact_rel=contact_rel, surface_zones_by_wall=surface_zones_by_wall,
     )

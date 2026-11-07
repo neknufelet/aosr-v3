@@ -246,16 +246,17 @@ def test_path_table_uses_partitioned_reflection_products() -> None:
 
 @pytest.mark.parametrize("reader", ["_solve_geometric_report_lane", "_solve_dense_geometric_report_lane",
                                     "_solve_both_geometric_report_lanes"])
-def test_report_geometry_readers_reject_rectangle_zones(reader: str) -> None:
-    """報表幾何讀者尚會合成整房散射；明給分區必須是專用拒收，不能靜默忽略。"""
+def test_report_geometry_readers_accept_rectangle_zones(reader: str) -> None:
+    """#562 三種幾何讀者都接逐區反射與房間散射，不可只解晚期。"""
     from aosr.physics import three_lane_report_geometry
     zones = _whole()
     zones["floor"] = _grid(6., 4., 2., 2.)
     solve = getattr(three_lane_report_geometry, reader)
-    with pytest.raises(RectangleZonesUnsupported):
-        solve(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER, scattering_by_wall=None,
+    actual = solve(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER, scattering_by_wall=None,
             rho_c_pa_s_per_m=1.19*347., sound_speed_m_s=347., density_kg_m3=1.19, reflection_order_k=3,
             materials_by_wall={}, surface_zones_by_wall=zones)
+    results = actual if isinstance(actual, tuple) else (actual,)
+    assert all(result.reflected_energy and result.scattering for result in results)
 
 
 def test_partition_sources_validate_room_and_reject_ambiguous_materials() -> None:
@@ -274,20 +275,20 @@ def test_partition_sources_validate_room_and_reject_ambiguous_materials() -> Non
 
 
 @pytest.mark.parametrize("lane", [geometric_lane.solve_geometric_early_lane, geometric_lane.solve_geometric_lane])
-def test_scattering_lanes_reject_rectangle_zones(lane: object) -> None:
-    """合成房間散射尚無分區定義，細軸與密軸的物理入口均須明確拒收。"""
+def test_scattering_lanes_accept_rectangle_zones(lane: object) -> None:
+    """#562 細軸與密軸均沿分區反射權重合成房間散射。"""
     zones = _whole()
     zones["floor"] = _grid(6., 4., 2., 2.)
     assert callable(lane)
-    with pytest.raises(RectangleZonesUnsupported):
-        lane(room=ROOM, source=SOURCE, receiver=RECEIVER, source_model=MODEL, sound_speed_m_s=347.,
+    actual = lane(room=ROOM, source=SOURCE, receiver=RECEIVER, source_model=MODEL, sound_speed_m_s=347.,
             rho_c_pa_s_per_m=1.19*347., frequencies_hz=AXIS,
             impedance_by_wall={w.wall_name(): 900. for w in Wall.all()}, reflection_sources=_sources(zones))
+    assert actual.reflected_energy and actual.scattering
 
 
 @pytest.mark.parametrize("downstream", ["screen", "window", "solver"])
-def test_report_downstreams_reject_rectangle_zones(downstream: str) -> None:
-    """牆對留存／顫動回聲、補算窗與三路總入口即使傳整牆覆寫也不得忽略分區。"""
+def test_report_downstreams_accept_rectangle_zones(downstream: str) -> None:
+    """#562 牆對、補算窗與總入口接分區；明給舊整面材料也不能覆蓋分區。"""
     from aosr.physics.reflection_screen import build_reflection_screen
     from aosr.physics.reflection_window import build_reflection_window
     from aosr.physics.report_io import ReportInput, solver_inputs
@@ -296,11 +297,12 @@ def test_report_downstreams_reject_rectangle_zones(downstream: str) -> None:
     inputs = ReportInput.model_validate({"room_m": ROOM, "source_m": SOURCE, "receiver_m": RECEIVER,
         "source_model": {"kind": "omnidirectional"}, "sound_speed_m_s": 347., "density_kg_m3": 1.19,
         "surface_zones_by_wall": zones, "reflection_order_k": 3})
-    with pytest.raises(RectangleZonesUnsupported):
-        if downstream == "screen":
-            build_reflection_screen(inputs, AXIS, materials_by_wall=materials(False))
-        elif downstream == "window":
-            build_reflection_window(inputs, frequencies_hz=AXIS, scattering_coefficient=(.21, .21),
-                window_s=.025, materials_by_wall=materials(False))
-        else:
-            solver_inputs(inputs)
+    if downstream == "screen":
+        assert build_reflection_screen(inputs, AXIS, materials_by_wall=materials(False)).pairs
+    elif downstream == "window":
+        result = build_reflection_window(inputs, frequencies_hz=AXIS, scattering_coefficient=(.21, .21),
+            window_s=.025, materials_by_wall=materials(False))
+        assert result.computed_order_k >= inputs.reflection_order_k
+    else:
+        solved = solver_inputs(inputs)
+        assert solved.surface_zones_by_wall == zones and solved.materials_by_wall == {}

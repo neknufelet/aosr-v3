@@ -1,7 +1,7 @@
 """錨定分析、一維逐源解與逐純量能量必須守住舊演算法逐位答案。"""
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pytest
@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 
 from aosr import runtime
-from aosr.geometry.shoebox import Room
-from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
+from aosr.geometry.shoebox import Room, Wall
+from aosr.geometry.shoebox_mesh import MeshRectangle, ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics import fem_helmholtz as fem
 from tests.engine import _fem_shared_cases as cases
 from tests.engine.test_three_lane_reports_batch import (
@@ -42,7 +42,9 @@ def _track_discretization(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     calls: list[str] = []
 
     def build(room: Room, *, max_frequency_hz: float, elements_per_wavelength: int,
-              sound_speed_m_s: float, random_seed: int) -> ShoeboxMesh:
+              sound_speed_m_s: float, random_seed: int,
+              partitions: Mapping[Wall, tuple[MeshRectangle, ...]] | None = None) -> ShoeboxMesh:
+        assert partitions is None
         calls.append("mesh")
         return mesh(room, max_frequency_hz=max_frequency_hz,
                     elements_per_wavelength=elements_per_wavelength,

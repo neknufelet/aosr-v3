@@ -264,8 +264,8 @@ def test_gradient_refuses_mismatched_patch_list(zoned_model: reduced.ReducedMode
         chain_objective(zoned_model, (), _objective_constants(zoned_model), air=air, ranges=ranges, frequencies=AXIS)
 
 
-def test_scheme_exports_partitioned_operators_without_relaxing_solver_inputs() -> None:
-    from aosr.physics import report_io, report_surfaces
+def test_scheme_exports_partitioned_operators_and_preserves_solver_zones() -> None:
+    from aosr.physics import report_io
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.reporting.scheme import Scheme
     from tests.engine._directivity import DIRECTIVITY
@@ -283,8 +283,9 @@ def test_scheme_exports_partitioned_operators_without_relaxing_solver_inputs() -
     second = export_operators(swapped, capabilities=CAPABILITIES, directivity=DIRECTIVITY, max_frequency_hz=40)
     assert second.patch_keys[:5] == (first.patch_keys[0], *reversed(first.patch_keys[1:5]))
     inputs = report_io.load_input_document(pair(scheme), CAPABILITIES, DIRECTIVITY)
-    with pytest.raises(report_surfaces.RectangleZonesUnsupported):
-        report_io.solver_inputs(inputs)
+    solved = report_io.solver_inputs(inputs)
+    assert solved.surface_zones_by_wall == scheme.scene.surface_zones_by_wall
+    assert solved.materials_by_wall == {}
 
 
 @pytest.mark.parametrize("entry", ["scheme", "ledger", "full", "endpoint"])

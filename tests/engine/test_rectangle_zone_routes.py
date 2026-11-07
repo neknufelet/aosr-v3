@@ -1,5 +1,4 @@
 """矩形方案的未支援路徑明確拒收；只考 Python，不開瀏覽器。"""
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -12,7 +11,6 @@ from aosr.physics import report_io, report_surfaces
 from aosr.physics.report_measured import measured_seams
 from aosr.physics.report_measured_text import construction_note_lines, measured_text
 from aosr.reporting.modal_lookup import key_from_scheme, scheme_scope_reason
-from aosr.reporting.pipeline import run_scheme
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.stage_one_result import check_stage_one_prerequisites
 from tests.engine._directivity import DIRECTIVITY
@@ -20,17 +18,13 @@ from tests.engine._furniture_cases import CAPABILITIES, pair
 from tests.engine._surface_zone_cases import rectangle_document
 
 
-@pytest.mark.parametrize("entry", ["scheme", "gradient-endpoint", "web-load", "seams", "text", "notes"])
+@pytest.mark.parametrize("entry", ["gradient-endpoint", "web-load", "seams", "text", "notes"])
 def test_calculating_and_display_entries_refuse_rectangles(tmp_path: Path, entry: str) -> None:
     """抓任一路靜默取第一區；終點換材料也不能把分區覆蓋掉。"""
     scheme = Scheme.model_validate(rectangle_document())
     inputs = report_io.load_input_document(pair(scheme), CAPABILITIES, DIRECTIVITY)
-    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match=r"ceiling.*這一段還不支援矩形分區（#561 之後幾步）"):
-        if entry == "scheme":
-            run_scheme(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY,
-                       quality_targets_path=Path("src/aosr/config/data/quality_targets.toml"), engine_commit="unused",
-                       program_fingerprint="unused", physics_identity="unused", run_date=date(2026, 11, 4))
-        elif entry == "gradient-endpoint":
+    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match=r"ceiling.*分區還不支援這一頁／這一路"):
+        if entry == "gradient-endpoint":
             endpoint.scene_with_materials(scheme.scene, {wall: ConstantImpedance(impedance_pa_s_m=1000.0) for wall in Wall.all()})
         elif entry == "web-load":
             checked_scheme(rectangle_document())
@@ -58,7 +52,7 @@ def test_web_python_load_refuses_rectangle_file(tmp_path: Path) -> None:
 
     path = tmp_path / "rectangles.json"
     path.write_text(Scheme.model_validate(rectangle_document()).model_dump_json())
-    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match="ceiling.*這一段還不支援矩形分區"):
+    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match="ceiling.*分區還不支援這一頁／這一路"):
         _read_scheme(path)
 
 
@@ -66,7 +60,7 @@ def test_search_refuses_rectangles_before_creating_folder(tmp_path: Path) -> Non
     """搜尋建立時就拒收，不能先寫成等待計算的候選。"""
     from tests.engine.test_scheme_furniture import _store
 
-    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match="ceiling.*這一段還不支援矩形分區"):
+    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match="ceiling.*分區還不支援這一頁／這一路"):
         _store(tmp_path / "search", Scheme.model_validate(rectangle_document()))
     assert not (tmp_path / "search").exists()
 
@@ -81,9 +75,9 @@ def test_web_form_python_entry_refuses_rectangles(entry: str) -> None:
     if entry == "validate":
         problems = web_scheme_problems(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
         assert len(problems) == 1
-        assert problems[0].message == "牆面 ceiling：這一段還不支援矩形分區（#561 之後幾步）"
+        assert "分區還不支援這一頁／這一路" in problems[0].message
     else:
-        with pytest.raises(InputShapeError, match="這一段還不支援矩形分區（#561 之後幾步）"):
+        with pytest.raises(InputShapeError, match="分區還不支援這一頁／這一路"):
             if entry == "preview":
                 input_preview(document, CAPABILITIES, DIRECTIVITY)
             else:
@@ -106,7 +100,7 @@ async def _web_requests(tmp_path: Path) -> None:
                      await client.put("/api/schemes/new", json=document | {"scheme_id": "new"})]
         for response in responses:
             assert response.status_code in (400, 422), response.text
-            assert "這一段還不支援矩形分區（#561 之後幾步）" in response.text, response.text
+            assert "分區還不支援這一頁／這一路" in response.text, response.text
             assert "ceiling" in response.text or "天花" in response.text
     assert not (tmp_path / "schemes" / "new.json").exists()
 

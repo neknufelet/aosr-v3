@@ -528,7 +528,9 @@ prefix = "tests.engine."
 # 10660→10705：#1038 完整模型指紋、小檔與抽查 30 題，沿用開始與補指紋 4 題，
 # 沿用記錄完整性與真實投影起點 10 題，終點入口指紋拒收 1 題；未移除。
 # 單行程 collect-only 引擎籃實數 10705；相關整檔的局部跑不冒充完整全套收據。
-collected_floor = 10705
+# #562 第1段：新增分區正式三路報表 9 題、分片與同材有限元素 3 題；原拒收 scheme 參數一格由新入口題覆蓋（−1）。
+# SolverInputs 新欄讓逐格綁定參數化多一題（＋1）；淨增 12，單行程 collect-only 逐檔加總實數 10717，未跑全套。
+collected_floor = 10717
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

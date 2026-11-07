@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Annotated, Self
+from dataclasses import dataclass, field
+from typing import Annotated, Self, TypedDict, NotRequired
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -15,17 +15,24 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.frequency_axis import low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.geometry.shoebox_mesh import MeshRectangle, _checked_partitions
 from aosr.physics import report_io
 from aosr.physics.fem_batch import solve_fem_energies_many
-from aosr.physics.fem_helmholtz import FrequencyWallImpedances, checked_impedance_rows
+from aosr.physics.fem_helmholtz import FrequencyWallImpedances, FrequencyZoneImpedances, checked_impedance_rows, checked_zone_impedance_rows
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.physics.wall_surfaces import wall_normal_impedances
+from aosr.physics.wall_surfaces import wall_normal_impedances, zoned_wall_normal_impedances
+from aosr.physics.report_surfaces import mesh_partitions
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 
 FROZEN = ConfigDict(frozen=True, extra="forbid")
 HexPoint = tuple[str, str, str]
 Index = Annotated[int, Field(strict=True, ge=0)]
+
+
+class _ZonedFemArguments(TypedDict):
+    partitions: NotRequired[Mapping[Wall, tuple[MeshRectangle, ...]]]
+    zone_impedances: NotRequired[FrequencyZoneImpedances]
 
 
 def _hex_value(text: str) -> float:
@@ -49,6 +56,8 @@ class FemInputs:
     frequencies_hz: tuple[float, ...]
     sources: Mapping[str, Point]
     receivers: Mapping[str, Point]
+    partitions: Mapping[Wall, tuple[MeshRectangle, ...]] = field(default_factory=dict)
+    zone_impedances: FrequencyZoneImpedances = field(default_factory=dict)
 
 
 def fem_inputs(
@@ -61,13 +70,20 @@ def fem_inputs(
     聲源模型、散射與反射階數不決定有限元素的任何輸入。
     """
     frequencies = low_frequency_axis_frequencies(solved.low_frequency_axis)[0]
-    impedances = wall_normal_impedances(materials_by_wall, frequencies,
-        density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
+    zones = solved.surface_zones_by_wall
+    if zones:
+        impedances, zone_impedances = zoned_wall_normal_impedances(solved.room, zones, frequencies,
+            density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
+    else:
+        impedances = wall_normal_impedances(materials_by_wall, frequencies,
+            density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
+        zone_impedances = {}
     return FemInputs(
         room=solved.room, wall_impedances=impedances,
         density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s,
         frequencies_hz=frequencies, sources=scheme.speakers,
-        receivers={point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points})
+        receivers={point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points},
+        partitions=mesh_partitions(solved.room, zones) if zones else {}, zone_impedances=zone_impedances)
 
 
 def _checked_fem_inputs(scheme: Scheme, *, capabilities: CapabilityTable,
@@ -87,6 +103,8 @@ class FemKey(BaseModel):
     density_hex: str
     speed_hex: str
     frequency_hex: tuple[str, ...]
+    partition_hex: tuple[tuple[str, str, str, str, str, str], ...] = Field(default=(), exclude_if=lambda v: not v)
+    zone_impedance_hex: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = Field(default=(), exclude_if=lambda v: not v)
 
     @model_validator(mode="after")
     def _valid_physics(self) -> Self:
@@ -103,7 +121,29 @@ class FemKey(BaseModel):
             walls[wall] = (tuple(complex(_hex_value(real), _hex_value(imag)) for real, imag in value)
                            if isinstance(value, tuple) else None if value is None else _hex_value(value))
         checked_impedance_rows(walls, frequencies)
+        self._valid_zones(walls, frequencies)
         return self
+
+    def _valid_zones(self, walls: FrequencyWallImpedances, frequencies: tuple[float, ...]) -> None:
+        """分片鑰匙同時驗分界、區代號與全軸阻抗，不接受單邊缺資料。"""
+        partitions: dict[Wall, tuple[MeshRectangle, ...]] = {}
+        for name, zone, u0, u1, v0, v1 in self.partition_hex:
+            wall = Wall.from_name(name)
+            partitions[wall] = (*partitions.get(wall, ()), (zone, (_hex_value(u0), _hex_value(u1)),
+                                                         (_hex_value(v0), _hex_value(v1))))
+        _checked_partitions(Room(*(_hex_value(v) for v in self.room_hex)), partitions)
+        rows: dict[Wall, dict[str, tuple[complex, ...]]] = {}
+        for name, zone, values in self.zone_impedance_hex:
+            wall = Wall.from_name(name)
+            if zone in rows.get(wall, {}):
+                raise ValueError("分區阻抗代號不可重複")
+            rows.setdefault(wall, {})[zone] = tuple(complex(_hex_value(r), _hex_value(i)) for r, i in values)
+        checked_zone_impedance_rows(rows, frequencies)
+        if {(wall, name) for wall, cells in partitions.items() for name, _u, _v in cells} != {
+                (wall, name) for wall, cells in rows.items() for name in cells}:
+            raise ValueError("分界與逐區阻抗必須完整相符")
+        if any(walls[wall] is not None for wall in rows):
+            raise ValueError("分區面不可同時有整面阻抗")
 
     @classmethod
     def from_inputs(cls, inputs: FemInputs) -> Self:
@@ -111,7 +151,13 @@ class FemKey(BaseModel):
         return cls(room_hex=(float(room.Lx).hex(), float(room.Ly).hex(), float(room.Lz).hex()),
                    impedance_hex=_impedance_hex(inputs.wall_impedances, inputs.frequencies_hz),
                    density_hex=float(inputs.density_kg_m3).hex(), speed_hex=float(inputs.sound_speed_m_s).hex(),
-                   frequency_hex=tuple(float(value).hex() for value in inputs.frequencies_hz))
+                   frequency_hex=tuple(float(value).hex() for value in inputs.frequencies_hz),
+                   partition_hex=tuple((wall.wall_name(), name, float(u[0]).hex(), float(u[1]).hex(), float(v_range[0]).hex(), float(v_range[1]).hex())
+                       for wall, cells in inputs.partitions.items() for name, u, v_range in cells),
+                   zone_impedance_hex=tuple((wall.wall_name(), name,
+                       tuple((complex(z).real.hex(), complex(z).imag.hex()) for z in row))
+                       for wall, cells in checked_zone_impedance_rows(inputs.zone_impedances, inputs.frequencies_hz).items()
+                       for name, row in cells.items()))
 
 
 def _impedance_hex(
@@ -224,11 +270,14 @@ def solve_slice(
     if any(FemKey.from_inputs(item) != key for item in inputs.values()):
         raise ValueError("整批候選的有限元素鑰匙必須相同")
     indices = slice_indices(len(first.frequencies_hz), slices, slice_index)
+    zone_args: _ZonedFemArguments = {}
+    if first.partitions:
+        zone_args = _ZonedFemArguments(partitions=first.partitions, zone_impedances=first.zone_impedances)
     energies = solve_fem_energies_many(
         room=first.room, candidates={name: (item.sources, item.receivers) for name, item in inputs.items()},
         wall_impedances=first.wall_impedances, frequencies_hz=first.frequencies_hz,
         density_kg_m3=first.density_kg_m3, sound_speed_m_s=first.sound_speed_m_s,
-        frequency_indices=indices)
+        frequency_indices=indices, **zone_args)
     return FemShard(
         physics_identity=physics_identity, fem_key=key, slices=slices, slice_index=slice_index,
         indices=indices, frequency_hex=tuple(key.frequency_hex[index] for index in indices),

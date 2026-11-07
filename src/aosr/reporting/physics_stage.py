@@ -101,7 +101,9 @@ def solve_checked_physics(
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
         low_frequency_axis=solved.low_frequency_axis,
-        capability=report_capability(capabilities, solved.materials_by_wall),
+        capability=(report_capability(capabilities, solved.materials_by_wall) if solved.surface_zones_by_wall is None else
+                    report_capability(capabilities, solved.materials_by_wall, solved.surface_zones_by_wall)),
+        surface_zones_by_wall=solved.surface_zones_by_wall,
         fem_energies=fem_energies,
         furniture=solved.furniture, contact_rel=contact_rel,
     )

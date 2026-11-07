@@ -15,7 +15,7 @@ from aosr.config.capabilities import CapabilityTable, capability_for
 from aosr.geometry.shoebox import Room, Wall
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.report_measured import measured_seams
-from aosr.physics.report_surfaces import report_materials_code
+from aosr.physics.report_surfaces import ZonesByWall, report_materials_code
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec
@@ -33,11 +33,12 @@ from aosr.physics.report_io import (
 )
 
 
-def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReportCapability:
+def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial],
+                      surface_zones_by_wall: ZonesByWall | None = None) -> ReportCapability:
     """依傳下來的材料查三路報表能力列；不支援的條件在求解前拒收。"""
-    if set(materials_by_wall) != set(Wall.all()):
+    if surface_zones_by_wall is None and set(materials_by_wall) != set(Wall.all()):
         raise ValueError("materials_by_wall 必須恰好包含六面牆")
-    materials = report_materials_code(materials_by_wall)
+    materials = report_materials_code(materials_by_wall, surface_zones_by_wall)
     if materials == "real_frequency_independent_impedance":
         return fixed_report_capability(table)
     entry, room = report_validation.CAPABILITY_ENTRY, "shoebox"
@@ -191,7 +192,7 @@ def output_from_report(
     return ReportOutput(
         scene=_scene_section(inputs),
         construction_notes_by_wall=report.construction_notes_by_wall,
-        measured_seams_by_wall=measured_seams(inputs.surface_zones_by_wall,
+        measured_seams_by_wall=measured_seams(inputs.surface_zones_by_wall if not solver_inputs(inputs).surface_zones_by_wall else None,
             density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s),
         capability=_capability_section(report),
         top=_top_fields(report, inputs.room_m),

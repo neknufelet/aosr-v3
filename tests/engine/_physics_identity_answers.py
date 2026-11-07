@@ -69,6 +69,7 @@ CLOSURE = (
     'aosr.physics.three_lane_report_batch',
     'aosr.physics.three_lane_report_geometry',
     'aosr.physics.three_lane_report_materials',
+    'aosr.physics.three_lane_report_zones',
     'aosr.physics.totals',
     'aosr.physics.wall_reflections',
     'aosr.physics.wall_surfaces',
@@ -107,4 +108,6 @@ PYTHON_MINOR = (3, 12)
 # 由正式 physics_identity_parts 實算；CLOSURE 與 DATA_FILES 不變，四份家具考卷的模態身分不變。
 # #561 第四步：逐區晚期能量、面積等效吸音；正式 physics_identity_parts 重算，閉包與資料清單不變。
 # #561 審查修補：分區加權改用權重總和並守凸組合界；正式入口重錄，閉包與資料清單不變。
-CODE_DIGEST = "d6bbc1b61b5eb7d8fe018423bc7107b91dc7ea71479b49dc43929436b02d1724"
+# #562 第1段物理變更：分區正式報表三路接線、散射與牆對面積加權，有限元素分片保留逐區資料。
+# 由正式 physics_identity_parts 重錄；閉包新增 three_lane_report_zones，資料清單不變。
+CODE_DIGEST = "493eb2a3463a7a98d61ca6e774e48fb8c844ac30e48ffbae041adf1122aae410"

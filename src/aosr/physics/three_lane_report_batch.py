@@ -29,6 +29,9 @@ from aosr.physics.furniture_scene import (
 from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.late_energy import LateEnergyOrderResult
 from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
+from aosr.physics.report_surfaces import ZonesByWall, mesh_partitions, validate_surface_partition
+from aosr.physics.wall_surfaces import zoned_wall_normal_impedances
+from aosr.physics.fem_batch import solve_fem_energies_many
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,7 @@ class _Shared:
     surfaces: WallSurfaceResponse
     construction_notes: dict[Wall, tuple[ConstructionNote, ...]]
     furniture: FurnitureReportInputs | None = None
+    surface_zones_by_wall: ZonesByWall | None = None
 
 
 def _prepare(
@@ -65,6 +69,7 @@ def _prepare(
     capability: report.ReportCapability | None,
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
     furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> _Shared:
     """只依賴房間的材料、權重、晚期混響及衰減各做一次。"""
     if furniture and contact_rel is None:
@@ -72,28 +77,33 @@ def _prepare(
     # 舊實數格只守已驗輸入的契約；物理求值一律從材料取。
     if impedance_by_wall is not None:
         report._wall_impedances(impedance_by_wall)
-    else:
+    elif surface_zones_by_wall is None:
         _checked_material_walls(materials_by_wall)
+    else:
+        validate_surface_partition(room, surface_zones_by_wall)
     fem_frequencies, report_frequencies = low_frequency_axis_frequencies(low_frequency_axis)
     rho_c = density_kg_m3 * sound_speed_m_s
     notes: dict[Wall, tuple[ConstructionNote, ...]] = {}
-    fem_walls = _prepare_fem_impedances(materials_by_wall, fem_frequencies,
-        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s, notes_by_wall=notes)
+    fem_walls = (zoned_wall_normal_impedances(room, surface_zones_by_wall, fem_frequencies,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s, notes_by_wall=notes)[0]
+        if surface_zones_by_wall else _prepare_fem_impedances(materials_by_wall, fem_frequencies,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s, notes_by_wall=notes))
     surfaces, t60, f_s_hz, late_result, decay = _prepare_late_family(
         room=room, materials_by_wall=materials_by_wall,
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
         report_frequencies_hz=report_frequencies, reflection_order_k=reflection_order_k,
-        furniture=furniture,
+        furniture=furniture, surface_zones_by_wall=surface_zones_by_wall,
     )
     for wall, items in surfaces.notes_by_wall.items():
         merge_construction_notes(notes, wall, items)
     return _Shared(
         source_model=source_model, room=room, fem_wall_impedances=fem_walls,
+        surface_zones_by_wall=surface_zones_by_wall,
         materials_by_wall=materials_by_wall,
         scattering_by_wall=scattering_by_wall,
         sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         rho_c_pa_s_per_m=rho_c,
-        capability=capability if capability is not None else report._unchecked_capability(materials_by_wall),
+        capability=capability if capability is not None else report._unchecked_capability(materials_by_wall, surface_zones_by_wall),
         reflection_order_k=reflection_order_k, low_frequency_axis=low_frequency_axis,
         fem_frequencies_hz=fem_frequencies, report_frequencies_hz=report_frequencies,
         t60=t60, f_s_hz=f_s_hz,
@@ -120,8 +130,14 @@ def _prepare_late_family(
     density_kg_m3: float, sound_speed_m_s: float,
     report_frequencies_hz: tuple[float, ...], reflection_order_k: int,
     furniture: tuple[AbsoluteFurniture, ...] | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> tuple[WallSurfaceResponse, dict[float, float], float, LateEnergyOrderResult, report._ReportLateDecay]:
     """每場景一次求聯集軸；各消費者只取自己的精確頻點，註記留在響應裡。"""
+    if surface_zones_by_wall:
+        from aosr.physics.three_lane_report_zones import prepare_zoned_late_family
+        return prepare_zoned_late_family(room=room, zones=surface_zones_by_wall,
+            density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
+            report_frequencies_hz=report_frequencies_hz, reflection_order_k=reflection_order_k, furniture=furniture)
     axis = tuple(sorted(set(report_frequencies_hz) | set(LATE_DECAY_FREQUENCIES_HZ)
                         | set(SCHROEDER_T60_BANDS_HZ)))
     surfaces = wall_surface_response(materials_by_wall, axis,
@@ -150,7 +166,7 @@ def _pair_report(
     geometric, dense_early = report_geometry._solve_both_geometric_report_lanes(
         source_model=shared.source_model,
         room=shared.room, source=source, receiver=receiver,
-        materials_by_wall=shared.materials_by_wall,
+        materials_by_wall=shared.materials_by_wall, surface_zones_by_wall=shared.surface_zones_by_wall,
         density_kg_m3=shared.density_kg_m3, notes_by_wall=notes,
         scattering_by_wall=shared.scattering_by_wall,
         rho_c_pa_s_per_m=shared.rho_c_pa_s_per_m,
@@ -238,6 +254,7 @@ def solve_reports(
     batch_fem: bool,
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
     furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
+    surface_zones_by_wall: ZonesByWall | None = None,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
     """單份與候選共用同一份材料、準備和逐對接合，僅有限元素入口依模式選擇。"""
     if fem_energies is not None and not batch_fem:
@@ -256,11 +273,18 @@ def solve_reports(
         impedance_by_wall=impedance_by_wall, materials_by_wall=materials_by_wall, scattering_by_wall=scattering_by_wall,
         capability=capability, reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
-        furniture=furniture, contact_rel=contact_rel,
+        furniture=furniture, contact_rel=contact_rel, surface_zones_by_wall=surface_zones_by_wall,
     )
     _check_direct_paths(shared, sources, receivers)
     if injected is not None:
         energies = injected
+    elif surface_zones_by_wall:
+        walls, zones = zoned_wall_normal_impedances(room, surface_zones_by_wall, shared.fem_frequencies_hz,
+            density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+        energies = solve_fem_energies_many(room=room, candidates={"case": (sources, receivers)},
+            wall_impedances=walls, zone_impedances=zones, partitions=mesh_partitions(room, surface_zones_by_wall),
+            frequencies_hz=shared.fem_frequencies_hz, density_kg_m3=density_kg_m3,
+            sound_speed_m_s=sound_speed_m_s)["case"]
     elif batch_fem:
         energies = report._solve_fem_energies(
             room=room, sources=sources, receivers=receivers,

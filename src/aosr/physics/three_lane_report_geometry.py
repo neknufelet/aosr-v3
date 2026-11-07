@@ -7,6 +7,7 @@ from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, GEOMETRIC_
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.construction_models import ConstructionNote, SurfaceMaterial
 from aosr.physics.wall_reflections import lane_reflection_sources
+from aosr.physics.wall_surfaces import ZoneAbsorption, zoned_wall_surface_response
 from aosr.physics.report_surfaces import ZonesByWall
 from aosr.physics.geometric_lane import (
     GeometricEarlyResult, GeometricLaneResult, solve_geometric_early_lane, solve_geometric_lane,
@@ -43,7 +44,15 @@ def _solve_geometric_report_lane(
     sources = lane_reflection_sources(materials_by_wall, frequencies_hz,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         notes_by_wall=notes_by_wall, surface_zones_by_wall=surface_zones_by_wall, room=room)
+    absorption_by_wall: Mapping[str, tuple[float, ...]] | None = None
+    absorption_by_zone: ZoneAbsorption | None = None
+    if surface_zones_by_wall and late_result is None:
+        surfaces = zoned_wall_surface_response(room, surface_zones_by_wall, frequencies_hz,
+            density_kg_m3=sources.density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+        absorption_by_wall = surfaces.named_rows(frequencies_hz)
+        absorption_by_zone = surfaces.named_zone_rows(frequencies_hz)
     return solve_geometric_lane(
+        absorption_by_wall=absorption_by_wall, absorption_by_zone=absorption_by_zone,
         source_model=source_model,
         room=room,
         source=source,
@@ -51,7 +60,7 @@ def _solve_geometric_report_lane(
         sound_speed_m_s=sound_speed_m_s,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         frequencies_hz=frequencies_hz,
-        impedance_by_wall=sources.normal_rows(), reflection_sources=sources,
+        impedance_by_wall={} if sources.has_rectangle_zones else sources.normal_rows(), reflection_sources=sources,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
         late_result=late_result,
@@ -92,7 +101,7 @@ def _solve_dense_geometric_report_lane(
         sound_speed_m_s=sound_speed_m_s,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
-        impedance_by_wall=sources.normal_rows(), reflection_sources=sources,
+        impedance_by_wall={} if sources.has_rectangle_zones else sources.normal_rows(), reflection_sources=sources,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
         furniture=furniture_inputs if furniture_inputs is not None else furniture_lane_inputs(
