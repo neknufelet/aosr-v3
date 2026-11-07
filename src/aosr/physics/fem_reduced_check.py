@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -18,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers, collect_refinement_steps
+from aosr.physics.dense_threads import checked_dense_threads, dense_blas_threads
 from aosr.geometry.shoebox import Point
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
@@ -116,9 +118,12 @@ def validate_reduced(
     model: ReducedModel, operators: FullOperators, holdout_impedances: Sequence[FrequencyBoundaryImpedances],
     *, workers: int = 1, device: Literal["cpu", "gpu"] = "cpu",
     refinement_steps: list[int] | None = None,
+    dense_threads: int | None = None,
 ) -> ValidationReport:
     """每組留出材料、每個頻點都完整解一次（殘差上限沿用建模當次的設定），跟替身比。"""
     checked_workers(workers)
+    threads = checked_dense_threads(dense_threads)
+    sys.stderr.write(f"完整解 {workers} 行程、裝置 {device}、稠密段 {threads} 緒\n")
     _checked_pairing(model, operators)
     axis = model.frequencies_hz
     holdouts = impedance_rows(holdout_impedances, axis, patch_keys=operators.patch_keys)
@@ -139,12 +144,13 @@ def validate_reduced(
                 full[material, index] = solutions @ receivers.T
         collect_refinement_steps(solver, refinement_steps)
     # 先收齊完整解聲壓，讓有待辦數上限的平行佇列持續前進；只保留報告原有的聲壓陣列。
-    for material, rows in enumerate(holdouts):
-        for index, frequency in enumerate(axis):
-            k_squared, coefficients = system_coefficients(
-                frequency, walls_at(rows, index), density_kg_m3=model.density_kg_m3,
-                sound_speed_m_s=model.sound_speed_m_s, patch_keys=model.patch_keys)
-            reduced[material, index] = evaluate_reduced(model.matrices, k_squared, coefficients)
+    with dense_blas_threads(threads):
+        for material, rows in enumerate(holdouts):
+            for index, frequency in enumerate(axis):
+                k_squared, coefficients = system_coefficients(
+                    frequency, walls_at(rows, index), density_kg_m3=model.density_kg_m3,
+                    sound_speed_m_s=model.sound_speed_m_s, patch_keys=model.patch_keys)
+                reduced[material, index] = evaluate_reduced(model.matrices, k_squared, coefficients)
     frequency_db = np.max(np.abs(20.0 * np.log10(np.abs(reduced) / np.abs(full))), axis=(0, 1, 2))
     bands = third_octave_bands(axis)
     complete = _band_db(bands, full, reduced, partial=False)
