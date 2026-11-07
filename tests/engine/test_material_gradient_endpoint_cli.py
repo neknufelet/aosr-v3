@@ -652,3 +652,14 @@ def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record]
     assert all(factor["freed"] is True for factor in factors)
     assert [factor["factorizations"] for factor in factors] == [gpu.report.full_solves, gpu.baseline.full_solves]
     assert all(cast(int, factor["calls"]) > cast(int, factor["factorizations"]) for factor in factors)
+
+
+def test_endpoint_entry_rechecks_carryover_operators(runs: tuple[Path, Record], monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓終點漏接指紋檢查：從正式入口走到匯出後拒收，不能進完整求解或重寫結果。"""
+    folder = _folder(runs)
+    project = run.read_project(folder).model_copy(update={"operators_digest": "f" * 64})
+    monkeypatch.setattr(endpoint_run, "read_project", lambda folder: project)
+    before = (folder / endpoint_run.ENDPOINT_FILE).read_bytes()
+    with pytest.raises(ValueError, match="完整模型指紋.*不同"):
+        endpoint_run.run_endpoint(folder)
+    assert (folder / endpoint_run.ENDPOINT_FILE).read_bytes() == before

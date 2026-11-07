@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import json
 import os
 import signal
 import subprocess
@@ -65,6 +66,12 @@ from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
 if TYPE_CHECKING:
     from aosr.gradient.gpu import Device
     from aosr.gradient.run import GradientProject
+    from aosr.gradient.material_gradient import SurfaceDesign
+    from aosr.config.material_gradient import MaterialGradientSettings
+    from aosr.physics.fem_reduced import FullOperators, ReducedModel
+    from aosr.physics.fem_reduced_check import SurrogateSpotCheck
+    from aosr.reporting.scheme import Scheme
+    from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 
 EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
@@ -138,6 +145,10 @@ def _parser() -> argparse.ArgumentParser:
     endpoint.add_argument("--workers", type=_workers, default=1, help="完整解工人數；預設 1（單行程）")
     report = commands.add_parser("report", help="只讀報告")
     report.add_argument("--folder", type=Path, required=True)
+    stamp = commands.add_parser("stamp-surrogate", help="用原身分與完整算子替已驗過的替身補指紋")
+    stamp.add_argument("--scheme", type=Path, required=True)
+    stamp.add_argument("--surrogate", type=Path, required=True)
+    stamp.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     return parser
 
 
@@ -226,6 +237,7 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.material_gradient import load_material_gradient_settings
     from aosr.gradient import run
     from aosr.gradient.fixed_surfaces import parse_fixed_surfaces, parse_max_depths
+    from aosr.physics.fem_reduced import operators_digest
     from aosr.physics.fem_reduced_check import points_hex
     from aosr.physics.fem_reduced_receipt import receipt_path
     from aosr.reporting.fem_reduced_scheme import export_operators
@@ -242,21 +254,30 @@ def _start(args: argparse.Namespace) -> int:
     settings = load_material_gradient_settings(settings_path)
     capabilities = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
-    run.designs_for(args.presets, settings,
+    designs = run.designs_for(args.presets, settings,
                     kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity),
                     mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
     from aosr.gradient.boundary import scheme_patch_keys
-
     patch_keys = scheme_patch_keys(scheme)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     physics, mesh = operators.physics_identity, operators.mesh_hash
     points = run.SchemePoints(points_hex(operators.source_points), points_hex(operators.receiver_points))
-    del operators
-    model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points)
+    manifest_identity = _surrogate_identity(surrogate, physics)
+    fingerprint = operators_digest(operators) if manifest_identity != physics else None
+    if fingerprint is None:
+        del operators
+        model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points)
+    else:
+        model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points,
+                                    current_operators_digest=fingerprint)
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
+    spot = None
+    if fingerprint is not None:
+        spot = _carryover_spot_check(model, operators, designs, scheme)
+        del operators
     del model
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
@@ -272,10 +293,69 @@ def _start(args: argparse.Namespace) -> int:
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
         objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
-        frequency_batch=args.frequency_batch, device=args.device)
+        frequency_batch=args.frequency_batch, device=args.device,
+        surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
+        operators_digest=fingerprint, surrogate_spot_check=spot)
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project)
+
+
+def _surrogate_identity(surrogate: Path, current: str) -> str:
+    """只預讀分支；manifest 的可信度仍由完整准用閘門核對。"""
+    from aosr.physics.fem_reduced_store import manifest_path
+
+    try:
+        document = json.loads(manifest_path(surrogate).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return current  # 預讀失敗仍走原閘門，由它保留既有拒收錯誤與原因。
+    return str(document.get("physics_identity", current)) if isinstance(document, dict) else current
+
+
+def _carryover_spot_check(model: ReducedModel, operators: FullOperators, designs: tuple[SurfaceDesign, ...],
+                           scheme: Scheme) -> SurrogateSpotCheck:
+    """用下降真正的起跑材料做抽查，尺由登記簿讀；不套終點離散規格與匯出空腔裁切。"""
+    from aosr.gradient.run import holdout_rulers
+    from aosr.physics.fem_reduced import even_indices
+    from aosr.physics.fem_reduced_check import spot_check_reduced
+
+    axis = tuple(model.frequencies_hz[index] for index in even_indices(8, len(model.frequencies_hz)))
+    impedances = _starting_impedances(designs, axis, scheme)
+    ruler = holdout_rulers().frequency
+    spot = spot_check_reduced(model, operators, impedances, axis, ruler_name=ruler.name, frequency_db=ruler.value)
+    if not spot.passed:
+        raise ValueError(f"替身沿用抽查不通過：最大差 {spot.max_db} dB（尺 {ruler.name}={ruler.value} dB），要重建")
+    sys.stderr.write(f"替身身分換過、完整模型逐位相同、抽查 {len(axis)} 點最大差 {spot.max_db:g} dB"
+                     f"（尺 {ruler.name}={ruler.value:g} dB），沿用\n")
+    return spot
+
+
+def _starting_impedances(designs: tuple[SurfaceDesign, ...], frequencies_hz: tuple[float, ...],
+                         scheme: Scheme) -> FrequencyBoundaryImpedances:
+    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內。"""
+    import jax.numpy as jnp
+    import numpy as np
+
+    from aosr.config.construction_environment import construction_environment
+    from aosr.gradient.boundary import patch_key
+    from aosr.gradient.material_gradient import (
+        baseline_theta, depth_limits, descent_start, design_bounds, design_templates, kept_impedance_rows, surface_parameters,
+    )
+    from aosr.materials.construction_diff import surface_impedance_from_parameters
+
+    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
+                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    theta = descent_start(baseline_theta(designs), design_bounds(designs), depth_limits(designs))
+    axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
+    templates = design_templates(designs, axis, air=air, ranges=ranges)
+    parameters = surface_parameters(designs, theta)
+    kept = kept_impedance_rows(designs, frequencies_hz, air=air, ranges=ranges)
+    rows = {}
+    for design, template, values, original in zip(designs, templates, parameters, kept, strict=True):
+        impedance = (original if original is not None else None if template is None else
+                     surface_impedance_from_parameters(template, values, axis, air=air))
+        rows[patch_key(design.surface_id)] = None if impedance is None else tuple(complex(value) for value in np.asarray(impedance))
+    return rows
 
 
 def _create_and_run(root: Path, project: GradientProject) -> int:
@@ -361,9 +441,26 @@ def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stamp_surrogate(args: argparse.Namespace) -> int:
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.gradient.run import holdout_rulers
+    from aosr.physics.fem_reduced_store import save_operators_stamp
+    from aosr.reporting.fem_reduced_scheme import export_operators
+    from aosr.reporting.scheme import load_scheme
+
+    with keep_signal_handlers():
+        operators = export_operators(
+            load_scheme(args.scheme), capabilities=load_capabilities(args.capabilities),
+            directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    target = save_operators_stamp(args.surrogate, operators, rulers=holdout_rulers())
+    sys.stdout.write(f"替身完整模型指紋：{target}\n")
+    return 0
+
+
 _COMMANDS: Final[dict[str, tuple[str, Callable[[argparse.Namespace], int]]]] = {
     "start": ("開始", _start), "resume": ("接續", _resume), "stop": ("停止", _stop), "endpoint": ("終點", _endpoint),
-    "report": ("報告", _report)}
+    "report": ("報告", _report), "stamp-surrogate": ("補指紋", _stamp_surrogate)}
 
 
 def main(argv: list[str] | None = None) -> int:

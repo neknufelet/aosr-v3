@@ -14,17 +14,22 @@ import json
 import zipfile
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.fem_reduced import ReducedModelSettings
 from aosr.geometry.shoebox import Wall
-from aosr.physics.fem_reduced import BuildLedger, GreedyRound, ReducedMatrices, ReducedModel
+from aosr.physics.fem_reduced import BuildLedger, FullOperators, GreedyRound, ReducedMatrices, ReducedModel, operators_digest
 
 from aosr.physics.fem_reduced_boundary import PatchKeys, boundary_patches, checked_patch_keys
 
+if TYPE_CHECKING:
+    from aosr.physics.fem_reduced_receipt import HoldoutRulers
+
 FORMAT_VERSION = 2
+OPERATORS_FORMAT_VERSION = 1
 _ARRAYS = ("stiffness", "mass", "boundary", "sources", "receivers")
 _DIGEST_FIELD = "manifest_sha256"
 _FLOAT = np.dtype(np.float64)
@@ -48,6 +53,65 @@ def _check_arrays(arrays: Mapping[str, NDArray[np.generic]], sources: int, recei
 
 def manifest_path(npz_path: Path) -> Path:
     return npz_path.with_name(npz_path.stem + ".manifest.json")
+
+
+def operators_path(npz_path: Path) -> Path:
+    return npz_path.with_name(npz_path.stem + ".operators.json")
+
+
+def load_operators_stamp(npz_path: Path) -> dict[str, object]:
+    """讀指紋小檔，核版本、必填格及 manifest／實際 npz／原身分的綁定；不憑小檔自行宣稱可沿用。"""
+    document = json.loads(operators_path(npz_path).read_text(encoding="utf-8"))
+    if (not isinstance(document, dict) or type(document.get("format_version")) is not int
+            or document.get("format_version") != OPERATORS_FORMAT_VERSION):
+        raise ValueError("指紋小檔格式版本不符")
+    fields = ("manifest_sha256", "npz_sha256", "physics_identity", "stamped_physics_identity", "operators_digest")
+    if any(not isinstance(document.get(field), str) or not document[field] for field in fields):
+        raise ValueError("指紋小檔必填欄位缺或格式不符")
+    fingerprint = str(document["operators_digest"])
+    if len(fingerprint) != 64 or any(char not in "0123456789abcdef" for char in fingerprint):
+        raise ValueError("指紋小檔完整模型指紋格式不符")
+    manifest = _checked_manifest(npz_path)
+    bindings = {"manifest_sha256": _sha(_canonical(manifest)), "npz_sha256": _sha(npz_path.read_bytes()),
+                "physics_identity": manifest["physics_identity"], "stamped_physics_identity": manifest["physics_identity"]}
+    if manifest["npz_sha256"] != bindings["npz_sha256"]:
+        raise ValueError("指紋小檔對應的 npz 與 manifest 綁定不同")
+    for field, value in bindings.items():
+        if document[field] != value:
+            raise ValueError(f"指紋小檔綁定不同：{field}")
+    return document
+
+
+def save_operators_stamp(npz_path: Path, operators: FullOperators, *, rulers: HoldoutRulers) -> Path:
+    """補指紋的 Python 入口：原身分、網格、座標、面片、完整驗證收據全過才獨佔寫檔。
+
+    建模腳本建完並存好合格收據後可直接呼叫；已存在的相同內容原樣回傳，不同內容拒絕覆寫。
+    """
+    from aosr.physics.fem_reduced_check import points_hex
+    from aosr.physics.fem_reduced_receipt import load_validated_reduced
+
+    model = load_validated_reduced(
+        npz_path, rulers=rulers, expected_mesh_hash=operators.mesh_hash,
+        expected_physics_identity=operators.physics_identity,
+        expected_source_points=points_hex(operators.source_points),
+        expected_receiver_points=points_hex(operators.receiver_points))
+    if model.physics_identity != operators.physics_identity or model.patch_keys != operators.patch_keys:
+        raise ValueError("補指紋時替身的物理身分或面片與完整模型不同")
+    manifest = _checked_manifest(npz_path)
+    if manifest["physics_identity"] != operators.physics_identity:
+        raise ValueError("補指紋時 manifest 的物理身分與完整模型不同")
+    document: dict[str, object] = {
+        "format_version": OPERATORS_FORMAT_VERSION, "manifest_sha256": _sha(_canonical(manifest)),
+        "npz_sha256": manifest["npz_sha256"], "physics_identity": model.physics_identity,
+        "stamped_physics_identity": operators.physics_identity, "operators_digest": operators_digest(operators)}
+    target = operators_path(npz_path)
+    try:
+        with target.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps(document, ensure_ascii=False, sort_keys=True, indent=1, allow_nan=False) + "\n")
+    except FileExistsError:
+        if load_operators_stamp(npz_path) != document:
+            raise ValueError("指紋小檔內容不同，不覆寫") from None
+    return target
 
 
 def _sha(data: bytes) -> str:

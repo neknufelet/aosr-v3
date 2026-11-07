@@ -77,6 +77,45 @@ class FullOperators:
                      for wall, zone in self.patch_keys)
 
 
+def operators_digest(operators: FullOperators) -> str:
+    """完整模型輸出的 SHA-256；CSR 正規化，不收物理身分、不改輸入。
+
+    物理層不能拿報告層的 ``feed_segment``，此處使用相同的名稱、零位元組、八位元組長度框架。
+    浮點陣列先核雙精度，索引統一 int64；所有位元組固定小端與 C 順序。
+    """
+    digest = hashlib.sha256()
+
+    def feed(label: str, content: bytes) -> None:
+        digest.update(label.encode() + b"\0" + len(content).to_bytes(8, "big") + content)
+
+    def array(label: str, values: NDArray[np.generic], dtype: np.dtype[np.generic]) -> None:
+        if values.dtype != dtype:
+            raise ValueError(f"完整模型 {label} 必須是 {dtype}，收到 {values.dtype}")
+        feed(label + ".shape", np.asarray(values.shape, dtype="<i8").tobytes())
+        feed(label + ".data", np.ascontiguousarray(values, dtype=dtype.newbyteorder("<")).tobytes())
+
+    for label, matrix in (("K", operators.stiffness), ("M", operators.mass),
+                           *((f"B.{index}", item) for index, item in enumerate(operators.boundary))):
+        normalized = matrix.copy()
+        normalized.sum_duplicates()
+        normalized.sort_indices()
+        normalized.eliminate_zeros()
+        feed(label + ".shape", np.asarray(normalized.shape, dtype="<i8").tobytes())
+        feed(label + ".indptr", np.asarray(normalized.indptr, dtype="<i8").tobytes())
+        feed(label + ".indices", np.asarray(normalized.indices, dtype="<i8").tobytes())
+        array(label, normalized.data, np.dtype(np.float64))
+    for label, values, dtype in (("sources", operators.sources, np.dtype(np.complex128)),
+                                  ("receivers", operators.receivers, np.dtype(np.float64))):
+        feed(label + ".names", json.dumps(sorted(values), ensure_ascii=False).encode())
+        for name in sorted(values):
+            array(label + "." + name, values[name], dtype)
+    feed("patch_keys", json.dumps([[wall.wall_name(), zone] for wall, zone in operators.patch_keys]).encode())
+    feed("density", float(operators.density_kg_m3).hex().encode())
+    feed("sound_speed", float(operators.sound_speed_m_s).hex().encode())
+    feed("mesh_hash", operators.mesh_hash.encode())
+    return digest.hexdigest()
+
+
 @dataclass(frozen=True)
 class ReducedMatrices:
     """投影後的小矩陣：K_r、M_r（r×r）、B_r（面片數×r×r）、f_r（喇叭×r）、c_r（座位×r）。"""
