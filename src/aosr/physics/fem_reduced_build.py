@@ -1,7 +1,7 @@
 """替身建模：起點快照、殘差貪婪補點、實數 SVD、投影（#561）。
 
 照 #610 實驗那一版：起點是平均挑的幾組訓練材料 × 平均挑的幾個頻點；之後每輪用固定種子從還沒解過的
-（材料、頻點）抽候選，以完整矩陣直接形成 ``b − A(Vq)`` 量替身殘差，取最大的一批完整解補進快照。
+（材料、頻點）抽候選，以完整算子直接形成 ``b − A(Vq)`` 量替身殘差，取最大的一批完整解補進快照。
 每輪補完快照、重做基底之後先抽候選量殘差，再決定停不停：候選用完記「候選用完」；抽到的最大殘差不超過停止值記
 「抽到的候選殘差都在停止值內」（同時到預算也記這個，殘差是量到的事實）；否則完整解用滿預算記「預算停止、殘差目標未達」
 （這時殘差真的量過、真的沒達，那一輪準備了下一批但不解，``solved`` 記 0）。停止值只是選點用的，不是驗證門檻；
@@ -22,7 +22,7 @@ from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
     BuildLedger, FullOperators, FullSolver, GreedyRound, ImpedanceRows, ReducedMatrices, ReducedModel,
-    checked_axis, elapsed_since, even_indices, impedance_rows, input_hash, project, relative_residual,
+    checked_axis, elapsed_since, even_indices, impedance_rows, input_hash, project,
     snapshot_basis, system_coefficients, walls_at,
 )
 
@@ -72,19 +72,25 @@ class _Build:
         return basis, matrices
 
     def residual(self, basis: NDArray[np.float64], matrices: ReducedMatrices, point: Point2) -> float:
-        """完整矩陣乘替身重建的場，逐支喇叭取相對殘差的最大值。"""
+        """完整算子乘替身重建的場，逐支喇叭取相對殘差的最大值；不組裝完整系統矩陣。"""
         material, index = point
         walls = walls_at(self.training[material], index)
         operators = self.operators
         k_squared, coefficients = system_coefficients(
             self.axis[index], walls, density_kg_m3=operators.density_kg_m3,
             sound_speed_m_s=operators.sound_speed_m_s, patch_keys=operators.patch_keys)
-        system = self.solver.system(self.axis[index], walls)
         coordinates = np.linalg.solve(
             matrices.stiffness - k_squared * matrices.mass + np.tensordot(coefficients, matrices.boundary, axes=1),
             matrices.sources.T)
-        fields = basis @ coordinates
-        return max(relative_residual(system, fields[:, column], load)
+        # 一次實數乘法重建實、虛部，避免 N×r 基底整份升成複數暫存。
+        parts = basis @ np.concatenate((coordinates.real, coordinates.imag), axis=1)
+        columns = coordinates.shape[1]
+        fields = parts[:, :columns] + 1j * parts[:, columns:]
+        product = operators.stiffness @ fields - k_squared * (operators.mass @ fields)
+        for coefficient, boundary in zip(coefficients, operators.boundary, strict=True):
+            if coefficient != 0:
+                product += coefficient * (boundary @ fields)
+        return max(float(np.linalg.norm(load - product[:, column]) / np.linalg.norm(load))
                    for column, load in enumerate(operators.sources.values()))
 
     def greedy_round(self, rng: np.random.Generator, basis: NDArray[np.float64],

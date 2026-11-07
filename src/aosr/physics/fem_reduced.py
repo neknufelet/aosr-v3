@@ -295,13 +295,19 @@ def snapshot_basis(snapshots: Sequence[NDArray[np.complex128]], cutoff: float) -
 
 
 def project(operators: FullOperators, basis: NDArray[np.float64]) -> ReducedMatrices:
-    """``Vᵀ A V`` 用普通轉置（V 是實數，不取共軛）。"""
+    """``Vᵀ A V`` 用普通轉置；面片只投影其非零列、行的聯集支撐。"""
     def squeeze(matrix: csr_matrix[np.float64]) -> NDArray[np.float64]:
         return np.asarray(basis.T @ np.asarray(matrix @ basis, dtype=np.float64), dtype=np.float64)
 
+    def boundary_squeeze(matrix: csr_matrix[np.float64]) -> NDArray[np.float64]:
+        indices = np.union1d(*matrix.nonzero())
+        local_basis = basis[indices]
+        local_matrix = matrix[indices][:, indices]
+        return np.asarray(local_basis.T @ (local_matrix @ local_basis), dtype=np.float64)
+
     return ReducedMatrices(
         stiffness=squeeze(operators.stiffness), mass=squeeze(operators.mass),
-        boundary=np.asarray([squeeze(matrix) for matrix in operators.boundary], dtype=np.float64),
+        boundary=np.asarray([boundary_squeeze(matrix) for matrix in operators.boundary], dtype=np.float64),
         sources=np.asarray([basis.T @ load for load in operators.sources.values()], dtype=np.complex128),
         receivers=np.asarray([row @ basis for row in operators.receivers.values()], dtype=np.float64))
 

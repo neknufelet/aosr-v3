@@ -137,10 +137,14 @@ def validate_reduced(
                 walls = walls_at(rows, index)
                 solutions = solver.solve(frequency, walls) if parallel is None else next(parallel)
                 full[material, index] = solutions @ receivers.T
-                k_squared, coefficients = system_coefficients(
-                    frequency, walls, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s, patch_keys=model.patch_keys)
-                reduced[material, index] = evaluate_reduced(model.matrices, k_squared, coefficients)
         collect_refinement_steps(solver, refinement_steps)
+    # 先收齊完整解聲壓，讓有待辦數上限的平行佇列持續前進；只保留報告原有的聲壓陣列。
+    for material, rows in enumerate(holdouts):
+        for index, frequency in enumerate(axis):
+            k_squared, coefficients = system_coefficients(
+                frequency, walls_at(rows, index), density_kg_m3=model.density_kg_m3,
+                sound_speed_m_s=model.sound_speed_m_s, patch_keys=model.patch_keys)
+            reduced[material, index] = evaluate_reduced(model.matrices, k_squared, coefficients)
     frequency_db = np.max(np.abs(20.0 * np.log10(np.abs(reduced) / np.abs(full))), axis=(0, 1, 2))
     bands = third_octave_bands(axis)
     complete = _band_db(bands, full, reduced, partial=False)
