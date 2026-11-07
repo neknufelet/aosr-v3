@@ -33,6 +33,7 @@ from tests.engine._scheme_cache import bitwise_equal
 from tests.engine._zone_rom_case import AXIS, SETTINGS
 
 ROUNDING = 64 * np.finfo(np.float64).eps
+CROSS_MACHINE_RELATIVE = 1e-6
 Case = tuple[FullOperators, tuple[float, ...], Sequence[FrequencyBoundaryImpedances], ReducedModelSettings]
 
 
@@ -87,7 +88,9 @@ def test_build_matches_starting_commit_points_and_ledger(
     for row, expected in zip(actual["rounds"], control["rounds"], strict=True):
         for key in expected:
             if key in ("max_residual", "median_residual"):
-                assert abs(row[key] - expected[key]) <= ROUNDING
+                # 控制值是本機（AMD）量的；雲端 Intel AVX-512 機器的 PARDISO 快照差末位，殘差跟著差（#1037 實量絕對差 1.2e-11）。
+                # 選點、快照數、秩、停因上面逐項相等才是這題要抓的；殘差只守跨機器捨入。
+                assert abs(row[key] - expected[key]) <= CROSS_MACHINE_RELATIVE * abs(expected[key])
             else:
                 assert row[key] == expected[key]
     assert set(model.ledger.seconds) == {"snapshot", "svd", "projection", "greedy", "total"}
