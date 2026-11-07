@@ -34,6 +34,9 @@ from tests.engine._zone_rom_case import AXIS, SETTINGS
 
 ROUNDING = 64 * np.finfo(np.float64).eps
 CROSS_MACHINE_RELATIVE = 1e-6
+# 殘差是相對範數，跨機器的捨入落在殘差本身的絕對量級（#1039 Intel 雲端：中位殘差 3.0e-6 差 4.1e-12）；
+# 1e-10 比停止殘差 0.001 小七個數量級，選點仍逐項相等才算過。
+CROSS_MACHINE_ABSOLUTE = 1e-10
 Case = tuple[FullOperators, tuple[float, ...], Sequence[FrequencyBoundaryImpedances], ReducedModelSettings]
 
 
@@ -90,7 +93,7 @@ def test_build_matches_starting_commit_points_and_ledger(
             if key in ("max_residual", "median_residual"):
                 # 控制值是本機（AMD）量的；雲端 Intel AVX-512 機器的 PARDISO 快照差末位，殘差跟著差（#1037 實量絕對差 1.2e-11）。
                 # 選點、快照數、秩、停因上面逐項相等才是這題要抓的；殘差只守跨機器捨入。
-                assert abs(row[key] - expected[key]) <= CROSS_MACHINE_RELATIVE * abs(expected[key])
+                assert abs(row[key] - expected[key]) <= CROSS_MACHINE_RELATIVE * abs(expected[key]) + CROSS_MACHINE_ABSOLUTE
             else:
                 assert row[key] == expected[key]
     assert set(model.ledger.seconds) == {"snapshot", "svd", "projection", "greedy", "total"}
