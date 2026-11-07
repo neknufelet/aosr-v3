@@ -69,8 +69,8 @@ _ZONES = TypeAdapter(ZonesByWall)
 class RectangleZonesUnsupported(ValueError):
     """格式已收下矩形，這條計算或顯示路徑尚未支援。"""
 
-    def __init__(self, wall: str) -> None:
-        super().__init__(f"牆面 {wall}：分區還不支援這一頁／這一路")
+    def __init__(self, wall: str, *, reason: str = "分區還不支援這一頁／這一路") -> None:
+        super().__init__(f"牆面 {wall}：{reason}")
 
 
 def whole_wall_materials(zones_by_wall: Mapping[str, Sequence[SurfaceZone]]) -> dict[str, SurfaceMaterial]:

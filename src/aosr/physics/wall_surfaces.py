@@ -378,9 +378,11 @@ def zoned_wall_normal_impedances(
         wall = Wall.from_name(name)
         for index, cell in enumerate(cells):
             if isinstance(cell, RectangleZone):
+                zone_notes: dict[Wall, tuple[ConstructionNote, ...]] = {}
                 row = base[wall] if index == 0 else wall_normal_impedances(
                     dict.fromkeys(Wall.all(), cell.material), frequencies_hz, density_kg_m3=density_kg_m3,
-                    sound_speed_m_s=sound_speed_m_s)[wall]
+                    sound_speed_m_s=sound_speed_m_s, notes_by_wall=zone_notes)[wall]
+                merge_construction_notes(notes_by_wall, wall, zone_notes.get(wall, ()))
                 assert row is not None
                 rectangles.setdefault(wall, {})[cell.id] = row
     return {wall: None if wall in rectangles else row for wall, row in base.items()}, rectangles

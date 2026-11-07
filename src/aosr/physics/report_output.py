@@ -13,9 +13,9 @@ from aosr.physics import report_validation
 
 from aosr.config.capabilities import CapabilityTable, capability_for
 from aosr.geometry.shoebox import Room, Wall
-from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.construction_models import MeasuredImpedance, SurfaceMaterial
 from aosr.physics.report_measured import measured_seams
-from aosr.physics.report_surfaces import ZonesByWall, report_materials_code
+from aosr.physics.report_surfaces import RectangleZone, RectangleZonesUnsupported, ZonesByWall, report_materials_code
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec
@@ -33,9 +33,19 @@ from aosr.physics.report_io import (
 )
 
 
+def _refuse_zoned_measured_seams(surface_zones_by_wall: ZonesByWall | None) -> None:
+    """能力查表與輸出組裝都拒收尚無接縫附表的分區實測材料。"""
+    if surface_zones_by_wall is not None and any(isinstance(zone, RectangleZone)
+        for zones in surface_zones_by_wall.values() for zone in zones):
+        for name, zones in surface_zones_by_wall.items():
+            if any(isinstance(zone.material, MeasuredImpedance) for zone in zones):
+                raise RectangleZonesUnsupported(name, reason="分區＋實測阻抗表的接縫附表還不支援")
+
+
 def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial],
                       surface_zones_by_wall: ZonesByWall | None = None) -> ReportCapability:
     """依傳下來的材料查三路報表能力列；不支援的條件在求解前拒收。"""
+    _refuse_zoned_measured_seams(surface_zones_by_wall)
     if surface_zones_by_wall is None and set(materials_by_wall) != set(Wall.all()):
         raise ValueError("materials_by_wall 必須恰好包含六面牆")
     materials = report_materials_code(materials_by_wall, surface_zones_by_wall)
@@ -181,6 +191,7 @@ def output_from_report(
         raise ValueError("inputs 的 source_model 跟 report 使用的 source_model 不同")
     if report.furniture != inputs.furniture:
         raise ValueError("inputs 的家具跟 report 使用的家具不同")
+    _refuse_zoned_measured_seams(inputs.surface_zones_by_wall)
     if path_table_inputs is not None:
         expected = solver_inputs(inputs)
         for field in SolverInputs._fields:

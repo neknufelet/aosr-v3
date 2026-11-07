@@ -15,7 +15,7 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.frequency_axis import low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.geometry.shoebox_mesh import MeshRectangle, _checked_partitions
+from aosr.geometry.shoebox_mesh import MeshRectangle, checked_partitions
 from aosr.physics import report_io
 from aosr.physics.fem_batch import solve_fem_energies_many
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances, FrequencyZoneImpedances, checked_impedance_rows, checked_zone_impedance_rows
@@ -131,7 +131,7 @@ class FemKey(BaseModel):
             wall = Wall.from_name(name)
             partitions[wall] = (*partitions.get(wall, ()), (zone, (_hex_value(u0), _hex_value(u1)),
                                                          (_hex_value(v0), _hex_value(v1))))
-        _checked_partitions(Room(*(_hex_value(v) for v in self.room_hex)), partitions)
+        checked_partitions(Room(*(_hex_value(v) for v in self.room_hex)), partitions)
         rows: dict[Wall, dict[str, tuple[complex, ...]]] = {}
         for name, zone, values in self.zone_impedance_hex:
             wall = Wall.from_name(name)

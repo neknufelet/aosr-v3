@@ -162,5 +162,5 @@ def test_direct_blockers_grazing_uses_registered_margin(depth_in_margins: float,
 def test_furniture_layout_is_outside_modal_identity_closure() -> None:
     from aosr.reporting.modal_diagnosis import modal_identity, modal_import_closure
 
-    assert modal_identity() == "modal-v1:c2efe6fcdd87f2f63c7bcf3232aee71402ffcebc5f0c7353e1c02c8b8e8f50cf"
+    assert modal_identity() == "modal-v1:131e48c026234320cfb40a9c687517e6b9e792eac52e5ef6bec228120aa4cb5b"
     assert "aosr.reporting.furniture_layout" not in modal_import_closure().modules

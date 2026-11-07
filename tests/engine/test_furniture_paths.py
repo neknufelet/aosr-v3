@@ -264,4 +264,4 @@ def test_furniture_modules_enter_physics_identity_but_stay_outside_modal_identit
                          "aosr.reporting.furniture_layout"}
     assert furniture_modules <= set(physics_import_closure().modules)
     assert furniture_modules.isdisjoint(modal_import_closure().modules)
-    assert modal_identity() == "modal-v1:c2efe6fcdd87f2f63c7bcf3232aee71402ffcebc5f0c7353e1c02c8b8e8f50cf"
+    assert modal_identity() == "modal-v1:131e48c026234320cfb40a9c687517e6b9e792eac52e5ef6bec228120aa4cb5b"

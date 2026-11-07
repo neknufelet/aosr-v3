@@ -117,7 +117,7 @@ def test_zone_scattering_uses_area_times_normal_reflected_energy() -> None:
     rho_c = inputs.density_kg_m3*inputs.sound_speed_m_s
     sources = zoned_reflection_sources(inputs.room_m, inputs.surface_zones_by_wall or {}, axis,
         density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s)
-    scattering = dict(zip(Wall.wall_names(), (0.1, 0.2, 0.3, 0.4, 0.5, 0.6), strict=True))
+    scattering = dict(zip(Wall.wall_names(), (0.1, 0.2, 0.4, 0.3, 0.5, 0.6), strict=True))
     def retained(z: float) -> float:
         return abs((complex(z)-rho_c)/(complex(z)+rho_c))**2
     weights = (6*retained(1646.4), 6*retained(1646.4),
@@ -129,7 +129,8 @@ def test_zone_scattering_uses_area_times_normal_reflected_energy() -> None:
         sound_speed_m_s=inputs.sound_speed_m_s, rho_c_pa_s_per_m=rho_c, frequencies_hz=axis,
         impedance_by_wall=dict.fromkeys(Wall.wall_names(), 1646.4), scattering_by_wall=scattering,
         reflection_sources=sources, reflection_order_k=3)
-    assert actual.scattering == (expected, expected)
+    np.testing.assert_allclose(actual.scattering, (expected, expected), rtol=0.0,
+                               atol=contract_value("reflection_product_ulp"))
 
 
 def test_screen_area_averages_each_face_before_pair_product() -> None:

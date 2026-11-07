@@ -24,6 +24,37 @@ from tests.engine._precision_contracts import contract_value
 from tests.engine._zoned_report_cases import small_scheme
 
 
+def test_distinct_frequency_dependent_zones_match_direct_assembly(
+    record_property: Callable[[str, object], None],
+) -> None:
+    """兩種材料各有不同的複數 Z(f)：抓第二區套首區，或逐頻取錯阻抗。"""
+    scheme = small_scheme(zoned=True)
+    solved = report_io.solver_inputs(report_io.load_input_document(pair(scheme), CAPABILITIES, DIRECTIVITY))
+    mesh = generate_shoebox_mesh(solved.room, max_frequency_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+        elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH, sound_speed_m_s=solved.sound_speed_m_s,
+        random_seed=FEM_MESH_RANDOM_SEED, partitions=mesh_partitions(solved.room, scheme.scene.surface_zones_by_wall or {}))
+    operators = fem.assemble_p2_operators(mesh)
+    frequencies = (37.0, 73.0)
+    # 直接給兩種材料的逐頻阻抗表；參考組不經 _frequency_system 的列與頻率索引。
+    material_a = (600.0-320.0j, 1100.0+180.0j)
+    material_b = (2100.0+460.0j, 800.0-240.0j)
+    walls: dict[Wall, float] = {wall: 1646.4 for wall in Wall.all() if wall != Wall.X0}
+    load = fem.point_source_load(operators, solved.source)
+    reference = []
+    for frequency, a, b in zip(frequencies, material_a, material_b, strict=True):
+        system = fem.assemble_zoned_helmholtz_system(operators, frequency_hz=frequency,
+            wall_impedances=walls, zone_impedances={Wall.X0: {"a": a, "b": b}},
+            density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
+        reference.append(fem.interpolate_pressure(operators, solved.receiver, spsolve(system, load)))
+    actual = fem.solve_frequency_responses_many(operators, right_hand_sides={"source": load},
+        receivers={"receiver": solved.receiver}, frequencies_hz=frequencies,
+        wall_impedances=walls | {Wall.X0: None}, zone_impedances={Wall.X0: {"a": material_a, "b": material_b}},
+        density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)["source", "receiver"]
+    difference = float(np.max(abs(actual-np.asarray(reference))/abs(np.asarray(reference))))
+    assert difference <= contract_value("fem_vs_fenics_frozen")
+    record_property("distinct_zones_pressure_max_relative_difference", difference)
+
+
 def test_two_identical_zones_equal_independent_whole_fem(record_property: Callable[[str, object], None]) -> None:
     """真正多右側求解、逐區阻抗與分界網格；不靠粗細不同的網格另訂誤差。"""
     scheme = small_scheme(zoned=True)

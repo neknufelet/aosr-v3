@@ -7,6 +7,7 @@
 輸入 JSON 新舊恰好一個：舊 impedance_pa_s_per_m_by_wall 永遠照收；新
 ``surface_zones_by_wall`` 六面各一區，area（分區）只收 whole_wall（整面），
 material（材料）只收構造 assembly 或固定阻抗 constant_impedance；也收實測阻抗表 measured_impedance，表外由必填底構造補值。
+矩形分區在此入口清楚拒收；分區方案請走 ``aosr.reporting.scheme_cli run``。
 全固定新寫法折回舊欄位，混合或構造場景保留六面分區。以下為舊格式；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
 ``reflection_order_k``（交接階數 K）也可省略，省略時用產品設定 ``REFLECTION_ORDER_K``；
@@ -71,6 +72,7 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.physics import capability_report, report_io, report_output
 from aosr.physics.report_io import ReportOutput
+from aosr.physics.report_surfaces import RectangleZone, RectangleZonesUnsupported
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
 from aosr.physics.three_lane_report import (
     ReportCapability,
@@ -396,6 +398,9 @@ def main(argv: list[str]) -> int:
         report_output.fixed_report_capability(table)
         inputs = report_io.load_input(args.input, table, load_directivity_defaults(
             config_path("directivity_defaults.toml")))
+        for name, zones in (inputs.surface_zones_by_wall or {}).items():
+            if any(isinstance(zone, RectangleZone) for zone in zones):
+                raise RectangleZonesUnsupported(name, reason="分區方案請走 aosr.reporting.scheme_cli run")
         if inputs.furniture is not None:
             raise ValueError(FURNITURE_CLI_UNSUPPORTED)
         solved = report_io.solver_inputs(inputs)
