@@ -198,6 +198,25 @@ def _bounded_weighted_absorption(weights: NDArray[np.float64], values: jax.Array
     return jnp.where(jnp.sum(active, axis=1)[:, None] == 1, direct, jnp.clip(average, lower, upper))
 
 
+def _bounded_absorption_with_linear_gradient(weights: NDArray[np.float64], values: jax.Array) -> jax.Array:
+    """值沿用原浮點凸組合護欄；導數是固定權重平均，同材時也不能被 min/max 平分。
+
+    非負權重的凸組合在數學上永遠在輸入上下界內；夾值只修捨入，不改物理導數。
+    幾何權重是固定常數，只對材料吸音率求導。前向沿用原 helper，既有與新分區入口共用這份導數。
+    """
+    @jax.custom_jvp
+    def bounded(alpha: jax.Array) -> jax.Array:
+        return _bounded_weighted_absorption(weights, alpha)
+
+    @bounded.defjvp
+    def bounded_jvp(primals: tuple[jax.Array], tangents: tuple[jax.Array]) -> tuple[jax.Array, jax.Array]:
+        coefficients = jnp.asarray(weights, dtype=primals[0].dtype)
+        tangent = jnp.matmul(coefficients, tangents[0], precision=_HIGHEST) / jnp.sum(coefficients, axis=1)[:, None]
+        return bounded(primals[0]), tangent
+
+    return bounded(values)
+
+
 def zoned_late_energy_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array) -> LateEnergyArrays:
     """以固定交集對逐區 α 可微；六面整面列後，按 Wall.wall_names 與區宣告順序接矩形列。
 
@@ -208,6 +227,6 @@ def zoned_late_energy_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array
         raise TypeError("吸音率必須是浮點陣列")
     if values.ndim != 2 or values.shape[0] != geometry.wall_weights.shape[1] or values.shape[1] == 0:
         raise ValueError("分區吸音率形狀與幾何權重不同")
-    walls = _bounded_weighted_absorption(geometry.wall_weights, values)
-    patches = _bounded_weighted_absorption(geometry.patch_weights, values)
+    walls = _bounded_absorption_with_linear_gradient(geometry.wall_weights, values)
+    patches = _bounded_absorption_with_linear_gradient(geometry.patch_weights, values)
     return late_energy_arrays(geometry.whole, walls, alpha_by_patch=patches)

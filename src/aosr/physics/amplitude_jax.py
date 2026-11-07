@@ -20,7 +20,7 @@
 **阻抗從哪來。** 每面牆一列與角度無關的 Z(f)：用 :func:`bounce_impedances` 從 ``(…, 6, F)`` 收成逐反彈
 ``(…, P, B, F)``（這一步在 JAX 裡，梯度穿得過）。構造牆的 Z(f, θ)：用 :func:`bounce_impedances_from_sources`
 在 CPU 上照 :class:`aosr.physics.wall_reflections.WallReflectionSources` 同一條路（同一組去重後的 cos、同一個
-求值函式）求好再交進來。分格材料（逐反彈查格）不在這一支的範圍，路徑表遇到就拒收。
+求值函式）求好再交進來。矩形分區用逐反彈點查面片，舊分格材料仍拒收。
 
 **這一支沒有任何現有程式引用。** 它不在物理身分的引用閉包裡，固定牆那條路也照舊不載入 JAX。
 """
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import cmath
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -38,7 +38,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.geometry.shoebox import Wall, wall_count_signature
-from aosr.physics.report_surfaces import RectangleZonesUnsupported
+from aosr.physics.report_surfaces import RectangleZone, RectangleZonesUnsupported, rectangle_zone_at
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics import amplitude as amp
 from aosr.physics.wall_surfaces import wall_path_impedances
@@ -68,6 +68,11 @@ class PathTable:
     bounce_mask: NDArray[np.bool_]
     inverse_distance: NDArray[np.float64]
     phase: NDArray[np.complex128]
+    patch_ids: tuple[str, ...]
+    bounce_patch: NDArray[np.int64]
+    bounce_angle: NDArray[np.int64]
+    incidence_cosines: tuple[NDArray[np.float64], ...]
+    incidence_angles_deg: tuple[NDArray[np.float64], ...]
 
     @property
     def path_count(self) -> int:
@@ -99,6 +104,7 @@ def build_path_table(
     paths: Sequence[RoomPath],
     receiver: tuple[float, float, float],
     frequencies_hz: Sequence[float],
+    *, rectangle_zones_by_wall: Mapping[Wall, tuple[RectangleZone, ...]] | None = None,
 ) -> PathTable:
     """從現有路徑程式的結果打包路徑表；cos 與相位都照現有寫法用 Python 雙精度算。"""
     if not paths:
@@ -106,34 +112,24 @@ def build_path_table(
     freqs = tuple(float(f) for f in frequencies_hz)
     if not freqs or any(not math.isfinite(f) or f <= 0 for f in freqs):
         raise ValueError("頻率軸必須非空且全為有限正數")
-    per_path: list[list[tuple[int, float]]] = []
-    for path in paths:
-        if path.rectangle_zone_walls:
-            raise RectangleZonesUnsupported(path.rectangle_zone_walls[0])
-        if path.has_patch_materials:
-            raise ValueError(f"路徑 {path.identity!r} 帶分格材料；逐反彈查格不在這一支的範圍")
-        if path.dist_m == 0.0:
-            raise ValueError("接收點落在鏡像聲源上（dist_m 為 0），壓力沒定義")
-        counts = wall_count_signature(path.identity)
-        bounces: list[tuple[int, float]] = []
-        for wall_index, wall in enumerate(amp.CANONICAL_WALLS):
-            count = counts.get(wall, 0)
-            if count:
-                cos = amp.incidence_cos(amp._wall_axis(wall), path.dist_m, receiver, path.image)
-                bounces.extend([(wall_index, cos)] * count)
-        per_path.append(bounces)
+    patch_ids = tuple(w.wall_name() + ("@"+z.id if z else "") for w in Wall.all()
+        for z in ((rectangle_zones_by_wall or {}).get(w) or (None,)))
+    per_path = [_path_bounces(p, receiver, rectangle_zones_by_wall, patch_ids) for p in paths]
     n_paths, n_bounces = len(paths), max(len(b) for b in per_path)
     bounce_wall = np.zeros((n_paths, n_bounces), dtype=np.int64)
     bounce_cos = np.ones((n_paths, n_bounces), dtype=np.float64)
     bounce_mask = np.zeros((n_paths, n_bounces), dtype=np.bool_)
+    bounce_patch = np.zeros((n_paths, n_bounces), dtype=np.int64)
     phase = np.empty((n_paths, len(freqs)), dtype=np.complex128)
     for i, (path, bounces) in enumerate(zip(paths, per_path, strict=True)):
-        for j, (wall_index, cos) in enumerate(bounces):
+        for j, (wall_index, patch_index, cos) in enumerate(bounces):
             bounce_wall[i, j], bounce_cos[i, j], bounce_mask[i, j] = wall_index, cos, True
+            bounce_patch[i, j] = patch_index
         for k, f in enumerate(freqs):
             omega = 2.0 * math.pi * f
             phase[i, k] = cmath.exp(complex(0.0, -omega * path.delay_s))
     dist = np.array([p.dist_m for p in paths], dtype=np.float64)
+    cosines, angles, indices = _angle_tables(bounce_patch, bounce_cos, bounce_mask, len(patch_ids))
     return PathTable(
         frequencies_hz=np.array(freqs, dtype=np.float64),
         order=np.array([p.order for p in paths], dtype=np.int64),
@@ -144,7 +140,75 @@ def build_path_table(
         bounce_mask=bounce_mask,
         inverse_distance=np.array([1.0 / p.dist_m for p in paths], dtype=np.float64),
         phase=phase,
+        patch_ids=patch_ids, bounce_patch=bounce_patch, bounce_angle=indices,
+        incidence_cosines=cosines, incidence_angles_deg=angles,
     )
+
+
+def _path_bounces(
+    path: RoomPath, receiver: tuple[float, float, float],
+    zones_by_wall: Mapping[Wall, tuple[RectangleZone, ...]] | None, patch_ids: tuple[str, ...],
+) -> list[tuple[int, int, float]]:
+    """保留原牆序；有分區時同牆按輸入區序，每一反彈（含交線多牆）各記一片。"""
+    if set(path.rectangle_zone_walls) - {w.wall_name() for w in (zones_by_wall or {})}:
+        raise RectangleZonesUnsupported(path.rectangle_zone_walls[0])
+    if path.has_patch_materials:
+        raise ValueError(f"路徑 {path.identity!r} 帶分格材料；逐反彈查格不在這一支的範圍")
+    if path.dist_m == 0.0:
+        raise ValueError("接收點落在鏡像聲源上（dist_m 為 0），壓力沒定義")
+    counts = wall_count_signature(path.identity)
+    out = []
+    for wall_index, name in enumerate(amp.CANONICAL_WALLS):
+        count = counts.get(name, 0)
+        if not count:
+            continue
+        cos = amp.incidence_cos(amp._wall_axis(name), path.dist_m, receiver, path.image)
+        zones = (zones_by_wall or {}).get(Wall.from_name(name))
+        if zones:
+            hits = [rectangle_zone_at(name, b.point, zones).id for b in path.bounces if name in b.walls]
+            if len(hits) != count:
+                raise ValueError("反彈點數與路徑牆面次數不同")
+            for zone in zones:
+                out.extend([(wall_index, patch_ids.index(name+"@"+zone.id), cos)] * hits.count(zone.id))
+        else:
+            out.extend([(wall_index, patch_ids.index(name), cos)] * count)
+    return out
+
+
+def _angle_tables(
+    patches: NDArray[np.int64], cos: NDArray[np.float64], mask: NDArray[np.bool_], count: int,
+) -> tuple[tuple[NDArray[np.float64], ...], tuple[NDArray[np.float64], ...], NDArray[np.int64]]:
+    """按路徑首現去重，與 wall_path_impedances 用同一個 Python 雙精度轉角。"""
+    cosines, angles = [], []
+    indices = np.zeros_like(patches)
+    for patch in range(count):
+        hits = mask & (patches == patch)
+        unique = tuple(dict.fromkeys(float(c) for c in cos[hits]))
+        cosines.append(np.asarray(unique, dtype=np.float64))
+        # 舊入口容許合成路徑配不相符接收點（既有拒收考卷也用它）；保留原 cos、不另夾角。
+        angles.append(np.asarray([math.degrees(math.acos(c)) if -1. <= c <= 1. else math.nan
+                                  for c in unique], dtype=np.float64))
+        lookup = {c: i for i, c in enumerate(unique)}
+        indices[hits] = [lookup[float(c)] for c in cos[hits]]
+    return tuple(cosines), tuple(angles), indices
+
+
+def bounce_impedances_by_patch(table: PathTable, impedance_by_patch: Sequence[jax.Array]) -> jax.Array:
+    """每面片 (F, 該片角數) 阻抗收成 (P,B,F)，角度索引是常數；可用 jit（編譯）與 grad（梯度）。"""
+    if len(impedance_by_patch) != len(table.patch_ids):
+        raise ValueError("面片阻抗數與路徑表不同")
+    rows = [_complex(jnp.asarray(z)) for z in impedance_by_patch]
+    offset, indices = 0, np.zeros_like(table.bounce_patch)
+    for patch, (z, angles) in enumerate(zip(rows, table.incidence_angles_deg, strict=True)):
+        if z.shape != (len(table.frequencies_hz), len(angles)):
+            raise ValueError(f"{table.patch_ids[patch]} 的阻抗形狀必須是 (F, 該片角數)")
+        hits = table.bounce_mask & (table.bounce_patch == patch)
+        indices[hits] = table.bounce_angle[hits] + offset
+        offset += len(angles)
+    # 未用格收安全的一列，即使整張只有直達、全部角清單都是空的仍可收。
+    indices[~table.bounce_mask] = offset
+    joined = jnp.concatenate((*rows, jnp.ones((len(table.frequencies_hz), 1), dtype=rows[0].dtype)), axis=1)
+    return joined[:, indices].transpose(1, 2, 0)
 
 
 def _complex(values: jax.Array) -> jax.Array:

@@ -108,3 +108,43 @@ def test_jax_weighted_absorption_obeys_participating_bounds(
         energy = cast(dict[str, list[list[float]]], run["energy"])[mode]
         np.testing.assert_allclose(energy[:4], expected,
             rtol=contract_value("late_energy_jax_vs_numpy"), atol=0.0)
+
+
+def test_equal_zone_gradients_follow_area_weights_and_preserve_values(runs: dict[str, object]) -> None:
+    """兩區等材時不讓 min/max 平分導數；兩頻的非本頻導數也必須為零。"""
+    from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL
+
+    row = cast(dict[str, object], runs["equal_zones"])
+    assert row["forward_bitwise"] is True
+    gradient = np.asarray(row["gradient"])
+    expected = np.zeros((2, 8, 2))
+    # 房間六面總面積 108 m²，地板 24 m²；兩區分別 8、16 m²。
+    expected[0, 6:, 0] = (8.0 / 108.0, 16.0 / 108.0)
+    expected[1, 6:, 1] = (8.0 / 108.0, 16.0 / 108.0)
+    np.testing.assert_allclose(gradient[:, 6:, :], expected[:, 6:, :], rtol=GRADIENT_REL, atol=GRADIENT_ABS)
+
+    # 能量的中央差分也守小塊權重；只改整面平均、漏改 patch 入口仍會紅。
+    from dataclasses import replace
+    from tests.engine.test_late_energy_zones import FREQUENCIES, ROOM
+    from tests.engine._late_family_cases import with_alpha
+
+    inputs = synthetic(Wall.FLOOR, 2, 1.0 / 3.0, 0.5)
+    cells = inputs.absorption_by_zone
+    assert cells is not None
+    zones = {"floor": tuple(replace(cells["floor"][i],
+        zone=cells["floor"][i].zone.model_copy(update={"v_m": (0.0, ROOM.Ly)}), absorption=(0.25, 0.25))
+        for i in (0, 2))}
+    inputs = replace(inputs, absorption_by_zone=zones)
+    alpha = np.full((8, len(FREQUENCIES)), 0.25)
+    central = np.zeros((2, 2, 2))
+    for zone, frequency in np.ndindex(2, 2):
+        step = alpha[zone + 6, frequency] * 1e-5
+        plus, minus = alpha.copy(), alpha.copy()
+        plus[zone + 6, frequency] += step
+        minus[zone + 6, frequency] -= step
+        a = solve_late_energy(with_alpha(inputs, plus)).bands
+        b = solve_late_energy(with_alpha(inputs, minus)).bands
+        central[:, zone, frequency] = np.asarray([x.late_reverberant_energy - y.late_reverberant_energy
+            for x, y in zip(a, b, strict=True)]) / (2 * step) * alpha[zone + 6, frequency]
+    np.testing.assert_allclose(np.asarray(row["energy_gradient"])[:, 6:, :] * 0.25, central,
+        rtol=GRADIENT_REL, atol=GRADIENT_ABS)

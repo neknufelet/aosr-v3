@@ -532,7 +532,9 @@ prefix = "tests.engine."
 # SolverInputs 新欄讓逐格綁定參數化多一題（＋1）；淨增 12，單行程 collect-only 逐檔加總實數 10717，未跑全套。
 # #562 第1段修補一：新增異材逐頻有限元素 1 題、入口／實測接縫拒收 4 題、公開分界與第二區註記各 1 題。
 # 淨增 7，未移除；單行程 collect-only 逐檔加總引擎籃實數 10724，未跑全套。
-collected_floor = 10724
+# #562 第 2a-1／2a-2／2b／2c／3 段（五段 JAX 版合一支）：殘響 T20＋殘響代價 77、早期反射 33、音色／聆聽區／左右匹配 66、
+# 早期三欄與分區路徑表 26、晚期一族與交接 34，淨增 236、未移除；單行程 collect-only（JAX_PLATFORMS=cpu）逐檔加總引擎籃實數 10960，未跑全套。
+collected_floor = 10960
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

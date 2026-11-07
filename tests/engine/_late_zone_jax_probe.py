@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 # 在 runtime（執行環境）與 JAX 載入前回讀，直接驗證傳進來的三格。
@@ -21,7 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.physics.late_energy_jax import (
-    _bounded_weighted_absorption, late_energy_arrays, late_energy_geometry,
+    ZonedLateEnergyGeometry, _bounded_weighted_absorption, late_energy_arrays, late_energy_geometry,
     zoned_late_energy_arrays, zoned_late_energy_geometry,
 )
 from tests.engine._late_zone_control import control_inputs
@@ -54,8 +55,32 @@ def bounded_runs() -> dict[str, object]:
     return result
 
 
+def equal_zones() -> dict[str, object]:
+    problem = synthetic(Wall.FLOOR, 2, 1.0 / 3.0, 0.5)
+    cells = problem.absorption_by_zone
+    assert cells is not None
+    zones = {"floor": tuple(replace(cells["floor"][i],
+        zone=cells["floor"][i].zone.model_copy(update={"v_m": (0.0, 4.0)}), absorption=(0.25, 0.25)) for i in (0, 2))}
+    geometry = zoned_late_energy_geometry(ROOM, 2, zones)
+    alpha = jnp.full((8, 2), 0.25)
+    derivative = jax.jit(jax.jacrev(lambda a: zoned_late_energy_arrays(geometry, a).alpha_bar))(alpha)
+    energy_derivative = jax.jit(jax.jacrev(
+        lambda a: zoned_late_energy_arrays(geometry, a).late_reverberant_energy))(alpha)
+    # 舊前向組裝是獨立控制，四欄與旗標都逐位比，不只比能量的容差。
+    def previous(g: ZonedLateEnergyGeometry, a: jax.Array) -> object:
+        return late_energy_arrays(g.whole, _bounded_weighted_absorption(g.wall_weights, a),
+            alpha_by_patch=_bounded_weighted_absorption(g.patch_weights, a))
+    bitwise = True
+    for dtype in (jnp.float64, jnp.float32):
+        for values in (alpha, alpha.at[6].set(0.125).at[7].set(0.5)):
+            for old, new in zip(jax.jit(previous)(geometry, values.astype(dtype)),
+                                jax.jit(zoned_late_energy_arrays)(geometry, values.astype(dtype)), strict=True):
+                bitwise = bitwise and np.asarray(old).tobytes() == np.asarray(new).tobytes()
+    return {"gradient": encode(derivative), "energy_gradient": encode(energy_derivative), "forward_bitwise": bitwise}
+
+
 def run() -> dict[str, object]:
-    result: dict[str, object] = {"bounds": bounded_runs()}
+    result: dict[str, object] = {"bounds": bounded_runs(), "equal_zones": equal_zones()}
     for wall in Wall.all():
         problem = synthetic(wall, 2, 1.0 / 3.0, 0.5)
         cells = problem.absorption_by_zone
