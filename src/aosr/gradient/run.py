@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 import time
@@ -90,9 +91,9 @@ from aosr.materials.construction_models import SurfaceMaterial
 from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials, partition_identity, scheme_patch_keys, surface_ids)
 from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
 from aosr.physics.report_surfaces import RectangleZone
-from aosr.physics.fem_reduced import ReducedModel
+from aosr.physics.fem_reduced import ReducedModel, checked_axis
 from aosr.physics.fem_reduced_jax import reduced_constants
-from aosr.physics.fem_reduced_check import PointHex, points_hex
+from aosr.physics.fem_reduced_check import PointHex, SurrogateSpotCheck, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.physics.report_io import solver_inputs
@@ -160,10 +161,26 @@ class GradientProject(BaseModel):
     device: Device = Field(default="cpu", exclude_if=lambda value: value == "cpu")
     precision_check: PrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
     frequency_batch: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
+    surrogate_physics_identity: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
+    operators_digest: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
+    surrogate_spot_check: SurrogateSpotCheck | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _depth_not_fixed(self) -> Self:
         check_fixed_depth_conflicts(self.fixed_surfaces, self.max_depths)
+        fields = (self.surrogate_physics_identity, self.operators_digest, self.surrogate_spot_check)
+        if any(value is not None for value in fields):
+            spot = self.surrogate_spot_check
+            if any(value is None for value in fields) or self.surrogate_physics_identity == self.physics_identity:
+                raise ValueError("沿用記錄必須完整包含替身原身分、完整模型指紋與抽查結果，且原身分不同")
+            if (spot is None or not spot.passed or spot.ruler_name != FREQUENCY_RULER
+                    or not all(math.isfinite(value) for value in (spot.max_db, spot.ruler_value, spot.seconds))
+                    or not 0 <= spot.max_db <= spot.ruler_value or spot.seconds <= 0):
+                raise ValueError("沿用抽查記錄未通過或數字、尺不合法")
+            try:
+                checked_axis(spot.frequencies_hz)
+            except ValueError as exc:
+                raise ValueError("沿用抽查頻點不合法") from exc
         return self
 
 
@@ -394,11 +411,12 @@ def scheme_points_hex(scheme: Scheme) -> SchemePoints:
     return SchemePoints(points_hex(sources), points_hex(receivers))
 
 
-def gated_surrogate(surrogate: Path, *, mesh_hash: str, physics_identity: str, points: SchemePoints) -> ReducedModel:
+def gated_surrogate(surrogate: Path, *, mesh_hash: str, physics_identity: str, points: SchemePoints,
+                    current_operators_digest: str | None = None) -> ReducedModel:
     """准用閘門：兩把尺從登記簿讀，網格雜湊、物理身分、喇叭與座位座標都要跟驗證收據對上。"""
     model = load_validated_reduced(surrogate, rulers=holdout_rulers(), expected_mesh_hash=mesh_hash,
                                   expected_physics_identity=physics_identity, expected_source_points=points.sources,
-                                  expected_receiver_points=points.receivers)
+                                  expected_receiver_points=points.receivers, current_operators_digest=current_operators_digest)
     require_matching_patches(model)
     return model
 
@@ -462,8 +480,9 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     scheme = load_scheme(scheme_path)
     points = scheme_points_hex(scheme)
     _check_same_points(SchemePoints(project.source_points, project.receiver_points), points, "project.json 記的")
-    model = gated_surrogate(surrogate, mesh_hash=project.mesh_hash, physics_identity=project.physics_identity,
-                            points=points)
+    model = gated_surrogate(surrogate, mesh_hash=project.mesh_hash,
+                            physics_identity=project.surrogate_physics_identity or project.physics_identity,
+                            points=points, current_operators_digest=project.operators_digest)
     if manifest_sha256(surrogate) != project.surrogate_manifest_sha256:
         raise ValueError("替身跟開始時不同（manifest 摘要變了），不接續")
     if file_sha256(receipt_path(surrogate)) != project.receipt_sha256:

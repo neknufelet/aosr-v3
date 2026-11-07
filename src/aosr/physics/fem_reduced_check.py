@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import numpy as np
@@ -23,7 +24,7 @@ from aosr.physics.dense_threads import checked_dense_threads, dense_blas_threads
 from aosr.geometry.shoebox import Point
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
-    FullOperators, ReducedModel, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
+    FullOperators, ReducedModel, checked_axis, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
 )
 from aosr.physics.fem_reduced_store import computation_digest, matrices_digest
 
@@ -67,6 +68,56 @@ class ValidationReport:
     computation_digest: str
     source_points: Mapping[str, PointHex]
     receiver_points: Mapping[str, PointHex]
+
+
+@dataclass(frozen=True)
+class SurrogateSpotCheck:
+    """算式漂移抽查：頻點、跨座位喇叭的最大 dB 差、登記簿的逐頻尺與耗時。"""
+
+    frequencies_hz: tuple[float, ...]
+    max_db: float
+    ruler_name: str
+    ruler_value: float
+    passed: bool
+    seconds: float
+
+
+def spot_check_reduced(model: ReducedModel, operators: FullOperators, impedances: FrequencyBoundaryImpedances,
+                       frequencies_hz: Sequence[float], *, ruler_name: str, frequency_db: float,
+                       workers: int = 1) -> SurrogateSpotCheck:
+    """單組材料的指定頻點：中央處理器完整解對替身，只判呼叫端從登記簿讀到的逐頻尺。
+
+    稀疏頻點不構成完整八度帶；獨立於留出驗證，不叫 ``validate_reduced``。
+    """
+    clock = time.perf_counter()
+    checked_workers(workers)
+    if (set(model.source_names) != set(operators.sources) or len(model.source_names) != len(operators.sources)
+            or set(model.receiver_names) != set(operators.receivers) or len(model.receiver_names) != len(operators.receivers)):
+        raise ValueError("替身的喇叭或座位跟完整模型不同")
+    operators = replace(operators, sources={name: operators.sources[name] for name in model.source_names},
+                        receivers={name: operators.receivers[name] for name in model.receiver_names})
+    _checked_pairing(model, operators)
+    axis = checked_axis(frequencies_hz)
+    rows = impedance_rows([impedances], axis, patch_keys=operators.patch_keys)[0]
+    jobs = [(frequency, walls_at(rows, index)) for index, frequency in enumerate(axis)]
+    receivers = np.asarray(list(operators.receivers.values()), dtype=np.float64)
+    with FullSolveBatch(operators, max_relative_residual=model.ledger.settings.full_solve_max_relative_residual,
+                       workers=workers, device="cpu") as batch:
+        solutions = (batch.map(jobs) if workers > 1 else
+                     (batch.solver.solve(frequency, walls) for frequency, walls in jobs))
+        full = np.asarray([solution @ receivers.T for solution in solutions], dtype=np.complex128)
+    with dense_blas_threads(checked_dense_threads(None)):
+        reduced = []
+        for frequency, walls in jobs:
+            k_squared, coefficients = system_coefficients(
+                frequency, walls, density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s,
+                patch_keys=model.patch_keys)
+            reduced.append(evaluate_reduced(model.matrices, k_squared, coefficients))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        difference = np.abs(20.0 * np.log10(np.abs(reduced) / np.abs(full)))
+    maximum = float(np.max(difference))
+    return SurrogateSpotCheck(axis, maximum, ruler_name, frequency_db,
+                              math.isfinite(maximum) and maximum <= frequency_db, time.perf_counter() - clock)
 
 
 def third_octave_bands(frequencies_hz: Sequence[float]) -> tuple[Band, ...]:

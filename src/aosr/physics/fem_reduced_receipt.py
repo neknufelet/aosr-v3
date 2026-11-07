@@ -35,7 +35,9 @@ from typing import TypeGuard
 
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_check import PointHex, ValidationReport, seats_within_contract, within_reduced_contract
-from aosr.physics.fem_reduced_store import computation_digest, load_reduced, manifest_path, matrices_digest
+from aosr.physics.fem_reduced_store import (
+    computation_digest, load_operators_stamp, load_reduced, manifest_path, matrices_digest, operators_path,
+)
 
 RECEIPT_FORMAT_VERSION = 2
 _READABLE_VERSIONS = (1, 2)
@@ -295,6 +297,7 @@ def _check_verdict(document: Mapping[str, object], model: ReducedModel, rulers: 
 
 def load_validated_reduced(npz_path: Path, *, rulers: HoldoutRulers, expected_mesh_hash: str | None = None,
                            expected_physics_identity: str | None = None,
+                           current_operators_digest: str | None = None,
                            expected_source_points: Mapping[str, PointHex] | None = None,
                            expected_receiver_points: Mapping[str, PointHex] | None = None) -> ReducedModel:
     """准用閘門：:func:`load_reduced` 核完替身，再核驗證收據；任何一條不過都拋 :class:`ReducedModelNotValidated`
@@ -302,7 +305,14 @@ def load_validated_reduced(npz_path: Path, *, rulers: HoldoutRulers, expected_me
     就跟收據記的逐名逐座標比；版本 1 收據沒有座標，給了預期一律拒。"""
     try:
         model = load_reduced(npz_path, expected_mesh_hash=expected_mesh_hash,
-                             expected_physics_identity=expected_physics_identity)
+                             expected_physics_identity=expected_physics_identity if current_operators_digest is None else None)
+        if (current_operators_digest is not None and expected_physics_identity is not None
+                and model.physics_identity != expected_physics_identity):
+            if not operators_path(npz_path).exists():
+                raise ValueError("替身物理身分不同、沒有指紋小檔，要重建")
+            stamp = load_operators_stamp(npz_path)
+            if stamp["operators_digest"] != current_operators_digest:
+                raise ValueError("身分不同、完整模型指紋不同，完整模型真的變了、要重建")
         identity = _model_identity(npz_path, model)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ReducedModelNotValidated(f"替身讀不進來或對不上，拒用：{exc}") from exc

@@ -49,13 +49,13 @@ from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.gradient.boundary import BoundaryKey
 from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, header_for
 from aosr.gradient.run import (
-    LEDGER_FILE, RESULT_FILE, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
+    LEDGER_FILE, RESULT_FILE, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
     parse_result, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
     search_objective_settings, template_header_for, write_json_atomic,
 )
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.report_surfaces import validation_content
-from aosr.physics.fem_reduced import ReducedModel
+from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings
 from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.reporting.scheme import Scene, Scheme
@@ -249,6 +249,14 @@ def _annotate_endpoint(checked: EndpointResult, baseline: EndpointBaseline, pres
     return report, baseline
 
 
+def check_operators_digest(project: GradientProject, operators: FullOperators) -> None:
+    """沿用搜尋到終點時，用已匯出的完整算子再核開始時的指紋。"""
+    from aosr.physics.fem_reduced import operators_digest
+
+    if project.operators_digest is not None and operators_digest(operators) != project.operators_digest:
+        raise ValueError("完整模型指紋跟開始時不同，拒收")
+
+
 def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> EndpointRecord:
     """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
     checked_device_workers(device, workers)
@@ -276,6 +284,7 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     export_seconds = time.perf_counter() - clock
     if operators.mesh_hash != project.mesh_hash or operators.physics_identity != project.physics_identity:
         raise ValueError("方案匯出的完整模型跟開始時記的網格雜湊或物理身分不同，拒收")
+    check_operators_digest(project, operators)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     objective = search_objective_settings(project.purpose)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
