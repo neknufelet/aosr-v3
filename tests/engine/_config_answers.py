@@ -714,7 +714,7 @@ def _capture(call: Callable[[], object]) -> object:
     """
     try:
         return call()
-    except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=這一格要記錄「炸什麼」而不是讓它往外炸，例外的種類不影響判準
+    except Exception as exc:
         return {
             "raised": {
                 "type": type(exc).__name__,

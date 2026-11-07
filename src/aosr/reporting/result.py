@@ -250,6 +250,6 @@ def save_result(result: SchemeResult, path: Path) -> None:
             handle.write(result.model_dump_json())
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)  # noqa: PTH105  # expires=2026-12-08 reason=同目錄原子替換需明用 os.replace
+        temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)

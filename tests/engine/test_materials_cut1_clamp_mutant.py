@@ -69,7 +69,7 @@ def _load_mutant() -> ModuleType:
     code = compile(source.replace(CLAMP_LINE, MUTANT_LINE), str(path), "exec")
     sys.modules[MUTANT_NAME] = mutant
     try:
-        exec(code, mutant.__dict__)  # noqa: S102  # expires=2026-12-08 reason=這就是突變體本身：一份只活在這支考卷裡的產品副本，來源是版控裡那一支檔
+        exec(code, mutant.__dict__)
     finally:
         sys.modules.pop(MUTANT_NAME, None)
     return mutant

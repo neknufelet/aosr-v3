@@ -10,6 +10,7 @@ v2 **沒有任何考卷呼叫過** ``guard_art_patch_count``（只有生產碼�
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TypedDict, cast
 
 import pytest
@@ -42,7 +43,7 @@ def _ids(*, polygon: bool) -> list[str]:
     return sorted(case_id for case_id in probe_ids("art_lane") if f".{fn}." in case_id)
 
 
-def _run(fn: object, case_id: str) -> None:
+def _run(fn: Callable[..., None], case_id: str) -> None:
     """一筆 case：donor 說炸就炸（那條守門訊息也要一樣），說沒事就要真的沒事。"""
     case = probe_by_id(case_id)
     expected = expected_block(case)
@@ -50,11 +51,11 @@ def _run(fn: object, case_id: str) -> None:
     raised = probe_raised(expected)
     if raised is not None:
         with pytest.raises(ValueError) as caught:
-            fn(**args)  # type: ignore[operator]  # expires=2026-12-08 reason=fn 是執行期才知道的函式物件；這一支要測的就是它
+            fn(**args)
         assert str(caught.value) == raised["message"], "訊息跟 donor 不一樣——守門的說法也是行為"
     else:
         assert probe_value(expected) is None
-        fn(**args)  # type: ignore[operator]  # expires=2026-12-08 reason=同上
+        fn(**args)
 
 
 def test_patch_count_guard_matches_donor_on_every_declared_case() -> None:

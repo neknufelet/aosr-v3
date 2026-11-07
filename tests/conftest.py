@@ -79,14 +79,14 @@ NUMERIC_THREAD_ENVS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREA
 for _thread_env in NUMERIC_THREAD_ENVS:
     os.environ.setdefault(_thread_env, "1")
 
-import pytest  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 
-from governance import gh_replay, repo_residue  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
-from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
-from governance.loader import load_all_cards  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
-from governance.status import mirror_receipts  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+from governance import gh_replay, repo_residue
+from governance.exit_codes import TEMP_REPO_QUIET_CONFIG, ToolBroken
+from governance.loader import load_all_cards
+from governance.status import mirror_receipts
 
 MIRROR_TIMEOUT = 60
 

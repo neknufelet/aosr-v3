@@ -24,7 +24,7 @@ import inspect
 from collections.abc import Callable, Container, Iterable, Sized
 from dataclasses import fields, is_dataclass
 from types import ModuleType
-from typing import Final, SupportsFloat, cast, get_args
+from typing import Final, Protocol, SupportsFloat, cast, get_args
 
 from blueprint import materials_cut1_steps as steps
 
@@ -140,7 +140,7 @@ def run_case(lookup: Lookup, case: steps.CaseEntry) -> dict[str, object]:
     for index, step in enumerate(case["steps"]):
         try:
             _run_step(lookup, env, step)
-        except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=這一格要記錄「炸什麼」而不是讓它往外炸，例外的種類正是被比的東西
+        except Exception as exc:
             return {"raised": {"step": index, "type": type(exc).__name__, "message": str(exc)}}
     return {"values": {name: encode(_fetch(env, name)) for name in case["report"]}}
 
@@ -283,9 +283,15 @@ def _tree_double(value: object) -> object:
     return tree_util.tree_map(_doubled, value)
 
 
-def _doubled(leaf: object) -> object:
+class _Multipliable(Protocol):
+    """pytree 的葉子必須支援乘整數；不要求某家陣列的具體型別。"""
+
+    def __mul__(self, other: int, /) -> object: ...
+
+
+def _doubled(leaf: _Multipliable) -> object:
     """一片葉子乘二（寫成具名函式，``type-guard`` 才看得到它的標註）。"""
-    return leaf * 2  # type: ignore[operator]  # expires=2026-12-08 reason=葉子是執行期才知道的陣列型別，這裡要的就是「它乘得起來」
+    return leaf * 2
 
 
 def _through_jit(value: object) -> object:
