@@ -309,7 +309,7 @@ def cancel(directory: Path) -> None:
 def budget(directory: Path) -> None:
     operators = _operators()
     settings = SETTINGS.model_copy(update={"max_full_solves": 5})
-    models = [builder.build_reduced_model(operators, AXIS, WALLS[:2], settings=settings, workers=count)
+    models = [builder.build_reduced_model(operators, AXIS, WALLS[:2], settings=settings, workers=count, dense_threads=1)
               for count in (1, 2)]
     assert models[0].ledger.full_solves == models[1].ledger.full_solves == 5
     assert models[0].ledger.snapshots == models[1].ledger.snapshots == 10

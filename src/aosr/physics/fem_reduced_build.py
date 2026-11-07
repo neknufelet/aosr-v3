@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.fem_reduced import ReducedModelSettings
+from aosr.physics.dense_threads import checked_dense_threads, dense_blas_threads
 from aosr.physics.fem_full_batch import FullSolveBatch, checked_workers
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
@@ -40,6 +42,7 @@ class _Build:
     solver: FullSolver
     batch_solver: FullSolveBatch
     workers: int
+    dense_threads: int | None = None
     snapshots: list[NDArray[np.complex128]] = field(default_factory=list)
     seen: set[Point2] = field(default_factory=set)
     rounds: list[GreedyRound] = field(default_factory=list)
@@ -63,12 +66,13 @@ class _Build:
         self.seconds["snapshot"] += elapsed_since(start)
 
     def reduce(self) -> tuple[NDArray[np.float64], ReducedMatrices]:
-        start = time.perf_counter()
-        basis = snapshot_basis(self.snapshots, self.settings.svd_relative_cutoff)
-        self.seconds["svd"] += elapsed_since(start)
-        start = time.perf_counter()
-        matrices = project(self.operators, basis)
-        self.seconds["projection"] += elapsed_since(start)
+        with dense_blas_threads(self.dense_threads):
+            start = time.perf_counter()
+            basis = snapshot_basis(self.snapshots, self.settings.svd_relative_cutoff)
+            self.seconds["svd"] += elapsed_since(start)
+            start = time.perf_counter()
+            matrices = project(self.operators, basis)
+            self.seconds["projection"] += elapsed_since(start)
         return basis, matrices
 
     def residual(self, basis: NDArray[np.float64], matrices: ReducedMatrices, point: Point2) -> float:
@@ -102,8 +106,9 @@ class _Build:
             return None
         start = time.perf_counter()
         chosen = rng.choice(len(pool), size=min(self.settings.candidates_per_round, len(pool)), replace=False)
-        scored = sorted(((self.residual(basis, matrices, pool[int(i)]), pool[int(i)]) for i in chosen),
-                        key=lambda item: item[0], reverse=True)
+        with dense_blas_threads(self.dense_threads):
+            scored = sorted(((self.residual(basis, matrices, pool[int(i)]), pool[int(i)]) for i in chosen),
+                            key=lambda item: item[0], reverse=True)
         self.seconds["greedy"] += elapsed_since(start)
         selected = [point for _, point in scored[:self.settings.batch]]
         values = [value for value, _ in scored]
@@ -117,6 +122,7 @@ class _Build:
 def build_reduced_model(
     operators: FullOperators, frequencies_hz: Sequence[float],
     training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings, workers: int = 1,
+    dense_threads: int | None = None,
 ) -> ReducedModel:
     """完整解快照（每點重新分解、殘差超過上限就報錯）→ 殘差貪婪補點 → 實數 SVD → 投影的小矩陣與建模帳。
 
@@ -124,13 +130,15 @@ def build_reduced_model(
     或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。
     """
     checked_workers(workers)
+    threads = checked_dense_threads(dense_threads)
+    sys.stderr.write(f"完整解 {workers} 行程、裝置 cpu、稠密段 {threads} 緒\n")
     start = time.perf_counter()
     axis = checked_axis(frequencies_hz)
     training = impedance_rows(training_impedances, axis, patch_keys=operators.patch_keys)
     with FullSolveBatch(operators, max_relative_residual=settings.full_solve_max_relative_residual,
                        workers=workers) as batch_solver:
         build = _Build(operators=operators, axis=axis, training=training, settings=settings,
-                       solver=batch_solver.solver, batch_solver=batch_solver, workers=workers)
+                       solver=batch_solver.solver, batch_solver=batch_solver, workers=workers, dense_threads=threads)
         rng = np.random.default_rng(settings.greedy_seed)
         pending = [(material, index)
                    for material in even_indices(settings.initial_impedance_count, len(training))

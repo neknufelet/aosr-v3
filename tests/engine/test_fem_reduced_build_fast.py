@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import cast
 
 import numpy as np
@@ -33,6 +33,7 @@ from tests.engine._scheme_cache import bitwise_equal
 from tests.engine._zone_rom_case import AXIS, SETTINGS
 
 ROUNDING = 64 * np.finfo(np.float64).eps
+CROSS_MACHINE_RELATIVE = 1e-6
 Case = tuple[FullOperators, tuple[float, ...], Sequence[FrequencyBoundaryImpedances], ReducedModelSettings]
 
 
@@ -69,7 +70,7 @@ def built(request: pytest.FixtureRequest) -> tuple[str, Case, ReducedModel, NDAr
         patch.setattr(_Build, "solve", solve)
         patch.setattr(_Build, "reduce", reduce)
         operators, axis, training, settings = case
-        model = build_reduced_model(operators, axis, training, settings=settings)
+        model = build_reduced_model(operators, axis, training, settings=settings, dense_threads=1)
     return name, case, model, bases[0], batches
 
 
@@ -87,10 +88,43 @@ def test_build_matches_starting_commit_points_and_ledger(
     for row, expected in zip(actual["rounds"], control["rounds"], strict=True):
         for key in expected:
             if key in ("max_residual", "median_residual"):
-                assert abs(row[key] - expected[key]) <= ROUNDING
+                # 控制值是本機（AMD）量的；雲端 Intel AVX-512 機器的 PARDISO 快照差末位，殘差跟著差（#1037 實量絕對差 1.2e-11）。
+                # 選點、快照數、秩、停因上面逐項相等才是這題要抓的；殘差只守跨機器捨入。
+                assert abs(row[key] - expected[key]) <= CROSS_MACHINE_RELATIVE * abs(expected[key])
             else:
                 assert row[key] == expected[key]
     assert set(model.ledger.seconds) == {"snapshot", "svd", "projection", "greedy", "total"}
+
+
+def test_many_threads_matches_single_thread_points_and_ledger(
+    built: tuple[str, Case, ReducedModel, NDArray[np.float64], list[list[Point2]]],
+    monkeypatch: pytest.MonkeyPatch, record_property: Callable[[str, object], None],
+) -> None:
+    """抓多緒改變貪婪路徑；殘差另守多緒 SVD 的捨入差，不動單緒控制組的尺。"""
+    name, (operators, axis, training, settings), single, _, batches = built
+    actual_batches: list[list[Point2]] = []
+    original_solve = _Build.solve
+
+    def solve(build: _Build, pending: Sequence[Point2]) -> None:
+        actual_batches.append(list(pending[:max(0, build.settings.max_full_solves - build.solver.solves)]))
+        original_solve(build, pending)
+
+    monkeypatch.setattr(_Build, "solve", solve)
+    many = build_reduced_model(operators, axis, training, settings=settings, dense_threads=4)
+    assert actual_batches == batches
+    for key in ("full_solves", "snapshots", "rank", "stop_reason"):
+        assert getattr(many.ledger, key) == getattr(single.ledger, key)
+    assert len(many.ledger.rounds) == len(single.ledger.rounds)
+    for index, (one, four) in enumerate(zip(single.ledger.rounds, many.ledger.rounds, strict=True)):
+        for field in dataclasses.fields(one):
+            before, after = getattr(one, field.name), getattr(four, field.name)
+            if field.name in ("max_residual", "median_residual"):
+                relative = 0.0 if before == after else abs(after - before) / abs(before)
+                record_property(f"{name}_round_{index}_{field.name}_relative_difference", relative)
+                # 多緒 SVD 在近重根方向轉基底，11-07 實量 2.6e-8。
+                assert relative <= 1e-6
+            else:
+                assert after == before
 
 
 def _legacy_project(operators: FullOperators, basis: NDArray[np.float64]) -> ReducedMatrices:
@@ -191,7 +225,7 @@ def test_greedy_residual_avoids_assembly_and_complex_basis(
 def test_validation_report_bitwise_matches_interleaved_control(workers: int, monkeypatch: pytest.MonkeyPatch) -> None:
     """抓留出驗證更動數值或在完整解尚未收齊時求替身；兩支真完整解路徑各對起點逐位。"""
     operators, axis, training, settings = _case("zones")
-    model = build_reduced_model(operators, axis, training, settings=settings)
+    model = build_reduced_model(operators, axis, training, settings=settings, dense_threads=1)
     holdouts = zones._zoned_materials(99, 2)
     expected_steps: list[int] = []
     expected = legacy_validate(model, operators, holdouts, workers=workers, refinement_steps=expected_steps)
@@ -211,6 +245,6 @@ def test_validation_report_bitwise_matches_interleaved_control(workers: int, mon
     monkeypatch.setattr(FullSolveBatch, "map", mapped)
     monkeypatch.setattr(check, "evaluate_reduced", evaluate)
     steps: list[int] = []
-    actual = check.validate_reduced(model, operators, holdouts, workers=workers, refinement_steps=steps)
+    actual = check.validate_reduced(model, operators, holdouts, workers=workers, refinement_steps=steps, dense_threads=1)
     assert bitwise_equal(actual, expected)
     assert steps == expected_steps
