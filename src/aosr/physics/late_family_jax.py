@@ -16,7 +16,7 @@ import jax.numpy as jnp
 
 from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
-from aosr.materials.catalog_absorption import _PARIS_MAPPED_WEIGHTS as PARIS_MAPPED_WEIGHTS, _PARIS_MU as PARIS_MU
+from aosr.materials.catalog_absorption import _PARIS_MAPPED_WEIGHTS, _PARIS_MU
 from aosr.materials.transfer_matrix import trapezoidal_integral
 from aosr.physics.crossover_jax import CheckedBands
 from aosr.physics.late_energy_jax import (
@@ -66,7 +66,7 @@ def constant_absorption_arrays(impedance_pa_s_m: jax.Array, rho_c_pa_s_m: float 
     valid = jnp.isfinite(z) & (z.real > 0.0) & valid_rho
     safe_z, safe_rho = jnp.where(valid, z, 1.0 + 0j), jnp.where(valid_rho, rho, 1.0)
     zeta = safe_z / safe_rho
-    mu, weights = jnp.asarray(PARIS_MU, dtype=z.real.dtype), jnp.asarray(PARIS_MAPPED_WEIGHTS, dtype=z.real.dtype)
+    mu, weights = jnp.asarray(_PARIS_MU, dtype=z.real.dtype), jnp.asarray(_PARIS_MAPPED_WEIGHTS, dtype=z.real.dtype)
     reflection = (zeta[..., None] * mu - 1.0) / (zeta[..., None] * mu + 1.0)
     result = 2.0 * jnp.sum(weights * (1.0 - jnp.abs(reflection) ** 2) * mu, axis=-1)
     valid = valid & jnp.isfinite(result)

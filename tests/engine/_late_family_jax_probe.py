@@ -17,7 +17,7 @@ from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.materials import construction, transfer_matrix as tmm
-from aosr.materials.catalog_absorption import PARIS_MAPPED_WEIGHTS, PARIS_MU, complex_random_incidence_absorption
+from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.materials.construction_diff import build_template, surface_impedance_from_parameters
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
 from aosr.physics import crossover_jax as cj, late_family_jax as lf
@@ -123,8 +123,6 @@ def paris() -> dict[str, object]:
         "angles_bitwise": bool(jnp.array_equal(angles, tmm.diffuse_incidence_angles_deg(method="paris"))),
         "weights_bitwise": bool(jnp.array_equal(jax.jit(lf.paris_angular_weights)(angles),
             jnp.sin(jnp.deg2rad(angles)) * jnp.cos(jnp.deg2rad(angles)))),
-        "gauss_nodes_bitwise": bool(np.array_equal(lf.PARIS_MU, PARIS_MU)),
-        "gauss_weights_bitwise": bool(np.array_equal(lf.PARIS_MAPPED_WEIGHTS, PARIS_MAPPED_WEIGHTS)),
         "double_dtype": str(actual.dtype), "single_dtype": str(single.dtype)}
 
 

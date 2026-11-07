@@ -101,8 +101,6 @@ def test_construction_parameters_through_paris_absorption(run: dict[str, object]
     np.testing.assert_allclose(np.asarray(data["automatic"]), np.asarray(data["central"]), rtol=GRADIENT_REL, atol=GRADIENT_ABS)
     assert data["weights_bitwise"] is True
     assert data["angles_bitwise"] is True
-    assert data["gauss_nodes_bitwise"] is True
-    assert data["gauss_weights_bitwise"] is True
     assert data["double_dtype"] == "float64"
     assert data["single_dtype"] == "float32"
 

@@ -193,11 +193,11 @@ def solve_geometric_early(
             pk = jnp.sum(jnp.where(selected, pressure, jnp.zeros((), dtype=pressure.dtype)), axis=0)
             pr = pr + (1.-safe_s)**(order/2.)*pk
         pr = pr+jnp.asarray(pair.furniture_pressure, dtype=pressure.dtype)
+        reflection_valid.append(valid)
         valid = valid & scattering_valid
         direct.append(jnp.abs(pd)**2)
         reflected.append(jnp.where(valid, jnp.abs(pr)**2, jnp.nan))
         interference.append(jnp.where(valid, 2.*jnp.real(pd*jnp.conj(pr)), jnp.nan))
-        reflection_valid.append(valid)
     def pack(rows: list[jax.Array]) -> jax.Array:
         return jnp.stack(rows).reshape(table.shape)
     s_valid = jnp.broadcast_to(scattering_valid, table.shape)

@@ -180,7 +180,7 @@ def test_flags_nan_and_valid_frequency_gradients(bad: str, quantity: str) -> Non
     if not bad.startswith("bounce"):
         assert np.isnan(room_s[0])
     assert not bool(result.valid[0, 0, 0])
-    assert not bool(result.reflection_valid[0, 0, 0])
+    assert bool(result.reflection_valid[0, 0, 0]) == (not bad.startswith("bounce"))
     assert bool(result.scattering_valid[0, 0, 0]) == bad.startswith("bounce")
     assert np.asarray(result.valid[..., 1:]).all()
     assert np.asarray(result.reflection_valid[..., 1:]).all()
