@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from types import ModuleType
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -33,15 +32,39 @@ class SinglePrecisionFactor(Protocol):
 FactorFactory = Callable[[csr_matrix[np.complex64], NDArray[np.complex64]], SinglePrecisionFactor]
 
 
+class NvmathSolverOptions(Protocol):
+    """nvmath 1.0.0 選項中本票使用的欄位；上游以整數接收矩陣種類列舉。"""
+
+    sparse_system_type: int
+
+
+class NvmathMatrixTypes(Protocol):
+    """只描述本票使用的複數對稱種類；上游 MatrixType 是 IntEnum。"""
+
+    SYMMETRIC: int
+
+
+class NvmathAdvanced(Protocol):
+    """選用模組的具體介面；只收本票使用的 CPU 單精度運算元與選項。"""
+
+    DirectSolverMatrixType: NvmathMatrixTypes
+
+    def DirectSolver(self, a: csr_matrix[np.complex64], b: NDArray[np.complex64], *,
+                     options: NvmathSolverOptions | None = None) -> SinglePrecisionFactor: ...
+
+    # 上游是 dataclass，亦接受位置參數與預設值；此處只開本票使用的具名參數。
+    def DirectSolverOptions(self, *, sparse_system_type: int) -> NvmathSolverOptions: ...
+
+
 def nvmath_factor(a: csr_matrix[np.complex64], b: NDArray[np.complex64]) -> SinglePrecisionFactor:
     """只有選 GPU 並真的解第一題才載入選用依賴；複數對稱不是 Hermitian（共軛對稱）。"""
     if TYPE_CHECKING:
-        advanced: ModuleType
+        advanced: NvmathAdvanced
     else:
         import nvmath.sparse.advanced as advanced
 
-    return cast(SinglePrecisionFactor, advanced.DirectSolver(a, b, options=advanced.DirectSolverOptions(
-        sparse_system_type=advanced.DirectSolverMatrixType.SYMMETRIC)))
+    return advanced.DirectSolver(a, b, options=advanced.DirectSolverOptions(
+        sparse_system_type=advanced.DirectSolverMatrixType.SYMMETRIC))
 
 
 class GPUFullSolver(FullSolver):
