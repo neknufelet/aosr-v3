@@ -192,7 +192,7 @@ name = "amplitude_jax_vs_python"
 value = 3.552713678800501e-15
 display = "2^-48"
 unit = "absolute"
-decision_paper = "amplitude-jax-vs-python-double-reference.md"
+decision_paper = "stage-three-objective-jax-rulers.md"
 truth = "暫定（#562）：鏡像法 JAX 雙精度版（src/aosr/physics/amplitude_jax.py）對現有 Python 雙精度實作，四組三階 63 條案例（flat、varied、220 點幾何路軸、兩面構造牆逐角 Z）；同一個基底餵進現有界線函式：反射乘積每分量絕對差、路徑壓力相對差、總壓力平方相加開根、反射能量（地板取同一基底）、直達能量相對差；2026-10-28 本機量到最大只用到界線的 0.125（2^-50 時 0.5、2^-52 已超界），取 8 倍餘裕。單精度對雙精度只量不登記"
 mutant_test = "tests/engine/test_amplitude_jax.py::test_amplitude_jax_mutant_beyond_tolerance_is_red"
 
@@ -222,3 +222,66 @@ unit = "absolute"
 decision_paper = "material-stage-tmm-gpu-single-precision-search-ruler.md"
 truth = "同一 θ、同一替身與搜尋設定，顯卡單精度鏈（矩陣乘法全精度）對 CPU 雙精度的 objective_total 絕對差，單位 dB。2026-11-06 實測 2.0e-5 dB，對登記尺有 50 倍餘裕；只守目標值，不宣稱梯度誤差界。"
 mutant_test = "tests/engine/test_material_gradient_gpu.py::test_perturbed_constant_exceeds_single_precision_contract"
+
+[[contract]]
+name = "late_decay_t20_jax_vs_numpy"
+value = 3.637978807091713e-12
+display = "2^-38"
+unit = "relative"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "JAX 中央處理器雙精度逐帶 T20 對 late_decay.solve_late_decay_t20 的 256 階、精確根尾巴與軟視窗擬合；同尺守對稱化最大根對 numpy 精確最大模根：三份 reference_art_decay_{flat,varied,lowabs} 小房、非均勻逐格吸音率與低吸音尾巴案例、109 原牆正式結果取出的 216 格 220 頻點吸音率；實量最大相對差 3.29e-15，界線留約 1100 倍。等價域限兩邊皆可估帶；α＝1、正 α 的吸音效應在工作精度的 1−α 中捨成零是定義差，numpy 會計算或丟錯，JAX 亮無效吸音旗標並回 NaN，不宣稱這些格等價。工程暫定；顯卡單精度另立尺"
+mutant_test = "tests/engine/test_late_decay_jax.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "reverberation_cost_jax_vs_python"
+value = 4.547473508864641e-13
+display = "2^-41"
+unit = "absolute"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "JAX 中央處理器雙精度殘響類代價、逐帶區間與相鄰突變對 reverberation_cost.cost_reverberation_evaluation 與 cost_shapes.shape_cost：登記簿、小房 T20、缺帶旗標、109 原牆七帶與 128 組固定種子帶值；實量最大絕對差 4.44e-16，界線留約 1024 倍。等價域為正有限 T20 與兩邊一致的缺帶資料；T20≤0 是定義差，Python 代價會丟錯，JAX 亮不可用旗標、該帶回 NaN 並排除；夾具把這些格轉成缺帶只用來對排除後代價，不宣稱原始非法輸入等價。工程暫定；顯卡單精度另立尺"
+mutant_test = "tests/engine/test_reverberation_cost_jax.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "reflections_cost_jax_vs_python"
+value = 1.8189894035458565e-12
+display = "2^-39"
+unit = "absolute"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "中央處理器 JAX 雙精度（未編譯及 jit）對既有 evaluate_reflections + reflections_cost.cost_reflections_evaluation：小房、補窗小房、逐頻複數阻抗與 109 原牆整面正式輸入，類代價（無量綱）、逐區超標（dB）與區代價分別比絕對差。實量最大 1.7763568394002505e-15（逐區 dB），2^-39 留 1024 倍餘裕；工程暫定；顯卡單精度另立尺。窗內路徑能量由 reflection_path_energy_jax_vs_python 的相對尺另判"
+mutant_test = "tests/engine/test_reflections_jax.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "reflection_path_energy_jax_vs_python"
+value = 1.8189894035458565e-12
+display = "2^-39"
+unit = "relative"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "中央處理器 JAX 雙精度（未編譯及 jit）逐路徑 (1-s)^order |p|²/|p_direct|² 對既有 amplitude 反射乘積及壓力、report_path_table.build_path_table：小房、補窗小房、逐頻複數阻抗、偏軸指向性小房與 109 原牆整面正式輸入。實量最大相對差 2.0692957212148477e-15（補窗小房未編譯），109 為 1.43292586964537e-15；2^-39 留約 879 倍餘裕，零能量必須恰為零。工程暫定；顯卡單精度另立尺"
+mutant_test = "tests/engine/test_reflections_jax.py::test_path_energy_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "timbre_cost_jax_vs_python"
+value = 9.094947017729282e-13
+display = "2^-40"
+unit = "absolute"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "CPU 冷子行程 JAX 雙精度對 evaluate_timbre＋evaluate_timbre_channels＋cost_timbre_evaluation 的類代價；既有小房管線逐點能量、非等權三座位曲線、多比較對、重排、直達開關、零權重最差座位與 109 正式 report.points。實量最大絕對差 8.881784197001252e-16，約千倍餘裕。工程暫定；顯卡單精度另立尺。"
+mutant_test = "tests/engine/test_timbre_cost_jax.py::test_timbre_cost_jax_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "listening_area_cost_jax_vs_python"
+value = 9.094947017729282e-13
+display = "2^-40"
+unit = "absolute"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "CPU 冷子行程 JAX 雙精度對 evaluate_listening_area＋evaluate_listening_area_channels＋cost_listening_area_evaluation 的類代價；既有小房管線逐點能量、非等權三座位曲線、多比較對、重排、直達開關、零權重最差座位與 109 正式 report.points。實量最大絕對差 8.881784197001252e-16，約千倍餘裕。工程暫定；顯卡單精度另立尺。"
+mutant_test = "tests/engine/test_timbre_cost_jax.py::test_listening_area_cost_jax_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "channel_matching_cost_jax_vs_python"
+value = 2.2737367544323206e-13
+display = "2^-42"
+unit = "absolute"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "CPU 冷子行程 JAX 雙精度對 evaluate_channel_matching＋cost_channel_matching_evaluation 的類代價；逐點傾斜用音色量，起伏用左右匹配自己範圍重算，反射差只診斷。既有小房、非等權三座位、多比較對、重排、直達開關、零權重最差座位與 109 正式 report.points；實量最大絕對差 2.220446049250313e-16，約千倍餘裕。工程暫定；顯卡單精度另立尺。"
+mutant_test = "tests/engine/test_timbre_cost_jax.py::test_channel_matching_cost_jax_mutant_beyond_tolerance_is_red"

@@ -126,6 +126,13 @@ def test_registry_has_the_named_contracts() -> None:
         "fem_reduced_holdout_band_db",
         "fem_reduced_jax_vs_numpy",
         "amplitude_jax_vs_python",
+        "late_decay_t20_jax_vs_numpy",
+        "reverberation_cost_jax_vs_python",
+        "reflections_cost_jax_vs_python",
+        "reflection_path_energy_jax_vs_python",
+        "timbre_cost_jax_vs_python",
+        "listening_area_cost_jax_vs_python",
+        "channel_matching_cost_jax_vs_python",
         "stage_one_objective_jax_vs_python",
         "rom_search_gpu_single_vs_cpu_double",
     }
