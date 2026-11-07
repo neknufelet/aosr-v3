@@ -22,12 +22,12 @@ import signal
 import sys
 from pathlib import Path
 from types import FrameType
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 import jax
 
 from aosr import runtime
-from aosr.physics.fem_full_batch import checked_workers
+from aosr.physics.fem_full_batch import checked_workers, checked_device_workers
 from aosr.gradient.endpoint_run import run_endpoint
 from aosr.gradient.material_gradient import SearchStopped, StopCheck
 from aosr.gradient.material_gradient_ledger import read_ledger
@@ -35,6 +35,9 @@ from aosr.gradient.run import (
     LEDGER_FILE, STATUS_FILE, GradientStatus, State, ledger_progress, now_text, resume_search, run_search,
     read_project, stop_requested, template_ledger_progress, write_json_atomic,
 )
+
+if TYPE_CHECKING:
+    from aosr.gradient.gpu import Device
 
 Mode = Literal["start", "resume"]
 MODES: Final[tuple[Mode, ...]] = ("start", "resume")
@@ -92,12 +95,15 @@ def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
     return EXIT_DONE
 
 
-def run_endpoint_worker(folder: Path, *, workers: int = 1) -> int:
+def run_endpoint_worker(folder: Path, *, workers: int = 1, device: Device = "cpu") -> int:
     """終點一次：寫 ``scheme-endpoint.json`` 與 ``endpoint.json``，回離開碼；不寫狀態檔。"""
     try:
+        checked_device_workers(device, workers)
         if runtime.jax_settings() != ("cpu", True):
             raise RuntimeError(f"終點子行程要中央處理器＋雙精度，生效的是 {runtime.jax_settings()!r}")
-        if workers == 1:
+        if device == "gpu":
+            run_endpoint(folder, workers=workers, device=device)
+        elif workers == 1:
             run_endpoint(folder)
         else:
             run_endpoint(folder, workers=workers)
@@ -111,20 +117,30 @@ def run_endpoint_worker(folder: Path, *, workers: int = 1) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) not in (2, 4) or argv[1] not in (*MODES, ENDPOINT_MODE):
+    if len(argv) not in (2, 4, 6) or argv[1] not in (*MODES, ENDPOINT_MODE):
         sys.stderr.write("用法：python -m aosr.gradient.worker <資料夾> start|resume|endpoint\n")
         return 2
     folder = Path(argv[0]).resolve()
     workers = 1
-    if len(argv) == 4:
-        if argv[1] != ENDPOINT_MODE or argv[2] != "--workers":
+    device: Device = "cpu"
+    seen: set[str] = set()
+    for option, value in zip(argv[2::2], argv[3::2], strict=True):
+        if argv[1] != ENDPOINT_MODE or option in seen:
             return 2
+        seen.add(option)
         try:
-            workers = checked_workers(int(argv[3]))
+            if option == "--workers":
+                workers = checked_workers(int(value))
+            elif option == "--device" and value in ("cpu", "gpu"):
+                device = "gpu" if value == "gpu" else "cpu"
+            else:
+                return 2
         except ValueError as error:
             sys.stderr.write(f"{error}\n")
             return 2
     if argv[1] == ENDPOINT_MODE:
+        if device == "gpu":
+            return run_endpoint_worker(folder, workers=workers, device=device)
         return run_endpoint_worker(folder) if workers == 1 else run_endpoint_worker(folder, workers=workers)
     mode: Mode = "start" if argv[1] == "start" else "resume"
     return run_worker(folder, mode, should_stop=stop_requested(folder))

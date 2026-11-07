@@ -626,3 +626,24 @@ def test_saved_batch_reaches_endpoint_chain(runs: tuple[Path, Record], tmp_path:
     output = _batch_probe(folder, "endpoint", tmp_path)
     assert output["batches"] == [7]
     assert output["paths"] == ["endpoint"]
+
+
+def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record], tmp_path: Path) -> None:
+    """CPU 不增任何 JSON 位元組；GPU 終點與原牆都真用單精度分解並記修正次數。"""
+    record = _record(_folder(runs))
+    original = record.model_dump(mode="json", exclude={"device", "max_refinement_steps"})
+    expected = (json.dumps(original, ensure_ascii=False, allow_nan=False) + "\n").encode()
+    for candidate in (record, record.model_copy(update={"device": "cpu"})):
+        run.write_json_atomic(tmp_path / "endpoint.json", candidate)
+        assert (tmp_path / "endpoint.json").read_bytes() == expected
+    probe = _section(runs, "probe")
+    gpu = EndpointRecord.model_validate(probe["gpu"])
+    assert gpu.device == "gpu" and gpu.max_refinement_steps is not None and gpu.max_refinement_steps > 0
+    steps = cast(list[int], probe["gpu_steps"])
+    assert len(steps) == gpu.report.full_solves + gpu.baseline.full_solves
+    assert gpu.max_refinement_steps == max(steps)
+    factors = cast(list[dict[str, object]], probe["gpu_factors"])
+    assert len(factors) == 2  # 終點和原牆兩個擁有資源的區段都要走 GPU。
+    assert all(factor["freed"] is True for factor in factors)
+    assert [factor["factorizations"] for factor in factors] == [gpu.report.full_solves, gpu.baseline.full_solves]
+    assert all(cast(int, factor["calls"]) > cast(int, factor["factorizations"]) for factor in factors)

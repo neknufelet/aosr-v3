@@ -12,7 +12,7 @@ from functools import partial
 from itertools import islice
 from multiprocessing.synchronize import Event
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,6 +20,7 @@ from scipy.sparse import csr_matrix
 
 from aosr import runtime
 from aosr.physics.fem_reduced import FullOperators, FullSolver
+from aosr.physics.fem_full_gpu import GPUFullSolver
 from aosr.physics.fem_reduced_boundary import BoundaryImpedances
 
 if TYPE_CHECKING:
@@ -35,6 +36,21 @@ def checked_workers(workers: int) -> int:
     if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError("workers 必須是正整數")
     return workers
+
+
+def checked_device_workers(device: Literal["cpu", "gpu"], workers: int) -> None:
+    """單張顯卡只用一個工人；錯誤在開子行程或組裝前拒收。"""
+    checked_workers(workers)
+    if device not in ("cpu", "gpu"):
+        raise ValueError("device 必須是 cpu 或 gpu")
+    if device == "gpu" and workers != 1:
+        raise ValueError("gpu 完整解的 workers 必須是 1")
+
+
+def collect_refinement_steps(solver: FullSolver, steps: list[int] | None) -> None:
+    """只把顯卡的每頻修正次數交給呼叫端；CPU 不增記錄。"""
+    if steps is not None and isinstance(solver, GPUFullSolver):
+        steps.extend(solver.refinement_steps)
 
 
 def _spawn_ready() -> None:
@@ -145,18 +161,25 @@ def _solve_worker(job: FullSolveJob) -> NDArray[np.complex128]:
 class FullSolveBatch:
     """給算子、殘差上限與工人數，以 map 解一批（頻率、牆阻抗）。
 
-    ``workers=1`` 只呼叫同一個 ``FullSolver.solve``；多行程只平行完整解，
+    CPU 的 ``workers=1`` 只呼叫同一個 ``FullSolver.solve``；多行程只平行完整解，
+    GPU 必須單工人，使用 ``GPUFullSolver``；離開區段時釋放分解器。
     ``solver`` 保留父行程的 system 與累計解次，供建模貪婪殘差與帳本沿用。
     同一區段可 map 多輪；工人、稀疏錨點與求解器一直重用，離開區段時收回。
     多行程批次出錯關閉後不可再 map；正在算的工作不會被中斷，可能在背景算完。
     """
 
-    def __init__(self, operators: FullOperators, *, max_relative_residual: float, workers: int = 1) -> None:
+    def __init__(self, operators: FullOperators, *, max_relative_residual: float, workers: int = 1,
+                 device: Literal["cpu", "gpu"] = "cpu") -> None:
+        checked_device_workers(device, workers)
         self._workers = checked_workers(workers)
         self._operators = operators
         self._limit = max_relative_residual
         self.solver = FullSolver(operators, max_relative_residual=max_relative_residual)
+        if device == "gpu":
+            self.solver = GPUFullSolver(operators, max_relative_residual=max_relative_residual)
         self._stack = ExitStack()
+        if isinstance(self.solver, GPUFullSolver):
+            self._stack.callback(self.solver.close)
         self._pool: ProcessPoolExecutor | None = None
         self._failed = False
 

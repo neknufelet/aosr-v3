@@ -57,7 +57,7 @@ from types import FrameType
 from typing import TYPE_CHECKING, Final
 
 from aosr import runtime
-from aosr.physics.fem_full_batch import checked_workers
+from aosr.physics.fem_full_batch import checked_workers, checked_device_workers
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
@@ -134,6 +134,7 @@ def _parser() -> argparse.ArgumentParser:
     stop.add_argument("folder", type=Path)
     endpoint = commands.add_parser("endpoint", help="終點：完整模型重算、原牆基準、匯出方案檔")
     endpoint.add_argument("folder", type=Path)
+    endpoint.add_argument("--device", choices=("cpu", "gpu"), default="cpu", help="完整解裝置；預設 cpu")
     endpoint.add_argument("--workers", type=_workers, default=1, help="完整解工人數；預設 1（單行程）")
     report = commands.add_parser("report", help="只讀報告")
     report.add_argument("--folder", type=Path, required=True)
@@ -194,6 +195,9 @@ def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1, 
     runtime.configure_jax(platforms="cuda,cpu" if device == "gpu" and mode != "endpoint" else "cpu",
                           enable_x64=True, env=env)
     command = [sys.executable, "-m", "aosr.gradient.worker", str(folder), mode]
+    if mode == "endpoint" and device == "gpu":
+        checked_device_workers(device, workers)
+        command.extend(("--device", device))
     if workers != 1:
         command.extend(("--workers", str(checked_workers(workers))))
     process: subprocess.Popen[bytes] | None = None
@@ -336,9 +340,12 @@ def _endpoint(args: argparse.Namespace) -> int:
     """拿資料夾鎖、起終點子行程（同一條 ``_spawn_and_wait``）；輸入閘門與結果檔核對在子行程裡做。"""
     from aosr.gradient import run
 
+    checked_device_workers(args.device, args.workers)
     folder = args.folder.resolve()
     run.read_project(folder)
     with _locked(folder) as descriptor:
+        if args.device == "gpu":
+            return _spawn_and_wait(folder, "endpoint", descriptor, workers=args.workers, device=args.device)
         if args.workers == 1:
             return _spawn_and_wait(folder, "endpoint", descriptor)
         return _spawn_and_wait(folder, "endpoint", descriptor, workers=args.workers)
