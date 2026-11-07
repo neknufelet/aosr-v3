@@ -66,7 +66,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Final, cast
+from typing import Final, TypedDict, cast
 
 from pydantic import BaseModel
 
@@ -226,7 +226,7 @@ def call_block(fn: Callable[..., object], args: dict[str, object]) -> dict[str, 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             value = fn(**args)
-    except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=這一支要記錄「炸什麼」而不是讓它往外炸，例外的種類不影響判準
+    except Exception as exc:
         return {"raised": {"type": type(exc).__name__, "message": str(exc)}}
     block: dict[str, object] = {"value": encode(value)}
     if caught:
@@ -240,23 +240,23 @@ def _read_attr(built: object, name: str) -> dict[str, object]:
     """讀一個屬性；讀的當下炸掉（例如守門）就記成例外。"""
     try:
         value = getattr(built, name)
-    except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=屬性本身就是守門（值不合法時丟例外），這裡要記錄它而不是讓它往外炸
+    except Exception as exc:
         return {"raised": {"type": type(exc).__name__, "message": str(exc)}}
     return {"value": encode(value)}
 
 
-def _spl_output_block(cls: object, args: dict[str, object]) -> dict[str, object]:
+def _spl_output_block(cls: Callable[..., object], args: dict[str, object]) -> dict[str, object]:
     """建一個 ``SplOutputConfig``，連它的兩個屬性一起收（屬性要從真的物件上讀）。
 
     屬性要在**還沒編碼之前**、從真的物件上讀（編碼之後它只是一個 JSON 記號，沒有屬性）；
     建不起來的那幾筆已經由 ``call_block`` 記下例外了，這裡不再多收屬性。
     """
-    block = call_block(cls, args)  # type: ignore[arg-type]  # expires=2026-12-08 reason=cls 是從模組上拿下來的類別物件，型別樁只知道它是 object；這裡要的就是「執行期那一格」
+    block = call_block(cls, args)
     if "value" not in block:
         return block
     try:
-        built = cls(**args)  # type: ignore[operator]  # expires=2026-12-08 reason=執行期才知道的類別物件，型別樁表達不了
-    except Exception:  # noqa: BLE001  # expires=2026-12-08 reason=同上一行：建不起來的那些 case 不是這一格要報的事
+        built = cls(**args)
+    except Exception:
         return block
     for name in ("l_ref_db", "is_relative"):
         block[name] = _read_attr(built, name)
@@ -348,7 +348,7 @@ def _raised_block(call: Callable[[], object]) -> dict[str, object]:
     """
     try:
         value = call()
-    except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=這一格要記錄「炸什麼」而不是讓它往外炸，例外的種類不影響判準
+    except Exception as exc:
         return {
             "raised": {
                 "type": type(exc).__name__,
@@ -503,9 +503,25 @@ def _case_id(record: dict[str, object]) -> str:
     return case_id
 
 
-def build_payload(v2_root: Path, data_dir: Path) -> dict[str, object]:
+class ModuleRecord(TypedDict):
+    """一支模組交出的常數與探針紀錄。"""
+
+    constants: dict[str, object]
+    probes: list[dict[str, object]]
+
+
+class ConfigPayload(TypedDict):
+    """答案檔最外層的固定形狀；數字與紀錄仍由原流程蒐集。"""
+
+    schema: int
+    donor: dict[str, object]
+    note: str
+    modules: dict[str, ModuleRecord]
+
+
+def build_payload(v2_root: Path, data_dir: Path) -> ConfigPayload:
     """把 case 表宣告的每一筆跑出來，組成答案檔的內容。"""
-    per_module: dict[str, object] = {}
+    per_module: dict[str, ModuleRecord] = {}
     for name in sorted(cases.MODULES):
         module = load_module(cases.engine_module_name(name))
         with tempfile.TemporaryDirectory(dir=TMP_PLACEHOLDER) as tmp_dir:
@@ -516,7 +532,7 @@ def build_payload(v2_root: Path, data_dir: Path) -> dict[str, object]:
                 else:
                     records.append(probe_record(name, case))
         records.sort(key=_case_id)
-        entry: dict[str, object] = {
+        entry: ModuleRecord = {
             "constants": constants_block(module, cases.constants_for(name)),
             "probes": records,
         }
@@ -555,7 +571,7 @@ def main(argv: list[str]) -> int:
     modules = payload["modules"]
     print(f"寫出 {args.out}（{len(text)} bytes）")
     for name in sorted(cases.MODULES):
-        entry = modules[name]  # type: ignore[index]  # expires=2026-12-08 reason=modules 是這支剛剛組出來的 dict，形狀由 build_payload 保證
+        entry = modules[name]
         print(f"  {name}: 常數 {len(entry['constants'])} 筆，探針 {len(entry['probes'])} 筆")
     return 0
 

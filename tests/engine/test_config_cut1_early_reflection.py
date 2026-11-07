@@ -65,7 +65,7 @@ def test_config_is_frozen() -> None:
         window_ms=15.0, required_attenuation_db=10.0, check_band_hz=(200.0, 8000.0)
     )
     with pytest.raises(ValidationError):
-        setattr(config, "window_ms", 20.0)  # noqa: B010  # expires=2026-12-08 reason=這一條要驗的就是「賦值會炸」，而靜態賦值在嚴格模式下本來就不合法；setattr 才是「執行期真的去改」那個動作
+        setattr(config, "window_ms", 20.0)
 
 
 def _with_extra_key() -> EarlyReflectionConfig:

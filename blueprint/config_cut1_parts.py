@@ -157,7 +157,7 @@ def tmp_root() -> str:
 # 哪一個欄位、哪一種錯。產生器與考卷兩邊共用這一支，不各寫一份。
 #
 # 這一支換的是**已知的兩個根**（repo 根與暫存根），不是用正則去猜「哪裡像路徑」：
-# 猜的那一種會把訊息裡本來就有的相對路徑（`src/aosr/config/data/x.toml`）留下來，
+# 猜的那一種會把訊息裡本來就有的相對路徑（`src/aosr/config/data/scoring.toml`）留下來，
 # 於是答案檔在另一棵 checkout 上比不過——那是這一條第一版真的踩到的坑。
 NORMALISED_PATH: Final[str] = "<path>"
 
@@ -172,7 +172,7 @@ def normalise_paths(message: str) -> str:
 
     這是訊息本身的純函式，不吃「這一跑在哪一棵樹跑」這種外部狀態——產生器與考卷在
     不同的 checkout、不同的暫存目錄上跑，套完這一支之後留下的字串逐位元相同。
-    相對路徑（`src/aosr/config/data/x.toml`）刻意不動：那一種不是「在哪一棵樹」，
+    相對路徑（`src/aosr/config/data/scoring.toml`）刻意不動：那一種不是「在哪一棵樹」，
     它是載入器訊息本身的一部分。
 
     **它連 pydantic 訊息裡的網址前綴一起收掉**（`https://errors.pydantic.dev/2.13/v/finite_number`

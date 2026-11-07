@@ -162,7 +162,7 @@ class MaterialResponse:
     @classmethod
     def from_impedance(
         cls,
-        Z_surface: object,  # noqa: N803  # expires=2026-12-08 reason=參數名是公開契約的一部分（呼叫端用關鍵字傳它），改成小寫就是改 API
+        Z_surface: object,
         freq_axis: FrequencyAxis,
         *,
         material_id: str,

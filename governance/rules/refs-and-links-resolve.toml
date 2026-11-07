@@ -149,11 +149,6 @@ reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。�
 expires = "2026-12-08"
 
 [[settings.allow]]
-path = "config/perceptual.toml"
-reason = "上一代的設定檔路徑。`scoring.toml` 的註解說「門檻表在 config/perceptual.toml」——那是上一代的座標；新家的同一份住在 `src/aosr/config/data/`。"
-expires = "2026-12-08"
-
-[[settings.allow]]
 path = "config/scoring_s4.toml"
 reason = "上一代的設定檔路徑（S4 複合分的權重檔）。`scoring.toml` 的註解用它說明「這一檔跟那一檔無關」；那一份不在這一塊的範圍裡。"
 expires = "2026-12-08"
@@ -196,11 +191,6 @@ expires = "2026-12-08"
 [[settings.allow]]
 path = "tests/test_response.py"
 reason = "上一代那一棵樹的考卷。`blueprint/generate_materials_cut1_answers.py` 的 docstring 說「在上一代唯一直接驗 response/source/registry 的 tests/test_response.py 只有 4 題」——那是 donor 樹的檔案，不是這一棵樹的引用。跟扣掉 v2-audit/ 是同一個理由：證物不是引用。"
-expires = "2026-12-08"
-
-[[settings.allow]]
-path = "src/aosr/config/data/x.toml"
-reason = "示範用的占位名（x 是任一個設定檔名的代稱）。`blueprint/config_cut1_parts.py`（#156 拆檔前在 `blueprint/config_cut1_cases.py`）的註解用它說明「載入器訊息裡本來就有的相對路徑刻意不動」——它不是真的檔案，是說明文字的一部分。"
 expires = "2026-12-08"
 
 [[settings.allow]]

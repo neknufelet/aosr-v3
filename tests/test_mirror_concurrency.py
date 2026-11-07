@@ -116,7 +116,7 @@ def run_writer(root: Path, out: Path, entered: threading.Event, result: list[obj
     """writer：真的 ``mirror()``。成功回 provenance 路徑、失敗把例外原樣帶回，最後一定報到。"""
     try:
         result.append(mirror_receipts.mirror(root, "status", out, timeout=30))
-    except BaseException as exc:  # noqa: BLE001  # expires=2026-12-08 reason=writer 的失敗要原樣帶回，不准吞
+    except BaseException as exc:
         result.append(exc)
     finally:
         entered.set()
@@ -126,7 +126,7 @@ def read_and_record(root: Path, result: list[object], observed: threading.Event)
     """reader：真的一條執行緒，真的 ``read_mirror``。"""
     try:
         result.append(cloud_receipts.read_mirror(root, SETTINGS, READER))
-    except BaseException as exc:  # noqa: BLE001  # expires=2026-12-08 reason=reader 讀到什麼正是這一題要看的
+    except BaseException as exc:
         result.append(exc)
     finally:
         observed.set()

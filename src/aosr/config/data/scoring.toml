@@ -80,7 +80,7 @@ peak_dip_bias = 0.0
 # 低頻模態衰減軟懲罰（BLIND-1）
 #
 # 用途：低頻某些音拖太久（模態餘音）要扣分。只罰超標，不獎勵過度吸音。
-# 門檻表在 config/perceptual.toml [modal_decay]。
+# 門檻表在 src/aosr/config/data/perceptual.toml [modal_decay]。
 #
 # 出處：docs/design/design_20260611-scoring-upgrade-plan.md §2(B1)。
 w_decay = 0.5
@@ -88,7 +88,7 @@ w_decay = 0.5
 # 寬頻逐帶殘響時間死區懲罰
 #
 # 用途：每個頻帶的 T60 偏離 ITU 目標太多才罰（死區內不罰）。
-# ITU 目標見 config/perceptual.toml 的 [rt60.target]。
+# ITU 目標見 src/aosr/config/data/perceptual.toml 的 [rt60.target]。
 #
 # 目前 0.0 ＝ 停用，是為了與舊版 bit 級相容的預設值；正式數值待 SCORING-S4 校準。
 # 出處：docs/design/design_20260617-m15-p4-*。
