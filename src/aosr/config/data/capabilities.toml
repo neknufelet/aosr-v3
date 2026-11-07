@@ -403,3 +403,21 @@ outputs = ["共振頻率", "衰減率"]
 status = "unsupported"
 evidence = []
 note = "V1 不支援逐頻阻抗；頻率範圍只供定位，不宣稱已驗。V1.5 仍是待驗代理，正式非線性特徵值解法留 V2。"
+
+[[entry]]
+name = "material_gradient_endpoint_gpu"
+module = "aosr.gradient.endpoint_run"
+not_modeled = ["非長方形房間", "多顯卡或多行程完整解", "顯卡建替身"]
+note = "#1030 終點可選 gpu；CPU 預設不變。cuDSS complex64 分解搭配 CPU complex128 殘差修正；不收斂直接拒收，不退回 CPU。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "assembly_by_wall"
+frequency_hz = [20.0, 300.0]
+outputs = ["endpoint_report", "baseline", "max_refinement_steps"]
+status = "experimental"
+evidence = [
+  "tests/engine/test_fem_full_gpu.py::test_refinement_reaches_double_residual_and_direct_solution",
+  "tests/engine/test_material_gradient_endpoint_cli.py::test_endpoint_cpu_bytes_unchanged_and_gpu_metadata",
+]
+note = "雲端以可注入的 scipy complex64 稀疏分解器真算、驗雙精度殘差與終點接線；本票考卷不宣稱 cuDSS 顯卡實跑或正式房間精度已驗證。完整解殘差上限沿用既有建模設定。"

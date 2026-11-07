@@ -15,9 +15,12 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
+from scipy.sparse import csr_matrix
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.construction_environment import construction_environment
@@ -28,7 +31,10 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import endpoint
 from aosr.gradient.material_gradient import wall_designs_from_presets
-from aosr.gradient.endpoint_run import ENDPOINT_FILE
+from aosr.gradient.endpoint_run import ENDPOINT_FILE, run_endpoint
+from aosr.physics import fem_full_gpu
+from aosr.physics.fem_reduced_boundary import BoundaryImpedances
+from tests.engine._full_gpu_fake import SingleFactor
 from aosr.gradient.run import RESULT_FILE, GradientResult, check_inputs, read_project
 from aosr.gradient.worker import run_endpoint_worker
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
@@ -81,6 +87,26 @@ def main(directory: Path, name: str) -> None:
     code = run_endpoint_worker(source)
     record = json.loads((source / ENDPOINT_FILE).read_text(encoding="utf-8")) if code == 0 else None
     output = {"worker_code": code, "worker_record": record, "endpoint": _endpoint(source)}
+    factors: list[SingleFactor] = []
+    steps: list[int] = []
+    solve = fem_full_gpu.GPUFullSolver.solve
+
+    def factor(a: csr_matrix[np.complex64], b: NDArray[np.complex64]) -> SingleFactor:
+        result = SingleFactor(a, b)
+        factors.append(result)
+        return result
+
+    def capture(solver: fem_full_gpu.GPUFullSolver, frequency: float,
+                walls: BoundaryImpedances) -> NDArray[np.complex128]:
+        solution = solve(solver, frequency, walls)
+        steps.append(solver.refinement_steps[-1])
+        return solution
+
+    with patch.object(fem_full_gpu, "nvmath_factor", factor), patch.object(fem_full_gpu.GPUFullSolver, "solve", capture):
+        gpu = run_endpoint(source, device="gpu")
+    output["gpu_steps"] = steps
+    output["gpu"] = gpu.model_dump(mode="json")
+    output["gpu_factors"] = [{"freed": f.freed, "factorizations": f.factorizations, "calls": f.calls} for f in factors]
     (directory / "output.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
     shutil.rmtree(directory / "__pycache__", ignore_errors=True)
 

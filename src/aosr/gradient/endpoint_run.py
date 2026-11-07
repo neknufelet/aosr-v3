@@ -35,6 +35,8 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient.cli import keep_signal_handlers
+from aosr.gradient.gpu import Device
+from aosr.physics.fem_full_batch import checked_device_workers
 from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.endpoint import (
     EndpointReport, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
@@ -131,6 +133,9 @@ class EndpointRecord(BaseModel):
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
     max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
 
+    device: Device = Field(default="cpu", exclude_if=lambda value: value == "cpu")
+    max_refinement_steps: int | None = Field(default=None, ge=0, strict=True, exclude_if=lambda value: value is None)
+
     @model_validator(mode="after")
     def _version_matches_content(self) -> Self:
         current = self.format_version == ENDPOINT_VERSION
@@ -193,8 +198,22 @@ def _full_baseline(constants: GradientObjectiveConstants, pressures: NDArray[np.
     return baseline, base
 
 
-def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
+def _improvement(baseline: EndpointBaseline, report: EndpointReport, base: ObjectiveReading) -> EndpointImprovement:
+    """同一把尺下基準減終點；數值與 CPU 既有順序相同。"""
+    if report.full_objective_total is None or report.full_proxy_db is None:
+        raise ValueError("終點報告沒有新合分或大峰代理")
+    return EndpointImprovement(
+        total=baseline.full_total - report.full_total,
+        components=(baseline.full_components[0] - report.full_components[0],
+                    baseline.full_components[1] - report.full_components[1]),
+        objective_total=base.objective_total - report.full_objective_total,
+        proxy_db=base.components[2] - report.full_proxy_db)
+
+
+def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> EndpointRecord:
     """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
+    checked_device_workers(device, workers)
+    refinement_steps: list[int] = []
     project = read_project(folder)
     scheme, model, settings = check_inputs(project)
     if not (folder / RESULT_FILE).exists():
@@ -226,13 +245,14 @@ def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
     checked = endpoint_check(operators, designs, theta, model=model, objective_settings=objective,
                              receiver_set=scheme.receiver_set, low_frequency_axis=axis_id,
                              presets=load_construction_presets(config_path("construction_presets.toml")),
-                             settings=settings, air=air, ranges=ranges, workers=workers, frequency_batch=project.frequency_batch)
+                             settings=settings, air=air, ranges=ranges, workers=workers, frequency_batch=project.frequency_batch,
+                             device=device, refinement_steps=refinement_steps)
     endpoint_seconds = time.perf_counter() - clock
     clock = time.perf_counter()
     axis = tuple(float(value) for value in model.frequencies_hz)
     pressures = full_model_pressures(operators, kept, axis, air=air, ranges=ranges,
                                      max_relative_residual=model.ledger.settings.full_solve_max_relative_residual,
-                                     workers=workers)
+                                     workers=workers, device=device, refinement_steps=refinement_steps)
     constants = gradient_objective_constants(axis, objective, scheme.receiver_set, len(model.source_names))
     peaks = big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
                       frequencies_hz=axis, low_frequency_axis=axis_id,
@@ -240,21 +260,16 @@ def run_endpoint(folder: Path, *, workers: int = 1) -> EndpointRecord:
     baseline, base = _full_baseline(constants, pressures, peaks)
     baseline_seconds = time.perf_counter() - clock
     report = checked.report
-    if report.full_objective_total is None or report.full_proxy_db is None:
-        raise ValueError("終點報告沒有新合分或大峰代理")
+    improvement = _improvement(baseline, report, base)
     materials = materials_from_surfaces(designs, theta, settings)
     exported = exported_scheme(scheme, scene_with_materials(scheme.scene, materials), project.gradient_id)
     write_json_atomic(folder / EXPORTED_SCHEME_FILE, exported)
     record = EndpointRecord(
+        device=device, max_refinement_steps=max(refinement_steps) if device == "gpu" else None,
         format_version=ENDPOINT_VERSION, gradient_id=project.gradient_id, result_ledger_sha256=result.ledger_sha256,
         result_template_ledger_sha256=result.template_ledger_sha256, result_sha256=result_sha256,
         report=report, baseline=baseline,
-        improvement=EndpointImprovement(
-            total=baseline.full_total - report.full_total,
-            components=(baseline.full_components[0] - report.full_components[0],
-                        baseline.full_components[1] - report.full_components[1]),
-            objective_total=base.objective_total - report.full_objective_total,
-            proxy_db=base.components[2] - report.full_proxy_db),
+        improvement=improvement,
         exported_scheme=EXPORTED_SCHEME_FILE,
         exported_scheme_sha256=file_sha256(folder / EXPORTED_SCHEME_FILE),
         seconds=EndpointSeconds(export_operators=export_seconds, endpoint=endpoint_seconds, baseline=baseline_seconds),
