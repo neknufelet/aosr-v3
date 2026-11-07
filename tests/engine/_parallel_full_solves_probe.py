@@ -61,7 +61,7 @@ def _equal(left: NDArray[np.complex128] | NDArray[np.float64],
 
 
 def _model(operators: FullOperators, workers: int = 1) -> ReducedModel:
-    return builder.build_reduced_model(operators, AXIS, WALLS[:2], settings=SETTINGS, workers=workers)
+    return builder.build_reduced_model(operators, AXIS, WALLS[:2], settings=SETTINGS, workers=workers, dense_threads=1)
 
 
 def _normal_time(model: ReducedModel) -> ReducedModel:
@@ -107,10 +107,10 @@ def validation(directory: Path) -> None:
     operators = _operators()
     model = _model(operators)
     start = time.perf_counter()
-    single = validate_reduced(model, operators, WALLS[2:], workers=1)
+    single = validate_reduced(model, operators, WALLS[2:], dense_threads=1, workers=1)
     sys.stdout.write(f"validation workers=1: {time.perf_counter() - start:.6f} s\n")
     start = time.perf_counter()
-    parallel = validate_reduced(model, operators, WALLS[2:], workers=2)
+    parallel = validate_reduced(model, operators, WALLS[2:], dense_threads=1, workers=2)
     sys.stdout.write(f"validation workers=2: {time.perf_counter() - start:.6f} s\n")
     _equal(single.full_pressure, parallel.full_pressure, "validation full")
     _equal(single.reduced_pressure, parallel.reduced_pressure, "validation reduced")
@@ -285,7 +285,7 @@ def zoned(directory: Path) -> None:
         max_frequency_hz=80.0, partitions=PARTITIONS)
     walls = [{key: complex(1500 + i * 300 + j * 80, -70 * (i + 1))
               for j, key in enumerate(operators.patch_keys)} for i in range(3)]
-    models = [builder.build_reduced_model(operators, AXIS, walls[:2], settings=SETTINGS, workers=workers)
+    models = [builder.build_reduced_model(operators, AXIS, walls[:2], settings=SETTINGS, workers=workers, dense_threads=1)
               for workers in (1, 2)]
     assert _normal_time(models[0]).ledger == _normal_time(models[1]).ledger
     _saved_pair(models[0], models[1], directory)
