@@ -51,7 +51,7 @@ from aosr.scoring.gradient_objective_jax import (
     GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_constants,
 )
 from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, gradient_objective_settings
-from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one, stage_one_score_settings
+from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
 from tests.engine._material_gradient_legacy import legacy_family_settings
@@ -91,7 +91,7 @@ def _presets() -> tuple[ConstructionPreset, ...]:
 
 @cache
 def _score() -> StageOneScoreSettings:
-    return stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), PURPOSE)
+    return _gradient_settings().stage_one  # #1032：第三階段參考；第一階段原設定另有控制組。
 
 
 @cache

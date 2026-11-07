@@ -79,6 +79,15 @@ status = "baseline"
 source_kind = "product_choice"
 source = "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
 
+# 第三階段計分範圍（#1032）：只有第三階段梯度目標與終點讀這一格，第一階段照舊讀 stage_one_low_frequency.scored_range_hz；下界以下那一段終點加註、不計分。
+[[stage_one.setting]]
+key = "stage_three_gradient.scored_range_hz"
+value = [30.0, 300.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #1032 老闆 2026-11-07：看完 20／30 Hz 起算試跑回「好。先用30開始。加註更低的部分」；問第一、第三階段是否一起改回「第三階段就好」。只管第三階段梯度目標與終點；第一階段照舊讀 stage_one_low_frequency.scored_range_hz"
+
 # 第三階段牆面材料梯度搜尋專用的三格（鍵前綴 stage_three_gradient.，2026-10-30 老闆拍 B：大峰的平滑代理進梯度目標當試驗）。
 # 只有梯度目標的 JAX 版讀這三格；第一階段合分（src/aosr/scoring/stage_one_score.py）與第二階段低頻頻響類只讀 stage_one_low_frequency.* 那幾格、
 # 兩邊的設定指紋都不含這三格，所以加這三格不動第一階段名次、也不動第二階段的比較身分。代理＝主位扣自己直線後的殘差、計分範圍內部點（去掉兩端）、

@@ -75,7 +75,7 @@ from aosr.gradient.material_gradient import (
     wall_designs_from_presets,
 )
 from aosr.gradient.material_gradient_ledger import (
-    PROXY_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
+    PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
     truncate_rows, write_ledger,
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
@@ -474,7 +474,7 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     objective = search_objective_settings(project.purpose)
     if project.objective_settings_fingerprint != objective.fingerprint:
         recorded = "沒記（加大峰代理之前開始的）" if project.objective_settings_fingerprint is None else "跟現在不同"
-        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了），不接續")
+        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了）；{SCORED_RANGE_RERUN_TEXT}，不接續")
     check_surrogate_matches_scheme(model, scheme, points)
     check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     return scheme, model, settings

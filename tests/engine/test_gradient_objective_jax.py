@@ -36,7 +36,7 @@ from aosr.gradient.report import LEGACY_ENDPOINT_NOTE, PROXY_MISMATCH, proxy_lin
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import (
-    PROXY, PROXY_TARGET_KEY, SETTING_KEYS, TEMPERATURE_KEY, WEIGHTS_KEY, gradient_objective_settings,
+    PROXY, PROXY_TARGET_KEY, SCORED_RANGE_KEY, SETTING_KEYS, TEMPERATURE_KEY, WEIGHTS_KEY, gradient_objective_settings,
 )
 from aosr.scoring.low_frequency_response import evaluate_low_frequency_response
 from aosr.scoring.low_frequency_response_contract import LowFrequencyResponsePayload
@@ -68,17 +68,18 @@ _PROBE = Path(__file__).with_name("_gradient_objective_jax_probe.py")
 STAGE_ONE_FINGERPRINT = "2d9c47e3be7e3ffcb29f4c6f57fc17fb55da1c0fb77f7bb25a449cc2673f98ea"
 REGISTRY_FINGERPRINT = "2e9bd2d4f0411968b314881aafdfcc4cb64cecb5b1b9e6aa1af06a39455aed32"
 LOW_FREQUENCY_COST_FINGERPRINT = "39965da27931909ece3e92e68c8f98caab7aea8ddb2b6a78fcb9b41bd83b52e2"
-# 控制組（審查第 3 條）：主線 a1be64b5 的第一階段原函式（``objective_constants`` ＋ ``objective_from_energies``）對
+# #1032：前三階段共用範圍已拆開；下列前七組改釘第三階段專用範圍，第一階段控制組指紋仍在上方。
+# 控制組（審查第 3 條）：原先以主線 a1be64b5 的第一階段原函式（``objective_constants`` ＋ ``objective_from_energies``）對
 # 這一支考卷每一組能量算的舊合分（直接、編譯後，``float.hex``），在主線那一份原始碼上先算好再釘（考卷不叫 git）。
 # 主線釘值是控制組、比容差（精度契約登記簿 ``stage_one_objective_jax_vs_python`` 那把相對尺）；逐位只在同一行程比。
-_MAINLINE_SCREENING: dict[str, tuple[str, str]] = {
-    "interior_spike": ("0x1.8414e09e863d8p+0", "0x1.8414e09e863d8p+0"),
-    "right_spike": ("0x1.88acde59e875ep+0", "0x1.88acde59e8762p+0"),
-    "plateau": ("0x1.8e64359de60c6p+0", "0x1.8e64359de60c8p+0"),
-    "demo": ("0x1.d4686369efce8p+1", "0x1.d4686369efcecp+1"),
-    "shoulder": ("0x1.f2428db07725cp+0", "0x1.f2428db077259p+0"),
-    "endpoint_max": ("0x1.c672b32671427p+0", "0x1.c672b32671427p+0"),
-    "flat": ("0x1.28a274d45e359p+0", "0x1.28a274d45e330p+0"),
+_STAGE_THREE_SCREENING: dict[str, tuple[str, str]] = {
+    "interior_spike": ("0x1.93e5a714f4232p+0", "0x1.93e5a714f4231p+0"),
+    "right_spike": ("0x1.9564bcebd0674p+0", "0x1.9564bcebd0670p+0"),
+    "plateau": ("0x1.a266c8dfeed80p+0", "0x1.a266c8dfeed81p+0"),
+    "demo": ("0x1.e49abdd130b1bp+1", "0x1.e49abdd130b1cp+1"),
+    "shoulder": ("0x1.0514f0f947e0ep+1", "0x1.0514f0f947e0dp+1"),
+    "endpoint_max": ("0x1.d9713935e759cp+0", "0x1.d9713935e759cp+0"),
+    "flat": ("0x1.2c70e5880e5c5p+0", "0x1.2c70e5880e59ep+0"),
     "review_shoulder": ("0x1.204bd0187a4c2p+3", "0x1.204bd0187a4c2p+3"),
     "review_negative": ("0x1.fbfbf7ebc7566p+1", "0x1.fbfbf7ebc7558p+1"),
 }
@@ -478,9 +479,9 @@ def test_report_lines_flag_mismatch_without_judging() -> None:
 @pytest.mark.parametrize("name", _ALL_CASES)
 def test_zero_weight_objective_and_gradient_equal_screening_bitwise(probe: Record, name: str) -> None:
     """抓權重沒從登記簿讀、或權重 0 時代理項仍漏進目標：登記簿暫存副本把權重改 0，同一行程裡新合分逐位等於舊合分
-    （直接與編譯後），新合分的梯度逐位等於舊合分的梯度；新合分另跟主線（加代理之前）釘下的答案
-    （``_MAINLINE_SCREENING``）比——同一支程式自己比自己抓不到第一階段那把尺被一起改掉。主線釘值是控制組、
-    比容差；逐位只在同一行程比。指紋跟正式那份不同（只改這一格就不能接續），第一階段設定指紋相同。"""
+    （直接與編譯後），新合分的梯度逐位等於舊合分的梯度；新合分另跟第三階段專用範圍釘下的答案
+    （``_STAGE_THREE_SCREENING``）比——同一支程式自己比自己抓不到第三階段兩分項被一起改掉。這組釘值是控制組、
+    比容差；逐位只在同一行程比。指紋跟正式那份不同（只改這一格就不能接續），第三階段內嵌的兩分項設定指紋相同。"""
     zero = cast(Record, probe["zero"])
     assert float.fromhex(cast(str, zero["weight"])) == 0.0
     assert zero["fingerprint"] != cast(Record, probe["real"])["fingerprint"]
@@ -490,17 +491,17 @@ def test_zero_weight_objective_and_gradient_equal_screening_bitwise(probe: Recor
         arrays = cast(Record, case[kind])
         assert arrays["objective_total"] == arrays["screening_total"], kind
     assert case["gradient"] == case["screening_gradient"]
-    eager, jit = _MAINLINE_SCREENING[name]
+    eager, jit = _STAGE_THREE_SCREENING[name]
     assert _near_mainline(cast(Record, case["eager"])["objective_total"], eager)
     assert _near_mainline(cast(Record, case["jit"])["objective_total"], jit)
 
 
 @pytest.mark.parametrize("name", _ALL_CASES)
-def test_screening_total_matches_mainline_pins(probe: Record, name: str) -> None:
-    """抓加代理時第一階段那把尺被動到：正式登記簿與權重 0 的副本，舊合分（直接、編譯後）都跟主線 a1be64b5 釘下的
-    答案比。主線釘值是控制組、比容差（相對差在 ``stage_one_objective_jax_vs_python`` 那把尺內）；逐位只在同一行程比
+def test_screening_total_matches_stage_three_pins(probe: Record, name: str) -> None:
+    """抓第三階段兩分項的尺度意外改動：正式登記簿與權重 0 的副本，舊合分（直接、編譯後）都跟 #1032 專用範圍釘下的
+    答案比。第一階段本身另守原範圍與指紋；這組釘值比容差（相對差在 ``stage_one_objective_jax_vs_python`` 那把尺內）；逐位只在同一行程比
     （同一行程的舊合分與梯度對第一階段原函式，見 ``test_screening_total_is_bitwise_the_stage_one_function``）。"""
-    eager, jit = _MAINLINE_SCREENING[name]
+    eager, jit = _STAGE_THREE_SCREENING[name]
     for registry in ("real", "zero"):
         case = _case(probe, name, registry)
         assert _near_mainline(cast(Record, case["eager"])["screening_total"], eager), registry
@@ -509,7 +510,7 @@ def test_screening_total_matches_mainline_pins(probe: Record, name: str) -> None
 
 @pytest.mark.parametrize("name", _ALL_CASES)
 def test_screening_total_is_bitwise_the_stage_one_function(probe: Record, name: str) -> None:
-    """抓舊合分被代理碰到（第一階段那把尺要一位都不動）：正式登記簿與權重 0 的副本，舊合分都逐位等於第一階段
+    """抓第三階段兩分項被代理碰到（同一範圍的兩分項算式一位不動）：正式登記簿與權重 0 的副本，舊合分都逐位等於第一階段
     原函式 ``objective_from_energies`` 的合分（直接對直接、編譯對編譯），舊合分的梯度逐位等於原函式的梯度。"""
     for registry in ("real", "zero"):
         case = _case(probe, name, registry)
@@ -591,7 +592,8 @@ def test_registry_cells_exist_baseline_and_share_reference() -> None:
     狀態都是 baseline；代理的較差參考等於主位起伏與座位穩健性兩分項的那一個（讀出來比）。"""
     registry: QualityTargets = load_quality_targets(config_path("quality_targets.toml"))
     section = registry.stage_one(PURPOSE)
-    temperature, target, weights = (section.entry(key) for key in SETTING_KEYS)
+    temperature, target, weights, scored_range = (section.entry(key) for key in SETTING_KEYS)
+    assert isinstance(scored_range, SettingEntry) and scored_range.value == (30.0, 300.0)
     assert isinstance(temperature, SettingEntry) and temperature.status == "baseline"
     assert isinstance(target, TargetEntry) and target.status == "baseline"
     assert isinstance(weights, WeightTable) and [item.name for item in weights.item] == [PROXY]
@@ -600,8 +602,8 @@ def test_registry_cells_exist_baseline_and_share_reference() -> None:
     assert target.worse_reference == stage_one.target(PRINCIPAL).worse_reference
     assert target.worse_reference == stage_one.target(ROBUSTNESS).worse_reference
     settings = gradient_objective_settings(registry, PURPOSE)
-    assert settings.status == "baseline" and settings.stage_one.fingerprint == STAGE_ONE_FINGERPRINT
-    assert (TEMPERATURE_KEY, PROXY_TARGET_KEY, WEIGHTS_KEY) == SETTING_KEYS
+    assert settings.status == "baseline" and settings.stage_one.fingerprint != STAGE_ONE_FINGERPRINT
+    assert (TEMPERATURE_KEY, PROXY_TARGET_KEY, WEIGHTS_KEY, SCORED_RANGE_KEY) == SETTING_KEYS
 
 
 def _objective_sources() -> list[Path]:
@@ -674,7 +676,7 @@ def test_v4_ledger_and_old_objective_header_are_rejected_on_resume(tmp_path: Pat
     legacy_header, legacy_rows = ledger.read_ledger(old, legacy=True)
     assert legacy_header.ledger_version == ledger.LEGACY_LEDGER_VERSION and legacy_rows[0].is_legacy()
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
-    with pytest.raises(ValueError, match="大峰代理"):
+    with pytest.raises(ValueError, match="#1032"):
         ledger.read_ledger(path, expected_header=other)
     with pytest.raises(ValueError):
         ledger.write_ledger(tmp_path / "again.jsonl", legacy_header, legacy_rows)
@@ -702,7 +704,7 @@ def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_
     legacy_header, legacy_rows = templates.read_template_ledger(old, legacy=True)
     assert legacy_header.ledger_version == templates.LEGACY_TEMPLATE_LEDGER_VERSION and legacy_rows[0].is_legacy()
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
-    with pytest.raises(ValueError, match="大峰代理"):
+    with pytest.raises(ValueError, match="#1032"):
         templates.read_template_ledger(path, expected_header=other)
 
 

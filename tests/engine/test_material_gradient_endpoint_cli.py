@@ -63,10 +63,10 @@ COMPUTED_FLOATS: dict[str, tuple[str, ...]] = {
                "total_difference_bound", "max_frequency_db", "rms_floor_db", "frequency_db_by_seat", "band_db_by_seat",
                "partial_band_db_by_seat", "big_peak_db_by_speaker", "big_peak_db", "reduced_objective_total",
                "reduced_proxy_db", "full_objective_total", "full_proxy_db", "reduced_interior_max_db",
-               "full_interior_max_db"),
+               "full_interior_max_db", "below_scoring"),
     "baseline": ("full_total", "full_components", "big_peak_db_by_speaker", "big_peak_db", "full_objective_total",
-                 "full_proxy_db", "full_interior_max_db"),
-    "improvement": ("total", "components", "objective_total", "proxy_db"),
+                 "full_proxy_db", "full_interior_max_db", "below_scoring"),
+    "improvement": ("total", "components", "objective_total", "proxy_db", "below_scoring"),
 }
 COMPUTED_PATHS = [[part, name] for part, names in COMPUTED_FLOATS.items() for name in names]
 # 近零參考值的尺度：dB 欄（分項、大峰、逐頻與帶差）是 1 dB，無因次合分（total、full_total、reduced_total、
@@ -233,6 +233,8 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
     (copy / "result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     record = _json(copy / "endpoint.json")
     record["format_version"] = endpoint_run.LEGACY_ENDPOINT_VERSION
+    for part in ("report", "baseline", "improvement"):
+        cast(Record, record[part]).pop("below_scoring")
     for part, names in (("report", _PROXY_FIELDS), ("baseline", ("full_objective_total", "full_proxy_db",
                                                                   "full_interior_max_db")),
                         ("improvement", ("objective_total", "proxy_db"))):
@@ -362,6 +364,8 @@ def test_endpoint_report_and_baseline_equal_direct_calls(runs: tuple[Path, Recor
         record.baseline.full_objective_total, record.baseline.full_proxy_db,
         record.baseline.full_interior_max_db)] == probe["baseline_objective"]
     assert record.baseline.big_peak_db_by_speaker == probe["baseline_peaks"]
+    assert record.baseline.below_scoring is not None
+    assert record.baseline.below_scoring.model_dump(mode="json") == probe["baseline_below_scoring"]
     assert record.baseline.full_solves == len(FEM_LANE_FREQUENCIES_HZ)
 
 
@@ -629,8 +633,9 @@ def test_saved_batch_reaches_endpoint_chain(runs: tuple[Path, Record], tmp_path:
 
 
 def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record], tmp_path: Path) -> None:
-    """CPU 不增任何 JSON 位元組；GPU 終點與原牆都真用單精度分解並記修正次數。"""
+    """v4 加不計分低頻註記；CPU 裝置預設不增 JSON 位元組，GPU 兩段真用單精度分解並記修正次數。"""
     record = _record(_folder(runs))
+    assert record.format_version == "aosr.material_gradient_endpoint.v4"
     original = record.model_dump(mode="json", exclude={"device", "max_refinement_steps"})
     expected = (json.dumps(original, ensure_ascii=False, allow_nan=False) + "\n").encode()
     for candidate in (record, record.model_copy(update={"device": "cpu"})):

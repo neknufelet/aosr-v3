@@ -57,7 +57,8 @@ _STAGE_ONE_REFERENCE_SOURCE = (
 _STAGE_ONE_WEIGHT_SOURCE = (
     "票 #558 老闆 2026-10-20 回第一階段第 2 題（權重）：「先採原始兩項指標的有效權重 1:1，標為 baseline、product_choice。這是暫定的工程取捨，不是兩項在聽感上等價的保證。」每次搜尋固定、不隨當批候選分布自動改；第一批後檢視取捨，看過分布也不升 calibrated"
 )
-# 第三階段梯度目標專用三格（stage_three_gradient.*，#561 壬一）：溫度一句、目標與權重同一句；從登記簿逐字抄。
+# 第三階段梯度目標專用四格（stage_three_gradient.*，#561 壬一）：溫度一句、目標與權重同一句；從登記簿逐字抄。
+_STAGE_THREE_RANGE_SOURCE = "票 #1032 老闆 2026-11-07：看完 20／30 Hz 起算試跑回「好。先用30開始。加註更低的部分」；問第一、第三階段是否一起改回「第三階段就好」。只管第三階段梯度目標與終點；第一階段照舊讀 stage_one_low_frequency.scored_range_hz"
 _STAGE_THREE_PROXY_TEMPERATURE_SOURCE = (
     '主對話 2026-10-30 暫定：軟最大值高估真大峰最多 T·ln N（N＝兩支喇叭的計分範圍內部點數，示範房 188 點軸約 2×186、ln 約 5.9），T＝0.25 dB 時最多約 1.5 dB；T 越小越貼近真大峰、目標越接近不平滑，第三場跑完再看要不要調'
 )
@@ -83,6 +84,7 @@ _BASELINE_SOURCES = frozenset({
     _STAGE_ONE_WEIGHT_SOURCE,
     _STAGE_THREE_PROXY_TEMPERATURE_SOURCE,
     _STAGE_THREE_PROXY_SOURCE,
+    _STAGE_THREE_RANGE_SOURCE,
 })
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。

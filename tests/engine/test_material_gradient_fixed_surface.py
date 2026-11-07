@@ -37,8 +37,8 @@ from tests.engine.test_material_gradient_mount import (
 
 FIXED = {"floor": "glass_wool_24k_50mm"}
 PRESETS = ("glass_wool_48k_50mm_gap50",) * 6
-# 改動前主線（814d471a）跑的合成整場：三份產物的 SHA-256。擷取紀錄留在本票工作區的證據資料夾，不進版控。
-CONTROL: dict[str, str] = {'ledger.jsonl': '87362b54c36120c7bb78f6f4a180501635be884203e0c177c299e8cdd9f72b11', 'templates.jsonl': '65c2511a3dd47432f9bb78c6de22414af0bd8af0311a89c52d068e652b035a15', 'result.json': '3a7dcefbc6ee19ba59c301e5c50773772b4b0b48acd6461161420c3620cb7de3'}
+# 改動前主線（814d471a）的合成整場；#1032 只重釘兩本帳的目標常數指紋，結果不變。擷取紀錄留在本票工作區，不進版控。
+CONTROL: dict[str, str] = {'ledger.jsonl': 'bfaf2131f221dd55b9c39a2ea3e70e8ead7bd1915f8d464e14de0e2b2fb2dd31', 'templates.jsonl': '94a6c91a55318650e8bd3bc743242ed82aac6f6db23181a8057b882bac6b3e41', 'result.json': '3a7dcefbc6ee19ba59c301e5c50773772b4b0b48acd6461161420c3620cb7de3'}
 
 
 def _problem(fixed: dict[str, str] | None = None) -> run.GradientProblem:

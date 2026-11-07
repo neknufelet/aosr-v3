@@ -47,9 +47,9 @@ def test_whole_control_at_starting_commit(tmp_path: Path) -> None:
         "y0": "ff2d4e05a9194967576191b229274cb10a503955fadef73ed58fed7724f78d78",
         "yL": "9aa0be661d4d1836d45bda2695460415acb4847912bb17f78b140d673c4e4fec"}
     header = _header(designs)
-    # #561 只更新家族設定指紋；這兩格是純標頭序列化，沒有重錄求解答案。
-    assert _digest(_ledger_line(tmp_path / "ledger.jsonl", header)) == "3411307712a67d9977692db67fd607a56d825727c7048bc94b117db189891f21"
-    assert _digest(_template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))) == "e97193100ab146a6f747045e022e21c6e89e9a3289d7c7dbf51f11dc8bbc3055"
+    # #561 更新家族設定指紋；#1032 更新計分範圍的目標常數指紋；這兩格是純標頭序列化，沒有重錄求解答案。
+    assert _digest(_ledger_line(tmp_path / "ledger.jsonl", header)) == "1e8c6edf1569caa3e3c4e8e8bb310d0d59c7f194216689f35a0c9b6160d0c4df"
+    assert _digest(_template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))) == "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project())
     assert _digest((tmp_path / run.PROJECT_FILE).read_bytes()) == "d51fbff4611f4915537fc6df82b5de4c1822dcb1b3c334c6245c9eb4f5979485"
 
