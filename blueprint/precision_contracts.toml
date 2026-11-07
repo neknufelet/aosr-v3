@@ -285,3 +285,21 @@ unit = "absolute"
 decision_paper = "stage-three-objective-jax-rulers.md"
 truth = "CPU 冷子行程 JAX 雙精度對 evaluate_channel_matching＋cost_channel_matching_evaluation 的類代價；逐點傾斜用音色量，起伏用左右匹配自己範圍重算，反射差只診斷。既有小房、非等權三座位、多比較對、重排、直達開關、零權重最差座位與 109 正式 report.points；實量最大絕對差 2.220446049250313e-16，約千倍餘裕。工程暫定；顯卡單精度另立尺。"
 mutant_test = "tests/engine/test_timbre_cost_jax.py::test_channel_matching_cost_jax_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "geometric_early_jax_vs_python"
+value = 3.637978807091713e-12
+display = "2^-38"
+unit = "absolute"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "工程暫定（#562 第2a-1段）：CPU JAX 雙精度對 numpy solve_geometric_early_lane／solve_geometric_lane 的 direct_energy、reflected_energy、interference_energy 與 scattering，同名欄逐聲源、座位、正式220點細軸取絕對差（能量各以原單位、s無因次），以單位聲源壓力為準、呼叫端乘聲源功率前，含固定整面、構造整面、固定與構造兩區異材、指向性、家具及109真實14組輸入；2026-11-08 本機小房最大3.3306690738754696e-16、109最大3.552713678800501e-15，取2^-38留1024倍餘裕，為同公式捨入一致性而非物理誤差；顯卡單精度另立尺"
+mutant_test = "tests/engine/test_geometric_early_jax.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "late_family_jax_vs_python"
+value = 1.8189894035458565e-12
+display = "2^-39"
+unit = "relative"
+decision_paper = "stage-three-objective-jax-rulers.md"
+truth = "同輸入的正式 construction.random_incidence_absorption／catalog_absorption、late_energy.solve_late_energy_by_order、geometric_lane._late_share_energy、wall_surfaces 分區面積等效、crossover Eyring T60／Schroeder f_s／權重與 three_lane_report.stitch_energy_points，逐格相對差，零參考必須恰零；CPU 雙精度冷子行程，小房整面／異材偏格分區／家具與 109 正式輸入（316 頻點），實量最大相對差 2.391e-15，取 2^-39 留約千倍餘裕。工程暫定；顯卡單精度另立尺。f_s 達上限照第 11 條沿用 NumPy 硬切，上限旗標僅供報告；接合總能量亦逐格對照正式報表 points"
+mutant_test = "tests/engine/test_late_family_jax.py::test_mutant_beyond_tolerance_is_red"
