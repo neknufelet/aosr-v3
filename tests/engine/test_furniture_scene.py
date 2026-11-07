@@ -236,4 +236,4 @@ def test_furniture_scene_enters_physics_but_stays_outside_modal_closure() -> Non
     modules = {"aosr.physics.furniture_scene"}
     assert modules <= set(physics_import_closure().modules)
     assert modules.isdisjoint(modal_import_closure().modules)
-    assert modal_identity() == "modal-v1:c6fa01c71bb8dada989e21b0255ff13c67bb9a02a15aae24781138ed49d7b3b9"
+    assert modal_identity() == "modal-v1:131e48c026234320cfb40a9c687517e6b9e792eac52e5ef6bec228120aa4cb5b"

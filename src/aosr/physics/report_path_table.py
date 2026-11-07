@@ -258,6 +258,7 @@ def build_path_table_section(report: object, inputs: SolverInputs, *, contact_re
         sound_speed_m_s=inputs.sound_speed_m_s,
         rho_c_pa_s_per_m=inputs.density_kg_m3 * inputs.sound_speed_m_s,
         materials_by_wall=inputs.materials_by_wall, density_kg_m3=inputs.density_kg_m3,
+        surface_zones_by_wall=inputs.surface_zones_by_wall,
         frequencies_hz=lane.frequencies_hz,
         scattering_coefficient=lane.scattering,
         reflection_order_k=inputs.reflection_order_k,

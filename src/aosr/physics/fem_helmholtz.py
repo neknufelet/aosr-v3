@@ -29,6 +29,7 @@ Impedance = float | complex
 SingleWallImpedances = Mapping[Wall, Impedance | None]
 WallImpedances = Mapping[Wall, float | None]
 FrequencyWallImpedances = Mapping[Wall, Impedance | None | Sequence[Impedance | None]]
+FrequencyZoneImpedances = Mapping[Wall, Mapping[str, Impedance | Sequence[Impedance]]]
 
 
 @dataclass(frozen=True)
@@ -383,6 +384,7 @@ def solve_frequency_responses_many(
     sound_speed_m_s: float,
     frequency_indices: Sequence[int] | None = None,
     pairs: Sequence[tuple[SourceKey, ReceiverKey]] | None = None,
+    zone_impedances: FrequencyZoneImpedances | None = None,
 ) -> dict[tuple[SourceKey, ReceiverKey], NDArray[np.complex128]]:
     """每頻只分解一次，各聲源逐一 solve，再用 P2 列取每個接收點。
 
@@ -392,6 +394,7 @@ def solve_frequency_responses_many(
     refactor 前核對完整 CSR 非零位置，因為 pydiso 本身只查非零個數。
     """
     rows = checked_impedance_rows(wall_impedances, frequencies_hz)
+    zones = checked_zone_impedance_rows(zone_impedances or {}, frequencies_hz)
     indices = _frequency_indices(len(frequencies_hz), frequency_indices)
     selected_pairs = _response_pairs(right_hand_sides, receivers, pairs)
     if any(load.shape != (operators.basis.N,) for load in right_hand_sides.values()):
@@ -405,13 +408,13 @@ def solve_frequency_responses_many(
                for source in right_hand_sides}
     pressures: dict[tuple[SourceKey, ReceiverKey], list[complex]] = {
         pair: [] for pair in selected_pairs}
-    anchor = assemble_helmholtz_system(
-        operators, frequency_hz=float(frequencies_hz[0]), wall_impedances={w: row[0] for w, row in rows.items()},
+    anchor = _frequency_system(
+        operators, frequencies_hz, rows, zones, 0,
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     solver = MKLPardisoSolver(anchor, matrix_type="complex_symmetric", factor=False)
     for index in indices:
-        system = anchor if index == 0 else assemble_helmholtz_system(
-            operators, frequency_hz=float(frequencies_hz[index]), wall_impedances={w: row[index] for w, row in rows.items()},
+        system = anchor if index == 0 else _frequency_system(
+            operators, frequencies_hz, rows, zones, index,
             density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
         if not (np.array_equal(system.indptr, anchor.indptr)
                 and np.array_equal(system.indices, anchor.indices)):
@@ -423,6 +426,41 @@ def solve_frequency_responses_many(
                 pressures[source, receiver].append(complex((probes[receiver] @ solution)[0]))
     return {pair: np.asarray(values, dtype=np.complex128)
             for pair, values in pressures.items()}
+
+
+def checked_zone_impedance_rows(
+    zone_impedances: FrequencyZoneImpedances, frequencies_hz: Sequence[float] | NDArray[np.float64],
+) -> dict[Wall, dict[str, tuple[Impedance, ...]]]:
+    """逐區沿用整面阻抗的被動性與頻點驗證；分區不允許 None。"""
+    result: dict[Wall, dict[str, tuple[Impedance, ...]]] = {}
+    for wall, cells in zone_impedances.items():
+        if wall not in Wall.all() or not cells:
+            raise ValueError("分區阻抗牆名必須有效、區列不可為空")
+        result[wall] = {}
+        for name, value in cells.items():
+            row = checked_impedance_rows(dict.fromkeys(Wall.all(), value), frequencies_hz)[wall]
+            if any(z is None for z in row):
+                raise ValueError("分區阻抗不允許 None")
+            result[wall][name] = tuple(z for z in row if z is not None)
+    return result
+
+
+def _frequency_system(
+    operators: P2Operators, frequencies_hz: Sequence[float] | NDArray[np.float64],
+    rows: Mapping[Wall, tuple[Impedance | None, ...]], zones: Mapping[Wall, Mapping[str, tuple[Impedance, ...]]],
+    index: int, *, density_kg_m3: float, sound_speed_m_s: float,
+) -> csr_matrix[np.complex128]:
+    """同一 PARDISO（直接解器）入口，僅有分區時改接既有逐區組裝器。"""
+    if zones or operators.zone_boundary_mass:
+        if any(rows[wall][index] is not None for wall in zones):
+            raise ValueError("分區牆不可同時提供整面阻抗")
+        return assemble_zoned_helmholtz_system(operators, frequency_hz=float(frequencies_hz[index]),
+            wall_impedances={wall: row[index] for wall, row in rows.items() if wall not in zones},
+            zone_impedances={wall: {name: row[index] for name, row in cells.items()} for wall, cells in zones.items()},
+            density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    return assemble_helmholtz_system(operators, frequency_hz=float(frequencies_hz[index]),
+        wall_impedances={wall: row[index] for wall, row in rows.items()},
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
 
 
 def solve_fem_helmholtz(

@@ -81,7 +81,7 @@ def _direct_reports(scheme: Scheme, table: CapabilityTable,
         low_frequency_axis=solved.low_frequency_axis,
         capability=three_lane_report._unchecked_capability(),
         fem_energies=None,
-        furniture=None, contact_rel=None,
+        furniture=None, contact_rel=None, surface_zones_by_wall=None,
     )
     assert calls == [expected], "管線必須恰好真求解一次，完整引數等於直接路線"
     assert reports, "必須攔到真求解器的回傳"

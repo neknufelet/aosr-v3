@@ -121,7 +121,7 @@ def _rectangle_fields(scheme: Scheme) -> set[str]:
                 zone[field] = [1.0 if edge == midpoint else edge for edge in cast(list[float], zone[field])]
         rectangular = Scheme.model_validate(rectangle_document() | {"scene": scene})
         for left, right in ((scheme, rectangular), (rectangular, scheme)):
-            with pytest.raises(RectangleZonesUnsupported, match="x0.*這一段還不支援矩形分區"):
+            with pytest.raises(RectangleZonesUnsupported, match="x0.*分區還不支援這一頁／這一路"):
                 scheme_differences(left, right)
     return {f"scene.{NEW}[][].{field}" for field in ("area", "id", "u_m", "v_m")}
 

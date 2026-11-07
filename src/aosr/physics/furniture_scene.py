@@ -151,6 +151,16 @@ def furniture_adjusted_absorption(
         effective = equivalent_absorption_rows(room, {wall.wall_name(): row for wall, row in absorption_by_wall.items()},
                                               absorption_by_zone)
         absorption_by_wall = {Wall.from_name(name): row for name, row in effective.items()}
+    epsilon = furniture_absorption_fraction(room, frequencies_hz, absorption_by_wall, absorption_area_m2)
+    return {wall: tuple(alpha + (1.0 - alpha) * extra for alpha, extra in
+                        zip(absorption_by_wall[wall], epsilon, strict=True)) for wall in Wall.all()}
+
+
+def furniture_absorption_fraction(
+    room: Room, frequencies_hz: tuple[float, ...], absorption_by_wall: Mapping[Wall, tuple[float, ...]],
+    absorption_area_m2: tuple[float, ...],
+) -> tuple[float, ...]:
+    """原整面公式的 ε；逐區報表共用同一整房剩餘反射率分母。"""
     _, areas = _room_measures(room)
     epsilon = []
     for i, (frequency, af) in enumerate(zip(frequencies_hz, absorption_area_m2, strict=True)):
@@ -159,8 +169,7 @@ def furniture_adjusted_absorption(
         if not math.isfinite(extra) or not 0.0 <= extra < 1.0:
             raise ValueError(f"{frequency:g} Hz 家具吸音量無法分配：A_f={af!r}, denom={denom!r}")
         epsilon.append(extra)
-    return {wall: tuple(alpha + (1.0 - alpha) * extra for alpha, extra in
-                        zip(absorption_by_wall[wall], epsilon, strict=True)) for wall in Wall.all()}
+    return tuple(epsilon)
 
 
 def furniture_pressure_with_directivity(

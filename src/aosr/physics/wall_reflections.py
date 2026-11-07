@@ -17,10 +17,10 @@ from aosr.geometry.shoebox import Room, Wall, wall_count_signature
 from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
 from aosr.physics import amplitude as amp
 from aosr.physics.report_surfaces import (
-    RectangleZone, RectangleZonesUnsupported, SurfaceZone, rectangle_zone_at,
+    RectangleZone, RectangleZonesUnsupported, SurfaceZone, WholeWallZone, rectangle_zone_at,
     validate_surface_partition, whole_wall_materials,
 )
-from aosr.physics.wall_surfaces import wall_normal_impedances, wall_path_impedances
+from aosr.physics.wall_surfaces import wall_normal_impedances, wall_path_impedances, zoned_wall_normal_impedances
 
 if TYPE_CHECKING:
     from aosr.physics.room_paths import RoomPath
@@ -99,6 +99,22 @@ class WallReflectionSources:
             if cosines:
                 result[wall] = self._evaluate_wall(wall, material, tuple(cosines))
         return result
+
+    def partition_normal_rows(
+        self,
+    ) -> tuple[dict[Wall, float | None | tuple[complex, ...]], dict[Wall, dict[str, float | tuple[complex, ...]]]]:
+        """分區散射取逐區垂直入射阻抗；整面讀者 normal_rows 仍拒收矩形。"""
+        if self.room is None:
+            raise ValueError("分區垂直入射列必須有房間")
+        return zoned_wall_normal_impedances(self.room, self.surface_partition(), self.fixed_materials.frequencies_hz,
+            density_kg_m3=self.density_kg_m3, sound_speed_m_s=self.sound_speed_m_s, notes_by_wall=self.notes_by_wall)
+
+    def surface_partition(self) -> dict[str, tuple[SurfaceZone, ...]]:
+        """完整材料分區供晚期響應，不以首區覆寫矩形面。"""
+        zones: dict[str, tuple[SurfaceZone, ...]] = {wall.wall_name(): (WholeWallZone(area="whole_wall", material=material),)
+            for wall, material in self.materials_by_wall.items()}
+        zones.update({wall.wall_name(): cells for wall, cells in (self.rectangle_zones_by_wall or {}).items()})
+        return zones
 
     def _evaluate_wall(
         self, wall: str, material: SurfaceMaterial, cosines: tuple[float, ...],

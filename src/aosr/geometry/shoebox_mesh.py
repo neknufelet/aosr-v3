@@ -44,6 +44,11 @@ class ShoeboxMesh:
     boundary_zone_ids: NDArray[np.str_] | None = None
 
 
+def checked_partitions(room: Room, partitions: WallPartitions) -> None:
+    """公開的純資料分界驗證入口；網格內部仍共用原驗證。"""
+    _checked_partitions(room, partitions)
+
+
 def _checked_partitions(room: Room, partitions: WallPartitions) -> None:
     """純資料入口也核實精確覆蓋；不依賴上層方案驗證或面積和。"""
     for wall, rectangles in partitions.items():

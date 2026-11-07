@@ -218,14 +218,13 @@ def test_unaligned_v_patch_uses_both_rows(wall: Wall) -> None:
         rtol=contract_value("late_energy_physical_property"), atol=0.0)
 
 
-def test_combined_geometric_lane_refuses_zone_absorption_before_whole_wall_scattering() -> None:
-    """晚期子路支援不等於整條散射路支援；不能拿整面阻抗算早期、只替換晚期。"""
+def test_combined_geometric_lane_requires_matching_zone_reflection_sources() -> None:
+    """#562 分區晚期不能搭整面早期：必須同時提供分區反射來源。"""
     from aosr.geometry.shoebox import Point
     from aosr.physics.geometric_lane import solve_geometric_lane
     from aosr.physics.report_source import SourceModelKind, SourceModelSpec
-    from aosr.physics.report_surfaces import RectangleZonesUnsupported
     problem = synthetic(Wall.FLOOR, 2, 1.0/3.0, 0.5)
-    with pytest.raises(RectangleZonesUnsupported):
+    with pytest.raises(ValueError, match="分區反射來源"):
         solve_geometric_lane(room=ROOM, source=Point(1.0, 1.0, 1.0), receiver=Point(2.0, 2.0, 1.0),
             source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL), sound_speed_m_s=CONSTANTS.sound_speed_m_s,
             rho_c_pa_s_per_m=CONSTANTS.rho_c, frequencies_hz=FREQUENCIES,

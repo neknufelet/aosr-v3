@@ -98,10 +98,11 @@ def test_whole_wall_mainline_bytes(mixed: bool, scheme_sha: str, report_sha: str
     assert scheme_hash(scheme) == search_sha
 
 
-def test_solver_explicitly_refuses_rectangles() -> None:
+def test_solver_preserves_rectangles_for_formal_report() -> None:
     inputs = report_io.load_input_document(pair(Scheme.model_validate(rectangle_document())), CAPABILITIES, DIRECTIVITY)
-    with pytest.raises(report_surfaces.RectangleZonesUnsupported, match=r"ceiling.*這一段還不支援矩形分區（#561 之後幾步）"):
-        report_io.solver_inputs(inputs)
+    solved = report_io.solver_inputs(inputs)
+    assert solved.surface_zones_by_wall == inputs.surface_zones_by_wall
+    assert solved.materials_by_wall == {}
 
 
 @pytest.mark.parametrize("wall,u,v", [("floor", 6.0, 4.0), ("ceiling", 6.0, 4.0),
@@ -118,7 +119,7 @@ def test_single_full_rectangle_is_preserved_but_not_calculable(wall: str, u: flo
     assert parsed.surface_zones_by_wall is not None and parsed.impedance_pa_s_per_m_by_wall is None
     with pytest.raises(report_surfaces.RectangleZonesUnsupported) as caught:
         report_surfaces.whole_wall_materials(parsed.surface_zones_by_wall)
-    assert str(caught.value) == f"牆面 {wall}：這一段還不支援矩形分區（#561 之後幾步）"
+    assert str(caught.value) == f"牆面 {wall}：分區還不支援這一頁／這一路"
 
 
 @pytest.mark.parametrize("overlap", [False, True])

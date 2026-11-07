@@ -81,6 +81,8 @@ def _with_one_field_changed(
         return solved._replace(low_frequency_axis=next(
             axis for axis in LowFrequencyAxis if axis is not solved.low_frequency_axis
         ))
+    if field == "surface_zones_by_wall":
+        return solved._replace(surface_zones_by_wall={})
     if field == "furniture":
         return solved._replace(furniture=(desk(),))
     raise AssertionError(f"SolverInputs 多了一格 {field}，這裡要補一個換掉的值")
