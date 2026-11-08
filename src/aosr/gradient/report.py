@@ -37,6 +37,7 @@ from aosr.gradient.boundary import named_materials
 from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces, expanded_max_depths
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
+from aosr.gradient.endpoint_six_report import six_endpoint_lines
 from aosr.gradient.material_gradient_ledger import (
     LEGACY_LEDGER_VERSIONS, PRE_PROXY_LEDGER_VERSION, MaterialGradientHeader, MaterialGradientRow, read_ledger,
 )
@@ -360,6 +361,17 @@ def _unscored_lines(record: EndpointRecord) -> list[str]:
 
 
 def _endpoint_section(record: EndpointRecord) -> list[str]:
+    if record.six_category is not None:
+        return [f"{ENDPOINT_HEADING}{record.finished_at}，引擎 {record.engine_commit or '沒記'}）：",
+                *six_endpoint_lines(record.six_category), *_unscored_lines(record),
+                f"  匯出方案：{record.exported_scheme}（SHA-256 {record.exported_scheme_sha256}）",
+                f"  完整解次數：終點 {record.report.full_solves}、原牆 {record.baseline.full_solves}",
+                "  低頻歷史對照（以下舊合分／新合分只含低頻，不是上列六類 J）：",
+                *_legacy_endpoint_section(record)]
+    return _legacy_endpoint_section(record)
+
+
+def _legacy_endpoint_section(record: EndpointRecord) -> list[str]:
     report, baseline, gain, seconds = record.report, record.baseline, record.improvement, record.seconds
     dropped = "、".join(report.dropped_cavities) if report.dropped_cavities else "沒有"
     bound = report.proxy_gap_bound_db

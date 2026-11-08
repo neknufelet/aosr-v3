@@ -148,8 +148,7 @@ def test_swapped_family_result_roundtrip_and_endpoint_check(tmp_path: Path) -> N
     run.write_json_atomic(tmp_path / run.RESULT_FILE, result)
     restored = run.parse_result((tmp_path / run.RESULT_FILE).read_bytes())
     assert restored == result
-    with pytest.raises(ValueError, match="終點三組數在後續支"):
-        checked_result(tmp_path, restored, header, settings, kept)
+    assert checked_result(tmp_path, restored, header, settings, kept) == restored
     final = run.final_designs([(s.surface_id, s.preset_id) for s in result.surfaces], settings, kept, max_depths=caps)
     assert final[2].family_id == "glass_wool_24k" and final[2].max_total_depth_m == 0.15
     assert result.surfaces[2].material_digest == design_digest(final[2])

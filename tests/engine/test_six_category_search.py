@@ -51,9 +51,9 @@ def test_gpu_search_writes_six_category_scores(six_measured: dict[str, object]) 
 
 
 @pytest.mark.parametrize('version', ('aosr.material_gradient_result.v6', 'aosr.material_gradient_result.v7'))
-def test_new_result_endpoint_explicitly_refuses_until_later_branch(tmp_path: Path, version: str) -> None:
+def test_new_result_endpoint_checks_content_after_accepting_version(tmp_path: Path, version: str) -> None:
     (tmp_path / run.RESULT_FILE).write_text(json.dumps({'format_version': version}))
-    with pytest.raises(ValueError, match='終點三組數在後續支'):
+    with pytest.raises(ValidationError, match='Field required'):
         endpoint_run.read_result(tmp_path)
 
 

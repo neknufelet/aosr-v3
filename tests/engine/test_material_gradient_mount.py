@@ -625,9 +625,9 @@ def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
     output["folder"] = str(folder)
-    legacy_folder = legacy_endpoint_copy(directory, folder)
-    output["endpoint_folder"] = str(legacy_folder)
-    output["endpoint"] = _run(directory, _command("endpoint", str(legacy_folder)))
+    # 六類貼牆結果 v7 直接進新版終點；下面的剛背控制另保留舊 v4 結果行為。
+    output["endpoint_folder"] = str(folder)
+    output["endpoint"] = _run(directory, _command("endpoint", str(folder)))
     output["report"] = _run(directory, _command("report", "--folder", str(folder)))
     copy = directory / "other-mount" / folder.name
     shutil.copytree(folder, copy)
@@ -714,9 +714,12 @@ def test_cli_endpoint_exports_mounted_walls(cli_runs: tuple[Path, Record]) -> No
     assert case["code"] == 0, case["stderr"]
     folder = Path(str(output["endpoint_folder"]))
     record = _json(folder / "endpoint.json")
+    assert record['format_version'] == 'aosr.material_gradient_endpoint.v5'
+    assert record['six_category'] is not None
     zones = load_scheme(folder / str(record["exported_scheme"])).scene.surface_zones_by_wall
     assert zones is not None
     result = run.parse_result((folder / "result.json").read_bytes(), legacy=True)
+    assert result.format_version == run.MOUNTED_RESULT_VERSION
     walls = _scheme_walls(directory)
     settings = load_material_gradient_settings(directory / "settings.toml")
     by_wall: dict[Wall, SurfaceMaterial] = {wall: walls[wall.wall_name()] for wall in Wall.all()}

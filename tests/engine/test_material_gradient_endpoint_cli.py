@@ -234,6 +234,7 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
     (copy / "result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     record = _json(copy / "endpoint.json")
     record["format_version"] = endpoint_run.LEGACY_ENDPOINT_VERSION
+    record.pop('six_category', None)
     for part in ("report", "baseline", "improvement"):
         cast(Record, record[part]).pop("below_scoring")
     for part, names in (("report", _PROXY_FIELDS), ("baseline", ("full_objective_total", "full_proxy_db",
@@ -403,7 +404,8 @@ def test_cli_endpoint_matches_entry_within_contract(runs: tuple[Path, Record]) -
 
 def _without(record: Record) -> Record:
     """不比的欄：各段秒數與完成時間。"""
-    return {key: value for key, value in record.items() if key not in ("seconds", "finished_at")}
+    # 歷史低頻的 CLI 控制；六類另由 test_six_category_endpoint 的獨立評分入口守。
+    return {key: value for key, value in record.items() if key not in ("seconds", "finished_at", "six_category")}
 
 
 def _within(actual: object, expected: object, tolerance: float) -> bool:
@@ -639,7 +641,7 @@ def test_saved_batch_reaches_endpoint_chain(runs: tuple[Path, Record], tmp_path:
 def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record], tmp_path: Path) -> None:
     """v4 加不計分低頻註記；CPU 裝置預設不增 JSON 位元組，GPU 兩段真用單精度分解並記修正次數。"""
     record = _record(_folder(runs))
-    assert record.format_version == "aosr.material_gradient_endpoint.v4"
+    assert record.format_version == endpoint_run.ENDPOINT_VERSION
     original = record.model_dump(mode="json", exclude={"device", "max_refinement_steps"})
     expected = (json.dumps(original, ensure_ascii=False, allow_nan=False) + "\n").encode()
     for candidate in (record, record.model_copy(update={"device": "cpu"})):

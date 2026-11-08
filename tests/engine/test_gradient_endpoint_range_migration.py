@@ -36,7 +36,7 @@ def test_old_scored_range_folder_rejected_with_restart_message(
 
 def test_endpoint_v4_carries_unscored_notes_and_chinese_report(runs: tuple[Path, Record]) -> None:
     record = _record(_folder(runs))
-    assert record.format_version == "aosr.material_gradient_endpoint.v4"
+    assert record.format_version == endpoint_run.ENDPOINT_VERSION
     assert record.report.below_scoring is not None and record.baseline.below_scoring is not None
     assert record.improvement.below_scoring is not None
     assert record.report.below_scoring.range_hz == (20.0, 30.0)
@@ -59,6 +59,7 @@ def test_legacy_endpoint_notes_absent_and_read_requires_legacy(
     shutil.copytree(_folder(runs), folder)
     document = _json(folder / "endpoint.json")
     document["format_version"] = version
+    document.pop('six_category', None)
     for part in ("report", "baseline", "improvement"):
         cast(Record, document[part]).pop("below_scoring", None)
     if version.endswith(".v2"):

@@ -139,8 +139,7 @@ def _check_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     before = run.parse_result((folder / run.RESULT_FILE).read_bytes())
     assert before.surfaces[0].fixed_material_id == FIXED["floor"]
     assert run.resume_search(folder, should_stop=None) == before
-    with pytest.raises(ValueError, match="終點三組數在後續支"):
-        checked_result(folder, before, header, problem.settings, problem.kept)
+    assert checked_result(folder, before, header, problem.settings, problem.kept) == before
     designs = run.final_designs([(s.surface_id, s.preset_id) for s in before.surfaces], problem.settings, problem.kept,
                                 fixed_surfaces=FIXED)
     assert materials_from_surfaces(designs, np.asarray([float.fromhex(v) for v in before.theta_hex]), problem.settings)[Wall.all()[0]] == material
