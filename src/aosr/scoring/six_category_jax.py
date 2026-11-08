@@ -23,6 +23,7 @@ from aosr.physics.late_family_jax import constant_absorption_arrays, paris_absor
 from aosr.physics.reflection_energy_jax import reflection_path_energy
 from aosr.scoring._six_category_constants import SixCategoryConstants as SixCategoryConstants
 from aosr.scoring._six_category_build import build_constants as build_constants
+from aosr.scoring._six_category_build import constant_material_flags as constant_material_flags
 from aosr.scoring.gradient_objective_jax import gradient_objective_from_pressures
 from aosr.scoring.reflections_jax import ReflectionGeometry, reflection_cost_arrays, primary_category_cost
 from aosr.scoring.reverberation_cost_jax import reverberation_cost_arrays

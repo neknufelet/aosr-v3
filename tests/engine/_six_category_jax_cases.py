@@ -23,9 +23,8 @@ from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 from aosr.scoring import ranking
-from aosr.scoring._six_category_build import constant_material_flags
 from aosr.scoring.receiver_set import primary_cross
-from aosr.scoring.six_category_jax import SixCategoryConstants, build_constants
+from aosr.scoring.six_category_jax import SixCategoryConstants, build_constants, constant_material_flags
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import reference_document, relative_item
 from tests.engine._geometric_early_jax_cases import scattering

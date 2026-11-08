@@ -19,8 +19,8 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.quality_targets import load_quality_targets
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Wall
-from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.materials.transfer_matrix import diffuse_incidence_angles_deg
 from aosr.physics import geometric_early_jax as early
 from aosr.physics.geometric_lane import _unblocked_room_paths

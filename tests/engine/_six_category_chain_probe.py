@@ -6,7 +6,6 @@ import json
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from time import perf_counter
 from unittest.mock import patch
 
 import jax
@@ -16,8 +15,11 @@ import numpy as np
 from aosr.config.construction_environment import construction_environment
 from aosr.config.frequency_axis import low_frequency_axis_frequencies
 from aosr.config.material_gradient import Mount
+from aosr.config.physics_constants import PhysicsConstants
+from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.gradient import endpoint, material_gradient as old, six_category_chain as chain
-from aosr.materials.construction_models import Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall
+from aosr.materials.construction_diff import ConstructionTemplate, build_template
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_build import build_reduced_model
 from aosr.physics.fem_reduced_store import save_reduced
@@ -70,26 +72,31 @@ def control(model: ReducedModel, designs: tuple[old.SurfaceDesign, ...], c: SixC
     objective = factory(model, designs, c)
     result: dict[str, object] = {}
     for mode, transform in (('eager', lambda x: x), ('jit', jax.jit)):
-        actual = transform(objective)(theta)[1].low_frequency.objective_total
+        aux = transform(objective)(theta)[1]
+        actual = aux.low_frequency.objective_total
         expected = transform(legacy)(theta)[1].objective_total
         result[f'{mode}_bitwise'] = np.asarray(actual).tobytes() == np.asarray(expected).tobytes()
         result[f'{mode}_hex'], result[f'{mode}_old_hex'] = float(actual).hex(), float(expected).hex()
+        result[f'{mode}_category_bitwise'] = np.asarray(aux.categories.low_frequency_objective).tobytes() == np.asarray(actual).tobytes()
     return result
 
 
-def reference(scheme: Scheme, designs: tuple[old.SurfaceDesign, ...], theta: jax.Array, c: SixCategoryConstants) -> tuple[jax.Array, ...]:
+def exported_scheme(scheme: Scheme, designs: tuple[old.SurfaceDesign, ...], theta: jax.Array) -> Scheme:
     materials = endpoint.materials_from_surfaces(designs, np.asarray(theta), _settings())
     scene = endpoint.scene_with_materials(scheme.scene, materials)
-    exported = Scheme.model_validate({**scheme.model_dump(), 'scene': scene.model_dump()})
-    return cases.array_inputs(exported, c)
+    return Scheme.model_validate({**scheme.model_dump(), 'scene': scene.model_dump()})
 
 
-def material_measure(name: str, objective: chain.SixCategoryChainObjective, theta: jax.Array,
+def reference(scheme: Scheme, designs: tuple[old.SurfaceDesign, ...], theta: jax.Array, c: SixCategoryConstants) -> tuple[jax.Array, ...]:
+    return cases.array_inputs(exported_scheme(scheme, designs, theta), c)
+
+
+def material_measure(name: str, model: ReducedModel, objective: chain.SixCategoryChainObjective, theta: jax.Array,
                      scheme: Scheme, designs: tuple[old.SurfaceDesign, ...], c: SixCategoryConstants) -> tuple[dict[str, object], dict[str, object], tuple[jax.Array, ...]]:
     result, inputs = capture(objective, theta)
     exported = reference(scheme, designs, theta, c)
     expected = six_category_costs(c, exported[0], exported[1], exported[2], exported[3], inputs[4], exported[5])
-    air, ranges = construction_environment(density_kg_m3=1.2, sound_speed_m_s=343.)
+    air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
     impedances = chain._impedance_function(designs, c, air=air, ranges=ranges)
     compiled_inputs = jax.jit(impedances)(theta)
     row: dict[str, object] = dict(name=name, flags_match=np.array_equal(inputs[5], exported[5]))
@@ -109,18 +116,47 @@ def material_measure(name: str, objective: chain.SixCategoryChainObjective, thet
     return row, end, inputs
 
 
+def numpy_measure(scheme: Scheme, designs: tuple[old.SurfaceDesign, ...], theta: jax.Array,
+                  inputs: tuple[jax.Array, ...], end: dict[str, object]) -> dict[str, object]:
+    exported = exported_scheme(scheme, designs, theta)
+    zones = exported.scene.surface_zones_by_wall
+    assert zones is not None
+    has_mounted = any(isinstance(z.material, MountedOnWall) for cells in zones.values() for z in cells)
+    result = cases.numpy_result(exported, np.asarray(inputs[4]))
+    costs, total = cases.numpy_costs(result)
+    return dict(reference=costs.tolist(), reference_product=total, has_mounted_patch=has_mounted,
+        eager=end['eager'], jit=end['jit'], eager_product=end['eager_product'], jit_product=end['jit_product'], weights=end['weights'])
+
+
+def template_axes_measure(model: ReducedModel, designs: tuple[old.SurfaceDesign, ...], c: SixCategoryConstants) -> dict[str, object]:
+    """攔截真 build_template 的驗證軸，仍照原入口驗材料；不以產品函式自己的輸出倒推軸。"""
+    captured: dict[str, list[np.ndarray]] = {'design': [], 'kept': []}
+    def observe(material: SurfaceMaterial, frequencies_hz: jax.Array, *, air: PhysicsConstants,
+                ranges: PorousModelRanges, variables: tuple[str, ...] | None = None) -> ConstructionTemplate:
+        captured['design' if variables else 'kept'].append(np.asarray(frequencies_hz))
+        return build_template(material, frequencies_hz, air=air, ranges=ranges, variables=variables)
+    air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
+    with patch.object(old, 'build_template', observe), patch.object(chain, 'build_template', observe):
+        chain._impedance_function(designs, c, air=air, ranges=ranges)
+    axes = (c.fem_frequencies_hz, c.frequencies_hz, c.frequencies_hz, c.union_frequencies_hz)
+    return {f'{kind}_coverage': [bool(captured[kind]) and all(np.isin(axis, used).all() for used in captured[kind]) for axis in axes]
+        for kind in captured}
+
+
 def gradient_measure(objective: chain.SixCategoryChainObjective, theta: jax.Array, c: SixCategoryConstants,
                      inputs: tuple[jax.Array, ...]) -> dict[str, object]:
+    """只驗 capped=True 硬切區；測不到決策紙第 11 條在平滑區刻意省掉的 dw/dθ。"""
     def totals(x: jax.Array) -> jax.Array:
         r = objective(x)[1]
         return jnp.stack((r.objective_total, r.product_total))
     evaluate = jax.jit(totals)
+    values = np.asarray(evaluate(theta))
     automatic = np.asarray(jax.jit(jax.jacrev(totals))(theta))*np.asarray(theta)
     central = np.empty_like(automatic)
     for i, h in enumerate(DIFFERENCE_STEP*np.asarray(theta)):
         delta = jnp.zeros_like(theta).at[i].set(h)
         central[:, i] = (np.asarray(evaluate(theta+delta))-np.asarray(evaluate(theta-delta)))/(2*h)*float(theta[i])
-    return dict(automatic=automatic.tolist(), central=central.tolist(), step=DIFFERENCE_STEP, theta=np.asarray(theta).tolist(),
+    return dict(automatic=automatic.tolist(), central=central.tolist(), values=values.tolist(), step=DIFFERENCE_STEP, theta=np.asarray(theta).tolist(),
         reflection_margin=reflection_margin(c, inputs), capped=bool(objective(theta)[1].categories.capped_by_upper_limit))
 
 
@@ -164,7 +200,7 @@ def rejections(model: ReducedModel, designs: tuple[old.SurfaceDesign, ...], c: S
         'objective': lambda: chain.six_category_chain_objective(model, designs, c.objective(),
             c._replace(objective_proxy_weight=c.objective_proxy_weight+1), air=air, ranges=ranges, frequencies=model.frequencies_hz),
         'rigid': lambda: factory(model, (dataclasses.replace(designs[0], kept_material=None), *designs[1:]), c)}
-    result: dict[str, object] = dict(material_flags=build.constant_material_flags(materials).tolist())
+    result: dict[str, object] = dict(material_flags=scoring.constant_material_flags(materials).tolist())
     for name, call in calls.items():
         try:
             call()
@@ -209,20 +245,24 @@ def main(output: Path) -> None:
             cached.append(original(scheme, pair_inputs=pair_inputs, quality_targets_path=quality_targets_path))
         return cached[0]
     materials, end_to_end = [], []
+    numpy_on_wall: dict[str, object] = {}
     with (patch.object(build, 'build_constants', counted), patch.object(cases, 'build_constants', counted),
           patch.object(scoring, 'build_constants', counted), patch.object(chain, 'build_constants', counted, create=True)):
         c = cases.constants(scheme)
         build_calls = calls
         theta = jnp.asarray([.071, .063])
         rejected = rejections(model, candidate_designs(scheme, c, 'rigid'), c)
+        template_axes = template_axes_measure(model, candidate_designs(scheme, c, 'rigid'), c)
         mounts: tuple[Mount, ...] = ('rigid', 'on_wall')
         for mount in mounts:
             designs = candidate_designs(scheme, c, mount)
             objective = factory(model, designs, c)
-            row, end, inputs = material_measure(mount, objective, theta, scheme, designs, c)
+            row, end, inputs = material_measure(mount, model, objective, theta, scheme, designs, c)
             materials.append(row)
             end_to_end.append(end)
             controls[mount] = control(model, designs, c, theta)
+            if mount == 'on_wall':
+                numpy_on_wall = numpy_measure(scheme, designs, theta, inputs, end)
         # 梯度用既有 zoned 的固定阻抗原牆，與上面的保留 Assembly 案例共用同一份幾何。
         # 原牆較反射，交接停在硬上限；不把 stop_gradient 擋掉的權重變化混進差分。
         designs = candidate_designs(cases.scheme_case('zoned'), c, 'rigid')
@@ -236,7 +276,8 @@ def main(output: Path) -> None:
         invalid = invalid_measure(model, designs, c, gradient_theta)
         after = calls
     output.write_text(json.dumps(dict(controls=controls, materials=materials, end_to_end=end_to_end, gradients=gradients,
-        single=single, invalid=invalid, rejections=rejected, build_calls=build_calls, build_calls_after_candidates=after), allow_nan=False))
+        single=single, invalid=invalid, rejections=rejected, build_calls=build_calls, build_calls_after_candidates=after,
+        numpy_on_wall=numpy_on_wall, template_axes=template_axes), allow_nan=False))
 
 
 if __name__ == '__main__':

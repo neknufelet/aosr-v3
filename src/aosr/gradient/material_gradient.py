@@ -468,6 +468,10 @@ def _patch_impedances(templates: Sequence[ConstructionTemplate | None], paramete
     return TemplateImpedances(jnp.stack(rows), jnp.asarray([template is None for template in templates], dtype=bool))
 
 
+# 面片阻抗的公開別名；原搜尋仍使用同一份既有實作與私名。
+patch_impedances = _patch_impedances
+
+
 def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64],

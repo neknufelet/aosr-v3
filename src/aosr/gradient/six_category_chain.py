@@ -16,17 +16,16 @@ from numpy.typing import NDArray
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.gradient.material_gradient import (
-    SurfaceDesign, _patch_impedances, design_template_material, design_templates, designs_mount,
-    kept_impedance_rows, surface_parameters,
+    SurfaceDesign, design_template_material, design_templates, designs_mount,
+    kept_impedance_rows, patch_impedances, surface_parameters,
 )
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, reduced_constants, reduced_pressures, wall_impedances_from_templates
-from aosr.scoring._six_category_build import constant_material_flags
 from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures
-from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, six_category_costs
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, constant_material_flags, six_category_costs
 
 
 class SixCategoryChainAux(NamedTuple):
@@ -73,7 +72,7 @@ def _angles(values: NDArray[np.float64], dtype: np.dtype) -> jax.Array:
 def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConstants, *,
                         air: PhysicsConstants, ranges: PorousModelRanges) -> ImpedanceFunction:
     materials = _materials(designs)
-    templates = design_templates(designs, jnp.asarray(c.fem_frequencies_hz), air=air, ranges=ranges)
+    templates = design_templates(designs, jnp.asarray(c.union_frequencies_hz), air=air, ranges=ranges)
     angle_templates = tuple(template if template is not None or isinstance(material, ConstantImpedance) else
         build_template(material, jnp.asarray(c.union_frequencies_hz), air=air, ranges=ranges, variables=())
         for material, template in zip(materials, templates, strict=True))
@@ -83,7 +82,7 @@ def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
     def impedances(theta: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
         parameters = surface_parameters(designs, theta)
         fem_axis = jnp.asarray(c.fem_frequencies_hz, dtype=theta.dtype)
-        fem = (_patch_impedances(templates, parameters, fem_axis, air=air) if zoned else
+        fem = (patch_impedances(templates, parameters, fem_axis, air=air) if zoned else
                wall_impedances_from_templates(templates, parameters, fem_axis, air=air)).values
         for index, row in kept:
             fem = fem.at[index].set(jnp.asarray(row, dtype=fem.dtype))
@@ -123,8 +122,10 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
                                  single_precision: bool = False, device_constants: ReducedConstants | None = None) -> SixCategoryChainObjective:
     """回 θ → (六類搜尋目標, aux 分項)；可 jit／grad（編譯／微分），精度跟 θ 走。
 
+    工廠必須在雙精度已開的行程裡呼叫，讓樣板在涵蓋四路頻率的聯集軸上驗合法性。
     六類常數必須由呼叫端事先 build_constants 建一次；候選只改樣板與 constant_material（常數材料旗標）。
-    保留構造用無變數樣板算角度阻抗，固定阻抗廣播；保留 MeasuredImpedance 明確拒收。
+    保留構造用無變數樣板算角度阻抗，固定阻抗廣播；只拒裸 MeasuredImpedance（實測）保留牆。
+    貼牆背後是實測表、或保留 MountedOnWall(wall=實測表) 照收，走 construction_diff 的 JAX 內插。
     舊低頻直接呼叫原評分入口，aux.low_frequency 保留篩選、代理與目標原值。
     這一支不接搜尋與顯卡包裝；single_precision／device_constants 顯卡選項留待後續支線。
     float32 θ 仍可在 CPU（中央處理器）求值，五個數值輸入進六類前統一成對應複數精度。

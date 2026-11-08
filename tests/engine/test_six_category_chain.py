@@ -46,6 +46,7 @@ def test_low_frequency_control_is_bitwise(measured: dict[str, object], mode: str
     for name, row in controls.items():
         assert row[f'{mode}_bitwise'] is True, (name, row)
         assert row[f'{mode}_hex'] == row[f'{mode}_old_hex'], (name, row)
+        assert row[f'{mode}_category_bitwise'] is True, (name, row)
 
 
 @pytest.mark.parametrize('lane', range(4), ids=('fem', 'normal', 'oblique', 'paris'))
@@ -63,7 +64,7 @@ def test_material_inputs_match_exported_materials(measured: dict[str, object], l
 
 @pytest.mark.parametrize('mode', ('eager', 'jit'))
 def test_categories_and_product_match_export_path(measured: dict[str, object], mode: str) -> None:
-    """抓：替身聲壓轉軸錯、六類接線錯或總分混入低頻代理。"""
+    """抓：六類接線錯或總分混入低頻代理；獨立 numpy 答案由下一題守。"""
     for row in cast(list[dict[str, object]], measured['end_to_end']):
         expected = np.asarray(row['reference'])
         tolerance = _tolerances(expected)
@@ -74,9 +75,31 @@ def test_categories_and_product_match_export_path(measured: dict[str, object], m
         assert row['flags'] == [True]*6
 
 
+@pytest.mark.parametrize('mode', ('eager', 'jit'))
+def test_on_wall_categories_and_product_match_numpy(measured: dict[str, object], mode: str) -> None:
+    """含 MountedOnWall（原牆上貼構造）的匯出方案，對正式 numpy 六類與排名總分。"""
+    row = cast(dict[str, object], measured['numpy_on_wall'])
+    expected = np.asarray(row['reference'])
+    tolerance = _tolerances(expected)
+    assert row['has_mounted_patch'] is True
+    assert np.all(np.abs(np.asarray(row[mode])-expected) <= tolerance), (row, tolerance)
+    assert abs(cast(float, row[f'{mode}_product'])-cast(float, row['reference_product'])) <= np.dot(np.asarray(row['weights']), tolerance)
+
+
+def test_template_validation_axis_covers_all_four_lanes(measured: dict[str, object]) -> None:
+    """抓：設計樣板僅在 FEM 軸驗合法性、漏掉報表／斜入射／Paris 軸。"""
+    row = cast(dict[str, object], measured['template_axes'])
+    assert row['design_coverage'] == [True]*4, row
+    assert row['kept_coverage'] == [True]*4, row
+
+
 @pytest.mark.parametrize('index', (0, 1), ids=('objective', 'product'))
 def test_theta_gradients_match_central_difference(measured: dict[str, object], index: int) -> None:
-    """抓：四路材料或替身斷梯度；逐參數比 θ_i·導數，沿用舊鏈相對步長。"""
+    """逐參數比 θ_i·導數，沿用舊鏈相對步長；本題只在 capped=True（交接硬切）區。
+
+    交接權重 stop_gradient（擋梯度）；硬切區真導數也是零，才能與中央差分相等。
+    本題測不到平滑交接區少掉的 dw/dθ，那是決策紙第 11 條的已知限制。
+    """
     row = cast(dict[str, object], measured['gradients'])
     actual, central = np.asarray(row['automatic'])[index], np.asarray(row['central'])[index]
     assert np.all(np.isfinite(actual) & (np.abs(actual-central) <= GRADIENT_ABS+GRADIENT_REL*np.abs(central))), (actual, central)
