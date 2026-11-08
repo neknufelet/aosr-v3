@@ -183,6 +183,10 @@ def solve_geometric_early(
     """陣列入口：逐反彈連乘、逐階相干和與散射縮放；可編譯及對阻抗微分。"""
     scattering, scattering_valid = room_scattering(table, normal_impedance, scattering_by_patch)
     safe_s = jnp.where(scattering_valid, scattering, 0.)
+    retained = 1.-safe_s
+    # 零保留邊界取零切線；內層避開零底數的開根號，外層保留原來的零值。
+    zero_retained = retained == 0.
+    safe_retained = jnp.where(zero_retained, 1., retained)
     direct, reflected, interference, reflection_valid = [], [], [], []
     for pair in table.pairs:
         pressure, valid = _pair_pressure(pair, impedance_by_patch, table.rho_c)
@@ -191,7 +195,8 @@ def solve_geometric_early(
         for order in range(1, table.reflection_order_k+1):
             selected = jnp.asarray(pair.paths.order == order)[:, None]
             pk = jnp.sum(jnp.where(selected, pressure, jnp.zeros((), dtype=pressure.dtype)), axis=0)
-            pr = pr + (1.-safe_s)**(order/2.)*pk
+            scale = jnp.where(zero_retained, 0., safe_retained**(order/2.))
+            pr = pr + scale*pk
         pr = pr+jnp.asarray(pair.furniture_pressure, dtype=pressure.dtype)
         reflection_valid.append(valid)
         valid = valid & scattering_valid
@@ -204,3 +209,8 @@ def solve_geometric_early(
     r_valid = pack(reflection_valid)
     return GeometricEarlyJaxResult(pack(direct), pack(reflected), pack(interference),
         jnp.where(r_valid, jnp.broadcast_to(scattering, table.shape), jnp.nan), r_valid, s_valid, r_valid & s_valid)
+
+
+# 固定幾何的組裝器也需要建逐對表與合併入射角；原私名保留相容。
+build_early_pair_table = _pair_table
+shared_incidence_angles = _shared_angles

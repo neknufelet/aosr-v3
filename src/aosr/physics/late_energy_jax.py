@@ -187,7 +187,7 @@ def zoned_late_energy_geometry(room: Room, n_per_wall: int, absorption_by_zone: 
     return ZonedLateEnergyGeometry(whole, patches, walls)
 
 
-def _bounded_weighted_absorption(weights: NDArray[np.float64], values: jax.Array) -> jax.Array:
+def _bounded_weighted_absorption(weights: NDArray[np.float64] | jax.Array, values: jax.Array) -> jax.Array:
     """分區凸組合只受正權重區的逐頻界約束；單一區直接取原列。"""
     coefficients = jnp.asarray(weights, dtype=values.dtype)
     active = coefficients > 0.0
@@ -198,23 +198,25 @@ def _bounded_weighted_absorption(weights: NDArray[np.float64], values: jax.Array
     return jnp.where(jnp.sum(active, axis=1)[:, None] == 1, direct, jnp.clip(average, lower, upper))
 
 
-def _bounded_absorption_with_linear_gradient(weights: NDArray[np.float64], values: jax.Array) -> jax.Array:
+@jax.custom_jvp
+def _bounded_absorption_with_linear_gradient(weights: NDArray[np.float64] | jax.Array, values: jax.Array) -> jax.Array:
     """值沿用原浮點凸組合護欄；導數是固定權重平均，同材時也不能被 min/max 平分。
 
     非負權重的凸組合在數學上永遠在輸入上下界內；夾值只修捨入，不改物理導數。
-    幾何權重是固定常數，只對材料吸音率求導。前向沿用原 helper，既有與新分區入口共用這份導數。
+    幾何權重明確傳入、不捕獲追蹤陣列；權重的切線不參與，只對材料吸音率求導。
+    前向沿用原 helper，既有與新分區入口共用這份導數。
     """
-    @jax.custom_jvp
-    def bounded(alpha: jax.Array) -> jax.Array:
-        return _bounded_weighted_absorption(weights, alpha)
+    return _bounded_weighted_absorption(weights, values)
 
-    @bounded.defjvp
-    def bounded_jvp(primals: tuple[jax.Array], tangents: tuple[jax.Array]) -> tuple[jax.Array, jax.Array]:
-        coefficients = jnp.asarray(weights, dtype=primals[0].dtype)
-        tangent = jnp.matmul(coefficients, tangents[0], precision=_HIGHEST) / jnp.sum(coefficients, axis=1)[:, None]
-        return bounded(primals[0]), tangent
 
-    return bounded(values)
+@_bounded_absorption_with_linear_gradient.defjvp
+def _bounded_absorption_jvp(
+    primals: tuple[jax.Array, jax.Array], tangents: tuple[jax.Array, jax.Array],
+) -> tuple[jax.Array, jax.Array]:
+    weights, values = primals
+    coefficients = jnp.asarray(weights, dtype=values.dtype)
+    tangent = jnp.matmul(coefficients, tangents[1], precision=_HIGHEST) / jnp.sum(coefficients, axis=1)[:, None]
+    return _bounded_absorption_with_linear_gradient(weights, values), tangent
 
 
 def zoned_late_energy_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array) -> LateEnergyArrays:

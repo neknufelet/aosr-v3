@@ -800,3 +800,7 @@ def rank_candidates(
             candidate_filter=CandidateFilterCounts(illegal_count=0, illegal_reasons={}),
         ),
     )
+
+
+# 六類組裝與排名共用規則及類權重；原私名保留相容。
+read_ranking_rules = _read_rules
