@@ -220,3 +220,4 @@ verdict_run = "uv run python -m governance.status.record_step --name verdict --o
 "上傳" = "${{ !cancelled() }}"
 
 [settings.allowed_required_step_ifs.timing-history]
+"上傳" = "${{ !cancelled() }}"
