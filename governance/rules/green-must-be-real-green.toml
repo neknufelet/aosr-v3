@@ -542,7 +542,9 @@ prefix = "tests.engine."
 # #562 B2a：新增六類搜尋與 CLI 控制 24 題，未移除；CPU collect-only 引擎籃逐檔實數 11041，未跑全套。
 # #562 B2a 修補一：新增混合拒收、worker／CLI 邊界與版本對照 12 題，方向分區指紋 1 題；CPU 純收集實量 11054，未移除、未跑全套。
 # #562 B2b：新增六類單精度／新尺 16 題、淘汰目標釋放 2 格；CPU 純收集實量 11072，未移除、未跑全套。
-collected_floor = 11072
+# #562 B2b 修補一：新增低頻同源、單次建圖、四路 HLO 與保留 Assembly 控制 7 題；CPU 純收集實量 11079，未移除、未跑全套。
+# #562 B2b 修補二：新增安全聲壓／有效梯度控制 1 題；CPU 純收集實量 11080，未移除、未跑全套。
+collected_floor = 11080
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

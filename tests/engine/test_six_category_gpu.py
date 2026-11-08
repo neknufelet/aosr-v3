@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -35,6 +36,45 @@ def measured(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> dict[s
 
 def test_single_low_frequency_control_is_bitwise(measured: dict[str, object]) -> None:
     assert measured['control_equal'] == [True]*3, measured['control_hex']
+
+
+@pytest.fixture(scope='module')
+def reviewed(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> dict[str, object]:
+    def produce() -> str:
+        directory = tmp_path_factory.mktemp('six-gpu-review')
+        output = directory/'review.json'
+        env = child_process_env(threads=1)
+        configure_jax(platforms='cpu',enable_x64=True,env=env)
+        env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'],str(Path(__file__).resolve().parents[2])))
+        done = subprocess.run([sys.executable,'-m','tests.engine._six_category_gpu_review_probe',str(output)],
+            cwd=directory,env=env,capture_output=True,text=True,timeout=300)
+        assert done.returncode == 0,done.stdout+done.stderr
+        return output.read_text()
+    return cast(dict[str,object],json.loads(shared_json(tmp_path_factory,worker_id,'six-gpu-review',produce)))
+
+
+@pytest.mark.parametrize('case',('normal','kept'))
+def test_single_low_frequency_has_one_bitwise_source_and_scores_hold(reviewed: dict[str,object],case: str) -> None:
+    points = cast(list[dict[str,object]],cast(dict[str,object],reviewed[case])['points'])
+    assert len(points) == 9
+    assert all(point['low_bitwise'] for point in points),[p['low_hex'] for p in points]
+    assert all(point['scores_checked'] for point in points)
+    assert all(point['forward_low_bitwise'] and point['forward_scores_checked'] for point in points)
+
+
+@pytest.mark.parametrize('case',('normal','kept'))
+def test_four_material_routes_have_no_double_arithmetic(reviewed: dict[str,object],case: str) -> None:
+    assert cast(dict[str,object],reviewed[case])['wide_arithmetic'] == []
+
+
+def test_kept_assembly_single_chain_matches_double_within_contract(reviewed: dict[str,object]) -> None:
+    case = cast(dict[str,object],reviewed['kept'])
+    assert case['kept_assembly'] is True
+    points = cast(list[dict[str,object]],case['points'])
+    for point in points:
+        assert all(error <= contract_value('six_category_search_gpu_single_vs_cpu_double')
+                   for error in cast(list[float],point['differences']))
+        assert all(math.isfinite(value) for value in cast(list[float],point['low_components']))
 
 
 def test_kept_assembly_fem_tmm_is_single(tmp_path: Path) -> None:
@@ -127,10 +167,13 @@ def test_six_category_gate_precedes_ledger_and_persists_record(tmp_path: Path, m
     ruler = contract_value('six_category_search_gpu_single_vs_cpu_double')
     comparison = six_category_precision_comparison(cpu_double=0.,gpu_single=ruler/2 if accepted else ruler*2,
         theta=(.05,),cpu_product=1.,gpu_product=2.,cpu_categories=(0.,)*6,gpu_categories=(1.,)*6)
-    project = _project().model_copy(update={'device':'gpu'})
+    project = _project().model_copy(update={'device':'gpu',
+        'objective_settings_fingerprint':run.search_objective_settings(_project().purpose).fingerprint})
     run.write_json_atomic(tmp_path/run.PROJECT_FILE,project)
     monkeypatch.setattr(gpu_preflight,'measure_start',lambda *args:comparison)
-    monkeypatch.setattr(run,'load_problem',lambda project:cast(run.GradientProblem,SimpleNamespace(header=None)))
+    from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
+    objective = object.__new__(SixCategorySinglePrecisionObjective)
+    monkeypatch.setattr(run,'load_problem',lambda project:cast(run.GradientProblem,SimpleNamespace(header=None,objective=objective)))
     class ReachedLedger(Exception):
         pass
     def reached(*args: object, **kwargs: object) -> None:

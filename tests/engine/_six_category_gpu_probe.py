@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 import json
 import sys
 from pathlib import Path
@@ -28,7 +29,7 @@ from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, reduced_pressures
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays
-from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, six_category_costs
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, _six_category_costs
 from tests.engine import _six_category_jax_cases as cases
 from tests.engine._material_gradient_gpu_probe import model
 from tests.engine.test_material_gradient import _settings
@@ -100,15 +101,16 @@ def boundary_types(room: ReducedModel, designs: tuple[g.SurfaceDesign, ...], c: 
             materials.extend(str(x.dtype) for x in values)
             return values
         return call
-    def observe_score(c: SixCategoryConstants, *args: jax.Array) -> SixCategoryArrays:
+    def observe_score(c: SixCategoryConstants, *args: jax.Array,
+                      low_frequency: Callable[[jax.Array],jax.Array]) -> SixCategoryArrays:
         inputs.extend(str(x.dtype) for x in args[:5])
-        return six_category_costs(c, *args)
+        return _six_category_costs(c, *args, low_frequency=low_frequency)
     def observe_pressure(reduced: ReducedConstants, z: jax.Array, *, rigid_mask: jax.Array,
                          frequency_batch: int | None) -> jax.Array:
         result = reduced_pressures(reduced,z,rigid_mask=rigid_mask,frequency_batch=frequency_batch)
         pressures.append(str(result.dtype))
         return result
-    with patch.object(chain,'_impedance_function',observe_impedances), patch.object(chain,'six_category_costs',observe_score), patch.object(chain,'reduced_pressures',observe_pressure):
+    with patch.object(chain,'_impedance_function',observe_impedances), patch.object(chain,'_six_category_costs',observe_score), patch.object(chain,'reduced_pressures',observe_pressure):
         factory(room,designs,c,True)(theta)
     return dict(input_dtypes=inputs,material_dtypes=materials,pressure_dtype=pressures[0])
 

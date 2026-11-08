@@ -26,7 +26,7 @@ from aosr.materials.construction_models import ConstantImpedance, MeasuredImpeda
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures
-from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, constant_material_flags, six_category_costs
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, constant_material_flags, six_category_costs, _six_category_costs
 
 
 class SixCategoryChainAux(NamedTuple):
@@ -130,12 +130,15 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
     工廠必須在雙精度已開的行程裡呼叫，讓樣板在涵蓋四路頻率的聯集軸上驗合法性。
     六類常數必須由呼叫端事先 build_constants 建一次；候選只改樣板與 constant_material（常數材料旗標）。
     保留構造用無變數樣板算角度阻抗，固定阻抗廣播；只拒裸 MeasuredImpedance（實測）保留牆。
+    單精度的保留 Assembly 連 FEM 列也實跑 float32 TMM；舊鏈則把雙精度預算 FEM 列降型。
+    這讓四路材料計算都守單精度界線，包含保留構造；J 的單雙精度差由開跑閘門守，各類差另記錄。
     貼牆背後是實測表、或保留 MountedOnWall(wall=實測表) 照收，走 construction_diff 的 JAX 內插。
     舊低頻直接呼叫原評分入口，aux.low_frequency 保留篩選、代理與目標原值。
     single_precision=True 時 θ／四路材料阻抗／替身聲壓單精度；五個數值輸入升 complex128 才進六類。
     低頻分項也先升 complex128，沿用舊單精度包裝的評分界線；帳本恆等式仍用雙精度守。
     device_constants／score_arrays 讓所有候選共用裝置常數；六類評分常數不降精度。
     aux 的舊低頻小向量常數仍沿用原閉包，保留既有常量折疊的運算順序以守逐位控制；
+    單精度六類低頻格與 J 共用這份低頻目標，不再建立另一份低頻目標圖。
     六類評分的大幾何、路徑、平滑矩陣與各浮點向量則由包裝明確動態傳入。
     未包裝的 float32 θ 仍沿用原本精度跟輸入走的純函式介面。
     """
@@ -156,8 +159,13 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
         dtype = jnp.complex128 if single_precision else jnp.result_type(values.dtype, jnp.complex64)
         z_fem, z_normal, z_early, z_paris, p = (jnp.asarray(x, dtype=dtype)
             for x in (fem, normal, early, paris, jnp.transpose(pressures, (1, 2, 0))))
-        categories = six_category_costs(scoring, z_fem, z_normal, z_early, z_paris, p, jnp.asarray(flags))
-        low = gradient_objective_from_pressures(objective_constants, pressures.astype(jnp.complex128) if single_precision else pressures)
+        if single_precision:
+            low = gradient_objective_from_pressures(objective_constants, pressures.astype(jnp.complex128))
+            categories = _six_category_costs(scoring, z_fem, z_normal, z_early, z_paris, p, jnp.asarray(flags),
+                                             low_frequency=lambda _: low.objective_total)
+        else:
+            categories = six_category_costs(scoring, z_fem, z_normal, z_early, z_paris, p, jnp.asarray(flags))
+            low = gradient_objective_from_pressures(objective_constants, pressures)
         aux = SixCategoryChainAux(categories, low, categories.objective_total, categories.product_total)
         return aux.objective_total, aux
 
