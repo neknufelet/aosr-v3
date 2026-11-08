@@ -1,7 +1,6 @@
 """六類接線的端到端考卷：正式 numpy 為答案，不從組裝器倒推答案。"""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -14,7 +13,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.six_category_jax import category_totals
 from tests.engine import _six_category_jax_cases as cases
@@ -122,41 +120,25 @@ def test_real_invalid_inputs_reach_category_and_totals(measured: dict[str, objec
     assert record['valid_gradient_finite'] is True
 
 
-def _fingerprint(constants: tuple[object, ...], names: tuple[str, ...]) -> str:
-    """帳本 objective_fingerprint 同一個逐欄算法；不收容器的 repr。"""
-    digest = hashlib.sha256()
-    for name, value in zip(names, constants, strict=True):
-        array = np.asarray(value)
-        for part in (name.encode(), str(array.dtype).encode('ascii'), ','.join(str(n) for n in array.shape).encode('ascii'), np.ascontiguousarray(array).tobytes()):
-            digest.update(len(part).to_bytes(8,'big'))
-            digest.update(part)
-    return digest.hexdigest()
+def _x64_check(*args: str) -> None:
+    """建常數要雙精度行程（numpy 正式那組 Paris 角）；斷言在冷子行程跑，失敗原文帶回。"""
+    env = child_process_env(threads=1).copy()
+    configure_jax(platforms='cpu', enable_x64=True, env=env)
+    env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'], str(Path(__file__).resolve().parents[2])))
+    run = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_jax_x64_checks', *args],
+        env=env, capture_output=True, text=True, timeout=600)
+    assert run.returncode == 0, run.stdout+run.stderr
 
 
 def test_flat_constants_every_field_changes_fingerprint() -> None:
     """逐欄植錯：漏掉任一幾何、索引、設定或巢狀音色葉子就紅。"""
-    c = cases.constants(cases.scheme_case('zoned'))
-    original = _fingerprint(c, c._fields)
-    for name, value in zip(c._fields, c, strict=True):
-        assert isinstance(value, (np.ndarray, int, float, complex, bool))
-        changed = np.asarray(value).copy()
-        assert changed.dtype.kind != 'O' and changed.size > 0, name
-        if changed.dtype.kind == 'b':
-            changed.flat[0] = ~changed.flat[0]
-        elif changed.dtype.kind == 'U':
-            changed.flat[0] = '#'+str(changed.flat[0])[1:]
-        else:
-            changed.flat[0] += 1
-        assert _fingerprint(c._replace(**{name:changed}), c._fields) != original, name
+    _x64_check('fingerprint')
 
 
 @pytest.mark.parametrize('name', ('zoned', 'reordered'))
 def test_patch_order_matches_boundary_and_input_zone_order(name: str) -> None:
     """抓：面片排序抹掉方案區序，或幾何表與邊界面片表不一致。"""
-    scheme = cases.scheme_case(name)
-    c = cases.constants(scheme)
-    assert tuple(c.patch_ids) == surface_ids(scheme_patch_keys(scheme))
-    assert tuple(c.patch_ids[2:4]) == (('x0@b','x0@a') if name=='zoned' else ('x0@a','x0@b'))
+    _x64_check('patch-order', name)
 
 
 def test_mismatched_geometric_patch_order_rejected() -> None:
