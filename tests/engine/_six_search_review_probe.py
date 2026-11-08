@@ -202,7 +202,7 @@ def cli_cases(directory: Path) -> dict[str,object]:
         gpu = cli.main([*_start_args(directory,gpu_root)[3:],'--device','gpu'])
     return dict(checked_calls=calls,resume_code=resumed,resume_stderr=stderr.getvalue(),gpu_code=gpu,
         gpu_stderr=gpu_stderr.getvalue(),gpu_root_exists=gpu_root.exists(),
-        gpu_projects=[str(p) for p in gpu_root.glob('*/project.json')])
+        gpu_projects=[str(p) for p in gpu_root.glob(f'*/{run.PROJECT_FILE}')])
 
 
 if __name__=='__main__':
