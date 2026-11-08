@@ -2,7 +2,8 @@
 
 常數只在 CPU 雙精度準備一次，扁平到每欄都可 np.asarray 後雜湊；用閉包交進 jit。
 阻抗順序是 patch_ids；斜入射為 (F, sum(A_patch))，晚期為 (N,F_union,A_paris)。
-另外收垂直入射 (N,F_fem)、(N,F_report) 及聲壓 (聲源,座位,F_fem)。
+共六個輸入：四路阻抗、聲壓 (聲源,座位,F_fem)、constant_material 布林 (N,)。
+垂直入射阻抗分別為 (N,F_fem)、(N,F_report)。
 product_total 用第一階段常數；objective_total 的低頻項原樣呼叫既有含代理入口。
 """
 from __future__ import annotations
@@ -22,6 +23,7 @@ from aosr.physics.late_family_jax import constant_absorption_arrays, paris_absor
 from aosr.physics.reflection_energy_jax import reflection_path_energy
 from aosr.scoring._six_category_constants import SixCategoryConstants as SixCategoryConstants
 from aosr.scoring._six_category_build import build_constants as build_constants
+from aosr.scoring._six_category_build import constant_material_flags as constant_material_flags
 from aosr.scoring.gradient_objective_jax import gradient_objective_from_pressures
 from aosr.scoring.reflections_jax import ReflectionGeometry, reflection_cost_arrays, primary_category_cost
 from aosr.scoring.reverberation_cost_jax import reverberation_cost_arrays
@@ -129,9 +131,11 @@ def category_totals(costs: jax.Array, valid: jax.Array, low_frequency_objective:
 def six_category_costs(c: SixCategoryConstants, impedance_fem: jax.Array, impedance_normal: jax.Array,
                        impedance_early: jax.Array, impedance_paris: jax.Array, fem_pressures: jax.Array,
                        constant_material: jax.Array) -> SixCategoryArrays:
-    """精度跟阻抗／聲壓走；constant_material 只有保留原牆且為常數阻抗時 True。
+    """五個數值輸入須由呼叫端統一精度；constant_material 只有 ConstantImpedance（固定阻抗）時 True。
 
     貼構造或 MountedOnWall（原牆上貼構造）由呼叫端傳 False，採 Paris 積分；旗標可隨設計變。
+    輸入順序必須照 c.patch_ids（這裡只守旗標長度，無法檢查材料身分）。
+    旗標 True 的面片，impedance_paris[n,:,0] 必須是真 Z，且該面片整列阻抗有限。
     任一類無效則兩種合分 NaN。
     """
     if constant_material.shape != (len(c.patch_ids),) or constant_material.dtype != jnp.bool_:

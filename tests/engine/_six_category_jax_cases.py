@@ -24,7 +24,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 from aosr.scoring import ranking
 from aosr.scoring.receiver_set import primary_cross
-from aosr.scoring.six_category_jax import SixCategoryConstants, build_constants
+from aosr.scoring.six_category_jax import SixCategoryConstants, build_constants, constant_material_flags
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import reference_document, relative_item
 from tests.engine._geometric_early_jax_cases import scattering
@@ -90,7 +90,7 @@ def array_inputs(scheme: Scheme, c: SixCategoryConstants) -> tuple[jnp.ndarray, 
     x = np.log2(c.fem_frequencies_hz)
     pressure = np.asarray([[(1.+.4*s+.25*r)*10**((2.4*np.sin((1.3+.07*r)*x+.23*s)+.3*r*x)/20.)
         *np.exp(1j*(.11*r*x+.7*s)) for r in range(len(scheme.receiver_set.points))] for s in range(2)])
-    return fem, normal, oblique, paris, jnp.asarray(pressure), jnp.asarray([isinstance(m, ConstantImpedance) for m in materials])
+    return fem, normal, oblique, paris, jnp.asarray(pressure), jnp.asarray(constant_material_flags(materials))
 
 
 def numpy_result(scheme: Scheme, pressure: np.ndarray) -> SchemeResult:
