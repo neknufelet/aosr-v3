@@ -25,7 +25,7 @@ from aosr.scoring.contract import EvaluationState, QualityCategory
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES, pair
 from tests.engine._precision_contracts import contract_value
-from tests.engine._zoned_report_cases import small_scheme, stable_digest
+from tests.engine._zoned_report_cases import small_scheme
 
 
 class _PathArguments(TypedDict):
@@ -182,7 +182,12 @@ def test_report_late_family_keeps_nonuniform_zone_distribution(with_furniture: b
 
 @pytest.mark.parametrize("zoned", (False, True))
 def test_scheme_cli_real_three_lanes_to_six_categories(tmp_path: Path, zoned: bool) -> None:
-    """完整入口不替身物理／評分；整面釘起點，異材分區須產出六類與全部逐點報表。"""
+    """完整入口不替身物理／評分；整面與異材分區都須產出六類與全部逐點報表。
+
+    不釘整份輸出的雜湊：真求解含有限元素直接解法器，跨處理器末位會差（#1044，Intel 那台紅過），
+    照 verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 2 條不當合併要求；
+    整面不變由同一跑的「兩區同材料＝整面」對照（鏡像法、晚期、有限元素三題）守。
+    """
     scheme = small_scheme(zoned=zoned, changed=zoned)
     source, out = tmp_path / "scheme.json", tmp_path / "result.json"
     source.write_text(scheme.model_dump_json())
@@ -197,8 +202,6 @@ def test_scheme_cli_real_three_lanes_to_six_categories(tmp_path: Path, zoned: bo
     assert all(p.report.points and p.report.path_table and p.report.bands for p in result.pairs)
     if zoned:
         assert all(p.report.measured_seams_by_wall is None for p in result.pairs)
-    if not zoned:
-        assert stable_digest(result.model_dump(mode="json")) == "bb4ff2a08393c857c222d188f67433e080f03d5b308a1330a4b6b7550dcea8d5"
 
 
 def test_scheme_cli_second_zone_assembly_uses_real_cpu_double(tmp_path: Path) -> None:
