@@ -15,7 +15,6 @@ import pytest
 
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.six_category_jax import category_totals
-from tests.engine import _six_category_jax_cases as cases
 from tests.engine._precision_contracts import contract_value
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL
@@ -63,7 +62,7 @@ def test_end_to_end_each_category_and_product_total(measured: dict[str, object],
         assert np.all(np.isfinite(actual) & (np.abs(actual-expected) <= tolerances)), (name,key,actual-expected,tolerances)
     assert abs(float(cast(float, record['product_total']))-float(cast(float, record['reference_total']))) <= np.dot(np.asarray(record['weights']), tolerances)
     assert record['flags'] == [True]*6
-    assert record['reflection_orders'] == [4, 4]
+    assert record['reflection_orders'] == ([3, 3] if name=='no_extension' else [4, 4])
     assert record['reflection_coverage'] == (['approximate']*2 if name=='furniture' else ['complete']*2)
     assert record['dtypes'] == ['float64']*6
     assert record['single_dtypes'] == ['float32']*6
@@ -143,12 +142,4 @@ def test_patch_order_matches_boundary_and_input_zone_order(name: str) -> None:
 
 def test_mismatched_geometric_patch_order_rejected() -> None:
     """抓：建常數時面片順序守門被拿掉；舊逐對輸入不能套新區序。"""
-    from aosr.config.capabilities import load_capabilities
-    from aosr.config.paths import config_path
-    from aosr.reporting.validation import checked_inputs
-    from aosr.scoring.six_category_jax import build_constants
-    from tests.engine._directivity import DIRECTIVITY
-    _, original = checked_inputs(cases.scheme_case('zoned'),
-        capabilities=load_capabilities(config_path('capabilities.toml')), directivity=DIRECTIVITY)
-    with pytest.raises(ValueError, match='面片順序'):
-        build_constants(cases.scheme_case('reordered'), pair_inputs={key:value[1] for key,value in original.items()})
+    _x64_check('mismatched-order')

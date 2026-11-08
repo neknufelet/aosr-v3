@@ -65,7 +65,6 @@ class SixCategoryConstants(NamedTuple):
     volume_m3: NDArray[np.float64]
     furniture_absorption_area_m2: NDArray[np.float64]
     has_furniture: NDArray[np.bool_]
-    constant_material: NDArray[np.bool_]
     scattering_by_patch: NDArray[np.float64]
     source_power_ratio: NDArray[np.float64]
     decay_band_mask: NDArray[np.bool_]

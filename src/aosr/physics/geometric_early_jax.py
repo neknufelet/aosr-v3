@@ -204,3 +204,8 @@ def solve_geometric_early(
     r_valid = pack(reflection_valid)
     return GeometricEarlyJaxResult(pack(direct), pack(reflected), pack(interference),
         jnp.where(r_valid, jnp.broadcast_to(scattering, table.shape), jnp.nan), r_valid, s_valid, r_valid & s_valid)
+
+
+# 固定幾何的組裝器也需要建逐對表與合併入射角；原私名保留相容。
+build_early_pair_table = _pair_table
+shared_incidence_angles = _shared_angles

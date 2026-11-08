@@ -13,16 +13,17 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
-from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ, low_frequency_axis_frequencies
+from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ, LATE_DECAY_FREQUENCIES_HZ, low_frequency_axis_frequencies
 from aosr.config.paths import config_path
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.quality_targets import load_quality_targets
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import ConstantImpedance
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.materials.transfer_matrix import diffuse_incidence_angles_deg
 from aosr.physics import geometric_early_jax as early
+from aosr.physics.geometric_lane import _unblocked_room_paths
+from aosr.physics.room_paths import image_source_paths
 from aosr.physics.fem_reduced_boundary import boundary_patches
 from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_lane_inputs, furniture_absorption_area_m2
 from aosr.physics.late_decay_jax import late_decay_geometry
@@ -38,9 +39,10 @@ from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.direction_zones import DirectionZone, classify, listening_angles, listening_axis, zone_limits
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
-from aosr.scoring.ranking import _read_rules
+from aosr.scoring.ranking import read_ranking_rules
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.reflections_jax import reflection_geometry, _setting
+from aosr.scoring.reflections_jax import reflection_geometry, reflection_setting
+from aosr.scoring.reverberation_cost import target_intervals
 from aosr.scoring.reverberation_cost_jax import reverberation_cost_settings
 from aosr.scoring.stage_one_objective_jax import objective_constants
 from aosr.scoring.stage_one_score import stage_one_score_settings
@@ -101,10 +103,10 @@ def _geometry(inputs: ReportInput, patch_ids: tuple[str, ...]) -> dict[str, np.n
         collision_frequency_hz=np.asarray(decay.collision_frequency_hz))
 
 
-def _costs(scheme: SchemeInputs, frequencies: np.ndarray, fem: tuple[float, ...], path: Path) -> dict[str, np.ndarray]:
+def _costs(scheme: SchemeInputs, frequencies: np.ndarray, fem: tuple[float, ...], path: Path, sound_speed_m_s: float) -> dict[str, np.ndarray]:
     registry = load_quality_targets(path)
     timbre = cost_constants(frequencies, scheme.receiver_set, scheme.channel_group, quality_targets_path=path,
-                           purpose=scheme.purpose, sound_speed_m_s=1.0)
+                           purpose=scheme.purpose, sound_speed_m_s=sound_speed_m_s)
     result = {'response_'+name: np.asarray(value) for name, value in zip(timbre.responses._fields, timbre.responses, strict=True)}
     for key in ('input_layout', 'primary', 'measured', 'channel_pairs', 'importance'):
         result['timbre_'+key] = np.asarray(getattr(timbre, key))
@@ -121,7 +123,7 @@ def _costs(scheme: SchemeInputs, frequencies: np.ndarray, fem: tuple[float, ...]
     for prefix, constants in (('product', product), ('objective', objective), ('reverb', reverb)):
         result.update({prefix+'_'+name: np.asarray(value) for name, value in zip(constants._fields, constants, strict=True)})
     categories = ('timbre_balance', 'listening_area_stability', 'reflections_and_echo', 'reverberation', 'channel_matching', 'low_frequency_response')
-    weights = _read_rules(registry, scheme.purpose).category_weights
+    weights = read_ranking_rules(registry, scheme.purpose).category_weights
     result['category_weights'] = np.asarray([weights[name] for name in categories])
     return result
 
@@ -133,14 +135,12 @@ def _reflection_constants(pairs: tuple[early.EarlyPairTable, ...], inputs: tuple
     axis = listening_axis(tuple(item.source_m.as_tuple() for item in inputs), inputs[0].receiver_m.as_tuple())
     geometries, fixed = [], []
     limits, _ = zone_limits(settings)
-    window_value = _setting(settings, 'window_upper_ms').value
+    window_value = reflection_setting(settings, 'window_upper_ms').value
     assert not isinstance(window_value, tuple)
     window = float(window_value) / 1000.0
     for pair, item in zip(pairs, inputs, strict=True):
         solved, table = solver_inputs(item), pair.paths
-        from aosr.physics.room_paths import image_source_paths
         raw = image_source_paths(item.room_m, item.source_m, item.receiver_m, item.sound_speed_m_s, max_order=int(max(table.order)))
-        from aosr.physics.geometric_lane import _unblocked_room_paths
         if furniture is not None:
             raw = list(_unblocked_room_paths(tuple(raw), item.source_m, item.receiver_m, furniture))
         directions = np.asarray([[(p.image[i]-item.receiver_m.as_tuple()[i])/p.dist_m for i in range(3)] for p in raw])
@@ -195,19 +195,16 @@ def build_constants(scheme: SchemeInputs, *, pair_inputs: Mapping[tuple[str, str
     if data.patch_ids != expected:
         raise ValueError('幾何早期表與方案面片順序不同')
     settings = load_quality_targets(quality_targets_path).purpose(scheme.purpose)
-    window_value = _setting(settings, 'window_upper_ms').value
+    window_value = reflection_setting(settings, 'window_upper_ms').value
     assert not isinstance(window_value, tuple)
     window = float(window_value)/1000.0
     primary_inputs = tuple(inputs[i*len(points)+primary] for i in range(len(channels)))
     coverage = [_coverage_from_geometry(item, window) for item in primary_inputs]
-    reflection = tuple(early._pair_table(first.room_m, item.source_m, item.receiver_m, solver_inputs(item).source_model,
+    reflection = tuple(early.build_early_pair_table(first.room_m, item.source_m, item.receiver_m, solver_inputs(item).source_model,
         first.sound_speed_m_s, rho, report, cov[0], zones, furniture) for item, cov in zip(primary_inputs, coverage, strict=True))
-    pairs = early._shared_angles((*data.pairs, *reflection))
-    values = _paths(data, pairs) | _geometry(first, data.patch_ids) | _costs(scheme, np.asarray(report), fem, quality_targets_path)
+    pairs = early.shared_incidence_angles((*data.pairs, *reflection))
+    values = _paths(data, pairs) | _geometry(first, data.patch_ids) | _costs(scheme, np.asarray(report), fem, quality_targets_path, first.sound_speed_m_s)
     values.update(_reflection_constants(pairs[len(data.pairs):], primary_inputs, scheme.purpose, quality_targets_path, furniture))
-    materials = [next(z.material for z in (first.surface_zones_by_wall or {}).get(name.partition('@')[0], ())
-        if not isinstance(z, RectangleZone) or z.id == name.partition('@')[2]) if first.surface_zones_by_wall
-        else solved[0].materials_by_wall[Wall.from_name(name)] for name in data.patch_ids]
     ratios = [np.ones(len(report)) if s.source_model.parameters is None else two_parameter_power_ratio(report, s.source_model.parameters) for s in solved[::len(points)]]
     values.update(frequencies_hz=np.asarray(report), fem_frequencies_hz=np.asarray(fem), union_frequencies_hz=np.asarray(union),
         report_indices=np.asarray([union.index(f) for f in report]), decay_indices=np.asarray([union.index(f) for f in LATE_DECAY_FREQUENCIES_HZ]),
@@ -217,10 +214,10 @@ def build_constants(scheme: SchemeInputs, *, pair_inputs: Mapping[tuple[str, str
         direct_distances_m=np.asarray([p.paths.dist_m[p.paths.direct_index()] for p in data.pairs]).reshape(len(channels), len(points)),
         volume_m3=np.asarray(first.room_m.Lx*first.room_m.Ly*first.room_m.Lz), has_furniture=np.asarray(first.furniture is not None),
         furniture_absorption_area_m2=np.asarray(furniture_absorption_area_m2(first.furniture, union, rho)) if first.furniture else np.zeros(len(union)),
-        constant_material=np.asarray([isinstance(m, ConstantImpedance) for m in materials]),
         scattering_by_patch=np.asarray([(first.scattering_by_wall or {}).get(name.partition('@')[0], MATERIAL_SCATTERING_DEFAULT_S) for name in data.patch_ids]),
-        source_power_ratio=np.stack(ratios), sound_speed_m_s=np.asarray(first.sound_speed_m_s))
-    from aosr.scoring.reverberation_cost import target_intervals
+        source_power_ratio=np.stack(ratios))
     centers = tuple(target_intervals(settings))
+    if centers != GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
+        raise ValueError('殘響目標帶中心與 numpy 報表帶中心不同')
     values['decay_band_mask'] = np.asarray([[center/np.sqrt(2) <= f < center*np.sqrt(2) for f in LATE_DECAY_FREQUENCIES_HZ] for center in centers])
     return SixCategoryConstants(**values)

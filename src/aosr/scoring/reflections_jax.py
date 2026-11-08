@@ -157,3 +157,7 @@ def primary_category_cost(channel_costs: jax.Array) -> jax.Array:
     valid = jnp.isfinite(channel_costs)
     safe = jnp.where(valid, channel_costs, jnp.zeros((), dtype=channel_costs.dtype))
     return jnp.where(jnp.all(valid, axis=-1), jnp.mean(safe, axis=-1), jnp.asarray(jnp.nan, dtype=channel_costs.dtype))
+
+
+# 組裝器讀同一份反射量法設定；原私名保留相容。
+reflection_setting = _setting
