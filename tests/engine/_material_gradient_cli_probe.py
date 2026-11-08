@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import json
+import dataclasses
+from unittest.mock import patch
 import shutil
 import sys
 from collections.abc import Callable
@@ -22,9 +24,9 @@ import numpy as np
 from aosr.config.construction_environment import construction_environment
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.gradient import cli
-from aosr.gradient.material_gradient import ChainObjective, baseline_theta, chain_objective
-from aosr.gradient.material_gradient_ledger import read_ledger
+from aosr.gradient import cli, run as run_module
+from aosr.gradient.material_gradient import ChainObjective, baseline_theta, chain_objective, compiled_evaluator, objective_reading, COMPONENT_NAMES
+from aosr.gradient.material_gradient_ledger import read_ledger, objective_fingerprint
 from aosr.gradient.run import (
     LEDGER_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, check_inputs, file_sha256, load_problem, manifest_sha256,
     read_project, stop_requested,
@@ -33,6 +35,11 @@ from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
+from aosr.scoring.six_category_jax import build_constants
+from aosr.gradient.six_category_chain import six_category_chain_objective
+from aosr.reporting.validation import checked_inputs
+from aosr.config.capabilities import load_capabilities
+from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.gradient.worker import run_worker
 
 Record = dict[str, object]
@@ -144,8 +151,11 @@ def _air(directory: Path, source: Path, surrogate: Path) -> Record:
     constants = gradient_objective_constants(np.asarray(model.frequencies_hz), score, scheme.receiver_set,
                                              len(model.source_names))
     air, ranges = construction_environment(density_kg_m3=density, sound_speed_m_s=speed)
-    expected = chain_objective(model, problem.designs, constants, air=air, ranges=ranges,
-                               frequencies=model.frequencies_hz)
+    _, pairs = checked_inputs(scheme, capabilities=load_capabilities(project.capabilities_path),
+        directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    six = build_constants(scheme.model_copy(update={"purpose": changed.purpose}), pair_inputs={k: v[1] for k, v in pairs.items()})
+    expected = six_category_chain_objective(model, problem.designs, constants, six, air=air, ranges=ranges,
+        frequencies=model.frequencies_hz)
     theta = jnp.asarray(baseline_theta(problem.designs))
 
     def value(objective: ChainObjective) -> str:
@@ -154,6 +164,62 @@ def _air(directory: Path, source: Path, surrogate: Path) -> Record:
     return {"rebuilt": value(problem.objective),
             "expected": value(expected), "original": value(load_problem(project).objective)}
 
+
+
+
+def _fingerprints(six: object) -> dict[str, bool]:
+    from aosr.scoring.six_category_jax import SixCategoryConstants
+    from typing import cast
+    constants = cast(SixCategoryConstants, six)
+    original = objective_fingerprint(constants)
+    result = {}
+    for name in constants._fields:
+        array = np.asarray(getattr(constants, name))
+        changed = array.copy()
+        if not changed.size:
+            changed = np.zeros((1,), dtype=array.dtype)
+        elif array.dtype.kind in 'US':
+            changed = np.char.add(array, 'changed')
+        elif array.dtype.kind == 'b':
+            changed.flat[0] = not changed.flat[0]
+        else:
+            changed.flat[0] = 0 if changed.flat[0] != 0 else 1
+        result[name] = objective_fingerprint(constants._replace(**{name:changed})) != original
+    return result
+
+
+def _reversed_sources(project: object, scheme: object, model: object, settings: object, theta: jnp.ndarray) -> list[float]:
+    from typing import cast
+    from aosr.physics.fem_reduced import ReducedModel
+    original = cast(ReducedModel, model)
+    flipped = dataclasses.replace(original, source_names=original.source_names[::-1],
+        matrices=dataclasses.replace(original.matrices, sources=original.matrices.sources[::-1]))
+    with patch.object(run_module, 'check_inputs', return_value=(scheme,flipped,settings)):
+        rebuilt = load_problem(cast(run_module.GradientProject, project))
+    (_, aux), _ = compiled_evaluator(rebuilt.objective)(theta)
+    return [float(x) for x in objective_reading(aux).components[3:]]
+
+def _control(source: Path, reference: Path) -> Record:
+    project = read_project(source)
+    scheme, model, settings = check_inputs(project)
+    problem = load_problem(project)
+    _, pairs = checked_inputs(scheme, capabilities=load_capabilities(project.capabilities_path),
+        directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    six = build_constants(scheme.model_copy(update={"purpose": project.purpose}), pair_inputs={k:v[1] for k,v in pairs.items()})
+    air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
+    direct = six_category_chain_objective(model, problem.designs, six.objective(), six, air=air, ranges=ranges, frequencies=model.frequencies_hz)
+    old = chain_objective(model, problem.designs, six.objective(), air=air, ranges=ranges, frequencies=model.frequencies_hz)
+    _, rows = read_ledger(reference / LEDGER_FILE)
+    first = rows[0]
+    theta = jnp.asarray(first.theta())
+    (_, aux), _ = compiled_evaluator(direct)(theta)
+    (_, low), _ = compiled_evaluator(old)(theta)
+    actual = [float(x).hex() for x in first.scores()[2]]
+    expected = [float(x).hex() for x in objective_reading(aux).components]
+    old_hex = [float(x).hex() for x in objective_reading(low).components]
+    return dict(names=COMPONENT_NAMES, actual=actual, expected=expected, low_old=old_hex,
+                low_bitwise=actual[:3] == old_hex, six_bitwise=actual[3:] == expected[3:],
+                fingerprints=_fingerprints(six), reversed_sources=_reversed_sources(project,scheme,model,settings,theta))
 
 def main(directory: Path, air_surrogate: Path, part: str) -> None:
     source = directory / "source"
@@ -165,7 +231,8 @@ def main(directory: Path, air_surrogate: Path, part: str) -> None:
         output: Record = {"reference": reference, "phases": phases,
                           "pre_loop_rows": len(pre_loop),
                           "other_header": _other_header(directory, source, reference_folder),
-                          "air": _air(directory, source, air_surrogate)}
+                          "air": _air(directory, source, air_surrogate),
+                          "control": _control(source, reference_folder)}
     else:
         output = _after_reference(directory, source, part)
     (directory / f"output-{part}.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")

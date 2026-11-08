@@ -23,6 +23,8 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from tests.engine._six_search_helpers import expand_components
+
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_frequencies
 from aosr.config.material_gradient import load_material_gradient_settings
@@ -654,7 +656,7 @@ def _material_ledger(directory: Path) -> tuple[Path, ledger.MaterialGradientHead
     snapped = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs)
     header = synthetic_header(designs, settings)
     path = directory / "ledger.jsonl"
-    ledger.write_ledger(path, header, (ledger.snap_row(snapped, 3.5, 3.0, (2.0, 4.0, 1.0), 0.0, 0),))
+    ledger.write_ledger(path, header, (ledger.snap_row(snapped, 3.5, 3.0, expand_components(3.5,3.0,(2.0,4.0,1.0)), 0.0, 0),))
     return path, header
 
 
@@ -664,9 +666,9 @@ def test_v4_ledger_and_old_objective_header_are_rejected_on_resume(tmp_path: Pat
     寫 v4 一律拒收。控制組：原檔照預期標頭讀得回、列帶三分項與舊合分。"""
     path, header = _material_ledger(tmp_path)
     read_header, rows = ledger.read_ledger(path, expected_header=header)
-    assert read_header.ledger_version == ledger.LEDGER_VERSION and len(rows[0].components) == 3
+    assert read_header.ledger_version == ledger.LEDGER_VERSION and len(rows[0].components) == 11
     assert rows[0].screening_total is not None
-    old = _downgrade(path, tmp_path / "v4.jsonl", ledger.LEGACY_LEDGER_VERSION)
+    old = _downgrade(path, tmp_path / "v4.jsonl", ledger.PRE_PROXY_LEDGER_VERSION)
     with pytest.raises(ValueError, match=ledger.PROXY_RERUN_TEXT):
         ledger.read_ledger(old)
     with pytest.raises(ValueError, match=ledger.PROXY_RERUN_TEXT):
@@ -674,7 +676,7 @@ def test_v4_ledger_and_old_objective_header_are_rejected_on_resume(tmp_path: Pat
     with pytest.raises(ValueError, match=ledger.PROXY_RERUN_TEXT):
         ledger.read_ledger(old, expected_header=header, legacy=True)
     legacy_header, legacy_rows = ledger.read_ledger(old, legacy=True)
-    assert legacy_header.ledger_version == ledger.LEGACY_LEDGER_VERSION and legacy_rows[0].is_legacy()
+    assert legacy_header.ledger_version == ledger.PRE_PROXY_LEDGER_VERSION and legacy_rows[0].is_legacy()
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
     with pytest.raises(ValueError, match="#1032"):
         ledger.read_ledger(path, expected_header=other)
@@ -688,13 +690,13 @@ def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_
     settings = load_material_gradient_settings(config_path("material_gradient.toml")).model_copy(update={"family": ()})
     context = _context(settings)
     surfaces = tuple((wall, None) for wall in gradient_search.wall_surface_ids())
-    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, (2.0, 4.0, 0.5))
+    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, expand_components(4.25,1.25,(2.0,4.0,0.5)))
     header = template_header(settings, surfaces, kept_walls(KEPT))
     path = tmp_path / "templates.jsonl"
     segment.run_template_rounds(context, path, header, start)
     _, rows = templates.read_template_ledger(path, expected_header=header, settings=settings, start=start)
-    assert rows[0].screening_total == 1.25 and len(rows[0].components) == 3
-    old = _downgrade(path, tmp_path / "v1.jsonl", templates.LEGACY_TEMPLATE_LEDGER_VERSION)
+    assert rows[0].screening_total == 1.25 and len(rows[0].components) == 11
+    old = _downgrade(path, tmp_path / "v1.jsonl", templates.PRE_PROXY_TEMPLATE_LEDGER_VERSION)
     with pytest.raises(ValueError, match=ledger.PROXY_RERUN_TEXT):
         templates.read_template_ledger(old)
     with pytest.raises(ValueError, match=ledger.PROXY_RERUN_TEXT):
@@ -702,7 +704,7 @@ def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_
     with pytest.raises(ValueError, match=ledger.PROXY_RERUN_TEXT):
         templates.read_template_ledger(old, expected_header=header, legacy=True)
     legacy_header, legacy_rows = templates.read_template_ledger(old, legacy=True)
-    assert legacy_header.ledger_version == templates.LEGACY_TEMPLATE_LEDGER_VERSION and legacy_rows[0].is_legacy()
+    assert legacy_header.ledger_version == templates.PRE_PROXY_TEMPLATE_LEDGER_VERSION and legacy_rows[0].is_legacy()
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
     with pytest.raises(ValueError, match="#1032"):
         templates.read_template_ledger(path, expected_header=other)
@@ -716,7 +718,7 @@ def _mutations(row: ledger.ScoredRow) -> dict[str, tuple[object, str]]:
     return {
         "value": ({"value": value + 1.0}, "value"),
         "screening_total": ({"screening_total": screening + 1.0}, "screening_total"),
-        "proxy": ({"components": (components[0], components[1], 999.0)}, "代理"),
+        "proxy": ({"components": (*components[:2], 999.0, *components[3:])}, "代理"),
         "length": ({"components": components[:2]}, "第 0 列"),
     }
 
@@ -738,7 +740,7 @@ def _template_ledger(directory: Path) -> tuple[Path, templates.TemplateHeader]:
     """沒有可換目標的一輪（不求值）寫一本 v2 換樣板帳本；起點的分數照合成分數常數對得上兩個恆等式。"""
     settings = load_material_gradient_settings(config_path("material_gradient.toml")).model_copy(update={"family": ()})
     surfaces = tuple((wall, None) for wall in gradient_search.wall_surface_ids())
-    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, (2.0, 4.0, 0.5))
+    start = templates.TemplateStart(surfaces, (), 4.25, 1.25, expand_components(4.25,1.25,(2.0,4.0,0.5)))
     header = template_header(settings, surfaces, kept_walls(KEPT))
     path = directory / "templates.jsonl"
     segment.run_template_rounds(_context(settings), path, header, start)
@@ -778,7 +780,7 @@ def test_score_constants_are_copied_from_objective_and_pinned_in_header(tmp_path
         ledger.MaterialGradientHeader.model_validate(header.model_dump() | {"score_constants": None})
     with pytest.raises(ValueError):
         ledger.MaterialGradientHeader.model_validate(
-            header.model_dump() | {"ledger_version": ledger.LEGACY_LEDGER_VERSION})
+            header.model_dump() | {"ledger_version": ledger.PRE_PROXY_LEDGER_VERSION})
     template_path, template = _template_ledger(tmp_path)
     assert template.score_constants is not None
     other = template.score_constants.model_copy(update={"proxy_temperature_db": template.score_constants

@@ -49,7 +49,8 @@ from aosr.physics.fem_reduced_store import load_reduced, save_reduced
 from aosr.reporting.scheme import load_scheme
 from tests.engine._precision_contracts import contract_value
 from tests.engine._scheme_cache import shared_json
-from tests.engine.test_fem_reduced import model as model, operators as operators
+from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
+from tests.engine._six_search_cli_case import model as model, operators as operators
 from tests.engine.test_material_gradient import _chain_model, _presets
 from tests.engine.test_material_gradient_cli import (
     BAND_NAME, FREQUENCY_NAME, NARROWED_STEPS, PRESETS, WAIT_S, Record, _command, _current_identity, _env,
@@ -113,7 +114,7 @@ def _entries(folder: Path) -> list[str]:
 
 def _other_theta(folder: Path, settings: Path) -> list[str]:
     """帳本裡第一個跟最後決定不同、而且可行的 θ（換進結果檔冒充結果）。"""
-    rows = ledger.read_ledger(folder / "ledger.jsonl")[1]
+    rows = ledger.read_ledger(folder / "ledger.jsonl", legacy=True)[1]
     designs = gradient_search.wall_designs_from_presets(
         PRESETS, load_material_gradient_settings(settings), _presets())
     return next(list(row.theta_hex) for row in rows if row.theta_hex != rows[-1].theta_hex
@@ -222,8 +223,8 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
     project = _json(copy / "project.json")
     project.pop("objective_settings_fingerprint")
     (copy / "project.json").write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    _downgraded_ledger(copy / "ledger.jsonl", ledger.LEGACY_LEDGER_VERSION)
-    _downgraded_ledger(copy / "templates.jsonl", templates.LEGACY_TEMPLATE_LEDGER_VERSION)
+    _downgraded_ledger(copy / "ledger.jsonl", ledger.PRE_PROXY_LEDGER_VERSION)
+    _downgraded_ledger(copy / "templates.jsonl", templates.PRE_PROXY_TEMPLATE_LEDGER_VERSION)
     result = _json(copy / "result.json")
     result["format_version"] = run.LEGACY_RESULT_VERSION
     result.pop("screening_total")
@@ -271,6 +272,9 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     output: Record = {"start": _run(directory, _start_args(directory, root))}
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
+    output["new_folder"] = str(folder)
+    output["new_endpoint"] = _run(directory, _command("endpoint", str(folder)))
+    folder = legacy_endpoint_copy(directory, folder)
     output["folder"] = str(folder)
     pristine = directory / "pristine" / folder.name
     shutil.copytree(folder, pristine)
@@ -278,7 +282,7 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     output["endpoint"] = _endpoint_runs(directory, folder)
     output["swapped"] = _swapped(directory, pristine, theta_hex)
     output["stale"] = {case: _stale(directory, folder, case, theta_hex) for case in STALE_CASES}
-    output["kept_resume"] = _kept_resume(directory, folder)
+    output["kept_resume"] = _kept_resume(directory, Path(str(output["new_folder"])))
     output["pre_proxy"] = _pre_proxy(directory, folder)
     no_axis = directory / "root-no-axis"
     output["no_axis"] = {**_run(directory, _start_args(directory, no_axis, scheme="scheme-no-axis.json")),
@@ -556,7 +560,7 @@ def test_result_from_ledger_equals_written_result(runs: tuple[Path, Record]) -> 
     folder = _folder(runs)
     project = run.read_project(folder)
     rebuilt = run.result_from_ledger(folder, load_material_gradient_settings(Path(project.settings_path)),
-                                     _by_wall(_kept_materials(runs)))
+                                     _by_wall(_kept_materials(runs)), legacy=True)
     assert rebuilt == read_result(folder)
     assert json.loads(rebuilt.model_dump_json()) == _json(folder / "result.json")
 
@@ -571,7 +575,7 @@ def test_ledger_header_binds_kept_wall_digests(runs: tuple[Path, Record]) -> Non
     settings = load_material_gradient_settings(Path(project.settings_path))
     model = load_reduced(Path(project.surrogate_path))
     constants = run.search_objective_constants(project, scheme, model)
-    stored = ledger.read_ledger(folder / "ledger.jsonl")[0]
+    stored = ledger.read_ledger(folder / "ledger.jsonl", legacy=True)[0]
     kept = _kept_materials(runs)
     same = ledger.header_for(model, run.designs_for(project.presets, settings, kept=_by_wall(kept)), settings,
                              objective_constants=constants)
@@ -612,7 +616,7 @@ def _batch_probe(folder: Path, mode: str, directory: Path) -> Record:
 
 def test_saved_batch_reaches_resumed_objectives(runs: tuple[Path, Record], tmp_path: Path) -> None:
     """雙精度子行程只換求解邊界：接續讀 project、起點與換樣板鏈都必須傳入同一批量。"""
-    source = Path(str(runs[1]["folder"]))
+    source = Path(str(runs[1]["new_folder"]))
     project = run.GradientProject.model_validate({**run.read_project(source).model_dump(), "frequency_batch": 7})
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, project)
     output = _batch_probe(tmp_path, "resume", tmp_path)

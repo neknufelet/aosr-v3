@@ -49,7 +49,8 @@ from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.gradient.boundary import BoundaryKey
 from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, header_for
 from aosr.gradient.run import (
-    LEDGER_FILE, RESULT_FILE, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
+    LEDGER_FILE, RESULT_FILE, RESULT_VERSION, MOUNTED_RESULT_VERSION, LOW_FREQUENCY_RESULT_VERSION,
+    LOW_FREQUENCY_MOUNTED_RESULT_VERSION, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
     parse_result, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
     search_objective_settings, template_header_for, write_json_atomic,
 )
@@ -178,7 +179,13 @@ def read_endpoint(folder: Path, *, legacy: bool = False) -> EndpointRecord:
 
 def read_result(folder: Path, *, legacy: bool = False) -> GradientResult:
     """讀 ``result.json``（:func:`aosr.gradient.run.parse_result`：v2 與更舊的講明版本拒收；``legacy`` 准讀 v3；v4 剛背、v5 貼在原牆上）。"""
-    return parse_result((folder / RESULT_FILE).read_bytes(), legacy=legacy)
+    content = (folder / RESULT_FILE).read_bytes()
+    document = json.loads(content)
+    version = document.get("format_version") if isinstance(document, dict) else None
+    if version in (RESULT_VERSION, MOUNTED_RESULT_VERSION) and not legacy:
+        raise ValueError("終點三組數在後續支")
+    return parse_result(content, legacy=legacy or version in (
+        LOW_FREQUENCY_RESULT_VERSION, LOW_FREQUENCY_MOUNTED_RESULT_VERSION))
 
 
 def exported_scheme(scheme: Scheme, scene: Scene, gradient_id: str) -> Scheme:
@@ -193,8 +200,10 @@ def checked_result[K: BoundaryKey](folder: Path, given: GradientResult, header: 
                    settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial]) -> GradientResult:
     """結果檔不能只信它自己說的：從兩本帳（庚二帳本標頭要等於 ``header``；換樣板帳本標頭要等於照它與現在的庚二帳本摘要
     重建的）重建整份結果，跟檔裡那份整個模型相等才收，回重建那一份；不等就拒收、列出哪幾格不同。"""
+    if given.format_version in (RESULT_VERSION, MOUNTED_RESULT_VERSION):
+        raise ValueError("終點三組數在後續支")
     template_header = template_header_for(header, settings, kept, base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
-    rebuilt = result_from_ledger(folder, settings, kept, expected_header=header, expected_template_header=template_header)
+    rebuilt = result_from_ledger(folder, settings, kept, expected_header=header, expected_template_header=template_header, legacy=True)
     if rebuilt != given:
         actual, expected = given.model_dump(), rebuilt.model_dump()
         differing = sorted(name for name in expected if actual.get(name) != expected[name])
@@ -262,7 +271,9 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     checked_device_workers(device, workers)
     refinement_steps: list[int] = []
     project = read_project(folder)
-    scheme, model, settings = check_inputs(project)
+    if (folder / RESULT_FILE).exists():
+        read_result(folder)
+    scheme, model, settings = check_inputs(project, allow_legacy_objective=True)
     if not (folder / RESULT_FILE).exists():
         raise ValueError(f"資料夾 {folder} 沒有 {RESULT_FILE}：先把搜尋跑完（start 或 resume）再跑 endpoint")
     result_sha256 = file_sha256(folder / RESULT_FILE)

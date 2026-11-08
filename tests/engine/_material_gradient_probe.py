@@ -14,6 +14,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from tests.engine._six_search_helpers import six_header_for, expand_components
+
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -186,7 +188,8 @@ def main(directory: Path) -> None:
                     ledger.snap_row(snapped, float(snapped_value), objective_reading(snapped_aux).screening_total,
                                     objective_reading(snapped_aux).components, 0.0, len(first.steps)),
                     *ledger.descent_rows(retuned, "retune", len(first.steps) + 1))
-            header = ledger.header_for(model, designs, settings, objective_constants=constants)
+            header = six_header_for(model, designs, settings, objective_constants=constants)
+            rows = tuple(item.model_copy(update={"components": expand_components(*item.scores())}) for item in rows)
             ledger.write_ledger(directory / f"{name}.ledger.jsonl", header, rows)
             row.update({
                 "start": _hex(start), "lower": _hex(bounds[0]), "upper": _hex(bounds[1]),

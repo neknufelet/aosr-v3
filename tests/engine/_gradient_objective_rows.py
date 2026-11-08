@@ -30,8 +30,17 @@ def assert_rows_split_scores(rows: Sequence[MaterialGradientRow | TemplateRow]) 
     screening = []
     for row in rows:
         assert not row.is_legacy(), row.step
-        value, old, (_, _, proxy) = row.scores()
+        value, old, components = row.scores()
+        proxy = components[2]
         expected = old + settings.proxy_weight * proxy / settings.worse_reference
+        if len(components) == 11:
+            from tests.engine._six_search_helpers import weights
+            w = weights()
+            expected = float(np.sum(np.asarray(w[:-1]) * np.asarray(components[3:8]))) + w[-1]*expected
+            product = float(np.sum(np.asarray(w)*np.asarray(components[3:9])))
+            product_tolerance = SCORE_IDENTITY_ULPS * float(np.spacing(max(abs(product), abs(components[10]))))
+            assert abs(components[10] - product) <= product_tolerance
+            assert value == components[9]
         tolerance = SCORE_IDENTITY_ULPS * float(np.spacing(max(abs(value), abs(expected))))
         assert abs(value - expected) <= tolerance, (row.step, value, expected)
         assert math.isfinite(old) and math.isfinite(proxy), row.step

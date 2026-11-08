@@ -29,7 +29,7 @@ import jax
 from aosr import runtime
 from aosr.physics.fem_full_batch import checked_workers, checked_device_workers
 from aosr.gradient.endpoint_run import run_endpoint
-from aosr.gradient.material_gradient import SearchStopped, StopCheck
+from aosr.gradient.material_gradient import SearchStopped, StopCheck, Unestimable
 from aosr.gradient.material_gradient_ledger import read_ledger
 from aosr.gradient.run import (
     LEDGER_FILE, STATUS_FILE, GradientStatus, State, ledger_progress, now_text, resume_search, run_search,
@@ -47,7 +47,7 @@ EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
 
 
-def _status(folder: Path, state: State, started_at: str, message: str | None = None) -> None:
+def _status(folder: Path, state: State, started_at: str, message: str | None = None, *, unestimable_reason: str | None = None) -> None:
     """寫狀態檔；進度從兩本帳讀（沒有帳本或讀不開時是零、None——帳本壞了由計算本身報錯）。
 
     ``stop_reason`` 照舊是庚二迴圈收尾的停止原因；換樣板那段的進度是另兩欄（停止原因在 ``result.json``）。"""
@@ -62,7 +62,7 @@ def _status(folder: Path, state: State, started_at: str, message: str | None = N
         template_evaluations, template_rounds = 0, 0
     write_json_atomic(folder / STATUS_FILE, GradientStatus(
         state=state, started_at=started_at, updated_at=now_text(), evaluations=evaluations, rounds_done=rounds,
-        last_value=value, stop_reason=reason, template_evaluations=template_evaluations,
+        last_value=value, stop_reason=unestimable_reason or reason, template_evaluations=template_evaluations,
         template_rounds_done=template_rounds, pid=os.getpid(), message=message))
 
 
@@ -78,6 +78,10 @@ def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
         if project.device == "gpu" and jax.default_backend() != "gpu":
             raise RuntimeError("顯卡搜尋需要 GPU 裝置，不能退回 CPU")
         (run_search if mode == "start" else resume_search)(folder, should_stop=should_stop)
+    except Unestimable as error:
+        _status(folder, "stopped", started, str(error), unestimable_reason=str(error))
+        sys.stderr.write(f"梯度搜尋停止：{error}\n")
+        return EXIT_STOPPED
     except SearchStopped:
         _status(folder, "stopped", started, "停止記號：在兩次求值之間停下，帳本停在最後一列寫完整的地方")
         sys.stderr.write("梯度搜尋已停止（停止記號）；接續用 resume\n")

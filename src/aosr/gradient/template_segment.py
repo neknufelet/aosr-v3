@@ -76,16 +76,23 @@ def _batches(result: TemplateRoundResult, start: Sequence[SurfaceDesign], round_
     """一輪開了之後的列，照寫入的批次切：快速評分一批、基準一批（配置是這一輪起點的 ``start``）、每個候選一批。"""
     if result.baseline is None:
         return []
-    batches = [[quick_row(first_step + offset, round_index, score) for offset, score in enumerate(result.quick)]]
+    batches = [[quick_row(first_step + offset, round_index, score) for offset, score in enumerate(score for score in result.quick if score.value is not None)]]
     step = first_step + len(batches[0])
     batches.append(list(segment_rows(result.baseline, "baseline_retune", step, round=round_index,
                                      surfaces=surfaces_of(start), variable_names=design_names(start))))
     step += len(batches[-1])
     for item in result.retuned:
+        if not item.retune.steps:
+            continue
         batches.append(list(segment_rows(item.retune, "candidate_retune", step, round=round_index,
                                          surfaces=item.quick.surfaces, variable_names=item.quick.variable_names,
                                          candidate=item.quick.candidate_id)))
         step += len(batches[-1])
+    batches = [batch for batch in batches if batch]
+    if batches:
+        batches[0][0] = batches[0][0].model_copy(update={
+            "rejected_quick": tuple(score.candidate_id for score in result.quick if score.value is None),
+            "rejected_candidates": tuple(item.quick.candidate_id for item in result.retuned if not item.retune.steps)})
     return batches
 
 
@@ -115,10 +122,13 @@ def _decision(result: TemplateRoundResult, threshold: float, total: int, bound: 
     baseline = result.baseline.steps[-1].value if result.baseline is not None else None
     return TemplateDecision(
         baseline_value=baseline, quick_count=len(result.quick),
-        outcomes=tuple(TemplateOutcome(candidate=item.quick.candidate_id, quick_value=item.quick.value,
-                                       value=item.value, improvement=item.improvement) for item in result.retuned),
+        outcomes=tuple(TemplateOutcome(candidate=item.quick.candidate_id, quick_value=float(item.quick.value) if item.quick.value is not None else 0.0,
+                                       value=item.value, improvement=item.improvement,
+                                       rejection="候選重調起點不可估" if not item.retune.steps else None,
+                                       rejected_evaluations=item.retune.evaluations if not item.retune.steps else 0) for item in result.retuned),
         threshold=threshold, accepted=result.accepted.quick.candidate_id if result.accepted is not None else None,
-        round_evaluations=result.evaluations, total_evaluations=total, next_round_bound=bound)
+        round_evaluations=result.evaluations, total_evaluations=total, next_round_bound=bound,
+        rejected_quick=tuple(score.candidate_id for score in result.quick if score.value is None))
 
 
 def _point_of(start: TemplateStart, context: TemplateContext) -> TemplatePoint:

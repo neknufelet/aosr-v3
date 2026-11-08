@@ -29,6 +29,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from tests.engine._six_search_helpers import six_header_for
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ, LowFrequencyAxis
 from aosr.config.material_gradient import (
@@ -78,7 +79,6 @@ CASES: dict[str, tuple[str | None, ...]] = {
 DESCENT_CASE = "two_rigid"
 Record = dict[str, object]
 
-
 @cache
 def _settings() -> MaterialGradientSettings:
     return load_material_gradient_settings(config_path("material_gradient.toml"))
@@ -123,7 +123,7 @@ def _objective_constants(model: ReducedModel, score: StageOneScoreSettings | Non
 def _header(model: ReducedModel, score: StageOneScoreSettings | None = None, *, settings: MaterialGradientSettings | None = None
             ) -> ledger.MaterialGradientHeader:
     settings = _settings() if settings is None else settings
-    return ledger.header_for(model, _designs(DESCENT_CASE, settings=settings), settings,
+    return six_header_for(model, _designs(DESCENT_CASE, settings=settings), settings,
                              objective_constants=_objective_constants(model, score))
 
 

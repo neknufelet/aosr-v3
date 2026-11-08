@@ -45,9 +45,11 @@ from aosr.gradient.template_rounds import (
 )
 
 
-TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v2"
+TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v3"
 # 上一版（梯度目標還沒有大峰代理項）：報告准讀，接續拒收。
-LEGACY_TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v1"
+LEGACY_TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v2"
+PRE_PROXY_TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v1"
+LEGACY_TEMPLATE_LEDGER_VERSIONS: Final = (LEGACY_TEMPLATE_LEDGER_VERSION, PRE_PROXY_TEMPLATE_LEDGER_VERSION)
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 _SHA256 = r"^[0-9a-f]{64}$"
 TemplatePhase = Literal["quick_score", "baseline_retune", "candidate_retune", "template_decision"]
@@ -61,7 +63,7 @@ class TemplateHeader(BaseModel):
     （剛背不寫、缺這一格讀成剛背）。"""
 
     model_config = _FROZEN
-    ledger_version: Literal["aosr.material_gradient_templates.v2", "aosr.material_gradient_templates.v1"]
+    ledger_version: Literal["aosr.material_gradient_templates.v3", "aosr.material_gradient_templates.v2", "aosr.material_gradient_templates.v1"]
     input_hash: str = Field(min_length=1)
     mesh_hash: str = Field(min_length=1)
     physics_identity: str = Field(min_length=1)
@@ -83,8 +85,12 @@ class TemplateHeader(BaseModel):
         ids = [surface_id for surface_id, _ in self.initial_surfaces]
         if len(set(ids)) != len(ids) or sorted(self.kept_digests) != sorted(ids):
             raise ValueError("起點配置的面代號不可重複，原牆摘要要恰好每一面一個")
-        if (self.score_constants is None) != (self.ledger_version == LEGACY_TEMPLATE_LEDGER_VERSION):
+        if (self.score_constants is None) != (self.ledger_version == PRE_PROXY_TEMPLATE_LEDGER_VERSION):
             raise ValueError(f"{TEMPLATE_LEDGER_VERSION} 的標頭要記分數常數（score_constants），上一版沒有")
+        if self.ledger_version == LEGACY_TEMPLATE_LEDGER_VERSION and self.score_constants is not None and self.score_constants.category_weights is not None:
+            raise ValueError("舊 v2 標頭沒有六類 category_weights")
+        if self.ledger_version == TEMPLATE_LEDGER_VERSION and (self.score_constants is None or self.score_constants.category_weights is None):
+            raise ValueError("六類 v3 標頭缺 category_weights")
         return self
 
 
@@ -94,8 +100,17 @@ class TemplateOutcome(BaseModel):
     model_config = _FROZEN
     candidate: str = Field(pattern=_CANDIDATE.pattern)
     quick_value: float
-    value: float
-    improvement: float
+    value: float | None
+    improvement: float | None
+    rejection: str | None = None
+    rejected_evaluations: int = Field(default=0, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def _estimable(self) -> Self:
+        invalid = self.rejection is not None
+        if (self.value is None) != invalid or (self.improvement is None) != invalid or (self.rejected_evaluations > 0) != invalid:
+            raise ValueError("不可估候選要記原因與求值次數，值與改善只能是 None")
+        return self
 
 
 class TemplateDecision(BaseModel):
@@ -111,6 +126,7 @@ class TemplateDecision(BaseModel):
     round_evaluations: int = Field(ge=0, strict=True)
     total_evaluations: int = Field(ge=0, strict=True)
     next_round_bound: int | None = Field(ge=1, strict=True)
+    rejected_quick: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -118,19 +134,22 @@ class TemplateDecision(BaseModel):
         if len(set(names)) != len(names):
             raise ValueError("同一輪進重調的候選不可重複")
         opened = self.quick_count > 0
-        if (self.baseline_value is not None) != opened or bool(self.outcomes) != opened:
+        if (self.baseline_value is not None) != opened or (bool(self.outcomes) != opened and len(self.rejected_quick) != self.quick_count):
             raise ValueError("開了的輪（快速評分至少一個）才有基準與候選結果，沒開的輪都沒有")
         if not 0 <= self.round_evaluations <= self.total_evaluations:
             raise ValueError("這一輪的求值次數不可大於累計")
         if not opened and self.round_evaluations != 0:
             raise ValueError("沒開的輪求值只能是 0 次")
-        if len(self.outcomes) > self.quick_count:
+        if len(set(self.rejected_quick)) != len(self.rejected_quick) or len(self.rejected_quick) > self.quick_count:
+            raise ValueError("不可估快速評分代號重複或多於快速評分總數")
+        if len(self.outcomes) > self.quick_count - len(self.rejected_quick):
             raise ValueError("進重調的候選不可多於快速評分的個數")
         if self.baseline_value is not None and any(
-                outcome.improvement != self.baseline_value - outcome.value for outcome in self.outcomes):
+                outcome.improvement != self.baseline_value - outcome.value for outcome in self.outcomes if outcome.value is not None):
             raise ValueError("改善必須等於基準重調後的值減候選重調後的值")
-        best = max(self.outcomes, key=lambda outcome: outcome.improvement, default=None)
-        expected = best.candidate if best is not None and best.improvement > self.threshold else None
+        best = max((outcome for outcome in self.outcomes if outcome.improvement is not None),
+                   key=lambda outcome: float(outcome.improvement or 0.0), default=None)
+        expected = best.candidate if best is not None and best.improvement is not None and best.improvement > self.threshold else None
         if self.accepted != expected:
             raise ValueError(f"接受的候選必須是改善最大且超過門檻的那一個（{expected}），記的是 {self.accepted}")
         return self
@@ -167,7 +186,7 @@ class TemplateRow(BaseModel):
     theta_hex: tuple[str, ...]
     value: float
     screening_total: float | None = None
-    components: tuple[float, float, float] | tuple[float, float]
+    components: tuple[float | None, ...]
     gradient_norm: float | None = Field(ge=0.0)
     step_size: float | None = Field(ge=0.0)
     seconds: float = Field(ge=0.0)
@@ -176,6 +195,9 @@ class TemplateRow(BaseModel):
     evaluations: int | None = Field(ge=1, strict=True)
     decision: TemplateDecision | None
     swapped_retunable: bool | None = Field(strict=True)
+    unestimable_trials: int = Field(default=0, ge=0, strict=True)
+    rejected_quick: tuple[str, ...] = ()
+    rejected_candidates: tuple[str, ...] = ()
 
     @field_validator("theta_hex")
     @classmethod
@@ -184,6 +206,10 @@ class TemplateRow(BaseModel):
 
     @model_validator(mode="after")
     def _phase_fields(self) -> Self:
+        if len(self.components) not in (2, 3, 11):
+            raise ValueError("分項長度只收舊版兩／三項或六類的十一項")
+        if len(self.components) != 11 and any(value is None for value in self.components):
+            raise ValueError("舊版分項不可估（None），不收這一列")
         if (self.screening_total is None) != (len(self.components) == 2):
             raise ValueError("舊合分與三分項同進同出（v2）；上一版的列只有兩分項、沒有舊合分")
         with_candidate = self.phase in ("quick_score", "candidate_retune")
@@ -218,18 +244,20 @@ class TemplateRow(BaseModel):
 
     def is_legacy(self) -> bool:
         """上一版（v1）的列：只有兩分項、沒有舊合分。"""
-        return self.screening_total is None
+        return len(self.components) != 11
 
     def scores(self) -> tuple[float, float, Components]:
         """v2 列的（新合分, 舊合分, 三分項）；上一版的列拒收。"""
         components = self.components
-        if self.screening_total is None or len(components) != 3:
+        if self.screening_total is None or len(components) not in (3, 11):
             raise ValueError(f"第 {self.step} 列是上一版換樣板帳本的列（沒有大峰代理）；{PROXY_RERUN_TEXT}")
-        return self.value, self.screening_total, (components[0], components[1], components[2])
+        if any(x is None for x in components):
+            raise ValueError("不可估類別不可寫列：J 與 product 必須有限")
+        return self.value, self.screening_total, tuple(x for x in components if x is not None)
 
     def proxy_db(self) -> float | None:
         """大峰代理（dB）；上一版的列沒有，是 None。"""
-        return None if self.screening_total is None else self.components[-1]
+        return None if self.screening_total is None else self.components[2]
 
 
 def swapped_retunable(candidate: str | None, names: Sequence[str]) -> bool:
@@ -297,6 +325,7 @@ def segment_rows(result: DescentResult, phase: SegmentPhase, first_step: int, *,
         stop_reason=result.stop_reason if offset == last else None,
         final_trial_step=result.final_trial_step if offset == last else None,
         evaluations=result.evaluations if offset == last else None,
+        unestimable_trials=result.unestimable_trials if offset == last else 0,
     ) for offset, item in enumerate(result.steps))
 
 
@@ -392,9 +421,10 @@ def _split_round(block: Sequence[TemplateRow], label: str) -> _Round:
         candidates.append((name, segment))
     if body:
         raise ValueError(f"{label}：列序必須是快速評分、基準重調、候選重調、決定，第 {body[0].step} 列是 {body[0].phase}")
-    if ((baseline or candidates) and not quick) or (candidates and not baseline):
+    rejected = block[0].rejected_quick
+    if ((baseline or candidates) and not quick and not rejected) or (candidates and not baseline):
         raise ValueError(f"{label}：要先有快速評分才有基準重調、先有基準重調才有候選重調")
-    if decision is not None and quick and not candidates:
+    if decision is not None and quick and not candidates and decision.decision is not None and not decision.decision.outcomes:
         raise ValueError(f"{label}：快速評分過的輪要有候選重調才能決定")
     return _Round(quick, baseline, candidates, decision)
 
@@ -404,6 +434,8 @@ def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStar
     """一輪的內容：快速評分照「可換的目標」（給了設定）、候選是快速評分前 k 名、各段起點對得上。"""
     label = f"第 {block[0].round} 輪"
     parts = _split_round(block, label)
+    if any(row.rejected_quick or row.rejected_candidates for row in block[1:]):
+        raise ValueError(f"{label}：不可估證據只能記在本輪第一個有限列")
     names = [str(row.candidate) for row in parts.quick]
     if len(set(names)) != len(names):
         raise ValueError(f"{label}：快速評分的候選重複")
@@ -411,22 +443,40 @@ def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStar
         _swapped_surface(start_surfaces, row, label, settings)
     decided = parts.decision.decision if parts.decision is not None else None
     complete = (decided is not None and decided.quick_count > 0) or bool(parts.baseline)
+    ranking_available = complete
     if settings is not None:
         wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings, fixed_surfaces)]
+        rejected = block[0].rejected_quick
+        if len(set(rejected)) != len(rejected) or any(name not in wanted or name in names for name in rejected):
+            raise ValueError(f"{label}：不可估快速評分不是可換目標，或與有效列重複")
+        wanted = [name for name in wanted if name not in rejected]
         if names != (wanted if complete else wanted[:len(names)]):
             raise ValueError(f"{label}：快速評分的候選與順序不是這個配置所有可換的目標")
+        ranking_available = complete or names == wanted
     if parts.baseline and start is not None and _point(parts.baseline[0])[:2] != _point(start)[:2]:
         raise ValueError(f"{label}：基準重調的起點不是這一輪起點的配置與 θ")
     if parts.baseline and parts.baseline[0].surfaces != start_surfaces:
         raise ValueError(f"{label}：基準重調的配置不是這一輪起點的配置")
     order = sorted(range(len(parts.quick)), key=lambda index: (parts.quick[index].value, index))
     top = [parts.quick[index] for index in order]
-    if [name for name, _ in parts.candidates] != [str(row.candidate) for row in top[:len(parts.candidates)]]:
+    rejected_candidates = block[0].rejected_candidates
+    invalid_retune = set(rejected_candidates)
+    count = retune_count(settings, len(top)) if settings is not None else (
+        len(decided.outcomes) if decided is not None else len(top))
+    selected = top[:count]
+    if len(invalid_retune) != len(rejected_candidates) or (ranking_available and not invalid_retune.issubset(
+            {str(row.candidate) for row in selected})):
+        raise ValueError(f"{label}：不可估重調候選不是快速評分前幾名")
+    if decided is not None and [(item.candidate, item.quick_value) for item in decided.outcomes] != [
+            (str(row.candidate), row.value) for row in selected]:
+        raise ValueError(f"{label}：含不可估的候選與快速評分前幾名或數值不同")
+    valid_top = [item for item in top if item.candidate not in invalid_retune]
+    if [name for name, _ in parts.candidates] != [str(row.candidate) for row in valid_top[:len(parts.candidates)]]:
         raise ValueError(f"{label}：進重調的候選不是快速評分照值由小到大的前幾名")
-    if settings is not None and parts.decision is not None and parts.quick and len(parts.candidates) != retune_count(
+    if settings is not None and parts.decision is not None and parts.quick and len(parts.candidates) + len(invalid_retune) != retune_count(
             settings, len(parts.quick)):
         raise ValueError(f"{label}：進重調的候選數不是 max_per_round 與快速評分數取小")
-    for (name, segment), quick in zip(parts.candidates, top, strict=False):
+    for (name, segment), quick in zip(parts.candidates, valid_top, strict=False):
         if (segment[0].surfaces, segment[0].variable_names, segment[0].theta_hex) != (
                 quick.surfaces, quick.variable_names, quick.theta_hex):
             raise ValueError(f"{label}：候選 {name} 的重調起點不是它快速評分那一點")
@@ -440,10 +490,14 @@ def _check_decision(label: str, parts: _Round, start: TemplateRow | TemplateStar
     if row is None or row.decision is None:
         raise ValueError(f"{label}的決定列沒有決定")
     decision = row.decision
-    if decision.quick_count != len(parts.quick):
+    first = (parts.quick or parts.baseline or [row])[0]
+    invalid_retune = tuple(item.candidate for item in decision.outcomes if item.rejection is not None)
+    if first.rejected_quick != decision.rejected_quick or first.rejected_candidates != invalid_retune:
+        raise ValueError(f"{label}：不可估候選證據與決定列不同")
+    if decision.quick_count != len(parts.quick) + len(decision.rejected_quick):
         raise ValueError(f"{label}：決定列記的快速評分數跟快速評分列數不同")
     quick_values = {str(item.candidate): item.value for item in parts.quick}
-    if [(item.candidate, item.quick_value, item.value) for item in decision.outcomes] != [
+    if [(item.candidate, item.quick_value, item.value) for item in decision.outcomes if item.rejection is None] != [
             (name, quick_values[name], segment[-1].value) for name, segment in parts.candidates]:
         raise ValueError(f"{label}：決定列記的候選、快速評分值或重調後的值跟前面的列不同")
     if parts.baseline and decision.baseline_value != parts.baseline[-1].value:
@@ -455,7 +509,7 @@ def _check_decision(label: str, parts: _Round, start: TemplateRow | TemplateStar
                              f"{'接受的候選' if decision.accepted else '基準'}重調末列的")
     elif start is not None and _point(row) != _point(start):
         raise ValueError(f"{label}：沒開的輪交出去的配置、θ、值、舊合分與分項必須是起點原樣")
-    spent = len(parts.quick) + sum(item[-1].evaluations or 0 for item in (
+    spent = decision.quick_count + sum(item.rejected_evaluations for item in decision.outcomes) + sum(item[-1].evaluations or 0 for item in (
         parts.baseline, *(segment for _, segment in parts.candidates)) if item)
     if decision.round_evaluations != spent or decision.total_evaluations != previous_total + spent:
         raise ValueError(f"{label}：求值次數跟快速評分數加各段重調記的對不上（或累計沒有逐輪相加）")
@@ -526,11 +580,11 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
     ids = [surface_id for surface_id, _ in header.initial_surfaces]
     if start is not None and start.surfaces != header.initial_surfaces:
         raise ValueError("起點配置跟標頭記的不同")
-    legacy = header.ledger_version == LEGACY_TEMPLATE_LEDGER_VERSION
+    component_count = {TEMPLATE_LEDGER_VERSION: 11, LEGACY_TEMPLATE_LEDGER_VERSION: 3, PRE_PROXY_TEMPLATE_LEDGER_VERSION: 2}[header.ledger_version]
     for index, row in enumerate(rows):
-        if row.is_legacy() != legacy:
+        if len(row.components) != component_count:
             raise ValueError(f"第 {index} 列的形狀跟標頭版本 {header.ledger_version} 不同"
-                             f"（{'上一版只有兩分項、沒有舊合分' if legacy else 'v2 要帶舊合分與三分項'}）")
+                             f"（分項必須是 {component_count} 格）")
         if row.step != index:
             raise ValueError(f"第 {index} 列的步序是 {row.step}，帳本列必須從 0 連號")
         if any(preset is not None for face, preset in row.surfaces if face in header.fixed_surfaces):
@@ -616,17 +670,21 @@ def read_template_ledger(path: Path, *, expected_header: TemplateHeader | None =
                          legacy: bool = False) -> tuple[TemplateHeader, tuple[TemplateRow, ...]]:
     """逐列驗型別與順序；給了預期標頭就逐格比（替身、設定、評分常數、庚二帳本、起點配置、原牆換了都拒收）。
     壞列一律報錯，不捨棄；版本不是這一版就拒收、訊息講明版本（v1 講明梯度目標加了大峰代理項）。
-    ``legacy=True`` 只給報告用：不給預期標頭與起點時准讀 v1。``settings``、``start`` 同 :func:`check_template_rows`。"""
+    ``legacy=True`` 供報告與舊終點唯讀重建：v1 不帶預期標頭與起點；v2 可核對預期標頭與起點。``settings``、``start`` 同 :func:`check_template_rows`。"""
     with path.open("rb") as handle:
         lines = handle.readlines()
     if not lines or any(not line.endswith(b"\n") for line in lines):
         raise ValueError("換樣板帳本是空的或有一列沒寫完")
     document = json.loads(lines[0])
     version = document.get("ledger_version") if isinstance(document, dict) else None
-    if version == LEGACY_TEMPLATE_LEDGER_VERSION and not (legacy and expected_header is None and start is None):
-        raise ValueError(f"換樣板帳本版本是 {version!r}（梯度目標加大峰代理項之前），{PROXY_RERUN_TEXT}；"
+    legacy_read = legacy and (expected_header is None or expected_header.ledger_version == version)
+    # 前代理 v1 保留原本的報告限定；v2 才供既有終點帶起點唯讀重建。
+    if version == PRE_PROXY_TEMPLATE_LEDGER_VERSION and (expected_header is not None or start is not None):
+        legacy_read = False
+    if version in LEGACY_TEMPLATE_LEDGER_VERSIONS and not legacy_read:
+        raise ValueError(f"換樣板帳本版本是 {version!r}（六類目標之前），{PROXY_RERUN_TEXT}；"
                          f"這一版只收 {TEMPLATE_LEDGER_VERSION}")
-    if version not in (TEMPLATE_LEDGER_VERSION, LEGACY_TEMPLATE_LEDGER_VERSION):
+    if version not in (TEMPLATE_LEDGER_VERSION, *LEGACY_TEMPLATE_LEDGER_VERSIONS):
         raise ValueError(f"換樣板帳本版本是 {version!r}，這一版只收 {TEMPLATE_LEDGER_VERSION}")
     header = TemplateHeader.model_validate_json(lines[0])
     if expected_header is not None and header != expected_header:

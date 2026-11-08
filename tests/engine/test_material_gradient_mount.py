@@ -26,6 +26,8 @@ import pytest
 from numpy.typing import NDArray
 from pydantic import ValidationError
 
+from tests.engine._six_search_helpers import six_header_for
+
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -52,7 +54,8 @@ from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from tests.engine._material_gradient_templates_probe import kept_walls
 from tests.engine import _zone_rom_case as zone_rom_case
 from tests.engine._scheme_cache import shared_json
-from tests.engine.test_fem_reduced import model as model, operators as operators
+from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
+from tests.engine._six_search_cli_case import model as model, operators as operators
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, DIFFERENCE_STEP, PURPOSE, _chain_model, _decode, _decode_complex, _gradient_settings,
     _numpy_total, _presets, _probe_point, _receivers, _settings,
@@ -135,7 +138,7 @@ def _stand_in() -> ReducedModel:
 def _header(designs: tuple[gradient_search.SurfaceDesign, ...],
             settings: MaterialGradientSettings | None = None) -> ledger.MaterialGradientHeader:
     constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
-    return ledger.header_for(_stand_in(), designs, settings or _settings(), objective_constants=constants)
+    return six_header_for(_stand_in(), designs, settings or _settings(), objective_constants=constants)
 
 
 def _template_header(header: ledger.MaterialGradientHeader, kept: dict[str, SurfaceMaterial]) -> templates.TemplateHeader:
@@ -174,7 +177,7 @@ def _rigid_result(header: ledger.MaterialGradientHeader,
     """主線量控制組那一份的寫法：``surface_specs`` 切每面（不給安裝方式）、版本 ``RESULT_VERSION``。"""
     theta = tuple(0.05 + 0.01 * index for index in range(len(header.variable_names)))
     return run.GradientResult(
-        format_version=run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID,
+        format_version=run.LOW_FREQUENCY_RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID,
         surfaces=run.surface_specs(header, theta, digests={design.surface_id: endpoint.design_digest(design)
                                                            for design in designs}),
         variable_names=header.variable_names, theta_hex=tuple(value.hex() for value in theta), value=1.5,
@@ -192,17 +195,23 @@ def test_rigid_identities_equal_mainline_bit_for_bit(tmp_path: Path) -> None:
     designs = _designs(MOUNT_RIGID)
     assert designs == gradient_search.wall_designs_from_presets(PRESETS, _settings(), _presets(), kept=_control_kept())
     assert {design.surface_id: endpoint.design_digest(design) for design in designs} == CONTROL_DIGESTS
-    header = _header(designs)
-    line = _ledger_line(tmp_path / "ledger.jsonl", header)
+    constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
+    header = ledger.header_for(_stand_in(), designs, _settings(), objective_constants=constants)
+    line = (json.dumps(header.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
+    (tmp_path / 'ledger.jsonl').write_bytes(line)
+    assert ledger.read_ledger(tmp_path / 'ledger.jsonl', legacy=True)[0] == header
     assert _digest(line) == CONTROL_LEDGER_HEADER and b"mount" not in line
-    template_line = _template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))
+    template = _template_header(header, _control_kept())
+    template_line = (json.dumps(template.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
+    (tmp_path / 'templates.jsonl').write_bytes(template_line)
+    assert templates.read_template_ledger(tmp_path / 'templates.jsonl',legacy=True)[0] == template
     assert _digest(template_line) == CONTROL_TEMPLATE_HEADER and b"mount" not in template_line
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project())
     assert _digest((tmp_path / run.PROJECT_FILE).read_bytes()) == CONTROL_PROJECT
     run.write_json_atomic(tmp_path / run.RESULT_FILE, _rigid_result(header, designs))
     data = (tmp_path / run.RESULT_FILE).read_bytes()
     assert _digest(data) == CONTROL_RESULT and b"mount" not in data
-    assert run.parse_result(data).mount == MOUNT_RIGID
+    assert run.parse_result(data, legacy=True).mount == MOUNT_RIGID
 
 
 # ---- 身分：貼在原牆上是另一個身分，六面原牆都綁 ----
@@ -362,7 +371,7 @@ def _result(mount: Mount) -> run.GradientResult:
                                   mount=mount if mounted else None)
                   for wall, preset in zip(Wall.all(), PRESETS, strict=True))
     return run.GradientResult(
-        format_version=run.MOUNTED_RESULT_VERSION if mounted else run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID, surfaces=specs, variable_names=("floor.layer1.thickness_m",),
+        format_version=run.LOW_FREQUENCY_MOUNTED_RESULT_VERSION if mounted else run.LOW_FREQUENCY_RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID, surfaces=specs, variable_names=("floor.layer1.thickness_m",),
         theta_hex=((0.05).hex(),), value=1.5, screening_total=1.25, components=run.Components(
             own_line_ripple_rms_db=1.0, seat_robustness_rms_db=2.0, big_peak_proxy_db=3.0),
         round_stop_reason="沒有候選", stop_reason="沒有可換的樣板", evaluations=3, rounds=1, template_rounds=1,
@@ -393,9 +402,9 @@ def test_result_version_follows_the_mount_and_v4_is_rigid(mount: Mount) -> None:
         assert document["format_version"] == CONTROL_RESULT_VERSION
         assert all(sorted(spec) == CONTROL_SURFACE_KEYS for spec in surfaces)
     else:
-        assert document["format_version"] == run.MOUNTED_RESULT_VERSION != CONTROL_RESULT_VERSION
+        assert document["format_version"] == run.LOW_FREQUENCY_MOUNTED_RESULT_VERSION != CONTROL_RESULT_VERSION
         assert all(spec["mount"] == MOUNT_ON_WALL for spec in surfaces)
-    parsed = run.parse_result(json.dumps(document).encode("utf-8"))
+    parsed = run.parse_result(json.dumps(document).encode("utf-8"), legacy=True)
     assert parsed == result and parsed.mount == mount
     content = _older(document, run.LEGACY_RESULT_VERSION, proxy=False)
     with pytest.raises(ValueError, match=run.LEGACY_RESULT_VERSION.replace(".", r"\.")):
@@ -404,8 +413,8 @@ def test_result_version_follows_the_mount_and_v4_is_rigid(mount: Mount) -> None:
     assert legacy.format_version == run.LEGACY_RESULT_VERSION and legacy.mount == MOUNT_RIGID
     assert legacy.surfaces == tuple(spec.model_copy(update={"mount": None}) for spec in result.surfaces)
     mounted = _result(MOUNT_ON_WALL).model_dump(mode="json")
-    wrong = (_older(mounted, run.MOUNTED_RESULT_VERSION, proxy=True),
-             json.dumps({**mounted, "format_version": run.RESULT_VERSION}).encode("utf-8"),
+    wrong = (_older(mounted, run.LOW_FREQUENCY_MOUNTED_RESULT_VERSION, proxy=True),
+             json.dumps({**mounted, "format_version": run.LOW_FREQUENCY_RESULT_VERSION}).encode("utf-8"),
              json.dumps({**mounted, "surfaces": [{**spec, "mount": MOUNT_RIGID}
                                                  for spec in cast(list[Record], mounted["surfaces"])]}).encode("utf-8"))
     for item in wrong:
@@ -616,7 +625,9 @@ def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
     output["folder"] = str(folder)
-    output["endpoint"] = _run(directory, _command("endpoint", str(folder)))
+    legacy_folder = legacy_endpoint_copy(directory, folder)
+    output["endpoint_folder"] = str(legacy_folder)
+    output["endpoint"] = _run(directory, _command("endpoint", str(legacy_folder)))
     output["report"] = _run(directory, _command("report", "--folder", str(folder)))
     copy = directory / "other-mount" / folder.name
     shutil.copytree(folder, copy)
@@ -635,7 +646,9 @@ def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     folders = [path for path in rigid_root.iterdir() if not path.name.startswith(".")] if rigid_root.exists() else []
     output["rigid_folder"] = str(folders[0]) if len(folders) == 1 else None
     if output["rigid_folder"] is not None:
-        output["rigid_endpoint"] = _run(directory, _command("endpoint", str(folders[0])))
+        old_rigid = legacy_endpoint_copy(directory, folders[0], name="legacy-rigid")
+        output["rigid_legacy_folder"] = str(old_rigid)
+        output["rigid_endpoint"] = _run(directory, _command("endpoint", str(old_rigid)))
     return json.dumps(output, ensure_ascii=False)
 
 
@@ -699,11 +712,11 @@ def test_cli_endpoint_exports_mounted_walls(cli_runs: tuple[Path, Record]) -> No
     directory, output = cli_runs
     case = cast(Record, output["endpoint"])
     assert case["code"] == 0, case["stderr"]
-    folder = Path(str(output["folder"]))
+    folder = Path(str(output["endpoint_folder"]))
     record = _json(folder / "endpoint.json")
     zones = load_scheme(folder / str(record["exported_scheme"])).scene.surface_zones_by_wall
     assert zones is not None
-    result = run.parse_result((folder / "result.json").read_bytes())
+    result = run.parse_result((folder / "result.json").read_bytes(), legacy=True)
     walls = _scheme_walls(directory)
     settings = load_material_gradient_settings(directory / "settings.toml")
     by_wall: dict[Wall, SurfaceMaterial] = {wall: walls[wall.wall_name()] for wall in Wall.all()}
@@ -756,7 +769,7 @@ def test_cli_rigid_result_is_mainline_v4_and_endpoint_takes_it_as_rigid(cli_runs
     output = cli_runs[1]
     start = cast(Record, output["rigid_start"])
     assert start["code"] == 0, start
-    folder = Path(str(output["rigid_folder"]))
+    folder = Path(str(output["rigid_legacy_folder"]))
     data = (folder / "result.json").read_bytes()
     document = cast(Record, json.loads(data))
     assert document["format_version"] == CONTROL_RESULT_VERSION and sorted(document) == CONTROL_RESULT_KEYS

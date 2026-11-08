@@ -127,7 +127,9 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
     保留構造用無變數樣板算角度阻抗，固定阻抗廣播；只拒裸 MeasuredImpedance（實測）保留牆。
     貼牆背後是實測表、或保留 MountedOnWall(wall=實測表) 照收，走 construction_diff 的 JAX 內插。
     舊低頻直接呼叫原評分入口，aux.low_frequency 保留篩選、代理與目標原值。
-    這一支不接搜尋與顯卡包裝；single_precision／device_constants 顯卡選項留待後續支線。
+    搜尋的 CPU 雙精度已接本工廠；single_precision／device_constants 顯卡選項留待 B2b。
+    B2b 必須決定低頻單精度是否比照 material_gradient.chain_objective，在評分前將 pressures 升 complex128；
+    本工廠目前不升型別，CPU 雙精度低頻仍逐位沿用舊入口。
     float32 θ 仍可在 CPU（中央處理器）求值，五個數值輸入進六類前統一成對應複數精度。
     """
     if single_precision or device_constants is not None:

@@ -18,7 +18,7 @@ from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_check import ValidationReport
 from aosr.physics.fem_reduced_receipt import save_validation_receipt
 from aosr.reporting import fem_reduced_scheme
-from tests.engine.test_fem_reduced import operators, model
+from tests.engine._six_search_cli_case import operators as operators, model as model
 from tests.engine.test_material_gradient_cli import (
     PRESET_TEXT, _chain_operators, _good_report, _schemes, _env,
 )

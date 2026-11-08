@@ -268,16 +268,10 @@ def test_create_forwards_persisted_gpu_device(tmp_path: Path, monkeypatch: pytes
     assert cli._create_and_run(tmp_path, project) == 0
 
 
-def test_project_and_candidate_use_single_chain_and_cpu_reference(numeric: dict[str, object]) -> None:
-    import math
+def test_project_explicitly_rejects_gpu_six_search(numeric: dict[str, object]) -> None:
     from typing import cast
-    from tests.engine._precision_contracts import contract_value
-
     wiring = cast(dict[str, object], numeric["wiring"])
-    assert math.isfinite(cast(float, wiring["candidate_value"]))
-    assert wiring["candidate_gradient_dtype"] == "float64"
-    assert abs(cast(float, wiring["reference"]) - cast(float, wiring["single"])) <= contract_value(
-        "rom_search_gpu_single_vs_cpu_double")
+    assert wiring["rejection"] == "六類目標的顯卡單精度與精度尺在下一支"
 
 
 @pytest.mark.parametrize("backend", ("cpu", "gpu"))

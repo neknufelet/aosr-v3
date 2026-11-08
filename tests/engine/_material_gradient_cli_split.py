@@ -98,7 +98,7 @@ class _Runs:
             **{name: f"start-{name}" for name in START_SURROGATES},
             **{name: "resume-rejections" for name in RESUME_REJECTIONS}})
         output["probe"] = self.sections.record({
-            **{key: "probe-reference" for key in ("reference", "phases", "pre_loop_rows", "other_header", "air")},
+            **{key: "probe-reference" for key in ("reference", "phases", "pre_loop_rows", "other_header", "air", "control")},
             "stops": "probe-stops", "cuts": "probe-cuts"})
         return output
 

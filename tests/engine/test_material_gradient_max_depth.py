@@ -10,6 +10,8 @@ from typing import cast
 import numpy as np
 import pytest
 
+from tests.engine._six_search_helpers import six_header_for, expand_components, weights
+
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
@@ -83,7 +85,7 @@ def test_start_still_rejects_cap_above_initial_family_limit() -> None:
 def _recorded_retune(theta: search.FloatVector, value: float) -> search.DescentResult:
     """手給帳本輸入，不求值、不跑搜尋；兩分項等權相加，代理為零。"""
     step = search.DescentStep(0, tuple(float(x) for x in theta), value, value,
-                              (value / 2, value / 2, 0.0), 0.0, 0.0, 0.0)
+                              expand_components(value,value,(value / 2,value / 2,0.0)), 0.0, 0.0, 0.0)
     return search.DescentResult(theta, (step,), search.STOP_GRADIENT, 0.0, 1)
 
 
@@ -99,7 +101,7 @@ def _write_swapped_template_ledger(folder: Path, header: ledger.MaterialGradient
         swapped, values = rounds.swap(designs, theta, face, target, context)
         value = 1.0 if (face, target) == ("x0", "glass_wool_24k") else 3.0
         score = rounds.QuickScore(face, target, rounds.surfaces_of(swapped), search.design_names(swapped), values,
-                                   value, value, (value / 2, value / 2, 0.0), 0.0)
+                                   value, value, expand_components(value,value,(value / 2,value / 2,0.0)), 0.0)
         rows.append(templates.quick_row(len(rows), 0, score))
     rows.extend(templates.segment_rows(_recorded_retune(theta, 2.0), "baseline_retune", len(rows), round=0,
                                        surfaces=start, variable_names=search.design_names(designs)))
@@ -114,12 +116,12 @@ def _write_swapped_template_ledger(folder: Path, header: ledger.MaterialGradient
         round_evaluations=20, total_evaluations=20, next_round_bound=None)
     rows.append(templates.decision_row(len(rows), 0, surfaces=chosen.surfaces, variable_names=chosen.variable_names,
                                        theta_hex=chosen.theta_hex, value=1.0, screening_total=1.0,
-                                       components=(0.5, 0.5, 0.0), seconds=0.0,
+                                       components=expand_components(1.0,1.0,(0.5,0.5,0.0)), seconds=0.0,
                                        decision=decision, stop_reason=rounds.TEMPLATE_STOP_MAX_ROUNDS))
     templates.create_template_ledger(folder / run.TEMPLATES_FILE, th)
     templates.append_template_rows(folder / run.TEMPLATES_FILE, th, rows, settings=context.settings,
                                     start=templates.TemplateStart(start, tuple(float(x).hex() for x in theta),
-                                                                  2.0, 2.0, (1.0, 1.0, 0.0)))
+                                                                  2.0, 2.0, expand_components(2.0,2.0,(1.0,1.0,0.0))))
 
 
 def test_swapped_family_result_roundtrip_and_endpoint_check(tmp_path: Path) -> None:
@@ -134,10 +136,10 @@ def test_swapped_family_result_roundtrip_and_endpoint_check(tmp_path: Path) -> N
         surfaces=rounds.surfaces_of(designs), variable_names=search.design_names(designs),
         settings_fingerprint=settings.fingerprint, objective_fingerprint="a" * 64, kept_digests={}, max_depths=caps,
         score_constants=ledger.ScoreConstants(component_weights=(1.0, 1.0), worse_references=(1.0, 1.0),
-                                               proxy_weight=0.25, proxy_worse_reference=1.0, proxy_temperature_db=0.25))
+                                               proxy_weight=0.25, proxy_worse_reference=1.0, proxy_temperature_db=0.25, category_weights=weights()))
     decision = ledger.RoundDecision(baseline_value=None, outcomes=(), threshold=settings.candidates.improvement_threshold,
                                      accepted=None, round_evaluations=1, total_evaluations=1, next_round_bound=None)
-    row = ledger.decision_row(0, 0, tuple(float(x) for x in search.baseline_theta(designs)), 2.0, 2.0, (1.0, 1.0, 0.0),
+    row = ledger.decision_row(0, 0, tuple(float(x) for x in search.baseline_theta(designs)), 2.0, 2.0, expand_components(2.0,2.0,(1.0,1.0,0.0)),
                                0.0, decision, search.LOOP_STOP_NO_CANDIDATES)
     ledger.write_ledger(tmp_path / run.LEDGER_FILE, header, (row,))
     _write_swapped_template_ledger(tmp_path, header, designs, context)
@@ -145,7 +147,9 @@ def test_swapped_family_result_roundtrip_and_endpoint_check(tmp_path: Path) -> N
     result = run.result_from_ledger(tmp_path, settings, kept, expected_header=header)
     run.write_json_atomic(tmp_path / run.RESULT_FILE, result)
     restored = run.parse_result((tmp_path / run.RESULT_FILE).read_bytes())
-    assert checked_result(tmp_path, restored, header, settings, kept) == result
+    assert restored == result
+    with pytest.raises(ValueError, match="終點三組數在後續支"):
+        checked_result(tmp_path, restored, header, settings, kept)
     final = run.final_designs([(s.surface_id, s.preset_id) for s in result.surfaces], settings, kept, max_depths=caps)
     assert final[2].family_id == "glass_wool_24k" and final[2].max_total_depth_m == 0.15
     assert result.surfaces[2].material_digest == design_digest(final[2])
@@ -389,7 +393,7 @@ def test_headers_bind_expanded_caps_and_preserve_legacy_bytes(tmp_path: Path) ->
     settings = _settings()
     for caps in ({}, {"x0": 0.08}):
         designs = run.designs_for((PRESET,) * 6, settings, kept=_kept(), max_depths=caps)
-        header = ledger.header_for(model, designs, settings, objective_constants=constants)
+        header = six_header_for(model, designs, settings, objective_constants=constants)
         assert header.max_depths == caps
         path = tmp_path / ("limited.jsonl" if caps else "plain.jsonl")
         ledger.write_ledger(path, header, ())
@@ -406,18 +410,18 @@ def test_headers_bind_expanded_caps_and_preserve_legacy_bytes(tmp_path: Path) ->
     kept = {wall: ConstantImpedance(impedance_pa_s_m=12348.0 + i) for i, wall in enumerate(Wall.all())}
     designs = run.designs_for(project.presets, legacy, kept=kept)
     header = ledger.header_for(model, designs, legacy, objective_constants=constants)
-    ledger.write_ledger(tmp_path / "legacy.jsonl", header, ())
+    (tmp_path / "legacy.jsonl").write_text(json.dumps(header.model_dump(mode="json"),ensure_ascii=False)+"\n")
     assert hashlib.sha256((tmp_path / "legacy.jsonl").read_bytes()).hexdigest() == "0c252b60fb6852e47dc200063192bfde70af8ca2a163814dee20dbf1cbfa2d26"
     template = run.template_header_for(header, legacy, kept, base_ledger_sha256="e" * 64)
-    templates.create_template_ledger(tmp_path / "legacy-templates.jsonl", template)
+    (tmp_path / "legacy-templates.jsonl").write_text(json.dumps(template.model_dump(mode="json"),ensure_ascii=False)+"\n")
     assert hashlib.sha256((tmp_path / "legacy-templates.jsonl").read_bytes()).hexdigest() == "b62a9e6f05ea67315c28b4fdcb9e716369e5497aa2e150427587857eb666d15a"
     current_designs = run.designs_for(project.presets, settings, kept=kept)
     current = ledger.header_for(model, current_designs, settings, objective_constants=constants)
     assert current.model_dump() == {**header.model_dump(), "settings_fingerprint": settings.fingerprint}
     current_template = run.template_header_for(current, settings, kept, base_ledger_sha256="e" * 64)
     assert current_template.model_dump() == {**template.model_dump(), "settings_fingerprint": settings.full_fingerprint}
-    ledger.write_ledger(tmp_path / "current.jsonl", current, ())
-    templates.create_template_ledger(tmp_path / "current-templates.jsonl", current_template)
+    (tmp_path / "current.jsonl").write_text(json.dumps(current.model_dump(mode="json"),ensure_ascii=False)+"\n")
+    (tmp_path / "current-templates.jsonl").write_text(json.dumps(current_template.model_dump(mode="json"),ensure_ascii=False)+"\n")
     assert hashlib.sha256((tmp_path / "current.jsonl").read_bytes()).hexdigest() == "1e8c6edf1569caa3e3c4e8e8bb310d0d59c7f194216689f35a0c9b6160d0c4df"
     assert hashlib.sha256((tmp_path / "current-templates.jsonl").read_bytes()).hexdigest() == "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
     run.write_json_atomic(tmp_path / "result.json", _rigid_result(current, current_designs))

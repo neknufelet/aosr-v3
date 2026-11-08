@@ -49,7 +49,7 @@ Record = dict[str, object]
 def _endpoint(source: Path) -> Record:
     """產品入口那一份的控制組：同一份輸入直接叫 ``endpoint_check``；原方案六面完整模型解交同一把尺、同一支大峰。"""
     project = read_project(source)
-    scheme, model, settings = check_inputs(project)
+    scheme, model, settings = check_inputs(project, allow_legacy_objective=True)
     result = GradientResult.model_validate_json((source / RESULT_FILE).read_bytes())
     fixed = scheme.scene.impedance_pa_s_per_m_by_wall
     axis_id = scheme.scene.low_frequency_axis

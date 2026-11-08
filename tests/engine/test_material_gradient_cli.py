@@ -63,7 +63,8 @@ from aosr.runtime import child_process_env, configure_jax
 from tests.engine import _fem_shared_cases as shared_cases
 from tests.engine._fem_reduced_cache import shared_holdout_report
 from tests.engine._precision_contracts import contract_value
-from tests.engine.test_fem_reduced import DENSITY, SOUND_SPEED, model as model, operators as operators
+from tests.engine.test_fem_reduced import DENSITY, SOUND_SPEED
+from tests.engine._six_search_cli_case import ROOM as CLI_ROOM, model as model, operators as operators
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, PURPOSE, _chain_model, _gradient_settings, _presets, _receivers,
 )
@@ -80,9 +81,9 @@ PRESET_TEXT = ",".join("none" if preset is None else preset for preset in PRESET
 OUTSIDE_FAMILY = "fabric_pet_a_gap100"  # construction_presets.toml 有、material_gradient.toml 的家族清單沒有
 FREQUENCY_NAME, BAND_NAME = "fem_reduced_holdout_frequency_db", "fem_reduced_holdout_band_db"
 # 考卷只為了快把兩個步數上限調小（正式 30 與 5），換樣板段的求值上限調成 1（第 0 輪就停、不求值，庚三另有考卷）。
-NARROWED_STEPS = {"descent.max_steps": 3, "retune.steps": 2, "templates.max_evaluations": 1}
+NARROWED_STEPS = {"descent.max_steps": 3, "retune.steps": 2, "templates.max_evaluations": 1, "candidates.max_rounds": 1, "candidates.max_per_round": 1}
 # 同一個根、另一份設定（只差下降步數上限）：資料夾名要跟著不同。
-OTHER_STEPS = {"descent.max_steps": 2, "retune.steps": 2, "templates.max_evaluations": 1}
+OTHER_STEPS = {"descent.max_steps": 2, "retune.steps": 2, "templates.max_evaluations": 1, "candidates.max_rounds": 1, "candidates.max_per_round": 1}
 MOVED_SPEAKER, MOVED_SEAT, MOVE_M = "left", "front", 0.1
 OTHER_DENSITY, OTHER_SPEED = 1.18, 340.0
 # 同網格、同座標、另一組空氣建的替身（各有合格收據）：探針用的那份空氣兩格都換，拒收題各只換一格。
@@ -187,7 +188,7 @@ def _moved_seat(receivers: ReceiverSet) -> ReceiverSet:
 def _schemes() -> dict[str, Scheme]:
     """正式方案（場景補搜尋低頻軸：終點量大峰要它），與同一間房只把一支喇叭或一個座位的 x 移 0.1 m 的兩份。"""
     base = shared_cases.small_scheme()
-    scene = base.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH})
+    scene = base.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH, "room_m": CLI_ROOM})
     scheme = base.model_copy(update={"receiver_set": _receivers(), "purpose": PURPOSE, "scene": scene})
     speakers = {**scheme.speakers, MOVED_SPEAKER: _moved(scheme.speakers[MOVED_SPEAKER])}
     return {"scheme.json": scheme, "scheme-moved-speaker.json": scheme.model_copy(update={"speakers": speakers}),
@@ -207,7 +208,9 @@ def _inputs(directory: Path) -> None:
     for name, steps in (("settings.toml", NARROWED_STEPS), ("settings-other.toml", OTHER_STEPS)):
         (directory / name).write_text(_settings_text(steps), encoding="utf-8")
         narrowed = load_material_gradient_settings(directory / name)
-        assert (narrowed.descent.max_steps, narrowed.retune.steps, narrowed.templates.max_evaluations) == (*steps.values(),)
+        for key, value in steps.items():
+            section, field = key.split('.', 1)
+            assert getattr(getattr(narrowed, section), field) == value
 
 
 def _env(directory: Path) -> dict[str, str]:
@@ -577,9 +580,7 @@ def test_result_is_last_decision_and_feasible(runs: tuple[Path, Record]) -> None
     assert result["surfaces"] == expected
     assert (result["value"], result["round_stop_reason"], result["evaluations"]) == (
         last.value, last.stop_reason, last.decision.total_evaluations)
-    assert result["components"] == {"own_line_ripple_rms_db": last.components[0],
-                                    "seat_robustness_rms_db": last.components[1],
-                                    "big_peak_proxy_db": last.proxy_db()}
+    assert result["components"] == dict(zip(gradient_search.COMPONENT_NAMES, last.components, strict=True))
     assert result["screening_total"] == last.screening_total
     assert result["ledger_sha256"] == _sha256(folder / "ledger.jsonl")
 
@@ -616,8 +617,7 @@ def test_report_prints_segments_rounds_stop_reason_and_final_point(runs: tuple[P
         assert f"  {spec['surface_id']}：{spec['preset_id']}，{thickness}，{cavity}" in lines
     for row in rows:
         if row.decision is not None:
-            assert any(line.startswith(f"第 {row.round} 輪：交出 舊合分 {row.screening_total:.6f}／新合分 {row.value:.6f}"
-                                       f"／代理 {row.proxy_db():.3f} dB") for line in lines)
+            assert any(line.startswith(f"第 {row.round} 輪：交出 六類 J {row.value:.6f}／product {row.components[10]:.6f}") for line in lines)
 
 
 # ---- 停止記號與接續 ----
@@ -950,3 +950,29 @@ def test_stop_checked_before_every_evaluation(runs: tuple[Path, Record]) -> None
     assert reference["checks"] == segments + snaps + last.total_evaluations
     phases = set(cast(list[str], _probe_section(runs, "phases")))
     assert {"header", "descent", "snap", "retune"} <= phases
+
+
+def test_new_ledger_low_frequency_and_six_categories_are_bitwise_controls(runs: tuple[Path, Record]) -> None:
+    control = cast(Record, _probe_section(runs, "control"))
+    assert control["low_bitwise"] is True, control
+    assert control["six_bitwise"] is True, control
+    assert control["actual"] == control["expected"], control
+
+
+def test_all_six_constants_participate_in_fingerprint(runs: tuple[Path, Record]) -> None:
+    from aosr.scoring.six_category_jax import SixCategoryConstants
+    control = cast(Record, _probe_section(runs, "control"))
+    fingerprints = cast(dict[str, bool], control['fingerprints'])
+    assert set(fingerprints) == set(SixCategoryConstants._fields)
+    assert all(fingerprints.values()), fingerprints
+
+
+def test_reversed_surrogate_source_axis_keeps_geometry_aligned(runs: tuple[Path, Record]) -> None:
+    from tests.engine.test_six_category_jax import _tolerances
+    control = cast(Record, _probe_section(runs, "control"))
+    expected = np.asarray([float.fromhex(x) for x in cast(list[str], control['expected'])][3:])
+    actual = np.asarray(control['reversed_sources'])
+    tolerance = _tolerances(expected[:6])
+    assert np.all(np.abs(actual[:6] - expected[:6]) <= tolerance), (actual, expected)
+    from tests.engine._six_search_helpers import weights
+    assert np.all(np.abs(actual[6:] - expected[6:]) <= np.dot(np.asarray(weights()), tolerance))

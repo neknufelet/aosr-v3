@@ -19,6 +19,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from tests.engine._six_search_helpers import six_header_for, six_objective, weights
+
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import CandidateSettings, MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -27,9 +29,10 @@ from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.config.quality_targets import load_quality_targets
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, gradient_objective_constants, objective_reading
+from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
+from aosr.gradient.material_gradient import objective_reading
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
 
@@ -51,7 +54,7 @@ def _settings(base: MaterialGradientSettings, override: object) -> MaterialGradi
 
 # 合成目標的分數常數：0.5·(v／1)＋0.5·(v／1)＝v（舊合分）、v＋代理權重·0（新合分）。
 SYNTHETIC_SCORES = ledger.ScoreConstants(component_weights=(0.5, 0.5), worse_references=(1.0, 1.0), proxy_weight=0.5,
-                                         proxy_worse_reference=1.0, proxy_temperature_db=0.5)
+                                         proxy_worse_reference=1.0, proxy_temperature_db=0.5, category_weights=weights())
 
 
 def synthetic_header(designs: tuple[gradient_search.SurfaceDesign, ...],
@@ -87,7 +90,7 @@ def synthetic_objective(designs: tuple[gradient_search.SurfaceDesign, ...], coun
         value = jnp.sum(jnp.asarray(weight, dtype=theta.dtype) * shift * shift)
         return value, GradientObjectiveArrays(value[None], value[None], value, value, value, value * 0.0, value, value * 0.0)
 
-    return objective
+    return six_objective(objective)
 
 
 def _start_ledger(path: Path, header: ledger.MaterialGradientHeader, designs: tuple[gradient_search.SurfaceDesign, ...],
@@ -194,17 +197,18 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings,
     score = gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), str(problem["purpose"]))
     constants = gradient_objective_constants(np.asarray(model.frequencies_hz), score, receivers, len(model.source_names))
     designs = gradient_search.wall_designs_from_presets(cast(list[str | None], problem["presets"]), base, presets)
-    objective = gradient_search.chain_objective(
+    low_objective = gradient_search.chain_objective(
         model, designs, constants, air=load_physics_constants(config_path("physics_constants.toml")),
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")), frequencies=model.frequencies_hz)
-    header = ledger.header_for(model, designs, base, objective_constants=constants)
+    objective = six_objective(low_objective)
+    header = six_header_for(model, designs, base, objective_constants=constants)
     start = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
     if part == "single":
         single = loop.confirmation_round(objective, start.astype(np.float32), designs, base, budget_left=10**6)
         return {"single": {"dtype": str(single.theta.dtype), "theta": _hex(single.theta),
                            "baseline_dtype": str(single.baseline.theta.dtype) if single.baseline is not None else None,
                            "value": float(cast(float, single.value)).hex(), "evaluations": single.evaluations,
-                           "candidate_values": [item.value.hex() for item in single.confirmed]}}
+                           "candidate_values": [cast(float, item.value).hex() for item in single.confirmed]}}
     if part == "again":
         again = directory / "surrogate.again.jsonl"
         _start_ledger(again, header, designs, objective, gradient_search.baseline_theta(designs))
@@ -259,12 +263,12 @@ def _threshold_edge(problem: Record, base: MaterialGradientSettings) -> Record:
     objective = synthetic_objective(designs, [0])
     start = gradient_search.snap_to_specs(gradient_search.baseline_theta(designs), designs).theta
     first = loop.confirmation_round(objective, start, designs, base, budget_left=10**6)
-    best = max(item.improvement for item in first.confirmed)
+    best = max(cast(float, item.improvement) for item in first.confirmed)
     rows: Record = {"best": best.hex()}
     for name, threshold in (("equal", best), ("below", float(np.nextafter(best, -np.inf)))):
         settings = _settings(base, {"improvement_threshold": threshold})
         again = loop.confirmation_round(objective, start, designs, settings, budget_left=10**6)
-        rows[name] = {"threshold": threshold.hex(), "best": max(item.improvement for item in again.confirmed).hex(),
+        rows[name] = {"threshold": threshold.hex(), "best": max(cast(float, item.improvement) for item in again.confirmed).hex(),
                       "accepted": again.accepted.candidate_id if again.accepted is not None else None,
                       "stop_reason": again.stop_reason}
     return rows

@@ -20,10 +20,11 @@
 """
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, Literal, NamedTuple, TypeAlias
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypeAlias
 
 import jax
 import jax.numpy as jnp
@@ -48,15 +49,16 @@ from aosr.materials.construction_models import (
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import (
-    GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures, objective_reading,
+    GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures, objective_reading as low_frequency_reading,
 )
 
 
+STOP_UNESTIMABLE: Final = "起點不可估"
 STOP_GRADIENT: Final = "梯度夠小"
 STOP_STEP: Final = "步長到下限"
 STOP_MAX_STEPS: Final = "步數到上限"
-StopReason = Literal["梯度夠小", "步長到下限", "步數到上限"]
-STOP_REASONS: Final[tuple[StopReason, ...]] = (STOP_GRADIENT, STOP_STEP, STOP_MAX_STEPS)
+StopReason = Literal["梯度夠小", "步長到下限", "步數到上限", "起點不可估"]
+STOP_REASONS: Final[tuple[StopReason, ...]] = (STOP_GRADIENT, STOP_STEP, STOP_MAX_STEPS, STOP_UNESTIMABLE)
 # 候選確認迴圈（``material_gradient_loop``）整場的停止原因，封閉集合；字面只說做過的事：
 # 「已確認」只指重調過、跟同步數重調的基準比過的候選。
 LOOP_STOP_NO_IMPROVEMENT: Final = "已確認候選內沒有超過門檻"
@@ -71,12 +73,49 @@ _THICKNESS = "thickness_m"
 # 用 type 陳述式：只是型別別名、不在模組層建材料（材料只有一個出生地，``test_material_flow``）。
 type WallMaterial = Assembly | ConstantImpedance | MeasuredImpedance
 
-ChainObjective = Callable[[jax.Array], tuple[jax.Array, GradientObjectiveArrays]]
-Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]]
-# 三分項：主位起伏、座位穩健性（聲道平均，dB）、大峰代理（dB）。
-Components = tuple[float, float, float]
+if TYPE_CHECKING:
+    from aosr.gradient.six_category_chain import SixCategoryChainAux
+
+# 舊鏈仍供低頻控制與既有顯卡入口；正式搜尋只建六類工廠。
+type ObjectiveAux = GradientObjectiveArrays | SixCategoryChainAux
+ChainObjective = Callable[[jax.Array], tuple[jax.Array, ObjectiveAux]]
+Evaluator = Callable[[jax.Array], tuple[tuple[jax.Array, ObjectiveAux], jax.Array]]
+# 低頻控制回三分項；正式搜尋回低頻三分項、六類與兩個總分。
+Components = tuple[float, ...]
+# 保留低頻三項的既有位置；之後是六類產品代價、搜尋總分、產品總分。
+COMPONENT_NAMES: Final = ("own_line_ripple_rms_db", "seat_robustness_rms_db", "big_peak_proxy_db",
+    "timbre_cost", "listening_cost", "reflections_cost", "reverberation_cost", "matching_cost",
+    "low_frequency_cost", "objective_total", "product_total")
+
+
+class ObjectiveReading(NamedTuple):
+    screening_total: float
+    components: Components
+    objective_total: float
+
+
+def objective_reading(aux: ObjectiveAux) -> ObjectiveReading:
+    """同次求值讀出低頻三項與六類；不可估值留在記憶體，有限性閘門擋在寫列之前。"""
+    if isinstance(aux, GradientObjectiveArrays):
+        old = low_frequency_reading(aux)
+        return ObjectiveReading(old.screening_total, old.components, old.objective_total)
+    low = low_frequency_reading(aux.low_frequency)
+    values = (*low.components, *aux.categories[:6], aux.objective_total, aux.product_total)
+    components = tuple(float(x) for x in values)
+    return ObjectiveReading(low.screening_total, components, float(aux.objective_total))
+
+
+def estimable(value: jax.Array, aux: ObjectiveAux) -> bool:
+    """總值與每個類別都有限，才可接受或落帳；不把 NaN 類別藏在有限總分後。"""
+    reading = objective_reading(aux)
+    return math.isfinite(float(value)) and math.isfinite(reading.screening_total) and all(
+        x is not None and math.isfinite(x) for x in reading.components)
 FloatVector = NDArray[np.floating]
 StopCheck = Callable[[], bool]
+
+
+class Unestimable(ValueError):
+    """目前階段不可估，保留已完成的有限列並停止；不寫虛假的候選值。"""
 
 
 class SearchStopped(Exception):
@@ -218,6 +257,7 @@ class DescentResult(NamedTuple):
     stop_reason: StopReason
     final_trial_step: float
     evaluations: int
+    unestimable_trials: int = 0
 
 
 class DepthLimit(NamedTuple):
@@ -476,7 +516,7 @@ def chain_objective(model: ReducedModel, designs: Sequence[SurfaceDesign],
                     objective_constants: GradientObjectiveConstants, *, air: PhysicsConstants,
                     ranges: PorousModelRanges, frequencies: Sequence[float] | NDArray[np.float64],
                     frequency_batch: int | None = None, single_precision: bool = False,
-                    device_constants: ReducedConstants | None = None) -> ChainObjective:
+                    device_constants: ReducedConstants | None = None) -> Callable[[jax.Array], tuple[jax.Array, GradientObjectiveArrays]]:
     """回 ``θ → (objective_total, 各分項)`` 的純函式，可 ``jax.jit``／``jax.grad``、預設精度跟 θ 走。
 
     顯卡模式的材料與替身求解維持單精度，聲壓轉成 complex128 後才進既有評分；帳本恆等式仍用雙精度守。
@@ -670,7 +710,7 @@ def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.A
     return float(jnp.linalg.norm(jnp.asarray(adjusted)))
 
 
-def _descent_step(index: int, theta: jax.Array, value: jax.Array, aux: GradientObjectiveArrays, gradient_norm: float,
+def _descent_step(index: int, theta: jax.Array, value: jax.Array, aux: ObjectiveAux, gradient_norm: float,
                   step: float, seconds: float) -> DescentStep:
     """一步的紀錄：值（新合分）照目標函式交回的那一個，舊合分與三分項從同一次求值的分項讀。"""
     reading = objective_reading(aux)
@@ -712,7 +752,7 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
     lower_values, upper_values = np.asarray(lower), np.asarray(upper)
     evaluate = compiled_evaluator(objective)
 
-    def record(index: int, theta: jax.Array, value: jax.Array, aux: GradientObjectiveArrays,
+    def record(index: int, theta: jax.Array, value: jax.Array, aux: ObjectiveAux,
                gradient: jax.Array, step: float, seconds: float) -> DescentStep:
         return _descent_step(index, theta, value, aux, _projected_gradient_norm(theta, gradient, lower, upper, limits),
                              step, seconds)
@@ -721,6 +761,9 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
     clock = time.perf_counter()
     (value, aux), gradient = evaluate(start)
     evaluations = 1
+    if not estimable(value, aux):
+        return DescentResult(np.asarray(start), (), STOP_UNESTIMABLE, 0.0, evaluations)
+    unestimable_trials = 0
     theta = start
     steps = [record(0, theta, value, aux, gradient, 0.0, time.perf_counter() - clock)]
     trial = 0.0
@@ -745,7 +788,10 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
             # 投影弧上的 Armijo：梯度乘實際位移。投到凸集合上的位移跟梯度的內積不大於零（投影的性質），
             # 所以右邊不大於舊值；只守盒界時每一格位移與梯度異號或為零。
             predicted = float(jnp.sum(gradient * (candidate - theta)))
-            if bool(jnp.isfinite(new_value)) and float(new_value) <= float(value) + settings.armijo_constant * predicted:
+            valid = estimable(new_value, new_aux)
+            if not valid:
+                unestimable_trials += 1
+            if valid and float(new_value) <= float(value) + settings.armijo_constant * predicted:
                 accepted = True
                 break
             trial *= settings.backtrack_ratio
@@ -754,7 +800,7 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
             break
         theta, value, aux, gradient = candidate, new_value, new_aux, new_gradient
         steps.append(record(len(steps), theta, value, aux, gradient, trial, time.perf_counter() - clock))
-    return DescentResult(np.asarray(theta), tuple(steps), reason, trial, evaluations)
+    return DescentResult(np.asarray(theta), tuple(steps), reason, trial, evaluations, unestimable_trials)
 
 
 def projected_descent(objective: ChainObjective, theta0: jax.Array | FloatVector,

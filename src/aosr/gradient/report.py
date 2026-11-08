@@ -38,7 +38,7 @@ from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces, expanded_max_d
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
 from aosr.gradient.material_gradient_ledger import (
-    LEGACY_LEDGER_VERSION, MaterialGradientHeader, MaterialGradientRow, read_ledger,
+    LEGACY_LEDGER_VERSIONS, PRE_PROXY_LEDGER_VERSION, MaterialGradientHeader, MaterialGradientRow, read_ledger,
 )
 from aosr.gradient.run import (
     LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, TEMPLATES_FILE, GradientProject, GradientStatus, Layout,
@@ -67,6 +67,9 @@ _MM: Final = 1000.0
 
 def _scores(row: MaterialGradientRow | TemplateRow) -> str:
     """一列的分數：「舊合分／新合分／代理」；加代理之前的列只有舊合分（它的值）。"""
+    if len(row.components) == 11:
+        categories = "／".join("不可估" if value is None else f"{value:.6f}" for value in row.components[3:9])
+        return f"六類 J {row.value:.6f}／product {row.components[10]:.6f}／逐類 {categories}"
     proxy = row.proxy_db()
     if proxy is None or row.screening_total is None:
         return f"舊合分 {row.value:.6f}{LEGACY_ROW_MARK}"
@@ -94,6 +97,7 @@ def _segment_lines(label: str, segment: Sequence[MaterialGradientRow]) -> list[s
     last = segment[-1]
     closing = (f"，停止原因「{last.stop_reason}」、這段求值 {last.evaluations} 次" if last.stop_reason is not None
                else "（沒寫完）")
+    closing += f"，不可估試探拒收 {last.unestimable_trials} 次" if last.unestimable_trials else ""
     return [f"{label}：{len(segment) - 1} 步，{_scores(segment[0])} → {_scores(last)}{closing}"]
 
 
@@ -124,6 +128,9 @@ def _round_lines(rows: Sequence[MaterialGradientRow]) -> list[str]:
             baseline = _last_of(rows, "baseline_retune", row.round, None)
             lines.append(f"  基準重調後 {_scores_of(baseline, decision.baseline_value)}（門檻 {decision.threshold}）")
         for outcome in decision.outcomes:
+            if outcome.value is None or outcome.improvement is None:
+                lines.append(f"  候選 {outcome.candidate}：{outcome.rejection}")
+                continue
             retuned = _last_of(rows, "candidate_retune", row.round, outcome.candidate)
             lines.append(f"  候選 {outcome.candidate}：預測 {outcome.predicted_change:+.6f}、重調後 "
                          f"{_scores_of(retuned, outcome.value)}、改善 {outcome.improvement:+.6f}")
@@ -234,7 +241,8 @@ def _template_round_lines(rows: Sequence[TemplateRow]) -> list[str]:
         decision_row = block[-1] if block[-1].decision is not None else None
         decision = decision_row.decision if decision_row is not None else None
         retuned = {outcome.candidate: (outcome.value, outcome.improvement)
-                   for outcome in (decision.outcomes if decision is not None else ())}
+                   for outcome in (decision.outcomes if decision is not None else ())
+                   if outcome.value is not None and outcome.improvement is not None}
         lines.append(f"換樣板第 {round_index} 輪：" + ("進行中（還沒有決定列，接續時這半輪會丟掉重跑）" if decision is None
                                                     else f"這輪求值 {decision.round_evaluations} 次、累計 {decision.total_evaluations} 次"))
         for row in block:
@@ -242,6 +250,8 @@ def _template_round_lines(rows: Sequence[TemplateRow]) -> list[str]:
                 lines.append(f"  {row.candidate}：快速評分 {_scores(row)}，{_quick_label(row, retuned, block)}")
         if decision_row is None or decision is None:
             continue
+        lines.extend(f"  {name}：快速評分不可估" for name in decision.rejected_quick)
+        lines.extend(f"  {item.candidate}：{item.rejection}" for item in decision.outcomes if item.rejection is not None)
         if decision.baseline_value is not None:
             baseline = _last_of(block, "baseline_retune", round_index, None)
             lines.append(f"  基準（本輪起點配置）重調後 {_scores_of(baseline, decision.baseline_value)}"
@@ -264,7 +274,7 @@ def _template_lines(folder: Path) -> tuple[list[str], TemplateRow | None]:
     except (OSError, ValueError) as error:
         return [TEMPLATE_HEADING, f"  換樣板帳本讀不開：{type(error).__name__}：{error}"], None
     evaluations, rounds, reason = template_progress(rows)
-    legacy = [f"  換樣板帳本 {header.ledger_version}：{LEGACY_SCORE_NOTE}"] if any(row.is_legacy() for row in rows) else []
+    legacy = [f"  換樣板帳本 {header.ledger_version}：{LEGACY_SCORE_NOTE}"] if any(row.screening_total is None for row in rows) else []
     lines = [TEMPLATE_HEADING, *legacy, *("  " + line for line in _template_round_lines(rows)),
              f"  換樣板累計求值次數（換樣板帳本記的，不含庚二）：{evaluations}；做完 {rounds} 輪；"
              f"各輪秒數加總 {decisions_seconds(rows):.1f}",
@@ -499,11 +509,16 @@ def render_report(folder: Path) -> str:
         return "\n".join([*lines, FULL_MODEL_LINE]) + "\n"
     header, rows = read_ledger(ledger, legacy=True)
     evaluations, rounds, _, reason = ledger_progress(rows)
-    if header.ledger_version == LEGACY_LEDGER_VERSION:
+    if header.ledger_version in LEGACY_LEDGER_VERSIONS:
+        lines.append("低頻舊版帳本：只讀，不與六類目標比較")
+    if header.ledger_version == PRE_PROXY_LEDGER_VERSION:
         lines.append(f"帳本 {header.ledger_version}：{LEGACY_SCORE_NOTE}")
     lines += _pre_loop_lines(rows)
     lines += _round_lines(rows)
     lines.append(f"累計求值次數（帳本記的、不含前段）：{evaluations}；做完 {rounds} 輪")
+    if reason is None and (folder / STATUS_FILE).exists():
+        status = GradientStatus.model_validate_json((folder / STATUS_FILE).read_bytes())
+        reason = status.stop_reason if status.state == "stopped" else None
     lines.append(f"停止原因：{reason}" if reason is not None else "停止原因：還沒收尾")
     template_lines, template_last = _template_lines(folder)
     lines += template_lines
