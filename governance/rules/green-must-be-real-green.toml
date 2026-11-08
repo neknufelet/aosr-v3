@@ -155,7 +155,8 @@ prefix = "tests."
 # 2032→2034：#928 複查建議補兩題（同一版兩節時第二節的雜湊也算、apt-cache 這支程式不在要回非零）；全套實跑收據分籃量到 tests. 2034。
 # 2034→2001：#972 考卷減量——後設第 1 回只跑宣告 [junit] 或 clean_tree_unset_env 的卡（36 題→2 題）、加一題守名單非空；單行程 collect-only 逐檔列加總實數 2001。
 # 2001→1959：#977 退兩張卡——tests_land_with_code 的 59 題換成零件考卷 test_git_range 的 31 題、兩張卡的後設回合跟著退；單行程 collect-only 逐檔列加總實數 1959。
-collected_floor = 1959
+# 1959→2039：#1045 新增逐工作收據包可讀、收尾只下載登記分片、前置上傳條件必紅樣本三題；治理籃只清點實收 2039，原地板已落後，未跑全套。
+collected_floor = 2039
 
 [[junit.bucket]]
 prefix = "tests.engine."

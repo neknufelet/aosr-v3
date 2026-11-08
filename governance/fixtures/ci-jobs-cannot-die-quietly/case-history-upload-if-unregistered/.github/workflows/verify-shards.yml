@@ -1,0 +1,152 @@
+name: verify-shards
+'on':
+  pull_request:
+    types:
+    - opened
+    - synchronize
+    - reopened
+jobs:
+  shard-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - run: uv run python -m governance.status.record_step --name prepare --out-dir
+        governance/receipts/steps -- uv run python -m governance.status.shard_prepare
+        --shard shard-a
+      env:
+        AOSR_TIMING_SNAPSHOT: ${{ needs.timing-history.outputs.snapshot }}
+    - name: "\u8003\u5377"
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: "\u4E0A\u50B3"
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+    needs:
+    - timing-history
+  shard-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - run: uv run python -m governance.status.record_step --name prepare --out-dir
+        governance/receipts/steps -- uv run python -m governance.status.shard_prepare
+        --shard shard-b
+      env:
+        AOSR_TIMING_SNAPSHOT: ${{ needs.timing-history.outputs.snapshot }}
+    - name: "\u8003\u5377"
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: "\u4E0A\u50B3"
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+    needs:
+    - timing-history
+  shard-c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - run: uv run python -m governance.status.record_step --name prepare --out-dir
+        governance/receipts/steps -- uv run python -m governance.status.shard_prepare
+        --shard shard-c
+      env:
+        AOSR_TIMING_SNAPSHOT: ${{ needs.timing-history.outputs.snapshot }}
+    - name: "\u8003\u5377"
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: "\u4E0A\u50B3"
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+    needs:
+    - timing-history
+  shard-d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - run: uv run python -m governance.status.record_step --name prepare --out-dir
+        governance/receipts/steps -- uv run python -m governance.status.shard_prepare
+        --shard shard-d
+      env:
+        AOSR_TIMING_SNAPSHOT: ${{ needs.timing-history.outputs.snapshot }}
+    - name: "\u8003\u5377"
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: "\u4E0A\u50B3"
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+    needs:
+    - timing-history
+  shard-e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - run: uv run python -m governance.status.record_step --name prepare --out-dir
+        governance/receipts/steps -- uv run python -m governance.status.shard_prepare
+        --shard shard-e
+      env:
+        AOSR_TIMING_SNAPSHOT: ${{ needs.timing-history.outputs.snapshot }}
+    - name: "\u8003\u5377"
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: "\u4E0A\u50B3"
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+    needs:
+    - timing-history
+  verify-sharded:
+    name: verify-sharded
+    needs:
+    - shard-a
+    - shard-b
+    - shard-c
+    - shard-d
+    - shard-e
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: "\u88DD\u74B0\u5883"
+      if: ${{ always() }}
+      run: uv sync --locked
+    - name: "\u5224\u6C7A"
+      if: ${{ always() }}
+      env:
+        AOSR_FINALIZER_NEEDS: ${{ toJSON(needs) }}
+      run: uv run python -m governance.status.record_step --name verdict --out-dir
+        governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green
+        --scan-root .
+    - name: "\u4E0A\u50B3"
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts-finalizer
+        path: governance/receipts
+  timing-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      snapshot: ${{ steps.history.outputs.snapshot }}
+    steps:
+    - id: history
+      run: uv run python -m governance.status.record_step --name timing_history --out-dir
+        governance/receipts/steps -- uv run python -m governance.status.shard_history
+    - name: 上傳
+      if: ${{ success() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+        path: governance/receipts
+        if-no-files-found: error

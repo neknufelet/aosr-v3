@@ -398,6 +398,7 @@ def test_registered_history_dependency_is_exact_and_protected(tmp_path: Path) ->
     ('case-history-has-needs', '卻有 needs'),
     ('case-history-has-strategy', '卻有 strategy'),
     ('case-history-has-if', '卻有 job 層 if'),
+    ('case-history-upload-if-unregistered', '沒在卡上按 job 與步驟名登記'),
 ])
 def test_history_preparation_negative_fixtures(tmp_path: Path, case: str, reason: str) -> None:
     root = _tree(tmp_path, 'ci-jobs-cannot-die-quietly', case)
