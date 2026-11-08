@@ -5,7 +5,7 @@ Scheme（方案）只用結構介面，呼叫端交 checked_inputs 的逐對 Rep
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -20,6 +20,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Wall
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.materials.transfer_matrix import diffuse_incidence_angles_deg
 from aosr.physics import geometric_early_jax as early
 from aosr.physics.geometric_lane import _unblocked_room_paths
@@ -65,6 +66,11 @@ class SchemeInputs(Protocol):
     def channel_group(self) -> ChannelGroup: ...
     @property
     def receiver_set(self) -> ReceiverSet: ...
+
+
+def constant_material_flags(materials: Sequence[SurfaceMaterial]) -> NDArray[np.bool_]:
+    """照面片材料序回布林 (N,)；只有 ConstantImpedance（固定阻抗）採常數吸音入口。"""
+    return np.asarray([isinstance(material, ConstantImpedance) for material in materials], dtype=np.bool_)
 
 
 def _paths(data: early.GeometricEarlyTable, pairs: tuple[early.EarlyPairTable, ...]) -> dict[str, np.ndarray]:
