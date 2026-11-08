@@ -1,6 +1,9 @@
 """兩台分攤的 verify 契約：兩片與收尾同一份環境、每支治理檢查恰好跑一次、pytest 命令及收尾登記對帳。"""
 from __future__ import annotations
 
+import fnmatch
+import json
+import os
 import shlex
 import tomllib
 from collections import Counter
@@ -10,6 +13,8 @@ from typing import cast
 import yaml
 
 from governance.loader import load_all_cards
+from governance.status import build_receipt
+from governance.status.collect import VERIFY_WORKFLOW
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / '.github' / 'workflows' / 'verify.yml'
@@ -50,6 +55,68 @@ def _setup(job: dict[str, object]) -> list[dict[str, object]]:
 def _shards() -> list[str]:
     registry = tomllib.loads((ROOT / 'governance/verify-shards.toml').read_text(encoding='utf-8'))
     return cast(list[str], registry['shards'])
+
+
+def _artifact_name(step: dict[str, object], job: str, run: build_receipt.RunMeta) -> str:
+    """只代換本題提供的雲端身分；未支援的運算式不當成包名。"""
+    options = cast(dict[str, str], step['with'])
+    name = options['name']
+    for key, value in {'run_id': str(run.run_id), 'run_attempt': str(run.attempt), 'job': job}.items():
+        name = name.replace('${{ github.' + key + ' }}', value)
+    assert '${{' not in name, name
+    return name
+
+
+def test_every_verify_job_uploads_artifact_with_recorded_steps(tmp_path: Path) -> None:
+    """漏上傳、包名不符或上傳路徑沒帶 steps，實際合成器就讀不到本 job 的片段。"""
+    run = build_receipt.RunMeta(1045, 2, 'pull_request', 'fake', 'a' * 40, 'success',
+                                'https://example.invalid/runs/1045', '', '')
+    artifacts = tmp_path / 'artifacts'
+    for name, job in _jobs().items():
+        records = _recorded(job)
+        assert records, f'{name} 沒有任何一步留收據'
+        for step in _steps(job):
+            if not str(step.get('uses', '')).startswith('actions/upload-artifact@'):
+                continue
+            options = cast(dict[str, str], step['with'])
+            assert options['if-no-files-found'] == 'error'
+            paths = options['path'].splitlines()
+            roots = [Path(path) for path in paths if not path.startswith('!')]
+            excluded = [Path(path[1:]) for path in paths if path.startswith('!')]
+            upload_root = Path(os.path.commonpath(roots))
+            folder = artifacts / _artifact_name(step, name, run)
+            for record, wrapped in records.items():
+                argv = shlex.split(str(wrapped['run']))
+                source = Path(argv[argv.index('--out-dir') + 1]) / f'{record}.json'
+                if not any(source.is_relative_to(root) for root in roots) or any(
+                    source.is_relative_to(root) for root in excluded
+                ):
+                    continue
+                target = folder / source.relative_to(upload_root)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps({'name': record, 'exit_code': 0, 'signal': None,
+                                               'report': None, 'seconds': 1, 'stderr_tail': []}), encoding='utf-8')
+        folder = build_receipt.job_artifact_dir(artifacts, run, name)
+        assert {part.name for part in build_receipt.read_fragments(folder)} == set(records)
+
+
+def test_finalizer_download_selects_exactly_registered_shard_artifacts() -> None:
+    """前置工作也有收據包；收尾下載多包或漏片，都會破壞分片證據清點。"""
+    run = build_receipt.RunMeta(1045, 2, 'pull_request', 'fake', 'a' * 40, 'success',
+                                'https://example.invalid/runs/1045', '', '')
+    jobs = _jobs()
+    finalizer = jobs[VERIFY_WORKFLOW]
+    downloads = [step for step in _steps(finalizer)
+                 if str(step.get('uses', '')).startswith('actions/download-artifact@')]
+    assert downloads
+    available = {_artifact_name(step, name, run): name for name, job in jobs.items() for step in _steps(job)
+                 if str(step.get('uses', '')).startswith('actions/upload-artifact@')}
+    selected: set[str] = set()
+    for step in downloads:
+        options = cast(dict[str, str], step['with'])
+        pattern = _artifact_name({'with': {'name': options['pattern']}}, VERIFY_WORKFLOW, run)
+        selected.update(name for artifact, name in available.items() if fnmatch.fnmatchcase(artifact, pattern))
+    assert selected == set(_shards())
 
 
 def test_shards_and_finalizer_share_one_environment() -> None:

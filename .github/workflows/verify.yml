@@ -37,6 +37,14 @@ jobs:
       - name: 固定本跑共用的歷史耗時快照
         id: history
         run: uv run python -m governance.status.record_step --name timing_history --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_history
+      - name: 上傳收據片段（前面紅了也要傳——那正是要留證據的時候）
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipts-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: governance/receipts
+          if-no-files-found: error
+          retention-days: 30
   shard-a:
     needs: [timing-history]
     runs-on: ubuntu-24.04
@@ -741,7 +749,8 @@ jobs:
         if: ${{ always() }}
         uses: actions/download-artifact@v4
         with:
-          pattern: receipts-${{ github.run_id }}-${{ github.run_attempt }}-*
+          # 耗時前置也留收據包；這裡只收分片，避免把前置包當成未登記分片。
+          pattern: receipts-${{ github.run_id }}-${{ github.run_attempt }}-shard-*
           path: governance/receipts/parts
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
         if: ${{ always() }}

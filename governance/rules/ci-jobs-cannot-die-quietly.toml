@@ -319,3 +319,4 @@ push_max_attempts = 5
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
 
 [settings.allowed_required_step_ifs.timing-history]
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
