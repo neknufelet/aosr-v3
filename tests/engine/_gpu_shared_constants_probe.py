@@ -48,7 +48,7 @@ class LegacyObjective(SinglePrecisionObjective):
 
 
 def load_problem(room: ReducedModel, patch: pytest.MonkeyPatch, batch: int | None = 16) -> run.GradientProblem:
-    """只考舊低頻 chain_objective 的共用常數 API；六類 load_problem 暫拒顯卡。"""
+    """只考舊低頻 chain_objective 的共用常數 API；六類接線另有正式工廠考卷。"""
     from aosr.config.construction_environment import construction_environment
     from aosr.gradient.gpu import single_precision_constants
     from aosr.gradient.material_gradient_ledger import header_for
@@ -114,7 +114,7 @@ def bitwise(batch: int | None) -> dict[str, object]:
         return {"matches": matches}
 
 
-def lifetime(accept: bool) -> dict[str, object]:
+def lifetime(accept: bool, *, six: bool = False) -> dict[str, object]:
     from aosr.gradient import template_rounds as rounds
     from aosr.gradient.material_gradient import objective_reading
     from tests.engine._material_gradient_templates_probe import synthetic_factory
@@ -125,7 +125,7 @@ def lifetime(accept: bool) -> dict[str, object]:
     target = settings.family[1].id
     offsets = {rounds.candidate_id(problem.designs[0].surface_id, target): -100.0 if accept else 100.0}
     make_kernel = synthetic_factory(settings, offsets, [0])
-    refs: list[tuple[weakref.ReferenceType[SinglePrecisionObjective], weakref.ReferenceType[object],
+    refs: list[tuple[weakref.ReferenceType[object], weakref.ReferenceType[object],
                      weakref.ReferenceType[object]]] = []
 
     def factory(designs: tuple[search.SurfaceDesign, ...]) -> search.ChainObjective:
@@ -134,8 +134,19 @@ def lifetime(accept: bool) -> dict[str, object]:
             value, aux = kernel(theta)
             from aosr.gradient.six_category_chain import SixCategoryChainAux
             return value, cast(SixCategoryChainAux, aux).low_frequency
-        candidate = SinglePrecisionObjective(low, reduced_constants(model()))
-        refs.append((weakref.ref(candidate), weakref.ref(candidate.forward), weakref.ref(candidate.compiled)))
+        candidate: search.ChainObjective
+        if six:
+            from aosr.gradient.six_category_chain import SixCategoryChainAux
+            from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
+            from aosr.scoring.six_category_jax import SixCategoryConstants
+            from tests.engine._six_search_helpers import ledger_constants
+            def score(theta: jax.Array, arrays: ReducedConstants, constants: SixCategoryConstants) -> tuple[jax.Array,SixCategoryChainAux]:
+                value,aux = kernel(theta)
+                return value,cast(SixCategoryChainAux,aux)
+            candidate = SixCategorySinglePrecisionObjective(score,reduced_constants(model()),ledger_constants(_objective_constants(model())))
+        else:
+            candidate = SinglePrecisionObjective(low, reduced_constants(model()))
+        refs.append((weakref.ref(candidate), weakref.ref(getattr(candidate,'forward')), weakref.ref(getattr(candidate,'compiled'))))
         return candidate
 
     context = problem.templates._replace(objective_for=factory)
@@ -154,8 +165,8 @@ def lifetime(accept: bool) -> dict[str, object]:
 
 def main() -> None:
     mode = sys.argv[1]
-    if mode in ("accept", "reject"):
-        result = lifetime(mode == "accept")
+    if mode in ("accept", "reject", "six_accept", "six_reject"):
+        result = lifetime(mode.endswith('accept'),six=mode.startswith('six_'))
     else:
         result = sharing() if mode == "sharing" else bitwise(None if mode == "full" else 16)
     sys.stdout.write(json.dumps(result) + "\n")

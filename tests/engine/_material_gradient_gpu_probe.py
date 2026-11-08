@@ -4,7 +4,6 @@ from __future__ import annotations
 import dataclasses
 import json
 
-import pytest
 import sys
 from typing import cast
 
@@ -45,16 +44,6 @@ def objective(single: bool, *, perturbed: bool = False) -> search.ChainObjective
                                    frequencies=room.frequencies_hz, frequency_batch=16, single_precision=single)
 
 
-def wiring() -> dict[str, object]:
-    """B2a 暫拒六類顯卡搜尋；上面的舊單精度純函式仍保留 CPU 數值控制。"""
-    from aosr.gradient import run
-    from tests.engine.test_material_gradient_mount import _project
-    project = run.GradientProject.model_validate({**_project().model_dump(), "device":"gpu"})
-    with pytest.raises(ValueError, match="六類目標的顯卡單精度與精度尺在下一支") as caught:
-        run.load_problem(project)
-    return {"rejection": str(caught.value)}
-
-
 def main() -> None:
     from aosr.gradient.gpu import SinglePrecisionObjective
 
@@ -70,7 +59,7 @@ def main() -> None:
     embedded = [line for line in text.splitlines() if "stablehlo.constant" in line and
                 any(f"tensor<{shape}x" in line for shape in shapes)]
     dots = [line for line in text.splitlines() if "stablehlo.dot_general" in line]
-    sys.stdout.write(json.dumps({"wiring": wiring(), "double_gradient_hex": [float(x).hex() for x in reference_gradient], "double": float(reference), "single": float(value), "mutated": float(mutated),
+    sys.stdout.write(json.dumps({"double_gradient_hex": [float(x).hex() for x in reference_gradient], "double": float(reference), "single": float(value), "mutated": float(mutated),
         "dtype": str(value.dtype), "gradient_dtype": str(gradient.dtype), "embedded": embedded,
         "ledger_step": search._descent_step(0, theta, value, aux, float(jnp.linalg.norm(gradient)), 0.0, 0.0)._asdict(),
         "dots": dots, "argument_signature": text.split("func.func public @main", 1)[1].split("{", 1)[0],

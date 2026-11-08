@@ -191,17 +191,18 @@ def cli_cases(directory: Path) -> dict[str,object]:
     with contextlib.redirect_stderr(stderr):
         resumed = cli.main(['resume',str(recorded[0])])
     gpu_root = directory/'gpu-root'
+    gpu_wrappers: list[bool] = []
     def child(folder: Path, mode: str, descriptor: int, *, device: str='cpu') -> int:
-        try: run.load_problem(run.read_project(folder))
-        except ValueError as error:
-            sys.stderr.write(str(error)+'\n')
-            return 1
-        raise AssertionError('GPU child unexpectedly accepted')
+        from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
+        project = run.read_project(folder)
+        problem = run.load_problem(project)
+        gpu_wrappers.append(device == project.device == 'gpu' and isinstance(problem.objective,SixCategorySinglePrecisionObjective))
+        return 0
     gpu_stderr = io.StringIO()
     with patch.object(cli,'_spawn_and_wait',side_effect=child),contextlib.redirect_stderr(gpu_stderr):
         gpu = cli.main([*_start_args(directory,gpu_root)[3:],'--device','gpu'])
     return dict(checked_calls=calls,resume_code=resumed,resume_stderr=stderr.getvalue(),gpu_code=gpu,
-        gpu_stderr=gpu_stderr.getvalue(),gpu_root_exists=gpu_root.exists(),
+        gpu_stderr=gpu_stderr.getvalue(),gpu_root_exists=gpu_root.exists(),gpu_wrappers=gpu_wrappers,
         gpu_projects=[str(p) for p in gpu_root.glob(f'*/{run.PROJECT_FILE}')])
 
 

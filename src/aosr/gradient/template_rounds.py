@@ -33,6 +33,7 @@ from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGrad
 from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.gpu import SinglePrecisionObjective
+from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
 from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
@@ -346,7 +347,7 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
         chosen = TemplatePoint(accepted.designs, accepted.retune.theta, accepted.retune.steps[-1].value,
                                accepted.retune.steps[-1].screening_total, accepted.retune.steps[-1].components)
         chosen_objective = cast(ChainObjective, accepted.objective)
-    if isinstance(objective, SinglePrecisionObjective):
+    if isinstance(objective, (SinglePrecisionObjective, SixCategorySinglePrecisionObjective)):
         # 淘汰目標不必隨帳本數值活到下一輪；勝出者由 accepted 與 objective 繼續持有。
         retuned = [item if item is accepted else item._replace(objective=None) for item in retuned]
     return TemplateRoundResult(True, bound, scores, baseline, tuple(retuned), accepted, chosen, chosen_objective,

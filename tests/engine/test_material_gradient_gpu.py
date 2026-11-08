@@ -10,6 +10,7 @@ import pytest
 
 from aosr.gradient import cli, run
 from tests.engine.test_material_gradient_mount import CONTROL_PROJECT, _digest, _project
+from tests.engine.test_six_category_gpu import measured as six_measured
 
 
 def test_cpu_project_bytes_and_gpu_identity(tmp_path: Path) -> None:
@@ -268,10 +269,8 @@ def test_create_forwards_persisted_gpu_device(tmp_path: Path, monkeypatch: pytes
     assert cli._create_and_run(tmp_path, project) == 0
 
 
-def test_project_explicitly_rejects_gpu_six_search(numeric: dict[str, object]) -> None:
-    from typing import cast
-    wiring = cast(dict[str, object], numeric["wiring"])
-    assert wiring["rejection"] == "六類目標的顯卡單精度與精度尺在下一支"
+def test_project_loads_gpu_six_search(six_measured: dict[str, object]) -> None:
+    assert six_measured['gpu_wrapper'] is True and six_measured['candidate_gpu_wrapper'] is True
 
 
 @pytest.mark.parametrize("backend", ("cpu", "gpu"))

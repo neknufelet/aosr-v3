@@ -303,3 +303,12 @@ unit = "relative"
 decision_paper = "stage-three-objective-jax-rulers.md"
 truth = "同輸入的正式 construction.random_incidence_absorption／catalog_absorption、late_energy.solve_late_energy_by_order、geometric_lane._late_share_energy、wall_surfaces 分區面積等效、crossover Eyring T60／Schroeder f_s／權重與 three_lane_report.stitch_energy_points，逐格相對差，零參考必須恰零；CPU 雙精度冷子行程，小房整面／異材偏格分區／家具與 109 正式輸入（316 頻點），實量最大相對差 2.391e-15，取 2^-39 留約千倍餘裕。工程暫定；顯卡單精度另立尺。f_s 達上限照第 11 條沿用 NumPy 硬切，上限旗標僅供報告；接合總能量亦逐格對照正式報表 points"
 mutant_test = "tests/engine/test_late_family_jax.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "six_category_search_gpu_single_vs_cpu_double"
+value = 1.0e-3
+display = "1e-3"
+unit = "absolute"
+decision_paper = "stage-three-six-category-gpu-single-precision-ruler.md"
+truth = "暫值：主對話顯卡實量後改。同一 θ 的 objective_total（搜尋 J）絕對差，無因次；材料四路阻抗與替身聲壓單精度、最高矩陣乘法精度，評分前升 complex128，六類評分雙精度。product_total 與六類各自的差只記錄，閘門只看 J；不宣稱梯度誤差界。"
+mutant_test = "tests/engine/test_six_category_gpu.py::test_mutant_beyond_six_category_precision_contract_is_red"

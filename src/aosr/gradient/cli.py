@@ -232,8 +232,6 @@ def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1, 
 
 
 def _start(args: argparse.Namespace) -> int:
-    if args.device == "gpu":
-        raise ValueError("六類目標的顯卡單精度與精度尺在下一支")
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.material_gradient import load_material_gradient_settings

@@ -20,6 +20,7 @@ from aosr.gradient.material_gradient import (
     kept_impedance_rows, patch_impedances, surface_parameters,
 )
 from aosr.gradient.surrogate_guard import require_matching_patches
+from aosr.gradient.six_category_gpu import ScoreArrays, SixCategorySinglePrecisionObjective
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
@@ -38,7 +39,7 @@ class SixCategoryChainAux(NamedTuple):
 
 
 type SixCategoryChainObjective = Callable[[jax.Array], tuple[jax.Array, SixCategoryChainAux]]
-type ImpedanceFunction = Callable[[jax.Array], tuple[jax.Array, jax.Array, jax.Array, jax.Array]]
+type ImpedanceFunction = Callable[[jax.Array, SixCategoryConstants], tuple[jax.Array, jax.Array, jax.Array, jax.Array]]
 
 
 def _materials(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceMaterial, ...]:
@@ -70,7 +71,7 @@ def _angles(values: NDArray[np.float64], dtype: np.dtype) -> jax.Array:
 
 
 def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConstants, *,
-                        air: PhysicsConstants, ranges: PorousModelRanges) -> ImpedanceFunction:
+                        air: PhysicsConstants, ranges: PorousModelRanges, single_precision: bool = False) -> ImpedanceFunction:
     materials = _materials(designs)
     templates = design_templates(designs, jnp.asarray(c.union_frequencies_hz), air=air, ranges=ranges)
     angle_templates = tuple(template if template is not None or isinstance(material, ConstantImpedance) else
@@ -79,21 +80,24 @@ def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
     kept = tuple((i, row) for i, row in enumerate(kept_impedance_rows(designs, c.fem_frequencies_hz, air=air, ranges=ranges)) if row is not None)
     zoned = any('@' in d.surface_id for d in designs)
 
-    def impedances(theta: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    def impedances(theta: jax.Array, arrays: SixCategoryConstants = c) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
         parameters = surface_parameters(designs, theta)
-        fem_axis = jnp.asarray(c.fem_frequencies_hz, dtype=theta.dtype)
+        fem_axis = jnp.asarray(arrays.fem_frequencies_hz, dtype=theta.dtype)
         fem = (patch_impedances(templates, parameters, fem_axis, air=air) if zoned else
                wall_impedances_from_templates(templates, parameters, fem_axis, air=air)).values
         for index, row in kept:
-            fem = fem.at[index].set(jnp.asarray(row, dtype=fem.dtype))
-        report_axis = jnp.asarray(c.frequencies_hz, dtype=theta.dtype)
-        union_axis = jnp.asarray(c.union_frequencies_hz, dtype=theta.dtype)
+            # 舊 CPU 雙精度沿用預算列；新單精度鏈的保留構造也實跑 float32 TMM，不能只降型。
+            value = (_angle_impedance(materials[index],angle_templates[index],parameters[index],fem_axis,None,air=air)
+                     if single_precision and not isinstance(materials[index],ConstantImpedance) else jnp.asarray(row,dtype=fem.dtype))
+            fem = fem.at[index].set(value)
+        report_axis = jnp.asarray(arrays.frequencies_hz, dtype=theta.dtype)
+        union_axis = jnp.asarray(arrays.union_frequencies_hz, dtype=theta.dtype)
         normal, oblique, paris = [], [], []
         for i, (material, template, values) in enumerate(zip(materials, angle_templates, parameters, strict=True)):
             a, b = (int(x) for x in c.angle_offsets[i:i+2])
             normal.append(_angle_impedance(material, template, values, report_axis, None, air=air))
-            oblique.append(_angle_impedance(material, template, values, report_axis, _angles(c.angles_deg[a:b], theta.dtype), air=air))
-            paris.append(_angle_impedance(material, template, values, union_axis, _angles(c.paris_angles_deg, theta.dtype), air=air))
+            oblique.append(_angle_impedance(material, template, values, report_axis, _angles(arrays.angles_deg[a:b], theta.dtype), air=air))
+            paris.append(_angle_impedance(material, template, values, union_axis, _angles(arrays.paris_angles_deg, theta.dtype), air=air))
         return fem, jnp.stack(normal), jnp.concatenate(oblique, axis=1), jnp.stack(paris)
 
     return impedances
@@ -119,7 +123,8 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
                                  objective_constants: GradientObjectiveConstants, six_category_constants: SixCategoryConstants,
                                  *, air: PhysicsConstants, ranges: PorousModelRanges,
                                  frequencies: Sequence[float] | NDArray[np.float64], frequency_batch: int | None = None,
-                                 single_precision: bool = False, device_constants: ReducedConstants | None = None) -> SixCategoryChainObjective:
+                                 single_precision: bool = False, device_constants: ReducedConstants | None = None,
+                                 score_arrays: ScoreArrays | None = None) -> SixCategoryChainObjective:
     """回 θ → (六類搜尋目標, aux 分項)；可 jit／grad（編譯／微分），精度跟 θ 走。
 
     工廠必須在雙精度已開的行程裡呼叫，讓樣板在涵蓋四路頻率的聯集軸上驗合法性。
@@ -127,30 +132,34 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
     保留構造用無變數樣板算角度阻抗，固定阻抗廣播；只拒裸 MeasuredImpedance（實測）保留牆。
     貼牆背後是實測表、或保留 MountedOnWall(wall=實測表) 照收，走 construction_diff 的 JAX 內插。
     舊低頻直接呼叫原評分入口，aux.low_frequency 保留篩選、代理與目標原值。
-    搜尋的 CPU 雙精度已接本工廠；single_precision／device_constants 顯卡選項留待 B2b。
-    B2b 必須決定低頻單精度是否比照 material_gradient.chain_objective，在評分前將 pressures 升 complex128；
-    本工廠目前不升型別，CPU 雙精度低頻仍逐位沿用舊入口。
-    float32 θ 仍可在 CPU（中央處理器）求值，五個數值輸入進六類前統一成對應複數精度。
+    single_precision=True 時 θ／四路材料阻抗／替身聲壓單精度；五個數值輸入升 complex128 才進六類。
+    低頻分項也先升 complex128，沿用舊單精度包裝的評分界線；帳本恆等式仍用雙精度守。
+    device_constants／score_arrays 讓所有候選共用裝置常數；六類評分常數不降精度。
+    aux 的舊低頻小向量常數仍沿用原閉包，保留既有常量折疊的運算順序以守逐位控制；
+    六類評分的大幾何、路徑、平滑矩陣與各浮點向量則由包裝明確動態傳入。
+    未包裝的 float32 θ 仍沿用原本精度跟輸入走的純函式介面。
     """
-    if single_precision or device_constants is not None:
-        raise ValueError('六類工廠尚未接顯卡包裝；請直接以 θ 的精度求值')
+    if not single_precision and (device_constants is not None or score_arrays is not None):
+        raise ValueError('裝置常數只供六類單精度包裝使用')
     frozen_designs = tuple(designs)
     c = six_category_constants
     _check_inputs(model, frozen_designs, objective_constants, c, frequencies)
-    impedance_for = _impedance_function(frozen_designs, c, air=air, ranges=ranges)
+    impedance_for = _impedance_function(frozen_designs, c, air=air, ranges=ranges, single_precision=single_precision)
     flags = constant_material_flags(_materials(frozen_designs))
     constants = reduced_constants(model)
 
-    def objective(theta: jax.Array, reduced: ReducedConstants = constants) -> tuple[jax.Array, SixCategoryChainAux]:
+    def objective(theta: jax.Array, reduced: ReducedConstants = constants,
+                  scoring: SixCategoryConstants = c) -> tuple[jax.Array, SixCategoryChainAux]:
         values = jnp.asarray(theta)
-        fem, normal, early, paris = impedance_for(values)
+        fem, normal, early, paris = impedance_for(values, scoring)
         pressures = reduced_pressures(reduced, fem, rigid_mask=jnp.zeros(len(frozen_designs), dtype=bool), frequency_batch=frequency_batch)
-        dtype = jnp.result_type(values.dtype, jnp.complex64)
+        dtype = jnp.complex128 if single_precision else jnp.result_type(values.dtype, jnp.complex64)
         z_fem, z_normal, z_early, z_paris, p = (jnp.asarray(x, dtype=dtype)
             for x in (fem, normal, early, paris, jnp.transpose(pressures, (1, 2, 0))))
-        categories = six_category_costs(c, z_fem, z_normal, z_early, z_paris, p, jnp.asarray(flags))
-        low = gradient_objective_from_pressures(objective_constants, pressures)
+        categories = six_category_costs(scoring, z_fem, z_normal, z_early, z_paris, p, jnp.asarray(flags))
+        low = gradient_objective_from_pressures(objective_constants, pressures.astype(jnp.complex128) if single_precision else pressures)
         aux = SixCategoryChainAux(categories, low, categories.objective_total, categories.product_total)
         return aux.objective_total, aux
 
-    return objective
+    return SixCategorySinglePrecisionObjective(objective, constants, c, device_constants=device_constants,
+                                               score_arrays=score_arrays) if single_precision else objective

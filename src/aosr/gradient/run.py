@@ -63,7 +63,7 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.gpu import Device, PrecisionComparison
+from aosr.gradient.gpu import Device, LegacyPrecisionComparison, PrecisionComparison, single_precision_constants
 from aosr.gradient.gpu_preflight import ensure_start_precision
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_surfaces import (
@@ -107,6 +107,8 @@ from aosr.scoring.stage_one_low_frequency import axis_reason_not_measurable
 from aosr.scoring.stage_one_score import StageOneScoreSettings
 from aosr.scoring.six_category_jax import build_constants
 from aosr.gradient.six_category_chain import six_category_chain_objective
+from aosr.gradient.six_category_gpu import double_precision_score_arrays
+from aosr.physics.fem_reduced_jax import reduced_constants
 
 
 PROJECT_FILE: Final = "project.json"
@@ -116,6 +118,7 @@ STATUS_FILE: Final = "status.json"
 RESULT_FILE: Final = "result.json"
 STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
+# 專案外殼仍向後相容、CPU 位元組不變；六類由目標指紋換版，舊顯卡比較另在接續閘門明拒。
 RESULT_VERSION: Final = "aosr.material_gradient_result.v6"
 LOW_FREQUENCY_RESULT_VERSION: Final = "aosr.material_gradient_result.v4"
 # 貼在原牆上（#990）的結果：每面帶安裝方式。剛背仍寫 RESULT_VERSION（安裝方式不改剛背的分數，位元組同加這一格之前）。
@@ -163,7 +166,7 @@ class GradientProject(BaseModel):
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
     max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
     device: Device = Field(default="cpu", exclude_if=lambda value: value == "cpu")
-    precision_check: PrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
+    precision_check: PrecisionComparison | LegacyPrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
     frequency_batch: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
     surrogate_physics_identity: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
     operators_digest: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
@@ -492,6 +495,9 @@ def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = Fal
     """接續前逐格核輸入（父行程起子行程前、子行程重建目標前各核一次）：方案檔雜湊、方案座標跟 ``project.json`` 記的、
     替身過閘門（網格雜湊、物理身分、座標）、manifest 與收據摘要、設定指紋、替身對得上方案、替身頻率軸算得了
     這一次的計分。任何一格不同就拒收。"""
+    if not allow_legacy_objective:
+        from aosr.gradient.gpu_preflight import require_search_contract
+        require_search_contract(project)
     scheme_path, surrogate = Path(project.scheme_path), Path(project.surrogate_path)
     if file_sha256(scheme_path) != project.scheme_sha256:
         raise ValueError(f"方案檔 {scheme_path} 跟開始時不同（scheme_sha256 變了），不接續")
@@ -595,8 +601,6 @@ def load_problem(project: GradientProject) -> GradientProblem:
     走設定層的 ``construction_environment``；這裡不自己拿產品預設的空氣。換樣板的目標工廠用同一份替身、常數、空氣與範圍
     對任何六面設計重建 ``six_category_chain_objective``（起點配置直接交回這一份目標，不重編譯）。
     """
-    if project.device == "gpu":
-        raise ValueError("六類目標的顯卡單精度與精度尺在下一支")
     scheme, model, settings = check_inputs(project)
     constants = search_objective_constants(project, scheme, model)
     channels = {channel.speaker_id: channel for channel in scheme.channel_group.channels}
@@ -612,14 +616,19 @@ def load_problem(project: GradientProject) -> GradientProblem:
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     six = build_constants(score_scheme, pair_inputs={key: item[1] for key, item in pairs.items()},
                           quality_targets_path=config_path("quality_targets.toml"))
+    single = project.device == 'gpu'
+    device_constants = single_precision_constants(reduced_constants(model)) if single else None
+    score_arrays = double_precision_score_arrays(six) if single else None
     objective = six_category_chain_objective(model, designs, constants, six, air=air, ranges=ranges,
-        frequencies=model.frequencies_hz, frequency_batch=project.frequency_batch)
+        frequencies=model.frequencies_hz, frequency_batch=project.frequency_batch, single_precision=single,
+        device_constants=device_constants, score_arrays=score_arrays)
 
     def objective_for(candidate: tuple[SurfaceDesign, ...]) -> ChainObjective:
         if candidate == designs:
             return objective
         return six_category_chain_objective(model, candidate, constants, six, air=air, ranges=ranges,
-            frequencies=model.frequencies_hz, frequency_batch=project.frequency_batch)
+            frequencies=model.frequencies_hz, frequency_batch=project.frequency_batch, single_precision=single,
+            device_constants=device_constants, score_arrays=score_arrays)
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 

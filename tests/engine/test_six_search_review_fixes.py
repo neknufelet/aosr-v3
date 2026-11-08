@@ -65,11 +65,10 @@ def test_old_v5_resume_cli_explains_six_category_migration(measured: Callable[[s
         assert text in str(row['resume_stderr'])
 
 
-def test_gpu_cli_refuses_before_creating_root_or_project(measured: Callable[[str],dict[str,object]]) -> None:
+def test_gpu_cli_creates_single_precision_project(measured: Callable[[str],dict[str,object]]) -> None:
     row=measured('cli')
-    assert row['gpu_code']==1
-    assert '六類目標的顯卡單精度與精度尺在下一支' in str(row['gpu_stderr'])
-    assert row['gpu_root_exists'] is False and row['gpu_projects']==[]
+    assert row['gpu_code']==0 and row['gpu_wrappers']==[True]
+    assert row['gpu_root_exists'] is True and len(cast(list[str],row['gpu_projects']))==1
 
 
 def test_load_problem_validates_pair_inputs_only_once(measured: Callable[[str],dict[str,object]]) -> None:

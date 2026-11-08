@@ -15,6 +15,7 @@ from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays
 
 Device = Literal["cpu", "gpu"]
 CONTRACT: Final = "rom_search_gpu_single_vs_cpu_double"
+SIX_CATEGORY_CONTRACT: Final = "six_category_search_gpu_single_vs_cpu_double"
 Kernel = Callable[[jax.Array, ReducedConstants], tuple[jax.Array, GradientObjectiveArrays]]
 Evaluation = tuple[tuple[jax.Array, GradientObjectiveArrays], jax.Array]
 
@@ -55,7 +56,7 @@ class SinglePrecisionObjective:
         return cast(Evaluation, self.compiled(theta, self.constants))
 
 
-class PrecisionComparison(BaseModel):
+class LegacyPrecisionComparison(BaseModel):
     """同一個起點的 CPU 雙精度與顯卡單精度目標值；連同 θ 保存於 project.json。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -66,16 +67,71 @@ class PrecisionComparison(BaseModel):
     theta_hex: tuple[str, ...]
 
 
-def precision_comparison(*, cpu_double: float, gpu_single: float, theta: Sequence[float]) -> PrecisionComparison:
+def precision_comparison(*, cpu_double: float, gpu_single: float, theta: Sequence[float]) -> LegacyPrecisionComparison:
     """保留兩邊原始值及絕對差；非有限結果直接拒收。"""
-    return PrecisionComparison(cpu_double=cpu_double, gpu_single=gpu_single,
+    return LegacyPrecisionComparison(cpu_double=cpu_double, gpu_single=gpu_single,
         absolute_difference_db=abs(gpu_single - cpu_double), theta_hex=tuple(float(x).hex() for x in theta))
 
 
-def require_precision(comparison: PrecisionComparison) -> None:
+def require_precision(comparison: LegacyPrecisionComparison | PrecisionComparison) -> None:
     """唯一的尺從登記簿讀取，超過就拒跑；也核對記錄的差沒有被改寫。"""
+    if isinstance(comparison, PrecisionComparison):
+        _require_six_category_precision(comparison)
+        return
     limit = load_precision_contracts(default_precision_contracts_path())[CONTRACT].value
     difference = abs(comparison.gpu_single - comparison.cpu_double)
     if difference != comparison.absolute_difference_db or difference > limit:
         raise ValueError(f"顯卡單精度 objective_total 絕對差 {difference!r} dB 超過或不符登記尺 {limit!r} dB："
                          f"CPU 雙精度={comparison.cpu_double!r}，GPU 單精度={comparison.gpu_single!r}；拒絕搜尋")
+
+
+type SixCosts = tuple[float, float, float, float, float, float]
+
+
+class PrecisionReading(BaseModel):
+    """同次求值的三組原值；供獨立 CPU 參考行程交換。"""
+
+    model_config = ConfigDict(frozen=True, extra='forbid', allow_inf_nan=False)
+    objective_total: float
+    product_total: float
+    categories: SixCosts
+
+
+class PrecisionComparison(BaseModel):
+    """六類同 θ 的無因次比較；只有 objective_total（搜尋 J）決定閘門。"""
+
+    model_config = ConfigDict(frozen=True, extra='forbid', allow_inf_nan=False)
+    contract: Literal['six_category_search_gpu_single_vs_cpu_double'] = SIX_CATEGORY_CONTRACT
+    cpu_double: float
+    gpu_single: float
+    absolute_difference: float
+    theta_hex: tuple[str, ...]
+    cpu_product: float
+    gpu_product: float
+    product_absolute_difference: float
+    cpu_categories: SixCosts
+    gpu_categories: SixCosts
+    category_absolute_differences: SixCosts
+
+
+def six_category_precision_comparison(*, cpu_double: float, gpu_single: float, theta: Sequence[float],
+                                     cpu_product: float, gpu_product: float,
+                                     cpu_categories: Sequence[float], gpu_categories: Sequence[float]) -> PrecisionComparison:
+    """同次求值的 J、產品總分與六類原值及差；不替診斷量新訂門檻。"""
+    return PrecisionComparison.model_validate(dict(cpu_double=cpu_double, gpu_single=gpu_single,
+        absolute_difference=abs(gpu_single-cpu_double), theta_hex=tuple(float(x).hex() for x in theta),
+        cpu_product=cpu_product, gpu_product=gpu_product, product_absolute_difference=abs(gpu_product-cpu_product),
+        cpu_categories=tuple(cpu_categories), gpu_categories=tuple(gpu_categories),
+        category_absolute_differences=tuple(abs(a-b) for a,b in zip(cpu_categories,gpu_categories,strict=True))))
+
+
+def _require_six_category_precision(comparison: PrecisionComparison) -> None:
+    """逐欄核記錄沒被改寫，再只以 J 比新尺；舊 dB 契約從不參與這條路。"""
+    limit = load_precision_contracts(default_precision_contracts_path())[SIX_CATEGORY_CONTRACT].value
+    difference = abs(comparison.gpu_single-comparison.cpu_double)
+    categories = tuple(abs(a-b) for a,b in zip(comparison.cpu_categories,comparison.gpu_categories,strict=True))
+    if (difference != comparison.absolute_difference or difference > limit
+            or abs(comparison.gpu_product-comparison.cpu_product) != comparison.product_absolute_difference
+            or categories != comparison.category_absolute_differences):
+        raise ValueError(f'顯卡單精度 objective_total 絕對差 {difference!r}（absolute，無因次）超過或不符登記尺 {limit!r}；'
+                         f'CPU 雙精度={comparison.cpu_double!r}，GPU 單精度={comparison.gpu_single!r}；拒絕搜尋')

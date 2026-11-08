@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.gradient import endpoint_run, material_gradient_ledger as ledger, run
+from tests.engine.test_six_category_gpu import measured as six_measured
 
 
 def _scores() -> ledger.ScoreConstants:
@@ -45,11 +46,8 @@ def test_nan_row_and_null_totals_cannot_be_written() -> None:
             ledger.check_scores(_scores(), [candidate])
 
 
-def test_gpu_search_explicitly_refuses_until_next_branch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(run, 'check_inputs', lambda project: pytest.fail('GPU 靜默落入搜尋接線'))
-    project = run.GradientProject.model_construct(device='gpu')
-    with pytest.raises(ValueError, match='六類目標的顯卡單精度與精度尺在下一支'):
-        run.load_problem(project)
+def test_gpu_search_writes_six_category_scores(six_measured: dict[str, object]) -> None:
+    assert six_measured['identities_checked'] is True and six_measured['result_written'] is True
 
 
 @pytest.mark.parametrize('version', ('aosr.material_gradient_result.v6', 'aosr.material_gradient_result.v7'))

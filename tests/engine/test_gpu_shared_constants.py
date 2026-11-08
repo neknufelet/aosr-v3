@@ -43,10 +43,10 @@ def test_shared_value_and_gradient_match_legacy_bits(tmp_path: Path, batch: str)
     assert all(cast(list[bool], result["matches"])), result
 
 
-@pytest.mark.parametrize("mode", ("accept", "reject"))
+@pytest.mark.parametrize("mode", ("accept", "reject", "six_accept", "six_reject"))
 def test_round_result_releases_discarded_objectives_and_compiled_functions(tmp_path: Path, mode: str) -> None:
     result = probe(tmp_path, mode)
-    assert result["accepted"] == (mode == "accept"), result
+    assert result["accepted"] == mode.endswith('accept'), result
     assert cast(int, result["discarded"]) > 0
     assert result["retained"] == 0, result
     assert result["chosen_callable"]
