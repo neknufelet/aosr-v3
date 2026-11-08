@@ -1,8 +1,5 @@
-"""#562 小房正式方案；整面控制在 ae0a7f7f 改產品前實量。"""
+"""#562 小房正式方案（整面與分區）。"""
 from __future__ import annotations
-
-import hashlib
-import json
 
 from aosr.materials.construction_models import Assembly, ConstantImpedance
 from aosr.physics.report_surfaces import RectangleZone, WholeWallZone, ZonesByWall
@@ -31,14 +28,3 @@ def small_scheme(*, zoned: bool = False, changed: bool = False, assembly: bool =
     return Scheme.model_validate(original.model_copy(update={"scene": scene, "speakers": speakers,
                                                             "receiver_set": receivers}).model_dump())
 
-
-def stable_digest(value: object) -> str:
-    """全樹浮點轉 hex，僅排除工單列出的身分與時間欄；含負零也受逐位控制。"""
-    def normalize(item: object) -> object:
-        if isinstance(item, dict):
-            return {key: normalize(part) for key, part in item.items() if key not in {
-                "engine_commit", "program_fingerprint", "physics_identity", "run_date", "timings"}}
-        if isinstance(item, (tuple, list)):
-            return [normalize(part) for part in item]
-        return item.hex() if isinstance(item, float) else item
-    return hashlib.sha256(json.dumps(normalize(value), sort_keys=True, ensure_ascii=False).encode()).hexdigest()
