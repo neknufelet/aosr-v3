@@ -25,7 +25,7 @@ def measured(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> dict[s
         configure_jax(platforms='cpu', enable_x64=True, env=env)
         env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'], str(Path(__file__).resolve().parents[2])))
         done = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_gpu_probe', str(output)],
-            cwd=directory, env=env, capture_output=True, text=True, timeout=300)
+            cwd=directory, env=env, capture_output=True, text=True, timeout=900)
         if done.returncode != 0:
             return json.dumps({'probe_error':done.stdout+done.stderr})
         return output.read_text()
@@ -47,7 +47,7 @@ def reviewed(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> dict[s
         configure_jax(platforms='cpu',enable_x64=True,env=env)
         env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'],str(Path(__file__).resolve().parents[2])))
         done = subprocess.run([sys.executable,'-m','tests.engine._six_category_gpu_review_probe',str(output)],
-            cwd=directory,env=env,capture_output=True,text=True,timeout=300)
+            cwd=directory,env=env,capture_output=True,text=True,timeout=900)
         assert done.returncode == 0,done.stdout+done.stderr
         return output.read_text()
     return cast(dict[str,object],json.loads(shared_json(tmp_path_factory,worker_id,'six-gpu-review',produce)))

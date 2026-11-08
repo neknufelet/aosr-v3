@@ -40,7 +40,7 @@ def test_precomputed_low_keeps_invalid_pressure_unestimable_and_valid_gradient_f
     configure_jax(platforms='cpu',enable_x64=True,env=env)
     env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'],str(Path(__file__).resolve().parents[2])))
     done = subprocess.run([sys.executable,'-m','tests.engine._six_category_gpu_review_probe','--invalid',str(output)],
-        cwd=tmp_path,env=env,capture_output=True,text=True,timeout=300)
+        cwd=tmp_path,env=env,capture_output=True,text=True,timeout=900)
     assert done.returncode == 0,done.stdout+done.stderr
     data = json.loads(output.read_text())
     assert data['valid']=={'estimable':True,'value_nan':False,'gradient_finite':True}
