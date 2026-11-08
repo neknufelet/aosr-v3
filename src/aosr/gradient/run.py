@@ -76,12 +76,12 @@ from aosr.gradient.material_gradient import (
     wall_designs_from_presets, estimable,
 )
 from aosr.gradient.material_gradient_ledger import (
-    PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
+    LEDGER_VERSION, LEGACY_LEDGER_VERSION, PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
     truncate_rows, write_ledger,
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
 from aosr.gradient.template_ledger import (
-    TEMPLATE_LEDGER_VERSION, TemplateHeader, TemplateStart, read_template_ledger, template_progress,
+    TEMPLATE_LEDGER_VERSION, LEGACY_TEMPLATE_LEDGER_VERSION, PRE_PROXY_TEMPLATE_LEDGER_VERSION, TemplateHeader, TemplateStart, read_template_ledger, template_progress,
 )
 from aosr.gradient.template_rounds import TemplateContext
 from aosr.gradient.template_segment import (
@@ -95,7 +95,7 @@ from aosr.physics.fem_reduced import ReducedModel, checked_axis
 from aosr.physics.fem_reduced_check import PointHex, SurrogateSpotCheck, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
-from aosr.physics.report_io import solver_inputs
+from aosr.physics.report_io import ReportInput, solver_inputs
 from aosr.reporting.fem_reduced_scheme import scheme_points
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.reporting.validation import checked_inputs
@@ -513,7 +513,9 @@ def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = Fal
     matches_legacy = allow_legacy_objective and project.objective_settings_fingerprint == previous.fingerprint
     if project.objective_settings_fingerprint != objective.fingerprint and not matches_legacy:
         recorded = "沒記（加大峰代理之前開始的）" if project.objective_settings_fingerprint is None else "跟現在不同"
-        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了）；{SCORED_RANGE_RERUN_TEXT}，不接續")
+        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：六類目標換版（梯度目標 v2／帳本 v6），"
+                         f"舊資料夾只讀、要重跑；{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了）；"
+                         f"{SCORED_RANGE_RERUN_TEXT}，不接續")
     check_surrogate_matches_scheme(model, scheme, points)
     check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     return scheme, model, settings
@@ -526,7 +528,11 @@ def scene_wall_materials(scheme: Scheme, *, capabilities: CapabilityTable,
     整面仍交 solver_inputs 取 materials_by_wall，不另轉固定阻抗；分區鍵與序由 boundary_patches 共用。
     """
     _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-    inputs = next(iter(documents.values()))[1]
+    return _wall_materials_from_inputs(scheme, next(iter(documents.values()))[1])
+
+
+def _wall_materials_from_inputs(scheme: Scheme, inputs: ReportInput) -> dict[BoundaryKey, SurfaceMaterial]:
+    """共用已驗過的逐對輸入；材料與面片序維持 scene_wall_materials 的讀法。"""
     keys = scheme_patch_keys(scheme)
     if keys != boundary_patches():
         zones = inputs.surface_zones_by_wall or {}
@@ -593,18 +599,17 @@ def load_problem(project: GradientProject) -> GradientProblem:
         raise ValueError("六類目標的顯卡單精度與精度尺在下一支")
     scheme, model, settings = check_inputs(project)
     constants = search_objective_constants(project, scheme, model)
-    kept = project_wall_materials(project, scheme)
-    designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
-    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
-                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
-    # 設定用途、品質登記簿、喇叭數與搜尋低頻常數同源；幾何與評分常數只建一次。
     channels = {channel.speaker_id: channel for channel in scheme.channel_group.channels}
     # 替身聲壓的第一軸照 model.source_names；幾何與評分必須同序，不能只核對喇叭數。
     group = scheme.channel_group.model_copy(update={"channels": tuple(channels[name] for name in model.source_names)})
     score_scheme = scheme.model_copy(update={"purpose": project.purpose, "channel_group": group})
     _, pairs = checked_inputs(score_scheme, capabilities=load_capabilities(project.capabilities_path),
                               directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    kept = _wall_materials_from_inputs(score_scheme, next(iter(pairs.values()))[1])
+    designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
+    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
+                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
     six = build_constants(score_scheme, pair_inputs={key: item[1] for key, item in pairs.items()},
                           quality_targets_path=config_path("quality_targets.toml"))
     objective = six_category_chain_objective(model, designs, constants, six, air=air, ranges=ranges,
@@ -732,7 +737,9 @@ def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings
                if header.boundary_patches else
                {wall.wall_name(): material_digest(whole_kept[wall]) for wall in Wall.all()})
     return TemplateHeader(
-        ledger_version=TEMPLATE_LEDGER_VERSION if header.ledger_version.endswith(".v6") else "aosr.material_gradient_templates.v2", input_hash=header.input_hash, mesh_hash=header.mesh_hash,
+        ledger_version=(TEMPLATE_LEDGER_VERSION if header.ledger_version == LEDGER_VERSION else
+                        LEGACY_TEMPLATE_LEDGER_VERSION if header.ledger_version == LEGACY_LEDGER_VERSION else
+                        PRE_PROXY_TEMPLATE_LEDGER_VERSION), input_hash=header.input_hash, mesh_hash=header.mesh_hash,
         physics_identity=header.physics_identity, settings_fingerprint=settings.full_fingerprint,
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
         initial_surfaces=header.surfaces, score_constants=header.score_constants,

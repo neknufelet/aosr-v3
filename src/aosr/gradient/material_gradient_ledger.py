@@ -56,7 +56,7 @@ from aosr.gradient.endpoint import design_digest, material_digest
 
 
 LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v6"
-# 上一版（梯度目標還沒有大峰代理項）：報告准讀，接續拒收。
+# 六類之前的低頻版（已有大峰代理項）：唯讀，接續與寫入拒收。
 LEGACY_LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v5"
 PRE_PROXY_LEDGER_VERSION: Final = "aosr.material_gradient_ledger.v4"
 LEGACY_LEDGER_VERSIONS: Final = (LEGACY_LEDGER_VERSION, PRE_PROXY_LEDGER_VERSION)
@@ -381,7 +381,7 @@ class MaterialGradientRow(BaseModel):
         return tuple(float.fromhex(encoded) for encoded in self.theta_hex)
 
     def is_legacy(self) -> bool:
-        """上一版（v4）的列：只有兩分項、沒有舊合分。"""
+        """六類之前的 v4／v5 列：兩／三個低頻分項。"""
         return len(self.components) != 11
 
     def scores(self) -> tuple[float, float, Components]:

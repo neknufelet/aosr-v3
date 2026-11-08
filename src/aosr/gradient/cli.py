@@ -232,14 +232,14 @@ def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1, 
 
 
 def _start(args: argparse.Namespace) -> int:
+    if args.device == "gpu":
+        raise ValueError("六類目標的顯卡單精度與精度尺在下一支")
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.material_gradient import load_material_gradient_settings
     from aosr.gradient import run
     from aosr.gradient.fixed_surfaces import parse_fixed_surfaces, parse_max_depths
-    from aosr.physics.fem_reduced import operators_digest
-    from aosr.physics.fem_reduced_check import points_hex
-    from aosr.physics.fem_reduced_receipt import receipt_path
+    from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.reporting.scheme import load_scheme
 
@@ -263,9 +263,9 @@ def _start(args: argparse.Namespace) -> int:
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     physics, mesh = operators.physics_identity, operators.mesh_hash
-    points = run.SchemePoints(points_hex(operators.source_points), points_hex(operators.receiver_points))
+    points = run.SchemePoints(fem_reduced_check.points_hex(operators.source_points), fem_reduced_check.points_hex(operators.receiver_points))
     manifest_identity = _surrogate_identity(surrogate, physics)
-    fingerprint = operators_digest(operators) if manifest_identity != physics else None
+    fingerprint = fem_reduced.operators_digest(operators) if manifest_identity != physics else None
     if fingerprint is None:
         del operators
         model = run.gated_surrogate(surrogate, mesh_hash=mesh, physics_identity=physics, points=points)
@@ -287,8 +287,8 @@ def _start(args: argparse.Namespace) -> int:
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
         scheme_sha256=hashes["scheme_sha256"], surrogate_manifest_sha256=hashes["surrogate_manifest_sha256"],
-        surrogate_path=str(surrogate), receipt_path=str(receipt_path(surrogate)),
-        receipt_sha256=run.file_sha256(receipt_path(surrogate)), presets=args.presets, purpose=args.purpose,
+        surrogate_path=str(surrogate), receipt_path=str(fem_reduced_receipt.receipt_path(surrogate)),
+        receipt_sha256=run.file_sha256(fem_reduced_receipt.receipt_path(surrogate)), presets=args.presets, purpose=args.purpose,
         settings_path=str(settings_path), settings_fingerprint=settings.fingerprint,
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),

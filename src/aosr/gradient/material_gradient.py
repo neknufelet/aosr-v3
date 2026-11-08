@@ -761,7 +761,7 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
     clock = time.perf_counter()
     (value, aux), gradient = evaluate(start)
     evaluations = 1
-    if not estimable(value, aux):
+    if not estimable(value, aux) or not np.all(np.isfinite(np.asarray(gradient))):
         return DescentResult(np.asarray(start), (), STOP_UNESTIMABLE, 0.0, evaluations)
     unestimable_trials = 0
     theta = start

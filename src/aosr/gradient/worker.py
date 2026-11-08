@@ -79,8 +79,9 @@ def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
             raise RuntimeError("顯卡搜尋需要 GPU 裝置，不能退回 CPU")
         (run_search if mode == "start" else resume_search)(folder, should_stop=should_stop)
     except Unestimable as error:
-        _status(folder, "stopped", started, str(error), unestimable_reason=str(error))
-        sys.stderr.write(f"梯度搜尋停止：{error}\n")
+        message = f"{error}；這是決定性的，接續會得到同一個結果；要換輸入或設定"
+        _status(folder, "stopped", started, message, unestimable_reason=str(error))
+        sys.stderr.write(f"梯度搜尋停止：{message}\n")
         return EXIT_STOPPED
     except SearchStopped:
         _status(folder, "stopped", started, "停止記號：在兩次求值之間停下，帳本停在最後一列寫完整的地方")

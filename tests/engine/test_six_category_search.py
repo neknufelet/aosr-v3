@@ -171,7 +171,7 @@ def test_v5_is_readable_but_cannot_resume_and_v6_requires_all_scores(tmp_path: P
 
 
 @pytest.mark.parametrize('prefix', ('timbre_balance.', 'listening_area_stability.', 'reflections_and_echo.',
-                                  'reverberation.', 'channel_matching.', 'ranking.category_weights'))
+                                  'reverberation.', 'channel_matching.', 'direction_zones.', 'ranking.category_weights'))
 def test_settings_fingerprint_includes_six_category_summary(prefix: str) -> None:
     from aosr.config.paths import config_path
     from aosr.config.quality_targets import load_quality_targets, WeightTable, QualityEntry

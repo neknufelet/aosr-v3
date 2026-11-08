@@ -120,12 +120,15 @@ def _stop(result: TemplateRoundResult, round_index: int, total: int, seconds: fl
 
 def _decision(result: TemplateRoundResult, threshold: float, total: int, bound: int | None) -> TemplateDecision:
     baseline = result.baseline.steps[-1].value if result.baseline is not None else None
+    outcomes = []
+    for item in result.retuned:
+        assert item.quick.value is not None
+        outcomes.append(TemplateOutcome(candidate=item.quick.candidate_id, quick_value=item.quick.value,
+            value=item.value, improvement=item.improvement,
+            rejection="候選重調起點不可估" if not item.retune.steps else None,
+            rejected_evaluations=item.retune.evaluations if not item.retune.steps else 0))
     return TemplateDecision(
-        baseline_value=baseline, quick_count=len(result.quick),
-        outcomes=tuple(TemplateOutcome(candidate=item.quick.candidate_id, quick_value=float(item.quick.value) if item.quick.value is not None else 0.0,
-                                       value=item.value, improvement=item.improvement,
-                                       rejection="候選重調起點不可估" if not item.retune.steps else None,
-                                       rejected_evaluations=item.retune.evaluations if not item.retune.steps else 0) for item in result.retuned),
+        baseline_value=baseline, quick_count=len(result.quick), outcomes=tuple(outcomes),
         threshold=threshold, accepted=result.accepted.quick.candidate_id if result.accepted is not None else None,
         round_evaluations=result.evaluations, total_evaluations=total, next_round_bound=bound,
         rejected_quick=tuple(score.candidate_id for score in result.quick if score.value is None))

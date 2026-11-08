@@ -516,9 +516,11 @@ def render_report(folder: Path) -> str:
     lines += _pre_loop_lines(rows)
     lines += _round_lines(rows)
     lines.append(f"累計求值次數（帳本記的、不含前段）：{evaluations}；做完 {rounds} 輪")
-    if reason is None and (folder / STATUS_FILE).exists():
+    if (folder / STATUS_FILE).exists():
         status = GradientStatus.model_validate_json((folder / STATUS_FILE).read_bytes())
-        reason = status.stop_reason if status.state == "stopped" else None
+        if status.state == "stopped" and status.stop_reason is not None and (
+                reason is None or "不可估" in status.stop_reason):
+            reason = status.stop_reason
     lines.append(f"停止原因：{reason}" if reason is not None else "停止原因：還沒收尾")
     template_lines, template_last = _template_lines(folder)
     lines += template_lines

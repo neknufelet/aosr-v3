@@ -46,7 +46,7 @@ from aosr.gradient.template_rounds import (
 
 
 TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v3"
-# 上一版（梯度目標還沒有大峰代理項）：報告准讀，接續拒收。
+# 六類之前的低頻版（已有大峰代理項）：唯讀，接續與寫入拒收。
 LEGACY_TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v2"
 PRE_PROXY_TEMPLATE_LEDGER_VERSION: Final = "aosr.material_gradient_templates.v1"
 LEGACY_TEMPLATE_LEDGER_VERSIONS: Final = (LEGACY_TEMPLATE_LEDGER_VERSION, PRE_PROXY_TEMPLATE_LEDGER_VERSION)
@@ -243,7 +243,7 @@ class TemplateRow(BaseModel):
         return tuple(float.fromhex(encoded) for encoded in self.theta_hex)
 
     def is_legacy(self) -> bool:
-        """上一版（v1）的列：只有兩分項、沒有舊合分。"""
+        """六類之前的 v1／v2 列：兩／三個低頻分項。"""
         return len(self.components) != 11
 
     def scores(self) -> tuple[float, float, Components]:
