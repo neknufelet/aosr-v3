@@ -30,7 +30,7 @@ from aosr.materials.construction_models import ConstantImpedance
 from aosr.reporting.scheme import load_scheme
 from tests.engine._scheme_cache import shared_json
 from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
-from tests.engine._six_search_cli_case import model as model, operators as operators
+from tests.engine._six_search_cli_case import ENDPOINT_ROOM, model as model, operators as operators
 from tests.engine.test_material_gradient_cli import (
     Record, _command, _json, _kept_materials, _run, _schemes, _settings_text, _sha256, _start_args,
 )
@@ -43,7 +43,9 @@ V3_ONLY = ("round_stop_reason", "template_rounds", "template_evaluations", "temp
 
 
 def _inputs(directory: Path) -> None:
-    (directory / "scheme.json").write_text(_schemes()["scheme.json"].model_dump_json(), encoding="utf-8")
+    scheme = _schemes()["scheme.json"]
+    scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"room_m": ENDPOINT_ROOM})})
+    (directory / "scheme.json").write_text(scheme.model_dump_json(), encoding="utf-8")
     # 六類每個候選都需編譯；小案例只保留第一家族，六面各一個替換，完整流程與斷言照舊。
     text = _settings_text(TEMPLATE_STEPS)
     preamble, first, *_ = text.split("\n[[family]]")
@@ -93,7 +95,7 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     _surrogate(directory, request)
     _inputs(directory)
     root = directory / "root"
-    output: Record = {"start": _run(directory, _start_args(directory, root, presets=",".join(("glass_wool_48k_50mm_gap50",) * len(Wall.all()))))}
+    output: Record = {"start": _run(directory, _start_args(directory, root, presets=",".join(("none",) * len(Wall.all()))))}
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
     output["folder"] = str(folder)

@@ -277,7 +277,9 @@ def _baseline_for[K: BoundaryKey](scheme: Scheme, model: ReducedModel, objective
         operators: FullOperators, kept: Mapping[K, SurfaceMaterial], *, workers: int, device: Device,
         refinement_steps: list[int]) -> tuple[NDArray[np.complex128], EndpointBaseline, ObjectiveReading]:
     """原牆完整解一次，同一份聲壓供歷史低頻對照與六類三組數。"""
-    assert scheme.scene.low_frequency_axis is not None
+    _require_low_frequency_axis(scheme)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案沒有低頻軸")
     air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
     axis = tuple(float(value) for value in model.frequencies_hz)
     pressures = full_model_pressures(operators, kept, axis, air=air, ranges=ranges,
@@ -294,7 +296,9 @@ def _endpoint_for(project: GradientProject, scheme: Scheme, model: ReducedModel,
         designs: tuple[SurfaceDesign, ...], theta: NDArray[np.float64], operators: FullOperators, *,
         workers: int, device: Device, refinement_steps: list[int]) -> EndpointResult:
     """沿用既有終點聲壓與低頻診斷入口；這一套完整解同時供六類評分。"""
-    assert scheme.scene.low_frequency_axis is not None
+    _require_low_frequency_axis(scheme)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案沒有低頻軸")
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     return endpoint_check(operators, designs, theta, model=model, objective_settings=search_objective_settings(project.purpose),
@@ -317,10 +321,10 @@ def _require_low_frequency_axis(scheme: Scheme) -> None:
 
 
 def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> EndpointRecord:
-    """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
+    """首次計算終點；低頻結果 v4/v5 也算六類、寫 endpoint v5。已有任何終點檔都拒絕覆寫。"""
     checked_device_workers(device, workers)
     if (folder / ENDPOINT_FILE).exists():
-        read_endpoint(folder)
+        raise ValueError("已有 endpoint.json；要重算先把舊檔移走")
     refinement_steps: list[int] = []
     project = read_project(folder)
     if (folder / RESULT_FILE).exists():
@@ -332,8 +336,6 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     _require_low_frequency_axis(scheme)
     given = read_result(folder)
     current = given.format_version in (RESULT_VERSION, MOUNTED_RESULT_VERSION)
-    if current and device != 'cpu':
-        raise ValueError("六類終點的完整模型與評分使用中央處理器雙精度，請用 cpu（中央處理器）")
     capabilities = load_capabilities(project.capabilities_path)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     clock = time.perf_counter()

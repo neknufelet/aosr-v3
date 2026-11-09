@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
@@ -29,7 +30,7 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient import endpoint
+from aosr.gradient import endpoint, endpoint_six
 from aosr.gradient.material_gradient import wall_designs_from_presets
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, run_endpoint
 from aosr.physics import fem_full_gpu
@@ -42,6 +43,7 @@ from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants, gradient_objective_from_pressures
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, six_category_costs
 
 Record = dict[str, object]
 
@@ -92,7 +94,14 @@ def _endpoint(source: Path) -> Record:
 
 def main(directory: Path, name: str) -> None:
     source = directory / name
-    code = run_endpoint_worker(source)
+    devices: list[bool] = []
+    def observe(c: SixCategoryConstants, fem: jax.Array, normal: jax.Array, early: jax.Array,
+                paris: jax.Array, pressures: jax.Array, flags: jax.Array) -> SixCategoryArrays:
+        devices.append(all(all(device.platform == 'cpu' for device in value.devices()) and value.dtype == jnp.complex128
+            for value in (fem, normal, early, paris, pressures)) and all(device.platform == 'cpu' for device in flags.devices()))
+        return six_category_costs(c, fem, normal, early, paris, pressures, flags)
+    with patch.object(endpoint_six, 'six_category_costs', observe):
+        code = run_endpoint_worker(source)
     record = json.loads((source / ENDPOINT_FILE).read_text(encoding="utf-8")) if code == 0 else None
     output = {"worker_code": code, "worker_record": record, "endpoint": _endpoint(source)}
     factors: list[SingleFactor] = []
@@ -110,8 +119,11 @@ def main(directory: Path, name: str) -> None:
         steps.append(solver.refinement_steps[-1])
         return solution
 
-    with patch.object(fem_full_gpu, "nvmath_factor", factor), patch.object(fem_full_gpu.GPUFullSolver, "solve", capture):
+    (source / ENDPOINT_FILE).rename(source / "endpoint-cpu.json")
+    with (patch.object(fem_full_gpu, "nvmath_factor", factor), patch.object(fem_full_gpu.GPUFullSolver, "solve", capture),
+          patch.object(endpoint_six, "six_category_costs", observe)):
         gpu = run_endpoint(source, device="gpu")
+    output["cpu_six_scoring"] = bool(devices) and all(devices)
     output["gpu_steps"] = steps
     output["gpu"] = gpu.model_dump(mode="json")
     output["gpu_factors"] = [{"freed": f.freed, "factorizations": f.factorizations, "calls": f.calls} for f in factors]

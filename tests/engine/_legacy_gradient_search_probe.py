@@ -23,7 +23,7 @@ def legacy_endpoint_copy(directory: Path, source: Path, name: str = 'legacy-endp
     from tests.engine.test_material_gradient_cli import _env, WAIT_S
 
     target = directory / name / source.name
-    shutil.copytree(source, target)
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("endpoint.json", "scheme-endpoint*.json"))
     done = subprocess.run([sys.executable, '-m', 'tests.engine._legacy_gradient_search_probe', str(target)],
         cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=WAIT_S)
     assert done.returncode == 0, done.stdout + done.stderr

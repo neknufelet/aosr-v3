@@ -16,11 +16,17 @@ from tests.engine._scheme_cache import shared_json
 from tests.engine.test_fem_reduced import AXIS, DENSITY, SEATS, SOUND_SPEED, SOURCES, TRAINING, _settings
 
 ROOM = Room(2.4, 1.8, 1.5)
+# 終點正式 numpy 路徑需避開反射的浮點邊界；搜尋控制保留原房殼與原判準。
+ENDPOINT_ROOM = Room(2.5, 2., 1.5)
+ENDPOINT_MODULES = frozenset(('test_material_gradient_endpoint_cli', 'test_gradient_endpoint_range_migration',
+    'test_material_gradient_fixed_surface_cli', 'test_material_gradient_mount', 'test_material_gradient_templates_cli',
+    'test_six_search_review_fixes'))
 
 
 @pytest.fixture(scope='module')
-def operators() -> FullOperators:
-    return export_room_operators(ROOM, SOURCES, SEATS, density_kg_m3=DENSITY, sound_speed_m_s=SOUND_SPEED,
+def operators(request: pytest.FixtureRequest) -> FullOperators:
+    room = ENDPOINT_ROOM if request.module.__name__.rsplit(".", 1)[-1] in ENDPOINT_MODULES else ROOM
+    return export_room_operators(room, SOURCES, SEATS, density_kg_m3=DENSITY, sound_speed_m_s=SOUND_SPEED,
         physics_identity='phys-v1:'+'0'*64, max_frequency_hz=300.)
 
 
@@ -31,4 +37,4 @@ def model(operators: FullOperators, tmp_path_factory: pytest.TempPathFactory, wo
         path = directory / 'rom.npz'
         save_reduced(build_reduced_model(operators, AXIS, TRAINING, settings=_settings()), path)
         return str(path)
-    return load_reduced(Path(shared_json(tmp_path_factory, worker_id, 'six-search-cli-model', produce)))
+    return load_reduced(Path(shared_json(tmp_path_factory, worker_id, f'six-search-cli-model-{operators.mesh_hash}', produce)))

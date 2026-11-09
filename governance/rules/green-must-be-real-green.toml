@@ -545,7 +545,8 @@ prefix = "tests.engine."
 # #562 B2b 修補一：新增低頻同源、單次建圖、四路 HLO 與保留 Assembly 控制 7 題；CPU 純收集實量 11079，未移除、未跑全套。
 # #562 B2b 修補二：新增安全聲壓／有效梯度控制 1 題；CPU 純收集實量 11080，未移除、未跑全套。
 # #562 C：六類終點三組數、逐位控制、舊版只讀與超界只報新增 8 題；CPU -n 4 純收集實量 11088，未移除、未跑全套。
-collected_floor = 11088
+# #562 C 收尾：實量 tests/engine 收集 11093 題；實測原牆改為拒收控制。
+collected_floor = 11093
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

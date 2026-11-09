@@ -54,6 +54,9 @@ def _materials(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceMaterial, ...]:
     return tuple(materials)
 
 
+design_materials = _materials
+
+
 def _angle_impedance(material: SurfaceMaterial, template: ConstructionTemplate | None,
                      parameters: dict[str, jax.Array], axis: jax.Array, angles: jax.Array | None,
                      *, air: PhysicsConstants) -> jax.Array:
@@ -101,6 +104,9 @@ def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
         return fem, jnp.stack(normal), jnp.concatenate(oblique, axis=1), jnp.stack(paris)
 
     return impedances
+
+
+impedance_function = _impedance_function
 
 
 def _check_inputs(model: ReducedModel, designs: tuple[SurfaceDesign, ...], objective: GradientObjectiveConstants,

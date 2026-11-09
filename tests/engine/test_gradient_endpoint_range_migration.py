@@ -26,7 +26,9 @@ def test_old_scored_range_folder_rejected_with_restart_message(
     project = _json(folder / "project.json")
     project["objective_settings_fingerprint"] = "e43e0f93a65016ccb1320333c3f80d08d2114d54e4acd7207f7e941f5dfcf971"
     (folder / "project.json").write_text(json.dumps(project), encoding="utf-8")
-    before = {name: (folder / name).read_bytes() for name in ("ledger.jsonl", "templates.jsonl", "result.json", "endpoint.json")}
+    if command == "endpoint":
+        (folder / "endpoint.json").rename(folder / "endpoint-previous.json")
+    before = {name: (folder / name).read_bytes() for name in ("ledger.jsonl", "templates.jsonl", "result.json")}
     result = _run(tmp_path, _command(command, str(folder)))
     assert result["code"] != 0
     message = str(result["stderr"])

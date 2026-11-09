@@ -363,11 +363,10 @@ def _unscored_lines(record: EndpointRecord) -> list[str]:
 def _endpoint_section(record: EndpointRecord) -> list[str]:
     if record.six_category is not None:
         return [f"{ENDPOINT_HEADING}{record.finished_at}，引擎 {record.engine_commit or '沒記'}）：",
-                *six_endpoint_lines(record.six_category), *_unscored_lines(record),
-                f"  匯出方案：{record.exported_scheme}（SHA-256 {record.exported_scheme_sha256}）",
+                *six_endpoint_lines(record.six_category),
                 f"  完整解次數：終點 {record.report.full_solves}、原牆 {record.baseline.full_solves}",
                 "  低頻歷史對照（以下舊合分／新合分只含低頻，不是上列六類 J）：",
-                *_legacy_endpoint_section(record)]
+                *_legacy_endpoint_section(record)[1:]]
     return _legacy_endpoint_section(record)
 
 

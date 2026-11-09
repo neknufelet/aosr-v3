@@ -31,6 +31,8 @@ import numpy as np
 import pytest
 
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+from aosr.runtime import child_process_env
+from tests.engine._scheme_cache import bitwise_equal
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import endpoint
@@ -50,7 +52,7 @@ from aosr.reporting.scheme import load_scheme
 from tests.engine._precision_contracts import contract_value
 from tests.engine._scheme_cache import shared_json
 from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
-from tests.engine._six_search_cli_case import model as model, operators as operators
+from tests.engine._six_search_cli_case import ENDPOINT_ROOM, model as model, operators as operators
 from tests.engine.test_material_gradient import _chain_model, _presets
 from tests.engine.test_material_gradient_cli import (
     BAND_NAME, FREQUENCY_NAME, NARROWED_STEPS, PRESETS, WAIT_S, Record, _command, _current_identity, _env,
@@ -102,6 +104,7 @@ def _surrogate(directory: Path, request: pytest.FixtureRequest) -> None:
 def _inputs(directory: Path) -> None:
     """命令列考卷那一份方案與縮小步數的設定；另一份方案只把場景的低頻軸拿掉。"""
     scheme = _schemes()["scheme.json"]
+    scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"room_m": ENDPOINT_ROOM})})
     (directory / "scheme.json").write_text(scheme.model_dump_json(), encoding="utf-8")
     no_axis = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"low_frequency_axis": None})})
     (directory / "scheme-no-axis.json").write_text(no_axis.model_dump_json(), encoding="utf-8")
@@ -256,10 +259,15 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
 def _probe(directory: Path, folder: Path) -> Record:
     """跑完搜尋的資料夾整份抄給探針（不帶命令列那一次的終點檔，探針自己用產品入口再寫一份）。"""
     work = directory / "probe"
-    work.mkdir()
+    work.mkdir(parents=True)
     shutil.copytree(folder, work / folder.name, ignore=shutil.ignore_patterns("endpoint.json", "scheme-endpoint*.json"))
-    process = subprocess.run([sys.executable, str(PROBE), str(work), folder.name], cwd=work, env=_env(work),
+    env = _env(work)
+    env = {**child_process_env(threads=1), **{name: value for name, value in env.items()
+        if name in ("PYTHONPATH", "JAX_ENABLE_X64", "JAX_PLATFORMS", "TMPDIR", "PYTHONDONTWRITEBYTECODE")}}
+    process = subprocess.run([sys.executable, str(PROBE), str(work), folder.name], cwd=work, env=env,
                              capture_output=True, text=True, timeout=WAIT_S * 2)
+    (work / "probe.stdout").write_text(process.stdout)
+    (work / "probe.stderr").write_text(process.stderr)
     assert process.returncode == 0, process.stdout + process.stderr
     return cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
 
@@ -288,7 +296,8 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     no_axis = directory / "root-no-axis"
     output["no_axis"] = {**_run(directory, _start_args(directory, no_axis, scheme="scheme-no-axis.json")),
                          "root_exists": no_axis.exists()}
-    output["probe"] = _probe(directory, folder)
+    output["probe"] = _probe(directory, Path(str(output["new_folder"])))
+    output["legacy_probe"] = _probe(directory / "legacy-probe", folder)
     text = json.dumps(output, ensure_ascii=False)
     (directory / "fixture.json").write_text(text, encoding="utf-8")
     return text
@@ -358,10 +367,10 @@ def test_endpoint_report_and_baseline_equal_direct_calls(runs: tuple[Path, Recor
     （``run_endpoint_worker``）寫的 endpoint.json，報告逐位等於直接叫 ``endpoint_check``（同一份 result.json 的 θ、preset
     加考卷自己從舊欄換的原牆）的；基準值、兩分項、大峰逐位等於完整模型解原方案六面交同一把尺、同一支大峰的；
     完整解次數等於軸長。"""
-    probe = _section(runs, "probe")
+    probe = _section(runs, "legacy_probe")
     assert probe["worker_code"] == 0
     record = EndpointRecord.model_validate(probe["worker_record"])
-    probe = _section(runs, "probe", "endpoint")
+    probe = _section(runs, "legacy_probe", "endpoint")
     assert json.loads(record.report.to_json()) == probe["report"]
     assert record.baseline.full_total.hex() == probe["baseline_total"]
     assert [value.hex() for value in record.baseline.full_components] == probe["baseline_components"]
@@ -392,7 +401,7 @@ def test_cli_endpoint_matches_entry_within_contract(runs: tuple[Path, Record]) -
     不比秒數與完成時間。"""
     tolerance = contract_value("stage_one_objective_jax_vs_python")
     cli = _leaves("", _without(_json(_folder(runs) / "endpoint.json")))
-    entry = _leaves("", _without(cast(Record, _section(runs, "probe")["worker_record"])))
+    entry = _leaves("", _without(cast(Record, _section(runs, "legacy_probe")["worker_record"])))
     assert cli.keys() == entry.keys()
     near = {key for key in cli if key.split("[", 1)[0].split(".")[1:3] in COMPUTED_PATHS}
     differing = {key: (cli[key], entry[key]) for key in cli.keys() - near if cli[key] != entry[key]}
@@ -404,8 +413,7 @@ def test_cli_endpoint_matches_entry_within_contract(runs: tuple[Path, Record]) -
 
 def _without(record: Record) -> Record:
     """不比的欄：各段秒數與完成時間。"""
-    # 歷史低頻的 CLI 控制；六類另由 test_six_category_endpoint 的獨立評分入口守。
-    return {key: value for key, value in record.items() if key not in ("seconds", "finished_at", "six_category")}
+    return {key: value for key, value in record.items() if key not in ("seconds", "finished_at")}
 
 
 def _within(actual: object, expected: object, tolerance: float) -> bool:
@@ -630,7 +638,7 @@ def test_saved_batch_reaches_endpoint_chain(runs: tuple[Path, Record], tmp_path:
     """從存檔跑終點，經 endpoint_check 與編譯目標，直到求解邊界才停；漏任何一層接線都抓。"""
     source = Path(str(runs[1]["folder"]))
     folder = tmp_path / "endpoint-batch"
-    shutil.copytree(source, folder)
+    shutil.copytree(source, folder, ignore=shutil.ignore_patterns("endpoint.json"))
     project = run.GradientProject.model_validate({**run.read_project(folder).model_dump(), "frequency_batch": 7})
     run.write_json_atomic(folder / run.PROJECT_FILE, project)
     output = _batch_probe(folder, "endpoint", tmp_path)
@@ -647,7 +655,7 @@ def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record]
     for candidate in (record, record.model_copy(update={"device": "cpu"})):
         run.write_json_atomic(tmp_path / "endpoint.json", candidate)
         assert (tmp_path / "endpoint.json").read_bytes() == expected
-    probe = _section(runs, "probe")
+    probe = _section(runs, "legacy_probe")
     gpu = EndpointRecord.model_validate(probe["gpu"])
     assert gpu.device == "gpu" and gpu.max_refinement_steps is not None and gpu.max_refinement_steps > 0
     steps = cast(list[int], probe["gpu_steps"])
@@ -660,12 +668,24 @@ def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record]
     assert all(cast(int, factor["calls"]) > cast(int, factor["factorizations"]) for factor in factors)
 
 
-def test_endpoint_entry_rechecks_carryover_operators(runs: tuple[Path, Record], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_endpoint_entry_rechecks_carryover_operators(runs: tuple[Path, Record], monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """抓終點漏接指紋檢查：從正式入口走到匯出後拒收，不能進完整求解或重寫結果。"""
-    folder = _folder(runs)
+    folder = tmp_path / "carryover"
+    shutil.copytree(_folder(runs), folder, ignore=shutil.ignore_patterns("endpoint.json"))
     project = run.read_project(folder).model_copy(update={"operators_digest": "f" * 64})
     monkeypatch.setattr(endpoint_run, "read_project", lambda folder: project)
-    before = (folder / endpoint_run.ENDPOINT_FILE).read_bytes()
     with pytest.raises(ValueError, match="完整模型指紋.*不同"):
         endpoint_run.run_endpoint(folder)
-    assert (folder / endpoint_run.ENDPOINT_FILE).read_bytes() == before
+    assert not (folder / endpoint_run.ENDPOINT_FILE).exists()
+
+
+def test_cli_six_category_bitwise_and_gpu_full_solve(runs: tuple[Path, Record]) -> None:
+    """六類結果的 CLI／入口逐位；GPU 完整解替身照收、精修照記，六類仍 CPU 評分。"""
+    record = _json(Path(str(runs[1]['new_folder'])) / 'endpoint.json')
+    probe = _section(runs, 'probe')
+    direct = cast(Record, probe['worker_record'])
+    assert bitwise_equal(record['six_category'], direct['six_category'])
+    gpu = EndpointRecord.model_validate(probe['gpu'])
+    assert gpu.device == 'gpu' and gpu.six_category is not None
+    assert probe['cpu_six_scoring'] is True
+    assert gpu.max_refinement_steps == max(cast(list[int], probe['gpu_steps']))
