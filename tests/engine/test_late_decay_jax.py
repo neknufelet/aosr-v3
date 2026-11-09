@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import jax
+import jax.numpy as jnp
 
 from aosr.config.art_lane import ART_NEUMANN_K_MAX
 from aosr.physics import late_decay, late_decay_jax, late_energy
@@ -146,3 +148,37 @@ def test_geometry_uses_existing_form_factors() -> None:
     problem = late_energy._reflection_problem(base)
     assert np.array_equal(geometry.form_factors, late_energy._form_factors(problem.patches))
     assert geometry.collision_frequency_hz == late_decay._collision_frequency(base, speed)
+
+
+def test_mixed_failures_keep_flags_values_and_gradients_in_their_bands(t20_runs: dict[str, object]) -> None:
+    """同時出現非法吸音、衰減不足與 NaN 時，好帶的值與梯度仍獨立。"""
+    run = section(t20_runs, "failure", "mixed_failures")
+    assert run["flag"] == [False, False, True, False]
+    assert run["flags"] == {
+        "invalid_absorption": [True, False, False, True],
+        "insufficient_decay_range": [False, True, False, False],
+        "insufficient_weight": [False, False, False, False],
+        "nonnegative_slope": [False, False, False, False],
+        "numerical_failure": [False, False, False, False],
+    }
+    values = decode(run["value"])
+    assert np.all(np.isnan(values[[0, 1, 3]]))
+    reference = decode(section(t20_runs, "failure", "mixed_failures_reference")["value"])
+    np.testing.assert_allclose(values[2], reference[2], rtol=contract_value("late_decay_t20_jax_vs_numpy"), atol=0.0)
+    gradient = decode(run["gradient"])
+    assert np.all(np.isfinite(gradient))
+    assert np.all(gradient[:, [0, 1, 3]] == 0.0)
+    assert np.any(gradient[:, 2] != 0.0)
+
+
+def test_decay_scan_has_no_operands_with_three_or_more_dimensions() -> None:
+    """抓：把逐頻三維轉移表重新放進每階縮併；不以牆鐘設門檻。"""
+    base, speed, alpha = inputs("patches")
+    geometry = late_decay_jax.late_decay_geometry(base.room, base.n_per_wall, sound_speed_m_s=speed)
+    expression = jax.make_jaxpr(late_decay_jax.late_decay_arrays)(geometry, jnp.asarray(alpha))
+    scans = [equation for equation in expression.jaxpr.eqns if equation.primitive.name == "scan"]
+    assert len(scans) == 1
+    body = scans[0].params["jaxpr"].jaxpr
+    for equation in body.eqns:
+        for operand in equation.invars:
+            assert len(operand.aval.shape) < 3, (equation.primitive.name, operand.aval.shape)

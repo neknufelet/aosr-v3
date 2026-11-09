@@ -143,3 +143,56 @@ def test_patch_order_matches_boundary_and_input_zone_order(name: str) -> None:
 def test_mismatched_geometric_patch_order_rejected() -> None:
     """抓：建常數時面片順序守門被拿掉；舊逐對輸入不能套新區序。"""
     _x64_check('mismatched-order')
+
+
+def _check_partial_decay_band() -> None:
+    """在雙精度子行程驗六類的真實殘響路徑，Python 裁判獨立指定缺帶。"""
+    from aosr.physics.late_decay_jax import LateDecayGeometry, late_decay_arrays
+    from aosr.scoring import reverberation_cost_jax as cost
+    from aosr.scoring import six_category_jax as six
+    from tests.engine import _six_category_jax_cases as cases
+    from tests.engine._t20_jax_cases import python_cost
+
+    c = cases.constants(cases.scheme_case('whole'))
+    mask = c.decay_band_mask
+    band = len(mask)//2
+    members = np.flatnonzero(mask[band])
+    assert len(members) > 1
+    frequency = members[len(members)//2]
+    good = jnp.full((len(c.late_patch_areas), len(c.union_frequencies_hz)), .3, dtype=jnp.float64)
+    bad = good.at[:, int(c.decay_indices[frequency])].set(.001)
+    geometry = LateDecayGeometry(c.form_factors, c.late_patch_areas, float(c.collision_frequency_hz))
+    decay = late_decay_arrays(geometry, bad[:, jnp.asarray(c.decay_indices)])
+    expected_failed = np.arange(len(c.decay_indices)) == frequency
+    assert np.array_equal(np.asarray(decay.insufficient_decay_range), expected_failed)
+    assert np.array_equal(np.asarray(~decay.valid), expected_failed)
+    observed: list[cost.ReverberationCostArrays] = []
+
+    def observe(settings: cost.ReverberationCostSettings, values: jax.Array, unavailable: jax.Array) -> cost.ReverberationCostArrays:
+        result = cost.reverberation_cost_arrays(settings, values, unavailable)
+        observed.append(result)
+        return result
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(six, 'reverberation_cost_arrays', observe)
+        _good_cost, good_count, _good_pairs = six._reverberation(c, good)
+        actual, bad_count, _bad_pairs = six._reverberation(c, bad)
+    unavailable = np.arange(len(mask)) == band
+    assert not np.any(np.asarray(observed[0].unavailable_bands))
+    assert np.array_equal(np.asarray(observed[1].unavailable_bands), unavailable)
+    assert int(good_count) == len(mask)
+    assert int(bad_count) == int(good_count)-1
+    good_decay = late_decay_arrays(geometry, good[:, jnp.asarray(c.decay_indices)])
+    means = np.asarray([np.mean(np.asarray(good_decay.t20_s)[row]) for row in mask])
+    expected, _components = python_cost(means, unavailable)
+    assert abs(float(actual)-expected) <= contract_value('reverberation_cost_jax_vs_python')
+
+
+def test_one_insufficient_frequency_excludes_its_whole_decay_band() -> None:
+    """抓：八度帶內只平均剩餘好頻點，誤把部分衰減不足的帶算可估。"""
+    env = child_process_env(threads=1).copy()
+    configure_jax(platforms='cpu', enable_x64=True, env=env)
+    env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'], str(Path(__file__).resolve().parents[2])))
+    script = 'from tests.engine.test_six_category_jax import _check_partial_decay_band; _check_partial_decay_band()'
+    run = subprocess.run([sys.executable, '-c', script], env=env, capture_output=True, text=True, timeout=600)
+    assert run.returncode == 0, run.stdout+run.stderr

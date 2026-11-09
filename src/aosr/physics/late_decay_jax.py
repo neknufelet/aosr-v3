@@ -74,14 +74,14 @@ def _exact_roots(form: jax.Array, areas: jax.Array, reflectivity: jax.Array) -> 
     return jnp.asarray(jnp.linalg.eigvalsh(symmetric)[:, -1])
 
 
-def _order_decay(transfer: jax.Array, areas: jax.Array) -> jax.Array:
+def _order_decay(form: jax.Array, reflection: jax.Array, areas: jax.Array) -> jax.Array:
     weight = areas / jnp.sum(areas)
 
     def step(energy: jax.Array, unused: None) -> tuple[jax.Array, jax.Array]:
-        energy = jnp.einsum("fij,jf->if", transfer, energy, precision=jax.lax.Precision.HIGHEST)
+        energy = reflection * jnp.einsum("ij,jf->if", form, energy, precision=jax.lax.Precision.HIGHEST)
         return energy, jnp.einsum("p,pf->f", weight, energy, precision=jax.lax.Precision.HIGHEST)
 
-    initial = jnp.ones((areas.shape[0], transfer.shape[0]), dtype=transfer.dtype)
+    initial = jnp.ones(reflection.shape, dtype=reflection.dtype)
     _last, orders = jax.lax.scan(step, initial, None, length=ART_NEUMANN_K_MAX)
     return orders
 
@@ -146,8 +146,7 @@ def late_decay_arrays(geometry: LateDecayGeometry, alpha: jax.Array) -> LateDeca
     safe_alpha = jnp.where(invalid[None, :], 0.5, values)
     reflection = 1.0 - safe_alpha
     roots = _exact_roots(form, areas, reflection)
-    transfer = reflection.T[:, :, None] * form[None, :, :]
-    orders = _order_decay(transfer, areas)
+    orders = _order_decay(form, reflection, areas)
     fit = _fit_decay_arrays(_decay_level(orders, roots), collision)
     numerical = ~invalid & (fit.numerical_failure | ~jnp.isfinite(roots))
     fit_eligible = ~(invalid | numerical)

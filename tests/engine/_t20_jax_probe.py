@@ -77,6 +77,12 @@ def _failures() -> dict[str, object]:
         cases[name] = _failure_result(run, "invalid_absorption", gradient)
     rigid = jax.jit(decay.late_decay_arrays)(geometry, alpha.at[0].set(0.0))
     cases["rigid_wall"] = {"flag": _list(rigid.invalid_absorption), "value": _list(rigid.t20_s)}
+    good = jnp.full((6, 4), 0.3, dtype=jnp.float64)
+    mixed = good.at[0, 0].set(1.0).at[:, 1].set(0.001).at[:, 3].set(jnp.nan)
+    run = jax.jit(decay.late_decay_arrays)(geometry, mixed)
+    gradient = jax.jit(jax.grad(lambda a: _finite_total(decay.late_decay_arrays(geometry, a).t20_s)))(mixed)
+    cases["mixed_failures"] = _failure_result(run, "valid", gradient)
+    cases["mixed_failures_reference"] = {"value": _list(jax.jit(decay.late_decay_arrays)(geometry, good).t20_s)}
     order = jnp.arange(ART_NEUMANN_K_MAX, dtype=jnp.float64)
     valid = -order
     for name, bad in (("insufficient_weight", jnp.full_like(order, -400.0)),
