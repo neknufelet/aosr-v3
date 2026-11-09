@@ -64,6 +64,9 @@ _V2_VERSION: Final = "aosr.material_gradient_ledger.v2"
 # 接續碰到上一版帳本、或標頭的評分常數指紋不同時，訊息要講明的那一句。
 SCORED_RANGE_RERUN_TEXT: Final = "第三階段計分範圍改了（#1032），舊範圍資料夾要重新開始搜尋"
 PROXY_RERUN_TEXT: Final = "評分常數指紋不同：梯度目標換成六類（舊版曾加大峰代理項），要重跑"
+CONSTANTS_RERUN_TEXT: Final = (
+    "評分常數指紋不同：方案、品質目標或設定變了，或這台機器的指令集／處理器釘選跟寫帳本那台不同；"
+    "要在同一台、同一環境接續，或重新開始")
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Phase = Literal["descent", "snap", "retune", "baseline_retune", "candidate_jump", "candidate_retune", "round_decision"]
 SegmentPhase = Literal["descent", "retune", "baseline_retune", "candidate_retune"]
@@ -736,8 +739,8 @@ def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = 
     """逐列驗型別與順序；給了預期標頭就逐格比（替身換了、設定換了、評分常數換了都拒收）。壞列一律報錯，不捨棄。
 
     標頭先看版本：不是這一版（例如 v1）就拒收、訊息講明版本，不做舊版相容；v2 另外講明少了評分常數指紋；
-    v4（梯度目標加大峰代理項之前）講明要重跑。``legacy=True`` 只給報告用：准讀 v4（不給預期標頭時），照 v4 的列形狀驗。
-    評分常數指紋不同時訊息講明大峰代理那一句（:data:`PROXY_RERUN_TEXT`）。
+    v4／v5 是六類目標之前的帳本，講明要重跑。``legacy=True`` 供報告與舊終點唯讀重建，照舊版列形狀驗。
+    現行版評分常數指紋不同時，說明輸入或處理器環境不同；舊版才說明六類目標換版。
     """
     with path.open("rb") as handle:
         lines = handle.readlines()
@@ -757,7 +760,8 @@ def read_ledger(path: Path, *, expected_header: MaterialGradientHeader | None = 
     if expected_header is not None and header != expected_header:
         differing = sorted(name for name in MaterialGradientHeader.model_fields
                            if getattr(header, name) != getattr(expected_header, name))
-        note = f"；{PROXY_RERUN_TEXT}；{SCORED_RANGE_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
+        reason = PROXY_RERUN_TEXT if version in LEGACY_LEDGER_VERSIONS else CONSTANTS_RERUN_TEXT
+        note = f"；{reason}" if "objective_fingerprint" in differing else ""
         raise ValueError(f"帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(MaterialGradientRow.model_validate_json(line) for line in lines[1:])
     check_rows(header, rows)

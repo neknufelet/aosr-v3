@@ -15,17 +15,19 @@ import dataclasses
 from unittest.mock import patch
 import shutil
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.construction_environment import construction_environment
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.gradient import cli, run as run_module
-from aosr.gradient.material_gradient import ChainObjective, baseline_theta, chain_objective, compiled_evaluator, objective_reading, COMPONENT_NAMES
+from aosr.gradient import cli, run as run_module, material_gradient as gradient_module
+from aosr.gradient import material_gradient_loop as loop_module, template_rounds as rounds_module
+from aosr.gradient.material_gradient import ChainObjective, Evaluator, ObjectiveAux, SurfaceDesign, baseline_theta, chain_objective, compiled_evaluator, objective_reading, COMPONENT_NAMES
 from aosr.gradient.material_gradient_ledger import read_ledger, objective_fingerprint
 from aosr.gradient.run import (
     LEDGER_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, check_inputs, file_sha256, load_problem, manifest_sha256,
@@ -35,12 +37,15 @@ from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
-from aosr.scoring.six_category_jax import build_constants
+from aosr.scoring.six_category_jax import SixCategoryConstants, build_constants
 from aosr.gradient.six_category_chain import six_category_chain_objective
 from aosr.reporting.validation import checked_inputs
+from aosr.reporting.scheme import Scheme
+from aosr.physics.report_io import ReportInput
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.gradient.worker import run_worker
+from tests.engine._scheme_cache import bitwise_equal
 
 Record = dict[str, object]
 
@@ -222,6 +227,20 @@ def _control(source: Path, reference: Path) -> Record:
                 fingerprints=_fingerprints(six), reversed_sources=_reversed_sources(project,scheme,model,settings,theta))
 
 def main(directory: Path, air_surrogate: Path, part: str) -> None:
+    if part == 'all':
+        # 參考與重播共用真正的編譯函式；控制組用直接 import 的 load_problem，仍各自重建。
+        evaluators = _ReplayEvaluators()
+        with (patch.object(run_module, 'load_problem', side_effect=_shared_problem_loader()),
+              patch.object(gradient_module, 'compiled_evaluator', side_effect=evaluators),
+              patch.object(run_module, 'compiled_evaluator', side_effect=evaluators),
+              patch.object(loop_module, 'compiled_evaluator', side_effect=evaluators),
+              patch.object(rounds_module, 'compiled_evaluator', side_effect=evaluators)):
+            main(directory, air_surrogate, 'reference')
+            combined = json.loads((directory / 'output-reference.json').read_text(encoding='utf-8'))
+            for replay in ('stops', 'cuts'):
+                combined.update(_replays(directory, directory / 'source', replay))
+        (directory / 'output-all.json').write_text(json.dumps(combined, ensure_ascii=False), encoding='utf-8')
+        return
     source = directory / "source"
     if part == "reference":
         reference, phases = _reference(directory, source)
@@ -240,6 +259,94 @@ def main(directory: Path, air_surrogate: Path, part: str) -> None:
 
 
 def _after_reference(directory: Path, source: Path, part: str) -> Record:
+    """同一段的停止／截帳重播共用編譯物件；每次仍重建並核對正式輸入，不快取求值。"""
+    with patch.object(run_module, 'load_problem', side_effect=_shared_problem_loader()):
+        return _replays(directory, source, part)
+
+
+def _shared_problem_loader() -> Callable[[run_module.GradientProject], run_module.GradientProblem]:
+    """只給相同輸入的重播使用；真正 load_problem 每次照跑，標頭及設計相同才共用目標身分。"""
+    original = run_module.load_problem
+    constants = _ReplayConstants()
+    shared: run_module.GradientProblem | None = None
+    objectives: list[tuple[tuple[SurfaceDesign, ...], ChainObjective]] = []
+
+    def load(project: run_module.GradientProject) -> run_module.GradientProblem:
+        nonlocal shared
+        with patch.object(run_module, 'build_constants', side_effect=constants):
+            current = original(project)
+        if shared is None:
+            factory = current.templates.objective_for
+
+            def objective_for(designs: tuple[SurfaceDesign, ...]) -> ChainObjective:
+                for previous, objective in objectives:
+                    if previous == designs:
+                        return objective
+                objective = factory(designs)
+                objectives.append((designs, objective))
+                return objective
+
+            objectives.append((current.designs, current.objective))
+            shared = current._replace(templates=current.templates._replace(objective_for=objective_for))
+        if current.header != shared.header or current.designs != shared.designs or current.kept != shared.kept:
+            raise ValueError('停止／截帳重播的輸入不同，不准共用編譯物件')
+        return current._replace(objective=shared.objective,
+                                templates=current.templates._replace(objective_for=shared.templates.objective_for))
+
+    return load
+
+
+class _ReplayConstants:
+    """同段重播才共用幾何常數；方案、逐對輸入逐位相同且設定檔未變才准用，不存評分答案。"""
+
+    def __init__(self) -> None:
+        self.build = build_constants
+        self.inputs: tuple[Scheme, Mapping[tuple[str, str], ReportInput], str] | None = None
+        self.value: SixCategoryConstants | None = None
+
+    def __call__(self, scheme: Scheme, *, pair_inputs: Mapping[tuple[str, str], ReportInput],
+                 quality_targets_path: Path) -> SixCategoryConstants:
+        inputs = (scheme, pair_inputs, file_sha256(quality_targets_path))
+        if self.inputs is None:
+            self.value = self.build(scheme, pair_inputs=pair_inputs, quality_targets_path=quality_targets_path)
+            self.inputs = inputs
+        elif not bitwise_equal(inputs, self.inputs):
+            raise ValueError('停止／截帳重播的方案、逐對輸入或品質設定不同，不准共用常數')
+        if self.value is None:
+            raise ValueError('停止／截帳重播的常數尚未建立')
+        return self.value
+
+
+type _Evaluation = tuple[tuple[jax.Array, ObjectiveAux], jax.Array]
+
+
+class _ReplayEvaluators:
+    """本次狀態機考卷共用純數值邊界：同函式與同 θ 位元只算一次，新點真算。
+
+    不存下降決定或帳本；控制組直接匯入的 compiled_evaluator 不經這層，仍獨立求值。
+    每個探針行程重建空表，植錯不會讀到上一跑的值。
+    """
+
+    def __init__(self) -> None:
+        self.functions: dict[ChainObjective, Evaluator] = {}
+
+    def __call__(self, objective: ChainObjective) -> Evaluator:
+        if objective not in self.functions:
+            actual = compiled_evaluator(objective)
+            points: dict[tuple[str, tuple[int, ...], bool, bytes], _Evaluation] = {}
+
+            def evaluate(theta: jax.Array) -> _Evaluation:
+                values = np.asarray(theta)
+                key = (values.dtype.str, values.shape, bool(theta.weak_type), values.tobytes())
+                if key not in points:
+                    points[key] = actual(theta)
+                return points[key]
+
+            self.functions[objective] = evaluate
+        return self.functions[objective]
+
+
+def _replays(directory: Path, source: Path, part: str) -> Record:
     # 父行程已同步拿到 reference 的完成收據才會啟動這一段，不在子行程裡等待檔案。
     output = json.loads((directory / "output-reference.json").read_text(encoding="utf-8"))
     reference, phases = output["reference"], output["phases"]

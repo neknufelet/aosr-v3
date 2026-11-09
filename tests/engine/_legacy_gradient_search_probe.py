@@ -17,15 +17,16 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.scoring.gradient_objective_settings import legacy_gradient_objective_settings
 from tests.engine._six_search_helpers import six_objective
+from tests.engine._gradient_probe_env import endpoint_probe_env
 
 
 def legacy_endpoint_copy(directory: Path, source: Path, name: str = 'legacy-endpoint') -> Path:
-    from tests.engine.test_material_gradient_cli import _env, WAIT_S
+    from tests.engine.test_material_gradient_cli import WAIT_S
 
     target = directory / name / source.name
     shutil.copytree(source, target, ignore=shutil.ignore_patterns("endpoint.json", "scheme-endpoint*.json"))
     done = subprocess.run([sys.executable, '-m', 'tests.engine._legacy_gradient_search_probe', str(target)],
-        cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=WAIT_S)
+        cwd=directory, env=endpoint_probe_env(directory), capture_output=True, text=True, timeout=WAIT_S)
     assert done.returncode == 0, done.stdout + done.stderr
     return target
 

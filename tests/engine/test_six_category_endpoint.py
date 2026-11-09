@@ -14,16 +14,17 @@ from aosr.gradient.endpoint_run import EndpointRecord, read_endpoint, run_endpoi
 from aosr.gradient.report import _endpoint_section
 from tests.engine._endpoint_v4_snapshot import SNAPSHOT_JSON
 from tests.engine._scheme_cache import shared_json
-from tests.engine.test_material_gradient_cli import _env
+from tests.engine._gradient_probe_env import endpoint_probe_env
 
 
 @pytest.fixture(scope='module')
 def measured(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> dict[str, object]:
+    """沒有錄製答案；逐位控制同進程算，環境須跟不帶 CPU 釘選的 CLI 工作行程一致。"""
     name = 'six-endpoint'
     def produce() -> str:
         directory = tmp_path_factory.mktemp(name)
         command = [sys.executable, '-m', 'tests.engine._six_category_endpoint_probe', str(directory)]
-        done = subprocess.run(command, cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=1800)
+        done = subprocess.run(command, cwd=directory, env=endpoint_probe_env(directory), capture_output=True, text=True, timeout=1800)
         (directory / 'probe.stdout').write_text(done.stdout)
         (directory / 'probe.stderr').write_text(done.stderr)
         assert done.returncode == 0, done.stdout + done.stderr
@@ -114,7 +115,7 @@ def test_old_endpoint_cannot_be_recomputed_or_overwritten(tmp_path: Path, versio
 def test_bare_measured_original_wall_refused_without_endpoint_or_temporary_files(tmp_path: Path) -> None:
     """裸實測原牆沿正式終點入口拒收；不得寫出結果或留下半份暫存檔。"""
     done = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_endpoint_probe', str(tmp_path), 'measured-rejection'],
-        cwd=tmp_path, env=_env(tmp_path), capture_output=True, text=True, timeout=1800)
+        cwd=tmp_path, env=endpoint_probe_env(tmp_path), capture_output=True, text=True, timeout=1800)
     (tmp_path / 'probe.stdout').write_text(done.stdout)
     (tmp_path / 'probe.stderr').write_text(done.stderr)
     assert done.returncode == 0, done.stdout + done.stderr
@@ -125,3 +126,15 @@ def test_bare_measured_original_wall_refused_without_endpoint_or_temporary_files
     assert result['endpoint_exists'] is False, result
     assert result['new_files'] == [], result
     assert result['endpoint_temporary_files'] == [], result
+
+
+def test_endpoint_probe_uses_worker_environment_without_cpu_pins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """父考卷即使釘住 AVX2，探針也必須跟不繼承釘選的正式工作行程一致。"""
+    pins = {'NPY_DISABLE_CPU_FEATURES': 'X86_V4 AVX512_ICL AVX512_SPR',
+            'OPENBLAS_CORETYPE': 'Haswell', 'XLA_FLAGS': '--xla_cpu_max_isa=AVX2'}
+    for name, value in pins.items():
+        monkeypatch.setenv(name, value)
+    env = endpoint_probe_env(tmp_path)
+    assert not (pins.keys() & env.keys())
+    assert env['JAX_PLATFORMS'] == 'cpu' and env['JAX_ENABLE_X64'] == 'true'
+    assert all(env[name] == '1' for name in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS'))

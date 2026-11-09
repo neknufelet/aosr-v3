@@ -71,8 +71,7 @@ class _Runs:
             name = group.removeprefix("start-")
             return {name: cases._start_rejection(directory, name)}
         if group.startswith("probe-"):
-            part = group.removeprefix("probe-")
-            return cases._probe(directory, self.folder(), part)
+            return cases._probe(directory, self.folder(), "all")
         if group == "concurrent":
             return {group: cases._concurrent_start(directory)}
         if group == "interrupted":
@@ -99,7 +98,7 @@ class _Runs:
             **{name: "resume-rejections" for name in RESUME_REJECTIONS}})
         output["probe"] = self.sections.record({
             **{key: "probe-reference" for key in ("reference", "phases", "pre_loop_rows", "other_header", "air", "control")},
-            "stops": "probe-stops", "cuts": "probe-cuts"})
+            "stops": "probe-reference", "cuts": "probe-reference"})
         return output
 
 

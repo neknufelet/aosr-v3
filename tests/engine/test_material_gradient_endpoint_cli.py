@@ -31,7 +31,7 @@ import numpy as np
 import pytest
 
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
-from aosr.runtime import child_process_env
+from tests.engine._gradient_probe_env import endpoint_probe_env
 from tests.engine._scheme_cache import bitwise_equal
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.geometry.shoebox import Wall
@@ -55,7 +55,7 @@ from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
 from tests.engine._six_search_cli_case import ENDPOINT_ROOM, model as model, operators as operators
 from tests.engine.test_material_gradient import _chain_model, _presets
 from tests.engine.test_material_gradient_cli import (
-    BAND_NAME, FREQUENCY_NAME, NARROWED_STEPS, PRESETS, WAIT_S, Record, _command, _current_identity, _env,
+    BAND_NAME, FREQUENCY_NAME, NARROWED_STEPS, PRESETS, WAIT_S, Record, _command, _current_identity,
     _good_report, _json, _kept_materials, _run, _schemes, _settings_text, _sha256, _start_args,
 )
 
@@ -256,23 +256,31 @@ def _pre_proxy(directory: Path, folder: Path) -> Record:
     return output
 
 
-def _probe(directory: Path, folder: Path) -> Record:
-    """跑完搜尋的資料夾整份抄給探針（不帶命令列那一次的終點檔，探針自己用產品入口再寫一份）。"""
+def _probe_work(directory: Path, folder: Path) -> Path:
+    """每份控制各用自己的資料夾與完整解；只共用探針行程的初始化。"""
     work = directory / "probe"
     work.mkdir(parents=True)
     shutil.copytree(folder, work / folder.name, ignore=shutil.ignore_patterns("endpoint.json", "scheme-endpoint*.json"))
-    env = _env(work)
-    env = {**child_process_env(threads=1), **{name: value for name, value in env.items()
-        if name in ("PYTHONPATH", "JAX_ENABLE_X64", "JAX_PLATFORMS", "TMPDIR", "PYTHONDONTWRITEBYTECODE")}}
-    process = subprocess.run([sys.executable, str(PROBE), str(work), folder.name], cwd=work, env=env,
+    return work
+
+
+def _probes(directory: Path, current: Path, legacy: Path) -> tuple[Record, Record]:
+    """新舊結果的全部 worker／直接解／顯卡替身控制依序跑；各自求值，不共用答案。"""
+    work = _probe_work(directory, current)
+    old_work = _probe_work(directory / "legacy-probe", legacy)
+    process = subprocess.run([sys.executable, str(PROBE), str(work), current.name, str(old_work), legacy.name],
+                             cwd=work, env=endpoint_probe_env(work),
                              capture_output=True, text=True, timeout=WAIT_S * 2)
     (work / "probe.stdout").write_text(process.stdout)
     (work / "probe.stderr").write_text(process.stderr)
     assert process.returncode == 0, process.stdout + process.stderr
-    return cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
+    current_record = cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
+    legacy_record = cast(Record, json.loads((old_work / "output.json").read_text(encoding="utf-8")))
+    return current_record, legacy_record
 
 
-def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
+def _search_runs(directory: Path, request: pytest.FixtureRequest) -> Record:
+    """真搜尋與舊目標重建；下游只計算自己會檢查的終點情境。"""
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
     _surrogate(directory, request)
@@ -282,9 +290,15 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
     output["new_folder"] = str(folder)
-    output["new_endpoint"] = _run(directory, _command("endpoint", str(folder)))
     folder = legacy_endpoint_copy(directory, folder)
     output["folder"] = str(folder)
+    return output
+
+
+def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
+    output = _search_runs(directory, request)
+    folder = Path(str(output["folder"]))
+    output["new_endpoint"] = _run(directory, _command("endpoint", str(output["new_folder"])))
     pristine = directory / "pristine" / folder.name
     shutil.copytree(folder, pristine)
     theta_hex = _other_theta(folder, directory / "settings.toml")
@@ -296,8 +310,7 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     no_axis = directory / "root-no-axis"
     output["no_axis"] = {**_run(directory, _start_args(directory, no_axis, scheme="scheme-no-axis.json")),
                          "root_exists": no_axis.exists()}
-    output["probe"] = _probe(directory, Path(str(output["new_folder"])))
-    output["legacy_probe"] = _probe(directory / "legacy-probe", folder)
+    output["probe"], output["legacy_probe"] = _probes(directory, Path(str(output["new_folder"])), folder)
     text = json.dumps(output, ensure_ascii=False)
     (directory / "fixture.json").write_text(text, encoding="utf-8")
     return text
@@ -311,6 +324,23 @@ def runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactor
                  else tmp_path_factory.getbasetemp().parent / "material-gradient-endpoint-cli-shared")
     text = shared_json(tmp_path_factory, worker_id, "material-gradient-endpoint-cli",
                        lambda: _compute(directory, request))
+    return directory, cast(Record, json.loads(text))
+
+
+@pytest.fixture(scope="module")
+def minimal_runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory,
+                 worker_id: str) -> tuple[Path, Record]:
+    """換版考卷只需一份真終點；不預算它未讀取的交換 θ、過期報告與數值探針。"""
+    directory = (tmp_path_factory.mktemp("endpoint-range") if worker_id == "master"
+                 else tmp_path_factory.getbasetemp().parent / "endpoint-range-shared")
+
+    def produce() -> str:
+        output = _search_runs(directory, request)
+        result = _run(directory, _command("endpoint", str(output["folder"])))
+        assert result["code"] == 0, result["stderr"]
+        return json.dumps(output, ensure_ascii=False)
+
+    text = shared_json(tmp_path_factory, worker_id, "endpoint-range", produce)
     return directory, cast(Record, json.loads(text))
 
 
@@ -619,7 +649,7 @@ def test_start_without_low_frequency_axis_fails_before_search(runs: tuple[Path, 
 
 def _batch_probe(folder: Path, mode: str, directory: Path) -> Record:
     result = subprocess.run([sys.executable, "-m", "tests.engine._frequency_batch_probe", mode, str(folder)],
-                            cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=100)
+                            cwd=directory, env=endpoint_probe_env(directory), capture_output=True, text=True, timeout=100)
     assert result.returncode == 0, result.stdout + result.stderr
     return cast(Record, json.loads(result.stdout))
 

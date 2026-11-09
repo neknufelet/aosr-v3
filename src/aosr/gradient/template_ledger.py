@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
-from aosr.gradient.material_gradient_ledger import PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, ScoreConstants, check_scores
+from aosr.gradient.material_gradient_ledger import CONSTANTS_RERUN_TEXT, PROXY_RERUN_TEXT, ScoreConstants, check_scores
 from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
@@ -690,7 +690,8 @@ def read_template_ledger(path: Path, *, expected_header: TemplateHeader | None =
     if expected_header is not None and header != expected_header:
         differing = sorted(name for name in TemplateHeader.model_fields
                            if getattr(header, name) != getattr(expected_header, name))
-        note = f"；{PROXY_RERUN_TEXT}；{SCORED_RANGE_RERUN_TEXT}" if "objective_fingerprint" in differing else ""
+        reason = PROXY_RERUN_TEXT if version in LEGACY_TEMPLATE_LEDGER_VERSIONS else CONSTANTS_RERUN_TEXT
+        note = f"；{reason}" if "objective_fingerprint" in differing else ""
         raise ValueError(f"換樣板帳本標頭跟這一次對不上：{differing}{note}")
     rows = tuple(TemplateRow.model_validate_json(line) for line in lines[1:])
     check_template_rows(header, rows, settings=settings, start=start)

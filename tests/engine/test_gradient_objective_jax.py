@@ -662,7 +662,7 @@ def _material_ledger(directory: Path) -> tuple[Path, ledger.MaterialGradientHead
 
 def test_v4_ledger_and_old_objective_header_are_rejected_on_resume(tmp_path: Path) -> None:
     """抓接續照收加代理之前的帳本：v4 帳本（沒有舊合分、只有兩分項）接續時拒收、訊息講「大峰代理」那一句；
-    報告用的讀法（``legacy=True``、不給預期標頭）照讀；v5 帳本標頭的評分常數指紋跟這一次不同也拒收、訊息同一句；
+    報告用的讀法（``legacy=True``、不給預期標頭）照讀；現行帳本常數指紋不同則講明輸入或處理器環境不同；
     寫 v4 一律拒收。控制組：原檔照預期標頭讀得回、列帶三分項與舊合分。"""
     path, header = _material_ledger(tmp_path)
     read_header, rows = ledger.read_ledger(path, expected_header=header)
@@ -678,15 +678,16 @@ def test_v4_ledger_and_old_objective_header_are_rejected_on_resume(tmp_path: Pat
     legacy_header, legacy_rows = ledger.read_ledger(old, legacy=True)
     assert legacy_header.ledger_version == ledger.PRE_PROXY_LEDGER_VERSION and legacy_rows[0].is_legacy()
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
-    with pytest.raises(ValueError, match="#1032"):
+    with pytest.raises(ValueError, match=ledger.CONSTANTS_RERUN_TEXT) as mismatch:
         ledger.read_ledger(path, expected_header=other)
+    assert "梯度目標換成六類" not in str(mismatch.value) and "#1032" not in str(mismatch.value)
     with pytest.raises(ValueError):
         ledger.write_ledger(tmp_path / "again.jsonl", legacy_header, legacy_rows)
 
 
 def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_path: Path) -> None:
     """抓接續照收加代理之前的換樣板帳本：沒有可換目標的一輪（不求值）寫一本 v2，換回 v1 形狀後，帶起點或預期
-    標頭讀都拒收、訊息講「大峰代理」那一句；報告的讀法照讀；v2 標頭的評分常數指紋不同也拒收、訊息同一句。"""
+    標頭讀都拒收、訊息講「大峰代理」那一句；報告的讀法照讀；現行標頭指紋不同則說明輸入或處理器環境。"""
     settings = load_material_gradient_settings(config_path("material_gradient.toml")).model_copy(update={"family": ()})
     context = _context(settings)
     surfaces = tuple((wall, None) for wall in gradient_search.wall_surface_ids())
@@ -706,8 +707,9 @@ def test_v1_template_ledger_and_old_objective_header_are_rejected_on_resume(tmp_
     legacy_header, legacy_rows = templates.read_template_ledger(old, legacy=True)
     assert legacy_header.ledger_version == templates.PRE_PROXY_TEMPLATE_LEDGER_VERSION and legacy_rows[0].is_legacy()
     other = header.model_copy(update={"objective_fingerprint": "0" * 64})
-    with pytest.raises(ValueError, match="#1032"):
+    with pytest.raises(ValueError, match=ledger.CONSTANTS_RERUN_TEXT) as mismatch:
         templates.read_template_ledger(path, expected_header=other)
+    assert "梯度目標換成六類" not in str(mismatch.value) and "#1032" not in str(mismatch.value)
 
 
 # ---- 8. 帳本的分數恆等式（審查第 4 條）----

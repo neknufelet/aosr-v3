@@ -437,7 +437,7 @@ def _interrupted(directory: Path) -> Record:
 
 def _probe(directory: Path, folder: Path, part: str) -> Record:
     work = directory / "probe"
-    if part == "reference":
+    if part in ("reference", "all"):
         (work / "source").mkdir(parents=True)
         shutil.copyfile(folder / "project.json", work / "source" / "project.json")
     process = subprocess.run([sys.executable, str(PROBE), str(work), str(directory / "air-other" / "rom.npz"), part], cwd=work, env=_env(work),

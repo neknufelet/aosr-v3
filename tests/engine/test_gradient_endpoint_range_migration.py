@@ -13,7 +13,7 @@ from aosr.gradient.endpoint_run import EndpointRecord
 from aosr.gradient.report import ENDPOINT_HEADING
 from tests.engine.test_material_gradient_cli import Record, _command, _json, _run
 from tests.engine.test_material_gradient_endpoint_cli import (
-    _PROXY_FIELDS, _folder, _record, model as model, operators as operators, runs as runs,
+    _PROXY_FIELDS, _folder, _record, model as model, operators as operators, minimal_runs as runs,
 )
 
 
