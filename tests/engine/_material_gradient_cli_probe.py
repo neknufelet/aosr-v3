@@ -1,8 +1,8 @@
 """梯度搜尋命令列考卷的雙精度子行程：只叫產品入口（``aosr.gradient.worker.run_worker``、``aosr.gradient.cli.main`` 的 stop），
 寫資料夾與原始紀錄；比對與判決在父行程。
 
-一口氣跑完的參考資料夾，與在第 N 次求值之前放停止記號、再接續的資料夾，都在這同一個行程、同一份環境裡跑
-（逐位比較要同一條路徑）。N 不寫死：先跑參考、記下每一次查停止時帳本最後一列的階段，每一種階段取第一次出現的那一次。
+參考與部分重播共用一個行程；另保留下降批後停止、下降半批截帳各一例，在全新無共用補丁的子行程重建後逐位比。
+N 不寫死：先跑參考、記下每一次查停止時帳本最後一列的階段，每一種階段取第一次出現的那一次。
 另外把參考帳本截成「前段只寫了一半」的幾份接續，與標頭被改過的一份接續（要拒收）。
 空氣（修補二、三）：方案場景的密度與聲速換成另一組、替身換成用同一組空氣建的那份（父行程建好、第二個參數給路徑），
 重建的目標在樣板起點的值要逐位等於這裡自己用設定層配方（``construction_environment``）造的那一份，並跟原方案原替身
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import dataclasses
+import os
 from unittest.mock import patch
 import shutil
 import sys
@@ -80,7 +81,7 @@ def _reference(directory: Path, source: Path) -> tuple[Record, list[str]]:
         return check()
 
     code = run_worker(folder, "start", should_stop=watch)
-    return {"folder": folder.name, "code": code, "status": _status(folder), "checks": len(phases)}, phases
+    return {"folder": folder.name, "code": code, "status": _status(folder), "checks": len(phases), "pid": os.getpid()}, phases
 
 
 def _stopper(folder: Path, at: int, record: Record) -> Callable[[], bool]:
@@ -99,7 +100,7 @@ def _stopper(folder: Path, at: int, record: Record) -> Callable[[], bool]:
 
 def _stop_and_resume(directory: Path, source: Path, at: int, phase: str) -> Record:
     folder = _folder(directory, f"stop-{at:05d}", source)
-    record: Record = {"folder": folder.name, "at": at, "phase": phase}
+    record: Record = {"folder": folder.name, "at": at, "phase": phase, "pid": os.getpid()}
     record["stopped_code"] = run_worker(folder, "start", should_stop=_stopper(folder, at, record))
     record["stopped_status"] = _status(folder)
     record["marker_after_stop"] = (folder / STOP_FILE).exists()
@@ -119,7 +120,7 @@ def _cut(directory: Path, source: Path, reference: Path, name: str, keep: int) -
     lines = (reference / LEDGER_FILE).read_bytes().splitlines(keepends=True)
     (folder / LEDGER_FILE).write_bytes(b"".join(lines[:keep + 1]))
     code = run_worker(folder, "resume", should_stop=stop_requested(folder))
-    return {"folder": folder.name, "keep": keep, "code": code, "status": _status(folder)}
+    return {"folder": folder.name, "keep": keep, "code": code, "status": _status(folder), "pid": os.getpid()}
 
 
 def _other_header(directory: Path, source: Path, reference: Path) -> Record:
@@ -252,6 +253,13 @@ def main(directory: Path, air_surrogate: Path, part: str) -> None:
                           "other_header": _other_header(directory, source, reference_folder),
                           "air": _air(directory, source, air_surrogate),
                           "control": _control(source, reference_folder)}
+    elif part.startswith('rebuild-'):
+        # 這兩條路在全新子行程直接跑，絕不進 _after_reference 的共用補丁。
+        if (run_module.load_problem is not load_problem or
+                any(module.compiled_evaluator is not compiled_evaluator
+                    for module in (gradient_module, run_module, loop_module, rounds_module))):
+            raise RuntimeError('跨重建控制不准套共用載入器或求值器補丁')
+        output = _replays(directory, source, part.removeprefix('rebuild-'), isolated=True)
     else:
         output = _after_reference(directory, source, part)
     (directory / f"output-{part}.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
@@ -265,7 +273,7 @@ def _after_reference(directory: Path, source: Path, part: str) -> Record:
 
 
 def _shared_problem_loader() -> Callable[[run_module.GradientProject], run_module.GradientProblem]:
-    """只給相同輸入的重播使用；真正 load_problem 每次照跑，標頭及設計相同才共用目標身分。"""
+    """每次真載入，核對輸入及起點值／分項／梯度逐位一致後，才共用目標身分。"""
     original = run_module.load_problem
     constants = _ReplayConstants()
     shared: run_module.GradientProblem | None = None
@@ -276,24 +284,36 @@ def _shared_problem_loader() -> Callable[[run_module.GradientProject], run_modul
         with patch.object(run_module, 'build_constants', side_effect=constants):
             current = original(project)
         if shared is None:
-            factory = current.templates.objective_for
-
-            def objective_for(designs: tuple[SurfaceDesign, ...]) -> ChainObjective:
-                for previous, objective in objectives:
-                    if previous == designs:
-                        return objective
-                objective = factory(designs)
-                objectives.append((designs, objective))
-                return objective
-
             objectives.append((current.designs, current.objective))
-            shared = current._replace(templates=current.templates._replace(objective_for=objective_for))
+            shared = current
         if current.header != shared.header or current.designs != shared.designs or current.kept != shared.kept:
             raise ValueError('停止／截帳重播的輸入不同，不准共用編譯物件')
+        _require_same_objective(current.objective, shared.objective, current.designs)
+        factory = current.templates.objective_for
+
+        def objective_for(designs: tuple[SurfaceDesign, ...]) -> ChainObjective:
+            fresh = factory(designs)
+            for previous, objective in objectives:
+                if previous == designs:
+                    _require_same_objective(fresh, objective, designs)
+                    return objective
+            objectives.append((designs, fresh))
+            return fresh
+
         return current._replace(objective=shared.objective,
-                                templates=current.templates._replace(objective_for=shared.templates.objective_for))
+                                templates=current.templates._replace(objective_for=objective_for))
 
     return load
+
+
+def _require_same_objective(fresh: ChainObjective, shared: ChainObjective,
+                            designs: tuple[SurfaceDesign, ...]) -> None:
+    """替換前用原求值器各算起點的值、全部分項與梯度；不能讀重播 memo 的舊答案。"""
+    theta = jnp.asarray(baseline_theta(designs))
+    actual = jax.tree.map(np.asarray, compiled_evaluator(fresh)(theta))
+    expected = jax.tree.map(np.asarray, compiled_evaluator(shared)(theta))
+    if not bitwise_equal(actual, expected):
+        raise ValueError('重建目標在起點的值、分項或梯度逐位不同，不准共用')
 
 
 class _ReplayConstants:
@@ -346,7 +366,7 @@ class _ReplayEvaluators:
         return self.functions[objective]
 
 
-def _replays(directory: Path, source: Path, part: str) -> Record:
+def _replays(directory: Path, source: Path, part: str, *, isolated: bool = False) -> Record:
     # 父行程已同步拿到 reference 的完成收據才會啟動這一段，不在子行程裡等待檔案。
     output = json.loads((directory / "output-reference.json").read_text(encoding="utf-8"))
     reference, phases = output["reference"], output["phases"]
@@ -354,12 +374,22 @@ def _replays(directory: Path, source: Path, part: str) -> Record:
     if part == "stops":
         firsts = {phase: index + 1 for index, phase in reversed(list(enumerate(phases)))}
         chosen = sorted({*firsts.values(), len(phases)})
-        return {"stops": [_stop_and_resume(directory, source, at, phases[at - 1]) for at in chosen]}
+        # 下降整批已寫、snap 尚未做；接續必須真正截帳並重做前段，不能只讀已完成的數字。
+        independent = firsts['descent']
+        selected = [independent] if isolated else [at for at in chosen if at != independent]
+        return {"stops": [{**_stop_and_resume(directory, source, at, phases[at - 1]), 'isolated': isolated}
+                           for at in selected]}
     _, rows = read_ledger(reference_folder / LEDGER_FILE)
     pre_loop = [index for index, row in enumerate(rows) if row.round is None]
     snap = next(index for index, row in enumerate(rows) if row.phase == "snap")
     keeps = sorted({max(1, snap // 2), snap, snap + 1, (snap + 1 + len(pre_loop)) // 2})
-    cuts = [_cut(directory, source, reference_folder, f"cut-{keep:04d}", keep) for keep in keeps if keep < len(pre_loop)]
+    # 取下降批中間的合法前綴，明確避開整批邊界，守跨行程的部分下降接續。
+    independent = max(1, snap // 2)
+    if not 1 <= independent < snap:
+        raise ValueError('跨重建截帳控制需要至少兩列下降')
+    selected = [independent] if isolated else [keep for keep in keeps if keep != independent]
+    cuts = [{**_cut(directory, source, reference_folder, f"cut-{keep:04d}", keep), 'isolated': isolated}
+            for keep in selected if keep < len(pre_loop)]
     return {"cuts": cuts}
 
 

@@ -8,10 +8,10 @@
 平行的工人共用（``shared_json``）。
 
 終點數字分兩層比（照辛一「逐位只比同一條路徑」的做法）：探針在自己的行程裡先叫產品入口
-``worker.run_endpoint_worker`` 跑一份終點、再直接叫 ``endpoint_check`` 與完整模型基準，這兩份同一行程、同一組處理器
-釘選，逐位比。命令列 ``endpoint`` 的子行程走 ``runtime.child_process_env``，刻意只繼承白名單環境、不帶三格處理器釘選
-（NPY_DISABLE_CPU_FEATURES、OPENBLAS_CORETYPE、XLA_FLAGS），有 AVX-512 的機器上 JAX 走另一套指令、替身那幾格差在
-最後幾位，所以命令列那一份只跟探針的產品入口那一份比：非浮點逐字，浮點用 ``|差| ≤ 2^-36 × max(|參考值|, 1)``。
+``worker.run_endpoint_worker`` 跑一份終點、再直接叫 ``endpoint_check`` 與完整模型基準，這兩份同一行程逐位比。
+探針用 ``endpoint_probe_env``、命令列工作行程用 ``runtime.child_process_env``，兩者都不帶三格處理器釘選
+（NPY_DISABLE_CPU_FEATURES、OPENBLAS_CORETYPE、XLA_FLAGS）。跨入口仍沿既有比較契約：非浮點逐字，浮點用
+``|差| ≤ 2^-36 × max(|參考值|, 1)``，不把換環境產生的末位差異當成凍結答案。
 2^-36 這個數字借自精度契約登記簿的 ``stage_one_objective_jax_vs_python``（JAX 對 Python 評分路徑留給換機器的尺），
 但只借它的數值大小、另採混合比較規則（dB 欄以 1 dB 為尺度、無因次合分以 1 為尺度），不是逐字遵守那條契約；
 這是 2026-10-30 明確批准、僅限這一張考卷的容差例外，不視為原契約已自動涵蓋，正式歸屬另記候選票 #985。
@@ -303,8 +303,9 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     work = _probe_work(directory, current)
     old_work = _probe_work(directory / "legacy-probe", folder)
     theta_hex = _other_theta(folder, directory / "settings.toml")
-    # 雲端四核：最多 min(os.cpu_count(), 4) 個獨立子行程；未知核心數時保守用一個。
-    with ThreadPoolExecutor(max_workers=min(os.cpu_count() or 1, 4)) as pool:
+    # 單一終點本機峰值約 4.5 GB；雲端 16 GB／四核還與其他 xdist 工人共用。
+    # 四個並行在 run 42578109442 比串行還慢，故最多兩個；換頁原因仍未驗證。
+    with ThreadPoolExecutor(max_workers=min(os.cpu_count() or 1, 2)) as pool:
         # 最長的兩份探針先排，各自資料夾、環境與控制皆獨立。
         futures = {"probe": pool.submit(_probe, work, current.name),
                    "legacy_probe": pool.submit(_probe, old_work, folder.name),

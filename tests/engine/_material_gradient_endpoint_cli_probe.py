@@ -5,9 +5,9 @@
 舊欄換成固定阻抗，不走產品的 ``scene_wall_materials``）直接叫 ``endpoint_check``，並用完整模型解原方案六面、交同一把尺
 （``objective_from_pressures``）與同一支大峰（``endpoint.big_peaks``）。
 
-兩份在同一個行程、同一組處理器釘選下算，父行程逐位比；命令列 ``endpoint`` 的子行程走 ``runtime.child_process_env``，
-刻意不帶三格處理器釘選，跨機器（例如有 AVX-512 的雲端）替身那幾格會差在最後幾位，所以命令列那一份只跟這裡的產品入口
-那一份比：非浮點逐字、浮點用精度契約登記簿的尺。
+兩份在同一個行程算，父行程逐位比。探針的 ``endpoint_probe_env`` 與命令列工作行程的
+``runtime.child_process_env`` 都不帶 NPY_DISABLE_CPU_FEATURES、OPENBLAS_CORETYPE、XLA_FLAGS 三格釘選。
+跨入口仍沿既有契約：非浮點逐字、浮點用精度契約登記簿的尺。
 """
 from __future__ import annotations
 

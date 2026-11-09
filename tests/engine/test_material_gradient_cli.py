@@ -644,6 +644,8 @@ def test_stop_marker_sampled_per_phase_then_resume_matches_one_shot(runs: tuple[
     expected_rows = _without_seconds(_rows(reference_folder))
     expected_result = _without_hash(_json(reference_folder / "result.json"))
     stops = cast(list[Record], _probe_section(runs, "stops"))
+    independent = [stop for stop in stops if stop['isolated']]
+    assert len(independent) == 1 and independent[0]['pid'] != reference['pid']
     phases = cast(list[str], _probe_section(runs, "phases"))
     assert {stop["phase"] for stop in stops} == set(phases)
     for stop in stops:
@@ -685,6 +687,9 @@ def test_resume_with_half_pre_loop_redoes_pre_loop(runs: tuple[Path, Record]) ->
     expected = _without_seconds(_rows(reference_folder))
     pre_loop = cast(int, _probe_section(runs, "pre_loop_rows"))
     cuts = cast(list[Record], _probe_section(runs, "cuts"))
+    independent = [cut for cut in cuts if cut['isolated']]
+    reference = cast(Record, _probe_section(runs, 'reference'))
+    assert len(independent) == 1 and independent[0]['pid'] != reference['pid']
     assert {cut["keep"] for cut in cuts} and all(cast(int, cut["keep"]) < pre_loop for cut in cuts)
     phases = {expected[cast(int, cut["keep"]) - 1]["phase"] for cut in cuts}
     assert phases == {"descent", "snap", "retune"}
