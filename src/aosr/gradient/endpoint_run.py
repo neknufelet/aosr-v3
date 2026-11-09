@@ -8,19 +8,21 @@
 最後把終點那一套寫成完整方案檔 ``scheme-endpoint.json``，數字寫成 ``endpoint.json``（綁帳本檔、換樣板帳本檔與 ``result.json``
 檔的摘要，任一變了它就過期）。兩個檔都整檔寫完再換名。不寫 ``status.json``：終點不是搜尋狀態機的一段。
 
-分數一律 ``gradient_objective_from_pressures``（舊合分就是裡面原樣的 ``objective_from_pressures``）、大峰一律
-``endpoint.big_peaks``，不另寫算式。要在雙精度已開的行程裡叫。
+六類三組數走 ``endpoint_six``：替身／完整聲壓各交同一份四路阻抗與六類 JAX 常數；完整聲壓的能量另注入正式 numpy 管線。
+歷史低頻對照仍用 ``gradient_objective_from_pressures``，大峰仍用 ``endpoint.big_peaks``。要在雙精度已開的行程裡叫。
 
 v3（#561 壬一）：梯度目標加了大峰代理項；終點報告、原牆基準與改善各自並列舊合分與新合分、代理（老闆 2026-10-30：
 「第三場一定要同時列舊分數與新分數」）。v2 只准報告讀（``legacy``），終點不收 v3 之前的結果檔。
 v4（#1032）：終點與原牆各加低於第三階段計分下界的觀察，改善另列；v3、v2 僅准報告讀。
 #990：設計照 ``project.json`` 的安裝方式建（貼在原牆上時匯出的面是 ``MountedOnWall``，背後是方案原本那面牆）；
 結果檔剛背是 v4（照舊，終點照收、讀成剛背）、貼在原牆上是 v5（每面帶安裝方式），兩種都要跟帳本重建的整份相等。
+v5（#562 C）：接六類搜尋結果 v6／v7；三組數與原牆改善必填，交接頻率與截斷旗標各記一次；舊終點 v4／v3／v2 僅准報告讀。
 """
 from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, Literal, Self
@@ -41,6 +43,7 @@ from aosr.gradient.cli import keep_signal_handlers
 from aosr.gradient.gpu import Device
 from aosr.physics.fem_full_batch import checked_device_workers
 from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
+from aosr.gradient.endpoint_six import EndpointSix, score_endpoint, scoring_context
 from aosr.gradient.endpoint import (
     EndpointReport, EndpointResult, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
     UnscoredBand, UnscoredImprovement, below_scoring_improvement, below_scoring_notes, worst_big_peak,
@@ -48,8 +51,10 @@ from aosr.gradient.endpoint import (
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.gradient.boundary import BoundaryKey
 from aosr.gradient.material_gradient_ledger import MaterialGradientHeader, header_for
+from aosr.gradient.material_gradient import SurfaceDesign
 from aosr.gradient.run import (
-    LEDGER_FILE, RESULT_FILE, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
+    LEDGER_FILE, RESULT_FILE, RESULT_VERSION, MOUNTED_RESULT_VERSION, LOW_FREQUENCY_RESULT_VERSION,
+    LOW_FREQUENCY_MOUNTED_RESULT_VERSION, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
     parse_result, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
     search_objective_settings, template_header_for, write_json_atomic,
 )
@@ -66,7 +71,8 @@ from aosr.scoring.gradient_objective_jax import (
 
 ENDPOINT_FILE: Final = "endpoint.json"
 EXPORTED_SCHEME_FILE: Final = "scheme-endpoint.json"
-ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v4"
+ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v5"
+PRE_SIX_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v4"
 PRE_RANGE_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v3"
 # 上一版（梯度目標還沒有大峰代理項）：報告准讀。
 LEGACY_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v2"
@@ -122,10 +128,11 @@ class EndpointRecord(BaseModel):
     結果檔與搜尋身分逐件比，任一件變了就認得出這份過期。``engine_commit`` 是 ``project.json`` 記的（開始時給的那一個），終點不另量。
     v2（庚三）多了換樣板帳本摘要；v1 的檔報告當過期（要重跑 endpoint）。
     v3（#561 壬一）：報告、基準、改善都帶新合分與大峰代理（報告另帶上界 T·ln N）；v2 這幾格都沒有。
+    v5 的 ``six_category`` 必須完整帶終點、原牆、改善；舊版不准含此欄（包括空值）。
     """
 
     model_config = _FROZEN
-    format_version: Literal["aosr.material_gradient_endpoint.v4", "aosr.material_gradient_endpoint.v3",
+    format_version: Literal["aosr.material_gradient_endpoint.v5", "aosr.material_gradient_endpoint.v4", "aosr.material_gradient_endpoint.v3",
                             "aosr.material_gradient_endpoint.v2"]
     gradient_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     result_ledger_sha256: str = Field(pattern=_SHA256)
@@ -139,6 +146,7 @@ class EndpointRecord(BaseModel):
     seconds: EndpointSeconds
     finished_at: str
     engine_commit: str | None
+    six_category: EndpointSix | None = Field(default=None, exclude_if=lambda value: value is None)
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
     max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
 
@@ -154,8 +162,11 @@ class EndpointRecord(BaseModel):
             raise ValueError(f"{ENDPOINT_VERSION} 的報告、基準與改善都要帶新合分與大峰代理；"
                              f"{LEGACY_ENDPOINT_VERSION} 都沒有")
         notes = (self.report.below_scoring, self.baseline.below_scoring, self.improvement.below_scoring)
-        if any((value is not None) != (self.format_version == ENDPOINT_VERSION) for value in notes):
+        if any((value is not None) != (self.format_version in (ENDPOINT_VERSION, PRE_SIX_ENDPOINT_VERSION)) for value in notes):
             raise ValueError("v4 的報告、原牆與改善都要帶不計分低頻加註；v3、v2 都沒有")
+        if ((self.six_category is not None) != (self.format_version == ENDPOINT_VERSION)
+                or self.format_version != ENDPOINT_VERSION and 'six_category' in self.model_fields_set):
+            raise ValueError("v5 必須帶六類終點三組數；v4、v3、v2 不准有六類終點欄位")
         if self.report.below_scoring is not None and self.baseline.below_scoring is not None:
             expected = below_scoring_improvement(self.baseline.below_scoring, self.report.below_scoring)
             if self.improvement.below_scoring != expected:
@@ -167,18 +178,22 @@ class EndpointRecord(BaseModel):
 
 def read_endpoint(folder: Path, *, legacy: bool = False) -> EndpointRecord:
     """讀 ``endpoint.json``：先看版本，不是這一版就拒收、訊息講明版本（要重跑 endpoint）；
-    ``legacy=True`` 只給報告用，准讀 v3（加低頻加註之前）與 v2（加大峰代理之前）。"""
+    ``legacy=True`` 只給報告用，准讀 v4／v3／v2，舊檔不能當新版終點接續或重算的輸入。"""
     content = (folder / ENDPOINT_FILE).read_bytes()
     document = json.loads(content)
     version = document.get("format_version") if isinstance(document, dict) else None
-    if version != ENDPOINT_VERSION and not (legacy and version in (PRE_RANGE_ENDPOINT_VERSION, LEGACY_ENDPOINT_VERSION)):
-        raise ValueError(f"{ENDPOINT_FILE} 版本是 {version!r}，這一版只收 {ENDPOINT_VERSION}；要重跑 endpoint")
+    if version != ENDPOINT_VERSION and not (legacy and version in (PRE_SIX_ENDPOINT_VERSION, PRE_RANGE_ENDPOINT_VERSION, LEGACY_ENDPOINT_VERSION)):
+        raise ValueError(f"{ENDPOINT_FILE} 版本是 {version!r}，這一版只收 {ENDPOINT_VERSION}；舊版只准報告讀，不准接續或重算")
     return EndpointRecord.model_validate_json(content)
 
 
 def read_result(folder: Path, *, legacy: bool = False) -> GradientResult:
-    """讀 ``result.json``（:func:`aosr.gradient.run.parse_result`：v2 與更舊的講明版本拒收；``legacy`` 准讀 v3；v4 剛背、v5 貼在原牆上）。"""
-    return parse_result((folder / RESULT_FILE).read_bytes(), legacy=legacy)
+    """讀六類結果 v6（剛背）／v7（貼牆）；歷史 v4／v5 仍核帳本，``legacy`` 另准報告讀 v3。"""
+    content = (folder / RESULT_FILE).read_bytes()
+    document = json.loads(content)
+    version = document.get("format_version") if isinstance(document, dict) else None
+    return parse_result(content, legacy=legacy or version in (
+        LOW_FREQUENCY_RESULT_VERSION, LOW_FREQUENCY_MOUNTED_RESULT_VERSION))
 
 
 def exported_scheme(scheme: Scheme, scene: Scene, gradient_id: str) -> Scheme:
@@ -194,7 +209,8 @@ def checked_result[K: BoundaryKey](folder: Path, given: GradientResult, header: 
     """結果檔不能只信它自己說的：從兩本帳（庚二帳本標頭要等於 ``header``；換樣板帳本標頭要等於照它與現在的庚二帳本摘要
     重建的）重建整份結果，跟檔裡那份整個模型相等才收，回重建那一份；不等就拒收、列出哪幾格不同。"""
     template_header = template_header_for(header, settings, kept, base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
-    rebuilt = result_from_ledger(folder, settings, kept, expected_header=header, expected_template_header=template_header)
+    rebuilt = result_from_ledger(folder, settings, kept, expected_header=header, expected_template_header=template_header,
+                                 legacy=given.format_version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION))
     if rebuilt != given:
         actual, expected = given.model_dump(), rebuilt.model_dump()
         differing = sorted(name for name in expected if actual.get(name) != expected[name])
@@ -257,27 +273,71 @@ def check_operators_digest(project: GradientProject, operators: FullOperators) -
         raise ValueError("完整模型指紋跟開始時不同，拒收")
 
 
+def _baseline_for[K: BoundaryKey](scheme: Scheme, model: ReducedModel, objective: GradientObjectiveSettings,
+        operators: FullOperators, kept: Mapping[K, SurfaceMaterial], *, workers: int, device: Device,
+        refinement_steps: list[int]) -> tuple[NDArray[np.complex128], EndpointBaseline, ObjectiveReading]:
+    """原牆完整解一次，同一份聲壓供歷史低頻對照與六類三組數。"""
+    _require_low_frequency_axis(scheme)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案沒有低頻軸")
+    air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
+    axis = tuple(float(value) for value in model.frequencies_hz)
+    pressures = full_model_pressures(operators, kept, axis, air=air, ranges=ranges,
+        max_relative_residual=model.ledger.settings.full_solve_max_relative_residual,
+        workers=workers, device=device, refinement_steps=refinement_steps)
+    constants = gradient_objective_constants(axis, objective, scheme.receiver_set, len(model.source_names))
+    peaks = big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
+        frequencies_hz=axis, low_frequency_axis=scheme.scene.low_frequency_axis, scoring_range_hz=objective.stage_one.scored_range_hz)
+    baseline, reading = _full_baseline(constants, pressures, peaks)
+    return pressures, baseline, reading
+
+
+def _endpoint_for(project: GradientProject, scheme: Scheme, model: ReducedModel, settings: MaterialGradientSettings,
+        designs: tuple[SurfaceDesign, ...], theta: NDArray[np.float64], operators: FullOperators, *,
+        workers: int, device: Device, refinement_steps: list[int]) -> EndpointResult:
+    """沿用既有終點聲壓與低頻診斷入口；這一套完整解同時供六類評分。"""
+    _require_low_frequency_axis(scheme)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案沒有低頻軸")
+    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
+                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    return endpoint_check(operators, designs, theta, model=model, objective_settings=search_objective_settings(project.purpose),
+        receiver_set=scheme.receiver_set, low_frequency_axis=scheme.scene.low_frequency_axis,
+        presets=load_construction_presets(config_path('construction_presets.toml')), settings=settings, air=air, ranges=ranges,
+        workers=workers, frequency_batch=project.frequency_batch, device=device, refinement_steps=refinement_steps)
+
+
+def _ordered_operators(operators: FullOperators, model: ReducedModel) -> FullOperators:
+    """指紋核對後才按替身聲源／座位序重排，不改任何矩陣或向量值。"""
+    if set(operators.sources) != set(model.source_names) or set(operators.receivers) != set(model.receiver_names):
+        raise ValueError('完整算子的聲源或座位名稱與替身不同')
+    return replace(operators, sources={name: operators.sources[name] for name in model.source_names},
+                   receivers={name: operators.receivers[name] for name in model.receiver_names})
+
+
+def _require_low_frequency_axis(scheme: Scheme) -> None:
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError('方案場景沒有 low_frequency_axis（低頻軸），終點量大峰要它，拒收')
+
+
 def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> EndpointRecord:
-    """整段終點：核輸入、匯出算子、終點重算、原牆基準、匯出方案檔、寫 ``endpoint.json``；回寫進去的那一份。"""
+    """首次計算終點；低頻結果 v4/v5 也算六類、寫 endpoint v5。已有任何終點檔都拒絕覆寫。"""
     checked_device_workers(device, workers)
+    if (folder / ENDPOINT_FILE).exists():
+        raise ValueError("已有 endpoint.json；要重算先把舊檔移走")
     refinement_steps: list[int] = []
     project = read_project(folder)
-    scheme, model, settings = check_inputs(project)
+    if (folder / RESULT_FILE).exists():
+        read_result(folder)
+    scheme, model, settings = check_inputs(project, allow_legacy_objective=True)
     if not (folder / RESULT_FILE).exists():
         raise ValueError(f"資料夾 {folder} 沒有 {RESULT_FILE}：先把搜尋跑完（start 或 resume）再跑 endpoint")
     result_sha256 = file_sha256(folder / RESULT_FILE)
-    axis_id = scheme.scene.low_frequency_axis
-    if axis_id is None:
-        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸），終點量大峰要它，拒收")
+    _require_low_frequency_axis(scheme)
+    given = read_result(folder)
+    current = given.format_version in (RESULT_VERSION, MOUNTED_RESULT_VERSION)
     capabilities = load_capabilities(project.capabilities_path)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
-    kept = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
-    result = checked_result(folder, read_result(folder), header_for(
-        model, initial, settings, objective_constants=search_objective_constants(project, scheme, model)), settings, kept)
-    designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
-                            mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     clock = time.perf_counter()
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -285,38 +345,39 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     if operators.mesh_hash != project.mesh_hash or operators.physics_identity != project.physics_identity:
         raise ValueError("方案匯出的完整模型跟開始時記的網格雜湊或物理身分不同，拒收")
     check_operators_digest(project, operators)
+    operators = _ordered_operators(operators, model)
+    context = scoring_context(scheme, model, project.purpose, capabilities=capabilities, directivity=directivity,
+                               capabilities_path=Path(project.capabilities_path), engine_commit=project.engine_commit)
+    kept = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
+    initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
+    result = checked_result(folder, given, header_for(model, initial, settings,
+        objective_constants=context.constants if current else search_objective_constants(project, scheme, model)), settings, kept)
+    designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
+                            mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     objective = search_objective_settings(project.purpose)
-    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
-                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
     clock = time.perf_counter()
-    checked = endpoint_check(operators, designs, theta, model=model, objective_settings=objective,
-                             receiver_set=scheme.receiver_set, low_frequency_axis=axis_id,
-                             presets=load_construction_presets(config_path("construction_presets.toml")),
-                             settings=settings, air=air, ranges=ranges, workers=workers, frequency_batch=project.frequency_batch,
-                             device=device, refinement_steps=refinement_steps)
+    checked = _endpoint_for(project, scheme, model, settings, designs, theta, operators,
+                             workers=workers, device=device, refinement_steps=refinement_steps)
     endpoint_seconds = time.perf_counter() - clock
     clock = time.perf_counter()
-    axis = tuple(float(value) for value in model.frequencies_hz)
-    pressures = full_model_pressures(operators, kept, axis, air=air, ranges=ranges,
-                                     max_relative_residual=model.ledger.settings.full_solve_max_relative_residual,
-                                     workers=workers, device=device, refinement_steps=refinement_steps)
-    constants = gradient_objective_constants(axis, objective, scheme.receiver_set, len(model.source_names))
-    peaks = big_peaks(pressures, speaker_ids=model.source_names, receiver_set=scheme.receiver_set,
-                      frequencies_hz=axis, low_frequency_axis=axis_id,
-                      scoring_range_hz=objective.stage_one.scored_range_hz)
-    baseline, base = _full_baseline(constants, pressures, peaks)
+    pressures, baseline, base = _baseline_for(scheme, model, objective, operators, kept,
+        workers=workers, device=device, refinement_steps=refinement_steps)
     baseline_seconds = time.perf_counter() - clock
     report, baseline = _annotate_endpoint(checked, baseline, pressures, model, scheme, objective)
     improvement = _improvement(baseline, report, base)
     materials = materials_from_surfaces(designs, theta, settings)
     exported = exported_scheme(scheme, scene_with_materials(scheme.scene, materials), project.gradient_id)
+    original_designs = designs_for((None,) * len(initial), settings, kept=kept)
+    six = score_endpoint(context, model, designs, np.asarray(report.exported_theta), checked.full_pressure,
+                         checked.reduced_pressure, original_designs, pressures, exported)
     write_json_atomic(folder / EXPORTED_SCHEME_FILE, exported)
     record = EndpointRecord(
         device=device, max_refinement_steps=max(refinement_steps) if device == "gpu" else None,
         format_version=ENDPOINT_VERSION, gradient_id=project.gradient_id, result_ledger_sha256=result.ledger_sha256,
         result_template_ledger_sha256=result.template_ledger_sha256, result_sha256=result_sha256,
-        report=report, baseline=baseline,
+        report=report, baseline=baseline, six_category=six,
         improvement=improvement,
         exported_scheme=EXPORTED_SCHEME_FILE,
         exported_scheme_sha256=file_sha256(folder / EXPORTED_SCHEME_FILE),

@@ -34,7 +34,7 @@ from aosr.gradient.material_gradient_ledger import (
     CandidateJump, CandidateOutcome, MaterialGradientHeader, MaterialGradientRow, RoundDecision, append_rows,
     decision_row, descent_rows, jump_row, read_ledger, truncate_rows,
 )
-from aosr.scoring.gradient_objective_jax import objective_reading
+from aosr.gradient.material_gradient import objective_reading, estimable, Unestimable
 
 
 Direction = Literal["thinner", "thicker"]
@@ -63,8 +63,8 @@ class ConfirmedCandidate(NamedTuple):
     candidate: Candidate
     jump_theta: FloatVector
     retune: DescentResult
-    value: float
-    improvement: float
+    value: float | None
+    improvement: float | None
 
 
 class RoundResult(NamedTuple):
@@ -98,7 +98,7 @@ class RoundSummary(NamedTuple):
     round: int
     value: float
     baseline_value: float | None
-    outcomes: tuple[tuple[str, float, float], ...]
+    outcomes: tuple[tuple[str, float | None, float | None], ...]
     accepted: str | None
     evaluations: int
     total_evaluations: int
@@ -241,6 +241,8 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
     check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), gradient = compiled_evaluator(objective)(jnp.asarray(theta))
+    if not estimable(value, aux):
+        raise Unestimable("候選確認起點不可估")
     start_value = float(value)
     candidates = candidates_from_gradient(theta, np.asarray(gradient), designs, settings)
     if not candidates:
@@ -248,15 +250,19 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
         return RoundResult(True, bound, start_value, (), None, (), None, theta, start_value, reading.screening_total,
                            reading.components, 1, time.perf_counter() - clock, LOOP_STOP_NO_CANDIDATES)
     baseline = retune_cavities(objective, theta, designs, settings, should_stop=should_stop)
+    if not baseline.steps:
+        raise Unestimable("基準重調起點不可估")
     base_value = baseline.steps[-1].value
     confirmed = []
     for candidate in candidates:
         jumped = apply_candidate(theta, candidate, designs)
         retuned = retune_cavities(objective, jumped, designs, settings, should_stop=should_stop)
-        confirmed.append(ConfirmedCandidate(candidate, jumped, retuned, retuned.steps[-1].value,
-                                            base_value - retuned.steps[-1].value))
-    best = max(confirmed, key=lambda item: item.improvement)
-    accepted = best if best.improvement > settings.candidates.improvement_threshold else None
+        value_after = retuned.steps[-1].value if retuned.steps else None
+        confirmed.append(ConfirmedCandidate(candidate, jumped, retuned, value_after,
+                                            None if value_after is None else base_value - value_after))
+    best = max((item for item in confirmed if item.improvement is not None),
+               key=lambda item: float(item.improvement or 0.0), default=None)
+    accepted = best if best is not None and best.improvement is not None and best.improvement > settings.candidates.improvement_threshold else None
     chosen = accepted.retune if accepted is not None else baseline
     evaluations = 1 + baseline.evaluations + sum(item.retune.evaluations for item in confirmed)
     return RoundResult(True, bound, start_value, candidates, baseline, tuple(confirmed),
@@ -292,6 +298,8 @@ def _segment_rows(result: RoundResult, round_index: int, first_step: int) -> lis
     batches = [list(descent_rows(result.baseline, "baseline_retune", first_step, round=round_index))]
     step = first_step + len(batches[0])
     for item in result.confirmed:
+        if not item.retune.steps:
+            continue
         start = item.retune.steps[0]
         batch = [jump_row(step, round_index, item.candidate.candidate_id, tuple(float(x) for x in item.jump_theta),
                           start.value, start.screening_total, start.components, _jump_model(item)),
@@ -340,7 +348,9 @@ def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequ
             baseline_value=result.baseline.steps[-1].value if result.baseline is not None else None,
             outcomes=tuple(CandidateOutcome(candidate=item.candidate.candidate_id,
                                             predicted_change=item.candidate.predicted_change,
-                                            value=item.value, improvement=item.improvement)
+                                            value=item.value, improvement=item.improvement,
+                                            rejection="候選跳點不可估" if not item.retune.steps else None,
+                                            rejected_evaluations=item.retune.evaluations if not item.retune.steps else 0)
                            for item in result.confirmed),
             threshold=settings.candidates.improvement_threshold,
             accepted=result.accepted.candidate_id if result.accepted is not None else None,

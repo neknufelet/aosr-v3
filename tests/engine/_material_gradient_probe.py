@@ -14,6 +14,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from tests.engine._six_search_helpers import six_header_for, expand_components
+
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -31,7 +33,7 @@ from aosr.scoring.gradient_objective_jax import (
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
-from tests.engine._material_gradient_legacy import legacy_family_settings
+from tests.engine._material_gradient_legacy import legacy_descent_settings
 
 
 Record = dict[str, object]
@@ -137,7 +139,7 @@ def _retune_with_room(objective: gradient_search.ChainObjective, snapped: np.nda
 def main(directory: Path) -> None:
     problem = cast(dict[str, object], json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
-    settings = legacy_family_settings(load_material_gradient_settings(config_path("material_gradient.toml")))
+    settings = legacy_descent_settings(load_material_gradient_settings(config_path("material_gradient.toml")))
     presets = load_construction_presets(config_path("construction_presets.toml"))
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
@@ -186,7 +188,8 @@ def main(directory: Path) -> None:
                     ledger.snap_row(snapped, float(snapped_value), objective_reading(snapped_aux).screening_total,
                                     objective_reading(snapped_aux).components, 0.0, len(first.steps)),
                     *ledger.descent_rows(retuned, "retune", len(first.steps) + 1))
-            header = ledger.header_for(model, designs, settings, objective_constants=constants)
+            header = six_header_for(model, designs, settings, objective_constants=constants)
+            rows = tuple(item.model_copy(update={"components": expand_components(*item.scores())}) for item in rows)
             ledger.write_ledger(directory / f"{name}.ledger.jsonl", header, rows)
             row.update({
                 "start": _hex(start), "lower": _hex(bounds[0]), "upper": _hex(bounds[1]),

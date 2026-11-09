@@ -539,7 +539,19 @@ prefix = "tests.engine."
 # #562 第 4 段前置：兩個 JAX 梯度接縫新增 8 題、未移除；CPU 單行程 collect-only 引擎籃實數 11000，未跑全套。
 # #562 B1：新增 θ → 六類工廠考卷 14 題，純收集實量 11014。
 # #562 B1 審查修補：新增 on_wall 對 numpy 兩題、樣板四路軸涵蓋一題，純收集實量 11017。
-collected_floor = 11017
+# #562 B2a：新增六類搜尋與 CLI 控制 24 題，未移除；CPU collect-only 引擎籃逐檔實數 11041，未跑全套。
+# #562 B2a 修補一：新增混合拒收、worker／CLI 邊界與版本對照 12 題，方向分區指紋 1 題；CPU 純收集實量 11054，未移除、未跑全套。
+# #562 B2b：新增六類單精度／新尺 16 題、淘汰目標釋放 2 格；CPU 純收集實量 11072，未移除、未跑全套。
+# #562 B2b 修補一：新增低頻同源、單次建圖、四路 HLO 與保留 Assembly 控制 7 題；CPU 純收集實量 11079，未移除、未跑全套。
+# #562 B2b 修補二：新增安全聲壓／有效梯度控制 1 題；CPU 純收集實量 11080，未移除、未跑全套。
+# #562 C：六類終點三組數、逐位控制、舊版只讀與超界只報新增 8 題；CPU -n 4 純收集實量 11088，未移除、未跑全套。
+# #562 C 收尾：實量 tests/engine 收集 11093 題；實測原牆改為拒收控制。
+# #562 外審與環境補題：外審 3 題＋去釘選環境 1 題，共 4 題；CPU 純收集實量 11097。
+# #562 CI 審查修補：接續重建控制新增 1 題；CPU 單行程 collect-only 逐檔加總實量 11098。
+# #562 第五輪：新增 running 寫完即中斷的確定性考卷 1 題；CPU 單行程純收集實量 11099。
+# #562 第六輪：新增被吞終止訊號在停止檢查重拋 1 題；CPU 單行程純收集實量 11100。
+# 2026-11-10 老闆拍板：material_gradient_cli、material_gradient_endpoint_cli、material_gradient_mount、material_gradient_templates_cli、gradient_endpoint_range_migration、six_category_endpoint、material_gradient_fixed_surface_cli、six_category_search、six_search_review_fixes、material_gradient_gpu 共 99 題原樣搬至 slow_ 檔；CPU 純收集實量 11001。
+collected_floor = 11001
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

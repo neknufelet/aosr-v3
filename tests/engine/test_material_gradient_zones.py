@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import numpy as np
 import pytest
@@ -16,9 +17,10 @@ from aosr.reporting.scheme import Scheme
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine._surface_zone_cases import rectangle_document
+from tests.engine._material_gradient_legacy import legacy_stopping_settings
 from tests.engine.test_material_gradient import _settings
 from tests.engine.test_material_gradient_mount import (
-    _control_id, _control_kept, _designs, _digest, _header, _ledger_line, _project, _template_header, _template_line,
+    _control_id, _control_kept, _designs, _digest, _project, _template_header,
 )
 
 
@@ -46,10 +48,21 @@ def test_whole_control_at_starting_commit(tmp_path: Path) -> None:
         "xL": "ed4a66abb87eb2d3d438861eae63460efbee4654b40d3baeeb6af2d46f5f1692",
         "y0": "ff2d4e05a9194967576191b229274cb10a503955fadef73ed58fed7724f78d78",
         "yL": "9aa0be661d4d1836d45bda2695460415acb4847912bb17f78b140d673c4e4fec"}
-    header = _header(designs)
+    from aosr.gradient import material_gradient_ledger as ledger
+    from aosr.scoring.gradient_objective_jax import gradient_objective_constants
+    from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+    from tests.engine.test_material_gradient import _gradient_settings, _receivers
+    from tests.engine.test_material_gradient_mount import _stand_in
+    constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
+    settings = legacy_stopping_settings(_settings())
+    header = ledger.header_for(_stand_in(), designs, settings, objective_constants=constants)
+    # 歷史標頭只讀；新版搜尋的標頭不能冒充舊版位元組。
+    line = (json.dumps(header.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
+    (tmp_path / 'legacy-ledger.jsonl').write_bytes(line)
+    assert ledger.read_ledger(tmp_path / 'legacy-ledger.jsonl',legacy=True)[0] == header
     # #561 更新家族設定指紋；#1032 更新計分範圍的目標常數指紋；這兩格是純標頭序列化，沒有重錄求解答案。
-    assert _digest(_ledger_line(tmp_path / "ledger.jsonl", header)) == "1e8c6edf1569caa3e3c4e8e8bb310d0d59c7f194216689f35a0c9b6160d0c4df"
-    assert _digest(_template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))) == "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
+    assert _digest(line) == "1e8c6edf1569caa3e3c4e8e8bb310d0d59c7f194216689f35a0c9b6160d0c4df"
+    assert _digest((json.dumps(_template_header(header, _control_kept(), settings).model_dump(mode="json"),ensure_ascii=False)+"\n").encode()) == "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project())
     assert _digest((tmp_path / run.PROJECT_FILE).read_bytes()) == "d51fbff4611f4915537fc6df82b5de4c1822dcb1b3c334c6245c9eb4f5979485"
 

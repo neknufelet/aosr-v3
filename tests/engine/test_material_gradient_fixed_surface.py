@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 import numpy as np
@@ -30,7 +31,7 @@ from aosr.gradient.report import _kept_texts
 from aosr.physics.report_surfaces import WholeWallZone
 from tests.engine._material_gradient_templates_probe import SYNTHETIC_SCORES, synthetic_factory
 from tests.engine.test_material_gradient import _presets, _settings
-from tests.engine._material_gradient_legacy import legacy_family_settings
+from tests.engine._material_gradient_legacy import legacy_descent_settings
 from tests.engine.test_material_gradient_mount import (
     _control_kept, _header, _project, test_rigid_identities_equal_mainline_bit_for_bit as _mount_control,
 )
@@ -42,7 +43,7 @@ CONTROL: dict[str, str] = {'ledger.jsonl': 'bfaf2131f221dd55b9c39a2ea3e70e8ead7b
 
 
 def _problem(fixed: dict[str, str] | None = None) -> run.GradientProblem:
-    settings = _settings() if fixed else legacy_family_settings(_settings())
+    settings = _settings() if fixed else legacy_descent_settings(_settings())
     kept = _control_kept()
     designs = run.designs_for(PRESETS, settings, kept={wall: kept[wall.wall_name()] for wall in Wall.all()}, fixed_surfaces=fixed)
     factory = synthetic_factory(settings, {}, [0])
@@ -51,6 +52,36 @@ def _problem(fixed: dict[str, str] | None = None) -> run.GradientProblem:
     return run.GradientProblem(designs, settings, factory(designs), header,
                                {wall: kept[wall.wall_name()] for wall in Wall.all()}, context)
 
+
+
+def _old_schema(value: object) -> object:
+    """只剔除本次換版欄位，保留歷史數值控制；不重錄舊答案。"""
+    if isinstance(value, list):
+        return [_old_schema(item) for item in cast(list[object], value)]
+    if not isinstance(value, dict):
+        return value
+    source = cast(dict[str, object], value)
+    result = {key:_old_schema(item) for key,item in source.items()
+              if key not in ('category_weights','unestimable_trials','rejected_quick','rejected_candidates',
+                             'rejection','rejected_evaluations')}
+    components = result.get('components')
+    if isinstance(components,list):
+        result['components'] = components[:3]
+    elif isinstance(components,dict):
+        result['components'] = {key:components[key] for key in search.COMPONENT_NAMES[:3]}
+    if result.get('ledger_version') == ledger.LEDGER_VERSION:
+        result['ledger_version'] = ledger.LEGACY_LEDGER_VERSION
+    elif result.get('ledger_version') == templates.TEMPLATE_LEDGER_VERSION:
+        result['ledger_version'] = templates.LEGACY_TEMPLATE_LEDGER_VERSION
+    if result.get('format_version') == run.RESULT_VERSION:
+        result['format_version'] = run.LOW_FREQUENCY_RESULT_VERSION
+    if 'objective_fingerprint' in result:
+        from aosr.scoring.gradient_objective_jax import gradient_objective_constants
+        from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+        from tests.engine.test_material_gradient import _gradient_settings, _receivers
+        result['objective_fingerprint'] = ledger.objective_fingerprint(gradient_objective_constants(
+            np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2))
+    return result
 
 def _snapshot(folder: Path) -> dict[str, str]:
     """秒數是量測值；結果中的帳本摘要也受秒數影響，其餘全部進逐位控制。"""
@@ -62,7 +93,7 @@ def _snapshot(folder: Path) -> dict[str, str]:
             for key in ("base_ledger_sha256", "ledger_sha256", "template_ledger_sha256"):
                 if key in item:
                     item[key] = "measured-seconds-dependent"
-        result[name] = hashlib.sha256(json.dumps(lines, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        result[name] = hashlib.sha256(json.dumps(_old_schema(lines), sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return result
 
 

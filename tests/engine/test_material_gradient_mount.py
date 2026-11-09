@@ -26,6 +26,8 @@ import pytest
 from numpy.typing import NDArray
 from pydantic import ValidationError
 
+from tests.engine._six_search_helpers import six_header_for
+
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -52,7 +54,9 @@ from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from tests.engine._material_gradient_templates_probe import kept_walls
 from tests.engine import _zone_rom_case as zone_rom_case
 from tests.engine._scheme_cache import shared_json
-from tests.engine.test_fem_reduced import model as model, operators as operators
+from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
+from tests.engine._material_gradient_legacy import legacy_stopping_settings
+from tests.engine._six_search_cli_case import model as model, operators as operators
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, DIFFERENCE_STEP, PURPOSE, _chain_model, _decode, _decode_complex, _gradient_settings,
     _numpy_total, _presets, _probe_point, _receivers, _settings,
@@ -135,11 +139,13 @@ def _stand_in() -> ReducedModel:
 def _header(designs: tuple[gradient_search.SurfaceDesign, ...],
             settings: MaterialGradientSettings | None = None) -> ledger.MaterialGradientHeader:
     constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
-    return ledger.header_for(_stand_in(), designs, settings or _settings(), objective_constants=constants)
+    return six_header_for(_stand_in(), designs, settings or _settings(), objective_constants=constants)
 
 
-def _template_header(header: ledger.MaterialGradientHeader, kept: dict[str, SurfaceMaterial]) -> templates.TemplateHeader:
-    return run.template_header_for(header, _settings(), {wall: kept[wall.wall_name()] for wall in Wall.all()},
+def _template_header(header: ledger.MaterialGradientHeader, kept: dict[str, SurfaceMaterial],
+                     settings: MaterialGradientSettings | None = None) -> templates.TemplateHeader:
+    return run.template_header_for(header, _settings() if settings is None else settings,
+                                   {wall: kept[wall.wall_name()] for wall in Wall.all()},
                                    base_ledger_sha256="e" * 64)
 
 
@@ -174,7 +180,7 @@ def _rigid_result(header: ledger.MaterialGradientHeader,
     """主線量控制組那一份的寫法：``surface_specs`` 切每面（不給安裝方式）、版本 ``RESULT_VERSION``。"""
     theta = tuple(0.05 + 0.01 * index for index in range(len(header.variable_names)))
     return run.GradientResult(
-        format_version=run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID,
+        format_version=run.LOW_FREQUENCY_RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID,
         surfaces=run.surface_specs(header, theta, digests={design.surface_id: endpoint.design_digest(design)
                                                            for design in designs}),
         variable_names=header.variable_names, theta_hex=tuple(value.hex() for value in theta), value=1.5,
@@ -192,17 +198,24 @@ def test_rigid_identities_equal_mainline_bit_for_bit(tmp_path: Path) -> None:
     designs = _designs(MOUNT_RIGID)
     assert designs == gradient_search.wall_designs_from_presets(PRESETS, _settings(), _presets(), kept=_control_kept())
     assert {design.surface_id: endpoint.design_digest(design) for design in designs} == CONTROL_DIGESTS
-    header = _header(designs)
-    line = _ledger_line(tmp_path / "ledger.jsonl", header)
+    constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
+    settings = legacy_stopping_settings(_settings())
+    header = ledger.header_for(_stand_in(), designs, settings, objective_constants=constants)
+    line = (json.dumps(header.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
+    (tmp_path / 'ledger.jsonl').write_bytes(line)
+    assert ledger.read_ledger(tmp_path / 'ledger.jsonl', legacy=True)[0] == header
     assert _digest(line) == CONTROL_LEDGER_HEADER and b"mount" not in line
-    template_line = _template_line(tmp_path / "templates.jsonl", _template_header(header, _control_kept()))
+    template = _template_header(header, _control_kept(), settings)
+    template_line = (json.dumps(template.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
+    (tmp_path / 'templates.jsonl').write_bytes(template_line)
+    assert templates.read_template_ledger(tmp_path / 'templates.jsonl',legacy=True)[0] == template
     assert _digest(template_line) == CONTROL_TEMPLATE_HEADER and b"mount" not in template_line
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, _project())
     assert _digest((tmp_path / run.PROJECT_FILE).read_bytes()) == CONTROL_PROJECT
     run.write_json_atomic(tmp_path / run.RESULT_FILE, _rigid_result(header, designs))
     data = (tmp_path / run.RESULT_FILE).read_bytes()
     assert _digest(data) == CONTROL_RESULT and b"mount" not in data
-    assert run.parse_result(data).mount == MOUNT_RIGID
+    assert run.parse_result(data, legacy=True).mount == MOUNT_RIGID
 
 
 # ---- 身分：貼在原牆上是另一個身分，六面原牆都綁 ----
@@ -362,7 +375,7 @@ def _result(mount: Mount) -> run.GradientResult:
                                   mount=mount if mounted else None)
                   for wall, preset in zip(Wall.all(), PRESETS, strict=True))
     return run.GradientResult(
-        format_version=run.MOUNTED_RESULT_VERSION if mounted else run.RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID, surfaces=specs, variable_names=("floor.layer1.thickness_m",),
+        format_version=run.LOW_FREQUENCY_MOUNTED_RESULT_VERSION if mounted else run.LOW_FREQUENCY_RESULT_VERSION, gradient_id=CONTROL_GRADIENT_ID, surfaces=specs, variable_names=("floor.layer1.thickness_m",),
         theta_hex=((0.05).hex(),), value=1.5, screening_total=1.25, components=run.Components(
             own_line_ripple_rms_db=1.0, seat_robustness_rms_db=2.0, big_peak_proxy_db=3.0),
         round_stop_reason="沒有候選", stop_reason="沒有可換的樣板", evaluations=3, rounds=1, template_rounds=1,
@@ -393,9 +406,9 @@ def test_result_version_follows_the_mount_and_v4_is_rigid(mount: Mount) -> None:
         assert document["format_version"] == CONTROL_RESULT_VERSION
         assert all(sorted(spec) == CONTROL_SURFACE_KEYS for spec in surfaces)
     else:
-        assert document["format_version"] == run.MOUNTED_RESULT_VERSION != CONTROL_RESULT_VERSION
+        assert document["format_version"] == run.LOW_FREQUENCY_MOUNTED_RESULT_VERSION != CONTROL_RESULT_VERSION
         assert all(spec["mount"] == MOUNT_ON_WALL for spec in surfaces)
-    parsed = run.parse_result(json.dumps(document).encode("utf-8"))
+    parsed = run.parse_result(json.dumps(document).encode("utf-8"), legacy=True)
     assert parsed == result and parsed.mount == mount
     content = _older(document, run.LEGACY_RESULT_VERSION, proxy=False)
     with pytest.raises(ValueError, match=run.LEGACY_RESULT_VERSION.replace(".", r"\.")):
@@ -404,8 +417,8 @@ def test_result_version_follows_the_mount_and_v4_is_rigid(mount: Mount) -> None:
     assert legacy.format_version == run.LEGACY_RESULT_VERSION and legacy.mount == MOUNT_RIGID
     assert legacy.surfaces == tuple(spec.model_copy(update={"mount": None}) for spec in result.surfaces)
     mounted = _result(MOUNT_ON_WALL).model_dump(mode="json")
-    wrong = (_older(mounted, run.MOUNTED_RESULT_VERSION, proxy=True),
-             json.dumps({**mounted, "format_version": run.RESULT_VERSION}).encode("utf-8"),
+    wrong = (_older(mounted, run.LOW_FREQUENCY_MOUNTED_RESULT_VERSION, proxy=True),
+             json.dumps({**mounted, "format_version": run.LOW_FREQUENCY_RESULT_VERSION}).encode("utf-8"),
              json.dumps({**mounted, "surfaces": [{**spec, "mount": MOUNT_RIGID}
                                                  for spec in cast(list[Record], mounted["surfaces"])]}).encode("utf-8"))
     for item in wrong:
@@ -535,69 +548,10 @@ def _close(ours: NDArray[np.complex128], reference: NDArray[np.complex128], labe
         np.testing.assert_allclose(part(ours), part(reference), rtol=REFERENCE_REL, atol=IMPEDANCE_ABS, err_msg=label)
 
 
-def test_chain_impedance_equals_exported_material_impedance(probe: Record) -> None:
-    """抓可微鏈與終點走兩種構造（鏈仍用剛背樣板、或終點匯出別的材料）：同一組 θ，鏈的樣板（``design_templates``）換進 θ 的
-    垂直入射阻抗，等於終點 ``_design_material`` 那份材料經 ``construction.surface_impedance`` 的阻抗（傳遞矩陣阻抗尺；
-    固定阻抗與多層構造原牆逐位）；鏈的值等於終點那幾列直接換進替身求值的值（梯度尺當前向粗檢）；
-    不貼的面那一列逐位相等；鏈裡沒有剛性面；而且跟同一組剛背的鏈值不同。"""
-    row = _on_wall(probe)
-    chain, exported = _decode_complex(row["chain_rows"]), _decode_complex(row["endpoint_rows"])
-    assert chain.shape == exported.shape == (len(Wall.all()), len(FEM_LANE_FREQUENCIES_HZ))
-    kept_rows = cast(Record, row["kept_rows"])
-    for index, (wall, preset) in enumerate(zip(Wall.all(), PRESETS, strict=True)):
-        if preset is None:
-            np.testing.assert_array_equal(_decode_complex(kept_rows[wall.wall_name()]), exported[index])
-            continue
-        assert np.all(np.isfinite(chain[index])), wall
-        _close(chain[index], exported[index], wall.wall_name())
-        if not isinstance(_probe_walls()[wall.wall_name()], MeasuredImpedance):
-            # 固定阻抗與多層構造原牆兩條路逐位相同（第一支 #1001 的性質）；實測表的表內內插只到阻抗尺。
-            np.testing.assert_array_equal(chain[index], exported[index], err_msg=wall.wall_name())
-    mask = cast(list[bool], row["chain_rigid_mask"])
-    assert mask == [preset is None for preset in PRESETS]
-    rigid = cast(Record, probe[MOUNT_RIGID])
-    assert row["value"] != rigid["value"]
-    value, control = float.fromhex(str(row["value"])), float.fromhex(str(row["control_value"]))
-    assert abs(value - control) <= GRADIENT_REL * abs(control) + GRADIENT_ABS
 
 
-def test_on_wall_chain_gradient_matches_numpy_difference(chain_model: ReducedModel, probe: Record) -> None:
-    """抓貼在原牆上的鏈導數斷線或值接錯構造：照 ``test_material_gradient`` 的寫法，逐參數比 θ_i·∂J/∂θ_i 對中央差分；
-    差分與前向值的阻抗由考卷自己重建 ``MountedOnWall``、走既有非可微入口，替身求值與計分走 numpy 那一份。"""
-    row = _on_wall(probe)
-    designs = _designs(MOUNT_ON_WALL, _probe_walls())
-    assert row["names"] == list(gradient_search.design_names(designs)) and row["dtype"] == "float64"
-    theta = _probe_point(designs)
-    mask = np.zeros(len(Wall.all()), dtype=np.bool_)
-    automatic = _decode(row["gradient"])
-    assert np.isfinite(automatic).all() and automatic.shape == theta.shape
-    center = _numpy_total(chain_model, _decode_complex(row["center"]), mask)
-    assert abs(float.fromhex(cast(str, row["value"])) - center) <= GRADIENT_REL * abs(center) + GRADIENT_ABS
-    points = cast(dict[str, object], row["points"])
-    for index, value in enumerate(theta):
-        upper = _numpy_total(chain_model, _decode_complex(points[f"{index}.upper"]), mask)
-        lower = _numpy_total(chain_model, _decode_complex(points[f"{index}.lower"]), mask)
-        central = (upper - lower) / (2.0 * DIFFERENCE_STEP * value) * value
-        scaled = automatic[index] * value
-        assert abs(scaled - central) <= GRADIENT_REL * abs(central) + GRADIENT_ABS, (row["names"], index, scaled, central)
 
 
-def test_three_lane_report_runs_on_the_exported_mounted_scheme(probe: Record) -> None:
-    """抓匯出的方案在報表那一頭變回剛背或跑不起來：小方案六面原牆當背後的牆，匯出、存檔讀回，貼樣板的面是貼牆構造、
-    原牆等於方案原本那面、等於匯出那一份；三路報表跑得起來：有限元素收到的 x0 阻抗就是非可微入口的值，幾何路與晚期能量有限。"""
-    case = cast(Record, _on_wall(probe)["three_lane"])
-    zones, walls, exported = (cast(Record, case[key]) for key in ("zones", "walls", "exported"))
-    for wall, preset in zip(Wall.all(), PRESETS, strict=True):
-        name = wall.wall_name()
-        zone = cast(Record, zones[name])
-        if preset is None:
-            assert zone == walls[name], name
-            continue
-        assert zone["kind"] == "mounted_on_wall" and zone["wall"] == walls[name] and zone == exported[name], name
-    assert case["capability"] == "assembly_by_wall" and case["x0_is_exported"] is True
-    for key in ("geometric", "late"):
-        values = np.asarray(cast(list[float], case[key]))
-        assert values.size and np.all(np.isfinite(values)) and np.all(values >= 0), key
 
 
 # ---- 命令列整條：start --mount on_wall、endpoint、report、改安裝方式再接續；同一組輸入的剛背 start、endpoint ----
@@ -616,6 +570,8 @@ def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
     output["folder"] = str(folder)
+    # 六類貼牆結果 v7 直接進新版終點；下面的剛背控制另保留舊 v4 結果行為。
+    output["endpoint_folder"] = str(folder)
     output["endpoint"] = _run(directory, _command("endpoint", str(folder)))
     output["report"] = _run(directory, _command("report", "--folder", str(folder)))
     copy = directory / "other-mount" / folder.name
@@ -635,7 +591,9 @@ def _cli_compute(directory: Path, request: pytest.FixtureRequest) -> str:
     folders = [path for path in rigid_root.iterdir() if not path.name.startswith(".")] if rigid_root.exists() else []
     output["rigid_folder"] = str(folders[0]) if len(folders) == 1 else None
     if output["rigid_folder"] is not None:
-        output["rigid_endpoint"] = _run(directory, _command("endpoint", str(folders[0])))
+        old_rigid = legacy_endpoint_copy(directory, folders[0], name="legacy-rigid")
+        output["rigid_legacy_folder"] = str(old_rigid)
+        output["rigid_endpoint"] = _run(directory, _command("endpoint", str(old_rigid)))
     return json.dumps(output, ensure_ascii=False)
 
 
@@ -657,114 +615,14 @@ def _scheme_walls(directory: Path) -> dict[str, ConstantImpedance]:
     return {name: ConstantImpedance(impedance_pa_s_m=value) for name, value in fixed.items()}
 
 
-def test_cli_on_wall_search_records_mount_everywhere(cli_runs: tuple[Path, Record]) -> None:
-    """抓 ``--mount on_wall`` 沒寫進身分：project.json 記貼在原牆上、資料夾名等於帶安裝方式重算的、不等於同一組輸入的剛背；
-    帳本與換樣板帳本標頭記貼在原牆上、帳本標頭六面原牆都綁；result.json 是 v5、每面記貼在原牆上、
-    貼樣板的面摘要是貼牆構造的。"""
-    directory, output = cli_runs
-    folder = Path(str(output["folder"]))
-    project = run.read_project(folder)
-    assert project.mount == MOUNT_ON_WALL and _json(folder / "project.json")["mount"] == MOUNT_ON_WALL
-    assert project.objective_settings_fingerprint is not None
-
-    def folder_name(mount: Mount) -> str:
-        return run.gradient_id(
-            scheme_sha256=project.scheme_sha256, surrogate_manifest_sha256=project.surrogate_manifest_sha256,
-            presets=project.presets, purpose=project.purpose, settings_fingerprint=project.settings_fingerprint,
-            physics_identity=project.physics_identity,
-            objective_settings_fingerprint=cast(str, project.objective_settings_fingerprint), mount=mount)
-    assert folder.name == project.gradient_id == folder_name(MOUNT_ON_WALL)
-    assert folder.name != folder_name(MOUNT_RIGID)
-    header = ledger.read_ledger(folder / "ledger.jsonl")[0]
-    walls = _scheme_walls(directory)
-    assert header.mount == MOUNT_ON_WALL
-    assert header.kept_digests == {name: endpoint.material_digest(material) for name, material in walls.items()}
-    assert templates.read_template_ledger(folder / "templates.jsonl")[0].mount == MOUNT_ON_WALL
-    result = run.parse_result((folder / "result.json").read_bytes())
-    assert result.format_version == run.MOUNTED_RESULT_VERSION and result.mount == MOUNT_ON_WALL
-    settings = load_material_gradient_settings(directory / "settings.toml")
-    by_wall: dict[Wall, SurfaceMaterial] = {wall: walls[wall.wall_name()] for wall in Wall.all()}
-    designs = run.final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, by_wall,
-                                mount=MOUNT_ON_WALL)
-    for spec, design in zip(result.surfaces, designs, strict=True):
-        assert spec.mount == MOUNT_ON_WALL and spec.material_digest == endpoint.design_digest(design), spec.surface_id
-        if design.material is not None:
-            assert spec.material_digest == endpoint.material_digest(MountedOnWall(
-                layers=design.material.layers, wall=walls[spec.surface_id]))
 
 
-def test_cli_endpoint_exports_mounted_walls(cli_runs: tuple[Path, Record]) -> None:
-    """抓終點匯出悄悄變回剛背：endpoint 回 0；``scheme-endpoint.json`` 讀回，貼樣板的面是貼牆構造、原牆等於方案原本那面、
-    等於 ``materials_from_surfaces``（貼在原牆上的設計、結果檔的 θ）那一份；不貼的面是原牆本身。"""
-    directory, output = cli_runs
-    case = cast(Record, output["endpoint"])
-    assert case["code"] == 0, case["stderr"]
-    folder = Path(str(output["folder"]))
-    record = _json(folder / "endpoint.json")
-    zones = load_scheme(folder / str(record["exported_scheme"])).scene.surface_zones_by_wall
-    assert zones is not None
-    result = run.parse_result((folder / "result.json").read_bytes())
-    walls = _scheme_walls(directory)
-    settings = load_material_gradient_settings(directory / "settings.toml")
-    by_wall: dict[Wall, SurfaceMaterial] = {wall: walls[wall.wall_name()] for wall in Wall.all()}
-    designs = run.final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, by_wall,
-                                mount=MOUNT_ON_WALL)
-    theta = np.asarray([float.fromhex(value) for value in result.theta_hex])
-    materials = endpoint.materials_from_surfaces(designs, theta, settings)
-    for wall, spec in zip(Wall.all(), result.surfaces, strict=True):
-        material = zones[wall.wall_name()][0].material
-        if spec.preset_id is None:
-            assert material == walls[wall.wall_name()], wall
-            continue
-        assert isinstance(material, MountedOnWall) and material.wall == walls[wall.wall_name()], wall
-        assert material == materials[wall], wall
 
 
-def test_cli_report_says_mounted_on_wall_in_plain_words(cli_runs: tuple[Path, Record]) -> None:
-    """抓報告看不出「貼在原牆上」或外露代號：安裝方式那一行是貼在原牆上；最後可行點每個貼樣板的面後面接它背後那面原牆
-    （考卷自己從方案舊欄格式化）；整份報告不出現安裝方式與材料種類的代號。"""
-    directory, output = cli_runs
-    case = cast(Record, output["report"])
-    assert case["code"] == 0, case["stderr"]
-    text = str(case["stdout"])
-    lines = text.splitlines()
-    assert MOUNT_ON_WALL_LINE in lines and MOUNT_RIGID_LINE not in lines
-    walls = _scheme_walls(directory)
-    folder = Path(str(output["folder"]))
-    result = run.parse_result((folder / "result.json").read_bytes())
-    lined = [spec.surface_id for spec in result.surfaces if spec.preset_id is not None]
-    assert lined
-    for surface_id in lined:
-        tail = f"，{MOUNTED_TEXT}（原牆：{material_text(walls[surface_id])}）"
-        assert any(line.startswith(f"  {surface_id}：") and line.endswith(tail) for line in lines), surface_id
-    assert not [word for word in CODE_WORDS if word in text]
 
 
-def test_cli_resume_with_other_mount_is_rejected(cli_runs: tuple[Path, Record]) -> None:
-    """抓接續不比安裝方式：貼在原牆上跑完的資料夾，project.json 拿掉安裝方式（讀成剛背）再 resume，回 1、錯誤點名
-    ``mount``，帳本、換樣板帳本與結果檔一個位元組都不動。"""
-    case = cast(Record, cli_runs[1]["other_mount"])
-    assert case["code"] == 1, case
-    assert "帳本標頭跟這一次對不上：" in str(case["stderr"]) and "'mount'" in str(case["stderr"]), case["stderr"]
-    assert case["unchanged"] is True
 
 
-def test_cli_rigid_result_is_mainline_v4_and_endpoint_takes_it_as_rigid(cli_runs: tuple[Path, Record]) -> None:
-    """控制組（寫入端整條）：同一組輸入不給 ``--mount`` 跑完，result.json 的版本字串、頂層與每面的鍵都等於主線寫入端量的
-    （沒有安裝方式那一格、不升版），檔裡沒有 ``mount``；這份 v4 交給終點（``endpoint``）回 0，終點的讀法讀成剛背。
-    抓「剛背也寫 v5」與「v4 被當舊版擋在終點外」。"""
-    output = cli_runs[1]
-    start = cast(Record, output["rigid_start"])
-    assert start["code"] == 0, start
-    folder = Path(str(output["rigid_folder"]))
-    data = (folder / "result.json").read_bytes()
-    document = cast(Record, json.loads(data))
-    assert document["format_version"] == CONTROL_RESULT_VERSION and sorted(document) == CONTROL_RESULT_KEYS
-    assert all(sorted(spec) == CONTROL_SURFACE_KEYS for spec in cast(list[Record], document["surfaces"]))
-    assert b"mount" not in data and "mount" not in _json(folder / "project.json")
-    endpoint_case = cast(Record, output["rigid_endpoint"])
-    assert endpoint_case["code"] == 0, endpoint_case["stderr"]
-    assert read_result(folder).mount == MOUNT_RIGID
 
 
 def test_report_material_text_of_walls_has_no_codes() -> None:

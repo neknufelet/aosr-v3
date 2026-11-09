@@ -7,15 +7,19 @@
 [descent]
 # 投影梯度下降最多走幾步；到了停、停止原因記「步數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_steps = 30
-# 每一步回溯線搜尋的起始步長（公尺 × 分數⁻¹，乘在梯度上）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
+# 每一步回溯線搜尋的起始步長（公尺 × 分數⁻¹，乘在梯度上）。
+# 109 號房舊低頻帳本多數步回溯 2～5 次，0.01 對舊目標偏大；六類梯度約剩 1/3、回溯較少，起始步長不放大。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 initial_step = 0.01
 # 線搜尋沒過就把步長乘上這個比例再試。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 backtrack_ratio = 0.5
 # Armijo 充分下降常數：新值要不大於舊值加這個常數乘「梯度 · 實際位移」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 armijo_constant = 1.0e-4
 # 投影梯度（貼著盒界往外推的分量歸零）的範數小於這個值就停，記「梯度夠小」；單位是合分／公尺，
-# 0.5 的意思是全部變數一起再動 1 cm、合分最多約變 0.005；這個值是在考卷的小房間替身上實量挑的，真房間要重挑。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-gradient_norm_stop = 0.5
+# 2026-11-09：109 號房舊低頻下降 30 步，範數最低 0.93，0.5 從未觸發。
+# 六類目標 J 起點範數 17.08、舊目標 51.13，約為 1/3；0.17 保留相同相對位置，避免半路碰巧停，仍靠 max_steps（最多步數）停止。
+# 暖啟動另開 #1050。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
+gradient_norm_stop = 0.17
 # 回溯到步長小於這個值仍沒過就停、這一步不走，記「步長到下限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 min_step = 1.0e-6
 
@@ -27,7 +31,8 @@ steps = 5
 # 候選確認迴圈（在可行解用「梯度 × 實際規格跳距」挑候選、各自重調空腔後跟同步數重調的基準比）。
 # 每一輪最多確認幾個候選（決策紙第 3 條「第一版預設 3 個，沒有理論保證」）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_per_round = 3
-# 改善門檻：基準重調後的合分減候選重調後的合分要「超過」這個值才換（合分的絕對差，單位同 screening_total）。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
+# 改善門檻：基準重調後的目標 J 減候選重調後的目標 J 要「超過」這個值才換（帳本 value，六類目標 objective_total 的絕對差）。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 improvement_threshold = 0.05
 # 最多跑幾輪；到了停、停止原因記「輪數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 max_rounds = 10

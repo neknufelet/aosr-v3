@@ -1,4 +1,4 @@
-"""#990 固定面真命令列：小房間、僅一面帶搜尋變數；開始與終點拆成獨立段落，命令各限 60 秒。"""
+"""#990 固定面真命令列：小房間、僅一面帶搜尋變數；開始與終點拆成獨立段落，命令沿命令列考卷的既有時間上限。"""
 from __future__ import annotations
 
 import json
@@ -15,15 +15,16 @@ from aosr.reporting.scheme import load_scheme
 from aosr.physics.report_surfaces import WholeWallZone
 from tests.engine.test_material_gradient import _presets
 from tests.engine._scheme_cache import shared_json
-from tests.engine.test_fem_reduced import model as model, operators as operators
-from tests.engine.test_material_gradient_cli import _command, _env, _start_args
+from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
+from tests.engine._six_search_cli_case import model as model, operators as operators
+from tests.engine.test_material_gradient_cli import WAIT_S, _command, _env, _start_args
 from tests.engine.test_material_gradient_endpoint_cli import _inputs, _surrogate
 
 FIXED = {"floor": "glass_wool_24k_50mm", "ceiling": "slotted_wood_typ9_absorber40_gap98"}
 
 
 def _command_run(directory: Path, args: list[str]) -> None:
-    process = subprocess.run(args, cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=60)
+    process = subprocess.run(args, cwd=directory, env=_env(directory), capture_output=True, text=True, timeout=WAIT_S)
     assert process.returncode == 0, process.stdout + process.stderr
 
 
@@ -66,6 +67,7 @@ def test_real_start_and_resume_keep_fixed_materials(live_search: Path, tmp_path:
 def test_real_endpoint_exports_and_records_fixed_materials(live_search: Path, tmp_path: Path) -> None:
     """抓 endpoint（終點）重建配置用回原牆，或紀錄與人看的報告遺失固定面。"""
     live_search = shutil.copytree(live_search, tmp_path / "endpoint")
+    live_search = legacy_endpoint_copy(tmp_path, live_search)
     _command_run(tmp_path, _command("endpoint", str(live_search)))
     record = read_endpoint(live_search)
     assert record.fixed_surfaces == FIXED
@@ -90,6 +92,6 @@ def test_real_resume_rejects_changed_fixed_settings(live_search: Path, tmp_path:
     names = (run.LEDGER_FILE, run.TEMPLATES_FILE, run.RESULT_FILE)
     before = {name: (folder / name).read_bytes() for name in names}
     process = subprocess.run(_command("resume", str(folder)), cwd=tmp_path, env=_env(tmp_path),
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=WAIT_S)
     assert process.returncode == 1 and "標頭跟這一次對不上" in process.stderr
     assert {name: (folder / name).read_bytes() for name in names} == before

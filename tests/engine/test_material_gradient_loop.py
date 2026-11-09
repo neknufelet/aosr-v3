@@ -455,11 +455,11 @@ def test_surrogate_rows_carry_both_scores_and_value_is_screening_plus_proxy(runs
     assert_rows_split_scores(rows)
 
 
-def test_ledger_v5_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None:
+def test_ledger_v6_round_trip(runs: tuple[Path, Record], tmp_path: Path) -> None:
     """抓帳本漏寫或改寫：讀回再寫一份逐位相同，讀回的停止原因、最後 θ、累計次數等於探針那一次的結果。"""
     source = runs[0] / str(_surrogate(runs)["ledger"])
     header, rows = ledger.read_ledger(source)
-    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v5"
+    assert header.ledger_version == ledger.LEDGER_VERSION == "aosr.material_gradient_ledger.v6"
     copy = tmp_path / "copy.jsonl"
     ledger.write_ledger(copy, header, rows)
     assert copy.read_bytes() == source.read_bytes()
@@ -522,7 +522,7 @@ def _contradict(source: Path, target: Path, edit: str) -> Path:
         decision["round_evaluations"] = decision["total_evaluations"] = 700
         row["value"] = 999.0
     elif edit in ("wrong_components", "no_candidates_wrong_components"):
-        row["components"] = [999.0, 999.0, 999.0]
+        row["components"] = [999.0] * len(cast(list[float], row["components"]))
     elif edit == "no_candidates_wrong_value":
         row["value"] = 999.0
     return _rewrite(source, target, None, documents)

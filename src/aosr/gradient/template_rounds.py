@@ -21,7 +21,6 @@
 """
 from __future__ import annotations
 
-import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Final, Literal, NamedTuple, cast
@@ -34,12 +33,13 @@ from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGrad
 from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.gpu import SinglePrecisionObjective
+from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
 from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_loop import retune_evaluation_bound
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.scoring.gradient_objective_jax import objective_reading
+from aosr.gradient.material_gradient import objective_reading, estimable, Unestimable
 
 
 TEMPLATE_STOP_NO_ALTERNATIVES: Final = "沒有可換的樣板"
@@ -93,7 +93,7 @@ class QuickScore(NamedTuple):
     surfaces: Surfaces
     variable_names: tuple[str, ...]
     theta: FloatVector
-    value: float
+    value: float | None
     screening_total: float
     components: Components
     seconds: float
@@ -111,8 +111,8 @@ class RetunedTemplate(NamedTuple):
     designs: tuple[SurfaceDesign, ...]
     objective: ChainObjective | None
     retune: DescentResult
-    value: float
-    improvement: float
+    value: float | None
+    improvement: float | None
 
 
 class TemplateRoundResult(NamedTuple):
@@ -259,17 +259,17 @@ def quick_scores(point: TemplatePoint, context: TemplateContext, *,
         designs, theta = swap(point.designs, point.theta, surface_id, target, context)
         (value, aux), _ = compiled_evaluator(context.objective_for(designs))(jnp.asarray(theta))
         number = float(value)
-        if not math.isfinite(number):
-            raise ValueError(f"快速評分 {candidate_id(surface_id, target)} 的值不是有限數：{number}")
+        estimable_number = number if estimable(value, aux) else None
         reading = objective_reading(aux)
-        found.append(QuickScore(surface_id, target, surfaces_of(designs), design_names(designs), theta, number,
+        found.append(QuickScore(surface_id, target, surfaces_of(designs), design_names(designs), theta, estimable_number,
                                 reading.screening_total, reading.components, time.perf_counter() - clock))
     return tuple(found)
 
 
 def ranked(scores: Sequence[QuickScore], count: int) -> tuple[QuickScore, ...]:
     """照值由小到大取前 ``count`` 個；同值照快速評分的順序（＝面序、再目標序）。"""
-    order = sorted(range(len(scores)), key=lambda index: (scores[index].value, index))
+    order = sorted((index for index in range(len(scores)) if scores[index].value is not None),
+                   key=lambda index: (float(scores[index].value or 0.0), index))
     return tuple(scores[index] for index in order[:count])
 
 
@@ -324,26 +324,30 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     clock = time.perf_counter()
     scores = quick_scores(point, context, should_stop=should_stop)
     baseline = retune_cavities(objective, point.theta, designs, settings, should_stop=should_stop)
+    if not baseline.steps:
+        raise Unestimable("換樣板基準重調起點不可估")
     base_value = baseline.steps[-1].value
     retuned = []
     for score in ranked(scores, top):
         swapped, theta = swap(designs, point.theta, score.surface_id, score.target, context)
         candidate_objective = context.objective_for(swapped)
         result = retune_cavities(candidate_objective, theta, swapped, settings, should_stop=should_stop)
-        value = result.steps[-1].value
-        retuned.append(RetunedTemplate(score, swapped, candidate_objective, result, value, base_value - value))
-    best = max(retuned, key=lambda item: item.improvement)
-    accepted = best if best.improvement > settings.candidates.improvement_threshold else None
+        value = result.steps[-1].value if result.steps else None
+        retuned.append(RetunedTemplate(score, swapped, candidate_objective, result, value,
+                                       None if value is None else base_value - value))
+    best = max((item for item in retuned if item.improvement is not None),
+               key=lambda item: float(item.improvement or 0.0), default=None)
+    accepted = best if best is not None and best.improvement is not None and best.improvement > settings.candidates.improvement_threshold else None
     evaluations = len(scores) + baseline.evaluations + sum(item.retune.evaluations for item in retuned)
     if accepted is None:
         chosen = TemplatePoint(designs, baseline.theta, base_value, baseline.steps[-1].screening_total,
                                baseline.steps[-1].components)
         chosen_objective = objective
     else:
-        chosen = TemplatePoint(accepted.designs, accepted.retune.theta, accepted.value,
+        chosen = TemplatePoint(accepted.designs, accepted.retune.theta, accepted.retune.steps[-1].value,
                                accepted.retune.steps[-1].screening_total, accepted.retune.steps[-1].components)
         chosen_objective = cast(ChainObjective, accepted.objective)
-    if isinstance(objective, SinglePrecisionObjective):
+    if isinstance(objective, (SinglePrecisionObjective, SixCategorySinglePrecisionObjective)):
         # 淘汰目標不必隨帳本數值活到下一輪；勝出者由 accepted 與 objective 繼續持有。
         retuned = [item if item is accepted else item._replace(objective=None) for item in retuned]
     return TemplateRoundResult(True, bound, scores, baseline, tuple(retuned), accepted, chosen, chosen_objective,

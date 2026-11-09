@@ -5,8 +5,8 @@
 ``stage_one_low_frequency.*``，兩邊的設定指紋都不含這四格，加這四格不動第一階段名次與第二階段的比較身分。
 #1032：第三階段以專用範圍重建兩分項設定與指紋；第一階段原設定不變。
 
-這一支只讀具名的四個鍵、不列舉整段；指紋只雜湊自己讀的四格與第一階段設定的指紋（照 ``stage_one_score``
-「指紋只收自己讀的那幾格」）。代理的較差參考必須等於第一階段兩分項那個值：較差參考只為無單位化，
+低頻計分仍讀具名四鍵；v2 指紋另收六類設定摘要與 ranking.category_weights，供六類搜尋核對身分。
+v1 指紋只供既有結果的終點唯讀核對。代理的較差參考必須等於第一階段兩分項那個值：較差參考只為無單位化，
 不相等時權重就不是登記的那個比例（同 ``StageOneScoreSettings`` 守兩分項相等的理由）。
 程式裡不寫任何溫度、權重或較差參考的數字。
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, QualityTargets, SettingEntry, TargetEntry
@@ -24,7 +24,7 @@ from aosr.scoring.stage_one_score import (
     PRINCIPAL, SCORED_RANGE_KEY as STAGE_ONE_RANGE_KEY, StageOneScoreSettings, stage_one_settings_from_section,
 )
 
-GRADIENT_OBJECTIVE_VERSION: Final = "aosr.scoring.gradient_objective.v1"
+GRADIENT_OBJECTIVE_VERSION: Final = "aosr.scoring.gradient_objective.v2"
 _PREFIX: Final[str] = "stage_three_gradient."
 PROXY: Final = "big_peak_proxy_db"
 TEMPERATURE_KEY: Final[str] = _PREFIX + "big_peak_proxy_temperature_db"
@@ -38,7 +38,7 @@ SETTING_KEYS: Final[tuple[str, ...]] = (TEMPERATURE_KEY, PROXY_TARGET_KEY, WEIGH
 @dataclass(frozen=True)
 class GradientObjectiveSettings:
     """梯度目標的設定：第一階段兩分項那一份、代理的溫度（dB）、代理的目標條目、代理的權重；
-    ``status`` 是四格與第一階段裡最低的狀態，``fingerprint`` 雜湊四格與第一階段設定的指紋。"""
+    ``status`` 是四格與第一階段裡最低的狀態；v2 ``fingerprint`` 另含六類設定與排名權重摘要。"""
 
     stage_one: StageOneScoreSettings
     temperature_db: float
@@ -75,10 +75,22 @@ def _temperature(entry: object) -> tuple[SettingEntry, float]:
 
 def gradient_objective_settings(registry: QualityTargets, purpose_name: str) -> GradientObjectiveSettings:
     """讀第一階段那一段：第一階段兩分項照 ``stage_one_settings_from_section``，再讀四個具名鍵。"""
-    return gradient_objective_settings_from_section(registry.stage_one(purpose_name))
+    low = gradient_objective_settings_from_section(registry.stage_one(purpose_name))
+    section = registry.purpose(purpose_name)
+    # 摘要涵蓋六類的量法、代價形狀、類內權重、反射分區與類間權重；來源也保留在正規化內容裡。
+    prefixes = ("timbre_balance.", "listening_area_stability.", "reflections_and_echo.",
+                "reverberation.", "channel_matching.", "direction_zones.")
+    summary = [entry.model_dump(mode="json") for entry in sorted(section.entries, key=lambda entry: entry.key)
+               if entry.key.startswith(prefixes) or entry.key == "ranking.category_weights"]
+    canonical = json.dumps({"objective_version": GRADIENT_OBJECTIVE_VERSION,
+        "low_frequency_fingerprint": low.fingerprint, "six_category_settings": summary,
+        "product_low_frequency": registry.stage_one(purpose_name).canonical()},
+        sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return replace(low, fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest())
 
 
-def gradient_objective_settings_from_section(section: QualityPurpose) -> GradientObjectiveSettings:
+def gradient_objective_settings_from_section(section: QualityPurpose, *,
+        objective_version: str = GRADIENT_OBJECTIVE_VERSION) -> GradientObjectiveSettings:
     """同一份讀法，從已取出的第一階段那一段讀；權重表的列不是剛好代理那一列就報錯。"""
     original = stage_one_settings_from_section(section)
     scored = section.entry(SCORED_RANGE_KEY)
@@ -105,7 +117,7 @@ def gradient_objective_settings_from_section(section: QualityPurpose) -> Gradien
     row = table.item[0]
     statuses = (stage_one.status, temperature.status, proxy.status, row.status)
     canonical = json.dumps({
-        "objective_version": GRADIENT_OBJECTIVE_VERSION,
+        "objective_version": objective_version,
         "stage_one_fingerprint": stage_one.fingerprint,
         "scored_range": {"key": scored.key, "value": scored.value, "unit": scored.unit, "status": scored.status},
         "temperature": {"value": temperature.value, "unit": temperature.unit, "status": temperature.status},
@@ -118,3 +130,9 @@ def gradient_objective_settings_from_section(section: QualityPurpose) -> Gradien
         proxy_weight=float(row.value), status="baseline" if "baseline" in statuses else "calibrated",
         fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
+
+
+def legacy_gradient_objective_settings(registry: QualityTargets, purpose_name: str) -> GradientObjectiveSettings:
+    """只供既有低頻結果的終點核身分；不准用來開始或接續搜尋。"""
+    return gradient_objective_settings_from_section(registry.stage_one(purpose_name),
+        objective_version="aosr.scoring.gradient_objective.v1")

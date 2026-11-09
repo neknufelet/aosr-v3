@@ -542,10 +542,10 @@ def _reduced_objective(model: ReducedModel, designs: Sequence[SurfaceDesign], co
 
     獨立成一支是為了讓鏈的閉包與編譯函式在回到 :func:`endpoint_check` 之前就沒人引用，不跟完整解疊在一起。
     """
-    compiled: ChainObjective = jax.jit(chain_objective(model, designs, constants, air=air, ranges=ranges,
+    compiled = jax.jit(chain_objective(model, designs, constants, air=air, ranges=ranges,
                                                        frequencies=frequencies, frequency_batch=frequency_batch))
     _, result = compiled(jnp.asarray(exported))
-    return result
+    return cast(GradientObjectiveArrays, result)
 
 
 def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector, *,

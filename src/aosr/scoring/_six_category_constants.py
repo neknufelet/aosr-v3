@@ -26,6 +26,7 @@ class SixCategoryConstants(NamedTuple):
     decay_indices: NDArray[np.int64]
     midband_indices: NDArray[np.int64]
     paris_angles_deg: NDArray[np.float64]
+    source_ids: NDArray[np.str_]
     patch_ids: NDArray[np.str_]
     angle_offsets: NDArray[np.int64]
     angles_deg: NDArray[np.float64]

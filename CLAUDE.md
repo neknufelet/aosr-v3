@@ -10,6 +10,7 @@
 - 來源資料：v2 的事故在 `v2-audit/lessons.json`，候選規則與每張卡的規格在 `blueprint/cards-38.json`。
 ## 驗證
 本機一行跑完 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml && uv run python -m governance.checks.green_must_be_real_green --scan-root . && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（程式與完整測試）與 `acceptance`（核合併請求驗收行）兩個必要檢查都綠才算數。
+跑真搜尋、真終點的重考卷住 `tests/engine/slow_*.py`，雲端不收，合併前由驗收者在本機跑。
 ## 去哪裡看
 - 機器算出來的那一頁（開著的票、每支檢查最近的結果）：https://neknufelet.github.io/aosr-v3/
 - 拍板過的決定：`docs/decisions/`，一題一檔。

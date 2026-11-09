@@ -63,7 +63,7 @@ from aosr.config.construction_environment import construction_environment
 from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient.gpu import Device, PrecisionComparison, single_precision_constants
+from aosr.gradient.gpu import Device, LegacyPrecisionComparison, PrecisionComparison, single_precision_constants
 from aosr.gradient.gpu_preflight import ensure_start_precision
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_surfaces import (
@@ -71,17 +71,17 @@ from aosr.gradient.fixed_surfaces import (
 )
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
-    ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, chain_objective, check_stop,
+    COMPONENT_NAMES, Unestimable, ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, check_stop, objective_reading,
     compiled_evaluator, depth_limits, design_bounds, design_names, projected_descent, retune_cavities, snap_to_specs,
-    wall_designs_from_presets,
+    wall_designs_from_presets, estimable,
 )
 from aosr.gradient.material_gradient_ledger import (
-    PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
+    LEDGER_VERSION, LEGACY_LEDGER_VERSION, PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
     truncate_rows, write_ledger,
 )
 from aosr.gradient.material_gradient_loop import LoopResult, resume_rounds, run_rounds
 from aosr.gradient.template_ledger import (
-    TEMPLATE_LEDGER_VERSION, TemplateHeader, TemplateStart, read_template_ledger, template_progress,
+    TEMPLATE_LEDGER_VERSION, LEGACY_TEMPLATE_LEDGER_VERSION, PRE_PROXY_TEMPLATE_LEDGER_VERSION, TemplateHeader, TemplateStart, read_template_ledger, template_progress,
 )
 from aosr.gradient.template_rounds import TemplateContext
 from aosr.gradient.template_segment import (
@@ -92,20 +92,23 @@ from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials,
 from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.fem_reduced import ReducedModel, checked_axis
-from aosr.physics.fem_reduced_jax import reduced_constants
 from aosr.physics.fem_reduced_check import PointHex, SurrogateSpotCheck, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
-from aosr.physics.report_io import solver_inputs
+from aosr.physics.report_io import ReportInput, solver_inputs
 from aosr.reporting.fem_reduced_scheme import scheme_points
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.reporting.validation import checked_inputs
 from aosr.scoring.gradient_objective_jax import (
-    GradientObjectiveConstants, gradient_objective_constants, objective_reading,
+    GradientObjectiveConstants, gradient_objective_constants,
 )
-from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, gradient_objective_settings
+from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, gradient_objective_settings, legacy_gradient_objective_settings
 from aosr.scoring.stage_one_low_frequency import axis_reason_not_measurable
 from aosr.scoring.stage_one_score import StageOneScoreSettings
+from aosr.scoring.six_category_jax import build_constants
+from aosr.gradient.six_category_chain import six_category_chain_objective
+from aosr.gradient.six_category_gpu import double_precision_score_arrays
+from aosr.physics.fem_reduced_jax import reduced_constants
 
 
 PROJECT_FILE: Final = "project.json"
@@ -115,9 +118,13 @@ STATUS_FILE: Final = "status.json"
 RESULT_FILE: Final = "result.json"
 STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
-RESULT_VERSION: Final = "aosr.material_gradient_result.v4"
+# 專案外殼仍向後相容、CPU 位元組不變；六類由目標指紋換版，舊顯卡比較另在接續閘門明拒。
+RESULT_VERSION: Final = "aosr.material_gradient_result.v6"
+LOW_FREQUENCY_RESULT_VERSION: Final = "aosr.material_gradient_result.v4"
 # 貼在原牆上（#990）的結果：每面帶安裝方式。剛背仍寫 RESULT_VERSION（安裝方式不改剛背的分數，位元組同加這一格之前）。
-MOUNTED_RESULT_VERSION: Final = "aosr.material_gradient_result.v5"
+MOUNTED_RESULT_VERSION: Final = "aosr.material_gradient_result.v7"
+LOW_FREQUENCY_MOUNTED_RESULT_VERSION: Final = "aosr.material_gradient_result.v5"
+LEGACY_RESULT_VERSIONS: Final = (LOW_FREQUENCY_RESULT_VERSION, LOW_FREQUENCY_MOUNTED_RESULT_VERSION, "aosr.material_gradient_result.v3")
 # 上一版（梯度目標還沒有大峰代理項）：報告准讀，終點與接續不收。
 LEGACY_RESULT_VERSION: Final = "aosr.material_gradient_result.v3"
 FREQUENCY_RULER: Final = "fem_reduced_holdout_frequency_db"
@@ -159,7 +166,7 @@ class GradientProject(BaseModel):
     fixed_surfaces: FixedSurfaces = Field(default_factory=dict, exclude_if=lambda value: not value)
     max_depths: MaxDepths = Field(default_factory=dict, exclude_if=lambda value: not value)
     device: Device = Field(default="cpu", exclude_if=lambda value: value == "cpu")
-    precision_check: PrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
+    precision_check: PrecisionComparison | LegacyPrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
     frequency_batch: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
     surrogate_physics_identity: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
     operators_digest: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
@@ -226,6 +233,14 @@ class Components(BaseModel):
     own_line_ripple_rms_db: float
     seat_robustness_rms_db: float
     big_peak_proxy_db: float | None = None
+    timbre_cost: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    listening_cost: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    reflections_cost: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    reverberation_cost: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    matching_cost: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    low_frequency_cost: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    objective_total: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    product_total: float | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class GradientResult(BaseModel):
@@ -241,7 +256,7 @@ class GradientResult(BaseModel):
     """
 
     model_config = _FROZEN
-    format_version: Literal["aosr.material_gradient_result.v5", "aosr.material_gradient_result.v4",
+    format_version: Literal["aosr.material_gradient_result.v7", "aosr.material_gradient_result.v6", "aosr.material_gradient_result.v5", "aosr.material_gradient_result.v4",
                             "aosr.material_gradient_result.v3"]
     gradient_id: str
     surfaces: tuple[SurfaceSpec, ...]
@@ -266,16 +281,22 @@ class GradientResult(BaseModel):
         if any(item != proxied for item in filled):
             raise ValueError(f"{MOUNTED_RESULT_VERSION} 與 {RESULT_VERSION} 要帶舊合分與大峰代理；"
                              f"{LEGACY_RESULT_VERSION} 兩個都沒有")
-        expected = MOUNT_ON_WALL if self.format_version == MOUNTED_RESULT_VERSION else None
+        expected = MOUNT_ON_WALL if self.format_version in (MOUNTED_RESULT_VERSION, LOW_FREQUENCY_MOUNTED_RESULT_VERSION) else None
         if any(spec.mount != expected for spec in self.surfaces):
             raise ValueError(f"{MOUNTED_RESULT_VERSION} 每面要帶安裝方式 {MOUNT_ON_WALL}；"
                              f"{RESULT_VERSION}（剛背）與更舊的沒有這一格")
+        if self.format_version in (RESULT_VERSION, MOUNTED_RESULT_VERSION):
+            values = tuple(getattr(self.components, name) for name in (
+                "timbre_cost", "listening_cost", "reflections_cost", "reverberation_cost", "matching_cost",
+                "low_frequency_cost", "objective_total", "product_total"))
+            if any(x is None for x in values) or self.components.objective_total != self.value:
+                raise ValueError("六類結果缺類別或總分，或 objective_total 與 value 不同")
         return self
 
     @property
     def mount(self) -> Mount:
         """這份結果的安裝方式：v5 是貼在原牆上；v4（與報告准讀的 v3）沒有這一格，是剛背。"""
-        return MOUNT_ON_WALL if self.format_version == MOUNTED_RESULT_VERSION else MOUNT_RIGID
+        return MOUNT_ON_WALL if self.format_version in (MOUNTED_RESULT_VERSION, LOW_FREQUENCY_MOUNTED_RESULT_VERSION) else MOUNT_RIGID
 
 
 class SchemePoints(NamedTuple):
@@ -380,10 +401,10 @@ def parse_result(content: bytes, *, legacy: bool = False) -> GradientResult:
     代理項，要重跑）。"""
     document = json.loads(content)
     version = document.get("format_version") if isinstance(document, dict) else None
-    if version == LEGACY_RESULT_VERSION and not legacy:
-        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}（梯度目標加大峰代理項之前），{PROXY_RERUN_TEXT}；"
+    if version in LEGACY_RESULT_VERSIONS and not legacy:
+        raise ValueError(f"{RESULT_FILE} 版本是 {version!r}（六類目標之前），{PROXY_RERUN_TEXT}；"
                          f"這一版只收 {RESULT_VERSION}（剛背）與 {MOUNTED_RESULT_VERSION}（貼在原牆上）")
-    if version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION, LEGACY_RESULT_VERSION):
+    if version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION, *LEGACY_RESULT_VERSIONS):
         raise ValueError(f"{RESULT_FILE} 版本是 {version!r}，這一版只收 {RESULT_VERSION}（剛背）與 "
                          f"{MOUNTED_RESULT_VERSION}（貼在原牆上）；跑 resume 會從帳本重建、覆寫成這一版")
     return GradientResult.model_validate_json(content)
@@ -470,10 +491,13 @@ def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> 
                 raise ValueError(f"{label} {name} 的座標：{what}是 {recorded.get(name)}，方案是 {wanted.get(name)}，拒收")
 
 
-def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
+def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = False) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
     """接續前逐格核輸入（父行程起子行程前、子行程重建目標前各核一次）：方案檔雜湊、方案座標跟 ``project.json`` 記的、
     替身過閘門（網格雜湊、物理身分、座標）、manifest 與收據摘要、設定指紋、替身對得上方案、替身頻率軸算得了
     這一次的計分。任何一格不同就拒收。"""
+    if not allow_legacy_objective:
+        from aosr.gradient.gpu_preflight import require_search_contract
+        require_search_contract(project)
     scheme_path, surrogate = Path(project.scheme_path), Path(project.surrogate_path)
     if file_sha256(scheme_path) != project.scheme_sha256:
         raise ValueError(f"方案檔 {scheme_path} 跟開始時不同（scheme_sha256 變了），不接續")
@@ -491,9 +515,13 @@ def check_inputs(project: GradientProject) -> tuple[Scheme, ReducedModel, Materi
     if settings.fingerprint != project.settings_fingerprint:
         raise ValueError("搜尋設定跟開始時不同（設定指紋變了），不接續")
     objective = search_objective_settings(project.purpose)
-    if project.objective_settings_fingerprint != objective.fingerprint:
+    previous = legacy_gradient_objective_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+    matches_legacy = allow_legacy_objective and project.objective_settings_fingerprint == previous.fingerprint
+    if project.objective_settings_fingerprint != objective.fingerprint and not matches_legacy:
         recorded = "沒記（加大峰代理之前開始的）" if project.objective_settings_fingerprint is None else "跟現在不同"
-        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了）；{SCORED_RANGE_RERUN_TEXT}，不接續")
+        raise ValueError(f"project.json 的梯度目標設定指紋{recorded}：六類目標換版（梯度目標 v2／帳本 v6），"
+                         f"舊資料夾只讀、要重跑；{PROXY_RERUN_TEXT}（或代理三格、第一階段設定改了）；"
+                         f"{SCORED_RANGE_RERUN_TEXT}，不接續")
     check_surrogate_matches_scheme(model, scheme, points)
     check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     return scheme, model, settings
@@ -506,7 +534,11 @@ def scene_wall_materials(scheme: Scheme, *, capabilities: CapabilityTable,
     整面仍交 solver_inputs 取 materials_by_wall，不另轉固定阻抗；分區鍵與序由 boundary_patches 共用。
     """
     _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-    inputs = next(iter(documents.values()))[1]
+    return _wall_materials_from_inputs(scheme, next(iter(documents.values()))[1])
+
+
+def _wall_materials_from_inputs(scheme: Scheme, inputs: ReportInput) -> dict[BoundaryKey, SurfaceMaterial]:
+    """共用已驗過的逐對輸入；材料與面片序維持 scene_wall_materials 的讀法。"""
     keys = scheme_patch_keys(scheme)
     if keys != boundary_patches():
         zones = inputs.surface_zones_by_wall or {}
@@ -567,26 +599,36 @@ def load_problem(project: GradientProject) -> GradientProblem:
 
     空氣的密度與聲速取方案場景那一格（``export_operators`` 建完整模型、替身建模用的同一組），熱黏常數與多孔範圍
     走設定層的 ``construction_environment``；這裡不自己拿產品預設的空氣。換樣板的目標工廠用同一份替身、常數、空氣與範圍
-    對任何六面設計重建 ``chain_objective``（起點配置直接交回這一份目標，不重編譯）。
+    對任何六面設計重建 ``six_category_chain_objective``（起點配置直接交回這一份目標，不重編譯）。
     """
     scheme, model, settings = check_inputs(project)
     constants = search_objective_constants(project, scheme, model)
-    kept = project_wall_materials(project, scheme)
+    channels = {channel.speaker_id: channel for channel in scheme.channel_group.channels}
+    # 替身聲壓的第一軸照 model.source_names；幾何與評分必須同序，不能只核對喇叭數。
+    group = scheme.channel_group.model_copy(update={"channels": tuple(channels[name] for name in model.source_names)})
+    score_scheme = scheme.model_copy(update={"purpose": project.purpose, "channel_group": group})
+    _, pairs = checked_inputs(score_scheme, capabilities=load_capabilities(project.capabilities_path),
+                              directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    kept = _wall_materials_from_inputs(score_scheme, next(iter(pairs.values()))[1])
     designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
                           fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
-    device_constants = single_precision_constants(reduced_constants(model)) if project.device == "gpu" else None
-    objective = chain_objective(model, designs, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
-                                frequency_batch=project.frequency_batch, single_precision=project.device == "gpu",
-                                device_constants=device_constants)
+    six = build_constants(score_scheme, pair_inputs={key: item[1] for key, item in pairs.items()},
+                          quality_targets_path=config_path("quality_targets.toml"))
+    single = project.device == 'gpu'
+    device_constants = single_precision_constants(reduced_constants(model)) if single else None
+    score_arrays = double_precision_score_arrays(six) if single else None
+    objective = six_category_chain_objective(model, designs, constants, six, air=air, ranges=ranges,
+        frequencies=model.frequencies_hz, frequency_batch=project.frequency_batch, single_precision=single,
+        device_constants=device_constants, score_arrays=score_arrays)
 
     def objective_for(candidate: tuple[SurfaceDesign, ...]) -> ChainObjective:
         if candidate == designs:
             return objective
-        return chain_objective(model, candidate, constants, air=air, ranges=ranges, frequencies=model.frequencies_hz,
-                               frequency_batch=project.frequency_batch, single_precision=project.device == "gpu",
-                               device_constants=device_constants)
+        return six_category_chain_objective(model, candidate, constants, six, air=air, ranges=ranges,
+            frequencies=model.frequencies_hz, frequency_batch=project.frequency_batch, single_precision=single,
+            device_constants=device_constants, score_arrays=score_arrays)
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
@@ -594,7 +636,7 @@ def load_problem(project: GradientProject) -> GradientProblem:
                               objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, tuple(d.surface_id for d in designs)),
                               max_depths=project.max_depths)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
-                                                                    objective_constants=constants), kept, context)
+                                                                    objective_constants=six), kept, context)
 
 
 def presets_table() -> tuple[ConstructionPreset, ...]:
@@ -609,15 +651,21 @@ def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | Non
     designs, settings, objective, header = problem.designs, problem.settings, problem.objective, problem.header
     descent = projected_descent(objective, baseline_theta(designs), design_bounds(designs), settings.descent,
                                 limits=depth_limits(designs), should_stop=should_stop)
+    if not descent.steps:
+        raise Unestimable(descent.stop_reason)
     append_rows(path, header, descent_rows(descent, "descent", 0))
     snapped = snap_to_specs(descent.theta, designs)
     check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), _ = compiled_evaluator(objective)(jnp.asarray(snapped.theta))
+    if not estimable(value, aux):
+        raise Unestimable("取規格不可估：取規格點當不可行，不寫列")
     reading = objective_reading(aux)
     append_rows(path, header, (snap_row(snapped, float(value), reading.screening_total, reading.components,
                                         time.perf_counter() - clock, len(descent.steps)),))
     retune = retune_cavities(objective, snapped.theta, designs, settings, should_stop=should_stop)
+    if not retune.steps:
+        raise Unestimable("重調不可估：起點當不可行，不寫列")
     append_rows(path, header, descent_rows(retune, "retune", len(descent.steps) + 1))
     return retune.theta
 
@@ -698,7 +746,9 @@ def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings
                if header.boundary_patches else
                {wall.wall_name(): material_digest(whole_kept[wall]) for wall in Wall.all()})
     return TemplateHeader(
-        ledger_version=TEMPLATE_LEDGER_VERSION, input_hash=header.input_hash, mesh_hash=header.mesh_hash,
+        ledger_version=(TEMPLATE_LEDGER_VERSION if header.ledger_version == LEDGER_VERSION else
+                        LEGACY_TEMPLATE_LEDGER_VERSION if header.ledger_version == LEGACY_LEDGER_VERSION else
+                        PRE_PROXY_TEMPLATE_LEDGER_VERSION), input_hash=header.input_hash, mesh_hash=header.mesh_hash,
         physics_identity=header.physics_identity, settings_fingerprint=settings.full_fingerprint,
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
@@ -771,20 +821,20 @@ def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], se
 
 def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
                        expected_header: MaterialGradientHeader | None = None,
-                       expected_template_header: TemplateHeader | None = None) -> GradientResult:
+                       expected_template_header: TemplateHeader | None = None, legacy: bool = False) -> GradientResult:
     """從兩本帳重建整份結果，不寫檔：庚二帳本要收尾（給了 ``expected_header`` 標頭要逐格相等）；換樣板帳本要收尾、
     標頭記的庚二帳本摘要等於現在那本、起點是庚二收尾那一點（給了 ``expected_template_header`` 要逐格相等），
     最後配置與 θ 取它最後一列決定。每面材料摘要從最後配置重建的設計（``endpoint.design_digest``）來，安裝方式照庚二帳本標頭：
-    剛背寫 v4、每面不帶安裝方式（逐位同加這一格之前），貼在原牆上寫 v5、每面帶 ``on_wall``。
+    六類剛背寫 v6、貼在原牆上寫 v7；legacy 唯讀重建仍回 v4／v5。
     寫 ``result.json`` 與終點核結果檔都走這一支（終點拿它跟檔裡那份整個比）。"""
     path, templates = folder / LEDGER_FILE, folder / TEMPLATES_FILE
-    header, rows = read_ledger(path, expected_header=expected_header)
+    header, rows = read_ledger(path, expected_header=expected_header, legacy=legacy)
     origin = template_start(header, rows)
     last = rows[-1]
     if not templates.exists():
         raise ValueError(f"沒有 {TEMPLATES_FILE}：換樣板段還沒開，沒有結果可寫")
     template_header, template_rows = read_template_ledger(templates, expected_header=expected_template_header,
-                                                          settings=settings, start=origin)
+                                                          settings=settings, start=origin, legacy=legacy)
     if template_header.base_ledger_sha256 != file_sha256(path):
         raise ValueError(f"{TEMPLATES_FILE} 標頭記的庚二帳本摘要跟現在的 {LEDGER_FILE} 不同，不寫結果")
     final = finished_result(template_rows)
@@ -796,14 +846,17 @@ def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientS
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
     mounted = header.mount == MOUNT_ON_WALL
+    version = (LOW_FREQUENCY_MOUNTED_RESULT_VERSION if mounted else LOW_FREQUENCY_RESULT_VERSION) if legacy else (
+        MOUNTED_RESULT_VERSION if mounted else RESULT_VERSION)
+    result_components = (Components(own_line_ripple_rms_db=components[0], seat_robustness_rms_db=components[1],
+        big_peak_proxy_db=components[2]) if legacy else Components.model_validate(dict(zip(COMPONENT_NAMES, components, strict=True))))
     return GradientResult(
-        format_version=MOUNTED_RESULT_VERSION if mounted else RESULT_VERSION, gradient_id=read_project(folder).gradient_id,
+        format_version=cast(Literal["aosr.material_gradient_result.v7", "aosr.material_gradient_result.v6", "aosr.material_gradient_result.v5", "aosr.material_gradient_result.v4", "aosr.material_gradient_result.v3"], version), gradient_id=read_project(folder).gradient_id,
         surfaces=surface_specs(closing, closing.theta(),
                                digests={design.surface_id: design_digest(design) for design in designs},
                                mount=header.mount if mounted else None, fixed_surfaces=header.fixed_surfaces),
         variable_names=closing.variable_names, theta_hex=closing.theta_hex, value=value, screening_total=screening,
-        components=Components(own_line_ripple_rms_db=components[0], seat_robustness_rms_db=components[1],
-                              big_peak_proxy_db=components[2]),
+        components=result_components,
         round_stop_reason=last.stop_reason, stop_reason=final.stop_reason, evaluations=last.decision.total_evaluations,
         rounds=sum(1 for row in rows if row.decision is not None), template_rounds=final.rounds,
         template_evaluations=final.evaluations, ledger_sha256=file_sha256(path),

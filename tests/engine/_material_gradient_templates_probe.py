@@ -20,6 +20,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from tests.engine._six_search_helpers import six_header_for, six_objective, weights
+
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -30,9 +32,10 @@ from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.scoring.receiver_set import ReceiverSet
-from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, gradient_objective_constants, objective_reading
+from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, gradient_objective_constants
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
+from aosr.gradient.material_gradient import objective_reading
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import template_ledger as templates
 from aosr.gradient import template_rounds as rounds
@@ -92,15 +95,15 @@ def synthetic_factory(settings: MaterialGradientSettings, offsets: dict[str, flo
             return value, GradientObjectiveArrays(value[None], value[None], value, value * 0.5, value * 0.25,
                                           value * 0.125, value, value * 0.125)
 
-        made[surfaces] = objective
-        return objective
+        made[surfaces] = six_objective(objective)
+        return made[surfaces]
 
     return factory
 
 
 # 合成目標的分數常數：0.125·v＋0.25·(v／2)＝v／4（舊合分）、v／4＋6·(v／8)＝v（新合分）。
 SYNTHETIC_SCORES = ledger.ScoreConstants(component_weights=(0.125, 0.25), worse_references=(1.0, 1.0),
-                                         proxy_weight=6.0, proxy_worse_reference=1.0, proxy_temperature_db=0.5)
+                                         proxy_weight=6.0, proxy_worse_reference=1.0, proxy_temperature_db=0.5, category_weights=weights())
 
 
 def synthetic_header(settings: MaterialGradientSettings, surfaces: rounds.Surfaces,
@@ -272,13 +275,13 @@ def _threshold_edge(base: MaterialGradientSettings, presets: tuple[ConstructionP
     theta = np.asarray([float.fromhex(value) for value in case.start.theta_hex])
     point = rounds.TemplatePoint(designs, theta, case.start.value, case.start.screening_total, case.start.components)
     first = rounds.template_round(case.context.objective_for(designs), point, case.context, budget_left=10**6)
-    best = max(item.improvement for item in first.retuned)
+    best = max(cast(float, item.improvement) for item in first.retuned)
     found: Record = {"best": best.hex()}
     for label, threshold in (("equal", best), ("below", float(np.nextafter(best, -np.inf)))):
         settings = settings_with(case.settings, {"candidates": {"improvement_threshold": threshold}})
         context = case.context._replace(settings=settings)
         again = rounds.template_round(context.objective_for(designs), point, context, budget_left=10**6)
-        found[label] = {"threshold": threshold.hex(), "best": max(item.improvement for item in again.retuned).hex(),
+        found[label] = {"threshold": threshold.hex(), "best": max(cast(float, item.improvement) for item in again.retuned).hex(),
                         "accepted": again.accepted.quick.candidate_id if again.accepted is not None else None,
                         "stop_reason": again.stop_reason}
     return found
@@ -301,7 +304,7 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings,
         made = gradient_search.chain_objective(model, designs, constants, air=air, ranges=ranges,
                                                frequencies=model.frequencies_hz)
         builds.append(time.perf_counter() - clock)
-        return made
+        return six_objective(made)
 
     kept = kept_walls(cast(list[float], spec["kept"]))
     context = rounds.TemplateContext(settings, presets, kept, factory)
@@ -311,7 +314,7 @@ def _surrogate(directory: Path, problem: Record, base: MaterialGradientSettings,
     start_seconds = time.perf_counter() - clock
     designs = rounds.designs_for_surfaces(surfaces, context)
     by_wall = {wall: kept[wall.wall_name()] for wall in Wall.all()}
-    header = template_header_for(ledger.header_for(model, designs, settings, objective_constants=constants), settings,
+    header = template_header_for(six_header_for(model, designs, settings, objective_constants=constants), settings,
                                  by_wall, base_ledger_sha256=hashlib.sha256(b"small-room").hexdigest())
     path = directory / "surrogate.jsonl"
     clock = time.perf_counter()

@@ -8,6 +8,7 @@ product_total 用第一階段常數；objective_total 的低頻項原樣呼叫�
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import NamedTuple
 
 import jax
@@ -138,6 +139,19 @@ def six_category_costs(c: SixCategoryConstants, impedance_fem: jax.Array, impeda
     旗標 True 的面片，impedance_paris[n,:,0] 必須是真 Z，且該面片整列阻抗有限。
     任一類無效則兩種合分 NaN。
     """
+    def low_frequency(pressures: jax.Array) -> jax.Array:
+        return gradient_objective_from_pressures(c.objective(), pressures).objective_total
+    return _six_category_costs(c, impedance_fem, impedance_normal, impedance_early, impedance_paris,
+                               fem_pressures, constant_material, low_frequency=low_frequency)
+
+
+def _six_category_costs(c: SixCategoryConstants, impedance_fem: jax.Array, impedance_normal: jax.Array,
+                       impedance_early: jax.Array, impedance_paris: jax.Array, fem_pressures: jax.Array,
+                       constant_material: jax.Array, *, low_frequency: Callable[[jax.Array], jax.Array]) -> SixCategoryArrays:
+    """共用本體；低頻函式接收安全聲壓 (F,S,L)，也可傳回呼叫端已算好的低頻值。
+
+    預算低頻可來自未替換聲壓；無效聲壓仍將 J 標 NaN（梯度可非有限）而判不可估，安全替換不改有效點的微分。
+    """
     if constant_material.shape != (len(c.patch_ids),) or constant_material.dtype != jnp.bool_:
         raise ValueError("constant_material 必須是逐面片的布林 (N,) 陣列")
     rows = tuple(impedance_early[:, int(a):int(b)] for a, b in zip(c.angle_offsets[:-1], c.angle_offsets[1:], strict=True))
@@ -158,7 +172,7 @@ def six_category_costs(c: SixCategoryConstants, impedance_fem: jax.Array, impeda
     safe_pressure = jnp.where(pressure_valid, fem_pressures, jnp.ones_like(fem_pressures))
     pressures = jnp.transpose(safe_pressure, (2, 0, 1))
     product = objective_from_pressures(c.product(), pressures).screening_total
-    objective = gradient_objective_from_pressures(c.objective(), pressures).objective_total
+    objective = low_frequency(pressures)
     raw = jnp.stack((timbre.category_costs[0], timbre.category_costs[1], reflection, reverb, timbre.category_costs[2], product))
     valid = jnp.isfinite(raw).at[-1].set(pressure_valid & jnp.isfinite(product) & jnp.isfinite(objective))
     values, product_total, objective_total = category_totals(raw, valid, objective, jnp.asarray(c.category_weights, dtype=energy.dtype))

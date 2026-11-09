@@ -8,6 +8,7 @@
 
 起它的父行程建子行程時擋著 SIGINT、SIGTERM、SIGHUP（遮罩會繼承），所以入口裝好轉換就把這三個放開；
 擋著那段收到的訊號放開時才送到，照樣轉成中斷。
+訊號處理可能落在會吞例外的 gc 回呼，所以另設閂，在下一次停止檢查重拋中斷。
 
 離開碼：0 跑完（也寫 ``result.json``）、1 失敗（錯誤原文寫標準錯誤、也記進狀態檔）、3 停止記號或中斷（SIGTERM、SIGHUP
 在 ``__main__`` 轉成 KeyboardInterrupt）。停止記號在每兩次求值之間查；帳本停在最後一列寫完整的地方。
@@ -21,6 +22,7 @@ import os
 import signal
 import sys
 from pathlib import Path
+from threading import Event
 from types import FrameType
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -29,7 +31,7 @@ import jax
 from aosr import runtime
 from aosr.physics.fem_full_batch import checked_workers, checked_device_workers
 from aosr.gradient.endpoint_run import run_endpoint
-from aosr.gradient.material_gradient import SearchStopped, StopCheck
+from aosr.gradient.material_gradient import SearchStopped, StopCheck, Unestimable
 from aosr.gradient.material_gradient_ledger import read_ledger
 from aosr.gradient.run import (
     LEDGER_FILE, STATUS_FILE, GradientStatus, State, ledger_progress, now_text, resume_search, run_search,
@@ -45,9 +47,10 @@ ENDPOINT_MODE: Final = "endpoint"
 EXIT_DONE: Final = 0
 EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
+_INTERRUPTED: Final = Event()
 
 
-def _status(folder: Path, state: State, started_at: str, message: str | None = None) -> None:
+def _status(folder: Path, state: State, started_at: str, message: str | None = None, *, unestimable_reason: str | None = None) -> None:
     """寫狀態檔；進度從兩本帳讀（沒有帳本或讀不開時是零、None——帳本壞了由計算本身報錯）。
 
     ``stop_reason`` 照舊是庚二迴圈收尾的停止原因；換樣板那段的進度是另兩欄（停止原因在 ``result.json``）。"""
@@ -62,22 +65,34 @@ def _status(folder: Path, state: State, started_at: str, message: str | None = N
         template_evaluations, template_rounds = 0, 0
     write_json_atomic(folder / STATUS_FILE, GradientStatus(
         state=state, started_at=started_at, updated_at=now_text(), evaluations=evaluations, rounds_done=rounds,
-        last_value=value, stop_reason=reason, template_evaluations=template_evaluations,
+        last_value=value, stop_reason=unestimable_reason or reason, template_evaluations=template_evaluations,
         template_rounds_done=template_rounds, pid=os.getpid(), message=message))
 
 
 def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
-    """跑一次（開始或接續），寫狀態檔與結果檔（結果檔由 ``run_search``／``resume_search`` 跑完時寫），回離開碼。"""
+    """跑一次（開始或接續），寫狀態檔與結果檔（結果檔由 ``run_search``／``resume_search`` 跑完時寫），回離開碼。
+
+    初始 running 寫入也在中斷處理範圍內，寫完就中斷仍須記 interrupted。"""
+    def interruptible_stop() -> bool:
+        if _INTERRUPTED.is_set():
+            raise KeyboardInterrupt
+        return should_stop()
+
     started = now_text()
-    _status(folder, "running", started)
     try:
+        _status(folder, "running", started)
         project = read_project(folder)
         platforms = "cuda,cpu" if project.device == "gpu" else "cpu"
         if runtime.jax_settings() != (platforms, True):
             raise RuntimeError(f"梯度子行程要 {platforms}＋雙精度，生效的是 {runtime.jax_settings()!r}")
         if project.device == "gpu" and jax.default_backend() != "gpu":
             raise RuntimeError("顯卡搜尋需要 GPU 裝置，不能退回 CPU")
-        (run_search if mode == "start" else resume_search)(folder, should_stop=should_stop)
+        (run_search if mode == "start" else resume_search)(folder, should_stop=interruptible_stop)
+    except Unestimable as error:
+        message = f"{error}；這是決定性的，接續會得到同一個結果；要換輸入或設定"
+        _status(folder, "stopped", started, message, unestimable_reason=str(error))
+        sys.stderr.write(f"梯度搜尋停止：{message}\n")
+        return EXIT_STOPPED
     except SearchStopped:
         _status(folder, "stopped", started, "停止記號：在兩次求值之間停下，帳本停在最後一列寫完整的地方")
         sys.stderr.write("梯度搜尋已停止（停止記號）；接續用 resume\n")
@@ -147,6 +162,7 @@ def main(argv: list[str]) -> int:
 
 
 def _interrupt(signum: int, frame: FrameType | None) -> None:
+    _INTERRUPTED.set()
     raise KeyboardInterrupt
 
 

@@ -137,6 +137,7 @@ def test_registry_has_the_named_contracts() -> None:
         "channel_matching_cost_jax_vs_python",
         "stage_one_objective_jax_vs_python",
         "rom_search_gpu_single_vs_cpu_double",
+        "six_category_search_gpu_single_vs_cpu_double",
     }
 
 

@@ -6,7 +6,6 @@ import json
 import sys
 import weakref
 from collections.abc import Callable
-from types import SimpleNamespace
 from typing import cast
 
 import jax
@@ -15,12 +14,13 @@ import numpy as np
 import pytest
 
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.boundary import BoundaryKey
+from aosr.materials.construction_models import SurfaceMaterial
 from aosr.gradient import material_gradient as search, run
 from aosr.gradient.gpu import Kernel, SinglePrecisionObjective
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, reduced_constants
-from aosr.reporting.scheme import Scheme
 from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays
 from tests.engine._material_gradient_gpu_probe import model
 from tests.engine.test_material_gradient import _objective_constants, _settings
@@ -48,14 +48,25 @@ class LegacyObjective(SinglePrecisionObjective):
 
 
 def load_problem(room: ReducedModel, patch: pytest.MonkeyPatch, batch: int | None = 16) -> run.GradientProblem:
-    """只替換磁碟輸入，使用真的 load_problem 與 objective_for 接線。"""
-    scheme = cast(Scheme, SimpleNamespace(scene=SimpleNamespace(density_kg_m3=1.2, sound_speed_m_s=343.0)))
-    kept = dict.fromkeys(Wall.all(), ConstantImpedance(impedance_pa_s_m=1500.0))
-    patch.setattr(run, "check_inputs", lambda project: (scheme, room, _settings()))
-    patch.setattr(run, "project_wall_materials", lambda project, scheme: kept)
-    patch.setattr(run, "search_objective_constants", lambda project, scheme, model: _objective_constants(model))
-    project = run.GradientProject.model_validate({**_project().model_dump(), "device": "gpu", "frequency_batch": batch})
-    return run.load_problem(project)
+    """只考舊低頻 chain_objective 的共用常數 API；六類接線另有正式工廠考卷。"""
+    from aosr.config.construction_environment import construction_environment
+    from aosr.gradient.gpu import single_precision_constants
+    from aosr.gradient.material_gradient_ledger import header_for
+    from aosr.gradient.template_rounds import TemplateContext
+    settings = _settings()
+    kept: dict[BoundaryKey, SurfaceMaterial] = dict.fromkeys(Wall.all(), ConstantImpedance(impedance_pa_s_m=1500.0))
+    designs = run.designs_for(_project().presets, settings, kept=kept)
+    low = _objective_constants(room)
+    air, ranges = construction_environment(density_kg_m3=room.density_kg_m3, sound_speed_m_s=room.sound_speed_m_s)
+    arrays = single_precision_constants(reduced_constants(room))
+    def build(items: tuple[search.SurfaceDesign, ...]) -> search.ChainObjective:
+        return search.chain_objective(room, items, low, air=air, ranges=ranges, frequencies=room.frequencies_hz,
+            frequency_batch=batch, single_precision=True, device_constants=arrays)
+    initial = build(designs)
+    def factory(items: tuple[search.SurfaceDesign, ...]) -> search.ChainObjective:
+        return initial if items == designs else build(items)
+    context = TemplateContext(settings, run.presets_table(), {str(w.wall_name()):m for w,m in kept.items() if isinstance(w, Wall)}, factory)
+    return run.GradientProblem(designs, settings, initial, header_for(room, designs, settings, objective_constants=low), kept, context)
 
 
 def candidates(problem: run.GradientProblem) -> list[tuple[search.SurfaceDesign, ...]]:
@@ -103,9 +114,9 @@ def bitwise(batch: int | None) -> dict[str, object]:
         return {"matches": matches}
 
 
-def lifetime(accept: bool) -> dict[str, object]:
+def lifetime(accept: bool, *, six: bool = False) -> dict[str, object]:
     from aosr.gradient import template_rounds as rounds
-    from aosr.scoring.gradient_objective_jax import objective_reading
+    from aosr.gradient.material_gradient import objective_reading
     from tests.engine._material_gradient_templates_probe import synthetic_factory
 
     with pytest.MonkeyPatch.context() as patch:
@@ -114,13 +125,28 @@ def lifetime(accept: bool) -> dict[str, object]:
     target = settings.family[1].id
     offsets = {rounds.candidate_id(problem.designs[0].surface_id, target): -100.0 if accept else 100.0}
     make_kernel = synthetic_factory(settings, offsets, [0])
-    refs: list[tuple[weakref.ReferenceType[SinglePrecisionObjective], weakref.ReferenceType[object],
+    refs: list[tuple[weakref.ReferenceType[object], weakref.ReferenceType[object],
                      weakref.ReferenceType[object]]] = []
 
     def factory(designs: tuple[search.SurfaceDesign, ...]) -> search.ChainObjective:
         kernel = make_kernel(designs)
-        candidate = SinglePrecisionObjective(lambda theta, arrays: kernel(theta), reduced_constants(model()))
-        refs.append((weakref.ref(candidate), weakref.ref(candidate.forward), weakref.ref(candidate.compiled)))
+        def low(theta: jax.Array, arrays: ReducedConstants) -> tuple[jax.Array, GradientObjectiveArrays]:
+            value, aux = kernel(theta)
+            from aosr.gradient.six_category_chain import SixCategoryChainAux
+            return value, cast(SixCategoryChainAux, aux).low_frequency
+        candidate: search.ChainObjective
+        if six:
+            from aosr.gradient.six_category_chain import SixCategoryChainAux
+            from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
+            from aosr.scoring.six_category_jax import SixCategoryConstants
+            from tests.engine._six_search_helpers import ledger_constants
+            def score(theta: jax.Array, arrays: ReducedConstants, constants: SixCategoryConstants) -> tuple[jax.Array,SixCategoryChainAux]:
+                value,aux = kernel(theta)
+                return value,cast(SixCategoryChainAux,aux)
+            candidate = SixCategorySinglePrecisionObjective(score,reduced_constants(model()),ledger_constants(_objective_constants(model())))
+        else:
+            candidate = SinglePrecisionObjective(low, reduced_constants(model()))
+        refs.append((weakref.ref(candidate), weakref.ref(getattr(candidate,'forward')), weakref.ref(getattr(candidate,'compiled'))))
         return candidate
 
     context = problem.templates._replace(objective_for=factory)
@@ -139,8 +165,8 @@ def lifetime(accept: bool) -> dict[str, object]:
 
 def main() -> None:
     mode = sys.argv[1]
-    if mode in ("accept", "reject"):
-        result = lifetime(mode == "accept")
+    if mode in ("accept", "reject", "six_accept", "six_reject"):
+        result = lifetime(mode.endswith('accept'),six=mode.startswith('six_'))
     else:
         result = sharing() if mode == "sharing" else bitwise(None if mode == "full" else 16)
     sys.stdout.write(json.dumps(result) + "\n")

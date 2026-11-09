@@ -29,23 +29,29 @@ from aosr.gradient.report import (
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.reporting.scheme import load_scheme
 from tests.engine._scheme_cache import shared_json
-from tests.engine.test_fem_reduced import model as model, operators as operators
+from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
+from tests.engine._six_search_cli_case import ENDPOINT_ROOM, model as model, operators as operators
 from tests.engine.test_material_gradient_cli import (
     Record, _command, _json, _kept_materials, _run, _schemes, _settings_text, _sha256, _start_args,
 )
 from tests.engine.test_material_gradient_endpoint_cli import _surrogate
 
-# 縮小步數（同命令列考卷），換樣板段照正式設定開、只把輪數上限調成 2 輪（考卷要快）。
-TEMPLATE_STEPS = {"descent.max_steps": 3, "retune.steps": 2, "templates.max_rounds": 2}
+# 縮小步數（一輪完整的小搜尋），換樣板段照正式設定開、只把輪數上限調成 1 輪（考卷要快）。
+TEMPLATE_STEPS = {"descent.max_steps": 1, "retune.steps": 1, "templates.max_rounds": 1, "candidates.max_rounds": 1, "candidates.max_per_round": 1, "templates.max_per_round": 1}
 # 庚三之前的 result.json（v2）有、v3 改名或新加的欄。
 V3_ONLY = ("round_stop_reason", "template_rounds", "template_evaluations", "template_ledger_sha256")
 
 
 def _inputs(directory: Path) -> None:
-    (directory / "scheme.json").write_text(_schemes()["scheme.json"].model_dump_json(), encoding="utf-8")
-    (directory / "settings.toml").write_text(_settings_text(TEMPLATE_STEPS), encoding="utf-8")
+    scheme = _schemes()["scheme.json"]
+    scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"room_m": ENDPOINT_ROOM})})
+    (directory / "scheme.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    # 六類每個候選都需編譯；小案例只保留第一家族，六面各一個替換，完整流程與斷言照舊。
+    text = _settings_text(TEMPLATE_STEPS)
+    preamble, first, *_ = text.split("\n[[family]]")
+    (directory / "settings.toml").write_text(preamble + "\n[[family]]" + first, encoding="utf-8")
     settings = load_material_gradient_settings(directory / "settings.toml")
-    assert (settings.descent.max_steps, settings.retune.steps, settings.templates.max_rounds) == (3, 2, 2)
+    assert (settings.descent.max_steps, settings.retune.steps, settings.templates.max_rounds) == (1, 1, 1)
 
 
 def v2_result(v3: Record) -> Record:
@@ -89,15 +95,17 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     _surrogate(directory, request)
     _inputs(directory)
     root = directory / "root"
-    output: Record = {"start": _run(directory, _start_args(directory, root))}
+    output: Record = {"start": _run(directory, _start_args(directory, root, presets=",".join(("none",) * len(Wall.all()))))}
     assert cast(Record, output["start"])["code"] == 0, output["start"]
     (folder,) = (path for path in root.iterdir() if not path.name.startswith("."))
     output["folder"] = str(folder)
     output["old_shape"] = _old_shape(directory, folder)
     output["report_before"] = _run(directory, _command("report", "--folder", str(folder)))
-    output["endpoint"] = _run(directory, _command("endpoint", str(folder)))
-    output["report_after"] = _run(directory, _command("report", "--folder", str(folder)))
-    output["flipped"] = _flipped(directory, folder)
+    old_folder = legacy_endpoint_copy(directory, folder)
+    output["endpoint_folder"] = str(old_folder)
+    output["endpoint"] = _run(directory, _command("endpoint", str(old_folder)))
+    output["report_after"] = _run(directory, _command("report", "--folder", str(old_folder)))
+    output["flipped"] = _flipped(directory, old_folder)
     text = json.dumps(output, ensure_ascii=False)
     (directory / "fixture.json").write_text(text, encoding="utf-8")
     return text
@@ -156,7 +164,7 @@ def test_start_closes_template_segment_and_result_v4_matches_ledgers(runs: tuple
     result, status = _json(folder / "result.json"), _json(folder / "status.json")
     last = rows[-1]
     assert last.decision is not None and last.stop_reason is not None
-    assert result["format_version"] == "aosr.material_gradient_result.v4"
+    assert result["format_version"] == run.RESULT_VERSION
     assert result["stop_reason"] == last.stop_reason
     assert [[item["surface_id"], item["preset_id"]] for item in cast(list[Record], result["surfaces"])] == [
         list(item) for item in last.surfaces]
@@ -193,7 +201,7 @@ def test_resume_of_pre_template_folder_opens_segment_and_overwrites_v2(runs: tup
     copy, folder = Path(str(case["folder"])), _folder(runs)
     assert _without_seconds(_template_rows(copy)) == _without_seconds(_template_rows(folder))
     rewritten = _json(copy / "result.json")
-    assert rewritten["format_version"] == "aosr.material_gradient_result.v4"
+    assert rewritten["format_version"] == run.RESULT_VERSION
     assert _without_hashes(rewritten) == _without_hashes(_json(folder / "result.json"))
     assert rewritten["template_ledger_sha256"] == _sha256(copy / "templates.jsonl")
 
@@ -205,7 +213,7 @@ def test_endpoint_exports_final_configuration(runs: tuple[Path, Record]) -> None
     不等於原 preset 那一份），不貼的面是方案原本那面的固定阻抗；endpoint.json 綁了換樣板帳本摘要。"""
     case = _section(runs, "endpoint")
     assert case["code"] == 0, case["stderr"]
-    folder = _folder(runs)
+    folder = Path(str(runs[1]["endpoint_folder"]))
     record = _json(folder / "endpoint.json")
     result = _json(folder / "result.json")
     assert record["result_template_ledger_sha256"] == result["template_ledger_sha256"] == _sha256(
@@ -250,8 +258,7 @@ def test_report_template_section_labels_each_candidate(runs: tuple[Path, Record]
         decision = next(item.decision for item in rows if item.round == row.round and item.decision is not None)
         retuned = {outcome.candidate for outcome in decision.outcomes}
         line = next(text for text in section if text.startswith(
-            f"    {row.candidate}：快速評分 舊合分 {row.screening_total:.6f}／新合分 {row.value:.6f}"
-            f"／代理 {row.proxy_db():.3f} dB，"))
+            f"    {row.candidate}：快速評分 六類 J {row.value:.6f}／product {row.components[10]:.6f}"))
         if row.candidate in retuned:
             assert RETUNED in line and QUICK_ONLY not in line, line
         else:

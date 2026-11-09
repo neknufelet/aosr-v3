@@ -122,7 +122,7 @@ JAX 雙精度對現有 Python 雙精度：
 
 - 第一部分照原紙拍板段（原文）：
 
-- 材料與三路一起放顯卡：2026-10-11，老闆在對話裡原話「然後我們材料一定要在顯卡,目前ism/晚期混響都已經是,之前也有測過fem的方式有機會放到顯卡,全部丟一起跑」（出處 `docs/decisions/material-stage-tmm-gpu-single-precision-search-ruler.md` 拍板段）。
+- 材料與三路一起放顯卡：2026-10-11，老闆在對話裡原話「然後我們材料一定要在顯卡,目前ism/晚期混響都已經是,之前也有測過fem的方式有機會放到顯卡,全部丟一起跑」（出處 `docs/decisions/stage-three-six-category-gpu-single-precision-ruler.md` 拍板段）。
 - 鏡像法幾何用中央處理器雙精度、第三階段用 JAX 在顯卡上單精度：`docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md` 表二鏡像法那一列，老闆在票 #285 回 A。
 - `2^-48` 這個數字、「單精度只量不登記、顯卡單精度另立尺」、相位用雙精度常數先算好，都是主對話依量測判斷（#562），老闆沒逐字拍。
 

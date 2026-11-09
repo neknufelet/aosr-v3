@@ -5,18 +5,22 @@
 舊欄換成固定阻抗，不走產品的 ``scene_wall_materials``）直接叫 ``endpoint_check``，並用完整模型解原方案六面、交同一把尺
 （``objective_from_pressures``）與同一支大峰（``endpoint.big_peaks``）。
 
-兩份在同一個行程、同一組處理器釘選下算，父行程逐位比；命令列 ``endpoint`` 的子行程走 ``runtime.child_process_env``，
-刻意不帶三格處理器釘選，跨機器（例如有 AVX-512 的雲端）替身那幾格會差在最後幾位，所以命令列那一份只跟這裡的產品入口
-那一份比：非浮點逐字、浮點用精度契約登記簿的尺。
+兩份在同一個行程算，父行程逐位比。探針的 ``endpoint_probe_env`` 與命令列工作行程的
+``runtime.child_process_env`` 都不帶 NPY_DISABLE_CPU_FEATURES、OPENBLAS_CORETYPE、XLA_FLAGS 三格釘選。
+跨入口仍沿既有契約：非浮點逐字、浮點用精度契約登記簿的尺。
+GPU 那一跑的 NumPy 評分只核 CPU 記下的輸入身分後回壓力雜湊值；CPU 那跑仍呼叫真評分，
+GPU 完整解、精修與六類 JAX 評分照算。
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
@@ -29,7 +33,7 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
-from aosr.gradient import endpoint
+from aosr.gradient import endpoint, endpoint_six
 from aosr.gradient.material_gradient import wall_designs_from_presets
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, run_endpoint
 from aosr.physics import fem_full_gpu
@@ -39,17 +43,27 @@ from aosr.gradient.run import RESULT_FILE, GradientResult, check_inputs, read_pr
 from aosr.gradient.worker import run_endpoint_worker
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.reporting.fem_reduced_scheme import export_operators
+from aosr.reporting.scheme import Scheme
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants, gradient_objective_from_pressures
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.scoring.stage_one_score import stage_one_score_settings
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, six_category_costs
 
 Record = dict[str, object]
+type NumpyReading = tuple[endpoint_six.Categories, float | None, str | None]
+
+
+def _numpy_identity(context: endpoint_six.ScoringContext, scheme: Scheme,
+                    pressure: NDArray[np.complex128]) -> tuple[str, str, str, tuple[int, ...], str]:
+    """同一份方案、計算與物理身分及壓力布局；GPU 單精度解的壓力位元另算。"""
+    return (scheme.model_dump_json(), context.program_fingerprint, context.physics_identity,
+            pressure.shape, pressure.dtype.str)
 
 
 def _endpoint(source: Path) -> Record:
     """產品入口那一份的控制組：同一份輸入直接叫 ``endpoint_check``；原方案六面完整模型解交同一把尺、同一支大峰。"""
     project = read_project(source)
-    scheme, model, settings = check_inputs(project)
+    scheme, model, settings = check_inputs(project, allow_legacy_objective=True)
     result = GradientResult.model_validate_json((source / RESULT_FILE).read_bytes())
     fixed = scheme.scene.impedance_pa_s_per_m_by_wall
     axis_id = scheme.scene.low_frequency_axis
@@ -92,7 +106,38 @@ def _endpoint(source: Path) -> Record:
 
 def main(directory: Path, name: str) -> None:
     source = directory / name
-    code = run_endpoint_worker(source)
+    devices: list[bool] = []
+    identities: list[tuple[str, str, str, tuple[int, ...], str]] = []
+    real_numpy = endpoint_six.numpy_scores
+
+    def record_numpy(context: endpoint_six.ScoringContext, scheme: Scheme,
+                     pressure: NDArray[np.complex128]) -> NumpyReading:
+        identities.append(_numpy_identity(context, scheme, pressure))
+        return real_numpy(context, scheme, pressure)
+
+    gpu_numpy_calls = 0
+
+    def gpu_numpy(context: endpoint_six.ScoringContext, scheme: Scheme,
+                  pressure: NDArray[np.complex128]) -> NumpyReading:
+        nonlocal gpu_numpy_calls
+        assert gpu_numpy_calls < len(identities), 'GPU 多叫了一次 numpy_scores'
+        assert _numpy_identity(context, scheme, pressure) == identities[gpu_numpy_calls]
+        gpu_numpy_calls += 1
+        # 此跑只驗 GPU 接線；CPU 那跑與獨立六類考卷仍核真 NumPy 分數。
+        # 壓力來自真單精度解，不要求與 CPU 位元相同；值照 solver stand-in 由位元導出。
+        raw = hashlib.sha256(np.ascontiguousarray(pressure).tobytes()).digest()
+        value = 1.0 + int.from_bytes(raw[:6], 'big') / 2.0**48
+        categories: endpoint_six.Categories = (value, value, value, value, value, value)
+        return categories, value, None
+
+    def observe(c: SixCategoryConstants, fem: jax.Array, normal: jax.Array, early: jax.Array,
+                paris: jax.Array, pressures: jax.Array, flags: jax.Array) -> SixCategoryArrays:
+        devices.append(all(all(device.platform == 'cpu' for device in value.devices()) and value.dtype == jnp.complex128
+            for value in (fem, normal, early, paris, pressures)) and all(device.platform == 'cpu' for device in flags.devices()))
+        return six_category_costs(c, fem, normal, early, paris, pressures, flags)
+    with (patch.object(endpoint_six, 'six_category_costs', observe),
+          patch.object(endpoint_six, 'numpy_scores', record_numpy)):
+        code = run_endpoint_worker(source)
     record = json.loads((source / ENDPOINT_FILE).read_text(encoding="utf-8")) if code == 0 else None
     output = {"worker_code": code, "worker_record": record, "endpoint": _endpoint(source)}
     factors: list[SingleFactor] = []
@@ -110,8 +155,13 @@ def main(directory: Path, name: str) -> None:
         steps.append(solver.refinement_steps[-1])
         return solution
 
-    with patch.object(fem_full_gpu, "nvmath_factor", factor), patch.object(fem_full_gpu.GPUFullSolver, "solve", capture):
+    (source / ENDPOINT_FILE).rename(source / "endpoint-cpu.json")
+    with (patch.object(fem_full_gpu, "nvmath_factor", factor), patch.object(fem_full_gpu.GPUFullSolver, "solve", capture),
+          patch.object(endpoint_six, "six_category_costs", observe), patch.object(endpoint_six, 'numpy_scores', gpu_numpy)):
         gpu = run_endpoint(source, device="gpu")
+    output['cpu_numpy_calls'] = len(identities)
+    output['gpu_numpy_calls'] = gpu_numpy_calls
+    output["cpu_six_scoring"] = bool(devices) and all(devices)
     output["gpu_steps"] = steps
     output["gpu"] = gpu.model_dump(mode="json")
     output["gpu_factors"] = [{"freed": f.freed, "factorizations": f.factorizations, "calls": f.calls} for f in factors]

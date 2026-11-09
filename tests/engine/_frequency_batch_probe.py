@@ -64,7 +64,7 @@ class _BatchReached(Exception):
 
 def wiring(folder: Path, mode: str) -> dict[str, object]:
     """只換數值求解邊界；讀檔、建鏈、終點編譯都走產品入口，回傳原始接線紀錄。"""
-    from aosr.gradient import endpoint_run, material_gradient, run
+    from aosr.gradient import endpoint_run, material_gradient, run, six_category_chain
 
     batches: list[object] = []
     paths: list[str] = []
@@ -75,6 +75,7 @@ def wiring(folder: Path, mode: str) -> dict[str, object]:
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(material_gradient, "reduced_pressures", stop_at_solve)
+        patch.setattr(six_category_chain, "reduced_pressures", stop_at_solve)
         if mode == "resume":
             problem = run.load_problem(run.read_project(folder))
             candidate = run.designs_for((None,) * len(problem.designs), problem.settings, kept=problem.kept)

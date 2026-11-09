@@ -20,7 +20,8 @@ from aosr.materials.construction_models import AirLayer, Assembly, ConstantImped
 from aosr.physics.fem_reduced import export_room_operators, impedance_rows
 from aosr.physics.fem_reduced_store import load_reduced
 from aosr.reporting import fem_reduced_scheme
-from tests.engine.test_fem_reduced import ROOM, SOURCES, SEATS, DENSITY, SOUND_SPEED
+from tests.engine.test_fem_reduced import SOURCES, SEATS, DENSITY, SOUND_SPEED
+from tests.engine._six_search_cli_case import ROOM
 from tests.engine.test_material_gradient import PURPOSE
 from tests.engine.test_material_gradient_cli import PRESET_TEXT, _chain_operators, _schemes
 

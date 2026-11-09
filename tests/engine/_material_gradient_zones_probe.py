@@ -11,6 +11,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from tests.engine._six_search_helpers import six_header_for, six_objective
+
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.gradient.boundary import BoundaryKey
@@ -70,16 +72,16 @@ def _identities(model: reduced.ReducedModel, designs: tuple[gradient.SurfaceDesi
                 settings: MaterialGradientSettings, constants: GradientObjectiveConstants,
                 kept: dict[BoundaryKey, SurfaceMaterial],
                 objective_for: Callable[[tuple[gradient.SurfaceDesign, ...]], gradient.ChainObjective]) -> None:
-    header = ledger.header_for(model, designs, settings, objective_constants=constants)
+    header = six_header_for(model, designs, settings, objective_constants=constants)
     assert header.boundary_patches == partition_identity(model.patch_keys)
-    assert header == ledger.header_for(model, designs, settings, objective_constants=constants)
+    assert header == six_header_for(model, designs, settings, objective_constants=constants)
     # 相同物理材料、只改代號或區序：搜尋身分與兩本標頭都不同。
     for keys in (tuple((w, "renamed" if z == "right" else z) for w, z in model.patch_keys),
                  (*model.patch_keys[:2], model.patch_keys[3], model.patch_keys[2], *model.patch_keys[4:])):
         other = dataclasses.replace(model, patch_keys=keys)
         from aosr.gradient.boundary import surface_ids
         changed = tuple(dataclasses.replace(d, surface_id=name) for d, name in zip(designs, surface_ids(keys), strict=True))
-        changed_header = ledger.header_for(other, changed, settings, objective_constants=constants)
+        changed_header = six_header_for(other, changed, settings, objective_constants=constants)
         assert header != changed_header
         assert run.template_header_for(header, settings, kept, base_ledger_sha256="e" * 64) != run.template_header_for(
             changed_header, settings, dict(zip(keys, kept.values(), strict=True)), base_ledger_sha256="e" * 64)
@@ -200,9 +202,9 @@ def _problem(model: reduced.ReducedModel) -> run.GradientProblem:
     air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
     constants = gradient_objective_constants(axis, _gradient_settings(), base.receiver_set, 2)
     def objective_for(items: tuple[gradient.SurfaceDesign, ...]) -> gradient.ChainObjective:
-        return gradient.chain_objective(model, items, constants, air=air, ranges=ranges, frequencies=axis)
+        return six_objective(gradient.chain_objective(model, items, constants, air=air, ranges=ranges, frequencies=axis))
     objective = objective_for(designs)
-    header = ledger.header_for(model, designs, settings, objective_constants=constants)
+    header = six_header_for(model, designs, settings, objective_constants=constants)
     fixed_patches = expanded_fixed_surfaces(fixed, tuple(d.surface_id for d in designs))
     context = TemplateContext(settings, run.presets_table(), named_materials(kept), objective_for, "rigid", fixed_patches)
     return run.GradientProblem(designs, settings, objective, header, kept, context)
