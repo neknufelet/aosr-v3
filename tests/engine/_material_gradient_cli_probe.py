@@ -379,6 +379,7 @@ def _replays(directory: Path, source: Path, part: str, *, isolated: bool = False
         chosen = sorted({*firsts.values(), len(phases)})
         # 最後一次回呼在迴圈內；整輪才落帳，phase 仍是 retune，但前段已完整，故走 resume_rounds。
         # 截帳獨立例走 _fresh。兩例各在無補丁新行程守一條產品接續分支。
+        # 此夾具迴圈只有一輪，停下時已寫迴圈列為零，resume_rounds 從第一輪重做；靠決定列接續由行程內考卷守。
         independent = len(phases)
         selected = [independent] if isolated else [at for at in chosen if at != independent]
         return {"stops": [{**_stop_and_resume(directory, source, at, phases[at - 1]), 'isolated': isolated}

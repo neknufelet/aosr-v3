@@ -67,10 +67,12 @@ def _status(folder: Path, state: State, started_at: str, message: str | None = N
 
 
 def run_worker(folder: Path, mode: Mode, *, should_stop: StopCheck) -> int:
-    """跑一次（開始或接續），寫狀態檔與結果檔（結果檔由 ``run_search``／``resume_search`` 跑完時寫），回離開碼。"""
+    """跑一次（開始或接續），寫狀態檔與結果檔（結果檔由 ``run_search``／``resume_search`` 跑完時寫），回離開碼。
+
+    初始 running 寫入也在中斷處理範圍內，寫完就中斷仍須記 interrupted。"""
     started = now_text()
-    _status(folder, "running", started)
     try:
+        _status(folder, "running", started)
         project = read_project(folder)
         platforms = "cuda,cpu" if project.device == "gpu" else "cpu"
         if runtime.jax_settings() != (platforms, True):
