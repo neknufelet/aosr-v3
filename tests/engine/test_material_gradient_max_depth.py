@@ -12,7 +12,9 @@ import pytest
 
 from tests.engine._six_search_helpers import six_header_for, expand_components, weights
 
-from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.material_gradient import (
+    DescentSettings, FamilySettings, MaterialGradientSettings, load_material_gradient_settings,
+)
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import cli, run
@@ -30,7 +32,7 @@ from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_boundary import boundary_patches
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
-from tests.engine._material_gradient_legacy import legacy_family_settings
+from tests.engine._material_gradient_legacy import legacy_family_settings, legacy_stopping_settings
 from tests.engine.test_material_gradient import _gradient_settings, _receivers
 from tests.engine.test_material_gradient_cli import _schemes
 from tests.engine.test_material_gradient_mount import _project, _rigid_result
@@ -404,6 +406,8 @@ def test_headers_bind_expanded_caps_and_preserve_legacy_bytes(tmp_path: Path) ->
     with pytest.raises(ValueError, match="標頭.*對不上"):
         ledger.read_ledger(tmp_path / "plain.jsonl", expected_header=header)
     # 歷史控制組只有序列化與設定指紋；#1032 僅重釘目標常數指紋，沒有線性代數或 XLA 的固定答案。
+    # 以下兩組都是舊低頻唯讀標頭，保留當時的 0.5 與固定摘要；前半六類標頭仍用現行預設。
+    settings = legacy_stopping_settings(settings)
     legacy = legacy_family_settings(settings)
     project = _project()
     kept = {wall: ConstantImpedance(impedance_pa_s_m=12348.0 + i) for i, wall in enumerate(Wall.all())}
@@ -425,3 +429,32 @@ def test_headers_bind_expanded_caps_and_preserve_legacy_bytes(tmp_path: Path) ->
     assert hashlib.sha256((tmp_path / "current-templates.jsonl").read_bytes()).hexdigest() == "fcaed69bbd2a1076cd417de2e96a9cee779d644b1f101a94f7516b39e065afe5"
     run.write_json_atomic(tmp_path / "result.json", _rigid_result(current, current_designs))
     assert hashlib.sha256((tmp_path / "result.json").read_bytes()).hexdigest() == "3ab492f75fd0110baca094025e12070f68264a8f6fa195b0a744473270121bb4"
+
+
+def test_settings_file_loads_and_guards(tmp_path: Path) -> None:
+    """抓設定檔缺節、步長下限不小於起始、最薄厚度超過總深度、一個 preset 屬兩個家族、數字型別寬鬆轉型照樣收。"""
+    settings = _settings()
+    assert settings.descent.gradient_norm_stop == 0.17
+    assert settings.descent.initial_step == 0.01
+    assert settings.candidates.improvement_threshold == 0.05
+    assert settings.fingerprint == load_material_gradient_settings(config_path("material_gradient.toml")).fingerprint
+    missing = tmp_path / "missing.toml"
+    missing.write_text("[descent]\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_material_gradient_settings(missing)
+    with pytest.raises(ValueError):
+        DescentSettings.model_validate({**settings.descent.model_dump(), "min_step": settings.descent.initial_step})
+    with pytest.raises(ValueError):
+        FamilySettings.model_validate({**settings.family[0].model_dump(), "max_total_depth_m": 0.01})
+    family = settings.family[0].model_dump()
+    with pytest.raises(ValueError, match="浮點"):
+        FamilySettings.model_validate({**family, "thicknesses_m": ["0.05", 0.1]})
+    with pytest.raises(ValueError, match="浮點"):
+        FamilySettings.model_validate({**family, "max_total_depth_m": 1})
+    with pytest.raises(ValueError, match="浮點"):
+        DescentSettings.model_validate({**settings.descent.model_dump(), "initial_step": 1})
+    with pytest.raises(ValueError):
+        DescentSettings.model_validate({**settings.descent.model_dump(), "max_steps": 30.0})
+    with pytest.raises(ValueError):
+        MaterialGradientSettings.model_validate({**settings.model_dump(), "family": [
+            settings.family[0].model_dump(), {**settings.family[1].model_dump(), "presets": list(settings.family[0].presets)}]})

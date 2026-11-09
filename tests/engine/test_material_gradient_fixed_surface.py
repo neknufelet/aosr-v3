@@ -31,7 +31,7 @@ from aosr.gradient.report import _kept_texts
 from aosr.physics.report_surfaces import WholeWallZone
 from tests.engine._material_gradient_templates_probe import SYNTHETIC_SCORES, synthetic_factory
 from tests.engine.test_material_gradient import _presets, _settings
-from tests.engine._material_gradient_legacy import legacy_family_settings
+from tests.engine._material_gradient_legacy import legacy_descent_settings
 from tests.engine.test_material_gradient_mount import (
     _control_kept, _header, _project, test_rigid_identities_equal_mainline_bit_for_bit as _mount_control,
 )
@@ -43,7 +43,7 @@ CONTROL: dict[str, str] = {'ledger.jsonl': 'bfaf2131f221dd55b9c39a2ea3e70e8ead7b
 
 
 def _problem(fixed: dict[str, str] | None = None) -> run.GradientProblem:
-    settings = _settings() if fixed else legacy_family_settings(_settings())
+    settings = _settings() if fixed else legacy_descent_settings(_settings())
     kept = _control_kept()
     designs = run.designs_for(PRESETS, settings, kept={wall: kept[wall.wall_name()] for wall in Wall.all()}, fixed_surfaces=fixed)
     factory = synthetic_factory(settings, {}, [0])

@@ -33,7 +33,7 @@ from tests.engine._six_search_helpers import six_header_for
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ, LowFrequencyAxis
 from aosr.config.material_gradient import (
-    DescentSettings, FamilySettings, MaterialGradientSettings, load_material_gradient_settings,
+    MaterialGradientSettings, load_material_gradient_settings,
 )
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
@@ -55,7 +55,7 @@ from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings, 
 from aosr.scoring.stage_one_score import StageOneScoreSettings, score_stage_one
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
-from tests.engine._material_gradient_legacy import legacy_family_settings
+from tests.engine._material_gradient_legacy import legacy_descent_settings
 from tests.engine.test_fem_reduced import model as model, operators as operators
 from tests.engine._scheme_cache import shared_json
 from tests.engine._precision_contracts import contract_value
@@ -176,7 +176,7 @@ def runs(chain_model: ReducedModel, tmp_path_factory: pytest.TempPathFactory, wo
 def _probe(chain_model: ReducedModel, directory: Path) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     save_reduced(chain_model, directory / "model.npz")
-    cases = {name: {"presets": list(presets), "theta": [value.hex() for value in _probe_point(_designs(name, settings=legacy_family_settings(_settings())))],
+    cases = {name: {"presets": list(presets), "theta": [value.hex() for value in _probe_point(_designs(name, settings=legacy_descent_settings(_settings())))],
                     "step": DIFFERENCE_STEP, "descent": name == DESCENT_CASE} for name, presets in CASES.items()}
     problem = {"cases": cases, "purpose": PURPOSE, "receivers": _receivers().model_dump(mode="json")}
     (directory / "problem.json").write_text(json.dumps(problem), encoding="utf-8")
@@ -262,7 +262,7 @@ def test_chain_gradient_matches_numpy_difference_per_parameter(
     關掉 #952 審查留下的「同一面弱頻點的錯梯度可躲過逐牆尺度」：這裡每一格是一個純量，沒有聚合可躲。
     """
     row = runs[1][name]
-    designs = _designs(name, settings=legacy_family_settings(_settings()))
+    designs = _designs(name, settings=legacy_descent_settings(_settings()))
     assert row["names"] == list(gradient_search.design_names(designs))
     assert row["dtype"] == "float64" and row["gradient_dtype"] == "float64"
     theta = _probe_point(designs)
@@ -304,7 +304,7 @@ def test_descent_monotone_inside_box_and_stop_reason_matches_numbers(runs: tuple
     """抓值上升、跳出盒界或總深度、停止原因跟記下的數字對不上（記梯度夠小但最後範數不小、記步數到上限但沒走滿）、
     求值次數比走過的步還少。"""
     descent = _descent(runs)
-    settings = _settings().descent
+    settings = legacy_descent_settings(_settings()).descent
     row = runs[1][DESCENT_CASE]
     lower, upper = _decode(row["lower"]), _decode(row["upper"])
     thetas = [_decode(step) for step in cast(list[list[str]], descent["theta"])]
@@ -315,7 +315,7 @@ def test_descent_monotone_inside_box_and_stop_reason_matches_numbers(runs: tuple
     assert np.all(np.diff(values) <= 0.0)
     assert values[-1] < values[0]
     assert all(np.all((lower <= theta) & (theta <= upper)) for theta in thetas)
-    top = legacy_family_settings(_settings()).family[0].max_total_depth_m
+    top = legacy_descent_settings(_settings()).family[0].max_total_depth_m
     pairs = _pairs(cast(list[str], row["names"]))
     assert pairs and all(theta[t] + theta[c] <= top for theta in thetas for t, c in pairs)
     assert cast(int, descent["evaluations"]) >= len(thetas)
@@ -394,7 +394,7 @@ def test_descent_gradient_norm_is_projected(runs: tuple[Path, dict[str, Record]]
     row = runs[1][DESCENT_CASE]
     descent = _descent(runs)
     lower, upper = _decode(row["lower"]), _decode(row["upper"])
-    pairs, top = _pairs(cast(list[str], row["names"])), legacy_family_settings(_settings()).family[0].max_total_depth_m
+    pairs, top = _pairs(cast(list[str], row["names"])), legacy_descent_settings(_settings()).family[0].max_total_depth_m
     thetas = [_decode(step) for step in cast(list[list[str]], descent["theta"])]
     gradients = [_decode(item) for item in cast(list[list[str]], row["descent_gradients"])]
     recorded = _decode(descent["gradient_norm"])
@@ -409,7 +409,7 @@ def test_descent_gradient_norm_is_projected(runs: tuple[Path, dict[str, Record]]
     projected = _tangent_norm(final_theta, final_gradient, lower, upper, pairs, top)
     assert float(np.linalg.norm(final_gradient)) > projected
     assert _masked_norm(final_theta, final_gradient, lower, upper) > projected
-    assert recorded[-1] < _settings().descent.gradient_norm_stop
+    assert recorded[-1] < legacy_descent_settings(_settings()).descent.gradient_norm_stop
 
 
 def test_descent_box_only_gradient_norm_masks_upper_bound(runs: tuple[Path, dict[str, Record]]) -> None:
@@ -430,7 +430,7 @@ def test_descent_box_only_gradient_norm_masks_upper_bound(runs: tuple[Path, dict
     cavities = [c for _, c in _pairs(cast(list[str], row["names"]))]
     assert [c for c in cavities if final_theta[c] >= upper[c] and final_gradient[c] < 0.0]
     unmasked = float(np.linalg.norm(final_gradient))
-    assert recorded[-1] < _settings().descent.gradient_norm_stop <= unmasked
+    assert recorded[-1] < legacy_descent_settings(_settings()).descent.gradient_norm_stop <= unmasked
 
 
 def _inside_by(top: float, thickness: float, ulps: int) -> tuple[float, float]:
@@ -614,7 +614,7 @@ def test_snap_retreats_to_thinner_when_cavity_zero_still_exceeds() -> None:
 def test_descent_end_snaps_to_feasible(runs: tuple[Path, dict[str, Record]]) -> None:
     """子行程那一次的取規格結果：可行、厚度都是合法值。"""
     snap = cast(Record, runs[1][DESCENT_CASE]["snap"])
-    assert gradient_search.is_feasible(_decode(snap["theta"]), _designs(DESCENT_CASE, settings=legacy_family_settings(_settings())))
+    assert gradient_search.is_feasible(_decode(snap["theta"]), _designs(DESCENT_CASE, settings=legacy_descent_settings(_settings())))
 
 
 # ---- 重調 ----
@@ -623,7 +623,7 @@ def test_retune_moves_only_cavities_at_most_k_steps(runs: tuple[Path, dict[str, 
     """抓重調動到厚度、步數超過上限、值上升、走出總深度：厚度逐位不變、最多 K 步、原因與數字一致、值不升、每步可行。"""
     row = runs[1][DESCENT_CASE]
     retune = cast(Record, row["retune"])
-    designs = _designs(DESCENT_CASE, settings=legacy_family_settings(_settings()))
+    designs = _designs(DESCENT_CASE, settings=legacy_descent_settings(_settings()))
     start = _decode(cast(Record, row["snap"])["theta"])
     thetas = [_decode(step) for step in cast(list[list[str]], retune["theta"])]
     names = gradient_search.design_names(designs)
@@ -654,7 +654,7 @@ def test_retune_with_cavity_room_moves_cavities(runs: tuple[Path, dict[str, Reco
     值不升、每步可行、最多 K 步。"""
     row = runs[1][DESCENT_CASE]
     retune = cast(Record, row["retune_slack"])
-    designs = _designs(DESCENT_CASE, settings=legacy_family_settings(_settings()))
+    designs = _designs(DESCENT_CASE, settings=legacy_descent_settings(_settings()))
     thetas = [_decode(step) for step in cast(list[list[str]], retune["theta"])]
     names = gradient_search.design_names(designs)
     cavities = np.asarray([name.endswith("layer2.thickness_m") for name in names])
@@ -673,8 +673,8 @@ def test_retune_with_cavity_room_moves_cavities(runs: tuple[Path, dict[str, Reco
 def test_ledger_round_trip_matches_probe(chain_model: ReducedModel, runs: tuple[Path, dict[str, Record]]) -> None:
     """抓帳本漏寫或改寫：子行程寫的帳本讀回，θ、值逐位等於那一次的結果，標頭等於父行程照同一份輸入算的。"""
     directory, output = runs
-    designs = _designs(DESCENT_CASE, settings=legacy_family_settings(_settings()))
-    expected = _header(chain_model, settings=legacy_family_settings(_settings()))
+    designs = _designs(DESCENT_CASE, settings=legacy_descent_settings(_settings()))
+    expected = _header(chain_model, settings=legacy_descent_settings(_settings()))
     header, rows = ledger.read_ledger(directory / f"{DESCENT_CASE}.ledger.jsonl", expected_header=expected)
     row = output[DESCENT_CASE]
     descent, retune = cast(Record, row["descent"]), cast(Record, row["retune"])
@@ -728,7 +728,7 @@ def test_ledger_rejects_header_with_other_surrogate(chain_model: ReducedModel, r
     source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
     other = dataclasses.replace(chain_model, input_hash="0" * 64)
     with pytest.raises(ValueError, match="input_hash"):
-        ledger.read_ledger(source, expected_header=_header(other, settings=legacy_family_settings(_settings())))
+        ledger.read_ledger(source, expected_header=_header(other, settings=legacy_descent_settings(_settings())))
     header, rows = ledger.read_ledger(source)
     with pytest.raises(FileExistsError):
         ledger.write_ledger(source, header, rows)
@@ -756,12 +756,12 @@ def test_ledger_rejects_header_with_other_scoring_constants(chain_model: Reduced
     source = runs[0] / f"{DESCENT_CASE}.ledger.jsonl"
     assert (ledger.objective_fingerprint(_objective_constants(chain_model))
             == ledger.objective_fingerprint(_objective_constants(chain_model)))
-    ledger.read_ledger(source, expected_header=_header(chain_model, settings=legacy_family_settings(_settings())))
+    ledger.read_ledger(source, expected_header=_header(chain_model, settings=legacy_descent_settings(_settings())))
     for score in (_reweighted(_score()), _narrowed(_score(), chain_model.frequencies_hz)):
-        other = _header(chain_model, score, settings=legacy_family_settings(_settings()))
+        other = _header(chain_model, score, settings=legacy_descent_settings(_settings()))
         # 評分指紋與標頭記的分數常數（#561 壬一審查 B）都從評分設定來，其餘逐格相同。
         scoring = {"objective_fingerprint": None, "score_constants": None}
-        assert other.model_dump() | scoring == _header(chain_model, settings=legacy_family_settings(_settings())).model_dump() | scoring
+        assert other.model_dump() | scoring == _header(chain_model, settings=legacy_descent_settings(_settings())).model_dump() | scoring
         with pytest.raises(ValueError, match="objective_fingerprint"):
             ledger.read_ledger(source, expected_header=other)
 
@@ -972,29 +972,3 @@ def test_surface_design_thickness_bounds_must_span_legal_thicknesses() -> None:
                          (floor.lower, (floor.legal_thicknesses_m[-1] * 1.5, *floor.upper[1:]))):
         with pytest.raises(ValueError, match="合法厚度"):
             dataclasses.replace(floor, lower=lower, upper=upper)
-
-
-def test_settings_file_loads_and_guards(tmp_path: Path) -> None:
-    """抓設定檔缺節、步長下限不小於起始、最薄厚度超過總深度、一個 preset 屬兩個家族、數字型別寬鬆轉型照樣收。"""
-    settings = _settings()
-    assert settings.fingerprint == load_material_gradient_settings(config_path("material_gradient.toml")).fingerprint
-    missing = tmp_path / "missing.toml"
-    missing.write_text("[descent]\n", encoding="utf-8")
-    with pytest.raises(ValueError):
-        load_material_gradient_settings(missing)
-    with pytest.raises(ValueError):
-        DescentSettings.model_validate({**settings.descent.model_dump(), "min_step": settings.descent.initial_step})
-    with pytest.raises(ValueError):
-        FamilySettings.model_validate({**settings.family[0].model_dump(), "max_total_depth_m": 0.01})
-    family = settings.family[0].model_dump()
-    with pytest.raises(ValueError, match="浮點"):
-        FamilySettings.model_validate({**family, "thicknesses_m": ["0.05", 0.1]})
-    with pytest.raises(ValueError, match="浮點"):
-        FamilySettings.model_validate({**family, "max_total_depth_m": 1})
-    with pytest.raises(ValueError, match="浮點"):
-        DescentSettings.model_validate({**settings.descent.model_dump(), "initial_step": 1})
-    with pytest.raises(ValueError):
-        DescentSettings.model_validate({**settings.descent.model_dump(), "max_steps": 30.0})
-    with pytest.raises(ValueError):
-        MaterialGradientSettings.model_validate({**settings.model_dump(), "family": [
-            settings.family[0].model_dump(), {**settings.family[1].model_dump(), "presets": list(settings.family[0].presets)}]})

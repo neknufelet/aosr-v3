@@ -33,7 +33,7 @@ from aosr.scoring.gradient_objective_jax import (
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.gradient import material_gradient as gradient_search
 from aosr.gradient import material_gradient_ledger as ledger
-from tests.engine._material_gradient_legacy import legacy_family_settings
+from tests.engine._material_gradient_legacy import legacy_descent_settings
 
 
 Record = dict[str, object]
@@ -139,7 +139,7 @@ def _retune_with_room(objective: gradient_search.ChainObjective, snapped: np.nda
 def main(directory: Path) -> None:
     problem = cast(dict[str, object], json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
-    settings = legacy_family_settings(load_material_gradient_settings(config_path("material_gradient.toml")))
+    settings = legacy_descent_settings(load_material_gradient_settings(config_path("material_gradient.toml")))
     presets = load_construction_presets(config_path("construction_presets.toml"))
     air = load_physics_constants(config_path("physics_constants.toml"))
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))

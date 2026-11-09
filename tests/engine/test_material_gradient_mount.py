@@ -55,6 +55,7 @@ from tests.engine._material_gradient_templates_probe import kept_walls
 from tests.engine import _zone_rom_case as zone_rom_case
 from tests.engine._scheme_cache import shared_json
 from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
+from tests.engine._material_gradient_legacy import legacy_stopping_settings
 from tests.engine._six_search_cli_case import model as model, operators as operators
 from tests.engine.test_material_gradient import (
     CASES, DESCENT_CASE, DIFFERENCE_STEP, PURPOSE, _chain_model, _decode, _decode_complex, _gradient_settings,
@@ -141,8 +142,10 @@ def _header(designs: tuple[gradient_search.SurfaceDesign, ...],
     return six_header_for(_stand_in(), designs, settings or _settings(), objective_constants=constants)
 
 
-def _template_header(header: ledger.MaterialGradientHeader, kept: dict[str, SurfaceMaterial]) -> templates.TemplateHeader:
-    return run.template_header_for(header, _settings(), {wall: kept[wall.wall_name()] for wall in Wall.all()},
+def _template_header(header: ledger.MaterialGradientHeader, kept: dict[str, SurfaceMaterial],
+                     settings: MaterialGradientSettings | None = None) -> templates.TemplateHeader:
+    return run.template_header_for(header, _settings() if settings is None else settings,
+                                   {wall: kept[wall.wall_name()] for wall in Wall.all()},
                                    base_ledger_sha256="e" * 64)
 
 
@@ -196,12 +199,13 @@ def test_rigid_identities_equal_mainline_bit_for_bit(tmp_path: Path) -> None:
     assert designs == gradient_search.wall_designs_from_presets(PRESETS, _settings(), _presets(), kept=_control_kept())
     assert {design.surface_id: endpoint.design_digest(design) for design in designs} == CONTROL_DIGESTS
     constants = gradient_objective_constants(np.asarray(FEM_LANE_FREQUENCIES_HZ), _gradient_settings(), _receivers(), 2)
-    header = ledger.header_for(_stand_in(), designs, _settings(), objective_constants=constants)
+    settings = legacy_stopping_settings(_settings())
+    header = ledger.header_for(_stand_in(), designs, settings, objective_constants=constants)
     line = (json.dumps(header.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
     (tmp_path / 'ledger.jsonl').write_bytes(line)
     assert ledger.read_ledger(tmp_path / 'ledger.jsonl', legacy=True)[0] == header
     assert _digest(line) == CONTROL_LEDGER_HEADER and b"mount" not in line
-    template = _template_header(header, _control_kept())
+    template = _template_header(header, _control_kept(), settings)
     template_line = (json.dumps(template.model_dump(mode='json'),ensure_ascii=False)+'\n').encode()
     (tmp_path / 'templates.jsonl').write_bytes(template_line)
     assert templates.read_template_ledger(tmp_path / 'templates.jsonl',legacy=True)[0] == template
