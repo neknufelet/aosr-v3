@@ -1,4 +1,4 @@
-"""θ → 材料四路阻抗 → 替身聲壓 → 六類；新增工廠，現行搜尋仍走原鏈。
+"""θ → 材料四路阻抗 → 替身聲壓 → 六類；聲源與面片必須跟替身同序。
 
 呼叫端先建一份 SixCategoryConstants（六類幾何與評分常數），所有候選共用。
 工廠只建材料樣板與保留牆常數，不重建幾何；精度跟 θ 走。
@@ -19,7 +19,8 @@ from aosr.gradient.material_gradient import (
     SurfaceDesign, design_template_material, design_templates, designs_mount,
     kept_impedance_rows, patch_impedances, surface_parameters,
 )
-from aosr.gradient.surrogate_guard import require_matching_patches
+from aosr.gradient.surrogate_guard import require_matching_patches, require_matching_sources
+from aosr.gradient.impedance_angles import impedance_at_angles_or_empty
 from aosr.gradient.six_category_gpu import ScoreArrays, SixCategorySinglePrecisionObjective
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
@@ -60,11 +61,13 @@ design_materials = _materials
 def _angle_impedance(material: SurfaceMaterial, template: ConstructionTemplate | None,
                      parameters: dict[str, jax.Array], axis: jax.Array, angles: jax.Array | None,
                      *, air: PhysicsConstants) -> jax.Array:
-    if isinstance(material, ConstantImpedance):
-        shape = axis.shape if angles is None else (axis.size, angles.size)
-        return jnp.full(shape, complex(material.impedance_pa_s_m), dtype=jnp.result_type(axis.dtype, jnp.complex64))
-    assert template is not None
-    return surface_impedance_from_parameters(template, parameters, axis, air=air, incidence_angles_deg=angles)
+    def calculate() -> jax.Array:
+        if isinstance(material, ConstantImpedance):
+            shape = axis.shape if angles is None else (axis.size, angles.size)
+            return jnp.full(shape, complex(material.impedance_pa_s_m), dtype=jnp.result_type(axis.dtype, jnp.complex64))
+        assert template is not None
+        return surface_impedance_from_parameters(template, parameters, axis, air=air, incidence_angles_deg=angles)
+    return impedance_at_angles_or_empty(axis, angles, calculate)
 
 
 def _angles(values: NDArray[np.float64], dtype: np.dtype) -> jax.Array:
@@ -112,6 +115,7 @@ impedance_function = _impedance_function
 def _check_inputs(model: ReducedModel, designs: tuple[SurfaceDesign, ...], objective: GradientObjectiveConstants,
                   c: SixCategoryConstants, frequencies: Sequence[float] | NDArray[np.float64]) -> None:
     ids = tuple(d.surface_id for d in designs)
+    require_matching_sources(model, c.source_ids)
     require_matching_patches(model, ids)
     if ids != tuple(str(x) for x in c.patch_ids):
         raise ValueError('六類常數與設計的有序面片清單不同')

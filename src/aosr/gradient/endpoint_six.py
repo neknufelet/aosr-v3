@@ -17,6 +17,8 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gradient.material_gradient import SurfaceDesign
+from aosr.gradient.impedance_angles import impedance_at_angles_or_empty
+from aosr.gradient.surrogate_guard import require_matching_sources
 from aosr.gradient.six_category_chain import impedance_function, design_materials
 from aosr.gradient.material_gradient import design_template_material
 from aosr.materials.construction import surface_impedance, surface_impedance_at_angles
@@ -111,6 +113,7 @@ def scoring_context(scheme: Scheme, model: ReducedModel, purpose: str, *, capabi
     _, pairs = checked_inputs(scored, capabilities=capabilities, directivity=directivity)
     constants = build_constants(scored, pair_inputs={key: value[1] for key, value in pairs.items()},
                                 quality_targets_path=config_path('quality_targets.toml'))
+    require_matching_sources(model, constants.source_ids)
     return ScoringContext(scored, constants, capabilities, directivity,
         calculation_fingerprint(capabilities_path=capabilities_path),
         physics_identity(capabilities=capabilities, directivity=directivity), engine_commit or '未記錄')
@@ -175,10 +178,13 @@ def baseline_impedances(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
     if any(isinstance(material, MeasuredImpedance) for material in materials):
         raise ValueError('實測原牆的表內／表外吸音分流尚未接入六類終點；拒絕寫出定義不同的分數')
     def impedance(material: SurfaceMaterial, axis: np.ndarray, angles: np.ndarray | None = None) -> jax.Array:
-        if angles is None:
-            return surface_impedance(material, jnp.asarray(axis, dtype=jnp.float64), air=air, ranges=ranges)[0]
-        return surface_impedance_at_angles(material, jnp.asarray(axis, dtype=jnp.float64),
-            jnp.asarray(angles, dtype=jnp.float64), air=air, ranges=ranges)[0]
+        frequencies = jnp.asarray(axis, dtype=jnp.float64)
+        incidence = None if angles is None else jnp.asarray(angles, dtype=jnp.float64)
+        def calculate() -> jax.Array:
+            if incidence is None:
+                return surface_impedance(material, frequencies, air=air, ranges=ranges)[0]
+            return surface_impedance_at_angles(material, frequencies, incidence, air=air, ranges=ranges)[0]
+        return impedance_at_angles_or_empty(frequencies, incidence, calculate)
     fem = jnp.stack([impedance(m, c.fem_frequencies_hz) for m in materials])
     normal = jnp.stack([impedance(m, c.frequencies_hz) for m in materials])
     early = jnp.concatenate([impedance(m, c.frequencies_hz, c.angles_deg[int(a):int(b)])

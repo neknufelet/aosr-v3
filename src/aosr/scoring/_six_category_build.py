@@ -213,6 +213,7 @@ def build_constants(scheme: SchemeInputs, *, pair_inputs: Mapping[tuple[str, str
     values.update(_reflection_constants(pairs[len(data.pairs):], primary_inputs, scheme.purpose, quality_targets_path, furniture))
     ratios = [np.ones(len(report)) if s.source_model.parameters is None else two_parameter_power_ratio(report, s.source_model.parameters) for s in solved[::len(points)]]
     values.update(frequencies_hz=np.asarray(report), fem_frequencies_hz=np.asarray(fem), union_frequencies_hz=np.asarray(union),
+        source_ids=np.asarray([channel.speaker_id for channel in channels], dtype=np.str_),
         report_indices=np.asarray([union.index(f) for f in report]), decay_indices=np.asarray([union.index(f) for f in LATE_DECAY_FREQUENCIES_HZ]),
         midband_indices=np.asarray([union.index(f) for f in SCHROEDER_T60_BANDS_HZ]), paris_angles_deg=_paris_angles_deg(),
         patch_areas_m2=data.patch_areas_m2, rho_c=np.asarray(rho), reflection_order_k=np.asarray(first.reflection_order_k),
