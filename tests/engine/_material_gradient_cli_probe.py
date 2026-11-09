@@ -1,7 +1,7 @@
 """梯度搜尋命令列考卷的雙精度子行程：只叫產品入口（``aosr.gradient.worker.run_worker``、``aosr.gradient.cli.main`` 的 stop），
 寫資料夾與原始紀錄；比對與判決在父行程。
 
-參考與部分重播共用一個行程；另保留下降批後停止、下降半批截帳各一例，在全新無共用補丁的子行程重建後逐位比。
+參考與部分重播共用一個行程；另保留迴圈中停止、下降半批截帳各一例，在全新無共用補丁的子行程重建後逐位比。
 N 不寫死：先跑參考、記下每一次查停止時帳本最後一列的階段，每一種階段取第一次出現的那一次。
 另外把參考帳本截成「前段只寫了一半」的幾份接續，與標頭被改過的一份接續（要拒收）。
 空氣（修補二、三）：方案場景的密度與聲速換成另一組、替身換成用同一組空氣建的那份（父行程建好、第二個參數給路徑），
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import dataclasses
+import inspect
 import os
 from unittest.mock import patch
 import shutil
@@ -92,6 +93,8 @@ def _stopper(folder: Path, at: int, record: Record) -> Callable[[], bool]:
     def should_stop() -> bool:
         calls[0] += 1
         if calls[0] == at:
+            record['in_rounds'] = any(item.frame.f_globals.get('__name__') == loop_module.__name__
+                                      for item in inspect.stack(context=0))
             record["stop_command_code"] = cli.main(["stop", str(folder)])
         return check()
 
@@ -374,8 +377,9 @@ def _replays(directory: Path, source: Path, part: str, *, isolated: bool = False
     if part == "stops":
         firsts = {phase: index + 1 for index, phase in reversed(list(enumerate(phases)))}
         chosen = sorted({*firsts.values(), len(phases)})
-        # 下降整批已寫、snap 尚未做；接續必須真正截帳並重做前段，不能只讀已完成的數字。
-        independent = firsts['descent']
+        # 最後一次回呼在迴圈內；整輪才落帳，phase 仍是 retune，但前段已完整，故走 resume_rounds。
+        # 截帳獨立例走 _fresh。兩例各在無補丁新行程守一條產品接續分支。
+        independent = len(phases)
         selected = [independent] if isolated else [at for at in chosen if at != independent]
         return {"stops": [{**_stop_and_resume(directory, source, at, phases[at - 1]), 'isolated': isolated}
                            for at in selected]}

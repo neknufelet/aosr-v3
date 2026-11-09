@@ -3,7 +3,7 @@
 
 從 ``test_material_gradient_cli`` 搬出來（那份逼近一千行上限），自帶夾具、不跟它共用 ``runs``：兩份檔在雲端可能分到
 不同片，共用就是整份命令列夾具在另一片重算。這裡只建驗過的那一份替身（同一間小房間、同一份收據寫法）、同一份方案
-與縮小步數的設定、開始一次、跑 endpoint 與報告；改檔的情境都先抄一份資料夾再改。控制組（同一份輸入直接叫
+與縮小步數的設定、開始一次、跑 endpoint 與報告；過期等情境抄副本，換 θ 拒收則在正式終點前還原。控制組（同一份輸入直接叫
 ``endpoint_check``、原方案六面完整模型解）在雙精度探針 ``_material_gradient_endpoint_cli_probe``。一場 pytest 只建一次、
 平行的工人共用（``shared_json``）。
 
@@ -138,9 +138,11 @@ def _with_field(path: Path, key: str, value: str) -> None:
     path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
 
 
-def _endpoint_runs(directory: Path, folder: Path) -> Record:
-    """跑完的資料夾跑 endpoint、再印一次報告；另抄一份只有 project.json 的資料夾跑 endpoint（沒有結果檔要拒收）。"""
-    record: Record = {"run": _run(directory, _command("endpoint", str(folder)))}
+def _endpoint_runs(directory: Path, folder: Path, theta_hex: list[str]) -> Record:
+    """同一份 legacy 夾先拒收竄改並還原，再正式跑 endpoint；另守缺結果檔拒收。"""
+    swapped = _swapped(directory, folder, theta_hex)
+    record: Record = {"run": _run(directory, _command("endpoint", str(folder))), "swapped": swapped}
+    swapped['restored'] = record['run']
     record["report_after"] = _run(directory, _command("report", "--folder", str(folder)))
     bare = directory / "no-result" / folder.name
     bare.mkdir(parents=True)
@@ -149,17 +151,15 @@ def _endpoint_runs(directory: Path, folder: Path) -> Record:
     return record
 
 
-def _swapped(directory: Path, pristine: Path, theta_hex: list[str]) -> Record:
-    """還沒跑過終點的一份資料夾：結果檔的 θ 換成帳本裡另一個可行點（帳本摘要那一格不動）跑 endpoint；
-    再把結果檔換回原樣跑一次。"""
-    original = (pristine / "result.json").read_bytes()
-    before = _entries(pristine)
-    _with_theta(pristine / "result.json", theta_hex)
-    swapped = _json(pristine / "result.json")
-    rejected = {**_run(directory, _command("endpoint", str(pristine))), "entries": _entries(pristine)}
-    (pristine / "result.json").write_bytes(original)
-    return {"before": before, "swapped": swapped, "rejected": rejected,
-            "restored": _run(directory, _command("endpoint", str(pristine)))}
+def _swapped(directory: Path, folder: Path, theta_hex: list[str]) -> Record:
+    """正式終點前先換 θ 驗拒收、再還原；成功那次由 _endpoint_runs 執行並記入 restored。"""
+    original = (folder / "result.json").read_bytes()
+    before = _entries(folder)
+    _with_theta(folder / "result.json", theta_hex)
+    swapped = _json(folder / "result.json")
+    rejected = {**_run(directory, _command("endpoint", str(folder))), "entries": _entries(folder)}
+    (folder / "result.json").write_bytes(original)
+    return {"before": before, "swapped": swapped, "rejected": rejected}
 
 
 def _stale(directory: Path, folder: Path, case: str, theta_hex: list[str]) -> Record:
@@ -297,9 +297,7 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     output = _search_runs(directory, request)
     folder = Path(str(output["folder"]))
     current = Path(str(output["new_folder"]))
-    # 搜尋與舊低頻重建先完成；以下副本均在任何終點寫檔前建立。
-    pristine = directory / "pristine" / folder.name
-    shutil.copytree(folder, pristine)
+    # 探針先抄未竄改的輸入；legacy 正式終點在自己的工作內先拒收換 θ、還原，再完整計算。
     work = _probe_work(directory, current)
     old_work = _probe_work(directory / "legacy-probe", folder)
     theta_hex = _other_theta(folder, directory / "settings.toml")
@@ -310,11 +308,11 @@ def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
         futures = {"probe": pool.submit(_probe, work, current.name),
                    "legacy_probe": pool.submit(_probe, old_work, folder.name),
                    "new_endpoint": pool.submit(_run, directory, _command("endpoint", str(current))),
-                   "endpoint": pool.submit(_endpoint_runs, directory, folder),
-                   "swapped": pool.submit(_swapped, directory, pristine, theta_hex),
+                   "endpoint": pool.submit(_endpoint_runs, directory, folder, theta_hex),
                    "no_axis": pool.submit(_no_axis, directory)}
         # 過期報告與前代理副本必須等舊低頻終點完成，才能抄完整的 endpoint.json。
         output["endpoint"] = futures.pop("endpoint").result()
+        output['swapped'] = cast(Record, output['endpoint']).pop('swapped')
         stale = {case: pool.submit(_stale, directory, folder, case, theta_hex) for case in STALE_CASES}
         futures["pre_proxy"] = pool.submit(_pre_proxy, directory, folder)
         # 原牆摘要拒收題要抄新資料夾整份，等其終點寫完，避免抄到原子寫檔的暫存檔。
@@ -584,7 +582,7 @@ def test_endpoint_without_result_fails_and_names_it(runs: tuple[Path, Record]) -
 
 def test_endpoint_rejects_result_with_swapped_theta_then_accepts_restored(runs: tuple[Path, Record]) -> None:
     """抓終點只信結果檔自己說的：結果檔的 θ 換成帳本裡另一個可行點、帳本摘要那一格還等於帳本檔，endpoint 回 1、
-    標準錯誤講明結果檔跟帳本對不上並點名 ``theta_hex``、沒多寫任何檔；換回原檔再跑回 0，報告逐位等於原資料夾那一次的。"""
+    標準錯誤講明結果檔跟帳本對不上並點名 ``theta_hex``、沒多寫任何檔；換回原檔正式跑回 0，報告逐位等於獨立探針。"""
     case, folder = _section(runs, "swapped"), _folder(runs)
     swapped = _section(runs, "swapped", "swapped")
     assert swapped["ledger_sha256"] == _sha256(folder / "ledger.jsonl")
@@ -595,7 +593,8 @@ def test_endpoint_rejects_result_with_swapped_theta_then_accepts_restored(runs: 
     assert rejected["entries"] == case["before"]
     restored = _section(runs, "swapped", "restored")
     assert restored["code"] == 0, restored["stderr"]
-    record, original = _record(runs[0] / "pristine" / folder.name), _record(folder)
+    record = _record(folder)
+    original = EndpointRecord.model_validate(_section(runs, 'legacy_probe')['worker_record'])
     assert json.loads(record.report.to_json()) == json.loads(original.report.to_json())
     assert record.result_sha256 == original.result_sha256
 
@@ -705,6 +704,7 @@ def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record]
         assert (tmp_path / "endpoint.json").read_bytes() == expected
     probe = _section(runs, "legacy_probe")
     gpu = EndpointRecord.model_validate(probe["gpu"])
+    assert probe['gpu_numpy_calls'] == probe['cpu_numpy_calls'] and cast(int, probe['cpu_numpy_calls']) > 0
     assert gpu.device == "gpu" and gpu.max_refinement_steps is not None and gpu.max_refinement_steps > 0
     steps = cast(list[int], probe["gpu_steps"])
     assert len(steps) == gpu.report.full_solves + gpu.baseline.full_solves
@@ -731,6 +731,7 @@ def test_cli_six_category_bitwise_and_gpu_full_solve(runs: tuple[Path, Record]) 
     """六類結果的 CLI／入口逐位；GPU 完整解替身照收、精修照記，六類仍 CPU 評分。"""
     record = _json(Path(str(runs[1]['new_folder'])) / 'endpoint.json')
     probe = _section(runs, 'probe')
+    assert probe['gpu_numpy_calls'] == probe['cpu_numpy_calls'] and cast(int, probe['cpu_numpy_calls']) > 0
     direct = cast(Record, probe['worker_record'])
     assert bitwise_equal(record['six_category'], direct['six_category'])
     gpu = EndpointRecord.model_validate(probe['gpu'])

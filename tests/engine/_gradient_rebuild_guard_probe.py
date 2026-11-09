@@ -1,4 +1,4 @@
-"""合成數值邊界的真開始／接續控制；植錯只改接續時的新建目標係數。"""
+"""守共用層不掩蓋重建漂移；控制與漂移各用自己的合成數值資料夾。"""
 from __future__ import annotations
 
 import json
@@ -16,11 +16,8 @@ from tests.engine.test_material_gradient import DESCENT_CASE, _designs, _setting
 from tests.engine.test_material_gradient_mount import _project
 from tests.engine.test_material_gradient_templates import _context
 
-# 正常控制為 1；植錯時只在本考卷子行程的新建接續目標改成 1 + 1e-12。
-RESUME_WEIGHT = 1.0
-
-
-def main(directory: Path) -> None:
+def _scenario(directory: Path, resume_weight: float) -> dict[str, object]:
+    directory.mkdir()
     settings = _settings()
     settings = settings.model_copy(update={'descent': settings.descent.model_copy(update={'max_steps': 3})})
     designs = _designs(DESCENT_CASE, settings=settings)
@@ -31,7 +28,7 @@ def main(directory: Path) -> None:
 
     def load(_: run.GradientProject) -> run.GradientProblem:
         original = synthetic_objective(designs, [0])
-        factor = RESUME_WEIGHT if resuming else 1.0
+        factor = resume_weight if resuming else 1.0
 
         def objective(theta: jnp.ndarray) -> tuple[jnp.ndarray, gradient.ObjectiveAux]:
             value, aux = original(theta)
@@ -50,6 +47,7 @@ def main(directory: Path) -> None:
         return [{key: value for key, value in json.loads(line).items() if key != 'seconds'} for line in content]
 
     error: str | None = None
+    error_type: str | None = None
     with patch.object(run, 'read_project', return_value=project), patch.object(run, 'load_problem', side_effect=load):
         shared = replay._shared_problem_loader()
         with patch.object(run, 'load_problem', side_effect=shared):
@@ -67,8 +65,16 @@ def main(directory: Path) -> None:
                 pass
             except ValueError as failure:
                 error = str(failure)
-    result = {'reproduced': error is None and bitwise_equal(expected, rows()), 'error': error,
+                error_type = type(failure).__name__
+    result: dict[str, object] = {'reproduced': error is None and bitwise_equal(expected, rows()), 'error': error, 'error_type': error_type,
               'start_stop': 'descent', 'reconstructed_objectives': len(objectives)}
+    (directory / 'result.json').write_text(json.dumps(result, ensure_ascii=False))
+    return result
+
+
+def main(directory: Path) -> None:
+    result = {'control': _scenario(directory / 'control', 1.0),
+              'drift': _scenario(directory / 'drift', 1.0 + 1e-12)}
     (directory / 'result.json').write_text(json.dumps(result, ensure_ascii=False))
 
 

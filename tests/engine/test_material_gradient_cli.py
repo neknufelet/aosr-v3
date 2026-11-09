@@ -646,6 +646,9 @@ def test_stop_marker_sampled_per_phase_then_resume_matches_one_shot(runs: tuple[
     stops = cast(list[Record], _probe_section(runs, "stops"))
     independent = [stop for stop in stops if stop['isolated']]
     assert len(independent) == 1 and independent[0]['pid'] != reference['pid']
+    assert independent[0]['in_rounds'] is True
+    stopped = ledger.read_ledger(runs[0] / 'probe' / str(independent[0]['stopped_ledger']))[1]
+    assert stopped[-1].phase == 'retune' and stopped[-1].stop_reason is not None  # 前段完整，走 resume_rounds。
     phases = cast(list[str], _probe_section(runs, "phases"))
     assert {stop["phase"] for stop in stops} == set(phases)
     for stop in stops:
