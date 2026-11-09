@@ -269,8 +269,6 @@ def test_create_forwards_persisted_gpu_device(tmp_path: Path, monkeypatch: pytes
     assert cli._create_and_run(tmp_path, project) == 0
 
 
-def test_project_loads_gpu_six_search(six_measured: dict[str, object]) -> None:
-    assert six_measured['gpu_wrapper'] is True and six_measured['candidate_gpu_wrapper'] is True
 
 
 @pytest.mark.parametrize("backend", ("cpu", "gpu"))

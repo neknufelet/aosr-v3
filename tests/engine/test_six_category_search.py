@@ -46,8 +46,6 @@ def test_nan_row_and_null_totals_cannot_be_written() -> None:
             ledger.check_scores(_scores(), [candidate])
 
 
-def test_gpu_search_writes_six_category_scores(six_measured: dict[str, object]) -> None:
-    assert six_measured['identities_checked'] is True and six_measured['result_written'] is True
 
 
 @pytest.mark.parametrize('version', ('aosr.material_gradient_result.v6', 'aosr.material_gradient_result.v7'))

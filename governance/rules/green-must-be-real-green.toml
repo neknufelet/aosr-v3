@@ -550,7 +550,8 @@ prefix = "tests.engine."
 # #562 CI 審查修補：接續重建控制新增 1 題；CPU 單行程 collect-only 逐檔加總實量 11098。
 # #562 第五輪：新增 running 寫完即中斷的確定性考卷 1 題；CPU 單行程純收集實量 11099。
 # #562 第六輪：新增被吞終止訊號在停止檢查重拋 1 題；CPU 單行程純收集實量 11100。
-collected_floor = 11100
+# 2026-11-10 老闆拍板：material_gradient_cli、material_gradient_endpoint_cli、material_gradient_mount、material_gradient_templates_cli、gradient_endpoint_range_migration、six_category_endpoint、material_gradient_fixed_surface_cli、six_category_search、six_search_review_fixes、material_gradient_gpu 共 99 題原樣搬至 slow_ 檔；CPU 純收集實量 11001。
+collected_floor = 11001
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
