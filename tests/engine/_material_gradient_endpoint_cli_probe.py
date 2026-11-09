@@ -132,5 +132,4 @@ def main(directory: Path, name: str) -> None:
 
 
 if __name__ == "__main__":
-    for offset in range(1, len(sys.argv), 2):
-        main(Path(sys.argv[offset]), sys.argv[offset + 1])
+    main(Path(sys.argv[1]), sys.argv[2])

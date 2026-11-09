@@ -21,11 +21,13 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import cast
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -264,19 +266,15 @@ def _probe_work(directory: Path, folder: Path) -> Path:
     return work
 
 
-def _probes(directory: Path, current: Path, legacy: Path) -> tuple[Record, Record]:
-    """新舊結果的全部 worker／直接解／顯卡替身控制依序跑；各自求值，不共用答案。"""
-    work = _probe_work(directory, current)
-    old_work = _probe_work(directory / "legacy-probe", legacy)
-    process = subprocess.run([sys.executable, str(PROBE), str(work), current.name, str(old_work), legacy.name],
+def _probe(work: Path, name: str) -> Record:
+    """一份獨立資料夾，完整跑 worker、直接解與顯卡替身三組控制，不共用答案。"""
+    process = subprocess.run([sys.executable, str(PROBE), str(work), name],
                              cwd=work, env=endpoint_probe_env(work),
                              capture_output=True, text=True, timeout=WAIT_S * 2)
     (work / "probe.stdout").write_text(process.stdout)
     (work / "probe.stderr").write_text(process.stderr)
     assert process.returncode == 0, process.stdout + process.stderr
-    current_record = cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
-    legacy_record = cast(Record, json.loads((old_work / "output.json").read_text(encoding="utf-8")))
-    return current_record, legacy_record
+    return cast(Record, json.loads((work / "output.json").read_text(encoding="utf-8")))
 
 
 def _search_runs(directory: Path, request: pytest.FixtureRequest) -> Record:
@@ -298,22 +296,41 @@ def _search_runs(directory: Path, request: pytest.FixtureRequest) -> Record:
 def _compute(directory: Path, request: pytest.FixtureRequest) -> str:
     output = _search_runs(directory, request)
     folder = Path(str(output["folder"]))
-    output["new_endpoint"] = _run(directory, _command("endpoint", str(output["new_folder"])))
+    current = Path(str(output["new_folder"]))
+    # 搜尋與舊低頻重建先完成；以下副本均在任何終點寫檔前建立。
     pristine = directory / "pristine" / folder.name
     shutil.copytree(folder, pristine)
+    work = _probe_work(directory, current)
+    old_work = _probe_work(directory / "legacy-probe", folder)
     theta_hex = _other_theta(folder, directory / "settings.toml")
-    output["endpoint"] = _endpoint_runs(directory, folder)
-    output["swapped"] = _swapped(directory, pristine, theta_hex)
-    output["stale"] = {case: _stale(directory, folder, case, theta_hex) for case in STALE_CASES}
-    output["kept_resume"] = _kept_resume(directory, Path(str(output["new_folder"])))
-    output["pre_proxy"] = _pre_proxy(directory, folder)
-    no_axis = directory / "root-no-axis"
-    output["no_axis"] = {**_run(directory, _start_args(directory, no_axis, scheme="scheme-no-axis.json")),
-                         "root_exists": no_axis.exists()}
-    output["probe"], output["legacy_probe"] = _probes(directory, Path(str(output["new_folder"])), folder)
+    # 雲端四核：最多 min(os.cpu_count(), 4) 個獨立子行程；未知核心數時保守用一個。
+    with ThreadPoolExecutor(max_workers=min(os.cpu_count() or 1, 4)) as pool:
+        # 最長的兩份探針先排，各自資料夾、環境與控制皆獨立。
+        futures = {"probe": pool.submit(_probe, work, current.name),
+                   "legacy_probe": pool.submit(_probe, old_work, folder.name),
+                   "new_endpoint": pool.submit(_run, directory, _command("endpoint", str(current))),
+                   "endpoint": pool.submit(_endpoint_runs, directory, folder),
+                   "swapped": pool.submit(_swapped, directory, pristine, theta_hex),
+                   "no_axis": pool.submit(_no_axis, directory)}
+        # 過期報告與前代理副本必須等舊低頻終點完成，才能抄完整的 endpoint.json。
+        output["endpoint"] = futures.pop("endpoint").result()
+        stale = {case: pool.submit(_stale, directory, folder, case, theta_hex) for case in STALE_CASES}
+        futures["pre_proxy"] = pool.submit(_pre_proxy, directory, folder)
+        # 原牆摘要拒收題要抄新資料夾整份，等其終點寫完，避免抄到原子寫檔的暫存檔。
+        output["new_endpoint"] = futures.pop("new_endpoint").result()
+        futures["kept_resume"] = pool.submit(_kept_resume, directory, current)
+        output.update({name: future.result() for name, future in futures.items()})
+        output["stale"] = {case: future.result() for case, future in stale.items()}
     text = json.dumps(output, ensure_ascii=False)
     (directory / "fixture.json").write_text(text, encoding="utf-8")
     return text
+
+
+def _no_axis(directory: Path) -> Record:
+    """只有輸入拒收，獨立於搜尋完成後的所有終點與改檔情境。"""
+    root = directory / "root-no-axis"
+    return {**_run(directory, _start_args(directory, root, scheme="scheme-no-axis.json")),
+            "root_exists": root.exists()}
 
 
 @pytest.fixture(scope="module")
