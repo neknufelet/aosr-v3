@@ -22,10 +22,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from aosr.config.art_lane import (
-    ART_NEUMANN_K_MAX,
     ART_N_PER_WALL_DEFAULT,
     ART_WLS_T20_LO_DB,
     ART_WLS_T30_LO_DB,
+    LATE_DECAY_ORDERS,
 )
 from aosr.config.capabilities import Capability
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
@@ -609,7 +609,7 @@ def _solve_report_late_decay(
         solved_bands.extend(result.bands)
     return _ReportLateDecay(
         result=LateDecayResult(
-            orders_used=ART_NEUMANN_K_MAX,
+            orders_used=LATE_DECAY_ORDERS,
             bands=tuple(solved_bands),
         ),
         unavailable_by_center_hz=unavailable_by_center_hz,

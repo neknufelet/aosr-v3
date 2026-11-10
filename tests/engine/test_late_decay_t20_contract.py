@@ -151,7 +151,7 @@ def test_each_reference_band_records_finite_t20_difference(
 def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> None:
     """抓階數、碰撞頻率、擬合斜率、權重或禁止備援的語意接錯。"""
     result = contract_run.result
-    assert result.orders_used == art_lane.ART_NEUMANN_K_MAX
+    assert result.orders_used == art_lane.LATE_DECAY_ORDERS
     assert len(result.bands) == len(contract_run.expected_t20_s)
     for band in result.bands:
         assert band.collision_frequency_hz > 0.0
@@ -212,7 +212,7 @@ def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
 
 
 def test_nearly_rigid_room_raises_instead_of_falling_back() -> None:
-    """控制組：256 階到不了下緣時必須報錯，不准回 Perron 或地板值。"""
+    """控制組：最後一階（512 階）到不了下緣時必須報錯，不准回 Perron 或地板值。"""
     inputs, sound_speed, _expected = _independent_case("flat")
     nearly_rigid = {
         wall: tuple(

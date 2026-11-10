@@ -63,7 +63,7 @@ def test_shared_fit_recovers_hand_derived_linear_decay(
     collision_frequency_hz: float,
 ) -> None:
     """抓 T20、T30 未從同一支擬合回復單一指數衰減的已知 T60。"""
-    order = np.arange(1, art_lane.ART_NEUMANN_K_MAX + 1, dtype=np.float64)
+    order = np.arange(1, art_lane.LATE_DECAY_ORDERS + 1, dtype=np.float64)
     level_db = (-60.0 * (order / collision_frequency_hz) / expected_t60_s)[:, None]
 
     t20 = late_decay._fit_decay(
@@ -92,7 +92,7 @@ def test_mutant_beyond_tolerance_is_red() -> None:
 def test_t30_window_reaches_below_the_t20_window() -> None:
     """抓 T30 下緣誤改成 T20 的 −25 dB，漏掉曲線較慢的 −25～−35 dB 段。"""
     collision_frequency_hz = 128.625
-    order = np.arange(1, art_lane.ART_NEUMANN_K_MAX + 1, dtype=np.float64)
+    order = np.arange(1, art_lane.LATE_DECAY_ORDERS + 1, dtype=np.float64)
     time_s = order / collision_frequency_hz
     early_slope_db_per_s = 200.0
     late_slope_db_per_s = 100.0
@@ -209,7 +209,7 @@ def test_matched_impedance_is_not_fully_absorbing_at_random_incidence() -> None:
 
 def test_invalid_t30_fit_names_the_window() -> None:
     """抓 T30 無效時的例外只說擬合失敗，無法辨認是哪個視窗。"""
-    level_db = np.zeros((art_lane.ART_NEUMANN_K_MAX, 1), dtype=np.float64)
+    level_db = np.zeros((art_lane.LATE_DECAY_ORDERS, 1), dtype=np.float64)
     with pytest.raises(ValueError, match="T30 擬合無效"):
         late_decay._fit_decay(
             level_db,
@@ -218,10 +218,13 @@ def test_invalid_t30_fit_names_the_window() -> None:
         )
 
 
-def test_alpha_near_0026_reaches_t20_but_rejects_unreached_t30() -> None:
-    """抓 256 階曲線沒到 −35 dB 時仍用軟視窗算出假的 T30。"""
+def test_alpha_near_0013_reaches_t20_but_rejects_unreached_t30() -> None:
+    """抓 512 階曲線沒到 −35 dB 時仍用軟視窗算出假的 T30。
+
+    #1062 階數 256 → 512：吸音率減半、曲線最後一階的 dB 大約不變，所以 0.026 換成 0.013。
+    """
     zeta = catalog_absorption.normalized_impedance_from_random_incidence_absorption(
-        0.026
+        0.013
     )
     inputs = _uniform_impedance_inputs(zeta)
     minimums = _minimum_decay_levels_db(inputs)
@@ -232,13 +235,27 @@ def test_alpha_near_0026_reaches_t20_but_rejects_unreached_t30() -> None:
     with pytest.raises(late_decay.DecayRangeError, match=r"T30.*125 Hz") as caught:
         late_decay.solve_late_decay(inputs, sound_speed_m_s=343.0)
     assert caught.value.lower_db == art_lane.ART_WLS_T30_LO_DB
-    assert "第 256 階最低" in str(caught.value)
+    assert f"第 {art_lane.LATE_DECAY_ORDERS} 階最低" in str(caught.value)
 
 
-def test_alpha_near_002_rejects_unreached_t20_before_t30() -> None:
-    """抓 256 階曲線連 −25 dB 都沒到時仍回傳 T20 或 T30。"""
+def test_alpha_near_002_reaches_t20_and_t30_with_512_orders() -> None:
+    """抓階數退回 256：吸音率 0.02 的均勻房在 256 階連 −25 dB 都到不了（#299 實算 −22.1 dB），
+    512 階要 T20、T30 都算得出（#1062，109 號房裸混凝土原牆就是這種房間）。"""
     zeta = catalog_absorption.normalized_impedance_from_random_incidence_absorption(
         0.02
+    )
+    inputs = _uniform_impedance_inputs(zeta)
+    minimums = _minimum_decay_levels_db(inputs)
+
+    assert all(value <= art_lane.ART_WLS_T30_LO_DB for value in minimums)
+    result = late_decay.solve_late_decay(inputs, sound_speed_m_s=343.0)
+    assert all(band.t20_s > 0.0 and band.t30_s is not None for band in result.bands)
+
+
+def test_alpha_near_001_rejects_unreached_t20_before_t30() -> None:
+    """抓 512 階曲線連 −25 dB 都沒到時仍回傳 T20 或 T30（#1062 起 0.02 換成 0.01，理由同上一題）。"""
+    zeta = catalog_absorption.normalized_impedance_from_random_incidence_absorption(
+        0.01
     )
     inputs = _uniform_impedance_inputs(zeta)
     minimums = _minimum_decay_levels_db(inputs)

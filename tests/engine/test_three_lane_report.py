@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
+from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT, LATE_DECAY_ORDERS
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -67,12 +67,9 @@ FEM_COMPARISON_FREQUENCIES_HZ = (
     FEM_LANE_FREQUENCIES_HZ[0],
     FEM_LANE_FREQUENCIES_HZ[-1],
 )
-T20_ONLY_IMPEDANCE_MULTIPLE = (
-    catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.026)
-)
-UNREACHED_T20_IMPEDANCE_MULTIPLE = (
-    catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.02)
-)
+# #1062 階數 256 → 512：吸音率減半、最後一階的 dB 大約不變，所以 0.026／0.02 換成 0.013／0.01。
+T20_ONLY_IMPEDANCE_MULTIPLE = catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.013)
+UNREACHED_T20_IMPEDANCE_MULTIPLE = catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.01)
 
 
 def _walls(value: object) -> dict[Wall, object]:
@@ -111,7 +108,7 @@ def _report_decay_frequencies() -> tuple[float, ...]:
 
 def _constant_late_decay(frequencies_hz: tuple[float, ...]) -> LateDecayResult:
     return LateDecayResult(
-        orders_used=256,
+        orders_used=LATE_DECAY_ORDERS,
         bands=tuple(
             LateDecayBand(
                 frequency_hz=frequency,
@@ -678,11 +675,11 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
     t20_lower: str | None,
     t30_lower: str,
 ) -> None:
-    """由均勻房 256 階精確指數（含空氣）逐帶判定未達下緣，不刪不可估檢查。"""
+    """由均勻房最後一階（512 階）精確指數（含空氣）逐帶判定未達下緣，不刪不可估檢查。"""
     report = _solve_fake_report(monkeypatch, impedance_multiple)
 
     assert report.points
-    baseline_minimum = 10.0*255*math.log10(1.0-_random_absorption(impedance_multiple*RHO_C_PA_S_PER_M))
+    baseline_minimum = 10.0*(LATE_DECAY_ORDERS-1)*math.log10(1.0-_random_absorption(impedance_multiple*RHO_C_PA_S_PER_M))
     assert (baseline_minimum <= -25.0) is t20_available
     assert (t20_lower is None) is t20_available
     assert t30_lower == "-35 dB"
@@ -691,7 +688,7 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
         axis = tuple(f for f in _report_decay_frequencies()
                      if band.center_frequency_hz/math.sqrt(2) <= f < band.center_frequency_hz*math.sqrt(2))
         alpha = _random_absorption(impedance_multiple*RHO_C_PA_S_PER_M)
-        minimums = 10.0*255*np.log10((1.0-alpha)*(1.0-_air_epsilon(axis)))
+        minimums = 10.0*(LATE_DECAY_ORDERS-1)*np.log10((1.0-alpha)*(1.0-_air_epsilon(axis)))
         t20_available = bool(np.all(minimums <= -25.0))
         t30_available = bool(np.all(minimums <= -35.0))
         t20_lower = None if t20_available else "-25 dB"
@@ -704,7 +701,7 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
         if t20_lower is not None:
             assert band.t20_unavailable_reason is not None
             assert t20_lower in band.t20_unavailable_reason
-            assert "第 256 階最低" in band.t20_unavailable_reason
+            assert f"第 {LATE_DECAY_ORDERS} 階最低" in band.t20_unavailable_reason
         if t30_available:
             assert band.t30_s is not None and math.isfinite(band.t30_s)
             assert band.t30_unavailable_reason is None
@@ -712,7 +709,7 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
             assert band.t30_s is None
             assert band.t30_unavailable_reason is not None
             assert t30_lower in band.t30_unavailable_reason
-            assert "第 256 階最低" in band.t30_unavailable_reason
+            assert f"第 {LATE_DECAY_ORDERS} 階最低" in band.t30_unavailable_reason
     assert unavailable30 > 0
     if baseline_minimum > -25.0:
         assert unavailable20 > 0
@@ -868,7 +865,7 @@ def test_report_averages_decay_from_every_fine_axis_point(
         called_frequencies.append(inputs.frequencies_hz)
         assert sound_speed_m_s == SOUND_SPEED_M_S
         return LateDecayResult(
-            orders_used=256,
+            orders_used=LATE_DECAY_ORDERS,
             bands=tuple(
                 LateDecayBand(
                     frequency_hz=frequency,

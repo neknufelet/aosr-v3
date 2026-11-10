@@ -1,6 +1,6 @@
 """晚期 T20 的可微陣列版；幾何先在 CPU 算好，吸音率為逐格 ``(P,F)``。
 
-與 ``late_decay._solve_late_decay(include_t30=False)`` 共用定義：256 階能量、
+與 ``late_decay._solve_late_decay(include_t30=False)`` 共用定義：512 階能量（``LATE_DECAY_ORDERS``）、
 精確根的尾巴、−5 至 −25 dB 軟視窗擬合。任何失敗逐帶亮旗標並回 NaN，
 不拿 Perron 的漸近 T60 代替擬合。輸出與幾何常數的工作精度跟 α 走。
 """
@@ -15,10 +15,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.art_lane import (
-    ART_NEUMANN_K_MAX,
     ART_WLS_T20_HI_DB,
     ART_WLS_T20_LO_DB,
     ART_WLS_WINDOW_SOFTNESS_DB,
+    LATE_DECAY_ORDERS,
 )
 from aosr.geometry.shoebox import Room
 from aosr.physics.late_decay import ART_WLS_LOG_FLOOR_DB, ART_WLS_MIN_WEIGHT
@@ -82,7 +82,7 @@ def _order_decay(form: jax.Array, reflection: jax.Array, areas: jax.Array) -> ja
         return energy, jnp.einsum("p,pf->f", weight, energy, precision=jax.lax.Precision.HIGHEST)
 
     initial = jnp.ones(reflection.shape, dtype=reflection.dtype)
-    _last, orders = jax.lax.scan(step, initial, None, length=ART_NEUMANN_K_MAX)
+    _last, orders = jax.lax.scan(step, initial, None, length=LATE_DECAY_ORDERS)
     return orders
 
 
@@ -102,7 +102,7 @@ def _fit_decay_arrays(level_db: jax.Array, collision_frequency_hz: jax.Array) ->
     """軟視窗與 NumPy 同式；先遮壞輸入、再除與取倒數，讓其他帶梯度有限。"""
     numerical = ~jnp.all(jnp.isfinite(level_db), axis=0)
     levels = jnp.where(numerical[None, :], 0.0, level_db)
-    time = (jnp.arange(1, ART_NEUMANN_K_MAX + 1, dtype=levels.dtype) / collision_frequency_hz)[:, None]
+    time = (jnp.arange(1, LATE_DECAY_ORDERS + 1, dtype=levels.dtype) / collision_frequency_hz)[:, None]
     upper = (ART_WLS_T20_HI_DB - levels) / ART_WLS_WINDOW_SOFTNESS_DB
     lower = (levels - ART_WLS_T20_LO_DB) / ART_WLS_WINDOW_SOFTNESS_DB
     weights = jax.nn.sigmoid(upper) * jax.nn.sigmoid(lower)

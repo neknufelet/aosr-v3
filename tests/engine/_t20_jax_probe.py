@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.art_lane import ART_NEUMANN_K_MAX
+from aosr.config.art_lane import LATE_DECAY_ORDERS
 from aosr.config.quality_targets import QualityPurpose, load_quality_targets
 from aosr.geometry.shoebox import Room
 from aosr.physics import late_decay_jax as decay
@@ -83,7 +83,7 @@ def _failures() -> dict[str, object]:
     gradient = jax.jit(jax.grad(lambda a: _finite_total(decay.late_decay_arrays(geometry, a).t20_s)))(mixed)
     cases["mixed_failures"] = _failure_result(run, "valid", gradient)
     cases["mixed_failures_reference"] = {"value": _list(jax.jit(decay.late_decay_arrays)(geometry, good).t20_s)}
-    order = jnp.arange(ART_NEUMANN_K_MAX, dtype=jnp.float64)
+    order = jnp.arange(LATE_DECAY_ORDERS, dtype=jnp.float64)
     valid = -order
     for name, bad in (("insufficient_weight", jnp.full_like(order, -400.0)),
                       ("nonnegative_slope", order - 128.0),
@@ -135,7 +135,7 @@ def _decay_mutants(case: DecayCase) -> dict[str, object]:
         patch.setattr(decay, "_decay_level", lambda orders, roots: original_level(orders, jnp.zeros_like(roots)))
         result["no_tail"] = _list(jax.jit(lambda a: decay.late_decay_arrays(geometry, a).t20_s)(alpha))
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(decay, "ART_NEUMANN_K_MAX", ART_NEUMANN_K_MAX // 2)
+        patch.setattr(decay, "LATE_DECAY_ORDERS", LATE_DECAY_ORDERS // 2)
         expression = jax.make_jaxpr(lambda a: decay.late_decay_arrays(geometry, a))(alpha)
         result["short_scan_length"] = [e.params["length"] for e in expression.jaxpr.eqns if e.primitive.name == "scan"][0]
     invalid = jnp.full_like(alpha, 0.001)
