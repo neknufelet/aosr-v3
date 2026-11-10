@@ -271,7 +271,7 @@ def main(output: Path) -> None:
             controls[mount] = control(model, designs, c, theta)
             if mount == 'on_wall':
                 numpy_on_wall = numpy_measure(scheme, designs, theta, inputs, end)
-        # 梯度用既有 zoned 的固定阻抗原牆，與上面的保留 Assembly 案例共用同一份幾何。
+        # 梯度用既有 zoned 的固定阻抗原牆（#1057 起阻抗提高一成，見 gradient_designs），與上面的保留 Assembly 案例共用同一份幾何。
         # 原牆較反射，交接停在硬上限；不把 stop_gradient 擋掉的權重變化混進差分。
         designs = gradient_designs(cases.scheme_case('zoned'), c)
         objective = factory(model, designs, c)

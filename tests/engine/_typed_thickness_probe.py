@@ -2,7 +2,7 @@
 
 用法：python _typed_thickness_probe.py <seams|t60> <求解輸入 JSON 檔> <厚度>...
 seams：實測表底構造在表兩端點的阻抗與無規吸音率（跟報表接縫同一支 assembly_endpoint_responses）。
-t60：六面無規吸音（跟報表同一支 wall_surface_response、同一條聯集軸）接逐帶艾林 T60。
+t60：六面無規吸音（跟報表同一支 wall_surface_response、同一條聯集軸）照決策紙第 7 條加空氣（#1057）後接逐帶艾林 T60。
 不解有限元素、不算幾何路，只算這兩個量；每個厚度輸出一筆，順序同引數。
 """
 from __future__ import annotations
@@ -16,6 +16,7 @@ from typing import cast
 from aosr.runtime import configure_calculation_jax
 configure_calculation_jax()
 
+from aosr.config.air_absorption_environment import air_absorption_environment
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ, low_frequency_axis_frequencies
@@ -23,6 +24,7 @@ from aosr.config.paths import config_path
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import MeasuredImpedance
+from aosr.physics.air_absorption import air_absorption_fraction
 from aosr.physics.crossover import eyring_t60_by_band
 from aosr.physics.report_io import ReportInput, load_input_document, solver_inputs
 from aosr.physics.wall_surfaces import assembly_endpoint_responses, wall_surface_response
@@ -57,7 +59,16 @@ def t60(inputs: ReportInput) -> dict[str, float]:
     axis = tuple(sorted(set(report_frequencies) | set(LATE_DECAY_FREQUENCIES_HZ) | set(SCHROEDER_T60_BANDS_HZ)))
     surfaces = wall_surface_response(solver.materials_by_wall, axis,
         density_kg_m3=solver.density_kg_m3, sound_speed_m_s=solver.sound_speed_m_s)
-    return {str(f): value for f, value in eyring_t60_by_band(solver.room, surfaces.band_rows(SCHROEDER_T60_BANDS_HZ)).items()}
+    # 4V/S 由這支用房間三軸自己算，ε 借已被表值守住的係數函式；同一條聯集軸上算、逐頻取值。
+    room = solver.room
+    volume = room.Lx * room.Ly * room.Lz
+    surface = 2.0 * (room.Lx * room.Ly + room.Ly * room.Lz + room.Lx * room.Lz)
+    temperature, humidity, pressure = air_absorption_environment()
+    epsilon = dict(zip(axis, (float(e) for e in air_absorption_fraction(axis, 4.0 * volume / surface,
+        temperature_c=temperature, relative_humidity_percent=humidity, pressure_pa=pressure)), strict=True))
+    rows = {wall: {f: a + (1.0 - a) * epsilon[f] for f, a in row.items()}
+            for wall, row in surfaces.band_rows(SCHROEDER_T60_BANDS_HZ).items()}
+    return {str(f): value for f, value in eyring_t60_by_band(solver.room, rows).items()}
 
 
 if __name__ == "__main__":

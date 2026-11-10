@@ -80,8 +80,10 @@ ANSWER_SCHEMA: Final[int] = 3
 
 # 新家為 TMM 加的物性，上一代沒有這三格；新家輸出時排除它們，
 # 四格共同欄位才是兩代比對的對象；這三格的數字由 TMM 凍結答案守。
-TMM_ONLY_PHYSICS_KEYS: Final[tuple[str, ...]] = (
+# 上一代沒有的物性鍵：#560 TMM 的空氣條件三鍵；#1057 晚期空氣吸收的溫度與濕度兩鍵。
+V3_ONLY_PHYSICS_KEYS: Final[tuple[str, ...]] = (
     "specific_heat_ratio", "prandtl_number", "atmospheric_pressure_pa",
+    "air_temperature_c", "air_relative_humidity_percent",
 )
 
 
@@ -387,7 +389,7 @@ def _resolved_kwargs(op: dict[str, object], table_name: str) -> dict[str, object
 def _donor_physics_text(text: str) -> str:
     """逐行去掉上一代沒有的物性；每一鍵必須恰好拿掉一行。"""
     lines = text.splitlines(keepends=True)
-    for key in TMM_ONLY_PHYSICS_KEYS:
+    for key in V3_ONLY_PHYSICS_KEYS:
         prefix = f"{key} ="
         hits = sum(line.startswith(prefix) for line in lines)
         if hits != 1:

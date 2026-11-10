@@ -66,7 +66,7 @@ def test_donor_physics_text_keeps_exactly_the_shared_fields() -> None:
     assert donor == {key: full[key] for key in shared}
 
 
-@pytest.mark.parametrize("key", generator.TMM_ONLY_PHYSICS_KEYS)
+@pytest.mark.parametrize("key", generator.V3_ONLY_PHYSICS_KEYS)
 @pytest.mark.parametrize("how", ["missing", "twice"])
 def test_donor_physics_text_rejects_a_key_not_written_exactly_once(key: str, how: str) -> None:
     """要拿掉的那一格不在、或寫了兩行，都不准默默餵下去。"""
