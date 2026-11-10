@@ -1,6 +1,7 @@
 """物理身分範圍內的有限元素輸入、連續切段與可核對的 hex 分片。
 
 分片自帶模型，不借結果檔；它只保存有限元素相關條件與各候選自己的取值座標。
+分片另帶有限元素自己的身分 ``fem-v1``（#1066，算法在 ``fem_identity``）：只改晚期一族時物理身分換、這個身分不換，分片照樣沿用。
 """
 from __future__ import annotations
 
@@ -224,6 +225,7 @@ class FemShard(BaseModel):
 
     model_config = FROZEN
     physics_identity: str = Field(min_length=1)
+    fem_identity: str | None = Field(default=None, min_length=1, exclude_if=lambda v: v is None)
     fem_key: FemKey
     slices: int = Field(strict=True, ge=1)
     slice_index: Index
@@ -256,7 +258,7 @@ def _coordinate_hex(points: Mapping[str, Point]) -> dict[str, HexPoint]:
 
 def solve_slice(
     schemes: Sequence[Scheme], *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
-    slices: int, slice_index: int, physics_identity: str,
+    slices: int, slice_index: int, physics_identity: str, fem_identity: str | None = None,
 ) -> FemShard:
     """整批先驗再比較有限元素鑰匙；不同就報錯，不偷偷拆批或換求解法。"""
     if not schemes or len({scheme.scheme_id for scheme in schemes}) != len(schemes):
@@ -279,7 +281,7 @@ def solve_slice(
         density_kg_m3=first.density_kg_m3, sound_speed_m_s=first.sound_speed_m_s,
         frequency_indices=indices, **zone_args)
     return FemShard(
-        physics_identity=physics_identity, fem_key=key, slices=slices, slice_index=slice_index,
+        physics_identity=physics_identity, fem_identity=fem_identity, fem_key=key, slices=slices, slice_index=slice_index,
         indices=indices, frequency_hex=tuple(key.frequency_hex[index] for index in indices),
         candidates={name: FemCandidate(
             speakers=_coordinate_hex(item.sources), receivers=_coordinate_hex(item.receivers),
@@ -290,8 +292,12 @@ def solve_slice(
 
 
 def _checked_candidate(shard: FemShard, scheme: Scheme, inputs: FemInputs,
-                       physics_identity: str) -> FemCandidate:
-    if shard.physics_identity != physics_identity:
+                       physics_identity: str, fem_identity: str | None) -> FemCandidate:
+    # 分片與呼叫端都帶有限元素身分時只核這一格（#1066）；任一邊沒有（含 #1066 之前的分片）照舊核整份物理身分。
+    if shard.fem_identity is not None and fem_identity is not None:
+        if shard.fem_identity != fem_identity:
+            raise ShardIdentityMismatch("分片有限元素身分不同")
+    elif shard.physics_identity != physics_identity:
         raise ShardIdentityMismatch("分片物理身分不同")
     # model_copy 與可變容器不能繞過讀回時的完整模型驗證。
     shard = FemShard.model_validate(shard.model_dump())
@@ -308,7 +314,7 @@ def _checked_candidate(shard: FemShard, scheme: Scheme, inputs: FemInputs,
 
 def energies_from_shards(
     shards: Sequence[FemShard], *, scheme: Scheme, capabilities: CapabilityTable,
-    directivity: DirectivityDefaults, physics_identity: str,
+    directivity: DirectivityDefaults, physics_identity: str, fem_identity: str | None = None,
 ) -> dict[tuple[str, str], tuple[float, ...]]:
     """核對身分、鑰匙、座標與完整覆蓋，依索引放回整條軸，檔案順序無關。"""
     if not shards:
@@ -320,7 +326,7 @@ def energies_from_shards(
     seen: set[int] = set()
     slices = shards[0].slices
     for shard in shards:
-        candidate = _checked_candidate(shard, scheme, inputs, physics_identity)
+        candidate = _checked_candidate(shard, scheme, inputs, physics_identity, fem_identity)
         if shard.slices != slices:
             raise ValueError("分片 slices 不一致")
         if seen.intersection(shard.indices):

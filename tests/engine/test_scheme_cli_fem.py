@@ -140,13 +140,18 @@ def test_run_ambiguous_or_negative_zero_parts_rejected(
     assert capsys.readouterr().err.strip()
 
 
+@pytest.mark.parametrize("field", ("fem_identity", "legacy_physics_identity"))
 def test_run_shard_identity_mismatch_uses_changed_exit(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
+        capsys: pytest.CaptureFixture[str], field: str) -> None:
     paths, common = cli.prepare(tmp_path, monkeypatch)
     outputs = cli.parts(tmp_path, paths, common)
     envelope = json.loads(outputs[0].read_text())
-    envelope["shard"]["physics_identity"] = "another-program"
+    if field == "fem_identity":
+        envelope["shard"]["fem_identity"] = "fem-v1:" + "1" * 64
+    else:
+        del envelope["shard"]["fem_identity"]
+        envelope["shard"]["physics_identity"] = "another-program"
     outputs[0].write_text(json.dumps(envelope))
     calls = cli.forbid_fem(monkeypatch)
     out = tmp_path / "result"
@@ -156,6 +161,30 @@ def test_run_shard_identity_mismatch_uses_changed_exit(
     stderr = capsys.readouterr().err
     assert scheme_cli.PROGRAM_CHANGED_MARKER in stderr.splitlines()
     assert "身分" in stderr
+
+
+def test_run_reuses_parts_from_another_physics_identity_and_says_so(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """#1066：分片的物理身分跟本次不同、有限元素身分相同，不重解、結果照整跑，印出沿用了哪一份身分。"""
+    paths, common = cli.prepare(tmp_path, monkeypatch)
+    outputs = cli.parts(tmp_path, paths, common)
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
+    expected, actual = tmp_path / "regular", tmp_path / "injected"
+    assert scheme_cli.main(cli.run_args(paths[0], common, expected)) == 0
+    older = "phys-v1:" + "3" * 64
+    for path in outputs:
+        envelope = json.loads(path.read_text())
+        envelope["shard"]["physics_identity"] = older
+        path.write_text(json.dumps(envelope))
+    capsys.readouterr()
+    calls = cli.forbid_fem(monkeypatch)
+    assert scheme_cli.main(cli.run_args(paths[0], common, actual, outputs)) == 0
+    left, right = json.loads(expected.read_text()), json.loads(actual.read_text())
+    left.pop("timings")
+    right.pop("timings")
+    assert left == right
+    assert calls == []
+    assert f"有限元素沿用分片：分片物理身分 {older}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("identity", ("program", "physics"))
@@ -227,10 +256,10 @@ def test_slice_measures_before_import_solve_and_replace(
     solve = fem_slices.solve_slice
     def recorded_solve(schemes: Sequence[Scheme], *, capabilities: CapabilityTable,
                        directivity: DirectivityDefaults, slices: int, slice_index: int,
-                       physics_identity: str) -> FemShard:
+                       physics_identity: str, fem_identity: str | None = None) -> FemShard:
         events.append("solve")
         return solve(schemes, capabilities=capabilities, directivity=directivity,
-                     slices=slices, slice_index=slice_index, physics_identity=physics_identity)
+                     slices=slices, slice_index=slice_index, physics_identity=physics_identity, fem_identity=fem_identity)
     replace = os.replace
     def recorded_replace(source: str | Path, target: str | Path) -> None:
         events.append("replace")
@@ -274,12 +303,13 @@ def test_run_measures_identity_before_reading_and_merging_parts(
     merge = fem_slices.energies_from_shards
     def recorded_merge(shards: Sequence[FemShard], *, scheme: Scheme,
                        capabilities: CapabilityTable, directivity: DirectivityDefaults,
-                       physics_identity: str) -> dict[tuple[str, str], tuple[float, ...]]:
+                       physics_identity: str, fem_identity: str | None = None) -> dict[tuple[str, str], tuple[float, ...]]:
         assert events == ["fingerprint", "physics", *["read" for _ in outputs]]
         assert physics_identity == identity
+        assert fem_identity is not None and fem_identity.startswith("fem-v1:")
         events.append("merge")
         return merge(shards, scheme=scheme, capabilities=capabilities,
-                     directivity=directivity, physics_identity=physics_identity)
+                     directivity=directivity, physics_identity=physics_identity, fem_identity=fem_identity)
     monkeypatch.setattr(scheme_cli, "calculation_fingerprint", fingerprint)
     monkeypatch.setattr("aosr.reporting.physics_identity.physics_identity", physics)
     monkeypatch.setattr(Path, "read_text", read)

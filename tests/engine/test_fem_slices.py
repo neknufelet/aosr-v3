@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from aosr.reporting.fem_slices import FemShard
 
 IDENTITY = "phys-v1:" + "0" * 64
+FEM = "fem-v1:" + "0" * 64
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def _shards(schemes: tuple[scheme_module.Scheme, ...], slices: int) -> list['Fem
     from aosr.reporting.fem_slices import solve_slice
     table = _table()
     return [solve_slice(schemes, capabilities=table, directivity=DIRECTIVITY,
-                        slices=slices, slice_index=index, physics_identity=IDENTITY)
+                        slices=slices, slice_index=index, physics_identity=IDENTITY, fem_identity=FEM)
             for index in range(slices)]
 
 
@@ -130,7 +131,7 @@ def test_shards_round_trip_and_merge_old_hex(
         assert cases.energy_hex(actual) == cases.energy_hex(expected[scheme.scheme_id])
 
 
-@pytest.mark.parametrize("change", ("identity", "frequency", "key", "coordinate_x", "coordinate_y",
+@pytest.mark.parametrize("change", ("identity", "legacy_identity", "frequency", "key", "coordinate_x", "coordinate_y",
                                     "coordinate_z", "missing_candidate",
                                     "hole", "overlap", "slices", "energy", "pair", "extra", "truncated",
                                     "receiver_coordinate_x", "receiver_coordinate_y", "receiver_coordinate_z",
@@ -142,6 +143,9 @@ def test_invalid_shards_rejected(small_axis: None, tmp_path: Path, change: str) 
     shards = _shards((scheme,), 2)
     document = shards[-1].model_dump(mode="json")
     if change == "identity":
+        document["fem_identity"] = "fem-v1:" + "1" * 64
+    elif change == "legacy_identity":
+        del document["fem_identity"]
         document["physics_identity"] = "other"
     elif change == "frequency":
         document["frequency_hex"][0] = float(999).hex()
@@ -172,7 +176,7 @@ def test_invalid_shards_rejected(small_axis: None, tmp_path: Path, change: str) 
         document["candidates"][scheme.scheme_id]["energies"].pop()
     elif change == "extra":
         document["extra"] = "forbidden"
-    error = ShardIdentityMismatch if change == "identity" else ValueError
+    error = ShardIdentityMismatch if change in {"identity", "legacy_identity"} else ValueError
     with pytest.raises(error):
         if change == "truncated":
             target = tmp_path / "truncated"
@@ -181,7 +185,35 @@ def test_invalid_shards_rejected(small_axis: None, tmp_path: Path, change: str) 
         else:
             if change not in {"hole", "overlap"}:
                 shards[-1] = FemShard.model_validate(document)
-            energies_from_shards(shards, scheme=scheme, capabilities=_table(), directivity=DIRECTIVITY, physics_identity=IDENTITY)
+            energies_from_shards(shards, scheme=scheme, capabilities=_table(), directivity=DIRECTIVITY, physics_identity=IDENTITY,
+                                 fem_identity=FEM)
+
+
+def test_fem_identity_lets_shards_cross_a_physics_identity_change(small_axis: None) -> None:
+    """#1066：分片的物理身分跟本次不同、有限元素身分相同就收，能量逐位不變；任一邊沒有有限元素身分就照舊核物理身分。"""
+    from aosr.reporting.fem_slices import FemShard, ShardIdentityMismatch, energies_from_shards
+
+    scheme = cases.small_scheme()
+    shards = _shards((scheme,), 2)
+    other = "phys-v1:" + "2" * 64
+    def merged(parts: list[FemShard], physics: str, fem: str | None) -> dict[tuple[str, str], tuple[str, ...]]:
+        return cases.energy_hex(energies_from_shards(parts, scheme=scheme, capabilities=_table(), directivity=DIRECTIVITY,
+                                                     physics_identity=physics, fem_identity=fem))
+    same = merged(shards, IDENTITY, FEM)
+    assert merged(shards, other, FEM) == same
+    with pytest.raises(ShardIdentityMismatch, match="有限元素身分"):
+        merged(shards, other, "fem-v1:" + "1" * 64)
+    with pytest.raises(ShardIdentityMismatch, match="物理身分"):
+        merged(shards, other, None)
+    legacy = []
+    for shard in shards:
+        document = shard.model_dump(mode="json")
+        del document["fem_identity"]
+        legacy.append(FemShard.model_validate(document))
+    assert "fem_identity" not in legacy[0].model_dump(mode="json")
+    assert merged(legacy, IDENTITY, FEM) == same
+    with pytest.raises(ShardIdentityMismatch, match="物理身分"):
+        merged(legacy, other, FEM)
 
 
 def test_mixed_slice_counts_rejected_after_model_validation(
