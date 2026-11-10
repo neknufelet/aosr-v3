@@ -87,6 +87,7 @@ from tests.engine.test_material_gradient_cli import (
     _interrupted as _interrupted,
     _json as _json,
     _kept_materials as _kept_materials,
+    _max_steps_flag as _max_steps_flag,
     _moved as _moved,
     _moved_seat as _moved_seat,
     _other_settings as _other_settings,
@@ -403,6 +404,34 @@ def test_resume_rejects_surrogate_axis_short_of_declared_points(runs: tuple[Path
     assert record["code"] == 1, record["stderr"]
     assert AXIS_SURROGATES["narrow-axis"][1].value in str(record["stderr"])
     assert record["unchanged"] is True
+
+def test_max_steps_flag_is_stored_reported_and_reapplied_on_resume(runs: tuple[Path, Record]) -> None:
+    """抓（#1073）：--max-steps 沒算進設定指紋（資料夾名、帳本跟 settings-other.toml 那一份不同）、沒存進 project.json、
+    報告沒印、接續重讀設定檔而拒收自己（或接上了但帳本跟一口氣跑完的不同）、把那一格拿掉仍照接或動了資料夾。"""
+    record = _section(runs, "max_steps_flag")
+    started = cast(Record, record["started"])
+    assert started["code"] == 0, started["stderr"]
+    steps = OTHER_STEPS["descent.max_steps"]
+    first = _folder(runs)
+    others = [name for name in cast(list[str], _section(runs, "other_settings")["folders"]) if name != first.name]
+    assert record["folders"] == others, (record["folders"], others)
+    folder = Path(str(record["folder"]))
+    project = _json(folder / "project.json")
+    assert project["max_steps"] == steps and project["settings_path"] == str((runs[0] / "settings.toml").resolve())
+    assert project["settings_fingerprint"] == load_material_gradient_settings(runs[0] / "settings-other.toml").fingerprint
+    assert _without_seconds(_rows(folder)) == _without_seconds(_rows(first.parent / others[0]))
+    descent = [row for row in _rows(folder) if row.phase == "descent" and row.round is None]
+    assert len(descent) - 1 <= steps
+    assert f"往下走步數上限：{steps} 步（開跑時指定）" in str(cast(Record, record["report"])["stdout"]).splitlines()
+    resumed = cast(Record, record["resumed"])
+    assert resumed["code"] == 0, resumed["stderr"]
+    cut = Path(str(record["resumed_folder"]))
+    assert _json(cut / "status.json")["state"] == "finished"
+    assert _without_seconds(_rows(cut)) == _without_seconds(_rows(folder))
+    refused = cast(Record, record["refused"])
+    assert refused["code"] == 1 and "設定指紋變了" in str(refused["stderr"]), refused
+    assert record["refused_unchanged"] is True
+
 
 def test_same_root_other_settings_gets_own_folder(runs: tuple[Path, Record]) -> None:
     """抓資料夾名沒把設定算進去（換一份設定開始，撞進同一個資料夾被當成「已存在」、或蓋掉前一場）：同一個根、

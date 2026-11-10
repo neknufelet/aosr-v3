@@ -16,5 +16,5 @@ def legacy_descent_settings(base: MaterialGradientSettings) -> MaterialGradientS
 
 
 def legacy_stopping_settings(base: MaterialGradientSettings) -> MaterialGradientSettings:
-    """舊低頻唯讀標頭保留當時的 0.5 與設定指紋，不重錄答案。"""
-    return base.model_copy(update={'descent': base.descent.model_copy(update={'gradient_norm_stop': 0.5})})
+    """舊低頻唯讀標頭保留當時的 0.5、30 步與設定指紋，不重錄答案（#1073 正式檔改 60 步）。"""
+    return base.model_copy(update={'descent': base.descent.model_copy(update={'gradient_norm_stop': 0.5, 'max_steps': 30})})

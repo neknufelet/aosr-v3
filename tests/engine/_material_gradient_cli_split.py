@@ -57,7 +57,7 @@ class _Runs:
             self.folder()
             return
         self.surrogate("good")
-        if group not in ("concurrent", "interrupted"):
+        if group not in ("concurrent", "interrupted", "max_steps_flag"):
             self.folder()
         if group == "resume-rejections":
             self.surrogate("narrow-axis")
@@ -82,6 +82,8 @@ class _Runs:
             return {group: cases._concurrent_start(directory)}
         if group == "interrupted":
             return {group: cases._interrupted(directory)}
+        if group == "max_steps_flag":
+            return {group: cases._max_steps_flag(directory)}
         return self.after_start(group)
 
     def after_start(self, group: str) -> Record:
@@ -98,7 +100,7 @@ class _Runs:
 
     def output(self) -> Record:
         output = self.sections.record({key: key for key in (
-            "concurrent", "report", "other_settings", "interrupted", "cli_stop")})
+            "concurrent", "report", "other_settings", "interrupted", "cli_stop", "max_steps_flag")})
         output["rejections"] = self.sections.record({
             **{name: f"start-{name}" for name in START_SURROGATES},
             **{name: "resume-rejections" for name in RESUME_REJECTIONS}})

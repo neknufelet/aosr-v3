@@ -80,7 +80,7 @@ PRESETS: tuple[str | None, ...] = CASES[DESCENT_CASE]
 PRESET_TEXT = ",".join("none" if preset is None else preset for preset in PRESETS)
 OUTSIDE_FAMILY = "fabric_pet_a_gap100"  # construction_presets.toml 有、material_gradient.toml 的家族清單沒有
 FREQUENCY_NAME, BAND_NAME = "fem_reduced_holdout_frequency_db", "fem_reduced_holdout_band_db"
-# 考卷只為了快把兩個步數上限調小（正式 30 與 5），換樣板段的求值上限調成 1（第 0 輪就停、不求值，庚三另有考卷）。
+# 考卷只為了快把兩個步數上限調小（正式設定檔的 [descent] max_steps 與 [retune] steps），換樣板段的求值上限調成 1（第 0 輪就停、不求值，庚三另有考卷）。
 NARROWED_STEPS = {"descent.max_steps": 3, "retune.steps": 2, "templates.max_evaluations": 1, "candidates.max_rounds": 1, "candidates.max_per_round": 1}
 # 同一個根、另一份設定（只差下降步數上限）：資料夾名要跟著不同。
 OTHER_STEPS = {"descent.max_steps": 2, "retune.steps": 2, "templates.max_evaluations": 1, "candidates.max_rounds": 1, "candidates.max_per_round": 1}
@@ -412,6 +412,28 @@ def _other_settings(directory: Path) -> Record:
     root = directory / "root-a"
     record = _run(directory, _start_args(directory, root, settings="settings-other.toml"))
     record["folders"] = sorted(path.name for path in root.iterdir())
+    return record
+
+
+def _max_steps_flag(directory: Path) -> Record:
+    """開跑時另外指定步數（#1073）：settings.toml 加 --max-steps 成 settings-other.toml 那一份，在另一個根跑完；
+    截掉第 0 輪再接續要跑完（接續照 project.json 記的步數套回去），把那一格拿掉再接續要拒收、資料夾不動。"""
+    root = directory / "root-flag"
+    started = _run(directory, [*_start_args(directory, root), "--max-steps", str(OTHER_STEPS["descent.max_steps"])])
+    folders = sorted(path for path in root.iterdir() if path.is_dir())
+    record: Record = {"started": started, "folders": [path.name for path in folders]}
+    if started["code"] != 0 or len(folders) != 1:
+        return record
+    folder = folders[0]
+    resumed, dropped = _cut_copy(directory, folder, "root-flag-cut"), _cut_copy(directory, folder, "root-flag-dropped")
+    project = json.loads((dropped / "project.json").read_text(encoding="utf-8"))
+    project.pop("max_steps", None)
+    (dropped / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    before = {path.name: _sha256(path) for path in dropped.iterdir()}
+    record.update(folder=str(folder), report=_run(directory, _command("report", "--folder", str(folder))),
+                  resumed_folder=str(resumed), resumed=_run(directory, _command("resume", str(resumed))),
+                  refused=_run(directory, _command("resume", str(dropped))))
+    record["refused_unchanged"] = before == {path.name: _sha256(path) for path in dropped.iterdir()}
     return record
 
 

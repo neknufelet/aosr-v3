@@ -114,6 +114,17 @@ def _frequency_batch(text: str) -> int:
     return value
 
 
+def _max_steps(text: str) -> int:
+    """命令列往下走步數上限（#1073）：只收正整數。"""
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("--max-steps 必須是正整數") from error
+    if value <= 0:
+        raise argparse.ArgumentTypeError("--max-steps 必須是正整數")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aosr.gradient.cli")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -127,6 +138,9 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--device", choices=("cpu", "gpu"), default="cpu", help="搜尋裝置：cpu 雙精度；gpu 單精度鏈")
     start.add_argument("--frequency-batch", type=_frequency_batch, default=None, metavar="N",
                        help="替身每批求解的頻點數（正整數）；反傳逐批重算")
+    start.add_argument("--max-steps", type=_max_steps, default=None, metavar="N",
+                       help="往下走最多幾步（正整數），例如 30、60、100；不給照 --settings 那份的 [descent] max_steps；"
+                            "指定的值存進搜尋資料夾，接著跑、終點、報告照用")
     start.add_argument("--max-depth", action="append", default=[], metavar="面=公尺",
                        help="每面總深度上限，可重複；整面或面片，例如 x0=0.08、x0@u0v0=0.08")
     start.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
@@ -234,7 +248,7 @@ def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1, 
 def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
-    from aosr.config.material_gradient import load_material_gradient_settings
+    from aosr.config.material_gradient import load_material_gradient_settings, with_max_steps
     from aosr.gradient import run
     from aosr.gradient.fixed_surfaces import parse_fixed_surfaces, parse_max_depths
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
@@ -250,6 +264,8 @@ def _start(args: argparse.Namespace) -> int:
     if scheme.scene.low_frequency_axis is None:
         raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
     settings = load_material_gradient_settings(settings_path)
+    if args.max_steps is not None:
+        settings = with_max_steps(settings, args.max_steps)
     capabilities = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
@@ -291,7 +307,7 @@ def _start(args: argparse.Namespace) -> int:
         capabilities_path=str(args.capabilities.resolve()), physics_identity=physics, mesh_hash=mesh,
         source_points=points.sources, receiver_points=points.receivers, engine_commit=args.engine_commit, started_at=run.now_text(),
         objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
-        frequency_batch=args.frequency_batch, device=args.device,
+        frequency_batch=args.frequency_batch, max_steps=args.max_steps, device=args.device,
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
         operators_digest=fingerprint, surrogate_spot_check=spot)
     root = args.root.resolve()
@@ -433,10 +449,27 @@ def _report(args: argparse.Namespace) -> int:
     from aosr.gradient.run import read_project
     from aosr.gradient.report import render_report
 
-    if (batch := read_project(args.folder.resolve()).frequency_batch) is not None:
+    project = read_project(args.folder.resolve())
+    if (batch := project.frequency_batch) is not None:
         sys.stdout.write(f"替身頻點分批：每批 {batch} 點（反傳逐批重算）\n")
+    sys.stdout.write(_max_steps_line(project))
     sys.stdout.write(render_report(args.folder.resolve()))
     return 0
+
+
+def _max_steps_line(project: GradientProject) -> str:
+    """報告開頭那一行往下走步數上限（#1073）：開跑時指定的照記的印；沒指定的照設定檔，讀不到或指紋不同照實說。"""
+    from aosr.gradient.run import project_settings
+
+    if project.max_steps is not None:
+        return f"往下走步數上限：{project.max_steps} 步（開跑時指定）\n"
+    try:
+        settings = project_settings(project)
+    except (OSError, ValueError) as error:
+        return f"往下走步數上限：設定讀不到（{type(error).__name__}）\n"
+    if settings.fingerprint != project.settings_fingerprint:
+        return "往下走步數上限：設定指紋不同，無法確認這一跑的上限\n"
+    return f"往下走步數上限：{settings.descent.max_steps} 步（設定檔）\n"
 
 
 def _stamp_surrogate(args: argparse.Namespace) -> int:
