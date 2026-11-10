@@ -38,14 +38,44 @@ def select_run(rows: Sequence[Mapping[str, object]], sha: str, branch: str) -> s
     return str(min(cast(list[int], ids)))
 
 
-def resolve_snapshot(event: Mapping[str, object], reader: Callable[[str], tuple[str, dict[str, float]]]) -> dict[str, object]:
-    """歷史讀不到時產生整跑共用的退回決定；分片不再獨自碰網路。"""
-    sha = history_sha(event)
+def first_parent_chain(commits: Sequence[Mapping[str, object]], sha: str, limit: int) -> list[str]:
+    """從起點沿第一父鏈往回，最多 limit 顆；清單外的父提交就停，不猜。"""
+    parents: dict[str, str | None] = {}
+    for row in commits:
+        raw = row.get('parents')
+        first = raw[0] if isinstance(raw, list) and raw else None
+        parent = first.get('sha') if isinstance(first, dict) else None
+        if isinstance(row.get('sha'), str):
+            parents[cast(str, row['sha'])] = parent if isinstance(parent, str) else None
+    if sha not in parents:
+        raise ToolBroken('提交清單沒有起點那一顆')
+    chain = [sha]
+    while len(chain) < limit and parents.get(chain[-1]) in parents:
+        chain.append(cast(str, parents[chain[-1]]))
+    return chain
+
+
+def nearest_success(chain: Sequence[str], rows: Sequence[Mapping[str, object]], branch: str) -> str:
+    """起點沒有成功主線驗證時用最近一顆有的祖先（#1059）；整條都沒有才交給退回。"""
+    for sha in chain:
+        try:
+            select_run(rows, sha, branch)
+        except ToolBroken:
+            continue
+        return sha
+    raise ToolBroken(f'起點連祖先共 {len(chain)} 顆主線提交都沒有已完成而且成功的主線驗證')
+
+
+def resolve_snapshot(event: Mapping[str, object], reader: Callable[[str], tuple[str, dict[str, float]]],
+                     locate: Callable[[str], str] = lambda sha: sha) -> dict[str, object]:
+    """歷史讀不到時產生整跑共用的退回決定；分片不再獨自碰網路。快照的提交記實際讀秒數的那一顆。"""
+    base = history_sha(event)
     try:
+        sha = locate(base)
         run_id, times = reader(sha)
         return validate_snapshot({'timing_source': 'history', 'run_id': run_id, 'sha': sha, 'reason': '', 'times': times})
     except (ToolBroken, OSError, ValueError) as exc:
-        return fallback(sha, str(exc))
+        return fallback(base, str(exc))
 
 
 def assign(files: Sequence[str], registry: Registry, times: Mapping[str, float]) -> dict[str, str]:

@@ -301,3 +301,38 @@ def test_missing_or_invalid_junit_seconds_fall_back_for_the_whole_run(tmp_path: 
     assert 'time' in str(snapshot['reason'])
     if time is None:
         assert '缺' in str(snapshot['reason'])
+
+
+def test_failed_base_uses_nearest_successful_ancestor_not_fallback() -> None:
+    """#1059 必紅樣本：起點那顆主線驗證被取消、前一顆成功，必須用前一顆的秒數，不准整跑退回。"""
+    base, parent, grand = 'a' * 40, 'b' * 40, 'c' * 40
+    commits: list[dict[str, object]] = [{'sha': base, 'parents': [{'sha': parent}]}, {'sha': parent, 'parents': [{'sha': grand}, {'sha': 'd' * 40}]},
+               {'sha': grand, 'parents': [{'sha': 'e' * 40}]}, {'sha': 'd' * 40, 'parents': []}]
+    rows: list[dict[str, object]] = [
+        {'databaseId': 7, 'headSha': base, 'status': 'completed', 'conclusion': 'cancelled', 'event': 'push', 'headBranch': 'main'},
+        {'databaseId': 6, 'headSha': parent, 'status': 'completed', 'conclusion': 'success', 'event': 'pull_request', 'headBranch': 'main'},
+        {'databaseId': 5, 'headSha': grand, 'status': 'completed', 'conclusion': 'success', 'event': 'push', 'headBranch': 'main'},
+        {'databaseId': 4, 'headSha': parent, 'status': 'completed', 'conclusion': 'success', 'event': 'push', 'headBranch': 'main'},
+    ]
+    chain = subject.first_parent_chain(commits, base, 20)
+    assert chain == [base, parent, grand]
+    assert subject.first_parent_chain(commits, base, 2) == [base, parent]
+    assert subject.nearest_success(chain, rows, 'main') == parent
+    assert subject.nearest_success(chain, rows[1:3], 'main') == grand
+    with pytest.raises(ToolBroken, match='共 2 顆'):
+        subject.nearest_success(chain[:2], rows[:3], 'main')
+    with pytest.raises(ToolBroken, match='起點'):
+        subject.first_parent_chain(commits[1:], base, 20)
+    read: list[str] = []
+    def reader(sha: str) -> tuple[str, dict[str, float]]:
+        read.append(sha)
+        return subject.select_run(rows, sha, 'main'), {FILES[0]: 3.0}
+    def locate(sha: str) -> str:
+        return subject.nearest_success(subject.first_parent_chain(commits, sha, 20), rows, 'main')
+    snapshot = subject.resolve_snapshot({'before': base}, reader, locate)
+    assert read == [parent]
+    assert snapshot == {'timing_source': 'history', 'run_id': '4', 'sha': parent, 'reason': '', 'times': {FILES[0]: 3.0}}
+    def nowhere(sha: str) -> str:
+        return subject.nearest_success([sha], rows[:1], 'main')
+    assert subject.resolve_snapshot({'before': base}, reader, nowhere) == subject.fallback(
+        base, '起點連祖先共 1 顆主線提交都沒有已完成而且成功的主線驗證')
