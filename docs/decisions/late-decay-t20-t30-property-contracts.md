@@ -1,7 +1,7 @@
 ---
 title: 晚期衰減 T20 與 T30 的獨立性質契約
 date_created: 2026-09-21
-date_modified: 2026-10-16
+date_modified: 2026-11-10
 status: accepted
 kind: governance
 supersedes: "late-decay-t20-legacy-record-property-contract.md, late-decay-t30-property-tolerance-2pow30.md"
@@ -32,6 +32,7 @@ summary: "上一代 T20 答案只作相容紀錄；均勻材料房間的 T20、T
 - T20 擬合算法不變：使用同一條晚期混響衰減曲線，在 −5～−25 dB（分貝）作加權直線擬合，採 256 階，擬合無效就報錯。
 - 擋合併的獨立性質是均勻材料房間的 T20 與 T30，各自必須等於考卷自行寫出的精確常數 Eyring（艾林）公式 `T = 24·ln(10)/c · V / (−S·ln(1−ᾱ_d))`，相對差不得超過 `2^-30`。
   2026-10-16（#703）起同一題加「均勻牆面加家具」的案例：家具整件吸音量 A_f 照 `late-energy-random-incidence-reciprocal-form-factors.md` 決定 1 分到每格後，式中 ᾱ_d 換成 (S·α_d＋A_f)/S；碰撞頻率只用六面牆面積，不變。掛在既有契約 `late_energy_physical_property` 底下，不加新列。
+  2026-11-10（#1057）起同一題再加「均勻牆面加空氣」的案例：照 `late-energy-random-incidence-reciprocal-air-absorption.md` 決定 7，式中分母換成 −S·ln(1−ᾱ_d)＋4mV（m 是空氣的能量衰減係數）；有家具時家具先、空氣後。同樣掛在 `late_energy_physical_property` 底下，不加新列。
 - `blueprint/precision_contracts.toml` 中 `late_decay_t20_vs_legacy`（T20 對上一代）仍是第二類紀錄尺；擋合併的是該登記簿的 `late_energy_physical_property`（晚期能量物理性質）所含精確常數 Eyring 性質。
 
 **T30 的 12 組合成衰減性質採 `2^-30`（2026-09-15）**

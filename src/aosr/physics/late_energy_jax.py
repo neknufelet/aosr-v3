@@ -1,7 +1,7 @@
 """鞋盒房間晚期混響能量的 JAX 版：同一套公式，對吸音率可微、可 ``jax.jit``。
 
 公式照 :mod:`aosr.physics.late_energy`（決策紙
-``late-energy-random-incidence-reciprocal-cpu-double-reference.md``）：每格反射率
+``late-energy-random-incidence-reciprocal-air-absorption.md``）：每格反射率
 ``1−α`` 乘中心點形狀因子得到逐頻反射算子 ``R``，直接解 ``(I−R)y=E``、取
 reflected-only 的 ``Ry`` 做面積加權平均，再乘 Eyring 比值。
 
