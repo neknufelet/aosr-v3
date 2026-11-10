@@ -19,7 +19,7 @@ from aosr.gradient.material_gradient import (
     SurfaceDesign, design_template_material, design_templates, designs_mount,
     kept_impedance_rows, patch_impedances, surface_parameters,
 )
-from aosr.gradient.surrogate_guard import require_matching_patches, require_matching_sources
+from aosr.gradient.surrogate_guard import require_matching_frequencies, require_matching_patches, require_matching_sources
 from aosr.gradient.impedance_angles import impedance_at_angles_or_empty
 from aosr.gradient.six_category_gpu import ScoreArrays, SixCategorySinglePrecisionObjective
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters
@@ -120,9 +120,7 @@ def _check_inputs(model: ReducedModel, designs: tuple[SurfaceDesign, ...], objec
     if ids != tuple(str(x) for x in c.patch_ids):
         raise ValueError('六類常數與設計的有序面片清單不同')
     designs_mount(designs)
-    axis = np.asarray(frequencies, dtype=np.float64)
-    if not np.array_equal(axis, model.frequencies_hz) or not np.array_equal(axis, c.fem_frequencies_hz):
-        raise ValueError('頻率軸必須等於替身與六類常數的 FEM 頻率軸')
+    require_matching_frequencies(model, frequencies, c.fem_frequencies_hz)
     if any(not np.array_equal(a, b) for a, b in zip(objective, c.objective(), strict=True)):
         raise ValueError('低頻目標常數必須等於六類常數的搜尋低頻定義')
     if c.direct_distances_m.shape != (len(model.source_names), len(model.receiver_names)):

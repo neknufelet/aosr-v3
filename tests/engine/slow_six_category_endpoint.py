@@ -73,7 +73,7 @@ def test_bare_measured_original_wall_refused_without_endpoint_or_temporary_files
     assert done.returncode == 0, done.stdout + done.stderr
     result = json.loads((tmp_path / 'rejection.json').read_text())
     assert result['error_type'] == 'ValueError', result
-    assert result['error_origin'] == 'baseline_impedances', result
+    assert result['error_origin'] == 'require_supported_original_walls', result
     assert '實測原牆的表內／表外吸音分流尚未接入六類終點' in result['error_message']
     assert result['endpoint_exists'] is False, result
     assert result['new_files'] == [], result
