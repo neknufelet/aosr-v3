@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from aosr.runtime import child_process_env, configure_jax
-from tests.engine._late_family_cases import CASES, alpha_rows, furniture_area, problem, reference, with_alpha
+from tests.engine._late_family_cases import CASES, air_fraction, alpha_rows, furniture_area, problem, reference, with_alpha
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL
 
@@ -51,7 +51,9 @@ def _check(actual: np.ndarray, expected: np.ndarray) -> None:
 
 @pytest.mark.parametrize("case", CASES)
 def test_late_family_matches_numpy(run: dict[str, object], case: str) -> None:
-    expected = reference(problem(case), furniture_area() if case == "furniture" else None)
+    inputs = problem(case)
+    expected = reference(inputs, furniture_area() if case in ("furniture", "furniture_air") else None,
+                         air_fraction(inputs) if case in ("air", "furniture_air") else None)
     actual = _arrays(run, case, "jit")
     for key, value in expected.items():
         _check(actual[key], value)
@@ -70,9 +72,10 @@ def test_jit_and_single_precision(run: dict[str, object], case: str) -> None:
 
 def _central_output_gradients(case: str, alpha: np.ndarray) -> dict[str, np.ndarray]:
     inputs = problem(case)
-    area = furniture_area() if case == "furniture" else None
+    area = furniture_area() if case in ("furniture", "furniture_air") else None
+    epsilon = air_fraction(inputs) if case in ("air", "furniture_air") else None
     keys = ("energy_by_order", "tail_energy", "late_share_energy", "t60", "fs")
-    baseline = reference(with_alpha(inputs, alpha), area)
+    baseline = reference(with_alpha(inputs, alpha), area, epsilon)
     expected = {key: np.zeros(baseline[key].shape + alpha.shape) for key in keys}
     # 沿用 stage_one_objective 的相對步長與 transfer_matrix 的無量綱梯度尺。
     for index in np.ndindex(alpha.shape):
@@ -80,7 +83,7 @@ def _central_output_gradients(case: str, alpha: np.ndarray) -> dict[str, np.ndar
         plus, minus = alpha.copy(), alpha.copy()
         plus[index] += step
         minus[index] -= step
-        a, b = reference(with_alpha(inputs, plus), area), reference(with_alpha(inputs, minus), area)
+        a, b = reference(with_alpha(inputs, plus), area, epsilon), reference(with_alpha(inputs, minus), area, epsilon)
         for key in keys:
             expected[key][(..., *index)] = (a[key] - b[key]) / (2 * step) * alpha[index]
     return expected
@@ -105,7 +108,8 @@ def test_construction_parameters_through_paris_absorption(run: dict[str, object]
     assert data["single_dtype"] == "float32"
 
 
-@pytest.mark.parametrize("flag", ("paris", "constant", "alpha", "furniture", "energy", "scattering", "t60", "fs", "frequency", "missing_fem"))
+@pytest.mark.parametrize("flag", ("paris", "constant", "alpha", "furniture", "energy", "scattering", "t60", "fs", "frequency", "missing_fem",
+    "air_nan", "air_inf", "air_negative", "air_one"))
 def test_invalid_items_are_nan_and_other_gradients_finite(run: dict[str, object], flag: str) -> None:
     rows = cast(dict[str, dict[str, object]], run["flags"])
     data = rows[flag]
@@ -227,3 +231,9 @@ def test_mutant_beyond_tolerance_is_red(run: dict[str, object]) -> None:
         changed.flat[flat] = original.flat[flat] * (1 + (1 + MUTANT_MARGIN) * contract_value("late_family_jax_vs_python"))
         with pytest.raises(AssertionError):
             _check(changed, original)
+
+
+def test_air_is_constant_and_zero_preserves_family_bitwise(run: dict[str, object]) -> None:
+    """空氣不能參與反傳，零空氣不能改動既有晚期陣列。"""
+    np.testing.assert_array_equal(np.asarray(run["air_gradient"]), 0.0)
+    assert run["zero_air_bitwise"] is True

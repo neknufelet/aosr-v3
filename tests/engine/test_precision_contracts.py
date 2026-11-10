@@ -106,6 +106,7 @@ def test_registry_has_the_named_contracts() -> None:
         "late_energy_vs_legacy",
         "late_energy_physical_property",
         "late_energy_jax_vs_numpy",
+        "air_absorption_vs_iso9613_table",
         "late_decay_t20_vs_legacy",
         "late_decay_t30_property",
         "fem_rigid_modal_vs_analytic",

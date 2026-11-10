@@ -12,6 +12,7 @@ CLOSURE = (
     'aosr',
     'aosr.config',
     'aosr.config._furniture_records',
+    'aosr.config.air_absorption_environment',
     'aosr.config.art_lane',
     'aosr.config.capabilities',
     'aosr.config.construction_environment',
@@ -38,6 +39,7 @@ CLOSURE = (
     'aosr.materials.scattering_defaults',
     'aosr.materials.transfer_matrix',
     'aosr.physics',
+    'aosr.physics.air_absorption',
     'aosr.physics.amplitude',
     'aosr.physics.compare',
     'aosr.physics.crossover',
@@ -111,4 +113,5 @@ PYTHON_MINOR = (3, 12)
 # #562 第1段物理變更：分區正式報表三路接線、散射與牆對面積加權，有限元素分片保留逐區資料。
 # 由正式 physics_identity_parts 重錄；閉包新增 three_lane_report_zones，資料清單不變。
 # #562 第1段修補一物理變更：分區實測接縫拒收、第二區構造註記與公開分界入口；正式入口重錄，閉包與資料清單不變。
-CODE_DIGEST = "e4d300e972d9c30bbf850c777a151bf544442230f533fd8550ce8fb8ce43d2ca"
+# #1057 物理變更：晚期一族在家具後加 ISO 9613-1 空氣吸收；正式 physics_identity_parts 重算，閉包加入空氣條件與係數模組。
+CODE_DIGEST = "46977a9b99696160c364b63d78cb860aef6eb66e200f806997ed615f6c544fb6"

@@ -36,7 +36,8 @@ GEOMETRIC_HEX = (
      ("-0x1.e3f3a1c612880p-5", "0x1.a0ebe43fab37fp-5", "-0x1.433c984c4fa5ap-5"),
      ("0x1.f21cbfc76df6bp-7", "0x1.e0c74436dc5d1p-7", "0x1.556e770e178d9p-8")),
 )
-REPORT_HEX = {100: "0x1.03ade9dda6ee7p-1", 140: "0x1.40fef991dfcb2p-4", 219: "0x1.09fdb728a88dfp-4"}
+# #1057 物理變更：晚期一族家具後加空氣；零空氣逐位重播通過後由原控制入口重錄。
+REPORT_HEX = {100: '0x1.03ac5b8fa614bp-1', 140: '0x1.40ed2b8139a98p-4', 219: '0x1.08e2271844a24p-4'}
 
 
 @pytest.mark.parametrize("index", range(len(case.CONTROL_CURVES)))

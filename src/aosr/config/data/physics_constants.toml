@@ -24,5 +24,10 @@ prandtl_number = 0.7022334916129888
 # atmospheric_pressure entry; circular viscothermal bulk modulus uses this.
 atmospheric_pressure_pa = 101325.0
 
+# ISO 9613-1 air absorption (#1057), same conditions as γ / Pr above.
+# Temperature [°C] and relative humidity [%]; pressure uses p₀ above.
+air_temperature_c = 20.0
+air_relative_humidity_percent = 30.0
+
 # Note: characteristic impedance of air rho_c = ρ₀·c ≈ 411.6 Pa·s/m is DERIVED
 # in PhysicsConstants.rho_c and injected explicitly (design §7.4) — not stored.

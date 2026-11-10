@@ -219,6 +219,14 @@ def candidate_designs(scheme: Scheme, c: SixCategoryConstants, mount: Mount) -> 
         _settings(), _presets(), kept=kept, mount=mount)
 
 
+def gradient_designs(scheme: Scheme, c: SixCategoryConstants) -> tuple[old.SurfaceDesign, ...]:
+    """#1057 空氣降低 T60 與 f_s；固定原牆阻抗提高一成，保留梯度題的硬切區前提。"""
+    designs = candidate_designs(scheme, c, 'rigid')
+    return tuple(dataclasses.replace(d, kept_material=ConstantImpedance(
+        impedance_pa_s_m=1.1*d.kept_material.impedance_pa_s_m))
+        if isinstance(d.kept_material, ConstantImpedance) else d for d in designs)
+
+
 def main(output: Path) -> None:
     # 第一個控制用既有 _zone_rom_case 小房、同一份替身、同一組設計；不以六類可估性放寬低頻逐位要求。
     zone_model = _build(output.parent)
@@ -263,9 +271,9 @@ def main(output: Path) -> None:
             controls[mount] = control(model, designs, c, theta)
             if mount == 'on_wall':
                 numpy_on_wall = numpy_measure(scheme, designs, theta, inputs, end)
-        # 梯度用既有 zoned 的固定阻抗原牆，與上面的保留 Assembly 案例共用同一份幾何。
+        # 梯度用既有 zoned 的固定阻抗原牆（#1057 起阻抗提高一成，見 gradient_designs），與上面的保留 Assembly 案例共用同一份幾何。
         # 原牆較反射，交接停在硬上限；不把 stop_gradient 擋掉的權重變化混進差分。
-        designs = candidate_designs(cases.scheme_case('zoned'), c, 'rigid')
+        designs = gradient_designs(cases.scheme_case('zoned'), c)
         objective = factory(model, designs, c)
         gradient_theta = jnp.asarray(old.baseline_theta(designs))
         # 厚度用既有基準，空腔用舊鏈第一個設計的梯度探點，不另訂探點或精度尺。

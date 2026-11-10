@@ -101,8 +101,9 @@ CUT2_CLASS_CONSTANT_IDS: tuple[str, ...] = tuple(
 # v3 在上一代的類別上**刻意多加**的欄位（上一代的欄位表裡沒有）。每一格都必須是序列化時排除的
 # 欄位，載入器回傳物件的 dump 才會跟上一代同一份；要加一格就寫出是哪一張票、為什麼。
 ADDED_IN_V3: dict[str, tuple[str, ...]] = {
-    # 票 #560：TMM（傳遞矩陣法）要的空氣條件；舊四欄案例照樣載入，dump 不變。
-    "cut2_physics_constants.const.PhysicsConstants": ("specific_heat_ratio", "prandtl_number", "atmospheric_pressure_pa"),
+    # 票 #560：TMM（傳遞矩陣法）要的空氣條件；票 #1057：晚期空氣吸收的溫度與濕度。舊四欄案例照樣載入，dump 不變。
+    "cut2_physics_constants.const.PhysicsConstants": ("specific_heat_ratio", "prandtl_number", "atmospheric_pressure_pa",
+                                                      "air_temperature_c", "air_relative_humidity_percent"),
 }
 
 # 每一筆類別常數的家：哪一筆成功探針、回傳物件底下哪一格（空路徑＝回傳物件本身）。

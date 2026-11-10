@@ -30,7 +30,7 @@ name = "late_energy_vs_legacy"
 value = 2.0e-4
 display = "2·1e-4"
 unit = "relative"
-decision_paper = "late-energy-random-incidence-reciprocal-cpu-double-reference.md"
+decision_paper = "late-energy-random-incidence-reciprocal-air-absorption.md"
 truth = "第二類相容紀錄，照量、照留、不擋合併：blueprint/reference_art_{flat,lowabs,varied}.json late_rev_E 的差距；值只是紀錄用的容差，不是判決界線"
 mutant_test = "tests/engine/test_late_energy_contract.py::test_mutant_beyond_tolerance_is_red"
 
@@ -48,8 +48,8 @@ name = "late_energy_physical_property"
 value = 9.313225746154785e-10
 display = "2^-30"
 unit = "relative"
-decision_paper = "late-energy-random-incidence-reciprocal-cpu-double-reference.md"
-truth = "五項物理性質：形狀因子面積加權互易與列和、均勻材料房間 Sabine 擴散場、穩態吸收功率守恆、同阻抗分格等於整牆、複數 α_d 對 4096 點數值積分真值；加上 T20／T30 對精確常數 Eyring（T20 那張紙寫與本條同一常數）。家具案例：均勻牆面每格 α＋(1−α)·ε 仍同值，Sabine 平均吸收率為 (S·α_d＋A_f)/S；穩態吸收功率含家具，同阻抗分格共用 ε 仍等於整牆；T20／T30 的精確常數 Eyring 裡 ᾱ_d 換成 (S·α_d＋A_f)/S；家具整件量的對數內插與延伸、非均勻牆分配後的總吸音量與剩餘反射率比例、晚期一族三路對同一份平均吸音率，也借本條界線；界線照舊。"
+decision_paper = "late-energy-random-incidence-reciprocal-air-absorption.md"
+truth = "五項物理性質：形狀因子面積加權互易與列和、均勻材料房間 Sabine 擴散場、穩態吸收功率守恆、同阻抗分格等於整牆、複數 α_d 對 4096 點數值積分真值；加上 T20／T30 對精確常數 Eyring（T20 那張紙寫與本條同一常數）。家具案例：均勻牆面每格 α＋(1−α)·ε 仍同值，Sabine 平均吸收率為 (S·α_d＋A_f)/S；穩態吸收功率含家具，同阻抗分格共用 ε 仍等於整牆；T20／T30 的精確常數 Eyring 裡 ᾱ_d 換成 (S·α_d＋A_f)/S；家具整件量的對數內插與延伸、非均勻牆分配後的總吸音量與剩餘反射率比例、晚期一族三路對同一份平均吸音率，也借本條界線；界線照舊；#1057 加空氣與家具後加空氣案例：平均自由路徑 4V/S、逐格共用 ε_air，均勻房精確 Eyring 分母加 4mV，功率守恆與同阻抗分格照舊"
 mutant_test = "tests/engine/test_late_energy_physical_properties.py::test_mutant_beyond_tolerance_is_red"
 
 [[contract]]
@@ -57,9 +57,18 @@ name = "late_energy_jax_vs_numpy"
 value = 1.4551915228366852e-11
 display = "2^-36"
 unit = "relative"
-decision_paper = "late-energy-random-incidence-reciprocal-cpu-double-reference.md"
+decision_paper = "late-energy-random-incidence-reciprocal-air-absorption.md"
 truth = "同一組輸入的 numpy 雙精度精確解（solve_late_energy）：三份 blueprint/reference_art_{flat,lowabs,varied}.json 與兩組固定種子隨機吸音率，逐頻 alpha_bar、原始混響能量、Eyring 比值、晚期能量四格；JAX 那一路在中央處理器雙精度。工程暫定：實量最大 1.47e-14，留約千倍給換機器；顯卡單精度另立尺，不借這一條"
 mutant_test = "tests/engine/test_late_energy_jax.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "air_absorption_vs_iso9613_table"
+value = 0.005
+display = "5e-3"
+unit = "relative"
+decision_paper = "late-energy-random-incidence-reciprocal-air-absorption.md"
+truth = "blueprint/air_absorption_iso9613_rows.json：ISO 9613-1 表 1 的三列第二手表值（−20 °C／10 %、−15 °C／30 %、+25 °C／80 %，101.325 kPa，各 24 個三分之一八度帶），公式代 ISO 266 精確中心頻率逐格比相對差；表印三位有效數字，四捨五入的半格最寬是 5e-3，實量最大 4.47e-3（−15 °C／30 %、1250 Hz）"
+mutant_test = "tests/engine/test_air_absorption.py::test_mutant_beyond_tolerance_is_red"
 
 [[contract]]
 name = "late_decay_t30_property"
@@ -301,7 +310,7 @@ value = 1.8189894035458565e-12
 display = "2^-39"
 unit = "relative"
 decision_paper = "stage-three-objective-jax-rulers.md"
-truth = "同輸入的正式 construction.random_incidence_absorption／catalog_absorption、late_energy.solve_late_energy_by_order、geometric_lane._late_share_energy、wall_surfaces 分區面積等效、crossover Eyring T60／Schroeder f_s／權重與 three_lane_report.stitch_energy_points，逐格相對差，零參考必須恰零；CPU 雙精度冷子行程，小房整面／異材偏格分區／家具與 109 正式輸入（316 頻點），實量最大相對差 2.391e-15，取 2^-39 留約千倍餘裕。工程暫定；顯卡單精度另立尺。f_s 達上限照第 11 條沿用 NumPy 硬切，上限旗標僅供報告；接合總能量亦逐格對照正式報表 points"
+truth = "同輸入的正式 construction.random_incidence_absorption／catalog_absorption、late_energy.solve_late_energy_by_order、geometric_lane._late_share_energy、wall_surfaces 分區面積等效、crossover Eyring T60／Schroeder f_s／權重與 three_lane_report.stitch_energy_points，逐格相對差，零參考必須恰零；CPU 雙精度冷子行程，小房整面／異材偏格分區／家具與 109 正式輸入（316 頻點），實量最大相對差 2.391e-15，取 2^-39 留約千倍餘裕。工程暫定；顯卡單精度另立尺。f_s 達上限照第 11 條沿用 NumPy 硬切，上限旗標僅供報告；接合總能量亦逐格對照正式報表 points；#1057 加空氣與家具後加空氣兩案（小房、逐格共用同一個 ε_air），實量最大相對差 1.28e-15，未超過上面的實量"
 mutant_test = "tests/engine/test_late_family_jax.py::test_mutant_beyond_tolerance_is_red"
 
 [[contract]]

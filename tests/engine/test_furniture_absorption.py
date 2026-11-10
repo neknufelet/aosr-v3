@@ -11,6 +11,8 @@ import pytest
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ
 from aosr.config.paths import config_path
+from aosr.config.air_absorption_environment import air_absorption_environment
+from aosr.physics.air_absorption import air_absorption_fraction
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.furniture import FurnitureKind
 from aosr.geometry.shoebox import Wall
@@ -118,17 +120,23 @@ def test_late_family_eyring_and_art_share_total_absorption() -> None:
     surfaces, t60, _fs, late, decay = batch._prepare_late_family(**late_kwargs(), furniture=ITEMS)
     original = batch._prepare_late_family(**late_kwargs())[0]
     assert surfaces == original
-    _, areas = _room_measures(case.ROOM)
+    volume, areas = _room_measures(case.ROOM)
     total = sum(areas.values())
+    temperature, humidity, pressure = air_absorption_environment()
+    epsilon = air_absorption_fraction(surfaces.frequencies_hz, 4.0 * volume / total,
+        temperature_c=temperature, relative_humidity_percent=humidity, pressure_pa=pressure)
     af = furniture_absorption_area_m2(ITEMS, surfaces.frequencies_hz, case.RHO_C)
     averages = {f: (sum(areas[w] * surfaces.absorption_by_wall[w][i] for w in Wall.all()) + af[i]) / total
                 for i, f in enumerate(surfaces.frequencies_hz)}
+    averages = {f: a + (1.0-a)*epsilon[i] for i, (f, a) in enumerate(averages.items())}
     uniform = {w: {f: averages[f] for f in SCHROEDER_T60_BANDS_HZ} for w in Wall.all()}
     assert t60 == pytest.approx(eyring_t60_by_band(case.ROOM, uniform), rel=contract_value("late_energy_physical_property"))
     af_on_report_axis = furniture_absorption_area_m2(ITEMS, case.FREQUENCIES, case.RHO_C)
     adjusted = furniture_adjusted_absorption(case.ROOM, case.FREQUENCIES,
         {w: tuple(surfaces.absorption_by_wall[w][surfaces.frequencies_hz.index(f)] for f in case.FREQUENCIES)
          for w in Wall.all()}, af_on_report_axis)
+    adjusted = {w: tuple(a+(1.0-a)*epsilon[surfaces.frequencies_hz.index(f)]
+        for a, f in zip(row, case.FREQUENCIES, strict=True)) for w, row in adjusted.items()}
     energy = late_energy.solve_late_energy(late_energy.LateEnergyInputs(room=case.ROOM,
         rho_c_pa_s_per_m=case.RHO_C, frequencies_hz=case.FREQUENCIES,
         absorption_by_wall={w.wall_name(): row for w, row in adjusted.items()}, n_per_wall=ART_N_PER_WALL_DEFAULT, domain_alpha_bar_max=float("inf")))
@@ -139,6 +147,8 @@ def test_late_family_eyring_and_art_share_total_absorption() -> None:
     af_on_decay_axis = furniture_absorption_area_m2(ITEMS, LATE_DECAY_FREQUENCIES_HZ, case.RHO_C)
     rows = tuple((sum(areas[w] * surfaces.absorption_by_wall[w][surfaces.frequencies_hz.index(f)] for w in Wall.all())
                   + af_on_decay_axis[i]) / total for i, f in enumerate(LATE_DECAY_FREQUENCIES_HZ))
+    rows = tuple(a+(1.0-a)*epsilon[surfaces.frequencies_hz.index(f)]
+        for a, f in zip(rows, LATE_DECAY_FREQUENCIES_HZ, strict=True))
     reference = report._solve_report_late_decay(room=case.ROOM, absorption_by_wall={w.wall_name(): rows for w in Wall.all()},
         rho_c_pa_s_per_m=case.RHO_C, sound_speed_m_s=case.SPEED)
     assert decay.unavailable_by_center_hz.keys() == reference.unavailable_by_center_hz.keys()

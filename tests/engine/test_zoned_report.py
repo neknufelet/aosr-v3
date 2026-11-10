@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 from aosr.config.paths import config_path
+from aosr.config.air_absorption_environment import air_absorption_environment
+from aosr.physics.air_absorption import air_absorption_fraction
 from aosr.geometry.shoebox import Point, Room, Wall
 from typing import TypedDict
 from aosr.physics.report_source import SourceModelSpec
@@ -173,6 +175,15 @@ def test_report_late_family_keeps_nonuniform_zone_distribution(with_furniture: b
         rows = {name: tuple(a+(1-a)*e for a, e in zip(row, epsilon, strict=True)) for name, row in rows.items()}
         zones = {name: tuple(replace(cell, absorption=tuple(a+(1-a)*e for a, e in
             zip(cell.absorption, epsilon, strict=True))) for cell in cells) for name, cells in zones.items()}
+    room = inputs.room_m
+    volume = room.Lx*room.Ly*room.Lz
+    surface = 2.0*(room.Lx*room.Ly+room.Ly*room.Lz+room.Lx*room.Lz)
+    temperature, humidity, pressure = air_absorption_environment()
+    air = air_absorption_fraction(axis, 4.0*volume/surface,
+        temperature_c=temperature, relative_humidity_percent=humidity, pressure_pa=pressure)
+    rows = {name: tuple(a+(1.0-a)*e for a, e in zip(row, air, strict=True)) for name, row in rows.items()}
+    zones = {name: tuple(replace(cell, absorption=tuple(a+(1.0-a)*e for a, e in
+        zip(cell.absorption, air, strict=True))) for cell in cells) for name, cells in zones.items()}
     expected = geometric_lane.solve_geometric_late_energy(room=inputs.room_m, rho_c_pa_s_per_m=rho_c,
         frequencies_hz=axis, absorption_by_wall=rows, absorption_by_zone=zones, reflection_order_k=3)
     np.testing.assert_allclose([b.late_reverberant_energy for b in actual.bands],

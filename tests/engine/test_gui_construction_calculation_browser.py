@@ -179,7 +179,7 @@ def recompute_floor_thickness(tmp_path: Path, mode: str, result: SchemeResult, t
 
 def check_solver_used_typed_thickness(tmp_path: Path, result: SchemeResult, default_thickness: float) -> None:
     """算出來的艾林 T60（施羅德兩帶，由六面無規吸音算）等於「填的厚度」重算、不等於「預設厚度」重算：
-    求解器偷用預設厚度就紅。小房間沒有家具，重算不必加家具吸收項（重算那支有家具就停）。"""
+    求解器偷用預設厚度就紅。小房間沒有家具，重算不必加家具吸收項（重算那支有家具就停）；空氣照決策紙第 7 條由重算那支自己加。"""
     assert default_thickness != TYPED_THICKNESS
     typed, default = recompute_floor_thickness(tmp_path, "t60", result, (TYPED_THICKNESS, default_thickness))
     for pair in result.pairs:

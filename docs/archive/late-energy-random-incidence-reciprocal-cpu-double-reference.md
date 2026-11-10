@@ -1,11 +1,11 @@
 ---
 title: 晚期混響用無規入射吸音率、形狀因子守互易；雙精度是中央處理器參考，顯卡單精度另立尺
 date_created: 2026-10-28
-date_modified: 2026-10-28
-status: accepted
+date_modified: 2026-11-10
+status: superseded
 kind: governance
 supersedes: "late-energy-random-incidence-reciprocal-form-factors.md"
-superseded_by: ""
+superseded_by: "late-energy-random-incidence-reciprocal-air-absorption.md"
 summary: "晚期混響（ART）的牆面吸收率由垂直入射改為 Paris 無規入射，形狀因子改成對稱交換矩陣再對稱縮放以守面積加權互易；上一代答案降為照量、照留、不擋合併的相容紀錄，改由互易、列和、Sabine 擴散場、吸收功率守恆、分格等於整牆五項獨立性質擋合併，界線 2^-30。2026-10-28 起只換決定第 6 條：numpy 雙精度直接解是中央處理器參考；同公式的 JAX 版對吸音率可微、精度跟輸入走，雙精度對 numpy 版的尺 late_energy_jax_vs_numpy＝2^-36（工程暫定）；顯卡單精度另立尺，等接進計算時登記。"
 ---
 

@@ -130,6 +130,7 @@ class LateFamilyArrays(NamedTuple):
 
 def late_family_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array, scattering: jax.Array, *,
                        furniture_absorption_area_m2: jax.Array | None = None,
+                       air_absorption_fraction: jax.Array | None = None,
                        max_order: int = REFLECTION_ORDER_K) -> LateFamilyArrays:
     """六面整面列後接各面矩形列的 α(R,F)，輸出逐階與散射晚期欄；s(F) 為上游輸入。
 
@@ -144,6 +145,13 @@ def late_family_arrays(geometry: ZonedLateEnergyGeometry, alpha: jax.Array, scat
     valid_furniture = jnp.ones(alpha.shape[1], dtype=jnp.bool_)
     if furniture_absorption_area_m2 is not None:
         walls, patches, valid_furniture = _furniture_absorption(geometry, walls, patches, furniture_absorption_area_m2)
+    if air_absorption_fraction is not None:
+        epsilon = jax.lax.stop_gradient(jnp.asarray(air_absorption_fraction, dtype=alpha.dtype))
+        valid_air = jnp.isfinite(epsilon) & (epsilon >= 0.0) & (epsilon < 1.0)
+        fraction = jnp.where(valid_air, epsilon, 0.0)
+        walls = walls + (1.0 - walls) * fraction
+        patches = patches + (1.0 - patches) * fraction
+        valid_alpha = valid_alpha & valid_air
     usable = valid_alpha & valid_furniture
     result = late_energy_by_order_arrays(geometry.whole, jnp.where(usable[None, :], walls, 0.5),
         alpha_by_patch=jnp.where(usable[None, :], patches, 0.5), max_order=max_order)

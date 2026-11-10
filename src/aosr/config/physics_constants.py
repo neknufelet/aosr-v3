@@ -28,6 +28,8 @@ class PhysicsConstants(BaseModel):
     specific_heat_ratio: float | None = Field(default=None, gt=0.0, exclude=True, description="γ, cp/cv")
     prandtl_number: float | None = Field(default=None, gt=0.0, exclude=True, description="Pr, dimensionless")
     atmospheric_pressure_pa: float | None = Field(default=None, gt=0.0, exclude=True, description="p₀, atmospheric pressure [Pa]")
+    air_temperature_c: float | None = Field(default=None, gt=-273.15, exclude=True, description="air temperature [°C]")
+    air_relative_humidity_percent: float | None = Field(default=None, ge=0.0, le=100.0, exclude=True, description="relative humidity [%]")
 
     @property
     def rho_c(self) -> float:

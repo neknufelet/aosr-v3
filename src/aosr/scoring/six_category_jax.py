@@ -87,6 +87,7 @@ def _late(c: SixCategoryConstants, z: jax.Array, scattering: jax.Array, constant
                                       c.patch_weights, c.wall_weights)
     s = jnp.zeros(len(c.union_frequencies_hz), dtype=z.real.dtype).at[jnp.asarray(c.report_indices)].set(scattering)
     result = late_family_arrays(geometry, alpha, s, max_order=int(c.reflection_order_k),
+        air_absorption_fraction=jnp.asarray(c.air_absorption_fraction, dtype=z.real.dtype),
         furniture_absorption_area_m2=jnp.asarray(c.furniture_absorption_area_m2, dtype=z.real.dtype) if bool(c.has_furniture) else None)
     return result.late_share_energy[jnp.asarray(c.report_indices)], result.alpha_by_wall, result.alpha_by_patch
 

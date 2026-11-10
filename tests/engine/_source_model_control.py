@@ -91,6 +91,7 @@ def fake_late_energy(
     return LateEnergyOrderResult(max_order=reflection_order_k, bands=tuple(bands))
 
 
+# #1057 物理變更：晚期一族家具後加空氣；零空氣逐位重播通過後由原控制入口重錄。
 ANSWERS: dict[str, object] = {
     'point_count': 220,
     'points': {
@@ -318,7 +319,7 @@ ANSWERS: dict[str, object] = {
     'bands': [
         {'center_frequency_hz': '0x1.f400000000000p+6',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x1.c3c2456b35133p-13',
          'fem_energy': '0x1.c773092846b06p-13',
          'geometric_contribution': '0x1.015c2a0928657p-9',
@@ -335,7 +336,7 @@ ANSWERS: dict[str, object] = {
          'w_geo': '0x1.7fc63bb18b9c0p-7'},
         {'center_frequency_hz': '0x1.f400000000000p+7',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x1.7cc4d4f6729e1p-15',
          'fem_energy': '0x1.875522259ec70p-13',
          'geometric_contribution': '0x1.339587279c498p-3',
@@ -352,7 +353,7 @@ ANSWERS: dict[str, object] = {
          'w_geo': '0x1.73f33e705475ap-1'},
         {'center_frequency_hz': '0x1.f400000000000p+8',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x0.0p+0',
          'fem_energy': None,
          'geometric_contribution': '0x1.3a0e47e0d38c4p-3',
@@ -369,7 +370,7 @@ ANSWERS: dict[str, object] = {
          'w_geo': '0x1.0000000000000p+0'},
         {'center_frequency_hz': '0x1.f400000000000p+9',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x0.0p+0',
          'fem_energy': None,
          'geometric_contribution': '0x1.27283aacd7e41p-3',
@@ -386,7 +387,7 @@ ANSWERS: dict[str, object] = {
          'w_geo': '0x1.0000000000000p+0'},
         {'center_frequency_hz': '0x1.f400000000000p+10',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x0.0p+0',
          'fem_energy': None,
          'geometric_contribution': '0x1.f7b65caca4ef9p-4',
@@ -403,7 +404,7 @@ ANSWERS: dict[str, object] = {
          'w_geo': '0x1.0000000000000p+0'},
         {'center_frequency_hz': '0x1.f400000000000p+11',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x0.0p+0',
          'fem_energy': None,
          'geometric_contribution': '0x1.18da19c9c3397p-3',
@@ -420,7 +421,7 @@ ANSWERS: dict[str, object] = {
          'w_geo': '0x1.0000000000000p+0'},
         {'center_frequency_hz': '0x1.f400000000000p+12',
          'direct_energy': '0x1.475a4718cea42p-4',
-         'f_s_hz': '0x1.08ced55720bb9p+6',
+         'f_s_hz': '0x1.08931d1ae0bfdp+6',
          'fem_contribution': '0x0.0p+0',
          'fem_energy': None,
          'geometric_contribution': '0x1.24a0795cfe81fp-3',
@@ -439,7 +440,7 @@ ANSWERS: dict[str, object] = {
     'top': {
         'crossover_lower_hz': '0x1.2c00000000000p+7',
         'crossover_upper_hz': '0x1.2c00000000000p+8',
-        'f_s_hz': '0x1.08ced55720bb9p+6',
+        'f_s_hz': '0x1.08931d1ae0bfdp+6',
         'room_volume_m3': '0x1.2ba0c49ba5e35p+6',
     },
     'path_rows': {

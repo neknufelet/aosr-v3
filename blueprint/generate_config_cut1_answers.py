@@ -78,10 +78,12 @@ DONOR_TAG: Final[str] = "v3-donor"
 # 「哪一支載入器炸了、炸什麼」。
 ANSWER_SCHEMA: Final[int] = 3
 
-# 新家為 TMM 加的物性，上一代沒有這三格；新家輸出時排除它們，
-# 四格共同欄位才是兩代比對的對象；這三格的數字由 TMM 凍結答案守。
-TMM_ONLY_PHYSICS_KEYS: Final[tuple[str, ...]] = (
+# 新家加的物性，上一代沒有這五格（TMM 三格、晚期空氣吸收兩格）；新家輸出時排除它們，
+# 四格共同欄位才是兩代比對的對象；TMM 三格的數字由 TMM 凍結答案守，空氣兩格由空氣吸收考卷守。
+# 上一代沒有的物性鍵：#560 TMM 的空氣條件三鍵；#1057 晚期空氣吸收的溫度與濕度兩鍵。
+V3_ONLY_PHYSICS_KEYS: Final[tuple[str, ...]] = (
     "specific_heat_ratio", "prandtl_number", "atmospheric_pressure_pa",
+    "air_temperature_c", "air_relative_humidity_percent",
 )
 
 
@@ -387,7 +389,7 @@ def _resolved_kwargs(op: dict[str, object], table_name: str) -> dict[str, object
 def _donor_physics_text(text: str) -> str:
     """逐行去掉上一代沒有的物性；每一鍵必須恰好拿掉一行。"""
     lines = text.splitlines(keepends=True)
-    for key in TMM_ONLY_PHYSICS_KEYS:
+    for key in V3_ONLY_PHYSICS_KEYS:
         prefix = f"{key} ="
         hits = sum(line.startswith(prefix) for line in lines)
         if hits != 1:
@@ -459,7 +461,7 @@ def loader_block(
         return _loader_block_with_text(fn, _donor_physics_text(text), engine_name, kwargs, tmp_dir)
     # `op.path == "default"` 那幾筆：把新家那一份真的設定檔的路徑**明著餵進去**。
     # 兩邊餵的是同一份檔（新家那 9 個 `.toml` 搬進來的當下與上一代逐位元相同；之後只有
-    # `physics_constants` 多了 TMM 那三格，上面那一段先拿掉再餵），
+    # `physics_constants` 多了 TMM 三格與空氣兩格，上面那一段先拿掉再餵），
     # 定的就是「同一份設定檔在兩代載入器底下的輸出」。
     #
     # **為什麼不餵 `None`**：`calibration`／`mat_continuation`／`scoring_v2`／`stereo_layout`

@@ -5,6 +5,8 @@ from dataclasses import replace
 
 import numpy as np
 
+from aosr.config.air_absorption_environment import air_absorption_environment
+from aosr.physics.air_absorption import air_absorption_fraction
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Wall
 from aosr.physics import crossover, late_energy
@@ -14,7 +16,7 @@ from tests.engine._furniture_energy_cases import desk
 from tests.engine.test_late_energy_zones import CONSTANTS as CONSTANTS, synthetic
 
 FREQUENCIES = (80.0, 150.0, 190.0, 240.0, 300.0, 500.0, 1000.0, 2000.0)
-CASES = ("whole", "zoned", "furniture")
+CASES = ("whole", "zoned", "furniture", "air", "furniture_air")
 
 
 def problem(name: str) -> late_energy.LateEnergyInputs:
@@ -65,8 +67,21 @@ def scattering() -> np.ndarray:
                                       dict.fromkeys(Wall.wall_names(), row), FREQUENCIES))
 
 
-def reference(inputs: late_energy.LateEnergyInputs, area: np.ndarray | None = None) -> dict[str, np.ndarray]:
+def air_fraction(inputs: late_energy.LateEnergyInputs) -> np.ndarray:
+    room = inputs.room
+    volume = room.Lx * room.Ly * room.Lz
+    surface = 2.0 * (room.Lx * room.Ly + room.Ly * room.Lz + room.Lx * room.Lz)
+    temperature, humidity, pressure = air_absorption_environment()
+    return air_absorption_fraction(FREQUENCIES, 4.0 * volume / surface,
+        temperature_c=temperature, relative_humidity_percent=humidity, pressure_pa=pressure)
+
+
+def reference(inputs: late_energy.LateEnergyInputs, area: np.ndarray | None = None,
+              epsilon: np.ndarray | None = None) -> dict[str, np.ndarray]:
     inputs = adjusted(inputs, area)
+    if epsilon is not None:
+        alpha = alpha_rows(inputs)
+        inputs = with_alpha(inputs, alpha + (1.0 - alpha) * epsilon)
     result = late_energy.solve_late_energy_by_order(inputs, max_order=REFLECTION_ORDER_K)
     walls = late_energy._wall_absorption(inputs)
     bands = {w: dict(zip(FREQUENCIES, walls[i], strict=True)) for i, w in enumerate(Wall.all())}

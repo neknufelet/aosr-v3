@@ -21,6 +21,7 @@ from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_respons
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
+from aosr.physics.air_absorption import air_adjusted_absorption, room_air_absorption_fraction
 from aosr.physics.geometric_lane import solve_geometric_late_energy
 from aosr.physics.furniture_paths import direct_path_blockers
 from aosr.physics.furniture_scene import (
@@ -148,6 +149,9 @@ def _prepare_late_family(
         af = furniture_absorption_area_m2(furniture, axis, rho_c)
         late_surfaces = replace(surfaces, absorption_by_wall=furniture_adjusted_absorption(
             room, axis, surfaces.absorption_by_wall, af))
+    epsilon = room_air_absorption_fraction(room, axis)
+    late_surfaces = replace(late_surfaces, absorption_by_wall={wall: tuple(air_adjusted_absorption(row, epsilon))
+        for wall, row in late_surfaces.absorption_by_wall.items()})
     t60, f_s_hz = report._eyring_t60_and_schroeder(room, late_surfaces.band_rows(SCHROEDER_T60_BANDS_HZ))
     late = solve_geometric_late_energy(room=room, rho_c_pa_s_per_m=rho_c,
         frequencies_hz=report_frequencies_hz, absorption_by_wall=late_surfaces.named_rows(report_frequencies_hz),

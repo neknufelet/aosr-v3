@@ -12,6 +12,7 @@ from unittest.mock import patch
 import jax.numpy as jnp
 import numpy as np
 
+from aosr.config.air_absorption_environment import air_absorption_environment
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.frequency_axis import (
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ, LATE_DECAY_FREQUENCIES_HZ, LowFrequencyAxis, low_frequency_axis_frequencies,
@@ -24,6 +25,7 @@ from aosr.geometry.shoebox import Room, Wall
 from aosr.materials.construction import random_incidence_absorption
 from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, PorousLayer, SurfaceMaterial
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
+from aosr.physics.air_absorption import air_absorption_fraction
 from aosr.physics.crossover import eyring_t60_by_band
 from aosr.physics.geometric_lane import solve_geometric_late_energy
 from aosr.physics.late_decay import DecayRangeError, solve_late_decay
@@ -101,6 +103,23 @@ def _direct_rows(materials: dict[Wall, SurfaceMaterial], frequencies: tuple[floa
     return rows
 
 
+def _air_epsilon(axis: tuple[float, ...]) -> dict[float, float]:
+    """#1057：4V/S 由考卷用房間三軸自己算，ε 借已被表值守住的係數函式；在報表同一條聯集軸上算、逐頻取值。"""
+    volume = ROOM.Lx * ROOM.Ly * ROOM.Lz
+    surface = 2.0 * (ROOM.Lx * ROOM.Ly + ROOM.Ly * ROOM.Lz + ROOM.Lx * ROOM.Lz)
+    temperature, humidity, pressure = air_absorption_environment()
+    values = air_absorption_fraction(axis, 4.0 * volume / surface, temperature_c=temperature,
+                                     relative_humidity_percent=humidity, pressure_pa=pressure)
+    return dict(zip(axis, (float(value) for value in values), strict=True))
+
+
+def _with_air(rows: dict[str, tuple[float, ...]], frequencies: tuple[float, ...],
+              epsilon: dict[float, float]) -> dict[str, tuple[float, ...]]:
+    """決策紙第 7 條：每格 α → α＋(1−α)·ε_air（這裡沒有家具）。"""
+    return {wall: tuple(a + (1.0 - a) * epsilon[f] for a, f in zip(row, frequencies, strict=True))
+            for wall, row in rows.items()}
+
+
 def _construction() -> dict[str, object]:
     fine = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[1]
     materials = _materials(BOARD)
@@ -110,29 +129,34 @@ def _construction() -> dict[str, object]:
     # 三條軸各自直接呼叫材料核心；會抓聯集軸漏點、取值或內插錯誤。
     for axis in (fine, LATE_DECAY_FREQUENCIES_HZ, SCHROEDER_T60_BANDS_HZ):
         assert surfaces.named_rows(axis) == _direct_rows(materials, axis)
+    epsilon = _air_epsilon(surfaces.frequencies_hz)
     bands = _direct_rows(materials, SCHROEDER_T60_BANDS_HZ)
     expected_t60 = eyring_t60_by_band(ROOM, {Wall.from_name(w): dict(zip(SCHROEDER_T60_BANDS_HZ, row, strict=True))
-                                          for w, row in bands.items()})
+                                          for w, row in _with_air(bands, SCHROEDER_T60_BANDS_HZ, epsilon).items()})
     assert t60 == expected_t60
+    # 加空氣後兩帶 T60 本來就不同；「構造兩帶 α 真的不同」另外斷言，抄同一 α 才抓得到。
+    assert bands["floor"][0] != bands["floor"][1]
     assert t60[500.] != t60[1000.]
     expected_late = solve_geometric_late_energy(room=ROOM, rho_c_pa_s_per_m=1.2 * 343.,
-        frequencies_hz=fine, absorption_by_wall=_direct_rows(materials, fine), reflection_order_k=3)
+        frequencies_hz=fine, absorption_by_wall=_with_air(_direct_rows(materials, fine), fine, epsilon), reflection_order_k=3)
     assert late == expected_late
     expected_decay = report._solve_report_late_decay(room=ROOM, rho_c_pa_s_per_m=1.2 * 343.,
-        sound_speed_m_s=343., absorption_by_wall=_direct_rows(materials, LATE_DECAY_FREQUENCIES_HZ))
+        sound_speed_m_s=343., absorption_by_wall=_with_air(_direct_rows(materials, LATE_DECAY_FREQUENCIES_HZ),
+                                                           LATE_DECAY_FREQUENCIES_HZ, epsilon))
     assert decay == expected_decay
-    _decay_bands_match_direct(materials, decay)
+    _decay_bands_match_direct(materials, decay, epsilon)
     _changes_and_notes(materials, surfaces.frequencies_hz, late, decay)
     return {"verified": True, "alpha_500_1000": bands["floor"]}
 
 
-def _decay_bands_match_direct(materials: dict[Wall, SurfaceMaterial], decay: report._ReportLateDecay) -> None:
+def _decay_bands_match_direct(materials: dict[Wall, SurfaceMaterial], decay: report._ReportLateDecay,
+                              epsilon: dict[float, float]) -> None:
     """裁判自己按八度帶挑衰減軸頻點、建輸入、直接呼叫底層衰減求解，不經報表那層的切片。"""
     actual = {b.frequency_hz: b for b in decay.result.bands}
     compared = []
     for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
         band = tuple(f for f in LATE_DECAY_FREQUENCIES_HZ if center / 2 ** .5 <= f < center * 2 ** .5)
-        inputs = LateEnergyInputs(ROOM, 1.2 * 343., band, _direct_rows(materials, band),
+        inputs = LateEnergyInputs(ROOM, 1.2 * 343., band, _with_air(_direct_rows(materials, band), band, epsilon),
                                   ART_N_PER_WALL_DEFAULT, float("inf"))
         try:
             expected = solve_late_decay(inputs, sound_speed_m_s=343.)
