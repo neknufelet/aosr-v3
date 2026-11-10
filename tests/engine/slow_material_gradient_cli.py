@@ -422,7 +422,10 @@ def test_max_steps_flag_is_stored_reported_and_reapplied_on_resume(runs: tuple[P
     assert _without_seconds(_rows(folder)) == _without_seconds(_rows(first.parent / others[0]))
     descent = [row for row in _rows(folder) if row.phase == "descent" and row.round is None]
     assert len(descent) - 1 <= steps
-    assert f"往下走步數上限：{steps} 步（開跑時指定）" in str(cast(Record, record["report"])["stdout"]).splitlines()
+    report = str(cast(Record, record["report"])["stdout"])
+    assert f"往下走步數上限：{steps} 步（開跑時指定）" in report.splitlines()
+    # 報告其他段（每面總深度上限）也要套回記的步數重讀設定，否則指紋對不上、整段變成「無法確認」
+    assert "設定指紋不同" not in report and "：總深度上限 " in report, report
     resumed = cast(Record, record["resumed"])
     assert resumed["code"] == 0, resumed["stderr"]
     cut = Path(str(record["resumed_folder"]))
