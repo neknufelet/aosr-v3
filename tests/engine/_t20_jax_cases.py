@@ -90,7 +90,7 @@ def inputs(name: str) -> tuple[late_energy.LateEnergyInputs, float, NDArray[np.f
     if name in ("patches", "tail"):
         base = replace(base, room=Room(5.1, 3.7, 2.6), n_per_wall=2, frequencies_hz=(125.0, 500.0, 2000.0),
                        absorption_by_wall={w: row[:3] for w, row in base.absorption_by_wall.items()})
-        bounds = (0.025, 0.035) if name == "tail" else (0.04, 0.7)
+        bounds = (0.0125, 0.0175) if name == "tail" else (0.04, 0.7)  # #1062 512 階：尾巴案例 α 減半，最後一階仍約 −34 dB
         alpha = np.random.default_rng(562).uniform(*bounds, (24, 3))
     else:
         alpha = np.repeat(np.asarray([base.absorption_by_wall[w] for w in Wall.wall_names()]), base.n_per_wall**2, axis=0)

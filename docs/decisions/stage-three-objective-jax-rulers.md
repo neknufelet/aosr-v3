@@ -51,7 +51,7 @@ summary: "第三階段梯度目標換成產品六類（第三階段目標紙第 
 | `geometric_early_jax_vs_python` | 2^-38 | 絕對 | 早期三欄（直達、逐階縮放反射、干涉）與房間散射 s(f)，`geometric_lane.py` 整面與分區 | 3.55e-15（109 原牆） | 約 1024 倍 |
 | `reflection_path_energy_jax_vs_python` | 2^-39 | 相對 | 早期反射窗內逐路徑 (1−s)^k·\|p\|²／\|p_direct\|²，`report_path_table.py` | 2.07e-15 | 約 879 倍 |
 | `late_family_jax_vs_python` | 2^-39 | 相對 | 無規入射吸音、逐階晚期 A_k 與尾巴、晚期那一欄、Eyring T60、f_s、交接權重、接合能量 | 2.39e-15 | 約 761 倍 |
-| `late_decay_t20_jax_vs_numpy` | 2^-38 | 相對 | 逐帶 T20（512 階，#1062 前 256 階；精確根尾巴改對稱化最大特徵值、軟視窗擬合），`late_decay.py` | 5.33e-15（#1062 重量；256 階時 3.29e-15） | 約 680 倍 |
+| `late_decay_t20_jax_vs_numpy` | 2^-38 | 相對 | 逐帶 T20（512 階，#1062 前 256 階；精確根尾巴改對稱化最大特徵值、軟視窗擬合），`late_decay.py` | 5.33e-15（#1062 重量五個小房案例；256 階時記 3.29e-15） | 約 680 倍 |
 | `reverberation_cost_jax_vs_python` | 2^-41 | 絕對 | 殘響類代價（區間超出、相鄰突變），`reverberation_cost.py` | 4.44e-16 | 約 1024 倍 |
 | `reflections_cost_jax_vs_python` | 2^-39 | 絕對 | 早期反射類代價與逐區超標，`reflections.py`＋`reflections_cost.py` | 1.78e-15 | 約 1024 倍 |
 | `timbre_cost_jax_vs_python` | 2^-40 | 絕對 | 音色類代價，`timbre.py`＋`timbre_cost.py` | 8.88e-16 | 約 1024 倍 |
