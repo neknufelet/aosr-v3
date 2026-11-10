@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import jax
 import jax.numpy as jnp
+from jax.extend import core as jax_core
 
 from aosr.config.art_lane import ART_NEUMANN_K_MAX
 from aosr.physics import late_decay, late_decay_jax, late_energy
@@ -172,7 +173,7 @@ def test_mixed_failures_keep_flags_values_and_gradients_in_their_bands(t20_runs:
 
 
 def test_decay_scan_has_no_operands_with_three_or_more_dimensions() -> None:
-    """抓：把逐頻三維轉移表重新放進每階縮併；不以牆鐘設門檻。"""
+    """抓：逐頻三維轉移表重回每階縮併，或縮併漏掉最高精度；不以牆鐘設門檻。"""
     base, speed, alpha = inputs("patches")
     geometry = late_decay_jax.late_decay_geometry(base.room, base.n_per_wall, sound_speed_m_s=speed)
     expression = jax.make_jaxpr(late_decay_jax.late_decay_arrays)(geometry, jnp.asarray(alpha))
@@ -182,3 +183,23 @@ def test_decay_scan_has_no_operands_with_three_or_more_dimensions() -> None:
     for equation in body.eqns:
         for operand in equation.invars:
             assert len(operand.aval.shape) < 3, (equation.primitive.name, operand.aval.shape)
+
+    # 運算參數可藏子運算圖；展開閉合圖、原始圖及容器，不綁定 jit/pjit 的名稱。
+    pending: list[object] = [body]
+    dots: list[jax_core.JaxprEqn] = []
+    while pending:
+        node = pending.pop()
+        if isinstance(node, jax_core.ClosedJaxpr):
+            pending.append(node.jaxpr)
+        elif isinstance(node, jax_core.Jaxpr):
+            for equation in node.eqns:
+                if equation.primitive.name == "dot_general":
+                    dots.append(equation)
+                pending.extend(equation.params.values())
+        elif isinstance(node, (tuple, list)):
+            pending.extend(node)
+        elif isinstance(node, dict):
+            pending.extend(node.values())
+    assert dots, "scan 本體及子運算圖必須至少包含一個 dot_general"
+    for equation in dots:
+        assert equation.params["precision"] == (jax.lax.Precision.HIGHEST, jax.lax.Precision.HIGHEST)
