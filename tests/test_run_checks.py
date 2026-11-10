@@ -90,18 +90,25 @@ def test_run_keeps_step_order_while_running_in_parallel(tmp_path: Path) -> None:
 
 
 def test_main_mirrors_first_then_runs_every_card(capsys: pytest.CaptureFixture[str]) -> None:
-    """抓讀收據的檢查比鏡像先跑：第一步是鏡像、跑完才開始並行；任何一支回 1，整支回 1。"""
+    """抓讀收據的檢查比鏡像先跑：鏡像跑完，其他每一支才開始；任何一支回 1，整支回 1。"""
     order: list[str] = []
+    early: list[str] = []
+    mirrored = threading.Event()
     lock = threading.Lock()
 
     def call(step: subject.Step, root: Path) -> tuple[int, str]:
         with lock:
             order.append(step.name)
+        if step.name == "mirror_receipts":
+            time.sleep(0.2)
+            mirrored.set()
+        elif not mirrored.is_set():
+            early.append(step.name)
         return (VIOLATION, "HIT: 植的錯") if step.name == "ruff" else (CLEAN, "")
 
     assert subject.main(["--jobs", "4"], call=call) == VIOLATION
     cards = load_all_cards(REPO)
-    assert order[0] == "mirror_receipts"
+    assert order[0] == "mirror_receipts" and early == []
     assert sorted(order[1:]) == sorted([*(card.id for card in cards), "ruff"])
     err = capsys.readouterr().err
     assert "HIT: 植的錯" in err and f"共 {len(cards) + 2} 支" in err
