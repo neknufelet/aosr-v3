@@ -68,12 +68,8 @@ FEM_COMPARISON_FREQUENCIES_HZ = (
     FEM_LANE_FREQUENCIES_HZ[-1],
 )
 # #1062 階數 256 → 512：吸音率減半、最後一階的 dB 大約不變，所以 0.026／0.02 換成 0.013／0.01。
-T20_ONLY_IMPEDANCE_MULTIPLE = (
-    catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.013)
-)
-UNREACHED_T20_IMPEDANCE_MULTIPLE = (
-    catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.01)
-)
+T20_ONLY_IMPEDANCE_MULTIPLE = catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.013)
+UNREACHED_T20_IMPEDANCE_MULTIPLE = catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.01)
 
 
 def _walls(value: object) -> dict[Wall, object]:

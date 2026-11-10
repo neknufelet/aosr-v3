@@ -1,6 +1,7 @@
 # schema 2：每片全套清點相同；未登記檔依 POSIX 路徑的 SHA-256 雜湊分片。
 # _search_worker_cases 的 lru_cache 只在行程內；xdist 跨行程不保證共用，所以不登記。
 # _report_cache 的單對物理（shared_control_pair）兩片各算一次，本機收據逐題時間約二十秒，接受、不登記；控制組結果（shared_control_result）那一群才是重算會變一百多秒的。
+# 舊 balance-shard-b（#972 兩片時代手算的十四檔）#1062 拿掉：只在退回時生效，五片退回時它把十四檔全壓在 shard-b，#1063 退回那一跑 shard-b 撞 30 分上限。
 schema = 2
 shards = ["shard-a", "shard-b", "shard-c", "shard-d", "shard-e"]
 unregistered = "path-hash"
@@ -100,22 +101,10 @@ files = [
 ]
 
 [[group]]
-name = "balance-shard-b"
-shard = "shard-b"
-why = "照 governance/status/shard_balance 依雲端歷史耗時印出的建議貼上；重算後整群換掉，改動走合併請求。2026-10-29（#972）手算加一支：shard_balance 要每片 steps 收據的機器行、鏡像沒存，改用 #971 雲端兩片 junit 逐檔秒數、按減量後本機逐檔比例縮放，再扣掉兩支共用夾具檔的等鎖時間（收集順序挪到最前面）；減量後 shard-a 約 3,520 秒、shard-b 約 3,220 秒（junit 逐題累計、#971 那台機器的尺），把 test_stage_one_objective_jax.py（170 秒、未登記、原本雜湊落 shard-a）登記到這一片，兩片約 3,350 對 3,390。"
+name = "six-category-measured"
+shard = "shard-d"
+why = "兩檔共用 test_six_category_jax 的 measured 前置（review 直接 import 同一個夾具、shared_json 同名 six-category-measure）；耗時分配把兩檔拆到兩片時，同一份前置在兩片各算一次，#1057 雲端收據兩片各約 490 秒。test_six_category_chain 用自己的探針與快取名，不綁。退回時放 shard-d：#1063 退回那一跑的逐檔秒數估得五片 a 18.1、b 16.0、c 10.8、d 14.2、e 6.9 分（四工人）。（#1062）"
 files = [
-  "tests/engine/test_fem_complex.py",
-  "tests/engine/test_fem_fenics_answers.py",
-  "tests/engine/test_material_flow.py",
-  "tests/engine/test_physics_identity.py",
-  "tests/engine/test_scheme_cli_fem.py",
-  "tests/engine/test_search_blocked_recovery.py",
-  "tests/engine/test_search_pipeline_integration.py",
-  "tests/engine/test_search_report_completion.py",
-  "tests/engine/test_stage_one_objective_jax.py",
-  "tests/engine/test_three_lane_report.py",
-  "tests/engine/test_transfer_matrix_reference.py",
-  "tests/engine/test_transfer_matrix_step2_reference.py",
-  "tests/engine/test_transfer_matrix_step3_reference.py",
-  "tests/engine/test_wall_surfaces.py",
+  "tests/engine/test_six_category_jax.py",
+  "tests/engine/test_six_category_jax_review.py",
 ]

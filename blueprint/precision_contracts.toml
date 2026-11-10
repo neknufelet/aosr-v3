@@ -238,7 +238,7 @@ value = 3.637978807091713e-12
 display = "2^-38"
 unit = "relative"
 decision_paper = "stage-three-objective-jax-rulers.md"
-truth = "JAX 中央處理器雙精度逐帶 T20 對 late_decay.solve_late_decay_t20 的 512 階（#1062 前 256 階）、精確根尾巴與軟視窗擬合；同尺守對稱化最大根對 numpy 精確最大模根：三份 reference_art_decay_{flat,varied,lowabs} 小房、非均勻逐格吸音率與低吸音尾巴案例、109 原牆正式結果取出的 216 格 220 頻點吸音率；實量最大相對差 3.29e-15，界線留約 1100 倍。等價域限兩邊皆可估帶；α＝1、正 α 的吸音效應在工作精度的 1−α 中捨成零是定義差，numpy 會計算或丟錯，JAX 亮無效吸音旗標並回 NaN，不宣稱這些格等價。工程暫定；顯卡單精度另立尺"
+truth = "JAX 中央處理器雙精度逐帶 T20 對 late_decay.solve_late_decay_t20 的 512 階（#1062 前 256 階）、精確根尾巴與軟視窗擬合；同尺守對稱化最大根對 numpy 精確最大模根：三份 reference_art_decay_{flat,varied,lowabs} 小房、非均勻逐格吸音率與低吸音尾巴案例、109 原牆正式結果取出的 216 格 220 頻點吸音率；實量最大相對差 3.29e-15（256 階時量）；#1062 改 512 階後重量五個小房案例：T20 最大 1.11e-15、對稱最大根 5.33e-15（根不隨階數變，256 階同值），界線留約 680 倍。等價域限兩邊皆可估帶；α＝1、正 α 的吸音效應在工作精度的 1−α 中捨成零是定義差，numpy 會計算或丟錯，JAX 亮無效吸音旗標並回 NaN，不宣稱這些格等價。工程暫定；顯卡單精度另立尺"
 mutant_test = "tests/engine/test_late_decay_jax.py::test_mutant_beyond_tolerance_is_red"
 
 [[contract]]
