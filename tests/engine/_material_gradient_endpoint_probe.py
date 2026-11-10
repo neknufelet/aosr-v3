@@ -12,13 +12,16 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn, cast
+from unittest.mock import patch
 
 from pydantic import TypeAdapter
+from scipy.sparse import csr_matrix
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, LowFrequencyAxis
@@ -28,9 +31,11 @@ from aosr.config.physics_constants import PhysicsConstants, load_physics_constan
 from aosr.config.porous_model_ranges import PorousModelRanges, load_porous_model_ranges
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.boundary import BoundaryKey
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import Assembly, SurfaceMaterial
 from aosr.materials.construction_diff import build_template, surface_impedance_from_parameters
+from aosr.physics import fem_full_gpu
 from aosr.physics.fem_reduced import FullOperators, ReducedModel, export_room_operators
 from aosr.physics.fem_reduced_jax import reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.physics.fem_reduced_check import validate_reduced
@@ -44,6 +49,7 @@ from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.scoring.stage_one_objective_jax import objective_from_pressures
 from aosr.gradient import endpoint
 from aosr.gradient import material_gradient as gradient_search
+from tests.engine._full_gpu_fake import SingleFactor
 from tests.engine.test_fem_reduced import DENSITY, ROOM, SEATS, SOUND_SPEED, SOURCES
 from tests.engine.test_material_gradient_endpoint import chain_operators, floor_case_pressures
 
@@ -174,6 +180,34 @@ def _surrogate_order(operators: FullOperators, model: ReducedModel, designs: tup
     return {"stopped_at_full_solve": stopped, "surrogate_calls_at_full_solve": at_full_solve, "traced": traced}
 
 
+def _gpu_sections(operators: FullOperators, designs: tuple[gradient_search.SurfaceDesign, ...], theta: np.ndarray,
+                  materials: Mapping[BoundaryKey, SurfaceMaterial | None], *, model: ReducedModel,
+                  score: GradientObjectiveSettings, receivers: ReceiverSet, axis_id: LowFrequencyAxis,
+                  presets: tuple[ConstructionPreset, ...], settings: MaterialGradientSettings, air: PhysicsConstants,
+                  ranges: PorousModelRanges) -> Record:
+    """終點與原牆兩段各走一次 GPU 完整解（注入的 scipy complex64 分解器真算，不代答）；記兩段的分解器與逐解修正次數。"""
+    factors: list[SingleFactor] = []
+    steps: list[int] = []
+
+    def factor(a: csr_matrix[np.complex64], b: NDArray[np.complex64]) -> SingleFactor:
+        made = SingleFactor(a, b)
+        factors.append(made)
+        return made
+
+    with patch.object(fem_full_gpu, "nvmath_factor", factor):
+        checked = endpoint.endpoint_check(
+            operators, designs, theta, model=model, objective_settings=score, receiver_set=receivers,
+            low_frequency_axis=axis_id, presets=presets, settings=settings, air=air, ranges=ranges, device="gpu",
+            refinement_steps=steps)
+        baseline = endpoint.full_model_pressures(
+            operators, materials, tuple(model.frequencies_hz), air=air, ranges=ranges,
+            max_relative_residual=model.ledger.settings.full_solve_max_relative_residual, device="gpu",
+            refinement_steps=steps)
+    return {"full_solves": checked.report.full_solves, "baseline_solves": int(baseline.shape[0]), "steps": steps,
+            "factors": [{"freed": made.freed, "factorizations": made.factorizations, "calls": made.calls}
+                        for made in factors]}
+
+
 def main(directory: Path) -> None:
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     model = load_reduced(directory / "model.npz")
@@ -226,6 +260,10 @@ def main(directory: Path) -> None:
         "kept": _kept(cast(Record, problem["kept"]), model, constants, settings, presets, air, ranges),
         "surrogate_order": _surrogate_order(operators, model, designs, theta, score, receivers,
                                             LowFrequencyAxis(str(problem["axis"])), settings, presets, air, ranges),
+        # 放最後：前面各格都在注入分解器之前算完。
+        "gpu": _gpu_sections(operators, designs, theta, materials, model=model, score=score, receivers=receivers,
+                             axis_id=LowFrequencyAxis(str(problem["axis"])), presets=presets, settings=settings,
+                             air=air, ranges=ranges),
     }
     (directory / "output.json").write_text(json.dumps(output), encoding="utf-8")
 

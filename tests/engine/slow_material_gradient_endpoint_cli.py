@@ -360,3 +360,26 @@ def test_cli_six_category_bitwise_and_gpu_full_solve(runs: tuple[Path, Record]) 
     assert gpu.device == 'gpu' and gpu.six_category is not None
     assert probe['cpu_six_scoring'] is True
     assert gpu.max_refinement_steps == max(cast(list[int], probe['gpu_steps']))
+
+
+def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record], tmp_path: Path) -> None:
+    """v4 加不計分低頻註記；CPU 裝置預設不增 JSON 位元組，GPU 兩段真用單精度分解並記修正次數。"""
+    record = _record(_folder(runs))
+    assert record.format_version == endpoint_run.ENDPOINT_VERSION
+    original = record.model_dump(mode="json", exclude={"device", "max_refinement_steps"})
+    expected = (json.dumps(original, ensure_ascii=False, allow_nan=False) + "\n").encode()
+    for candidate in (record, record.model_copy(update={"device": "cpu"})):
+        run.write_json_atomic(tmp_path / "endpoint.json", candidate)
+        assert (tmp_path / "endpoint.json").read_bytes() == expected
+    probe = _section(runs, "legacy_probe")
+    gpu = EndpointRecord.model_validate(probe["gpu"])
+    assert probe['gpu_numpy_calls'] == probe['cpu_numpy_calls'] and cast(int, probe['cpu_numpy_calls']) > 0
+    assert gpu.device == "gpu" and gpu.max_refinement_steps is not None and gpu.max_refinement_steps > 0
+    steps = cast(list[int], probe["gpu_steps"])
+    assert len(steps) == gpu.report.full_solves + gpu.baseline.full_solves
+    assert gpu.max_refinement_steps == max(steps)
+    factors = cast(list[dict[str, object]], probe["gpu_factors"])
+    assert len(factors) == 2  # 終點和原牆兩個擁有資源的區段都要走 GPU。
+    assert all(factor["freed"] is True for factor in factors)
+    assert [factor["factorizations"] for factor in factors] == [gpu.report.full_solves, gpu.baseline.full_solves]
+    assert all(cast(int, factor["calls"]) > cast(int, factor["factorizations"]) for factor in factors)

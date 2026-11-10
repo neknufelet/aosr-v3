@@ -417,6 +417,7 @@ outputs = ["endpoint_report", "baseline", "max_refinement_steps"]
 status = "experimental"
 evidence = [
   "tests/engine/test_fem_full_gpu.py::test_refinement_reaches_double_residual_and_direct_solution",
-  "tests/engine/test_material_gradient_endpoint_cli.py::test_endpoint_cpu_bytes_unchanged_and_gpu_metadata",
+  "tests/engine/test_material_gradient_endpoint.py::test_gpu_endpoint_and_baseline_each_own_a_single_precision_factor",
+  "tests/engine/test_material_gradient_endpoint_cli.py::test_endpoint_record_omits_cpu_defaults_and_keeps_gpu_metadata",
 ]
-note = "雲端以可注入的 scipy complex64 稀疏分解器真算、驗雙精度殘差與終點接線；本票考卷不宣稱 cuDSS 顯卡實跑或正式房間精度已驗證。完整解殘差上限沿用既有建模設定。"
+note = "雲端以可注入的 scipy complex64 稀疏分解器在小房間真算，驗雙精度殘差、終點與原牆兩段各自分解與修正次數，另驗紀錄 CPU 預設不增位元組（#1069）；正式入口整條（真搜尋後的 endpoint、六類評分次數對齊）在 slow_material_gradient_endpoint_cli，合併前本機跑。本票考卷不宣稱 cuDSS 顯卡實跑或正式房間精度已驗證。完整解殘差上限沿用既有建模設定。"
