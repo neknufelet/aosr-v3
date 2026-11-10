@@ -14,7 +14,7 @@ from tempfile import TemporaryDirectory
 from typing import cast
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
-from governance.shard_timing import resolve_snapshot, select_run
+from governance.shard_timing import first_parent_chain, history_sha, nearest_success, resolve_snapshot, select_run
 from governance.status.shard_balance import read_timing_junits
 
 
@@ -27,6 +27,22 @@ def command(argv: list[str]) -> str:
     if result.returncode:
         raise ToolBroken(f'歷史收據平台讀取回 {result.returncode}：{result.stderr[:300]}')
     return result.stdout
+
+
+# 起點那顆主線驗證沒成功時，連起點看幾顆（#1059）：11-10 主線往回第二十顆是 11-06 合的，約四天；再往前的秒數多半已經過時。
+ANCESTOR_LIMIT = 20
+
+
+def locate(sha: str, repository: str, branch: str, *, call: Callable[[list[str]], str] = command) -> str:
+    """起點沒有成功主線驗證時，沿第一父鏈找最近一顆有的祖先；找不到交給整跑退回。"""
+    commits = json.loads(call(['gh', 'api', f'repos/{repository}/commits?sha={sha}&per_page={ANCESTOR_LIMIT}']))
+    rows = json.loads(call(['gh', 'run', 'list', '--repo', repository, '--workflow', 'verify.yml', '--branch', branch,
+                            '--event', 'push', '--status', 'success', '--limit', '100',
+                            '--json', 'databaseId,headSha,headBranch,event,status,conclusion']))
+    if (not isinstance(commits, list) or any(not isinstance(row, dict) for row in commits)
+            or not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)):
+        raise ToolBroken('祖先提交或主線跑清單格式錯')
+    return nearest_success(first_parent_chain(commits, sha, ANCESTOR_LIMIT), rows, branch)
 
 
 def read_cloud(sha: str, repository: str, branch: str, files: tuple[str, ...], *,
@@ -98,11 +114,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         files = tuple(sorted(path.as_posix() for path in Path('tests').rglob('test_*.py')))
         def reader(sha: str) -> tuple[str, dict[str, float]]:
             return read_cloud(sha, repository, branch, files, call=command)
-        snapshot = resolve_snapshot(cast(dict[str, object], event), reader)
+        def ancestor(sha: str) -> str:
+            return locate(sha, repository, branch, call=command)
+        snapshot = resolve_snapshot(cast(dict[str, object], event), reader, ancestor)
         encoded = json.dumps(snapshot, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
         with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as stream:
             stream.write(f'snapshot={encoded}\n')
         note(f"耗時來源 {snapshot['timing_source']}（全片共用）：{snapshot['reason'] or snapshot['run_id']}")
+        base = history_sha(cast(dict[str, object], event))
+        if snapshot['timing_source'] == 'history' and snapshot['sha'] != base:
+            note(f"起點 {base} 沒有已完成而且成功的主線驗證，秒數改用最近一顆有的祖先 {snapshot['sha']}")
     except (KeyError, OSError, ValueError, ToolBroken) as exc:
         note(f'共同耗時快照回 2（工具自壞）：{exc}')
         return TOOL_BROKEN

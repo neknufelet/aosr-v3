@@ -89,3 +89,48 @@ def test_valid_xml_with_changed_seconds_is_corrupt_history() -> None:
         return result
     with pytest.raises(ToolBroken, match='綁定'):
         subject.read_cloud(SHA, 'owner/repo', 'main', FILES, call=tamper)
+
+
+def test_locate_walks_first_parents_to_nearest_successful_mainline_run() -> None:
+    """#1059：起點那顆沒有成功主線驗證時，用一次提交清單、一次跑清單找最近的祖先；上限外的不算。"""
+    base, parent = 'b' * 40, SHA
+    calls: list[list[str]] = []
+    def call(argv: list[str]) -> str:
+        calls.append(argv)
+        if argv[:2] == ['gh', 'api']:
+            assert argv[2] == f'repos/owner/repo/commits?sha={base}&per_page={subject.ANCESTOR_LIMIT}'
+            return json.dumps([{'sha': base, 'parents': [{'sha': parent}]}, {'sha': parent, 'parents': []}])
+        return transport(argv)
+    assert subject.locate(base, 'owner/repo', 'main', call=call) == parent
+    assert [argv[:3] for argv in calls] == [['gh', 'api', calls[0][2]], ['gh', 'run', 'list']]
+    assert '--commit' not in calls[1]
+    with pytest.raises(ToolBroken, match='共 1 顆'):
+        subject.locate(SHA, 'owner/repo', 'main', call=lambda argv: json.dumps(
+            [{'sha': SHA, 'parents': []}] if argv[:2] == ['gh', 'api'] else []))
+    with pytest.raises(ToolBroken, match='格式錯'):
+        subject.locate(SHA, 'owner/repo', 'main', call=lambda argv: json.dumps({'message': 'Not Found'}))
+
+
+def test_cli_names_the_ancestor_whose_seconds_it_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    base = 'b' * 40
+    event = tmp_path / 'event.json'
+    event.write_text(json.dumps({'before': base}))
+    output = tmp_path / 'output'
+    output.write_text('')
+    for key, value in {'GITHUB_EVENT_PATH': str(event), 'GITHUB_OUTPUT': str(output),
+                       'GITHUB_REPOSITORY': 'owner/repo', 'AOSR_DEFAULT_BRANCH': 'main'}.items():
+        monkeypatch.setenv(key, value)
+    def call(argv: list[str]) -> str:
+        if argv[:2] == ['gh', 'api'] and '/commits?' in argv[2]:
+            return json.dumps([{'sha': base, 'parents': [{'sha': SHA}]}, {'sha': SHA, 'parents': []}])
+        return transport(argv)
+    monkeypatch.setattr(subject, 'command', call)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'tests').mkdir()
+    for file in FILES:
+        (tmp_path / file).write_text('')
+    assert subject.main([]) == 0
+    snapshot = json.loads(output.read_text().removeprefix('snapshot='))
+    assert (snapshot['timing_source'], snapshot['sha'], snapshot['run_id']) == ('history', SHA, '42')
+    assert f'起點 {base}' in capsys.readouterr().err
