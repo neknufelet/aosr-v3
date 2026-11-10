@@ -53,6 +53,7 @@ from aosr.physics.fem_reduced_store import load_reduced, save_reduced
 from aosr.reporting.scheme import load_scheme
 from tests.engine._precision_contracts import contract_value
 from tests.engine._scheme_cache import shared_json
+from tests.engine._endpoint_v4_snapshot import SNAPSHOT_JSON
 from tests.engine._legacy_gradient_search_probe import legacy_endpoint_copy
 from tests.engine._six_search_cli_case import ENDPOINT_ROOM, model as model, operators as operators
 from tests.engine.test_material_gradient import _chain_model, _presets
@@ -449,55 +450,21 @@ def _batch_probe(folder: Path, mode: str, directory: Path) -> Record:
 
 
 
-def test_endpoint_cpu_bytes_unchanged_and_gpu_metadata(runs: tuple[Path, Record], tmp_path: Path) -> None:
-    """v4 加不計分低頻註記；CPU 裝置預設不增 JSON 位元組，GPU 兩段真用單精度分解並記修正次數。"""
-    record = _record(_folder(runs))
-    assert record.format_version == endpoint_run.ENDPOINT_VERSION
+def test_endpoint_record_omits_cpu_defaults_and_keeps_gpu_metadata(tmp_path: Path) -> None:
+    """抓 CPU 預設多寫 JSON 位元組或 GPU 兩欄漏寫：device 是 cpu（預設或明給）、修正次數是 None 時兩欄都不寫，
+    位元組等於扣掉兩欄的傾印；GPU 那份兩欄照寫、讀回相同。紀錄用 v4 快照（快照本身是 GPU 那份，扣掉兩欄就是 CPU
+    預設；兩欄各版都有）；v5 真終點同一題在 slow_ 檔。"""
+    document = cast(Record, json.loads(SNAPSHOT_JSON)["record"])
+    gpu = EndpointRecord.model_validate(document)
+    assert gpu.device == "gpu" and gpu.max_refinement_steps is not None
+    record = EndpointRecord.model_validate(
+        {key: value for key, value in document.items() if key not in ("device", "max_refinement_steps")})
     original = record.model_dump(mode="json", exclude={"device", "max_refinement_steps"})
     expected = (json.dumps(original, ensure_ascii=False, allow_nan=False) + "\n").encode()
     for candidate in (record, record.model_copy(update={"device": "cpu"})):
         run.write_json_atomic(tmp_path / "endpoint.json", candidate)
         assert (tmp_path / "endpoint.json").read_bytes() == expected
-    probe = _section(runs, "legacy_probe")
-    gpu = EndpointRecord.model_validate(probe["gpu"])
-    assert probe['gpu_numpy_calls'] == probe['cpu_numpy_calls'] and cast(int, probe['cpu_numpy_calls']) > 0
-    assert gpu.device == "gpu" and gpu.max_refinement_steps is not None and gpu.max_refinement_steps > 0
-    steps = cast(list[int], probe["gpu_steps"])
-    assert len(steps) == gpu.report.full_solves + gpu.baseline.full_solves
-    assert gpu.max_refinement_steps == max(steps)
-    factors = cast(list[dict[str, object]], probe["gpu_factors"])
-    assert len(factors) == 2  # 終點和原牆兩個擁有資源的區段都要走 GPU。
-    assert all(factor["freed"] is True for factor in factors)
-    assert [factor["factorizations"] for factor in factors] == [gpu.report.full_solves, gpu.baseline.full_solves]
-    assert all(cast(int, factor["calls"]) > cast(int, factor["factorizations"]) for factor in factors)
-
-
-
-
-
-
-def _cloud_compute(directory: Path, request: pytest.FixtureRequest) -> str:
-    """能力證據只讀一份 CPU 終點與舊目標探針，不建其他終點和改檔情境。"""
-    output = _search_runs(directory, request)
-    folder = Path(str(output["folder"]))
-    work = _probe_work(directory / "legacy-probe", folder)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        cpu = pool.submit(_run, directory, _command("endpoint", str(folder)))
-        probe = pool.submit(_probe, work, folder.name)
-        output["endpoint"] = cpu.result()
-        output["legacy_probe"] = probe.result()
-    assert cast(Record, output["endpoint"])["code"] == 0, output["endpoint"]
-    text = json.dumps(output, ensure_ascii=False)
-    (directory / "fixture.json").write_text(text, encoding="utf-8")
-    return text
-
-
-@pytest.fixture(scope="module")
-def runs(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
-         ) -> tuple[Path, Record]:
-    """雲端能力證據專用；與本機完整情境使用不同目錄和快取鍵。"""
-    directory = (tmp_path_factory.mktemp("endpoint-cpu-gpu-evidence") if worker_id == "master"
-                 else tmp_path_factory.getbasetemp().parent / "endpoint-cpu-gpu-evidence-shared")
-    text = shared_json(tmp_path_factory, worker_id, "endpoint-cpu-gpu-evidence",
-                       lambda: _cloud_compute(directory, request))
-    return directory, cast(Record, json.loads(text))
+    run.write_json_atomic(tmp_path / "endpoint.json", gpu)
+    written = json.loads((tmp_path / "endpoint.json").read_bytes())
+    assert (written["device"], written["max_refinement_steps"]) == (gpu.device, gpu.max_refinement_steps)
+    assert written == document and EndpointRecord.model_validate(written) == gpu

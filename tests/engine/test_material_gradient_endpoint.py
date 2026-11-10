@@ -376,6 +376,20 @@ def test_full_model_pressures_bitwise_match_validate_reduced(probe: Record) -> N
     assert not np.array_equal(_decode_complex(probe["reduced"]), reference)
 
 
+def test_gpu_endpoint_and_baseline_each_own_a_single_precision_factor(probe: Record) -> None:
+    """抓 GPU 終點漏走顯卡、兩段共用分解器或沒釋放：終點與原牆兩段各一個單精度分解器（注入的 scipy complex64 真算），
+    每頻分解一次、解的次數比分解多（有雙精度殘差修正）、用完都釋放；每一解的修正次數都交回同一份紀錄。"""
+    gpu = cast(Record, probe["gpu"])
+    full_solves, baseline_solves = cast(int, gpu["full_solves"]), cast(int, gpu["baseline_solves"])
+    steps = cast(list[int], gpu["steps"])
+    assert len(steps) == full_solves + baseline_solves and max(steps) > 0
+    factors = cast(list[Record], gpu["factors"])
+    assert len(factors) == 2  # 終點和原牆兩個擁有資源的區段都要走 GPU。
+    assert all(factor["freed"] is True for factor in factors)
+    assert [factor["factorizations"] for factor in factors] == [full_solves, baseline_solves]
+    assert all(cast(int, factor["calls"]) > cast(int, factor["factorizations"]) for factor in factors)
+
+
 def test_endpoint_full_value_within_holdout_ruler(probe: Record, chain_model: ReducedModel) -> None:
     """抓終點把替身值當完整模型值、或差與上界接錯：完整模型合分等於獨立完整解交同一把尺的值（逐位）；
     每座位逐頻最大 dB 差在留出尺內、等於考卷從兩邊聲壓重算的；合分之差不超過由逐頻差推得的上界。
