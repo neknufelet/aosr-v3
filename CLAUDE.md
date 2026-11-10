@@ -9,7 +9,7 @@
 - 一張票一個資料夾 `~/aosr-v3-work/<票號>-<短名>/`，worktree（第二個工作目錄）住它底下的 `tree/`、分支同名；開樹、列樹、拆樹只走 `uv run python -m governance.worktrees`（`new`／`list`／`remove`），不手打 `git worktree add`；決定見 `docs/decisions/worktrees-live-with-the-work-folder.md`。
 - 來源資料：v2 的事故在 `v2-audit/lessons.json`，候選規則與每張卡的規格在 `blueprint/cards-38.json`。
 ## 驗證
-本機一行跑完 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml && uv run python -m governance.checks.green_must_be_real_green --scan-root . && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（程式與完整測試）與 `acceptance`（核合併請求驗收行）兩個必要檢查都綠才算數。
+推之前一行跑完全部規矩檢查（每張卡一支，加 ruff 寫法檢查器；約一分鐘）：`uv run python -m governance.run_checks`；測試綠燈那一支要先 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml` 產收據，沒有收據時標「本機不算」。本機跑出來的只是宣稱，雲端 `verify`（程式與完整測試）與 `acceptance`（核合併請求驗收行）兩個必要檢查都綠才算數。
 跑真搜尋、真終點的重考卷住 `tests/engine/slow_*.py`，雲端不收，合併前由驗收者在本機跑。
 ## 去哪裡看
 - 機器算出來的那一頁（開著的票、每支檢查最近的結果）：https://neknufelet.github.io/aosr-v3/
