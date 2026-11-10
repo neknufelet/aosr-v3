@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -67,43 +66,44 @@ def test_report_shows_whole_output_only_for_nonzero(tmp_path: Path) -> None:
 
 
 def test_run_keeps_step_order_while_running_in_parallel(tmp_path: Path) -> None:
-    """先完成的不准排前面：結果照清單順序回，同時跑的確實重疊。"""
+    """先完成的不准排前面、而且真的同時跑：兩支都要在柵欄會合才放行（一支一支跑就會合不了、柵欄壞掉而紅），
+    會合後 fast 先做完、slow 等它做完才收，結果仍照清單順序回。"""
     steps = [subject.Step(name, ()) for name in ("slow", "fast")]
-    running: list[int] = []
-    peak = 0
-    lock = threading.Lock()
+    meet = threading.Barrier(2, timeout=5)
+    fast_done = threading.Event()
 
     def call(step: subject.Step, root: Path) -> tuple[int, str]:
-        nonlocal peak
-        with lock:
-            running.append(1)
-            peak = max(peak, len(running))
-        time.sleep(0.3 if step.name == "slow" else 0.0)
-        time.sleep(0.05)
-        with lock:
-            running.pop()
+        meet.wait()
+        if step.name == "fast":
+            fast_done.set()
+        else:
+            assert fast_done.wait(timeout=5)
         return CLEAN, step.name
 
     outcomes = subject.run(steps, tmp_path, jobs=2, call=call)
     assert [item.output for item in outcomes] == ["slow", "fast"]
-    assert peak == 2
 
 
 def test_main_mirrors_first_then_runs_every_card(capsys: pytest.CaptureFixture[str]) -> None:
-    """抓讀收據的檢查比鏡像先跑：鏡像跑完，其他每一支才開始；任何一支回 1，整支回 1。"""
+    """抓讀收據的檢查比鏡像先跑：鏡像跑的時候別支一支都還沒開始（鏡像等一下看有沒有人插隊），鏡像做完別支才開始；
+    任何一支回 1，整支回 1。正確的程式不靠時間：別支只在鏡像做完後才會被叫到。"""
     order: list[str] = []
     early: list[str] = []
     mirrored = threading.Event()
+    others_started = threading.Event()
     lock = threading.Lock()
 
     def call(step: subject.Step, root: Path) -> tuple[int, str]:
         with lock:
             order.append(step.name)
         if step.name == "mirror_receipts":
-            time.sleep(0.2)
+            if others_started.wait(timeout=0.5):
+                early.append("鏡像還沒做完別支就開始了")
             mirrored.set()
-        elif not mirrored.is_set():
-            early.append(step.name)
+        else:
+            others_started.set()
+            if not mirrored.is_set():
+                early.append(step.name)
         return (VIOLATION, "HIT: 植的錯") if step.name == "ruff" else (CLEAN, "")
 
     assert subject.main(["--jobs", "4"], call=call) == VIOLATION
