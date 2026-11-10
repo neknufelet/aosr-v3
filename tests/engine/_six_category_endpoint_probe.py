@@ -263,19 +263,32 @@ def _start(directory: Path, *, measured: bool = False) -> Path:
     _build(directory, measured)
     presets = ('glass_wool_48k_50mm_gap50,none,glass_wool_48k_50mm_gap50,none,none,none' if measured else
                'none,none,glass_wool_48k_50mm_gap50,none,none,none,none')
-    start = _run(directory, _start_args(directory, directory / 'root', presets=presets))
+    start: dict[str, object]
+    if measured:
+        from aosr.gradient import cli, worker
+        def search(folder: Path, mode: str, lock_fd: int, *, device: str = 'cpu') -> int:
+            # 同程序跑真 worker（搜尋工人），讓新檢查的暫時替換涵蓋 start 的父子入口。
+            return worker.run_worker(folder, 'start', should_stop=run.stop_requested(folder))
+        with (patch.object(run, 'require_supported_original_walls', return_value=None),
+              patch.object(cli, '_spawn_and_wait', side_effect=search)):
+            start = {'code': cli.main(_start_args(directory, directory / 'root', presets=presets)[3:])}
+    else:
+        start = _run(directory, _start_args(directory, directory / 'root', presets=presets))
     assert start['code'] == 0, start
     (folder,) = (directory / 'root').iterdir()
     return folder
 
 
 def measured_rejection(directory: Path) -> None:
-    """真搜尋產生合法結果，再以正式入口確認裸實測基準的拒收與無殘檔。"""
+    """模擬新檢查之前的真搜尋結果；恢復檢查後，在完整求解之前拒收且無殘檔。"""
     folder = _start(directory, measured=True)
     before = {path.name for path in folder.iterdir()}
     error_type = error_message = error_origin = None
     try:
-        endpoint_run.run_endpoint(folder)
+        with (patch.object(endpoint_run, 'endpoint_check', side_effect=AssertionError('不准求解終點')),
+              patch.object(endpoint_run, 'full_model_pressures', side_effect=AssertionError('不准求解原牆')),
+              patch.object(FullSolver, 'solve', side_effect=AssertionError('不准完整求解'))):
+            endpoint_run.run_endpoint(folder)
     except ValueError as error:
         error_type, error_message = type(error).__name__, str(error)
         error_origin = traceback.extract_tb(error.__traceback__)[-1].name

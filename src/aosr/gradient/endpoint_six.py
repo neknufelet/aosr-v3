@@ -18,7 +18,7 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gradient.material_gradient import SurfaceDesign
 from aosr.gradient.impedance_angles import impedance_at_angles_or_empty
-from aosr.gradient.surrogate_guard import require_matching_sources
+from aosr.gradient.surrogate_guard import require_matching_frequencies, require_matching_sources
 from aosr.gradient.six_category_chain import impedance_function, design_materials
 from aosr.gradient.material_gradient import design_template_material
 from aosr.materials.construction import surface_impedance, surface_impedance_at_angles
@@ -114,6 +114,7 @@ def scoring_context(scheme: Scheme, model: ReducedModel, purpose: str, *, capabi
     constants = build_constants(scored, pair_inputs={key: value[1] for key, value in pairs.items()},
                                 quality_targets_path=config_path('quality_targets.toml'))
     require_matching_sources(model, constants.source_ids)
+    require_matching_frequencies(model, model.frequencies_hz, constants.fem_frequencies_hz)
     return ScoringContext(scored, constants, capabilities, directivity,
         calculation_fingerprint(capabilities_path=capabilities_path),
         physics_identity(capabilities=capabilities, directivity=directivity), engine_commit or '未記錄')

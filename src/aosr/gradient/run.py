@@ -65,7 +65,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.gpu import Device, LegacyPrecisionComparison, PrecisionComparison, single_precision_constants
 from aosr.gradient.gpu_preflight import ensure_start_precision
-from aosr.gradient.surrogate_guard import require_matching_patches
+from aosr.gradient.surrogate_guard import require_matching_patches, require_supported_original_walls as require_supported_original_walls
 from aosr.gradient.fixed_surfaces import (
     FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_fixed, designs_with_max_depths,
 )
@@ -610,6 +610,7 @@ def load_problem(project: GradientProject) -> GradientProblem:
     _, pairs = checked_inputs(score_scheme, capabilities=load_capabilities(project.capabilities_path),
                               directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
     kept = _wall_materials_from_inputs(score_scheme, next(iter(pairs.values()))[1])
+    require_supported_original_walls(kept.values())
     designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
                           fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,

@@ -252,9 +252,9 @@ def _start(args: argparse.Namespace) -> int:
     settings = load_material_gradient_settings(settings_path)
     capabilities = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
-    designs = run.designs_for(args.presets, settings,
-                    kept=run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity),
-                    mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
+    kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
+    run.require_supported_original_walls(kept.values())
+    designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
     from aosr.gradient.boundary import scheme_patch_keys
     patch_keys = scheme_patch_keys(scheme)
     objective = run.search_objective_settings(args.purpose)
