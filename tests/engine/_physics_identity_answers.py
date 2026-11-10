@@ -114,4 +114,5 @@ PYTHON_MINOR = (3, 12)
 # 由正式 physics_identity_parts 重錄；閉包新增 three_lane_report_zones，資料清單不變。
 # #562 第1段修補一物理變更：分區實測接縫拒收、第二區構造註記與公開分界入口；正式入口重錄，閉包與資料清單不變。
 # #1057 物理變更：晚期一族在家具後加 ISO 9613-1 空氣吸收；正式 physics_identity_parts 重算，閉包加入空氣條件與係數模組。
-CODE_DIGEST = "46977a9b99696160c364b63d78cb860aef6eb66e200f806997ed615f6c544fb6"
+# #1062 物理變更：晚期衰減曲線 T20／T30 從 256 階改成 512 階；正式 physics_identity_parts 重算，閉包與資料清單不變。
+CODE_DIGEST = "53ba7bdfdc4a690915b1ea34365218704409a765bb874517664c727eb58df4d7"

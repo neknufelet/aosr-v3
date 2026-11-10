@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from jax.extend import core as jax_core
 
-from aosr.config.art_lane import ART_NEUMANN_K_MAX
+from aosr.config.art_lane import LATE_DECAY_ORDERS
 from aosr.physics import late_decay, late_decay_jax, late_energy
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 from tests.engine._t20_jax_cases import ALPHA_FAILURES, CASES, FLAGS, decode, inputs, mutant, numpy_t20, section, t20_runs
@@ -106,7 +106,7 @@ def test_one_rigid_wall_is_valid(t20_runs: dict[str, object]) -> None:
 
 
 def test_scan_really_uses_registered_order_count(t20_runs: dict[str, object]) -> None:
-    assert t20_runs["scan_length"] == ART_NEUMANN_K_MAX
+    assert t20_runs["scan_length"] == LATE_DECAY_ORDERS
 
 
 def test_nonuniform_fit_is_not_perron_shortcut(t20_runs: dict[str, object]) -> None:
@@ -136,7 +136,7 @@ def test_removing_exact_tail_mutant_is_red(t20_runs: dict[str, object]) -> None:
 
 
 def test_short_scan_mutant_is_red(t20_runs: dict[str, object]) -> None:
-    assert mutant(t20_runs, "short_scan_length") != ART_NEUMANN_K_MAX
+    assert mutant(t20_runs, "short_scan_length") != LATE_DECAY_ORDERS
 
 
 def test_perron_fallback_mutant_is_red(t20_runs: dict[str, object]) -> None:

@@ -35,7 +35,7 @@ CONTROL: dict[str, str | int | bool] = {
     'decay.bands.2.t30_s': '0x1.0f4394fce9f6ap-3',
     'decay.bands.2.t30_slope_db_per_s': '-0x1.c4fd8ea5d50e0p+8',
     'decay.bands.2.t30_soft_weight_sum': '0x1.0b25318181001p+3',
-    'decay.orders_used': 256,
+    'decay.orders_used': 512,
     'fs': '0x1.4959672343876p+6',
     'furniture.ceiling.0': '0x1.96d0463a550b7p-1',
     'furniture.ceiling.1': '0x1.98dbfea58ef09p-1',

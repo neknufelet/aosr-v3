@@ -153,9 +153,9 @@ def test_empty_value_with_a_reason_is_accepted() -> None:
         bands=(
             _band(
                 t20_s=None,
-                t20_unavailable_reason="T20 擬合無效：第 256 階最低 -20 dB",
+                t20_unavailable_reason="T20 擬合無效：第 512 階最低 -20 dB",
                 t30_s=None,
-                t30_unavailable_reason="T30 擬合無效：第 256 階最低 -20 dB",
+                t30_unavailable_reason="T30 擬合無效：第 512 階最低 -20 dB",
             ),
         )
     )

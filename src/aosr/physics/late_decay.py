@@ -1,7 +1,7 @@
 """鞋盒房間晚期衰減 T20、T30 的雙精度計算。
 
 反射算子由 :mod:`aosr.physics.late_energy` 的共用建構器取得；本模組只負責
-256 階衰減、精確特徵值尾巴、共用軟視窗擬合與上一代 T20 差距量測。
+512 階衰減（``LATE_DECAY_ORDERS``）、精確特徵值尾巴、共用軟視窗擬合與上一代 T20 差距量測。
 擬合無效直接報錯，不回傳 Perron 備援值；舊界線分類只作第二類相容紀錄，
 容差由呼叫端給。
 """
@@ -16,11 +16,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.art_lane import (
-    ART_NEUMANN_K_MAX,
     ART_WLS_T20_HI_DB,
     ART_WLS_T20_LO_DB,
     ART_WLS_T30_LO_DB,
     ART_WLS_WINDOW_SOFTNESS_DB,
+    LATE_DECAY_ORDERS,
 )
 from aosr.physics.late_energy import LateEnergyInputs, _reflection_problem
 
@@ -96,10 +96,10 @@ class _FitArrays:
 
 
 class DecayRangeError(ValueError):
-    """第 256 階衰減仍未到指定擬合下緣。
+    """最後一階（第 ``LATE_DECAY_ORDERS`` 階）衰減仍未到指定擬合下緣。
 
     報表只捕捉這個型別；其他輸入、矩陣或擬合錯誤仍照常往外丟。
-    ``minimums_by_frequency`` 保留每個細軸點的第 256 階最低 dB，讓報表能為
+    ``minimums_by_frequency`` 保留每個細軸點到最後一階的最低 dB，讓報表能為
     T20 與 T30 各自產生可追查原因。
     """
 
@@ -114,19 +114,19 @@ class DecayRangeError(ValueError):
         super().__init__(self.reason_for(lower_db))
 
     def reason_for(self, lower_db: float) -> str:
-        """用同一份第 256 階量測說明指定視窗為何不可算。"""
+        """用同一份最後一階量測說明指定視窗為何不可算。"""
         missing = tuple(
             (frequency, minimum)
             for frequency, minimum in self.minimums_by_frequency
             if minimum > lower_db
         )
         if not missing:
-            raise ValueError("這份第 256 階量測已到指定擬合下緣")
+            raise ValueError(f"這份第 {LATE_DECAY_ORDERS} 階量測已到指定擬合下緣")
         fit_name = "T30" if lower_db == ART_WLS_T30_LO_DB else "T20"
         minimum = min(value for _frequency, value in missing)
         frequencies = ", ".join(f"{frequency:g} Hz" for frequency, _value in missing)
         return (
-            f"{fit_name} 擬合無效：第 256 階最低 {minimum:.17g} dB，"
+            f"{fit_name} 擬合無效：第 {LATE_DECAY_ORDERS} 階最低 {minimum:.17g} dB，"
             f"未達下緣 {lower_db:g} dB；未達頻點 {frequencies}"
         )
 
@@ -171,8 +171,8 @@ def _order_decay(
     patch_count, _other_patch_count, frequency_count = transfer.shape
     area_weight = areas / np.sum(areas)
     energy = np.ones((patch_count, frequency_count), dtype=np.float64)
-    orders = np.empty((ART_NEUMANN_K_MAX, frequency_count), dtype=np.float64)
-    for index in range(ART_NEUMANN_K_MAX):
+    orders = np.empty((LATE_DECAY_ORDERS, frequency_count), dtype=np.float64)
+    for index in range(LATE_DECAY_ORDERS):
         energy = np.einsum("ijf,jf->if", transfer, energy)
         orders[index] = np.einsum("p,pf->f", area_weight, energy)
     return orders
@@ -204,7 +204,7 @@ def _fit_decay(
     lower_db: float,
 ) -> _FitArrays:
     """以共用的 −5 dB 上緣和指定下緣作軟視窗加權直線擬合。"""
-    order = np.arange(1, ART_NEUMANN_K_MAX + 1, dtype=np.float64)
+    order = np.arange(1, LATE_DECAY_ORDERS + 1, dtype=np.float64)
     time = (order / collision_frequency_hz)[:, None]
     upper = (ART_WLS_T20_HI_DB - level_db) / ART_WLS_WINDOW_SOFTNESS_DB
     lower = (level_db - lower_db) / ART_WLS_WINDOW_SOFTNESS_DB
@@ -309,7 +309,7 @@ def _solve_late_decay(
         )
         for index, frequency in enumerate(inputs.frequencies_hz)
     )
-    return LateDecayResult(orders_used=ART_NEUMANN_K_MAX, bands=bands)
+    return LateDecayResult(orders_used=LATE_DECAY_ORDERS, bands=bands)
 
 
 def solve_late_decay(
@@ -317,7 +317,7 @@ def solve_late_decay(
     *,
     sound_speed_m_s: float,
 ) -> LateDecayResult:
-    """由同一條 256 階衰減曲線回傳 T20 與 T30。"""
+    """由同一條 512 階衰減曲線回傳 T20 與 T30。"""
     return _solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s, include_t30=True)
 
 

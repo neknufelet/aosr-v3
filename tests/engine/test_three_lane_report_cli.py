@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.art_lane import LATE_DECAY_ORDERS
 from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
@@ -116,7 +117,7 @@ def test_cli_names_unavailable_decay_and_hard_cut_in_chinese(
         json.dumps(
             _input_document(
                 impedance_multiple=(
-                    normalized_impedance_from_random_incidence_absorption(0.026)
+                    normalized_impedance_from_random_incidence_absorption(0.013)
                 )
             )
         ),
@@ -132,7 +133,7 @@ def test_cli_names_unavailable_decay_and_hard_cut_in_chinese(
     assert exit_code == 0
     assert "被上限硬切（f_s ≥ 300 Hz，在 300 Hz 硬切換）" in output
     assert "算不出：T30 擬合無效" in output
-    assert "第 256 階最低" in output
+    assert f"第 {LATE_DECAY_ORDERS} 階最低" in output
 
 
 def test_cli_read_failure_returns_two_and_prints_reason(

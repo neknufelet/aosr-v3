@@ -22,6 +22,10 @@ ART_P_CAP: int = 8192
 # full production absorption sweep (down to alpha=0.05) at EPS_TAIL=1e-4 with margin.
 # A per-frequency dynamic-length scan (cut compute to max(tail_steps)) is a P4.3 item.
 ART_NEUMANN_K_MAX: int = 256
+# v3 新增（#1062）：晚期衰減曲線 T20／T30 取樣的階數，上一代沿用上面那個 256。
+# 256 階在 109 號房裸混凝土原牆只到 2.18 秒，三帶停在 −24.75～−24.96 dB、差一點到 −25 dB；
+# 512 階七帶都過，處理過的房間 T20／T30 逐位不變。
+LATE_DECAY_ORDERS: int = 512
 
 # ENGINE-4.4 (VAL-F6): T20 fit range and smooth-window softness for the WLS
 # slope T60. The measured T20 samples the -5 -> -25 dB early decay; the
