@@ -208,3 +208,9 @@ def load_material_gradient_settings(path: str | Path) -> MaterialGradientSetting
     with Path(path).open("rb") as config_file:
         data = tomllib.load(config_file)
     return MaterialGradientSettings.model_validate(data)
+
+
+def with_max_steps(settings: MaterialGradientSettings, max_steps: int) -> MaterialGradientSettings:
+    """開跑時另外指定的往下走步數上限（#1073）：其餘照原設定；步數照 :class:`DescentSettings` 的檢查（整數、至少 1）。"""
+    descent = DescentSettings.model_validate({**settings.descent.model_dump(), "max_steps": max_steps})
+    return settings.model_copy(update={"descent": descent})

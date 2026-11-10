@@ -5,8 +5,12 @@
 # 總價、重量這類跨牆限制沒有資料，第一版不做；每面只守「棉板＋空腔」的總深度上限。
 
 [descent]
-# 投影梯度下降最多走幾步；到了停、停止原因記「步數到上限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
-max_steps = 30
+# 投影梯度下降最多走幾步；到了停、停止原因記「步數到上限」。開跑時可用 `start --max-steps N` 另外指定（存進搜尋資料夾，接著跑照用）。
+# 2026-11-11（#1073）30 改 60：現行評分 109 分區兩場到第 30 步坡度仍 2.03、2.73（停止值 0.17），跑完那場第 20～30 步還改善 0.28（下降段的 24%）。
+# 改後用 11-11 主線重跑 109 分區（工作區 1073-steps60-rerun/）：前 13 步跟那場幾乎同路、之後分開，第 30→60 步只再改善 0.032（下降段的 3.4%），
+# 坡度最低 0.59、仍是步數先到；多走的步數有沒有用看那一場的路線，兩場還下不了定論，照老闆拍的留 60。
+# 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
+max_steps = 60
 # 每一步回溯線搜尋的起始步長（公尺 × 分數⁻¹，乘在梯度上）。
 # 109 號房舊低頻帳本多數步回溯 2～5 次，0.01 對舊目標偏大；六類梯度約剩 1/3、回溯較少，起始步長不放大。
 # 工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
@@ -17,7 +21,7 @@ backtrack_ratio = 0.5
 armijo_constant = 1.0e-4
 # 投影梯度（貼著盒界往外推的分量歸零）的範數小於這個值就停，記「梯度夠小」；單位是合分／公尺，
 # 2026-11-09：109 號房舊低頻下降 30 步，範數最低 0.93，0.5 從未觸發。
-# 六類目標 J 起點範數 17.08、舊目標 51.13，約為 1/3；0.17 保留相同相對位置，避免半路碰巧停，仍靠 max_steps（最多步數）停止。
+# 六類目標 J 起點範數 17.08、舊目標 51.13，約為 1/3；0.17 保留相同相對位置，避免半路碰巧停；到 2026-11-11 為止仍是 max_steps（最多步數）先到（#1073 因此 30 改 60）。
 # 暖啟動另開 #1050。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。
 gradient_norm_stop = 0.17
 # 回溯到步長小於這個值仍沒過就停、這一步不走，記「步長到下限」。工程暫定、調整走 PR、依據紙 stage-three-gradient-search-objective-findings-and-template-rounds.md 代價段。

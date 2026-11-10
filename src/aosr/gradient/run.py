@@ -56,7 +56,7 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings,
+    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings, with_max_steps,
 )
 from aosr.config.paths import config_path
 from aosr.config.construction_environment import construction_environment
@@ -139,6 +139,8 @@ class GradientProject(BaseModel):
 
     ``objective_settings_fingerprint`` 是梯度目標設定的指紋（#561 壬一）；加代理之前開始的資料夾沒有這一格（讀成 None，
     報告照讀），接續時一律拒收。``mount`` 是安裝方式（#990）：剛背不寫（寫出的檔逐位等於加這一格之前）、缺這一格讀成剛背。
+    ``max_steps`` 是開跑時另外指定的往下走步數上限（#1073）：沒指定不寫、照設定檔；指定了，``settings_fingerprint``
+    記的是套上之後的指紋，接續、終點、報告一律經 :func:`project_settings` 套回去再比。
     """
 
     model_config = _FROZEN
@@ -168,6 +170,7 @@ class GradientProject(BaseModel):
     device: Device = Field(default="cpu", exclude_if=lambda value: value == "cpu")
     precision_check: PrecisionComparison | LegacyPrecisionComparison | None = Field(default=None, exclude_if=lambda value: value is None)
     frequency_batch: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
+    max_steps: int | None = Field(default=None, gt=0, strict=True, exclude_if=lambda value: value is None)
     surrogate_physics_identity: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
     operators_digest: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
     surrogate_spot_check: SurrogateSpotCheck | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -491,6 +494,12 @@ def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> 
                 raise ValueError(f"{label} {name} 的座標：{what}是 {recorded.get(name)}，方案是 {wanted.get(name)}，拒收")
 
 
+def project_settings(project: GradientProject) -> MaterialGradientSettings:
+    """這一跑生效的搜尋設定：讀 ``settings_path``，開跑時另外指定了步數上限就套上（#1073）；指紋由呼叫端比。"""
+    settings = load_material_gradient_settings(project.settings_path)
+    return settings if project.max_steps is None else with_max_steps(settings, project.max_steps)
+
+
 def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = False) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
     """接續前逐格核輸入（父行程起子行程前、子行程重建目標前各核一次）：方案檔雜湊、方案座標跟 ``project.json`` 記的、
     替身過閘門（網格雜湊、物理身分、座標）、manifest 與收據摘要、設定指紋、替身對得上方案、替身頻率軸算得了
@@ -511,7 +520,7 @@ def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = Fal
         raise ValueError("替身跟開始時不同（manifest 摘要變了），不接續")
     if file_sha256(receipt_path(surrogate)) != project.receipt_sha256:
         raise ValueError("替身的驗證收據跟開始時不同（SHA-256 變了），不接續")
-    settings = load_material_gradient_settings(project.settings_path)
+    settings = project_settings(project)
     if settings.fingerprint != project.settings_fingerprint:
         raise ValueError("搜尋設定跟開始時不同（設定指紋變了），不接續")
     objective = search_objective_settings(project.purpose)

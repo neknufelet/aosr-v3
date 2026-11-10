@@ -43,7 +43,7 @@ from aosr.gradient.material_gradient_ledger import (
 )
 from aosr.gradient.run import (
     LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, TEMPLATES_FILE, GradientProject, GradientStatus, Layout,
-    file_sha256, ledger_progress, project_wall_materials, read_project, surface_specs,
+    file_sha256, ledger_progress, project_settings, project_wall_materials, read_project, surface_specs,
 )
 from aosr.gradient.template_ledger import TemplateRow, decisions_seconds, read_template_ledger, template_progress
 from aosr.materials.construction_models import Assembly, ConstantImpedance, Layer, MountedOnWall, SurfaceMaterial
@@ -467,10 +467,8 @@ def _endpoint_lines(folder: Path, project: GradientProject) -> list[str]:
 
 def _depth_lines(project: GradientProject, surfaces: Sequence[tuple[str, str | None]]) -> list[str]:
     """目前配置每面生效上限；不貼沒有新增層，但仍顯示保存的上限。"""
-    from aosr.config.material_gradient import load_material_gradient_settings
-
     try:
-        settings = load_material_gradient_settings(project.settings_path)
+        settings = project_settings(project)
     except (OSError, ValueError) as error:
         return [f"每面總深度上限：設定讀不到（{type(error).__name__}）"]
     if settings.fingerprint != project.settings_fingerprint:
