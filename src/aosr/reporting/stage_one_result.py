@@ -174,18 +174,18 @@ def run_stage_one(
     scheme: Scheme, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     registry: QualityTargets, physics_identity: str, program_fingerprint: str,
     engine_commit: str, run_date: date, origin: ResultOrigin | None = None,
-    shards: Sequence[FemShard] | None = None,
+    shards: Sequence[FemShard] | None = None, fem_identity: str | None = None,
 ) -> StageOneResult:
     """無分片時在本行程一段解完整軸；有分片只合併，拒收不退回求解。"""
     check_stage_one_prerequisites(scheme)
     parts = shards if shards is not None else [fem_slices.solve_slice(
         [scheme], capabilities=capabilities, directivity=directivity, slices=1, slice_index=0,
-        physics_identity=physics_identity)]
+        physics_identity=physics_identity, fem_identity=fem_identity)]
     if not parts:
         raise ValueError("分片不能為空")
     # 每一片的頻率由合併逐點對方案的軸核，不同就拒收；組輸入時再對 fem_key 核一次。
     energies = fem_slices.energies_from_shards(parts, scheme=scheme, capabilities=capabilities,
-        directivity=directivity, physics_identity=physics_identity)
+        directivity=directivity, physics_identity=physics_identity, fem_identity=fem_identity)
     data = stage_one_input(scheme, energies, parts[0].fem_key)
     settings = stage_one_score_settings(registry, scheme.purpose)
     evaluation = evaluate_stage_one_low_frequency(data, scoring_range_hz=settings.scored_range_hz)

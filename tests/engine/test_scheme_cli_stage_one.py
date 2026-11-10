@@ -53,6 +53,32 @@ def test_shuffled_parts_equal_regular_and_print_assumptions(
     assert f"第一階段合分 {saved.score.screening_total}" in text
 
 
+def test_parts_from_another_physics_identity_are_reused_when_fem_identity_matches(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """#1066：第一階段也照有限元素身分收分片；物理身分不同照樣不重解，結果記本次物理身分。"""
+    from aosr.reporting.fem_identity import fem_identity
+    item = cases.scheme()
+    older = "phys-v1:" + "4" * 64
+    parts = [part.model_copy(update={"fem_identity": fem_identity(), "physics_identity": older})
+             for part in cases.shards(monkeypatch, item)]
+    monkeypatch.setattr("aosr.reporting.physics_identity.physics_identity", lambda **kwargs: "phys-v1:" + "0" * 64)
+    path = tmp_path / "scheme.json"
+    path.write_text(item.model_dump_json())
+    outputs = []
+    for index, part in enumerate(parts):
+        out = tmp_path / f"part-{index}.json"
+        out.write_text(json.dumps({"shard": part.model_dump(mode="json")}))
+        outputs.append(out)
+    regular, injected = tmp_path / "regular.json", tmp_path / "injected.json"
+    assert scheme_cli.main(cases.cli_args(path, regular)) == 0
+    capsys.readouterr()
+    calls = forbid_fem(monkeypatch)
+    assert scheme_cli.main(cases.cli_args(path, injected, outputs)) == 0
+    assert json.loads(regular.read_text()) == json.loads(injected.read_text())
+    assert calls == []
+    assert f"有限元素沿用分片：分片物理身分 {older}" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("damage", ["missing", "truncated", "identity", "axis", "coordinates", "overlap"])
 def test_bad_parts_refuse_without_solving(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], damage: str) -> None:

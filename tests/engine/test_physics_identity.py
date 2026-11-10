@@ -466,3 +466,46 @@ def test_unmeasurable_data_paths_are_refused(tmp_path: Path, source: str) -> Non
 def test_identity_is_measured_for_real_in_this_module() -> None:
     # 其他引擎考卷的身分有記憶（tests/engine/_identity_memo.py）；考身分的這支要看到真的函式。
     assert Path(identity_module.physics_identity.__code__.co_filename).name == "physics_identity.py"
+
+
+def test_fem_closure_has_no_late_family() -> None:
+    """有限元素身分的閉包不准含晚期一族；含了，只改晚期也會換身分、分片沿用不了（#1066）。"""
+    from aosr.reporting.fem_identity import FEM_ENTRY_MODULE
+    from aosr.reporting.import_closure import scan_import_closure
+    modules = scan_import_closure(_root(), FEM_ENTRY_MODULE)[0].modules
+    assert {"aosr.physics.fem_batch", "aosr.physics.fem_helmholtz", "aosr.config.fem_lane",
+            "aosr.physics.wall_surfaces"} <= set(modules)
+    assert not [name for name in modules if re.search(r"late|air_absorption|art_lane|geometric_lane", name)]
+
+
+@pytest.mark.parametrize("change", ["late_decay_orders", "air_absorption_code"])
+def test_late_family_change_flips_physics_but_not_fem_identity(tmp_path: Path, change: str) -> None:
+    """#1066 必紅樣本：只改晚期一族，物理身分換、有限元素身分不換，存下的分片才沿用得了。"""
+    from aosr.reporting.fem_identity import fem_identity
+    root = _copy(tmp_path)
+    physics, fem = _parts(root).identity, fem_identity(package_root=root)
+    if change == "late_decay_orders":
+        _replace(_module_path(root, "aosr.config.art_lane"), "LATE_DECAY_ORDERS: int = 512", "LATE_DECAY_ORDERS: int = 256")
+    else:
+        path = _module_path(root, "aosr.physics.air_absorption")
+        path.write_text(path.read_text(encoding="utf-8") + "\n_PROBE = 0\n", encoding="utf-8")
+    assert _parts(root).identity != physics
+    assert fem_identity(package_root=root) == fem
+
+
+@pytest.mark.parametrize("change", ["mesh_seed", "fem_lane_data", "helmholtz_code", "impedance_code"])
+def test_fem_side_change_flips_fem_identity(tmp_path: Path, change: str) -> None:
+    """網格常數、有限元素資料檔、求解與阻抗程式任一改了，有限元素身分就換，舊分片拒收。"""
+    from aosr.reporting.fem_identity import fem_identity
+    root = _copy(tmp_path)
+    fem = fem_identity(package_root=root)
+    if change == "mesh_seed":
+        _replace(_module_path(root, "aosr.config.fem_lane"), "FEM_MESH_RANDOM_SEED: int = 1", "FEM_MESH_RANDOM_SEED: int = 2")
+    elif change == "fem_lane_data":
+        path = _data_path(root, "fem_lane.toml")
+        path.write_bytes(path.read_bytes() + b"\n# probe\n")
+    else:
+        module = "aosr.physics.fem_helmholtz" if change == "helmholtz_code" else "aosr.physics.wall_surfaces"
+        path = _module_path(root, module)
+        path.write_text(path.read_text(encoding="utf-8") + "\n_PROBE = 0\n", encoding="utf-8")
+    assert fem_identity(package_root=root) != fem

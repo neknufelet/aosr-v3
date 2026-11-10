@@ -211,6 +211,7 @@ def _run(args: argparse.Namespace) -> int:
     from aosr.config.quality_targets import load_quality_targets
     from aosr.reporting import fem_slices
     from aosr.reporting.compare import compare_results
+    from aosr.reporting.fem_identity import fem_identity
     from aosr.reporting.pipeline import run_scheme
     from aosr.reporting.result import save_result
     from aosr.reporting.scheme import load_scheme
@@ -219,12 +220,14 @@ def _run(args: argparse.Namespace) -> int:
     scheme = load_scheme(args.scheme)
     energies = None
     if args.fem_parts is not None:
+        parts = _read_fem_parts(args.fem_parts)
         try:
             energies = fem_slices.energies_from_shards(
-                _read_fem_parts(args.fem_parts), scheme=scheme, capabilities=table,
-                directivity=directivity, physics_identity=physics_before)
+                parts, scheme=scheme, capabilities=table,
+                directivity=directivity, physics_identity=physics_before, fem_identity=fem_identity())
         except fem_slices.ShardIdentityMismatch as exc:
             return _changed(str(exc))
+        _note_fem_reuse(parts, physics_before)
     result = run_scheme(scheme, capabilities=table,
                         directivity=directivity, quality_targets_path=target_path,
                         engine_commit=args.engine_commit, program_fingerprint=before,
@@ -240,6 +243,13 @@ def _run(args: argparse.Namespace) -> int:
                               run_date=run_date)
     _print_result(result, ranking)
     return 0
+
+
+def _note_fem_reuse(shards: list[FemShard], physics_identity: str) -> None:
+    """分片來自別的物理身分（有限元素身分相同才收得進來）時照實印出；結果仍記本次物理身分。"""
+    older = sorted({shard.physics_identity for shard in shards} - {physics_identity})
+    if older:
+        print(f"有限元素沿用分片：分片物理身分 {'、'.join(older)}，本次 {physics_identity}；有限元素身分相同")
 
 
 def _write_fem_part(shard: FemShard, out: Path, wall_s: float) -> None:
@@ -267,11 +277,12 @@ def _fem_slice(args: argparse.Namespace) -> int:
     start = time.perf_counter()
     before, table, directivity, physics_before = _calculation_start(args.capabilities)
     from aosr.reporting import fem_slices
+    from aosr.reporting.fem_identity import fem_identity
     from aosr.reporting.scheme import load_scheme
     shard = fem_slices.solve_slice(
         [load_scheme(path) for path in args.schemes], capabilities=table,
         directivity=directivity, slices=args.slices, slice_index=args.slice_index,
-        physics_identity=physics_before)
+        physics_identity=physics_before, fem_identity=fem_identity())
     if _identities_changed(args.capabilities, before, physics_before):
         return PROGRAM_CHANGED_EXIT
     _write_fem_part(shard, args.out, time.perf_counter() - start)
@@ -283,19 +294,22 @@ def _stage_one(args: argparse.Namespace) -> int:
     before, table, directivity, physics_before = _calculation_start(args.capabilities)
     from aosr.config.paths import config_path
     from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.fem_identity import fem_identity
     from aosr.reporting.fem_slices import ShardIdentityMismatch
     from aosr.reporting.scheme import load_scheme
     from aosr.reporting.stage_one_result import check_stage_one_prerequisites, run_stage_one, save_stage_one_result
     scheme = load_scheme(args.scheme)
     check_stage_one_prerequisites(scheme)
+    parts = None if args.fem_parts is None else _read_fem_parts(args.fem_parts)
     try:
         result = run_stage_one(scheme, capabilities=table, directivity=directivity,
             registry=load_quality_targets(config_path("quality_targets.toml")),
             physics_identity=physics_before, program_fingerprint=before, engine_commit=args.engine_commit,
-            run_date=args.run_date or date.today(), origin=_origin(args),
-            shards=None if args.fem_parts is None else _read_fem_parts(args.fem_parts))
+            run_date=args.run_date or date.today(), origin=_origin(args), shards=parts, fem_identity=fem_identity())
     except ShardIdentityMismatch as exc:
         return _changed(str(exc))
+    if parts is not None:
+        _note_fem_reuse(parts, physics_before)
     if _identities_changed(args.capabilities, before, physics_before):
         return PROGRAM_CHANGED_EXIT
     save_stage_one_result(result, args.out)
