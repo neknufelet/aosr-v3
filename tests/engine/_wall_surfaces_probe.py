@@ -134,6 +134,8 @@ def _construction() -> dict[str, object]:
     expected_t60 = eyring_t60_by_band(ROOM, {Wall.from_name(w): dict(zip(SCHROEDER_T60_BANDS_HZ, row, strict=True))
                                           for w, row in _with_air(bands, SCHROEDER_T60_BANDS_HZ, epsilon).items()})
     assert t60 == expected_t60
+    # 加空氣後兩帶 T60 本來就不同；「構造兩帶 α 真的不同」另外斷言，抄同一 α 才抓得到。
+    assert bands["floor"][0] != bands["floor"][1]
     assert t60[500.] != t60[1000.]
     expected_late = solve_geometric_late_energy(room=ROOM, rho_c_pa_s_per_m=1.2 * 343.,
         frequencies_hz=fine, absorption_by_wall=_with_air(_direct_rows(materials, fine), fine, epsilon), reflection_order_k=3)
