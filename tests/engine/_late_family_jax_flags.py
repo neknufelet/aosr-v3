@@ -38,8 +38,12 @@ def _family(which: str) -> dict[str, object]:
         area = area.at[0].set(jnp.inf)
     if which == "scattering":
         s = s.at[0].set(jnp.nan)
+    epsilon = jnp.zeros(len(FREQUENCIES))
+    if which.startswith("air_"):
+        epsilon = epsilon.at[0].set({"air_nan": jnp.nan, "air_inf": jnp.inf, "air_negative": -1.0, "air_one": 1.0}[which])
     def evaluate(a: jax.Array) -> cj.CheckedBands:
-        result = lf.late_family_arrays(geometry, a, s, furniture_absorption_area_m2=area if which == "furniture" else None)
+        fraction = epsilon if which.startswith("air_") else None
+        result = lf.late_family_arrays(geometry, a, s, furniture_absorption_area_m2=area if which == "furniture" else None, air_absorption_fraction=fraction)
         invalid = result.invalid_absorption | result.invalid_furniture | result.invalid_energy | result.invalid_scattering
         return cj.CheckedBands(result.late_share_energy, invalid)
     return _record(evaluate, alpha)
@@ -47,7 +51,7 @@ def _family(which: str) -> dict[str, object]:
 
 def flags() -> dict[str, object]:
     angles = tmm.diffuse_incidence_angles_deg(method="paris")
-    rows: dict[str, object] = {which: _family(which) for which in ("alpha", "energy", "furniture", "scattering")}
+    rows: dict[str, object] = {which: _family(which) for which in ("alpha", "energy", "furniture", "scattering", "air_nan", "air_inf", "air_negative", "air_one")}
     impedance = jnp.full((2, len(angles)), CONSTANTS.rho_c * 4.0 + 0j).at[0, 1].set(jnp.nan)
     # 對實部求導；複數本身不作 grad 的純量輸入。
     rows["paris"] = _record(lambda x: lf.paris_absorption_arrays(x + 0j, angles, CONSTANTS.rho_c), impedance.real)

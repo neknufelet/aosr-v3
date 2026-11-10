@@ -27,6 +27,8 @@ from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, S
 from aosr.physics import geometric_lane as geo
 from aosr.physics import reflection_screen, reflection_window, report_io, report_output
 from aosr.physics import report_path_table as tables
+from aosr.config.air_absorption_environment import air_absorption_environment
+from aosr.physics.air_absorption import air_absorption_fraction
 from aosr.physics import three_lane_report as report
 from aosr.physics import three_lane_report_batch as batch
 from aosr.physics import three_lane_report_geometry as geometry
@@ -105,6 +107,13 @@ def _late() -> None:
     for axis, rows in seen:
         wanted = wall_surface_response(solved.materials_by_wall, axis,
             density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s).named_rows(axis)
+        room = solved.room
+        volume = room.Lx*room.Ly*room.Lz
+        surface = 2.0*(room.Lx*room.Ly+room.Ly*room.Lz+room.Lx*room.Lz)
+        temperature, humidity, pressure = air_absorption_environment()
+        epsilon = air_absorption_fraction(axis, 4.0*volume/surface,
+            temperature_c=temperature, relative_humidity_percent=humidity, pressure_pa=pressure)
+        wanted = {name: tuple(a+(1.0-a)*e for a, e in zip(row, epsilon, strict=True)) for name, row in wanted.items()}
         assert rows == wanted
         old = wall_surface_response(fixed.materials_by_wall, axis,
             density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s).named_rows(axis)

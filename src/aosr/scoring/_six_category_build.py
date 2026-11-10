@@ -23,6 +23,7 @@ from aosr.materials.construction_models import ConstantImpedance, SurfaceMateria
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.materials.transfer_matrix import diffuse_incidence_angles_deg
 from aosr.physics import geometric_early_jax as early
+from aosr.physics.air_absorption import room_air_absorption_fraction
 from aosr.physics.geometric_lane import _unblocked_room_paths
 from aosr.physics.room_paths import image_source_paths
 from aosr.physics.fem_reduced_boundary import boundary_patches
@@ -220,6 +221,7 @@ def build_constants(scheme: SchemeInputs, *, pair_inputs: Mapping[tuple[str, str
         primary_pair_indices=np.arange(len(data.pairs), len(pairs)), reflection_coverage=values['reflection_coverage'] & np.asarray([c[2] is not None for c in coverage]),
         direct_distances_m=np.asarray([p.paths.dist_m[p.paths.direct_index()] for p in data.pairs]).reshape(len(channels), len(points)),
         volume_m3=np.asarray(first.room_m.Lx*first.room_m.Ly*first.room_m.Lz), has_furniture=np.asarray(first.furniture is not None),
+        air_absorption_fraction=room_air_absorption_fraction(first.room_m, union),
         furniture_absorption_area_m2=np.asarray(furniture_absorption_area_m2(first.furniture, union, rho)) if first.furniture else np.zeros(len(union)),
         scattering_by_patch=np.asarray([(first.scattering_by_wall or {}).get(name.partition('@')[0], MATERIAL_SCATTERING_DEFAULT_S) for name in data.patch_ids]),
         source_power_ratio=np.stack(ratios))

@@ -22,15 +22,16 @@ from aosr.materials.construction_diff import build_template, surface_impedance_f
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
 from aosr.physics import crossover_jax as cj, late_family_jax as lf
 from aosr.physics.late_energy_jax import _bounded_weighted_absorption, zoned_late_energy_geometry
-from tests.engine._late_family_cases import CASES, CONSTANTS, FREQUENCIES, alpha_rows, furniture_area, problem, scattering
+from tests.engine._late_family_cases import CASES, CONSTANTS, FREQUENCIES, air_fraction, alpha_rows, furniture_area, problem, scattering
 
 
 def evaluate(name: str, alpha: jax.Array) -> dict[str, jax.Array]:
     inputs = problem(name)
     geometry = zoned_late_energy_geometry(inputs.room, inputs.n_per_wall, inputs.absorption_by_zone or {})
-    area = jnp.asarray(furniture_area(), dtype=alpha.dtype) if name == "furniture" else None
+    area = jnp.asarray(furniture_area(), dtype=alpha.dtype) if name in ("furniture", "furniture_air") else None
+    epsilon = jnp.asarray(air_fraction(inputs), dtype=alpha.dtype) if name in ("air", "furniture_air") else None
     late = lf.late_family_arrays(geometry, alpha, jnp.asarray(scattering(), dtype=alpha.dtype),
-                                furniture_absorption_area_m2=area)
+                                furniture_absorption_area_m2=area, air_absorption_fraction=epsilon)
     volume = inputs.room.Lx * inputs.room.Ly * inputs.room.Lz
     t60 = cj.eyring_t60_arrays(geometry.whole.wall_areas, volume, late.alpha_by_wall)
     mids = jnp.asarray([FREQUENCIES.index(f) for f in SCHROEDER_T60_BANDS_HZ])
@@ -208,7 +209,18 @@ def other_gradients() -> dict[str, object]:
             for values in (alpha, uniform, jnp.zeros_like(alpha), -jnp.zeros_like(alpha), jnp.ones_like(alpha)):
                 before, after = jax.jit(old)(values.astype(dtype)), jax.jit(new)(values.astype(dtype))
                 bitwise = bitwise and np.asarray(before).tobytes() == np.asarray(after).tobytes()
-    return {"scattering_gradient": np.asarray(automatic).tolist(), "scattering_input": np.asarray(s).tolist(),
+    def air_loss(epsilon: jax.Array) -> jax.Array:
+        return jnp.sum(lf.late_family_arrays(geometry, alpha, s, air_absorption_fraction=epsilon).total_energy)
+    air_gradient = jax.jit(jax.grad(air_loss))(jnp.asarray(air_fraction(inputs)))
+    zero_air_bitwise = True
+    for dtype in (jnp.float64, jnp.float32):
+        def zero(a: jax.Array) -> lf.LateFamilyArrays:
+            return lf.late_family_arrays(geometry, a, s.astype(dtype), air_absorption_fraction=jnp.zeros(len(FREQUENCIES), dtype=dtype))
+        def omitted(a: jax.Array) -> lf.LateFamilyArrays:
+            return lf.late_family_arrays(geometry, a, s.astype(dtype))
+        before, after = jax.jit(omitted)(alpha.astype(dtype)), jax.jit(zero)(alpha.astype(dtype))
+        zero_air_bitwise = zero_air_bitwise and all(np.array_equal(a, b) for a, b in zip(before, after, strict=True))
+    return {"air_gradient": np.asarray(air_gradient).tolist(), "zero_air_bitwise": zero_air_bitwise, "scattering_gradient": np.asarray(automatic).tolist(), "scattering_input": np.asarray(s).tolist(),
             "furniture_gradient": np.asarray(constant).tolist(), "uniform_alpha": np.asarray(uniform).tolist(),
             "uniform_gradient": uniform_gradient, "uniform_forward_bitwise": bitwise}
 

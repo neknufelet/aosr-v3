@@ -7,6 +7,7 @@ from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Room
 from aosr.physics import three_lane_report as report
+from aosr.physics.air_absorption import air_adjusted_absorption, room_air_absorption_fraction
 from aosr.physics.furniture_scene import furniture_absorption_area_m2, furniture_adjusted_absorption, furniture_absorption_fraction
 from aosr.physics.geometric_lane import solve_geometric_late_energy
 from aosr.physics.late_energy import LateEnergyOrderResult
@@ -36,6 +37,13 @@ def prepare_zoned_late_family(
             for name, cells in surfaces.absorption_by_zone.items()}
         late_surfaces = replace(surfaces, equivalent=replace(surfaces.equivalent, absorption_by_wall=adjusted),
                                 absorption_by_zone=zone_rows)
+    epsilon = room_air_absorption_fraction(room, axis)
+    adjusted = {wall: tuple(air_adjusted_absorption(row, epsilon))
+                for wall, row in late_surfaces.equivalent.absorption_by_wall.items()}
+    zone_rows = {name: tuple(replace(cell, absorption=tuple(air_adjusted_absorption(cell.absorption, epsilon)))
+                            for cell in cells) for name, cells in late_surfaces.absorption_by_zone.items()}
+    late_surfaces = replace(late_surfaces, equivalent=replace(late_surfaces.equivalent, absorption_by_wall=adjusted),
+                            absorption_by_zone=zone_rows)
     t60, f_s = report._eyring_t60_and_schroeder(room, late_surfaces.band_rows(SCHROEDER_T60_BANDS_HZ))
     late = solve_geometric_late_energy(room=room, rho_c_pa_s_per_m=rho_c,
         frequencies_hz=report_frequencies_hz, absorption_by_wall=late_surfaces.named_rows(report_frequencies_hz),

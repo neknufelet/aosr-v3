@@ -1,6 +1,6 @@
 """ISO 9613-1:1993 第 6 節的純音空氣衰減與平均自由路徑能量吸收。
 
-大氣條件由呼叫端明給；本模組只算雙精度係數，不讀設定或接入晚期混響。
+係數函式由呼叫端明給條件；產品房間包裝從設定層讀條件，供晚期注入點共用。
 """
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ import math
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+
+from aosr.config.air_absorption_environment import air_absorption_environment
+from aosr.geometry.shoebox import Room
 
 
 def _validate_conditions(temperature_c: float, relative_humidity_percent: float, pressure_pa: float) -> None:
@@ -83,3 +86,21 @@ def air_absorption_fraction(
     )
     m = alpha * np.log(10.0) / 10.0
     return np.asarray(-np.expm1(-m * mean_free_path_m), dtype=np.float64)
+
+
+def room_air_absorption_fraction(room: Room, frequencies_hz: ArrayLike) -> NDArray[np.float64]:
+    """產品晚期一族共用 ε_air；4V/S 與晚期衰減的碰撞頻率用同一個幾何量。"""
+    surface = 2.0 * (room.Lx * room.Ly + room.Ly * room.Lz + room.Lx * room.Lz)
+    volume = room.Lx * room.Ly * room.Lz
+    temperature, humidity, pressure = air_absorption_environment()
+    return air_absorption_fraction(frequencies_hz, 4.0 * volume / surface,
+        temperature_c=temperature, relative_humidity_percent=humidity, pressure_pa=pressure)
+
+
+def air_adjusted_absorption(absorption: ArrayLike, fraction: ArrayLike) -> NDArray[np.float64]:
+    """家具後的每格剩餘反射率乘同一個空氣存活率；ε＝0 保留原陣列值。"""
+    epsilon = np.asarray(fraction, dtype=np.float64)
+    if not np.all(np.isfinite(epsilon) & (epsilon >= 0.0) & (epsilon < 1.0)):
+        raise ValueError("空氣吸收 ε_air 必須有限且在 [0, 1) 之內")
+    alpha = np.asarray(absorption, dtype=np.float64)
+    return np.asarray(alpha + (1.0 - alpha) * epsilon, dtype=np.float64)

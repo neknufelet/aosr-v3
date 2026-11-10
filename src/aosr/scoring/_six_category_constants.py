@@ -64,6 +64,7 @@ class SixCategoryConstants(NamedTuple):
     patch_weights: NDArray[np.float64]
     collision_frequency_hz: NDArray[np.float64]
     volume_m3: NDArray[np.float64]
+    air_absorption_fraction: NDArray[np.float64]
     furniture_absorption_area_m2: NDArray[np.float64]
     has_furniture: NDArray[np.bool_]
     scattering_by_patch: NDArray[np.float64]

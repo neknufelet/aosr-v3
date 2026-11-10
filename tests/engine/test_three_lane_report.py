@@ -47,6 +47,7 @@ from aosr.physics.geometric_lane import (
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
 from aosr.physics.wall_surfaces import impedance_absorption_rows
+from tests.engine._three_lane_air_reference import air_epsilon, late_absorption
 from aosr.physics.three_lane_report import ThreeLaneBandReport, ThreeLaneReport
 from tests.engine._report_cache import shared_call
 
@@ -57,6 +58,8 @@ RECEIVER = Point(4.7, 2.8, 1.4)
 SOUND_SPEED_M_S = 343.0
 DENSITY_KG_M3 = 1.2
 RHO_C_PA_S_PER_M = DENSITY_KG_M3 * SOUND_SPEED_M_S
+_air_epsilon = partial(air_epsilon, room=ROOM)
+_late_absorption = partial(late_absorption, room=ROOM, rho_c=RHO_C_PA_S_PER_M)
 HARD_CUT_ROOM = Room(1.5, 1.0, 0.75)
 HARD_CUT_SOURCE = Point(0.3, 0.325, 0.275)
 HARD_CUT_RECEIVER = Point(1.175, 0.7, 0.35)
@@ -89,7 +92,6 @@ def _random_absorption(impedance: float) -> float:
     return catalog_absorption.complex_random_incidence_absorption(
         impedance / RHO_C_PA_S_PER_M
     )
-
 
 def _deterministic_fem_energy(frequency_hz: float) -> float:
     return frequency_hz * 3.0 + 7.0
@@ -243,14 +245,15 @@ def _expected_geometric(
         frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
         impedance_by_wall={wall.wall_name(): complex(impedance) for wall in Wall.all()},
         scattering_by_wall=scattering_by_wall,
+        absorption_by_wall=_late_absorption(impedance, GEOMETRIC_LANE_FREQUENCIES_HZ),
     )
 
 
 def _assert_source_results(timed: _TimedReport, impedance: float) -> GeometricLaneResult:
     absorption = {
         wall: {
-            500.0: _random_absorption(impedance),
-            1000.0: _random_absorption(impedance),
+            f: _random_absorption(impedance) + (1.0-_random_absorption(impedance))*epsilon
+            for f, epsilon in zip((500.0, 1000.0), _air_epsilon((500.0, 1000.0)), strict=True)
         }
         for wall in Wall.all()
     }
@@ -263,9 +266,7 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> GeometricLa
             room=ROOM,
             rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
             frequencies_hz=_report_decay_frequencies(),
-            absorption_by_wall=impedance_absorption_rows(_named_walls(
-                complex(impedance), _report_decay_frequencies()
-            ), RHO_C_PA_S_PER_M),
+            absorption_by_wall=_late_absorption(impedance, _report_decay_frequencies()),
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         ),
@@ -677,11 +678,25 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
     t20_lower: str | None,
     t30_lower: str,
 ) -> None:
-    """Paris α=0.026 保留 T20；α=0.02 讓未達下緣欄位失效。"""
+    """由均勻房 256 階精確指數（含空氣）逐帶判定未達下緣，不刪不可估檢查。"""
     report = _solve_fake_report(monkeypatch, impedance_multiple)
 
     assert report.points
+    baseline_minimum = 10.0*255*math.log10(1.0-_random_absorption(impedance_multiple*RHO_C_PA_S_PER_M))
+    assert (baseline_minimum <= -25.0) is t20_available
+    assert (t20_lower is None) is t20_available
+    assert t30_lower == "-35 dB"
+    unavailable20 = unavailable30 = 0
     for band in report.bands:
+        axis = tuple(f for f in _report_decay_frequencies()
+                     if band.center_frequency_hz/math.sqrt(2) <= f < band.center_frequency_hz*math.sqrt(2))
+        alpha = _random_absorption(impedance_multiple*RHO_C_PA_S_PER_M)
+        minimums = 10.0*255*np.log10((1.0-alpha)*(1.0-_air_epsilon(axis)))
+        t20_available = bool(np.all(minimums <= -25.0))
+        t30_available = bool(np.all(minimums <= -35.0))
+        t20_lower = None if t20_available else "-25 dB"
+        unavailable20 += not t20_available
+        unavailable30 += not t30_available
         assert math.isfinite(band.total_energy)
         assert math.isfinite(band.geometric_energy)
         assert (band.t20_s is not None) is t20_available
@@ -690,10 +705,17 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
             assert band.t20_unavailable_reason is not None
             assert t20_lower in band.t20_unavailable_reason
             assert "第 256 階最低" in band.t20_unavailable_reason
-        assert band.t30_s is None
-        assert band.t30_unavailable_reason is not None
-        assert t30_lower in band.t30_unavailable_reason
-        assert "第 256 階最低" in band.t30_unavailable_reason
+        if t30_available:
+            assert band.t30_s is not None and math.isfinite(band.t30_s)
+            assert band.t30_unavailable_reason is None
+        else:
+            assert band.t30_s is None
+            assert band.t30_unavailable_reason is not None
+            assert t30_lower in band.t30_unavailable_reason
+            assert "第 256 階最低" in band.t30_unavailable_reason
+    assert unavailable30 > 0
+    if baseline_minimum > -25.0:
+        assert unavailable20 > 0
 
 
 def test_report_does_not_catch_unrelated_late_decay_value_error(
