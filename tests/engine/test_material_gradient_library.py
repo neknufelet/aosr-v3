@@ -235,8 +235,9 @@ def _start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str, presets
     return cli.main(args), checked
 
 
-def test_start_snapshots_user_families_into_the_folder_and_its_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """抓快照沒寫進資料夾、沒進資料夾名、接續讀網頁現在的材料庫，或快照被改了還照讀。"""
+def test_start_snapshots_user_families_into_the_folder_and_its_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    """抓快照沒寫進資料夾、沒進資料夾名、接續讀網頁現在的材料庫，或快照被改了還照讀（報告命令也算）。"""
     user = tmp_path / "library.json"
     user.write_text(library.dump_user_library((_fixed(), _optimizable())), encoding="utf-8")
     code, checked = _start(tmp_path, monkeypatch, "--materials", str(user), presets=",".join([USER] * 6))
@@ -262,6 +263,18 @@ def test_start_snapshots_user_families_into_the_folder_and_its_name(tmp_path: Pa
     snapshot.write_bytes(snapshot.read_bytes().replace(b"20000.0", b"20001.0"))
     with pytest.raises(ValueError, match="材料快照 .* 跟開跑時不同"):
         run.project_settings(project)
+    capsys.readouterr()
+    assert cli.main(["report", "--folder", str(folder)]) == cli.EXIT_FAILED
+    assert "跟開跑時不同" in capsys.readouterr().err
+
+
+def test_start_refuses_a_named_library_that_does_not_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                           capsys: pytest.CaptureFixture[str]) -> None:
+    """抓明給 ``--materials`` 但檔案不在時，悄悄退成沒有使用者材料的另一場搜尋。"""
+    absent = tmp_path / "absent.json"
+    code, checked = _start(tmp_path, monkeypatch, "--materials", str(absent), presets=",".join(["glass_wool_48k_50mm_gap50"] * 6))
+    assert code == cli.EXIT_FAILED and checked == []
+    assert f"{absent} 不存在" in capsys.readouterr().err and not (tmp_path / "out").exists()
 
 
 def test_start_without_user_families_writes_no_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

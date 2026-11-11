@@ -64,7 +64,8 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
 from aosr.materials.search_library import (
-    SNAPSHOT_FILE, SearchMaterials, cavity_notes, read_user_entries, refuse_fixed_as_family, snapshot_bytes, with_user_materials,
+    SNAPSHOT_FILE, MaterialsRefused, SearchMaterials, cavity_notes, read_user_entries, refuse_fixed_as_family, snapshot_bytes,
+    with_user_materials,
 )
 
 if TYPE_CHECKING:
@@ -341,7 +342,7 @@ def _start_materials(args: argparse.Namespace, settings_path: Path) -> tuple[Sea
                                                                              bytes | None, str | None]:
     """這一場的材料、生效設定（步數上限已套）、材料快照內文與整份 SHA-256。
 
-    ``--materials`` 給了：讀使用者材料庫（讀不進來照講原因拒收）、起跑配置不准填固定材料、可最佳化材料接成家族；
+    ``--materials`` 給了：讀使用者材料庫（檔案不在、讀不進來都照講原因拒收）、起跑配置不准填固定材料、可最佳化材料接成家族；
     沒給、或材料庫裡沒有可最佳化材料：設定檔與產品構造預設原樣、沒有快照（資料夾名與 ``project.json`` 逐位照舊）。"""
     from aosr.config.material_gradient import load_material_gradient_settings, with_max_steps
     from aosr.gradient.run import presets_table
@@ -350,7 +351,10 @@ def _start_materials(args: argparse.Namespace, settings_path: Path) -> tuple[Sea
     if args.materials is None:
         materials = SearchMaterials(base, presets_table(), ())
     else:
-        entries = read_user_entries(args.materials.resolve())
+        path = args.materials.resolve()
+        if not path.is_file():
+            raise MaterialsRefused(f"--materials 指的使用者材料庫 {path} 不存在，搜尋不開（沒有使用者材料就不帶這個旗標）")
+        entries = read_user_entries(path)
         refuse_fixed_as_family(args.presets, entries)
         materials = with_user_materials(base, presets_table(), entries)
     settings = materials.settings if args.max_steps is None else with_max_steps(materials.settings, args.max_steps)
@@ -495,10 +499,11 @@ def _endpoint(args: argparse.Namespace) -> int:
 
 
 def _report(args: argparse.Namespace) -> int:
-    from aosr.gradient.run import read_project
+    from aosr.gradient.run import project_presets, read_project
     from aosr.gradient.report import render_report
 
     project = read_project(args.folder.resolve())
+    project_presets(project)  # 材料快照被改過就拒收（SHA-256 對不上丟 ValueError），不印半份報告
     if (batch := project.frequency_batch) is not None:
         sys.stdout.write(f"替身頻點分批：每批 {batch} 點（反傳逐批重算）\n")
     sys.stdout.write(_max_steps_line(project))
