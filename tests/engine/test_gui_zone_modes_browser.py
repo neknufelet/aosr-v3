@@ -229,6 +229,7 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         expect(page.locator("#zone-to-search")).to_have_count(0)
         _choose(page, "#zone-mode-x0-whole_wall", "search")
         expect(page.locator("#zone-to-search")).to_contain_text("1 區交給搜尋")
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "to-search.png"))
         page.locator("#zone-mode-x0-whole_wall").select_option("fixed")  # 改回固定不換材料、不打伺服器
         expect(page.locator("#zone-to-search")).to_have_count(0)
         _choose(page, "#zone-mode-x0-whole_wall", "search")
