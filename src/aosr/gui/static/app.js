@@ -419,8 +419,9 @@ async function openScheme() {
   // 成功才同步套上：不准在表單已換、做法還沒換的空檔放使用者按「儲存」。
   let zoneState;
   if (!await changeInputScheme(async () => {
-    const [opened, design, library] = await Promise.all([
-      api(`/api/schemes/${encodeURIComponent(name)}`), fetchZoneDesign(name), fetchZoneLibrary()]);
+    // 方案讀得到才讀做法：做法那一頁要拿方案比對分區，方案壞了它也只會回錯，不多打一個注定失敗的請求。
+    const opened = await api(`/api/schemes/${encodeURIComponent(name)}`);
+    const [design, library] = await Promise.all([fetchZoneDesign(name), fetchZoneLibrary()]);
     zoneState = {design, library};
     return opened.scheme;
   })) {
