@@ -107,7 +107,7 @@ def test_without_user_optimizable_materials_nothing_moves() -> None:
 
 def test_project_records_snapshot_path_and_hash_together() -> None:
     with pytest.raises(ValueError, match="材料快照的路徑與 SHA-256 要一起記"):
-        run.GradientProject.model_validate({**_project().model_dump(), "materials_path": "/x/materials.json"})
+        run.GradientProject.model_validate({**_project().model_dump(), "materials_path": "materials.json"})
 
 
 # ---- 使用者可最佳化材料 → 家族 ----

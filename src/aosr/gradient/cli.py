@@ -275,8 +275,7 @@ def _start(args: argparse.Namespace) -> int:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     run.require_supported_original_walls(kept.values())
-    designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
-                              table=materials.presets)
+    designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps, table=materials.presets)
     from aosr.gradient.boundary import scheme_patch_keys
     patch_keys = scheme_patch_keys(scheme)
     objective = run.search_objective_settings(args.purpose)
@@ -304,8 +303,7 @@ def _start(args: argparse.Namespace) -> int:
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
-                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch, device=args.device,
-                               materials_sha256=materials_sha)
+                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha)
     root = args.root.resolve()
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
@@ -318,8 +316,8 @@ def _start(args: argparse.Namespace) -> int:
         objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
         frequency_batch=args.frequency_batch, max_steps=args.max_steps, device=args.device,
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
-        operators_digest=fingerprint, surrogate_spot_check=spot,
-        materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE), materials_sha256=materials_sha)
+        operators_digest=fingerprint, surrogate_spot_check=spot, materials_sha256=materials_sha,
+        materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE))
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
