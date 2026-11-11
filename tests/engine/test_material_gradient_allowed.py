@@ -426,9 +426,13 @@ def _web_start(tmp_path: Path, listed: str, entry: library.FixedEntry) -> list[s
 
 def test_web_start_hands_user_fixed_ids_to_the_plan_and_passes_the_library(tmp_path: Path) -> None:
     """抓網頁開跑沒把使用者材料庫的固定材料代號交給計畫（清單寫了它卻當不認識的代號拒收）、
-    或材料庫只有固定材料時沒帶 --materials（命令列找不到那份材料）。"""
+    或材料庫只有固定材料時沒帶 --materials（命令列找不到那份材料）、開跑關卡的完整解沒照建替身那份開多行程。"""
+    from aosr.config.surrogate_training import load_surrogate_training_settings
+
     command = _web_start(tmp_path, BUILT, _built())
     assert "--materials" in command
+    workers = load_surrogate_training_settings(config_path("surrogate_training.toml")).compute.workers
+    assert command[command.index("--workers") + 1] == str(workers)
     lists = [command[index + 1] for index, item in enumerate(command) if item == "--allowed"]
     assert len(lists) == 1 and lists[0].endswith("=glass_wool_48k,fixed:" + BUILT), lists
 

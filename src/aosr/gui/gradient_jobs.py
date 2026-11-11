@@ -39,7 +39,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
-from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings, fixed_target, load_material_gradient_settings
+from aosr.config.material_gradient import (
+    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target, is_fixed_target, load_material_gradient_settings,
+)
+from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
@@ -506,6 +509,10 @@ class GradientJobs:
                 library = directory / USER_LIBRARY_NAME
                 write_text_atomic(library, dump_user_library(entries))
                 arguments.extend(("--materials", str(library)))
+            if any(is_fixed_target(target) for targets in plan.allowed.values() for target in targets):
+                # 准用清單有固定材料：開跑前每個各做一組完整解留出驗證，行程數照建替身那一份（109 實量 4 行程，#1036）。
+                compute = load_surrogate_training_settings(config_path("surrogate_training.toml")).compute
+                arguments.extend(("--workers", str(compute.workers)))
             job = GradientJob(job_id=job_id, scheme_id=scheme_id, created_at=time.time(), plan=plan,
                               surrogate=str(surrogate))
             self._save(job)
