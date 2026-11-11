@@ -562,8 +562,8 @@ prefix = "tests.engine."
 # #1084 分區＋實測表逐區接縫：新檔 test_zoned_measured_seams.py 13 題（邊界檔那 3 題改寫、題數不變）；主線 3ca5312e CPU 單行程純收集實量 11151，本支 11164。
 # #1083 網頁收分區方案：補滿 11 題、設計設定 8 題、瀏覽器 1 題，分區路線考卷拒收改收下淨加 4 題，共 24 題；主線 bd8cd5a1 上 CPU 單行程純收集實量 11188。
 # #1089 材料編輯頁：test_gui_material_editor.py 19 題、test_gui_material_editor_browser.py 10 題；CPU 單行程純收集實量 11217（主線 c3aacbf6 實量 11188）。
-# #1093 網頁開第三階段搜尋後端：test_gui_gradient_jobs.py 41 題、固定面保留字 4 題，共 45 題（真跑那 2 題住 slow_ 檔、雲端不收）；主線 c3aacbf6 上 CPU 單行程純收集實量 11233。
-collected_floor = 11262
+# #1093 網頁開第三階段搜尋後端：test_gui_gradient_jobs.py 44 題、固定面保留字 4 題，共 48 題（真跑那 2 題住 slow_ 檔、雲端不收）；主線 c3aacbf6 上 CPU 單行程純收集實量 11236。
+collected_floor = 11265
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
