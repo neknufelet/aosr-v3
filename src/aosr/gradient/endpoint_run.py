@@ -70,8 +70,7 @@ from aosr.scoring.gradient_objective_jax import (
     objective_reading,
 )
 
-ENDPOINT_FILE: Final = "endpoint.json"
-EXPORTED_SCHEME_FILE: Final = "scheme-endpoint.json"
+from aosr.gradient.folder_files import ENDPOINT_FILE as ENDPOINT_FILE, EXPORTED_SCHEME_FILE as EXPORTED_SCHEME_FILE
 ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v5"
 PRE_SIX_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v4"
 PRE_RANGE_ENDPOINT_VERSION: Final = "aosr.material_gradient_endpoint.v3"

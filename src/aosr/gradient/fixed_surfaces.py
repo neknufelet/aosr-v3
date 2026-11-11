@@ -1,4 +1,9 @@
-"""固定面的共用設定：現有材料庫 id，沿用方案整面材料的解析入口；空設定不改舊格式。"""
+"""固定面的共用設定：現有材料庫 id，沿用方案整面材料的解析入口；空設定不改舊格式。
+
+材料除了構造預設 id，還收保留字 :data:`SCHEME_MATERIAL`：那一面（或那一區）用方案檔自己寫的材料、不帶變數、
+不參與換樣板（網頁的「固定這一組材料」與「保留原牆」都走這條，#1093）。保留字含連字號，構造預設與使用者材料庫的
+id 只收小寫英數與底線，永遠撞不到。
+"""
 from __future__ import annotations
 
 import math
@@ -9,7 +14,7 @@ from typing import Annotated
 from pydantic import AfterValidator
 
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
-from aosr.config.material_gradient import MaterialGradientSettings, Mount
+from aosr.config.material_gradient import SCHEME_MATERIAL as SCHEME_MATERIAL, MaterialGradientSettings, Mount
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
@@ -19,7 +24,7 @@ from aosr.physics.report_surfaces import WholeWallZone
 
 
 def checked_fixed_surfaces(value: Mapping[str, str]) -> dict[str, str]:
-    """面名與材料 id 都必須認得，至少留一面可換；排序使保存與身分不受選項順序影響。"""
+    """面名與材料 id 都必須認得（或是保留字 :data:`SCHEME_MATERIAL`），至少留一面可換；排序使保存與身分不受選項順序影響。"""
     names = {wall.wall_name() for wall in Wall.all()}
     for name in value:
         patch_key(name)
@@ -30,7 +35,7 @@ def checked_fixed_surfaces(value: Mapping[str, str]) -> dict[str, str]:
         raise ValueError("不能全部六面固定：至少留一面可換")
     ids = {preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))}
     for face, material in value.items():
-        if material not in ids:
+        if material != SCHEME_MATERIAL and material not in ids:
             raise ValueError(f"固定面 {face} 的材料 id {material!r} 不在現有材料庫")
     return dict(sorted(value.items()))
 
@@ -52,17 +57,17 @@ def parse_fixed_surfaces(values: Sequence[str]) -> dict[str, str]:
 
 
 def fixed_materials(fixed: Mapping[str, str]) -> dict[str, SurfaceMaterial]:
-    """材料庫僅提供填表資料，驗材料與方案原牆相同，交 ``WholeWallZone``。"""
+    """材料庫僅提供填表資料，驗材料與方案原牆相同，交 ``WholeWallZone``；保留字那幾面不在這裡（用方案自己的材料）。"""
     fixed = checked_fixed_surfaces(fixed)
     table = {preset.id: preset for preset in load_construction_presets(config_path("construction_presets.toml"))}
     return {face: WholeWallZone.model_validate({"area": "whole_wall", "material": table[material].material}).material
-            for face, material in fixed.items()}
+            for face, material in fixed.items() if material != SCHEME_MATERIAL}
 
 
 def designs_with_fixed(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
                        presets: Sequence[ConstructionPreset], *, kept: Mapping[str, SurfaceMaterial], mount: Mount,
                        fixed_surfaces: Mapping[str, str]) -> tuple[SurfaceDesign, ...]:
-    """固定面強制用無樣板、無變數的常數材料；其他面的原牆與安裝方式照舊。"""
+    """固定面強制用無樣板、無變數的常數材料（保留字那幾面就是 ``kept`` 那一面）；其他面的原牆與安裝方式照舊。"""
     fixed_surfaces = expanded_fixed_surfaces(fixed_surfaces, tuple(name for name, _ in surfaces))
     materials = fixed_materials(fixed_surfaces) if fixed_surfaces else {}
     selected = tuple((face, None if face in fixed_surfaces else preset) for face, preset in surfaces)

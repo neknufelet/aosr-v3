@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.gradient.fixed_surfaces import SCHEME_MATERIAL
 from tests.engine.test_material_gradient_fixed_surface import _check_fixed, _run, _snapshot
 
 
@@ -15,6 +16,8 @@ def main() -> None:
     with pytest.MonkeyPatch.context() as patch:
         if part == "fixed":
             _check_fixed(directory, patch)
+        elif part == "scheme":
+            _check_fixed(directory, patch, {"floor": SCHEME_MATERIAL})
         else:
             folder = directory / "control"
             _run(folder, patch)
