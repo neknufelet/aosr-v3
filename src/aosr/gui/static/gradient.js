@@ -103,8 +103,14 @@ function duration(seconds) {
   return `約 ${Math.floor(minutes / 60)} 小時 ${minutes % 60} 分`;
 }
 
-function when(epoch) {
-  return epoch ? new Date(epoch * 1000).toLocaleString("zh-TW", {hour12: false}) : "";
+// 整頁的時間都經過這一支、照看網頁那台電腦的時區印：伺服器給的是秒數（epoch）或帶時區的 ISO 8601 字串
+// （搜尋本體寫的是世界時 +00:00）。沒寫時區的字串分不出是哪一區，照原文印、標明沒寫時區，不猜。
+const ZONED = /(Z|[+-]\d\d:?\d\d)$/;
+function when(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "string" && !ZONED.test(value)) return `${value}（沒寫時區）`;
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-TW", {hour12: false});
 }
 
 // 每區准用清單（#1082 段 2-3b；轉好的參數 plan.allowed：面片 → 家族代號、fixed:<代號>、none）；沒有清單的區照家族全部試。
@@ -386,8 +392,7 @@ function progressLines(job, detail) {
     if (progress.last_value !== null) lines.push(`目前合分（越小越好）：${progress.last_value.toFixed(4)}`);
     if (progress.stop_reason) lines.push(`停止原因：${progress.stop_reason}`);
     if (progress.message) lines.push(`搜尋本體的話：${progress.message}`);
-    const updated = new Date(progress.updated_at);
-    lines.push(`狀態檔最後更新：${Number.isNaN(updated.getTime()) ? progress.updated_at : updated.toLocaleString("zh-TW", {hour12: false})}`);
+    lines.push(`狀態檔最後更新：${when(progress.updated_at)}`);
   }
   if (job.progress_note) lines.push(job.progress_note);
   return lines;

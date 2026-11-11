@@ -11,11 +11,14 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
+from zoneinfo import ZoneInfo
 
+import pytest
 import uvicorn
 from playwright.sync_api import Browser, Page, Route, expect
 
@@ -181,8 +184,10 @@ def _searching(page: Page, data_dir: Path, job_id: str) -> Path:
     (folder / folder_files.PROJECT_FILE).write_text("{}", encoding="utf-8")
     header = json.dumps({"ledger_version": "v6"})
     (folder / folder_files.LEDGER_FILE).write_text(header + "\n", encoding="utf-8")
+    # 搜尋本體寫世界時（+00:00）；時間取這一刻，截圖上的「狀態檔最後更新」才跟「開始」對得上。
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     (folder / folder_files.STATUS_FILE).write_text(json.dumps({
-        "state": "running", "started_at": "2026-11-11T00:00:00+00:00", "updated_at": "2026-11-11T00:01:00+00:00",
+        "state": "running", "started_at": now, "updated_at": now,
         "evaluations": 12, "rounds_done": 0, "last_value": 3.25, "stop_reason": None, "pid": 4242}), encoding="utf-8")
     (data_dir / "gradient" / job_id / "steps" / "0.log").write_text(NOTE + "\n", encoding="utf-8")
     _tick(page)
@@ -276,6 +281,45 @@ def test_a_refused_surrogate_offers_a_rebuild_that_replaces_it(browser: Browser,
         expect(page.locator("#build-state")).to_contain_text("建替身")
         _, argv, _, _ = launcher.launched[-1]
         assert "--replace" in argv
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def _shown(epoch: float, zone: str) -> str:
+    """瀏覽器 ``toLocaleString("zh-TW", {hour12: false})`` 的樣子：年月日不補零、時分秒補零。"""
+    moment = datetime.fromtimestamp(epoch, ZoneInfo(zone))
+    return f"{moment.year}/{moment.month}/{moment.day} {moment:%H:%M:%S}"
+
+
+@pytest.mark.parametrize(("zone", "updated"), [("Asia/Taipei", "2026/11/11 20:01:00"),
+                                               ("America/New_York", "2026/11/11 07:01:00")])
+def test_every_time_on_the_page_is_shown_in_the_browser_time_zone(browser: Browser, tmp_path: Path, zone: str,
+                                                                  updated: str) -> None:
+    """抓世界時沒換成本機時間（截圖上「狀態檔最後更新」比「開始」少 8 小時那一種）：搜尋本體寫的帶時區字串
+    ``2026-11-11T12:01:00+00:00`` 要照瀏覽器時區印；兩個時區各考一次，寫死加 8 小時也過不了。秒數（epoch）的
+    「開始」「第 1 步」同樣照瀏覽器時區；沒寫時區的字串照原文印、標明沒寫時區，不替它猜。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    job_id = str(view["job_id"])
+    folder = data_dir / "gradient" / job_id / "root" / ("f" * 32)
+    folder.mkdir(parents=True)
+    (folder / folder_files.PROJECT_FILE).write_text("{}", encoding="utf-8")
+    status = {"state": "running", "started_at": "2026-11-11T12:00:00+00:00", "updated_at": "2026-11-11T12:01:00+00:00",
+              "evaluations": 12, "rounds_done": 0, "last_value": 3.25, "stop_reason": None, "pid": 4242}
+    (folder / folder_files.STATUS_FILE).write_text(json.dumps(status), encoding="utf-8")
+    steps = cast(list[Record], view["steps"])
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}&job={job_id}",
+                                                  fake_clock=True, timezone_id=zone) as watched:
+        page = watched.page
+        expect(page.locator("#job-progress")).to_contain_text(f"狀態檔最後更新：{updated}")
+        expect(page.locator("#job-title")).to_contain_text(f"開始 {_shown(float(str(view['created_at'])), zone)}")
+        expect(page.locator("#job-steps")).to_contain_text(f"（{_shown(float(str(steps[0]['launched_at'])), zone)}）")
+        expect(page.locator(f'#job-list tr[data-job="{job_id}"]')).to_contain_text(
+            _shown(float(str(view["created_at"])), zone))
+        (folder / folder_files.STATUS_FILE).write_text(json.dumps({**status, "updated_at": "2026-11-11T12:02:00"}),
+                                                       encoding="utf-8")
+        _tick(page)
+        expect(page.locator("#job-progress")).to_contain_text("狀態檔最後更新：2026-11-11T12:02:00（沒寫時區）")
         _clean(page, watched.page_errors + watched.console_errors)
 
 

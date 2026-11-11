@@ -113,11 +113,12 @@ def _serve(data_dir: Path, runner: tuple[str, ...] | None = None, *,
 @contextmanager
 def _open(browser: Browser, url: str, device_scale_factor: float = 1,
           viewport_width: int = 1400, *, response_path: str | None = None,
-          fake_clock: bool = False) -> Iterator[Watched]:
+          fake_clock: bool = False, timezone_id: str | None = None) -> Iterator[Watched]:
     """``fake_clock``：導覽前裝上瀏覽器假時鐘（``page.clock``，時間照常走，另可用 ``run_for`` 快轉），
-    輪詢考卷用它跳過真等的 5 秒；要在頁面腳本起計時器之前裝，所以只能在這裡、``goto`` 之前。"""
+    輪詢考卷用它跳過真等的 5 秒；要在頁面腳本起計時器之前裝，所以只能在這裡、``goto`` 之前。
+    ``timezone_id``：釘住瀏覽器的時區（例如 ``Asia/Taipei``），考畫面上的本機時間時不吃跑考卷那台機器的時區。"""
     page = browser.new_page(viewport={"width": viewport_width, "height": 1100},
-                            device_scale_factor=device_scale_factor)
+                            device_scale_factor=device_scale_factor, timezone_id=timezone_id)
     if fake_clock:
         page.clock.install()
     watched = Watched(page)
