@@ -6,6 +6,7 @@
 let elevationWall = null;
 let elevationSelected = null;
 let elevationThin = [];
+let elevationDrawing = false;  // 正在拖框：限制判決回來先不重畫（#1111），放開滑鼠才畫
 // 站在房間裡看那一面：畫面往右、往上各是方案的哪一軸（反了就鏡像），四邊標的是隔壁哪一面。
 // 四面牆：往上是 z；x 起點牆面向 -x、右手邊是 +y；x 終點牆面向 +x、右手邊是 -y（鏡像）；
 // y 起點牆面向 -y、右手邊是 -x（鏡像）；y 終點牆面向 +y、右手邊是 +x。
@@ -147,6 +148,10 @@ function startDrawing(svg, event, geometry, view, wall) {
   const preview = node("rect", {class: "zone-preview", x: 0, y: 0, width: 0, height: 0});
   svg.append(preview);
   svg.setPointerCapture(event.pointerId);
+  elevationDrawing = true;
+  // 放開滑鼠（收尾做完、不管走哪條路）或拖曳被瀏覽器收回之後，才畫收著的判決：收尾要用的這張圖在那之前不能換掉。
+  const endDrawing = () => { if (!elevationDrawing) return; elevationDrawing = false; zoneLimitsDragEnded(); };
+  svg.addEventListener("lostpointercapture", endDrawing, {once: true});
   const corners = end => [Math.min(start[0], end[0]), Math.max(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[1], end[1])];
   const move = moved => {
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, moved, geometry));
@@ -155,7 +160,8 @@ function startDrawing(svg, event, geometry, view, wall) {
     preview.setAttribute("width", (a1 - a0) * geometry.scale);
     preview.setAttribute("height", (b1 - b0) * geometry.scale);
   };
-  const finish = ended => {
+  const finish = ended => { try { complete(ended); } finally { endDrawing(); } };
+  const complete = ended => {
     svg.removeEventListener("pointermove", move);
     svg.removeEventListener("pointerup", finish);
     preview.remove();
@@ -210,7 +216,7 @@ function selectedEditor(wall, view, width, height) {
   for (const [field, label, value] of [["left", "離左緣", a0], ["bottom", "離下緣", b0], ["width", "寬", a1 - a0], ["height", "高", b1 - b0]]) {
     const wrap = document.createElement("label"); wrap.textContent = label;
     const input = document.createElement("input"); input.type = "number"; input.step = "0.01"; input.id = `elevation-${field}`;
-    input.value = metres(value);
+    input.defaultValue = metres(value);  // 畫出來的值：跟它不同才算正在打字（限制判決先不重畫，#1111）
     input.addEventListener("change", () => editSelected(wall, view, width, height, field, Number(input.value)));
     wrap.append(input); fields.append(wrap);
   }
@@ -264,15 +270,19 @@ function renderElevation() {
   svg.append(node("rect", {id: "elevation-frame", x: pad, y: pad, width: width * scale, height: height * scale}));
   const zones = wallZones(wall);
   // 整面一區的牆：牆框本身照那一區的做法上色。
-  if (!zones.some(zone => zone.area === "rectangle")) svg.lastChild.setAttribute("class", `zone-mode-${zoneSetting(wall, "whole_wall").mode}`);
+  if (!zones.some(zone => zone.area === "rectangle"))
+    svg.lastChild.setAttribute("class", `zone-mode-${zoneSetting(wall, "whole_wall").mode}${zoneIsRed(wall, "whole_wall") ? " zone-red" : ""}`);
+  if (wallIsRed(wall)) svg.lastChild.classList.add("wall-red");
   const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_merge_tol_m || zone.v_m[1] > height + cutSpec().edge_merge_tol_m));
   for (const zone of zones.filter(zone => zone.area === "rectangle")) {
     const auto = zone.id.startsWith(cutSpec().fill_prefix);
     const [a0, a1, b0, b1] = screenBox(view, width, height, zone);
     const mode = zoneSetting(wall, zone.id).mode;
-    const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"} zone-mode-${mode}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
+    const red = zoneIsRed(wall, zone.id);
+    const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"} zone-mode-${mode}${red ? " zone-red" : ""}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
+    const limits = zoneLimitLines(wall, zone.id).map(line => `\n${line.text}`).join("");
     group.append(node("rect", {x: pad + a0 * scale, y: pad + (height - b1) * scale, width: (a1 - a0) * scale, height: (b1 - b0) * scale}),
-      node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}`));
+      node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}${limits}`));
     // 字放得下才寫（窄條裡「自動」兩字會擠出界）；放不下的滑過去看 title。
     const label = auto ? "自動" : zone.id;
     if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18)
@@ -313,7 +323,10 @@ function renderElevation() {
   renderZoneTable(wall);
 }
 window.renderElevation = renderElevation;
+window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());
+  // 房間尺寸改定了（離開格子）才重判限制：分區可能超出變小的牆面（#1111）。
+  $("room-fields").addEventListener("change", () => refreshZoneLimits());
 });
 })();

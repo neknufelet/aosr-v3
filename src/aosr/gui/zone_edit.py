@@ -75,7 +75,7 @@ def zone_cut_defaults() -> dict[str, object]:
             "fill_prefix": FILL_PREFIX}
 
 
-def _room(document: dict[str, object]) -> Room:
+def draft_room(document: dict[str, object]) -> Room:
     scene = document.get("scene")
     room = scene.get("room_m") if isinstance(scene, dict) else None
     if not isinstance(room, dict):
@@ -147,7 +147,7 @@ def _pulled(boxes: Sequence[CutBox], width: float, height: float) -> list[Box]:
                 v_m=(_pull(box.v_m[0], v_edges), _pull(box.v_m[1], v_edges))) for box in boxes]
 
 
-def _too_small(box: Box) -> bool:
+def too_small(box: Box) -> bool:
     return min(box.u_m[1] - box.u_m[0], box.v_m[1] - box.v_m[0]) < MIN_SIDE_M - EDGE_MERGE_TOL
 
 
@@ -155,13 +155,13 @@ def _check_drawn(wall: str, boxes: Sequence[Box]) -> None:
     for box in boxes:
         if box.id.startswith(FILL_PREFIX):
             raise ZoneCutError(f"牆面 {wall} 分區 {box.id}：畫的框代號不能用 {FILL_PREFIX} 開頭（那是自動補滿用的）")
-        if _too_small(box):
+        if too_small(box):
             raise ZoneCutError(f"牆面 {wall} 分區 {box.id}：框的寬或高不到最小邊 {MIN_SIDE_M:g} 公尺")
 
 
 def cut_wall(document: dict[str, object], wall: WallName, boxes: Sequence[CutBox]) -> dict[str, object]:
     """切一面牆，回 ``zones``（這一面新的分區清單）、``filled_ids``（自動補的代號）、``inherited``（每一塊沿用誰的材料）。"""
-    room = _room(document)
+    room = draft_room(document)
     entries = _old_entries(document, wall)
     width, height = wall_size_m(room, wall)
     drawn = _pulled(boxes, width, height)
@@ -174,7 +174,7 @@ def cut_wall(document: dict[str, object], wall: WallName, boxes: Sequence[CutBox
     result = fill_wall(wall, width, height, drawn, min_side_m=0.0)
     if result.problems:
         raise ZoneCutError("；".join(result.problems), result.problems)
-    thin = [zone for zone in result.zones if zone.id in result.filled_ids and _too_small(zone)]
+    thin = [zone for zone in result.zones if zone.id in result.filled_ids and too_small(zone)]
     if thin:
         problems = [f"牆面 {wall}：補滿後剩一條 u {box.u_m[0]:.3f}–{box.u_m[1]:.3f}、v {box.v_m[0]:.3f}–{box.v_m[1]:.3f} 公尺的窄條，"
                     f"比最小邊 {MIN_SIDE_M:g} 公尺還窄；請把畫的框貼齊牆邊或鄰框，或離開至少 {MIN_SIDE_M:g} 公尺" for box in thin]

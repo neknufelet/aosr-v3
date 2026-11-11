@@ -20,6 +20,11 @@ const zoneAllowedOpen = new Set();
 const ZONE_MODE_WORDS = {fixed: "指定材料組（固定）", keep_original: "不貼，保留原牆", search: "交給搜尋"};
 const ZONE_NONE = "none";
 
+// 設計設定裡有沒有東西：每一區的做法、原方案、深度上限（房間預設與每面牆，#1111）任一樣有寫就算。
+function designHasContent(design) {
+  return Object.keys(design.zones || {}).length > 0 || design.original_scheme_id != null
+    || design.room_max_depth_m != null || Object.keys(design.wall_max_depth_m || {}).length > 0;
+}
 function freshZoneDesign() {
   return {schema_version: "aosr.zone_design.v1", scheme_id: scheme.scheme_id, zones: {}};
 }
@@ -46,7 +51,7 @@ function zoneNote(text, kind) { zoneNoteText = text; zoneNoteKind = kind; const 
 async function fetchZoneDesign(name) {
   try {
     const data = await api(`/api/designs/${encodeURIComponent(name)}`);
-    const stored = Object.keys(data.design.zones || {}).length > 0 || data.design.original_scheme_id != null;
+    const stored = designHasContent(data.design);
     const note = data.problems.length ? `設計設定有幾條跟方案對不上（下次儲存時拿掉）：${data.problems.join("；")}` : "";
     return {design: data.design, stored, broken: false, note};
   } catch (error) {
@@ -57,16 +62,16 @@ async function fetchZoneDesign(name) {
 function applyZoneDesign(state) {
   zoneDesignGeneration += 1;
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
-  zoneDesignNote = state.note; zoneNote("", "");
+  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null;
 }
 // 載入範本：新的方案，沒有設計設定。
-function resetZoneDesign() { zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); }
+function resetZoneDesign() { zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); zoneLimits = null; }
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
 async function saveZoneDesign(name) {
   zoneDesignSaved = false;
   if (zoneDesignBroken) throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）");
-  const touched = zoneDesign && (Object.keys(zoneDesign.zones || {}).length || zoneDesign.original_scheme_id != null);
+  const touched = zoneDesign && designHasContent(zoneDesign);
   if (!touched && !zoneDesignStored) { zoneDesignSaved = true; return; }
   const design = structuredClone(designForEdit());
   design.scheme_id = name;
@@ -76,6 +81,7 @@ async function saveZoneDesign(name) {
     if (!Object.keys(design.zones[wall]).length) delete design.zones[wall];
   }
   if (design.original_scheme_id === name) design.original_scheme_id = null;
+  if (design.wall_max_depth_m && !Object.keys(design.wall_max_depth_m).length) delete design.wall_max_depth_m;
   const generation = zoneDesignGeneration;
   await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
   zoneDesignSaved = true;
@@ -92,6 +98,11 @@ function searchZoneCount() {
 }
 // 「拿去搜尋」：搜尋頁讀的是存好的方案與做法，先照畫面存一份；兩樣都存成才跳過去，沒存成留在這頁照講。
 async function sendToSearch() {
+  const limits = await settledZoneLimits();
+  if (limits?.status !== "checked") {
+    zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
+  }
+  if (limitsRedCount()) { zoneNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); return; }
   const generation = zoneDesignGeneration, name = $("save-id").value;
   if (!await save()) return;
   if (generation !== zoneDesignGeneration) { zoneNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice"); return; }
@@ -105,7 +116,11 @@ function searchButtonRow() {
   const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
   button.textContent = `拿去搜尋（${count} 區交給搜尋）`;
   button.onclick = () => action(sendToSearch);
-  const note = document.createElement("span"); note.className = "note"; note.textContent = "會先照畫面儲存，再打開第三階段搜尋頁";
+  const red = limitsRedCount();
+  button.disabled = red > 0;
+  const note = document.createElement("span"); note.id = "zone-to-search-note";
+  note.className = red ? "limit-red" : "note";
+  note.textContent = red ? `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋` : "會先照畫面儲存，再打開第三階段搜尋頁";
   row.append(button, " ", note);
   return row;
 }
@@ -320,17 +335,21 @@ function renderZoneTable(wall) {
   area.replaceChildren();
   if (!wall || !scheme) return;
   area.append(originalSchemeRow());
+  area.append(depthRow(wall));
+  area.append(limitsSummary());
+  if (wallLimitLines(wall).length) area.append(limitLinesBlock(wallLimitLines(wall), `limit-wall-${wall}`));
   for (const text of [zoneDesignNote, zoneLibraryProblem]) {
     if (!text) continue;
     const line = document.createElement("p"); line.className = "notice"; line.textContent = text; area.append(line);
   }
   const table = document.createElement("table"); table.id = `zone-table-${wall}`; table.className = "zone-table";
   const head = document.createElement("tr");
-  for (const text of ["區", "大小（公尺）", "做法", "材料"]) { const cell = document.createElement("th"); cell.textContent = text; head.append(cell); }
+  for (const text of ["區", "大小（公尺）", "做法", "材料", "深度上限（公尺）"]) { const cell = document.createElement("th"); cell.textContent = text; head.append(cell); }
   table.append(head);
   for (const zone of zoneList(wall)) {
     const key = zoneKey(zone), setting = zoneSetting(wall, key);
-    const row = document.createElement("tr"); row.id = `zone-row-${wall}-${key}`; row.className = `zone-mode-${setting.mode}`;
+    const row = document.createElement("tr"); row.id = `zone-row-${wall}-${key}`;
+    row.className = `zone-mode-${setting.mode}${zoneIsRed(wall, key) ? " zone-red" : ""}`;
     const name = document.createElement("td"); name.textContent = zoneName(key);
     const size = document.createElement("td");
     size.textContent = zone.area === "rectangle"
@@ -340,7 +359,11 @@ function renderZoneTable(wall) {
     if (setting.mode === "fixed") fixedCell(wall, key, zone, material);
     else if (setting.mode === "keep_original") material.textContent = `原牆：${wallText(originalMaterial(zone.material))}`;
     else searchCell(wall, key, zone, setting, material);
-    row.append(name, size, mode, material); table.append(row);
+    const depth = document.createElement("td"); depth.id = `zone-depth-${wall}-${key}`;
+    zoneDepthCell(wall, key, setting, depth);
+    const lines = zoneLimitLines(wall, key);
+    if (lines.length) material.append(limitLinesBlock(lines, `limit-${wall}-${key}`));
+    row.append(name, size, mode, material, depth); table.append(row);
   }
   area.append(table);
   const toSearch = searchButtonRow();

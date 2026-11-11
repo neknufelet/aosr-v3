@@ -108,6 +108,14 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-table tr.zone-mode-fixed td:first-child{border-left:6px solid #15617b}
 .zone-allowed{display:flex;flex-direction:column;align-items:flex-start}
 .zone-allowed label{margin:.15rem 0}
+/* 超過限制（#1111）：紅框紅底；表裡那一列左邊紅條、每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
+.zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:#f9d6d2;stroke:#c0392b;stroke-width:3}
+.zone-table tr.zone-red td{background:#fdecea}
+.zone-table tr.zone-red td:first-child{border-left:6px solid #c0392b}
+.limit-lines p{margin:.15rem 0}
+.limit-red{color:#a52714;font-weight:600}
+.limit-warn{color:#9a5b00}
+.limit-note{color:#5b6670}
 .zone-thin{fill:none;stroke:#c0392b;stroke-width:3;stroke-dasharray:5 3}
 .zone-preview{fill:rgba(21,97,123,.15);stroke:#15617b;stroke-dasharray:3 3}
 .elevation-marker{pointer-events:none}

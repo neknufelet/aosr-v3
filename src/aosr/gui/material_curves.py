@@ -160,6 +160,36 @@ def _labels(entry: LibraryEntry) -> dict[str, object]:
             "provenance": PROVENANCE_LABELS[entry.provenance], "source": entry.source, "links": list(entry.links)}
 
 
+NO_PRECISION: Final = "no_precision"
+
+
+def _computed(material: SurfaceMaterial, axis: tuple[float, ...]) -> tuple[object, tuple[ConstructionNote, ...]] | str:
+    """算吸音與物理回的提醒；沒開雙精度回 ``NO_PRECISION``，物理拒算回白話原因（字串）。"""
+    air, ranges = product_air_environment()
+    import jax.numpy as jnp
+    from aosr.materials.construction import random_incidence_absorption
+
+    if jnp.asarray(0.0).dtype != jnp.float64:
+        return NO_PRECISION
+    try:
+        return random_incidence_absorption(material, jnp.asarray(axis), air=air, ranges=ranges)
+    except ValueError as exc:
+        return _plain(str(exc))
+
+
+def range_check(material: SurfaceMaterial) -> dict[str, object]:
+    """分區限制檢查（#1082 段 1-4）查一份牆面材料的可信範圍，跟這一頁同一條路、同一份提醒：
+    ``status`` 是 drawn／uncomputable（``message`` 是物理拒算的原因）／no_precision；``warnings`` 同曲線那一份。"""
+    axis = _axis(material)
+    computed = _computed(material, axis)
+    if isinstance(computed, str):
+        return ({"status": "no_precision"} if computed == NO_PRECISION
+                else {"status": "uncomputable", "message": f"這組參數算不出吸音曲線：{computed}"})
+    _, ranges = product_air_environment()
+    warnings, _ = _note_lines(material, axis, computed[1], ranges)
+    return {"status": "drawn", "warnings": warnings}
+
+
 def material_curve(document: object) -> dict[str, object]:
     """一份材料內文 → 吸音曲線、標語、提醒；算不出來或沒填齊時照實講原因。"""
     try:
@@ -170,18 +200,15 @@ def material_curve(document: object) -> dict[str, object]:
     axis = _axis(material)
     air, ranges = product_air_environment()
     labels = _labels(entry)
-    import jax.numpy as jnp
-    from aosr.materials.construction import random_incidence_absorption
-
-    if jnp.asarray(0.0).dtype != jnp.float64:
-        # 正式網頁入口開機就開雙精度；沒開時物理層會拒算，那不是材料參數的錯，不能說成「這組參數算不出」。
-        return {"status": "no_precision", **labels, "arrangement": arrangement, "range_scope": RANGE_SCOPE,
-                "message": "這個網頁行程沒有開雙精度，算不出吸音曲線；這是網頁開機設定的問題，不是材料參數的問題。"}
-    try:
-        absorption, notes = random_incidence_absorption(material, jnp.asarray(axis), air=air, ranges=ranges)
-    except ValueError as exc:
+    computed = _computed(material, axis)
+    if isinstance(computed, str):
+        if computed == NO_PRECISION:
+            # 正式網頁入口開機就開雙精度；沒開時物理層會拒算，那不是材料參數的錯，不能說成「這組參數算不出」。
+            return {"status": "no_precision", **labels, "arrangement": arrangement, "range_scope": RANGE_SCOPE,
+                    "message": "這個網頁行程沒有開雙精度，算不出吸音曲線；這是網頁開機設定的問題，不是材料參數的問題。"}
         return {"status": "uncomputable", **labels, "arrangement": arrangement, "range_scope": RANGE_SCOPE,
-                "message": f"這組參數算不出吸音曲線：{_plain(str(exc))}"}
+                "message": f"這組參數算不出吸音曲線：{computed}"}
+    absorption, notes = computed
     warnings, spans = _note_lines(material, axis, notes, ranges)
     warnings.sort(key=lambda line: line["level"] != "strong")
     measured_range = None if not isinstance(material, MeasuredImpedance) else [

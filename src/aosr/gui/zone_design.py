@@ -11,6 +11,10 @@
 
 ``original_scheme_id``（選填）：這份設計是從哪一份方案切出來的。結果頁「改善多少」的原牆基準照它那一份的材料
 鋪到這一套切法（見 ``zone_result``）；沒填就拆掉每一區加貼的層。寫入時那份方案要在、而且不能是自己。
+
+深度上限三層（#1082 段 1-4，全部選填、單位公尺、都要大於 0）：``room_max_depth_m`` 房間預設、``wall_max_depth_m``
+每面牆、``ZoneDesign.max_depth_m`` 每一區。一區實際的上限取三層裡最小的那一個，並記得是哪一層擋的
+（``zone_limits.depth_cap``）。沒給的格子存檔時不寫（舊設計設定逐位不變）。
 """
 from __future__ import annotations
 
@@ -32,6 +36,8 @@ from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.scheme import Scheme
 
 WHOLE_WALL_KEY = "whole_wall"
+WallName = Literal["floor", "ceiling", "x0", "xL", "y0", "yL"]
+Depth = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}\Z")
 ZoneMode = Literal["fixed", "keep_original", "search"]
 MODE_WORDS: dict[str, str] = {"fixed": "固定這一組材料", "keep_original": "保留原牆", "search": "交給搜尋"}
@@ -39,7 +45,7 @@ DEFAULT_MODE: ZoneMode = "fixed"
 
 
 class ZoneDesign(BaseModel):
-    """一區的做法；之後的段（深度上限）往這裡加欄位。
+    """一區的做法、准用清單與這一區自己的深度上限。
 
     ``allowed``（#1082 段 2-3b，選填、只給交給搜尋的區）：這一區准用的材料代號（材料庫的代號：可最佳化材料、固定材料）
     或 ``none``（不貼、保留原牆）。搜尋換樣板只換到清單裡的，起點也要在清單裡；沒給照舊換全部家族與不貼。
@@ -50,6 +56,8 @@ class ZoneDesign(BaseModel):
     mode: ZoneMode
     allowed: tuple[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")], ...] | None = Field(
         default=None, min_length=1, exclude_if=lambda value: value is None)
+    # 這一區自己的深度上限（公尺；#1082 段 1-4）：固定區比貼上去的總深、搜尋區當搜尋的上限；保留原牆的區不加層、管不到。
+    max_depth_m: Depth | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _allowed_only_for_search(self) -> Self:
@@ -69,6 +77,8 @@ class DesignSettings(BaseModel):
     scheme_id: str
     zones: dict[str, dict[str, ZoneDesign]] = Field(default_factory=dict)
     original_scheme_id: str | None = Field(default=None, pattern="^" + NAME.pattern.removesuffix(r"\Z") + "$")
+    room_max_depth_m: Depth | None = Field(default=None, exclude_if=lambda value: value is None)
+    wall_max_depth_m: dict[WallName, Depth] = Field(default_factory=dict, exclude_if=lambda value: not value)
 
 
 def design_relative(scheme_id: str) -> Path:
@@ -90,7 +100,7 @@ def zone_keys(scheme: Scheme) -> dict[str, list[str]]:
 def mismatches(settings: DesignSettings, scheme: Scheme) -> list[str]:
     """設定裡對不上方案的牆或區，白話一條一句。"""
     keys = zone_keys(scheme)
-    problems = []
+    problems = [f"設計設定給了 {wall} 這面牆的深度上限，方案裡沒有這面牆" for wall in settings.wall_max_depth_m if wall not in keys]
     for wall, zones in settings.zones.items():
         if wall not in keys:
             problems.append(f"設計設定的牆 {wall} 方案裡沒有")
