@@ -267,8 +267,6 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.gradient import run
     from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths
-    from aosr.gradient.surrogate_coverage import check_covers
-    from aosr.gradient.surrogate_files import TRAINING_FILE
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
@@ -299,8 +297,7 @@ def _start(args: argparse.Namespace) -> int:
                                     current_operators_digest=fingerprint)
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
-    _check_start_materials(materials, model, scheme)
-    check_covers(surrogate.parent / TRAINING_FILE, materials)
+    _check_start_materials(materials, model, scheme, surrogate)
     checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers)
     del full_operators
     spot = None
@@ -333,19 +330,23 @@ def _start(args: argparse.Namespace) -> int:
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
 
-def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme) -> None:
-    """接進來的使用者家族在這一場的頻點與空氣下逐一建得起、算得出（:func:`aosr.gradient.run.check_user_families`）；
-    空腔不調的那幾筆照實印一行。沒有使用者家族什麼都不做（不碰替身）。"""
-    if not materials.entries:
-        return
-    import numpy as np
+def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme, surrogate: Path) -> None:
+    """接進來的使用者家族在這一場的頻點與空氣下逐一建得起、算得出（:func:`aosr.gradient.run.check_user_families`；
+    物理拒算重建替身也救不了，先講），空腔不調的那幾筆照實印一行；再核這一場的家族都在替身訓練過的範圍裡
+    （:func:`aosr.gradient.surrogate_coverage.check_covers`，#1082 段 2-3c；只有產品設定檔家族時舊替身照舊放行）。"""
+    from aosr.gradient.surrogate_coverage import check_covers
+    from aosr.gradient.surrogate_files import TRAINING_FILE
 
-    from aosr.gradient.run import check_user_families
+    if materials.entries:
+        import numpy as np
 
-    check_user_families(materials, tuple(float(value) for value in np.asarray(model.frequencies_hz)),
-                        density_kg_m3=scheme.scene.density_kg_m3, sound_speed_m_s=scheme.scene.sound_speed_m_s)
-    for note in cavity_notes(materials):
-        sys.stderr.write(f"注意：{note}\n")
+        from aosr.gradient.run import check_user_families
+
+        check_user_families(materials, tuple(float(value) for value in np.asarray(model.frequencies_hz)),
+                            density_kg_m3=scheme.scene.density_kg_m3, sound_speed_m_s=scheme.scene.sound_speed_m_s)
+        for note in cavity_notes(materials):
+            sys.stderr.write(f"注意：{note}\n")
+    check_covers(surrogate.parent / TRAINING_FILE, materials)
 
 
 def _start_scheme(root: Path, scheme_path: Path) -> Scheme:

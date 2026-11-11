@@ -173,7 +173,7 @@ def test_settings_refusals(tmp_path: Path, old: str, new: str, message: str) -> 
 # ---- 材料庫的可最佳化材料（#1082 段 2-3c）----
 
 # 改動前（116426a7）這間分區小房間的訓練說明（``document()`` 的 JSON，``ensure_ascii=False`` 加換行，跟建模命令列寫檔同一個寫法）
-# 整份位元組的 SHA-256；改動前的分支實跑存的那一份在工作區 1107-surrogate-library-coverage/evidence/baseline/document-zoned.json。
+# 整份位元組的 SHA-256；改動前的分支實跑存的那一份在 #1107 工作區 evidence 底下 baseline 那一夾（分區那份 document）。
 MAIN_DOCUMENT_SHA256 = "8492876d9277ed54a3404b17f30add0f9042a882ede5491891758d87085599a1"
 USER = "rock_wool_60k"
 ONE_VARIABLE = "panel_one_variable"
