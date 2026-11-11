@@ -31,7 +31,9 @@ from typing import Final, Literal, NamedTuple, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings
-from aosr.materials.library import FixedEntry, LibraryEntry, OptimizableEntry, load_user_library, template_assembly
+from aosr.materials.library import (
+    BASIS_LABELS, FixedEntry, LibraryEntry, MeasuredTable, OptimizableEntry, impedance_basis, load_user_library, template_assembly,
+)
 
 SNAPSHOT_VERSION: Final = "aosr.material_gradient_materials.v1"
 # v2（#1082 段 2-3b）：快照裡另有准用清單點名的使用者固定材料；只在有那種材料時寫，沒有照舊寫 v1（逐位不變）。
@@ -229,6 +231,14 @@ def fixed_candidates(targets: Sequence[str], presets: Sequence[PresetMaterial],
             raise MaterialsRefused(f"准用清單的固定材料 {material_id} 不在材料庫（內建構造預設或使用者的固定材料）裡，搜尋不開")
         found[target] = FixedCandidate(id=target, material=material)
     return tuple(found.values())
+
+
+def approximate_notes(user_fixed: Sequence[FixedEntry]) -> tuple[str, ...]:
+    """准用清單裡沒有虛部的實測表（老闆第二部分第 2 條）：照材料庫的規則虛部當 0、當純實數阻抗算，每一筆照實一行標「近似」。"""
+    label = BASIS_LABELS["approximate"]
+    return tuple(f"固定材料 {entry.id}（{entry.label}）的實測表沒有虛部：虛部當 0、當純實數阻抗算，結果是{label}"
+                 for entry in user_fixed
+                 if isinstance(entry.material, MeasuredTable) and impedance_basis(entry) == "approximate")
 
 
 def user_fixed_entries(ids: Sequence[str], entries: Sequence[LibraryEntry]) -> tuple[FixedEntry, ...]:

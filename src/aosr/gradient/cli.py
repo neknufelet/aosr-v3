@@ -65,8 +65,8 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS, fixed_target_id
 from aosr.materials.search_library import (
-    SNAPSHOT_FILE, MaterialsRefused, PresetMaterial, SearchMaterials, cavity_notes, fixed_candidates, read_user_entries,
-    refuse_fixed_as_family, snapshot_bytes, user_fixed_entries, with_user_materials,
+    SNAPSHOT_FILE, MaterialsRefused, PresetMaterial, SearchMaterials, approximate_notes, cavity_notes, fixed_candidates,
+    read_user_entries, refuse_fixed_as_family, snapshot_bytes, user_fixed_entries, with_user_materials,
 )
 
 if TYPE_CHECKING:
@@ -279,7 +279,6 @@ def _start(args: argparse.Namespace) -> int:
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    run.require_supported_original_walls(kept.values())
     designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps, table=materials.presets)
     expanded = _checked_allowed(allowed, designs, settings, fixed, caps, materials.presets)
     objective = run.search_objective_settings(args.purpose)
@@ -368,10 +367,9 @@ def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[Surface
                      settings: MaterialGradientSettings, fixed: dict[str, str],
                      caps: dict[str, float], table: tuple[PresetMaterial, ...]) -> dict[str, tuple[str, ...]]:
     """准用清單對起跑配置核一次（:func:`~aosr.gradient.fixed_surfaces.check_allowed_against_start`），回展開到面片的清單。
-    起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）；六類評分收不了的固定材料（裸實測表）在匯出完整模型
-    與關卡之前就拒收（:func:`~aosr.gradient.fixed_candidates.refuse_unscored_fixed_candidates`），不花完整解的錢。"""
+    起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）。實測阻抗表照收（#1082 段 2-3d：六類評分照產品入口
+    表內／表外分流）。"""
     from aosr.config.material_gradient import is_fixed_target
-    from aosr.gradient.fixed_candidates import refuse_unscored_fixed_candidates
     from aosr.gradient.fixed_surfaces import check_allowed_against_start, check_depth_targets, expanded_allowed_targets
 
     surfaces = tuple((design.surface_id, design.preset_id) for design in designs)
@@ -381,7 +379,6 @@ def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[Surface
     expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
     check_depth_targets(surfaces, settings, fixed_surfaces=fixed, max_depths=caps, allowed=allowed,
                         fixed_materials=_listed_fixed_materials(expanded, table))
-    refuse_unscored_fixed_candidates(designs, expanded, table)
     return expanded
 
 
@@ -442,6 +439,8 @@ def _start_materials(args: argparse.Namespace, settings_path: Path,
     settings = materials.settings if args.max_steps is None else with_max_steps(materials.settings, args.max_steps)
     targets = fixed_targets_of(allowed)
     user_fixed = user_fixed_entries([fixed_target_id(target) for target in targets], entries)
+    for note in approximate_notes(user_fixed):
+        sys.stderr.write(f"注意：{note}\n")
     if targets:
         materials = materials._replace(presets=(*materials.presets, *fixed_candidates(targets, materials.presets, user_fixed)))
     if not materials.entries and not user_fixed:

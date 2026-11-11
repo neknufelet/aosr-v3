@@ -64,17 +64,18 @@ def test_implementation_differences_and_single_material_crossover(measured: dict
     assert text.count('f_s（') == 2
     assert text.count('匯出方案：') == 1
 
-def test_bare_measured_original_wall_refused_without_endpoint_or_temporary_files(tmp_path: Path) -> None:
-    """裸實測原牆沿正式終點入口拒收；不得寫出結果或留下半份暫存檔。"""
-    done = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_endpoint_probe', str(tmp_path), 'measured-rejection'],
+def test_bare_measured_original_wall_reaches_endpoint_with_matching_scores(tmp_path: Path) -> None:
+    """方案原牆有裸實測表（#1082 段 2-3d）：真搜尋到終點；JAX 分數逐位等於直算、對正式 numpy 在登記容差加權和內。"""
+    done = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_endpoint_probe', str(tmp_path), 'measured'],
         cwd=tmp_path, env=endpoint_probe_env(tmp_path), capture_output=True, text=True, timeout=1800)
     (tmp_path / 'probe.stdout').write_text(done.stdout)
     (tmp_path / 'probe.stderr').write_text(done.stderr)
     assert done.returncode == 0, done.stdout + done.stderr
-    result = json.loads((tmp_path / 'rejection.json').read_text())
-    assert result['error_type'] == 'ValueError', result
-    assert result['error_origin'] == 'require_supported_original_walls', result
-    assert '實測原牆的表內／表外吸音分流尚未接入六類終點' in result['error_message']
-    assert result['endpoint_exists'] is False, result
-    assert result['new_files'] == [], result
-    assert result['endpoint_temporary_files'] == [], result
+    result = json.loads((tmp_path / 'measured.json').read_text())
+    assert result['original_floor_kind'] == 'measured_impedance', result
+    assert result['exported_floor_kind'] != 'measured_impedance', result
+    assert result['solves'] == result['expected_solves'], result
+    assert result['jax_bitwise'] == [True] * 4, result
+    assert result['numpy_bitwise'] == [True] * 2, result
+    assert result['within_registered_sum_bound'] == [True] * 2, result
+    assert result['all_scores_finite'] is True, result

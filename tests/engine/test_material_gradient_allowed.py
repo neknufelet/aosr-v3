@@ -231,21 +231,17 @@ def test_fixed_candidates_resolve_user_then_builtin_and_refuse_the_rest() -> Non
             materials.fixed_candidates((target,), table, (_measured(),))
 
 
-def test_entry_refuses_bare_measured_tables_with_the_factory_rule_and_takes_constructions() -> None:
-    """抓入口不擋裸實測表（關卡做完、第一次評到才整場失敗）、或把構造型固定材料也擋掉。判斷要跟六類工廠同一條。"""
-    from aosr.gradient.fixed_candidates import refuse_unscored_fixed_candidates
+def test_factory_takes_measured_tables_and_notes_the_ones_without_imaginary_parts() -> None:
+    """抓六類工廠仍拒收實測阻抗表當固定材料（#1082 段 2-3d 起照收），或沒有虛部的那一筆沒標「近似」、有虛部的也標了。"""
     from aosr.gradient.six_category_chain import design_materials
 
     table: tuple[materials.PresetMaterial, ...] = (*run.presets_table(), *materials.fixed_candidates(
-        ("fixed:" + CARPET, "fixed:" + MEASURED, "fixed:" + BUILT), run.presets_table(), (_measured(), _built())))
-    designs = search.designs_from_presets(tuple((wall.wall_name(), None) for wall in Wall.all()), _settings(), table,
-                                          kept=kept_walls(KEPT))
-    refuse_unscored_fixed_candidates(designs, {"x0": ("none", "fixed:" + CARPET), "floor": ("none", "fixed:" + BUILT)}, table)
-    with pytest.raises(materials.MaterialsRefused, match=f"固定材料 {MEASURED} 進不了第三階段六類評分.*MeasuredImpedance"):
-        refuse_unscored_fixed_candidates(designs, {"x0": ("none", "fixed:" + CARPET), "floor": ("none", "fixed:" + MEASURED)},
-                                         table)
-    with pytest.raises(ValueError, match="MeasuredImpedance"):
-        design_materials((search.fixed_candidate_design("x0", "fixed:" + MEASURED, {p.id: p for p in table}, "rigid"),))
+        ("fixed:" + MEASURED,), run.presets_table(), (_measured(),)))
+    (material,) = design_materials((search.fixed_candidate_design("x0", "fixed:" + MEASURED, {p.id: p for p in table}, "rigid"),))
+    assert material == _measured().surface_material()
+    assert materials.approximate_notes((_measured(), _built())) == ()
+    (note,) = materials.approximate_notes((_measured(imaginary=False), _built()))
+    assert MEASURED in note and "沒有虛部" in note and "純實數" in note and note.endswith("近似")
 
 
 def test_resume_refuses_a_builtin_fixed_material_changed_after_the_check(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -461,10 +457,12 @@ def test_web_start_hands_user_fixed_ids_to_the_plan_and_passes_the_library(tmp_p
     assert len(lists) == 1 and lists[0].endswith("=glass_wool_48k,fixed:" + BUILT), lists
 
 
-def test_web_start_refuses_a_listed_measured_table_by_name(tmp_path: Path) -> None:
-    """抓網頁把實測阻抗表交給背景開跑（六類評分還沒接上，背景才失敗）、或拒收時講成「材料庫裡沒有」。"""
-    with pytest.raises(PlanRefused, match=f"{MEASURED} 是實測阻抗表"):
-        _web_start(tmp_path, MEASURED, _measured())
+def test_web_start_hands_a_listed_measured_table_to_the_command_line(tmp_path: Path) -> None:
+    """抓網頁仍拒收准用清單裡的實測阻抗表（2-3b 的暫時拒收，2-3d 拿掉）、或沒帶材料庫給命令列。"""
+    command = _web_start(tmp_path, MEASURED, _measured(imaginary=False))
+    assert "--materials" in command
+    lists = [command[index + 1] for index, item in enumerate(command) if item == "--allowed"]
+    assert len(lists) == 1 and lists[0].endswith("=glass_wool_48k,fixed:" + MEASURED), lists
 
 
 @pytest.mark.parametrize(("allowed", "words"), [({"x0": (MEASURED,)}, "只有固定材料"), ({"x0": ("no_such",)}, "材料庫裡沒有")])

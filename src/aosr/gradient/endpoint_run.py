@@ -43,7 +43,6 @@ from aosr.gradient.gpu import Device
 from aosr.physics.fem_full_batch import checked_device_workers
 from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
 from aosr.gradient.endpoint_six import EndpointSix, score_endpoint, scoring_context
-from aosr.gradient.surrogate_guard import require_supported_original_walls
 from aosr.gradient.endpoint import (
     EndpointReport, EndpointResult, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
     UnscoredBand, UnscoredImprovement, below_scoring_improvement, below_scoring_notes, worst_big_peak,
@@ -342,7 +341,6 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     capabilities = load_capabilities(project.capabilities_path)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    require_supported_original_walls(kept.values())
     clock = time.perf_counter()
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)

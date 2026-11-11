@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
 
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
@@ -184,12 +185,33 @@ def _wall_load(template: ConstructionTemplate, frequencies: jax.Array, angles: j
     if isinstance(wall, Assembly):
         assert template.wall_template is not None
         return surface_impedance_from_parameters(template.wall_template, {}, frequencies, air=air, incidence_angles_deg=angles)
-    # 表內照局部反應攤開，表外同既有入口走底構造（用當下的空氣）；底構造整條軸都算，再依表外遮罩挑。
     assert template.wall_template is not None
-    load = tmm._broadcast_angles(_table_impedance(wall, frequencies).astype(dtype), angles)
-    base = surface_impedance_from_parameters(template.wall_template, {}, frequencies, air=air, incidence_angles_deg=angles)
-    outside = _outside_table(wall, frequencies)
-    return jnp.where(outside if angles is None else outside[:, None], base.astype(dtype), load)
+    return measured_table_impedance(wall, template.wall_template, frequencies, air=air, incidence_angles_deg=angles)
+
+
+def measured_table_template(material: MeasuredImpedance, frequencies_hz: jax.Array, *, air: PhysicsConstants,
+                            ranges: PorousModelRanges) -> ConstructionTemplate:
+    """實測表的底構造樣板（沒有變數）：先用產品入口 ``surface_impedance(實測表)`` 在這條軸上把關（表外頻點才求底構造，
+    跟 numpy 那套同一條），再直接包成樣板；不對底構造跑整條軸的 build_template，免得拒收 numpy 那套照收的表。"""
+    surface_impedance(material, frequencies_hz, air=air, ranges=ranges)
+    return ConstructionTemplate(material.base_assembly, (), ())
+
+
+def measured_table_impedance(material: MeasuredImpedance, base: ConstructionTemplate, frequencies_hz: jax.Array, *,
+                             air: PhysicsConstants, incidence_angles_deg: jax.Array | None = None,
+                             outside: NDArray[np.bool_] | None = None) -> jax.Array:
+    """實測表的表面阻抗（JAX、追蹤得過、精度跟頻率走）：表內照局部反應攤開，表外同既有入口走底構造（用當下的空氣）；
+    底構造整條軸都算，再依表外遮罩挑。``base`` 是底構造沒有變數的樣板。貼牆背後是實測表（原牆負載）與
+    第三階段六類搜尋的實測固定材料（#1082 段 2-3d）共用這一支，不另抄一份。
+    ``outside`` 給了就用它當表外遮罩（呼叫端用產品入口 construction._outside_table 在雙精度原始頻率軸上判一次）：
+    六類搜尋的晚期吸音遮罩也由同一支判，單精度下端點頻率捨入到表外時，阻抗與吸音才不會一邊算表內、一邊算表外（審查 #1102）。"""
+    frequencies = jnp.asarray(frequencies_hz)
+    angles = None if incidence_angles_deg is None else jnp.asarray(incidence_angles_deg)
+    dtype = jnp.result_type(frequencies.dtype, jnp.complex64)
+    load = tmm._broadcast_angles(_table_impedance(material, frequencies).astype(dtype), angles)
+    values = surface_impedance_from_parameters(base, {}, frequencies, air=air, incidence_angles_deg=angles)
+    side = _outside_table(material, frequencies) if outside is None else jnp.asarray(outside)
+    return jnp.where(side if angles is None else side[:, None], values.astype(dtype), load)
 
 
 def _table_impedance(material: MeasuredImpedance, frequencies: jax.Array) -> jax.Array:

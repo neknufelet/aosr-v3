@@ -50,23 +50,6 @@ class FixedCandidateCheck(BaseModel):
         return self
 
 
-def refuse_unscored_fixed_candidates(designs: Sequence[SurfaceDesign], allowed: Mapping[str, Sequence[str]],
-                                     table: Sequence[PresetMaterial]) -> None:
-    """產品入口目前拒收：第三階段六類評分工廠收不了的固定材料（裸實測阻抗表）開跑前就點名拒收，
-    不等關卡做完、第一次評到它才整場失敗。判斷用工廠自己那一條（``six_category_chain.design_materials``），兩邊不會漂。
-    底層（設計、帳本、匯出、關卡）照樣認得實測表，六類評分接上實測表那天拿掉這一道就好。"""
-    from aosr.gradient.fixed_surfaces import fixed_targets_of
-    from aosr.gradient.six_category_chain import design_materials
-
-    for target in fixed_targets_of(allowed):
-        try:
-            design_materials(candidate_designs(designs, target, allowed, table))
-        except ValueError as error:
-            raise MaterialsRefused(
-                f"固定材料 {fixed_target_id(target)} 進不了第三階段六類評分（{error}）：實測阻抗表在六類評分還沒接上，"
-                "這次不開；准用清單先拿掉它，或改用貼在牆上的構造") from error
-
-
 def candidate_designs(designs: Sequence[SurfaceDesign], target: str, allowed: Mapping[str, Sequence[str]],
                       table: Sequence[PresetMaterial]) -> tuple[SurfaceDesign, ...]:
     """起跑設計裡、准用清單列了 ``target`` 的每一片換成那份固定材料（整塊、沒有變數），其他片原樣。"""

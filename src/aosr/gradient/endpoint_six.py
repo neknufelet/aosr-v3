@@ -22,7 +22,7 @@ from aosr.gradient.surrogate_guard import require_matching_frequencies, require_
 from aosr.gradient.six_category_chain import impedance_function, design_materials
 from aosr.gradient.material_gradient import design_template_material
 from aosr.materials.construction import surface_impedance, surface_impedance_at_angles
-from aosr.materials.construction_models import MeasuredImpedance, SurfaceMaterial
+from aosr.materials.construction_models import SurfaceMaterial
 from aosr.reporting.compare import compare_results
 from aosr.scoring.gradient_objective_settings import gradient_objective_settings
 from aosr.scoring.stage_one_score import stage_one_score_settings
@@ -34,7 +34,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 from aosr.runtime import configure_calculation_jax
 from aosr.scoring.gradient_objective_jax import gradient_objective_from_pressures
-from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, build_constants, constant_material_flags, six_category_costs
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, build_constants, constant_absorption_mask, six_category_costs
 
 _FROZEN = ConfigDict(frozen=True, extra='forbid', allow_inf_nan=False)
 type Categories = tuple[float | None, float | None, float | None, float | None, float | None, float | None]
@@ -168,7 +168,7 @@ def numpy_scores(context: ScoringContext, scheme: Scheme, pressure: NDArray[np.c
 
 def baseline_impedances(designs: tuple[SurfaceDesign, ...], c: SixCategoryConstants, *,
                         model: ReducedModel) -> tuple[tuple[jax.Array, jax.Array, jax.Array, jax.Array], jax.Array]:
-    """無梯度原牆沿產品材料入口求四路；實測逐頻分流接入前保留明確拒收。"""
+    """無梯度原牆沿產品材料入口求四路；實測表的晚期吸音照產品入口逐頻分流（constant_absorption_mask）。"""
     air, ranges = construction_environment(density_kg_m3=model.density_kg_m3, sound_speed_m_s=model.sound_speed_m_s)
     materials: list[SurfaceMaterial] = []
     for design in designs:
@@ -176,8 +176,6 @@ def baseline_impedances(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
         if material is None:
             raise ValueError(f'原牆 {design.surface_id} 沒有材料')
         materials.append(material)
-    if any(isinstance(material, MeasuredImpedance) for material in materials):
-        raise ValueError('實測原牆的表內／表外吸音分流尚未接入六類終點；拒絕寫出定義不同的分數')
     def impedance(material: SurfaceMaterial, axis: np.ndarray, angles: np.ndarray | None = None) -> jax.Array:
         frequencies = jnp.asarray(axis, dtype=jnp.float64)
         incidence = None if angles is None else jnp.asarray(angles, dtype=jnp.float64)
@@ -191,7 +189,7 @@ def baseline_impedances(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
     early = jnp.concatenate([impedance(m, c.frequencies_hz, c.angles_deg[int(a):int(b)])
         for m, a, b in zip(materials, c.angle_offsets[:-1], c.angle_offsets[1:], strict=True)], axis=1)
     paris = jnp.stack([impedance(m, c.union_frequencies_hz, c.paris_angles_deg) for m in materials])
-    return (fem, normal, early, paris), jnp.asarray(constant_material_flags(materials))
+    return (fem, normal, early, paris), jnp.asarray(constant_absorption_mask(materials, c.union_frequencies_hz))
 
 
 def _difference(base: float | None, end: float | None) -> float | None:
@@ -211,7 +209,7 @@ def score_comparison(context: ScoringContext, model: ReducedModel, designs: tupl
         impedances, flags = baseline_impedances(designs, c, model=model)
     else:
         impedances = impedance_function(designs, c, air=air, ranges=ranges)(jnp.asarray(theta, dtype=jnp.float64), c)
-        flags = jnp.asarray(constant_material_flags(design_materials(designs)))
+        flags = jnp.asarray(constant_absorption_mask(design_materials(designs), c.union_frequencies_hz))
     if reduced is None:
         rows = np.asarray(impedances[0])
         reduced_rows = []

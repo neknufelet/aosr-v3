@@ -7,10 +7,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    import jax
 
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ, LATE_DECAY_FREQUENCIES_HZ, low_frequency_axis_frequencies
@@ -19,7 +22,8 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.quality_targets import load_quality_targets
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction import _outside_table
+from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.materials.transfer_matrix import diffuse_incidence_angles_deg
 from aosr.physics import geometric_early_jax as early
@@ -72,6 +76,20 @@ class SchemeInputs(Protocol):
 def constant_material_flags(materials: Sequence[SurfaceMaterial]) -> NDArray[np.bool_]:
     """照面片材料序回布林 (N,)；只有 ConstantImpedance（固定阻抗）採常數吸音入口。"""
     return np.asarray([isinstance(material, ConstantImpedance) for material in materials], dtype=np.bool_)
+
+
+def constant_absorption_mask(materials: Sequence[SurfaceMaterial],
+                             union_frequencies_hz: Sequence[float] | NDArray[np.float64]) -> NDArray[np.bool_]:
+    """晚期吸音走哪一個入口：沒有實測表時就是 :func:`constant_material_flags` 的 (N,)（逐位照舊）；
+    有實測表（MeasuredImpedance）時回聯集軸上的逐頻遮罩 (N, F_union)，跟產品 ``random_incidence_absorption`` 同一條：
+    實測表表內用固定阻抗那一支換算（表值），表外走底構造的 Paris 角度積分；固定阻抗整列 True、構造整列 False。"""
+    flags = constant_material_flags(materials)
+    if not any(isinstance(material, MeasuredImpedance) for material in materials):
+        return flags
+    axis = np.asarray(union_frequencies_hz, dtype=np.float64)
+    # 產品入口那一支只做 np.asarray 比端點；型別標 jax.Array 是給產品呼叫端的，雙精度 numpy 軸照收（不先轉 jnp：沒開 x64 會降成單精度）。
+    return np.stack([~_outside_table(material, cast('jax.Array', axis)) if isinstance(material, MeasuredImpedance) else np.full(axis.shape, flag)
+                     for material, flag in zip(materials, flags, strict=True)])
 
 
 def _paths(data: early.GeometricEarlyTable, pairs: tuple[early.EarlyPairTable, ...]) -> dict[str, np.ndarray]:

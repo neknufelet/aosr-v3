@@ -293,3 +293,27 @@ def test_fixed_candidates_are_trained_and_held_out_on_their_allowed_patches() ->
         sets.document(training, holdout, coverage_for(materials, ()) or coverage.model_copy(update={"fixed": ()}))
     with pytest.raises(ValueError, match="留出材料一片都沒放過固定材料"):
         sets.require_every_family(training, [item for item in holdout if item not in placed_holdout])
+
+
+def test_measured_fixed_candidates_are_placed_and_recorded_for_training() -> None:
+    """抓建替身那條（``surrogate_build._open`` → ``TrainingSets``）收不了實測阻抗表當固定材料候選（段 2-3d 接上評分、
+    2-3c 閘門要求替身訓練過它）：訓練與留出都放到准用的面片、匯出的就是那張表（虛部補 0 的物理格式）、訓練說明記得它。
+    阻抗那一步（``TrainingSets.impedances`` → 產品 ``surface_impedance``）要雙精度行程，這裡不跑；原牆是實測表時同一支早就收。"""
+    from tests.engine.test_material_gradient_allowed import MEASURED, _measured
+
+    base_sets, materials = _user_sets()
+    zone = base_sets.names[2]
+    table = _measured(imaginary=False)
+    fixed = fixed_targets({zone: ("glass_wool_48k", "fixed:" + MEASURED)},
+                          fixed_candidates(["fixed:" + MEASURED], run.presets_table(), (table,)))
+    sets = TrainingSets(base_sets.saved, SEARCH, SAMPLING, air=base_sets.air, ranges=base_sets.ranges,
+                        frequencies_hz=base_sets.axis, fixed=fixed)
+    training, holdout = sets.training_sets(), sets.holdout_sets()
+    placed = [item for item in (*training, *holdout) if any(face.kind == "fixed" for face in item.faces)]
+    assert len(placed) == 3
+    for item in placed:
+        assert [name for name, face in zip(sets.names, item.faces, strict=True) if face.kind == "fixed"] == [zone]
+        assert sets.materials(item)[sets.keys[2]] == table.surface_material()
+    coverage = coverage_for(materials, fixed)
+    assert coverage is not None and coverage.fixed == (fixed[0].coverage(),) and fixed[0].material["kind"] == "measured_impedance"
+    assert sets.document(training, holdout, coverage)["coverage"] == coverage.model_dump(mode="json")

@@ -8,12 +8,13 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal, cast
+from typing import Literal
 
 import numpy as np
 
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, is_fixed_target
-from aosr.materials.construction_models import Assembly
+from aosr.materials.construction_models import Assembly, MeasuredImpedance
+from aosr.materials.library import MeasuredTable
 
 DEPTH_SLACK_M = 1e-6
 """總深跟上限比時放過的浮點尾數（公尺）：同網頁切牆面的 ``zone_edit.EDGE_MERGE_TOL``（考卷釘兩邊相等）。搜尋把空腔切到
@@ -72,16 +73,26 @@ def _snap_fits(family: FamilySettings, max_total: float) -> bool:
 
 def fixed_material_depth_m(material: object) -> float | None:
     """固定材料整塊的總深（公尺）：多層構造是每一層厚度加總（板與布這類層沒有厚度欄、當 0，同網頁 ``zone_limits.added_depth``）；
-    直接給阻抗的材料（固定阻抗、實測表，物理用的或材料庫那一份都一樣）看不出多深，回 None。"""
+    實測表（物理用的或材料庫那一份都一樣）一定附底構造（段 2-1），總深照底構造算（#1082 段 2-3d）；
+    固定阻抗直接給阻抗、看不出多深，回 None。"""
     total = _written_depth(material)
     return None if total is None else float(total)
 
 
 def _written_depth(material: object) -> Decimal | None:
     """照寫下來的十進位數字逐層相加（0.05＋0.1 就是 0.15，不帶浮點尾數），只拿來印。"""
-    if not isinstance(material, Assembly):
-        return None
-    return _layers_depth(material.layers)
+    assembly = depth_assembly(material)
+    return None if assembly is None else _layers_depth(assembly.layers)
+
+
+def depth_assembly(material: object) -> Assembly | None:
+    """拿來量總深的那一份構造：多層構造是它自己；實測表是它的底構造（量測時樣品就是那一份構造，表外也照它補值）；
+    其餘（固定阻抗）回 None。"""
+    if isinstance(material, Assembly):
+        return material
+    if isinstance(material, MeasuredImpedance | MeasuredTable):
+        return material.base_assembly
+    return None
 
 
 def _layers_depth(layers: Sequence[object]) -> Decimal:
@@ -95,11 +106,12 @@ def layers_exceed(layers: Sequence[object], cap: float) -> bool:
 
 
 def fixed_fit(target: str, material: object, cap: float) -> TargetFit:
-    """固定材料對個案上限：總深超過就不可用；量不出多深也不可用（限制是硬的，判不了放不放得下就不放）。"""
-    written = _written_depth(material)
-    if written is None:
+    """固定材料對個案上限：總深超過就不可用；量不出多深也不可用（限制是硬的，判不了放不放得下就不放）。
+    實測表用底構造的總深比（:func:`depth_assembly`），比法同多層構造這一把。"""
+    written, assembly = _written_depth(material), depth_assembly(material)
+    if written is None or assembly is None:
         return TargetFit(target, False, "fixed_not_comparable", None, "case")
-    if layers_exceed(cast(Assembly, material).layers, cap):
+    if layers_exceed(assembly.layers, cap):
         return TargetFit(target, False, "fixed_too_deep", None, "case", float(written))
     return TargetFit(target, True, "fits", cap, "case", float(written))
 

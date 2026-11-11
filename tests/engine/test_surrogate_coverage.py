@@ -234,3 +234,21 @@ def test_fixed_candidate_on_fewer_patches_than_trained_still_passes(tmp_path: Pa
     training = _written(tmp_path, _fixed_targets(both, _fixed()))
     check_covers(training, _materials(), _fixed_targets({ZONE: ("glass_wool_48k", "fixed:panel_fixed")}, _fixed()))
     check_covers(training, _materials(), _fixed_targets({"x0@r1_c1": ("fixed:panel_fixed",)}, _fixed()))
+
+
+def test_measured_fixed_candidate_runs_only_when_the_surrogate_was_trained_with_it(tmp_path: Path) -> None:
+    """抓實測阻抗表當固定材料（#1082 段 2-3d 接上六類評分之後）繞過涵蓋閘門：替身訓練過它開得了跑，沒訓練過、
+    或表的內容跟訓練時不同（換了一列實部）都拒收、點名那張表。"""
+    from tests.engine.test_material_gradient_allowed import MEASURED, _measured
+
+    table = _measured(imaginary=False)
+    fixed = _fixed_targets({ZONE: ("glass_wool_48k", "fixed:" + MEASURED)}, table)
+    assert fixed[0].material["kind"] == "measured_impedance"
+    _refused_fixed(_legacy(tmp_path), fixed, f"固定材料 fixed:{MEASURED} 沒訓練過")
+    training = _written(tmp_path / "trained", fixed)
+    check_covers(training, _materials(), fixed)
+    dumped = table.model_dump(mode="json")
+    rows = [dict(row) for row in dumped["material"]["points"]]
+    rows[0]["real_pa_s_m"] = float(rows[0]["real_pa_s_m"]) * 1.5
+    changed = cast(library.FixedEntry, _ENTRY.validate_python({**dumped, "material": {**dumped["material"], "points": rows}}))
+    _refused_fixed(training, _fixed_targets({ZONE: ("fixed:" + MEASURED,)}, changed), f"固定材料 fixed:{MEASURED} 的內容跟訓練時不同")

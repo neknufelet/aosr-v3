@@ -259,7 +259,6 @@ def _prepare(job: _Run, capabilities_path: Path) -> tuple[FullOperators, tuple[f
     capabilities = load_capabilities(capabilities_path.resolve())
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     saved = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    run.require_supported_original_walls(saved.values())
     axis = low_frequency_axis_frequencies(scheme.scene.low_frequency_axis)[0]
     materials = job.materials
     run.check_user_families(materials, axis, density_kg_m3=scheme.scene.density_kg_m3,

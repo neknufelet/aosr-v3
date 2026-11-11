@@ -40,7 +40,7 @@ from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target, fixed_target_id, is_fixed_target, load_material_gradient_settings,
+    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target_id, is_fixed_target, load_material_gradient_settings,
 )
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
@@ -58,7 +58,6 @@ from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.gui.zone_limits import DepthTargets
-from aosr.materials.construction_models import MeasuredImpedance
 from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
 from aosr.materials.search_library import (
     MaterialsRefused, SearchMaterials, fixed_candidates, refuse_fixed_as_family, user_fixed_entries, with_user_materials,
@@ -264,18 +263,6 @@ def _not_trained(surrogate: Path, materials: SearchMaterials, fixed: tuple[Fixed
     return None
 
 
-def _refuse_measured_tables(plan: SearchPlan, entries: tuple[LibraryEntry, ...]) -> None:
-    """准用清單列了使用者的實測阻抗表就點名拒收：第三階段六類評分還沒接上裸實測表（命令列開跑前用評分工廠同一條判斷再擋一次），
-    在這裡先講清楚是哪一筆、為什麼，不讓它落成「材料庫裡沒有」或背景開跑才失敗。"""
-    measured = {fixed_target(entry.id) for entry in entries
-                if isinstance(entry, FixedEntry) and isinstance(entry.surface_material(), MeasuredImpedance)}
-    listed = sorted({target for targets in (plan.allowed or {}).values() for target in targets} & measured)
-    if listed:
-        names = "、".join(target.removeprefix("fixed:") for target in listed)
-        raise PlanRefused(f"准用清單裡的 {names} 是實測阻抗表：第三階段六類評分還沒接上實測表，搜尋不開；"
-                          "先從准用清單拿掉，或在材料庫改用貼在牆上的構造")
-
-
 class GradientJobs:
     """``scheme_lock`` 是網頁存方案、設計設定、封存共用的那一把：只在讀方案與設計設定做快照時拿；工作狀態另一把。"""
 
@@ -321,7 +308,6 @@ class GradientJobs:
                                *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
         plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check,
                            depth_targets=library_depth_targets(materials.settings, entries))
-        _refuse_measured_tables(plan, entries)
         return plan, materials, entries
 
     def depth_targets(self) -> DepthTargets:
