@@ -1,4 +1,4 @@
-"""worktree（第二個工作目錄）的家與名字只有一種；拆樹只拆「PR 已合進主線、頭對得上」或「沒開過 PR、沒有主線之外的提交」（#442），而且樹乾淨、沒有會跟著消失的被忽略檔的。"""
+"""worktree（第二個工作目錄）的家與名字只有一種；拆樹只拆「PR 已合進主線、頭對得上」或「沒開過 PR、沒有主線之外的提交」（#442），或人看過、打 --bundle、主線之外的提交先打包驗過（#1076），而且樹乾淨、沒有會跟著消失的被忽略檔的。"""
 from __future__ import annotations
 
 import stat
@@ -692,3 +692,231 @@ def test_an_unreadable_commit_count_is_not_read_as_zero() -> None:
 
     with pytest.raises(WorktreeError, match="不是數字"):
         worktrees.commits_outside_mainline("feat/364-worktree-home", odd_git)
+
+
+# ---- #1076：人看過、打 --bundle 的拆樹路徑 ----
+
+BRANCH = "feat/364-worktree-home"
+
+
+def _bundles(folder: Path) -> list[str]:
+    """派工資料夾裡跟包有關的檔（含暫名）。"""
+    return sorted(p.name for p in folder.iterdir() if worktrees.BUNDLE_SUFFIX in p.name)
+
+
+def _fresh_repo(sandbox: GitSandbox, where: Path) -> worktrees.Git:
+    """只有主線的全新 repo，還原一律在這裡做。
+
+    沙箱裡刪掉分支之後，那幾顆提交的物件還在沙箱的物件庫：在沙箱裡 fetch 包，排除基底寫錯、少裝提交的包
+    照樣 fetch 得回來，考卷空過。命令列的 --git-dir／--work-tree 蓋得過沙箱釘的 GIT_DIR／GIT_WORK_TREE；
+    GIT_INDEX_FILE 蓋不過，但 init、fetch、cat-file、rev-list 都不碰索引。
+    """
+    where.mkdir()
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return sandbox.git(f"--git-dir={where / '.git'}", f"--work-tree={where}", *args)
+
+    git("init", "-q", "-b", "unborn")
+    git("fetch", "-q", str(sandbox.root), "main:main")
+    return git
+
+
+def _two_own_commits(sandbox: GitSandbox) -> str:
+    """分支上兩顆主線沒有的提交，主線再往前走一顆。回分支的頭。"""
+    _own_commit(sandbox, BRANCH)
+    own = _own_commit(sandbox, BRANCH)
+    _advance_main(sandbox)
+    return own
+
+
+def test_bundle_saves_every_commit_outside_mainline_then_removes(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """PR 關掉沒合、分支上兩顆自己的提交：打包、驗過、拆樹刪分支，工單留著。
+
+    包要在只有主線的全新 repo 裡還原得回那兩顆：先斷言那裡本來沒有（控制組，證明不是打在沙箱上），
+    還原後頭要對得上、主線之外正好兩顆。
+    """
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _two_own_commits(git_sandbox)
+    brief = path.parent / "brief.md"
+    brief.write_text("工單\n", encoding="utf-8")
+
+    gone, saved = worktrees.remove_with_bundle("364-worktree-home", git_sandbox.git, _answers("CLOSED", own), tmp_path / "work")
+
+    assert gone.path == path
+    assert not path.exists()
+    assert BRANCH not in _branches(git_sandbox)
+    assert brief.is_file()
+    assert saved is not None
+    assert saved.parent == path.parent
+    assert _bundles(path.parent) == [saved.name]
+    fresh = _fresh_repo(git_sandbox, tmp_path / "restore")
+    with pytest.raises(AssertionError):
+        fresh("cat-file", "-e", own)
+    fresh("fetch", "-q", str(saved), f"refs/heads/{BRANCH}:refs/heads/restored")
+    assert fresh("rev-parse", "refs/heads/restored").stdout.strip() == own
+    assert fresh("rev-list", "--count", "refs/heads/restored", "^refs/heads/main").stdout.strip() == "2"
+
+
+@pytest.mark.parametrize("unsaved", ["untracked", "modified", "ignored"])
+def test_bundle_still_refuses_a_tree_with_anything_unsaved(
+    git_sandbox: GitSandbox, tmp_path: Path, unsaved: str
+) -> None:
+    """--bundle 只跳過分支那一格；樹裡沒保存的東西打包不到，照擋，也不先打包。"""
+    _ignore(git_sandbox, "notes/")
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _two_own_commits(git_sandbox)
+    target = {"untracked": path / "draft.md", "modified": path / "a.txt", "ignored": path / "notes" / "measured.md"}[unsaved]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("還沒保存的東西\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match="不拆"):
+        worktrees.remove_with_bundle("364-worktree-home", git_sandbox.git, _answers("CLOSED", own), tmp_path / "work")
+
+    assert target.read_text(encoding="utf-8") == "還沒保存的東西\n"
+    assert BRANCH in _branches(git_sandbox)
+    assert _bundles(path.parent) == []
+
+
+def _failing_bundle(sandbox: GitSandbox, step: str) -> worktrees.Git:
+    """``git bundle <step>`` 失敗（list-heads 則是印出別的頭），其餘照常。"""
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ("bundle", step):
+            if step == "list-heads":
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{'0' * 40} refs/heads/{BRANCH}\n", stderr="")
+            raise WorktreeError(f"假的失敗：打包那一步（{step}）回 128")
+        return sandbox.git(*args)
+
+    return git
+
+
+@pytest.mark.parametrize("step", ["create", "verify", "list-heads"])
+def test_a_bundle_that_fails_or_does_not_check_out_stops_removal(
+    git_sandbox: GitSandbox, tmp_path: Path, step: str
+) -> None:
+    """打包、驗證、核頭任一步不成立：樹與分支原封不動，派工資料夾不留正式名的包，暫名檔也清掉。"""
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _two_own_commits(git_sandbox)
+
+    with pytest.raises(WorktreeError):
+        worktrees.remove_with_bundle("364-worktree-home", _failing_bundle(git_sandbox, step), _answers("CLOSED", own), tmp_path / "work")
+
+    assert path.is_dir()
+    assert git_sandbox.git("rev-parse", f"refs/heads/{BRANCH}").stdout.strip() == own
+    assert _bundles(path.parent) == []
+
+
+def test_bundle_refuses_while_the_pull_request_is_still_open(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _two_own_commits(git_sandbox)
+
+    with pytest.raises(WorktreeError, match="還開著"):
+        worktrees.remove_with_bundle("364-worktree-home", git_sandbox.git, _answers("OPEN", own), tmp_path / "work")
+
+    assert path.is_dir()
+    assert BRANCH in _branches(git_sandbox)
+    assert _bundles(path.parent) == []
+
+
+def test_bundle_refuses_a_failed_pull_request_lookup(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    _two_own_commits(git_sandbox)
+
+    def broken(_branch: str) -> PullRequest | None:
+        raise WorktreeError("gh pr list 回 1：no network")
+
+    with pytest.raises(WorktreeError, match="no network"):
+        worktrees.remove_with_bundle("364-worktree-home", git_sandbox.git, broken, tmp_path / "work")
+
+    assert path.is_dir()
+    assert _bundles(path.parent) == []
+
+
+@pytest.mark.parametrize("where", [("elsewhere",), ("outside", "364-worktree-home", "tree")])
+def test_bundle_refuses_a_tree_outside_the_work_folder(
+    git_sandbox: GitSandbox, tmp_path: Path, where: tuple[str, ...]
+) -> None:
+    """不住在派工資料夾底下，包不知道放哪，不拆；資料夾剛好也叫 364-worktree-home／tree、但不在工作區底下的也一樣。"""
+    _seed(git_sandbox)
+    elsewhere = tmp_path.joinpath(*where)
+    git_sandbox.git("worktree", "add", "-q", "-b", BRANCH, str(elsewhere), "main")
+    _origin(git_sandbox)
+
+    with pytest.raises(WorktreeError, match="位置或名字不合規矩"):
+        worktrees.remove_with_bundle(BRANCH, git_sandbox.git, _answers("CLOSED"), tmp_path / "work")
+
+    assert elsewhere.is_dir()
+    assert BRANCH in _branches(git_sandbox)
+
+
+def test_bundle_refuses_a_detached_tree(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    _seed(git_sandbox)
+    path = tmp_path / "work" / "364-worktree-home" / "tree"
+    git_sandbox.git("worktree", "add", "-q", "--detach", str(path), "main")
+
+    with pytest.raises(WorktreeError, match="^不拆：沒掛在分支上"):
+        worktrees.remove_with_bundle("364-worktree-home", git_sandbox.git, _answers("CLOSED"), tmp_path / "work")
+
+    assert path.is_dir()
+    assert _bundles(path.parent) == []
+
+
+def test_bundle_with_nothing_outside_mainline_removes_without_a_bundle(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    path, head = _open_tree(git_sandbox, tmp_path / "work")
+    _origin(git_sandbox)
+
+    gone, saved = worktrees.remove_with_bundle("364-worktree-home", git_sandbox.git, _answers("CLOSED", head), tmp_path / "work")
+
+    assert saved is None
+    assert not gone.path.exists()
+    assert _bundles(path.parent) == []
+
+
+@pytest.mark.parametrize(("state", "hinted"), [("CLOSED", True), (None, True), ("OPEN", False)])
+def test_refusal_without_the_flag_points_at_it_only_where_it_would_help(
+    git_sandbox: GitSandbox, tmp_path: Path, state: str | None, hinted: bool
+) -> None:
+    """沒打旗標的舊兩條路照拒；分支那一格擋下、--bundle 收得下時才提示，PR 還開著不提示。"""
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _two_own_commits(git_sandbox)
+
+    with pytest.raises(WorktreeError, match="不拆") as caught:
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers(state, own))
+
+    assert ("--bundle" in str(caught.value)) is hinted
+    assert path.is_dir()
+    assert _bundles(path.parent) == []
+
+
+@pytest.mark.parametrize(("state", "why"), [("MERGED", "unsaved.txt"), ("CLOSED", "還沒合")])
+def test_a_dirty_tree_refusal_does_not_point_at_the_flag(
+    git_sandbox: GitSandbox, tmp_path: Path, state: str, why: str
+) -> None:
+    """髒樹打 --bundle 也拆不掉，提示它只會讓人白跑一趟：分支那一格放行（樹髒擋下）或分支那一格也擋下，都不提示。"""
+    path, head = _open_tree(git_sandbox, tmp_path / "work")
+    _origin(git_sandbox)
+    (path / "unsaved.txt").write_text("還沒提交的東西\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match=why) as caught:
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers(state, head))
+
+    assert "--bundle" not in str(caught.value)
+    assert (path / "unsaved.txt").is_file()
+
+
+def test_main_remove_with_the_bundle_flag_prints_where_the_bundle_went(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "work"
+    path, _head = _open_tree(git_sandbox, root)
+    own = _two_own_commits(git_sandbox)
+    _wire_main(monkeypatch, git_sandbox, root, _answers("CLOSED", own))
+
+    assert worktrees.main(["remove", "364-worktree-home"]) == TOOL_BROKEN
+    assert path.is_dir()
+    assert worktrees.main(["remove", "364-worktree-home", "--bundle"]) == CLEAN
+
+    printed = capsys.readouterr()
+    (bundle,) = _bundles(path.parent)
+    assert str(path.parent / bundle) in printed.out + printed.err
+    assert not path.exists()

@@ -4,18 +4,22 @@
 ``~/aosr-v3-work/<票號>-<短名>/``：工單與證據放那一層，樹住它底下的 ``tree/``，分支叫
 ``<種類>/<票號>-<短名>``——資料夾、樹、分支三樣東西一個名字。
 
-三個動作：``new`` 開樹、``list`` 列樹並把不合規矩的標出來、``remove`` 拆樹。拆樹有兩條路，
-後兩格兩條路都要成立：
+三個動作：``new`` 開樹、``list`` 列樹並把不合規矩的標出來、``remove`` 拆樹。拆樹有三條路，
+樹的兩格（最後一點）每條路都要成立：
 
 - 開過 PR（合併請求）的：PR 已經合進主線（base 是主線，不是合進別條分支）、本機分支的頭就是 PR 的頭。
 - 沒開過 PR 的（#442）：先更新 origin/main，分支上沒有任何一顆主線之外的提交。不要求分支的頭等於
   最新主線——主線往前走了，從舊主線開出來、什麼都沒做的樹照樣能拆。
-- 兩條路都要：樹裡沒有改過或沒進版控的檔、被 ``.gitignore`` 蓋住的檔只有重建得回來的那幾種。
+- 人看過、明確打 ``--bundle`` 的（#1076）：前兩條不成立也能拆（例：PR 關掉沒合、合了之後本機又多提交、
+  沒開過 PR 但有自己的提交），但 PR 還開著照拒。工具先把分支上不在主線裡的每一顆提交打包（git bundle）
+  存進派工資料夾、驗過才拆；打包或驗證任何一步不成立都不拆。
+- 每條路都要：樹裡沒有改過或沒進版控的檔、被 ``.gitignore`` 蓋住的檔只有重建得回來的那幾種。
 
 主線用 squash（把整條分支壓成一顆提交）合併，``git branch --merged`` 看不出合了沒，所以開過 PR 的
 去問 GitHub；壓過的分支上原本那幾顆提交不在主線上，所以「主線之外的提交」那一格只用在沒開過 PR 的。
 PR 問不到、git 量不下去，一律停，不當成沒有 PR、也不當成零顆提交。「符合清理條件」只是 ``list``
-印出來給人看，不會自動拆；要拆一律走 ``remove``，這裡不加 ``--force``。沒進版控的檔 ``git worktree remove``
+印出來給人看，不會自動拆；要拆一律走 ``remove``，這裡不加 ``--force``：``--bundle`` 跳過的只有分支那一格，
+樹的兩格照量，而且跳過之前先把會丟掉的提交打包留下。沒進版控的檔 ``git worktree remove``
 自己也會擋，這裡先量一次、把檔名印出來；git 的「乾淨」不看被忽略的檔、拆的時候會一起刪掉，所以那一格也自己量。
 派工資料夾裡的工單與證據不動，只拿掉 ``tree/`` 與本機分支。
 
@@ -23,7 +27,7 @@ PR 問不到、git 量不下去，一律停，不當成沒有 PR、也不當成�
 把放錯地方的、名字對不上的、該拆沒拆的標出來並回非零」。
 
 用法：``uv run python -m governance.worktrees new 364 worktree-home``、
-``... list``、``... remove 364-worktree-home``。
+``... list``、``... remove 364-worktree-home``、``... remove 364-worktree-home --bundle``。
 """
 from __future__ import annotations
 
@@ -50,6 +54,9 @@ MERGED = "MERGED"
 OPEN = "OPEN"
 MAINLINE = "main"
 IGNORED_MARK = "!! "
+BUNDLE_SUFFIX = ".bundle"
+PARTIAL_SUFFIX = ".partial"
+BUNDLE_HINT = "（看過、確定那些提交不要了：加 --bundle，工具先把主線之外的提交打包存進派工資料夾、驗過才拆）"
 # 被 .gitignore 蓋住、拆樹時跟著消失也無所謂的東西：環境、快取、本機那份 junit 收據
 # （本機跑出來的只是宣稱，雲端那一跑才算數）。不在這裡的被忽略檔一律擋下來給人看。
 # 前一張只認樹的根層那一個（``notes/.venv/`` 不算）；位元組碼快取每一層都會長，認任何一層。
@@ -329,14 +336,10 @@ def ignored_keepsakes(item: Linked, git: Git) -> list[str]:
     return [rel for rel in rels if not _rebuildable(rel)]
 
 
-def refusal(item: Linked, found: PullRequest | None, git: Git) -> str | None:
-    """這一棵為什麼不拆，None＝可以拆。``list`` 說「該拆」與 ``remove`` 真的去拆問的是同一支：
-
-    兩邊條件不一樣的話，``list`` 會叫人去拆一棵 ``remove`` 自己不肯拆的樹，人就會改用硬拆。
-    """
-    reason = keep_reason(item, found, git)
-    if reason is not None or not item.path.is_dir():
-        return reason
+def tree_refusal(item: Linked, git: Git) -> str | None:
+    """樹的兩格：改過或沒進版控的檔、會跟著消失的被忽略檔。None＝這兩格放行。三條路都問這一支。"""
+    if not item.path.is_dir():
+        return None
     dirty = unsaved_changes(item, git)
     if dirty:
         return f"樹裡有改過、暫存或沒進版控的檔，拆了就丟，先提交、搬走或刪掉：{dirty}"
@@ -346,15 +349,82 @@ def refusal(item: Linked, found: PullRequest | None, git: Git) -> str | None:
     return None
 
 
+def refusal(item: Linked, found: PullRequest | None, git: Git) -> str | None:
+    """這一棵為什麼不拆，None＝可以拆。``list`` 說「該拆」與 ``remove`` 真的去拆問的是同一組條件：
+
+    兩邊條件不一樣的話，``list`` 會叫人去拆一棵 ``remove`` 自己不肯拆的樹，人就會改用硬拆。
+    """
+    return keep_reason(item, found, git) or tree_refusal(item, git)
+
+
 def remove(key: str, git: Git, pull_request: PrLookup) -> Linked:
-    """拆一棵。任何一格不成立都不拆，原因照印。``git`` 的 cwd 不准是要拆的那一棵。"""
+    """拆一棵（前兩條路）。任何一格不成立都不拆，原因照印。``git`` 的 cwd 不准是要拆的那一棵。
+
+    擋下來的是分支那一格、而且 ``--bundle`` 那條路收得下時（不是 PR 還開著、不是沒掛分支、樹的兩格也成立），
+    原因後面提示那個旗標；樹髒的時候打旗標照樣拆不掉，提示只會讓人白跑一趟。
+    """
     item = find(key, git)
-    reason = refusal(item, pull_request(item.branch) if item.branch is not None else None, git)
+    found = pull_request(item.branch) if item.branch is not None else None
+    reason = keep_reason(item, found, git)
     if reason is not None or item.branch is None:
+        helps = item.branch is not None and not (found is not None and found.state == OPEN)
+        hint = BUNDLE_HINT if helps and tree_refusal(item, git) is None else ""
+        raise WorktreeError(f"不拆：{reason}{hint}")
+    reason = tree_refusal(item, git)
+    if reason is not None:
         raise WorktreeError(f"不拆：{reason}")
     git("worktree", "remove", str(item.path))
     git("branch", "-D", item.branch)
     return item
+
+
+def bundle_outside_mainline(branch: str, folder: Path, git: Git) -> Path | None:
+    """把分支上不在主線（剛更新過的 origin/main）裡的每一顆提交打包存進 ``folder``；零顆回 None、不打包。
+
+    排除端與 :func:`commits_outside_mainline` 數顆數用同一格 ``MAINLINE_REF``。先寫暫名、驗過
+    （``git bundle verify`` 加「包裡那條分支的頭等於本機的頭」）才換成正式名，任何一步不成立就 raise、暫名檔刪掉：
+    中途失敗不會留下一份看起來像正式的包，重跑也不會沿用一份沒驗過的舊包。
+    """
+    if commits_outside_mainline(branch, git) == 0:
+        return None
+    head = git("rev-parse", f"refs/heads/{branch}").stdout.strip()
+    final = folder / f"{branch.replace('/', '-')}-{head[:12]}{BUNDLE_SUFFIX}"
+    partial = final.with_name(final.name + PARTIAL_SUFFIX)
+    try:
+        git("bundle", "create", "--quiet", str(partial), f"refs/heads/{branch}", f"^{MAINLINE_REF}")
+        git("bundle", "verify", "--quiet", str(partial))
+        heads = [line.strip() for line in git("bundle", "list-heads", str(partial)).stdout.splitlines()]
+        if f"{head} refs/heads/{branch}" not in heads:
+            raise WorktreeError(f"包裡沒有 {branch} 的頭 {head}：{heads}")
+        partial.replace(final)
+    finally:
+        partial.unlink(missing_ok=True)
+    return final
+
+
+def remove_with_bundle(key: str, git: Git, pull_request: PrLookup, root: Path) -> tuple[Linked, Path | None]:
+    """第三條路（#1076，要明確打 ``--bundle``）：分支那一格不問，改成先打包主線之外的提交、驗過才拆。
+
+    照拒的：沒掛在分支上、PR 還開著（工作還在進行）、PR 查不到、位置或名字不合規矩（:func:`problems` 照 ``root`` 量；
+    不住在 ``root`` 底下的派工資料夾，包不知道放哪、也對不上是哪張票）、樹的兩格任一格不成立。
+    回拆掉的那一棵與包的路徑（零顆提交時是 None）。
+    """
+    item = find(key, git)
+    if item.branch is None:
+        raise WorktreeError("不拆：沒掛在分支上，這支工具不替你判斷，自己看過再用 git 拆")
+    found = pull_request(item.branch)
+    if found is not None and found.state == OPEN:
+        raise WorktreeError(f"不拆：PR #{found.number} 還開著，工作還在進行；先合或關掉再拆")
+    misplaced = problems(item, root)
+    if misplaced:
+        raise WorktreeError(f"不拆：位置或名字不合規矩（{'；'.join(misplaced)}），包不知道放哪、也對不上是哪張票")
+    reason = tree_refusal(item, git)
+    if reason is not None:
+        raise WorktreeError(f"不拆：{reason}")
+    saved = bundle_outside_mainline(item.branch, item.path.parent, git)
+    git("worktree", "remove", str(item.path))
+    git("branch", "-D", item.branch)
+    return item, saved
 
 
 def report(items: Sequence[Linked], root: Path, pull_request: PrLookup, git: Git) -> int:
@@ -407,6 +477,10 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="列出每一棵，不合規矩的標紅")
     drop = sub.add_parser("remove", help="拆一棵（PR 已合、或沒開過 PR 也沒有主線之外的提交；樹都要乾淨）")
     drop.add_argument("key", help="資料夾名或完整分支名")
+    drop.add_argument(
+        "--bundle", action="store_true",
+        help="人看過才用：分支那一格不問，先把主線之外的提交打包存進派工資料夾、驗過才拆（PR 開著照拒、樹照樣要乾淨）",
+    )  # fmt: skip
     return parser
 
 
@@ -427,6 +501,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         git("fetch", "--quiet", "origin", MAINLINE)
         if args.action == "list":
             return report(linked(git), work_root(), gh_pull_request(repo), git)
+        if args.bundle:
+            gone, saved = remove_with_bundle(args.key, git, gh_pull_request(repo), work_root())
+            kept = (
+                "分支上沒有主線之外的提交，沒有打包"
+                if saved is None
+                else f"主線之外的提交打包在 {saved}（還原：git fetch {saved} refs/heads/{gone.branch}:refs/heads/{gone.branch}）"
+            )
+            note(f"拆掉了 {gone.path}，本機分支 {gone.branch} 也刪了；{kept}；派工資料夾留著")
+            return CLEAN
         gone = remove(args.key, git, gh_pull_request(repo))
         note(f"拆掉了 {gone.path}，本機分支 {gone.branch} 也刪了；派工資料夾留著")
         return CLEAN
