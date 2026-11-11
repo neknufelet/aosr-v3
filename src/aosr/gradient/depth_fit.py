@@ -43,8 +43,8 @@ def family_fit(family: FamilySettings, cap: float) -> TargetFit:
     """家族對個案上限：最淺排法放不進就不可用（個案擋）；放得下時生效上限取兩邊較嚴的那一個，一樣大算個案定的。
 
     「放得進」照搜尋取規格的同一條算式判（``material_gradient.snap_to_specs``：生效上限減最薄棉、在精度下往下修到
-    不超過，要不小於空腔下界），雙精度與單精度（顯卡）都要放得進才算可用——邊界上兩種精度可能判得不一樣，
-    寧可少一個候選也不讓換樣板在快速評分中途丟錯。"""
+    不超過，要不小於空腔下界），在 θ 的精度（float64）下算——十進位剛好、浮點放不進的邊界判不可用，
+    不讓換樣板在快速評分中途丟錯。"""
     shallowest = family_shallowest_m(family)
     blocker: Literal["case", "material"] = "case" if cap <= family.max_total_depth_m else "material"
     effective = cap if blocker == "case" else family.max_total_depth_m
