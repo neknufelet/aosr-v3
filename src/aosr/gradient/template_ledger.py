@@ -439,7 +439,8 @@ def _split_round(block: Sequence[TemplateRow], label: str) -> _Round:
 
 def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStart | None, start_surfaces: Surfaces,
                  settings: MaterialGradientSettings | None, fixed_surfaces: Mapping[str, str],
-                 allowed: Mapping[str, Sequence[str]] | None = None) -> _Round:
+                 allowed: Mapping[str, Sequence[str]] | None = None,
+                 max_depths: Mapping[str, float] | None = None) -> _Round:
     """一輪的內容：快速評分照「可換的目標」（給了設定）、候選是快速評分前 k 名、各段起點對得上。"""
     label = f"第 {block[0].round} 輪"
     parts = _split_round(block, label)
@@ -454,7 +455,7 @@ def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStar
     complete = (decided is not None and decided.quick_count > 0) or bool(parts.baseline)
     ranking_available = complete
     if settings is not None:
-        wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings, fixed_surfaces, allowed)]
+        wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings, fixed_surfaces, allowed, max_depths)]
         rejected = block[0].rejected_quick
         if len(set(rejected)) != len(rejected) or any(name not in wanted or name in names for name in rejected):
             raise ValueError(f"{label}：不可估快速評分不是可換目標，或與有效列重複")
@@ -549,7 +550,8 @@ def _check_stop_reason(label: str, row: TemplateRow, decision: TemplateDecision)
 
 def _check_settings(label: str, row: TemplateRow, decision: TemplateDecision, previous_total: int, seconds: float,
                     settings: MaterialGradientSettings, fixed_surfaces: Mapping[str, str],
-                    allowed: Mapping[str, Sequence[str]] | None = None) -> None:
+                    allowed: Mapping[str, Sequence[str]] | None = None,
+                    max_depths: Mapping[str, float] | None = None) -> None:
     """給了設定：門檻、停止原因與下一輪最壞值都要照設定重算得出來，帳本跟設定矛盾就拒收。
 
     接受了候選的輪照「輪數 → 總時間（各決定列秒數加總，含這一輪）→ 下一輪最壞值放不放得進預算」的順序判停，
@@ -558,8 +560,8 @@ def _check_settings(label: str, row: TemplateRow, decision: TemplateDecision, pr
     reason, limits = row.stop_reason, settings.templates
     if decision.threshold != settings.candidates.improvement_threshold:
         raise ValueError(f"{label}：決定列記的門檻不是設定檔的改善門檻")
-    count = len(alternatives(row.surfaces, settings, fixed_surfaces, allowed))
-    bound = next_round_bound(row.surfaces, settings, fixed_surfaces, allowed)
+    count = len(alternatives(row.surfaces, settings, fixed_surfaces, allowed, max_depths))
+    bound = next_round_bound(row.surfaces, settings, fixed_surfaces, allowed, max_depths)
     if decision.quick_count == 0:
         expected = TEMPLATE_STOP_NO_ALTERNATIVES if count == 0 else (
             TEMPLATE_STOP_MAX_EVALUATIONS if bound > limits.max_evaluations - previous_total else None)
@@ -612,14 +614,15 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
     surfaces, total, seconds = header.initial_surfaces, 0, 0.0
     for block in _round_blocks(rows):
         label = f"第 {block[0].round} 輪"
-        parts = _check_round(block, previous, surfaces, settings, header.fixed_surfaces, header.allowed_targets)
+        parts = _check_round(block, previous, surfaces, settings, header.fixed_surfaces, header.allowed_targets,
+                             header.max_depths)
         if parts.decision is None:
             continue
         decision = _check_decision(label, parts, previous, total, parts.decision is rows[-1])
         seconds += parts.decision.seconds
         if settings is not None:
             _check_settings(label, parts.decision, decision, total, seconds, settings, header.fixed_surfaces,
-                            header.allowed_targets)
+                            header.allowed_targets, header.max_depths)
         previous, surfaces, total = parts.decision, parts.decision.surfaces, decision.total_evaluations
     if header.score_constants is not None:
         check_scores(header.score_constants, rows)

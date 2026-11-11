@@ -49,12 +49,15 @@ from aosr.gradient.surrogate_coverage import NOT_TRAINED_TEXT, FixedTarget, Surr
 from aosr.gradient.surrogate_files import TRAINING_FILE
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
-from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, plan_search, start_arguments
+from aosr.gui.gradient_plan import (
+    GradientRequest, PlanRefused, SearchPlan, library_depth_targets, plan_search, start_arguments,
+)
 from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
+from aosr.gui.zone_limits import DepthTargets
 from aosr.materials.construction_models import MeasuredImpedance
 from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
 from aosr.materials.search_library import (
@@ -316,9 +319,15 @@ class GradientJobs:
             raise PlanRefused(str(error)) from error
         fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
                                *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
-        plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check)
+        plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check,
+                           depth_targets=library_depth_targets(materials.settings, entries))
         _refuse_measured_tables(plan, entries)
         return plan, materials, entries
+
+    def depth_targets(self) -> DepthTargets:
+        """立面圖限制檢查判准用材料組放不放得下用的那一份（跟開跑同一份材料庫）；材料庫讀不進來丟 :class:`PlanRefused`。"""
+        materials, entries = self._materials()
+        return library_depth_targets(materials.settings, entries)
 
     def search_settings(self) -> MaterialGradientSettings:
         return load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))

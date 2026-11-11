@@ -197,6 +197,14 @@ function depthText(plan, surface, mode) {
   return source ? `${depth} 公尺（${DEPTH_SOURCES[source] || source}）` : `${depth} 公尺`;
 }
 
+// 深度上限那一格：個案上限一行，下面逐組跟自己的上限取較嚴（#1082 段 2-4，伺服器逐組寫好一句；
+// 放不下的那一組這一跑不換過去、起點也跳過）。
+function depthCell(plan, surface, mode) {
+  const lines = (plan.depth_targets || {})[surface] || [];
+  return el("td", {class: "depth-cell"}, el("p", {text: depthText(plan, surface, mode)}),
+    ...lines.map((line) => el("p", {class: line.usable ? "note" : "limit-warn", text: line.text})));
+}
+
 function drawDepthTable(plan) {
   const rows = plan.surfaces.map((surface, index) => ({surface, mode: plan.modes[index]})).filter((row) => row.mode === "search");
   const body = el("tbody");
@@ -255,7 +263,7 @@ function showPreview(data, sent) {
       el("td", {text: MODE_WORDS[mode] || mode, class: mode === "search" ? "mode-search" : null}),
       el("td", {text: plan.presets[index] || (mode === "search" ? "" : "方案裡這一區的材料，不調")}),
       el("td", {text: allowedText(plan, surface, mode)}),
-      el("td", {text: depthText(plan, surface, mode)})));
+      depthCell(plan, surface, mode)));
   });
   const head = el("tr", {}, ...["牆", "區", "做法", "起跑樣板", "准用材料", "深度上限"].map((text) => el("th", {text})));
   byId("plan-table").replaceChildren(el("table", {}, el("thead", {}, head), body));

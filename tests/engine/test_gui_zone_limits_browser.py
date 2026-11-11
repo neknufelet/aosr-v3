@@ -2,6 +2,7 @@
 固定區貼得比上限深就在立面圖與表上標紅、寫出哪一層擋的，「拿去搜尋」停用；改好就解除；交給搜尋的區寫出生效的
 上限；存檔再打開三層都在；再切同一面，區的上限跟著做法走。房間一律用 109 號房的長寬高。"""
 import json
+import os
 import re
 from pathlib import Path
 from typing import cast
@@ -61,7 +62,8 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         # 這面牆上限 0.1：貼 0.05 的還在限內；換成 0.15 的那一刻（換材料也重判）就紅。
         _depth(page, "#depth-wall-x0", "0.1")
         _clear(page, "z1")
-        expect(page.locator("#depth-cap-x0-auto1")).to_have_text("生效：0.1 公尺（這面牆擋的）")
+        expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.1 公尺（這面牆）；每一組跟自己的上限取較嚴：")
+        expect(page.locator("#depth-target-x0-auto1-0")).to_have_text("48K 玻璃棉（可調厚度與空腔）：生效 0.1 公尺（這面牆的上限擋住；材料組自己 0.3 公尺比較寬）")
         _choose(page, "#zone-fixed-x0-z1", DEEP)
         _settled(page)
         _red(page, "z1")
@@ -87,7 +89,7 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         expect(page.locator("#limit-x0-z1-0")).to_contain_text("房間預設的上限")
         _depth(page, "#depth-room", "0.2")
         _clear(page, "z1")
-        expect(page.locator("#depth-cap-x0-auto1")).to_have_text("生效：0.2 公尺（房間預設擋的）")
+        expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.2 公尺（房間預設）；每一組跟自己的上限取較嚴：")
 
         # 不合理的值不收：照講、格子畫回原值、不打伺服器。
         page.locator("#depth-room").fill("-1")
@@ -109,7 +111,7 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         _depth(page, "#depth-room", "0.3")
         _depth(page, "#depth-wall-x0", "0.2")
         _depth(page, "#depth-zone-x0-auto1", "0.08")
-        expect(page.locator("#depth-cap-x0-auto1")).to_have_text("生效：0.08 公尺（這一塊擋的）")
+        expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.08 公尺（這一塊）；每一組跟自己的上限取較嚴：")
         # 在右邊那一大塊（交給搜尋、上限 0.08）裡再畫一框：自動區重編，上限跟著做法走。
         _drag(page, LY, LZ, (2.02, 0.02), (3.0, 1.0))
         after = {str(zone["id"]): zone for zone in _zones(page, "x0")}
@@ -128,7 +130,7 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         expect(page.locator("#depth-room")).to_have_value("0.3")
         expect(page.locator("#depth-wall-x0")).to_have_value("0.2")
         expect(page.locator(f"#depth-zone-x0-{right[0]}")).to_have_value("0.08")
-        expect(page.locator(f"#depth-cap-x0-{right[0]}")).to_have_text("生效：0.08 公尺（這一塊擋的）")
+        expect(page.locator(f"#depth-cap-x0-{right[0]}")).to_have_text("個案上限 0.08 公尺（這一塊）；每一組跟自己的上限取較嚴：")
         _clear(page, "z1")
         # 別面沒填牆的上限：照房間預設。
         page.locator("#elevation-wall-y0").click()
@@ -308,3 +310,54 @@ def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp
         _clear(page, "z1")
         expect(page.locator("#depth-room")).to_be_focused()
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path: Path, browser: Browser) -> None:
+    """#1082 段 2-4：交給搜尋的區逐組寫出生效上限與哪一條擋住（個案哪一層／材料組自己）；比某一組最淺排法還淺，
+    那一組標「不可用」但不擋；准用的組全放不下才紅、擋「拿去搜尋」。用正式網頁入口起、109 號房，截圖存證。"""
+    _write(tmp_path, room109_document())
+    (tmp_path / "materials.json").write_text(_deep_user_library(), encoding="utf-8")
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        _choose(page, "#zone-fixed-x0-z1", PRESET)
+        _choose(page, "#zone-mode-x0-auto1", "search")
+        # 房間預設 0.2：玻璃棉照個案（房間預設）擋，使用者材料自己 0.15 比較嚴、寫「材料組自己的上限擋住」。
+        _depth(page, "#depth-room", "0.2")
+        _clear(page, "z1")
+        expect(page.locator("#depth-target-x0-auto1-0")).to_have_text(
+            "48K 玻璃棉（可調厚度與空腔）：生效 0.2 公尺（房間預設的上限擋住；材料組自己 0.3 公尺比較寬）")
+        expect(page.locator("#depth-target-x0-auto1-3")).to_have_text(
+            "深背岩棉（自填）：生效 0.15 公尺（材料組自己的上限擋住；0.2 公尺（房間預設的上限）比較寬）")
+        # 這一塊 0.06：比使用者材料最淺排法 0.08 還淺，那一組不可用（橘字、不擋），玻璃棉照樣可用。
+        _depth(page, "#depth-zone-x0-auto1", "0.06")
+        _clear(page, "auto1")
+        unusable = page.locator("#depth-target-x0-auto1-3")
+        expect(unusable).to_have_text("深背岩棉（自填）：不可用——深度上限 0.06 公尺（這一塊的上限）比這一組最淺排法 0.08 公尺還淺（個案上限擋住）")
+        expect(unusable).to_have_class("limit-warn")
+        shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)  # 給了資料夾就把截圖存去那裡（證據），沒給存暫存
+        page.locator("#elevation-panel").screenshot(path=str(shots / "depth-which-limit.png"))
+        # 這一塊 0.03：每一組都放不下（「不貼」不算救）→ 紅、擋拿去搜尋，原文講哪一條擋。
+        _depth(page, "#depth-zone-x0-auto1", "0.03")
+        _red(page, "auto1")
+        expect(page.locator("#zone-limits-summary")).to_contain_text("准用的材料組一組都放不進深度上限")
+        expect(page.locator("#zone-limits-summary")).to_contain_text("0.03 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺")
+        page.locator("#elevation-panel").screenshot(path=str(shots / "depth-nothing-fits-red.png"))
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def _deep_user_library() -> str:
+    """最淺排法 0.08 m（最薄 0.05 m＋空腔下界 0.03 m）、自己的上限 0.15 m 的使用者可最佳化材料。"""
+    from pydantic import TypeAdapter
+
+    from aosr.materials import library
+
+    adapter: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
+    entry = adapter.validate_python({
+        "kind": "optimizable", "id": "deep_rock_wool", "label": "深背岩棉（自填）", "provenance": "model", "source": "自填",
+        "porous": {"kind": "porous", "thickness_m": 0.05, "flow_resistivity_pa_s_m2": 20000.0, "material_class": "fibrous"},
+        "porous_thickness": {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1], "initial_m": 0.05},
+        "cavity": {"adjustable": True, "range_m": [0.03, 0.1], "initial_m": 0.04}, "max_total_depth_m": 0.15})
+    return library.dump_user_library((entry,))

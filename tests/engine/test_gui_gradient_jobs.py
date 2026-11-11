@@ -451,7 +451,7 @@ def test_stop_right_after_resume_stops_the_service_until_the_worker_is_up(tmp_pa
 
 @pytest.mark.parametrize(("line", "state"), [
     ("梯度搜尋開始失敗：ReducedModelNotValidated：替身讀不進來或對不上，拒用：物理身分不同", "surrogate_refused"),
-    ("梯度搜尋開始失敗：ValueError：面 x0@r0_c0 的深度上限 0.5 m 超過家族上限", "failed"),
+    ("梯度搜尋開始失敗：ValueError：面 x0@r0_c0 的深度上限 0.03 m 放不下家族 glass_wool_48k 最淺排法 0.05 m", "failed"),
 ])
 def test_a_surrogate_the_gate_refuses_has_its_own_state(tmp_path: Path, line: str, state: str) -> None:
     """抓替身被准用閘門拒收時只顯示「搜尋失敗」，畫面不知道要去重建替身；別的失敗不能被認成替身的問題。"""

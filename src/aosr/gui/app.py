@@ -909,7 +909,7 @@ def _zone_routes(handlers: GuiHandlers) -> list[Route]:
     """立面圖切一面（#1091）、每一區換材料（#1105）與超過限制的區（#1111；可信範圍跟材料頁同一個出處）。"""
     return [*zone_edit_routes(), *zone_material_routes(handlers.data_dir, handlers.jobs._lock,
                                                       capabilities=handlers.capabilities, directivity=handlers.directivity),
-            *zone_limit_routes(range_check)]
+            *zone_limit_routes(range_check, handlers.gradient.depth_targets)]
 
 
 def _archive_routes(handlers: GuiHandlers) -> list[Route]:

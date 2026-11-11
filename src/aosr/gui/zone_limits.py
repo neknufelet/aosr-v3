@@ -9,6 +9,10 @@
   固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過就紅。
   直接取代牆面的材料（固定阻抗、實測表、整面多層構造）看不出貼了多深，照實寫「比不了」、不當作過，也不拿原牆的厚度標紅。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
+- 搜尋區的上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法只在引擎一份 ``fixed_surfaces.target_fit``）：准用的每一組
+  （沒寫清單就是全部可調材料）列出生效上限與是哪一條擋住的（個案哪一層／材料組自己）；比一組最淺排法還淺、或固定材料
+  總深超過（量不出多深也算）＝那一組在這一區不可用（列在 ``caps`` 的 ``targets``、不擋，搜尋不換過去）；准用的材料組一組都不可用＝紅
+  （「不貼」不算救：交給搜尋卻什麼都貼不上）。清單本來只有「不貼」的區不判。沒傳材料組（``depth_targets``）就不判這一項。
 - 可信範圍（固定區的材料參數，跟材料頁同一個出處 ``material_curves.range_check``）：物理拒算的標紅；照算但醒目提醒的
   標「警告」、不擋（計畫段 2-2b 寫的是「超出可信範圍警告」，物理那邊也照算）。沒傳檢查函式就不判這一項；
   網頁的限制檢查、開跑預覽、開跑與建替身都傳材料頁那一支（正式入口開機釘中央處理器＋雙精度）。
@@ -30,7 +34,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
+from aosr.gradient.depth_fit import TargetFit, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
@@ -44,6 +50,19 @@ LEVEL_WORDS: dict[DepthLevel, str] = {"zone": "這一塊", "wall": "這面牆", 
 WALLS = ("floor", "ceiling", "x0", "xL", "y0", "yL")
 _MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 RangeCheck = Callable[[SurfaceMaterial], dict[str, object]]
+
+
+@dataclass(frozen=True)
+class DepthTargets:
+    """判一區准用材料組放不放得進上限要的三樣：這一場的搜尋設定（家族，含使用者可最佳化材料）、固定材料（代號 → 材料，
+    內建構造與使用者固定材料）與顯示名（代號 → 材料庫的名字，沒有就照代號）。"""
+
+    settings: MaterialGradientSettings
+    fixed: Mapping[str, object]
+    labels: Mapping[str, str]
+
+    def label(self, identifier: str) -> str:
+        return self.labels.get(identifier, identifier)
 
 
 @dataclass(frozen=True)
@@ -165,6 +184,70 @@ def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: Depth
     return []
 
 
+def zone_targets(allowed: Sequence[str] | None, targets: DepthTargets) -> tuple[str, ...] | None:
+    """一區可選的目標（引擎的寫法：家族代號、``fixed:<代號>``、none）：沒寫清單是全部家族加不貼；清單有不認識的代號回 None
+    （開跑那邊照講拒收，這裡不猜）。"""
+    families = {family.id for family in targets.settings.family}
+    if allowed is None:
+        return (*(family.id for family in targets.settings.family), NONE_TARGET)
+    found: list[str] = []
+    for item in allowed:
+        if item == NONE_TARGET or item in families:
+            found.append(item)
+        elif item in targets.fixed:
+            found.append(fixed_target(item))
+        else:
+            return None
+    return tuple(found)
+
+
+def target_line(fit: TargetFit, cap: DepthCap, targets: DepthTargets, *, level_words: str | None = None) -> dict[str, object]:
+    """一組在一區的判決給畫面：代號、名字、可不可用、生效上限、哪一條擋住（``case`` 個案／``material`` 材料組自己）與一句白話。"""
+    identifier = fit.target[len("fixed:"):] if is_fixed_target(fit.target) else fit.target
+    name = targets.label(identifier)
+    case = f"{cap.value_m:g} 公尺（{level_words or LEVEL_WORDS[cap.level]}的上限）"
+    if fit.reason == "shallower_than_family":
+        text = f"{name}：不可用——深度上限 {case}比這一組最淺排法 {fit.shallowest_m:g} 公尺還淺（個案上限擋住）"
+    elif fit.reason == "fixed_too_deep":
+        text = f"{name}：不可用——總深 {fit.material_m:g} 公尺超過深度上限 {case}（個案上限擋住）"
+    elif fit.reason == "fixed_not_comparable":
+        text = f"{name}：不可用——直接取代牆面、看不出多深，有深度上限的區不能用（限制是硬的）"
+    elif is_fixed_target(fit.target):
+        text = f"{name}：總深 {fit.material_m:g} 公尺，放得進深度上限 {case}"
+    elif fit.blocker == "material":
+        text = f"{name}：生效 {fit.effective_m:g} 公尺（材料組自己的上限擋住；{case}比較寬）"
+    else:
+        own = "" if fit.material_m is None or fit.material_m <= cap.value_m else f"；材料組自己 {fit.material_m:g} 公尺比較寬"
+        text = f"{name}：生效 {fit.effective_m:g} 公尺（{level_words or LEVEL_WORDS[cap.level]}的上限擋住{own}）"
+    return {"target": fit.target, "label": name, "usable": fit.usable, "effective_m": fit.effective_m,
+            "blocker": fit.blocker, "text": text}
+
+
+def target_fits(allowed: Sequence[str] | None, cap: float, targets: DepthTargets) -> tuple[TargetFit, ...] | None:
+    """一區每一個材料組（不含不貼）在上限 ``cap`` 下的判決；清單有不認識的代號回 None。"""
+    listed = zone_targets(allowed, targets)
+    if listed is None:
+        return None
+    fixed = {fixed_target(key): material for key, material in targets.fixed.items()}
+    return tuple(target_fit(target, cap, targets.settings, fixed) for target in listed if target != NONE_TARGET)
+
+
+def no_group_words(lines: Sequence[Mapping[str, object]]) -> str:
+    """准用的材料組一組都放不下時擋下的那一句（頁面紅、開跑擋同一句）。"""
+    return "准用的材料組一組都放不進深度上限，交給搜尋什麼都貼不上（「不貼」不算）：" + "；".join(str(line["text"]) for line in lines)
+
+
+def _target_problems(allowed: Sequence[str] | None, cap: DepthCap, targets: DepthTargets
+                     ) -> tuple[list[Problem], list[dict[str, object]]]:
+    fits = target_fits(allowed, cap.value_m, targets)
+    if fits is None or not fits:
+        return [], []
+    lines = [target_line(fit, cap, targets) for fit in fits]
+    if not any(fit.usable for fit in fits):
+        return [Problem(code="depth_no_group", level="red", text=no_group_words(lines))], lines
+    return [], lines
+
+
 def range_target(material: SurfaceMaterial) -> SurfaceMaterial | None:
     """可信範圍要查的那一份：貼在原牆上的只查加貼的那幾層（當一份多層構造）；沒有小松纖維層的不必查（沒有登記範圍）。"""
     # 參數範圍只看層本身，背後接什麼不影響；跟材料頁的初值排法一樣當硬背。
@@ -202,9 +285,11 @@ def _design_of(value: object, scheme_id: str) -> tuple[DesignSettings | None, li
 
 
 def zone_limits(document: Mapping[str, object], design_value: object = None,
-                range_check: RangeCheck | None = None) -> dict[str, object]:
-    """一份方案（草稿也可以）逐面逐區的限制檢查；回 ``zones``（牆 → 區 → 幾條）、``walls``（整面的）、``caps``（每區生效上限）、
-    ``red``（擋下的條數）與 ``refusals``（擋下的每一條，給開跑與「拿去搜尋」照講）。"""
+                range_check: RangeCheck | None = None,
+                depth_targets: Callable[[], DepthTargets] | None = None) -> dict[str, object]:
+    """一份方案（草稿也可以）逐面逐區的限制檢查；回 ``zones``（牆 → 區 → 幾條）、``walls``（整面的）、``caps``（每區生效上限；
+    搜尋區另有 ``targets``：每一組的生效上限與哪一條擋住）、``red``（擋下的條數）與 ``refusals``（擋下的每一條，給開跑與
+    「拿去搜尋」照講）。``depth_targets`` 只在有一區交給搜尋又有上限時才叫（讀材料庫）；叫失敗照講成一條紅。"""
     scheme_id = str(document.get("scheme_id", ""))
     design, top = _design_of(design_value, scheme_id)
     try:
@@ -218,6 +303,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
     caps: dict[str, dict[str, dict[str, object]]] = {}
     modes = _modes(design)
     checked: dict[str, list[Problem]] = {}
+    loaded: DepthTargets | bool | None = None
     for wall in WALLS:
         entries = cast(list[Mapping[str, object]], by_wall.get(wall) if isinstance(by_wall, dict) else None) or [{"area": "whole_wall"}]
         if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
@@ -236,6 +322,15 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             material = _material(entry.get("material"))
             lines = found.setdefault(key, [])
             lines.extend(_depth_problems(material, mode, cap))
+            if cap is not None and mode == "search" and depth_targets is not None:
+                if loaded is None:
+                    loaded = _loaded(depth_targets, top)
+                if isinstance(loaded, DepthTargets):
+                    item = design.zones.get(wall, {}).get(key) if design is not None else None
+                    problems, targets = _target_problems(None if item is None else item.allowed, cap, loaded)
+                    lines.extend(problems)
+                    if targets:
+                        caps[wall][key]["targets"] = targets
             if range_check is not None and mode == "fixed" and material is not None:
                 text = json.dumps(material.model_dump(mode="json"), sort_keys=True)
                 if text not in checked:
@@ -253,6 +348,16 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             "caps": caps, "red": len(refusals), "refusals": refusals}
 
 
+def _loaded(provider: Callable[[], DepthTargets], top: list[Problem]) -> DepthTargets | bool:
+    """讀這一場的材料組（材料庫）；讀不進來照講成一條紅（開跑那邊也一樣開不了），回 False 不再試。"""
+    try:
+        return provider()
+    except ValueError as error:
+        top.append(Problem(code="materials_unreadable", level="red",
+                           text=f"查不了交給搜尋的區放不放得下材料組：{error}"))
+        return False
+
+
 def _material(value: object) -> SurfaceMaterial | None:
     try:
         return _MATERIAL.validate_python(value)
@@ -268,14 +373,16 @@ def _modes(design: DesignSettings | None) -> dict[str, dict[str, ZoneMode]]:
 
 
 def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings | None,
-                   range_check: RangeCheck | None = None) -> list[str]:
+                   range_check: RangeCheck | None = None, depth_targets: DepthTargets | None = None) -> list[str]:
     """存好的方案開搜尋（或建替身）前要擋的那幾條：跟立面圖標紅同一把；``range_check`` 給了就連可信範圍一起判
-    （網頁開跑與建替身傳材料頁那一支，頁面紅的、伺服器就擋）。"""
+    （網頁開跑與建替身傳材料頁那一支，頁面紅的、伺服器就擋）；``depth_targets`` 給了就連准用材料組放不放得下一起判。"""
     value = None if design is None else design.model_dump(mode="json")
-    return cast(list[str], zone_limits(scheme_document, value, range_check)["refusals"])
+    provider = None if depth_targets is None else (lambda: depth_targets)
+    return cast(list[str], zone_limits(scheme_document, value, range_check, provider)["refusals"])
 
 
-def zone_limit_routes(range_check: RangeCheck | None) -> list[Route]:
+def zone_limit_routes(range_check: RangeCheck | None,
+                      depth_targets: Callable[[], DepthTargets] | None = None) -> list[Route]:
     """``POST /api/zone-limits``：收 ``{"scheme": 草稿, "design": 設計設定或 null}``，內容有問題一律回 200 照講。"""
 
     async def limits(request: Request) -> Response:
@@ -285,7 +392,7 @@ def zone_limit_routes(range_check: RangeCheck | None) -> list[Route]:
             return JSONResponse({"error": "限制檢查的請求不是 JSON"}, status_code=400)
         if not isinstance(body, dict) or not isinstance(body.get("scheme"), dict):
             return JSONResponse({"error": "限制檢查的請求要有 scheme（整份方案）"}, status_code=400)
-        return JSONResponse(await run_in_threadpool(zone_limits, body["scheme"], body.get("design"), range_check))
+        return JSONResponse(await run_in_threadpool(zone_limits, body["scheme"], body.get("design"), range_check, depth_targets))
 
     return [Route("/api/zone-limits", limits, methods=["POST"])]
 

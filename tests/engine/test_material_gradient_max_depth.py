@@ -76,12 +76,13 @@ def test_swapped_family_final_designs_and_export_use_minimum_depth(cap: float, e
         materials_from_surfaces(rebuilt, theta, settings)
 
 
-def test_start_still_rejects_cap_above_initial_family_limit() -> None:
+def test_start_takes_the_family_limit_when_the_cap_is_deeper() -> None:
+    """#1082 段 2-4：個案上限比起跑家族上限大不再拒收，生效上限取兩邊較嚴的那一個（原本這一題釘的是拒收）。"""
     settings = _unequal_family_settings()
     presets = list((PRESET,) * 6)
     presets[2] = settings.family_by_id("glass_wool_24k").template_preset
-    with pytest.raises(ValueError, match="x0.*0.2.*glass_wool_24k.*0.15"):
-        run.designs_for(presets, settings, kept=_kept(), max_depths={"x0": 0.20})
+    designs = run.designs_for(presets, settings, kept=_kept(), max_depths={"x0": 0.20})
+    assert designs[2].max_depth_m == 0.20 and designs[2].max_total_depth_m == 0.15
 
 
 def _recorded_retune(theta: search.FloatVector, value: float) -> search.DescentResult:
@@ -222,7 +223,7 @@ def test_wall_depth_expands_and_patch_depth_matches_only_one() -> None:
 
 
 @pytest.mark.parametrize(("caps", "fixed", "message"), [
-    ({"x0": 0.31}, {}, "家族.*上限"), ({"x0": 0.049}, {}, "最薄"),
+    ({"x0": 0.049}, {}, "最薄"),
     ({"x0@u0v0": 0.1}, {}, "清單"),
     ({"x0": 0.1}, {"x0": "glass_wool_24k_50mm"}, "固定"),
 ])
@@ -325,7 +326,7 @@ def test_project_rejects_overlapping_fixed_depths(fixed: dict[str, str], caps: d
 
 
 @pytest.mark.parametrize(("value", "fixed", "message"), [
-    ("x0=0.31", None, "家族.*上限"), ("x0=0.049", None, "最薄"),
+    ("x0=0.049", None, "最薄"),
     ("x0@absent=0.1", None, "清單"), ("x0=0.1", "x0=glass_wool_24k_50mm", "固定"),
 ])
 def test_cli_rejects_before_export_or_creating_folder(value: str, fixed: str | None, message: str,

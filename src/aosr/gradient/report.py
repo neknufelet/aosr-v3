@@ -31,9 +31,10 @@ from typing import Final
 
 from pydantic import BaseModel, ValidationError
 
-from aosr.config.material_gradient import MOUNT_ON_WALL, fixed_target_id, is_fixed_target
+from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings, fixed_target_id, is_fixed_target
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import named_materials
+from aosr.gradient.depth_fit import family_fit, family_shallowest_m
 from aosr.gradient.fixed_surfaces import SCHEME_MATERIAL, expanded_fixed_surfaces, expanded_max_depths
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
@@ -495,14 +496,26 @@ def _depth_lines(project: GradientProject, surfaces: Sequence[tuple[str, str | N
             continue
         family = None if preset is None else settings.family_of(preset)
         cap = caps.get(face)
-        if family is not None:
-            effective = family.max_total_depth_m if cap is None else min(family.max_total_depth_m, cap)
-            lines.append(f"  {face}：總深度上限 {effective:g} m")
+        if family is not None and cap is None:
+            lines.append(f"  {face}：總深度上限 {family.max_total_depth_m:g} m")
+        elif family is not None and cap is not None:
+            fit = family_fit(family, cap)
+            words = (f"個案上限擋；家族 {family.id} 自己 {family.max_total_depth_m:g} m" if fit.blocker == "case"
+                     else f"家族 {family.id} 自己的上限擋；個案上限 {cap:g} m")
+            lines.append(f"  {face}：總深度上限 {fit.effective_m:g} m（{words}）" + _unfit_words(settings, cap))
         elif cap is not None:
-            lines.append(f"  {face}：總深度上限 {cap:g} m（目前不貼，換家族仍套用）")
+            lines.append(f"  {face}：總深度上限 {cap:g} m（目前不貼，換家族仍套用）" + _unfit_words(settings, cap))
         else:
             lines.append(f"  {face}：不貼（無新增層深度）")
     return lines
+
+
+def _unfit_words(settings: MaterialGradientSettings, cap: float) -> str:
+    """個案上限比哪幾個家族最淺排法還淺（那幾組在這一面不可用、換樣板不換過去）；都放得下回空字串。"""
+    unfit = [family for family in settings.family if not family_fit(family, cap).usable]
+    if not unfit:
+        return ""
+    return "；放不下、不換過去：" + "、".join(f"{family.id}（最淺 {family_shallowest_m(family):g} m）" for family in unfit)
 
 
 def render_report(folder: Path) -> str:

@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
     from aosr.gradient.fixed_candidates import FixedCandidateCheck
     from aosr.materials.library import LibraryEntry
+    from aosr.materials.construction_models import SurfaceMaterial
 
 EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
@@ -371,15 +372,30 @@ def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[Surface
     與關卡之前就拒收（:func:`~aosr.gradient.fixed_candidates.refuse_unscored_fixed_candidates`），不花完整解的錢。"""
     from aosr.config.material_gradient import is_fixed_target
     from aosr.gradient.fixed_candidates import refuse_unscored_fixed_candidates
-    from aosr.gradient.fixed_surfaces import check_allowed_against_start, expanded_allowed_targets
+    from aosr.gradient.fixed_surfaces import check_allowed_against_start, check_depth_targets, expanded_allowed_targets
 
     surfaces = tuple((design.surface_id, design.preset_id) for design in designs)
     if any(is_fixed_target(preset) for _, preset in surfaces):
         raise ValueError("--presets 不能直接寫固定材料（fixed:…）：起點要是家族樣板或 none，固定材料從 --allowed 進來")
     check_allowed_against_start(allowed, surfaces, settings, fixed_surfaces=fixed, max_depths=caps)
     expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
+    check_depth_targets(surfaces, settings, fixed_surfaces=fixed, max_depths=caps, allowed=allowed,
+                        fixed_materials=_listed_fixed_materials(expanded, table))
     refuse_unscored_fixed_candidates(designs, expanded, table)
     return expanded
+
+
+def _listed_fixed_materials(allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...]) -> dict[str, SurfaceMaterial]:
+    """准用清單列到的固定材料（``fixed:<代號>`` → 材料）；清單外的不讀。代號不在構造清單的留給後面那一步照講拒收。"""
+    from pydantic import TypeAdapter
+
+    from aosr.config.material_gradient import fixed_target, is_fixed_target
+    from aosr.materials.construction_models import SurfaceMaterial
+
+    listed = {target for targets in allowed.values() for target in targets if is_fixed_target(target)}
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    return {fixed_target(preset.id): adapter.validate_python(preset.material) for preset in table
+            if fixed_target(preset.id) in listed}
 
 
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],

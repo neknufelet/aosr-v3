@@ -15,3 +15,7 @@ button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
 .mode-search{font-weight:600;color:#15617b}
 @media (max-width:640px){main{padding:.75rem}header,section{padding:.9rem}}
 .path{overflow-wrap:anywhere;font-family:ui-monospace,monospace;font-size:.82rem}
+/* 深度上限逐組（#1082 段 2-4）：放得下的灰字，放不下的橘字（這一組這一跑不換過去）。 */
+#plan-table td.depth-cell p{margin:.1rem 0}
+#plan-table td.depth-cell .note{color:#46586a}
+#plan-table td.depth-cell .limit-warn{color:#9a5b00}

@@ -160,6 +160,9 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     page.locator("#preview").click()
     expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限 45 步")
     expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"]')).to_contain_text("0.1 公尺")
+    # 每一組跟自己的上限取較嚴（#1082 段 2-4）：這一跑另填的 0.1 比玻璃棉自己的 0.3 嚴。
+    expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"] td.depth-cell p.note').first).to_have_text(
+        "48K 玻璃棉（可調厚度與空腔）：生效 0.1 公尺（這一跑另填的上限擋住；材料組自己 0.3 公尺比較寬）")
     expect(page.locator('#plan-table tr[data-surface="ceiling@r0_c1"]')).to_contain_text("保留原牆")
     expect(page.locator('#plan-table tr[data-surface="x0@r1_c1"]')).to_contain_text("沒有限制（家族都試、也試不貼）")
     _shot(page, "1-6b-2-preview")
