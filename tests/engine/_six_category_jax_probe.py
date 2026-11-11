@@ -1,8 +1,9 @@
-"""冷行程雙精度實量；答案經 solve_reports、evaluate_parts、排名正式路徑。"""
+"""冷行程雙精度實量；答案經 solve_reports、evaluate_parts、排名正式路徑。一次只算一段（#1074），段名見 ``SECTIONS``。"""
 from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
@@ -152,26 +153,37 @@ def nonfinite_inputs() -> list[dict[str, object]]:
             valid_gradient_finite=all(bool(jnp.all(jnp.isfinite(d))) for d in derivatives)))
     return records
 
-def main(output: Path) -> None:
-    records = {}
-    whole_constants: SixCategoryConstants | None = None
-    for name in ('whole', 'zoned', 'furniture', 'default_scattering', 'no_extension', 'changed_wall'):
-        record, c, _ = measure(name, whole_constants if name=='changed_wall' else None)
-        if name == 'whole':
-            whole_constants = c
-        records[name] = record
+CASES = ('whole', 'zoned', 'furniture', 'default_scattering', 'no_extension', 'changed_wall')
+SECTIONS = (*CASES, 'unavailable', 'invalid', 'gradients', 'nonfinite')
+
+
+def unavailable() -> dict[str, object]:
     scheme = cases.scheme_case('unavailable')
     c = cases.constants(scheme)
     inputs = cases.array_inputs(scheme, c)
     r = six_category_costs(c, *inputs)
     numpy = cases.numpy_result(scheme, np.asarray(inputs[4]))
     reflection = next(e for e in numpy.candidate.evaluations if e.category.value=='reflections_and_echo')
-    unavailable = dict(jax_valid=bool(r.reflections_valid), jax_nan=bool(jnp.isnan(r.reflections_cost)),
+    return dict(jax_valid=bool(r.reflections_valid), jax_nan=bool(jnp.isnan(r.reflections_cost)),
         product_nan=bool(jnp.isnan(r.product_total)), objective_nan=bool(jnp.isnan(r.objective_total)),
         numpy_state=reflection.state.value, numpy_cost_missing=reflection.category_cost is None)
-    invalid = invalid_inputs()
-    output.write_text(json.dumps(dict(cases=records, unavailable=unavailable, gradients=gradients(), invalid=invalid, nonfinite=nonfinite_inputs()), allow_nan=False))
+
+
+def section(name: str) -> object:
+    """一段一支行程（#1074）：六間各量一間；changed_wall 在自己的行程裡先建 whole 的常數再借用（原本整份時借的是同一份）。"""
+    if name in CASES:
+        constants = cases.constants(cases.scheme_case('whole')) if name == 'changed_wall' else None
+        return measure(name, constants)[0]
+    parts: dict[str, Callable[[], object]] = dict(unavailable=unavailable, invalid=invalid_inputs, gradients=gradients,
+                                                  nonfinite=nonfinite_inputs)
+    if name not in parts:
+        raise ValueError(f'段名 {name!r} 不在 {SECTIONS}')
+    return parts[name]()
+
+
+def main(output: Path, name: str) -> None:
+    output.write_text(json.dumps(section(name), allow_nan=False))
 
 
 if __name__ == '__main__':
-    main(Path(sys.argv[1]))
+    main(Path(sys.argv[1]), sys.argv[2])

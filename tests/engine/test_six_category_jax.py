@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +17,7 @@ import pytest
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.six_category_jax import category_totals
 from tests.engine._precision_contracts import contract_value
+from tests.engine._six_category_jax_probe import CASES, SECTIONS
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL
 
@@ -24,19 +26,38 @@ CONTRACTS = ('timbre_cost_jax_vs_python', 'listening_area_cost_jax_vs_python',
              'channel_matching_cost_jax_vs_python', 'stage_one_objective_jax_vs_python')
 
 
+class _Lazy(dict[str, object]):
+    """``measured`` 的懶讀法（#1074）：第一次讀到某一段才開那一段的探針子行程；``shared_json`` 鍵 ``six-category-<段名>``，
+    同一台的工人共用一份、各段由先要到的工人算，所以不同工人同時算不同段。讀法照舊：``measured['cases'][名]``、
+    ``measured['gradients']`` 等；不認得的鍵照 dict 拋 KeyError。"""
+
+    def __init__(self, load: Callable[[str], object], names: tuple[str, ...]) -> None:
+        super().__init__()
+        self._load, self._names = load, names
+
+    def __missing__(self, key: str) -> object:
+        if key not in self._names:
+            raise KeyError(key)
+        value = self[key] = self._load(key)
+        return value
+
+
 @pytest.fixture(scope='module')
 def measured(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> dict[str, object]:
-    def produce() -> str:
-        directory = tmp_path_factory.mktemp('six-category')
-        output = directory/'measure.json'
-        env = child_process_env(threads=1).copy()
-        configure_jax(platforms='cpu', enable_x64=True, env=env)
-        env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'], str(Path(__file__).resolve().parents[2])))
-        run = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_jax_probe', str(output)],
-            cwd=directory, env=env, capture_output=True, text=True, timeout=1800)
-        assert run.returncode == 0, run.stdout+run.stderr
-        return output.read_text()
-    return cast(dict[str, object], json.loads(shared_json(tmp_path_factory, worker_id, 'six-category-measure', produce)))
+    def section(name: str) -> object:
+        def produce() -> str:
+            directory = tmp_path_factory.mktemp(f'six-category-{name}')
+            output = directory/'measure.json'
+            env = child_process_env(threads=1).copy()
+            configure_jax(platforms='cpu', enable_x64=True, env=env)
+            env['PYTHONPATH'] = os.pathsep.join((env['PYTHONPATH'], str(Path(__file__).resolve().parents[2])))
+            run = subprocess.run([sys.executable, '-m', 'tests.engine._six_category_jax_probe', str(output), name],
+                cwd=directory, env=env, capture_output=True, text=True, timeout=1800)
+            assert run.returncode == 0, run.stdout+run.stderr
+            return output.read_text()
+        return json.loads(shared_json(tmp_path_factory, worker_id, f'six-category-{name}', produce))
+    cases = _Lazy(section, CASES)
+    return _Lazy(lambda key: cases if key == 'cases' else section(key), ('cases', *(s for s in SECTIONS if s not in CASES)))
 
 
 def _record(measured: dict[str, object], name: str) -> dict[str, object]:
