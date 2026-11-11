@@ -63,6 +63,7 @@ def test_builtins_are_every_preset_as_fixed_and_every_family_as_optimizable() ->
     assert [e.id for e in entries if e.kind == "fixed"] == [p.id for p in presets]
     assert [e.id for e in entries if e.kind == "optimizable"] == [f.id for f in families]
     assert all(e.provenance == "literature" for e in entries)
+    assert len({e.id for e in entries}) == len({e.label for e in entries}) == len(entries)
 
 
 def test_builtin_families_rebuild_todays_gradient_settings() -> None:
@@ -149,6 +150,15 @@ def test_a_table_missing_only_some_imaginary_parts_is_refused() -> None:
         _ENTRY.validate_python(_fixed(material=table))
 
 
+def test_a_table_the_physics_contract_refuses_is_refused_here_too() -> None:
+    """跟物理用的實測阻抗表同一份契約：頻率沒有嚴格遞增，物理那邊不收，這裡也不收。"""
+    table = _table(imag=False)
+    points = cast(list[dict[str, object]], table["points"])
+    points[1], points[2] = points[2], points[1]
+    with pytest.raises(ValueError, match="嚴格遞增"):
+        _ENTRY.validate_python(_fixed(material=table))
+
+
 def _thickness(**changes: object) -> dict[str, object]:
     spec: dict[str, object] = {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.075, 0.1], "initial_m": 0.05}
     spec.update(changes)
@@ -162,11 +172,11 @@ def _thickness(**changes: object) -> dict[str, object]:
     ({"porous_thickness": _thickness(choices_m=[0.1, 0.05], range_m=[0.1, 0.05])}, "下限"),
     ({"porous_thickness": _thickness(adjustable=False, choices_m=None)}, "上下限要相等"),
     ({"porous_thickness": _thickness(choices_m=[0.05, 0.05, 0.1])}, "不重複"),
-    ({"porous_thickness": _thickness(range_m=[0.0, 0.1], choices_m=None)}, "大於 0"),
     ({"porous": {"kind": "porous", "thickness_m": 0.06, "flow_resistivity_pa_s_m2": 20000.0, "material_class": "fibrous"},
       "porous_thickness": _thickness(initial_m=0.06)}, "不是產品厚度"),
     ({"cavity": {"adjustable": True, "range_m": [-0.01, 0.1], "initial_m": None}}, "下限"),
-    ({"cavity": {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1], "initial_m": None}}, "不給產品厚度"),
+    ({"cavity": {"adjustable": True, "range_m": [0.02, 0.1], "initial_m": None}}, "一開始沒有這一層"),
+    ({"cavity": {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1], "initial_m": 0.05}}, "不給產品厚度"),
     ({"cavity": {"adjustable": True, "range_m": [0.0, 0.1], "initial_m": 0.2}}, "不在範圍"),
     ({"porous_thickness": _thickness(adjustable=False, range_m=[0.05, 0.05], choices_m=None),
       "cavity": {"adjustable": False, "range_m": [0.05, 0.05], "initial_m": 0.05}, "suggested_total_depth_m": None}, "至少要有一格能調"),
@@ -198,7 +208,7 @@ def test_a_consistent_optimizable_entry_reports_its_depth_bounds() -> None:
 
 def test_the_cavity_lower_bound_counts_toward_the_shallowest_depth() -> None:
     """空腔下限不是 0 時，最薄的總深＝多孔最薄＋空腔下限。"""
-    entry = _ENTRY.validate_python(_optimizable(cavity={"adjustable": True, "range_m": [0.02, 0.1], "initial_m": None}))
+    entry = _ENTRY.validate_python(_optimizable(cavity={"adjustable": True, "range_m": [0.02, 0.1], "initial_m": 0.02}))
     assert isinstance(entry, library.OptimizableEntry)
     assert entry.depth_bounds() == (0.05 + 0.02, 0.1 + 0.1)
 

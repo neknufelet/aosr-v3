@@ -70,6 +70,8 @@ class ThicknessSpec(BaseModel):
             if (choices[0], choices[-1]) != self.range_m:
                 raise ValueError(f"有產品厚度時，範圍就是最薄到最厚 {(choices[0], choices[-1])}，收到 {self.range_m}")
         initial = self.initial_m
+        if initial is None and low > 0.0:
+            raise ValueError(f"初值空白＝一開始沒有這一層（0），範圍要從 0 開始，收到 {self.range_m}")
         if initial is not None:
             if not low <= initial <= high:
                 raise ValueError(f"初值 {initial} 不在範圍 {self.range_m} 內")
@@ -123,8 +125,6 @@ class OptimizableEntry(_EntryBase):
         porous, cavity = self.porous_thickness, self.cavity
         if porous.initial_m is None or porous.initial_m != self.porous.thickness_m:
             raise ValueError(f"多孔層厚度 {self.porous.thickness_m} 要等於多孔厚度初值 {porous.initial_m}")
-        if porous.range_m[0] <= 0.0:
-            raise ValueError("多孔層厚度下限要大於 0")
         if porous.adjustable and porous.choices_m is None:
             raise ValueError("能調的多孔層厚度要給產品厚度（搜尋最後取規格）")
         if cavity is not None and cavity.choices_m is not None:
@@ -218,11 +218,6 @@ class _LibraryFile(BaseModel):
     schema_version: Literal["aosr.material_library.v1"]
     materials: tuple[LibraryEntry, ...]
 
-    @model_validator(mode="after")
-    def _distinct(self) -> Self:
-        _check_distinct(self.materials)
-        return self
-
 
 def _check_distinct(entries: tuple[LibraryEntry, ...]) -> None:
     ids = [entry.id for entry in entries]
@@ -261,19 +256,17 @@ def _family_entry(family: FamilySettings, presets: dict[str, ConstructionPreset]
         max_total_depth_m=family.max_total_depth_m, preset_members=family.presets, template_preset=family.template_preset)
 
 
-def builtin_entries(presets_path: Path | None = None, gradient_path: Path | None = None) -> tuple[LibraryEntry, ...]:
+def builtin_entries() -> tuple[LibraryEntry, ...]:
     """內建材料：構造預設每筆一個固定材料、第三階段梯度設定的每個家族一個可最佳化材料；唯讀起點。"""
-    presets = load_construction_presets(presets_path or config_path("construction_presets.toml"))
-    settings: MaterialGradientSettings = load_material_gradient_settings(gradient_path or config_path("material_gradient.toml"))
+    presets = load_construction_presets(config_path("construction_presets.toml"))
+    settings: MaterialGradientSettings = load_material_gradient_settings(config_path("material_gradient.toml"))
     fixed: list[LibraryEntry] = [
         FixedEntry.model_validate({"kind": "fixed", "id": preset.id, "label": preset.label, "provenance": "literature",
                                    "source": preset.source, "links": preset.links, "notes": preset.notes,
                                    "material": preset.material})
         for preset in presets]
     table = {preset.id: preset for preset in presets}
-    entries = (*fixed, *(_family_entry(family, table) for family in settings.family))
-    _check_distinct(entries)
-    return entries
+    return (*fixed, *(_family_entry(family, table) for family in settings.family))
 
 
 def family_settings(entry: OptimizableEntry) -> FamilySettings:
