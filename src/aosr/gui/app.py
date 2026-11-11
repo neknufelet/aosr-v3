@@ -29,6 +29,7 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.archive_delete import ArchiveDelete, delete_response
 from aosr.gui.gradient_jobs import GradientJobs, Launcher, SystemdLauncher, gradient_routes
+from aosr.gui.surrogate_builds import SurrogateBuilds, surrogate_routes
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
 from aosr.gui.modal_jobs import ModalJobs, scheme_snapshot
 from aosr.gui.compare_view import (
@@ -316,6 +317,7 @@ class GuiHandlers:
         self.gradient = GradientJobs(self.data_dir, launcher=settings.gradient_launcher or SystemdLauncher(),
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
                                      scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
+        self.surrogates = SurrogateBuilds(self.gradient)
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
         self.startup_physics_identity = (settings.startup_physics_identity or
@@ -934,7 +936,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

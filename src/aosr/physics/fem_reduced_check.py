@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -170,8 +170,12 @@ def validate_reduced(
     *, workers: int = 1, device: Literal["cpu", "gpu"] = "cpu",
     refinement_steps: list[int] | None = None,
     dense_threads: int | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> ValidationReport:
-    """每組留出材料、每個頻點都完整解一次（殘差上限沿用建模當次的設定），跟替身比。"""
+    """每組留出材料、每個頻點都完整解一次（殘差上限沿用建模當次的設定），跟替身比。
+
+    ``progress`` 給了就在每一組留出材料的完整解收齊後叫一次（已解幾點、共幾點；#1098 網頁顯示進度用），只讀、不改結果。
+    """
     checked_workers(workers)
     threads = checked_dense_threads(dense_threads)
     sys.stderr.write(f"完整解 {workers} 行程、裝置 {device}、稠密段 {threads} 緒\n")
@@ -193,6 +197,8 @@ def validate_reduced(
                 walls = walls_at(rows, index)
                 solutions = solver.solve(frequency, walls) if parallel is None else next(parallel)
                 full[material, index] = solutions @ receivers.T
+            if progress is not None:
+                progress((material + 1) * len(axis), len(holdouts) * len(axis))
         collect_refinement_steps(solver, refinement_steps)
     # 先收齊完整解聲壓，讓有待辦數上限的平行佇列持續前進；只保留報告原有的聲壓陣列。
     with dense_blas_threads(threads):

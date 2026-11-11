@@ -1,4 +1,4 @@
-"""網頁去哪裡找一份切法的替身（surrogate，縮減模型；#1093，1-6c 建好的替身放進同一格）。
+"""網頁去哪裡找一份切法的替身（surrogate，縮減模型；#1093；建替身見 ``aosr.gui.surrogate_builds``，#1098）。
 
 一份切法一格：``data_dir/surrogates/<格子代號>/surrogate.npz``，旁邊照縮減模型存檔的規矩放 manifest 與留出驗證收據。
 格子代號是方案裡「匯出完整模型、核替身會用到的那幾格」的雜湊（照 ``export_operators`` 與搜尋命令列的准用閘門讀）：
@@ -16,13 +16,14 @@ from pathlib import Path
 from typing import Final
 
 from aosr.geometry.shoebox import Wall
+from aosr.gradient.surrogate_files import MODEL_FILE
 from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.scheme import Scheme
 
 SLOTS_DIR: Final = "surrogates"
-SURROGATE_FILE: Final = "surrogate.npz"
+SURROGATE_FILE: Final = MODEL_FILE
 SLOT_VERSION: Final = "aosr.gui.surrogate_slot.v1"
 
 

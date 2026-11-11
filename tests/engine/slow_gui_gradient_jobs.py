@@ -6,12 +6,8 @@
 from __future__ import annotations
 
 import shutil
-import signal
-import subprocess
 import threading
 import time
-from collections.abc import Sequence
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import cast
 
@@ -31,7 +27,7 @@ from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
 from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.reporting.scheme import load_scheme
-from tests.engine._cpu_pins import forward_cpu_pins
+from tests.engine._local_launcher import LocalLauncher
 from tests.engine._six_search_cli_case import model as model, operators as operators
 from tests.engine.test_material_gradient_cli import WAIT_S
 from tests.engine.test_material_gradient_endpoint_cli import _inputs, _surrogate
@@ -40,35 +36,6 @@ NAME = "demo"
 SEARCHED = "x0"
 Record = dict[str, object]
 RUNNING = ("checking", "searching", "stopping", "endpoint_running", "endpoint_stopping")
-
-
-class LocalLauncher:
-    """本機行程代替服務：新的行程群、停止只送給最外層（同 ``KillMode=mixed``）。"""
-
-    def __init__(self, tmp: Path) -> None:
-        self.tmp = tmp
-        self.processes: dict[str, subprocess.Popen[bytes]] = {}
-        self.start_lock = threading.Lock()
-
-    def starting(self) -> AbstractContextManager[object]:
-        return self.start_lock
-
-    def launch(self, unit: str, argv: Sequence[str], *, env: dict[str, str], cwd: Path) -> None:
-        child = forward_cpu_pins(env)
-        child["TMPDIR"] = str(self.tmp)
-        self.processes[unit] = subprocess.Popen(list(argv), env=child, cwd=cwd, start_new_session=True,
-                                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                                stderr=subprocess.DEVNULL)
-
-    def is_active(self, unit: str) -> bool:
-        process = self.processes.get(unit)
-        return process is not None and process.poll() is None
-
-    def active_units(self) -> set[str]:
-        return {unit for unit in self.processes if self.is_active(unit)}
-
-    def stop(self, unit: str) -> None:
-        self.processes[unit].send_signal(signal.SIGTERM)
 
 
 def _wait(jobs: GradientJobs, job_id: str) -> Record:

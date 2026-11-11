@@ -12,8 +12,9 @@ from __future__ import annotations
 import dataclasses
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,6 +30,30 @@ from aosr.physics.fem_reduced import (
 )
 
 Point2 = tuple[int, int]
+STOP_CANDIDATES_EXHAUSTED: Final = "候選用完"
+STOP_RESIDUAL_MET: Final = "抽到的候選殘差都在停止值內"
+STOP_BUDGET: Final = "預算停止、殘差目標未達"
+
+
+@dataclass(frozen=True)
+class BuildProgress:
+    """建模途中每一輪量完候選殘差之後交給呼叫端的一筆（只讀、不影響建模；#1098 網頁顯示進度用）。
+
+    ``latest`` 是剛記下的那一輪（候選用完那一次沒有新的一輪，是 None）；這一刻那一輪的點還沒解，``latest.solved`` 一律是 0，
+    實際解了幾次要等下一輪開解才寫進建模帳。``seconds`` 是到這一刻各段累計秒數的複本。
+    """
+
+    full_solves: int
+    max_full_solves: int
+    snapshots: int
+    rank: int
+    stop_residual: float
+    latest: GreedyRound | None
+    seconds: dict[str, float]
+    elapsed_s: float
+
+
+BuildProgressCallback = Callable[[BuildProgress], None]
 
 
 @dataclass
@@ -122,12 +147,13 @@ class _Build:
 def build_reduced_model(
     operators: FullOperators, frequencies_hz: Sequence[float],
     training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings, workers: int = 1,
-    dense_threads: int | None = None,
+    dense_threads: int | None = None, progress: BuildProgressCallback | None = None,
 ) -> ReducedModel:
     """完整解快照（每點重新分解、殘差超過上限就報錯）→ 殘差貪婪補點 → 實數 SVD → 投影的小矩陣與建模帳。
 
     ``training_impedances`` 是呼叫端算好的一批材料，每組每面片各一條逐頻阻抗（面片鍵對整條頻率軸的列；六個整面仍接受 ``Wall``，
-    或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。
+    或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。``progress`` 給了就在每一輪量完候選殘差後叫一次
+    （:class:`BuildProgress`）；它只讀，選點、快照與結果跟不給逐位相同。
     """
     checked_workers(workers)
     threads = checked_dense_threads(dense_threads)
@@ -148,15 +174,21 @@ def build_reduced_model(
             basis, matrices = build.reduce()
             # 先量這份基底的殘差再判預算：到上限時記「殘差目標未達」之前，殘差一定量過。
             outcome = build.greedy_round(rng, basis, matrices)
+            if progress is not None:
+                progress(BuildProgress(
+                    full_solves=build.solver.solves, max_full_solves=settings.max_full_solves,
+                    snapshots=len(build.snapshots), rank=basis.shape[1], stop_residual=settings.stop_residual,
+                    latest=None if outcome is None else build.rounds[-1], seconds=dict(build.seconds),
+                    elapsed_s=elapsed_since(start)))
             if outcome is None:
-                stop = "候選用完"
+                stop = STOP_CANDIDATES_EXHAUSTED
                 break
             largest, pending = outcome
             if largest <= settings.stop_residual:
-                stop = "抽到的候選殘差都在停止值內"
+                stop = STOP_RESIDUAL_MET
                 break
             if build.solver.solves >= settings.max_full_solves:
-                stop = "預算停止、殘差目標未達"
+                stop = STOP_BUDGET
                 break
         ledger = BuildLedger(
             full_solves=build.solver.solves, snapshots=len(build.snapshots), rank=basis.shape[1],
