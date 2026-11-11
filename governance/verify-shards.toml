@@ -103,7 +103,7 @@ files = [
 [[group]]
 name = "six-category-measured"
 shard = "shard-d"
-why = "兩檔共用 test_six_category_jax 的 measured 前置（review 直接 import 同一個夾具、shared_json 同名 six-category-measure）；耗時分配把兩檔拆到兩片時，同一份前置在兩片各算一次，#1057 雲端收據兩片各約 490 秒。test_six_category_chain 用自己的探針與快取名，不綁。退回時放 shard-d：#1063 退回那一跑的逐檔秒數估得五片 a 18.1、b 16.0、c 10.8、d 14.2、e 6.9 分（四工人）。（#1062）"
+why = "兩檔共用 test_six_category_jax 的 measured 前置（review 直接 import 同一個夾具、shared_json 同一組鍵 six-category-<段名>，#1074 起一段一支子行程）；耗時分配把兩檔拆到兩片時，同一份前置在兩片各算一次，#1057 雲端收據兩片各約 490 秒。test_six_category_chain 用自己的探針與快取名，不綁。退回時放 shard-d：#1063 退回那一跑的逐檔秒數估得五片 a 18.1、b 16.0、c 10.8、d 14.2、e 6.9 分（四工人）。（#1062）"
 files = [
   "tests/engine/test_six_category_jax.py",
   "tests/engine/test_six_category_jax_review.py",
