@@ -94,6 +94,17 @@ def _result(work: Path, result: SurrogateResult) -> None:
     write_json_atomic(work / RESULT_FILE, result)
 
 
+def _rebuild_hint(stop_reason: str) -> str:
+    """驗證沒過時重建有沒有用：預算用完才停的，加大預算可能會過；殘差先達標才停的，照同樣設定重建結果一模一樣
+    （訓練材料與補點都是固定種子），加預算沒用。"""
+    from aosr.physics.fem_reduced_build import STOP_BUDGET
+
+    if stop_reason == STOP_BUDGET:
+        return f"建模停止原因：{stop_reason}——加大完整解預算（max_full_solves）重建可能會過"
+    return (f"建模停止原因：{stop_reason}——照同樣設定重建結果一模一樣（固定種子），加預算沒用；"
+            "要過得改建模停止值或訓練抽法，那要另外決定")
+
+
 def _install(stage: Path, slot: Path, replace: Path | None) -> str | None:
     """整個資料夾換名進格子；格子已有東西時只在給了 ``--replace`` 才先把舊的搬走（同一顆磁碟的換名，不複製）。"""
     retired = None
@@ -230,7 +241,7 @@ def build(args: argparse.Namespace) -> int:
     if not within:
         verdict("not_validated", f"留出驗證沒過（逐頻最大差 {max(report.frequency_db_by_seat.values()):.4g} dB，尺 "
                 f"{rulers.frequency.value:g} dB；帶能量最大差 {max(report.band_db_by_seat.values()):.4g} dB，尺 "
-                f"{rulers.band.value:g} dB）：這份替身不能用，沒有放進格子（停止原因：{ledger.stop_reason}）")
+                f"{rulers.band.value:g} dB）：這份替身不能用，沒有放進格子。{_rebuild_hint(ledger.stop_reason)}")
         return EXIT_NOT_USABLE
     job.progress.phase("checking")
     save_operators_stamp(npz, operators, rulers=rulers)

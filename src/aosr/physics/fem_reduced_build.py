@@ -14,6 +14,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,6 +30,9 @@ from aosr.physics.fem_reduced import (
 )
 
 Point2 = tuple[int, int]
+STOP_CANDIDATES_EXHAUSTED: Final = "候選用完"
+STOP_RESIDUAL_MET: Final = "抽到的候選殘差都在停止值內"
+STOP_BUDGET: Final = "預算停止、殘差目標未達"
 
 
 @dataclass(frozen=True)
@@ -176,14 +180,14 @@ def build_reduced_model(
                     latest=None if outcome is None else build.rounds[-1], seconds=dict(build.seconds),
                     elapsed_s=elapsed_since(start)))
             if outcome is None:
-                stop = "候選用完"
+                stop = STOP_CANDIDATES_EXHAUSTED
                 break
             largest, pending = outcome
             if largest <= settings.stop_residual:
-                stop = "抽到的候選殘差都在停止值內"
+                stop = STOP_RESIDUAL_MET
                 break
             if build.solver.solves >= settings.max_full_solves:
-                stop = "預算停止、殘差目標未達"
+                stop = STOP_BUDGET
                 break
         ledger = BuildLedger(
             full_solves=build.solver.solves, snapshots=len(build.snapshots), rank=basis.shape[1],

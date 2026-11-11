@@ -24,6 +24,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient import run
+from aosr.gradient.surrogate_build import _rebuild_hint
 from aosr.gradient.surrogate_files import (
     ESTIMATE_LABEL, MODEL_FILE, PROGRESS_FILE, RESULT_FILE, STAGE_DIR, TRAINING_FILE, RoundRecord, SurrogateProgress,
     SurrogateResult, estimate,
@@ -35,6 +36,7 @@ from aosr.gui.gradient_plan import GradientRequest, PlanRefused
 from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX, RETIRED_DIR, SurrogateBuilds, SurrogateRequest
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, surrogate_path
 from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
+from aosr.physics.fem_reduced_build import STOP_BUDGET, STOP_RESIDUAL_MET
 from aosr.physics.fem_reduced_check import points_hex
 from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import operators_path
@@ -178,14 +180,22 @@ def test_starved_build_fails_validation_and_never_enters_the_slot(tmp_path: Path
     view = _wait(builds, str(builds.start(NAME, QUICK.model_copy(update={"max_full_solves": 8}))["build_id"]))
     assert view["state"] == "not_validated", view
     result = SurrogateResult.model_validate(view["result"])
-    assert result.within_contract is False and result.full_solves == 8 and result.stop_reason == "預算停止、殘差目標未達"
+    assert result.within_contract is False and result.full_solves == 8 and result.stop_reason == STOP_BUDGET
     assert set(result.rulers) == {"frequency", "band"} and "沒有放進格子" in result.message
+    assert "加大完整解預算" in result.message
     assert not slot_dir(data_dir, scheme()).exists()
     stage = tmp_path / "data" / SLOTS_DIR / "builds" / str(view["build_id"]) / "work" / STAGE_DIR
     assert receipt_path(stage / MODEL_FILE).is_file() and not operators_path(stage / MODEL_FILE).exists()
     jobs, _ = _managers(data_dir, FakeLauncher(), None)
     with pytest.raises(NeedsSurrogate):
         jobs.start(NAME, GradientRequest())
+
+
+def test_rebuild_hint_says_whether_a_bigger_budget_can_help() -> None:
+    """抓殘差先達標才停的也叫人加預算重建（固定種子，重建結果一模一樣，白等）。"""
+    assert "加大完整解預算" in _rebuild_hint(STOP_BUDGET)
+    residual = _rebuild_hint(STOP_RESIDUAL_MET)
+    assert "加預算沒用" in residual and "一模一樣" in residual
 
 
 # ---- 真跑：產品預設的抽法、留出驗證中途停 ----

@@ -125,6 +125,22 @@ def test_document_lists_every_set_with_its_materials() -> None:
         assert all(set(entry["faces"]) == set(entry["materials"]) == set(sets.names) for entry in entries)
 
 
+def test_whole_wall_scheme_uses_the_six_walls() -> None:
+    """抓沒有分區的方案（六面整面）面片鍵不是六面牆、或材料匯出的鍵型跟方案對不上。"""
+    from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+    from aosr.geometry.shoebox import Wall
+    from tests.engine.test_gui_gradient_jobs import _scheme as gui_scheme
+
+    case = gui_scheme("whole")
+    saved = run.scene_wall_materials(case, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    air, ranges = construction_environment(density_kg_m3=case.scene.density_kg_m3,
+                                           sound_speed_m_s=case.scene.sound_speed_m_s)
+    sets = TrainingSets(saved, SEARCH, SAMPLING, air=air, ranges=ranges, frequencies_hz=FEM_LANE_FREQUENCIES_HZ)
+    assert sets.keys == tuple(Wall.all()) and sets.names == ("floor", "ceiling", "x0", "xL", "y0", "yL")
+    for item in sets.training_sets()[:3] + sets.holdout_sets()[:3]:
+        assert tuple(sets.materials(item)) == tuple(Wall.all())
+
+
 def _write(path: Path, text: str) -> Path:
     path.write_text(text, encoding="utf-8")
     return path
