@@ -184,6 +184,24 @@ def test_a_late_verdict_never_eats_a_half_typed_limit(tmp_path: Path, browser: B
         _settled(page)
         assert page.evaluate("zoneDesign.wall_max_depth_m") == {"x0": 0.1}
         _red(page, "z1")
+
+        # 空白的房間格只打了「.」：值讀起來是空的、跟確定過的一樣，但那是打到一半的字，不准被重畫吃掉。
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        with page.expect_request("**/api/zone-limits"):
+            page.evaluate("() => { window.before = zoneLimits; refreshZoneLimits(); }")
+        page.locator("#depth-room").focus()
+        page.keyboard.type(".")
+        assert page.locator("#depth-room").evaluate("e => e.validity.badInput")
+        with page.expect_response("**/api/zone-limits"):
+            held[-1].continue_()
+        page.unroute("**/api/zone-limits")
+        page.wait_for_function("zoneLimits !== window.before")
+        assert page.evaluate("zoneLimitsShown < zoneLimitsGeneration")
+        assert page.locator("#depth-room").evaluate("e => e.validity.badInput")   # 還是同一格、字還在
+        page.keyboard.type("2")
+        page.locator("#depth-room").blur()
+        _settled(page)
+        assert page.evaluate("zoneDesign.room_max_depth_m") == 0.2
         assert watched.page_errors == [] and watched.console_errors == []
 
 

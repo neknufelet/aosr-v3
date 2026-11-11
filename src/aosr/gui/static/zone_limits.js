@@ -12,12 +12,13 @@ let zoneLimitsRequest = Promise.resolve();
 let zoneLimitsAfterDrag = 0; // 拖框中收下、放開滑鼠才畫的那一次
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
 
-// 正在打字＝焦點在立面圖那一區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同）。
+// 正在打字＝焦點在立面圖那一區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同；
+// 數字格打了「.」這種還不成數字的字時，值讀起來是空的，瀏覽器另外標 badInput，也算）。
 // 按 Tab 換到別格、按 Enter 確定之後那一格是乾淨的：照畫，畫完把焦點放回同一格。
 function typingInElevation() {
   const active = document.activeElement;
   return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest("#elevation-panel")
-    && active.value !== active.defaultValue ? active : null;
+    && (active.value !== active.defaultValue || active.validity.badInput) ? active : null;
 }
 function showZoneLimits(generation) {
   if (generation !== zoneLimitsGeneration) return;
