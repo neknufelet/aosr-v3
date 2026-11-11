@@ -100,7 +100,7 @@ def _settings(deps: ZoneResultDeps, scheme: Scheme) -> DesignSettings | None:
         raise BaselineRefused(f"設計設定讀不出來（{first}），拿不準有沒有指原方案；到設計設定重存一次") from exc
 
 
-def _original(deps: ZoneResultDeps, settings: DesignSettings | None) -> OriginalWalls | None:
+def _original(deps: ZoneResultDeps, settings: DesignSettings | None, design: Scheme) -> OriginalWalls | None:
     """設計設定指的原方案；沒指回 None；指了卻讀不到、或過不了檢查就拒收。"""
     if settings is None or settings.original_scheme_id is None:
         return None
@@ -109,7 +109,7 @@ def _original(deps: ZoneResultDeps, settings: DesignSettings | None) -> Original
         scheme = Scheme.model_validate_json(path.read_bytes())
     except (ValueError, OSError) as exc:
         raise BaselineRefused(f"設計設定指的原方案「{settings.original_scheme_id}」讀不到或不在了") from exc
-    return original_walls(scheme, capabilities=deps.capabilities, directivity=deps.directivity)
+    return original_walls(scheme, design, capabilities=deps.capabilities, directivity=deps.directivity)
 
 
 def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | None:
@@ -202,7 +202,7 @@ def _build(deps: ZoneResultDeps, design_path: Path, design: SchemeResult) -> tup
     settings: DesignSettings | None = None
     try:
         settings = _settings(deps, scheme)
-        original = _original(deps, settings)
+        original = _original(deps, settings, scheme)
         baseline = derive_baseline(scheme, original)
     except BaselineRefused as exc:
         rows = zone_rows(derive_baseline(scheme), settings, scheme, baseline_known=False)

@@ -12,7 +12,7 @@
 
 基準方案的代號＝設計代號＋「-orig-」＋基準內容雜湊前 8 碼：設計或原方案改了，代號跟著換，舊的基準結果不會被誤認。
 原方案六面都是整面固定阻抗時，方案檔存成六個數字；這裡不自己把數字建成材料（固定阻抗只在已驗輸入出生，
-見 ``report_io.solver_inputs``），而是走同一條驗證拿那六面材料，見 ``original_walls``。
+見 ``report_io.solver_inputs``），而是把原方案的牆放進設計的擺位、走同一條驗證拿那六面材料，見 ``original_walls``。
 這一支不在物理身分範圍裡：只組方案、讀結果、排版，不算物理。
 """
 from __future__ import annotations
@@ -84,17 +84,25 @@ class OriginalWalls:
     zones: Mapping[str, tuple[SurfaceZone, ...]]
 
 
-def original_walls(scheme: Scheme, *, capabilities: CapabilityTable, directivity: DirectivityDefaults) -> OriginalWalls:
-    """原方案每一面牆的分區；六面固定阻抗存成六個數字的，材料照計算同一條驗證、從唯一出生地拿。"""
-    zones = scheme.scene.surface_zones_by_wall
+def original_walls(original: Scheme, design: Scheme, *, capabilities: CapabilityTable,
+                   directivity: DirectivityDefaults) -> OriginalWalls:
+    """原方案每一面牆的分區；只拿牆，原方案自己的喇叭、座位、家具不帶進基準，也不拿來擋。
+
+    六面固定阻抗存成六個數字的：把原方案的場景放進設計的擺位（基準就是用設計的擺位算），走計算同一條驗證、
+    從唯一出生地拿六面材料；過不了就是原方案的牆本身鋪不上這一場。
+    """
+    if original.scene.room_m != design.scene.room_m:
+        raise BaselineRefused(f"原方案「{original.scheme_id}」的房間尺寸跟設計不同，原牆鋪不上去")
+    zones = original.scene.surface_zones_by_wall
     if zones is not None:
-        return OriginalWalls(scheme.scheme_id, scheme.scene.room_m, dict(zones))
+        return OriginalWalls(original.scheme_id, original.scene.room_m, dict(zones))
     try:
-        _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-    except SchemeValidationError as exc:
-        raise BaselineRefused(f"原方案「{scheme.scheme_id}」過不了檢查：{exc}") from exc
+        placed = Scheme.model_validate(design.model_copy(update={"scene": original.scene}).model_dump())
+        _, documents = checked_inputs(placed, capabilities=capabilities, directivity=directivity)
+    except (SchemeValidationError, ValueError) as exc:
+        raise BaselineRefused(f"原方案「{original.scheme_id}」的牆放進設計的擺位過不了檢查：{exc}") from exc
     _, inputs = next(iter(documents.values()))
-    return OriginalWalls(scheme.scheme_id, scheme.scene.room_m, {
+    return OriginalWalls(original.scheme_id, original.scene.room_m, {
         wall.wall_name(): (WholeWallZone(area="whole_wall", material=material),)
         for wall, material in solver_inputs(inputs).materials_by_wall.items()})
 

@@ -24,7 +24,7 @@ from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._construction_gui_server import real_server
 from tests.engine._zone_result_cases import original_x0, real_design
-from tests.engine._zoned_report_cases import with_x0
+from tests.engine._zoned_report_cases import small_scheme, with_x0
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_scheme_pipeline import shared_control_result
 from aosr.materials.construction_models import ConstantImpedance
@@ -155,6 +155,12 @@ def test_zone_routes_refuse_whole_walls_old_physics_cut_originals_and_missing_or
         stale = client.get(zones).json()
         assert stale["state"] == "design_stale" and not stale["can_start"] and "舊版物理" in stale["state_text"]
         assert client.post(start, json={}).status_code == 409
+        six = Scheme.model_validate(small_scheme().model_dump(mode="json") | {"scheme_id": "orig6"})
+        (tmp_path / "schemes" / "orig6.json").write_text(six.model_dump_json())
+        pointed = DesignSettings(scheme_id=design.scheme.scheme_id, original_scheme_id="orig6").model_dump(mode="json")
+        assert client.put(f"/api/designs/{design.scheme.scheme_id}", json=pointed).status_code == 200
+        laid = client.get(zones).json()  # 六個數字的原方案照它的牆鋪（不用表單外重建材料），逐區表照出
+        assert laid["state"] == "design_stale" and any("照原方案「orig6」" in row["baseline_source"] for row in laid["rows"])
         settings = DesignSettings(scheme_id=design.scheme.scheme_id, original_scheme_id="orig")
         saved = client.put(f"/api/designs/{design.scheme.scheme_id}", json=settings.model_dump(mode="json"))
         assert saved.status_code == 200, saved.text

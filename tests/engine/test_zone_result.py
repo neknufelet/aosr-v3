@@ -10,6 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
+from aosr.geometry.shoebox import Point
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_result import (
     BaselineRefused, OriginalWalls, _change, derive_baseline, improvement, original_walls, zone_rows)
@@ -22,6 +23,7 @@ from aosr.physics.zone_fill import wall_size_m
 from aosr.reporting.compare import compare_results
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import validate_scheme
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._zone_result_cases import design_scheme, mounted, original_x0
 from tests.engine._zoned_report_cases import small_scheme, split_x0, with_x0
@@ -32,8 +34,8 @@ OTHER = ConstantImpedance(impedance_pa_s_m=2000.0)
 CAPABILITIES = load_capabilities(config_path("capabilities.toml"))
 
 
-def _walls(scheme: Scheme) -> OriginalWalls:
-    return original_walls(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+def _walls(original: Scheme) -> OriginalWalls:
+    return original_walls(original, design_scheme(), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
 
 
 def _boxes(scheme: Scheme) -> dict[str, list[tuple[object, ...]]]:
@@ -124,6 +126,16 @@ def test_pointer_to_a_six_number_original_takes_its_walls_from_the_validated_inp
     assert {zone.source for zone in pointed.zones} == {"original_scheme"}
     with pytest.raises(BaselineRefused, match="沒有分區"):
         derive_baseline(six)
+
+
+def test_pointer_takes_only_the_walls_so_the_originals_own_placement_cannot_refuse_it() -> None:
+    """複查第 1 條：原方案自己的喇叭擺壞了（對準點跟喇叭重合，計算驗證不收）也不擋——基準用的是設計的擺位。"""
+    six = small_scheme()
+    speakers = dict(six.speakers)
+    speakers[next(iter(speakers))] = Point(*six.receiver_set.primary.position_m)
+    odd = Scheme.model_validate(six.model_copy(update={"source_model": "product_default", "speakers": speakers}).model_dump())
+    assert validate_scheme(odd, capabilities=CAPABILITIES, directivity=DIRECTIVITY)  # 原方案整份確實過不了
+    assert derive_baseline(design_scheme(), _walls(odd)).scheme == derive_baseline(design_scheme()).scheme
 
 
 def test_nothing_to_compare_when_no_zone_has_an_added_layer() -> None:
