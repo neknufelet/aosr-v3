@@ -17,11 +17,14 @@ from pathlib import Path
 from typing import cast
 
 import uvicorn
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.gradient import folder_files
 from aosr.gradient.cli import EXIT_STOPPED
+from aosr.gradient.surrogate_files import PROGRESS_FILE, RoundRecord, SurrogateProgress
+from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX
+from aosr.gui.surrogate_slots import SLOTS_DIR
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import GradientJobs
 from aosr.gui.gradient_plan import GradientRequest
@@ -114,11 +117,33 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         unit, argv, _, _ = launcher.launched[-1]
         assert "surrogate" in unit and argv[argv.index("--max-full-solves") + 1] == "1000"
         assert "--stop-residual" not in argv
+        build_id = unit.removeprefix(BUILD_UNIT_PREFIX)
+        work = data_dir / SLOTS_DIR / "builds" / build_id / "work"
+        work.mkdir(parents=True)
+        (work / PROGRESS_FILE).write_text(_progress(time.time()).model_dump_json(), encoding="utf-8")
+        _tick(page)
+        expect(page.locator("#build-state")).to_contain_text("完整解快照、補點、投影")
+        expect(page.locator("#build-estimate")).to_contain_text("推估")
+        expect(page.locator("#build-estimate")).to_contain_text("還要約")
+        expect(page.locator("#build-surrogate")).to_be_disabled()
+        page.locator("#load-plan").click()
+        expect(page.locator("#busy-line")).to_contain_text("方案「zoned」正在建替身")
+        expect(page.locator("#busy-open")).to_have_text("看建替身進度")
         _shot(page, "1-6b-1-surrogate-building")
         page.locator("#stop-build").click()
         expect(page.locator("#build-state")).to_contain_text("停止中")
         assert launcher.stopped == [unit]
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def _progress(now: float) -> SurrogateProgress:
+    """建模第二輪做完的進度（同建替身考卷那一份的數字）：推估量得到速度。"""
+    return SurrogateProgress.model_validate({
+        "phase": "building", "started_at": now - 120.0, "phase_started_at": now - 110.0, "updated_at": now - 5.0,
+        "workers": 4, "patches": 7, "dofs": 3389, "axis_points": 94, "training_sets": 41, "holdout_sets": 9,
+        "max_full_solves": 1000, "stop_residual": 0.001, "full_solves": 96, "rank": 267, "snapshot_seconds": 48.0,
+        "rounds": [RoundRecord(round=0, full_solves=64, rank=200, max_residual=0.5, elapsed_s=40.0),
+                   RoundRecord(round=1, full_solves=96, rank=267, max_residual=0.02, elapsed_s=70.0)]})
 
 
 def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
@@ -130,12 +155,16 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限 45 步")
     expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"]')).to_contain_text("0.1 公尺")
     expect(page.locator('#plan-table tr[data-surface="ceiling@r0_c1"]')).to_contain_text("保留原牆")
+    expect(page.locator('#plan-table tr[data-surface="x0@r1_c1"]')).to_contain_text("沒有限制（家族都試、也試不貼）")
     _shot(page, "1-6b-2-preview")
     page.locator("#start").click()
     expect(page.locator("#job-state")).to_contain_text("開跑前核對中")
     unit, argv, _, _ = launcher.launched[-1]
     assert argv[argv.index("--max-steps") + 1] == "45"
     assert "x0@r0_c0=0.1" in argv
+    page.locator("#preview").click()
+    expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋")
+    expect(page.locator("#start")).to_be_disabled()
     return unit.split("-")[2]
 
 
@@ -238,3 +267,30 @@ def test_a_refused_surrogate_offers_a_rebuild_that_replaces_it(browser: Browser,
         _, argv, _, _ = launcher.launched[-1]
         assert "--replace" in argv
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_server_errors_and_a_long_wait_are_said_plainly(browser: Browser, tmp_path: Path) -> None:
+    """抓伺服器回 500（不是 JSON）時頁面丟例外或什麼都不說、等開跑鎖等很久時畫面像當掉（取鎖沒有逾時）。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#start")).to_be_enabled()
+        start = "**/api/gradient/schemes/*/start"
+        page.route(start, lambda route: route.fulfill(status=500, body="Internal Server Error", content_type="text/plain"))
+        page.locator("#start").click()
+        expect(page.locator("#start-message")).to_contain_text("伺服器出錯（狀態 500）")
+        page.unroute(start)
+        page.route(start, lambda route: held.append(route))
+        page.locator("#start").click()
+        page.wait_for_function("() => document.getElementById('start-message').textContent === '正在開跑…'")
+        page.clock.run_for(15_000)
+        expect(page.locator("#start-message")).to_contain_text("還在等伺服器回應（可能在等開跑鎖")
+        _shot(page, "1-6b-7-waiting-for-lock")
+        assert len(held) == 1
+        held[0].fulfill(status=409, json={"error": "已經有一跑在算（abc）", "busy": "aosr-gradient-elsewhere-0"})
+        expect(page.locator("#start-message")).to_contain_text("別的資料夾或命令列開的第三階段計算（服務 aosr-gradient-elsewhere-0）")
+        assert launcher.launched == []
+        _clean(page, watched.page_errors + [error for error in watched.console_errors
+                                            if "status of 500" not in error and "status of 409" not in error])

@@ -20,6 +20,8 @@ let defaults = null;
 let lastPreview = null;
 let watchedBuild = null;
 let surrogateDefaults = null;
+let knownJobs = [];
+let knownBuilds = [];
 let polling = false;
 
 function el(tag, attributes = {}, ...children) {
@@ -59,8 +61,29 @@ async function api(path, body = undefined, messageId = null) {
   }
 }
 
+// 忙碌時伺服器只給代號（一跑的代號，或別處開的服務名）：照清單翻成「哪份方案、在搜尋還是建替身」。
+function busyWho(busy) {
+  const job = knownJobs.find((item) => item.job_id === busy);
+  if (job) return {text: `方案「${job.scheme_id}」的第三階段搜尋（${job.state_text}）`, job: job.job_id};
+  const build = knownBuilds.find((item) => item.unit === busy || item.build_id === busy);
+  if (build) return {text: `方案「${build.scheme_id}」正在建替身（${build.state_text}）`, build: build.build_id};
+  return {text: `別的資料夾或命令列開的第三階段計算（服務 ${busy}）`};
+}
+
 function busyText(body) {
-  return body.busy ? `整台機器同時只跑一件：${body.busy} 正在算，等它做完或先停掉` : body.error;
+  return body.busy ? `整台機器同時只跑一件：${busyWho(body.busy).text}正在算，等它做完或先停掉` : body.error;
+}
+
+function showBusy(busy) {
+  const line = byId("busy-line");
+  line.hidden = !busy;
+  if (!busy) { line.replaceChildren(); return; }
+  const who = busyWho(busy);
+  line.replaceChildren(`整台機器同時只跑一件：${who.text}正在算，等它做完或先停掉。`);
+  if (who.job) line.append(" ", el("button", {type: "button", class: "quiet", id: "busy-open", text: "看那一跑",
+    on: {click: () => selectJob(who.job)}}));
+  if (who.build) line.append(" ", el("button", {type: "button", class: "quiet", id: "busy-open", text: "看建替身進度",
+    on: {click: () => { watchedBuild = who.build; poll(); byId("surrogate-block").scrollIntoView(); }}}));
 }
 
 function errorText(reply) {
@@ -78,6 +101,15 @@ function duration(seconds) {
 
 function when(epoch) {
   return epoch ? new Date(epoch * 1000).toLocaleString("zh-TW", {hour12: false}) : "";
+}
+
+// 每區准用清單（#1082 段 2-3b；轉好的參數 plan.allowed：面片 → 家族代號、fixed:<代號>、none）；沒有清單的區照家族全部試。
+function allowedText(plan, surface, mode) {
+  if (mode !== "search") return "—";
+  const targets = (plan.allowed || {})[surface];
+  if (!targets) return "沒有限制（家族都試、也試不貼）";
+  return targets.map((target) => target === "none" ? "不貼" : target.startsWith("fixed:") ?
+    `${target.slice("fixed:".length)}（固定，整塊選或不選）` : target).join("、");
 }
 
 function surfaceParts(surface) {
@@ -133,8 +165,17 @@ async function loadPlan() {
   byId("mount").value = defaults.mount;
   byId("device").value = defaults.device;
   byId("frequency-batch").value = "";
+  mountWarning();
   drawDepthTable(reply.body.plan);
   showPreview(reply.body);
+}
+
+// 結果頁沒指原方案時，是拆「貼在原牆上」的加貼層找回原牆；貼在硬底上的區拆不回去，會被當成沒動、改善算不進來。
+function mountWarning() {
+  const rigid = byId("mount").value === "rigid";
+  byId("mount-warning").hidden = !rigid;
+  byId("mount-warning").textContent = rigid ? "貼在硬底上：結果頁要算「改善多少」得知道原牆。設計設定沒指原方案時，結果頁是拆" +
+    "「貼在原牆上」的加貼層找回原牆；貼在硬底上的區拆不回去，會被當成沒動、改善算不進來。要用硬底，先在設計設定指原方案。" : "";
 }
 
 function drawDepthTable(plan) {
@@ -176,9 +217,10 @@ function showPreview(data) {
     body.append(el("tr", {"data-surface": surface}, el("td", {text: WALLS[wall] || wall}), el("td", {text: zoneText(zone)}),
       el("td", {text: MODE_WORDS[mode] || mode, class: mode === "search" ? "mode-search" : null}),
       el("td", {text: plan.presets[index] || (mode === "search" ? "" : "方案裡這一區的材料，不調")}),
+      el("td", {text: allowedText(plan, surface, mode)}),
       el("td", {text: depth === undefined ? (mode === "search" ? "照材料自己的限制" : "不加層") : `${depth} 公尺`})));
   });
-  const head = el("tr", {}, ...["牆", "區", "做法", "起跑樣板", "深度上限"].map((text) => el("th", {text})));
+  const head = el("tr", {}, ...["牆", "區", "做法", "起跑樣板", "准用材料", "深度上限"].map((text) => el("th", {text})));
   byId("plan-table").replaceChildren(el("table", {}, el("thead", {}, head), body));
   byId("plan-arguments").textContent = data.arguments.join(" ");
   const surrogate = data.surrogate;
@@ -186,8 +228,7 @@ function showPreview(data) {
     `這份切法還沒有替身，要先建（缺：${surrogate.missing.join("、")}）。`;
   byId("surrogate-slot").textContent = `替身放在：${surrogate.slot}`;
   byId("surrogate-state").className = surrogate.found ? "" : "notice";
-  byId("busy-line").hidden = !data.busy;
-  byId("busy-line").textContent = data.busy ? busyText({busy: data.busy}) : "";
+  showBusy(data.busy);
   byId("start").disabled = !surrogate.found || Boolean(data.busy);
   if (!surrogate.found) loadSurrogatePlan(false); else byId("surrogate-build-form").hidden = true;
 }
@@ -231,9 +272,13 @@ function showBuild(build) {
   byId("build-state").textContent = `${build.state_text}（開建 ${when(build.created_at)}）`;
   byId("build-state").className = ["failed", "not_validated", "gate_refused", "interrupted"].includes(build.state) ? "notice" : "";
   const estimate = build.estimate;
-  byId("build-estimate").textContent = estimate ?
-    `${estimate.label}：還要 ${duration(estimate.remaining_s)}，已經 ${duration(estimate.elapsed_s)}。${estimate.basis}` :
-    (build.result ? `完整解 ${build.result.full_solves} 次、秩 ${build.result.rank}；判定「${build.result.verdict}」。` : "");
+  if (estimate) {
+    const left = estimate.remaining_s === null ? "還推不出還要多久" : `還要${duration(estimate.remaining_s)}`;
+    byId("build-estimate").textContent = `${estimate.label}：${left}（已經建了${duration(estimate.elapsed_s)}）。${estimate.basis}`;
+  } else {
+    byId("build-estimate").textContent = build.result ?
+      `完整解 ${build.result.full_solves} 次、秩 ${build.result.rank}。${build.result.message}` : "";
+  }
   byId("build-error").hidden = !build.error;
   byId("build-error").textContent = build.error || "";
   byId("build-log").textContent = (build.log_tail || []).join("\n");
@@ -270,6 +315,7 @@ async function refreshJobs() {
   if (!reply.ok) { say("connection", `讀不到搜尋清單：${errorText(reply)}`, true); return; }
   say("connection", "");
   const jobs = reply.body.jobs;
+  knownJobs = jobs;
   if (!jobs.length) { byId("job-list").replaceChildren(el("p", {text: "還沒有第三階段搜尋。"})); return; }
   const body = el("tbody");
   for (const job of jobs) {
@@ -350,6 +396,9 @@ function showJob(job, detail, detailError) {
   byId("job-adopt").hidden = job.state !== "done" || Boolean(adopted);
   byId("job-endpoint-note").hidden = !job.endpoint;
   byId("job-endpoint-note").textContent = job.endpoint ? job.endpoint.baseline_note : "";
+  const warning = detail ? detail.baseline_warning : null;
+  byId("job-baseline-warning").hidden = !warning;
+  byId("job-baseline-warning").textContent = warning || "";
   const adoptedLine = byId("job-adopted");
   adoptedLine.hidden = !adopted;
   if (adopted) {
@@ -392,10 +441,16 @@ async function rebuild() {
   say("surrogate-message", "這一跑的替身被准用閘門拒收：按「建替身」重建一份（新的建好、核過才換掉舊的）。", true);
 }
 
+async function refreshBuilds() {
+  const reply = await api("/api/gradient/surrogates");
+  if (reply.ok) knownBuilds = reply.body.builds;
+}
+
 async function poll() {
   if (polling) return;
   polling = true;
   try {
+    await refreshBuilds();
     await refreshJobs();
     if (selectedJob) await refreshJob();
     if (watchedBuild) {
@@ -418,6 +473,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   byId("job-endpoint").addEventListener("click", () => jobAction("endpoint"));
   byId("job-adopt").addEventListener("click", adopt);
   byId("job-rebuild").addEventListener("click", rebuild);
+  byId("mount").addEventListener("change", mountWarning);
+  await refreshBuilds();
+  await refreshJobs();
   await loadSchemes();
   await poll();
   setInterval(poll, POLL_MS);

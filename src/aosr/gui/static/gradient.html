@@ -34,6 +34,7 @@
       <label>替身每批算幾個頻點（空白＝一次全部；顯卡記憶體不夠才填）<input id="frequency-batch" type="number" min="1" step="1" inputmode="numeric"></label>
     </div>
     <p id="max-steps-default" class="hint"></p>
+    <p id="mount-warning" class="notice" hidden></p>
     <h3>每一區的深度上限（公尺；空白＝照材料自己的限制）</h3>
     <div id="depth-table"></div>
     <p><button id="preview" type="button">預覽轉好的參數</button></p>
@@ -97,6 +98,7 @@
       <button id="job-adopt" type="button" hidden>存成方案、算結果頁</button>
     </p>
     <p id="job-endpoint-note" class="hint" hidden></p>
+    <p id="job-baseline-warning" class="notice" hidden></p>
     <p id="job-adopted" hidden></p>
     <p id="job-message" aria-live="polite"></p>
     <details><summary>每一步的輸出最後幾行</summary><div id="job-steps"></div></details>

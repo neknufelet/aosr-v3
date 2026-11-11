@@ -9,6 +9,9 @@
   ``<原方案>-search-<這一跑代號前 8 碼>``，開跑那一刻的設計設定跟著帶過去（區代號不變；有指原方案就照指），再開一般計算；
   結果頁（#1092）的逐區表與「改善多少」照它自己的規則算，這裡不算改善；
 - 查開過沒有：同一跑只開一次，記在這一跑資料夾的 ``adopted.json``，再按就回同一筆。
+
+結果頁沒指原方案時是拆「貼在原牆上」的加貼層找回原牆（``zone_result.derive_baseline``）；選了「貼在硬底上」的那一跑
+交給搜尋的區拆不回去、會被當成沒動，細節裡照實警告（``baseline_warning``），不替使用者猜原牆。
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.config.material_gradient import MOUNT_RIGID
 from aosr.gradient.folder_files import LEDGER_FILE
 from aosr.gui.gradient_jobs import JOB_ID, ActionRefused, GradientJobs
 from aosr.gui.gradient_plan import PlanRefused
@@ -42,6 +46,9 @@ FAILURE_MARK: Final = "失敗："
 LINE_LIMIT: Final = 6
 NAME_ROOM: Final = 180  # 方案代號上限 200 字，留給「-search-」與 8 碼
 ADOPTED_WORD: Final = "search"
+RIGID_BASELINE_WARNING: Final = (
+    "這一跑選了「貼在硬底上」，開跑時的設計設定又沒指原方案：結果頁找原牆是拆「貼在原牆上」的加貼層，"
+    "這一跑交給搜尋的區拆不回去、會被當成沒動，改善算不進來。要算改善，存成方案後在那份方案的設計設定指原方案。")
 
 
 class Adoption(BaseModel):
@@ -113,6 +120,17 @@ class GradientFollow:
         return {"scheme_id": adoption.scheme_id, "run_id": adoption.run_id, "created_at": adoption.created_at,
                 "run_status": status, "run_error": error, "result_url": f"/results/{adoption.run_id}"}
 
+    def _baseline_warning(self, job_id: str, view: dict[str, object]) -> str | None:
+        plan = view["plan"]
+        request = plan.get("request") if isinstance(plan, dict) else None
+        if not isinstance(request, dict) or request.get("mount") != MOUNT_RIGID:
+            return None
+        snapshot = self._job_dir(job_id) / "design.json"
+        if snapshot.is_file() and DesignSettings.model_validate_json(
+                snapshot.read_text(encoding="utf-8")).original_scheme_id is not None:
+            return None
+        return RIGID_BASELINE_WARNING
+
     def detail(self, job_id: str) -> dict[str, object]:
         view = self.gradient.get(job_id)
         folder = view["folder"]
@@ -128,6 +146,7 @@ class GradientFollow:
         return {"job_id": job_id, "state": view["state"], "max_steps": view["max_steps"],
                 "descent_steps": None if folder is None else descent_steps(Path(str(folder))),
                 "notes": list(dict.fromkeys(notes)), "failures": failures,
+                "baseline_warning": self._baseline_warning(job_id, view),
                 "adopted": self._adoption_view(self._adoption(job_id))}
 
     def adopt(self, job_id: str) -> dict[str, object]:

@@ -19,9 +19,11 @@ from aosr.gradient import folder_files
 from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import LaunchFailed
-from aosr.gui.gradient_follow import ADOPTED_FILE, adopted_name, descent_steps
+from aosr.config.paths import config_path
+from aosr.gui.gradient_follow import ADOPTED_FILE, RIGID_BASELINE_WARNING, GradientFollow, adopted_name, descent_steps
+from aosr.gui.jobs import JobManager
 from aosr.gui.gradient_plan import GradientRequest
-from aosr.gui.zone_design import read_design
+from aosr.gui.zone_design import read_design, write_design
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -206,12 +208,12 @@ def test_page_and_static_files_are_served(tmp_path: Path) -> None:
     seen: list[httpx.Response] = []
 
     async def scenario(client: httpx.AsyncClient) -> None:
-        for path in ("/gradient", "/static/gradient.js", "/static/gradient.css", "/"):
+        for path in ("/gradient", *(f"/static/gradient.{kind}" for kind in ("js", "css")), "/"):
             seen.append(await client.get(path))
 
     _serve(data_dir, FakeLauncher(), scenario)
     page, script, style, home = seen
-    assert page.status_code == 200 and "第三階段搜尋" in page.text and "/static/gradient.js" in page.text
+    assert page.status_code == 200 and "第三階段搜尋" in page.text and 'src="/static/gradient.' in page.text
     assert script.status_code == 200 and "/api/gradient/runs/" in script.text
     assert style.status_code == 200 and home.status_code == 200 and 'href="/gradient"' in home.text
 
@@ -245,3 +247,42 @@ def test_detail_of_a_launch_failure_shows_the_service_error(tmp_path: Path) -> N
     detail, view = seen
     assert detail["state"] == "failed" and detail["failures"] == []
     assert cast(list[Record], view["steps"])[0]["error"] == "systemd-run 找不到"
+
+
+def _follow(data_dir: Path, launcher: FakeLauncher) -> GradientFollow:
+    jobs = _jobs(data_dir, launcher)
+    manager = JobManager(data_dir, (sys.executable, "-c", "pass"), "a" * 40, config_path("capabilities.toml"))
+    return GradientFollow(jobs, manager, lambda document: [])
+
+
+def test_job_ids_are_checked_before_any_path_is_built(tmp_path: Path) -> None:
+    """抓代號沒先驗格式就拿去組路徑：「..」會讀到工作資料夾外面那一份 adopted.json。網址裡的「..」可能在送出前就被
+    併掉，所以直接叫函式考。"""
+    data_dir = _data(tmp_path)
+    follow = _follow(data_dir, FakeLauncher())
+    planted = {"job_id": "0" * 32, "scheme_id": "planted", "run_id": "1" * 32, "created_at": 0.0}
+    for folder in (data_dir, data_dir / "gradient"):
+        (folder / ADOPTED_FILE).write_text(json.dumps(planted), encoding="utf-8")
+    for job_id in ("..", ".", "../gradient", "0" * 31):
+        # 訊息是這一支格式檢查的那一句（後端深處也會丟 FileNotFoundError，但訊息只有代號）：證明是先擋下、沒去讀檔。
+        with pytest.raises(FileNotFoundError, match="沒有這一跑"):
+            follow.adopt(job_id)
+        with pytest.raises(FileNotFoundError):
+            follow.detail(job_id)
+
+
+@pytest.mark.parametrize(("mount", "original", "warned"), [
+    ("rigid", None, True), ("rigid", "room-original", False), ("on_wall", None, False)])
+def test_rigid_mount_without_an_original_scheme_is_warned(tmp_path: Path, mount: str, original: str | None,
+                                                          warned: bool) -> None:
+    """抓選了「貼在硬底上」又沒指原方案時沒警告（結果頁會把搜尋的區當成沒動、改善算成零），或沒這個問題時亂警告。"""
+    data_dir = _data(tmp_path)
+    if original is not None:
+        design = read_design(data_dir, NAME)
+        assert design is not None
+        write_design(data_dir, design.model_copy(update={"original_scheme_id": original}), _scheme())
+    launcher = FakeLauncher()
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest.model_validate({"mount": mount}))
+    detail = _follow(data_dir, launcher).detail(str(view["job_id"]))
+    assert (detail["baseline_warning"] == RIGID_BASELINE_WARNING) is warned
+    assert (detail["baseline_warning"] is None) is not warned
