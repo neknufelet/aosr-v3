@@ -204,7 +204,7 @@ def test_physics_refusal_names_the_material_before_the_search_starts(tmp_path: P
     for flow in (3000.0, 80000.0):
         bad = _optimizable(porous={**porous, "flow_resistivity_pa_s_m2": flow})
         result = _probe(tmp_path, [_fixed(), bad])
-        assert result["type"] == "MaterialsRefused", result
+        assert result.get("type") == "MaterialsRefused", result
         refused = str(result["refused"])
         assert f"（{USER}）的多孔層（porous）參數物理拒算" in refused and f"{flow:g}" in refused and "流阻" in refused
 
