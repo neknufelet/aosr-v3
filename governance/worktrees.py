@@ -360,13 +360,15 @@ def refusal(item: Linked, found: PullRequest | None, git: Git) -> str | None:
 def remove(key: str, git: Git, pull_request: PrLookup) -> Linked:
     """拆一棵（前兩條路）。任何一格不成立都不拆，原因照印。``git`` 的 cwd 不准是要拆的那一棵。
 
-    擋下來的是分支那一格、而且 ``--bundle`` 那條路收得下時（不是 PR 還開著、不是沒掛分支），原因後面提示那個旗標。
+    擋下來的是分支那一格、而且 ``--bundle`` 那條路收得下時（不是 PR 還開著、不是沒掛分支、樹的兩格也成立），
+    原因後面提示那個旗標；樹髒的時候打旗標照樣拆不掉，提示只會讓人白跑一趟。
     """
     item = find(key, git)
     found = pull_request(item.branch) if item.branch is not None else None
     reason = keep_reason(item, found, git)
     if reason is not None or item.branch is None:
-        hint = "" if item.branch is None or (found is not None and found.state == OPEN) else BUNDLE_HINT
+        helps = item.branch is not None and not (found is not None and found.state == OPEN)
+        hint = BUNDLE_HINT if helps and tree_refusal(item, git) is None else ""
         raise WorktreeError(f"不拆：{reason}{hint}")
     reason = tree_refusal(item, git)
     if reason is not None:
@@ -400,11 +402,12 @@ def bundle_outside_mainline(branch: str, folder: Path, git: Git) -> Path | None:
     return final
 
 
-def remove_with_bundle(key: str, git: Git, pull_request: PrLookup) -> tuple[Linked, Path | None]:
+def remove_with_bundle(key: str, git: Git, pull_request: PrLookup, root: Path) -> tuple[Linked, Path | None]:
     """第三條路（#1076，要明確打 ``--bundle``）：分支那一格不問，改成先打包主線之外的提交、驗過才拆。
 
-    照拒的：沒掛在分支上、PR 還開著（工作還在進行）、PR 查不到、樹不在派工資料夾的 ``tree/`` 底下（包不知道放哪）、
-    樹的兩格任一格不成立。回拆掉的那一棵與包的路徑（零顆提交時是 None）。
+    照拒的：沒掛在分支上、PR 還開著（工作還在進行）、PR 查不到、位置或名字不合規矩（:func:`problems` 照 ``root`` 量；
+    不住在 ``root`` 底下的派工資料夾，包不知道放哪、也對不上是哪張票）、樹的兩格任一格不成立。
+    回拆掉的那一棵與包的路徑（零顆提交時是 None）。
     """
     item = find(key, git)
     if item.branch is None:
@@ -412,8 +415,9 @@ def remove_with_bundle(key: str, git: Git, pull_request: PrLookup) -> tuple[Link
     found = pull_request(item.branch)
     if found is not None and found.state == OPEN:
         raise WorktreeError(f"不拆：PR #{found.number} 還開著，工作還在進行；先合或關掉再拆")
-    if item.path.name != TREE_DIR:
-        raise WorktreeError(f"不拆：{item.path} 不在派工資料夾的 {TREE_DIR}/ 底下，包不知道放哪")
+    misplaced = problems(item, root)
+    if misplaced:
+        raise WorktreeError(f"不拆：位置或名字不合規矩（{'；'.join(misplaced)}），包不知道放哪、也對不上是哪張票")
     reason = tree_refusal(item, git)
     if reason is not None:
         raise WorktreeError(f"不拆：{reason}")
@@ -498,7 +502,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.action == "list":
             return report(linked(git), work_root(), gh_pull_request(repo), git)
         if args.bundle:
-            gone, saved = remove_with_bundle(args.key, git, gh_pull_request(repo))
+            gone, saved = remove_with_bundle(args.key, git, gh_pull_request(repo), work_root())
             kept = (
                 "分支上沒有主線之外的提交，沒有打包"
                 if saved is None
