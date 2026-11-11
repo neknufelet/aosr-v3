@@ -30,3 +30,15 @@ td[data-verdict="within_range"]{color:#1a7f37}
 #modal-report h4 { margin-bottom: 0.5rem; }
 /* 接縫表在窄畫面只捲表格，保留表頭與適用範圍說明。 */
 #measured-walls .table-wrap { overflow-x: auto; }
+/* 分區附表（#1092）：材料那幾欄很長，表在窄畫面只橫向捲；有換材料的區淡底；差那一欄改善綠、變差紅（字是伺服器給的判定）。 */
+#zone-result .table-wrap { overflow-x: auto; }
+#zone-rows tr[data-changed="true"] td { background: #eef6f0; }
+#zone-rows td { white-space: pre-line; }
+#zone-rows td:nth-child(-n+4) { white-space: pre; }
+#zone-rows td:nth-child(n+5) { min-width: 14em; }
+#zone-improvement td[data-verdict="better"] { color: #1a7f37; font-weight: 600; }
+#zone-improvement td[data-verdict="worse"] { color: #872c22; font-weight: 600; }
+#zone-improvement tr.zone-total td { border-top: 2px solid #15617b; font-weight: 600; }
+/* 改善多少那張表：每格不折行（窄畫面「音／色／平／衡」看不懂），放不下就只捲這張表。 */
+#zone-improvement { overflow-x: auto; }
+#zone-improvement th, #zone-improvement td { white-space: nowrap; }

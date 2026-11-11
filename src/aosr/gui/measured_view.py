@@ -8,6 +8,8 @@ from aosr.gui.labels import WALLS
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance, SurfaceMaterial
 from aosr.physics.report_measured import MeasuredSeam
+from aosr.physics.report_surfaces import RectangleZone
+from aosr.physics.report_zone_seams import SeamPair
 from aosr.physics.wall_surfaces import extrapolated_frequency_text, merge_construction_notes
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
@@ -25,7 +27,10 @@ class MeasuredWallView(BaseModel):
 
 
 def measured_materials(scheme: Scheme) -> dict[str, MeasuredImpedance]:
-    """沿用完整方案驗證過的模型，不另建材料物件；分區的牆不在這裡（分區＋實測表的接縫附表還不支援，計算那一路會拒收）。"""
+    """整面一區、直接用實測表的牆；沿用完整方案驗證過的模型，不另建材料物件。
+
+    有矩形的牆不在這裡：逐區那一份在 ``zone_measured_materials``（接縫存在逐對結果的 measured_seams_by_zone，#1084）。
+    """
     return {wall: material for wall, material in whole_wall_entries(scheme.scene.surface_zones_by_wall or {}).items()
             if isinstance(material, MeasuredImpedance)}
 
@@ -80,14 +85,55 @@ def _seam_rows(seams: tuple[MeasuredSeam, ...]) -> tuple[tuple[str, ...], ...]:
                  for measured, base in [(getattr(seam.measured, field), getattr(seam.base_assembly, field))])
 
 
+def zone_measured_materials(scheme: Scheme) -> dict[tuple[str, str], MeasuredImpedance]:
+    """有矩形的牆裡直接用實測表的那幾區（牆、區代號）；貼在實測原牆上的構造區不報接縫，跟計算那一路同一條。"""
+    return {(wall, zone.id): zone.material for wall, zones in (scheme.scene.surface_zones_by_wall or {}).items()
+            for zone in zones if isinstance(zone, RectangleZone) and isinstance(zone.material, MeasuredImpedance)}
+
+
+def _saved_zone_seams(result: SchemeResult, materials: dict[tuple[str, str], MeasuredImpedance]
+                      ) -> dict[str, dict[str, SeamPair]]:
+    """逐區那一份照整面的同一套核法：區要對得上方案、端點等於表的頭尾、各位置對一樣，才顯示。"""
+    reference: dict[str, dict[str, SeamPair]] | None = None
+    for pair in result.pairs:
+        saved = pair.measured_seams_by_zone
+        if saved is None or {(wall, zone) for wall, zones in saved.items() for zone in zones} != set(materials):
+            raise ValueError('保存的逐區接縫與方案的實測區不一致，無法顯示接縫')
+        for (wall, zone), material in materials.items():
+            low, high = saved[wall][zone]
+            if (low.frequency_hz, high.frequency_hz) != (material.points[0].frequency_hz, material.points[-1].frequency_hz):
+                raise ValueError(f'{WALLS[wall]} {zone} 區保存的接縫端點與實測表不一致')
+        if reference is not None and saved != reference:
+            raise ValueError('各位置對保存的逐區接縫不一致，無法顯示接縫')
+        reference = saved
+    if reference is None:
+        raise ValueError('結果沒有保存任何位置對的接縫')
+    return reference
+
+
+def _zone_header(wall: str, zone: str, material: MeasuredImpedance) -> tuple[str, ...]:
+    low, high = material.points[0].frequency_hz, material.points[-1].frequency_hz
+    return (f'{WALLS[wall]} {zone} 區：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
+            '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
+            '這面牆分了區：底構造的材料模型註記各區併在一起，列在「牆面材料計算提醒」那一節，分不出是哪一區。')
+
+
 def build_measured_view(result: SchemeResult) -> tuple[MeasuredWallView, ...] | None:
-    """先核全部位置對相等，才顯示結果檔保存的數字；無實測牆時整塊省略。"""
+    """先核全部位置對相等，才顯示結果檔保存的數字；整面的牆在前、分區的實測區在後；都沒有時整塊省略。"""
     materials = measured_materials(result.scheme)
-    if not materials:
+    zoned = zone_measured_materials(result.scheme)
+    if not materials and not zoned:
         return None
-    seams = _saved_seams(result, materials)
-    return tuple(MeasuredWallView(wall_name=WALLS[wall], header_lines=_header(result, wall, material),
-                                 rows=_seam_rows(seams[wall])) for wall, material in materials.items())
+    views: list[MeasuredWallView] = []
+    if materials:
+        seams = _saved_seams(result, materials)
+        views.extend(MeasuredWallView(wall_name=WALLS[wall], header_lines=_header(result, wall, material),
+                                      rows=_seam_rows(seams[wall])) for wall, material in materials.items())
+    if zoned:
+        zone_seams = _saved_zone_seams(result, zoned)
+        views.extend(MeasuredWallView(wall_name=f'{WALLS[wall]}（{zone} 區）', header_lines=_zone_header(wall, zone, material),
+                                      rows=_seam_rows(zone_seams[wall][zone])) for (wall, zone), material in zoned.items())
+    return tuple(views)
 
 
 def _point_text(material: MeasuredImpedance) -> dict[float, str]:
