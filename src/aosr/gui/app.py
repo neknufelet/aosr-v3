@@ -29,6 +29,7 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.archive_delete import ArchiveDelete, delete_response
 from aosr.gui.gradient_jobs import GradientJobs, Launcher, SystemdLauncher, gradient_routes
+from aosr.gui.gradient_follow import GradientFollow, gradient_follow_routes
 from aosr.gui.surrogate_builds import SurrogateBuilds, surrogate_routes
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
 from aosr.gui.modal_jobs import ModalJobs, scheme_snapshot
@@ -80,7 +81,7 @@ STANDING_TEXT = {
 STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
-                "materials.js", "materials.css", "zone_result.js"}
+                "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -319,6 +320,7 @@ class GuiHandlers:
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
                                      scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
         self.surrogates = SurrogateBuilds(self.gradient)
+        self.gradient_follow = GradientFollow(self.gradient, self.jobs, self._web_problem_texts)
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
         self.startup_physics_identity = (settings.startup_physics_identity or
@@ -327,6 +329,11 @@ class GuiHandlers:
         self.result_list = ResultList(self.startup_physics_identity,
                                       config_path("quality_targets.toml"))
         self.capabilities_path = capabilities_path
+
+    def _web_problem_texts(self, document: object) -> list[str]:
+        """網頁存方案那一套檢查的白話（第三階段終點方案存成新方案時用）；過了回空的。"""
+        problems = web_scheme_problems(document, capabilities=self.capabilities, directivity=self.directivity)
+        return [str(item["text"]) for item in plain_problems(problems, document)] if problems else []
 
     def _server_stale(self) -> bool:
         return calculation_fingerprint(capabilities_path=self.capabilities_path) != self.startup_fingerprint
@@ -937,7 +944,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *zone_edit_routes(),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *zone_edit_routes(),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

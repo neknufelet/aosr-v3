@@ -1,0 +1,17 @@
+/* 第三階段搜尋頁（#1082 段 1-6b）。共用樣式把 label 設成橫排；這一頁選項欄名長，改直排。 */
+main [hidden]{display:none!important}
+.option-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.4rem 1rem}
+.option-grid label{flex-direction:column;align-items:stretch;margin:.3rem 0}
+.option-grid input[type=number]{width:auto}
+.hint{color:#53636b;font-size:.92rem;margin:.2rem 0 .5rem}
+button.danger{background:#9b2c22}
+button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
+#job-list button{padding:.3rem .7rem}
+#job-list tr.selected td{background:#e6f1f5}
+#plan-arguments,#build-log,#job-steps pre{color:#17212a;font-size:.85rem}
+#job-failures ul,#job-notes ul{margin:.3rem 0;padding-left:1.2rem}
+#job-failures li{white-space:pre-wrap;overflow-wrap:anywhere}
+#depth-table input{width:7rem}
+.mode-search{font-weight:600;color:#15617b}
+@media (max-width:640px){main{padding:.75rem}header,section{padding:.9rem}}
+.path{overflow-wrap:anywhere;font-family:ui-monospace,monospace;font-size:.82rem}
