@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import cast, get_args
 
 from pydantic import BaseModel
-from aosr.physics.report_surfaces import whole_wall_materials
+from aosr.physics.report_surfaces import RectangleZone, SurfaceZone
 from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, FabricLayer, MeasuredImpedance, MeasuredImpedancePoint, MicroPerforatedLayer, MountedOnWall, PerforatedLayer, PorousLayer, SlottedLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
@@ -93,6 +93,20 @@ def material_summary(material: SurfaceMaterial) -> str:
         layers = _model_summary(MountedOnWall, lambda name: None if name == "wall" else getattr(material, name))
         return f"{layers}；{wall}：{material_summary(material.wall)}"
     return _model_summary(type(material), lambda name: getattr(material, name))
+
+
+def rectangle_zone_summary(zone: RectangleZone, *, exact: bool = False) -> str:
+    """一區的白話：位置（公尺，平常六位有效數字；exact 印完整浮點數）與材料。"""
+    edges = [repr(edge) if exact else f"{edge:g}" for edge in (*zone.u_m, *zone.v_m)]
+    return f"u {edges[0]}–{edges[1]}、v {edges[2]}–{edges[3]} 公尺：{material_summary(zone.material)}"
+
+
+def wall_zone_rows(zones: Sequence[SurfaceZone]) -> dict[str, str | RectangleZone]:
+    """一面牆的材料：整面一區鍵是空字串、一句白話；分區一區一格（鍵是區代號、值是那一區本身），順序同方案。"""
+    rectangles = [zone for zone in zones if isinstance(zone, RectangleZone)]
+    if not rectangles:
+        return {"": material_summary(zones[0].material)}
+    return {zone.id: zone for zone in rectangles}
 
 
 def _enum_word(description: str, value: object) -> str:
@@ -201,9 +215,7 @@ class SchemeProblemsError(SchemeValidationError):
 def checked_scheme(document: object) -> Scheme:
     """跟檢查同一支驗方案；不過就丟帶著原文件的錯，讓回應能寫出表單上的中文名。"""
     try:
-        scheme = validated_scheme(document)
-        whole_wall_materials(scheme.scene.surface_zones_by_wall or {})
-        return scheme
+        return validated_scheme(document)
     except SchemeValidationError as exc:
         raise SchemeProblemsError(exc.problems, document) from exc
 
@@ -299,11 +311,25 @@ def _material_path(rest: list[str], document: Document) -> str:
     return " › ".join(parts)
 
 
+def _zone_word(document: Document, wall: str, index: str) -> str:
+    """分區的牆要講是哪一區（#1083）：路徑只有第幾格，從原文件取那一區的代號；整面一區不加字。"""
+    scene = document.get("scene")
+    walls = scene.get("surface_zones_by_wall") if isinstance(scene, dict) else None
+    zones = walls.get(wall) if isinstance(walls, dict) else None
+    if not index.isdigit() or not isinstance(zones, list) or int(index) >= len(zones):
+        return ""
+    zone = zones[int(index)]
+    if not isinstance(zone, dict) or zone.get("area") != "rectangle":
+        return ""
+    return f" › 分區 {zone.get('id') if isinstance(zone.get('id'), str) else int(index) + 1}"
+
+
 def _scene_field(rest: list[str], document: Document) -> str | None:
     if len(rest) >= 2 and rest[0] == "surface_zones_by_wall":
         wall = WALLS.get(rest[1], rest[1])
         tail = rest[2:]
-        return f"{wall}材料構造" + (" › " + _material_path(rest, document) if tail else "")
+        zone = _zone_word(document, rest[1], tail[0]) if tail else ""
+        return f"{wall}材料構造{zone}" + (" › " + _material_path(rest, document) if tail else "")
     if len(rest) == 2 and rest[0] == "room_m":
         return ROOM_LENGTHS.get(rest[1], f"房間 › {rest[1]}")
     if len(rest) == 2 and rest[0] in WALL_FIELDS:

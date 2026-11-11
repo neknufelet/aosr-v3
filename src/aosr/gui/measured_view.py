@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from aosr.physics.report_surfaces import whole_wall_materials
+from aosr.physics.zone_fill import whole_wall_entries
 from aosr.gui.labels import WALLS
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance, SurfaceMaterial
@@ -25,8 +25,8 @@ class MeasuredWallView(BaseModel):
 
 
 def measured_materials(scheme: Scheme) -> dict[str, MeasuredImpedance]:
-    """沿用完整方案驗證過的模型，不另建材料物件。"""
-    return {wall: material for wall, material in whole_wall_materials(scheme.scene.surface_zones_by_wall or {}).items()
+    """沿用完整方案驗證過的模型，不另建材料物件；分區的牆不在這裡（分區＋實測表的接縫附表還不支援，計算那一路會拒收）。"""
+    return {wall: material for wall, material in whole_wall_entries(scheme.scene.surface_zones_by_wall or {}).items()
             if isinstance(material, MeasuredImpedance)}
 
 

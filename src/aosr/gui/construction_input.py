@@ -3,34 +3,37 @@ from __future__ import annotations
 
 from typing import cast
 
-from pydantic import ValidationError
-
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.problem_text import MATERIAL_MODELS
-from aosr.physics.report_surfaces import RectangleZonesUnsupported, ZONE_WALL_FIELD, whole_wall_materials
-from aosr.reporting.scheme import Scene
+from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting.validation import SchemeProblem, validate_scheme
 from aosr.materials.construction_models import layer_open_area
 
 
-def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
-    """已檢查容器的表單資料，只讀原始值；舊六數字仍由原表單處理。"""
+def zone_materials(document: dict[str, object]) -> list[tuple[str, int, dict[str, object]]]:
+    """每一區的原始材料（牆名、在那面清單裡第幾區、材料），整面一區與矩形分區都列；只讀原始值。"""
     scene = document.get("scene")
-    if not isinstance(scene, dict):
-        return {}
-    zones = scene.get(ZONE_WALL_FIELD)
+    zones = scene.get(ZONE_WALL_FIELD) if isinstance(scene, dict) else None
+    if not isinstance(zones, dict):
+        return []
+    return [(str(name), index, cast(dict[str, object], entry["material"]))
+            for name, entries in zones.items() if isinstance(entries, list)
+            for index, entry in enumerate(entries) if isinstance(entry, dict) and isinstance(entry.get("material"), dict)]
+
+
+def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
+    """表單那一格的整面材料：只收整面一區的牆；分區的牆不上這張表單（在立面圖看），舊六數字仍由原表單處理。"""
+    scene = document.get("scene")
+    zones = scene.get(ZONE_WALL_FIELD) if isinstance(scene, dict) else None
     if not isinstance(zones, dict):
         return {}
-    if any(isinstance(entry, dict) and entry.get("area") == "rectangle"
-           for entries in zones.values() if isinstance(entries, list) for entry in entries):
-        parsed = Scene.model_validate(scene)
-        whole_wall_materials(parsed.surface_zones_by_wall or {})
     return {name: cast(dict[str, object], entry["material"])
             for name, entries in zones.items() if isinstance(entries, list) and len(entries) == 1
-            for entry in entries if isinstance(entry, dict) and isinstance(entry.get("material"), dict)}
+            for entry in entries if isinstance(entry, dict) and entry.get("area") != "rectangle"
+            and isinstance(entry.get("material"), dict)}
 
 
 def _layers(material: dict[str, object]) -> list[object]:
@@ -49,7 +52,7 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
     low, high = ranges.manual_flow_resistivity_min_pa_s_m2, ranges.sample_flow_resistivity_max_pa_s_m2
     issues = []
-    for wall, material in wall_materials(document).items():
+    for wall, zone, material in zone_materials(document):
         for index, layer in enumerate(_layers(material)):
             if not isinstance(layer, dict) or layer.get("kind") != "porous":
                 continue
@@ -58,7 +61,7 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
             if model == "komatsu" and isinstance(sigma, int | float) and not low <= sigma <= high:
                 branch = {"measured_impedance": "measured_impedance.base_assembly",
                           "mounted_on_wall": "mounted_on_wall"}.get(str(material.get("kind")), "assembly")
-                issues.append(SchemeProblem(f"scene.{ZONE_WALL_FIELD}.{wall}.0.material.{branch}.layers.{index}.porous.flow_resistivity_pa_s_m2",
+                issues.append(SchemeProblem(f"scene.{ZONE_WALL_FIELD}.{wall}.{zone}.material.{branch}.layers.{index}.porous.flow_resistivity_pa_s_m2",
                     f"小松纖維模型的流阻可用範圍為 {low:g}–{high:g} Pa·s/m²；手動下限是工程界線，上限沿用原研究樣品值，請改流阻或選合適模型"))
     return tuple(issues)
 
@@ -95,13 +98,7 @@ def web_scheme_problems(document: object, *, capabilities: CapabilityTable,
     只處理網頁傳來的層，包含實測底構造；不改方案檔格式的拒收契約。
     """
     if isinstance(document, dict):
-        try:
-            materials = wall_materials(document)
-        except ValidationError:
-            return validate_scheme(document, capabilities=capabilities, directivity=directivity)
-        except RectangleZonesUnsupported as exc:
-            return (SchemeProblem(f"scene.{ZONE_WALL_FIELD}", str(exc)),)
-        for material in materials.values():
+        for _wall, _zone, material in zone_materials(document):
             for layer in _layers(material):
                 if not isinstance(layer, dict):
                     continue

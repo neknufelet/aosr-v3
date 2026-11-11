@@ -23,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from aosr.physics.report_surfaces import RectangleZonesUnsupported, whole_wall_materials
+from aosr.physics.zone_fill import whole_wall_entries
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
@@ -39,6 +39,7 @@ from aosr.gui.labels import label_tables
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
+from aosr.gui.zone_design import design_routes
 from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
@@ -285,7 +286,7 @@ class GuiHandlers:
         self.data_dir = settings.data_dir.expanduser().resolve()
         if self.data_dir.is_relative_to(repo_root()):
             raise ValueError("data_dir 不准在 repo 內")
-        for name in ("schemes", "runs", "results", "searches", "modal-cache", "modal-jobs"):
+        for name in ("schemes", "designs", "runs", "results", "searches", "modal-cache", "modal-jobs"):
             child = self.data_dir / name
             child.mkdir(parents=True, exist_ok=True)
             if child.resolve().is_relative_to(repo_root()):
@@ -435,14 +436,13 @@ class GuiHandlers:
                                                     scene.sound_speed_m_s)
                          for wall, value in (scene.impedance_pa_s_per_m_by_wall or {}).items()}
             if scene.surface_zones_by_wall is not None:
-                for wall, material in whole_wall_materials(scene.surface_zones_by_wall).items():
+                # 分區的牆不在表單的「約 ρc 幾倍」那一格（那面在立面圖上看），只算整面一區的牆。
+                for wall, material in whole_wall_entries(scene.surface_zones_by_wall).items():
                     if isinstance(material, ConstantImpedance):
                         multiples[wall] = impedance_multiple(material.impedance_pa_s_m,
                             scene.density_kg_m3, scene.sound_speed_m_s)
         except ValidationError:
             pass
-        except RectangleZonesUnsupported as exc:
-            return _bad(exc)
         labels = {wall: f"約 ρc 的 {multiple:.2f} 倍" if multiple is not None else ""
                   for wall, multiple in multiples.items()}
         return JSONResponse({"problems": plain_problems(problems, document),
@@ -923,7 +923,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

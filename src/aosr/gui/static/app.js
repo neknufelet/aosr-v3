@@ -338,7 +338,7 @@ async function editInput(actionName, value, wall) {
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
-  const walls = Object.keys(wallNames).filter(name => wallMaterial(name).kind === "constant_impedance" && !measuredDrafts[name]);
+  const walls = formWalls().filter(name => wallMaterial(name).kind === "constant_impedance" && !measuredDrafts[name]);
   const sent = Object.fromEntries(walls.map((name) => [name, $(`wall-${name}`).value]));
   const checked = await api("/api/validate", "POST", collect());
   if (asked !== multiplesAsked) return;
@@ -791,7 +791,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("walls").addEventListener("input", event => {
     if (!event.target.matches("[data-layer-field]")) return;
     collectWallMaterials();
-    for (const name of Object.keys(wallNames)) if (["assembly", "measured_impedance"].includes(wallMaterial(name).kind) && !measuredDrafts[name]) showPresetState(name);
+    for (const name of formWalls()) if (["assembly", "measured_impedance"].includes(wallMaterial(name).kind) && !measuredDrafts[name]) showPresetState(name);
   });
   $("furniture-sofa").onchange = () => action(() => editInput($("furniture-sofa").checked ? "furniture" : "remove_furniture", "sofa"));
   $("furniture-cloud").onchange = () => action(() => editInput($("furniture-cloud").checked ? "furniture" : "remove_furniture", $("furniture-cloud").checked ? "ceiling_cloud" : "cloud"));

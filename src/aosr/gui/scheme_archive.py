@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from aosr.gui.jobs import JobManager, ResultMoveConflict
+from aosr.gui.zone_design import design_relative
 
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}\Z")
@@ -54,7 +55,8 @@ class ArchivePackage(BaseModel):
         return self
 
     def reserved_paths(self) -> list[Path]:
-        return [Path("schemes") / f"{self.scheme_id}.json",
+        # 設計設定（#1083）跟著方案搬；舊包沒有這一格，清單照樣是這一份的子集合、照驗得過。
+        return [Path("schemes") / f"{self.scheme_id}.json", design_relative(self.scheme_id),
                 *(path for run_id in self.artifact_ids for path in result_relatives(run_id))]
 
     def summary(self) -> dict[str, object]:
@@ -175,7 +177,7 @@ class SchemeArchive:
         if not NAME.fullmatch(name):
             raise ValueError("方案代號只收英數字、底線與連字號")
         members = self._members(name, result_ids)
-        relatives = [Path("schemes") / f"{name}.json",
+        relatives = [Path("schemes") / f"{name}.json", design_relative(name),
                      *(path for run_id in sorted(members) for path in result_relatives(run_id))]
         present = [str(path) for path in relatives if _present(self.data_dir / path)]
         if not present:
