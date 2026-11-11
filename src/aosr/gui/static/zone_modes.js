@@ -38,17 +38,21 @@ function setZoneSetting(wall, key, setting) {
 function zoneNote(text, kind) { zoneNoteText = text; zoneNoteKind = kind; const line = $("zone-note"); if (line) { line.textContent = text; line.className = kind; } }
 
 // 開舊方案：讀它的設計設定（沒有就是全部固定）；讀不到照講、不當成沒有。
-async function loadZoneDesign(name) {
-  zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
+// 先讀、後套：讀的時候不碰頁面狀態，打開方案時跟方案一起在鎖頁期間讀完，成功才一口氣套上（中間沒有等待點）。
+async function fetchZoneDesign(name) {
   try {
     const data = await api(`/api/designs/${encodeURIComponent(name)}`);
-    zoneDesign = data.design;
-    zoneDesignStored = Object.keys(data.design.zones || {}).length > 0 || data.design.original_scheme_id != null;
-    if (data.problems.length) zoneDesignNote = `設計設定有幾條跟方案對不上（下次儲存時拿掉）：${data.problems.join("；")}`;
+    const stored = Object.keys(data.design.zones || {}).length > 0 || data.design.original_scheme_id != null;
+    const note = data.problems.length ? `設計設定有幾條跟方案對不上（下次儲存時拿掉）：${data.problems.join("；")}` : "";
+    return {design: data.design, stored, broken: false, note};
   } catch (error) {
-    zoneDesignBroken = true;
-    zoneDesignNote = `每一區的做法讀不到（${errorText(error)}）：這一頁改的做法不會存回去，免得蓋掉原本存的；先處理好再重新打開方案`;
+    return {design: null, stored: false, broken: true,
+            note: `每一區的做法讀不到（${errorText(error)}）：這一頁改的做法不會存回去，免得蓋掉原本存的；先處理好再重新打開方案`};
   }
+}
+function applyZoneDesign(state) {
+  zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
+  zoneDesignNote = state.note; zoneNote("", "");
 }
 // 載入範本：新的方案，沒有設計設定。
 function resetZoneDesign() { zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); }
@@ -78,16 +82,17 @@ function remapZoneDesign(wall, inherited) {
   if (Object.keys(next).length) zoneDesign.zones[wall] = next; else delete zoneDesign.zones[wall];
 }
 
-async function loadZoneLibrary() {
+async function fetchZoneLibrary() {
   try {
     const data = await api("/api/materials");
-    zoneLibrary = data.materials.map(row => ({...row.entry, basis: row.basis}));
-    zoneLibraryProblem = data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : "";
+    return {library: data.materials.map(row => ({...row.entry, basis: row.basis})),
+            problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {
-    zoneLibrary = [];
-    zoneLibraryProblem = `材料庫讀不到：${errorText(error)}`;
+    return {library: [], problem: `材料庫讀不到：${errorText(error)}`};
   }
 }
+function applyZoneLibrary(state) { zoneLibrary = state.library; zoneLibraryProblem = state.problem; }
+async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
 // 這一區現在的材料是材料庫哪一筆：多層構造比貼上去的那幾層，固定阻抗與實測表比整份。
 function libraryLabel(material) {

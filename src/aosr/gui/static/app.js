@@ -415,15 +415,22 @@ async function loadSchemeList() {
 async function openScheme() {
   const name = $("scheme-list").value;
   if (!name) return;
-  if (!await changeInputScheme(async () => (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme)) {
+  // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。三樣都在鎖頁期間讀完，
+  // 成功才同步套上：不准在表單已換、做法還沒換的空檔放使用者按「儲存」。
+  let zoneState;
+  if (!await changeInputScheme(async () => {
+    const [opened, design, library] = await Promise.all([
+      api(`/api/schemes/${encodeURIComponent(name)}`), fetchZoneDesign(name), fetchZoneLibrary()]);
+    zoneState = {design, library};
+    return opened.scheme;
+  })) {
     // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列，也寫在「打開」旁邊。
     sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
     return;
   }
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
-  // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。
-  await loadZoneDesign(name);
-  await loadZoneLibrary();
+  applyZoneDesign(zoneState.design);
+  applyZoneLibrary(zoneState.library);
   renderWalls();
   openedId = name;
   $("scheme-archive-notice").hidden = true;

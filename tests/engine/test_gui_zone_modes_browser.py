@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
@@ -187,3 +187,31 @@ def test_unreadable_design_is_not_overwritten_and_a_dropped_request_puts_the_men
         expect(page.locator("#messages")).to_contain_text("每一區的做法沒存成")
         assert broken.read_text(encoding="utf-8") == "{not json"
         assert watched.page_errors == []
+
+
+def test_opening_a_scheme_swaps_the_form_only_after_its_zone_design_arrives(tmp_path: Path, browser: Browser) -> None:
+    """打開方案：每一區的做法還沒讀回來時表單不換、整頁鎖著（不准在表單已換、做法還是上一份的空檔按「儲存」，
+    雲端 #1109 第一版就是這樣讓別的考卷按到儲存撲空）；讀回來才跟方案一起換上。"""
+    _write(tmp_path, room109_document())
+    _write(tmp_path, room109_document("room109-original"))
+    (tmp_path / "designs").mkdir(exist_ok=True)
+    (tmp_path / "designs" / "room109.json").write_text(json.dumps(
+        {"schema_version": "aosr.zone_design.v1", "scheme_id": "room109", "original_scheme_id": "room109-original",
+         "zones": {"x0": {"whole_wall": {"mode": "search"}}}}), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        held: list[Route] = []
+        page.route("**/api/designs/room109", lambda route: held.append(route))
+        page.locator("#scheme-list").select_option("room109")
+        with page.expect_request("**/api/designs/room109"):
+            page.locator("#open-scheme").click()
+        page.wait_for_function("document.querySelector('main').inert")
+        assert page.locator("#save-id").input_value() != "room109"
+        assert page.evaluate("zoneDesign") is None
+        held[0].continue_()
+        page.wait_for_function("document.getElementById('save-id').value === 'room109'")
+        assert page.evaluate("[zoneDesign.scheme_id, zoneDesign.original_scheme_id]") == ["room109", "room109-original"]
+        page.wait_for_function("!document.querySelector('main').inert")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#zone-mode-x0-whole_wall")).to_have_value("search")
+        assert watched.page_errors == [] and watched.console_errors == []
