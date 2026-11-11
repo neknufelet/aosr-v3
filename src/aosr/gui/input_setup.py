@@ -17,6 +17,7 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
+from aosr.gui.zone_edit import zone_cut_defaults
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
@@ -80,7 +81,8 @@ def input_defaults() -> dict[str, object]:
             "materials": {kind: [material for material, kinds in FURNITURE_MATERIAL_KINDS.items() if kind in kinds]
                           for kind in FURNITURE_DEFAULTS},
             "representative_speakers": {kind: {"cabinet": getattr(speakers, kind).cabinet_fields_m()}
-                                        for kind in MOUNTS}}
+                                        for kind in MOUNTS},
+            "zone_cut": zone_cut_defaults()}
 
 
 def editable_role(item: dict[str, object]) -> str | None:

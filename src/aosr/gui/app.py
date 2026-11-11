@@ -44,6 +44,7 @@ from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, 
 from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.zone_design import design_routes
+from aosr.gui.zone_edit import zone_edit_routes
 from aosr.gui.zone_result_routes import ZoneResultDeps, zone_result_routes
 from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
@@ -76,7 +77,7 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"app.js", "walls.js", "measured.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "materials.js", "materials.css", "zone_result.js"}
@@ -936,7 +937,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *zone_edit_routes(),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

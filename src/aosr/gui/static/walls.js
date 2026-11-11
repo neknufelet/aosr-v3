@@ -149,6 +149,8 @@ function renderWalls() {
     } else if (["assembly", "mounted_on_wall"].includes(material.kind)) renderAssembly(name, material, row);
     else if (material.kind === "measured_impedance") renderMeasured(name, material, row);
   }
+  // 立面圖跟著牆面表單一起重畫：開檔、換範本、切完一面都會走到這裡。
+  renderElevation();
 }
 function collectWallMaterials() {
   for (const name of formWalls()) {
