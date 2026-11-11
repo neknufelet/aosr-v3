@@ -4,6 +4,29 @@ function wallMaterial(name) {
   return scheme.scene.surface_zones_by_wall?.[name][0].material ?? {
     kind: "constant_impedance", impedance_pa_s_m: scheme.scene.impedance_pa_s_per_m_by_wall[name]};
 }
+// 分區的牆（#1083）：這張表單只會改整面一區，分區的牆只列出每一區、不收值，免得只改到第一區。
+function zonedWall(name) {
+  return (scheme.scene.surface_zones_by_wall?.[name] ?? []).some(zone => zone.area === "rectangle");
+}
+function formWalls() {
+  return Object.keys(wallNames).filter(name => !zonedWall(name));
+}
+function renderZonedWall(name, row) {
+  const zones = scheme.scene.surface_zones_by_wall[name];
+  const heading = document.createElement("p"); heading.id = `zoned-${name}`;
+  heading.textContent = `${wallNames[name]}：分成 ${zones.length} 區（分區在立面圖上改，這張表單不改這一面）`;
+  const list = document.createElement("ul"); list.id = `zoned-list-${name}`;
+  // 只是顯示：座標到公釐、阻抗六位有效數字；存檔照方案原值，不經過這裡。
+  const metres = value => Number(value.toFixed(3));
+  const material = zone => zone.material.kind === "constant_impedance"
+    ? wallText({...zone.material, impedance_pa_s_m: Number(zone.material.impedance_pa_s_m.toPrecision(6))}) : wallText(zone.material);
+  for (const zone of zones) {
+    const item = document.createElement("li");
+    item.textContent = `${zone.id}：u ${metres(zone.u_m[0])}–${metres(zone.u_m[1])}、v ${metres(zone.v_m[0])}–${metres(zone.v_m[1])} 公尺，${material(zone)}`;
+    list.append(item);
+  }
+  row.append(heading, list);
+}
 function sameMaterial(a, b) {
   if (a === b) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
@@ -108,8 +131,9 @@ function renderWalls() {
   $("walls").replaceChildren();
   const spec = inputDefaults.material_form;
   for (const name of Object.keys(wallNames)) {
-    const material = wallMaterial(name);
     const row = document.createElement("div"); row.className = "wall-editor row"; row.id = `wall-editor-${name}`;
+    if (zonedWall(name)) { renderZonedWall(name, row); $("walls").append(row); continue; }
+    const material = wallMaterial(name);
     // 貼在原牆上的構造網頁上不能新選，只在方案已經是這一種時列出來顯示。
     const kinds = ["constant_impedance", "assembly", "measured_impedance", ...(material.kind === "mounted_on_wall" ? ["mounted_on_wall"] : [])];
     const choice = wallSelect(`material-kind-${name}`, `${wallNames[name]}材料`,
@@ -127,7 +151,7 @@ function renderWalls() {
   }
 }
 function collectWallMaterials() {
-  for (const name of Object.keys(wallNames)) {
+  for (const name of formWalls()) {
     const material = wallMaterial(name);
     if (measuredDrafts[name]) continue;
     if (material.kind === "constant_impedance") {

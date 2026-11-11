@@ -8,7 +8,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from aosr.physics.report_surfaces import whole_wall_materials
+from aosr.physics.zone_fill import whole_wall_entries
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.measured_view import MeasuredWallView, build_measured_view, measured_note_text
@@ -858,8 +858,16 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
         for wall_name, notes in (pair.report.construction_notes_by_wall or {}).items():
             merge_construction_notes(merged, Wall.from_name(wall_name), notes)
     lines = []
-    materials = whole_wall_materials(result.scheme.scene.surface_zones_by_wall or {})
+    zones = result.scheme.scene.surface_zones_by_wall or {}
+    materials = whole_wall_entries(zones)
     for wall in Wall.all():
+        if wall.wall_name() in zones and wall.wall_name() not in materials:
+            # 分區的牆：計算端把各區註記併成一面，分不出是哪一區的第幾層，照註記原文列、標「分區」。
+            for note in merged.get(wall, ()):
+                text = (f"{note.message.split('：', 1)[0]}：{extrapolated_frequency_text(note.frequencies_hz)} "
+                        "超出材料模型原研究的量測範圍，仍以外推照算" if note.frequencies_hz else note.message)
+                lines.append(f"{WALLS[wall.wall_name()]}（分區）{text}")
+            continue
         material = materials.get(wall.wall_name())
         table = material.wall if isinstance(material, MountedOnWall) else material
         for note in merged.get(wall, ()):

@@ -9,7 +9,6 @@ from pydantic import BaseModel
 import pytest
 
 from aosr.gui.compare_view import scheme_differences
-from aosr.physics.report_surfaces import RectangleZonesUnsupported
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
@@ -107,22 +106,32 @@ def test_every_scheme_model_field_is_compared_or_has_named_reason(scheme_pair: t
 
 
 def _rectangle_fields(scheme: Scheme) -> set[str]:
-    """矩形的面積種類、代號、兩軸都由實際拒收守住，不加入欄位放行清單。"""
-    from tests.engine._surface_zone_cases import NEW, rectangle_document, rectangle_scene
+    """矩形的面積種類、代號、兩軸都要比得出來（#1083）：改的是最後一區（不是第一區），
+    比較一區一列、只列改到的那幾區；最後一區換材料只出那一列。"""
+    from tests.engine._surface_zone_cases import NEW, rectangle_document, rectangle_scene, zone_document
 
-    for field in ("area", "id", "u_m", "v_m"):
+    base = Scheme.model_validate(rectangle_document() | {"scene": rectangle_scene(only_wall="x0")})
+    for field in ("area", "id", "u_m", "v_m", "material"):
         scene = rectangle_scene(only_wall="x0")
         zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
         if field == "id":
-            zones["x0"][0]["id"] = "renamed"
+            zones["x0"][-1]["id"] = "renamed"
+        elif field == "material":
+            cast(dict[str, object], zones["x0"][-1]["material"])["impedance_pa_s_m"] = 1234.5
         elif field in ("u_m", "v_m"):
             midpoint = 2.0 if field == "u_m" else 1.5
             for zone in zones["x0"]:
                 zone[field] = [1.0 if edge == midpoint else edge for edge in cast(list[float], zone[field])]
-        rectangular = Scheme.model_validate(rectangle_document() | {"scene": scene})
-        for left, right in ((scheme, rectangular), (rectangular, scheme)):
-            with pytest.raises(RectangleZonesUnsupported, match="x0.*分區還不支援這一頁／這一路"):
-                scheme_differences(left, right)
+        changed = (Scheme.model_validate(zone_document()) if field == "area"
+                   else Scheme.model_validate(rectangle_document() | {"scene": scene}))
+        expected = {"area": {"x0", "x0.r0_c0", "x0.r0_c1", "x0.r1_c0", "x0.r1_c1"}, "id": {"x0.r1_c1", "x0.renamed"},
+                    "u_m": {"x0.r0_c0", "x0.r0_c1", "x0.r1_c0", "x0.r1_c1"},
+                    "v_m": {"x0.r0_c0", "x0.r0_c1", "x0.r1_c0", "x0.r1_c1"}, "material": {"x0.r1_c1"}}[field]
+        for left, right in ((base, changed), (changed, base)):
+            changes = scheme_differences(left, right)
+            assert {row.path for row in changes} == {f"scene.{NEW}.{key}" for key in expected}, field
+            assert all(row.material and row.a_text != row.b_text and "未設定" not in row.a_text + row.b_text
+                       for row in changes), field
     return {f"scene.{NEW}[][].{field}" for field in ("area", "id", "u_m", "v_m")}
 
 

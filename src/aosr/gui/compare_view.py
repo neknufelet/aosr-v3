@@ -1,12 +1,12 @@
 """兩份已驗結果的比較頁顯示資料。"""
 from __future__ import annotations
 
-from aosr.physics.report_surfaces import whole_wall_materials
 from aosr.gui.plan_objects import changed_furniture_keys
 from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 
 import csv
 import io
+from dataclasses import dataclass
 from collections import Counter
 from datetime import date
 from decimal import Decimal
@@ -31,7 +31,8 @@ from aosr.reporting.display import (
 )
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.furniture_display import furniture_material_lines
-from aosr.gui.problem_text import field_name, fixed_material_summary, material_summary
+from aosr.gui.problem_text import field_name, fixed_material_summary, rectangle_zone_summary, wall_zone_rows
+from aosr.physics.report_surfaces import RectangleZone
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
@@ -369,10 +370,12 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
             into[path] = wall_values[wall] if wall_values is not None else None
             labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
     if wall_materials:
-        for wall, summary in _wall_material_summaries(scheme).items():
-            path = f"{_MATERIAL_PATH_PREFIX}{wall}"
+        for key, summary in _wall_material_summaries(scheme).items():
+            wall, _, zone = key.partition(".")
+            path = f"{_MATERIAL_PATH_PREFIX}{key}"
             into[path] = summary
-            labels[path] = (field_name(path, {}) or path, "")
+            name = field_name(f"{_MATERIAL_PATH_PREFIX}{wall}", {}) or path
+            labels[path] = (f"{name} › 分區 {zone}" if zone else name, "")
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
     for speaker_id, point in scheme.speakers.items():
@@ -474,10 +477,29 @@ def _name_both_kinds(a: Scheme, b: Scheme, labels: dict[str, tuple[str, str]]) -
                 labels[path] = (both + label[len(name):], unit)
 
 
-def _wall_material_summaries(scheme: Scheme) -> dict[str, str]:
-    """舊固定值與新構造清單轉成相同材料意義，僅供比較收集。"""
+@dataclass(frozen=True)
+class _ZoneCell:
+    """比較用的一區：照那一區的完整值比（座標不縮位），顯示時座標取六位有效數字；
+    兩邊縮完字一樣（例如邊只挪了 1 微米）時，比較表照舊印 repr，也就是完整座標（審查第 A 條）。"""
+
+    zone: RectangleZone
+
+    def __str__(self) -> str:
+        return rectangle_zone_summary(self.zone)
+
+    def __repr__(self) -> str:
+        return rectangle_zone_summary(self.zone, exact=True)
+
+
+def _wall_material_summaries(scheme: Scheme) -> dict[str, object]:
+    """舊固定值與新構造清單轉成相同材料意義，僅供比較收集。
+
+    分區的牆一區一格（鍵「牆.區代號」，代號不收句點），比較時只列改到的那幾區（#1083）；
+    整面塞成一格的話，109 那種四區貼牆構造一格就是幾百字，比較頁讀不了。
+    """
     if scheme.scene.surface_zones_by_wall is not None:
-        return {wall: material_summary(material) for wall, material in whole_wall_materials(scheme.scene.surface_zones_by_wall).items()}
+        return {f"{wall}.{zone}" if zone else wall: _ZoneCell(value) if isinstance(value, RectangleZone) else value
+                for wall, zones in scheme.scene.surface_zones_by_wall.items() for zone, value in wall_zone_rows(zones).items()}
     return {wall: fixed_material_summary(value)
             for wall, value in (scheme.scene.impedance_pa_s_per_m_by_wall or {}).items()}
 
@@ -511,8 +533,11 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
                                   else ("無", "只有 B 有"))
             else:
                 unit = labels[path][1]
-                a_text = _text(left[path], unit) if path in left else "未設定"
-                b_text = _text(right[path], unit) if path in right else "未設定"
+                # 牆面一邊整面、一邊分區（或區代號不同）：缺的那一邊照實說，不寫成「未設定」。
+                missing = (("沒有這一區" if path.count(".") > 2 else "這一面分區（見各區）")
+                           if path.startswith(_MATERIAL_PATH_PREFIX) else "未設定")
+                a_text = _text(left[path], unit) if path in left else missing
+                b_text = _text(right[path], unit) if path in right else missing
         elif left[path] == right[path]:
             continue
         else:
