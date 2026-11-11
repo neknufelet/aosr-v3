@@ -33,7 +33,7 @@ from numpy.typing import NDArray
 from pydantic import TypeAdapter
 
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MOUNT_RIGID, MOUNTS, DescentSettings, MaterialGradientSettings, Mount,
+    MOUNT_ON_WALL, MOUNT_RIGID, MOUNTS, DescentSettings, MaterialGradientSettings, Mount, is_fixed_target,
 )
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
@@ -140,7 +140,8 @@ class SurfaceDesign:
     ``variables`` 照「厚度、空腔」的順序，名字是樣板的 ``layer<層號>.<欄位>``；
     厚度界是合法厚度的最薄到最厚，空腔界是家族的空腔範圍（公尺）。
     ``material`` 是 None 時：``kept_material`` 有值就是「不貼、保留方案原本的牆」（整條鏈用這份材料的垂直入射阻抗，
-    常數、沒有變數），兩個都 None 才是剛性面。有樣板的面不收 ``kept_material``。
+    常數、沒有變數），兩個都 None 才是剛性面。有樣板的面不收 ``kept_material``。``preset_id`` 是 ``fixed:<代號>``
+    （#1082 段 2-3b，換樣板整塊換成准用清單裡的固定材料）時也沒有樣板：``kept_material`` 就是那份固定材料（整塊、常數）。
     ``mount`` 是這一次搜尋的安裝方式（#990）；``backing_material`` 是貼在原牆上時那一面原本的牆，只在 ``on_wall``
     而且有樣板時必填，其他情況拒收。``material`` 仍是 preset 那份構造（終點照舊逐欄核身分）。
     """
@@ -174,7 +175,10 @@ class SurfaceDesign:
         if self.fixed_material_id is not None and (self.material is not None or self.kept_material is None):
             raise ValueError(f"固定面 {self.surface_id} 要用無樣板的保留材料")
         if self.material is None:
-            if (self.preset_id is not None or self.family_id is not None or self.variables or self.lower
+            if is_fixed_target(self.preset_id) and (self.kept_material is None or self.fixed_material_id is not None):
+                raise ValueError(f"面 {self.surface_id} 換成固定材料 {self.preset_id}，要帶那份材料、而且不是固定面")
+            if ((self.preset_id is not None and not is_fixed_target(self.preset_id)) or self.family_id is not None
+                    or self.variables or self.lower
                     or self.upper or self.thickness_variable is not None or self.cavity_variable is not None
                     or self.legal_thicknesses_m or self.max_total_depth_m is not None):
                 raise ValueError(f"沒有樣板的面 {self.surface_id} 不收 preset、變數、界或規格")
@@ -377,8 +381,21 @@ def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: M
     by_id = {preset.id: preset for preset in presets}
     return tuple(
         _plain_design(surface_id, kept, mount) if preset_id is None
+        else fixed_candidate_design(surface_id, preset_id, by_id, mount) if is_fixed_target(preset_id)
         else _surface_design(surface_id, preset_id, settings, by_id, mount=mount, kept=kept)
         for surface_id, preset_id in surfaces)
+
+
+def fixed_candidate_design(surface_id: str, target: str, presets: Mapping[str, PresetMaterial],
+                            mount: Mount) -> SurfaceDesign:
+    """``fixed:<代號>``：整塊換成那份固定材料（構造清單裡同名那一筆，由准用清單接進來），沒有變數；整塊取代那一面的牆
+    （不管安裝方式，材料本身就是完整的牆面）。清單裡沒有這一筆就拒收。"""
+    preset = presets.get(target)
+    if preset is None:
+        raise ValueError(f"面 {surface_id} 的 {target} 不在這一場的固定材料清單裡（只能是准用清單列過的固定材料）")
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    return SurfaceDesign(surface_id, target, None, None, (), (), (), None, None, (), None,
+                         kept_material=adapter.validate_python(preset.material), mount=mount)
 
 
 def wall_designs_from_presets(preset_ids: Sequence[str | None], settings: MaterialGradientSettings,

@@ -14,7 +14,8 @@
   填的代號不存在另外講明。
 
 固定材料只能整塊選或不選，不能當搜尋家族微調：起跑或網頁選的家族填了固定材料的代號就拒收。
-固定材料當換樣板候選、每區准用清單、實測固定材料進搜尋都是 2-3b。
+固定材料當換樣板候選、每區准用清單、實測固定材料進搜尋在 2-3b：准用清單點名的固定材料用 ``fixed:<代號>`` 這個目標
+整塊換上（:func:`fixed_candidates`），使用者的那幾筆也進快照（v2）。
 
 快照：搜尋資料夾存一份 ``materials.json``（只放接成家族的那幾筆，正規化 JSON），整份 SHA-256 進資料夾名與 ``project.json``；
 接續、報告、終點一律讀資料夾裡那份，不讀網頁資料夾裡現在的材料庫。
@@ -27,12 +28,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Final, Literal, NamedTuple, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings
 from aosr.materials.library import FixedEntry, LibraryEntry, OptimizableEntry, load_user_library, template_assembly
 
 SNAPSHOT_VERSION: Final = "aosr.material_gradient_materials.v1"
+# v2（#1082 段 2-3b）：快照裡另有准用清單點名的使用者固定材料；只在有那種材料時寫，沒有照舊寫 v1（逐位不變）。
+SNAPSHOT_VERSION_WITH_FIXED: Final = "aosr.material_gradient_materials.v2"
 SNAPSHOT_FILE: Final = "materials.json"
 
 
@@ -67,11 +70,28 @@ class SearchMaterials(NamedTuple):
 
 
 class MaterialsSnapshot(BaseModel):
-    """搜尋資料夾裡的 ``materials.json``。"""
+    """搜尋資料夾裡的 ``materials.json``（v1：只有接成家族的可最佳化材料，2-3a 寫的舊資料夾照讀）。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     format_version: Literal["aosr.material_gradient_materials.v1"]
     materials: tuple[OptimizableEntry, ...]
+
+
+class MaterialsSnapshotWithFixed(BaseModel):
+    """v2：接成家族的可最佳化材料（在前、順序照材料庫）＋准用清單點名的使用者固定材料（在後、照代號排）。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    format_version: Literal["aosr.material_gradient_materials.v2"]
+    materials: tuple[OptimizableEntry, ...]
+    fixed: tuple[FixedEntry, ...] = Field(min_length=1)
+
+
+class FixedCandidate(BaseModel):
+    """准用清單裡一個固定材料目標的構造：代號是目標字串 ``fixed:<材料代號>``、材料是那份完整牆面材料（物理格式）。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str
+    material: dict[str, object]
 
 
 def _name(entry: LibraryEntry) -> str:
@@ -151,18 +171,68 @@ def refuse_fixed_as_family(ids: Sequence[str | None], entries: Sequence[LibraryE
                                    "不能拿來當搜尋的家族或起跑樣板（要整塊用就把那一區設成固定）")
 
 
-def snapshot_bytes(entries: Sequence[OptimizableEntry]) -> bytes:
-    """快照的正規化 JSON（鍵排序、兩格縮排、結尾換行）；材料順序照材料庫（家族順序也照它）。"""
-    document = MaterialsSnapshot(format_version=SNAPSHOT_VERSION, materials=tuple(entries))
+def snapshot_bytes(entries: Sequence[OptimizableEntry], fixed: Sequence[FixedEntry] = ()) -> bytes:
+    """快照的正規化 JSON（鍵排序、兩格縮排、結尾換行）；材料順序照材料庫（家族順序也照它）。
+    沒有固定材料寫 v1（跟 2-3a 逐位相同），有就寫 v2（固定材料照代號排）。"""
+    document: BaseModel = (MaterialsSnapshot(format_version=SNAPSHOT_VERSION, materials=tuple(entries)) if not fixed else
+                           MaterialsSnapshotWithFixed(format_version=SNAPSHOT_VERSION_WITH_FIXED, materials=tuple(entries),
+                                                      fixed=tuple(sorted(fixed, key=lambda entry: entry.id))))
     return (json.dumps(document.model_dump(mode="json"), ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def read_snapshot(path: Path, sha256: str) -> tuple[OptimizableEntry, ...]:
-    """搜尋資料夾裡的材料快照：整份 SHA-256 要等於開跑時記的，不同就拒收（不接續、不報告）。"""
+class Snapshot(NamedTuple):
+    """讀回的快照：接成家族的可最佳化材料、准用清單點名的使用者固定材料（v1 沒有，是空的）。"""
+
+    materials: tuple[OptimizableEntry, ...]
+    fixed: tuple[FixedEntry, ...]
+
+
+def read_snapshot_entries(path: Path, sha256: str) -> Snapshot:
+    """搜尋資料夾裡的材料快照：整份 SHA-256 要等於開跑時記的，不同就拒收（不接續、不報告）；v1、v2 都讀。"""
     try:
         content = path.read_bytes()
     except OSError as error:
         raise ValueError(f"材料快照 {path} 讀不到（{type(error).__name__}），拒收") from error
     if hashlib.sha256(content).hexdigest() != sha256:
         raise ValueError(f"材料快照 {path} 跟開跑時不同（SHA-256 變了），拒收")
-    return MaterialsSnapshot.model_validate_json(content).materials
+    version = json.loads(content).get("format_version")
+    if version == SNAPSHOT_VERSION_WITH_FIXED:
+        document = MaterialsSnapshotWithFixed.model_validate_json(content)
+        return Snapshot(document.materials, document.fixed)
+    return Snapshot(MaterialsSnapshot.model_validate_json(content).materials, ())
+
+
+def read_snapshot(path: Path, sha256: str) -> tuple[OptimizableEntry, ...]:
+    """快照裡接成家族的可最佳化材料（:func:`read_snapshot_entries` 的前半）。"""
+    return read_snapshot_entries(path, sha256).materials
+
+
+def fixed_candidates(targets: Sequence[str], presets: Sequence[PresetMaterial],
+                     user_fixed: Sequence[FixedEntry]) -> tuple[FixedCandidate, ...]:
+    """准用清單裡的 ``fixed:<代號>`` → 那份固定材料的構造（照目標字串排、不重複）。
+
+    代號先找使用者的固定材料（材料庫已保證跟內建不撞），再找產品構造預設（內建的固定材料就是它們，
+    :func:`~aosr.materials.library.builtin_entries`）；都沒有、或指到使用者的可最佳化材料就拒收、點名哪一個。
+    """
+    from aosr.config.material_gradient import fixed_target_id
+
+    users = {entry.id: entry for entry in user_fixed}
+    builtin = {preset.id: preset for preset in presets}
+    found: dict[str, FixedCandidate] = {}
+    for target in sorted(set(targets)):
+        material_id = fixed_target_id(target)
+        if material_id in users:
+            material = users[material_id].surface_material().model_dump(mode="json")
+        elif material_id in builtin and not isinstance(builtin[material_id], LibraryPreset):
+            material = dict(builtin[material_id].material)
+        else:
+            raise MaterialsRefused(f"准用清單的固定材料 {material_id} 不在材料庫（內建構造預設或使用者的固定材料）裡，搜尋不開")
+        found[target] = FixedCandidate(id=target, material=material)
+    return tuple(found.values())
+
+
+def user_fixed_entries(ids: Sequence[str], entries: Sequence[LibraryEntry]) -> tuple[FixedEntry, ...]:
+    """准用清單點名、而且是使用者固定材料的那幾筆（照代號排）；快照要存它們，網頁之後改材料庫不影響這一場。"""
+    wanted = set(ids)
+    return tuple(sorted((entry for entry in entries if isinstance(entry, FixedEntry) and entry.id in wanted),
+                        key=lambda entry: entry.id))

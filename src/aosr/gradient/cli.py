@@ -62,10 +62,10 @@ from aosr import runtime
 from aosr.physics.fem_full_batch import checked_workers, checked_device_workers
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
-from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
+from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS, fixed_target_id
 from aosr.materials.search_library import (
-    SNAPSHOT_FILE, MaterialsRefused, SearchMaterials, cavity_notes, read_user_entries, refuse_fixed_as_family, snapshot_bytes,
-    with_user_materials,
+    SNAPSHOT_FILE, MaterialsRefused, PresetMaterial, SearchMaterials, cavity_notes, fixed_candidates, read_user_entries,
+    refuse_fixed_as_family, snapshot_bytes, user_fixed_entries, with_user_materials,
 )
 
 if TYPE_CHECKING:
@@ -77,6 +77,8 @@ if TYPE_CHECKING:
     from aosr.physics.fem_reduced_check import SurrogateSpotCheck
     from aosr.reporting.scheme import Scheme
     from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
+    from aosr.gradient.fixed_candidates import FixedCandidateCheck
+    from aosr.materials.library import LibraryEntry
 
 EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
@@ -158,6 +160,11 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--materials", type=Path, default=None, metavar="材料庫.json",
                        help="使用者材料庫（網頁資料夾的 materials.json 的複本）：可最佳化材料一筆一個家族接在設定檔的家族後面，"
                             "存一份快照進搜尋資料夾；不給就只用設定檔的家族")
+    start.add_argument("--allowed", action="append", default=[], metavar="面=目標,目標",
+                       help="每面（或面片）准用的換樣板目標，可重複：家族代號、fixed:<材料代號>（整塊換成固定材料）、none；"
+                            "沒給的面照舊換全部家族與 none；起跑那一面的目標一定要在清單裡")
+    start.add_argument("--workers", type=_workers, default=1,
+                       help="准用清單有固定材料時，開跑前替身留出驗證的完整解工人數；預設 1")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -258,31 +265,26 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.gradient import run
-    from aosr.gradient.fixed_surfaces import parse_fixed_surfaces, parse_max_depths
+    from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
+    from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
-    from aosr.reporting.scheme import load_scheme
 
-    fixed = parse_fixed_surfaces(args.fixed_surface)
-    caps = parse_max_depths(args.max_depth)
+    fixed, caps, allowed = (parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth),
+                            parse_allowed_targets(args.allowed))
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
-    if SEARCHES_DIR in args.root.resolve().parts:
-        raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
-    scheme = load_scheme(scheme_path)
-    if scheme.scene.low_frequency_axis is None:
-        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
-    materials, settings, snapshot, materials_sha = _start_materials(args, settings_path)
-    capabilities = load_capabilities(args.capabilities)
-    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    scheme = _start_scheme(args.root, scheme_path)
+    materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
+    capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     run.require_supported_original_walls(kept.values())
     designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps, table=materials.presets)
-    from aosr.gradient.boundary import scheme_patch_keys
-    patch_keys = scheme_patch_keys(scheme)
+    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, materials.presets)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
     physics, mesh = operators.physics_identity, operators.mesh_hash
+    full_operators = operators if fixed_targets_of(expanded) else None
     points = run.SchemePoints(fem_reduced_check.points_hex(operators.source_points), fem_reduced_check.points_hex(operators.receiver_points))
     manifest_identity = _surrogate_identity(surrogate, physics)
     fingerprint = fem_reduced.operators_digest(operators) if manifest_identity != physics else None
@@ -295,6 +297,8 @@ def _start(args: argparse.Namespace) -> int:
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     _check_start_materials(materials, model, scheme)
+    checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers)
+    del full_operators
     spot = None
     if fingerprint is not None:
         spot = _carryover_spot_check(model, operators, designs, scheme)
@@ -304,7 +308,8 @@ def _start(args: argparse.Namespace) -> int:
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
-                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha)
+                               max_depths=caps, patch_keys=boundary.scheme_patch_keys(scheme), frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha,
+                               allowed_targets=allowed)
     root = args.root.resolve()
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
@@ -318,7 +323,8 @@ def _start(args: argparse.Namespace) -> int:
         frequency_batch=args.frequency_batch, max_steps=args.max_steps, device=args.device,
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
         operators_digest=fingerprint, surrogate_spot_check=spot, materials_sha256=materials_sha,
-        materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE))
+        materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE),
+        allowed_targets=allowed, fixed_candidate_checks=checks)
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
@@ -338,16 +344,71 @@ def _check_start_materials(materials: SearchMaterials, model: ReducedModel, sche
         sys.stderr.write(f"注意：{note}\n")
 
 
-def _start_materials(args: argparse.Namespace, settings_path: Path) -> tuple[SearchMaterials, MaterialGradientSettings,
-                                                                             bytes | None, str | None]:
+def _start_scheme(root: Path, scheme_path: Path) -> Scheme:
+    """開跑前兩條：資料夾根不在網頁讀的 searches/ 底下；方案場景要有低頻軸（終點量大峰要它）。"""
+    from aosr.reporting.scheme import load_scheme
+
+    if SEARCHES_DIR in root.resolve().parts:
+        raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
+    scheme = load_scheme(scheme_path)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
+    return scheme
+
+
+def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[SurfaceDesign, ...],
+                     settings: MaterialGradientSettings, fixed: dict[str, str],
+                     caps: dict[str, float], table: tuple[PresetMaterial, ...]) -> dict[str, tuple[str, ...]]:
+    """准用清單對起跑配置核一次（:func:`~aosr.gradient.fixed_surfaces.check_allowed_against_start`），回展開到面片的清單。
+    起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）；六類評分收不了的固定材料（裸實測表）在匯出完整模型
+    與關卡之前就拒收（:func:`~aosr.gradient.fixed_candidates.refuse_unscored_fixed_candidates`），不花完整解的錢。"""
+    from aosr.config.material_gradient import is_fixed_target
+    from aosr.gradient.fixed_candidates import refuse_unscored_fixed_candidates
+    from aosr.gradient.fixed_surfaces import check_allowed_against_start, expanded_allowed_targets
+
+    surfaces = tuple((design.surface_id, design.preset_id) for design in designs)
+    if any(is_fixed_target(preset) for _, preset in surfaces):
+        raise ValueError("--presets 不能直接寫固定材料（fixed:…）：起點要是家族樣板或 none，固定材料從 --allowed 進來")
+    check_allowed_against_start(allowed, surfaces, settings, fixed_surfaces=fixed, max_depths=caps)
+    expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
+    refuse_unscored_fixed_candidates(designs, expanded, table)
+    return expanded
+
+
+def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],
+                            allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...], scheme: Scheme,
+                            workers: int) -> tuple[FixedCandidateCheck, ...]:
+    """准用清單有固定材料：表外補值照實印、每一個各做一組替身留出驗證（沒過就拒收）；沒有就什麼都不做。"""
+    from aosr.gradient.fixed_candidates import check_fixed_candidates, table_range_notes
+    from aosr.gradient.fixed_surfaces import fixed_targets_of
+
+    targets = fixed_targets_of(allowed)
+    if not targets:
+        return ()
+    assert operators is not None
+    for note in table_range_notes(targets, table, tuple(float(value) for value in model.frequencies_hz)):
+        sys.stderr.write(f"注意：{note}\n")
+    checks = check_fixed_candidates(model, operators, designs, allowed, table, density_kg_m3=scheme.scene.density_kg_m3,
+                                    sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers)
+    for check in checks:
+        sys.stderr.write(f"固定材料 {check.target} 替身留出驗證通過：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
+                         f"{check.band_db:g} dB（完整解 {check.full_solves} 次、{check.seconds:.1f} 秒）\n")
+    return checks
+
+
+def _start_materials(args: argparse.Namespace, settings_path: Path,
+                     allowed: dict[str, tuple[str, ...]]) -> tuple[SearchMaterials, MaterialGradientSettings,
+                                                                    bytes | None, str | None]:
     """這一場的材料、生效設定（步數上限已套）、材料快照內文與整份 SHA-256。
 
     ``--materials`` 給了：讀使用者材料庫（檔案不在、讀不進來都照講原因拒收）、起跑配置不准填固定材料、可最佳化材料接成家族；
     沒給、或材料庫裡沒有可最佳化材料：設定檔與產品構造預設原樣、沒有快照（資料夾名與 ``project.json`` 逐位照舊）。"""
     from aosr.config.material_gradient import load_material_gradient_settings, with_max_steps
+    from aosr.gradient.fixed_surfaces import fixed_targets_of
     from aosr.gradient.run import presets_table
 
     base = load_material_gradient_settings(settings_path)
+    entries: tuple[LibraryEntry, ...] = ()
     if args.materials is None:
         materials = SearchMaterials(base, presets_table(), ())
     else:
@@ -358,9 +419,13 @@ def _start_materials(args: argparse.Namespace, settings_path: Path) -> tuple[Sea
         refuse_fixed_as_family(args.presets, entries)
         materials = with_user_materials(base, presets_table(), entries)
     settings = materials.settings if args.max_steps is None else with_max_steps(materials.settings, args.max_steps)
-    if not materials.entries:
+    targets = fixed_targets_of(allowed)
+    user_fixed = user_fixed_entries([fixed_target_id(target) for target in targets], entries)
+    if targets:
+        materials = materials._replace(presets=(*materials.presets, *fixed_candidates(targets, materials.presets, user_fixed)))
+    if not materials.entries and not user_fixed:
         return materials, settings, None, None
-    content = snapshot_bytes(materials.entries)
+    content = snapshot_bytes(materials.entries, user_fixed)
     return materials, settings, content, hashlib.sha256(content).hexdigest()
 
 
@@ -395,30 +460,11 @@ def _carryover_spot_check(model: ReducedModel, operators: FullOperators, designs
 
 def _starting_impedances(designs: tuple[SurfaceDesign, ...], frequencies_hz: tuple[float, ...],
                          scheme: Scheme) -> FrequencyBoundaryImpedances:
-    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內。"""
-    import jax.numpy as jnp
-    import numpy as np
+    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內（:func:`~aosr.gradient.fixed_candidates.design_impedances`）。"""
+    from aosr.gradient.fixed_candidates import design_impedances
 
-    from aosr.config.construction_environment import construction_environment
-    from aosr.gradient.boundary import patch_key
-    from aosr.gradient.material_gradient import (
-        baseline_theta, depth_limits, descent_start, design_bounds, design_templates, kept_impedance_rows, surface_parameters,
-    )
-    from aosr.materials.construction_diff import surface_impedance_from_parameters
-
-    air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
-                                           sound_speed_m_s=scheme.scene.sound_speed_m_s)
-    theta = descent_start(baseline_theta(designs), design_bounds(designs), depth_limits(designs))
-    axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
-    templates = design_templates(designs, axis, air=air, ranges=ranges)
-    parameters = surface_parameters(designs, theta)
-    kept = kept_impedance_rows(designs, frequencies_hz, air=air, ranges=ranges)
-    rows = {}
-    for design, template, values, original in zip(designs, templates, parameters, kept, strict=True):
-        impedance = (original if original is not None else None if template is None else
-                     surface_impedance_from_parameters(template, values, axis, air=air))
-        rows[patch_key(design.surface_id)] = None if impedance is None else tuple(complex(value) for value in np.asarray(impedance))
-    return rows
+    return design_impedances(designs, frequencies_hz, density_kg_m3=scheme.scene.density_kg_m3,
+                             sound_speed_m_s=scheme.scene.sound_speed_m_s)
 
 
 def _create_and_run(root: Path, project: GradientProject, snapshot: bytes | None = None) -> int:

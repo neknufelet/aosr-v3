@@ -50,13 +50,13 @@ from typing import Final, Literal, NamedTuple, Protocol, Self, cast
 
 import jax.numpy as jnp
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import TypeAdapter, BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, load_material_gradient_settings, with_max_steps,
+    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, is_fixed_target, load_material_gradient_settings, with_max_steps,
 )
 from aosr.config.paths import config_path
 from aosr.config.construction_environment import construction_environment
@@ -66,8 +66,10 @@ from aosr.geometry.shoebox import Wall
 from aosr.gradient.gpu import Device, LegacyPrecisionComparison, PrecisionComparison, single_precision_constants
 from aosr.gradient.gpu_preflight import ensure_start_precision
 from aosr.gradient.surrogate_guard import require_matching_patches, require_supported_original_walls as require_supported_original_walls
+from aosr.gradient.fixed_candidates import FixedCandidateCheck
 from aosr.gradient.fixed_surfaces import (
-    FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_fixed, designs_with_max_depths,
+    AllowedTargets, FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_fixed, designs_with_max_depths,
+    expanded_allowed_targets, fixed_targets_of,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
@@ -89,8 +91,10 @@ from aosr.gradient.template_segment import (
     TemplateResult, finished_result, resume_template_rounds, run_template_rounds,
 )
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.materials.library import OptimizableEntry
-from aosr.materials.search_library import PresetMaterial, SearchMaterials, read_snapshot, with_user_materials, with_user_presets
+from aosr.materials.library import FixedEntry, OptimizableEntry
+from aosr.materials.search_library import (
+    PresetMaterial, SearchMaterials, fixed_candidates, read_snapshot_entries, with_user_materials, with_user_presets,
+)
 from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials, partition_identity, scheme_patch_keys, surface_ids)
 from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
 from aosr.physics.report_surfaces import RectangleZone
@@ -143,6 +147,9 @@ class GradientProject(BaseModel):
     記的是套上之後的指紋，接續、終點、報告一律經 :func:`project_settings` 套回去再比。
     ``materials_path``／``materials_sha256`` 是材料快照（#1082 段 2-3a）：使用者的可最佳化材料接成家族的搜尋才寫
     （資料夾裡的 ``materials.json`` 與它整份的 SHA-256）；沒接的不寫、寫出的檔逐位等於加這兩格之前。
+    ``allowed_targets`` 是每區准用清單（#1082 段 2-3b，面 → 目標，照開跑時給的面名，沒展開）；清單裡的固定材料
+    每一個都有一筆 ``fixed_candidate_checks``（替身留出驗證，通過才開得了）。沒有清單兩格都不寫（逐位等於加這兩格之前）。
+    使用者固定材料存在材料快照 v2 裡。
     """
 
     model_config = _FROZEN
@@ -178,10 +185,14 @@ class GradientProject(BaseModel):
     surrogate_spot_check: SurrogateSpotCheck | None = Field(default=None, exclude_if=lambda value: value is None)
     materials_path: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
     materials_sha256: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
+    allowed_targets: AllowedTargets = Field(default_factory=dict, exclude_if=lambda value: not value)
+    fixed_candidate_checks: tuple[FixedCandidateCheck, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _depth_not_fixed(self) -> Self:
         check_fixed_depth_conflicts(self.fixed_surfaces, self.max_depths)
+        if [check.target for check in self.fixed_candidate_checks] != list(fixed_targets_of(self.allowed_targets)):
+            raise ValueError("准用清單裡每一個固定材料都要有一筆通過的替身留出驗證（照目標字串排），不多不少")
         if (self.materials_path is None) != (self.materials_sha256 is None):
             raise ValueError("材料快照的路徑與 SHA-256 要一起記（使用者材料接成家族的搜尋），或都不記")
         fields = (self.surrogate_physics_identity, self.operators_digest, self.surrogate_spot_check)
@@ -348,7 +359,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
                 mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
                 patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None,
-                frequency_batch: int | None = None, device: Device = "cpu", materials_sha256: str | None = None) -> str:
+                frequency_batch: int | None = None, device: Device = "cpu", materials_sha256: str | None = None,
+                allowed_targets: Mapping[str, Sequence[str]] | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -371,6 +383,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["frequency_batch"] = frequency_batch
     if materials_sha256 is not None:
         identity["materials"] = materials_sha256
+    if allowed_targets:
+        identity["allowed_targets"] = {face: list(targets) for face, targets in sorted(allowed_targets.items())}
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
     content = json.dumps(identity,
@@ -490,8 +504,13 @@ def project_materials(project: GradientProject) -> SearchMaterials:
     settings = load_material_gradient_settings(project.settings_path)
     entries: tuple[OptimizableEntry, ...] = ()
     if project.materials_path is not None and project.materials_sha256 is not None:
-        entries = read_snapshot(Path(project.materials_path), project.materials_sha256)
+        entries = read_snapshot_entries(Path(project.materials_path), project.materials_sha256).materials
     return with_user_materials(settings, presets_table(), entries)
+
+
+def project_allowed(project: GradientProject, names: Sequence[str]) -> dict[str, tuple[str, ...]] | None:
+    """這一跑的准用清單展開到面片（``names`` 是設計清單的面代號）；沒有清單是 None（換樣板照舊）。"""
+    return expanded_allowed_targets(project.allowed_targets, names) if project.allowed_targets else None
 
 
 def project_settings(project: GradientProject) -> MaterialGradientSettings:
@@ -501,10 +520,29 @@ def project_settings(project: GradientProject) -> MaterialGradientSettings:
 
 
 def project_presets(project: GradientProject) -> tuple[PresetMaterial, ...]:
-    """這一跑的構造清單：產品構造預設，有材料快照就接上快照裡使用者材料生成的構造（不讀搜尋設定；快照 SHA-256 照核）。"""
+    """這一跑的構造清單：產品構造預設，有材料快照就接上快照裡使用者材料生成的構造（不讀搜尋設定；快照 SHA-256 照核）；
+    准用清單有固定材料就再接上每一個 ``fixed:<代號>`` 的那份材料（使用者的從快照、內建的從產品構造預設），
+    而且每一份要跟開跑時做留出驗證的那份逐位同一份（``fixed_candidate_checks`` 記的摘要）：內建構造之後改了內容，
+    舊的驗證不算數，拒收。"""
+    from aosr.gradient.endpoint import material_digest
+
+    table: tuple[PresetMaterial, ...]
+    user_fixed: tuple[FixedEntry, ...]
     if project.materials_path is None or project.materials_sha256 is None:
-        return presets_table()
-    return with_user_presets(presets_table(), read_snapshot(Path(project.materials_path), project.materials_sha256))
+        table, user_fixed = presets_table(), ()
+    else:
+        snapshot = read_snapshot_entries(Path(project.materials_path), project.materials_sha256)
+        table, user_fixed = with_user_presets(presets_table(), snapshot.materials), snapshot.fixed
+    targets = fixed_targets_of(project.allowed_targets)
+    if not targets:
+        return tuple(table)
+    candidates = fixed_candidates(targets, table, user_fixed)
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    by_target = {candidate.id: candidate for candidate in candidates}
+    for check in project.fixed_candidate_checks:
+        if material_digest(adapter.validate_python(by_target[check.target].material)) != check.material_digest:
+            raise ValueError(f"固定材料 {check.target} 的內容跟開跑時做留出驗證的那份不同（材料改過了），舊的驗證不算數，拒收")
+    return (*table, *candidates)
 
 
 def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = False) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
@@ -653,9 +691,10 @@ def load_problem(project: GradientProject) -> GradientProblem:
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
+    names = tuple(d.surface_id for d in designs)
     context = TemplateContext(settings, table, named_materials(kept),
-                              objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, tuple(d.surface_id for d in designs)),
-                              max_depths=project.max_depths)
+                              objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, names),
+                              max_depths=project.max_depths, allowed=project_allowed(project, names))
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
                                                                     objective_constants=six), kept, context)
 
@@ -795,9 +834,19 @@ def template_start(header: MaterialGradientHeader, rows: Sequence[MaterialGradie
 
 
 def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings: MaterialGradientSettings,
-                        kept: Mapping[K, SurfaceMaterial], *, base_ledger_sha256: str) -> TemplateHeader:
+                        kept: Mapping[K, SurfaceMaterial], *, base_ledger_sha256: str,
+                        allowed: Mapping[str, tuple[str, ...]] | None = None,
+                        table: Sequence[PresetMaterial] | None = None) -> TemplateHeader:
     """換樣板帳本的標頭：替身身分與評分常數指紋抄庚二標頭、完整設定指紋（含 ``[templates]``）、庚二帳本整份摘要、
-    起點配置（庚二標頭的六面）、六面方案原本那面牆的材料摘要。"""
+    起點配置（庚二標頭的六面）、六面方案原本那面牆的材料摘要；有准用清單（已展開到面片）就再記清單與清單裡每個
+    固定材料的材料摘要（材料從 ``table`` 裡同名那一筆來）。"""
+    targets = fixed_targets_of(allowed or {})
+    by_id = {preset.id: preset for preset in (table or ())}
+    missing = [target for target in targets if target not in by_id]
+    if missing:
+        raise ValueError(f"准用清單的固定材料 {missing} 不在這一場的構造清單裡")
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    candidate_digests = {target: material_digest(adapter.validate_python(by_id[target].material)) for target in targets}
     whole_kept = cast(Mapping[Wall, SurfaceMaterial], kept)
     digests = ({name: material_digest(material) for name, material in named_materials(kept).items()}
                if header.boundary_patches else
@@ -810,7 +859,8 @@ def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings
         objective_fingerprint=header.objective_fingerprint, base_ledger_sha256=base_ledger_sha256,
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
         kept_digests=digests, mount=header.mount,
-        fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths, boundary_patches=header.boundary_patches)
+        fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths, boundary_patches=header.boundary_patches,
+        allowed_targets=dict(allowed or {}), fixed_candidate_digests=candidate_digests)
 
 
 def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:
@@ -818,7 +868,8 @@ def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopC
     path = folder / LEDGER_FILE
     _, rows = read_ledger(path, expected_header=problem.header)
     origin = template_start(problem.header, rows)
-    header = template_header_for(problem.header, problem.settings, problem.kept, base_ledger_sha256=file_sha256(path))
+    header = template_header_for(problem.header, problem.settings, problem.kept, base_ledger_sha256=file_sha256(path),
+                                 allowed=problem.templates.allowed, table=problem.templates.presets)
     templates = folder / TEMPLATES_FILE
     if templates.exists():
         return resume_template_rounds(problem.templates, templates, header, origin, should_stop=should_stop)
@@ -839,11 +890,11 @@ def surface_specs(layout: Layout, theta: Sequence[float], *, digests: Mapping[st
     for surface_id, preset_id in layout.surfaces:
         values = [value for name, value in zip(layout.variable_names, theta, strict=True)
                   if name.split(".", 1)[0] == surface_id]
-        if preset_id is None and values:
-            raise ValueError(f"不貼的面 {surface_id} 不該有變數")
+        if (preset_id is None or is_fixed_target(preset_id)) and values:
+            raise ValueError(f"不貼或整塊換成固定材料的面 {surface_id} 不該有變數")
         if digests is not None and surface_id not in digests:
             raise ValueError(f"材料摘要缺面 {surface_id}")
-        if preset_id is not None and not 1 <= len(values) <= 2:
+        if preset_id is not None and not is_fixed_target(preset_id) and not 1 <= len(values) <= 2:
             raise ValueError(f"面 {surface_id} 的變數要是厚度或厚度加空腔")
         specs.append(SurfaceSpec(surface_id=surface_id, preset_id=preset_id,
                                  thickness_m=values[0] if values else None,
@@ -927,7 +978,8 @@ def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientS
 def write_result(folder: Path, problem: GradientProblem) -> GradientResult:
     """:func:`result_from_ledger`（兩本帳的標頭都要等於這一次重建的）重建、原子寫成 ``result.json``。"""
     template_header = template_header_for(problem.header, problem.settings, problem.kept,
-                                          base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
+                                          base_ledger_sha256=file_sha256(folder / LEDGER_FILE),
+                                          allowed=problem.templates.allowed, table=problem.templates.presets)
     result = result_from_ledger(folder, problem.settings, problem.kept, expected_header=problem.header,
                                 expected_template_header=template_header, table=problem.templates.presets)
     write_json_atomic(folder / RESULT_FILE, result)

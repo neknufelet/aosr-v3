@@ -39,7 +39,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
-from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.material_gradient import (
+    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target, is_fixed_target, load_material_gradient_settings,
+)
+from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
@@ -49,7 +52,8 @@ from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_librar
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
-from aosr.materials.library import LibraryEntry, dump_user_library, load_user_library
+from aosr.materials.construction_models import MeasuredImpedance
+from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
 from aosr.materials.search_library import MaterialsRefused, SearchMaterials, refuse_fixed_as_family, with_user_materials
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 from aosr.reporting.scheme import Scheme
@@ -231,6 +235,18 @@ def tail_lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8", errors="replace").splitlines()[-LOG_TAIL_LINES:]
 
 
+def _refuse_measured_tables(plan: SearchPlan, entries: tuple[LibraryEntry, ...]) -> None:
+    """准用清單列了使用者的實測阻抗表就點名拒收：第三階段六類評分還沒接上裸實測表（命令列開跑前用評分工廠同一條判斷再擋一次），
+    在這裡先講清楚是哪一筆、為什麼，不讓它落成「材料庫裡沒有」或背景開跑才失敗。"""
+    measured = {fixed_target(entry.id) for entry in entries
+                if isinstance(entry, FixedEntry) and isinstance(entry.surface_material(), MeasuredImpedance)}
+    listed = sorted({target for targets in (plan.allowed or {}).values() for target in targets} & measured)
+    if listed:
+        names = "、".join(target.removeprefix("fixed:") for target in listed)
+        raise PlanRefused(f"准用清單裡的 {names} 是實測阻抗表：第三階段六類評分還沒接上實測表，搜尋不開；"
+                          "先從准用清單拿掉，或在材料庫改用貼在牆上的構造")
+
+
 class GradientJobs:
     """``scheme_lock`` 是網頁存方案、設計設定、封存共用的那一把：只在讀方案與設計設定做快照時拿；工作狀態另一把。"""
 
@@ -271,7 +287,11 @@ class GradientJobs:
             refuse_fixed_as_family((request.family,), entries)
         except MaterialsRefused as error:
             raise PlanRefused(str(error)) from error
-        return plan_search(scheme, design, request, materials.settings), materials, entries
+        fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
+                               *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
+        plan = plan_search(scheme, design, request, materials.settings, fixed_ids)
+        _refuse_measured_tables(plan, entries)
+        return plan, materials, entries
 
     def search_settings(self) -> MaterialGradientSettings:
         return load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))
@@ -489,6 +509,10 @@ class GradientJobs:
                 library = directory / USER_LIBRARY_NAME
                 write_text_atomic(library, dump_user_library(entries))
                 arguments.extend(("--materials", str(library)))
+            if any(is_fixed_target(target) for targets in plan.allowed.values() for target in targets):
+                # 准用清單有固定材料：開跑前每個各做一組完整解留出驗證，行程數照建替身那一份（109 實量 4 行程，#1036）。
+                compute = load_surrogate_training_settings(config_path("surrogate_training.toml")).compute
+                arguments.extend(("--workers", str(compute.workers)))
             job = GradientJob(job_id=job_id, scheme_id=scheme_id, created_at=time.time(), plan=plan,
                               surrogate=str(surrogate))
             self._save(job)

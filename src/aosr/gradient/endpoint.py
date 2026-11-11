@@ -160,7 +160,7 @@ def surface_specs(designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVect
     offset = 0
     for design in designs:
         if design.material is None:
-            specs.append(SurfaceSpec(design.surface_id, None, None, None, design_digest(design)))
+            specs.append(SurfaceSpec(design.surface_id, design.preset_id, None, None, design_digest(design)))
             continue
         cavity = float(values[offset + 1]) if design.cavity_variable is not None else None
         specs.append(SurfaceSpec(design.surface_id, design.preset_id, float(values[offset]), cavity,
