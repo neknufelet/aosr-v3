@@ -57,7 +57,7 @@ def _materials(seed: int, count: int) -> list[FrequencyWallImpedances]:
 
 
 def _scheme_surrogate(directory: Path) -> None:
-    """方案自己的算子建替身、做留出驗證寫收據，放在 ``good/rom.npz``（開跑參數照命令列考卷那一條）。"""
+    """方案自己的算子建替身、做留出驗證寫收據，放在暫存資料夾的 good 子資料夾（開跑參數照命令列考卷那一條）。"""
     capabilities = load_capabilities(config_path("capabilities.toml"))
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     operators = export_operators(load_scheme(directory / "scheme.json"), capabilities=capabilities, directivity=directivity)
