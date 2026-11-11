@@ -365,7 +365,9 @@ function fixedBlock(entry, readonly) {
 
 let plot = null;
 let curveTicket = 0;
-let curveShown = false;
+let curveReply = null; // 畫面上正在顯示的那一份回應（畫好的、或講為什麼沒畫的）
+let curveDirty = false; // 送出那一份之後表單又改過：晚到的回應不准把「表單改過」的提示清掉
+const STALE = "表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。";
 const SPAN_FILL = {extrapolation: "rgba(230,140,40,0.22)", model_fill: "rgba(110,125,135,0.2)"};
 
 function destroyPlot() {
@@ -421,6 +423,20 @@ function showLabels(reply) {
   byId("curve-arrangement").hidden = !reply.arrangement;
 }
 
+function stateText() {
+  if (!curveReply) return;
+  const reason = curveReply.status === "drawn" ? "" : curveReply.message;
+  const text = [reason, curveDirty ? STALE : ""].filter(Boolean).join("\n");
+  curveState(text, text ? "notice" : "");
+}
+
+function clearCurve() {
+  // 換開另一筆或關掉表單：上一筆的圖、標語、提醒先拿掉，不跟新那一筆混在一起。
+  curveDirty = false;
+  showCurve({status: "cleared", message: ""});
+  curveReply = null;
+}
+
 function showCurve(reply) {
   showLabels(reply);
   const drawn = reply.status === "drawn";
@@ -432,26 +448,26 @@ function showCurve(reply) {
     el("li", {class: line.level, "data-code": line.code, text: line.text})));
   byId("curve-axis").textContent = drawn ? reply.axis_text : "";
   byId("curve-scope").textContent = reply.range_scope || "";
-  if (drawn) {
-    curveState("", "");
-    drawPlot(reply);
-  } else {
-    destroyPlot();
-    curveState(reply.message, "notice");
-  }
-  curveShown = drawn;
+  if (drawn) drawPlot(reply); else destroyPlot();
+  curveReply = reply;
+  stateText();
 }
 
 async function drawCurve(document) {
   const ticket = ++curveTicket;
+  curveDirty = false; // 送出的是表單此刻的值；之後再改才算過期
   byId("curve-redraw").disabled = true;
   curveState("計算吸音曲線中…（第一次算一種新構造要等一兩秒）", "");
   try {
-    const reply = await api("/api/material-curve", {method: "POST", headers: {"Content-Type": "application/json"},
-                                                    body: JSON.stringify(document)});
+    let reply;
+    try {
+      reply = await api("/api/material-curve", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                body: JSON.stringify(document)});
+    } catch (error) {
+      reply = {ok: false, body: {error: `連不到網頁伺服器（${error.message}）`}};
+    }
     if (ticket !== curveTicket) return; // 已經換開別筆，或又按了重畫：這一份過期，不蓋掉新的
-    if (!reply.ok) { destroyPlot(); curveState(`畫不出曲線：${reply.body.error || reply.status}`, "notice"); curveShown = false; return; }
-    showCurve(reply.body);
+    showCurve(reply.ok ? reply.body : {status: "failed", message: `畫不出曲線：${reply.body.error || reply.status}`});
   } finally {
     if (ticket === curveTicket) byId("curve-redraw").disabled = false;
   }
@@ -459,12 +475,19 @@ async function drawCurve(document) {
 
 function redrawCurve() {
   let document;
-  try { document = collect(); } catch (error) { destroyPlot(); curveShown = false; curveState(`畫不出曲線：${error.message}`, "notice"); return; }
+  try { document = collect(); } catch (error) {
+    curveTicket += 1; // 還在算的那一份也作廢：畫面講的是表單現在填錯的地方
+    curveDirty = false;
+    showCurve({status: "failed", message: `畫不出曲線：${error.message}`});
+    byId("curve-redraw").disabled = false;
+    return;
+  }
   drawCurve(document);
 }
 
 function markCurveStale() {
-  if (curveShown) curveState("表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。", "notice");
+  curveDirty = true;
+  stateText();
 }
 
 let parts = null;
@@ -489,6 +512,7 @@ function openEntry(row, isNew) {
   say("", "");
   byId("editor").scrollIntoView({block: "start"});
   // 表單先顯示再畫：藏著的時候圖的寬度量出來是 0。
+  clearCurve();
   drawCurve(entry);
 }
 
@@ -496,8 +520,7 @@ function closeEditor() {
   current = null;
   parts = null;
   curveTicket += 1;
-  curveShown = false;
-  destroyPlot();
+  clearCurve();
   byId("editor").hidden = true;
   byId("editor-body").replaceChildren();
 }

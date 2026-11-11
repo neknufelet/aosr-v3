@@ -77,6 +77,16 @@ def test_redraw_uses_unsaved_form_values_and_says_when_the_curve_is_stale(tmp_pa
         page.locator("#curve-redraw").click()
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         expect(state).to_have_text("")
+        # 算到一半又改表單：回應晚到也不准把「表單改過」清掉（按鈕恢復＝那份回應處理完了）
+        held: list[Route] = []
+        page.route("**/api/material-curve", lambda route: held.append(route))
+        with page.expect_request("**/api/material-curve"):
+            page.locator("#curve-redraw").click()
+        first.locator('input[name="flow_resistivity_pa_s_m2"]').fill("16000")
+        held[0].continue_()
+        expect(page.locator("#curve-redraw")).to_be_enabled(timeout=COMPUTED_MS)
+        page.unroute("**/api/material-curve")
+        expect(state).to_have_text("表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。")
         page.locator("#panel-assembly button.add-layer").click()  # 加層是按鈕，不觸發 input，也算改過
         expect(state).to_contain_text("表單改過，曲線還是上次畫的")
         page.locator("#assembly-layers > li").nth(1).locator("button.remove").click()
@@ -104,28 +114,38 @@ def test_redraw_uses_unsaved_form_values_and_says_when_the_curve_is_stale(tmp_pa
 def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        held: list[Route] = []
-
-        def hold_first(route: Route) -> None:
-            if held:
-                route.continue_()
-            else:
-                held.append(route)
-
-        page.route("**/api/material-curve", hold_first)
         _row(page, "glass_wool_48k")
-        expect(page.locator("#curve-state")).to_contain_text("計算吸音曲線中")
-        _row(page, "fabric_pet_a_gap100")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
-        expect(page.locator("#curve-arrangement")).to_be_hidden()
+        held: list[Route] = []
+        page.route("**/api/material-curve", lambda route: held.append(route))
+        with page.expect_request("**/api/material-curve"):
+            _row(page, "fabric_pet_a_gap100")
+        # 換開另一筆：新回應回來前，上一筆的圖、標語、提醒先拿掉
+        expect(page.locator("#curve-chart canvas")).to_have_count(0)
+        expect(page.locator("#curve-labels")).to_be_hidden()
+        expect(page.locator("#curve-warnings li")).to_have_count(0)
+        with page.expect_request("**/api/material-curve"):
+            _row(page, "glass_wool_24k")
+        held[1].continue_()
+        expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
+        expect(page.locator("#curve-arrangement")).to_be_visible()
         shown = page.locator("#curve-source").inner_text()
         with page.expect_response("**/api/material-curve", timeout=COMPUTED_MS):
             held[0].continue_()
         page.wait_for_timeout(500)
-        expect(page.locator("#curve-arrangement")).to_be_hidden()  # 48K 棉那份晚到的回應有初值排法；蓋上去就會現出來
+        expect(page.locator("#curve-arrangement")).to_be_visible()  # 布那份晚到的回應沒有初值排法；蓋上去這一行就會藏起來
         assert page.locator("#curve-source").inner_text() == shown
-        expect(page.locator("#curve-redraw")).to_be_enabled()
         assert (watched.console_errors, watched.page_errors) == ([], [])
+        page.unroute("**/api/material-curve")
+        # 連不到伺服器：照實講，不停在「計算中」，也不留舊圖
+        page.route("**/api/material-curve", lambda route: route.abort())
+        page.locator("#curve-redraw").click()
+        expect(page.locator("#curve-state")).to_contain_text("畫不出曲線：連不到網頁伺服器")
+        expect(page.locator("#curve-chart canvas")).to_have_count(0)
+        expect(page.locator("#curve-labels")).to_be_hidden()
+        expect(page.locator("#curve-redraw")).to_be_enabled()
+        assert all("ERR_FAILED" in error for error in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
 
 
 def test_the_curve_fits_a_phone_and_follows_a_resize(tmp_path: Path, browser: Browser) -> None:
@@ -134,6 +154,8 @@ def test_the_curve_fits_a_phone_and_follows_a_resize(tmp_path: Path, browser: Br
         _row(page, "glass_wool_48k")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+        # 區塊自己會橫向捲（共用樣式 overflow-x:auto），整頁量不到：出處裡的長網址要斷得開
+        assert page.locator("#editor").evaluate("box => box.scrollWidth <= box.clientWidth")
         chart, canvas = page.locator("#curve-chart").bounding_box(), page.locator("#curve-chart canvas").bounding_box()
         assert chart is not None and canvas is not None
         assert canvas["width"] <= chart["width"] + 0.5

@@ -9,6 +9,7 @@
 - 可最佳化材料是一族（搜尋會調厚度與空腔），這裡畫的是初值排法（``template_assembly``），圖旁寫明。
 - 提醒分兩級：參數出界（流阻低於原研究樣品、泡棉不在擬合範圍）醒目；頻率外推與實測表外的模型補值照實寫頻段、圖上標底色。
 - 只有小松模型與實測表登記了可信範圍；其他多孔模型照實寫「沒有範圍可查」，沒有提醒不等於在可信範圍內。
+- JAX 與構造物理延到第一次畫曲線才載入：網頁主程式載入時不帶 JAX（跟主線一樣；``wall_surfaces`` 也是這樣延後）。
 - 表單沒填齊、參數算不出來（例如流阻超出手動試算範圍）都是使用者會走到的正常狀態：回 200 加 ``status`` 一格，不回錯誤碼。
 - 行程沒開雙精度（正式入口一定開；pytest 的行程刻意不開）另給一個狀態，講明是開機設定、不怪材料參數。
 """
@@ -16,7 +17,6 @@ from __future__ import annotations
 
 from typing import Final, Literal, cast
 
-import jax.numpy as jnp
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -29,7 +29,6 @@ from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.config.product_air import product_air_environment
 from aosr.gui.material_editor import plain_error
 from aosr.gui.problem_text import material_form_spec
-from aosr.materials.construction import random_incidence_absorption
 from aosr.materials.construction_models import (
     Assembly,
     ConstantImpedance,
@@ -171,6 +170,9 @@ def material_curve(document: object) -> dict[str, object]:
     axis = _axis(material)
     air, ranges = product_air_environment()
     labels = _labels(entry)
+    import jax.numpy as jnp
+    from aosr.materials.construction import random_incidence_absorption
+
     if jnp.asarray(0.0).dtype != jnp.float64:
         # 正式網頁入口開機就開雙精度；沒開時物理層會拒算，那不是材料參數的錯，不能說成「這組參數算不出」。
         return {"status": "no_precision", **labels, "arrangement": arrangement, "range_scope": RANGE_SCOPE,
