@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>材料庫</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/materials.css">
+  <script src="/static/materials.js" defer></script>
+</head>
+<body><main>
+  <header><h1>材料庫</h1>
+    <p><a href="/">回方案輸入頁</a>　<a href="/searches">查看搜尋進度</a></p>
+    <p>內建材料唯讀，當起點用；要改請按「複製成新材料」。自己的材料存在網頁資料夾的材料庫，之後牆面分區選材料與搜尋會讀這一份（那兩段還在做）。</p>
+    <p>長度一律用公尺（m）。存檔時伺服器照材料庫的規則檢查，不過就照實講哪一格、為什麼，檔案不動。</p>
+    <p id="file-problem" class="notice" hidden></p>
+    <p id="list-state" aria-live="polite">正在讀取材料庫…</p>
+  </header>
+  <section id="mine">
+    <h2>我的材料</h2>
+    <div class="actions"><button id="new-optimizable" type="button">新增可最佳化材料</button>
+      <button id="new-fixed" type="button">新增固定材料</button></div>
+    <div id="user-list"></div>
+  </section>
+  <section id="editor" hidden>
+    <h2 id="editor-title"></h2>
+    <p id="editor-readonly" class="notice" hidden>內建材料唯讀；要改請按「複製成新材料」，改好再存。</p>
+    <div id="editor-body"></div>
+    <div class="actions"><button id="save" type="button">儲存</button>
+      <button id="copy" type="button">複製成新材料</button>
+      <button id="close" type="button" class="quiet">關閉</button></div>
+    <p id="editor-message" aria-live="polite"></p>
+  </section>
+  <section id="builtins">
+    <h2>內建材料（唯讀）</h2>
+    <div id="builtin-list"></div>
+  </section>
+</main></body>
+</html>

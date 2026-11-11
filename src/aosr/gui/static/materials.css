@@ -1,0 +1,33 @@
+/* 材料編輯頁：清單一筆一列；表單分塊，長欄名直排，多層構造一層一塊。 */
+/* 共用樣式把 .fields 設成 flex，會蓋掉 hidden；這一頁靠 hidden 切「能調／不能調」兩組欄位，所以要壓回去。 */
+#editor [hidden]{display:none!important}
+#user-list td:last-child,#builtin-list td:last-child{white-space:nowrap}
+#user-list td:nth-child(2),#builtin-list td:nth-child(2){font-family:ui-monospace,monospace;font-size:.85rem;overflow-wrap:anywhere}
+#user-list td:nth-child(3),#builtin-list td:nth-child(3),#user-list td:nth-child(4),#builtin-list td:nth-child(4){min-width:8rem}
+#user-list button,#builtin-list button{padding:.3rem .7rem;margin-right:.3rem}
+button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
+button.danger{background:#9b2c22}
+.block{border-top:1px solid #d5e0e4;padding:.8rem 0}
+.block h3{font-size:1.05rem}
+.block .fields label,.layer .fields label{flex-direction:column;align-items:flex-start}
+.block>label{display:flex;flex-direction:column;align-items:stretch;margin:.5rem 0}
+.block label.toggle{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:.4rem;margin:.4rem 0}
+.block textarea{font:inherit;width:100%;box-sizing:border-box;min-height:4.5rem;padding:.35rem;border:1px solid #97aeb8;border-radius:5px}
+#points{min-height:9rem;font-family:ui-monospace,monospace}
+.hint{color:#53636b;font-size:.92rem;margin:.2rem 0 .5rem}
+.layers{list-style:none;padding:0;margin:.4rem 0}
+.layer{border:1px solid #cddde2;border-radius:8px;padding:.6rem .8rem;margin:.5rem 0;background:#f8fbfc}
+.layer-head{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.layer-head strong{min-width:4.5rem}
+.layer-head button{padding:.3rem .7rem}
+#editor-message{white-space:pre-line}
+textarea:disabled,select:disabled{background:#edf1f2;color:#53636b}
+/* 手機寬度：表格擠成一字一行看不了，改成一筆一張卡，欄名寫在值前面。 */
+@media(max-width:700px){
+  #user-list thead,#builtin-list thead{display:none}
+  #user-list tr,#builtin-list tr{display:block;border-bottom:1px solid #d5e0e4;padding:.5rem 0}
+  #user-list td,#builtin-list td{display:block;border:0;padding:.15rem 0;min-width:0}
+  #user-list td:first-child,#builtin-list td:first-child{font-weight:600}
+  #user-list td[data-head]::before,#builtin-list td[data-head]::before{content:attr(data-head) "：";color:#53636b}
+  #user-list td:last-child,#builtin-list td:last-child{padding-top:.4rem}
+}
