@@ -29,7 +29,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount, is_fixed_target
-from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
+from aosr.gradient.depth_fit import family_fits
+from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths, expanded_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
@@ -169,17 +170,25 @@ def target_order(settings: MaterialGradientSettings) -> tuple[str, ...]:
 
 def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings,
                  fixed_surfaces: Mapping[str, str] | None = None,
-                 allowed: Mapping[str, Sequence[str]] | None = None) -> tuple[tuple[str, str], ...]:
+                 allowed: Mapping[str, Sequence[str]] | None = None,
+                 max_depths: Mapping[str, float] | None = None) -> tuple[tuple[str, str], ...]:
     """每一面可換的（面代號, 目標）：沒有准用清單的面是所有家族扣掉它現在的、再加不貼（它現在不是不貼時）；
-    有清單的面（``allowed``，面片代號 → 目標）是清單扣掉它現在的、照清單的存法順序。照面序、再照目標序。"""
+    有清單的面（``allowed``，面片代號 → 目標）是清單扣掉它現在的、照清單的存法順序。照面序、再照目標序。
+
+    ``max_depths``（個案上限，同命令列的寫法，整面或面片）給了時，比那一面上限還深排不下的家族不列
+    （#1082 段 2-4，那一組在那一面不可用）；每個家族都放得下時清單逐位跟沒給一樣。固定材料放不放得下在開跑前核
+    （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，放不下就拒收），這裡不再判。"""
+    caps = expanded_max_depths(max_depths, tuple(surface_id for surface_id, _ in surfaces)) if max_depths else {}
     found: list[tuple[str, str]] = []
     for surface_id, preset_id in surfaces:
         if surface_id in (fixed_surfaces or {}):
             continue
         current = target_of(preset_id, settings)
         targets = (allowed or {}).get(surface_id)
+        cap = caps.get(surface_id)
         found.extend((surface_id, target) for target in (target_order(settings) if targets is None else targets)
-                     if target != current)
+                     if target != current and (cap is None or target == NONE_TARGET or is_fixed_target(target)
+                                               or family_fits(settings.family_by_id(target), cap)))
     return tuple(found)
 
 
@@ -197,7 +206,7 @@ def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[
                                      mount=context.mount, fixed_surfaces=context.fixed_surfaces)
     else:
         designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept, mount=context.mount)
-    designs = designs_with_max_depths(designs, context.settings, context.max_depths or {}, check_family_upper=False)
+    designs = designs_with_max_depths(designs, context.settings, context.max_depths or {})
     return checked_wall_designs(designs)
 
 
@@ -268,7 +277,8 @@ def quick_scores(point: TemplatePoint, context: TemplateContext, *,
     非有限的值拒收（帳本不收、也排不出名次）。順序照 :func:`alternatives`。
     """
     found = []
-    for surface_id, target in alternatives(surfaces_of(point.designs), context.settings, context.fixed_surfaces, context.allowed):
+    for surface_id, target in alternatives(surfaces_of(point.designs), context.settings, context.fixed_surfaces, context.allowed,
+                                           context.max_depths):
         check_stop(should_stop)
         clock = time.perf_counter()
         designs, theta = swap(point.designs, point.theta, surface_id, target, context)
@@ -309,9 +319,10 @@ def template_round_bound(settings: MaterialGradientSettings, quick_count: int, r
 
 def next_round_bound(surfaces: Surfaces, settings: MaterialGradientSettings,
                      fixed_surfaces: Mapping[str, str] | None = None,
-                     allowed: Mapping[str, Sequence[str]] | None = None) -> int:
-    """這個配置開下一輪的最壞求值數（候選有沒有只看配置與准用清單，不求值）。"""
-    count = len(alternatives(surfaces, settings, fixed_surfaces, allowed))
+                     allowed: Mapping[str, Sequence[str]] | None = None,
+                     max_depths: Mapping[str, float] | None = None) -> int:
+    """這個配置開下一輪的最壞求值數（候選有沒有只看配置、准用清單與個案上限，不求值）。"""
+    count = len(alternatives(surfaces, settings, fixed_surfaces, allowed, max_depths))
     return template_round_bound(settings, count, retune_count(settings, count))
 
 
@@ -331,7 +342,7 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     designs = checked_wall_designs(point.designs)
     if not is_feasible(point.theta, designs):
         raise ValueError("換樣板要從可行的整房配置開始")
-    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces, context.allowed))
+    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces, context.allowed, context.max_depths))
     top = retune_count(settings, count)
     bound = template_round_bound(settings, count, top)
     if count == 0 or bound > budget_left:

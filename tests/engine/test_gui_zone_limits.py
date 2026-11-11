@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from starlette.testclient import TestClient
 import httpx
 
@@ -20,12 +20,15 @@ from aosr.config.product_air import product_air_environment
 from aosr.gradient.fixed_surfaces import designs_with_max_depths
 from aosr.gradient.run import designs_for, scene_wall_materials
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search
+from aosr.config.construction_presets import load_construction_presets
+from aosr.gui.gradient_plan import GradientRequest, PlanRefused, builtin_depth_targets, library_depth_targets, plan_search, start_arguments
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_edit import MIN_SIDE_M, CutBox, cut_wall
-from aosr.gui.zone_limits import DepthCap, added_depth, depth_cap, range_target, zone_limits
+from aosr.gui.zone_limits import DepthCap, DepthTargets, added_depth, depth_cap, range_target, zone_limits
+from aosr.materials import library
 from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceMaterial
 from aosr.materials.library import FixedEntry, builtin_entries
+from aosr.materials.search_library import with_user_materials
 from aosr.reporting.scheme import Scheme
 from tests.engine._construction_gui_server import real_server
 from tests.engine._directivity import DIRECTIVITY
@@ -35,6 +38,8 @@ from tests.engine._surface_zone_cases import NEW, ROOM_109, room109_document
 PRESET = "glass_wool_48k_50mm"          # 50 mm 玻璃棉，貼在原牆上總深 0.05 m
 DEEP = "glass_wool_48k_50mm_gap100"     # 50 mm 玻璃棉＋100 mm 空腔，總深 0.15 m
 SETTINGS = load_material_gradient_settings(config_path("material_gradient.toml"))
+TARGETS = builtin_depth_targets(SETTINGS)
+_ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
 Doc = dict[str, object]
 
 
@@ -298,22 +303,106 @@ def test_a_fixed_zone_over_its_cap_refuses_the_search() -> None:
         plan_search(scheme, design, GradientRequest(), SETTINGS)
 
 
-def test_today_the_command_line_refuses_caps_above_the_family_limit() -> None:
-    """現況釘一題（取較嚴的引擎端是段 2-4）：個案上限比家族自己的上限大，命令列開跑前會拒收、原文照講；
-    網頁照樣把設計設定的值帶過去，拒收原文由開跑頁顯示（1-6b）。"""
+def test_caps_deeper_than_the_family_take_the_stricter_and_too_shallow_caps_are_red() -> None:
+    """#1082 段 2-4（取代 1-4 那一題現況釘）：個案上限比家族自己的上限大，引擎取較嚴的那一個、不拒收；
+    比每一組最淺排法都淺，頁面標紅、開跑擋，同一句講是哪一條擋住。"""
     scheme = _scheme(_cut(PRESET))
     kept = scene_wall_materials(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
     designs = designs_for((None,) * len(kept), SETTINGS, kept=kept)
     upper = max(family.max_total_depth_m for family in SETTINGS.family)
-    with pytest.raises(ValueError, match=r"面 x0@auto1 的深度上限 .* m 超過家族 .* 上限"):
-        designs_with_max_depths(designs, SETTINGS, {"x0@auto1": upper + 0.1})
-    assert designs_with_max_depths(designs, SETTINGS, {"x0@auto1": upper + 0.1}, check_family_upper=False)
-    # 比最薄那一層棉還淺也拒收（放不下）；立面圖今天不標紅這一種，同樣交段 2-4。
+    assert designs_with_max_depths(designs, SETTINGS, {"x0@auto1": upper + 0.1})
     thinnest = min(family.thicknesses_m[0] for family in SETTINGS.family)
-    with pytest.raises(ValueError, match=r"面 x0@auto1 的深度上限 .* m 放不下家族 .* 最薄棉"):
-        designs_with_max_depths(designs, SETTINGS, {"x0@auto1": thinnest / 2})
-    assert zone_limits(_cut(PRESET), _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": thinnest / 2}}})
-                       .model_dump(mode="json"))["red"] == 0
+    design = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": thinnest / 2}}})
+    assert zone_limits(_cut(PRESET), design.model_dump(mode="json"))["red"] == 0  # 沒給材料組：照 1-4 不判這一項
+    result = zone_limits(_cut(PRESET), design.model_dump(mode="json"), depth_targets=lambda: TARGETS)
+    assert result["red"] == 1 and _codes(result, "x0", "auto1") == ["depth_no_group"]
+    refusal = cast(list[str], result["refusals"])[0]
+    assert refusal.startswith("x 起點牆「自動 auto1」：准用的材料組一組都放不進深度上限")
+    assert "0.025 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺（個案上限擋住）" in refusal
+    with pytest.raises(PlanRefused, match="一組都放不進深度上限"):
+        plan_search(scheme, design, GradientRequest(), SETTINGS)
+
+
+def _deep_user() -> library.OptimizableEntry:
+    """最淺排法 0.08 m（最薄 0.05 m＋空腔下界 0.03 m）、自己的上限 0.15 m 的使用者可最佳化材料。"""
+    return cast(library.OptimizableEntry, _ENTRY.validate_python({
+        "kind": "optimizable", "id": "deep_rock_wool", "label": "深背岩棉（自填）", "provenance": "model", "source": "自填",
+        "porous": {"kind": "porous", "thickness_m": 0.05, "flow_resistivity_pa_s_m2": 20000.0, "material_class": "fibrous"},
+        "porous_thickness": {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1], "initial_m": 0.05},
+        "cavity": {"adjustable": True, "range_m": [0.03, 0.1], "initial_m": 0.04}, "max_total_depth_m": 0.15}))
+
+
+def _user_targets() -> DepthTargets:
+    chosen = with_user_materials(SETTINGS, load_construction_presets(config_path("construction_presets.toml")), (_deep_user(),))
+    return library_depth_targets(chosen.settings, (_deep_user(),))
+
+
+def test_each_group_gets_its_own_effective_cap_and_blocker() -> None:
+    """抓生效上限沒有逐組取較嚴、沒寫哪一條擋住、部分放不下被當成紅。"""
+    targets = _user_targets()
+    design = _design(room_max_depth_m=0.2, zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06},
+                                                         "auto2": {"mode": "search"}}})
+    result = zone_limits(_cut(PRESET), design.model_dump(mode="json"), depth_targets=lambda: targets)
+    assert result["red"] == 0
+    caps = cast(dict[str, dict[str, dict[str, object]]], result["caps"])["x0"]
+    shallow = cast(list[dict[str, object]], caps["auto1"]["targets"])
+    assert [(line["target"], line["usable"]) for line in shallow] == [
+        ("glass_wool_48k", True), ("glass_wool_24k", True), ("glass_wool_96k", True), ("deep_rock_wool", False)]
+    assert shallow[0]["text"] == "48K 玻璃棉（可調厚度與空腔）：生效 0.06 公尺（這一塊的上限擋住；材料組自己 0.3 公尺比較寬）"
+    assert shallow[3]["text"] == ("深背岩棉（自填）：不可用——深度上限 0.06 公尺（這一塊的上限）比這一組最淺排法 0.08 公尺還淺"
+                                  "（個案上限擋住）")
+    room = cast(list[dict[str, object]], caps["auto2"]["targets"])
+    assert (room[3]["effective_m"], room[3]["blocker"]) == (0.15, "material")
+    assert room[3]["text"] == "深背岩棉（自填）：生效 0.15 公尺（材料組自己的上限擋住；0.2 公尺（房間預設的上限）比較寬）"
+    assert (room[0]["effective_m"], room[0]["blocker"]) == (0.2, "case")
+
+
+def test_plan_drops_groups_that_do_not_fit_and_skips_them_as_start() -> None:
+    """抓放不下的組照樣進 --allowed、起點挑到放不下的那一組（命令列開跑前才拒收）、清單只剩不貼時照樣開。"""
+    targets = _user_targets()
+    scheme = _scheme(_cut(PRESET))
+    fixed_ids = frozenset(targets.fixed)
+    design = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06,
+                                             "allowed": ["deep_rock_wool", "glass_wool_24k", "glass_wool_48k_50mm_gap100", "none"]}}})
+    plan = plan_search(scheme, design, GradientRequest(), targets.settings, fixed_ids, depth_targets=targets)
+    assert plan.allowed == {"x0@auto1": ("glass_wool_24k", "none")}
+    assert plan.presets[plan.surfaces.index("x0@auto1")] == "glass_wool_24k_50mm"
+    lines = plan.depth_targets["x0@auto1"]
+    assert [(line.target, line.usable) for line in lines] == [
+        ("deep_rock_wool", False), ("glass_wool_24k", True), ("fixed:glass_wool_48k_50mm_gap100", False)]
+    assert lines[2].text == "48K 玻璃棉 50 mm＋100 mm 空腔：不可用——總深 0.15 公尺超過深度上限 0.06 公尺（這一塊的上限）（個案上限擋住）"
+    assert "--allowed" in start_arguments(plan) and "x0@auto1=glass_wool_24k,none" in start_arguments(plan)
+    # 沒寫清單：選定家族放不下就挑設定檔順序第一個放得下的；清單照舊不寫（命令列換樣板時自己濾）
+    free = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06}}})
+    plan = plan_search(scheme, free, GradientRequest(family="deep_rock_wool"), targets.settings, fixed_ids, depth_targets=targets)
+    assert plan.presets[plan.surfaces.index("x0@auto1")] == "glass_wool_48k_50mm_gap50" and plan.allowed == {}
+    # 清單只剩不貼：不貼不算救，紅
+    only = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06, "allowed": ["deep_rock_wool", "none"]}}})
+    with pytest.raises(PlanRefused, match="x 起點牆「自動 auto1」：准用的材料組一組都放不進"):
+        plan_search(scheme, only, GradientRequest(), targets.settings, fixed_ids, depth_targets=targets)
+
+
+def test_a_tighter_request_cap_is_judged_too() -> None:
+    """抓開跑頁另填的上限更嚴時，沒重判材料組放不放得下（命令列開跑前才拒收）。"""
+    design = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.2}}})
+    with pytest.raises(PlanRefused, match="0.01 公尺（這一跑另填的上限）比這一組最淺排法"):
+        plan_search(_scheme(_cut(PRESET)), design, GradientRequest(max_depths={"x0": {"auto1": 0.01}}), SETTINGS)
+
+
+def test_route_judges_groups_from_the_library_and_says_when_it_cannot(tmp_path: Path) -> None:
+    """抓網址沒接材料庫（使用者材料放不下不標）、材料庫壞掉時回 500 或當成放得下。"""
+    (tmp_path / "materials.json").write_text(library.dump_user_library((_deep_user(),)), encoding="utf-8")
+    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
+    design = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06}}}).model_dump(mode="json")
+    body = client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": design}).json()
+    lines = body["caps"]["x0"]["auto1"]["targets"]
+    assert body["red"] == 0 and lines[-1]["label"] == "深背岩棉（自填）" and lines[-1]["usable"] is False
+    (tmp_path / "materials.json").write_text("{壞掉", encoding="utf-8")
+    response = client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": design})
+    assert response.status_code == 200 and response.json()["red"] == 1
+    assert "查不了交給搜尋的區放不放得下材料組" in response.json()["refusals"][0]
+    fixed_only = _design(zones={"x0": {"auto1": {"mode": "fixed"}}}).model_dump(mode="json")
+    assert client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": fixed_only}).json()["red"] == 0
 
 
 # ---- 網址：內容有問題一律 200 照講 ----

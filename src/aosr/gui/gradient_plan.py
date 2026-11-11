@@ -14,26 +14,38 @@
 （兩邊取小），``depth_sources`` 記每片是哪一層擋的（``zone``／``wall``／``room``／``request``）。設計設定有一條紅的
 （``zone_limits``：固定區貼太深、分區太小或出界）就不開。
 
+個案上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法在 ``aosr.gradient.depth_fit``，立面圖標紅同一把）：有上限的搜尋區，
+准用的每一組（沒寫清單就是全部可調材料）照最後生效的上限（設計設定與這一跑另填取小）判，計畫記 ``depth_targets``
+（每一組的生效上限與哪一條擋住）；不可用的組從 ``--allowed`` 拿掉、起點也跳過它（沒寫清單的區由命令列換樣板時自己濾），
+一組都不可用就不開（「不貼」不算救）。個案上限比材料組自己的上限大不再拒收，命令列取較嚴的那一個。
+
 這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區、准用清單的代號
-不認識或排不出起點、有超過限制的區）；
-深度上限放不放得下家族的棉、超不超過家族上限，照舊由命令列在開跑前判，錯誤原文照實回給畫面。
+不認識或排不出起點、有超過限制的區、准用的材料組一組都放不下）。
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Literal, Self
+from collections.abc import Mapping, Sequence
+from typing import Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
     MOUNT_ON_WALL, NONE_TARGET, SCHEME_MATERIAL, FamilySettings, MaterialGradientSettings, Mount, fixed_target,
 )
+from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
-from aosr.gui.zone_limits import RangeCheck, depth_cap, saved_refusals
+from aosr.gui.zone_limits import (
+    DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, saved_refusals, target_fits, target_line,
+    zone_words,
+)
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries
 from aosr.reporting.scheme import Scheme
 
 Device = Literal["cpu", "gpu"]
+_MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 
 
 class PlanRefused(ValueError):
@@ -80,6 +92,21 @@ class SearchPlan(BaseModel):
     allowed: dict[str, tuple[str, ...]] = Field(default_factory=dict, exclude_if=lambda value: not value)
     # 面片代號 → 深度上限是哪一層擋的（zone／wall／room／request）；沒有上限的計畫不寫這一格（舊計畫逐位不變）。
     depth_sources: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    # 面片代號 → 每一組材料在那一片的判決（#1082 段 2-4）；只列有上限的搜尋區，沒有上限的計畫不寫這一格。
+    depth_targets: dict[str, tuple[TargetLine, ...]] = Field(default_factory=dict, exclude_if=lambda value: not value)
+
+
+class TargetLine(BaseModel):
+    """一組材料在一片的判決：目標代號（命令列寫法）、名字、可不可用、生效上限（公尺；不可用是 None）、
+    哪一條擋住（``case`` 個案上限／``material`` 材料組自己）與一句白話。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    target: str
+    label: str
+    usable: bool
+    effective_m: float | None
+    blocker: Literal["case", "material"] | None
+    text: str
 
 
 def surface_of(wall: str, zone: str) -> str:
@@ -128,13 +155,14 @@ def _targets(wall: str, zone: str, ids: tuple[str, ...], settings: MaterialGradi
 
 
 def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family: FamilySettings,
-                  settings: MaterialGradientSettings) -> str | None:
-    if targets is None or family.id in targets:
+                  settings: MaterialGradientSettings, unusable: frozenset[str] = frozenset()) -> str | None:
+    """起點：選定家族（在清單裡、放得下）→ 清單裡（沒清單就是全部）第一個放得下的家族（設定檔順序）→ 不貼。"""
+    if (targets is None or family.id in targets) and family.id not in unusable:
         return family.template_preset
-    listed = [item for item in settings.family if item.id in targets]
+    listed = [item for item in settings.family if (targets is None or item.id in targets) and item.id not in unusable]
     if listed:
         return listed[0].template_preset
-    if NONE_TARGET in targets:
+    if targets is None or NONE_TARGET in targets:
         return None
     raise PlanRefused(f"{wall} 分區 {zone} 的准用清單只有固定材料：搜尋要一個起點（一種可調材料或「不貼」），"
                       "請在清單加一種可調材料或不貼")
@@ -150,15 +178,56 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
     return found
 
 
+def builtin_depth_targets(settings: MaterialGradientSettings) -> DepthTargets:
+    """沒有材料庫可讀時（考卷、命令列以外的呼叫）的材料組：這份設定的家族＋內建構造預設當固定材料，名字照代號。"""
+    presets = load_construction_presets(config_path("construction_presets.toml"))
+    labels = {entry.id: entry.label for entry in builtin_entries()}
+    return DepthTargets(settings, {preset.id: _MATERIAL.validate_python(preset.material) for preset in presets}, labels)
+
+
+def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[LibraryEntry]) -> DepthTargets:
+    """網頁那一份：``settings`` 已接上使用者可最佳化材料（``with_user_materials``）；固定材料是內建構造加使用者的固定材料，
+    名字照材料庫。"""
+    base = builtin_depth_targets(settings)
+    return DepthTargets(settings, {**base.fixed, **{entry.id: entry.material for entry in entries if isinstance(entry, FixedEntry)}},
+                        {**base.labels, **{entry.id: entry.label for entry in entries}})
+
+
+_LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設", "request": "這一跑另填"}
+
+
+def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], per_surface: tuple[ZoneMode, ...],
+                   depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets
+                   ) -> dict[str, tuple[TargetLine, ...]]:
+    found: dict[str, tuple[TargetLine, ...]] = {}
+    for (wall, zone), mode in zip(pairs, per_surface, strict=True):
+        surface = surface_of(wall, zone)
+        if mode != "search" or surface not in depths:
+            continue
+        item = design.zones.get(wall, {}).get(zone) if design is not None else None
+        fits = target_fits(None if item is None else item.allowed, depths[surface], targets)
+        if not fits:
+            continue
+        source = sources.get(surface, "request")
+        cap = DepthCap(depths[surface], cast(DepthLevel, source if source in ("zone", "wall", "room") else "zone"))
+        lines = [target_line(fit, cap, targets, level_words=_LEVEL_WORDS.get(source, source)) for fit in fits]
+        if not any(fit.usable for fit in fits):
+            raise PlanRefused(f"{zone_words(wall, zone)}：{no_group_words(lines)}")
+        found[surface] = tuple(TargetLine.model_validate(line) for line in lines)
+    return dict(sorted(found.items()))
+
+
 def plan_search(scheme: Scheme, design: DesignSettings | None, request: GradientRequest,
                 settings: MaterialGradientSettings, fixed_ids: frozenset[str] = frozenset(), *,
-                range_check: RangeCheck | None = None) -> SearchPlan:
+                range_check: RangeCheck | None = None, depth_targets: DepthTargets | None = None) -> SearchPlan:
     """``fixed_ids`` 是材料庫裡固定材料的代號（內建構造預設＋使用者的固定材料），准用清單照它認固定材料；
-    ``range_check`` 給了就連可信範圍一起擋（跟立面圖標紅同一把，網頁開跑與建替身傳材料頁那一支）。"""
+    ``range_check`` 給了就連可信範圍一起擋（跟立面圖標紅同一把，網頁開跑與建替身傳材料頁那一支）；
+    ``depth_targets`` 是判材料組放不放得進上限的那一份（網頁傳接了材料庫的，不給就用 :func:`builtin_depth_targets`）。"""
     problems = mismatches(design, scheme) if design is not None else []
     if problems:
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
-    refusals = saved_refusals(scheme.model_dump(mode="json"), design, range_check)
+    targets_for_depth = depth_targets if depth_targets is not None else builtin_depth_targets(settings)
+    refusals = saved_refusals(scheme.model_dump(mode="json"), design, range_check, targets_for_depth)
     if refusals:
         raise PlanRefused("有超過限制的區（立面圖上標紅的），先改好再開：" + "；".join(refusals))
     modes = effective_modes(design, scheme)
@@ -176,15 +245,24 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
     depths, sources = _depths(request, modes, design)
+    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth)
+    unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
+    for pair, chosen in list(allowed.items()):
+        dropped = unusable.get(surface_of(*pair), frozenset())
+        if dropped:
+            allowed[pair] = tuple(target for target in chosen if target not in dropped)
     return SearchPlan(
         surfaces=surfaces, modes=per_surface,
-        presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings) if mode == "search" else None
-                      for pair, mode in zip(pairs, per_surface, strict=True)),
+        presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()))
+                      if mode == "search" else None for pair, mode in zip(pairs, per_surface, strict=True)),
         fixed_surfaces={surface: SCHEME_MATERIAL for surface, mode in zip(surfaces, per_surface, strict=True)
                         if mode != "search"},
-        max_depths=depths, depth_sources=sources, family=family.id,
+        max_depths=depths, depth_sources=sources, depth_targets=lines, family=family.id,
         max_steps=request.max_steps if request.max_steps is not None else settings.descent.max_steps, request=request,
         allowed={surface_of(*pair): targets for pair, targets in sorted(allowed.items())})
+
+
+SearchPlan.model_rebuild()
 
 
 def start_arguments(plan: SearchPlan) -> list[str]:

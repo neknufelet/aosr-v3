@@ -2,7 +2,8 @@
 
 - 准用清單：存法跟輸入順序無關、整面展到每一片、空的／重複的／認不得的／同牆混整面與面片都拒收。
 - 換樣板候選：有清單的面只換清單裡的（扣掉現在的、照存法順序），沒清單的面照舊全部家族＋不貼；固定材料只從清單進來。
-- 起跑前四條拒收：固定面給清單、家族不認識、起點不在清單裡、有深度上限又列固定材料；起跑配置直接寫固定材料也拒收。
+- 起跑前三條拒收：固定面給清單、家族不認識、起點不在清單裡；起跑配置直接寫固定材料也拒收。有深度上限又列固定材料
+  放不放得下是段 2-4（``test_depth_fit``）。
 - ``fixed:<代號>`` 的設計：整塊用那份材料、沒有變數；不在這一場的清單裡就拒收。材料從使用者固定材料或內建構造預設來，
   指到使用者的可最佳化材料、或不存在都拒收。
 - 快照：沒有固定材料照舊寫 v1（逐位跟 2-3a 同一份）、有就寫 v2；2-3a 寫的 v1 讀得回來。
@@ -203,7 +204,6 @@ def _start(allowed: dict[str, tuple[str, ...]], *, fixed: dict[str, str] | None 
     ({"x0": ("glass_wool_48k", "rock_wool_60k")}, {}, {}, GAP50, "不認識的家族"),
     ({"x0": ("glass_wool_24k", "none")}, {}, {}, GAP50, "起跑是 glass_wool_48k"),
     ({"floor": ("glass_wool_24k",)}, {}, {}, GAP50, "起跑是 none"),
-    ({"x0": ("glass_wool_48k", "fixed:" + CARPET)}, {}, {"x0": 0.1}, GAP50, "有深度上限"),
     ({"x0": ("glass_wool_48k",)}, {}, {}, "fixed:" + CARPET, "不能直接寫固定材料")])
 def test_start_refuses_lists_that_break_the_start_configuration(
         allowed: dict[str, tuple[str, ...]], fixed: dict[str, str], caps: dict[str, float], x0: str, words: str) -> None:

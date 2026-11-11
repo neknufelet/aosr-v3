@@ -160,6 +160,9 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     page.locator("#preview").click()
     expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限 45 步")
     expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"]')).to_contain_text("0.1 公尺")
+    # 每一組跟自己的上限取較嚴（#1082 段 2-4）：這一跑另填的 0.1 比玻璃棉自己的 0.3 嚴。
+    expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"] td.depth-cell p.note').first).to_have_text(
+        "48K 玻璃棉（可調厚度與空腔）：生效 0.1 公尺（這一跑另填的上限擋住；材料組自己 0.3 公尺比較寬）")
     expect(page.locator('#plan-table tr[data-surface="ceiling@r0_c1"]')).to_contain_text("保留原牆")
     expect(page.locator('#plan-table tr[data-surface="x0@r1_c1"]')).to_contain_text("沒有限制（家族都試、也試不貼）")
     _shot(page, "1-6b-2-preview")
@@ -171,6 +174,9 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     expect(page.locator("#start")).to_be_enabled()
     page.locator("#start").click()
     expect(page.locator("#job-state")).to_contain_text("開跑前核對中")
+    # 工作頁留著開跑時的深度上限判決（個案哪一層、每一組生效多少、哪一條擋住）。
+    expect(page.locator('#job-depths [data-surface="x0@r0_c0"]')).to_contain_text("個案上限 0.1 公尺")
+    expect(page.locator('#job-depths [data-surface="x0@r0_c0"]')).to_contain_text("生效 0.1 公尺（這一跑另填的上限擋住")
     unit, argv, _, _ = launcher.launched[-1]
     assert argv[argv.index("--max-steps") + 1] == "45"
     assert "x0@r0_c0=0.1" in argv

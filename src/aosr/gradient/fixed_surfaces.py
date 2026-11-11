@@ -21,6 +21,7 @@ from aosr.config.material_gradient import (
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
+from aosr.gradient.depth_fit import family_fit, fit_words, fixed_fit, target_fit
 from aosr.gradient.material_gradient import SurfaceDesign, designs_from_presets
 from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import SurfaceMaterial
@@ -144,9 +145,14 @@ def expanded_max_depths(value: Mapping[str, float], names: Sequence[str]) -> dic
     return dict(sorted(result.items()))
 
 
+# ---- 個案上限跟材料組自己的限制取較嚴（#1082 段 2-4；判法在 depth_fit，網頁行程也讀它、不載入 JAX） ----
+
 def designs_with_max_depths(designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
-                            value: Mapping[str, float], *, check_family_upper: bool = True) -> tuple[SurfaceDesign, ...]:
-    """套入每面生效上限；不貼的面也保留選項，後續換家族繼續套用。"""
+                            value: Mapping[str, float]) -> tuple[SurfaceDesign, ...]:
+    """套入每面生效上限：個案上限跟家族自己的上限取較嚴的那一個（個案比家族大不再拒收，#1082 段 2-4）；
+    不貼的面也保留選項，後續換家族繼續套用。這一面現在的家族比個案上限還深排不下（最淺排法放不進）就拒收：
+    那一組在這一面不可用，起跑要換一組或不貼（換樣板的候選也不會換過去，:func:`~aosr.gradient.template_rounds.alternatives`）。
+    不貼的面不跟任何家族比；換成固定材料的面比它整塊的總深（:func:`fixed_fit`）。"""
     caps = expanded_max_depths(value, tuple(d.surface_id for d in designs))
     result = []
     for design in designs:
@@ -156,12 +162,20 @@ def designs_with_max_depths(designs: Sequence[SurfaceDesign], settings: Material
             continue
         if design.fixed_material_id is not None:
             raise ValueError(f"固定面 {design.surface_id} 不准再給深度上限")
+        if design.material is None:
+            if is_fixed_target(design.preset_id) and design.kept_material is not None:
+                fit = fixed_fit(str(design.preset_id), design.kept_material, cap)
+                if not fit.usable:
+                    raise ValueError(f"面 {design.surface_id}：{fit_words(fit, cap)}")
+            result.append(replace(design, max_depth_m=cap))
+            continue
         families = (settings.family_by_id(design.family_id),) if design.family_id else settings.family
         for family in families:
-            if check_family_upper and cap > family.max_total_depth_m:
-                raise ValueError(f"面 {design.surface_id} 的深度上限 {cap} m 超過家族 {family.id} 上限 {family.max_total_depth_m} m")
-            if cap < family.thicknesses_m[0]:
-                raise ValueError(f"面 {design.surface_id} 的深度上限 {cap} m 放不下家族 {family.id} 最薄棉 {family.thicknesses_m[0]} m")
+            fit = family_fit(family, cap)
+            if not fit.usable:
+                raise ValueError(f"面 {design.surface_id} 的深度上限 {cap} m 放不下家族 {family.id} 最淺排法 "
+                                 f"{fit.shallowest_m} m（最薄棉 {family.thicknesses_m[0]} m 加空腔下界）："
+                                 "這一組在這一面不可用，起跑換一組或不貼")
         effective = None if design.max_total_depth_m is None else min(design.max_total_depth_m, cap)
         result.append(replace(design, max_depth_m=cap, max_total_depth_m=effective))
     return tuple(result)
@@ -234,12 +248,12 @@ def check_allowed_against_start(allowed: Mapping[str, Sequence[str]], surfaces: 
                                 max_depths: Mapping[str, float]) -> None:
     """開跑前把准用清單跟起跑配置對一次，四條都點名拒收：
     固定面不准給清單（它不換樣板）；家族代號要在這一場的家族裡；起跑那一面現在的目標（家族或 none）一定要在它的清單裡
-    （限制是硬的：搜尋只會換到清單裡的目標，起點也要守）；有深度上限的面不准列固定材料（固定材料的厚度這一段量不出來，
-    放不放得進上限判不了，跟個案上限一起處理是 2-4）。"""
+    （限制是硬的：搜尋只會換到清單裡的目標，起點也要守）。有深度上限的面列固定材料放不放得下由
+    :func:`check_depth_targets` 判（#1082 段 2-4）。"""
     names = [name for name, _ in surfaces]
     lists = expanded_allowed_targets(allowed, names)
     frozen = expanded_fixed_surfaces(fixed_surfaces, names) if fixed_surfaces else {}
-    caps = expanded_max_depths(max_depths, names)
+    expanded_max_depths(max_depths, names)
     families = {family.id for family in settings.family}
     for name, preset in surfaces:
         targets = lists.get(name)
@@ -258,7 +272,30 @@ def check_allowed_against_start(allowed: Mapping[str, Sequence[str]], surfaces: 
         current = NONE_TARGET if family is None else family.id
         if current not in targets:
             raise ValueError(f"面 {name} 起跑是 {current}，不在它的准用清單 {list(targets)} 裡；起點也要守准用清單")
-        fixed = [target for target in targets if is_fixed_target(target)]
-        if fixed and name in caps:
-            raise ValueError(f"面 {name} 有深度上限 {caps[name]} m，准用清單卻列了固定材料 {fixed}："
-                             "固定材料的厚度這一段量不出來，判不了放不放得進上限；請拿掉其中一邊")
+
+
+def check_depth_targets(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings, *,
+                        fixed_surfaces: Mapping[str, str], max_depths: Mapping[str, float],
+                        allowed: Mapping[str, Sequence[str]], fixed_materials: Mapping[str, SurfaceMaterial]) -> None:
+    """開跑前把個案上限跟每一面可選的材料組對一次（#1082 段 2-4），兩條都點名拒收：
+    准用清單裡的固定材料放不下（總深超過、或直接取代牆面看不出多深）——固定材料整塊不變，放不下就是清單寫錯，請拿掉；
+    一面可選的材料組（清單列的家族與固定材料；沒有清單就是全部家族）一組都放不下——「不貼」不算救（交給搜尋卻什麼都貼不上）。
+    清單裡本來就沒有材料組（只有不貼）的面不判。放不下的家族不拒收：換樣板不換過去（:func:`~aosr.gradient.template_rounds.alternatives`）。"""
+    names = [name for name, _ in surfaces]
+    caps = expanded_max_depths(max_depths, names)
+    if not caps:
+        return
+    lists = expanded_allowed_targets(allowed, names)
+    frozen = expanded_fixed_surfaces(fixed_surfaces, names) if fixed_surfaces else {}
+    for name, _ in surfaces:
+        cap = caps.get(name)
+        if cap is None or name in frozen:
+            continue
+        targets = lists.get(name, tuple(family.id for family in settings.family))
+        groups = [target for target in targets if target != NONE_TARGET]
+        fits = [target_fit(target, cap, settings, fixed_materials) for target in groups]
+        bad = [fit for fit in fits if is_fixed_target(fit.target) and not fit.usable]
+        if bad:
+            raise ValueError(f"面 {name} 的准用清單：" + "；".join(fit_words(fit, cap) for fit in bad) + "。請拿掉它或放寬上限")
+        if groups and not any(fit.usable for fit in fits):
+            raise ValueError(f"面 {name} 可選的材料組一組都放不進深度上限：" + "；".join(fit_words(fit, cap) for fit in fits))

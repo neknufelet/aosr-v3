@@ -130,9 +130,19 @@ function zoneDepthCell(wall, key, setting, cell) {
   }));
   const cap = zoneCap(wall, key);
   const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
-  now.textContent = cap ? `生效：${cap.value_m} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}擋的）`
-    : setting.mode === "search" ? "沒給：照材料自己的限制" : "沒給上限";
+  const targets = cap?.targets ?? [];
+  now.textContent = !cap ? (setting.mode === "search" ? "沒給：照材料自己的限制" : "沒給上限")
+    : targets.length ? `個案上限 ${cap.value_m} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}）；每一組跟自己的上限取較嚴：`
+    : `生效：${cap.value_m} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}擋的）`;
   cell.append(now);
+  // 交給搜尋的區（#1082 段 2-4）：准用的每一組各自的生效上限、哪一條擋住；放不下的那一組標出來（搜尋不換過去）。
+  targets.forEach((target, index) => {
+    const line = document.createElement("p");
+    line.className = target.usable ? "note" : "limit-warn";
+    line.id = `depth-target-${wall}-${key}-${index}`;
+    line.textContent = target.text;
+    cell.append(line);
+  });
 }
 function limitsSummary() {
   const line = document.createElement("p"); line.id = "zone-limits-summary";
