@@ -37,7 +37,7 @@ def _design(page: Page) -> dict[str, object]:
 
 
 def _modes(page: Page, wall: str) -> dict[str, dict[str, object]]:
-    return cast(dict[str, dict[str, object]], _design(page)["zones"])[wall]
+    return cast(dict[str, dict[str, dict[str, object]]], _design(page)["zones"])[wall]
 
 
 def _save(page: Page, name: str) -> None:
@@ -55,6 +55,32 @@ def _region(zone: dict[str, object]) -> str:
     return "z1" if u < 1.0 and v < 1.2 else "top-left" if u < 1.0 else "right"
 
 
+def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]], list[str]]:
+    """x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2（三塊都還是原牆）；三塊各選一種做法、搜尋那塊限定准用。"""
+    _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+    assert sorted(str(zone["id"]) for zone in _zones(page, "x0")) == ["auto1", "auto2", "z1"]
+    wall = _zones(page, "x0")[0]["material"]
+    assert all(zone["material"] == wall for zone in _zones(page, "x0"))
+    _choose(page, "#zone-fixed-x0-z1", PRESET)
+    _choose(page, "#zone-mode-x0-auto1", "search")
+    _choose(page, "#zone-mode-x0-auto2", "keep_original")
+    page.locator("#zone-limit-x0-auto1").check()
+    page.locator("#zone-allow-x0-auto1-glass_wool_96k").uncheck()
+    page.locator("#zone-allow-x0-auto1-carpet_on_concrete").check()
+    page.locator("#original-scheme").select_option("room109-original")
+    expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
+    expect(page.locator("#zone-note")).to_contain_text("auto2")
+
+    zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
+    assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}
+    assert zones["auto1"]["material"] == wall and zones["auto2"]["material"] == wall
+    allowed = ["glass_wool_48k", "glass_wool_24k", "carpet_on_concrete", "none"]
+    assert _modes(page, "x0") == {"z1": {"mode": "fixed"}, "auto1": {"mode": "search", "allowed": allowed},
+                                  "auto2": {"mode": "keep_original"}}
+    page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-first-cut.png"))
+    return zones, allowed
+
+
 def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _write(tmp_path, room109_document("room109-original"))
@@ -64,29 +90,7 @@ def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, br
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#zone-mode-x0-whole_wall")).to_have_value("fixed")
 
-        # x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2；三塊都還是原牆。
-        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
-        assert sorted(str(zone["id"]) for zone in _zones(page, "x0")) == ["auto1", "auto2", "z1"]
-        wall = _zones(page, "x0")[0]["material"]
-        assert all(zone["material"] == wall for zone in _zones(page, "x0"))
-        _choose(page, "#zone-fixed-x0-z1", PRESET)
-        _choose(page, "#zone-mode-x0-auto1", "search")
-        _choose(page, "#zone-mode-x0-auto2", "keep_original")
-        page.locator("#zone-limit-x0-auto1").check()
-        page.locator("#zone-allow-x0-auto1-glass_wool_96k").uncheck()
-        page.locator("#zone-allow-x0-auto1-carpet_on_concrete").check()
-        page.locator("#original-scheme").select_option("room109-original")
-        expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
-        expect(page.locator("#zone-note")).to_contain_text("auto2")
-
-        zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
-        assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}
-        assert zones["auto1"]["material"] == wall and zones["auto2"]["material"] == wall
-        allowed = ["glass_wool_48k", "glass_wool_24k", "carpet_on_concrete", "none"]
-        assert _modes(page, "x0") == {"z1": {"mode": "fixed"}, "auto1": {"mode": "search", "allowed": allowed},
-                                      "auto2": {"mode": "keep_original"}}
-        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-first-cut.png"))
-
+        zones, allowed = _first_cut(page, tmp_path)
         # 在右邊那一大塊（交給搜尋）裡再畫一框：自動區重編，每一塊照中心落在哪一塊沿用那一塊的做法與准用。
         _drag(page, LY, LZ, (2.02, 0.02), (3.0, 1.0))
         after = {str(zone["id"]): zone for zone in _zones(page, "x0")}

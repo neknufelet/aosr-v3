@@ -904,6 +904,12 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
 
+def _zone_routes(handlers: GuiHandlers) -> list[Route]:
+    """立面圖切一面（#1091）與每一區換材料（#1105）。"""
+    return [*zone_edit_routes(), *zone_material_routes(handlers.data_dir, handlers.jobs._lock,
+                                                      capabilities=handlers.capabilities, directivity=handlers.directivity)]
+
+
 def _archive_routes(handlers: GuiHandlers) -> list[Route]:
     """封存的預覽、搬動與舊單筆入口集中登記。"""
     return [Route("/api/schemes/{name}/archive", handlers.archive_scheme, methods=["POST"]),
@@ -945,9 +951,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *zone_edit_routes(),
-        *zone_material_routes(handlers.data_dir, handlers.jobs._lock, capabilities=handlers.capabilities,
-                              directivity=handlers.directivity),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
