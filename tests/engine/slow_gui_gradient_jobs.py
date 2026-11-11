@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import cast
 
@@ -47,6 +48,10 @@ class LocalLauncher:
     def __init__(self, tmp: Path) -> None:
         self.tmp = tmp
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
+        self.start_lock = threading.Lock()
+
+    def starting(self) -> AbstractContextManager[object]:
+        return self.start_lock
 
     def launch(self, unit: str, argv: Sequence[str], *, env: dict[str, str], cwd: Path) -> None:
         child = forward_cpu_pins(env)

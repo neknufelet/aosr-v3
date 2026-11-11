@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import math
 import os
@@ -15,6 +16,7 @@ import sys
 import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractContextManager
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
@@ -31,7 +33,7 @@ from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui import gradient_exec
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import (
-    ActionRefused, GradientJobs, JobBusy, LaunchFailed, NeedsSurrogate, SystemdLauncher,
+    START_LOCK, ActionRefused, GradientJobs, JobBusy, LaunchFailed, NeedsSurrogate, SystemdLauncher,
 )
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search, start_arguments
 from aosr.gui.surrogate_slots import found_surrogate, slot_key, surrogate_path
@@ -51,13 +53,17 @@ Record = dict[str, object]
 
 
 class FakeLauncher:
-    """記下每一次開、查、停；``active`` 是考卷說「還在」的服務名。"""
+    """記下每一次開、查、停；``active`` 是考卷說「還在」的服務名；開跑鎖是一把執行緒鎖（共用這個假的就共用這把）。"""
 
     def __init__(self) -> None:
         self.launched: list[tuple[str, list[str], dict[str, str], Path]] = []
         self.stopped: list[str] = []
         self.active: set[str] = set()
         self.fail: str | None = None
+        self.start_lock = threading.Lock()
+
+    def starting(self) -> AbstractContextManager[object]:
+        return self.start_lock
 
     def launch(self, unit: str, argv: Sequence[str], *, env: dict[str, str], cwd: Path) -> None:
         if self.fail is not None:
@@ -341,9 +347,11 @@ def test_a_job_started_from_another_data_folder_also_blocks(tmp_path: Path) -> N
     assert launcher.launched == []
 
 
-def test_two_web_processes_on_one_folder_cannot_both_start(tmp_path: Path) -> None:
-    """抓查忙與開服務之間沒有跨行程的鎖：兩個工作管理器（兩個網頁行程）同時查到空閒，就各開一跑。"""
-    data_dir = _data(tmp_path)
+@pytest.mark.parametrize("folders", ["one", "two"])
+def test_two_web_processes_cannot_both_start(tmp_path: Path, folders: str) -> None:
+    """抓查忙與開服務之間沒有整台共用的鎖：兩個工作管理器（兩個網頁行程，同一個或兩個不同的資料夾）同時查到空閒，
+    就各開一跑——鎖放在各自的資料夾時，兩個資料夾那一格會紅。"""
+    data_dirs = [_data(tmp_path)] * 2 if folders == "one" else [_data(tmp_path / label) for label in ("a", "b")]
     launcher = FakeLauncher()
 
     class SlowCheck(GradientJobs):
@@ -354,7 +362,7 @@ def test_two_web_processes_on_one_folder_cannot_both_start(tmp_path: Path) -> No
 
     managers = [SlowCheck(data_dir, launcher=launcher, engine_commit="c" * 40,
                           capabilities=config_path("capabilities.toml"), scheme_lock=threading.RLock())
-                for _ in range(2)]
+                for data_dir in data_dirs]
     outcomes: list[str] = []
 
     def start(jobs: GradientJobs) -> None:
@@ -580,6 +588,18 @@ def test_systemd_launcher_command_line() -> None:
     runs.answer = (1, "", "Failed to connect to bus")
     with pytest.raises(LaunchFailed, match="Failed to connect to bus"):
         launcher.launch("u", ["x"], env={}, cwd=Path("/"))
+
+
+def test_systemd_launcher_start_lock_is_exclusive(tmp_path: Path) -> None:
+    """抓開跑鎖沒真的鎖住（另一個網頁行程照樣拿得到）、鎖放在各自的資料夾而不是使用者的執行期資料夾、資料夾不在時沒說清楚。"""
+    assert SystemdLauncher().lock_dir == Path("/run/user") / str(os.getuid())
+    with SystemdLauncher(lock_dir=tmp_path).starting(), (tmp_path / START_LOCK).open("a") as other:
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with SystemdLauncher(lock_dir=tmp_path).starting():
+        pass
+    with pytest.raises(LaunchFailed, match="開跑鎖開不了"), SystemdLauncher(lock_dir=tmp_path / "absent").starting():
+        pass
 
 
 # ---- 包一層的執行入口（真的子行程） ----

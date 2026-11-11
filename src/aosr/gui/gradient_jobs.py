@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import re
 import subprocess
 import sys
@@ -59,7 +60,9 @@ LOG_TAIL_LINES: Final = 8
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNNING_UNIT_STATES: Final = ("active", "activating", "deactivating", "reloading")
 GONE_UNIT_STATES: Final = ("inactive", "failed", "unknown")
-START_LOCK: Final = ".start.lock"
+START_LOCK: Final = "aosr-gradient-start.lock"
+# systemd 替每個使用者開的執行期資料夾（``XDG_RUNTIME_DIR`` 指的就是 /run/user/<使用者編號>）：跟 ``systemctl --user`` 同一個範圍。
+USER_RUNTIME_ROOT: Final = Path("/run/user")
 StepKind = Literal["start", "resume", "endpoint"]
 
 STATE_TEXTS: Final[dict[str, str]] = {
@@ -115,6 +118,10 @@ class Launcher(Protocol):
 
     def stop(self, unit: str) -> None: ...
 
+    def starting(self) -> AbstractContextManager[object]:
+        """查忙到開好服務整段要拿的鎖；凡是看得到同一批服務的網頁行程（不管開哪一個資料夾）都要搶同一把。"""
+        ...
+
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
@@ -130,9 +137,25 @@ class SystemdLauncher:
     服務不繼承網頁的環境：環境變數逐格 ``--setenv`` 帶過去、工作目錄指定成 repo 根。
     """
 
-    def __init__(self, *, memory_max: str = MEMORY_MAX, run: Runner = _run) -> None:
+    def __init__(self, *, memory_max: str = MEMORY_MAX, run: Runner = _run, lock_dir: Path | None = None) -> None:
         self.memory_max = memory_max
         self.run = run
+        self.lock_dir = USER_RUNTIME_ROOT / str(os.getuid()) if lock_dir is None else lock_dir
+
+    @contextmanager
+    def starting(self) -> Iterator[None]:
+        """檔案鎖放在這個使用者的執行期資料夾：整台這個使用者的每一個網頁行程都搶同一把，
+        兩個不同資料夾的網頁同時查到「整台沒在跑」也不會各開一跑。資料夾不在（沒有使用者層的 systemd）就開不了。"""
+        try:
+            handle = (self.lock_dir / START_LOCK).open("a")
+        except OSError as error:
+            raise LaunchFailed(f"開跑鎖開不了（{self.lock_dir / START_LOCK}）：{error}") from error
+        with handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     def command(self, unit: str, argv: Sequence[str], *, env: dict[str, str], cwd: Path) -> list[str]:
         return ["systemd-run", "--user", f"--unit={unit}", "--collect", "--quiet",
@@ -375,14 +398,10 @@ class GradientJobs:
 
     @contextmanager
     def _launching(self) -> Iterator[None]:
-        """查忙到開好服務整段拿檔案鎖：同一個資料夾就算有兩個網頁行程（重開交接那一瞬間）也不會各開一跑；
-        別的資料夾開的由 :meth:`active_job` 從服務清單看到（開服務那一層回來時服務已經在了）。"""
-        with self.lock, (self.root / START_LOCK).open("a") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        """查忙到開好服務整段拿開服務那一層給的鎖（:meth:`Launcher.starting`，整台共用）：同一個資料夾的兩個網頁行程
+        （重開交接那一瞬間）、或兩個不同資料夾的網頁，都不會同時查到空閒而各開一跑；鎖放掉時服務已經在服務清單裡了。"""
+        with self.lock, self.launcher.starting():
+            yield
 
     # ---- 動作 ----
 
