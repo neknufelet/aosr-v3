@@ -404,3 +404,18 @@ def test_the_real_entry_refuses_to_plan_a_search_over_an_uncomputable_fixed_mate
         # 在範圍內就過了限制這一關（考卷行程連不上使用者的服務匯流排，下一步查「現在有沒有一跑在算」會回 503，那不是這一段的事）
         again = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
         assert "有超過限制的區" not in again.text and "算不出吸音曲線" not in again.text, again.text
+
+
+def test_sources_stay_when_requests_tighten_every_design_cap() -> None:
+    """設計設定有給上限、請求把每一區都收得更嚴：照記「請求」，不當成沒給過（審查 #1111 抓到的）。"""
+    plan = plan_search(_scheme(_cut(PRESET)), _design(room_max_depth_m=0.1, zones={"x0": {"auto1": {"mode": "search"}}}),
+                       GradientRequest(max_depths={"x0": {"auto1": 0.05}}), SETTINGS)
+    assert plan.max_depths == {"x0@auto1": 0.05} and plan.depth_sources == {"x0@auto1": "request"}
+
+
+def test_a_zone_list_with_a_non_object_is_reported_not_raised() -> None:
+    document = _cut(PRESET)
+    _zones(document)["x0"].append(cast(dict[str, object], "z9"))
+    result = zone_limits(document)
+    assert [line["code"] for line in cast(dict[str, list[dict[str, str]]], result["walls"])["x0"]] == ["unreadable"]
+    assert result["red"] == 1

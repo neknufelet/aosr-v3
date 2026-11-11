@@ -100,6 +100,7 @@ def _depths(request: GradientRequest, modes: Mapping[str, Mapping[str, ZoneMode]
             cap = depth_cap(design, wall, zone)
             if mode == "search" and cap is not None:
                 found[surface_of(wall, zone)] = (cap.value_m, cap.level)
+    designed = bool(found)
     for wall, given in request.max_depths.items():
         for zone, depth in given.items():
             found_mode = modes.get(wall, {}).get(zone)
@@ -112,8 +113,8 @@ def _depths(request: GradientRequest, modes: Mapping[str, Mapping[str, ZoneMode]
                 found[surface] = (depth, "request")
     ordered = dict(sorted(found.items()))
     sources = {surface: source for surface, (_, source) in ordered.items()}
-    if all(source == "request" for source in sources.values()):
-        sources = {}  # 設計設定沒有給上限：計畫照舊不寫這一格
+    if not designed:
+        sources = {}  # 設計設定沒有給任何一區上限：計畫照舊不寫這一格
     return {surface: depth for surface, (depth, _) in ordered.items()}, sources
 
 

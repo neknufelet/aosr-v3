@@ -6,6 +6,7 @@
 let elevationWall = null;
 let elevationSelected = null;
 let elevationThin = [];
+let elevationDrawing = false;  // 正在拖框：限制判決回來先不重畫（#1111），放開滑鼠才畫
 // 站在房間裡看那一面：畫面往右、往上各是方案的哪一軸（反了就鏡像），四邊標的是隔壁哪一面。
 // 四面牆：往上是 z；x 起點牆面向 -x、右手邊是 +y；x 終點牆面向 +x、右手邊是 -y（鏡像）；
 // y 起點牆面向 -y、右手邊是 -x（鏡像）；y 終點牆面向 +y、右手邊是 +x。
@@ -147,6 +148,9 @@ function startDrawing(svg, event, geometry, view, wall) {
   const preview = node("rect", {class: "zone-preview", x: 0, y: 0, width: 0, height: 0});
   svg.append(preview);
   svg.setPointerCapture(event.pointerId);
+  elevationDrawing = true;
+  // 放開滑鼠（或拖曳被瀏覽器收回）之後才畫收著的判決：拖框收尾要用的這張圖在那之前不能換掉。
+  svg.addEventListener("lostpointercapture", () => { elevationDrawing = false; zoneLimitsDragEnded(); }, {once: true});
   const corners = end => [Math.min(start[0], end[0]), Math.max(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[1], end[1])];
   const move = moved => {
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, moved, geometry));
@@ -317,6 +321,7 @@ function renderElevation() {
   renderZoneTable(wall);
 }
 window.renderElevation = renderElevation;
+window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());
   // 房間尺寸改定了（離開格子）才重判限制：分區可能超出變小的牆面（#1111）。

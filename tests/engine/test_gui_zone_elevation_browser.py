@@ -47,6 +47,10 @@ def _centre_y(page: Page, selector: str) -> float:
 
 def _drag(page: Page, width: float, height: float, start: tuple[float, float], end: tuple[float, float]) -> None:
     """畫面座標（公尺，從左緣往右、從下緣往上）拖一個框；換算照牆框在畫面上的位置。"""
+    # 先等最新一次限制判決畫上去（#1111：判決晚到會重畫立面圖，換掉這裡要量的牆框）。
+    # 按下滑鼠本來就會讓焦點離開輸入格：先照做，正在打字而延後的判決才會畫。
+    page.evaluate("document.activeElement?.blur()")
+    page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
     # 滑鼠座標以視窗為準：牆框要先捲進視窗，不然按下去的點落在視窗外，瀏覽器不送事件。
     page.locator("#elevation-frame").scroll_into_view_if_needed()
     frame = page.locator("#elevation-frame").bounding_box()

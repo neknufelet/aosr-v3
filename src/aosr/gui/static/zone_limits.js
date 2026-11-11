@@ -2,10 +2,14 @@
    改了房間尺寸、打開方案、按「檢查」）把表單現在的樣子與設計設定交伺服器判（/api/zone-limits），回來的每一條照原文
    寫在那一區旁邊；紅的擋「拿去搜尋」（開跑那邊伺服器也照同一把再擋一次）。判法只在伺服器一份，這裡只畫。
    不從每個輸入事件發（房間、喇叭、座位每打一個字都會觸發），不鎖頁；晚到的回覆照世代號丟掉。
-   回覆到的時候使用者正在立面圖那一區的某一格打字：先不重畫（重畫會換掉那一格、打到一半的字就沒了），離開那一格再畫。 */
+   回覆到的時候使用者正在立面圖那一區的某一格打字、或正在拖框：先不重畫（重畫會換掉那一格或那張圖，打到一半的字、
+   拖到一半的框就沒了），離開那一格、放開滑鼠再畫。 */
 let zoneLimits = null;
 let zoneLimitsGeneration = 0;
-let zoneLimitsShown = 0;  // 畫面上畫的是第幾次的判決；等於 zoneLimitsGeneration 表示最新的一次已經畫上去
+let zoneLimitsReceived = 0;  // 收下的是第幾次的判決（最新那次回來才收）
+let zoneLimitsShown = 0;     // 畫面上畫的是第幾次的判決；等於 zoneLimitsGeneration 表示最新的一次已經畫上去
+let zoneLimitsRequest = Promise.resolve();
+let zoneLimitsAfterDrag = 0; // 拖框中收下、放開滑鼠才畫的那一次
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
 
 function typingInElevation() {
@@ -18,7 +22,21 @@ function showZoneLimits(generation) {
   if (typeof renderElevation === "function") renderElevation();
 }
 
-async function refreshZoneLimits() {
+function refreshZoneLimits() {
+  zoneLimitsRequest = checkZoneLimits();
+  return zoneLimitsRequest;
+}
+// 「拿去搜尋」要的是最新那次的判決：還在路上就等它回來（不會丟錯：檢查失敗也是一份判決）。
+async function settledZoneLimits() {
+  while (zoneLimitsReceived !== zoneLimitsGeneration) await zoneLimitsRequest;
+  return zoneLimits;
+}
+function zoneLimitsDragEnded() {
+  const generation = zoneLimitsAfterDrag;
+  zoneLimitsAfterDrag = 0;
+  if (generation) showZoneLimits(generation);
+}
+async function checkZoneLimits() {
   zoneLimitsGeneration += 1;
   const generation = zoneLimitsGeneration;
   let result;
@@ -32,8 +50,10 @@ async function refreshZoneLimits() {
   }
   if (generation !== zoneLimitsGeneration) return;
   zoneLimits = result;
+  zoneLimitsReceived = generation;
   const typing = typingInElevation();
   if (typing) { typing.addEventListener("focusout", () => showZoneLimits(generation), {once: true}); return; }
+  if (window.elevationDrawing?.()) { zoneLimitsAfterDrag = generation; return; }
   showZoneLimits(generation);
 }
 function zoneLimitLines(wall, key) { return zoneLimits?.zones?.[wall]?.[key] ?? []; }

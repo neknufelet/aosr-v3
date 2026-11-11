@@ -98,6 +98,10 @@ function searchZoneCount() {
 }
 // 「拿去搜尋」：搜尋頁讀的是存好的方案與做法，先照畫面存一份；兩樣都存成才跳過去，沒存成留在這頁照講。
 async function sendToSearch() {
+  const limits = await settledZoneLimits();
+  if (limits?.status !== "checked") {
+    zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
+  }
   if (limitsRedCount()) { zoneNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); return; }
   const generation = zoneDesignGeneration, name = $("save-id").value;
   if (!await save()) return;

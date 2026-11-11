@@ -185,3 +185,73 @@ def test_a_late_verdict_never_eats_a_half_typed_limit(tmp_path: Path, browser: B
         assert page.evaluate("zoneDesign.wall_max_depth_m") == {"x0": 0.1}
         _red(page, "z1")
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_verdict_arriving_mid_drag_waits_for_the_mouse_and_replies_out_of_order_are_dropped(tmp_path: Path,
+                                                                                              browser: Browser) -> None:
+    """拖框拖到一半判決回來：先收著不重畫（重畫會換掉正在拖的那張圖），放開滑鼠才畫，框照樣切成。
+    兩次判決倒序回來：晚到的舊判決丟掉，畫面上是最新那次。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _settled(page)
+        held: list[Route] = []
+        page.locator("#elevation-frame").scroll_into_view_if_needed()   # 滑鼠座標以視窗為準
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        with page.expect_request("**/api/zone-limits"):
+            page.evaluate("() => { refreshZoneLimits(); }")
+        frame = page.locator("#elevation-frame").bounding_box()
+        assert frame is not None
+        page.mouse.move(frame["x"] + 2, frame["y"] + frame["height"] - 2)
+        page.mouse.down()
+        page.mouse.move(frame["x"] + frame["width"] * 0.3, frame["y"] + frame["height"] * 0.6, steps=4)
+        with page.expect_response("**/api/zone-limits"):
+            held[0].continue_()
+        page.wait_for_function("zoneLimitsReceived === zoneLimitsGeneration")
+        assert page.evaluate("[elevationDrawing(), zoneLimitsShown < zoneLimitsGeneration]") == [True, True]   # 收下了，但還在拖：不畫
+        page.unroute("**/api/zone-limits")
+        with page.expect_response("**/api/zone-cut") as cut:
+            page.mouse.up()
+        assert cut.value.ok, cut.value.text()
+        page.wait_for_function("!document.querySelector('main').inert")
+        assert sorted(str(zone["id"]) for zone in _zones(page, "x0")) == ["auto1", "auto2", "z1"]
+
+        # 倒序：先發的那次最後才回來，丟掉；畫面上是後發的那次。
+        page.wait_for_function("zoneLimitsReceived === zoneLimitsGeneration")
+        held.clear()
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.evaluate("() => { refreshZoneLimits(); refreshZoneLimits(); }")   # 兩次都在同一拍送出
+        for _ in range(200):                                                   # 等攔截收齊兩個請求（最多 10 秒）
+            if len(held) == 2:
+                break
+            page.wait_for_timeout(50)
+        assert len(held) == 2
+        newest = cast(int, page.evaluate("zoneLimitsGeneration"))
+        with page.expect_response("**/api/zone-limits"):
+            held[1].continue_()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        with page.expect_response("**/api/zone-limits"):
+            held[0].continue_()
+        page.unroute("**/api/zone-limits")
+        assert page.evaluate("[zoneLimitsShown, zoneLimitsReceived]") == [newest, newest]
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_send_to_search_waits_for_the_verdict_and_refuses_when_the_check_failed(tmp_path: Path, browser: Browser) -> None:
+    """「拿去搜尋」等最新那次判決；檢查沒做成（斷線）就照講、不存不跳——伺服器開跑那邊雖然還會擋，這頁不先存一份過去。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        _settled(page)
+        page.route("**/api/zone-limits", lambda route: route.abort())
+        page.evaluate("() => { refreshZoneLimits(); }")
+        page.locator("#zone-to-search").click()
+        expect(page.locator("#zone-note")).to_contain_text("限制沒檢查成")
+        assert page.url == f"{base}/"
+        assert not (tmp_path / "designs" / "room109.json").exists()
+        assert watched.page_errors == []

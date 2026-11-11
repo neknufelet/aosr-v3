@@ -10,8 +10,8 @@
   直接取代牆面的材料（固定阻抗、實測表、整面多層構造）看不出貼了多深，照實寫「比不了」、不當作過，也不拿原牆的厚度標紅。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
 - 可信範圍（固定區的材料參數，跟材料頁同一個出處 ``material_curves.range_check``）：物理拒算的標紅；照算但醒目提醒的
-  標「警告」、不擋（老闆原話是「要警告」，物理那邊也照算）。這一項要算數學函式庫，只在網頁介面那一支做，
-  不放進開跑的同步路徑（開跑前物理拒算命令列自己會擋）。
+  標「警告」、不擋（計畫段 2-2b 寫的是「超出可信範圍警告」，物理那邊也照算）。沒傳檢查函式就不判這一項；
+  網頁的限制檢查、開跑預覽、開跑與建替身都傳材料頁那一支（正式入口開機釘中央處理器＋雙精度）。
 
 紅的會擋「拿去搜尋」與開跑（``refusals``，``gradient_plan.plan_search`` 也照它擋）；警告與說明只顯示。
 這一支只讀不寫；草稿有一格讀不出來就照實列，不丟錯誤碼（畫面在改到一半時也要能問）。
@@ -212,7 +212,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
     checked: dict[str, list[Problem]] = {}
     for wall in WALLS:
         entries = cast(list[Mapping[str, object]], by_wall.get(wall) if isinstance(by_wall, dict) else None) or [{"area": "whole_wall"}]
-        if not isinstance(entries, list):
+        if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
             walls[wall].append(Problem(code="unreadable", level="red", text="這一面的分區讀不出來；請重新打開方案"))
             continue
         found: dict[str, list[Problem]] = {}
