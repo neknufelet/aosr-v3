@@ -18,6 +18,9 @@ from aosr.materials.library import builtin_entries, load_user_library
 
 COMMIT = "a" * 40
 CREATE = {"If-None-Match": "*"}
+STATIC = "src/aosr/gui/static/"
+# 寫完整的版控路徑：圖表庫搬家或改名時，路徑檢查會在這裡抓到死引用。
+CHART_LIBRARY = ("src/aosr/gui/static/vendor/uplot/uPlot.iife.min.js", "src/aosr/gui/static/vendor/uplot/uPlot.min.css")
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -154,12 +157,11 @@ def test_measured_tables_with_and_without_imaginary_parts_round_trip_with_their_
 def test_the_page_and_its_two_static_files_are_served(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         page = client.get("/materials")
-        assets = [client.get(f"/static/{name}") for name in (
-            "materials.js", "materials.css", "vendor/uplot/uPlot.iife.min.js", "vendor/uplot/uPlot.min.css")]
+        assets = [client.get(f"/static/{name}") for name in ("materials.js", "materials.css", *(path.removeprefix(STATIC) for path in CHART_LIBRARY))]
         home = client.get("/")
     assert page.status_code == 200
     # 段 2-2b 起多載入畫吸音曲線的圖表庫（跟結果頁同一份內附檔）
-    assert re.findall(r'<script src="/static/([^"]+)"', page.text) == ["vendor/uplot/uPlot.iife.min.js", "materials.js"]
+    assert re.findall(r'<script src="/static/([^"]+)"', page.text) == [CHART_LIBRARY[0].removeprefix(STATIC), "materials.js"]
     assert [asset.status_code for asset in assets] == [200, 200, 200, 200]
     assert 'href="/materials"' in home.text
 

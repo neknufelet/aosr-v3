@@ -160,6 +160,7 @@ def test_every_builtin_is_drawn_on_the_room_axis_with_exactly_what_the_physics_r
         assert reply["status"] == "drawn", entry.id
         assert reply["frequencies_hz"] == LANE
         assert reply["absorption"] == _expected(probe, "builtins", index), entry.id
+        assert f"空氣用產品設定的標準值（聲速 {AIR.sound_speed_m_s:g} m/s、密度 {AIR.air_density_kg_m3:g} kg/m³）" in str(reply["axis_text"])
         assert (reply["basis"], reply["provenance"], reply["source"], reply["links"]) == (
             basis_label(entry), PROVENANCE_LABELS[entry.provenance], entry.source, list(entry.links))
         assert (reply["arrangement"] is None) == isinstance(entry, FixedEntry)

@@ -3,6 +3,7 @@
 只呼叫現成的物理（:func:`aosr.materials.construction.random_incidence_absorption`，Paris 角度平均的無規入射吸音），
 不改任何物理。送來什麼材料內文就畫什麼——表單還沒存的值也能先看；不讀也不寫使用者材料庫。
 
+- 沒有場景，空氣用產品設定的標準值（設定層 :func:`aosr.config.product_air.product_air_environment`），畫面上寫明。
 - 頻率軸跟房間計算同一條細軸（``GEOMETRIC_LANE_FREQUENCIES_HZ``：20 Hz 起、每八度 24 點、到 8000 Hz 八度帶上緣以內）；
   不為了讓提醒消失而縮短：搜尋最在意的低頻正好落在小松模型的外推區。實測表的頻點另外併進軸，表內表外分得出來。
 - 可最佳化材料是一族（搜尋會調厚度與空腔），這裡畫的是初值排法（``template_assembly``），圖旁寫明。
@@ -24,9 +25,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, V3_AXIS_POINTS_PER_OCTAVE
-from aosr.config.paths import config_path
-from aosr.config.physics_constants import load_physics_constants
-from aosr.config.porous_model_ranges import PorousModelRanges, load_porous_model_ranges
+from aosr.config.porous_model_ranges import PorousModelRanges
+from aosr.config.product_air import product_air_environment
 from aosr.gui.material_editor import plain_error
 from aosr.gui.problem_text import material_form_spec
 from aosr.materials.construction import random_incidence_absorption
@@ -169,8 +169,7 @@ def material_curve(document: object) -> dict[str, object]:
         return {"status": "incomplete", "message": f"表單還沒填齊，曲線畫不出來：{plain_error(exc)}", "range_scope": RANGE_SCOPE}
     material, arrangement = _physics_material(entry)
     axis = _axis(material)
-    air = load_physics_constants(config_path("physics_constants.toml"))
-    ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
+    air, ranges = product_air_environment()
     labels = _labels(entry)
     if jnp.asarray(0.0).dtype != jnp.float64:
         # 正式網頁入口開機就開雙精度；沒開時物理層會拒算，那不是材料參數的錯，不能說成「這組參數算不出」。
@@ -189,7 +188,9 @@ def material_curve(document: object) -> dict[str, object]:
             "frequencies_hz": list(axis), "absorption": [float(value) for value in np.asarray(absorption)],
             "measured_range_hz": measured_range, "spans": spans, "warnings": [*warnings, *_unchecked_layers(material)],
             "axis_text": (f"頻率軸跟房間計算同一條細軸：{GEOMETRIC_LANE_FREQUENCIES_HZ[0]:g} Hz 起、每八度 {V3_AXIS_POINTS_PER_OCTAVE} 點，"
-                          f"到 {GEOMETRIC_LANE_FREQUENCIES_HZ[-1]:.0f} Hz" + ("；實測表的頻點另外併進去。" if measured_range else "。"))}
+                          f"到 {GEOMETRIC_LANE_FREQUENCIES_HZ[-1]:.0f} Hz" + ("；實測表的頻點另外併進去" if measured_range else "")
+                          + f"。空氣用產品設定的標準值（聲速 {air.sound_speed_m_s:g} m/s、密度 {air.air_density_kg_m3:g} kg/m³），"
+                          "房間計算用各方案自己的場景值。")}
 
 
 def material_curve_routes() -> list[Route]:
