@@ -58,7 +58,11 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
         assert _runs(tmp_path) == []  # 打開結果頁、查附表都不開算
         page.locator("#zone-baseline-start").click()
         expect(page.locator("#zone-start-state")).to_contain_text("開始算了", timeout=60_000)
-        expect(page.locator("#zone-baseline-start")).to_be_hidden()
+        expect(page.locator("#zone-baseline-start")).to_be_hidden(timeout=60_000)
+        with httpx.Client(base_url=base, trust_env=False, timeout=120) as client:
+            running = client.get(f"/api/results/{DESIGN_RUN}/zones").json()
+            assert (running["state"], running["running"], running["can_start"]) == ("running", True, False)
+            assert client.post(f"/api/results/{DESIGN_RUN}/zones/baseline", json={}).status_code == 409
         expect(page.locator("#zone-improvement tr.zone-total")).to_be_visible(timeout=600_000)
         (run,) = _runs(tmp_path)
         baseline = SchemeResult.model_validate_json((tmp_path / "results" / f"{run.stem}.json").read_bytes())
@@ -75,8 +79,24 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
         with httpx.Client(base_url=base, trust_env=False, timeout=120) as client:
             assert client.get(f"/api/results/{DESIGN_RUN}/zones").json()["improvement"] == expected.model_dump(mode="json")
             assert client.post(f"/api/results/{DESIGN_RUN}/zones/baseline", json={}).status_code == 409
-        assert len(_runs(tmp_path)) == 1
-        assert watched.page_errors == [] and watched.console_errors == []
+            assert len(_runs(tmp_path)) == 1
+            assert watched.page_errors == [] and watched.console_errors == []
+            _later_states(tmp_path, client, run)
+
+
+def _later_states(folder: Path, client: httpx.Client, run: Path) -> None:
+    """算好之後基準又出事的三格（改檔模擬，不再真算）：舊版物理要重算、讀不出來要重算、上一次沒算完要重算。"""
+    result_path = folder / "results" / f"{run.stem}.json"
+    stored = json.loads(result_path.read_text(encoding="utf-8"))
+    for text, state, words in ((json.dumps(stored | {"physics_identity": "phys-v1:" + "0" * 64}), "baseline_stale", "舊版物理"),
+                               ("{}", "baseline_rejected", "讀不出來")):
+        result_path.write_text(text, encoding="utf-8")
+        view = client.get(f"/api/results/{DESIGN_RUN}/zones").json()
+        assert (view["state"], view["can_start"], view["improvement"]) == (state, True, None) and words in view["state_text"]
+    record = json.loads(run.read_text(encoding="utf-8")) | {"status": "failed", "exit_code": 1}
+    run.write_text(json.dumps(record), encoding="utf-8")
+    failed = client.get(f"/api/results/{DESIGN_RUN}/zones").json()
+    assert (failed["state"], failed["can_start"]) == ("failed", True) and "沒算完" in failed["state_text"]
 
 
 def test_zone_routes_refuse_whole_walls_old_physics_cut_originals_and_missing_originals(
