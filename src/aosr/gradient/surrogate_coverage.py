@@ -31,6 +31,7 @@ from typing import Final, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
     FamilySettings, MaterialGradientSettings, is_fixed_target, load_material_gradient_settings,
 )
@@ -249,8 +250,10 @@ def check_covers(training: Path, materials: SearchMaterials, fixed: Sequence[Fix
     if trained is None:
         if only_product_families(materials) and not fixed:
             return
+        # 舊替身照產品設定檔家族＋產品構造清單訓練（建模命令列用的就是 construction_presets.toml）：基準不跟這一場的構造清單走，
+        # 不然同代號樣板換了內容（流阻、多了空氣層）兩邊一起變、比不出來。
         product = family_coverage(load_material_gradient_settings(config_path("material_gradient.toml")),
-                                  materials.presets)
+                                  load_construction_presets(config_path("construction_presets.toml")))
         extra = (_problems(wanted, product) + _member_problems(materials.settings, materials.presets)
                  + _fixed_problems(fixed, ()))
         if not extra:

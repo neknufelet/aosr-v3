@@ -86,6 +86,25 @@ def test_old_surrogate_still_passes_when_product_families_are_only_narrowed(tmp_
         check_covers(_legacy(tmp_path), materials)
 
 
+@pytest.mark.parametrize("change", ["flow", "air"])
+def test_old_surrogate_refuses_a_narrowed_run_whose_template_content_changed(tmp_path: Path, change: str) -> None:
+    """抓舊替身那一支拿這一場自己的構造清單當訓練基準：只留 24K（唯一成員就是樣板）、再把樣板換流阻或多一層空氣層，
+    兩邊一起變就比不出來、被收窄那條放行（審查第三輪重現）。"""
+    settings = BASE.model_copy(update={"family": (BASE.family[1],)})
+    template = settings.family[0].template_preset
+    table = []
+    for preset in run.presets_table():
+        material = json.loads(json.dumps(preset.material))
+        if preset.id == template:
+            if change == "flow":
+                material["layers"][0]["flow_resistivity_pa_s_m2"] = 30000.0
+            else:
+                material["layers"].append({"kind": "air", "thickness_m": 0.05})
+        table.append(preset.model_copy(update={"material": material}))
+    check_covers(_legacy(tmp_path), SearchMaterials(settings, tuple(run.presets_table()), ()))
+    _refused(_legacy(tmp_path), SearchMaterials(settings, tuple(table), ()), f"家族 {settings.family[0].id}")
+
+
 def test_recorded_coverage_accepts_the_same_or_narrower_families(tmp_path: Path) -> None:
     """抓同一份材料、或只把範圍收窄、或材料庫多了一筆固定材料（固定材料不接成家族）也被拒收（會白白逼人重建）。"""
     training = trained_on(tmp_path / "surrogate.npz", _materials(_optimizable()))
