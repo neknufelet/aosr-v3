@@ -279,7 +279,7 @@ def _start(args: argparse.Namespace) -> int:
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     run.require_supported_original_walls(kept.values())
     designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps, table=materials.presets)
-    expanded = _checked_allowed(allowed, designs, settings, fixed, caps)
+    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, materials.presets)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -358,17 +358,21 @@ def _start_scheme(root: Path, scheme_path: Path) -> Scheme:
 
 def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[SurfaceDesign, ...],
                      settings: MaterialGradientSettings, fixed: dict[str, str],
-                     caps: dict[str, float]) -> dict[str, tuple[str, ...]]:
+                     caps: dict[str, float], table: tuple[PresetMaterial, ...]) -> dict[str, tuple[str, ...]]:
     """准用清單對起跑配置核一次（:func:`~aosr.gradient.fixed_surfaces.check_allowed_against_start`），回展開到面片的清單。
-    起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）。"""
+    起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）；六類評分收不了的固定材料（裸實測表）在匯出完整模型
+    與關卡之前就拒收（:func:`~aosr.gradient.fixed_candidates.refuse_unscored_fixed_candidates`），不花完整解的錢。"""
     from aosr.config.material_gradient import is_fixed_target
+    from aosr.gradient.fixed_candidates import refuse_unscored_fixed_candidates
     from aosr.gradient.fixed_surfaces import check_allowed_against_start, expanded_allowed_targets
 
     surfaces = tuple((design.surface_id, design.preset_id) for design in designs)
     if any(is_fixed_target(preset) for _, preset in surfaces):
         raise ValueError("--presets 不能直接寫固定材料（fixed:…）：起點要是家族樣板或 none，固定材料從 --allowed 進來")
     check_allowed_against_start(allowed, surfaces, settings, fixed_surfaces=fixed, max_depths=caps)
-    return expanded_allowed_targets(allowed, [name for name, _ in surfaces])
+    expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
+    refuse_unscored_fixed_candidates(designs, expanded, table)
+    return expanded
 
 
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],

@@ -521,7 +521,11 @@ def project_settings(project: GradientProject) -> MaterialGradientSettings:
 
 def project_presets(project: GradientProject) -> tuple[PresetMaterial, ...]:
     """這一跑的構造清單：產品構造預設，有材料快照就接上快照裡使用者材料生成的構造（不讀搜尋設定；快照 SHA-256 照核）；
-    准用清單有固定材料就再接上每一個 ``fixed:<代號>`` 的那份材料（使用者的從快照、內建的從產品構造預設）。"""
+    准用清單有固定材料就再接上每一個 ``fixed:<代號>`` 的那份材料（使用者的從快照、內建的從產品構造預設），
+    而且每一份要跟開跑時做留出驗證的那份逐位同一份（``fixed_candidate_checks`` 記的摘要）：內建構造之後改了內容，
+    舊的驗證不算數，拒收。"""
+    from aosr.gradient.endpoint import material_digest
+
     table: tuple[PresetMaterial, ...]
     user_fixed: tuple[FixedEntry, ...]
     if project.materials_path is None or project.materials_sha256 is None:
@@ -530,7 +534,15 @@ def project_presets(project: GradientProject) -> tuple[PresetMaterial, ...]:
         snapshot = read_snapshot_entries(Path(project.materials_path), project.materials_sha256)
         table, user_fixed = with_user_presets(presets_table(), snapshot.materials), snapshot.fixed
     targets = fixed_targets_of(project.allowed_targets)
-    return (*table, *fixed_candidates(targets, table, user_fixed)) if targets else tuple(table)
+    if not targets:
+        return tuple(table)
+    candidates = fixed_candidates(targets, table, user_fixed)
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    by_target = {candidate.id: candidate for candidate in candidates}
+    for check in project.fixed_candidate_checks:
+        if material_digest(adapter.validate_python(by_target[check.target].material)) != check.material_digest:
+            raise ValueError(f"固定材料 {check.target} 的內容跟開跑時做留出驗證的那份不同（材料改過了），舊的驗證不算數，拒收")
+    return (*table, *candidates)
 
 
 def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = False) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:

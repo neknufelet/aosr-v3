@@ -40,12 +40,33 @@ class FixedCandidateCheck(BaseModel):
     band_ruler: float = Field(gt=0.0)
     full_solves: int = Field(ge=1, strict=True)
     seconds: float = Field(ge=0.0)
+    material_digest: str = Field(pattern=r"^[0-9a-f]{64}$",
+                                 description="驗的那份材料的身分摘要（endpoint.material_digest）；接續讀回的材料要逐位同一份")
 
     @model_validator(mode="after")
     def _passed(self) -> Self:
         if self.frequency_db > self.frequency_ruler or self.band_db > self.band_ruler:
             raise ValueError(f"固定材料 {self.target} 的替身留出驗證沒過，不會記成可以開跑的搜尋")
         return self
+
+
+def refuse_unscored_fixed_candidates(designs: Sequence[SurfaceDesign], allowed: Mapping[str, Sequence[str]],
+                                     table: Sequence[PresetMaterial]) -> None:
+    """產品入口目前拒收：第三階段六類評分工廠收不了的固定材料（裸實測阻抗表）開跑前就點名拒收，
+    不等關卡做完、第一次評到它才整場失敗。判斷用工廠自己那一條（``six_category_chain.design_materials``），兩邊不會漂。
+    底層（設計、帳本、匯出、關卡）照樣認得實測表，六類評分接上實測表那天拿掉這一道就好。"""
+    from aosr.gradient.fixed_surfaces import fixed_targets_of
+    from aosr.gradient.six_category_chain import design_materials
+
+    for target in fixed_targets_of(allowed):
+        try:
+            design_materials(candidate_designs(designs, target, allowed, table))
+        except ValueError as error:
+            raise MaterialsRefused(
+                f"固定材料 {fixed_target_id(target)} 進不了第三階段六類評分（{error}）：實測阻抗表在六類評分還沒接上，"
+                "這次不開；准用清單先拿掉它，或改用貼在牆上的構造") from error
+
+
 def candidate_designs(designs: Sequence[SurfaceDesign], target: str, allowed: Mapping[str, Sequence[str]],
                       table: Sequence[PresetMaterial]) -> tuple[SurfaceDesign, ...]:
     """起跑設計裡、准用清單列了 ``target`` 的每一片換成那份固定材料（整塊、沒有變數），其他片原樣。"""
@@ -108,10 +129,13 @@ def check_fixed_candidates(model: ReducedModel, operators: FullOperators, design
 
     import numpy as np
 
+    from aosr.gradient.endpoint import material_digest
     from aosr.gradient.fixed_surfaces import fixed_targets_of
     from aosr.gradient.run import holdout_rulers
     from aosr.physics.fem_reduced_check import validate_reduced, within_reduced_contract
 
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    by_id = {preset.id: preset for preset in table}
     rulers = holdout_rulers()
     axis = tuple(float(value) for value in model.frequencies_hz)
     if set(operators.sources) != set(model.source_names) or set(operators.receivers) != set(model.receiver_names):
@@ -140,5 +164,6 @@ def check_fixed_candidates(model: ReducedModel, operators: FullOperators, design
         found.append(FixedCandidateCheck(
             target=target, surfaces=tuple(name for name, targets in sorted(allowed.items()) if target in targets),
             frequency_db=frequency_db, band_db=band_db, frequency_ruler=rulers.frequency.value,
-            band_ruler=rulers.band.value, full_solves=report.full_solves, seconds=seconds))
+            band_ruler=rulers.band.value, full_solves=report.full_solves, seconds=seconds,
+            material_digest=material_digest(adapter.validate_python(by_id[target].material))))
     return tuple(found)

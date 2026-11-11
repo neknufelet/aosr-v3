@@ -191,7 +191,8 @@ def test_search_rows_and_endpoint_read_the_same_table_bit_for_bit(tmp_path: Path
 
 
 def test_holdout_gate_records_passing_tables_and_refuses_a_poor_surrogate(tmp_path: Path) -> None:
-    """抓沒做留出驗證就開跑、驗了不照兩把尺判、拒收時不講數字。硬實測表（80ρc）在這間小房的替身上照實記數字。"""
+    """抓沒做留出驗證就開跑、驗了不照兩把尺判、拒收時不講數字、完整模型的喇叭座位順序跟替身不同就驗不了（重排後數字逐位不變）。
+    硬實測表（80ρc）在這間小房的替身上照實記數字（關卡本身認得實測表；產品入口目前在關卡前就拒收裸實測表）。"""
     problem = {**_problem(), "allowed": {"x0": ["none", "fixed:" + SOFT, "fixed:" + HARD],
                                          "ceiling": ["none", "fixed:" + HARD]}}
     record = _run(tmp_path, "gate", problem)
@@ -203,6 +204,14 @@ def test_holdout_gate_records_passing_tables_and_refuses_a_poor_surrogate(tmp_pa
         assert 0.0 <= cast(float, check["frequency_db"]) <= frequency and 0.0 <= cast(float, check["band_db"]) <= band
         assert (check["frequency_ruler"], check["band_ruler"]) == (frequency, band)
         assert cast(int, check["full_solves"]) > 0
+    assert record["shuffled"] == {"source_order_differs": True, "receiver_order_differs": True, "same": True}
     error = cast(str, record["truncated_error"])
     assert error is not None and "沒過留出驗證" in error
     assert "fem_reduced_holdout_frequency_db" in error and "fem_reduced_holdout_band_db" in error and "dB" in error
+
+
+def test_every_builtin_fixed_candidate_gets_through_the_factory_material_steps(tmp_path: Path) -> None:
+    """抓內建構造當固定材料時六類工廠在材料那幾步收不了（入口沒擋、第一次評分才整場失敗）：每一筆都當固定候選走一次。"""
+    record = _run(tmp_path, "builtins", _problem())
+    assert len(cast(list[str], record["targets"])) >= 10, record["targets"]
+    assert record["refused"] == {}, record["refused"]

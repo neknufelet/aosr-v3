@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
 GAP50 = "glass_wool_48k_50mm_gap50"
 MEASURED = "panel_measured"
+BUILT = "panel_built"
 CARPET = "carpet_on_concrete"
 _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
 KEPT = [20000.0, 21000.0, 22000.0, 23000.0, 24000.0, 25000.0]
@@ -68,6 +69,15 @@ def _measured(*, imaginary: bool = True) -> library.FixedEntry:
         "material": {"kind": "measured_impedance", "points": rows, "source_and_conditions": "阻抗管，背 5 cm 空腔",
                      "base_assembly": {"kind": "assembly", "layers": [{"kind": "air", "thickness_m": 0.05}],
                                        "backing": "rigid"}}}))
+
+
+def _built() -> library.FixedEntry:
+    """使用者的構造型固定材料（多層構造、不是實測表）：第三階段六類評分收得了。"""
+    return cast(library.FixedEntry, _ENTRY.validate_python({
+        "kind": "fixed", "id": BUILT, "label": "自組吸音板（自填）", "provenance": "model", "source": "自填構造",
+        "material": {"kind": "assembly", "layers": [
+            {"kind": "porous", "thickness_m": 0.05, "flow_resistivity_pa_s_m2": 15000.0, "material_class": "fibrous"},
+            {"kind": "air", "thickness_m": 0.05}], "backing": "rigid"}}))
 
 
 def _optimizable() -> library.OptimizableEntry:
@@ -205,6 +215,42 @@ def test_fixed_candidates_resolve_user_then_builtin_and_refuse_the_rest() -> Non
             materials.fixed_candidates((target,), table, (_measured(),))
 
 
+def test_entry_refuses_bare_measured_tables_with_the_factory_rule_and_takes_constructions() -> None:
+    """抓入口不擋裸實測表（關卡做完、第一次評到才整場失敗）、或把構造型固定材料也擋掉。判斷要跟六類工廠同一條。"""
+    from aosr.gradient.fixed_candidates import refuse_unscored_fixed_candidates
+    from aosr.gradient.six_category_chain import design_materials
+
+    table: tuple[materials.PresetMaterial, ...] = (*run.presets_table(), *materials.fixed_candidates(
+        ("fixed:" + CARPET, "fixed:" + MEASURED, "fixed:" + BUILT), run.presets_table(), (_measured(), _built())))
+    designs = search.designs_from_presets(tuple((wall.wall_name(), None) for wall in Wall.all()), _settings(), table,
+                                          kept=kept_walls(KEPT))
+    refuse_unscored_fixed_candidates(designs, {"x0": ("none", "fixed:" + CARPET), "floor": ("none", "fixed:" + BUILT)}, table)
+    with pytest.raises(materials.MaterialsRefused, match=f"固定材料 {MEASURED} 進不了第三階段六類評分.*MeasuredImpedance"):
+        refuse_unscored_fixed_candidates(designs, {"x0": ("none", "fixed:" + CARPET), "floor": ("none", "fixed:" + MEASURED)},
+                                         table)
+    with pytest.raises(ValueError, match="MeasuredImpedance"):
+        design_materials((search.fixed_candidate_design("x0", "fixed:" + MEASURED, {p.id: p for p in table}, "rigid"),))
+
+
+def test_resume_refuses_a_builtin_fixed_material_changed_after_the_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓內建固定材料在開跑後改了內容、接續照舊沿用開跑時的留出驗證（內建構造沒有快照，要靠關卡紀錄的摘要綁）。"""
+    from pydantic import TypeAdapter
+
+    from aosr.gradient.endpoint import material_digest
+    from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+
+    carpet = next(preset for preset in run.presets_table() if preset.id == CARPET)
+    digest = material_digest(TypeAdapter(SurfaceMaterial).validate_python(carpet.material))
+    project = run.GradientProject.model_validate({**_project().model_dump(), "allowed_targets": {"x0": ["none", "fixed:" + CARPET]},
+                                                 "fixed_candidate_checks": [_check("fixed:" + CARPET, material_digest=digest)]})
+    assert any(preset.id == "fixed:" + CARPET for preset in run.project_presets(project))
+    changed = tuple(preset.model_copy(update={"material": ConstantImpedance(impedance_pa_s_m=54321.0).model_dump(mode="json")})
+                    if preset.id == CARPET else preset for preset in run.presets_table())
+    monkeypatch.setattr(run, "presets_table", lambda: changed)
+    with pytest.raises(ValueError, match=f"固定材料 fixed:{CARPET} 的內容跟開跑時做留出驗證的那份不同"):
+        run.project_presets(project)
+
+
 def test_snapshot_without_fixed_materials_stays_v1_and_v2_round_trips(tmp_path: Path) -> None:
     """抓沒有固定材料也升 v2（2-3a 的資料夾名就變了）、v2 讀不回固定材料、2-3a 寫的 v1 讀不回來。"""
     v1 = materials.snapshot_bytes((_optimizable(),))
@@ -239,7 +285,7 @@ def test_without_lists_project_folder_name_and_template_header_do_not_move() -> 
 
 def _check(target: str, **changes: object) -> dict[str, object]:
     return {"target": target, "surfaces": ["x0"], "frequency_db": 0.01, "band_db": 0.001, "frequency_ruler": 0.011,
-            "band_ruler": 0.01, "full_solves": 47, "seconds": 1.0, **changes}
+            "band_ruler": 0.01, "full_solves": 47, "seconds": 1.0, "material_digest": "a" * 64, **changes}
 
 
 def test_project_needs_one_passing_holdout_check_per_fixed_target() -> None:
@@ -282,7 +328,7 @@ def test_holdout_gate_judges_each_ruler_on_its_own(monkeypatch: pytest.MonkeyPat
     operators = cast("FullOperators", _FakeOperators(sources={"s": 0}, receivers={"front": 0}))
 
     def gate() -> tuple[FixedCandidateCheck, ...]:
-        return fixed_candidates.check_fixed_candidates(model, operators, (), {"x0": ("none", "fixed:" + CARPET)}, (),
+        return fixed_candidates.check_fixed_candidates(model, operators, (), {"x0": ("none", "fixed:" + CARPET)}, _table(),
                                                        density_kg_m3=1.2, sound_speed_m_s=343.0)
     if passes:
         (check,) = gate()
@@ -359,6 +405,38 @@ def test_plan_maps_library_ids_to_targets_and_picks_each_start() -> None:
     _, bare = _scheme_and_design({})
     plain = plan_search(scheme, bare, GradientRequest(), _settings(), fixed_ids)
     assert "--allowed" not in start_arguments(plain) and "allowed" not in plain.model_dump_json()
+
+
+def _web_start(tmp_path: Path, listed: str, entry: library.FixedEntry) -> list[str]:
+    """網頁開跑一次：材料庫只有一筆固定材料、x0 一區准用玻璃棉家族與它；回交給命令列的參數（假的開服務層）。"""
+    from aosr.gui.material_editor import user_library_path
+    from aosr.gui.zone_design import write_design
+    from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data, _jobs, _scheme
+
+    data_dir = _data(tmp_path)
+    zones = {"x0": {"r0_c0": ZoneDesign(mode="search", allowed=("glass_wool_48k", listed)), "r1_c1": ZoneDesign(mode="search")},
+             "ceiling": {"r0_c1": ZoneDesign(mode="keep_original")}}
+    write_design(data_dir, DesignSettings(scheme_id=NAME, zones=zones), _scheme())
+    user_library_path(data_dir).write_text(library.dump_user_library((entry,)), encoding="utf-8")
+    launcher = FakeLauncher()
+    _jobs(data_dir, launcher).start(NAME, GradientRequest(max_steps=5))
+    (_, argv, _, _), = launcher.launched
+    return argv[argv.index("--") + 5:]
+
+
+def test_web_start_hands_user_fixed_ids_to_the_plan_and_passes_the_library(tmp_path: Path) -> None:
+    """抓網頁開跑沒把使用者材料庫的固定材料代號交給計畫（清單寫了它卻當不認識的代號拒收）、
+    或材料庫只有固定材料時沒帶 --materials（命令列找不到那份材料）。"""
+    command = _web_start(tmp_path, BUILT, _built())
+    assert "--materials" in command
+    lists = [command[index + 1] for index, item in enumerate(command) if item == "--allowed"]
+    assert len(lists) == 1 and lists[0].endswith("=glass_wool_48k,fixed:" + BUILT), lists
+
+
+def test_web_start_refuses_a_listed_measured_table_by_name(tmp_path: Path) -> None:
+    """抓網頁把實測阻抗表交給背景開跑（六類評分還沒接上，背景才失敗）、或拒收時講成「材料庫裡沒有」。"""
+    with pytest.raises(PlanRefused, match=f"{MEASURED} 是實測阻抗表"):
+        _web_start(tmp_path, MEASURED, _measured())
 
 
 @pytest.mark.parametrize(("allowed", "words"), [({"x0": (MEASURED,)}, "只有固定材料"), ({"x0": ("no_such",)}, "材料庫裡沒有")])

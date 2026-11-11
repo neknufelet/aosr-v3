@@ -127,6 +127,13 @@ def _gate(problem: Record) -> Record:
     checks = check_fixed_candidates(model, operators, designs, allowed, table, density_kg_m3=DENSITY,
                                     sound_speed_m_s=SOUND_SPEED)
     found["checks"] = [check.model_dump(mode="json") for check in checks]
+    shuffled = dataclasses.replace(operators, sources=dict(reversed(list(operators.sources.items()))),
+                                   receivers=dict(reversed(list(operators.receivers.items()))))
+    again = check_fixed_candidates(model, shuffled, designs, allowed, table, density_kg_m3=DENSITY, sound_speed_m_s=SOUND_SPEED)
+    found["shuffled"] = {"source_order_differs": tuple(shuffled.sources) != model.source_names,
+                         "receiver_order_differs": tuple(shuffled.receivers) != model.receiver_names,
+                         "same": [check.model_dump(mode="json", exclude={"seconds"}) for check in again]
+                         == [check.model_dump(mode="json", exclude={"seconds"}) for check in checks]}
     rank = int(cast(int, problem["truncated_rank"]))
     m = model.matrices
     small = dataclasses.replace(model, matrices=ReducedMatrices(
@@ -140,12 +147,36 @@ def _gate(problem: Record) -> Record:
     return found
 
 
+def _builtins() -> Record:
+    """每一筆內建構造預設當固定候選，走六類工廠的材料清單與無變數樣板（整條有限元素軸＋幾何軸），不求解；回收不了的。"""
+    import jax.numpy as jnp
+
+    from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ, GEOMETRIC_LANE_FREQUENCIES_HZ
+    from aosr.gradient.six_category_chain import design_materials
+    from aosr.materials.construction_diff import build_template
+
+    presets = presets_table()
+    targets = tuple("fixed:" + preset.id for preset in presets if not isinstance(preset, materials.LibraryPreset))
+    table = {candidate.id: candidate for candidate in materials.fixed_candidates(targets, presets, ())}
+    air, ranges = construction_environment(density_kg_m3=1.2, sound_speed_m_s=343.0)
+    axis = jnp.asarray(np.asarray(sorted(set(FEM_LANE_FREQUENCIES_HZ) | set(GEOMETRIC_LANE_FREQUENCIES_HZ))))
+    refused: dict[str, str] = {}
+    for target in targets:
+        try:
+            (material,) = design_materials((search.fixed_candidate_design("x0", target, table, "rigid"),))
+            if not isinstance(material, ConstantImpedance):
+                build_template(material, axis, air=air, ranges=ranges, variables=())
+        except ValueError as error:
+            refused[target] = str(error)
+    return {"targets": list(targets), "refused": refused}
+
+
 def main() -> None:
     directory, part = Path(sys.argv[1]), sys.argv[2]
     problem = cast(Record, json.loads((directory / "problem.json").read_text(encoding="utf-8")))
     record: Record = {"x64": str(jax.numpy.asarray(0.0).dtype)}
     record.update({"segment": lambda: _segment(directory, problem), "rows": lambda: _rows(problem),
-                   "gate": lambda: _gate(problem)}[part]())
+                   "gate": lambda: _gate(problem), "builtins": _builtins}[part]())
     (directory / f"output-{part}.json").write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
 
 
