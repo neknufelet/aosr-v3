@@ -3,34 +3,78 @@
 雲端那兩份（``test_material_gradient_allowed``、``..._runs``）用合成目標與探針考每一個讀的人；這一份開真的子行程：
 開跑（命令列自己開雙精度、准用清單核起點、固定材料各做一組替身留出驗證、快照 v2）→ 工作行程重建目標與換樣板
 （換樣板只換到清單裡的）→ 寫結果 → 報告 → 終點（完整模型、核清單與固定材料摘要、匯出）。環境照網頁開服務那一條。
+
+替身要用這份方案自己的算子、整條正式軸真的建一份（不借命令列考卷那份衍生替身：它的座位列是三個真座位的組合、
+頻點只建一半，搜尋用得了，拿方案真網格做完整解比一定對不上，關卡照實拒收）。
 """
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pytest
 
+from aosr.config.capabilities import load_capabilities
+from aosr.config.directivity_defaults import load_directivity_defaults
+from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
+from aosr.config.paths import config_path
+from aosr.geometry.shoebox import Wall
 from aosr.gradient import run
 from aosr.gradient import template_ledger as templates
 from aosr.gradient.endpoint_run import read_result
 from aosr.materials import library
 from aosr.materials import search_library as materials
-from tests.engine._six_search_cli_case import model as model, operators as operators
+from aosr.physics.fem_helmholtz import FrequencyWallImpedances
+from aosr.physics.fem_reduced_build import build_reduced_model
+from aosr.physics.fem_reduced_check import validate_reduced
+from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, save_validation_receipt
+from aosr.physics.fem_reduced_store import save_reduced
+from aosr.reporting.fem_reduced_scheme import export_operators
+from aosr.reporting.scheme import load_scheme
+from tests.engine._precision_contracts import contract_value
 from tests.engine.slow_material_gradient_library_cli import _run
 from tests.engine.test_material_gradient_allowed import CARPET, MEASURED, _measured
 from tests.engine.test_material_gradient_cli import Record, _command, _start_args
-from tests.engine.test_material_gradient_endpoint_cli import _inputs, _surrogate
+from tests.engine.test_material_gradient_endpoint_cli import _inputs
+from tests.engine.test_fem_reduced import DENSITY, SOUND_SPEED, _settings
 
 ALLOWED = ("ceiling=none,fixed:" + MEASURED, "x0=glass_wool_48k,fixed:" + CARPET)
 
 
+def _materials(seed: int, count: int) -> list[FrequencyWallImpedances]:
+    """訓練／留出材料：抽法同 ``test_fem_reduced``，頻率軸換成整條正式有限元素軸（替身的軸）。"""
+    rng = np.random.default_rng(seed)
+    frequencies = np.asarray(FEM_LANE_FREQUENCIES_HZ)
+    sets: list[FrequencyWallImpedances] = []
+    for _ in range(count):
+        sets.append({wall: tuple(complex(z) for z in DENSITY * SOUND_SPEED * (
+            math.exp(rng.uniform(math.log(1.5), math.log(60.0))) - 1j * rng.uniform(0.0, 5.0) * 100.0 / frequencies))
+            for wall in Wall.all()})
+    return sets
+
+
+def _scheme_surrogate(directory: Path) -> None:
+    """方案自己的算子建替身、做留出驗證寫收據，放在 ``good/rom.npz``（開跑參數照命令列考卷那一條）。"""
+    capabilities = load_capabilities(config_path("capabilities.toml"))
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    operators = export_operators(load_scheme(directory / "scheme.json"), capabilities=capabilities, directivity=directivity)
+    model = build_reduced_model(operators, FEM_LANE_FREQUENCIES_HZ, _materials(1, 12), settings=_settings())
+    report = validate_reduced(model, operators, _materials(99, 2))
+    rulers = HoldoutRulers(frequency=Ruler("fem_reduced_holdout_frequency_db", contract_value("fem_reduced_holdout_frequency_db")),
+                           band=Ruler("fem_reduced_holdout_band_db", contract_value("fem_reduced_holdout_band_db")))
+    (directory / "good").mkdir()
+    save_reduced(model, directory / "good" / "rom.npz")
+    save_validation_receipt(directory / "good" / "rom.npz", report, rulers=rulers, seconds=1.0)
+
+
 @pytest.fixture(scope="module")
-def searched(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Record]:
+def searched(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Record]:
     directory = tmp_path_factory.mktemp("material-gradient-allowed-cli")
-    _surrogate(directory, request)
     _inputs(directory)
+    _scheme_surrogate(directory)
     user = directory / "library.json"
     user.write_text(library.dump_user_library((_measured(),)), encoding="utf-8")
     root = directory / "root"

@@ -269,16 +269,11 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
-    from aosr.reporting.scheme import load_scheme
 
     fixed, caps, allowed = (parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth),
                             parse_allowed_targets(args.allowed))
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
-    if SEARCHES_DIR in args.root.resolve().parts:
-        raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
-    scheme = load_scheme(scheme_path)
-    if scheme.scene.low_frequency_axis is None:
-        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
+    scheme = _start_scheme(args.root, scheme_path)
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
@@ -347,6 +342,18 @@ def _check_start_materials(materials: SearchMaterials, model: ReducedModel, sche
                         density_kg_m3=scheme.scene.density_kg_m3, sound_speed_m_s=scheme.scene.sound_speed_m_s)
     for note in cavity_notes(materials):
         sys.stderr.write(f"注意：{note}\n")
+
+
+def _start_scheme(root: Path, scheme_path: Path) -> Scheme:
+    """開跑前兩條：資料夾根不在網頁讀的 searches/ 底下；方案場景要有低頻軸（終點量大峰要它）。"""
+    from aosr.reporting.scheme import load_scheme
+
+    if SEARCHES_DIR in root.resolve().parts:
+        raise ValueError(f"--root 不能在 {SEARCHES_DIR}/ 底下：網頁會把裡面的資料夾當擺位搜尋讀、報讀取錯誤")
+    scheme = load_scheme(scheme_path)
+    if scheme.scene.low_frequency_axis is None:
+        raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
+    return scheme
 
 
 def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[SurfaceDesign, ...],

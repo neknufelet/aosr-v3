@@ -149,6 +149,41 @@ def test_ledger_with_the_fixed_material_struck_from_the_list_is_refused(segment_
         templates.read_template_ledger(tampered, settings=settings)
 
 
+def test_ledger_with_none_struck_from_a_list_is_refused_row_by_row(segment_run: tuple[Path, Record],
+                                                                   tmp_path: Path) -> None:
+    """抓讀帳本的人只核標頭的固定材料摘要、不逐列核清單：標頭只把天花板清單的 none 拿掉（摘要不動），
+    列裡天花板不貼那幾列只有逐列核清單才抓得到。"""
+    from tests.engine._material_gradient_templates_probe import settings_with
+    from aosr.config.material_gradient import load_material_gradient_settings
+    from aosr.config.paths import config_path
+
+    directory, record = segment_run
+    lines = (directory / str(record["ledger"])).read_bytes().splitlines(keepends=True)
+    head = json.loads(lines[0])
+    head["allowed_targets"]["ceiling"] = ["glass_wool_48k", "fixed:" + CARPET]
+    tampered = tmp_path / "tampered-none.jsonl"
+    tampered.write_bytes(b"".join([(json.dumps(head, ensure_ascii=False) + "\n").encode("utf-8"), *lines[1:]]))
+    settings = settings_with(load_material_gradient_settings(config_path("material_gradient.toml")),
+                             {"templates": {"max_rounds": 3}})
+    with pytest.raises(ValueError, match="面 ceiling 不在准用清單"):
+        templates.read_template_ledger(tampered, settings=settings)
+
+
+def test_ledger_rows_with_an_undeclared_fixed_material_are_refused(segment_run: tuple[Path, Record],
+                                                                   tmp_path: Path) -> None:
+    """抓讀帳本的人不逐列核固定材料摘要：標頭拿掉 x0 的清單與實測表摘要（清單與摘要彼此一致、標頭自己讀得過），
+    不給設定讀（不核清單），列裡 x0 換成實測表那幾列只有逐列核摘要才抓得到。"""
+    directory, record = segment_run
+    lines = (directory / str(record["ledger"])).read_bytes().splitlines(keepends=True)
+    head = json.loads(lines[0])
+    del head["allowed_targets"]["x0"]
+    del head["fixed_candidate_digests"]["fixed:" + MEASURED]
+    tampered = tmp_path / "tampered-digest.jsonl"
+    tampered.write_bytes(b"".join([(json.dumps(head, ensure_ascii=False) + "\n").encode("utf-8"), *lines[1:]]))
+    with pytest.raises(ValueError, match="標頭沒記這份固定材料"):
+        templates.read_template_ledger(tampered)
+
+
 def test_search_rows_and_endpoint_read_the_same_table_bit_for_bit(tmp_path: Path) -> None:
     """抓搜尋頻點與終點各自取表（內插或表外補值兩邊不同）。軸含表外（16、31.5 Hz 與 630 Hz）。"""
     record = _run(tmp_path, "rows", _problem())

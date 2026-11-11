@@ -14,10 +14,11 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -41,6 +42,9 @@ from aosr.reporting.scheme import Scheme
 from tests.engine._material_gradient_templates_probe import kept_walls
 from tests.engine.test_material_gradient_cli import _schemes
 from tests.engine.test_material_gradient_mount import _project
+
+if TYPE_CHECKING:
+    from aosr.physics.fem_reduced import FullOperators, ReducedModel
 
 GAP50 = "glass_wool_48k_50mm_gap50"
 MEASURED = "panel_measured"
@@ -251,6 +255,42 @@ def test_project_needs_one_passing_holdout_check_per_fixed_target() -> None:
         FixedCandidateCheck.model_validate(_check("fixed:" + CARPET, frequency_db=0.2))
     with pytest.raises(ValidationError, match="沒過"):
         FixedCandidateCheck.model_validate(_check("fixed:" + CARPET, band_db=0.02))
+
+
+@dataclasses.dataclass(frozen=True)
+class _FakeOperators:
+    sources: dict[str, int]
+    receivers: dict[str, int]
+
+
+@pytest.mark.parametrize(("frequency_db", "band_db", "passes"), [(0.01, 0.5, False), (5.0, 0.0001, False),
+                                                                 (0.01, 0.0001, True)])
+def test_holdout_gate_judges_each_ruler_on_its_own(monkeypatch: pytest.MonkeyPatch, frequency_db: float, band_db: float,
+                                                  passes: bool) -> None:
+    """抓關卡只看一把尺：完整解那一步換成回固定數字的報告，只超帶能量、只超逐頻都要照實拒收（訊息帶兩個數字），
+    兩把都在尺內才回紀錄、紀錄抄的就是報告的數字。"""
+    from types import SimpleNamespace
+
+    from aosr.gradient import fixed_candidates
+    from aosr.physics import fem_reduced_check
+
+    report = SimpleNamespace(frequency_db_by_seat={"front": frequency_db}, band_db_by_seat={"front": band_db}, full_solves=3)
+    monkeypatch.setattr(fem_reduced_check, "validate_reduced", lambda *args, **kwargs: report)
+    monkeypatch.setattr(fixed_candidates, "candidate_designs", lambda designs, *args: designs)
+    monkeypatch.setattr(fixed_candidates, "design_impedances", lambda *args, **kwargs: {"x0": (1.0 + 0.0j,)})
+    model = cast("ReducedModel", SimpleNamespace(frequencies_hz=(50.0,), source_names=("s",), receiver_names=("front",)))
+    operators = cast("FullOperators", _FakeOperators(sources={"s": 0}, receivers={"front": 0}))
+
+    def gate() -> tuple[FixedCandidateCheck, ...]:
+        return fixed_candidates.check_fixed_candidates(model, operators, (), {"x0": ("none", "fixed:" + CARPET)}, (),
+                                                       density_kg_m3=1.2, sound_speed_m_s=343.0)
+    if passes:
+        (check,) = gate()
+        assert (check.frequency_db, check.band_db, check.full_solves) == (frequency_db, band_db, 3)
+        return
+    with pytest.raises(materials.MaterialsRefused, match="沒過留出驗證") as refused:
+        gate()
+    assert f"逐頻最大差 {frequency_db:g} dB" in str(refused.value) and f"帶能量最大差 {band_db:g} dB" in str(refused.value)
 
 
 def test_template_header_binds_lists_and_fixed_material_digests() -> None:
