@@ -10,25 +10,11 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.physics import report_io, report_output, three_lane_report_cli
-from aosr.physics.report_surfaces import RectangleZonesUnsupported, WholeWallZone, ZonesByWall
-from aosr.physics.three_lane_report import ThreeLaneReport, solve_three_lane_report
 from aosr.runtime import child_process_env
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES, pair
 from tests.engine._zoned_report_cases import small_scheme
 from tests.engine.test_measured_impedance import measured
-
-
-@pytest.fixture(scope="module")
-def whole_report() -> ThreeLaneReport:
-    """真算控制報表，供輸出邊界考卷使用；不替換求解器。"""
-    inputs = report_io.load_input_document(pair(small_scheme()), CAPABILITIES, DIRECTIVITY)
-    solved = report_io.solver_inputs(inputs)
-    return solve_three_lane_report(source_model=solved.source_model, room=solved.room,
-        source=solved.source, receiver=solved.receiver, sound_speed_m_s=solved.sound_speed_m_s,
-        density_kg_m3=solved.density_kg_m3, impedance_by_wall=solved.impedance_by_wall,
-        materials_by_wall=solved.materials_by_wall, scattering_by_wall=solved.scattering_by_wall,
-        reflection_order_k=solved.reflection_order_k, low_frequency_axis=solved.low_frequency_axis)
 
 
 def test_physics_cli_directs_rectangles_to_scheme_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -41,8 +27,9 @@ def test_physics_cli_directs_rectangles_to_scheme_cli(tmp_path: Path, capsys: py
 
 
 @pytest.mark.parametrize("wall,index", (("x0", 0), ("x0", 1), ("floor", 0)))
-def test_zoned_measured_material_refuses_missing_seams(wall: str, index: int, whole_report: ThreeLaneReport) -> None:
-    """首區、第二區或其他整面有實測表都不可產出缺少接縫的報表。"""
+def test_zoned_measured_material_is_calculable(wall: str, index: int) -> None:
+    """#1084：首區、第二區或其他整面貼實測表都查得到能力列、不再拒收；接縫各報一處由雙精度探針
+    （test_zoned_measured_seams 的 routing 段）守。"""
     inputs = report_io.load_input_document(pair(small_scheme(zoned=True)), CAPABILITIES, DIRECTIVITY)
     document = inputs.model_dump(mode="json")
     zones = inputs.surface_zones_by_wall
@@ -50,16 +37,7 @@ def test_zoned_measured_material_refuses_missing_seams(wall: str, index: int, wh
     updated = {name: [zone.model_dump(mode="json") for zone in cells] for name, cells in zones.items()}
     updated[wall][index]["material"] = measured()
     inputs = report_io.load_input_document(document | {"surface_zones_by_wall": updated}, CAPABILITIES, DIRECTIVITY)
-    with pytest.raises(RectangleZonesUnsupported, match="分區＋實測阻抗表的接縫附表還不支援"):
-        report_output.report_capability(CAPABILITIES, {}, inputs.surface_zones_by_wall)
-    with pytest.raises(RectangleZonesUnsupported, match="分區＋實測阻抗表的接縫附表還不支援"):
-        report_output.output_from_report(whole_report, inputs=inputs, with_points=False)
-    assert inputs.surface_zones_by_wall is not None
-    whole_materials = {Wall.from_name(name): cells[0].material for name, cells in inputs.surface_zones_by_wall.items()}
-    whole_materials[Wall.from_name(wall)] = inputs.surface_zones_by_wall[wall][index].material
-    whole_zones: ZonesByWall = {w.wall_name(): (WholeWallZone(area="whole_wall", material=material),)
-                               for w, material in whole_materials.items()}
-    assert report_output.report_capability(CAPABILITIES, whole_materials, whole_zones).materials == "measured_impedance_by_wall"
+    assert report_output.report_capability(CAPABILITIES, {}, inputs.surface_zones_by_wall).materials == "measured_impedance_by_wall"
 
 
 def test_public_partition_check_rejects_gap_and_accepts_full_coverage() -> None:

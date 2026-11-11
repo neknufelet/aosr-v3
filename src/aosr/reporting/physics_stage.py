@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
@@ -15,6 +16,7 @@ from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.report_io import ReportInput, ReportOutput, SolverInputs
 from aosr.physics.report_output import output_from_report, report_capability
+from aosr.physics.report_zone_seams import ZoneSeamTable, zone_measured_seams
 from aosr.physics.third_octave_decay import ThirdOctaveDecay, build_third_octave_decay
 from aosr.reporting.fem_slices import fem_inputs
 from aosr.reporting.scheme import Scheme, expected_pairs
@@ -36,6 +38,17 @@ class PhysicsPair(BaseModel):
     report: ReportOutput
     screen: ReflectionScreen
     third_octave_decay: ThirdOctaveDecay
+    measured_seams_by_zone: ZoneSeamTable | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+        description="分區方案逐區的實測表接縫（牆名 → 區代號 → 低、高兩端）；整面一區的牆照舊在 report.measured_seams_by_wall")
+
+    @model_validator(mode="after")
+    def _seams_not_reported_twice(self) -> Self:
+        """同一面牆不能同時在整面接縫與逐區接縫裡：一面牆要嘛整面一區、要嘛切了矩形。"""
+        whole, zoned = self.report.measured_seams_by_wall or {}, self.measured_seams_by_zone or {}
+        if set(whole) & set(zoned):
+            raise ValueError(f"{sorted(set(whole) & set(zoned))} 同時出現在整面與逐區接縫")
+        return self
 
 
 class SchemePhysics(BaseModel):
@@ -65,6 +78,8 @@ def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
                                       materials_by_wall=solved.materials_by_wall)),
         screen=build_reflection_screen(inputs, lane.frequencies_hz, materials_by_wall=solved.materials_by_wall),
         third_octave_decay=build_third_octave_decay(raw, inputs),
+        measured_seams_by_zone=zone_measured_seams(inputs.surface_zones_by_wall,
+            density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s),
     )
 
 
