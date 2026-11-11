@@ -5,10 +5,12 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -31,7 +33,7 @@ _CONDITIONS = "阻抗管內徑 40 mm、垂直入射、樣品 50 mm"
 
 def _table(*, imag: bool = True) -> dict[str, object]:
     points = [{"frequency_hz": f, "real_pa_s_m": r, **({"imag_pa_s_m": i} if imag else {})} for f, r, i in _ROWS]
-    return {"kind": "measured_impedance", "points": points, "base_assembly": _BASE, "source_and_conditions": _CONDITIONS}
+    return {"kind": "measured_impedance", "points": points, "base_assembly": copy.deepcopy(_BASE), "source_and_conditions": _CONDITIONS}
 
 
 def _optimizable(**changes: object) -> dict[str, object]:
@@ -150,13 +152,34 @@ def test_a_table_missing_only_some_imaginary_parts_is_refused() -> None:
         _ENTRY.validate_python(_fixed(material=table))
 
 
-def test_a_table_the_physics_contract_refuses_is_refused_here_too() -> None:
-    """跟物理用的實測阻抗表同一份契約：頻率沒有嚴格遞增，物理那邊不收，這裡也不收。"""
-    table = _table(imag=False)
+def _swap_two_rows(table: dict[str, object]) -> None:
     points = cast(list[dict[str, object]], table["points"])
     points[1], points[2] = points[2], points[1]
-    with pytest.raises(ValueError, match="嚴格遞增"):
+
+
+def _drop_base_kind(table: dict[str, object]) -> None:
+    del cast(dict[str, object], table["base_assembly"])["kind"]
+
+
+@pytest.mark.parametrize(("break_it", "message"), [(_swap_two_rows, "嚴格遞增"), (_drop_base_kind, "kind")])
+def test_a_table_the_physics_contract_refuses_is_refused_here_too(break_it: Callable[[dict[str, object]], None],
+                                                                   message: str) -> None:
+    """跟物理用的實測阻抗表同一份契約：物理那邊不收的原始表（頻率沒嚴格遞增、底構造沒寫 kind），這裡也不收。"""
+    physics_table, table = _table(), _table(imag=False)
+    break_it(physics_table)
+    break_it(table)
+    with pytest.raises(ValueError, match=message):
+        MeasuredImpedance.model_validate(physics_table)
+    with pytest.raises(ValueError, match=message):
         _ENTRY.validate_python(_fixed(material=table))
+
+
+def test_a_serialized_physics_table_loads_and_converts_back_unchanged() -> None:
+    """物理用的實測阻抗表寫成 JSON（含補值規則版本、出處頭尾空白）拿來當固定材料，轉回物理一模一樣。"""
+    physics = MeasuredImpedance.model_validate({**_table(), "source_and_conditions": f"  {_CONDITIONS}\n"})
+    entry = _ENTRY.validate_python(_fixed(material=physics.model_dump(mode="json")))
+    assert isinstance(entry, library.FixedEntry)
+    assert entry.surface_material() == physics
 
 
 def _thickness(**changes: object) -> dict[str, object]:

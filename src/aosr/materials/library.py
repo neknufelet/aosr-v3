@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Final, Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictStr, field_validator, model_validator
 
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, load_material_gradient_settings
@@ -163,14 +164,26 @@ class MeasuredPoint(BaseModel):
 
 
 class MeasuredTable(BaseModel):
-    """實測阻抗表（固定材料用）：跟物理用的實測阻抗表同一份契約，只多一條「整張可以沒有虛部」。"""
+    """實測阻抗表（固定材料用）：跟物理用的實測阻抗表同一份契約，只多一條「整張可以沒有虛部」。
 
-    model_config = _FROZEN
+    字串不去頭尾空白（物理那邊原樣存）；原始文件的底構造要明寫 kind（物理那邊對原始文件的同一條）。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
     kind: Literal["measured_impedance"]
     points: tuple[MeasuredPoint, ...] = Field(min_length=2)
     base_assembly: Assembly = Field(description="base_assembly（表外補值用的同一面牆底構造；物理契約必填）")
     source_and_conditions: str = Field(min_length=1)
+    fill_rule: Literal["log_linear_table_base_assembly_outside_v1"] = Field(
+        default="log_linear_table_base_assembly_outside_v1", description="fill_rule（補值規則版本；原樣交給物理）")
+
+    @field_validator("base_assembly", mode="before")
+    @classmethod
+    def _base_kind_given(cls, value: object) -> object:
+        if isinstance(value, Mapping) and "kind" not in value:
+            raise ValueError("必填底構造的種類代號 kind（assembly）")
+        return value
 
     @property
     def imaginary_missing(self) -> bool:
@@ -183,7 +196,7 @@ class MeasuredTable(BaseModel):
                                             imag_pa_s_m=0.0 if row.imag_pa_s_m is None else row.imag_pa_s_m)
                      for row in self.points)
         return MeasuredImpedance(points=rows, base_assembly=self.base_assembly,
-                                 source_and_conditions=self.source_and_conditions)
+                                 source_and_conditions=self.source_and_conditions, fill_rule=self.fill_rule)
 
     @model_validator(mode="after")
     def _all_or_none(self) -> Self:
