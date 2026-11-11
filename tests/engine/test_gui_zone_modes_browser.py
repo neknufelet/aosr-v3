@@ -311,7 +311,7 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         # 重新限定後拿到只剩一種，最後一種拿不掉（空清單伺服器整份拒收）：勾還在、清單不動、照講。
         page.locator("#zone-limit-x0-whole_wall").uncheck()
         page.locator("#zone-limit-x0-whole_wall").check()  # 打勾時清單自己攤開
-        for choice in [entry for entry in _modes(page, "x0")["whole_wall"]["allowed"] if entry != "none"]:
+        for choice in [entry for entry in cast(list[str], _modes(page, "x0")["whole_wall"]["allowed"]) if entry != "none"]:
             page.locator(f"#zone-allow-x0-whole_wall-{choice}").uncheck()
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
         page.locator("#zone-allow-x0-whole_wall-none").click()  # 想拿掉最後一種
