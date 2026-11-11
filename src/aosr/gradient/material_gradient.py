@@ -32,7 +32,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import TypeAdapter
 
-from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.material_gradient import (
     MOUNT_ON_WALL, MOUNT_RIGID, MOUNTS, DescentSettings, MaterialGradientSettings, Mount,
 )
@@ -46,6 +45,7 @@ from aosr.materials.construction_diff import ConstructionTemplate, build_templat
 from aosr.materials.construction_models import (
     AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
 )
+from aosr.materials.search_library import PresetMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, TemplateImpedances, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import (
@@ -282,7 +282,7 @@ def wall_surface_ids() -> tuple[str, ...]:
 
 
 def _surface_design(surface_id: str, preset_id: str, settings: MaterialGradientSettings,
-                    presets: Mapping[str, ConstructionPreset], *, mount: Mount = MOUNT_RIGID,
+                    presets: Mapping[str, PresetMaterial], *, mount: Mount = MOUNT_RIGID,
                     kept: Mapping[str, SurfaceMaterial] | None = None) -> SurfaceDesign:
     preset = presets.get(preset_id)
     if preset is None:
@@ -360,7 +360,7 @@ def _plain_design(surface_id: str, kept: Mapping[str, SurfaceMaterial] | None,
 
 
 def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
-                         presets: Sequence[ConstructionPreset], *,
+                         presets: Sequence[PresetMaterial], *,
                          kept: Mapping[str, SurfaceMaterial] | None = None,
                          mount: Mount = MOUNT_RIGID) -> tuple[SurfaceDesign, ...]:
     """一串（面代號, preset id 或 None）→ 每面的設計。面數不限，面代號不可重複。
@@ -382,7 +382,7 @@ def designs_from_presets(surfaces: Sequence[tuple[str, str | None]], settings: M
 
 
 def wall_designs_from_presets(preset_ids: Sequence[str | None], settings: MaterialGradientSettings,
-                              presets: Sequence[ConstructionPreset], *,
+                              presets: Sequence[PresetMaterial], *,
                               kept: Mapping[str, SurfaceMaterial] | None = None,
                               mount: Mount = MOUNT_RIGID) -> tuple[SurfaceDesign, ...]:
     """今天的替身只有六面：照 ``Wall.all()`` 給六個 preset id（或 None），面代號是牆名；``kept``、``mount`` 同

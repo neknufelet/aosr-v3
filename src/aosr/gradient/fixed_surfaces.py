@@ -13,12 +13,13 @@ from typing import Annotated
 
 from pydantic import AfterValidator
 
-from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
+from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import SCHEME_MATERIAL as SCHEME_MATERIAL, MaterialGradientSettings, Mount
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
 from aosr.gradient.material_gradient import SurfaceDesign, designs_from_presets
+from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.report_surfaces import WholeWallZone
 
@@ -65,7 +66,7 @@ def fixed_materials(fixed: Mapping[str, str]) -> dict[str, SurfaceMaterial]:
 
 
 def designs_with_fixed(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
-                       presets: Sequence[ConstructionPreset], *, kept: Mapping[str, SurfaceMaterial], mount: Mount,
+                       presets: Sequence[PresetMaterial], *, kept: Mapping[str, SurfaceMaterial], mount: Mount,
                        fixed_surfaces: Mapping[str, str]) -> tuple[SurfaceDesign, ...]:
     """固定面強制用無樣板、無變數的常數材料（保留字那幾面就是 ``kept`` 那一面）；其他面的原牆與安裝方式照舊。"""
     fixed_surfaces = expanded_fixed_surfaces(fixed_surfaces, tuple(name for name, _ in surfaces))
