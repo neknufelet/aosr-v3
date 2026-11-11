@@ -5,10 +5,12 @@
 照搜尋開跑那一段（``aosr.gradient.cli`` 的 ``start``）的同一組取法，免得建出來的替身開跑時被拒：
 完整模型算子照 ``export_operators`` 的預設網格、頻率軸照方案場景的低頻軸、原牆照 ``run.scene_wall_materials``。
 步驟：開跑前核對（方案有低頻軸、原牆能貼）→ 匯出完整模型 → 訓練與留出材料（:mod:`aosr.gradient.surrogate_training`）
-→ 建模（停止規則照 ``fem_reduced.toml``：殘差達標或完整解預算用完；預算可用 ``--max-full-solves`` 換，照實記在建模帳裡）
+→ 建模（停止規則照 ``fem_reduced.toml``：殘差達標或完整解預算用完。``--stop-residual``、``--max-full-solves`` 只換這一次建模的
+停止值與預算，設定檔預設不動；換了照實寫進建模帳，建模帳在 manifest 與輸入雜湊裡，驗證收據對的就是它，等於進了替身身分）
 → 一定跑留出驗證、寫驗證收據 → 兩把尺都過才補完整模型指紋 → 用搜尋開跑那一道准用閘門核
 （``run.gated_surrogate``、``check_surrogate_matches_scheme``、``check_surrogate_axis_covers_scoring``）→ 整個資料夾換名進格子。
-驗證或閘門沒過：照實寫 ``result.json``、留在建模資料夾、不放進格子，離開碼 4。被停（SIGTERM／SIGINT）離開碼 3，不接續。
+驗證或閘門沒過：照實寫 ``result.json``、留在建模資料夾、不放進格子，離開碼 4。被停（SIGTERM／SIGINT）離開碼 3，不接續；
+開始換名進格子之後才到的停止只記下、不打斷（見 :class:`_StopGate`）。
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ import json
 import signal
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
@@ -81,11 +83,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--replace", type=Path, default=None,
                         help="格子裡已經有一份（例如閘門拒收的舊替身）：新的核過之後把舊的整個搬到這裡，再放新的")
     parser.add_argument("--max-full-solves", type=int, default=None,
-                        help="建模的完整解預算；不給照 fem_reduced.toml（停止規則不變：殘差達標或預算用完就停）")
+                        help="這一次建模的完整解預算；不給照 fem_reduced.toml（停止規則不變：殘差達標或預算用完就停）")
+    parser.add_argument("--stop-residual", type=float, default=None,
+                        help="這一次建模的停止殘差；不給照 fem_reduced.toml（只在這一次生效，照實記進建模帳）")
     parser.add_argument("--workers", type=int, default=None, help="完整解行程數；不給照 surrogate_training.toml")
     parser.add_argument("--dense-threads", type=int, default=None, help="稠密段 BLAS 緒數；不給＝實體核數")
-    parser.add_argument("--training-settings", type=Path, default=None,
-                        help="訓練／留出抽法設定；不給照 surrogate_training.toml（考卷縮組數用）")
     return parser
 
 
@@ -102,21 +104,54 @@ def _rebuild_hint(stop_reason: str) -> str:
     if stop_reason == STOP_BUDGET:
         return f"建模停止原因：{stop_reason}——加大完整解預算（max_full_solves）重建可能會過"
     return (f"建模停止原因：{stop_reason}——照同樣設定重建結果一模一樣（固定種子），加預算沒用；"
-            "要過得改建模停止值或訓練抽法，那要另外決定")
+            "要過得給這一次建模更嚴的停止殘差（stop_residual）")
+
+
+class _StopGate:
+    """停止訊號（SIGTERM／SIGINT／SIGHUP）的處理函式：平常收到就打斷（離開碼 3）；``holding`` 打開之後收到只記下、不打斷，
+    而且打開了就不再關——放進格子那一刻起這一次建模就是建好了，晚到的停止不准把它翻成「被停」，也不准把退舊、入新、
+    寫判決三步打斷在中間（格子空掉或判決跟格子對不上）。用 Python 層的旗標、不用 ``pthread_sigmask``：完整解行程池、
+    BLAS 都開緒，作業系統可能把訊號交給沒擋住的緒；Python 的訊號處理函式則一律在主緒跑，旗標擋得全。"""
+
+    def __init__(self) -> None:
+        self.holding = False
+        self.deferred: list[int] = []
+
+    def __call__(self, signum: int, frame: FrameType | None) -> None:
+        if self.holding:
+            self.deferred.append(signum)
+            return
+        raise KeyboardInterrupt
+
+
+STOPS: Final = _StopGate()
 
 
 def _install(stage: Path, slot: Path, replace: Path | None) -> str | None:
-    """整個資料夾換名進格子；格子已有東西時只在給了 ``--replace`` 才先把舊的搬走（同一顆磁碟的換名，不複製）。"""
+    """整個資料夾換名進格子；格子已有東西時只在給了 ``--replace`` 才先把舊的搬走（同一顆磁碟的換名，不複製）。
+    新的換不進去（例如跨磁碟換名失敗）就把舊的搬回格子再報原本的錯：格子不會因為一次失敗的安裝變空。"""
     retired = None
     if slot.exists():
         if replace is None:
             raise FileExistsError(f"替身格子 {slot} 已經有東西；要換掉舊的得給 --replace（舊的搬去哪）")
         replace.parent.mkdir(parents=True, exist_ok=True)
         slot.rename(replace)
-        retired = str(replace)
-    slot.parent.mkdir(parents=True, exist_ok=True)
-    stage.rename(slot)
-    return retired
+        retired = replace
+    try:
+        slot.parent.mkdir(parents=True, exist_ok=True)
+        stage.rename(slot)
+    except BaseException:
+        if retired is not None:
+            retired.rename(slot)
+        raise
+    return None if retired is None else str(retired)
+
+
+def _commit(gate: _StopGate, stage: Path, slot: Path, replace: Path | None,
+            record: Callable[[str | None], None]) -> None:
+    """放進格子＋寫 installed 判決是一段不被停打斷的提交：先關住停止訊號（見 :class:`_StopGate`），再換名、再寫判決。"""
+    gate.holding = True
+    record(_install(stage, slot, replace))
 
 
 @dataclass
@@ -151,10 +186,12 @@ def _open(args: argparse.Namespace) -> _Run:
     if slot.exists() and replace is None:
         raise FileExistsError(f"替身格子 {slot} 已經有東西；要換掉舊的得給 --replace")
     work.mkdir(parents=True, exist_ok=True)
-    sampling = load_surrogate_training_settings(args.training_settings or config_path("surrogate_training.toml"))
+    sampling = load_surrogate_training_settings(config_path("surrogate_training.toml"))
     settings = load_reduced_model_settings(config_path("fem_reduced.toml"))
-    if args.max_full_solves is not None:
-        settings = type(settings).model_validate({**settings.model_dump(), "max_full_solves": args.max_full_solves})
+    overrides = {name: value for name, value in (("max_full_solves", args.max_full_solves),
+                                                 ("stop_residual", args.stop_residual)) if value is not None}
+    if overrides:
+        settings = type(settings).model_validate({**settings.model_dump(), **overrides})
     workers = sampling.compute.workers if args.workers is None else args.workers
     scheme = load_scheme(args.scheme.resolve())
     progress = _Progress(work / PROGRESS_FILE, SurrogateProgress(
@@ -257,9 +294,9 @@ def build(args: argparse.Namespace) -> int:
         verdict("gate_refused", f"搜尋開跑那一道准用閘門不收（{type(error).__name__}：{error}），沒有放進格子")
         return EXIT_NOT_USABLE
     job.progress.phase("installing")
-    retired = _install(job.stage, job.slot, job.replace)
-    verdict("installed", "建好、留出驗證兩把尺都過、搜尋的准用閘門核過，已放進這份切法的格子",
-            slot_text=str(job.slot), retired=retired)
+    _commit(STOPS, job.stage, job.slot, job.replace, lambda retired: verdict(
+        "installed", "建好、留出驗證兩把尺都過、搜尋的准用閘門核過，已放進這份切法的格子",
+        slot_text=str(job.slot), retired=retired))
     return EXIT_INSTALLED
 
 
@@ -277,11 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_FAILED
 
 
-def _interrupt(signum: int, frame: FrameType | None) -> None:
-    raise KeyboardInterrupt
-
-
 if __name__ == "__main__":
     for number in SIGNALS:
-        signal.signal(number, _interrupt)
+        signal.signal(number, STOPS)
     raise SystemExit(main())

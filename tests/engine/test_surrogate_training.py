@@ -17,7 +17,7 @@ from aosr.config.paths import config_path
 from aosr.config.surrogate_training import SurrogateTrainingSettings, load_surrogate_training_settings
 from aosr.gradient import run
 from aosr.gradient.boundary import scheme_patch_keys
-from aosr.gradient.surrogate_training import MaterialSet, TrainingSets, original_walls
+from aosr.gradient.surrogate_training import TrainingSets, original_walls
 from aosr.materials.construction_models import MountedOnWall
 from aosr.reporting.scheme import Scheme
 from tests.engine._directivity import DIRECTIVITY
@@ -161,11 +161,3 @@ def test_settings_refusals(tmp_path: Path, old: str, new: str, message: str) -> 
     path = _write(tmp_path / "s.toml", BASE.replace(old, new, 1))
     with pytest.raises(ValueError, match=message):
         _sets(sampling=load_surrogate_training_settings(path))
-
-
-def test_shrunk_holdout_count_only_drops_random_sets(tmp_path: Path) -> None:
-    """考卷縮組數用的設定只少隨機組：固定那幾組（全部原牆、混搭）照舊在。"""
-    path = _write(tmp_path / "s.toml", BASE.replace("random_sets = 7", "random_sets = 1", 1))
-    holdout = _sets(sampling=load_surrogate_training_settings(path)).holdout_sets()
-    assert [item.label for item in holdout][:2] == ["全部原牆", "混搭（原牆與各家族厚度、空腔都取中間值輪流）"]
-    assert len(holdout) == 3 and isinstance(holdout[2], MaterialSet)

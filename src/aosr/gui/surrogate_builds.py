@@ -4,7 +4,7 @@
 - ``build.json``：方案代號、格子代號與路徑、請求、那一步的服務名與命令列；
 - ``scheme.json``：開建那一刻方案的快照（命令列指向它，不指向網頁之後還會再存的那一份）；
 - ``work/``：建模命令列（``aosr.gradient.surrogate_build``）的資料夾：``progress.json``、``result.json``、先建在這裡的 ``stage/``；
-- ``steps/0.log``、``steps/0.exit.json``：輸出與離開碼（``gradient_exec`` 寫）。
+- ``steps/<第幾步>.log``、``steps/<第幾步>.exit.json``：輸出與離開碼（``gradient_exec`` 寫；建模只有第 0 步）。
 
 建模跟搜尋共用開服務那一層（``GradientJobs.launcher``）、開跑鎖與服務名前綴：整台機器同時只跑一件第三階段的重計算，
 建模中不能開搜尋、搜尋中不能開建模。建好、留出驗證兩把尺都過、搜尋開跑那一道准用閘門核過，命令列才把整份換名進格子
@@ -70,13 +70,15 @@ RUNNING_STATES: Final = ("preparing", "building", "validating", "checking", "ins
 class SurrogateRequest(BaseModel):
     """開建時可以選的幾格；全部有預設。
 
-    ``max_full_solves`` 是建模的完整解預算（不給照 ``fem_reduced.toml``）：停止規則不變（殘差達標或預算用完就停），
-    建完一定跑留出驗證、兩把尺都過才放進格子。``workers`` 是完整解行程數（不給照 ``surrogate_training.toml``）、
-    ``dense_threads`` 是稠密段的 BLAS 緒數（不給＝實體核數）。``replace``：格子裡已經有一份時，新的核過之後換掉它。
+    ``max_full_solves``（完整解預算）與 ``stop_residual``（停止殘差）只換這一次建模的值，設定檔 ``fem_reduced.toml`` 的預設
+    不動：停止規則不變（殘差達標或預算用完就停），換了照實寫進建模帳（替身身分的一部分）；建完一定跑留出驗證、兩把尺
+    都過才放進格子。``workers`` 是完整解行程數（不給照 ``surrogate_training.toml``）、``dense_threads`` 是稠密段的
+    BLAS 緒數（不給＝實體核數）。``replace``：格子裡已經有一份時，新的核過之後換掉它。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     max_full_solves: int | None = Field(default=None, ge=1, strict=True)
+    stop_residual: float | None = Field(default=None, gt=0.0, lt=1.0)
     workers: int | None = Field(default=None, ge=1, strict=True)
     dense_threads: int | None = Field(default=None, ge=1, strict=True)
     replace: bool = False
@@ -112,16 +114,14 @@ def _read[T: BaseModel](path: Path, kind: type[T]) -> tuple[T | None, str | None
 
 
 class SurrogateBuilds:
-    """跟 :class:`GradientJobs` 共用開服務那一層、開跑鎖、方案讀法與能力表；``training_settings`` 只給考卷縮組數用。"""
+    """跟 :class:`GradientJobs` 共用開服務那一層、開跑鎖、方案讀法與能力表。"""
 
-    def __init__(self, jobs: GradientJobs, *, python: str = sys.executable,
-                 training_settings: Path | None = None) -> None:
+    def __init__(self, jobs: GradientJobs, *, python: str = sys.executable) -> None:
         self.jobs = jobs
         self.data_dir = jobs.data_dir
         self.root = self.data_dir / SLOTS_DIR / BUILDS_DIR
         self.root.mkdir(parents=True, exist_ok=True)
         self.python = python
-        self.training_settings = None if training_settings is None else training_settings.resolve()
 
     # ---- 檔 ----
 
@@ -237,7 +237,7 @@ class SurrogateBuilds:
     def preview(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
         """不開建：格子在哪、已經有沒有、這份切法最近一次建模、預設值、前幾次花了多久、現在忙不忙。"""
         _, slot, key = self._checked(scheme_id)
-        sampling = load_surrogate_training_settings(self.training_settings or config_path("surrogate_training.toml"))
+        sampling = load_surrogate_training_settings(config_path("surrogate_training.toml"))
         reduced = load_reduced_model_settings(config_path("fem_reduced.toml"))
         with self.jobs.lock:
             busy = self.jobs.active_job()
@@ -272,12 +272,12 @@ class SurrogateBuilds:
                 arguments.extend(("--replace", str(self.data_dir / SLOTS_DIR / RETIRED_DIR / f"{key}-{build_id}")))
             if request.max_full_solves is not None:
                 arguments.extend(("--max-full-solves", str(request.max_full_solves)))
+            if request.stop_residual is not None:
+                arguments.extend(("--stop-residual", repr(request.stop_residual)))
             if request.workers is not None:
                 arguments.extend(("--workers", str(request.workers)))
             if request.dense_threads is not None:
                 arguments.extend(("--dense-threads", str(request.dense_threads)))
-            if self.training_settings is not None:
-                arguments.extend(("--training-settings", str(self.training_settings)))
             argv = (self.python, "-m", "aosr.gui.gradient_exec", str(self._exit_path(build_id)), str(self._log_path(build_id)),
                     "--", self.python, "-m", "aosr.gradient.surrogate_build", *arguments)
             build = SurrogateBuild(build_id=build_id, scheme_id=scheme_id, slot_key=key, slot=str(slot),

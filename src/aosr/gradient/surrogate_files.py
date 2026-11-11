@@ -111,7 +111,7 @@ def estimate(progress: SurrogateProgress, now: float) -> dict[str, object]:
     每次完整解秒數）；輪越後越慢（秩越大，投影與殘差越貴），殘差先達標會提早停，所以兩頭都可能偏。
     留出驗證段：照這一段已解的速度外推剩下的點。
     """
-    elapsed = now - progress.started_at
+    elapsed = max(0.0, now - progress.started_at)  # 系統時間被往回調時不給負秒數
     base: dict[str, object] = {"label": ESTIMATE_LABEL, "elapsed_s": elapsed, "remaining_s": None}
     validation_points = (None if progress.holdout_sets is None or progress.axis_points is None
                          else progress.holdout_sets * progress.axis_points)
@@ -136,13 +136,13 @@ def estimate(progress: SurrogateProgress, now: float) -> dict[str, object]:
         if total is None:
             return base | {"basis": "留出驗證點數還沒記下"}
         if done > 0:
-            rate = (now - progress.phase_started_at) / done
+            rate = max(0.0, now - progress.phase_started_at) / done
             basis = f"留出驗證已解 {done}／{total} 點，照這一段的速度外推"
         elif per_solve is not None:
             rate = per_solve
             basis = f"留出驗證 {total} 點 × 建模量到的每次完整解 {per_solve:.2f} 秒"
         else:
             return base | {"basis": "留出驗證剛開始，還量不到速度"}
-        remaining = (total - done) * rate
+        remaining = max(0, total - done) * rate
         return base | {"remaining_s": remaining, "validation_remaining_s": remaining, "basis": basis}
     return base | {"remaining_s": 0.0, "basis": "建完、驗完，正在用搜尋開跑那一道閘門核對並放進格子"}

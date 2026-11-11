@@ -1,14 +1,19 @@
 """#1098 網頁替新切法建替身：真的建模命令列（小房間）經工作管理器開、留出驗證、准用閘門、換名進格子；
 停止、驗證沒過、格子已有、忙碌互擋、進度與「推估」、網址。
 
-真跑的幾題開本機行程代替服務（``_local_launcher``），建模命令列真的匯出完整模型、真的建、真的驗；
-留出組數用考卷縮過的抽法設定（只少隨機組），產品預設的抽法另有一題真跑（停止那一題，跑到留出驗證中途才停）。
+真跑的幾題開本機行程代替服務（``_local_launcher``），建模命令列真的匯出完整模型、真的建、真的驗，抽法與留出組數
+一律照產品設定檔、一組都不少：
+- 照產品預設的停止值建：這間小房間留出驗證沒過（殘差在抽到的候選上先達標就停）→ 不放進格子、閘門拒收、網頁照實回；
+- 這一次建模給更嚴的停止殘差（只在這一次生效、記進建模帳）：留出全跑、真的全過才放進格子，搜尋那一道閘門收。
 其餘題開服務那一層換成假的（``test_gui_gradient_jobs.FakeLauncher``），狀態與檔案由考卷寫。
 """
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -24,7 +29,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient import run
-from aosr.gradient.surrogate_build import _rebuild_hint
+from aosr.gradient.surrogate_build import _commit, _install, _rebuild_hint, _StopGate
 from aosr.gradient.surrogate_files import (
     ESTIMATE_LABEL, MODEL_FILE, PROGRESS_FILE, RESULT_FILE, STAGE_DIR, TRAINING_FILE, RoundRecord, SurrogateProgress,
     SurrogateResult, estimate,
@@ -53,16 +58,8 @@ Record = dict[str, object]
 RUNNING = ("preparing", "building", "validating", "checking", "installing", "stopping")
 WAIT_S = 300.0
 QUICK = SurrogateRequest(workers=1, dense_threads=1)
-SHRUNK_HOLDOUTS = 1
-
-
-def _training_settings(directory: Path) -> Path:
-    """考卷縮組數的抽法設定：留出隨機組只留一組（全部原牆、混搭兩組固定的照舊），其餘一字不改。"""
-    text = config_path("surrogate_training.toml").read_text(encoding="utf-8")
-    assert text.count("random_sets = 7") == 1
-    path = directory / "surrogate_training.toml"
-    path.write_text(text.replace("random_sets = 7", f"random_sets = {SHRUNK_HOLDOUTS}"), encoding="utf-8")
-    return path
+# 這一次建模更嚴的停止殘差（設定檔預設 0.001 不動）；暫存區實量：這間小房間 160 次停、九組留出全過（帶能量 0.0003 dB）。
+STRICT = QUICK.model_copy(update={"stop_residual": 1e-4})
 
 
 def _data(tmp_path: Path, case: Scheme | None = None, *, search: bool = True) -> Path:
@@ -76,10 +73,10 @@ def _data(tmp_path: Path, case: Scheme | None = None, *, search: bool = True) ->
     return data_dir
 
 
-def _managers(data_dir: Path, launcher: Launcher, training: Path | None) -> tuple[GradientJobs, SurrogateBuilds]:
+def _managers(data_dir: Path, launcher: Launcher) -> tuple[GradientJobs, SurrogateBuilds]:
     jobs = GradientJobs(data_dir, launcher=launcher, engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
                         scheme_lock=threading.RLock())
-    return jobs, SurrogateBuilds(jobs, training_settings=training)
+    return jobs, SurrogateBuilds(jobs)
 
 
 def _wait(builds: SurrogateBuilds, build_id: str, until: Callable[[Record], bool] | None = None) -> Record:
@@ -102,8 +99,8 @@ def _slot_npz(data_dir: Path) -> Path:
 def installed(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, SurrogateBuilds, Record]:
     directory = tmp_path_factory.mktemp("surrogate-build")
     data_dir = _data(directory)
-    _, builds = _managers(data_dir, LocalLauncher(directory), _training_settings(directory))
-    view = _wait(builds, str(builds.start(NAME, QUICK)["build_id"]))
+    _, builds = _managers(data_dir, LocalLauncher(directory))
+    view = _wait(builds, str(builds.start(NAME, STRICT)["build_id"]))
     assert view["state"] == "installed", view
     return data_dir, builds, view
 
@@ -129,16 +126,22 @@ def test_build_installs_a_surrogate_the_search_gate_accepts(installed: tuple[Pat
 
 
 def test_installed_build_records_progress_and_settings(installed: tuple[Path, SurrogateBuilds, Record]) -> None:
-    """抓進度檔沒記到每一輪、預算或停止值不是產品設定那一份、行程數沒照請求、留出點數算錯。"""
+    """抓進度檔沒記到每一輪、這一次的停止殘差沒記進建模帳（替身身分）或連預算也被換掉、行程數沒照請求、
+    留出組數不是產品設定那一份（少跑幾組就等於挑會過的樣本）。"""
     from aosr.config.fem_reduced import load_reduced_model_settings
+    from aosr.config.surrogate_training import load_surrogate_training_settings
+    from aosr.physics.fem_reduced_store import load_reduced
 
     _, _, view = installed
     progress = SurrogateProgress.model_validate(view["progress"])
     reduced = load_reduced_model_settings(config_path("fem_reduced.toml"))
-    assert progress.max_full_solves == reduced.max_full_solves and progress.stop_residual == reduced.stop_residual
+    assert progress.max_full_solves == reduced.max_full_solves and progress.stop_residual == 1e-4 != reduced.stop_residual
+    stored = load_reduced(_slot_npz(installed[0])).ledger.settings
+    assert stored == reduced.model_copy(update={"stop_residual": 1e-4})
     assert progress.workers == 1 and progress.dense_threads == 1 and progress.patches == 7
-    assert progress.rounds and progress.rank == progress.rounds[-1].rank and progress.stop_reason
-    assert progress.holdout_sets == 2 + SHRUNK_HOLDOUTS
+    assert progress.rounds and progress.rank == progress.rounds[-1].rank and progress.stop_reason == STOP_RESIDUAL_MET
+    sampling = load_surrogate_training_settings(config_path("surrogate_training.toml"))
+    assert progress.holdout_sets == 2 + sampling.holdout.random_sets
     assert progress.holdout_sets is not None and progress.axis_points is not None
     assert progress.validation_total == progress.validation_done == progress.holdout_sets * progress.axis_points
     training = json.loads((_slot_npz(installed[0]).parent / TRAINING_FILE).read_text(encoding="utf-8"))
@@ -149,26 +152,99 @@ def test_search_start_finds_the_built_surrogate(installed: tuple[Path, Surrogate
     """抓建好放進格子之後，網頁開搜尋還是說要先建替身、或命令列指向別處。"""
     data_dir = installed[0]
     launcher = FakeLauncher()
-    jobs, _ = _managers(data_dir, launcher, None)
+    jobs, _ = _managers(data_dir, launcher)
     view = jobs.start(NAME, GradientRequest(device="cpu"))
     argv = launcher.launched[0][1]
     assert argv[argv.index("--surrogate") + 1] == str(_slot_npz(data_dir)) and view["state"] == "checking"
 
 
-def test_existing_slot_needs_replace_and_replacing_retires_the_old_one(
-        installed: tuple[Path, SurrogateBuilds, Record], tmp_path: Path) -> None:
-    """抓格子已有替身還照樣重建蓋掉、或給了 replace 卻把舊的直接刪掉（舊的要整份搬去 retired）。"""
-    data_dir, builds, first = installed
+def test_existing_slot_needs_replace(installed: tuple[Path, SurrogateBuilds, Record]) -> None:
+    """抓格子已有替身還照樣重建（之後換名會蓋掉一份核過的替身）。"""
+    _, builds, _ = installed
     with pytest.raises(ActionRefused, match="replace"):
-        builds.start(NAME, QUICK)
-    old = json.loads(receipt_path(_slot_npz(data_dir)).read_text(encoding="utf-8"))
-    view = _wait(builds, str(builds.start(NAME, QUICK.model_copy(update={"replace": True}))["build_id"]))
-    assert view["state"] == "installed", view
-    result = cast(Record, view["result"])
-    retired = Path(str(result["retired"]))
-    assert retired.parent == data_dir / SLOTS_DIR / RETIRED_DIR and retired.name.startswith(str(first["slot_key"]))
-    assert json.loads(receipt_path(retired / SURROGATE_FILE).read_text(encoding="utf-8")) == old
-    assert missing_parts(_slot_npz(data_dir)) == []
+        builds.start(NAME, STRICT)
+
+
+def test_install_moves_the_old_slot_aside_only_when_told(tmp_path: Path) -> None:
+    """抓格子已有東西卻直接蓋掉、或給了搬去哪卻把舊的刪掉（舊的要整份搬走、內容不動）。"""
+    stage, slot, retired = tmp_path / "stage", tmp_path / "slots" / "key", tmp_path / "retired" / "key-old"
+    for folder, text in ((stage, "new"), (slot, "old")):
+        folder.mkdir(parents=True)
+        (folder / SURROGATE_FILE).write_text(text, encoding="utf-8")
+    with pytest.raises(FileExistsError, match="--replace"):
+        _install(stage, slot, None)
+    assert (slot / SURROGATE_FILE).read_text(encoding="utf-8") == "old" and stage.is_dir()
+    assert _install(stage, slot, retired) == str(retired)
+    assert (slot / SURROGATE_FILE).read_text(encoding="utf-8") == "new" and not stage.exists()
+    assert (retired / SURROGATE_FILE).read_text(encoding="utf-8") == "old"
+
+
+
+def _slot_pair(tmp_path: Path) -> tuple[Path, Path, Path]:
+    stage, slot, retired = tmp_path / "stage", tmp_path / "slots" / "key", tmp_path / "retired" / "key-old"
+    for folder, text in ((stage, "new"), (slot, "old")):
+        folder.mkdir(parents=True)
+        (folder / SURROGATE_FILE).write_text(text, encoding="utf-8")
+    return stage, slot, retired
+
+
+def test_install_puts_the_old_slot_back_when_the_new_one_cannot_go_in(tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓舊的搬走之後新的換不進去（跨磁碟換名失敗）時格子空掉：舊的要搬回格子、原本的錯照報、新的留在原地。"""
+    stage, slot, retired = _slot_pair(tmp_path)
+    rename = Path.rename
+
+    def failing(self: Path, target: Path) -> Path:
+        if self == stage:
+            raise OSError(errno.EXDEV, "模擬跨磁碟換名失敗")
+        return rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing)
+    with pytest.raises(OSError, match="跨磁碟"):
+        _install(stage, slot, retired)
+    assert (slot / SURROGATE_FILE).read_text(encoding="utf-8") == "old" and not retired.exists()
+    assert (stage / SURROGATE_FILE).read_text(encoding="utf-8") == "new"
+
+
+def _stop_now(gate: _StopGate, seen: int) -> None:
+    """真的送 SIGTERM 給自己，等主緒的處理函式跑完（擋住時記下；沒擋住時在這裡丟 KeyboardInterrupt）。"""
+    os.kill(os.getpid(), signal.SIGTERM)
+    deadline = time.monotonic() + 5.0
+    while len(gate.deferred) == seen and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert len(gate.deferred) == seen + 1, "停止訊號沒有被記下"
+
+
+@pytest.mark.parametrize("moment", ["退舊之後", "入新之後"])
+def test_stop_during_install_is_recorded_not_obeyed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moment: str) -> None:
+    """抓換名進格子途中被停打斷：退舊之後被停格子空掉、入新之後被停判決沒寫（新替身在格子裡卻回「被停」）；
+    放進去之後晚到的停止也不准把它翻成被停。對照：還沒開始提交時同一個處理函式照常打斷。"""
+    stage, slot, retired = _slot_pair(tmp_path)
+    gate = _StopGate()
+    previous = signal.signal(signal.SIGTERM, gate)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(5.0)
+        rename = Path.rename
+        source = slot if moment == "退舊之後" else stage
+
+        def stopping(self: Path, target: Path) -> Path:
+            moved = rename(self, target)
+            if self == source:
+                _stop_now(gate, 0)
+            return moved
+
+        recorded: list[str | None] = []
+        monkeypatch.setattr(Path, "rename", stopping)
+        _commit(gate, stage, slot, retired, recorded.append)
+        monkeypatch.undo()
+        _stop_now(gate, 1)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert recorded == [str(retired)] and gate.deferred == [signal.SIGTERM, signal.SIGTERM]
+    assert (slot / SURROGATE_FILE).read_text(encoding="utf-8") == "new"
+    assert (retired / SURROGATE_FILE).read_text(encoding="utf-8") == "old" and not stage.exists()
 
 
 # ---- 真跑：預算給太小、留出驗證不過 ----
@@ -176,7 +252,7 @@ def test_existing_slot_needs_replace_and_replacing_retires_the_old_one(
 def test_starved_build_fails_validation_and_never_enters_the_slot(tmp_path: Path) -> None:
     """抓留出驗證沒過也放進格子、或結果沒照實寫兩個差與兩把尺；搜尋開跑要照舊回「要先建替身」。"""
     data_dir = _data(tmp_path)
-    _, builds = _managers(data_dir, LocalLauncher(tmp_path), _training_settings(tmp_path))
+    _, builds = _managers(data_dir, LocalLauncher(tmp_path))
     view = _wait(builds, str(builds.start(NAME, QUICK.model_copy(update={"max_full_solves": 8}))["build_id"]))
     assert view["state"] == "not_validated", view
     result = SurrogateResult.model_validate(view["result"])
@@ -186,7 +262,41 @@ def test_starved_build_fails_validation_and_never_enters_the_slot(tmp_path: Path
     assert not slot_dir(data_dir, scheme()).exists()
     stage = tmp_path / "data" / SLOTS_DIR / "builds" / str(view["build_id"]) / "work" / STAGE_DIR
     assert receipt_path(stage / MODEL_FILE).is_file() and not operators_path(stage / MODEL_FILE).exists()
-    jobs, _ = _managers(data_dir, FakeLauncher(), None)
+    jobs, _ = _managers(data_dir, FakeLauncher())
+    with pytest.raises(NeedsSurrogate):
+        jobs.start(NAME, GradientRequest())
+
+
+# ---- 真跑：產品預設的停止值、這間小房間留出驗證沒過 ----
+
+def test_default_stop_fails_holdouts_here_and_the_gate_refuses_it(tmp_path: Path) -> None:
+    """照產品預設建（停止值、預算、抽法、留出組數一格不換）：這間小房間殘差在抽到的候選上先達標就停，留出沒過。
+    抓沒過也放進格子、閘門照樣收、網頁沒照實回（判決、兩個差、兩把尺、重建有沒有用），或開搜尋不再要求先建替身。"""
+    from aosr.config.fem_reduced import load_reduced_model_settings
+    from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
+
+    data_dir = _data(tmp_path)
+    _, builds = _managers(data_dir, LocalLauncher(tmp_path))
+    view = _wait(builds, str(builds.start(NAME, QUICK)["build_id"]))
+    assert view["state"] == "not_validated", view
+    result = SurrogateResult.model_validate(view["result"])
+    reduced = load_reduced_model_settings(config_path("fem_reduced.toml"))
+    progress = SurrogateProgress.model_validate(view["progress"])
+    assert progress.stop_residual == reduced.stop_residual and progress.max_full_solves == reduced.max_full_solves
+    assert result.stop_reason == STOP_RESIDUAL_MET and result.within_contract is False
+    over = [name for name, ruler in result.rulers.items()
+            if max((result.frequency_db_by_seat if name == "frequency" else result.band_db_by_seat).values()) > ruler]
+    assert over and "加預算沒用" in result.message and "stop_residual" in result.message
+    assert not slot_dir(data_dir, scheme()).exists()
+    stage = data_dir / SLOTS_DIR / "builds" / str(view["build_id"]) / "work" / STAGE_DIR / MODEL_FILE
+    base = scheme()
+    operators = export_operators(base, capabilities=load_capabilities(config_path("capabilities.toml")),
+                                 directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    points = run.SchemePoints(points_hex(operators.source_points), points_hex(operators.receiver_points))
+    with pytest.raises(ReducedModelNotValidated):
+        run.gated_surrogate(stage, mesh_hash=operators.mesh_hash, physics_identity=operators.physics_identity,
+                            points=points)
+    jobs, _ = _managers(data_dir, FakeLauncher())
     with pytest.raises(NeedsSurrogate):
         jobs.start(NAME, GradientRequest())
 
@@ -203,7 +313,7 @@ def test_rebuild_hint_says_whether_a_bigger_budget_can_help() -> None:
 def test_stopping_mid_validation_discards_the_build(tmp_path: Path) -> None:
     """抓停了還繼續、停完沒留離開碼 3、或建到一半的被放進格子；用產品預設的抽法（留出組數照設定檔）。"""
     data_dir = _data(tmp_path)
-    _, builds = _managers(data_dir, LocalLauncher(tmp_path), None)
+    _, builds = _managers(data_dir, LocalLauncher(tmp_path))
     build_id = str(builds.start(NAME, QUICK)["build_id"])
     running = _wait(builds, build_id, lambda view: view["state"] == "validating" or view["state"] not in RUNNING)
     assert running["state"] == "validating", running
@@ -222,7 +332,7 @@ def _fake(tmp_path: Path, case: Scheme | None = None, *, search: bool = True
           ) -> tuple[Path, FakeLauncher, GradientJobs, SurrogateBuilds]:
     data_dir = _data(tmp_path, case, search=search)
     launcher = FakeLauncher()
-    jobs, builds = _managers(data_dir, launcher, None)
+    jobs, builds = _managers(data_dir, launcher)
     return data_dir, launcher, jobs, builds
 
 
@@ -252,7 +362,7 @@ def test_command_line_snapshots_the_scheme_and_goes_through_the_wrapper(tmp_path
     """抓命令列指向網頁會再改的方案檔、沒走包一層、沒指到這份切法的格子、少了能力表，或服務名不在共用前綴底下
     （不在就躲過「整台一次一跑」）。"""
     data_dir, launcher, _, builds = _fake(tmp_path)
-    view = builds.start(NAME, SurrogateRequest(max_full_solves=900, workers=2, dense_threads=3))
+    view = builds.start(NAME, SurrogateRequest(max_full_solves=900, stop_residual=1e-4, workers=2, dense_threads=3))
     unit, argv, env, _ = launcher.launched[0]
     assert unit.startswith(BUILD_UNIT_PREFIX) and unit == view["unit"]
     assert argv[1:3] == ["-m", "aosr.gui.gradient_exec"] and argv[argv.index("--") + 1:][1:3] == ["-m", "aosr.gradient.surrogate_build"]
@@ -261,9 +371,18 @@ def test_command_line_snapshots_the_scheme_and_goes_through_the_wrapper(tmp_path
         data_dir / "schemes" / f"{NAME}.json").read_text(encoding="utf-8")
     assert argv[argv.index("--slot") + 1] == str(slot_dir(data_dir, scheme()))
     assert argv[argv.index("--capabilities") + 1] == str(config_path("capabilities.toml").resolve())
-    for flag, value in (("--max-full-solves", "900"), ("--workers", "2"), ("--dense-threads", "3")):
+    for flag, value in (("--max-full-solves", "900"), ("--stop-residual", "0.0001"), ("--workers", "2"),
+                        ("--dense-threads", "3")):
         assert argv[argv.index(flag) + 1] == value
-    assert "--replace" not in argv and "--training-settings" not in argv
+    assert "--replace" not in argv
+    launcher.active.clear()
+    slot_dir(data_dir, scheme()).mkdir(parents=True)
+    replacing = builds.start(NAME, SurrogateRequest(replace=True))
+    argv = launcher.launched[1][1]
+    retired = Path(argv[argv.index("--replace") + 1])
+    assert retired.parent == data_dir.resolve() / SLOTS_DIR / RETIRED_DIR
+    assert retired.name == f"{replacing['slot_key']}-{replacing['build_id']}"
+    assert "--stop-residual" not in argv and "--max-full-solves" not in argv
     assert env["OPENBLAS_NUM_THREADS"] == "1" and view["state"] == "preparing"
 
 
@@ -378,6 +497,10 @@ def test_estimate_is_labelled_and_extrapolates_measured_seconds() -> None:
                                     validation_total=846), 1050.0)
     assert validating["remaining_s"] == pytest.approx((846 - 100) * 0.5)
     assert estimate(_progress(phase="checking"), 1100.0)["remaining_s"] == 0.0
+    # 系統時間被往回調（現在比開始還早）：不給負秒數
+    assert estimate(_progress(), 900.0)["elapsed_s"] == 0.0
+    rolled = estimate(_progress(phase="validating", phase_started_at=1000.0, validation_done=100, validation_total=846), 900.0)
+    assert rolled["remaining_s"] == 0.0 and rolled["elapsed_s"] == 0.0
 
 
 def _serve(data_dir: Path, launcher: FakeLauncher, scenario: Callable[[httpx.AsyncClient], Awaitable[None]]) -> None:
