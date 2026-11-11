@@ -31,7 +31,8 @@ class PlanRefused(ValueError):
 class GradientRequest(BaseModel):
     """網頁開跑時可以選的幾格；全部有預設，什麼都不給就照預設跑。
 
-    ``max_steps`` 不給＝不帶 ``--max-steps``，照搜尋設定檔的預設（現在 60）；``max_depths`` 是牆 → 區代號 → 公尺。
+    ``max_steps`` 不給＝不帶 ``--max-steps``，照搜尋設定檔的預設（現在 60）；``max_depths`` 是牆 → 區代號 → 公尺；
+    ``frequency_batch`` 是替身每批求解幾個頻點（顯卡記憶體不夠時用；不給照命令列預設，一次全部）。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -39,6 +40,7 @@ class GradientRequest(BaseModel):
     mount: Mount = MOUNT_ON_WALL
     device: Device = "gpu"
     max_steps: int | None = Field(default=None, ge=1, strict=True)
+    frequency_batch: int | None = Field(default=None, ge=1, strict=True)
     max_depths: dict[str, dict[str, float]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -122,6 +124,8 @@ def start_arguments(plan: SearchPlan) -> list[str]:
         arguments.extend(("--fixed-surface", f"{surface}={material}"))
     for surface, depth in plan.max_depths.items():
         arguments.extend(("--max-depth", f"{surface}={depth!r}"))
+    if plan.request.frequency_batch is not None:
+        arguments.extend(("--frequency-batch", str(plan.request.frequency_batch)))
     if plan.request.max_steps is not None:
         arguments.extend(("--max-steps", str(plan.request.max_steps)))
     return arguments

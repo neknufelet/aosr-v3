@@ -115,7 +115,7 @@ def test_zoned_design_maps_to_patch_order_template_presets_and_frozen_scheme_mat
     assert dict(zip(plan.surfaces, plan.modes, strict=True))["ceiling@r0_c1"] == "keep_original"
     assert plan.family == SETTINGS.family[0].id and plan.max_steps == SETTINGS.descent.max_steps == 60
     arguments = start_arguments(plan)
-    assert "--max-steps" not in arguments and "--max-depth" not in arguments
+    assert "--max-steps" not in arguments and "--max-depth" not in arguments and "--frequency-batch" not in arguments
     assert arguments[:6] == ["--presets", ",".join(TEMPLATE if s in searched else "none" for s in surfaces),
                              "--mount", "on_wall", "--device", "gpu"]
     pairs = [arguments[index + 1] for index, word in enumerate(arguments) if word == "--fixed-surface"]
@@ -137,11 +137,11 @@ def test_whole_wall_and_single_full_rectangle_keys(kind: str, design: dict[str, 
 def test_steps_depths_family_mount_and_device_pass_through() -> None:
     """抓自訂步數、深度上限（公尺照原值）、家族、安裝方式、裝置沒照實帶進命令列。"""
     family = SETTINGS.family[-1]
-    request = GradientRequest(family=family.id, mount="rigid", device="cpu", max_steps=12,
+    request = GradientRequest(family=family.id, mount="rigid", device="cpu", max_steps=12, frequency_batch=16,
                               max_depths={"x0": {"r0_c0": 0.1}})
     plan = plan_search(_scheme(), _design(SEARCH), request, SETTINGS)
     arguments = start_arguments(plan)
-    assert plan.max_steps == 12 and arguments[-2:] == ["--max-steps", "12"]
+    assert plan.max_steps == 12 and arguments[-4:] == ["--frequency-batch", "16", "--max-steps", "12"]
     assert ["--max-depth", "x0@r0_c0=0.1"] == arguments[arguments.index("--max-depth"):arguments.index("--max-depth") + 2]
     assert {preset for preset in plan.presets if preset is not None} == {family.template_preset}
     assert arguments[2:6] == ["--mount", "rigid", "--device", "cpu"]
@@ -162,7 +162,8 @@ def test_plan_refusals_speak_plainly(design: dict[str, dict[str, str]], request_
 
 
 @pytest.mark.parametrize("fields", [{"max_steps": 0}, {"max_steps": 1.5}, {"max_depths": {"x0": {"r0_c0": 0.0}}},
-                                    {"max_depths": {"x0": {"r0_c0": math.inf}}}, {"device": "tpu"}, {"steps": 3}])
+                                    {"max_depths": {"x0": {"r0_c0": math.inf}}}, {"device": "tpu"}, {"steps": 3},
+                                    {"frequency_batch": 0}])
 def test_request_rejects_bad_options(fields: Record) -> None:
     with pytest.raises(ValueError):
         GradientRequest.model_validate(fields)
@@ -373,6 +374,36 @@ def test_stop_marker_then_resume_then_endpoint_then_done(tmp_path: Path) -> None
     endpoint = cast(Record, view["endpoint"])
     assert endpoint["exported_scheme"] == str(folder / folder_files.EXPORTED_SCHEME_FILE)
     assert "不是「同一套切法、每區都不貼」" in str(endpoint["baseline_note"])
+
+
+def test_stop_pressed_as_resume_clears_the_old_marker_is_put_back(tmp_path: Path) -> None:
+    """抓接續開頭清掉舊停止記號時、剛好在那之前按的停止被一起清掉，畫面一直「停止中」到搜尋跑完。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    jobs = _jobs(data_dir, launcher)
+    view = jobs.start(NAME, GradientRequest())
+    folder = _folder(data_dir, view)
+    _finish(data_dir, launcher, view, EXIT_STOPPED)
+    view = jobs.stop(str(jobs.resume(str(view["job_id"]))["job_id"]))
+    (folder / folder_files.STOP_FILE).unlink()  # 命令列接續開頭做的事
+    assert jobs.get(str(view["job_id"]))["state"] == "stopping"
+    assert (folder / folder_files.STOP_FILE).is_file()
+
+
+@pytest.mark.parametrize(("line", "state"), [
+    ("梯度搜尋開始失敗：ReducedModelNotValidated：替身讀不進來或對不上，拒用：物理身分不同", "surrogate_refused"),
+    ("梯度搜尋開始失敗：ValueError：面 x0@r0_c0 的深度上限 0.5 m 超過家族上限", "failed"),
+])
+def test_a_surrogate_the_gate_refuses_has_its_own_state(tmp_path: Path, line: str, state: str) -> None:
+    """抓替身被准用閘門拒收時只顯示「搜尋失敗」，畫面不知道要去重建替身；別的失敗不能被認成替身的問題。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    jobs = _jobs(data_dir, launcher)
+    view = jobs.start(NAME, GradientRequest())
+    (data_dir / "gradient" / str(view["job_id"]) / "steps" / "0.log").write_text(line + "\n", encoding="utf-8")
+    _finish(data_dir, launcher, view, 1)
+    view = jobs.get(str(view["job_id"]))
+    assert view["state"] == state and not any(cast(dict[str, bool], view["actions"]).values())
 
 
 def test_stop_before_the_folder_exists_or_during_endpoint_stops_the_service(tmp_path: Path) -> None:

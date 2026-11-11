@@ -44,6 +44,7 @@ from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, pla
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
+from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 
@@ -64,6 +65,7 @@ STATE_TEXTS: Final[dict[str, str]] = {
     "stopped": "已停止，可以接續",
     "interrupted": "服務不見了、沒留下離開碼（可能被強制結束或機器重開），可以接續",
     "failed": "搜尋失敗",
+    "surrogate_refused": "替身核不過（例如程式換了物理身分、或替身跟這份切法對不上），要重建替身",
     "searched": "搜尋做完了，可以跑終點",
     "endpoint_running": "終點計算中（完整模型重算）",
     "endpoint_stopping": "終點停止中",
@@ -289,7 +291,13 @@ class GradientJobs:
             return "done" if endpoint else "searched"
         if code == EXIT_STOPPED:
             return "endpoint_stopped" if endpoint else "stopped"
-        return "endpoint_failed" if endpoint else "failed"
+        if endpoint:
+            return "endpoint_failed"
+        refused = f"失敗：{ReducedModelNotValidated.__name__}："  # 命令列印「梯度搜尋開始失敗：<例外名>：<原因>」
+        log = self._log_path(job.job_id, len(job.steps) - 1)
+        if step.kind == "start" and log.is_file() and refused in log.read_text(encoding="utf-8", errors="replace"):
+            return "surrogate_refused"
+        return "failed"
 
     def _actions(self, job: GradientJob, state: str, folder: Path | None) -> dict[str, bool]:
         running = state in ("checking", "searching", "stopping", "endpoint_running", "endpoint_stopping")
@@ -310,6 +318,9 @@ class GradientJobs:
     def view(self, job: GradientJob) -> dict[str, object]:
         folder = self.folder(job)
         state = self._state(job, folder)
+        if state == "stopping" and folder is not None and not (folder / STOP_FILE).exists():
+            # 接續開頭會先清掉舊的停止記號：剛好在那之前按的停止會被清掉，看狀態時補放回去。
+            (folder / STOP_FILE).touch()
         progress, note = self._progress(folder)
         steps = []
         for index, step in enumerate(job.steps):
