@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>第三階段搜尋</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/gradient.css">
+  <script src="/static/gradient.js" defer></script>
+</head>
+<body><main>
+  <header><h1>第三階段搜尋：每一區貼什麼材料</h1>
+    <p><a href="/">回方案輸入頁</a>　<a href="/materials">材料庫</a>　<a href="/searches">第二階段搜尋進度</a></p>
+    <p>方案裡有任何一區在立面圖上設成「交給搜尋」，就從這裡開。搜尋要用這份切法的替身（加快搜尋用的簡化模型）；沒有就先建一份。
+      建替身與搜尋都要好幾小時，整台機器同時只跑一件。搜尋做完要再跑「終點」（用完整模型重算一次），之後才能拿去算結果頁。</p>
+    <p id="connection" aria-live="polite">正在讀取…</p>
+  </header>
+
+  <section id="scheme-block">
+    <h2>1. 選方案</h2>
+    <p><label>方案 <select id="scheme-pick"></select></label>
+      <button id="load-plan" type="button">讀這份方案的開跑選項</button></p>
+    <p id="scheme-message" aria-live="polite"></p>
+  </section>
+
+  <section id="form-block" hidden>
+    <h2>2. 開跑選項（全部有預設，不改就照預設跑）</h2>
+    <div class="option-grid">
+      <label>往下走步數上限（步）<input id="max-steps" type="number" min="1" step="1" inputmode="numeric"></label>
+      <label>材料家族（交給搜尋的區從這一家開始）<select id="family"></select></label>
+      <label>裝法<select id="mount">
+        <option value="on_wall">貼在原牆上（預設）</option><option value="rigid">貼在硬底上</option></select></label>
+      <label>用哪個算<select id="device"><option value="gpu">顯卡（預設）</option><option value="cpu">處理器</option></select></label>
+      <label>替身每批算幾個頻點（空白＝一次全部；顯卡記憶體不夠才填）<input id="frequency-batch" type="number" min="1" step="1" inputmode="numeric"></label>
+    </div>
+    <p id="max-steps-default" class="hint"></p>
+    <h3>每一區的深度上限（公尺；空白＝照材料自己的限制）</h3>
+    <div id="depth-table"></div>
+    <p><button id="preview" type="button">預覽轉好的參數</button></p>
+    <p id="form-message" aria-live="polite"></p>
+  </section>
+
+  <section id="plan-block" hidden>
+    <h2>3. 預覽：每一區怎麼做</h2>
+    <p id="plan-summary"></p>
+    <div id="plan-table"></div>
+    <details><summary>交給搜尋命令列的參數</summary><pre id="plan-arguments"></pre></details>
+  </section>
+
+  <section id="surrogate-block" hidden>
+    <h2>4. 替身（這份切法的簡化模型）</h2>
+    <p id="surrogate-state"></p>
+    <p id="surrogate-slot" class="hint path"></p>
+    <div id="surrogate-build-form" hidden>
+      <p id="surrogate-history" class="hint"></p>
+      <div class="option-grid">
+        <label>完整解預算（次）<input id="max-full-solves" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label>停止殘差<input id="stop-residual" type="number" min="0" step="any"></label>
+      </div>
+      <p class="hint">停止規則不變：殘差達標或預算用完就停；建完一定跑留出驗證，兩把尺都過、准用閘門核過才放進來用。改的值照實記進替身身分。</p>
+      <p><button id="build-surrogate" type="button">建替身</button></p>
+    </div>
+    <div id="surrogate-build" hidden>
+      <h3>建替身進度</h3>
+      <p id="build-state"></p>
+      <p id="build-estimate"></p>
+      <p id="build-error" class="notice" hidden></p>
+      <details><summary>輸出最後幾行</summary><pre id="build-log"></pre></details>
+      <p><button id="stop-build" type="button" class="danger">停止建替身</button></p>
+    </div>
+    <p id="surrogate-message" aria-live="polite"></p>
+  </section>
+
+  <section id="start-block" hidden>
+    <h2>5. 開始搜尋</h2>
+    <p id="busy-line" class="notice" hidden></p>
+    <p><button id="start" type="button">開始搜尋</button></p>
+    <p id="start-message" aria-live="polite"></p>
+  </section>
+
+  <section id="jobs-block">
+    <h2>搜尋清單</h2>
+    <div id="job-list"><p>還沒有第三階段搜尋。</p></div>
+  </section>
+
+  <section id="job-block" hidden>
+    <h2 id="job-title">這一跑</h2>
+    <p id="job-state"></p>
+    <ul id="job-progress"></ul>
+    <div id="job-notes" hidden><h3>注意</h3><ul></ul></div>
+    <div id="job-failures" class="notice" hidden><h3>失敗原因（輸出原文）</h3><ul></ul></div>
+    <p class="actions">
+      <button id="job-stop" type="button" class="danger" hidden>停止</button>
+      <button id="job-resume" type="button" hidden>接續</button>
+      <button id="job-endpoint" type="button" hidden>跑終點</button>
+      <button id="job-rebuild" type="button" hidden>重建替身</button>
+      <button id="job-adopt" type="button" hidden>存成方案、算結果頁</button>
+    </p>
+    <p id="job-endpoint-note" class="hint" hidden></p>
+    <p id="job-adopted" hidden></p>
+    <p id="job-message" aria-live="polite"></p>
+    <details><summary>每一步的輸出最後幾行</summary><div id="job-steps"></div></details>
+  </section>
+</main></body>
+</html>
