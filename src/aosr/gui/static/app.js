@@ -388,6 +388,10 @@ async function save() {
   openedId = document.scheme_id;
   $("scheme-archive-notice").hidden = true;
   say(saved.message, "ok");
+  // 每一區的做法跟著方案存（#1105）；方案已經存好，做法沒存成要照講、不算存檔失敗。
+  try { await saveZoneDesign(document.scheme_id); } catch (error) {
+    say(`${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
+  }
   await loadSchemeList();
   // #755：同名方案改過，清單與封存區那幾筆要馬上標「改之前的方案算的」，不等重新整理。
   // 清單讀不到不算存檔失敗：方案已經存好，後面的「計算」照樣要開。
@@ -417,6 +421,9 @@ async function openScheme() {
     return;
   }
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
+  // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。
+  await loadZoneDesign(name);
+  await loadZoneLibrary();
   renderWalls();
   openedId = name;
   $("scheme-archive-notice").hidden = true;
@@ -439,6 +446,7 @@ async function loadTemplate() {
   // 牆改回「固定阻抗」時填的預設值跟著載入的範本（第一階段範本是 30ρc）。
   fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
+  resetZoneDesign();
   renderWalls();
   openedId = null;
   $("scheme-archive-notice").hidden = true;
@@ -472,6 +480,10 @@ async function saveAs() {
   $("scheme-archive-notice").hidden = true;
   say(saved.message, "ok");
   sayBeside("save-as-note", `「${name}」：${saved.message}`, "ok");
+  try { await saveZoneDesign(name); } catch (error) {
+    say(`${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
+    sayBeside("save-as-note", `「${name}」：${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
+  }
   await loadSchemeList();
   $("scheme-list").value = name;
 }
@@ -768,6 +780,7 @@ async function action(work) {
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example");
   inputDefaults = await api("/api/input-defaults");
+  await loadZoneLibrary();
   fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
