@@ -1,0 +1,1 @@
+必紅樣本：用「模組.函式」叫 runtime.child_process_env()，沒包。換個叫法不准繞過。

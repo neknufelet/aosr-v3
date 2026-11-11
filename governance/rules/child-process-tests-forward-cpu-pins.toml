@@ -1,0 +1,410 @@
+# 規矩卡：開子行程的考卷要帶三格處理器釘選
+# 票 #1077；收尾（現有的檔改用共用小工具、放行一筆一筆拿掉）在 #1078。
+# 上一代沒有對得上的事故（v2 的子行程問題是載入路徑，不是指令集），這一類是 v3 自己踩的：
+# #721（10-08 主線紅）、#783、#1019、#1021、#1037、#1039、#1044→#1048 等，至少九次、三次紅到主線；
+# 盤點在工作區 pstack-to-main 那份重複錯清單第 2 列。規則本身在決策紙
+# verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 6 條，這張卡只守子行程環境那一半。
+id = "child-process-tests-forward-cpu-pins"
+human = "開子行程的考卷要把雲端設好的三格處理器釘選帶進子行程：`tests/` 底下呼叫 `child_process_env(...)`（建計算子行程的環境，只繼承白名單）的每一處，都必須直接寫成共用小工具的第一個引數 `forward_cpu_pins(child_process_env(...))`（小工具住 `tests/engine/_cpu_pins.py`）。不包的話，雲端 job 層設好的三格（numpy 的向量指令、OpenBLAS 的核心、XLA 的指令集）不會跟進子行程，抽到有 AVX-512 的機器時子行程的數字就差最後一位。直接叫、`模組.函式` 叫、`import … as 別名` 再叫都算；包在別的東西裡（`dict(...)`、先指給名字再傳、字典展開）不算——審的人要一眼看得出那一處帶了釘選。立卡前就在的檔整批列在 `[[settings.allow]]`：一支檔一筆、記凍結當時沒包的處數 `calls`，那支檔沒包的處數必須等於 `calls`——多了是新寫的沒帶，少了或檔不在了就要把那一筆改小或拿掉，同一支檔寫兩筆也紅，放行清單不准比實況寬。子行程刻意要跟不帶釘選的正式工作行程同一環境的（終點探針，#1051），才開一筆放行寫理由。刻意沒管：把函式本身當值傳出去、`getattr` 取、在別的模組包一層再叫、另定義一支同名函式當小工具；產品程式自己開的子行程（正式工作行程刻意不帶釘選）。判準全住卡上的 [settings]；讀不到卡、放行那一格形狀壞掉（缺 path、calls 不是正整數）、共用小工具不在或沒有那支函式、考卷的 .py 剖不開，一律回 2 不回 0。"
+scope = [
+  "tests/**/*.py",
+  "governance/rules",
+]
+check = "governance/checks/child_process_tests_forward_cpu_pins.py"
+negative_fixture = "governance/fixtures/child-process-tests-forward-cpu-pins"
+control_fixture = "governance/fixtures/child-process-tests-forward-cpu-pins/control"
+# 該回 2 的樣本：樹裡沒有這張卡、共用小工具不在、小工具裡沒有那支函式、考卷剖不開、放行的 calls 不是正整數。
+tool_broken_fixture = "governance/fixtures/child-process-tests-forward-cpu-pins-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+# 列檔靠 git ls-files（外殼共用）；抽掉 git 這一跑就回 2。
+external_tools = ["git"]
+blood_debt = []
+related_lessons = []
+admission_issue = 1077
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 判準只住這裡。每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+tests_dir = "tests/"
+# 建計算子行程環境的那支產品函式（aosr.runtime）。它在物理身分的程式範圍裡，改它會換身分，所以釘選從考卷這一側補。
+child_env_name = "child_process_env"
+helper_file = "tests/engine/_cpu_pins.py"
+helper_name = "forward_cpu_pins"
+
+# ── 立卡前就在的檔（#1077 凍結；收尾在 #1078，到期日統一 2027-02-26）──────────────
+# 三種理由：自己已經帶三格（還沒改用共用小工具）、沒帶（要逐支看補了會不會反而不一致）、
+# 刻意不帶（終點探針要跟正式工作行程同一環境）。本機三格是空的、沒有 AVX-512，本機跑不出差異，
+# 逐支判斷要看雲端摘要的機器行（tests/conftest.py 的 machine_lines）。
+
+[[settings.allow]]
+path = "tests/engine/_construction_gui_server.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/_gradient_probe_env.py"
+calls = 1
+reason = "刻意不帶：endpoint_probe_env 給終點探針用，探針要跟不繼承釘選的正式工作行程同一套指令集（#1051；test_six_category_endpoint.py::test_endpoint_probe_uses_worker_environment_without_cpu_pins 守這件事）。#1078 收尾時確認後把理由寫成這一類、另訂到期日。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/_jax_identity_probe.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/_t20_jax_cases.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_amplitude_jax.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_construction.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_construction_cli_end_to_end.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_construction_diff.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_construction_presets.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_fem_complex.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_fem_reduced_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_fem_reduced_zones.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_frequency_batch.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_geometric_early_jax.py"
+calls = 2
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_gpu_shared_constants.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_gradient_objective_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_jax_gradient_boundaries.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_jax_identity.py"
+calls = 4
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_late_energy_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_late_energy_zones_jax.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_late_family_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_flow.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_cli.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_endpoint.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_fixed_surface.py"
+calls = 2
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_gpu.py"
+calls = 2
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_loop.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_mount.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_templates.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_material_gradient_zones.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_mounted_on_wall.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_parallel_full_repairs.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_parallel_full_solves.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_physics_identity.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_physics_stage.py"
+calls = 7
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_reflections_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_cli_process.py"
+calls = 2
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_crossover_process.py"
+calls = 2
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_folder_lock.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_modal_cli.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_modal_process.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_worker.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_search_worker_fem.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_six_category_chain.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_six_category_external_review.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_six_category_gpu.py"
+calls = 3
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_six_category_gpu_trace.py"
+calls = 2
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_six_category_jax.py"
+calls = 3
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_six_category_search.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_stage_one_objective_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_surface_zone_precision.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_timbre_cost_jax.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_transfer_matrix_reference.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_transfer_matrix_step2_reference.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_transfer_matrix_step3_reference.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_wall_reflections.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_wall_surfaces.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_zone_reflections.py"
+calls = 1
+reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_zoned_report.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"
+
+[[settings.allow]]
+path = "tests/engine/test_zoned_report_boundaries.py"
+calls = 1
+reason = "立卡前就在：這支開的子行程沒帶三格處理器釘選；子行程的數字跟誰比、補了會不會反而讓兩邊環境不一致，要逐支看，在 #1078。"
+expires = "2027-02-26"

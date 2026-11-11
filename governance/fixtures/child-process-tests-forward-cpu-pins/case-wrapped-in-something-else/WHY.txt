@@ -1,0 +1,1 @@
+必紅樣本：forward_cpu_pins(dict(child_process_env()))——小工具包的是 dict(...)，不是 child_process_env 那一處。要直接包，審的人才一眼看得出那一處帶了釘選。

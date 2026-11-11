@@ -185,6 +185,8 @@ jobs:
         run: uv run python -m governance.status.record_step --name fenics_answers_carry_provenance --out-dir governance/receipts/steps -- uv run python -m governance.checks.fenics_answers_carry_provenance --scan-root .
       - name: TMM 凍結答案要帶出身、原套件提交要對上、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name tmm_answers_carry_provenance --out-dir governance/receipts/steps -- uv run python -m governance.checks.tmm_answers_carry_provenance --scan-root .
+      - name: 開子行程的考卷要帶三格處理器釘選——child_process_env(...) 要直接包在共用小工具裡——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name child_process_tests_forward_cpu_pins --out-dir governance/receipts/steps -- uv run python -m governance.checks.child_process_tests_forward_cpu_pins --scan-root .
       - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name exemptions_need_expiry --out-dir governance/receipts/steps -- uv run python -m governance.checks.exemptions_need_expiry --scan-root .
       - name: ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）

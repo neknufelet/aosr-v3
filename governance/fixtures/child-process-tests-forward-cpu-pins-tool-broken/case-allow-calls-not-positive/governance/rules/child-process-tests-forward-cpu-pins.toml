@@ -1,0 +1,15 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "child-process-tests-forward-cpu-pins"
+
+[settings]
+tests_dir = "tests/"
+child_env_name = "child_process_env"
+helper_file = "tests/engine/_cpu_pins.py"
+helper_name = "forward_cpu_pins"
+
+[[settings.allow]]
+path = "tests/engine/test_frozen.py"
+calls = 0
+reason = "樣本：立卡前就在的檔，凍結當時沒包的處數。"
+expires = "2099-12-31"
