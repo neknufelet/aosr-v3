@@ -54,7 +54,7 @@ from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._local_launcher import LocalLauncher
 from tests.engine._material_gradient_zones_case import scheme
 from tests.engine.test_gui_gradient_jobs import FakeLauncher
-from tests.engine.test_material_gradient_library import USER, _fixed, _optimizable
+from tests.engine.test_material_gradient_library import _ENTRY, FIXED, USER, _fixed, _optimizable
 
 NAME = "zoned"
 Record = dict[str, object]
@@ -65,13 +65,13 @@ QUICK = SurrogateRequest(workers=1, dense_threads=1)
 STRICT = QUICK.model_copy(update={"stop_residual": 1e-4})
 
 
-def _data(tmp_path: Path, case: Scheme | None = None, *, search: bool = True) -> Path:
+def _data(tmp_path: Path, case: Scheme | None = None, *, search: bool = True, allowed: tuple[str, ...] | None = None) -> Path:
     data_dir = tmp_path / "data"
     (data_dir / "schemes").mkdir(parents=True)
     (data_dir / "designs").mkdir()
     base = scheme() if case is None else case
     (data_dir / "schemes" / f"{NAME}.json").write_text(base.model_dump_json(), encoding="utf-8")
-    zones = {"x0": {"right": ZoneDesign(mode="search")}} if search else {}
+    zones = {"x0": {"right": ZoneDesign(mode="search", allowed=allowed)}} if search else {}
     write_design(data_dir, DesignSettings(scheme_id=NAME, zones=zones), base)
     return data_dir
 
@@ -604,7 +604,8 @@ def _library(data_dir: Path, *entries: library.LibraryEntry) -> None:
 @pytest.fixture(scope="module")
 def trained_with_library(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, SurrogateBuilds, Record]:
     directory = tmp_path_factory.mktemp("surrogate-build-library")
-    data_dir = _data(directory)
+    # x0 那一區的准用清單：產品家族、材料庫的可最佳化家族、材料庫的固定材料（2-3b 的固定材料候選）各一。
+    data_dir = _data(directory, allowed=("glass_wool_48k", USER, FIXED))
     _library(data_dir, _fixed(), _optimizable())
     _, builds = _managers(data_dir, LocalLauncher(directory))
     view = _wait(builds, str(builds.start(NAME, STRICT)["build_id"]))
@@ -614,7 +615,8 @@ def trained_with_library(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path
 
 def test_build_trains_the_library_families_and_the_search_accepts_it(
         trained_with_library: tuple[Path, SurrogateBuilds, Record]) -> None:
-    """抓建模只抽設定檔那三個家族（材料庫的可最佳化材料沒訓練、留出也沒驗到），或訓練說明沒記涵蓋、開跑照樣說要重建。"""
+    """抓建模只抽設定檔那三個家族（材料庫的可最佳化材料沒訓練、留出也沒驗到）、准用清單的固定材料候選沒放進訓練與留出，
+    或訓練說明沒記涵蓋、開跑照樣說要重建。"""
     data_dir, _, _ = trained_with_library
     training = json.loads((_slot_npz(data_dir).parent / TRAINING_FILE).read_text(encoding="utf-8"))
     assert training["version"] == "aosr.gradient.surrogate_training.v2" and training["families"][-1] == USER
@@ -622,6 +624,10 @@ def test_build_trains_the_library_families_and_the_search_accepts_it(
     for group in ("training", "holdout"):
         assert any(face.get("family") == USER for entry in training[group] for face in entry["faces"].values())
     assert any(entry["label"].startswith(f"{USER} 中間值") for entry in training["holdout"])
+    fixed, = training["coverage"]["fixed"]
+    assert fixed["target"] == f"fixed:{FIXED}" and fixed["surfaces"] == ["x0@right"]
+    for group in ("training", "holdout"):
+        assert any(face.get("target") == f"fixed:{FIXED}" for entry in training[group] for face in entry["faces"].values())
     launcher = FakeLauncher()
     jobs, _ = _managers(data_dir, launcher)
     preview = jobs.preview(NAME, GradientRequest(device="cpu"))
@@ -635,11 +641,14 @@ def test_search_refuses_materials_the_surrogate_was_not_trained_on(
         installed: tuple[Path, SurrogateBuilds, Record],
         trained_with_library: tuple[Path, SurrogateBuilds, Record]) -> None:
     """抓材料庫加了可最佳化材料（或把訓練過的那一筆改了流阻）之後，開跑照樣收下替身、在替身沒驗過的範圍走梯度；
-    畫面要說「替身沒用這些材料訓練過，要重建」、走「要先建替身」那條路，不開服務。"""
+    准用清單的固定材料換了阻抗也一樣；畫面要說「替身沒用這些材料訓練過，要重建」、走「要先建替身」那條路，不開服務。"""
     porous = _optimizable().porous.model_dump(mode="json")
     changed = _optimizable(porous={**porous, "flow_resistivity_pa_s_m2": 30000.0})
+    panel = cast(library.FixedEntry, _ENTRY.validate_python(
+        {**_fixed().model_dump(mode="json"), "material": {"kind": "constant_impedance", "impedance_pa_s_m": 6000.0}}))
     for data_dir, entries, words in ((installed[0], (_optimizable(),), "家族 rock_wool_60k 沒訓練過"),
-                                     (trained_with_library[0], (changed,), "rock_wool_60k 的材料內容跟訓練時不同")):
+                                     (trained_with_library[0], (_fixed(), changed), "rock_wool_60k 的材料內容跟訓練時不同"),
+                                     (trained_with_library[0], (panel, _optimizable()), f"固定材料 fixed:{FIXED} 的內容跟訓練時不同")):
         before = user_library_path(data_dir).read_bytes() if user_library_path(data_dir).is_file() else None
         _library(data_dir, *entries)
         try:

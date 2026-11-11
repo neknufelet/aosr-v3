@@ -33,13 +33,16 @@ from aosr.gradient.fixed_candidates import FixedCandidateCheck
 from aosr.gradient.fixed_surfaces import (
     check_allowed_against_start, checked_allowed_targets, expanded_allowed_targets, fixed_targets_of, parse_allowed_targets,
 )
+from aosr.gui.gradient_jobs import NeedsSurrogate, plan_fixed
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search, start_arguments
+from aosr.gui.surrogate_slots import surrogate_path
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.materials import library
 from aosr.materials import search_library as materials
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.reporting.scheme import Scheme
 from tests.engine._material_gradient_templates_probe import kept_walls
+from tests.engine._surrogate_coverage import trained_on
 from tests.engine.test_material_gradient_cli import _schemes
 from tests.engine.test_material_gradient_mount import _project
 
@@ -432,7 +435,15 @@ def _web_start(tmp_path: Path, listed: str, entry: library.FixedEntry) -> list[s
     write_design(data_dir, DesignSettings(scheme_id=NAME, zones=zones), _scheme())
     user_library_path(data_dir).write_text(library.dump_user_library((entry,)), encoding="utf-8")
     launcher = FakeLauncher()
-    _jobs(data_dir, launcher).start(NAME, GradientRequest(max_steps=5))
+    jobs = _jobs(data_dir, launcher)
+    request = GradientRequest(max_steps=5)
+    # 替身樁旁沒記訓練過這個固定材料候選：照 #1082 段 2-3c 要拒收、說要重建；照產品函式記上之後才開得了跑。
+    with pytest.raises(NeedsSurrogate, match=f"固定材料 fixed:{listed} 沒訓練過"):
+        jobs.start(NAME, request)
+    _, scheme, design = jobs.inputs(NAME)
+    plan, materials, entries = jobs.plan(scheme, design, request)
+    trained_on(surrogate_path(data_dir, scheme), materials, plan_fixed(plan, materials, entries))
+    jobs.start(NAME, request)
     (_, argv, _, _), = launcher.launched
     return argv[argv.index("--") + 5:]
 

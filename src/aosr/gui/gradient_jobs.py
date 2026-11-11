@@ -40,12 +40,12 @@ from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target, is_fixed_target, load_material_gradient_settings,
+    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target, fixed_target_id, is_fixed_target, load_material_gradient_settings,
 )
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
-from aosr.gradient.surrogate_coverage import NOT_TRAINED_TEXT, SurrogateNotTrainedOn, check_covers
+from aosr.gradient.surrogate_coverage import NOT_TRAINED_TEXT, FixedTarget, SurrogateNotTrainedOn, check_covers, fixed_targets
 from aosr.gradient.surrogate_files import TRAINING_FILE
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
@@ -57,7 +57,9 @@ from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.materials.construction_models import MeasuredImpedance
 from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
-from aosr.materials.search_library import MaterialsRefused, SearchMaterials, refuse_fixed_as_family, with_user_materials
+from aosr.materials.search_library import (
+    MaterialsRefused, SearchMaterials, fixed_candidates, refuse_fixed_as_family, user_fixed_entries, with_user_materials,
+)
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
@@ -240,10 +242,20 @@ def tail_lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8", errors="replace").splitlines()[-LOG_TAIL_LINES:]
 
 
-def _not_trained(surrogate: Path, materials: SearchMaterials) -> str | None:
-    """這一場的家族超出替身訓練過的就回拒收原因（跟命令列開跑同一支 ``check_covers``；網頁先講，不等背景開跑才失敗）。"""
+def plan_fixed(plan: SearchPlan, materials: SearchMaterials, entries: tuple[LibraryEntry, ...]) -> tuple[FixedTarget, ...]:
+    """計畫准用清單裡的固定材料候選（材料照命令列開跑同一條 ``fixed_candidates`` 取；網頁的清單本來就是逐片）。"""
+    targets = sorted({target for targets in plan.allowed.values() for target in targets if is_fixed_target(target)})
+    user = user_fixed_entries([fixed_target_id(target) for target in targets], entries)
     try:
-        check_covers(surrogate.parent / TRAINING_FILE, materials)
+        return fixed_targets(plan.allowed, fixed_candidates(targets, materials.presets, user))
+    except MaterialsRefused as error:
+        raise PlanRefused(str(error)) from error
+
+
+def _not_trained(surrogate: Path, materials: SearchMaterials, fixed: tuple[FixedTarget, ...]) -> str | None:
+    """這一場的家族或固定材料候選超出替身訓練過的就回拒收原因（跟命令列開跑同一支 ``check_covers``；網頁先講，不等背景開跑才失敗）。"""
+    try:
+        check_covers(surrogate.parent / TRAINING_FILE, materials, fixed)
     except SurrogateNotTrainedOn as error:
         return str(error)
     return None
@@ -497,11 +509,11 @@ class GradientJobs:
     def preview(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
         """不開跑：轉好的參數、替身在不在、預設值、現在有沒有一跑在算。"""
         _, scheme, design = self.inputs(scheme_id)
-        plan, materials, _ = self.plan(scheme, design, request)
+        plan, materials, entries = self.plan(scheme, design, request)
         settings = materials.settings
         path = surrogate_path(self.data_dir, scheme)
         missing = missing_parts(path)
-        refused = None if missing else _not_trained(path, materials)
+        refused = None if missing else _not_trained(path, materials, plan_fixed(plan, materials, entries))
         with self.lock:
             busy = self.active_job()
         return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan),
@@ -516,7 +528,7 @@ class GradientJobs:
         text, scheme, design = self.inputs(scheme_id)
         plan, materials, entries = self.plan(scheme, design, request)
         surrogate = self._surrogate(scheme)
-        refused = _not_trained(surrogate, materials)
+        refused = _not_trained(surrogate, materials, plan_fixed(plan, materials, entries))
         if refused is not None:
             raise NeedsSurrogate(refused, surrogate.parent)
         with self.launching():

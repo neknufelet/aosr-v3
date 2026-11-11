@@ -224,15 +224,15 @@ class SurrogateBuilds:
 
     # ---- 動作 ----
 
-    def _checked(self, scheme_id: str) -> tuple[str, Path, str, tuple[LibraryEntry, ...]]:
+    def _checked(self, scheme_id: str) -> tuple[str, Path, str, tuple[LibraryEntry, ...], dict[str, tuple[str, ...]]]:
         """開建前網頁講得清楚的拒收（照搜尋開跑的同一套 ``GradientJobs.plan``：設定檔家族＋材料庫）：方案要有低頻軸、
         設計設定要轉得成搜尋參數、材料庫要讀得進來；原牆能不能貼、使用者家族物理算不算得出來要算材料，
-        留給命令列第一步判（網頁行程不載入物理）。回方案原文、格子、格子代號與使用者材料。"""
+        留給命令列第一步判（網頁行程不載入物理）。回方案原文、格子、格子代號、使用者材料與准用清單（固定材料候選一起訓練）。"""
         text, scheme, design = self.jobs.inputs(scheme_id)
         if scheme.scene.low_frequency_axis is None:
             raise PlanRefused("方案場景沒有低頻軸（low_frequency_axis），搜尋開跑會拒收，不建替身")
-        _, _, entries = self.jobs.plan(scheme, design, GradientRequest())
-        return text, slot_dir(self.data_dir, scheme), slot_key(scheme), entries
+        plan, _, entries = self.jobs.plan(scheme, design, GradientRequest())
+        return text, slot_dir(self.data_dir, scheme), slot_key(scheme), entries, plan.allowed
 
     def _latest(self, key: str) -> dict[str, object] | None:
         build = next((item for item in self._builds() if item.slot_key == key), None)
@@ -240,7 +240,7 @@ class SurrogateBuilds:
 
     def preview(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
         """不開建：格子在哪、已經有沒有、這份切法最近一次建模、預設值、前幾次花了多久、現在忙不忙。"""
-        _, slot, key, _ = self._checked(scheme_id)
+        _, slot, key, _, _ = self._checked(scheme_id)
         sampling = load_surrogate_training_settings(config_path("surrogate_training.toml"))
         reduced = load_reduced_model_settings(config_path("fem_reduced.toml"))
         with self.jobs.lock:
@@ -256,7 +256,7 @@ class SurrogateBuilds:
                                   "開建後照這一跑量到的速度推")}
 
     def start(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
-        text, slot, key, entries = self._checked(scheme_id)
+        text, slot, key, entries, allowed = self._checked(scheme_id)
         if slot.exists() and not request.replace:
             found = not missing_parts(slot / SURROGATE_FILE)
             raise ActionRefused("這份切法已經有替身了" + ("" if found else "（但缺件）") +
@@ -278,6 +278,8 @@ class SurrogateBuilds:
                 library = directory / USER_LIBRARY_NAME
                 write_text_atomic(library, dump_user_library(entries))
                 arguments.extend(("--materials", str(library)))
+            for surface, targets in allowed.items():
+                arguments.extend(("--allowed", f"{surface}={','.join(targets)}"))
             if request.replace:
                 arguments.extend(("--replace", str(self.data_dir / SLOTS_DIR / RETIRED_DIR / f"{key}-{build_id}")))
             if request.max_full_solves is not None:

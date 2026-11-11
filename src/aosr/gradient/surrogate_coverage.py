@@ -15,6 +15,10 @@
 都當成只用產品設定檔那幾個家族訓練過。這一場的家族就是產品設定檔那幾個時照舊放行；有別的家族就拒收、要重建。
 建模時這一場的家族就是產品設定檔那幾個（材料庫沒有可最佳化材料、也沒換家族設定）就不寫這一節，訓練說明逐位照舊。
 
+每區准用清單裡的固定材料候選（#1082 段 2-3b 的 ``fixed:<代號>``，整塊取代那一片的牆）也一樣（主對話 11-12 定）：
+建模照設計設定的准用清單把每個候選放進訓練與留出，記下「哪一個、材料內容摘要、准用在哪幾片」；開跑時這一場的每個候選
+都要同代號、同內容，准用的面片也要在訓練放過的裡面，不然拒收、要重建。2-3b 開跑前每個候選的完整解留出驗證照做。
+
 訓練說明不在替身 manifest 的雜湊裡：它跟替身同一個資料夾整份換名進格子，事後被手改閘門看不出來（照實記下，非阻塞）。
 """
 from __future__ import annotations
@@ -23,11 +27,13 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.material_gradient import (
+    FamilySettings, MaterialGradientSettings, is_fixed_target, load_material_gradient_settings,
+)
 from aosr.config.paths import config_path
 from aosr.materials.search_library import PresetMaterial, SearchMaterials, snapshot_bytes
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
@@ -56,12 +62,46 @@ class FamilyCoverage(_Frozen):
     max_total_depth_m: float
 
 
+class FixedCoverage(_Frozen):
+    """一個固定材料候選（``fixed:<代號>``）：材料內容摘要、訓練時放過它的面片（照名字排）。"""
+
+    target: str = Field(pattern=r"^fixed:[a-z][a-z0-9_]*$")
+    material_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    surfaces: tuple[str, ...] = Field(min_length=1)
+
+
 class Coverage(_Frozen):
-    """訓練說明裡的 ``coverage`` 一節：訓練過的每個家族、那一份搜尋設定的指紋、材料庫（接成家族的那幾筆）的指紋。"""
+    """訓練說明裡的 ``coverage`` 一節：訓練過的每個家族、固定材料候選、那一份搜尋設定的指紋、材料庫（接成家族的那幾筆）的指紋。"""
 
     families: tuple[FamilyCoverage, ...] = Field(min_length=1)
+    fixed: tuple[FixedCoverage, ...] = ()
     settings_fingerprint: str
     materials_sha256: str | None
+
+
+class FixedTarget(NamedTuple):
+    """這一場（或這一次建模）的一個固定材料候選：目標字串、那份完整牆面材料（物理格式）、准用它的面片。"""
+
+    target: str
+    material: Mapping[str, object]
+    surfaces: tuple[str, ...]
+
+    def coverage(self) -> FixedCoverage:
+        return FixedCoverage(target=self.target, material_sha256=template_sha256(self.material), surfaces=self.surfaces)
+
+
+def fixed_targets(allowed: Mapping[str, Sequence[str]], table: Sequence[PresetMaterial]) -> tuple[FixedTarget, ...]:
+    """准用清單（面片 → 目標）裡每個 ``fixed:<代號>`` → 它的材料（構造清單裡同名那一筆，
+    :func:`~aosr.materials.search_library.fixed_candidates` 生成的）與准用它的面片；照目標字串排。"""
+    by_id = {preset.id: preset for preset in table}
+    found = []
+    for target in sorted({item for targets in allowed.values() for item in targets if is_fixed_target(item)}):
+        preset = by_id.get(target)
+        if preset is None:
+            raise ValueError(f"准用清單的固定材料 {target} 不在構造清單裡")
+        found.append(FixedTarget(target, preset.material,
+                                 tuple(sorted(name for name, targets in allowed.items() if target in targets))))
+    return tuple(found)
 
 
 def template_sha256(material: Mapping[str, object]) -> str:
@@ -136,12 +176,13 @@ def only_product_families(materials: SearchMaterials) -> bool:
     return not materials.entries and materials.settings.family == product_families()
 
 
-def coverage_for(materials: SearchMaterials) -> Coverage | None:
-    """建模要寫進訓練說明的那一節；只有產品設定檔那幾個家族時是 None（訓練說明逐位照舊）。"""
-    if only_product_families(materials):
+def coverage_for(materials: SearchMaterials, fixed: Sequence[FixedTarget] = ()) -> Coverage | None:
+    """建模要寫進訓練說明的那一節；只有產品設定檔那幾個家族、也沒有固定材料候選時是 None（訓練說明逐位照舊）。"""
+    if only_product_families(materials) and not fixed:
         return None
     library = None if not materials.entries else hashlib.sha256(snapshot_bytes(materials.entries)).hexdigest()
     return Coverage(families=family_coverage(materials.settings, materials.presets),
+                    fixed=tuple(target.coverage() for target in fixed),
                     settings_fingerprint=materials.settings.fingerprint, materials_sha256=library)
 
 
@@ -184,20 +225,37 @@ def _problems(wanted: Sequence[FamilyCoverage], trained: Sequence[FamilyCoverage
     return problems
 
 
-def check_covers(training: Path, materials: SearchMaterials) -> None:
-    """開跑前核這一場的家族都在替身訓練過的範圍裡；不在就拋 :class:`SurrogateNotTrainedOn`（點名哪一個、哪一格）。
+def _fixed_problems(wanted: Sequence[FixedTarget], trained: Sequence[FixedCoverage]) -> list[str]:
+    by_target = {item.target: item for item in trained}
+    problems = []
+    for item in wanted:
+        seen = by_target.get(item.target)
+        if seen is None:
+            problems.append(f"固定材料 {item.target} 沒訓練過")
+        elif seen.material_sha256 != template_sha256(item.material):
+            problems.append(f"固定材料 {item.target} 的內容跟訓練時不同")
+        elif not set(item.surfaces) <= set(seen.surfaces):
+            problems.append(f"固定材料 {item.target} 准用在 {sorted(set(item.surfaces) - set(seen.surfaces))}，"
+                            f"訓練只放過 {list(seen.surfaces)}")
+    return problems
 
-    ``training`` 是替身旁的訓練說明（``surrogate.npz`` 同資料夾的 ``training.json``）。"""
+
+def check_covers(training: Path, materials: SearchMaterials, fixed: Sequence[FixedTarget] = ()) -> None:
+    """開跑前核這一場的家族與固定材料候選都在替身訓練過的範圍裡；不在就拋 :class:`SurrogateNotTrainedOn`（點名哪一個、哪一格）。
+
+    ``training`` 是替身旁的訓練說明（``surrogate.npz`` 同資料夾的 ``training.json``）；``fixed`` 是這一場准用清單的固定材料候選。"""
     trained = read_coverage(training)
     wanted = family_coverage(materials.settings, materials.presets, reachable=True)
     if trained is None:
-        if only_product_families(materials):
+        if only_product_families(materials) and not fixed:
             return
         product = family_coverage(load_material_gradient_settings(config_path("material_gradient.toml")),
                                   materials.presets)
-        extra = _problems(wanted, product) + _member_problems(materials.settings, materials.presets)
+        extra = (_problems(wanted, product) + _member_problems(materials.settings, materials.presets)
+                 + _fixed_problems(fixed, ()))
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：這份替身沒記訓練過哪些材料（材料庫接進搜尋之前建的，"
                                     f"只用產品設定檔的家族訓練過），這一場{'；'.join(extra) or '的家族設定換過'}")
-    problems = _problems(wanted, trained.families) + _member_problems(materials.settings, materials.presets)
+    problems = (_problems(wanted, trained.families) + _member_problems(materials.settings, materials.presets)
+                + _fixed_problems(fixed, trained.fixed))
     if problems:
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：{'；'.join(problems)}")

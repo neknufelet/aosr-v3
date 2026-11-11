@@ -20,10 +20,10 @@ from aosr.config.paths import config_path
 from aosr.config.surrogate_training import SurrogateTrainingSettings, load_surrogate_training_settings
 from aosr.gradient import run
 from aosr.gradient.boundary import scheme_patch_keys
-from aosr.gradient.surrogate_coverage import coverage_for
+from aosr.gradient.surrogate_coverage import coverage_for, fixed_targets
 from aosr.gradient.surrogate_training import TrainingSets, original_walls
 from aosr.materials import library
-from aosr.materials.search_library import SearchMaterials, with_user_materials
+from aosr.materials.search_library import SearchMaterials, fixed_candidates, with_user_materials
 from aosr.materials.construction_models import MountedOnWall
 from aosr.reporting.scheme import Scheme
 from tests.engine._directivity import DIRECTIVITY
@@ -267,3 +267,29 @@ def test_document_records_what_was_trained_only_with_user_families() -> None:
         update={"thickness_m": (0.05, 0.2)}))})
     with pytest.raises(ValueError, match="範圍跟這一次真的抽的盒界不同"):
         sets.document(training, holdout, wider)
+
+
+def test_fixed_candidates_are_trained_and_held_out_on_their_allowed_patches() -> None:
+    """抓准用清單的固定材料沒進訓練或留出、放到沒准用它的面片、匯出的材料不是那一份，或訓練說明沒記它（開跑閘門就核不出）。"""
+    base_sets, materials = _user_sets()
+    zone = base_sets.names[2]
+    fixed = fixed_targets({zone: ("glass_wool_48k", "fixed:panel_fixed")},
+                          fixed_candidates(["fixed:panel_fixed"], run.presets_table(), (_fixed(),)))
+    sets = TrainingSets(base_sets.saved, SEARCH, SAMPLING, air=base_sets.air, ranges=base_sets.ranges,
+                        frequencies_hz=base_sets.axis, fixed=fixed)
+    training, holdout = sets.training_sets(), sets.holdout_sets()
+    placed_training = [item for item in training if any(face.kind == "fixed" for face in item.faces)]
+    placed_holdout = [item for item in holdout if any(face.kind == "fixed" for face in item.faces)]
+    assert len(placed_training) == 2 and len(placed_holdout) == 1
+    for item in placed_training + placed_holdout:
+        assert [name for name, face in zip(sets.names, item.faces, strict=True) if face.kind == "fixed"] == [zone]
+        assert sets.materials(item)[sets.keys[2]] == _fixed().surface_material()
+    coverage = coverage_for(materials, fixed)
+    assert coverage is not None
+    document = sets.document(training, holdout, coverage)
+    assert document["version"] == "aosr.gradient.surrogate_training.v2"
+    assert document["coverage"] == coverage.model_dump(mode="json")
+    with pytest.raises(ValueError, match="固定材料候選跟這一次真的放的不同"):
+        sets.document(training, holdout, coverage_for(materials, ()) or coverage.model_copy(update={"fixed": ()}))
+    with pytest.raises(ValueError, match="留出材料一片都沒放過固定材料"):
+        sets.require_every_family(training, [item for item in holdout if item not in placed_holdout])

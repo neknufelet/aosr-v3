@@ -297,7 +297,7 @@ def _start(args: argparse.Namespace) -> int:
                                     current_operators_digest=fingerprint)
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
-    _check_start_materials(materials, model, scheme, surrogate)
+    _check_start_materials(materials, model, scheme, surrogate, expanded)
     checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers)
     del full_operators
     spot = None
@@ -330,11 +330,13 @@ def _start(args: argparse.Namespace) -> int:
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
 
-def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme, surrogate: Path) -> None:
+def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme, surrogate: Path,
+                           allowed: dict[str, tuple[str, ...]]) -> None:
     """接進來的使用者家族在這一場的頻點與空氣下逐一建得起、算得出（:func:`aosr.gradient.run.check_user_families`；
     物理拒算重建替身也救不了，先講），空腔不調的那幾筆照實印一行；再核這一場的家族都在替身訓練過的範圍裡
-    （:func:`aosr.gradient.surrogate_coverage.check_covers`，#1082 段 2-3c；只有產品設定檔家族時舊替身照舊放行）。"""
-    from aosr.gradient.surrogate_coverage import check_covers
+    （:func:`aosr.gradient.surrogate_coverage.check_covers`，#1082 段 2-3c；准用清單 ``allowed`` 的固定材料候選一起核；
+    只有產品設定檔家族、沒有候選時舊替身照舊放行）。"""
+    from aosr.gradient.surrogate_coverage import check_covers, fixed_targets
     from aosr.gradient.surrogate_files import TRAINING_FILE
 
     if materials.entries:
@@ -346,7 +348,7 @@ def _check_start_materials(materials: SearchMaterials, model: ReducedModel, sche
                             density_kg_m3=scheme.scene.density_kg_m3, sound_speed_m_s=scheme.scene.sound_speed_m_s)
         for note in cavity_notes(materials):
             sys.stderr.write(f"注意：{note}\n")
-    check_covers(surrogate.parent / TRAINING_FILE, materials)
+    check_covers(surrogate.parent / TRAINING_FILE, materials, fixed_targets(allowed, materials.presets))
 
 
 def _start_scheme(root: Path, scheme_path: Path) -> Scheme:

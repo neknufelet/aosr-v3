@@ -1,13 +1,14 @@
 """替一份切法建替身（surrogate，縮減模型）的命令列（#1098）：網頁在獨立服務裡叫它，人也可以直接叫。
 
 ``python -m aosr.gradient.surrogate_build --scheme <方案檔> --work <建模資料夾> --slot <格子資料夾> --capabilities <能力表>
-[--settings <搜尋設定>] [--materials <使用者材料庫>]``
+[--settings <搜尋設定>] [--materials <使用者材料庫>] [--allowed 面=目標,… …]``
 
 照搜尋開跑那一段（``aosr.gradient.cli`` 的 ``start``）的同一組取法，免得建出來的替身開跑時被拒：
 完整模型算子照 ``export_operators`` 的預設網格、頻率軸照方案場景的低頻軸、原牆照 ``run.scene_wall_materials``；
 家族也跟開跑同一份（#1082 段 2-3c）：``--settings`` 的家族在前、``--materials`` 的可最佳化材料一筆一個接在後，
 接進來的先在這一場的頻點與空氣下逐一建得起、算得出（``run.check_user_families``，比匯出完整模型便宜，排前面）。
-有產品設定檔以外的家族時，訓練說明記下訓練過的家族與範圍（:mod:`aosr.gradient.surrogate_coverage`），
+``--allowed``（跟開跑同一個寫法）列的固定材料候選也一起訓練與留出（:mod:`aosr.gradient.surrogate_training`）。
+有產品設定檔以外的家族或固定材料候選時，訓練說明記下訓練過的家族、範圍與候選（:mod:`aosr.gradient.surrogate_coverage`），
 進格子前用開跑同一支 ``check_covers`` 核一次。
 步驟：開跑前核對（方案有低頻軸、原牆能貼）→ 匯出完整模型 → 訓練與留出材料（:mod:`aosr.gradient.surrogate_training`）
 → 建模（停止規則照 ``fem_reduced.toml``：殘差達標或完整解預算用完。``--stop-residual``、``--max-full-solves`` 只換這一次建模的
@@ -38,6 +39,7 @@ from aosr.gradient.surrogate_files import (
 
 if TYPE_CHECKING:
     from aosr.config.fem_reduced import ReducedModelSettings
+    from aosr.gradient.surrogate_coverage import FixedTarget
     from aosr.materials.search_library import SearchMaterials
     from aosr.config.surrogate_training import SurrogateTrainingSettings
     from aosr.physics.fem_reduced import FullOperators
@@ -90,6 +92,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="搜尋設定（跟開跑的 --settings 同一份）；不給照產品的 material_gradient.toml")
     parser.add_argument("--materials", type=Path, default=None, metavar="材料庫.json",
                         help="使用者材料庫（跟開跑的 --materials 同一份）：可最佳化材料一筆一個家族一起訓練")
+    parser.add_argument("--allowed", action="append", default=[], metavar="面=目標,目標",
+                        help="每區准用清單（跟開跑的 --allowed 同一個寫法，可重複）：列到的固定材料候選一起訓練")
     parser.add_argument("--replace", type=Path, default=None,
                         help="格子裡已經有一份（例如閘門拒收的舊替身）：新的核過之後把舊的整個搬到這裡，再放新的")
     parser.add_argument("--max-full-solves", type=int, default=None,
@@ -181,6 +185,7 @@ class _Run:
     sampling: SurrogateTrainingSettings
     settings: ReducedModelSettings
     materials: SearchMaterials
+    fixed: tuple[FixedTarget, ...]
     workers: int
     dense_threads: int | None
     progress: _Progress
@@ -191,10 +196,13 @@ def _open(args: argparse.Namespace) -> _Run:
     from aosr.config.paths import config_path
     from aosr.config.material_gradient import load_material_gradient_settings
     from aosr.config.surrogate_training import load_surrogate_training_settings
-    from aosr.gradient.boundary import scheme_patch_keys
+    from aosr.config.material_gradient import fixed_target_id
+    from aosr.gradient.boundary import scheme_patch_keys, surface_ids
     from aosr.gradient.cli import user_entries
+    from aosr.gradient.fixed_surfaces import expanded_allowed_targets, fixed_targets_of, parse_allowed_targets
     from aosr.gradient.run import presets_table
-    from aosr.materials.search_library import with_user_materials
+    from aosr.gradient.surrogate_coverage import fixed_targets
+    from aosr.materials.search_library import fixed_candidates, user_fixed_entries, with_user_materials
     from aosr.reporting.scheme import load_scheme
 
     started = time.time()
@@ -217,11 +225,17 @@ def _open(args: argparse.Namespace) -> _Run:
     entries = () if args.materials is None else user_entries(args.materials)
     materials = with_user_materials(load_material_gradient_settings(settings_path), presets_table(), entries)
     scheme = load_scheme(args.scheme.resolve())
+    allowed = expanded_allowed_targets(parse_allowed_targets(args.allowed), surface_ids(scheme_patch_keys(scheme)))
+    targets = fixed_targets_of(allowed)
+    candidates = fixed_candidates(targets, materials.presets,
+                                  user_fixed_entries([fixed_target_id(target) for target in targets], entries))
+    fixed = fixed_targets(allowed, candidates)
     progress = _Progress(work / PROGRESS_FILE, SurrogateProgress(
         phase="preparing", started_at=started, phase_started_at=started, updated_at=started, workers=workers,
         dense_threads=args.dense_threads, patches=len(scheme_patch_keys(scheme)),
         max_full_solves=settings.max_full_solves, stop_residual=settings.stop_residual))
-    return _Run(work, stage, slot, replace, scheme, sampling, settings, materials, workers, args.dense_threads, progress)
+    return _Run(work, stage, slot, replace, scheme, sampling, settings, materials, fixed, workers, args.dense_threads,
+                progress)
 
 
 def _prepare(job: _Run, capabilities_path: Path) -> tuple[FullOperators, tuple[float, ...], list[FrequencyBoundaryImpedances],
@@ -257,13 +271,13 @@ def _prepare(job: _Run, capabilities_path: Path) -> tuple[FullOperators, tuple[f
     checked_air(air, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s, source="完整模型算子")
     users = tuple(entry.id for entry in materials.entries)
     sets = TrainingSets(saved, materials.settings, job.sampling, air=air, ranges=ranges, frequencies_hz=axis,
-                        presets=materials.presets if users else None, user_families=users)
+                        presets=materials.presets if users else None, user_families=users, fixed=job.fixed)
     training_sets, holdout_sets = sets.training_sets(), sets.holdout_sets()
     training = [sets.impedances(item) for item in training_sets]
     holdout = [sets.impedances(item) for item in holdout_sets]
     job.stage.mkdir(parents=True)
     with (job.stage / TRAINING_FILE).open("x", encoding="utf-8") as handle:
-        handle.write(json.dumps(sets.document(training_sets, holdout_sets, coverage_for(materials)), ensure_ascii=False,
+        handle.write(json.dumps(sets.document(training_sets, holdout_sets, coverage_for(materials, job.fixed)), ensure_ascii=False,
                                 allow_nan=False) + "\n")
     return operators, axis, training, holdout
 
@@ -319,7 +333,7 @@ def build(args: argparse.Namespace) -> int:
         run.check_surrogate_matches_scheme(gated, job.scheme, points)
         run.check_surrogate_axis_covers_scoring(gated, job.scheme,
                                                 run.search_objective_settings(job.scheme.purpose).stage_one)
-        check_covers(job.stage / TRAINING_FILE, job.materials)
+        check_covers(job.stage / TRAINING_FILE, job.materials, job.fixed)
     except ValueError as error:
         verdict("gate_refused", f"搜尋開跑那一道准用閘門不收（{type(error).__name__}：{error}），沒有放進格子")
         return EXIT_NOT_USABLE
