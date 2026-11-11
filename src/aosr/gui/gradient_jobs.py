@@ -216,7 +216,7 @@ class GradientJob(BaseModel):
     steps: tuple[JobStep, ...] = ()
 
 
-def _write_text(path: Path, text: str) -> None:
+def write_text_atomic(path: Path, text: str) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_text(text, encoding="utf-8")
@@ -225,7 +225,7 @@ def _write_text(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _tail(path: Path) -> list[str]:
+def tail_lines(path: Path) -> list[str]:
     if not path.is_file():
         return []
     return path.read_text(encoding="utf-8", errors="replace").splitlines()[-LOG_TAIL_LINES:]
@@ -253,7 +253,7 @@ class GradientJobs:
 
     def _materials(self) -> tuple[SearchMaterials, tuple[LibraryEntry, ...]]:
         """搜尋設定接上使用者材料庫的可最佳化材料（#1082 段 2-3a），與使用者材料本身；材料庫讀不進來照講原因、不開。"""
-        settings = load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))
+        settings = self.search_settings()
         try:
             entries = load_user_library(user_library_path(self.data_dir))
         except (OSError, ValueError, ValidationError) as error:
@@ -273,7 +273,10 @@ class GradientJobs:
             raise PlanRefused(str(error)) from error
         return plan_search(scheme, design, request, materials.settings), materials, entries
 
-    def _inputs(self, scheme_id: str) -> tuple[str, Scheme, DesignSettings | None]:
+    def search_settings(self) -> MaterialGradientSettings:
+        return load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))
+
+    def inputs(self, scheme_id: str) -> tuple[str, Scheme, DesignSettings | None]:
         if not NAME.fullmatch(scheme_id):
             raise ValueError("方案代號只收英數字、底線與連字號")
         with self.scheme_lock:
@@ -306,7 +309,7 @@ class GradientJobs:
         return GradientJob.model_validate_json(path.read_text(encoding="utf-8"))
 
     def _save(self, job: GradientJob) -> None:
-        _write_text(self._dir(job.job_id) / "job.json", job.model_dump_json())
+        write_text_atomic(self._dir(job.job_id) / "job.json", job.model_dump_json())
 
     def _exit_path(self, job_id: str, index: int) -> Path:
         return self._dir(job_id) / "steps" / f"{index}.exit.json"
@@ -393,7 +396,7 @@ class GradientJobs:
                           "exit_code": None if record is None else record.exit_code,
                           "error": None if record is None else record.error,
                           "finished_at": None if record is None else record.finished_at,
-                          "log_tail": _tail(self._log_path(job.job_id, index))})
+                          "log_tail": tail_lines(self._log_path(job.job_id, index))})
         endpoint = None
         if folder is not None and (folder / ENDPOINT_FILE).is_file():
             endpoint = {"file": str(folder / ENDPOINT_FILE), "exported_scheme": str(folder / EXPORTED_SCHEME_FILE),
@@ -420,7 +423,7 @@ class GradientJobs:
         return units[0] if units else None
 
     @contextmanager
-    def _launching(self) -> Iterator[None]:
+    def launching(self) -> Iterator[None]:
         """查忙到開好服務整段拿開服務那一層給的鎖（:meth:`Launcher.starting`，整台共用）：同一個資料夾的兩個網頁行程
         （重開交接那一瞬間）、或兩個不同資料夾的網頁，都不會同時查到空閒而各開一跑；鎖放掉時服務已經在服務清單裡了。"""
         with self.lock, self.launcher.starting():
@@ -446,7 +449,7 @@ class GradientJobs:
 
     def preview(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
         """不開跑：轉好的參數、替身在不在、預設值、現在有沒有一跑在算。"""
-        _, scheme, design = self._inputs(scheme_id)
+        _, scheme, design = self.inputs(scheme_id)
         plan, materials, _ = self._plan(scheme, design, request)
         settings = materials.settings
         path = surrogate_path(self.data_dir, scheme)
@@ -462,10 +465,10 @@ class GradientJobs:
                 "busy": busy}
 
     def start(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
-        text, scheme, design = self._inputs(scheme_id)
+        text, scheme, design = self.inputs(scheme_id)
         plan, _, entries = self._plan(scheme, design, request)
         surrogate = self._surrogate(scheme)
-        with self._launching():
+        with self.launching():
             busy = self.active_job()
             if busy is not None:
                 raise JobBusy(busy)
@@ -474,9 +477,9 @@ class GradientJobs:
             (directory / "root").mkdir(parents=True)
             (directory / "steps").mkdir()
             snapshot = directory / "scheme.json"
-            _write_text(snapshot, text)
+            write_text_atomic(snapshot, text)
             if design is not None:
-                _write_text(directory / "design.json", design.model_dump_json())
+                write_text_atomic(directory / "design.json", design.model_dump_json())
             arguments = ["start", "--scheme", str(snapshot), "--surrogate", str(surrogate), "--purpose", scheme.purpose,
                          "--root", str(directory / "root"), "--capabilities", str(self.capabilities),
                          "--engine-commit", self.engine_commit]
@@ -529,7 +532,7 @@ class GradientJobs:
             return self.view(job)
 
     def _follow_up(self, job_id: str, action: Literal["resume", "endpoint"]) -> dict[str, object]:
-        with self._launching():
+        with self.launching():
             job = self._job(job_id)
             folder = self.folder(job)
             state = self._state(job, folder)
