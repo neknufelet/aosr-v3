@@ -148,6 +148,19 @@ def test_listed_surfaces_swap_only_to_their_list_and_others_keep_every_family() 
     assert rounds.preset_for_target("fixed:" + MEASURED, settings) == "fixed:" + MEASURED
 
 
+def test_next_round_bound_counts_only_listed_candidates() -> None:
+    """抓開下一輪的最壞求值數不看清單（照全部家族＋不貼算）：清單讓候選變少，上限一算多了就該開的輪不開。"""
+    settings = _settings()
+    surfaces = (("floor", GAP50), ("ceiling", None), ("x0", GAP50), ("xL", GAP50), ("y0", None), ("yL", None))
+    allowed = {"floor": ("glass_wool_48k",), "ceiling": ("none", "fixed:" + CARPET), "x0": ("glass_wool_48k", "none"),
+               "xL": ("glass_wool_48k",), "y0": ("none",), "yL": ("none",)}
+    listed = rounds.next_round_bound(surfaces, settings, None, allowed)
+    count = len(rounds.alternatives(surfaces, settings, None, allowed))
+    assert count == 2
+    assert listed == rounds.template_round_bound(settings, count, rounds.retune_count(settings, count))
+    assert listed < rounds.next_round_bound(surfaces, settings, None, None)
+
+
 def test_swap_to_a_fixed_material_has_no_variables_and_refuses_unlisted_targets() -> None:
     """抓換成固定材料時變數沒拿掉、別面的 θ 被動到、材料不是清單那一份、清單外的目標照樣換。"""
     context = _context({"x0": ("glass_wool_48k", "fixed:" + MEASURED)})
