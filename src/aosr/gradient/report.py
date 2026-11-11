@@ -34,7 +34,7 @@ from pydantic import BaseModel, ValidationError
 from aosr.config.material_gradient import MOUNT_ON_WALL
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import named_materials
-from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces, expanded_max_depths
+from aosr.gradient.fixed_surfaces import SCHEME_MATERIAL, expanded_fixed_surfaces, expanded_max_depths
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
 from aosr.gradient.endpoint_six_report import six_endpoint_lines
@@ -179,17 +179,27 @@ def material_text(material: SurfaceMaterial) -> str:
     return material.coverage_text()
 
 
+def _fixed_text(material_id: str, scheme_material: SurfaceMaterial | None) -> str:
+    """固定面那一句：構造預設印 id；保留字印方案檔那一面自己的材料（讀不到就照講）。"""
+    if material_id != SCHEME_MATERIAL:
+        return f"固定（材料 id：{material_id}）"
+    if scheme_material is None:
+        return "固定（方案這一面自己的材料；方案檔讀不到）"
+    return f"固定（方案這一面自己的材料：{material_text(scheme_material)}）"
+
+
 def _kept_texts(project: GradientProject) -> dict[str, str]:
     """不貼的面那一句：方案檔那一面原本的牆；方案檔讀不到時每面都說讀不到（報告照印，不中斷）。"""
-    fixed = {face: f"固定（材料 id：{material}）" for face, material in project.fixed_surfaces.items()}
+    fixed = {face: _fixed_text(material, None) for face, material in project.fixed_surfaces.items()}
     try:
         materials = project_wall_materials(project, load_scheme(Path(project.scheme_path)))
     except (OSError, ValueError) as error:
         return {**{wall.wall_name(): f"不貼（保留原牆；方案檔讀不到：{type(error).__name__}）" for wall in Wall.all()},
                 **fixed}
-    fixed = {face: f"固定（材料 id：{material}）" for face, material in
-             expanded_fixed_surfaces(project.fixed_surfaces, tuple(named_materials(materials))).items()}
-    return {**{name: f"不貼（保留原牆：{material_text(material)}）" for name, material in named_materials(materials).items()}, **fixed}
+    named = named_materials(materials)
+    fixed = {face: _fixed_text(material, named[face]) for face, material in
+             expanded_fixed_surfaces(project.fixed_surfaces, tuple(named)).items()}
+    return {**{name: f"不貼（保留原牆：{material_text(material)}）" for name, material in named.items()}, **fixed}
 
 
 def mount_line(project: GradientProject) -> str:
@@ -498,7 +508,8 @@ def render_report(folder: Path) -> str:
     lines = [f"梯度搜尋 {project.gradient_id}（用途 {project.purpose}，開始 {project.started_at}）", _status_line(folder),
              mount_line(project)]
     if project.fixed_surfaces:
-        lines.append("固定面：" + "、".join(f"{face}={material}" for face, material in project.fixed_surfaces.items()))
+        lines.append("固定面：" + "、".join(f"{face}=" + ("方案自己的材料" if material == SCHEME_MATERIAL else material)
+                                           for face, material in project.fixed_surfaces.items()))
     if (folder / STOP_FILE).exists():
         lines.append("停止記號：在（下一次求值之前會停；resume 會先清掉它）")
     ledger = folder / LEDGER_FILE

@@ -29,6 +29,9 @@ Mount = Literal["rigid", "on_wall"]
 MOUNT_RIGID: Final = "rigid"
 MOUNT_ON_WALL: Final = "on_wall"
 MOUNTS: Final[tuple[Mount, ...]] = (MOUNT_RIGID, MOUNT_ON_WALL)
+# 固定面的保留字：那一面（或那一區）用方案檔自己寫的材料、不帶變數、不換樣板（#1093）。含連字號，構造預設與
+# 使用者材料庫的 id（小寫英數與底線）撞不到；住設定層是為了讓網頁不必 import 會拉 JAX 的搜尋模組。
+SCHEME_MATERIAL: Final = "scheme-material"
 
 
 def _exact_float(value: object) -> object:

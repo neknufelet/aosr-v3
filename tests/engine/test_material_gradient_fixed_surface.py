@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,8 +27,8 @@ from aosr.gradient import template_ledger as templates
 from aosr.gradient import template_rounds as rounds
 from aosr.gradient.endpoint import design_digest, materials_from_surfaces
 from aosr.gradient.endpoint_run import checked_result
-from aosr.gradient.fixed_surfaces import fixed_materials, parse_fixed_surfaces
-from aosr.gradient.report import _kept_texts
+from aosr.gradient.fixed_surfaces import SCHEME_MATERIAL, fixed_materials, parse_fixed_surfaces
+from aosr.gradient.report import _fixed_text, _kept_texts, material_text
 from aosr.physics.report_surfaces import WholeWallZone
 from tests.engine._material_gradient_templates_probe import SYNTHETIC_SCORES, synthetic_factory
 from tests.engine.test_material_gradient import _presets, _settings
@@ -114,21 +115,27 @@ def test_no_fixed_matches_mainline(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     _mount_control(tmp_path)
 
 
-def _check_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """抓固定面被帶變數、換樣板、讀回還原成原牆，並經真正的終點結果核對與材料匯出。"""
+def _check_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed: dict[str, str] = FIXED) -> None:
+    """抓固定面被帶變數、換樣板、讀回還原成原牆，並經真正的終點結果核對與材料匯出。
+
+    ``fixed`` 是保留字那一份（#1093）時，預期材料就是方案那一面自己的（``_control_kept`` 的 floor）、報告印那份材料。
+    """
     folder = tmp_path / "fixed"
-    problem = _run(folder, monkeypatch, FIXED)
+    problem = _run(folder, monkeypatch, fixed)
     # 預期材料由既有資料與方案解析器取得，不呼叫本次新增的材料解析函式。
-    raw = next(p.material for p in _presets() if p.id == "glass_wool_24k_50mm")
-    material = WholeWallZone.model_validate({"area": "whole_wall", "material": raw}).material
+    if fixed["floor"] == SCHEME_MATERIAL:
+        material = _control_kept()["floor"]
+    else:
+        raw = next(p.material for p in _presets() if p.id == fixed["floor"])
+        material = WholeWallZone.model_validate({"area": "whole_wall", "material": raw}).material
     floor = problem.designs[0]
     assert floor.material is None and floor.kept_material == material and not floor.variables
     header, rows = ledger.read_ledger(folder / run.LEDGER_FILE)
-    assert header.fixed_surfaces == FIXED
+    assert header.fixed_surfaces == fixed
     assert all(not name.startswith("floor.") for name in header.variable_names)
     assert all(run.surface_specs(header, row.theta())[0].preset_id is None for row in rows)
     th, tr = templates.read_template_ledger(folder / run.TEMPLATES_FILE, settings=problem.settings)
-    assert th.fixed_surfaces == FIXED
+    assert th.fixed_surfaces == fixed
     assert any(row.phase == "quick_score" for row in tr)
     for row in tr:
         assert row.surfaces[0] == ("floor", None)
@@ -137,15 +144,16 @@ def _check_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert designs[0].kept_material == material and not designs[0].variables
         assert design_digest(designs[0]) == design_digest(floor)
     before = run.parse_result((folder / run.RESULT_FILE).read_bytes())
-    assert before.surfaces[0].fixed_material_id == FIXED["floor"]
+    assert before.surfaces[0].fixed_material_id == fixed["floor"]
     assert run.resume_search(folder, should_stop=None) == before
     assert checked_result(folder, before, header, problem.settings, problem.kept) == before
     designs = run.final_designs([(s.surface_id, s.preset_id) for s in before.surfaces], problem.settings, problem.kept,
-                                fixed_surfaces=FIXED)
+                                fixed_surfaces=fixed)
     assert materials_from_surfaces(designs, np.asarray([float.fromhex(v) for v in before.theta_hex]), problem.settings)[Wall.all()[0]] == material
     project = run.read_project(folder)
-    assert project.fixed_surfaces == FIXED
-    assert "固定" in _kept_texts(project)["floor"] and FIXED["floor"] in _kept_texts(project)["floor"]
+    assert project.fixed_surfaces == fixed
+    text = _kept_texts(project)["floor"]  # 合成整場的方案檔路徑不存在：保留字那一句照講讀不到
+    assert "固定" in text and ("方案這一面自己的材料" if fixed["floor"] == SCHEME_MATERIAL else fixed["floor"]) in text
     changed = _problem({"floor": "glass_wool_96k_50mm"})
     monkeypatch.setattr(run, "load_problem", lambda project: changed)
     with pytest.raises(ValueError, match="標頭.*對不上"):
@@ -224,3 +232,44 @@ def _invoke(directory: Path, part: str) -> None:
 def test_fixed_material_survives_every_row_resume_and_endpoint(tmp_path: Path) -> None:
     """合成整場在雙精度子行程，超過 60 秒直接失敗。"""
     _invoke(tmp_path, "fixed")
+
+
+def test_scheme_material_fixed_face_runs_whole_search_with_its_own_material(tmp_path: Path) -> None:
+    """#1093 保留字：固定面用方案那一面自己的材料，整場、換樣板、接續、終點核對都不帶變數也不被換；雙精度子行程。"""
+    _invoke(tmp_path, "scheme")
+
+
+def test_scheme_material_is_accepted_kept_out_of_catalog_and_reported_with_material() -> None:
+    """抓保留字被當成材料庫 id 拒收、被拿去材料庫查表、撞到真的 id，或報告沒印出方案那一面的材料。"""
+    assert parse_fixed_surfaces([f"x0@r1={SCHEME_MATERIAL}", "floor=carpet_on_concrete"]) == {
+        "floor": "carpet_on_concrete", "x0@r1": SCHEME_MATERIAL}
+    assert set(fixed_materials({"floor": SCHEME_MATERIAL, "ceiling": "carpet_on_concrete"})) == {"ceiling"}
+    assert SCHEME_MATERIAL not in {preset.id for preset in _presets()}
+    assert re.fullmatch(r"[a-z][a-z0-9_]*", SCHEME_MATERIAL) is None  # 構造預設與使用者材料庫 id 的字集
+    material = _control_kept()["floor"]
+    assert material_text(material) in _fixed_text(SCHEME_MATERIAL, material)
+    assert "讀不到" in _fixed_text(SCHEME_MATERIAL, None)
+    assert _fixed_text("carpet_on_concrete", material) == "固定（材料 id：carpet_on_concrete）"
+    assert _identity({"floor": SCHEME_MATERIAL}) not in {_identity({}), _identity(FIXED)}
+
+
+def test_scheme_material_face_is_frozen_and_never_a_template_alternative() -> None:
+    """抓保留字那一面帶了變數、材料不是方案那一面，或還出現在換樣板候選裡。"""
+    settings, kept = _settings(), _control_kept()
+    fixed = {"floor": SCHEME_MATERIAL}
+    designs = run.designs_for(PRESETS, settings, kept={wall: kept[wall.wall_name()] for wall in Wall.all()},
+                              fixed_surfaces=fixed)
+    floor = designs[0]
+    assert floor.surface_id == "floor" and floor.fixed_material_id == SCHEME_MATERIAL
+    assert floor.material is None and floor.kept_material == kept["floor"] and not floor.variables
+    assert all(design.variables for design in designs[1:])
+    candidates = rounds.alternatives(tuple((d.surface_id, d.preset_id) for d in designs), settings, fixed)
+    assert candidates and all(surface != "floor" for surface, _ in candidates)
+
+
+def test_cli_help_names_the_scheme_material_word(capsys: pytest.CaptureFixture[str]) -> None:
+    """抓命令列說明寫的保留字跟程式的常數對不上（說明是字面字，命令列不先 import 搜尋模組）。"""
+    with pytest.raises(SystemExit) as exited:
+        cli.main(["start", "--help"])
+    assert exited.value.code == 0
+    assert SCHEME_MATERIAL in " ".join(capsys.readouterr().out.split())

@@ -148,7 +148,8 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--mount", choices=MOUNTS, default=MOUNT_RIGID,
                        help="安裝方式：rigid 樣板照原樣（剛背）；on_wall 貼在原牆上（新增層背後接方案原本那面牆）")
     start.add_argument("--fixed-surface", action="append", default=[], metavar="面=材料id",
-                       help="固定指定面的材料，不參與優化；可重複給不同面，材料 id 取現有材料庫")
+                       help="固定指定面的材料，不參與優化；可重複給不同面，材料 id 取現有材料庫，"
+                            "寫 scheme-material 就是用方案檔那一面自己的材料")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
