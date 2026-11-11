@@ -129,7 +129,7 @@ def test_fixed_zone_mounted_deeper_than_its_cap_is_red_and_names_the_level(field
     assert _codes(result, "x0", "z1") == ["depth_over"]
     line = _lines(result, "x0", "z1")[0]
     assert line["level"] == "red" and "0.15 公尺" in line["text"] and f"{word}的上限" in line["text"]
-    assert result["red"] == 1 and "x0 分區 z1" in cast(list[str], result["refusals"])[0]
+    assert result["red"] == 1 and "x 起點牆「z1」" in cast(list[str], result["refusals"])[0]
     assert cast(dict[str, dict[str, dict[str, object]]], result["caps"])["x0"]["z1"]["level"] == level
 
 
@@ -141,8 +141,8 @@ def test_an_uncut_wall_fixed_too_deep_is_red_on_the_page_and_at_the_search() -> 
     design = _design(room_max_depth_m=0.1, zones={"x0": {"whole_wall": {"mode": "search"}}})
     result = zone_limits(document, design.model_dump(mode="json"))
     assert [(line["code"], line["level"]) for line in _lines(result, "y0", "whole_wall")] == [("depth_over", "red")]
-    assert result["refusals"] == ["y0 分區 whole_wall：" + _lines(result, "y0", "whole_wall")[0]["text"]]
-    with pytest.raises(PlanRefused, match="y0 分區 whole_wall"):
+    assert result["refusals"] == ["y 起點牆「整面」：" + _lines(result, "y0", "whole_wall")[0]["text"]]
+    with pytest.raises(PlanRefused, match="y 起點牆「整面」"):
         plan_search(_scheme(document), design, GradientRequest(), SETTINGS)
 
 
@@ -294,7 +294,7 @@ def test_plans_without_design_caps_are_written_as_before() -> None:
 def test_a_fixed_zone_over_its_cap_refuses_the_search() -> None:
     scheme = _scheme(_cut())
     design = _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}})
-    with pytest.raises(PlanRefused, match=r"有超過限制的區.*x0 分區 z1.*0\.15 公尺"):
+    with pytest.raises(PlanRefused, match=r"有超過限制的區.*x 起點牆「z1」.*0\.15 公尺"):
         plan_search(scheme, design, GradientRequest(), SETTINGS)
 
 
@@ -399,7 +399,7 @@ def test_the_real_entry_refuses_to_plan_a_search_over_an_uncomputable_fixed_mate
         for path in ("plan", "surrogate/plan"):
             response = client.post(f"{base}/api/gradient/schemes/room109/{path}", json={})
             assert response.status_code == 400, (path, response.text)
-            assert "x0 分區 z1" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"], path
+            assert "x 起點牆「z1」" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"], path
         (tmp_path / "schemes" / "room109.json").write_text(_scheme(_cut(PRESET)).model_dump_json(), encoding="utf-8")
         # 在範圍內就過了限制這一關（考卷行程連不上使用者的服務匯流排，下一步查「現在有沒有一跑在算」會回 503，那不是這一段的事）
         again = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
@@ -419,3 +419,22 @@ def test_a_zone_list_with_a_non_object_is_reported_not_raised() -> None:
     result = zone_limits(document)
     assert [line["code"] for line in cast(dict[str, list[dict[str, str]]], result["walls"])["x0"]] == ["unreadable"]
     assert result["red"] == 1
+
+
+def test_refusals_name_walls_and_zones_as_the_page_shows_them() -> None:
+    """擋下的原文（表上方那行總述、開跑被擋的回覆）用畫面上的牆名與區名，不露 x0、whole_wall 這類內部代號。"""
+    import re
+    document = _cut()                                                  # x0：z1 貼太深
+    whole = _zones(document)["y0"][0]                                  # y0 沒切：整面貼太深
+    whole["material"] = {"kind": "mounted_on_wall", "layers": _layers(DEEP), "wall": whole["material"]}
+    cast(dict[str, float], cast(Doc, document["scene"])["room_m"])["Ly"] = 0.9   # x 起點牆變窄：自動補的那塊出界
+    result = zone_limits(document, _design(room_max_depth_m=0.1).model_dump(mode="json"))
+    refusals = cast(list[str], result["refusals"])
+    assert any(line.startswith("x 起點牆「z1」：") for line in refusals)
+    assert any(line.startswith("y 起點牆「整面」：") for line in refusals)
+    assert any(line.startswith("x 起點牆「自動 auto1」：超出牆面") for line in refusals)
+    assert not [line for line in refusals if re.search(r"\b(x0|xL|y0|yL|floor|ceiling|whole_wall)\b", line)], refusals
+    with pytest.raises(PlanRefused) as refused:
+        plan_search(_scheme(_cut()), _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}}),
+                    GradientRequest(), SETTINGS)
+    assert "x 起點牆「z1」" in str(refused.value) and "x0" not in str(refused.value)

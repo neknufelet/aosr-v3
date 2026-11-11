@@ -31,11 +31,12 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.geometry.shoebox import Room
+from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
-from aosr.physics.zone_fill import Box, wall_size_m
+from aosr.physics.zone_fill import FILL_PREFIX, Box, wall_size_m
 
 DepthLevel = Literal["zone", "wall", "room"]
 Level = Literal["red", "warn", "note"]
@@ -96,6 +97,13 @@ def _number_pair(value: object) -> tuple[float, float] | None:
     if not all(isinstance(n, int | float) and not isinstance(n, bool) and math.isfinite(n) for n in value):
         return None
     return float(value[0]), float(value[1])
+
+
+def zone_words(wall: str, key: str) -> str:
+    """一區在畫面上叫什麼（擋下的原文給人看，不露內部代號）：牆名照表單（``labels.WALLS``），
+    區名同逐區表——整面、自動補的寫「自動 代號」、畫的框寫它的代號。"""
+    zone = "整面" if key == WHOLE_WALL_KEY else f"自動 {key}" if key.startswith(FILL_PREFIX) else key
+    return f"{WALL_WORDS.get(wall, wall)}「{zone}」"
 
 
 def _key(entry: Mapping[str, object]) -> str | None:
@@ -235,8 +243,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                 lines.extend(checked[text])
         zones[wall] = {key: lines for key, lines in found.items() if lines}
     refusals = [problem.text for problem in top]
-    refusals += [f"{wall}：{problem.text}" for wall, lines in walls.items() for problem in lines if problem.level == "red"]
-    refusals += [f"{wall} 分區 {key}：{problem.text}" for wall, items in zones.items() for key, lines in items.items()
+    refusals += [f"{WALL_WORDS.get(wall, wall)}：{problem.text}" for wall, lines in walls.items() for problem in lines if problem.level == "red"]
+    refusals += [f"{zone_words(wall, key)}：{problem.text}" for wall, items in zones.items() for key, lines in items.items()
                  for problem in lines if problem.level == "red"]
     return {"status": "checked", "design": [problem.model_dump() for problem in top],
             "zones": {wall: {key: [problem.model_dump() for problem in lines] for key, lines in items.items()}
