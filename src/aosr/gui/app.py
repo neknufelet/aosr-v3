@@ -46,6 +46,7 @@ from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.zone_design import design_routes
 from aosr.gui.zone_edit import zone_edit_routes
+from aosr.gui.zone_modes import zone_material_routes
 from aosr.gui.zone_result_routes import ZoneResultDeps, zone_result_routes
 from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
@@ -78,7 +79,7 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "measured.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "zone_modes.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css"}
@@ -903,6 +904,12 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
 
+def _zone_routes(handlers: GuiHandlers) -> list[Route]:
+    """立面圖切一面（#1091）與每一區換材料（#1105）。"""
+    return [*zone_edit_routes(), *zone_material_routes(handlers.data_dir, handlers.jobs._lock,
+                                                      capabilities=handlers.capabilities, directivity=handlers.directivity)]
+
+
 def _archive_routes(handlers: GuiHandlers) -> list[Route]:
     """封存的預覽、搬動與舊單筆入口集中登記。"""
     return [Route("/api/schemes/{name}/archive", handlers.archive_scheme, methods=["POST"]),
@@ -944,7 +951,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *zone_edit_routes(),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

@@ -99,6 +99,15 @@ button.archive-danger:hover{background:#fff0f0}
 .zone text,.elevation-edge,.elevation-marker text{font-size:14px;fill:#17212a;pointer-events:none}
 .zone-auto text{fill:#46586a}
 .zone-drawn{cursor:pointer}
+/* 每一區的做法（#1105）：固定＝藍（原樣）、保留原牆＝灰、交給搜尋＝琥珀；立面圖與逐區表同一套。 */
+.zone.zone-mode-keep_original rect,#elevation-frame.zone-mode-keep_original{fill:#e6e8ea}
+.zone.zone-mode-search rect,#elevation-frame.zone-mode-search{fill:#fbe7b5}
+.zone.zone-mode-search.selected rect{fill:#f5cf73}
+.zone-table tr.zone-mode-keep_original td:first-child{border-left:6px solid #9aa4ab}
+.zone-table tr.zone-mode-search td:first-child{border-left:6px solid #e0a526}
+.zone-table tr.zone-mode-fixed td:first-child{border-left:6px solid #15617b}
+.zone-allowed{display:flex;flex-direction:column;align-items:flex-start}
+.zone-allowed label{margin:.15rem 0}
 .zone-thin{fill:none;stroke:#c0392b;stroke-width:3;stroke-dasharray:5 3}
 .zone-preview{fill:rgba(21,97,123,.15);stroke:#15617b;stroke-dasharray:3 3}
 .elevation-marker{pointer-events:none}

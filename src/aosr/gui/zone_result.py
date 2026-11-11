@@ -132,7 +132,7 @@ def _zone_name(zone_id: str) -> str:
     return "整面" if zone_id == WHOLE_WALL_KEY else zone_id
 
 
-def _original_material(original: OriginalWalls, wall: str, zone_id: str,
+def original_material(original: OriginalWalls, wall: str, zone_id: str,
                        box: tuple[tuple[float, float], tuple[float, float]]) -> SurfaceMaterial:
     """原方案在這一區的材料：要有一區整個蓋住它（邊照原值精確比，不加容差）；劃過兩區就拒收。"""
     zones = original.zones.get(wall)
@@ -174,7 +174,7 @@ def derive_baseline(design: Scheme, original: OriginalWalls | None = None) -> Ba
             material: SurfaceMaterial
             source: BaselineSource
             if original is not None:
-                material, source = _original_material(original, wall, zone_id, box), "original_scheme"
+                material, source = original_material(original, wall, zone_id, box), "original_scheme"
             elif isinstance(zone.material, MountedOnWall):
                 material, source = zone.material.wall, "unwrapped"
             else:

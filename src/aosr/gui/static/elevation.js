@@ -118,6 +118,7 @@ async function cutWall(wall, boxes, done) {
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
     }
     scheme.scene.surface_zones_by_wall[wall] = data.zones;
+    remapZoneDesign(wall, data.inherited);
     elevationThin = [];
   } finally {
     document.querySelector("main").inert = false;
@@ -252,9 +253,9 @@ function renderElevation() {
   }
   area.replaceChildren();
   $("elevation-selected").replaceChildren();
-  if (!elevationWall) { $("elevation-size").textContent = "選一面牆打開立面圖。"; return; }
+  if (!elevationWall) { $("elevation-size").textContent = "選一面牆打開立面圖。"; renderZoneTable(null); return; }
   const wall = elevationWall, view = views[wall], size = wallSize(wall);
-  if (!size) { $("elevation-size").textContent = "先把房間的長、寬、高都填好正數，才畫得出這一面。"; return; }
+  if (!size) { $("elevation-size").textContent = "先把房間的長、寬、高都填好正數，才畫得出這一面。"; renderZoneTable(wall); return; }
   const [width, height] = size;
   const scale = Math.min(560 / width, 320 / height), pad = 48;
   const geometry = {width, height, scale, pad};
@@ -262,13 +263,20 @@ function renderElevation() {
                            "data-wall": wall, role: "img", "aria-label": `${wallNames[wall]}立面圖（站在房間裡看）`});
   svg.append(node("rect", {id: "elevation-frame", x: pad, y: pad, width: width * scale, height: height * scale}));
   const zones = wallZones(wall);
+  // 整面一區的牆：牆框本身照那一區的做法上色。
+  if (!zones.some(zone => zone.area === "rectangle")) svg.lastChild.setAttribute("class", `zone-mode-${zoneSetting(wall, "whole_wall").mode}`);
   const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_merge_tol_m || zone.v_m[1] > height + cutSpec().edge_merge_tol_m));
   for (const zone of zones.filter(zone => zone.area === "rectangle")) {
     const auto = zone.id.startsWith(cutSpec().fill_prefix);
     const [a0, a1, b0, b1] = screenBox(view, width, height, zone);
-    const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
+    const mode = zoneSetting(wall, zone.id).mode;
+    const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"} zone-mode-${mode}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
     group.append(node("rect", {x: pad + a0 * scale, y: pad + (height - b1) * scale, width: (a1 - a0) * scale, height: (b1 - b0) * scale}),
-      node("text", {x: pad + (a0 + a1) / 2 * scale, y: pad + (height - (b0 + b1) / 2) * scale, "text-anchor": "middle"}, auto ? "自動" : zone.id));
+      node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}`));
+    // 字放得下才寫（窄條裡「自動」兩字會擠出界）；放不下的滑過去看 title。
+    const label = auto ? "自動" : zone.id;
+    if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18)
+      group.append(node("text", {x: pad + (a0 + a1) / 2 * scale, y: pad + (height - (b0 + b1) / 2) * scale, "text-anchor": "middle"}, label));
     svg.append(group);
   }
   for (const strip of elevationThin) {
@@ -302,6 +310,7 @@ function renderElevation() {
   clear.disabled = !count;
   clear.onclick = () => action(() => cutWall(wall, [], () => { elevationSelected = null; }));
   $("elevation-selected").append(clear);
+  renderZoneTable(wall);
 }
 window.renderElevation = renderElevation;
 window.addEventListener("DOMContentLoaded", () => {
