@@ -22,6 +22,22 @@ button.danger{background:#9b2c22}
 .layer-head button{padding:.3rem .7rem}
 #editor-message{white-space:pre-line}
 textarea:disabled,select:disabled{background:#edf1f2;color:#53636b}
+/* 吸音曲線（段 2-2b）：標語兩顆、圖、底色說明、提醒。醒目提醒加左邊紅線，一般提醒照提示字。 */
+.badge{display:inline-block;border-radius:999px;padding:.15rem .7rem;font-size:.9rem;font-weight:600;background:#edf4f6;color:#17212a;margin:.1rem .2rem .1rem 0}
+.badge.basis-simulated{background:#e3eef7;color:#1d4f7a}
+.badge.basis-measured{background:#e1f1e6;color:#1f6136}
+.badge.basis-approximate{background:#fbecd4;color:#7a4a0c}
+#curve-chart{width:100%;max-width:900px}
+#curve-key,#curve-warnings{list-style:none;padding:0;margin:.4rem 0}
+#curve-key li{display:inline-flex;align-items:center;gap:.35rem;margin-right:1rem}
+.swatch{display:inline-block;width:1.4rem;height:.9rem;border:1px solid #b9c7cc}
+.swatch.extrapolation{background:rgba(230,140,40,.22)}
+.swatch.model_fill{background:rgba(110,125,135,.2)}
+#curve-warnings li{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b}
+#curve-warnings li.strong{border-left-color:#9b2c22;color:#872c22;font-weight:600;background:#fbf1ef}
+#curve-state{white-space:pre-line}
+/* 出處網址很長、沒有空白可斷：手機寬度要能在任何地方斷行，不然整塊表單會橫向捲。 */
+#curve-source{overflow-wrap:anywhere}
 /* 手機寬度：表格擠成一字一行看不了，改成一筆一張卡，欄名寫在值前面。 */
 @media(max-width:700px){
   #user-list thead,#builtin-list thead{display:none}
