@@ -7,10 +7,12 @@ from collections.abc import Sequence
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
+from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
-from aosr.gui.zone_result import BaselineRefused, _change, derive_baseline, improvement, zone_rows
+from aosr.gui.zone_result import (
+    BaselineRefused, OriginalWalls, _change, derive_baseline, improvement, original_walls, zone_rows)
 from aosr.gui.zone_result_routes import ZoneResultView, lock_refusal
 from aosr.gui.measured_view import build_measured_view
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
@@ -20,12 +22,18 @@ from aosr.physics.zone_fill import wall_size_m
 from aosr.reporting.compare import compare_results
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._directivity import DIRECTIVITY
 from tests.engine._zone_result_cases import design_scheme, mounted, original_x0
 from tests.engine._zoned_report_cases import small_scheme, split_x0, with_x0
 from tests.engine.test_measured_impedance import measured
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 OTHER = ConstantImpedance(impedance_pa_s_m=2000.0)
+CAPABILITIES = load_capabilities(config_path("capabilities.toml"))
+
+
+def _walls(scheme: Scheme) -> OriginalWalls:
+    return original_walls(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
 
 
 def _boxes(scheme: Scheme) -> dict[str, list[tuple[object, ...]]]:
@@ -73,7 +81,7 @@ def test_baseline_id_is_stable_and_follows_baseline_content() -> None:
 def test_pointer_lays_the_original_schemes_materials_on_the_design_partition() -> None:
     design = design_scheme()
     original = _with_wall(small_scheme(zoned=True), "x0", (WholeWallZone(area="whole_wall", material=OTHER),))
-    baseline = derive_baseline(design, original)
+    baseline = derive_baseline(design, _walls(original))
     assert _boxes(baseline.scheme) == _boxes(design)
     x0 = [zone for zone in baseline.zones if zone.wall == "x0"]
     assert [(zone.zone_id, zone.baseline, zone.source) for zone in x0] == [
@@ -87,18 +95,35 @@ def test_pointer_refuses_when_an_original_cut_crosses_a_design_zone() -> None:
     left = RectangleZone(area="rectangle", id="l", u_m=(0.0, 1.0), v_m=(0.0, 1.5), material=OTHER)
     right = RectangleZone(area="rectangle", id="r", u_m=(1.0, 2.0), v_m=(0.0, 1.5), material=original_x0())
     with pytest.raises(BaselineRefused, match="劃過設計的「b」"):
-        derive_baseline(design, with_x0((left, right)))
+        derive_baseline(design, _walls(with_x0((left, right))))
     width, height = wall_size_m(design.scene.room_m, "floor")
     floor = tuple(RectangleZone(area="rectangle", id=name, u_m=u, v_m=(0.0, height), material=OTHER)
                   for name, u in (("p", (0.0, width / 2)), ("q", (width / 2, width))))
     with pytest.raises(BaselineRefused, match="地板的切線劃過設計的「整面」"):
-        derive_baseline(design, _with_wall(small_scheme(zoned=True), "floor", floor))
+        derive_baseline(design, _walls(_with_wall(small_scheme(zoned=True), "floor", floor)))
     room = design.scene.room_m
     bigger = small_scheme(zoned=True)
     bigger = Scheme.model_validate(bigger.model_copy(update={"scene": bigger.scene.model_copy(update={
         "room_m": type(room)(room.Lx + 0.5, room.Ly, room.Lz)})}).model_dump())
     with pytest.raises(BaselineRefused, match="房間尺寸跟設計不同"):
-        derive_baseline(design, bigger)
+        derive_baseline(design, _walls(bigger))
+
+
+def test_pointer_to_a_six_number_original_takes_its_walls_from_the_validated_inputs() -> None:
+    """原方案六面都是整面固定阻抗（方案檔存成六個數字）：每面當整面一區，材料走計算同一條驗證拿，不在這裡重建。
+
+    設計的 a 區是貼在原方案 x0 那個固定阻抗上的棉，所以照原方案鋪跟拆加貼層要得到逐欄相同的基準方案。
+    """
+    six = small_scheme()
+    assert six.scene.surface_zones_by_wall is None and six.scene.impedance_pa_s_per_m_by_wall is not None
+    walls = _walls(six)
+    assert {wall: [zone.material for zone in zones] for wall, zones in walls.zones.items()} == {
+        wall: [ConstantImpedance(impedance_pa_s_m=value)] for wall, value in six.scene.impedance_pa_s_per_m_by_wall.items()}
+    pointed, unwrapped = derive_baseline(design_scheme(), walls), derive_baseline(design_scheme())
+    assert pointed.scheme == unwrapped.scheme and pointed.original_scheme_id == six.scheme_id
+    assert {zone.source for zone in pointed.zones} == {"original_scheme"}
+    with pytest.raises(BaselineRefused, match="沒有分區"):
+        derive_baseline(six)
 
 
 def test_nothing_to_compare_when_no_zone_has_an_added_layer() -> None:

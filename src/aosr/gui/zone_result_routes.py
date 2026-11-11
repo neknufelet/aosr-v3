@@ -27,13 +27,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.config.capabilities import CapabilityTable
+from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.jobs import JobManager
 from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
-    PLACE_NOTE, Baseline, BaselineRefused, Improvement, ZoneRow, derive_baseline, improvement, is_zoned, zone_rows)
+    PLACE_NOTE, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement, is_zoned,
+    original_walls, zone_rows)
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.evaluation import LoadedResult
 from aosr.reporting.result import SchemeResult
@@ -54,6 +57,8 @@ class ZoneResultDeps:
 
     data_dir: Path
     jobs: JobManager
+    capabilities: CapabilityTable
+    directivity: DirectivityDefaults
     physics_identity: str
     server_stale: Callable[[], bool]
     stale_response: Callable[[], JSONResponse]
@@ -95,15 +100,16 @@ def _settings(deps: ZoneResultDeps, scheme: Scheme) -> DesignSettings | None:
         raise BaselineRefused(f"設計設定讀不出來（{first}），拿不準有沒有指原方案；到設計設定重存一次") from exc
 
 
-def _original(deps: ZoneResultDeps, settings: DesignSettings | None) -> Scheme | None:
-    """設計設定指的原方案；沒指回 None；指了卻讀不到就拒收。"""
+def _original(deps: ZoneResultDeps, settings: DesignSettings | None) -> OriginalWalls | None:
+    """設計設定指的原方案；沒指回 None；指了卻讀不到、或過不了檢查就拒收。"""
     if settings is None or settings.original_scheme_id is None:
         return None
     path = deps.data_dir / "schemes" / f"{settings.original_scheme_id}.json"
     try:
-        return Scheme.model_validate_json(path.read_bytes())
+        scheme = Scheme.model_validate_json(path.read_bytes())
     except (ValueError, OSError) as exc:
         raise BaselineRefused(f"設計設定指的原方案「{settings.original_scheme_id}」讀不到或不在了") from exc
+    return original_walls(scheme, capabilities=deps.capabilities, directivity=deps.directivity)
 
 
 def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | None:

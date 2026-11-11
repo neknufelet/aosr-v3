@@ -943,7 +943,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
         *material_routes(handlers.data_dir), *material_curve_routes(),
-        *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs,
+        *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs, handlers.capabilities, handlers.directivity,
             handlers.startup_physics_identity, handlers._server_stale, handlers._updated_response, handlers._load_result)),
     ])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)

@@ -11,6 +11,8 @@
 - 沒指：拆掉這一區加貼的層（貼在原牆上的構造，取它記的原牆）；沒有加貼層的區看不出原牆，兩邊一樣，畫面點名。
 
 基準方案的代號＝設計代號＋「-orig-」＋基準內容雜湊前 8 碼：設計或原方案改了，代號跟著換，舊的基準結果不會被誤認。
+原方案六面都是整面固定阻抗時，方案檔存成六個數字；這裡不自己把數字建成材料（固定阻抗只在已驗輸入出生，
+見 ``report_io.solver_inputs``），而是走同一條驗證拿那六面材料，見 ``original_walls``。
 這一支不在物理身分範圍裡：只組方案、讀結果、排版，不算物理。
 """
 from __future__ import annotations
@@ -18,21 +20,27 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from aosr.config.capabilities import CapabilityTable
+from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import LABELS, WALLS
 from aosr.gui.problem_text import material_summary
 from aosr.gui.zone_design import MODE_WORDS, WHOLE_WALL_KEY, DesignSettings, effective_modes, mismatches
-from aosr.materials.construction_models import ConstantImpedance, MountedOnWall, SurfaceMaterial
+from aosr.geometry.shoebox import Room
+from aosr.materials.construction_models import MountedOnWall, SurfaceMaterial
+from aosr.physics.report_io import solver_inputs
 from aosr.physics.report_surfaces import RectangleZone, SurfaceZone, WholeWallZone
 from aosr.physics.zone_fill import wall_size_m
 from aosr.reporting.compare import compare_results
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import SchemeValidationError, checked_inputs
 from aosr.scoring.contract import QualityCategory
 from aosr.scoring.ranking_models import CandidateStatus
 
@@ -68,6 +76,30 @@ class BaselineZone:
 
 
 @dataclass(frozen=True)
+class OriginalWalls:
+    """原方案鋪原牆要用的三樣：代號、房間尺寸、每一面牆的分區（六個數字的方案已換成整面一區）。"""
+
+    scheme_id: str
+    room_m: Room
+    zones: Mapping[str, tuple[SurfaceZone, ...]]
+
+
+def original_walls(scheme: Scheme, *, capabilities: CapabilityTable, directivity: DirectivityDefaults) -> OriginalWalls:
+    """原方案每一面牆的分區；六面固定阻抗存成六個數字的，材料照計算同一條驗證、從唯一出生地拿。"""
+    zones = scheme.scene.surface_zones_by_wall
+    if zones is not None:
+        return OriginalWalls(scheme.scheme_id, scheme.scene.room_m, dict(zones))
+    try:
+        _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
+    except SchemeValidationError as exc:
+        raise BaselineRefused(f"原方案「{scheme.scheme_id}」過不了檢查：{exc}") from exc
+    _, inputs = next(iter(documents.values()))
+    return OriginalWalls(scheme.scheme_id, scheme.scene.room_m, {
+        wall.wall_name(): (WholeWallZone(area="whole_wall", material=material),)
+        for wall, material in solver_inputs(inputs).materials_by_wall.items()})
+
+
+@dataclass(frozen=True)
 class Baseline:
     scheme: Scheme
     zones: tuple[BaselineZone, ...]
@@ -84,14 +116,6 @@ def is_zoned(scheme: Scheme) -> bool:
                for zones in (scheme.scene.surface_zones_by_wall or {}).values() for zone in zones)
 
 
-def _zones(scheme: Scheme) -> dict[str, tuple[SurfaceZone, ...]]:
-    """方案每一面牆的分區；六面都是固定阻抗、存成六個數字的方案，每面當整面一區。"""
-    if scheme.scene.surface_zones_by_wall is not None:
-        return dict(scheme.scene.surface_zones_by_wall)
-    return {wall: (WholeWallZone(area="whole_wall", material=ConstantImpedance(impedance_pa_s_m=value)),)
-            for wall, value in (scheme.scene.impedance_pa_s_per_m_by_wall or {}).items()}
-
-
 def _box(zone: SurfaceZone, size: tuple[float, float]) -> tuple[tuple[float, float], tuple[float, float]]:
     return (zone.u_m, zone.v_m) if isinstance(zone, RectangleZone) else ((0.0, size[0]), (0.0, size[1]))
 
@@ -100,13 +124,13 @@ def _zone_name(zone_id: str) -> str:
     return "整面" if zone_id == WHOLE_WALL_KEY else zone_id
 
 
-def _original_material(original: Scheme, wall: str, zone_id: str,
+def _original_material(original: OriginalWalls, wall: str, zone_id: str,
                        box: tuple[tuple[float, float], tuple[float, float]]) -> SurfaceMaterial:
     """原方案在這一區的材料：要有一區整個蓋住它（邊照原值精確比，不加容差）；劃過兩區就拒收。"""
-    zones = _zones(original).get(wall)
+    zones = original.zones.get(wall)
     if zones is None:
         raise BaselineRefused(f"原方案「{original.scheme_id}」沒有{WALLS[wall]}，原牆鋪不上去")
-    size = wall_size_m(original.scene.room_m, wall)
+    size = wall_size_m(original.room_m, wall)
     (u0, u1), (v0, v1) = box
     for zone in zones:
         (a0, a1), (b0, b1) = _box(zone, size)
@@ -125,13 +149,15 @@ def _baseline_scheme(design: Scheme, zones: dict[str, tuple[SurfaceZone, ...]]) 
     return Scheme.model_validate({**body, "scheme_id": f"{prefix}{SUFFIX}{digest}"})
 
 
-def derive_baseline(design: Scheme, original: Scheme | None = None) -> Baseline:
-    """同一套切法、每一區換回原牆的基準方案；鋪不上就丟 BaselineRefused。"""
-    if original is not None and original.scene.room_m != design.scene.room_m:
+def derive_baseline(design: Scheme, original: OriginalWalls | None = None) -> Baseline:
+    """同一套切法、每一區換回原牆的基準方案；鋪不上就丟 BaselineRefused。設計要有分區清單（切了矩形的方案一定有）。"""
+    if design.scene.surface_zones_by_wall is None:
+        raise BaselineRefused("這一份方案沒有分區，沒有逐區的原牆可推")
+    if original is not None and original.room_m != design.scene.room_m:
         raise BaselineRefused(f"原方案「{original.scheme_id}」的房間尺寸跟設計不同，原牆鋪不上去")
     rows: list[BaselineZone] = []
     laid_by_wall: dict[str, tuple[SurfaceZone, ...]] = {}
-    for wall, zones in _zones(design).items():
+    for wall, zones in design.scene.surface_zones_by_wall.items():
         size = wall_size_m(design.scene.room_m, wall)
         laid: list[SurfaceZone] = []
         for zone in zones:
