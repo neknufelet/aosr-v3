@@ -50,9 +50,12 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
         tmp_path: Path, browser: Browser, design_text: str) -> None:
     design = SchemeResult.model_validate_json(design_text)
     _put(tmp_path, DESIGN_RUN, design_text)
-    with real_server(tmp_path) as base, _open(browser, f"{base}/results/{DESIGN_RUN}") as watched:
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        expect(page.locator("#zone-result")).to_be_visible(timeout=60_000)
+        # 冷的網頁行程第一次讀回這一份要編譯重評（本機 16.7 秒、熱的 7.4 秒；雲端搶核時超過導覽等網路靜下來的 30 秒，
+        # 11-11 shard-c 紅過）：導覽只等頁面本身，讀回交給下面有寬限的等待。
+        page.goto(f"{base}/results/{DESIGN_RUN}", wait_until="domcontentloaded")
+        expect(page.locator("#zone-result")).to_be_visible(timeout=180_000)
         expect(page.locator("#zone-rows tr")).to_have_count(1 + 7)
         expect(page.locator('#zone-rows tr[data-changed="true"]')).to_have_count(1)
         expect(page.locator('#zone-rows tr[data-changed="true"]')).to_contain_text("拆掉這一區加貼的層")
