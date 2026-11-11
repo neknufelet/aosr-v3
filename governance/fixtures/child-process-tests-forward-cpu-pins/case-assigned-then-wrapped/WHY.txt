@@ -1,0 +1,1 @@
+必紅樣本：先 env = child_process_env() 再 forward_cpu_pins(env)。這種寫法中間可以先改 env、也可能漏傳，機器分不出，所以只認直接包。
