@@ -27,10 +27,11 @@ function node(tag, attributes, text) {
   if (text !== undefined) element.textContent = text;
   return element;
 }
-// 牆面寬高照表單上現在填的房間尺寸（還沒交伺服器也算），讀不出正數就不畫。
+// 牆面寬高照表單上現在填的房間尺寸（還沒交伺服器也算），讀不出正數就不畫。沒改過的格子用方案原值
+// （格子裡顯示的是伺服器排過位數的字，4.41988145469 不等於 4.41988145469311），跟存檔時 collect 讀的同一份。
 function wallSize(wall) {
-  const room = Object.fromEntries(["Lx", "Ly", "Lz"].map(key => [key, Number($(`room-${key}`)?.value ?? scheme.scene.room_m[key])]));
-  if (!Object.values(room).every(value => Number.isFinite(value) && value > 0)) return null;
+  const room = Object.fromEntries(["Lx", "Ly", "Lz"].map(key => [key, $(`room-${key}`) ? numericInput(`room-${key}`) : scheme.scene.room_m[key]]));
+  if (!Object.values(room).every(value => typeof value === "number" && Number.isFinite(value) && value > 0)) return null;
   return {floor: [room.Lx, room.Ly], ceiling: [room.Lx, room.Ly], x0: [room.Ly, room.Lz], xL: [room.Ly, room.Lz],
           y0: [room.Lx, room.Lz], yL: [room.Lx, room.Lz]}[wall];
 }
@@ -59,12 +60,13 @@ function drawnBoxes(wall) {
 function project(wall, point) {
   return wall[0] === "x" ? [point[1], point[2]] : wall[0] === "y" ? [point[0], point[2]] : [point[0], point[1]];
 }
-// 拖曳畫的框：先吸到格點、夾在牆內；再把離牆邊或別框的邊不到最小邊的邊貼過去（不然補滿會剩一條太窄的縫，
+// 拖曳畫的框：先吸到畫面上的格點、夾在牆內；再把離牆邊或別框的邊不到最小邊的邊貼過去（不然補滿會剩一條太窄的縫，
 // 牆寬不在格點上時最容易發生）。打數字改的框只做第二步。
 function snapEdges(box, others, width, height) {
-  const minSide = cutSpec().min_side_m;
+  // 跟伺服器同一把：差不到「最小邊扣容差」才貼（0.7 − 0.5 在浮點不到 0.2，那是剛好一個最小邊，不貼）。
+  const reach = cutSpec().min_side_m - cutSpec().edge_merge_tol_m;
   const snapOne = (value, targets) => {
-    let best = value, gap = minSide;
+    let best = value, gap = reach;
     for (const target of targets) {
       const distance = Math.abs(value - target);
       if (distance > 0 && distance < gap) { best = target; gap = distance; }
@@ -159,10 +161,12 @@ function startDrawing(svg, event, geometry, view, wall) {
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, ended, geometry));
     // 幾乎沒拖：當作點在空白處，取消選取。
     if (Math.max(a1 - a0, b1 - b0) * geometry.scale < 4) { elevationSelected = null; renderElevation(); return; }
-    const raw = wallBox(view, geometry.width, geometry.height, a0, a1, b0, b1, newBoxId(wall));
+    // 格點量的是畫面上離左緣、離下緣的距離（鏡像的牆也一樣），選取後四格數字才是整數格。
+    const [g0, g1] = [a0, a1].map(value => gridSnap(value, geometry.width));
+    const [h0, h1] = [b0, b1].map(value => gridSnap(value, geometry.height));
     const others = drawnBoxes(wall);
-    const box = snapEdges({id: raw.id, u_m: raw.u_m.map(value => gridSnap(value, geometry.uMax)),
-                           v_m: raw.v_m.map(value => gridSnap(value, geometry.vMax))}, others, geometry.uMax, geometry.vMax);
+    const box = snapEdges(wallBox(view, geometry.width, geometry.height, g0, g1, h0, h1, newBoxId(wall)),
+                          others, geometry.width, geometry.height);
     if (boxTooSmall(box)) {
       note(`框太小：寬與高都要至少 ${cutSpec().min_side_m * 100} 公分（離牆邊或鄰框不到這麼近會自動貼齊）`, "notice");
       return;
@@ -216,13 +220,18 @@ function selectedEditor(wall, view, width, height) {
 function markers(svg, wall, view, geometry) {
   const items = [...Object.entries(scheme.speakers).map(([id, point]) => ({key: `speaker-${id}`, name: speakerName(id), point: [point.x, point.y, point.z], kind: "speaker"})),
     ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: point.position_m, kind: "seat"}))];
+  // 兩支喇叭在 y 兩面牆上會投影到同一點（同 x、同高度）：字往下一行一行排，不疊在一起。
+  const labels = [];
   for (const item of items) {
     const [u, v] = project(wall, item.point);
     const [a, b] = flip(view, geometry.width, geometry.height, u, v);
     const x = geometry.pad + a * geometry.scale, y = geometry.pad + (geometry.height - b) * geometry.scale;
+    let labelY = y - 8;
+    while (labels.some(([lx, ly]) => Math.abs(lx - x) < 80 && Math.abs(ly - labelY) < 16)) labelY += 18;
+    labels.push([x, labelY]);
     const group = node("g", {id: `elevation-${item.key}`, class: `elevation-marker ${item.kind}`});
     group.append(item.kind === "speaker" ? node("rect", {x: x - 6, y: y - 6, width: 12, height: 12})
-      : node("circle", {cx: x, cy: y, r: 7}), node("text", {x: x + 9, y: y - 8}, item.name));
+      : node("circle", {cx: x, cy: y, r: 7}), node("text", {x: x + 9, y: labelY}, item.name));
     svg.append(group);
   }
 }
@@ -243,7 +252,7 @@ function renderElevation() {
   if (!size) { $("elevation-size").textContent = "先把房間的長、寬、高都填好正數，才畫得出這一面。"; return; }
   const [width, height] = size;
   const scale = Math.min(560 / width, 320 / height), pad = 48;
-  const geometry = {width, height, scale, pad, uMax: width, vMax: height};
+  const geometry = {width, height, scale, pad};
   const svg = node("svg", {id: "elevation-svg", viewBox: `0 0 ${width * scale + 2 * pad} ${height * scale + 2 * pad}`,
                            "data-wall": wall, role: "img", "aria-label": `${wallNames[wall]}立面圖（站在房間裡看）`});
   svg.append(node("rect", {id: "elevation-frame", x: pad, y: pad, width: width * scale, height: height * scale}));

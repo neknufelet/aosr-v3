@@ -9,7 +9,7 @@ from playwright.sync_api import Browser, Page, expect
 from aosr.physics.zone_fill import Box, fill_wall
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
-from tests.engine._surface_zone_cases import NEW, ROOM_109, room109_document, room109_quarters
+from tests.engine._surface_zone_cases import ASSEMBLY, NEW, ROOM_109, room109_document, room109_quarters
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _save_readback
 
@@ -77,6 +77,7 @@ def _cut_by(page: Page, action: str, *, ok: bool = True) -> None:
 
 def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: Path, browser: Browser) -> None:
     document = room109_document()
+    cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])["ceiling"][0]["material"] = ASSEMBLY
     original = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])["xL"][0]["material"]
     _write(tmp_path, document)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -98,12 +99,12 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
         assert _centre_y(page, "#elevation-speaker-left") < _centre_y(page, "#elevation-speaker-right")
         expect(page.locator("#elevation-edge-top")).to_have_text("y 起點牆")
 
-        # x 終點牆是鏡像：畫面左下角拖到離左緣 1.02、離下緣 1.2 公尺（u＝3.39988，離格點 3.40 留半格的餘裕給像素誤差），
-        # 存下的 u 在高的那一頭，而且正好貼到牆寬（4.41988… 不在 5 公分格上）。
+        # x 終點牆是鏡像：畫面左下角拖到離左緣 1.0、離下緣 1.2 公尺（都在畫面格點上，留半格餘裕給像素誤差），
+        # 存下的 u 在高的那一頭，貼牆那一邊正好等於牆寬（4.41988… 不在 5 公分格上），另一邊離牆寬正好 1 公尺。
         page.locator("#elevation-wall-xL").click()
-        _drag(page, LY, LZ, (0.02, 0.02), (1.02, 1.2))
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         zones = {str(zone["id"]): zone for zone in _zones(page, "xL")}
-        assert zones["z1"]["u_m"] == [3.4, LY] and zones["z1"]["v_m"] == [0.0, 1.2]
+        assert zones["z1"]["u_m"] == [LY - 1.0, LY] and zones["z1"]["v_m"] == [0.0, 1.2]
         assert sorted(zones) == ["auto1", "auto2", "z1"]
         assert all(zone["material"] == original for zone in zones.values())
         expect(page.locator("#elevation .zone-drawn")).to_have_count(1)
@@ -125,16 +126,26 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
         _cut_by(page, "#elevation-delete")
         assert _zones(page, "xL") == [{"area": "whole_wall", "material": original}]
         expect(page.locator("#zoned-xL")).to_have_count(0)
+
+        # 多層構造的牆切了再清回整面：構造表單重新長出來、欄位是方案裡的值，存回去材料一字不差。
+        page.locator("#elevation-wall-ceiling").click()
+        _drag(page, LX, LY, (0.5, 0.5), (2.0, 2.0))
+        expect(page.locator("#construction-ceiling")).to_have_count(0)
+        _cut_by(page, "#elevation-clear")
+        expect(page.locator("#layer-ceiling-1-thickness_m")).to_have_value("0.43")
+        saved = _save_readback(page, "room109-ceiling")
+        ceiling = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], saved["scene"])[NEW])["ceiling"]
+        assert ceiling == [{"area": "whole_wall", "material": ASSEMBLY}]
         assert watched.page_errors == [] and watched.console_errors == []
 
 
 def _thin_wall_document() -> dict[str, object]:
-    """y 終點牆有一框離左牆邊只有 10 公分（檔案裡的方案可以這樣存）；x 兩面是 109 的 2×2。"""
+    """y 終點牆（多層構造）有一框離左牆邊只有 10 公分（檔案裡的方案可以這樣存）；x 兩面是 109 的 2×2。"""
     document = room109_document("shrink")
     room109_quarters(document, "x0", (100.0, 200.0, 300.0, 400.0))
     room109_quarters(document, "xL", (500.0, 600.0, 700.0, 800.0))
     zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])
-    material = zones["yL"][0]["material"]
+    material = ASSEMBLY
     drawn = [Box("z1", (0.1, 2.0), (0.0, LZ)), Box("z2", (3.0, 4.0), (0.0, 1.0))]
     filled = fill_wall("yL", LX, LZ, drawn, min_side_m=0.0)
     zones["yL"] = [{"area": "rectangle", "id": box.id, "u_m": list(box.u_m), "v_m": list(box.v_m), "material": material}
@@ -159,16 +170,22 @@ def test_thin_strip_is_marked_red_and_walls_can_be_cleared_one_by_one_after_the_
         assert _zones(page, "yL") == before
 
         # 房間改矮到 2.5 公尺：x 兩面與 y 終點牆的分區都超出牆面；一面一面清，每一面都清得掉。
+        # 先清 y 終點牆：別兩面還壞著、預覽一定被拒，多層構造表單照樣長回來、欄位是方案裡的值。
         page.locator("#room-Lz").fill("2.5")
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#elevation-size")).to_contain_text("超出目前的牆面")
-        for wall in ("x0", "xL", "yL"):
+        for wall in ("yL", "x0", "xL"):
             page.locator(f"#elevation-wall-{wall}").click()
             _cut_by(page, "#elevation-clear")
             assert [zone["area"] for zone in _zones(page, wall)] == ["whole_wall"]
+            if wall == "yL":
+                expect(page.locator("#layer-yL-1-thickness_m")).to_have_value("0.43")
+                assert _zones(page, "yL")[0]["material"] == ASSEMBLY
         expect(page.locator("#messages")).to_have_class("ok")
         assert cast(dict[str, object], _zones(page, "x0")[0]["material"])["impedance_pa_s_m"] == 100.0
         saved = _save_readback(page, "shrunk")
         assert cast(dict[str, dict[str, float]], saved["scene"])["room_m"]["Lz"] == 2.5
+        assert cast(dict[str, list[dict[str, object]]], cast(dict[str, object], saved["scene"])[NEW])["yL"] == [
+            {"area": "whole_wall", "material": ASSEMBLY}]
         page.locator("#elevation").screenshot(path=str(tmp_path / "cleared.png"))
         assert watched.page_errors == []
