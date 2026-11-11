@@ -217,9 +217,14 @@ function selectedEditor(wall, view, width, height) {
   remove.onclick = () => action(() => cutWall(wall, drawnBoxes(wall).filter(box => box.id !== current.id), () => { elevationSelected = null; }));
   fields.append(remove); area.append(fields);
 }
+// 喇叭與主位的座標照表單上現在填的（還沒交伺服器也算，同房間尺寸）；沒改過的格子取方案原值，填不出數字就不畫那一點。
+function fieldPoint(prefix, id, fallback) {
+  return ["x", "y", "z"].map((axis, index) => $(`${prefix}-${id}-${axis}`) ? numericInput(`${prefix}-${id}-${axis}`) : fallback[index]);
+}
 function markers(svg, wall, view, geometry) {
-  const items = [...Object.entries(scheme.speakers).map(([id, point]) => ({key: `speaker-${id}`, name: speakerName(id), point: [point.x, point.y, point.z], kind: "speaker"})),
-    ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: point.position_m, kind: "seat"}))];
+  const items = [...Object.entries(scheme.speakers).map(([id, point]) => ({key: `speaker-${id}`, name: speakerName(id), point: fieldPoint("speaker", id, [point.x, point.y, point.z]), kind: "speaker"})),
+    ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: fieldPoint("receiver", point.receiver_id, point.position_m), kind: "seat"}))]
+    .filter(item => item.point.every(value => typeof value === "number" && Number.isFinite(value)));
   // 兩支喇叭在 y 兩面牆上會投影到同一點（同 x、同高度）：字往下一行一行排，不疊在一起。
   const labels = [];
   for (const item of items) {
@@ -300,6 +305,6 @@ function renderElevation() {
 }
 window.renderElevation = renderElevation;
 window.addEventListener("DOMContentLoaded", () => {
-  $("room-fields").addEventListener("input", () => renderElevation());
+  for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());
 });
 })();

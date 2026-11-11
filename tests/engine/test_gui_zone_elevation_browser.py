@@ -75,6 +75,33 @@ def _cut_by(page: Page, action: str, *, ok: bool = True) -> None:
     page.wait_for_function("!document.querySelector('main').inert")
 
 
+def _check_orientation_and_markers(page: Page) -> None:
+    """站在房裡看那一面：用喇叭左右考鏡像，不只考自己的翻轉表；表單上改座標，記號跟著搬。"""
+    # 參考擺位面向 x 起點牆聽：站在房裡看 x 起點牆，左喇叭在左；轉身看 x 終點牆，左喇叭到右邊。
+    page.locator("#elevation-wall-x0").click()
+    assert _centre_x(page, "#elevation-speaker-left") < _centre_x(page, "#elevation-speaker-right")
+    expect(page.locator("#elevation-edge-left")).to_have_text("y 起點牆")
+    expect(page.locator("#elevation-edge-right")).to_have_text("y 終點牆")
+    page.locator("#elevation-wall-xL").click()
+    assert _centre_x(page, "#elevation-speaker-left") > _centre_x(page, "#elevation-speaker-right")
+    expect(page.locator("#elevation-edge-left")).to_have_text("y 終點牆")
+    # 地板跟平面圖同向（y 往上）：左喇叭 y 小、畫在右喇叭下面；天花抬頭看，上下對調。喇叭（x＝1）在主位（x＝3.2）左邊。
+    page.locator("#elevation-wall-floor").click()
+    assert _centre_y(page, "#elevation-speaker-left") > _centre_y(page, "#elevation-speaker-right")
+    assert _centre_x(page, "#elevation-speaker-left") < _centre_x(page, "#elevation-receiver-main")
+    page.locator("#elevation-wall-ceiling").click()
+    assert _centre_y(page, "#elevation-speaker-left") < _centre_y(page, "#elevation-speaker-right")
+    expect(page.locator("#elevation-edge-top")).to_have_text("y 起點牆")
+
+    # 表單上改了左喇叭的 y（還沒存），立面圖上的記號跟著搬：x 起點牆上往右移。
+    page.locator("#elevation-wall-x0").click()
+    before = _centre_x(page, "#elevation-speaker-left")
+    page.locator("#speaker-left-y").fill("2.0")
+    page.wait_for_function("x => { const r = document.querySelector('#elevation-speaker-left rect').getBoundingClientRect();"
+                           " return r.x + r.width / 2 > x + 1; }", arg=before)
+    page.locator("#speaker-left-y").fill("1.3")
+
+
 def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: Path, browser: Browser) -> None:
     document = room109_document()
     cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])["ceiling"][0]["material"] = ASSEMBLY
@@ -83,21 +110,7 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
-        # 參考擺位面向 x 起點牆聽：站在房裡看 x 起點牆，左喇叭在左；轉身看 x 終點牆，左喇叭到右邊。
-        page.locator("#elevation-wall-x0").click()
-        assert _centre_x(page, "#elevation-speaker-left") < _centre_x(page, "#elevation-speaker-right")
-        expect(page.locator("#elevation-edge-left")).to_have_text("y 起點牆")
-        expect(page.locator("#elevation-edge-right")).to_have_text("y 終點牆")
-        page.locator("#elevation-wall-xL").click()
-        assert _centre_x(page, "#elevation-speaker-left") > _centre_x(page, "#elevation-speaker-right")
-        expect(page.locator("#elevation-edge-left")).to_have_text("y 終點牆")
-        # 地板跟平面圖同向（y 往上）：左喇叭 y 小、畫在右喇叭下面；天花抬頭看，上下對調。喇叭（x＝1）在主位（x＝3.2）左邊。
-        page.locator("#elevation-wall-floor").click()
-        assert _centre_y(page, "#elevation-speaker-left") > _centre_y(page, "#elevation-speaker-right")
-        assert _centre_x(page, "#elevation-speaker-left") < _centre_x(page, "#elevation-receiver-main")
-        page.locator("#elevation-wall-ceiling").click()
-        assert _centre_y(page, "#elevation-speaker-left") < _centre_y(page, "#elevation-speaker-right")
-        expect(page.locator("#elevation-edge-top")).to_have_text("y 起點牆")
+        _check_orientation_and_markers(page)
 
         # x 終點牆是鏡像：畫面左下角拖到離左緣 1.0、離下緣 1.2 公尺（都在畫面格點上，留半格餘裕給像素誤差），
         # 存下的 u 在高的那一頭，貼牆那一邊正好等於牆寬（4.41988… 不在 5 公分格上），另一邊離牆寬正好 1 公尺。

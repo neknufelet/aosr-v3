@@ -183,3 +183,14 @@ def test_route_cuts_refuses_and_publishes_its_numbers(tmp_path: Path) -> None:
             refused = client.post("/api/zone-cut", json=bad)
             assert refused.status_code == 400 and "格式不完整" in refused.json()["error"], refused.text
         assert client.post("/api/zone-cut", content=b"not json", headers={"Content-Type": "application/json"}).status_code == 400
+
+
+def test_old_zones_whose_place_cannot_be_read_are_skipped_when_finding_materials() -> None:
+    """舊分區的座標讀不出來（壞檔）就不拿來找材料：新框中心落在那一區時，改取讀得出來、離中心最近的那一區。"""
+    document = room109_document()
+    room109_quarters(document, "x0", (100.0, 200.0, 300.0, 400.0))
+    _zones(document)["x0"][3]["u_m"] = ["a", 1.0]
+    _zones(document)["x0"][2]["id"] = 7
+    result = _cut(document, "x0", [{"id": "u1v1", "u_m": [3.0, 4.0], "v_m": [2.0, LZ]}])
+    inherited = cast(dict[str, str], result["inherited"])
+    assert inherited["u1v1"] == "u0v1" and _impedance(_by_id(result)["u1v1"]) == 200.0
