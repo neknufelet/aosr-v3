@@ -253,8 +253,11 @@ def check_covers(training: Path, materials: SearchMaterials, fixed: Sequence[Fix
                                   materials.presets)
         extra = (_problems(wanted, product) + _member_problems(materials.settings, materials.presets)
                  + _fixed_problems(fixed, ()))
+        if not extra:
+            # 舊替身當作照產品設定檔家族訓練過：這一場只把產品家族收窄或拿掉幾個（照 v2 同一條「相同或更窄」），照舊收下。
+            return
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：這份替身沒記訓練過哪些材料（材料庫接進搜尋之前建的，"
-                                    f"只用產品設定檔的家族訓練過），這一場{'；'.join(extra) or '的家族設定換過'}")
+                                    f"只用產品設定檔的家族訓練過），這一場{'；'.join(extra)}")
     problems = (_problems(wanted, trained.families) + _member_problems(materials.settings, materials.presets)
                 + _fixed_problems(fixed, trained.fixed))
     if problems:

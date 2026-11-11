@@ -72,6 +72,20 @@ def test_old_surrogate_is_refused_when_a_product_family_is_widened(tmp_path: Pat
     _refused(_legacy(tmp_path), _materials(settings=wide), "glass_wool_48k 的總深度上限 0.4 m 比訓練過的 0.3 m 大")
 
 
+def test_old_surrogate_still_passes_when_product_families_are_only_narrowed(tmp_path: Path) -> None:
+    """抓搜尋設定只留產品家族的其中一個、或把範圍收窄，舊替身（沒有訓練說明、#1098 那一版）就被拒收
+    （它用產品那幾個家族訓練過，收窄的一場還在裡面；slow_material_gradient_templates_cli 的設定只留第一個家族）。"""
+    first = BASE.family[0]
+    narrowed = (BASE.model_copy(update={"family": (first,)}),
+                BASE.model_copy(update={"family": (first.model_copy(update={"max_total_depth_m": first.max_total_depth_m / 2}),
+                                                   *BASE.family[1:])}))
+    for settings in narrowed:
+        materials = _materials(settings=settings)
+        assert not only_product_families(materials)
+        check_covers(tmp_path / "absent" / TRAINING_FILE, materials)
+        check_covers(_legacy(tmp_path), materials)
+
+
 def test_recorded_coverage_accepts_the_same_or_narrower_families(tmp_path: Path) -> None:
     """抓同一份材料、或只把範圍收窄、或材料庫多了一筆固定材料（固定材料不接成家族）也被拒收（會白白逼人重建）。"""
     training = trained_on(tmp_path / "surrogate.npz", _materials(_optimizable()))
@@ -193,3 +207,11 @@ def test_fixed_candidate_content_and_surfaces_must_match_what_was_trained(tmp_pa
                    r"固定材料 fixed:panel_fixed 准用在 \['x0@r1_c1'\]，訓練只放過 \['x0@r0_c0'\]")
     _refused_fixed(training, _fixed_targets({ZONE: ("fixed:panel_fixed", "fixed:glass_wool_24k_50mm")}, _fixed()),
                    "固定材料 fixed:glass_wool_24k_50mm 沒訓練過")
+
+
+def test_fixed_candidate_on_fewer_patches_than_trained_still_passes(tmp_path: Path) -> None:
+    """抓候選訓練時放過兩片、這一場只准用其中一片（准用面片是訓練過的子集）也被拒收（會白白逼人重建）。"""
+    both: dict[str, tuple[str, ...]] = {ZONE: ("glass_wool_48k", "fixed:panel_fixed"), "x0@r1_c1": ("glass_wool_48k", "fixed:panel_fixed")}
+    training = _written(tmp_path, _fixed_targets(both, _fixed()))
+    check_covers(training, _materials(), _fixed_targets({ZONE: ("glass_wool_48k", "fixed:panel_fixed")}, _fixed()))
+    check_covers(training, _materials(), _fixed_targets({"x0@r1_c1": ("fixed:panel_fixed",)}, _fixed()))
