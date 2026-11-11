@@ -39,7 +39,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
-from aosr.config.material_gradient import MOUNT_ON_WALL, load_material_gradient_settings
+from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
@@ -487,7 +487,7 @@ class GradientJobs:
                 arguments.extend(("--settings", str(self.settings_path)))
             if entries:
                 library = directory / USER_LIBRARY_NAME
-                _write_text(library, dump_user_library(entries))
+                write_text_atomic(library, dump_user_library(entries))
                 arguments.extend(("--materials", str(library)))
             job = GradientJob(job_id=job_id, scheme_id=scheme_id, created_at=time.time(), plan=plan,
                               surrogate=str(surrogate))
