@@ -8,6 +8,9 @@
 讀出時方案已經改過、對不上的就照實列出來，不靜默丟掉也不當錯誤擋住整頁。
 
 設計設定不能比方案多活：沒有方案檔就不准寫；封存、還原跟著方案整包一起搬（見 ``scheme_archive``）。
+
+``original_scheme_id``（選填）：這份設計是從哪一份方案切出來的。結果頁「改善多少」的原牆基準照它那一份的材料
+鋪到這一套切法（見 ``zone_result``）；沒填就拆掉每一區加貼的層。寫入時那份方案要在、而且不能是自己。
 """
 from __future__ import annotations
 
@@ -49,6 +52,7 @@ class DesignSettings(BaseModel):
     schema_version: Literal["aosr.zone_design.v1"] = "aosr.zone_design.v1"
     scheme_id: str
     zones: dict[str, dict[str, ZoneDesign]] = Field(default_factory=dict)
+    original_scheme_id: str | None = Field(default=None, pattern="^" + NAME.pattern.removesuffix(r"\Z") + "$")
 
 
 def design_relative(scheme_id: str) -> Path:
@@ -147,6 +151,10 @@ class DesignHandlers:
                 settings = DesignSettings.model_validate(body)
                 if settings.scheme_id != name:
                     return _error("設計設定的方案代號跟網址不同", 400)
+                if settings.original_scheme_id is not None:
+                    if settings.original_scheme_id == name:
+                        return _error("原方案不能是這一份自己", 400)
+                    self._scheme(settings.original_scheme_id)
                 write_design(self.data_dir, settings, scheme)
                 return JSONResponse({"scheme_id": name, "message": "設計設定已儲存",
                                      "modes": effective_modes(settings, scheme)})

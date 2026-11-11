@@ -343,6 +343,7 @@ async function load() {
   selectedRole = view.frequency_responses[0]?.role;
   drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections(); drawFurniture(); drawConstructionNotes(); drawMeasuredWalls();
   loadModalDiagnosis(resultId);
+  loadZoneResult(resultId);
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
   $("loading").hidden = true;

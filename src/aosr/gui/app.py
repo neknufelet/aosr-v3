@@ -43,6 +43,7 @@ from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, 
 from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.zone_design import design_routes
+from aosr.gui.zone_result_routes import ZoneResultDeps, zone_result_routes
 from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
@@ -77,7 +78,7 @@ STANDING_TEXT = {
 STATIC_NAMES = {"app.js", "walls.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
-                "materials.js", "materials.css"}
+                "materials.js", "materials.css", "zone_result.js"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -942,6 +943,8 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
         *material_routes(handlers.data_dir), *material_curve_routes(),
+        *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs, handlers.capabilities, handlers.directivity,
+            handlers.startup_physics_identity, handlers._server_stale, handlers._updated_response, handlers._load_result)),
     ])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 

@@ -11,6 +11,7 @@
   <script src="/static/capabilities.js" defer></script>
   <script src="/static/modal.js" defer></script>
   <script src="/static/plan.js" defer></script>
+  <script src="/static/zone_result.js" defer></script>
   <script src="/static/results.js" defer></script>
 </head>
 <body>
@@ -27,6 +28,12 @@
       <button id="rerun">用現在的程式重算</button><p id="rerun-state"></p></section>
     <div id="content" hidden>
       <p id="material-research-notice" class="notice" hidden></p>
+      <section id="zone-result" hidden><h2>逐區表與改善多少</h2><div id="zone-notes"></div>
+        <div class="table-wrap" id="zone-rows"></div>
+        <h3>改善多少（跟原牆基準比）</h3><p id="zone-state" aria-live="polite"></p>
+        <button id="zone-baseline-start" type="button" hidden>算原牆基準</button><p id="zone-start-state" aria-live="polite"></p>
+        <p id="zone-baseline-link" hidden><a href="#">打開原牆基準那一份結果</a></p>
+        <div id="zone-improvement"></div><p id="zone-total-note"></p><p id="zone-improvement-note"></p></section>
       <section id="measured-walls" hidden><h2>實測阻抗表與接縫</h2><div id="measured-wall-details"></div></section>
       <section id="construction-notes" hidden><h2>牆面材料計算提醒</h2><div id="construction-note-lines"></div></section>
       <section id="result-plan"><h2>當次方案的平面圖與側面圖</h2>
