@@ -237,9 +237,12 @@ def test_stop_during_install_is_recorded_not_obeyed(tmp_path: Path, monkeypatch:
 
         recorded: list[str | None] = []
         monkeypatch.setattr(Path, "rename", stopping)
-        _commit(gate, stage, slot, retired, recorded.append)
-        monkeypatch.undo()
-        _stop_now(gate, 1)
+        try:
+            _commit(gate, stage, slot, retired, recorded.append)
+            monkeypatch.undo()
+            _stop_now(gate, 1)
+        except KeyboardInterrupt:  # 讓它變成這一題紅，不要把整場考試停掉
+            pytest.fail(f"放進格子途中（{moment}）或放進去之後被停打斷了")
     finally:
         signal.signal(signal.SIGTERM, previous)
     assert recorded == [str(retired)] and gate.deferred == [signal.SIGTERM, signal.SIGTERM]
