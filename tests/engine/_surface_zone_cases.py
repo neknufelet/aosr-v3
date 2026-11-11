@@ -95,3 +95,29 @@ def invalid_scene(case: str) -> tuple[dict[str, object], str, str]:
         path += ".floor.0.material.assembly.layers.0.air.thickness_m"
         hint = "要大於 0"
     return scene, path, hint
+
+
+# 109 號房的長寬高（#562 示範方案的 room_m 原值）：牆寬不在 5 公分格上，畫框貼牆邊的浮點問題要在這種尺寸上考。
+ROOM_109: dict[str, float] = {"Lx": 6.98792656080558, "Ly": 4.41988145469311, "Lz": 3.1554034223396052}
+
+
+def room109_document(scheme_id: str = "room109") -> dict[str, object]:
+    """參考方案換成 109 號房的長寬高，六面整面一區；喇叭與座位都在房內（參考房比 109 小）。"""
+    document = zone_document() | {"scheme_id": scheme_id}
+    cast(dict[str, object], document["scene"])["room_m"] = dict(ROOM_109)
+    return document
+
+
+def room109_quarters(document: dict[str, object], wall: str, impedances: tuple[float, float, float, float]) -> None:
+    """把一面牆切成 109 示範用的 2×2（代號 u0v0…，順序同 #562 方案），四區各給一個固定阻抗。"""
+    sizes = {"x0": ("Ly", "Lz"), "xL": ("Ly", "Lz"), "y0": ("Lx", "Lz"), "yL": ("Lx", "Lz"),
+             "floor": ("Lx", "Ly"), "ceiling": ("Lx", "Ly")}
+    room = cast(dict[str, float], cast(dict[str, object], document["scene"])["room_m"])
+    width, height = ROOM_109[sizes[wall][0]], ROOM_109[sizes[wall][1]]
+    assert room == ROOM_109
+    zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])
+    zones[wall] = [{"area": "rectangle", "id": f"u{col}v{row}",
+                    "u_m": [col * width / 2, width if col else width / 2],
+                    "v_m": [row * height / 2, height if row else height / 2],
+                    "material": {"kind": "constant_impedance", "impedance_pa_s_m": impedances[2 * col + row]}}
+                   for col in range(2) for row in range(2)]

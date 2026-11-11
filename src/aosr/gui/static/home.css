@@ -89,3 +89,21 @@ button.archive-danger:hover{background:#fff0f0}
   .archive-scroll-note{display:block}
   #archived table:not([hidden]){display:block;overflow-x:auto;max-width:100%}
 }
+/* 立面圖（#1091）：畫的框實線、補滿的格子虛線標「自動」、太窄的那幾條紅虛線、選取的框加粗；喇叭方塊、主位圓點。
+   整張圖不讓瀏覽器拿去捲動或選字，按住拖曳才畫得出框。 */
+#elevation svg{max-width:760px;touch-action:none;user-select:none;cursor:crosshair}
+#elevation-frame{fill:#ffffff;stroke:#17212a;stroke-width:2}
+.zone rect{fill:#dcecf2;stroke:#15617b;stroke-width:2}
+.zone-auto rect{fill:#f4f7f8;stroke:#7d95a0;stroke-dasharray:6 4}
+.zone.selected rect{fill:#b9dbe7;stroke-width:4}
+.zone text,.elevation-edge,.elevation-marker text{font-size:14px;fill:#17212a;pointer-events:none}
+.zone-auto text{fill:#46586a}
+.zone-drawn{cursor:pointer}
+.zone-thin{fill:none;stroke:#c0392b;stroke-width:3;stroke-dasharray:5 3}
+.zone-preview{fill:rgba(21,97,123,.15);stroke:#15617b;stroke-dasharray:3 3}
+.elevation-marker{pointer-events:none}
+.elevation-marker.speaker rect{fill:#872c22}
+.elevation-marker.seat circle{fill:#1d7a3a}
+#elevation-walls{display:flex;gap:.5rem;flex-wrap:wrap}
+#elevation-walls button[aria-pressed=true]{background:#0b3a4a;outline:2px solid #f0b429}
+#elevation-selected{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
