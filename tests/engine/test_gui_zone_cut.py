@@ -13,7 +13,8 @@ from starlette.testclient import TestClient
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.zone_edit import MIN_SIDE_M, ROOM_ERROR, SHAPE_ERROR, CutBox, WallName, ZoneCutError, cut_wall, zone_cut_defaults
 from aosr.reporting.scheme import Scheme
-from tests.engine._surface_zone_cases import NEW, OLD, ROOM_109, reference_document, room109_document, room109_quarters
+from tests.engine._furniture_cases import reference_document
+from tests.engine._surface_zone_cases import NEW, OLD, ROOM_109, room109_document, room109_quarters
 
 LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 
@@ -60,9 +61,9 @@ def test_edges_a_hair_apart_are_pulled_together_instead_of_leaving_a_sliver() ->
     result = _cut(document, "y0", [{"id": "a", "u_m": [0.4, 0.4 + 0.8], "v_m": [0.0, 1.0]},
                                    {"id": "b", "u_m": [1.2, 2.0], "v_m": [0.0, 1.0]},
                                    {"id": "c", "u_m": [5.0, lx + 1e-9], "v_m": [2.0, LZ - 1e-9]}])
-    zones = _by_id(result)
-    assert zones["a"]["u_m"][1] == zones["b"]["u_m"][0]
-    assert zones["c"]["u_m"][1] == lx and zones["c"]["v_m"][1] == LZ
+    edges = {key: (cast(list[float], zone["u_m"]), cast(list[float], zone["v_m"])) for key, zone in _by_id(result).items()}
+    assert edges["a"][0][1] == edges["b"][0][0]
+    assert edges["c"][0][1] == lx and edges["c"][1][1] == LZ
     Scheme.model_validate(_applied(document, "y0", result))
 
 

@@ -564,7 +564,8 @@ prefix = "tests.engine."
 # #1089 材料編輯頁：test_gui_material_editor.py 19 題、test_gui_material_editor_browser.py 10 題；CPU 單行程純收集實量 11217（主線 c3aacbf6 實量 11188）。
 # #1093 網頁開第三階段搜尋後端：test_gui_gradient_jobs.py 46 題、固定面保留字 4 題，共 50 題（真跑那 2 題住 slow_ 檔、雲端不收）；主線 08265e2a 上 CPU 單行程純收集實量 11267（主線實量 11217）。
 # #1094 材料頁吸音曲線：test_gui_material_curves.py 15 題、test_gui_material_curves_browser.py 4 題；主線 8a0a3be9 上 CPU 單行程純收集實量 11286（主線實量 11267）。
-collected_floor = 11286
+# #1091 立面圖畫框：test_gui_zone_cut.py 15 題、test_gui_zone_elevation_browser.py 2 題；主線 4e2ad58e 上 CPU 單行程純收集實量 FLOOR。
+collected_floor = FLOOR
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

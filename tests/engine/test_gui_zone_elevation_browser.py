@@ -102,7 +102,7 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
         # 存下的 u 在高的那一頭，而且正好貼到牆寬（4.41988… 不在 5 公分格上）。
         page.locator("#elevation-wall-xL").click()
         _drag(page, LY, LZ, (0.02, 0.02), (1.02, 1.2))
-        zones = {zone["id"]: zone for zone in _zones(page, "xL")}
+        zones = {str(zone["id"]): zone for zone in _zones(page, "xL")}
         assert zones["z1"]["u_m"] == [3.4, LY] and zones["z1"]["v_m"] == [0.0, 1.2]
         assert sorted(zones) == ["auto1", "auto2", "z1"]
         assert all(zone["material"] == original for zone in zones.values())

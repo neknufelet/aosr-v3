@@ -104,5 +104,6 @@ button.archive-danger:hover{background:#fff0f0}
 .elevation-marker{pointer-events:none}
 .elevation-marker.speaker rect{fill:#872c22}
 .elevation-marker.seat circle{fill:#1d7a3a}
+#elevation-walls{display:flex;gap:.5rem;flex-wrap:wrap}
 #elevation-walls button[aria-pressed=true]{background:#0b3a4a;outline:2px solid #f0b429}
 #elevation-selected{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}

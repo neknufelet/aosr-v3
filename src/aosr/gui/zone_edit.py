@@ -4,7 +4,7 @@
 兩面以上對不上就哪一面都切不動。這一面的材料原樣搬過來、不在這裡核參數：半填的數字照舊交正式驗證列原因。
 
 邊的浮點誤差在這裡收：網頁上打 0.4 加寬 0.8 得到 1.2000000000000002，跟另一框的 1.2 差一點點就會留一條
-看不見的縫；牆寬 4.41988… 也不在 5 公分格上。所以補滿前，離牆邊或別框的邊不到 ``EDGE_TOLERANCE_M`` 的邊
+看不見的縫；牆寬 4.41988… 也不在 5 公分格上。所以補滿前，離牆邊或別框的邊不到 ``EDGE_MERGE_TOL`` 的邊
 一律拉到那條邊的原值。補滿本身（``zone_fill``）照舊精確比對、不加容差。
 
 材料怎麼跟：畫的框代號跟切之前某一區相同，就沿用那一區的材料（搬了位置也一樣）；新畫的框與自動補的格子，
@@ -32,7 +32,8 @@ from aosr.physics.zone_fill import FILL_PREFIX, Box, fill_wall, wall_size_m
 
 SNAP_M = 0.05
 MIN_SIDE_M = 0.20
-EDGE_TOLERANCE_M = 1e-6
+# 演算法容差（同 fem_lane 的 *_TOL：判「是不是同一條邊」，不是精度契約），單位公尺。
+EDGE_MERGE_TOL = 1e-6
 MAX_BOXES = 100
 ZONE_FIELD = "surface_zones_by_wall"
 WHOLE_WALL_KEY = "whole_wall"
@@ -70,7 +71,7 @@ class ZoneCutError(ValueError):
 
 def zone_cut_defaults() -> dict[str, object]:
     """網頁畫框要用的數字：吸附格距、最小邊、邊的容差、自動補滿的代號字首。"""
-    return {"snap_m": SNAP_M, "min_side_m": MIN_SIDE_M, "edge_tolerance_m": EDGE_TOLERANCE_M,
+    return {"snap_m": SNAP_M, "min_side_m": MIN_SIDE_M, "edge_merge_tol_m": EDGE_MERGE_TOL,
             "fill_prefix": FILL_PREFIX}
 
 
@@ -133,7 +134,7 @@ def _source_at(entries: Sequence[dict[str, object]], u: float, v: float) -> tupl
 
 def _pull(value: float, edges: list[float]) -> float:
     for edge in edges:
-        if abs(value - edge) <= EDGE_TOLERANCE_M:
+        if abs(value - edge) <= EDGE_MERGE_TOL:
             return edge
     edges.append(value)
     return value
@@ -147,7 +148,7 @@ def _pulled(boxes: Sequence[CutBox], width: float, height: float) -> list[Box]:
 
 
 def _too_small(box: Box) -> bool:
-    return min(box.u_m[1] - box.u_m[0], box.v_m[1] - box.v_m[0]) < MIN_SIDE_M - EDGE_TOLERANCE_M
+    return min(box.u_m[1] - box.u_m[0], box.v_m[1] - box.v_m[0]) < MIN_SIDE_M - EDGE_MERGE_TOL
 
 
 def _check_drawn(wall: str, boxes: Sequence[Box]) -> None:

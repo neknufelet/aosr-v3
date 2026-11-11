@@ -80,7 +80,7 @@ function gridSnap(value, limit) {
   return Math.min(Math.max(Number((Math.round(value / step) * step).toFixed(6)), 0), limit);
 }
 function boxTooSmall(box) {
-  const tolerance = cutSpec().edge_tolerance_m;
+  const tolerance = cutSpec().edge_merge_tol_m;
   return Math.min(box.u_m[1] - box.u_m[0], box.v_m[1] - box.v_m[0]) < cutSpec().min_side_m - tolerance;
 }
 function newBoxId(wall) {
@@ -248,7 +248,7 @@ function renderElevation() {
                            "data-wall": wall, role: "img", "aria-label": `${wallNames[wall]}立面圖（站在房間裡看）`});
   svg.append(node("rect", {id: "elevation-frame", x: pad, y: pad, width: width * scale, height: height * scale}));
   const zones = wallZones(wall);
-  const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_tolerance_m || zone.v_m[1] > height + cutSpec().edge_tolerance_m));
+  const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_merge_tol_m || zone.v_m[1] > height + cutSpec().edge_merge_tol_m));
   for (const zone of zones.filter(zone => zone.area === "rectangle")) {
     const auto = zone.id.startsWith(cutSpec().fill_prefix);
     const [a0, a1, b0, b1] = screenBox(view, width, height, zone);
