@@ -216,7 +216,6 @@ function changeAllowed(wall, key, allowed) {
 }
 function allowedProblem(allowed) {
   if (!allowed) return "";
-  if (!allowed.length) return "准用清單至少要勾一種";
   const optimizable = new Set(libraryEntries("optimizable").map(entry => entry.id));
   return allowed.some(id => id === ZONE_NONE || optimizable.has(id)) ? ""
     : "准用清單只有固定材料：搜尋要一個起點，請再勾一種可調材料或「不貼」";
@@ -270,8 +269,16 @@ function searchCell(wall, key, zone, setting, cell) {
     const input = document.createElement("input"); input.type = "checkbox"; input.id = `zone-allow-${wall}-${key}-${id}`;
     input.checked = setting.allowed.includes(id);
     // 只加減勾的這一種：存著的清單原樣帶回（順序不動、材料庫找不到的代號也不偷丟）。
-    input.onchange = () => changeAllowed(wall, key, input.checked
-      ? [...setting.allowed.filter(choice => choice !== id), id] : setting.allowed.filter(choice => choice !== id));
+    // 最後一種不准拿掉：空清單伺服器整份拒收（整份做法都存不進去）；不想限定就取消上面那一格。
+    input.onchange = () => {
+      const next = input.checked ? [...setting.allowed.filter(choice => choice !== id), id] : setting.allowed.filter(choice => choice !== id);
+      if (!next.length) {
+        input.checked = true;
+        zoneNote(`${wallNames[wall]}「${zoneName(key)}」：准用清單至少要留一種；不想限定就取消「限定准用」那一格`, "notice");
+        return;
+      }
+      changeAllowed(wall, key, next);
+    };
     wrap.append(input, document.createTextNode(text)); list.append(wrap);
   }
   const known = new Map(choices.map(([id, text]) => [id, text.replace(/（.*$/, "")]));

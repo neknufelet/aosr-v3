@@ -74,7 +74,8 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
     assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}
     assert zones["auto1"]["material"] == wall and zones["auto2"]["material"] == wall
-    allowed = ["glass_wool_48k", "glass_wool_24k", "carpet_on_concrete", "none"]
+    # 打勾時先勾滿預設（可調材料在前、不貼在後）；之後勾的一種接在尾巴（存著的順序原樣帶回，不照選單重排）。
+    allowed = ["glass_wool_48k", "glass_wool_24k", "none", "carpet_on_concrete"]
     assert _modes(page, "x0") == {"z1": {"mode": "fixed"}, "auto1": {"mode": "search", "allowed": allowed},
                                   "auto2": {"mode": "keep_original"}}
     page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-first-cut.png"))
@@ -306,4 +307,17 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         _save(page, "room109")
         saved = json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]
         assert saved == {"mode": "search", "allowed": ["none", "ghost_material", "glass_wool_24k"]}
+
+        # 重新限定後拿到只剩一種，最後一種拿不掉（空清單伺服器整份拒收）：勾還在、清單不動、照講。
+        page.locator("#zone-limit-x0-whole_wall").uncheck()
+        page.locator("#zone-limit-x0-whole_wall").check()  # 打勾時清單自己攤開
+        for choice in [entry for entry in _modes(page, "x0")["whole_wall"]["allowed"] if entry != "none"]:
+            page.locator(f"#zone-allow-x0-whole_wall-{choice}").uncheck()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
+        page.locator("#zone-allow-x0-whole_wall-none").click()  # 想拿掉最後一種
+        expect(page.locator("#zone-note")).to_contain_text("至少要留一種")
+        expect(page.locator("#zone-allow-x0-whole_wall-none")).to_be_checked()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
+        _save(page, "room109")
+        assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]["allowed"] == ["none"]
         assert watched.page_errors == [] and watched.console_errors == []
