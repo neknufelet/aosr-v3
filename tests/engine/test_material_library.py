@@ -162,6 +162,10 @@ def _thickness(**changes: object) -> dict[str, object]:
     ({"porous_thickness": _thickness(choices_m=[0.1, 0.05], range_m=[0.1, 0.05])}, "下限"),
     ({"porous_thickness": _thickness(adjustable=False, choices_m=None)}, "上下限要相等"),
     ({"porous_thickness": _thickness(choices_m=[0.05, 0.05, 0.1])}, "不重複"),
+    ({"porous_thickness": _thickness(range_m=[0.0, 0.1], choices_m=None)}, "大於 0"),
+    ({"porous": {"kind": "porous", "thickness_m": 0.06, "flow_resistivity_pa_s_m2": 20000.0, "material_class": "fibrous"},
+      "porous_thickness": _thickness(initial_m=0.06)}, "不是產品厚度"),
+    ({"cavity": {"adjustable": True, "range_m": [-0.01, 0.1], "initial_m": None}}, "下限"),
     ({"cavity": {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1], "initial_m": None}}, "不給產品厚度"),
     ({"cavity": {"adjustable": True, "range_m": [0.0, 0.1], "initial_m": 0.2}}, "不在範圍"),
     ({"porous_thickness": _thickness(adjustable=False, range_m=[0.05, 0.05], choices_m=None),
@@ -175,6 +179,7 @@ def _thickness(**changes: object) -> dict[str, object]:
     ({"template_preset": "glass_wool_48k_50mm"}, "不在 preset_members"),
     ({"id": "none"}, "保留代號"),
     ({"links": ["http://example.org"]}, "https"),
+    ({"notes": [""]}, "註記"),
 ])
 def test_inconsistent_optimizable_entries_are_refused(changes: dict[str, object], message: str) -> None:
     """可最佳化材料的檢查：厚度與初值、產品厚度、能不能調、總深與建議總深、舊家族對應、保留代號、出處網址。"""
@@ -189,6 +194,39 @@ def test_a_consistent_optimizable_entry_reports_its_depth_bounds() -> None:
     assert entry.depth_bounds() == (0.05, 0.2)
     with pytest.raises(ValueError, match="現在還收不到"):
         library.family_settings(entry)
+
+
+def test_the_cavity_lower_bound_counts_toward_the_shallowest_depth() -> None:
+    """空腔下限不是 0 時，最薄的總深＝多孔最薄＋空腔下限。"""
+    entry = _ENTRY.validate_python(_optimizable(cavity={"adjustable": True, "range_m": [0.02, 0.1], "initial_m": None}))
+    assert isinstance(entry, library.OptimizableEntry)
+    assert entry.depth_bounds() == (0.05 + 0.02, 0.1 + 0.1)
+
+
+def test_a_product_thickness_must_be_positive() -> None:
+    """產品厚度要是正數（單獨一格厚度也查，不靠可最佳化材料那一層補擋）。"""
+    with pytest.raises(ValueError, match="正數"):
+        library.ThicknessSpec(adjustable=True, range_m=(0.0, 0.05), choices_m=(0.0, 0.05), initial_m=0.05)
+
+
+def test_a_zero_initial_cavity_means_no_air_layer() -> None:
+    """空腔初值 0 跟 null 一樣：排出來的構造沒有空氣層（物理的空氣層厚度一定要正）。"""
+    entry = _ENTRY.validate_python(_optimizable(cavity={"adjustable": True, "range_m": [0.0, 0.1], "initial_m": 0.0}))
+    assert isinstance(entry, library.OptimizableEntry)
+    assert library.template_assembly(entry).layers == (entry.porous,)
+
+
+def test_an_entry_without_cavity_maps_to_a_family_with_no_cavity() -> None:
+    """沒有空腔這一格的可最佳化材料轉成家族設定：空腔範圍 0～0、沒有空腔初值；成員、產品厚度、初始厚度原樣帶。"""
+    entry = _ENTRY.validate_python(_optimizable(
+        cavity=None, porous_thickness=_thickness(initial_m=0.075),
+        porous={"kind": "porous", "thickness_m": 0.075, "flow_resistivity_pa_s_m2": 20000.0, "material_class": "fibrous"},
+        suggested_total_depth_m=None, preset_members=["rock_wool_60k_50mm", "rock_wool_60k_75mm"], template_preset="rock_wool_60k_75mm"))
+    assert isinstance(entry, library.OptimizableEntry)
+    family = library.family_settings(entry)
+    assert (family.cavity_range_m, family.initial_cavity_m) == ((0.0, 0.0), None)
+    assert (family.presets, family.thicknesses_m, family.initial_thickness_m) == (
+        ("rock_wool_60k_50mm", "rock_wool_60k_75mm"), (0.05, 0.075, 0.1), 0.075)
 
 
 def test_user_library_round_trips_and_a_missing_file_is_empty(tmp_path: Path) -> None:
