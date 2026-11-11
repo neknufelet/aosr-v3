@@ -12,6 +12,14 @@
 留出：全部原牆、方案存檔（跟全部原牆不同時）、一組厚度與空腔都取中間值的混搭、另一個種子的隨機組。
 留出只拿來驗、不拿來建；替身准不准用照舊由精度契約那兩把尺判（:mod:`aosr.physics.fem_reduced_check`）。
 
+材料庫的可最佳化材料（#1082 段 2-3c）：跟開跑同一份家族清單（設定檔的在前、使用者的接在後），樣板構造照那一份構造清單找。
+使用者家族的抽樣權重：設定檔那幾個家族照抽法設定的權重；每個使用者家族分到「它的連續變數數（厚度能調算一個、有空腔算一個，
+至少算一個）×設定檔家族平均每個變數分到的權重」，全部再一起正規化成 1——跟設定檔 48K 兩個變數抽兩倍同一條規則。
+每個使用者家族另外保證一組留出（每一片都取那個家族的中間值）：混搭只輪得到面片數那麼多格，隨機組又可能一片都沒抽到。
+每區准用清單的固定材料候選（2-3b 的 ``fixed:<代號>``，整塊取代那一片的牆、不管安裝方式）：每個候選兩組訓練
+（准用它的面片放它，其他片原牆／其他片各家族最薄輪流）、一組留出（其他片各家族中間值輪流）。
+沒有使用者家族、也沒有固定材料候選時權重、組、訓練說明一個位元都不動；有的話訓練說明換 v2、多記 ``coverage``（:mod:`aosr.gradient.surrogate_coverage`）。
+
 一份切法換材料共用同一份替身（``aosr.gui.surrogate_slots``）：原牆與方案存檔取的是觸發建模那一份方案的材料，
 別份同切法的方案換了固定材料，用的仍是這份替身；終點用完整模型重算，最後的數字不靠替身。
 """
@@ -22,6 +30,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from pydantic import TypeAdapter
 
 from aosr.config.material_gradient import MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount
 from aosr.config.surrogate_training import SurrogateTrainingSettings
@@ -29,12 +38,14 @@ from aosr.gradient import run
 from aosr.gradient.boundary import BoundaryKey, surface_id
 from aosr.gradient.endpoint import material_impedances, materials_from_surfaces
 from aosr.gradient.material_gradient import SurfaceDesign, checked_theta, depth_limits, depth_room
+from aosr.gradient.surrogate_coverage import COVERAGE_VERSION, TRAINING_VERSION, Coverage, FixedTarget
+from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import MountedOnWall, SurfaceMaterial
 from aosr.config.physics_constants import PhysicsConstants
 from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 
-FaceKind = Literal["original", "saved", "mounted"]
+FaceKind = Literal["original", "saved", "mounted", "fixed"]
 
 
 @dataclass(frozen=True)
@@ -43,8 +54,11 @@ class FaceSpec:
     family: str | None = None
     thickness_m: float | None = None
     cavity_m: float | None = None
+    target: str | None = None
 
     def document(self) -> dict[str, object]:
+        if self.kind == "fixed":
+            return {"kind": self.kind, "target": self.target}
         if self.kind != "mounted":
             return {"kind": self.kind}
         return {"kind": self.kind, "family": self.family, "thickness_m": self.thickness_m, "cavity_m": self.cavity_m}
@@ -64,6 +78,11 @@ class _FamilyBox:
     thickness: tuple[float, float]
     cavity: tuple[float, float] | None
     max_total_m: float | None
+
+    @property
+    def variables(self) -> int:
+        """連續變數數：厚度能調算一個、有空腔算一個（至少算一個，抽樣權重用）。"""
+        return max(1, int(self.thickness[1] > self.thickness[0]) + int(self.cavity is not None))
 
     def room(self, thickness: float) -> float:
         """這個厚度底下空腔最多到哪（家族空腔上界與總深度上限取小）。"""
@@ -87,7 +106,10 @@ class TrainingSets:
 
     def __init__(self, saved: Mapping[BoundaryKey, SurfaceMaterial], settings: MaterialGradientSettings,
                  sampling: SurrogateTrainingSettings, *, air: PhysicsConstants, ranges: PorousModelRanges,
-                 frequencies_hz: Sequence[float]) -> None:
+                 frequencies_hz: Sequence[float], presets: Sequence[PresetMaterial] | None = None,
+                 user_families: Sequence[str] = (), fixed: Sequence[FixedTarget] = ()) -> None:
+        """``presets`` 是這一場的構造清單（不給是產品構造預設）；``user_families`` 是其中接進來的使用者家族代號；
+        ``fixed`` 是准用清單的固定材料候選（材料與准用它的面片）。"""
         self.keys = tuple(saved)
         self.names = tuple(surface_id(key) for key in self.keys)
         self.saved = dict(saved)
@@ -96,20 +118,44 @@ class TrainingSets:
         self.sampling = sampling
         self.air, self.ranges = air, ranges
         self.axis = tuple(float(value) for value in frequencies_hz)
+        self.presets = None if presets is None else tuple(presets)
         families = tuple(family.id for family in settings.family)
+        users = tuple(user_families)
+        if not set(users) <= set(families):
+            raise ValueError(f"使用者家族 {sorted(set(users) - set(families))} 不在搜尋設定的家族裡")
+        builtin = tuple(family for family in families if family not in users)
         weights = sampling.sampling.family_weights
-        if set(weights) != set(families):
-            raise ValueError(f"抽法設定的家族 {sorted(weights)} 跟搜尋設定的家族 {sorted(families)} 不同，"
+        if set(weights) != set(builtin):
+            raise ValueError(f"抽法設定的家族 {sorted(weights)} 跟搜尋設定的家族 {sorted(builtin)} 不同，"
                              "兩邊要一樣（每個搜尋家族都要抽得到）")
         self.families = families
-        self.weights = tuple(weights[family] for family in families)
+        self.user_families = users
         self.boxes = {family: self._box(family) for family in families}
+        self.weights = self._weights(builtin, weights)
+        self.fixed = tuple(fixed)
+        adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+        self.fixed_materials = {item.target: adapter.validate_python(dict(item.material)) for item in self.fixed}
+        for item in self.fixed:
+            outside = sorted(set(item.surfaces) - set(self.names))
+            if outside:
+                raise ValueError(f"固定材料 {item.target} 准用的面片 {outside} 不在方案的面片裡")
+
+    def _weights(self, builtin: Sequence[str], configured: Mapping[str, float]) -> tuple[float, ...]:
+        """抽樣權重（規則見模組說明）；沒有使用者家族就是抽法設定原樣。"""
+        if not self.user_families:
+            return tuple(configured[family] for family in self.families)
+        unit = sum(configured[family] for family in builtin) / sum(self.boxes[family].variables for family in builtin)
+        raw = {**{family: configured[family] for family in builtin},
+               **{family: unit * self.boxes[family].variables for family in self.user_families}}
+        total = sum(raw.values())
+        return tuple(raw[family] / total for family in self.families)
 
     # ---- 家族盒界 ----
 
     def _box(self, family_id: str) -> _FamilyBox:
         preset = self.settings.family_by_id(family_id).template_preset
-        design = run.designs_for([preset] * len(self.keys), self.settings, kept=self.originals, mount=MOUNT_ON_WALL)[0]
+        design = run.designs_for([preset] * len(self.keys), self.settings, kept=self.originals, mount=MOUNT_ON_WALL,
+                                 table=self.presets)[0]
         cavity = (design.lower[1], design.upper[1]) if design.cavity_variable is not None else None
         return _FamilyBox((design.lower[0], design.upper[0]), cavity, design.max_total_depth_m)
 
@@ -163,6 +209,12 @@ class TrainingSets:
     def _cycle(self, label: str, faces: Sequence[FaceSpec]) -> MaterialSet:
         return MaterialSet(label, MOUNT_ON_WALL, tuple(faces[index % len(faces)] for index in range(len(self.keys))))
 
+    def _fixed_set(self, label: str, item: FixedTarget, others: Sequence[FaceSpec]) -> MaterialSet:
+        """准用它的面片放這個固定材料，其他片照 ``others`` 輪流。"""
+        face = FaceSpec("fixed", target=item.target)
+        return MaterialSet(label, MOUNT_ON_WALL, tuple(face if name in item.surfaces else others[index % len(others)]
+                                                       for index, name in enumerate(self.names)))
+
     def _random_sets(self, seed: int, count: int, word: str) -> list[MaterialSet]:
         rng = np.random.default_rng(seed)
         probabilities = self.sampling.sampling.bare_probabilities
@@ -188,6 +240,10 @@ class TrainingSets:
                 sets.append(self._uniform(f"{family} 角點（{_face_word(corner)}）", corner))
         sets.append(self._cycle("混搭（原牆與各家族最薄、空腔中間輪流）",
                                 [ORIGINAL, *(self._thinnest(family) for family in self.families)]))
+        for item in self.fixed:
+            sets.append(self._fixed_set(f"固定 {item.target}（准用的面片放它、其他原牆）", item, [ORIGINAL]))
+            sets.append(self._fixed_set(f"固定 {item.target}（准用的面片放它、其他各家族最薄輪流）", item,
+                                        [self._thinnest(family) for family in self.families]))
         training = self.sampling.training
         return sets + self._random_sets(training.seed, training.random_sets, "訓練")
 
@@ -195,6 +251,11 @@ class TrainingSets:
         sets = self._base_sets()
         sets.append(self._cycle("混搭（原牆與各家族厚度、空腔都取中間值輪流）",
                                 [*(self._middle(family) for family in self.families), ORIGINAL]))
+        for family in self.user_families:
+            sets.append(self._uniform(f"{family} 中間值（材料庫的可最佳化材料，保證留出驗到）", self._middle(family)))
+        for item in self.fixed:
+            sets.append(self._fixed_set(f"固定 {item.target}（准用的面片放它、其他各家族中間值輪流，保證留出驗到）", item,
+                                        [self._middle(family) for family in self.families]))
         holdout = self.sampling.holdout
         return sets + self._random_sets(holdout.seed, holdout.random_sets, "留出")
 
@@ -203,7 +264,7 @@ class TrainingSets:
     def _designs(self, material_set: MaterialSet) -> tuple[SurfaceDesign, ...]:
         presets = [self.settings.family_by_id(face.family).template_preset if face.kind == "mounted" and face.family
                    else None for face in material_set.faces]
-        return run.designs_for(presets, self.settings, kept=self.originals, mount=material_set.mount)
+        return run.designs_for(presets, self.settings, kept=self.originals, mount=material_set.mount, table=self.presets)
 
     def materials(self, material_set: MaterialSet) -> dict[BoundaryKey, SurfaceMaterial | None]:
         if len(material_set.faces) != len(self.keys):
@@ -226,7 +287,8 @@ class TrainingSets:
         exported = materials_from_surfaces(designs, theta, self.settings)
         if tuple(exported) != self.keys:
             raise ValueError(f"「{material_set.label}」匯出的面片序 {list(exported)} 跟方案的 {list(self.keys)} 不同")
-        return {key: self.saved[key] if face.kind == "saved" else exported[key]
+        return {key: self.saved[key] if face.kind == "saved" else
+                self.fixed_materials[face.target] if face.kind == "fixed" and face.target is not None else exported[key]
                 for key, face in zip(self.keys, material_set.faces, strict=True)}
 
     def impedances(self, material_set: MaterialSet) -> FrequencyBoundaryImpedances:
@@ -236,8 +298,23 @@ class TrainingSets:
                 raise ValueError(f"「{material_set.label}」{surface_id(key)} 的阻抗不是有限數")
         return rows
 
-    def document(self, training: Sequence[MaterialSet], holdout: Sequence[MaterialSet]) -> dict[str, object]:
-        """寫在替身旁邊的訓練說明：抽法設定、每一組每一片是什麼、匯出的材料。"""
+    def require_every_family(self, training: Sequence[MaterialSet], holdout: Sequence[MaterialSet]) -> None:
+        """每個家族、每個固定材料候選在訓練與留出都至少貼過一片：說替身涵蓋它，訓練要見過、留出要驗過。"""
+        for word, group in (("訓練", training), ("留出", holdout)):
+            seen = {face.family for item in group for face in item.faces if face.kind == "mounted"}
+            missing = [family for family in self.families if family not in seen]
+            if missing:
+                raise ValueError(f"{word}材料一片都沒貼過家族 {missing}：替身不能說涵蓋它們")
+            placed = {face.target for item in group for face in item.faces if face.kind == "fixed"}
+            absent = [item.target for item in self.fixed if item.target not in placed]
+            if absent:
+                raise ValueError(f"{word}材料一片都沒放過固定材料 {absent}：替身不能說涵蓋它們")
+
+    def document(self, training: Sequence[MaterialSet], holdout: Sequence[MaterialSet],
+                 coverage: Coverage | None = None) -> dict[str, object]:
+        """寫在替身旁邊的訓練說明：抽法設定、每一組每一片是什麼、匯出的材料；``coverage`` 給了（這一場有產品設定檔
+        以外的家族）就換 v2、多記訓練過的家族與範圍與實際用的抽樣權重，沒給逐位照 v1。"""
+        self.require_every_family(training, holdout)
         def entry(material_set: MaterialSet) -> dict[str, object]:
             materials = self.materials(material_set)
             return {"label": material_set.label, "mount": material_set.mount,
@@ -245,10 +322,25 @@ class TrainingSets:
                     "materials": {name: None if (material := materials[key]) is None else material.model_dump(mode="json")
                                   for name, key in zip(self.names, self.keys, strict=True)}}
 
-        return {"version": "aosr.gradient.surrogate_training.v1", "patches": list(self.names),
-                "axis_points": len(self.axis), "families": list(self.families),
-                "sampling": self.sampling.model_dump(mode="json"),
-                "training": [entry(item) for item in training], "holdout": [entry(item) for item in holdout]}
+        document: dict[str, object] = {
+            "version": TRAINING_VERSION if coverage is None else COVERAGE_VERSION, "patches": list(self.names),
+            "axis_points": len(self.axis), "families": list(self.families),
+            "sampling": self.sampling.model_dump(mode="json"),
+            "training": [entry(item) for item in training], "holdout": [entry(item) for item in holdout]}
+        if coverage is not None:
+            trained = {family.id for family in coverage.families}
+            if trained != set(self.families):
+                raise ValueError(f"涵蓋那一節的家族 {sorted(trained)} 跟這一次抽的 {sorted(self.families)} 不同")
+            for family in coverage.families:
+                box = self.boxes[family.id]
+                if (box.thickness, box.cavity, box.max_total_m) != (family.thickness_m, family.cavity_m,
+                                                                   family.max_total_depth_m):
+                    raise ValueError(f"涵蓋那一節記的家族 {family.id} 範圍跟這一次真的抽的盒界不同，不能照記")
+            if coverage.fixed != tuple(item.coverage() for item in self.fixed):
+                raise ValueError("涵蓋那一節記的固定材料候選跟這一次真的放的不同，不能照記")
+            document["coverage"] = coverage.model_dump(mode="json")
+            document["family_weights"] = dict(zip(self.families, self.weights, strict=True))
+        return document
 
 
 def _mount_word(mount: Mount) -> str:

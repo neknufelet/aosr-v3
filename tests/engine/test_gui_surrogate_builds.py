@@ -39,7 +39,9 @@ from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import ActionRefused, GradientJobs, JobBusy, LaunchFailed, Launcher, NeedsSurrogate
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused
 from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX, RETIRED_DIR, SurrogateBuilds, SurrogateRequest
+from aosr.gui.material_editor import user_library_path
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, surrogate_path
+from aosr.materials import library
 from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
 from aosr.physics.fem_reduced_build import STOP_BUDGET, STOP_RESIDUAL_MET
 from aosr.physics.fem_reduced_check import points_hex
@@ -52,6 +54,7 @@ from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._local_launcher import LocalLauncher
 from tests.engine._material_gradient_zones_case import scheme
 from tests.engine.test_gui_gradient_jobs import FakeLauncher
+from tests.engine.test_material_gradient_library import _ENTRY, FIXED, USER, _fixed, _optimizable
 
 NAME = "zoned"
 Record = dict[str, object]
@@ -62,13 +65,13 @@ QUICK = SurrogateRequest(workers=1, dense_threads=1)
 STRICT = QUICK.model_copy(update={"stop_residual": 1e-4})
 
 
-def _data(tmp_path: Path, case: Scheme | None = None, *, search: bool = True) -> Path:
+def _data(tmp_path: Path, case: Scheme | None = None, *, search: bool = True, allowed: tuple[str, ...] | None = None) -> Path:
     data_dir = tmp_path / "data"
     (data_dir / "schemes").mkdir(parents=True)
     (data_dir / "designs").mkdir()
     base = scheme() if case is None else case
     (data_dir / "schemes" / f"{NAME}.json").write_text(base.model_dump_json(), encoding="utf-8")
-    zones = {"x0": {"right": ZoneDesign(mode="search")}} if search else {}
+    zones = {"x0": {"right": ZoneDesign(mode="search", allowed=allowed)}} if search else {}
     write_design(data_dir, DesignSettings(scheme_id=NAME, zones=zones), base)
     return data_dir
 
@@ -405,7 +408,7 @@ def test_command_line_snapshots_the_scheme_and_goes_through_the_wrapper(tmp_path
     for flag, value in (("--max-full-solves", "900"), ("--stop-residual", "0.0001"), ("--workers", "2"),
                         ("--dense-threads", "3")):
         assert argv[argv.index(flag) + 1] == value
-    assert "--replace" not in argv
+    assert "--replace" not in argv and "--materials" not in argv and "--settings" not in argv
     launcher.active.clear()
     slot_dir(data_dir, scheme()).mkdir(parents=True)
     replacing = builds.start(NAME, SurrogateRequest(replace=True))
@@ -590,3 +593,98 @@ def test_web_process_never_imports_jax_with_the_build_modules(tmp_path: Path) ->
     done = subprocess.run([sys.executable, "-c", code], env=env, cwd=tmp_path, capture_output=True, text=True,
                           timeout=120)
     assert done.returncode == 0, done.stderr
+
+
+# ---- 材料庫的可最佳化材料（#1082 段 2-3c）：建模吃開跑同一份家族、訓練說明記涵蓋、開跑閘門核涵蓋 ----
+
+def _library(data_dir: Path, *entries: library.LibraryEntry) -> None:
+    user_library_path(data_dir).write_text(library.dump_user_library(entries), encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def trained_with_library(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, SurrogateBuilds, Record]:
+    directory = tmp_path_factory.mktemp("surrogate-build-library")
+    # x0 那一區的准用清單：產品家族、材料庫的可最佳化家族、材料庫的固定材料（2-3b 的固定材料候選）各一。
+    data_dir = _data(directory, allowed=("glass_wool_48k", USER, FIXED))
+    _library(data_dir, _fixed(), _optimizable())
+    _, builds = _managers(data_dir, LocalLauncher(directory))
+    view = _wait(builds, str(builds.start(NAME, STRICT)["build_id"]))
+    assert view["state"] == "installed", view
+    return data_dir, builds, view
+
+
+def test_build_trains_the_library_families_and_the_search_accepts_it(
+        trained_with_library: tuple[Path, SurrogateBuilds, Record]) -> None:
+    """抓建模只抽設定檔那三個家族（材料庫的可最佳化材料沒訓練、留出也沒驗到）、准用清單的固定材料候選沒放進訓練與留出，
+    或訓練說明沒記涵蓋、開跑照樣說要重建。"""
+    data_dir, _, _ = trained_with_library
+    training = json.loads((_slot_npz(data_dir).parent / TRAINING_FILE).read_text(encoding="utf-8"))
+    assert training["version"] == "aosr.gradient.surrogate_training.v2" and training["families"][-1] == USER
+    assert [family["id"] for family in training["coverage"]["families"]][-1] == USER
+    for group in ("training", "holdout"):
+        assert any(face.get("family") == USER for entry in training[group] for face in entry["faces"].values())
+    assert any(entry["label"].startswith(f"{USER} 中間值") for entry in training["holdout"])
+    fixed, = training["coverage"]["fixed"]
+    assert fixed["target"] == f"fixed:{FIXED}" and fixed["surfaces"] == ["x0@right"]
+    for group in ("training", "holdout"):
+        assert any(face.get("target") == f"fixed:{FIXED}" for entry in training[group] for face in entry["faces"].values())
+    launcher = FakeLauncher()
+    jobs, _ = _managers(data_dir, launcher)
+    preview = jobs.preview(NAME, GradientRequest(device="cpu"))
+    assert cast(Record, preview["surrogate"])["found"] is True
+    jobs.start(NAME, GradientRequest(device="cpu"))
+    argv = launcher.launched[0][1]
+    assert argv[argv.index("--surrogate") + 1] == str(_slot_npz(data_dir)) and "--materials" in argv
+
+
+def test_search_refuses_materials_the_surrogate_was_not_trained_on(
+        installed: tuple[Path, SurrogateBuilds, Record],
+        trained_with_library: tuple[Path, SurrogateBuilds, Record]) -> None:
+    """抓材料庫加了可最佳化材料（或把訓練過的那一筆改了流阻）之後，開跑照樣收下替身、在替身沒驗過的範圍走梯度；
+    准用清單的固定材料換了阻抗也一樣；畫面要說「替身沒用這些材料訓練過，要重建」、走「要先建替身」那條路，不開服務。"""
+    porous = _optimizable().porous.model_dump(mode="json")
+    changed = _optimizable(porous={**porous, "flow_resistivity_pa_s_m2": 30000.0})
+    panel = cast(library.FixedEntry, _ENTRY.validate_python(
+        {**_fixed().model_dump(mode="json"), "material": {"kind": "constant_impedance", "impedance_pa_s_m": 6000.0}}))
+    for data_dir, entries, words in ((installed[0], (_optimizable(),), "家族 rock_wool_60k 沒訓練過"),
+                                     (trained_with_library[0], (_fixed(), changed), "rock_wool_60k 的材料內容跟訓練時不同"),
+                                     (trained_with_library[0], (panel, _optimizable()), f"固定材料 fixed:{FIXED} 的內容跟訓練時不同")):
+        before = user_library_path(data_dir).read_bytes() if user_library_path(data_dir).is_file() else None
+        _library(data_dir, *entries)
+        try:
+            launcher = FakeLauncher()
+            jobs, _ = _managers(data_dir, launcher)
+            surrogate = cast(Record, jobs.preview(NAME, GradientRequest(device="cpu"))["surrogate"])
+            assert surrogate["found"] is False and surrogate["missing"] == []
+            assert str(surrogate["message"]).startswith("替身沒用這些材料訓練過，要重建：") and words in str(surrogate["message"])
+            with pytest.raises(NeedsSurrogate, match=words) as refused:
+                jobs.start(NAME, GradientRequest(device="cpu"))
+            assert refused.value.slot == _slot_npz(data_dir).parent and launcher.launched == []
+        finally:
+            if before is None:
+                user_library_path(data_dir).unlink()
+            else:
+                user_library_path(data_dir).write_bytes(before)
+
+
+def test_build_hands_the_same_library_and_settings_to_the_command_line(tmp_path: Path) -> None:
+    """抓建模的命令列沒拿到開跑同一份材料（材料庫複本、搜尋設定），或交的是網頁之後還會改的那一份；
+    材料庫讀不進來時照樣開建（開跑會拒的，建模也先拒）。"""
+    data_dir = _data(tmp_path)
+    _library(data_dir, _fixed(), _optimizable())
+    launcher = FakeLauncher()
+    settings = config_path("material_gradient.toml")
+    jobs = GradientJobs(data_dir, launcher=launcher, engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock(), settings_path=settings)
+    builds = SurrogateBuilds(jobs)
+    view = builds.start(NAME, QUICK)
+    argv = launcher.launched[0][1]
+    copy = data_dir.resolve() / SLOTS_DIR / "builds" / str(view["build_id"]) / "materials.json"
+    assert argv[argv.index("--materials") + 1] == str(copy)
+    assert copy.read_bytes() == user_library_path(data_dir).read_bytes()
+    assert argv[argv.index("--settings") + 1] == str(settings.resolve())
+    launcher.active.clear()
+    user_library_path(data_dir).write_text("{", encoding="utf-8")
+    with pytest.raises(PlanRefused, match="使用者材料庫（materials.json）讀不進來"):
+        builds.start(NAME, QUICK)
+    assert len(launcher.launched) == 1

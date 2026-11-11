@@ -5,6 +5,9 @@
 （換樣板只換到清單裡的，第 0 輪兩個固定材料候選真的走正式六類評分）→ 寫結果 → 報告 → 終點（完整模型、核清單與固定材料摘要、
 匯出）。環境照網頁開服務那一條。另一場清單列了使用者的實測阻抗表：六類評分還沒接上裸實測表，開跑前就拒收、不建資料夾。
 
+替身樁旁邊沒有訓練說明時，清單有固定材料候選就拒收（#1082 段 2-3c，「替身沒用這些材料訓練過，要重建」）：先跑一次照實拒收，
+再照產品那一條（:mod:`aosr.gradient.surrogate_build` 的 ``_open``）記上訓練過這一場的家族與候選，才開正式那一場。
+
 替身要用這份方案自己的算子、整條正式軸真的建一份（不借命令列考卷那份衍生替身：它的座位列是三個真座位的組合、
 頻點只建一半，搜尋用得了，拿方案真網格做完整解比一定對不上，關卡照實拒收）。
 """
@@ -36,6 +39,7 @@ from aosr.physics.fem_reduced_store import save_reduced
 from aosr.reporting.fem_reduced_scheme import export_operators
 from aosr.reporting.scheme import load_scheme
 from tests.engine._precision_contracts import contract_value
+from tests.engine._surrogate_coverage import trained_on
 from tests.engine.slow_material_gradient_library_cli import _run
 from tests.engine.test_material_gradient_allowed import BUILT, CARPET, MEASURED, _built, _measured
 from tests.engine.test_material_gradient_cli import NARROWED_STEPS, Record, _command, _settings_text, _start_args
@@ -76,6 +80,25 @@ def _scheme_surrogate(directory: Path) -> None:
     save_validation_receipt(directory / "good" / "rom.npz", report, rulers=rulers, seconds=1.0)
 
 
+def _record_training(directory: Path, user: Path, allowed: tuple[str, ...]) -> None:
+    """照建模命令列（``surrogate_build._open``）組這一場的材料與固定材料候選，在 good/ 旁寫訓練說明。"""
+    from aosr.config.material_gradient import fixed_target_id, load_material_gradient_settings
+    from aosr.gradient.boundary import scheme_patch_keys, surface_ids
+    from aosr.gradient.cli import user_entries
+    from aosr.gradient.fixed_surfaces import expanded_allowed_targets, fixed_targets_of, parse_allowed_targets
+    from aosr.gradient.surrogate_coverage import fixed_targets
+
+    entries = user_entries(user)
+    found = materials.with_user_materials(load_material_gradient_settings(directory / "settings-rounds.toml"),
+                                          run.presets_table(), entries)
+    listed = expanded_allowed_targets(parse_allowed_targets(list(allowed)),
+                                      surface_ids(scheme_patch_keys(load_scheme(directory / "scheme.json"))))
+    targets = fixed_targets_of(listed)
+    candidates = materials.fixed_candidates(targets, found.presets,
+                                            materials.user_fixed_entries([fixed_target_id(target) for target in targets], entries))
+    trained_on(directory / "good" / "rom.npz", found, fixed_targets(listed, candidates))
+
+
 @pytest.fixture(scope="module")
 def searched(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Record]:
     directory = tmp_path_factory.mktemp("material-gradient-allowed-cli")
@@ -89,8 +112,13 @@ def searched(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Record]:
     output: Record = {"measured": _run(directory, [*_start_args(directory, measured_root, settings="settings-rounds.toml"),
                                                    "--materials", str(user), *measured])}
     output["measured_folders"] = sorted(path.name for path in measured_root.iterdir()) if measured_root.exists() else []
-    root = directory / "root"
     flags = [item for value in ALLOWED for item in ("--allowed", value)]
+    untrained_root = directory / "untrained-root"
+    output["untrained"] = _run(directory, [*_start_args(directory, untrained_root, settings="settings-rounds.toml"),
+                                           "--materials", str(user), *flags])
+    output["untrained_folders"] = sorted(path.name for path in untrained_root.iterdir()) if untrained_root.exists() else []
+    _record_training(directory, user, ALLOWED)
+    root = directory / "root"
     output["start"] = _run(directory, [*_start_args(directory, root, settings="settings-rounds.toml"), "--materials", str(user),
                                        *flags])
     folders = [path for path in root.iterdir() if not path.name.startswith(".")] if root.exists() else []
@@ -102,6 +130,9 @@ def searched(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Record]:
 
 def test_start_checks_each_fixed_material_and_snapshots_the_user_table(searched: tuple[Path, Record]) -> None:
     folder, output = searched
+    untrained = cast(Record, output["untrained"])
+    assert untrained["code"] != 0 and output["untrained_folders"] == [], untrained
+    assert "替身沒用這些材料訓練過，要重建" in str(untrained["stderr"]) and f"固定材料 fixed:{BUILT} 沒訓練過" in str(untrained["stderr"])
     start = cast(Record, output["start"])
     assert start["code"] == 0, start
     project = run.read_project(folder)

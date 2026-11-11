@@ -1,5 +1,5 @@
 """真瀏覽器考第三階段搜尋頁（#1106，#1082 段 1-6b）：選方案、開跑選項、預覽、沒替身先建、開跑、進度、停止、接續、
-失敗原文、終點、存成方案接結果頁；替身被准用閘門拒收時叫人重建。
+失敗原文、終點、存成方案接結果頁；替身被准用閘門拒收時叫人重建；材料庫的材料替身沒訓練過時說要重建（#1082 段 2-3c）。
 
 開服務那一層換成假的（搜尋與建替身都不真跑，考卷自己寫離開碼、帳本、狀態檔假裝它們跑到哪），一般計算的執行程式是
 「什麼都不做」的 Python。輪詢用瀏覽器假時鐘快轉，不真等 5 秒。截圖存 ``AOSR_SHOTS``（有給才存）。
@@ -31,12 +31,15 @@ from aosr.gui.surrogate_slots import SLOTS_DIR
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import GradientJobs
 from aosr.gui.gradient_plan import GradientRequest
+from aosr.gui.material_editor import user_library_path
 from aosr.gui.zone_design import write_design
+from aosr.materials import library
 from aosr.reporting.scheme import Scheme
 from tests.engine.test_gui_browser import RAW_VALUES, _open, browser as browser
 from tests.engine.test_gui_gradient_jobs import (
     NAME, SEARCH, FakeLauncher, Record, _design, _finish, _jobs, _place_surrogate, _scheme,
 )
+from tests.engine.test_material_gradient_library import _optimizable
 
 POLL_MS = 5000
 NOTE = "注意：材料 my_wool 的空腔不調（固定 0.05 m）"
@@ -348,3 +351,50 @@ def test_server_errors_and_a_long_wait_are_said_plainly(browser: Browser, tmp_pa
         assert launcher.launched == []
         _clean(page, watched.page_errors + [error for error in watched.console_errors
                                             if "status of 500" not in error and "status of 409" not in error])
+
+
+# ---- 替身沒用這些材料訓練過（#1082 段 2-3c）----
+
+NOT_TRAINED = "梯度搜尋開始失敗：SurrogateNotTrainedOn：替身沒用這些材料訓練過，要重建：家族 rock_wool_60k 沒訓練過"
+
+
+def test_library_families_the_surrogate_never_saw_say_rebuild_and_rebuild_with_them(browser: Browser,
+                                                                                    tmp_path: Path) -> None:
+    """抓材料庫加了可最佳化材料、格子裡的替身沒訓練過它時，畫面照樣說「已經有替身」讓人開跑，
+    或重建沒帶「換掉舊的」與材料庫（重建了還是沒訓練到它）。"""
+    data_dir = _data(tmp_path)
+    user_library_path(data_dir).write_text(library.dump_user_library((_optimizable(),)), encoding="utf-8")
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#surrogate-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
+        expect(page.locator("#surrogate-state")).to_contain_text("rock_wool_60k 沒訓練過")
+        expect(page.locator("#surrogate-state")).to_have_class("notice")
+        expect(page.locator("#start")).to_be_disabled()
+        expect(page.locator("#surrogate-build-form")).to_be_visible()
+        _shot(page, "2-3c-1-not-trained-rebuild")
+        page.locator("#build-surrogate").click()
+        expect(page.locator("#build-state")).to_contain_text("建替身")
+        _, argv, _, _ = launcher.launched[-1]
+        assert "--replace" in argv and "--materials" in argv
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_start_refused_for_untrained_materials_says_so_and_offers_a_rebuild(browser: Browser, tmp_path: Path) -> None:
+    """抓背景開跑那一步才發現材料沒訓練過（網頁預覽之後材料庫才改）時，狀態只說「替身核不過」講不出原因、或沒有重建的路。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    jobs = _jobs(data_dir, launcher)
+    view = jobs.start(NAME, GradientRequest())
+    job_id = str(view["job_id"])
+    (data_dir / "gradient" / job_id / "steps" / "0.log").write_text(NOT_TRAINED + "\n", encoding="utf-8")
+    _finish(data_dir, launcher, view, 1)
+    assert jobs.get(job_id)["state"] == "surrogate_refused"
+    with _serve(data_dir, launcher) as url, \
+            _open(browser, f"{url}/gradient?scheme={NAME}&job={job_id}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#job-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
+        expect(page.locator("#job-failures")).to_contain_text("rock_wool_60k 沒訓練過")
+        expect(page.locator("#job-rebuild")).to_be_visible()
+        _shot(page, "2-3c-2-start-refused-not-trained")
+        _clean(page, watched.page_errors + watched.console_errors)
