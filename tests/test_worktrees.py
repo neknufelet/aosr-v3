@@ -784,7 +784,7 @@ def _failing_bundle(sandbox: GitSandbox, step: str) -> worktrees.Git:
         if args[:2] == ("bundle", step):
             if step == "list-heads":
                 return subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{'0' * 40} refs/heads/{BRANCH}\n", stderr="")
-            raise WorktreeError(f"git bundle {step} 回 128：假的失敗")
+            raise WorktreeError(f"假的失敗：打包那一步（{step}）回 128")
         return sandbox.git(*args)
 
     return git
