@@ -255,3 +255,38 @@ def test_send_to_search_waits_for_the_verdict_and_refuses_when_the_check_failed(
         assert page.url == f"{base}/"
         assert not (tmp_path / "designs" / "room109.json").exists()
         assert watched.page_errors == []
+
+
+def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp_path: Path, browser: Browser) -> None:
+    """只點一下沒拖（收尾那條路會先重畫）不讓「拖框中」卡住；打完上限按 Tab 換格或按 Enter，判決照樣畫上去、
+    焦點留在原來那一格（只有那一格打了還沒確定的字才延後）。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        _choose(page, "#zone-fixed-x0-z1", DEEP)
+        _choose(page, "#zone-mode-x0-auto1", "search")
+        _settled(page)
+        page.locator("#elevation-frame").scroll_into_view_if_needed()
+        box = page.locator("#elevation [data-zone-id=auto1]").bounding_box()
+        assert box is not None
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        assert page.evaluate("elevationDrawing()") is False
+        _depth(page, "#depth-wall-x0", "0.1")
+        _red(page, "z1")
+        _depth(page, "#depth-wall-x0", "")
+        _clear(page, "z1")
+
+        page.locator("#depth-room").fill("0.1")
+        page.locator("#depth-room").press("Tab")
+        _settled(page)
+        _red(page, "z1")
+        expect(page.locator("#depth-wall-x0")).to_be_focused()
+        page.locator("#depth-room").fill("0.3")
+        page.locator("#depth-room").press("Enter")
+        _settled(page)
+        _clear(page, "z1")
+        expect(page.locator("#depth-room")).to_be_focused()
+        assert watched.page_errors == [] and watched.console_errors == []

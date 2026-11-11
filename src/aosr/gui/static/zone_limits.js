@@ -12,14 +12,20 @@ let zoneLimitsRequest = Promise.resolve();
 let zoneLimitsAfterDrag = 0; // 拖框中收下、放開滑鼠才畫的那一次
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
 
+// 正在打字＝焦點在立面圖那一區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同）。
+// 按 Tab 換到別格、按 Enter 確定之後那一格是乾淨的：照畫，畫完把焦點放回同一格。
 function typingInElevation() {
   const active = document.activeElement;
-  return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest("#elevation-panel") ? active : null;
+  return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest("#elevation-panel")
+    && active.value !== active.defaultValue ? active : null;
 }
 function showZoneLimits(generation) {
   if (generation !== zoneLimitsGeneration) return;
   zoneLimitsShown = generation;
+  const active = document.activeElement;
+  const focused = active?.id && active.closest?.("#elevation-panel") ? active.id : null;
   if (typeof renderElevation === "function") renderElevation();
+  if (focused) document.getElementById(focused)?.focus();
 }
 
 function refreshZoneLimits() {
@@ -80,7 +86,7 @@ function limitLinesBlock(lines, idPrefix) {
 function depthInput(id, label, value, apply) {
   const wrap = document.createElement("label"); wrap.textContent = label;
   const input = document.createElement("input"); input.type = "number"; input.min = "0"; input.step = "0.01"; input.id = id;
-  input.value = value ?? "";
+  input.defaultValue = value ?? "";  // 確定過的值：跟它不同才算「正在打字」
   input.addEventListener("change", () => {
     const text = input.value.trim();
     const number = Number(text);
@@ -90,6 +96,7 @@ function depthInput(id, label, value, apply) {
       return;
     }
     apply(text === "" ? null : number);
+    input.defaultValue = input.value;
     markStale();
     refreshZoneLimits();
   });

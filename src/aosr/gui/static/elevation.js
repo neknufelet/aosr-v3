@@ -149,8 +149,9 @@ function startDrawing(svg, event, geometry, view, wall) {
   svg.append(preview);
   svg.setPointerCapture(event.pointerId);
   elevationDrawing = true;
-  // 放開滑鼠（或拖曳被瀏覽器收回）之後才畫收著的判決：拖框收尾要用的這張圖在那之前不能換掉。
-  svg.addEventListener("lostpointercapture", () => { elevationDrawing = false; zoneLimitsDragEnded(); }, {once: true});
+  // 放開滑鼠（收尾做完、不管走哪條路）或拖曳被瀏覽器收回之後，才畫收著的判決：收尾要用的這張圖在那之前不能換掉。
+  const endDrawing = () => { if (!elevationDrawing) return; elevationDrawing = false; zoneLimitsDragEnded(); };
+  svg.addEventListener("lostpointercapture", endDrawing, {once: true});
   const corners = end => [Math.min(start[0], end[0]), Math.max(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[1], end[1])];
   const move = moved => {
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, moved, geometry));
@@ -159,7 +160,8 @@ function startDrawing(svg, event, geometry, view, wall) {
     preview.setAttribute("width", (a1 - a0) * geometry.scale);
     preview.setAttribute("height", (b1 - b0) * geometry.scale);
   };
-  const finish = ended => {
+  const finish = ended => { try { complete(ended); } finally { endDrawing(); } };
+  const complete = ended => {
     svg.removeEventListener("pointermove", move);
     svg.removeEventListener("pointerup", finish);
     preview.remove();
@@ -214,7 +216,7 @@ function selectedEditor(wall, view, width, height) {
   for (const [field, label, value] of [["left", "離左緣", a0], ["bottom", "離下緣", b0], ["width", "寬", a1 - a0], ["height", "高", b1 - b0]]) {
     const wrap = document.createElement("label"); wrap.textContent = label;
     const input = document.createElement("input"); input.type = "number"; input.step = "0.01"; input.id = `elevation-${field}`;
-    input.value = metres(value);
+    input.defaultValue = metres(value);  // 畫出來的值：跟它不同才算正在打字（限制判決先不重畫，#1111）
     input.addEventListener("change", () => editSelected(wall, view, width, height, field, Number(input.value)));
     wrap.append(input); fields.append(wrap);
   }
