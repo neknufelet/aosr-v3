@@ -109,14 +109,12 @@ from aosr.scoring.six_category_jax import build_constants
 from aosr.gradient.six_category_chain import six_category_chain_objective
 from aosr.gradient.six_category_gpu import double_precision_score_arrays
 from aosr.physics.fem_reduced_jax import reduced_constants
+from aosr.gradient.folder_files import (
+    LEDGER_FILE as LEDGER_FILE, PROJECT_FILE as PROJECT_FILE, RESULT_FILE as RESULT_FILE, STATUS_FILE as STATUS_FILE,
+    STOP_FILE as STOP_FILE, TEMPLATES_FILE as TEMPLATES_FILE, GradientStatus as GradientStatus, State as State,
+)
 
 
-PROJECT_FILE: Final = "project.json"
-LEDGER_FILE: Final = "ledger.jsonl"
-TEMPLATES_FILE: Final = "templates.jsonl"
-STATUS_FILE: Final = "status.json"
-RESULT_FILE: Final = "result.json"
-STOP_FILE: Final = "stop"
 PROJECT_VERSION: Final = "aosr.material_gradient_project.v1"
 # 專案外殼仍向後相容、CPU 位元組不變；六類由目標指紋換版，舊顯卡比較另在接續閘門明拒。
 RESULT_VERSION: Final = "aosr.material_gradient_result.v6"
@@ -131,7 +129,6 @@ FREQUENCY_RULER: Final = "fem_reduced_holdout_frequency_db"
 BAND_RULER: Final = "fem_reduced_holdout_band_db"
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 _SHA256 = r"^[0-9a-f]{64}$"
-State = Literal["running", "finished", "stopped", "failed", "interrupted"]
 
 
 class GradientProject(BaseModel):
@@ -192,25 +189,6 @@ class GradientProject(BaseModel):
             except ValueError as exc:
                 raise ValueError("沿用抽查頻點不合法") from exc
         return self
-
-
-class GradientStatus(BaseModel):
-    """``status.json``：狀態、這一次子行程開始與最後寫的時間、庚二帳本記的累計求值次數、做完幾輪、帳本最後一列的值、
-    迴圈收尾的停止原因（收尾才有）、換樣板帳本記的累計求值次數與做完幾輪（另兩欄，沒有換樣板帳本是 0）、
-    子行程編號、失敗時的錯誤原文。庚三之前寫的狀態檔沒有那兩欄，讀成 0（報告照印；下一次子行程寫的時候補上）。"""
-
-    model_config = _FROZEN
-    state: State
-    started_at: str
-    updated_at: str
-    evaluations: int = Field(ge=0, strict=True)
-    rounds_done: int = Field(ge=0, strict=True)
-    last_value: float | None
-    stop_reason: str | None
-    template_evaluations: int = Field(default=0, ge=0, strict=True)
-    template_rounds_done: int = Field(default=0, ge=0, strict=True)
-    pid: int = Field(ge=1, strict=True)
-    message: str | None = None
 
 
 class SurfaceSpec(BaseModel):
