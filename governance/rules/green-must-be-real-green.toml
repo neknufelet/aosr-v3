@@ -559,7 +559,8 @@ prefix = "tests.engine."
 # #1073 步數上限 60 與開跑旗標：新檔 test_material_gradient_max_steps.py 9 題（整條命令列那題住 slow_ 檔、雲端不收）；CPU 單行程純收集實量 11103。
 # #1077 三格釘選共用小工具：test_cpu_pins.py 3 題；CPU 單行程純收集實量 11106。
 # #1085 材料庫格式與檢查：test_material_library.py 45 題；CPU 單行程純收集實量 11151。
-collected_floor = 11151
+# #1084 分區＋實測表逐區接縫：新檔 test_zoned_measured_seams.py 13 題（邊界檔那 3 題改寫、題數不變）；主線 3ca5312e CPU 單行程純收集實量 11151，本支 11164。
+collected_floor = 11164
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

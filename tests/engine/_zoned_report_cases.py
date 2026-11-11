@@ -1,7 +1,7 @@
 """#562 小房正式方案（整面與分區）。"""
 from __future__ import annotations
 
-from aosr.materials.construction_models import Assembly, ConstantImpedance
+from aosr.materials.construction_models import Assembly, ConstantImpedance, SurfaceMaterial
 from aosr.physics.report_surfaces import RectangleZone, WholeWallZone, ZonesByWall
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import reference_document
@@ -28,3 +28,18 @@ def small_scheme(*, zoned: bool = False, changed: bool = False, assembly: bool =
     return Scheme.model_validate(original.model_copy(update={"scene": scene, "speakers": speakers,
                                                             "receiver_set": receivers}).model_dump())
 
+
+
+def with_x0(x0: tuple[WholeWallZone | RectangleZone, ...]) -> Scheme:
+    """小房分區方案只換 x0 那一面；其餘五面照舊整面固定阻抗（#1084）。"""
+    base = small_scheme(zoned=True)
+    zones = dict(base.scene.surface_zones_by_wall or {})
+    zones["x0"] = x0
+    scene = base.scene.model_copy(update={"surface_zones_by_wall": zones})
+    return Scheme.model_validate(base.model_copy(update={"scene": scene}).model_dump())
+
+
+def split_x0(material_a: SurfaceMaterial, material_b: SurfaceMaterial) -> tuple[RectangleZone, ...]:
+    """x0 照 small_scheme 的 1:2 切兩區，各自給材料（#1084）。"""
+    return tuple(RectangleZone(area="rectangle", id=name, u_m=u, v_m=(0.0, 1.5), material=material)
+                 for name, u, material in (("a", (0.0, 2.0/3.0), material_a), ("b", (2.0/3.0, 2.0), material_b)))

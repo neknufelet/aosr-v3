@@ -63,6 +63,7 @@ CLOSURE = (
     'aosr.physics.report_source',
     'aosr.physics.report_surfaces',
     'aosr.physics.report_validation',
+    'aosr.physics.report_zone_seams',
     'aosr.physics.room_path_output',
     'aosr.physics.room_paths',
     'aosr.physics.source_directivity',
@@ -116,4 +117,4 @@ PYTHON_MINOR = (3, 12)
 # #1057 物理變更：晚期一族在家具後加 ISO 9613-1 空氣吸收；正式 physics_identity_parts 重算，閉包加入空氣條件與係數模組。
 # #1062 物理變更：晚期衰減曲線 T20／T30 從 256 階改成 512 階；正式 physics_identity_parts 重算，閉包與資料清單不變。
 # #1066 物理變更（身分換、數字不變）：有限元素分片多一格自己的身分 fem-v1；正式 physics_identity_parts 重算，閉包與資料清單不變；109 原牆注入分片重跑跟 #1062 那份除身分、提交與耗時外逐位相同。
-CODE_DIGEST = "8fdb07a315cf6895a8a2d7c1ad2aeeef3879a445e8827a3b4c1de519110f24cd"
+CODE_DIGEST = "94bfa67c3aed781f04037650906c067519f786656a3fc21c10db25db16ba4639"
