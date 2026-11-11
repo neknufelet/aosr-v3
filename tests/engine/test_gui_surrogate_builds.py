@@ -206,6 +206,28 @@ def test_install_puts_the_old_slot_back_when_the_new_one_cannot_go_in(tmp_path: 
     assert (stage / SURROGATE_FILE).read_text(encoding="utf-8") == "new"
 
 
+def test_install_says_where_the_old_slot_is_when_it_cannot_go_back(tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓新的換不進去、舊的也搬不回去時只報第二個錯（命令列只印最外層）：兩次失敗與舊的現在在哪裡都要講。"""
+    stage, slot, retired = _slot_pair(tmp_path)
+    rename = Path.rename
+
+    def failing(self: Path, target: Path) -> Path:
+        if self == stage:
+            raise OSError(errno.EXDEV, "模擬跨磁碟換名失敗")
+        if self == retired:
+            raise PermissionError(errno.EACCES, "模擬搬回被拒")
+        return rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing)
+    with pytest.raises(OSError) as raised:
+        _install(stage, slot, retired)
+    message = str(raised.value)
+    assert "跨磁碟" in message and "搬回被拒" in message and str(retired) in message and str(slot) in message
+    assert (retired / SURROGATE_FILE).read_text(encoding="utf-8") == "old" and not slot.exists()
+    assert (stage / SURROGATE_FILE).read_text(encoding="utf-8") == "new"
+
+
 def _stop_now(gate: _StopGate, seen: int) -> None:
     """真的送 SIGTERM 給自己，等主緒的處理函式跑完（擋住時記下；沒擋住時在這裡丟 KeyboardInterrupt）。"""
     os.kill(os.getpid(), signal.SIGTERM)
@@ -215,7 +237,7 @@ def _stop_now(gate: _StopGate, seen: int) -> None:
     assert len(gate.deferred) == seen + 1, "停止訊號沒有被記下"
 
 
-@pytest.mark.parametrize("moment", ["退舊之後", "入新之後"])
+@pytest.mark.parametrize("moment", ["退舊之後", "入新之後", "寫判決途中"])
 def test_stop_during_install_is_recorded_not_obeyed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moment: str) -> None:
     """抓換名進格子途中被停打斷：退舊之後被停格子空掉、入新之後被停判決沒寫（新替身在格子裡卻回「被停」）；
     放進去之後晚到的停止也不准把它翻成被停。對照：還沒開始提交時同一個處理函式照常打斷。"""
@@ -227,7 +249,7 @@ def test_stop_during_install_is_recorded_not_obeyed(tmp_path: Path, monkeypatch:
             os.kill(os.getpid(), signal.SIGTERM)
             time.sleep(5.0)
         rename = Path.rename
-        source = slot if moment == "退舊之後" else stage
+        source = {"退舊之後": slot, "入新之後": stage}.get(moment)
 
         def stopping(self: Path, target: Path) -> Path:
             moved = rename(self, target)
@@ -236,9 +258,15 @@ def test_stop_during_install_is_recorded_not_obeyed(tmp_path: Path, monkeypatch:
             return moved
 
         recorded: list[str | None] = []
+
+        def record(retired_text: str | None) -> None:
+            if moment == "寫判決途中":
+                _stop_now(gate, 0)
+            recorded.append(retired_text)
+
         monkeypatch.setattr(Path, "rename", stopping)
         try:
-            _commit(gate, stage, slot, retired, recorded.append)
+            _commit(gate, stage, slot, retired, record)
             monkeypatch.undo()
             _stop_now(gate, 1)
         except KeyboardInterrupt:  # 讓它變成這一題紅，不要把整場考試停掉

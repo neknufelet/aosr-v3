@@ -129,7 +129,8 @@ STOPS: Final = _StopGate()
 
 def _install(stage: Path, slot: Path, replace: Path | None) -> str | None:
     """整個資料夾換名進格子；格子已有東西時只在給了 ``--replace`` 才先把舊的搬走（同一顆磁碟的換名，不複製）。
-    新的換不進去（例如跨磁碟換名失敗）就把舊的搬回格子再報原本的錯：格子不會因為一次失敗的安裝變空。"""
+    新的換不進去（例如跨磁碟換名失敗）就把舊的搬回格子再報原本的錯：格子不會因為一次失敗的安裝變空。
+    連搬回都失敗時報一個錯、把兩次失敗與舊的現在在哪裡一起講出來（命令列只印最外層那一個錯，不印例外鏈）。"""
     retired = None
     if slot.exists():
         if replace is None:
@@ -140,9 +141,13 @@ def _install(stage: Path, slot: Path, replace: Path | None) -> str | None:
     try:
         slot.parent.mkdir(parents=True, exist_ok=True)
         stage.rename(slot)
-    except BaseException:
+    except BaseException as error:
         if retired is not None:
-            retired.rename(slot)
+            try:
+                retired.rename(slot)
+            except OSError as again:
+                raise OSError(f"新的換不進格子 {slot}（{type(error).__name__}：{error}），舊的也搬不回去"
+                              f"（{type(again).__name__}：{again}）：舊的留在 {retired}，要手動搬回 {slot}") from error
         raise
     return None if retired is None else str(retired)
 
