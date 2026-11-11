@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>材料庫</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
   <link rel="stylesheet" href="/static/materials.css">
+  <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/materials.js" defer></script>
 </head>
 <body><main>
@@ -25,6 +27,23 @@
   <section id="editor" hidden>
     <h2 id="editor-title"></h2>
     <p id="editor-readonly" class="notice" hidden>內建材料唯讀；要改請按「複製成新材料」，改好再存。</p>
+    <div id="curve-block" class="block">
+      <h3>吸音曲線</h3>
+      <p id="curve-labels"><span id="curve-basis" class="badge"></span> <span id="curve-provenance" class="badge"></span></p>
+      <p id="curve-basis-detail" class="hint"></p>
+      <p id="curve-source" class="hint"></p>
+      <p id="curve-arrangement" class="hint"></p>
+      <p id="curve-state" aria-live="polite"></p>
+      <div id="curve-chart"></div>
+      <ul id="curve-key" class="hint">
+        <li data-kind="extrapolation"><span class="swatch extrapolation"></span>橘底：材料模型外推（照算，不宣稱準確）</li>
+        <li data-kind="model_fill"><span class="swatch model_fill"></span>灰底：實測表外，用底構造算的模型補值</li>
+      </ul>
+      <ul id="curve-warnings"></ul>
+      <p id="curve-axis" class="hint"></p>
+      <p id="curve-scope" class="hint"></p>
+      <div class="actions"><button id="curve-redraw" type="button" class="quiet">用表單現在的值重畫曲線</button></div>
+    </div>
     <div id="editor-body"></div>
     <div class="actions"><button id="save" type="button">儲存</button>
       <button id="copy" type="button">複製成新材料</button>

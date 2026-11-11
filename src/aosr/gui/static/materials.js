@@ -360,6 +360,113 @@ function fixedBlock(entry, readonly) {
   return {block, after: show, assemblyLayers, baseLayers};
 }
 
+// ---- 吸音曲線、數字來源、可信範圍提醒（段 2-2b） ----
+// 曲線與提醒全由伺服器現算（同一套物理）；這裡只畫圖、照實印。標語也由伺服器從送去的內文判，不在這裡自己猜。
+
+let plot = null;
+let curveTicket = 0;
+let curveShown = false;
+const SPAN_FILL = {extrapolation: "rgba(230,140,40,0.22)", model_fill: "rgba(110,125,135,0.2)"};
+
+function destroyPlot() {
+  if (plot) plot.destroy();
+  plot = null;
+  byId("curve-chart").replaceChildren();
+}
+
+function curveState(text, kind) {
+  byId("curve-state").textContent = text;
+  byId("curve-state").className = kind;
+}
+
+function chartWidth() {
+  return Math.max(byId("curve-chart").clientWidth, 240);
+}
+
+function drawPlot(reply) {
+  destroyPlot();
+  const spans = reply.spans;
+  // 底色畫在清畫布之後、畫線之前；頭尾同一點時至少畫 2 像素寬，看得到。
+  const shade = (u) => {
+    const ctx = u.ctx, box = u.bbox;
+    ctx.save();
+    for (const span of spans) {
+      const left = u.valToPos(span.low_hz, "x", true), right = u.valToPos(span.high_hz, "x", true);
+      ctx.fillStyle = SPAN_FILL[span.kind];
+      ctx.fillRect(left, box.top, Math.max(right - left, 2 * devicePixelRatio), box.height);
+    }
+    ctx.restore();
+  };
+  plot = new uPlot({width: chartWidth(), height: 320, legend: {show: false},
+    scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}, y: {range: [0, 1]}},
+    axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}],
+    series: [{}, {label: "吸音係數", stroke: "#15617b", width: 2, points: {show: false}}],
+    hooks: {drawClear: [shade]}}, [reply.frequencies_hz, reply.absorption], byId("curve-chart"));
+}
+
+function showLabels(reply) {
+  const known = Boolean(reply.basis);
+  byId("curve-labels").hidden = !known;
+  byId("curve-basis").textContent = known ? `阻抗怎麼得到：${reply.basis}` : "";
+  byId("curve-basis").className = known ? `badge basis-${reply.basis_code}` : "badge";
+  byId("curve-provenance").textContent = known ? `數字從哪來：${reply.provenance}` : "";
+  byId("curve-basis-detail").textContent = reply.basis_detail || "";
+  const source = byId("curve-source");
+  source.replaceChildren();
+  if (known) {
+    source.append(`出處：${reply.source}`);
+    for (const link of reply.links) source.append("　", el("a", {href: link, target: "_blank", rel: "noopener", text: link}));
+  }
+  byId("curve-arrangement").textContent = reply.arrangement || "";
+  byId("curve-arrangement").hidden = !reply.arrangement;
+}
+
+function showCurve(reply) {
+  showLabels(reply);
+  const drawn = reply.status === "drawn";
+  byId("curve-key").hidden = !drawn || !reply.spans.length;
+  // 底色說明只列圖上真的有的那幾種。
+  const kinds = new Set(drawn ? reply.spans.map((span) => span.kind) : []);
+  for (const item of byId("curve-key").querySelectorAll("li")) item.hidden = !kinds.has(item.dataset.kind);
+  byId("curve-warnings").replaceChildren(...(drawn ? reply.warnings : []).map((line) =>
+    el("li", {class: line.level, "data-code": line.code, text: line.text})));
+  byId("curve-axis").textContent = drawn ? reply.axis_text : "";
+  byId("curve-scope").textContent = reply.range_scope || "";
+  if (drawn) {
+    curveState("", "");
+    drawPlot(reply);
+  } else {
+    destroyPlot();
+    curveState(reply.message, "notice");
+  }
+  curveShown = drawn;
+}
+
+async function drawCurve(document) {
+  const ticket = ++curveTicket;
+  byId("curve-redraw").disabled = true;
+  curveState("計算吸音曲線中…（第一次算一種新構造要等一兩秒）", "");
+  try {
+    const reply = await api("/api/material-curve", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                    body: JSON.stringify(document)});
+    if (ticket !== curveTicket) return; // 已經換開別筆，或又按了重畫：這一份過期，不蓋掉新的
+    if (!reply.ok) { destroyPlot(); curveState(`畫不出曲線：${reply.body.error || reply.status}`, "notice"); curveShown = false; return; }
+    showCurve(reply.body);
+  } finally {
+    if (ticket === curveTicket) byId("curve-redraw").disabled = false;
+  }
+}
+
+function redrawCurve() {
+  let document;
+  try { document = collect(); } catch (error) { destroyPlot(); curveShown = false; curveState(`畫不出曲線：${error.message}`, "notice"); return; }
+  drawCurve(document);
+}
+
+function markCurveStale() {
+  if (curveShown) curveState("表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。", "notice");
+}
+
 let parts = null;
 
 function openEntry(row, isNew) {
@@ -381,11 +488,16 @@ function openEntry(row, isNew) {
   byId("editor").hidden = false;
   say("", "");
   byId("editor").scrollIntoView({block: "start"});
+  // 表單先顯示再畫：藏著的時候圖的寬度量出來是 0。
+  drawCurve(entry);
 }
 
 function closeEditor() {
   current = null;
   parts = null;
+  curveTicket += 1;
+  curveShown = false;
+  destroyPlot();
   byId("editor").hidden = true;
   byId("editor-body").replaceChildren();
 }
@@ -466,4 +578,9 @@ byId("new-fixed").addEventListener("click", () => { openEntry({entry: newEntry("
 byId("save").addEventListener("click", save);
 byId("copy").addEventListener("click", () => current && copyEntry(current.entry));
 byId("close").addEventListener("click", closeEditor);
+byId("curve-redraw").addEventListener("click", redrawCurve);
+for (const event of ["input", "change"]) byId("editor-body").addEventListener(event, markCurveStale);
+// 加層、刪層、上下移是按鈕，不會觸發 input／change，也算改過。
+byId("editor-body").addEventListener("click", (event) => { if (event.target.closest("button")) markCurveStale(); });
+window.addEventListener("resize", () => { if (plot) plot.setSize({width: chartWidth(), height: 320}); });
 loadListing().catch((error) => { byId("list-state").textContent = `讀不到材料庫：${error.message}`; byId("list-state").className = "notice"; });

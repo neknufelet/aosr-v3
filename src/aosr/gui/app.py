@@ -37,6 +37,7 @@ from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
+from aosr.gui.material_curves import material_curve_routes
 from aosr.gui.material_editor import material_routes
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.construction_input import web_scheme_problems
@@ -940,7 +941,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/modal-jobs/{run_id}", handlers.modal_job),
         Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
-        *material_routes(handlers.data_dir),
+        *material_routes(handlers.data_dir), *material_curve_routes(),
     ])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
