@@ -259,9 +259,12 @@ def _modes(design: DesignSettings | None) -> dict[str, dict[str, ZoneMode]]:
     return {wall: {key: item.mode for key, item in items.items()} for wall, items in design.zones.items()}
 
 
-def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings | None) -> list[str]:
-    """存好的方案開搜尋前要擋的那幾條（不算可信範圍：那一項要數學函式庫，開跑前物理拒算命令列自己會擋）。"""
-    return cast(list[str], zone_limits(scheme_document, None if design is None else design.model_dump(mode="json"))["refusals"])
+def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings | None,
+                   range_check: RangeCheck | None = None) -> list[str]:
+    """存好的方案開搜尋（或建替身）前要擋的那幾條：跟立面圖標紅同一把；``range_check`` 給了就連可信範圍一起判
+    （網頁開跑與建替身傳材料頁那一支，頁面紅的、伺服器就擋）。"""
+    value = None if design is None else design.model_dump(mode="json")
+    return cast(list[str], zone_limits(scheme_document, value, range_check)["refusals"])
 
 
 def zone_limit_routes(range_check: RangeCheck | None) -> list[Route]:

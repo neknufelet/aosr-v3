@@ -6,8 +6,9 @@ import re
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -20,18 +21,23 @@ DEEP = "glass_wool_48k_50mm_gap100"     # 總深 0.15 m
 RED = re.compile(r"\bzone-red\b")
 
 
+def _settled(page: Page) -> None:
+    """最新一次限制判決已經畫上畫面（不是「某一個回覆到了」：前一個改動的回覆可能還在路上）。"""
+    page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration")
+
+
 def _depth(page: Page, selector: str, value: str) -> None:
-    """填一格深度上限（離開那一格才算確定），等伺服器判完那一次。"""
-    with page.expect_response("**/api/zone-limits") as response:
-        page.locator(selector).fill(value)
-        page.locator(selector).blur()
-    assert response.value.ok, response.value.text()
+    """填一格深度上限（離開那一格才算確定），等這一次的判決畫上去。"""
+    before = cast(int, page.evaluate("zoneLimitsGeneration"))
+    page.locator(selector).fill(value)
+    page.locator(selector).blur()
+    assert cast(int, page.evaluate("zoneLimitsGeneration")) > before
+    _settled(page)
 
 
 def _red(page: Page, zone: str) -> None:
     expect(page.locator(f"#elevation [data-zone-id={zone}]")).to_have_class(RED)
     expect(page.locator("#zone-to-search")).to_be_disabled()
-
 
 
 def _clear(page: Page, zone: str) -> None:
@@ -41,8 +47,9 @@ def _clear(page: Page, zone: str) -> None:
 
 
 def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_path: Path, browser: Browser) -> None:
+    """用正式網頁入口起（雙精度開著、可信範圍真的判）：截圖就是產品真正的樣子。"""
     _write(tmp_path, room109_document())
-    with _serve(tmp_path) as base, _open(browser, base) as watched:
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
@@ -55,8 +62,8 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         _depth(page, "#depth-wall-x0", "0.1")
         _clear(page, "z1")
         expect(page.locator("#depth-cap-x0-auto1")).to_have_text("生效：0.1 公尺（這面牆擋的）")
-        with page.expect_response("**/api/zone-limits"):
-            _choose(page, "#zone-fixed-x0-z1", DEEP)
+        _choose(page, "#zone-fixed-x0-z1", DEEP)
+        _settled(page)
         _red(page, "z1")
         expect(page.locator("#limit-x0-z1-0")).to_contain_text("0.15 公尺")
         expect(page.locator("#limit-x0-z1-0")).to_contain_text("這面牆的上限")
@@ -147,4 +154,34 @@ def test_send_to_search_stays_put_while_red(tmp_path: Path, browser: Browser) ->
         assert page.url == f"{base}/"
         assert not (tmp_path / "designs" / "room109.json").exists()
         assert cast(int, page.evaluate("limitsRedCount()")) == 1
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_late_verdict_never_eats_a_half_typed_limit(tmp_path: Path, browser: Browser) -> None:
+    """判決回來的時候正在立面圖那一區打字：不重畫（重畫會換掉那一格），打到一半的字留著；離開那一格才算確定、才畫。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        _choose(page, "#zone-fixed-x0-z1", DEEP)
+        _choose(page, "#zone-mode-x0-auto1", "search")
+        _settled(page)
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        with page.expect_request("**/api/zone-limits"):
+            page.evaluate("() => { window.before = zoneLimits; refreshZoneLimits(); }")   # 例如換材料之後那一次，回覆還在路上
+        page.locator("#depth-wall-x0").fill("0.1")    # 這時開始打牆的上限，還沒離開那一格
+        with page.expect_response("**/api/zone-limits"):
+            held[0].continue_()
+        page.unroute("**/api/zone-limits")
+        page.wait_for_function("zoneLimits !== window.before")   # 判決收下了，但正在打字：不畫
+        assert page.evaluate("zoneLimitsShown < zoneLimitsGeneration")
+        expect(page.locator("#depth-wall-x0")).to_have_value("0.1")
+        expect(page.locator("#depth-wall-x0")).to_be_focused()
+        page.locator("#depth-wall-x0").blur()           # 離開才算確定：記進設計設定、重判、畫紅
+        _settled(page)
+        assert page.evaluate("zoneDesign.wall_max_depth_m") == {"x0": 0.1}
+        _red(page, "z1")
         assert watched.page_errors == [] and watched.console_errors == []

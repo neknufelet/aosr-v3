@@ -48,6 +48,7 @@ from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, plan_search, start_arguments
+from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
@@ -289,7 +290,7 @@ class GradientJobs:
             raise PlanRefused(str(error)) from error
         fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
                                *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
-        plan = plan_search(scheme, design, request, materials.settings, fixed_ids)
+        plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check)
         _refuse_measured_tables(plan, entries)
         return plan, materials, entries
 

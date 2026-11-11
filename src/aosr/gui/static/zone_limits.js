@@ -1,10 +1,22 @@
 /* 超過限制的區塊標紅（#1111，#1082 第 1-4 段）：每次確定的改動之後（切完一面、換了做法或材料、改了深度上限、
    改了房間尺寸、打開方案、按「檢查」）把表單現在的樣子與設計設定交伺服器判（/api/zone-limits），回來的每一條照原文
    寫在那一區旁邊；紅的擋「拿去搜尋」（開跑那邊伺服器也照同一把再擋一次）。判法只在伺服器一份，這裡只畫。
-   不從每個輸入事件發（房間、喇叭、座位每打一個字都會觸發），不鎖頁；晚到的回覆照世代號丟掉。 */
+   不從每個輸入事件發（房間、喇叭、座位每打一個字都會觸發），不鎖頁；晚到的回覆照世代號丟掉。
+   回覆到的時候使用者正在立面圖那一區的某一格打字：先不重畫（重畫會換掉那一格、打到一半的字就沒了），離開那一格再畫。 */
 let zoneLimits = null;
 let zoneLimitsGeneration = 0;
+let zoneLimitsShown = 0;  // 畫面上畫的是第幾次的判決；等於 zoneLimitsGeneration 表示最新的一次已經畫上去
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
+
+function typingInElevation() {
+  const active = document.activeElement;
+  return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest("#elevation-panel") ? active : null;
+}
+function showZoneLimits(generation) {
+  if (generation !== zoneLimitsGeneration) return;
+  zoneLimitsShown = generation;
+  if (typeof renderElevation === "function") renderElevation();
+}
 
 async function refreshZoneLimits() {
   zoneLimitsGeneration += 1;
@@ -20,7 +32,9 @@ async function refreshZoneLimits() {
   }
   if (generation !== zoneLimitsGeneration) return;
   zoneLimits = result;
-  if (typeof renderElevation === "function") renderElevation();
+  const typing = typingInElevation();
+  if (typing) { typing.addEventListener("focusout", () => showZoneLimits(generation), {once: true}); return; }
+  showZoneLimits(generation);
 }
 function zoneLimitLines(wall, key) { return zoneLimits?.zones?.[wall]?.[key] ?? []; }
 function wallLimitLines(wall) { return zoneLimits?.walls?.[wall] ?? []; }

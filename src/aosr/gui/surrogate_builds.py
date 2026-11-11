@@ -40,6 +40,7 @@ from aosr.gui.gradient_jobs import (
     REPO_ROOT, UNIT_PREFIX, ActionRefused, GradientJobs, JobBusy, LaunchFailed, tail_lines, write_text_atomic,
 )
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search
+from aosr.gui.material_curves import range_check
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, slot_key
 from aosr.runtime import child_process_env
 
@@ -227,7 +228,7 @@ class SurrogateBuilds:
         text, scheme, design = self.jobs.inputs(scheme_id)
         if scheme.scene.low_frequency_axis is None:
             raise PlanRefused("方案場景沒有低頻軸（low_frequency_axis），搜尋開跑會拒收，不建替身")
-        plan_search(scheme, design, GradientRequest(), self.jobs.search_settings())
+        plan_search(scheme, design, GradientRequest(), self.jobs.search_settings(), range_check=range_check)
         return text, slot_dir(self.data_dir, scheme), slot_key(scheme)
 
     def _latest(self, key: str) -> dict[str, object] | None:

@@ -30,7 +30,7 @@ from aosr.config.material_gradient import (
 )
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
-from aosr.gui.zone_limits import depth_cap, saved_refusals
+from aosr.gui.zone_limits import RangeCheck, depth_cap, saved_refusals
 from aosr.reporting.scheme import Scheme
 
 Device = Literal["cpu", "gpu"]
@@ -150,12 +150,14 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
 
 
 def plan_search(scheme: Scheme, design: DesignSettings | None, request: GradientRequest,
-                settings: MaterialGradientSettings, fixed_ids: frozenset[str] = frozenset()) -> SearchPlan:
-    """``fixed_ids`` 是材料庫裡固定材料的代號（內建構造預設＋使用者的固定材料），准用清單照它認固定材料。"""
+                settings: MaterialGradientSettings, fixed_ids: frozenset[str] = frozenset(), *,
+                range_check: RangeCheck | None = None) -> SearchPlan:
+    """``fixed_ids`` 是材料庫裡固定材料的代號（內建構造預設＋使用者的固定材料），准用清單照它認固定材料；
+    ``range_check`` 給了就連可信範圍一起擋（跟立面圖標紅同一把，網頁開跑與建替身傳材料頁那一支）。"""
     problems = mismatches(design, scheme) if design is not None else []
     if problems:
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
-    refusals = saved_refusals(scheme.model_dump(mode="json"), design)
+    refusals = saved_refusals(scheme.model_dump(mode="json"), design, range_check)
     if refusals:
         raise PlanRefused("有超過限制的區（立面圖上標紅的），先改好再開：" + "；".join(refusals))
     modes = effective_modes(design, scheme)

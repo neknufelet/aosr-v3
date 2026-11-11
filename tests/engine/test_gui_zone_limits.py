@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from starlette.testclient import TestClient
 import httpx
 
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.config.product_air import product_air_environment
@@ -130,6 +131,19 @@ def test_fixed_zone_mounted_deeper_than_its_cap_is_red_and_names_the_level(field
     assert line["level"] == "red" and "0.15 公尺" in line["text"] and f"{word}的上限" in line["text"]
     assert result["red"] == 1 and "x0 分區 z1" in cast(list[str], result["refusals"])[0]
     assert cast(dict[str, dict[str, dict[str, object]]], result["caps"])["x0"]["z1"]["level"] == level
+
+
+def test_an_uncut_wall_fixed_too_deep_is_red_on_the_page_and_at_the_search() -> None:
+    """整面沒切（方案裡那一面只有一筆「整面」）：一樣比、一樣擋；示範最常見的就是這一種。"""
+    document = room109_document()
+    whole = _zones(document)["y0"][0]
+    whole["material"] = {"kind": "mounted_on_wall", "layers": _layers(DEEP), "wall": whole["material"]}
+    design = _design(room_max_depth_m=0.1, zones={"x0": {"whole_wall": {"mode": "search"}}})
+    result = zone_limits(document, design.model_dump(mode="json"))
+    assert [(line["code"], line["level"]) for line in _lines(result, "y0", "whole_wall")] == [("depth_over", "red")]
+    assert result["refusals"] == ["y0 分區 whole_wall：" + _lines(result, "y0", "whole_wall")[0]["text"]]
+    with pytest.raises(PlanRefused, match="y0 分區 whole_wall"):
+        plan_search(_scheme(document), design, GradientRequest(), SETTINGS)
 
 
 def test_fixed_zone_within_its_cap_and_zones_without_caps_pass() -> None:
@@ -294,6 +308,12 @@ def test_today_the_command_line_refuses_caps_above_the_family_limit() -> None:
     with pytest.raises(ValueError, match=r"面 x0@auto1 的深度上限 .* m 超過家族 .* 上限"):
         designs_with_max_depths(designs, SETTINGS, {"x0@auto1": upper + 0.1})
     assert designs_with_max_depths(designs, SETTINGS, {"x0@auto1": upper + 0.1}, check_family_upper=False)
+    # 比最薄那一層棉還淺也拒收（放不下）；立面圖今天不標紅這一種，同樣交段 2-4。
+    thinnest = min(family.thicknesses_m[0] for family in SETTINGS.family)
+    with pytest.raises(ValueError, match=r"面 x0@auto1 的深度上限 .* m 放不下家族 .* 最薄棉"):
+        designs_with_max_depths(designs, SETTINGS, {"x0@auto1": thinnest / 2})
+    assert zone_limits(_cut(PRESET), _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": thinnest / 2}}})
+                       .model_dump(mode="json"))["red"] == 0
 
 
 # ---- 網址：內容有問題一律 200 照講 ----
@@ -347,3 +367,37 @@ def test_the_real_entry_checks_the_trust_range_the_same_way_as_the_material_page
         assert ask(_cut(PRESET)) == []
         assert ask(flow(5000.0)) == [("komatsu_flow_below_samples", "warn")]
         assert ask(flow(3000.0)) == [("range_uncomputable", "red")]
+
+
+def test_building_a_surrogate_refuses_red_designs_too(tmp_path: Path) -> None:
+    """建替身也走開跑同一份計畫：有紅照講、400，不是 500。"""
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "designs").mkdir()
+    scheme = _scheme(_cut())
+    scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH})})
+    (tmp_path / "schemes" / "room109.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    design = _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}})
+    (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
+    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
+    response = client.post("/api/gradient/schemes/room109/surrogate/plan", json={})
+    assert response.status_code == 400 and "有超過限制的區" in response.json()["error"]
+
+
+def test_the_real_entry_refuses_to_plan_a_search_over_an_uncomputable_fixed_material(tmp_path: Path) -> None:
+    """頁面上物理拒算是紅：伺服器開跑那一步也擋（同一把，帶可信範圍）；在範圍內的照常回計畫。"""
+    document = _cut(PRESET)
+    z1 = next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")
+    cast(list[dict[str, object]], cast(Doc, z1["material"])["layers"])[0]["flow_resistivity_pa_s_m2"] = 3000.0
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "designs").mkdir()
+    (tmp_path / "schemes" / "room109.json").write_text(_scheme(document).model_dump_json(), encoding="utf-8")
+    design = _design(zones={"x0": {"auto1": {"mode": "search"}}})
+    (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
+    with real_server(tmp_path) as base, httpx.Client(trust_env=False, timeout=60) as client:
+        response = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
+        assert response.status_code == 400, response.text
+        assert "x0 分區 z1" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"]
+        (tmp_path / "schemes" / "room109.json").write_text(_scheme(_cut(PRESET)).model_dump_json(), encoding="utf-8")
+        # 在範圍內就過了限制這一關（考卷行程連不上使用者的服務匯流排，下一步查「現在有沒有一跑在算」會回 503，那不是這一段的事）
+        again = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
+        assert "有超過限制的區" not in again.text and "算不出吸音曲線" not in again.text, again.text
