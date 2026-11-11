@@ -151,7 +151,7 @@ def _parser() -> argparse.ArgumentParser:
                        help="往下走最多幾步（正整數），例如 30、60、100；不給照 --settings 那份的 [descent] max_steps；"
                             "指定的值存進搜尋資料夾，接著跑、終點、報告照用")
     start.add_argument("--max-depth", action="append", default=[], metavar="面=公尺",
-                       help="每面總深度上限，可重複；整面或面片，例如 x0=0.08、x0@u0v0=0.08")
+                       help="每面總深度上限（個案上限，跟家族自己的上限取較嚴；放不下的家族不換過去），可重複；整面或面片，例如 x0=0.08、x0@u0v0=0.08")
     start.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     start.add_argument("--engine-commit", default=None)
     start.add_argument("--mount", choices=MOUNTS, default=MOUNT_RIGID,
@@ -386,16 +386,17 @@ def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[Surface
 
 
 def _listed_fixed_materials(allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...]) -> dict[str, SurfaceMaterial]:
-    """准用清單列到的固定材料（``fixed:<代號>`` → 材料）；清單外的不讀。代號不在構造清單的留給後面那一步照講拒收。"""
+    """准用清單列到的固定材料（``fixed:<代號>`` → 材料）；清單外的不讀。查法跟換樣板建設計那一把同一份
+    （:func:`~aosr.gradient.material_gradient.fixed_candidate_design`：構造清單裡代號就是 ``fixed:<代號>`` 的那一筆，
+    ``_start_materials`` 已把清單點名的固定材料接進來）；查不到的留給後面那一步照講拒收。"""
     from pydantic import TypeAdapter
 
-    from aosr.config.material_gradient import fixed_target, is_fixed_target
+    from aosr.config.material_gradient import is_fixed_target
     from aosr.materials.construction_models import SurfaceMaterial
 
     listed = {target for targets in allowed.values() for target in targets if is_fixed_target(target)}
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
-    return {fixed_target(preset.id): adapter.validate_python(preset.material) for preset in table
-            if fixed_target(preset.id) in listed}
+    return {preset.id: adapter.validate_python(preset.material) for preset in table if preset.id in listed}
 
 
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],

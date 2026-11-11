@@ -33,6 +33,7 @@ from tests.engine.test_material_gradient_mount import _project
 
 GAP50 = "glass_wool_48k_50mm_gap50"
 USER = "deep_rock_wool"
+THICK = "thick_start_wool"
 _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
 _MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 
@@ -50,8 +51,17 @@ def _user_entry() -> library.OptimizableEntry:
         "cavity": {"adjustable": True, "range_m": [0.03, 0.1], "initial_m": 0.04}, "max_total_depth_m": 0.15}))
 
 
+def _thick_start_entry() -> library.OptimizableEntry:
+    """初值不是最薄的那一片（初值 0.1 m、可取 0.05／0.1 m、沒有空腔）：上限比初值淺但放得下最薄的，換過去要退到最薄。"""
+    return cast(library.OptimizableEntry, _ENTRY.validate_python({
+        "kind": "optimizable", "id": THICK, "label": "厚起點棉（自填）", "provenance": "model", "source": "自填",
+        "porous": {"kind": "porous", "thickness_m": 0.1, "flow_resistivity_pa_s_m2": 15000.0, "material_class": "fibrous"},
+        "porous_thickness": {"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1], "initial_m": 0.1},
+        "max_total_depth_m": 0.2}))
+
+
 def _user() -> materials.SearchMaterials:
-    return materials.with_user_materials(_base(), run.presets_table(), (_user_entry(),))
+    return materials.with_user_materials(_base(), run.presets_table(), (_user_entry(), _thick_start_entry()))
 
 
 def _kept() -> dict[Wall, SurfaceMaterial]:
@@ -219,3 +229,52 @@ def test_report_names_which_limit_blocks(tmp_path: Path) -> None:
 def test_assembly_type_is_what_is_measured() -> None:
     assert isinstance(_preset_material("carpet_on_concrete"), Assembly)
     assert fixed_material_depth_m(_preset_material("carpet_on_concrete")) == pytest.approx(0.007)
+
+
+def test_cli_start_judges_user_fixed_materials_against_the_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                               capsys: pytest.CaptureFixture[str]) -> None:
+    """走真的命令列開跑（``_start_materials`` → ``_checked_allowed``）：使用者的構造型固定材料（總深 0.1 m）
+    在上限 0.08 的面開跑前就拒收、講總深與上限；上限 0.1 放得下，往下走到匯出網格那一步。抓查固定材料時鍵對不上
+    （使用者的固定材料查不到、或拿到同名的別一份）。"""
+    from aosr.gradient import cli
+    from aosr.reporting import fem_reduced_scheme
+    from tests.engine.test_material_gradient_allowed import BUILT, _built
+    from tests.engine.test_material_gradient_cli import _schemes
+
+    class ReachedExport(RuntimeError):
+        pass
+
+    def export(*args: object, **kwargs: object) -> object:
+        raise ReachedExport("走到匯出網格了")
+
+    scheme = tmp_path / "scheme.json"
+    scheme.write_text(_schemes()["scheme.json"].model_dump_json())
+    user = tmp_path / "library.json"
+    user.write_text(library.dump_user_library((_built(),)), encoding="utf-8")
+    monkeypatch.setattr(fem_reduced_scheme, "export_operators", export)
+    for cap, words in (("0.08", f"固定材料 fixed:{BUILT} 總深 0.1 m 超過深度上限 0.08 m"), ("0.1", "走到匯出網格了")):
+        code = cli.main(["start", "--scheme", str(scheme), "--surrogate", str(tmp_path / "absent"), "--presets",
+                         ",".join([GAP50] * 6), "--purpose", _project().purpose, "--root", str(tmp_path / "out"),
+                         "--materials", str(user), "--allowed", f"x0=glass_wool_48k,fixed:{BUILT}", "--max-depth", f"x0={cap}"])
+        assert code == cli.EXIT_FAILED
+        assert words in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_report_writes_a_fixed_material_face_as_what_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓換成固定材料的面被寫成「目前不貼」或「不貼（無新增層深度）」：寫它的代號、總深、有上限一併寫。"""
+    from aosr.gradient import report
+    from aosr.materials.search_library import FixedCandidate
+
+    carpet = "carpet_on_concrete"
+    material = next(p for p in run.presets_table() if p.id == carpet).material
+    monkeypatch.setattr(report, "project_presets", lambda project: (*run.presets_table(),
+                                                                     FixedCandidate(id=f"fixed:{carpet}", material=dict(material))))
+    settings = _base()
+    for caps, expected in (({"x0": 0.05}, "x0：整塊換成固定材料 carpet_on_concrete（總深 0.007 m；個案上限 0.05 m，開跑前核過放得下）"),
+                           ({}, "x0：整塊換成固定材料 carpet_on_concrete（總深 0.007 m）")):
+        project = run.GradientProject.model_validate({
+            **_project().model_dump(), "settings_path": str(config_path("material_gradient.toml")),
+            "settings_fingerprint": settings.fingerprint, "max_depths": caps})
+        surfaces = tuple((name, f"fixed:{carpet}" if name == "x0" else GAP50) for name in search.wall_surface_ids())
+        assert f"  {expected}" in report._depth_lines(project, surfaces)

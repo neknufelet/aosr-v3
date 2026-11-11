@@ -19,3 +19,6 @@ button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
 #plan-table td.depth-cell p{margin:.1rem 0}
 #plan-table td.depth-cell .note{color:#46586a}
 #plan-table td.depth-cell .limit-warn{color:#9a5b00}
+#job-depths .depth-cell p{margin:.1rem 0}
+#job-depths .note{color:#46586a}
+#job-depths .limit-warn{color:#9a5b00}

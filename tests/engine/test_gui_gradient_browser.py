@@ -174,6 +174,9 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     expect(page.locator("#start")).to_be_enabled()
     page.locator("#start").click()
     expect(page.locator("#job-state")).to_contain_text("開跑前核對中")
+    # 工作頁留著開跑時的深度上限判決（個案哪一層、每一組生效多少、哪一條擋住）。
+    expect(page.locator('#job-depths [data-surface="x0@r0_c0"]')).to_contain_text("個案上限 0.1 公尺")
+    expect(page.locator('#job-depths [data-surface="x0@r0_c0"]')).to_contain_text("生效 0.1 公尺（這一跑另填的上限擋住")
     unit, argv, _, _ = launcher.launched[-1]
     assert argv[argv.index("--max-steps") + 1] == "45"
     assert "x0@r0_c0=0.1" in argv

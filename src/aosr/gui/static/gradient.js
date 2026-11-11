@@ -419,6 +419,18 @@ function progressLines(job, detail) {
   return lines;
 }
 
+// 這一跑開跑時每區的深度上限判決（#1082 段 2-4；工作記錄存的那一份計畫）：個案上限是哪一層、每一組生效多少、哪一條擋住。
+function showJobDepths(plan) {
+  const found = Object.entries((plan && plan.depth_targets) || {});
+  byId("job-depths").hidden = !found.length;
+  byId("job-depths").querySelector("div").replaceChildren(...found.map(([surface, lines]) => {
+    const {wall, zone} = surfaceParts(surface);
+    return el("div", {class: "depth-cell", "data-surface": surface},
+      el("p", {text: `${WALLS[wall] || wall}「${zoneText(zone)}」：個案上限 ${depthText(plan, surface, "search")}`}),
+      ...lines.map((line) => el("p", {class: line.usable ? "note" : "limit-warn", text: line.text})));
+  }));
+}
+
 function showJob(job, detail, detailError) {
   // 狀態換了，上一個動作留下的話（例如「接續了。」）就過期了，不留著誤導。
   if (byId("job-block").dataset.state && byId("job-block").dataset.state !== `${job.job_id}:${job.state}`) say("job-message", "");
@@ -432,6 +444,7 @@ function showJob(job, detail, detailError) {
   const notes = detail ? detail.notes : [];
   byId("job-notes").hidden = !notes.length;
   byId("job-notes").querySelector("ul").replaceChildren(...notes.map((text) => el("li", {text})));
+  showJobDepths(job.plan);
   const lastStep = job.steps[job.steps.length - 1];
   const failures = [...(detail ? detail.failures : [])];
   if (lastStep && lastStep.error) failures.unshift(`開服務那一層：${lastStep.error}`);

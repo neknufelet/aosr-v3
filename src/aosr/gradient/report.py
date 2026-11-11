@@ -34,7 +34,7 @@ from pydantic import BaseModel, ValidationError
 from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings, fixed_target_id, is_fixed_target
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import named_materials
-from aosr.gradient.depth_fit import family_fit, family_shallowest_m
+from aosr.gradient.depth_fit import family_fit, family_shallowest_m, fixed_material_depth_m
 from aosr.gradient.fixed_surfaces import SCHEME_MATERIAL, expanded_fixed_surfaces, expanded_max_depths
 from aosr.gradient.endpoint import EndpointReport
 from aosr.gradient.endpoint_run import ENDPOINT_FILE, EndpointBaseline, EndpointRecord, read_endpoint, read_result
@@ -44,7 +44,7 @@ from aosr.gradient.material_gradient_ledger import (
 )
 from aosr.gradient.run import (
     LEDGER_FILE, RESULT_FILE, STATUS_FILE, STOP_FILE, TEMPLATES_FILE, GradientProject, GradientStatus, Layout,
-    file_sha256, ledger_progress, project_settings, project_wall_materials, read_project, surface_specs,
+    file_sha256, ledger_progress, project_presets, project_settings, project_wall_materials, read_project, surface_specs,
 )
 from aosr.gradient.template_ledger import TemplateRow, decisions_seconds, read_template_ledger, template_progress
 from aosr.materials.construction_models import Assembly, ConstantImpedance, Layer, MountedOnWall, SurfaceMaterial
@@ -494,8 +494,11 @@ def _depth_lines(project: GradientProject, surfaces: Sequence[tuple[str, str | N
         if face in fixed:
             lines.append(f"  {face}：固定面（不參與深度搜尋）")
             continue
-        family = None if preset is None else settings.family_of(preset)
         cap = caps.get(face)
+        if is_fixed_target(preset):
+            lines.append(f"  {face}：{_fixed_target_words(project, str(preset), cap)}")
+            continue
+        family = None if preset is None else settings.family_of(preset)
         if family is not None and cap is None:
             lines.append(f"  {face}：總深度上限 {family.max_total_depth_m:g} m")
         elif family is not None and cap is not None:
@@ -508,6 +511,22 @@ def _depth_lines(project: GradientProject, surfaces: Sequence[tuple[str, str | N
         else:
             lines.append(f"  {face}：不貼（無新增層深度）")
     return lines
+
+
+def _fixed_target_words(project: GradientProject, target: str, cap: float | None) -> str:
+    """換樣板換成固定材料的面：整塊、沒有變數；寫它的總深（看不出多深就照講），有個案上限一併寫（開跑前核過放得下）。"""
+    from pydantic import TypeAdapter
+
+    try:
+        preset = next(item for item in project_presets(project) if item.id == target)
+        material: SurfaceMaterial = TypeAdapter(SurfaceMaterial).validate_python(preset.material)
+    except (OSError, ValueError, StopIteration):
+        depth_words = "材料讀不到，總深寫不出"
+    else:
+        depth = fixed_material_depth_m(material)
+        depth_words = "直接給阻抗、看不出多深" if depth is None else f"總深 {depth:g} m"
+    limit = "" if cap is None else f"；個案上限 {cap:g} m，開跑前核過放得下"
+    return f"整塊換成固定材料 {fixed_target_id(target)}（{depth_words}{limit}）"
 
 
 def _unfit_words(settings: MaterialGradientSettings, cap: float) -> str:
