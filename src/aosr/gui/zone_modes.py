@@ -7,14 +7,15 @@
 - 「固定這一組材料」選了材料庫的一筆：多層構造貼在原牆上（``MountedOnWall``，最後一層背後接原牆，1-5 的改善基準
   拆得回原牆）；固定阻抗與實測阻抗表本身就是整面的表面阻抗，直接換掉那一區，畫面點明「直接取代、不是貼上」。
 
-原牆怎麼來（同 1-5 ``zone_result`` 那一條規則，只是這裡一區一區取）：現在是貼在原牆上的構造，取它記的原牆；
-不是的話，設計設定指了原方案就照原方案蓋住這一區的那一塊；兩樣都沒有就看不出原牆，照現在的材料不動、照實說。
+原牆怎麼來（同 1-5 ``zone_result`` 那一條規則、同一個先後，只是這裡一區一區取）：設計設定指了原方案就照原方案蓋住
+這一區的那一塊；沒指時，現在是貼在原牆上的構造就取它記的原牆；都沒有就當現在的材料是原牆，只有它正是材料庫裡
+直接取代牆面的那幾種時才說看不出原牆、照現在的材料不動。
 這一支只組材料、不算物理；材料庫讀不進來照講原因，不當成空的。
 """
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +35,8 @@ from aosr.gui.zone_design import NAME, WHOLE_WALL_KEY
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material, original_walls
 from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceMaterial
 from aosr.materials.library import FixedEntry, LibraryEntry, full_library
-from aosr.physics.report_surfaces import RectangleZone
+from aosr.geometry.shoebox import Room
+from aosr.physics.report_surfaces import RectangleZone, SurfaceZone
 from aosr.physics.zone_fill import wall_size_m
 from aosr.reporting.scheme import Scheme
 
@@ -71,31 +73,30 @@ class Origin:
     source: OriginSource
 
 
-def _zone_index(scheme: Scheme, wall: str, zone: str) -> tuple[int, tuple[tuple[float, float], tuple[float, float]]]:
-    zones = (scheme.scene.surface_zones_by_wall or {}).get(wall)
-    if zones is None:
-        raise ZoneMaterialError(f"方案沒有{wall}的分區清單；先把這一面切過或重新打開方案")
-    size = wall_size_m(scheme.scene.room_m, wall)
-    for index, item in enumerate(zones):
+def _zone_index(zones: Mapping[str, tuple[SurfaceZone, ...]], room: Room, wall: str,
+                zone: str) -> tuple[SurfaceZone, tuple[tuple[float, float], tuple[float, float]]]:
+    size = wall_size_m(room, wall)
+    for item in zones.get(wall, ()):
         key = item.id if isinstance(item, RectangleZone) else WHOLE_WALL_KEY
         if key == zone:
             box = (item.u_m, item.v_m) if isinstance(item, RectangleZone) else ((0.0, size[0]), (0.0, size[1]))
-            return index, box
+            return item, box
     raise ZoneMaterialError(f"{wall}沒有「{zone}」這一區；畫面跟方案對不上，請重新打開方案")
 
 
 def origin(current: SurfaceMaterial, original: OriginalWalls | None, wall: str, zone: str,
            box: tuple[tuple[float, float], tuple[float, float]], replacements: Sequence[SurfaceMaterial] = ()) -> Origin:
-    """這一區的原牆：貼在原牆上的取它記的原牆；不是的話照原方案；都沒有就當現在的材料是原牆（``current``，
+    """這一區的原牆，順序同 1-5 的改善基準（``derive_baseline``）：指了原方案就照原方案；沒指時貼在原牆上的取它記的原牆；
+    都沒有就當現在的材料是原牆（``current``，
     剛切出來的區就是這樣）——除非現在的材料正是材料庫裡直接取代牆面的那幾種（``replacements``：固定阻抗、
     實測表），那就看不出原牆（``unknown``），照現在的材料不動、照實說。"""
-    if isinstance(current, MountedOnWall):
-        return Origin(current.wall, "unwrapped")
     if original is not None:
         try:
             return Origin(original_material(original, wall, zone, box), "original_scheme")
         except BaselineRefused as exc:
             raise ZoneMaterialError(str(exc)) from exc
+    if isinstance(current, MountedOnWall):
+        return Origin(current.wall, "unwrapped")
     return Origin(current, "unknown" if current in replacements else "current")
 
 
@@ -156,6 +157,16 @@ class ZoneMaterialHandlers:
         except (ValueError, BaselineRefused) as exc:
             raise ZoneMaterialError(str(exc).splitlines()[0]) from exc
 
+    def _walls(self, scheme: Scheme) -> Mapping[str, tuple[SurfaceZone, ...]]:
+        """方案每一面的分區；六面都是整面固定阻抗的方案存成六個數字，走計算同一條驗證拿那六面材料
+        （固定阻抗只在已驗輸入出生，見 ``zone_result.original_walls``），不在這裡自己建。"""
+        if scheme.scene.surface_zones_by_wall is not None:
+            return scheme.scene.surface_zones_by_wall
+        try:
+            return original_walls(scheme, scheme, capabilities=self.capabilities, directivity=self.directivity).zones
+        except BaselineRefused as exc:
+            raise ZoneMaterialError("方案表單還有格子沒填好或填錯，先改好再選這一區的材料（按「檢查」看是哪一格）") from exc
+
     def change(self, body: ZoneMaterialRequest) -> dict[str, object]:
         if body.choice == "fixed" and body.material_id is None:
             raise ZoneMaterialError("選固定材料要給材料代號")
@@ -163,8 +174,8 @@ class ZoneMaterialHandlers:
             scheme = checked_scheme(body.scheme)
         except ValueError as exc:
             raise ZoneMaterialError("方案表單還有格子沒填好或填錯，先改好再選這一區的材料（按「檢查」看是哪一格）") from exc
-        index, box = _zone_index(scheme, body.wall, body.zone)
-        current = (scheme.scene.surface_zones_by_wall or {})[body.wall][index].material
+        item, box = _zone_index(self._walls(scheme), scheme.scene.room_m, body.wall, body.zone)
+        current = item.material
         entries = self._library()
         entry = self._entry(entries, body.material_id) if body.choice == "fixed" and body.material_id else None
         replacements = [material for item in entries if isinstance(item, FixedEntry)

@@ -144,3 +144,29 @@ def test_original_zone_that_is_itself_mounted_cannot_take_another_layer(client: 
                           "points": [{**point, "imag_pa_s_m": 0.0} for point in cast(list[dict[str, object]], _TABLE["points"])]})
     code, data = _post(client, document, "z1", choice="fixed", material_id=OTHER, original_scheme_id="room109-treated")
     assert code == 400 and "不能再貼一層" in str(data["error"])
+
+
+def test_named_original_scheme_wins_over_unwrapping_like_the_improvement_baseline(client: TestClient,
+                                                                                    tmp_path: Path) -> None:
+    """已經貼過的區、又指了原方案：照原方案取原牆，跟 1-5 改善基準（derive_baseline）同一個先後，不拆貼上的層。"""
+    original = room109_document("room109-carpeted")
+    _zones(original)["x0"][0]["material"] = {"kind": "assembly", "layers": _preset_layers(OTHER), "backing": "rigid"}
+    (tmp_path / "schemes").mkdir(exist_ok=True)
+    (tmp_path / "schemes" / "room109-carpeted.json").write_text(Scheme.model_validate(original).model_dump_json())
+    document = _cut_document()
+    wall = deepcopy(_zones(document)["x0"][0]["material"])
+    _put(document, "z1", {"kind": "mounted_on_wall", "layers": _preset_layers(PRESET), "wall": wall})
+    code, data = _post(client, document, "z1", choice="original", original_scheme_id="room109-carpeted")
+    assert code == 200 and data["origin"] == "original_scheme"
+    assert data["material"] == _zones(original)["x0"][0]["material"]
+
+
+def test_whole_wall_of_a_six_number_scheme_is_found_through_the_validated_inputs(client: TestClient) -> None:
+    """六面都是整面固定阻抗的方案驗證後折回六個數字：整面那一區照計算同一條驗證拿材料，照樣換得了。"""
+    document = room109_document()
+    wall = deepcopy(_zones(document)["y0"][0]["material"])
+    response = client.post("/api/zone-material", json={"scheme": document, "wall": "y0", "zone": "whole_wall",
+                                                       "choice": "fixed", "material_id": PRESET})
+    data = cast(dict[str, object], response.json())
+    assert response.status_code == 200, data
+    assert data["material"] == {"kind": "mounted_on_wall", "layers": _preset_layers(PRESET), "wall": wall}

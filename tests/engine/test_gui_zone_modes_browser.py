@@ -160,3 +160,30 @@ def test_auto_label_is_left_out_of_a_strip_too_narrow_for_it(tmp_path: Path, bro
         expect(page.locator(f"#elevation [data-zone-id={strip}] text")).to_have_count(0)
         expect(page.locator(f"#elevation [data-zone-id={strip}] title")).to_contain_text("自動")
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_unreadable_design_is_not_overwritten_and_a_dropped_request_puts_the_menu_back(tmp_path: Path,
+                                                                                      browser: Browser) -> None:
+    """存著的設計設定讀不到：照講、存方案時不拿空的一份蓋掉原檔；換材料半路斷線：照講、選單畫回原樣、方案不動。"""
+    _write(tmp_path, room109_document())
+    (tmp_path / "designs").mkdir(exist_ok=True)
+    broken = tmp_path / "designs" / "room109.json"
+    broken.write_text("{not json", encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#elevation-zones")).to_contain_text("不會存回去")
+        page.route("**/api/zone-material", lambda route: route.abort())
+        page.locator("#zone-mode-x0-whole_wall").select_option("search")
+        expect(page.locator("#zone-note")).to_contain_text("沒有換")
+        expect(page.locator("#zone-mode-x0-whole_wall")).to_have_value("fixed")
+        assert page.evaluate("zoneDesign") is None
+        page.unroute("**/api/zone-material")
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        with page.expect_response(lambda r: r.url.endswith("/api/schemes/room109") and r.request.method == "PUT") as saved:
+            page.locator("#save").click()
+        assert saved.value.ok
+        expect(page.locator("#messages")).to_contain_text("每一區的做法沒存成")
+        assert broken.read_text(encoding="utf-8") == "{not json"
+        assert watched.page_errors == []

@@ -6,6 +6,8 @@
 let zoneDesign = null;
 let zoneDesignStored = false;
 let zoneDesignNote = "";
+// 伺服器上那一份設計設定讀不到（壞檔或連不上）：這一頁不准存回去，免得一份空的蓋掉原本每一區的做法。
+let zoneDesignBroken = false;
 let zoneLibrary = null;
 let zoneLibraryProblem = "";
 let zoneNoteText = "";
@@ -37,21 +39,23 @@ function zoneNote(text, kind) { zoneNoteText = text; zoneNoteKind = kind; const 
 
 // 開舊方案：讀它的設計設定（沒有就是全部固定）；讀不到照講、不當成沒有。
 async function loadZoneDesign(name) {
-  zoneDesign = null; zoneDesignStored = false; zoneDesignNote = ""; zoneNote("", "");
+  zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
   try {
     const data = await api(`/api/designs/${encodeURIComponent(name)}`);
     zoneDesign = data.design;
     zoneDesignStored = Object.keys(data.design.zones || {}).length > 0 || data.design.original_scheme_id != null;
     if (data.problems.length) zoneDesignNote = `設計設定有幾條跟方案對不上（下次儲存時拿掉）：${data.problems.join("；")}`;
   } catch (error) {
-    zoneDesignNote = `每一區的做法讀不到：${errorText(error)}`;
+    zoneDesignBroken = true;
+    zoneDesignNote = `每一區的做法讀不到（${errorText(error)}）：這一頁改的做法不會存回去，免得蓋掉原本存的；先處理好再重新打開方案`;
   }
 }
 // 載入範本：新的方案，沒有設計設定。
-function resetZoneDesign() { zoneDesign = null; zoneDesignStored = false; zoneDesignNote = ""; zoneNote("", ""); }
+function resetZoneDesign() { zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); }
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
 async function saveZoneDesign(name) {
+  if (zoneDesignBroken) throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）");
   const touched = zoneDesign && (Object.keys(zoneDesign.zones || {}).length || zoneDesign.original_scheme_id != null);
   if (!touched && !zoneDesignStored) return;
   const design = structuredClone(designForEdit());
@@ -91,9 +95,10 @@ function libraryLabel(material) {
     const chosen = entry.material.kind === "measured_impedance" ? null : entry.material;
     if (material.kind === "mounted_on_wall" && chosen?.kind === "assembly" && sameMaterial(chosen.layers, material.layers)) return entry;
     if (chosen && chosen.kind !== "assembly" && sameMaterial(chosen, material)) return entry;
+    // 實測表：材料庫存的虛部可以整張沒有（物理那邊補 0），其餘欄與每一列都要一樣才算同一筆。
     if (entry.material.kind === "measured_impedance" && material.kind === "measured_impedance"
-        && material.source_and_conditions === entry.material.source_and_conditions
-        && material.points.length === entry.material.points.length) return entry;
+        && sameMaterial({...entry.material, points: entry.material.points.map(point => ({...point, imag_pa_s_m: point.imag_pa_s_m ?? 0}))}, material))
+      return entry;
   }
   return null;
 }
@@ -139,9 +144,16 @@ async function afterZoneChange() {
 }
 function zoneName(key) { return key === "whole_wall" ? "整面" : key.startsWith(inputDefaults.zone_cut.fill_prefix) ? `自動 ${key}` : key; }
 
+// 換材料連不上或回覆讀不出來：照講、把選單畫回原樣（方案與做法都沒動），不留在新選項上。
+async function zoneMaterialChanged(wall, key, choice) {
+  try { return await changeZoneMaterial(wall, key, choice); } catch (error) {
+    zoneNote(`沒有換：${errorText(error)}`, "notice");
+    return false;
+  }
+}
 async function changeZoneMode(wall, key, mode) {
   const before = zoneSetting(wall, key);
-  if (mode !== "fixed" && !await changeZoneMaterial(wall, key, {choice: "original"})) { renderZoneTable(wall); return; }
+  if (mode !== "fixed" && !await zoneMaterialChanged(wall, key, {choice: "original"})) { renderZoneTable(wall); return; }
   const next = {...before, mode};
   if (mode !== "search") delete next.allowed;
   setZoneSetting(wall, key, next);
@@ -149,7 +161,7 @@ async function changeZoneMode(wall, key, mode) {
   await afterZoneChange();
 }
 async function chooseFixed(wall, key, materialId) {
-  if (!await changeZoneMaterial(wall, key, {choice: "fixed", material_id: materialId})) { renderZoneTable(wall); return; }
+  if (!await zoneMaterialChanged(wall, key, {choice: "fixed", material_id: materialId})) { renderZoneTable(wall); return; }
   setZoneSetting(wall, key, {...zoneSetting(wall, key), mode: "fixed"});
   await afterZoneChange();
 }
