@@ -5,12 +5,13 @@ from collections.abc import Sequence
 
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_result import BaselineRefused, _change, derive_baseline, improvement, zone_rows
+from aosr.gui.zone_result_routes import ZoneResultView, lock_refusal
 from aosr.gui.measured_view import build_measured_view
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
 from aosr.physics.report_zone_seams import ZoneSeamTable
@@ -120,6 +121,43 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     assert {(row.baseline, row.baseline_source, row.changed) for row in unknown} == {("—", "—", False)}
     stale = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"gone": ZoneDesign(mode="search")}})
     assert {row.mode for row in zone_rows(baseline, stale, design)} == {"—"}
+
+
+SEEN, NEWER = "1" * 32, "2" * 32
+
+
+@pytest.mark.parametrize(("seen", "latest", "allowed"), (
+    (None, None, True),                                       # 查的時候沒有、現在也沒有：開
+    (None, {"run_id": NEWER, "status": "done"}, False),        # 查完有人開了而且算好了
+    (None, {"run_id": NEWER, "status": "running"}, False),
+    (SEEN, {"run_id": SEEN, "status": "done"}, True),          # 查的時候那一筆舊版物理或讀不出：准重算
+    (SEEN, {"run_id": SEEN, "status": "failed"}, True),
+    (SEEN, {"run_id": NEWER, "status": "done"}, False),        # 審查第 2 條：查完到拿鎖之間別人的重算已經算好
+    (SEEN, {"run_id": NEWER, "status": "failed"}, False),
+    (SEEN, {"run_id": NEWER, "status": "running"}, False),
+    (SEEN, None, False),                                       # 查的時候那一筆不見了：不猜，重新整理
+))
+def test_lock_only_starts_when_the_latest_baseline_run_is_still_the_one_looked_at(
+        seen: str | None, latest: dict[str, object] | None, allowed: bool) -> None:
+    view = ZoneResultView(zoned=True, state="none" if seen is None else "baseline_stale", can_start=True,
+                          baseline_run_id=seen)
+    refusal = lock_refusal(view, latest)
+    assert (refusal is None) is allowed
+    if latest is not None and latest["status"] == "running":
+        assert refusal == {"error": "原牆基準已經在算了", "state": "running"}
+
+
+@pytest.mark.parametrize(("name", "ok"), (
+    ("a", True), ("A-b_9", True), ("a" * 200, True),
+    ("", False), ("-a", False), ("_a", False), ("a/b", False), ("../a", False), ("a.json", False),
+    ("a\n", False), ("a ", False), ("中文", False), ("a" * 201, False),
+))
+def test_original_scheme_id_is_an_anchored_scheme_name(name: str, ok: bool) -> None:
+    if ok:
+        assert DesignSettings(scheme_id="d", original_scheme_id=name).original_scheme_id == name
+    else:
+        with pytest.raises(ValidationError):
+            DesignSettings(scheme_id="d", original_scheme_id=name)
 
 
 @pytest.mark.parametrize(("baseline", "design", "text", "verdict"), (

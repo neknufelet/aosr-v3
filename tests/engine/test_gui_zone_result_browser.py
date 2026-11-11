@@ -2,7 +2,9 @@
 
 一題真瀏覽器走完整條路：打開設計的結果頁先看到逐區表、原牆基準還沒算、而且沒有任何計算被開；按「算原牆基準」，
 正式網頁行程自己開正式計算（真算，不替身）；算完這一節自己換成改善多少，數字等於拿兩份結果檔獨立算的那一份。
-另一題只打入口：整面一區的結果沒有這一節、舊版物理的設計不給開、原方案切線劃過設計的一區照實拒收、原方案不在了也照講。
+算好之後再改檔走過其餘狀態：較舊的紀錄不蓋掉最新的、基準方案對不上、基準或設計在正式讀回被拒收、舊版物理、讀不出、沒算完。
+另一題只打入口：整面一區的結果沒有這一節、舊版物理的設計不給開、原方案切線劃過設計的一區照實拒收、原方案不在了、
+設計設定讀壞了都照講。
 """
 from __future__ import annotations
 
@@ -81,20 +83,51 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
             assert client.post(f"/api/results/{DESIGN_RUN}/zones/baseline", json={}).status_code == 409
             assert len(_runs(tmp_path)) == 1
             assert watched.page_errors == [] and watched.console_errors == []
-            _later_states(tmp_path, client, run)
+            _later_states(tmp_path, client, run, expected.model_dump(mode="json"))
 
 
-def _later_states(folder: Path, client: httpx.Client, run: Path) -> None:
-    """算好之後基準又出事的三格（改檔模擬，不再真算）：舊版物理要重算、讀不出來要重算、上一次沒算完要重算。"""
+def _tampered(document: dict[str, object]) -> str:
+    """格式照樣讀得進來、正式讀回才拒收的一份：逐點表第一點的頻率跟宣告的低頻軸差 0.001 Hz。"""
+    changed = json.loads(json.dumps(document))
+    changed["pairs"][0]["report"]["points"][0]["frequency_hz"] += 0.001
+    return json.dumps(changed)
+
+
+def _later_states(folder: Path, client: httpx.Client, run: Path, expected: object) -> None:
+    """算好之後的幾格（改檔模擬，不再真算）。
+
+    多一筆較舊的同方案紀錄不換掉最新那一筆；基準方案跟這一次推出來的不一樣、基準或設計格式讀得進來卻在正式讀回
+    被拒收，都照講、不出數字；舊版物理、讀不出來、上一次沒算完，都要重算。
+    """
+    zones = f"/api/results/{DESIGN_RUN}/zones"
+    record = json.loads(run.read_text(encoding="utf-8"))
+    older = record | {"run_id": "0" * 32, "status": "failed", "exit_code": 1,
+                      "started_at": float(record["started_at"]) - 60}
+    (folder / "runs" / f"{'0' * 32}.json").write_text(json.dumps(older), encoding="utf-8")
+    kept = client.get(zones).json()
+    assert (kept["state"], kept["baseline_run_id"], kept["improvement"]) == ("done", run.stem, expected)
     result_path = folder / "results" / f"{run.stem}.json"
     stored = json.loads(result_path.read_text(encoding="utf-8"))
+    design_path = folder / "results" / f"{DESIGN_RUN}.json"
+    design_text = design_path.read_text(encoding="utf-8")
+    # 基準位置放一份完整合格、同版物理、但方案不是這一次推出來的那一份的結果（設計自己那一份）。
+    for text, words in ((design_text, "跟這一次推出來的不一樣"), (_tampered(stored), "讀回時被拒收")):
+        result_path.write_text(text, encoding="utf-8")
+        view = client.get(zones).json()
+        assert (view["state"], view["can_start"], view["improvement"]) == ("baseline_rejected", True, None), view
+        assert words in view["state_text"], view["state_text"]
+    result_path.write_text(json.dumps(stored), encoding="utf-8")
+    design_path.write_text(_tampered(json.loads(design_text)), encoding="utf-8")
+    view = client.get(zones).json()
+    assert (view["state"], view["can_start"], view["improvement"]) == ("cannot_compare", False, None), view
+    assert "設計結果讀回時被拒收" in view["state_text"]
+    design_path.write_text(design_text, encoding="utf-8")
     for text, state, words in ((json.dumps(stored | {"physics_identity": "phys-v1:" + "0" * 64}), "baseline_stale", "舊版物理"),
                                ("{}", "baseline_rejected", "讀不出來")):
         result_path.write_text(text, encoding="utf-8")
         view = client.get(f"/api/results/{DESIGN_RUN}/zones").json()
         assert (view["state"], view["can_start"], view["improvement"]) == (state, True, None) and words in view["state_text"]
-    record = json.loads(run.read_text(encoding="utf-8")) | {"status": "failed", "exit_code": 1}
-    run.write_text(json.dumps(record), encoding="utf-8")
+    run.write_text(json.dumps(record | {"status": "failed", "exit_code": 1}), encoding="utf-8")
     failed = client.get(f"/api/results/{DESIGN_RUN}/zones").json()
     assert (failed["state"], failed["can_start"]) == ("failed", True) and "沒算完" in failed["state_text"]
 
@@ -132,6 +165,11 @@ def test_zone_routes_refuse_whole_walls_old_physics_cut_originals_and_missing_or
         (tmp_path / "schemes" / "orig.json").unlink()
         gone = client.get(zones).json()
         assert gone["state"] == "refused" and "讀不到或不在了" in gone["state_text"]
+        saved_path = tmp_path / "designs" / f"{design.scheme.scheme_id}.json"
+        saved_path.write_text(json.dumps(settings.model_dump(mode="json") | {"zones": {"x0": {"a": {"mode": "bad"}}}}))
+        broken = client.get(zones).json()  # 審查第 1 條：讀壞的設定拿不準有沒有指原方案，不准改用拆加貼層
+        assert (broken["state"], broken["can_start"]) == ("refused", False) and "設計設定讀不出來" in broken["state_text"]
+        assert client.post(start, json={}).status_code == 409
         for target, code, words in (("orig", 404, "沒有方案"), (design.scheme.scheme_id, 400, "不能是這一份自己")):
             body = DesignSettings(scheme_id=design.scheme.scheme_id, original_scheme_id=target).model_dump(mode="json")
             response = client.put(f"/api/designs/{design.scheme.scheme_id}", json=body)

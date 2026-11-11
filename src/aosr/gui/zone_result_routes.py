@@ -1,7 +1,11 @@
 """結果頁分區附表的兩個入口（#1092）：查（GET）與開算原牆基準（POST）。
 
 查的時候絕不開算：109 那種房一場要半小時，只有按鈕（POST）才開。開算前先核三件事：設計結果是現在這一版物理
-算的（不然基準跟它比不得）、基準跟設計真的有一區不同、同一份基準沒有正在算或已經算好。
+算的（不然基準跟它比不得）、基準跟設計真的有一區不同、同一份基準沒有正在算或已經算好。開算用的就是查的那一次
+推出來的基準；鎖裡再核一次最新一筆基準計算還是查的時候看到的那一筆，中間有人開了新的一份就不再開。基準方案過不過
+得了檢查交給計算行程自己判，過不了會記成「上一次沒算完」並附上原因。
+
+設計設定檔在、卻讀不出來時照實拒收：拿不準它有沒有指原方案，不能改用拆加貼層的基準。
 
 找基準結果只看網頁資料夾裡每一筆計算的狀態紀錄（小檔）裡方案代號等於基準代號的那幾筆，取最新一筆；算好的還要讀回
 核對：方案逐欄等於這一次推出來的基準、物理身分等於設計那一份，才拿來比。
@@ -23,20 +27,17 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from aosr.config.capabilities import CapabilityTable
-from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.jobs import JobManager
 from aosr.gui.modal_jobs import scheme_snapshot
-from aosr.gui.zone_design import read_design
+from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
     PLACE_NOTE, Baseline, BaselineRefused, Improvement, ZoneRow, derive_baseline, improvement, is_zoned, zone_rows)
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.evaluation import LoadedResult
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.validation import validate_scheme
 
 RUN_ID_LENGTH = 32
 State = Literal["same", "refused", "design_stale", "none", "running", "failed",
@@ -53,8 +54,6 @@ class ZoneResultDeps:
 
     data_dir: Path
     jobs: JobManager
-    capabilities: CapabilityTable
-    directivity: DirectivityDefaults
     physics_identity: str
     server_stale: Callable[[], bool]
     stale_response: Callable[[], JSONResponse]
@@ -87,19 +86,24 @@ class Found:
     rejected: str = ""
 
 
-def _original(deps: ZoneResultDeps, scheme: Scheme) -> tuple[Scheme | None, str | None]:
-    """設計設定指的原方案；沒指回 (None, None)；指了卻讀不到，回原因（畫面當拒收講）。"""
+def _settings(deps: ZoneResultDeps, scheme: Scheme) -> DesignSettings | None:
+    """設計設定；沒有這一份回 None；檔在卻讀不出來就拒收（拿不準有沒有指原方案）。"""
     try:
-        settings = read_design(deps.data_dir, scheme.scheme_id)
-    except (ValueError, OSError):
-        return None, None
+        return read_design(deps.data_dir, scheme.scheme_id)
+    except (ValueError, OSError) as exc:
+        first = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        raise BaselineRefused(f"設計設定讀不出來（{first}），拿不準有沒有指原方案；到設計設定重存一次") from exc
+
+
+def _original(deps: ZoneResultDeps, settings: DesignSettings | None) -> Scheme | None:
+    """設計設定指的原方案；沒指回 None；指了卻讀不到就拒收。"""
     if settings is None or settings.original_scheme_id is None:
-        return None, None
+        return None
     path = deps.data_dir / "schemes" / f"{settings.original_scheme_id}.json"
     try:
-        return Scheme.model_validate_json(path.read_bytes()), None
-    except (ValueError, OSError):
-        return None, f"設計設定指的原方案「{settings.original_scheme_id}」讀不到或不在了"
+        return Scheme.model_validate_json(path.read_bytes())
+    except (ValueError, OSError) as exc:
+        raise BaselineRefused(f"設計設定指的原方案「{settings.original_scheme_id}」讀不到或不在了") from exc
 
 
 def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | None:
@@ -181,21 +185,23 @@ def _compare(deps: ZoneResultDeps, view: ZoneResultView, design_path: Path, base
 
 def build_zone_view(deps: ZoneResultDeps, design_path: Path, design: SchemeResult) -> ZoneResultView:
     """整份附表；任何一步拒收都照講原因，逐區表照樣出（表本身不靠基準算好）。"""
+    return _build(deps, design_path, design)[0]
+
+
+def _build(deps: ZoneResultDeps, design_path: Path, design: SchemeResult) -> tuple[ZoneResultView, Baseline | None]:
+    """附表與它用的那一份基準（推不出來是 None）；開算只用這裡推出來的那一份。"""
     scheme = design.scheme
     if not is_zoned(scheme):
-        return ZoneResultView(zoned=False)
-    original, missing = _original(deps, scheme)
+        return ZoneResultView(zoned=False), None
+    settings: DesignSettings | None = None
     try:
-        settings = read_design(deps.data_dir, scheme.scheme_id)
-    except (ValueError, OSError):
-        settings = None
-    try:
-        if missing is not None:
-            raise BaselineRefused(missing)
+        settings = _settings(deps, scheme)
+        original = _original(deps, settings)
         baseline = derive_baseline(scheme, original)
     except BaselineRefused as exc:
-        return ZoneResultView(zoned=True, rows=zone_rows(derive_baseline(scheme), settings, scheme, baseline_known=False),
-                              notes=(PLACE_NOTE,), state="refused", state_text=f"原牆基準推不出來：{exc}")
+        rows = zone_rows(derive_baseline(scheme), settings, scheme, baseline_known=False)
+        return ZoneResultView(zoned=True, rows=rows, notes=(PLACE_NOTE,), state="refused",
+                              state_text=f"原牆基準推不出來：{exc}"), None
     notes = [PLACE_NOTE, BASELINE_LINE]
     if original is None:
         notes.append(UNWRAP_NOTE)
@@ -207,8 +213,21 @@ def build_zone_view(deps: ZoneResultDeps, design_path: Path, design: SchemeResul
                           baseline_result_url=(f"/results/{found.state['run_id']}"
                                                if found is not None and found.result is not None else None))
     if state != "done" or found is None or found.path is None:
-        return view
-    return _compare(deps, view, design_path, found.path)
+        return view, baseline
+    return _compare(deps, view, design_path, found.path), baseline
+
+
+def lock_refusal(view: ZoneResultView, latest: dict[str, object] | None) -> dict[str, object] | None:
+    """鎖裡最後一關：最新一筆基準計算要還是鎖外查的時候看到的那一筆（沒有就還是沒有），才准開。
+
+    查完到拿到鎖之間有人開了新的一份（算中或已經算好），都不再開；原本那一筆壞了要重算照樣准。
+    """
+    if latest is not None and latest.get("status") == "running":
+        return {"error": "原牆基準已經在算了", "state": "running"}
+    if (None if latest is None else latest.get("run_id")) != view.baseline_run_id:
+        return {"error": "原牆基準剛剛有人開了新的一份，重新整理這一頁就看得到",
+                "state": None if latest is None else latest.get("status")}
+    return None
 
 
 class ZoneResultHandlers:
@@ -223,17 +242,17 @@ class ZoneResultHandlers:
             raise FileNotFoundError(f"沒有這一份結果：{run_id}")
         return path, scheme_snapshot(path)
 
-    def _view(self, run_id: str) -> ZoneResultView:
+    def _view(self, run_id: str) -> tuple[ZoneResultView, Baseline | None]:
         path, scheme = self._design(run_id)
         if not is_zoned(scheme):
-            return ZoneResultView(zoned=False)
-        return build_zone_view(self.deps, path, SchemeResult.model_validate_json(path.read_bytes()))
+            return ZoneResultView(zoned=False), None
+        return _build(self.deps, path, SchemeResult.model_validate_json(path.read_bytes()))
 
     async def item(self, request: Request) -> Response:
         if self.deps.server_stale():
             return self.deps.stale_response()
         try:
-            view = await run_in_threadpool(self._view, request.path_params["run_id"])
+            view, _ = await run_in_threadpool(self._view, request.path_params["run_id"])
             return JSONResponse(view.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
@@ -242,27 +261,16 @@ class ZoneResultHandlers:
 
     def _start(self, run_id: str) -> tuple[int, dict[str, object]]:
         """重的檢查（讀回設計結果）在鎖外做；鎖裡只重查最新一筆基準計算再開：兩個人同時按，只開一份。"""
-        view = self._view(run_id)
-        if not view.can_start:
+        view, baseline = self._view(run_id)
+        if not view.can_start or baseline is None:
             return 409, {"error": view.state_text or "這一份不用算原牆基準", "state": view.state}
-        _, scheme = self._design(run_id)
-        original, missing = _original(self.deps, scheme)
-        if missing is not None:
-            return 409, {"error": missing}
-        baseline = derive_baseline(scheme, original)
-        problems = validate_scheme(baseline.scheme, capabilities=self.deps.capabilities,
-                                   directivity=self.deps.directivity)
-        if problems:
-            return 422, {"error": "原牆基準方案過不了檢查：" + "；".join(item.message for item in problems)}
         with self.deps.jobs._lock:
-            latest = _latest_run(self.deps, baseline.scheme.scheme_id)
-            if latest is not None and latest.get("status") == "running":
-                return 409, {"error": "原牆基準已經在算了", "state": "running"}
-            if latest is not None and latest.get("status") == "done" and view.state in ("none", "failed"):
-                return 409, {"error": "原牆基準剛剛算好了，重新整理這一頁就看得到", "state": "done"}
+            refusal = lock_refusal(view, _latest_run(self.deps, baseline.scheme.scheme_id))
+            if refusal is not None:
+                return 409, refusal
             return 200, self.deps.jobs.start_snapshot(
                 baseline.scheme.model_dump_json(), baseline.scheme.scheme_id,
-                job_fields={"display_label": f"原牆基準（{scheme.scheme_id}）", "zone_baseline_for": run_id})
+                job_fields={"display_label": f"原牆基準（{baseline.scheme.scheme_id}）", "zone_baseline_for": run_id})
 
     async def start(self, request: Request) -> Response:
         if self.deps.server_stale():
