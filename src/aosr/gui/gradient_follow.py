@@ -8,7 +8,8 @@
 - 接結果頁：終點做完後，把匯出的方案（``scheme-endpoint.json``）照網頁存方案的同一套檢查存成新方案
   ``<原方案>-search-<這一跑代號前 8 碼>``，開跑那一刻的設計設定跟著帶過去（區代號不變；有指原方案就照指），再開一般計算；
   結果頁（#1092）的逐區表與「改善多少」照它自己的規則算，這裡不算改善；
-- 查開過沒有：同一跑只開一次，記在這一跑資料夾的 ``adopted.json``，再按就回同一筆。
+- 查開過沒有：同一跑只開一次，記在這一跑資料夾的 ``adopted.json``，再按就回同一筆；開了計算、紀錄還沒落盤就中斷的，
+  重按時找這份新方案已經開過的那一筆接回來（網頁伺服器是單一行程，``JobManager`` 也這樣假設，不防兩個行程同時按）。
 
 結果頁沒指原方案時是拆「貼在原牆上」的加貼層找回原牆（``zone_result.derive_baseline``）；選了「貼在硬底上」的那一跑
 交給搜尋的區拆不回去、會被當成沒動，細節裡照實警告（``baseline_warning``），不替使用者猜原牆。
@@ -149,6 +150,23 @@ class GradientFollow:
                 "baseline_warning": self._baseline_warning(job_id, view),
                 "adopted": self._adoption_view(self._adoption(job_id))}
 
+    def _started_run(self, name: str) -> str | None:
+        """這份新方案已經開過的一般計算（最晚開的那一筆）；沒有回 None。
+
+        方案名字帶這一跑代號前 8 碼，有它的一般計算只會是這裡開的（或使用者之後從首頁再開的同一份方案）：
+        開了計算、``adopted.json`` 還沒落盤就中斷，重按時接回這一筆，不再開第二筆。"""
+        latest: tuple[float, str] | None = None
+        for state_path in (self.jobs.data_dir / "runs").glob("*.json"):
+            try:
+                state = self.jobs.read_state(state_path.stem)
+                started = float(str(state.get("started_at")))
+            except (OSError, ValueError, TypeError):
+                continue
+            run_id = state.get("run_id")
+            if state.get("scheme_id") == name and isinstance(run_id, str) and (latest is None or started > latest[0]):
+                latest = (started, run_id)
+        return None if latest is None else latest[1]
+
     def adopt(self, job_id: str) -> dict[str, object]:
         """終點做完的這一跑：匯出的方案存成新方案、帶設計設定、開一般計算；開過就回同一筆。"""
         with self.gradient.scheme_lock:
@@ -179,8 +197,10 @@ class GradientFollow:
             if snapshot.is_file():
                 design = DesignSettings.model_validate_json(snapshot.read_text(encoding="utf-8"))
                 write_design(self.gradient.data_dir, design.model_copy(update={"scheme_id": name}), scheme)
-            run = self.jobs.start(path)
-            adoption = Adoption(job_id=job_id, scheme_id=name, run_id=str(run["run_id"]), created_at=time.time())
+            run_id = self._started_run(name)
+            if run_id is None:
+                run_id = str(self.jobs.start(path)["run_id"])
+            adoption = Adoption(job_id=job_id, scheme_id=name, run_id=run_id, created_at=time.time())
             _write_atomic(self._job_dir(job_id) / ADOPTED_FILE, adoption.model_dump_json())
             return self.detail(job_id)
 

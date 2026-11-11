@@ -18,6 +18,10 @@ let schemeId = params.get("scheme");
 let selectedJob = params.get("job");
 let defaults = null;
 let lastPreview = null;
+// 最後一次預覽送出的選項（JSON 字串）：開跑只送這一份；表單改過就要先重新預覽，畫面上的預覽才是真的會跑的。
+let previewedRequest = null;
+// 伺服器最後一次說的整機忙碌（一跑代號或服務名）；建替身那一顆按鈕的停用要同時看它，不被建模狀態蓋掉。
+let machineBusy = null;
 let watchedBuild = null;
 let surrogateDefaults = null;
 let knownJobs = [];
@@ -167,7 +171,7 @@ async function loadPlan() {
   byId("frequency-batch").value = "";
   mountWarning();
   drawDepthTable(reply.body.plan);
-  showPreview(reply.body);
+  showPreview(reply.body, request());
 }
 
 // 結果頁沒指原方案時，是拆「貼在原牆上」的加貼層找回原牆；貼在硬底上的區拆不回去，會被當成沒動、改善算不進來。
@@ -196,14 +200,30 @@ function drawDepthTable(plan) {
 
 async function preview() {
   say("form-message", "正在預覽…");
-  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, request(), "form-message");
+  const body = request();
+  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, body, "form-message");
   if (!reply.ok) { say("form-message", errorText(reply), true); return; }
   say("form-message", "預覽好了，看下面。");
-  showPreview(reply.body);
+  showPreview(reply.body, body);
 }
 
-function showPreview(data) {
+// 表單改過：舊預覽不再是會跑的那一份，先停用開跑、請使用者重新預覽。
+function markStale() {
+  if (previewedRequest === null) return;
+  if (JSON.stringify(request()) === previewedRequest) {
+    byId("start").disabled = !lastPreview.surrogate.found || Boolean(lastPreview.busy);
+    say("start-message", "");
+    return;
+  }
+  byId("start").disabled = true;
+  say("start-message", "選項改過了：先按「預覽」看過這一份，才能開跑。", true);
+}
+
+function showPreview(data, sent) {
   lastPreview = data;
+  previewedRequest = JSON.stringify(sent);
+  machineBusy = data.busy || null;
+  say("start-message", "");
   const plan = data.plan;
   const searched = plan.modes.filter((mode) => mode === "search").length;
   byId("plan-summary").textContent = `共 ${plan.surfaces.length} 區，交給搜尋 ${searched} 區；家族 ${plan.family}；` +
@@ -248,7 +268,8 @@ async function loadSurrogatePlan(replace) {
   byId("surrogate-history").textContent = (last ?
     `這台機器上一次建替身花了 ${duration(last.total_seconds)}（${last.patches} 區、完整解 ${last.full_solves} 次）。` :
     "這台機器還沒建過替身，開建前推不出要多久。") + data.estimate_note;
-  byId("build-surrogate").disabled = Boolean(data.busy);
+  machineBusy = data.busy || null;
+  byId("build-surrogate").disabled = Boolean(machineBusy);
   if (data.busy) say("surrogate-message", busyText({busy: data.busy}), true);
   if (data.latest) { watchedBuild = data.latest.build_id; showBuild(data.latest); }
 }
@@ -283,7 +304,7 @@ function showBuild(build) {
   byId("build-error").textContent = build.error || "";
   byId("build-log").textContent = (build.log_tail || []).join("\n");
   byId("stop-build").hidden = !build.actions.stop;
-  byId("build-surrogate").disabled = RUNNING_BUILD.has(build.state);
+  byId("build-surrogate").disabled = RUNNING_BUILD.has(build.state) || Boolean(machineBusy);
   if (build.state === "installed" && lastPreview && !lastPreview.surrogate.found) preview();
 }
 
@@ -297,8 +318,9 @@ async function stopBuild() {
 // ---- 5. 開跑 ----
 
 async function start() {
+  if (previewedRequest === null || JSON.stringify(request()) !== previewedRequest) { markStale(); return; }
   say("start-message", "正在開跑…");
-  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/start`, request(), "start-message");
+  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/start`, JSON.parse(previewedRequest), "start-message");
   if (!reply.ok) {
     say("start-message", errorText(reply), true);
     if (reply.body.needs === "surrogate") loadSurrogatePlan(false);
@@ -349,7 +371,10 @@ async function refreshJob() {
 
 function progressLines(job, detail) {
   const lines = [];
-  if (detail && detail.descent_steps !== null && detail.descent_steps !== undefined) {
+  if (detail && detail.descent_steps === 0 && job.state === "searching") {
+    // 搜尋本體把往下走那一段整段算完才一次寫進帳本，算的途中帳本裡一列都沒有。
+    lines.push(`往下走（上限 ${job.max_steps} 步）：這一段整段算完才一次記帳，正在算；算完會直接跳到實際走了幾步`);
+  } else if (detail && detail.descent_steps !== null && detail.descent_steps !== undefined) {
     lines.push(`往下走：${detail.descent_steps}／${job.max_steps} 步`);
   } else {
     lines.push(`往下走步數上限：${job.max_steps} 步（帳本還沒開始寫）`);
@@ -474,6 +499,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   byId("job-adopt").addEventListener("click", adopt);
   byId("job-rebuild").addEventListener("click", rebuild);
   byId("mount").addEventListener("change", mountWarning);
+  byId("form-block").addEventListener("input", markStale);
+  byId("form-block").addEventListener("change", markStale);
   await refreshBuilds();
   await refreshJobs();
   await loadSchemes();

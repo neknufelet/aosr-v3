@@ -20,6 +20,7 @@ from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import LaunchFailed
 from aosr.config.paths import config_path
+import aosr.gui.gradient_follow as follow_module
 from aosr.gui.gradient_follow import ADOPTED_FILE, RIGID_BASELINE_WARNING, GradientFollow, adopted_name, descent_steps
 from aosr.gui.jobs import JobManager
 from aosr.gui.gradient_plan import GradientRequest
@@ -253,6 +254,33 @@ def _follow(data_dir: Path, launcher: FakeLauncher) -> GradientFollow:
     jobs = _jobs(data_dir, launcher)
     manager = JobManager(data_dir, (sys.executable, "-c", "pass"), "a" * 40, config_path("capabilities.toml"))
     return GradientFollow(jobs, manager, lambda document: [])
+
+
+def test_adopt_interrupted_before_its_record_reuses_the_started_run(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓「開了一般計算、``adopted.json`` 還沒落盤就中斷，重按又開第二筆」：一般計算是真的 ``JobManager``
+    （執行程式什麼都不做），第一次寫採用紀錄時丟錯，重按要接回同一筆、計算狀態檔只有一份。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    job_id = _done_job(data_dir, launcher, _exported())
+    follow = _follow(data_dir, launcher)
+    original = follow_module._write_atomic
+    crashed: list[Path] = []
+
+    def crash_once(path: Path, text: str) -> None:
+        if path.name == ADOPTED_FILE and not crashed:
+            crashed.append(path)
+            raise OSError("模擬採用紀錄落盤前中斷")
+        original(path, text)
+
+    monkeypatch.setattr(follow_module, "_write_atomic", crash_once)
+    with pytest.raises(OSError, match="落盤前中斷"):
+        follow.adopt(job_id)
+    started = [path.stem for path in (data_dir / "runs").glob("*.json")]
+    assert len(started) == 1 and not (data_dir / "gradient" / job_id / ADOPTED_FILE).exists()
+    detail = follow.adopt(job_id)
+    assert [path.stem for path in (data_dir / "runs").glob("*.json")] == started
+    assert cast(Record, detail["adopted"])["run_id"] == started[0]
 
 
 def test_job_ids_are_checked_before_any_path_is_built(tmp_path: Path) -> None:

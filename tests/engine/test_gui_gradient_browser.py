@@ -157,6 +157,12 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     expect(page.locator('#plan-table tr[data-surface="ceiling@r0_c1"]')).to_contain_text("保留原牆")
     expect(page.locator('#plan-table tr[data-surface="x0@r1_c1"]')).to_contain_text("沒有限制（家族都試、也試不貼）")
     _shot(page, "1-6b-2-preview")
+    # 預覽之後改了選項：畫面上的預覽不再是會跑的那一份，開始要停用；改回來又能按（抓「開跑重讀表單、跑的跟預覽不同」）。
+    page.locator("#max-steps").fill("50")
+    expect(page.locator("#start")).to_be_disabled()
+    expect(page.locator("#start-message")).to_contain_text("選項改過了")
+    page.locator("#max-steps").fill("45")
+    expect(page.locator("#start")).to_be_enabled()
     page.locator("#start").click()
     expect(page.locator("#job-state")).to_contain_text("開跑前核對中")
     unit, argv, _, _ = launcher.launched[-1]
@@ -174,14 +180,18 @@ def _searching(page: Page, data_dir: Path, job_id: str) -> Path:
     folder.mkdir(parents=True)
     (folder / folder_files.PROJECT_FILE).write_text("{}", encoding="utf-8")
     header = json.dumps({"ledger_version": "v6"})
-    rows = [json.dumps({"step": index, "phase": "descent"}) for index in range(11)]
-    (folder / folder_files.LEDGER_FILE).write_text("\n".join([header, *rows]) + "\n", encoding="utf-8")
+    (folder / folder_files.LEDGER_FILE).write_text(header + "\n", encoding="utf-8")
     (folder / folder_files.STATUS_FILE).write_text(json.dumps({
         "state": "running", "started_at": "2026-11-11T00:00:00+00:00", "updated_at": "2026-11-11T00:01:00+00:00",
         "evaluations": 12, "rounds_done": 0, "last_value": 3.25, "stop_reason": None, "pid": 4242}), encoding="utf-8")
     (data_dir / "gradient" / job_id / "steps" / "0.log").write_text(NOTE + "\n", encoding="utf-8")
     _tick(page)
     expect(page.locator("#job-state")).to_have_text("搜尋中")
+    # 往下走那一段整段算完才一次寫帳：帳本只有標頭時不印「0／45」裝成沒在動。
+    expect(page.locator("#job-progress")).to_contain_text("整段算完才一次記帳，正在算")
+    rows = [json.dumps({"step": index, "phase": "descent"}) for index in range(11)]
+    (folder / folder_files.LEDGER_FILE).write_text("\n".join([header, *rows]) + "\n", encoding="utf-8")
+    _tick(page)
     expect(page.locator("#job-progress")).to_contain_text("往下走：10／45 步")
     expect(page.locator("#job-notes")).to_contain_text(NOTE)
     _shot(page, "1-6b-3-searching")
