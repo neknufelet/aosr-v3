@@ -215,3 +215,34 @@ def test_opening_a_scheme_swaps_the_form_only_after_its_zone_design_arrives(tmp_
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#zone-mode-x0-whole_wall")).to_have_value("search")
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_search_page(tmp_path: Path,
+                                                                                         browser: Browser) -> None:
+    """「拿去搜尋」：有一區交給搜尋才出現、改回去就收掉；按下去先照畫面存方案與做法，兩樣都存成才跳到
+    /gradient?scheme=<方案>；做法存不成就留在這頁照講（搜尋頁讀的是存好的那一份，不准帶著舊做法過去）。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#zone-to-search")).to_have_count(0)
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        expect(page.locator("#zone-to-search")).to_contain_text("1 區交給搜尋")
+        page.locator("#zone-mode-x0-whole_wall").select_option("fixed")  # 改回固定不換材料、不打伺服器
+        expect(page.locator("#zone-to-search")).to_have_count(0)
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+
+        page.route("**/api/designs/room109", lambda route: route.abort() if route.request.method == "PUT"
+                   else route.continue_())
+        page.locator("#zone-to-search").click()
+        expect(page.locator("#zone-note")).to_contain_text("做法沒存成")
+        assert page.url == f"{base}/"
+        assert not (tmp_path / "designs" / "room109.json").exists()
+        page.unroute("**/api/designs/room109")
+
+        page.locator("#zone-to-search").click()
+        page.wait_for_url(f"{base}/gradient?scheme=room109")
+        stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
+        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search"}}
+        assert watched.page_errors == []

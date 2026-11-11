@@ -8,6 +8,8 @@ let zoneDesignStored = false;
 let zoneDesignNote = "";
 // 伺服器上那一份設計設定讀不到（壞檔或連不上）：這一頁不准存回去，免得一份空的蓋掉原本每一區的做法。
 let zoneDesignBroken = false;
+// 最近一次存方案時每一區的做法有沒有存成（沒設過、不必寫也算存成）；「拿去搜尋」靠它決定跳不跳。
+let zoneDesignSaved = false;
 let zoneLibrary = null;
 let zoneLibraryProblem = "";
 let zoneNoteText = "";
@@ -59,9 +61,10 @@ function resetZoneDesign() { zoneDesign = null; zoneDesignStored = false; zoneDe
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
 async function saveZoneDesign(name) {
+  zoneDesignSaved = false;
   if (zoneDesignBroken) throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）");
   const touched = zoneDesign && (Object.keys(zoneDesign.zones || {}).length || zoneDesign.original_scheme_id != null);
-  if (!touched && !zoneDesignStored) return;
+  if (!touched && !zoneDesignStored) { zoneDesignSaved = true; return; }
   const design = structuredClone(designForEdit());
   design.scheme_id = name;
   for (const wall of Object.keys(design.zones)) {
@@ -71,7 +74,33 @@ async function saveZoneDesign(name) {
   }
   if (design.original_scheme_id === name) design.original_scheme_id = null;
   await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
-  zoneDesign = design; zoneDesignStored = true; zoneDesignNote = "";
+  zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; zoneDesignSaved = true;
+}
+// 各面交給搜尋的區有幾塊（只算現在切法裡還在的區）。
+function searchZoneCount() {
+  let count = 0;
+  for (const [wall, zones] of Object.entries(zoneDesign?.zones || {})) {
+    const keys = new Set(zoneList(wall).map(zoneKey));
+    for (const [key, setting] of Object.entries(zones)) if (keys.has(key) && setting.mode === "search") count += 1;
+  }
+  return count;
+}
+// 「拿去搜尋」：搜尋頁讀的是存好的方案與做法，先照畫面存一份；兩樣都存成才跳過去，沒存成留在這頁照講。
+async function sendToSearch() {
+  if (!await save()) return;
+  if (!zoneDesignSaved) { zoneNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice"); return; }
+  window.location.href = `/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`;
+}
+function searchButtonRow() {
+  const count = searchZoneCount();
+  if (!count) return null;
+  const row = document.createElement("p"); row.className = "fields";
+  const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
+  button.textContent = `拿去搜尋（${count} 區交給搜尋）`;
+  button.onclick = () => action(sendToSearch);
+  const note = document.createElement("span"); note.className = "note"; note.textContent = "會先照畫面儲存，再打開第三階段搜尋頁";
+  row.append(button, " ", note);
+  return row;
 }
 // 切完一面：自動補的代號每次重編，做法跟著 /api/zone-cut 回的 inherited（每一塊沿用了切之前哪一區的材料）走。
 function remapZoneDesign(wall, inherited) {
@@ -292,6 +321,8 @@ function renderZoneTable(wall) {
     row.append(name, size, mode, material); table.append(row);
   }
   area.append(table);
+  const toSearch = searchButtonRow();
+  if (toSearch) area.append(toSearch);
   const note = document.createElement("p"); note.id = "zone-note"; note.setAttribute("aria-live", "polite");
   note.textContent = zoneNoteText; note.className = zoneNoteKind; area.append(note);
 }
