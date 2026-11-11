@@ -3,6 +3,7 @@
 一次建模＝ ``data_dir/surrogates/builds/<建模代號>/`` 一個資料夾：
 - ``build.json``：方案代號、格子代號與路徑、請求、那一步的服務名與命令列；
 - ``scheme.json``：開建那一刻方案的快照（命令列指向它，不指向網頁之後還會再存的那一份）；
+- ``materials.json``：使用者材料庫有東西時，開建那一刻的複本（命令列 ``--materials`` 指向它；跟開跑同一個帶法，#1082 段 2-3c）；
 - ``work/``：建模命令列（``aosr.gradient.surrogate_build``）的資料夾：``progress.json``、``result.json``、先建在這裡的 ``stage/``；
 - ``steps/<第幾步>.log``、``steps/<第幾步>.exit.json``：輸出與離開碼（``gradient_exec`` 寫；建模只有第 0 步）。
 
@@ -39,9 +40,10 @@ from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_jobs import (
     REPO_ROOT, UNIT_PREFIX, ActionRefused, GradientJobs, JobBusy, LaunchFailed, tail_lines, write_text_atomic,
 )
-from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search
-from aosr.gui.material_curves import range_check
+from aosr.gui.gradient_plan import GradientRequest, PlanRefused
+from aosr.gui.material_editor import USER_LIBRARY_NAME
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, slot_key
+from aosr.materials.library import LibraryEntry, dump_user_library
 from aosr.runtime import child_process_env
 
 BUILDS_DIR: Final = "builds"
@@ -222,14 +224,15 @@ class SurrogateBuilds:
 
     # ---- 動作 ----
 
-    def _checked(self, scheme_id: str) -> tuple[str, Path, str]:
-        """開建前網頁講得清楚的拒收（照搜尋開跑的同一套）：方案要有低頻軸、設計設定要轉得成搜尋參數；
-        原牆能不能貼要算材料，留給命令列第一步判（網頁行程不載入物理）。"""
+    def _checked(self, scheme_id: str) -> tuple[str, Path, str, tuple[LibraryEntry, ...]]:
+        """開建前網頁講得清楚的拒收（照搜尋開跑的同一套 ``GradientJobs.plan``：設定檔家族＋材料庫）：方案要有低頻軸、
+        設計設定要轉得成搜尋參數、材料庫要讀得進來；原牆能不能貼、使用者家族物理算不算得出來要算材料，
+        留給命令列第一步判（網頁行程不載入物理）。回方案原文、格子、格子代號與使用者材料。"""
         text, scheme, design = self.jobs.inputs(scheme_id)
         if scheme.scene.low_frequency_axis is None:
             raise PlanRefused("方案場景沒有低頻軸（low_frequency_axis），搜尋開跑會拒收，不建替身")
-        plan_search(scheme, design, GradientRequest(), self.jobs.search_settings(), range_check=range_check)
-        return text, slot_dir(self.data_dir, scheme), slot_key(scheme)
+        _, _, entries = self.jobs.plan(scheme, design, GradientRequest())
+        return text, slot_dir(self.data_dir, scheme), slot_key(scheme), entries
 
     def _latest(self, key: str) -> dict[str, object] | None:
         build = next((item for item in self._builds() if item.slot_key == key), None)
@@ -237,7 +240,7 @@ class SurrogateBuilds:
 
     def preview(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
         """不開建：格子在哪、已經有沒有、這份切法最近一次建模、預設值、前幾次花了多久、現在忙不忙。"""
-        _, slot, key = self._checked(scheme_id)
+        _, slot, key, _ = self._checked(scheme_id)
         sampling = load_surrogate_training_settings(config_path("surrogate_training.toml"))
         reduced = load_reduced_model_settings(config_path("fem_reduced.toml"))
         with self.jobs.lock:
@@ -253,7 +256,7 @@ class SurrogateBuilds:
                                   "開建後照這一跑量到的速度推")}
 
     def start(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
-        text, slot, key = self._checked(scheme_id)
+        text, slot, key, entries = self._checked(scheme_id)
         if slot.exists() and not request.replace:
             found = not missing_parts(slot / SURROGATE_FILE)
             raise ActionRefused("這份切法已經有替身了" + ("" if found else "（但缺件）") +
@@ -269,6 +272,12 @@ class SurrogateBuilds:
             write_text_atomic(snapshot, text)
             arguments = ["--scheme", str(snapshot), "--work", str(directory / "work"), "--slot", str(slot),
                          "--capabilities", str(self.jobs.capabilities)]
+            if self.jobs.settings_path is not None:
+                arguments.extend(("--settings", str(self.jobs.settings_path)))
+            if entries:
+                library = directory / USER_LIBRARY_NAME
+                write_text_atomic(library, dump_user_library(entries))
+                arguments.extend(("--materials", str(library)))
             if request.replace:
                 arguments.extend(("--replace", str(self.data_dir / SLOTS_DIR / RETIRED_DIR / f"{key}-{build_id}")))
             if request.max_full_solves is not None:

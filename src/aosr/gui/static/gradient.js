@@ -261,7 +261,9 @@ function showPreview(data, sent) {
   byId("plan-table").replaceChildren(el("table", {}, el("thead", {}, head), body));
   byId("plan-arguments").textContent = data.arguments.join(" ");
   const surrogate = data.surrogate;
+  // 三件都在、但這一場的材料有替身沒訓練過的（#1082 段 2-3c）：伺服器把原因放在 message，照講、要重建。
   byId("surrogate-state").textContent = surrogate.found ? "這份切法已經有替身，可以直接開搜尋。" :
+    surrogate.missing.length === 0 ? `${surrogate.message}。` :
     `這份切法還沒有替身，要先建（缺：${surrogate.missing.join("、")}）。`;
   byId("surrogate-slot").textContent = `替身放在：${surrogate.slot}`;
   byId("surrogate-state").className = surrogate.found ? "" : "notice";

@@ -4,6 +4,8 @@
 雙精度、物理檢查在開跑行程裡算）→ 工作行程重建目標與換樣板 → 寫結果 → 報告 → 終點（完整模型、核樣板身分、匯出）。
 環境照網頁開服務那一條（``child_process_env(threads=1)``，不替它開雙精度），抓「開跑行程沒開雙精度、把精度問題講成材料問題」。
 開跑之後改網頁那份材料庫，接續的讀者照讀資料夾裡的快照，終點照樣做得完。
+#1082 段 2-3c：替身（考卷合成的那一份）旁邊沒記訓練過這個使用者家族時，真的命令列開跑要拒收、講要重建、不建資料夾；
+記了（照產品 ``coverage_for`` 生成）才開得了跑。
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from typing import cast
 import pytest
 from pydantic import TypeAdapter
 
+from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import run
 from aosr.gradient.endpoint_run import read_result
@@ -22,6 +25,7 @@ from aosr.materials import library
 from aosr.materials import search_library as materials
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
+from tests.engine._surrogate_coverage import trained_on
 from tests.engine._six_search_cli_case import model as model, operators as operators
 from tests.engine.test_material_gradient_cli import PRESETS, WAIT_S, Record, _command, _start_args
 from tests.engine.test_material_gradient_endpoint_cli import _inputs, _surrogate
@@ -62,13 +66,25 @@ def searched(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFa
     presets = ",".join("none" if preset is None else USER if index in (0, 2) else preset
                        for index, preset in enumerate(PRESETS))
     root = directory / "root"
-    output: Record = {"start": _run(directory, [*_start_args(directory, root, presets=presets), "--materials", str(user)])}
+    output: Record = {"untrained": _run(directory, [*_start_args(directory, root, presets=presets), "--materials", str(user)])}
+    output["untrained_folders"] = sorted(path.name for path in root.iterdir()) if root.exists() else []
+    trained_on(directory / "good" / "rom.npz", materials.with_user_materials(
+        load_material_gradient_settings(directory / "settings.toml"), run.presets_table(), (_entry(),)))
+    output["start"] = _run(directory, [*_start_args(directory, root, presets=presets), "--materials", str(user)])
     folders = [path for path in root.iterdir() if not path.name.startswith(".")] if root.exists() else []
     if len(folders) == 1:
         user.write_text(library.dump_user_library((_entry(30000.0),)), encoding="utf-8")
         output["report"] = _run(directory, _command("report", "--folder", str(folders[0])))
         output["endpoint"] = _run(directory, _command("endpoint", str(folders[0])))
     return (folders[0] if len(folders) == 1 else directory), output
+
+
+def test_start_refuses_a_surrogate_not_trained_on_the_user_family(searched: tuple[Path, Record]) -> None:
+    _, output = searched
+    untrained = cast(Record, output["untrained"])
+    assert untrained["code"] == 1 and output["untrained_folders"] == []
+    assert "SurrogateNotTrainedOn：替身沒用這些材料訓練過，要重建" in str(untrained["stderr"])
+    assert "家族 rock_wool_60k 沒訓練過" in str(untrained["stderr"])
 
 
 def test_start_runs_the_user_family_search_and_snapshots_it(searched: tuple[Path, Record]) -> None:

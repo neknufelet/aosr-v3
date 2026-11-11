@@ -3,7 +3,8 @@
 - ``start --scheme <方案檔> --surrogate <替身 npz> --presets <六個 id，逗號分隔，不貼的面寫 none> --purpose <用途>
   --root <資料夾根> [--settings <material_gradient.toml>] [--capabilities <能力表>] [--engine-commit <提交>]``：
   先核輸入（preset 在家族裡、用途認得、方案匯出完整模型拿網格雜湊、物理身分與喇叭座位座標、替身過准用閘門而且
-  對得上這幾格、替身座位與喇叭的名字對得上方案），都過才建 ``<root>/<32 位十六進位>/``（名字由輸入算，同一組輸入同一個資料夾），
+  對得上這幾格、替身座位與喇叭的名字對得上方案、這一場的家族都在替身訓練過的範圍裡——#1082 段 2-3c，
+  ``surrogate_coverage.check_covers``；只在開跑核，接續、報告、終點不重核），都過才建 ``<root>/<32 位十六進位>/``（名字由輸入算，同一組輸入同一個資料夾），
   寫 ``project.json``，在雙精度子行程把整條鏈跑完。拒收不建資料夾。
 - ``resume <資料夾>``：拿鎖、重算現在的物理身分跟 ``project.json`` 比（不同就拒收），再逐格核輸入（方案檔雜湊、
   方案座標、替身過閘門、manifest 與收據摘要、設定指紋、梯度目標設定指紋——#561 壬一加大峰代理之前開始的資料夾沒有這一格，
@@ -266,6 +267,8 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.gradient import run
     from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths
+    from aosr.gradient.surrogate_coverage import check_covers
+    from aosr.gradient.surrogate_files import TRAINING_FILE
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
@@ -297,6 +300,7 @@ def _start(args: argparse.Namespace) -> int:
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     _check_start_materials(materials, model, scheme)
+    check_covers(surrogate.parent / TRAINING_FILE, materials)
     checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers)
     del full_operators
     spot = None
@@ -412,10 +416,7 @@ def _start_materials(args: argparse.Namespace, settings_path: Path,
     if args.materials is None:
         materials = SearchMaterials(base, presets_table(), ())
     else:
-        path = args.materials.resolve()
-        if not path.is_file():
-            raise MaterialsRefused(f"--materials 指的使用者材料庫 {path} 不存在，搜尋不開（沒有使用者材料就不帶這個旗標）")
-        entries = read_user_entries(path)
+        entries = user_entries(args.materials)
         refuse_fixed_as_family(args.presets, entries)
         materials = with_user_materials(base, presets_table(), entries)
     settings = materials.settings if args.max_steps is None else with_max_steps(materials.settings, args.max_steps)
@@ -427,6 +428,14 @@ def _start_materials(args: argparse.Namespace, settings_path: Path,
         return materials, settings, None, None
     content = snapshot_bytes(materials.entries, user_fixed)
     return materials, settings, content, hashlib.sha256(content).hexdigest()
+
+
+def user_entries(materials: Path) -> tuple[LibraryEntry, ...]:
+    """``--materials`` 指的使用者材料庫（開跑與建替身共用）：檔案不在、讀不進來都照講原因拒收，不當成空的。"""
+    path = materials.resolve()
+    if not path.is_file():
+        raise MaterialsRefused(f"--materials 指的使用者材料庫 {path} 不存在，搜尋不開（沒有使用者材料就不帶這個旗標）")
+    return read_user_entries(path)
 
 
 def _surrogate_identity(surrogate: Path, current: str) -> str:

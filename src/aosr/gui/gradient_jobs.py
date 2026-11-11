@@ -45,6 +45,8 @@ from aosr.config.material_gradient import (
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
+from aosr.gradient.surrogate_coverage import NOT_TRAINED_TEXT, SurrogateNotTrainedOn, check_covers
+from aosr.gradient.surrogate_files import TRAINING_FILE
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, plan_search, start_arguments
@@ -90,6 +92,8 @@ STATE_TEXTS: Final[dict[str, str]] = {
     "endpoint_failed": "終點失敗，可以重跑終點",
     "done": "做完了：終點算好、方案已匯出",
 }
+# 替身核不過的一種（#1082 段 2-3c）：這一場的家族有替身建模時沒訓練過的；狀態照舊是 surrogate_refused（畫面有重建的路），字換這一句。
+NOT_TRAINED_STATE_TEXT: Final = f"{NOT_TRAINED_TEXT}（搜尋要用的材料有替身建模時沒訓練過的；重建時會一起訓練）"
 ENDPOINT_BASELINE_TEXT: Final = ("終點檔裡的基準是方案存檔那一份材料（固定的區已經算貼上），不是「同一套切法、每區都不貼」；"
                                  "改善多少以結果頁算的為準")
 
@@ -236,6 +240,15 @@ def tail_lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8", errors="replace").splitlines()[-LOG_TAIL_LINES:]
 
 
+def _not_trained(surrogate: Path, materials: SearchMaterials) -> str | None:
+    """這一場的家族超出替身訓練過的就回拒收原因（跟命令列開跑同一支 ``check_covers``；網頁先講，不等背景開跑才失敗）。"""
+    try:
+        check_covers(surrogate.parent / TRAINING_FILE, materials)
+    except SurrogateNotTrainedOn as error:
+        return str(error)
+    return None
+
+
 def _refuse_measured_tables(plan: SearchPlan, entries: tuple[LibraryEntry, ...]) -> None:
     """准用清單列了使用者的實測阻抗表就點名拒收：第三階段六類評分還沒接上裸實測表（命令列開跑前用評分工廠同一條判斷再擋一次），
     在這裡先講清楚是哪一筆、為什麼，不讓它落成「材料庫裡沒有」或背景開跑才失敗。"""
@@ -281,8 +294,9 @@ class GradientJobs:
         except MaterialsRefused as error:
             raise PlanRefused(str(error)) from error
 
-    def _plan(self, scheme: Scheme, design: DesignSettings | None, request: GradientRequest) -> tuple[SearchPlan, SearchMaterials,
-                                                                                                         tuple[LibraryEntry, ...]]:
+    def plan(self, scheme: Scheme, design: DesignSettings | None, request: GradientRequest) -> tuple[SearchPlan, SearchMaterials,
+                                                                                                        tuple[LibraryEntry, ...]]:
+        """設計設定轉成搜尋參數，跟這一場的材料（設定檔家族＋材料庫）與使用者材料本身；建替身（``surrogate_builds``）走同一支。"""
         materials, entries = self._materials()
         try:
             refuse_fixed_as_family((request.family,), entries)
@@ -383,11 +397,18 @@ class GradientJobs:
             return "endpoint_stopped" if endpoint else "stopped"
         if endpoint:
             return "endpoint_failed"
-        refused = f"失敗：{ReducedModelNotValidated.__name__}："  # 命令列印「梯度搜尋開始失敗：<例外名>：<原因>」
-        log = self._log_path(job.job_id, len(job.steps) - 1)
-        if step.kind == "start" and log.is_file() and refused in log.read_text(encoding="utf-8", errors="replace"):
+        if step.kind == "start" and self._refusal(job) is not None:
             return "surrogate_refused"
         return "failed"
+
+    def _refusal(self, job: GradientJob) -> type[ReducedModelNotValidated] | None:
+        """最後一步的輸出裡命令列印的是哪一種替身核不過（「梯度搜尋開始失敗：<例外名>：<原因>」）；不是就是 None。"""
+        log = self._log_path(job.job_id, len(job.steps) - 1)
+        text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        for kind in (SurrogateNotTrainedOn, ReducedModelNotValidated):
+            if f"失敗：{kind.__name__}：" in text:
+                return kind
+        return None
 
     def _actions(self, job: GradientJob, state: str, folder: Path | None) -> dict[str, bool]:
         running = state in ("checking", "searching", "stopping", "endpoint_running", "endpoint_stopping")
@@ -423,10 +444,15 @@ class GradientJobs:
             endpoint = {"file": str(folder / ENDPOINT_FILE), "exported_scheme": str(folder / EXPORTED_SCHEME_FILE),
                         "baseline_note": ENDPOINT_BASELINE_TEXT}
         return {"job_id": job.job_id, "scheme_id": job.scheme_id, "created_at": job.created_at,
-                "state": state, "state_text": STATE_TEXTS[state], "actions": self._actions(job, state, folder),
+                "state": state, "state_text": self._state_text(job, state), "actions": self._actions(job, state, folder),
                 "plan": job.plan.model_dump(mode="json"), "max_steps": job.plan.max_steps,
                 "folder": None if folder is None else str(folder), "progress": progress, "progress_note": note,
                 "steps": steps, "endpoint": endpoint}
+
+    def _state_text(self, job: GradientJob, state: str) -> str:
+        if state == "surrogate_refused" and self._refusal(job) is SurrogateNotTrainedOn:
+            return NOT_TRAINED_STATE_TEXT
+        return STATE_TEXTS[state]
 
     def _jobs(self) -> list[GradientJob]:
         found = []
@@ -471,15 +497,16 @@ class GradientJobs:
     def preview(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
         """不開跑：轉好的參數、替身在不在、預設值、現在有沒有一跑在算。"""
         _, scheme, design = self.inputs(scheme_id)
-        plan, materials, _ = self._plan(scheme, design, request)
+        plan, materials, _ = self.plan(scheme, design, request)
         settings = materials.settings
         path = surrogate_path(self.data_dir, scheme)
         missing = missing_parts(path)
+        refused = None if missing else _not_trained(path, materials)
         with self.lock:
             busy = self.active_job()
         return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan),
-                "surrogate": {"found": not missing, "slot": str(path.parent), "missing": missing,
-                              "message": None if not missing else "要先建替身"},
+                "surrogate": {"found": not missing and refused is None, "slot": str(path.parent), "missing": missing,
+                              "message": "要先建替身" if missing else refused},
                 "defaults": {"max_steps": settings.descent.max_steps, "family": settings.family[0].id,
                              "families": [family.id for family in settings.family], "mount": MOUNT_ON_WALL,
                              "device": GradientRequest().device},
@@ -487,8 +514,11 @@ class GradientJobs:
 
     def start(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
         text, scheme, design = self.inputs(scheme_id)
-        plan, _, entries = self._plan(scheme, design, request)
+        plan, materials, entries = self.plan(scheme, design, request)
         surrogate = self._surrogate(scheme)
+        refused = _not_trained(surrogate, materials)
+        if refused is not None:
+            raise NeedsSurrogate(refused, surrogate.parent)
         with self.launching():
             busy = self.active_job()
             if busy is not None:

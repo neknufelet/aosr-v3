@@ -5,6 +5,9 @@
 有限數與面片序由命令列自己核（``TrainingSets.impedances`` 與建模的 ``impedance_rows``）。"""
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -17,12 +20,16 @@ from aosr.config.paths import config_path
 from aosr.config.surrogate_training import SurrogateTrainingSettings, load_surrogate_training_settings
 from aosr.gradient import run
 from aosr.gradient.boundary import scheme_patch_keys
+from aosr.gradient.surrogate_coverage import coverage_for
 from aosr.gradient.surrogate_training import TrainingSets, original_walls
+from aosr.materials import library
+from aosr.materials.search_library import SearchMaterials, with_user_materials
 from aosr.materials.construction_models import MountedOnWall
 from aosr.reporting.scheme import Scheme
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine._material_gradient_zones_case import scheme
+from tests.engine.test_material_gradient_library import _fixed, _optimizable
 
 SEARCH = load_material_gradient_settings(config_path("material_gradient.toml"))
 SAMPLING = load_surrogate_training_settings(config_path("surrogate_training.toml"))
@@ -161,3 +168,102 @@ def test_settings_refusals(tmp_path: Path, old: str, new: str, message: str) -> 
     path = _write(tmp_path / "s.toml", BASE.replace(old, new, 1))
     with pytest.raises(ValueError, match=message):
         _sets(sampling=load_surrogate_training_settings(path))
+
+
+# ---- 材料庫的可最佳化材料（#1082 段 2-3c）----
+
+# 改動前（116426a7）這間分區小房間的訓練說明（``document()`` 的 JSON，``ensure_ascii=False`` 加換行，跟建模命令列寫檔同一個寫法）
+# 整份位元組的 SHA-256；改動前的分支實跑存的那一份在工作區 1107-surrogate-library-coverage/evidence/baseline/document-zoned.json。
+MAIN_DOCUMENT_SHA256 = "8492876d9277ed54a3404b17f30add0f9042a882ede5491891758d87085599a1"
+USER = "rock_wool_60k"
+ONE_VARIABLE = "panel_one_variable"
+
+
+def _one_variable() -> library.LibraryEntry:
+    """只有厚度能調、沒有空腔的使用者材料（一個連續變數）。"""
+    return _optimizable(id=ONE_VARIABLE, label="一個變數的板（自填）",
+                        porous_thickness={"adjustable": True, "range_m": [0.05, 0.1], "choices_m": [0.05, 0.1],
+                                          "initial_m": 0.05},
+                        cavity=None, max_total_depth_m=None)
+
+
+def _user_sets(*entries: library.LibraryEntry) -> tuple[TrainingSets, SearchMaterials]:
+    base = scheme()
+    assert base.scene.low_frequency_axis is not None
+    axis = low_frequency_axis_frequencies(base.scene.low_frequency_axis)[0]
+    saved = run.scene_wall_materials(base, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    air, ranges = construction_environment(density_kg_m3=base.scene.density_kg_m3,
+                                           sound_speed_m_s=base.scene.sound_speed_m_s)
+    materials = with_user_materials(SEARCH, run.presets_table(), entries)
+    users = tuple(entry.id for entry in materials.entries)
+    sets = TrainingSets(saved, materials.settings, SAMPLING, air=air, ranges=ranges, frequencies_hz=axis,
+                        presets=materials.presets if users else None, user_families=users)
+    return sets, materials
+
+
+def test_without_user_families_the_document_and_weights_are_the_old_ones() -> None:
+    """抓材料庫空的（或只有固定材料）時訓練說明跟改動前差一個位元（包括它記的每一組每一片的材料），
+    或抽樣權重被重新算過（隨機組就跟著變了）。"""
+    for entries in ((), (_fixed(),)):
+        sets, materials = _user_sets(*entries)
+        training, holdout = sets.training_sets(), sets.holdout_sets()
+        text = json.dumps(sets.document(training, holdout, coverage_for(materials)), ensure_ascii=False,
+                          allow_nan=False) + "\n"
+        assert hashlib.sha256(text.encode("utf-8")).hexdigest() == MAIN_DOCUMENT_SHA256
+        assert sets.weights == tuple(SAMPLING.sampling.family_weights[family] for family in sets.families)
+        assert training == _sets().training_sets() and holdout == _sets().holdout_sets()
+
+
+def test_user_family_weights_give_every_continuous_variable_the_same_share() -> None:
+    """抓使用者家族沒抽到、或權重規則不是「每個連續變數分一樣多」（設定檔 48K 兩個變數 0.5、24K／96K 一個 0.25 的同一條），
+    或加起來不是 1。"""
+    sets, _ = _user_sets(_optimizable(), _one_variable())
+    assert sets.families[-2:] == (USER, ONE_VARIABLE)
+    assert (sets.boxes[USER].variables, sets.boxes[ONE_VARIABLE].variables) == (2, 1)
+    weights = dict(zip(sets.families, sets.weights, strict=True))
+    total = 1.0 + 0.25 * 2 + 0.25 * 1
+    expected = {"glass_wool_48k": 0.5 / total, "glass_wool_24k": 0.25 / total, "glass_wool_96k": 0.25 / total,
+                USER: 0.5 / total, ONE_VARIABLE: 0.25 / total}
+    assert weights == pytest.approx(expected, rel=0.0, abs=1e-15)
+    assert math.isclose(sum(sets.weights), 1.0, rel_tol=0.0, abs_tol=1e-12)
+
+
+def test_every_user_family_is_trained_and_held_out_inside_its_box() -> None:
+    """抓使用者家族只進了訓練、留出一片都沒驗到（混搭輪不到、隨機組沒抽到），或抽到它自己盒界與總深度外。"""
+    sets, _ = _user_sets(_optimizable(), _one_variable())
+    training, holdout = sets.training_sets(), sets.holdout_sets()
+    for family in (USER, ONE_VARIABLE):
+        middle = [item for item in holdout if item.label.startswith(f"{family} 中間值")]
+        assert len(middle) == 1 and set(middle[0].faces) == {sets._middle(family)}
+    sets.require_every_family(training, holdout)
+    with pytest.raises(ValueError, match="留出材料一片都沒貼過家族"):
+        sets.require_every_family(training, holdout[:1])
+    for item in training + holdout:
+        for face in item.faces:
+            if face.kind == "mounted" and face.family in (USER, ONE_VARIABLE):
+                assert face.thickness_m is not None
+                box = sets.boxes[face.family]
+                assert box.thickness[0] <= face.thickness_m <= box.thickness[1]
+                assert (face.cavity_m is None) == (box.cavity is None)
+        sets.materials(item)
+
+
+def test_document_records_what_was_trained_only_with_user_families() -> None:
+    """抓有使用者家族時訓練說明沒換版、沒記涵蓋（開跑閘門就看不出替身訓練過它），或記的涵蓋跟這一次真的抽的對不上。"""
+    sets, materials = _user_sets(_fixed(), _optimizable())
+    coverage = coverage_for(materials)
+    assert coverage is not None and coverage.materials_sha256 is not None
+    training, holdout = sets.training_sets(), sets.holdout_sets()
+    document = sets.document(training, holdout, coverage)
+    assert document["version"] == "aosr.gradient.surrogate_training.v2" and document["families"] == list(sets.families)
+    assert sets.families[-1] == USER
+    assert document["coverage"] == coverage.model_dump(mode="json")
+    assert document["family_weights"] == dict(zip(sets.families, sets.weights, strict=True))
+    other = coverage_for(with_user_materials(SEARCH, run.presets_table(), (_one_variable(),)))
+    assert other is not None
+    with pytest.raises(ValueError, match="涵蓋那一節的家族"):
+        sets.document(training, holdout, other)
+    wider = coverage.model_copy(update={"families": (*coverage.families[:-1], coverage.families[-1].model_copy(
+        update={"thickness_m": (0.05, 0.2)}))})
+    with pytest.raises(ValueError, match="範圍跟這一次真的抽的盒界不同"):
+        sets.document(training, holdout, wider)

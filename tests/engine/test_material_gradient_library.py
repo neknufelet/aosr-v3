@@ -33,7 +33,9 @@ from aosr.gradient import template_ledger as templates
 from aosr.gradient import template_rounds as rounds
 from aosr.gradient.endpoint import checked_design_identity
 from aosr.gradient.endpoint_run import checked_result
-from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_jobs import GradientJobs, NeedsSurrogate
+from aosr.gui.problem_text import checked_scheme
+from aosr.gui.surrogate_slots import surrogate_path
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused
 from aosr.materials import library
 from aosr.materials import search_library as materials
@@ -41,6 +43,7 @@ from aosr.materials.construction_models import ConstantImpedance, SurfaceMateria
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._six_search_helpers import expand_components, weights
+from tests.engine._surrogate_coverage import trained_on
 from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data
 from tests.engine.test_material_gradient_cli import _schemes
 from tests.engine.test_material_gradient_mount import _project
@@ -237,9 +240,14 @@ def _start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str, presets
 
 def test_start_snapshots_user_families_into_the_folder_and_its_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                     capsys: pytest.CaptureFixture[str]) -> None:
-    """抓快照沒寫進資料夾、沒進資料夾名、接續讀網頁現在的材料庫，或快照被改了還照讀（報告命令也算）。"""
+    """抓快照沒寫進資料夾、沒進資料夾名、接續讀網頁現在的材料庫，或快照被改了還照讀（報告命令也算）；
+    替身沒記訓練過這個使用者家族就照樣開跑（#1082 段 2-3c：要拒收、講要重建，不建資料夾）。"""
     user = tmp_path / "library.json"
     user.write_text(library.dump_user_library((_fixed(), _optimizable())), encoding="utf-8")
+    code, _ = _start(tmp_path, monkeypatch, "--materials", str(user), presets=",".join([USER] * 6))
+    assert code == cli.EXIT_FAILED and not (tmp_path / "out").exists()
+    assert "SurrogateNotTrainedOn：替身沒用這些材料訓練過，要重建" in capsys.readouterr().err
+    trained_on(tmp_path / "absent.npz", materials.with_user_materials(_base(), run.presets_table(), (_fixed(), _optimizable())))
     code, checked = _start(tmp_path, monkeypatch, "--materials", str(user), presets=",".join([USER] * 6))
     assert code == 0
     folder, = (tmp_path / "out").iterdir()
@@ -398,6 +406,16 @@ def test_web_offers_user_families_and_hands_a_library_copy_to_the_search(tmp_pat
     plan = cast(dict[str, object], preview["plan"])
     assert plan["family"] == USER and USER in cast(list[str], plan["presets"])
     assert cast(dict[str, list[str]], preview["defaults"])["families"][-1] == USER
+    # 替身樁旁沒記訓練過這個使用者家族：預覽說要重建、開跑回「要先建替身」（#1082 段 2-3c），不開服務。
+    surrogate = cast(dict[str, object], preview["surrogate"])
+    assert surrogate["found"] is False and surrogate["missing"] == []
+    assert str(surrogate["message"]).startswith("替身沒用這些材料訓練過，要重建：")
+    with pytest.raises(NeedsSurrogate, match="替身沒用這些材料訓練過，要重建"):
+        jobs.start(NAME, GradientRequest(family=USER))
+    assert launcher.launched == []
+    trained_on(surrogate_path(data_dir, checked_scheme(json.loads((data_dir / "schemes" / f"{NAME}.json").read_text()))),
+               jobs.plan(*jobs.inputs(NAME)[1:], GradientRequest(family=USER))[1])
+    assert cast(dict[str, object], jobs.preview(NAME, GradientRequest(family=USER))["surrogate"])["found"] is True
     view = jobs.start(NAME, GradientRequest(family=USER))
     (_, argv, _, _), = launcher.launched
     copy = data_dir / "gradient" / str(view["job_id"]) / "materials.json"

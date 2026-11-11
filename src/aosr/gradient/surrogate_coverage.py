@@ -1,0 +1,157 @@
+"""替身訓練過哪些材料（#1082 段 2-3c）：建模把這一場的家族記進訓練說明，開跑前核這一場的家族都在裡面；不載入 JAX。
+
+搜尋會走到的材料＝搜尋設定的家族：設定檔的在前、材料庫的可最佳化材料一筆一個接在後
+（:func:`~aosr.materials.search_library.with_user_materials`），換樣板也會換到每一個。替身只在訓練與留出抽過的範圍驗過，
+這一場的家族有一個沒訓練過、或範圍超出訓練過的，就拒收、要重建——不是只警告（限制一律是硬的）。
+
+一個家族記：代號、換樣板構造的代號與內容摘要（流阻之類的內容換了、代號沒變也算不同）、厚度範圍、空腔範圍、總深度上限。
+涵蓋＝這一場的每個家族都找得到同代號、同構造內容，而且厚度與空腔範圍都在訓練過的裡面、總深度上限不比訓練過的大。
+個案的每面深度上限只會把範圍切小，不算進來（替身照家族範圍建）。
+
+訓練說明（``training.json``）沒有 ``coverage`` 這一節的是舊替身：#1098 那一版、或手建的替身旁邊根本沒有訓練說明，
+都當成只用產品設定檔那幾個家族訓練過。這一場的家族就是產品設定檔那幾個時照舊放行；有別的家族就拒收、要重建。
+建模時這一場的家族就是產品設定檔那幾個（材料庫沒有可最佳化材料、也沒換家族設定）就不寫這一節，訓練說明逐位照舊。
+
+訓練說明不在替身 manifest 的雜湊裡：它跟替身同一個資料夾整份換名進格子，事後被手改閘門看不出來（照實記下，非阻塞）。
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Final
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.paths import config_path
+from aosr.materials.search_library import PresetMaterial, SearchMaterials, snapshot_bytes
+from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
+
+TRAINING_VERSION: Final = "aosr.gradient.surrogate_training.v1"
+COVERAGE_VERSION: Final = "aosr.gradient.surrogate_training.v2"
+NOT_TRAINED_TEXT: Final = "替身沒用這些材料訓練過，要重建"
+
+
+class SurrogateNotTrainedOn(ReducedModelNotValidated):
+    """這一場的家族超出替身訓練過的：拒收、要重建（是替身核不過的一種，網頁照「替身核不過、要重建」那一條走）。"""
+
+
+class _Frozen(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+
+class FamilyCoverage(_Frozen):
+    """一個家族的訓練範圍：換樣板構造（代號＋內容摘要）、厚度與空腔的上下界、總深度上限（公尺）。"""
+
+    id: str = Field(min_length=1)
+    template_preset: str = Field(min_length=1)
+    template_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    thickness_m: tuple[float, float]
+    cavity_m: tuple[float, float]
+    max_total_depth_m: float
+
+
+class Coverage(_Frozen):
+    """訓練說明裡的 ``coverage`` 一節：訓練過的每個家族、那一份搜尋設定的指紋、材料庫（接成家族的那幾筆）的指紋。"""
+
+    families: tuple[FamilyCoverage, ...] = Field(min_length=1)
+    settings_fingerprint: str
+    materials_sha256: str | None
+
+
+def template_sha256(material: Mapping[str, object]) -> str:
+    """構造內容的摘要：正規化 JSON（鍵排序、緊湊分隔、不轉義非 ASCII）做 SHA-256。"""
+    content = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def family_coverage(settings: MaterialGradientSettings,
+                    presets: Sequence[PresetMaterial]) -> tuple[FamilyCoverage, ...]:
+    """搜尋設定的每個家族 → 它的訓練範圍；樣板構造照構造清單找（找不到就拒收，講是哪一個）。"""
+    table = {preset.id: preset for preset in presets}
+    rows = []
+    for family in settings.family:
+        preset = table.get(family.template_preset)
+        if preset is None:
+            raise ValueError(f"家族 {family.id} 的樣板構造 {family.template_preset} 不在構造清單裡")
+        rows.append(FamilyCoverage(id=family.id, template_preset=family.template_preset,
+                                   template_sha256=template_sha256(preset.material),
+                                   thickness_m=(min(family.thicknesses_m), max(family.thicknesses_m)),
+                                   cavity_m=family.cavity_range_m, max_total_depth_m=family.max_total_depth_m))
+    return tuple(rows)
+
+
+def product_families() -> tuple[FamilySettings, ...]:
+    """產品設定檔（``material_gradient.toml``）的家族：舊替身就是用這幾個訓練的。"""
+    return load_material_gradient_settings(config_path("material_gradient.toml")).family
+
+
+def only_product_families(materials: SearchMaterials) -> bool:
+    """這一場的家族就是產品設定檔那幾個（沒有接進使用者材料、家族設定也沒換）。"""
+    return not materials.entries and materials.settings.family == product_families()
+
+
+def coverage_for(materials: SearchMaterials) -> Coverage | None:
+    """建模要寫進訓練說明的那一節；只有產品設定檔那幾個家族時是 None（訓練說明逐位照舊）。"""
+    if only_product_families(materials):
+        return None
+    library = None if not materials.entries else hashlib.sha256(snapshot_bytes(materials.entries)).hexdigest()
+    return Coverage(families=family_coverage(materials.settings, materials.presets),
+                    settings_fingerprint=materials.settings.fingerprint, materials_sha256=library)
+
+
+def read_coverage(training: Path) -> Coverage | None:
+    """替身旁的訓練說明裡記的涵蓋；檔不在或沒有這一節（舊替身）是 None，檔壞了拒收。"""
+    if not training.is_file():
+        return None
+    try:
+        document = json.loads(training.read_text(encoding="utf-8"))
+        section = document.get("coverage") if isinstance(document, dict) else None
+        return None if section is None else Coverage.model_validate(section)
+    except (OSError, ValueError, ValidationError) as error:
+        raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：替身旁的訓練說明 {training} 讀不懂（{type(error).__name__}），"
+                                    "看不出訓練過哪些材料") from error
+
+
+def _inside(wanted: tuple[float, float], trained: tuple[float, float]) -> bool:
+    return trained[0] <= wanted[0] and wanted[1] <= trained[1]
+
+
+def _problems(wanted: Sequence[FamilyCoverage], trained: Sequence[FamilyCoverage]) -> list[str]:
+    by_id = {family.id: family for family in trained}
+    problems = []
+    for family in wanted:
+        seen = by_id.get(family.id)
+        if seen is None:
+            problems.append(f"家族 {family.id} 沒訓練過")
+        elif (seen.template_preset, seen.template_sha256) != (family.template_preset, family.template_sha256):
+            problems.append(f"家族 {family.id} 的材料內容跟訓練時不同")
+        else:
+            if not _inside(family.thickness_m, seen.thickness_m):
+                problems.append(f"家族 {family.id} 的厚度範圍 {list(family.thickness_m)} 超出訓練過的 {list(seen.thickness_m)}")
+            if not _inside(family.cavity_m, seen.cavity_m):
+                problems.append(f"家族 {family.id} 的空腔範圍 {list(family.cavity_m)} 超出訓練過的 {list(seen.cavity_m)}")
+            if family.max_total_depth_m > seen.max_total_depth_m:
+                problems.append(f"家族 {family.id} 的總深度上限 {family.max_total_depth_m:g} m 比訓練過的 "
+                                f"{seen.max_total_depth_m:g} m 大")
+    return problems
+
+
+def check_covers(training: Path, materials: SearchMaterials) -> None:
+    """開跑前核這一場的家族都在替身訓練過的範圍裡；不在就拋 :class:`SurrogateNotTrainedOn`（點名哪一個、哪一格）。
+
+    ``training`` 是替身旁的訓練說明（``surrogate.npz`` 同資料夾的 ``training.json``）。"""
+    trained = read_coverage(training)
+    if trained is None:
+        if only_product_families(materials):
+            return
+        product = family_coverage(load_material_gradient_settings(config_path("material_gradient.toml")),
+                                  materials.presets)
+        extra = _problems(family_coverage(materials.settings, materials.presets), product)
+        raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：這份替身沒記訓練過哪些材料（材料庫接進搜尋之前建的，"
+                                    f"只用產品設定檔的家族訓練過），這一場{'；'.join(extra) or '的家族設定換過'}")
+    problems = _problems(family_coverage(materials.settings, materials.presets), trained.families)
+    if problems:
+        raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：{'；'.join(problems)}")
