@@ -59,6 +59,9 @@ class LocalLauncher:
         process = self.processes.get(unit)
         return process is not None and process.poll() is None
 
+    def active_units(self) -> set[str]:
+        return {unit for unit in self.processes if self.is_active(unit)}
+
     def stop(self, unit: str) -> None:
         self.processes[unit].send_signal(signal.SIGTERM)
 

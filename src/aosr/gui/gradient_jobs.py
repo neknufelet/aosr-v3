@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import re
 import subprocess
@@ -24,8 +25,9 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal, Protocol
 
@@ -55,8 +57,10 @@ UNIT_PREFIX: Final = "aosr-gradient-"
 MEMORY_MAX: Final = "32G"
 LOG_TAIL_LINES: Final = 8
 REPO_ROOT = Path(__file__).resolve().parents[3]
+RUNNING_UNIT_STATES: Final = ("active", "activating", "deactivating", "reloading")
+GONE_UNIT_STATES: Final = ("inactive", "failed", "unknown")
+START_LOCK: Final = ".start.lock"
 StepKind = Literal["start", "resume", "endpoint"]
-SEARCH_KINDS: Final = ("start", "resume")
 
 STATE_TEXTS: Final[dict[str, str]] = {
     "checking": "開跑前核對中（匯出完整模型、核替身）",
@@ -107,6 +111,8 @@ class Launcher(Protocol):
 
     def is_active(self, unit: str) -> bool: ...
 
+    def active_units(self) -> set[str]: ...
+
     def stop(self, unit: str) -> None: ...
 
 
@@ -140,8 +146,22 @@ class SystemdLauncher:
             raise LaunchFailed(f"systemd-run 開不了服務 {unit}（離開碼 {done.returncode}）：{done.stderr.strip()}")
 
     def is_active(self, unit: str) -> bool:
+        """查不到（使用者服務匯流排連不上之類）就丟錯，不准當成「不在」——當成不在會放行第二跑。"""
         done = self.run(["systemctl", "--user", "is-active", unit])
-        return done.stdout.strip() in ("active", "activating", "deactivating", "reloading")
+        state = done.stdout.strip()
+        if state in RUNNING_UNIT_STATES:
+            return True
+        if state in GONE_UNIT_STATES:
+            return False
+        raise LaunchFailed(f"查不到服務 {unit} 的狀態（離開碼 {done.returncode}）：{done.stderr.strip() or state}")
+
+    def active_units(self) -> set[str]:
+        """整台機器（這個使用者）還在的第三階段服務，不管是哪一個網頁資料夾開的。"""
+        done = self.run(["systemctl", "--user", "list-units", "--plain", "--no-legend",
+                         "--state=" + ",".join(RUNNING_UNIT_STATES), f"{UNIT_PREFIX}*"])
+        if done.returncode != 0:
+            raise LaunchFailed(f"查不到現在有哪些服務（離開碼 {done.returncode}）：{done.stderr.strip()}")
+        return {line.split()[0].removesuffix(".service") for line in done.stdout.splitlines() if line.strip()}
 
     def stop(self, unit: str) -> None:
         done = self.run(["systemctl", "--user", "stop", "--no-block", unit])
@@ -318,9 +338,6 @@ class GradientJobs:
     def view(self, job: GradientJob) -> dict[str, object]:
         folder = self.folder(job)
         state = self._state(job, folder)
-        if state == "stopping" and folder is not None and not (folder / STOP_FILE).exists():
-            # 接續開頭會先清掉舊的停止記號：剛好在那之前按的停止會被清掉，看狀態時補放回去。
-            (folder / STOP_FILE).touch()
         progress, note = self._progress(folder)
         steps = []
         for index, step in enumerate(job.steps):
@@ -349,10 +366,23 @@ class GradientJobs:
         return sorted(found, key=lambda job: job.created_at, reverse=True)
 
     def active_job(self) -> str | None:
+        """還在算的那一跑：先看這個資料夾的工作，再看整台機器有沒有別處開的第三階段服務。"""
         for job in self._jobs():
             if job.steps and self._step_state(job, len(job.steps) - 1)[0] == "running":
                 return job.job_id
-        return None
+        units = sorted(self.launcher.active_units())
+        return units[0] if units else None
+
+    @contextmanager
+    def _launching(self) -> Iterator[None]:
+        """查忙到開好服務整段拿檔案鎖：同一個資料夾就算有兩個網頁行程（重開交接那一瞬間）也不會各開一跑；
+        別的資料夾開的由 :meth:`active_job` 從服務清單看到（開服務那一層回來時服務已經在了）。"""
+        with self.lock, (self.root / START_LOCK).open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     # ---- 動作 ----
 
@@ -393,7 +423,7 @@ class GradientJobs:
         text, scheme, design = self._inputs(scheme_id)
         plan = plan_search(scheme, design, request, self._settings())
         surrogate = self._surrogate(scheme)
-        with self.lock:
+        with self._launching():
             busy = self.active_job()
             if busy is not None:
                 raise JobBusy(busy)
@@ -423,14 +453,28 @@ class GradientJobs:
         with self.lock:
             return {"jobs": [self.view(job) for job in self._jobs()]}
 
+    def _marker_holds(self, step: JobStep, folder: Path) -> bool:
+        """放停止記號停得到嗎：搜尋的步驟才看記號；接續那一步還要等工作行程已經起來（狀態檔是這一步之後寫的）——
+        命令列接續開頭會先清掉舊記號，在那之前放的記號會被一起清掉。"""
+        if step.kind == "start":
+            return True
+        if step.kind != "resume":
+            return False
+        try:
+            status = GradientStatus.model_validate_json((folder / STATUS_FILE).read_text(encoding="utf-8"))
+            return datetime.fromisoformat(status.started_at).timestamp() >= step.launched_at
+        except (OSError, ValueError):
+            return False
+
     def stop(self, job_id: str) -> dict[str, object]:
-        """搜尋資料夾已開：放停止記號（下一次求值之前停、回「已停止」）；還在開跑前核對或在跑終點：停服務。"""
+        """記號停得到（:meth:`_marker_holds`）就放停止記號（下一次求值之前停、回「已停止」）；其餘（開跑前核對、
+        接續剛開、終點）停服務：最外層轉一次 SIGTERM，命令列轉成中斷、收好工作行程，一樣回「已停止」。"""
         with self.lock:
             job = self._job(job_id)
             if not job.steps or self._step_state(job, len(job.steps) - 1)[0] != "running":
                 raise ActionRefused("這一跑沒有在算，不用停")
             step, folder = job.steps[-1], self.folder(job)
-            if step.kind in SEARCH_KINDS and folder is not None:
+            if folder is not None and self._marker_holds(step, folder):
                 (folder / STOP_FILE).touch()
             else:
                 self.launcher.stop(step.unit)
@@ -439,7 +483,7 @@ class GradientJobs:
             return self.view(job)
 
     def _follow_up(self, job_id: str, action: Literal["resume", "endpoint"]) -> dict[str, object]:
-        with self.lock:
+        with self._launching():
             job = self._job(job_id)
             folder = self.folder(job)
             state = self._state(job, folder)

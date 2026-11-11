@@ -68,6 +68,9 @@ class FakeLauncher:
     def is_active(self, unit: str) -> bool:
         return unit in self.active
 
+    def active_units(self) -> set[str]:
+        return set(self.active)
+
     def stop(self, unit: str) -> None:
         self.stopped.append(unit)
 
@@ -328,6 +331,47 @@ def test_paths_handed_to_the_service_are_absolute(tmp_path: Path, monkeypatch: p
     assert Path(argv[3]).is_absolute() and Path(argv[4]).is_absolute()  # 離開碼檔與輸出檔
 
 
+def test_a_job_started_from_another_data_folder_also_blocks(tmp_path: Path) -> None:
+    """抓整台一次一跑只看自己資料夾的工作：別的網頁資料夾開的第三階段服務還在算時，這裡照樣開得起來。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    launcher.active.add("aosr-gradient-" + "e" * 32 + "-0")
+    with pytest.raises(JobBusy):
+        _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    assert launcher.launched == []
+
+
+def test_two_web_processes_on_one_folder_cannot_both_start(tmp_path: Path) -> None:
+    """抓查忙與開服務之間沒有跨行程的鎖：兩個工作管理器（兩個網頁行程）同時查到空閒，就各開一跑。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+
+    class SlowCheck(GradientJobs):
+        def active_job(self) -> str | None:
+            answer = super().active_job()
+            time.sleep(0.3)  # 把查忙到開服務的空檔撐大
+            return answer
+
+    managers = [SlowCheck(data_dir, launcher=launcher, engine_commit="c" * 40,
+                          capabilities=config_path("capabilities.toml"), scheme_lock=threading.RLock())
+                for _ in range(2)]
+    outcomes: list[str] = []
+
+    def start(jobs: GradientJobs) -> None:
+        try:
+            jobs.start(NAME, GradientRequest())
+            outcomes.append("started")
+        except JobBusy:
+            outcomes.append("busy")
+
+    threads = [threading.Thread(target=start, args=(jobs,)) for jobs in managers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert sorted(outcomes) == ["busy", "started"] and len(launcher.launched) == 1
+
+
 def test_one_job_at_a_time_on_the_whole_machine(tmp_path: Path) -> None:
     """抓第二跑（就算是別份方案）在第一跑還在算時也開得起來。"""
     data_dir = _data(tmp_path)
@@ -376,18 +420,25 @@ def test_stop_marker_then_resume_then_endpoint_then_done(tmp_path: Path) -> None
     assert "不是「同一套切法、每區都不貼」" in str(endpoint["baseline_note"])
 
 
-def test_stop_pressed_as_resume_clears_the_old_marker_is_put_back(tmp_path: Path) -> None:
-    """抓接續開頭清掉舊停止記號時、剛好在那之前按的停止被一起清掉，畫面一直「停止中」到搜尋跑完。"""
+@pytest.mark.parametrize(("worker_started", "via"), [(False, "service"), (True, "marker")])
+def test_stop_right_after_resume_stops_the_service_until_the_worker_is_up(tmp_path: Path, worker_started: bool,
+                                                                          via: str) -> None:
+    """抓接續剛開（命令列還沒清掉舊停止記號、工作行程還沒起來）時按停止只放記號：記號會被命令列清掉，沒人再看就停不下來。"""
     data_dir = _data(tmp_path)
     launcher = FakeLauncher()
     jobs = _jobs(data_dir, launcher)
     view = jobs.start(NAME, GradientRequest())
-    folder = _folder(data_dir, view)
+    folder = _folder(data_dir, view, STATUS)  # 上一步的狀態檔：開始時間在接續之前
     _finish(data_dir, launcher, view, EXIT_STOPPED)
-    view = jobs.stop(str(jobs.resume(str(view["job_id"]))["job_id"]))
-    (folder / folder_files.STOP_FILE).unlink()  # 命令列接續開頭做的事
-    assert jobs.get(str(view["job_id"]))["state"] == "stopping"
-    assert (folder / folder_files.STOP_FILE).is_file()
+    view = jobs.resume(str(view["job_id"]))
+    if worker_started:
+        later = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + 5))
+        (folder / folder_files.STATUS_FILE).write_text(json.dumps(STATUS | {"started_at": later}), encoding="utf-8")
+    view = jobs.stop(str(view["job_id"]))
+    assert view["state"] == "stopping"
+    unit = cast(list[Record], view["steps"])[-1]["unit"]
+    assert (folder / folder_files.STOP_FILE).is_file() == (via == "marker")
+    assert launcher.stopped == ([unit] if via == "service" else [])
 
 
 @pytest.mark.parametrize(("line", "state"), [
@@ -511,6 +562,18 @@ def test_systemd_launcher_command_line() -> None:
     assert launcher.is_active("u")
     runs.answer = (3, "inactive\n", "")
     assert not launcher.is_active("u")
+    runs.answer = (4, "inactive\n", "")
+    assert not launcher.is_active("never-started")
+    runs.answer = (1, "", "Failed to connect to bus")
+    with pytest.raises(LaunchFailed, match="查不到服務"):
+        launcher.is_active("u")
+    runs.answer = (0, "aosr-gradient-a-0.service loaded active running x\naosr-gradient-b-1.service loaded activating start y\n", "")
+    assert launcher.active_units() == {"aosr-gradient-a-0", "aosr-gradient-b-1"}
+    assert runs.commands[-1] == ["systemctl", "--user", "list-units", "--plain", "--no-legend",
+                                 "--state=active,activating,deactivating,reloading", "aosr-gradient-*"]
+    runs.answer = (1, "", "Failed to connect to bus")
+    with pytest.raises(LaunchFailed, match="查不到現在有哪些服務"):
+        launcher.active_units()
     runs.answer = (0, "", "")
     launcher.stop("u")
     assert runs.commands[-1] == ["systemctl", "--user", "stop", "--no-block", "u"]
