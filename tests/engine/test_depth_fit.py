@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pytest
 from pydantic import TypeAdapter
 
@@ -115,6 +116,45 @@ def test_usable_means_the_swap_is_feasible(cap: float) -> None:
         except ValueError:
             swapped = False
         assert usable == swapped, (family.id, cap)
+
+
+def _float_edge_entry() -> library.OptimizableEntry:
+    """審查抓到的那一格：最薄 0.20 m、空腔下界 0.05 m，十進位剛好 0.25 m，但 0.25－0.20 在 float64 是 0.0499…，引擎換不過去。"""
+    return cast(library.OptimizableEntry, _ENTRY.validate_python({
+        "kind": "optimizable", "id": "edge_wool", "label": "邊界棉（自填）", "provenance": "model", "source": "自填",
+        "porous": {"kind": "porous", "thickness_m": 0.2, "flow_resistivity_pa_s_m2": 20000.0, "material_class": "fibrous"},
+        "porous_thickness": {"adjustable": True, "range_m": [0.2, 0.3], "choices_m": [0.2, 0.3], "initial_m": 0.2},
+        "cavity": {"adjustable": True, "range_m": [0.05, 0.1], "initial_m": 0.05}, "max_total_depth_m": 0.4}))
+
+
+@pytest.mark.parametrize("cap", [0.25, 0.2500000000000001, 0.26])
+def test_float_edge_is_judged_like_the_engine_snaps(cap: float) -> None:
+    """判可用照引擎取規格的浮點算（空腔＝上限減厚度再往下退到不超過）：十進位剛好卻換不過去的那一格判不可用，兩邊同答案。"""
+    chosen = materials.with_user_materials(_base(), run.presets_table(), (_float_edge_entry(),))
+    settings, kept = chosen.settings, {wall.wall_name(): m for wall, m in _kept().items()}
+    family = settings.family_by_id("edge_wool")
+    designs = run.designs_for([GAP50] * 6, settings, kept=_kept(), max_depths={"x0": cap}, table=chosen.presets)
+    context = rounds.TemplateContext(settings, chosen.presets, kept, lambda d: pytest.fail("不應求值"), max_depths={"x0": cap})
+    try:
+        new, values = rounds.swap(designs, search.baseline_theta(designs), "x0", family.id, context)
+        swapped = search.is_feasible(values, new)
+    except ValueError:
+        swapped = False
+    assert family_fit(family, cap).usable == swapped
+    assert swapped == (cap != 0.25)
+
+
+@pytest.mark.parametrize("thickness", [0.03, 0.05, 0.1, 0.2, 0.3])
+@pytest.mark.parametrize("total", [0.08, 0.1, 0.15, 0.25, 0.3, 0.33, 0.45])
+def test_snap_copy_matches_the_engine_depth_room(thickness: float, total: float) -> None:
+    """網頁行程不能載入 JAX，判法抄了一份 ``depth_room``；抄的那份要跟引擎那份逐位同答案。"""
+    from aosr.gradient import depth_fit
+
+    for low in (0.0, 0.03, 0.05, total - thickness):
+        family = _base().family[0].model_copy(update={"thicknesses_m": (thickness,), "cavity_range_m": (low, max(low, 0.1)),
+                                                        "initial_cavity_m": low})
+        room = search.depth_room(np.float64(total), np.float64(thickness))
+        assert depth_fit._snap_fits(family, total) == bool(room >= np.float64(low)), (thickness, total, low)
 
 
 def test_fixed_fit_measures_assemblies_and_refuses_what_it_cannot_measure() -> None:
@@ -278,3 +318,63 @@ def test_report_writes_a_fixed_material_face_as_what_it_is(tmp_path: Path, monke
             "settings_fingerprint": settings.fingerprint, "max_depths": caps})
         surfaces = tuple((name, f"fixed:{carpet}" if name == "x0" else GAP50) for name in search.wall_surface_ids())
         assert f"  {expected}" in report._depth_lines(project, surfaces)
+
+
+def test_template_ledger_replays_the_filtered_candidates(tmp_path: Path) -> None:
+    """寫帳本那一側（換樣板候選濾掉放不下的家族）跟讀帳本核對那一側（讀表頭 ``max_depths``）是同一組候選：合法帳本讀得回來。"""
+    from aosr.gradient import material_gradient_ledger as ledger
+    from aosr.gradient import template_ledger as templates
+    from tests.engine._six_search_helpers import expand_components, weights
+    from tests.engine.test_material_gradient_max_depth import _recorded_retune
+
+    chosen = _user()
+    document = chosen.settings.model_dump()
+    document["templates"].update(max_per_round=1, max_rounds=1)
+    settings = MaterialGradientSettings.model_validate(document)
+    kept = _kept()
+    caps = {"x0": 0.06}
+    designs = run.designs_for((GAP50,) * 6, settings, kept=kept, max_depths=caps, table=chosen.presets)
+    theta = search.snap_to_specs(search.baseline_theta(designs), designs).theta
+    context = rounds.TemplateContext(settings, chosen.presets, {w.wall_name(): m for w, m in kept.items()},
+                                     lambda d: pytest.fail("不應求值"), max_depths=caps)
+    start = rounds.surfaces_of(designs)
+    found = rounds.alternatives(start, settings, max_depths=caps)
+    assert ("x0", USER) in rounds.alternatives(start, settings) and ("x0", USER) not in found
+    header = ledger.MaterialGradientHeader(
+        ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic", physics_identity="synthetic",
+        surfaces=start, variable_names=search.design_names(designs), settings_fingerprint=settings.fingerprint,
+        objective_fingerprint="a" * 64, kept_digests={}, max_depths=caps,
+        score_constants=ledger.ScoreConstants(component_weights=(1.0, 1.0), worse_references=(1.0, 1.0), proxy_weight=0.25,
+                                               proxy_worse_reference=1.0, proxy_temperature_db=0.25, category_weights=weights()))
+    decision = ledger.RoundDecision(baseline_value=None, outcomes=(), threshold=settings.candidates.improvement_threshold,
+                                     accepted=None, round_evaluations=1, total_evaluations=1, next_round_bound=None)
+    ledger.write_ledger(tmp_path / run.LEDGER_FILE, header, (ledger.decision_row(
+        0, 0, tuple(float(x) for x in theta), 2.0, 2.0, expand_components(2.0, 2.0, (1.0, 1.0, 0.0)), 0.0, decision,
+        search.LOOP_STOP_NO_CANDIDATES),))
+    th = run.template_header_for(header, settings, kept, base_ledger_sha256=run.file_sha256(tmp_path / run.LEDGER_FILE))
+    rows: list[templates.TemplateRow] = []
+    for face, target in found:
+        swapped, values = rounds.swap(designs, theta, face, target, context)
+        value = 1.0 if (face, target) == ("x0", "glass_wool_24k") else 3.0
+        score = rounds.QuickScore(face, target, rounds.surfaces_of(swapped), search.design_names(swapped), values,
+                                   value, value, expand_components(value, value, (value / 2, value / 2, 0.0)), 0.0)
+        rows.append(templates.quick_row(len(rows), 0, score))
+    rows.extend(templates.segment_rows(_recorded_retune(theta, 2.0), "baseline_retune", len(rows), round=0,
+                                       surfaces=start, variable_names=search.design_names(designs)))
+    best = next(row for row in rows if row.candidate == "x0->glass_wool_24k")
+    rows.extend(templates.segment_rows(_recorded_retune(np.asarray(best.theta()), 1.0), "candidate_retune", len(rows),
+                                       round=0, surfaces=best.surfaces, variable_names=best.variable_names,
+                                       candidate=best.candidate))
+    outcome = templates.TemplateOutcome(candidate="x0->glass_wool_24k", quick_value=1.0, value=1.0, improvement=1.0)
+    choice = templates.TemplateDecision(baseline_value=2.0, quick_count=len(found), outcomes=(outcome,),
+                                        threshold=settings.candidates.improvement_threshold, accepted="x0->glass_wool_24k",
+                                        round_evaluations=len(found) + 2, total_evaluations=len(found) + 2, next_round_bound=None)
+    rows.append(templates.decision_row(len(rows), 0, surfaces=best.surfaces, variable_names=best.variable_names,
+                                       theta_hex=best.theta_hex, value=1.0, screening_total=1.0,
+                                       components=expand_components(1.0, 1.0, (0.5, 0.5, 0.0)), seconds=0.0,
+                                       decision=choice, stop_reason=rounds.TEMPLATE_STOP_MAX_ROUNDS))
+    begin = templates.TemplateStart(start, tuple(float(x).hex() for x in theta), 2.0, 2.0, expand_components(2.0, 2.0, (1.0, 1.0, 0.0)))
+    path = tmp_path / run.TEMPLATES_FILE
+    templates.create_template_ledger(path, th)
+    templates.append_template_rows(path, th, rows, settings=settings, start=begin)
+    assert templates.read_template_ledger(path, expected_header=th, settings=settings, start=begin)[1] == tuple(rows)

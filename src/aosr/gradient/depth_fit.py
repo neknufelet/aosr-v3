@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
+
+import numpy as np
 
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, is_fixed_target
 from aosr.materials.construction_models import Assembly
@@ -38,13 +40,29 @@ def family_shallowest_m(family: FamilySettings) -> float:
 
 
 def family_fit(family: FamilySettings, cap: float) -> TargetFit:
-    """家族對個案上限：比最淺排法還淺就不可用（個案擋）；放得下時生效上限取兩邊較嚴的那一個，一樣大算個案定的。"""
+    """家族對個案上限：最淺排法放不進就不可用（個案擋）；放得下時生效上限取兩邊較嚴的那一個，一樣大算個案定的。
+
+    「放得進」照搜尋取規格的同一條算式判（``material_gradient.snap_to_specs``：生效上限減最薄棉、在精度下往下修到
+    不超過，要不小於空腔下界），雙精度與單精度（顯卡）都要放得進才算可用——邊界上兩種精度可能判得不一樣，
+    寧可少一個候選也不讓換樣板在快速評分中途丟錯。"""
     shallowest = family_shallowest_m(family)
-    if cap < shallowest:
+    blocker: Literal["case", "material"] = "case" if cap <= family.max_total_depth_m else "material"
+    effective = cap if blocker == "case" else family.max_total_depth_m
+    if not _snap_fits(family, effective):
         return TargetFit(family.id, False, "shallower_than_family", None, "case", family.max_total_depth_m, shallowest)
-    if cap <= family.max_total_depth_m:
-        return TargetFit(family.id, True, "fits", cap, "case", family.max_total_depth_m, shallowest)
-    return TargetFit(family.id, True, "fits", family.max_total_depth_m, "material", family.max_total_depth_m, shallowest)
+    return TargetFit(family.id, True, "fits", effective, blocker, family.max_total_depth_m, shallowest)
+
+
+def _snap_fits(family: FamilySettings, max_total: float) -> bool:
+    """最薄棉放得進 ``max_total``：空腔留得下下界（樣板沒有空氣層的家族下界當 0）。
+    算法逐字同 ``material_gradient._depth_room``，在 θ 的精度 float64 下算（``baseline_theta`` 建 float64、
+    取規格與換樣板都跟著 θ 的型別；顯卡只在評分 kernel 裡轉單精度）。那支在載入 JAX 的模組裡，網頁行程不能匯入；考卷核兩邊同答案。"""
+    total, thickness = np.float64(max_total), np.float64(family.thicknesses_m[0])
+    room = total - thickness
+    while thickness + room > total:
+        room = np.nextafter(room, -np.inf)
+    low = np.float64(family.cavity_range_m[0]) if family.initial_cavity_m is not None else np.float64(0.0)
+    return bool(room >= low)
 
 
 def fixed_material_depth_m(material: object) -> float | None:
@@ -58,7 +76,17 @@ def _written_depth(material: object) -> Decimal | None:
     """照寫下來的十進位數字逐層相加（0.05＋0.1 就是 0.15，不帶浮點尾數），跟上限比不必另設容差。"""
     if not isinstance(material, Assembly):
         return None
-    return sum((Decimal(repr(float(getattr(layer, "thickness_m", 0.0)))) for layer in material.layers), Decimal(0))
+    return _layers_depth(material.layers)
+
+
+def _layers_depth(layers: Sequence[object]) -> Decimal:
+    return sum((Decimal(repr(float(getattr(layer, "thickness_m", 0.0)))) for layer in layers), Decimal(0))
+
+
+def layers_exceed(layers: Sequence[object], cap: float) -> bool:
+    """這幾層加起來（照寫下來的十進位）比上限深。網頁固定區貼在原牆上的那幾層（``zone_limits``）與搜尋的固定材料候選
+    用同一把，同一份材料兩邊不會判得不一樣。"""
+    return _layers_depth(layers) > Decimal(repr(cap))
 
 
 def fixed_fit(target: str, material: object, cap: float) -> TargetFit:
@@ -66,7 +94,7 @@ def fixed_fit(target: str, material: object, cap: float) -> TargetFit:
     written = _written_depth(material)
     if written is None:
         return TargetFit(target, False, "fixed_not_comparable", None, "case")
-    if written > Decimal(repr(cap)):
+    if layers_exceed(cast(Assembly, material).layers, cap):
         return TargetFit(target, False, "fixed_too_deep", None, "case", float(written))
     return TargetFit(target, True, "fits", cap, "case", float(written))
 
