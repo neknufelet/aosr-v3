@@ -46,7 +46,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
-from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings
 from aosr.config.physics_constants import PhysicsConstants
@@ -59,6 +58,7 @@ from aosr.gradient.material_gradient import (
     ChainObjective, FloatVector, SurfaceDesign, chain_objective, checked_theta, design_template_material, designs_mount,
     is_feasible, wall_surface_ids,
 )
+from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_models import AirLayer, Assembly, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
@@ -133,7 +133,7 @@ def checked_wall_designs(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceDesig
     return tuple(designs)
 
 
-def checked_design_identity(designs: Sequence[SurfaceDesign], presets: Sequence[ConstructionPreset]) -> None:
+def checked_design_identity(designs: Sequence[SurfaceDesign], presets: Sequence[PresetMaterial]) -> None:
     """每面的樣板構造（``design.material``，換 θ 之前）必須等於它 preset id 在 ``presets`` 裡的構造（驗證後逐欄相等）；
     沒有樣板的面（``material`` 是 None：真剛性或「不貼」保留原牆，不是 preset）略過；有樣板構造卻沒有 preset id、
     preset id 找不到或構造不同都拒收，訊息指名面（與 preset id）。只核身分，匯出材料仍只從 ``design.material`` 來。"""
@@ -550,7 +550,7 @@ def _reduced_objective(model: ReducedModel, designs: Sequence[SurfaceDesign], co
 
 def endpoint_check(operators: FullOperators, designs: Sequence[SurfaceDesign], theta: jax.Array | FloatVector, *,
                    model: ReducedModel, objective_settings: GradientObjectiveSettings, receiver_set: ReceiverSet,
-                   low_frequency_axis: LowFrequencyAxis, presets: Sequence[ConstructionPreset],
+                   low_frequency_axis: LowFrequencyAxis, presets: Sequence[PresetMaterial],
                    settings: MaterialGradientSettings, air: PhysicsConstants,
                    ranges: PorousModelRanges, workers: int = 1, frequency_batch: int | None = None,
                    device: Device = "cpu", refinement_steps: list[int] | None = None) -> EndpointResult:

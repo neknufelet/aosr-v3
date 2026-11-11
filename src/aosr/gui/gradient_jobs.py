@@ -38,15 +38,19 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from aosr.config.material_gradient import MOUNT_ON_WALL, MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.construction_presets import load_construction_presets
+from aosr.config.material_gradient import MOUNT_ON_WALL, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, plan_search, start_arguments
+from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
+from aosr.materials.library import LibraryEntry, dump_user_library, load_user_library
+from aosr.materials.search_library import MaterialsRefused, SearchMaterials, refuse_fixed_as_family, with_user_materials
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
@@ -247,8 +251,27 @@ class GradientJobs:
 
     # ---- 讀輸入 ----
 
-    def _settings(self) -> MaterialGradientSettings:
-        return load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))
+    def _materials(self) -> tuple[SearchMaterials, tuple[LibraryEntry, ...]]:
+        """搜尋設定接上使用者材料庫的可最佳化材料（#1082 段 2-3a），與使用者材料本身；材料庫讀不進來照講原因、不開。"""
+        settings = load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))
+        try:
+            entries = load_user_library(user_library_path(self.data_dir))
+        except (OSError, ValueError, ValidationError) as error:
+            raise PlanRefused(f"使用者材料庫（{USER_LIBRARY_NAME}）讀不進來，搜尋不開：{plain_error(error)}") from error
+        try:
+            return with_user_materials(settings, load_construction_presets(config_path("construction_presets.toml")),
+                                       entries), entries
+        except MaterialsRefused as error:
+            raise PlanRefused(str(error)) from error
+
+    def _plan(self, scheme: Scheme, design: DesignSettings | None, request: GradientRequest) -> tuple[SearchPlan, SearchMaterials,
+                                                                                                         tuple[LibraryEntry, ...]]:
+        materials, entries = self._materials()
+        try:
+            refuse_fixed_as_family((request.family,), entries)
+        except MaterialsRefused as error:
+            raise PlanRefused(str(error)) from error
+        return plan_search(scheme, design, request, materials.settings), materials, entries
 
     def _inputs(self, scheme_id: str) -> tuple[str, Scheme, DesignSettings | None]:
         if not NAME.fullmatch(scheme_id):
@@ -424,8 +447,8 @@ class GradientJobs:
     def preview(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
         """不開跑：轉好的參數、替身在不在、預設值、現在有沒有一跑在算。"""
         _, scheme, design = self._inputs(scheme_id)
-        settings = self._settings()
-        plan = plan_search(scheme, design, request, settings)
+        plan, materials, _ = self._plan(scheme, design, request)
+        settings = materials.settings
         path = surrogate_path(self.data_dir, scheme)
         missing = missing_parts(path)
         with self.lock:
@@ -440,7 +463,7 @@ class GradientJobs:
 
     def start(self, scheme_id: str, request: GradientRequest) -> dict[str, object]:
         text, scheme, design = self._inputs(scheme_id)
-        plan = plan_search(scheme, design, request, self._settings())
+        plan, _, entries = self._plan(scheme, design, request)
         surrogate = self._surrogate(scheme)
         with self._launching():
             busy = self.active_job()
@@ -459,6 +482,10 @@ class GradientJobs:
                          "--engine-commit", self.engine_commit]
             if self.settings_path is not None:
                 arguments.extend(("--settings", str(self.settings_path)))
+            if entries:
+                library = directory / USER_LIBRARY_NAME
+                _write_text(library, dump_user_library(entries))
+                arguments.extend(("--materials", str(library)))
             job = GradientJob(job_id=job_id, scheme_id=scheme_id, created_at=time.time(), plan=plan,
                               surrogate=str(surrogate))
             self._save(job)

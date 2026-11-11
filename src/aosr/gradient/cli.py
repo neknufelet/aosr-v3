@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import signal
@@ -62,6 +63,10 @@ from aosr.physics.fem_full_batch import checked_workers, checked_device_workers
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.config.material_gradient import MOUNT_RIGID, MOUNTS
+from aosr.materials.search_library import (
+    SNAPSHOT_FILE, MaterialsRefused, SearchMaterials, cavity_notes, read_user_entries, refuse_fixed_as_family, snapshot_bytes,
+    with_user_materials,
+)
 
 if TYPE_CHECKING:
     from aosr.gradient.gpu import Device
@@ -150,6 +155,9 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--fixed-surface", action="append", default=[], metavar="面=材料id",
                        help="固定指定面的材料，不參與優化；可重複給不同面，材料 id 取現有材料庫，"
                             "寫 scheme-material 就是用方案檔那一面自己的材料")
+    start.add_argument("--materials", type=Path, default=None, metavar="材料庫.json",
+                       help="使用者材料庫（網頁資料夾的 materials.json 的複本）：可最佳化材料一筆一個家族接在設定檔的家族後面，"
+                            "存一份快照進搜尋資料夾；不給就只用設定檔的家族")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -249,7 +257,6 @@ def _spawn_and_wait(folder: Path, mode: str, lock_fd: int, *, workers: int = 1, 
 def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
-    from aosr.config.material_gradient import load_material_gradient_settings, with_max_steps
     from aosr.gradient import run
     from aosr.gradient.fixed_surfaces import parse_fixed_surfaces, parse_max_depths
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
@@ -264,14 +271,12 @@ def _start(args: argparse.Namespace) -> int:
     scheme = load_scheme(scheme_path)
     if scheme.scene.low_frequency_axis is None:
         raise ValueError("方案場景沒有 low_frequency_axis（低頻軸）：搜尋跑完之後終點量大峰要它，開始前就拒收")
-    settings = load_material_gradient_settings(settings_path)
-    if args.max_steps is not None:
-        settings = with_max_steps(settings, args.max_steps)
+    materials, settings, snapshot, materials_sha = _start_materials(args, settings_path)
     capabilities = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     run.require_supported_original_walls(kept.values())
-    designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps)
+    designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps, table=materials.presets)
     from aosr.gradient.boundary import scheme_patch_keys
     patch_keys = scheme_patch_keys(scheme)
     objective = run.search_objective_settings(args.purpose)
@@ -289,6 +294,7 @@ def _start(args: argparse.Namespace) -> int:
                                     current_operators_digest=fingerprint)
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
+    _check_start_materials(materials, model, scheme)
     spot = None
     if fingerprint is not None:
         spot = _carryover_spot_check(model, operators, designs, scheme)
@@ -298,7 +304,8 @@ def _start(args: argparse.Namespace) -> int:
     identity = run.gradient_id(**hashes, presets=args.presets, purpose=args.purpose,
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
-                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch, device=args.device)
+                               max_depths=caps, patch_keys=patch_keys, frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha)
+    root = args.root.resolve()
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
         scheme_sha256=hashes["scheme_sha256"], surrogate_manifest_sha256=hashes["surrogate_manifest_sha256"],
@@ -310,10 +317,51 @@ def _start(args: argparse.Namespace) -> int:
         objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
         frequency_batch=args.frequency_batch, max_steps=args.max_steps, device=args.device,
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
-        operators_digest=fingerprint, surrogate_spot_check=spot)
-    root = args.root.resolve()
+        operators_digest=fingerprint, surrogate_spot_check=spot, materials_sha256=materials_sha,
+        materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE))
     root.mkdir(parents=True, exist_ok=True)
-    return _create_and_run(root, project)
+    return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
+
+
+def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme) -> None:
+    """接進來的使用者家族在這一場的頻點與空氣下逐一建得起、算得出（:func:`aosr.gradient.run.check_user_families`）；
+    空腔不調的那幾筆照實印一行。沒有使用者家族什麼都不做（不碰替身）。"""
+    if not materials.entries:
+        return
+    import numpy as np
+
+    from aosr.gradient.run import check_user_families
+
+    check_user_families(materials, tuple(float(value) for value in np.asarray(model.frequencies_hz)),
+                        density_kg_m3=scheme.scene.density_kg_m3, sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    for note in cavity_notes(materials):
+        sys.stderr.write(f"注意：{note}\n")
+
+
+def _start_materials(args: argparse.Namespace, settings_path: Path) -> tuple[SearchMaterials, MaterialGradientSettings,
+                                                                             bytes | None, str | None]:
+    """這一場的材料、生效設定（步數上限已套）、材料快照內文與整份 SHA-256。
+
+    ``--materials`` 給了：讀使用者材料庫（檔案不在、讀不進來都照講原因拒收）、起跑配置不准填固定材料、可最佳化材料接成家族；
+    沒給、或材料庫裡沒有可最佳化材料：設定檔與產品構造預設原樣、沒有快照（資料夾名與 ``project.json`` 逐位照舊）。"""
+    from aosr.config.material_gradient import load_material_gradient_settings, with_max_steps
+    from aosr.gradient.run import presets_table
+
+    base = load_material_gradient_settings(settings_path)
+    if args.materials is None:
+        materials = SearchMaterials(base, presets_table(), ())
+    else:
+        path = args.materials.resolve()
+        if not path.is_file():
+            raise MaterialsRefused(f"--materials 指的使用者材料庫 {path} 不存在，搜尋不開（沒有使用者材料就不帶這個旗標）")
+        entries = read_user_entries(path)
+        refuse_fixed_as_family(args.presets, entries)
+        materials = with_user_materials(base, presets_table(), entries)
+    settings = materials.settings if args.max_steps is None else with_max_steps(materials.settings, args.max_steps)
+    if not materials.entries:
+        return materials, settings, None, None
+    content = snapshot_bytes(materials.entries)
+    return materials, settings, content, hashlib.sha256(content).hexdigest()
 
 
 def _surrogate_identity(surrogate: Path, current: str) -> str:
@@ -373,8 +421,9 @@ def _starting_impedances(designs: tuple[SurfaceDesign, ...], frequencies_hz: tup
     return rows
 
 
-def _create_and_run(root: Path, project: GradientProject) -> int:
-    """暫存名資料夾裡先拿鎖、寫 ``project.json``，再換成正式名、起子行程。同名資料夾已在就拒收（不碰它）。"""
+def _create_and_run(root: Path, project: GradientProject, snapshot: bytes | None = None) -> int:
+    """暫存名資料夾裡先拿鎖、寫 ``project.json``（有材料快照先寫 ``materials.json``），再換成正式名、起子行程。
+    同名資料夾已在就拒收（不碰它）。"""
     from aosr.gradient import run
 
     folder = root / project.gradient_id
@@ -383,10 +432,13 @@ def _create_and_run(root: Path, project: GradientProject) -> int:
     staging = Path(tempfile.mkdtemp(prefix=f".{project.gradient_id}-", dir=root))
     with _locked(staging) as descriptor:
         try:
+            if snapshot is not None:
+                (staging / SNAPSHOT_FILE).write_bytes(snapshot)
             run.write_json_atomic(staging / run.PROJECT_FILE, project)
             staging.rename(folder)
         except BaseException:
             (staging / run.PROJECT_FILE).unlink(missing_ok=True)
+            (staging / SNAPSHOT_FILE).unlink(missing_ok=True)
             staging.rmdir()
             if folder.exists():
                 return _existing(folder)
@@ -447,10 +499,11 @@ def _endpoint(args: argparse.Namespace) -> int:
 
 
 def _report(args: argparse.Namespace) -> int:
-    from aosr.gradient.run import read_project
+    from aosr.gradient.run import project_presets, read_project
     from aosr.gradient.report import render_report
 
     project = read_project(args.folder.resolve())
+    project_presets(project)  # 材料快照被改過就拒收（SHA-256 對不上丟 ValueError），不印半份報告
     if (batch := project.frequency_batch) is not None:
         sys.stdout.write(f"替身頻點分批：每批 {batch} 點（反傳逐批重算）\n")
     sys.stdout.write(_max_steps_line(project))

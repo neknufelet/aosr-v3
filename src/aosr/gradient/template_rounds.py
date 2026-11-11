@@ -28,7 +28,6 @@ from typing import Final, Literal, NamedTuple, cast
 import jax.numpy as jnp
 import numpy as np
 
-from aosr.config.construction_presets import ConstructionPreset
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
 from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
@@ -38,6 +37,7 @@ from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_loop import retune_evaluation_bound
+from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.gradient.material_gradient import objective_reading, estimable, Unestimable
 
@@ -65,7 +65,7 @@ class TemplateContext(NamedTuple):
     不列舉安裝方式；貼在原牆上時換過去的樣板背後接的仍是那一面原牆）。"""
 
     settings: MaterialGradientSettings
-    presets: tuple[ConstructionPreset, ...]
+    presets: tuple[PresetMaterial, ...]
     kept: Mapping[str, SurfaceMaterial]
     objective_for: ObjectiveFactory
     mount: Mount = MOUNT_RIGID

@@ -72,6 +72,7 @@ from aosr.gradient.fixed_surfaces import (
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.material_gradient import (
     COMPONENT_NAMES, Unestimable, ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, check_stop, objective_reading,
+    designs_from_presets, is_feasible,
     compiled_evaluator, depth_limits, design_bounds, design_names, projected_descent, retune_cavities, snap_to_specs,
     wall_designs_from_presets, estimable,
 )
@@ -88,6 +89,8 @@ from aosr.gradient.template_segment import (
     TemplateResult, finished_result, resume_template_rounds, run_template_rounds,
 )
 from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.library import OptimizableEntry
+from aosr.materials.search_library import PresetMaterial, SearchMaterials, read_snapshot, with_user_materials, with_user_presets
 from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials, partition_identity, scheme_patch_keys, surface_ids)
 from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
 from aosr.physics.report_surfaces import RectangleZone
@@ -138,6 +141,8 @@ class GradientProject(BaseModel):
     報告照讀），接續時一律拒收。``mount`` 是安裝方式（#990）：剛背不寫（寫出的檔逐位等於加這一格之前）、缺這一格讀成剛背。
     ``max_steps`` 是開跑時另外指定的往下走步數上限（#1073）：沒指定不寫、照設定檔；指定了，``settings_fingerprint``
     記的是套上之後的指紋，接續、終點、報告一律經 :func:`project_settings` 套回去再比。
+    ``materials_path``／``materials_sha256`` 是材料快照（#1082 段 2-3a）：使用者的可最佳化材料接成家族的搜尋才寫
+    （資料夾裡的 ``materials.json`` 與它整份的 SHA-256）；沒接的不寫、寫出的檔逐位等於加這兩格之前。
     """
 
     model_config = _FROZEN
@@ -171,10 +176,14 @@ class GradientProject(BaseModel):
     surrogate_physics_identity: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
     operators_digest: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
     surrogate_spot_check: SurrogateSpotCheck | None = Field(default=None, exclude_if=lambda value: value is None)
+    materials_path: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
+    materials_sha256: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _depth_not_fixed(self) -> Self:
         check_fixed_depth_conflicts(self.fixed_surfaces, self.max_depths)
+        if (self.materials_path is None) != (self.materials_sha256 is None):
+            raise ValueError("材料快照的路徑與 SHA-256 要一起記（使用者材料接成家族的搜尋），或都不記")
         fields = (self.surrogate_physics_identity, self.operators_digest, self.surrogate_spot_check)
         if any(value is not None for value in fields):
             spot = self.surrogate_spot_check
@@ -339,12 +348,13 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
                 settings_fingerprint: str, physics_identity: str, objective_settings_fingerprint: str,
                 mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
                 patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None,
-                frequency_batch: int | None = None, device: Device = "cpu") -> str:
+                frequency_batch: int | None = None, device: Device = "cpu", materials_sha256: str | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
     登記簿的代理三格與第一階段設定）算進來：只改那三格就是另一個資料夾，不會撞到加代理之前的那一個。
     安裝方式（#990）只在不是剛背時多一個 ``"mount"`` 鍵：剛背的資料夾名逐位等於加這一格之前，貼在原牆上落在另一個資料夾。
+    材料快照（#1082 段 2-3a）只在使用者材料接成家族時多一個 ``"materials"`` 鍵（快照整份的 SHA-256）。
     """
     identity: dict[str, object] = {
         "scheme": scheme_sha256, "surrogate": surrogate_manifest_sha256, "presets": list(presets), "purpose": purpose,
@@ -359,6 +369,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["device"] = device
     if frequency_batch is not None:
         identity["frequency_batch"] = frequency_batch
+    if materials_sha256 is not None:
+        identity["materials"] = materials_sha256
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
     content = json.dumps(identity,
@@ -472,10 +484,27 @@ def _check_same_points(given: SchemePoints, scheme: SchemePoints, what: str) -> 
                 raise ValueError(f"{label} {name} 的座標：{what}是 {recorded.get(name)}，方案是 {wanted.get(name)}，拒收")
 
 
-def project_settings(project: GradientProject) -> MaterialGradientSettings:
-    """這一跑生效的搜尋設定：讀 ``settings_path``，開跑時另外指定了步數上限就套上（#1073）；指紋由呼叫端比。"""
+def project_materials(project: GradientProject) -> SearchMaterials:
+    """這一跑的材料：讀 ``settings_path`` 與產品構造預設清單，有材料快照就把快照裡的使用者材料接成家族
+    （讀資料夾裡那份、SHA-256 要等於記的，不讀網頁資料夾裡現在的材料庫）；步數上限還沒套。"""
     settings = load_material_gradient_settings(project.settings_path)
+    entries: tuple[OptimizableEntry, ...] = ()
+    if project.materials_path is not None and project.materials_sha256 is not None:
+        entries = read_snapshot(Path(project.materials_path), project.materials_sha256)
+    return with_user_materials(settings, presets_table(), entries)
+
+
+def project_settings(project: GradientProject) -> MaterialGradientSettings:
+    """這一跑生效的搜尋設定：:func:`project_materials` 的設定，開跑時另外指定了步數上限就套上（#1073）；指紋由呼叫端比。"""
+    settings = project_materials(project).settings
     return settings if project.max_steps is None else with_max_steps(settings, project.max_steps)
+
+
+def project_presets(project: GradientProject) -> tuple[PresetMaterial, ...]:
+    """這一跑的構造清單：產品構造預設，有材料快照就接上快照裡使用者材料生成的構造（不讀搜尋設定；快照 SHA-256 照核）。"""
+    if project.materials_path is None or project.materials_sha256 is None:
+        return presets_table()
+    return with_user_presets(presets_table(), read_snapshot(Path(project.materials_path), project.materials_sha256))
 
 
 def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = False) -> tuple[Scheme, ReducedModel, MaterialGradientSettings]:
@@ -550,34 +579,37 @@ def search_objective_constants(project: GradientProject, scheme: Scheme,
 
 def _uncapped_designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
                 kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
-                fixed_surfaces: Mapping[str, str] | None = None) -> tuple[SurfaceDesign, ...]:
+                fixed_surfaces: Mapping[str, str] | None = None,
+                table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
     """有分區照共用面片序、整面照 ``Wall.all()`` 的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
     那一面的材料（方案原本的牆，``scene_wall_materials``），是「不貼、保留原牆」，不是剛性；``mount`` 是貼在原牆上時，
-    貼樣板的面背後接 ``kept`` 那一面。"""
+    貼樣板的面背後接 ``kept`` 那一面。``table`` 是構造清單（不給是產品構造預設；有材料快照的搜尋給 :func:`project_presets`）。"""
+    table = presets_table() if table is None else tuple(table)
     keys = material_keys(kept)
     if keys != boundary_patches():
         names = surface_ids(keys)
         if len(presets) != len(names):
             raise ValueError(f"面片清單要給 {len(names)} 個 preset id")
-        return designs_with_fixed(tuple(zip(names, presets, strict=True)), settings, presets_table(),
+        return designs_with_fixed(tuple(zip(names, presets, strict=True)), settings, table,
                                   kept=named_materials(kept), mount=mount, fixed_surfaces=fixed_surfaces or {})
     whole_kept = cast(Mapping[Wall, SurfaceMaterial], kept)
     if fixed_surfaces:
         if len(presets) != len(Wall.all()):
             raise ValueError("六面牆要給六個 preset id")
         return designs_with_fixed(tuple(zip((wall.wall_name() for wall in Wall.all()), presets, strict=True)),
-                                  settings, presets_table(), kept={w.wall_name(): m for w, m in whole_kept.items()},
+                                  settings, table, kept={w.wall_name(): m for w, m in whole_kept.items()},
                                   mount=mount, fixed_surfaces=fixed_surfaces)
-    return wall_designs_from_presets(presets, settings, presets_table(),
+    return wall_designs_from_presets(presets, settings, table,
                                      kept={wall.wall_name(): material for wall, material in whole_kept.items()}, mount=mount)
 
 
 def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
                 kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
                 fixed_surfaces: Mapping[str, str] | None = None,
-                max_depths: Mapping[str, float] | None = None) -> tuple[SurfaceDesign, ...]:
-    """建立起跑設計，驗證每面上限不超過起跑家族上限，再套入；空設定沿用舊設計。"""
-    designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces)
+                max_depths: Mapping[str, float] | None = None,
+                table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
+    """建立起跑設計，驗證每面上限不超過起跑家族上限，再套入；空設定沿用舊設計。``table`` 同 :func:`_uncapped_designs_for`。"""
+    designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces, table=table)
     return designs_with_max_depths(designs, settings, max_depths or {})
 
 
@@ -598,8 +630,9 @@ def load_problem(project: GradientProject) -> GradientProblem:
                               directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
     kept = _wall_materials_from_inputs(score_scheme, next(iter(pairs.values()))[1])
     require_supported_original_walls(kept.values())
+    table = project_presets(project)
     designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     six = build_constants(score_scheme, pair_inputs={key: item[1] for key, item in pairs.items()},
@@ -620,11 +653,47 @@ def load_problem(project: GradientProject) -> GradientProblem:
 
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
-    context = TemplateContext(settings, presets_table(), named_materials(kept),
+    context = TemplateContext(settings, table, named_materials(kept),
                               objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, tuple(d.surface_id for d in designs)),
                               max_depths=project.max_depths)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
                                                                     objective_constants=six), kept, context)
+
+
+def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[float], *, density_kg_m3: float,
+                        sound_speed_m_s: float) -> None:
+    """開跑前把每個接進來的使用者家族都真的建一次（#1082 段 2-3a）：換樣板會換到每一個家族，不先擋會在搜尋半路才壞。
+
+    每一筆：用它的樣板建一面設計（一層多孔、最多一層空腔、厚度界照合法厚度）、初值要在盒界內而且可行、
+    樣板在這一場搜尋的頻點算得出垂直入射阻抗（空氣照方案場景、多孔範圍照產品設定，跟 :func:`load_problem` 同一組）。
+    物理拒算（例如小松模型流阻出了手動試算範圍）原文照轉、前面點名是哪一筆材料的多孔層；範圍數字只住設定檔，這裡不重寫。
+    """
+    if not materials.entries:
+        return
+    from aosr.materials.construction import surface_impedance
+    from aosr.materials.search_library import MaterialsRefused
+
+    if jnp.asarray(0.0).dtype != jnp.float64:
+        # 正式入口（命令列 main）開機就開雙精度；沒開時物理會拒算，那是行程設定的問題，不准講成材料參數的錯。
+        raise RuntimeError("這個行程沒有開雙精度，算不了材料物理檢查；這是開機設定的問題，不是材料參數的問題")
+    air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    axis = jnp.asarray(tuple(frequencies_hz), dtype=jnp.float64)
+    for entry in materials.entries:
+        name = f"材料「{entry.label}」（{entry.id}）"
+        family = materials.settings.family_by_id(entry.id)
+        try:
+            designs = designs_from_presets((("check", family.template_preset),), materials.settings, materials.presets)
+            if not is_feasible(baseline_theta(designs), designs):
+                raise ValueError("初值的厚度加空腔超過總深度上限")
+        except ValueError as error:
+            raise MaterialsRefused(f"{name}建不成搜尋樣板：{error}") from error
+        template = designs[0].material
+        if template is None:
+            raise MaterialsRefused(f"{name}建不成搜尋樣板：樣板是空的")
+        try:
+            surface_impedance(template, axis, air=air, ranges=ranges)
+        except ValueError as error:
+            raise MaterialsRefused(f"{name}的多孔層（porous）參數物理拒算，搜尋不開：{error}") from error
 
 
 def presets_table() -> tuple[ConstructionPreset, ...]:
@@ -795,26 +864,29 @@ def ledger_progress(rows: Sequence[MaterialGradientRow]) -> tuple[int, int, floa
 def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings,
                   kept: Mapping[K, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
                   fixed_surfaces: Mapping[str, str] | None = None,
-                  max_depths: Mapping[str, float] | None = None) -> tuple[SurfaceDesign, ...]:
+                  max_depths: Mapping[str, float] | None = None,
+                  table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
     """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。
+    ``table`` 同 :func:`_uncapped_designs_for`（有材料快照的搜尋要給 :func:`project_presets`）。
 
     每面上限已在起跑驗證，換家族後沿用換樣板的 min 規則，不再用新家族上限拒收原選項。
     """
     if tuple(surface_id for surface_id, _ in surfaces) != surface_ids(material_keys(kept)):
         raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
     designs = _uncapped_designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
-                                    fixed_surfaces=fixed_surfaces)
+                                    fixed_surfaces=fixed_surfaces, table=table)
     return designs_with_max_depths(designs, settings, max_depths or {}, check_family_upper=False)
 
 
 def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
                        expected_header: MaterialGradientHeader | None = None,
-                       expected_template_header: TemplateHeader | None = None, legacy: bool = False) -> GradientResult:
+                       expected_template_header: TemplateHeader | None = None, legacy: bool = False,
+                       table: Sequence[PresetMaterial] | None = None) -> GradientResult:
     """從兩本帳重建整份結果，不寫檔：庚二帳本要收尾（給了 ``expected_header`` 標頭要逐格相等）；換樣板帳本要收尾、
     標頭記的庚二帳本摘要等於現在那本、起點是庚二收尾那一點（給了 ``expected_template_header`` 要逐格相等），
     最後配置與 θ 取它最後一列決定。每面材料摘要從最後配置重建的設計（``endpoint.design_digest``）來，安裝方式照庚二帳本標頭：
     六類剛背寫 v6、貼在原牆上寫 v7；legacy 唯讀重建仍回 v4／v5。
-    寫 ``result.json`` 與終點核結果檔都走這一支（終點拿它跟檔裡那份整個比）。"""
+    寫 ``result.json`` 與終點核結果檔都走這一支（終點拿它跟檔裡那份整個比）。``table`` 同 :func:`final_designs`。"""
     path, templates = folder / LEDGER_FILE, folder / TEMPLATES_FILE
     header, rows = read_ledger(path, expected_header=expected_header, legacy=legacy)
     origin = template_start(header, rows)
@@ -830,7 +902,8 @@ def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientS
         raise ValueError(f"{TEMPLATES_FILE} 沒有以帶停止原因的決定列結尾，沒有結果可寫")
     closing = template_rows[-1]
     value, screening, components = closing.scores()
-    designs = final_designs(final.surfaces, settings, kept, mount=header.mount, fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths)
+    designs = final_designs(final.surfaces, settings, kept, mount=header.mount, fixed_surfaces=header.fixed_surfaces,
+                            max_depths=header.max_depths, table=table)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
     mounted = header.mount == MOUNT_ON_WALL
@@ -856,7 +929,7 @@ def write_result(folder: Path, problem: GradientProblem) -> GradientResult:
     template_header = template_header_for(problem.header, problem.settings, problem.kept,
                                           base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
     result = result_from_ledger(folder, problem.settings, problem.kept, expected_header=problem.header,
-                                expected_template_header=template_header)
+                                expected_template_header=template_header, table=problem.templates.presets)
     write_json_atomic(folder / RESULT_FILE, result)
     return result
 

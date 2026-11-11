@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import replace
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final, Literal, Self
 
@@ -34,7 +34,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.construction_environment import construction_environment
-from aosr.config.construction_presets import load_construction_presets
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
@@ -56,10 +55,11 @@ from aosr.gradient.material_gradient import SurfaceDesign
 from aosr.gradient.run import (
     LEDGER_FILE, RESULT_FILE, RESULT_VERSION, MOUNTED_RESULT_VERSION, LOW_FREQUENCY_RESULT_VERSION,
     LOW_FREQUENCY_MOUNTED_RESULT_VERSION, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
-    parse_result, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
+    parse_result, project_presets, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
     search_objective_settings, template_header_for, write_json_atomic,
 )
 from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.search_library import PresetMaterial
 from aosr.physics.report_surfaces import validation_content
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.scoring.gradient_objective_settings import GradientObjectiveSettings
@@ -205,12 +205,13 @@ def exported_scheme(scheme: Scheme, scene: Scene, gradient_id: str) -> Scheme:
 
 
 def checked_result[K: BoundaryKey](folder: Path, given: GradientResult, header: MaterialGradientHeader,
-                   settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial]) -> GradientResult:
+                   settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
+                   table: Sequence[PresetMaterial] | None = None) -> GradientResult:
     """結果檔不能只信它自己說的：從兩本帳（庚二帳本標頭要等於 ``header``；換樣板帳本標頭要等於照它與現在的庚二帳本摘要
     重建的）重建整份結果，跟檔裡那份整個模型相等才收，回重建那一份；不等就拒收、列出哪幾格不同。"""
     template_header = template_header_for(header, settings, kept, base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
     rebuilt = result_from_ledger(folder, settings, kept, expected_header=header, expected_template_header=template_header,
-                                 legacy=given.format_version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION))
+                                 legacy=given.format_version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION), table=table)
     if rebuilt != given:
         actual, expected = given.model_dump(), rebuilt.model_dump()
         differing = sorted(name for name in expected if actual.get(name) != expected[name])
@@ -303,7 +304,7 @@ def _endpoint_for(project: GradientProject, scheme: Scheme, model: ReducedModel,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     return endpoint_check(operators, designs, theta, model=model, objective_settings=search_objective_settings(project.purpose),
         receiver_set=scheme.receiver_set, low_frequency_axis=scheme.scene.low_frequency_axis,
-        presets=load_construction_presets(config_path('construction_presets.toml')), settings=settings, air=air, ranges=ranges,
+        presets=project_presets(project), settings=settings, air=air, ranges=ranges,
         workers=workers, frequency_batch=project.frequency_batch, device=device, refinement_steps=refinement_steps)
 
 
@@ -350,12 +351,15 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     operators = _ordered_operators(operators, model)
     context = scoring_context(scheme, model, project.purpose, capabilities=capabilities, directivity=directivity,
                                capabilities_path=Path(project.capabilities_path), engine_commit=project.engine_commit)
+    table = project_presets(project)
     initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table)
     result = checked_result(folder, given, header_for(model, initial, settings,
-        objective_constants=context.constants if current else search_objective_constants(project, scheme, model)), settings, kept)
+        objective_constants=context.constants if current else search_objective_constants(project, scheme, model)), settings, kept,
+        table=table)
     designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
-                            mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths)
+                            mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths,
+                            table=table)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     objective = search_objective_settings(project.purpose)
     clock = time.perf_counter()
@@ -370,7 +374,7 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     improvement = _improvement(baseline, report, base)
     materials = materials_from_surfaces(designs, theta, settings)
     exported = exported_scheme(scheme, scene_with_materials(scheme.scene, materials), project.gradient_id)
-    original_designs = designs_for((None,) * len(initial), settings, kept=kept)
+    original_designs = designs_for((None,) * len(initial), settings, kept=kept, table=table)
     six = score_endpoint(context, model, designs, np.asarray(report.exported_theta), checked.full_pressure,
                          checked.reduced_pressure, original_designs, pressures, exported)
     write_json_atomic(folder / EXPORTED_SCHEME_FILE, exported)
