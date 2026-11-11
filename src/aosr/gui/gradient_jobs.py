@@ -188,14 +188,15 @@ class GradientJobs:
     def __init__(self, data_dir: Path, *, launcher: Launcher, engine_commit: str, capabilities: Path,
                  scheme_lock: AbstractContextManager[object], settings_path: Path | None = None,
                  python: str = sys.executable) -> None:
-        self.data_dir = data_dir
-        self.root = data_dir / JOBS_DIR
+        # 服務的工作目錄是 repo 根，交給命令列的路徑一律先換成絕對路徑（相對路徑在服務裡會指到別處）。
+        self.data_dir = data_dir.resolve()
+        self.root = self.data_dir / JOBS_DIR
         self.root.mkdir(parents=True, exist_ok=True)
         self.launcher = launcher
         self.engine_commit = engine_commit
-        self.capabilities = capabilities
+        self.capabilities = capabilities.resolve()
         self.scheme_lock = scheme_lock
-        self.settings_path = settings_path
+        self.settings_path = None if settings_path is None else settings_path.resolve()
         self.python = python
         self.lock = threading.RLock()
 

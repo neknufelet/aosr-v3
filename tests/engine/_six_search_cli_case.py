@@ -22,7 +22,7 @@ ENDPOINT_MODULES = frozenset(('test_material_gradient_endpoint_cli', 'test_gradi
     'test_material_gradient_fixed_surface_cli', 'test_material_gradient_mount', 'test_material_gradient_templates_cli',
     'test_six_search_review_fixes', 'slow_material_gradient_endpoint_cli', 'slow_gradient_endpoint_range_migration',
     'slow_material_gradient_fixed_surface_cli', 'slow_material_gradient_mount',
-    'slow_material_gradient_templates_cli', 'slow_six_search_review_fixes'))
+    'slow_material_gradient_templates_cli', 'slow_six_search_review_fixes', 'slow_gui_gradient_jobs'))
 
 
 @pytest.fixture(scope='module')

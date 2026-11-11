@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import signal
 import subprocess
 import sys
@@ -308,6 +309,22 @@ def test_start_snapshots_inputs_and_launches_the_cli_through_the_wrapper(tmp_pat
     assert command[-2:] == ["--max-steps", "5"]
     assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == env["OPENBLAS_NUM_THREADS"] == "1"
     assert (cwd / "pyproject.toml").is_file()
+
+
+def test_paths_handed_to_the_service_are_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓相對路徑原樣交給服務：服務的工作目錄是 repo 根，相對的資料夾、設定檔、能力表在那裡指到別處（真服務實跑抓到的）。"""
+    _data(tmp_path)
+    (tmp_path / "settings.toml").write_text(config_path("material_gradient.toml").read_text(encoding="utf-8"))
+    monkeypatch.chdir(tmp_path)
+    launcher = FakeLauncher()
+    jobs = GradientJobs(Path("data"), launcher=launcher, engine_commit="c" * 40,
+                        capabilities=Path(os.path.relpath(config_path("capabilities.toml"), tmp_path)),
+                        scheme_lock=threading.RLock(), settings_path=Path("settings.toml"))
+    jobs.start(NAME, GradientRequest())
+    _, argv, _, _ = launcher.launched[0]
+    for flag in ("--scheme", "--surrogate", "--root", "--capabilities", "--settings"):
+        assert Path(argv[argv.index(flag) + 1]).is_absolute(), flag
+    assert Path(argv[3]).is_absolute() and Path(argv[4]).is_absolute()  # 離開碼檔與輸出檔
 
 
 def test_one_job_at_a_time_on_the_whole_machine(tmp_path: Path) -> None:
