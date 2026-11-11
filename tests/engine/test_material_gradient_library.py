@@ -24,6 +24,7 @@ from pydantic import TypeAdapter
 
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.config.product_air import product_air_environment
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import cli, run
 from aosr.gradient import material_gradient as search
@@ -404,3 +405,14 @@ def test_web_refuses_fixed_family_and_unreadable_library_and_omits_flag_without_
     (data_dir / "materials.json").write_text("{", encoding="utf-8")
     with pytest.raises(PlanRefused, match="使用者材料庫（materials.json）讀不進來"):
         jobs.preview(NAME, GradientRequest())
+
+
+def test_physics_check_never_blames_the_material_for_missing_double_precision() -> None:
+    """pytest 行程刻意不開雙精度：物理檢查要講明是行程設定，不准回「材料參數物理拒算」。"""
+    import jax.numpy as jnp
+
+    assert jnp.asarray(0.0).dtype != jnp.float64
+    chosen = materials.with_user_materials(_base(), run.presets_table(), (_optimizable(),))
+    with pytest.raises(RuntimeError, match="沒有開雙精度.*不是材料參數的問題"):
+        air, _ = product_air_environment()
+        run.check_user_families(chosen, (63.0,), density_kg_m3=air.air_density_kg_m3, sound_speed_m_s=air.sound_speed_m_s)

@@ -13,6 +13,7 @@ from pydantic import TypeAdapter
 
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.config.product_air import product_air_environment
 from aosr.gradient import run
 from aosr.materials.library import LibraryEntry
 from aosr.materials.search_library import with_user_materials
@@ -26,7 +27,9 @@ def main() -> None:
     settings = load_material_gradient_settings(config_path("material_gradient.toml"))
     materials = with_user_materials(settings, run.presets_table(), entries)
     try:
-        run.check_user_families(materials, tuple(request["frequencies_hz"]), density_kg_m3=1.2, sound_speed_m_s=343.0)
+        air, _ = product_air_environment()
+        run.check_user_families(materials, tuple(request["frequencies_hz"]), density_kg_m3=air.air_density_kg_m3,
+                                sound_speed_m_s=air.sound_speed_m_s)
     except ValueError as error:
         result: dict[str, object] = {"refused": str(error), "type": type(error).__name__}
     else:

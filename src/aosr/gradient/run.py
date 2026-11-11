@@ -673,6 +673,9 @@ def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[flo
     from aosr.materials.construction import surface_impedance
     from aosr.materials.search_library import MaterialsRefused
 
+    if jnp.asarray(0.0).dtype != jnp.float64:
+        # 正式入口（命令列 main）開機就開雙精度；沒開時物理會拒算，那是行程設定的問題，不准講成材料參數的錯。
+        raise RuntimeError("這個行程沒有開雙精度，算不了材料物理檢查；這是開機設定的問題，不是材料參數的問題")
     air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     axis = jnp.asarray(tuple(frequencies_hz), dtype=jnp.float64)
     for entry in materials.entries:
