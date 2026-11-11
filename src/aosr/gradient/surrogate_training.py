@@ -301,7 +301,8 @@ class TrainingSets:
                 raise ValueError(f"涵蓋那一節的家族 {sorted(trained)} 跟這一次抽的 {sorted(self.families)} 不同")
             for family in coverage.families:
                 box = self.boxes[family.id]
-                if box.thickness != family.thickness_m or (box.cavity is not None and box.cavity != family.cavity_m):
+                if (box.thickness, box.cavity, box.max_total_m) != (family.thickness_m, family.cavity_m,
+                                                                   family.max_total_depth_m):
                     raise ValueError(f"涵蓋那一節記的家族 {family.id} 範圍跟這一次真的抽的盒界不同，不能照記")
             document["coverage"] = coverage.model_dump(mode="json")
             document["family_weights"] = dict(zip(self.families, self.weights, strict=True))

@@ -5,6 +5,9 @@
 這一場的家族有一個沒訓練過、或範圍超出訓練過的，就拒收、要重建——不是只警告（限制一律是硬的）。
 
 一個家族記：代號、換樣板構造的代號與內容摘要（流阻之類的內容換了、代號沒變也算不同）、厚度範圍、空腔範圍、總深度上限。
+訓練只用換樣板抽（:mod:`aosr.gradient.surrogate_training`），所以記的空腔是「真的抽過的」：換樣板沒有空氣層就是 None。
+開跑那一側要的是「搜尋可能走到的」：家族裡任一個構造（起跑可以選任一個成員）有空氣層就要空腔，而且每個成員的多孔層
+（厚度除外）要跟換樣板相同——不同的成員訓練沒見過，點名拒收（審查 #1107 點出：換樣板沒空腔、成員有空腔會漏核）。
 涵蓋＝這一場的每個家族都找得到同代號、同構造內容，而且厚度與空腔範圍都在訓練過的裡面、總深度上限不比訓練過的大。
 個案的每面深度上限只會把範圍切小，不算進來（替身照家族範圍建）。
 
@@ -49,7 +52,7 @@ class FamilyCoverage(_Frozen):
     template_preset: str = Field(min_length=1)
     template_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     thickness_m: tuple[float, float]
-    cavity_m: tuple[float, float]
+    cavity_m: tuple[float, float] | None
     max_total_depth_m: float
 
 
@@ -67,20 +70,60 @@ def template_sha256(material: Mapping[str, object]) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def family_coverage(settings: MaterialGradientSettings,
-                    presets: Sequence[PresetMaterial]) -> tuple[FamilyCoverage, ...]:
-    """搜尋設定的每個家族 → 它的訓練範圍；樣板構造照構造清單找（找不到就拒收，講是哪一個）。"""
+def _layers(material: Mapping[str, object]) -> list[Mapping[str, object]]:
+    layers = material.get("layers")
+    return [layer for layer in layers if isinstance(layer, Mapping)] if isinstance(layers, list) else []
+
+
+def has_air_layer(material: Mapping[str, object]) -> bool:
+    """構造有空氣層（``kind = "air"``）：搜尋設計照這一層開空腔變數（``material_gradient._surface_design`` 同一條）。"""
+    return any(layer.get("kind") == "air" for layer in _layers(material))
+
+
+def porous_identity(material: Mapping[str, object]) -> list[dict[str, object]]:
+    """多孔層去掉厚度（厚度是搜尋變數）之後的內容：同一個家族的成員要跟換樣板一樣，替身才算見過。"""
+    return [{key: value for key, value in layer.items() if key != "thickness_m"}
+            for layer in _layers(material) if layer.get("kind") == "porous"]
+
+
+def _preset(table: Mapping[str, PresetMaterial], family: FamilySettings, preset_id: str) -> PresetMaterial:
+    preset = table.get(preset_id)
+    if preset is None:
+        raise ValueError(f"家族 {family.id} 的構造 {preset_id} 不在構造清單裡")
+    return preset
+
+
+def family_coverage(settings: MaterialGradientSettings, presets: Sequence[PresetMaterial], *,
+                    reachable: bool = False) -> tuple[FamilyCoverage, ...]:
+    """搜尋設定的每個家族 → 它的範圍；構造照構造清單找（找不到就拒收，講是哪一個）。
+
+    ``reachable`` 是 False：建模真的抽過的（空腔只看換樣板有沒有空氣層）；True：開跑可能走到的（家族任一成員有空氣層就算）。"""
     table = {preset.id: preset for preset in presets}
     rows = []
     for family in settings.family:
-        preset = table.get(family.template_preset)
-        if preset is None:
-            raise ValueError(f"家族 {family.id} 的樣板構造 {family.template_preset} 不在構造清單裡")
+        template = _preset(table, family, family.template_preset)
+        shapes = [template.material]
+        if reachable:
+            shapes += [_preset(table, family, member).material for member in family.presets]
+        cavity = family.cavity_range_m if any(has_air_layer(shape) for shape in shapes) else None
         rows.append(FamilyCoverage(id=family.id, template_preset=family.template_preset,
-                                   template_sha256=template_sha256(preset.material),
+                                   template_sha256=template_sha256(template.material),
                                    thickness_m=(min(family.thicknesses_m), max(family.thicknesses_m)),
-                                   cavity_m=family.cavity_range_m, max_total_depth_m=family.max_total_depth_m))
+                                   cavity_m=cavity, max_total_depth_m=family.max_total_depth_m))
     return tuple(rows)
+
+
+def _member_problems(settings: MaterialGradientSettings, presets: Sequence[PresetMaterial]) -> list[str]:
+    """家族成員的多孔層（厚度除外）跟換樣板不同：替身只用換樣板訓練過，那個成員沒見過。"""
+    table = {preset.id: preset for preset in presets}
+    problems = []
+    for family in settings.family:
+        porous = porous_identity(_preset(table, family, family.template_preset).material)
+        for member in family.presets:
+            if porous_identity(_preset(table, family, member).material) != porous:
+                problems.append(f"家族 {family.id} 的構造 {member} 的多孔層跟換樣板 {family.template_preset} 不同"
+                                "（替身只用換樣板訓練過）")
+    return problems
 
 
 def product_families() -> tuple[FamilySettings, ...]:
@@ -131,7 +174,9 @@ def _problems(wanted: Sequence[FamilyCoverage], trained: Sequence[FamilyCoverage
         else:
             if not _inside(family.thickness_m, seen.thickness_m):
                 problems.append(f"家族 {family.id} 的厚度範圍 {list(family.thickness_m)} 超出訓練過的 {list(seen.thickness_m)}")
-            if not _inside(family.cavity_m, seen.cavity_m):
+            if family.cavity_m is not None and seen.cavity_m is None:
+                problems.append(f"家族 {family.id} 的空腔沒訓練過（訓練用的換樣板沒有空氣層，這一場會調空腔）")
+            elif family.cavity_m is not None and seen.cavity_m is not None and not _inside(family.cavity_m, seen.cavity_m):
                 problems.append(f"家族 {family.id} 的空腔範圍 {list(family.cavity_m)} 超出訓練過的 {list(seen.cavity_m)}")
             if family.max_total_depth_m > seen.max_total_depth_m:
                 problems.append(f"家族 {family.id} 的總深度上限 {family.max_total_depth_m:g} m 比訓練過的 "
@@ -144,14 +189,15 @@ def check_covers(training: Path, materials: SearchMaterials) -> None:
 
     ``training`` 是替身旁的訓練說明（``surrogate.npz`` 同資料夾的 ``training.json``）。"""
     trained = read_coverage(training)
+    wanted = family_coverage(materials.settings, materials.presets, reachable=True)
     if trained is None:
         if only_product_families(materials):
             return
         product = family_coverage(load_material_gradient_settings(config_path("material_gradient.toml")),
                                   materials.presets)
-        extra = _problems(family_coverage(materials.settings, materials.presets), product)
+        extra = _problems(wanted, product) + _member_problems(materials.settings, materials.presets)
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：這份替身沒記訓練過哪些材料（材料庫接進搜尋之前建的，"
                                     f"只用產品設定檔的家族訓練過），這一場{'；'.join(extra) or '的家族設定換過'}")
-    problems = _problems(family_coverage(materials.settings, materials.presets), trained.families)
+    problems = _problems(wanted, trained.families) + _member_problems(materials.settings, materials.presets)
     if problems:
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：{'；'.join(problems)}")

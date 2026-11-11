@@ -110,3 +110,32 @@ def test_a_family_the_surrogate_never_saw_and_a_broken_note_are_refused(tmp_path
     _refused(training, _materials(_optimizable(), other), "家族 rock_wool_100k 沒訓練過")
     training.write_text("{", encoding="utf-8")
     _refused(training, _materials(), "讀不懂")
+
+
+def test_template_without_cavity_does_not_cover_members_with_cavity(tmp_path: Path) -> None:
+    """抓換樣板沒有空氣層（訓練一個空腔都沒抽）、家族裡別的構造卻有空腔（起跑選它就會調空腔）時，
+    涵蓋照設定檔記了空腔範圍、開跑閘門放行（#1107 唯讀審查重現的漏洞）。期望值手寫，不由 ``coverage_for`` 生成。"""
+    raw = BASE.model_dump(mode="json")
+    raw["family"][0].update(template_preset="glass_wool_48k_50mm", initial_cavity_m=None)
+    settings = MaterialGradientSettings.model_validate(raw)
+    assert settings.family[0].presets.count("glass_wool_48k_50mm_gap50") == 1
+    materials = _materials(settings=settings)
+    coverage = coverage_for(materials)
+    assert coverage is not None and coverage.families[0].id == "glass_wool_48k" and coverage.families[0].cavity_m is None
+    training = tmp_path / TRAINING_FILE
+    training.write_text(json.dumps({"version": COVERAGE_VERSION, "coverage": coverage.model_dump(mode="json")}),
+                        encoding="utf-8")
+    _refused(training, materials, "家族 glass_wool_48k 的空腔沒訓練過")
+
+
+def test_a_member_with_another_porous_layer_is_not_covered_by_its_template(tmp_path: Path) -> None:
+    """抓家族成員的多孔層（流阻）跟換樣板不同、替身只用換樣板訓練過，開跑照樣放行；產品設定檔的家族不准中這一條
+    （中了就是每一場預設搜尋都被拒）。"""
+    training = trained_on(tmp_path / "surrogate.npz", _materials(_optimizable()))
+    check_covers(training, _materials(_optimizable()))
+    joined = _materials(_optimizable())
+    # 設定檔驗證不准一個構造掛兩個家族；這裡繞過驗證直接塞，只考閘門自己擋不擋得住
+    mixed = joined.settings.model_copy(update={"family": (joined.settings.family[0].model_copy(
+        update={"presets": (*joined.settings.family[0].presets, "glass_wool_24k_50mm")}), *joined.settings.family[1:])})
+    _refused(training, joined._replace(settings=mixed),
+             "家族 glass_wool_48k 的構造 glass_wool_24k_50mm 的多孔層跟換樣板 glass_wool_48k_50mm_gap50 不同")
