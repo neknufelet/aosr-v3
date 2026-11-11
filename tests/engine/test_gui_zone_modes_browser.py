@@ -242,6 +242,9 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         assert not (tmp_path / "designs" / "room109.json").exists()
         page.unroute("**/api/designs/room109")
 
+        # 只考跳到哪一個網址：搜尋頁一打開就向後端要開跑計畫（重計算），它自己有考卷（#1108），這裡用一頁空殼接住。
+        page.route(f"{base}/gradient?scheme=room109",
+                   lambda route: route.fulfill(status=200, content_type="text/plain", body="gradient"))
         page.locator("#zone-to-search").click()
         page.wait_for_url(f"{base}/gradient?scheme=room109")
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
