@@ -247,3 +247,31 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
         assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search"}}
         assert watched.page_errors == []
+
+
+def test_switching_scheme_while_send_to_search_saves_keeps_the_new_scheme_and_does_not_jump(tmp_path: Path,
+                                                                                           browser: Browser) -> None:
+    """按「拿去搜尋」存檔途中（設計設定的回覆還沒到）打開另一份：晚到的回覆不把舊方案的做法寫回頁面，也不跳頁；
+    舊方案的做法照樣存好。"""
+    _write(tmp_path, room109_document())
+    _write(tmp_path, room109_document("other"))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        held: list[Route] = []
+        page.route("**/api/designs/room109",
+                   lambda route: held.append(route) if route.request.method == "PUT" else route.continue_())
+        with page.expect_request(lambda r: r.url.endswith("/api/designs/room109") and r.method == "PUT"):
+            page.locator("#zone-to-search").click()
+        _open_scheme(page, "other")
+        assert page.evaluate("[zoneDesign.scheme_id, zoneDesign.zones]") == ["other", {}]
+        held[0].continue_()
+        expect(page.locator("#zone-note")).to_contain_text("存檔途中換了方案")
+        assert page.evaluate("[zoneDesign.scheme_id, zoneDesign.zones]") == ["other", {}]
+        assert page.url == f"{base}/"
+        assert page.locator("#save-id").input_value() == "other"
+        stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
+        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search"}}
+        assert watched.page_errors == []

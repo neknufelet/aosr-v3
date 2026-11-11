@@ -10,6 +10,8 @@ let zoneDesignNote = "";
 let zoneDesignBroken = false;
 // 最近一次存方案時每一區的做法有沒有存成（沒設過、不必寫也算存成）；「拿去搜尋」靠它決定跳不跳。
 let zoneDesignSaved = false;
+// 頁面上那一份做法換過幾次（打開方案、載入範本各算一次）：存檔途中使用者換了方案，晚到的回覆不准把舊做法寫回來。
+let zoneDesignGeneration = 0;
 let zoneLibrary = null;
 let zoneLibraryProblem = "";
 let zoneNoteText = "";
@@ -53,11 +55,12 @@ async function fetchZoneDesign(name) {
   }
 }
 function applyZoneDesign(state) {
+  zoneDesignGeneration += 1;
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
   zoneDesignNote = state.note; zoneNote("", "");
 }
 // 載入範本：新的方案，沒有設計設定。
-function resetZoneDesign() { zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); }
+function resetZoneDesign() { zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); }
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
 async function saveZoneDesign(name) {
@@ -73,8 +76,10 @@ async function saveZoneDesign(name) {
     if (!Object.keys(design.zones[wall]).length) delete design.zones[wall];
   }
   if (design.original_scheme_id === name) design.original_scheme_id = null;
+  const generation = zoneDesignGeneration;
   await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
-  zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; zoneDesignSaved = true;
+  zoneDesignSaved = true;
+  if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
 }
 // 各面交給搜尋的區有幾塊（只算現在切法裡還在的區）。
 function searchZoneCount() {
@@ -87,7 +92,9 @@ function searchZoneCount() {
 }
 // 「拿去搜尋」：搜尋頁讀的是存好的方案與做法，先照畫面存一份；兩樣都存成才跳過去，沒存成留在這頁照講。
 async function sendToSearch() {
+  const generation = zoneDesignGeneration, name = $("save-id").value;
   if (!await save()) return;
+  if (generation !== zoneDesignGeneration) { zoneNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice"); return; }
   if (!zoneDesignSaved) { zoneNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice"); return; }
   window.location.href = `/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`;
 }
