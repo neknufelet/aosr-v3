@@ -269,14 +269,22 @@ function searchCell(wall, key, zone, setting, cell) {
     const wrap = document.createElement("label");
     const input = document.createElement("input"); input.type = "checkbox"; input.id = `zone-allow-${wall}-${key}-${id}`;
     input.checked = setting.allowed.includes(id);
-    input.onchange = () => changeAllowed(wall, key, choices.map(([choice]) => choice).filter(choice =>
-      choice === id ? input.checked : setting.allowed.includes(choice)));
+    // 只加減勾的這一種：存著的清單原樣帶回（順序不動、材料庫找不到的代號也不偷丟）。
+    input.onchange = () => changeAllowed(wall, key, input.checked
+      ? [...setting.allowed.filter(choice => choice !== id), id] : setting.allowed.filter(choice => choice !== id));
     wrap.append(input, document.createTextNode(text)); list.append(wrap);
   }
-  const names = choices.filter(([id]) => setting.allowed.includes(id)).map(([, text]) => text.replace(/（.*$/, ""));
+  const known = new Map(choices.map(([id, text]) => [id, text.replace(/（.*$/, "")]));
+  const missing = setting.allowed.filter(id => !known.has(id));
+  const names = setting.allowed.map(id => known.get(id) ?? `${id}（材料庫找不到）`);
   summary.textContent = `准用 ${names.length} 種：${names.join("、") || "（沒有）"}（點開改）`;
   details.append(summary, list);
   cell.append(details);
+  if (missing.length) {
+    const line = document.createElement("p"); line.className = "notice"; line.id = `zone-allowed-missing-${wall}-${key}`;
+    line.textContent = `准用清單裡有材料庫找不到的：${missing.join("、")}（照原樣留著，開跑時伺服器會點名；要拿掉：取消「限定准用」再重新勾）`;
+    cell.append(line);
+  }
   const problem = allowedProblem(setting.allowed);
   if (problem) { const line = document.createElement("p"); line.className = "notice"; line.id = `zone-allowed-problem-${wall}-${key}`; line.textContent = problem; cell.append(line); }
 }

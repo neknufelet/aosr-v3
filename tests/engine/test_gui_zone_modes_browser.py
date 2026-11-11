@@ -278,3 +278,32 @@ def test_switching_scheme_while_send_to_search_saves_keeps_the_new_scheme_and_do
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
         assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search"}}
         assert watched.page_errors == []
+
+
+def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_path: Path, browser: Browser) -> None:
+    """2-3b 交接：存著的准用清單（ZoneDesign.allowed）打開再存要原樣帶回——順序不動、材料庫找不到的代號不偷丟
+    （照講、留著，開跑時伺服器點名）；勾一種只加在尾巴、拿掉一種只拿那一種。"""
+    _write(tmp_path, room109_document())
+    stored = ["none", "ghost_material", "glass_wool_48k"]
+    design = tmp_path / "designs" / "room109.json"
+    design.parent.mkdir(exist_ok=True)
+    design.write_text(json.dumps({"schema_version": "aosr.zone_design.v1", "scheme_id": "room109",
+                                  "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": stored}}}}),
+                      encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#zone-allowed-summary-x0-whole_wall")).to_contain_text("准用 3 種")
+        expect(page.locator("#zone-allowed-missing-x0-whole_wall")).to_contain_text("ghost_material")
+        _save(page, "room109")
+        assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]["allowed"] == stored
+
+        page.locator("#zone-allowed-summary-x0-whole_wall").click()
+        page.locator("#zone-allow-x0-whole_wall-glass_wool_48k").uncheck()
+        page.locator("#zone-allow-x0-whole_wall-glass_wool_24k").check()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none", "ghost_material", "glass_wool_24k"]
+        _save(page, "room109")
+        saved = json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]
+        assert saved == {"mode": "search", "allowed": ["none", "ghost_material", "glass_wool_24k"]}
+        assert watched.page_errors == [] and watched.console_errors == []
