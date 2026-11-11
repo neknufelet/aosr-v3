@@ -32,6 +32,25 @@ MOUNTS: Final[tuple[Mount, ...]] = (MOUNT_RIGID, MOUNT_ON_WALL)
 # 固定面的保留字：那一面（或那一區）用方案檔自己寫的材料、不帶變數、不換樣板（#1093）。含連字號，構造預設與
 # 使用者材料庫的 id（小寫英數與底線）撞不到；住設定層是為了讓網頁不必 import 會拉 JAX 的搜尋模組。
 SCHEME_MATERIAL: Final = "scheme-material"
+# 換樣板的「整塊換成某個固定材料」目標（#1082 段 2-3b）：``fixed:<材料代號>``，只從每區准用清單進來（沒有清單的區照舊
+# 只換家族與不貼）。冒號不在材料代號允許的字元裡，跟家族代號、構造預設代號、不貼都撞不到；面的配置裡也用同一個字串。
+FIXED_TARGET_PREFIX: Final = "fixed:"
+
+
+def is_fixed_target(value: str | None) -> bool:
+    """是不是「整塊換成固定材料」的目標字串。"""
+    return value is not None and value.startswith(FIXED_TARGET_PREFIX)
+
+
+def fixed_target(material_id: str) -> str:
+    return f"{FIXED_TARGET_PREFIX}{material_id}"
+
+
+def fixed_target_id(target: str) -> str:
+    """``fixed:<代號>`` 的代號；不是這個形狀就拒收。"""
+    if not is_fixed_target(target) or not target[len(FIXED_TARGET_PREFIX):]:
+        raise ValueError(f"{target!r} 不是 {FIXED_TARGET_PREFIX}<材料代號>")
+    return target[len(FIXED_TARGET_PREFIX):]
 
 
 def _exact_float(value: object) -> object:

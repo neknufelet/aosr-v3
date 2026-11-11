@@ -31,7 +31,7 @@ from typing import Final
 
 from pydantic import BaseModel, ValidationError
 
-from aosr.config.material_gradient import MOUNT_ON_WALL
+from aosr.config.material_gradient import MOUNT_ON_WALL, fixed_target_id, is_fixed_target
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import named_materials
 from aosr.gradient.fixed_surfaces import SCHEME_MATERIAL, expanded_fixed_surfaces, expanded_max_depths
@@ -227,6 +227,9 @@ def _point_lines(layout: Layout, row: MaterialGradientRow | TemplateRow | None,
     for spec in surface_specs(layout, row.theta()):
         if spec.preset_id is None:
             lines.append(f"  {spec.surface_id}：{kept.get(spec.surface_id, '不貼（保留原牆；方案沒有這一面）')}")
+            continue
+        if is_fixed_target(spec.preset_id):
+            lines.append(f"  {spec.surface_id}：整塊換成固定材料 {fixed_target_id(spec.preset_id)}（准用清單裡的，沒有變數）")
             continue
         cavity = "沒有空腔層" if spec.cavity_m is None else f"空腔 {spec.cavity_m * _MM:.3f} mm"
         thickness = f"{spec.thickness_m * _MM:.3f}" if spec.thickness_m is not None else "？"

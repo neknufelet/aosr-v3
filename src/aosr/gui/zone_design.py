@@ -20,9 +20,9 @@ import re
 import tempfile
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -39,10 +39,26 @@ DEFAULT_MODE: ZoneMode = "fixed"
 
 
 class ZoneDesign(BaseModel):
-    """一區的做法；之後的段（准用材料、深度上限）往這裡加欄位。"""
+    """一區的做法；之後的段（深度上限）往這裡加欄位。
+
+    ``allowed``（#1082 段 2-3b，選填、只給交給搜尋的區）：這一區准用的材料代號（材料庫的代號：可最佳化材料、固定材料）
+    或 ``none``（不貼、保留原牆）。搜尋換樣板只換到清單裡的，起點也要在清單裡；沒給照舊換全部家族與不貼。
+    沒給的區存檔時不寫這一格（舊設計設定逐位不變）。
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     mode: ZoneMode
+    allowed: tuple[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")], ...] | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _allowed_only_for_search(self) -> Self:
+        if self.allowed is not None:
+            if self.mode != "search":
+                raise ValueError(f"准用清單只給交給搜尋的區，這一區是「{MODE_WORDS[self.mode]}」")
+            if len(set(self.allowed)) != len(self.allowed):
+                raise ValueError(f"准用清單有重複：{list(self.allowed)}")
+        return self
 
 
 class DesignSettings(BaseModel):

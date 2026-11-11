@@ -6,7 +6,12 @@
   ``面=scheme-material``（方案檔裡固定區放的是那一組材料、保留原牆的區放的是原牆，所以同一條路就對）。
 面片的順序照命令列自己的取法（``scheme_patch_keys``），不在這裡另排。
 
-這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區）；
+每區准用清單（#1082 段 2-3b，設計設定的 ``allowed``，材料庫代號或 none）轉成命令列 ``--allowed 面=目標,…``：
+可最佳化材料是家族代號、固定材料是 ``fixed:<代號>``、none 照寫。有清單的區起點照順序挑：選定家族在清單裡就用它、
+不在就用清單裡第一個家族（設定檔順序）、都沒有家族就不貼（清單要有 none）；清單只有固定材料就拒收（起點要是可調材料或不貼）。
+
+這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區、准用清單的代號
+不認識或排不出起點）；
 深度上限放不放得下家族的棉、超不超過家族上限，照舊由命令列在開跑前判，錯誤原文照實回給畫面。
 """
 from __future__ import annotations
@@ -16,7 +21,9 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from aosr.config.material_gradient import MOUNT_ON_WALL, SCHEME_MATERIAL, MaterialGradientSettings, Mount
+from aosr.config.material_gradient import (
+    MOUNT_ON_WALL, NONE_TARGET, SCHEME_MATERIAL, FamilySettings, MaterialGradientSettings, Mount, fixed_target,
+)
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.reporting.scheme import Scheme
@@ -64,6 +71,8 @@ class SearchPlan(BaseModel):
     family: str
     max_steps: int
     request: GradientRequest
+    # 面片代號 → 准用目標（命令列 --allowed 的寫法）；沒有清單的面不列，舊的計畫逐位不變。
+    allowed: dict[str, tuple[str, ...]] = Field(default_factory=dict, exclude_if=lambda value: not value)
 
 
 def surface_of(wall: str, zone: str) -> str:
@@ -89,8 +98,41 @@ def _depths(request: GradientRequest, modes: Mapping[str, Mapping[str, ZoneMode]
     return dict(sorted(found.items()))
 
 
+def _targets(wall: str, zone: str, ids: tuple[str, ...], settings: MaterialGradientSettings,
+             fixed_ids: frozenset[str]) -> tuple[str, ...]:
+    families = {family.id for family in settings.family}
+    unknown = [item for item in ids if item != NONE_TARGET and item not in families and item not in fixed_ids]
+    if unknown:
+        raise PlanRefused(f"{wall} 分區 {zone} 的准用清單有材料庫裡沒有的代號 {unknown}")
+    return tuple(item if item == NONE_TARGET or item in families else fixed_target(item) for item in ids)
+
+
+def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family: FamilySettings,
+                  settings: MaterialGradientSettings) -> str | None:
+    if targets is None or family.id in targets:
+        return family.template_preset
+    listed = [item for item in settings.family if item.id in targets]
+    if listed:
+        return listed[0].template_preset
+    if NONE_TARGET in targets:
+        return None
+    raise PlanRefused(f"{wall} 分區 {zone} 的准用清單只有固定材料：搜尋要一個起點（一種可調材料或「不貼」），"
+                      "請在清單加一種可調材料或不貼")
+
+
+def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
+             fixed_ids: frozenset[str]) -> dict[tuple[str, str], tuple[str, ...]]:
+    found = {}
+    for wall, zones in (design.zones if design is not None else {}).items():
+        for zone, item in zones.items():
+            if item.allowed is not None:
+                found[(wall, zone)] = _targets(wall, zone, item.allowed, settings, fixed_ids)
+    return found
+
+
 def plan_search(scheme: Scheme, design: DesignSettings | None, request: GradientRequest,
-                settings: MaterialGradientSettings) -> SearchPlan:
+                settings: MaterialGradientSettings, fixed_ids: frozenset[str] = frozenset()) -> SearchPlan:
+    """``fixed_ids`` 是材料庫裡固定材料的代號（內建構造預設＋使用者的固定材料），准用清單照它認固定材料。"""
     problems = mismatches(design, scheme) if design is not None else []
     if problems:
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
@@ -107,13 +149,16 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
         family = settings.family_by_id(request.family) if request.family is not None else settings.family[0]
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
+    allowed = _allowed(design, settings, fixed_ids)
     return SearchPlan(
         surfaces=surfaces, modes=per_surface,
-        presets=tuple(family.template_preset if mode == "search" else None for mode in per_surface),
+        presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings) if mode == "search" else None
+                      for pair, mode in zip(pairs, per_surface, strict=True)),
         fixed_surfaces={surface: SCHEME_MATERIAL for surface, mode in zip(surfaces, per_surface, strict=True)
                         if mode != "search"},
         max_depths=_depths(request, modes), family=family.id,
-        max_steps=request.max_steps if request.max_steps is not None else settings.descent.max_steps, request=request)
+        max_steps=request.max_steps if request.max_steps is not None else settings.descent.max_steps, request=request,
+        allowed={surface_of(*pair): targets for pair, targets in sorted(allowed.items())})
 
 
 def start_arguments(plan: SearchPlan) -> list[str]:
@@ -128,4 +173,6 @@ def start_arguments(plan: SearchPlan) -> list[str]:
         arguments.extend(("--frequency-batch", str(plan.request.frequency_batch)))
     if plan.request.max_steps is not None:
         arguments.extend(("--max-steps", str(plan.request.max_steps)))
+    for surface, targets in plan.allowed.items():
+        arguments.extend(("--allowed", f"{surface}={','.join(targets)}"))
     return arguments

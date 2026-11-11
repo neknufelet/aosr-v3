@@ -28,7 +28,7 @@ from typing import Final, Literal, NamedTuple, cast
 import jax.numpy as jnp
 import numpy as np
 
-from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount
+from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount, is_fixed_target
 from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.gpu import SinglePrecisionObjective
@@ -72,6 +72,9 @@ class TemplateContext(NamedTuple):
     # 固定面不列候選；重建時也使用同一份指定材料。
     fixed_surfaces: Mapping[str, str] | None = None
     max_depths: Mapping[str, float] | None = None
+    # 每區准用清單（#1082 段 2-3b；面片代號 → 目標，已展開到面片）：列了的面只換到清單裡的目標，沒列的照舊。
+    # 清單裡的 ``fixed:<代號>`` 要在 ``presets`` 裡有同名那一筆（:func:`aosr.materials.search_library.fixed_candidates`）。
+    allowed: Mapping[str, tuple[str, ...]] | None = None
 
 
 class TemplatePoint(NamedTuple):
@@ -147,9 +150,12 @@ def surfaces_of(designs: Sequence[SurfaceDesign]) -> Surfaces:
 
 
 def target_of(preset_id: str | None, settings: MaterialGradientSettings) -> str:
-    """一面現在的目標代號：不貼是 :data:`NONE_TARGET`，有 preset 是它所屬的家族；不在任何家族就拒收。"""
+    """一面現在的目標代號：不貼是 :data:`NONE_TARGET`，整塊換成固定材料是那個 ``fixed:<代號>`` 本身，
+    有 preset 是它所屬的家族；不在任何家族就拒收。"""
     if preset_id is None:
         return NONE_TARGET
+    if is_fixed_target(preset_id):
+        return preset_id
     family = settings.family_of(preset_id)
     if family is None:
         raise ValueError(f"preset {preset_id} 不在家族清單裡（設定檔 [[family]]），不知道它是哪一個家族")
@@ -162,20 +168,26 @@ def target_order(settings: MaterialGradientSettings) -> tuple[str, ...]:
 
 
 def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings,
-                 fixed_surfaces: Mapping[str, str] | None = None) -> tuple[tuple[str, str], ...]:
-    """每一面可換的（面代號, 目標）：所有家族扣掉它現在的、再加不貼（它現在不是不貼時）；照面序、再照目標序。"""
+                 fixed_surfaces: Mapping[str, str] | None = None,
+                 allowed: Mapping[str, Sequence[str]] | None = None) -> tuple[tuple[str, str], ...]:
+    """每一面可換的（面代號, 目標）：沒有准用清單的面是所有家族扣掉它現在的、再加不貼（它現在不是不貼時）；
+    有清單的面（``allowed``，面片代號 → 目標）是清單扣掉它現在的、照清單的存法順序。照面序、再照目標序。"""
     found: list[tuple[str, str]] = []
     for surface_id, preset_id in surfaces:
         if surface_id in (fixed_surfaces or {}):
             continue
         current = target_of(preset_id, settings)
-        found.extend((surface_id, target) for target in target_order(settings) if target != current)
+        targets = (allowed or {}).get(surface_id)
+        found.extend((surface_id, target) for target in (target_order(settings) if targets is None else targets)
+                     if target != current)
     return tuple(found)
 
 
 def preset_for_target(target: str, settings: MaterialGradientSettings) -> str | None:
-    """目標換成哪個 preset：不貼是 None，家族是它的 ``template_preset``。"""
-    return None if target == NONE_TARGET else settings.family_by_id(target).template_preset
+    """目標換成哪個 preset：不貼是 None，固定材料是目標字串本身（``fixed:<代號>``），家族是它的 ``template_preset``。"""
+    if target == NONE_TARGET:
+        return None
+    return target if is_fixed_target(target) else settings.family_by_id(target).template_preset
 
 
 def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[SurfaceDesign, ...]:
@@ -201,6 +213,9 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
     """
     if surface_id in (context.fixed_surfaces or {}):
         raise ValueError(f"固定面 {surface_id} 不參與換樣板")
+    listed = (context.allowed or {}).get(surface_id)
+    if listed is not None and target not in listed:
+        raise ValueError(f"面 {surface_id} 的准用清單 {list(listed)} 沒有 {target}，不能換過去")
     values = checked_theta(theta, designs)
     surfaces = surfaces_of(designs)
     ids = [item[0] for item in surfaces]
@@ -253,7 +268,7 @@ def quick_scores(point: TemplatePoint, context: TemplateContext, *,
     非有限的值拒收（帳本不收、也排不出名次）。順序照 :func:`alternatives`。
     """
     found = []
-    for surface_id, target in alternatives(surfaces_of(point.designs), context.settings, context.fixed_surfaces):
+    for surface_id, target in alternatives(surfaces_of(point.designs), context.settings, context.fixed_surfaces, context.allowed):
         check_stop(should_stop)
         clock = time.perf_counter()
         designs, theta = swap(point.designs, point.theta, surface_id, target, context)
@@ -293,9 +308,10 @@ def template_round_bound(settings: MaterialGradientSettings, quick_count: int, r
 
 
 def next_round_bound(surfaces: Surfaces, settings: MaterialGradientSettings,
-                     fixed_surfaces: Mapping[str, str] | None = None) -> int:
-    """這個配置開下一輪的最壞求值數（候選有沒有只看配置，不求值）。"""
-    count = len(alternatives(surfaces, settings, fixed_surfaces))
+                     fixed_surfaces: Mapping[str, str] | None = None,
+                     allowed: Mapping[str, Sequence[str]] | None = None) -> int:
+    """這個配置開下一輪的最壞求值數（候選有沒有只看配置與准用清單，不求值）。"""
+    count = len(alternatives(surfaces, settings, fixed_surfaces, allowed))
     return template_round_bound(settings, count, retune_count(settings, count))
 
 
@@ -315,7 +331,7 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     designs = checked_wall_designs(point.designs)
     if not is_feasible(point.theta, designs):
         raise ValueError("換樣板要從可行的整房配置開始")
-    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces))
+    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces, context.allowed))
     top = retune_count(settings, count)
     bound = template_round_bound(settings, count, top)
     if count == 0 or bound > budget_left:

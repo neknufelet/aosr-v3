@@ -49,7 +49,7 @@ from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_librar
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
-from aosr.materials.library import LibraryEntry, dump_user_library, load_user_library
+from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
 from aosr.materials.search_library import MaterialsRefused, SearchMaterials, refuse_fixed_as_family, with_user_materials
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 from aosr.reporting.scheme import Scheme
@@ -271,7 +271,9 @@ class GradientJobs:
             refuse_fixed_as_family((request.family,), entries)
         except MaterialsRefused as error:
             raise PlanRefused(str(error)) from error
-        return plan_search(scheme, design, request, materials.settings), materials, entries
+        fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
+                               *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
+        return plan_search(scheme, design, request, materials.settings, fixed_ids), materials, entries
 
     def search_settings(self) -> MaterialGradientSettings:
         return load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))

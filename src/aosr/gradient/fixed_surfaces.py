@@ -7,6 +7,7 @@ id 只收小寫英數與底線，永遠撞不到。
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Annotated
@@ -14,7 +15,9 @@ from typing import Annotated
 from pydantic import AfterValidator
 
 from aosr.config.construction_presets import load_construction_presets
-from aosr.config.material_gradient import SCHEME_MATERIAL as SCHEME_MATERIAL, MaterialGradientSettings, Mount
+from aosr.config.material_gradient import (
+    FIXED_TARGET_PREFIX, NONE_TARGET, SCHEME_MATERIAL as SCHEME_MATERIAL, MaterialGradientSettings, Mount, is_fixed_target,
+)
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
@@ -162,3 +165,100 @@ def designs_with_max_depths(designs: Sequence[SurfaceDesign], settings: Material
         effective = None if design.max_total_depth_m is None else min(design.max_total_depth_m, cap)
         result.append(replace(design, max_depth_m=cap, max_total_depth_m=effective))
     return tuple(result)
+
+
+# ---- 每區准用清單（#1082 段 2-3b） ----
+
+_TARGET = re.compile(r"^(?:fixed:)?[a-z][a-z0-9_]*$")
+
+
+def _target_rank(target: str) -> tuple[int, str]:
+    return (2 if target == NONE_TARGET else 1 if is_fixed_target(target) else 0, target)
+
+
+def checked_allowed_targets(value: Mapping[str, Sequence[str]]) -> dict[str, tuple[str, ...]]:
+    """面 → 准用的換樣板目標（家族代號、``fixed:<材料代號>``、``none``）。面名同固定面的規則（同一牆不准混整面與面片）；
+    清單不准空、不准重複。存法固定：面照名字排、清單照「家族、固定材料、不貼」再照字串排，跟輸入順序無關（身分不會因順序變）。"""
+    result: dict[str, tuple[str, ...]] = {}
+    for name, targets in value.items():
+        patch_key(name)
+        wall, separator, _ = name.partition("@")
+        if separator and wall in value:
+            raise ValueError(f"准用清單同一面不能同時給牆名與面片代號：{wall}")
+        items = tuple(targets)
+        if not items:
+            raise ValueError(f"面 {name} 的准用清單是空的：至少要列一種（家族、固定材料或 none）")
+        if len(set(items)) != len(items):
+            raise ValueError(f"面 {name} 的准用清單有重複：{list(items)}")
+        bad = [item for item in items if not _TARGET.match(item)]
+        if bad:
+            raise ValueError(f"面 {name} 的准用清單認不得 {bad}：只收家族代號、{FIXED_TARGET_PREFIX}<材料代號> 或 {NONE_TARGET}")
+        result[name] = tuple(sorted(items, key=_target_rank))
+    return dict(sorted(result.items()))
+
+
+AllowedTargets = Annotated[dict[str, tuple[str, ...]], AfterValidator(checked_allowed_targets)]
+
+
+def parse_allowed_targets(values: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    """可重複的 ``--allowed 面=目標,目標,...``；同面重複拒收。"""
+    found: dict[str, tuple[str, ...]] = {}
+    for item in values:
+        face, separator, text = item.partition("=")
+        if not separator or not face or not text:
+            raise ValueError(f"--allowed 要寫成 面=目標,目標（家族代號、fixed:<材料代號>、none），收到 {item!r}")
+        if face in found:
+            raise ValueError(f"--allowed 同一面 {face} 給了兩次")
+        found[face] = tuple(part.strip() for part in text.split(","))
+    return checked_allowed_targets(found)
+
+
+def expanded_allowed_targets(value: Mapping[str, Sequence[str]], names: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    """整面的清單套到那面每一片；面片必須在本次搜尋清單中。"""
+    result: dict[str, tuple[str, ...]] = {}
+    for face, targets in checked_allowed_targets(value).items():
+        matches = [name for name in names if name == face or ("@" not in face and name.partition("@")[0] == face)]
+        if not matches:
+            raise ValueError(f"准用清單的面 {face} 不在搜尋面片清單")
+        result.update((name, targets) for name in matches)
+    return dict(sorted(result.items()))
+
+
+def fixed_targets_of(value: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """清單裡全部 ``fixed:<代號>`` 目標（排好、不重複）。"""
+    return tuple(sorted({target for targets in value.values() for target in targets if is_fixed_target(target)}))
+
+
+def check_allowed_against_start(allowed: Mapping[str, Sequence[str]], surfaces: Sequence[tuple[str, str | None]],
+                                settings: MaterialGradientSettings, *, fixed_surfaces: Mapping[str, str],
+                                max_depths: Mapping[str, float]) -> None:
+    """開跑前把准用清單跟起跑配置對一次，四條都點名拒收：
+    固定面不准給清單（它不換樣板）；家族代號要在這一場的家族裡；起跑那一面現在的目標（家族或 none）一定要在它的清單裡
+    （限制是硬的：搜尋只會換到清單裡的目標，起點也要守）；有深度上限的面不准列固定材料（固定材料的厚度這一段量不出來，
+    放不放得進上限判不了，跟個案上限一起處理是 2-4）。"""
+    names = [name for name, _ in surfaces]
+    lists = expanded_allowed_targets(allowed, names)
+    frozen = expanded_fixed_surfaces(fixed_surfaces, names) if fixed_surfaces else {}
+    caps = expanded_max_depths(max_depths, names)
+    families = {family.id for family in settings.family}
+    for name, preset in surfaces:
+        targets = lists.get(name)
+        if targets is None:
+            continue
+        if name in frozen:
+            raise ValueError(f"面 {name} 是固定面（不換樣板），不能再給准用清單")
+        unknown = [target for target in targets if target != NONE_TARGET and not is_fixed_target(target) and target not in families]
+        if unknown:
+            raise ValueError(f"面 {name} 的准用清單有不認識的家族 {unknown}；這一場的家族是 {sorted(families)}")
+        if is_fixed_target(preset):
+            raise ValueError(f"面 {name} 的起跑配置不能直接寫固定材料 {preset}：起點要是家族樣板或 none")
+        family = settings.family_of(preset) if preset is not None else None
+        if preset is not None and family is None:
+            raise ValueError(f"preset {preset} 不在家族清單裡（設定檔 [[family]]）")
+        current = NONE_TARGET if family is None else family.id
+        if current not in targets:
+            raise ValueError(f"面 {name} 起跑是 {current}，不在它的准用清單 {list(targets)} 裡；起點也要守准用清單")
+        fixed = [target for target in targets if is_fixed_target(target)]
+        if fixed and name in caps:
+            raise ValueError(f"面 {name} 有深度上限 {caps[name]} m，准用清單卻列了固定材料 {fixed}："
+                             "固定材料的厚度這一段量不出來，判不了放不放得進上限；請拿掉其中一邊")

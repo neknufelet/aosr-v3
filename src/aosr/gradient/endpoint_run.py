@@ -55,7 +55,7 @@ from aosr.gradient.material_gradient import SurfaceDesign
 from aosr.gradient.run import (
     LEDGER_FILE, RESULT_FILE, RESULT_VERSION, MOUNTED_RESULT_VERSION, LOW_FREQUENCY_RESULT_VERSION,
     LOW_FREQUENCY_MOUNTED_RESULT_VERSION, GradientProject, GradientResult, check_inputs, designs_for, file_sha256, final_designs, now_text,
-    parse_result, project_presets, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
+    parse_result, project_allowed, project_presets, read_project, result_from_ledger, scene_wall_materials, search_objective_constants,
     search_objective_settings, template_header_for, write_json_atomic,
 )
 from aosr.materials.construction_models import SurfaceMaterial
@@ -206,10 +206,12 @@ def exported_scheme(scheme: Scheme, scene: Scene, gradient_id: str) -> Scheme:
 
 def checked_result[K: BoundaryKey](folder: Path, given: GradientResult, header: MaterialGradientHeader,
                    settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
-                   table: Sequence[PresetMaterial] | None = None) -> GradientResult:
+                   table: Sequence[PresetMaterial] | None = None,
+                   allowed: Mapping[str, tuple[str, ...]] | None = None) -> GradientResult:
     """結果檔不能只信它自己說的：從兩本帳（庚二帳本標頭要等於 ``header``；換樣板帳本標頭要等於照它與現在的庚二帳本摘要
     重建的）重建整份結果，跟檔裡那份整個模型相等才收，回重建那一份；不等就拒收、列出哪幾格不同。"""
-    template_header = template_header_for(header, settings, kept, base_ledger_sha256=file_sha256(folder / LEDGER_FILE))
+    template_header = template_header_for(header, settings, kept, base_ledger_sha256=file_sha256(folder / LEDGER_FILE),
+                                          allowed=allowed, table=table)
     rebuilt = result_from_ledger(folder, settings, kept, expected_header=header, expected_template_header=template_header,
                                  legacy=given.format_version not in (RESULT_VERSION, MOUNTED_RESULT_VERSION), table=table)
     if rebuilt != given:
@@ -356,7 +358,7 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
                           fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table)
     result = checked_result(folder, given, header_for(model, initial, settings,
         objective_constants=context.constants if current else search_objective_constants(project, scheme, model)), settings, kept,
-        table=table)
+        table=table, allowed=project_allowed(project, tuple(design.surface_id for design in initial)))
     designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
                             mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths,
                             table=table)
