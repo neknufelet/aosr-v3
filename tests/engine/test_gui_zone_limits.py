@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 from starlette.testclient import TestClient
+import httpx
 
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -25,6 +26,7 @@ from aosr.gui.zone_limits import DepthCap, added_depth, depth_cap, range_target,
 from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceMaterial
 from aosr.materials.library import FixedEntry, builtin_entries
 from aosr.reporting.scheme import Scheme
+from tests.engine._construction_gui_server import real_server
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine._surface_zone_cases import NEW, ROOM_109, room109_document
@@ -306,3 +308,42 @@ def test_route_answers_drafts_with_200_and_refuses_non_json(tmp_path: Path) -> N
     assert client.post("/api/zone-limits", content=b"nope", headers={"content-type": "application/json"}).status_code == 400
     assert client.post("/api/zone-limits", json={"design": {}}).status_code == 400
     assert ROOM_109["Ly"] > 1.0
+
+
+def test_the_search_page_preview_refuses_a_saved_design_with_red_zones(tmp_path: Path) -> None:
+    """存好的方案裡固定區貼太深：搜尋頁要開跑參數那一步就被擋（400、原文照講），不必等按開跑。"""
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "designs").mkdir()
+    (tmp_path / "schemes" / "room109.json").write_text(_scheme(_cut()).model_dump_json(), encoding="utf-8")
+    design = _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}})
+    (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
+    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
+    response = client.post("/api/gradient/schemes/room109/plan", json={})
+    assert response.status_code == 400 and "有超過限制的區" in response.json()["error"]
+    (tmp_path / "designs" / "room109.json").write_text(_design(wall_max_depth_m={"x0": 0.2}, zones={"x0": {"auto1": {"mode": "search"}}})
+                                                     .model_dump_json(), encoding="utf-8")
+    response = client.post("/api/gradient/schemes/room109/plan", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["plan"]["max_depths"] == {"x0@auto1": 0.2}
+    assert response.json()["plan"]["depth_sources"] == {"x0@auto1": "wall"}
+
+
+def test_the_real_entry_checks_the_trust_range_the_same_way_as_the_material_page(tmp_path: Path) -> None:
+    """正式網頁入口開機就開雙精度：可信範圍真的算（材料頁那三個流阻值）。內建玻璃棉在範圍內、什麼都不說；
+    流阻 5000 低於原研究樣品，警告不擋；3000 低於手動試算下限，物理拒算，紅。"""
+    def flow(value: float) -> Doc:
+        document = _cut(PRESET)
+        z1 = next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")
+        layers = cast(list[dict[str, object]], cast(Doc, z1["material"])["layers"])
+        layers[0]["flow_resistivity_pa_s_m2"] = value
+        return document
+
+    with real_server(tmp_path) as base, httpx.Client(trust_env=False, timeout=60) as client:
+        def ask(document: Doc) -> list[tuple[str, str]]:
+            response = client.post(f"{base}/api/zone-limits", json={"scheme": document})
+            assert response.status_code == 200, response.text
+            return [(line["code"], line["level"]) for line in _lines(response.json(), "x0", "z1")]
+
+        assert ask(_cut(PRESET)) == []
+        assert ask(flow(5000.0)) == [("komatsu_flow_below_samples", "warn")]
+        assert ask(flow(3000.0)) == [("range_uncomputable", "red")]
