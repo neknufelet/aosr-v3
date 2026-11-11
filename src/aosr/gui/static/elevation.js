@@ -264,15 +264,19 @@ function renderElevation() {
   svg.append(node("rect", {id: "elevation-frame", x: pad, y: pad, width: width * scale, height: height * scale}));
   const zones = wallZones(wall);
   // 整面一區的牆：牆框本身照那一區的做法上色。
-  if (!zones.some(zone => zone.area === "rectangle")) svg.lastChild.setAttribute("class", `zone-mode-${zoneSetting(wall, "whole_wall").mode}`);
+  if (!zones.some(zone => zone.area === "rectangle"))
+    svg.lastChild.setAttribute("class", `zone-mode-${zoneSetting(wall, "whole_wall").mode}${zoneIsRed(wall, "whole_wall") ? " zone-red" : ""}`);
+  if (wallIsRed(wall)) svg.lastChild.classList.add("wall-red");
   const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_merge_tol_m || zone.v_m[1] > height + cutSpec().edge_merge_tol_m));
   for (const zone of zones.filter(zone => zone.area === "rectangle")) {
     const auto = zone.id.startsWith(cutSpec().fill_prefix);
     const [a0, a1, b0, b1] = screenBox(view, width, height, zone);
     const mode = zoneSetting(wall, zone.id).mode;
-    const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"} zone-mode-${mode}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
+    const red = zoneIsRed(wall, zone.id);
+    const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"} zone-mode-${mode}${red ? " zone-red" : ""}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
+    const limits = zoneLimitLines(wall, zone.id).map(line => `\n${line.text}`).join("");
     group.append(node("rect", {x: pad + a0 * scale, y: pad + (height - b1) * scale, width: (a1 - a0) * scale, height: (b1 - b0) * scale}),
-      node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}`));
+      node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}${limits}`));
     // 字放得下才寫（窄條裡「自動」兩字會擠出界）；放不下的滑過去看 title。
     const label = auto ? "自動" : zone.id;
     if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18)
@@ -315,5 +319,7 @@ function renderElevation() {
 window.renderElevation = renderElevation;
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());
+  // 房間尺寸改定了（離開格子）才重判限制：分區可能超出變小的牆面（#1111）。
+  $("room-fields").addEventListener("change", () => refreshZoneLimits());
 });
 })();

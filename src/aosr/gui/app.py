@@ -39,13 +39,14 @@ from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
-from aosr.gui.material_curves import material_curve_routes
+from aosr.gui.material_curves import material_curve_routes, range_check
 from aosr.gui.material_editor import material_routes
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.zone_design import design_routes
 from aosr.gui.zone_edit import zone_edit_routes
+from aosr.gui.zone_limits import zone_limit_routes
 from aosr.gui.zone_modes import zone_material_routes
 from aosr.gui.zone_result_routes import ZoneResultDeps, zone_result_routes
 from aosr.gui.scheme_archive import SchemeArchive
@@ -79,7 +80,7 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "zone_modes.js", "measured.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "zone_modes.js", "zone_limits.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css"}
@@ -905,9 +906,10 @@ class GuiHandlers:
 
 
 def _zone_routes(handlers: GuiHandlers) -> list[Route]:
-    """立面圖切一面（#1091）與每一區換材料（#1105）。"""
+    """立面圖切一面（#1091）、每一區換材料（#1105）與超過限制的區（#1111；可信範圍跟材料頁同一個出處）。"""
     return [*zone_edit_routes(), *zone_material_routes(handlers.data_dir, handlers.jobs._lock,
-                                                      capabilities=handlers.capabilities, directivity=handlers.directivity)]
+                                                      capabilities=handlers.capabilities, directivity=handlers.directivity),
+            *zone_limit_routes(range_check)]
 
 
 def _archive_routes(handlers: GuiHandlers) -> list[Route]:

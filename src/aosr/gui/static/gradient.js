@@ -188,16 +188,28 @@ function mountWarning() {
     "「貼在原牆上」的加貼層找回原牆；貼在硬底上的區拆不回去，會被當成沒動、改善算不進來。要用硬底，先在設計設定指原方案。" : "";
 }
 
+// 深度上限是哪一層擋的（#1111）：設計設定的三層取最嚴，這一跑另填的只能更嚴。
+const DEPTH_SOURCES = {zone: "這一塊", wall: "這面牆", room: "房間預設", request: "這一跑另填"};
+function depthText(plan, surface, mode) {
+  const depth = plan.max_depths[surface];
+  if (depth === undefined) return mode === "search" ? "照材料自己的限制" : "不加層";
+  const source = (plan.depth_sources || {})[surface];
+  return source ? `${depth} 公尺（${DEPTH_SOURCES[source] || source}）` : `${depth} 公尺`;
+}
+
 function drawDepthTable(plan) {
   const rows = plan.surfaces.map((surface, index) => ({surface, mode: plan.modes[index]})).filter((row) => row.mode === "search");
   const body = el("tbody");
   for (const row of rows) {
     const {wall, zone} = surfaceParts(row.surface);
+    const designed = plan.max_depths[row.surface];
     body.append(el("tr", {}, el("td", {text: WALLS[wall] || wall}), el("td", {text: zoneText(zone)}),
       el("td", {}, el("input", {type: "number", min: "0", step: "any", "data-wall": wall, "data-zone": zone,
-        "aria-label": `${WALLS[wall] || wall} ${zoneText(zone)} 深度上限（公尺）`}))));
+        placeholder: designed === undefined ? "" : `設計設定 ${designed}`,
+        "aria-label": `${WALLS[wall] || wall} ${zoneText(zone)} 深度上限（公尺）`})),
+      el("td", {text: designed === undefined ? "照材料自己的限制" : depthText(plan, row.surface, row.mode)})));
   }
-  const head = el("tr", {}, ...["牆", "區", "深度上限（公尺）"].map((text) => el("th", {text})));
+  const head = el("tr", {}, ...["牆", "區", "這一跑另填（只能更嚴）", "設計設定的上限"].map((text) => el("th", {text})));
   byId("depth-table").replaceChildren(rows.length ? el("table", {}, el("thead", {}, head), body) :
     el("p", {text: "沒有交給搜尋的區。"}));
 }
@@ -239,12 +251,11 @@ function showPreview(data, sent) {
   plan.surfaces.forEach((surface, index) => {
     const {wall, zone} = surfaceParts(surface);
     const mode = plan.modes[index];
-    const depth = plan.max_depths[surface];
     body.append(el("tr", {"data-surface": surface}, el("td", {text: WALLS[wall] || wall}), el("td", {text: zoneText(zone)}),
       el("td", {text: MODE_WORDS[mode] || mode, class: mode === "search" ? "mode-search" : null}),
       el("td", {text: plan.presets[index] || (mode === "search" ? "" : "方案裡這一區的材料，不調")}),
       el("td", {text: allowedText(plan, surface, mode)}),
-      el("td", {text: depth === undefined ? (mode === "search" ? "照材料自己的限制" : "不加層") : `${depth} 公尺`})));
+      el("td", {text: depthText(plan, surface, mode)})));
   });
   const head = el("tr", {}, ...["牆", "區", "做法", "起跑樣板", "准用材料", "深度上限"].map((text) => el("th", {text})));
   byId("plan-table").replaceChildren(el("table", {}, el("thead", {}, head), body));

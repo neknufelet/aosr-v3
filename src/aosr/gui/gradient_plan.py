@@ -10,8 +10,12 @@
 可最佳化材料是家族代號、固定材料是 ``fixed:<代號>``、none 照寫。有清單的區起點照順序挑：選定家族在清單裡就用它、
 不在就用清單裡第一個家族（設定檔順序）、都沒有家族就不貼（清單要有 none）；清單只有固定材料就拒收（起點要是可調材料或不貼）。
 
+深度上限（#1082 段 1-4）：設計設定的三層（房間預設／每面牆／每一區）取最小，只帶給搜尋區；開跑請求另填的只能更嚴
+（兩邊取小），``depth_sources`` 記每片是哪一層擋的（``zone``／``wall``／``room``／``request``）。設計設定有一條紅的
+（``zone_limits``：固定區貼太深、分區太小或出界）就不開。
+
 這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區、准用清單的代號
-不認識或排不出起點）；
+不認識或排不出起點、有超過限制的區）；
 深度上限放不放得下家族的棉、超不超過家族上限，照舊由命令列在開跑前判，錯誤原文照實回給畫面。
 """
 from __future__ import annotations
@@ -26,6 +30,7 @@ from aosr.config.material_gradient import (
 )
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
+from aosr.gui.zone_limits import depth_cap, saved_refusals
 from aosr.reporting.scheme import Scheme
 
 Device = Literal["cpu", "gpu"]
@@ -73,6 +78,8 @@ class SearchPlan(BaseModel):
     request: GradientRequest
     # 面片代號 → 准用目標（命令列 --allowed 的寫法）；沒有清單的面不列，舊的計畫逐位不變。
     allowed: dict[str, tuple[str, ...]] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    # 面片代號 → 深度上限是哪一層擋的（zone／wall／room／request）；沒有上限的計畫不寫這一格（舊計畫逐位不變）。
+    depth_sources: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
 
 
 def surface_of(wall: str, zone: str) -> str:
@@ -85,17 +92,29 @@ def zone_of(surface: str) -> tuple[str, str]:
     return wall, zone if separator else WHOLE_WALL_KEY
 
 
-def _depths(request: GradientRequest, modes: Mapping[str, Mapping[str, ZoneMode]]) -> dict[str, float]:
-    found = {}
-    for wall, zones in request.max_depths.items():
-        for zone, depth in zones.items():
-            mode = modes.get(wall, {}).get(zone)
-            if mode is None:
+def _depths(request: GradientRequest, modes: Mapping[str, Mapping[str, ZoneMode]],
+            design: DesignSettings | None) -> tuple[dict[str, float], dict[str, str]]:
+    found: dict[str, tuple[float, str]] = {}
+    for wall, wall_modes in modes.items():
+        for zone, mode in wall_modes.items():
+            cap = depth_cap(design, wall, zone)
+            if mode == "search" and cap is not None:
+                found[surface_of(wall, zone)] = (cap.value_m, cap.level)
+    for wall, given in request.max_depths.items():
+        for zone, depth in given.items():
+            found_mode = modes.get(wall, {}).get(zone)
+            if found_mode is None:
                 raise PlanRefused(f"深度上限給的 {wall} 分區 {zone} 方案裡沒有")
-            if mode != "search":
+            if found_mode != "search":
                 raise PlanRefused(f"{wall} 分區 {zone} 不是交給搜尋的區，不能給深度上限（固定與保留原牆的區不加層）")
-            found[surface_of(wall, zone)] = depth
-    return dict(sorted(found.items()))
+            surface = surface_of(wall, zone)
+            if surface not in found or depth < found[surface][0]:
+                found[surface] = (depth, "request")
+    ordered = dict(sorted(found.items()))
+    sources = {surface: source for surface, (_, source) in ordered.items()}
+    if all(source == "request" for source in sources.values()):
+        sources = {}  # 設計設定沒有給上限：計畫照舊不寫這一格
+    return {surface: depth for surface, (depth, _) in ordered.items()}, sources
 
 
 def _targets(wall: str, zone: str, ids: tuple[str, ...], settings: MaterialGradientSettings,
@@ -136,6 +155,9 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
     problems = mismatches(design, scheme) if design is not None else []
     if problems:
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
+    refusals = saved_refusals(scheme.model_dump(mode="json"), design)
+    if refusals:
+        raise PlanRefused("有超過限制的區（立面圖上標紅的），先改好再開：" + "；".join(refusals))
     modes = effective_modes(design, scheme)
     surfaces = surface_ids(scheme_patch_keys(scheme))
     pairs = [zone_of(surface) for surface in surfaces]
@@ -150,13 +172,14 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
+    depths, sources = _depths(request, modes, design)
     return SearchPlan(
         surfaces=surfaces, modes=per_surface,
         presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings) if mode == "search" else None
                       for pair, mode in zip(pairs, per_surface, strict=True)),
         fixed_surfaces={surface: SCHEME_MATERIAL for surface, mode in zip(surfaces, per_surface, strict=True)
                         if mode != "search"},
-        max_depths=_depths(request, modes), family=family.id,
+        max_depths=depths, depth_sources=sources, family=family.id,
         max_steps=request.max_steps if request.max_steps is not None else settings.descent.max_steps, request=request,
         allowed={surface_of(*pair): targets for pair, targets in sorted(allowed.items())})
 

@@ -727,6 +727,8 @@ async function follow(id) {
   await showOtherRuns();
 }
 async function refreshPlan() {
+  // 每次確定的改動都走到這裡：順手重判超過限制的區（#1111；不等它、不鎖頁，晚到的回覆自己丟掉）。
+  refreshZoneLimits();
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())}));
   if (!response.ok) {
