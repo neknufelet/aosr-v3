@@ -390,13 +390,16 @@ def test_the_real_entry_refuses_to_plan_a_search_over_an_uncomputable_fixed_mate
     cast(list[dict[str, object]], cast(Doc, z1["material"])["layers"])[0]["flow_resistivity_pa_s_m2"] = 3000.0
     (tmp_path / "schemes").mkdir()
     (tmp_path / "designs").mkdir()
-    (tmp_path / "schemes" / "room109.json").write_text(_scheme(document).model_dump_json(), encoding="utf-8")
+    scheme = _scheme(document)    # 建替身要方案有低頻軸
+    scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH})})
+    (tmp_path / "schemes" / "room109.json").write_text(scheme.model_dump_json(), encoding="utf-8")
     design = _design(zones={"x0": {"auto1": {"mode": "search"}}})
     (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
     with real_server(tmp_path) as base, httpx.Client(trust_env=False, timeout=60) as client:
-        response = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
-        assert response.status_code == 400, response.text
-        assert "x0 分區 z1" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"]
+        for path in ("plan", "surrogate/plan"):
+            response = client.post(f"{base}/api/gradient/schemes/room109/{path}", json={})
+            assert response.status_code == 400, (path, response.text)
+            assert "x0 分區 z1" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"], path
         (tmp_path / "schemes" / "room109.json").write_text(_scheme(_cut(PRESET)).model_dump_json(), encoding="utf-8")
         # 在範圍內就過了限制這一關（考卷行程連不上使用者的服務匯流排，下一步查「現在有沒有一跑在算」會回 503，那不是這一段的事）
         again = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
