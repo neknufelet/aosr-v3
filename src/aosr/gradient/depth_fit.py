@@ -4,15 +4,20 @@
 """
 from __future__ import annotations
 
-from decimal import Decimal
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Literal, cast
 
 import numpy as np
 
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, is_fixed_target
 from aosr.materials.construction_models import Assembly
+
+DEPTH_SLACK_M = 1e-6
+"""總深跟上限比時放過的浮點尾數（公尺）：同網頁切牆面的 ``zone_edit.EDGE_MERGE_TOL``（考卷釘兩邊相等）。搜尋把空腔切到
+上限減厚度，存回方案的那幾層照寫下來相加可能多出 1e-17 量級，不放過這一點，搜尋結果帶著上限重開就會自己標紅。"""
 
 FitReason = Literal["fits", "shallower_than_family", "fixed_too_deep", "fixed_not_comparable"]
 
@@ -73,7 +78,7 @@ def fixed_material_depth_m(material: object) -> float | None:
 
 
 def _written_depth(material: object) -> Decimal | None:
-    """照寫下來的十進位數字逐層相加（0.05＋0.1 就是 0.15，不帶浮點尾數），跟上限比不必另設容差。"""
+    """照寫下來的十進位數字逐層相加（0.05＋0.1 就是 0.15，不帶浮點尾數），只拿來印。"""
     if not isinstance(material, Assembly):
         return None
     return _layers_depth(material.layers)
@@ -84,9 +89,9 @@ def _layers_depth(layers: Sequence[object]) -> Decimal:
 
 
 def layers_exceed(layers: Sequence[object], cap: float) -> bool:
-    """這幾層加起來（照寫下來的十進位）比上限深。網頁固定區貼在原牆上的那幾層（``zone_limits``）與搜尋的固定材料候選
-    用同一把，同一份材料兩邊不會判得不一樣。"""
-    return _layers_depth(layers) > Decimal(repr(cap))
+    """這幾層加起來比上限深（``math.fsum``，放過 :data:`DEPTH_SLACK_M`）。逐字同網頁固定區那一把
+    （``zone_limits.added_depth`` 加總、``depth > cap + EDGE_MERGE_TOL``），同一份材料兩邊不會判得不一樣。"""
+    return math.fsum(float(getattr(layer, "thickness_m", 0.0)) for layer in layers) > cap + DEPTH_SLACK_M
 
 
 def fixed_fit(target: str, material: object, cap: float) -> TargetFit:

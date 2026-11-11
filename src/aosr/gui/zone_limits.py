@@ -6,7 +6,7 @@
   判法跟切牆面（``zone_edit``）同一把：同一個最小邊、同一個邊的容差；蓋滿與不重疊照方案自己那一把精確判法
   （``validate_surface_partition``）。
 - 深度：一區的上限取「房間預設／這面牆／這一塊」三層裡最小的那一個（一樣小時取範圍最小的那一層），並記是哪一層擋的；
-  固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過就紅（照寫下來的十進位相加、不設容差，跟搜尋的固定材料候選同一把 ``depth_fit.layers_exceed``）。
+  固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過上限加 ``EDGE_MERGE_TOL`` 就紅（跟搜尋的固定材料候選 ``depth_fit.layers_exceed`` 同一把）。
   直接取代牆面的材料（固定阻抗、實測表、整面多層構造）看不出貼了多深，照實寫「比不了」、不當作過，也不拿原牆的厚度標紅。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
 - 搜尋區的上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法只在引擎一份 ``fixed_surfaces.target_fit``）：准用的每一組
@@ -36,7 +36,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, layers_exceed, target_fit
+from aosr.gradient.depth_fit import TargetFit, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
@@ -178,7 +178,7 @@ def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: Depth
     if depth is None:
         return [Problem(code="depth_not_comparable", level="note",
                         text=f"這一區的材料直接取代牆面、看不出貼了多深，上限 {cap.words()} 比不了")]
-    if isinstance(material, MountedOnWall) and layers_exceed(material.layers, cap.value_m):
+    if depth > cap.value_m + EDGE_MERGE_TOL:
         return [Problem(code="depth_over", level="red",
                         text=f"貼上去總深 {depth:g} 公尺，超過深度上限 {cap.words()}")]
     return []

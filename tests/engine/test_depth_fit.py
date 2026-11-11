@@ -157,6 +157,30 @@ def test_snap_copy_matches_the_engine_depth_room(thickness: float, total: float)
         assert depth_fit._snap_fits(family, total) == bool(room >= np.float64(low)), (thickness, total, low)
 
 
+def test_layers_cut_to_the_cap_by_the_engine_do_not_exceed_it() -> None:
+    """搜尋把空腔切到「上限減厚度」（``depth_room``），那兩層照寫下來相加會多出浮點尾數（0.03＋0.020000000000000004）；
+    存回方案帶著同一個上限重開不准自己標紅、也不准把那份材料判成放不下。容差兩邊同一個數。"""
+    from types import SimpleNamespace
+
+    from aosr.gradient import depth_fit
+    from aosr.gui.zone_edit import EDGE_MERGE_TOL
+
+    assert depth_fit.DEPTH_SLACK_M == EDGE_MERGE_TOL
+    thicknesses = sorted({t for f in _base().family for t in f.thicknesses_m} | {0.03, 0.04, 0.06, 0.075, 0.12, 0.2})
+    checked = 0
+    for step in range(6, 101):
+        cap = round(step * 0.005, 3)
+        for thickness in thicknesses:
+            room = float(search.depth_room(np.float64(cap), np.float64(thickness)))
+            if room < 0:
+                continue
+            layers = [SimpleNamespace(thickness_m=thickness), SimpleNamespace(thickness_m=room)]
+            assert not depth_fit.layers_exceed(layers, cap), (cap, thickness, room)
+            checked += 1
+    assert checked > 500
+    assert depth_fit.layers_exceed([SimpleNamespace(thickness_m=0.15)], 0.1499)
+
+
 def test_fixed_fit_measures_assemblies_and_refuses_what_it_cannot_measure() -> None:
     """抓固定材料厚度加總的浮點尾數被當成超過、看不出多深的被當成放得下。"""
     deep = _preset_material("glass_wool_48k_50mm_gap100")
