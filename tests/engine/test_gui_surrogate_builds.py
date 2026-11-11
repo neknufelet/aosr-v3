@@ -482,6 +482,13 @@ def test_states_from_files_and_service(tmp_path: Path) -> None:
     listed = cast(list[Record], builds.listing()["builds"])
     assert [item["build_id"] for item in listed] == [fifth["build_id"], fourth["build_id"], third["build_id"],
                                                      second["build_id"], first["build_id"]]
+    # 放進格子途中按了停：命令列只記下不打斷、照常寫 installed、離開碼 0——網頁要說「放進格子」，不說「已停止」
+    sixth = builds.start(NAME, QUICK)
+    assert builds.stop(str(sixth["build_id"]))["state"] == "stopping"
+    installed = result.model_copy(update={"verdict": "installed", "within_contract": True})
+    (_work(data_dir, sixth) / RESULT_FILE).write_text(installed.model_dump_json(), encoding="utf-8")
+    _finish(data_dir, launcher, sixth, 0)
+    assert builds.get(str(sixth["build_id"]))["state"] == "installed"
 
 
 def test_launch_failure_is_recorded(tmp_path: Path) -> None:
