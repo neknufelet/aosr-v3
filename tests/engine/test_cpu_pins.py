@@ -27,10 +27,12 @@ def test_pins_missing_in_the_parent_are_not_invented(monkeypatch: pytest.MonkeyP
     for name in PINS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OPENBLAS_CORETYPE", "Haswell")
-    base = {"PATH": "/bin"}
+    monkeypatch.setenv("NPY_DISABLE_CPU_FEATURES", "")
+    base = {"PATH": "/bin", "OPENBLAS_CORETYPE": "Prescott"}
     pinned = forward_cpu_pins(base)
-    assert pinned == {"PATH": "/bin", "OPENBLAS_CORETYPE": "Haswell"}
-    assert base == {"PATH": "/bin"}, "傳進來的那一份不准被改"
+    assert pinned == {"PATH": "/bin", "OPENBLAS_CORETYPE": "Haswell", "NPY_DISABLE_CPU_FEATURES": ""}, (
+        "父行程有設的照抄（空字串也是設了、蓋掉傳進來的舊值），沒設的 XLA_FLAGS 不補")
+    assert base == {"PATH": "/bin", "OPENBLAS_CORETYPE": "Prescott"}, "傳進來的那一份不准被改"
 
 
 def test_every_cloud_shard_sets_the_pins_the_helper_forwards() -> None:

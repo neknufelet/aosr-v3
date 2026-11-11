@@ -39,9 +39,10 @@ helper_file = "tests/engine/_cpu_pins.py"
 helper_name = "forward_cpu_pins"
 
 # ── 立卡前就在的檔（#1077 凍結；收尾在 #1078，到期日統一 2027-02-26）──────────────
-# 三種理由：自己已經帶三格（還沒改用共用小工具）、沒帶（要逐支看補了會不會反而不一致）、
+# 三種理由：檔裡至少一處自己帶三格（不一定每處都帶）、整支沒帶（要逐支看補了會不會反而不一致）、
 # 刻意不帶（終點探針要跟正式工作行程同一環境）。本機三格是空的、沒有 AVX-512，本機跑不出差異，
 # 逐支判斷要看雲端摘要的機器行（tests/conftest.py 的 machine_lines）。
+# 按檔凍結只比處數：凍結的檔修掉一處、同時另寫一處沒包的，總數不變就看不出來（審查 #1081 點的）；凍結檔要改動時順手包好。
 
 [[settings.allow]]
 path = "tests/engine/_construction_gui_server.py"
@@ -58,7 +59,7 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/_jax_identity_probe.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -70,25 +71,25 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_amplitude_jax.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_construction.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_construction_cli_end_to_end.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_construction_diff.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -100,7 +101,7 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_fem_complex.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -112,7 +113,7 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_fem_reduced_zones.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -148,7 +149,7 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_jax_identity.py"
 calls = 4
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -160,7 +161,7 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_late_energy_zones_jax.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -172,31 +173,31 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_material_flow.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_cli.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_endpoint.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_fixed_surface.py"
 calls = 2
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -208,43 +209,43 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_loop.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_mount.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_templates.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_material_gradient_zones.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_mounted_on_wall.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_parallel_full_repairs.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_parallel_full_solves.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
@@ -382,19 +383,19 @@ expires = "2027-02-26"
 [[settings.allow]]
 path = "tests/engine/test_wall_reflections.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_wall_surfaces.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
 path = "tests/engine/test_zone_reflections.py"
 calls = 1
-reason = "立卡前就在：這支自己把三格處理器釘選帶進子行程（各檔一份 _CPU_PIN_VARS 或同義寫法），還沒改用共用小工具 forward_cpu_pins；改寫並刪掉自己那份在 #1078。"
+reason = "立卡前就在：這支檔裡至少有一處自己把三格處理器釘選帶進子行程（env.update 搭配各檔一份 _CPU_PIN_VARS 或同義寫法），但不一定每一處都帶；逐處改用共用小工具 forward_cpu_pins、刪掉自己那份在 #1078。"
 expires = "2027-02-26"
 
 [[settings.allow]]
