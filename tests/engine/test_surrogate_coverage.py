@@ -267,6 +267,9 @@ def test_reachable_families_are_the_union_of_lists_and_an_unlisted_patch_reaches
     assert reachable_families(settings, [*LISTS, "y0"], LISTS) == {family.id for family in settings.family}
     assert USER in reachable_families(settings, ["y0"], {})
     assert reachable_families(settings, [ZONE], {ZONE: ("none", "fixed:panel_fixed")}) == frozenset()
+    # 固定面固定成某個家族的構造：替身每一步都算它，那個家族照樣要核；方案自己的材料不是家族
+    assert reachable_families(settings, LISTS, LISTS, ("glass_wool_96k_50mm", "scheme-material")) == {
+        "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"}
 
 
 def test_a_library_family_no_search_patch_may_use_needs_no_rebuild(tmp_path: Path) -> None:

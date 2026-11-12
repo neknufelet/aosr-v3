@@ -260,7 +260,7 @@ def plan_reachable(plan: SearchPlan, settings: MaterialGradientSettings) -> froz
     """這一跑搜尋走得到的家族：交給搜尋的每一片照計畫的准用清單（就是交給命令列的 ``--allowed``），沒清單的片＝全部家族
     （:func:`~aosr.gradient.surrogate_coverage.reachable_families`，命令列開跑同一支）。"""
     search = [surface for surface, mode in zip(plan.surfaces, plan.modes, strict=True) if mode == "search"]
-    return reachable_families(settings, search, plan.allowed)
+    return reachable_families(settings, search, plan.allowed, plan.fixed_surfaces.values())
 
 
 def _not_trained(surrogate: Path, materials: SearchMaterials, fixed: tuple[FixedTarget, ...],

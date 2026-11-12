@@ -288,10 +288,12 @@ def test_start_ignores_a_library_family_no_search_surface_may_use(tmp_path: Path
     code, _ = _start(tmp_path, monkeypatch, "--materials", str(user), *listed[:-2], presets=",".join([preset] * 6))
     assert code == cli.EXIT_FAILED and not (tmp_path / "out").exists()
     assert f"家族 {USER} 沒訓練過" in capsys.readouterr().err
-    code, _ = _start(tmp_path, monkeypatch, "--materials", str(user), *listed, presets=",".join([preset] * 6))
+    # 最後一面改成固定面（方案自己的材料、不換樣板）：不算走得到全部家族，照樣開得了
+    code, _ = _start(tmp_path, monkeypatch, "--materials", str(user), *listed[:-2], "--fixed-surface", "yL=scheme-material",
+                     presets=",".join([preset] * 6))
     assert code == 0, capsys.readouterr().err
     folder, = (tmp_path / "out").iterdir()
-    assert run.read_project(folder).allowed_targets == {wall: ("glass_wool_48k", "none") for wall in walls}
+    assert run.read_project(folder).allowed_targets == {wall: ("glass_wool_48k", "none") for wall in walls[:-1]}
 
 
 def test_start_refuses_a_named_library_that_does_not_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

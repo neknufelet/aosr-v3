@@ -353,7 +353,7 @@ def _check_start_materials(materials: SearchMaterials, model: ReducedModel, sche
             sys.stderr.write(f"注意：{note}\n")
     names = [design.surface_id for design in designs]
     frozen = expanded_fixed_surfaces(fixed, names) if fixed else {}
-    reachable = reachable_families(materials.settings, [name for name in names if name not in frozen], allowed)
+    reachable = reachable_families(materials.settings, [name for name in names if name not in frozen], allowed, frozen.values())
     check_covers(surrogate.parent / TRAINING_FILE, materials, fixed_targets(allowed, materials.presets), reachable=reachable)
 
 

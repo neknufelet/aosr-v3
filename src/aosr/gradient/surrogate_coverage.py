@@ -12,7 +12,8 @@
 個案的每面深度上限只會把範圍切小，不算進來（替身照家族範圍建）。
 
 開跑核的家族只算這一場**走得到**的（#1082 段 2-7，:func:`reachable_families`）：每個交給搜尋的面片准用清單裡的家族取聯集，
-沒寫清單的面片走得到全部家族（同換樣板 ``template_rounds.alternatives`` 那一條）；固定面不換樣板、不算。起點一定在
+沒寫清單的面片走得到全部家族（同換樣板 ``template_rounds.alternatives`` 那一條）；固定面不換樣板，但固定成某個家族的構造時
+替身每一步都算那份構造，它的家族照樣要核（網頁的固定面一律是方案自己的材料，不中這一條）。起點一定在
 它那一面的清單裡（開跑前 ``check_allowed_against_start`` 擋），不另加。材料庫多一組、清單都不准用它，舊替身照樣收。
 網頁預覽、網頁開跑、命令列開跑三處同一支、同一份逐片清單。
 
@@ -160,12 +161,13 @@ def family_coverage(settings: MaterialGradientSettings, presets: Sequence[Preset
 
 
 def reachable_families(settings: MaterialGradientSettings, search_surfaces: Iterable[str],
-                       allowed: Mapping[str, Sequence[str]]) -> frozenset[str]:
+                       allowed: Mapping[str, Sequence[str]], fixed_presets: Iterable[str] = ()) -> frozenset[str]:
     """這一場搜尋走得到的家族代號：交給搜尋的每一片（``search_surfaces``，固定面不列）有准用清單（``allowed``，面片代號 →
     目標，命令列 ``--allowed`` 展開到面片的寫法）就取清單裡的家族，沒寫清單的那一片走得到全部家族；全部取聯集。
+    固定面的構造（``fixed_presets``，命令列 ``--fixed-surface`` 的值）屬於哪個家族也算進來（替身每一步都算它）。
     不貼與固定材料（``fixed:<代號>``）不是家族，固定材料另核（:func:`fixed_targets`）。"""
     every = tuple(family.id for family in settings.family)
-    found: set[str] = set()
+    found: set[str] = {family.id for preset in fixed_presets if (family := settings.family_of(preset)) is not None}
     for surface in search_surfaces:
         listed = allowed.get(surface)
         if listed is None:
