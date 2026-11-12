@@ -539,7 +539,8 @@ function drawJob() {
   steps.replaceChildren(...job.steps.map((step, index) => el("div", {},
     el("p", {text: `第 ${index + 1} 步（${step.kind === "start" ? "開跑：搜尋再細算與收尾" : "接續：細算與收尾"}）` +
       `${step.exit_code === null ? "" : `，離開碼 ${step.exit_code}`}${step.error ? `：${step.error}` : ""}`}),
-    el("pre", {text: step.log_tail.join("\n") || "（還沒有輸出）"}))));
+    // 搜尋命令列平常不印東西（進度寫在搜尋資料夾的狀態檔），空的不代表卡住（#700 示範時看到）。
+    el("pre", {text: step.log_tail.join("\n") || "（沒有輸出：搜尋命令列平常不印東西，進度看上面幾行與進度頁；出錯時這裡會有原文）"}))));
 }
 
 async function act(action) {
