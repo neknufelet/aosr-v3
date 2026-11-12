@@ -13,19 +13,24 @@
 """
 from __future__ import annotations
 
+import re
 import signal
 import sys
 import time
 from pathlib import Path
 from types import FrameType
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.gui.gradient_exec import FORWARDED, StepExit, run_step, write_exit
-from aosr.search.store import REFINE_STOP_FILE, STOP_FILE
 
 StepName = Literal["start", "auto"]
+# 搜尋資料夾裡的兩個停止記號與資料夾代號的樣子；照抄 src/aosr/search/store.py 與 src/aosr/gui/search_view.py（考卷核兩邊相同）。
+# 不從那兩支載入：這一層要越早接管訊號越好，不多載一堆模組拉長「還沒接管就被 SIGTERM 打死」的空窗。
+STOP_FILE: Final = "stop"
+REFINE_STOP_FILE: Final = "refine-stop"
+SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
 class ChainStep(BaseModel):
@@ -56,11 +61,10 @@ def chain_folder(chain: Chain) -> Path | None:
         return None
     try:
         name = Path(chain.id_file).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, ValueError):
         return None
-    if not name or "/" in name or name in (".", ".."):
-        return None
-    return Path(chain.search_root) / name
+    path = Path(chain.search_root) / name
+    return path if SEARCH_ID.fullmatch(name) and path.is_dir() and not path.is_symlink() else None
 
 
 def _stop_marked(folder: Path | None) -> bool:
@@ -78,10 +82,12 @@ def run_chain(chain: Chain) -> int:
         signal.signal(number, remember)
     last: StepExit | None = None
     for index, step in enumerate(chain.steps):
+        if received:
+            break  # 收過訊號（含第一步開之前）就不再開任何一步
         if index > 0:
-            # 上一步沒正常結束、收過訊號、或有人放了停止記號：不開下一步。
+            # 上一步沒正常結束、或有人放了停止記號：不開下一步。
             folder = chain_folder(chain)
-            if last is None or last.exit_code != 0 or received or _stop_marked(folder):
+            if last is None or last.exit_code != 0 or _stop_marked(folder):
                 break
             if step.append_folder and folder is None:
                 last = StepExit(exit_code=None, error=f"上一步沒有留下搜尋資料夾的代號，{step.name} 開不了",
@@ -92,7 +98,7 @@ def run_chain(chain: Chain) -> int:
         run_step(Path(step.record), Path(chain.log), argv, received=received)
         last = StepExit.model_validate_json(Path(step.record).read_text(encoding="utf-8"))
     if last is None:
-        last = StepExit(exit_code=None, error="這一條沒有開任何一步", finished_at=time.time())
+        last = StepExit(exit_code=None, error="開第一步之前就收到停止訊號，這一條沒有開任何一步", finished_at=time.time())
     write_exit(Path(chain.done), last.model_copy(update={"signals": tuple(received), "finished_at": time.time()}))
     return 0
 

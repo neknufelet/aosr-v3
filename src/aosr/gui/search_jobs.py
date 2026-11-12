@@ -43,17 +43,20 @@ from aosr.gui.gradient_jobs import (
 )
 from aosr.gui.material_editor import plain_error
 from aosr.gui.search_exec import Chain, ChainStep, StepName
-from aosr.gui.search_view import SEARCH_ID, folder_process, read_proc_locks, search_line
+from aosr.gui.search_view import SEARCH_ID, held_search, search_line
 from aosr.gui.zone_design import NAME
 from aosr.reporting.evaluation import purpose_settings
 from aosr.reporting.scheme import Scheme, scheme_from_document
 from aosr.reporting.validation import SchemeValidationError
 from aosr.runtime import child_process_env
 from aosr.search.labels import SEAT_LOCKED_NOTE, speaker_setup_text
+from aosr.search.outer_status import snapshot_of
 from aosr.search.run import SearchStatus
 from aosr.search.select import select_refined
 from aosr.search.settings import SearchSettings
-from aosr.search.store import SearchStore, check_search_axis, checked_inputs, fill_settings_document
+from aosr.search.store import (
+    REFINE_STOP_FILE, STOP_FILE, SearchStore, check_search_axis, checked_inputs, fill_settings_document,
+)
 
 JOBS_DIR: Final = "search-jobs"
 SEARCHES_DIR: Final = "searches"
@@ -71,10 +74,16 @@ STATE_TEXTS: Final[dict[str, str]] = {
     "finishing": "細算與收尾中（細算、外圈結論、低頻診斷、交接敏感度、擺位穩定性）",
     "stopping": "停止中（這一批算完才停；收尾附件中按停會中斷附件）",
     "stopped": "已停止",
-    "interrupted": "中斷了（服務不見了、沒留下離開碼，或命令列回報中斷），可以接續",
+    "interrupted": "中斷了（服務不見了、被外面送了停止訊號，或命令列回報中斷）",
     "paused_time_limit": "因單題時間上限暫停（要調高上限接續，請叫助理）",
     "failed": "失敗（原因看下面的輸出）",
-    "done": "做完了",
+    "concluded": "收尾了，但沒有完成（原因看外圈結論）",
+    "done": "做完了：細算完成",
+}
+# 外圈結論 → 這一頁的狀態；沒列的（細算用完上限、第一名是原方案…）都是「收尾了，但沒有完成」。
+CONCLUSION_STATES: Final[dict[str, str]] = {
+    "complete": "done", "user_stopped": "stopped", "search_failed": "failed", "refine_failed": "failed",
+    "search_interrupted": "interrupted", "refine_interrupted": "interrupted", "search_paused_time_limit": "paused_time_limit",
 }
 
 
@@ -233,7 +242,7 @@ class SearchJobs:
         """命令列建好的搜尋資料夾（照代號檔）；還沒建好、或代號檔指的不是合法的資料夾就是 None。"""
         try:
             name = (self._dir(job.job_id) / ID_FILE).read_text(encoding="utf-8").strip()
-        except OSError:
+        except (OSError, ValueError):
             return None
         path = self.searches / name
         return path if SEARCH_ID.fullmatch(name) and path.is_dir() and not path.is_symlink() else None
@@ -266,6 +275,13 @@ class SearchJobs:
         except (OSError, ValueError):
             return None
 
+    @staticmethod
+    def _conclusion(status: SearchStatus | None) -> str | None:
+        """外圈結論，而且是對著現在這份狀態下的（快照對得上；命令列 stop 的提示也這樣判）；舊的不算。"""
+        if status is None or status.outer.conclusion is None or status.outer.snapshot != snapshot_of(status):
+            return None
+        return status.outer.conclusion
+
     def _state(self, job: SearchJob, folder: Path | None) -> str:
         if not job.steps:
             return "failed"
@@ -283,10 +299,15 @@ class SearchJobs:
         if status == "vanished":
             return "stopped" if step.stop_requested else "interrupted"
         code = None if record is None else record.exit_code
-        if step.stop_requested or (record is not None and record.signals):
+        if step.stop_requested:
             return "stopped"
+        if record is not None and record.signals:
+            return "interrupted"  # 不是網頁按停：外面停了服務、登出或關機
+        conclusion = self._conclusion(self._status(folder))
+        if auto_ran and conclusion is not None:
+            return CONCLUSION_STATES.get(conclusion, "concluded")
         if code == 0:
-            return "done" if auto_ran else "stopped"
+            return "failed" if auto_ran else "stopped"  # start 正常結束卻沒接 auto：有人放了停止記號
         if code == 4:
             return "paused_time_limit"
         if code == 3:
@@ -294,11 +315,16 @@ class SearchJobs:
         return "failed"
 
     def _actions(self, job: SearchJob, state: str, folder: Path | None, status: SearchStatus | None) -> dict[str, bool]:
+        """接續：外圈還沒結論、搜尋與細算都沒判失敗或中斷、也沒放停止記號——auto 接得下去才給。
+        放進結果清單：外圈有結論、細算有第一名就給（收尾附件被停或被殺，搜尋結果照樣拿得出來）；第一階段還沒接入選。"""
         running = state in ("starting", "searching", "finishing", "stopping")
-        open_outer = status is not None and status.outer.conclusion is None
+        conclusion = self._conclusion(status)
+        resumable = (folder is not None and status is not None and conclusion is None
+                     and status.state not in ("failed", "interrupted") and status.refine.state not in ("failed", "interrupted")
+                     and not (folder / STOP_FILE).exists() and not (folder / REFINE_STOP_FILE).exists())
         return {"stop": running,
-                "resume": folder is not None and open_outer and state in ("interrupted", "failed"),
-                "select": (state == "done" and not job.stage_one and status is not None
+                "resume": resumable and state in ("interrupted", "failed"),
+                "select": (not running and not job.stage_one and status is not None and conclusion is not None
                            and status.refine.best is not None)}
 
     def view(self, job: SearchJob) -> dict[str, object]:
@@ -326,21 +352,11 @@ class SearchJobs:
                 "refine_best": best, "steps": steps}
 
     def _held_search(self) -> str | None:
-        """``data_dir/searches/`` 底下正被計算行程拿著的搜尋資料夾（命令列開的也算）；讀不到鎖清單就丟錯，不當成沒有。"""
-        if not self.searches.is_dir():
-            return None
+        """``data_dir/searches/`` 底下正被計算行程拿著的搜尋資料夾（命令列開的也算）；判不出就丟錯，不當成沒有。"""
         try:
-            locks = read_proc_locks()
-        except OSError as error:
-            raise LaunchFailed(f"讀不到鎖清單（/proc/locks），判不出有沒有搜尋在跑：{error}") from error
-        for path in sorted(self.searches.iterdir()):
-            if SEARCH_ID.fullmatch(path.name) and path.is_dir() and not path.is_symlink():
-                held = folder_process(path, locks)
-                if held.held is None:
-                    raise LaunchFailed(f"判不出搜尋 {path.name} 有沒有在跑：{held.text}")
-                if held.held:
-                    return f"搜尋 {path.name}"
-        return None
+            return held_search(self.searches)
+        except ValueError as error:
+            raise LaunchFailed(str(error)) from error
 
     def active(self) -> str | None:
         """還在算的那一件：這個資料夾的搜尋工作、整台機器的重計算服務（第三階段、建替身、別處開的搜尋）、
@@ -443,16 +459,24 @@ class SearchJobs:
             if not job.steps or self._step_state(job, len(job.steps) - 1)[0] != "running":
                 raise ActionRefused("這一跑沒有在算，不用停")
             step, folder = job.steps[-1], self.folder(job)
-            status = self._status(folder)
-            if folder is not None and status is not None and status.outer.conclusion is None:
-                store = SearchStore.open(folder)
-                store.stop_path.touch()
-                store.refine_stop_path.touch()
-            else:
+            if not self._stop_by_marker(folder):
                 self.launcher.stop(step.unit)
             job = job.model_copy(update={"steps": (*job.steps[:-1], step.model_copy(update={"stop_requested": True}))})
             self._save(job)
             return self.view(job)
+
+    def _stop_by_marker(self, folder: Path | None) -> bool:
+        """外圈還沒結論就放兩個記號；放完再讀一次狀態——這中間剛好下了結論（開始補附件，記號停不到）就回假、改停服務。
+        資料夾還沒建好、狀態讀不到、記號放不下去，一樣回假。"""
+        status = self._status(folder)
+        if folder is None or status is None or self._conclusion(status) is not None:
+            return False
+        try:
+            (folder / STOP_FILE).touch()
+            (folder / REFINE_STOP_FILE).touch()
+        except OSError:
+            return False
+        return self._conclusion(self._status(folder)) is None
 
     def resume(self, job_id: str) -> dict[str, object]:
         with self.launching():

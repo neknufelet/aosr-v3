@@ -326,7 +326,7 @@ class GuiHandlers:
         self.surrogates = SurrogateBuilds(self.gradient)
         search_launcher = settings.search_launcher or settings.gradient_launcher or SystemdLauncher(memory_max=SEARCH_MEMORY_MAX)
         self.search_jobs = SearchJobs(self.data_dir, launcher=search_launcher, engine_commit=settings.engine_commit,
-                                      capabilities=capabilities_path, scheme_lock=self.jobs._lock, others=self.gradient.active_job)
+                                      capabilities=capabilities_path, scheme_lock=self.jobs._lock, others=lambda: self.gradient.active_job())
         self.gradient_follow = GradientFollow(self.gradient, self.jobs, self._web_problem_texts)
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))

@@ -206,6 +206,28 @@ def folder_process(folder: Path, locks: str | None = None) -> Process:
         return Process(None, f"判不出有沒有行程在跑：{_reason(error)}")
 
 
+def held_search(root: Path) -> str | None:
+    """``root`` 底下正被計算行程拿著的搜尋資料夾（命令列開的也算）：整台一次一件時，網頁開任何重計算前都看這一支（#700）。
+
+    判不出來（鎖清單讀不到、某個資料夾查不了）丟 ValueError，不准當成沒有——當成沒有就會放行第二件。
+    只看這一個根目錄：開在別的資料夾的命令列搜尋看不到。
+    """
+    if not root.is_dir():
+        return None
+    try:
+        locks = read_proc_locks()
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"讀不到鎖清單（/proc/locks），判不出有沒有搜尋在跑：{error}") from error
+    for path in sorted(root.iterdir()):
+        if SEARCH_ID.fullmatch(path.name) and path.is_dir() and not path.is_symlink():
+            held = folder_process(path, locks)
+            if held.held is None:
+                raise ValueError(f"判不出搜尋 {path.name} 有沒有在跑：{held.text}")
+            if held.held:
+                return f"搜尋 {path.name}"
+    return None
+
+
 def search_path(root: Path, search_id: str) -> Path:
     """只從合法代號組路徑；拒絕連到外面的資料夾。"""
     if not SEARCH_ID.fullmatch(search_id):

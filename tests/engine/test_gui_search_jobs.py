@@ -32,7 +32,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.config.paths import config_path
 from aosr.runtime import child_process_env
 from aosr.search import cli
-from aosr.search.outer_status import OUTER_MESSAGES, OuterStatus, snapshot_of
+from aosr.search.outer_status import OUTER_MESSAGES, OuterConclusion, OuterStatus, snapshot_of
 from aosr.search.run import RefineStatus, SearchStatus
 from aosr.search.select import SelectOutcome
 from aosr.search.settings import SearchSettings
@@ -91,10 +91,10 @@ def _finish(jobs: SearchJobs, job_id: str, index: int, *, start: int | None, aut
     write_exit(steps / f"{index}.exit.json", last)
 
 
-def _done_status(best: int | Literal["baseline"] | None = 7) -> SearchStatus:
+def _done_status(best: int | Literal["baseline"] | None = 7, conclusion: OuterConclusion = "complete") -> SearchStatus:
     refine = RefineStatus(state="stopped", stop_reason="stable", best=best)
     status = SearchStatus(state="converged", refine=refine)
-    return status.model_copy(update={"outer": OuterStatus(conclusion="complete", message=OUTER_MESSAGES["complete"],
+    return status.model_copy(update={"outer": OuterStatus(conclusion=conclusion, message=OUTER_MESSAGES[conclusion],
                                                           snapshot=snapshot_of(status))})
 
 
@@ -228,8 +228,10 @@ def test_states_follow_the_id_file_status_and_exit_records(tmp_path: Path) -> No
     view = jobs.get(job_id)
     assert view["state"] == "done" and view["actions"] == {"stop": False, "resume": False, "select": True}
     assert view["refine_best"] == 7 and view["outer"] == OUTER_MESSAGES["complete"]
+    (jobs.root / job_id / "steps" / "0.auto.exit.json").unlink()
     _finish(jobs, job_id, 0, start=4, auto=None)
     assert jobs.get(job_id)["state"] == "paused_time_limit"
+    (folder / "status.json").write_text(SearchStatus().model_dump_json(), encoding="utf-8")
     _finish(jobs, job_id, 0, start=0, auto=3)
     assert jobs.get(job_id)["state"] == "interrupted"
     (jobs.root / job_id / "steps" / "0.auto.exit.json").unlink()
@@ -277,6 +279,11 @@ def test_stop_stops_the_service_before_the_folder_or_after_the_conclusion(tmp_pa
     jobs.stop(job_id)
     assert launcher.stopped == [f"aosr-search-{job_id}-0"]
     assert folder is None or not (folder / "stop").exists()
+    if folder is None:
+        # 服務照實轉了一次 SIGTERM、命令列被打斷：這是網頁按的停，判已停止，不是外面來的中斷。
+        launcher.active.clear()
+        _finish(jobs, job_id, 0, start=3, auto=None, signals=(signal.SIGTERM,))
+        assert jobs.get(job_id)["state"] == "stopped"
 
 
 def test_resume_runs_auto_alone_on_the_known_folder(tmp_path: Path) -> None:
@@ -427,9 +434,10 @@ def test_chain_forwards_one_sigterm_and_stops_there(tmp_path: Path) -> None:
     ready, count = tmp_path / "ready", tmp_path / "count"
     start = (f"import signal,sys,time\nseen=[]\nsignal.signal(signal.SIGTERM, lambda s,f: seen.append(s))\n"
              f"open({str(ready)!r},'w').close()\nend=time.time()+3\n"
-             f"while time.time()<end: time.sleep(0.05)\nopen({str(count)!r},'w').write(str(len(seen)))\nsys.exit(3)")
+             f"while time.time()<end: time.sleep(0.05)\nopen({str(count)!r},'w').write(str(len(seen)))\nsys.exit(0)")
     done, _ = _run_chain(tmp_path, start, "import sys; sys.exit(0)", signal_after=ready)
-    assert done.exit_code == 3 and done.signals == (signal.SIGTERM,)
+    # start 收到訊號後照樣回 0：擋住 auto 的只能是「收過訊號」那一條。
+    assert done.exit_code == 0 and done.signals == (signal.SIGTERM,)
     assert count.read_text(encoding="utf-8") == "1" and not (tmp_path / "auto.json").exists()
 
 
@@ -446,3 +454,150 @@ def test_scheme_without_speaker_setup_needs_height_and_cabinet(tmp_path: Path) -
     full = settings_document()
     full.pop("purpose")
     assert cast(Record, jobs.preview("plain", full)["settings"])["layout"] is not None
+
+
+# ---- 審查補的（#1129 審查）：結論決定做完沒、外面來的訊號、附件被停、停止的空窗、開跑鎖、第三階段那一側 ----
+
+@pytest.mark.parametrize("conclusion,state,select", [
+    ("complete", "done", True), ("refine_budget", "concluded", True), ("baseline_first", "concluded", True),
+    ("feedback_not_configured", "concluded", True), ("user_stopped", "stopped", True), ("search_failed", "failed", True),
+    ("refine_interrupted", "interrupted", True),
+])
+def test_auto_exit_zero_is_judged_by_the_outer_conclusion(tmp_path: Path, conclusion: OuterConclusion, state: str,
+                                                          select: bool) -> None:
+    """抓 auto 離開碼 0 一律當「做完了」：命令列 stop 停的、細算用完上限、第一名是原方案，都不准顯示成做完。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    _folder(jobs, job_id, _done_status(conclusion=conclusion))
+    launcher.active.clear()
+    _finish(jobs, job_id, 0, start=0, auto=0)
+    view = jobs.get(job_id)
+    assert view["state"] == state and view["actions"] == {"stop": False, "resume": False, "select": select}
+
+
+def test_web_stop_through_markers_ends_stopped_without_resume(tmp_path: Path) -> None:
+    """抓網頁按停的主路徑：放了記號、auto 回 0、結論「使用者停止」，要判已停止，不給接續。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    folder = _folder(jobs, job_id)
+    jobs.stop(job_id)
+    (folder / "status.json").write_text(_done_status(conclusion="user_stopped").model_dump_json(), encoding="utf-8")
+    launcher.active.clear()
+    _finish(jobs, job_id, 0, start=0, auto=0)
+    view = jobs.get(job_id)
+    assert view["state"] == "stopped" and cast(Record, view["actions"])["resume"] is False
+
+
+def test_a_signal_not_from_the_page_is_interrupted_and_resumable(tmp_path: Path) -> None:
+    """抓外面停了服務（登出、關機）被當成網頁按停：狀態檔還是進行中、外圈沒結論，要判中斷、給接續。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    _folder(jobs, job_id)
+    launcher.active.clear()
+    _finish(jobs, job_id, 0, start=-15, auto=None, signals=(signal.SIGTERM,))
+    view = jobs.get(job_id)
+    assert view["state"] == "interrupted" and cast(Record, view["actions"])["resume"] is True
+
+
+@pytest.mark.parametrize("status", [SearchStatus(state="interrupted"), SearchStatus(state="failed"),
+                                    SearchStatus(refine=RefineStatus(state="failed"))])
+def test_no_resume_when_auto_would_only_conclude(tmp_path: Path, status: SearchStatus) -> None:
+    """抓狀態檔已判中斷或失敗還給接續（auto 一進去只會下結論，按了沒用）。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    _folder(jobs, job_id, status)
+    launcher.active.clear()
+    assert jobs.get(job_id)["state"] == "interrupted"
+    assert cast(Record, jobs.get(job_id)["actions"])["resume"] is False
+
+
+def test_attachments_cut_short_still_hand_over_the_result(tmp_path: Path) -> None:
+    """抓外圈已有結論、補附件時服務不見了，結果卻拿不出來（接續與放進結果清單都關）。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    _folder(jobs, job_id, _done_status())
+    launcher.active.clear()
+    view = jobs.get(job_id)
+    assert view["state"] == "interrupted"
+    assert view["actions"] == {"stop": False, "resume": False, "select": True}
+
+
+def test_stop_falls_back_to_the_service_when_the_conclusion_lands_meanwhile(tmp_path: Path,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓放記號的同時外圈剛好下結論（開始補附件，記號停不到）沒補一次停服務。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    folder = _folder(jobs, job_id)
+    reads: list[Path | None] = []
+
+    def status(path: Path | None) -> SearchStatus:
+        reads.append(path)
+        return SearchStatus() if len(reads) == 1 else _done_status()  # 第一次讀還沒結論，放完記號再讀已經有了
+
+    monkeypatch.setattr(jobs, "_status", status)
+    jobs.stop(job_id)
+    assert (folder / "stop").is_file() and launcher.stopped == [f"aosr-search-{job_id}-0"]
+
+
+def test_start_waits_for_the_shared_start_lock(tmp_path: Path) -> None:
+    """抓查忙到開好服務那一段沒拿共用的開跑鎖（兩個網頁同時查到空閒會各開一件）。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    launcher.start_lock.acquire()
+    worker = threading.Thread(target=lambda: jobs.start(NAME, _body()))
+    worker.start()
+    time.sleep(0.5)
+    assert launcher.launched == []
+    launcher.start_lock.release()
+    worker.join(timeout=30)
+    assert len(launcher.launched) == 1
+
+
+def test_third_stage_also_sees_a_command_line_search(tmp_path: Path) -> None:
+    """抓第三階段那一側（開搜尋、建替身都走它的查忙）看不到命令列開著的搜尋。"""
+    from aosr.gui.gradient_jobs import GradientJobs
+
+    data_dir = tmp_path / "data"
+    folder = data_dir / "searches" / ("e" * 32)
+    folder.mkdir(parents=True)
+    gradient = GradientJobs(data_dir, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=CAPABILITIES,
+                            scheme_lock=threading.Lock())
+    assert gradient.active_job() is None
+    descriptor = os.open(folder, os.O_RDONLY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert gradient.active_job() == f"搜尋 {'e' * 32}"
+    finally:
+        os.close(descriptor)
+
+
+def test_app_search_page_sees_the_web_third_stage_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓網頁接線時沒把第三階段的查忙交給搜尋那一側（others）。"""
+    from aosr.gui.app import GuiHandlers
+
+    handlers = GuiHandlers(GuiSettings(engine_commit="c" * 40, data_dir=tmp_path / "data", gradient_launcher=FakeLauncher(),
+                                       startup_fingerprint="f", startup_physics_identity="p"))
+    monkeypatch.setattr(handlers.gradient, "active_job", lambda: "第三階段 j")
+    assert handlers.search_jobs.active() == "第三階段 j"
+
+
+def test_chain_refuses_an_id_file_that_is_not_a_search_folder(tmp_path: Path) -> None:
+    """抓代號檔寫了不是搜尋代號的東西（../ 或亂碼），服務那一層照樣把它接在 auto 後面。"""
+    start = (f"import sys; open({str(tmp_path / 'search.id')!r},'w').write('../x\\n'); sys.exit(0)")
+    done, _ = _run_chain(tmp_path, start, "import sys; sys.exit(0)")
+    assert done.exit_code is None and "代號" in cast(str, done.error) and not (tmp_path / "auto.json").read_text() == ""
+
+
+def test_exec_constants_match_the_search_folder(tmp_path: Path) -> None:
+    """抓服務那一層抄的停止記號檔名與代號樣子跟搜尋資料夾那一邊不同。"""
+    from aosr.gui import search_exec, search_view
+    from aosr.search import store
+
+    assert (search_exec.STOP_FILE, search_exec.REFINE_STOP_FILE) == (store.STOP_FILE, store.REFINE_STOP_FILE)
+    assert search_exec.SEARCH_ID.pattern == search_view.SEARCH_ID.pattern
