@@ -32,7 +32,7 @@ from aosr.gui.gradient_plan import GradientRequest, SearchPlan
 from aosr.reporting.scheme import Scheme
 from aosr.gui.surrogate_slots import surrogate_path
 from aosr.materials.search_library import MaterialsRefused
-from aosr.physics.fem_reduced_build import STOP_BUDGET, ReducedModelBuilder, build_reduced_model
+from aosr.physics.fem_reduced_build import STOP_BUDGET, STOP_ROUND_LIMIT, ReducedModelBuilder, build_reduced_model
 from aosr.physics.fem_reduced import impedance_rows, input_hash
 from aosr.physics import fem_reduced_check as check
 from aosr.runtime import child_process_env, configure_jax
@@ -82,6 +82,12 @@ def test_build_that_extends_until_the_check_passes_installs_and_the_preview_says
     found = _probe(tmp_path, "pass")
     judged = cast(list[dict[str, Record]], found["judged"])
     assert judged[0]["fixed:panel_absorbing"]["passed"] is False and judged[-1]["fixed:panel_absorbing"]["passed"] is True
+    assert all(item["fixed:panel_absorbing"]["passed"] is False for item in judged[:-1])  # 過了就停、不再補
+    # 每補一輪就核、過了就停：停止殘差收到 1e-9（池裡殘差到不了），一路補到停止值或池用完才核就會白解
+    # （2-6b part2b 的形狀：候選第 4 輪就過了，池裡殘差卡在 0.0015）。這間小房間補一輪就過。
+    before, = cast(list[dict[str, int]], found["before"])
+    solved = cast(int, cast(Record, found["result"])["full_solves"]) - before["full_solves"]
+    assert 0 < solved <= before["batch"] * (len(judged) - 1), (solved, before, len(judged))
     added = cast(int, found["added"])
     assert added >= 1 and found["added_equal_to_check"] == [False] * added
     result = cast(Record, found["result"])
@@ -132,6 +138,15 @@ def test_extend_continues_the_same_snapshots_on_the_new_sets_only() -> None:
     after = check.revalidate_reduced(extended, operators, materials[4:], before.full_pressure,
                                      full_solves=before.full_solves, dense_threads=1)
     assert max(after.frequency_db_by_seat.values()) < max(before.frequency_db_by_seat.values())
+    # 一輪一輪補（每輪交回來一次、不給新材料就同一池接著補）跟一次補到底逐位相同。
+    stepwise = ReducedModelBuilder(operators, AXIS, materials[:4], settings=settings, dense_threads=1)
+    stepwise.build()
+    calls, step = 1, stepwise.extend(materials[4:], max_rounds=1)
+    while stepwise.stop_reason == STOP_ROUND_LIMIT:
+        calls, step = calls + 1, stepwise.extend(max_rounds=1)
+    assert calls > 1 and bitwise_equal(step.matrices, extended.matrices) and step.input_hash == extended.input_hash
+    assert (step.ledger.rounds, step.ledger.full_solves, step.ledger.stop_reason) == (
+        extended.ledger.rounds, extended.ledger.full_solves, extended.ledger.stop_reason)
     again = check.revalidate_reduced(base, operators, materials[4:], before.full_pressure, full_solves=before.full_solves,
                                      dense_threads=1)
     assert bitwise_equal(again, before)  # 同一份替身重算替身那一側，跟完整驗證逐位相同

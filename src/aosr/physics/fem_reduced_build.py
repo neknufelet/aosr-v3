@@ -37,6 +37,8 @@ Point2 = tuple[int, int]
 STOP_CANDIDATES_EXHAUSTED: Final = "候選用完"
 STOP_RESIDUAL_MET: Final = "抽到的候選殘差都在停止值內"
 STOP_BUDGET: Final = "預算停止、殘差目標未達"
+# 補訓練（:meth:`ReducedModelBuilder.extend` 給了 ``max_rounds``）補滿這幾輪就先停，讓呼叫端核過再決定要不要接著補。
+STOP_ROUND_LIMIT: Final = "補訓練補滿這幾輪先停、交回去核"
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,7 @@ class ReducedModelBuilder:
         self._build: _Build | None = None
         self._basis: NDArray[np.float64] | None = None
         self._matrices: ReducedMatrices | None = None
+        self._extension_first: int | None = None
         self.stop_reason: str | None = None
 
     def _report(self, build: _Build, basis: NDArray[np.float64], outcome: tuple[float, list[Point2]] | None) -> None:
@@ -224,22 +227,31 @@ class ReducedModelBuilder:
                 pending = outcome[1]
         return self._finish(build, basis, matrices, stop)
 
-    def extend(self, training_impedances: Sequence[FrequencyBoundaryImpedances]) -> ReducedModel:
-        """補訓練：新的這批材料接在訓練材料後面，用目前的基底從新的這批抽候選、量殘差、補點，停止規則與合計預算照舊。
+    def extend(self, training_impedances: Sequence[FrequencyBoundaryImpedances] = (), *,
+               max_rounds: int | None = None) -> ReducedModel:
+        """補訓練：新的這批材料接在訓練材料後面，用目前的基底從補訓練的材料（第一次補起所有補進來的，不含原本的訓練材料）
+        抽候選、量殘差、補點，停止規則與合計預算照舊。``max_rounds`` 給了就最多補這幾輪（每輪一次補點＋重算基底）先停
+        （:data:`STOP_ROUND_LIMIT`；剛好用完預算記「預算停止」），呼叫端核過再決定要不要接著補——再叫一次、不給新材料
+        就從同一個候選池接著補，跟一次補到底選的點與結果逐位相同。
 
-        回補完的替身（輸入雜湊含新的這批、建模帳接著記）；預算已經用完就一點都不補、照實記「預算停止」。"""
+        回補完的替身（輸入雜湊含補進來的材料、建模帳接著記）；預算已經用完就一點都不補、照實記「預算停止」。"""
         build, basis, matrices = self._build, self._basis, self._matrices
         if build is None or basis is None or matrices is None:
             raise RuntimeError("還沒建模、或快照已經放掉了，不能補訓練")
-        first = len(build.training)
-        build.training = (*build.training, *impedance_rows(training_impedances, self.axis,
-                                                            patch_keys=self.operators.patch_keys))
+        if max_rounds is not None and max_rounds < 1:
+            raise ValueError("max_rounds 至少 1")
+        if self._extension_first is None:
+            self._extension_first = len(build.training)
+        if training_impedances:
+            build.training = (*build.training, *impedance_rows(training_impedances, self.axis,
+                                                                patch_keys=self.operators.patch_keys))
         self.training = build.training
+        rounds = 0
         with self._batch() as batch_solver:
             # 換池：舊池解過的次數記進 done，新池從 0 數，合計照舊。
             build.done, build.solver, build.batch_solver = build.solves, batch_solver.solver, batch_solver
             while True:
-                outcome = build.greedy_round(self.rng, basis, matrices, first)
+                outcome = build.greedy_round(self.rng, basis, matrices, self._extension_first)
                 self._report(build, basis, outcome)
                 stop = self._stop(build, outcome)
                 if stop is not None:
@@ -247,6 +259,10 @@ class ReducedModelBuilder:
                 assert outcome is not None
                 build.solve(outcome[1])
                 basis, matrices = build.reduce()
+                rounds += 1
+                if max_rounds is not None and rounds >= max_rounds:
+                    stop = STOP_BUDGET if build.solves >= self.settings.max_full_solves else STOP_ROUND_LIMIT
+                    break
         return self._finish(build, basis, matrices, stop)
 
     @property

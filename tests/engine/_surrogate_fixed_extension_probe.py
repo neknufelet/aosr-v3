@@ -127,6 +127,8 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
         elif MODE == "pass":
             job.settings = job.settings.model_copy(update={"stop_residual": PASS_STOP})
             builder.settings = job.settings
+        seen["before"].append({"full_solves": builder.full_solves, "batch": job.settings.batch,
+                               "cap": job.settings.max_full_solves})
         extension = checked(job, builder, model, prepared)
         added.extend(prepared.sets.impedances(item) for item in extension.added)
         return extension
@@ -141,7 +143,7 @@ def main() -> None:
     from aosr.gradient import surrogate_build
 
     jobs, search, build_id, arguments = _arguments()
-    seen: dict[str, list[object]] = {"judged": [], "added": [], "generated": []}
+    seen: dict[str, list[object]] = {"judged": [], "added": [], "generated": [], "before": []}
     configurations = _patch(seen)
     judged, added, generated = seen["judged"], seen["added"], seen["generated"]
     code = surrogate_build.build(surrogate_build._parser().parse_args(arguments))
@@ -156,7 +158,7 @@ def main() -> None:
     if slot.is_dir():
         surrogate = jobs.preview(NAME, search)["surrogate"]
     (DIRECTORY / "probe.json").write_text(json.dumps({
-        "exit": code, "build_id": build_id, "arguments": arguments, "judged": judged,
+        "exit": code, "build_id": build_id, "arguments": arguments, "judged": judged, "before": seen["before"],
         "added": len(added), "generated": generated, "added_equal_to_check": held_out,
         "result": json.loads((work / "result.json").read_text(encoding="utf-8")), "slot": slot.is_dir(),
         "training_labels": None if training is None else [item["label"] for item in training["training"]],

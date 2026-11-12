@@ -64,8 +64,11 @@ if TYPE_CHECKING:
     from aosr.reporting.scheme import Scheme
 
 SIGNALS: Final = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
-# 補訓練最多幾批（每一批都要真的補到點才會有下一批；預算先用完就先停）。
+# 補訓練最多加幾批新的組（一批補到池裡殘差到停止值才加下一批；預算先用完就先停）。
 MAX_EXTENSION_BATCHES: Final = 8
+# 補訓練每補幾輪就重核一次開跑那一道固定材料核對（2-8 實量：part2b 池裡殘差卡在 0.0015 降不到停止值，
+# 候選卻在第 4 輪就過了；一路補到停止值或上限才核會白解到上限）。
+EXTENSION_ROUNDS_PER_CHECK: Final = 1
 
 
 class _Progress:
@@ -424,41 +427,53 @@ class _Extension:
 
 
 def _fixed_checked(job: _Run, builder: ReducedModelBuilder, model: ReducedModel, prepared: _Prepared) -> _Extension:
-    """開跑那一道固定材料核對（全部候選）；有沒過的就一批一批補訓練、重核，直到全過、預算用完、或補的樣本殘差都已在
-    停止值內（``stalled``：再補同類樣本也沒用）。核對那一組本身不進訓練。"""
+    """開跑那一道固定材料核對（全部候選）；有沒過的就補訓練，每補一輪（一次補點＋重算基底）就重核一次、全過就停：
+    候選池是補進來的那幾批，池裡的殘差還沒到停止值就同一池接著補；到了停止值（或池用完）才再加一批新的組。
+    停在：全過、預算用完、加了一批新的組卻一點都沒補進（``stalled``：補的樣本殘差都已在停止值內，再補同類也沒用）、
+    或已加滿 :data:`MAX_EXTENSION_BATCHES` 批。核對那一組本身不進訓練。"""
     from aosr.gradient.fixed_candidates import judge_candidates
+    from aosr.physics.fem_reduced_build import STOP_ROUND_LIMIT
 
     axis = prepared.axis
-    job.progress.phase("validating", validation_done=0, validation_total=len(prepared.configurations) * len(axis))
+    total = len(prepared.configurations) * len(axis)
+    job.progress.phase("validating", validation_done=0, validation_total=total)
     verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded, workers=job.workers)
-    job.progress.validation(len(prepared.configurations) * len(axis), len(prepared.configurations) * len(axis))
+    job.progress.validation(total, total)
     added: list[MaterialSet] = []
-    batch, stalled = 0, False
+    batch, stalled, continuing = 0, False, False
     assert job.start is not None
     while (failing := {target for target, verdict in verdicts.items() if not verdict.passed}) \
-            and builder.full_solves < job.settings.max_full_solves and batch < MAX_EXTENSION_BATCHES:
+            and builder.full_solves < job.settings.max_full_solves:
         fresh: list[tuple[MaterialSet, FrequencyBoundaryImpedances]] = []
-        for item in job.fixed:
-            if item.target not in failing:
+        if not continuing:
+            if batch >= MAX_EXTENSION_BATCHES:
+                break
+            for item in job.fixed:
+                if item.target not in failing:
+                    continue
+                for material_set in prepared.sets.extension_sets(item, search=prepared.search, mount=job.start.mount,
+                                                                 batch=batch):
+                    impedances = prepared.sets.impedances(material_set)
+                    if not any(same_configuration(impedances, held) for held in prepared.configurations.values()):
+                        fresh.append((material_set, impedances))
+            batch += 1
+            if not fresh:
                 continue
-            for material_set in prepared.sets.extension_sets(item, search=prepared.search, mount=job.start.mount,
-                                                             batch=batch):
-                impedances = prepared.sets.impedances(material_set)
-                if not any(same_configuration(impedances, held) for held in prepared.configurations.values()):
-                    fresh.append((material_set, impedances))
-        batch += 1
-        if not fresh:
-            continue
         before = builder.full_solves
         job.progress.phase("building", stop_reason=None)
-        model = builder.extend([impedances for _, impedances in fresh])
+        model = builder.extend([impedances for _, impedances in fresh], max_rounds=EXTENSION_ROUNDS_PER_CHECK)
         added.extend(material_set for material_set, _ in fresh)
-        job.progress.phase("validating", validation_done=0, validation_total=len(prepared.configurations) * len(axis))
+        if builder.full_solves == before:
+            # 這一池補不進點：新加的一批一點都沒補進就是補不動；同一池接著補卻補不進，就換一批新的組。
+            if fresh:
+                stalled = True
+                break
+            continuing = False
+            continue
+        job.progress.phase("validating", validation_done=0, validation_total=total)
         verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded,
                                     workers=job.workers, previous=verdicts)
-        if builder.full_solves == before:
-            stalled = True
-            break
+        continuing = builder.stop_reason == STOP_ROUND_LIMIT
     return _Extension(model, verdicts, added, batch, stalled)
 
 
