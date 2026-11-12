@@ -260,12 +260,14 @@ def test_wall_names_speaker_names_zone_names_and_markers_never_overlap(tmp_path:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109-labels")
+        found = {}
         for wall in ("y0", "x0"):
             page.locator(f"#elevation-wall-{wall}").click()
             expect(page.locator("#elevation [data-zone-id=z1] text")).to_have_text("z1")
             boxes = cast(list[dict[str, object]], page.evaluate(_BOXES))
             assert len(boxes) >= 10, boxes
-            assert _clashes(boxes) == [], (wall, _clashes(boxes))
+            found[wall] = _clashes(boxes)
             if shots:
                 page.locator("#elevation").screenshot(path=str(Path(shots) / f"1119-{wall}-labels.png"))
+        assert found == {"y0": [], "x0": []}
         assert watched.page_errors + watched.console_errors == []

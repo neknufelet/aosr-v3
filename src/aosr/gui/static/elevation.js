@@ -245,18 +245,24 @@ function markerLayout(wall, view, geometry) {
     ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: fieldPoint("receiver", point.receiver_id, point.position_m), kind: "seat"}))]
     .filter(item => item.point.every(value => typeof value === "number" && Number.isFinite(value)));
   const frameLeft = geometry.pad, frameRight = geometry.pad + geometry.width * geometry.scale;
-  const placed = [];
-  for (const item of items) {
+  // 先放好所有記號，字再避開全部記號與先排好的字（後畫的記號不會蓋到先排的字）。
+  const points = items.map(item => {
     const [u, v] = project(wall, item.point);
     const [a, b] = flip(view, geometry.width, geometry.height, u, v);
     const x = geometry.pad + a * geometry.scale, y = geometry.pad + (geometry.height - b) * geometry.scale;
+    return {item, x, y, mark: {left: x - 8, right: x + 8, top: y - 8, bottom: y + 8}};
+  });
+  const placed = [];
+  for (const {item, x, y, mark} of points) {
     const width = LABEL_PX * item.name.length;
     const toLeft = x + 9 + width > frameRight && x - 9 - width >= frameLeft;
     const anchor = toLeft ? "end" : "start", labelX = toLeft ? x - 9 : x + 9;
-    const mark = {left: x - 8, right: x + 8, top: y - 8, bottom: y + 8};
+    const blocked = labelY => {
+      const box = textBox(labelX, labelY, item.name, anchor);
+      return points.some(other => boxesOverlap(box, other.mark)) || placed.some(other => boxesOverlap(box, other.label));
+    };
     let labelY = y - 8;
-    while (placed.some(other => boxesOverlap(textBox(labelX, labelY, item.name, anchor), other.label)
-                                || boxesOverlap(textBox(labelX, labelY, item.name, anchor), other.mark))) labelY += 18;
+    for (let tries = 0; tries < 12 && blocked(labelY); tries += 1) labelY += 18;
     placed.push({item, x, y, labelX, labelY, anchor, mark, label: textBox(labelX, labelY, item.name, anchor)});
   }
   return placed;
@@ -269,7 +275,8 @@ function drawMarkers(svg, layout) {
     svg.append(group);
   }
 }
-// 區名的高度：先試正中，跟點或點的字疊到就往上下各挪一行試，都不行才放回正中（滑過去看 title 照樣有）。
+// 區名的高度：先試正中，跟點或點的字疊到就往上下各挪一行試，一律留在這一區框內；都不行就回 null 不寫
+// （同「窄條放不下就不寫」，滑過去看 title 照樣有）。
 function zoneLabelY(label, centerX, centerY, top, bottom, layout) {
   const obstacles = layout.flatMap(placed => [placed.mark, placed.label]);
   for (let step = 0; step <= 8; step += 1) {
@@ -279,7 +286,7 @@ function zoneLabelY(label, centerX, centerY, top, bottom, layout) {
     if (box.top < top || box.bottom > bottom) continue;
     if (!obstacles.some(other => boxesOverlap(box, other))) return y;
   }
-  return centerY;
+  return null;
 }
 function renderElevation() {
   const area = $("elevation");
@@ -323,7 +330,7 @@ function renderElevation() {
     if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18) {
       const centerX = pad + (a0 + a1) / 2 * scale, centerY = pad + (height - (b0 + b1) / 2) * scale;
       const labelY = zoneLabelY(label, centerX, centerY, pad + (height - b1) * scale, pad + (height - b0) * scale, layout);
-      group.append(node("text", {x: centerX, y: labelY, "text-anchor": "middle"}, label));
+      if (labelY !== null) group.append(node("text", {x: centerX, y: labelY, "text-anchor": "middle"}, label));
     }
     svg.append(group);
   }

@@ -198,6 +198,8 @@ function mountWarning() {
 
 // 只給人看：六位有效數字、千分位，同立面圖 walls.js 的 shownNumber（這一頁不載入那一支）；送伺服器的值不經過這裡。
 function shownNumber(value) {
+  // 格子清空時表單回 null：照舊原樣印，不丟錯（丟錯會讓整段畫面畫不出來）。
+  if (typeof value !== "number" || !Number.isFinite(value)) return String(value);
   return Number(value.toPrecision(6)).toLocaleString("en-US", {maximumFractionDigits: 20});
 }
 

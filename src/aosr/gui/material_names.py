@@ -25,7 +25,8 @@ from aosr.materials.library import FixedEntry, LibraryEntry, OptimizableEntry
 
 COMPOSED_NOTE = "（依參數組名）"
 MOUNTED_NOTE = "貼在原牆上"
-# 可最佳化材料的顯示名尾巴常帶一段括號說明（內建家族是「（可調厚度與空腔）」）；拿來當多孔層的名字時去掉那一段。
+# 內建家族（有換樣板構造的那幾筆）的顯示名尾巴是一段括號說明「（可調厚度與空腔）」，拿來當多孔層的名字時去掉；
+# 使用者材料的括號可能正是分辨兩筆的字（廠牌、批號），照原名不動。
 _TRAILING_NOTE = re.compile(r"\s*（[^（）]*）\Z")
 
 
@@ -54,6 +55,8 @@ def _porous_name(layer: PorousLayer, library: Sequence[LibraryEntry]) -> str | N
     for entry in library:
         if isinstance(entry, OptimizableEntry) and entry.porous.model_copy(
                 update={"thickness_m": layer.thickness_m}) == layer:
+            if entry.template_preset is None:
+                return entry.label
             return _TRAILING_NOTE.sub("", entry.label) or entry.label
     return None
 

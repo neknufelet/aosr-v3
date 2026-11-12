@@ -62,6 +62,8 @@ function showPresetState(name, material = assemblyMaterial(wallMaterial(name))) 
 // 只給人看：六位有效數字、千分位（0.04999999999999999 → 0.05、123479.99999999999 → 123,480），同結果頁
 // problem_text.rounded_number；存檔與送伺服器的值照原值，不經過這裡。
 function shownNumber(value) {
+  // 格子清空時表單回 null：照舊原樣印，不丟錯（丟錯會讓整段畫面畫不出來）。
+  if (typeof value !== "number" || !Number.isFinite(value)) return String(value);
   return Number(value.toPrecision(6)).toLocaleString("en-US", {maximumFractionDigits: 20});
 }
 function wallText(material) {

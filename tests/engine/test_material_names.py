@@ -9,7 +9,7 @@ import pytest
 from aosr.gui.material_names import material_name, original_wall_words, zone_material_words
 from aosr.gui.problem_text import material_summary, rounded_number
 from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall, SurfaceMaterial
-from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries
+from aosr.materials.library import FixedEntry, LibraryEntry, OptimizableEntry, builtin_entries
 
 UGLY_WALL = 123479.99999999999
 DENSITY_48K = {"kind": "porous", "flow_resistivity_pa_s_m2": 19100.0, "flow_resistivity_source": "density_table",
@@ -80,3 +80,16 @@ def test_user_library_names_win_for_fixed_materials_and_porous_layers() -> None:
 def test_default_summary_still_prints_saved_values_for_the_compare_page() -> None:
     """比較頁要分得出兩份不同的材料：沒指定寫法時照存檔原值印，不收位。"""
     assert "123479.99999999999" in material_summary(ConstantImpedance(impedance_pa_s_m=UGLY_WALL))
+
+
+def test_user_material_brackets_stay_only_builtin_family_notes_are_dropped() -> None:
+    """審查抓到（#1119）：使用者材料名的括號可能正是分辨兩筆的字（廠牌），不准去掉；內建家族的「（可調厚度與空腔）」才去。"""
+    family = next(entry for entry in builtin_entries() if isinstance(entry, OptimizableEntry))
+    names = []
+    for vendor, factor in (("甲廠", 1.0), ("乙廠", 1.1)):
+        porous = family.porous.model_copy(update={
+            "flow_resistivity_pa_s_m2": family.porous.flow_resistivity_pa_s_m2 * factor, "thickness_m": 0.123})
+        entry = family.model_copy(update={"label": f"棉（{vendor}）", "porous": porous, "template_preset": None})
+        material = Assembly.model_validate({"kind": "assembly", "backing": "rigid", "layers": [porous.model_dump()]})
+        names.append(material_name(material, (entry,)).shown())
+    assert names == ["棉（甲廠） 123 mm（依參數組名）", "棉（乙廠） 123 mm（依參數組名）"]

@@ -32,7 +32,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.jobs import JobManager
-from aosr.gui.material_editor import user_library_path
+from aosr.gui.material_editor import plain_error, user_library_path
 from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
@@ -201,7 +201,8 @@ def _names(deps: ZoneResultDeps) -> tuple[tuple[LibraryEntry, ...], tuple[str, .
     try:
         return full_library(user_library_path(deps.data_dir)), ()
     except (OSError, ValueError, ValidationError) as exc:
-        detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        # 同 1-3 材料選單（zone_modes）的寫法：格式錯照欄位講中文，其餘照原句。
+        detail = plain_error(exc) if isinstance(exc, (ValidationError, json.JSONDecodeError)) else str(exc)
         return builtin_entries(), (f"使用者材料庫讀不進來，材料名字只比內建材料：{detail}",)
 
 
