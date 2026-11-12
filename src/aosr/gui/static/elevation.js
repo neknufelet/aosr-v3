@@ -228,24 +228,65 @@ function selectedEditor(wall, view, width, height) {
 function fieldPoint(prefix, id, fallback) {
   return ["x", "y", "z"].map((axis, index) => $(`${prefix}-${id}-${axis}`) ? numericInput(`${prefix}-${id}-${axis}`) : fallback[index]);
 }
-function markers(svg, wall, view, geometry) {
+// 喇叭與主位先排好位置再畫（#1119）：字的外框用估的寬（14px 字，一字約一個字高），一律留在牆框裡——
+// 點右邊放不下就放到點的左邊，免得壓到牆邊直排的牆名；兩個點投影到同一處（y 兩面牆上的兩支喇叭）字往下一行一行排。
+// 區名（renderElevation）再避開這些點與字。
+const LABEL_PX = 14;
+function textBox(x, y, text, anchor) {
+  const width = LABEL_PX * text.length;
+  const left = anchor === "end" ? x - width : anchor === "middle" ? x - width / 2 : x;
+  return {left, right: left + width, top: y - LABEL_PX, bottom: y + 4};
+}
+function boxesOverlap(a, b) {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+function markerLayout(wall, view, geometry) {
   const items = [...Object.entries(scheme.speakers).map(([id, point]) => ({key: `speaker-${id}`, name: speakerName(id), point: fieldPoint("speaker", id, [point.x, point.y, point.z]), kind: "speaker"})),
     ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: fieldPoint("receiver", point.receiver_id, point.position_m), kind: "seat"}))]
     .filter(item => item.point.every(value => typeof value === "number" && Number.isFinite(value)));
-  // 兩支喇叭在 y 兩面牆上會投影到同一點（同 x、同高度）：字往下一行一行排，不疊在一起。
-  const labels = [];
-  for (const item of items) {
+  const frameLeft = geometry.pad, frameRight = geometry.pad + geometry.width * geometry.scale;
+  // 先放好所有記號，字再避開全部記號與先排好的字（後畫的記號不會蓋到先排的字）。
+  const points = items.map(item => {
     const [u, v] = project(wall, item.point);
     const [a, b] = flip(view, geometry.width, geometry.height, u, v);
     const x = geometry.pad + a * geometry.scale, y = geometry.pad + (geometry.height - b) * geometry.scale;
+    return {item, x, y, mark: {left: x - 8, right: x + 8, top: y - 8, bottom: y + 8}};
+  });
+  const placed = [];
+  for (const {item, x, y, mark} of points) {
+    const width = LABEL_PX * item.name.length;
+    const toLeft = x + 9 + width > frameRight && x - 9 - width >= frameLeft;
+    const anchor = toLeft ? "end" : "start", labelX = toLeft ? x - 9 : x + 9;
+    const blocked = labelY => {
+      const box = textBox(labelX, labelY, item.name, anchor);
+      return points.some(other => boxesOverlap(box, other.mark)) || placed.some(other => boxesOverlap(box, other.label));
+    };
     let labelY = y - 8;
-    while (labels.some(([lx, ly]) => Math.abs(lx - x) < 80 && Math.abs(ly - labelY) < 16)) labelY += 18;
-    labels.push([x, labelY]);
+    for (let tries = 0; tries < 12 && blocked(labelY); tries += 1) labelY += 18;
+    placed.push({item, x, y, labelX, labelY, anchor, mark, label: textBox(labelX, labelY, item.name, anchor)});
+  }
+  return placed;
+}
+function drawMarkers(svg, layout) {
+  for (const {item, x, y, labelX, labelY, anchor} of layout) {
     const group = node("g", {id: `elevation-${item.key}`, class: `elevation-marker ${item.kind}`});
     group.append(item.kind === "speaker" ? node("rect", {x: x - 6, y: y - 6, width: 12, height: 12})
-      : node("circle", {cx: x, cy: y, r: 7}), node("text", {x: x + 9, y: labelY}, item.name));
+      : node("circle", {cx: x, cy: y, r: 7}), node("text", {x: labelX, y: labelY, "text-anchor": anchor}, item.name));
     svg.append(group);
   }
+}
+// 區名的高度：先試正中，跟點或點的字疊到就往上下各挪一行試，一律留在這一區框內；都不行就回 null 不寫
+// （同「窄條放不下就不寫」，滑過去看 title 照樣有）。
+function zoneLabelY(label, centerX, centerY, top, bottom, layout) {
+  const obstacles = layout.flatMap(placed => [placed.mark, placed.label]);
+  for (let step = 0; step <= 8; step += 1) {
+    const offset = Math.ceil(step / 2) * 18 * (step % 2 ? -1 : 1);
+    const y = centerY + offset;
+    const box = textBox(centerX, y, label, "middle");
+    if (box.top < top || box.bottom > bottom) continue;
+    if (!obstacles.some(other => boxesOverlap(box, other))) return y;
+  }
+  return null;
 }
 function renderElevation() {
   const area = $("elevation");
@@ -273,6 +314,7 @@ function renderElevation() {
   if (!zones.some(zone => zone.area === "rectangle"))
     svg.lastChild.setAttribute("class", `zone-mode-${zoneSetting(wall, "whole_wall").mode}${zoneIsRed(wall, "whole_wall") ? " zone-red" : ""}`);
   if (wallIsRed(wall)) svg.lastChild.classList.add("wall-red");
+  const layout = markerLayout(wall, view, geometry);
   const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_merge_tol_m || zone.v_m[1] > height + cutSpec().edge_merge_tol_m));
   for (const zone of zones.filter(zone => zone.area === "rectangle")) {
     const auto = zone.id.startsWith(cutSpec().fill_prefix);
@@ -285,15 +327,18 @@ function renderElevation() {
       node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}${limits}`));
     // 字放得下才寫（窄條裡「自動」兩字會擠出界）；放不下的滑過去看 title。
     const label = auto ? "自動" : zone.id;
-    if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18)
-      group.append(node("text", {x: pad + (a0 + a1) / 2 * scale, y: pad + (height - (b0 + b1) / 2) * scale, "text-anchor": "middle"}, label));
+    if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18) {
+      const centerX = pad + (a0 + a1) / 2 * scale, centerY = pad + (height - (b0 + b1) / 2) * scale;
+      const labelY = zoneLabelY(label, centerX, centerY, pad + (height - b1) * scale, pad + (height - b0) * scale, layout);
+      if (labelY !== null) group.append(node("text", {x: centerX, y: labelY, "text-anchor": "middle"}, label));
+    }
     svg.append(group);
   }
   for (const strip of elevationThin) {
     const [a0, a1, b0, b1] = screenBox(view, width, height, strip);
     svg.append(node("rect", {class: "zone-thin", x: pad + a0 * scale, y: pad + (height - b1) * scale, width: (a1 - a0) * scale, height: (b1 - b0) * scale}));
   }
-  markers(svg, wall, view, geometry);
+  drawMarkers(svg, layout);
   const mid = [pad + width * scale / 2, pad + height * scale / 2];
   for (const [edge, x, y, rotate] of [["left", pad - 14, mid[1], -90], ["right", pad + width * scale + 14, mid[1], 90],
                                        ["top", mid[0], pad - 16, 0], ["bottom", mid[0], pad + height * scale + 26, 0]]) {

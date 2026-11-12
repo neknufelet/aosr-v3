@@ -3,11 +3,23 @@
    查附表（GET）不會開算；只有按「算原牆基準」才開。算中只輪詢那一筆計算的狀態（輕），算完才重讀整份附表。 */
 let zonePollTimer;
 // 位置與尺寸、原牆基準與它怎麼來，各併成一格兩行（伺服器的字照原樣接，不另外算）。
+// 材料兩格先寫名字，收位後的工程參數收在「參數」裡（#1119）；沒有參數的格（同左、—）不出細節。
+function materialDetail(cell, detail) {
+  if (!detail) return;
+  const box = document.createElement("details"); box.className = "zone-material-detail";
+  box.append(node("summary", "參數"), node("div", detail));
+  cell.append(box);
+}
 function zoneRowsTable(rows) {
   const element = tableElement(["牆", "區", "位置與尺寸（公尺）", "做法", "設計的材料", "原牆基準的材料（怎麼來）"],
     rows.map((row) => [row.wall, row.zone, `${row.place}\n${row.size}，${row.area}`, row.mode, row.design,
       `${row.baseline}\n（${row.baseline_source}）`]));
-  rows.forEach((row, index) => { element.rows[index + 1].dataset.changed = String(row.changed); });
+  rows.forEach((row, index) => {
+    const line = element.rows[index + 1];
+    line.dataset.changed = String(row.changed);
+    materialDetail(line.cells[4], row.design_detail);
+    materialDetail(line.cells[5], row.baseline_detail);
+  });
   return element;
 }
 function zoneImprovementTable(improvement) {

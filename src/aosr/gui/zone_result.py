@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -30,10 +30,12 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import LABELS, WALLS
-from aosr.gui.problem_text import material_summary
+from aosr.gui.material_names import original_wall_words, zone_material_words
+from aosr.gui.problem_text import material_summary, rounded_number
 from aosr.gui.zone_design import MODE_WORDS, WHOLE_WALL_KEY, DesignSettings, effective_modes, mismatches
 from aosr.geometry.shoebox import Room
 from aosr.materials.construction_models import MountedOnWall, SurfaceMaterial
+from aosr.materials.library import LibraryEntry, builtin_entries
 from aosr.physics.report_io import solver_inputs
 from aosr.physics.report_surfaces import RectangleZone, SurfaceZone, WholeWallZone
 from aosr.physics.zone_fill import wall_size_m
@@ -187,7 +189,11 @@ def derive_baseline(design: Scheme, original: OriginalWalls | None = None) -> Ba
 
 
 class ZoneRow(BaseModel):
-    """逐區表一列；字都排好了，頁面只照印。"""
+    """逐區表一列；字都排好了，頁面只照印。
+
+    ``design``／``baseline`` 是給人看的名字（材料庫的顯示名，對不到就依層的參數組名、照實標出來）；
+    ``design_detail``／``baseline_detail`` 是收位後的工程參數，頁面收在可展開的細節裡（空字串就不出細節）。
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     wall: str
@@ -197,7 +203,9 @@ class ZoneRow(BaseModel):
     area: str
     mode: str
     design: str
+    design_detail: str
     baseline: str
+    baseline_detail: str
     baseline_source: str
     changed: bool
 
@@ -211,28 +219,35 @@ def _source_text(zone: BaselineZone, original: str | None) -> str:
 
 
 def zone_rows(baseline: Baseline, settings: DesignSettings | None, scheme: Scheme, *,
-              baseline_known: bool = True) -> tuple[ZoneRow, ...]:
+              baseline_known: bool = True, library: Sequence[LibraryEntry] | None = None) -> tuple[ZoneRow, ...]:
     """逐區表：位置、尺寸、面積、做法、設計的材料、原牆基準的材料與它怎麼來。
 
     ``baseline_known`` 是假（原牆推不出來）時，基準兩欄印「—」，不拿別的規則補上去。
     兩邊一樣的區，基準材料印「同左」，免得同一段長字印兩次。
+    材料先寫名字（``library`` 給名字用，沒給就只比內建材料），數字一律收位；「原牆」只寫在確定是原牆的地方：
+    基準欄、做法是保留原牆的區、貼在原牆上的構造記的那面牆。
     """
+    names = builtin_entries() if library is None else tuple(library)
     modes = effective_modes(settings, scheme) if settings is None or not mismatches(settings, scheme) else {}
     rows = []
     for zone in baseline.zones:
         (u0, u1), (v0, v1) = zone.u_m, zone.v_m
         first, second = AXES[zone.wall]
         mode = modes.get(zone.wall, {}).get(zone.zone_id)
+        changed = baseline_known and zone.design != zone.baseline
         rows.append(ZoneRow(
             wall=WALLS[zone.wall], zone=_zone_name(zone.zone_id),
             place=f"{first} {u0:.2f}–{u1:.2f}、{second} {v0:.2f}–{v1:.2f}",
             size=f"{u1 - u0:.2f} × {v1 - v0:.2f} m", area=f"{(u1 - u0) * (v1 - v0):.2f} m²",
             mode=MODE_WORDS[mode] if mode is not None else "—",
-            design=material_summary(zone.design),
-            baseline=("—" if not baseline_known else material_summary(zone.baseline) if zone.design != zone.baseline
+            design=(original_wall_words(zone.design, names) if mode == "keep_original"
+                    else zone_material_words(zone.design, names)),
+            design_detail=material_summary(zone.design, rounded_number),
+            baseline=("—" if not baseline_known else original_wall_words(zone.baseline, names) if changed
                       else "同左"),
+            baseline_detail=material_summary(zone.baseline, rounded_number) if changed else "",
             baseline_source=_source_text(zone, baseline.original_scheme_id) if baseline_known else "—",
-            changed=baseline_known and zone.design != zone.baseline))
+            changed=changed))
     return tuple(rows)
 
 

@@ -59,6 +59,14 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
         expect(page.locator("#zone-rows tr")).to_have_count(1 + 7)
         expect(page.locator('#zone-rows tr[data-changed="true"]')).to_have_count(1)
         expect(page.locator('#zone-rows tr[data-changed="true"]')).to_contain_text("拆掉這一區加貼的層")
+        # 材料先寫名字、參數收在細節（#1119）：改過的那一列名字照實標依參數組名、基準寫原牆；參數沒展開時看不到。
+        changed = page.locator('#zone-rows tr[data-changed="true"]')
+        expect(changed.locator("td").nth(4)).to_contain_text("多孔層 50 mm（流阻 19,100 Pa·s/m²）（依參數組名），貼在原牆上")
+        expect(changed.locator("td").nth(5)).to_contain_text("原牆（固定阻抗 ")
+        expect(changed.locator("details")).to_have_count(2)
+        expect(changed.locator("details").first.locator("div")).to_be_hidden()
+        changed.locator("details summary").first.click()
+        expect(changed.locator("details").first.locator("div")).to_contain_text("層厚度 0.05 m")
         expect(page.locator("#zone-state")).to_contain_text("原牆基準還沒算")
         assert _runs(tmp_path) == []  # 打開結果頁、查附表都不開算
         page.locator("#zone-baseline-start").click()

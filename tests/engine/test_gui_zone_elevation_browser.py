@@ -1,6 +1,7 @@
 """真瀏覽器考立面圖（#1091）：站在房間裡看那一面（鏡像對不對用喇叭左右考，不只考自己的翻轉表）、
 拖曳畫框貼到不在格點上的牆邊、補滿、存檔再開、改數字、刪框回整面；補出窄條時標紅不換方案；
 房間改矮後兩面都對不上，一面一面清還是做得到。房間一律用 109 號房的長寬高。"""
+import os
 from pathlib import Path
 from typing import cast
 
@@ -206,3 +207,67 @@ def test_thin_strip_is_marked_red_and_walls_can_be_cleared_one_by_one_after_the_
             {"area": "whole_wall", "material": ASSEMBLY}]
         page.locator("#elevation").screenshot(path=str(tmp_path / "cleared.png"))
         assert watched.page_errors == []
+
+
+# 109 示範的擺位與切法（#1119；值照示範方案 room109demo-search-c98c50b8 原樣抄，含浮點尾數與補滿的區）：
+# y 起點牆兩支喇叭投影在右緣、x 起點牆主位在 z1 正中。
+DEMO_SPEAKERS = {"left": {"x": 0.36810808858895405, "y": 0.937648486381631, "z": 1.2},
+                 "right": {"x": 0.36810808858895405, "y": 3.4822329683114788, "z": 1.2}}
+DEMO_PRIMARY = [2.3865101734352736, 2.209940727346555, 1.2]
+DEMO_ZONES = {
+    "x0": [("z1", [1.3, 3.1], [0.0, 2.2]), ("auto1", [0.0, 1.3], [0.0, LZ]), ("auto2", [3.1, LY], [0.0, LZ]),
+           ("auto3", [1.3, 3.1], [2.2, LZ])],
+    "y0": [("z1", [4.88792656080558, 6.087926560805579], [0.0, LZ]),
+           ("z2", [2.7879265608055794, 3.9879265608055796], [0.0, LZ]),
+           ("auto1", [0.0, 2.7879265608055794], [0.0, LZ]),
+           ("auto2", [3.9879265608055796, 4.88792656080558], [0.0, LZ]),
+           ("auto3", [6.087926560805579, LX], [0.0, LZ])]}
+
+# 立面圖上每一段字與每一個記號在畫面上的外框（瀏覽器實際排出來的，不是程式估的）。
+_BOXES = """() => [...document.querySelectorAll(
+  '#elevation-svg text, #elevation-svg .elevation-marker rect, #elevation-svg .elevation-marker circle')].map(el => {
+  const r = el.getBoundingClientRect();
+  return {text: el.tagName === 'text', what: el.tagName === 'text' ? el.textContent : el.closest('g').id, left: r.left, right: r.right,
+          top: r.top, bottom: r.bottom}; })"""
+
+
+def _demo_document() -> dict[str, object]:
+    document = room109_document("room109-labels")
+    document["speakers"] = DEMO_SPEAKERS
+    points = cast(list[dict[str, object]], cast(dict[str, object], document["receiver_set"])["points"])
+    next(point for point in points if point["role"] == "primary")["position_m"] = DEMO_PRIMARY
+    walls = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])
+    for wall, zones in DEMO_ZONES.items():
+        material = walls[wall][0]["material"]
+        walls[wall] = [{"area": "rectangle", "id": zone_id, "u_m": u, "v_m": v, "material": material}
+                       for zone_id, u, v in zones]
+    return document
+
+
+def _clashes(boxes: list[dict[str, object]]) -> list[tuple[object, object]]:
+    """字跟字、字跟記號的外框兩兩相交（各邊留半個像素，貼邊不算）；記號跟記號不算——y 兩面牆上兩支喇叭本來就投影在同一點。"""
+    def edge(box: dict[str, object], name: str) -> float:
+        return cast(float, box[name])
+    return [(a["what"], b["what"]) for index, a in enumerate(boxes) for b in boxes[index + 1:]
+            if (a["text"] or b["text"]) and edge(a, "left") < edge(b, "right") - 0.5 and edge(b, "left") < edge(a, "right") - 0.5
+            and edge(a, "top") < edge(b, "bottom") - 0.5 and edge(b, "top") < edge(a, "bottom") - 0.5]
+
+
+def test_wall_names_speaker_names_zone_names_and_markers_never_overlap(tmp_path: Path, browser: Browser) -> None:
+    """抓 109 示範兩處疊字：y 起點牆右緣直排的「x 起點牆」壓到喇叭名字；x 起點牆的 z1 被主位圓點蓋住。"""
+    _write(tmp_path, _demo_document())
+    shots = os.environ.get("AOSR_SHOTS")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109-labels")
+        found = {}
+        for wall in ("y0", "x0"):
+            page.locator(f"#elevation-wall-{wall}").click()
+            expect(page.locator("#elevation [data-zone-id=z1] text")).to_have_text("z1")
+            boxes = cast(list[dict[str, object]], page.evaluate(_BOXES))
+            assert len(boxes) >= 10, boxes
+            found[wall] = _clashes(boxes)
+            if shots:
+                page.locator("#elevation").screenshot(path=str(Path(shots) / f"1119-{wall}-labels.png"))
+        assert found == {"y0": [], "x0": []}
+        assert watched.page_errors + watched.console_errors == []

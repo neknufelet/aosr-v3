@@ -72,8 +72,19 @@ PATH_WORDS.update({name: (field.description or name).split("（", 1)[-1].removes
                    for name, field in MeasuredImpedancePoint.model_fields.items()})
 
 
-def material_summary(material: SurfaceMaterial) -> str:
-    """逐層白話只從所屬模型的描述取欄名、單位與種類中文。"""
+def raw_number(value: float) -> str:
+    """存檔原值的寫法（比較頁要分得出兩份不同的材料，不收位）。"""
+    return str(value).removesuffix(".0")
+
+
+def rounded_number(value: float) -> str:
+    """只給人看：六位有效數字、千分位（0.04999999999999999 → 0.05、123479.99999999999 → 123,480）；存檔不經過這裡。"""
+    shown = float(f"{value:.6g}")
+    return f"{int(shown):,}" if shown.is_integer() and abs(shown) < 1e15 else f"{shown:,}"
+
+
+def material_summary(material: SurfaceMaterial, number: Callable[[float], str] = raw_number) -> str:
+    """逐層白話只從所屬模型的描述取欄名、單位與種類中文；``number`` 換數字寫法（預設照存檔原值）。"""
     if isinstance(material, MeasuredImpedance):
         kind = material.kind
         name = _enum_word(MATERIAL_WORDS[kind]["kind"], kind)
@@ -81,18 +92,16 @@ def material_summary(material: SurfaceMaterial) -> str:
         base = material_field_text(kind, "base_assembly").split("；", 1)[0]
         real = PATH_WORDS["real_pa_s_m"].split("，", 1)[0]
         imag = PATH_WORDS["imag_pa_s_m"].split("，", 1)[0]
-        def number(value: float) -> str:
-            return str(value).removesuffix(".0")  # 與 _model_summary 同一種數字寫法
         rows = "／".join(f"{number(point.frequency_hz)} Hz：{real} {number(point.real_pa_s_m)}、{imag} {number(point.imag_pa_s_m)} Pa·s/m"
                         for point in material.points)
         return (f"{name}：{material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz，"
                 f"{len(material.points)} 列；{rows}；{source}：{material.source_and_conditions}；"
-                f"{base}：{material_summary(material.base_assembly)}")
+                f"{base}：{material_summary(material.base_assembly, number)}")
     if isinstance(material, MountedOnWall):
         wall = material_field_text(material.kind, "wall")
-        layers = _model_summary(MountedOnWall, lambda name: None if name == "wall" else getattr(material, name))
-        return f"{layers}；{wall}：{material_summary(material.wall)}"
-    return _model_summary(type(material), lambda name: getattr(material, name))
+        layers = _model_summary(MountedOnWall, lambda name: None if name == "wall" else getattr(material, name), number)
+        return f"{layers}；{wall}：{material_summary(material.wall, number)}"
+    return _model_summary(type(material), lambda name: getattr(material, name), number)
 
 
 def rectangle_zone_summary(zone: RectangleZone, *, exact: bool = False) -> str:
@@ -120,6 +129,11 @@ def _enum_word(description: str, value: object) -> str:
 
 # 貼在原牆上的構造（#990）的分支名也換中文；字從模型描述解析，不另寫對照。
 PATH_WORDS["mounted_on_wall"] = _enum_word(MATERIAL_WORDS["mounted_on_wall"]["kind"], "mounted_on_wall")
+
+
+def kind_word(kind: str) -> str:
+    """材料與層的種類中文（多孔層、空氣層、固定阻抗……），從模型描述解析。"""
+    return _enum_word(MATERIAL_WORDS[kind]["kind"], kind)
 
 
 def material_field_text(kind: str, name: str) -> str:
@@ -168,7 +182,8 @@ def _plain_material_message(message: str) -> str:
     return message
 
 
-def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str:
+def _model_summary(model: type[BaseModel], read: Callable[[str], object],
+                   number: Callable[[float], str] = raw_number) -> str:
     parts = []
     for name, field in model.model_fields.items():
         value = read(name)
@@ -176,7 +191,7 @@ def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str
             continue
         description = (field.description or name).split("（", 1)[-1].removesuffix("）")
         if isinstance(value, tuple):
-            parts.append("／".join(f"第 {index + 1} 層：{material_summary(item)}"
+            parts.append("／".join(f"第 {index + 1} 層：{material_summary(item, number)}"
                                   for index, item in enumerate(value)))
         elif isinstance(value, str):
             word = _enum_word(description, value)
@@ -184,7 +199,7 @@ def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str
         else:
             label, _, unit = description.partition("，")
             unit = unit.split("；", 1)[0]
-            parts.append(f"{label} {str(value).removesuffix('.0')}" + (f" {unit}" if unit else ""))
+            parts.append(f"{label} {number(value) if isinstance(value, float) else value}" + (f" {unit}" if unit else ""))
     return "；".join(parts)
 
 

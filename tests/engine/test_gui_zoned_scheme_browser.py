@@ -38,7 +38,7 @@ def test_zoned_walls_are_listed_and_left_alone_when_another_wall_is_edited(tmp_p
         expect(page.locator("#zoned-ceiling")).to_contain_text("分成 4 區")
         last = page.locator("#zoned-list-ceiling li").nth(3)
         expect(last).to_contain_text("r1_c1")
-        expect(last).to_contain_text("1234.5")
+        expect(last).to_contain_text("1,234.5")  # 只給人看的收位寫法（#1119，千分位）
         for wall in ZONED_WALLS:
             assert page.locator(f"#wall-{wall}").count() == 0 and page.locator(f"#material-kind-{wall}").count() == 0
         with page.expect_response("**/api/validate"):

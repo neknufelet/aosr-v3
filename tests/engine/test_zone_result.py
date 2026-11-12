@@ -1,7 +1,11 @@
 """#1092 分區結果頁的純函式：原牆基準怎麼推、逐區表、改善多少的正負號與缺分數；入口與畫面在 test_gui_zone_result_browser。"""
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 
 import pytest
@@ -14,9 +18,12 @@ from aosr.geometry.shoebox import Point
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_result import (
     BaselineRefused, OriginalWalls, _change, derive_baseline, improvement, original_walls, zone_rows)
-from aosr.gui.zone_result_routes import ZoneResultView, lock_refusal
+from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, lock_refusal
+from aosr.gui.material_editor import user_library_path
 from aosr.gui.measured_view import build_measured_view
+from aosr.gui.problem_text import rounded_number
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
+from aosr.materials.library import builtin_entries
 from aosr.physics.report_zone_seams import ZoneSeamTable
 from aosr.physics.report_surfaces import RectangleZone, WholeWallZone
 from aosr.physics.zone_fill import wall_size_m
@@ -150,12 +157,21 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     a, b = rows[("x 起點牆", "a")], rows[("x 起點牆", "b")]
     assert (a.place, a.size, a.area) == ("寬向 0.00–0.67、高度 0.00–1.50", "0.67 × 1.50 m", "1.00 m²")
     assert (a.mode, a.changed, a.baseline_source) == ("交給搜尋", True, "拆掉這一區加貼的層")
-    assert a.design.startswith("貼在原牆上的構造") and a.baseline.startswith("固定阻抗")
-    assert (b.mode, b.changed, b.baseline, b.baseline_source) == (
-        "固定這一組材料", False, "同左", "兩邊一樣：這一區沒有加貼的層，當成沒動")
+    # 先寫名字（#1119）：對不到材料庫就依層的參數組名、照實標；工程參數收在細節裡、同樣收位。
+    impedance = rounded_number(original_x0().impedance_pa_s_m)
+    assert a.design == f"多孔層 50 mm（流阻 19,100 Pa·s/m²）（依參數組名），貼在原牆上（原牆：固定阻抗 {impedance} Pa·s/m）"
+    assert a.baseline == f"原牆（固定阻抗 {impedance} Pa·s/m）"
+    assert a.design_detail.startswith("貼在原牆上的構造；第 1 層：多孔層；層厚度 0.05 m")
+    assert a.baseline_detail == f"固定阻抗；阻抗 {impedance} Pa·s/m"
+    assert (b.mode, b.changed, b.baseline, b.baseline_detail, b.baseline_source) == (
+        "固定這一組材料", False, "同左", "", "兩邊一樣：這一區沒有加貼的層，當成沒動")
     assert rows[("地板", "整面")].place.startswith("長向 0.00–") and len(rows) == 5 + 2
     unknown = zone_rows(baseline, settings, design, baseline_known=False)
     assert {(row.baseline, row.baseline_source, row.changed) for row in unknown} == {("—", "—", False)}
+    # 做法是保留原牆的區才寫「原牆（…）」（#1119）；固定這一組材料的區照材料名寫，不冒稱原牆。
+    keep = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"b": ZoneDesign(mode="keep_original")}})
+    kept = {row.zone: row for row in zone_rows(baseline, keep, design) if row.wall == "x 起點牆"}
+    assert kept["b"].design == f"原牆（固定阻抗 {impedance} Pa·s/m）" and not b.design.startswith("原牆")
     stale = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"gone": ZoneDesign(mode="search")}})
     assert {row.mode for row in zone_rows(baseline, stale, design)} == {"—"}
 
@@ -298,3 +314,16 @@ def test_result_page_lists_zone_measured_seams_and_refuses_saved_ones_that_disag
                           ([None] * len(base.pairs), "與方案的實測區不一致")):
         with pytest.raises(ValueError, match=words):
             build_measured_view(result_with(tables))
+
+
+def test_unreadable_user_library_falls_back_to_builtin_names_and_says_so_in_chinese(tmp_path: Path) -> None:
+    """#1119：使用者材料庫讀不進來時，結果頁逐區表只比內建材料、附表照講一句（中文欄位），不讓整頁失敗。"""
+    deps = cast(ZoneResultDeps, SimpleNamespace(data_dir=tmp_path))
+    assert _names(deps) == (builtin_entries(), ())
+    user_library_path(tmp_path).write_text("{", encoding="utf-8")
+    entries, notes = _names(deps)
+    assert entries == builtin_entries() and notes == ("使用者材料庫讀不進來，材料名字只比內建材料：使用者材料庫不是有效的 JSON",)
+    user_library_path(tmp_path).write_text(json.dumps({"schema_version": "aosr.material_library.v1", "materials": [{}]}),
+                                           encoding="utf-8")
+    (note,) = _names(deps)[1]
+    assert note.startswith("使用者材料庫讀不進來，材料名字只比內建材料：") and "Field required" not in note

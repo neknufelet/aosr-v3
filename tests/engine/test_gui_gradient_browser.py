@@ -29,7 +29,7 @@ from aosr.gradient.surrogate_files import PROGRESS_FILE, RoundRecord, SurrogateP
 from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX
 from aosr.gui.surrogate_slots import SLOTS_DIR
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_jobs import GradientJobs, LaunchFailed
 from aosr.gui.gradient_plan import GradientRequest
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.zone_design import write_design
@@ -132,6 +132,13 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         expect(page.locator("#build-estimate")).to_contain_text("推估")
         expect(page.locator("#build-estimate")).to_contain_text("還要約")
         expect(page.locator("#build-surrogate")).to_be_disabled()
+        # 建模中重開頁面（#1119）：印這一份實際的完整解上限（另填的 1000，不是預設 600），兩格換成這一份的值並鎖住。
+        page.reload()
+        expect(page.locator("#build-state")).to_contain_text("完整解上限 1000 次（這一份另填）、停止殘差 0.001（預設）")
+        expect(page.locator("#max-full-solves")).to_have_value("1000")
+        expect(page.locator("#max-full-solves")).to_be_disabled()
+        expect(page.locator("#stop-residual")).to_be_disabled()
+        _shot(page, "1119-surrogate-reopened-budget")
         page.locator("#load-plan").click()
         expect(page.locator("#busy-line")).to_contain_text("方案「zoned」正在建替身")
         expect(page.locator("#busy-open")).to_have_text("看建替身進度")
@@ -139,6 +146,12 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         page.locator("#stop-build").click()
         expect(page.locator("#build-state")).to_contain_text("停止中")
         assert launcher.stopped == [unit]
+        # 建模真的停了（服務不在了）：兩格放回預設、解鎖，下一次開建不會悄悄帶這一份另填的 1000（#1119）。
+        launcher.active.discard(unit)
+        _tick(page)
+        expect(page.locator("#max-full-solves")).to_be_enabled()
+        expect(page.locator("#max-full-solves")).to_have_value("600")
+        expect(page.locator("#stop-residual")).to_be_enabled()
         _clean(page, watched.page_errors + watched.console_errors)
 
 
@@ -164,6 +177,11 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"] td.depth-cell p.note').first).to_have_text(
         "48K 玻璃棉（可調厚度與空腔）：生效 0.1 公尺（這一跑另填的上限擋住；材料組自己 0.3 公尺比較寬）")
     expect(page.locator('#plan-table tr[data-surface="ceiling@r0_c1"]')).to_contain_text("保留原牆")
+    # 代號改印材料庫的名字（#1119）：起跑樣板、家族選單；代號只留在命令列參數。
+    expect(page.locator('#plan-table tr[data-surface="x0@r0_c0"] td').nth(3)).to_have_text("48K 玻璃棉 50 mm＋50 mm 空腔")
+    expect(page.locator("#plan-summary")).to_contain_text("家族 48K 玻璃棉（可調厚度與空腔）")
+    expect(page.locator('#family option[value="glass_wool_48k"]')).to_have_text("48K 玻璃棉（可調厚度與空腔）")
+    expect(page.locator("#plan-arguments")).to_contain_text("glass_wool_48k_50mm_gap50")
     expect(page.locator('#plan-table tr[data-surface="x0@r1_c1"]')).to_contain_text("沒有限制（家族都試、也試不貼）")
     _shot(page, "1-6b-2-preview")
     # 預覽之後改了選項：畫面上的預覽不再是會跑的那一份，開始要停用；改回來又能按（抓「開跑重讀表單、跑的跟預覽不同」）。
@@ -180,6 +198,9 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     unit, argv, _, _ = launcher.launched[-1]
     assert argv[argv.index("--max-steps") + 1] == "45"
     assert "x0@r0_c0=0.1" in argv
+    # 開跑之後不用再按預覽（#1119）：輪詢的清單就帶「整台在算」，開始鈕立刻停用、忙碌行出來。
+    expect(page.locator("#start")).to_be_disabled()
+    expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋")
     page.locator("#preview").click()
     expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋")
     expect(page.locator("#start")).to_be_disabled()
@@ -235,8 +256,26 @@ def _finish_endpoint_and_adopt(page: Page, data_dir: Path, launcher: FakeLaunche
     expect(page.locator("#job-state")).to_have_text("搜尋中")
     _finish(data_dir, launcher, _view(jobs, job_id), 0)
     _tick(page)
+    expect(page.locator("#start")).to_be_enabled()
+    expect(page.locator("#busy-line")).to_be_hidden()
+    # 查不到整台機器忙不忙（systemctl 叫不動）：不准開、照講原因；查得到了又能開（#1119）。
+    def blind() -> set[str]:
+        raise LaunchFailed("systemctl 離開碼 1")
+    setattr(launcher, "active_units", blind)
+    _tick(page)
+    expect(page.locator("#start")).to_be_disabled()
+    expect(page.locator("#busy-line")).to_contain_text("查不到整台機器現在忙不忙，先不開新的一跑：systemctl 離開碼 1")
+    delattr(launcher, "active_units")
+    _tick(page)
+    expect(page.locator("#start")).to_be_enabled()
+    expect(page.locator("#busy-line")).to_be_hidden()
     page.locator("#job-endpoint").click()
     expect(page.locator("#job-state")).to_contain_text("終點計算中")
+    # 終點在算時（#1119，109 示範看到開始鈕還亮著）：開始鈕停用、忙碌行點名是這一跑的終點。
+    _tick(page)
+    expect(page.locator("#start")).to_be_disabled()
+    expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋（終點計算中")
+    _shot(page, "1119-endpoint-running-start-disabled")
     _finish(data_dir, launcher, _view(jobs, job_id), 0)
     exported = cast(Record, json.loads(_axis_scheme().model_dump_json())) | {"scheme_id": f"{NAME}-gradient-0123abcd"}
     (folder / folder_files.ENDPOINT_FILE).write_text("{}", encoding="utf-8")
