@@ -17,13 +17,13 @@ from aosr.config.paths import config_path
 from aosr.gradient import run
 from aosr.gradient.surrogate_coverage import (
     COVERAGE_VERSION, NOT_TRAINED_TEXT, TRAINING_VERSION, FixedTarget, SurrogateNotTrainedOn, check_covers, coverage_for,
-    fixed_targets, only_product_families,
+    fixed_targets, only_product_families, reachable_families,
 )
 from aosr.gradient.surrogate_files import TRAINING_FILE
 from aosr.materials import library
 from aosr.materials.search_library import SearchMaterials, fixed_candidates, with_user_materials
 from tests.engine._surrogate_coverage import trained_on
-from tests.engine.test_material_gradient_library import _ENTRY, _fixed, _optimizable
+from tests.engine.test_material_gradient_library import _ENTRY, USER, _fixed, _optimizable
 
 BASE = load_material_gradient_settings(config_path("material_gradient.toml"))
 
@@ -252,3 +252,51 @@ def test_measured_fixed_candidate_runs_only_when_the_surrogate_was_trained_with_
     rows[0]["real_pa_s_m"] = float(rows[0]["real_pa_s_m"]) * 1.5
     changed = cast(library.FixedEntry, _ENTRY.validate_python({**dumped, "material": {**dumped["material"], "points": rows}}))
     _refused_fixed(training, _fixed_targets({ZONE: ("fixed:" + MEASURED,)}, changed), f"固定材料 fixed:{MEASURED} 的內容跟訓練時不同")
+
+
+# ---- 只核搜尋走得到的家族（#1082 段 2-7）----
+
+LISTS: dict[str, tuple[str, ...]] = {ZONE: ("glass_wool_48k", "none"), "x0@r1_c1": ("glass_wool_24k", "fixed:panel_fixed")}
+
+
+def test_reachable_families_are_the_union_of_lists_and_an_unlisted_patch_reaches_all() -> None:
+    """抓走得到的家族沒取准用清單的聯集（漏一片、把不貼或固定材料當家族），或沒寫清單的面片沒算成全部家族
+    （換樣板 ``alternatives`` 在那一片會換到每一個家族）。"""
+    settings = _materials(_optimizable()).settings
+    assert reachable_families(settings, LISTS, LISTS) == {"glass_wool_48k", "glass_wool_24k"}
+    assert reachable_families(settings, [*LISTS, "y0"], LISTS) == {family.id for family in settings.family}
+    assert USER in reachable_families(settings, ["y0"], {})
+    assert reachable_families(settings, [ZONE], {ZONE: ("none", "fixed:panel_fixed")}) == frozenset()
+    # 固定面固定成某個家族的構造：替身每一步都算它，那個家族照樣要核；方案自己的材料不是家族
+    assert reachable_families(settings, LISTS, LISTS, ("glass_wool_96k_50mm", "scheme-material")) == {
+        "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"}
+
+
+def test_a_library_family_no_search_patch_may_use_needs_no_rebuild(tmp_path: Path) -> None:
+    """抓材料庫多一組可最佳化材料、每一片的准用清單都不准用它，替身（舊的、或有涵蓋紀錄卻沒訓練過它）照樣被說要重建
+    （2-6a 示範在 109 的副本重現過）；有一片沒寫清單就照舊拒收。"""
+    materials = _materials(_optimizable())
+    narrow = reachable_families(materials.settings, LISTS, LISTS)
+    every = reachable_families(materials.settings, [*LISTS, "y0"], LISTS)
+    for training in (tmp_path / "absent" / TRAINING_FILE, _legacy(tmp_path)):
+        check_covers(training, materials, reachable=narrow)
+        with pytest.raises(SurrogateNotTrainedOn, match=f"家族 {USER} 沒訓練過"):
+            check_covers(training, materials, reachable=every)
+    fixed = _fixed_targets({ZONE: ("glass_wool_48k", "fixed:panel_fixed")}, _fixed())
+    recorded = _written(tmp_path / "recorded", fixed)
+    check_covers(recorded, materials, fixed, reachable=narrow)
+    with pytest.raises(SurrogateNotTrainedOn, match=f"家族 {USER} 沒訓練過"):
+        check_covers(recorded, materials, fixed, reachable=every)
+    with pytest.raises(SurrogateNotTrainedOn, match=f"家族 {USER} 沒訓練過"):
+        check_covers(recorded, materials, fixed)
+
+
+def test_member_checks_follow_the_reachable_families_too(tmp_path: Path) -> None:
+    """抓家族成員那一條沒跟著走得到的家族濾：清單不准用的家族成員跟樣板不同，也逼人重建。"""
+    training = trained_on(tmp_path / "surrogate.npz", _materials(_optimizable()))
+    joined = _materials(_optimizable())
+    mixed = joined.settings.model_copy(update={"family": (joined.settings.family[0].model_copy(
+        update={"presets": (*joined.settings.family[0].presets, "glass_wool_24k_50mm")}), *joined.settings.family[1:])})
+    check_covers(training, joined._replace(settings=mixed), reachable={"glass_wool_24k", USER})
+    with pytest.raises(SurrogateNotTrainedOn, match="家族 glass_wool_48k 的構造 glass_wool_24k_50mm"):
+        check_covers(training, joined._replace(settings=mixed), reachable={"glass_wool_48k"})

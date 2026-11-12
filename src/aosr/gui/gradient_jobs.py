@@ -45,7 +45,9 @@ from aosr.config.material_gradient import (
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
-from aosr.gradient.surrogate_coverage import NOT_TRAINED_TEXT, FixedTarget, SurrogateNotTrainedOn, check_covers, fixed_targets
+from aosr.gradient.surrogate_coverage import (
+    NOT_TRAINED_TEXT, FixedTarget, SurrogateNotTrainedOn, check_covers, fixed_targets, reachable_families,
+)
 from aosr.gradient.surrogate_files import TRAINING_FILE
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
@@ -254,10 +256,19 @@ def plan_fixed(plan: SearchPlan, materials: SearchMaterials, entries: tuple[Libr
         raise PlanRefused(str(error)) from error
 
 
-def _not_trained(surrogate: Path, materials: SearchMaterials, fixed: tuple[FixedTarget, ...]) -> str | None:
-    """這一場的家族或固定材料候選超出替身訓練過的就回拒收原因（跟命令列開跑同一支 ``check_covers``；網頁先講，不等背景開跑才失敗）。"""
+def plan_reachable(plan: SearchPlan, settings: MaterialGradientSettings) -> frozenset[str]:
+    """這一跑搜尋走得到的家族：交給搜尋的每一片照計畫的准用清單（就是交給命令列的 ``--allowed``），沒清單的片＝全部家族
+    （:func:`~aosr.gradient.surrogate_coverage.reachable_families`，命令列開跑同一支）。"""
+    search = [surface for surface, mode in zip(plan.surfaces, plan.modes, strict=True) if mode == "search"]
+    return reachable_families(settings, search, plan.allowed, plan.fixed_surfaces.values())
+
+
+def _not_trained(surrogate: Path, materials: SearchMaterials, fixed: tuple[FixedTarget, ...],
+                 reachable: frozenset[str]) -> str | None:
+    """這一場走得到的家族（``reachable``）或固定材料候選超出替身訓練過的就回拒收原因（跟命令列開跑同一支 ``check_covers``；
+    網頁先講，不等背景開跑才失敗）。"""
     try:
-        check_covers(surrogate.parent / TRAINING_FILE, materials, fixed)
+        check_covers(surrogate.parent / TRAINING_FILE, materials, fixed, reachable=reachable)
     except SurrogateNotTrainedOn as error:
         return str(error)
     return None
@@ -508,7 +519,8 @@ class GradientJobs:
         settings = materials.settings
         path = surrogate_path(self.data_dir, scheme)
         missing = missing_parts(path)
-        refused = None if missing else _not_trained(path, materials, plan_fixed(plan, materials, entries))
+        refused = None if missing else _not_trained(path, materials, plan_fixed(plan, materials, entries),
+                                                    plan_reachable(plan, materials.settings))
         with self.lock:
             busy = self.active_job()
         # 代號 → 材料庫顯示名（內建構造預設、家族、使用者材料），只給預覽表看；計畫本身照舊只存代號（#1119）。
@@ -525,7 +537,7 @@ class GradientJobs:
         text, scheme, design = self.inputs(scheme_id)
         plan, materials, entries = self.plan(scheme, design, request)
         surrogate = self._surrogate(scheme)
-        refused = _not_trained(surrogate, materials, plan_fixed(plan, materials, entries))
+        refused = _not_trained(surrogate, materials, plan_fixed(plan, materials, entries), plan_reachable(plan, materials.settings))
         if refused is not None:
             raise NeedsSurrogate(refused, surrogate.parent)
         with self.launching():

@@ -276,6 +276,26 @@ def test_start_snapshots_user_families_into_the_folder_and_its_name(tmp_path: Pa
     assert "跟開跑時不同" in capsys.readouterr().err
 
 
+def test_start_ignores_a_library_family_no_search_surface_may_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                  capsys: pytest.CaptureFixture[str]) -> None:
+    """#1082 段 2-7：抓材料庫多一組可最佳化材料、每一面的准用清單都不准用它，命令列開跑照樣說替身沒訓練過、要重建
+    （舊替身：旁邊沒有訓練說明）；有一面沒寫清單（走得到全部家族）就照舊拒收、不建資料夾。網頁預覽與開跑同一條。"""
+    user = tmp_path / "library.json"
+    user.write_text(library.dump_user_library((_optimizable(),)), encoding="utf-8")
+    preset = "glass_wool_48k_50mm_gap50"
+    walls = ("floor", "ceiling", "x0", "xL", "y0", "yL")
+    listed = [part for wall in walls for part in ("--allowed", f"{wall}=glass_wool_48k,none")]
+    code, _ = _start(tmp_path, monkeypatch, "--materials", str(user), *listed[:-2], presets=",".join([preset] * 6))
+    assert code == cli.EXIT_FAILED and not (tmp_path / "out").exists()
+    assert f"家族 {USER} 沒訓練過" in capsys.readouterr().err
+    # 最後一面改成固定面（方案自己的材料、不換樣板）：不算走得到全部家族，照樣開得了
+    code, _ = _start(tmp_path, monkeypatch, "--materials", str(user), *listed[:-2], "--fixed-surface", "yL=scheme-material",
+                     presets=",".join([preset] * 6))
+    assert code == 0, capsys.readouterr().err
+    folder, = (tmp_path / "out").iterdir()
+    assert run.read_project(folder).allowed_targets == {wall: ("glass_wool_48k", "none") for wall in walls[:-1]}
+
+
 def test_start_refuses_a_named_library_that_does_not_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                            capsys: pytest.CaptureFixture[str]) -> None:
     """抓明給 ``--materials`` 但檔案不在時，悄悄退成沒有使用者材料的另一場搜尋。"""

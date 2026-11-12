@@ -744,3 +744,38 @@ def test_listing_carries_whether_the_machine_is_busy_and_survives_a_blind_servic
     blind = _jobs(tmp_path, _BlindLauncher()).listing()
     assert blind["jobs"] == [] and blind["busy"] is None
     assert blind["busy_problem"] == "查不到整台機器現在忙不忙，先不開新的一跑：systemctl 離開碼 1"
+
+
+def test_a_library_family_no_search_zone_may_use_keeps_the_old_surrogate(tmp_path: Path) -> None:
+    """#1082 段 2-7：抓材料庫多一組可最佳化材料、兩個搜尋區的准用清單都不准用它，網頁預覽與開跑照樣說替身沒訓練過、
+    要重建（舊替身：旁邊沒有訓練說明）；有一區沒寫清單（走得到全部家族）就照舊拒收、不開服務。"""
+    from aosr.gui.material_editor import user_library_path
+    from aosr.materials import library
+    from tests.engine.test_material_gradient_library import USER, _optimizable
+
+    data_dir = _data(tmp_path)
+    user_library_path(data_dir).write_text(library.dump_user_library((_optimizable(),)), encoding="utf-8")
+    scheme = _scheme()
+
+    def zones(second: tuple[str, ...] | None) -> DesignSettings:
+        return DesignSettings(scheme_id=NAME, zones={
+            "x0": {"r0_c0": ZoneDesign(mode="search", allowed=("glass_wool_48k", "none")),
+                   "r1_c1": ZoneDesign(mode="search", allowed=second)},
+            "ceiling": {"r0_c1": ZoneDesign(mode="keep_original")}})
+
+    write_design(data_dir, zones(("glass_wool_24k", "none")), scheme)
+    launcher = FakeLauncher()
+    jobs = _jobs(data_dir, launcher)
+    preview = jobs.preview(NAME, GradientRequest())
+    assert cast(Record, preview["surrogate"])["found"] is True, preview["surrogate"]
+    jobs.start(NAME, GradientRequest())
+    argv = launcher.launched[0][1]
+    assert "--materials" in argv and "x0@r1_c1=glass_wool_24k,none" in argv
+    launcher.active.clear()
+    write_design(data_dir, zones(None), scheme)
+    surrogate = cast(Record, _jobs(data_dir, FakeLauncher()).preview(NAME, GradientRequest())["surrogate"])
+    assert surrogate["found"] is False and f"家族 {USER} 沒訓練過" in str(surrogate["message"])
+    refused = FakeLauncher()
+    with pytest.raises(NeedsSurrogate, match=f"家族 {USER} 沒訓練過"):
+        _jobs(data_dir, refused).start(NAME, GradientRequest())
+    assert refused.launched == []

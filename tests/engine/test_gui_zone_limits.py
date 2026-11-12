@@ -40,6 +40,7 @@ DEEP = "glass_wool_48k_50mm_gap100"     # 50 mm 玻璃棉＋100 mm 空腔，總�
 SETTINGS = load_material_gradient_settings(config_path("material_gradient.toml"))
 TARGETS = builtin_depth_targets(SETTINGS)
 _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
+_SURFACE: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 Doc = dict[str, object]
 
 
@@ -400,7 +401,7 @@ def test_route_judges_groups_from_the_library_and_says_when_it_cannot(tmp_path: 
     (tmp_path / "materials.json").write_text("{壞掉", encoding="utf-8")
     response = client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": design})
     assert response.status_code == 200 and response.json()["red"] == 1
-    assert "查不了交給搜尋的區放不放得下材料組" in response.json()["refusals"][0]
+    assert "查不了交給搜尋的區放不放得下材料組、也認不出固定區是不是選了材料庫的材料" in response.json()["refusals"][0]
     fixed_only = _design(zones={"x0": {"auto1": {"mode": "fixed"}}}).model_dump(mode="json")
     assert client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": fixed_only}).json()["red"] == 0
 
@@ -527,3 +528,85 @@ def test_refusals_name_walls_and_zones_as_the_page_shows_them() -> None:
         plan_search(_scheme(_cut()), _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}}),
                     GradientRequest(), SETTINGS)
     assert "x 起點牆「z1」" in str(refused.value) and "x0" not in str(refused.value)
+
+
+# ---- 固定區選了材料庫直接取代牆面的那一筆（#1082 段 2-7）----
+
+def _picked(entry: FixedEntry) -> Doc:
+    """x0 的 z1 固定成材料庫這一筆：方案裡放的是換材料那一支（``/api/zone-material``）寫進去的同一份
+    （``FixedEntry.surface_material``，實測表是物理那一份）；其餘自動補的兩塊是原牆。"""
+    document = _cut(None)
+    z1 = next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")
+    z1["material"] = _SURFACE.dump_python(entry.surface_material(), mode="json")
+    return document
+
+
+def _library_targets(*entries: library.LibraryEntry) -> DepthTargets:
+    return library_depth_targets(SETTINGS, entries)
+
+
+def test_a_fixed_zone_picking_a_library_table_is_judged_by_its_backing_depth() -> None:
+    """抓固定區選了材料庫的實測表（底構造 0.05 m 空腔）只寫「比不了」、不標紅、開跑照放；放得進時沒講總深；
+    沒傳材料組的舊呼叫端被改了判法。"""
+    from tests.engine.test_material_gradient_allowed import _measured
+
+    table = _measured(imaginary=False)
+    targets = _library_targets(table)
+    over = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.04}, "auto1": {"mode": "search"}}})
+    result = zone_limits(_picked(table), over.model_dump(mode="json"), depth_targets=lambda: targets)
+    assert [(line["code"], line["level"]) for line in _lines(result, "x0", "z1")] == [("depth_over", "red")]
+    text = _lines(result, "x0", "z1")[0]["text"]
+    assert text == "實測吸音板（自填）：不可用——總深 0.05 公尺超過深度上限 0.04 公尺（這一塊的上限）（個案上限擋住）"
+    assert result["refusals"] == ["x 起點牆「z1」：" + text]
+    with pytest.raises(PlanRefused, match="有超過限制的區.*x 起點牆「z1」：實測吸音板（自填）：不可用——總深 0.05 公尺"):
+        plan_search(_scheme(_picked(table)), over, GradientRequest(), targets.settings, frozenset(targets.fixed),
+                    depth_targets=targets)
+    fits = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}}})
+    result = zone_limits(_picked(table), fits.model_dump(mode="json"), depth_targets=lambda: targets)
+    assert result["red"] == 0
+    assert _lines(result, "x0", "z1") == [{"code": "depth_fits", "level": "note",
+                                           "text": "實測吸音板（自填）：總深 0.05 公尺，放得進深度上限 0.05 公尺（這一塊的上限）"}]
+    assert _codes(zone_limits(_picked(table), over.model_dump(mode="json")), "x0", "z1") == ["depth_not_comparable"]
+
+
+def test_a_fixed_zone_picking_a_library_impedance_is_red_and_original_walls_stay_notes() -> None:
+    """抓固定區選了材料庫的固定阻抗（量不出多深）在有上限的區照樣放行；或反過來把方案原本的牆（固定阻抗、整面多層構造，
+    不是材料庫那一筆）也當成選上去的標紅——保留原牆那幾區的判決不准變。"""
+    from tests.engine.test_material_gradient_allowed import _measured
+    from tests.engine.test_material_gradient_library import _fixed
+
+    targets = _library_targets(_fixed(), _measured(imaginary=False))
+    document = _picked(_fixed())
+    document_scene = cast(dict[str, list[dict[str, object]]], cast(Doc, document["scene"])[NEW])
+    document_scene["ceiling"][0]["material"] = {"kind": "assembly", "layers": _layers(DEEP), "backing": "rigid"}
+    result = zone_limits(document, _design(room_max_depth_m=0.3).model_dump(mode="json"), depth_targets=lambda: targets)
+    assert [(line["code"], line["level"]) for line in _lines(result, "x0", "z1")] == [("depth_unknown", "red")]
+    assert _lines(result, "x0", "z1")[0]["text"] == ("固定吸音板（自填）：不可用——直接取代牆面、看不出多深，有深度上限的區不能用"
+                                                     "（限制是硬的）；這一區的上限 0.3 公尺（房間預設的上限）")
+    assert result["red"] == 1
+    untouched = zone_limits(_cut(None), _design(room_max_depth_m=0.3).model_dump(mode="json"))
+    for wall, zones in cast(dict[str, dict[str, list[dict[str, str]]]], untouched["zones"]).items():
+        for zone, lines in zones.items():
+            if (wall, zone) != ("x0", "z1"):
+                assert _lines(result, wall, zone) == lines, (wall, zone)
+                assert [line["code"] for line in lines] == ["depth_not_comparable"]
+    assert [line["code"] for line in _lines(result, "ceiling", "whole_wall")] == ["depth_not_comparable"]
+
+
+def test_the_page_and_the_search_preview_judge_picks_from_the_web_library(tmp_path: Path) -> None:
+    """抓網頁的限制檢查與開跑預覽沒拿網頁那份材料庫認固定區選了什麼（頁面不紅、存好的方案照樣開得了搜尋）。"""
+    from tests.engine.test_material_gradient_allowed import _measured
+
+    table = _measured(imaginary=False)
+    (tmp_path / "materials.json").write_text(library.dump_user_library((table,)), encoding="utf-8")
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "designs").mkdir()
+    document = _picked(table)
+    design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.04}, "auto1": {"mode": "search"}}})
+    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
+    body = client.post("/api/zone-limits", json={"scheme": document, "design": design.model_dump(mode="json")}).json()
+    assert body["red"] == 1 and body["refusals"][0].startswith("x 起點牆「z1」：實測吸音板（自填）：不可用——總深 0.05 公尺")
+    (tmp_path / "schemes" / "room109.json").write_text(_scheme(document).model_dump_json(), encoding="utf-8")
+    (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
+    response = client.post("/api/gradient/schemes/room109/plan", json={})
+    assert response.status_code == 400 and "x 起點牆「z1」：實測吸音板（自填）：不可用" in response.json()["error"]

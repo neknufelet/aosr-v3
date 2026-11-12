@@ -11,6 +11,12 @@
 涵蓋＝這一場的每個家族都找得到同代號、同構造內容，而且厚度與空腔範圍都在訓練過的裡面、總深度上限不比訓練過的大。
 個案的每面深度上限只會把範圍切小，不算進來（替身照家族範圍建）。
 
+開跑核的家族只算這一場**走得到**的（#1082 段 2-7，:func:`reachable_families`）：每個交給搜尋的面片准用清單裡的家族取聯集，
+沒寫清單的面片走得到全部家族（同換樣板 ``template_rounds.alternatives`` 那一條）；固定面不換樣板，但固定成某個家族的構造時
+替身每一步都算那份構造，它的家族照樣要核（網頁的固定面一律是方案自己的材料，不中這一條）。起點一定在
+它那一面的清單裡（開跑前 ``check_allowed_against_start`` 擋），不另加。材料庫多一組、清單都不准用它，舊替身照樣收。
+網頁預覽、網頁開跑、命令列開跑三處同一支、同一份逐片清單。
+
 訓練說明（``training.json``）沒有 ``coverage`` 這一節的是舊替身：#1098 那一版、或手建的替身旁邊根本沒有訓練說明，
 都當成只用產品設定檔那幾個家族訓練過。這一場的家族就是產品設定檔那幾個時照舊放行；有別的家族就拒收、要重建。
 建模時這一場的家族就是產品設定檔那幾個（材料庫沒有可最佳化材料、也沒換家族設定）就不寫這一節，訓練說明逐位照舊。
@@ -25,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Final, NamedTuple
 
@@ -154,11 +160,30 @@ def family_coverage(settings: MaterialGradientSettings, presets: Sequence[Preset
     return tuple(rows)
 
 
-def _member_problems(settings: MaterialGradientSettings, presets: Sequence[PresetMaterial]) -> list[str]:
-    """家族成員的多孔層（厚度除外）跟換樣板不同：替身只用換樣板訓練過，那個成員沒見過。"""
+def reachable_families(settings: MaterialGradientSettings, search_surfaces: Iterable[str],
+                       allowed: Mapping[str, Sequence[str]], fixed_presets: Iterable[str] = ()) -> frozenset[str]:
+    """這一場搜尋走得到的家族代號：交給搜尋的每一片（``search_surfaces``，固定面不列）有准用清單（``allowed``，面片代號 →
+    目標，命令列 ``--allowed`` 展開到面片的寫法）就取清單裡的家族，沒寫清單的那一片走得到全部家族；全部取聯集。
+    固定面的構造（``fixed_presets``，命令列 ``--fixed-surface`` 的值）屬於哪個家族也算進來（替身每一步都算它）。
+    不貼與固定材料（``fixed:<代號>``）不是家族，固定材料另核（:func:`fixed_targets`）。"""
+    every = tuple(family.id for family in settings.family)
+    found: set[str] = {family.id for preset in fixed_presets if (family := settings.family_of(preset)) is not None}
+    for surface in search_surfaces:
+        listed = allowed.get(surface)
+        if listed is None:
+            return frozenset(every)
+        found.update(target for target in listed if target in every)
+    return frozenset(found)
+
+
+def _member_problems(settings: MaterialGradientSettings, presets: Sequence[PresetMaterial],
+                     reachable: Collection[str] | None = None) -> list[str]:
+    """家族成員的多孔層（厚度除外）跟換樣板不同：替身只用換樣板訓練過，那個成員沒見過。``reachable`` 給了只看那幾個家族。"""
     table = {preset.id: preset for preset in presets}
     problems = []
     for family in settings.family:
+        if reachable is not None and family.id not in reachable:
+            continue
         porous = porous_identity(_preset(table, family, family.template_preset).material)
         for member in family.presets:
             if porous_identity(_preset(table, family, member).material) != porous:
@@ -241,12 +266,15 @@ def _fixed_problems(wanted: Sequence[FixedTarget], trained: Sequence[FixedCovera
     return problems
 
 
-def check_covers(training: Path, materials: SearchMaterials, fixed: Sequence[FixedTarget] = ()) -> None:
+def check_covers(training: Path, materials: SearchMaterials, fixed: Sequence[FixedTarget] = (), *,
+                 reachable: Collection[str] | None = None) -> None:
     """開跑前核這一場的家族與固定材料候選都在替身訓練過的範圍裡；不在就拋 :class:`SurrogateNotTrainedOn`（點名哪一個、哪一格）。
 
-    ``training`` 是替身旁的訓練說明（``surrogate.npz`` 同資料夾的 ``training.json``）；``fixed`` 是這一場准用清單的固定材料候選。"""
+    ``training`` 是替身旁的訓練說明（``surrogate.npz`` 同資料夾的 ``training.json``）；``fixed`` 是這一場准用清單的固定材料候選；
+    ``reachable`` 是這一場走得到的家族（:func:`reachable_families`），給了就只核那幾個，沒給核全部（建模進格子前那一次）。"""
     trained = read_coverage(training)
-    wanted = family_coverage(materials.settings, materials.presets, reachable=True)
+    wanted = [row for row in family_coverage(materials.settings, materials.presets, reachable=True)
+              if reachable is None or row.id in reachable]
     if trained is None:
         if only_product_families(materials) and not fixed:
             return
@@ -254,14 +282,14 @@ def check_covers(training: Path, materials: SearchMaterials, fixed: Sequence[Fix
         # 不然同代號樣板換了內容（流阻、多了空氣層）兩邊一起變、比不出來。
         product = family_coverage(load_material_gradient_settings(config_path("material_gradient.toml")),
                                   load_construction_presets(config_path("construction_presets.toml")))
-        extra = (_problems(wanted, product) + _member_problems(materials.settings, materials.presets)
+        extra = (_problems(wanted, product) + _member_problems(materials.settings, materials.presets, reachable)
                  + _fixed_problems(fixed, ()))
         if not extra:
             # 舊替身當作照產品設定檔家族訓練過：這一場只把產品家族收窄或拿掉幾個（照 v2 同一條「相同或更窄」），照舊收下。
             return
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：這份替身沒記訓練過哪些材料（材料庫接進搜尋之前建的，"
                                     f"只用產品設定檔的家族訓練過），這一場{'；'.join(extra)}")
-    problems = (_problems(wanted, trained.families) + _member_problems(materials.settings, materials.presets)
+    problems = (_problems(wanted, trained.families) + _member_problems(materials.settings, materials.presets, reachable)
                 + _fixed_problems(fixed, trained.fixed))
     if problems:
         raise SurrogateNotTrainedOn(f"{NOT_TRAINED_TEXT}：{'；'.join(problems)}")
