@@ -5,7 +5,6 @@ from collections.abc import Callable
 import json
 import shutil
 import sys
-import traceback
 from pathlib import Path
 from collections.abc import Mapping, Sequence
 from unittest.mock import patch
@@ -40,10 +39,10 @@ from aosr.physics.fem_reduced_store import save_reduced
 from aosr.physics import three_lane_report, three_lane_report_batch
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.fem_reduced_scheme import export_operators
-from aosr.reporting.scheme import Scheme
+from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.pipeline import run_scheme
-from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, build_constants, constant_material_flags, six_category_costs
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, build_constants, constant_absorption_mask, six_category_costs
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, ReasonCode, TimbreChannelsPayload
 from aosr.reporting.validation import checked_inputs
 from tests.engine._six_category_jax_cases import numpy_result, scheme_case
@@ -65,7 +64,7 @@ def _small_scheme(measured: bool = False) -> Scheme:
         for name, rows in scene.surface_zones_by_wall.items()}
     if measured:
         assembly = zones['x0'][0].material
-        # 搜尋用新地板；終點的原牆基準保留裸實測表，專考基準拒收入口。
+        # 搜尋用新地板；終點的原牆基準保留裸實測表（表內 1000–4000 Hz 只在幾何軸上，表內外分流兩支都考到）。
         zones['floor'] = (WholeWallZone(area='whole_wall', material=MeasuredImpedance.model_validate({
             'kind': 'measured_impedance', 'source_and_conditions': 'endpoint fixture impedance tube',
             'points': [{'frequency_hz': 1000., 'real_pa_s_m': 12000., 'imag_pa_s_m': -300.},
@@ -199,7 +198,7 @@ def _oracle(folder: Path, checked: endpoint.EndpointResult, baseline: np.ndarray
                 values.append(evaluate_reduced(model.matrices, k2, coeff))
             reduced = np.asarray(values)
         for pressure, scores, notes in ((reduced, saved.reduced, saved.crossover), (full, saved.full, saved.crossover)):
-            arrays = six_category_costs(c, *impedances, jnp.asarray(pressure.transpose(1, 2, 0)), jnp.asarray(constant_material_flags(materials)))
+            arrays = six_category_costs(c, *impedances, jnp.asarray(pressure.transpose(1, 2, 0)), jnp.asarray(constant_absorption_mask(materials, c.union_frequencies_hz)))
             expected = [*(float(v) for v in arrays[:6]), float(arrays.objective_total), float(arrays.product_total), float(arrays.low_frequency_objective)]
             actual = [*scores.categories, scores.objective_total, scores.product_total, scores.low_frequency_objective]
             equal = np.asarray(actual, dtype=float).tobytes() == np.asarray(expected).tobytes()
@@ -263,40 +262,35 @@ def _start(directory: Path, *, measured: bool = False) -> Path:
     _build(directory, measured)
     presets = ('glass_wool_48k_50mm_gap50,none,glass_wool_48k_50mm_gap50,none,none,none' if measured else
                'none,none,glass_wool_48k_50mm_gap50,none,none,none,none')
-    start: dict[str, object]
-    if measured:
-        from aosr.gradient import cli, worker
-        def search(folder: Path, mode: str, lock_fd: int, *, device: str = 'cpu') -> int:
-            # 同程序跑真 worker（搜尋工人），讓新檢查的暫時替換涵蓋 start 的父子入口。
-            return worker.run_worker(folder, 'start', should_stop=run.stop_requested(folder))
-        with (patch.object(run, 'require_supported_original_walls', return_value=None),
-              patch.object(cli, '_spawn_and_wait', side_effect=search)):
-            start = {'code': cli.main(_start_args(directory, directory / 'root', presets=presets)[3:])}
-    else:
-        start = _run(directory, _start_args(directory, directory / 'root', presets=presets))
+    start = _run(directory, _start_args(directory, directory / 'root', presets=presets))
     assert start['code'] == 0, start
     (folder,) = (directory / 'root').iterdir()
     return folder
 
 
-def measured_rejection(directory: Path) -> None:
-    """模擬新檢查之前的真搜尋結果；恢復檢查後，在完整求解之前拒收且無殘檔。"""
+def measured_endpoint(directory: Path) -> None:
+    """方案原牆有裸實測表（#1082 段 2-3d 起照收）：真搜尋、真終點；終點分數對 JAX 直算逐位、對正式 numpy 在登記容差加權和內。"""
     folder = _start(directory, measured=True)
-    before = {path.name for path in folder.iterdir()}
-    error_type = error_message = error_origin = None
-    try:
-        with (patch.object(endpoint_run, 'endpoint_check', side_effect=AssertionError('不准求解終點')),
-              patch.object(endpoint_run, 'full_model_pressures', side_effect=AssertionError('不准求解原牆')),
-              patch.object(FullSolver, 'solve', side_effect=AssertionError('不准完整求解'))):
-            endpoint_run.run_endpoint(folder)
-    except ValueError as error:
-        error_type, error_message = type(error).__name__, str(error)
-        error_origin = traceback.extract_tb(error.__traceback__)[-1].name
-    after = {path.name for path in folder.iterdir()}
-    output = dict(error_type=error_type, error_message=error_message, error_origin=error_origin,
-        endpoint_exists=(folder / endpoint_run.ENDPOINT_FILE).exists(), new_files=sorted(after - before),
-        endpoint_temporary_files=sorted(name for name in after if name.startswith('.endpoint-')))
-    (directory / 'rejection.json').write_text(json.dumps(output, ensure_ascii=False))
+    solves: list[np.ndarray] = []
+    captured: list[endpoint.EndpointResult] = []
+    baseline: list[np.ndarray] = []
+    with (patch.object(FullSolver, 'solve', _capture(FullSolver.solve, solves)),
+          patch.object(endpoint_run, 'endpoint_check', _capture(endpoint.endpoint_check, captured)),
+          patch.object(endpoint_run, 'full_model_pressures', _capture(endpoint.full_model_pressures, baseline))):
+        record = endpoint_run.run_endpoint(folder)
+        direct, numpy_equal, bound_equal, _, _ = _oracle(folder, captured[0], baseline[0])
+    six = record.six_category
+    assert six is not None
+    # 實測表是方案原本的地板（原牆基準那一份）；搜尋在地板貼了新樣板，匯出的地板是構造。
+    original = load_scheme(Path(run.read_project(folder).scheme_path)).scene.surface_zones_by_wall
+    exported = load_scheme(folder / 'scheme-endpoint.json').scene.surface_zones_by_wall
+    assert original is not None and exported is not None
+    output = dict(solves=len(solves), expected_solves=2 * len(captured[0].full_pressure), jax_bitwise=direct,
+        numpy_bitwise=numpy_equal, within_registered_sum_bound=bound_equal,
+        original_floor_kind=original['floor'][0].material.kind, exported_floor_kind=exported['floor'][0].material.kind,
+        all_scores_finite=all(v is not None for item in (six.baseline, six.endpoint) for score in (item.reduced, item.full)
+            for v in (*score.categories, score.objective_total, score.product_total)))
+    (directory / 'measured.json').write_text(json.dumps(output, ensure_ascii=False))
 
 
 def main(directory: Path) -> None:
@@ -339,4 +333,4 @@ def main(directory: Path) -> None:
 
 
 if __name__ == '__main__':
-    (measured_rejection if len(sys.argv) > 2 else main)(Path(sys.argv[1]))
+    (measured_endpoint if len(sys.argv) > 2 else main)(Path(sys.argv[1]))

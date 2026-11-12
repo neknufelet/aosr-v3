@@ -2,7 +2,7 @@
 
 常數只在 CPU 雙精度準備一次，扁平到每欄都可 np.asarray 後雜湊；用閉包交進 jit。
 阻抗順序是 patch_ids；斜入射為 (F, sum(A_patch))，晚期為 (N,F_union,A_paris)。
-共六個輸入：四路阻抗、聲壓 (聲源,座位,F_fem)、constant_material 布林 (N,)。
+共六個輸入：四路阻抗、聲壓 (聲源,座位,F_fem)、constant_material 布林 (N,)；有實測表時是逐頻 (N,F_union)。
 垂直入射阻抗分別為 (N,F_fem)、(N,F_report)。
 product_total 用第一階段常數；objective_total 的低頻項原樣呼叫既有含代理入口。
 """
@@ -24,7 +24,7 @@ from aosr.physics.late_family_jax import constant_absorption_arrays, paris_absor
 from aosr.physics.reflection_energy_jax import reflection_path_energy
 from aosr.scoring._six_category_constants import SixCategoryConstants as SixCategoryConstants
 from aosr.scoring._six_category_build import build_constants as build_constants
-from aosr.scoring._six_category_build import constant_material_flags as constant_material_flags
+from aosr.scoring._six_category_build import constant_absorption_mask as constant_absorption_mask, constant_material_flags as constant_material_flags
 from aosr.scoring.gradient_objective_jax import gradient_objective_from_pressures
 from aosr.scoring.reflections_jax import ReflectionGeometry, reflection_cost_arrays, primary_category_cost
 from aosr.scoring.reverberation_cost_jax import reverberation_cost_arrays
@@ -82,7 +82,9 @@ def _late(c: SixCategoryConstants, z: jax.Array, scattering: jax.Array, constant
     edge = jnp.nextafter(jnp.asarray(90., dtype=z.real.dtype), jnp.asarray(0., dtype=z.real.dtype))
     angles = jnp.minimum(angles, edge)
     paris = paris_absorption_arrays(z, angles, float(c.rho_c))
-    alpha = jnp.where(constant_material[:, None], constant.values, paris.values)
+    # (N,) 是整列同一個入口（逐位照舊）；(N, F_union) 是實測表的表內／表外逐頻分流（constant_absorption_mask）。
+    mask = constant_material[:, None] if constant_material.ndim == 1 else constant_material
+    alpha = jnp.where(mask, constant.values, paris.values)
     geometry = ZonedLateEnergyGeometry(LateEnergyGeometry(c.form_factors, c.late_patch_areas, c.late_wall_index, c.wall_areas),
                                       c.patch_weights, c.wall_weights)
     s = jnp.zeros(len(c.union_frequencies_hz), dtype=z.real.dtype).at[jnp.asarray(c.report_indices)].set(scattering)
@@ -136,6 +138,7 @@ def six_category_costs(c: SixCategoryConstants, impedance_fem: jax.Array, impeda
     """五個數值輸入須由呼叫端統一精度；constant_material 只有 ConstantImpedance（固定阻抗）時 True。
 
     貼構造或 MountedOnWall（原牆上貼構造）由呼叫端傳 False，採 Paris 積分；旗標可隨設計變。
+    裸實測表（MeasuredImpedance）照產品入口逐頻分流：傳 (N, F_union)（constant_absorption_mask），表內 True、表外 False。
     輸入順序必須照 c.patch_ids（這裡只守旗標長度，無法檢查材料身分）。
     旗標 True 的面片，impedance_paris[n,:,0] 必須是真 Z，且該面片整列阻抗有限。
     任一類無效則兩種合分 NaN。
@@ -153,8 +156,9 @@ def _six_category_costs(c: SixCategoryConstants, impedance_fem: jax.Array, imped
 
     預算低頻可來自未替換聲壓；無效聲壓仍將 J 標 NaN（梯度可非有限）而判不可估，安全替換不改有效點的微分。
     """
-    if constant_material.shape != (len(c.patch_ids),) or constant_material.dtype != jnp.bool_:
-        raise ValueError("constant_material 必須是逐面片的布林 (N,) 陣列")
+    if (constant_material.shape not in ((len(c.patch_ids),), (len(c.patch_ids), len(c.union_frequencies_hz)))
+            or constant_material.dtype != jnp.bool_):
+        raise ValueError("constant_material 必須是逐面片的布林 (N,) 陣列，或實測表逐頻分流的 (N, F_union)")
     rows = tuple(impedance_early[:, int(a):int(b)] for a, b in zip(c.angle_offsets[:-1], c.angle_offsets[1:], strict=True))
     geo = early.solve_geometric_early(geometric_early_table(c), rows, impedance_normal, jnp.asarray(c.scattering_by_patch))
     scattering = geo.scattering[0, 0]

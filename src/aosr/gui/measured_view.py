@@ -52,6 +52,14 @@ def _saved_seams(result: SchemeResult, materials: dict[str, MeasuredImpedance]) 
     return reference
 
 
+# 材料庫的規則（沒有虛部的實測表轉物理時虛部補 0、標「近似」）；物理格式沒留出處，整張表虛部都是 0 就照這一條講。
+APPROXIMATE_LINE = '這張實測表沒有虛部：虛部當 0、當純實數阻抗算，是近似。'
+
+
+def _approximate(material: MeasuredImpedance) -> tuple[str, ...]:
+    return (APPROXIMATE_LINE,) if all(point.imag_pa_s_m == 0.0 for point in material.points) else ()
+
+
 def _header(result: SchemeResult, wall: str, material: MeasuredImpedance) -> tuple[str, ...]:
     low, high = material.points[0].frequency_hz, material.points[-1].frequency_hz
     extra = []
@@ -68,7 +76,7 @@ def _header(result: SchemeResult, wall: str, material: MeasuredImpedance) -> tup
         elif note.code == 'komatsu_flow_below_samples':
             extra.append(f'底構造第 {note.layer_index} 層流阻低於原研究樣品範圍，照算但不宣稱準確性')
     return (f'{WALLS[wall]}：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
-            '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
+            *_approximate(material), '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
             *dict.fromkeys(extra))
 
 
@@ -114,7 +122,7 @@ def _saved_zone_seams(result: SchemeResult, materials: dict[tuple[str, str], Mea
 def _zone_header(wall: str, zone: str, material: MeasuredImpedance) -> tuple[str, ...]:
     low, high = material.points[0].frequency_hz, material.points[-1].frequency_hz
     return (f'{WALLS[wall]} {zone} 區：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
-            '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
+            *_approximate(material), '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
             '這面牆分了區：底構造的材料模型註記各區併在一起，列在「牆面材料計算提醒」那一節，分不出是哪一區。')
 
 

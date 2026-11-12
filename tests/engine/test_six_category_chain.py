@@ -131,12 +131,14 @@ def test_shared_geometry_is_never_rebuilt(measured: dict[str, object]) -> None:
     assert measured['build_calls_after_candidates'] == 1
 
 
-def test_material_flags_and_measured_wall_rejection(measured: dict[str, object]) -> None:
-    """抓：旗標全 True、MountedOnWall 誤作常數，或保留實測牆靜默走不同公式。"""
+def test_material_flags_and_guards(measured: dict[str, object]) -> None:
+    """抓：旗標全 True、MountedOnWall 誤作常數，或工廠的面片／頻率／低頻／剛性面拒收被拿掉。
+
+    保留實測牆從 #1082 段 2-3d 起照收（表內／表外分流對產品那套由 test_six_category_measured 守），這裡只核建得起來。
+    """
     row = cast(dict[str, object], measured['rejections'])
     assert row['material_flags'] == [True, False, False, False]
-    assert 'MeasuredImpedance' in cast(str, row['measured'])
-    assert 'numpy' in cast(str, row['measured']) and 'JAX' in cast(str, row['measured'])
+    assert row['measured'] == ''
     assert '面片' in cast(str, row['order'])
     assert '頻率' in cast(str, row['axis'])
     assert '低頻' in cast(str, row['objective'])

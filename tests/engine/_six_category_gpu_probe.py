@@ -11,6 +11,7 @@ from unittest.mock import patch
 import jax
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
 
 from aosr.config.construction_environment import construction_environment
 from aosr.config.material_gradient import MaterialGradientSettings
@@ -76,8 +77,9 @@ def kept_material_precision() -> dict[str, object]:
     calls: list[list[str]] = []
     original = chain._angle_impedance
     def observe(material: SurfaceMaterial, template: ConstructionTemplate | None, parameters: dict[str,jax.Array],
-                axis: jax.Array, angles: jax.Array | None, *, air: PhysicsConstants) -> jax.Array:
-        value = original(material,template,parameters,axis,angles,air=air)
+                axis: jax.Array, angles: jax.Array | None, *, air: PhysicsConstants,
+                outside: NDArray[np.bool_] | None = None) -> jax.Array:
+        value = original(material,template,parameters,axis,angles,air=air,outside=outside)
         if isinstance(material,Assembly) and angles is None and axis.size == c.fem_frequencies_hz.size:
             calls.append([str(axis.dtype),str(value.dtype)])
         return value

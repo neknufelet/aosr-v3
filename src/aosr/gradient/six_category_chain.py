@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -22,12 +22,15 @@ from aosr.gradient.material_gradient import (
 from aosr.gradient.surrogate_guard import require_matching_frequencies, require_matching_patches, require_matching_sources
 from aosr.gradient.impedance_angles import impedance_at_angles_or_empty
 from aosr.gradient.six_category_gpu import ScoreArrays, SixCategorySinglePrecisionObjective
-from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters
+from aosr.materials.construction_diff import (
+    ConstructionTemplate, build_template, measured_table_impedance, measured_table_template, surface_impedance_from_parameters,
+)
+from aosr.materials.construction import _outside_table
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_jax import ReducedConstants, reduced_constants, reduced_pressures, wall_impedances_from_templates
 from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays, GradientObjectiveConstants, gradient_objective_from_pressures
-from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, constant_material_flags, six_category_costs, _six_category_costs
+from aosr.scoring.six_category_jax import SixCategoryArrays, SixCategoryConstants, constant_absorption_mask, six_category_costs, _six_category_costs
 
 
 class SixCategoryChainAux(NamedTuple):
@@ -49,8 +52,6 @@ def _materials(designs: Sequence[SurfaceDesign]) -> tuple[SurfaceMaterial, ...]:
         material = design_template_material(design) if design.material is not None else design.kept_material
         if material is None:
             raise ValueError(f"六類面片 {design.surface_id} 必須有材料；無材料的合成剛性面沒有六類阻抗")
-        if isinstance(material, MeasuredImpedance):
-            raise ValueError(f"保留牆 {design.surface_id} 是 MeasuredImpedance：numpy 的表內無規入射吸音公式尚無對應 JAX 分支，六類工廠拒收")
         materials.append(material)
     return tuple(materials)
 
@@ -60,12 +61,16 @@ design_materials = _materials
 
 def _angle_impedance(material: SurfaceMaterial, template: ConstructionTemplate | None,
                      parameters: dict[str, jax.Array], axis: jax.Array, angles: jax.Array | None,
-                     *, air: PhysicsConstants) -> jax.Array:
+                     *, air: PhysicsConstants, outside: NDArray[np.bool_] | None = None) -> jax.Array:
     def calculate() -> jax.Array:
         if isinstance(material, ConstantImpedance):
             shape = axis.shape if angles is None else (axis.size, angles.size)
             return jnp.full(shape, complex(material.impedance_pa_s_m), dtype=jnp.result_type(axis.dtype, jnp.complex64))
         assert template is not None
+        if isinstance(material, MeasuredImpedance):
+            # 實測表：表內照局部反應攤開、表外底構造（template 是底構造的無變數樣板），跟貼牆背後實測表同一支；
+            # 表外遮罩由呼叫端在雙精度原始軸上判（跟晚期吸音遮罩同一支），單精度捨入不換邊。
+            return measured_table_impedance(material, template, axis, air=air, incidence_angles_deg=angles, outside=outside)
         return surface_impedance_from_parameters(template, parameters, axis, air=air, incidence_angles_deg=angles)
     return impedance_at_angles_or_empty(axis, angles, calculate)
 
@@ -80,11 +85,20 @@ def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
                         air: PhysicsConstants, ranges: PorousModelRanges, single_precision: bool = False) -> ImpedanceFunction:
     materials = _materials(designs)
     templates = design_templates(designs, jnp.asarray(c.union_frequencies_hz), air=air, ranges=ranges)
+    union = jnp.asarray(c.union_frequencies_hz)
     angle_templates = tuple(template if template is not None or isinstance(material, ConstantImpedance) else
-        build_template(material, jnp.asarray(c.union_frequencies_hz), air=air, ranges=ranges, variables=())
+        measured_table_template(material, union, air=air, ranges=ranges) if isinstance(material, MeasuredImpedance) else
+        build_template(material, union, air=air, ranges=ranges, variables=())
         for material, template in zip(materials, templates, strict=True))
     kept = tuple((i, row) for i, row in enumerate(kept_impedance_rows(designs, c.fem_frequencies_hz, air=air, ranges=ranges)) if row is not None)
     zoned = any('@' in d.surface_id for d in designs)
+
+    def sides(axis: NDArray[np.float64]) -> tuple[NDArray[np.bool_] | None, ...]:
+        # 表內外照原始雙精度頻率判一次（產品入口 construction._outside_table；constant_absorption_mask 也是這一支），不讓 float32 捨入後重判。
+        return tuple(_outside_table(m, cast(jax.Array, np.asarray(axis, dtype=np.float64))) if isinstance(m, MeasuredImpedance) else None
+                     for m in materials)
+
+    fem_sides, report_sides, union_sides = (sides(c.fem_frequencies_hz), sides(c.frequencies_hz), sides(c.union_frequencies_hz))
 
     def impedances(theta: jax.Array, arrays: SixCategoryConstants = c) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
         parameters = surface_parameters(designs, theta)
@@ -93,7 +107,7 @@ def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
                wall_impedances_from_templates(templates, parameters, fem_axis, air=air)).values
         for index, row in kept:
             # 舊 CPU 雙精度沿用預算列；新單精度鏈的保留構造也實跑 float32 TMM，不能只降型。
-            value = (_angle_impedance(materials[index],angle_templates[index],parameters[index],fem_axis,None,air=air)
+            value = (_angle_impedance(materials[index],angle_templates[index],parameters[index],fem_axis,None,air=air,outside=fem_sides[index])
                      if single_precision and not isinstance(materials[index],ConstantImpedance) else jnp.asarray(row,dtype=fem.dtype))
             fem = fem.at[index].set(value)
         report_axis = jnp.asarray(arrays.frequencies_hz, dtype=theta.dtype)
@@ -101,9 +115,11 @@ def _impedance_function(designs: tuple[SurfaceDesign, ...], c: SixCategoryConsta
         normal, oblique, paris = [], [], []
         for i, (material, template, values) in enumerate(zip(materials, angle_templates, parameters, strict=True)):
             a, b = (int(x) for x in c.angle_offsets[i:i+2])
-            normal.append(_angle_impedance(material, template, values, report_axis, None, air=air))
-            oblique.append(_angle_impedance(material, template, values, report_axis, _angles(arrays.angles_deg[a:b], theta.dtype), air=air))
-            paris.append(_angle_impedance(material, template, values, union_axis, _angles(arrays.paris_angles_deg, theta.dtype), air=air))
+            normal.append(_angle_impedance(material, template, values, report_axis, None, air=air, outside=report_sides[i]))
+            oblique.append(_angle_impedance(material, template, values, report_axis, _angles(arrays.angles_deg[a:b], theta.dtype), air=air,
+                                            outside=report_sides[i]))
+            paris.append(_angle_impedance(material, template, values, union_axis, _angles(arrays.paris_angles_deg, theta.dtype), air=air,
+                                          outside=union_sides[i]))
         return fem, jnp.stack(normal), jnp.concatenate(oblique, axis=1), jnp.stack(paris)
 
     return impedances
@@ -137,7 +153,9 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
 
     工廠必須在雙精度已開的行程裡呼叫，讓樣板在涵蓋四路頻率的聯集軸上驗合法性。
     六類常數必須由呼叫端事先 build_constants 建一次；候選只改樣板與 constant_material（常數材料旗標）。
-    保留構造用無變數樣板算角度阻抗，固定阻抗廣播；只拒裸 MeasuredImpedance（實測）保留牆。
+    保留構造用無變數樣板算角度阻抗，固定阻抗廣播；裸實測表（保留牆或准用清單的實測固定材料，#1082 段 2-3d）
+    四路走 construction_diff.measured_table_impedance（表內攤開、表外底構造），晚期吸音照產品入口逐頻分流
+    （constant_absorption_mask：表內固定阻抗換算、表外底構造 Paris）。
     單精度的保留 Assembly 連 FEM 列也實跑 float32 TMM；舊鏈則把雙精度預算 FEM 列降型。
     這讓四路材料計算都守單精度界線，包含保留構造；J 的單雙精度差由開跑閘門守，各類差另記錄。
     貼牆背後是實測表、或保留 MountedOnWall(wall=實測表) 照收，走 construction_diff 的 JAX 內插。
@@ -156,7 +174,7 @@ def six_category_chain_objective(model: ReducedModel, designs: Sequence[SurfaceD
     c = six_category_constants
     _check_inputs(model, frozen_designs, objective_constants, c, frequencies)
     impedance_for = _impedance_function(frozen_designs, c, air=air, ranges=ranges, single_precision=single_precision)
-    flags = constant_material_flags(_materials(frozen_designs))
+    flags = constant_absorption_mask(_materials(frozen_designs), c.union_frequencies_hz)
     constants = reduced_constants(model)
 
     def objective(theta: jax.Array, reduced: ReducedConstants = constants,

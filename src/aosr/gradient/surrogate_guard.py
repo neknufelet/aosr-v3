@@ -1,11 +1,10 @@
-"""搜尋與終點共用的替身輸入及方案原牆檢查。"""
-from collections.abc import Iterable, Sequence
+"""搜尋與終點共用的替身輸入檢查（面片、聲源、頻率軸）。"""
+from collections.abc import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
 from aosr.gradient.boundary import design_patch_keys
-from aosr.materials.construction_models import MeasuredImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_boundary import PatchKeys, checked_patch_keys
 
@@ -22,12 +21,6 @@ def require_matching_frequencies(model: ReducedModel, frequencies: Sequence[floa
     axis = np.asarray(frequencies, dtype=np.float64)
     if not np.array_equal(axis, model.frequencies_hz) or not np.array_equal(axis, expected):
         raise ValueError('頻率軸必須等於替身與六類常數的 FEM 頻率軸')
-
-
-def require_supported_original_walls(kept: Iterable[SurfaceMaterial]) -> None:
-    """六類終點必算方案原牆基準；裸實測表尚未接入，貼牆構造照常收。"""
-    if any(isinstance(material, MeasuredImpedance) for material in kept):
-        raise ValueError('方案原本的牆含裸實測材料：實測原牆的表內／表外吸音分流尚未接入六類終點；拒絕寫出定義不同的分數')
 
 
 def require_matching_patches(model: ReducedModel | FullOperators, names: Sequence[str] | None = None, *,

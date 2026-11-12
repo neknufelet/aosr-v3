@@ -29,7 +29,7 @@ from aosr.gradient.fixed_surfaces import check_depth_targets
 from aosr.gradient.report import render_report
 from aosr.materials import library
 from aosr.materials import search_library as materials
-from aosr.materials.construction_models import Assembly, ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MeasuredImpedance, SurfaceMaterial
 from tests.engine.test_material_gradient_mount import _project
 
 GAP50 = "glass_wool_48k_50mm_gap50"
@@ -193,6 +193,33 @@ def test_fixed_fit_measures_assemblies_and_refuses_what_it_cannot_measure() -> N
     assert target_fit("none", 0.01, _base(), {}).usable
     with pytest.raises(ValueError, match="不在這一場的材料清單"):
         target_fit("fixed:absent", 0.1, _base(), {})
+
+
+
+def _measured_on(base: Assembly) -> tuple[MeasuredImpedance, library.MeasuredTable]:
+    """同一張合成表（不是真實量測）的物理那一份與材料庫那一份，底構造是 ``base``。"""
+    table = library.MeasuredTable.model_validate({'kind': 'measured_impedance', 'base_assembly': base.model_dump(),
+        'source_and_conditions': '合成考卷用表（非真實量測）',
+        'points': [{'frequency_hz': 100.0, 'real_pa_s_m': 1200.0}, {'frequency_hz': 1000.0, 'real_pa_s_m': 900.0}]})
+    return table.to_physics(), table
+
+
+def test_fixed_fit_measures_measured_tables_by_their_base_assembly() -> None:
+    """抓實測表一律當看不出多深（#1082 段 2-4 交接）：實測表一定附底構造（段 2-1），總深照底構造算，比法同多層構造那一把；
+    物理那一份與材料庫那一份判法一樣，固定阻抗照舊比不了。"""
+    deep = _preset_material("glass_wool_48k_50mm_gap100")
+    assert isinstance(deep, Assembly)
+    for table in _measured_on(deep):
+        assert fixed_material_depth_m(table) == pytest.approx(0.15)
+        assert fixed_fit("fixed:t", table, 0.15).usable
+        over = fixed_fit("fixed:t", table, 0.149)
+        assert (over.usable, over.reason) == (False, "fixed_too_deep") and over.material_m == pytest.approx(0.15)
+    physics, _ = _measured_on(deep)
+    check_depth_targets(_surfaces(), _base(), fixed_surfaces={}, max_depths={"x0": 0.2},
+                        allowed={"x0": ("glass_wool_48k", "fixed:t")}, fixed_materials={"fixed:t": physics})
+    with pytest.raises(ValueError, match="固定材料 fixed:t 總深 0.15 m 超過深度上限 0.1 m"):
+        check_depth_targets(_surfaces(), _base(), fixed_surfaces={}, max_depths={"x0": 0.1},
+                            allowed={"x0": ("glass_wool_48k", "fixed:t")}, fixed_materials={"fixed:t": physics})
 
 
 # ---- 起跑設計 ----

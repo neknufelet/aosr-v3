@@ -20,7 +20,7 @@ from aosr.gui.zone_result import (
     BaselineRefused, OriginalWalls, _change, derive_baseline, improvement, original_walls, zone_rows)
 from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, lock_refusal
 from aosr.gui.material_editor import user_library_path
-from aosr.gui.measured_view import build_measured_view
+from aosr.gui.measured_view import APPROXIMATE_LINE, build_measured_view
 from aosr.gui.problem_text import rounded_number
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
 from aosr.materials.library import builtin_entries
@@ -305,6 +305,13 @@ def test_result_page_lists_zone_measured_seams_and_refuses_saved_ones_that_disag
     assert view is not None and [item.wall_name for item in view] == ["x 起點牆（a 區）"]
     assert view[0].header_lines[0].startswith(f"x 起點牆 a 區：實測表涵蓋 {low:g}–{high:g} Hz")
     assert view[0].rows[0] == (f"{low:g} Hz", "阻抗實部（Pa·s/m）", "400", "401", "1")
+    assert APPROXIMATE_LINE not in view[0].header_lines
+    # 沒有虛部的表（材料庫轉物理補 0，#1082 段 2-3d 搜尋匯出的就是這一份）：表頭第二行標「近似」。
+    real_only = table.model_copy(update={"points": tuple(point.model_copy(update={"imag_pa_s_m": 0.0}) for point in table.points)})
+    zones["x0"] = (zones["x0"][0].model_copy(update={"material": real_only}), zones["x0"][1])
+    scene = base.scheme.scene.model_copy(update={"surface_zones_by_wall": zones, "impedance_pa_s_per_m_by_wall": None})
+    approximate = build_measured_view(result_with([seams] * len(base.pairs)))
+    assert approximate is not None and approximate[0].header_lines[1] == APPROXIMATE_LINE
     moved = TypeAdapter(ZoneSeamTable).validate_python({"x0": {"a": [_seam(low + 1, 400.0), _seam(high, 800.0)]}})
     other = TypeAdapter(ZoneSeamTable).validate_python({"x0": {"a": [_seam(low, 401.0), _seam(high, 800.0)]}})
     wrong = TypeAdapter(ZoneSeamTable).validate_python({"x0": {"b": [_seam(low, 400.0), _seam(high, 800.0)]}})

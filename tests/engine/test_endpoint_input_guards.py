@@ -1,4 +1,4 @@
-"""六類入口先核完整頻率軸與方案原牆；拒收前不得求解或開始搜尋。"""
+"""六類入口先核完整頻率軸；方案原牆是裸實測表照收（#1082 段 2-3d），一路走到求解或搜尋的邊界。"""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -28,7 +28,6 @@ from tests.engine.test_material_gradient_cli import _env, _start_args
 from tests.engine.test_material_gradient_mount import _project
 
 PRESETS = 'glass_wool_48k_50mm_gap50,none,glass_wool_48k_50mm_gap50,none,none,none'
-REJECTION = '方案原本的牆.*實測原牆的表內／表外吸音分流尚未接入六類終點'
 
 
 def _model(scheme: Scheme) -> ReducedModel:
@@ -90,17 +89,22 @@ def _start_inputs(tmp_path: Path, scheme: Scheme) -> list[str]:
     return _start_args(tmp_path, tmp_path / 'root', presets=PRESETS)[3:]
 
 
+class _ReachedOperators(Exception):
+    """合法材料已通過入口檢查，到達本題不跑的完整算子（或搜尋迴圈）邊界。"""
+
+
+def _reached(*args: object, **kwargs: object) -> NoReturn:
+    raise _ReachedOperators
+
+
 @pytest.mark.parametrize('mount', ('rigid', 'on_wall'))
-def test_start_refuses_bare_original_wall_before_solving_or_creating_folder(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mount: str) -> None:
-    """即使新樣板蓋住實測牆也拒收；檢查在建立根目錄及 project 之前。"""
+def test_start_accepts_bare_measured_original_wall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mount: str) -> None:
+    """抓開跑仍拒收方案原本的裸實測牆（2-3d 起六類評分照產品入口表內／表外分流）：要一路走到匯出完整算子。"""
     args = cli._parser().parse_args([*_start_inputs(tmp_path, _small_scheme(True)), '--mount', mount])
-    monkeypatch.setattr(fem_reduced_scheme, 'export_operators', _unexpected_work)
+    monkeypatch.setattr(fem_reduced_scheme, 'export_operators', _reached)
     monkeypatch.setattr(fem_reduced.FullSolver, 'solve', _unexpected_work)
-    monkeypatch.setattr(run, '_fresh', _unexpected_work)
-    with pytest.raises(ValueError, match=REJECTION):
+    with pytest.raises(_ReachedOperators):
         cli._start(args)
-    assert not (tmp_path / 'root').exists()
 
 
 def _saved_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,42 +114,33 @@ def _saved_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project().model_copy(update={'capabilities_path': str(config_path('capabilities.toml')),
         'presets': tuple(None if p == 'none' else p for p in PRESETS.split(','))})
     run.write_json_atomic(tmp_path / run.PROJECT_FILE, project)
-    # 替身准用與檔案摘要不屬本題；材料解析、入口重建與拒收仍跑真程式。
+    # 替身准用與檔案摘要不屬本題；材料解析與入口重建仍跑真程式。
     monkeypatch.setattr(run, 'check_inputs', lambda *a, **kw: (scheme, model, settings))
     monkeypatch.setattr(endpoint_run, 'check_inputs', lambda *a, **kw: (scheme, model, settings))
 
 
-def test_resume_refuses_bare_original_wall_before_search(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resume_accepts_bare_measured_original_wall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """接續讀回方案原本的裸實測牆，設計建得起來、走到建六類常數（以前的守衛就在這一步前面）。"""
     _saved_inputs(tmp_path, monkeypatch)
-    monkeypatch.setattr(run, 'build_constants', _unexpected_work)
-    monkeypatch.setattr(run, 'six_category_chain_objective', _unexpected_work)
+    monkeypatch.setattr(run, 'build_constants', _reached)
     monkeypatch.setattr(run, '_resume', _unexpected_work)
     monkeypatch.setattr(fem_reduced.FullSolver, 'solve', _unexpected_work)
-    with pytest.raises(ValueError, match=REJECTION):
+    with pytest.raises(_ReachedOperators):
         run.resume_search(tmp_path, should_stop=None)
-    assert not (tmp_path / run.LEDGER_FILE).exists()
 
 
-def test_endpoint_refuses_bare_original_wall_before_full_solves(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_endpoint_accepts_bare_measured_original_wall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """終點讀回方案原本的裸實測牆，走到匯出完整算子（終點兩套完整解與六類分數由慢考卷 slow_six_category_endpoint 真跑）。"""
     _saved_inputs(tmp_path, monkeypatch)
-    # 結果身分與帳本由既有慢考卷核；此題在完整算子與兩套完整解前設哨兵。
     (tmp_path / run.RESULT_FILE).write_text('{}')
     monkeypatch.setattr(endpoint_run, 'read_result', lambda folder: run.GradientResult.model_construct(
         format_version=run.RESULT_VERSION))
-    monkeypatch.setattr(endpoint_run, 'export_operators', _unexpected_work)
+    monkeypatch.setattr(endpoint_run, 'export_operators', _reached)
     monkeypatch.setattr(endpoint_run, 'endpoint_check', _unexpected_work)
     monkeypatch.setattr(endpoint_run, 'full_model_pressures', _unexpected_work)
     monkeypatch.setattr(fem_reduced.FullSolver, 'solve', _unexpected_work)
-    before = {path.name for path in tmp_path.iterdir()}
-    with pytest.raises(ValueError, match=REJECTION):
+    with pytest.raises(_ReachedOperators):
         endpoint_run.run_endpoint(tmp_path)
-    assert {path.name for path in tmp_path.iterdir()} == before
-
-
-class _ReachedOperators(Exception):
-    """合法材料已通過入口檢查，到達本題不跑的完整算子邊界。"""
 
 
 def test_start_accepts_original_mounted_on_measured_wall(
@@ -161,9 +156,7 @@ def test_start_accepts_original_mounted_on_measured_wall(
     changed = {**zones, 'floor': (zones['floor'][0].model_copy(update={'material': mounted}),)}
     scheme = Scheme.model_validate(scheme.model_copy(update={'scene': scheme.scene.model_copy(
         update={'surface_zones_by_wall': changed})}).model_dump())
-    def reached(*args: object, **kwargs: object) -> NoReturn:
-        raise _ReachedOperators
-    monkeypatch.setattr(fem_reduced_scheme, 'export_operators', reached)
+    monkeypatch.setattr(fem_reduced_scheme, 'export_operators', _reached)
     args = cli._parser().parse_args(_start_inputs(tmp_path, scheme))
     with pytest.raises(_ReachedOperators):
         cli._start(args)
