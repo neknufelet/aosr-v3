@@ -271,7 +271,7 @@ def test_reachable_families_are_the_union_of_lists_and_an_unlisted_patch_reaches
 
 def test_a_library_family_no_search_patch_may_use_needs_no_rebuild(tmp_path: Path) -> None:
     """抓材料庫多一組可最佳化材料、每一片的准用清單都不准用它，替身（舊的、或有涵蓋紀錄卻沒訓練過它）照樣被說要重建
-    （2-6a 示範在 109 的副本重現：demo-2-6/logs/repro-allowed-coverage.log 第 2 步）；有一片沒寫清單就照舊拒收。"""
+    （2-6a 示範在 109 的副本重現過）；有一片沒寫清單就照舊拒收。"""
     materials = _materials(_optimizable())
     narrow = reachable_families(materials.settings, LISTS, LISTS)
     every = reachable_families(materials.settings, [*LISTS, "y0"], LISTS)

@@ -40,6 +40,7 @@ DEEP = "glass_wool_48k_50mm_gap100"     # 50 mm 玻璃棉＋100 mm 空腔，總�
 SETTINGS = load_material_gradient_settings(config_path("material_gradient.toml"))
 TARGETS = builtin_depth_targets(SETTINGS)
 _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
+_SURFACE: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 Doc = dict[str, object]
 
 
@@ -536,7 +537,7 @@ def _picked(entry: FixedEntry) -> Doc:
     （``FixedEntry.surface_material``，實測表是物理那一份）；其餘自動補的兩塊是原牆。"""
     document = _cut(None)
     z1 = next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")
-    z1["material"] = TypeAdapter(SurfaceMaterial).dump_python(entry.surface_material(), mode="json")
+    z1["material"] = _SURFACE.dump_python(entry.surface_material(), mode="json")
     return document
 
 
