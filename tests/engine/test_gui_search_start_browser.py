@@ -63,7 +63,7 @@ def _shown(page: Page) -> Record:
 
 def _rich_body() -> Record:
     """表單每一種格都用到的第二階段設定（帶入來回要每一格都對）；時間上限故意取小時換不整的秒數。"""
-    body = _body() | {"budget": 40, "refine": {"budget": 4, "convergence_run": 2}, "search_time_budget_s": 5457.0,
+    body = _body() | {"budget": 40, "refine": {"budget": 4, "convergence_run": 2}, "search_time_budget_s": 3607.0,
                       "feedback": {"offset": 0.25}}
     cast(Record, body["layout"]).update(
         axis_offset_m=0.1, wall_gap_m=0.05, base_angle_deg={"low": 20.0, "high": 80.0},
