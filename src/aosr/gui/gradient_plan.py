@@ -38,7 +38,7 @@ from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, saved_refusals, target_fits, target_line,
-    zone_words,
+    zone_limits, zone_words,
 )
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries
@@ -263,6 +263,27 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
 
 
 SearchPlan.model_rebuild()
+
+
+def fixed_depths(plan: SearchPlan, scheme: Scheme, design: DesignSettings | None,
+                 targets: DepthTargets) -> dict[str, dict[str, object]]:
+    """開跑預覽「深度上限」那一格給固定區用的（#1082 段 2-9）：跟立面圖同一次限制檢查（``zone_limits``，選了材料庫的
+    實測表照底構造算總深那一條也在裡面）的生效上限（``cap``：值與哪一層，沒給是 None）與深度那幾條原句（``lines``）。
+    只排給人看，不進計畫（計畫存在工作記錄裡、舊的逐位不變）；保留原牆與交給搜尋的區不列。"""
+    result = zone_limits(scheme.model_dump(mode="json"), None if design is None else design.model_dump(mode="json"),
+                         depth_targets=lambda: targets)
+    caps = cast(dict[str, dict[str, dict[str, object]]], result["caps"])
+    zones = cast(dict[str, dict[str, list[dict[str, str]]]], result["zones"])
+    found: dict[str, dict[str, object]] = {}
+    for surface, mode in zip(plan.surfaces, plan.modes, strict=True):
+        if mode != "fixed":
+            continue
+        wall, zone = zone_of(surface)
+        cap = caps.get(wall, {}).get(zone)
+        found[surface] = {"cap": None if cap is None else {"value_m": cap["value_m"], "level": cap["level"]},
+                          "lines": [{"level": line["level"], "text": line["text"]}
+                                    for line in zones.get(wall, {}).get(zone, []) if line["code"].startswith("depth_")]}
+    return found
 
 
 def start_arguments(plan: SearchPlan) -> list[str]:

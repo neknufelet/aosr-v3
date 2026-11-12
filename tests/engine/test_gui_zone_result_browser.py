@@ -238,7 +238,7 @@ def test_zone_rows_say_measured_or_simulated_with_the_source_under_the_name(
         expect(table.locator("li").first).to_contain_text("100 Hz：")
         detail = cell.locator("details.zone-material-detail")
         detail.locator("summary").first.click()
-        expect(detail.locator("> div")).not_to_contain_text("1000 Hz：")
+        expect(detail.locator("div")).not_to_contain_text("1000 Hz：")
         # 搜尋或貼上去的層：照材料頁標「模擬」；原牆固定阻抗照材料頁標「近似」。
         laid = rows.filter(has_text="依參數組名")
         expect(laid.locator("td").nth(4).locator(".badge")).to_have_text(["模擬"])
