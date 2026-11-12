@@ -16,6 +16,7 @@ from aosr.gui.zone_result import (
     BaselineRefused, OriginalWalls, _change, derive_baseline, improvement, original_walls, zone_rows)
 from aosr.gui.zone_result_routes import ZoneResultView, lock_refusal
 from aosr.gui.measured_view import build_measured_view
+from aosr.gui.problem_text import rounded_number
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
 from aosr.physics.report_zone_seams import ZoneSeamTable
 from aosr.physics.report_surfaces import RectangleZone, WholeWallZone
@@ -150,9 +151,14 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     a, b = rows[("x 起點牆", "a")], rows[("x 起點牆", "b")]
     assert (a.place, a.size, a.area) == ("寬向 0.00–0.67、高度 0.00–1.50", "0.67 × 1.50 m", "1.00 m²")
     assert (a.mode, a.changed, a.baseline_source) == ("交給搜尋", True, "拆掉這一區加貼的層")
-    assert a.design.startswith("貼在原牆上的構造") and a.baseline.startswith("固定阻抗")
-    assert (b.mode, b.changed, b.baseline, b.baseline_source) == (
-        "固定這一組材料", False, "同左", "兩邊一樣：這一區沒有加貼的層，當成沒動")
+    # 先寫名字（#1119）：對不到材料庫就依層的參數組名、照實標；工程參數收在細節裡、同樣收位。
+    impedance = rounded_number(original_x0().impedance_pa_s_m)
+    assert a.design == f"多孔層 50 mm（流阻 19,100 Pa·s/m²）（依參數組名），貼在原牆上（原牆：固定阻抗 {impedance} Pa·s/m）"
+    assert a.baseline == f"原牆（固定阻抗 {impedance} Pa·s/m）"
+    assert a.design_detail.startswith("貼在原牆上的構造；第 1 層：多孔層；層厚度 0.05 m")
+    assert a.baseline_detail == f"固定阻抗；阻抗 {impedance} Pa·s/m"
+    assert (b.mode, b.changed, b.baseline, b.baseline_detail, b.baseline_source) == (
+        "固定這一組材料", False, "同左", "", "兩邊一樣：這一區沒有加貼的層，當成沒動")
     assert rows[("地板", "整面")].place.startswith("長向 0.00–") and len(rows) == 5 + 2
     unknown = zone_rows(baseline, settings, design, baseline_known=False)
     assert {(row.baseline, row.baseline_source, row.changed) for row in unknown} == {("—", "—", False)}

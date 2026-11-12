@@ -525,7 +525,9 @@ class GradientJobs:
         refused = None if missing else _not_trained(path, materials, plan_fixed(plan, materials, entries))
         with self.lock:
             busy = self.active_job()
-        return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan),
+        # 代號 → 材料庫顯示名（內建構造預設、家族、使用者材料），只給預覽表看；計畫本身照舊只存代號（#1119）。
+        labels = dict(library_depth_targets(settings, entries).labels)
+        return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan), "labels": labels,
                 "surrogate": {"found": not missing and refused is None, "slot": str(path.parent), "missing": missing,
                               "message": "要先建替身" if missing else refused},
                 "defaults": {"max_steps": settings.descent.max_steps, "family": settings.family[0].id,
@@ -575,8 +577,15 @@ class GradientJobs:
             return self.view(self._job(job_id))
 
     def listing(self) -> dict[str, object]:
+        """清單＋整台機器現在忙不忙（同開跑鎖的 :meth:`active_job`）：網頁每次輪詢靠它停用「開始搜尋」（#1119）。
+        查不到服務清單時不讓整張清單失敗，``busy_problem`` 照講原因、網頁照樣不准開。"""
         with self.lock:
-            return {"jobs": [self.view(job) for job in self._jobs()]}
+            jobs = [self.view(job) for job in self._jobs()]
+            try:
+                busy, problem = self.active_job(), None
+            except LaunchFailed as error:
+                busy, problem = None, f"查不到整台機器現在忙不忙，先不開新的一跑：{error}"
+            return {"jobs": jobs, "busy": busy, "busy_problem": problem}
 
     def _marker_holds(self, step: JobStep, folder: Path) -> bool:
         """放停止記號停得到嗎：搜尋的步驟才看記號；接續那一步還要等工作行程已經起來（狀態檔是這一步之後寫的）——

@@ -32,11 +32,13 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.jobs import JobManager
+from aosr.gui.material_editor import user_library_path
 from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
     PLACE_NOTE, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement, is_zoned,
     original_walls, zone_rows)
+from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.evaluation import LoadedResult
 from aosr.reporting.result import SchemeResult
@@ -194,25 +196,36 @@ def build_zone_view(deps: ZoneResultDeps, design_path: Path, design: SchemeResul
     return _build(deps, design_path, design)[0]
 
 
+def _names(deps: ZoneResultDeps) -> tuple[tuple[LibraryEntry, ...], tuple[str, ...]]:
+    """逐區表取名字用的材料庫（只讀）：使用者材料庫讀不進來就只比內建材料，並照講一句，不讓整頁失敗。"""
+    try:
+        return full_library(user_library_path(deps.data_dir)), ()
+    except (OSError, ValueError, ValidationError) as exc:
+        detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        return builtin_entries(), (f"使用者材料庫讀不進來，材料名字只比內建材料：{detail}",)
+
+
 def _build(deps: ZoneResultDeps, design_path: Path, design: SchemeResult) -> tuple[ZoneResultView, Baseline | None]:
     """附表與它用的那一份基準（推不出來是 None）；開算只用這裡推出來的那一份。"""
     scheme = design.scheme
     if not is_zoned(scheme):
         return ZoneResultView(zoned=False), None
+    library, library_notes = _names(deps)
     settings: DesignSettings | None = None
     try:
         settings = _settings(deps, scheme)
         original = _original(deps, settings, scheme)
         baseline = derive_baseline(scheme, original)
     except BaselineRefused as exc:
-        rows = zone_rows(derive_baseline(scheme), settings, scheme, baseline_known=False)
-        return ZoneResultView(zoned=True, rows=rows, notes=(PLACE_NOTE,), state="refused",
+        rows = zone_rows(derive_baseline(scheme), settings, scheme, baseline_known=False, library=library)
+        return ZoneResultView(zoned=True, rows=rows, notes=(PLACE_NOTE, *library_notes), state="refused",
                               state_text=f"原牆基準推不出來：{exc}"), None
-    notes = [PLACE_NOTE, BASELINE_LINE]
+    notes = [PLACE_NOTE, BASELINE_LINE, *library_notes]
     if original is None:
         notes.append(UNWRAP_NOTE)
     state, text, found = _status(deps, design, baseline)
-    view = ZoneResultView(zoned=True, rows=zone_rows(baseline, settings, scheme), notes=tuple(notes), state=state,
+    view = ZoneResultView(zoned=True, rows=zone_rows(baseline, settings, scheme, library=library), notes=tuple(notes),
+                          state=state,
                           state_text=text, running=state == "running",
                           can_start=state in ("none", "failed", "baseline_stale", "baseline_rejected"),
                           baseline_run_id=str(found.state["run_id"]) if found is not None else None,

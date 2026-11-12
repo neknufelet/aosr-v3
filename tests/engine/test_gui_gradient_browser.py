@@ -132,6 +132,13 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         expect(page.locator("#build-estimate")).to_contain_text("推估")
         expect(page.locator("#build-estimate")).to_contain_text("還要約")
         expect(page.locator("#build-surrogate")).to_be_disabled()
+        # 建模中重開頁面（#1119）：印這一份實際的完整解上限（另填的 1000，不是預設 600），兩格換成這一份的值並鎖住。
+        page.reload()
+        expect(page.locator("#build-state")).to_contain_text("完整解上限 1000 次（這一份另填）、停止殘差 0.001（預設）")
+        expect(page.locator("#max-full-solves")).to_have_value("1000")
+        expect(page.locator("#max-full-solves")).to_be_disabled()
+        expect(page.locator("#stop-residual")).to_be_disabled()
+        _shot(page, "1119-surrogate-reopened-budget")
         page.locator("#load-plan").click()
         expect(page.locator("#busy-line")).to_contain_text("方案「zoned」正在建替身")
         expect(page.locator("#busy-open")).to_have_text("看建替身進度")
@@ -180,6 +187,9 @@ def _preview_and_start(page: Page, launcher: FakeLauncher) -> str:
     unit, argv, _, _ = launcher.launched[-1]
     assert argv[argv.index("--max-steps") + 1] == "45"
     assert "x0@r0_c0=0.1" in argv
+    # 開跑之後不用再按預覽（#1119）：輪詢的清單就帶「整台在算」，開始鈕立刻停用、忙碌行出來。
+    expect(page.locator("#start")).to_be_disabled()
+    expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋")
     page.locator("#preview").click()
     expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋")
     expect(page.locator("#start")).to_be_disabled()
@@ -235,8 +245,15 @@ def _finish_endpoint_and_adopt(page: Page, data_dir: Path, launcher: FakeLaunche
     expect(page.locator("#job-state")).to_have_text("搜尋中")
     _finish(data_dir, launcher, _view(jobs, job_id), 0)
     _tick(page)
+    expect(page.locator("#start")).to_be_enabled()
+    expect(page.locator("#busy-line")).to_be_hidden()
     page.locator("#job-endpoint").click()
     expect(page.locator("#job-state")).to_contain_text("終點計算中")
+    # 終點在算時（#1119，109 示範看到開始鈕還亮著）：開始鈕停用、忙碌行點名是這一跑的終點。
+    _tick(page)
+    expect(page.locator("#start")).to_be_disabled()
+    expect(page.locator("#busy-line")).to_contain_text("方案「zoned」的第三階段搜尋（終點計算中")
+    _shot(page, "1119-endpoint-running-start-disabled")
     _finish(data_dir, launcher, _view(jobs, job_id), 0)
     exported = cast(Record, json.loads(_axis_scheme().model_dump_json())) | {"scheme_id": f"{NAME}-gradient-0123abcd"}
     (folder / folder_files.ENDPOINT_FILE).write_text("{}", encoding="utf-8")

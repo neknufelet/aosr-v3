@@ -16,10 +16,9 @@ function renderZonedWall(name, row) {
   const heading = document.createElement("p"); heading.id = `zoned-${name}`;
   heading.textContent = `${wallNames[name]}：分成 ${zones.length} 區（分區在立面圖上改，這張表單不改這一面）`;
   const list = document.createElement("ul"); list.id = `zoned-list-${name}`;
-  // 只是顯示：座標到公釐、阻抗六位有效數字；存檔照方案原值，不經過這裡。
+  // 只是顯示：座標到公釐、阻抗收位（wallText）；存檔照方案原值，不經過這裡。
   const metres = value => Number(value.toFixed(3));
-  const material = zone => zone.material.kind === "constant_impedance"
-    ? wallText({...zone.material, impedance_pa_s_m: Number(zone.material.impedance_pa_s_m.toPrecision(6))}) : wallText(zone.material);
+  const material = zone => wallText(zone.material);
   for (const zone of zones) {
     const item = document.createElement("li");
     item.textContent = `${zone.id}：u ${metres(zone.u_m[0])}–${metres(zone.u_m[1])}、v ${metres(zone.v_m[0])}–${metres(zone.v_m[1])} 公尺，${material(zone)}`;
@@ -60,11 +59,16 @@ function showPresetState(name, material = assemblyMaterial(wallMaterial(name))) 
     }
   }
 }
+// 只給人看：六位有效數字、千分位（0.04999999999999999 → 0.05、123479.99999999999 → 123,480），同結果頁
+// problem_text.rounded_number；存檔與送伺服器的值照原值，不經過這裡。
+function shownNumber(value) {
+  return Number(value.toPrecision(6)).toLocaleString("en-US", {maximumFractionDigits: 20});
+}
 function wallText(material) {
   // 貼在原牆上的構造（#990）唯讀的一行原牆摘要；欄名與種類中文都來自伺服器的模型描述。
   const spec = inputDefaults.material_form;
   return material.kind === "constant_impedance"
-    ? `${spec.constant_impedance.label} ${material.impedance_pa_s_m} ${spec.constant_impedance.fields.impedance_pa_s_m.unit}`
+    ? `${spec.constant_impedance.label} ${shownNumber(material.impedance_pa_s_m)} ${spec.constant_impedance.fields.impedance_pa_s_m.unit}`
     : spec[material.kind].label;
 }
 function renderAssembly(name, material, row, onPreset = null) {

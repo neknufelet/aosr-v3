@@ -726,3 +726,21 @@ def test_folder_files_are_the_ones_the_search_writes() -> None:
             endpoint_run.EXPORTED_SCHEME_FILE) == (folder_files.STATUS_FILE, folder_files.STOP_FILE,
                                                    folder_files.PROJECT_FILE, folder_files.ENDPOINT_FILE,
                                                    folder_files.EXPORTED_SCHEME_FILE)
+
+
+class _BlindLauncher(FakeLauncher):
+    """查服務清單會失敗的服務層（systemctl 叫不動）。"""
+
+    def active_units(self) -> set[str]:
+        raise LaunchFailed("systemctl 離開碼 1")
+
+
+def test_listing_carries_whether_the_machine_is_busy_and_survives_a_blind_service_list(tmp_path: Path) -> None:
+    """#1119：網頁輪詢靠清單的 busy 停用「開始搜尋」（同開跑鎖 active_job）；查不到服務清單時清單照回、照講原因。"""
+    launcher = FakeLauncher()
+    assert _jobs(tmp_path, launcher).listing() == {"jobs": [], "busy": None, "busy_problem": None}
+    launcher.active.add("aosr-gradient-elsewhere-0")
+    assert _jobs(tmp_path, launcher).listing()["busy"] == "aosr-gradient-elsewhere-0"
+    blind = _jobs(tmp_path, _BlindLauncher()).listing()
+    assert blind["jobs"] == [] and blind["busy"] is None
+    assert blind["busy_problem"] == "查不到整台機器現在忙不忙，先不開新的一跑：systemctl 離開碼 1"

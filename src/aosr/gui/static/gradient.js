@@ -24,6 +24,9 @@ let previewedRequest = null;
 let machineBusy = null;
 let watchedBuild = null;
 let surrogateDefaults = null;
+let busyProblem = null;
+let watchedBuildState = null;
+let budgetHeldByBuild = false;
 let knownJobs = [];
 let knownBuilds = [];
 let polling = false;
@@ -80,8 +83,8 @@ function busyText(body) {
 
 function showBusy(busy) {
   const line = byId("busy-line");
-  line.hidden = !busy;
-  if (!busy) { line.replaceChildren(); return; }
+  line.hidden = !busy && !busyProblem;
+  if (!busy) { line.replaceChildren(...(busyProblem ? [busyProblem] : [])); return; }
   const who = busyWho(busy);
   line.replaceChildren(`整台機器同時只跑一件：${who.text}正在算，等它做完或先停掉。`);
   if (who.job) line.append(" ", el("button", {type: "button", class: "quiet", id: "busy-open", text: "看那一跑",
@@ -119,7 +122,12 @@ function allowedText(plan, surface, mode) {
   const targets = (plan.allowed || {})[surface];
   if (!targets) return "沒有限制（家族都試、也試不貼）";
   return targets.map((target) => target === "none" ? "不貼" : target.startsWith("fixed:") ?
-    `${target.slice("fixed:".length)}（固定，整塊選或不選）` : target).join("、");
+    `${materialLabel(target.slice("fixed:".length))}（固定，整塊選或不選）` : materialLabel(target)).join("、");
+}
+
+// 代號照預覽回的材料庫顯示名印（#1119）；對不到就照印代號。代號本身看「交給搜尋命令列的參數」。
+function materialLabel(id) {
+  return (lastPreview && lastPreview.labels && lastPreview.labels[id]) || id;
 }
 
 function surfaceParts(surface) {
@@ -170,7 +178,7 @@ async function loadPlan() {
   defaults = reply.body.defaults;
   byId("max-steps").value = defaults.max_steps;
   byId("max-steps-default").textContent = `步數上限預設 ${defaults.max_steps} 步（設定檔的值）；這一跑改了只換這一跑，數字記進搜尋資料夾、報告會印出來。`;
-  byId("family").replaceChildren(...defaults.families.map((id) => el("option", {value: id, text: id})));
+  byId("family").replaceChildren(...defaults.families.map((id) => el("option", {value: id, text: (reply.body.labels || {})[id] || id})));
   byId("family").value = defaults.family;
   byId("mount").value = defaults.mount;
   byId("device").value = defaults.device;
@@ -188,13 +196,18 @@ function mountWarning() {
     "「貼在原牆上」的加貼層找回原牆；貼在硬底上的區拆不回去，會被當成沒動、改善算不進來。要用硬底，先在設計設定指原方案。" : "";
 }
 
+// 只給人看：六位有效數字、千分位，同立面圖 walls.js 的 shownNumber（這一頁不載入那一支）；送伺服器的值不經過這裡。
+function shownNumber(value) {
+  return Number(value.toPrecision(6)).toLocaleString("en-US", {maximumFractionDigits: 20});
+}
+
 // 深度上限是哪一層擋的（#1111）：設計設定的三層取最嚴，這一跑另填的只能更嚴。
 const DEPTH_SOURCES = {zone: "這一塊", wall: "這面牆", room: "房間預設", request: "這一跑另填"};
 function depthText(plan, surface, mode) {
   const depth = plan.max_depths[surface];
   if (depth === undefined) return mode === "search" ? "照材料自己的限制" : "不加層";
   const source = (plan.depth_sources || {})[surface];
-  return source ? `${depth} 公尺（${DEPTH_SOURCES[source] || source}）` : `${depth} 公尺`;
+  return source ? `${shownNumber(depth)} 公尺（${DEPTH_SOURCES[source] || source}）` : `${shownNumber(depth)} 公尺`;
 }
 
 // 深度上限那一格：個案上限一行，下面逐組跟自己的上限取較嚴（#1082 段 2-4，伺服器逐組寫好一句；
@@ -233,16 +246,24 @@ async function preview() {
   showPreview(reply.body, body);
 }
 
+// 「開始搜尋」與「建替身」亮不亮只由這一支決定（#1119）：開始要有預覽、選項沒改過、這份切法有替身、整台機器現在沒在算；
+// 建替身要整台沒在算、看著的那一份也沒在建。忙不忙每次輪詢從清單回應重拿（搜尋、接續、終點、建替身、別處開的
+// 第三階段服務都算，同伺服器開跑鎖 active_job），不靠預覽那一刻的舊值；查不到忙不忙也不准開。
+function refreshStart() {
+  showBusy(machineBusy);
+  const blocked = Boolean(machineBusy) || Boolean(busyProblem);
+  byId("build-surrogate").disabled = RUNNING_BUILD.has(watchedBuildState) || blocked;
+  if (previewedRequest === null || !lastPreview) { byId("start").disabled = true; return; }
+  const stale = JSON.stringify(request()) !== previewedRequest;
+  byId("start").disabled = stale || !lastPreview.surrogate.found || blocked;
+}
+
 // 表單改過：舊預覽不再是會跑的那一份，先停用開跑、請使用者重新預覽。
 function markStale() {
   if (previewedRequest === null) return;
-  if (JSON.stringify(request()) === previewedRequest) {
-    byId("start").disabled = !lastPreview.surrogate.found || Boolean(lastPreview.busy);
-    say("start-message", "");
-    return;
-  }
-  byId("start").disabled = true;
-  say("start-message", "選項改過了：先按「預覽」看過這一份，才能開跑。", true);
+  const stale = JSON.stringify(request()) !== previewedRequest;
+  say("start-message", stale ? "選項改過了：先按「預覽」看過這一份，才能開跑。" : "", stale);
+  refreshStart();
 }
 
 function showPreview(data, sent) {
@@ -252,7 +273,7 @@ function showPreview(data, sent) {
   say("start-message", "");
   const plan = data.plan;
   const searched = plan.modes.filter((mode) => mode === "search").length;
-  byId("plan-summary").textContent = `共 ${plan.surfaces.length} 區，交給搜尋 ${searched} 區；家族 ${plan.family}；` +
+  byId("plan-summary").textContent = `共 ${plan.surfaces.length} 區，交給搜尋 ${searched} 區；家族 ${materialLabel(plan.family)}；` +
     `往下走步數上限 ${plan.max_steps} 步；裝法「${plan.request.mount === "on_wall" ? "貼在原牆上" : "貼在硬底上"}」；` +
     `用${plan.request.device === "gpu" ? "顯卡" : "處理器"}算。`;
   const body = el("tbody");
@@ -261,7 +282,7 @@ function showPreview(data, sent) {
     const mode = plan.modes[index];
     body.append(el("tr", {"data-surface": surface}, el("td", {text: WALLS[wall] || wall}), el("td", {text: zoneText(zone)}),
       el("td", {text: MODE_WORDS[mode] || mode, class: mode === "search" ? "mode-search" : null}),
-      el("td", {text: plan.presets[index] || (mode === "search" ? "" : "方案裡這一區的材料，不調")}),
+      el("td", {text: plan.presets[index] ? materialLabel(plan.presets[index]) : (mode === "search" ? "" : "方案裡這一區的材料，不調")}),
       el("td", {text: allowedText(plan, surface, mode)}),
       depthCell(plan, surface, mode)));
   });
@@ -275,8 +296,7 @@ function showPreview(data, sent) {
     `這份切法還沒有替身，要先建（缺：${surrogate.missing.join("、")}）。`;
   byId("surrogate-slot").textContent = `替身放在：${surrogate.slot}`;
   byId("surrogate-state").className = surrogate.found ? "" : "notice";
-  showBusy(data.busy);
-  byId("start").disabled = !surrogate.found || Boolean(data.busy);
+  refreshStart();
   if (!surrogate.found) loadSurrogatePlan(false); else byId("surrogate-build-form").hidden = true;
 }
 
@@ -296,7 +316,7 @@ async function loadSurrogatePlan(replace) {
     `這台機器上一次建替身花了 ${duration(last.total_seconds)}（${last.patches} 區、完整解 ${last.full_solves} 次）。` :
     "這台機器還沒建過替身，開建前推不出要多久。") + data.estimate_note;
   machineBusy = data.busy || null;
-  byId("build-surrogate").disabled = Boolean(machineBusy);
+  refreshStart();
   if (data.busy) say("surrogate-message", busyText({busy: data.busy}), true);
   if (data.latest) { watchedBuild = data.latest.build_id; showBuild(data.latest); }
 }
@@ -315,9 +335,38 @@ async function buildSurrogate() {
   showBuild(reply.body);
 }
 
+// 這一份實際用的完整解上限與停止殘差（#1119）：開建時另填的照它，沒填的是設定檔預設。建模中重開頁面也照這一份印，
+// 兩格輸入在建模中換成這一份的值並鎖住；建完放回預設值，下一次開建不會悄悄沿用這一份另填的數字。
+function buildBudget(build) {
+  const given = build.request || {};
+  const solves = given.max_full_solves ?? (surrogateDefaults ? surrogateDefaults.max_full_solves : null);
+  const residual = given.stop_residual ?? (surrogateDefaults ? surrogateDefaults.stop_residual : null);
+  const word = (value, unit, own) => `${value === null ? "照設定檔預設" : `${value}${unit}`}（${own ? "這一份另填" : "預設"}）`;
+  return {solves, residual,
+    text: `完整解上限 ${word(solves, " 次", given.max_full_solves != null)}、停止殘差 ${word(residual, "", given.stop_residual != null)}`};
+}
+function holdBudget(build, budget) {
+  const running = RUNNING_BUILD.has(build.state);
+  if (running) {
+    if (budget.solves !== null) byId("max-full-solves").value = budget.solves;
+    if (budget.residual !== null) byId("stop-residual").value = budget.residual;
+  } else if (budgetHeldByBuild && surrogateDefaults) {
+    byId("max-full-solves").value = surrogateDefaults.max_full_solves;
+    byId("stop-residual").value = surrogateDefaults.stop_residual;
+  }
+  if (running || budgetHeldByBuild) {
+    byId("max-full-solves").disabled = running;
+    byId("stop-residual").disabled = running;
+  }
+  budgetHeldByBuild = running;
+}
+
 function showBuild(build) {
   byId("surrogate-build").hidden = false;
-  byId("build-state").textContent = `${build.state_text}（開建 ${when(build.created_at)}）`;
+  watchedBuildState = build.state;
+  const budget = buildBudget(build);
+  holdBudget(build, budget);
+  byId("build-state").textContent = `${build.state_text}（開建 ${when(build.created_at)}；${budget.text}）`;
   byId("build-state").className = ["failed", "not_validated", "gate_refused", "interrupted"].includes(build.state) ? "notice" : "";
   const estimate = build.estimate;
   if (estimate) {
@@ -331,7 +380,7 @@ function showBuild(build) {
   byId("build-error").textContent = build.error || "";
   byId("build-log").textContent = (build.log_tail || []).join("\n");
   byId("stop-build").hidden = !build.actions.stop;
-  byId("build-surrogate").disabled = RUNNING_BUILD.has(build.state) || Boolean(machineBusy);
+  refreshStart();
   if (build.state === "installed" && lastPreview && !lastPreview.surrogate.found) preview();
 }
 
@@ -347,8 +396,10 @@ async function stopBuild() {
 async function start() {
   if (previewedRequest === null || JSON.stringify(request()) !== previewedRequest) { markStale(); return; }
   say("start-message", "正在開跑…");
+  byId("start").disabled = true;
   const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/start`, JSON.parse(previewedRequest), "start-message");
   if (!reply.ok) {
+    refreshStart();
     say("start-message", errorText(reply), true);
     if (reply.body.needs === "surrogate") loadSurrogatePlan(false);
     return;
@@ -365,6 +416,9 @@ async function refreshJobs() {
   say("connection", "");
   const jobs = reply.body.jobs;
   knownJobs = jobs;
+  machineBusy = reply.body.busy || null;
+  busyProblem = reply.body.busy_problem || null;
+  refreshStart();
   if (!jobs.length) { byId("job-list").replaceChildren(el("p", {text: "還沒有第三階段搜尋。"})); return; }
   const body = el("tbody");
   for (const job of jobs) {
