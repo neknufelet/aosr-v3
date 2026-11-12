@@ -13,8 +13,16 @@ let schemeId = params.get("scheme");
 let selectedJob = params.get("job");
 let facts = null;
 let previous = [];
-// 最後一次預覽成功送出的設定（JSON 字串）：開始只送這一份；表單改過就要重新預覽，畫面上的預覽才是真的會跑的。
+// 最後一次預覽成功送出的設定（JSON 字串）與它是哪一份方案的：開始只把這一份送到那一份方案；
+// 表單改過或換方案就要重新預覽，畫面上的預覽才是真的會跑的。
 let previewedBody = null;
+let previewedScheme = null;
+// 表單每改一次加一：預覽回覆回來時表單已經又改過，那一份回覆就丟掉。
+let formVersion = 0;
+// 帶入的那一場的時間上限（秒）與表單上那一格當時的字：沒改過就原樣送回，不經過小時來回換算。
+let loadedTime = null;
+// 畫面上正在畫的那一跑：換看另一跑時清掉上一跑的結果連結與訊息。
+let drawnJob = null;
 let knownJobs = [];
 let machineBusy = null;
 let busyProblem = null;
@@ -35,7 +43,7 @@ function el(tag, attributes = {}, ...children) {
 function say(id, text, bad = false) {
   const node = byId(id);
   node.textContent = text || "";
-  node.className = bad ? "notice" : "";
+  node.classList.toggle("notice", bad);
 }
 
 async function api(path, body = undefined) {
@@ -67,7 +75,10 @@ function label(id) {
 }
 
 function num(id, {integer = false, required = false} = {}) {
-  const raw = byId(id).value.trim();
+  const input = byId(id);
+  // 瀏覽器解析不了的字（例如 1-2、0.3e）在 value 裡是空字串，不准當成空白省略。
+  if (input.validity.badInput) throw new FormProblem(`「${label(id)}」要是${integer ? "整數" : "數字"}`);
+  const raw = input.value.trim();
   if (raw === "") {
     if (required) throw new FormProblem(`「${label(id)}」要填`);
     return null;
@@ -107,8 +118,9 @@ function boxRow(container, box = null) {
 
 function boxes(container, word) {
   return [...byId(container).querySelectorAll(".box-row")].map((row, index) => {
-    const values = [...row.querySelectorAll("input")].map((input) => input.value.trim());
-    if (values.some((value) => value === "" || !Number.isFinite(Number(value)))) {
+    const inputs = [...row.querySelectorAll("input")];
+    const values = inputs.map((input) => input.value.trim());
+    if (inputs.some((input) => input.validity.badInput) || values.some((value) => value === "" || !Number.isFinite(Number(value)))) {
       throw new FormProblem(`第 ${index + 1} 塊${word}的六格都要填數字`);
     }
     const numbers = values.map(Number);
@@ -149,7 +161,10 @@ function readForm() {
     batch_size: num("batch", {integer: true, required: true}), max_workers: num("workers", {integer: true, required: true}),
     constant_liar: byId("liar").checked};
   const hours = num("time-budget");
-  if (hours !== null) body.search_time_budget_s = hours * 3600;
+  if (hours !== null) {
+    body.search_time_budget_s = loadedTime && byId("time-budget").value === loadedTime.text ? loadedTime.seconds
+      : Math.round(hours * 3600 * 1e6) / 1e6;
+  }
   if (one) {
     body.stage = "stage_one_fem_only";
     const room = {Lx: span("room-x-low", "room-x-high"), Ly: span("room-y-low", "room-y-high"), Lz: span("room-z-low", "room-z-high")};
@@ -188,9 +203,28 @@ function putSpan(lowId, highId, value) {
   put(highId, value ? value.high : null);
 }
 
-// 之前一場的設定填回表單；表單沒有的格不偷偷帶（帶不進來的照講）。
+// 換方案時表單回到空白（只留方案自己給的預設），不留上一份方案的距離、禁區、可用區。
+function clearForm() {
+  for (const input of byId("form-block").querySelectorAll("input[type=number]")) input.value = "";
+  put("axis-offset", 0);
+  document.querySelector("input[name=stage][value=two]").checked = true;
+  byId("seat-locked").checked = false;
+  byId("liar").checked = true;
+  byId("keep-out").replaceChildren();
+  byId("speaker-areas").replaceChildren();
+  loadedTime = null;
+  byId("front-wall").value = facts.front_wall_guess;
+  put("ear-height", facts.primary_m[2]);
+  if (!facts.has_speaker_setup) put("speaker-height", facts.speaker_height_m);
+}
+
+// 之前一場的設定填回表單；表單沒有的格不偷偷帶，回傳帶不進來的那幾樣（照講給人看）。
 function fillForm(settings) {
   const layout = settings.layout;
+  const dropped = [];
+  if (facts && facts.has_speaker_setup) dropped.push("喇叭高與箱體（這份方案自己有喇叭設定，照方案）");
+  if (settings.stage && settings.refine) dropped.push("細算上限（第一階段不用）");
+  if (settings.stage && settings.feedback) dropped.push("回饋偏移（第一階段不用）");
   document.querySelector(`input[name=stage][value=${settings.stage ? "one" : "two"}]`).checked = true;
   byId("front-wall").value = layout.front_wall;
   put("axis-offset", layout.axis_offset_m);
@@ -222,6 +256,7 @@ function fillForm(settings) {
   put("budget", settings.budget);
   put("convergence", settings.convergence_run);
   put("time-budget", settings.search_time_budget_s ? settings.search_time_budget_s / 3600 : null);
+  loadedTime = settings.search_time_budget_s ? {seconds: settings.search_time_budget_s, text: byId("time-budget").value} : null;
   put("refine-budget", settings.refine ? settings.refine.budget : null);
   put("refine-convergence", settings.refine ? settings.refine.convergence_run : null);
   put("feedback-offset", settings.feedback ? settings.feedback.offset : null);
@@ -238,6 +273,7 @@ function fillForm(settings) {
   byId("liar").checked = settings.constant_liar !== false;
   showStage();
   changed();
+  return dropped.length ? `；這幾樣沒帶入：${dropped.join("、")}` : "";
 }
 
 function showStage() {
@@ -249,8 +285,11 @@ function showStage() {
 }
 
 function changed() {
+  formVersion += 1;
   previewedBody = null;
+  previewedScheme = null;
   byId("preview-block").hidden = true;
+  say("start-message", "");
   showStage();
 }
 
@@ -279,20 +318,27 @@ function factLines(data) {
 }
 
 async function loadScheme() {
-  schemeId = byId("scheme-pick").value;
-  if (!schemeId) return;
-  const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(schemeId)}`);
+  const wanted = byId("scheme-pick").value;
+  if (!wanted) return;
+  // 一換方案先作廢預覽、收起表單：讀失敗或還在讀時，不准拿上一份方案預覽過的設定開在這一份上。
+  changed();
+  schemeId = null;
+  facts = null;
+  byId("form-block").hidden = true;
+  byId("scheme-facts").hidden = true;
+  say("scheme-message", `正在讀方案「${wanted}」…`);
+  const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(wanted)}`);
+  if (byId("scheme-pick").value !== wanted) return;
   if (!reply.ok) { say("scheme-message", reply.body.error, true); return; }
   facts = reply.body;
+  schemeId = wanted;
   say("scheme-message", `已讀方案「${schemeId}」`);
   byId("facts-list").replaceChildren(...factLines(facts).map((line) => el("li", {text: line})));
   if (facts.zoned) byId("facts-list").append(el("li", {class: "notice", text: facts.zoned}));
   byId("scheme-facts").hidden = false;
   byId("speaker-fields").hidden = facts.has_speaker_setup;
   byId("form-block").hidden = false;
-  byId("front-wall").value = facts.front_wall_guess;
-  put("ear-height", facts.primary_m[2]);
-  if (!facts.has_speaker_setup) put("speaker-height", facts.speaker_height_m);
+  clearForm();
   await loadPrevious();
   history.replaceState(null, "", `?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   changed();
@@ -302,7 +348,7 @@ async function loadPrevious() {
   const reply = await api("/api/search-jobs/previous");
   const pick = byId("previous-pick");
   pick.replaceChildren();
-  if (!reply.ok) { say("previous-message", reply.body.error, true); return; }
+  if (!reply.ok) { say("previous-message", reply.body.error, true); defaultAdvanced(); return; }
   previous = reply.body.searches;
   byId("previous-row").hidden = !previous.length;
   for (const item of previous) {
@@ -313,8 +359,8 @@ async function loadPrevious() {
   const same = previous.find((item) => item.scheme_id === facts.scheme_id);
   if (same) {
     pick.value = same.search_id;
-    fillForm(same.settings);
-    say("previous-message", `已帶入 ${when(same.created_at)} 那一場（同一份方案）的設定，可以再改${skipped}`);
+    const dropped = fillForm(same.settings);
+    say("previous-message", `已帶入 ${when(same.created_at)} 那一場（同一份方案）的設定，可以再改${dropped}${skipped}`);
   } else {
     say("previous-message", previous.length ? `這份方案還沒搜過；要沿用別份方案的設定就選一場按「帶入」${skipped}`
       : "還沒有任何一場搜尋可以帶入：預算與停止那幾格要自己填");
@@ -334,8 +380,8 @@ function defaultAdvanced() {
 function loadPreviousChoice() {
   const item = previous.find((entry) => entry.search_id === byId("previous-pick").value);
   if (!item) { say("previous-message", "沒有選到一場", true); return; }
-  fillForm(item.settings);
-  say("previous-message", `已帶入 ${when(item.created_at)} 那一場（方案「${item.scheme_id}」）的設定，可以再改`);
+  const dropped = fillForm(item.settings);
+  say("previous-message", `已帶入 ${when(item.created_at)} 那一場（方案「${item.scheme_id}」）的設定，可以再改${dropped}`);
 }
 
 // ---- 預覽與開始 ----
@@ -344,9 +390,9 @@ function spanText(value, unit) {
   return value ? `${value.low}～${value.high} ${unit}` : "不限";
 }
 
-function previewLines(settings) {
+function previewLines(scheme, settings) {
   const layout = settings.layout;
-  const lines = [settings.stage ? "第一階段：只看低頻" : "第二階段：擺位（低頻、反射、殘響）",
+  const lines = [`方案：「${scheme}」`, settings.stage ? "第一階段：只看低頻" : "第二階段：擺位（低頻、反射、殘響）",
     `前牆：${WALLS[layout.front_wall]}，中軸偏移 ${layout.axis_offset_m} 公尺`,
     `離前牆 ${spanText(layout.front_distance_m, "公尺")}；間距 ${spanText(layout.spacing_m, "公尺")}`,
     layout.seat_locked ? facts.seat_locked_note : `聆聽距離 ${spanText(layout.listening_distance_m, "公尺")}；耳高 ${layout.ear_height_m} 公尺`,
@@ -362,7 +408,16 @@ function previewLines(settings) {
   }
   if (settings.refine) lines.push(`細算最多 ${settings.refine.budget} 個、第一名連續 ${settings.refine.convergence_run} 個沒換就停`);
   else if (!settings.stage) lines.push("不細算");
-  if (settings.stage_one_refine) lines.push(`細算保留前 ${settings.stage_one_refine.top_n} 名，加較遠對照（離前牆至少 ${settings.stage_one_refine.far_control_min_front_distance_m} 公尺）`);
+  if (settings.stage) {
+    lines.push(`每個候選最多算 ${settings.stage_one_candidate_cap_s ?? 600} 秒`);
+    const refined = settings.stage_one_refine;
+    if (!refined) lines.push("不細算");
+    else {
+      lines.push(`細算保留前 ${refined.top_n} 名，加較遠對照（離前牆至少 ${refined.far_control_min_front_distance_m} 公尺）` +
+        (refined.area_control_max_spread !== null && refined.area_control_max_spread !== undefined
+          ? `、面積對照（前幾名跨度不超過 ${refined.area_control_max_spread}、明顯不同至少差 ${refined.area_control_min_difference}）` : ""));
+    }
+  }
   if (settings.feedback) lines.push(`回饋偏移 ${settings.feedback.offset}`);
   lines.push(`同時算 ${settings.max_workers} 個、每批 ${settings.batch_size} 題、起點隨機 ${settings.n_startup_trials} 題、種子 ${settings.seed}`);
   return lines;
@@ -381,11 +436,16 @@ async function preview() {
   }
   say("form-message", "預覽中…");
   const text = JSON.stringify(body);
-  const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(schemeId)}/preview`, text);
-  if (!reply.ok) { say("form-message", `設定過不了：${reply.body.error}`, true); return; }
+  const scheme = schemeId;
+  const version = formVersion;
+  const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(scheme)}/preview`, text);
+  if (version !== formVersion || scheme !== schemeId) { say("form-message", "預覽期間表單或方案改過了，要再按一次預覽", true); return; }
+  if (!reply.ok) { say("form-message", reply.status === 400 ? `設定過不了：${reply.body.error}` : reply.body.error, true); return; }
   say("form-message", "");
+  say("start-message", "");
   previewedBody = text;
-  byId("preview-list").replaceChildren(...previewLines(reply.body.settings).map((line) => el("li", {text: line})));
+  previewedScheme = scheme;
+  byId("preview-list").replaceChildren(...previewLines(scheme, reply.body.settings).map((line) => el("li", {text: line})));
   byId("preview-json").textContent = JSON.stringify(reply.body.settings, withoutNulls, 1);
   byId("preview-block").hidden = false;
   machineBusy = reply.body.busy;
@@ -393,10 +453,13 @@ async function preview() {
 }
 
 async function start() {
-  if (previewedBody === null) { say("start-message", "設定改過了，要先重新預覽", true); return; }
+  if (previewedBody === null || previewedScheme === null || previewedScheme !== schemeId) {
+    say("start-message", "設定或方案改過了，要先重新預覽", true);
+    return;
+  }
   byId("start").disabled = true;
   say("start-message", "開跑中…");
-  const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(schemeId)}/start`, previewedBody);
+  const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(previewedScheme)}/start`, previewedBody);
   if (!reply.ok) {
     say("start-message", reply.body.error, true);
     byId("start").disabled = false;
@@ -445,6 +508,12 @@ function drawJob() {
   const job = knownJobs.find((item) => item.job_id === selectedJob);
   byId("job-block").hidden = !job;
   if (!job) return;
+  if (drawnJob !== job.job_id) {
+    drawnJob = job.job_id;
+    byId("job-result").replaceChildren();
+    byId("job-result").hidden = true;
+    say("job-message", "");
+  }
   byId("job-title").textContent = `這一跑：方案「${job.scheme_id}」（${when(job.created_at)} 開始）`;
   byId("job-state").textContent = `狀態：${job.state_text}`;
   byId("job-state").className = ["failed", "interrupted", "paused_time_limit"].includes(job.state) ? "notice" : "";

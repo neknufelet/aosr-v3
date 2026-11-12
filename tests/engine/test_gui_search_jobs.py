@@ -614,7 +614,7 @@ def test_zoned_scheme_is_flagged_before_the_form_and_refused_at_preview(tmp_path
     assert "矩形分區" in cast(str, jobs.facts("zoned")["zoned"])
     full = settings_document()
     full.pop("purpose")
-    with pytest.raises(SettingsRefused):
+    with pytest.raises(SettingsRefused, match="分區"):
         jobs.preview("zoned", full)
 
 
