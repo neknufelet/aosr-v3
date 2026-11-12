@@ -21,7 +21,10 @@ from typing import TYPE_CHECKING, cast
 from aosr import runtime
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from aosr.gui.gradient_jobs import GradientJobs
+    from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
     from aosr.gui.gradient_plan import GradientRequest
 
 DIRECTORY, MODE = Path(sys.argv[1]), sys.argv[2]
@@ -67,47 +70,57 @@ def _arguments() -> tuple[GradientJobs, GradientRequest, str, list[str]]:
 
 
 def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
-    """候選的訓練組拿掉、候選核對用窄尺、記下每次判決與補了哪些組；``cap`` 模式建完就把預算收到剛好用完。"""
+    """候選的訓練組拿掉、候選核對用窄尺、記下每次判決與補了哪些組；``cap`` 模式建完就把預算收到剛好用完、
+    ``pass`` 模式把停止殘差收到 ``PASS_STOP``。換函式一律用 ``setattr``（換上去的是考卷自己的版本，型別不必跟原本一樣）。"""
     from aosr.gradient import fixed_candidates, run, surrogate_build
-    from aosr.gradient.surrogate_training import TrainingSets
+    from aosr.gradient.fixed_candidates import CandidateVerdict
+    from aosr.gradient.surrogate_training import MaterialSet, TrainingSets
+    from aosr.physics.fem_reduced_build import ReducedModelBuilder
 
     # 替身沒學過這個候選：訓練與留出都拿掉它自己的那幾組（其他照產品）。
-    training_sets, holdout_sets = TrainingSets.training_sets, TrainingSets.holdout_sets
-    TrainingSets.training_sets = lambda self: [item for item in training_sets(self) if not item.label.startswith("固定 ")]  # type: ignore[method-assign]
-    TrainingSets.holdout_sets = lambda self: [item for item in holdout_sets(self) if not item.label.startswith("固定 ")]  # type: ignore[method-assign]
-    TrainingSets.require_every_family = lambda self, training, holdout: None  # type: ignore[method-assign]
+    training_sets: Callable[[TrainingSets], list[MaterialSet]] = TrainingSets.training_sets
+    holdout_sets: Callable[[TrainingSets], list[MaterialSet]] = TrainingSets.holdout_sets
+
+    def without_candidate(sets: list[MaterialSet]) -> list[MaterialSet]:
+        return [item for item in sets if not item.label.startswith("固定 ")]
+
+    setattr(TrainingSets, "training_sets", lambda self: without_candidate(training_sets(self)))
+    setattr(TrainingSets, "holdout_sets", lambda self: without_candidate(holdout_sets(self)))
+    setattr(TrainingSets, "require_every_family", lambda self, training, holdout: None)
     judged, added, generated = seen["judged"], seen["added"], seen["generated"]
     configurations: dict[str, object] = {}
-    judge = fixed_candidates.judge_candidates
+    judge: Callable[..., dict[str, CandidateVerdict]] = fixed_candidates.judge_candidates
     rulers = run.holdout_rulers
 
-    def tight():  # type: ignore[no-untyped-def]
+    def tight() -> object:
         found = rulers()
         return dataclasses.replace(found, frequency=dataclasses.replace(found.frequency, value=TIGHT_DB))
 
-    def recording(model, operators, found, allowed, **kwargs):  # type: ignore[no-untyped-def]
+    def recording(model: object, operators: object, found: dict[str, object], allowed: object,
+                  **kwargs: object) -> dict[str, CandidateVerdict]:
         configurations.update(found)
-        run.holdout_rulers = tight
+        setattr(run, "holdout_rulers", tight)
         try:
             verdicts = judge(model, operators, found, allowed, **kwargs)
         finally:
-            run.holdout_rulers = rulers
+            setattr(run, "holdout_rulers", rulers)
         judged.append({target: {"frequency_db": verdict.frequency_db, "passed": verdict.passed,
                                 "full_solves": verdict.report.full_solves} for target, verdict in verdicts.items()})
         return verdicts
 
-    fixed_candidates.judge_candidates = recording  # type: ignore[assignment]
-    checked = surrogate_build._fixed_checked
-    extension_sets = TrainingSets.extension_sets
+    setattr(fixed_candidates, "judge_candidates", recording)
+    checked: Callable[..., surrogate_build._Extension] = surrogate_build._fixed_checked
+    extension_sets: Callable[..., list[MaterialSet]] = TrainingSets.extension_sets
 
-    def counting(self, item, **kwargs):  # type: ignore[no-untyped-def]
+    def counting(self: TrainingSets, item: object, **kwargs: object) -> list[MaterialSet]:
         found = extension_sets(self, item, **kwargs)
         generated.append(len(found))
         return found
 
-    TrainingSets.extension_sets = counting  # type: ignore[method-assign]
+    setattr(TrainingSets, "extension_sets", counting)
 
-    def capped(job, builder, model, prepared):  # type: ignore[no-untyped-def]
+    def capped(job: surrogate_build._Run, builder: ReducedModelBuilder, model: object,
+               prepared: surrogate_build._Prepared) -> surrogate_build._Extension:
         if MODE == "cap":
             job.settings = job.settings.model_copy(update={"max_full_solves": builder.full_solves})
             builder.settings = job.settings
@@ -118,7 +131,7 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
         added.extend(prepared.sets.impedances(item) for item in extension.added)
         return extension
 
-    surrogate_build._fixed_checked = capped
+    setattr(surrogate_build, "_fixed_checked", capped)
     return configurations
 
 
@@ -134,8 +147,9 @@ def main() -> None:
     code = surrogate_build.build(surrogate_build._parser().parse_args(arguments))
     work = Path(arguments[arguments.index("--work") + 1])
     slot = Path(arguments[arguments.index("--slot") + 1])
-    held_out = [any(surrogate_build.same_configuration(item, held) for held in configurations.values())  # type: ignore[arg-type]
-                for item in added]
+    held_out = [any(surrogate_build.same_configuration(cast("FrequencyBoundaryImpedances", item),
+                                                       cast("FrequencyBoundaryImpedances", held))
+                    for held in configurations.values()) for item in added]
     training = json.loads((slot / "training.json").read_text(encoding="utf-8")) if slot.is_dir() else None
     record = json.loads((slot / "fixed_checks.json").read_text(encoding="utf-8")) if slot.is_dir() else None
     surrogate = None

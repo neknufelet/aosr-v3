@@ -535,9 +535,29 @@ def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict]
     write_record(job.stage / FIXED_CHECKS_FILE, record)
 
 
+def _built(job: _Run, prepared: _Prepared) -> tuple[ReducedModel, _Extension | None] | None:
+    """建模；有固定材料候選就接著核、不夠準就補訓練（:func:`_train_fixed`）。補完還有候選沒過就寫判決、回 None（不裝）；
+    否則回替身與補訓練紀錄（沒有候選是 None）。快照與基底在這裡放掉。"""
+    from aosr.physics.fem_reduced_build import ReducedModelBuilder
+
+    operators, axis = prepared.operators, prepared.axis
+    job.progress.phase("building", dofs=int(operators.p2.basis.N), axis_points=len(axis), training_sets=len(prepared.training),
+                       holdout_sets=len(prepared.holdout))
+    builder = ReducedModelBuilder(operators, axis, prepared.training, settings=job.settings, workers=job.workers,
+                                  dense_threads=job.dense_threads, progress=job.progress.build_round)
+    model = builder.build()
+    extension = _train_fixed(job, builder, model, prepared)
+    builder.release()
+    if extension is None:
+        return model, None
+    if any(not verdict.passed for verdict in extension.verdicts.values()):
+        _refuse_fixed(job, extension)
+        return None
+    return extension.model, extension
+
+
 def build(args: argparse.Namespace) -> int:
     from aosr.gradient import run
-    from aosr.physics.fem_reduced_build import ReducedModelBuilder
     from aosr.physics.fem_reduced_check import points_hex, validate_reduced, within_reduced_contract
     from aosr.physics.fem_reduced_receipt import save_validation_receipt
     from aosr.gradient.surrogate_coverage import check_covers
@@ -546,18 +566,10 @@ def build(args: argparse.Namespace) -> int:
     job = _open(args)
     prepared = _prepare(job, args.capabilities)
     operators, axis, holdout = prepared.operators, prepared.axis, prepared.holdout
-    job.progress.phase("building", dofs=int(operators.p2.basis.N), axis_points=len(axis), training_sets=len(prepared.training),
-                       holdout_sets=len(holdout))
-    builder = ReducedModelBuilder(operators, axis, prepared.training, settings=job.settings, workers=job.workers,
-                                  dense_threads=job.dense_threads, progress=job.progress.build_round)
-    model = builder.build()
-    extension = _train_fixed(job, builder, model, prepared)
-    builder.release()
-    if extension is not None:
-        model = extension.model
-        if any(not verdict.passed for verdict in extension.verdicts.values()):
-            _refuse_fixed(job, extension)
-            return EXIT_NOT_USABLE
+    built = _built(job, prepared)
+    if built is None:
+        return EXIT_NOT_USABLE
+    model, extension = built
     ledger = model.ledger
     npz = job.stage / MODEL_FILE
     save_reduced(model, npz)

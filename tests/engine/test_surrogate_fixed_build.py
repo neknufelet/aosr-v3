@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -186,9 +187,10 @@ def test_start_checks_every_candidate_and_says_trained_but_not_accurate(monkeypa
     model, operators, (carpet, measured) = _fake_gate(monkeypatch, {"fixed:carpet_on_concrete": 0.3,
                                                                      "fixed:panel_measured": 0.388243})
     allowed = {"x0": ("none", carpet, measured)}
+    check_candidates: Callable[..., object] = fixed_candidates.check_fixed_candidates  # 替身與完整模型是樁
     with pytest.raises(FixedCandidateInaccurate) as refused:
-        fixed_candidates.check_fixed_candidates(model, operators, (), allowed, _table(), density_kg_m3=1.2,  # type: ignore[arg-type]
-                                                sound_speed_m_s=343.0, trained=(measured,))
+        check_candidates(model, operators, (), allowed, _table(), density_kg_m3=1.2, sound_speed_m_s=343.0,
+                         trained=(measured,))
     text = str(refused.value)
     assert getattr(fixed_candidates, "_calls") == [carpet, measured]
     assert ("替身對固定材料 panel_measured 沒過留出驗證：替身訓練過這種材料，但開跑這一組配置在 293.441 Hz 不夠準："

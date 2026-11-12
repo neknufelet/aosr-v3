@@ -31,7 +31,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Literal
 
 import numpy as np
 from pydantic import TypeAdapter
@@ -50,11 +50,6 @@ from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 
 FaceKind = Literal["original", "saved", "mounted", "fixed"]
-# 補訓練一批的隨機組數：其他片照方案存檔的幾組、其他片也有幾片換成隨機家族的幾組（只有一片交給搜尋的切法要靠後者才跟核對那一組不同）。
-EXTENSION_RANDOM_SAVED: Final = 4
-EXTENSION_RANDOM_MIXED: Final = 2
-# 補訓練隨機組裡，不交給搜尋的片換成隨機家族的機率。
-EXTENSION_SWAP_PROBABILITY: Final = 0.25
 
 
 @dataclass(frozen=True)
@@ -260,12 +255,12 @@ class TrainingSets:
             for family in self.families:
                 face = self._thinnest(family)
                 sets.append(MaterialSet(f"{word}（搜尋的片 {family} 最薄、其他照存檔）", mount, faces(lambda: face)))
-        for index in range(EXTENSION_RANDOM_SAVED):
+        for index in range(self.sampling.extension.random_saved):
             sets.append(MaterialSet(f"{word}（搜尋的片隨機 {index}、其他照存檔）", mount,
                                     faces(lambda: self._random_face(rng))))
-        for index in range(EXTENSION_RANDOM_MIXED):
+        for index in range(self.sampling.extension.random_mixed):
             sets.append(MaterialSet(f"{word}（搜尋的片隨機 {index}、其他幾片也換隨機家族）", mount,
-                                    faces(lambda: self._random_face(rng), EXTENSION_SWAP_PROBABILITY)))
+                                    faces(lambda: self._random_face(rng), self.sampling.extension.swap_probability)))
         return sets
 
     def _base_sets(self) -> list[MaterialSet]:
@@ -366,7 +361,8 @@ class TrainingSets:
         document: dict[str, object] = {
             "version": TRAINING_VERSION if coverage is None else COVERAGE_VERSION, "patches": list(self.names),
             "axis_points": len(self.axis), "families": list(self.families),
-            "sampling": self.sampling.model_dump(mode="json"),
+            # 補訓練那一節不記：沒補過的訓練說明逐位照舊；補了的組各自寫在 training 裡（標籤「補訓練第 N 批」）。
+            "sampling": self.sampling.model_dump(mode="json", exclude={"extension"}),
             "training": [entry(item) for item in training], "holdout": [entry(item) for item in holdout]}
         if coverage is not None:
             trained = {family.id for family in coverage.families}
