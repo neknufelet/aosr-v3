@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>開始擺位搜尋</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/gradient.css">
+  <link rel="stylesheet" href="/static/search_start.css">
+  <script src="/static/search_start.js" defer></script>
+</head>
+<body><main>
+  <header><h1>開始擺位搜尋（第一、二階段）</h1>
+    <p><a href="/">回方案輸入頁</a>　<a href="/searches">搜尋進度清單</a>　<a href="/gradient">第三階段搜尋（牆面材料）</a></p>
+    <p>從一份方案出發，設定喇叭與座位可以擺的範圍、硬限制、預算，按「開始搜尋」。搜尋與細算要好幾小時，整台機器同時只跑一件；
+      第二階段做完可以把細算第一名放進結果清單、打開結果頁（第一階段的入選還不能放進結果清單，看進度頁的入選清單）。</p>
+    <p id="connection" aria-live="polite">正在讀取…</p>
+  </header>
+
+  <section id="scheme-block">
+    <h2>1. 選方案</h2>
+    <p><label>方案 <select id="scheme-pick"></select></label>
+      <button id="load-scheme" type="button">讀這份方案</button></p>
+    <p id="scheme-message" aria-live="polite"></p>
+    <div id="scheme-facts" hidden>
+      <ul id="facts-list"></ul>
+      <p class="hint">喇叭類型與擺法、座位、桌面與家具都跟著方案走：要改請回方案輸入頁載入這份方案改完存檔，再回這裡重讀。</p>
+    </div>
+  </section>
+
+  <section id="form-block" hidden>
+    <h2>2. 搜尋設定</h2>
+    <p id="previous-row" hidden><label>從之前的一場帶入設定 <select id="previous-pick"></select></label>
+      <button id="load-previous" type="button" class="quiet">帶入</button></p>
+    <p id="previous-message" class="hint" aria-live="polite"></p>
+
+    <h3>階段</h3>
+    <p><label><input type="radio" name="stage" value="two" checked> 第二階段：房間固定，搜喇叭與座位擺位（低頻、反射、殘響都算）</label><br>
+      <label><input type="radio" name="stage" value="one"> 第一階段：只看低頻（有限元素），房間尺寸也可以一起搜（做完看進度頁的入選清單，還不能放進結果清單）</label></p>
+
+    <h3>可擺範圍</h3>
+    <div class="option-grid">
+      <label>前牆（喇叭靠的那一面）<select id="front-wall">
+        <option value="x0">x 起點牆</option><option value="xL">x 終點牆</option>
+        <option value="y0">y 起點牆</option><option value="yL">y 終點牆</option></select></label>
+      <label>中軸偏移（公尺；0＝前牆正中，沿牆座標增加為正）<input id="axis-offset" type="number" step="any" value="0"></label>
+      <label>聲學中心離前牆（公尺）<span class="pair"><input id="front-low" type="number" step="any" placeholder="最近">～<input id="front-high" type="number" step="any" placeholder="最遠"></span></label>
+      <label>左右兩支間距（公尺）<span class="pair"><input id="spacing-low" type="number" step="any" placeholder="最窄">～<input id="spacing-high" type="number" step="any" placeholder="最寬"></span></label>
+    </div>
+    <p><label><input id="seat-locked" type="checkbox"> 座位不能搬：鎖定在原方案的主位，只搜離前牆與間距，聆聽距離由座位推出</label></p>
+    <div class="option-grid" id="free-seat">
+      <label>聆聽距離（喇叭連線到主位的水平距離，公尺）<span class="pair"><input id="listen-low" type="number" step="any" placeholder="最近">～<input id="listen-high" type="number" step="any" placeholder="最遠"></span></label>
+      <label>耳高（公尺）<input id="ear-height" type="number" step="any"></label>
+    </div>
+    <div id="speaker-fields" hidden>
+      <p class="hint">這份方案沒有設喇叭類型與擺法，喇叭高度與箱體要在這裡填（也可以回方案輸入頁設好）。</p>
+      <div class="option-grid">
+        <label>喇叭聲學中心高度（公尺）<input id="speaker-height" type="number" step="any"></label>
+        <label>箱寬（公尺）<input id="cabinet-width" type="number" step="any"></label>
+        <label>箱深（公尺）<input id="cabinet-depth" type="number" step="any"></label>
+        <label>箱高（公尺）<input id="cabinet-height" type="number" step="any"></label>
+        <label>聲學中心離前面板（公尺）<input id="cabinet-behind" type="number" step="any" placeholder="0"></label>
+        <label>聲學中心離箱底（公尺；空白＝箱高一半）<input id="cabinet-above" type="number" step="any"></label>
+      </div>
+    </div>
+    <div id="room-fields" hidden>
+      <h3>房間尺寸範圍（第一階段；空白的邊照方案的房間）</h3>
+      <p class="hint">房間尺寸一起搜時，不能同時鎖座位、設禁區或喇叭可用區（那幾樣用房間的絕對座標）。</p>
+      <div class="option-grid">
+        <label>x 方向長（公尺）<span class="pair"><input id="room-x-low" type="number" step="any">～<input id="room-x-high" type="number" step="any"></span></label>
+        <label>y 方向寬（公尺）<span class="pair"><input id="room-y-low" type="number" step="any">～<input id="room-y-high" type="number" step="any"></span></label>
+        <label>高（公尺）<span class="pair"><input id="room-z-low" type="number" step="any">～<input id="room-z-high" type="number" step="any"></span></label>
+        <label>地板面積下限（平方公尺；空白＝不限）<input id="room-area" type="number" step="any"></label>
+      </div>
+    </div>
+
+    <h3>硬限制（空白＝不限制）</h3>
+    <div class="option-grid">
+      <label>箱體離四面牆至少（公尺）<input id="wall-gap" type="number" step="any" placeholder="0"></label>
+      <label>型號適用的聆聽距離（三維，公尺）<span class="pair"><input id="range-low" type="number" step="any">～<input id="range-high" type="number" step="any"></span></label>
+      <label>主位看左右兩支的水平夾角（度）<span class="pair"><input id="angle-low" type="number" step="any">～<input id="angle-high" type="number" step="any"></span></label>
+    </div>
+    <h4>禁區（門、走道：箱體與座位都不准進；房間座標，公尺）</h4>
+    <div id="keep-out"></div>
+    <p><button id="add-keep-out" type="button" class="quiet">加一塊禁區</button></p>
+    <h4>喇叭可用區（聲學中心只准在這些盒子裡；一塊都沒有＝不限制）</h4>
+    <div id="speaker-areas"></div>
+    <p><button id="add-speaker-area" type="button" class="quiet">加一塊可用區</button></p>
+
+    <h3>預算與停止</h3>
+    <p class="hint">題數上限與「連續幾個沒改善就停」是暫行的工程停止設定，沒有產品預設（要實跑後問老闆），一定要填；
+      不確定就從之前的一場帶入。用完預算停下來不代表找到最好的。</p>
+    <div class="option-grid">
+      <label>搜尋題數上限（題）<input id="budget" type="number" min="1" step="1"></label>
+      <label>連續幾個沒改善就停（個）<input id="convergence" type="number" min="1" step="1"></label>
+      <label>搜尋時間上限（小時；空白＝不限，批界才停、不含細算）<input id="time-budget" type="number" min="0" step="any"></label>
+    </div>
+    <div id="stage-two-budget" class="option-grid">
+      <label>細算上限（個；空白＝不細算）<input id="refine-budget" type="number" min="1" step="1"></label>
+      <label>細算第一名連續幾個沒換就停（個）<input id="refine-convergence" type="number" min="1" step="1"></label>
+      <label>回饋偏移（0～0.5；空白＝不回饋）<input id="feedback-offset" type="number" min="0" max="0.5" step="any"></label>
+    </div>
+    <div id="stage-one-budget" class="option-grid" hidden>
+      <label>每個候選的搜尋時間上限（秒；空白＝600）<input id="candidate-cap" type="number" min="1" step="any"></label>
+      <label>細算保留名額（前幾名；空白＝不細算）<input id="top-n" type="number" min="1" step="1"></label>
+      <label>較遠對照：離前牆至少（公尺）<input id="far-control" type="number" step="any"></label>
+      <label>面積對照：前幾名面積跨度不超過（比例）<input id="area-spread" type="number" step="any"></label>
+      <label>面積對照：明顯不同至少差（比例）<input id="area-difference" type="number" step="any"></label>
+    </div>
+    <details id="advanced"><summary>進階（取樣與工作行程）</summary>
+      <div class="option-grid">
+        <label>起點隨機題數（題）<input id="startup" type="number" min="1" step="1"></label>
+        <label>每批題數（題）<input id="batch" type="number" min="1" step="1"></label>
+        <label>同時算幾個（工作行程數）<input id="workers" type="number" min="1" step="1"></label>
+        <label>亂數種子<input id="seed" type="number" step="1"></label>
+      </div>
+      <p><label><input id="liar" type="checkbox" checked> 同一批互相避開（constant liar：還沒算完的先當成算過了）</label></p>
+    </details>
+    <p><button id="preview" type="button">預覽轉好的設定</button></p>
+    <p id="form-message" aria-live="polite"></p>
+  </section>
+
+  <section id="preview-block" hidden>
+    <h2>3. 預覽</h2>
+    <ul id="preview-list"></ul>
+    <details><summary>交給搜尋命令列的設定（JSON）</summary><pre id="preview-json"></pre></details>
+    <p id="busy-line" class="notice" hidden></p>
+    <p><button id="start" type="button">開始搜尋</button></p>
+    <p id="start-message" aria-live="polite"></p>
+  </section>
+
+  <section id="jobs-block">
+    <h2>網頁開的擺位搜尋</h2>
+    <div id="job-list"><p>還沒有從網頁開的擺位搜尋。</p></div>
+  </section>
+
+  <section id="job-block" hidden>
+    <h2 id="job-title">這一跑</h2>
+    <p id="job-state"></p>
+    <p id="job-summary"></p>
+    <p id="job-outer"></p>
+    <p id="job-progress-link" hidden><a id="job-progress" href="#">打開這場的搜尋進度頁（每一批、目前最佳、細算、附件）</a></p>
+    <p class="actions">
+      <button id="job-stop" type="button" class="danger" hidden>停止</button>
+      <button id="job-resume" type="button" hidden>接續</button>
+      <button id="job-select" type="button" hidden>把細算第一名放進結果清單、打開結果頁</button>
+    </p>
+    <p class="hint">停止：搜尋與細算都在這一批算完才停（停止記號）；正在補低頻診斷等附件時按停，附件會被中斷、搜尋結果不受影響。
+      按停之後就不能接續；搜尋資料夾還沒建好就按停的，要重開一場。</p>
+    <p id="job-result" hidden></p>
+    <p id="job-message" aria-live="polite"></p>
+    <details><summary>每一步的輸出最後幾行</summary><div id="job-steps"></div></details>
+  </section>
+</main></body>
+</html>

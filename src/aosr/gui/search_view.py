@@ -640,8 +640,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     return view
 
 
-def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
-    """清單頁一場一列：只讀快照名字與狀態檔（第一階段另讀細算狀態小檔），不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
+def _list_lines(path: Path, locks: Read[str]) -> tuple[Read[SearchStore], tuple[str, ...]]:
     process = (Process(None, f"判不出有沒有行程在跑：{locks.error.removeprefix('讀不到：')}") if locks.value is None
                else folder_process(path, locks.value))
     store = _read(lambda: SearchStore.open(path))
@@ -649,13 +648,20 @@ def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
     lines = _stage(search, refine, outer, process).lines
     if store.value is not None and store.value.settings.stage == "stage_one_fem_only":
         lines = tuple(_stage_one_refine_lines(lines, _stage_one_refined(path), process))
+    return store, lines
+
+
+def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
+    """清單頁一場一列：只讀快照名字與狀態檔（第一階段另讀細算狀態小檔），不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
+    store, lines = _list_lines(path, locks)
     return {"search_id": path.name, "name": store.value.project.scheme_id if store.value else path.name,
             "stage_text": "；".join(lines[:3]), "url": f"/searches/{path.name}"}
 
 
-def search_line(path: Path) -> dict[str, str]:
-    """一場一列（清單頁同一支）：網頁開搜尋那一頁的工作清單也用它講這場走到哪（#700）。"""
-    return _list_item(path, _read(read_proc_locks))
+def search_line(path: Path) -> str:
+    """一場一句（清單頁同一支，扣掉第一句「有沒有行程拿著資料夾」——那一頁自己看服務在不在）：
+    網頁開搜尋那一頁講這場的搜尋與細算走到哪（#700）。"""
+    return "；".join(_list_lines(path, _read(read_proc_locks))[1][1:3])
 
 
 def list_searches(root: Path) -> dict[str, object]:

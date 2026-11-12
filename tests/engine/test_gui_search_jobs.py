@@ -503,6 +503,7 @@ def test_a_signal_not_from_the_page_is_interrupted_and_resumable(tmp_path: Path)
 
 
 @pytest.mark.parametrize("status", [SearchStatus(state="interrupted"), SearchStatus(state="failed"),
+                                    SearchStatus(state="user_stopped"), SearchStatus(state="paused_time_limit"),
                                     SearchStatus(refine=RefineStatus(state="failed"))])
 def test_no_resume_when_auto_would_only_conclude(tmp_path: Path, status: SearchStatus) -> None:
     """抓狀態檔已判中斷或失敗還給接續（auto 一進去只會下結論，按了沒用）。"""
@@ -601,3 +602,43 @@ def test_exec_constants_match_the_search_folder(tmp_path: Path) -> None:
 
     assert (search_exec.STOP_FILE, search_exec.REFINE_STOP_FILE) == (store.STOP_FILE, store.REFINE_STOP_FILE)
     assert search_exec.SEARCH_ID.pattern == search_view.SEARCH_ID.pattern
+
+
+def test_zoned_scheme_is_flagged_before_the_form_and_refused_at_preview(tmp_path: Path) -> None:
+    """抓分區牆的方案（第三階段用的切法）沒先講、或預覽照收（第一、二階段搜尋只收整面牆）。"""
+    from tests.engine.test_gui_gradient_jobs import _scheme_document
+
+    jobs = _jobs(tmp_path)
+    assert jobs.facts(NAME)["zoned"] is None
+    (tmp_path / "schemes" / "zoned.json").write_text(json.dumps(_scheme_document("zoned")), encoding="utf-8")
+    assert "矩形分區" in cast(str, jobs.facts("zoned")["zoned"])
+    full = settings_document()
+    full.pop("purpose")
+    with pytest.raises(SettingsRefused, match="分區"):
+        jobs.preview("zoned", full)
+
+
+def test_a_stale_conclusion_counts_as_none(tmp_path: Path) -> None:
+    """抓快照對不上的舊結論（之後狀態又推進了）被當成這一次的結論：不准判做完、不准放進結果清單。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    stale = _done_status().model_copy(update={"asked": 99})  # 結論的快照記的是 asked=0
+    _folder(jobs, job_id, stale)
+    launcher.active.clear()
+    _finish(jobs, job_id, 0, start=0, auto=0)
+    view = jobs.get(job_id)
+    assert view["state"] == "failed" and cast(Record, view["actions"])["select"] is False
+
+
+@pytest.mark.parametrize("marker", ["stop", "refine-stop"])
+def test_no_resume_when_a_stop_marker_is_already_there(tmp_path: Path, marker: str) -> None:
+    """抓資料夾裡已有停止記號（例如命令列 stop 放的）還給接續：auto 一進去只會判使用者停止。"""
+    launcher = FakeLauncher()
+    jobs = _jobs(tmp_path, launcher)
+    job_id = cast(str, jobs.start(NAME, _body())["job_id"])
+    folder = _folder(jobs, job_id)
+    launcher.active.clear()
+    assert cast(Record, jobs.get(job_id)["actions"])["resume"] is True
+    (folder / marker).touch()
+    assert cast(Record, jobs.get(job_id)["actions"])["resume"] is False
