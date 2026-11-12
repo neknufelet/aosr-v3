@@ -565,7 +565,10 @@ def test_the_preview_judges_a_fixed_library_table_like_the_zone_editor(browser: 
     document = _picked(table)
     design = _limits_design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}, "auto1": {"mode": "search"},
                                           "auto2": {"mode": "keep_original"}}})
-    scheme = Scheme.model_validate(document)
+    # 帶低頻軸：建替身那一支預覽才不會照實回 400（這一題不考它，主控台一個錯都不准有）。
+    plain = Scheme.model_validate(document)
+    scheme = plain.model_copy(update={"scene": plain.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH})})
+    scheme = Scheme.model_validate(scheme.model_dump(mode="json"))
     (data_dir / "schemes" / "room109.json").write_text(scheme.model_dump_json(), encoding="utf-8")
     write_design(data_dir, design, scheme)
     launcher = FakeLauncher()
@@ -581,4 +584,4 @@ def test_the_preview_judges_a_fixed_library_table_like_the_zone_editor(browser: 
         expect(cell).not_to_contain_text("不加層")
         expect(page.locator('#plan-table tr[data-surface="x0@auto2"] td.depth-cell')).to_have_text("不加層")
         _shot(page, "2-9-2-preview-fixed-table-depth")
-        _clean(page, watched.page_errors + [error for error in watched.console_errors if "status of 400" not in error])
+        _clean(page, watched.page_errors + watched.console_errors)

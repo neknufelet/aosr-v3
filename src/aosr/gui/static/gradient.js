@@ -29,10 +29,9 @@ let watchedBuildState = null;
 let budgetHeldByBuild = false;
 // 使用者自己在兩格預算裡打過字（#1082 段 2-9）：重讀建替身選項時不拿預設值蓋掉；建模結束放回預設時一起清掉。
 let budgetTyped = false;
-// 這一頁畫過的最後一份建模（代號與狀態）：只在同一份從建模中變成「已放進格子」那一刻重新預覽一次（#1082 段 2-9：
-// 原本每次畫到已放進格子、預覽又說沒涵蓋就再預覽，預覽又畫回同一份，幾分鐘送了六千多次）。
-let shownBuild = {id: null, state: null};
-// 這一頁看過的每一份建模（含剛按下開建、輪詢清單還沒帶到的那一份），忙碌行認得是哪份方案在建（#1082 段 2-9）。
+// 這一頁看過的每一份建模（含剛按下開建、輪詢清單還沒帶到的那一份），各記上一次畫到的樣子（#1082 段 2-9）：
+// 忙碌行認得是哪份方案在建；只在同一份從建模中變成「已放進格子」那一刻重新預覽一次（原本每次畫到已放進格子、
+// 預覽又說沒涵蓋就再預覽，預覽又畫回同一份，幾分鐘送了六千多次）。
 const seenBuilds = new Map();
 let knownJobs = [];
 let knownBuilds = [];
@@ -174,6 +173,8 @@ function request() {
 }
 
 async function loadPlan() {
+  // 換方案：上一份打的預算不帶過去（#1082 段 2-9），這一份照它自己的預設。
+  if (byId("scheme-pick").value !== schemeId) budgetTyped = false;
   schemeId = byId("scheme-pick").value;
   if (!schemeId) return;
   history.replaceState(null, "", `/gradient?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
@@ -388,8 +389,7 @@ function holdBudget(build, budget) {
 }
 
 function showBuild(build) {
-  const before = shownBuild.id === build.build_id ? shownBuild.state : null;
-  shownBuild = {id: build.build_id, state: build.state};
+  const before = seenBuilds.has(build.build_id) ? seenBuilds.get(build.build_id).state : null;
   seenBuilds.set(build.build_id, build);
   byId("surrogate-build").hidden = false;
   watchedBuildState = build.state;

@@ -17,7 +17,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_result import (
-    BaselineRefused, OriginalWalls, ZoneRow, _change, derive_baseline, improvement, original_walls, zone_rows)
+    UNMATCHED_TABLE_NOTE, BaselineRefused, OriginalWalls, ZoneRow, _change, derive_baseline, improvement, original_walls, zone_rows)
 from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, lock_refusal
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.measured_view import APPROXIMATE_LINE, build_measured_view
@@ -372,16 +372,16 @@ def test_zone_rows_tag_measured_and_simulated_and_lift_the_source_out_of_the_tab
 
 
 def test_a_table_without_imaginary_part_is_also_tagged_approximate() -> None:
-    """同材料頁：實測表沒有虛部（虛部當 0 算）要另標「近似」。"""
+    """實測表沒有虛部（虛部當 0 算）：材料頁那一格寫「近似」，結果頁兩個都標（看得出是實測表、也看得出是近似）。"""
     assert _tags(_measured_rows(_lab_entry(imaginary=False))["a"]) == [("measured", "實測"), ("approximate", "近似")]
 
 
 def test_a_table_the_library_no_longer_has_still_shows_its_own_conditions() -> None:
     """材料庫那一筆改了或刪了：出處與網址只住在材料庫那一筆，照方案裡那張表自己帶的量測出處與條件講，不冒稱材料庫的出處；
-    虛部有量到（不是 0）就是實測，全是 0 分不出是不是缺虛部、不標「近似」也不標「實測」以外的猜測。"""
+    缺不缺虛部也只有材料庫那一筆知道：只標「實測」、滑過去講看不出來，不猜「近似」。"""
     material = _lab_entry().surface_material()
     design = with_x0(split_x0(material, mounted(original_x0())))
     (a,) = [row for row in zone_rows(derive_baseline(design), None, design) if (row.wall, row.zone) == ("x 起點牆", "a")]
-    assert _tags(a) == [("measured", "實測")]
+    assert _tags(a) == [("measured", "實測")] and a.design_facts.tags[0].title.endswith(UNMATCHED_TABLE_NOTE)
     assert (a.design_facts.source, a.design_facts.links) == ("", ())
     assert a.design_facts.conditions == "阻抗管，垂直入射，樣品厚 30 mm"

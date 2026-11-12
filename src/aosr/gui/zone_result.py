@@ -219,8 +219,9 @@ UNMATCHED_TABLE_NOTE = "（材料庫裡對不到這一張表，看不出虛部�
 
 
 def material_facts(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> MaterialFacts:
-    """標語照材料頁同一條規則：多層構造（含貼在原牆上、搜尋貼上去的）＝模擬；固定阻抗＝近似；實測表＝實測，沒有虛部
-    （材料庫那一筆缺虛部、轉物理時寫 0）再加「近似」。缺不缺虛部只有材料庫那一筆知道：對不到（改了或刪了）只標實測、
+    """標語照材料頁「阻抗怎麼得到」同一條規則（``library.impedance_basis``）：多層構造（含貼在原牆上、搜尋貼上去的）＝模擬；
+    固定阻抗＝近似；實測表＝實測，沒有虛部（材料庫那一筆缺虛部、轉物理時寫 0）再加「近似」——材料頁那一格只寫近似，
+    這裡兩個都標：看得出是實測表、也看得出是近似。缺不缺虛部只有材料庫那一筆知道：對不到（改了或刪了）只標實測、
     滑過去講看不出來，不猜。出處與網址也只住在材料庫那一筆；實測表自己帶的量測出處與條件與逐列數字照方案裡那一份。"""
     entry = registered_entry(material, library)
     table = (material if isinstance(material, MeasuredImpedance)
