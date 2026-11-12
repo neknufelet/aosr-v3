@@ -49,6 +49,9 @@ from aosr.gradient.surrogate_coverage import (
     NOT_TRAINED_TEXT, FixedTarget, SurrogateNotTrainedOn, check_covers, fixed_targets, reachable_families,
 )
 from aosr.gradient.surrogate_files import TRAINING_FILE
+from aosr.gradient.surrogate_fixed_checks import (
+    INACCURATE_STATE_TEXT, FixedCandidateInaccurate, configuration_document, unchecked_reason,
+)
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import (
@@ -58,6 +61,7 @@ from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
+from aosr.physics.fem_reduced_store import manifest_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.gui.zone_limits import DepthTargets
 from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
@@ -274,6 +278,18 @@ def _not_trained(surrogate: Path, materials: SearchMaterials, fixed: tuple[Fixed
     return None
 
 
+def plan_configuration(plan: SearchPlan, scheme: Scheme) -> dict[str, object]:
+    """這一份搜尋計畫交給開跑的那一組起跑配置（正規寫法，跟建替身寫進核對紀錄的同一支 ``configuration_document``）。"""
+    return configuration_document(presets=plan.presets, mount=plan.request.mount, fixed_surfaces=plan.fixed_surfaces,
+                                  max_depths=plan.max_depths, allowed=plan.allowed, scene_json=scheme.scene.model_dump_json())
+
+
+def _unchecked(surrogate: Path, plan: SearchPlan, scheme: Scheme, fixed: tuple[FixedTarget, ...]) -> str | None:
+    """准用清單有固定材料時：替身裝進格子之前有沒有用這一組起跑配置核過每個候選（#1082 段 2-8）；沒有就回原因、要重建
+    （開跑那一道照樣自己再核，這裡只讓網頁先講、不說「可以直接開搜尋」）。"""
+    return unchecked_reason(surrogate.parent, manifest_path(surrogate), plan_configuration(plan, scheme), fixed)
+
+
 class GradientJobs:
     """``scheme_lock`` 是網頁存方案、設計設定、封存共用的那一把：只在讀方案與設計設定做快照時拿；工作狀態另一把。"""
 
@@ -419,11 +435,11 @@ class GradientJobs:
             return "surrogate_refused"
         return "failed"
 
-    def _refusal(self, job: GradientJob) -> type[ReducedModelNotValidated] | None:
+    def _refusal(self, job: GradientJob) -> type[ValueError] | None:
         """最後一步的輸出裡命令列印的是哪一種替身核不過（「梯度搜尋開始失敗：<例外名>：<原因>」）；不是就是 None。"""
         log = self._log_path(job.job_id, len(job.steps) - 1)
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
-        for kind in (SurrogateNotTrainedOn, ReducedModelNotValidated):
+        for kind in (SurrogateNotTrainedOn, FixedCandidateInaccurate, ReducedModelNotValidated):
             if f"失敗：{kind.__name__}：" in text:
                 return kind
         return None
@@ -468,8 +484,12 @@ class GradientJobs:
                 "steps": steps, "endpoint": endpoint}
 
     def _state_text(self, job: GradientJob, state: str) -> str:
-        if state == "surrogate_refused" and self._refusal(job) is SurrogateNotTrainedOn:
-            return NOT_TRAINED_STATE_TEXT
+        if state == "surrogate_refused":
+            refusal = self._refusal(job)
+            if refusal is SurrogateNotTrainedOn:
+                return NOT_TRAINED_STATE_TEXT
+            if refusal is FixedCandidateInaccurate:
+                return INACCURATE_STATE_TEXT
         return STATE_TEXTS[state]
 
     def _jobs(self) -> list[GradientJob]:
@@ -519,8 +539,9 @@ class GradientJobs:
         settings = materials.settings
         path = surrogate_path(self.data_dir, scheme)
         missing = missing_parts(path)
-        refused = None if missing else _not_trained(path, materials, plan_fixed(plan, materials, entries),
-                                                    plan_reachable(plan, materials.settings))
+        fixed = plan_fixed(plan, materials, entries)
+        refused = None if missing else (_not_trained(path, materials, fixed, plan_reachable(plan, materials.settings))
+                                        or _unchecked(path, plan, scheme, fixed))
         with self.lock:
             busy = self.active_job()
         # 代號 → 材料庫顯示名（內建構造預設、家族、使用者材料），只給預覽表看；計畫本身照舊只存代號（#1119）。
@@ -539,7 +560,9 @@ class GradientJobs:
         text, scheme, design = self.inputs(scheme_id)
         plan, materials, entries = self.plan(scheme, design, request)
         surrogate = self._surrogate(scheme)
-        refused = _not_trained(surrogate, materials, plan_fixed(plan, materials, entries), plan_reachable(plan, materials.settings))
+        fixed = plan_fixed(plan, materials, entries)
+        refused = (_not_trained(surrogate, materials, fixed, plan_reachable(plan, materials.settings))
+                   or _unchecked(surrogate, plan, scheme, fixed))
         if refused is not None:
             raise NeedsSurrogate(refused, surrogate.parent)
         with self.launching():

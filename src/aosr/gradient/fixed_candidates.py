@@ -5,14 +5,18 @@
 各做一組留出驗證：把它放到准用它的每一片、其他片照起跑配置（樣板片取下降起點那一點），整條頻率軸完整解對替身，
 兩把尺從精度契約登記簿讀（跟准用閘門同兩把，不另立尺）。任何一個沒過就拒收、照實寫出數字，不放寬、不偷偷補訓練。
 
+#1082 段 2-8：每一個候選都核完才判（不是第一個沒過就停），沒過的一次全講；替身訓練說明記了它（訓練過）就說
+「訓練過、但在哪個頻率不夠準」，沒記才說沒學過。建替身那一側（:mod:`aosr.gradient.surrogate_build`）裝進格子前用同一組
+起跑配置、同一支 :func:`judge_candidates` 先核，沒過就補訓練再核（完整解只解一次，之後只重算替身那一側）。
+
 阻抗一律走搜尋同一條材料鏈：固定材料是 surface_impedance（實測表在表內對數內插、表外用它的底構造補值），
 跟終點 material_impedances 同一支函式、同一份材料，所以搜尋頻點與終點取到的是同一份表。
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import replace
-from typing import Self
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
@@ -23,6 +27,10 @@ from aosr.materials.construction_models import MeasuredImpedance, SurfaceMateria
 from aosr.materials.search_library import MaterialsRefused, PresetMaterial
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
+from aosr.gradient.surrogate_fixed_checks import FixedCandidateInaccurate
+
+if TYPE_CHECKING:
+    from aosr.physics.fem_reduced_check import ValidationReport
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -103,50 +111,126 @@ def table_range_notes(targets: Sequence[str], table: Sequence[PresetMaterial],
     return tuple(notes)
 
 
-def check_fixed_candidates(model: ReducedModel, operators: FullOperators, designs: Sequence[SurfaceDesign],
-                           allowed: Mapping[str, Sequence[str]], table: Sequence[PresetMaterial], *,
-                           density_kg_m3: float, sound_speed_m_s: float, workers: int = 1) -> tuple[FixedCandidateCheck, ...]:
-    """准用清單裡每一個固定材料各一組留出驗證（整條頻率軸、兩把尺）；全部過了回每一筆的紀錄，任何一個沒過就拒收、
-    寫出它的數字與尺，不放寬。算不出阻抗（物理拒算、不是有限數）也拒收、點名哪一個。"""
-    import time
+@dataclass(frozen=True)
+class CandidateVerdict:
+    """一個固定材料候選在起跑配置的一次判決：完整解對替身的報告（含兩側聲壓，補訓練後重判用）、兩個差、最差的頻點。"""
 
+    target: str
+    surfaces: tuple[str, ...]
+    report: ValidationReport
+    frequency_db: float
+    band_db: float
+    worst_hz: float
+    passed: bool
+    seconds: float
+
+
+def candidate_configurations(designs: Sequence[SurfaceDesign], allowed: Mapping[str, Sequence[str]],
+                             table: Sequence[PresetMaterial], frequencies_hz: Sequence[float], *, density_kg_m3: float,
+                             sound_speed_m_s: float) -> dict[str, FrequencyBoundaryImpedances]:
+    """准用清單裡每一個固定材料的核對配置：起跑設計裡准用它的片換成它、其他片照起跑配置，整條頻率軸的每片阻抗。
+    算不出阻抗（物理拒算、不是有限數）就拒收、點名哪一個。"""
     import numpy as np
 
-    from aosr.gradient.endpoint import material_digest
     from aosr.gradient.fixed_surfaces import fixed_targets_of
-    from aosr.gradient.run import holdout_rulers
-    from aosr.physics.fem_reduced_check import validate_reduced, within_reduced_contract
 
-    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
-    by_id = {preset.id: preset for preset in table}
-    rulers = holdout_rulers()
-    axis = tuple(float(value) for value in model.frequencies_hz)
-    if set(operators.sources) != set(model.source_names) or set(operators.receivers) != set(model.receiver_names):
-        raise ValueError("完整模型的喇叭或座位跟替身不同")
-    operators = replace(operators, sources={name: operators.sources[name] for name in model.source_names},
-                        receivers={name: operators.receivers[name] for name in model.receiver_names})
-    found = []
+    found = {}
     for target in fixed_targets_of(allowed):
         swapped = candidate_designs(designs, target, allowed, table)
         try:
-            impedances = design_impedances(swapped, axis, density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+            impedances = design_impedances(swapped, frequencies_hz, density_kg_m3=density_kg_m3,
+                                           sound_speed_m_s=sound_speed_m_s)
         except ValueError as error:
             raise MaterialsRefused(f"固定材料 {fixed_target_id(target)} 在搜尋頻點物理拒算，搜尋不開：{error}") from error
         if not all(np.all(np.isfinite(np.asarray(row))) for row in impedances.values() if row is not None):
             raise MaterialsRefused(f"固定材料 {fixed_target_id(target)} 在搜尋頻點的阻抗不是有限數，搜尋不開")
+        found[target] = impedances
+    return found
+
+
+def judge_candidates(model: ReducedModel, operators: FullOperators, configurations: Mapping[str, FrequencyBoundaryImpedances],
+                     allowed: Mapping[str, Sequence[str]], *, workers: int = 1,
+                     previous: Mapping[str, CandidateVerdict] | None = None) -> dict[str, CandidateVerdict]:
+    """每一個候選都判（不在第一個沒過就停）：沒給 ``previous`` 就整條頻率軸完整解對替身；給了（同一批配置、補訓練之後）
+    完整解聲壓照上一次的、只重算替身那一側。兩把尺從登記簿讀。"""
+    import time
+
+    from aosr.gradient.run import holdout_rulers
+    from aosr.physics import fem_reduced_check
+
+    rulers = holdout_rulers()
+    if set(operators.sources) != set(model.source_names) or set(operators.receivers) != set(model.receiver_names):
+        raise ValueError("完整模型的喇叭或座位跟替身不同")
+    operators = replace(operators, sources={name: operators.sources[name] for name in model.source_names},
+                        receivers={name: operators.receivers[name] for name in model.receiver_names})
+    found = {}
+    for target, impedances in configurations.items():
         clock = time.perf_counter()
-        report = validate_reduced(model, operators, [impedances], workers=workers)
+        if previous is None:
+            report = fem_reduced_check.validate_reduced(model, operators, [impedances], workers=workers)
+        else:
+            before = previous[target].report
+            report = fem_reduced_check.revalidate_reduced(model, operators, [impedances], before.full_pressure,
+                                                          full_solves=before.full_solves)
         seconds = time.perf_counter() - clock
         frequency_db, band_db = max(report.frequency_db_by_seat.values()), max(report.band_db_by_seat.values())
-        if not within_reduced_contract(report, frequency_db=rulers.frequency.value, band_db=rulers.band.value):
-            raise MaterialsRefused(
-                f"替身對固定材料 {fixed_target_id(target)} 沒過留出驗證：逐頻最大差 {frequency_db:g} dB"
-                f"（尺 {rulers.frequency.name}={rulers.frequency.value:g} dB）、帶能量最大差 {band_db:g} dB"
-                f"（尺 {rulers.band.name}={rulers.band.value:g} dB）。這份替身沒有學過這種材料，"
-                "要把它放進訓練材料重建替身；這次不開，也不放寬尺")
-        found.append(FixedCandidateCheck(
+        passed = fem_reduced_check.within_reduced_contract(report, frequency_db=rulers.frequency.value,
+                                                           band_db=rulers.band.value)
+        worst = (float("nan") if passed else
+                 fem_reduced_check.worst_frequency_hz(report, tuple(float(value) for value in model.frequencies_hz)))
+        found[target] = CandidateVerdict(
             target=target, surfaces=tuple(name for name, targets in sorted(allowed.items()) if target in targets),
-            frequency_db=frequency_db, band_db=band_db, frequency_ruler=rulers.frequency.value,
-            band_ruler=rulers.band.value, full_solves=report.full_solves, seconds=seconds,
-            material_digest=material_digest(adapter.validate_python(by_id[target].material))))
-    return tuple(found)
+            report=report, frequency_db=frequency_db, band_db=band_db, worst_hz=worst, passed=passed, seconds=seconds)
+    return found
+
+
+def inaccurate_text(verdict: CandidateVerdict, *, trained: bool) -> str:
+    """一個沒過的候選怎麼講：數字、尺、最差的頻點；訓練過（替身訓練說明記了它）就說訓練過但不夠準，沒記才說沒學過。"""
+    from aosr.gradient.run import holdout_rulers
+
+    rulers = holdout_rulers()
+    numbers = (f"逐頻最大差 {verdict.frequency_db:g} dB（尺 {rulers.frequency.name}={rulers.frequency.value:g} dB）、"
+               f"帶能量最大差 {verdict.band_db:g} dB（尺 {rulers.band.name}={rulers.band.value:g} dB）")
+    name = fixed_target_id(verdict.target)
+    if trained:
+        return (f"替身對固定材料 {name} 沒過留出驗證：替身訓練過這種材料，但開跑這一組配置在 {verdict.worst_hz:g} Hz "
+                f"不夠準：{numbers}")
+    return f"替身對固定材料 {name} 沒過留出驗證：{numbers}。這份替身沒有學過這種材料"
+
+
+def check_fixed_candidates(model: ReducedModel, operators: FullOperators, designs: Sequence[SurfaceDesign],
+                           allowed: Mapping[str, Sequence[str]], table: Sequence[PresetMaterial], *,
+                           density_kg_m3: float, sound_speed_m_s: float, workers: int = 1,
+                           trained: Collection[str] = ()) -> tuple[FixedCandidateCheck, ...]:
+    """准用清單裡每一個固定材料各一組留出驗證（整條頻率軸、兩把尺）；全部過了回每一筆的紀錄，有沒過的就全部核完再拒收、
+    一次寫出每一個沒過的數字與尺，不放寬。``trained`` 是替身訓練說明記過的固定材料（措辭用：訓練過但不夠準、或沒學過）。
+    算不出阻抗（物理拒算、不是有限數）也拒收、點名哪一個。"""
+    from aosr.gradient.endpoint import material_digest
+
+    adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+    by_id = {preset.id: preset for preset in table}
+    axis = tuple(float(value) for value in model.frequencies_hz)
+    configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=density_kg_m3,
+                                              sound_speed_m_s=sound_speed_m_s)
+    verdicts = judge_candidates(model, operators, configurations, allowed, workers=workers)
+    failed = [verdict for verdict in verdicts.values() if not verdict.passed]
+    frequency_ruler, band_ruler = holdout_ruler_values()
+    if failed:
+        words = "；".join(inaccurate_text(verdict, trained=verdict.target in trained) for verdict in failed)
+        advice = ("要重建替身（重建時會先用這一組起跑配置核，不夠準就補訓練）" if all(item.target in trained for item in failed)
+                  else "要把它放進訓練材料重建替身")
+        raise FixedCandidateInaccurate(f"{words}。{advice}；這次不開，也不放寬尺")
+    return tuple(FixedCandidateCheck(
+        target=verdict.target, surfaces=verdict.surfaces, frequency_db=verdict.frequency_db, band_db=verdict.band_db,
+        frequency_ruler=frequency_ruler, band_ruler=band_ruler,
+        full_solves=verdict.report.full_solves, seconds=verdict.seconds,
+        material_digest=material_digest(adapter.validate_python(by_id[verdict.target].material)))
+        for verdict in verdicts.values())
+
+
+def holdout_ruler_values() -> tuple[float, float]:
+    """登記簿那兩把留出尺的值（逐頻、帶能量）。"""
+    from aosr.gradient.run import holdout_rulers
+
+    rulers = holdout_rulers()
+    return rulers.frequency.value, rulers.band.value

@@ -6,6 +6,10 @@
 「抽到的候選殘差都在停止值內」（同時到預算也記這個，殘差是量到的事實）；否則完整解用滿預算記「預算停止、殘差目標未達」
 （這時殘差真的量過、真的沒達，那一輪準備了下一批但不解，``solved`` 記 0）。停止值只是選點用的，不是驗證門檻；
 替身準不準由 :mod:`aosr.physics.fem_reduced_check` 用留出材料對完整解判。
+
+補訓練（#1082 段 2-8，:class:`ReducedModelBuilder`）：建完之後再交一批新的訓練材料，接著同一份快照、同一個抽樣器往下補點，
+候選只從新的那一批抽（舊的已經量到停止值內）；停止規則與預算照舊，完整解次數跟建模那一段合計算預算。
+只用 :func:`build_reduced_model` 不補訓練時，選點、快照、建模帳與替身逐位照舊。
 """
 from __future__ import annotations
 
@@ -58,7 +62,8 @@ BuildProgressCallback = Callable[[BuildProgress], None]
 
 @dataclass
 class _Build:
-    """建模途中的可變狀態；只活在 :func:`build_reduced_model` 一次呼叫裡。"""
+    """建模途中的可變狀態；只活在一次建模（:class:`ReducedModelBuilder`）裡。``done`` 是換完整解行程池之前已經解了幾次
+    （補訓練那一段另開一池，預算照合計算）。"""
 
     operators: FullOperators
     axis: tuple[float, ...]
@@ -68,16 +73,22 @@ class _Build:
     batch_solver: FullSolveBatch
     workers: int
     dense_threads: int | None = None
+    done: int = 0
     snapshots: list[NDArray[np.complex128]] = field(default_factory=list)
     seen: set[Point2] = field(default_factory=set)
     rounds: list[GreedyRound] = field(default_factory=list)
     seconds: dict[str, float] = field(default_factory=lambda: dict.fromkeys(
         ("snapshot", "svd", "projection", "greedy"), 0.0))
 
+    @property
+    def solves(self) -> int:
+        """到這一刻合計完整解了幾次（含換池之前的）。"""
+        return self.done + self.solver.solves
+
     def solve(self, pending: Sequence[Point2]) -> None:
         """完整解（解次上限內）並補進快照；上一輪記下實際解了幾點。"""
         start = time.perf_counter()
-        chosen = pending[:max(0, self.settings.max_full_solves - self.solver.solves)]
+        chosen = pending[:max(0, self.settings.max_full_solves - self.solves)]
         parallel = (self.batch_solver.map([
             (self.axis[index], walls_at(self.training[material], index)) for material, index in chosen])
             if self.workers > 1 else None)
@@ -123,9 +134,9 @@ class _Build:
                    for column, load in enumerate(operators.sources.values()))
 
     def greedy_round(self, rng: np.random.Generator, basis: NDArray[np.float64],
-                     matrices: ReducedMatrices) -> tuple[float, list[Point2]] | None:
-        """抽候選、量殘差、記一輪；候選用完回 None。"""
-        pool = [(material, index) for material in range(len(self.training))
+                     matrices: ReducedMatrices, first: int = 0) -> tuple[float, list[Point2]] | None:
+        """抽候選、量殘差、記一輪；候選用完回 None。``first`` 給了只從第幾組材料之後抽（補訓練只抽新的那一批）。"""
+        pool = [(material, index) for material in range(first, len(self.training))
                 for index in range(len(self.axis)) if (material, index) not in self.seen]
         if not pool:
             return None
@@ -144,6 +155,123 @@ class _Build:
         return values[0], selected
 
 
+class ReducedModelBuilder:
+    """一次建模的建模者：先 :meth:`build`（同 :func:`build_reduced_model`），需要的話再 :meth:`extend` 補訓練（#1082 段 2-8）。
+
+    快照、已解過的點、每一輪紀錄、抽樣器都留在物件裡，補訓練接著往下補；完整解行程池每一段各開一個（段與段之間
+    不佔著工作行程），解次照合計算預算。:meth:`release` 放掉快照與基底（不再補訓練時叫，省記憶體）。
+    """
+
+    def __init__(self, operators: FullOperators, frequencies_hz: Sequence[float],
+                 training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings,
+                 workers: int = 1, dense_threads: int | None = None, progress: BuildProgressCallback | None = None) -> None:
+        checked_workers(workers)
+        self.threads = checked_dense_threads(dense_threads)
+        sys.stderr.write(f"完整解 {workers} 行程、裝置 cpu、稠密段 {self.threads} 緒\n")
+        self.started = time.perf_counter()
+        self.operators, self.settings, self.workers, self.progress = operators, settings, workers, progress
+        self.axis = checked_axis(frequencies_hz)
+        self.training = impedance_rows(training_impedances, self.axis, patch_keys=operators.patch_keys)
+        self.rng = np.random.default_rng(settings.greedy_seed)
+        self._build: _Build | None = None
+        self._basis: NDArray[np.float64] | None = None
+        self._matrices: ReducedMatrices | None = None
+        self.stop_reason: str | None = None
+
+    def _report(self, build: _Build, basis: NDArray[np.float64], outcome: tuple[float, list[Point2]] | None) -> None:
+        if self.progress is not None:
+            self.progress(BuildProgress(
+                full_solves=build.solves, max_full_solves=self.settings.max_full_solves,
+                snapshots=len(build.snapshots), rank=basis.shape[1], stop_residual=self.settings.stop_residual,
+                latest=None if outcome is None else build.rounds[-1], seconds=dict(build.seconds),
+                elapsed_s=elapsed_since(self.started)))
+
+    def _stop(self, build: _Build, outcome: tuple[float, list[Point2]] | None) -> str | None:
+        """這一輪量完之後停不停（規則見模組說明）；不停回 None。"""
+        if outcome is None:
+            return STOP_CANDIDATES_EXHAUSTED
+        if outcome[0] <= self.settings.stop_residual:
+            return STOP_RESIDUAL_MET
+        if build.solves >= self.settings.max_full_solves:
+            return STOP_BUDGET
+        return None
+
+    def _batch(self) -> FullSolveBatch:
+        return FullSolveBatch(self.operators, max_relative_residual=self.settings.full_solve_max_relative_residual,
+                              workers=self.workers)
+
+    def build(self) -> ReducedModel:
+        """起點快照 → 殘差貪婪補點 → 實數 SVD → 投影；選點與結果跟 :func:`build_reduced_model` 逐位相同（它就是叫這一支）。"""
+        if self._build is not None:
+            raise RuntimeError("這一次建模已經建過了；補訓練用 extend")
+        with self._batch() as batch_solver:
+            build = _Build(operators=self.operators, axis=self.axis, training=self.training, settings=self.settings,
+                           solver=batch_solver.solver, batch_solver=batch_solver, workers=self.workers,
+                           dense_threads=self.threads)
+            pending = [(material, index)
+                       for material in even_indices(self.settings.initial_impedance_count, len(self.training))
+                       for index in even_indices(self.settings.initial_frequency_count, len(self.axis))]
+            while True:
+                build.solve(pending)
+                basis, matrices = build.reduce()
+                # 先量這份基底的殘差再判預算：到上限時記「殘差目標未達」之前，殘差一定量過。
+                outcome = build.greedy_round(self.rng, basis, matrices)
+                self._report(build, basis, outcome)
+                stop = self._stop(build, outcome)
+                if stop is not None:
+                    break
+                assert outcome is not None
+                pending = outcome[1]
+        return self._finish(build, basis, matrices, stop)
+
+    def extend(self, training_impedances: Sequence[FrequencyBoundaryImpedances]) -> ReducedModel:
+        """補訓練：新的這批材料接在訓練材料後面，用目前的基底從新的這批抽候選、量殘差、補點，停止規則與合計預算照舊。
+
+        回補完的替身（輸入雜湊含新的這批、建模帳接著記）；預算已經用完就一點都不補、照實記「預算停止」。"""
+        build, basis, matrices = self._build, self._basis, self._matrices
+        if build is None or basis is None or matrices is None:
+            raise RuntimeError("還沒建模、或快照已經放掉了，不能補訓練")
+        first = len(build.training)
+        build.training = (*build.training, *impedance_rows(training_impedances, self.axis,
+                                                            patch_keys=self.operators.patch_keys))
+        self.training = build.training
+        with self._batch() as batch_solver:
+            # 換池：舊池解過的次數記進 done，新池從 0 數，合計照舊。
+            build.done, build.solver, build.batch_solver = build.solves, batch_solver.solver, batch_solver
+            while True:
+                outcome = build.greedy_round(self.rng, basis, matrices, first)
+                self._report(build, basis, outcome)
+                stop = self._stop(build, outcome)
+                if stop is not None:
+                    break
+                assert outcome is not None
+                build.solve(outcome[1])
+                basis, matrices = build.reduce()
+        return self._finish(build, basis, matrices, stop)
+
+    @property
+    def full_solves(self) -> int:
+        return 0 if self._build is None else self._build.solves
+
+    def release(self) -> None:
+        """不再補訓練：放掉快照、基底與已解過的點（替身本身不受影響）。"""
+        self._build = self._basis = self._matrices = None
+
+    def _finish(self, build: _Build, basis: NDArray[np.float64], matrices: ReducedMatrices, stop: str) -> ReducedModel:
+        self._build, self._basis, self._matrices, self.stop_reason = build, basis, matrices, stop
+        operators, settings = self.operators, self.settings
+        ledger = BuildLedger(
+            full_solves=build.solves, snapshots=len(build.snapshots), rank=basis.shape[1],
+            rounds=tuple(build.rounds), stop_reason=stop,
+            seconds={**build.seconds, "total": elapsed_since(self.started)}, settings=settings)
+        return ReducedModel(
+            matrices=matrices, source_names=tuple(operators.sources), receiver_names=tuple(operators.receivers),
+            frequencies_hz=self.axis, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
+            mesh_hash=operators.mesh_hash, physics_identity=operators.physics_identity,
+            input_hash=input_hash(operators, self.axis, build.training, settings), ledger=ledger,
+            patch_keys=operators.patch_keys)
+
+
 def build_reduced_model(
     operators: FullOperators, frequencies_hz: Sequence[float],
     training_impedances: Sequence[FrequencyBoundaryImpedances], *, settings: ReducedModelSettings, workers: int = 1,
@@ -155,48 +283,8 @@ def build_reduced_model(
     或整軸固定值、``None`` 表剛性），全部先過產品阻抗閘門。``progress`` 給了就在每一輪量完候選殘差後叫一次
     （:class:`BuildProgress`）；它只讀，選點、快照與結果跟不給逐位相同。
     """
-    checked_workers(workers)
-    threads = checked_dense_threads(dense_threads)
-    sys.stderr.write(f"完整解 {workers} 行程、裝置 cpu、稠密段 {threads} 緒\n")
-    start = time.perf_counter()
-    axis = checked_axis(frequencies_hz)
-    training = impedance_rows(training_impedances, axis, patch_keys=operators.patch_keys)
-    with FullSolveBatch(operators, max_relative_residual=settings.full_solve_max_relative_residual,
-                       workers=workers) as batch_solver:
-        build = _Build(operators=operators, axis=axis, training=training, settings=settings,
-                       solver=batch_solver.solver, batch_solver=batch_solver, workers=workers, dense_threads=threads)
-        rng = np.random.default_rng(settings.greedy_seed)
-        pending = [(material, index)
-                   for material in even_indices(settings.initial_impedance_count, len(training))
-                   for index in even_indices(settings.initial_frequency_count, len(axis))]
-        while True:
-            build.solve(pending)
-            basis, matrices = build.reduce()
-            # 先量這份基底的殘差再判預算：到上限時記「殘差目標未達」之前，殘差一定量過。
-            outcome = build.greedy_round(rng, basis, matrices)
-            if progress is not None:
-                progress(BuildProgress(
-                    full_solves=build.solver.solves, max_full_solves=settings.max_full_solves,
-                    snapshots=len(build.snapshots), rank=basis.shape[1], stop_residual=settings.stop_residual,
-                    latest=None if outcome is None else build.rounds[-1], seconds=dict(build.seconds),
-                    elapsed_s=elapsed_since(start)))
-            if outcome is None:
-                stop = STOP_CANDIDATES_EXHAUSTED
-                break
-            largest, pending = outcome
-            if largest <= settings.stop_residual:
-                stop = STOP_RESIDUAL_MET
-                break
-            if build.solver.solves >= settings.max_full_solves:
-                stop = STOP_BUDGET
-                break
-        ledger = BuildLedger(
-            full_solves=build.solver.solves, snapshots=len(build.snapshots), rank=basis.shape[1],
-            rounds=tuple(build.rounds), stop_reason=stop,
-            seconds={**build.seconds, "total": elapsed_since(start)}, settings=settings)
-        return ReducedModel(
-            matrices=matrices, source_names=tuple(operators.sources), receiver_names=tuple(operators.receivers),
-            frequencies_hz=axis, density_kg_m3=operators.density_kg_m3, sound_speed_m_s=operators.sound_speed_m_s,
-            mesh_hash=operators.mesh_hash, physics_identity=operators.physics_identity,
-            input_hash=input_hash(operators, axis, training, settings), ledger=ledger, patch_keys=operators.patch_keys)
-
+    builder = ReducedModelBuilder(operators, frequencies_hz, training_impedances, settings=settings, workers=workers,
+                                  dense_threads=dense_threads, progress=progress)
+    model = builder.build()
+    builder.release()
+    return model

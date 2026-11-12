@@ -40,7 +40,7 @@ from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_jobs import (
     REPO_ROOT, UNIT_PREFIX, ActionRefused, GradientJobs, JobBusy, LaunchFailed, tail_lines, write_text_atomic,
 )
-from aosr.gui.gradient_plan import GradientRequest, PlanRefused
+from aosr.gui.gradient_plan import GradientRequest, PlanRefused, configuration_arguments
 from aosr.gui.material_editor import USER_LIBRARY_NAME
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, slot_key
 from aosr.materials.library import LibraryEntry, dump_user_library
@@ -77,6 +77,8 @@ class SurrogateRequest(BaseModel):
     不動：停止規則不變（殘差達標或預算用完就停），換了照實寫進建模帳（替身身分的一部分）；建完一定跑留出驗證、兩把尺
     都過才放進格子。``workers`` 是完整解行程數（不給照 ``surrogate_training.toml``）、``dense_threads`` 是稠密段的
     BLAS 緒數（不給＝實體核數）。``replace``：格子裡已經有一份時，新的核過之後換掉它。
+    ``search`` 是網頁預覽那一份開跑選項（裝法、深度上限、家族…；不給照開跑預設）：准用清單有固定材料時，建替身照它算出
+    開跑那一組起跑配置、裝進格子之前先用開跑同一道核對核過（#1082 段 2-8），預覽換了選項就要照新的重建。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -85,6 +87,7 @@ class SurrogateRequest(BaseModel):
     workers: int | None = Field(default=None, ge=1, strict=True)
     dense_threads: int | None = Field(default=None, ge=1, strict=True)
     replace: bool = False
+    search: GradientRequest | None = None
 
 
 class BuildStep(BaseModel):
@@ -224,15 +227,18 @@ class SurrogateBuilds:
 
     # ---- 動作 ----
 
-    def _checked(self, scheme_id: str) -> tuple[str, Path, str, tuple[LibraryEntry, ...], dict[str, tuple[str, ...]]]:
+    def _checked(self, scheme_id: str, search: GradientRequest | None = None
+                 ) -> tuple[str, Path, str, tuple[LibraryEntry, ...], dict[str, tuple[str, ...]], list[str]]:
         """開建前網頁講得清楚的拒收（照搜尋開跑的同一套 ``GradientJobs.plan``：設定檔家族＋材料庫）：方案要有低頻軸、
         設計設定要轉得成搜尋參數、材料庫要讀得進來；原牆能不能貼、使用者家族物理算不算得出來要算材料，
-        留給命令列第一步判（網頁行程不載入物理）。回方案原文、格子、格子代號、使用者材料與准用清單（固定材料候選一起訓練）。"""
+        留給命令列第一步判（網頁行程不載入物理）。回方案原文、格子、格子代號、使用者材料、准用清單（固定材料候選一起訓練）
+        與開跑那一組起跑配置的命令列參數（``search`` 那一份開跑選項的計畫；准用清單有固定材料時建替身照它核）。"""
         text, scheme, design = self.jobs.inputs(scheme_id)
         if scheme.scene.low_frequency_axis is None:
             raise PlanRefused("方案場景沒有低頻軸（low_frequency_axis），搜尋開跑會拒收，不建替身")
-        plan, _, entries = self.jobs.plan(scheme, design, GradientRequest())
-        return text, slot_dir(self.data_dir, scheme), slot_key(scheme), entries, plan.allowed
+        plan, _, entries = self.jobs.plan(scheme, design, search or GradientRequest())
+        return (text, slot_dir(self.data_dir, scheme), slot_key(scheme), entries, plan.allowed,
+                configuration_arguments(plan))
 
     def _latest(self, key: str) -> dict[str, object] | None:
         build = next((item for item in self._builds() if item.slot_key == key), None)
@@ -240,7 +246,7 @@ class SurrogateBuilds:
 
     def preview(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
         """不開建：格子在哪、已經有沒有、這份切法最近一次建模、預設值、前幾次花了多久、現在忙不忙。"""
-        _, slot, key, _, _ = self._checked(scheme_id)
+        _, slot, key, _, _, _ = self._checked(scheme_id, request.search)
         sampling = load_surrogate_training_settings(config_path("surrogate_training.toml"))
         reduced = load_reduced_model_settings(config_path("fem_reduced.toml"))
         with self.jobs.lock:
@@ -256,7 +262,7 @@ class SurrogateBuilds:
                                   "開建後照這一跑量到的速度推")}
 
     def start(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
-        text, slot, key, entries, allowed = self._checked(scheme_id)
+        text, slot, key, entries, allowed, configuration = self._checked(scheme_id, request.search)
         if slot.exists() and not request.replace:
             found = not missing_parts(slot / SURROGATE_FILE)
             raise ActionRefused("這份切法已經有替身了" + ("" if found else "（但缺件）") +
@@ -280,6 +286,7 @@ class SurrogateBuilds:
                 arguments.extend(("--materials", str(library)))
             for surface, targets in allowed.items():
                 arguments.extend(("--allowed", f"{surface}={','.join(targets)}"))
+            arguments.extend(configuration)
             if request.replace:
                 arguments.extend(("--replace", str(self.data_dir / SLOTS_DIR / RETIRED_DIR / f"{key}-{build_id}")))
             if request.max_full_solves is not None:

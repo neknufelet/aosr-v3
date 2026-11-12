@@ -18,6 +18,9 @@
 每個使用者家族另外保證一組留出（每一片都取那個家族的中間值）：混搭只輪得到面片數那麼多格，隨機組又可能一片都沒抽到。
 每區准用清單的固定材料候選（2-3b 的 ``fixed:<代號>``，整塊取代那一片的牆、不管安裝方式）：每個候選兩組訓練
 （准用它的面片放它，其他片原牆／其他片各家族最薄輪流）、一組留出（其他片各家族中間值輪流）。
+補訓練（#1082 段 2-8，:meth:`TrainingSets.extension_sets`）：建好的替身在開跑那一組起跑配置對某個固定材料候選不夠準時，
+再補幾組「候選放在准用它的片、其他片圍著起跑配置變」的訓練材料（交給搜尋的片換原牆／各家族最薄／隨機，其他片多半照方案
+存檔）；核對用的那一組本身不准進訓練（呼叫端比過阻抗剔除），它要留著當留出。
 沒有使用者家族、也沒有固定材料候選時權重、組、訓練說明一個位元都不動；有的話訓練說明換 v2、多記 ``coverage``（:mod:`aosr.gradient.surrogate_coverage`）。
 
 一份切法換材料共用同一份替身（``aosr.gui.surrogate_slots``）：原牆與方案存檔取的是觸發建模那一份方案的材料，
@@ -25,9 +28,10 @@
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import hashlib
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
 import numpy as np
 from pydantic import TypeAdapter
@@ -46,6 +50,11 @@ from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 
 FaceKind = Literal["original", "saved", "mounted", "fixed"]
+# 補訓練一批的隨機組數：其他片照方案存檔的幾組、其他片也有幾片換成隨機家族的幾組（只有一片交給搜尋的切法要靠後者才跟核對那一組不同）。
+EXTENSION_RANDOM_SAVED: Final = 4
+EXTENSION_RANDOM_MIXED: Final = 2
+# 補訓練隨機組裡，不交給搜尋的片換成隨機家族的機率。
+EXTENSION_SWAP_PROBABILITY: Final = 0.25
 
 
 @dataclass(frozen=True)
@@ -225,6 +234,38 @@ class TrainingSets:
             mount: Mount = MOUNT_RIGID if index % every == every - 1 else MOUNT_ON_WALL
             faces = tuple(ORIGINAL if rng.random() < bare else self._random_face(rng) for _ in self.keys)
             sets.append(MaterialSet(f"{word}隨機 {index}（原牆機率 {bare:g}、{_mount_word(mount)}）", mount, faces))
+        return sets
+
+    def extension_sets(self, item: FixedTarget, *, search: Collection[str], mount: Mount, batch: int) -> list[MaterialSet]:
+        """補訓練的第 ``batch`` 批（從 0 起）：候選 ``item`` 放在准用它的片；``search`` 是開跑時交給搜尋的片（候選那幾片除外），
+        換原牆、各家族最薄或隨機家族；其他片照方案存檔（開跑那一組固定的、不貼的都是存檔那一份），隨機組裡有幾組也把其中
+        幾片換成隨機家族。安裝方式照開跑的 ``mount``。種子由抽法設定的訓練種子、候選與批次決定（同一組輸入同一批）；
+        第 0 批先有原牆與各家族最薄那幾組，之後每批只抽新的隨機組。跟核對那一組相同的由呼叫端剔除。"""
+        names = set(self.names)
+        if not set(item.surfaces) <= names or not set(search) <= names:
+            raise ValueError(f"固定材料 {item.target} 的補訓練面片不在方案的面片裡")
+        others = [name for name in self.names if name in search and name not in item.surfaces]
+        target_seed = int.from_bytes(hashlib.sha256(item.target.encode()).digest()[:8], "big")
+        rng = np.random.default_rng([self.sampling.training.seed, target_seed, batch])
+        fixed = FaceSpec("fixed", target=item.target)
+
+        def faces(searched: Callable[[], FaceSpec], swap: float = 0.0) -> tuple[FaceSpec, ...]:
+            return tuple(fixed if name in item.surfaces else searched() if name in others else
+                         self._random_face(rng) if swap and rng.random() < swap else SAVED for name in self.names)
+
+        word = f"補訓練第 {batch} 批 固定 {item.target}"
+        sets = []
+        if batch == 0:
+            sets.append(MaterialSet(f"{word}（搜尋的片原牆、其他照存檔）", mount, faces(lambda: ORIGINAL)))
+            for family in self.families:
+                face = self._thinnest(family)
+                sets.append(MaterialSet(f"{word}（搜尋的片 {family} 最薄、其他照存檔）", mount, faces(lambda: face)))
+        for index in range(EXTENSION_RANDOM_SAVED):
+            sets.append(MaterialSet(f"{word}（搜尋的片隨機 {index}、其他照存檔）", mount,
+                                    faces(lambda: self._random_face(rng))))
+        for index in range(EXTENSION_RANDOM_MIXED):
+            sets.append(MaterialSet(f"{word}（搜尋的片隨機 {index}、其他幾片也換隨機家族）", mount,
+                                    faces(lambda: self._random_face(rng), EXTENSION_SWAP_PROBABILITY)))
         return sets
 
     def _base_sets(self) -> list[MaterialSet]:

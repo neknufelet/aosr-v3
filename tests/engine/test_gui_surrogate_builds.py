@@ -30,6 +30,7 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient import run
 from aosr.gradient.surrogate_build import _commit, _install, _rebuild_hint, _StopGate
+from aosr.gradient.surrogate_fixed_checks import FIXED_CHECKS_FILE, read_record
 from aosr.gradient.surrogate_files import (
     ESTIMATE_LABEL, MODEL_FILE, PROGRESS_FILE, RESULT_FILE, STAGE_DIR, TRAINING_FILE, RoundRecord, SurrogateProgress,
     SurrogateResult, estimate,
@@ -628,6 +629,9 @@ def test_build_trains_the_library_families_and_the_search_accepts_it(
     assert fixed["target"] == f"fixed:{FIXED}" and fixed["surfaces"] == ["x0@right"]
     for group in ("training", "holdout"):
         assert any(face.get("target") == f"fixed:{FIXED}" for entry in training[group] for face in entry["faces"].values())
+    # #1082 段 2-8：裝進格子之前用開跑那一組起跑配置核過固定材料候選、留了紀錄（網頁預覽憑它才說可以直接開搜尋）。
+    record = read_record(_slot_npz(data_dir).parent / FIXED_CHECKS_FILE)
+    assert record is not None and [(row.target, row.passed) for row in record.checks] == [(f"fixed:{FIXED}", True)]
     launcher = FakeLauncher()
     jobs, _ = _managers(data_dir, launcher)
     preview = jobs.preview(NAME, GradientRequest(device="cpu"))
