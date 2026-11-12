@@ -5,7 +5,8 @@
 
 ``argv``：工作資料夾、模式。``stall``：預算夠，補訓練的樣本殘差卻已經在停止值內、補不進點（這間小房間只有一片交給搜尋，
 跟核對那一組不同的只剩「其他片也換隨機家族」那幾組）——要停、不裝、照實講；``cap``：建完就把這一次的預算收到剛好用完，
-沒有餘額補訓練，要不裝、講加大預算。命令列參數由網頁那一層（``SurrogateBuilds.start``，假的開服務層）照產品組出來，
+沒有餘額補訓練，要不裝、講加大預算；``pass``：建完把停止殘差收到 ``PASS_STOP``（只這一次建模、考卷自己的值），
+補訓練真的解了候選那幾組、核對過了才做留出驗證、裝進格子、留紀錄，預覽才說可以直接開搜尋。命令列參數由網頁那一層（``SurrogateBuilds.start``，假的開服務層）照產品組出來，
 這裡在同一個行程叫 ``surrogate_build.build``（才換得了訓練組）；結果寫 ``probe.json``。
 """
 from __future__ import annotations
@@ -27,6 +28,8 @@ DIRECTORY, MODE = Path(sys.argv[1]), sys.argv[2]
 FIXED = "panel_absorbing"
 # 只給候選核對用的考卷窄尺（逐頻 dB）：沒學過候選的替身差約 0.0006 dB，補訓練後要壓到它以下。
 TIGHT_DB = 0.0002
+# ``pass`` 模式補訓練用的停止殘差（考卷自己的值）：讓補的那幾組真的被解進快照。
+PASS_STOP = 1e-9
 NAME = "zoned"
 
 
@@ -107,6 +110,9 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
     def capped(job, builder, model, prepared):  # type: ignore[no-untyped-def]
         if MODE == "cap":
             job.settings = job.settings.model_copy(update={"max_full_solves": builder.full_solves})
+            builder.settings = job.settings
+        elif MODE == "pass":
+            job.settings = job.settings.model_copy(update={"stop_residual": PASS_STOP})
             builder.settings = job.settings
         extension = checked(job, builder, model, prepared)
         added.extend(prepared.sets.impedances(item) for item in extension.added)

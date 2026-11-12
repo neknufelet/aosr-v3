@@ -471,13 +471,14 @@ def _extension_failure(job: _Run, extension: _Extension) -> str:
     if extension.stalled:
         where = (f"補訓練了 {len(extension.added)} 組（完整解合計 {solves} 次），補的樣本殘差都已在停止值 "
                  f"{job.settings.stop_residual:g} 內，再補同類樣本也沒用")
-        hint = "要過得改停止殘差或尺，那要老闆決定"
+        hint = "可以在建替身那一格把停止殘差調小再重建試試（兩把尺不動）"
     elif solves >= cap:
         where = f"補訓練到完整解上限 {cap} 次還不夠準"
         hint = "加大完整解上限（max_full_solves）重建可能會過"
     else:
-        where = f"補訓練了 {extension.batches} 批（完整解合計 {solves} 次）還不夠準"
-        hint = "加大完整解上限（max_full_solves）重建可能會過"
+        where = (f"補訓練了 {extension.batches} 批（每次建模最多 {MAX_EXTENSION_BATCHES} 批，完整解合計 {solves} 次、"
+                 f"上限 {cap} 次還沒用完）還不夠準")
+        hint = "預算不是卡住的原因，加大完整解上限不一定會過；照這一組配置再重建一次會換一批隨機樣本"
     return (f"開跑前那一道固定材料核對沒過：{words}。{where}，這份替身沒有放進格子（裝進去開跑也會被拒）。{hint}")
 
 

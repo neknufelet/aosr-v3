@@ -193,8 +193,10 @@ def inaccurate_text(verdict: CandidateVerdict, *, trained: bool) -> str:
                f"帶能量最大差 {verdict.band_db:g} dB（尺 {rulers.band.name}={rulers.band.value:g} dB）")
     name = fixed_target_id(verdict.target)
     if trained:
-        return (f"替身對固定材料 {name} 沒過留出驗證：替身訓練過這種材料，但開跑這一組配置在 {verdict.worst_hz:g} Hz "
-                f"不夠準：{numbers}")
+        # 逐頻那一把沒超才只講帶能量：最差頻點是逐頻差最大的那一點，帶能量超了不一定在那一點。
+        spot = (f"在 {verdict.worst_hz:g} Hz 不夠準" if verdict.frequency_db > rulers.frequency.value
+                else "帶能量不夠準")
+        return f"替身對固定材料 {name} 沒過留出驗證：替身訓練過這種材料，但開跑這一組配置{spot}：{numbers}"
     return f"替身對固定材料 {name} 沒過留出驗證：{numbers}。這份替身沒有學過這種材料"
 
 

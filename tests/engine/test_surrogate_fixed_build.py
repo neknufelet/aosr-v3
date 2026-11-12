@@ -18,7 +18,13 @@ import numpy as np
 import pytest
 
 from aosr.gradient import fixed_candidates
-from aosr.gradient.surrogate_fixed_checks import NO_RECORD_TEXT, OTHER_CONFIGURATION_TEXT, FixedCandidateInaccurate
+from aosr.gradient.surrogate_fixed_checks import (
+    NO_RECORD_TEXT,
+    OTHER_CONFIGURATION_TEXT,
+    FixedCandidateInaccurate,
+    read_record,
+    write_record,
+)
 from aosr.gradient.surrogate_coverage import FixedTarget
 from aosr.gui.gradient_jobs import GradientJobs, NeedsSurrogate, plan_configuration, plan_fixed
 from aosr.gui.gradient_plan import GradientRequest, SearchPlan
@@ -67,6 +73,25 @@ def test_build_checks_the_start_configuration_and_never_installs_what_the_start_
     message = str(result["message"])
     assert message.startswith("開跑前那一道固定材料核對沒過：") and "panel_absorbing" in message
     assert "再補同類樣本也沒用" in message and "沒有放進格子" in message and "完整解合計 0 次" not in message
+
+
+def test_build_that_extends_until_the_check_passes_installs_and_the_preview_says_ready(tmp_path: Path) -> None:
+    """抓補訓練過了的那條路沒走通：候選先沒過 → 補訓練真的解了候選那幾組 → 重核過了才做留出驗證、裝進格子；
+    訓練說明記了補的組、格子留了這一組起跑配置的紀錄（候選過了）、預覽說可以直接開搜尋、裝好的那句講補訓練之後過了。"""
+    found = _probe(tmp_path, "pass")
+    judged = cast(list[dict[str, Record]], found["judged"])
+    assert judged[0]["fixed:panel_absorbing"]["passed"] is False and judged[-1]["fixed:panel_absorbing"]["passed"] is True
+    added = cast(int, found["added"])
+    assert added >= 1 and found["added_equal_to_check"] == [False] * added
+    result = cast(Record, found["result"])
+    assert found["exit"] == 0 and found["slot"] is True, result
+    assert "開跑前那一道固定材料核對先沒過，補訓練" in str(result["message"]) and "之後過了" in str(result["message"])
+    labels = cast(list[str], found["training_labels"])
+    assert sum(label.startswith("補訓練第 ") for label in labels) == added, labels
+    record = cast(Record, found["record"])
+    assert [(row["target"], row["passed"]) for row in cast(list[Record], record["checks"])] == [("fixed:panel_absorbing", True)]
+    preview = cast(Record, found["preview"])
+    assert preview["found"] is True and preview["message"] is None
 
 
 def test_build_without_budget_left_refuses_and_says_a_bigger_budget_may_pass(tmp_path: Path) -> None:
@@ -132,7 +157,7 @@ def _fake_gate(monkeypatch: pytest.MonkeyPatch, numbers: dict[str, float]) -> tu
     rows: dict[int, str] = {}
 
     def impedances(target: str, *args: object, **kwargs: object) -> dict[str, tuple[complex, ...]]:
-        row = {"x0": (1.0 + 0.0j, 1.0 + 0.0j)}
+        row: dict[str, tuple[complex, ...]] = {"x0": (1.0 + 0.0j, 1.0 + 0.0j)}
         rows[id(row)] = target
         return row
 
@@ -211,8 +236,18 @@ def test_preview_never_says_ready_for_a_surrogate_not_checked_on_this_start_conf
     assert legacy["found"] is False and legacy["missing"] == [] and legacy["message"] == NO_RECORD_TEXT
     with pytest.raises(NeedsSurrogate, match="沒有用開跑那一組起跑配置核過"):
         jobs.start(NAME, request)
-    fixed_checked_on(surrogate, plan_configuration(plan, scheme), fixed)
+    path = fixed_checked_on(surrogate, plan_configuration(plan, scheme), fixed)
     assert preview() == {**legacy, "found": True, "message": None}
+    record = read_record(path)
+    assert record is not None
+    row = record.checks[0]
+    for changed in (row.model_copy(update={"passed": False}), row.model_copy(update={"material_sha256": "0" * 64})):
+        path.unlink()
+        write_record(path, record.model_copy(update={"checks": (changed, *record.checks[1:])}))
+        assert preview()["message"] == f"固定材料 {row.target} 沒有在這一組起跑配置核過；要重建（重建時會先核，不夠準就補訓練）"
+    path.unlink()
+    write_record(path, record)
+    assert preview()["found"] is True
     rigid = preview(GradientRequest(max_steps=5, mount="rigid"))
     assert rigid["found"] is False and rigid["message"] == OTHER_CONFIGURATION_TEXT
     manifest = surrogate.with_name(surrogate.stem + ".manifest.json")
