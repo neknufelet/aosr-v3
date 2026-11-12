@@ -10,6 +10,36 @@ function materialDetail(cell, detail) {
   box.append(node("summary", "參數"), node("div", detail));
   cell.append(box);
 }
+// 名字旁邊的標語、名字底下的出處（#1082 段 2-9）：標語同材料頁（實測／近似／模擬，滑過去看整句）；
+// 出處與網址、實測表自己帶的量測出處與條件緊接在名字下面；實測表逐列數字收在自己那一層、預設收起來。
+function materialCell(cell, name, facts, detail, tail) {
+  cell.replaceChildren(name);
+  for (const tag of facts.tags) {
+    const badge = node("span", tag.text); badge.className = `badge basis-${tag.code}`; badge.title = tag.title;
+    cell.append(" ", badge);
+  }
+  if (tail) cell.append(`\n${tail}`);
+  if (facts.source) {
+    const line = node("p", `出處與條件：${facts.source}`); line.className = "zone-material-source";
+    for (const link of facts.links) {
+      const anchor = node("a", link); anchor.href = link; anchor.target = "_blank"; anchor.rel = "noopener";
+      line.append(" ", anchor);
+    }
+    cell.append(line);
+  }
+  if (facts.conditions && facts.conditions !== facts.source) {
+    const line = node("p", `量測出處與條件：${facts.conditions}`); line.className = "zone-material-conditions";
+    cell.append(line);
+  }
+  materialDetail(cell, detail);
+  if (facts.table_rows.length) {
+    const box = document.createElement("details"); box.className = "zone-measured-table";
+    const list = document.createElement("ol");
+    list.append(...facts.table_rows.map((text) => node("li", text)));
+    box.append(node("summary", facts.table), list);
+    cell.append(box);
+  }
+}
 function zoneRowsTable(rows) {
   const element = tableElement(["牆", "區", "位置與尺寸（公尺）", "做法", "設計的材料", "原牆基準的材料（怎麼來）"],
     rows.map((row) => [row.wall, row.zone, `${row.place}\n${row.size}，${row.area}`, row.mode, row.design,
@@ -17,8 +47,8 @@ function zoneRowsTable(rows) {
   rows.forEach((row, index) => {
     const line = element.rows[index + 1];
     line.dataset.changed = String(row.changed);
-    materialDetail(line.cells[4], row.design_detail);
-    materialDetail(line.cells[5], row.baseline_detail);
+    materialCell(line.cells[4], row.design, row.design_facts, row.design_detail, "");
+    materialCell(line.cells[5], row.baseline, row.baseline_facts, row.baseline_detail, `（${row.baseline_source}）`);
   });
   return element;
 }

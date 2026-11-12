@@ -75,18 +75,24 @@ def _layer_words(layer: Layer, library: Sequence[LibraryEntry]) -> str:
     return kind_word(layer.kind)
 
 
-def _registered(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> str | None:
-    """材料庫固定材料逐位相等的那一筆的顯示名；貼在原牆上的比貼上去的那幾層。"""
+def registered_entry(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> FixedEntry | None:
+    """材料庫固定材料逐位相等的那一筆；貼在原牆上的比貼上去的那幾層。"""
     for entry in library:
         if not isinstance(entry, FixedEntry):
             continue
         chosen = entry.surface_material()
         if isinstance(material, MountedOnWall):
             if isinstance(chosen, Assembly) and chosen.layers == material.layers:
-                return entry.label
+                return entry
         elif chosen == material:
-            return entry.label
+            return entry
     return None
+
+
+def _registered(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> str | None:
+    """材料庫固定材料逐位相等的那一筆的顯示名。"""
+    entry = registered_entry(material, library)
+    return None if entry is None else entry.label
 
 
 def layers_name(layers: Sequence[Layer], library: Sequence[LibraryEntry]) -> MaterialName:

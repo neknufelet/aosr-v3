@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -23,8 +24,8 @@ from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._construction_gui_server import real_server
-from tests.engine._zone_result_cases import original_x0, real_design
-from tests.engine._zoned_report_cases import small_scheme, with_x0
+from tests.engine._zone_result_cases import lab_entry, mounted, original_x0, real_design, real_result
+from tests.engine._zoned_report_cases import small_scheme, split_x0, with_x0
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_scheme_pipeline import shared_control_result
 from aosr.materials.construction_models import ConstantImpedance
@@ -192,3 +193,56 @@ def test_zone_routes_refuse_whole_walls_old_physics_cut_originals_and_missing_or
             response = client.put(f"/api/designs/{design.scheme.scheme_id}", json=body)
             assert response.status_code == code and words in response.text, response.text
     assert _runs(tmp_path) == []
+
+
+# ---- 結果頁看得出實測還是模擬、出處在名字底下、實測表收起來（#1082 段 2-9）----
+
+MEASURED_RUN = "c" * 32
+
+
+@pytest.fixture(scope="module")
+def measured_text(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> str:
+    """x0 的 a 區固定成材料庫那一張實測表（物理那一份）、b 區貼一層棉（依參數組名的模擬構造）；真算。"""
+    design = with_x0(split_x0(lab_entry().surface_material(), mounted(original_x0())))
+    scheme = Scheme.model_validate(design.model_dump(mode="json") | {"scheme_id": "zone-measured"})
+    return real_result(tmp_path_factory, worker_id, "zone-result-measured-design", scheme)
+
+
+def test_zone_rows_say_measured_or_simulated_with_the_source_under_the_name(
+        tmp_path: Path, browser: Browser, measured_text: str) -> None:
+    """抓 109 示範的結果頁：選了材料庫實測表的那一列沒有「實測」標語、出處與網址在「參數」展開後逐列數字的最後面；
+    搜尋或貼上去的層也看不出是模擬的。逐列數字要收在自己那一層、預設收起來。"""
+    from aosr.gui.material_editor import user_library_path
+    from aosr.materials.library import dump_user_library
+
+    _put(tmp_path, MEASURED_RUN, measured_text)
+    user_library_path(tmp_path).write_text(dump_user_library((lab_entry(),)), encoding="utf-8")
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.goto(f"{base}/results/{MEASURED_RUN}", wait_until="domcontentloaded")
+        expect(page.locator("#zone-result")).to_be_visible(timeout=180_000)
+        rows = page.locator("#zone-rows tr")
+        table_row = rows.filter(has_text="實驗室實測板（考卷）")
+        cell = table_row.locator("td").nth(4)
+        expect(cell.locator(".badge")).to_have_text(["實測"])
+        expect(cell.locator(".zone-material-source")).to_be_visible()
+        expect(cell.locator(".zone-material-source")).to_contain_text("出處與條件：阻抗管實測（考卷），樣品 30 mm")
+        expect(cell.locator(".zone-material-source a")).to_have_attribute("href", "https://example.org/lab-table")
+        expect(cell).to_contain_text("量測出處與條件：阻抗管，垂直入射，樣品厚 30 mm")
+        # 逐列數字收在自己那一層、預設收起來；摘要一句看得到。
+        table = cell.locator("details.zone-measured-table")
+        expect(table.locator("summary")).to_have_text("實測阻抗表 2 列，涵蓋 100–1000 Hz")
+        expect(table.locator("li").first).to_be_hidden()
+        table.locator("summary").click()
+        expect(table.locator("li")).to_have_count(2)
+        expect(table.locator("li").first).to_contain_text("100 Hz：")
+        detail = cell.locator("details.zone-material-detail")
+        detail.locator("summary").first.click()
+        expect(detail.locator("div")).not_to_contain_text("1000 Hz：")
+        # 搜尋或貼上去的層：照材料頁標「模擬」；原牆固定阻抗照材料頁標「近似」。
+        laid = rows.filter(has_text="依參數組名")
+        expect(laid.locator("td").nth(4).locator(".badge")).to_have_text(["模擬"])
+        expect(laid.locator("td").nth(5).locator(".badge")).to_have_text(["近似"])
+        if shots := os.environ.get("AOSR_SHOTS"):
+            page.screenshot(path=str(Path(shots) / "2-9-1-result-measured-tagged.png"), full_page=True)
+        assert watched.page_errors == [] and watched.console_errors == []

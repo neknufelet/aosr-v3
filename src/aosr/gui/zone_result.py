@@ -30,12 +30,12 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import LABELS, WALLS
-from aosr.gui.material_names import original_wall_words, zone_material_words
-from aosr.gui.problem_text import material_summary, rounded_number
+from aosr.gui.material_names import original_wall_words, registered_entry, zone_material_words
+from aosr.gui.problem_text import material_brief, measured_rows, rounded_number
 from aosr.gui.zone_design import MODE_WORDS, WHOLE_WALL_KEY, DesignSettings, effective_modes, mismatches
 from aosr.geometry.shoebox import Room
-from aosr.materials.construction_models import MountedOnWall, SurfaceMaterial
-from aosr.materials.library import LibraryEntry, builtin_entries
+from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, MountedOnWall, SurfaceMaterial
+from aosr.materials.library import BASIS_LABELS, Basis, LibraryEntry, builtin_entries, impedance_basis
 from aosr.physics.report_io import solver_inputs
 from aosr.physics.report_surfaces import RectangleZone, SurfaceZone, WholeWallZone
 from aosr.physics.zone_fill import wall_size_m
@@ -188,11 +188,65 @@ def derive_baseline(design: Scheme, original: OriginalWalls | None = None) -> Ba
                     original.scheme_id if original is not None else None)
 
 
+class MaterialTag(BaseModel):
+    """材料旁邊的標語（同材料頁「阻抗怎麼得到」那一條，``library.impedance_basis``）：代號、短字、滑過去看的整句。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    code: Basis
+    text: str
+    title: str
+
+
+class MaterialFacts(BaseModel):
+    """一格材料名字底下要看得到的（#1082 段 2-9）：標語、出處與網址、實測表自己帶的量測出處與條件、
+    實測表的範圍一句與逐列數字（頁面收在自己那一層、預設收起來）。沒有的格是空的。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    tags: tuple[MaterialTag, ...] = ()
+    source: str = ""
+    links: tuple[str, ...] = ()
+    conditions: str = ""
+    table: str = ""
+    table_rows: tuple[str, ...] = ()
+
+
+def _tag(code: Basis, note: str = "") -> MaterialTag:
+    words = BASIS_LABELS[code]
+    return MaterialTag(code=code, text=words.split("，", 1)[0], title=words + note)
+
+
+UNMATCHED_TABLE_NOTE = "（材料庫裡對不到這一張表，看不出虛部是量到的還是缺的）"
+
+
+def material_facts(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> MaterialFacts:
+    """標語照材料頁「阻抗怎麼得到」同一條規則（``library.impedance_basis``）：多層構造（含貼在原牆上、搜尋貼上去的）＝模擬；
+    固定阻抗＝近似；實測表＝實測，沒有虛部（材料庫那一筆缺虛部、轉物理時寫 0）再加「近似」——材料頁那一格只寫近似，
+    這裡兩個都標：看得出是實測表、也看得出是近似。缺不缺虛部只有材料庫那一筆知道：對不到（改了或刪了）只標實測、
+    滑過去講看不出來，不猜。出處與網址也只住在材料庫那一筆；實測表自己帶的量測出處與條件與逐列數字照方案裡那一份。"""
+    entry = registered_entry(material, library)
+    table = (material if isinstance(material, MeasuredImpedance)
+             else material.wall if isinstance(material, MountedOnWall) and isinstance(material.wall, MeasuredImpedance)
+             else None)
+    if isinstance(material, MeasuredImpedance):
+        tags = ((_tag("measured"), *((_tag("approximate"),) if impedance_basis(entry) == "approximate" else ()))
+                if entry is not None else (_tag("measured", UNMATCHED_TABLE_NOTE),))
+    elif isinstance(material, ConstantImpedance):
+        tags = (_tag("approximate"),)
+    else:
+        tags = (_tag("simulated"),)
+    return MaterialFacts(
+        tags=tags, source="" if entry is None else entry.source, links=() if entry is None else entry.links,
+        conditions="" if table is None else table.source_and_conditions,
+        table="" if table is None else table.coverage_text(),
+        table_rows=() if table is None else measured_rows(table, rounded_number))
+
+
 class ZoneRow(BaseModel):
     """逐區表一列；字都排好了，頁面只照印。
 
     ``design``／``baseline`` 是給人看的名字（材料庫的顯示名，對不到就依層的參數組名、照實標出來）；
-    ``design_detail``／``baseline_detail`` 是收位後的工程參數，頁面收在可展開的細節裡（空字串就不出細節）。
+    ``design_detail``／``baseline_detail`` 是收位後的工程參數，頁面收在可展開的細節裡（空字串就不出細節；
+    實測表只寫範圍與列數，逐列數字在 ``*_facts.table_rows``）；``*_facts`` 是名字底下的標語與出處（#1082 段 2-9）。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -208,6 +262,8 @@ class ZoneRow(BaseModel):
     baseline_detail: str
     baseline_source: str
     changed: bool
+    design_facts: MaterialFacts = MaterialFacts()
+    baseline_facts: MaterialFacts = MaterialFacts()
 
 
 def _source_text(zone: BaselineZone, original: str | None) -> str:
@@ -242,12 +298,13 @@ def zone_rows(baseline: Baseline, settings: DesignSettings | None, scheme: Schem
             mode=MODE_WORDS[mode] if mode is not None else "—",
             design=(original_wall_words(zone.design, names) if mode == "keep_original"
                     else zone_material_words(zone.design, names)),
-            design_detail=material_summary(zone.design, rounded_number),
+            design_detail=material_brief(zone.design, rounded_number),
             baseline=("—" if not baseline_known else original_wall_words(zone.baseline, names) if changed
                       else "同左"),
-            baseline_detail=material_summary(zone.baseline, rounded_number) if changed else "",
+            baseline_detail=material_brief(zone.baseline, rounded_number) if changed else "",
             baseline_source=_source_text(zone, baseline.original_scheme_id) if baseline_known else "—",
-            changed=changed))
+            changed=changed, design_facts=material_facts(zone.design, names),
+            baseline_facts=material_facts(zone.baseline, names) if changed else MaterialFacts()))
     return tuple(rows)
 
 

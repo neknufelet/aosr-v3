@@ -27,6 +27,12 @@ let surrogateDefaults = null;
 let busyProblem = null;
 let watchedBuildState = null;
 let budgetHeldByBuild = false;
+// 使用者自己在兩格預算裡打過字（#1082 段 2-9）：重讀建替身選項時不拿預設值蓋掉；建模結束放回預設時一起清掉。
+let budgetTyped = false;
+// 這一頁看過的每一份建模（含剛按下開建、輪詢清單還沒帶到的那一份），各記上一次畫到的樣子（#1082 段 2-9）：
+// 忙碌行認得是哪份方案在建；只在同一份從建模中變成「已放進格子」那一刻重新預覽一次（原本每次畫到已放進格子、
+// 預覽又說沒涵蓋就再預覽，預覽又畫回同一份，幾分鐘送了六千多次）。
+const seenBuilds = new Map();
 let knownJobs = [];
 let knownBuilds = [];
 let polling = false;
@@ -72,7 +78,7 @@ async function api(path, body = undefined, messageId = null) {
 function busyWho(busy) {
   const job = knownJobs.find((item) => item.job_id === busy);
   if (job) return {text: `方案「${job.scheme_id}」的第三階段搜尋（${job.state_text}）`, job: job.job_id};
-  const build = knownBuilds.find((item) => item.unit === busy || item.build_id === busy);
+  const build = [...knownBuilds, ...seenBuilds.values()].find((item) => item.unit === busy || item.build_id === busy);
   if (build) return {text: `方案「${build.scheme_id}」正在建替身（${build.state_text}）`, build: build.build_id};
   return {text: `別的資料夾或命令列開的第三階段計算（服務 ${busy}）`};
 }
@@ -167,6 +173,8 @@ function request() {
 }
 
 async function loadPlan() {
+  // 換方案：上一份打的預算不帶過去（#1082 段 2-9），這一份照它自己的預設。
+  if (byId("scheme-pick").value !== schemeId) budgetTyped = false;
   schemeId = byId("scheme-pick").value;
   if (!schemeId) return;
   history.replaceState(null, "", `/gradient?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
@@ -216,8 +224,19 @@ function depthText(plan, surface, mode) {
 // 放不下的那一組這一跑不換過去、起點也跳過）。
 function depthCell(plan, surface, mode) {
   const lines = (plan.depth_targets || {})[surface] || [];
+  if (mode === "fixed") return fixedDepthCell(surface);
   return el("td", {class: "depth-cell"}, el("p", {text: depthText(plan, surface, mode)}),
     ...lines.map((line) => el("p", {class: line.usable ? "note" : "limit-warn", text: line.text})));
+}
+
+// 固定區那一格（#1082 段 2-9）：跟立面圖同一次限制檢查（伺服器 fixed_depths）——生效上限是哪一層，
+// 加上深度那幾條原句（選了材料庫的實測表就是「總深 … 放得進 …」，方案原本的牆是「比不了」）；沒給上限照立面圖寫「沒給上限」。
+function fixedDepthCell(surface) {
+  const found = ((lastPreview && lastPreview.fixed_depths) || {})[surface];
+  if (!found) return el("td", {class: "depth-cell"}, el("p", {text: "不加層"}));
+  const cap = found.cap ? `${shownNumber(found.cap.value_m)} 公尺（${DEPTH_SOURCES[found.cap.level] || found.cap.level}）` : "沒給上限";
+  return el("td", {class: "depth-cell"}, el("p", {text: cap}),
+    ...found.lines.map((line) => el("p", {class: line.level === "red" ? "limit-warn" : "note", text: line.text})));
 }
 
 function drawDepthTable(plan) {
@@ -311,15 +330,20 @@ async function loadSurrogatePlan(replace) {
   byId("surrogate-build-form").hidden = false;
   byId("build-surrogate").dataset.replace = String(Boolean(replace || data.exists));
   surrogateDefaults = data.defaults;
-  byId("max-full-solves").value = data.defaults.max_full_solves;
-  byId("stop-residual").value = data.defaults.stop_residual;
+  if (!budgetTyped) {
+    byId("max-full-solves").value = data.defaults.max_full_solves;
+    byId("stop-residual").value = data.defaults.stop_residual;
+  }
   const last = data.history[0];
   byId("surrogate-history").textContent = (last ?
     `這台機器上一次建替身花了 ${duration(last.total_seconds)}（${last.patches} 區、完整解 ${last.full_solves} 次）。` :
     "這台機器還沒建過替身，開建前推不出要多久。") + data.estimate_note;
   machineBusy = data.busy || null;
   refreshStart();
-  if (data.busy) say("surrogate-message", busyText({busy: data.busy}), true);
+  // 忙的正是下面畫的這一份建模：進度就在下面，不另寫一句（舊的那句也清掉，免得留著別份的話）。
+  const own = data.latest && data.busy && (data.latest.unit === data.busy || data.latest.build_id === data.busy);
+  if (data.busy && !own) say("surrogate-message", busyText({busy: data.busy}), true);
+  else if (own) say("surrogate-message", "");
   if (data.latest) { watchedBuild = data.latest.build_id; showBuild(data.latest); }
 }
 
@@ -355,6 +379,7 @@ function holdBudget(build, budget) {
   } else if (budgetHeldByBuild && surrogateDefaults) {
     byId("max-full-solves").value = surrogateDefaults.max_full_solves;
     byId("stop-residual").value = surrogateDefaults.stop_residual;
+    budgetTyped = false;
   }
   if (running || budgetHeldByBuild) {
     byId("max-full-solves").disabled = running;
@@ -364,6 +389,8 @@ function holdBudget(build, budget) {
 }
 
 function showBuild(build) {
+  const before = seenBuilds.has(build.build_id) ? seenBuilds.get(build.build_id).state : null;
+  seenBuilds.set(build.build_id, build);
   byId("surrogate-build").hidden = false;
   watchedBuildState = build.state;
   const budget = buildBudget(build);
@@ -383,7 +410,8 @@ function showBuild(build) {
   byId("build-log").textContent = (build.log_tail || []).join("\n");
   byId("stop-build").hidden = !build.actions.stop;
   refreshStart();
-  if (build.state === "installed" && lastPreview && !lastPreview.surrogate.found) preview();
+  // 只在這一份剛建好放進格子（上一次畫它還在建）時重新預覽一次，看這一場的材料它涵不涵蓋；之後不再自己送。
+  if (build.state === "installed" && RUNNING_BUILD.has(before) && lastPreview && !lastPreview.surrogate.found) preview();
 }
 
 async function stopBuild() {
@@ -596,6 +624,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   byId("mount").addEventListener("change", mountWarning);
   byId("form-block").addEventListener("input", markStale);
   byId("form-block").addEventListener("change", markStale);
+  for (const id of ["max-full-solves", "stop-residual"]) byId(id).addEventListener("input", () => { budgetTyped = true; });
   await refreshBuilds();
   await refreshJobs();
   await loadSchemes();

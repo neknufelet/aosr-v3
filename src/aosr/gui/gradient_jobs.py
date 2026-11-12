@@ -52,7 +52,7 @@ from aosr.gradient.surrogate_files import TRAINING_FILE
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import (
-    GradientRequest, PlanRefused, SearchPlan, library_depth_targets, plan_search, start_arguments,
+    GradientRequest, PlanRefused, SearchPlan, fixed_depths, library_depth_targets, plan_search, start_arguments,
 )
 from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
@@ -524,8 +524,10 @@ class GradientJobs:
         with self.lock:
             busy = self.active_job()
         # 代號 → 材料庫顯示名（內建構造預設、家族、使用者材料），只給預覽表看；計畫本身照舊只存代號（#1119）。
-        labels = dict(library_depth_targets(settings, entries).labels)
+        targets = library_depth_targets(settings, entries)
+        labels = dict(targets.labels)
         return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan), "labels": labels,
+                "fixed_depths": fixed_depths(plan, scheme, design, targets),
                 "surrogate": {"found": not missing and refused is None, "slot": str(path.parent), "missing": missing,
                               "message": "要先建替身" if missing else refused},
                 "defaults": {"max_steps": settings.descent.max_steps, "family": settings.family[0].id,

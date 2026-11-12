@@ -85,22 +85,36 @@ def rounded_number(value: float) -> str:
 
 def material_summary(material: SurfaceMaterial, number: Callable[[float], str] = raw_number) -> str:
     """逐層白話只從所屬模型的描述取欄名、單位與種類中文；``number`` 換數字寫法（預設照存檔原值）。"""
+    return _summary(material, number, rows=True)
+
+
+def material_brief(material: SurfaceMaterial, number: Callable[[float], str] = raw_number) -> str:
+    """同 :func:`material_summary`，只是實測表不寫逐列數字（只寫範圍與列數；結果頁把逐列收在自己那一層，#1082 段 2-9）。"""
+    return _summary(material, number, rows=False)
+
+
+def measured_rows(material: MeasuredImpedance, number: Callable[[float], str] = raw_number) -> tuple[str, ...]:
+    """實測表逐列一句：頻率、實部、虛部（欄名取模型描述，同 :func:`material_summary` 那一段）。"""
+    real = PATH_WORDS["real_pa_s_m"].split("，", 1)[0]
+    imag = PATH_WORDS["imag_pa_s_m"].split("，", 1)[0]
+    return tuple(f"{number(point.frequency_hz)} Hz：{real} {number(point.real_pa_s_m)}、{imag} {number(point.imag_pa_s_m)} Pa·s/m"
+                 for point in material.points)
+
+
+def _summary(material: SurfaceMaterial, number: Callable[[float], str], *, rows: bool) -> str:
     if isinstance(material, MeasuredImpedance):
         kind = material.kind
         name = _enum_word(MATERIAL_WORDS[kind]["kind"], kind)
         source = material_field_text(kind, "source_and_conditions").split("，", 1)[0]
         base = material_field_text(kind, "base_assembly").split("；", 1)[0]
-        real = PATH_WORDS["real_pa_s_m"].split("，", 1)[0]
-        imag = PATH_WORDS["imag_pa_s_m"].split("，", 1)[0]
-        rows = "／".join(f"{number(point.frequency_hz)} Hz：{real} {number(point.real_pa_s_m)}、{imag} {number(point.imag_pa_s_m)} Pa·s/m"
-                        for point in material.points)
+        table = f"{'／'.join(measured_rows(material, number))}；" if rows else ""
         return (f"{name}：{material.points[0].frequency_hz:g}–{material.points[-1].frequency_hz:g} Hz，"
-                f"{len(material.points)} 列；{rows}；{source}：{material.source_and_conditions}；"
-                f"{base}：{material_summary(material.base_assembly, number)}")
+                f"{len(material.points)} 列；{table}{source}：{material.source_and_conditions}；"
+                f"{base}：{_summary(material.base_assembly, number, rows=rows)}")
     if isinstance(material, MountedOnWall):
         wall = material_field_text(material.kind, "wall")
         layers = _model_summary(MountedOnWall, lambda name: None if name == "wall" else getattr(material, name), number)
-        return f"{layers}；{wall}：{material_summary(material.wall, number)}"
+        return f"{layers}；{wall}：{_summary(material.wall, number, rows=rows)}"
     return _model_summary(type(material), lambda name: getattr(material, name), number)
 
 

@@ -38,6 +38,16 @@ td[data-verdict="within_range"]{color:#1a7f37}
 #zone-rows td:nth-child(n+5) { min-width: 14em; }
 #zone-rows .zone-material-detail { margin-top: .25rem; color: #46586a; font-size: .9em; }
 #zone-rows .zone-material-detail summary { cursor: pointer; }
+/* 標語同材料頁（#1082 段 2-9）：實測綠、近似橘、模擬藍；出處緊接名字下面；實測表逐列收在自己那一層。 */
+#zone-rows .badge { display: inline-block; padding: 0 .4em; border-radius: .6em; font-size: .85em; white-space: nowrap; }
+#zone-rows .badge.basis-simulated { background: #e3eef7; color: #1d4f7a; }
+#zone-rows .badge.basis-measured { background: #e1f1e6; color: #1f6136; }
+#zone-rows .badge.basis-approximate { background: #fbecd4; color: #7a4a0c; }
+#zone-rows .zone-material-source, #zone-rows .zone-material-conditions { margin: .25rem 0 0; font-size: .9em; color: #2c3e50; }
+#zone-rows .zone-material-source a { overflow-wrap: anywhere; }
+#zone-rows .zone-measured-table { margin-top: .25rem; color: #46586a; font-size: .9em; }
+#zone-rows .zone-measured-table summary { cursor: pointer; }
+#zone-rows .zone-measured-table ol { margin: .25rem 0; padding-left: 2em; white-space: normal; }
 #zone-improvement td[data-verdict="better"] { color: #1a7f37; font-weight: 600; }
 #zone-improvement td[data-verdict="worse"] { color: #872c22; font-weight: 600; }
 #zone-improvement tr.zone-total td { border-top: 2px solid #15617b; font-weight: 600; }
