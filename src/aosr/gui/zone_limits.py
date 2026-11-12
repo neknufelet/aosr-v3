@@ -7,7 +7,10 @@
   （``validate_surface_partition``）。
 - 深度：一區的上限取「房間預設／這面牆／這一塊」三層裡最小的那一個（一樣小時取範圍最小的那一層），並記是哪一層擋的；
   固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過上限加 ``EDGE_MERGE_TOL`` 就紅（跟搜尋的固定材料候選 ``depth_fit.layers_exceed`` 同一把）。
-  直接取代牆面的材料（固定阻抗、實測表、整面多層構造）看不出貼了多深，照實寫「比不了」、不當作過，也不拿原牆的厚度標紅。
+  直接取代牆面的材料（固定阻抗、實測表、整面多層構造）看不出貼了多深：是方案原本的牆就照實寫「比不了」、不當作過，
+  也不拿原牆的厚度標紅；正是材料庫裡直接取代牆面的那一筆（:func:`picked_entry`，內容逐欄相同，同換材料那一支
+  ``zone_modes`` 認原牆那一條）就是使用者選上去的，照搜尋的固定材料候選同一把判（``depth_fit.fixed_fit``，#1082 段 2-7）：
+  實測表照底構造算總深、超過就紅，固定阻抗量不出多深、有上限就紅（限制是硬的），句子同段 2-4 講是哪一層擋的。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
 - 搜尋區的上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法只在引擎一份 ``fixed_surfaces.target_fit``）：准用的每一組
   （沒寫清單就是全部可調材料）列出生效上限與是哪一條擋住的（個案哪一層／材料組自己）；比一組最淺排法還淺、或固定材料
@@ -36,11 +39,12 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, target_fit
+from aosr.gradient.depth_fit import TargetFit, fixed_fit, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
+from aosr.materials.library import MeasuredTable
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.physics.zone_fill import FILL_PREFIX, Box, wall_size_m
 
@@ -171,11 +175,42 @@ def _place_problems(room: Room, wall: str, entries: Sequence[Mapping[str, object
         walls[wall].append(Problem(code="not_covered", level="red", text="這一面的分區沒有正好蓋滿整面（留了空）；請重切這一面"))
 
 
-def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: DepthCap | None) -> list[Problem]:
+def picked_entry(material: SurfaceMaterial, targets: DepthTargets) -> str | None:
+    """固定區的材料正是材料庫裡直接取代牆面的哪一筆（固定阻抗、實測表；多層構造選上去一定是貼在原牆上，不在這裡認）：
+    內容逐欄相同才算，同換材料那一支認原牆的那一條（``zone_modes.origin`` 的 ``replacements``；實測表比物理那一份）。
+    不是就回 None——那是方案原本的牆。"""
+    if isinstance(material, MountedOnWall | Assembly):
+        return None
+    for identifier, entry in targets.fixed.items():
+        physics = entry.to_physics() if isinstance(entry, MeasuredTable) else entry
+        if not isinstance(physics, Assembly) and physics == material:
+            return identifier
+    return None
+
+
+def _picked_problems(identifier: str, cap: DepthCap, targets: DepthTargets) -> list[Problem]:
+    """固定區選了材料庫直接取代牆面的那一筆：照搜尋的固定材料候選同一把判（``fixed_fit``，實測表照底構造算總深），
+    句子同段 2-4 那一行（``target_line``）。"""
+    fit = fixed_fit(fixed_target(identifier), targets.fixed[identifier], cap.value_m)
+    text = str(target_line(fit, cap, targets)["text"])
+    if fit.usable:
+        return [Problem(code="depth_fits", level="note", text=text)]
+    if fit.reason == "fixed_not_comparable":
+        return [Problem(code="depth_unknown", level="red", text=f"{text}；這一區的上限 {cap.words()}")]
+    return [Problem(code="depth_over", level="red", text=text)]
+
+
+def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: DepthCap | None,
+                    targets: Callable[[], DepthTargets | None] = lambda: None) -> list[Problem]:
+    """``targets`` 只在固定區的材料直接取代牆面、又有上限時才叫（要讀材料庫認是不是選上去的）；回 None 就當方案原本的牆。"""
     if cap is None or mode != "fixed":
         return []
     depth = None if material is None else added_depth(material)
     if depth is None:
+        loaded = None if material is None else targets()
+        identifier = None if loaded is None or material is None else picked_entry(material, loaded)
+        if loaded is not None and identifier is not None:
+            return _picked_problems(identifier, cap, loaded)
         return [Problem(code="depth_not_comparable", level="note",
                         text=f"這一區的材料直接取代牆面、看不出貼了多深，上限 {cap.words()} 比不了")]
     if depth > cap.value_m + EDGE_MERGE_TOL:
@@ -289,7 +324,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                 depth_targets: Callable[[], DepthTargets] | None = None) -> dict[str, object]:
     """一份方案（草稿也可以）逐面逐區的限制檢查；回 ``zones``（牆 → 區 → 幾條）、``walls``（整面的）、``caps``（每區生效上限；
     搜尋區另有 ``targets``：每一組的生效上限與哪一條擋住）、``red``（擋下的條數）與 ``refusals``（擋下的每一條，給開跑與
-    「拿去搜尋」照講）。``depth_targets`` 只在有一區交給搜尋又有上限時才叫（讀材料庫）；叫失敗照講成一條紅。"""
+    「拿去搜尋」照講）。``depth_targets`` 只在有一區交給搜尋又有上限、或固定區的材料直接取代牆面又有上限時才叫
+    （讀材料庫），整份最多叫一次；叫失敗照講成一條紅。"""
     scheme_id = str(document.get("scheme_id", ""))
     design, top = _design_of(design_value, scheme_id)
     try:
@@ -304,6 +340,15 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
     modes = _modes(design)
     checked: dict[str, list[Problem]] = {}
     loaded: DepthTargets | bool | None = None
+
+    def targets() -> DepthTargets | None:
+        nonlocal loaded
+        if depth_targets is None:
+            return None
+        if loaded is None:
+            loaded = _loaded(depth_targets, top)
+        return loaded if isinstance(loaded, DepthTargets) else None
+
     for wall in WALLS:
         entries = cast(list[Mapping[str, object]], by_wall.get(wall) if isinstance(by_wall, dict) else None) or [{"area": "whole_wall"}]
         if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
@@ -321,16 +366,13 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                 caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words()}
             material = _material(entry.get("material"))
             lines = found.setdefault(key, [])
-            lines.extend(_depth_problems(material, mode, cap))
-            if cap is not None and mode == "search" and depth_targets is not None:
-                if loaded is None:
-                    loaded = _loaded(depth_targets, top)
-                if isinstance(loaded, DepthTargets):
-                    item = design.zones.get(wall, {}).get(key) if design is not None else None
-                    problems, targets = _target_problems(None if item is None else item.allowed, cap, loaded)
-                    lines.extend(problems)
-                    if targets:
-                        caps[wall][key]["targets"] = targets
+            lines.extend(_depth_problems(material, mode, cap, targets))
+            if cap is not None and mode == "search" and (found_targets := targets()) is not None:
+                item = design.zones.get(wall, {}).get(key) if design is not None else None
+                problems, lines_by_group = _target_problems(None if item is None else item.allowed, cap, found_targets)
+                lines.extend(problems)
+                if lines_by_group:
+                    caps[wall][key]["targets"] = lines_by_group
             if range_check is not None and mode == "fixed" and material is not None:
                 text = json.dumps(material.model_dump(mode="json"), sort_keys=True)
                 if text not in checked:
@@ -354,7 +396,7 @@ def _loaded(provider: Callable[[], DepthTargets], top: list[Problem]) -> DepthTa
         return provider()
     except ValueError as error:
         top.append(Problem(code="materials_unreadable", level="red",
-                           text=f"查不了交給搜尋的區放不放得下材料組：{error}"))
+                           text=f"查不了交給搜尋的區放不放得下材料組、也認不出固定區是不是選了材料庫的材料：{error}"))
         return False
 
 
