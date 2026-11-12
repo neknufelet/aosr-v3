@@ -33,7 +33,7 @@ from typing import Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.paths import config_path
@@ -59,6 +59,7 @@ from aosr.search.store import (
 )
 
 JOBS_DIR: Final = "search-jobs"
+PAGE: Final = Path(__file__).resolve().parent / "static" / "search_start.html"
 SEARCHES_DIR: Final = "searches"
 MODAL_CACHE_DIR: Final = "modal-cache"
 JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
@@ -135,13 +136,21 @@ def front_wall_guess(scheme: Scheme) -> str:
 def scheme_facts(scheme: Scheme) -> dict[str, object]:
     """表單旁邊要給人看的方案事實：房間、主位、喇叭擺法（改擺法回方案輸入頁）、有沒有家具。"""
     room = scheme.scene.room_m
+    heights = {point.z for point in scheme.speakers.values()}
+    try:
+        scheme.scene.require_whole_walls()
+        zoned = None
+    except ValueError:
+        zoned = ("這份方案的牆面有矩形分區（第三階段用的切法）；第一、二階段搜尋只收整面牆的方案，"
+                 "預覽會照實拒收。請改用整面牆的那一份方案")
     return {"scheme_id": scheme.scheme_id, "purpose": scheme.purpose,
+            "speaker_height_m": heights.pop() if len(heights) == 1 else None,
             "room_m": {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz},
             "primary_m": list(scheme.receiver_set.primary.position_m),
             "speaker_setup": None if scheme.speaker_setup is None else speaker_setup_text(scheme.speaker_setup),
             "has_speaker_setup": scheme.speaker_setup is not None,
             "furniture": len(scheme.furniture or ()),
-            "front_wall_guess": front_wall_guess(scheme), "seat_locked_note": SEAT_LOCKED_NOTE}
+            "front_wall_guess": front_wall_guess(scheme), "seat_locked_note": SEAT_LOCKED_NOTE, "zoned": zoned}
 
 
 class SearchJobs:
@@ -320,7 +329,8 @@ class SearchJobs:
         running = state in ("starting", "searching", "finishing", "stopping")
         conclusion = self._conclusion(status)
         resumable = (folder is not None and status is not None and conclusion is None
-                     and status.state not in ("failed", "interrupted") and status.refine.state not in ("failed", "interrupted")
+                     and status.state not in ("failed", "interrupted", "user_stopped", "paused_time_limit")
+                     and status.refine.state not in ("failed", "interrupted")
                      and not (folder / STOP_FILE).exists() and not (folder / REFINE_STOP_FILE).exists())
         return {"stop": running,
                 "resume": resumable and state in ("interrupted", "failed"),
@@ -347,7 +357,7 @@ class SearchJobs:
                 "actions": self._actions(job, state, folder, status),
                 "search_id": None if folder is None else folder.name,
                 "search_url": None if folder is None else f"/searches/{folder.name}",
-                "summary": None if summary is None else summary["stage_text"],
+                "summary": summary,
                 "outer": None if status is None else status.outer.message,
                 "refine_best": best, "steps": steps}
 
@@ -572,9 +582,13 @@ class SearchJobHandlers:
         return await self._respond(lambda: call(job_id))
 
 
+async def _page(request: Request) -> Response:
+    return FileResponse(PAGE, media_type="text/html")
+
+
 def search_job_routes(jobs: SearchJobs) -> list[Route]:
     handlers = SearchJobHandlers(jobs)
-    return [Route("/api/search-jobs", handlers.listing),
+    return [Route("/search-start", _page), Route("/api/search-jobs", handlers.listing),
             Route("/api/search-jobs/previous", handlers.previous),
             Route("/api/search-jobs/schemes/{name}", handlers.facts),
             Route("/api/search-jobs/schemes/{name}/preview", handlers.preview, methods=["POST"]),

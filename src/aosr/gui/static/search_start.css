@@ -1,0 +1,8 @@
+/* 開始擺位搜尋頁（#700）：共用第三階段頁的選項格；兩格一對的範圍排成一行。 */
+.pair{display:flex;align-items:center;gap:.3rem}
+.pair input{width:6.5rem;min-width:0}
+.box-row{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.2rem 0}
+.box-row input{width:5.5rem}
+.box-row span{color:#46586a;font-size:.9rem}
+#facts-list,#preview-list{margin:.3rem 0;padding-left:1.2rem}
+#job-steps pre{white-space:pre-wrap;overflow-wrap:anywhere}
