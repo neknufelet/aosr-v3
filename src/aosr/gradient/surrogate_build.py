@@ -149,8 +149,11 @@ def _result(work: Path, result: SurrogateResult) -> None:
 def _rebuild_hint(stop_reason: str) -> str:
     """驗證沒過時重建有沒有用：預算用完才停的，加大預算可能會過；殘差先達標才停的，照同樣設定重建結果一模一樣
     （訓練材料與補點都是固定種子），加預算沒用。"""
-    from aosr.physics.fem_reduced_build import STOP_BUDGET
+    from aosr.physics.fem_reduced_build import STOP_BUDGET, STOP_ROUND_LIMIT
 
+    if stop_reason == STOP_ROUND_LIMIT:
+        return ("建模停止原因：補訓練補到開跑那一道固定材料核對過了就停（候選池的殘差還沒到停止值）——"
+                "加大完整解預算（max_full_solves）或調小停止殘差（stop_residual）重建可能會過")
     if stop_reason == STOP_BUDGET:
         return f"建模停止原因：{stop_reason}——加大完整解預算（max_full_solves）重建可能會過"
     return (f"建模停止原因：{stop_reason}——照同樣設定重建結果一模一樣（固定種子），加預算沒用；"

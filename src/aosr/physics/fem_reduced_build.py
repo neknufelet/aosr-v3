@@ -231,7 +231,7 @@ class ReducedModelBuilder:
                max_rounds: int | None = None) -> ReducedModel:
         """補訓練：新的這批材料接在訓練材料後面，用目前的基底從補訓練的材料（第一次補起所有補進來的，不含原本的訓練材料）
         抽候選、量殘差、補點，停止規則與合計預算照舊。``max_rounds`` 給了就最多補這幾輪（每輪一次補點＋重算基底）先停
-        （:data:`STOP_ROUND_LIMIT`；剛好用完預算記「預算停止」），呼叫端核過再決定要不要接著補——再叫一次、不給新材料
+        （:data:`STOP_ROUND_LIMIT`；補到上限那一輪照舊再量一次殘差、由停止規則判），呼叫端核過再決定要不要接著補——再叫一次、不給新材料
         就從同一個候選池接著補，跟一次補到底選的點與結果逐位相同。
 
         回補完的替身（輸入雜湊含補進來的材料、建模帳接著記）；預算已經用完就一點都不補、照實記「預算停止」。"""
@@ -260,8 +260,9 @@ class ReducedModelBuilder:
                 build.solve(outcome[1])
                 basis, matrices = build.reduce()
                 rounds += 1
-                if max_rounds is not None and rounds >= max_rounds:
-                    stop = STOP_BUDGET if build.solves >= self.settings.max_full_solves else STOP_ROUND_LIMIT
+                # 到上限那一輪不先停：照一次補到底，再量一次殘差由 _stop 判（殘差達標或預算停止），逐位相同。
+                if max_rounds is not None and rounds >= max_rounds and build.solves < self.settings.max_full_solves:
+                    stop = STOP_ROUND_LIMIT
                     break
         return self._finish(build, basis, matrices, stop)
 

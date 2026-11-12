@@ -138,15 +138,25 @@ def test_extend_continues_the_same_snapshots_on_the_new_sets_only() -> None:
     after = check.revalidate_reduced(extended, operators, materials[4:], before.full_pressure,
                                      full_solves=before.full_solves, dense_threads=1)
     assert max(after.frequency_db_by_seat.values()) < max(before.frequency_db_by_seat.values())
-    # 一輪一輪補（每輪交回來一次、不給新材料就同一池接著補）跟一次補到底逐位相同。
-    stepwise = ReducedModelBuilder(operators, AXIS, materials[:4], settings=settings, dense_threads=1)
-    stepwise.build()
-    calls, step = 1, stepwise.extend(materials[4:], max_rounds=1)
-    while stepwise.stop_reason == STOP_ROUND_LIMIT:
-        calls, step = calls + 1, stepwise.extend(max_rounds=1)
-    assert calls > 1 and bitwise_equal(step.matrices, extended.matrices) and step.input_hash == extended.input_hash
-    assert (step.ledger.rounds, step.ledger.full_solves, step.ledger.stop_reason) == (
-        extended.ledger.rounds, extended.ledger.full_solves, extended.ledger.stop_reason)
+    # 一輪一輪補（每輪交回來一次、不給新材料就同一池接著補）跟一次補到底逐位相同；補到一半撞上限那一種也一樣
+    # （上限那一輪照舊再量一次殘差才判停）。
+    # 上限收到補一輪補不完（這間小房間不設上限一輪補 16 點就把池用完）。
+    capped = settings.model_copy(update={"max_full_solves": base.ledger.full_solves + 8})
+    for limit in (settings, capped):
+        whole = ReducedModelBuilder(operators, AXIS, materials[:4], settings=limit, dense_threads=1)
+        whole.build()
+        expected = whole.extend(materials[4:])
+        stepwise = ReducedModelBuilder(operators, AXIS, materials[:4], settings=limit, dense_threads=1)
+        stepwise.build()
+        calls, step = 1, stepwise.extend(materials[4:], max_rounds=1)
+        while stepwise.stop_reason == STOP_ROUND_LIMIT:
+            calls, step = calls + 1, stepwise.extend(max_rounds=1)
+        assert (calls > 1) is (limit is settings)  # 沒撞上限時真的分了幾次交回來
+        assert bitwise_equal(step.matrices, expected.matrices) and step.input_hash == expected.input_hash
+        assert (step.ledger.rounds, step.ledger.full_solves, step.ledger.stop_reason) == (
+            expected.ledger.rounds, expected.ledger.full_solves, expected.ledger.stop_reason)
+    # 真的撞到上限；停止原因是上限那一輪之後量過殘差才判的（這一例殘差剛好達標），不是沒量就記「預算停止」。
+    assert expected.ledger.full_solves == capped.max_full_solves and expected.ledger.stop_reason != STOP_ROUND_LIMIT
     again = check.revalidate_reduced(base, operators, materials[4:], before.full_pressure, full_solves=before.full_solves,
                                      dense_threads=1)
     assert bitwise_equal(again, before)  # 同一份替身重算替身那一側，跟完整驗證逐位相同
