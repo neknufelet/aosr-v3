@@ -153,7 +153,7 @@ def _rebuild_hint(stop_reason: str) -> str:
 
     if stop_reason == STOP_ROUND_LIMIT:
         return ("建模停止原因：補訓練補到開跑那一道固定材料核對過了就停（候選池的殘差還沒到停止值）——"
-                "加大完整解預算（max_full_solves）或調小停止殘差（stop_residual）重建可能會過")
+                "照同樣設定重建會停在同一輪、結果一模一樣（固定種子），加預算沒用；要過得給這一次建模更嚴的停止殘差（stop_residual）")
     if stop_reason == STOP_BUDGET:
         return f"建模停止原因：{stop_reason}——加大完整解預算（max_full_solves）重建可能會過"
     return (f"建模停止原因：{stop_reason}——照同樣設定重建結果一模一樣（固定種子），加預算沒用；"
