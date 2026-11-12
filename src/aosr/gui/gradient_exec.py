@@ -48,9 +48,14 @@ def write_exit(path: Path, record: StepExit) -> None:
 POLL_S = 0.5
 
 
-def run_step(record: Path, log: Path, command: list[str]) -> int:
-    """處置只把訊號記下來；轉給子行程由主迴圈做、只做一次（處置裡送會在重入時送兩次）。"""
-    received: list[int] = []
+def run_step(record: Path, log: Path, command: list[str], *, received: list[int] | None = None) -> int:
+    """處置只把訊號記下來；轉給子行程由主迴圈做、只做一次（處置裡送會在重入時送兩次）。
+
+    ``received`` 給了就記進那一份（連著跑好幾步的那一層用同一份，步與步之間收到的訊號也看得到，#700）；
+    開跑前那一份已經有訊號時，子行程一起來就轉一次。
+    """
+    if received is None:
+        received = []
 
     def remember(signum: int, frame: FrameType | None) -> None:
         received.append(signum)

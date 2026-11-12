@@ -60,6 +60,7 @@ from aosr.gui.gradient_plan import (
 from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
 from aosr.gui.problem_text import checked_scheme
+from aosr.gui.search_view import held_search
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
@@ -76,6 +77,8 @@ JOBS_DIR: Final = "gradient"
 JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
 JOB_VERSION: Final = "aosr.gui.gradient_job.v1"
 UNIT_PREFIX: Final = "aosr-gradient-"
+# 網頁開的第一、二階段搜尋（#700）的服務名開頭：整台一次一件，查忙時兩邊的服務都算。
+SEARCH_UNIT_PREFIX: Final = "aosr-search-"
 MEMORY_MAX: Final = "32G"
 LOG_TAIL_LINES: Final = 8
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -202,9 +205,9 @@ class SystemdLauncher:
         raise LaunchFailed(f"查不到服務 {unit} 的狀態（離開碼 {done.returncode}）：{done.stderr.strip() or state}")
 
     def active_units(self) -> set[str]:
-        """整台機器（這個使用者）還在的第三階段服務，不管是哪一個網頁資料夾開的。"""
+        """整台機器（這個使用者）還在的重計算服務（第三階段、建替身、網頁開的第一二階段搜尋），不管是哪一個網頁資料夾開的。"""
         done = self.run(["systemctl", "--user", "list-units", "--plain", "--no-legend",
-                         "--state=" + ",".join(RUNNING_UNIT_STATES), f"{UNIT_PREFIX}*"])
+                         "--state=" + ",".join(RUNNING_UNIT_STATES), f"{UNIT_PREFIX}*", f"{SEARCH_UNIT_PREFIX}*"])
         if done.returncode != 0:
             raise LaunchFailed(f"查不到現在有哪些服務（離開碼 {done.returncode}）：{done.stderr.strip()}")
         return {line.split()[0].removesuffix(".service") for line in done.stdout.splitlines() if line.strip()}
@@ -500,12 +503,18 @@ class GradientJobs:
         return sorted(found, key=lambda job: job.created_at, reverse=True)
 
     def active_job(self) -> str | None:
-        """還在算的那一跑：先看這個資料夾的工作，再看整台機器有沒有別處開的第三階段服務。"""
+        """還在算的那一跑：先看這個資料夾的工作，再看整台機器有沒有別處開的重計算服務，最後看命令列開著的搜尋。"""
         for job in self._jobs():
             if job.steps and self._step_state(job, len(job.steps) - 1)[0] == "running":
                 return job.job_id
         units = sorted(self.launcher.active_units())
-        return units[0] if units else None
+        if units:
+            return units[0]
+        # 命令列開的第一、二階段搜尋不是服務，讀鎖清單看網頁的搜尋區有沒有資料夾正被拿著（#700）。
+        try:
+            return held_search(self.data_dir / "searches")
+        except ValueError as error:
+            raise LaunchFailed(str(error)) from error
 
     @contextmanager
     def launching(self) -> Iterator[None]:

@@ -80,6 +80,8 @@ function busyWho(busy) {
   if (job) return {text: `方案「${job.scheme_id}」的第三階段搜尋（${job.state_text}）`, job: job.job_id};
   const build = [...knownBuilds, ...seenBuilds.values()].find((item) => item.unit === busy || item.build_id === busy);
   if (build) return {text: `方案「${build.scheme_id}」正在建替身（${build.state_text}）`, build: build.build_id};
+  if (busy.startsWith("aosr-search-")) return {text: `網頁開的擺位搜尋（服務 ${busy}）`};
+  if (busy.startsWith("搜尋 ")) return {text: `命令列開的${busy}（資料夾正被計算行程拿著）`};
   return {text: `別的資料夾或命令列開的第三階段計算（服務 ${busy}）`};
 }
 

@@ -29,6 +29,7 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.archive_delete import ArchiveDelete, delete_response
 from aosr.gui.gradient_jobs import GradientJobs, Launcher, SystemdLauncher, gradient_routes
+from aosr.gui.search_jobs import MEMORY_MAX as SEARCH_MEMORY_MAX, SearchJobs, search_job_routes
 from aosr.gui.gradient_follow import GradientFollow, gradient_follow_routes
 from aosr.gui.surrogate_builds import SurrogateBuilds, surrogate_routes
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
@@ -123,6 +124,7 @@ class GuiSettings:
     # 第三階段搜尋開服務的那一層（#1093）；不給就是 systemd 使用者層服務。考卷換成本機行程或假的。
     gradient_launcher: Launcher | None = None
     gradient_settings: Path | None = None
+    search_launcher: Launcher | None = None  # 第一、二階段搜尋（#700）；不給就跟第三階段共用，整台一次一件才看得到彼此
 
 
 def client_allowed(host: str | None, networks: tuple[ipaddress.IPv4Network, ...]) -> bool:
@@ -322,6 +324,9 @@ class GuiHandlers:
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
                                      scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
         self.surrogates = SurrogateBuilds(self.gradient)
+        search_launcher = settings.search_launcher or settings.gradient_launcher or SystemdLauncher(memory_max=SEARCH_MEMORY_MAX)
+        self.search_jobs = SearchJobs(self.data_dir, launcher=search_launcher, engine_commit=settings.engine_commit,
+                                      capabilities=capabilities_path, scheme_lock=self.jobs._lock, others=lambda: self.gradient.active_job())
         self.gradient_follow = GradientFollow(self.gradient, self.jobs, self._web_problem_texts)
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
@@ -953,7 +958,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
+        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *search_job_routes(handlers.search_jobs), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
