@@ -76,6 +76,8 @@ JOBS_DIR: Final = "gradient"
 JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
 JOB_VERSION: Final = "aosr.gui.gradient_job.v1"
 UNIT_PREFIX: Final = "aosr-gradient-"
+# 網頁開的第一、二階段搜尋（#700）的服務名開頭：整台一次一件，查忙時兩邊的服務都算。
+SEARCH_UNIT_PREFIX: Final = "aosr-search-"
 MEMORY_MAX: Final = "32G"
 LOG_TAIL_LINES: Final = 8
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -202,9 +204,9 @@ class SystemdLauncher:
         raise LaunchFailed(f"查不到服務 {unit} 的狀態（離開碼 {done.returncode}）：{done.stderr.strip() or state}")
 
     def active_units(self) -> set[str]:
-        """整台機器（這個使用者）還在的第三階段服務，不管是哪一個網頁資料夾開的。"""
+        """整台機器（這個使用者）還在的重計算服務（第三階段、建替身、網頁開的第一二階段搜尋），不管是哪一個網頁資料夾開的。"""
         done = self.run(["systemctl", "--user", "list-units", "--plain", "--no-legend",
-                         "--state=" + ",".join(RUNNING_UNIT_STATES), f"{UNIT_PREFIX}*"])
+                         "--state=" + ",".join(RUNNING_UNIT_STATES), f"{UNIT_PREFIX}*", f"{SEARCH_UNIT_PREFIX}*"])
         if done.returncode != 0:
             raise LaunchFailed(f"查不到現在有哪些服務（離開碼 {done.returncode}）：{done.stderr.strip()}")
         return {line.split()[0].removesuffix(".service") for line in done.stdout.splitlines() if line.strip()}

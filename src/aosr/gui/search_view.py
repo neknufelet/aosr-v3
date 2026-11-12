@@ -631,6 +631,11 @@ def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
             "stage_text": "；".join(lines[:3]), "url": f"/searches/{path.name}"}
 
 
+def search_line(path: Path) -> dict[str, str]:
+    """一場一列（清單頁同一支）：網頁開搜尋那一頁的工作清單也用它講這場走到哪（#700）。"""
+    return _list_item(path, _read(read_proc_locks))
+
+
 def list_searches(root: Path) -> dict[str, object]:
     """只列指定根目錄的合法資料夾；不往外遞迴。"""
     items: list[dict[str, str]] = []

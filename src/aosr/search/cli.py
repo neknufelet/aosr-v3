@@ -37,7 +37,7 @@ from aosr.search.refine_run import refine_search, refinement_status
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings
 from aosr.search.select import select_refined
-from aosr.search.store import SearchIdentity, SearchStore, speaker_height
+from aosr.search.store import SearchIdentity, SearchStore, fill_settings_document
 from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
@@ -107,6 +107,7 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--project", type=Path, required=True)
     start.add_argument("--settings", type=Path, required=True)
     start.add_argument("--root", type=Path, required=True)
+    start.add_argument("--id-file", type=Path, help="建好資料夾後把搜尋代號寫進這個檔（網頁開的搜尋用）")
     resume = commands.add_parser("resume", help="接續進行中的搜尋")
     resume.add_argument("search", type=Path)
     refine = commands.add_parser("refine", help="接續細算與重排已停的搜尋")
@@ -148,17 +149,22 @@ def _identity(purpose: str, capabilities: Path) -> SearchIdentity:
 
 def _create(args: argparse.Namespace) -> SearchStore:
     project = load_scheme(args.project)
-    document = json.loads(args.settings.read_bytes())
-    if isinstance(document, dict) and isinstance(document.get("layout"), dict) and document["layout"].get("seat_locked") is True:
-        document["layout"].setdefault("ear_height_m", project.receiver_set.primary.position_m[2])
-    if project.speaker_setup is not None and isinstance(document, dict) and isinstance(document.get("layout"), dict):
-        document["layout"].setdefault("speaker_height_m", speaker_height(project))
-        document["layout"].setdefault("cabinet", project.speaker_setup.cabinet.model_dump(mode="json"))
-    settings = SearchSettings.model_validate(document)
+    settings = SearchSettings.model_validate(fill_settings_document(project, json.loads(args.settings.read_bytes())))
     identity = _identity(project.purpose, args.capabilities)
     versions = {"python": sys.version, "optuna": version("optuna"), "numpy": version("numpy")}
-    return SearchStore.create(args.root, project=project, settings=settings,
-                              identity=identity, versions=versions)
+    store = SearchStore.create(args.root, project=project, settings=settings,
+                               identity=identity, versions=versions)
+    id_file = getattr(args, "id_file", None)  # 考卷直接叫 _create 時給的參數沒有這一格
+    if id_file is not None:
+        _write_id_file(id_file, store.search_id)
+    return store
+
+
+def _write_id_file(path: Path, search_id: str) -> None:
+    """新資料夾的代號寫成一個小檔（先寫暫存檔再換名）：網頁開的搜尋靠它認得自己開的是哪一個資料夾（#700）。"""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(search_id + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def _compute(store: SearchStore, capabilities: Path, commit: str, *, lock_fd: int | None = None,

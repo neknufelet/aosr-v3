@@ -578,7 +578,7 @@ def test_systemd_launcher_command_line() -> None:
     runs.answer = (0, "aosr-gradient-a-0.service loaded active running x\naosr-gradient-b-1.service loaded activating start y\n", "")
     assert launcher.active_units() == {"aosr-gradient-a-0", "aosr-gradient-b-1"}
     assert runs.commands[-1] == ["systemctl", "--user", "list-units", "--plain", "--no-legend",
-                                 "--state=active,activating,deactivating,reloading", "aosr-gradient-*"]
+                                 "--state=active,activating,deactivating,reloading", "aosr-gradient-*", "aosr-search-*"]
     runs.answer = (1, "", "Failed to connect to bus")
     with pytest.raises(LaunchFailed, match="查不到現在有哪些服務"):
         launcher.active_units()

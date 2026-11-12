@@ -37,6 +37,8 @@ CANDIDATES_DIR = "candidates"
 REFINE_DIR = "verification"
 REFINE_LEDGER_FILE = f"refine{JSONL_SUFFIX}"
 FEM_DIR = "fem-parts"
+STOP_FILE = "stop"
+REFINE_STOP_FILE = "refine-stop"
 REQUIRED_VERSIONS = frozenset(("python", "optuna", "numpy"))
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -165,6 +167,56 @@ def _check_speaker_settings(project: Scheme, settings: LayoutSettings) -> None:
         raise SchemeValidationError(tuple(differences))
 
 
+def fill_settings_document(project: Scheme, document: object) -> object:
+    """設定檔省略、可從方案推出的三格照方案補：鎖座位時的耳高、有喇叭設定時的喇叭高與箱體。
+
+    命令列開搜尋與網頁開搜尋共用這一支（#700），其餘一格不補；已寫的值照原樣留給建資料夾時核對。
+    """
+    if not isinstance(document, dict) or not isinstance(document.get("layout"), dict):
+        return document
+    layout = dict(document["layout"])
+    if layout.get("seat_locked") is True:
+        layout.setdefault("ear_height_m", project.receiver_set.primary.position_m[2])
+    if project.speaker_setup is not None:
+        layout.setdefault("speaker_height_m", speaker_height(project))
+        layout.setdefault("cabinet", project.speaker_setup.cabinet.model_dump(mode="json"))
+    return {**document, "layout": layout}
+
+
+def checked_inputs(project: Scheme, settings: SearchSettings) -> tuple[Scheme, SearchSettings]:
+    """建搜尋資料夾之前對方案與設定的全部檢查（用途核對與驗證軸除外，那兩道要評分設定）；不寫任何檔。
+
+    回補上搜尋軸的方案與重新驗過的設定；網頁開跑前的預覽（#700）跟建資料夾走同一支。
+    """
+    project = Scheme.model_validate(project)
+    project.scene.require_whole_walls()
+    if project.scene.low_frequency_axis is None:
+        project = project.model_copy(update={"scene": project.scene.model_copy(
+            update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
+    if settings.stage is not None:
+        from aosr.config.paths import config_path
+        from aosr.config.quality_targets import load_quality_targets
+        from aosr.reporting.stage_one_result import check_stage_one_prerequisites
+        from aosr.scoring.stage_one_score import stage_one_score_settings
+
+        check_stage_one_prerequisites(project)
+        try:
+            stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
+        except KeyError as error:
+            raise ValueError(str(error)) from error
+    check_project_furniture_layout(project)
+    settings = SearchSettings.model_validate(settings.canonical())
+    _check_speaker_settings(project, settings.layout)
+    from aosr.search.seat_lock import check_desk_reach, check_listening_reach, check_room_range, check_seat_lock
+
+    check_seat_lock(project, settings.layout)
+    check_desk_reach(project, settings.layout)
+    check_room_range(project, settings.layout)
+    if settings.layout.room_range is None:
+        check_listening_reach(project, settings.layout)
+    return project, settings
+
+
 class SearchStore:
     """新搜尋用新代號；只提供候選結果路徑，不求解、不儲存候選結果。"""
 
@@ -181,32 +233,7 @@ class SearchStore:
     def create(cls, root: Path, *, project: Scheme, settings: SearchSettings,
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
-        project = Scheme.model_validate(project)
-        project.scene.require_whole_walls()
-        if project.scene.low_frequency_axis is None:
-            project = project.model_copy(update={"scene": project.scene.model_copy(
-                update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
-        if settings.stage is not None:
-            from aosr.config.paths import config_path
-            from aosr.config.quality_targets import load_quality_targets
-            from aosr.reporting.stage_one_result import check_stage_one_prerequisites
-            from aosr.scoring.stage_one_score import stage_one_score_settings
-
-            check_stage_one_prerequisites(project)
-            try:
-                stage_one_score_settings(load_quality_targets(config_path("quality_targets.toml")), project.purpose)
-            except KeyError as error:
-                raise ValueError(str(error)) from error
-        check_project_furniture_layout(project)
-        settings = SearchSettings.model_validate(settings.canonical())
-        _check_speaker_settings(project, settings.layout)
-        from aosr.search.seat_lock import check_desk_reach, check_listening_reach, check_room_range, check_seat_lock
-
-        check_seat_lock(project, settings.layout)
-        check_desk_reach(project, settings.layout)
-        check_room_range(project, settings.layout)
-        if settings.layout.room_range is None:
-            check_listening_reach(project, settings.layout)
+        project, settings = checked_inputs(project, settings)
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)
         check_search_axis(project)
@@ -334,9 +361,9 @@ class SearchStore:
     @property
     def stop_path(self) -> Path:
         """每批開始前檢查的使用者停止記號。"""
-        return self.path / "stop"
+        return self.path / STOP_FILE
 
     @property
     def refine_stop_path(self) -> Path:
         """細算獨立停止記號；搜尋曾被停過不會停止後續細算。"""
-        return self.path / "refine-stop"
+        return self.path / REFINE_STOP_FILE
