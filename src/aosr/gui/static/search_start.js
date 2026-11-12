@@ -23,6 +23,8 @@ let formVersion = 0;
 let loadedTime = null;
 // 畫面上正在畫的那一跑：換看另一跑時清掉上一跑的結果連結與訊息。
 let drawnJob = null;
+// 上一次讀成功的方案：重讀同一份（例如回輸入頁改完喇叭再回來）不清掉已經填的表單。
+let loadedScheme = null;
 let knownJobs = [];
 let machineBusy = null;
 let busyProblem = null;
@@ -328,8 +330,8 @@ async function loadScheme() {
   byId("scheme-facts").hidden = true;
   say("scheme-message", `正在讀方案「${wanted}」…`);
   const reply = await api(`/api/search-jobs/schemes/${encodeURIComponent(wanted)}`);
-  if (byId("scheme-pick").value !== wanted) return;
-  if (!reply.ok) { say("scheme-message", reply.body.error, true); return; }
+  if (byId("scheme-pick").value !== wanted) { say("scheme-message", "讀的時候下拉換過了，請再按「讀這份方案」", true); return; }
+  if (!reply.ok) { say("scheme-message", reply.body.error, true); loadedScheme = null; return; }
   facts = reply.body;
   schemeId = wanted;
   say("scheme-message", `已讀方案「${schemeId}」`);
@@ -338,16 +340,22 @@ async function loadScheme() {
   byId("scheme-facts").hidden = false;
   byId("speaker-fields").hidden = facts.has_speaker_setup;
   byId("form-block").hidden = false;
-  clearForm();
-  await loadPrevious();
+  if (loadedScheme === schemeId) {
+    say("scheme-message", `已重讀方案「${schemeId}」；表單照你填的留著`);
+  } else {
+    loadedScheme = schemeId;
+    clearForm();
+    await loadPrevious(facts);
+  }
   history.replaceState(null, "", `?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   changed();
 }
 
-async function loadPrevious() {
+async function loadPrevious(read) {
   const reply = await api("/api/search-jobs/previous");
   const pick = byId("previous-pick");
   pick.replaceChildren();
+  if (read !== facts) return;  // 等回覆時又讀了別份方案：這一份回覆不用
   if (!reply.ok) { say("previous-message", reply.body.error, true); defaultAdvanced(); return; }
   previous = reply.body.searches;
   byId("previous-row").hidden = !previous.length;
@@ -356,7 +364,7 @@ async function loadPrevious() {
       text: `${when(item.created_at)}　方案「${item.scheme_id}」${item.stage_one ? "（第一階段）" : "（第二階段）"}`}));
   }
   const skipped = reply.body.skipped.length ? `；${reply.body.skipped.length} 場讀不懂、沒列出來` : "";
-  const same = previous.find((item) => item.scheme_id === facts.scheme_id);
+  const same = previous.find((item) => item.scheme_id === read.scheme_id);
   if (same) {
     pick.value = same.search_id;
     const dropped = fillForm(same.settings);
@@ -535,8 +543,10 @@ function drawJob() {
 }
 
 async function act(action) {
+  const job = selectedJob;
   say("job-message", "送出中…");
-  const reply = await api(`/api/search-jobs/${selectedJob}/${action}`, {});
+  const reply = await api(`/api/search-jobs/${job}/${action}`, {});
+  if (job !== selectedJob) return;  // 回覆到之前換看了另一跑：不把這一跑的結果寫到那一跑底下
   if (!reply.ok) { say("job-message", reply.body.error, true); return; }
   if (action === "select") {
     const result = byId("job-result");

@@ -157,12 +157,23 @@ def test_previous_search_of_the_same_scheme_fills_the_form(browser: Browser, tmp
         page = watched.page
         expect(page.locator("#previous-message")).to_contain_text("同一份方案")
         expect(page.locator("#previous-message")).to_contain_text("喇叭高與箱體")
+        # 秒換小時：3607 秒顯示成 1.0019… 小時（不是 3607，也不是分鐘）。
+        assert abs(float(page.locator("#time-budget").input_value()) * 3600 - 3607) < 1e-6
         expect(page.locator("#budget")).to_have_value("40")
         expect(page.locator("#keep-out .box-row")).to_have_count(1)
         expect(page.locator("#speaker-areas .box-row")).to_have_count(1)
         page.click("#preview")
         expect(page.locator("#preview-list")).to_contain_text("禁區 1 塊；喇叭可用區 1 塊")
         assert _shown(page) == _without_none(SearchStore.open(folder).settings.model_dump(mode="json"))
+        # 手填的小時照乘 3600 送秒數。
+        page.fill("#time-budget", "1.5")
+        page.click("#preview")
+        expect(page.locator("#preview-list")).to_contain_text("搜尋最多 1.5 小時")
+        assert _shown(page)["search_time_budget_s"] == 5400
+        # 重讀同一份方案不清掉剛填的表單。
+        page.click("#load-scheme")
+        expect(page.locator("#scheme-message")).to_contain_text("表單照你填的留著")
+        expect(page.locator("#time-budget")).to_have_value("1.5")
         _clean(page, watched.page_errors + watched.console_errors)
 
 
@@ -187,6 +198,14 @@ def test_form_problems_name_the_field_and_busy_blocks_start(browser: Browser, tm
         page.click("#preview")
         expect(page.locator("#form-message")).to_have_text("「箱體離四面牆至少（公尺）」要是數字")
         page.fill("#wall-gap", "")
+        page.click("#add-keep-out")
+        row = page.locator("#keep-out .box-row input")
+        for index, value in enumerate(("5", "6", "0", "1", "0")):
+            row.nth(index).fill(value)
+        row.nth(5).press_sequentially("2e")
+        page.click("#preview")
+        expect(page.locator("#form-message")).to_have_text("第 1 塊禁區的六格都要填數字")
+        page.click("#keep-out .box-row button")
         page.click("#preview")
         expect(page.locator("#busy-line")).to_contain_text("第三階段搜尋或建替身")
         expect(page.locator("#start")).to_be_disabled()
