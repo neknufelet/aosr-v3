@@ -5,7 +5,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 
 import pytest
@@ -17,13 +17,13 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_result import (
-    BaselineRefused, OriginalWalls, _change, derive_baseline, improvement, original_walls, zone_rows)
+    BaselineRefused, OriginalWalls, ZoneRow, _change, derive_baseline, improvement, original_walls, zone_rows)
 from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, lock_refusal
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.measured_view import APPROXIMATE_LINE, build_measured_view
 from aosr.gui.problem_text import rounded_number
 from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
-from aosr.materials.library import builtin_entries
+from aosr.materials.library import FixedEntry, builtin_entries
 from aosr.physics.report_zone_seams import ZoneSeamTable
 from aosr.physics.report_surfaces import RectangleZone, WholeWallZone
 from aosr.physics.zone_fill import wall_size_m
@@ -32,7 +32,7 @@ from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import validate_scheme
 from tests.engine._directivity import DIRECTIVITY
-from tests.engine._zone_result_cases import design_scheme, mounted, original_x0
+from tests.engine._zone_result_cases import design_scheme, lab_entry as _lab_entry, mounted, original_x0
 from tests.engine._zoned_report_cases import small_scheme, split_x0, with_x0
 from tests.engine.test_measured_impedance import measured
 from tests.engine.test_scheme_pipeline import shared_control_result
@@ -334,3 +334,54 @@ def test_unreadable_user_library_falls_back_to_builtin_names_and_says_so_in_chin
                                            encoding="utf-8")
     (note,) = _names(deps)[1]
     assert note.startswith("使用者材料庫讀不進來，材料名字只比內建材料：") and "Field required" not in note
+
+
+# ---- 結果頁看得出實測還是模擬、出處在名字底下、實測表收起來（#1082 段 2-9）----
+
+def _measured_rows(entry: FixedEntry) -> dict[str, ZoneRow]:
+    material = entry.surface_material()
+    design = with_x0(split_x0(material, mounted(original_x0())))
+    return {row.zone: row for row in zone_rows(derive_baseline(design), None, design, library=(*builtin_entries(), entry))
+            if row.wall == "x 起點牆"}
+
+
+def _tags(row: ZoneRow, side: Literal["design", "baseline"] = "design") -> list[tuple[str, str]]:
+    facts = row.design_facts if side == "design" else row.baseline_facts
+    return [(tag.code, tag.text) for tag in facts.tags]
+
+
+def test_zone_rows_tag_measured_and_simulated_and_lift_the_source_out_of_the_table() -> None:
+    """抓 109 示範的結果頁：實測表那一列沒有「實測」標語、出處埋在逐列數字最後（約第 32,000 px）；
+    搜尋貼上去的層也看不出是模擬的。標語照材料頁同一條規則（``library.impedance_basis``）。"""
+    entry = _lab_entry()
+    assert entry.surface_material() == MeasuredImpedance.model_validate(measured())
+    rows = _measured_rows(entry)
+    a, b = rows["a"], rows["b"]
+    assert _tags(a) == [("measured", "實測")]
+    assert (a.design_facts.source, a.design_facts.links) == ("阻抗管實測（考卷），樣品 30 mm", ("https://example.org/lab-table",))
+    assert a.design_facts.conditions == "阻抗管，垂直入射，樣品厚 30 mm"
+    assert a.design_facts.table == "實測阻抗表 2 列，涵蓋 100–1000 Hz"
+    assert len(a.design_facts.table_rows) == 2 and a.design_facts.table_rows[0].startswith("100 Hz：")
+    # 參數那一格只留摘要與底構造，逐列數字搬到自己那一層。
+    assert "100 Hz：" not in a.design_detail and "1000 Hz：" not in a.design_detail
+    assert "100–1000 Hz，2 列" in a.design_detail and "底構造" in a.design_detail
+    assert _tags(b) == [("simulated", "模擬")]
+    assert b.design_facts.tags[0].title.startswith("模擬")
+    assert _tags(b, "baseline") == [("approximate", "近似")]
+    assert not b.design_facts.table_rows and b.design_facts.source == ""
+
+
+def test_a_table_without_imaginary_part_is_also_tagged_approximate() -> None:
+    """同材料頁：實測表沒有虛部（虛部當 0 算）要另標「近似」。"""
+    assert _tags(_measured_rows(_lab_entry(imaginary=False))["a"]) == [("measured", "實測"), ("approximate", "近似")]
+
+
+def test_a_table_the_library_no_longer_has_still_shows_its_own_conditions() -> None:
+    """材料庫那一筆改了或刪了：出處與網址只住在材料庫那一筆，照方案裡那張表自己帶的量測出處與條件講，不冒稱材料庫的出處；
+    虛部有量到（不是 0）就是實測，全是 0 分不出是不是缺虛部、不標「近似」也不標「實測」以外的猜測。"""
+    material = _lab_entry().surface_material()
+    design = with_x0(split_x0(material, mounted(original_x0())))
+    (a,) = [row for row in zone_rows(derive_baseline(design), None, design) if (row.wall, row.zone) == ("x 起點牆", "a")]
+    assert _tags(a) == [("measured", "實測")]
+    assert (a.design_facts.source, a.design_facts.links) == ("", ())
+    assert a.design_facts.conditions == "阻抗管，垂直入射，樣品厚 30 mm"

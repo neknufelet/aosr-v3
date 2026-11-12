@@ -443,3 +443,142 @@ def test_a_start_refused_for_untrained_materials_says_so_and_offers_a_rebuild(br
         expect(page.locator("#job-rebuild")).to_be_visible()
         _shot(page, "2-3c-2-start-refused-not-trained")
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+# ---- 109 示範找到的顯示毛病（#1082 段 2-9）----
+
+def _installed(data_dir: Path, launcher: FakeLauncher, unit: str) -> None:
+    """假裝這一頁開的建模做完、放進格子（命令列寫 installed 結果、離開碼 0、服務不在了）。"""
+    from aosr.gui import gradient_exec
+    from aosr.gradient.surrogate_files import RESULT_FILE, SurrogateResult
+
+    build_id = unit.removeprefix(BUILD_UNIT_PREFIX)
+    work = data_dir / SLOTS_DIR / "builds" / build_id / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    (work / PROGRESS_FILE).write_text(_progress(time.time()).model_copy(update={"phase": "installing"}).model_dump_json(),
+                                      encoding="utf-8")
+    result = SurrogateResult(verdict="installed", message="好了", stop_reason="抽到的候選殘差都在停止值內", full_solves=96,
+                             rank=267, build_seconds=70.0, validation_seconds=30.0, within_contract=True,
+                             finished_at=time.time())
+    (work / RESULT_FILE).write_text(result.model_dump_json(), encoding="utf-8")
+    launcher.active.discard(unit)
+    gradient_exec.write_exit(data_dir / SLOTS_DIR / "builds" / build_id / "steps" / "0.exit.json",
+                             gradient_exec.StepExit(exit_code=0, error=None, finished_at=time.time()))
+
+
+def _plan_posts(page: Page) -> list[str]:
+    """這一頁送出的開跑預覽請求（``/schemes/<方案>/plan``，不含建替身那一支 ``/surrogate/plan``）。"""
+    seen: list[str] = []
+    page.on("request", lambda request: seen.append(request.url) if request.method == "POST" and
+            request.url.endswith("/plan") and not request.url.endswith("/surrogate/plan") else None)
+    return seen
+
+
+def _settles(page: Page, seen: list[str], most: int) -> None:
+    """真時間等 2 秒（預覽迴圈是請求一回來就再送、不靠計時器，假時鐘擋不住它），送出的預覽不准超過 ``most`` 次。"""
+    page.wait_for_timeout(2000)
+    assert len(seen) <= most, f"2 秒內送了 {len(seen)} 次預覽（迴圈）"
+
+
+def test_an_installed_build_the_materials_outgrow_does_not_loop_and_keeps_the_typed_budget(browser: Browser,
+                                                                                         tmp_path: Path) -> None:
+    """抓 109 示範那一個迴圈：格子裡最新一份替身已裝好、但這一場的材料它沒訓練過時，showBuild 叫預覽、預覽又叫回
+    showBuild（幾分鐘六千多次預覽），每一圈把「完整解預算」改回 600，使用者打的 1000 留不住。
+    也抓修過頭：建好、這一次涵蓋得到時，畫面要自己換成「已經有替身」、開始鈕亮起來。"""
+    data_dir = _data(tmp_path)
+    library_file = user_library_path(data_dir)
+    library_file.write_text(library.dump_user_library((_optimizable(),)), encoding="utf-8")
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        seen = _plan_posts(page)
+        expect(page.locator("#surrogate-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
+        page.locator("#build-surrogate").click()
+        expect(page.locator("#build-state")).to_contain_text("建替身")
+        unit = launcher.launched[-1][0]
+        _installed(data_dir, launcher, unit)
+        seen.clear()
+        _tick(page)
+        expect(page.locator("#build-state")).to_contain_text("已放進這份切法的格子")
+        # 建好那一刻重新預覽一次（材料還是沒涵蓋：照講要重建），之後不再自己送。
+        _settles(page, seen, 2)
+        expect(page.locator("#surrogate-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
+        expect(page.locator("#max-full-solves")).to_be_enabled()
+        page.locator("#max-full-solves").fill("1000")
+        seen.clear()
+        _tick(page)
+        page.locator("#preview").click()
+        expect(page.locator("#form-message")).to_contain_text("預覽好了")
+        _settles(page, seen, 1)
+        expect(page.locator("#max-full-solves")).to_have_value("1000")
+        # 109 示範的重現路：格子裡已經是裝好的那一份，重開頁面不准自己轉起來。
+        seen.clear()
+        page.reload()
+        expect(page.locator("#surrogate-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
+        _settles(page, seen, 1)
+        _shot(page, "2-9-3-installed-not-covered-no-loop")
+        page.locator("#max-full-solves").fill("1000")
+        page.locator("#build-surrogate").click()
+        expect(page.locator("#build-state")).to_contain_text("完整解上限 1000 次（這一份另填）")
+        second = launcher.launched[-1]
+        assert second[1][second[1].index("--max-full-solves") + 1] == "1000"
+        # 這一次涵蓋得到（材料庫拿掉沒訓練過的那一組）：建好就自己換成「已經有替身」、可以開跑。
+        library_file.unlink()
+        _installed(data_dir, launcher, second[0])
+        _tick(page)
+        expect(page.locator("#surrogate-state")).to_have_text("這份切法已經有替身，可以直接開搜尋。")
+        expect(page.locator("#start")).to_be_enabled()
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_build_this_page_just_started_is_named_as_its_own(browser: Browser, tmp_path: Path) -> None:
+    """抓 109 示範那一句：這一頁剛按下建替身、還沒輪詢就按預覽，忙碌行與替身區說那件是「別的資料夾或命令列開的」。"""
+    data_dir = _data(tmp_path, surrogate=False)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#surrogate-state")).to_contain_text("還沒有替身，要先建")
+        page.locator("#build-surrogate").click()
+        expect(page.locator("#build-state")).to_contain_text("建替身")
+        page.locator("#preview").click()
+        expect(page.locator("#form-message")).to_contain_text("預覽好了")
+        expect(page.locator("#busy-line")).to_contain_text("方案「zoned」正在建替身")
+        expect(page.locator("#busy-line")).not_to_contain_text("別的資料夾或命令列")
+        expect(page.locator("#surrogate-message")).not_to_contain_text("別的資料夾或命令列")
+        _shot(page, "2-9-4-own-build-named")
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_the_preview_judges_a_fixed_library_table_like_the_zone_editor(browser: Browser, tmp_path: Path) -> None:
+    """抓 109 示範那一格：固定區選了材料庫的實測表，分區編輯寫「總深 0.049 公尺，放得進……」，第三階段預覽卻寫「不加層」。
+    預覽那一格要跟立面圖限制檢查（``/api/zone-limits``）逐字同一句；保留原牆的區照舊「不加層」。"""
+    import httpx
+
+    from tests.engine.test_gui_zone_limits import _design as _limits_design, _picked
+    from tests.engine.test_material_gradient_allowed import _measured
+
+    table = _measured(imaginary=False)
+    data_dir = tmp_path / "data"
+    (data_dir / "schemes").mkdir(parents=True)
+    (data_dir / "designs").mkdir()
+    user_library_path(data_dir).write_text(library.dump_user_library((table,)), encoding="utf-8")
+    document = _picked(table)
+    design = _limits_design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}, "auto1": {"mode": "search"},
+                                          "auto2": {"mode": "keep_original"}}})
+    scheme = Scheme.model_validate(document)
+    (data_dir / "schemes" / "room109.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    write_design(data_dir, design, scheme)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme=room109", fake_clock=True) as watched:
+        page = watched.page
+        with httpx.Client(base_url=url, trust_env=False, timeout=60) as client:
+            limits = client.post("/api/zone-limits", json={"scheme": scheme.model_dump(mode="json"),
+                                                           "design": design.model_dump(mode="json")}).json()
+        (line,) = limits["zones"]["x0"]["z1"]
+        assert line["code"] == "depth_fits" and "總深 0.05 公尺，放得進深度上限 0.05 公尺" in line["text"]
+        cell = page.locator('#plan-table tr[data-surface="x0@z1"] td.depth-cell')
+        expect(cell).to_contain_text(line["text"])
+        expect(cell).not_to_contain_text("不加層")
+        expect(page.locator('#plan-table tr[data-surface="x0@auto2"] td.depth-cell')).to_have_text("不加層")
+        _shot(page, "2-9-2-preview-fixed-table-depth")
+        _clean(page, watched.page_errors + [error for error in watched.console_errors if "status of 400" not in error])
