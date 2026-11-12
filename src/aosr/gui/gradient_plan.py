@@ -286,14 +286,23 @@ def fixed_depths(plan: SearchPlan, scheme: Scheme, design: DesignSettings | None
     return found
 
 
-def start_arguments(plan: SearchPlan) -> list[str]:
-    """``aosr.gradient.cli start`` 裡跟設計有關的那幾格（方案、替身、根目錄等由呼叫端補）。"""
+def configuration_arguments(plan: SearchPlan) -> list[str]:
+    """開跑那一組起跑配置的命令列參數（起跑樣板、裝法、固定面、深度上限；准用清單另交）：建替身照它核固定材料
+    （#1082 段 2-8），寫法跟 :func:`start_arguments` 同一份。"""
     arguments = ["--presets", ",".join("none" if preset is None else preset for preset in plan.presets),
-                 "--mount", plan.request.mount, "--device", plan.request.device]
+                 "--mount", plan.request.mount]
     for surface, material in plan.fixed_surfaces.items():
         arguments.extend(("--fixed-surface", f"{surface}={material}"))
     for surface, depth in plan.max_depths.items():
         arguments.extend(("--max-depth", f"{surface}={depth!r}"))
+    return arguments
+
+
+def start_arguments(plan: SearchPlan) -> list[str]:
+    """``aosr.gradient.cli start`` 裡跟設計有關的那幾格（方案、替身、根目錄等由呼叫端補）。"""
+    configuration = configuration_arguments(plan)
+    # 順序照舊：起跑樣板、裝法、裝置、固定面、深度上限……
+    arguments = [*configuration[:4], "--device", plan.request.device, *configuration[4:]]
     if plan.request.frequency_batch is not None:
         arguments.extend(("--frequency-batch", str(plan.request.frequency_batch)))
     if plan.request.max_steps is not None:

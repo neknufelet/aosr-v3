@@ -34,7 +34,7 @@ from aosr.gradient.fixed_candidates import FixedCandidateCheck
 from aosr.gradient.fixed_surfaces import (
     check_allowed_against_start, checked_allowed_targets, expanded_allowed_targets, fixed_targets_of, parse_allowed_targets,
 )
-from aosr.gui.gradient_jobs import NeedsSurrogate, plan_fixed
+from aosr.gui.gradient_jobs import NeedsSurrogate, plan_configuration, plan_fixed
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search, start_arguments
 from aosr.gui.surrogate_slots import surrogate_path
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
@@ -43,7 +43,7 @@ from aosr.materials import search_library as materials
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.reporting.scheme import Scheme
 from tests.engine._material_gradient_templates_probe import kept_walls
-from tests.engine._surrogate_coverage import trained_on
+from tests.engine._surrogate_coverage import fixed_checked_on, trained_on
 from tests.engine.test_material_gradient_cli import _schemes
 from tests.engine.test_material_gradient_mount import _project
 
@@ -332,7 +332,11 @@ def test_holdout_gate_judges_each_ruler_on_its_own(monkeypatch: pytest.MonkeyPat
     from aosr.gradient import fixed_candidates
     from aosr.physics import fem_reduced_check
 
-    report = SimpleNamespace(frequency_db_by_seat={"front": frequency_db}, band_db_by_seat={"front": band_db}, full_solves=3)
+    import numpy as np
+
+    report = SimpleNamespace(frequency_db_by_seat={"front": frequency_db}, band_db_by_seat={"front": band_db}, full_solves=3,
+                             full_pressure=np.ones((1, 1, 1, 1), dtype=complex),
+                             reduced_pressure=np.full((1, 1, 1, 1), 10.0 ** (frequency_db / 20.0), dtype=complex))
     monkeypatch.setattr(fem_reduced_check, "validate_reduced", lambda *args, **kwargs: report)
     monkeypatch.setattr(fixed_candidates, "candidate_designs", lambda designs, *args: designs)
     monkeypatch.setattr(fixed_candidates, "design_impedances", lambda *args, **kwargs: {"x0": (1.0 + 0.0j,)})
@@ -439,6 +443,10 @@ def _web_start(tmp_path: Path, listed: str, entry: library.FixedEntry) -> list[s
     _, scheme, design = jobs.inputs(NAME)
     plan, materials, entries = jobs.plan(scheme, design, request)
     trained_on(surrogate_path(data_dir, scheme), materials, plan_fixed(plan, materials, entries))
+    # 訓練過了，但替身裝進格子之前沒用這一組起跑配置核過固定材料（#1082 段 2-8）：照樣要重建；核過的紀錄放上才開。
+    with pytest.raises(NeedsSurrogate, match="沒有用開跑那一組起跑配置核過"):
+        jobs.start(NAME, request)
+    fixed_checked_on(surrogate_path(data_dir, scheme), plan_configuration(plan, scheme), plan_fixed(plan, materials, entries))
     jobs.start(NAME, request)
     (_, argv, _, _), = launcher.launched
     return argv[argv.index("--") + 5:]

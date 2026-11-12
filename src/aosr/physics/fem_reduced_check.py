@@ -24,7 +24,8 @@ from aosr.physics.dense_threads import checked_dense_threads, dense_blas_threads
 from aosr.geometry.shoebox import Point
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
 from aosr.physics.fem_reduced import (
-    FullOperators, ReducedModel, checked_axis, evaluate_reduced, impedance_rows, system_coefficients, walls_at,
+    FullOperators, ImpedanceRows, ReducedModel, checked_axis, evaluate_reduced, impedance_rows, system_coefficients,
+    walls_at,
 )
 from aosr.physics.fem_reduced_store import computation_digest, matrices_digest
 
@@ -191,7 +192,6 @@ def validate_reduced(
         receivers = np.asarray(list(operators.receivers.values()), dtype=np.float64)
         full = np.empty((len(holdouts), len(axis), len(model.source_names), len(model.receiver_names)),
                         dtype=np.complex128)
-        reduced = np.empty_like(full)
         for material, rows in enumerate(holdouts):
             for index, frequency in enumerate(axis):
                 walls = walls_at(rows, index)
@@ -201,6 +201,28 @@ def validate_reduced(
                 progress((material + 1) * len(axis), len(holdouts) * len(axis))
         collect_refinement_steps(solver, refinement_steps)
     # 先收齊完整解聲壓，讓有待辦數上限的平行佇列持續前進；只保留報告原有的聲壓陣列。
+    return _compared(model, operators, holdouts, full, full_solves=solver.solves, threads=threads)
+
+
+def revalidate_reduced(model: ReducedModel, operators: FullOperators,
+                       holdout_impedances: Sequence[FrequencyBoundaryImpedances], full_pressure: NDArray[np.complex128], *,
+                       full_solves: int, dense_threads: int | None = None) -> ValidationReport:
+    """同一批留出材料換一份替身再比一次（#1082 段 2-8 補訓練後重判）：完整解聲壓 ``full_pressure`` 照上一次
+    :func:`validate_reduced` 報告裡的（完整解跟替身無關，不重解），只重算替身那一側；``full_solves`` 照記上一次解了幾次。"""
+    _checked_pairing(model, operators)
+    holdouts = impedance_rows(holdout_impedances, model.frequencies_hz, patch_keys=operators.patch_keys)
+    expected = (len(holdouts), len(model.frequencies_hz), len(model.source_names), len(model.receiver_names))
+    if full_pressure.shape != expected:
+        raise ValueError(f"完整解聲壓的形狀 {full_pressure.shape} 跟這批留出材料 {expected} 對不上")
+    return _compared(model, operators, holdouts, np.asarray(full_pressure, dtype=np.complex128), full_solves=full_solves,
+                     threads=checked_dense_threads(dense_threads))
+
+
+def _compared(model: ReducedModel, operators: FullOperators, holdouts: Sequence[ImpedanceRows],
+              full: NDArray[np.complex128], *, full_solves: int, threads: int | None) -> ValidationReport:
+    """完整解聲壓已收齊：逐點算替身聲壓，量每座位的逐頻差與帶能量差，組報告。"""
+    axis = model.frequencies_hz
+    reduced = np.empty_like(full)
     with dense_blas_threads(threads):
         for material, rows in enumerate(holdouts):
             for index, frequency in enumerate(axis):
@@ -220,11 +242,21 @@ def validate_reduced(
         band_db_by_seat={name: float(complete[i]) for i, name in enumerate(names)},
         partial_band_db_by_seat={} if partial is None else {
             name: float(partial[i]) for i, name in enumerate(names)},
-        bands=bands, full_solves=solver.solves, full_pressure=full, reduced_pressure=reduced,
+        bands=bands, full_solves=full_solves, full_pressure=full, reduced_pressure=reduced,
         model_digest=matrices_digest(model.matrices),
         computation_digest=computation_digest(model),
         source_points=points_hex({name: operators.source_points[name] for name in model.source_names}),
         receiver_points=points_hex({name: operators.receiver_points[name] for name in names}))
+
+
+def worst_frequency_hz(report: ValidationReport, frequencies_hz: Sequence[float]) -> float:
+    """逐頻差最大的那一個頻點（跨材料、喇叭、座位取最大），講「在哪個頻率不夠準」用；不是有限數的點當最差。"""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        difference = np.abs(20.0 * np.log10(np.abs(report.reduced_pressure) / np.abs(report.full_pressure)))
+    per_point = np.max(np.where(np.isfinite(difference), difference, np.inf), axis=(0, 2, 3))
+    if per_point.shape != (len(frequencies_hz),):
+        raise ValueError("報告的聲壓陣列跟頻率軸對不上")
+    return float(frequencies_hz[int(np.argmax(per_point))])
 
 
 def within_reduced_contract(report: ValidationReport, *, frequency_db: float, band_db: float) -> bool:

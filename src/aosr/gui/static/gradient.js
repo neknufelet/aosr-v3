@@ -349,6 +349,8 @@ async function loadSurrogatePlan(replace) {
 
 async function buildSurrogate() {
   const body = {replace: byId("build-surrogate").dataset.replace === "true"};
+  // 准用清單有固定材料時，建替身照預覽那一份開跑選項的起跑配置先核過才裝（#1082 段 2-8）。
+  if (previewedRequest !== null) body.search = JSON.parse(previewedRequest);
   const solves = byId("max-full-solves").value.trim();
   if (solves !== "" && Number(solves) !== surrogateDefaults.max_full_solves) body.max_full_solves = Number(solves);
   const residual = byId("stop-residual").value.trim();

@@ -53,7 +53,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Iterator, Set
+from collections.abc import Callable, Iterator, Sequence, Set
 from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
@@ -81,6 +81,9 @@ if TYPE_CHECKING:
     from aosr.gradient.fixed_candidates import FixedCandidateCheck
     from aosr.materials.library import LibraryEntry
     from aosr.materials.construction_models import SurfaceMaterial
+    from aosr.config.capabilities import CapabilityTable
+    from aosr.config.directivity_defaults import DirectivityDefaults
+    from aosr.config.material_gradient import Mount
 
 EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
@@ -278,9 +281,8 @@ def _start(args: argparse.Namespace) -> int:
     scheme = _start_scheme(args.root, scheme_path)
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
-    kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    designs = run.designs_for(args.presets, settings, kept=kept, mount=args.mount, fixed_surfaces=fixed, max_depths=caps, table=materials.presets)
-    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, materials.presets)
+    designs, expanded = start_designs(scheme, settings, materials.presets, args.presets, mount=args.mount, fixed=fixed,
+                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -298,7 +300,8 @@ def _start(args: argparse.Namespace) -> int:
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     _check_start_materials(materials, model, scheme, surrogate, expanded, designs, fixed)
-    checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers)
+    checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers,
+                                     surrogate)
     del full_operators
     spot = None
     if fingerprint is not None:
@@ -328,6 +331,20 @@ def _start(args: argparse.Namespace) -> int:
         allowed_targets=allowed, fixed_candidate_checks=checks)
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
+
+
+def start_designs(scheme: Scheme, settings: MaterialGradientSettings, table: tuple[PresetMaterial, ...],
+                  presets: Sequence[str | None], *, mount: Mount, fixed: dict[str, str], caps: dict[str, float],
+                  allowed: dict[str, tuple[str, ...]], capabilities: CapabilityTable,
+                  directivity: DirectivityDefaults) -> tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]]:
+    """開跑那一組起跑配置：原牆照 ``run.scene_wall_materials``、起跑設計照 ``run.designs_for``、准用清單對起跑配置核過
+    （:func:`_checked_allowed`）並展開到面片。開跑與建替身（#1082 段 2-8，裝進格子前先核固定材料）共用這一支，
+    兩邊核的是同一組配置。"""
+    from aosr.gradient import run
+
+    kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
+    designs = run.designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed, max_depths=caps, table=table)
+    return designs, _checked_allowed(allowed, designs, settings, fixed, caps, table)
 
 
 def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme, surrogate: Path,
@@ -404,10 +421,13 @@ def _listed_fixed_materials(allowed: dict[str, tuple[str, ...]], table: tuple[Pr
 
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],
                             allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...], scheme: Scheme,
-                            workers: int) -> tuple[FixedCandidateCheck, ...]:
-    """准用清單有固定材料：表外補值照實印、每一個各做一組替身留出驗證（沒過就拒收）；沒有就什麼都不做。"""
+                            workers: int, surrogate: Path) -> tuple[FixedCandidateCheck, ...]:
+    """准用清單有固定材料：表外補值照實印、每一個各做一組替身留出驗證（全部核完、有沒過的就拒收）；沒有就什麼都不做。
+    替身旁訓練說明記過的固定材料算「訓練過」（拒收的句子說訓練過但在哪個頻率不夠準，不說沒學過）。"""
     from aosr.gradient.fixed_candidates import check_fixed_candidates, table_range_notes
     from aosr.gradient.fixed_surfaces import fixed_targets_of
+    from aosr.gradient.surrogate_coverage import read_coverage
+    from aosr.gradient.surrogate_files import TRAINING_FILE
 
     targets = fixed_targets_of(allowed)
     if not targets:
@@ -415,8 +435,10 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     assert operators is not None
     for note in table_range_notes(targets, table, tuple(float(value) for value in model.frequencies_hz)):
         sys.stderr.write(f"注意：{note}\n")
+    coverage = read_coverage(surrogate.parent / TRAINING_FILE)
+    trained = frozenset(item.target for item in coverage.fixed) if coverage is not None else frozenset()
     checks = check_fixed_candidates(model, operators, designs, allowed, table, density_kg_m3=scheme.scene.density_kg_m3,
-                                    sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers)
+                                    sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers, trained=trained)
     for check in checks:
         sys.stderr.write(f"固定材料 {check.target} 替身留出驗證通過：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
                          f"{check.band_db:g} dB（完整解 {check.full_solves} 次、{check.seconds:.1f} 秒）\n")

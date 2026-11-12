@@ -37,6 +37,14 @@ class Sampling(_Frozen):
         return self
 
 
+class Extension(_Frozen):
+    """開跑那一道固定材料核對沒過時補訓練每一批怎麼抽（#1082 段 2-8）。"""
+
+    random_saved: int = Field(strict=True, ge=0)
+    random_mixed: int = Field(strict=True, ge=0)
+    swap_probability: float = Field(gt=0.0, lt=1.0)
+
+
 class Compute(_Frozen):
     workers: int = Field(strict=True, ge=1)
 
@@ -45,6 +53,7 @@ class SurrogateTrainingSettings(_Frozen):
     training: RandomSets
     holdout: RandomSets
     sampling: Sampling
+    extension: Extension
     compute: Compute
 
     @model_validator(mode="after")
