@@ -135,7 +135,7 @@ def test_fixed_zone_mounted_deeper_than_its_cap_is_red_and_names_the_level(field
     assert _codes(result, "x0", "z1") == ["depth_over"]
     line = _lines(result, "x0", "z1")[0]
     assert line["level"] == "red" and "0.15 公尺" in line["text"] and f"{word}的上限" in line["text"]
-    assert result["red"] == 1 and "x 起點牆「z1」" in cast(list[str], result["refusals"])[0]
+    assert result["red"] == 1 and "前牆「z1」" in cast(list[str], result["refusals"])[0]
     assert cast(dict[str, dict[str, dict[str, object]]], result["caps"])["x0"]["z1"]["level"] == level
 
 
@@ -147,8 +147,8 @@ def test_an_uncut_wall_fixed_too_deep_is_red_on_the_page_and_at_the_search() -> 
     design = _design(room_max_depth_m=0.1, zones={"x0": {"whole_wall": {"mode": "search"}}})
     result = zone_limits(document, design.model_dump(mode="json"))
     assert [(line["code"], line["level"]) for line in _lines(result, "y0", "whole_wall")] == [("depth_over", "red")]
-    assert result["refusals"] == ["y 起點牆「整面」：" + _lines(result, "y0", "whole_wall")[0]["text"]]
-    with pytest.raises(PlanRefused, match="y 起點牆「整面」"):
+    assert result["refusals"] == ["左牆「整面」：" + _lines(result, "y0", "whole_wall")[0]["text"]]
+    with pytest.raises(PlanRefused, match="左牆「整面」"):
         plan_search(_scheme(document), design, GradientRequest(), SETTINGS)
 
 
@@ -300,7 +300,7 @@ def test_plans_without_design_caps_are_written_as_before() -> None:
 def test_a_fixed_zone_over_its_cap_refuses_the_search() -> None:
     scheme = _scheme(_cut())
     design = _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}})
-    with pytest.raises(PlanRefused, match=r"有超過限制的區.*x 起點牆「z1」.*0\.15 公尺"):
+    with pytest.raises(PlanRefused, match=r"有超過限制的區.*前牆「z1」.*0\.15 公尺"):
         plan_search(scheme, design, GradientRequest(), SETTINGS)
 
 
@@ -318,7 +318,7 @@ def test_caps_deeper_than_the_family_take_the_stricter_and_too_shallow_caps_are_
     result = zone_limits(_cut(PRESET), design.model_dump(mode="json"), depth_targets=lambda: TARGETS)
     assert result["red"] == 1 and _codes(result, "x0", "auto1") == ["depth_no_group"]
     refusal = cast(list[str], result["refusals"])[0]
-    assert refusal.startswith("x 起點牆「自動 auto1」：准用的材料組一組都放不進深度上限")
+    assert refusal.startswith("前牆「自動 auto1」：准用的材料組一組都放不進深度上限")
     assert "0.025 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺（個案上限擋住）" in refusal
     with pytest.raises(PlanRefused, match="一組都放不進深度上限"):
         plan_search(scheme, design, GradientRequest(), SETTINGS)
@@ -379,7 +379,7 @@ def test_plan_drops_groups_that_do_not_fit_and_skips_them_as_start() -> None:
     assert plan.presets[plan.surfaces.index("x0@auto1")] == "glass_wool_48k_50mm_gap50" and plan.allowed == {}
     # 清單只剩不貼：不貼不算救，紅
     only = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06, "allowed": ["deep_rock_wool", "none"]}}})
-    with pytest.raises(PlanRefused, match="x 起點牆「自動 auto1」：准用的材料組一組都放不進"):
+    with pytest.raises(PlanRefused, match="前牆「自動 auto1」：准用的材料組一組都放不進"):
         plan_search(scheme, only, GradientRequest(), targets.settings, fixed_ids, depth_targets=targets)
 
 
@@ -489,7 +489,7 @@ def test_the_real_entry_refuses_to_plan_a_search_over_an_uncomputable_fixed_mate
         for path in ("plan", "surrogate/plan"):
             response = client.post(f"{base}/api/gradient/schemes/room109/{path}", json={})
             assert response.status_code == 400, (path, response.text)
-            assert "x 起點牆「z1」" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"], path
+            assert "前牆「z1」" in response.json()["error"] and "算不出吸音曲線" in response.json()["error"], path
         (tmp_path / "schemes" / "room109.json").write_text(_scheme(_cut(PRESET)).model_dump_json(), encoding="utf-8")
         # 在範圍內就過了限制這一關（考卷行程連不上使用者的服務匯流排，下一步查「現在有沒有一跑在算」會回 503，那不是這一段的事）
         again = client.post(f"{base}/api/gradient/schemes/room109/plan", json={})
@@ -520,6 +520,7 @@ def test_refusals_name_walls_and_zones_as_the_page_shows_them() -> None:
     cast(dict[str, float], cast(Doc, document["scene"])["room_m"])["Ly"] = 0.9   # x 起點牆變窄：自動補的那塊出界
     result = zone_limits(document, _design(room_max_depth_m=0.1).model_dump(mode="json"))
     refusals = cast(list[str], result["refusals"])
+    # 房間窄到喇叭出界：這份草稿驗不過方案、定不出前牆，牆名照座標名（#1134）。
     assert any(line.startswith("x 起點牆「z1」：") for line in refusals)
     assert any(line.startswith("y 起點牆「整面」：") for line in refusals)
     assert any(line.startswith("x 起點牆「自動 auto1」：超出牆面") for line in refusals)
@@ -527,7 +528,7 @@ def test_refusals_name_walls_and_zones_as_the_page_shows_them() -> None:
     with pytest.raises(PlanRefused) as refused:
         plan_search(_scheme(_cut()), _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}}),
                     GradientRequest(), SETTINGS)
-    assert "x 起點牆「z1」" in str(refused.value) and "x0" not in str(refused.value)
+    assert "前牆「z1」" in str(refused.value) and "x0" not in str(refused.value)
 
 
 # ---- 固定區選了材料庫直接取代牆面的那一筆（#1082 段 2-7）----
@@ -557,8 +558,8 @@ def test_a_fixed_zone_picking_a_library_table_is_judged_by_its_backing_depth() -
     assert [(line["code"], line["level"]) for line in _lines(result, "x0", "z1")] == [("depth_over", "red")]
     text = _lines(result, "x0", "z1")[0]["text"]
     assert text == "實測吸音板（自填）：不可用——總深 0.05 公尺超過深度上限 0.04 公尺（這一塊的上限）（個案上限擋住）"
-    assert result["refusals"] == ["x 起點牆「z1」：" + text]
-    with pytest.raises(PlanRefused, match="有超過限制的區.*x 起點牆「z1」：實測吸音板（自填）：不可用——總深 0.05 公尺"):
+    assert result["refusals"] == ["前牆「z1」：" + text]
+    with pytest.raises(PlanRefused, match="有超過限制的區.*前牆「z1」：實測吸音板（自填）：不可用——總深 0.05 公尺"):
         plan_search(_scheme(_picked(table)), over, GradientRequest(), targets.settings, frozenset(targets.fixed),
                     depth_targets=targets)
     fits = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}}})
@@ -605,8 +606,8 @@ def test_the_page_and_the_search_preview_judge_picks_from_the_web_library(tmp_pa
     design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.04}, "auto1": {"mode": "search"}}})
     client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
     body = client.post("/api/zone-limits", json={"scheme": document, "design": design.model_dump(mode="json")}).json()
-    assert body["red"] == 1 and body["refusals"][0].startswith("x 起點牆「z1」：實測吸音板（自填）：不可用——總深 0.05 公尺")
+    assert body["red"] == 1 and body["refusals"][0].startswith("前牆「z1」：實測吸音板（自填）：不可用——總深 0.05 公尺")
     (tmp_path / "schemes" / "room109.json").write_text(_scheme(document).model_dump_json(), encoding="utf-8")
     (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
     response = client.post("/api/gradient/schemes/room109/plan", json={})
-    assert response.status_code == 400 and "x 起點牆「z1」：實測吸音板（自填）：不可用" in response.json()["error"]
+    assert response.status_code == 400 and "前牆「z1」：實測吸音板（自填）：不可用" in response.json()["error"]

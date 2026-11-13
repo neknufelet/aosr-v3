@@ -15,6 +15,7 @@ const compareChoice = {a: null, b: null};
 // 顯示名稱表（伺服器 /api/labels 給）：喇叭用聲道代號查、座位用座位代號查；查不到就顯示代號本身。
 let labels = {speakers: {}, listening_points: {}, speaker_setup: {}};
 const $ = (id) => document.getElementById(id);
+// 六面牆的名字：先用座標名，伺服器依喇叭與主位排出前後左右後換掉（#1134，useWallNames）；鍵與順序不變。
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
 // 新名字要是伺服器收得下的方案代號（跟伺服器同一個規則）：第一個字是英文字母或數字，後面英文字母、數字、_ 或 -。
@@ -147,10 +148,28 @@ function renderSpeakerSetupNotice() {
   }
   notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。`;
 }
+// 伺服器回的牆名跟現在不同才換（喇叭搬到靠另一面牆、開了別份方案）；回傳有沒有換，換了由呼叫的人重畫。
+function useWallNames(names) {
+  if (!names || Object.keys(wallNames).every((wall) => wallNames[wall] === names[wall])) return false;
+  for (const wall of Object.keys(wallNames)) wallNames[wall] = names[wall] ?? wallNames[wall];
+  return true;
+}
+// 帶牆名的幾塊照新名字重畫：牆面表單（連立面圖）重畫自方案，散射那排只換欄名、不動已填的值。
+// 重畫會清掉「約 ρc 的幾倍」那幾格、超限總述也是舊名字寫的：兩樣都重問一次（各自有序號丟掉晚到的舊回覆）。
+function relabelWalls() {
+  renderWalls();
+  for (const wall of Object.keys(wallNames)) {
+    const input = $(`scatter-${wall}`);
+    if (input) input.parentElement.firstChild.textContent = `${wallNames[wall]}散射`;
+  }
+  refreshZoneLimits();
+  action(updateMultiples);
+}
 function useInputPreview(data) {
   inputPreview = data;
   inputValues = data.field_values;
   inputPreviewScheme = scheme;
+  return useWallNames(data.wall_names);
 }
 function requireInputMatch(withForm = false) {
   if (inputPreviewScheme !== scheme || (withForm && formScheme !== scheme))
@@ -266,7 +285,7 @@ async function updateInputPreview() {
     throw error;
   }
   if (stale()) return;
-  useInputPreview(data);
+  if (useInputPreview(data)) relabelWalls();
   renderInputPreview();
 }
 function renderInputPreview() {

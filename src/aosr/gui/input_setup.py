@@ -17,6 +17,7 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
+from aosr.gui.wall_words import draft_wall_words
 from aosr.gui.zone_edit import zone_cut_defaults
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
@@ -450,4 +451,6 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
             "placement_warnings": placement_warnings(document),
             "furniture_items": furniture_items, "furniture_controls": controls,
             "field_values": input_field_values(document),
+            # 牆名跟著喇叭與主位走（#1134）；別格填錯照樣排得出來，房間、喇叭、座位本身不對才退回座標名。
+            "wall_names": draft_wall_words(document),
             "stand_hint": hint, "mounts": mount_options(document, str(setup["kind"])) if setup else []}

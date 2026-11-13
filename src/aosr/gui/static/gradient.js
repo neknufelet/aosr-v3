@@ -5,6 +5,7 @@
 
 const POLL_MS = 5000;
 const SLOW_MS = 15000;
+// 牆名先用座標名，讀到方案後換成伺服器依喇叭與主位排的前後左右（#1134，預覽回話的 wall_names）。
 const WALLS = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const MODE_WORDS = {fixed: "固定這一組材料", keep_original: "保留原牆", search: "交給搜尋"};
 const WHOLE_WALL = "whole_wall";
@@ -185,6 +186,7 @@ async function loadPlan() {
   for (const id of ["form-block", "plan-block", "surrogate-block", "start-block"]) byId(id).hidden = !reply.ok;
   if (!reply.ok) { say("scheme-message", `這份方案開不了第三階段搜尋：${errorText(reply)}`, true); return; }
   say("scheme-message", "");
+  Object.assign(WALLS, reply.body.wall_names);
   defaults = reply.body.defaults;
   byId("max-steps").value = defaults.max_steps;
   byId("max-steps-default").textContent = `步數上限預設 ${defaults.max_steps} 步（設定檔的值）；這一跑改了只換這一跑，數字記進搜尋資料夾、報告會印出來。`;
@@ -508,13 +510,14 @@ function progressLines(job, detail) {
 }
 
 // 這一跑開跑時每區的深度上限判決（#1082 段 2-4；工作記錄存的那一份計畫）：個案上限是哪一層、每一組生效多少、哪一條擋住。
-function showJobDepths(plan) {
+// 牆名用這一跑自己那份方案的（#1134，伺服器排；清單跨方案，不借頁面上選的那一份）。
+function showJobDepths(plan, names) {
   const found = Object.entries((plan && plan.depth_targets) || {});
   byId("job-depths").hidden = !found.length;
   byId("job-depths").querySelector("div").replaceChildren(...found.map(([surface, lines]) => {
     const {wall, zone} = surfaceParts(surface);
     return el("div", {class: "depth-cell", "data-surface": surface},
-      el("p", {text: `${WALLS[wall] || wall}「${zoneText(zone)}」：個案上限 ${depthText(plan, surface, "search")}`}),
+      el("p", {text: `${(names || WALLS)[wall] || wall}「${zoneText(zone)}」：個案上限 ${depthText(plan, surface, "search")}`}),
       ...lines.map((line) => el("p", {class: line.usable ? "note" : "limit-warn", text: line.text})));
   }));
 }
@@ -532,7 +535,7 @@ function showJob(job, detail, detailError) {
   const notes = detail ? detail.notes : [];
   byId("job-notes").hidden = !notes.length;
   byId("job-notes").querySelector("ul").replaceChildren(...notes.map((text) => el("li", {text})));
-  showJobDepths(job.plan);
+  showJobDepths(job.plan, job.wall_names);
   const lastStep = job.steps[job.steps.length - 1];
   const failures = [...(detail ? detail.failures : [])];
   if (lastStep && lastStep.error) failures.unshift(`開服務那一層：${lastStep.error}`);

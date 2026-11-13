@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast, get_args
 
@@ -18,6 +18,7 @@ from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, C
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
+from aosr.gui.wall_words import draft_wall_words
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS, FURNITURE_ROOM_ANGLE
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validated_scheme
@@ -182,9 +183,9 @@ def material_form_spec() -> dict[str, dict[str, object]]:
     return specs
 
 
-def _plain_material_message(message: str) -> str:
-    """核心原文只在顯示時替換代號；模型與其描述都不改。"""
-    words: dict[str, str] = dict(WALLS)
+def _plain_material_message(message: str, walls: Mapping[str, str] = WALLS) -> str:
+    """核心原文只在顯示時替換代號；模型與其描述都不改。牆名照表單（``walls``，#1134 跟著方案排的前後左右）。"""
+    words: dict[str, str] = dict(walls)
     message = re.sub(r"(種類代號)\s+kind(?=（種類）)", r"\1", message)
     for kind, spec in material_form_spec().items():
         words[kind] = str(spec["label"])
@@ -354,15 +355,16 @@ def _zone_word(document: Document, wall: str, index: str) -> str:
 
 
 def _scene_field(rest: list[str], document: Document) -> str | None:
+    walls = draft_wall_words(document)
     if len(rest) >= 2 and rest[0] == "surface_zones_by_wall":
-        wall = WALLS.get(rest[1], rest[1])
+        wall = walls.get(rest[1], rest[1])
         tail = rest[2:]
         zone = _zone_word(document, rest[1], tail[0]) if tail else ""
         return f"{wall}材料構造{zone}" + (" › " + _material_path(rest, document) if tail else "")
     if len(rest) == 2 and rest[0] == "room_m":
         return ROOM_LENGTHS.get(rest[1], f"房間 › {rest[1]}")
     if len(rest) == 2 and rest[0] in WALL_FIELDS:
-        return f"{WALLS.get(rest[1], f'{rest[1]} 牆')}{WALL_FIELDS[rest[0]]}"
+        return f"{walls.get(rest[1], f'{rest[1]} 牆')}{WALL_FIELDS[rest[0]]}"
     return None
 
 
@@ -678,7 +680,7 @@ def plain_problem(problem: SchemeProblem, document: object) -> tuple[tuple[str, 
         if match:
             fields = rule.fields(match, scheme) if rule.fields else (field,) if field else ()
             return fields, rule.message(match)
-    return ((field,) if field else ()), _plain_material_message(problem.message) if "surface_zones_by_wall" in problem.path else problem.message
+    return ((field,) if field else ()), _plain_material_message(problem.message, draft_wall_words(scheme)) if "surface_zones_by_wall" in problem.path else problem.message
 
 
 def plan_problems(problems: Sequence[SchemeProblem], document: object,

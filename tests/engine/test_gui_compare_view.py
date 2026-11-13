@@ -296,17 +296,17 @@ def test_codes_are_named_in_chinese_by_their_own_table(pair: tuple[SchemeResult,
 
 
 def test_wall_names_match_input_page(pair: tuple[SchemeResult, SchemeResult]) -> None:
-    # 跟輸入頁同一套牆名；x、y 起點終點沒有前後左右的定義，翻成前牆後牆會讓人看錯是哪一面。
+    # 跟輸入頁同一套牆名（#1134 起輸入頁的牆名由 wall_words 跟著方案排前後左右，app.js 那張表只是定不出時的座標名）。
     scheme = pair[0].scheme
     walls = scheme.scene.impedance_pa_s_per_m_by_wall
     assert walls is not None
     scene = scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": {
         wall: value * 10 for wall, value in walls.items()}})
     rows = scheme_differences(scheme, scheme.model_copy(update={"scene": scene}))
-    script = (STATIC / "app.js").read_text(encoding="utf-8")
-    names = dict(re.findall(r'(\w+): "([^"]+)"', script[script.index("wallNames"):
-                                                        script.index("};", script.index("wallNames"))]))
-    assert walls is not None
+    from aosr.gui.wall_words import wall_words
+
+    names = wall_words(scheme)
+    assert names["x0"] == "前牆"
     assert {row.path: row.label for row in rows} == {
         f"scene.impedance_pa_s_per_m_by_wall.{wall}": f"{names[wall]}阻抗" for wall in walls}
     assert all("帕·秒／公尺" in row.a_text for row in rows)

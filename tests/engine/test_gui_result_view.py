@@ -242,6 +242,9 @@ def test_flutter_alerts_merge_into_one_entry_per_wall_pair() -> None:
     assert "衰減 60 dB 所需的時間" in first.summary_text
     assert dict(groups[1].fields)["頻帶"] == "400–500 Hz，共 2 個三分之一八度帶"
     assert "原始字" not in str(groups[0].model_dump()) and "walls" not in str(first.fields)
+    # 牆名照方案排的前後左右（#1134）：x0、xL 那一對叫前牆、後牆。
+    named = _flutter_groups(alerts, {"floor": "地板", "ceiling": "天花", "x0": "前牆", "xL": "後牆", "y0": "左牆", "yL": "右牆"})
+    assert named[1].heading_text == "牆間顫動警戒・前牆、後牆"
 
 
 def test_flutter_group_shows_ranges_when_bands_differ() -> None:
@@ -343,7 +346,11 @@ def test_reflection_display_keeps_payload_classification(result: SchemeResult) -
     import re
     from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
 
+    from aosr.gui.wall_words import wall_words
+
     view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
+    walls = wall_words(result.scheme)
+    assert walls["x0"] == "前牆"
     evaluation = next(item for item in result.candidate.evaluations
                       if item.category is QualityCategory.REFLECTIONS_AND_ECHO)
     payload = evaluation.payload
@@ -361,7 +368,8 @@ def test_reflection_display_keeps_payload_classification(result: SchemeResult) -
             assert path.azimuth_text != "-0.0 度" and path.elevation_text != "-0.0 度"
             assert path.within_window == raw.within_window
             assert path.zone == raw.zone.value
-            assert path.wall_sequence == tuple(LABELS[wall] for wall in raw.wall_sequence)
+            # 牆名跟著方案排前後左右（#1134）；不是牆的（家具面）照標籤表。
+            assert path.wall_sequence == tuple(walls.get(wall, LABELS[wall]) for wall in raw.wall_sequence)
         assert [path.delay_text for path in channel.paths] == [
             f"{raw.relative_direct_delay_s * 1000:.2f} 毫秒"
             for raw in ordered]

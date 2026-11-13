@@ -35,6 +35,7 @@ from aosr.config.material_gradient import (
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
+from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, saved_refusals, target_fits, target_line,
@@ -197,8 +198,8 @@ _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設"
 
 
 def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], per_surface: tuple[ZoneMode, ...],
-                   depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets
-                   ) -> dict[str, tuple[TargetLine, ...]]:
+                   depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets,
+                   names: Mapping[str, str]) -> dict[str, tuple[TargetLine, ...]]:
     found: dict[str, tuple[TargetLine, ...]] = {}
     for (wall, zone), mode in zip(pairs, per_surface, strict=True):
         surface = surface_of(wall, zone)
@@ -212,7 +213,7 @@ def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], 
         cap = DepthCap(depths[surface], cast(DepthLevel, source if source in ("zone", "wall", "room") else "zone"))
         lines = [target_line(fit, cap, targets, level_words=_LEVEL_WORDS.get(source, source)) for fit in fits]
         if not any(fit.usable for fit in fits):
-            raise PlanRefused(f"{zone_words(wall, zone)}：{no_group_words(lines)}")
+            raise PlanRefused(f"{zone_words(wall, zone, names)}：{no_group_words(lines)}")
         found[surface] = tuple(TargetLine.model_validate(line) for line in lines)
     return dict(sorted(found.items()))
 
@@ -245,7 +246,7 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
     depths, sources = _depths(request, modes, design)
-    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth)
+    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, wall_words(scheme))
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
     for pair, chosen in list(allowed.items()):
         dropped = unusable.get(surface_of(*pair), frozenset())

@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from aosr.physics.zone_fill import whole_wall_entries
 from aosr.gui.labels import WALLS
+from aosr.gui.wall_words import wall_words
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstructionNote, MeasuredImpedance, SurfaceMaterial
 from aosr.physics.report_measured import MeasuredSeam
@@ -60,7 +61,7 @@ def _approximate(material: MeasuredImpedance) -> tuple[str, ...]:
     return (APPROXIMATE_LINE,) if all(point.imag_pa_s_m == 0.0 for point in material.points) else ()
 
 
-def _header(result: SchemeResult, wall: str, material: MeasuredImpedance) -> tuple[str, ...]:
+def _header(result: SchemeResult, wall: str, material: MeasuredImpedance, names: dict[str, str]) -> tuple[str, ...]:
     low, high = material.points[0].frequency_hz, material.points[-1].frequency_hz
     extra = []
     merged: dict[Wall, tuple[ConstructionNote, ...]] = {}
@@ -75,7 +76,7 @@ def _header(result: SchemeResult, wall: str, material: MeasuredImpedance) -> tup
             extra.append(f'底構造第 {note.layer_index} 層的材料類別不在小松纖維模型擬合範圍')
         elif note.code == 'komatsu_flow_below_samples':
             extra.append(f'底構造第 {note.layer_index} 層流阻低於原研究樣品範圍，照算但不宣稱準確性')
-    return (f'{WALLS[wall]}：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
+    return (f'{names[wall]}：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
             *_approximate(material), '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
             *dict.fromkeys(extra))
 
@@ -119,9 +120,9 @@ def _saved_zone_seams(result: SchemeResult, materials: dict[tuple[str, str], Mea
     return reference
 
 
-def _zone_header(wall: str, zone: str, material: MeasuredImpedance) -> tuple[str, ...]:
+def _zone_header(wall: str, zone: str, material: MeasuredImpedance, names: dict[str, str]) -> tuple[str, ...]:
     low, high = material.points[0].frequency_hz, material.points[-1].frequency_hz
-    return (f'{WALLS[wall]} {zone} 區：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
+    return (f'{names[wall]} {zone} 區：實測表涵蓋 {low:g}–{high:g} Hz；{low:g} Hz 以下與 {high:g} Hz 以上是模型補值（底構造）',
             *_approximate(material), '實測段假設與角度無關。', '實測表只代表樣品在管子裡量到的結果，不代表現場安裝（邊緣、龍骨、板會彎）。',
             '這面牆分了區：底構造的材料模型註記各區併在一起，列在「牆面材料計算提醒」那一節，分不出是哪一區。')
 
@@ -133,13 +134,15 @@ def build_measured_view(result: SchemeResult) -> tuple[MeasuredWallView, ...] | 
     if not materials and not zoned:
         return None
     views: list[MeasuredWallView] = []
+    # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
+    names = wall_words(result.scheme)
     if materials:
         seams = _saved_seams(result, materials)
-        views.extend(MeasuredWallView(wall_name=WALLS[wall], header_lines=_header(result, wall, material),
+        views.extend(MeasuredWallView(wall_name=names[wall], header_lines=_header(result, wall, material, names),
                                       rows=_seam_rows(seams[wall])) for wall, material in materials.items())
     if zoned:
         zone_seams = _saved_zone_seams(result, zoned)
-        views.extend(MeasuredWallView(wall_name=f'{WALLS[wall]}（{zone} 區）', header_lines=_zone_header(wall, zone, material),
+        views.extend(MeasuredWallView(wall_name=f'{names[wall]}（{zone} 區）', header_lines=_zone_header(wall, zone, material, names),
                                       rows=_seam_rows(zone_seams[wall][zone])) for (wall, zone), material in zoned.items())
     return tuple(views)
 
