@@ -221,6 +221,10 @@ def test_states_follow_the_id_file_status_and_exit_records(tmp_path: Path) -> No
     write_exit(jobs.root / job_id / "steps" / "0.start.exit.json", StepExit(exit_code=0, finished_at=time.time()))
     (folder / "status.json").write_text(SearchStatus(state="budget_exhausted").model_dump_json(), encoding="utf-8")
     assert jobs.get(job_id)["state"] == "finishing"
+    # 回饋開的下一輪：start 早就做完，auto 又在搜尋（狀態檔回到進行中），判搜尋中（#1136）。
+    (folder / "status.json").write_text(SearchStatus().model_dump_json(), encoding="utf-8")
+    assert jobs.get(job_id)["state"] == "searching"
+    (folder / "status.json").write_text(SearchStatus(state="budget_exhausted").model_dump_json(), encoding="utf-8")
     launcher.active.clear()
     assert jobs.get(job_id)["state"] == "interrupted"
     assert cast(Record, jobs.get(job_id)["actions"])["resume"] is True
