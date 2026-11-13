@@ -141,13 +141,28 @@ def test_input_page_and_candidates_share_one_center_rule(tmp_path: Path) -> None
     copied = layout.to_scheme(furnished, same, "copied")
     assert _cloud(copied).bottom_center_m == (2.1, 1.9, 2.85)
     assert copied.model_dump(exclude={"scheme_id"}) == furnished.model_dump(exclude={"scheme_id"})
-    # 勾選後在輸入頁挪了喇叭：天雲照存檔不動（輸入頁行為），搜尋候選照新擺位重算水平中心、高度照存檔。
+    # 勾選後在輸入頁挪了喇叭（往前牆 0.4、往 y0 偏 0.3，中點 (0.6,1.6)）：天雲照存檔不動（輸入頁行為），
+    # 搜尋候選照新擺位重算水平中心 ((0.6+3.2)/2, (1.6+1.9)/2)＝(1.9,1.75)，高度照存檔；搜尋自己擺的喇叭中點橫向永遠對齊主位，
+    # 所以 y 那一半只有這種不對稱擺位驗得到。
     moved = Scheme.model_validate(furnished.model_dump() | {"speakers": {
-        "left": {"x": 0.6, "y": 1.3, "z": 1.2}, "right": {"x": 0.6, "y": 2.5, "z": 1.2}}})
+        "left": {"x": 0.6, "y": 1.0, "z": 1.2}, "right": {"x": 0.6, "y": 2.2, "z": 1.2}}})
     assert _cloud(moved).bottom_center_m == (2.1, 1.9, 2.85)
     shifted = layout.Placement(moved.speakers["left"], moved.speakers["right"], same.primary, same.receivers, (-1.0, 0.0))
-    assert _cloud(layout.to_scheme(moved, shifted, "moved")).bottom_center_m == pytest.approx((1.9, 1.9, 2.85), abs=1e-12, rel=0)
+    assert _cloud(layout.to_scheme(moved, shifted, "moved")).bottom_center_m == pytest.approx((1.9, 1.75, 2.85), abs=1e-12, rel=0)
     assert _cloud(layout.to_scheme(moved, shifted, "kept", cloud_follows=False)).bottom_center_m == (2.1, 1.9, 2.85)
+
+
+def test_search_with_two_clouds_is_rejected_before_creating_folder(tmp_path: Path) -> None:
+    from aosr.reporting.validation import SchemeValidationError
+
+    # 兩片並排都在房內（主線上可以搜）；跟著走會被搬到同一個中心疊在一起，整場全判擺放錯，所以建目錄前就拒收。
+    cloud = _input_cloud(tmp_path)
+    left = cloud | {"furniture_id": "cloud-a", "placement": {"bottom_center_m": [1.4, 1.9, 2.85], "yaw_deg": 90}}
+    right = cloud | {"furniture_id": "cloud-b", "placement": {"bottom_center_m": [3.4, 1.9, 2.85], "yaw_deg": 90}}
+    with pytest.raises(SchemeValidationError, match="規則只定得出一片天雲；這份方案有 2 片（cloud-a、cloud-b）"):
+        make_store(tmp_path / "two", furniture=[left, right])
+    assert not (tmp_path / "two" / "searches").exists() or not any((tmp_path / "two" / "searches").iterdir())
+    make_store(tmp_path / "one", furniture=[left])
 
 
 # 改動前主線（ad8b520f）照同一建法算的方案雜湊；沒放天雲的候選必須逐位不變。
