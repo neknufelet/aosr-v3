@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import json
+import math
 import os
 import signal
 import subprocess
@@ -20,6 +21,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import httpx
@@ -29,21 +31,25 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient import run
-from aosr.gradient.surrogate_build import _commit, _install, _rebuild_hint, _StopGate
+from aosr.gradient.fixed_candidates import CandidateVerdict
+from aosr.gradient.surrogate_build import _commit, _install, _rebuild_hint, _record_check, _Run, _StopGate
 from aosr.gradient.surrogate_fixed_checks import FIXED_CHECKS_FILE, read_record
 from aosr.gradient.surrogate_files import (
-    ESTIMATE_LABEL, MODEL_FILE, PROGRESS_FILE, RESULT_FILE, STAGE_DIR, TRAINING_FILE, RoundRecord, SurrogateProgress,
-    SurrogateResult, estimate,
+    ESTIMATE_LABEL, FIXED_ROUNDS_FILE, MODEL_FILE, PROGRESS_FILE, RESULT_FILE, STAGE_DIR, TRAINING_FILE, FixedCheckRound,
+    RoundRecord, SurrogateProgress, SurrogateResult, estimate, fixed_round_lines, read_fixed_rounds,
 )
 from aosr.gui import gradient_exec
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import ActionRefused, GradientJobs, JobBusy, LaunchFailed, Launcher, NeedsSurrogate
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused
-from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX, RETIRED_DIR, SurrogateBuilds, SurrogateRequest
+from aosr.gui.surrogate_builds import (
+    BUILD_UNIT_PREFIX, RETIRED_DIR, RUNNING_STATES, STATE_TEXTS, SurrogateBuilds, SurrogateRequest,
+)
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, surrogate_path
 from aosr.materials import library
 from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
+from aosr.physics.fem_reduced import ReducedModel
 from aosr.physics.fem_reduced_build import STOP_BUDGET, STOP_RESIDUAL_MET
 from aosr.physics.fem_reduced_check import points_hex
 from aosr.physics.fem_reduced_receipt import receipt_path
@@ -59,7 +65,7 @@ from tests.engine.test_material_gradient_library import _ENTRY, FIXED, USER, _fi
 
 NAME = "zoned"
 Record = dict[str, object]
-RUNNING = ("preparing", "building", "validating", "checking", "installing", "stopping")
+RUNNING = ("preparing", "building", "fixed_checking", "validating", "checking", "installing", "stopping")
 WAIT_S = 300.0
 QUICK = SurrogateRequest(workers=1, dense_threads=1)
 # 這一次建模更嚴的停止殘差（設定檔預設 0.001 不動）；暫存區實量：這間小房間 160 次停、九組留出全過（帶能量 0.0003 dB）。
@@ -104,7 +110,8 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Surrogate
     directory = tmp_path_factory.mktemp("surrogate-build")
     data_dir = _data(directory)
     _, builds = _managers(data_dir, LocalLauncher(directory))
-    view = _wait(builds, str(builds.start(NAME, STRICT)["build_id"]))
+    # 准用清單有固定材料：建替身要帶開跑選項（#1128，網頁一律帶表單上那一份）；這裡帶開跑預設那一組。
+    view = _wait(builds, str(builds.start(NAME, STRICT.model_copy(update={"search": GradientRequest()}))["build_id"]))
     assert view["state"] == "installed", view
     return data_dir, builds, view
 
@@ -609,7 +616,8 @@ def trained_with_library(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path
     data_dir = _data(directory, allowed=("glass_wool_48k", USER, FIXED))
     _library(data_dir, _fixed(), _optimizable())
     _, builds = _managers(data_dir, LocalLauncher(directory))
-    view = _wait(builds, str(builds.start(NAME, STRICT)["build_id"]))
+    # 准用清單有固定材料：建替身要帶開跑選項（#1128，網頁一律帶表單上那一份）；這裡帶開跑預設那一組。
+    view = _wait(builds, str(builds.start(NAME, STRICT.model_copy(update={"search": GradientRequest()}))["build_id"]))
     assert view["state"] == "installed", view
     return data_dir, builds, view
 
@@ -692,3 +700,102 @@ def test_build_hands_the_same_library_and_settings_to_the_command_line(tmp_path:
     with pytest.raises(PlanRefused, match="使用者材料庫（materials.json）讀不進來"):
         builds.start(NAME, QUICK)
     assert len(launcher.launched) == 1
+
+
+# ---- #1128：補訓練時的推估、每一次固定材料核對的數字、沒帶開跑選項不建 ----
+
+def _demo_2_6c(**fields: object) -> SurrogateProgress:
+    """2-6c 示範 20:36 那一刻的進度（build-final.json 的數字）：第 16 輪補到 576 次殘差到停止值，第 17 輪是補訓練換池
+    只量殘差、沒解（秒數還含 14 分鐘的固定材料核對）。"""
+    rounds = [RoundRecord(round=15, full_solves=544, rank=2145, max_residual=0.0116, elapsed_s=1832.5971104549244),
+              RoundRecord(round=16, full_solves=576, rank=2272, max_residual=0.00094, elapsed_s=2014.033939926885),
+              RoundRecord(round=17, full_solves=576, rank=2272, max_residual=0.0166, elapsed_s=2963.756234965287)]
+    base: Record = {"phase": "building", "started_at": 1000.0, "phase_started_at": 3900.0, "updated_at": 4000.0,
+                    "workers": 4, "patches": 13, "dofs": 102720, "axis_points": 188, "training_sets": 48, "holdout_sets": 12,
+                    "max_full_solves": 1000, "stop_residual": 0.001, "full_solves": 576, "rank": 2272,
+                    "snapshot_seconds": 1327.9626388428733 * 576 / 672, "rounds": rounds}
+    return SurrogateProgress.model_validate(base | fields)
+
+
+def test_extension_estimate_does_not_take_a_round_that_solved_nothing_as_one_solve_per_round() -> None:
+    """抓 2-6c 那一句：補訓練換池那一輪沒解（完整解次數不變），推估把剩下 424 次當成 424 輪 × 950 秒＝407317 秒
+    （約 113 小時，實際補三輪約 18 分）。往前找真的有補的那一輪；在補訓練時只推再補一輪（過了就停）。"""
+    progress = _demo_2_6c()
+    plain = estimate(progress, 4000.0)
+    seconds = 2014.033939926885 - 1832.5971104549244
+    assert plain["build_remaining_s"] == pytest.approx(math.ceil(424 / 32) * seconds)
+    extending = estimate(progress, 4000.0, extending=True)
+    assert extending["build_remaining_s"] == pytest.approx(seconds)
+    assert extending["validation_remaining_s"] == plain["validation_remaining_s"]
+    assert "過了就停" in str(extending["basis"]) and "最多再 14 輪" in str(extending["basis"])
+    assert cast(float, extending["remaining_s"]) < 2 * 3600
+
+
+def test_build_view_lists_every_fixed_check_and_estimates_the_extension(tmp_path: Path) -> None:
+    """抓每一輪核對的數字沒處看（2-6c：只留最後一次，中間兩輪過不過查不到），或核過一次之後還照預算推估；
+    材料庫有的印名字（不印代號），對不到的照印代號。"""
+    data_dir, _, _, builds = _fake(tmp_path)
+    view = builds.start(NAME, QUICK)
+    work = _work(data_dir, view)
+    (work / PROGRESS_FILE).write_text(_demo_2_6c().model_dump_json(), encoding="utf-8")
+    assert builds.get(str(view["build_id"]))["fixed_checks"] == []
+    rows = [FixedCheckRound(check=1, full_solves=576, rank=2272, target="fixed:glass_wool_48k_50mm_gap50", frequency_db=0.388, band_db=0.0047,
+                            worst_hz=293.441, passed=False, seconds=840.0),
+            FixedCheckRound(check=1, full_solves=576, rank=2272, target="fixed:b", frequency_db=0.1, band_db=0.001,
+                            passed=True, seconds=830.0),
+            FixedCheckRound(check=2, full_solves=608, rank=2397, target="fixed:glass_wool_48k_50mm_gap50", frequency_db=0.141, band_db=0.001,
+                            passed=True, seconds=20.0)]
+    (work / FIXED_ROUNDS_FILE).write_text("".join(row.model_dump_json() + "\n" for row in rows) + "not json\n",
+                                          encoding="utf-8")
+    seen = builds.get(str(view["build_id"]))
+    assert seen["fixed_checks"] == [
+        "固定材料核對第 1 次（完整解合計 576 次、秩 2272）：「48K 玻璃棉 50 mm＋50 mm 空腔」逐頻 0.388 dB、帶能量 0.0047 dB，沒過（最差在 293.441 Hz）；"
+        "fixed:b 逐頻 0.1 dB、帶能量 0.001 dB，過了",
+        "固定材料核對第 2 次（完整解合計 608 次、秩 2397）：「48K 玻璃棉 50 mm＋50 mm 空腔」逐頻 0.141 dB、帶能量 0.001 dB，過了"]
+    assert "過了就停" in str(cast(Record, seen["estimate"])["basis"])
+
+
+def test_build_without_the_search_options_is_refused_when_the_allowed_list_has_fixed_materials(tmp_path: Path) -> None:
+    """抓 #1127 審查第 8 條：沒帶開跑選項就照預設算起跑配置核固定材料，建好了開跑可能照樣被拒；帶了就照建。
+    沒有固定材料候選的切法照舊不用帶。"""
+    data_dir = _data(tmp_path, allowed=("glass_wool_48k", FIXED))
+    _library(data_dir, _fixed())
+    launcher = FakeLauncher()
+    _, builds = _managers(data_dir, launcher)
+    with pytest.raises(PlanRefused, match="建替身要帶開跑那一組選項"):
+        builds.start(NAME, QUICK)
+    assert launcher.launched == []
+    view = builds.start(NAME, QUICK.model_copy(update={"search": GradientRequest(mount="rigid")}))
+    argv = launcher.launched[-1][1]
+    assert argv[argv.index("--mount") + 1] == "rigid" and view["state"] == "preparing"
+    _, plain = _fake(tmp_path / "plain")[2:]
+    assert plain.start(NAME, QUICK)["state"] == "preparing"
+
+
+def test_fixed_check_phase_has_its_own_name_and_counts_the_validation_after_it() -> None:
+    """抓審查那一條：固定材料核對借用「留出驗證」的名字，推估只算核對剩下的點、漏掉後面真的留出驗證那一段。"""
+    progress = _progress(phase="fixed_checking", phase_started_at=1000.0, validation_done=94, validation_total=188)
+    seen = estimate(progress, 1094.0)
+    after = cast(float, estimate(_progress(), 1100.0)["validation_remaining_s"])  # 留出驗證 9 組 × 94 點，照建模量到的速度
+    assert seen["validation_remaining_s"] == pytest.approx(after)
+    assert seen["remaining_s"] == pytest.approx((188 - 94) * 1.0 + after)
+    assert "固定材料核對已解 94／188 點" in str(seen["basis"]) and "之後還有留出驗證" in str(seen["basis"])
+    assert "固定材料核對" in STATE_TEXTS["fixed_checking"] and "fixed_checking" in RUNNING_STATES
+
+
+def test_a_check_that_cannot_be_computed_is_written_as_such_and_never_stops_the_build(tmp_path: Path,
+                                                                                     capsys: pytest.CaptureFixture[str]) -> None:
+    """抓審查那一條：差值是非有限數（判決照沒過）時寫紀錄丟例外、整個建模失敗；寫不進去也一樣。紀錄只給人看。"""
+    job = SimpleNamespace(work=tmp_path)
+    model = SimpleNamespace(ledger=SimpleNamespace(full_solves=96, rank=267))
+    verdicts = {"fixed:glass_wool_48k_50mm_gap50": SimpleNamespace(frequency_db=math.inf, band_db=math.nan,
+                                                                   worst_hz=293.441, passed=False, seconds=840.0)}
+    _record_check(cast("_Run", job), 1, cast("ReducedModel", model), cast("dict[str, CandidateVerdict]", verdicts))
+    (row,) = read_fixed_rounds(tmp_path / FIXED_ROUNDS_FILE)
+    assert (row.frequency_db, row.band_db, row.passed) == (None, None, False)
+    assert fixed_round_lines([row]) == [
+        "固定材料核對第 1 次（完整解合計 96 次、秩 267）：fixed:glass_wool_48k_50mm_gap50 逐頻 算不出來、帶能量 算不出來，"
+        "沒過（最差在 293.441 Hz）"]
+    _record_check(cast("_Run", SimpleNamespace(work=tmp_path / "missing")), 2, cast("ReducedModel", model),
+                  cast("dict[str, CandidateVerdict]", verdicts))
+    assert "固定材料核對第 2 次的紀錄沒寫進去（判決照常）" in capsys.readouterr().err

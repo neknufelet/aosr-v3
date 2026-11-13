@@ -35,6 +35,8 @@ td[data-verdict="within_range"]{color:#1a7f37}
 #zone-rows tr[data-changed="true"] td { background: #eef6f0; }
 #zone-rows td { white-space: pre-line; }
 #zone-rows td:nth-child(-n+4) { white-space: pre; }
+/* 位置與尺寸那一格可以在「、」換行（#1128：1400 px 寬時整張表 1157 px 塞不進 1058 px 的框，最後一欄要橫捲）。 */
+#zone-rows td:nth-child(3) { white-space: pre-line; min-width: 9em; }
 #zone-rows td:nth-child(n+5) { min-width: 14em; }
 #zone-rows .zone-material-detail { margin-top: .25rem; color: #46586a; font-size: .9em; }
 #zone-rows .zone-material-detail summary { cursor: pointer; }

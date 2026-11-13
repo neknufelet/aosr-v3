@@ -30,11 +30,12 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.fem_reduced import load_reduced_model_settings
+from aosr.config.material_gradient import is_fixed_target
 from aosr.config.paths import config_path
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.gradient.surrogate_files import (
-    EXIT_INSTALLED, EXIT_NOT_USABLE, EXIT_STOPPED, ESTIMATE_LABEL, PROGRESS_FILE, RESULT_FILE, SurrogateProgress,
-    SurrogateResult, estimate,
+    EXIT_INSTALLED, EXIT_NOT_USABLE, EXIT_STOPPED, ESTIMATE_LABEL, FIXED_ROUNDS_FILE, PROGRESS_FILE, RESULT_FILE,
+    SurrogateProgress, SurrogateResult, estimate, fixed_round_lines, read_fixed_rounds,
 )
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_jobs import (
@@ -43,7 +44,7 @@ from aosr.gui.gradient_jobs import (
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, configuration_arguments
 from aosr.gui.material_editor import USER_LIBRARY_NAME
 from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, slot_key
-from aosr.materials.library import LibraryEntry, dump_user_library
+from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library, load_user_library
 from aosr.runtime import child_process_env
 
 BUILDS_DIR: Final = "builds"
@@ -52,10 +53,13 @@ BUILD_ID = re.compile(r"[0-9a-f]{32}\Z")
 BUILD_VERSION: Final = "aosr.gui.surrogate_build.v1"
 BUILD_UNIT_PREFIX: Final = f"{UNIT_PREFIX}surrogate-"
 HISTORY_LIMIT: Final = 5
+NO_SEARCH_TEXT: Final = ("准用清單有固定材料：建替身要帶開跑那一組選項（search；網頁按「建替身」會帶表單上現在的選項），"
+                         "建替身才核得到搜尋真的要用的那一組起跑配置；沒帶就照預設核，建好了開跑也可能被拒，這次不建")
 
 STATE_TEXTS: Final[dict[str, str]] = {
     "preparing": "建替身：匯出完整模型、算訓練與留出材料",
     "building": "建替身：完整解快照、補點、投影",
+    "fixed_checking": "建替身：固定材料核對（准用清單的固定材料整條頻率軸完整解，跟替身比；沒過就補訓練再核）",
     "validating": "建替身：留出驗證（拿沒用來建的材料逐點完整解，跟替身比）",
     "checking": "建替身：用搜尋開跑那一道准用閘門核對",
     "installing": "建替身：放進這份切法的格子",
@@ -67,7 +71,7 @@ STATE_TEXTS: Final[dict[str, str]] = {
     "gate_refused": "建好、驗過，但搜尋開跑那一道准用閘門不收：沒有放進格子",
     "installed": "建好、留出驗證兩把尺都過、閘門核過，已放進這份切法的格子，可以開搜尋",
 }
-RUNNING_STATES: Final = ("preparing", "building", "validating", "checking", "installing", "stopping")
+RUNNING_STATES: Final = ("preparing", "building", "fixed_checking", "validating", "checking", "installing", "stopping")
 
 
 class SurrogateRequest(BaseModel):
@@ -108,6 +112,17 @@ class SurrogateBuild(BaseModel):
     created_at: float
     request: SurrogateRequest
     step: BuildStep
+
+
+def _labels(library: Path) -> dict[str, str]:
+    """材料代號→顯示名：內建＋這一次建模帶的那份使用者材料庫（建模資料夾裡的快照；沒有或讀不進來就只用內建）。"""
+    entries: tuple[LibraryEntry, ...] = builtin_entries()
+    if library.is_file():
+        try:
+            entries += load_user_library(library)
+        except (OSError, ValueError):
+            pass
+    return {entry.id: entry.label for entry in entries}
 
 
 def _read[T: BaseModel](path: Path, kind: type[T]) -> tuple[T | None, str | None]:
@@ -197,11 +212,16 @@ class SurrogateBuilds:
         state = self._state(build, progress, result)
         _, record = self._status(build)
         running = state in RUNNING_STATES
+        # 開跑那一道固定材料核對每做一次的數字（#1128）；核過一次之後還在建模就是在補訓練。
+        checks = read_fixed_rounds(work / FIXED_ROUNDS_FILE)
+        labels = _labels(self._dir(build.build_id) / USER_LIBRARY_NAME) if checks else {}
         return {"build_id": build.build_id, "scheme_id": build.scheme_id, "slot_key": build.slot_key, "slot": build.slot,
                 "created_at": build.created_at, "request": build.request.model_dump(mode="json"),
                 "state": state, "state_text": STATE_TEXTS[state], "actions": {"stop": running and state != "stopping"},
                 "progress": None if progress is None else progress.model_dump(mode="json"),
-                "estimate": estimate(progress, time.time()) if running and progress is not None else None,
+                "estimate": (estimate(progress, time.time(), extending=bool(checks)) if running and progress is not None
+                             else None),
+                "fixed_checks": fixed_round_lines(checks, labels),
                 "result": None if result is None else result.model_dump(mode="json"),
                 "notes": [note for note in (progress_note, result_note) if note is not None],
                 "unit": build.step.unit, "exit_code": None if record is None else record.exit_code,
@@ -263,6 +283,9 @@ class SurrogateBuilds:
 
     def start(self, scheme_id: str, request: SurrogateRequest) -> dict[str, object]:
         text, slot, key, entries, allowed, configuration = self._checked(scheme_id, request.search)
+        if request.search is None and any(is_fixed_target(target) for targets in allowed.values() for target in targets):
+            # #1127 審查第 8 條（#1128）：沒帶開跑選項就照預設算起跑配置，核的不是搜尋要用的那一組，建好開跑照樣被拒。
+            raise PlanRefused(NO_SEARCH_TEXT)
         if slot.exists() and not request.replace:
             found = not missing_parts(slot / SURROGATE_FILE)
             raise ActionRefused("這份切法已經有替身了" + ("" if found else "（但缺件）") +

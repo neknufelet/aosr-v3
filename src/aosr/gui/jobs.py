@@ -143,9 +143,43 @@ class JobManager:
         with self._lock:
             return self._load(run_id)
 
-    def start(self, scheme_path: Path) -> dict[str, object]:
-        # 一般起算讀的是 schemes/<代號>.json，檔名就是已過代號白名單的方案代號。
-        return self._start(scheme_path, uuid.uuid4().hex, scheme_path.stem)
+    def run_seconds(self, run_id: str) -> int | None:
+        """這一筆算完（done）實際花的秒數（結束減開始，四捨五入）；沒算完、沒記結束時間或讀不到就 None。"""
+        try:
+            state = self.read_state(run_id)
+            if state.get("status") != "done" or "finished_at" not in state:
+                return None
+            return round(max(0.0, float(str(state["finished_at"])) - float(str(state["started_at"]))))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def measured_seconds(self, scheme_id: str) -> int | None:
+        """方案代號是 ``scheme_id`` 的最近一筆算完的計算實際花的秒數；沒有就 None。"""
+        latest: tuple[float, str] | None = None
+        for path in (self.data_dir / "runs").glob("*.json"):
+            try:
+                state = self.read_state(path.stem)
+                started = float(str(state.get("started_at")))
+            except (OSError, ValueError, TypeError):
+                continue
+            if state.get("scheme_id") == scheme_id and state.get("status") == "done" and (latest is None or started > latest[0]):
+                latest = (started, path.stem)
+        return None if latest is None else self.run_seconds(latest[1])
+
+    def start(self, scheme_path: Path, *, reference_scheme: str | None = None) -> dict[str, object]:
+        """一般起算讀的是 schemes/<代號>.json，檔名就是已過代號白名單的方案代號。
+
+        參考時間（#1128）：這份方案上一次算完量到的；沒算過就看 ``reference_scheme``（同一間房的另一份，例如搜尋存成
+        方案時的搜尋起點）上一次量到的；都沒有才用這台管理員的預設值。109 那種房一場約 21 分，固定的 360 秒差太多。"""
+        name = scheme_path.stem
+        fields: dict[str, object] | None = None
+        for source, label in ((name, "上一次算這份方案量到的"),
+                              (reference_scheme, f"同一間房「{reference_scheme}」上一次量到的")):
+            seconds = None if source is None else self.measured_seconds(source)
+            if seconds is not None:
+                fields = {"reference_seconds": seconds, "reference_label": label}
+                break
+        return self._start(scheme_path, uuid.uuid4().hex, name, job_fields=fields)
 
     def start_snapshot(self, scheme_json: str, scheme_label: str, *, extra_args: tuple[str, ...] = (),
                        job_fields: dict[str, object] | None = None) -> dict[str, object]:

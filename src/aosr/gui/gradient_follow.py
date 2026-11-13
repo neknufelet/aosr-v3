@@ -286,7 +286,7 @@ class GradientFollow:
                 write_design(self.gradient.data_dir, design.model_copy(update={"scheme_id": name}), scheme)
             run_id = self._started_run(name)
             if run_id is None:
-                run_id = str(self.jobs.start(path)["run_id"])
+                run_id = str(self.jobs.start(path, reference_scheme=scheme_id)["run_id"])
             adoption = Adoption(job_id=job_id, scheme_id=name, run_id=run_id, created_at=time.time())
             _write_atomic(self._job_dir(job_id) / ADOPTED_FILE, adoption.model_dump_json())
             return self.detail(job_id)

@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import signal
 import sys
 import time
@@ -429,6 +431,33 @@ class _Extension:
     stalled: bool
 
 
+def _record_check(job: _Run, check: int, model: ReducedModel, verdicts: Mapping[str, CandidateVerdict]) -> None:
+    """這一次核的每個候選一列寫進 ``fixed_check_rounds.jsonl``、同一句印進建模日誌（#1128：只存最後一次，中間幾輪
+    過不過、差多少事後查不到）。不改判決。"""
+    from aosr.gradient.surrogate_files import FIXED_ROUNDS_FILE, FixedCheckRound, fixed_round_lines
+
+    def finite(value: float) -> float | None:
+        return value if math.isfinite(value) else None
+
+    try:
+        rows = [FixedCheckRound(check=check, full_solves=model.ledger.full_solves, rank=model.ledger.rank, target=target,
+                                frequency_db=finite(verdict.frequency_db), band_db=finite(verdict.band_db),
+                                worst_hz=None if verdict.passed or not math.isfinite(verdict.worst_hz) else verdict.worst_hz,
+                                passed=verdict.passed, seconds=max(0.0, verdict.seconds))
+                for target, verdict in sorted(verdicts.items())]
+        with (job.work / FIXED_ROUNDS_FILE).open("a", encoding="utf-8") as stream:
+            for row in rows:
+                stream.write(row.model_dump_json() + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except (OSError, ValueError) as error:
+        # 紀錄只給人看：寫不進去照講一句、建模照走，不讓它改掉判決之後的路（審查必修）。
+        sys.stderr.write(f"固定材料核對第 {check} 次的紀錄沒寫進去（判決照常）：{error}\n")
+        return
+    for line in fixed_round_lines(rows):
+        sys.stderr.write(line + "\n")
+
+
 def _fixed_checked(job: _Run, builder: ReducedModelBuilder, model: ReducedModel, prepared: _Prepared) -> _Extension:
     """開跑那一道固定材料核對（全部候選）；有沒過的就補訓練，每補一輪（一次補點＋重算基底）就重核一次、全過就停：
     候選池是補進來的那幾批，池裡的殘差還沒到停止值就同一池接著補；到了停止值（或池用完）才再加一批新的組。
@@ -439,9 +468,12 @@ def _fixed_checked(job: _Run, builder: ReducedModelBuilder, model: ReducedModel,
 
     axis = prepared.axis
     total = len(prepared.configurations) * len(axis)
-    job.progress.phase("validating", validation_done=0, validation_total=total)
-    verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded, workers=job.workers)
+    job.progress.phase("fixed_checking", validation_done=0, validation_total=total)
+    verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded, workers=job.workers,
+                                progress=job.progress.validation)
     job.progress.validation(total, total)
+    checks = 1
+    _record_check(job, checks, model, verdicts)
     added: list[MaterialSet] = []
     batch, stalled, continuing = 0, False, False
     assert job.start is not None
@@ -473,9 +505,11 @@ def _fixed_checked(job: _Run, builder: ReducedModelBuilder, model: ReducedModel,
                 break
             continuing = False
             continue
-        job.progress.phase("validating", validation_done=0, validation_total=total)
+        job.progress.phase("fixed_checking", validation_done=0, validation_total=total)
         verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded,
-                                    workers=job.workers, previous=verdicts)
+                                    workers=job.workers, previous=verdicts, progress=job.progress.validation)
+        checks += 1
+        _record_check(job, checks, model, verdicts)
         continuing = builder.stop_reason == STOP_ROUND_LIMIT
     return _Extension(model, verdicts, added, batch, stalled)
 
