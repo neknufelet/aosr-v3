@@ -680,6 +680,8 @@ async function loadArchiveList() {
   }
 }
 async function loadResultList() {
+  // 首頁第一屏跟著結果清單重讀（算完、封存之後「最近算的房間」會變）；它自己讀不到只寫在它那一行，不擋清單。
+  if (typeof refreshHome === "function") refreshHome().catch(() => {});
   const data = await api("/api/results");
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
