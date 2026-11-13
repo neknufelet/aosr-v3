@@ -153,3 +153,5 @@ a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
 .home-schemes{padding-left:1.2rem}
 .home-schemes li{margin:.3rem 0}
 #home-auto summary{cursor:pointer;color:#15617b}
+/* 手機寬：三個下一步排在圖前面，第一屏就看得到要按哪裡。 */
+@media (max-width:700px){.home-next{order:-1}}

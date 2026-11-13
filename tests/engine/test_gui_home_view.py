@@ -16,9 +16,10 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.home_view import (LAYOUT_NOTE, NO_WHOLE_LAYOUT_NOTE, ZONED_LAYOUT_NOTE, home_data, home_view,
-                                latest_pick, name_words, room_overview, scheme_line, treated_words)
+                                latest_picks, name_words, room_overview, scheme_line, treated, treated_words)
 from aosr.gui.result_list import ResultSummary
 from aosr.gui.wall_words import wall_words
+from aosr.materials.construction_models import Assembly
 from aosr.materials.library import builtin_entries
 from aosr.reporting.scheme import Scheme
 from tests.engine._surface_zone_cases import ROOM_109, room109_quarters
@@ -64,11 +65,13 @@ def test_latest_skips_baselines_refines_and_unfinished_runs() -> None:
     rows = [("a-orig-3d07ea99", "r1", "/results/r1", "done"),
             (f"{'b' * 32}-baseline-verification", "r2", "/results/r2", "done"),
             ("mine", "r3", "/results/r3", "failed"),
+            ("mine", "r3s", "/results/r3s", "stopped"),
+            ("mine", "r3r", "/results/r3r", "running"),
             ("mine", "r4", "", "done"),
             ("mine-search-c98c50b8", "r5", "/results/r5", "none"),
             ("older", "r6", "/results/r6", "done")]
-    assert latest_pick(rows) == ("r5", "/results/r5")
-    assert latest_pick(rows[:4]) is None
+    assert list(latest_picks(rows)) == [("r5", "/results/r5"), ("r6", "/results/r6")]
+    assert not list(latest_picks(rows[:6]))
 
 
 def test_part2d_layout_draws_front_wall_on_top_and_left_wall_on_the_left() -> None:
@@ -77,7 +80,7 @@ def test_part2d_layout_draws_front_wall_on_top_and_left_wall_on_the_left() -> No
     _zones(document)["x0"][2]["material"] = copy.deepcopy(MOUNTED)  # u0v0, u0v1, u1v0…：第三塊是 u 後半、下半
     _whole(document, "y0")
     scheme = Scheme.model_validate(document)
-    assert treated_words(scheme) == "有貼東西：前牆 1 塊、左牆整面"
+    assert treated_words(scheme) == "貼了吸音材料：前牆 1 塊、左牆整面"
     room = room_overview(scheme, builtin_entries())
     assert (room["width_m"], room["depth_m"]) == (ROOM_109["Ly"], ROOM_109["Lx"])
     walls = {str(item["wall"]): item for item in _items(room, "walls")}
@@ -95,6 +98,32 @@ def test_part2d_layout_draws_front_wall_on_top_and_left_wall_on_the_left() -> No
     primary = _at(room, "primary")
     assert speakers["左聲道喇叭"]["x"] < primary["x"] < speakers["右聲道喇叭"]["x"]
     assert speakers["左聲道喇叭"]["y"] < primary["y"]
+
+
+MEASURED: dict[str, object] = {"kind": "measured_impedance", "points": [
+    {"frequency_hz": 140.0, "real_pa_s_m": 1097.5, "imag_pa_s_m": -2404.1},
+    {"frequency_hz": 144.0, "real_pa_s_m": 1086.6, "imag_pa_s_m": -2292.1}],
+    "base_assembly": {"kind": "assembly", "layers": [{"kind": "porous", "thickness_m": 0.049, "flow_resistivity_pa_s_m2": 76100.0,
+                                                      "model": "wilson_2015", "material_class": "fibrous", "porosity": 0.97,
+                                                      "tortuosity": 1.5}], "backing": "rigid"},
+    "source_and_conditions": "考卷用的兩列", "fill_rule": "log_linear_table_base_assembly_outside_v1"}
+
+
+def test_measured_tables_draw_blue_and_plain_boards_count_as_the_original_wall() -> None:
+    document = _part2d_layout()
+    _zones(document)["yL"] = [{"area": "whole_wall", "material": copy.deepcopy(MEASURED)}]
+    _zones(document)["ceiling"] = [{"area": "whole_wall", "material": {"kind": "assembly", "layers": [
+        {"kind": "board", "surface_mass_kg_m2": 5.8, "resistance_pa_s_m": 40.0}, {"kind": "air", "thickness_m": 0.2}],
+        "backing": "rigid"}}]
+    scheme = Scheme.model_validate(document)
+    assert treated_words(scheme) == "貼了吸音材料：右牆整面"
+    segments = _items(room_overview(scheme, builtin_entries()), "segments")
+    assert [(item["wall"], item["basis"]) for item in segments] == [("yL", "measured")]
+    # 板＋空腔以外的層（這裡是吸音棉）直接取代整面牆也算有貼；只有板＋空腔（109 的天花）不算。
+    porous = Assembly.model_validate(MEASURED["base_assembly"])
+    board = Assembly.model_validate({"kind": "assembly", "backing": "rigid", "layers": [
+        {"kind": "board", "surface_mass_kg_m2": 5.8, "resistance_pa_s_m": 40.0}, {"kind": "air", "thickness_m": 0.2}]})
+    assert treated(porous) and not treated(board)
 
 
 @pytest.mark.parametrize("turns", [0, 1, 2, 3])
@@ -143,7 +172,7 @@ def test_scheme_line_says_cut_treated_and_searched() -> None:
     room109_quarters(document, "x0", (1e5, 1e5, 1e5, 1e5))
     scheme = Scheme.model_validate(document | {"scheme_id": "mine"})
     line = scheme_line(scheme, {"mine": scheme, "mine-search-c98c50b8": scheme})
-    assert line["text"] == "牆上切了 4 區；牆面都是原樣，沒貼東西；跑過第三階段搜尋"
+    assert line["text"] == "牆面分成 4 區；牆面都是原樣，沒貼吸音材料；電腦挑過材料（第三階段搜尋）"
     assert line["search_start_refused"] and not line["auto"]
 
 
@@ -157,7 +186,7 @@ def test_home_api_without_results_lists_saved_schemes(tmp_path: Path) -> None:
     assert reply.status_code == 200, reply.text
     data = reply.json()
     assert data["title"] == "還沒有算好的房間" and data["room"] is None
-    assert [(item["name"], item["text"]) for item in data["schemes"]] == [("mine", "有貼東西：後牆整面")]
+    assert [(item["name"], item["text"]) for item in data["schemes"]] == [("mine", "貼了吸音材料：後牆整面")]
 
 
 def test_home_first_screen_opens_a_saved_scheme_into_the_form(tmp_path: Path, browser: Browser) -> None:
@@ -171,8 +200,8 @@ def test_home_first_screen_opens_a_saved_scheme_into_the_form(tmp_path: Path, br
         expect(page.locator("#home-result")).to_be_hidden()
         expect(page.locator("#home-materials")).to_be_visible()
         row = page.locator('#home-schemes li[data-scheme="mine"]')
-        expect(row).to_contain_text("有貼東西：後牆整面")
-        row.get_by_role("button", name="打開到下面表單").click()
+        expect(row).to_contain_text("貼了吸音材料：後牆整面")
+        row.get_by_role("button", name="打開來改").click()
         expect(page.locator("#save-id")).to_have_value("mine")
         _assert_quiet(watched)
 
@@ -190,8 +219,22 @@ def test_home_data_reads_the_latest_result_snapshot_not_the_saved_scheme(tmp_pat
         return ResultSummary(run_id=run_id, scheme_id=scheme_id, finished_text="", duration_text="", calculation_text="",
                              calculation_detail="", registry_text="", result_url=f"/results/{run_id}", run_status="done")
 
-    data = home_data(tmp_path, lambda: ["mine"], lambda name: saved,
-                     lambda: [row("mine-orig-3d07ea99", "r0"), row("mine", "r1")])
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes" / "mine.json").write_text(saved.model_dump_json(), encoding="utf-8")
+    # 最新那一份讀不出（例如格式改版）：往下一份找，不說成「還沒有算好的」。
+    (tmp_path / "results" / "r2.json").write_text("{}", encoding="utf-8")
+
+    class Source:
+        data_dir = tmp_path
+
+        def _scheme_names(self) -> list[str]:
+            return ["mine"]
+
+        def _result_summaries(self, archived: bool = False) -> list[ResultSummary]:
+            return [row("mine", "r2"), row("mine-orig-3d07ea99", "r0"), row("mine", "r1")]
+
+    data = home_data(Source())
+    assert [item["name"] for item in cast(list[dict[str, object]], data["schemes"])] == ["mine"]
     assert data["title"] == "最近算的房間：「mine」"
-    assert str(data["facts"]).endswith("有貼東西：後牆整面")
+    assert str(data["facts"]).endswith("貼了吸音材料：後牆整面")
     assert cast(dict[str, dict[str, str]], data["links"])["result"]["url"] == "/results/r1"

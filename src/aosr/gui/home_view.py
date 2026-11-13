@@ -4,8 +4,8 @@
 
 - 牆名、前牆朝哪：``wall_words``／``front_wall``（跟 /search-start 前牆預設同一條）；定不出前牆時圖照 x 起點牆朝上、
   牆名照座標名，不猜。
-- 哪裡「有貼東西」：貼在原牆上的構造、實測表、含多孔層的多層構造；固定阻抗與不含多孔層的多層構造（例如 109 的天花
-  薄板＋空腔）當原本的面，不畫。顏色照結果頁同一支 ``material_facts`` 的標語：實測一色、其餘（模擬）一色。
+- 哪裡「貼了吸音材料」：貼在原牆上的構造、實測表、含板與空腔以外的層的多層構造（吸音棉、布、微穿孔板、開縫板…）；
+  固定阻抗與只有板＋空腔的多層構造（例如 109 的天花薄板＋空腔）當原本的面，不畫。顏色照結果頁同一支 ``material_facts`` 的標語：實測一色、其餘（模擬）一色。
 - 自動存的名字：原牆基準 ``<名字>-orig-<8 碼>``（``zone_result.SUFFIX``）、第三階段搜尋選出來存的
   ``<名字>-search-<8 碼>``（``gradient_follow.adopted_name``）、擺位搜尋細算的 ``<搜尋代號>-…-verification``
   （``search.store.refine_scheme_id``）。
@@ -13,10 +13,11 @@
 """
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Final, Protocol
 from urllib.parse import quote
 
 from starlette.concurrency import run_in_threadpool
@@ -28,10 +29,11 @@ from aosr.gui.gradient_follow import ADOPTED_WORD
 from aosr.gui.labels import speaker_label
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.modal_jobs import scheme_snapshot
+from aosr.gui.problem_text import checked_scheme
 from aosr.gui.result_list import ResultSummary
 from aosr.gui.wall_words import FACING, LEFT_OF, front_wall, wall_words
 from aosr.gui.zone_result import SUFFIX, material_facts
-from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, MeasuredImpedance, MountedOnWall, SurfaceMaterial
 from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.zone_fill import wall_size_m
@@ -41,11 +43,11 @@ FOUR_WALLS: Final = ("x0", "xL", "y0", "yL")
 _BASELINE: Final = re.compile(rf"(?P<name>.+){re.escape(SUFFIX)}[0-9a-f]{{8}}\Z")
 _ADOPTED: Final = re.compile(rf"(?P<name>.+)-{ADOPTED_WORD}-[0-9a-f]{{8}}\Z")
 _REFINED: Final = re.compile(r"[0-9a-f]{32}-(?:baseline|trial-(?P<trial>[0-9]+))-verification\Z")
-MATERIALS_NOTE: Final = "每一面牆貼什麼、貼多厚，或交給電腦挑"
-LAYOUT_NOTE: Final = "喇叭和座位放哪裡最好，交給電腦試"
-RESULT_NOTE: Final = "這一間算出來怎樣、比原本的牆好多少"
-ZONED_LAYOUT_NOTE: Final = "這一份牆上有切區，擺位搜尋只收整面牆的方案，到那一頁選一份整面牆的"
-NO_WHOLE_LAYOUT_NOTE: Final = "存著的方案牆上都有切區，擺位搜尋只收整面牆的方案，要先存一份整面牆的"
+MATERIALS_NOTE: Final = "每一面牆、每一區貼哪種吸音材料、貼多厚，交給電腦挑"
+LAYOUT_NOTE: Final = "喇叭和座位放哪裡最好，交給電腦試很多種擺法"
+RESULT_NOTE: Final = "這一間算出來怎樣、比沒貼吸音材料的原牆好多少"
+ZONED_LAYOUT_NOTE: Final = "這一間的牆面分了區，電腦試擺位目前只能用在牆面沒分區的方案；到那一頁選一份沒分區的"
+NO_WHOLE_LAYOUT_NOTE: Final = "目前用不了：電腦試擺位只能用在牆面沒分區的方案，已存的每一份都分了區"
 
 
 def name_words(scheme_id: str) -> tuple[str, bool]:
@@ -67,10 +69,11 @@ def _helper(scheme_id: str) -> bool:
 
 
 def treated(material: SurfaceMaterial) -> bool:
-    """這一塊是不是「貼了東西」：貼在原牆上、實測表、含多孔層的多層構造。"""
+    """這一塊是不是「貼了吸音材料」：貼在原牆上、實測表、含板與空腔以外的層的多層構造。"""
     if isinstance(material, MountedOnWall | MeasuredImpedance):
         return True
-    return isinstance(material, Assembly) and any(isinstance(layer, PorousLayer) for layer in material.layers)
+    return isinstance(material, Assembly) and any(not isinstance(layer, BoardLayer | AirLayer)
+                                                  for layer in material.layers)
 
 
 def _metres(value: float) -> str:
@@ -106,7 +109,7 @@ def treated_words(scheme: Scheme) -> str:
         if items:
             whole = len(items) == 1 and len(every.get(wall, ())) == 1
             parts.append(f"{names[wall]}{'整面' if whole else f' {len(items)} 塊'}")
-    return "有貼東西：" + "、".join(parts) if parts else "牆面都是原樣，沒貼東西"
+    return "貼了吸音材料：" + "、".join(parts) if parts else "牆面都是原樣，沒貼吸音材料"
 
 
 def _screen(scheme: Scheme) -> Callable[[float, float], tuple[float, float]]:
@@ -173,25 +176,24 @@ def scheme_line(scheme: Scheme, saved: Mapping[str, Scheme]) -> dict[str, object
     title, auto = name_words(scheme.scheme_id)
     pieces = sum(1 for items in (scheme.scene.surface_zones_by_wall or {}).values()
                  for zone in items if isinstance(zone, RectangleZone))
-    parts = [f"牆上切了 {pieces} 區"] if pieces else []
+    parts = [f"牆面分成 {pieces} 區"] if pieces else []
     parts.append(treated_words(scheme))
     if any(other.startswith(f"{scheme.scheme_id}-{ADOPTED_WORD}-") and _ADOPTED.fullmatch(other) for other in saved):
-        parts.append("跑過第三階段搜尋")
+        parts.append("電腦挑過材料（第三階段搜尋）")
     return {"name": scheme.scheme_id, "title": title, "text": "；".join(parts), "auto": auto,
-            "search_start_refused": "牆上有切區，擺位搜尋只收整面牆的方案" if zoned(scheme) else ""}
+            "search_start_refused": "牆面分了區，電腦試擺位目前只能用在牆面沒分區的方案" if zoned(scheme) else ""}
 
 
 def _with_scheme(url: str, name: str | None) -> str:
     return url if name is None else f"{url}?scheme={quote(name, safe='')}"
 
 
-def latest_pick(rows: Sequence[tuple[str, str, str, str]]) -> tuple[str, str] | None:
-    """結果清單（新的在前；每列方案代號、計算代號、結果頁網址、狀態）裡最近一份正常算完、不是只為比較或細算存的；
-    回計算代號與結果頁網址。"""
+def latest_picks(rows: Sequence[tuple[str, str, str, str]]) -> Iterator[tuple[str, str]]:
+    """結果清單（新的在前；每列方案代號、計算代號、結果頁網址、狀態）裡正常算完、不是只為比較或細算存的，新的先給；
+    給計算代號與結果頁網址。"""
     for scheme_id, run_id, url, status in rows:
         if url and status in ("done", "none") and not _helper(scheme_id):
-            return run_id, url
-    return None
+            yield run_id, url
 
 
 def home_view(latest: tuple[str, Scheme] | None, saved: Mapping[str, Scheme],
@@ -220,22 +222,36 @@ def home_view(latest: tuple[str, Scheme] | None, saved: Mapping[str, Scheme],
             "schemes": schemes}
 
 
-def home_data(data_dir: Path, scheme_names: Callable[[], list[str]], read_scheme: Callable[[str], Scheme],
-              summaries: Callable[[], list[ResultSummary]]) -> dict[str, object]:
-    """讀存著的方案、結果清單（新的在前）與材料庫，排成首頁第一屏；讀不出的方案不列（下面「開舊方案」照樣列、打開時講原因）。"""
-    saved: dict[str, Scheme] = {}
-    for name in scheme_names():
+class HomeSource(Protocol):
+    """首頁要讀的那幾樣（網頁伺服器的 GuiHandlers 有）：資料目錄、存著的方案名、結果清單（新的在前）。"""
+
+    data_dir: Path
+
+    def _scheme_names(self) -> list[str]: ...
+
+    def _result_summaries(self, archived: bool = False) -> list[ResultSummary]: ...
+
+
+def _latest(data_dir: Path, summaries: Sequence[ResultSummary]) -> tuple[str, Scheme] | None:
+    """最近一份讀得出方案快照的；最新那份讀不出（例如格式改版）就往下一份找，不說成「還沒有算好的」。"""
+    for run_id, url in latest_picks([(row.scheme_id, row.run_id, row.result_url, row.run_status) for row in summaries]):
         try:
-            saved[name] = read_scheme(name)
+            return url, scheme_snapshot(data_dir / "results" / f"{run_id}.json")
         except (ValueError, OSError):
             continue
-    picked = latest_pick([(row.scheme_id, row.run_id, row.result_url, row.run_status) for row in summaries()])
-    latest = None
-    if picked is not None:
+    return None
+
+
+def home_data(source: HomeSource) -> dict[str, object]:
+    """讀存著的方案、結果清單與材料庫，排成首頁第一屏；讀不出的方案不列（下面「開舊方案」照樣列、打開時講原因）。"""
+    data_dir = source.data_dir
+    saved: dict[str, Scheme] = {}
+    for name in source._scheme_names():
         try:
-            latest = (picked[1], scheme_snapshot(data_dir / "results" / f"{picked[0]}.json"))
+            saved[name] = checked_scheme(json.loads((data_dir / "schemes" / f"{name}.json").read_text(encoding="utf-8")))
         except (ValueError, OSError):
-            latest = None
+            continue
+    latest = _latest(data_dir, source._result_summaries())
     try:
         library = full_library(user_library_path(data_dir))
     except (OSError, ValueError):
@@ -243,10 +259,9 @@ def home_data(data_dir: Path, scheme_names: Callable[[], list[str]], read_scheme
     return home_view(latest, saved, library)
 
 
-def home_routes(data_dir: Path, scheme_names: Callable[[], list[str]], read_scheme: Callable[[str], Scheme],
-                summaries: Callable[[], list[ResultSummary]]) -> list[Route]:
+def home_routes(source: HomeSource) -> list[Route]:
     """GET /api/home；讀結果清單要拿工作鎖，所以放到執行緒（同 /api/schemes，#796）。"""
     async def home(request: Request) -> Response:
-        return JSONResponse(await run_in_threadpool(home_data, data_dir, scheme_names, read_scheme, summaries))
+        return JSONResponse(await run_in_threadpool(home_data, source))
 
     return [Route("/api/home", home)]

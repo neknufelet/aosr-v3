@@ -958,7 +958,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *home_routes(handlers.data_dir, handlers._scheme_names, lambda name: _read_scheme(_scheme_path(handlers.data_dir, name)), handlers._result_summaries), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *search_job_routes(handlers.search_jobs), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
+        *_archive_routes(handlers), *home_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *search_job_routes(handlers.search_jobs), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

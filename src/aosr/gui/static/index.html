@@ -20,15 +20,15 @@
     <header><p><a href="/search-start">開始擺位搜尋</a>　<a href="/searches">查看搜尋進度</a>　<a href="/materials">材料庫：新增與編輯材料</a>　<a href="/gradient">第三階段搜尋：每一區貼什麼</a></p><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
     <section id="home"><h2 id="home-title">讀取中…</h2><p id="home-facts"></p>
       <div class="home-top"><figure id="home-picture" hidden><svg id="home-room" role="img" aria-label="最近算的房間俯視圖：前牆在上"></svg>
-          <figcaption><span class="home-legend"><span class="home-key home-simulated"></span>有貼東西（模擬，之後要拿實測對照）</span>
-            <span class="home-legend"><span class="home-key home-measured"></span>有貼東西（實測）</span>
+          <figcaption><span class="home-legend"><span class="home-key home-simulated"></span>貼了吸音材料，數字是電腦算的（模擬，之後要拿實測對照）</span>
+            <span class="home-legend"><span class="home-key home-measured"></span>貼了吸音材料，數字是實際量過的（實測）</span>
             <span id="home-unnamed" class="note" hidden>喇叭靠的牆跟座位面向的不一致，分不出前後左右：圖照 x 起點牆朝上，牆名用座標名。</span></figcaption></figure>
         <nav class="home-next" aria-label="下一步"><h3>下一步做什麼</h3>
           <a id="home-result" class="home-go" hidden><b>看這一間的結果</b><span class="home-note"></span></a>
-          <a id="home-materials" class="home-go" href="/gradient"><b>挑材料：每一面牆貼什麼</b><span class="home-note"></span></a>
-          <a id="home-layout" class="home-go" href="/search-start"><b>挑擺位：喇叭和座位放哪</b><span class="home-note"></span></a>
-          <p class="note">要改房間、喇叭或座位，或新算一套：往下填表，最後按「計算這個方案」。</p></nav></div>
-      <h3>存著的方案</h3><ul id="home-schemes" class="home-schemes"></ul>
+          <a id="home-materials" class="home-go" href="/gradient"><b>挑材料：牆上貼什麼（第三階段搜尋）</b><span class="home-note"></span></a>
+          <a id="home-layout" class="home-go" href="/search-start"><b>挑擺位：喇叭和座位放哪（擺位搜尋）</b><span class="home-note"></span></a>
+          <p class="note">要改房間、喇叭或座位：在下面「已存的方案」按那一份的「打開來改」，改完按頁面下方的「計算這個方案」。下面的表單一開頁是範本，不是上面這一間。</p></nav></div>
+      <h3>已存的方案</h3><ul id="home-schemes" class="home-schemes"></ul>
       <details id="home-auto" hidden><summary id="home-auto-count"></summary><ul id="home-auto-schemes" class="home-schemes"></ul></details></section>
     <section id="scheme-section"><h2>方案</h2>
       <div class="scheme-row"><label><span class="row-name">方案代號</span><input id="save-id" readonly></label>
