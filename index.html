@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-11-13 12:54）</title>
+<title>aosr-v3 現況（2026-11-13 13:22）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;--bad-bg:#fbe9e7;--warn-bg:#fff3e0;}
@@ -62,7 +62,7 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="meta">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「#1134 段 3：結果頁第一屏——標題寫方案名、一句房間摘要、改善多少排前面、貼法講白話 (#1140)」（2026-11-13 12:31）。有 9 題要老闆拍板。</div>
+<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「#1136 網頁擺位搜尋：接續後搜尋還在進行中判「搜尋中」 (#1137)」（2026-11-13 12:57）。有 9 題要老闆拍板。</div>
 <h2>要你回的</h2>
 <p>要老闆拍板的題（標籤 decision）：</p>
 <ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/992">#992</a>　專題：每支改動 2～3 小時，流程壓時間、不犧牲太多安全——多模型討論後出一張紙　<span class="meta">最後動過 2026-11-05 10:36</span>　<span class="tag">decision</span></li>
@@ -76,19 +76,17 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/249">#249</a>　候選：材料最佳化上 GPU 前要改的六格規矩（答案檔出身、自架 runner 掛載點、GPU 考卷分籃、逾時、收據權威、JAX 版本）　<span class="meta">最後動過 2026-10-28 08:56</span>　<span class="tag">deferred-cards</span><span class="tag">decision</span></li></ul>
 <h2>最近做完的</h2>
 <p>最近關掉的票（issue，待辦票），新的在前。一張票要串得起三樣東西：一個把它關掉的PR（合併請求）、那個 PR 併出來的那一顆 commit、以及那一顆 commit 的雲端檢查（verify）在機器分支上留下的一份綠收據（雲端那一跑留下的成績單）。串不起來的用紅字寫問題。</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/1134">#1134</a>　網頁最薄一層：首頁與結果頁第一屏看得懂（房間圖、三個入口、前後左右牆、材料白話、藏技術碼） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1140">#1140</a>（合併請求）合進主線，關掉時間 2026-11-13 12:31</li>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/1136">#1136</a>　網頁擺位搜尋：中斷後接續、搜尋還在跑時狀態寫成「細算與收尾中」 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1137">#1137</a>（合併請求）合進主線，關掉時間 2026-11-13 12:57</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/1134">#1134</a>　網頁最薄一層：首頁與結果頁第一屏看得懂（房間圖、三個入口、前後左右牆、材料白話、藏技術碼） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1140">#1140</a>（合併請求）合進主線，關掉時間 2026-11-13 12:31</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1131">#1131</a>　第三階段建替身的完整解上限預設從 600 改成 1000（109 號房要 672～704 次才過開跑前核對） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1132">#1132</a>（合併請求）合進主線，關掉時間 2026-11-13 09:29</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/700">#700</a>　網頁上設定並啟動搜尋（座位、桌面、喇叭類型與擺法、天雲、可擺範圍、預算、開始與停止） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1130">#1130</a>（合併請求）合進主線，關掉時間 2026-11-13 04:22</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1125">#1125</a>　建替身時就跑開跑那道固定材料核對，沒過就續訓練到上限、不裝開跑會拒的替身（#1082 段 2-8） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1127">#1127</a>（合併請求）合進主線，關掉時間 2026-11-12 19:39</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1124">#1124</a>　#1082 段 2-9：結果頁標實測／模擬與出處、預覽深度欄同判法、第三階段頁預覽不迴圈 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1126">#1126</a>（合併請求）合進主線，關掉時間 2026-11-12 17:16</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1122">#1122</a>　#1082 段 2-7：固定區選材料庫材料也比深度上限；替身涵蓋只核搜尋走得到的材料 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1123">#1123</a>（合併請求）合進主線，關掉時間 2026-11-12 13:31</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/1102">#1102</a>　#1082 段 2-3b：每區准用材料清單＋實測固定材料進第三階段搜尋 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1121">#1121</a>（合併請求）合進主線，關掉時間 2026-11-12 11:29</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/1119">#1119</a>　結果頁看得懂每一塊貼了什麼：材料白話名、數字收位、立面圖疊字、終點在算時停用開始搜尋（#1082 段 1-8） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1120">#1120</a>（合併請求）合進主線，關掉時間 2026-11-12 09:41</li></ul>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/1102">#1102</a>　#1082 段 2-3b：每區准用材料清單＋實測固定材料進第三階段搜尋 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/1121">#1121</a>（合併請求）合進主線，關掉時間 2026-11-12 11:29</li></ul>
 <h2>正在做</h2>
-<p>開著的合併請求（PR，等人看等人合）（1 張）</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/pull/1137">#1137</a>　#1136 網頁擺位搜尋：接續後搜尋還在進行中判「搜尋中」　<span class="meta">最後動過 2026-11-13 12:34</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（78 張）</p>
+<p>開著的合併請求（PR，等人看等人合）：沒有。</p><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（77 張）</p>
 <ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/1138">#1138</a>　網頁擺位搜尋：中斷與接續之後頁上的字跟實際不符（請叫助理、接續標題、按停後外圈未判定）　<span class="meta">最後動過 2026-11-13 11:09</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/1136">#1136</a>　網頁擺位搜尋：中斷後接續、搜尋還在跑時狀態寫成「細算與收尾中」　<span class="meta">最後動過 2026-11-13 09:52</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1133">#1133</a>　第三階段頁重開時，舊的建替身紀錄把完整解上限印成現行預設，不是當時實際用的數字　<span class="meta">最後動過 2026-11-13 09:07</span>　<span class="tag">bug</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1128">#1128</a>　候選：#1082 段 2-6c 示範找到的毛病（原方案不繼承、搜尋區字寫錯、試過沒選看不到、時間估算等八條）　<span class="meta">最後動過 2026-11-13 00:33</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/1117">#1117</a>　替身涵蓋閘門的後續：同切法多方案取聯集、接續重核、內部錯誤名不外露　<span class="meta">最後動過 2026-11-12 03:42</span>　—</li>
@@ -166,42 +164,24 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/15">#15</a>　shell-scripts-in-repo: repo 裡零支 shell 腳本，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/10">#10</a>　design-report-exists: v3 自己的設計報告還沒產出，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li></ul>
 <h2>健康燈</h2>
-<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑從首個工作開始到末個工作結束共 約 22 分鐘（1331 秒）。</div>
+<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑從首個工作開始到末個工作結束共 約 24 分鐘（1462 秒）。</div>
 <details><summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary><div class="fold"><div class="scroll"><table>
 <tr><th>工作（job）</th><th>那一步</th><th>結論</th><th>跑了多久</th></tr>
-<tr><td>timing-history</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>timing-history</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>timing-history</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>timing-history</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>timing-history</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>timing-history</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
-<tr><td>timing-history</td><td>固定本跑共用的歷史耗時快照</td><td><span class="ok">綠（過了）</span></td><td>13 秒</td></tr>
+<tr><td>timing-history</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
+<tr><td>timing-history</td><td>固定本跑共用的歷史耗時快照</td><td><span class="ok">綠（過了）</span></td><td>12 秒</td></tr>
 <tr><td>timing-history</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>timing-history</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>timing-history</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>timing-history</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-d</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-d</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
-<tr><td>shard-d</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>18 秒</td></tr>
-<tr><td>shard-d</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>shard-d</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
-<tr><td>shard-d</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-d</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>shard-d</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-d</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
-<tr><td>shard-d</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-d</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
-<tr><td>shard-d</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>39 秒</td></tr>
-<tr><td>shard-d</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1146 秒</td></tr>
-<tr><td>shard-d</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-d</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-d</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-d</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-d</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-b</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-b</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-b</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-b</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
-<tr><td>shard-b</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-b</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>11 秒</td></tr>
+<tr><td>shard-b</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>shard-b</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
-<tr><td>shard-b</td><td>掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>15 秒</td></tr>
+<tr><td>shard-b</td><td>掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>16 秒</td></tr>
 <tr><td>shard-b</td><td>密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>39 秒</td></tr>
 <tr><td>shard-b</td><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>21 秒</td></tr>
 <tr><td>shard-b</td><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>79 秒</td></tr>
@@ -209,117 +189,136 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>shard-b</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-b</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-b</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
-<tr><td>shard-b</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-b</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-b</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
-<tr><td>shard-b</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>43 秒</td></tr>
-<tr><td>shard-b</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1034 秒</td></tr>
-<tr><td>shard-b</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-b</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>42 秒</td></tr>
+<tr><td>shard-b</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1167 秒</td></tr>
+<tr><td>shard-b</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-b</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
 <tr><td>shard-b</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-b</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-b</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>shard-c</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-c</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
-<tr><td>shard-c</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-c</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
-<tr><td>shard-c</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>shard-c</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
-<tr><td>shard-c</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>40 秒</td></tr>
-<tr><td>shard-c</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1095 秒</td></tr>
-<tr><td>shard-c</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-c</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-c</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-e</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-e</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>shard-e</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
-<tr><td>shard-e</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-e</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
-<tr><td>shard-e</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-e</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-e</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-e</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
-<tr><td>shard-e</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-e</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
-<tr><td>shard-e</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>34 秒</td></tr>
-<tr><td>shard-e</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>586 秒</td></tr>
-<tr><td>shard-e</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-e</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-e</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-e</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-e</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-d</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-d</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-d</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
+<tr><td>shard-d</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-d</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
+<tr><td>shard-d</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-d</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-d</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-d</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>13 秒</td></tr>
+<tr><td>shard-d</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-d</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
+<tr><td>shard-d</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>37 秒</td></tr>
+<tr><td>shard-d</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>826 秒</td></tr>
+<tr><td>shard-d</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-d</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-d</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-d</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-d</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
 <tr><td>shard-a</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
-<tr><td>shard-a</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>shard-a</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
-<tr><td>shard-a</td><td>把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
-<tr><td>shard-a</td><td>規矩卡——驗欄位、掛載、血債編號、票號；附的樣本真的會咬由後設測試第 2 回守</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-a</td><td>離開碼誠實——驗靜態、GIT_DIR、空集合與外殼；其餘三針由後設測試第 3、4、5 回守</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
+<tr><td>shard-a</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-a</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
+<tr><td>shard-a</td><td>把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-a</td><td>規矩卡——驗欄位、掛載、血債編號、票號；附的樣本真的會咬由後設測試第 2 回守</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
+<tr><td>shard-a</td><td>離開碼誠實——驗靜態、GIT_DIR、空集合與外殼；其餘三針由後設測試第 3、4、5 回守</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
 <tr><td>shard-a</td><td>進度待辦不准手寫進版控——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>雲端工作不准無聲死掉——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-a</td><td>檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>雲端工作不准無聲死掉——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>shard-a</td><td>測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-a</td><td>測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
 <tr><td>shard-a</td><td>提交身分在名單裡——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
+<tr><td>shard-a</td><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
 <tr><td>shard-a</td><td>能力與驗證範圍表要有證據撐——validated 指名的考卷與答案檔都在、入口都有模組、狀態只認三個值——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>基礎物理量單一來源——產品不准手寫聲速那幾個數、凍結答案要記自己的條件、設定檔不准存 ρc——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-a</td><td>基礎物理量單一來源——產品不准手寫聲速那幾個數、凍結答案要記自己的條件、設定檔不准存 ρc——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>shard-a</td><td>精度契約的尺只住一份登記簿——產品不准契約常數、改值要帶新紙、每條指得到紙與考卷——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>門檻數字只准住在卡的登記簿——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issue-lifecycle-backlog-status-and-closing）</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
-<tr><td>shard-a</td><td>雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>門檻數字只准住在卡的登記簿——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-a</td><td>關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issue-lifecycle-backlog-status-and-closing）</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
+<tr><td>shard-a</td><td>雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>收據不准由被查的那一跑寫、不准由人寫——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>從上一代抓來的答案檔要帶出身，donor 三格與 env 要等於登記的那一顆——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>FEniCS 凍結答案要帶出身、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>TMM 凍結答案要帶出身、原套件提交要對上、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>從上一代抓來的答案檔要帶出身，donor 三格與 env 要等於登記的那一顆——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-a</td><td>FEniCS 凍結答案要帶出身、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>TMM 凍結答案要帶出身、原套件提交要對上、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>開子行程的考卷要帶三格處理器釘選——child_process_env(...) 要直接包在共用小工具裡——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
-<tr><td>shard-a</td><td>每筆放行都要有理由與到期日——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
-<tr><td>shard-a</td><td>ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>shard-a</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
+<tr><td>shard-a</td><td>每筆放行都要有理由與到期日——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
+<tr><td>shard-a</td><td>ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-a</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-a</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-a</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>9 秒</td></tr>
 <tr><td>shard-a</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
-<tr><td>shard-a</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>33 秒</td></tr>
-<tr><td>shard-a</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>738 秒</td></tr>
+<tr><td>shard-a</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>35 秒</td></tr>
+<tr><td>shard-a</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>811 秒</td></tr>
 <tr><td>shard-a</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>shard-a</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>shard-a</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>shard-a</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>verify</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>verify</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>verify</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>verify</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
+<tr><td>shard-c</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-c</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-c</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
+<tr><td>shard-c</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-c</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
+<tr><td>shard-c</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-c</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-c</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-c</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>12 秒</td></tr>
+<tr><td>shard-c</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-c</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
+<tr><td>shard-c</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>41 秒</td></tr>
+<tr><td>shard-c</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>1031 秒</td></tr>
+<tr><td>shard-c</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-c</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-c</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-c</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-c</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-e</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-e</td><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>9 秒</td></tr>
+<tr><td>shard-e</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>shard-e</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>8 秒</td></tr>
+<tr><td>shard-e</td><td>計算瀏覽器安裝包快取鑰匙</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-e</td><td>讀取瀏覽器安裝包快取</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>放回瀏覽器安裝包並記下先前清單</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>shard-e</td><td>裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）</td><td><span class="ok">綠（過了）</span></td><td>11 秒</td></tr>
+<tr><td>shard-e</td><td>封存瀏覽器安裝包並記錄實裝版本</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>儲存瀏覽器安裝包快取（僅未命中）</td><td><span class="warn">跳過</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>全套清點與分片參數</td><td><span class="ok">綠（過了）</span></td><td>40 秒</td></tr>
+<tr><td>shard-e</td><td>正式分片考卷與結束當下的 junit 綁定</td><td><span class="ok">綠（過了）</span></td><td>964 秒</td></tr>
+<tr><td>shard-e</td><td>封存本片來源與證據</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>shard-e</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>shard-e</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>verify</td><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>verify</td><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>verify</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>verify</td><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
 <tr><td>verify</td><td>下載本跑本次五片的證據包</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>verify</td><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>verify</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>verify</td><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>verify</td><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>verify</td><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>verify</td><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 </table></div>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/43366115088">雲端那一跑（run 43366115088）</a>，狀態 completed　開始 2026-11-13 12:31　對著提交（commit）b22f724e1262　收工 2026-11-13 12:54。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
-<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（1486 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/43368784601">雲端那一跑（run 43368784601）</a>，狀態 completed　開始 2026-11-13 12:57　對著提交（commit）c807ed6e0261　收工 2026-11-13 13:21。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
+<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（1488 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
 <p class="ok">每一跑都有收據。</p></div></details><div class="light ok">關掉的票串不起綠收據的有 0 張——最近關掉的每一張票都有一個合併請求（PR）做掉它、而且收據是綠的。</div>
-<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（1486 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
+<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（1488 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
 <div class="scroll"><table>
 <tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th><th>併出來那一顆提交（commit）</th><th>綠收據</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1136">#1136</a></td><td>網頁擺位搜尋：中斷後接續、搜尋還在跑時狀態寫成「細算與收尾中」</td><td>2026-11-13 12:57</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1137">#1137</a></td><td><code>c807ed6e0261</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43368784601">雲端那一跑（run 43368784601）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1134">#1134</a></td><td>網頁最薄一層：首頁與結果頁第一屏看得懂（房間圖、三個入口、前後左右牆、材料白話、藏技術碼）</td><td>2026-11-13 12:31</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1140">#1140</a></td><td><code>b22f724e1262</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43366115088">雲端那一跑（run 43366115088）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1131">#1131</a></td><td>第三階段建替身的完整解上限預設從 600 改成 1000（109 號房要 672～704 次才過開跑前核對）</td><td>2026-11-13 09:29</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1132">#1132</a></td><td><code>5fea5b05bb5c</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43345267618">雲端那一跑（run 43345267618）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/700">#700</a></td><td>網頁上設定並啟動搜尋（座位、桌面、喇叭類型與擺法、天雲、可擺範圍、預算、開始與停止）</td><td>2026-11-13 04:22</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1130">#1130</a></td><td><code>8f9f90607097</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43299587637">雲端那一跑（run 43299587637）</a></td></tr>
@@ -327,7 +326,6 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1124">#1124</a></td><td>#1082 段 2-9：結果頁標實測／模擬與出處、預覽深度欄同判法、第三階段頁預覽不迴圈</td><td>2026-11-12 17:16</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1126">#1126</a></td><td><code>153570160110</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43190009898">雲端那一跑（run 43190009898）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1122">#1122</a></td><td>#1082 段 2-7：固定區選材料庫材料也比深度上限；替身涵蓋只核搜尋走得到的材料</td><td>2026-11-12 13:31</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1123">#1123</a></td><td><code>a8f37ae8868e</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43161911604">雲端那一跑（run 43161911604）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1102">#1102</a></td><td>#1082 段 2-3b：每區准用材料清單＋實測固定材料進第三階段搜尋</td><td>2026-11-12 11:29</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1121">#1121</a></td><td><code>a5e62a333a8a</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43148524750">雲端那一跑（run 43148524750）</a></td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/1119">#1119</a></td><td>結果頁看得懂每一塊貼了什麼：材料白話名、數字收位、立面圖疊字、終點在算時停用開始搜尋（#1082 段 1-8）</td><td>2026-11-12 09:41</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/1120">#1120</a></td><td><code>935cc69ec704</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/43136266926">雲端那一跑（run 43136266926）</a></td></tr>
 </table></div></div></details>
 <h2>路線走到哪（里程碑 milestone，一段路線）</h2>
 <div class="ms"><a href="https://github.com/neknufelet/aosr-v3/milestone/1">batch-1</a>　<span class="meta">關了</span>　關掉 1／還開著 0　<span class="meta">100%</span><div class="bar"><span style="width:100%"></span></div></div>
@@ -410,8 +408,8 @@ border:1px solid var(--line);border-radius:10px}
 </details>
 <h2>主線（repo：neknufelet/aosr-v3）</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
-<p>最新一筆（提交）：<code>b22f724e1262</code>　#1134 段 3：結果頁第一屏——標題寫方案名、一句房間摘要、改善多少排前面、貼法講白話 (#1140)　（2026-11-13 12:31）</p>
-<p class="foot">算出時間：2026-11-13 12:54（台北時間）。算這一頁的是：雲端 run 43368475271（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/43368475271。這一頁反映的是：main 的 b22f724e1262（#1134 段 3：結果頁第一屏——標題寫方案名、一句房間摘要、改善多少排前面、貼法講白話 (#1140)）；接在 verify run 43366115088 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
+<p>最新一筆（提交）：<code>c807ed6e0261</code>　#1136 網頁擺位搜尋：接續後搜尋還在進行中判「搜尋中」 (#1137)　（2026-11-13 12:57）</p>
+<p class="foot">算出時間：2026-11-13 13:22（台北時間）。算這一頁的是：雲端 run 43371495061（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/43371495061。這一頁反映的是：main 的 c807ed6e0261（#1136 網頁擺位搜尋：接續後搜尋還在進行中判「搜尋中」 (#1137)）；接在 verify run 43368784601 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 </div>
 </body>
 </html>
