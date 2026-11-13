@@ -680,6 +680,8 @@ async function loadArchiveList() {
   }
 }
 async function loadResultList() {
+  // 首頁第一屏跟著結果清單重讀（算完、封存之後「最近算的房間」會變）；它自己讀不到只寫在它那一行，不擋清單。
+  if (typeof refreshHome === "function") refreshHome();
   const data = await api("/api/results");
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
@@ -878,4 +880,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("stop").onclick = () => action(async () => { await api(`/api/runs/${runId}/stop`, "POST"); await poll(); });
   await refreshPlan();
   for (const load of [loadSchemeList, loadResultList, resumeRuns]) await action(load);
+  // 首頁第一屏的「打開來改」借上面「開舊方案」那一組：按鈕綁好、清單載好才放它按（#1134 審查：太早按會靜靜失敗）。
+  document.body.dataset.inputReady = "true";
+  document.dispatchEvent(new Event("input-ready"));
 }));

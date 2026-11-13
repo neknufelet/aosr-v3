@@ -34,11 +34,11 @@ from aosr.gui.gradient_follow import GradientFollow, gradient_follow_routes
 from aosr.gui.surrogate_builds import SurrogateBuilds, surrogate_routes
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
 from aosr.gui.modal_jobs import ModalJobs, scheme_snapshot
-from aosr.gui.compare_view import (
-    CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
+from aosr.gui.compare_view import CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv
 from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
+from aosr.gui.home_view import home_routes
 from aosr.gui.labels import label_tables
 from aosr.gui.material_curves import material_curve_routes, range_check
 from aosr.gui.material_editor import material_routes
@@ -81,7 +81,7 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"app.js", "walls.js", "elevation.js", "zone_modes.js", "zone_limits.js", "measured.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"app.js", "home.js", "walls.js", "elevation.js", "zone_modes.js", "zone_limits.js", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css"}
@@ -958,7 +958,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        *_archive_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *search_job_routes(handlers.search_jobs), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
+        *_archive_routes(handlers), *home_routes(handlers), *design_routes(handlers.data_dir, handlers.jobs._lock), *gradient_routes(handlers.gradient), *search_job_routes(handlers.search_jobs), *surrogate_routes(handlers.surrogates), *gradient_follow_routes(handlers.gradient_follow), *_zone_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),

@@ -124,3 +124,34 @@ button.archive-danger:hover{background:#fff0f0}
 #elevation-walls{display:flex;gap:.5rem;flex-wrap:wrap}
 #elevation-walls button[aria-pressed=true]{background:#0b3a4a;outline:2px solid #f0b429}
 #elevation-selected{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+
+/* 首頁第一屏（#1134）：左邊最近算的房間俯視圖（前牆在上），右邊三個大入口；窄螢幕上下排。 */
+#home h2{margin-bottom:.25rem}
+.home-top{display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-start}
+#home-picture{margin:0;flex:0 1 320px;min-width:0}
+#home-picture[hidden]{display:none}
+#home-room{width:100%;max-width:320px;height:auto;background:#fafcfc}
+.home-wall{fill:none;stroke:#46586a;stroke-width:2}
+.home-treated{stroke-width:7;stroke-linecap:butt}
+.home-simulated{stroke:#d9822b;background:#d9822b}
+.home-measured{stroke:#2b6cb0;background:#2b6cb0}
+.home-beam{stroke:#9fb3bf;stroke-dasharray:4 3}
+.home-speaker{fill:#15617b}
+.home-seat{fill:#872c22}
+.home-small{font-size:10px;fill:#46586a}
+.home-wall-name{font-size:12px;font-weight:600;fill:#1d2b36}
+.home-key{display:inline-block;width:1.2em;height:.45em;margin-right:.3em;vertical-align:middle}
+#home-picture figcaption{font-size:.9em;margin-top:.35rem}
+.home-legend,#home-unnamed{display:block}
+#home-unnamed[hidden]{display:none}
+.home-next{flex:1 1 280px;display:flex;flex-direction:column;gap:.6rem}
+.home-next h3{margin:0}
+a.home-go{display:block;padding:.7rem 1rem;border-radius:8px;background:#15617b;color:white;text-decoration:none}
+a.home-go[hidden]{display:none}
+a.home-go b{display:block;font-size:1.1em}
+a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
+.home-schemes{padding-left:1.2rem}
+.home-schemes li{margin:.3rem 0}
+#home-auto summary{cursor:pointer;color:#15617b}
+/* 手機寬：三個下一步排在圖前面，第一屏就看得到要按哪裡。 */
+@media (max-width:700px){.home-next{order:-1}}
