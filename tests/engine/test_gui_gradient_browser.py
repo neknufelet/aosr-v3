@@ -585,3 +585,41 @@ def test_the_preview_judges_a_fixed_library_table_like_the_zone_editor(browser: 
         expect(page.locator('#plan-table tr[data-surface="x0@auto2"] td.depth-cell')).to_have_text("不加層")
         _shot(page, "2-9-2-preview-fixed-table-depth")
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_template_tries_table_keeps_quick_and_retuned_apart_and_says_why_a_round_never_opened(
+        browser: Browser, tmp_path: Path) -> None:
+    """#1128（審查）：換樣板試過什麼那一塊，快篩與重調後分兩欄、沒進重調的「比現狀」標「（快篩）」（不跟重調後的混成
+    同一把尺）、固定候選寫在外面、沒有候選的那一輪寫它停的理由（不說成「沒換」）。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    job_id = str(view["job_id"])
+    folder = data_dir / "gradient" / job_id / "root" / ("f" * 32)
+    folder.mkdir(parents=True)
+    (folder / folder_files.PROJECT_FILE).write_text("{}", encoding="utf-8")
+    rows = [{"ledger_version": "v3"},
+            {"phase": "quick_score", "round": 0, "candidate": "x0@r0_c0->fixed:glass_wool_48k_50mm_gap50", "value": 3.7415},
+            {"phase": "quick_score", "round": 0, "candidate": "x0@r0_c0->glass_wool_48k", "value": 3.1},
+            {"phase": "template_decision", "round": 0, "value": 2.9358, "stop_reason": "沒有超過改善門檻",
+             "decision": {"baseline_value": 2.9358, "accepted": None,
+                          "outcomes": [{"candidate": "x0@r0_c0->glass_wool_48k", "value": 2.99}]}},
+            {"phase": "template_decision", "round": 1, "value": 2.9358, "stop_reason": "換樣板求值到上限",
+             "decision": {"baseline_value": None, "accepted": None}}]
+    (folder / folder_files.TEMPLATES_FILE).write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}&job={job_id}",
+                                                  fake_clock=True) as watched:
+        page = watched.page
+        box = page.locator("#job-template-tries")
+        expect(box.locator("p.tried-fixed")).to_contain_text("整塊換成「48K 玻璃棉 50 mm＋50 mm 空腔（固定，整塊選或不選）」快篩 3.7415（沒選）")
+        box.locator("summary").click()
+        expect(box.locator("thead th")).to_have_text(["牆／區", "換成", "快篩合分", "重調後", "比現狀", "結果"])
+        fixed, family = box.locator("tbody tr").nth(0).locator("td"), box.locator("tbody tr").nth(1).locator("td")
+        expect(fixed.nth(3)).to_have_text("沒進重調")
+        expect(fixed.nth(4)).to_have_text("+0.8057（快篩）")
+        expect(family.nth(2)).to_have_text("3.1000")
+        expect(family.nth(3)).to_have_text("2.9900")
+        expect(family.nth(4)).to_have_text("+0.0542")
+        expect(box).to_contain_text("第 1 輪：現狀 2.9358；都沒換：沒有超過改善門檻")
+        expect(box).to_contain_text("第 2 輪沒開：換樣板求值到上限")
+        _clean(page, watched.page_errors + watched.console_errors)

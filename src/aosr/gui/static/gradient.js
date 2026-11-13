@@ -528,7 +528,8 @@ function showJobDepths(plan, names) {
 // 換樣板試過、沒選的（#1128）：固定材料候選一句寫在外面（整塊試過、差多少），每一輪全部候選收在表裡。
 // 快篩合分是搜尋自己的梯度目標（越小越好），跟結果頁的總分不是同一把尺；快篩沒重調，換不換照重調後跟現狀比。
 const TRY_SCALE_NOTE = "合分是搜尋自己的尺（越小越好），跟結果頁的總分不是同一把尺。快篩是換上去先算一次的粗篩；" +
-  "快篩排前面的幾個再重調空腔，換不換是拿重調後跟這一輪現狀（起點配置重調後）比、要好過改善門檻才換。";
+  "快篩排前面的幾個再重調空腔，換不換是拿重調後跟這一輪現狀（起點配置重調後）比、要好過改善門檻才換。" +
+  "表裡「比現狀」有重調的拿重調後比；沒進重調的只能拿快篩比，標「（快篩）」。";
 function score(value) { return value === null || value === undefined ? "—" : value.toFixed(4); }
 function signed(value) { return `${value >= 0 ? "+" : ""}${value.toFixed(4)}`; }
 function showTemplateTries(rounds, names) {
@@ -555,7 +556,7 @@ function showTemplateTries(rounds, names) {
       return el("tr", {class: item.fixed ? "tried-fixed-row" : null},
         el("td", {text: place(item.surface)}), el("td", {text: item.label}), el("td", {text: score(item.value)}),
         el("td", {text: item.retuned !== null ? score(item.retuned) : "沒進重調"}),
-        el("td", {text: round.baseline === null ? "—" : signed(value - round.baseline)}),
+        el("td", {text: round.baseline === null ? "—" : signed(value - round.baseline) + (item.retuned !== null ? "" : "（快篩）")}),
         el("td", {text: item.chosen ? "換上了" : "沒選"}));
     }));
     return el("div", {}, el("p", {text: `第 ${round.round} 輪：現狀 ${score(round.baseline)}；${outcome}`}),
