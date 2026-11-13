@@ -1,0 +1,41 @@
+# 樣本用的卡：只帶 id 與 [settings]，刻意不寫 check 欄——寫了那一欄，卡自己就多出一個
+# 指向樣本樹裡不存在的檢查程式的路徑 token，樣本會因為一個無關的理由回紅。
+# 檢查程式靠 id 認卡，理由寫在那支程式的模組說明裡。
+# 底下的 [settings] 從主卡逐字複製，放行清單與主卡頂層的 [[by_design]] 除外（那兩種寫的是真樹的路徑，
+# 樣本樹不帶，要證 [[by_design]] 的樣本自己帶一筆假的）；每一份樣本都是獨立的掃描根，門檻只從掃描根自己的
+# governance/rules/ 讀，讀不到就回 2（不回 0）。
+id = "refs-and-links-resolve"
+
+[settings]
+# 要掃哪些副檔名。列舉在這裡，不寫死在程式：多一種文字檔就改卡。
+# 副檔名不在這張清單上的檔（.txt、.lock、.gitignore、.gitkeep）整份不掃。
+text_suffixes = [".md", ".toml", ".yaml", ".yml", ".py", ".json"]
+# 掃描面扣掉這些前綴，一個一句理由：
+# v2-audit/    ——v2 的 66 筆事故資料。裡面到處是 v2 那棵樹當時的檔案位置，那些是**事故證據**
+#                不是這棵樹的引用；掃它等於要求 v3 把 v2 的檔案重建出來。
+# governance/fixtures/ ——必紅樣本是一棵棵獨立的迷你掃描根，餵進去時它們自己會被咬
+#                （後設測試第 2、5 回）。從外層掃它們等於把刻意的壞樣本算成本樹的違規。
+# .claude/     ——本機 agent 工具目錄，雲端 checkout 不會有；file-placement-allowlist 那張卡
+#                已為同一個理由把它列進根層白名單。底下是各家工具自己的設定與工作樹副本。
+scan_exempt_prefixes = [
+  "v2-audit/",
+  "governance/fixtures/",
+  ".claude/",
+]
+
+# 某個前綴底下、只扣掉某一種副檔名（其餘副檔名照掃）。一條「前綴:副檔名」（用冒號分隔，
+# 不用斜線——斜線加副檔名會長得像路徑 token，被這支檢查自己掃成死引用）。
+# blueprint 底下的 dot-json ——那批 .json（cards-38.json 等）是候選規則／卡的規格資料，
+#                 不是這棵樹的引用。blueprint 底下的 *.py 是產生器／case 表，docstring 與
+#                 註解裡的引用要守（收窄判準見 human），所以只扣 dot-json、不整批扣掉
+#                 blueprint/。
+scan_exempt_suffixes = [
+  "blueprint:.json",
+]
+
+
+[[by_design]]
+path = "docs/kept-out-on-purpose.md"
+reason = "樣本：刻意不存在的檔，只准登記的那幾份檔引它。"
+[by_design.cited_in]
+"notes/allowed.md" = 1

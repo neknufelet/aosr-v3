@@ -1,0 +1,4 @@
+條①、[[by_design]]：名單上的檔多引一處也紅。
+
+迷你卡登記 notes/allowed.md 准引 docs/kept-out-on-purpose.md 一處，notes/allowed.md 實際引了兩處。只寫死檔名的話，
+名單上的檔可以無限加引用而照樣回 0（審查 #1160 戳出來的洞）；寫死處數，多出來那一處就紅。

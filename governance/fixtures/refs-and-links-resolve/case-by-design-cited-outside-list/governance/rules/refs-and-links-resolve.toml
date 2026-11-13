@@ -36,5 +36,6 @@ scan_exempt_suffixes = [
 
 [[by_design]]
 path = "docs/kept-out-on-purpose.md"
-cited_in = ["notes/allowed.md"]
 reason = "樣本：刻意不存在的檔，只准登記的那幾份檔引它。"
+[by_design.cited_in]
+"notes/allowed.md" = 1
