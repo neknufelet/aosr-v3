@@ -618,17 +618,21 @@ NETWORK_KEY = "network"
 
 
 def _network_anywhere(value: object, at: str) -> list[str]:
-    """``value`` 底下任何一層、任何形狀（表、行內表、表陣列、陣列裡的陣列）帶 ``network`` 鍵（不分大小寫）的位置。"""
+    """``value`` 底下任何一層、任何形狀（表、行內表、表陣列、陣列裡的陣列）帶 ``network`` 鍵（不分大小寫）的位置。
+
+    用自己的堆疊走、不遞迴：很深的巢狀不會撞上直譯器的遞迴上限，把該回 2 的一跑變成例外回 1。
+    """
     found: list[str] = []
-    if isinstance(value, Mapping):
-        if any(str(key).lower() == NETWORK_KEY for key in value):
-            found.append(at)
-        for key, inner in value.items():
-            found += _network_anywhere(inner, f"{at}.{key}")
-    elif isinstance(value, list):
-        for index, inner in enumerate(value):
-            found += _network_anywhere(inner, f"{at}[{index}]")
-    return found
+    stack: list[tuple[object, str]] = [(value, at)]
+    while stack:
+        node, where = stack.pop()
+        if isinstance(node, Mapping):
+            if any(str(key).lower() == NETWORK_KEY for key in node):
+                found.append(where)
+            stack.extend((inner, f"{where}.{key}") for key, inner in node.items())
+        elif isinstance(node, list):
+            stack.extend((inner, f"{where}[{index}]") for index, inner in enumerate(node))
+    return sorted(found)
 
 
 def network_permission(data: Mapping[str, object], where: str, paper: str) -> str:

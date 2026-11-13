@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Mapping, Sequence
 from datetime import date
 
@@ -190,7 +191,7 @@ STRAY = {"network": "假的", "reason": "假的：准上網", "expires": LIVE}
         ({"net": [STRAY]}, "settings.net[0]"),
         ({"allow": STRAY}, "settings.allow"),
         ({"allow": [[STRAY]]}, "settings.allow[0][0]"),
-        ({"allow": [{**STRAY, "Network": STRAY["network"]}]}, "settings.allow[0]"),
+        ({"allow": [{"Network": "假的", "reason": "假的", "expires": LIVE}]}, "settings.allow[0]"),
         ({"x": {"allow": [{"NETWORK": "假的", "reason": "假的", "expires": LIVE}]}}, "settings.x.allow[0]"),
     ],
     ids=["allow", "renamed", "single-table", "nested-array", "mixed-case", "deeper"],
@@ -203,6 +204,16 @@ def test_network_written_as_a_temporary_allow_means_no_network(settings: dict[st
     """
     data = {"settings": settings, "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}]}
     with pytest.raises(ToolBroken, match=re.escape(f"'{at}'")):
+        card.network_allowed(data, "假的卡")
+
+
+def test_network_buried_very_deep_still_means_no_network() -> None:
+    """埋得很深（遠超過直譯器的遞迴上限）也照樣回 2，不是爆成別的例外（離開碼 1）。"""
+    deep: dict[str, object] = dict(STRAY)
+    for _ in range(sys.getrecursionlimit() * 3):
+        deep = {"a": deep}
+    data = {"settings": deep, "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}]}
+    with pytest.raises(ToolBroken, match="帶 network"):
         card.network_allowed(data, "假的卡")
 
 
