@@ -77,6 +77,19 @@ def _arguments() -> tuple[GradientJobs, GradientRequest, str, list[str]]:
     return jobs, search, str(view["build_id"]), argv[argv.index("aosr.gradient.surrogate_build") + 1:]
 
 
+def _watch_identity(events: list[object]) -> None:
+    """#1142：每次量算核對的程式身分記一筆 ``identity``（產品原樣算，只記先後）；建模之前量一次、寫紀錄之前再量一次。"""
+    from aosr.gradient import fixed_candidates
+
+    identity: Callable[..., str] = fixed_candidates.check_code_identity
+
+    def measured(**kwargs: object) -> str:
+        events.append("identity")
+        return identity(**kwargs)
+
+    setattr(fixed_candidates, "check_code_identity", measured)
+
+
 def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
     """候選的訓練組拿掉、候選核對用窄尺、記下每次判決與補了哪些組；``cap`` 模式建完就把預算收到剛好用完、
     ``pass`` 模式把停止殘差收到 ``PASS_STOP``。換函式一律用 ``setattr``（換上去的是考卷自己的版本，型別不必跟原本一樣）。"""
@@ -98,13 +111,7 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
     judged, added, generated, events = seen["judged"], seen["added"], seen["generated"], seen["events"]
     configurations: dict[str, object] = {}
     judge: Callable[..., dict[str, CandidateVerdict]] = fixed_candidates.judge_candidates
-    identity: Callable[..., str] = fixed_candidates.check_code_identity
-
-    def measured(**kwargs: object) -> str:
-        events.append("identity")  # #1142：建模之前量一次、寫紀錄之前再量一次（產品原樣算，只記先後）
-        return identity(**kwargs)
-
-    setattr(fixed_candidates, "check_code_identity", measured)
+    _watch_identity(events)
     rulers = run.holdout_rulers
 
     def tight() -> object:
