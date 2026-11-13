@@ -16,7 +16,8 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.home_view import (LAYOUT_NOTE, NO_WHOLE_LAYOUT_NOTE, ZONED_LAYOUT_NOTE, home_data, home_view,
-                                latest_picks, name_words, room_overview, scheme_line, treated, treated_words)
+                                latest_picks, name_words, room_overview, scheme_line)
+from aosr.gui.room_words import treated, treated_words
 from aosr.gui.result_list import ResultSummary
 from aosr.gui.wall_words import wall_words
 from aosr.materials.construction_models import Assembly

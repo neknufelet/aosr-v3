@@ -54,3 +54,5 @@ td[data-verdict="within_range"]{color:#1a7f37}
 /* 改善多少那張表：每格不折行（窄畫面「音／色／平／衡」看不懂），放不下就只捲這張表。 */
 #zone-improvement { overflow-x: auto; }
 #zone-improvement th, #zone-improvement td { white-space: nowrap; }
+#next-materials{margin-left:1.5rem}
+#zone-rows .zone-material-detail div { white-space: pre-line; }

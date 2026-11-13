@@ -13,6 +13,7 @@ from aosr.physics.zone_fill import whole_wall_entries
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.measured_view import MeasuredWallView, build_measured_view, measured_note_text
+from aosr.gui.room_words import size_words, treated_words
 from aosr.gui.wall_words import wall_words
 from aosr.gui.capability_view import capability_lists
 from aosr.gui.furniture_view import furniture_rows, furniture_surface, has_furniture_paths
@@ -249,6 +250,8 @@ class ListeningAreaView(ViewModel):
 class ResultView(ViewModel):
     material_research_notice: str | None = Field(default=None, exclude_if=lambda value: value is None)
     speaker_setup_line: str = ""
+    # 結果頁開頭的一句（#1134）：這一間多大、哪幾面貼了吸音材料（跟首頁同一支 room_words）。
+    room_line: str = ""
     furniture: tuple[tuple[str, str, str], ...] = ()
     furniture_reason: str = ""
     furniture_notes: tuple[str, ...] = ()
@@ -931,6 +934,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
     return ResultView(
         material_research_notice=komatsu_research_notice(result.scheme.scene.surface_zones_by_wall, web=True),
         speaker_setup_line=speaker_setup_text(result.scheme.speaker_setup) if result.scheme.speaker_setup else "",
+        room_line=f"{size_words(result.scheme)}；{treated_words(result.scheme)}",
         furniture=furniture_rows(result),
         construction_notes=_construction_notes(result) or None,
         measured_walls=build_measured_view(result),

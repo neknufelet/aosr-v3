@@ -351,6 +351,10 @@ def test_reflection_display_keeps_payload_classification(result: SchemeResult) -
     view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
     walls = wall_words(result.scheme)
     assert walls["x0"] == "前牆"
+    # 結果頁開頭那一句（#1134）：尺寸照方案、參考房六面固定阻抗＝沒貼吸音材料。
+    room = result.scheme.scene.room_m
+    assert view.room_line.startswith(f"長 {room.Lx:g}、寬 {room.Ly:g}、高 {room.Lz:g} 公尺；")
+    assert view.room_line.endswith("牆面都是原樣，沒貼吸音材料")
     evaluation = next(item for item in result.candidate.evaluations
                       if item.category is QualityCategory.REFLECTIONS_AND_ECHO)
     payload = evaluation.payload

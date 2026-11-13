@@ -4,8 +4,7 @@
 
 - 牆名、前牆朝哪：``wall_words``／``front_wall``（跟 /search-start 前牆預設同一條）；定不出前牆時圖照 x 起點牆朝上、
   牆名照座標名，不猜。
-- 哪裡「貼了吸音材料」：貼在原牆上的構造、實測表、含板與空腔以外的層的多層構造（吸音棉、布、微穿孔板、開縫板…）；
-  固定阻抗與只有板＋空腔的多層構造（例如 109 的天花薄板＋空腔）當原本的面，不畫。顏色照結果頁同一支 ``material_facts`` 的標語：實測一色、其餘（模擬）一色。
+- 哪裡「貼了吸音材料」：照 ``room_words.treated``（跟結果頁開頭那一句同一條）。顏色照結果頁同一支 ``material_facts`` 的標語：實測一色、其餘（模擬）一色。
 - 自動存的名字：原牆基準 ``<名字>-orig-<8 碼>``（``zone_result.SUFFIX``）、第三階段搜尋選出來存的
   ``<名字>-search-<8 碼>``（``gradient_follow.adopted_name``）、擺位搜尋細算的 ``<搜尋代號>-…-verification``
   （``search.store.refine_scheme_id``）。
@@ -31,21 +30,19 @@ from aosr.gui.material_editor import user_library_path
 from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.result_list import ResultSummary
+from aosr.gui.room_words import FOUR_WALLS, size_words, treated_words, treated_zones
 from aosr.gui.wall_words import FACING, LEFT_OF, front_wall, wall_words
 from aosr.gui.zone_result import SUFFIX, material_facts
-from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, MeasuredImpedance, MountedOnWall, SurfaceMaterial
 from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.physics.report_surfaces import RectangleZone
-from aosr.physics.zone_fill import wall_size_m
 from aosr.reporting.scheme import Scheme
 
-FOUR_WALLS: Final = ("x0", "xL", "y0", "yL")
 _BASELINE: Final = re.compile(rf"(?P<name>.+){re.escape(SUFFIX)}[0-9a-f]{{8}}\Z")
 _ADOPTED: Final = re.compile(rf"(?P<name>.+)-{ADOPTED_WORD}-[0-9a-f]{{8}}\Z")
 _REFINED: Final = re.compile(r"[0-9a-f]{32}-(?:baseline|trial-(?P<trial>[0-9]+))-verification\Z")
 MATERIALS_NOTE: Final = "每一面牆、每一區貼哪種吸音材料、貼多厚，交給電腦挑"
 LAYOUT_NOTE: Final = "喇叭和座位放哪裡最好，交給電腦試很多種擺法"
-RESULT_NOTE: Final = "這一間算出來怎樣、比沒貼吸音材料的原牆好多少"
+RESULT_NOTE: Final = "這一間算出來怎樣、比原牆基準好多少"
 ZONED_LAYOUT_NOTE: Final = "這一間的牆面分了區，電腦試擺位目前只能用在牆面沒分區的方案；到那一頁選一份沒分區的"
 NO_WHOLE_LAYOUT_NOTE: Final = "目前用不了：電腦試擺位只能用在牆面沒分區的方案，已存的每一份都分了區"
 
@@ -66,50 +63,6 @@ def name_words(scheme_id: str) -> tuple[str, bool]:
 def _helper(scheme_id: str) -> bool:
     """只為了比較或細算才存的那幾種（原牆基準、擺位搜尋細算）；首頁「最近算的房間」跳過它們。"""
     return bool(_BASELINE.fullmatch(scheme_id) or _REFINED.fullmatch(scheme_id))
-
-
-def treated(material: SurfaceMaterial) -> bool:
-    """這一塊是不是「貼了吸音材料」：貼在原牆上、實測表、含板與空腔以外的層的多層構造。"""
-    if isinstance(material, MountedOnWall | MeasuredImpedance):
-        return True
-    return isinstance(material, Assembly) and any(not isinstance(layer, BoardLayer | AirLayer)
-                                                  for layer in material.layers)
-
-
-def _metres(value: float) -> str:
-    return f"{value:.2f}".rstrip("0").rstrip(".")
-
-
-def size_words(scheme: Scheme) -> str:
-    room = scheme.scene.room_m
-    return f"長 {_metres(room.Lx)}、寬 {_metres(room.Ly)}、高 {_metres(room.Lz)} 公尺"
-
-
-def _treated_zones(scheme: Scheme) -> dict[str, list[tuple[tuple[float, float], SurfaceMaterial]]]:
-    """每一面有貼東西的區（沿牆的 u 範圍與材料）；整面的 u 是整面寬。"""
-    room = scheme.scene.room_m
-    found: dict[str, list[tuple[tuple[float, float], SurfaceMaterial]]] = {}
-    for wall, zones in (scheme.scene.surface_zones_by_wall or {}).items():
-        width = wall_size_m(room, wall)[0]
-        for zone in zones:
-            if treated(zone.material):
-                span = zone.u_m if isinstance(zone, RectangleZone) else (0.0, width)
-                found.setdefault(wall, []).append((span, zone.material))
-    return found
-
-
-def treated_words(scheme: Scheme) -> str:
-    """一句話：哪幾面有貼東西（前牆 2 塊、後牆整面…）；都沒有就說原樣。"""
-    names = wall_words(scheme)
-    zones = _treated_zones(scheme)
-    every = scheme.scene.surface_zones_by_wall or {}
-    parts = []
-    for wall in (*FOUR_WALLS, "ceiling", "floor"):
-        items = zones.get(wall, [])
-        if items:
-            whole = len(items) == 1 and len(every.get(wall, ())) == 1
-            parts.append(f"{names[wall]}{'整面' if whole else f' {len(items)} 塊'}")
-    return "貼了吸音材料：" + "、".join(parts) if parts else "牆面都是原樣，沒貼吸音材料"
 
 
 def _screen(scheme: Scheme) -> Callable[[float, float], tuple[float, float]]:
@@ -142,7 +95,7 @@ def room_overview(scheme: Scheme, library: Sequence[LibraryEntry]) -> dict[str, 
     ends: dict[str, Callable[[float], tuple[float, float]]] = {
         "x0": lambda u: (0.0, u), "xL": lambda u: (room.Lx, u), "y0": lambda u: (u, 0.0), "yL": lambda u: (u, room.Ly)}
     segments = []
-    for wall, items in _treated_zones(scheme).items():
+    for wall, items in treated_zones(scheme).items():
         if wall in ends:
             for (u0, u1), material in items:
                 measured = any(tag.code == "measured" for tag in material_facts(material, library).tags)

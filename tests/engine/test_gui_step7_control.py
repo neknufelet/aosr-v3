@@ -43,7 +43,7 @@ from tests.engine.test_scheme_pipeline import shared_control_result
 NEW_FIELDS = {"furniture", "furniture_reason", "furniture_notes", "furniture_flutter_text",
               "frequency_note", "ranking_approximation_text", "surface_text", "coverage_text",
               "validation_text", "a_state_text", "b_state_text", "overlay_note", "no_changes_text",
-              "speaker_setup_line", "ideal_source_note"}
+              "speaker_setup_line", "ideal_source_note", "room_line"}
 NEW_LABELS = {"direction_zones", "ranking", "own_line_ripple_rms_db", "seat_robustness_rms_db"}
 
 CAPABILITY_TEXT_CHANGES = {

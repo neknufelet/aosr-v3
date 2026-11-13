@@ -16,11 +16,11 @@
 </head>
 <body>
   <main>
-    <header><h1>房間計算結果</h1><p><a href="/">回方案輸入頁</a></p>
+    <header><h1 id="page-title">房間計算結果</h1><p><a href="/">回方案輸入頁</a><a id="next-materials" hidden>這一間挑材料（第三階段搜尋）</a></p>
       <p id="server-notice" class="notice" hidden></p><p id="run-notice" class="notice" hidden></p>
-      <p id="identity"></p><p id="speaker-setup" hidden></p><p id="timings"></p>
+      <p id="identity"></p><p id="room-line"></p><p id="speaker-setup" hidden></p>
       <p id="fingerprint-status" aria-live="polite"></p>
-      <details id="header-details" hidden><summary>技術細節（版本碼）</summary><p id="header-technical"></p></details>
+      <details id="header-details" hidden><summary>技術細節（計算時間、版本碼）</summary><p id="timings"></p><p id="header-technical"></p></details>
       <button id="fingerprint-rerun" hidden>用現在的程式重算</button><p id="fingerprint-rerun-state"></p></header>
     <p id="loading">正在讀取並核對結果（讀回時用存下的資料重評一次，確認分數沒被改過）…</p>
     <section id="rejection" hidden><h2 id="rejection-title">結果讀取失敗</h2><p id="reject-reason"></p>
@@ -28,12 +28,14 @@
       <button id="rerun">用現在的程式重算</button><p id="rerun-state"></p></section>
     <div id="content" hidden>
       <p id="material-research-notice" class="notice" hidden></p>
-      <section id="zone-result" hidden><h2>逐區表與改善多少</h2><div id="zone-notes"></div>
-        <div class="table-wrap" id="zone-rows"></div>
-        <h3>改善多少（跟原牆基準比）</h3><p id="zone-state" aria-live="polite"></p>
+      <section id="zone-result" hidden><h2>逐區表與改善多少</h2>
+        <h3>改善多少（跟原牆基準比；每一區的原牆怎麼來，看逐區表最後一欄）</h3><p id="zone-state" aria-live="polite"></p>
         <button id="zone-baseline-start" type="button" hidden>算原牆基準</button><p id="zone-start-state" aria-live="polite"></p>
         <p id="zone-baseline-link" hidden><a href="#">打開原牆基準那一份結果</a></p>
-        <div id="zone-improvement"></div><p id="zone-total-note"></p><p id="zone-improvement-note"></p></section>
+        <div id="zone-improvement"></div><p id="zone-total-note"></p><p id="zone-improvement-note"></p>
+        <h3>每一區貼了什麼</h3><div id="zone-notes"></div>
+        <p class="note">「做法」是設計設定裡這一區怎麼處理：交給搜尋＝第三階段搜尋可以換這一區的材料；這一份結果算的就是表上寫的材料。「固定阻抗」＝把這一面當成一個固定數字的面（不隨頻率變；這裡的牆數字很大＝很硬），所以標「近似」。</p>
+        <div class="table-wrap" id="zone-rows"></div></section>
       <section id="measured-walls" hidden><h2>實測阻抗表與接縫</h2><div id="measured-wall-details"></div></section>
       <section id="construction-notes" hidden><h2>牆面材料計算提醒</h2><div id="construction-note-lines"></div></section>
       <section id="result-plan"><h2>當次方案的平面圖與側面圖</h2>

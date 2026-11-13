@@ -327,7 +327,11 @@ async function load() {
   drawPlan(view.plan, {planXY: "result-plan-xy", planXZ: "result-plan-xz",
     detail: $("result-plan-detail"), legend: $("result-plan-legend")});
   drawCapabilities(view);
+  // 標題直接說是哪一份（#1134）；方案與日期那一行照舊，計算時間收進技術細節。
+  $("page-title").textContent = `計算結果：「${view.scheme_id}」`;
+  document.title = `計算結果：${view.scheme_id}`;
   $("identity").textContent = `方案：${view.scheme_id}；日期：${view.run_date}`;
+  $("room-line").textContent = view.room_line;
   $("speaker-setup").textContent = view.speaker_setup_line;
   $("speaker-setup").hidden = !view.speaker_setup_line;
   $("timings").textContent = `計算時間：求解 ${view.timing_texts.solve_s}；輸出 ${view.timing_texts.output_s}；評估 ${view.timing_texts.evaluate_s}；全程 ${view.timing_texts.total_s}`;

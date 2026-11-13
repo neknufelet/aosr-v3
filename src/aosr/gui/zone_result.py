@@ -31,7 +31,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import LABELS, WALLS
 from aosr.gui.wall_words import wall_words
-from aosr.gui.material_names import original_wall_words, registered_entry, zone_material_words
+from aosr.gui.material_names import original_wall_words, plain_words, registered_entry, zone_material_words
 from aosr.gui.problem_text import material_brief, measured_rows, rounded_number
 from aosr.gui.zone_design import MODE_WORDS, WHOLE_WALL_KEY, DesignSettings, effective_modes, mismatches
 from aosr.geometry.shoebox import Room
@@ -259,6 +259,8 @@ class ZoneRow(BaseModel):
     mode: str
     design: str
     design_detail: str
+    # 白話一句（#1134）：貼在原牆上的一層吸音材講成「玻璃棉 10 公分厚，離牆 2 公分」；空字串就照 design。
+    design_plain: str = ""
     baseline: str
     baseline_detail: str
     baseline_source: str
@@ -302,6 +304,7 @@ def zone_rows(baseline: Baseline, settings: DesignSettings | None, scheme: Schem
             design=(original_wall_words(zone.design, names) if mode == "keep_original"
                     else zone_material_words(zone.design, names)),
             design_detail=material_brief(zone.design, rounded_number),
+            design_plain="" if mode == "keep_original" else plain_words(zone.design, names),
             baseline=("—" if not baseline_known else original_wall_words(zone.baseline, names) if changed
                       else "同左"),
             baseline_detail=material_brief(zone.baseline, rounded_number) if changed else "",

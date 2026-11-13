@@ -22,8 +22,8 @@ from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, 
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.measured_view import APPROXIMATE_LINE, build_measured_view
 from aosr.gui.problem_text import rounded_number
-from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance
-from aosr.materials.library import FixedEntry, builtin_entries
+from aosr.materials.construction_models import ConstantImpedance, MeasuredImpedance, MountedOnWall
+from aosr.materials.library import FixedEntry, OptimizableEntry, builtin_entries
 from aosr.physics.report_zone_seams import ZoneSeamTable
 from aosr.physics.report_surfaces import RectangleZone, WholeWallZone
 from aosr.physics.zone_fill import wall_size_m
@@ -161,6 +161,17 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     impedance = rounded_number(original_x0().impedance_pa_s_m)
     assert a.design == f"多孔層 50 mm（流阻 19,100 Pa·s/m²）（依參數組名），貼在原牆上（原牆：固定阻抗 {impedance} Pa·s/m）"
     assert a.baseline == f"原牆（固定阻抗 {impedance} Pa·s/m）"
+    # 白話一句（#1134）只給借得到材料庫名字的吸音材；這一區對不到（原名帶流阻才分得出兩種棉），照原名。
+    assert a.design_plain == ""
+    # 材料庫有一筆可最佳化材料跟它只差厚度：借它的名字，講幾公分厚、直接貼牆（原名仍在 design，頁面併進「參數」）。
+    zones = design.scene.surface_zones_by_wall
+    assert zones is not None
+    porous = cast(MountedOnWall, zones["x0"][0].material).layers[0]
+    template = next(item for item in builtin_entries() if isinstance(item, OptimizableEntry))
+    named = (template.model_copy(update={"label": "試用棉", "porous": porous}),)
+    plain = {(row.wall, row.zone): row for row in zone_rows(baseline, settings, design, library=named)}
+    assert plain[("前牆", "a")].design_plain == "試用棉 5 公分厚，直接貼牆"
+    assert plain[("前牆", "a")].design.startswith("試用棉 50 mm")
     assert a.design_detail.startswith("貼在原牆上的構造；第 1 層：多孔層；層厚度 0.05 m")
     assert a.baseline_detail == f"固定阻抗；阻抗 {impedance} Pa·s/m"
     assert (b.mode, b.changed, b.baseline, b.baseline_detail, b.baseline_source) == (
@@ -172,6 +183,7 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     keep = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"b": ZoneDesign(mode="keep_original")}})
     kept = {row.zone: row for row in zone_rows(baseline, keep, design) if row.wall == "前牆"}
     assert kept["b"].design == f"原牆（固定阻抗 {impedance} Pa·s/m）" and not b.design.startswith("原牆")
+    assert kept["b"].design_plain == "" and b.design_plain == ""
     stale = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"gone": ZoneDesign(mode="search")}})
     assert {row.mode for row in zone_rows(baseline, stale, design)} == {"—"}
 
