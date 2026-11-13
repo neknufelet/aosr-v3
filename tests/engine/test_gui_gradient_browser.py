@@ -25,7 +25,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.gradient import folder_files
 from aosr.gradient.cli import EXIT_STOPPED
-from aosr.gradient.surrogate_files import PROGRESS_FILE, RoundRecord, SurrogateProgress
+from aosr.gradient.surrogate_files import FIXED_ROUNDS_FILE, PROGRESS_FILE, FixedCheckRound, RoundRecord, SurrogateProgress
 from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX
 from aosr.gui.surrogate_slots import SLOTS_DIR
 from aosr.gui.app import GuiSettings, create_app
@@ -622,4 +622,30 @@ def test_template_tries_table_keeps_quick_and_retuned_apart_and_says_why_a_round
         expect(family.nth(4)).to_have_text("+0.0542")
         expect(box).to_contain_text("第 1 輪：現狀 2.9358；都沒換：沒有超過改善門檻")
         expect(box).to_contain_text("第 2 輪沒開：換樣板求值到上限")
+
+
+def test_build_sends_the_options_on_the_form_and_lists_every_fixed_check(browser: Browser, tmp_path: Path) -> None:
+    """#1128（#1127 審查第 8 條）：預覽之後改了開跑選項、沒再按預覽就按建替身，送出去的要是表單上現在那一份
+    （搜尋真的要用的那一組起跑配置），不是舊預覽、也不是預設；建模進度列出開跑那一道固定材料核對每一次的數字。"""
+    data_dir = _data(tmp_path, surrogate=False)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#surrogate-state")).to_contain_text("還沒有替身，要先建")
+        page.locator("#mount").select_option("rigid")
+        page.locator("#build-surrogate").click()
+        expect(page.locator("#build-state")).to_contain_text("建替身")
+        unit, argv, _, _ = launcher.launched[-1]
+        assert argv[argv.index("--mount") + 1] == "rigid"
+        work = data_dir / SLOTS_DIR / "builds" / unit.removeprefix(BUILD_UNIT_PREFIX) / "work"
+        work.mkdir(parents=True)
+        (work / PROGRESS_FILE).write_text(_progress(time.time()).model_dump_json(), encoding="utf-8")
+        row = FixedCheckRound(check=1, full_solves=96, rank=267, target="fixed:glass_wool_48k_50mm_gap50", frequency_db=0.388, band_db=0.0047,
+                              worst_hz=293.441, passed=False, seconds=840.0)
+        (work / FIXED_ROUNDS_FILE).write_text(row.model_dump_json() + "\n", encoding="utf-8")
+        _tick(page)
+        expect(page.locator("#build-checks")).to_be_visible()
+        expect(page.locator("#build-checks li")).to_have_text(
+            "固定材料核對第 1 次（完整解合計 96 次、秩 267）：「48K 玻璃棉 50 mm＋50 mm 空腔」逐頻 0.388 dB、帶能量 0.0047 dB，沒過（最差在 293.441 Hz）")
+        expect(page.locator("#build-estimate")).to_contain_text("過了就停")
         _clean(page, watched.page_errors + watched.console_errors)

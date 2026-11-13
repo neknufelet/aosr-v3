@@ -295,9 +295,13 @@ class ZoneResultHandlers:
             refusal = lock_refusal(view, _latest_run(self.deps, baseline.scheme.scheme_id))
             if refusal is not None:
                 return 409, refusal
+            fields: dict[str, object] = {"display_label": f"原牆基準（{baseline.scheme.scheme_id}）", "zone_baseline_for": run_id}
+            # 參考時間照設計那一場量到的（同一套切法、同一間房；#1128：固定的 360 秒跟實際約 21 分差太多）。
+            seconds = self.deps.jobs.run_seconds(run_id)
+            if seconds is not None:
+                fields.update(reference_seconds=seconds, reference_label="設計那一場量到的，同一套切法")
             return 200, self.deps.jobs.start_snapshot(
-                baseline.scheme.model_dump_json(), baseline.scheme.scheme_id,
-                job_fields={"display_label": f"原牆基準（{baseline.scheme.scheme_id}）", "zone_baseline_for": run_id})
+                baseline.scheme.model_dump_json(), baseline.scheme.scheme_id, job_fields=fields)
 
     async def start(self, request: Request) -> Response:
         if self.deps.server_stale():

@@ -356,8 +356,9 @@ async function loadSurrogatePlan(replace) {
 
 async function buildSurrogate() {
   const body = {replace: byId("build-surrogate").dataset.replace === "true"};
-  // 准用清單有固定材料時，建替身照預覽那一份開跑選項的起跑配置先核過才裝（#1082 段 2-8）。
-  if (previewedRequest !== null) body.search = JSON.parse(previewedRequest);
+  // 准用清單有固定材料時，建替身照開跑選項的起跑配置先核過才裝（#1082 段 2-8）。送表單上現在的那一份（#1128）：
+  // 沒先按預覽、或預覽之後改過選項，也是開跑會用的這一組，不送預設、不送舊預覽。
+  body.search = request();
   const solves = byId("max-full-solves").value.trim();
   if (solves !== "" && Number(solves) !== surrogateDefaults.max_full_solves) body.max_full_solves = Number(solves);
   const residual = byId("stop-residual").value.trim();
@@ -414,6 +415,9 @@ function showBuild(build) {
     byId("build-estimate").textContent = build.result ?
       `完整解 ${build.result.full_solves} 次、秩 ${build.result.rank}。${build.result.message}` : "";
   }
+  const checks = build.fixed_checks || [];
+  byId("build-checks").hidden = !checks.length;
+  byId("build-checks").querySelector("ul").replaceChildren(...checks.map((text) => el("li", {text})));
   byId("build-error").hidden = !build.error;
   byId("build-error").textContent = build.error || "";
   byId("build-log").textContent = (build.log_tail || []).join("\n");

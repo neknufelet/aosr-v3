@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Self
 
@@ -148,11 +148,22 @@ def candidate_configurations(designs: Sequence[SurfaceDesign], allowed: Mapping[
     return found
 
 
+def _offset(progress: Callable[[int, int], None], done: int, total: int) -> Callable[[int, int], None]:
+    """單一候選的「已解幾點」換成全部候選合計的進度。"""
+    def call(solved: int, _points: int) -> None:
+        progress(done + solved, total)
+    return call
+
+
 def judge_candidates(model: ReducedModel, operators: FullOperators, configurations: Mapping[str, FrequencyBoundaryImpedances],
                      allowed: Mapping[str, Sequence[str]], *, workers: int = 1,
-                     previous: Mapping[str, CandidateVerdict] | None = None) -> dict[str, CandidateVerdict]:
+                     previous: Mapping[str, CandidateVerdict] | None = None,
+                     progress: Callable[[int, int], None] | None = None) -> dict[str, CandidateVerdict]:
     """每一個候選都判（不在第一個沒過就停）：沒給 ``previous`` 就整條頻率軸完整解對替身；給了（同一批配置、補訓練之後）
-    完整解聲壓照上一次的、只重算替身那一側。兩把尺從登記簿讀。"""
+    完整解聲壓照上一次的、只重算替身那一側。兩把尺從登記簿讀。
+
+    ``progress`` 給了就照「全部候選合計核到第幾個頻點、共幾點」叫（#1128：建替身那一道核 14 分鐘，進度一直停在 0）；
+    只讀、不改判決。"""
     import time
 
     from aosr.gradient.run import holdout_rulers
@@ -164,14 +175,20 @@ def judge_candidates(model: ReducedModel, operators: FullOperators, configuratio
     operators = replace(operators, sources={name: operators.sources[name] for name in model.source_names},
                         receivers={name: operators.receivers[name] for name in model.receiver_names})
     found = {}
-    for target, impedances in configurations.items():
+    points, total = len(model.frequencies_hz), len(model.frequencies_hz) * len(configurations)
+    for index, (target, impedances) in enumerate(configurations.items()):
         clock = time.perf_counter()
+        done = index * points
         if previous is None:
-            report = fem_reduced_check.validate_reduced(model, operators, [impedances], workers=workers)
+            report = fem_reduced_check.validate_reduced(
+                model, operators, [impedances], workers=workers,
+                progress=None if progress is None else _offset(progress, done, total))
         else:
             before = previous[target].report
             report = fem_reduced_check.revalidate_reduced(model, operators, [impedances], before.full_pressure,
                                                           full_solves=before.full_solves)
+            if progress is not None:
+                progress(done + points, total)
         seconds = time.perf_counter() - clock
         frequency_db, band_db = max(report.frequency_db_by_seat.values()), max(report.band_db_by_seat.values())
         passed = fem_reduced_check.within_reduced_contract(report, frequency_db=rulers.frequency.value,

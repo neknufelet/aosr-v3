@@ -99,6 +99,13 @@ def test_build_that_extends_until_the_check_passes_installs_and_the_preview_says
     assert [(row["target"], row["passed"]) for row in cast(list[Record], record["checks"])] == [("fixed:panel_absorbing", True)]
     preview = cast(Record, found["preview"])
     assert preview["found"] is True and preview["message"] is None
+    # #1128：每一次核（建模完一次、每補一輪一次）的數字都留在 fixed_check_rounds.jsonl，跟判決逐筆相同；進度有接上。
+    rounds = cast(list[Record], found["rounds"])
+    assert [(row["check"], row["target"], row["frequency_db"], row["passed"]) for row in rounds] == [
+        (index + 1, target, item["frequency_db"], item["passed"])
+        for index, check in enumerate(judged) for target, item in sorted(check.items())]
+    assert [row["full_solves"] for row in rounds][-1] == cast(Record, found["result"])["full_solves"]
+    assert all(item["progress_given"] for check in judged for item in check.values())
 
 
 def test_build_without_budget_left_refuses_and_says_a_bigger_budget_may_pass(tmp_path: Path) -> None:

@@ -105,7 +105,9 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
         finally:
             setattr(run, "holdout_rulers", rulers)
         judged.append({target: {"frequency_db": verdict.frequency_db, "passed": verdict.passed,
-                                "full_solves": verdict.report.full_solves} for target, verdict in verdicts.items()})
+                                "full_solves": verdict.report.full_solves,
+                                "progress_given": kwargs.get("progress") is not None}
+                       for target, verdict in verdicts.items()})
         return verdicts
 
     setattr(fixed_candidates, "judge_candidates", recording)
@@ -162,7 +164,9 @@ def main() -> None:
         "added": len(added), "generated": generated, "added_equal_to_check": held_out,
         "result": json.loads((work / "result.json").read_text(encoding="utf-8")), "slot": slot.is_dir(),
         "training_labels": None if training is None else [item["label"] for item in training["training"]],
-        "record": record, "preview": surrogate}, ensure_ascii=False, default=str), encoding="utf-8")
+        "record": record, "preview": surrogate,
+        "rounds": [json.loads(line) for line in (work / "fixed_check_rounds.jsonl").read_text(encoding="utf-8").splitlines()]
+        if (work / "fixed_check_rounds.jsonl").is_file() else None}, ensure_ascii=False, default=str), encoding="utf-8")
 
 
 if __name__ == "__main__":
