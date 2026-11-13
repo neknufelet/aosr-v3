@@ -511,7 +511,7 @@ def test_preview_shows_slot_defaults_history_and_latest(tmp_path: Path) -> None:
     preview = builds.preview(NAME, SurrogateRequest())
     defaults = cast(Record, preview["defaults"])
     assert preview["found"] is False and preview["exists"] is False and preview["latest"] is None
-    assert defaults == {"max_full_solves": 600, "stop_residual": 0.001, "workers": 4}
+    assert defaults == {"max_full_solves": 1000, "stop_residual": 0.001, "workers": 4}
     assert preview["history"] == [] and ESTIMATE_LABEL in str(preview["estimate_note"])
     view = builds.start(NAME, QUICK)
     work = _work(data_dir, view)

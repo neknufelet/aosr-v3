@@ -115,13 +115,13 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         expect(page.locator("#depth-table tbody tr")).to_have_count(2)
         expect(page.locator("#surrogate-state")).to_contain_text("還沒有替身，要先建")
         expect(page.locator("#start")).to_be_disabled()
-        expect(page.locator("#max-full-solves")).to_have_value("600")
+        expect(page.locator("#max-full-solves")).to_have_value("1000")
         expect(page.locator("#surrogate-history")).to_contain_text("還沒建過替身")
-        page.locator("#max-full-solves").fill("1000")
+        page.locator("#max-full-solves").fill("1500")
         page.locator("#build-surrogate").click()
         expect(page.locator("#build-state")).to_contain_text("建替身：匯出完整模型")
         unit, argv, _, _ = launcher.launched[-1]
-        assert "surrogate" in unit and argv[argv.index("--max-full-solves") + 1] == "1000"
+        assert "surrogate" in unit and argv[argv.index("--max-full-solves") + 1] == "1500"
         assert "--stop-residual" not in argv
         build_id = unit.removeprefix(BUILD_UNIT_PREFIX)
         work = data_dir / SLOTS_DIR / "builds" / build_id / "work"
@@ -132,10 +132,10 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         expect(page.locator("#build-estimate")).to_contain_text("推估")
         expect(page.locator("#build-estimate")).to_contain_text("還要約")
         expect(page.locator("#build-surrogate")).to_be_disabled()
-        # 建模中重開頁面（#1119）：印這一份實際的完整解上限（另填的 1000，不是預設 600），兩格換成這一份的值並鎖住。
+        # 建模中重開頁面（#1119）：印這一份實際的完整解上限（另填的 1500，不是預設 1000），兩格換成這一份的值並鎖住。
         page.reload()
-        expect(page.locator("#build-state")).to_contain_text("完整解上限 1000 次（這一份另填）、停止殘差 0.001（預設）")
-        expect(page.locator("#max-full-solves")).to_have_value("1000")
+        expect(page.locator("#build-state")).to_contain_text("完整解上限 1500 次（這一份另填）、停止殘差 0.001（預設）")
+        expect(page.locator("#max-full-solves")).to_have_value("1500")
         expect(page.locator("#max-full-solves")).to_be_disabled()
         expect(page.locator("#stop-residual")).to_be_disabled()
         _shot(page, "1119-surrogate-reopened-budget")
@@ -146,11 +146,11 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
         page.locator("#stop-build").click()
         expect(page.locator("#build-state")).to_contain_text("停止中")
         assert launcher.stopped == [unit]
-        # 建模真的停了（服務不在了）：兩格放回預設、解鎖，下一次開建不會悄悄帶這一份另填的 1000（#1119）。
+        # 建模真的停了（服務不在了）：兩格放回預設、解鎖，下一次開建不會悄悄帶這一份另填的 1500（#1119）。
         launcher.active.discard(unit)
         _tick(page)
         expect(page.locator("#max-full-solves")).to_be_enabled()
-        expect(page.locator("#max-full-solves")).to_have_value("600")
+        expect(page.locator("#max-full-solves")).to_have_value("1000")
         expect(page.locator("#stop-residual")).to_be_enabled()
         _clean(page, watched.page_errors + watched.console_errors)
 
@@ -160,7 +160,7 @@ def _progress(now: float) -> SurrogateProgress:
     return SurrogateProgress.model_validate({
         "phase": "building", "started_at": now - 120.0, "phase_started_at": now - 110.0, "updated_at": now - 5.0,
         "workers": 4, "patches": 7, "dofs": 3389, "axis_points": 94, "training_sets": 41, "holdout_sets": 9,
-        "max_full_solves": 1000, "stop_residual": 0.001, "full_solves": 96, "rank": 267, "snapshot_seconds": 48.0,
+        "max_full_solves": 1500, "stop_residual": 0.001, "full_solves": 96, "rank": 267, "snapshot_seconds": 48.0,
         "rounds": [RoundRecord(round=0, full_solves=64, rank=200, max_residual=0.5, elapsed_s=40.0),
                    RoundRecord(round=1, full_solves=96, rank=267, max_residual=0.02, elapsed_s=70.0)]})
 
@@ -483,7 +483,7 @@ def _settles(page: Page, seen: list[str], most: int) -> None:
 def test_an_installed_build_the_materials_outgrow_does_not_loop_and_keeps_the_typed_budget(browser: Browser,
                                                                                          tmp_path: Path) -> None:
     """抓 109 示範那一個迴圈：格子裡最新一份替身已裝好、但這一場的材料它沒訓練過時，showBuild 叫預覽、預覽又叫回
-    showBuild（幾分鐘六千多次預覽），每一圈把「完整解預算」改回 600，使用者打的 1000 留不住。
+    showBuild（幾分鐘六千多次預覽），每一圈把「完整解預算」改回預設，使用者另填的數字留不住（當時預設 600、打的 1000；預設改 1000 後考卷另填 1500）。
     也抓修過頭：建好、這一次涵蓋得到時，畫面要自己換成「已經有替身」、開始鈕亮起來。"""
     data_dir = _data(tmp_path)
     library_file = user_library_path(data_dir)
@@ -504,24 +504,24 @@ def test_an_installed_build_the_materials_outgrow_does_not_loop_and_keeps_the_ty
         _settles(page, seen, 2)
         expect(page.locator("#surrogate-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
         expect(page.locator("#max-full-solves")).to_be_enabled()
-        page.locator("#max-full-solves").fill("1000")
+        page.locator("#max-full-solves").fill("1500")
         seen.clear()
         _tick(page)
         page.locator("#preview").click()
         expect(page.locator("#form-message")).to_contain_text("預覽好了")
         _settles(page, seen, 1)
-        expect(page.locator("#max-full-solves")).to_have_value("1000")
+        expect(page.locator("#max-full-solves")).to_have_value("1500")
         # 109 示範的重現路：格子裡已經是裝好的那一份，重開頁面不准自己轉起來。
         seen.clear()
         page.reload()
         expect(page.locator("#surrogate-state")).to_contain_text("替身沒用這些材料訓練過，要重建")
         _settles(page, seen, 1)
         _shot(page, "2-9-3-installed-not-covered-no-loop")
-        page.locator("#max-full-solves").fill("1000")
+        page.locator("#max-full-solves").fill("1500")
         page.locator("#build-surrogate").click()
-        expect(page.locator("#build-state")).to_contain_text("完整解上限 1000 次（這一份另填）")
+        expect(page.locator("#build-state")).to_contain_text("完整解上限 1500 次（這一份另填）")
         second = launcher.launched[-1]
-        assert second[1][second[1].index("--max-full-solves") + 1] == "1000"
+        assert second[1][second[1].index("--max-full-solves") + 1] == "1500"
         # 這一次涵蓋得到（材料庫拿掉沒訓練過的那一組）：建好就自己換成「已經有替身」、可以開跑。
         library_file.unlink()
         _installed(data_dir, launcher, second[0])
