@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import io
+import json
 import math
 from collections.abc import Callable
 from contextlib import redirect_stderr
@@ -29,13 +30,14 @@ from aosr.gradient.surrogate_coverage import fixed_targets
 from aosr.gradient.surrogate_fixed_checks import (
     FIXED_CHECKS_FILE, FIXED_CHECKS_VERSION, FIXED_CHECKS_VERSION_V2, CandidateIdentity, FixedCheckRow, FixedChecksRecord,
     axis_hex, configuration_document, configuration_sha256, impedances_sha256, manifest_digest, read_record, reused_rows,
-    write_record,
+    unchecked_reason, write_record,
 )
 from aosr.physics.fem_reduced_store import manifest_path
 from tests.engine.test_material_gradient_allowed import CARPET, MEASURED, _table
 
 if TYPE_CHECKING:
     from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
+    from aosr.physics.fem_reduced_check import ValidationReport
 
 CARPET_TARGET, MEASURED_TARGET = "fixed:" + CARPET, "fixed:" + MEASURED
 ALLOWED: dict[str, tuple[str, ...]] = {"x0": ("none", CARPET_TARGET, MEASURED_TARGET), "y0": (MEASURED_TARGET,)}
@@ -196,6 +198,19 @@ def test_no_record_or_unreadable_record_means_recheck(tmp_path: Path) -> None:
     assert read_record(path) is None
 
 
+def test_record_with_a_candidate_written_twice_is_no_record(tmp_path: Path) -> None:
+    """抓同一個候選寫兩列（一列沒過、一列過）照收、比對只看到最後那一列就沿用：不收，讀成沒有紀錄、重核。"""
+    record = _record()
+    rows = [row.model_dump(mode="json") for row in record.checks]
+    doubled = {**record.model_dump(mode="json"), "checks": [{**rows[0], "passed": False, "frequency_db": 1.0}, *rows]}
+    with pytest.raises(ValidationError, match="不只一列"):
+        FixedChecksRecord.model_validate(doubled)
+    path = tmp_path / FIXED_CHECKS_FILE
+    path.write_text(json.dumps(doubled), encoding="utf-8")
+    assert read_record(path) is None
+    assert _reuse(read_record(path)) == "替身旁邊沒有建替身時的核對紀錄（或讀不懂）"
+
+
 def test_impedance_digest_changes_with_one_bit_and_ignores_key_order() -> None:
     """抓阻抗摘要只看四捨五入的值或被鍵的順序影響：差一個位元（實部或虛部）就不同，鍵換順序相同，剛性（None）跟 0 不同。"""
     rows = _impedances(MEASURED_TARGET)
@@ -208,6 +223,60 @@ def test_impedance_digest_changes_with_one_bit_and_ignores_key_order() -> None:
     assert _digest({**rows, Wall.X0: (values[0], nudged, values[2])}) != digest
     assert _digest({**rows, (Wall.Y0, "z1"): (0j, 0j, 0j)}) != digest
     assert _digest({Wall.X0: values}) != _digest({(Wall.X0, "z1"): values})
+    # 單一值（型別准的寫法，整條軸同一個阻抗）：跟一點的逐頻寫法不同，差一個位元也不同。
+    scalar = impedances_sha256(cast("FrequencyBoundaryImpedances", {Wall.X0: complex(400.0, -1.0)}))
+    assert scalar != _digest({Wall.X0: (complex(400.0, -1.0),)})
+    assert scalar != impedances_sha256(cast("FrequencyBoundaryImpedances",
+                                            {Wall.X0: complex(math.nextafter(400.0, math.inf), -1.0)}))
+
+
+# ---- 建替身那一側（surrogate_build._fixed_record）：程式身分建模之前量、寫之前再量 ----
+
+def test_check_code_that_changes_during_the_build_writes_an_old_format_record(tmp_path: Path,
+                                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓建替身途中程式換過還寫 v2：網頁起的建替身跑主 repo 那份程式，建模途中主線拉了新提交，數字是開頭載入的程式算的，
+    寫紀錄那一刻磁碟上卻是新程式；紀錄要記建模開頭量的身分，寫之前再量一次不同就寫成 v1（網頁預覽照讀、開跑重核）。"""
+    from aosr.gradient import surrogate_build
+    from aosr.gradient.fixed_candidates import CandidateVerdict
+
+    table = _table()
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    npz = stage / "rom.npz"
+    manifest_path(npz).write_text('{"manifest": 1}\n', encoding="utf-8")
+    start = surrogate_build._Start(presets=("glass_wool_48k_50mm_gap50", None), mount="on_wall",
+                                   fixed_surfaces={"floor": "scheme-material"}, max_depths={"x0": 0.3}, allowed=ALLOWED,
+                                   table=table, code_identity=CODE)
+    fixed = fixed_targets(ALLOWED, table)
+    job = SimpleNamespace(start=start, scheme=SimpleNamespace(scene=SimpleNamespace(model_dump_json=lambda: '{"scene":1}')),
+                          fixed=fixed, stage=stage)
+    report = cast("ValidationReport", SimpleNamespace(full_solves=len(AXIS)))
+    verdicts = {item.target: CandidateVerdict(target=item.target, surfaces=item.surfaces, report=report, frequency_db=0.05,
+                                              band_db=0.001, worst_hz=math.nan, passed=True, seconds=1.0)
+                for item in _candidates()}
+    prepared = SimpleNamespace(operators=object(),
+                               configurations={target: _impedances(target) for target in fixed_targets_of(ALLOWED)})
+    monkeypatch.setattr(fem_reduced, "operators_digest", lambda operators: OPERATORS)
+    write: Callable[..., None] = surrogate_build._fixed_record  # 建模的人、驗證報告、完整模型是樁
+    path = stage / FIXED_CHECKS_FILE
+    found: dict[str, tuple[FixedChecksRecord | None, str]] = {}
+    for label, now in (("same", CODE), ("changed", "fixcheck-v1:" + "9" * 64)):
+        path.unlink(missing_ok=True)
+        monkeypatch.setattr(fixed_candidates, "check_code_identity", lambda now=now: now)
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            write(job, npz, verdicts, prepared, AXIS)
+        found[label] = (read_record(path), stderr.getvalue())
+    same, quiet = found["same"]
+    assert same is not None and same.schema_version == FIXED_CHECKS_VERSION_V2 and same.code_identity == CODE
+    assert not isinstance(_reuse(same, manifest_sha256=same.manifest_sha256), str) and quiet == ""
+    changed, said = found["changed"]
+    assert changed is not None and changed.schema_version == FIXED_CHECKS_VERSION and changed.code_identity is None
+    assert "建替身途中算核對的程式或環境換過" in said and "照舊重核" in said, said
+    assert _reuse(changed, manifest_sha256=changed.manifest_sha256) == "建替身時的核對紀錄是舊格式，沒有沿用要比的欄位"
+    keep = {"target", "material_sha256", "frequency_db", "band_db", "frequency_ruler", "band_ruler", "passed"}
+    assert [row.model_dump(include=keep) for row in changed.checks] == [row.model_dump(include=keep) for row in same.checks]
+    assert unchecked_reason(stage, manifest_path(npz), CONFIGURATION, fixed) is None  # 網頁預覽照舊說核過
 
 
 # ---- 開跑那一道（命令列 _fixed_candidate_checks）：沿用、或照舊重核 ----
@@ -342,3 +411,25 @@ def test_code_identity_follows_the_check_code(tmp_path: Path) -> None:
     target = copy / "physics" / "fem_reduced_check.py"
     target.write_text(target.read_text(encoding="utf-8") + "\n\ndef _changed() -> int:\n    return 1\n", encoding="utf-8")
     assert fixed_candidates.check_code_identity(package_root=copy) != same
+
+
+def test_code_identity_follows_its_data_files_and_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓程式身分只收程式、不收閉包經 ``config_path`` 讀的資料檔或執行環境：資料檔差一個位元組、環境摘要換了，身分都要換
+    （閉包掃描與程式摘要換成樁，只考這兩段有沒有餵進摘要）。"""
+    from aosr.reporting import import_closure
+
+    data = tmp_path / "config" / "data"
+    data.mkdir(parents=True)
+    (data / "probe.toml").write_bytes(b"a = 1\n")
+    environment = ["environment-1"]
+    monkeypatch.setattr(import_closure, "import_code_digest", lambda root, module: "code")
+    monkeypatch.setattr(import_closure, "scan_import_closure",
+                        lambda root, module: (SimpleNamespace(data_files=("probe.toml",)),))
+    monkeypatch.setattr(import_closure, "environment_digest", lambda: environment[0])
+    first = fixed_candidates.check_code_identity(package_root=tmp_path)
+    assert first == fixed_candidates.check_code_identity(package_root=tmp_path)
+    (data / "probe.toml").write_bytes(b"a = 2\n")
+    second = fixed_candidates.check_code_identity(package_root=tmp_path)
+    assert second != first
+    environment[0] = "environment-2"
+    assert fixed_candidates.check_code_identity(package_root=tmp_path) != second

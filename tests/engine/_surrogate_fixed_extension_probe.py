@@ -12,7 +12,8 @@
 #1142：``pass`` 模式裝好之後，再由網頁那一層照產品組出開跑的命令列參數，在同一個行程叫命令列開跑那一段
 （``cli._start``，只把「建資料夾、起子行程」換成記下 ``project.json`` 那一份），跑兩次：一次照產品（核對紀錄在、
 身分相同 → 沿用），一次先把核對紀錄移開（→ 照舊重核，真的完整解）；兩次的固定材料核對與輸出都記進 ``starts``。
-這兩次之前先把上面換掉的函式換回產品原樣（窄尺、記錄判決都不套到開跑那一段）。
+這兩次之前先把上面換掉的函式換回產品原樣（窄尺、記錄判決都不套到開跑那一段）。建替身那一段另記「量程式身分」與
+「判候選」的先後（``events``；身分照產品原樣算），考建模之前量一次、寫紀錄之前再量一次。
 """
 from __future__ import annotations
 
@@ -94,9 +95,16 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
     setattr(TrainingSets, "training_sets", lambda self: without_candidate(training_sets(self)))
     setattr(TrainingSets, "holdout_sets", lambda self: without_candidate(holdout_sets(self)))
     setattr(TrainingSets, "require_every_family", lambda self, training, holdout: None)
-    judged, added, generated = seen["judged"], seen["added"], seen["generated"]
+    judged, added, generated, events = seen["judged"], seen["added"], seen["generated"], seen["events"]
     configurations: dict[str, object] = {}
     judge: Callable[..., dict[str, CandidateVerdict]] = fixed_candidates.judge_candidates
+    identity: Callable[..., str] = fixed_candidates.check_code_identity
+
+    def measured(**kwargs: object) -> str:
+        events.append("identity")  # #1142：建模之前量一次、寫紀錄之前再量一次（產品原樣算，只記先後）
+        return identity(**kwargs)
+
+    setattr(fixed_candidates, "check_code_identity", measured)
     rulers = run.holdout_rulers
 
     def tight() -> object:
@@ -111,6 +119,7 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
             verdicts = judge(model, operators, found, allowed, **kwargs)
         finally:
             setattr(run, "holdout_rulers", rulers)
+        events.append("judge")
         judged.append({target: {"frequency_db": verdict.frequency_db, "passed": verdict.passed,
                                 "full_solves": verdict.report.full_solves,
                                 "progress_given": kwargs.get("progress") is not None}
@@ -188,15 +197,17 @@ def main() -> None:
     from aosr.gradient.surrogate_training import TrainingSets
 
     jobs, search, build_id, arguments = _arguments()
-    seen: dict[str, list[object]] = {"judged": [], "added": [], "generated": [], "before": []}
+    seen: dict[str, list[object]] = {"judged": [], "added": [], "generated": [], "before": [], "events": []}
     originals = {name: getattr(TrainingSets, name)
                  for name in ("training_sets", "holdout_sets", "require_every_family", "extension_sets")}
     judge, rulers, checked = fixed_candidates.judge_candidates, run.holdout_rulers, surrogate_build._fixed_checked
+    identity = fixed_candidates.check_code_identity
 
     def restore() -> None:
         for name, value in originals.items():
             setattr(TrainingSets, name, value)
         setattr(fixed_candidates, "judge_candidates", judge)
+        setattr(fixed_candidates, "check_code_identity", identity)
         setattr(run, "holdout_rulers", rulers)
         setattr(surrogate_build, "_fixed_checked", checked)
 
@@ -216,6 +227,7 @@ def main() -> None:
     starts = _starts(jobs, search, slot, restore) if MODE == "pass" and code == 0 else None
     (DIRECTORY / "probe.json").write_text(json.dumps({
         "exit": code, "build_id": build_id, "arguments": arguments, "judged": judged, "before": seen["before"],
+        "events": seen["events"],
         "added": len(added), "generated": generated, "added_equal_to_check": held_out,
         "result": json.loads((work / "result.json").read_text(encoding="utf-8")), "slot": slot.is_dir(),
         "training_labels": None if training is None else [item["label"] for item in training["training"]],

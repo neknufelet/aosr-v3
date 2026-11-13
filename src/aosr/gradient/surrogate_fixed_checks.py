@@ -60,6 +60,7 @@ class _Frozen(BaseModel):
 
 _SHA256 = r"^[0-9a-f]{64}$"
 _ROW_IDENTITY: Final = ("surfaces", "material_digest", "full_solves", "impedances_sha256")
+_RECORD_IDENTITY: Final = ("frequencies_hz", "operators_digest", "code_identity")
 
 
 class FixedCheckRow(_Frozen):
@@ -102,11 +103,24 @@ class FixedChecksRecord(_Frozen):
         v2 = self.schema_version == FIXED_CHECKS_VERSION_V2
         missing = [f"{row.target}.{name}" for row in self.checks for name in _ROW_IDENTITY
                    if (getattr(row, name) is None) == v2]
-        missing.extend(name for name in ("frequencies_hz", "operators_digest", "code_identity")
-                       if (getattr(self, name) is None) == v2)
+        missing.extend(name for name in _RECORD_IDENTITY if (getattr(self, name) is None) == v2)
         if missing:
             raise ValueError(f"核對紀錄 {self.schema_version} 的欄位跟版本不一致：{missing}")
         return self
+
+    @model_validator(mode="after")
+    def _one_row_per_candidate(self) -> Self:
+        """同一個候選寫兩列（建替身寫不出來）讀不懂哪一列算數：不收，讀成沒有紀錄（開跑重核、網頁照「要重建」講）。"""
+        targets = [row.target for row in self.checks]
+        if len(set(targets)) != len(targets):
+            raise ValueError(f"核對紀錄同一個候選寫了不只一列：{sorted(targets)}")
+        return self
+
+    def without_reuse_identity(self) -> FixedChecksRecord:
+        """同一份紀錄去掉開跑沿用要比的欄位、寫成 v1：網頁預覽照讀，開跑那一道不沿用、照舊重核。"""
+        return FixedChecksRecord.model_validate({
+            **self.model_dump(mode="json", exclude=set(_RECORD_IDENTITY)), "schema_version": FIXED_CHECKS_VERSION,
+            "checks": [row.model_dump(mode="json", exclude=set(_ROW_IDENTITY)) for row in self.checks]})
 
 
 @dataclass(frozen=True)

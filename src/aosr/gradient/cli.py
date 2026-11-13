@@ -453,8 +453,8 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
         if not isinstance(found, str):
             checks = tuple(reused_check(row) for row in found)
             for check in checks:
-                sys.stderr.write(f"注意：固定材料 {check.target} 沿用建替身時核過的數字（替身、材料、起跑配置、頻率軸、"
-                                 f"兩把尺都跟那次相同，這次不再完整解）：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
+                sys.stderr.write(f"注意：固定材料 {check.target} 沿用建替身時核過的數字（替身、完整模型、材料、起跑配置與"
+                                 f"核對配置的阻抗、頻率軸、兩把尺、算核對的程式都跟那次相同，這次不再完整解）：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
                                  f"{check.band_db:g} dB（建替身時完整解 {check.full_solves} 次）\n")
             return checks
         sys.stderr.write(f"注意：不沿用建替身時核過的固定材料數字（{found}），開跑前照舊重核\n")
@@ -495,10 +495,8 @@ def _reusable(model: ReducedModel, operators: FullOperators, designs: tuple[Surf
                                          surfaces=candidate_surfaces(target, allowed),
                                          impedances_sha256=impedances_sha256(configurations[target]))
                        for target in fixed_targets_of(allowed))
-    manifest = manifest_path(surrogate)
-    if not manifest.is_file():
-        return "替身的 manifest 不在", configurations
-    found = reused_rows(read_record(surrogate.parent / FIXED_CHECKS_FILE), manifest_sha256=manifest_digest(manifest),
+    found = reused_rows(read_record(surrogate.parent / FIXED_CHECKS_FILE),
+                        manifest_sha256=manifest_digest(manifest_path(surrogate)),  # 准用閘門讀過、一定在
                         configuration=configuration, frequencies_hz=axis, rulers=holdout_ruler_values(),
                         operators_digest=operators_digest(operators), code_identity=check_code_identity(),
                         candidates=candidates)

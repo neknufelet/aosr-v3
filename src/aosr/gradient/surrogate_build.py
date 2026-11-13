@@ -235,7 +235,8 @@ class _Run:
 
 @dataclass(frozen=True)
 class _Start:
-    """開跑那一組起跑配置（命令列參數原樣解好）與核對用的構造清單（搜尋的構造清單＋固定材料候選）。"""
+    """開跑那一組起跑配置（命令列參數原樣解好）與核對用的構造清單（搜尋的構造清單＋固定材料候選），以及建模一開頭量的
+    算核對的程式與環境身分（#1142：寫核對紀錄時再量一次，兩次不同＝建模途中程式換過，紀錄不給開跑沿用）。"""
 
     presets: tuple[str | None, ...]
     mount: Mount
@@ -243,6 +244,7 @@ class _Start:
     max_depths: dict[str, float]
     allowed: dict[str, tuple[str, ...]]
     table: tuple[PresetMaterial, ...]
+    code_identity: str
 
 
 @dataclass
@@ -269,6 +271,7 @@ def _open(args: argparse.Namespace) -> _Run:
     from aosr.config.material_gradient import fixed_target_id
     from aosr.gradient.boundary import scheme_patch_keys, surface_ids
     from aosr.gradient.cli import user_entries
+    from aosr.gradient.fixed_candidates import check_code_identity
     from aosr.gradient.fixed_surfaces import (
         expanded_allowed_targets, fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths,
     )
@@ -307,9 +310,11 @@ def _open(args: argparse.Namespace) -> _Run:
         if args.presets is None:
             raise ValueError("准用清單有固定材料時要給開跑那一組起跑配置（--presets，跟開跑同一個寫法）："
                              "裝進格子之前要照它核固定材料")
+        # 程式身分在建模之前量（#1142）：數字是這一個行程開頭載入的程式算的，不是建完那一刻磁碟上的（網頁起的建替身
+        # 跑主 repo 那份程式，建模途中主線可能拉了新提交）；算不出來也在長計算之前就停。
         start = _Start(presets=args.presets, mount=args.mount, fixed_surfaces=parse_fixed_surfaces(args.fixed_surface),
                        max_depths=parse_max_depths(args.max_depth), allowed=parse_allowed_targets(args.allowed),
-                       table=(*materials.presets, *candidates))
+                       table=(*materials.presets, *candidates), code_identity=check_code_identity())
     progress = _Progress(work / PROGRESS_FILE, SurrogateProgress(
         phase="preparing", started_at=started, phase_started_at=started, updated_at=started, workers=workers,
         dense_threads=args.dense_threads, patches=len(scheme_patch_keys(scheme)),
@@ -565,8 +570,9 @@ def _refuse_fixed(job: _Run, extension: _Extension) -> None:
 def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict], prepared: _Prepared,
                   frequencies_hz: Sequence[float]) -> None:
     """核對紀錄寫進 stage/（跟替身一起換名進格子）：哪一組起跑配置、哪一份替身、每個候選的數字；v2（#1142）再記開跑沿用
-    要比的身分：頻率軸（裝進去那份替身自己的）、完整模型指紋、算核對的程式身分、每個候選准用的片、材料身分摘要、
-    完整解次數、核對配置的阻抗摘要。"""
+    要比的身分：頻率軸（裝進去那份替身自己的）、完整模型指紋、算核對的程式身分（建模一開頭量的那一個）、每個候選准用的片、
+    材料身分摘要、完整解次數、核對配置的阻抗摘要。寫之前再量一次程式身分：跟開頭不同（建模途中程式或環境換過，數字是
+    哪一份程式算的說不準）就寫成舊格式 v1——網頁預覽照讀，開跑那一道照舊重核。"""
     from aosr.gradient.fixed_candidates import candidate_material_digest, check_code_identity, holdout_ruler_values
     from aosr.physics.fem_reduced import operators_digest
     from aosr.gradient.surrogate_fixed_checks import (
@@ -586,7 +592,7 @@ def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict]
         schema_version=FIXED_CHECKS_VERSION_V2,
         configuration_sha256=configuration_sha256(configuration), configuration=configuration,
         manifest_sha256=manifest_digest(manifest_path(npz)), frequencies_hz=axis_hex(frequencies_hz),
-        operators_digest=operators_digest(prepared.operators), code_identity=check_code_identity(),
+        operators_digest=operators_digest(prepared.operators), code_identity=start.code_identity,
         checks=tuple(FixedCheckRow(target=target, material_sha256=materials[target], frequency_db=verdict.frequency_db,
                                    band_db=verdict.band_db, frequency_ruler=frequency_ruler, band_ruler=band_ruler,
                                    passed=verdict.passed, surfaces=verdict.surfaces,
@@ -594,6 +600,10 @@ def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict]
                                    full_solves=verdict.report.full_solves,
                                    impedances_sha256=impedances_sha256(prepared.configurations[target]))
                      for target, verdict in sorted(verdicts.items())))
+    if check_code_identity() != start.code_identity:
+        sys.stderr.write("注意：建替身途中算核對的程式或環境換過（例如主線拉了新提交），固定材料核對紀錄寫成舊格式："
+                         "網頁預覽照舊，開跑那一道會照舊重核、不沿用這次的數字\n")
+        record = record.without_reuse_identity()
     write_record(job.stage / FIXED_CHECKS_FILE, record)
 
 

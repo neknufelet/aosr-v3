@@ -106,6 +106,10 @@ def test_build_that_extends_until_the_check_passes_installs_and_the_preview_says
         for index, check in enumerate(judged) for target, item in sorted(check.items())]
     assert [row["full_solves"] for row in rounds][-1] == cast(Record, found["result"])["full_solves"]
     assert all(item["progress_given"] for check in judged for item in check.values())
+    # #1142：算核對的程式身分建模之前量一次、寫紀錄之前再量一次（建模途中程式換過就寫舊格式、不給開跑沿用），兩次相同才是 v2。
+    events = cast(list[str], found["events"])
+    assert events[0] == events[-1] == "identity" and events.count("identity") == 2 and "judge" in events, events
+    assert record["schema_version"] == "aosr.gradient.surrogate_fixed_checks.v2", record
     # #1142：開跑那一段（網頁照產品組參數、命令列 _start 照產品走）沿用建替身時核過的數字，跟移開紀錄真的重核那一次逐位相同。
     reuse, recheck = cast(list[Record], found["starts"])
     assert reuse["exit"] == recheck["exit"] == 0 and reuse["surrogate_is_slot"] is True, (reuse, recheck)
