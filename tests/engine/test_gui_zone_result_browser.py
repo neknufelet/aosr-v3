@@ -58,6 +58,11 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
         page.goto(f"{base}/results/{DESIGN_RUN}", wait_until="domcontentloaded")
         expect(page.locator("#zone-result")).to_be_visible(timeout=180_000)
         expect(page.locator("#zone-rows tr")).to_have_count(1 + 7)
+        # 第一屏（#1134）：標題寫方案名、開頭一句房間摘要、計算時間收在技術細節裡；改善表排在逐區表前面。
+        expect(page.locator("#page-title")).to_have_text(f"計算結果：「{design.scheme.scheme_id}」")
+        expect(page.locator("#room-line")).to_contain_text("公尺；貼了吸音材料：")
+        expect(page.locator("#timings")).to_be_hidden()
+        assert page.locator("#zone-result h3").all_inner_texts()[0].startswith("改善多少")
         expect(page.locator('#zone-rows tr[data-changed="true"]')).to_have_count(1)
         expect(page.locator('#zone-rows tr[data-changed="true"]')).to_contain_text("拆掉這一區加貼的層")
         # 材料先寫名字、參數收在細節（#1119）：改過的那一列名字照實標依參數組名、基準寫原牆；參數沒展開時看不到。

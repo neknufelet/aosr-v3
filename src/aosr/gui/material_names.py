@@ -134,13 +134,18 @@ def _cm(value_m: float) -> str:
 
 def plain_words(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> str:
     """結果頁逐區表先看到的那一句（#1134）：貼在原牆上的一層吸音材（可再隔一層空氣）講成
-    「48K 玻璃棉 10 公分厚，離牆 2 公分」或「…，直接貼牆」；其他排法回空字串，照原本的名字。"""
-    if not isinstance(material, MountedOnWall) or not 1 <= len(material.layers) <= 2:
+    「48K 玻璃棉 10 公分厚，離牆 2 公分」或「…，直接貼牆」；其他排法回空字串，照原本的名字。
+    對得到材料庫固定材料（例如地毯、使用者的廠牌材料）照它的名字；多孔層借不到材料庫名字的也照原名
+    （原名帶流阻，兩種棉才分得出來）。"""
+    if (not isinstance(material, MountedOnWall) or not 1 <= len(material.layers) <= 2
+            or registered_entry(material, library) is not None):
         return ""
     porous, *rest = material.layers
     air = rest[0] if rest else None
     if not isinstance(porous, PorousLayer) or (air is not None and not isinstance(air, AirLayer)):
         return ""
-    name = _porous_name(porous, library) or kind_word(porous.kind)
+    name = _porous_name(porous, library)
+    if name is None:
+        return ""
     gap = air.thickness_m if isinstance(air, AirLayer) else 0.0
     return f"{name} {_cm(porous.thickness_m)}厚，{f'離牆 {_cm(gap)}（中間是空氣）' if gap > 0 else '直接貼牆'}"

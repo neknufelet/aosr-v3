@@ -161,8 +161,8 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     impedance = rounded_number(original_x0().impedance_pa_s_m)
     assert a.design == f"多孔層 50 mm（流阻 19,100 Pa·s/m²）（依參數組名），貼在原牆上（原牆：固定阻抗 {impedance} Pa·s/m）"
     assert a.baseline == f"原牆（固定阻抗 {impedance} Pa·s/m）"
-    # 白話一句（#1134）：貼在原牆上的一層吸音材直接說幾公分厚、直接貼牆或離牆多遠；原名併進「參數」。
-    assert a.design_plain == "多孔層 5 公分厚，直接貼牆"
+    # 白話一句（#1134）只給借得到材料庫名字的吸音材；這一區對不到（原名帶流阻才分得出兩種棉），照原名。
+    assert a.design_plain == ""
     assert a.design_detail.startswith("貼在原牆上的構造；第 1 層：多孔層；層厚度 0.05 m")
     assert a.baseline_detail == f"固定阻抗；阻抗 {impedance} Pa·s/m"
     assert (b.mode, b.changed, b.baseline, b.baseline_detail, b.baseline_source) == (
