@@ -1,0 +1,4 @@
+條①、[[by_design]]：名單上的檔不再引那個死路徑也紅。
+
+迷你卡登記 notes/allowed.md 與 notes/dropped.md 都引 docs/kept-out-on-purpose.md，但 notes/dropped.md 那一行已經拿掉了。
+資料要跟樹對得上：名單不跟著改，它就在等下一個人往那份檔裡寫同一個死路徑。

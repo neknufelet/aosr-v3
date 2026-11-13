@@ -1,0 +1,4 @@
+條①、[[by_design]]：登記過的死路徑，只准名單上的檔引它。
+
+迷你卡頂層的 [[by_design]] 登記 docs/kept-out-on-purpose.md 只准 notes/allowed.md 引；notes/allowed.md 引了（不咬），
+notes/other.md 也引了——它不在名單上，所以紅。要證明的是：登記一次不等於到處都能寫。
