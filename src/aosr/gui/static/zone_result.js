@@ -47,21 +47,33 @@ function zoneRowsTable(rows) {
   rows.forEach((row, index) => {
     const line = element.rows[index + 1];
     line.dataset.changed = String(row.changed);
-    materialCell(line.cells[4], row.design, row.design_facts, row.design_detail, "");
+    // 有白話一句就先寫白話，原本的名字（含原牆）併進「參數」（#1134）。
+    materialCell(line.cells[4], row.design_plain || row.design, row.design_facts,
+      row.design_plain ? `${row.design}\n${row.design_detail}` : row.design_detail, "");
     materialCell(line.cells[5], row.baseline, row.baseline_facts, row.baseline_detail, `（${row.baseline_source}）`);
   });
   return element;
 }
 function zoneImprovementTable(improvement) {
   const lines = [...improvement.rows, ...(improvement.total ? [improvement.total] : [])];
-  const element = tableElement(["類別", "原牆基準", "設計", "差（越低越好）"],
+  const element = tableElement(["類別", "原牆基準（扣分）", "這一套（扣分）", "差多少（扣分越低越好，綠色＝改善）"],
     lines.map((row) => [row.category, row.baseline, row.design, row.change]));
   lines.forEach((row, index) => { element.rows[index + 1].cells[3].dataset.verdict = row.verdict; });
   if (improvement.total) element.rows[lines.length].classList.add("zone-total");
   return element;
 }
+// 「這一間挑材料」只給存著的方案（第三階段頁只收存檔裡的方案）；讀不到清單就不給，不猜（#1134）。
+async function showMaterialsLink() {
+  try {
+    const listing = await (await fetch("/api/schemes")).json();
+    if (!listing.schemes.includes(view.scheme_id)) return;
+    $("next-materials").href = `/gradient?scheme=${encodeURIComponent(view.scheme_id)}`;
+    $("next-materials").hidden = false;
+  } catch { /* 清單讀不到：不給這個連結 */ }
+}
 function drawZoneResult(runId, data) {
   $("zone-result").hidden = false;
+  showMaterialsLink();
   $("zone-notes").replaceChildren(...data.notes.map((text) => node("p", text)));
   $("zone-rows").replaceChildren(zoneRowsTable(data.rows));
   $("zone-state").textContent = data.state_text;

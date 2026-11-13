@@ -161,6 +161,8 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     impedance = rounded_number(original_x0().impedance_pa_s_m)
     assert a.design == f"多孔層 50 mm（流阻 19,100 Pa·s/m²）（依參數組名），貼在原牆上（原牆：固定阻抗 {impedance} Pa·s/m）"
     assert a.baseline == f"原牆（固定阻抗 {impedance} Pa·s/m）"
+    # 白話一句（#1134）：貼在原牆上的一層吸音材直接說幾公分厚、直接貼牆或離牆多遠；原名併進「參數」。
+    assert a.design_plain == "多孔層 5 公分厚，直接貼牆"
     assert a.design_detail.startswith("貼在原牆上的構造；第 1 層：多孔層；層厚度 0.05 m")
     assert a.baseline_detail == f"固定阻抗；阻抗 {impedance} Pa·s/m"
     assert (b.mode, b.changed, b.baseline, b.baseline_detail, b.baseline_source) == (
@@ -172,6 +174,7 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     keep = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"b": ZoneDesign(mode="keep_original")}})
     kept = {row.zone: row for row in zone_rows(baseline, keep, design) if row.wall == "前牆"}
     assert kept["b"].design == f"原牆（固定阻抗 {impedance} Pa·s/m）" and not b.design.startswith("原牆")
+    assert kept["b"].design_plain == "" and b.design_plain == ""
     stale = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"gone": ZoneDesign(mode="search")}})
     assert {row.mode for row in zone_rows(baseline, stale, design)} == {"—"}
 

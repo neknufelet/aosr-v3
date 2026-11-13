@@ -125,3 +125,22 @@ def zone_material_words(material: SurfaceMaterial, library: Sequence[LibraryEntr
 def original_wall_words(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> str:
     """確定是原牆的地方（原牆基準欄、保留原牆的區）：原牆（固定阻抗 123,480 Pa·s/m）。"""
     return f"原牆（{zone_material_words(material, library)}）"
+
+
+def _cm(value_m: float) -> str:
+    """公分、最多一位小數（0.01999999999999999 公尺 → 2 公分）；只給人看。"""
+    return f"{float(f'{value_m * 100:.1f}'):g} 公分"
+
+
+def plain_words(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> str:
+    """結果頁逐區表先看到的那一句（#1134）：貼在原牆上的一層吸音材（可再隔一層空氣）講成
+    「48K 玻璃棉 10 公分厚，離牆 2 公分」或「…，直接貼牆」；其他排法回空字串，照原本的名字。"""
+    if not isinstance(material, MountedOnWall) or not 1 <= len(material.layers) <= 2:
+        return ""
+    porous, *rest = material.layers
+    air = rest[0] if rest else None
+    if not isinstance(porous, PorousLayer) or (air is not None and not isinstance(air, AirLayer)):
+        return ""
+    name = _porous_name(porous, library) or kind_word(porous.kind)
+    gap = air.thickness_m if isinstance(air, AirLayer) else 0.0
+    return f"{name} {_cm(porous.thickness_m)}厚，{f'離牆 {_cm(gap)}（中間是空氣）' if gap > 0 else '直接貼牆'}"
