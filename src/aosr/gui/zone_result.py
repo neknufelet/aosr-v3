@@ -195,8 +195,9 @@ def derive_baseline(design: Scheme, original: OriginalWalls | None = None) -> Ba
 
 
 def replaced_unseen(scheme: Scheme, settings: DesignSettings | None, library: Sequence[LibraryEntry]) -> tuple[str, ...]:
-    """沒指原方案時結果頁會當成沒動、其實是整個換成材料庫材料的區（#1128）：做法是固定、材料不是貼在原牆上的層、
-    而且逐位等於材料庫的一筆固定材料（使用者從選單挑的，不是方案原本的牆）。每一區一句「左牆 z1「材料名」」；
+    """沒指原方案時結果頁會當成沒動、其實是整個換成材料庫材料的區（#1128）：材料不是貼在原牆上的層、而且逐位等於
+    材料庫的一筆固定材料（看起來是從材料庫選上去的，不是方案原本的牆）。固定區是使用者選的；交給搜尋的區是搜尋整塊
+    換成固定材料候選（存成的方案那一區直接放那份材料）；保留原牆的區不算。每一區一句「左牆 z1「材料名」」；
     指了原方案、或不是分區方案都是空的。只看方案與設計設定，不算物理。"""
     if (settings is not None and settings.original_scheme_id is not None) or scheme.scene.surface_zones_by_wall is None:
         return ()
@@ -204,21 +205,21 @@ def replaced_unseen(scheme: Scheme, settings: DesignSettings | None, library: Se
     found: list[str] = []
     for row in derive_baseline(scheme).zones:
         entry = registered_entry(row.design, library) if row.source == "unchanged" else None
-        if entry is not None and modes.get(row.wall, {}).get(row.zone_id) == "fixed":
+        if entry is not None and modes.get(row.wall, {}).get(row.zone_id) != "keep_original":
             found.append(f"{names.get(row.wall, row.wall)} {_zone_name(row.zone_id)}「{entry.label}」")
     return tuple(found)
 
 
 def replaced_unseen_text(zones: Sequence[str]) -> str:
     """:func:`replaced_unseen` 那幾區的一句提醒（第三階段頁）：結果頁會當成沒動、怎麼補。"""
-    return (f"設計設定沒有指原方案：{'、'.join(zones)} 整個換成了材料庫的材料（不是貼在原牆上的層），結果頁找不到這幾區"
+    return (f"設計設定沒有指原方案：{'、'.join(zones)} 跟材料庫的材料逐位相同（看起來是整個換上去的，不是貼在原牆上的層），結果頁找不到這幾區"
             "原本的牆，會當成沒動、改善算不進來。要算進來，到方案輸入頁替這一份（搜尋存成的方案也一樣）在設計設定指原方案"
             "（這間房還沒換材料的那一份），結果頁就會照它推原牆基準。")
 
 
 def replaced_unseen_note(zones: Sequence[str]) -> str:
     """結果頁那一句（接在「沒有加貼層的區當成沒動」那條通則後面，點名這一份是哪幾區）。"""
-    return (f"這一份照上面那條當成沒動的有：{'、'.join(zones)}——整個換成了材料庫的材料，改善沒算進來；"
+    return (f"這一份照上面那條當成沒動的有：{'、'.join(zones)}——跟材料庫的材料逐位相同（看起來是整個換上去的），改善沒算進來；"
             "在方案輸入頁替這一份的設計設定指原方案（這間房還沒換材料的那一份）就算得進來。")
 
 

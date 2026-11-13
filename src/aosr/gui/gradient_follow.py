@@ -109,11 +109,13 @@ def _target_label(target: str, labels: Mapping[str, str]) -> str:
 
 
 def template_tries(folder: Path, labels: Mapping[str, str]) -> list[dict[str, object]]:
-    """換樣板每一輪試過什麼（#1128）：每個（區, 換成什麼）的快篩合分、那一輪起點（現狀）的合分、哪一個換上了。
+    """換樣板每一輪試過什麼（#1128）：每個（區, 換成什麼）的快篩合分、進了重調的重調後合分、那一輪現狀、哪一個換上了、
+    這一輪的停止原因（沒開的輪只有決定列：沒有候選、照停止原因講）。
 
     照 ``templates.jsonl`` 的原始文字讀（網頁行程不載入物理，同 :func:`descent_steps`）：``quick_score`` 列的 ``value``
-    是搜尋自己的梯度目標合分（越小越好），跟結果頁的總分不是同一把尺；現狀是決定列的 ``baseline_value``。
-    讀不懂的列不算；還沒有決定列的那一輪不列（接續時那半輪會丟掉重跑）。沒有帳本回空的。"""
+    是搜尋自己的梯度目標合分（越小越好、沒重調的粗篩），跟結果頁的總分不是同一把尺；現狀是決定列的 ``baseline_value``
+    （起點配置重調後），換不換照重調後（決定列 ``outcomes`` 的 ``value``）跟它比。讀不懂的列不算；還沒有決定列的那一輪
+    不列（接續時那半輪會丟掉重跑）。沒有帳本回空的。"""
     path = folder / TEMPLATES_FILE
     if not path.is_file():
         return []
@@ -137,12 +139,17 @@ def template_tries(folder: Path, labels: Mapping[str, str]) -> list[dict[str, ob
                                                      "fixed": target.startswith(FIXED_TARGET_PREFIX), "value": float(value)})
             decision = row.get("decision")
             if row.get("phase") == "template_decision" and isinstance(decision, dict):
-                accepted = decision.get("accepted")
-                baseline = decision.get("baseline_value")
-                tries = [{**item, "chosen": f"{item['surface']}{CANDIDATE_SEPARATOR}{item['target']}" == accepted}
-                         for item in rounds.pop(index, [])]
+                accepted, baseline, reason = decision.get("accepted"), decision.get("baseline_value"), row.get("stop_reason")
+                retuned = {item["candidate"]: float(item["value"]) for item in decision.get("outcomes") or ()
+                           if isinstance(item, dict) and isinstance(item.get("candidate"), str)
+                           and isinstance(item.get("value"), (int, float))}
+                tries = []
+                for item in rounds.pop(index, []):
+                    name = f"{item['surface']}{CANDIDATE_SEPARATOR}{item['target']}"
+                    tries.append({**item, "retuned": retuned.get(name), "chosen": name == accepted})
                 found.append({"round": index + 1, "baseline": float(baseline) if isinstance(baseline, (int, float)) else None,
-                              "accepted": accepted if isinstance(accepted, str) else None, "tries": tries})
+                              "accepted": accepted if isinstance(accepted, str) else None,
+                              "stop_reason": reason if isinstance(reason, str) else None, "tries": tries})
     return found
 
 
@@ -196,12 +203,15 @@ class GradientFollow:
         rigid = isinstance(request, dict) and request.get("mount") == MOUNT_RIGID
         folder = self._job_dir(job_id)
         design: DesignSettings | None = None
+        # 存成方案之後照存成的那一份（搜尋整塊換上固定材料的區只在那一份裡）與它現在的設計設定。
+        scheme_path = (folder / "scheme.json" if adoption is None
+                       else self.gradient.data_dir / "schemes" / f"{adoption.scheme_id}.json")
         try:
             if adoption is not None:
                 design = read_design(self.gradient.data_dir, adoption.scheme_id)
             elif (folder / "design.json").is_file():
                 design = DesignSettings.model_validate_json((folder / "design.json").read_text(encoding="utf-8"))
-            scheme = Scheme.model_validate_json((folder / "scheme.json").read_text(encoding="utf-8"))
+            scheme = Scheme.model_validate_json(scheme_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return RIGID_BASELINE_WARNING if rigid and (design is None or design.original_scheme_id is None) else None
         return baseline_warning(scheme, design, rigid=rigid, library=self._library())

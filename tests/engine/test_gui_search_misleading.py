@@ -51,7 +51,9 @@ def test_only_fixed_zones_swapped_for_a_library_material_are_named() -> None:
     expected = (f"{wall_words(scheme)['x0']} a「{ENTRY.label}」",)
     assert replaced_unseen(scheme, design, library) == expected
     assert replaced_unseen(scheme, None, library) == expected  # 沒有設計設定＝每一區都是固定
-    assert replaced_unseen(*_swapped("search"), library) == ()
+    # 交給搜尋的區：搜尋整塊換上固定材料候選，存成的方案那一區直接放那份材料，一樣點名；保留原牆的區不點。
+    assert replaced_unseen(*_swapped("search"), library) == expected
+    assert replaced_unseen(*_swapped("keep_original"), library) == ()
     assert replaced_unseen(scheme, design.model_copy(update={"original_scheme_id": "room"}), library) == ()
     assert replaced_unseen(scheme, design, ()) == ()  # 材料庫沒有這一筆：看不出是換上去的
 
@@ -97,7 +99,9 @@ def test_preview_and_job_detail_warn_before_the_run_and_stop_once_the_adopted_de
     preview = jobs.preview(NAME, GradientRequest())
     warning = cast(str, preview["baseline_warning"])
     assert warning.startswith("設計設定沒有指原方案") and f"「{ENTRY.label}」" in warning and "r0_c1" in warning
-    job_id = _done_job(data_dir, launcher, _exported())
+    exported = json.loads((data_dir / "schemes" / f"{NAME}.json").read_text(encoding="utf-8"))
+    exported["scheme_id"] = f"{NAME}-trial-gradient-0123abcd"
+    job_id = _done_job(data_dir, launcher, exported)
     follow = _follow(data_dir, launcher)
     assert follow.detail(job_id)["baseline_warning"] == warning
     adopted = cast(dict[str, object], follow.adopt(job_id)["adopted"])
@@ -110,6 +114,23 @@ def test_preview_and_job_detail_warn_before_the_run_and_stop_once_the_adopted_de
     scheme = Scheme.model_validate_json((data_dir / "schemes" / f"{name}.json").read_text(encoding="utf-8"))
     write_design(data_dir, design.model_copy(update={"original_scheme_id": "room-original"}), scheme)
     assert follow.detail(job_id)["baseline_warning"] is None
+
+
+def test_a_search_zone_the_search_swapped_for_a_fixed_material_is_named_after_adopting(tmp_path: Path) -> None:
+    """抓審查那一條：搜尋整塊換上固定材料候選，存成的方案那一區直接放那份材料（不是貼牆），結果頁會當成沒動；
+    這一跑的細節要照存成的那一份點名，不是照開跑時的方案（那時那一區還是原牆）。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    exported = _exported()
+    walls = cast("dict[str, list[dict[str, object]]]", cast("dict[str, object]", exported["scene"])["surface_zones_by_wall"])
+    zone = next(item for item in walls["x0"] if item["id"] == "r0_c0")
+    zone["material"] = ENTRY.surface_material().model_dump(mode="json")
+    job_id = _done_job(data_dir, launcher, exported)
+    follow = _follow(data_dir, launcher)
+    assert follow.detail(job_id)["baseline_warning"] is None
+    follow.adopt(job_id)
+    warning = cast(str, follow.detail(job_id)["baseline_warning"])
+    assert "r0_c0" in warning and f"「{ENTRY.label}」" in warning
 
 
 def test_adopt_carries_the_original_scheme_the_design_points_at(tmp_path: Path) -> None:
@@ -140,22 +161,29 @@ def test_template_tries_lists_every_quick_score_with_the_round_baseline_and_what
              _row("quick_score", 0, candidate="xL->none", value=4.1153),
              _row("quick_score", 0, candidate="x0@z1->glass_wool_48k", value=2.9),
              "not json",
-             _row("template_decision", 0, value=2.9358, decision={"baseline_value": 2.9358, "accepted": None}),
+             _row("template_decision", 0, value=2.9358, stop_reason="沒有超過門檻",
+                  decision={"baseline_value": 2.9358, "accepted": None,
+                            "outcomes": [{"candidate": "x0@z1->glass_wool_48k", "value": 2.95}]}),
              _row("quick_score", 1, candidate="xL->none", value=2.0),
              _row("template_decision", 1, value=2.0, decision={"baseline_value": 2.9358, "accepted": "xL->none"}),
-             _row("quick_score", 2, candidate="xL->none", value=1.0)]
+             _row("template_decision", 2, value=2.0, stop_reason="換樣板求值到上限",
+                  decision={"baseline_value": None, "accepted": None}),
+             _row("quick_score", 3, candidate="xL->none", value=1.0)]
     (tmp_path / folder_files.TEMPLATES_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
     labels = {"demo_gw49": "實測 49 mm", "glass_wool_48k_50mm_gap50": "48K 50＋50", "glass_wool_48k": "48K（可調厚度與空腔）"}
-    first, second = template_tries(tmp_path, labels)
+    first, second, third = template_tries(tmp_path, labels)
     assert first["round"] == 1 and first["baseline"] == 2.9358 and first["accepted"] is None
-    assert [(item["surface"], item["label"], item["fixed"], item["value"], item["chosen"])
+    assert first["stop_reason"] == "沒有超過門檻"
+    assert [(item["surface"], item["label"], item["fixed"], item["value"], item["retuned"], item["chosen"])
             for item in cast(list[dict[str, object]], first["tries"])] == [
-        ("xL", "實測 49 mm（固定，整塊選或不選）", True, 3.7413, False),
-        ("xL", "48K 50＋50（固定，整塊選或不選）", True, 3.7415, False),
-        ("xL", "不貼（保留原牆）", False, 4.1153, False),
-        ("x0@z1", "48K（可調厚度與空腔）", False, 2.9, False)]
+        ("xL", "實測 49 mm（固定，整塊選或不選）", True, 3.7413, None, False),
+        ("xL", "48K 50＋50（固定，整塊選或不選）", True, 3.7415, None, False),
+        ("xL", "不貼（保留原牆）", False, 4.1153, None, False),
+        ("x0@z1", "48K（可調厚度與空腔）", False, 2.9, 2.95, False)]  # 進了重調：換不換照重調後
     assert second["accepted"] == "xL->none"
     assert [item["chosen"] for item in cast(list[dict[str, object]], second["tries"])] == [True]
+    # 沒開的輪（只有決定列）：沒有候選、照它自己的停止原因講，不說成「沒有超過門檻」。
+    assert third == {"round": 3, "baseline": None, "accepted": None, "stop_reason": "換樣板求值到上限", "tries": []}
     assert template_tries(tmp_path / "missing", labels) == []
 
 

@@ -526,9 +526,11 @@ function showJobDepths(plan, names) {
 }
 
 // 換樣板試過、沒選的（#1128）：固定材料候選一句寫在外面（整塊試過、差多少），每一輪全部候選收在表裡。
-// 快篩合分是搜尋自己的梯度目標（越小越好），跟結果頁的總分不是同一把尺，畫面照講。
-const TRY_SCALE_NOTE = "快篩合分是搜尋自己的尺（越小越好），跟結果頁的總分不是同一把尺，只能跟同一輪的現狀比。";
+// 快篩合分是搜尋自己的梯度目標（越小越好），跟結果頁的總分不是同一把尺；快篩沒重調，換不換照重調後跟現狀比。
+const TRY_SCALE_NOTE = "合分是搜尋自己的尺（越小越好），跟結果頁的總分不是同一把尺。快篩是換上去先算一次的粗篩；" +
+  "快篩排前面的幾個再重調空腔，換不換是拿重調後跟這一輪現狀（起點配置重調後）比、要好過改善門檻才換。";
 function score(value) { return value === null || value === undefined ? "—" : value.toFixed(4); }
+function signed(value) { return `${value >= 0 ? "+" : ""}${value.toFixed(4)}`; }
 function showTemplateTries(rounds, names) {
   const box = byId("job-template-tries");
   box.hidden = !rounds.length;
@@ -539,20 +541,28 @@ function showTemplateTries(rounds, names) {
     const fixed = round.tries.filter((item) => item.fixed);
     if (!fixed.length) continue;
     const tried = fixed.map((item) => `${place(item.surface)}整塊換成「${item.label}」快篩 ${score(item.value)}` +
-      (item.chosen ? "（換上了）" : "（沒選）")).join("；");
+      (item.retuned !== null ? `、重調後 ${score(item.retuned)}` : "") + (item.chosen ? "（換上了）" : "（沒選）")).join("；");
     lines.push(el("p", {class: "tried-fixed", text: `換樣板第 ${round.round} 輪試過固定材料：${tried}；這一輪現狀 ${score(round.baseline)}。`}));
   }
   const tables = rounds.map((round) => {
-    const head = el("tr", {}, ...["牆／區", "換成", "快篩合分", "比現狀", "結果"].map((text) => el("th", {text})));
-    const body = el("tbody", {}, ...round.tries.map((item) => el("tr", {class: item.fixed ? "tried-fixed-row" : null},
-      el("td", {text: place(item.surface)}), el("td", {text: item.label}), el("td", {text: score(item.value)}),
-      el("td", {text: round.baseline === null ? "—" : `${item.value - round.baseline >= 0 ? "+" : ""}${(item.value - round.baseline).toFixed(4)}`}),
-      el("td", {text: item.chosen ? "換上了" : "沒選"}))));
-    return el("div", {}, el("p", {text: `第 ${round.round} 輪：現狀 ${score(round.baseline)}；` +
-      (round.accepted ? "換上了一個候選" : "都沒換（沒有超過改善門檻）")}), el("table", {}, el("thead", {}, head), body));
+    const outcome = round.accepted ? "換上了一個候選" : (round.stop_reason ? `都沒換：${round.stop_reason}` : "都沒換");
+    if (!round.tries.length) {
+      return el("p", {text: `第 ${round.round} 輪沒開` + (round.stop_reason ? `：${round.stop_reason}` : "")});
+    }
+    const head = el("tr", {}, ...["牆／區", "換成", "快篩合分", "重調後", "比現狀", "結果"].map((text) => el("th", {text})));
+    const body = el("tbody", {}, ...round.tries.map((item) => {
+      const value = item.retuned !== null ? item.retuned : item.value;
+      return el("tr", {class: item.fixed ? "tried-fixed-row" : null},
+        el("td", {text: place(item.surface)}), el("td", {text: item.label}), el("td", {text: score(item.value)}),
+        el("td", {text: item.retuned !== null ? score(item.retuned) : "沒進重調"}),
+        el("td", {text: round.baseline === null ? "—" : signed(value - round.baseline)}),
+        el("td", {text: item.chosen ? "換上了" : "沒選"}));
+    }));
+    return el("div", {}, el("p", {text: `第 ${round.round} 輪：現狀 ${score(round.baseline)}；${outcome}`}),
+      el("table", {}, el("thead", {}, head), body));
   });
   box.replaceChildren(el("h3", {text: "換樣板試過什麼"}), ...lines, el("p", {class: "hint", text: TRY_SCALE_NOTE}),
-    el("details", {}, el("summary", {text: "每一輪全部候選的快篩合分"}), ...tables));
+    el("details", {}, el("summary", {text: "每一輪全部候選的合分"}), ...tables));
 }
 
 function showJob(job, detail, detailError) {
