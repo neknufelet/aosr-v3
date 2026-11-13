@@ -176,8 +176,45 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
         expect(page.locator("#messages")).to_have_text("寬 Ly（公尺）：空著沒填")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
         assert floor.input_value() == "2000"
+        # 換過名就沒有擱著的了：再點進來、再離開，不准又整排重畫一次。
+        again = floor.element_handle()
+        floor.click()
+        page.locator("#check").click()
+        assert again.evaluate("node => node.isConnected")
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
+
+
+def test_a_click_on_a_wall_label_while_a_rename_waits_lands_in_its_box(tmp_path: Path, browser: Browser) -> None:
+    # 複查實測：換名擱著時點表單裡另一格的標籤字，以前在按下那一刻就重畫，標籤被換掉、那一下沒點到，
+    # 焦點落到頁面本身、接著打的字落空。現在滑鼠按著不重畫，放開、點完才看游標在哪。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        held = _late_rename(page)
+        page.locator("#wall-floor").focus()
+        _arrive(page, held)
+        page.locator("#wall-ceiling").locator("xpath=..").click(position={"x": 4, "y": 4})
+        assert page.evaluate("() => document.activeElement.id") == "wall-ceiling"
+        expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        # 點表單外不能聚焦的地方（區塊標題）離開：放開之後換名，頁面不出錯。
+        page.locator("h2", has_text="房間與材料").click()
+        expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
+        _assert_quiet(watched)
+
+
+def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_path: Path, browser: Browser) -> None:
+    # 複查實測：600 寬時換名讓牆名變長、折行，下面的格子往下移；在按下與放開之間重畫，那一下就按到別處。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=600) as watched:
+        page = watched.page
+        expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        held = _late_rename(page)
+        page.locator("#wall-floor").focus()
+        _arrive(page, held)
+        page.locator("#use-scattering").click()
+        expect(page.locator("#use-scattering")).to_be_checked()
+        expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
+        _assert_quiet(watched)
 
 
 def test_a_late_rename_never_swaps_the_elevation_box_being_typed_in(tmp_path: Path, browser: Browser) -> None:

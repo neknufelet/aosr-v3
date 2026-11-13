@@ -233,8 +233,8 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         before = {field: page.locator(field).input_value() for field in ("#room-Ly", "#wall-floor")}
         _blank_and_press(page, "#save-as", tuple(before), trail)
         below = page.locator("#messages").inner_text()
-        assert below.split("\n") == ["寬 Ly（公尺）、地板阻抗：空著沒填"], trail
-        assert note.inner_text() == f"沒有另存：{below}", trail
+        assert below.split("\n") == ["寬 Ly（公尺）、地板阻抗：空著沒填"], f"{trail}"
+        assert note.inner_text() == f"沒有另存：{below}", f"{trail}"
         # 按鈕旁邊那句不用捲動就看得到：整句落在視窗裡（bounding_box 以目前視窗的左上角為原點）。
         hint, viewport = _box(page, "#save-as-note"), page.viewport_size
         assert note.is_visible() and viewport is not None
@@ -249,8 +249,8 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         page.locator("#save-as").click()
         # 存好了、沒存成（「沒有另存：…」）都寫在旁邊：等旁邊有字就是有結局，沒存成立刻紅、印出原因，不空等逾時。
         page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
-        assert note.inner_text() == "「next」：方案已儲存" and note.get_attribute("class") == "ok", trail
-        assert page.locator("#save-id").input_value() == "next", trail
+        assert note.inner_text() == "「next」：方案已儲存" and note.get_attribute("class") == "ok", f"{trail}"
+        assert page.locator("#save-id").input_value() == "next", f"{trail}"
         assert (tmp_path / "schemes" / "next.json").exists()
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
