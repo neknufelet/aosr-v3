@@ -85,8 +85,9 @@ EXEMPTION_DATE_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # 每一筆必帶非空的 reason、不准帶 expires；其餘欄位各卡自己定、各支檢查自己讀（見 by_design_entries）。
 BY_DESIGN_FIELD = "by_design"
 BY_DESIGN_REASON_KEY = "reason"
-# 各卡欄位的型別只認這三種：非空字串、正整數（true／false 不算）、非空字串的清單。
-BY_DESIGN_KINDS = ("text", "count", "texts")
+# 各卡欄位的型別只認這四種：非空字串、正整數（true／false 不算）、非空字串的清單、
+# 以及「名字→正整數」的非空表（一個檔裡哪幾個符號各准幾處，例如 style-guard 的 print）。
+BY_DESIGN_KINDS = ("text", "count", "texts", "counts")
 
 # 執行者白名單：只認版控裡的機器。人、審查員、健檢報告、本機 hook 都不算。
 ENFORCERS = ("github-actions-job", "pytest-meta-test")
@@ -533,6 +534,12 @@ def _by_design_value_problem(value: object, kind: str) -> str:
     if kind == "texts":
         ok = isinstance(value, list) and bool(value) and all(isinstance(x, str) and x.strip() for x in value)
         return "" if ok else "非空字串的清單"
+    if kind == "counts":
+        ok = isinstance(value, dict) and bool(value) and all(
+            isinstance(name, str) and name.strip() and isinstance(n, int) and not isinstance(n, bool) and n > 0
+            for name, n in value.items()
+        )
+        return "" if ok else "「名字→正整數」的非空表"
     return f"不認識的型別 {kind!r}（只認 {list(BY_DESIGN_KINDS)}）"
 
 

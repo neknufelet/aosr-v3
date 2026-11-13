@@ -1,0 +1,3 @@
+第①條、[[by_design]]：登記的函式多一處 print 就紅。
+
+迷你卡登記 cli_tool.py 的 main 准兩處 print，main 實際有三處——多出來那一處沒人登記過，紅。

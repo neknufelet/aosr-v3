@@ -11,8 +11,14 @@ import pytest
 from governance.exit_codes import ToolBroken
 from governance.loader import by_design_entries, by_design_problems, settings_exemptions
 
-KEYS = {"path": "text", "writes": "count", "cited_in": "texts"}
-GOOD = {"path": "a.md", "writes": 2, "cited_in": ["b.md"], "reason": "本來就該這樣：假的理由。"}
+KEYS = {"path": "text", "writes": "count", "cited_in": "texts", "prints": "counts"}
+GOOD = {
+    "path": "a.md",
+    "writes": 2,
+    "cited_in": ["b.md"],
+    "prints": {"main": 3, "Cli.show": 1},
+    "reason": "本來就該這樣：假的理由。",
+}
 
 
 def card(*entries: dict[str, object]) -> dict[str, object]:
@@ -57,6 +63,10 @@ def test_shared_rules_block_both_loader_and_check(broken: dict[str, object], sai
         ({**GOOD, "path": ""}, "path 必須是非空字串"),
         ({**GOOD, "cited_in": []}, "cited_in 必須是非空字串的清單"),
         ({**GOOD, "line": 12}, "不認識的鍵"),
+        ({**GOOD, "prints": {}}, "prints 必須是「名字→正整數」的非空表"),
+        ({**GOOD, "prints": {"main": 0}}, "prints 必須是「名字→正整數」的非空表"),
+        ({**GOOD, "prints": {"main": "3"}}, "prints 必須是「名字→正整數」的非空表"),
+        ({**GOOD, "prints": ["main"]}, "prints 必須是「名字→正整數」的非空表"),
     ],
 )
 def test_card_specific_fields_are_checked_by_the_reader(broken: dict[str, object], said: str) -> None:
