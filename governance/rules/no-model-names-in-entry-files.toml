@@ -52,6 +52,7 @@ scope = [
 check = "governance/checks/no_model_names_in_entry_files.py"
 negative_fixture = "governance/fixtures/no-model-names-in-entry-files"
 control_fixture = "governance/fixtures/no-model-names-in-entry-files/control"
+tool_broken_fixture = "governance/fixtures/no-model-names-in-entry-files-tool-broken"
 declared_level = "blocking"
 enforcer = "github-actions-job"
 job = "verify"
