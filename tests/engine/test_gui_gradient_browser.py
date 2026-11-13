@@ -156,7 +156,7 @@ def test_no_surrogate_builds_one_with_the_chosen_budget_and_can_stop(browser: Br
 
 
 def _progress(now: float) -> SurrogateProgress:
-    """建模第二輪做完的進度（同建替身考卷那一份的數字）：推估量得到速度。"""
+    """建模第二輪做完的進度（數字同建替身考卷那一份，只有完整解上限換成這一份另填的 1500）：推估量得到速度。"""
     return SurrogateProgress.model_validate({
         "phase": "building", "started_at": now - 120.0, "phase_started_at": now - 110.0, "updated_at": now - 5.0,
         "workers": 4, "patches": 7, "dofs": 3389, "axis_points": 94, "training_sets": 41, "holdout_sets": 9,
