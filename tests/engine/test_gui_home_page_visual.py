@@ -9,6 +9,7 @@ import json
 import re
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page
 
@@ -172,9 +173,37 @@ def test_rows_and_legend_use_chinese_names_from_label_table(tmp_path: Path, brow
         _assert_quiet(watched)
 
 
-def _blank_and_press(page: Page, button: str, fields: tuple[str, ...]) -> None:
+# 考卷紅的時候畫面上那幾格各是什麼：訊息列、另存旁邊那句、方案代號、兩格被清空又填回的值、游標在哪一格。
+SHOWN_JS = """() => Object.fromEntries([['messages', 'textContent'], ['save-as-note', 'textContent'], ['save-id', 'value'],
+  ['room-Ly', 'value'], ['wall-floor', 'value']].map(([id, key]) => [id, document.getElementById(id)?.[key]])
+  .concat([['focus', document.activeElement?.id || document.activeElement?.tagName]]))"""
+
+
+class _Trail:
+    """這一頁的 /api/ 請求照送出、回來的先後記下，考卷紅的時候連畫面上那幾格一起印（#1145）。
+
+    兩種偶發紅都是「哪一份回覆比哪一下按鍵早到」的先後問題；只印「等 30 秒逾時」看不出是哪一種。
+    """
+
+    def __init__(self, page: Page) -> None:
+        self.page, self.lines = page, list[str]()
+        page.on("request", lambda request: self._note(f"送 {request.method}", request.url))
+        page.on("response", lambda response: self._note(f"回 {response.status} {response.request.method}", response.url))
+
+    def _note(self, head: str, url: str) -> None:
+        if (path := urlsplit(url).path).startswith("/api/"):
+            self.lines.append(f"{head} {path}")
+
+    def __str__(self) -> str:
+        return f"畫面：{self.page.evaluate(SHOWN_JS)}\n請求先後：\n" + "\n".join(self.lines)
+
+
+def _blank_and_press(page: Page, button: str, fields: tuple[str, ...], trail: object = "") -> None:
     for field in fields:
         page.locator(field).fill("")
+    # 填了要真的留在格子裡：#1145 那次是按鍵落到頁面本身、格子沒清到，到後面才以別的樣子紅。
+    # 全部填完才一起讀：每填一格就讀一次會在兩格之間多一趟來回，正好把那段先後蓋掉、病就看不到了。
+    assert all(page.locator(field).input_value() == "" for field in fields), f"清空了沒留住\n{trail}"
     page.locator("#messages").evaluate("node => { node.textContent = ''; }")
     page.locator(button).click()
     page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
@@ -185,6 +214,7 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
     # 空名字的提示還寫「新代號」，跟這一列的「新名字」對不上。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        trail = _Trail(page)
         page.locator("#plan-legend li").first.wait_for()
         note, button = page.locator("#save-as-note"), _box(page, "#save-as")
         page.locator("#save-as").click()
@@ -201,10 +231,10 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         assert note.inner_text() == ""
         # 檢查沒過：問題（伺服器寫好的白話，同一句只一行、列出哪幾格）寫在按鈕旁邊，也寫在底下的訊息列。
         before = {field: page.locator(field).input_value() for field in ("#room-Ly", "#wall-floor")}
-        _blank_and_press(page, "#save-as", tuple(before))
+        _blank_and_press(page, "#save-as", tuple(before), trail)
         below = page.locator("#messages").inner_text()
-        assert below.split("\n") == ["寬 Ly（公尺）、地板阻抗：空著沒填"], below
-        assert note.inner_text() == f"沒有另存：{below}"
+        assert below.split("\n") == ["寬 Ly（公尺）、地板阻抗：空著沒填"], f"{trail}"
+        assert note.inner_text() == f"沒有另存：{below}", f"{trail}"
         # 按鈕旁邊那句不用捲動就看得到：整句落在視窗裡（bounding_box 以目前視窗的左上角為原點）。
         hint, viewport = _box(page, "#save-as-note"), page.viewport_size
         assert note.is_visible() and viewport is not None
@@ -215,9 +245,12 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         page.wait_for_function("() => document.getElementById('save-as-note').textContent === ''")
         for field, value in before.items():
             page.locator(field).fill(value)
+        assert {field: page.locator(field).input_value() for field in before} == before, f"填回去沒留住\n{trail}"
         page.locator("#save-as").click()
-        page.wait_for_function("() => document.getElementById('save-id').value === 'next'")
-        assert note.inner_text() == "「next」：方案已儲存" and note.get_attribute("class") == "ok"
+        # 存好了、沒存成（「沒有另存：…」）都寫在旁邊：等旁邊有字就是有結局，沒存成立刻紅、印出原因，不空等逾時。
+        page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
+        assert note.inner_text() == "「next」：方案已儲存" and note.get_attribute("class") == "ok", f"{trail}"
+        assert page.locator("#save-id").input_value() == "next", f"{trail}"
         assert (tmp_path / "schemes" / "next.json").exists()
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []

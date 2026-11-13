@@ -154,9 +154,31 @@ function useWallNames(names) {
   for (const wall of Object.keys(wallNames)) wallNames[wall] = names[wall] ?? wallNames[wall];
   return true;
 }
+// 牆面表單與立面圖重畫時每一格都換成新的。換名的回覆是晚到的（每打一個字問一次）：那時游標若在這兩區的某一格
+// （剛點進去、正在打、在區內換格），換掉它，下一個按鍵就落到頁面本身、沒進任何一格（#1145：清空地板阻抗沒清到、
+// 填回去沒填進去）。滑鼠按著的時候也一樣：在按下與放開之間重畫，按到的東西被換掉或挪了位置，那一下就沒按到
+// （點標籤字焦點落空、窄視窗的按鈕往下移）。所以游標在區內、或滑鼠按著，就先記著不換；離開這兩區、放開滑鼠才換。
+const wallAreas = "#walls, #elevation-panel";
+let relabelLater = false;
+let pressing = false;
+function inWallAreas(node) {
+  // 焦點離開到不能聚焦的地方（標籤字、空白處）時 relatedTarget 是 null。
+  return node instanceof Element && node.closest(wallAreas) !== null;
+}
+function relabelWallsOnLeave(event) {
+  // 在區內換格（Tab、滑鼠點另一格）不算離開：瀏覽器自己換焦點時，這裡跑的當下新的那一格還沒拿到焦點。
+  if (relabelLater && !inWallAreas(event.relatedTarget)) relabelWalls();
+}
+function relabelWallsAfterPress() {
+  pressing = false;
+  // 放開之後瀏覽器才發 click（點標籤字這時才把焦點交給那一格）：排到這一下點完，再看游標在不在區內。
+  if (relabelLater) setTimeout(() => { if (relabelLater) relabelWalls(); }, 0);
+}
 // 帶牆名的幾塊照新名字重畫：牆面表單（連立面圖）重畫自方案，散射那排只換欄名、不動已填的值。
 // 重畫會清掉「約 ρc 的幾倍」那幾格、超限總述也是舊名字寫的：兩樣都重問一次（各自有序號丟掉晚到的舊回覆）。
 function relabelWalls() {
+  if (pressing || inWallAreas(document.activeElement)) { relabelLater = true; return; }
+  relabelLater = false;
   renderWalls();
   for (const wall of Object.keys(wallNames)) {
     const input = $(`scatter-${wall}`);
@@ -837,6 +859,9 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     collectWallMaterials();
     for (const name of formWalls()) if (["assembly", "measured_impedance"].includes(wallMaterial(name).kind) && !measuredDrafts[name]) showPresetState(name);
   });
+  for (const id of ["walls", "elevation-panel"]) $(id).addEventListener("focusout", relabelWallsOnLeave);
+  document.addEventListener("pointerdown", () => { pressing = true; }, true);
+  for (const kind of ["pointerup", "pointercancel"]) document.addEventListener(kind, relabelWallsAfterPress, true);
   $("furniture-sofa").onchange = () => action(() => editInput($("furniture-sofa").checked ? "furniture" : "remove_furniture", "sofa"));
   $("furniture-cloud").onchange = () => action(() => editInput($("furniture-cloud").checked ? "furniture" : "remove_furniture", $("furniture-cloud").checked ? "ceiling_cloud" : "cloud"));
   $("furniture-table-kind").onchange = () => action(() => editInput($("furniture-table-kind").value === "none" ? "remove_furniture" : "furniture", $("furniture-table-kind").value === "none" ? "table" : $("furniture-table-kind").value));
