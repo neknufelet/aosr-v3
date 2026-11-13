@@ -1,6 +1,6 @@
 # 規矩卡：文件裡的路徑與連結都要解析得到，不准指到 repo 外（收窄版，只留今天有對象的兩條）
 id = "refs-and-links-resolve"
-human = "文件裡的路徑與連結都要解析得到，也不准指到 repo 外。兩條：①版控的文字檔（副檔名由這張卡登記：md／toml／yaml／py／json；py 只看字串與註解、json 只看字串值，會跑的程式碼本身不看）裡形如 `目錄/…/檔名.副檔名` 的路徑 token，加上 md 的 markdown link 目標，都必須在 `git ls-files` 的集合裡解析得到——glob 算解析得到（`governance/checks/*.py` 有東西命中就過），markdown link 指到目錄也算（有檔住在那個前綴底下）；解不到就紅。②不准指到 repo 外：`../` 逃出樹、開頭是 `/` 的絕對路徑、開頭是 `~/` 的家目錄路徑，一律紅——這一條不去讀那些路徑，只判它的形狀。blueprint 底下只納入 `*.py` 而且收窄成：只解析 docstring 與註解（程式碼字串是執行期的事，不管），並且只認「長得像這一棵 repo 的相對路徑」的 token——前綴限 docs/、governance/、blueprint/、src/、tests/，副檔名限 .md、.py、.json、.toml（那批產生器／case 表的 docstring 與註解裡滿是上一代 donor 樹與示範性死路徑，不收窄乾淨樹當場紅）；blueprint 底下的 .json 是資料不是引用，整批扣掉。刻意要指到解析不到的東西（repo 外的備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的道具、v2 事故現場的路徑）走 `[[settings.allow]]`，一條一個路徑、每條必須寫理由與到期日（過期即紅那一關由 exemptions-need-expiry 判）；清單是資料、放在這張卡裡，不寫死在檢查程式，要放寬就得改卡走 PR。沒有副檔名的裸目錄 token（`docs/`、`.github/`）不當引用看，錨點（`#小節`）與 http(s) 連結這一版不管。"
+human = "文件裡的路徑與連結都要解析得到，也不准指到 repo 外。兩條：①版控的文字檔（副檔名由這張卡登記：md／toml／yaml／py／json；py 只看字串與註解、json 只看字串值，會跑的程式碼本身不看）裡形如 `目錄/…/檔名.副檔名` 的路徑 token，加上 md 的 markdown link 目標，都必須在 `git ls-files` 的集合裡解析得到——glob 算解析得到（`governance/checks/*.py` 有東西命中就過），markdown link 指到目錄也算（有檔住在那個前綴底下）；解不到就紅。②不准指到 repo 外：`../` 逃出樹、開頭是 `/` 的絕對路徑、開頭是 `~/` 的家目錄路徑，一律紅——這一條不去讀那些路徑，只判它的形狀。blueprint 底下只納入 `*.py` 而且收窄成：只解析 docstring 與註解（程式碼字串是執行期的事，不管），並且只認「長得像這一棵 repo 的相對路徑」的 token——前綴限 docs/、governance/、blueprint/、src/、tests/，副檔名限 .md、.py、.json、.toml（那批產生器／case 表的 docstring 與註解裡滿是上一代 donor 樹與示範性死路徑，不收窄乾淨樹當場紅）；blueprint 底下的 .json 是資料不是引用，整批扣掉。刻意要指到解析不到的東西（repo 外的備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的宣告檔、v2 事故現場的路徑、上一代原樣搬來的出處標註）住在卡頂層的 `[[by_design]]`：一筆一個 token、寫一句理由、沒有到期日，`cited_in` 寫死哪幾份檔准引它、各准幾處，兩個方向都守——名單外的檔引它就紅（登記一次不等於到處都能寫），名單裡的檔處數對不上也紅（多寫一次是新的同類、那一行拿掉了也要跟著改），登記的路徑在樹裡解析得到了也紅，這張卡自己不必列；只是暫時的才寫進 `[[settings.allow]]`，一條一個路徑、每條必須寫理由與到期日（過期即紅那一關由 exemptions-need-expiry 判），哪一份檔引它都放。兩種清單都是資料、放在這張卡裡，不寫死在檢查程式，要放寬就得改卡走 PR。沒有副檔名的裸目錄 token（`docs/`、`.github/`）不當引用看，錨點（`#小節`）與 http(s) 連結這一版不管。"
 
 # 掃描面：版控裡的全樹（`git ls-files`，含未被忽略的未追蹤檔），扣掉四個前綴。
 # 扣掉的理由寫在 [settings] 的 scan_exempt_prefixes 上面，一個一句。
@@ -30,6 +30,7 @@ scope = [
 check = "governance/checks/refs_and_links_resolve.py"
 negative_fixture = "governance/fixtures/refs-and-links-resolve"
 control_fixture = "governance/fixtures/refs-and-links-resolve/control"
+tool_broken_fixture = "governance/fixtures/refs-and-links-resolve-tool-broken"
 declared_level = "blocking"
 enforcer = "github-actions-job"
 job = "verify"
@@ -84,56 +85,122 @@ scan_exempt_suffixes = [
   "blueprint:.json",
 ]
 
-# 明文放行：一條一個路徑（照它在文件裡寫的樣子逐字比對），每條必須寫理由。
-# 放行只是「不判紅」——檢查程式不會去讀這些路徑，repo 外的更不會。
+# 刻意指到解析不到的東西住在卡頂層的 [[by_design]]，不是放行（#1014、#1154；老闆 2026-11-13 拍 B）。
+# 一筆一個 token（照它在文件裡寫的樣子逐字比對），[by_design.cited_in] 寫死「哪幾份檔准引它、各准
+# 幾處」，兩個方向都守：名單外的檔引它就紅（登記一次不等於到處都能寫），名單裡的檔處數對不上也紅
+# （多一處是新的同類、零處是那一行拿掉了：資料要跟樹對得上）；登記的路徑在樹裡解析得到了也紅。
+# 這張卡自己不必列——登記那一格就寫著它。沒有到期日：它們本來就該這樣。
+# 只是「不判紅」——檢查程式不會去讀這些路徑，repo 外的更不會。
+# 暫時的那一種才寫進 [settings] 底下的 [[settings.allow]]（帶 reason 與 expires，由
+# exemptions-need-expiry 看到期，哪一份檔引它都放）；今天一筆都沒有。
 #
 # 寫理由的時候不要在理由裡寫路徑形狀的 token（要提決策紙就寫它的題目、或只寫到目錄那一層）：
-# 每一份必紅樣本都逐字複製這整段 [settings]，理由裡的 token 在樣本那棵迷你樹裡解析不到，
-# 會讓每份樣本多犯一條跟它要證的事無關的違規。實測踩過。
-[[settings.allow]]
+# 這張卡自己也在掃描面上，理由裡的 token 解析不到就多一筆跟它要證的事無關的違規。實測踩過。
+
+# ── repo 外的備份座標 ──
+[[by_design]]
 path = "~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle"
 reason = "刻意指向 repo 外、2026-10-14 已刪除的備份：清空重來前的完整 git 歷史 bundle，找不到副本（#822）。決策紙「從 v2 事故重長，歷史清空」（在 docs/decisions/ 底下）與已取代的舊紙要寫得出它原本在哪、已經不在。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"docs/archive/fresh-git-history.md" = 1
+"docs/decisions/reset-from-v2-fresh-history-own-rulebook.md" = 1
 
-[[settings.allow]]
+
+# ── 刻意不進版控的產出物（.gitignore 有它，執行期才長出來） ──
+[[by_design]]
 path = "governance/receipts/pytest.junit.xml"
 reason = "刻意不進版控的產出物：pytest 每一跑自己產的 junit 收據，.gitignore 有它（收據進版控就等於拿上一跑的檔當這一跑的綠）。green-must-be-real-green 那張卡的 [junit] path 與 verify 的測試步驟都必須寫得出這個路徑。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"AGENTS.md" = 1
+"CLAUDE.md" = 1
+"governance/rules/entry-files-rendered-from-registry.toml" = 1
+"governance/rules/green-must-be-real-green.toml" = 3
+"governance/rules/tests-isolated-from-real-env.toml" = 1
+"tests/test_green_file_collection.py" = 1
+"tests/test_green_finalizer_inputs.py" = 1
+"tests/test_green_finalizer_mode.py" = 1
+"tests/test_receipt_isolation.py" = 1
 
-[[settings.allow]]
+[[by_design]]
+path = "governance/receipts/shard/junit.xml"
+reason = "分片正式考卷的執行期產物，抄寫員在結束當下綁定雜湊，收尾只認包裡這一份；不進版控；切換或取消分片時 verify 不再引它，這一筆就會紅、要連卡一起改。"
+[by_design.cited_in]
+".github/workflows/verify.yml" = 10
+
+[[by_design]]
+path = "governance/receipts/shard/pytest.args"
+reason = "分片清點當下產生的考卷參數檔，執行期由清點工具新建，收尾重算逐位元組核對；不進版控；切換或取消分片時 verify 不再引它，這一筆就會紅、要連卡一起改。"
+[by_design.cited_in]
+".github/workflows/verify.yml" = 5
+
+
+# ── 只活在必紅樣本迷你樹裡的宣告檔（那幾支檢查明訂真的 git 工作樹根出現它就回 2） ──
+[[by_design]]
 path = "governance/fixture-commit-range.txt"
 reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"governance/checks/commit_author_allowlisted.py" = 2
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/fixture-contracts-history.txt"
 reason = "刻意只活在必紅樣本的迷你樹裡：precision-contracts-live-in-one-registry 用它宣告兩棵快照子樹重建 base 與 head 兩筆提交，而那支檢查明訂「真的 git 工作樹的根出現這個檔一律回 2」——所以外層樹本來就不准有它。"
-expires = "2026-12-31"
+[by_design.cited_in]
+"governance/rules/precision-contracts-live-in-one-registry.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/fixture-pr-event.json"
 reason = "刻意只活在必紅樣本的迷你樹裡：acceptance-verdict-points-at-head 用它頂替 GitHub 的事件檔（pull_request.head.sha 與 body），而那支檢查明訂「真的 git 工作樹的根出現這個檔一律回 2」——所以外層樹本來就不准有它。"
-expires = "2026-12-31"
+[by_design.cited_in]
+"governance/rules/acceptance-verdict-points-at-head.toml" = 1
+"tests/test_acceptance_verdict_judge.py" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/fixture-fenics-answer-range.txt"
 reason = "跟上面兩條同一個形狀，換成 fenics-answers-carry-provenance：它只用這份宣告重建必紅樣本的提交範圍，而且明訂真的 git 工作樹根出現它就回 2——所以外層樹本來就不准有它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"governance/rules/fenics-answers-carry-provenance.toml" = 2
+"tests/test_fenics_answers_carry_provenance.py" = 2
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/fixture-fenics-answer-base-cases.json"
 reason = "跟上一條同一張卡、同一個樣本專用守門：它只替必紅樣本保存 base 的 cases，真的 git 工作樹根出現它同樣回 2——所以外層樹本來就不准有它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"governance/rules/fenics-answers-carry-provenance.toml" = 2
+"tests/test_fenics_answers_carry_provenance.py" = 2
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/fixture-tmm-answer-range.txt"
 reason = "TMM 答案卡只用這份宣告重建樣本迷你樹的提交範圍；共用核心明訂真的 git 工作樹根出現它就回 2，不能讓樣本宣告接管真正範圍，所以外層樹本來就不准有它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"governance/rules/tmm-answers-carry-provenance.toml" = 2
+"tests/test_tmm_answers_carry_provenance.py" = 2
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/fixture-tmm-answer-base-cases.json"
 reason = "同一張 TMM 答案卡的樣本專用宣告，只替迷你樹保存 base 的 cases；真的 git 工作樹根出現它同樣回 2，所以外層樹本來就不准有它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"governance/rules/tmm-answers-carry-provenance.toml" = 2
+"tests/test_tmm_answers_carry_provenance.py" = 2
+
+[[by_design]]
+path = "governance/fixture-finalizer-run.json"
+reason = "收尾的樣本身分檔只准活在樣本樹；真 git 工作樹根出現它就回 2。正式環境由 GitHub 注入，真樹本來就不准有此檔；切換或取消分片設計時 verify 不再引它，這一筆就會紅、要連卡一起改。"
+[by_design.cited_in]
+"governance/rules/green-must-be-real-green.toml" = 1
+"tests/test_green_finalizer_inputs.py" = 1
+
+
+# ── v2 事故現場的路徑（證物不是引用） ──
+[[by_design]]
+path = "docs/next.md"
+reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
+[by_design.cited_in]
+"docs/archive/backlog-in-issues-status-page-computed.md" = 2
+"docs/archive/status-page-not-in-main.md" = 2
+"docs/decisions/issue-lifecycle-backlog-status-and-closing.md" = 2
+"governance/checks/status_page_computed_not_typed.py" = 3
+"governance/rules/status-page-computed-not-typed.toml" = 1
+
 
 # ── 票 #127 後半（讀檔那 9 支）：上一代留下來的出處標註 ──────────────────────
 # 這一刀把上一代根層那 9 個 `.toml`（calibration／fem_lane／mat_continuation／membrane_opt／perceptual／physics_constants／scoring／scoring_v2／stereo_layout）**逐位元**搬進 `src/aosr/config/data/`
@@ -141,64 +208,52 @@ expires = "2027-03-08"
 # 這些數字**當初從哪一份設計文件、哪一份審查報告來**的，是出處，不是這一棵樹的引用。
 # 那幾份文件與那幾支程式都住在上一代那一棵樹（`aosr-v2`，不在這個 repo 裡）。
 # 這一批跟上面「v2 事故現場的路徑」是同一種東西：證物不是引用。逐條列出而不是
-# 整檔放行，是為了讓「哪幾個字串被放過」看得見（整檔放行會連未來的新引用一起放掉）。
-# 到期日：跟這一塊一起重審（#127 收尾那一刀）。
-[[settings.allow]]
-path = "docs/next.md"
-reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
-expires = "2027-03-08"
-
-[[settings.allow]]
+# 整檔放過，是為了讓「哪幾個字串被放過」看得見（整檔放過會連未來的新引用一起放掉）；
+# cited_in 又把每一筆釘在那一份設定檔上，別的檔要引同一份上一代文件照樣紅。
+[[by_design]]
 path = "config/scoring_s4.toml"
 reason = "上一代的設定檔路徑（S4 複合分的權重檔）。`scoring.toml` 的註解用它說明「這一檔跟那一檔無關」；那一份不在這一塊的範圍裡。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "lib/scoring/core.py"
 reason = "上一代 scoring 那一層的程式檔。`scoring.toml` 的註解說「`layer_a_loss` 在那裡」——那是出處，不是這一棵樹的檔。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "docs/design/design_20260611-scoring-upgrade-plan.md"
 reason = "上一代那一棵樹的設計文件。`scoring.toml` 好幾筆參數的 provenance 都指向它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 3
 
-[[settings.allow]]
+[[by_design]]
 path = "docs/design/design_20260614-scoring-fractional-octave-smoothing.md"
 reason = "上一代那一棵樹的設計文件（分數八度平滑）。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "docs/design/design_20260617-m15-p4-art-diffuse-and-decay-scoring-build-spec.md"
 reason = "上一代那一棵樹的設計文件（M15-P4 寬頻衰減目標）。`perceptual.toml` 的 `[rt60.target]` 指向它。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/perceptual.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "docs/agents/_codex_peakdip_review_report.md"
 reason = "上一代那一棵樹的 cross-review 報告（峰谷偏向那條旋鈕的實測）。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "docs/references/220621_sample_report_summary.md"
 reason = "上一代那一棵樹的參考文件摘要（REDI 低頻指標的查證）。"
-expires = "2027-03-08"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "docs/plan/plan_20260720-peak-dip-bias-knob.md"
 reason = "上一代那一棵樹的計畫文件（峰谷旋鈕的設計）。"
-expires = "2027-03-08"
-
-[[settings.allow]]
-path = "governance/fixture-finalizer-run.json"
-reason = "收尾的樣本身分檔只准活在樣本樹；真 git 工作樹根出現它就回 2。正式環境由 GitHub 注入，真樹本來就不准有此檔；切換或取消分片設計時重新審查。"
-expires = "2026-12-31"
-
-[[settings.allow]]
-path = "governance/receipts/shard/junit.xml"
-reason = "分片正式考卷的執行期產物，抄寫員在結束當下綁定雜湊，收尾只認包裡這一份；不進版控，切換或取消分片時重新審查。"
-expires = "2026-12-31"
-
-[[settings.allow]]
-path = "governance/receipts/shard/pytest.args"
-reason = "分片清點當下產生的考卷參數檔，執行期由清點工具新建，收尾重算逐位元組核對；不進版控，切換或取消分片時重新審查。"
-expires = "2026-12-31"
+[by_design.cited_in]
+"src/aosr/config/data/scoring.toml" = 1

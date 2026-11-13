@@ -1,7 +1,7 @@
 # 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的字典
 # 只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
 # 底下的 [settings] 從主卡逐字複製；主卡已沒有放行（入口檔檔名住在卡頂層的 [[by_design]]）。
-# 這一份的樹裡沒有入口檔檔名，所以既不帶放行也不帶 [[by_design]]（#1158 拿掉一筆用不到的放行）。
+# 這一份掃到的檔（入口檔與決策紙）裡沒有入口檔檔名，所以既不帶放行也不帶 [[by_design]]（#1158 拿掉一筆用不到的放行）。
 id = "no-model-names-in-entry-files"
 check = "governance/checks/no_model_names_in_entry_files.py"
 

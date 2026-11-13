@@ -29,10 +29,18 @@
 每份樣本都會多一筆跟它要證的事無關的違規。所以樣本的迷你卡只帶 ``id`` 與 ``[settings]``，
 這支檢查照 ``id`` 找卡。
 
-``[[settings.allow]]`` 是明文放行，一條一個路徑（照它在文件裡寫的樣子逐字比對），**每條必須
-寫 ``reason`` 與 ``expires``**（到期日；過期即紅那一關由 exemptions-need-expiry 判）。放行只是「不判紅」，不是「去讀它」。今天四條，各一種刻意的形狀：repo 外的
-備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的道具、v2 事故現場的路徑。哪幾條真的被
-用到、哪幾條沒被用到（可能已經過期），跑完印 ``NOTE:`` 說清楚。
+刻意指到解析不到的東西，卡上有兩種寫法，都照 token 在文件裡寫的樣子逐字比對，都只是「不判紅」、
+不是「去讀它」：
+
+* 卡**頂層**的 ``[[by_design]]``——本來就該這樣的那一種（repo 外的備份座標、刻意不進版控的產出物、
+  只活在必紅樣本樹裡的宣告檔、v2 事故現場的路徑、上一代原樣搬來的出處標註；#1014，老闆
+  2026-11-13 拍 B），沒有到期日。一筆一個 token，``cited_in`` 寫死「哪幾份檔准引它、各准幾處」，兩個方向
+  都守：名單外的檔引它就紅（同一個死路徑不會因為登記過一次就到處都能寫），名單裡的檔引的處數
+  跟登記的不一樣也紅（多一處是新的同類、少到零是那一行拿掉了：資料要跟樹對得上）；登記的死路徑
+  在樹裡解析得到了也紅（它已經不是死路徑，登記該拿掉）。這張卡自己（登記那一格就寫著它）不必列。
+* ``[settings]`` 底下的 ``[[settings.allow]]``——暫時的放行，一條一個路徑，**每條必須寫
+  ``reason`` 與 ``expires``**（到期日；過期即紅那一關由 exemptions-need-expiry 判），哪一份檔
+  引它都放。哪幾條真的被用到、哪幾條沒被用到（可能已經過期），跑完印 ``NOTE:`` 說清楚。
 
 血債 ``moved-files-leave-dead-references``（``v2-audit/lessons.json``）：那筆事故自己的對策
 幾乎逐字寫了這道閘。找碴席對它判 lesson_bites = false，理由與指揮為什麼仍記成血債，寫在卡的
@@ -48,6 +56,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+from collections import Counter
 import io
 import json
 import posixpath
@@ -58,7 +67,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, note, run
-from governance.loader import EXEMPTION_KEYS, RULES_DIR, setting_strings, setting_tables
+from governance.loader import EXEMPTION_KEYS, RULES_DIR, by_design_entries, setting_strings, setting_tables
 
 # 這張卡的 id。門檻只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
 CARD_ID = "refs-and-links-resolve"
@@ -71,6 +80,9 @@ ALLOW_KEY = "allow"
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("path", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+# path：照文件裡寫的樣子逐字比對的 token；cited_in：准引它的檔（相對掃描根的路徑）→ 准幾處。
+BY_DESIGN_KEYS = {"path": "text", "cited_in": "counts"}
 # scan_exempt_suffixes 一筆一條「前綴:副檔名」：只在那個前綴底下、只有那個副檔名被扣掉
 # （其餘副檔名照掃）。用冒號分隔，不用斜線——斜線加副檔名會長得像路徑 token，被這支檢查
 # 自己掃成死引用。今天只有 blueprint 底下的 dot-json 一條：那些 .json 是資料不是引用。
@@ -136,6 +148,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或門檻的形狀不對，一律 raise ToolBroken——沒有門檻就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], dict[str, dict[str, int]], str]:
+    """這張卡的 ``[settings]``（形狀驗過）、頂層 ``[[by_design]]``（token→准引它的檔→處數）、卡的相對路徑。"""
     rules_dir = scan_root / RULES_DIR
     mine: list[tuple[str, dict[str, object]]] = []
     for path in sorted(f for f in files if f.parent == rules_dir and f.suffix == ".toml"):
@@ -157,7 +174,16 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（掃描面、副檔名清單與放行清單都寫在那裡）")
     _assert_settings(settings, rel)
-    return settings
+    allowed = {str(entry["path"]) for entry in setting_tables(settings, ALLOW_KEY)}
+    designed: dict[str, dict[str, int]] = {}
+    for entry in by_design_entries(data, BY_DESIGN_KEYS, rel):
+        token = str(entry["path"])
+        if token in designed or token in allowed:
+            raise ToolBroken(f"{rel} 把 {token!r} 准許了不只一次（放行與 [[by_design]] 合起來算）")
+        cited = entry["cited_in"]
+        assert isinstance(cited, dict)  # by_design_entries 驗過形狀
+        designed[token] = {str(name): int(n) for name, n in cited.items()}
+    return settings, designed, rel
 
 
 def _assert_settings(settings: dict[str, object], rel: str) -> None:
@@ -395,8 +421,50 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     return sorted(set(picked) | set(_card_files(scan_root, files)))
 
 
+def _designed_elsewhere(where: str, allowed_in: dict[str, int], card_rel: str) -> str:
+    """登記過的死路徑出現在名單外的檔：紅。"""
+    return (
+        f"{where} 是卡 {card_rel} 頂層 [[by_design]] 登記的死路徑，但只准 {sorted(allowed_in)}"
+        " 這幾份檔引它——准許寫死到哪幾份檔，新的地方要引它就連卡一起改（不然登記一次就到處都能寫）"
+    )
+
+
+def _designed_counts(
+    designed: dict[str, dict[str, int]], cited: dict[str, Counter[str]], card_rel: str
+) -> list[str]:
+    """名單上的檔這一跑引那個死路徑的處數跟登記的不一樣：紅（多一處是新的同類，零處是那一行拿掉了）。"""
+    bad: list[str] = []
+    for token, want_by_file in sorted(designed.items()):
+        for rel, want in sorted(want_by_file.items()):
+            got = cited[token][rel]
+            if got == want:
+                continue
+            why = (
+                "（檔不在了、搬了、或那一行拿掉了）" if got == 0
+                else "（多出來的那幾處沒人登記過；少了的那幾處拿掉了）"
+            )
+            bad.append(
+                f"{rel} 引用 {token!r} {got} 處，卡 {card_rel} 頂層的 [[by_design]] 登記 {want} 處{why}"
+                "——資料寫死處數，同一份檔裡多寫一次、少寫一次都要連卡一起改"
+            )
+    return bad
+
+
+def _designed_resolved(
+    designed: dict[str, dict[str, int]], names: list[str], nameset: set[str], card_rel: str
+) -> list[str]:
+    """登記的死路徑在樹裡解析得到了：紅（它已經不是死路徑，登記該拿掉，不然名單外的引用會被說成死路徑）。"""
+    return [
+        f"卡 {card_rel} 頂層的 [[by_design]] 登記 {token!r} 是刻意解析不到的路徑，但它在這棵樹裡解析得到了"
+        "——它已經不是死路徑，把那一筆登記拿掉（資料要跟樹對得上）"
+        for token in sorted(designed)
+        if not _outside_reason(token, posixpath.normpath(token))
+        and _resolves(posixpath.normpath(token), names, nameset, allow_dir=False)
+    ]
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, designed, card_rel = _card(scan_root, files)
     suffixes = {s.casefold() for s in setting_strings(settings, "text_suffixes")}
     exempt = setting_strings(settings, "scan_exempt_prefixes")
     allow = {
@@ -414,6 +482,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         )
 
     used: set[str] = set()
+    cited: dict[str, Counter[str]] = {token: Counter() for token in designed}
     bad: list[str] = []
     for rel in picked:
         path = scan_root / rel
@@ -426,6 +495,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         for lineno, segment in _segments(path, rel, suffix, blueprint_py=blueprint_py):
             for kind, raw in _refs(segment, links=is_markdown):
                 if blueprint_py and not _blueprint_ref_kept(raw):
+                    continue
+                if raw in designed:
+                    cited[raw][rel] += 1
+                    if rel != card_rel and rel not in designed[raw]:
+                        bad.append(_designed_elsewhere(f"{rel}:{lineno} {kind} {raw!r}", designed[raw], card_rel))
                     continue
                 if raw in allow:
                     used.add(raw)
@@ -440,7 +514,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
                     bad.append(
                         f"{rel}:{lineno} {kind} {raw!r} {outside}"
                         "——引用不准指到 repo 外，換一台機器就不存在了；真的必要（例如 repo 外的"
-                        "備份座標）就進卡的 [[settings.allow]] 並寫理由"
+                        "備份座標）就進卡頂層的 [[by_design]]，寫死哪幾份檔准引、寫理由"
                     )
                     continue
                 if not _resolves(normalized, names, nameset, allow_dir=(kind == KIND_LINK)):
@@ -450,6 +524,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
                         "——刪檔或搬目錄要順手改引用，v2 就是這樣讓死引用活了 53 天"
                     )
 
+    bad += _designed_counts(designed, cited, card_rel) + _designed_resolved(designed, names, nameset, card_rel)
     stale = sorted(set(allow) - used)
     if stale:
         note(f"卡上有 {len(stale)} 條放行沒被用到（可能已經過期，該從卡上刪掉）：{stale}")
