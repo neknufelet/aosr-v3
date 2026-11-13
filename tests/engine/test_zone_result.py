@@ -164,7 +164,9 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     # 白話一句（#1134）只給借得到材料庫名字的吸音材；這一區對不到（原名帶流阻才分得出兩種棉），照原名。
     assert a.design_plain == ""
     # 材料庫有一筆可最佳化材料跟它只差厚度：借它的名字，講幾公分厚、直接貼牆（原名仍在 design，頁面併進「參數」）。
-    porous = cast(MountedOnWall, design.scene.surface_zones_by_wall["x0"][0].material).layers[0]  # type: ignore[index]
+    zones = design.scene.surface_zones_by_wall
+    assert zones is not None
+    porous = cast(MountedOnWall, zones["x0"][0].material).layers[0]
     template = next(item for item in builtin_entries() if isinstance(item, OptimizableEntry))
     named = (template.model_copy(update={"label": "試用棉", "porous": porous}),)
     plain = {(row.wall, row.zone): row for row in zone_rows(baseline, settings, design, library=named)}
