@@ -562,12 +562,14 @@ def _refuse_fixed(job: _Run, extension: _Extension) -> None:
         finished_at=time.time()))
 
 
-def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict]) -> None:
-    """核對紀錄寫進 stage/（跟替身一起換名進格子）：哪一組起跑配置、哪一份替身、每個候選的數字。"""
-    from aosr.gradient.fixed_candidates import holdout_ruler_values
+def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict], prepared: _Prepared,
+                  frequencies_hz: Sequence[float]) -> None:
+    """核對紀錄寫進 stage/（跟替身一起換名進格子）：哪一組起跑配置、哪一份替身、每個候選的數字；v2（#1142）再記開跑沿用
+    要比的身分：頻率軸（裝進去那份替身自己的）、每個候選准用的片、材料身分摘要、完整解次數、核對配置的阻抗摘要。"""
+    from aosr.gradient.fixed_candidates import candidate_material_digest, holdout_ruler_values
     from aosr.gradient.surrogate_fixed_checks import (
-        FIXED_CHECKS_FILE, FixedCheckRow, FixedChecksRecord, configuration_document, configuration_sha256, manifest_digest,
-        write_record,
+        FIXED_CHECKS_FILE, FIXED_CHECKS_VERSION_V2, FixedCheckRow, FixedChecksRecord, axis_hex, configuration_document,
+        configuration_sha256, impedances_sha256, manifest_digest, write_record,
     )
     from aosr.physics.fem_reduced_store import manifest_path
 
@@ -579,11 +581,16 @@ def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict]
     frequency_ruler, band_ruler = holdout_ruler_values()
     materials = {item.target: item.coverage().material_sha256 for item in job.fixed}
     record = FixedChecksRecord(
+        schema_version=FIXED_CHECKS_VERSION_V2,
         configuration_sha256=configuration_sha256(configuration), configuration=configuration,
-        manifest_sha256=manifest_digest(manifest_path(npz)),
+        manifest_sha256=manifest_digest(manifest_path(npz)), frequencies_hz=axis_hex(frequencies_hz),
         checks=tuple(FixedCheckRow(target=target, material_sha256=materials[target], frequency_db=verdict.frequency_db,
                                    band_db=verdict.band_db, frequency_ruler=frequency_ruler, band_ruler=band_ruler,
-                                   passed=verdict.passed) for target, verdict in sorted(verdicts.items())))
+                                   passed=verdict.passed, surfaces=verdict.surfaces,
+                                   material_digest=candidate_material_digest(target, start.table),
+                                   full_solves=verdict.report.full_solves,
+                                   impedances_sha256=impedances_sha256(prepared.configurations[target]))
+                     for target, verdict in sorted(verdicts.items())))
     write_record(job.stage / FIXED_CHECKS_FILE, record)
 
 
@@ -666,7 +673,7 @@ def build(args: argparse.Namespace) -> int:
         verdict("gate_refused", f"搜尋開跑那一道准用閘門不收（{type(error).__name__}：{error}），沒有放進格子")
         return EXIT_NOT_USABLE
     if extension is not None:
-        _fixed_record(job, npz, extension.verdicts)
+        _fixed_record(job, npz, extension.verdicts, prepared, gated.frequencies_hz)
     job.progress.phase("installing")
     _commit(STOPS, job.stage, job.slot, job.replace, lambda retired: verdict(
         "installed", "建好、留出驗證兩把尺都過、搜尋的准用閘門核過，已放進這份切法的格子" + extended,

@@ -106,6 +106,16 @@ def test_build_that_extends_until_the_check_passes_installs_and_the_preview_says
         for index, check in enumerate(judged) for target, item in sorted(check.items())]
     assert [row["full_solves"] for row in rounds][-1] == cast(Record, found["result"])["full_solves"]
     assert all(item["progress_given"] for check in judged for item in check.values())
+    # #1142：開跑那一段（網頁照產品組參數、命令列 _start 照產品走）沿用建替身時核過的數字，跟移開紀錄真的重核那一次逐位相同。
+    reuse, recheck = cast(list[Record], found["starts"])
+    assert reuse["exit"] == recheck["exit"] == 0 and reuse["surrogate_is_slot"] is True, (reuse, recheck)
+    assert "沿用建替身時核過的數字" in str(reuse["stderr"]) and "替身留出驗證通過" not in str(reuse["stderr"])
+    assert "不沿用建替身時核過的固定材料數字（替身旁邊沒有建替身時的核對紀錄" in str(recheck["stderr"])
+    assert "替身留出驗證通過" in str(recheck["stderr"])
+    reused, rechecked = cast(list[Record], reuse["checks"]), cast(list[Record], recheck["checks"])
+    assert [row.pop("reused") for row in reused] == [True] and all("reused" not in row for row in rechecked)
+    assert [row.pop("seconds") for row in reused] == [0.0] and cast(float, rechecked[0].pop("seconds")) > 0.0
+    assert reused == rechecked  # 逐頻、帶能量（JSON 浮點逐位來回）、尺、完整解次數、材料摘要、准用的片
 
 
 def test_build_without_budget_left_refuses_and_says_a_bigger_budget_may_pass(tmp_path: Path) -> None:

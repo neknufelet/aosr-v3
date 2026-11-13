@@ -53,7 +53,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Iterator, Sequence, Set
+from collections.abc import Callable, Iterator, Mapping, Sequence, Set
 from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
@@ -79,6 +79,7 @@ if TYPE_CHECKING:
     from aosr.reporting.scheme import Scheme
     from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
     from aosr.gradient.fixed_candidates import FixedCandidateCheck
+    from aosr.gradient.surrogate_fixed_checks import FixedCheckRow
     from aosr.materials.library import LibraryEntry
     from aosr.materials.construction_models import SurfaceMaterial
     from aosr.config.capabilities import CapabilityTable
@@ -274,6 +275,7 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
+    from aosr.gradient.surrogate_fixed_checks import configuration_document
 
     fixed, caps, allowed = (parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth),
                             parse_allowed_targets(args.allowed))
@@ -300,8 +302,10 @@ def _start(args: argparse.Namespace) -> int:
     run.check_surrogate_matches_scheme(model, scheme, points)
     run.check_surrogate_axis_covers_scoring(model, scheme, objective.stage_one)
     _check_start_materials(materials, model, scheme, surrogate, expanded, designs, fixed)
+    configuration = configuration_document(presets=args.presets, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
+                                           allowed=allowed, scene_json=scheme.scene.model_dump_json())
     checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers,
-                                     surrogate)
+                                     surrogate, configuration=configuration, carryover=fingerprint is not None)
     del full_operators
     spot = None
     if fingerprint is not None:
@@ -421,10 +425,15 @@ def _listed_fixed_materials(allowed: dict[str, tuple[str, ...]], table: tuple[Pr
 
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],
                             allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...], scheme: Scheme,
-                            workers: int, surrogate: Path) -> tuple[FixedCandidateCheck, ...]:
+                            workers: int, surrogate: Path, *, configuration: Mapping[str, object],
+                            carryover: bool) -> tuple[FixedCandidateCheck, ...]:
     """准用清單有固定材料：表外補值照實印、每一個各做一組替身留出驗證（全部核完、有沒過的就拒收）；沒有就什麼都不做。
-    替身旁訓練說明記過的固定材料算「訓練過」（拒收的句子說訓練過但在哪個頻率不夠準，不說沒學過）。"""
-    from aosr.gradient.fixed_candidates import check_fixed_candidates, table_range_notes
+    替身旁訓練說明記過的固定材料算「訓練過」（拒收的句子說訓練過但在哪個頻率不夠準，不說沒學過）。
+
+    #1142（老闆 2026-11-13 拍 A）：替身旁建替身時的核對紀錄身分逐欄都跟這一次相同（:func:`_reusable`），就沿用紀錄的
+    數字、不再完整解，輸出講一句「沿用建替身時核過的數字」；任何一欄不同、舊格式紀錄、或替身是接續（carry-over，
+    ``carryover``）沿用的，照舊重核，輸出講為什麼沒沿用。兩句都用「注意：」開頭，網頁那一跑的「注意」一節看得到。"""
+    from aosr.gradient.fixed_candidates import check_fixed_candidates, reused_check, table_range_notes
     from aosr.gradient.fixed_surfaces import fixed_targets_of
     from aosr.gradient.surrogate_coverage import read_coverage
     from aosr.gradient.surrogate_files import TRAINING_FILE
@@ -433,16 +442,64 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     if not targets:
         return ()
     assert operators is not None
-    for note in table_range_notes(targets, table, tuple(float(value) for value in model.frequencies_hz)):
+    axis = tuple(float(value) for value in model.frequencies_hz)
+    for note in table_range_notes(targets, table, axis):
         sys.stderr.write(f"注意：{note}\n")
+    configurations = None
+    if carryover:
+        sys.stderr.write("注意：替身是接續（carry-over）沿用的，不沿用建替身時核過的固定材料數字，開跑前照舊重核\n")
+    else:
+        found, configurations = _reusable(model, designs, allowed, table, scheme, surrogate, configuration)
+        if not isinstance(found, str):
+            checks = tuple(reused_check(row) for row in found)
+            for check in checks:
+                sys.stderr.write(f"注意：固定材料 {check.target} 沿用建替身時核過的數字（替身、材料、起跑配置、頻率軸、"
+                                 f"兩把尺都跟那次相同，這次不再完整解）：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
+                                 f"{check.band_db:g} dB（建替身時完整解 {check.full_solves} 次）\n")
+            return checks
+        sys.stderr.write(f"注意：不沿用建替身時核過的固定材料數字（{found}），開跑前照舊重核\n")
     coverage = read_coverage(surrogate.parent / TRAINING_FILE)
     trained = frozenset(item.target for item in coverage.fixed) if coverage is not None else frozenset()
     checks = check_fixed_candidates(model, operators, designs, allowed, table, density_kg_m3=scheme.scene.density_kg_m3,
-                                    sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers, trained=trained)
+                                    sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers, trained=trained,
+                                    configurations=configurations)
     for check in checks:
         sys.stderr.write(f"固定材料 {check.target} 替身留出驗證通過：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
                          f"{check.band_db:g} dB（完整解 {check.full_solves} 次、{check.seconds:.1f} 秒）\n")
     return checks
+
+
+def _reusable(model: ReducedModel, designs: tuple[SurfaceDesign, ...], allowed: dict[str, tuple[str, ...]],
+              table: tuple[PresetMaterial, ...], scheme: Scheme, surrogate: Path, configuration: Mapping[str, object],
+              ) -> tuple[tuple[FixedCheckRow, ...] | str, dict[str, FrequencyBoundaryImpedances]]:
+    """這一次的身分跟建替身時的核對紀錄逐欄比（:func:`aosr.gradient.surrogate_fixed_checks.reused_rows`）：回沿用得了的
+    紀錄列或沒沿用的原因，以及這一次算的核對配置（沒沿用就直接拿去重核，不算第二次）。"""
+    from aosr.gradient.fixed_candidates import (
+        candidate_configurations, candidate_material_digest, candidate_surfaces, holdout_ruler_values,
+    )
+    from aosr.gradient.fixed_surfaces import fixed_targets_of
+    from aosr.gradient.surrogate_coverage import fixed_targets
+    from aosr.gradient.surrogate_fixed_checks import (
+        FIXED_CHECKS_FILE, CandidateIdentity, impedances_sha256, manifest_digest, read_record, reused_rows,
+    )
+    from aosr.physics.fem_reduced_store import manifest_path
+
+    axis = tuple(float(value) for value in model.frequencies_hz)
+    configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=scheme.scene.density_kg_m3,
+                                              sound_speed_m_s=scheme.scene.sound_speed_m_s)
+    contents = {item.target: item.coverage().material_sha256 for item in fixed_targets(allowed, table)}
+    candidates = tuple(CandidateIdentity(target=target, material_sha256=contents[target],
+                                         material_digest=candidate_material_digest(target, table),
+                                         surfaces=candidate_surfaces(target, allowed),
+                                         impedances_sha256=impedances_sha256(configurations[target]))
+                       for target in fixed_targets_of(allowed))
+    manifest = manifest_path(surrogate)
+    if not manifest.is_file():
+        return "替身的 manifest 不在", configurations
+    found = reused_rows(read_record(surrogate.parent / FIXED_CHECKS_FILE), manifest_sha256=manifest_digest(manifest),
+                        configuration=configuration, frequencies_hz=axis, rulers=holdout_ruler_values(),
+                        candidates=candidates)
+    return found, configurations
 
 
 def _start_materials(args: argparse.Namespace, settings_path: Path,

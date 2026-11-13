@@ -8,10 +8,17 @@
 沒有餘額補訓練，要不裝、講加大預算；``pass``：建完把停止殘差收到 ``PASS_STOP``（只這一次建模、考卷自己的值），
 補訓練真的解了候選那幾組、核對過了才做留出驗證、裝進格子、留紀錄，預覽才說可以直接開搜尋。命令列參數由網頁那一層（``SurrogateBuilds.start``，假的開服務層）照產品組出來，
 這裡在同一個行程叫 ``surrogate_build.build``（才換得了訓練組）；結果寫 ``probe.json``。
+
+#1142：``pass`` 模式裝好之後，再由網頁那一層照產品組出開跑的命令列參數，在同一個行程叫命令列開跑那一段
+（``cli._start``，只把「建資料夾、起子行程」換成記下 ``project.json`` 那一份），跑兩次：一次照產品（核對紀錄在、
+身分相同 → 沿用），一次先把核對紀錄移開（→ 照舊重核，真的完整解）；兩次的固定材料核對與輸出都記進 ``starts``。
+這兩次之前先把上面換掉的函式換回產品原樣（窄尺、記錄判決都不套到開跑那一段）。
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import io
 import json
 import sys
 import threading
@@ -139,13 +146,60 @@ def _patch(seen: dict[str, list[object]]) -> dict[str, object]:
     return configurations
 
 
+def _starts(jobs: GradientJobs, search: GradientRequest, slot: Path, restore: Callable[[], None]) -> list[object]:
+    """網頁照產品組出開跑參數、在這個行程叫開跑那一段兩次（沿用、移開紀錄重核）；回兩次的核對與輸出。"""
+    from aosr.gradient import cli
+    from aosr.gradient.run import GradientProject
+    from aosr.gradient.surrogate_fixed_checks import FIXED_CHECKS_FILE
+    from aosr.gradient.surrogate_files import MODEL_FILE
+
+    restore()
+    launcher = getattr(jobs, "launcher")
+    launcher.active.clear()  # 建替身那一個服務（假的）做完了
+    jobs.start(NAME, search)
+    argv = list(launcher.launched[-1][1])
+    arguments = argv[argv.index("aosr.gradient.cli") + 1:]
+    captured: list[GradientProject] = []
+
+    def keep(root: Path, project: GradientProject, snapshot: bytes | None = None) -> int:
+        captured.append(project)
+        return 0
+
+    setattr(cli, "_create_and_run", keep)
+    found: list[object] = []
+    record = slot / FIXED_CHECKS_FILE
+    for label in ("reuse", "recheck"):
+        if label == "recheck":
+            record.rename(slot / "moved-fixed-checks.json")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = cli._start(cli._parser().parse_args(arguments))
+        project, = captured[-1:]
+        found.append({"label": label, "exit": code, "stderr": stderr.getvalue(),
+                      "surrogate_is_slot": Path(arguments[arguments.index("--surrogate") + 1]) == slot / MODEL_FILE,
+                      "checks": [check.model_dump(mode="json") for check in project.fixed_candidate_checks]})
+    return found
+
+
 def main() -> None:
     runtime.configure_calculation_jax()
 
-    from aosr.gradient import surrogate_build
+    from aosr.gradient import fixed_candidates, run, surrogate_build
+    from aosr.gradient.surrogate_training import TrainingSets
 
     jobs, search, build_id, arguments = _arguments()
     seen: dict[str, list[object]] = {"judged": [], "added": [], "generated": [], "before": []}
+    originals = {name: getattr(TrainingSets, name)
+                 for name in ("training_sets", "holdout_sets", "require_every_family", "extension_sets")}
+    judge, rulers, checked = fixed_candidates.judge_candidates, run.holdout_rulers, surrogate_build._fixed_checked
+
+    def restore() -> None:
+        for name, value in originals.items():
+            setattr(TrainingSets, name, value)
+        setattr(fixed_candidates, "judge_candidates", judge)
+        setattr(run, "holdout_rulers", rulers)
+        setattr(surrogate_build, "_fixed_checked", checked)
+
     configurations = _patch(seen)
     judged, added, generated = seen["judged"], seen["added"], seen["generated"]
     code = surrogate_build.build(surrogate_build._parser().parse_args(arguments))
@@ -159,12 +213,13 @@ def main() -> None:
     surrogate = None
     if slot.is_dir():
         surrogate = jobs.preview(NAME, search)["surrogate"]
+    starts = _starts(jobs, search, slot, restore) if MODE == "pass" and code == 0 else None
     (DIRECTORY / "probe.json").write_text(json.dumps({
         "exit": code, "build_id": build_id, "arguments": arguments, "judged": judged, "before": seen["before"],
         "added": len(added), "generated": generated, "added_equal_to_check": held_out,
         "result": json.loads((work / "result.json").read_text(encoding="utf-8")), "slot": slot.is_dir(),
         "training_labels": None if training is None else [item["label"] for item in training["training"]],
-        "record": record, "preview": surrogate,
+        "record": record, "preview": surrogate, "starts": starts,
         "rounds": [json.loads(line) for line in (work / "fixed_check_rounds.jsonl").read_text(encoding="utf-8").splitlines()]
         if (work / "fixed_check_rounds.jsonl").is_file() else None}, ensure_ascii=False, default=str), encoding="utf-8")
 
