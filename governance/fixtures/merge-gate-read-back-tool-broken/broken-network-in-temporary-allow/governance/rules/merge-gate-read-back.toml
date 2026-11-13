@@ -18,5 +18,10 @@ api_timeout_seconds = 60
 
 [[settings.allow]]
 network = "GitHub 的 ruleset API（只讀）"
-reason = "樣本：一筆已經過期的放行。"
+reason = "樣本：准上網寫回會到期的放行（到期日填得很遠，所以不是因為過期才回 2）。"
 expires = "2099-12-31"
+
+# 卡頂層那一筆照抄控制組、是對的：這份樣本只留「寫回放行」這一個病。
+[[by_design]]
+network = "GitHub 的 ruleset API（只讀）"
+reason = "決策紙 merge-gate-check-may-read-github：只准這一支、只准讀。樣本裡照抄主卡那一筆。"

@@ -179,10 +179,17 @@ def test_no_network_entry_means_no_network() -> None:
         card.network_allowed({"settings": {"allow": [{"issue": 83, "reason": "假的", "expires": LIVE}]}}, "假的卡")
 
 
-def test_network_written_as_a_temporary_allow_means_no_network() -> None:
-    """准上網寫回會到期的放行也不准上網——那是規矩的形狀，不是放行（#1014）。"""
-    data = {"settings": {"allow": [{"network": "假的", "reason": "假的：准上網", "expires": LIVE}]}}
-    with pytest.raises(ToolBroken, match="settings.allow"):
+@pytest.mark.parametrize("table", ["allow", "net"])
+def test_network_written_as_a_temporary_allow_means_no_network(table: str) -> None:
+    """准上網寫回會到期的放行也不准上網——那是規矩的形狀，不是放行（#1014）。
+
+    卡頂層那一筆是對的也一樣（只留這一個病）；表叫什麼名字都算，改個名字就繞過去的判準等於沒有判準。
+    """
+    data = {
+        "settings": {table: [{"network": "假的", "reason": "假的：准上網", "expires": LIVE}]},
+        "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}],
+    }
+    with pytest.raises(ToolBroken, match=f"表陣列 \\['{table}'\\]"):
         card.network_allowed(data, "假的卡")
 
 

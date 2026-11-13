@@ -10,8 +10,8 @@
 那個目錄在 `.gitignore` 裡（pytest 的 junit、每一步的片段早就住在旁邊），不會被列舉、不會進主線。
 
 **不上網。** 只讀本機已經有的 ref（預設 `origin/status`）。`actions/checkout` 帶 `fetch-depth: 0` 會把所有
-分支抓下來，本機 `git pull` 之後也有；ref 不在就回 2 並說「先 git fetch」，這裡不替你抓——決策紙
-merge-gate-check-may-read-github 只放行那一支檢查上網，這一支不是。
+分支抓下來，本機 `git pull` 之後也有；ref 不在就回 2 並說「先 git fetch」，這裡不替你抓——准上網只給兩支具名的檢查
+（merge-gate-read-back、issues-closed-only-by-merged-pr，各寫在自己卡頂層的 [[by_design]]），這一支不是。
 
 **順手記來源。** 每一份收據是 `status` 分支上哪一筆提交寫的、author 與 committer 是誰，寫進同一層的
 `provenance.json`（跟收據放在不同目錄，收據目錄底下「每一個 json 檔」的 glob 才不會把它當成一份收據）。

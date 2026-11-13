@@ -620,17 +620,18 @@ NETWORK_KEY = "network"
 def network_permission(data: Mapping[str, object], where: str, paper: str) -> str:
     """卡頂層 ``[[by_design]]`` 那一筆「准上網」的 reason。
 
-    缺席、不只一筆、或還寫在 ``[[settings.allow]]`` 裡（會到期的放行），一律 raise
+    缺席、不只一筆、或還寫在 ``[settings]`` 底下任何一個表陣列裡（會到期的放行；不只認叫 ``allow``
+    的那張——改個名字就繞過去的判準等於沒有判準，見 :func:`settings_exemptions`），一律 raise
     :class:`ToolBroken`——外殼翻成離開碼 2，不上網。
     """
-    settings = data.get("settings")
-    if isinstance(settings, Mapping):
-        stray = [e for e in setting_tables(settings, "allow") if NETWORK_KEY in e]
-        if stray:
-            raise ToolBroken(
-                f"{where} 的 [[settings.allow]] 裡有 {len(stray)} 筆帶 {NETWORK_KEY}——准上網是卡頂層"
-                f" [[{BY_DESIGN_FIELD}]] 的資料、沒有到期日，不是會到期的放行（決策紙 {paper}）"
-            )
+    stray = sorted(
+        {name for name, _, entry in settings_exemptions(dict(data)) if isinstance(entry, Mapping) and NETWORK_KEY in entry}
+    )
+    if stray:
+        raise ToolBroken(
+            f"{where} 的 [settings] 底下表陣列 {stray} 裡有一筆帶 {NETWORK_KEY}——准上網是卡頂層"
+            f" [[{BY_DESIGN_FIELD}]] 的資料、沒有到期日，不是會到期的放行（決策紙 {paper}）"
+        )
     entries = by_design_entries(data, {NETWORK_KEY: "text"}, where)
     if len(entries) != 1:
         raise ToolBroken(
