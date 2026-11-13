@@ -60,11 +60,3 @@ heading_labels = [
 ]
 heading_max_chars = 6
 
-# 明文放行：決策紙允許 handoff.md 存在（「只寫現在在哪、去看哪」），但它有行數上限——
-# handoff.md 自己第 29 行寫「這份超過 60 行就該砍」，v2 事故的對策也是「行數上限」。
-# 放行只免掉檔名那一條，內容那兩條照管；超過上限一樣紅。
-[[settings.allow]]
-path = "handoff.md"
-max_lines = 60
-reason = "樣本裡照主卡逐字複製的一筆放行：決策紙明文允許那一份手寫檔存在，行數上限寫在同一筆的 max_lines。"
-expires = "2026-12-08"

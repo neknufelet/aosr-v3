@@ -23,5 +23,5 @@ threshold_name_patterns = [
   "*_MINUTES",
   "*_BYTES",
 ]
-registry_tables = ["settings", "junit"]
+registry_tables = ["settings", "junit", "by_design"]
 allow = []

@@ -34,6 +34,9 @@ fixture」，fixture 的名字由卡宣告。
    答案取決於「跑在誰的機器上」。這一條不看有沒有 fixture：家目錄從來不是這棵樹的一部分。
 6. **放行本身壞掉**——放行指向的檔不在掃描面裡（過期的放行）、放行的路徑沒有被掃描根的
    ``.gitignore`` 蓋住（等於准你在版控樹裡留殘留）、或放行從頭到尾沒有對象（該拿掉了）。
+   卡**頂層**的 ``[[by_design]]`` 跟放行同一個形狀，另外寫死 ``writes``（那個函式裡准幾筆寫入）、
+   沒有到期日（#1014，老闆 2026-11-13 拍 B：本來就該這樣的那一種）。同一個函式多寫一筆、少一筆，
+   或登記的那支檔不在了，都紅——同類新出現的不會跟著被准許。
 7. **登記的產品代寫函式收到版控路徑**——任一參數是真樹路徑，或含登記常數／路徑字串。
    沙盒 fixture 改不了產品路徑常數，這一類也不能由寫入放行免掉。
 
@@ -42,7 +45,8 @@ fixture」，fixture 的名字由卡宣告。
 卡（宣告 ``check = "governance/checks/tests_isolated_from_real_env.py"`` 的那一張）的
 ``[settings]`` 給 ``sandbox_fixture``（唯一那支 fixture 的名字）與選填的
 ``[[settings.allow]]``（寫入真樹的放行，一條一格：``file``／``function``／``path``，
-加上放行條目共用的 ``reason``／``expires``）。
+加上放行條目共用的 ``reason``／``expires``）；卡頂層選填的 ``[[by_design]]`` 多一格 ``writes``、
+不帶 ``expires``。
 選填的 ``product_writers``／``committed_constants``／``committed_paths`` 是純字串陣列，
 分別登記產品代寫函式、版控目錄常數與相對路徑；省略時保留原有判準。
 讀不到、找到多張、或形狀不對，一律 raise :class:`ToolBroken` 讓外殼回 2——這支檢查沒有
@@ -70,7 +74,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import EXEMPTION_KEYS, RULES_DIR
+from governance.loader import EXEMPTION_KEYS, RULES_DIR, by_design_entries
 
 # 這支檢查在卡裡的名字。門檻只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/tests_isolated_from_real_env.py"
@@ -86,6 +90,9 @@ ALLOW_KEY = "allow"
 # 形狀定義在 governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一。
 # 那一格原本叫 why，跟著改叫 reason——同一件事不要在不同卡上叫不同名字）。
 ALLOW_KEYS = ("file", "function", "path", *EXEMPTION_KEYS)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+# 比放行多一格 writes：那個函式裡准幾筆寫入，多一筆、少一筆都紅。
+BY_DESIGN_KEYS = {"file": "text", "function": "text", "path": "text", "writes": "count"}
 
 # 版控工具的名字。參數陣列的第一格（去掉目錄）等於它，就是在 spawn 它。
 GIT_TOOL = "git"
@@ -156,13 +163,17 @@ USEFIXTURES = "usefixtures"
 
 @dataclass(frozen=True)
 class Allow:
-    """卡上的一條放行：哪支檔、哪個函式、寫到哪、為什麼。"""
+    """卡上的一條放行（或頂層 [[by_design]] 的一筆）：哪支檔、哪個函式、寫到哪、為什麼。
+
+    ``writes`` 只有 [[by_design]] 才有：准幾筆寫入（放行是 None，不數）。
+    """
 
     file: str
     function: str
     path: str
     reason: str
     expires: str
+    writes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -223,13 +234,41 @@ def _settings(scan_root: Path, files: list[Path]) -> Settings:
     name = settings.get("sandbox_fixture")
     if not isinstance(name, str) or not name.isidentifier():
         raise ToolBroken(f"{rel} 的 [settings] sandbox_fixture 必須是一個合法的 Python 名字，實際是 {name!r}")
+    allow = (*_allow_list(settings, rel), *_by_design_list(data, rel))
+    keys = [(a.file, a.function, a.path) for a in allow]
+    twice = sorted({key for key in keys if keys.count(key) > 1})
+    if twice:
+        raise ToolBroken(f"{rel} 把 {twice} 准許了不只一次（放行與 [[by_design]] 合起來算）")
     return Settings(
         fixture=name,
-        allow=_allow_list(settings, rel),
+        allow=allow,
         product_writers=_string_list(settings, rel, "product_writers"),
         committed_constants=_string_list(settings, rel, "committed_constants"),
         committed_paths=_string_list(settings, rel, "committed_paths"),
     )
+
+
+def _by_design_list(data: dict[str, object], rel: str) -> tuple[Allow, ...]:
+    """讀卡頂層的 ``[[by_design]]``。沒寫就是沒有；寫了形狀就要對（共用那一關在載入器）。"""
+    out: list[Allow] = []
+    for index, entry in enumerate(by_design_entries(data, BY_DESIGN_KEYS, rel)):
+        path = str(entry["path"])
+        if Path(path).is_absolute() or ".." in Path(path).parts:
+            raise ToolBroken(
+                f"{rel} 的 [[by_design]] 第 {index + 1} 條的 path={path!r} 必須是掃描根底下的相對路徑"
+            )
+        writes = entry["writes"]
+        out.append(
+            Allow(
+                file=str(entry["file"]).strip(),
+                function=str(entry["function"]).strip(),
+                path=path.strip().strip("/"),
+                reason=str(entry["reason"]).strip(),
+                expires="",
+                writes=writes if isinstance(writes, int) else None,
+            )
+        )
+    return tuple(out)
 
 
 def _string_list(settings: dict[str, object], rel: str, key: str) -> tuple[str, ...]:
@@ -815,7 +854,8 @@ def _allow_problems(
                 "不然這條放行等於「准你在版控樹裡留殘留」"
             )
         if problems:
-            bad += [f"卡上的放行（{entry.file} 的 {entry.function}()）：{p}" for p in problems]
+            label = "卡上的放行" if entry.writes is None else "卡頂層的 [[by_design]]"
+            bad += [f"{label}（{entry.file} 的 {entry.function}()）：{p}" for p in problems]
             continue
         usable.append(entry)
     return bad, usable
@@ -866,11 +906,12 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         _scan_scope(_parse(path, rel), rel, (), False, {}, {}, rules, facts)
 
     bad, usable = _allow_problems(allow, scanned, _ignored_prefixes(scan_root))
-    used: set[int] = set()
+    used: dict[int, int] = {}
     for hit in facts.hits:
         keep = [i for i, entry in enumerate(usable) if _matches(entry, hit)]
         if keep:
-            used.update(keep)
+            for i in keep:
+                used[i] = used.get(i, 0) + 1
             continue
         bad.append(f"{hit.where} {hit.message}")
     for index, entry in enumerate(usable):
@@ -878,6 +919,12 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             bad.append(
                 f"卡上的放行（{entry.file} 的 {entry.function}()，寫到 {entry.path}）從頭到尾沒有對象"
                 "——那個函式裡沒有任何一筆會被擋掉的寫入，這條放行該拿掉了"
+            )
+        elif entry.writes is not None and used[index] != entry.writes:
+            bad.append(
+                f"卡頂層的 [[by_design]]（{entry.file} 的 {entry.function}()，寫到 {entry.path}）"
+                f"登記 {entry.writes} 筆寫入，這一跑量到 {used[index]} 筆——資料寫死筆數，"
+                "同一個函式多出來的那一筆不會跟著被准許；真的要改就連卡一起改"
             )
 
     if len(facts.definitions) > 1:

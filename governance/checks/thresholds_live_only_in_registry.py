@@ -14,7 +14,10 @@
    函式簽章的預設值、以及賦值運算式裡包起來的容器與 lambda。**函式身體裡的字面值不看**
    ——那是演算法（切片、索引、位移），不是門檻。放行只有兩種：值就是離開碼約定的那三個數
    （唯一一份住在 ``governance/exit_codes.py``，這裡 import 進來用，不自己再寫一次），
-   或具名登記在卡的 ``[[settings.allow]]``（``file``＋``name``＋``reason``）。名字命中卡上
+   或具名登記在卡的 ``[[settings.allow]]``（``file``＋``name``＋``reason``＋``expires``，暫時的）
+   或卡頂層的 ``[[by_design]]``（``file``＋``name``＋``assignments``（准幾處載入時賦值）＋``reason``、沒有到期日；本來就不是門檻的那一種，
+   例如協定碼，#1014）。``[[by_design]]`` 登記的名字在那支檔的載入時位置找不到就紅——資料要跟
+   程式對得上；同一支檔裡別的名字照樣要登記。名字命中卡上
    登記的門檻樣式（``MAX_*``、``*_TIMEOUT`` 這些）時，值落在離開碼白名單裡也一樣要登記
    ——不然「深度上限」這種門檻只要把值寫成那三個數之一就整條繞過去。
 
@@ -24,7 +27,7 @@
    值等於離開碼那三個數的門檻放掉——卡的人話到處在寫「回 2 不回 0」，不放掉會誤判。
 
 血債與關聯事故寫在卡上（``governance/rules/thresholds-live-only-in-registry.toml``），
-這裡不重複；那張卡刻意沒管的四件事也在卡面。
+這裡不重複；那張卡刻意沒管的五件事也在卡面。
 
 這支程式自己受這條規矩管（它就在掃描面裡）：從頭到尾沒有一個模組層級的數字字面值。
 """
@@ -43,6 +46,7 @@ from governance.loader import (
     CHECKS_DIR,
     EXEMPTION_KEYS,
     RULES_DIR,
+    by_design_entries,
     setting_strings,
     setting_tables,
 )
@@ -65,6 +69,8 @@ ALLOW_KEY = "allow"
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("file", "name", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+BY_DESIGN_KEYS = {"file": "text", "name": "text", "assignments": "count"}
 
 # 唯一的值白名單：離開碼約定那三個數。刻意 import 名字而不是寫值——這張卡自己的規矩就是
 # 「同一個數字不准有第二個家」，它們的家是 governance/exit_codes.py。
@@ -101,6 +107,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或形狀不對，一律 raise ToolBroken——讀不到登記簿就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], dict[tuple[str, str], int]]:
+    """這張卡的 ``[settings]``（形狀驗過）＋卡頂層 ``[[by_design]]`` 登記的（檔, 名字）→ 准幾處載入時賦值。"""
     mine: list[tuple[str, dict[str, object]]] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -117,7 +128,14 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（門檻樣式、登記表清單與例外清單都寫在那裡）")
     _assert_settings(settings, rel)
-    return settings
+    entries = by_design_entries(data, BY_DESIGN_KEYS, rel)
+    keys = [(str(e["file"]), str(e["name"])) for e in entries]
+    allowed = [(str(e["file"]), str(e["name"])) for e in setting_tables(settings, ALLOW_KEY)]
+    twice = sorted({key for key in [*keys, *allowed] if [*keys, *allowed].count(key) > 1})
+    if twice:
+        raise ToolBroken(f"{rel} 把 {twice} 登記了不只一次（放行與 [[by_design]] 合起來算）")
+    designed = {key: int(str(e["assignments"])) for key, e in zip(keys, entries)}
+    return settings, designed
 
 
 def _assert_settings(settings: dict[str, object], rel: str) -> None:
@@ -232,13 +250,17 @@ def _threshold_pattern(name: str, patterns: list[str]) -> str:
 
 
 def _programs_problems(
-    scan_root: Path, files: list[Path], settings: dict[str, object], used: set[tuple[str, str]]
+    scan_root: Path,
+    files: list[Path],
+    settings: dict[str, object],
+    used: dict[tuple[str, str], int],
+    designed: dict[tuple[str, str], int],
 ) -> list[str]:
     """第①條：程式裡不准有載入時就算好的門檻。"""
     patterns = setting_strings(settings, "threshold_name_patterns")
     registered = {
         (str(entry["file"]), str(entry["name"])) for entry in setting_tables(settings, ALLOW_KEY)
-    }
+    } | set(designed)
     programs = _scanned_python(scan_root, files)
     if not programs:
         raise ToolBroken(
@@ -257,22 +279,22 @@ def _programs_problems(
         for shown, bare, lineno, values in _load_time_entries(tree.body, ""):
             key = (rel, shown)
             if key in registered:
-                used.add(key)
+                used[key] = used.get(key, 0) + 1
                 continue
             hit = _threshold_pattern(bare, patterns)
             if not all(value in EXIT_CODE_VALUES for value in values):
                 bad.append(
                     f"{rel}:{lineno} {shown} 在模組載入時就把數字寫死了"
                     f"（{_shown_values(values)}）——門檻只准住在卡的登記簿，檢查程式從卡讀進來；"
-                    f"真的不是判決門檻（列舉、協定碼、看門狗秒數）就在卡 {CARD_ID} 的"
-                    f" [[settings.{ALLOW_KEY}]] 具名登記並寫理由"
+                    f"真的不是判決門檻（列舉、協定碼）就在卡 {CARD_ID} 頂層的 [[by_design]] 具名登記、"
+                    f"寫死准幾處、寫理由；暫時的才進 [[settings.{ALLOW_KEY}]] 帶到期日"
                 )
             elif hit:
                 bad.append(
                     f"{rel}:{lineno} {shown} 的名字命中卡上登記的門檻樣式 {hit!r} 又帶了數字"
                     f"（{_shown_values(values)}）——值落在離開碼白名單裡也不放行，不然任何門檻"
                     f"只要把值寫成離開碼那三個數之一就整條繞過去了。真的不是判決門檻就在卡"
-                    f" {CARD_ID} 的 [[settings.{ALLOW_KEY}]] 具名登記並寫理由"
+                    f" {CARD_ID} 頂層的 [[by_design]] 具名登記（寫死准幾處）；暫時的才進 [[settings.{ALLOW_KEY}]]"
                 )
     return bad
 
@@ -333,10 +355,22 @@ def _cards_problems(scan_root: Path, files: list[Path], settings: dict[str, obje
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
-    used: set[tuple[str, str]] = set()
-    bad = _programs_problems(scan_root, files, settings, used)
+    settings, designed = _card(scan_root, files)
+    used: dict[tuple[str, str], int] = {}
+    bad = _programs_problems(scan_root, files, settings, used, designed)
     bad += _cards_problems(scan_root, files, settings)
+    bad += [
+        f"卡 {CARD_ID} 頂層的 [[by_design]] 登記了 {file}／{name}，但那支檔的載入時位置找不到這個名字"
+        "——資料是規矩的形狀、沒有到期日，所以要跟程式對得上；名字改了或拿掉了就把那一筆一起改"
+        for file, name in designed
+        if (file, name) not in used
+    ]
+    bad += [
+        f"{file} 的 {name} 有 {used[(file, name)]} 處載入時賦值，卡 {CARD_ID} 頂層的 [[by_design]] 登記 {want} 處"
+        "——資料寫死處數，同一個名字底下多一處、少一處都要連卡一起改（不然登記一個名字，它底下再多寫的賦值就跟著被准許；這一格看不見的寫法列在卡尾）"
+        for (file, name), want in sorted(designed.items())
+        if (file, name) in used and used[(file, name)] != want
+    ]
 
     allow = setting_tables(settings, ALLOW_KEY)
     stale = [

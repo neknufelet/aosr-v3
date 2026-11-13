@@ -27,6 +27,11 @@
 物件本身」——``handoff.md`` 跟 v2 的 ``docs/next.md`` 是同一種會持續長大的檔——所以放行帶
 上限（``handoff.md`` 自己寫「這份超過 60 行就該砍」，v2 事故的對策也是行數上限）。
 
+卡**頂層**的 ``[[by_design]]`` 跟放行同一個形狀（``path``＋``max_lines``＋``reason``），差在它是
+規矩本身的形狀、沒有到期日（#1014，老闆 2026-11-13 拍 B：決策紙明文允許的那一份手寫檔，本來就該
+這樣）。准許的對象寫死成一個路徑：別的檔名命中樣式照樣紅；登記的那個檔不在這棵樹裡也紅
+——資料要跟樹對得上，對不上就是沒人回頭看的清單。同一個路徑在放行與資料裡各寫一次、或寫兩次，回 2。
+
 血債 ``status-file-grows-into-history-ledger``（v2-audit/lessons.json，legacy_id L38）：
 事故現場就是手寫的 ``docs/next.md``，劃掉的完成項留 37 條、同一份檔同時寫「已 commit」與
 「未 commit」，守衛只守 100 行照樣過。必紅樣本 ``case-v2-next-md`` 就是那個現場。
@@ -49,6 +54,7 @@ from governance.exit_codes import ToolBroken, run
 from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
+    by_design_entries,
     setting_int,
     setting_strings,
     setting_tables,
@@ -79,6 +85,8 @@ ALLOW_KEY = "allow"
 # 形狀定義在 governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("path", "max_lines", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, *INT_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+BY_DESIGN_KEYS = {"path": "text", "max_lines": "count"}
 
 
 def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
@@ -86,6 +94,12 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或門檻的形狀不對，一律 raise ToolBroken——沒有門檻就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], dict[str, int], list[str], str]:
+    """這支檢查的卡：``[settings]``（形狀驗過）、准許的檔（路徑→行數上限，放行與資料合起來）、
+    其中由 ``[[by_design]]`` 准許的那幾個路徑、以及卡的相對路徑。"""
     rules_dir = scan_root / RULES_DIR
     mine: list[tuple[Path, dict[str, object]]] = []
     for path in sorted(f for f in files if f.parent == rules_dir and f.suffix == ".toml"):
@@ -106,7 +120,17 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（門檻與名單都寫在那裡）")
     _settings_problems(settings, str(rel))
-    return settings
+    permitted: dict[str, int] = {}
+    designed = by_design_entries(data, BY_DESIGN_KEYS, str(rel))
+    for entry in [*setting_tables(settings, ALLOW_KEY), *designed]:
+        name = str(entry["path"])
+        if name in permitted:
+            raise ToolBroken(
+                f"{rel} 把 {name} 准許了不只一次（放行與 [[by_design]] 合起來算）"
+                "——兩筆各寫一個上限，哪一個算數就說不清楚"
+            )
+        permitted[name] = setting_int(entry, "max_lines")
+    return settings, permitted, [str(entry["path"]) for entry in designed], str(rel)
 
 
 def _settings_problems(settings: dict[str, object], rel: str) -> None:
@@ -230,8 +254,21 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     )
 
 
+def _stale_by_design(scan_root: Path, files: list[Path], designed: list[str], rel: str) -> list[str]:
+    """資料登記的檔不在這棵樹裡就紅：資料要跟樹對得上（放行沒對象只是過期，由到期日管）。"""
+    names = {f.relative_to(scan_root).as_posix() for f in files}
+    bad: list[str] = []
+    for name in designed:
+        if name not in names:
+            bad.append(
+                f"{rel} 的 [[by_design]] 准許 {name}，但這棵樹裡沒有這個檔"
+                "——資料要跟樹對得上；檔拿掉了就把那一筆一起拿掉"
+            )
+    return bad
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, allow, designed, card_rel = _card(scan_root, files)
     name_patterns = setting_strings(settings, "name_patterns")
     name_exempt = setting_strings(settings, "name_exempt_prefixes")
     scan_exempt = setting_strings(settings, "scan_exempt_prefixes")
@@ -240,12 +277,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     max_checkboxes = setting_int(settings, "max_checkboxes")
     labels = setting_strings(settings, "heading_labels")
     heading_max = setting_int(settings, "heading_max_chars")
-    allow = {
-        str(entry["path"]): setting_int(entry, "max_lines")
-        for entry in setting_tables(settings, ALLOW_KEY)
-    }
 
-    bad: list[str] = []
+    bad: list[str] = _stale_by_design(scan_root, files, designed, card_rel)
     for path in targets(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
         if not path.is_file():
@@ -264,8 +297,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             lines = len(_read_text(path, rel).splitlines())
             if lines > allow[rel]:
                 bad.append(
-                    f"{rel} 在放行名單上，但它 {lines} 行，超過卡上登記的上限 {allow[rel]} 行"
-                    "——放行帶上限才不是無條件豁免；v2 的 docs/next.md 就是這樣長成歷史帳本的"
+                    f"{rel} 在准許名單上（放行或 [[by_design]]），但它 {lines} 行，超過卡上登記的上限 {allow[rel]} 行"
+                    "——准許帶上限才不是無條件豁免；v2 的 docs/next.md 就是這樣長成歷史帳本的"
                 )
 
         if path.suffix.casefold() not in MARKDOWN_SUFFIXES:

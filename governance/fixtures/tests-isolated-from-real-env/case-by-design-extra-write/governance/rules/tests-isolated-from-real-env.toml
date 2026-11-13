@@ -1,0 +1,16 @@
+# 樣本用的卡：只帶 id、check 與 [settings]，加上卡頂層的 [[by_design]]。每一份樣本都是獨立的掃描根，
+# 檢查程式的門檻只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（工具自壞），不回 0。
+id = "tests-isolated-from-real-env"
+check = "governance/checks/tests_isolated_from_real_env.py"
+
+[settings]
+# 唯一准 spawn 版控工具、准對真樹寫檔的那支 fixture 叫什麼名字。
+sandbox_fixture = "git_sandbox"
+
+# 本來就該這樣的准許，寫死准兩筆寫入（跟主卡同一個形狀）。
+[[by_design]]
+file = "tests/conftest.py"
+function = "pytest_sessionstart"
+path = "governance/receipts"
+writes = 2
+reason = "樣本用的准許：主控建收據父目錄並刪掉舊收據，兩筆。"

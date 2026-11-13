@@ -45,6 +45,12 @@
   （ISO 日期字串，要加引號）。形狀見 :data:`EXEMPTION_KEYS` 與 :func:`exemption_problems`；
   「到期了沒」「理由是不是只是一個推託的字樣」由規矩卡 ``exemptions-need-expiry`` 的檢查判。
   純陣列（副檔名清單、樣式清單、前綴清單）不是放行條目，那是規矩本身的形狀。
+* ``[[by_design]]``——「本來就該這樣」的規矩准許（#1014，老闆 2026-11-13 拍 B）。住在卡的**頂層**、
+  不在 ``[settings]`` 底下，所以不是放行條目、沒有到期日：它是規矩本身的形狀（跟 ``[[allowlist]]``
+  同一類），具名寫死位置（檔＋符號）與筆數，同類新出現的照樣紅、登記的對象不在或筆數對不上也紅
+  ——那兩半由各支檢查自己判。形狀這裡只驗兩件共用的事：每一筆有非空的 ``reason``、不准帶
+  ``expires``（會到期的那一種寫進 ``[[settings.allow]]``）。各卡自己的欄位由那支檢查用
+  :func:`by_design_entries` 讀。
 * ``tool_broken_fixture``——**該回 2 的**樣本目錄（每個子目錄一份，餵下去必須回「工具自壞」）。
   必紅樣本（``negative_fixture``）底下每一份都必須回 1，所以「這一跑不算數」那種樣本
   放不進去，只能另開一個目錄；寫了這欄，後設測試就多跑一回合（見
@@ -74,6 +80,14 @@ CHECKS_DIR = "governance/checks"
 EXEMPTION_KEYS = ("reason", "expires")
 # 到期日只認這一種寫法：四位數年、兩位數月、兩位數日。
 EXEMPTION_DATE_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# 「本來就該這樣」的規矩准許：卡頂層的表陣列（不在 [settings] 底下，所以不是放行條目）。
+# 每一筆必帶非空的 reason、不准帶 expires；其餘欄位各卡自己定、各支檢查自己讀（見 by_design_entries）。
+BY_DESIGN_FIELD = "by_design"
+BY_DESIGN_REASON_KEY = "reason"
+# 各卡欄位的型別只認這四種：非空字串、正整數（true／false 不算）、非空字串的清單、
+# 以及「名字→正整數」的非空表（一個檔裡哪幾個符號各准幾處，例如 style-guard 的 print）。
+BY_DESIGN_KINDS = ("text", "count", "texts", "counts")
 
 # 執行者白名單：只認版控裡的機器。人、審查員、健檢報告、本機 hook 都不算。
 ENFORCERS = ("github-actions-job", "pytest-meta-test")
@@ -510,6 +524,93 @@ def exemption_problems(entry: object, where: str) -> list[str]:
     return exemption_field_problems(entry, where)
 
 
+def _by_design_value_problem(value: object, kind: str) -> str:
+    """一格欄位的型別對不對。對就回空字串，不對回一句「應該是什麼」。"""
+    if kind == "text":
+        return "" if isinstance(value, str) and value.strip() else "非空字串"
+    if kind == "count":
+        ok = isinstance(value, int) and not isinstance(value, bool) and value > 0
+        return "" if ok else "正整數"
+    if kind == "texts":
+        ok = isinstance(value, list) and bool(value) and all(isinstance(x, str) and x.strip() for x in value)
+        return "" if ok else "非空字串的清單"
+    if kind == "counts":
+        ok = isinstance(value, dict) and bool(value) and all(
+            isinstance(name, str) and name.strip() and isinstance(n, int) and not isinstance(n, bool) and n > 0
+            for name, n in value.items()
+        )
+        return "" if ok else "「名字→正整數」的非空表"
+    return f"不認識的型別 {kind!r}（只認 {list(BY_DESIGN_KINDS)}）"
+
+
+def _by_design_common_problems(entry: Mapping[str, object], where: str) -> list[str]:
+    """每一筆都要守的兩件事：reason 非空、不准帶 expires。載入器與檢查程式共用這一份。"""
+    bad: list[str] = []
+    if EXEMPTION_KEYS[1] in entry:
+        bad.append(
+            f"{where} 帶了 {EXEMPTION_KEYS[1]}——[[{BY_DESIGN_FIELD}]] 是規矩的形狀、沒有到期日；"
+            "會到期的那一種寫進 [settings] 底下的 [[settings.allow]]"
+        )
+    reason = entry.get(BY_DESIGN_REASON_KEY)
+    if not isinstance(reason, str) or not reason.strip():
+        bad.append(f"{where} 的 {BY_DESIGN_REASON_KEY} 必須是非空字串（為什麼本來就該這樣），實際是 {reason!r}")
+    return bad
+
+
+def _by_design_entry_problems(entry: Mapping[str, object], keys: Mapping[str, str], where: str) -> list[str]:
+    bad = _by_design_common_problems(entry, where)
+    known = {*keys, BY_DESIGN_REASON_KEY, EXEMPTION_KEYS[1]}
+    extra = sorted(k for k in entry if k not in known)
+    if extra:
+        bad.append(f"{where} 多了不認識的鍵 {extra}，只認 {sorted({*keys, BY_DESIGN_REASON_KEY})}")
+    for key, kind in keys.items():
+        if key not in entry:
+            bad.append(f"{where} 缺 {key}——位置、筆數要寫死，同類新出現的才會照樣紅")
+            continue
+        want = _by_design_value_problem(entry[key], kind)
+        if want:
+            bad.append(f"{where} 的 {key} 必須是{want}，實際是 {entry[key]!r}")
+    return bad
+
+
+def by_design_problems(data: Mapping[str, object]) -> list[str]:
+    """驗卡頂層 ``[[by_design]]`` 共用的形狀（非空表陣列、reason 非空、不帶 expires）。沒寫就沒有問題。
+
+    各卡自己的欄位與型別不在這裡判，由那支檢查用 :func:`by_design_entries` 讀的時候判。
+    """
+    if BY_DESIGN_FIELD not in data:
+        return []
+    raw = data[BY_DESIGN_FIELD]
+    if not isinstance(raw, list) or not raw or not all(isinstance(x, dict) for x in raw):
+        return [f"選填欄位 {BY_DESIGN_FIELD} 寫了就必須是非空的 [[{BY_DESIGN_FIELD}]] 表陣列，實際是 {raw!r}"]
+    bad: list[str] = []
+    for index, entry in enumerate(raw):
+        bad += _by_design_common_problems(entry, f"[[{BY_DESIGN_FIELD}]] 第 {index + 1} 條")
+    return bad
+
+
+def by_design_entries(data: Mapping[str, object], keys: Mapping[str, str], where: str) -> list[dict[str, object]]:
+    """讀一張卡頂層的 ``[[by_design]]``：每一筆欄位剛好是 ``keys``（名字→型別）加 ``reason``。
+
+    沒寫就是空 list（資料只會准許，缺了只會更紅）；寫了形狀就要對，不對一律 raise
+    :class:`ToolBroken`——必紅樣本的迷你卡不經載入器，這一關要由檢查程式自己守。
+    """
+    if BY_DESIGN_FIELD not in data:
+        return []
+    raw = data[BY_DESIGN_FIELD]
+    if not isinstance(raw, list) or not raw or not all(isinstance(x, dict) for x in raw):
+        raise ToolBroken(f"{where} 的 {BY_DESIGN_FIELD} 寫了就必須是非空的表陣列，實際是 {raw!r}")
+    out: list[dict[str, object]] = []
+    bad: list[str] = []
+    for index, entry in enumerate(raw):
+        fields = {str(k): v for k, v in entry.items()}
+        bad += _by_design_entry_problems(fields, keys, f"{where} 的 [[{BY_DESIGN_FIELD}]] 第 {index + 1} 條")
+        out.append(fields)
+    if bad:
+        raise ToolBroken("；".join(bad))
+    return out
+
+
 def settings_exemptions(data: dict[str, object]) -> list[tuple[str, int, object]]:
     """一張卡的放行條目：``[settings]`` 底下每一個表陣列的每一筆。
 
@@ -788,6 +889,7 @@ def card_problems(path: Path, scan_root: Path) -> list[str]:
     bad += allowlist_problems(data)
     bad += clean_tree_unset_env_problems(data)
     bad += _settings_exemption_problems(data)
+    bad += by_design_problems(data)
     bad += _path_problems(data, scan_root)
     return bad
 

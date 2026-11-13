@@ -1,0 +1,3 @@
+# 收據目錄不進版控（准許的那個路徑被蓋住了，壞不在這裡）。
+/governance/receipts/
+__pycache__/

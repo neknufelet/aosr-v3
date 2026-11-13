@@ -1,0 +1,3 @@
+壞法：卡頂層 `[[by_design]]` 登記 governance/checks/stub_protocol.py 的 SHELL_SAYS_EMPTY 不是門檻，
+但那支檔裡已經沒有這個名字（改名了）。資料是規矩的形狀、沒有到期日，所以要跟程式對得上：
+登記的對象不在了，那一筆就是沒人回頭看的清單，當場紅（#1014）。

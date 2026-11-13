@@ -7,9 +7,18 @@
 
 **① print 只准出現在輸出層**
 
-輸出層是卡的 ``[[settings.allow]]`` 具名列出的那幾個檔，一筆一個檔，各自帶 ``reason``
-與 ``expires``（那兩格的形狀定義在 :mod:`governance.loader`，「到期了沒」由規矩卡
-``exemptions-need-expiry`` 判）。不在名單上的檔出現 ``print(...)`` 就是一筆違規。
+輸出層是卡上具名列出的那幾個檔，兩種寫法：
+
+* 卡**頂層**的 ``[[by_design]]``——本來就該這樣的那一種（命令列工具的輸出、輸出層本身；#1014，
+  老闆 2026-11-13 拍 B），沒有到期日。一筆一個檔，``prints`` 寫死「哪幾個函式各准幾處 print」
+  （函式用點連起來的全名，類別裡的方法寫 ``類別.方法``，模組層寫 ``<module>``）。同一支檔裡
+  沒登記的函式出現 print、登記的函式處數多一處或少一處、登記的檔不在了，都紅——同類新出現的
+  不會跟著被准許。
+* ``[settings]`` 底下的 ``[[settings.allow]]``——暫時的放行，一筆一個檔，各自帶 ``reason``
+  與 ``expires``（那兩格的形狀定義在 :mod:`governance.loader`，「到期了沒」由規矩卡
+  ``exemptions-need-expiry`` 判）。整支檔放過、不數處數，所以要有到期日。
+
+不在兩種名單上的檔出現 ``print(...)`` 就是一筆違規。
 治理層要對人說話的正路是 :func:`governance.exit_codes.note`：判決收據、HIT、NOTE
 全部從同一層出去，才看得出哪一行是這一跑的產品、哪一行是誰某天為了除錯加的。
 
@@ -84,6 +93,7 @@ from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
+    by_design_entries,
     setting_int,
     setting_strings,
     setting_tables,
@@ -124,6 +134,10 @@ ALLOW_KEY = "allow"
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("path", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*INT_KEYS, *LIST_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+# prints：哪幾個函式各准幾處 print（函式全名用點連起來，模組層寫 MODULE_SCOPE）。
+BY_DESIGN_KEYS = {"path": "text", "prints": "counts"}
+MODULE_SCOPE = "<module>"
 
 # 自己一個作用域的節點。走到它就換一層算，外層不把內層的行數與分支算進來。
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -170,6 +184,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或形狀不對，一律 raise ToolBroken——沒有尺就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], dict[str, dict[str, int]], str]:
+    """這張卡的 ``[settings]``（形狀驗過）、頂層 ``[[by_design]]``（檔→{函式: 處數}）、卡的相對路徑。"""
     mine: list[tuple[str, dict[str, object]]] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -189,7 +208,13 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（門檻、路徑水槽名單與輸出層白名單都寫在那裡）")
     _assert_settings(settings, rel)
-    return settings
+    designed: dict[str, dict[str, int]] = {}
+    for entry in by_design_entries(data, BY_DESIGN_KEYS, rel):
+        name = str(entry["path"])
+        if name in designed or name in _allow_paths(settings):
+            raise ToolBroken(f"{rel} 把 {name} 准許了不只一次（放行與 [[by_design]] 合起來算）")
+        designed[name] = _pinned(entry["prints"])
+    return settings, designed, rel
 
 
 def _int_problems(settings: dict[str, object]) -> list[str]:
@@ -376,13 +401,61 @@ def _print_calls(tree: ast.Module, resolved: names.Names) -> list[ast.Call]:
     ]
 
 
+def _pinned(raw: object) -> dict[str, int]:
+    """``prints`` 那一格收窄成具體型別（形狀已由 by_design_entries 驗過，這裡是第二道）。"""
+    if not isinstance(raw, dict):
+        raise ToolBroken(f"[[by_design]] 的 prints 必須是「函式→處數」的表，實際是 {raw!r}")
+    return {str(name): setting_int(raw, str(name)) for name in raw}
+
+
+def _print_scopes(tree: ast.Module, resolved: names.Names) -> list[tuple[str, ast.Call]]:
+    """每一處 print 落在哪個函式裡：(函式全名, 呼叫)。類別與巢狀函式用點連起來，模組層是 MODULE_SCOPE。"""
+    calls = {id(call) for call in _print_calls(tree, resolved)}
+    found: list[tuple[str, ast.Call]] = []
+
+    def walk(node: ast.AST, chain: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = (*chain, child.name) if isinstance(child, SCOPE_NODES) else chain
+            if isinstance(child, ast.Call) and id(child) in calls:
+                found.append((".".join(inner) or MODULE_SCOPE, child))
+            walk(child, inner)
+
+    walk(tree, ())
+    return found
+
+
+def _by_design_print_hits(
+    tree: ast.Module, rel: str, resolved: names.Names, pinned: dict[str, int], card_rel: str
+) -> list[str]:
+    """卡頂層 ``[[by_design]]`` 准許的檔：只准登記的函式 print，處數要剛好對上。"""
+    bad: list[str] = []
+    counted: dict[str, int] = {}
+    for scope, call in _print_scopes(tree, resolved):
+        counted[scope] = counted.get(scope, 0) + 1
+        if scope not in pinned:
+            bad.append(
+                f"{rel}:{call.lineno} 在 {scope} 裡用 {PRINT_NAME}(...) 說話，但卡 {card_rel} 頂層的"
+                f" [[by_design]] 只准許這支檔的 {sorted(pinned)} 這幾個函式——准許寫死到函式，"
+                "同一支檔裡新冒出來的 print 不會跟著被准許；真的是產品就連卡一起改"
+            )
+    for scope, want in sorted(pinned.items()):
+        got = counted.get(scope, 0)
+        if got != want:
+            bad.append(
+                f"{rel} 的 {scope} 有 {got} 處 {PRINT_NAME}(...)，卡 {card_rel} 頂層的 [[by_design]] 登記 {want} 處"
+                "——資料寫死處數，多一處、少一處都要連卡一起改（對不上就是沒人回頭看的清單）"
+            )
+    return bad
+
+
 def _print_hits(tree: ast.Module, rel: str, resolved: names.Names) -> list[str]:
     return [
         f"{rel}:{call.lineno} 用 {PRINT_NAME}(...) 說話（`{ast.unparse(call.func)}`），但這個檔不在輸出層白名單上"
         "——要對人說話就走輸出層那支 note()（governance/exit_codes.py）；"
         "散在各支程式裡的 print 混在判決輸出裡，之後看不出哪一行是這一跑的收據、"
-        f"哪一行是誰某天為了除錯加的。真的是這支程式的產品，就在卡 {CARD_ID} 的"
-        f" [[settings.{ALLOW_KEY}]] 具名放行，寫理由與到期日"
+        f"哪一行是誰某天為了除錯加的。真的是這支程式的產品，就在卡 {CARD_ID} 頂層的"
+        " [[by_design]] 寫死哪幾個函式各准幾處；暫時的才進"
+        f" [[settings.{ALLOW_KEY}]]，寫理由與到期日"
         for call in _print_calls(tree, resolved)
     ]
 
@@ -617,7 +690,7 @@ def _note_output_layer(counts: dict[str, int], allowed: list[str]) -> None:
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, designed, card_rel = _card(scan_root, files)
     note(f"ruff 在崗：{_ruff_version()}")
     picked = _scanned_python(scan_root, files, _names(settings, "scan_exempt_prefixes"))
     if not picked:
@@ -628,7 +701,13 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     allowed = _allow_paths(settings)
     counts: dict[str, int] = {rel: 0 for rel in allowed}
-    bad: list[str] = []
+    present = {path.relative_to(scan_root).as_posix() for path in picked if path.is_file()}
+    bad: list[str] = [
+        f"卡 {card_rel} 頂層的 [[by_design]] 准許 {rel} 的 print，但這棵樹的掃描面裡沒有這支檔"
+        "——資料要跟樹對得上；檔拿掉或搬家了就把那一筆一起改"
+        for rel in sorted(designed)
+        if rel not in present
+    ]
     for path in picked:
         rel = path.relative_to(scan_root).as_posix()
         if not path.is_file():
@@ -637,7 +716,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         text = _read_text(path, rel)
         tree = _parse(text, rel)
         resolved = names.resolve(tree, ASSUMED_NAMES)
-        if rel in counts:
+        if rel in designed:
+            bad += _by_design_print_hits(tree, rel, resolved, designed[rel], card_rel)
+        elif rel in counts:
             counts[rel] = len(_print_calls(tree, resolved))
         else:
             bad += _print_hits(tree, rel, resolved)

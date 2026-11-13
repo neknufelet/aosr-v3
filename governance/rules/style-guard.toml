@@ -3,7 +3,7 @@
 # 確認沒有任何一筆的本體是這幾條寫法規則之一——所以 blood_debt 是空的，related_lessons 也空。
 # 它的價值是「從今天起別長歪」：一條寫法規則的收益全在未來，不在補洞。
 id = "style-guard"
-human = "寫法警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），五條。①`print` 只准出現在輸出層——輸出層是這張卡 `[[settings.allow]]` 具名列出的那幾個檔，每筆帶理由與到期日（那兩格由 exemptions-need-expiry 那張卡守）；別的檔要對人說話就走 `governance/exit_codes.py` 的 `note()`，不要自己 print，因為散在各支程式裡的 print 混在判決輸出裡，看不出哪一行是收據哪一行是隨手記的。名字是**解析出來的、不是比字面**（共用零件 `governance/names.py`）：`p = print` 之後的 `p(...)`、`import builtins` 之後的 `builtins.print(...)`、`from builtins import print as w` 之後的 `w(...)` 都咬，三種都是實測戳出來的洞、各有一份必紅樣本；`sys.stdout.write` 與 `logging` 還是繞得過去，照實記在卡的檔尾。②字串拼路徑：`+` 拼出來的字串流進開檔／路徑／子程序參數（`open()`、`Path()`、`os.path.*` 系列、`subprocess` 的 argv）才紅，看到字串相加不會紅——判準刻意收窄成「拼接鏈裡有字串字面值，而且結果直接當參數、或先指給同一個作用域裡的一個名字再當參數」；乾淨樹裡 `blueprint/remap_cards.py` 就有一處 `json.dumps(...) + 換行` 的拼接，它流進的是檔案內容不是路徑，所以不咬。③開檔一律 `with`：`open(...)` 不在某個 `with` 的頭上就紅（`Path.read_text`／`write_text` 合法，它們自己關）。④函式的行數（不含文件字串）與分支數超過這張卡 `[settings]` 登記的門檻就紅；門檻怎麼量出來的寫在卡的註解裡，人話這裡不抄數字。⑤一支檔的行數超過這張卡 `[settings]` 登記的上限就紅。這一條數的是整份檔有幾行，空行、註解、說明文字全部算進去（第④條會把函式自己的說明扣掉，那是為了不罰寫說明；這一條問的是「一個人要看完這支檔要捲多少畫面」，說明也要捲，所以不扣）。為什麼要有它：一支檔大到看不完，改它的人就只能挑一段看一段改，旁邊那一段會不會被自己弄壞沒人知道；上一代那棵樹拆過大檔，拆完又長回去，因為從來沒有上限。上限是多少、怎麼定出來的、當時量到哪些數字，寫在這張卡登記簿旁邊的註解裡，人話這裡一樣不抄數字。這幾條之外的寫法規則交給 ruff：規則集與它自己的數字住在 `pyproject.toml` 的 `[tool.ruff]`（只有一份、走 PR 看得到），CI 有獨立一步 `uv run ruff check`。ruff 裝不起來這支檢查回 2 不回 0——ruff 是這張卡的另一半，它不在的時候「沒問題」這句話不算數。讀不到這張卡的 `[settings]`、掃描面上一支 .py 都沒有、某支 .py 剖不開，一律回 2 不回 0。"
+human = "寫法警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），五條。①`print` 只准出現在輸出層——輸出層是這張卡具名列出的那幾個檔，兩種寫法：本來就該這樣的（命令列工具的輸出、輸出層本身）住在卡頂層的 `[[by_design]]`，每筆寫死「哪幾個函式各准幾處 `print`」與一句理由、沒有到期日，同一支檔裡沒登記的函式冒出 `print`、登記的函式多一處或少一處、登記的檔不在了，都紅——所以准許一支檔不等於准許它以後長出來的同類；暫時放過整支檔的才寫進 `[[settings.allow]]`，每筆帶理由與到期日（那兩格由 exemptions-need-expiry 那張卡守）；別的檔要對人說話就走 `governance/exit_codes.py` 的 `note()`，不要自己 print，因為散在各支程式裡的 print 混在判決輸出裡，看不出哪一行是收據哪一行是隨手記的。名字是**解析出來的、不是比字面**（共用零件 `governance/names.py`）：`p = print` 之後的 `p(...)`、`import builtins` 之後的 `builtins.print(...)`、`from builtins import print as w` 之後的 `w(...)` 都咬，三種都是實測戳出來的洞、各有一份必紅樣本；`sys.stdout.write` 與 `logging` 還是繞得過去，照實記在卡的檔尾。②字串拼路徑：`+` 拼出來的字串流進開檔／路徑／子程序參數（`open()`、`Path()`、`os.path.*` 系列、`subprocess` 的 argv）才紅，看到字串相加不會紅——判準刻意收窄成「拼接鏈裡有字串字面值，而且結果直接當參數、或先指給同一個作用域裡的一個名字再當參數」；乾淨樹裡 `blueprint/remap_cards.py` 就有一處 `json.dumps(...) + 換行` 的拼接，它流進的是檔案內容不是路徑，所以不咬。③開檔一律 `with`：`open(...)` 不在某個 `with` 的頭上就紅（`Path.read_text`／`write_text` 合法，它們自己關）。④函式的行數（不含文件字串）與分支數超過這張卡 `[settings]` 登記的門檻就紅；門檻怎麼量出來的寫在卡的註解裡，人話這裡不抄數字。⑤一支檔的行數超過這張卡 `[settings]` 登記的上限就紅。這一條數的是整份檔有幾行，空行、註解、說明文字全部算進去（第④條會把函式自己的說明扣掉，那是為了不罰寫說明；這一條問的是「一個人要看完這支檔要捲多少畫面」，說明也要捲，所以不扣）。為什麼要有它：一支檔大到看不完，改它的人就只能挑一段看一段改，旁邊那一段會不會被自己弄壞沒人知道；上一代那棵樹拆過大檔，拆完又長回去，因為從來沒有上限。上限是多少、怎麼定出來的、當時量到哪些數字，寫在這張卡登記簿旁邊的註解裡，人話這裡一樣不抄數字。這幾條之外的寫法規則交給 ruff：規則集與它自己的數字住在 `pyproject.toml` 的 `[tool.ruff]`（只有一份、走 PR 看得到），CI 有獨立一步 `uv run ruff check`。ruff 裝不起來這支檢查回 2 不回 0——ruff 是這張卡的另一半，它不在的時候「沒問題」這句話不算數。讀不到這張卡的 `[settings]`、掃描面上一支 .py 都沒有、某支 .py 剖不開，一律回 2 不回 0。"
 
 # 掃描面：進得了版控的每一支 .py，扣掉必紅樣本樹（那是別的掃描根，由後設測試單獨餵）
 # 與本機 agent 工具目錄（雲端 checkout 不會有，底下還有工作樹副本會把同一批檔算兩次）。
@@ -97,56 +97,98 @@ with_required_calls = ["open", "io.open"]
 # 這邊是給程式讀的）。
 scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
 
-# ── ① 的輸出層白名單 ───────────────────────────────────────────────────────
-# 一筆放行一個檔：那個檔裡的 print 是它的產品（CLI 輸出／收據行），不是拿來當 log。
-# 判準是「這一行 print 是不是這支程式要交出去的東西」：是就在這裡具名放行，
+allow = []
+
+# ── ① 的輸出層：本來就該這樣的那一種住在卡頂層的 [[by_design]] ──────────────────────
+# （不在 [settings] 底下，所以不是放行、沒有到期日；#1014，老闆 2026-11-13 拍 B。）
+# 一筆一個檔：那個檔裡的 print 是它的產品（CLI 輸出／收據行），不是拿來當 log。
+# 判準是「這一行 print 是不是這支程式要交出去的東西」：是就在這裡具名准許，
 # 不是就改寫法——治理層要對人說話走 governance/exit_codes.py 的 note()。
 # 立卡那個 PR 就是照這個判準把 13 處「拿 print 當 NOTE」改成走 note()，清單才縮到三筆。
+#
+# [by_design.prints] 寫死「哪幾個函式各准幾處 print」（函式全名用點連起來，模組層寫 "<module>"）：
+# 同一支檔裡沒登記的函式出現 print、登記的函式多一處或少一處、這支檔不在了，都紅。
+# 加一行輸出就連卡一起改這裡的處數——那個 diff 一眼看得出輸出層長了什麼。
+# 暫時要放過整支檔的，才寫進 [settings] 底下的 [[settings.allow]]（帶 reason 與 expires）。
 
-[[settings.allow]]
+[[by_design]]
 path = "governance/exit_codes.py"
 reason = "這個檔就是輸出層本身：判決收據那一行、列舉模式的清單、HIT 與 FAIL、以及新加的 note()，全部住在這裡。整個治理層對外說的每一句話都從這幾支函式出去，所以 print 在這裡是產品不是紀錄。"
-expires = "2027-03-08"
+[by_design.prints]
+list_files = 3
+note = 1
+report = 1
+run = 3
 
-[[settings.allow]]
+[[by_design]]
 path = "blueprint/remap_cards.py"
 reason = "產生器的命令列輸出：它跑完印的那一段統計（幾張卡、幾筆血債、幾個幽靈 id）就是它要交出去的東西，人照著那段判斷這一跑對不對。它不是被 CI 當閘用的檢查程式，沒有收據行的約定可走。"
-expires = "2027-03-08"
+[by_design.prints]
+die = 1
+print_summary = 11
+self_check = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "tests/test_fixture_runner.py"
 reason = "後設測試第四、六回把空宣告的斷言記到輸出；第七回印候選名單狀態與排除清單；第八回印 commits 分流。這些 print 都是刻意關掉 pytest 捕捉後留下的本跑結果，改走別的管線就看不見了。"
-expires = "2027-03-08"
+[by_design.prints]
+test_round4_external_tool_removed_is_tool_broken = 1
+test_round6_tool_broken_fixtures_are_tool_broken = 1
+test_round7_new_candidates_have_no_overlap = 3
+test_round8_negative_fixtures_contain_a_scoped_file = 1
 
-[[settings.allow]]
+[[by_design]]
 path = "src/aosr/physics/room_paths.py"
 reason = "新家第一個命令列工具（票 #181）：人看的路徑表、--json 的機器格式、--compare 的逐條判決，這三種標準輸出就是它要交出去的產品，跟 blueprint 那兩支產生器同一種東西。它不是被 CI 當閘用的檢查程式、也不在治理層，所以不走 governance/exit_codes.py 的 note()。列在這裡是為了讓豁免攤在卡上讓人審，而不是靠 sys.stdout.write 那條卡面自己記著的繞法。"
-expires = "2027-03-08"
+[by_design.prints]
+_compare_command = 4
+_multi_command = 2
+_multi_compare_command = 8
+_print_compare = 2
+_print_path_rows = 2
+_print_total_rows = 2
+main = 6
 
-[[settings.allow]]
+[[by_design]]
 path = "src/aosr/physics/fem_rigid.py"
 reason = "剛性參考房的命令列輸出層：逐頻的壓力大小、相位與能量表，以及讀檔或求解失敗訊息，都是這支工具交給使用者的產品。純裁判仍只回結構，不會從別的物理模組散印紀錄。"
-expires = "2027-03-08"
+[by_design.prints]
+main = 5
 
-[[settings.allow]]
+[[by_design]]
 path = "src/aosr/physics/late_energy_cli.py"
 reason = "晚期混響能量的命令列輸出層：逐頻帶吸收率、能量與對上一代答案的比對表，給監督印出來逐頻帶核對（老闆在 #275 回 A）；計算與裁判住 late_energy.py，不印字"
-expires = "2027-03-08"
+[by_design.prints]
+main = 3
 
-[[settings.allow]]
+[[by_design]]
 path = "blueprint/generate_config_cut1_answers.py"
 reason = "產生器的命令列輸出，跟 blueprint/remap_cards.py 同一種東西：它跑完印的那幾行（寫到哪裡、每一支模組幾個常數幾筆探針）就是它要交出去的東西，人照著那段判斷這一跑對不對。它不是被 CI 當閘用的檢查程式、沒有收據行的約定可走；它跑在上一代自己的直譯器上（要拿上一代那 11 支模組的凍結值當標準答案），連 v3 的輸出層那支模組都不一定在，所以那些行只能是這支程式自己的產品。它的產物——新家那 11 支的標準答案檔——跟它住同一層（blueprint 底下）。"
-expires = "2027-03-08"
+[by_design.prints]
+main = 2
 
-[[settings.allow]]
+[[by_design]]
 path = "src/aosr/physics/three_lane_report_cli.py"
 reason = "三路接合物理量報表的命令列輸出層：頂層、頻帶表與逐點表，給助理印出核對（老闆在 #280 回 A）；計算住 three_lane_report.py，不印字"
-expires = "2027-03-08"
+[by_design.prints]
+_regenerate_schemas = 2
+main = 3
 
-[[settings.allow]]
+[[by_design]]
 path = "src/aosr/reporting/scheme_cli.py"
 reason = "方案管線的命令列輸出層：印分段秒數、各類狀態與代價、兩份結果並排；求解與排名住 reporting 其他模組"
-expires = "2027-03-08"
+[by_design.prints]
+_compare = 3
+_comparison_table = 2
+_identity = 2
+_modal = 2
+_note_fem_reuse = 1
+_print_result = 6
+_print_stage_one_comparison_result = 5
+_run = 1
+_stage_one = 5
+_stage_one_compare = 4
+_stage_one_comparison_table = 3
 
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
 #
@@ -208,3 +250,8 @@ expires = "2027-03-08"
 #    刪掉，這張卡照樣綠。今天壓住它的是 PR 審與 ci-jobs-cannot-die-quietly（那張卡保證留下來
 #    的每一步都不准把離開碼吞掉）。要機器擋住「步驟被刪掉」得另外一條，形狀跟
 #    green-must-be-real-green 驗「那個 job 裡真的有一步在跑 pytest」一樣，今天沒做。
+#
+# 11) ① 的 [[by_design]] 粒度是「檔＋函式＋處數」，所以三件事看不見（審查 #1156 實測，照實記）：
+#    同一個函式裡把一處 print 原地換成另一處（處數不變）；參數預設值與裝飾器裡的 print 算在
+#    那個函式名下，但它們其實在模組載入時就跑；`map(print, …)` 這種把 print 當值傳出去的寫法
+#    不是呼叫，在沒登記的檔裡也不咬。前兩件要看 PR 的 diff，第三件跟第 6 條同一族。
