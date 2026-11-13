@@ -37,7 +37,8 @@ class Shift:
 
     @property
     def scheme(self) -> Scheme:
-        return to_scheme(self.template, self.placement, self.scheme_id)
+        # 移位紙第 3 條「不動：天雲」：天雲留在入選方案算好的位置，不照移過的喇叭與座位重算（#705 A）。
+        return to_scheme(self.template, self.placement, self.scheme_id, cloud_follows=False)
 
 
 @dataclass(frozen=True)

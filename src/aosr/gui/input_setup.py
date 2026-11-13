@@ -22,8 +22,9 @@ from aosr.gui.zone_edit import zone_cut_defaults
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
-from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
+from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing
 from aosr.search.furniture_prefilter import PLACEMENT_NAMES, scheme_placement_hits
+from aosr.search.layout import cloud_center_xy
 
 
 # 尺寸與來源只住這裡；下列位置已是施工單指定的相對座標，不在瀏覽器推算。
@@ -42,7 +43,7 @@ FURNITURE_DEFAULTS: dict[str, dict[str, object]] = {
              "description": "尺寸與頂面高 0.75 公尺：老闆 2026-10-10；板厚、木質與位置：主對話估，近邊離耳朵 0.45 公尺。"},
     "ceiling_cloud": {"item": {"furniture_id": "cloud", "kind": "ceiling_cloud", "material": "absorptive_cloud",
                                 "width_m": 1.35, "depth_m": 1.80, "height_m": 0.05},
-                      "description": "尺寸與底面在天花板下 0.15 公尺：老闆 2026-10-10；材質、中心與角度規則：主對話估，中心在兩喇叭水平中點與主位的中間，深邊順面向軸；只在勾選時算一次。"},
+                      "description": "尺寸與底面在天花板下 0.15 公尺：老闆 2026-10-10；材質、中心與角度規則：主對話估，中心在兩喇叭水平中點與主位的中間，深邊順面向軸；勾選時照現況算一次，搜尋時每個候選照自己的喇叭與座位重算水平中心（老闆 2026-10-26），高度與角度照這裡存的值。"},
 }
 CLOUD_CEILING_GAP_M = 0.15
 SHORTCUTS: dict[str, dict[str, object]] = {
@@ -198,18 +199,16 @@ def _geometry_scheme(document: dict[str, object]) -> Scheme:
 
 
 def default_furniture(kind: str, document: dict[str, object]) -> dict[str, object]:
-    """天雲只在勾選當下按現況定位，往後原樣存房間座標。"""
+    """天雲在勾選當下按現況定位、存房間座標；水平中心跟搜尋建候選共用 `cloud_center_xy` 那一條規則。"""
     item = deepcopy(cast(dict[str, object], FURNITURE_DEFAULTS[kind]["item"]))
     if kind == "ceiling_cloud":
         scheme = _geometry_scheme(document)
-        mx, my = project_midpoint(scheme)
-        px, py, _ = scheme.receiver_set.primary.position_m
+        x, y = cloud_center_xy(scheme)
         try:
             fx, _ = project_facing(scheme)
         except ValueError as exc:
             raise InputShapeError(str(exc)) from exc
-        item["placement"] = {"bottom_center_m": [(mx + px) / 2, (my + py) / 2,
-                                                  scheme.scene.room_m.Lz - CLOUD_CEILING_GAP_M],
+        item["placement"] = {"bottom_center_m": [x, y, scheme.scene.room_m.Lz - CLOUD_CEILING_GAP_M],
                              "yaw_deg": 90 if fx else 0}
     return item
 

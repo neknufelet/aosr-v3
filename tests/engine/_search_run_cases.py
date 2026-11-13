@@ -65,6 +65,23 @@ def make_store(tmp_path: Path, *, workers: int = 1, budget: int = 17,
     return store, registry
 
 
+def assert_furniture_follows(project: Scheme, candidate: Scheme) -> None:
+    """天雲水平中心照候選自己的喇叭與主位重算（#1147），高度、角度、尺寸照專案；其餘家具逐件不變。"""
+    from aosr.geometry.furniture import FurnitureKind
+    from aosr.reporting.scheme import RoomPlacement
+
+    before, after = project.furniture or (), candidate.furniture or ()
+    assert [item.furniture_id for item in before] == [item.furniture_id for item in after]
+    for old, new in zip(before, after, strict=True):
+        if old.kind != FurnitureKind.CEILING_CLOUD:
+            assert new == old
+            continue
+        assert isinstance(old.placement, RoomPlacement) and isinstance(new.placement, RoomPlacement)
+        assert new.placement.bottom_center_m == (*layout.cloud_center_xy(candidate), old.placement.bottom_center_m[2])
+        assert new.model_dump(exclude={"placement"}) == old.model_dump(exclude={"placement"})
+        assert new.placement.yaw_deg == old.placement.yaw_deg
+
+
 class Killed(BaseException):
     """模擬行程被砍；不屬於計算例外，不把搜尋宣判失敗。"""
 
@@ -130,7 +147,7 @@ class FakeCompute:
     def _check_legal(self, job: CandidateJob) -> None:
         if self.store.settings.layout.seat_locked:
             assert job.scheme.receiver_set == self.store.project.receiver_set
-            assert job.scheme.furniture == self.store.project.furniture
+            assert_furniture_follows(self.store.project, job.scheme)
             from aosr.geometry.shoebox import Point
 
             placement = layout.Placement(job.scheme.speakers["left"], job.scheme.speakers["right"],

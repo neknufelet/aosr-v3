@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
+from aosr.geometry.furniture import FurnitureKind
 from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme, speaker_pair_ids
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError, furniture_problems
@@ -128,6 +129,18 @@ def check_project_furniture_layout(project: Scheme) -> None:
         raise SchemeValidationError(problems)
 
 
+def check_single_cloud(project: Scheme) -> None:
+    """搜尋候選照 `aosr.search.layout.cloud_center_xy` 重算天雲中心，規則只定得出一片（#1147）。
+
+    兩片以上會被搬到同一個中心疊在一起，整場候選全判擺放錯；建目錄之前就拒收，不讓它安靜地跑完一場沒有合法候選的搜尋。
+    """
+    clouds = [item.furniture_id for item in project.furniture or () if item.kind == FurnitureKind.CEILING_CLOUD]
+    if len(clouds) > 1:
+        raise SchemeValidationError((SchemeProblem("furniture",
+            f"搜尋時天雲中心跟著每個候選的喇叭與主位重算，規則只定得出一片天雲；這份方案有 {len(clouds)} 片"
+            f"（{'、'.join(clouds)}），請只留一片"),))
+
+
 def reject_stage_one(store: SearchStore, entry: str) -> None:
     """第二階段的函式庫入口在寫任何檔之前拒收第一階段資料夾，跟命令列分流同一條；函式庫直接呼叫也擋（#884）。"""
     if store.settings.stage is not None:
@@ -205,6 +218,7 @@ def checked_inputs(project: Scheme, settings: SearchSettings) -> tuple[Scheme, S
         except KeyError as error:
             raise ValueError(str(error)) from error
     check_project_furniture_layout(project)
+    check_single_cloud(project)
     settings = SearchSettings.model_validate(settings.canonical())
     _check_speaker_settings(project, settings.layout)
     from aosr.search.seat_lock import check_desk_reach, check_listening_reach, check_room_range, check_seat_lock

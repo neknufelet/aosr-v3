@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
+from aosr.geometry.furniture import FurnitureKind
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.reporting.scheme import Scheme, project_facing, project_midpoint, speaker_pair_ids
+from aosr.reporting.scheme import RoomPlacement, Scheme, project_facing, project_midpoint, speaker_pair_ids
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.search.layout_settings import LayoutSettings, Span
 
@@ -218,10 +219,23 @@ def place(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> Pl
     return Placement(left, right, primary, _receivers(project, primary, facing), facing)
 
 
-def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
+def cloud_center_xy(scheme: Scheme) -> tuple[float, float]:
+    """天雲水平中心唯一的規則：兩喇叭水平中點與主位水平位置的中間（#705 老闆 10-26 回 A）。
+
+    輸入頁勾選天雲（`aosr.gui.input_setup.default_furniture`）與搜尋建每個候選（`to_scheme`）共用這一支。
+    高度不在這裡：輸入頁照房高定一次底面，第二階段房高不變，候選沿用方案存的高度（手調低的厚天雲才不會穿出天花板）。
+    """
+    mx, my = project_midpoint(scheme)
+    px, py, _ = scheme.receiver_set.primary.position_m
+    return (mx + px) / 2, (my + py) / 2
+
+
+def to_scheme(project: Scheme, placement: Placement, scheme_id: str, *, cloud_follows: bool = True) -> Scheme:
     """合法後才呼叫：保留場景、用途、聲源、聲道，以及每席的代號／角色／權重／方向。
 
-    家具照專案原樣帶過去；跟著主位走的家具由使用處換算。
+    家具照專案原樣帶過去；跟著主位走的家具由使用處換算。天雲（每一件 ceiling_cloud）的水平中心照
+    `cloud_center_xy` 用候選自己的喇叭與主位重算，高度與角度照方案存的值（#1147）。
+    入選後的移位檢查傳 cloud_follows=False：天雲留在入選方案算好的位置，當成裝好後喇叭擺偏。
     """
     left_id, right_id = speaker_pair_ids(project)
     positions = dict(placement.receivers)
@@ -229,11 +243,22 @@ def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
         raise ValueError("placement must preserve project receiver identities")
     points = tuple(receiver.model_dump() | {"position_m": positions[receiver.receiver_id].as_tuple()}
                    for receiver in project.receiver_set.points)
-    return Scheme.model_validate(project.model_dump() | {
+    scheme = Scheme.model_validate(project.model_dump() | {
         "scheme_id": scheme_id,
         "speakers": {left_id: placement.left, right_id: placement.right},
         "receiver_set": ReceiverSet.model_validate({"points": points}),
     })
+    if not cloud_follows or not any(item.kind == FurnitureKind.CEILING_CLOUD for item in scheme.furniture or ()):
+        return scheme
+    x, y = cloud_center_xy(scheme)
+    furniture = []
+    for item in scheme.furniture or ():
+        document = item.model_dump()
+        if item.kind == FurnitureKind.CEILING_CLOUD:
+            assert isinstance(item.placement, RoomPlacement)  # 方案驗證已保證天雲用房間座標。
+            document["placement"]["bottom_center_m"] = (x, y, item.placement.bottom_center_m[2])
+        furniture.append(document)
+    return Scheme.model_validate(scheme.model_dump() | {"furniture": furniture})
 
 
 def _start_spacing_interval(settings: LayoutSettings, listening_factor: float) -> tuple[float, float] | None:

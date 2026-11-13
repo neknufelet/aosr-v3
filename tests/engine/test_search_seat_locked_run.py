@@ -54,11 +54,17 @@ def test_locked_start_first_trial_is_hand_calculated_clamped_spacing(tmp_path: P
 
 
 def test_locked_blocked_baseline_uses_two_dimensional_unpinned_batch(tmp_path: Path) -> None:
+    from tests.engine._furniture_cases import relative_item
     from tests.engine._seat_locked_cases import LOCKED
     from tests.engine._search_blocked_cases import blocker
     from tests.engine._search_run_cases import make_store
 
-    store, registry = make_store(tmp_path, budget=1, batch=1, layout_changes=LOCKED, furniture=[blocker()])
+    # #1147 起方塊（天雲）跟著候選重算水平中心、移開後不再擋試算 0（見 test_search_cloud_follows.py）；
+    # 另放一塊跟著主位的小板讓試算 0 照舊被擋：座位鎖在 (3.2,1.9)，小板中心在主位前 0.22、左 0.1 → (2.98,1.8)，
+    # 0.1×0.1×0.5 m、底高 1.0；左喇叭 (1,0.9,1.25) 到主位在 x=2.93～3.03 時 y≈1.78～1.82，穿過小板。
+    board = relative_item(furniture_id="board", kind="desk", material="wood", width_m=0.1, depth_m=0.1, height_m=0.5,
+                          placement={"forward_m": 0.22, "left_m": 0.1, "bottom_height_m": 1.0, "yaw_deg": 0})
+    store, registry = make_store(tmp_path, budget=1, batch=1, layout_changes=LOCKED, furniture=[blocker(), board])
     compute = FakeCompute(store)
     status = run(store, registry, compute)
     assert status.baseline_outcome == "direct_path_blocked"

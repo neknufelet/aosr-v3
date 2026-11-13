@@ -152,8 +152,11 @@ def test_blocked_baseline_unpinned_candidates_also_apply_new_constraints(tmp_pat
     from tests.engine._furniture_cases import cloud_item
     from tests.engine._search_run_cases import ENGINE, RUN_DATE
     project = flow_project("stand")
-    cloud = cloud_item(width_m=2.0, depth_m=0.2, height_m=0.2,
-        placement={"bottom_center_m": [2.1, 2.0, 1.1], "yaw_deg": 90})
+    # 原方案左喇叭 (1.0,1.4,1.2) 到主位 (3.2,2.0,1.2) 在 x=2.55～2.75 時 y≈1.82～1.88，穿過方塊 y=[1.74,1.94]、z=[1.1,1.3]。
+    # 方塊用天雲種類，#1147 起候選照自己的喇叭與主位重算它的水平中心（落在中軸 y=2.0，盒 y=[1.9,2.1]）；
+    # 兩個試算的直達線在那裡 y≈1.6～1.75 與 2.25～2.4，不擋，所以試算 0 只剩新限制那一條。
+    cloud = cloud_item(width_m=0.2, depth_m=0.2, height_m=0.2,
+        placement={"bottom_center_m": [2.65, 1.84, 1.1], "yaw_deg": 90})
     project = Scheme.model_validate(project.model_dump() | {"furniture": [
         *(item.model_dump() for item in project.furniture or ()), cloud]})
     store, registry = store_for(tmp_path, project, budget=2)
