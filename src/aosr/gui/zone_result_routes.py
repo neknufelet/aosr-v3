@@ -36,8 +36,8 @@ from aosr.gui.material_editor import plain_error, user_library_path
 from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
-    PLACE_NOTE, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement, is_zoned,
-    original_walls, replaced_unseen, replaced_unseen_note, zone_rows)
+    PLACE_NOTE, SUFFIX, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement,
+    is_zoned, original_walls, replaced_unseen, replaced_unseen_note, zone_rows)
 from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.evaluation import LoadedResult
@@ -114,8 +114,20 @@ def _original(deps: ZoneResultDeps, settings: DesignSettings | None, design: Sch
     return original_walls(scheme, design, capabilities=deps.capabilities, directivity=deps.directivity)
 
 
+def same_content(run_scheme_id: object, baseline_id: str) -> bool:
+    """這一筆計算的方案代號是不是同一份內容的基準：代號尾巴「-orig-<內容雜湊>」相同（雜湊只算內容、不含代號，見
+    ``zone_result.derive_baseline``）。兩份設計推出逐欄一樣的原牆基準（例如存成方案的那一份跟另存的那一份）就共用
+    同一次計算，不用再算 21 分（#1128）；收不收照樣在 ``_find`` 逐欄核整份方案。"""
+    if not isinstance(run_scheme_id, str):
+        return False
+    if run_scheme_id == baseline_id:
+        return True
+    tail = baseline_id.rpartition(SUFFIX)[2]
+    return SUFFIX in baseline_id and run_scheme_id.endswith(SUFFIX + tail)
+
+
 def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | None:
-    """計算紀錄裡方案代號是這一份基準的最新一筆；算中的先走一次查狀態（真的結束才收屍）。"""
+    """計算紀錄裡同一份內容的基準（``same_content``）最新一筆；算中的先走一次查狀態（真的結束才收屍）。"""
     newest: tuple[float, str] | None = None
     for path in (deps.jobs.data_dir / "runs").glob("*.json"):
         if len(path.stem) != RUN_ID_LENGTH:
@@ -124,7 +136,7 @@ def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | Non
             state = deps.jobs.read_state(path.stem)
         except (OSError, ValueError):
             continue
-        if state.get("scheme_id") != scheme_id:
+        if not same_content(state.get("scheme_id"), scheme_id):
             continue
         started = float(str(state.get("started_at", 0)))
         if newest is None or started > newest[0]:
@@ -141,7 +153,7 @@ def _find(deps: ZoneResultDeps, baseline: Baseline) -> Found | None:
         result = SchemeResult.model_validate_json(path.read_bytes())
     except (ValueError, OSError) as exc:
         return Found(state, path, rejected=str(exc))
-    if result.scheme != baseline.scheme:
+    if result.scheme.model_copy(update={"scheme_id": baseline.scheme.scheme_id}) != baseline.scheme:
         return Found(state, path, rejected="算好的基準方案跟這一次推出來的不一樣")
     return Found(state, path, result)
 
@@ -169,6 +181,9 @@ def _status(deps: ZoneResultDeps, design: SchemeResult, baseline: Baseline) -> t
         return "baseline_rejected", f"原牆基準的結果讀不出來：{found.rejected}", found
     if found.result.physics_identity != design.physics_identity:
         return "baseline_stale", "原牆基準是舊版物理算的，要重算才比得。", found
+    shared = found.result.scheme.scheme_id
+    if shared != baseline.scheme.scheme_id:
+        return "done", (f"原牆基準跟「{shared}」那一份逐欄相同（同一套切法、同一份牆），共用它算好的那一次，不用再算。"), found
     return "done", "", found
 
 
