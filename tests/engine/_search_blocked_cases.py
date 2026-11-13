@@ -20,6 +20,7 @@ def blocker(*, blocked: bool = True) -> dict[str, object]:
     """原方案左喇叭 (1,1.3,1.2) 到主位 (3.2,1.9,1.2)；懸空方塊 x=[2.7,2.9]、y=[1.7,2.0]、z=[1.1,1.4] 擋住直達。
 
     blocked=False 時方塊抬到 z=[2.0,2.3]，高過喇叭與耳朵，不擋。
+    方塊用天雲種類：只有原方案在這個位置；#1147 起搜尋候選照自己的喇叭與主位重算它的水平中心，高度不變。
     """
     return {
         "furniture_id": "blocker", "kind": "ceiling_cloud", "material": "wood",
