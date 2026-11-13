@@ -200,8 +200,10 @@ def _default_entries(node: ast.FunctionDef | ast.AsyncFunctionDef, prefix: str) 
 def _load_time_entries(body: list[ast.stmt], prefix: str) -> Iterator[tuple[str, str, int, list[float]]]:
     """走一份檔裡「模組載入時就算好」的位置，回 (顯示名, 比對名, 行號, 數字)。
 
-    進得去的：模組層級、模組層的 ``if``／``try``／``with``／``for`` 底下、類別身體、
-    以及函式簽章的預設值。進不去的：函式身體（那裡的數字是演算法，不是門檻）。
+    進得去的：模組層級、模組層任何帶身體的語句底下（``if``、``try`` 連 else／finally／except、
+    ``while``、``with``、``for`` 的身體）、類別身體、以及函式簽章的預設值。進不去的：函式身體
+    （那裡的數字是演算法，不是門檻）；``match`` 也進不去（它那一格叫 ``cases``），其餘看不見的
+    寫法列在卡尾第 5) 條（#1157）。
     """
     for node in body:
         if isinstance(node, FUNCTION_NODES):
