@@ -164,7 +164,10 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
         assert floor.input_value() == ""
         page.keyboard.insert_text("2000")
         assert floor.input_value() == "2000"
-        page.locator("#wall-ceiling").focus()
+        # 用滑鼠點表單裡的另一格（瀏覽器自己換焦點，不是程式呼叫 focus()）：點到的那一格也不准被換掉。
+        ceiling = page.locator("#wall-ceiling").element_handle()
+        page.locator("#wall-ceiling").click()
+        assert ceiling.evaluate("node => node.isConnected && node === document.activeElement")
         assert box.evaluate("node => node.isConnected")
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
         # 從牆面表單直接按「檢查」：那一下照樣按得到，按的時候換名，表單的值是剛打的那個。
@@ -183,6 +186,10 @@ def test_a_late_rename_never_swaps_the_elevation_box_being_typed_in(tmp_path: Pa
         page = watched.page
         page.locator("#elevation-wall-x0").click()
         held = _late_rename(page)
+        # 寬 Ly 一離開就發超限檢查（房間尺寸改了，#1111），回來會重畫立面圖、照 id 把焦點放回去：那是另一條路，
+        # 不是這裡考的，先等它畫完再點進去。
+        page.locator("#room-Lx").focus()
+        page.wait_for_function("() => zoneLimitsShown === zoneLimitsGeneration")
         depth = page.locator("#depth-room")
         depth.focus()
         box = depth.element_handle()
