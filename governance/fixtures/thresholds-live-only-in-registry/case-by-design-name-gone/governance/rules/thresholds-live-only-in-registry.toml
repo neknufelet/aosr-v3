@@ -30,4 +30,5 @@ allow = []
 [[by_design]]
 file = "governance/checks/stub_protocol.py"
 name = "SHELL_SAYS_EMPTY"
+assignments = 1
 reason = "樣本用的准許：跟子程序約好的私有訊號碼，是列舉不是門檻。"

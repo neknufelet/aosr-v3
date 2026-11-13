@@ -234,9 +234,14 @@ def _settings(scan_root: Path, files: list[Path]) -> Settings:
     name = settings.get("sandbox_fixture")
     if not isinstance(name, str) or not name.isidentifier():
         raise ToolBroken(f"{rel} 的 [settings] sandbox_fixture 必須是一個合法的 Python 名字，實際是 {name!r}")
+    allow = (*_allow_list(settings, rel), *_by_design_list(data, rel))
+    keys = [(a.file, a.function, a.path) for a in allow]
+    twice = sorted({key for key in keys if keys.count(key) > 1})
+    if twice:
+        raise ToolBroken(f"{rel} 把 {twice} 准許了不只一次（放行與 [[by_design]] 合起來算）")
     return Settings(
         fixture=name,
-        allow=(*_allow_list(settings, rel), *_by_design_list(data, rel)),
+        allow=allow,
         product_writers=_string_list(settings, rel, "product_writers"),
         committed_constants=_string_list(settings, rel, "committed_constants"),
         committed_paths=_string_list(settings, rel, "committed_paths"),
