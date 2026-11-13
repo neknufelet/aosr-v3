@@ -1,6 +1,6 @@
 # 規矩卡：每一筆放行都要有理由與到期日，過期即紅，關鍵字當不了免死金牌
 id = "exemptions-need-expiry"
-human = "每一筆「放行」都要寫得出為什麼、以及什麼時候失效。掃描面明確列舉，只有這幾類算放行條目：①規矩卡 toml 裡住在 `[settings]` 底下的表陣列（今天全叫 `[[settings.allow]]`），一筆就是一個具名放過；②測試檔裡的 skip 標記（`pytest.skip`、`pytest.mark.skip`／`skipif`／`xfail`）；③原始碼註解裡的抑制標記（`# noqa`、`# type: ignore`、`# pragma: no cover`）。每一筆都必須帶 `reason`（非空）與 `expires`（ISO 日期，`YYYY-MM-DD`），三件事會紅：缺任一欄、`expires` 早於今天（今天從系統時間讀，不寫死）、`reason` 正規化之後整串只由卡上登記的關鍵字組成（「暫時」「legacy」「TODO」這種字樣不是理由，是把問題往後推的說法）。①的欄位寫成 toml 的鍵；②③寫成標記那一行行尾的註解，形如 `expires=YYYY-MM-DD reason=<一句話>`——理由取到行尾，所以 `expires` 寫在前面。跑完在 stderr 印一行「目前有效的放行幾筆、最近到期的是哪一筆」，讓放行清單長大這件事看得見。**哪些算放行、哪些算資料**：判準是「這一條是在放過一個原本會紅的東西」。放行是具名指向一個個體、把它從已經算出來的違規裡撈出來（`[[settings.allow]]` 的每一筆）；資料是規矩本身的形狀，拿掉它規矩就沒有形狀可言——`file-placement-allowlist` 的 `[[allowlist]]`（那是「准出現什麼」的正面定義，不是放過某一筆違規）、`governance/authors.txt` 與 `governance/required-status-checks.txt` 這種名單檔、各卡的 `scan_exempt_prefixes`／`name_exempt_prefixes`（那是掃描面宣告，已經由卡的 `scope` 與 scan-scope-has-no-holes 那張卡在守）、`swallow_snippets` 這種樣式表，以及各卡頂層的 `[[by_design]]`（本來就該這樣的准許——寫死位置、處數與一句理由，沒有到期日，同類新冒出來的照樣紅；#1014，老闆 2026-11-13 拍 B；每一筆不准帶 `expires`，這一格由載入器守）。③裡本來就該這樣的那幾行，就登記在這張卡頂層的 `[[by_design]]`：一筆寫死檔、函式、註解裡那一段標記原文、處數與理由，那幾行不要兩格、也不准帶 `expires=`，同一個函式多一處、少一處、登記的檔不在了，都紅。讀不到這張卡的 `[settings]`、掃描面上一個對象都沒有、某張卡或某支 .py 剖不開，一律回 2 不回 0。"
+human = "每一筆「放行」都要寫得出為什麼、以及什麼時候失效。掃描面明確列舉，只有這幾類算放行條目：①規矩卡 toml 裡住在 `[settings]` 底下的表陣列（今天全叫 `[[settings.allow]]`），一筆就是一個具名放過；②測試檔裡的 skip 標記（`pytest.skip`、`pytest.mark.skip`／`skipif`／`xfail`）；③原始碼註解裡的抑制標記（`# noqa`、`# type: ignore`、`# pragma: no cover`）。每一筆都必須帶 `reason`（非空）與 `expires`（ISO 日期，`YYYY-MM-DD`），三件事會紅：缺任一欄、`expires` 早於今天（今天從系統時間讀，不寫死）、`reason` 正規化之後整串只由卡上登記的關鍵字組成（「暫時」「legacy」「TODO」這種字樣不是理由，是把問題往後推的說法）。①的欄位寫成 toml 的鍵；②③寫成標記那一行行尾的註解，形如 `expires=YYYY-MM-DD reason=<一句話>`——理由取到行尾，所以 `expires` 寫在前面。跑完在 stderr 印一行「目前有效的放行幾筆、最近到期的是哪一筆」，讓放行清單長大這件事看得見。**哪些算放行、哪些算資料**：判準是「這一條是在放過一個原本會紅的東西」。放行是具名指向一個個體、把它從已經算出來的違規裡撈出來（`[[settings.allow]]` 的每一筆）；資料是規矩本身的形狀，拿掉它規矩就沒有形狀可言——`file-placement-allowlist` 的 `[[allowlist]]`（那是「准出現什麼」的正面定義，不是放過某一筆違規）、`governance/authors.txt` 與 `governance/required-status-checks.txt` 這種名單檔、各卡的 `scan_exempt_prefixes`／`name_exempt_prefixes`（那是掃描面宣告，已經由卡的 `scope` 與 scan-scope-has-no-holes 那張卡在守）、`swallow_snippets` 這種樣式表，以及各卡頂層的 `[[by_design]]`（本來就該這樣的准許——寫死位置、處數與一句理由，沒有到期日，同類新冒出來的照樣紅；#1014，老闆 2026-11-13 拍 B；每一筆不准帶 `expires`，這一格由載入器守）。③裡本來就該這樣的那幾行，就登記在這張卡頂層的 `[[by_design]]`：一筆寫死檔、函式、註解裡那一段標記原文、處數與理由，那幾行不要兩格、也不准帶 `expires=`，同一個函式多一處、少一處、登記的檔不在了，都紅；登記那一行的註解要以登記的原文開頭，後面不准再接代碼或搭另一種抑制標記（准的是那一段原文，搭上去的沒有登記也沒有到期日）。讀不到這張卡的 `[settings]`、掃描面上一個對象都沒有、某張卡或某支 .py 剖不開，一律回 2 不回 0。"
 
 # 掃描面：所有規矩卡（第①類）＋ 進得了版控的 .py（第②③類），扣掉必紅樣本樹。
 # 樣本樹是別的掃描根，裡面的道具刻意是壞的，由後設測試單獨餵。
@@ -118,6 +118,8 @@ scan_exempt_prefixes = ["governance/fixtures/"]
 # 一筆寫死「哪支檔、哪個函式（點連起來的全名，模組層寫 "<module>"）、註解裡的哪一段標記原文、幾處」。
 # 登記的那幾行不要 expires／reason 兩格，但不准帶 expires=（會到期的就不是資料）；
 # 同一個函式多一處、少一處、登記的檔不在了，都紅——同類新冒出來的不會跟著被准許。
+# 登記那一行的註解要以登記的原文開頭，原文後面不准再接代碼（`, PTH118`、` PTH118`）、也不准再搭另一種
+# 抑制標記（比對不分大小寫、不看空白）——「含有那一段」不算，否則同一行多壓的東西就永遠不到期。
 # 刻意沒把「要落在 pytest.raises 裡」寫進比對：_with_extra_key 是被 raises 包住的那一題呼叫的小工具，
 # 它自己不在 raises 裡；寫死到函式與處數已經讓「同一支考卷新冒出來的一處」紅。
 

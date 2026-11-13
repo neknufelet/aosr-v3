@@ -1,0 +1,5 @@
+③、[[by_design]]：登記的原文不在註解開頭就紅。
+
+迷你卡登記 tests/test_probe.py 的 probe 准一處 # type: ignore[arg-type]；那一行開頭是
+# type: ignore[arg-type, call-arg]，登記的原文接在後面。型別檢查器只認開頭那一段，
+多壓的 call-arg 沒人登記。處數照樣是一處，只有這一件錯。

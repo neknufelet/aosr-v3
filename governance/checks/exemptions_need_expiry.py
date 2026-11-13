@@ -21,7 +21,9 @@
 拍 B），登記在**這張卡頂層**的 ``[[by_design]]``：一筆寫死「哪支檔、哪個函式（點連起來的全名，
 模組層寫 ``<module>``）、註解裡的哪一段標記原文、幾處」，加一句理由，沒有到期日。登記的那幾行
 不要那兩格，但**不准帶** ``expires=``（會到期的就不是資料）；同一個函式多一處、少一處、登記的檔
-不在了，都紅——同類新冒出來的不會跟著被准許。
+不在了，都紅——同類新冒出來的不會跟著被准許。登記的那一行，註解要以登記的原文**開頭**，原文後面
+不准再接代碼、也不准再搭另一種抑制標記（比對不分大小寫、不看空白）：准的是那一段原文，搭上去的
+沒有登記也沒有到期日。
 
 **什麼會紅**
 
@@ -345,19 +347,45 @@ def _scopes(text: str, rel: str) -> dict[int, str]:
     return out
 
 
+def _bare(text: str) -> str:
+    """拿掉所有空白、拉成小寫：工具認抑制標記不分大小寫、不看空白，比「有沒有搭別的標記」時也一樣。"""
+    return "".join(text.split()).lower()
+
+
 def _designed_line(
-    where: str, comment: str, scope: str, mine: dict[tuple[str, str], int]
+    where: str, comment: str, scope: str, mine: dict[tuple[str, str], int], markers: list[str]
 ) -> tuple[tuple[str, str] | None, list[str]]:
     """這一行是不是 ``[[by_design]]`` 登記的：(登記的那一筆或 None, 紅的理由)。"""
     for function, text in mine:
         if function == scope and text in comment:
-            if EXPIRES_RE.search(comment):
-                return (function, text), [
-                    f"{where} 登記在卡 {CARD_ID} 頂層的 [[by_design]]，卻還帶 {EXPIRES_KEY}="
-                    "——資料沒有到期日；會到期的那一種就從 [[by_design]] 拿掉、照放行寫兩格"
-                ]
-            return (function, text), []
+            return (function, text), _designed_line_problems(where, comment, text, markers)
     return None, []
+
+
+def _designed_line_problems(where: str, comment: str, text: str, markers: list[str]) -> list[str]:
+    """登記的那一行只准是「註解開頭就是登記的原文」，後面不准再搭代碼或另一種抑制標記，也不准帶 expires=。
+
+    准的是那一段原文，不是「含有那一段」：``# noqa: PTH123, PTH118``、``# noqa: PTH123 PTH118``、
+    登記原文之後再接 ``# noqa: …``／``# type: ignore[…]``、或把原文放在另一個標記後面，
+    都是同一行多壓了一樣沒登記的東西——那就是新的同類，而登記沒有到期日，搭上去的就永遠不會被看到。
+    """
+    bad: list[str] = []
+    if EXPIRES_RE.search(comment):
+        bad.append(
+            f"{where} 登記在卡 {CARD_ID} 頂層的 [[by_design]]，卻還帶 {EXPIRES_KEY}="
+            "——資料沒有到期日；會到期的那一種就從 [[by_design]] 拿掉、照放行寫兩格"
+        )
+    # 原文不在開頭時 rest 就是整段註解，裡面一定含登記的那一種標記（每一筆 comment 都要含標記，
+    # 不含就回 2），所以「不在開頭」由後半那條標記比對接住，不必另寫一條。
+    rest = comment[len(text) :] if comment.startswith(text) else comment
+    tail = rest.lstrip()
+    if (tail and not tail.startswith("#")) or any(_bare(marker) in _bare(rest) for marker in markers):
+        bad.append(
+            f"{where} 登記在卡 {CARD_ID} 頂層的 [[by_design]]，准的只是註解開頭那一段 {text!r}，"
+            "這一行卻多搭了別的代碼或另一種抑制標記（或原文不在開頭）——搭上去的沒有登記、也沒有到期日；"
+            "拆到自己那一行照放行寫兩格，或連卡一起登記"
+        )
+    return bad
 
 
 def _designed_problems(designed: Designed, seen: dict[tuple[str, str, str], int], present: set[str]) -> list[str]:
@@ -411,7 +439,9 @@ def _python_hits(
     for lineno, marker in sorted(marked):
         where = f"{rel}:{lineno} 的 {marker} 標記"
         if mine and (lineno, marker) in designed_lines:
-            hit, problems = _designed_line(where, comments[lineno], scopes.get(lineno, MODULE_SCOPE), mine)
+            hit, problems = _designed_line(
+                where, comments[lineno], scopes.get(lineno, MODULE_SCOPE), mine, _names(settings, "comment_markers")
+            )
             if hit is not None:
                 seen[(rel, *hit)] = seen.get((rel, *hit), 0) + 1
                 bad += problems
