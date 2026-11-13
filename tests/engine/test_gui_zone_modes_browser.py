@@ -321,3 +321,33 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         _save(page, "room109")
         assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]["allowed"] == ["none"]
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: Browser) -> None:
+    """#1128：交給搜尋的區寫方案裡現在真的放什麼。網頁改成交給搜尋時放原牆（寫原牆、會貼在它上面）；搜尋存成的方案
+    （或它的另存）那一區放的是搜尋選的貼牆構造，不准還寫「先放原牆」。這裡把貼了一層的 z1 在設計設定改成交給搜尋，
+    就是存成方案那一份的形狀。"""
+    _write(tmp_path, room109_document())
+    _write(tmp_path, room109_document("room109-original"))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _first_cut(page, tmp_path)
+        _save(page, "room109")
+        expect(page.locator("#zone-search-now-x0-auto1")).to_contain_text("方案裡現在放：固定阻抗")
+        expect(page.locator("#zone-search-now-x0-auto1")).to_contain_text("貼在它上面")
+        path = tmp_path / "designs" / "room109.json"
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        stored["zones"]["x0"]["z1"] = {"mode": "search"}
+        path.write_text(json.dumps(stored), encoding="utf-8")
+        page.reload()
+        page.wait_for_function("typeof inputDefaults !== 'undefined' && inputDefaults !== undefined")
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#zone-mode-x0-z1")).to_have_value("search")
+        line = page.locator("#zone-search-now-x0-z1")
+        expect(line).to_contain_text("方案裡現在放：48K 玻璃棉 50 mm 貼牆（貼在原牆上）")
+        expect(line).not_to_contain_text("先放原牆")
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "search-zone-holds.png"))
+        assert watched.page_errors == [] and watched.console_errors == []

@@ -301,6 +301,9 @@ function showPreview(data, sent) {
   byId("plan-summary").textContent = `共 ${plan.surfaces.length} 區，交給搜尋 ${searched} 區；家族 ${materialLabel(plan.family)}；` +
     `往下走步數上限 ${plan.max_steps} 步；裝法「${plan.request.mount === "on_wall" ? "貼在原牆上" : "貼在硬底上"}」；` +
     `用${plan.request.device === "gpu" ? "顯卡" : "處理器"}算。`;
+  // 結果頁會把哪些區當成沒動（#1128）：開跑前先講，要指原方案就在跑之前指。
+  byId("plan-baseline-warning").hidden = !data.baseline_warning;
+  byId("plan-baseline-warning").textContent = data.baseline_warning || "";
   const body = el("tbody");
   plan.surfaces.forEach((surface, index) => {
     const {wall, zone} = surfaceParts(surface);
@@ -522,6 +525,47 @@ function showJobDepths(plan, names) {
   }));
 }
 
+// 換樣板試過、沒選的（#1128）：固定材料候選一句寫在外面（整塊試過、差多少），每一輪全部候選收在表裡。
+// 快篩合分是搜尋自己的梯度目標（越小越好），跟結果頁的總分不是同一把尺；快篩沒重調，換不換照重調後跟現狀比。
+const TRY_SCALE_NOTE = "合分是搜尋自己的尺（越小越好），跟結果頁的總分不是同一把尺。快篩是換上去先算一次的粗篩；" +
+  "快篩排前面的幾個再重調空腔，換不換是拿重調後跟這一輪現狀（起點配置重調後）比、要好過改善門檻才換。" +
+  "表裡「比現狀」有重調的拿重調後比；沒進重調的只能拿快篩比，標「（快篩）」。";
+function score(value) { return value === null || value === undefined ? "—" : value.toFixed(4); }
+function signed(value) { return `${value >= 0 ? "+" : ""}${value.toFixed(4)}`; }
+function showTemplateTries(rounds, names) {
+  const box = byId("job-template-tries");
+  box.hidden = !rounds.length;
+  if (!rounds.length) { box.replaceChildren(); return; }
+  const place = (surface) => { const {wall, zone} = surfaceParts(surface); return `${(names || WALLS)[wall] || wall}「${zoneText(zone)}」`; };
+  const lines = [];
+  for (const round of rounds) {
+    const fixed = round.tries.filter((item) => item.fixed);
+    if (!fixed.length) continue;
+    const tried = fixed.map((item) => `${place(item.surface)}整塊換成「${item.label}」快篩 ${score(item.value)}` +
+      (item.retuned !== null ? `、重調後 ${score(item.retuned)}` : "") + (item.chosen ? "（換上了）" : "（沒選）")).join("；");
+    lines.push(el("p", {class: "tried-fixed", text: `換樣板第 ${round.round} 輪試過固定材料：${tried}；這一輪現狀 ${score(round.baseline)}。`}));
+  }
+  const tables = rounds.map((round) => {
+    const outcome = round.accepted ? "換上了一個候選" : (round.stop_reason ? `都沒換：${round.stop_reason}` : "都沒換");
+    if (!round.tries.length) {
+      return el("p", {text: `第 ${round.round} 輪沒開` + (round.stop_reason ? `：${round.stop_reason}` : "")});
+    }
+    const head = el("tr", {}, ...["牆／區", "換成", "快篩合分", "重調後", "比現狀", "結果"].map((text) => el("th", {text})));
+    const body = el("tbody", {}, ...round.tries.map((item) => {
+      const value = item.retuned !== null ? item.retuned : item.value;
+      return el("tr", {class: item.fixed ? "tried-fixed-row" : null},
+        el("td", {text: place(item.surface)}), el("td", {text: item.label}), el("td", {text: score(item.value)}),
+        el("td", {text: item.retuned !== null ? score(item.retuned) : "沒進重調"}),
+        el("td", {text: round.baseline === null ? "—" : signed(value - round.baseline) + (item.retuned !== null ? "" : "（快篩）")}),
+        el("td", {text: item.chosen ? "換上了" : "沒選"}));
+    }));
+    return el("div", {}, el("p", {text: `第 ${round.round} 輪：現狀 ${score(round.baseline)}；${outcome}`}),
+      el("table", {}, el("thead", {}, head), body));
+  });
+  box.replaceChildren(el("h3", {text: "換樣板試過什麼"}), ...lines, el("p", {class: "hint", text: TRY_SCALE_NOTE}),
+    el("details", {}, el("summary", {text: "每一輪全部候選的合分"}), ...tables));
+}
+
 function showJob(job, detail, detailError) {
   // 狀態換了，上一個動作留下的話（例如「接續了。」）就過期了，不留著誤導。
   if (byId("job-block").dataset.state && byId("job-block").dataset.state !== `${job.job_id}:${job.state}`) say("job-message", "");
@@ -551,6 +595,7 @@ function showJob(job, detail, detailError) {
   byId("job-adopt").hidden = job.state !== "done" || Boolean(adopted);
   byId("job-endpoint-note").hidden = !job.endpoint;
   byId("job-endpoint-note").textContent = job.endpoint ? job.endpoint.baseline_note : "";
+  showTemplateTries(detail ? (detail.template_tries || []) : [], job.wall_names);
   const warning = detail ? detail.baseline_warning : null;
   byId("job-baseline-warning").hidden = !warning;
   byId("job-baseline-warning").textContent = warning || "";

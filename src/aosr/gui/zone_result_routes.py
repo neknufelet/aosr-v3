@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -37,7 +37,7 @@ from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
     PLACE_NOTE, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement, is_zoned,
-    original_walls, zone_rows)
+    original_walls, replaced_unseen, replaced_unseen_note, zone_rows)
 from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.evaluation import LoadedResult
@@ -206,6 +206,15 @@ def _names(deps: ZoneResultDeps) -> tuple[tuple[LibraryEntry, ...], tuple[str, .
         return builtin_entries(), (f"使用者材料庫讀不進來，材料名字只比內建材料：{detail}",)
 
 
+def unwrap_notes(original: OriginalWalls | None, scheme: Scheme, settings: DesignSettings | None,
+                 library: Sequence[LibraryEntry]) -> list[str]:
+    """沒指原方案時的通則一句，再點名這一份當成沒動、其實整個換成材料庫材料的那幾區（#1128）；指了就沒有。"""
+    if original is not None:
+        return []
+    unseen = replaced_unseen(scheme, settings, library)
+    return [UNWRAP_NOTE, *((replaced_unseen_note(unseen),) if unseen else ())]
+
+
 def _build(deps: ZoneResultDeps, design_path: Path, design: SchemeResult) -> tuple[ZoneResultView, Baseline | None]:
     """附表與它用的那一份基準（推不出來是 None）；開算只用這裡推出來的那一份。"""
     scheme = design.scheme
@@ -221,9 +230,7 @@ def _build(deps: ZoneResultDeps, design_path: Path, design: SchemeResult) -> tup
         rows = zone_rows(derive_baseline(scheme), settings, scheme, baseline_known=False, library=library)
         return ZoneResultView(zoned=True, rows=rows, notes=(PLACE_NOTE, *library_notes), state="refused",
                               state_text=f"原牆基準推不出來：{exc}"), None
-    notes = [PLACE_NOTE, BASELINE_LINE, *library_notes]
-    if original is None:
-        notes.append(UNWRAP_NOTE)
+    notes = [PLACE_NOTE, BASELINE_LINE, *library_notes, *unwrap_notes(original, scheme, settings, library)]
     state, text, found = _status(deps, design, baseline)
     view = ZoneResultView(zoned=True, rows=zone_rows(baseline, settings, scheme, library=library), notes=tuple(notes),
                           state=state,

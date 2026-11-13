@@ -61,6 +61,11 @@ STATUS_WORDS = {CandidateStatus.RANKABLE: "可排名", CandidateStatus.ELIMINATE
 IMPROVEMENT_NOTE = "代價越低越好；兩邊用同一份評分設定、同一版物理、同一套切法，差只來自每一區換了什麼。"
 
 
+RIGID_BASELINE_WARNING = (
+    "這一跑選了「貼在硬底上」，開跑時的設計設定又沒指原方案：結果頁找原牆是拆「貼在原牆上」的加貼層，"
+    "這一跑交給搜尋的區拆不回去、會被當成沒動，改善算不進來。要算改善，存成方案後在那份方案的設計設定指原方案。")
+
+
 class BaselineRefused(ValueError):
     """原牆鋪不上這一套切法；訊息是給人看的一句話。"""
 
@@ -187,6 +192,47 @@ def derive_baseline(design: Scheme, original: OriginalWalls | None = None) -> Ba
         laid_by_wall[wall] = tuple(laid)
     return Baseline(_baseline_scheme(design, laid_by_wall), tuple(rows),
                     original.scheme_id if original is not None else None)
+
+
+def replaced_unseen(scheme: Scheme, settings: DesignSettings | None, library: Sequence[LibraryEntry]) -> tuple[str, ...]:
+    """沒指原方案時結果頁會當成沒動、其實是整個換成材料庫材料的區（#1128）：材料不是貼在原牆上的層、而且逐位等於
+    材料庫的一筆固定材料（看起來是從材料庫選上去的，不是方案原本的牆）。固定區是使用者選的；交給搜尋的區是搜尋整塊
+    換成固定材料候選（存成的方案那一區直接放那份材料）；保留原牆的區不算。每一區一句「左牆 z1「材料名」」；
+    指了原方案、或不是分區方案都是空的。只看方案與設計設定，不算物理。"""
+    if (settings is not None and settings.original_scheme_id is not None) or scheme.scene.surface_zones_by_wall is None:
+        return ()
+    modes, names = effective_modes(settings, scheme), wall_words(scheme)
+    found: list[str] = []
+    for row in derive_baseline(scheme).zones:
+        entry = registered_entry(row.design, library) if row.source == "unchanged" else None
+        if entry is not None and modes.get(row.wall, {}).get(row.zone_id) != "keep_original":
+            found.append(f"{names.get(row.wall, row.wall)} {_zone_name(row.zone_id)}「{entry.label}」")
+    return tuple(found)
+
+
+def replaced_unseen_text(zones: Sequence[str]) -> str:
+    """:func:`replaced_unseen` 那幾區的一句提醒（第三階段頁）：結果頁會當成沒動、怎麼補。"""
+    return (f"設計設定沒有指原方案：{'、'.join(zones)} 跟材料庫的材料逐位相同（看起來是整個換上去的，不是貼在原牆上的層），結果頁找不到這幾區"
+            "原本的牆，會當成沒動、改善算不進來。要算進來，到方案輸入頁替這一份（搜尋存成的方案也一樣）在設計設定指原方案"
+            "（這間房還沒換材料的那一份），結果頁就會照它推原牆基準。")
+
+
+def replaced_unseen_note(zones: Sequence[str]) -> str:
+    """結果頁那一句（接在「沒有加貼層的區當成沒動」那條通則後面，點名這一份是哪幾區）。"""
+    return (f"這一份照上面那條當成沒動的有：{'、'.join(zones)}——跟材料庫的材料逐位相同（看起來是整個換上去的），改善沒算進來；"
+            "在方案輸入頁替這一份的設計設定指原方案（這間房還沒換材料的那一份）就算得進來。")
+
+
+def baseline_warning(scheme: Scheme, settings: DesignSettings | None, *, rigid: bool,
+                     library: Sequence[LibraryEntry]) -> str | None:
+    """第三階段頁先講的那一句（#1128；預覽與這一跑的細節共用）：沒指原方案時結果頁會把哪些區當成沒動。
+    選了「貼在硬底上」是交給搜尋的區（:data:`RIGID_BASELINE_WARNING`），固定成材料庫材料的區見 :func:`replaced_unseen`；
+    指了原方案、或兩樣都沒有就是 None。"""
+    if settings is not None and settings.original_scheme_id is not None:
+        return None
+    zones = replaced_unseen(scheme, settings, library)
+    texts = [*((RIGID_BASELINE_WARNING,) if rigid else ()), *((replaced_unseen_text(zones),) if zones else ())]
+    return "".join(texts) or None
 
 
 class MaterialTag(BaseModel):
