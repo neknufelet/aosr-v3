@@ -1,7 +1,7 @@
 """#1142（老闆 2026-11-13 拍 A）：開跑那一道固定材料核對沿用建替身時核過的數字，只在身分逐欄相同時。
 
-身分：替身（manifest 整份檔案的摘要）、起跑配置（正規寫法的摘要）、頻率軸（逐位）、兩把尺（登記簿現值）、每個候選的
-兩種材料摘要、准用它的片、核對配置的逐片逐頻阻抗摘要；紀錄要是 v2（舊格式沒有這些欄位）。任何一欄不同、舊格式、
+身分：替身（manifest 整份檔案的摘要）、起跑配置（正規寫法的摘要）、頻率軸（逐位）、兩把尺（登記簿現值）、完整模型指紋、
+算核對的程式身分、每個候選的兩種材料摘要、准用它的片、核對配置的逐片逐頻阻抗摘要；紀錄要是 v2（舊格式沒有這些欄位）。任何一欄不同、舊格式、
 紀錄讀不懂、或替身是接續（carry-over）沿用的，都照舊重核。真建替身、真開跑兩條路逐位相同的那一題在
 ``test_surrogate_fixed_build.py``（``pass`` 模式）。這裡專挑「不該沿用卻沿用」：每一欄單獨換掉都要重核。
 """
@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 from aosr.geometry.shoebox import Wall
 from aosr.gradient import cli, fixed_candidates
+from aosr.physics import fem_reduced
 from aosr.gradient.fixed_candidates import (
     FixedCandidateCheck, candidate_material_digest, candidate_surfaces, holdout_ruler_values,
 )
@@ -43,6 +44,11 @@ CONFIGURATION = configuration_document(presets=("glass_wool_48k_50mm_gap50", Non
                                        fixed_surfaces={"floor": "scheme-material"}, max_depths={"x0": 0.3},
                                        allowed=ALLOWED, scene_json='{"scene":1}')
 Rows = dict[Wall | tuple[Wall, str], tuple[complex, ...] | None]
+OPERATORS = "4" * 64
+# 家族設定收窄總深度上限（樣板片的下降起點被投影進去、阻抗跟著變），初值跟著收進新上限內：設定檔照樣讀得進來。
+NARROWED_DEPTH = (("max_total_depth_m = 0.300\n", "max_total_depth_m = 0.080\n"),
+                  ("initial_cavity_m = 0.050\n", "initial_cavity_m = 0.030\n"))
+CODE = "fixcheck-v1:" + "5" * 64
 
 
 def _digest(rows: Rows) -> str:
@@ -75,13 +81,15 @@ def _record(manifest_sha256: str = "a" * 64) -> FixedChecksRecord:
                  for index, item in enumerate(sorted(_candidates(), key=lambda item: item.target)))
     return FixedChecksRecord(schema_version=FIXED_CHECKS_VERSION_V2, configuration_sha256=configuration_sha256(CONFIGURATION),
                              configuration=CONFIGURATION, manifest_sha256=manifest_sha256, frequencies_hz=axis_hex(AXIS),
-                             checks=rows)
+                             operators_digest=OPERATORS, code_identity=CODE, checks=rows)
 
 
 def _reuse(record: FixedChecksRecord | None, **changes: object) -> tuple[FixedCheckRow, ...] | str:
     given: dict[str, object] = {"manifest_sha256": "a" * 64, "configuration": CONFIGURATION, "frequencies_hz": AXIS,
-                                "rulers": holdout_ruler_values(), "candidates": _candidates(), **changes}
-    return reused_rows(record, **given)  # type: ignore[arg-type]
+                                "rulers": holdout_ruler_values(), "operators_digest": OPERATORS, "code_identity": CODE,
+                                "candidates": _candidates(), **changes}
+    call: Callable[..., tuple[FixedCheckRow, ...] | str] = reused_rows  # 各格照名字交，型別由產品那一支自己核
+    return call(record, **given)
 
 
 def test_same_identity_reuses_every_row_in_the_start_order() -> None:
@@ -104,7 +112,8 @@ def _row_change(target: str, **update: object) -> Callable[[FixedChecksRecord], 
 def _identity_change(target: str, **update: object) -> tuple[CandidateIdentity, ...]:
     from dataclasses import replace
 
-    return tuple(replace(item, **update) if item.target == target else item for item in _candidates())  # type: ignore[arg-type]
+    change: Callable[..., CandidateIdentity] = replace
+    return tuple(change(item, **update) if item.target == target else item for item in _candidates())
 
 
 RECORD_CHANGES: dict[str, tuple[Callable[[FixedChecksRecord], FixedChecksRecord], str]] = {
@@ -113,6 +122,8 @@ RECORD_CHANGES: dict[str, tuple[Callable[[FixedChecksRecord], FixedChecksRecord]
     "頻率軸差一個位元": (lambda record: record.model_copy(update={"frequencies_hz": axis_hex(
         (AXIS[0], math.nextafter(AXIS[1], math.inf), AXIS[2]))}), "頻率軸"),
     "頻率軸少一點": (lambda record: record.model_copy(update={"frequencies_hz": axis_hex(AXIS[:2])}), "頻率軸"),
+    "完整模型": (lambda record: record.model_copy(update={"operators_digest": "6" * 64}), "完整模型"),
+    "算核對的程式": (lambda record: record.model_copy(update={"code_identity": "fixcheck-v1:" + "7" * 64}), "算核對的程式"),
     "逐頻尺": (_row_change(MEASURED_TARGET, frequency_ruler=0.3), "用的尺"),
     "帶能量尺": (_row_change(CARPET_TARGET, band_ruler=0.02), "用的尺"),
     "材料內容摘要": (_row_change(CARPET_TARGET, material_sha256="d" * 64), "材料內容"),
@@ -145,6 +156,8 @@ IDENTITY_CHANGES: dict[str, tuple[dict[str, object], str]] = {
     "這一次的替身": ({"manifest_sha256": "b" * 64}, "核的不是這一份替身"),
     "這一次的起跑配置": ({"configuration": {**CONFIGURATION, "mount": "rigid"}}, "起跑配置"),
     "這一次的頻率軸": ({"frequencies_hz": (AXIS[0], AXIS[1], math.nextafter(AXIS[2], 0.0))}, "頻率軸"),
+    "這一次的完整模型": ({"operators_digest": "8" * 64}, "完整模型"),
+    "這一次的程式或環境": ({"code_identity": "fixcheck-v1:" + "9" * 64}, "算核對的程式"),
     "登記簿的逐頻尺換了": ({"rulers": (holdout_ruler_values()[0] / 2, holdout_ruler_values()[1])}, "用的尺"),
     "登記簿的帶能量尺換了": ({"rulers": (holdout_ruler_values()[0], holdout_ruler_values()[1] / 2)}, "用的尺"),
     "這一次的材料內容": ({"candidates": _identity_change(MEASURED_TARGET, material_sha256="1" * 64)}, "材料內容"),
@@ -167,8 +180,9 @@ def test_no_record_or_unreadable_record_means_recheck(tmp_path: Path) -> None:
     """抓紀錄不在、壞掉、或版本跟欄位對不上（v2 缺一格、v1 多一格）還當成核過：一律讀成沒有紀錄、重核。"""
     assert _reuse(None) == "替身旁邊沒有建替身時的核對紀錄（或讀不懂）"
     record = _record()
-    with pytest.raises(ValidationError, match="欄位跟版本不一致"):
-        FixedChecksRecord.model_validate({**record.model_dump(mode="json"), "frequencies_hz": None})
+    for name in ("frequencies_hz", "operators_digest", "code_identity"):
+        with pytest.raises(ValidationError, match="欄位跟版本不一致"):
+            FixedChecksRecord.model_validate({**record.model_dump(mode="json"), name: None})
     with pytest.raises(ValidationError, match="欄位跟版本不一致"):
         FixedChecksRecord.model_validate({**record.model_dump(mode="json"), "schema_version": FIXED_CHECKS_VERSION})
     rows = [row.model_dump(mode="json") for row in record.checks]
@@ -221,13 +235,15 @@ def _start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, record: FixedChec
 
     monkeypatch.setattr(fixed_candidates, "candidate_configurations", configurations)
     monkeypatch.setattr(fixed_candidates, "check_fixed_candidates", recheck)
+    monkeypatch.setattr(fixed_candidates, "check_code_identity", lambda: CODE)
+    monkeypatch.setattr(fem_reduced, "operators_digest", lambda operators: OPERATORS)
     model = SimpleNamespace(frequencies_hz=AXIS)
     scheme = SimpleNamespace(scene=SimpleNamespace(density_kg_m3=1.2, sound_speed_m_s=343.0))
     stderr = io.StringIO()
+    gate: Callable[..., tuple[FixedCandidateCheck, ...]] = cli._fixed_candidate_checks  # 替身、完整模型、方案是樁
     with redirect_stderr(stderr):
-        checks = cli._fixed_candidate_checks(
-            model, object(), (), ALLOWED, _table(), scheme, 1, surrogate,  # type: ignore[arg-type]
-            configuration=CONFIGURATION, carryover=carryover)
+        checks = gate(model, object(), (), ALLOWED, _table(), scheme, 1, surrogate, configuration=CONFIGURATION,
+                      carryover=carryover)
     assert len(built) == (0 if carryover else 1)  # 核對配置只算一次；沒沿用就把同一份交給重核
     assert carryover or all(given is built[0] for given in rechecked)
     return checks, stderr.getvalue(), rechecked
@@ -271,3 +287,58 @@ def test_project_json_keeps_its_bytes_when_not_reused() -> None:
                                 material_digest="a" * 64)
     assert "reused" not in check.model_dump(mode="json") and "reused" not in check.model_dump_json()
     assert check.model_copy(update={"reused": True}).model_dump(mode="json")["reused"] is True
+
+
+def test_family_setting_that_moves_a_template_start_changes_the_check_impedances_and_means_recheck(tmp_path: Path) -> None:
+    """抓家族設定（``--settings``）改了、起跑配置的正規寫法（只記代號）看不出來就沿用：總深度上限收窄，樣板片的下降起點
+    被投影到新的上限內，候選核對配置的阻抗就變了；真的起跑設計與核對配置（子行程雙精度，不是樁），阻抗摘要要擋得住、要重核。"""
+    import json
+    import os
+    import subprocess
+    import sys
+    from dataclasses import replace
+
+    from aosr.runtime import child_process_env, configure_jax
+    from tests.engine._cpu_pins import forward_cpu_pins
+
+    env = forward_cpu_pins(child_process_env(threads=1))
+    configure_jax(platforms="cpu", enable_x64=True, env=env)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
+    env["TMPDIR"] = str(tmp_path)
+    done = subprocess.run([sys.executable, str(Path(__file__).with_name("_fixed_checks_reuse_settings_probe.py")),
+                           str(tmp_path)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, done.stdout + done.stderr
+    found = json.loads((tmp_path / "probe.json").read_text(encoding="utf-8"))
+    assert found["changed"] is True and found["built"] != found["now"], found
+    expanded = {surface: tuple(targets) for surface, targets in found["expanded"].items()}
+    table = _table()
+    identity = CandidateIdentity(target=CARPET_TARGET,
+                                 material_sha256=fixed_targets(expanded, table)[0].coverage().material_sha256,
+                                 material_digest=candidate_material_digest(CARPET_TARGET, table),
+                                 surfaces=candidate_surfaces(CARPET_TARGET, expanded), impedances_sha256=found["built"])
+    frequency_ruler, band_ruler = holdout_ruler_values()
+    record = FixedChecksRecord(
+        schema_version=FIXED_CHECKS_VERSION_V2, configuration_sha256=configuration_sha256(CONFIGURATION),
+        configuration=CONFIGURATION, manifest_sha256="a" * 64, frequencies_hz=axis_hex(AXIS), operators_digest=OPERATORS,
+        code_identity=CODE, checks=(FixedCheckRow(
+            target=CARPET_TARGET, material_sha256=identity.material_sha256, frequency_db=0.05, band_db=0.001,
+            frequency_ruler=frequency_ruler, band_ruler=band_ruler, passed=True, surfaces=identity.surfaces,
+            material_digest=identity.material_digest, full_solves=3, impedances_sha256=found["built"]),))
+    assert not isinstance(_reuse(record, candidates=(identity,)), str)  # 同一份設定：沿用
+    rechecked = _reuse(record, candidates=(replace(identity, impedances_sha256=found["now"]),))
+    assert isinstance(rechecked, str) and "核對配置阻抗" in rechecked
+
+
+def test_code_identity_follows_the_check_code(tmp_path: Path) -> None:
+    """抓算核對的程式（替身求值、比對、完整解）改了還沿用：物理身分不收那幾支，改了就要換程式身分；同一份程式同一個值。"""
+    import shutil
+
+    package = Path(fixed_candidates.__file__).resolve().parents[1]
+    copy = tmp_path / "aosr"
+    shutil.copytree(package, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    same = fixed_candidates.check_code_identity(package_root=copy)
+    assert same == fixed_candidates.check_code_identity(package_root=package)
+    target = copy / "physics" / "fem_reduced_check.py"
+    target.write_text(target.read_text(encoding="utf-8") + "\n\ndef _changed() -> int:\n    return 1\n", encoding="utf-8")
+    assert fixed_candidates.check_code_identity(package_root=copy) != same

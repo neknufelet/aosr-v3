@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Self
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
@@ -272,6 +273,26 @@ def reused_check(row: FixedCheckRow) -> FixedCandidateCheck:
                                band_db=row.band_db, frequency_ruler=row.frequency_ruler, band_ruler=row.band_ruler,
                                full_solves=row.full_solves, seconds=0.0, material_digest=row.material_digest,
                                reused=True)
+
+
+CHECK_ENTRY_MODULE: Final = "aosr.gradient.fixed_candidates"
+
+
+def check_code_identity(*, package_root: Path | None = None) -> str:
+    """算這一道核對的程式與環境的身分（#1142）：本模組的靜態引入閉包（判決、完整解、替身求值、比對、阻抗鏈都在裡面）
+    的程式、閉包經 ``config_path`` 讀的資料檔、執行環境；收法照有限元素分片的身分（:func:`aosr.reporting.fem_identity.
+    fem_identity`）。建替身寫進核對紀錄、開跑比：不同就重核（物理身分不收替身求值與比對那幾支）。"""
+    import hashlib
+
+    from aosr.reporting.import_closure import environment_digest, feed_segment, import_code_digest, scan_import_closure
+
+    root = package_root if package_root is not None else Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    feed_segment(digest, b"code", import_code_digest(root, CHECK_ENTRY_MODULE).encode())
+    for name in scan_import_closure(root, CHECK_ENTRY_MODULE)[0].data_files:
+        feed_segment(digest, b"data:" + name.encode(), (root / "config" / "data" / name).read_bytes())
+    feed_segment(digest, b"environment", environment_digest().encode())
+    return "fixcheck-v1:" + digest.hexdigest()
 
 
 def holdout_ruler_values() -> tuple[float, float]:

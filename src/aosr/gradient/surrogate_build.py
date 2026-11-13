@@ -565,8 +565,10 @@ def _refuse_fixed(job: _Run, extension: _Extension) -> None:
 def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict], prepared: _Prepared,
                   frequencies_hz: Sequence[float]) -> None:
     """核對紀錄寫進 stage/（跟替身一起換名進格子）：哪一組起跑配置、哪一份替身、每個候選的數字；v2（#1142）再記開跑沿用
-    要比的身分：頻率軸（裝進去那份替身自己的）、每個候選准用的片、材料身分摘要、完整解次數、核對配置的阻抗摘要。"""
-    from aosr.gradient.fixed_candidates import candidate_material_digest, holdout_ruler_values
+    要比的身分：頻率軸（裝進去那份替身自己的）、完整模型指紋、算核對的程式身分、每個候選准用的片、材料身分摘要、
+    完整解次數、核對配置的阻抗摘要。"""
+    from aosr.gradient.fixed_candidates import candidate_material_digest, check_code_identity, holdout_ruler_values
+    from aosr.physics.fem_reduced import operators_digest
     from aosr.gradient.surrogate_fixed_checks import (
         FIXED_CHECKS_FILE, FIXED_CHECKS_VERSION_V2, FixedCheckRow, FixedChecksRecord, axis_hex, configuration_document,
         configuration_sha256, impedances_sha256, manifest_digest, write_record,
@@ -584,6 +586,7 @@ def _fixed_record(job: _Run, npz: Path, verdicts: Mapping[str, CandidateVerdict]
         schema_version=FIXED_CHECKS_VERSION_V2,
         configuration_sha256=configuration_sha256(configuration), configuration=configuration,
         manifest_sha256=manifest_digest(manifest_path(npz)), frequencies_hz=axis_hex(frequencies_hz),
+        operators_digest=operators_digest(prepared.operators), code_identity=check_code_identity(),
         checks=tuple(FixedCheckRow(target=target, material_sha256=materials[target], frequency_db=verdict.frequency_db,
                                    band_db=verdict.band_db, frequency_ruler=frequency_ruler, band_ruler=band_ruler,
                                    passed=verdict.passed, surfaces=verdict.surfaces,

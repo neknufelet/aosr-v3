@@ -449,7 +449,7 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     if carryover:
         sys.stderr.write("注意：替身是接續（carry-over）沿用的，不沿用建替身時核過的固定材料數字，開跑前照舊重核\n")
     else:
-        found, configurations = _reusable(model, designs, allowed, table, scheme, surrogate, configuration)
+        found, configurations = _reusable(model, operators, designs, allowed, table, scheme, surrogate, configuration)
         if not isinstance(found, str):
             checks = tuple(reused_check(row) for row in found)
             for check in checks:
@@ -469,14 +469,16 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     return checks
 
 
-def _reusable(model: ReducedModel, designs: tuple[SurfaceDesign, ...], allowed: dict[str, tuple[str, ...]],
+def _reusable(model: ReducedModel, operators: FullOperators, designs: tuple[SurfaceDesign, ...],
+              allowed: dict[str, tuple[str, ...]],
               table: tuple[PresetMaterial, ...], scheme: Scheme, surrogate: Path, configuration: Mapping[str, object],
               ) -> tuple[tuple[FixedCheckRow, ...] | str, dict[str, FrequencyBoundaryImpedances]]:
     """這一次的身分跟建替身時的核對紀錄逐欄比（:func:`aosr.gradient.surrogate_fixed_checks.reused_rows`）：回沿用得了的
     紀錄列或沒沿用的原因，以及這一次算的核對配置（沒沿用就直接拿去重核，不算第二次）。"""
     from aosr.gradient.fixed_candidates import (
-        candidate_configurations, candidate_material_digest, candidate_surfaces, holdout_ruler_values,
+        candidate_configurations, candidate_material_digest, candidate_surfaces, check_code_identity, holdout_ruler_values,
     )
+    from aosr.physics.fem_reduced import operators_digest
     from aosr.gradient.fixed_surfaces import fixed_targets_of
     from aosr.gradient.surrogate_coverage import fixed_targets
     from aosr.gradient.surrogate_fixed_checks import (
@@ -498,6 +500,7 @@ def _reusable(model: ReducedModel, designs: tuple[SurfaceDesign, ...], allowed: 
         return "替身的 manifest 不在", configurations
     found = reused_rows(read_record(surrogate.parent / FIXED_CHECKS_FILE), manifest_sha256=manifest_digest(manifest),
                         configuration=configuration, frequencies_hz=axis, rulers=holdout_ruler_values(),
+                        operators_digest=operators_digest(operators), code_identity=check_code_identity(),
                         candidates=candidates)
     return found, configurations
 

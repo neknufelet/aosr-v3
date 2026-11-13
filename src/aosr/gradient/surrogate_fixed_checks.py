@@ -9,8 +9,11 @@
 開跑那一道（#1142，老闆 2026-11-13 拍 A）：紀錄的身分逐欄都跟這一次相同才沿用紀錄的數字、不再完整解一次
 （:func:`reused_rows`）；任何一欄不同、紀錄是舊格式（v1，沒有沿用要比的欄位）或讀不懂、替身是接續（carry-over）沿用的，
 一律照舊自己重核。身分：替身（manifest 整份檔案的 SHA-256）、起跑配置（正規寫法的摘要）、頻率軸（逐位 ``float.hex()``）、
-兩把尺（登記簿現值）、每個候選的材料內容（兩種摘要都比）與准用它的片、以及每個候選核對配置的逐片逐頻阻抗（逐位摘要；
-起跑配置的正規寫法只記代號，家族的構造與盒界、使用者材料庫的內容改了阻抗就會變，這一格擋得住）。
+兩把尺（登記簿現值）、每個候選的材料內容（兩種摘要都比）與准用它的片、每個候選核對配置的逐片逐頻阻抗（逐位摘要；
+起跑配置的正規寫法只記代號，家族的構造與盒界、使用者材料庫的內容改了阻抗就會變，這一格擋得住）、完整模型的指紋
+（``fem_reduced.operators_digest``，直接比，不靠物理身分推）、算這一道核對的程式（:func:`~aosr.gradient.fixed_candidates.
+check_code_identity`：核對那一支的靜態引入閉包、它讀的資料檔與執行環境；物理身分不收替身求值與比對那幾支，
+那幾支改了數字就可能變）。
 
 准用清單沒有固定材料的切法不寫也不讀這份紀錄（格子裡的檔與網頁行為逐位照舊）。
 """
@@ -90,14 +93,17 @@ class FixedChecksRecord(_Frozen):
     checks: tuple[FixedCheckRow, ...] = Field(min_length=1)
     frequencies_hz: tuple[str, ...] | None = Field(default=None, min_length=1,
                                                    description="核對用的頻率軸，逐點 float.hex()（v2）")
+    operators_digest: str | None = Field(default=None, pattern=_SHA256, description="完整模型的指紋（v2）")
+    code_identity: str | None = Field(default=None, pattern=r"^fixcheck-v1:[0-9a-f]{64}$",
+                                      description="算核對的程式與環境的身分（v2，check_code_identity）")
 
     @model_validator(mode="after")
     def _fields_match_version(self) -> Self:
         v2 = self.schema_version == FIXED_CHECKS_VERSION_V2
         missing = [f"{row.target}.{name}" for row in self.checks for name in _ROW_IDENTITY
                    if (getattr(row, name) is None) == v2]
-        if (self.frequencies_hz is None) == v2:
-            missing.append("frequencies_hz")
+        missing.extend(name for name in ("frequencies_hz", "operators_digest", "code_identity")
+                       if (getattr(self, name) is None) == v2)
         if missing:
             raise ValueError(f"核對紀錄 {self.schema_version} 的欄位跟版本不一致：{missing}")
         return self
@@ -195,7 +201,7 @@ def unchecked_reason(slot: Path, manifest: Path, configuration: Mapping[str, obj
 
 
 def reused_rows(record: FixedChecksRecord | None, *, manifest_sha256: str, configuration: Mapping[str, object],
-                frequencies_hz: Sequence[float], rulers: tuple[float, float],
+                frequencies_hz: Sequence[float], rulers: tuple[float, float], operators_digest: str, code_identity: str,
                 candidates: Sequence[CandidateIdentity]) -> tuple[FixedCheckRow, ...] | str:
     """開跑那一道能不能沿用建替身時核過的數字（#1142）：身分逐欄都相同、每個候選都在紀錄裡而且過了，回照 ``candidates``
     順序排好的紀錄列；有任何一欄不同，回一句白話原因（開跑照舊重核）。``rulers`` 是登記簿現值（逐頻、帶能量）。
@@ -210,6 +216,10 @@ def reused_rows(record: FixedChecksRecord | None, *, manifest_sha256: str, confi
         return "起跑配置跟建替身時核的那一組不同"
     if record.frequencies_hz != axis_hex(frequencies_hz):
         return "頻率軸跟建替身時核的不同"
+    if record.operators_digest != operators_digest:
+        return "完整模型跟建替身時核的不同"
+    if record.code_identity != code_identity:
+        return "算核對的程式或環境跟建替身時不同"
     rows = {row.target: row for row in record.checks}
     if set(rows) != {item.target for item in candidates}:
         return "固定材料候選跟建替身時核的那幾個不同"
