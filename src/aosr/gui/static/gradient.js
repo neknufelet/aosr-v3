@@ -9,7 +9,7 @@ const SLOW_MS = 15000;
 const WALLS = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const MODE_WORDS = {fixed: "固定這一組材料", keep_original: "保留原牆", search: "交給搜尋"};
 const WHOLE_WALL = "whole_wall";
-const RUNNING_BUILD = new Set(["preparing", "building", "validating", "checking", "installing", "stopping"]);
+const RUNNING_BUILD = new Set(["preparing", "building", "fixed_checking", "validating", "checking", "installing", "stopping"]);
 const RUN_WORDS = {running: "一般計算中", done: "一般計算做完了", failed: "一般計算失敗", stopped: "一般計算已停止",
   interrupted: "一般計算中斷", unknown: "一般計算狀態讀不到"};
 

@@ -32,7 +32,7 @@ EXIT_FAILED: Final = 1
 EXIT_STOPPED: Final = 3
 EXIT_NOT_USABLE: Final = 4
 
-Phase = Literal["preparing", "building", "validating", "checking", "installing"]
+Phase = Literal["preparing", "building", "fixed_checking", "validating", "checking", "installing"]
 Verdict = Literal["installed", "not_validated", "gate_refused"]
 ESTIMATE_LABEL: Final = "推估"
 
@@ -84,8 +84,8 @@ class FixedCheckRound(_Frozen):
     full_solves: int = Field(ge=0)
     rank: int = Field(ge=0)
     target: str
-    frequency_db: float = Field(ge=0.0)
-    band_db: float = Field(ge=0.0)
+    frequency_db: float | None = Field(default=None, ge=0.0, description="算不出來（非有限數，判決照沒過）是 None")
+    band_db: float | None = Field(default=None, ge=0.0, description="同上")
     worst_hz: float | None = None
     passed: bool
     seconds: float = Field(ge=0.0)
@@ -93,15 +93,21 @@ class FixedCheckRound(_Frozen):
 
 def read_fixed_rounds(path: Path) -> tuple[FixedCheckRound, ...]:
     """``fixed_check_rounds.jsonl`` 每一列；檔不在是空的，讀不懂的列不算（只給網頁看，判決照 ``result.json``）。"""
-    if not path.is_file():
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    except OSError:
         return ()
     rows: list[FixedCheckRound] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in text.splitlines():
         try:
             rows.append(FixedCheckRound.model_validate_json(line))
         except ValueError:
             continue
     return tuple(rows)
+
+
+def _db(value: float | None) -> str:
+    return "算不出來" if value is None else f"{value:.4g} dB"
 
 
 def fixed_round_lines(rows: Sequence[FixedCheckRound], labels: Mapping[str, str] | None = None) -> list[str]:
@@ -117,7 +123,7 @@ def fixed_round_lines(rows: Sequence[FixedCheckRound], labels: Mapping[str, str]
     for check in sorted({row.check for row in rows}):
         block = [row for row in rows if row.check == check]
         words = "；".join(
-            f"{shown(row.target)}逐頻 {row.frequency_db:.4g} dB、帶能量 {row.band_db:.4g} dB"
+            f"{shown(row.target)}逐頻 {_db(row.frequency_db)}、帶能量 {_db(row.band_db)}"
             + ("，過了" if row.passed else f"，沒過（最差在 {row.worst_hz:g} Hz）" if row.worst_hz is not None else "，沒過")
             for row in block)
         lines.append(f"固定材料核對第 {check} 次（完整解合計 {block[0].full_solves} 次、秩 {block[0].rank}）：{words}")
@@ -168,6 +174,7 @@ def estimate(progress: SurrogateProgress, now: float, *, extending: bool = False
     每次完整解秒數）；輪越後越慢（秩越大，投影與殘差越貴），殘差先達標會提早停，所以兩頭都可能偏。
     ``extending``（已經核過一次固定材料、在補訓練）：每補一輪就重核、全過就停，所以只推「再補一輪」加留出驗證，
     另寫預算內最多還能補幾輪（#1128：照預算推成上百小時，實際補三輪約 18 分）。
+    固定材料核對段（#1128：原本借用留出驗證的名字、也沒算後面那一段）：照這一段已解的速度外推剩下的點，加上留出驗證。
     留出驗證段：照這一段已解的速度外推剩下的點。
     """
     elapsed = max(0.0, now - progress.started_at)  # 系統時間被往回調時不給負秒數
@@ -197,6 +204,17 @@ def estimate(progress: SurrogateProgress, now: float, *, extending: bool = False
                        "validation_remaining_s": validation_left,
                        "basis": (f"最近一輪 {seconds:.0f} 秒 × 預算內最多再 {rounds_left} 輪，加留出驗證 {validation_points} 點 × "
                                  f"每次完整解 {per_solve:.2f} 秒；輪越後越慢，殘差先達標會提早停")}
+    if progress.phase == "fixed_checking":
+        done, total = progress.validation_done or 0, progress.validation_total
+        after = None if validation_points is None or per_solve is None else validation_points * per_solve
+        if total is None or after is None or (done == 0 and per_solve is None):
+            return base | {"basis": "固定材料核對剛開始，還量不到速度"}
+        rate = max(0.0, now - progress.phase_started_at) / done if done > 0 else per_solve
+        assert rate is not None
+        check_left = max(0, total - done) * rate
+        return base | {"remaining_s": check_left + after, "validation_remaining_s": after,
+                       "basis": (f"固定材料核對已解 {done}／{total} 點（照這一段的速度外推），之後還有留出驗證 "
+                                 f"{validation_points} 點 × 每次完整解 {per_solve:.2f} 秒；沒過要先補訓練再核，會再加")}
     if progress.phase == "validating":
         done, total = progress.validation_done or 0, progress.validation_total or validation_points
         if total is None:

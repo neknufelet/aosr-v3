@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import signal
 import sys
@@ -435,16 +436,24 @@ def _record_check(job: _Run, check: int, model: ReducedModel, verdicts: Mapping[
     過不過、差多少事後查不到）。不改判決。"""
     from aosr.gradient.surrogate_files import FIXED_ROUNDS_FILE, FixedCheckRound, fixed_round_lines
 
-    rows = [FixedCheckRound(check=check, full_solves=model.ledger.full_solves, rank=model.ledger.rank, target=target,
-                            frequency_db=verdict.frequency_db, band_db=verdict.band_db,
-                            worst_hz=None if verdict.passed else verdict.worst_hz, passed=verdict.passed,
-                            seconds=verdict.seconds)
-            for target, verdict in sorted(verdicts.items())]
-    with (job.work / FIXED_ROUNDS_FILE).open("a", encoding="utf-8") as stream:
-        for row in rows:
-            stream.write(row.model_dump_json() + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
+    def finite(value: float) -> float | None:
+        return value if math.isfinite(value) else None
+
+    try:
+        rows = [FixedCheckRound(check=check, full_solves=model.ledger.full_solves, rank=model.ledger.rank, target=target,
+                                frequency_db=finite(verdict.frequency_db), band_db=finite(verdict.band_db),
+                                worst_hz=None if verdict.passed or not math.isfinite(verdict.worst_hz) else verdict.worst_hz,
+                                passed=verdict.passed, seconds=max(0.0, verdict.seconds))
+                for target, verdict in sorted(verdicts.items())]
+        with (job.work / FIXED_ROUNDS_FILE).open("a", encoding="utf-8") as stream:
+            for row in rows:
+                stream.write(row.model_dump_json() + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except (OSError, ValueError) as error:
+        # 紀錄只給人看：寫不進去照講一句、建模照走，不讓它改掉判決之後的路（審查必修）。
+        sys.stderr.write(f"固定材料核對第 {check} 次的紀錄沒寫進去（判決照常）：{error}\n")
+        return
     for line in fixed_round_lines(rows):
         sys.stderr.write(line + "\n")
 
@@ -459,7 +468,7 @@ def _fixed_checked(job: _Run, builder: ReducedModelBuilder, model: ReducedModel,
 
     axis = prepared.axis
     total = len(prepared.configurations) * len(axis)
-    job.progress.phase("validating", validation_done=0, validation_total=total)
+    job.progress.phase("fixed_checking", validation_done=0, validation_total=total)
     verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded, workers=job.workers,
                                 progress=job.progress.validation)
     job.progress.validation(total, total)
@@ -496,7 +505,7 @@ def _fixed_checked(job: _Run, builder: ReducedModelBuilder, model: ReducedModel,
                 break
             continuing = False
             continue
-        job.progress.phase("validating", validation_done=0, validation_total=total)
+        job.progress.phase("fixed_checking", validation_done=0, validation_total=total)
         verdicts = judge_candidates(model, prepared.operators, prepared.configurations, prepared.expanded,
                                     workers=job.workers, previous=verdicts, progress=job.progress.validation)
         checks += 1

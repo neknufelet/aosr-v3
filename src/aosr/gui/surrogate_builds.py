@@ -59,6 +59,7 @@ NO_SEARCH_TEXT: Final = ("准用清單有固定材料：建替身要帶開跑那
 STATE_TEXTS: Final[dict[str, str]] = {
     "preparing": "建替身：匯出完整模型、算訓練與留出材料",
     "building": "建替身：完整解快照、補點、投影",
+    "fixed_checking": "建替身：固定材料核對（准用清單的固定材料整條頻率軸完整解，跟替身比；沒過就補訓練再核）",
     "validating": "建替身：留出驗證（拿沒用來建的材料逐點完整解，跟替身比）",
     "checking": "建替身：用搜尋開跑那一道准用閘門核對",
     "installing": "建替身：放進這份切法的格子",
@@ -70,7 +71,7 @@ STATE_TEXTS: Final[dict[str, str]] = {
     "gate_refused": "建好、驗過，但搜尋開跑那一道准用閘門不收：沒有放進格子",
     "installed": "建好、留出驗證兩把尺都過、閘門核過，已放進這份切法的格子，可以開搜尋",
 }
-RUNNING_STATES: Final = ("preparing", "building", "validating", "checking", "installing", "stopping")
+RUNNING_STATES: Final = ("preparing", "building", "fixed_checking", "validating", "checking", "installing", "stopping")
 
 
 class SurrogateRequest(BaseModel):
