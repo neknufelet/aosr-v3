@@ -1,0 +1,4 @@
+③、[[by_design]]：登記寫死到函式，同一支檔裡別的函式冒出同一種抑制標記，照放行判。
+
+迷你卡頂層的 [[by_design]] 准許 tests/test_probe.py 的 probe 一處 `# type: ignore[arg-type]`；probe 剛好一處（不咬），
+但同一支檔又長出一個 other，也壓了一處——它沒登記，就是一筆沒寫兩格的放行，紅。

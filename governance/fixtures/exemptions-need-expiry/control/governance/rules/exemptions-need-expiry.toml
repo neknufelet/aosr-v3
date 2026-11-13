@@ -36,3 +36,17 @@ keyword_reasons = [
   "pending",
 ]
 scan_exempt_prefixes = ["governance/fixtures/"]
+
+[[by_design]]
+path = "tests/test_designed.py"
+function = "Probe.run"
+comment = "# type: ignore[arg-type]"
+count = 1
+reason = "樣本：這一題就是要餵壞形狀進去看它炸。"
+
+[[by_design]]
+path = "tests/test_designed.py"
+function = "<module>"
+comment = "# noqa: E501"
+count = 1
+reason = "樣本：這一題就是要餵壞形狀進去看它炸。"

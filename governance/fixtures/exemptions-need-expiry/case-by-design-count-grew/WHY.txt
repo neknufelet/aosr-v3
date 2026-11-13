@@ -1,0 +1,3 @@
+③、[[by_design]]：登記的函式多一處就紅。
+
+迷你卡登記 tests/test_probe.py 的 probe 准一處，probe 實際壓了兩處——多出來那一處沒人登記過，紅。

@@ -415,7 +415,7 @@ def test_early_lane_multiplies_each_path_by_hand_computed_d_once(monkeypatch: py
     real = room_paths.image_source_paths
 
     def recording(*args: object, **kwargs: object) -> list[RoomPath]:
-        paths = real(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-31 reason=考卷攔截原函式、參數原樣轉交
+        paths = real(*args, **kwargs)  # type: ignore[arg-type]  # reason=考卷攔截原函式、參數原樣轉交
         captured.append(list(paths))
         return paths
 

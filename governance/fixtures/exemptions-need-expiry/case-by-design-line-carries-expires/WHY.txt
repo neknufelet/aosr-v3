@@ -1,0 +1,4 @@
+③、[[by_design]]：登記的那一行不准再帶 expires=。
+
+迷你卡登記 tests/test_probe.py 的 probe 一處，那一行卻還寫著 expires=——資料沒有到期日，
+兩種寫法混在一起，到期那一關就看不清它是哪一種，紅。

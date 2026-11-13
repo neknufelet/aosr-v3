@@ -249,7 +249,7 @@ def test_capability_frequency_range_is_empty_or_exactly_two() -> None:
     for wrong in ((500.0,), (500.0, 1000.0, 2000.0), (500.0, 1000.0, 2000.0, 4000.0)):
         with pytest.raises(Exception) as caught:
             report_io.CapabilitySection(
-                frequency_hz=wrong,  # type: ignore[arg-type]  # expires=2027-03-08 reason=這一題就是要餵壞形狀進去看它炸
+                frequency_hz=wrong,  # type: ignore[arg-type]  # reason=這一題就是要餵壞形狀進去看它炸
                 outputs=(),
                 status="unchecked",
                 evidence=(),
