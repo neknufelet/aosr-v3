@@ -292,7 +292,7 @@ def plan_configuration(plan: SearchPlan, scheme: Scheme) -> dict[str, object]:
 
 def _unchecked(surrogate: Path, plan: SearchPlan, scheme: Scheme, fixed: tuple[FixedTarget, ...]) -> str | None:
     """准用清單有固定材料時：替身裝進格子之前有沒有用這一組起跑配置核過每個候選（#1082 段 2-8）；沒有就回原因、要重建
-    （開跑那一道照樣自己再核，這裡只讓網頁先講、不說「可以直接開搜尋」）。"""
+    （開跑那一道自己再比一次身分：逐欄相同才沿用紀錄的數字、否則照舊重核，#1142；這裡只讓網頁先講、不說「可以直接開搜尋」）。"""
     return unchecked_reason(surrogate.parent, manifest_path(surrogate), plan_configuration(plan, scheme), fixed)
 
 
