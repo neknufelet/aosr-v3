@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date
 
@@ -179,18 +180,40 @@ def test_no_network_entry_means_no_network() -> None:
         card.network_allowed({"settings": {"allow": [{"issue": 83, "reason": "假的", "expires": LIVE}]}}, "假的卡")
 
 
-@pytest.mark.parametrize("table", ["allow", "net"])
-def test_network_written_as_a_temporary_allow_means_no_network(table: str) -> None:
+STRAY = {"network": "假的", "reason": "假的：准上網", "expires": LIVE}
+
+
+@pytest.mark.parametrize(
+    ("settings", "at"),
+    [
+        ({"allow": [STRAY]}, "settings.allow[0]"),
+        ({"net": [STRAY]}, "settings.net[0]"),
+        ({"allow": STRAY}, "settings.allow"),
+        ({"allow": [[STRAY]]}, "settings.allow[0][0]"),
+        ({"allow": [{**STRAY, "Network": STRAY["network"]}]}, "settings.allow[0]"),
+        ({"x": {"allow": [{"NETWORK": "假的", "reason": "假的", "expires": LIVE}]}}, "settings.x.allow[0]"),
+    ],
+    ids=["allow", "renamed", "single-table", "nested-array", "mixed-case", "deeper"],
+)
+def test_network_written_as_a_temporary_allow_means_no_network(settings: dict[str, object], at: str) -> None:
     """准上網寫回會到期的放行也不准上網——那是規矩的形狀，不是放行（#1014）。
 
-    卡頂層那一筆是對的也一樣（只留這一個病）；表叫什麼名字都算，改個名字就繞過去的判準等於沒有判準。
+    卡頂層那一筆是對的也一樣（只留這一個病）；表叫什麼名字、寫成什麼形狀、鍵名大小寫都算，
+    改個名字或形狀就繞過去的判準等於沒有判準。
     """
-    data = {
-        "settings": {table: [{"network": "假的", "reason": "假的：准上網", "expires": LIVE}]},
-        "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}],
-    }
-    with pytest.raises(ToolBroken, match=f"表陣列 \\['{table}'\\]"):
+    data = {"settings": settings, "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}]}
+    with pytest.raises(ToolBroken, match=re.escape(f"'{at}'")):
         card.network_allowed(data, "假的卡")
+
+
+def test_a_named_ticket_exemption_beside_the_network_entry_still_goes_online() -> None:
+    """具名放過某張票（只帶票號、理由、到期日）跟卡頂層准上網那一筆並存：照常上網、交回理由。"""
+    reason = "假的：決策紙說可以"
+    data = {
+        "settings": {"allow": [{"issue": 83, "reason": "假的：等合併", "expires": LIVE}]},
+        "by_design": [{"network": "假的", "reason": reason}],
+    }
+    assert card.network_allowed(data, "假的卡") == reason
 
 
 @pytest.mark.parametrize(

@@ -617,19 +617,31 @@ def by_design_entries(data: Mapping[str, object], keys: Mapping[str, str], where
 NETWORK_KEY = "network"
 
 
+def _network_anywhere(value: object, at: str) -> list[str]:
+    """``value`` 底下任何一層、任何形狀（表、行內表、表陣列、陣列裡的陣列）帶 ``network`` 鍵（不分大小寫）的位置。"""
+    found: list[str] = []
+    if isinstance(value, Mapping):
+        if any(str(key).lower() == NETWORK_KEY for key in value):
+            found.append(at)
+        for key, inner in value.items():
+            found += _network_anywhere(inner, f"{at}.{key}")
+    elif isinstance(value, list):
+        for index, inner in enumerate(value):
+            found += _network_anywhere(inner, f"{at}[{index}]")
+    return found
+
+
 def network_permission(data: Mapping[str, object], where: str, paper: str) -> str:
     """卡頂層 ``[[by_design]]`` 那一筆「准上網」的 reason。
 
-    缺席、不只一筆、或還寫在 ``[settings]`` 底下任何一個表陣列裡（會到期的放行；不只認叫 ``allow``
-    的那張——改個名字就繞過去的判準等於沒有判準，見 :func:`settings_exemptions`），一律 raise
-    :class:`ToolBroken`——外殼翻成離開碼 2，不上網。
+    缺席、不只一筆、或還寫在 ``[settings]`` 底下任何地方（會到期的放行；不只認叫 ``allow`` 的那張表陣列，
+    單一表、行內表、陣列裡的陣列、鍵名大小寫不同都算——改個名字或形狀就繞過去的判準等於沒有判準），
+    一律 raise :class:`ToolBroken`——外殼翻成離開碼 2，不上網。
     """
-    stray = sorted(
-        {name for name, _, entry in settings_exemptions(dict(data)) if isinstance(entry, Mapping) and NETWORK_KEY in entry}
-    )
+    stray = _network_anywhere(data.get("settings"), "settings")
     if stray:
         raise ToolBroken(
-            f"{where} 的 [settings] 底下表陣列 {stray} 裡有一筆帶 {NETWORK_KEY}——准上網是卡頂層"
+            f"{where} 的 {stray} 帶 {NETWORK_KEY}——准上網是卡頂層"
             f" [[{BY_DESIGN_FIELD}]] 的資料、沒有到期日，不是會到期的放行（決策紙 {paper}）"
         )
     entries = by_design_entries(data, {NETWORK_KEY: "text"}, where)

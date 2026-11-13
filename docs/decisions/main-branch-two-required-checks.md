@@ -27,7 +27,7 @@ summary: "公開主線只收兩個必要檢查全綠的合併請求；規則組�
 
 准上網寫在 `governance/rules/merge-gate-read-back.toml` 卡頂層的 `[[by_design]]`（一筆 `network` 加 `reason`），是規矩本身的形狀、沒有到期日。缺席、不只一筆、或寫回 `[[settings.allow]]` 時檢查回 2 且不上網。檢查只打讀取端點，不改平台設定；使用 CI 自帶 `GITHUB_TOKEN`，權限是 `contents: read`。期望值全住在卡的 `[settings]`，改平台設定也要開 PR 改卡。
 
-准上網原本是老闆 2026-09-10 拍板的「90 天、跟第一批放行同日審」（含 `expires` 的 `[[settings.allow]]`）。那個審查日就是 #1014：老闆 2026-11-13 原話「Ｂ」；問句由主對話寫，把「准讀 GitHub」列在「本來就該這樣的……改寫成規矩卡上的資料」那一類。B 取代了 90 天那一條，照設計永久需要的改寫成卡上的資料。拍板留言：https://github.com/neknufelet/aosr-v3/issues/1014#issuecomment-6850467991
+准上網原本是老闆 2026-09-10 拍板的 90 天放行、跟第一批放行同日審（含 `expires` 的 `[[settings.allow]]`，原話見拍板段）。那個審查日就是 #1014：老闆 2026-11-13 原話「Ｂ」；問句由主對話寫，把「准讀 GitHub」列在「本來就該這樣的……改寫成規矩卡上的資料」那一類。B 取代了 90 天那一條，照設計永久需要的改寫成卡上的資料。拍板留言：https://github.com/neknufelet/aosr-v3/issues/1014#issuecomment-6850467991
 
 准上網不是通則。2026-09-10 後，具名例外從一支變兩支：本支與 `issues-closed-only-by-merged-pr`；第二支的權限與三層分工見 `docs/decisions/issue-lifecycle-backlog-status-and-closing.md`。規則讀得到就比；管理員 bypass 名單若因平台只給管理員而在雲端看不到，輸出必須明說「這一格這一跑沒守」，不得假裝通過。
 
