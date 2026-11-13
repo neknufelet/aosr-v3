@@ -10,10 +10,9 @@ main_branch = "aosr-fixture-branch-that-never-exists"
 api_timeout_seconds = 60
 per_page = 100
 
-[[settings.allow]]
+[[by_design]]
 network = "GitHub 的 issue 與關票來源（只讀）"
 reason = "決策紙 hand-closed-issues-block-merge：只准這一支、只准讀。樣本裡照抄主卡那一筆。"
-expires = "2027-03-08"
 
 # 具名放過 #83（那張票在主線上真的是由一個合進去的 PR 關掉的），但這一筆已經過期。
 # 過期的放行當沒放行——配上上面那個不存在的分支名，#83 照樣要被列成人手關的。

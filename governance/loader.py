@@ -611,6 +611,52 @@ def by_design_entries(data: Mapping[str, object], keys: Mapping[str, str], where
     return out
 
 
+# 准上網那一格。兩支具名准上網的檢查（merge-gate-read-back、issues-closed-only-by-merged-pr）各在自己卡頂層的
+# [[by_design]] 寫剛好一筆：network（准讀什麼）＋ reason（憑哪一張決策紙）。那是規矩本身的形狀、沒有到期日
+# （#1014，老闆 2026-11-13 拍 B；之前是 [[settings.allow]] 帶到期日）。
+NETWORK_KEY = "network"
+
+
+def _network_anywhere(value: object, at: str) -> list[str]:
+    """``value`` 底下任何一層、任何形狀（表、行內表、表陣列、陣列裡的陣列）帶 ``network`` 鍵（不分大小寫）的位置。
+
+    用自己的堆疊走、不遞迴：很深的巢狀不會撞上直譯器的遞迴上限，把該回 2 的一跑變成例外回 1。
+    """
+    found: list[str] = []
+    stack: list[tuple[object, str]] = [(value, at)]
+    while stack:
+        node, where = stack.pop()
+        if isinstance(node, Mapping):
+            if any(str(key).lower() == NETWORK_KEY for key in node):
+                found.append(where)
+            stack.extend((inner, f"{where}.{key}") for key, inner in node.items())
+        elif isinstance(node, list):
+            stack.extend((inner, f"{where}[{index}]") for index, inner in enumerate(node))
+    return sorted(found)
+
+
+def network_permission(data: Mapping[str, object], where: str, paper: str) -> str:
+    """卡頂層 ``[[by_design]]`` 那一筆「准上網」的 reason。
+
+    缺席、不只一筆、或還寫在 ``[settings]`` 底下任何地方（會到期的放行；不只認叫 ``allow`` 的那張表陣列，
+    單一表、行內表、陣列裡的陣列、鍵名大小寫不同都算——改個名字或形狀就繞過去的判準等於沒有判準），
+    一律 raise :class:`ToolBroken`——外殼翻成離開碼 2，不上網。
+    """
+    stray = _network_anywhere(data.get("settings"), "settings")
+    if stray:
+        raise ToolBroken(
+            f"{where} 的 {stray} 帶 {NETWORK_KEY}——准上網是卡頂層"
+            f" [[{BY_DESIGN_FIELD}]] 的資料、沒有到期日，不是會到期的放行（決策紙 {paper}）"
+        )
+    entries = by_design_entries(data, {NETWORK_KEY: "text"}, where)
+    if len(entries) != 1:
+        raise ToolBroken(
+            f"{where} 頂層的 [[{BY_DESIGN_FIELD}]] 裡准上網的有 {len(entries)} 筆，要剛好 1 筆"
+            f"——沒有登記就不准上網（決策紙 {paper}）"
+        )
+    return str(entries[0][BY_DESIGN_REASON_KEY])
+
+
 def settings_exemptions(data: dict[str, object]) -> list[tuple[str, int, object]]:
     """一張卡的放行條目：``[settings]`` 底下每一個表陣列的每一筆。
 

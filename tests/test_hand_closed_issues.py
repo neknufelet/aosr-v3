@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import re
+import sys
 from collections.abc import Mapping, Sequence
 from datetime import date
 
@@ -148,7 +150,6 @@ def test_an_expired_named_exemption_is_no_exemption() -> None:
     """過期的具名放行讀出來就不在名單裡——放行不是寫上去就永久有效。"""
     settings = {
         "allow": [
-            {"network": "假的", "reason": "假的：准上網", "expires": LIVE},
             {"issue": 83, "reason": "假的：過期的具名放行", "expires": DEAD},
             {"issue": 84, "reason": "假的：還沒過期的具名放行", "expires": LIVE},
         ]
@@ -171,27 +172,80 @@ def test_an_issue_number_that_is_not_an_integer_stops_the_run() -> None:
         card.excused_tickets(settings, "假的卡", TODAY)
 
 
-# ── 准上網那一筆放行：缺席或過期就不上網 ──────────────────────────────────────
+# ── 准上網那一筆：住在卡頂層的 [[by_design]]，缺席就不上網 ────────────────────────
 
 
-def test_no_network_exemption_means_no_network() -> None:
-    """沒有登記的放行就不准上網：ToolBroken（外殼翻成離開碼 2）。"""
+def test_no_network_entry_means_no_network() -> None:
+    """卡頂層沒有准上網那一筆就不准上網：ToolBroken（外殼翻成離開碼 2）。具名放過票的放行不算。"""
     with pytest.raises(ToolBroken):
-        card.network_allowed({"allow": [{"issue": 83, "reason": "假的", "expires": LIVE}]}, "假的卡", TODAY)
+        card.network_allowed({"settings": {"allow": [{"issue": 83, "reason": "假的", "expires": LIVE}]}}, "假的卡")
 
 
-def test_an_expired_network_exemption_means_no_network() -> None:
-    """准上網那一筆過期了也不准上網——放行有牙，不是裝飾。"""
-    settings = {"allow": [{"network": "假的", "reason": "假的：准上網", "expires": DEAD}]}
-    with pytest.raises(ToolBroken):
-        card.network_allowed(settings, "假的卡", TODAY)
+STRAY = {"network": "假的", "reason": "假的：准上網", "expires": LIVE}
 
 
-def test_a_live_network_exemption_hands_back_its_reason() -> None:
-    """還沒過期的那一筆讀得出來，理由要原樣交回去（輸出裡要寫得出憑什麼上網）。"""
+@pytest.mark.parametrize(
+    ("settings", "at"),
+    [
+        ({"allow": [STRAY]}, "settings.allow[0]"),
+        ({"net": [STRAY]}, "settings.net[0]"),
+        ({"allow": STRAY}, "settings.allow"),
+        ({"allow": [[STRAY]]}, "settings.allow[0][0]"),
+        ({"allow": [{"Network": "假的", "reason": "假的", "expires": LIVE}]}, "settings.allow[0]"),
+        ({"x": {"allow": [{"NETWORK": "假的", "reason": "假的", "expires": LIVE}]}}, "settings.x.allow[0]"),
+    ],
+    ids=["allow", "renamed", "single-table", "nested-array", "mixed-case", "deeper"],
+)
+def test_network_written_as_a_temporary_allow_means_no_network(settings: dict[str, object], at: str) -> None:
+    """准上網寫回會到期的放行也不准上網——那是規矩的形狀，不是放行（#1014）。
+
+    卡頂層那一筆是對的也一樣（只留這一個病）；表叫什麼名字、寫成什麼形狀、鍵名大小寫都算，
+    改個名字或形狀就繞過去的判準等於沒有判準。
+    """
+    data = {"settings": settings, "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}]}
+    with pytest.raises(ToolBroken, match=re.escape(f"'{at}'")):
+        card.network_allowed(data, "假的卡")
+
+
+def test_network_buried_very_deep_still_means_no_network() -> None:
+    """埋得很深（遠超過直譯器的遞迴上限）也照樣回 2，不是爆成別的例外（離開碼 1）。"""
+    deep: dict[str, object] = dict(STRAY)
+    for _ in range(sys.getrecursionlimit() * 3):
+        deep = {"a": deep}
+    data = {"settings": deep, "by_design": [{"network": "假的", "reason": "假的：決策紙說可以"}]}
+    with pytest.raises(ToolBroken, match="帶 network"):
+        card.network_allowed(data, "假的卡")
+
+
+def test_a_named_ticket_exemption_beside_the_network_entry_still_goes_online() -> None:
+    """具名放過某張票（只帶票號、理由、到期日）跟卡頂層准上網那一筆並存：照常上網、交回理由。"""
     reason = "假的：決策紙說可以"
-    settings = {"allow": [{"network": "假的", "reason": reason, "expires": LIVE}]}
-    assert card.network_allowed(settings, "假的卡", TODAY) == reason
+    data = {
+        "settings": {"allow": [{"issue": 83, "reason": "假的：等合併", "expires": LIVE}]},
+        "by_design": [{"network": "假的", "reason": reason}],
+    }
+    assert card.network_allowed(data, "假的卡") == reason
+
+
+@pytest.mark.parametrize(
+    "by_design",
+    [
+        [{"network": "假的", "reason": "假的：一"}, {"network": "又一個", "reason": "假的：二"}],
+        [{"network": "假的", "reason": "假的：准上網", "expires": LIVE}],
+        [{"network": "假的"}],
+    ],
+)
+def test_a_broken_network_entry_means_no_network(by_design: list[dict[str, object]]) -> None:
+    """不只一筆、帶了到期日、沒寫理由：都不上網。"""
+    with pytest.raises(ToolBroken):
+        card.network_allowed({"settings": {}, "by_design": by_design}, "假的卡")
+
+
+def test_the_network_entry_hands_back_its_reason() -> None:
+    """卡頂層那一筆讀得出來，理由要原樣交回去（輸出裡要寫得出憑什麼上網）。"""
+    reason = "假的：決策紙說可以"
+    data = {"settings": {}, "by_design": [{"network": "假的", "reason": reason}]}
+    assert card.network_allowed(data, "假的卡") == reason
 
 
 # ── 翻頁與看不懂的形狀 ────────────────────────────────────────────────────────

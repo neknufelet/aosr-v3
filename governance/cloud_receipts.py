@@ -103,7 +103,7 @@ def by_schema(settings: Mapping[str, object], key: str, schema: int, where: str)
 def allowed_names(settings: Mapping[str, object], today: date) -> set[str]:
     """卡上具名放過的收據檔名——只算還沒到期的那幾筆。
 
-    放行有牙：過期的那一筆當作沒放行，那份收據照樣紅（跟 merge-gate-read-back 的准上網放行同一個做法）。
+    放行有牙：過期的那一筆當作沒放行，那份收據照樣紅（具名放過的放行都是這個做法）。
     兩格（reason、expires）的形狀不對就 ToolBroken——寫壞的放行不是放行。理由與到期日另外由
     exemptions-need-expiry 守著整張卡；這裡只讀名字與日期。
     """
