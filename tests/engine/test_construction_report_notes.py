@@ -2,13 +2,29 @@
 from __future__ import annotations
 
 import pytest
+from collections.abc import Callable
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 from aosr.reporting.result import SchemeResult
 from tests.engine.test_scheme_repair import result as result
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstructionNote
 from aosr.physics import wall_surfaces
 from tests.engine.test_report_output_contract import _output
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _forward(real: Callable[_P, _T], *, before: Callable[[dict[str, object]], None] | None = None,
+             after: Callable[[_T], _T] | None = None) -> Callable[_P, _T]:
+    """原樣轉交給真入口：before 在呼叫前看當次關鍵字參數、after 改寫回傳；簽名跟著真入口走（ParamSpec），不靠抑制註解。"""
+    def forwarded(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if before is not None:
+            before(kwargs)
+        result = real(*args, **kwargs)
+        return result if after is None else after(result)
+    return forwarded
 
 
 def note(frequencies: tuple[float, ...], *, layer: int = 1) -> ConstructionNote:
@@ -90,22 +106,18 @@ def test_formal_report_merges_three_lane_returns_without_recalculation(monkeypat
     from tests.engine._directivity import DIRECTIVITY
 
     real_fem, real_late, real_geometry = batch._prepare_fem_impedances, batch._prepare_late_family, geometry._solve_both_geometric_report_lanes
-    def fem(*args: object, **kwargs: object) -> object:
+    def fem_note(kwargs: dict[str, object]) -> None:
         collector = kwargs["notes_by_wall"]
         assert isinstance(collector, dict)
         collector[Wall.X0] = (note((20.,)),)
-        return real_fem(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=包裝原入口，保留當次所有參數
-    def late(**kwargs: object) -> object:
-        surfaces, t60, fs, energy, decay = real_late(**kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=同上
-        return replace(surfaces, notes_by_wall={Wall.X0: (note((40.,)),)}), t60, fs, energy, decay
-    def geometric(**kwargs: object) -> object:
+    def geometric_note(kwargs: dict[str, object]) -> None:
         collector = kwargs["notes_by_wall"]
         assert isinstance(collector, dict)
         wall_surfaces.merge_construction_notes(collector, Wall.X0, (note((80.,)),))
-        return real_geometry(**kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=同上
-    monkeypatch.setattr(batch, "_prepare_fem_impedances", fem)
-    monkeypatch.setattr(batch, "_prepare_late_family", late)
-    monkeypatch.setattr(geometry, "_solve_both_geometric_report_lanes", geometric)
+    monkeypatch.setattr(batch, "_prepare_fem_impedances", _forward(real_fem, before=fem_note))
+    monkeypatch.setattr(batch, "_prepare_late_family", _forward(real_late, after=lambda result: (
+        replace(result[0], notes_by_wall={Wall.X0: (note((40.,)),)}), *result[1:])))
+    monkeypatch.setattr(geometry, "_solve_both_geometric_report_lanes", _forward(real_geometry, before=geometric_note))
     monkeypatch.setattr(report, "_solve_fem_energy", _fake_fem_energy)
     inputs = report_io.load_input_document(_input_document(), _table(), DIRECTIVITY)
     solved = report_io.solver_inputs(inputs)
@@ -154,12 +166,11 @@ def test_each_pair_keeps_only_its_own_reflection_notes(monkeypatch: pytest.Monke
     far = Point(solved.room.Lx - near.x, near.y, near.z)
     frequency = {near: 30., far: 60.}
     real_geometry = geometry._solve_both_geometric_report_lanes
-    def geometric(**kwargs: object) -> object:
+    def geometric_note(kwargs: dict[str, object]) -> None:
         collector, receiver = kwargs["notes_by_wall"], kwargs["receiver"]
         assert isinstance(collector, dict) and isinstance(receiver, Point)
         wall_surfaces.merge_construction_notes(collector, Wall.X0, (note((frequency[receiver],)),))
-        return real_geometry(**kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=包裝原入口，保留當次所有參數
-    monkeypatch.setattr(geometry, "_solve_both_geometric_report_lanes", geometric)
+    monkeypatch.setattr(geometry, "_solve_both_geometric_report_lanes", _forward(real_geometry, before=geometric_note))
     fem_axis, _report_axis = low_frequency_axis_frequencies(solved.low_frequency_axis)
     reports = batch.solve_reports(source_model=solved.source_model, room=solved.room,
         sources={"s": solved.source}, receivers={"near": near, "far": far},
