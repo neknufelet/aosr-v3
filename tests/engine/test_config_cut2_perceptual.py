@@ -183,9 +183,9 @@ def test_load_perceptual_requires_a_path_like_the_previous_generation() -> None:
     跟上一代一致」，所以那一條被換成這一條：把「`None` 是 `TypeError`」釘住。
     """
     with pytest.raises(TypeError):
-        load_perceptual()  # type: ignore[call-arg]  # expires=2026-12-08 reason=這一條要驗的就是「少給必填參數會炸」，所以刻意少給
+        load_perceptual()  # type: ignore[call-arg]  # expires=2027-03-08 reason=這一條要驗的就是「少給必填參數會炸」，所以刻意少給
     with pytest.raises(TypeError):
-        load_material_rfz_profile()  # type: ignore[call-arg]  # expires=2026-12-08 reason=同上
+        load_material_rfz_profile()  # type: ignore[call-arg]  # expires=2027-03-08 reason=同上
 
 
 def _valid_perceptual_source() -> dict[str, object]:

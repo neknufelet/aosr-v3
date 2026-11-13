@@ -1,7 +1,7 @@
 ---
 title: 主線鎖死並以兩個必要檢查守合併門口
 date_created: 2026-09-28
-date_modified: 2026-11-10
+date_modified: 2026-11-13
 status: accepted
 kind: governance
 supersedes: "main-branch-locked-gate-read-back.md"
@@ -25,7 +25,7 @@ summary: "公開主線只收兩個必要檢查全綠的合併請求；規則組�
 
 **合併門口檢查准回讀 GitHub ruleset（2026-09-10，issue #64）。** 這是 issue #9 那組最後一張，採第一個選項。`merge-gate-read-back` 在 CI（持續整合）裡可用 `gh`（GitHub 命令列工具）唯讀查主線規則組，把 repo、ruleset id、規則、必要檢查與空的 bypass 名單逐格對照卡上 `[settings]`；讀不到、工具不在、未登入或平台無回應時回 2，不回 0。2026-09-10 已先驗過公開 repo 的規則組與主線規則兩個讀取端點，不帶 token（存取憑證）也回 HTTP 200，內容完整。
 
-放行寫在 `governance/rules/merge-gate-read-back.toml` 的 `[[settings.allow]]`，含 `reason` 與 `expires`，由 `exemptions-need-expiry` 守；老闆拍板「90 天」並要求和第一批放行同日審，現行登記到期日是 2026-12-08。缺席或過期時檢查回 2 且不上網。檢查只打讀取端點，不改平台設定；使用 CI 自帶 `GITHUB_TOKEN`，權限是 `contents: read`。期望值全住在卡的 `[settings]`，改平台設定也要開 PR 改卡。
+放行寫在 `governance/rules/merge-gate-read-back.toml` 的 `[[settings.allow]]`，含 `reason` 與 `expires`，由 `exemptions-need-expiry` 守；老闆拍板「90 天」並要求和第一批放行同日審，現行登記到期日是 2027-03-08（原為 2026-12-08，#1014 延期）。缺席或過期時檢查回 2 且不上網。檢查只打讀取端點，不改平台設定；使用 CI 自帶 `GITHUB_TOKEN`，權限是 `contents: read`。期望值全住在卡的 `[settings]`，改平台設定也要開 PR 改卡。
 
 准上網不是通則。2026-09-10 後，具名例外從一支變兩支：本支與 `issues-closed-only-by-merged-pr`；第二支的權限、到期日與三層分工見 `docs/decisions/issue-lifecycle-backlog-status-and-closing.md`。規則讀得到就比；管理員 bypass 名單若因平台只給管理員而在雲端看不到，輸出必須明說「這一格這一跑沒守」，不得假裝通過。
 

@@ -36,11 +36,11 @@ def test_every_field_is_required_with_no_default() -> None:
         field = EarlyReflectionConfig.model_fields[name]
         assert field.is_required(), f"{name} 竟然有預設——那等於那個數字有兩個家"
     with pytest.raises(ValidationError):
-        EarlyReflectionConfig(window_ms=15.0)  # type: ignore[call-arg]  # expires=2026-12-08 reason=這一條要驗的就是「少給必填欄位會炸」，所以刻意少給
+        EarlyReflectionConfig(window_ms=15.0)  # type: ignore[call-arg]  # expires=2027-03-08 reason=這一條要驗的就是「少給必填欄位會炸」，所以刻意少給
     with pytest.raises(ValidationError):
-        EarlyReflectionConfig(required_attenuation_db=10.0)  # type: ignore[call-arg]  # expires=2026-12-08 reason=同上
+        EarlyReflectionConfig(required_attenuation_db=10.0)  # type: ignore[call-arg]  # expires=2027-03-08 reason=同上
     with pytest.raises(ValidationError):
-        EarlyReflectionConfig(check_band_hz=(200.0, 8000.0))  # type: ignore[call-arg]  # expires=2026-12-08 reason=同上
+        EarlyReflectionConfig(check_band_hz=(200.0, 8000.0))  # type: ignore[call-arg]  # expires=2027-03-08 reason=同上
 
 
 def test_field_annotations_are_the_declared_types() -> None:
@@ -74,7 +74,7 @@ def _with_extra_key() -> EarlyReflectionConfig:
         window_ms=15.0,
         required_attenuation_db=10.0,
         check_band_hz=(200.0, 8000.0),
-        extra_key=1,  # type: ignore[call-arg]  # expires=2026-12-08 reason=這一條要驗的就是「多一個鍵會炸」，所以那個鍵是刻意的
+        extra_key=1,  # type: ignore[call-arg]  # expires=2027-03-08 reason=這一條要驗的就是「多一個鍵會炸」，所以那個鍵是刻意的
     )
 
 

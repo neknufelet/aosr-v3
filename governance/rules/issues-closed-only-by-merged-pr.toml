@@ -50,4 +50,4 @@ per_page = 100
 [[settings.allow]]
 network = "GitHub 的 issue 與關票來源（只讀，一句圖查詢：關掉的票，加上每一張掛著關它的那幾個 PR）"
 reason = "決策紙 hand-closed-issues-block-merge：一張票是被誰關掉的只住在 GitHub 上，不上網讀就守不到；這是第二個放行的例外，只准這一支、只准讀。"
-expires = "2026-12-08"
+expires = "2027-03-08"
