@@ -1,0 +1,64 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的字典
+# 只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡逐字複製；主卡已沒有放行（入口檔檔名住在卡頂層的 [[by_design]]，
+# 每份樣本自己帶一筆假的；網址那筆主卡沒人用、#1158 刪掉）。
+id = "no-model-names-in-entry-files"
+check = "governance/checks/no_model_names_in_entry_files.py"
+
+[settings]
+entry_files = ["CLAUDE.md", "AGENTS.md"]
+scan_dirs = ["docs/decisions"]
+
+model_words = [
+  "opus",
+  "sonnet",
+  "haiku",
+  "gpt",
+  "claude",
+  "gemini",
+  "deepseek",
+  "qwen",
+  "glm",
+  "llama",
+  "mistral",
+  "fable",
+  "luna",
+  "sol",
+  "astra",
+  "anthropic",
+  "openai",
+  "grok",
+  "kimi",
+  "gemma",
+]
+
+cli_words = [
+  "codex",
+  "opencode",
+  "agy",
+  "dsh",
+  "aider",
+  "copilot",
+]
+
+quota_words = [
+  "quota",
+  "quotas",
+  "額度",
+  "配額",
+  "token 上限",
+  "token上限",
+  "tokens 上限",
+  "tokens上限",
+  "rate limit",
+  "rate-limit",
+  "每日上限",
+  "用量上限",
+]
+
+
+[[by_design]]
+text = "CLAUDE.md"
+reason = "樣本：入口檔自己的檔名是工具規定的，不是一個路由選擇。"
+[by_design.files]
+"docs/decisions/gone.md" = 1

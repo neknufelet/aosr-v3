@@ -18,8 +18,15 @@
 * **帶空白或中文的片語**——直接找子字串（中文沒有詞邊界可錨），比對前先把半形／全形空白
   折成一個半形空白，所以片語只寫一種寫法就好。
 
-放行是「塗掉逐字（連大小寫）相同的那一段」，不是「這一行放過」：塗完同一行剩下的字照樣比對。
-放行清單這一跑用到幾條、哪幾條沒用到，跑完印一行——讓清單長大這件事看得見。
+准許是「塗掉逐字（連大小寫）相同的那一段」，不是「這一行放過」：塗完同一行剩下的字照樣比對。
+兩種寫法：
+
+* 卡**頂層**的 ``[[by_design]]``——本來就該這樣的那一種（入口檔自己的檔名是工具規定的，
+  改不掉也躲不掉；#1154，照 #1014 老闆 2026-11-13 拍的 B），沒有到期日。一筆一段字面字串，
+  ``files`` 寫死「哪幾份檔各准幾處」：只在登記的檔裡塗掉，別的檔出現同一段不塗、照樣被字典咬；
+  登記的檔處數多一處、少一處、檔不在掃描面了，都紅——同類新出現的不會跟著被准許。
+* ``[settings]`` 底下的 ``[[settings.allow]]``——暫時的放行，每一份檔都塗，帶理由與到期日。
+  放行清單這一跑用到幾條、哪幾條沒用到，跑完印一行——讓清單長大這件事看得見。
 
 字典只住在卡的 ``[settings]``，這支檢查沒有任何預設值：讀不到那一段、宣告這支檢查的卡不是
 剛好一張、掃描面上一個檔都沒有、某一份檔不是合法 UTF-8，一律回 2（工具自壞），不回 0。
@@ -43,7 +50,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, note, run
-from governance.loader import EXEMPTION_KEYS, RULES_DIR, setting_strings, setting_tables
+from governance.loader import EXEMPTION_KEYS, RULES_DIR, by_design_entries, setting_int, setting_strings, setting_tables
 
 # 這支檢查在卡裡的名字。字典只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/no_model_names_in_entry_files.py"
@@ -61,6 +68,9 @@ ALLOW_KEY = "allow"
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("text", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+# text：逐字（連大小寫）塗掉的那一段；files：哪幾份檔（相對掃描根）各准幾處。
+BY_DESIGN_KEYS = {"text": "text", "files": "counts"}
 
 # 純英數底線的詞：用得起詞邊界的那一種。數字刻意在字元集裡（`gpt4` 是一個詞），
 # 但錨點的字元集沒有數字（`gpt4` 裡的 `gpt` 要咬）。
@@ -76,6 +86,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或形狀不對，一律 raise ToolBroken——沒有字典就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], dict[str, dict[str, int]], str]:
+    """這張卡的 ``[settings]``（形狀驗過）、頂層 ``[[by_design]]``（字串→{檔: 處數}）、卡的相對路徑。"""
     rules_dir = scan_root / RULES_DIR
     mine: list[tuple[Path, dict[str, object]]] = []
     for path in sorted(f for f in files if f.parent == rules_dir and f.suffix == ".toml"):
@@ -96,7 +111,16 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（字典與掃描面宣告都寫在那裡）")
     _assert_settings(settings, str(rel))
-    return settings
+    allowed = {str(entry["text"]) for entry in setting_tables(settings, ALLOW_KEY)}
+    designed: dict[str, dict[str, int]] = {}
+    for entry in by_design_entries(data, BY_DESIGN_KEYS, rel.as_posix()):
+        text = str(entry["text"])
+        if text in designed or text in allowed:
+            raise ToolBroken(f"{rel} 把 {text!r} 准許了不只一次（放行與 [[by_design]] 合起來算）")
+        raw = entry["files"]
+        assert isinstance(raw, dict)  # by_design_entries 驗過形狀
+        designed[text] = {str(name): setting_int(raw, str(name)) for name in raw}
+    return settings, designed, rel.as_posix()
 
 
 def _assert_settings(settings: dict[str, object], rel: str) -> None:
@@ -214,8 +238,30 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     return sorted(picked)
 
 
+def _by_design_problems(
+    designed: dict[str, dict[str, int]], seen: dict[tuple[str, str], int], present: set[str], card_rel: str
+) -> list[str]:
+    """登記的檔不在、或處數對不上，都紅（資料要跟樹對得上）。"""
+    bad: list[str] = []
+    for text, pinned in sorted(designed.items()):
+        for rel, want in sorted(pinned.items()):
+            if rel not in present:
+                bad.append(
+                    f"卡 {card_rel} 頂層的 [[by_design]] 准許 {rel} 裡的 {text!r}，但掃描面裡沒有這份檔"
+                    "——檔拿掉或搬家了就把那一筆一起改"
+                )
+                continue
+            got = seen.get((text, rel), 0)
+            if got != want:
+                bad.append(
+                    f"{rel} 有 {got} 處 {text!r}，卡 {card_rel} 頂層的 [[by_design]] 登記 {want} 處"
+                    "——資料寫死處數，多一處、少一處都要連卡一起改（對不上就是沒人回頭看的清單）"
+                )
+    return bad
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, designed, card_rel = _card(scan_root, files)
     patterns = _patterns(settings)
     allowed = [str(entry["text"]) for entry in setting_tables(settings, ALLOW_KEY)]
     picked = targets(scan_root, files)
@@ -226,18 +272,28 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         )
 
     used: set[str] = set()
+    seen: dict[tuple[str, str], int] = {}
+    present: set[str] = set()
     bad: list[str] = []
     for path in picked:
         rel = path.relative_to(scan_root).as_posix()
         if not path.is_file():
             # git 認得、檔案系統上不在（剛被刪掉還沒 commit）。不猜內容，跳過。
             continue
-        bad += _file_hits(rel, _read_text(path, rel), patterns, allowed, used)
+        present.add(rel)
+        content = _read_text(path, rel)
+        # [[by_design]] 的字串只在登記的檔裡塗掉；別的檔出現同一段不塗，照樣被字典咬。
+        mine = [text for text, pinned in designed.items() if rel in pinned]
+        for text in mine:
+            seen[(text, rel)] = sum(line.count(text) for line in content.splitlines())
+        bad += _file_hits(rel, content, patterns, [*mine, *allowed], used)
+    bad += _by_design_problems(designed, seen, present, card_rel)
 
     unused = [text for text in allowed if text not in used]
     note(
         f"掃了 {len(picked)} 份每次開工會載入的檔，字典 {len(patterns)} 條；"
-        f"具名放行 {len(allowed)} 條，這一跑用到 {len(used)} 條"
+        f"頂層 [[by_design]] {len(designed)} 段；"
+        f"具名放行 {len(allowed)} 條，這一跑用到 {len(allowed) - len(unused)} 條"
         + (f"，沒用到的：{unused}（該回頭看還需不需要）" if unused else "")
     )
     return bad

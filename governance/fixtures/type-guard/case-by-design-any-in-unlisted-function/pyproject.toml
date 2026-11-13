@@ -1,0 +1,6 @@
+# 必紅樣本用的迷你設定檔：只帶 [tool.mypy]。
+# 每份樣本都是獨立的掃描根，第①層把掃描根自己的這個檔當 --config-file 餵給 mypy。
+# 內容跟 repo 根那一份的 [tool.mypy] 一樣：嚴格度不准在樣本裡放寬，不然樣本證明不了事。
+[tool.mypy]
+strict = true
+explicit_package_bases = true
