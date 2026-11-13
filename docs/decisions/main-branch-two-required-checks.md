@@ -25,7 +25,9 @@ summary: "公開主線只收兩個必要檢查全綠的合併請求；規則組�
 
 **合併門口檢查准回讀 GitHub ruleset（2026-09-10，issue #64）。** 這是 issue #9 那組最後一張，採第一個選項。`merge-gate-read-back` 在 CI（持續整合）裡可用 `gh`（GitHub 命令列工具）唯讀查主線規則組，把 repo、ruleset id、規則、必要檢查與空的 bypass 名單逐格對照卡上 `[settings]`；讀不到、工具不在、未登入或平台無回應時回 2，不回 0。2026-09-10 已先驗過公開 repo 的規則組與主線規則兩個讀取端點，不帶 token（存取憑證）也回 HTTP 200，內容完整。
 
-准上網寫在 `governance/rules/merge-gate-read-back.toml` 卡頂層的 `[[by_design]]`（一筆 `network` 加 `reason`），是規矩本身的形狀、沒有到期日。原本是含 `expires` 的 `[[settings.allow]]`：老闆拍板「90 天」並要求和第一批放行同日審，那個審查日就是 #1014，老闆 2026-11-13 拍 B，照設計永久需要的改寫成卡上的資料。缺席、不只一筆、或寫回 `[[settings.allow]]` 時檢查回 2 且不上網。檢查只打讀取端點，不改平台設定；使用 CI 自帶 `GITHUB_TOKEN`，權限是 `contents: read`。期望值全住在卡的 `[settings]`，改平台設定也要開 PR 改卡。
+准上網寫在 `governance/rules/merge-gate-read-back.toml` 卡頂層的 `[[by_design]]`（一筆 `network` 加 `reason`），是規矩本身的形狀、沒有到期日。缺席、不只一筆、或寫回 `[[settings.allow]]` 時檢查回 2 且不上網。檢查只打讀取端點，不改平台設定；使用 CI 自帶 `GITHUB_TOKEN`，權限是 `contents: read`。期望值全住在卡的 `[settings]`，改平台設定也要開 PR 改卡。
+
+准上網原本是老闆 2026-09-10 拍板的「90 天、跟第一批放行同日審」（含 `expires` 的 `[[settings.allow]]`）。那個審查日就是 #1014：老闆 2026-11-13 拍 B，問句把「准讀 GitHub」明列為「寫進規矩」的例子，B 取代了 90 天那一條，照設計永久需要的改寫成卡上的資料。拍板留言：https://github.com/neknufelet/aosr-v3/issues/1014#issuecomment-6850467991
 
 准上網不是通則。2026-09-10 後，具名例外從一支變兩支：本支與 `issues-closed-only-by-merged-pr`；第二支的權限、到期日與三層分工見 `docs/decisions/issue-lifecycle-backlog-status-and-closing.md`。規則讀得到就比；管理員 bypass 名單若因平台只給管理員而在雲端看不到，輸出必須明說「這一格這一跑沒守」，不得假裝通過。
 
