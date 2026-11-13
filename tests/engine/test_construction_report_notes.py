@@ -53,8 +53,11 @@ def test_note_output_is_optional_and_has_facts_and_closed_wall_names() -> None:
     schema = whole["properties"]["construction_notes_by_wall"]
     assert set(schema["propertyNames"]["enum"]) == set(Wall.wall_names())
     assert whole["$defs"]["ConstructionNote"]["properties"]["frequencies_hz"]["uniqueItems"] is True
-    for broken in ({"ceilling": (note((20.,)),)}, {"x0": (note((40., 20.)),)},
-                   {"x0": (note((20.,)), note((40.,)))}, {"x0": ()}, {}):
+    # 型別都對（牆名對頻點元組），錯的是值：拼錯的牆名、沒排序、同一層兩筆、空的、整張空的。
+    broken_cases: tuple[dict[str, tuple[ConstructionNote, ...]], ...] = (
+        {"ceilling": (note((20.,)),)}, {"x0": (note((40., 20.)),)},
+        {"x0": (note((20.,)), note((40.,)))}, {"x0": ()}, {})
+    for broken in broken_cases:
         with pytest.raises(ValueError):
             _output(construction_notes_by_wall=broken)
 

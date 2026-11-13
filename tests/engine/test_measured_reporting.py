@@ -43,7 +43,10 @@ def test_measured_seams_output_is_optional_closed_and_has_facts() -> None:
     assert {'quantity', 'unit', 'reference', 'validity'} <= facts.keys()
     names = cast(dict[str, list[str]], facts['propertyNames'])
     assert set(names['enum']) == set(Wall.wall_names())
-    for bad in ({}, {'unknown': seams}, {'floor': tuple(reversed(seams))}, {'floor': seams[:1]}):
+    # 型別都對（牆名對接縫元組），錯的是值：整張空的、沒有這面牆、順序反了、只有一端。
+    bad_cases: tuple[dict[str, tuple[MeasuredSeam, ...]], ...] = (
+        {}, {'unknown': seams}, {'floor': tuple(reversed(seams))}, {'floor': seams[:1]})
+    for bad in bad_cases:
         with pytest.raises(ValidationError):
             _output(measured_seams_by_wall=bad)
     assert 'difference' not in output.model_dump_json()
