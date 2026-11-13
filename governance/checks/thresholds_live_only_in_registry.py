@@ -15,7 +15,7 @@
    ——那是演算法（切片、索引、位移），不是門檻。放行只有兩種：值就是離開碼約定的那三個數
    （唯一一份住在 ``governance/exit_codes.py``，這裡 import 進來用，不自己再寫一次），
    或具名登記在卡的 ``[[settings.allow]]``（``file``＋``name``＋``reason``＋``expires``，暫時的）
-   或卡頂層的 ``[[by_design]]``（``file``＋``name``＋``reason``、沒有到期日；本來就不是門檻的那一種，
+   或卡頂層的 ``[[by_design]]``（``file``＋``name``＋``assignments``（准幾處載入時賦值）＋``reason``、沒有到期日；本來就不是門檻的那一種，
    例如協定碼，#1014）。``[[by_design]]`` 登記的名字在那支檔的載入時位置找不到就紅——資料要跟
    程式對得上；同一支檔裡別的名字照樣要登記。名字命中卡上
    登記的門檻樣式（``MAX_*``、``*_TIMEOUT`` 這些）時，值落在離開碼白名單裡也一樣要登記
@@ -27,7 +27,7 @@
    值等於離開碼那三個數的門檻放掉——卡的人話到處在寫「回 2 不回 0」，不放掉會誤判。
 
 血債與關聯事故寫在卡上（``governance/rules/thresholds-live-only-in-registry.toml``），
-這裡不重複；那張卡刻意沒管的四件事也在卡面。
+這裡不重複；那張卡刻意沒管的五件事也在卡面。
 
 這支程式自己受這條規矩管（它就在掃描面裡）：從頭到尾沒有一個模組層級的數字字面值。
 """
@@ -367,7 +367,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     ]
     bad += [
         f"{file} 的 {name} 有 {used[(file, name)]} 處載入時賦值，卡 {CARD_ID} 頂層的 [[by_design]] 登記 {want} 處"
-        "——資料寫死處數，同一個名字底下多一處、少一處都要連卡一起改（不然登記一個名字就等於永久放行它底下的任何數字）"
+        "——資料寫死處數，同一個名字底下多一處、少一處都要連卡一起改（不然登記一個名字，它底下再多寫的賦值就跟著被准許；這一格看不見的寫法列在卡尾）"
         for (file, name), want in sorted(designed.items())
         if (file, name) in used and used[(file, name)] != want
     ]
