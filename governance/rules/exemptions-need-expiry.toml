@@ -1,6 +1,6 @@
 # 規矩卡：每一筆放行都要有理由與到期日，過期即紅，關鍵字當不了免死金牌
 id = "exemptions-need-expiry"
-human = "每一筆「放行」都要寫得出為什麼、以及什麼時候失效。掃描面明確列舉，只有這幾類算放行條目：①規矩卡 toml 裡住在 `[settings]` 底下的表陣列（今天全叫 `[[settings.allow]]`），一筆就是一個具名放過；②測試檔裡的 skip 標記（`pytest.skip`、`pytest.mark.skip`／`skipif`／`xfail`）；③原始碼註解裡的抑制標記（`# noqa`、`# type: ignore`、`# pragma: no cover`）。每一筆都必須帶 `reason`（非空）與 `expires`（ISO 日期，`YYYY-MM-DD`），三件事會紅：缺任一欄、`expires` 早於今天（今天從系統時間讀，不寫死）、`reason` 正規化之後整串只由卡上登記的關鍵字組成（「暫時」「legacy」「TODO」這種字樣不是理由，是把問題往後推的說法）。①的欄位寫成 toml 的鍵；②③寫成標記那一行行尾的註解，形如 `expires=YYYY-MM-DD reason=<一句話>`——理由取到行尾，所以 `expires` 寫在前面。跑完在 stderr 印一行「目前有效的放行幾筆、最近到期的是哪一筆」，讓放行清單長大這件事看得見。**哪些算放行、哪些算資料**：判準是「這一條是在放過一個原本會紅的東西」。放行是具名指向一個個體、把它從已經算出來的違規裡撈出來（`[[settings.allow]]` 的每一筆）；資料是規矩本身的形狀，拿掉它規矩就沒有形狀可言——`file-placement-allowlist` 的 `[[allowlist]]`（那是「准出現什麼」的正面定義，不是放過某一筆違規）、`governance/authors.txt` 與 `governance/required-status-checks.txt` 這種名單檔、各卡的 `scan_exempt_prefixes`／`name_exempt_prefixes`（那是掃描面宣告，已經由卡的 `scope` 與 scan-scope-has-no-holes 那張卡在守）、`swallow_snippets` 這種樣式表。讀不到這張卡的 `[settings]`、掃描面上一個對象都沒有、某張卡或某支 .py 剖不開，一律回 2 不回 0。"
+human = "每一筆「放行」都要寫得出為什麼、以及什麼時候失效。掃描面明確列舉，只有這幾類算放行條目：①規矩卡 toml 裡住在 `[settings]` 底下的表陣列（今天全叫 `[[settings.allow]]`），一筆就是一個具名放過；②測試檔裡的 skip 標記（`pytest.skip`、`pytest.mark.skip`／`skipif`／`xfail`）；③原始碼註解裡的抑制標記（`# noqa`、`# type: ignore`、`# pragma: no cover`）。每一筆都必須帶 `reason`（非空）與 `expires`（ISO 日期，`YYYY-MM-DD`），三件事會紅：缺任一欄、`expires` 早於今天（今天從系統時間讀，不寫死）、`reason` 正規化之後整串只由卡上登記的關鍵字組成（「暫時」「legacy」「TODO」這種字樣不是理由，是把問題往後推的說法）。①的欄位寫成 toml 的鍵；②③寫成標記那一行行尾的註解，形如 `expires=YYYY-MM-DD reason=<一句話>`——理由取到行尾，所以 `expires` 寫在前面。跑完在 stderr 印一行「目前有效的放行幾筆、最近到期的是哪一筆」，讓放行清單長大這件事看得見。**哪些算放行、哪些算資料**：判準是「這一條是在放過一個原本會紅的東西」。放行是具名指向一個個體、把它從已經算出來的違規裡撈出來（`[[settings.allow]]` 的每一筆）；資料是規矩本身的形狀，拿掉它規矩就沒有形狀可言——`file-placement-allowlist` 的 `[[allowlist]]`（那是「准出現什麼」的正面定義，不是放過某一筆違規）、`governance/authors.txt` 與 `governance/required-status-checks.txt` 這種名單檔、各卡的 `scan_exempt_prefixes`／`name_exempt_prefixes`（那是掃描面宣告，已經由卡的 `scope` 與 scan-scope-has-no-holes 那張卡在守）、`swallow_snippets` 這種樣式表，以及各卡頂層的 `[[by_design]]`（本來就該這樣的准許——寫死位置、處數與一句理由，沒有到期日，同類新冒出來的照樣紅；#1014，老闆 2026-11-13 拍 B；每一筆不准帶 `expires`，這一格由載入器守）。③裡本來就該這樣的那幾行，就登記在這張卡頂層的 `[[by_design]]`：一筆寫死檔、函式、註解裡那一段標記原文、處數與理由，那幾行不要兩格、也不准帶 `expires=`，同一個函式多一處、少一處、登記的檔不在了，都紅。讀不到這張卡的 `[settings]`、掃描面上一個對象都沒有、某張卡或某支 .py 剖不開，一律回 2 不回 0。"
 
 # 掃描面：所有規矩卡（第①類）＋ 進得了版控的 .py（第②③類），扣掉必紅樣本樹。
 # 樣本樹是別的掃描根，裡面的道具刻意是壞的，由後設測試單獨餵。
@@ -113,3 +113,59 @@ scan_exempt_prefixes = ["governance/fixtures/"]
 #
 # 5) 這張卡不判「這筆放行到底該不該存在」。它只判「有沒有寫理由、有沒有寫到期日、
 #    到期了沒、理由是不是只是一個推託的字樣」。放行合不合理是人在 PR 上看的事。
+
+# ── ③ 裡本來就該這樣的那幾行：卡頂層的 [[by_design]]（#1014，老闆 2026-11-13 拍 B）──────────
+# 一筆寫死「哪支檔、哪個函式（點連起來的全名，模組層寫 "<module>"）、註解裡的哪一段標記原文、幾處」。
+# 登記的那幾行不要 expires／reason 兩格，但不准帶 expires=（會到期的就不是資料）；
+# 同一個函式多一處、少一處、登記的檔不在了，都紅——同類新冒出來的不會跟著被准許。
+# 刻意沒把「要落在 pytest.raises 裡」寫進比對：_with_extra_key 是被 raises 包住的那一題呼叫的小工具，
+# 它自己不在 raises 裡；寫死到函式與處數已經讓「同一支考卷新冒出來的一處」紅。
+
+[[by_design]]
+path = "src/aosr/config/perceptual.py"
+function = "load_perceptual"
+comment = "# noqa: PTH123"
+count = 1
+reason = "與上一代逐字相同的開檔寫法：`open(None)` 的 TypeError 訊息是行為契約，換成 `Path(path).open(...)` 講的是另一句，考卷釘的就是那一句。"
+
+[[by_design]]
+path = "src/aosr/config/physics_constants.py"
+function = "load_physics_constants"
+comment = "# noqa: PTH123"
+count = 1
+reason = "同上一筆：與上一代逐字相同的開檔寫法，`open(None)` 的 TypeError 訊息是行為契約。"
+
+[[by_design]]
+path = "src/aosr/config/scoring.py"
+function = "load_scoring"
+comment = "# noqa: PTH123"
+count = 1
+reason = "同上一筆：與上一代逐字相同的開檔寫法，`open(None)` 的 TypeError 訊息是行為契約。"
+
+[[by_design]]
+path = "tests/engine/test_config_cut1_early_reflection.py"
+function = "test_every_field_is_required_with_no_default"
+comment = "# type: ignore[call-arg]"
+count = 3
+reason = "這一題要驗的就是「少給必填欄位會炸」：三個欄位各少給一次，刻意少給的那一行型別檢查本來就會擋。"
+
+[[by_design]]
+path = "tests/engine/test_config_cut1_early_reflection.py"
+function = "_with_extra_key"
+comment = "# type: ignore[call-arg]"
+count = 1
+reason = "這一題要驗的就是「多一個鍵會炸」：那個多出來的鍵是刻意的，逐字寫出來讓靜態檢查看得見。"
+
+[[by_design]]
+path = "tests/engine/test_config_cut2_perceptual.py"
+function = "test_load_perceptual_requires_a_path_like_the_previous_generation"
+comment = "# type: ignore[call-arg]"
+count = 2
+reason = "這一題要驗的就是「少給必填參數會炸」（上一代那個參數是必填）：兩支載入函式各刻意少給一次。"
+
+[[by_design]]
+path = "tests/engine/test_report_io_contract.py"
+function = "test_capability_frequency_range_is_empty_or_exactly_two"
+comment = "# type: ignore[arg-type]"
+count = 1
+reason = "這一題就是要餵壞形狀（不是零個也不是兩個的頻率範圍）進去看它炸，那個壞形狀型別檢查本來就會擋。"

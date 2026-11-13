@@ -172,7 +172,7 @@ def load_perceptual(
     path: str | Path, *, profile: str | None = None
 ) -> PerceptualConfig:
     """Load, validate, and resolve one profile from this package's ``data`` directory (``perceptual.toml``)."""
-    with open(path, "rb") as f:  # noqa: PTH123  # expires=2027-03-08 reason=與上一代逐字相同的開檔寫法——`open(None)` 的 TypeError 訊息是行為契約，`Path(path).open(...)` 講的是另一句（找碴第二輪）
+    with open(path, "rb") as f:  # noqa: PTH123  # reason=與上一代逐字相同的開檔寫法——`open(None)` 的 TypeError 訊息是行為契約，`Path(path).open(...)` 講的是另一句（找碴第二輪）
         data = tomllib.load(f)
     source = PerceptualProfilesConfig(**data)
 

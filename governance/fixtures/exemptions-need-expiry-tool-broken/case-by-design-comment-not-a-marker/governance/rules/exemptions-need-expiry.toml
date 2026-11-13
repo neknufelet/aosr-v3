@@ -1,0 +1,45 @@
+# 樣本用的卡：只帶 id 與 [settings]，刻意不寫 check 欄——寫了那一欄，這棵迷你樹裡就多出
+# 一個指向不存在的檢查程式的路徑，樣本會因為一個跟它要證的事無關的理由回紅。
+# 檢查程式靠 id 認卡，理由寫在那支程式的模組說明裡。
+# 底下的 [settings] 從主卡逐字複製；每一份樣本都是獨立的掃描根，名單只從掃描根自己的
+# governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 這張卡自己沒有 [settings] 底下的表陣列；頂層的 [[by_design]] 是這份樣本要的那一筆資料。
+id = "exemptions-need-expiry"
+
+[settings]
+comment_markers = [
+  "# noqa",
+  "# type: ignore",
+  "# pragma: no cover",
+]
+skip_markers = [
+  "pytest.skip",
+  "pytest.mark.skip",
+  "pytest.mark.skipif",
+  "pytest.mark.xfail",
+]
+keyword_reasons = [
+  "暫時",
+  "暫緩",
+  "先延後",
+  "延後",
+  "原本",
+  "已廢",
+  "待處理",
+  "以後再說",
+  "legacy",
+  "todo",
+  "fixme",
+  "wip",
+  "temporary",
+  "later",
+  "pending",
+]
+scan_exempt_prefixes = ["governance/fixtures/"]
+
+[[by_design]]
+path = "tests/test_probe.py"
+function = "probe"
+comment = "# type ignore[arg-type]"
+count = 1
+reason = "樣本：這一題就是要餵壞形狀進去看它炸。"

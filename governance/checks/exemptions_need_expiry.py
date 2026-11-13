@@ -17,6 +17,12 @@
 刻意只認註解這一個來源，不順便讀 ``pytest.mark.skip(reason=...)`` 自己那一格——
 兩個來源就是兩份會各自漂的宣告，而漂掉的那一份正是這個 repo 最常出事的形狀。
 
+第 3 類裡本來就該這樣的那幾行（例如考卷刻意餵錯參數、要壓掉型別檢查；#1014，老闆 2026-11-13
+拍 B），登記在**這張卡頂層**的 ``[[by_design]]``：一筆寫死「哪支檔、哪個函式（點連起來的全名，
+模組層寫 ``<module>``）、註解裡的哪一段標記原文、幾處」，加一句理由，沒有到期日。登記的那幾行
+不要那兩格，但**不准帶** ``expires=``（會到期的就不是資料）；同一個函式多一處、少一處、登記的檔
+不在了，都紅——同類新冒出來的不會跟著被准許。
+
 **什麼會紅**
 
 * 缺 ``reason`` 或缺 ``expires``（第 2、3 類：那一行行尾根本沒有註解，或註解裡挖不出那一格）。
@@ -61,6 +67,7 @@ from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
     exemption_field_problems,
+    by_design_entries,
     exemption_problems,
     setting_strings,
     settings_exemptions,
@@ -83,6 +90,14 @@ EXPIRES_KEY, REASON_KEY = "expires", "reason"
 EXPIRES_RE = re.compile(EXPIRES_KEY + r"\s*=\s*(\S+)")
 REASON_RE = re.compile(REASON_KEY + r"\s*=\s*(.*)$")
 
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+# comment：註解裡的那一段標記原文（逐字比對，要含卡上登記的某一種抑制標記）。
+BY_DESIGN_KEYS = {"path": "text", "function": "text", "comment": "text", "count": "count"}
+MODULE_SCOPE = "<module>"
+SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+# (檔, 函式全名, 標記原文) → 准幾處
+Designed = dict[tuple[str, str, str], int]
+
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
     """掃描面的一組：所有規矩卡（第 1 類的對象，名單也住在其中一張上）。"""
@@ -101,6 +116,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或名單的形狀不對，一律 raise ToolBroken——沒有判準就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], Designed, str]:
+    """這張卡的 ``[settings]``（形狀驗過）、頂層 ``[[by_design]]``、卡的相對路徑。"""
     mine: list[tuple[str, dict[str, object]]] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -117,7 +137,16 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（標記樣式與關鍵字名單都寫在那裡）")
     _assert_settings(settings, rel)
-    return settings
+    markers = _names(settings, "comment_markers")
+    designed: Designed = {}
+    for entry in by_design_entries(data, BY_DESIGN_KEYS, rel):
+        key = (str(entry["path"]), str(entry["function"]), str(entry["comment"]))
+        if not any(marker in key[2] for marker in markers):
+            raise ToolBroken(f"{rel} 的 [[by_design]] {key} 的 comment 不含任何一種登記的抑制標記 {markers}")
+        if key in designed:
+            raise ToolBroken(f"{rel} 的 [[by_design]] 把 {key} 登記了不只一次")
+        designed[key] = int(str(entry["count"]))
+    return settings, designed, rel
 
 
 def _assert_settings(settings: dict[str, object], rel: str) -> None:
@@ -296,6 +325,60 @@ def _annotation(comment: str) -> dict[str, object]:
     return found
 
 
+def _scopes(text: str, rel: str) -> dict[int, str]:
+    """每一行落在哪個函式：行號 → 函式全名（類別與巢狀函式用點連起來；不在任何函式裡的行不在表上）。"""
+    try:
+        tree = ast.parse(text, filename=rel)
+    except SyntaxError as exc:
+        raise ToolBroken(f"{rel} 第 {exc.lineno} 行剖不開（{exc.msg}）——我沒看懂就不出結論") from exc
+    out: dict[int, str] = {}
+
+    def walk(node: ast.AST, chain: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, SCOPE_NODES):
+                inner = (*chain, child.name)
+                for line in range(child.lineno, (child.end_lineno or child.lineno) + 1):
+                    out[line] = ".".join(inner)
+                walk(child, inner)
+
+    walk(tree, ())
+    return out
+
+
+def _designed_line(
+    where: str, comment: str, scope: str, mine: dict[tuple[str, str], int]
+) -> tuple[tuple[str, str] | None, list[str]]:
+    """這一行是不是 ``[[by_design]]`` 登記的：(登記的那一筆或 None, 紅的理由)。"""
+    for function, text in mine:
+        if function == scope and text in comment:
+            if EXPIRES_RE.search(comment):
+                return (function, text), [
+                    f"{where} 登記在卡 {CARD_ID} 頂層的 [[by_design]]，卻還帶 {EXPIRES_KEY}="
+                    "——資料沒有到期日；會到期的那一種就從 [[by_design]] 拿掉、照放行寫兩格"
+                ]
+            return (function, text), []
+    return None, []
+
+
+def _designed_problems(designed: Designed, seen: dict[tuple[str, str, str], int], present: set[str]) -> list[str]:
+    """登記的檔不在、或處數對不上，都紅（資料要跟樹對得上）。"""
+    bad: list[str] = []
+    for (rel, function, text), want in sorted(designed.items()):
+        if rel not in present:
+            bad.append(
+                f"卡 {CARD_ID} 頂層的 [[by_design]] 准許 {rel} 的 {function} 裡的 {text!r}，但掃描面裡沒有這支檔"
+                "——檔拿掉或搬家了就把那一筆一起改"
+            )
+            continue
+        got = seen.get((rel, function, text), 0)
+        if got != want:
+            bad.append(
+                f"{rel} 的 {function} 有 {got} 處 {text!r}，卡 {CARD_ID} 頂層的 [[by_design]] 登記 {want} 處"
+                "——資料寫死處數，多一處、少一處都要連卡一起改（對不上就是沒人回頭看的清單）"
+            )
+    return bad
+
+
 def _python_hits(
     path: Path,
     rel: str,
@@ -303,6 +386,8 @@ def _python_hits(
     keywords: list[str],
     today: date,
     live: list[tuple[date, str]],
+    designed: Designed,
+    seen: dict[tuple[str, str, str], int],
 ) -> list[str]:
     """第 2、3 類：一支 .py 裡的 skip 標記與註解裡的抑制標記。"""
     try:
@@ -317,11 +402,20 @@ def _python_hits(
             if marker in comment:
                 marked.append((lineno, marker))
                 break  # 一行的註解只算一筆：一組兩格就交代得完它
+    designed_lines = set(marked)
     marked += _skip_marks(text, rel, _names(settings, "skip_markers"))
+    mine = {(function, text_): n for (path_, function, text_), n in designed.items() if path_ == rel}
+    scopes = _scopes(text, rel) if mine else {}
 
     bad: list[str] = []
     for lineno, marker in sorted(marked):
         where = f"{rel}:{lineno} 的 {marker} 標記"
+        if mine and (lineno, marker) in designed_lines:
+            hit, problems = _designed_line(where, comments[lineno], scopes.get(lineno, MODULE_SCOPE), mine)
+            if hit is not None:
+                seen[(rel, *hit)] = seen.get((rel, *hit), 0) + 1
+                bad += problems
+                continue
         fields = _annotation(comments.get(lineno, ""))
         problems = exemption_field_problems(fields, where)
         if problems:
@@ -338,7 +432,7 @@ def _python_hits(
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, designed, _card_rel = _card(scan_root, files)
     picked = targets(scan_root, files)
     if not picked:
         raise ToolBroken(
@@ -349,6 +443,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     keywords = _names(settings, "keyword_reasons")
     today = date.today()
     live: list[tuple[date, str]] = []
+    seen: dict[tuple[str, str, str], int] = {}
+    present: set[str] = set()
     bad: list[str] = []
     for path in picked:
         rel = path.relative_to(scan_root).as_posix()
@@ -358,8 +454,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         if path.suffix == CARD_SUFFIX:
             bad += _card_hits(path, rel, keywords, today, live)
         else:
-            bad += _python_hits(path, rel, settings, keywords, today, live)
+            present.add(rel)
+            bad += _python_hits(path, rel, settings, keywords, today, live, designed, seen)
 
+    bad += _designed_problems(designed, seen, present)
     _note(live, today)
     return bad
 

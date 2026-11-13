@@ -120,6 +120,6 @@ class ScoringConfig(_Frozen):
 
 def load_scoring(path: str | Path) -> ScoringConfig:
     """Load and validate the ``scoring.toml`` in this package's ``data`` directory."""
-    with open(path, "rb") as file:  # noqa: PTH123  # expires=2027-03-08 reason=與上一代逐字相同的開檔寫法——`open(None)` 的 TypeError 訊息是行為契約，`Path(path).open(...)` 講的是另一句（找碴第二輪）
+    with open(path, "rb") as file:  # noqa: PTH123  # reason=與上一代逐字相同的開檔寫法——`open(None)` 的 TypeError 訊息是行為契約，`Path(path).open(...)` 講的是另一句（找碴第二輪）
         data = tomllib.load(file)
     return ScoringConfig(**data)
