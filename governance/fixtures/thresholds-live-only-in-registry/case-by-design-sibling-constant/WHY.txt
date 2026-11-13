@@ -1,0 +1,3 @@
+壞法：卡頂層 `[[by_design]]` 只登記 governance/checks/stub_protocol.py 的 SHELL_SAYS_EMPTY（協定碼，
+本來就不是門檻），同一支檔裡又多了一個 MAX_RETRIES = 5。資料寫死到名字，不是寫到整支檔：
+同一支檔裡新冒出來的門檻照樣紅——這一份守的就是「寫進規矩之後，同類新的會不會漏網」（#1014）。

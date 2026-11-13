@@ -1,0 +1,4 @@
+壞法：卡頂層 `[[by_design]]` 准許 tests/conftest.py 的 pytest_sessionstart() 往 governance/receipts
+寫兩筆（建父目錄、刪舊收據），而那個函式現在寫了三筆。同一個檔、同一個函式、同一個被 .gitignore
+蓋住的路徑——資料寫死筆數，多出來的那一筆照樣紅。這一份守的就是「寫進規矩之後，同類新的會不會
+跟著被准許」（#1014）。

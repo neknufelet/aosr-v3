@@ -14,7 +14,10 @@
    函式簽章的預設值、以及賦值運算式裡包起來的容器與 lambda。**函式身體裡的字面值不看**
    ——那是演算法（切片、索引、位移），不是門檻。放行只有兩種：值就是離開碼約定的那三個數
    （唯一一份住在 ``governance/exit_codes.py``，這裡 import 進來用，不自己再寫一次），
-   或具名登記在卡的 ``[[settings.allow]]``（``file``＋``name``＋``reason``）。名字命中卡上
+   或具名登記在卡的 ``[[settings.allow]]``（``file``＋``name``＋``reason``＋``expires``，暫時的）
+   或卡頂層的 ``[[by_design]]``（``file``＋``name``＋``reason``、沒有到期日；本來就不是門檻的那一種，
+   例如協定碼，#1014）。``[[by_design]]`` 登記的名字在那支檔的載入時位置找不到就紅——資料要跟
+   程式對得上；同一支檔裡別的名字照樣要登記。名字命中卡上
    登記的門檻樣式（``MAX_*``、``*_TIMEOUT`` 這些）時，值落在離開碼白名單裡也一樣要登記
    ——不然「深度上限」這種門檻只要把值寫成那三個數之一就整條繞過去。
 
@@ -43,6 +46,7 @@ from governance.loader import (
     CHECKS_DIR,
     EXEMPTION_KEYS,
     RULES_DIR,
+    by_design_entries,
     setting_strings,
     setting_tables,
 )
@@ -65,6 +69,8 @@ ALLOW_KEY = "allow"
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("file", "name", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+BY_DESIGN_KEYS = {"file": "text", "name": "text"}
 
 # 唯一的值白名單：離開碼約定那三個數。刻意 import 名字而不是寫值——這張卡自己的規矩就是
 # 「同一個數字不准有第二個家」，它們的家是 governance/exit_codes.py。
@@ -101,6 +107,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或形狀不對，一律 raise ToolBroken——讀不到登記簿就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], list[tuple[str, str]]]:
+    """這張卡的 ``[settings]``（形狀驗過）＋卡頂層 ``[[by_design]]`` 登記的（檔, 名字）。"""
     mine: list[tuple[str, dict[str, object]]] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -117,7 +128,12 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（門檻樣式、登記表清單與例外清單都寫在那裡）")
     _assert_settings(settings, rel)
-    return settings
+    designed = [(str(e["file"]), str(e["name"])) for e in by_design_entries(data, BY_DESIGN_KEYS, rel)]
+    allowed = [(str(e["file"]), str(e["name"])) for e in setting_tables(settings, ALLOW_KEY)]
+    twice = sorted({key for key in [*designed, *allowed] if [*designed, *allowed].count(key) > 1})
+    if twice:
+        raise ToolBroken(f"{rel} 把 {twice} 登記了不只一次（放行與 [[by_design]] 合起來算）")
+    return settings, designed
 
 
 def _assert_settings(settings: dict[str, object], rel: str) -> None:
@@ -232,13 +248,17 @@ def _threshold_pattern(name: str, patterns: list[str]) -> str:
 
 
 def _programs_problems(
-    scan_root: Path, files: list[Path], settings: dict[str, object], used: set[tuple[str, str]]
+    scan_root: Path,
+    files: list[Path],
+    settings: dict[str, object],
+    used: set[tuple[str, str]],
+    designed: list[tuple[str, str]],
 ) -> list[str]:
     """第①條：程式裡不准有載入時就算好的門檻。"""
     patterns = setting_strings(settings, "threshold_name_patterns")
     registered = {
         (str(entry["file"]), str(entry["name"])) for entry in setting_tables(settings, ALLOW_KEY)
-    }
+    } | set(designed)
     programs = _scanned_python(scan_root, files)
     if not programs:
         raise ToolBroken(
@@ -333,10 +353,16 @@ def _cards_problems(scan_root: Path, files: list[Path], settings: dict[str, obje
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, designed = _card(scan_root, files)
     used: set[tuple[str, str]] = set()
-    bad = _programs_problems(scan_root, files, settings, used)
+    bad = _programs_problems(scan_root, files, settings, used, designed)
     bad += _cards_problems(scan_root, files, settings)
+    bad += [
+        f"卡 {CARD_ID} 頂層的 [[by_design]] 登記了 {file}／{name}，但那支檔的載入時位置找不到這個名字"
+        "——資料是規矩的形狀、沒有到期日，所以要跟程式對得上；名字改了或拿掉了就把那一筆一起改"
+        for file, name in designed
+        if (file, name) not in used
+    ]
 
     allow = setting_tables(settings, ALLOW_KEY)
     stale = [
