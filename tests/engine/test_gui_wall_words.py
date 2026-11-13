@@ -169,6 +169,10 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
         page.locator("#wall-ceiling").click()
         assert ceiling.evaluate("node => node.isConnected && node === document.activeElement")
         assert box.evaluate("node => node.isConnected")
+        # 用 Tab 換到表單裡的下一格（沒有按著滑鼠）：一樣不算離開。
+        kind = page.locator("#material-kind-x0").element_handle()
+        page.keyboard.press("Tab")
+        assert kind.evaluate("node => node.isConnected && node === document.activeElement")
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
         # 從牆面表單直接按「檢查」：那一下照樣按得到，按的時候換名，表單的值是剛打的那個。
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
@@ -180,6 +184,8 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
         again = floor.element_handle()
         floor.click()
         page.locator("#check").click()
+        # 放開滑鼠時排的那一次（setTimeout 0）先跑完：同樣延遲的計時器照排進去的先後跑。
+        page.evaluate("() => new Promise(resolve => setTimeout(resolve, 0))")
         assert again.evaluate("node => node.isConnected")
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
@@ -213,6 +219,23 @@ def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_p
         _arrive(page, held)
         page.locator("#use-scattering").click()
         expect(page.locator("#use-scattering")).to_be_checked()
+        expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
+        _assert_quiet(watched)
+
+
+def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases_it(tmp_path: Path,
+                                                                                      browser: Browser) -> None:
+    # 按著（拖框、按住捲動）的時候離開也先不換；觸控被瀏覽器收回（pointercancel，不會有放開）一樣算放開，換名不准卡住。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        held = _late_rename(page)
+        page.locator("#wall-floor").focus()
+        _arrive(page, held)
+        page.evaluate("() => document.dispatchEvent(new PointerEvent('pointerdown'))")
+        page.locator("#room-Lx").focus()
+        expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        page.evaluate("() => document.dispatchEvent(new PointerEvent('pointercancel'))")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
         _assert_quiet(watched)
 
