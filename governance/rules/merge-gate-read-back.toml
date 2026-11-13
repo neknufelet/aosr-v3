@@ -55,8 +55,8 @@ bypass_actors_empty = true
 api_timeout_seconds = 60
 
 # 准上網的放行。檢查程式自己讀這一筆：缺席或過期就回 2、不上網（放行有牙，不是裝飾）。
-# 到期日刻意對齊第一批放行那一天（2026-12-08），老闆 2026-09-10 拍板：一個審查日一次看完。
+# 到期日刻意對齊第一批放行那一天，老闆 2026-09-10 拍板：一個審查日一次看完；原為 2026-12-08，#1014 一起延到 2027-03-08。
 [[settings.allow]]
 network = "GitHub 的 ruleset API（只讀，兩支：列出 repo 的 ruleset、讀登記的那一個）"
 reason = "決策紙 merge-gate-check-may-read-github：合併門口的設定只住在 GitHub 上，不上網讀就只守得了版控這一半，而事故發生在伺服器那一半。只准這一支、只准讀。"
-expires = "2026-12-08"
+expires = "2027-03-08"

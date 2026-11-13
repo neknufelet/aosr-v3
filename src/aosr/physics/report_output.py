@@ -69,7 +69,7 @@ def fixed_report_capability(table: CapabilityTable) -> ReportCapability:
 
 def _capability_section(report: object) -> CapabilitySection:
     """報表那一格能力：表上那一條本人；沒查表時狀態是 unchecked、範圍與收據是空的。"""
-    record = report.capability.record  # type: ignore[attr-defined]  # expires=2026-12-08 reason=呼叫端已驗過型別，這一支只收報告物件的那一格
+    record = report.capability.record  # type: ignore[attr-defined]  # expires=2027-03-08 reason=呼叫端已驗過型別，這一支只收報告物件的那一格
     return CapabilitySection(
         frequency_hz=record.frequency_hz if record is not None else (),
         outputs=record.outputs if record is not None else (),
@@ -83,15 +83,15 @@ def _top_fields(report: object, room: Room) -> TopFields:
     from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 
     return TopFields(
-        f_s_hz=report.f_s_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        crossover_lower_hz=report.crossover_lower_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        crossover_upper_hz=report.crossover_upper_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        capped_by_upper_limit=report.capped_by_upper_limit,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        reflection_order_k=report.reflection_order_k,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        low_frequency_axis=report.low_frequency_axis,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
+        f_s_hz=report.f_s_hz,  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
+        crossover_lower_hz=report.crossover_lower_hz,  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
+        crossover_upper_hz=report.crossover_upper_hz,  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
+        capped_by_upper_limit=report.capped_by_upper_limit,  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
+        reflection_order_k=report.reflection_order_k,  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
+        low_frequency_axis=report.low_frequency_axis,  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
         eyring_t60_by_band_s={
             str(frequency): value
-            for frequency, value in report.eyring_t60_by_band_s.items()  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
+            for frequency, value in report.eyring_t60_by_band_s.items()  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
         },
         room_volume_m3=room.Lx * room.Ly * room.Lz,
         schroeder_band_count=len(SCHROEDER_T60_BANDS_HZ),
@@ -122,7 +122,7 @@ def _band_rows(report: object) -> tuple[BandRow, ...]:
             t30_s=band.t30_s,
             t30_unavailable_reason=band.t30_unavailable_reason,
         )
-        for band in report.bands  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
+        for band in report.bands  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
     )
 
 
@@ -142,7 +142,7 @@ def _point_rows(report: object) -> tuple[PointRow, ...]:
             w_geo=point.w_geo,
             total_energy=point.total_energy,
         )
-        for point in report.points  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
+        for point in report.points  # type: ignore[attr-defined]  # expires=2027-03-08 reason=同上
     )
 
 

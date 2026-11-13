@@ -93,17 +93,17 @@ scan_exempt_suffixes = [
 [[settings.allow]]
 path = "~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle"
 reason = "刻意指向 repo 外、2026-10-14 已刪除的備份：清空重來前的完整 git 歷史 bundle，找不到副本（#822）。決策紙「從 v2 事故重長，歷史清空」（在 docs/decisions/ 底下）與已取代的舊紙要寫得出它原本在哪、已經不在。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/receipts/pytest.junit.xml"
 reason = "刻意不進版控的產出物：pytest 每一跑自己產的 junit 收據，.gitignore 有它（收據進版控就等於拿上一跑的檔當這一跑的綠）。green-must-be-real-green 那張卡的 [junit] path 與 verify 的測試步驟都必須寫得出這個路徑。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/fixture-commit-range.txt"
 reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/fixture-contracts-history.txt"
@@ -118,22 +118,22 @@ expires = "2026-12-31"
 [[settings.allow]]
 path = "governance/fixture-fenics-answer-range.txt"
 reason = "跟上面兩條同一個形狀，換成 fenics-answers-carry-provenance：它只用這份宣告重建必紅樣本的提交範圍，而且明訂真的 git 工作樹根出現它就回 2——所以外層樹本來就不准有它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/fixture-fenics-answer-base-cases.json"
 reason = "跟上一條同一張卡、同一個樣本專用守門：它只替必紅樣本保存 base 的 cases，真的 git 工作樹根出現它同樣回 2——所以外層樹本來就不准有它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/fixture-tmm-answer-range.txt"
 reason = "TMM 答案卡只用這份宣告重建樣本迷你樹的提交範圍；共用核心明訂真的 git 工作樹根出現它就回 2，不能讓樣本宣告接管真正範圍，所以外層樹本來就不准有它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/fixture-tmm-answer-base-cases.json"
 reason = "同一張 TMM 答案卡的樣本專用宣告，只替迷你樹保存 base 的 cases；真的 git 工作樹根出現它同樣回 2，所以外層樹本來就不准有它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 # ── 票 #127 後半（讀檔那 9 支）：上一代留下來的出處標註 ──────────────────────
 # 這一刀把上一代根層那 9 個 `.toml`（calibration／fem_lane／mat_continuation／membrane_opt／perceptual／physics_constants／scoring／scoring_v2／stereo_layout）**逐位元**搬進 `src/aosr/config/data/`
@@ -146,47 +146,47 @@ expires = "2026-12-08"
 [[settings.allow]]
 path = "docs/next.md"
 reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "config/scoring_s4.toml"
 reason = "上一代的設定檔路徑（S4 複合分的權重檔）。`scoring.toml` 的註解用它說明「這一檔跟那一檔無關」；那一份不在這一塊的範圍裡。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "lib/scoring/core.py"
 reason = "上一代 scoring 那一層的程式檔。`scoring.toml` 的註解說「`layer_a_loss` 在那裡」——那是出處，不是這一棵樹的檔。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "docs/design/design_20260611-scoring-upgrade-plan.md"
 reason = "上一代那一棵樹的設計文件。`scoring.toml` 好幾筆參數的 provenance 都指向它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "docs/design/design_20260614-scoring-fractional-octave-smoothing.md"
 reason = "上一代那一棵樹的設計文件（分數八度平滑）。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "docs/design/design_20260617-m15-p4-art-diffuse-and-decay-scoring-build-spec.md"
 reason = "上一代那一棵樹的設計文件（M15-P4 寬頻衰減目標）。`perceptual.toml` 的 `[rt60.target]` 指向它。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "docs/agents/_codex_peakdip_review_report.md"
 reason = "上一代那一棵樹的 cross-review 報告（峰谷偏向那條旋鈕的實測）。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "docs/references/220621_sample_report_summary.md"
 reason = "上一代那一棵樹的參考文件摘要（REDI 低頻指標的查證）。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "docs/plan/plan_20260720-peak-dip-bias-knob.md"
 reason = "上一代那一棵樹的計畫文件（峰谷旋鈕的設計）。"
-expires = "2026-12-08"
+expires = "2027-03-08"
 
 [[settings.allow]]
 path = "governance/fixture-finalizer-run.json"

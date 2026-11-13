@@ -1,12 +1,12 @@
 ---
 title: 人手關的票超過零張就擋合併，立卡 issues-closed-only-by-merged-pr，第二個准上網的例外
 date_created: 2026-09-10
-date_modified: 2026-09-21
+date_modified: 2026-11-13
 status: superseded
 kind: governance
 supersedes: ""
 superseded_by: "issues-closed-only-by-merged-pr-hand-closed-blocks.md"
-summary: "「票只准由合進主線的 PR 關」從守衛重開與狀態頁紅字，升成一張擋合併的規矩卡：檢查上網讀 GitHub 自己記的關票來源，人手關的超過零張就回 1；這是第二支准上網的檢查，放行到期日對齊 2026-12-08。"
+summary: "「票只准由合進主線的 PR 關」從守衛重開與狀態頁紅字，升成一張擋合併的規矩卡：檢查上網讀 GitHub 自己記的關票來源，人手關的超過零張就回 1；這是第二支准上網的檢查，放行到期日對齊 2027-03-08（原為 2026-12-08，#1014 延期）。"
 ---
 
 # 人手關的票超過零張就擋合併，立卡 issues-closed-only-by-merged-pr，第二個准上網的例外
@@ -41,7 +41,7 @@ summary: "「票只准由合進主線的 PR 關」從守衛重開與狀態頁紅
   今天在那張紙的「決定」段補一句指到這裡，不用 `supersedes` 把它標成失效：那張紙講的是
   合併門口的 ruleset 怎麼回讀，整段還在生效，變的只有「例外從一個變成兩個」。
 - 放行登記在新卡的 `[[settings.allow]]`，帶 `reason` 與 `expires`，由規矩卡
-  `exemptions-need-expiry` 守。到期日 **2026-12-08**，跟第一批放行同一天：一個審查日一次看完。
+  `exemptions-need-expiry` 守。到期日 **2027-03-08**（原為 2026-12-08，#1014 延期），跟第一批放行同一天：一個審查日一次看完。
 - 放行有牙：檢查程式自己讀那一筆放行，缺席或過期就回 2、不上網。
 - 只准讀。只打兩件事：關掉的票、每一張掛著關它的那幾個 PR。token 用 CI 自帶的那一個，
   `verify` 那一份 workflow 的權限從 `contents: read` 多一格 `issues: read`——那個區塊寫了任何

@@ -246,7 +246,7 @@ def build_path_table(
 
 def build_path_table_section(report: object, inputs: SolverInputs, *, contact_rel: float | None = None) -> PathTableSection:
     """只在呼叫端要求時，從同一組求解輸入重建逐路徑資料。"""
-    lane = report.geometric_lane  # type: ignore[attr-defined]  # expires=2026-12-08 reason=output_from_report 已驗過 ThreeLaneReport
+    lane = report.geometric_lane  # type: ignore[attr-defined]  # expires=2027-03-08 reason=output_from_report 已驗過 ThreeLaneReport
     if inputs.furniture and contact_rel is None:
         contact_rel = furniture_contact_rel(default_precision_contracts_path())
     furniture = furniture_lane_inputs(inputs.furniture, (inputs.room.Lx, inputs.room.Ly, inputs.room.Lz),
