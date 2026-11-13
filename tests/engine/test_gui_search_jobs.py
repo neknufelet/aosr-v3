@@ -219,7 +219,12 @@ def test_states_follow_the_id_file_status_and_exit_records(tmp_path: Path) -> No
     assert view["state"] == "searching" and view["search_url"] == f"/searches/{folder.name}"
     assert "細算：未開始" in cast(str, view["summary"])  # 進度頁清單同一支的那一行
     write_exit(jobs.root / job_id / "steps" / "0.start.exit.json", StepExit(exit_code=0, finished_at=time.time()))
+    (folder / "status.json").write_text(SearchStatus(state="budget_exhausted").model_dump_json(), encoding="utf-8")
     assert jobs.get(job_id)["state"] == "finishing"
+    # 回饋開的下一輪：start 早就做完，auto 又在搜尋（狀態檔回到進行中），判搜尋中（#1136）。
+    (folder / "status.json").write_text(SearchStatus().model_dump_json(), encoding="utf-8")
+    assert jobs.get(job_id)["state"] == "searching"
+    (folder / "status.json").write_text(SearchStatus(state="budget_exhausted").model_dump_json(), encoding="utf-8")
     launcher.active.clear()
     assert jobs.get(job_id)["state"] == "interrupted"
     assert cast(Record, jobs.get(job_id)["actions"])["resume"] is True
@@ -298,7 +303,10 @@ def test_resume_runs_auto_alone_on_the_known_folder(tmp_path: Path) -> None:
         jobs.resume(job_id)
     launcher.active.clear()
     view = jobs.resume(job_id)
-    assert view["state"] == "finishing"
+    # 搜尋狀態還是進行中：接續的 auto 先把搜尋接完，判搜尋中（#1136：真跑時判成細算與收尾中、跟進度那一行打架）。
+    assert view["state"] == "searching"
+    (folder / "status.json").write_text(SearchStatus(state="budget_exhausted").model_dump_json(), encoding="utf-8")
+    assert jobs.get(job_id)["state"] == "finishing"
     unit, argv, _, _ = launcher.launched[-1]
     assert unit == f"aosr-search-{job_id}-1"
     chain = Chain.model_validate_json(Path(argv[3]).read_text(encoding="utf-8"))

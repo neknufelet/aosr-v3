@@ -294,6 +294,9 @@ class SearchJobs:
                 return "stopping"
             if folder is None:
                 return "starting"
+            current = self._status(folder)
+            if current is not None and current.state == "running":
+                return "searching"  # auto 遇到進行中的搜尋先接完（接續那一步、回饋開的下一輪）才細算（#1136）
             start_done = (self._steps(job.job_id) / f"{index}.start.exit.json").is_file()
             return "finishing" if step.kind == "resume" or start_done else "searching"
         if status == "vanished":
