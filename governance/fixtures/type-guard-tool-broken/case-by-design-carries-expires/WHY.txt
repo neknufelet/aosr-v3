@@ -1,0 +1,5 @@
+工具壞（回 2）：卡頂層的 [[by_design]] 帶了 expires。
+
+[[by_design]] 是「本來就該這樣」的資料，沒有到期日；會到期的那一種是放行，要寫進 [settings]
+底下的 [[settings.allow]]、由 exemptions-need-expiry 看到期。混在一起，到期那一關就看不到它，
+所以這支檢查不出結論、回 2。

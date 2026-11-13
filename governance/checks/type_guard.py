@@ -25,7 +25,12 @@
 用 :mod:`ast` 與 :mod:`tokenize` 判三件事：
 
 1. 標註位置（參數、回傳、變數標註、型別別名）出現 ``Any``。巢狀的也算——
-   ``dict[str, Any]`` 一樣咬。可以在卡的 ``[[settings.allow]]`` 具名放行一個檔。
+   ``dict[str, Any]`` 一樣咬。准許有兩種寫法：本來就該這樣的（讀進來的資料型別本來就未知）
+   寫進卡**頂層**的 ``[[by_design]]``，一筆一個檔、``anys`` 寫死「哪幾個函式各准幾個標註位置」
+   （函式用點連起來的全名，類別裡的方法寫 ``類別.方法``，模組層寫 ``<module>``），沒有到期日；
+   同一支檔裡沒登記的函式出現 ``Any``、登記的函式多一處或少一處、登記的檔不在了，都紅（#1154，
+   照 #1014 老闆 2026-11-13 拍的 B）。暫時的才在卡的 ``[[settings.allow]]`` 具名放行整個檔，
+   帶理由與到期日。
 2. ``cast(Any, …)`` 這個呼叫本身。沒有放行的寫法。
 3. 程式檔裡，抑制型別檢查的行尾註解沒帶錯誤碼（方括號裡沒寫明是哪一種錯）；型別存根檔
    裡出現任何抑制型別檢查的註解，不論帶不帶錯誤碼都紅。沒有放行的寫法。
@@ -81,6 +86,7 @@ from governance.exit_codes import ToolBroken, make_temp_dir, note, remove_temp_d
 from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
+    by_design_entries,
     setting_int,
     setting_strings,
     setting_tables,
@@ -103,6 +109,10 @@ ALLOW_KEY = "allow"
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("path", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*TEXT_KEYS, *INT_KEYS, *LIST_KEYS, ALLOW_KEY)
+# 卡頂層 [[by_design]] 一筆的欄位（名字→型別），外加共用的 reason；不准帶 expires。
+# anys：哪幾個函式各准幾個標註位置出現 Any（函式全名用點連起來，模組層寫 MODULE_SCOPE）。
+BY_DESIGN_KEYS = {"path": "text", "anys": "counts"}
+MODULE_SCOPE = "<module>"
 
 # ① 怎麼叫 mypy。裸的名字走 PATH（理由見模組說明）。
 MYPY_ARGV = ("mypy",)
@@ -170,6 +180,11 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
 
     找不到、找到多張、或形狀不對，一律 raise ToolBroken——沒有尺就不出結論。
     """
+    return _card(scan_root, files)[0]
+
+
+def _card(scan_root: Path, files: list[Path]) -> tuple[dict[str, object], dict[str, dict[str, int]], str]:
+    """這張卡的 ``[settings]``（形狀驗過）、頂層 ``[[by_design]]``（檔→{函式: 處數}）、卡的相對路徑。"""
     mine: list[tuple[str, dict[str, object]]] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -189,7 +204,20 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（看門狗秒數、設定檔位置與放行清單都寫在那裡）")
     _assert_settings(settings, rel)
-    return settings
+    designed: dict[str, dict[str, int]] = {}
+    for entry in by_design_entries(data, BY_DESIGN_KEYS, rel):
+        name = str(entry["path"])
+        if name in designed or name in _allow_paths(settings):
+            raise ToolBroken(f"{rel} 把 {name} 准許了不只一次（放行與 [[by_design]] 合起來算）")
+        designed[name] = _pinned(entry["anys"])
+    return settings, designed, rel
+
+
+def _pinned(raw: object) -> dict[str, int]:
+    """``anys`` 那一格收窄成具體型別（形狀已由 by_design_entries 驗過，這裡是第二道）。"""
+    if not isinstance(raw, dict):
+        raise ToolBroken(f"[[by_design]] 的 anys 必須是「函式→處數」的表，實際是 {raw!r}")
+    return {str(name): setting_int(raw, str(name)) for name in raw}
 
 
 def _allow_problems(settings: dict[str, object]) -> list[str]:
@@ -501,6 +529,66 @@ def _annotations(tree: ast.Module) -> Iterator[tuple[str, ast.expr]]:
             yield f"型別別名 {ast.unparse(node.name)}", node.value
 
 
+def _scoped_annotations(tree: ast.Module) -> list[tuple[str, str, ast.expr]]:
+    """每一個標註位置落在哪個函式：(函式全名, 位置的人話, 運算式)。
+
+    函式自己的參數與回傳標註算那個函式；變數標註與型別別名算包住它的那一層（類別、函式或
+    模組層 MODULE_SCOPE）。類別與巢狀函式用點連起來。
+    """
+    found: list[tuple[str, str, ast.expr]] = []
+
+    def walk(node: ast.AST, chain: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (*FUNCTION_NODES, ast.ClassDef)):
+                inner = (*chain, child.name)
+                if isinstance(child, FUNCTION_NODES):
+                    scope = ".".join(inner)
+                    if child.returns is not None:
+                        found.append((scope, f"函式 {child.name}() 的回傳標註", child.returns))
+                    found.extend(
+                        (scope, f"函式 {child.name}() 的參數 {arg.arg} 的標註", arg.annotation)
+                        for arg in _signature_args(child.args)
+                        if arg.annotation is not None
+                    )
+                walk(child, inner)
+                continue
+            scope = ".".join(chain) or MODULE_SCOPE
+            if isinstance(child, ast.AnnAssign):
+                found.append((scope, f"{ast.unparse(child.target)} 的變數標註", child.annotation))
+            elif isinstance(child, ast.TypeAlias):
+                found.append((scope, f"型別別名 {ast.unparse(child.name)}", child.value))
+            walk(child, chain)
+
+    walk(tree, ())
+    return found
+
+
+def _by_design_any_hits(
+    tree: ast.Module, rel: str, bindings: Bindings, pinned: dict[str, int], card_rel: str
+) -> list[str]:
+    """卡頂層 ``[[by_design]]`` 准許的檔：只准登記的函式在標註位置寫 Any，處數要剛好對上。"""
+    bad: list[str] = []
+    counted: dict[str, int] = {}
+    for scope, where, annotation in _scoped_annotations(tree):
+        if not _has_any(annotation, bindings):
+            continue
+        counted[scope] = counted.get(scope, 0) + 1
+        if scope not in pinned:
+            bad.append(
+                f"{rel}:{annotation.lineno} {where}（在 {scope} 裡）出現 {ANY_NAME}，但卡 {card_rel} 頂層的"
+                f" [[by_design]] 只准許這支檔的 {sorted(pinned)} 這幾個函式——准許寫死到函式，"
+                f"同一支檔裡新寫的 {ANY_NAME} 不會跟著被准許；寫得出具體型別就寫，真的是動態資料就連卡一起改"
+            )
+    for scope, want in sorted(pinned.items()):
+        got = counted.get(scope, 0)
+        if got != want:
+            bad.append(
+                f"{rel} 的 {scope} 有 {got} 個標註位置出現 {ANY_NAME}，卡 {card_rel} 頂層的 [[by_design]] 登記 {want} 個"
+                "——資料寫死處數，多一處、少一處都要連卡一起改（對不上就是沒人回頭看的清單）"
+            )
+    return bad
+
+
 def _any_count(tree: ast.Module, bindings: Bindings) -> int:
     """這份檔裡有幾個標註位置出現 ``Any``（放行清單那幾個檔用這個數字報告）。"""
     return sum(1 for _, annotation in _annotations(tree) if _has_any(annotation, bindings))
@@ -522,8 +610,8 @@ def _any_hits(tree: ast.Module, rel: str, bindings: Bindings) -> list[str]:
         f"（`{ast.unparse(annotation)}`）——{ANY_NAME} 不是一個型別，是「這裡不要檢查」："
         f"標成 {ANY_NAME} 的值之後怎麼用都不會紅，型別檢查在那一格整個讓開。"
         f"寫得出具體型別就寫（連 object 都比 {ANY_NAME} 強，它什麼都不能做但還是型別安全的）；"
-        f"真的是讀進來的動態資料，就在卡 {CARD_ID} 的 [[settings.{ALLOW_KEY}]] 具名放行那個檔，"
-        f"寫理由與到期日。改名 import（`from typing import {ANY_NAME} as 別的名字`）不是繞法，"
+        f"真的是讀進來的動態資料，就在卡 {CARD_ID} 頂層的 [[by_design]] 寫死哪幾個函式各准幾處；"
+        f"暫時的才進 [[settings.{ALLOW_KEY}]] 具名放行那個檔，寫理由與到期日。改名 import（`from typing import {ANY_NAME} as 別的名字`）不是繞法，"
         "這一條解析過這份檔的 import 綁定"
         for where, annotation in _annotations(tree)
         if _has_any(annotation, bindings)
@@ -584,7 +672,7 @@ def _note_allowed(counts: dict[str, int], allowed: list[str]) -> None:
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    settings = _card_settings(scan_root, files)
+    settings, designed, card_rel = _card(scan_root, files)
     suffixes = setting_strings(settings, "scan_suffixes")
     picked = _scanned_sources(
         scan_root, files, suffixes, setting_strings(settings, "scan_exempt_prefixes")
@@ -602,6 +690,13 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     allowed = _allow_paths(settings)
     counts: dict[str, int] = {rel: 0 for rel in allowed}
+    present = {path.relative_to(scan_root).as_posix() for path in picked if path.is_file()}
+    bad += [
+        f"卡 {card_rel} 頂層的 [[by_design]] 准許 {rel} 的 {ANY_NAME}，但這棵樹的掃描面裡沒有這支檔"
+        "——資料要跟樹對得上；檔拿掉或搬家了就把那一筆一起改"
+        for rel in sorted(designed)
+        if rel not in present
+    ]
     for path in picked:
         rel = path.relative_to(scan_root).as_posix()
         if not path.is_file():
@@ -610,7 +705,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         text = _read_text(path, rel)
         tree = _parse(text, rel)
         bindings = _bindings(tree)
-        if rel in counts:
+        if rel in designed:
+            bad += _by_design_any_hits(tree, rel, bindings, designed[rel], card_rel)
+        elif rel in counts:
             counts[rel] = _any_count(tree, bindings)
         else:
             bad += _any_hits(tree, rel, bindings)

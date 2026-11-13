@@ -56,11 +56,12 @@ quota_words = [
 ]
 
 [[settings.allow]]
-text = "CLAUDE.md"
-reason = "樣本裡照主卡逐字複製的一筆放行：入口檔自己的檔名是工具規定的，不是一個路由選擇。塗掉的只有這一段字面字串。"
-expires = "2026-12-10"
-
-[[settings.allow]]
 text = "https://claude.ai/"
 reason = "樣本裡照主卡逐字複製的一筆放行：網址是一個位置不是一個路由。塗掉的只有網址開頭這一段。"
 expires = "2026-12-10"
+
+[[by_design]]
+text = "CLAUDE.md"
+reason = "樣本：入口檔自己的檔名是工具規定的，不是一個路由選擇。"
+[by_design.files]
+"AGENTS.md" = 1
