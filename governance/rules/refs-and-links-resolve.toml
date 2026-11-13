@@ -189,11 +189,6 @@ reason = "上一代那一棵樹的計畫文件（峰谷旋鈕的設計）。"
 expires = "2026-12-08"
 
 [[settings.allow]]
-path = "tests/test_response.py"
-reason = "上一代那一棵樹的考卷。`blueprint/generate_materials_cut1_answers.py` 的 docstring 說「在上一代唯一直接驗 response/source/registry 的 tests/test_response.py 只有 4 題」——那是 donor 樹的檔案，不是這一棵樹的引用。跟扣掉 v2-audit/ 是同一個理由：證物不是引用。"
-expires = "2026-12-08"
-
-[[settings.allow]]
 path = "governance/fixture-finalizer-run.json"
 reason = "收尾的樣本身分檔只准活在樣本樹；真 git 工作樹根出現它就回 2。正式環境由 GitHub 注入，真樹本來就不准有此檔；切換或取消分片設計時重新審查。"
 expires = "2026-12-31"

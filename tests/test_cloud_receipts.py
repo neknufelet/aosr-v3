@@ -63,28 +63,29 @@ Judge = Callable[[cloud_receipts.Mirror, dict[str, object]], list[str]]
 
 
 def judges() -> list[tuple[str, Judge]]:
+    """三個裁判的「今天」一律由考卷給 TODAY：裁判自己讀時鐘的話，放行一到期這幾題就跟著日曆變紅（#1014）。"""
     return [
-        ("schema", lambda m, s: receipt_schema_complete.judge(m, s, "卡")),
-        ("authority", receipt_authority_is_the_cloud_run.judge),
-        ("four-roles", four_roles_different_actors.judge),
+        ("schema", lambda m, s: receipt_schema_complete.judge(m, s, "卡", today=TODAY)),
+        ("authority", lambda m, s: receipt_authority_is_the_cloud_run.judge(m, s, today=TODAY)),
+        ("four-roles", lambda m, s: four_roles_different_actors.judge(m, s, today=TODAY)),
     ]
 
 
 def test_without_allow_every_card_bites(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cloud_receipts, "date", _FixedDate)
+    _no_clock(monkeypatch)
     for name, judge in judges():
         assert judge(mirror_of(bad_receipt()), settings_with(None)), f"{name} 沒咬那份壞收據"
 
 
 def test_named_unexpired_allow_skips_the_receipt_on_every_card(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cloud_receipts, "date", _FixedDate)
+    _no_clock(monkeypatch)
     allow = [{"path": NAME, "reason": "測試：假裝這一份出過事、拍板放過。", "expires": "2026-12-08"}]
     for name, judge in judges():
         assert judge(mirror_of(bad_receipt()), settings_with(allow)) == [], f"{name} 沒跳過被放行的那一份"
 
 
 def test_expired_allow_does_not_skip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cloud_receipts, "date", _FixedDate)
+    _no_clock(monkeypatch)
     allow = [{"path": NAME, "reason": "測試：放過但到期了。", "expires": "2026-01-01"}]
     for name, judge in judges():
         assert judge(mirror_of(bad_receipt()), settings_with(allow)), f"{name} 把過期的放行當成有效"
@@ -93,7 +94,7 @@ def test_expired_allow_does_not_skip(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_allow_naming_another_receipt_does_not_skip() -> None:
     allow = [{"path": "999-1.json", "reason": "測試：放的是別份。", "expires": "2026-12-08"}]
     assert cloud_receipts.allowed_names(settings_with(allow), TODAY) == {"999-1.json"}
-    assert receipt_authority_is_the_cloud_run.judge(mirror_of(bad_receipt()), settings_with(allow))
+    assert receipt_authority_is_the_cloud_run.judge(mirror_of(bad_receipt()), settings_with(allow), today=TODAY)
 
 
 def test_malformed_allow_is_tool_broken() -> None:
@@ -102,12 +103,17 @@ def test_malformed_allow_is_tool_broken() -> None:
             cloud_receipts.allowed_names(settings_with([broken]), TODAY)
 
 
-class _FixedDate(date):
-    """把 date.today() 釘在測試的今天，放行的到期判斷才不會跟著日曆漂。"""
+class _NoClock(date):
+    """判決那一層不准讀時鐘：今天只能從參數進來。讀了就炸，不是悄悄拿到真的日期。"""
 
     @classmethod
-    def today(cls) -> "_FixedDate":
-        return cls(TODAY.year, TODAY.month, TODAY.day)
+    def today(cls) -> "_NoClock":
+        raise AssertionError("判決那一層讀了真時鐘——今天要由呼叫者注入（#1014）")
+
+
+def _no_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    for module in (cloud_receipts, four_roles_different_actors, receipt_authority_is_the_cloud_run, receipt_schema_complete):
+        monkeypatch.setattr(module, "date", _NoClock)
 
 
 SCHEMA_CARD = FIXTURE.parents[2] / "rules" / "receipt-schema-complete.toml"

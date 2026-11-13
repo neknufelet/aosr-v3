@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
-from typing import cast
+from typing import ParamSpec, TypeVar, cast
 from unittest.mock import patch
 
 import aosr
@@ -47,6 +47,21 @@ WALLS = {wall: 900. + 173. * i for i, wall in enumerate(Wall.all())}
 SCATTER = {wall: .05 + i * .04 for i, wall in enumerate(Wall.all())}
 BOARD = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)), backing="rigid")
 POROUS = Assembly(layers=(PorousLayer(thickness_m=.05, flow_resistivity_pa_s_m2=12000., material_class="fibrous"), AirLayer(thickness_m=.17)), backing="rigid")
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _spy(real: Callable[_P, _T], *, before: Callable[[tuple[object, ...], dict[str, object]], None] | None = None,
+         after: Callable[[_T], None] | None = None) -> Callable[_P, _T]:
+    """原樣轉交給真入口：before 在呼叫前看當次參數、after 在呼叫後看回傳；簽名跟著真入口走（ParamSpec），不靠抑制註解。"""
+    def spied(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if before is not None:
+            before(args, kwargs)
+        result = real(*args, **kwargs)
+        if after is not None:
+            after(result)
+        return result
+    return spied
 
 
 def _materials(two: bool = True, *, depth: float | None = None) -> dict[Wall, SurfaceMaterial]:
@@ -118,10 +133,7 @@ def _readers() -> None:
     captured: list[tuple[str, list[RoomPath]]] = []
     reader = ["fine"]
 
-    def recording(*args: object, **kwargs: object) -> list[RoomPath]:
-        paths = image_source_paths(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交讀者的幾何參數
-        captured.append((reader[0], paths))
-        return paths
+    recording = _spy(image_source_paths, after=lambda paths: captured.append((reader[0], paths)))
 
     with patch.object(geo, "image_source_paths", recording):
         report_geometry._solve_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
@@ -175,10 +187,7 @@ def _override_inputs() -> None:
     assert materials[Wall.Y0] != ConstantImpedance(impedance_pa_s_m=WALLS[Wall.Y0])
     captured: list[RoomPath] = []
 
-    def recording(*args: object, **kwargs: object) -> list[RoomPath]:
-        paths = image_source_paths(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交讀者的幾何參數
-        captured.extend(paths)
-        return paths
+    recording = _spy(image_source_paths, after=captured.extend)
 
     with patch.object(tables, "image_source_paths", recording):
         tables.build_path_table(room=ROOM, source=SOURCE, receiver=RECEIVER, sound_speed_m_s=c,
@@ -244,10 +253,12 @@ def _reuse() -> None:
     batches: list[tuple[float, ...]] = []
     coefficients: list[tuple[complex, float, float]] = []
 
-    def core(material: SurfaceMaterial, *args: object, **kwargs: object) -> tuple[jax.Array, tuple[ConstructionNote, ...]]:
-        calls.append(material)
-        batches.append(tuple(float(a) for a in np.asarray(cast(jax.Array, args[1]))))
-        return real_core(material, *args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=只記錄核心呼叫並原樣轉交
+    def seen(args: tuple[object, ...], kwargs: dict[str, object]) -> None:
+        # 真入口的位置參數：材料、頻率、入射角。
+        calls.append(cast(SurfaceMaterial, args[0]))
+        batches.append(tuple(float(a) for a in np.asarray(cast(jax.Array, args[2]))))
+
+    core = _spy(real_core, before=seen)
 
     def coefficient(z: complex, cos: float, rho_c: float) -> complex:
         coefficients.append((z, cos, rho_c))
@@ -353,9 +364,8 @@ def _batch() -> None:
     captured: list[Mapping[Wall, SurfaceMaterial]] = []
     real = report_geometry._solve_both_geometric_report_lanes
 
-    def recording(*args: object, **kwargs: object) -> tuple[geo.GeometricLaneResult, geo.GeometricEarlyResult]:
-        captured.append(cast(Mapping[Wall, SurfaceMaterial], kwargs["materials_by_wall"]))
-        return real(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交批次鏡像法參數
+    recording = _spy(real, before=lambda args, kwargs: captured.append(
+        cast(Mapping[Wall, SurfaceMaterial], kwargs["materials_by_wall"])))
 
     with patch.object(report, "_solve_fem_energy", fake_fem_energy), \
             patch.object(report_geometry, "_solve_both_geometric_report_lanes", recording):

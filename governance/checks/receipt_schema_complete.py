@@ -185,8 +185,9 @@ def receipt_hits(receipt: Receipt, settings: Mapping[str, object], where: str) -
     return hits
 
 
-def judge(mirror: Mirror, settings: Mapping[str, object], where: str) -> list[str]:
-    skip = allowed_names(settings, date.today())
+def judge(mirror: Mirror, settings: Mapping[str, object], where: str, *, today: date) -> list[str]:
+    """今天由呼叫者給：判決這一層不讀時鐘，考卷才釘得住放行的到期日（#1014）。"""
+    skip = allowed_names(settings, today)
     hits: list[str] = []
     for receipt in mirror.receipts:
         if receipt.name in skip:
@@ -204,7 +205,7 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     card, settings = card_settings(scan_root, files, CHECK_REL)
     where = str(card.relative_to(scan_root))
-    return judge(read_mirror(scan_root, settings, where), settings, where)
+    return judge(read_mirror(scan_root, settings, where), settings, where, today=date.today())
 
 
 if __name__ == "__main__":

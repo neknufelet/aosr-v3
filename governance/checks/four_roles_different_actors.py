@@ -62,11 +62,12 @@ def _committed_by_machine(receipt: Receipt, mirror: Mirror, machines: set[str]) 
     return hits
 
 
-def judge(mirror: Mirror, settings: Mapping[str, object]) -> list[str]:
+def judge(mirror: Mirror, settings: Mapping[str, object], *, today: date) -> list[str]:
+    """今天由呼叫者給：判決這一層不讀時鐘，考卷才釘得住放行的到期日（#1014）。"""
     machines = {m.strip().lower() for m in setting_strings(settings, "machine_emails")}
     if not machines:
         raise ToolBroken("卡上 machine_emails 是空的——沒有登記的機器身分就分不出誰是機器")
-    skip = allowed_names(settings, date.today())
+    skip = allowed_names(settings, today)
     hits: list[str] = []
     for receipt in mirror.receipts:
         if receipt.name in skip:
@@ -83,7 +84,7 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     card, settings = card_settings(scan_root, files, CHECK_REL)
-    return judge(read_mirror(scan_root, settings, str(card.relative_to(scan_root))), settings)
+    return judge(read_mirror(scan_root, settings, str(card.relative_to(scan_root))), settings, today=date.today())
 
 
 if __name__ == "__main__":

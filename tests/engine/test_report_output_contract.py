@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import pytest
 import json
+from typing import TypedDict, Unpack
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, report_output
-from aosr.physics.report_io import BandRow, CapabilitySection, PointRow, ReportOutput, SceneSection, TopFields
+from aosr.materials.construction_models import ConstructionNote
+from aosr.physics.report_io import BandRow, CapabilitySection, PathTableSection, PointRow, ReportOutput, SceneSection, TopFields
+from aosr.physics.report_measured import MeasuredSeam
 from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from tests.engine import _directivity
 from tests.engine.test_report_io_contract import _three_lane_frequency_range, _fake_fem_energy, _input_document, _table
@@ -16,8 +19,56 @@ from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 # ── ③ 輸出模型：值空必須有原因（兩個方向）────────────────────────────────────────
-def _band(**overrides: object) -> BandRow:
-    defaults: dict[str, object] = {
+# 三支組列小工具的欄名與型別：跟模型欄位一一對應；考卷只給要蓋掉的那幾欄，其餘用預設值。
+class _BandFields(TypedDict, total=False):
+    center_frequency_hz: float
+    fem_energy: float | None
+    fem_point_count: int
+    direct_energy: float
+    reflected_energy: float
+    interference_energy: float
+    late_energy: float
+    geometric_energy: float
+    fem_contribution: float
+    geometric_contribution: float
+    total_energy: float
+    w_fem: float
+    w_geo: float
+    f_s_hz: float
+    capped_by_upper_limit: bool
+    t20_s: float | None
+    t20_unavailable_reason: str | None
+    t30_s: float | None
+    t30_unavailable_reason: str | None
+
+
+class _PointFields(TypedDict, total=False):
+    frequency_hz: float
+    fem_energy: float | None
+    direct_energy: float
+    reflected_energy: float
+    interference_energy: float
+    late_energy: float
+    scattering: float
+    geometric_energy: float
+    w_fem: float
+    w_geo: float
+    total_energy: float
+
+
+class _OutputFields(TypedDict, total=False):
+    scene: SceneSection
+    capability: CapabilitySection
+    top: TopFields
+    bands: tuple[BandRow, ...]
+    points: tuple[PointRow, ...] | None
+    path_table: PathTableSection | None
+    construction_notes_by_wall: dict[str, tuple[ConstructionNote, ...]] | None
+    measured_seams_by_wall: dict[str, tuple[MeasuredSeam, ...]] | None
+
+
+def _band(**overrides: Unpack[_BandFields]) -> BandRow:
+    defaults: _BandFields = {
         "center_frequency_hz": 1000.0,
         "fem_energy": 1.0,
         "fem_point_count": 1,
@@ -39,11 +90,11 @@ def _band(**overrides: object) -> BandRow:
         "t30_unavailable_reason": None,
     }
     defaults.update(overrides)
-    return BandRow(**defaults)  # type: ignore[arg-type]  # expires=2026-12-08 reason=這一支刻意用寬鬆的 kwargs 組列，欄名由上面的 defaults 決定
+    return BandRow(**defaults)
 
 
-def _point(**overrides: object) -> PointRow:
-    defaults: dict[str, object] = {
+def _point(**overrides: Unpack[_PointFields]) -> PointRow:
+    defaults: _PointFields = {
         "frequency_hz": 1000.0,
         "fem_energy": 1.0,
         "direct_energy": 1.0,
@@ -57,11 +108,11 @@ def _point(**overrides: object) -> PointRow:
         "total_energy": 1.0,
     }
     defaults.update(overrides)
-    return PointRow(**defaults)  # type: ignore[arg-type]  # expires=2026-12-08 reason=這一支刻意用寬鬆的 kwargs 組列，欄名由上面的 defaults 決定
+    return PointRow(**defaults)
 
 
-def _output(**overrides: object) -> ReportOutput:
-    defaults: dict[str, object] = {
+def _output(**overrides: Unpack[_OutputFields]) -> ReportOutput:
+    defaults: _OutputFields = {
         "scene": SceneSection(
             source_model=SourceModelSection.from_spec(
                 SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None,
@@ -91,7 +142,7 @@ def _output(**overrides: object) -> ReportOutput:
         "points": None,
     }
     defaults.update(overrides)
-    return ReportOutput(**defaults)  # type: ignore[arg-type]  # expires=2026-12-08 reason=同上
+    return ReportOutput(**defaults)
 
 
 def test_empty_value_without_a_reason_is_rejected() -> None:
