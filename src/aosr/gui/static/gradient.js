@@ -37,6 +37,7 @@ const seenBuilds = new Map();
 let knownJobs = [];
 let knownBuilds = [];
 let polling = false;
+let pollAgain = false;
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -650,17 +651,22 @@ async function refreshBuilds() {
   if (reply.ok) knownBuilds = reply.body.builds;
 }
 
+// 上一次還沒回來又輪到：記一筆、做完立刻補一次，不吞掉（#1128：被吞掉的那一次若剛好是「查得到忙不忙了」，
+// 開始鈕要等下一輪才亮；假時鐘的考卷一次只推一格，吞掉就永遠不亮）。
 async function poll() {
-  if (polling) return;
+  if (polling) { pollAgain = true; return; }
   polling = true;
   try {
-    await refreshBuilds();
-    await refreshJobs();
-    if (selectedJob) await refreshJob();
-    if (watchedBuild) {
-      const reply = await api(`/api/gradient/surrogates/${watchedBuild}`);
-      if (reply.ok) showBuild(reply.body);
-    }
+    do {
+      pollAgain = false;
+      await refreshBuilds();
+      await refreshJobs();
+      if (selectedJob) await refreshJob();
+      if (watchedBuild) {
+        const reply = await api(`/api/gradient/surrogates/${watchedBuild}`);
+        if (reply.ok) showBuild(reply.body);
+      }
+    } while (pollAgain);
   } finally {
     polling = false;
   }
