@@ -5,7 +5,15 @@
 配置核過、全部候選都過才裝，並在格子裡留一份紀錄（``fixed_checks.json``）：哪一組配置（摘要＋原文）、哪一份替身
 （manifest 整份摘要）、每個候選的數字。網頁預覽與網頁開跑拿這一次的配置對紀錄：對得上、而且這一場每個候選都在紀錄裡
 過了，才說「可以直接開搜尋」；對不上（舊替身沒有紀錄、起跑配置換過、核的不是這份替身）就照實講、要照這一次的設定重建。
-開跑那一道照樣自己再核一次（紀錄只讓網頁先講，不取代開跑的核對）。
+
+開跑那一道（#1142，老闆 2026-11-13 拍 A）：紀錄的身分逐欄都跟這一次相同才沿用紀錄的數字、不再完整解一次
+（:func:`reused_rows`）；任何一欄不同、紀錄是舊格式（v1，沒有沿用要比的欄位）或讀不懂、替身是接續（carry-over）沿用的，
+一律照舊自己重核。身分：替身（manifest 整份檔案的 SHA-256）、起跑配置（正規寫法的摘要）、頻率軸（逐位 ``float.hex()``）、
+兩把尺（登記簿現值）、每個候選的材料內容（兩種摘要都比）與准用它的片、每個候選核對配置的逐片逐頻阻抗（逐位摘要；
+起跑配置的正規寫法只記代號，家族的構造與盒界、使用者材料庫的內容改了阻抗就會變，這一格擋得住）、完整模型的指紋
+（``fem_reduced.operators_digest``，直接比，不靠物理身分推）、算這一道核對的程式（:func:`~aosr.gradient.fixed_candidates.
+check_code_identity`：核對那一支的靜態引入閉包、它讀的資料檔與執行環境；物理身分不收替身求值與比對那幾支，
+那幾支改了數字就可能變）。
 
 准用清單沒有固定材料的切法不寫也不讀這份紀錄（格子裡的檔與網頁行為逐位照舊）。
 """
@@ -14,17 +22,23 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from aosr.gradient.surrogate_coverage import FixedTarget
 from aosr.materials.search_library import MaterialsRefused
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 
+if TYPE_CHECKING:
+    from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
+
 FIXED_CHECKS_FILE: Final = "fixed_checks.json"
 FIXED_CHECKS_VERSION: Final = "aosr.gradient.surrogate_fixed_checks.v1"
+# v2（#1142）多記開跑沿用要比的身分欄位；v1 照讀（網頁預覽照舊），只是開跑不沿用、照舊重核。
+FIXED_CHECKS_VERSION_V2: Final = "aosr.gradient.surrogate_fixed_checks.v2"
 NO_RECORD_TEXT: Final = ("這份替身裝進格子之前沒有用開跑那一組起跑配置核過准用清單的固定材料（舊版建替身沒有這一道），"
                          "開跑前的核對可能不收；要重建（重建時會先用這一組配置核，不夠準就補訓練）")
 OTHER_CONFIGURATION_TEXT: Final = ("這份替身核固定材料時用的起跑配置跟這一次不同（起跑樣板、裝法、深度上限、固定的區、"
@@ -44,25 +58,104 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
+_SHA256 = r"^[0-9a-f]{64}$"
+_ROW_IDENTITY: Final = ("surfaces", "material_digest", "full_solves", "impedances_sha256")
+_RECORD_IDENTITY: Final = ("frequencies_hz", "operators_digest", "code_identity")
+
+
 class FixedCheckRow(_Frozen):
-    """一個候選在那一組起跑配置的核對：材料內容摘要、兩個差、兩把尺、過了沒。"""
+    """一個候選在那一組起跑配置的核對：材料內容摘要、兩個差、兩把尺、過了沒。
+
+    v2 多四格（開跑沿用要的）：准用它的片、材料的身分摘要（``endpoint.material_digest``，開跑記進 ``project.json`` 的那一種）、
+    完整解次數、核對配置的逐片逐頻阻抗摘要（:func:`impedances_sha256`）。v1 沒有這四格。"""
 
     target: str = Field(pattern=r"^fixed:[a-z][a-z0-9_]*$")
-    material_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    material_sha256: str = Field(pattern=_SHA256)
     frequency_db: float = Field(ge=0.0)
     band_db: float = Field(ge=0.0)
     frequency_ruler: float = Field(gt=0.0)
     band_ruler: float = Field(gt=0.0)
     passed: bool
+    surfaces: tuple[str, ...] | None = Field(default=None, min_length=1)
+    material_digest: str | None = Field(default=None, pattern=_SHA256)
+    full_solves: int | None = Field(default=None, ge=1, strict=True)
+    impedances_sha256: str | None = Field(default=None, pattern=_SHA256)
 
 
 class FixedChecksRecord(_Frozen):
-    schema_version: Literal["aosr.gradient.surrogate_fixed_checks.v1"] = FIXED_CHECKS_VERSION
-    configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    configuration: dict[str, object]
-    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    checks: tuple[FixedCheckRow, ...] = Field(min_length=1)
+    """v1：建替身那一側只給網頁預覽用；v2（#1142）每一格沿用要比的身分都齊，開跑才可能沿用。版本跟欄位要一致：
+    v2 缺一格、v1 多一格都不收（讀成「沒有紀錄」，網頁照「要重建」講、開跑照舊重核，不當成核過）。"""
 
+    schema_version: Literal["aosr.gradient.surrogate_fixed_checks.v1",
+                            "aosr.gradient.surrogate_fixed_checks.v2"] = FIXED_CHECKS_VERSION
+    configuration_sha256: str = Field(pattern=_SHA256)
+    configuration: dict[str, object]
+    manifest_sha256: str = Field(pattern=_SHA256)
+    checks: tuple[FixedCheckRow, ...] = Field(min_length=1)
+    frequencies_hz: tuple[str, ...] | None = Field(default=None, min_length=1,
+                                                   description="核對用的頻率軸，逐點 float.hex()（v2）")
+    operators_digest: str | None = Field(default=None, pattern=_SHA256, description="完整模型的指紋（v2）")
+    code_identity: str | None = Field(default=None, pattern=r"^fixcheck-v1:[0-9a-f]{64}$",
+                                      description="算核對的程式與環境的身分（v2，check_code_identity）")
+
+    @model_validator(mode="after")
+    def _fields_match_version(self) -> Self:
+        v2 = self.schema_version == FIXED_CHECKS_VERSION_V2
+        missing = [f"{row.target}.{name}" for row in self.checks for name in _ROW_IDENTITY
+                   if (getattr(row, name) is None) == v2]
+        missing.extend(name for name in _RECORD_IDENTITY if (getattr(self, name) is None) == v2)
+        if missing:
+            raise ValueError(f"核對紀錄 {self.schema_version} 的欄位跟版本不一致：{missing}")
+        return self
+
+    @model_validator(mode="after")
+    def _one_row_per_candidate(self) -> Self:
+        """同一個候選寫兩列（建替身寫不出來）讀不懂哪一列算數：不收，讀成沒有紀錄（開跑重核、網頁照「要重建」講）。"""
+        targets = [row.target for row in self.checks]
+        if len(set(targets)) != len(targets):
+            raise ValueError(f"核對紀錄同一個候選寫了不只一列：{sorted(targets)}")
+        return self
+
+    def without_reuse_identity(self) -> FixedChecksRecord:
+        """同一份紀錄去掉開跑沿用要比的欄位、寫成 v1：網頁預覽照讀，開跑那一道不沿用、照舊重核。"""
+        return FixedChecksRecord.model_validate({
+            **self.model_dump(mode="json", exclude=set(_RECORD_IDENTITY)), "schema_version": FIXED_CHECKS_VERSION,
+            "checks": [row.model_dump(mode="json", exclude=set(_ROW_IDENTITY)) for row in self.checks]})
+
+
+@dataclass(frozen=True)
+class CandidateIdentity:
+    """開跑這一次、一個固定材料候選要跟紀錄比的身分：兩種材料摘要、准用它的片、核對配置的阻抗摘要。"""
+
+    target: str
+    material_sha256: str
+    material_digest: str
+    surfaces: tuple[str, ...]
+    impedances_sha256: str
+
+
+def axis_hex(frequencies_hz: Sequence[float]) -> tuple[str, ...]:
+    """頻率軸的逐位寫法（``float.hex()``）：建替身與開跑各自算，逐字相同才算同一條軸。"""
+    return tuple(float(value).hex() for value in frequencies_hz)
+
+
+def impedances_sha256(impedances: FrequencyBoundaryImpedances) -> str:
+    """一組核對配置（牆或面片 → 每個頻點的阻抗、單一值、或 None＝剛性）的逐位摘要：鍵寫成面片代號、照字排，每個值的
+    實部虛部各取 ``float.hex()``。建替身與開跑用同一支，阻抗差一個位元就不同。不載入 JAX（值先轉成 Python 的 complex）。"""
+    def number(value: float | complex | None) -> list[str] | None:
+        if value is None:
+            return None
+        found = complex(value)
+        return [float(found.real).hex(), float(found.imag).hex()]
+
+    rows: dict[str, object] = {}
+    for key, row in impedances.items():
+        wall, zone = key if isinstance(key, tuple) else (key, "")
+        name = wall.wall_name() + ("@" + zone if zone else "")
+        rows[name] = (None if row is None else ["scalar", number(row)] if isinstance(row, (int, float, complex))
+                      else [number(value) for value in row])
+    content = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 def configuration_document(*, presets: Sequence[str | None], mount: str, fixed_surfaces: Mapping[str, str],
                            max_depths: Mapping[str, float], allowed: Mapping[str, Sequence[str]],
@@ -119,3 +212,43 @@ def unchecked_reason(slot: Path, manifest: Path, configuration: Mapping[str, obj
     if missing:
         return f"固定材料 {'、'.join(missing)} 沒有在這一組起跑配置核過；要重建（重建時會先核，不夠準就補訓練）"
     return None
+
+
+def reused_rows(record: FixedChecksRecord | None, *, manifest_sha256: str, configuration: Mapping[str, object],
+                frequencies_hz: Sequence[float], rulers: tuple[float, float], operators_digest: str, code_identity: str,
+                candidates: Sequence[CandidateIdentity]) -> tuple[FixedCheckRow, ...] | str:
+    """開跑那一道能不能沿用建替身時核過的數字（#1142）：身分逐欄都相同、每個候選都在紀錄裡而且過了，回照 ``candidates``
+    順序排好的紀錄列；有任何一欄不同，回一句白話原因（開跑照舊重核）。``rulers`` 是登記簿現值（逐頻、帶能量）。
+    全部候選一起沿用或一起重核，不拆。"""
+    if record is None:
+        return "替身旁邊沒有建替身時的核對紀錄（或讀不懂）"
+    if record.schema_version != FIXED_CHECKS_VERSION_V2:
+        return "建替身時的核對紀錄是舊格式，沒有沿用要比的欄位"
+    if record.manifest_sha256 != manifest_sha256:
+        return "核對紀錄核的不是這一份替身"
+    if record.configuration_sha256 != configuration_sha256(configuration):
+        return "起跑配置跟建替身時核的那一組不同"
+    if record.frequencies_hz != axis_hex(frequencies_hz):
+        return "頻率軸跟建替身時核的不同"
+    if record.operators_digest != operators_digest:
+        return "完整模型跟建替身時核的不同"
+    if record.code_identity != code_identity:
+        return "算核對的程式或環境跟建替身時不同"
+    rows = {row.target: row for row in record.checks}
+    if set(rows) != {item.target for item in candidates}:
+        return "固定材料候選跟建替身時核的那幾個不同"
+    found = []
+    for item in candidates:
+        row = rows[item.target]
+        if (row.frequency_ruler, row.band_ruler) != rulers:
+            return f"固定材料 {item.target} 核的時候用的尺跟登記簿現在的不同"
+        if row.material_sha256 != item.material_sha256 or row.material_digest != item.material_digest:
+            return f"固定材料 {item.target} 的材料內容跟建替身時核的不同"
+        if row.surfaces != item.surfaces:
+            return f"固定材料 {item.target} 准用的片跟建替身時核的不同"
+        if row.impedances_sha256 != item.impedances_sha256:
+            return f"固定材料 {item.target} 的核對配置阻抗跟建替身時核的不同"
+        if not row.passed or row.frequency_db > rulers[0] or row.band_db > rulers[1]:
+            return f"固定材料 {item.target} 建替身時核的沒過"
+        found.append(row)
+    return tuple(found)

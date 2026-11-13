@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Self
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
@@ -27,7 +28,7 @@ from aosr.materials.construction_models import MeasuredImpedance, SurfaceMateria
 from aosr.materials.search_library import MaterialsRefused, PresetMaterial
 from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_boundary import FrequencyBoundaryImpedances
-from aosr.gradient.surrogate_fixed_checks import FixedCandidateInaccurate
+from aosr.gradient.surrogate_fixed_checks import FixedCandidateInaccurate, FixedCheckRow
 
 if TYPE_CHECKING:
     from aosr.physics.fem_reduced_check import ValidationReport
@@ -50,12 +51,20 @@ class FixedCandidateCheck(BaseModel):
     seconds: float = Field(ge=0.0)
     material_digest: str = Field(pattern=r"^[0-9a-f]{64}$",
                                  description="驗的那份材料的身分摘要（endpoint.material_digest）；接續讀回的材料要逐位同一份")
+    reused: bool = Field(default=False, strict=True, exclude_if=lambda value: not value,
+                         description="#1142：數字沿用建替身時核過的（身分逐欄相同），這一跑沒有完整解；"
+                                     "完整解次數是建替身那一次的、秒數記 0。沒沿用不寫這一格（project.json 逐位照舊）")
 
     @model_validator(mode="after")
     def _passed(self) -> Self:
         if self.frequency_db > self.frequency_ruler or self.band_db > self.band_ruler:
             raise ValueError(f"固定材料 {self.target} 的替身留出驗證沒過，不會記成可以開跑的搜尋")
         return self
+
+
+def candidate_surfaces(target: str, allowed: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """准用清單裡列了 ``target`` 的片（照名字排）：判決、核對紀錄、開跑沿用比對同一個寫法。"""
+    return tuple(name for name, targets in sorted(allowed.items()) if target in targets)
 
 
 def candidate_designs(designs: Sequence[SurfaceDesign], target: str, allowed: Mapping[str, Sequence[str]],
@@ -196,7 +205,7 @@ def judge_candidates(model: ReducedModel, operators: FullOperators, configuratio
         worst = (float("nan") if passed else
                  fem_reduced_check.worst_frequency_hz(report, tuple(float(value) for value in model.frequencies_hz)))
         found[target] = CandidateVerdict(
-            target=target, surfaces=tuple(name for name, targets in sorted(allowed.items()) if target in targets),
+            target=target, surfaces=candidate_surfaces(target, allowed),
             report=report, frequency_db=frequency_db, band_db=band_db, worst_hz=worst, passed=passed, seconds=seconds)
     return found
 
@@ -217,20 +226,29 @@ def inaccurate_text(verdict: CandidateVerdict, *, trained: bool) -> str:
     return f"替身對固定材料 {name} 沒過留出驗證：{numbers}。這份替身沒有學過這種材料"
 
 
-def check_fixed_candidates(model: ReducedModel, operators: FullOperators, designs: Sequence[SurfaceDesign],
-                           allowed: Mapping[str, Sequence[str]], table: Sequence[PresetMaterial], *,
-                           density_kg_m3: float, sound_speed_m_s: float, workers: int = 1,
-                           trained: Collection[str] = ()) -> tuple[FixedCandidateCheck, ...]:
-    """准用清單裡每一個固定材料各一組留出驗證（整條頻率軸、兩把尺）；全部過了回每一筆的紀錄，有沒過的就全部核完再拒收、
-    一次寫出每一個沒過的數字與尺，不放寬。``trained`` 是替身訓練說明記過的固定材料（措辭用：訓練過但不夠準、或沒學過）。
-    算不出阻抗（物理拒算、不是有限數）也拒收、點名哪一個。"""
+def candidate_material_digest(target: str, table: Sequence[PresetMaterial]) -> str:
+    """構造清單裡 ``target`` 那一份材料的身分摘要（``endpoint.material_digest``，``project.json`` 記的那一種）。"""
     from aosr.gradient.endpoint import material_digest
 
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
-    by_id = {preset.id: preset for preset in table}
+    material = next(preset.material for preset in table if preset.id == target)
+    return material_digest(adapter.validate_python(material))
+
+
+def check_fixed_candidates(model: ReducedModel, operators: FullOperators, designs: Sequence[SurfaceDesign],
+                           allowed: Mapping[str, Sequence[str]], table: Sequence[PresetMaterial], *,
+                           density_kg_m3: float, sound_speed_m_s: float, workers: int = 1,
+                           trained: Collection[str] = (),
+                           configurations: Mapping[str, FrequencyBoundaryImpedances] | None = None,
+                           ) -> tuple[FixedCandidateCheck, ...]:
+    """准用清單裡每一個固定材料各一組留出驗證（整條頻率軸、兩把尺）；全部過了回每一筆的紀錄，有沒過的就全部核完再拒收、
+    一次寫出每一個沒過的數字與尺，不放寬。``trained`` 是替身訓練說明記過的固定材料（措辭用：訓練過但不夠準、或沒學過）。
+    算不出阻抗（物理拒算、不是有限數）也拒收、點名哪一個。``configurations`` 給了就用它（開跑那一道先算好、比過沿用不成的
+    那一份，:func:`candidate_configurations` 同一支算的），沒給就在這裡算。"""
     axis = tuple(float(value) for value in model.frequencies_hz)
-    configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=density_kg_m3,
-                                              sound_speed_m_s=sound_speed_m_s)
+    if configurations is None:
+        configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=density_kg_m3,
+                                                  sound_speed_m_s=sound_speed_m_s)
     verdicts = judge_candidates(model, operators, configurations, allowed, workers=workers)
     failed = [verdict for verdict in verdicts.values() if not verdict.passed]
     frequency_ruler, band_ruler = holdout_ruler_values()
@@ -243,8 +261,38 @@ def check_fixed_candidates(model: ReducedModel, operators: FullOperators, design
         target=verdict.target, surfaces=verdict.surfaces, frequency_db=verdict.frequency_db, band_db=verdict.band_db,
         frequency_ruler=frequency_ruler, band_ruler=band_ruler,
         full_solves=verdict.report.full_solves, seconds=verdict.seconds,
-        material_digest=material_digest(adapter.validate_python(by_id[verdict.target].material)))
+        material_digest=candidate_material_digest(verdict.target, table))
         for verdict in verdicts.values())
+
+
+def reused_check(row: FixedCheckRow) -> FixedCandidateCheck:
+    """建替身時核過、開跑比過身分逐欄相同的那一列（:func:`aosr.gradient.surrogate_fixed_checks.reused_rows`）換成
+    ``project.json`` 的一筆：數字、尺、完整解次數照紀錄，秒數 0（這一跑沒解），記明是沿用的。"""
+    assert row.surfaces is not None and row.full_solves is not None and row.material_digest is not None
+    return FixedCandidateCheck(target=row.target, surfaces=row.surfaces, frequency_db=row.frequency_db,
+                               band_db=row.band_db, frequency_ruler=row.frequency_ruler, band_ruler=row.band_ruler,
+                               full_solves=row.full_solves, seconds=0.0, material_digest=row.material_digest,
+                               reused=True)
+
+
+CHECK_ENTRY_MODULE: Final = "aosr.gradient.fixed_candidates"
+
+
+def check_code_identity(*, package_root: Path | None = None) -> str:
+    """算這一道核對的程式與環境的身分（#1142）：本模組的靜態引入閉包（判決、完整解、替身求值、比對、阻抗鏈都在裡面）
+    的程式、閉包經 ``config_path`` 讀的資料檔、執行環境；收法照有限元素分片的身分（:func:`aosr.reporting.fem_identity.
+    fem_identity`）。建替身寫進核對紀錄、開跑比：不同就重核（物理身分不收替身求值與比對那幾支）。"""
+    import hashlib
+
+    from aosr.reporting.import_closure import environment_digest, feed_segment, import_code_digest, scan_import_closure
+
+    root = package_root if package_root is not None else Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    feed_segment(digest, b"code", import_code_digest(root, CHECK_ENTRY_MODULE).encode())
+    for name in scan_import_closure(root, CHECK_ENTRY_MODULE)[0].data_files:
+        feed_segment(digest, b"data:" + name.encode(), (root / "config" / "data" / name).read_bytes())
+    feed_segment(digest, b"environment", environment_digest().encode())
+    return "fixcheck-v1:" + digest.hexdigest()
 
 
 def holdout_ruler_values() -> tuple[float, float]:
