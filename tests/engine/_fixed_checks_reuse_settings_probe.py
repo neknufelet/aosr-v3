@@ -1,5 +1,5 @@
 """#1142 子行程（雙精度）：同一組起跑樣板與准用清單，產品設定檔與「總深度上限收窄」的那一份各算一次固定材料候選的
-真核對配置（:func:`aosr.cli.start_designs`→:func:`~aosr.gradient.fixed_candidates.candidate_configurations`，不是樁），
+真核對配置（:func:`aosr.gradient.cli.start_designs`→:func:`~aosr.gradient.fixed_candidates.candidate_configurations`，不是樁），
 寫兩份阻抗摘要與展開的准用清單到 ``probe.json``。``argv``：工作資料夾。"""
 from __future__ import annotations
 
