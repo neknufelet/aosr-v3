@@ -62,6 +62,7 @@ from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_librar
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.search_view import held_search
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
+from aosr.gui.wall_words import wall_words
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.gui.zone_limits import DepthTargets
@@ -557,6 +558,8 @@ class GradientJobs:
         targets = library_depth_targets(settings, entries)
         labels = dict(targets.labels)
         return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan), "labels": labels,
+                # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
+                "wall_names": wall_words(scheme),
                 "fixed_depths": fixed_depths(plan, scheme, design, targets),
                 "surrogate": {"found": not missing and refused is None, "slot": str(path.parent), "missing": missing,
                               "message": "要先建替身" if missing else refused},

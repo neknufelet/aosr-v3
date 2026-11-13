@@ -79,7 +79,7 @@ def test_saved_pair_notes_read_back_without_a_result_version_change(tmp_path: Pa
     assert loaded.result.schema_version == result.schema_version
     assert loaded.standing is ResultStanding.CURRENT
     assert loaded.result.pairs[0].report.construction_notes_by_wall == with_notes.report.construction_notes_by_wall
-    assert _construction_notes(loaded.result) == ("x 起點牆第 1 層：20–40 Hz 超出材料模型原研究的量測範圍，仍以外推照算",)
+    assert _construction_notes(loaded.result) == ("前牆第 1 層：20–40 Hz 超出材料模型原研究的量測範圍，仍以外推照算",)
 
 
 def test_formal_report_merges_three_lane_returns_without_recalculation(monkeypatch: pytest.MonkeyPatch) -> None:

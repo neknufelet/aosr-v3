@@ -41,12 +41,14 @@ from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings,
 from aosr.geometry.shoebox import Room
 from aosr.gradient.depth_fit import TargetFit, fixed_fit, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
+from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.materials.library import MeasuredTable
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.physics.zone_fill import FILL_PREFIX, Box, wall_size_m
+from aosr.reporting.scheme import Scheme
 
 DepthLevel = Literal["zone", "wall", "room"]
 Level = Literal["red", "warn", "note"]
@@ -122,11 +124,19 @@ def _number_pair(value: object) -> tuple[float, float] | None:
     return float(value[0]), float(value[1])
 
 
-def zone_words(wall: str, key: str) -> str:
-    """一區在畫面上叫什麼（擋下的原文給人看，不露內部代號）：牆名照表單（``labels.WALLS``），
-    區名同逐區表——整面、自動補的寫「自動 代號」、畫的框寫它的代號。"""
+def zone_words(wall: str, key: str, names: Mapping[str, str] = WALL_WORDS) -> str:
+    """一區在畫面上叫什麼（擋下的原文給人看，不露內部代號）：牆名照表單（``names``，方案驗得過時是
+    ``wall_words`` 排的前後左右，否則 ``labels.WALLS``），區名同逐區表——整面、自動補的寫「自動 代號」、畫的框寫它的代號。"""
     zone = "整面" if key == WHOLE_WALL_KEY else f"自動 {key}" if key.startswith(FILL_PREFIX) else key
-    return f"{WALL_WORDS.get(wall, wall)}「{zone}」"
+    return f"{names.get(wall, wall)}「{zone}」"
+
+
+def draft_wall_words(document: Mapping[str, object]) -> Mapping[str, str]:
+    """草稿驗得過方案時用跟著方案走的牆名（#1134），驗不過照座標名。"""
+    try:
+        return wall_words(Scheme.model_validate(document))
+    except ValueError:
+        return WALL_WORDS
 
 
 def _key(entry: Mapping[str, object]) -> str | None:
@@ -379,9 +389,9 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                     checked[text] = _range_problems(range_check, material)
                 lines.extend(checked[text])
         zones[wall] = {key: lines for key, lines in found.items() if lines}
-    refusals = [problem.text for problem in top]
-    refusals += [f"{WALL_WORDS.get(wall, wall)}：{problem.text}" for wall, lines in walls.items() for problem in lines if problem.level == "red"]
-    refusals += [f"{zone_words(wall, key)}：{problem.text}" for wall, items in zones.items() for key, lines in items.items()
+    refusals, names = [problem.text for problem in top], draft_wall_words(document)
+    refusals += [f"{names.get(wall, wall)}：{problem.text}" for wall, lines in walls.items() for problem in lines if problem.level == "red"]
+    refusals += [f"{zone_words(wall, key, names)}：{problem.text}" for wall, items in zones.items() for key, lines in items.items()
                  for problem in lines if problem.level == "red"]
     return {"status": "checked", "design": [problem.model_dump() for problem in top],
             "zones": {wall: {key: [problem.model_dump() for problem in lines] for key, lines in items.items()}

@@ -85,18 +85,18 @@ def _check_orientation_and_markers(page: Page) -> None:
     # 參考擺位面向 x 起點牆聽：站在房裡看 x 起點牆，左喇叭在左；轉身看 x 終點牆，左喇叭到右邊。
     page.locator("#elevation-wall-x0").click()
     assert _centre_x(page, "#elevation-speaker-left") < _centre_x(page, "#elevation-speaker-right")
-    expect(page.locator("#elevation-edge-left")).to_have_text("y 起點牆")
-    expect(page.locator("#elevation-edge-right")).to_have_text("y 終點牆")
+    expect(page.locator("#elevation-edge-left")).to_have_text("左牆")
+    expect(page.locator("#elevation-edge-right")).to_have_text("右牆")
     page.locator("#elevation-wall-xL").click()
     assert _centre_x(page, "#elevation-speaker-left") > _centre_x(page, "#elevation-speaker-right")
-    expect(page.locator("#elevation-edge-left")).to_have_text("y 終點牆")
+    expect(page.locator("#elevation-edge-left")).to_have_text("右牆")
     # 地板跟平面圖同向（y 往上）：左喇叭 y 小、畫在右喇叭下面；天花抬頭看，上下對調。喇叭（x＝1）在主位（x＝3.2）左邊。
     page.locator("#elevation-wall-floor").click()
     assert _centre_y(page, "#elevation-speaker-left") > _centre_y(page, "#elevation-speaker-right")
     assert _centre_x(page, "#elevation-speaker-left") < _centre_x(page, "#elevation-receiver-main")
     page.locator("#elevation-wall-ceiling").click()
     assert _centre_y(page, "#elevation-speaker-left") < _centre_y(page, "#elevation-speaker-right")
-    expect(page.locator("#elevation-edge-top")).to_have_text("y 起點牆")
+    expect(page.locator("#elevation-edge-top")).to_have_text("左牆")
 
     # 表單上改了左喇叭的 y（還沒存），立面圖上的記號跟著搬：x 起點牆上往右移。
     page.locator("#elevation-wall-x0").click()
@@ -158,7 +158,7 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
 
 
 def _thin_wall_document() -> dict[str, object]:
-    """y 終點牆（多層構造）有一框離左牆邊只有 10 公分（檔案裡的方案可以這樣存）；x 兩面是 109 的 2×2。"""
+    """右牆（多層構造）有一框離左牆邊只有 10 公分（檔案裡的方案可以這樣存）；x 兩面是 109 的 2×2。"""
     document = room109_document("shrink")
     room109_quarters(document, "x0", (100.0, 200.0, 300.0, 400.0))
     room109_quarters(document, "xL", (500.0, 600.0, 700.0, 800.0))

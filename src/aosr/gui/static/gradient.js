@@ -5,6 +5,7 @@
 
 const POLL_MS = 5000;
 const SLOW_MS = 15000;
+// 牆名先用座標名，讀到方案後換成伺服器依喇叭與主位排的前後左右（#1134，預覽回話的 wall_names）。
 const WALLS = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const MODE_WORDS = {fixed: "固定這一組材料", keep_original: "保留原牆", search: "交給搜尋"};
 const WHOLE_WALL = "whole_wall";
@@ -185,6 +186,7 @@ async function loadPlan() {
   for (const id of ["form-block", "plan-block", "surrogate-block", "start-block"]) byId(id).hidden = !reply.ok;
   if (!reply.ok) { say("scheme-message", `這份方案開不了第三階段搜尋：${errorText(reply)}`, true); return; }
   say("scheme-message", "");
+  Object.assign(WALLS, reply.body.wall_names);
   defaults = reply.body.defaults;
   byId("max-steps").value = defaults.max_steps;
   byId("max-steps-default").textContent = `步數上限預設 ${defaults.max_steps} 步（設定檔的值）；這一跑改了只換這一跑，數字記進搜尋資料夾、報告會印出來。`;

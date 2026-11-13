@@ -847,7 +847,7 @@ def _ranking_text(status: str, reasons: tuple[str, ...], missing: tuple[MissingC
 
 def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     """逐對註記只顯示一次；牆與層以白話標明，外推頻率來自保存的當次註記。"""
-    from aosr.gui.labels import WALLS
+    from aosr.gui.wall_words import wall_words
     from aosr.physics.wall_surfaces import extrapolated_frequency_text, merge_construction_notes
     from aosr.geometry.shoebox import Wall
     from aosr.materials.construction import wall_note_place
@@ -860,13 +860,15 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     lines = []
     zones = result.scheme.scene.surface_zones_by_wall or {}
     materials = whole_wall_entries(zones)
+    # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
+    walls = wall_words(result.scheme)
     for wall in Wall.all():
         if wall.wall_name() in zones and wall.wall_name() not in materials:
             # 分區的牆：計算端把各區註記併成一面，分不出是哪一區的第幾層，照註記原文列、標「分區」。
             for note in merged.get(wall, ()):
                 text = (f"{note.message.split('：', 1)[0]}：{extrapolated_frequency_text(note.frequencies_hz)} "
                         "超出材料模型原研究的量測範圍，仍以外推照算" if note.frequencies_hz else note.message)
-                lines.append(f"{WALLS[wall.wall_name()]}（分區）{text}")
+                lines.append(f"{walls[wall.wall_name()]}（分區）{text}")
             continue
         material = materials.get(wall.wall_name())
         table = material.wall if isinstance(material, MountedOnWall) else material
@@ -874,14 +876,14 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
             if note.code == "measured_table_model_fill" and isinstance(table, MeasuredImpedance):
                 bounds = table.points[0].frequency_hz, table.points[-1].frequency_hz
                 frequencies = extrapolated_frequency_text(note.frequencies_hz, table_bounds_hz=bounds)
-                lines.append(f"{WALLS[wall.wall_name()]}：{note.message}；模型補值頻點 {frequencies}")
+                lines.append(f"{walls[wall.wall_name()]}：{note.message}；模型補值頻點 {frequencies}")
                 continue
             if isinstance(material, MountedOnWall) and note.layer_index is not None:
                 # 新增層與原牆同號註記各自一行：層編號接著往牆體側數，這裡寫回「原牆第 k 層」。
                 place = wall_note_place(material, note.layer_index)
                 text = (f"{extrapolated_frequency_text(note.frequencies_hz)} 超出材料模型原研究的量測範圍，仍以外推照算"
                         if note.frequencies_hz else note.message.removeprefix(f"{place}："))
-                lines.append(f"{WALLS[wall.wall_name()]}{place}：{measured_note_text(text)}")
+                lines.append(f"{walls[wall.wall_name()]}{place}：{measured_note_text(text)}")
                 continue
             if note.frequencies_hz:
                 text = f"{extrapolated_frequency_text(note.frequencies_hz)} 超出材料模型原研究的量測範圍，仍以外推照算"
@@ -891,7 +893,7 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
             base = "底構造" if isinstance(material, MeasuredImpedance) else ""
             if isinstance(material, MeasuredImpedance):
                 text = measured_note_text(text)
-            lines.append(f"{WALLS[wall.wall_name()]}{base}第 {note.layer_index} 層：{text}")
+            lines.append(f"{walls[wall.wall_name()]}{base}第 {note.layer_index} 層：{text}")
     return tuple(lines)
 
 

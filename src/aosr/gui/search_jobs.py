@@ -44,6 +44,7 @@ from aosr.gui.gradient_jobs import (
 from aosr.gui.material_editor import plain_error
 from aosr.gui.search_exec import Chain, ChainStep, StepName
 from aosr.gui.search_view import SEARCH_ID, held_search, search_line
+from aosr.gui.wall_words import front_wall_guess
 from aosr.gui.zone_design import NAME
 from aosr.reporting.evaluation import purpose_settings
 from aosr.reporting.scheme import Scheme, scheme_from_document
@@ -121,16 +122,6 @@ def _plain(error: Exception) -> str:
     if isinstance(error, SchemeValidationError):
         return "；".join(str(problem) for problem in error.problems)
     return plain_error(error)
-
-
-def front_wall_guess(scheme: Scheme) -> str:
-    """兩支喇叭中點離哪一面牆最近，就當前牆的預設（只是表單的預設，可以改）。"""
-    points = [scheme.speakers[name] for name in sorted(scheme.speakers)]
-    x = sum(point.x for point in points) / len(points)
-    y = sum(point.y for point in points) / len(points)
-    room = scheme.scene.room_m
-    distances = {"x0": x, "xL": room.Lx - x, "y0": y, "yL": room.Ly - y}
-    return min(distances, key=lambda wall: distances[wall])
 
 
 def scheme_facts(scheme: Scheme) -> dict[str, object]:

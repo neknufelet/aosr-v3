@@ -154,7 +154,7 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     baseline = derive_baseline(design)
     settings = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"a": ZoneDesign(mode="search")}})
     rows = {(row.wall, row.zone): row for row in zone_rows(baseline, settings, design)}
-    a, b = rows[("x 起點牆", "a")], rows[("x 起點牆", "b")]
+    a, b = rows[("前牆", "a")], rows[("前牆", "b")]
     assert (a.place, a.size, a.area) == ("寬向 0.00–0.67、高度 0.00–1.50", "0.67 × 1.50 m", "1.00 m²")
     assert (a.mode, a.changed, a.baseline_source) == ("交給搜尋", True, "拆掉這一區加貼的層")
     # 先寫名字（#1119）：對不到材料庫就依層的參數組名、照實標；工程參數收在細節裡、同樣收位。
@@ -170,7 +170,7 @@ def test_zone_rows_place_size_area_mode_and_where_the_original_comes_from() -> N
     assert {(row.baseline, row.baseline_source, row.changed) for row in unknown} == {("—", "—", False)}
     # 做法是保留原牆的區才寫「原牆（…）」（#1119）；固定這一組材料的區照材料名寫，不冒稱原牆。
     keep = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"b": ZoneDesign(mode="keep_original")}})
-    kept = {row.zone: row for row in zone_rows(baseline, keep, design) if row.wall == "x 起點牆"}
+    kept = {row.zone: row for row in zone_rows(baseline, keep, design) if row.wall == "前牆"}
     assert kept["b"].design == f"原牆（固定阻抗 {impedance} Pa·s/m）" and not b.design.startswith("原牆")
     stale = DesignSettings(scheme_id=design.scheme_id, zones={"x0": {"gone": ZoneDesign(mode="search")}})
     assert {row.mode for row in zone_rows(baseline, stale, design)} == {"—"}
@@ -302,8 +302,8 @@ def test_result_page_lists_zone_measured_seams_and_refuses_saved_ones_that_disag
         return base.model_copy(update={"scheme": base.scheme.model_copy(update={"scene": scene}), "pairs": pairs})
 
     view = build_measured_view(result_with([seams] * len(base.pairs)))
-    assert view is not None and [item.wall_name for item in view] == ["x 起點牆（a 區）"]
-    assert view[0].header_lines[0].startswith(f"x 起點牆 a 區：實測表涵蓋 {low:g}–{high:g} Hz")
+    assert view is not None and [item.wall_name for item in view] == ["前牆（a 區）"]
+    assert view[0].header_lines[0].startswith(f"前牆 a 區：實測表涵蓋 {low:g}–{high:g} Hz")
     assert view[0].rows[0] == (f"{low:g} Hz", "阻抗實部（Pa·s/m）", "400", "401", "1")
     assert APPROXIMATE_LINE not in view[0].header_lines
     # 沒有虛部的表（材料庫轉物理補 0，#1082 段 2-3d 搜尋匯出的就是這一份）：表頭第二行標「近似」。
@@ -342,7 +342,7 @@ def _measured_rows(entry: FixedEntry) -> dict[str, ZoneRow]:
     material = entry.surface_material()
     design = with_x0(split_x0(material, mounted(original_x0())))
     return {row.zone: row for row in zone_rows(derive_baseline(design), None, design, library=(*builtin_entries(), entry))
-            if row.wall == "x 起點牆"}
+            if row.wall == "前牆"}
 
 
 def _tags(row: ZoneRow, side: Literal["design", "baseline"] = "design") -> list[tuple[str, str]]:
@@ -381,7 +381,7 @@ def test_a_table_the_library_no_longer_has_still_shows_its_own_conditions() -> N
     缺不缺虛部也只有材料庫那一筆知道：只標「實測」、滑過去講看不出來，不猜「近似」。"""
     material = _lab_entry().surface_material()
     design = with_x0(split_x0(material, mounted(original_x0())))
-    (a,) = [row for row in zone_rows(derive_baseline(design), None, design) if (row.wall, row.zone) == ("x 起點牆", "a")]
+    (a,) = [row for row in zone_rows(derive_baseline(design), None, design) if (row.wall, row.zone) == ("前牆", "a")]
     assert _tags(a) == [("measured", "實測")] and a.design_facts.tags[0].title.endswith(UNMATCHED_TABLE_NOTE)
     assert (a.design_facts.source, a.design_facts.links) == ("", ())
     assert a.design_facts.conditions == "阻抗管，垂直入射，樣品厚 30 mm"

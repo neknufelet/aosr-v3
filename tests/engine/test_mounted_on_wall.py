@@ -305,17 +305,19 @@ def test_wall_notes_have_their_own_layer_numbers_and_show_as_wall(tmp_path: Path
     canonical(SimpleNamespace(construction_notes_by_wall={"x0": collide}))
     for name, expected_cli, expected_web in (
             ("collide", ["x0 第 1 層：Komatsu", "x0 第 1 層：泡棉", "x0 原牆第 1 層：Komatsu"],
-             ["x 起點牆第 1 層：10 Hz 超出", "x 起點牆第 1 層：泡棉", "x 起點牆原牆第 1 層：10 Hz 超出"]),
+             ["前牆第 1 層：10 Hz 超出", "前牆第 1 層：泡棉", "前牆原牆第 1 層：10 Hz 超出"]),
             ("fill", ["x0：原牆模型補值：實測表涵蓋 50–500 Hz，表外以底構造計算；模型補值頻點 10 Hz", "x0 原牆底構造第 1 層：Komatsu"],
-             ["x 起點牆：原牆模型補值：實測表涵蓋 50–500 Hz，表外以底構造計算；模型補值頻點 10 Hz",
-              "x 起點牆原牆底構造第 1 層：10 Hz 超出"])):
+             ["前牆：原牆模型補值：實測表涵蓋 50–500 Hz，表外以底構造計算；模型補值頻點 10 Hz",
+              "前牆原牆底構造第 1 層：10 Hz 超出"])):
         material, notes = cases[name]
         zones = {wall.wall_name(): (WholeWallZone(area="whole_wall", material=material if wall is Wall.X0 else
                                   ConstantImpedance(impedance_pa_s_m=1000.0)),) for wall in Wall.all()}
         cli = construction_note_lines(cast(ReportInput, SimpleNamespace(surface_zones_by_wall=zones)), {"x0": notes})
         report = SimpleNamespace(construction_notes_by_wall={"x0": notes})
-        web = _construction_notes(cast(SchemeResult, SimpleNamespace(
-            pairs=(SimpleNamespace(report=report),), scheme=SimpleNamespace(scene=SimpleNamespace(surface_zones_by_wall=zones)))))
+        # 方案用參考房的擺位（牆名照它推：x0 是前牆，#1134），只換牆面。
+        reference = Scheme.model_validate(zone_document())
+        scheme = reference.model_copy(update={"scene": reference.scene.model_copy(update={"surface_zones_by_wall": zones})})
+        web = _construction_notes(cast(SchemeResult, SimpleNamespace(pairs=(SimpleNamespace(report=report),), scheme=scheme)))
         assert len(cli) == len(expected_cli) + 1 and len(web) == len(expected_web), (cli, web)
         for line, start in (*zip(cli[1:], expected_cli), *zip(web, expected_web)):
             assert line.startswith(start) and "None" not in line, (line, start)

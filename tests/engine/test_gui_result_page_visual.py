@@ -467,7 +467,7 @@ def test_results_section_shows_the_ideal_source_sentence(tmp_path: Path, browser
         # test_construction_report_notes 守字，這裡守網頁真的畫出來）。
         lines = page.locator("#construction-note-lines")
         lines.wait_for(state="visible")
-        assert lines.inner_text() == "x 起點牆第 1 層：20–40 Hz 超出材料模型原研究的量測範圍，仍以外推照算"
+        assert lines.inner_text() == "前牆第 1 層：20–40 Hz 超出材料模型原研究的量測範圍，仍以外推照算"
         note = page.locator("#ideal-source-note")
         assert note.is_visible()
         assert note.inner_text() == _IDEAL_SOURCE_SENTENCE

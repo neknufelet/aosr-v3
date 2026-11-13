@@ -30,6 +30,7 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import LABELS, WALLS
+from aosr.gui.wall_words import wall_words
 from aosr.gui.material_names import original_wall_words, registered_entry, zone_material_words
 from aosr.gui.problem_text import material_brief, measured_rows, rounded_number
 from aosr.gui.zone_design import MODE_WORDS, WHOLE_WALL_KEY, DesignSettings, effective_modes, mismatches
@@ -284,6 +285,8 @@ def zone_rows(baseline: Baseline, settings: DesignSettings | None, scheme: Schem
     基準欄、做法是保留原牆的區、貼在原牆上的構造記的那面牆。
     """
     names = builtin_entries() if library is None else tuple(library)
+    # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
+    walls = wall_words(scheme)
     modes = effective_modes(settings, scheme) if settings is None or not mismatches(settings, scheme) else {}
     rows = []
     for zone in baseline.zones:
@@ -292,7 +295,7 @@ def zone_rows(baseline: Baseline, settings: DesignSettings | None, scheme: Schem
         mode = modes.get(zone.wall, {}).get(zone.zone_id)
         changed = baseline_known and zone.design != zone.baseline
         rows.append(ZoneRow(
-            wall=WALLS[zone.wall], zone=_zone_name(zone.zone_id),
+            wall=walls[zone.wall], zone=_zone_name(zone.zone_id),
             place=f"{first} {u0:.2f}–{u1:.2f}、{second} {v0:.2f}–{v1:.2f}",
             size=f"{u1 - u0:.2f} × {v1 - v0:.2f} m", area=f"{(u1 - u0) * (v1 - v0):.2f} m²",
             mode=MODE_WORDS[mode] if mode is not None else "—",

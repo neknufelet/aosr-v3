@@ -17,6 +17,7 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
+from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_edit import zone_cut_defaults
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
@@ -434,8 +435,11 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
                     heights[identifier] = str(plain_problems((problem,), document)[0]["text"])
     coordinates: dict[str, str] = {}
     hint = ""
+    names: dict[str, str] = {}
     try:
         scheme = Scheme.model_validate(document)
+        # 牆名跟著喇叭與主位走（#1134）；半填表單驗不過時不給，畫面留上一次的名字。
+        names = wall_words(scheme)
         for item in absolute_furniture(scheme) or ():
             x, y, z = item.bottom_center_m
             coordinates[item.furniture_id] = f"房間底面中心：x {x:.12g}、y {y:.12g}、z {z:.12g} 公尺"
@@ -450,4 +454,5 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
             "placement_warnings": placement_warnings(document),
             "furniture_items": furniture_items, "furniture_controls": controls,
             "field_values": input_field_values(document),
+            **({"wall_names": names} if names else {}),
             "stand_hint": hint, "mounts": mount_options(document, str(setup["kind"])) if setup else []}
