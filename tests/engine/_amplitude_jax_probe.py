@@ -44,10 +44,10 @@ def _hex_complex(values: np.ndarray) -> list[object]:
     return [_hex_complex(row) for row in array]
 
 
-def _hex_real(values: np.ndarray) -> list[object]:
+def _hex_real(values: np.ndarray) -> object:
     array = np.asarray(values, dtype=np.float64)
     if array.ndim == 0:
-        return float(array).hex()  # type: ignore[return-value]  # expires=2027-01-31 reason=遞迴底層回單一字串
+        return float(array).hex()
     return [_hex_real(row) for row in array]
 
 

@@ -169,3 +169,10 @@ function = "test_capability_frequency_range_is_empty_or_exactly_two"
 comment = "# type: ignore[arg-type]"
 count = 1
 reason = "這一題就是要餵壞形狀（不是零個也不是兩個的頻率範圍）進去看它炸，那個壞形狀型別檢查本來就會擋。"
+
+[[by_design]]
+path = "tests/engine/test_directivity_step4_report.py"
+function = "test_early_lane_multiplies_each_path_by_hand_computed_d_once.recording"
+comment = "# type: ignore[arg-type]"
+count = 1
+reason = "考卷攔下鏡像法的原函式記下路徑、參數原樣轉交：轉交的那一層只看得到 object，型別檢查本來就會擋（#1154，原 2026-12-31 到期的放行）。"
