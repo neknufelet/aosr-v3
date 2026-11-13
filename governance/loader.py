@@ -611,6 +611,35 @@ def by_design_entries(data: Mapping[str, object], keys: Mapping[str, str], where
     return out
 
 
+# 准上網那一格。兩支具名准上網的檢查（merge-gate-read-back、issues-closed-only-by-merged-pr）各在自己卡頂層的
+# [[by_design]] 寫剛好一筆：network（准讀什麼）＋ reason（憑哪一張決策紙）。那是規矩本身的形狀、沒有到期日
+# （#1014，老闆 2026-11-13 拍 B；之前是 [[settings.allow]] 帶到期日）。
+NETWORK_KEY = "network"
+
+
+def network_permission(data: Mapping[str, object], where: str, paper: str) -> str:
+    """卡頂層 ``[[by_design]]`` 那一筆「准上網」的 reason。
+
+    缺席、不只一筆、或還寫在 ``[[settings.allow]]`` 裡（會到期的放行），一律 raise
+    :class:`ToolBroken`——外殼翻成離開碼 2，不上網。
+    """
+    settings = data.get("settings")
+    if isinstance(settings, Mapping):
+        stray = [e for e in setting_tables(settings, "allow") if NETWORK_KEY in e]
+        if stray:
+            raise ToolBroken(
+                f"{where} 的 [[settings.allow]] 裡有 {len(stray)} 筆帶 {NETWORK_KEY}——准上網是卡頂層"
+                f" [[{BY_DESIGN_FIELD}]] 的資料、沒有到期日，不是會到期的放行（決策紙 {paper}）"
+            )
+    entries = by_design_entries(data, {NETWORK_KEY: "text"}, where)
+    if len(entries) != 1:
+        raise ToolBroken(
+            f"{where} 頂層的 [[{BY_DESIGN_FIELD}]] 裡准上網的有 {len(entries)} 筆，要剛好 1 筆"
+            f"——沒有登記就不准上網（決策紙 {paper}）"
+        )
+    return str(entries[0][BY_DESIGN_REASON_KEY])
+
+
 def settings_exemptions(data: dict[str, object]) -> list[tuple[str, int, object]]:
     """一張卡的放行條目：``[settings]`` 底下每一個表陣列的每一筆。
 

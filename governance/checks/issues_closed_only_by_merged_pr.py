@@ -14,12 +14,14 @@
 從卡上的 ``[settings]`` 來，不是模組常數，樣本樹才改得動它（見那幾份必紅樣本）。
 
 **這是第二支准上網的檢查。** 決策紙 ``docs/decisions/issue-lifecycle-backlog-status-and-closing.md``：
-只准讀、放行登記在卡的 ``[[settings.allow]]`` 並帶到期日。放行有牙——這裡先讀那一筆放行，
-缺席或過期就回 2、不上網。同一張表裡帶票號那幾筆是**具名放過某幾張票**，過期的當沒放行。
+只准讀、准上網登記在卡**頂層**的 ``[[by_design]]``（一筆 ``network`` ＋ ``reason``，沒有到期日；
+#1014，老闆 2026-11-13 拍 B——之前是會到期的放行）。登記有牙——這裡先讀那一筆，缺席、不只一筆、
+或還寫在 ``[[settings.allow]]`` 裡就回 2、不上網。``[[settings.allow]]`` 裡帶票號那幾筆是
+**具名放過某幾張票**（暫時的，帶到期日），過期的當沒放行。
 
 **回 2 的路（這一跑不算數，不准當綠）：** ``gh`` 不在 PATH 上、沒 token、API 回不了話或
 逾時、回來的不是 JSON、形狀跟 GitHub 文件對不上、某一張票掛著的關票 PR 一頁看不完、
-卡讀不到或准上網那筆放行缺席／過期。
+卡讀不到或准上網那一筆缺席。
 
 **刻意不判的：** 這張票該不該被關（機器判不出來）；關它的那個 PR 有沒有一份綠收據
 （那是狀態頁那一格的事，鏈更長，而且不擋合併）。門檻與期望只住在卡上，這裡沒有任何數字。
@@ -38,6 +40,7 @@ from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
+    network_permission,
     exemption_field_problems,
     setting_int,
     setting_tables,
@@ -61,8 +64,8 @@ from governance.status.collect import (
 
 CHECK_REL = "governance/checks/issues_closed_only_by_merged_pr.py"
 ALLOW_KEY = "allow"
-# 放行條目裡「准上網」那一格的鍵。找的是帶這一格的那一筆，不是任何一筆 allow。
-NETWORK_KEY = "network"
+# 准上網憑的那一張決策紙（訊息裡要說得出憑什麼上網）。准上網那一筆住在卡頂層的 [[by_design]]。
+NETWORK_PAPER = "hand-closed-issues-block-merge"
 # 放行條目裡「具名放過這一張票」那一格的鍵（值是票號）。
 ISSUE_KEY = "issue"
 
@@ -132,9 +135,12 @@ def _card_path(scan_root: Path, files: list[Path]) -> Path:
     return mine[0]
 
 
+def _data(card: Path) -> dict[str, object]:
+    return tomllib.loads(card.read_bytes().decode("utf-8"))
+
+
 def _settings(card: Path, scan_root: Path) -> dict[str, object]:
-    data = tomllib.loads(card.read_bytes().decode("utf-8"))
-    settings = data.get("settings")
+    settings = _data(card).get("settings")
     if not isinstance(settings, dict):
         raise ToolBroken(f"{card.relative_to(scan_root)} 沒有 [settings] 表（期望全寫在那裡）")
     return settings
@@ -150,25 +156,9 @@ def read_expected(settings: Mapping[str, object]) -> Expected:
     )
 
 
-def network_allowed(settings: Mapping[str, object], where: str, today: date) -> str:
-    """找那一筆「准上網」的放行。缺席、欄位不齊、過期，一律回 2——不上網。回那一筆的 reason。"""
-    entries = [e for e in setting_tables(settings, ALLOW_KEY) if NETWORK_KEY in e]
-    if len(entries) != 1:
-        raise ToolBroken(
-            f"{where} 的 [[settings.allow]] 裡帶 {NETWORK_KEY} 那一格的放行有 {len(entries)} 筆，"
-            "要剛好 1 筆——沒有登記的放行就不准上網（決策紙 hand-closed-issues-block-merge）"
-        )
-    entry = entries[0]
-    problems = exemption_field_problems(entry, f"{where} 的准上網放行")
-    if problems:
-        raise ToolBroken("；".join(problems))
-    expires = date.fromisoformat(str(entry["expires"]).strip())
-    if expires < today:
-        raise ToolBroken(
-            f"{where} 的准上網放行 {expires} 已到期（今天 {today}）——到期就不准上網，"
-            "要續就重新看它還需不需要、範圍有沒有變寬，改卡走 PR"
-        )
-    return str(entry[EXEMPTION_KEYS[0]])
+def network_allowed(data: Mapping[str, object], where: str) -> str:
+    """卡頂層 ``[[by_design]]`` 那一筆「准上網」的 reason。缺席、不只一筆、寫在會到期的放行裡，一律回 2——不上網。"""
+    return network_permission(data, where, NETWORK_PAPER)
 
 
 def excused_tickets(settings: Mapping[str, object], where: str, today: date) -> dict[int, str]:
@@ -324,9 +314,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _settings(card, scan_root)
     want = read_expected(settings)
     today = date.today()
-    reason = network_allowed(settings, where, today)
+    reason = network_allowed(_data(card), where)
     excused = excused_tickets(settings, where, today)
-    note(f"准上網的放行在（{reason[:60]}…）；只讀 {want.repo} 關掉的票，主線是 {want.main_branch}")
+    note(f"准上網的登記在（{reason[:60]}…）；只讀 {want.repo} 關掉的票，主線是 {want.main_branch}")
     shell = ReplayShell(cwd=scan_root, timeout=want.timeout)
     hub = Hub(shell=shell, slug=want.repo, per_page=want.per_page)
     tickets = read_closed_tickets(hub, want.main_branch)

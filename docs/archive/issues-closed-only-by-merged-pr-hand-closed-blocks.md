@@ -23,7 +23,7 @@ summary: "票只准由合進主線的 PR 關；守衛即時重開人手關票，
 
 **票只准由合進主線的 PR 關，人手關的由機器重開（2026-09-10，決策票 #83）。** 採第二個選項。要關票就在 PR 內文寫 `Closes #n`，由 GitHub 在該 PR 合進主線時關票並記下兩邊連結。`.github/workflows/issue-guard.yml` 在 `issues: [closed]` 事件叫起 `governance/status/issue_guard.py`，用 GraphQL（圖形查詢語言）的 `closedByPullRequestsReferences` 查關票來源，並與狀態頁共用查詢；有合進主線的 PR 就不動，沒有就用 `gh issue reopen` 重開並留言說明正確關法。`gh`（GitHub 命令列工具）不在、平台無回應或資料形狀看不懂時，一律離開碼 2，不重開、不留言。狀態頁繼續顯示「關掉的票能否串到綠收據」，守的是更長的鏈。
 
-**人手關的票超過零張就擋合併（2026-09-10，決策票 #89）。** 採第二個選項。規矩卡 `governance/rules/issues-closed-only-by-merged-pr.toml` 的 `declared_level = "blocking"`，掛在 `verify` 工作；它逐張讀 GitHub 自己記的關票來源，不把票面互相提到當成落地。人手關的票超過 0 張就回 1。這是第二支准上網的檢查；每支例外各有一張紙、一筆 `[[settings.allow]]`，含 `reason` 與 `expires`，由 `exemptions-need-expiry` 守。這一筆到期日是 2027-03-08（原為 2026-12-08，#1014 延期），缺席或過期就回 2 且不上網。
+**人手關的票超過零張就擋合併（2026-09-10，決策票 #89）。** 採第二個選項。規矩卡 `governance/rules/issues-closed-only-by-merged-pr.toml` 的 `declared_level = "blocking"`，掛在 `verify` 工作；它逐張讀 GitHub 自己記的關票來源，不把票面互相提到當成落地。人手關的票超過 0 張就回 1。這是第二支准上網的檢查；每支例外各有一張紙、一筆 `[[settings.allow]]`，含 `reason` 與 `expires`，由 `exemptions-need-expiry` 守。這一筆到期日原為 2026-12-08；#1014（老闆 2026-11-13 拍 B）起改成卡頂層的 `[[by_design]]`、沒有到期日，缺席就回 2 且不上網。
 
 這支檢查只讀關掉的票與掛著關票的 PR；CI 自帶 token（存取憑證）只給 `contents: read` 與 `issues: read`，重開票所需的寫入權限只在守衛自己的 workflow（工作流程）。欄位名、查哪些格與「PR 是否已落地」共用 `governance/status/collect.py`；只有主線分支名從卡的 `[settings]` 來，讓樣本樹可替換。具名放過某張票也寫在同一張表，必須帶票號、理由與到期日，過期視同沒有放行。
 

@@ -5,11 +5,12 @@ bypass 名單必須是空的）；這支檢查用 ``gh``（GitHub 的命令列�
 逐格比對，任何一格對不上就回 1；登記的 ruleset 在伺服器上根本不存在也回 1（主線沒鎖）。
 
 **這是兩支具名准上網檢查之一。** 決策紙 ``docs/decisions/main-branch-two-required-checks.md``：這一支
-只准讀、放行登記在卡的 ``[[settings.allow]]`` 並帶到期日。放行有牙——這裡先讀那一筆放行，缺席或
-過期就回 2、不上網。到期那天不只 exemptions-need-expiry 紅，這支也拒絕上網。
+只准讀、准上網登記在卡**頂層**的 ``[[by_design]]``（一筆 ``network`` ＋ ``reason``，沒有到期日；
+#1014，老闆 2026-11-13 拍 B——之前是會到期的放行）。登記有牙——這裡先讀那一筆，缺席、不只一筆、
+或還寫在 ``[[settings.allow]]`` 裡就回 2、不上網。
 
 **回 2 的路（這一跑不算數，不准當綠）：** ``gh`` 不在 PATH 上、沒 token、API 回不了話或逾時、回來的
-不是 JSON、形狀跟 GitHub 文件對不上、卡讀不到或放行缺席／過期。
+不是 JSON、形狀跟 GitHub 文件對不上、卡讀不到或准上網那一筆缺席。
 
 **刻意不比的：** ``current_user_can_bypass``（那一格看的是問的人是誰，不是設定本身）；reflog 與
 非快進推送的痕跡（雲端 checkout 是冷 clone，看不到）。門檻與期望只住在卡上，這裡沒有任何數字。
@@ -22,26 +23,22 @@ import sys
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
 from governance import gh_replay
 from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
-    EXEMPTION_KEYS,
     RULES_DIR,
-    exemption_field_problems,
+    network_permission,
     setting_int,
     setting_strings,
-    setting_tables,
     setting_text,
 )
 
 CHECK_REL = "governance/checks/merge_gate_read_back.py"
 GH = "gh"
-ALLOW_KEY = "allow"
-# 放行條目裡「准上網」那一格的鍵。找的是帶這一格的那一筆，不是任何一筆 allow。
-NETWORK_KEY = "network"
+# 准上網憑的那一張決策紙（訊息裡要說得出憑什麼上網）。准上網那一筆住在卡頂層的 [[by_design]]。
+NETWORK_PAPER = "merge-gate-check-may-read-github"
 
 
 
@@ -83,9 +80,12 @@ def _card_path(scan_root: Path, files: list[Path]) -> Path:
     return mine[0]
 
 
+def _data(card: Path) -> dict[str, object]:
+    return tomllib.loads(card.read_bytes().decode("utf-8"))
+
+
 def _settings(card: Path, scan_root: Path) -> dict[str, object]:
-    data = tomllib.loads(card.read_bytes().decode("utf-8"))
-    settings = data.get("settings")
+    settings = _data(card).get("settings")
     if not isinstance(settings, dict):
         raise ToolBroken(f"{card.relative_to(scan_root)} 沒有 [settings] 表（期望全寫在那裡）")
     return settings
@@ -114,25 +114,9 @@ def read_expected(settings: Mapping[str, object], where: str) -> Expected:
     )
 
 
-def network_allowed(settings: Mapping[str, object], where: str, today: date) -> str:
-    """找那一筆「准上網」的放行。缺席、欄位不齊、過期，一律回 2——不上網。回那一筆的 reason。"""
-    entries = [e for e in setting_tables(settings, ALLOW_KEY) if NETWORK_KEY in e]
-    if len(entries) != 1:
-        raise ToolBroken(
-            f"{where} 的 [[settings.allow]] 裡帶 {NETWORK_KEY} 那一格的放行有 {len(entries)} 筆，要剛好 1 筆"
-            "——沒有登記的放行就不准上網（決策紙 merge-gate-check-may-read-github）"
-        )
-    entry = entries[0]
-    problems = exemption_field_problems(entry, f"{where} 的准上網放行")
-    if problems:
-        raise ToolBroken("；".join(problems))
-    expires = date.fromisoformat(str(entry["expires"]).strip())
-    if expires < today:
-        raise ToolBroken(
-            f"{where} 的准上網放行 {expires} 已到期（今天 {today}）——到期就不准上網，"
-            "要續就重新看它還需不需要、範圍有沒有變寬，改卡走 PR"
-        )
-    return str(entry[EXEMPTION_KEYS[0]])
+def network_allowed(data: Mapping[str, object], where: str) -> str:
+    """卡頂層 ``[[by_design]]`` 那一筆「准上網」的 reason。缺席、不只一筆、寫在會到期的放行裡，一律回 2——不上網。"""
+    return network_permission(data, where, NETWORK_PAPER)
 
 
 # ── 問伺服器 ───────────────────────────────────────────────────────────────────
@@ -275,8 +259,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     where = str(card.relative_to(scan_root))
     settings = _settings(card, scan_root)
     want = read_expected(settings, where)
-    reason = network_allowed(settings, where, date.today())
-    note(f"准上網的放行在（{reason[:60]}…）；只讀 {want.repo} 的 ruleset {want.ruleset_id}")
+    reason = network_allowed(_data(card), where)
+    note(f"准上網的登記在（{reason[:60]}…）；只讀 {want.repo} 的 ruleset {want.ruleset_id}")
     listed = _ids(_rows(gh_json(f"repos/{want.repo}/rulesets", want.timeout), "ruleset 清單"))
     if want.ruleset_id not in listed:
         return [f"登記的 ruleset {want.ruleset_id} 在 {want.repo} 上不存在（伺服器上有：{sorted(listed)}）——主線沒鎖"]

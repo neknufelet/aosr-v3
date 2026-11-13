@@ -13,4 +13,4 @@ per_page = 100
 [[settings.allow]]
 network = "GitHub 的 issue 與關票來源（只讀）"
 reason = "樣本：一筆已經過期的准上網放行。"
-expires = "2026-01-01"
+expires = "2099-12-31"
