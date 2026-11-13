@@ -18,7 +18,7 @@ from aosr.geometry.shoebox import Point
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_result import (
     UNMATCHED_TABLE_NOTE, BaselineRefused, OriginalWalls, ZoneRow, _change, derive_baseline, improvement, original_walls, zone_rows)
-from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, lock_refusal
+from aosr.gui.zone_result_routes import ZoneResultDeps, ZoneResultView, _names, lock_refusal, same_content
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.measured_view import APPROXIMATE_LINE, build_measured_view
 from aosr.gui.problem_text import rounded_number
@@ -397,3 +397,18 @@ def test_a_table_the_library_no_longer_has_still_shows_its_own_conditions() -> N
     assert _tags(a) == [("measured", "實測")] and a.design_facts.tags[0].title.endswith(UNMATCHED_TABLE_NOTE)
     assert (a.design_facts.source, a.design_facts.links) == ("", ())
     assert a.design_facts.conditions == "阻抗管，垂直入射，樣品厚 30 mm"
+
+
+def test_baseline_runs_are_shared_by_content_tail_only_when_this_entry_started_them() -> None:
+    """#1128：同一份內容的原牆基準（代號尾巴相同）跨名字共用；但只收原牆基準入口開的那幾筆（記了 zone_baseline_for），
+    名字剛好長得像基準的一般計算不算；尾巴不同、沒有尾巴、代號不是字串都不收。"""
+    baseline = "room-part2d-orig-3d07ea99"
+    entry = {"zone_baseline_for": "c" * 32}
+    assert same_content({"scheme_id": baseline}, baseline)
+    assert same_content({"scheme_id": "room-search-0123abcd-orig-3d07ea99"} | entry, baseline)
+    assert same_content({"scheme_id": "scheme-orig-3d07ea99"} | entry, baseline)
+    assert not same_content({"scheme_id": "room-search-0123abcd-orig-3d07ea99"}, baseline)  # 一般計算、名字像基準
+    assert not same_content({"scheme_id": "room-orig-2e112e4e"} | entry, baseline)
+    assert not same_content({"scheme_id": "room-part2d"} | entry, baseline)
+    assert not same_content({"scheme_id": None, "zone_baseline_for": "c" * 32}, baseline)
+    assert not same_content({"scheme_id": "room-orig-3d07ea99"} | entry, "plain-name")

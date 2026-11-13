@@ -7,8 +7,9 @@
 
 設計設定檔在、卻讀不出來時照實拒收：拿不準它有沒有指原方案，不能改用拆加貼層的基準。
 
-找基準結果只看網頁資料夾裡每一筆計算的狀態紀錄（小檔）裡方案代號等於基準代號的那幾筆，取最新一筆；算好的還要讀回
-核對：方案逐欄等於這一次推出來的基準、物理身分等於設計那一份，才拿來比。
+找基準結果只看網頁資料夾裡每一筆計算的狀態紀錄（小檔）裡同一份內容的基準（方案代號等於基準代號，或是這個入口
+開的、代號尾巴「-orig-<內容雜湊>」相同的別份名字；#1128），取最新一筆；算好的還要讀回核對：方案（除代號）逐欄等於
+這一次推出來的基準、物理身分等於設計那一份，才拿來比。
 
 讀檔分兩層：狀態判斷只照格式讀結果檔（方案、物理身分、計算時間；不重評）；真的要比的那一刻，兩份才走跟結果頁
 同一條讀回（重驗輸入、重評、判物理），被拒收就照講。109 那種結果一份重評要好幾秒，不能每次查都做。
@@ -16,7 +17,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -114,16 +115,19 @@ def _original(deps: ZoneResultDeps, settings: DesignSettings | None, design: Sch
     return original_walls(scheme, design, capabilities=deps.capabilities, directivity=deps.directivity)
 
 
-def same_content(run_scheme_id: object, baseline_id: str) -> bool:
-    """這一筆計算的方案代號是不是同一份內容的基準：代號尾巴「-orig-<內容雜湊>」相同（雜湊只算內容、不含代號，見
-    ``zone_result.derive_baseline``）。兩份設計推出逐欄一樣的原牆基準（例如存成方案的那一份跟另存的那一份）就共用
-    同一次計算，不用再算 21 分（#1128）；收不收照樣在 ``_find`` 逐欄核整份方案。"""
+def same_content(state: Mapping[str, object], baseline_id: str) -> bool:
+    """這一筆計算是不是同一份內容的基準：方案代號等於基準代號；或是這個入口開的原牆基準（記了 ``zone_baseline_for``）、
+    代號尾巴「-orig-<內容雜湊>」相同（雜湊只算內容、不含代號，見 ``zone_result.derive_baseline``）。兩份設計推出逐欄
+    一樣的原牆基準（例如存成方案的那一份跟另存的那一份）就共用同一次計算，不用再算 21 分（#1128）；只收這個入口開的，
+    名字剛好長得像基準的一般計算不算。收不收照樣在 ``_find`` 逐欄核整份方案。"""
+    run_scheme_id = state.get("scheme_id")
     if not isinstance(run_scheme_id, str):
         return False
     if run_scheme_id == baseline_id:
         return True
     tail = baseline_id.rpartition(SUFFIX)[2]
-    return SUFFIX in baseline_id and run_scheme_id.endswith(SUFFIX + tail)
+    return (SUFFIX in baseline_id and isinstance(state.get("zone_baseline_for"), str)
+            and run_scheme_id.endswith(SUFFIX + tail))
 
 
 def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | None:
@@ -136,7 +140,7 @@ def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | Non
             state = deps.jobs.read_state(path.stem)
         except (OSError, ValueError):
             continue
-        if not same_content(state.get("scheme_id"), scheme_id):
+        if not same_content(state, scheme_id):
             continue
         started = float(str(state.get("started_at", 0)))
         if newest is None or started > newest[0]:
