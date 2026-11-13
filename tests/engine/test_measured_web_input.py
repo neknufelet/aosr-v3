@@ -97,7 +97,11 @@ def test_mainline_existing_forms_and_preview_values_are_unchanged() -> None:
     assert isinstance(presets, list)
     documents = {'fixed': reference_document(), 'assembly': preset_document(presets[0]['material'])}
     for name, data in documents.items():
-        assert input_preview(data, CAPABILITIES, DIRECTIVITY) == control['previews'][name]
+        # #1134 只多一個欄位（牆名，參考房喇叭靠 x0：前牆）；原有每一個欄位照舊逐值比。
+        preview = input_preview(data, CAPABILITIES, DIRECTIVITY)
+        names = preview.pop('wall_names')
+        assert isinstance(names, dict) and names['x0'] == '前牆'
+        assert preview == control['previews'][name]
 
 
 def test_measured_editor_asset_is_served(tmp_path: Path) -> None:

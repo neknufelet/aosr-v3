@@ -62,6 +62,7 @@ from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_librar
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.search_view import held_search
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
+from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
@@ -485,7 +486,15 @@ class GradientJobs:
                 "state": state, "state_text": self._state_text(job, state), "actions": self._actions(job, state, folder),
                 "plan": job.plan.model_dump(mode="json"), "max_steps": job.plan.max_steps,
                 "folder": None if folder is None else str(folder), "progress": progress, "progress_note": note,
-                "steps": steps, "endpoint": endpoint}
+                "steps": steps, "endpoint": endpoint, "wall_names": self._wall_names(job)}
+
+    def _wall_names(self, job: GradientJob) -> dict[str, str]:
+        """這一跑自己那份方案快照的牆名（#1134）：清單跨方案，不能借頁面上現在選的那一份；快照讀不出照座標名。"""
+        try:
+            return wall_words(Scheme.model_validate_json(
+                (self._dir(job.job_id) / "scheme.json").read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return dict(WALLS)
 
     def _state_text(self, job: GradientJob, state: str) -> str:
         if state == "surrogate_refused":

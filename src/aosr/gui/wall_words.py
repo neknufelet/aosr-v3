@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final
 
 from aosr.gui.labels import WALLS
@@ -65,3 +66,23 @@ def wall_words(scheme: Scheme) -> dict[str, str]:
     left = LEFT_OF[front]
     named = {front: FRONT, OPPOSITE[front]: BACK, left: LEFT, OPPOSITE[left]: RIGHT}
     return {wall: named.get(wall, word) for wall, word in WALLS.items()}
+
+
+def draft_wall_words(document: object) -> dict[str, str]:
+    """表單草稿的牆名：前後左右只看房間、喇叭、聲道、座位這四格，所以只拿這四格的原值、其餘換成不會錯的佔位值
+    再驗（存檔名稱清空、別格填錯時名字不跟著變回座標名，同一頁的檢查訊息才跟表單同一套叫法）；這四格本身驗不過照座標名。
+    佔位的聲速、密度只為了過驗證，不拿來算任何東西。"""
+    if not isinstance(document, Mapping):
+        return dict(WALLS)
+    scene = document.get("scene")
+    if not isinstance(scene, Mapping):
+        return dict(WALLS)
+    probe = {"schema_version": "aosr.scheme.v1", "scheme_id": "wall-words", "purpose": "wall-words",
+             "source_model": "omnidirectional",
+             **{key: document.get(key) for key in ("speakers", "channel_group", "receiver_set")},
+             "scene": {"room_m": scene.get("room_m"), "sound_speed_m_s": 1.0, "density_kg_m3": 1.0,
+                       "impedance_pa_s_per_m_by_wall": dict.fromkeys(WALLS, 1.0)}}
+    try:
+        return wall_words(Scheme.model_validate(probe))
+    except ValueError:
+        return dict(WALLS)

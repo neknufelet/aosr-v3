@@ -155,12 +155,15 @@ function useWallNames(names) {
   return true;
 }
 // 帶牆名的幾塊照新名字重畫：牆面表單（連立面圖）重畫自方案，散射那排只換欄名、不動已填的值。
+// 重畫會清掉「約 ρc 的幾倍」那幾格、超限總述也是舊名字寫的：兩樣都重問一次（各自有序號丟掉晚到的舊回覆）。
 function relabelWalls() {
   renderWalls();
   for (const wall of Object.keys(wallNames)) {
     const input = $(`scatter-${wall}`);
     if (input) input.parentElement.firstChild.textContent = `${wallNames[wall]}散射`;
   }
+  refreshZoneLimits();
+  action(updateMultiples);
 }
 function useInputPreview(data) {
   inputPreview = data;

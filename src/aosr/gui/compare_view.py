@@ -8,6 +8,7 @@ import csv
 import io
 from dataclasses import dataclass
 from collections import Counter
+from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 from urllib.parse import unquote
@@ -32,6 +33,7 @@ from aosr.reporting.display import (
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.furniture_display import furniture_material_lines
 from aosr.gui.problem_text import field_name, fixed_material_summary, rectangle_zone_summary, wall_zone_rows
+from aosr.gui.wall_words import wall_words
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
@@ -349,7 +351,7 @@ def _path_id(code: str) -> str:
 
 def _collect_scheme(scheme: Scheme, into: dict[str, object],
                     labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset(),
-                    wall_materials: bool = False) -> None:
+                    wall_materials: bool = False, walls: Mapping[str, str] = WALLS) -> None:
     room = scheme.scene.room_m
     into.update({f"scene.room_m.{axis}": getattr(room, axis) for axis in ("Lx", "Ly", "Lz")})
     for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k"):
@@ -368,13 +370,13 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         for wall in sorted(set(wall_values or {})):
             path = f"scene.{field}.{wall}"
             into[path] = wall_values[wall] if wall_values is not None else None
-            labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
+            labels[path] = (f"{walls.get(wall, wall)}{title}", unit)
     if wall_materials:
         for key, summary in _wall_material_summaries(scheme).items():
             wall, _, zone = key.partition(".")
             path = f"{_MATERIAL_PATH_PREFIX}{key}"
             into[path] = summary
-            name = field_name(f"{_MATERIAL_PATH_PREFIX}{wall}", {}) or path
+            name = (field_name(f"{_MATERIAL_PATH_PREFIX}{wall}", {}) or path).replace(WALLS.get(wall, wall), walls.get(wall, wall), 1)
             labels[path] = (f"{name} › 分區 {zone}" if zone else name, "")
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
@@ -514,8 +516,10 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     split_angles = frozenset(item.furniture_id for item in a.furniture or () for other in b.furniture or ()
                              if item.furniture_id == other.furniture_id and type(item.placement) is not type(other.placement))
     wall_materials = a.scene.surface_zones_by_wall is not None or b.scene.surface_zones_by_wall is not None
-    _collect_scheme(a, left, labels, split_angles, wall_materials)
-    _collect_scheme(b, right, labels, split_angles, wall_materials)
+    # 牆名（#1134）：兩份前後左右一樣才叫前後左右（同方案輸入頁表單），不一樣照座標名，免得同一列兩邊指不同面。
+    walls = wall_words(a) if wall_words(a) == wall_words(b) else WALLS
+    _collect_scheme(a, left, labels, split_angles, wall_materials, walls)
+    _collect_scheme(b, right, labels, split_angles, wall_materials, walls)
     _name_both_kinds(a, b, labels)
     from aosr.gui.measured_view import wall_difference_details
     changes: list[SchemeChange] = []

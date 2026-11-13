@@ -1,6 +1,7 @@
 """從已驗結果挑出結果頁資料；畫面不重算聲學量或門檻。"""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from math import dist
 from pathlib import Path
@@ -12,11 +13,12 @@ from aosr.physics.zone_fill import whole_wall_entries
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.measured_view import MeasuredWallView, build_measured_view, measured_note_text
+from aosr.gui.wall_words import wall_words
 from aosr.gui.capability_view import capability_lists
 from aosr.gui.furniture_view import furniture_rows, furniture_surface, has_furniture_paths
 from aosr.config.quality_targets import QualityTargets, TargetEntry, load_quality_targets
 from aosr.gui.labels import (
-    LABELS as LABELS, FLAG_TEXTS as FLAG_TEXTS, LISTENING_POINTS, listening_point_label, speaker_label,
+    LABELS as LABELS, FLAG_TEXTS as FLAG_TEXTS, LISTENING_POINTS, WALLS, listening_point_label, speaker_label,
 )
 from aosr.reporting.compare import compare_results
 from aosr.reporting.display import (
@@ -542,7 +544,8 @@ def _flutter_duration_text(alerts: list[FlutterReviewAlert], digits: int) -> str
     return f"{shown}；另有 {infinite} 帶全反射，持續度無限長" if infinite else shown
 
 
-def _flutter_group(walls: tuple[str, str], alerts: list[FlutterReviewAlert]) -> FlutterGroupView:
+def _flutter_group(walls: tuple[str, str], alerts: list[FlutterReviewAlert],
+                   names: Mapping[str, str] = WALLS) -> FlutterGroupView:
     """同一對牆的各帶合成一筆；位數取各帶需要的最多位，逐帶明細才對得齊、分得出。"""
     ordered = sorted(alerts, key=lambda alert: alert.nominal_center_hz)
     digits = max(_flutter_digits(alert) for alert in ordered)
@@ -555,7 +558,7 @@ def _flutter_group(walls: tuple[str, str], alerts: list[FlutterReviewAlert]) -> 
     bands = _span(f"{ordered[0].nominal_center_hz} Hz", f"{ordered[-1].nominal_center_hz} Hz")
     decays = {alert.decay_db for alert in ordered}
     decay = f" {next(iter(decays)):g} dB " if len(decays) == 1 else ""
-    walls_text = "、".join(_label(wall) for wall in walls)
+    walls_text = "、".join(names.get(wall, _label(wall)) for wall in walls)
     return FlutterGroupView(
         walls=walls, heading_text=f"{_label('flutter')}・{walls_text}",
         summary_text=f"這對牆之間來回反射，衰減{decay}所需的時間（持續度）比本房同一頻帶的 T20 長，待複核",
@@ -570,22 +573,24 @@ def _flutter_group(walls: tuple[str, str], alerts: list[FlutterReviewAlert]) -> 
     )
 
 
-def _flutter_groups(alerts: tuple[FlutterReviewAlert, ...]) -> tuple[FlutterGroupView, ...]:
-    """牆間顫動按牆對合併：一對牆一筆，照第一次出現的順序。"""
+def _flutter_groups(alerts: tuple[FlutterReviewAlert, ...],
+                    names: Mapping[str, str] = WALLS) -> tuple[FlutterGroupView, ...]:
+    """牆間顫動按牆對合併：一對牆一筆，照第一次出現的順序；牆名照 ``names``（#1134 跟著方案排的前後左右）。"""
     grouped: dict[tuple[str, str], list[FlutterReviewAlert]] = {}
     for alert in alerts:
         grouped.setdefault(alert.walls, []).append(alert)
-    return tuple(_flutter_group(walls, items) for walls, items in grouped.items())
+    return tuple(_flutter_group(walls, items, names) for walls, items in grouped.items())
 
 
 def _alert_sections(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert | ListeningAreaReviewAlert, ...],
-                    registry: QualityTargets, purpose_name: str, roles: dict[str, str]
+                    registry: QualityTargets, purpose_name: str, roles: dict[str, str],
+                    names: Mapping[str, str] = WALLS
                     ) -> tuple[tuple[AlertView, ...], tuple[FlutterGroupView, ...]]:
     """警戒分兩區：跟喇叭、座位有關的逐筆列；牆間顫動按牆對合併，排在後面。"""
     seats = tuple(alert for alert in alerts
                   if isinstance(alert, PeakDipReviewAlert | ListeningAreaReviewAlert))
     flutter = tuple(alert for alert in alerts if isinstance(alert, FlutterReviewAlert))
-    return _alerts(seats, registry, purpose_name, roles=roles), _flutter_groups(flutter)
+    return _alerts(seats, registry, purpose_name, roles=roles), _flutter_groups(flutter, names)
 
 
 VERDICT_TEXTS = {"within_range": "在目標內", "below_range": "低於下限", "above_range": "高於上限",
@@ -655,13 +660,14 @@ def _reverberation(result: SchemeResult, registry: QualityTargets,
 
 
 def _reflection_path(path: ReflectionPath, pair: PairResult, scheme: Scheme) -> ReflectionPathView:
+    names = wall_words(scheme)
     return ReflectionPathView(
         surface_text=furniture_surface(path, pair, scheme),
         delay_text=_fixed(path.relative_direct_delay_s * 1000.0, 2, "毫秒"),
         level_text=_fixed(path.broadband_level_db, 1, "dB"),
         azimuth_text=_fixed(path.listening_azimuth_deg, 1, "度"),
         elevation_text=_fixed(path.listening_elevation_deg, 1, "度"),
-        zone=path.zone.value, wall_sequence=tuple(_label(wall) for wall in path.wall_sequence),
+        zone=path.zone.value, wall_sequence=tuple(names.get(wall, _label(wall)) for wall in path.wall_sequence),
         within_window=path.within_window,
     )
 
@@ -847,7 +853,6 @@ def _ranking_text(status: str, reasons: tuple[str, ...], missing: tuple[MissingC
 
 def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     """逐對註記只顯示一次；牆與層以白話標明，外推頻率來自保存的當次註記。"""
-    from aosr.gui.wall_words import wall_words
     from aosr.physics.wall_surfaces import extrapolated_frequency_text, merge_construction_notes
     from aosr.geometry.shoebox import Wall
     from aosr.materials.construction import wall_note_place
@@ -920,7 +925,8 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
     reasons = tuple(reason.value for reason in eliminated.reasons) if eliminated else ()
     seat_alerts, flutter_groups = _alert_sections(
         alerts, registry, result.scheme.purpose,
-        {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels})
+        {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels},
+        wall_words(result.scheme))
     capabilities = capability_lists(load_capabilities(config_path("capabilities.toml")))
     return ResultView(
         material_research_notice=komatsu_research_notice(result.scheme.scene.surface_zones_by_wall, web=True),

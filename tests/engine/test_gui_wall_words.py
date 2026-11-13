@@ -13,11 +13,14 @@ from playwright.sync_api import Browser, expect
 from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
+from aosr.gui.gradient_plan import GradientRequest
 from aosr.gui.labels import WALLS
-from aosr.gui.wall_words import front_wall, wall_words
+from aosr.gui.wall_words import draft_wall_words, front_wall, wall_words
 from aosr.reporting.scheme import Scheme
+from tests.engine._furniture_cases import reference_document
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data, _jobs
 
 # 109 part2d 存檔裡的喇叭與主位（公尺）。
 LEFT_109 = (0.36810808858895405, 0.937648486381631)
@@ -121,4 +124,44 @@ def test_home_form_renames_walls_when_the_speakers_move_to_the_other_end(tmp_pat
         expect(page.locator("#wall-editor-yL")).to_contain_text("左牆材料")
         expect(page.locator("#elevation-wall-y0")).to_have_text("右牆")
         expect(page.locator("#scatter-xL").locator("xpath=..")).to_contain_text("前牆散射")
+        # 重畫牆面表單會清空「約 ρc 的幾倍」那幾格：換名之後要重問、填回來（審查實測三次都被洗掉）。
+        expect(page.locator("#multiple-x0")).to_contain_text("ρc")
         _assert_quiet(watched)
+
+
+def test_a_draft_with_a_bad_wall_value_still_names_walls_and_its_problem_says_front_wall(tmp_path: Path) -> None:
+    """別格填錯（x0 阻抗填負的）不影響前後左右；同一頁的檢查訊息跟表單同一套叫法。"""
+    document = reference_document()
+    walls = cast(dict[str, float], cast(Doc, document["scene"])["impedance_pa_s_per_m_by_wall"])
+    walls["x0"] = -5.0
+    assert draft_wall_words(document)["x0"] == "前牆"
+    # 存檔名稱清空（準備改名）、用途清空、密度填錯：一樣叫前牆（審查實測這幾樣都會整組退回座標名）。
+    renaming = reference_document()
+    renaming["scheme_id"], renaming["purpose"] = "", ""
+    cast(Doc, renaming["scene"])["density_kg_m3"] = -1.0
+    del cast(Doc, renaming["scene"])["sound_speed_m_s"]
+    del renaming["source_model"]
+    assert draft_wall_words(renaming)["x0"] == "前牆"
+    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://localhost")
+    problems = cast(list[dict[str, str]], client.post("/api/validate", json=document).json()["problems"])
+    texts = [problem["text"] for problem in problems]
+    assert any(text.startswith("前牆阻抗") for text in texts), texts
+    assert not any("x 起點牆" in text for text in texts), texts
+    # 房間、喇叭、座位本身壞了才退回座標名。
+    del document["speakers"]
+    assert draft_wall_words(document) == WALLS
+
+
+def test_gradient_preview_and_each_job_use_their_own_scheme_names(tmp_path: Path) -> None:
+    """第三階段頁：預覽帶選的那份方案的牆名；工作清單跨方案，每一跑用自己那份快照的牆名。"""
+    data_dir = _data(tmp_path)
+    jobs = _jobs(data_dir, FakeLauncher())
+    assert cast(dict[str, str], jobs.preview(NAME, GradientRequest())["wall_names"])["x0"] == "前牆"
+    view = jobs.start(NAME, GradientRequest())
+    assert cast(dict[str, str], view["wall_names"])["x0"] == "前牆"
+    # 這一跑的快照換成喇叭靠 xL 的擺法（存著的方案不動）：看這一跑時 xL 是前牆。
+    snapshot = data_dir / "gradient" / str(view["job_id"]) / "scheme.json"
+    turned = _turned(Scheme.model_validate_json(snapshot.read_text(encoding="utf-8")).model_dump(mode="json"), 2)
+    snapshot.write_text(turned.model_dump_json(), encoding="utf-8")
+    names = cast(dict[str, str], jobs.get(str(view["job_id"]))["wall_names"])
+    assert (names["xL"], names["x0"]) == ("前牆", "後牆")

@@ -19,6 +19,7 @@ listening_area.pairs.limit 是登記簿輸入，全部留骨架。所有顯示�
 from __future__ import annotations
 
 import json
+import re
 from functools import cache
 
 import pytest
@@ -52,6 +53,14 @@ CAPABILITY_TEXT_CHANGES = {
 }
 
 
+# #1134 畫面上的牆名跟著方案排前後左右；這兩份控制組是參考房擺法（喇叭靠 x0、主位面向 x0），換回座標名再比原答案。
+WALL_NAME_CHANGES = {"前牆": "x 起點牆", "後牆": "x 終點牆", "左牆": "y 起點牆", "右牆": "y 終點牆"}
+
+
+def _old_wall_names(text: str) -> str:
+    return re.sub("|".join(WALL_NAME_CHANGES), lambda match: WALL_NAME_CHANGES[match.group(0)], text)
+
+
 @cache
 def _physics_text_changes() -> dict[str, str]:
     """第八步換物理身分；只還原整格短指紋，原本兩份雜湊照舊。
@@ -73,7 +82,9 @@ def _original_fields(value: object, root: bool = True, labels: bool = False) -> 
                 and (not labels or key not in NEW_LABELS)}
     if isinstance(value, list):
         return [_original_fields(item, False) for item in value]
-    return {**CAPABILITY_TEXT_CHANGES, **_physics_text_changes()}.get(value, value) if isinstance(value, str) else value
+    if not isinstance(value, str):
+        return value
+    return {**CAPABILITY_TEXT_CHANGES, **_physics_text_changes()}.get(value, _old_wall_names(value))
 
 
 def rank_margin(results: tuple[SchemeResult, SchemeResult]) -> tuple[float, float]:
