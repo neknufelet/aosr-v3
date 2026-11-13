@@ -649,3 +649,45 @@ def test_build_sends_the_options_on_the_form_and_lists_every_fixed_check(browser
             "固定材料核對第 1 次（完整解合計 96 次、秩 267）：「48K 玻璃棉 50 mm＋50 mm 空腔」逐頻 0.388 dB、帶能量 0.0047 dB，沒過（最差在 293.441 Hz）")
         expect(page.locator("#build-estimate")).to_contain_text("過了就停")
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_poll_due_while_the_last_one_is_still_out_is_made_up_not_dropped(browser: Browser, tmp_path: Path) -> None:
+    """#1128（雲端紅過兩次）：上一次輪詢還沒回來又輪到，舊的做法直接跳過；跳過的那一次若剛好是「查得到忙不忙了」，
+    開始鈕要等下一輪才亮，假時鐘一次只推一格就永遠不亮。攔住一次回應、這時再推一格，放行後要補做一次輪詢。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    held: list[Route] = []
+    seen: list[str] = []
+    holding = threading.Event()
+
+    def handle(route: Route) -> None:
+        seen.append(route.request.url)
+        if holding.is_set():
+            holding.clear()
+            held.append(route)
+        else:
+            route.continue_()
+
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#surrogate-state")).to_contain_text("已經有替身")
+        expect(page.locator("#plan-summary")).not_to_be_empty()
+        page.wait_for_timeout(500)  # 開頁那幾支（清單、預覽、第一次輪詢）都回來了才開始攔
+        # 時間停住、只靠手動推格（假時鐘平常照真時間走，等 5 秒自然又輪一次就分不出有沒有補做）。
+        page.clock.pause_at(int(page.evaluate("Date.now()")) + 100)
+        page.route("**/api/gradient/surrogates", handle)
+        holding.set()
+        _tick(page)
+        deadline = time.monotonic() + 10
+        while not held and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert held, "推一格之後沒有輪詢（被吞掉了）"
+        _tick(page)  # 上一次還卡著：舊的做法在這裡直接跳過
+        page.wait_for_timeout(200)
+        count = len(seen)
+        held.pop().continue_()
+        deadline = time.monotonic() + 3
+        while len(seen) == count and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert len(seen) == count + 1, ("被跳過的那一次沒有補做", seen)
+        _clean(page, watched.page_errors + watched.console_errors)

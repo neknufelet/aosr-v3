@@ -30,7 +30,7 @@ from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_scheme_pipeline import shared_control_result
 from aosr.materials.construction_models import ConstantImpedance
 
-DESIGN_RUN, OLD_RUN, WHOLE_RUN = "d" * 32, "e" * 32, "f" * 32
+DESIGN_RUN, OLD_RUN, WHOLE_RUN, SHARED_RUN = "d" * 32, "e" * 32, "f" * 32, "c" * 32
 
 
 @pytest.fixture(scope="module")
@@ -100,6 +100,7 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
             assert client.post(f"/api/results/{DESIGN_RUN}/zones/baseline", json={}).status_code == 409
             assert len(_runs(tmp_path)) == 1
             assert watched.page_errors == [] and watched.console_errors == []
+            _shared_with_another_name(tmp_path, client, run, expected.model_dump(mode="json"))
             _later_states(tmp_path, client, run, expected.model_dump(mode="json"))
 
 
@@ -108,6 +109,43 @@ def _tampered(document: dict[str, object]) -> str:
     changed = json.loads(json.dumps(document))
     changed["pairs"][0]["report"]["points"][0]["frequency_hz"] += 0.001
     return json.dumps(changed)
+
+
+def _renamed(value: object, old: str, new: str) -> object:
+    """整份結果裡等於舊方案名的值都換成新名字（方案、候選包幾處都帶名字，要一致才讀得進來）。"""
+    if isinstance(value, dict):
+        return {key: _renamed(item, old, new) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_renamed(item, old, new) for item in value]
+    return new if value == old else value
+
+
+def _shared_with_another_name(folder: Path, client: httpx.Client, run: Path, expected: object) -> None:
+    """#1128：另一個名字、內容相同的設計（存成方案的那一份跟另存的那一份）推出逐欄一樣的原牆基準，直接共用算好的那一次：
+    不再開算（2-6c 照樣重算多花 20.8 分）、改善數字一樣、講共用了哪一份；代號尾巴相同但內容不同的照樣拒收。"""
+    original = json.loads((folder / "results" / f"{DESIGN_RUN}.json").read_text(encoding="utf-8"))
+    document = _renamed(original, str(original["scheme"]["scheme_id"]), "renamed-copy")
+    _put(folder, SHARED_RUN, json.dumps(document))
+    renamed = SchemeResult.model_validate(document)
+    assert derive_baseline(renamed.scheme).scheme.scheme_id != derive_baseline(
+        SchemeResult.model_validate_json((folder / "results" / f"{DESIGN_RUN}.json").read_bytes()).scheme).scheme.scheme_id
+    zones = f"/api/results/{SHARED_RUN}/zones"
+    shared = client.get(zones).json()
+    assert (shared["state"], shared["baseline_run_id"], shared["can_start"]) == ("done", run.stem, False), shared
+    assert shared["improvement"] == expected
+    record = json.loads(run.read_text(encoding="utf-8"))
+    assert "共用它算好的那一次" in shared["state_text"] and str(record["scheme_id"]) in shared["state_text"]
+    assert client.post(f"{zones}/baseline", json={}).status_code == 409
+    assert len(_runs(folder)) == 1
+    # 尾巴相同、內容不同（算好的那一份被換成設計自己那一份，讀得進來）：照樣拒收、要重算，不因為代號像就收。
+    result_path = folder / "results" / f"{run.stem}.json"
+    stored = result_path.read_text(encoding="utf-8")
+    result_path.write_text(json.dumps(original), encoding="utf-8")
+    refused = client.get(zones).json()
+    assert (refused["state"], refused["can_start"], refused["improvement"]) == ("baseline_rejected", True, None), refused
+    assert "跟這一次推出來的不一樣" in refused["state_text"], refused["state_text"]
+    result_path.write_text(stored, encoding="utf-8")
+    (folder / "results" / f"{SHARED_RUN}.json").unlink()
 
 
 def _later_states(folder: Path, client: httpx.Client, run: Path, expected: object) -> None:

@@ -7,8 +7,9 @@
 
 設計設定檔在、卻讀不出來時照實拒收：拿不準它有沒有指原方案，不能改用拆加貼層的基準。
 
-找基準結果只看網頁資料夾裡每一筆計算的狀態紀錄（小檔）裡方案代號等於基準代號的那幾筆，取最新一筆；算好的還要讀回
-核對：方案逐欄等於這一次推出來的基準、物理身分等於設計那一份，才拿來比。
+找基準結果只看網頁資料夾裡每一筆計算的狀態紀錄（小檔）裡同一份內容的基準（方案代號等於基準代號，或是這個入口
+開的、代號尾巴「-orig-<內容雜湊>」相同的別份名字；#1128），取最新一筆；算好的還要讀回核對：方案（除代號）逐欄等於
+這一次推出來的基準、物理身分等於設計那一份，才拿來比。
 
 讀檔分兩層：狀態判斷只照格式讀結果檔（方案、物理身分、計算時間；不重評）；真的要比的那一刻，兩份才走跟結果頁
 同一條讀回（重驗輸入、重評、判物理），被拒收就照講。109 那種結果一份重評要好幾秒，不能每次查都做。
@@ -16,7 +17,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -36,8 +37,8 @@ from aosr.gui.material_editor import plain_error, user_library_path
 from aosr.gui.modal_jobs import scheme_snapshot
 from aosr.gui.zone_design import DesignSettings, read_design
 from aosr.gui.zone_result import (
-    PLACE_NOTE, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement, is_zoned,
-    original_walls, replaced_unseen, replaced_unseen_note, zone_rows)
+    PLACE_NOTE, SUFFIX, Baseline, BaselineRefused, Improvement, OriginalWalls, ZoneRow, derive_baseline, improvement,
+    is_zoned, original_walls, replaced_unseen, replaced_unseen_note, zone_rows)
 from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.evaluation import LoadedResult
@@ -114,8 +115,23 @@ def _original(deps: ZoneResultDeps, settings: DesignSettings | None, design: Sch
     return original_walls(scheme, design, capabilities=deps.capabilities, directivity=deps.directivity)
 
 
+def same_content(state: Mapping[str, object], baseline_id: str) -> bool:
+    """這一筆計算是不是同一份內容的基準：方案代號等於基準代號；或是這個入口開的原牆基準（記了 ``zone_baseline_for``）、
+    代號尾巴「-orig-<內容雜湊>」相同（雜湊只算內容、不含代號，見 ``zone_result.derive_baseline``）。兩份設計推出逐欄
+    一樣的原牆基準（例如存成方案的那一份跟另存的那一份）就共用同一次計算，不用再算 21 分（#1128）；只收這個入口開的，
+    名字剛好長得像基準的一般計算不算。收不收照樣在 ``_find`` 逐欄核整份方案。"""
+    run_scheme_id = state.get("scheme_id")
+    if not isinstance(run_scheme_id, str):
+        return False
+    if run_scheme_id == baseline_id:
+        return True
+    tail = baseline_id.rpartition(SUFFIX)[2]
+    return (SUFFIX in baseline_id and isinstance(state.get("zone_baseline_for"), str)
+            and run_scheme_id.endswith(SUFFIX + tail))
+
+
 def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | None:
-    """計算紀錄裡方案代號是這一份基準的最新一筆；算中的先走一次查狀態（真的結束才收屍）。"""
+    """計算紀錄裡同一份內容的基準（``same_content``）最新一筆；算中的先走一次查狀態（真的結束才收屍）。"""
     newest: tuple[float, str] | None = None
     for path in (deps.jobs.data_dir / "runs").glob("*.json"):
         if len(path.stem) != RUN_ID_LENGTH:
@@ -124,7 +140,7 @@ def _latest_run(deps: ZoneResultDeps, scheme_id: str) -> dict[str, object] | Non
             state = deps.jobs.read_state(path.stem)
         except (OSError, ValueError):
             continue
-        if state.get("scheme_id") != scheme_id:
+        if not same_content(state, scheme_id):
             continue
         started = float(str(state.get("started_at", 0)))
         if newest is None or started > newest[0]:
@@ -141,7 +157,7 @@ def _find(deps: ZoneResultDeps, baseline: Baseline) -> Found | None:
         result = SchemeResult.model_validate_json(path.read_bytes())
     except (ValueError, OSError) as exc:
         return Found(state, path, rejected=str(exc))
-    if result.scheme != baseline.scheme:
+    if result.scheme.model_copy(update={"scheme_id": baseline.scheme.scheme_id}) != baseline.scheme:
         return Found(state, path, rejected="算好的基準方案跟這一次推出來的不一樣")
     return Found(state, path, result)
 
@@ -169,6 +185,9 @@ def _status(deps: ZoneResultDeps, design: SchemeResult, baseline: Baseline) -> t
         return "baseline_rejected", f"原牆基準的結果讀不出來：{found.rejected}", found
     if found.result.physics_identity != design.physics_identity:
         return "baseline_stale", "原牆基準是舊版物理算的，要重算才比得。", found
+    shared = found.result.scheme.scheme_id
+    if shared != baseline.scheme.scheme_id:
+        return "done", (f"原牆基準跟「{shared}」那一份逐欄相同（同一套切法、同一份牆），共用它算好的那一次，不用再算。"), found
     return "done", "", found
 
 
