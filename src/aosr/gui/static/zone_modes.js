@@ -163,6 +163,20 @@ function materialWords(material) {
   if (entry) return `${entry.label}（${material.kind === "mounted_on_wall" ? "貼在原牆上" : "直接取代牆面"}）`;
   return material.kind === "mounted_on_wall" ? `${wallText(material)}（原牆：${wallText(material.wall)}）` : wallText(material);
 }
+// 搜尋存成的方案裡那幾層（#1128）：每層「種類 厚度」，多孔層加流阻（兩種棉才分得出來）；名字來自伺服器的模型描述。
+function layersText(material) {
+  const spec = inputDefaults.material_form;
+  return material.layers.map(layer => {
+    const kind = spec[layer.kind]?.label ?? layer.kind;
+    const thick = typeof layer.thickness_m === "number" ? ` ${shownNumber(layer.thickness_m * 1000)} mm` : "";
+    const flow = typeof layer.flow_resistivity_pa_s_m2 === "number" ? `（流阻 ${shownNumber(layer.flow_resistivity_pa_s_m2)} Pa·s/m²）` : "";
+    return `${kind}${thick}${flow}`;
+  }).join("＋");
+}
+function nowWords(material) {
+  if (material.kind !== "mounted_on_wall" || libraryLabel(material)) return materialWords(material);
+  return `${layersText(material)}，貼在原牆上（原牆：${wallText(material.wall)}）`;
+}
 function originalMaterial(material) { return material.kind === "mounted_on_wall" ? material.wall : material; }
 
 // 交伺服器換這一區的材料；成功才原地換進方案（同切牆面：等回覆時整頁鎖住）。
@@ -261,8 +275,11 @@ function fixedCell(wall, key, zone, cell) {
   cell.append(select);
 }
 function searchCell(wall, key, zone, setting, cell) {
-  const start = document.createElement("p"); start.className = "note";
-  start.textContent = `方案裡先放原牆：${wallText(originalMaterial(zone.material))}`;
+  // 寫方案裡這一區現在真的放什麼（#1128）：網頁改成交給搜尋時放原牆，但搜尋存成的方案（或它的另存）放的是搜尋選的材料。
+  const start = document.createElement("p"); start.className = "note"; start.id = `zone-search-now-${wall}-${key}`;
+  start.textContent = zone.material.kind === "mounted_on_wall"
+    ? `方案裡現在放：${nowWords(zone.material)}`
+    : `方案裡現在放：${materialWords(zone.material)}（搜尋選「貼在原牆上」就貼在它上面）`;
   const limit = document.createElement("label");
   const box = document.createElement("input"); box.type = "checkbox"; box.id = `zone-limit-${wall}-${key}`;
   box.checked = Array.isArray(setting.allowed);

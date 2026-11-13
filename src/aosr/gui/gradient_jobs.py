@@ -40,7 +40,7 @@ from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MaterialGradientSettings, fixed_target_id, is_fixed_target, load_material_gradient_settings,
+    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, fixed_target_id, is_fixed_target, load_material_gradient_settings,
 )
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
@@ -66,8 +66,9 @@ from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
+from aosr.gui.zone_result import baseline_warning
 from aosr.gui.zone_limits import DepthTargets
-from aosr.materials.library import FixedEntry, LibraryEntry, dump_user_library, load_user_library
+from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries, dump_user_library, load_user_library
 from aosr.materials.search_library import (
     MaterialsRefused, SearchMaterials, fixed_candidates, refuse_fixed_as_family, user_fixed_entries, with_user_materials,
 )
@@ -570,6 +571,9 @@ class GradientJobs:
                 # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
                 "wall_names": wall_words(scheme),
                 "fixed_depths": fixed_depths(plan, scheme, design, targets),
+                # 開跑之前先講結果頁會把哪些區當成沒動（#1128）：要指原方案就在跑幾個小時之前指。
+                "baseline_warning": baseline_warning(scheme, design, rigid=request.mount == MOUNT_RIGID,
+                                                     library=(*builtin_entries(), *entries)),
                 "surrogate": {"found": not missing and refused is None, "slot": str(path.parent), "missing": missing,
                               "message": "要先建替身" if missing else refused},
                 "defaults": {"max_steps": settings.descent.max_steps, "family": settings.family[0].id,

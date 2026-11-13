@@ -12,7 +12,12 @@
   重按時找這份新方案已經開過的那一筆接回來（網頁伺服器是單一行程，``JobManager`` 也這樣假設，不防兩個行程同時按）。
 
 結果頁沒指原方案時是拆「貼在原牆上」的加貼層找回原牆（``zone_result.derive_baseline``）；選了「貼在硬底上」的那一跑
-交給搜尋的區拆不回去、會被當成沒動，細節裡照實警告（``baseline_warning``），不替使用者猜原牆。
+交給搜尋的區拆不回去、固定區整個換成材料庫材料的也拆不回去，都會被當成沒動，細節裡照實點名（``baseline_warning``，
+#1128；預覽同一句），不替使用者猜原牆：存成方案照舊只帶設計設定的原方案，不退回指搜尋起點那一份（那一份已經放了
+固定的材料，指它一樣當成沒動，還會把貼牆層拆得回的區也變成沒動）。
+
+- 換樣板試過什麼（#1128）：每一輪每個（區, 換成什麼）的快篩合分、現狀、換上了哪一個（``template_tries``），
+  整塊試過、沒選的固定材料候選看得到差多少。
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -32,11 +37,15 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.material_gradient import MOUNT_RIGID
-from aosr.gradient.folder_files import LEDGER_FILE
+from aosr.config.material_gradient import FIXED_TARGET_PREFIX, NONE_TARGET
+from aosr.gradient.folder_files import LEDGER_FILE, TEMPLATES_FILE
 from aosr.gui.gradient_jobs import JOB_ID, ActionRefused, GradientJobs
 from aosr.gui.gradient_plan import PlanRefused
 from aosr.gui.jobs import JobManager
-from aosr.gui.zone_design import DesignSettings, write_design
+from aosr.gui.material_editor import user_library_path
+from aosr.gui.zone_design import DesignSettings, read_design, write_design
+from aosr.gui.zone_result import RIGID_BASELINE_WARNING as RIGID_BASELINE_WARNING, baseline_warning
+from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.reporting.scheme import Scheme
 
 PAGE: Final = Path(__file__).resolve().parent / "static" / "gradient.html"
@@ -45,11 +54,14 @@ DESCENT_PHASE: Final = "descent"
 NOTE_PREFIX: Final = "注意："
 FAILURE_MARK: Final = "失敗："
 LINE_LIMIT: Final = 6
+# 換樣板候選「面->目標」的分隔；同 ``template_rounds.CANDIDATE_SEPARATOR``（那一支載入 JAX，網頁行程不載，考卷核兩邊相等）。
+CANDIDATE_SEPARATOR: Final = "->"
+NONE_WORDS: Final = "不貼（保留原牆）"
+FIXED_WORDS: Final = "（固定，整塊選或不選）"
+TUNABLE_WORDS: Final = "（可調）"
+TUNABLE_MARK: Final = "可調"
 NAME_ROOM: Final = 180  # 方案代號上限 200 字，留給「-search-」與 8 碼
 ADOPTED_WORD: Final = "search"
-RIGID_BASELINE_WARNING: Final = (
-    "這一跑選了「貼在硬底上」，開跑時的設計設定又沒指原方案：結果頁找原牆是拆「貼在原牆上」的加貼層，"
-    "這一跑交給搜尋的區拆不回去、會被當成沒動，改善算不進來。要算改善，存成方案後在那份方案的設計設定指原方案。")
 
 
 class Adoption(BaseModel):
@@ -84,6 +96,54 @@ def descent_steps(folder: Path) -> int | None:
             if isinstance(row, dict) and row.get("phase") == DESCENT_PHASE:
                 rows += 1
     return max(0, rows - 1)
+
+
+def _target_label(target: str, labels: Mapping[str, str]) -> str:
+    if target == NONE_TARGET:
+        return NONE_WORDS
+    if target.startswith(FIXED_TARGET_PREFIX):
+        name = target[len(FIXED_TARGET_PREFIX):]
+        return f"{labels.get(name, name)}{FIXED_WORDS}"
+    label = labels.get(target, target)
+    return label if TUNABLE_MARK in label else f"{label}{TUNABLE_WORDS}"
+
+
+def template_tries(folder: Path, labels: Mapping[str, str]) -> list[dict[str, object]]:
+    """換樣板每一輪試過什麼（#1128）：每個（區, 換成什麼）的快篩合分、那一輪起點（現狀）的合分、哪一個換上了。
+
+    照 ``templates.jsonl`` 的原始文字讀（網頁行程不載入物理，同 :func:`descent_steps`）：``quick_score`` 列的 ``value``
+    是搜尋自己的梯度目標合分（越小越好），跟結果頁的總分不是同一把尺；現狀是決定列的 ``baseline_value``。
+    讀不懂的列不算；還沒有決定列的那一輪不列（接續時那半輪會丟掉重跑）。沒有帳本回空的。"""
+    path = folder / TEMPLATES_FILE
+    if not path.is_file():
+        return []
+    rounds: dict[int, list[dict[str, object]]] = {}
+    found: list[dict[str, object]] = []
+    with path.open(encoding="utf-8", errors="replace") as stream:
+        next(stream, None)  # 第一列是標頭
+        for line in stream:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(row, dict) or not isinstance(row.get("round"), int):
+                continue
+            index = int(row["round"])
+            candidate, value = row.get("candidate"), row.get("value")
+            if row.get("phase") == "quick_score" and isinstance(candidate, str) and CANDIDATE_SEPARATOR in candidate \
+                    and isinstance(value, (int, float)):
+                surface, target = candidate.split(CANDIDATE_SEPARATOR, 1)
+                rounds.setdefault(index, []).append({"surface": surface, "target": target, "label": _target_label(target, labels),
+                                                     "fixed": target.startswith(FIXED_TARGET_PREFIX), "value": float(value)})
+            decision = row.get("decision")
+            if row.get("phase") == "template_decision" and isinstance(decision, dict):
+                accepted = decision.get("accepted")
+                baseline = decision.get("baseline_value")
+                tries = [{**item, "chosen": f"{item['surface']}{CANDIDATE_SEPARATOR}{item['target']}" == accepted}
+                         for item in rounds.pop(index, [])]
+                found.append({"round": index + 1, "baseline": float(baseline) if isinstance(baseline, (int, float)) else None,
+                              "accepted": accepted if isinstance(accepted, str) else None, "tries": tries})
+    return found
 
 
 def _lines(path: Path, keep: Callable[[str], bool]) -> list[str]:
@@ -121,16 +181,30 @@ class GradientFollow:
         return {"scheme_id": adoption.scheme_id, "run_id": adoption.run_id, "created_at": adoption.created_at,
                 "run_status": status, "run_error": error, "result_url": f"/results/{adoption.run_id}"}
 
-    def _baseline_warning(self, job_id: str, view: dict[str, object]) -> str | None:
+    def _library(self) -> tuple[LibraryEntry, ...]:
+        """取材料名字用（只讀）：使用者材料庫讀不進來就只比內建材料。"""
+        try:
+            return full_library(user_library_path(self.gradient.data_dir))
+        except (OSError, ValueError, ValidationError):
+            return builtin_entries()
+
+    def _baseline_warning(self, job_id: str, view: dict[str, object], adoption: Adoption | None) -> str | None:
+        """結果頁會把哪些區當成沒動（:func:`aosr.gui.zone_result.baseline_warning`）：照這一跑開跑時的方案與設計設定；
+        存成方案之後照那份方案現在的設計設定（使用者事後替它指了原方案，這一句就不再出）。"""
         plan = view["plan"]
         request = plan.get("request") if isinstance(plan, dict) else None
-        if not isinstance(request, dict) or request.get("mount") != MOUNT_RIGID:
-            return None
-        snapshot = self._job_dir(job_id) / "design.json"
-        if snapshot.is_file() and DesignSettings.model_validate_json(
-                snapshot.read_text(encoding="utf-8")).original_scheme_id is not None:
-            return None
-        return RIGID_BASELINE_WARNING
+        rigid = isinstance(request, dict) and request.get("mount") == MOUNT_RIGID
+        folder = self._job_dir(job_id)
+        design: DesignSettings | None = None
+        try:
+            if adoption is not None:
+                design = read_design(self.gradient.data_dir, adoption.scheme_id)
+            elif (folder / "design.json").is_file():
+                design = DesignSettings.model_validate_json((folder / "design.json").read_text(encoding="utf-8"))
+            scheme = Scheme.model_validate_json((folder / "scheme.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return RIGID_BASELINE_WARNING if rigid and (design is None or design.original_scheme_id is None) else None
+        return baseline_warning(scheme, design, rigid=rigid, library=self._library())
 
     def detail(self, job_id: str) -> dict[str, object]:
         view = self.gradient.get(job_id)
@@ -142,13 +216,16 @@ class GradientFollow:
         for log in logs:
             notes.extend(_lines(log, lambda line: line.lstrip().startswith(NOTE_PREFIX)))
         failures: list[str] = []
+        adoption = self._adoption(job_id)
         if steps and isinstance(steps[-1], dict) and steps[-1].get("state") == "finished" and steps[-1].get("exit_code") != 0:
             failures = _lines(logs[-1], lambda line: FAILURE_MARK in line)
         return {"job_id": job_id, "state": view["state"], "max_steps": view["max_steps"],
                 "descent_steps": None if folder is None else descent_steps(Path(str(folder))),
                 "notes": list(dict.fromkeys(notes)), "failures": failures,
-                "baseline_warning": self._baseline_warning(job_id, view),
-                "adopted": self._adoption_view(self._adoption(job_id))}
+                "baseline_warning": self._baseline_warning(job_id, view, adoption),
+                "template_tries": [] if folder is None else template_tries(
+                    Path(str(folder)), {entry.id: entry.label for entry in self._library()}),
+                "adopted": self._adoption_view(adoption)}
 
     def _started_run(self, name: str) -> str | None:
         """這份新方案已經開過的一般計算（最晚開的那一筆）；沒有回 None。
