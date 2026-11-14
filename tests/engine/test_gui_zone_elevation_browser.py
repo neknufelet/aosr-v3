@@ -1,10 +1,12 @@
 """真瀏覽器考立面圖（#1091）：站在房間裡看那一面（鏡像對不對用喇叭左右考，不只考自己的翻轉表）、
 拖曳畫框貼到不在格點上的牆邊、補滿、存檔再開、改數字、刪框回整面；補出窄條時標紅不換方案；
-房間改矮後兩面都對不上，一面一面清還是做得到。房間一律用 109 號房的長寬高。"""
+房間改矮後兩面都對不上，一面一面清還是做得到；畫好的框按住拖著整塊搬（#1168）。房間一律用 109 號房的長寬高。"""
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.physics.zone_fill import Box, fill_wall
@@ -46,8 +48,10 @@ def _centre_y(page: Page, selector: str) -> float:
     return box["y"] + box["height"] / 2
 
 
-def _drag(page: Page, width: float, height: float, start: tuple[float, float], end: tuple[float, float]) -> None:
-    """畫面座標（公尺，從左緣往右、從下緣往上）拖一個框；換算照牆框在畫面上的位置。"""
+def _drag(page: Page, width: float, height: float, start: tuple[float, float], end: tuple[float, float], *,
+          ok: bool = True, during: Callable[[], None] | None = None) -> None:
+    """畫面座標（公尺，從左緣往右、從下緣往上）拖一下（空白處畫框、畫好的框整塊搬）；換算照牆框在畫面上的位置。
+    ``during`` 在按著滑鼠、還沒放開時跑。"""
     # 先等最新一次限制判決畫上去（#1111：判決晚到會重畫立面圖，換掉這裡要量的牆框）。
     # 按下滑鼠本來就會讓焦點離開輸入格：先照做，正在打字而延後的判決才會畫。
     page.evaluate("document.activeElement?.blur()")
@@ -63,9 +67,11 @@ def _drag(page: Page, width: float, height: float, start: tuple[float, float], e
     page.mouse.move(*pixel(start))
     page.mouse.down()
     page.mouse.move(*pixel(end), steps=6)
+    if during is not None:
+        during()
     with page.expect_response("**/api/zone-cut") as response:
         page.mouse.up()
-    assert response.value.ok, response.value.text()
+    assert response.value.ok is ok, response.value.text()
     page.wait_for_function("!document.querySelector('main').inert")
 
 
@@ -207,6 +213,89 @@ def test_thin_strip_is_marked_red_and_walls_can_be_cleared_one_by_one_after_the_
             {"area": "whole_wall", "material": ASSEMBLY}]
         page.locator("#elevation").screenshot(path=str(tmp_path / "cleared.png"))
         assert watched.page_errors == []
+
+
+MOVED_MATERIAL: dict[str, object] = {"kind": "constant_impedance", "impedance_pa_s_m": 900.0}
+
+
+def _moving_wall_document() -> dict[str, object]:
+    """x 終點牆（鏡像）有兩個畫好的框：z1 在畫面左下角、貼牆那一邊在 u＝牆寬（不在 5 公分格上），材料跟整面不同；
+    z2 在畫面右邊。其餘自動補滿，材料沿用整面。"""
+    document = room109_document("move")
+    zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])
+    wall_material = zones["xL"][0]["material"]
+    drawn = [Box("z1", (LY - 1.0, LY), (0.0, 1.2)), Box("z2", (0.5, 1.5), (0.0, 2.0))]
+    filled = fill_wall("xL", LY, LZ, drawn, min_side_m=0.0)
+    zones["xL"] = [{"area": "rectangle", "id": box.id, "u_m": list(box.u_m), "v_m": list(box.v_m),
+                    "material": MOVED_MATERIAL if box.id == "z1" else wall_material} for box in filled.zones]
+    return document
+
+
+def _box(page: Page, wall: str, zone_id: str) -> dict[str, object]:
+    return next(zone for zone in _zones(page, wall) if zone["id"] == zone_id)
+
+
+def test_drawn_box_drags_as_a_whole_snaps_to_the_wall_edge_and_springs_back_on_overlap(
+        tmp_path: Path, browser: Browser) -> None:
+    """老闆 11-14「框不能移動喔」：按住畫好的框拖＝整塊搬（寬高、代號、材料不變）；點一下沒拖只選取、不送切牆；
+    拖到離牆邊不到最小邊就整塊貼過去（貼的那一邊正好等於不在格點上的牆寬）；疊到別框被伺服器拒，框畫回原位。"""
+    _write(tmp_path, _moving_wall_document())
+    shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "move")
+        page.locator("#elevation-wall-xL").click()
+        z2 = _box(page, "xL", "z2")
+        cuts: list[str] = []
+        page.on("request", lambda request: cuts.append(request.url) if "/api/zone-cut" in request.url else None)
+
+        # 點一下：只選取，四格是畫面方向的數字（鏡像牆：貼牆那邊在畫面左緣）。
+        page.locator("#elevation [data-zone-id=z1] rect").click()
+        expect(page.locator("#elevation [data-zone-id=z1]")).to_have_class("zone zone-drawn zone-mode-fixed selected")
+        expect(page.locator("#elevation-left")).to_have_value("0")
+        expect(page.locator("#elevation-bottom")).to_have_value("0")
+        assert cuts == []
+
+        # 按住 z1 正中往右 1 公尺、往上 0.5 公尺：拖的時候框跟著走、限制判決先不重畫、提示列報落點；放開才切。
+        def while_dragging() -> None:
+            assert page.evaluate("elevationDrawing()") is True
+            assert page.locator("#elevation [data-zone-id=z1]").get_attribute("transform") is not None
+            # 被拖的框畫在其餘分區上面（不然被後畫的「自動」格蓋住，畫面上只剩原位的空洞）。
+            assert page.evaluate("[...document.querySelectorAll('#elevation-svg .zone')].at(-1).dataset.zoneId") == "z1"
+            expect(page.locator("#elevation-note")).to_contain_text("搬到：離左緣 1、離下緣 0.5 公尺")
+            assert cuts == []
+            # 按著滑鼠時截圖不能捲頁面（捲了放開的點就對到牆上別處）：照立面圖現在的位置裁整個視窗的圖。
+            clip = page.locator("#elevation").bounding_box()
+            assert clip is not None
+            page.screenshot(path=str(shots / "1168-dragging.png"), clip=clip)
+        _drag(page, LY, LZ, (0.5, 0.6), (1.5, 1.1), during=while_dragging)
+        z1 = _box(page, "xL", "z1")
+        assert z1["u_m"] == pytest.approx([LY - 2.0, LY - 1.0]) and z1["v_m"] == pytest.approx([0.5, 1.7])
+        assert z1["material"] == MOVED_MATERIAL and _box(page, "xL", "z2") == z2
+        for field, value in (("left", "1"), ("bottom", "0.5"), ("width", "1"), ("height", "1.2")):
+            expect(page.locator(f"#elevation-{field}")).to_have_value(value)
+        assert page.evaluate("elevationDrawing()") is False
+        page.locator("#elevation").screenshot(path=str(shots / "1168-moved.png"))
+
+        # 拖回離左緣 0.1 公尺：不到最小邊，整塊貼到牆邊，寬不變；貼牆那一邊正好等於牆寬。
+        _drag(page, LY, LZ, (1.5, 1.1), (0.6, 1.1))
+        z1 = _box(page, "xL", "z1")
+        u = cast(list[float], z1["u_m"])
+        assert u[1] == LY and u[0] == pytest.approx(LY - 1.0) and z1["v_m"] == pytest.approx([0.5, 1.7])
+
+        # 拖去疊住 z2：伺服器拒、分區不變、框畫回原位。
+        before = _zones(page, "xL")
+        _drag(page, LY, LZ, (0.5, 1.1), (2.8, 1.1), ok=False)
+        assert _zones(page, "xL") == before
+        expect(page.locator("#elevation-note")).to_contain_text("重疊")
+        assert page.locator("#elevation [data-zone-id=z1]").get_attribute("transform") is None
+        page.locator("#elevation").screenshot(path=str(shots / "1168-overlap.png"))
+
+        saved = _save_readback(page, "moved")
+        assert cast(dict[str, list[object]], cast(dict[str, object], saved["scene"])[NEW])["xL"] == _zones(page, "xL")
+        # 主控台只准有疊框那一次被拒的 400（瀏覽器自己記的），別的錯一筆都不准。
+        assert watched.page_errors == [] and len(watched.console_errors) == 1
+        assert "400 (Bad Request)" in watched.console_errors[0]
 
 
 # 109 示範的擺位與切法（#1119；值照示範方案 room109demo-search-c98c50b8 原樣抄，含浮點尾數與補滿的區）：
