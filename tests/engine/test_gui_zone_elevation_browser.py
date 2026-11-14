@@ -1,10 +1,12 @@
 """真瀏覽器考立面圖（#1091）：站在房間裡看那一面（鏡像對不對用喇叭左右考，不只考自己的翻轉表）、
 拖曳畫框貼到不在格點上的牆邊、補滿、存檔再開、改數字、刪框回整面；補出窄條時標紅不換方案；
-房間改矮後兩面都對不上，一面一面清還是做得到。房間一律用 109 號房的長寬高。"""
+房間改矮後兩面都對不上，一面一面清還是做得到；畫好的框按住拖著整塊搬（#1168）。房間一律用 109 號房的長寬高。"""
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.physics.zone_fill import Box, fill_wall
@@ -46,8 +48,8 @@ def _centre_y(page: Page, selector: str) -> float:
     return box["y"] + box["height"] / 2
 
 
-def _drag(page: Page, width: float, height: float, start: tuple[float, float], end: tuple[float, float]) -> None:
-    """畫面座標（公尺，從左緣往右、從下緣往上）拖一個框；換算照牆框在畫面上的位置。"""
+def _ready_pixel(page: Page, width: float, height: float) -> Callable[[tuple[float, float]], tuple[float, float]]:
+    """等畫面可以拖了，回「畫面座標（公尺）換成視窗像素」的函式。"""
     # 先等最新一次限制判決畫上去（#1111：判決晚到會重畫立面圖，換掉這裡要量的牆框）。
     # 按下滑鼠本來就會讓焦點離開輸入格：先照做，正在打字而延後的判決才會畫。
     page.evaluate("document.activeElement?.blur()")
@@ -59,13 +61,22 @@ def _drag(page: Page, width: float, height: float, start: tuple[float, float], e
 
     def pixel(point: tuple[float, float]) -> tuple[float, float]:
         return frame["x"] + point[0] / width * frame["width"], frame["y"] + (1 - point[1] / height) * frame["height"]
+    return pixel
 
+
+def _drag(page: Page, width: float, height: float, start: tuple[float, float], end: tuple[float, float], *,
+          ok: bool = True, during: Callable[[], None] | None = None) -> None:
+    """畫面座標（公尺，從左緣往右、從下緣往上）拖一下（空白處畫框、畫好的框整塊搬）；換算照牆框在畫面上的位置。
+    ``during`` 在按著滑鼠、還沒放開時跑。"""
+    pixel = _ready_pixel(page, width, height)
     page.mouse.move(*pixel(start))
     page.mouse.down()
     page.mouse.move(*pixel(end), steps=6)
+    if during is not None:
+        during()
     with page.expect_response("**/api/zone-cut") as response:
         page.mouse.up()
-    assert response.value.ok, response.value.text()
+    assert response.value.ok is ok, response.value.text()
     page.wait_for_function("!document.querySelector('main').inert")
 
 
@@ -206,6 +217,164 @@ def test_thin_strip_is_marked_red_and_walls_can_be_cleared_one_by_one_after_the_
         assert cast(dict[str, list[dict[str, object]]], cast(dict[str, object], saved["scene"])[NEW])["yL"] == [
             {"area": "whole_wall", "material": ASSEMBLY}]
         page.locator("#elevation").screenshot(path=str(tmp_path / "cleared.png"))
+        assert watched.page_errors == []
+
+
+MOVED_MATERIAL: dict[str, object] = {"kind": "constant_impedance", "impedance_pa_s_m": 900.0}
+
+
+def _moving_wall_document() -> dict[str, object]:
+    """x 終點牆（鏡像）有兩個畫好的框：z1 在畫面左下角、貼牆那一邊在 u＝牆寬（不在 5 公分格上），材料跟整面不同；
+    z2 在畫面右邊。其餘自動補滿，材料沿用整面。"""
+    document = room109_document("move")
+    zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])
+    wall_material = zones["xL"][0]["material"]
+    drawn = [Box("z1", (LY - 1.0, LY), (0.0, 1.2)), Box("z2", (0.5, 1.5), (0.0, 2.0))]
+    filled = fill_wall("xL", LY, LZ, drawn, min_side_m=0.0)
+    zones["xL"] = [{"area": "rectangle", "id": box.id, "u_m": list(box.u_m), "v_m": list(box.v_m),
+                    "material": MOVED_MATERIAL if box.id == "z1" else wall_material} for box in filled.zones]
+    return document
+
+
+def _box(page: Page, wall: str, zone_id: str) -> dict[str, object]:
+    return next(zone for zone in _zones(page, wall) if zone["id"] == zone_id)
+
+
+def test_drawn_box_drags_as_a_whole_snaps_to_the_wall_edge_and_springs_back_on_overlap(
+        tmp_path: Path, browser: Browser) -> None:
+    """老闆 11-14「框不能移動喔」：按住畫好的框拖＝整塊搬（寬高、代號、材料不變）；點一下沒拖只選取、不送切牆；
+    拖到離牆邊不到最小邊就整塊貼過去（貼的那一邊正好等於不在格點上的牆寬）；疊到別框被伺服器拒，框畫回原位。"""
+    _write(tmp_path, _moving_wall_document())
+    shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "move")
+        page.locator("#elevation-wall-xL").click()
+        z2 = _box(page, "xL", "z2")
+        cuts: list[str] = []
+        page.on("request", lambda request: cuts.append(request.url) if "/api/zone-cut" in request.url else None)
+
+        # 點一下：只選取，四格是畫面方向的數字（鏡像牆：貼牆那邊在畫面左緣）。
+        page.locator("#elevation [data-zone-id=z1] rect").click()
+        expect(page.locator("#elevation [data-zone-id=z1]")).to_have_class("zone zone-drawn zone-mode-fixed selected")
+        expect(page.locator("#elevation-left")).to_have_value("0")
+        expect(page.locator("#elevation-bottom")).to_have_value("0")
+        assert cuts == []
+
+        # 按住 z1 正中往右 1 公尺、往上 0.5 公尺：拖的時候框跟著走、限制判決先不重畫、提示列報落點；放開才切。
+        def while_dragging() -> None:
+            assert page.evaluate("elevationDrawing()") is True
+            assert page.locator("#elevation [data-zone-id=z1]").get_attribute("transform") is not None
+            # 被拖的框畫在其餘分區上面（不然被後畫的「自動」格蓋住，畫面上只剩原位的空洞）。
+            assert page.evaluate("[...document.querySelectorAll('#elevation-svg .zone')].at(-1).dataset.zoneId") == "z1"
+            expect(page.locator("#elevation-note")).to_contain_text("搬到：離左緣 1、離下緣 0.5 公尺")
+            assert cuts == []
+            # 按著滑鼠時截圖不能捲頁面（捲了放開的點就對到牆上別處）：照立面圖現在的位置裁整個視窗的圖。
+            clip = page.locator("#elevation").bounding_box()
+            assert clip is not None
+            page.screenshot(path=str(shots / "1168-dragging.png"), clip=clip)
+        _drag(page, LY, LZ, (0.5, 0.6), (1.5, 1.1), during=while_dragging)
+        z1 = _box(page, "xL", "z1")
+        assert z1["u_m"] == pytest.approx([LY - 2.0, LY - 1.0]) and z1["v_m"] == pytest.approx([0.5, 1.7])
+        assert z1["material"] == MOVED_MATERIAL and _box(page, "xL", "z2") == z2
+        for field, value in (("left", "1"), ("bottom", "0.5"), ("width", "1"), ("height", "1.2")):
+            expect(page.locator(f"#elevation-{field}")).to_have_value(value)
+        assert page.evaluate("elevationDrawing()") is False
+        page.locator("#elevation").screenshot(path=str(shots / "1168-moved.png"))
+
+        # 拖回離左緣 0.1 公尺：不到最小邊，整塊貼到牆邊，寬不變；貼牆那一邊正好等於牆寬。
+        _drag(page, LY, LZ, (1.5, 1.1), (0.6, 1.1))
+        z1 = _box(page, "xL", "z1")
+        u = cast(list[float], z1["u_m"])
+        assert u[1] == LY and u[0] == pytest.approx(LY - 1.0) and z1["v_m"] == pytest.approx([0.5, 1.7])
+
+        # 拖去疊住 z2：伺服器拒、分區不變、框畫回原位。
+        before = _zones(page, "xL")
+        _drag(page, LY, LZ, (0.5, 1.1), (2.8, 1.1), ok=False)
+        assert _zones(page, "xL") == before
+        expect(page.locator("#elevation-note")).to_contain_text("重疊")
+        assert page.locator("#elevation [data-zone-id=z1]").get_attribute("transform") is None
+        page.locator("#elevation").screenshot(path=str(shots / "1168-overlap.png"))
+
+        saved = _save_readback(page, "moved")
+        assert cast(dict[str, list[object]], cast(dict[str, object], saved["scene"])[NEW])["xL"] == _zones(page, "xL")
+        # 主控台只准有疊框那一次被拒的 400（瀏覽器自己記的），別的錯一筆都不准。
+        assert watched.page_errors == [] and len(watched.console_errors) == 1
+        assert "400 (Bad Request)" in watched.console_errors[0]
+
+
+# 切牆請求在送出那一刻記下（頁面上包一層 fetch）：Playwright 的請求事件晚一拍才到，判「沒送」要當場數。
+_COUNT_CUTS = """() => { window.cutsSent = 0; const send = window.fetch;
+  window.fetch = (url, init) => { if (String(url).includes('/api/zone-cut')) window.cutsSent += 1; return send(url, init); }; }"""
+
+
+def _touch_then_cancel(page: Page, pixel: Callable[[tuple[float, float]], tuple[float, float]],
+                       start: tuple[float, float], end: tuple[float, float]) -> None:
+    """用瀏覽器自己的觸控管道按下、拖，再由瀏覽器取消（沒有放開）：瀏覽器發 pointercancel 與 lostpointercapture。"""
+    cdp = page.context.new_cdp_session(page)
+    (x0, y0), (x1, y1) = pixel(start), pixel(end)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x0, "y": y0}]})
+    for step in range(1, 7):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [
+            {"x": x0 + (x1 - x0) * step / 6, "y": y0 + (y1 - y0) * step / 6}]})
+    assert page.evaluate("elevationDrawing()") is True
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
+    page.wait_for_function("!elevationDrawing()")
+    cdp.detach()
+
+
+def test_cancelled_or_redrawn_drag_leaves_nothing_behind(tmp_path: Path, browser: Browser) -> None:
+    """#1168 審查：瀏覽器沒等放開就收回指標（觸控被取消），拖到半路的框回原位、預覽框拿掉，之後隨手點一下不准照點的位置切牆
+    （修之前框被搬走、或畫出一個框）；搬框時連線斷掉，框畫回原位、提示列說沒有切；拖到一半立面圖被重畫
+    （焦點留在房高那格時按方向鍵），「正在拖」要放掉、限制判決照常畫上。"""
+    _write(tmp_path, _moving_wall_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "move")
+        page.locator("#elevation-wall-xL").click()
+        before = _zones(page, "xL")
+        page.evaluate(_COUNT_CUTS)
+        z1 = page.locator("#elevation [data-zone-id=z1]")
+
+        # 搬框途中被取消：框回原位、不帶拖曳樣式，提示列不停在「搬到」；之後在空白處點一下不送切牆。
+        pixel = _ready_pixel(page, LY, LZ)
+        _touch_then_cancel(page, pixel, (0.5, 0.6), (1.5, 1.1))
+        assert z1.get_attribute("transform") is None and "moving" not in str(z1.get_attribute("class"))
+        expect(page.locator("#elevation-note")).not_to_contain_text("搬到")
+        page.mouse.click(*pixel((2.0, 2.8)))
+        assert page.evaluate("window.cutsSent") == 0 and _zones(page, "xL") == before
+
+        # 畫框途中被取消：預覽框拿掉；之後點一下不送切牆。
+        _touch_then_cancel(page, pixel, (1.5, 2.0), (2.5, 2.8))
+        expect(page.locator("#elevation .zone-preview")).to_have_count(0)
+        page.mouse.click(*pixel((1.5, 2.5)))
+        assert page.evaluate("window.cutsSent") == 0 and _zones(page, "xL") == before
+
+        # 搬框時連線斷掉：框畫回原位、提示列說沒有切。
+        page.route("**/api/zone-cut", lambda route: route.abort())
+        page.mouse.move(*pixel((0.5, 0.6)))
+        page.mouse.down()
+        page.mouse.move(*pixel((1.5, 1.1)), steps=6)
+        page.mouse.up()
+        expect(page.locator("#elevation-note")).to_contain_text("沒有切：框放回原位")
+        assert z1.get_attribute("transform") is None and _zones(page, "xL") == before
+        page.unroute("**/api/zone-cut")
+        assert page.evaluate("window.cutsSent") == 1
+        page.evaluate("window.cutsSent = 0")
+
+        # 焦點留在房高那格（按下框不會搶走焦點），拖到一半按上方向鍵：房高改了、立面圖重畫、這次拖曳作廢。
+        pixel = _ready_pixel(page, LY, LZ)
+        page.evaluate("document.getElementById('room-Lz').focus({preventScroll: true})")
+        page.mouse.move(*pixel((0.5, 0.6)))
+        page.mouse.down()
+        page.mouse.move(*pixel((1.5, 1.1)), steps=6)
+        assert page.evaluate("elevationDrawing()") is True
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate("elevationDrawing()") is False
+        page.mouse.up()
+        page.evaluate("document.activeElement?.blur()")
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        assert page.evaluate("window.cutsSent") == 0 and _zones(page, "xL") == before
         assert watched.page_errors == []
 
 

@@ -143,15 +143,38 @@ function pointerMetres(svg, event, geometry) {
   const b = geometry.height - (local.y - geometry.pad) / geometry.scale;
   return [Math.min(Math.max(a, 0), geometry.width), Math.min(Math.max(b, 0), geometry.height)];
 }
+// 一次拖曳（畫框、搬框共用）：按下就抓住指標、標「正在拖」，放開才走 complete。瀏覽器沒等放開就收回指標（觸控被取消），
+// 或拖到一半立面圖被重畫（焦點留在房間尺寸格時按方向鍵），都拆掉監聽、標回沒在拖、整張重畫（預覽框與拖到半路的框回原位），
+// 不留一個等下一次點擊才觸發的收尾（#1168 審查：框卡在半路，之後點一下就被搬走；畫框留著預覽框同樣）。
+// 收著的限制判決在拖曳結束（不管走哪條路）之後才畫：收尾要用的這張圖在那之前不能換掉。
+let dropDrag = null;
+function trackDrag(svg, event, move, complete, cancelled = () => {}) {
+  let live = true;
+  const stop = () => {
+    if (!live) return false;
+    live = false; dropDrag = null;
+    svg.removeEventListener("pointermove", move);
+    svg.removeEventListener("pointerup", finish);
+    svg.removeEventListener("lostpointercapture", lost);
+    return true;
+  };
+  const endDrawing = () => { if (!elevationDrawing) return; elevationDrawing = false; zoneLimitsDragEnded(); };
+  const finish = ended => {
+    if (!stop()) return;
+    try { complete(ended); } finally { endDrawing(); }
+  };
+  const lost = () => { if (stop()) { cancelled(); endDrawing(); renderElevation(); } };
+  dropDrag = () => { if (stop()) { cancelled(); endDrawing(); } };  // 重畫的那一支自己會畫
+  svg.setPointerCapture(event.pointerId);
+  elevationDrawing = true;
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerup", finish);
+  svg.addEventListener("lostpointercapture", lost);
+}
 function startDrawing(svg, event, geometry, view, wall) {
   const start = pointerMetres(svg, event, geometry);
   const preview = node("rect", {class: "zone-preview", x: 0, y: 0, width: 0, height: 0});
   svg.append(preview);
-  svg.setPointerCapture(event.pointerId);
-  elevationDrawing = true;
-  // 放開滑鼠（收尾做完、不管走哪條路）或拖曳被瀏覽器收回之後，才畫收著的判決：收尾要用的這張圖在那之前不能換掉。
-  const endDrawing = () => { if (!elevationDrawing) return; elevationDrawing = false; zoneLimitsDragEnded(); };
-  svg.addEventListener("lostpointercapture", endDrawing, {once: true});
   const corners = end => [Math.min(start[0], end[0]), Math.max(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[1], end[1])];
   const move = moved => {
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, moved, geometry));
@@ -160,10 +183,7 @@ function startDrawing(svg, event, geometry, view, wall) {
     preview.setAttribute("width", (a1 - a0) * geometry.scale);
     preview.setAttribute("height", (b1 - b0) * geometry.scale);
   };
-  const finish = ended => { try { complete(ended); } finally { endDrawing(); } };
   const complete = ended => {
-    svg.removeEventListener("pointermove", move);
-    svg.removeEventListener("pointerup", finish);
     preview.remove();
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, ended, geometry));
     // 幾乎沒拖：當作點在空白處，取消選取。
@@ -180,8 +200,69 @@ function startDrawing(svg, event, geometry, view, wall) {
     }
     action(() => cutWall(wall, [...others, box], () => { elevationSelected = box.id; }));
   };
-  svg.addEventListener("pointermove", move);
-  svg.addEventListener("pointerup", finish);
+  trackDrag(svg, event, move, complete);
+}
+// 整塊平移要挪多少才貼齊（#1168）：有一邊已經貼著牆邊或別框的邊就不挪；不然挑離最近的那一對，
+// 差不到「最小邊扣容差」才貼（同 snapEdges 那一把）。只平移、不改寬高。
+function moveShift(edges, targets) {
+  const tolerance = cutSpec().edge_merge_tol_m;
+  if (edges.some(edge => targets.some(target => Math.abs(edge - target) <= tolerance))) return 0;
+  let best = 0, gap = cutSpec().min_side_m - tolerance;
+  for (const edge of edges) for (const target of targets) {
+    if (Math.abs(target - edge) < gap) { best = target - edge; gap = Math.abs(target - edge); }
+  }
+  return best;
+}
+// 按住畫好的框拖著搬（#1168）：寬高不變；左下角吸到畫面格點、夾在牆內，再整塊貼齊最近的牆邊或鄰框。
+// 拖的時候框跟著滑鼠走（看到的就是放開後要交出去的位置），放開才交伺服器切；幾乎沒拖就當點選。
+// 疊到別框、留下窄條照樣交伺服器判，不切就畫回原位。代號不變，材料與做法照代號沿用。
+function startMoving(svg, event, geometry, view, wall, group) {
+  const id = group.dataset.zoneId;
+  const current = drawnBoxes(wall).find(box => box.id === id);
+  const others = drawnBoxes(wall).filter(box => box.id !== id);
+  if (!current) return;
+  const {width, height, scale} = geometry;
+  const [a0, a1, b0, b1] = screenBox(view, width, height, current);
+  const start = pointerMetres(svg, event, geometry);
+  group.classList.add("moving");
+  // 提到其餘分區上面（不然拖過去被後畫的「自動」格蓋住，只看得到原位的空洞），喇叭與座位記號照舊在最上層。
+  svg.insertBefore(group, svg.querySelector(".elevation-marker"));
+  const line = $("elevation-note"), before = [line.textContent, line.className];  // 只是點選時放回原本的提示
+  const landing = point => {
+    const left = Math.min(gridSnap(a0 + point[0] - start[0], width), width - (a1 - a0));
+    const bottom = Math.min(gridSnap(b0 + point[1] - start[1], height), height - (b1 - b0));
+    const box = wallBox(view, width, height, left, left + (a1 - a0), bottom, bottom + (b1 - b0), id);
+    const clamp = (shift, pair, limit) => Math.min(Math.max(shift, -pair[0]), limit - pair[1]);
+    const du = clamp(moveShift(box.u_m, [0, width, ...others.flatMap(other => other.u_m)]), box.u_m, width);
+    const dv = clamp(moveShift(box.v_m, [0, height, ...others.flatMap(other => other.v_m)]), box.v_m, height);
+    return {id, u_m: box.u_m.map(value => value + du), v_m: box.v_m.map(value => value + dv)};
+  };
+  const move = moved => {
+    const [c0, , d0] = screenBox(view, width, height, landing(pointerMetres(svg, moved, geometry)));
+    group.setAttribute("transform", `translate(${(c0 - a0) * scale} ${(b0 - d0) * scale})`);
+    note(`搬到：離左緣 ${metres(c0)}、離下緣 ${metres(d0)} 公尺（放開才切）`, "");
+  };
+  const complete = ended => {
+    elevationSelected = id;
+    const box = landing(pointerMetres(svg, ended, geometry));
+    const same = [...box.u_m, ...box.v_m].every((value, index) => Math.abs(value - [...current.u_m, ...current.v_m][index]) < 1e-9);
+    const dragged = Math.hypot(ended.clientX - event.clientX, ended.clientY - event.clientY) >= 4;
+    if (!dragged || same) {
+      if (dragged) note("框沒有搬動（放開的位置吸回原處）", "notice"); else note(...before);
+      renderElevation(); return;
+    }
+    // 切成功或被拒都會整張重畫；沒送出（上一個改動還在處理）或連線失敗時，這裡把拖走的框畫回原位，
+    // 提示列還停在「放開才切」的話改說沒有切（沒送出那兩種 cutWall 自己寫了原因，不蓋掉）。
+    action(async () => {
+      try { await cutWall(wall, [...others, box]); } finally {
+        if (group.isConnected) {
+          if ($("elevation-note").textContent.startsWith("搬到")) note("沒有切：框放回原位（連線失敗）", "notice");
+          renderElevation();
+        }
+      }
+    });
+  };
+  trackDrag(svg, event, move, complete, () => note(...before));
 }
 // 選取的框用畫面方向的四個數字改：只改動到的那一格，另外三格沿用原值（顯示只到公釐，不拿顯示的數字回填）。
 function editSelected(wall, view, width, height, field, value) {
@@ -206,7 +287,7 @@ function selectedEditor(wall, view, width, height) {
   if (!current) {
     elevationSelected = null;
     const hint = document.createElement("p"); hint.className = "note";
-    hint.textContent = "在牆上空白處（含標「自動」的格子）按住拖曳畫一個框；點畫好的框可以改尺寸或刪掉。";
+    hint.textContent = "在牆上空白處（含標「自動」的格子）按住拖曳畫一個框；按住畫好的框拖曳可以整塊搬，點一下可以改尺寸或刪掉。";
     area.append(hint); return;
   }
   const [a0, a1, b0, b1] = screenBox(view, width, height, current);
@@ -289,6 +370,7 @@ function zoneLabelY(label, centerX, centerY, top, bottom, layout) {
   return null;
 }
 function renderElevation() {
+  if (dropDrag) dropDrag();  // 拖到一半被重畫：那一張圖要換掉了，這次拖曳作廢（見 trackDrag）
   const area = $("elevation");
   if (!area || !scheme || !inputDefaults) return;
   const buttons = $("elevation-walls"); buttons.replaceChildren();
@@ -347,11 +429,10 @@ function renderElevation() {
   }
   svg.addEventListener("pointerdown", event => {
     if (event.button !== 0) return;
-    const zone = event.target.closest?.("[data-zone-id]");
-    if (zone && zone.classList.contains("zone-drawn")) {
-      elevationSelected = zone.dataset.zoneId; renderElevation(); return;
-    }
     event.preventDefault();
+    const zone = event.target.closest?.("[data-zone-id]");
+    // 畫好的框：按住拖＝整塊搬，按一下沒拖＝選取（#1168）；空白處與「自動」格：拖曳畫新框。
+    if (zone && zone.classList.contains("zone-drawn")) { startMoving(svg, event, geometry, view, wall, zone); return; }
     startDrawing(svg, event, geometry, view, wall);
   });
   area.append(svg);
