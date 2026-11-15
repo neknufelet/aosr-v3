@@ -27,7 +27,7 @@ const zoneAllowedOpen = new Set();
 // （「只讓電腦決定：這一筆貼或不貼」用）。兩樣都只記在這一頁，不跨重開，也不跨方案（打開別的方案、載入範本就清掉）。
 let zoneLastAllowed = null;
 const zoneFormerFixed = new Map();
-// 剛才選的跟原牆一模一樣、做法自己跳成「不貼，保留原牆」的區（#1175／#1176）：那一列寫為什麼（八區的牆上，底部訊息常在畫面外）。
+// 選的跟原牆一模一樣、做法自己跳成「不貼，保留原牆」的區（#1175／#1176）：那一列寫為什麼（八區的牆上，底部訊息常在畫面外）。
 // 「牆/區」→ 選的那一筆的名字；只記在這一頁，那一區再改做法、選別的、重切或換方案就拿掉。
 const zoneSameAsOriginal = new Map();
 const ZONE_NONE = "none";
@@ -290,7 +290,7 @@ function fixedDepthWords(entry) {
   if (!(depth > 0)) return "";
   return `總厚約 ${centimetres(depth)} cm${layers.some(layer => layer.kind === "board") ? "（不含薄板）" : ""}`;
 }
-// 不在固定成品那一組標題底下列的固定成品（方塊、不列的那幾組）：自己說是固定成品，再接總厚。
+// 「顯示全部材料」打開後不列的那幾組裡的固定成品（組標題沒說是固定成品）：自己說是固定成品，再接總厚。
 function fixedWords(entry) { return [FIXED_WORDS, fixedDepthWords(entry)].filter(Boolean).join("，"); }
 
 // 交伺服器換這一區的材料；成功才原地換進方案（同切牆面：等回覆時整頁鎖住）。回伺服器的回覆，沒換成回 null。
@@ -366,7 +366,7 @@ async function chooseFixed(wall, key, materialId) {
   delete next.allowed;
   setZoneSetting(wall, key, next);
   if (data.same_as_original) {
-    zoneSameAsOriginal.set(`${wall}/${key}`, libraryEntry(materialId)?.label ?? materialId);
+    zoneSameAsOriginal.set(`${wall}/${key}`, libraryEntry(materialId).label);
     zoneNote(`${wallNames[wall]}「${zoneName(key)}」：選的跟原本一樣，當成不貼（做法改成「不貼，保留原牆」）`, "ok");
   } else zoneSameAsOriginal.delete(`${wall}/${key}`);
   await afterZoneChange();
@@ -517,7 +517,7 @@ function allowedChecklist(wall, key, allowed, onToggle) {
     }
   } else if (count) {
     const line = document.createElement("p"); line.className = "note"; line.id = `zone-allowed-hidden-${wall}-${key}`;
-    line.textContent = `還有 ${count} 筆不是${wallNames[wall]}用的、不列出來：${hidden.map(([group]) => zoneSurfaceShort[group] ?? group).join("、")}。`
+    line.textContent = `還有 ${count} 筆不是${wallNames[wall]}用的、不列出來：${hidden.map(([group]) => zoneSurfaceShort[group]).join("、")}。`
       + "要選就打開表格下面「顯示全部材料」";
     list.append(line);
   }
@@ -683,7 +683,7 @@ function renderZoneTable(wall) {
       const same = zoneSameAsOriginal.get(`${wall}/${key}`);
       if (same) {
         const why = document.createElement("p"); why.className = "ok"; why.id = `zone-same-${wall}-${key}`;
-        why.textContent = `剛才選的「${same}」跟原本一樣，當成不貼（做法自己改成「不貼，保留原牆」）`;
+        why.textContent = `選的「${same}」跟原本一樣，當成不貼（做法自己改成「不貼，保留原牆」）`;
         material.append(why);
       }
       material.append(numbersDetail(zone.material, `zone-numbers-${wall}-${key}`));
