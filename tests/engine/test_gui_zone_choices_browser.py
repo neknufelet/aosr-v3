@@ -1,7 +1,7 @@
 """真瀏覽器考做法表的材料清單（#1176，老闆 11-15「109示範又不知道是娥麼這也能當成一個材料」「都不知道在講甚麼」）：
 選單與勾選表只列這一面能貼的（門、窗、地板、整片吊頂、另一間示範房的不出現），「顯示全部材料」打開才分組列出；
 這一區現在放的那一筆就算不是這一面用的也照樣顯示；用語是白話（做法三種、原牆不寫阻抗數字、可調寫得出調什麼）。
-材料庫用老闆 11-15 那 12 筆（``_boss_material_library``），房間用 109 號房的長寬高。"""
+材料庫用自己編的合成 12 筆（``_sample_material_library``），房間用 109 號房的長寬高。"""
 from __future__ import annotations
 
 import json
@@ -12,23 +12,23 @@ from playwright.sync_api import Browser, Locator, Page, expect
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
-from tests.engine._boss_material_library import BOSS_USER_ENTRIES
+from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _load_template, _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _save
 
-HIDDEN_ON_WALLS = ("own_room_door_wood_solid", "own_room_window_glass_10mm_single", "own_room_ceiling_calsil_6mm_gap250",
-                   "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "own_room_floor_wood_on_concrete",
-                   "demo109_gw48k_limited", "demo109_measured_gw49_gaborit_s1")
-DOOR = "own_room_door_wood_solid"
-FLOOR_WOOD = "own_room_floor_wood_on_concrete"
+HIDDEN_ON_WALLS = ("hall_door_hollow_core", "side_window_glass_12mm_single", "ceiling_gypsum9mm_gap300",
+                   "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "joist_floor_plank_fixed",
+                   "demo109_rockwool60k_capped", "demo109_measured_pet35_synthetic_b7")
+DOOR = "hall_door_hollow_core"
+FLOOR_WOOD = "joist_floor_plank_fixed"
 
 
-def _boss_library(tmp_path: Path) -> None:
+def _sample_library(tmp_path: Path) -> None:
     adapter: TypeAdapter[tuple[LibraryEntry, ...]] = TypeAdapter(tuple[LibraryEntry, ...])
-    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python(BOSS_USER_ENTRIES)), encoding="utf-8")
+    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python(SAMPLE_USER_ENTRIES)), encoding="utf-8")
 
 
 def _values(page: Page, selector: str) -> list[str]:
@@ -71,15 +71,15 @@ def _small(page: Page, wall: str, material: str) -> Locator:
 
 def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
         assert page.locator("#zone-mode-x0-whole_wall option").all_inner_texts() == ["指定貼一種", "不貼，保留原牆", "交給電腦挑"]
-        # 指定貼一種：牆上能貼的固定成品（含老闆的 VPR），門、窗、天花構造、地毯、示範房一筆都沒有；原牆不寫阻抗數字。
+        # 指定貼一種：牆上能貼的固定成品（含合成的 VPR），門、窗、天花構造、地毯、示範房一筆都沒有；原牆不寫阻抗數字。
         fixed = _values(page, "#zone-fixed-x0-whole_wall option")
-        assert "glass_wool_48k_50mm" in fixed and "melamine100_vpr_steel1mm_softfoam100_draft" in fixed
+        assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
         assert not set(HIDDEN_ON_WALLS) & set(fixed)
         expect(page.locator("#zone-fixed-x0-whole_wall option").first).to_have_text("現在：沒貼東西（原牆原樣）")
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
@@ -98,9 +98,9 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
                 "可調：厚 5～20 cm、空腔不調")
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).not_to_contain_text("（可調厚度與空腔）")
         # 固定成品那一組標題已經講過整塊貼或不貼：每一筆只留總厚；有薄板（只給面密度、沒有厚度）的註明不含，
-        # 不然跟顯示名裡把鋼板算進去的「總厚約 17 cm」打架（審查 11-15）。
+        # 不然跟顯示名裡把鋼板算進去的「總厚約 14 cm」打架（審查 11-15）。
         expect(_small(page, "x0", "fabric_pet_a_gap100")).to_have_text("總厚約 10 cm")
-        expect(_small(page, "x0", "slotted16_mel50_vpr_steel3_5mm_mel100_draft")).to_have_text("總厚約 16.6 cm（不含薄板）")
+        expect(_small(page, "x0", "slotted18_pet45_vpr_steel2p25mm_foam70_sample")).to_have_text("總厚約 13.3 cm（不含薄板）")
         # 不列的那一句只列短組名、不套括號。
         hidden = page.locator("#zone-allowed-hidden-x0-whole_wall")
         expect(hidden).to_have_text("還有 11 筆不是前牆用的、不列出來：地板用的、整片天花構造、門窗、牆面地面本身、示範房的。"
@@ -131,11 +131,11 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
     """選單只列這一面能貼的，但這一區現在放的就是門（打開「顯示全部材料」選的）：關掉之後選單照樣是它、寫出它不是這一面用的；
     保留原牆的區寫白話、數字收在細節；直接取代整面的（地板本身就是木地板那一筆）照樣顯示、不標紅。"""
     document = room109_document()
-    floor = next(entry["material"] for entry in BOSS_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
+    floor = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
     cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["floor"][0]["material"] = (
         cast(dict[str, object], floor))
     _write(tmp_path, document)
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -152,7 +152,7 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
         expect(page.locator("#zone-keep-x0-whole_wall")).to_have_text("原牆原樣，不貼東西")
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
 
-        # 地板本身就是木地板那一筆（直接取代整面的固定阻抗，老闆房間就是這樣）：選單照樣是它，但它就是地板本身，不標紅說不是地板用的。
+        # 地板本身就是木地板那一筆（直接取代整面的固定阻抗，有的房間地板就是這樣）：選單照樣是它，但它就是地板本身，不標紅說不是地板用的。
         page.locator("#elevation-wall-floor").click()
         expect(page.locator("#zone-fixed-floor-whole_wall")).to_have_value(FLOOR_WOOD)
         expect(page.locator(f"#zone-fixed-floor-whole_wall option[value={FLOOR_WOOD}]")).to_contain_text("整面就是它，不是貼上去的")
@@ -171,7 +171,7 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
     不貼），一鍵常用組合整份換掉；這一頁上一次改過的組合，下一區改成交給電腦挑時優先放（這一面用不了的拿掉）；
     地板沒有可調材料，只放「不貼」、不出現玻璃棉的組合。存檔一律寫明確清單。"""
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -221,10 +221,10 @@ def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materia
     """起點要可預期（#1176，跟老闆講好「直接帶好三種玻璃棉＋不貼」）：材料庫多了一筆牆上能用的可調材料，改成交給電腦挑照樣
     只帶三種玻璃棉＋不貼；那一筆在「改清單」裡列著、沒勾，要用自己勾。"""
     _write(tmp_path, room109_document())
-    extra = {**next(entry for entry in BOSS_USER_ENTRIES if entry["id"] == "demo109_gw48k_limited"),
+    extra = {**next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == "demo109_rockwool60k_capped"),
              "id": "own_rock_wool_free", "label": "自填岩棉"}
     adapter: TypeAdapter[tuple[LibraryEntry, ...]] = TypeAdapter(tuple[LibraryEntry, ...])
-    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python([*BOSS_USER_ENTRIES, extra])),
+    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python([*SAMPLE_USER_ENTRIES, extra])),
                                              encoding="utf-8")
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -244,7 +244,7 @@ def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path
     """審查 11-15：底部那一行不准留「先放了 48K、不貼」卻畫著別的清單——改清單（×、常用組合）跟著寫現在的清單，換到別一面
     清掉；「要改就按」指這一區的「改清單」，這一區沒有常用組合（地板）就不提組合。"""
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -270,7 +270,7 @@ def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path
     照樣從三種玻璃棉＋不貼開始（同一份方案裡的別一面才照上一次的組合）；載入範本也一樣從頭。"""
     _write(tmp_path, room109_document())
     _write(tmp_path, room109_document("room109-b"))
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
@@ -306,15 +306,15 @@ def test_an_old_zone_without_a_list_shows_and_saves_what_the_server_means(tmp_pa
     """舊的交給搜尋區沒寫清單（null，伺服器的意思是材料庫全部可調材料＋不貼，示範房的也算）：打開照這個意思列成明確清單
     （示範房那一筆標不是這一面用的），存檔寫成明確清單；伺服器那一邊 null 的意思不改。"""
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     design = _old_search_design(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        everything = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "demo109_gw48k_limited", "none"]
+        everything = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "demo109_rockwool60k_capped", "none"]
         assert _chips(page, "x0", "whole_wall") == everything
-        expect(page.locator("#zone-chip-x0-whole_wall-demo109_gw48k_limited")).to_contain_text("不是前牆用的")
+        expect(page.locator("#zone-chip-x0-whole_wall-demo109_rockwool60k_capped")).to_contain_text("不是前牆用的")
         assert page.evaluate("zoneDesign.zones.x0.whole_wall") == {"mode": "search"}  # 打開不改設計，存檔才寫
         _save(page, "room109")
         assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"] == {
@@ -349,9 +349,9 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
 def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_path: Path, browser: Browser) -> None:
     """老闆 11-15 看不懂「准用清單只有固定材料：搜尋要一個起點」：只放了固定成品時紅框白話寫電腦沒得挑，下面直接給按鈕——
     只有一筆就能改成指定貼它（清單跟著拿掉，伺服器不收固定區帶清單）、加上「不貼」、加上 48K 玻璃棉（地板用不了就不出現）。"""
-    vpr = "melamine100_vpr_steel1mm_softfoam100_draft"
+    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -408,9 +408,9 @@ def _only_fixed(page: Page, wall: str, product: str) -> None:
 def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, browser: Browser) -> None:
     """紅框（只放了固定成品）還在的時候「拿去搜尋」按不下去，旁邊點名是哪幾區的紅框（別面的也算）；處理好一區少一區，
     全處理好自己恢復。直接叫送出也照樣擋、不存不跳頁。"""
-    vpr = "melamine100_vpr_steel1mm_softfoam100_draft"
+    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -458,10 +458,10 @@ def _overflow(page: Page) -> dict[str, float]:
 
 
 def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: Path, browser: Browser) -> None:
-    """老闆的材料庫有幾筆名字很長的固定成品（VPR 那幾筆）：材料下拉選單不准照最長那一筆把表撐寬、把深度上限那一欄擠出面板；
+    """材料庫有幾筆名字很長的固定成品（合成的 VPR 那幾筆）：材料下拉選單不准照最長那一筆把表撐寬、把深度上限那一欄擠出面板；
     指定貼一種與交給電腦挑（方塊、常用組合按鈕、說明一行一行換）兩個樣子都要塞得進立面圖面板。"""
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -469,7 +469,7 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
         _drag(page, ROOM_109["Ly"], ROOM_109["Lz"], (0.02, 0.02), (1.0, 1.2))
         expect(page.locator("#zone-fixed-x0-z1 option", has_text="VPR").first).to_be_attached()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
-        _choose(page, "#zone-fixed-x0-z1", "melamine100_vpr_steel1mm_softfoam100_draft")
+        _choose(page, "#zone-fixed-x0-z1", "pet60_vpr_steel1p2mm_foam90_sample")
         _choose(page, "#zone-mode-x0-z1", "search")
         long_preset = page.locator("#zone-preset-x0-z1-this_or_none")
         expect(long_preset).to_contain_text("只讓電腦決定：「VPR")
@@ -488,7 +488,7 @@ def test_zone_and_size_columns_never_break_inside_a_word(tmp_path: Path, browser
     """審查 11-15：天花整面一區、交給電腦挑打開清單，「區」那一欄的「整面」斷成直的兩行。窄視窗（760）也不准在字中間斷：
     「整面」一行，「大小（公尺）」只准在括號前換行。"""
     _write(tmp_path, room109_document())
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=760) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -531,13 +531,13 @@ def test_an_unknown_name_in_the_list_is_not_counted_as_a_fixed_product(tmp_path:
 def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: Path, browser: Browser) -> None:
     """#1175（老闆 11-15 天花選了跟現況同一筆吊頂，存成兩層吊頂疊在一起）：選到跟這一區原牆一模一樣的多層構造，
     網頁把做法改成「不貼，保留原牆」、說「選的跟原本一樣，當成不貼」，那一區放的還是原牆一份。"""
-    ceiling = "own_room_ceiling_calsil_melamine40_on_board_gap210"
-    built = next(entry["material"] for entry in BOSS_USER_ENTRIES if entry["id"] == ceiling)
+    ceiling = "ceiling_fibrecement8mm_wool30_on_board_gap180"
+    built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == ceiling)
     document = room109_document()
     cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["ceiling"][0]["material"] = (
         cast(dict[str, object], built))
     _write(tmp_path, document)
-    _boss_library(tmp_path)
+    _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -545,7 +545,7 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         # 整片天花構造平常不列成貼上去的處理；原牆認得出是哪一筆就寫它的名字。
         assert ceiling not in _values(page, "#zone-fixed-ceiling-whole_wall option")
         expect(page.locator("#zone-fixed-ceiling-whole_wall option").first).to_contain_text(
-            "現在：沒貼東西（原牆「天花 矽酸鈣板 6 mm＋美耐皿泡棉 40 mm 平放板背＋21 cm 空腔（剛背）」原樣）")
+            "現在：沒貼東西（原牆「天花 纖維水泥板 8 mm＋岩棉毯 30 mm 平鋪在板背＋18 cm 空腔（剛背）」原樣）")
         page.locator("#zone-show-all").check()
         _choose(page, "#zone-fixed-ceiling-whole_wall", ceiling)
         expect(page.locator("#zone-mode-ceiling-whole_wall")).to_have_value("keep_original")
