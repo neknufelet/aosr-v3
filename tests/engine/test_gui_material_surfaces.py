@@ -62,6 +62,17 @@ def test_every_current_material_lands_in_its_pinned_group() -> None:
     assert sorted(key for key, item in found.items() if "ceiling" in item.surfaces) == wall
 
 
+def test_the_ceiling_label_rule_and_the_floor_name_rule_each_hold_a_material() -> None:
+    """審查 11-15：「顯示名以天花開頭」與「代號含 floor」兩條規則，現在的 30 筆沒有一筆只靠它們分組（拿掉照綠）。
+    各釘一筆假材料（剛背的固定多層構造，照內建 48K 50 mm 改代號與顯示名）：拿掉那一條，它就掉進牆面那一組。"""
+    template = next(entry for entry in builtin_entries() if entry.id == "glass_wool_48k_50mm").model_dump(mode="json")
+    adapter: TypeAdapter[LibraryEntry] = TypeAdapter(LibraryEntry)
+    ceiling = adapter.validate_python({**template, "id": "suspended_gypsum_gap200", "label": "天花 石膏板吊頂＋20 cm 空腔"})
+    floor = adapter.validate_python({**template, "id": "raised_wood_floor_on_joists", "label": "架高木地板"})
+    assert (placement(ceiling).group, placement(ceiling).surfaces) == ("ceiling_build", ())
+    assert (placement(floor).group, placement(floor).surfaces) == ("floor", ("floor",))
+
+
 def test_material_listing_carries_the_placement_of_each_row(tmp_path: Path) -> None:
     path = user_library_path(tmp_path)
     path.write_text(dump_user_library(_boss()), encoding="utf-8")
