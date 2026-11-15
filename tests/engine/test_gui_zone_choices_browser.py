@@ -15,7 +15,7 @@ from aosr.materials.library import LibraryEntry, dump_user_library
 from tests.engine._boss_material_library import BOSS_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
-from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_browser import _load_template, _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _save
 
@@ -267,7 +267,7 @@ def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path
 
 def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path, browser: Browser) -> None:
     """「上一次的組合」只在同一份方案裡帶（審查 11-15）：在這一份改成 48K＋不貼，打開另一份方案再改成交給電腦挑，
-    照樣從三種玻璃棉＋不貼開始（同一份方案裡的別一面才照上一次的組合）。"""
+    照樣從三種玻璃棉＋不貼開始（同一份方案裡的別一面才照上一次的組合）；載入範本也一樣從頭。"""
     _write(tmp_path, room109_document())
     _write(tmp_path, room109_document("room109-b"))
     _boss_library(tmp_path)
@@ -282,6 +282,12 @@ def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path
         _choose(page, "#zone-mode-y0-whole_wall", "search")
         assert _chips(page, "y0", "whole_wall") == ["glass_wool_48k", "none"]  # 同一份方案：照上一次的組合
         _open_scheme(page, "room109-b")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        assert _chips(page, "x0", "whole_wall") == three
+        # 這一份也改成 48K＋不貼，再載入範本（resetZoneDesign）：一樣從頭。
+        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        _load_template(page)
         page.locator("#elevation-wall-x0").click()
         _choose(page, "#zone-mode-x0-whole_wall", "search")
         assert _chips(page, "x0", "whole_wall") == three
@@ -492,6 +498,8 @@ def test_zone_and_size_columns_never_break_inside_a_word(tmp_path: Path, browser
         row = page.locator("#zone-row-ceiling-whole_wall td")
         assert row.nth(0).evaluate(LINES) == ["整面"] and row.nth(1).evaluate(LINES) == ["整面"]
         assert page.locator("#zone-table-ceiling th").nth(1).evaluate(LINES) in (["大小（公尺）"], ["大小", "（公尺）"])
+        # 兩欄不准斷字之後最窄寬了一點：這麼窄的視窗整張表照樣塞得進面板。
+        assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "narrow-columns.png"))
         assert watched.page_errors == [] and watched.console_errors == []
 
