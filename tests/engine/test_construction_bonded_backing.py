@@ -1,4 +1,4 @@
-"""#1171 黏住鋼板的背襯（多孔層填骨架楊氏模數與損耗）：格式、位置規則、網頁欄位與白話名、分區換材料重組。
+"""#1171 黏住鋼板的背襯（多孔層填骨架壓縮模數與損耗）：格式、位置規則、網頁欄位與白話名、分區換材料重組。
 
 算數（對獨立轉接逐位、彈簧解析差、實測峰位）在 test_construction 的隔離雙精度子行程；梯度在 test_construction_diff。
 這一支只驗不需要算數的部分，在本行程跑。
@@ -35,18 +35,18 @@ def _rejected(document: dict[str, object]) -> str:
     return str(caught.value)
 
 
-@pytest.mark.parametrize("given", [{"frame_young_modulus_pa": E_MID}, {"frame_loss_factor": LOSS},
-                                   {"frame_young_modulus_pa": E_MID, "frame_loss_factor": None}])
+@pytest.mark.parametrize("given", [{"frame_compression_modulus_pa": E_MID}, {"frame_loss_factor": LOSS},
+                                   {"frame_compression_modulus_pa": E_MID, "frame_loss_factor": None}])
 def test_frame_fields_come_in_pairs(given: dict[str, object]) -> None:
-    """抓只填一格（或一格填空值）就被收下：彈簧少了楊氏模數或損耗會靜靜算錯。"""
-    with pytest.raises(ValidationError, match="骨架楊氏模數與骨架損耗必須一起填"):
+    """抓只填一格（或一格填空值）就被收下：彈簧少了壓縮模數或損耗會靜靜算錯。"""
+    with pytest.raises(ValidationError, match="骨架壓縮模數與骨架損耗必須一起填"):
         PorousLayer.model_validate({**MELAMINE_100, **given})
 
 
 def test_zero_loss_is_accepted_and_negative_is_not() -> None:
-    """損耗可以是零（純彈簧），不能是負的；楊氏模數必須是正數。"""
+    """損耗可以是零（純彈簧），不能是負的；壓縮模數必須是正數。"""
     assert PorousLayer.model_validate({**MELAMINE_BONDED, "frame_loss_factor": 0.0}).bonded()
-    for field, value in (("frame_loss_factor", -0.01), ("frame_young_modulus_pa", 0.0)):
+    for field, value in (("frame_loss_factor", -0.01), ("frame_compression_modulus_pa", 0.0)):
         with pytest.raises(ValidationError):
             PorousLayer.model_validate({**MELAMINE_BONDED, field: value})
 
@@ -54,7 +54,7 @@ def test_zero_loss_is_accepted_and_negative_is_not() -> None:
 def test_plain_porous_dump_has_no_frame_keys() -> None:
     """沒填骨架兩格的多孔層存檔不多出欄位：既有材料的指紋與存檔一個字都不變。"""
     dumped = PorousLayer.model_validate(MELAMINE_100).model_dump()
-    assert not {"frame_young_modulus_pa", "frame_loss_factor"} & set(dumped)
+    assert not {"frame_compression_modulus_pa", "frame_loss_factor"} & set(dumped)
     assert not PorousLayer.model_validate(MELAMINE_100).bonded()
 
 
@@ -72,7 +72,7 @@ def test_plain_porous_dump_has_no_frame_keys() -> None:
 def test_bonded_backing_place_is_enforced(document: dict[str, object], words: str) -> None:
     """抓黏住鋼板的背襯放錯位置也照算：骨架彈簧頂著牆，前面要是板、後面不能再有層、背後不能是空氣。"""
     message = _rejected(document)
-    assert words in message and "骨架楊氏模數" in message, message
+    assert words in message and "骨架壓縮模數" in message, message
 
 
 def test_layers_in_front_of_the_steel_are_free() -> None:
@@ -90,20 +90,20 @@ def test_input_schema_lists_the_pair() -> None:
     """產生的輸入綱要有兩格、而且成對（一格都不給或兩格都給）。"""
     schema = json.loads((Path(__file__).resolve().parents[2] / "blueprint" / "schemas" / "three_lane_report_input.schema.json").read_text())
     porous = schema["$defs"]["PorousLayer"]
-    assert {"frame_young_modulus_pa", "frame_loss_factor"} <= set(porous["properties"])
+    assert {"frame_compression_modulus_pa", "frame_loss_factor"} <= set(porous["properties"])
     pairs = [rule for rule in porous["allOf"] if "oneOf" in rule]
     assert pairs == [{"oneOf": [
-        {"not": {"anyOf": [{"required": ["frame_young_modulus_pa"]}, {"required": ["frame_loss_factor"]}]}},
-        {"required": ["frame_young_modulus_pa", "frame_loss_factor"],
-         "properties": {"frame_young_modulus_pa": {"not": {"type": "null"}}, "frame_loss_factor": {"not": {"type": "null"}}}}]}]
+        {"not": {"anyOf": [{"required": ["frame_compression_modulus_pa"]}, {"required": ["frame_loss_factor"]}]}},
+        {"required": ["frame_compression_modulus_pa", "frame_loss_factor"],
+         "properties": {"frame_compression_modulus_pa": {"not": {"type": "null"}}, "frame_loss_factor": {"not": {"type": "null"}}}}]}]
 
 
 def test_web_form_has_the_two_fields() -> None:
     """網頁材料表單照模型描述多兩格，欄名與單位是中文（老闆在網頁上填）。"""
     fields = material_form_spec()["porous"]["fields"]
     assert isinstance(fields, dict)
-    assert {name: (fields[name]["label"], fields[name]["unit"]) for name in ("frame_young_modulus_pa", "frame_loss_factor")} == {
-        "frame_young_modulus_pa": ("骨架楊氏模數", "Pa"), "frame_loss_factor": ("骨架損耗因數", "無量綱")}
+    assert {name: (fields[name]["label"], fields[name]["unit"]) for name in ("frame_compression_modulus_pa", "frame_loss_factor")} == {
+        "frame_compression_modulus_pa": ("骨架壓縮模數", "Pa"), "frame_loss_factor": ("骨架損耗因數", "無量綱")}
 
 
 def test_plain_name_says_vpr() -> None:
@@ -122,7 +122,7 @@ def test_optimizable_porous_cannot_be_bonded() -> None:
         "kind": "optimizable", "id": "test_opt", "label": "考卷 可最佳化", "provenance": "model", "source": "考卷",
         "porous": MELAMINE_BONDED, "porous_thickness": {"adjustable": False, "initial_m": 0.1, "range_m": [0.1, 0.1]},
         "cavity": {"adjustable": True, "initial_m": 0.05, "range_m": [0.0, 0.1]}}
-    with pytest.raises(ValidationError, match="可最佳化材料的多孔層不能填骨架楊氏模數與骨架損耗"):
+    with pytest.raises(ValidationError, match="可最佳化材料的多孔層不能填骨架壓縮模數與骨架損耗"):
         OptimizableEntry.model_validate(entry)
     assert OptimizableEntry.model_validate({**entry, "porous": MELAMINE_100}).porous == PorousLayer.model_validate(MELAMINE_100)
 

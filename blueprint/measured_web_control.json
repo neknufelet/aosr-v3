@@ -114,8 +114,8 @@
           "options": {},
           "default": null
         },
-        "frame_young_modulus_pa": {
-          "label": "骨架楊氏模數",
+        "frame_compression_modulus_pa": {
+          "label": "骨架壓縮模數",
           "unit": "Pa",
           "options": {},
           "default": null

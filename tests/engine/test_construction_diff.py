@@ -28,7 +28,7 @@ from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
 
 PROBE = Path(__file__).with_name("_construction_diff_probe.py")
-# 預設以外一起考的構造：#1171 黏住鋼板的背襯（骨架楊氏模數與損耗兩格）沒有預設，從這裡交給子行程。
+# 預設以外一起考的構造：#1171 黏住鋼板的背襯（骨架壓縮模數與損耗兩格）沒有預設，從這裡交給子行程。
 EXTRA = {"test_bonded_vpr": BONDED_VPR}
 Bits = dict[str, object]
 
@@ -93,9 +93,9 @@ def test_template_exposes_porous_and_cavity_variables(identity: dict[str, dict[s
 
 
 def test_bonded_backing_exposes_frame_variables(identity: dict[str, dict[str, object]]) -> None:
-    """#1171 黏住鋼板的背襯：骨架楊氏模數與損耗也是變數（板重、背襯厚度本來就是）。"""
+    """#1171 黏住鋼板的背襯：骨架壓縮模數與損耗也是變數（板重、背襯厚度本來就是）。"""
     names = set(cast(list[str], identity["test_bonded_vpr"]["variables"]))
-    assert {"layer1.surface_mass_kg_m2", "layer2.thickness_m", "layer2.frame_young_modulus_pa", "layer2.frame_loss_factor"} <= names
+    assert {"layer1.surface_mass_kg_m2", "layer2.thickness_m", "layer2.frame_compression_modulus_pa", "layer2.frame_loss_factor"} <= names
 
 
 def test_gradients_match_central_difference(tmp_path: Path, identity: dict[str, dict[str, object]]) -> None:

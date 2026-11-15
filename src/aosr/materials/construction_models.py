@@ -3,7 +3,7 @@
 層順序是房間側 → 牆體側，背後負載必填。實測阻抗表在表內對數頻率內插，表外交必填底構造。
 孔隙率與曲折度沿用傳遞矩陣的合法域：皆正；不額外收緊曲折度為大於等於一。
 Mechel 1976（低頻延伸多孔模型）的孔隙率另須不大於一。
-多孔層填了骨架楊氏模數與損耗（#1171）＝這層整面黏在前面的薄板上、背後是牆：骨架當彈簧串在板後（複合板共振器 VPR 的背襯）；
+多孔層填了骨架壓縮模數與損耗（#1171）＝這層整面黏在前面的薄板上、背後是牆：骨架當彈簧串在板後（複合板共振器 VPR 的背襯）；
 所以這層必須是最後一層、緊接在薄板層後面，多層構造背後必須是剛背。
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _required_kind(schema: JsonDict) -> None:
             required.append("kind")
 
 
-_FRAME_FIELDS = ["frame_young_modulus_pa", "frame_loss_factor"]
+_FRAME_FIELDS = ["frame_compression_modulus_pa", "frame_loss_factor"]
 
 
 def _porous_schema(schema: JsonDict) -> None:
@@ -70,8 +70,8 @@ class PorousLayer(_ConstructionRecord):
     material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
     porosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="porosity（孔隙率，無量綱；模型要求時必填）")
     tortuosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="tortuosity（曲折度，無量綱；模型要求時必填）")
-    frame_young_modulus_pa: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="frame_young_modulus_pa（骨架楊氏模數，Pa；填了表示這層整面黏在前面的薄板上、背後是牆，骨架當彈簧串在板後：楊氏模數乘一加 j 損耗、除以厚度；與骨架損耗同給同不給，這層必須是最後一層、緊接薄板層）")
-    frame_loss_factor: _NonnegativeNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="frame_loss_factor（骨架損耗因數，無量綱；與骨架楊氏模數同給同不給）")
+    frame_compression_modulus_pa: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="frame_compression_modulus_pa（骨架壓縮模數，Pa；填了表示這層整面黏在前面的薄板上、背後是牆，骨架當彈簧串在板後：壓縮模數乘一加 j 損耗、除以厚度；這是整面黏住、側向不能脹開時的等效值，不是型錄上的楊氏模數（側向受限要換算，泊松比越接近 0.5 差越多）；與骨架損耗同給同不給，這層必須是最後一層、緊接薄板層）")
+    frame_loss_factor: _NonnegativeNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="frame_loss_factor（骨架損耗因數，無量綱；與骨架壓縮模數同給同不給）")
 
     @model_validator(mode="after")
     def parameters_used_by_model(self) -> Self:
@@ -87,13 +87,13 @@ class PorousLayer(_ConstructionRecord):
             if self.porosity is None or self.porosity > 1:
                 raise ValueError("mechel_1976 低頻延伸模型必須明給孔隙率，且 0 < 孔隙率 ≤ 1")
         frame = self.model_fields_set & set(_FRAME_FIELDS)
-        if frame and (frame != set(_FRAME_FIELDS) or any(getattr(self, name) is None for name in _FRAME_FIELDS)):
-            raise ValueError("骨架楊氏模數與骨架損耗必須一起填（楊氏模數正數、損耗不小於零），或兩格都刪除")
+        if frame and any(getattr(self, name) is None for name in _FRAME_FIELDS):
+            raise ValueError("骨架壓縮模數與骨架損耗必須一起填（壓縮模數正數、損耗不小於零），或兩格都刪除")
         return self
 
     def bonded(self) -> bool:
         """填了骨架兩格＝整面黏在前面薄板上的背襯（#1171）。"""
-        return self.frame_young_modulus_pa is not None
+        return self.frame_compression_modulus_pa is not None
 
 
 class AirLayer(_ConstructionRecord):
@@ -288,15 +288,16 @@ Layer: TypeAlias = Annotated[PorousLayer | AirLayer | BoardLayer | FabricLayer |
 def _bonded_backing_place(layers: tuple[Layer, ...], backing: str | None) -> None:
     """黏住薄板的背襯（填了骨架兩格的多孔層）骨架彈簧頂著牆：必須是最後一層、緊接薄板層；多層構造要剛背。
 
-    貼在原牆上的構造（backing 給 None）把原牆當成不動，原牆本身的阻抗不改彈簧。
+    貼在原牆上的構造（backing 給 None）把原牆當成不動，原牆本身的阻抗不改彈簧；原牆是輕隔間或帶空腔時，
+    骨架那一份會算硬（真的反力是板與牆的相對位移乘彈簧），能力表註記寫著。
     """
     for index, layer in enumerate(layers):
         if not isinstance(layer, PorousLayer) or not layer.bonded():
             continue
-        place = f"第 {index + 1} 層（從房間側數）填了骨架楊氏模數，表示黏住薄板的背襯"
+        place = f"第 {index + 1} 層（從房間側數）填了骨架壓縮模數，表示黏住薄板的背襯"
         if index != len(layers) - 1:
             raise ValueError(f"{place}，必須是最後一層（最靠牆）；骨架彈簧頂著牆，後面不能再有別的層")
-        if index == 0 or not isinstance(layers[index - 1], BoardLayer):
+        if len(layers) < 2 or not isinstance(layers[-2], BoardLayer):
             raise ValueError(f"{place}，前面一層必須是薄板層（鋼板）")
         if backing == "air":
             raise ValueError(f"{place}，背後負載必須是剛背，不能是空氣負載")

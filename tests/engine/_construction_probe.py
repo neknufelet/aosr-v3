@@ -49,9 +49,9 @@ def _direct(request: dict[str, object], f: jax.Array, air: PhysicsConstants, the
                 air=air, model=cast(str, layer.get("model", "komatsu")),
                 porosity=cast(float, layer.get("porosity", 0.95)), tortuosity=cast(float, layer.get("tortuosity", 1.)),
                 incidence_angles_deg=theta)
-            if "frame_young_modulus_pa" in layer:
+            if "frame_compression_modulus_pa" in layer:
                 # #1171 獨立轉接：骨架彈簧 E(1+jη)/(jωd) 當一張壓力跳躍阻抗串在這層前面。
-                spring = (cast(float, layer["frame_young_modulus_pa"]) * (1 + 1j * cast(float, layer["frame_loss_factor"]))
+                spring = (cast(float, layer["frame_compression_modulus_pa"]) * (1 + 1j * cast(float, layer["frame_loss_factor"]))
                           / cast(float, layer["thickness_m"]) / (1j * 2 * jnp.pi * f))
                 m = tmm._sheet_layer(tmm._broadcast_angles(spring, theta)) @ m
         elif layer["kind"] == "fabric":

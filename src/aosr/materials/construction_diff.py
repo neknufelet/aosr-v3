@@ -42,7 +42,7 @@ from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, C
 # 背面貼布的面密度只記錄、不進計算，所以不列；孔排法、多孔模型這類是離散選項，也不列。
 _PANEL_FIELDS = ("thickness_m", "open_area", "surface_mass_kg_m2")
 _CONTINUOUS_FIELDS: dict[type, tuple[str, ...]] = {
-    PorousLayer: ("thickness_m", "flow_resistivity_pa_s_m2", "porosity", "tortuosity", "frame_young_modulus_pa", "frame_loss_factor"),
+    PorousLayer: ("thickness_m", "flow_resistivity_pa_s_m2", "porosity", "tortuosity", "frame_compression_modulus_pa", "frame_loss_factor"),
     AirLayer: ("thickness_m",),
     BoardLayer: ("surface_mass_kg_m2", "resistance_pa_s_m"),
     FabricLayer: ("surface_mass_kg_m2", "flow_resistance_pa_s_m"),

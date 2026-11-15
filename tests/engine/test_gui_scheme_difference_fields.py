@@ -264,7 +264,7 @@ def _facing_fields(document: dict[str, Json], layers: tuple[str | int, ...]) -> 
     # #1171 黏住鋼板的背襯：位置規則要它最後一層、緊接薄板，所以整串換成「鋼板＋黏住的背襯」再逐格改。
     original = _change(document, layers, cast(Json, [STEEL_2_5MM, MELAMINE_BONDED]))
     data = cast(dict[str, Json], original.model_dump(mode="json"))
-    for name, value in {"frame_young_modulus_pa": 60000., "frame_loss_factor": .1}.items():
+    for name, value in {"frame_compression_modulus_pa": 60000., "frame_loss_factor": .1}.items():
         rows = scheme_differences(original, _change(data, (*layers, 1, name), value))
         assert {row.path for row in rows} == {f"scene.{NEW}.floor"}, name
         names.add(name)
