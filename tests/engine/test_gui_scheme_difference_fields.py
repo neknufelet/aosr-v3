@@ -11,6 +11,7 @@ import pytest
 from aosr.gui.compare_view import scheme_differences
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._bonded_backing_cases import MELAMINE_BONDED, STEEL_2_5MM
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
 from tests.engine._speaker_setup_cases import setup
 
@@ -260,6 +261,13 @@ def _facing_fields(document: dict[str, Json], layers: tuple[str | int, ...]) -> 
             rows = scheme_differences(original, _change(data, (*layers, 0, name), value))
             assert {row.path for row in rows} == {f"scene.{NEW}.floor"}, name
             names.add(name)
+    # #1171 黏住鋼板的背襯：位置規則要它最後一層、緊接薄板，所以整串換成「鋼板＋黏住的背襯」再逐格改。
+    original = _change(document, layers, cast(Json, [STEEL_2_5MM, MELAMINE_BONDED]))
+    data = cast(dict[str, Json], original.model_dump(mode="json"))
+    for name, value in {"frame_young_modulus_pa": 60000., "frame_loss_factor": .1}.items():
+        rows = scheme_differences(original, _change(data, (*layers, 1, name), value))
+        assert {row.path for row in rows} == {f"scene.{NEW}.floor"}, name
+        names.add(name)
     return names
 
 
