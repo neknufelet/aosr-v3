@@ -22,6 +22,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.gui.problem_text import MATERIAL_MODELS, _plain_material_message, material_form_spec
+from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, placement
 from aosr.materials.library import (
     PROVENANCE_LABELS,
     FixedEntry,
@@ -180,18 +181,22 @@ class MaterialStore:
             raise MaterialEditError(f"使用者材料庫（{self.path.name}）讀不進來，先修好檔案再存：{plain_error(exc)}", 409) from exc
 
     def listing(self) -> dict[str, object]:
-        """內建在前、使用者在後；使用者檔讀不進來時照講原因，清單只列內建。"""
+        """內建在前、使用者在後；使用者檔讀不進來時照講原因，清單只列內建。
+
+        每一筆多帶 ``placement``（#1176，``material_surfaces.placement`` 現算）：能用在哪幾面、哪一組、一句白話理由；
+        ``surface_groups`` 是每一組的標題、``surface_group_short`` 是短名。立面圖的做法表照它過濾，材料庫格式不動。"""
         problem = None
         try:
             user = self._user_entries()
         except MaterialEditError as exc:
             user, problem = (), str(exc)
-        rows = [{"entry": entry.model_dump(mode="json"), "builtin": True, "basis": basis_label(entry)}
-                for entry in builtin_entries()]
-        rows += [{"entry": entry.model_dump(mode="json"), "builtin": False, "basis": basis_label(entry)} for entry in user]
+        rows = [{"entry": entry.model_dump(mode="json"), "builtin": builtin, "basis": basis_label(entry),
+                 "placement": placement(entry).to_json()}
+                for entries, builtin in ((builtin_entries(), True), (user, False)) for entry in entries]
         return {"materials": rows, "user_file_problem": problem, "material_form": material_form_spec(),
                 "required_fields": _required_fields(), "layer_kinds": list(LAYER_KINDS), "fixed_kinds": list(FIXED_KINDS),
-                "provenance_labels": PROVENANCE_LABELS, "entry_kind_labels": ENTRY_KIND_LABELS}
+                "provenance_labels": PROVENANCE_LABELS, "entry_kind_labels": ENTRY_KIND_LABELS,
+                "surface_groups": GROUP_WORDS, "surface_group_short": GROUP_SHORT_WORDS}
 
     def _write(self, entries: tuple[LibraryEntry, ...]) -> None:
         text = dump_user_library(entries)

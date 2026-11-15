@@ -161,6 +161,24 @@ def test_named_original_scheme_wins_over_unwrapping_like_the_improvement_baselin
     assert data["material"] == _zones(original)["x0"][0]["material"]
 
 
+def test_choosing_what_the_original_wall_already_is_keeps_the_wall_instead_of_doubling_it(client: TestClient) -> None:
+    """#1175：原牆本身就是那一套多層構造（天花的吊頂），再選同一筆不准包成貼在原牆上（兩層疊在一起）：放原牆、回
+    same_as_original 給網頁改成保留原牆；換別的照常貼上去；已經疊成兩層的那一區（老闆 11-15 存的：貼的層＝原牆的層）
+    再選同一筆，也拆回原牆一份。"""
+    document = _cut_document()
+    built = {"kind": "assembly", "layers": _preset_layers(PRESET), "backing": "rigid"}
+    _put(document, "z1", built)
+    status, data = _post(client, document, "z1", choice="fixed", material_id=PRESET)
+    assert status == 200, data
+    assert data["material"] == built and data["same_as_original"] is True and "一模一樣" in str(data["note"])
+    status, data = _post(client, document, "z1", choice="fixed", material_id=OTHER)
+    assert status == 200 and data["same_as_original"] is False
+    assert data["material"] == {"kind": "mounted_on_wall", "layers": _preset_layers(OTHER), "wall": built}
+    _put(document, "z1", {"kind": "mounted_on_wall", "layers": _preset_layers(PRESET), "wall": built})
+    status, data = _post(client, document, "z1", choice="fixed", material_id=PRESET)
+    assert status == 200 and data["same_as_original"] is True and data["material"] == built
+
+
 def test_whole_wall_of_a_six_number_scheme_is_found_through_the_validated_inputs(client: TestClient) -> None:
     """六面都是整面固定阻抗的方案驗證後折回六個數字：整面那一區照計算同一條驗證拿材料，照樣換得了。"""
     document = room109_document()

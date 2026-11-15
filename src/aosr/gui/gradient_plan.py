@@ -8,7 +8,7 @@
 
 每區准用清單（#1082 段 2-3b，設計設定的 ``allowed``，材料庫代號或 none）轉成命令列 ``--allowed 面=目標,…``：
 可最佳化材料是家族代號、固定材料是 ``fixed:<代號>``、none 照寫。有清單的區起點照順序挑：選定家族在清單裡就用它、
-不在就用清單裡第一個家族（設定檔順序）、都沒有家族就不貼（清單要有 none）；清單只有固定材料就拒收（起點要是可調材料或不貼）。
+不在就用清單裡第一個家族（設定檔順序）、都沒有家族就不貼（清單要有 none）；清單只放了固定成品就拒收（起點要是可調材料或不貼）。
 
 深度上限（#1082 段 1-4）：設計設定的三層（房間預設／每面牆／每一區）取最小，只帶給搜尋區；開跑請求另填的只能更嚴
 （兩邊取小），``depth_sources`` 記每片是哪一層擋的（``zone``／``wall``／``room``／``request``）。設計設定有一條紅的
@@ -156,8 +156,9 @@ def _targets(wall: str, zone: str, ids: tuple[str, ...], settings: MaterialGradi
 
 
 def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family: FamilySettings,
-                  settings: MaterialGradientSettings, unusable: frozenset[str] = frozenset()) -> str | None:
-    """起點：選定家族（在清單裡、放得下）→ 清單裡（沒清單就是全部）第一個放得下的家族（設定檔順序）→ 不貼。"""
+                  settings: MaterialGradientSettings, unusable: frozenset[str], names: Mapping[str, str]) -> str | None:
+    """起點：選定家族（在清單裡、放得下）→ 清單裡（沒清單就是全部）第一個放得下的家族（設定檔順序）→ 不貼。
+    都沒有就拒收，原文跟立面圖那一區的紅框同一套白話（#1176）；牆名照 ``names``（方案的前後左右）。"""
     if (targets is None or family.id in targets) and family.id not in unusable:
         return family.template_preset
     listed = [item for item in settings.family if (targets is None or item.id in targets) and item.id not in unusable]
@@ -165,8 +166,8 @@ def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family:
         return listed[0].template_preset
     if targets is None or NONE_TARGET in targets:
         return None
-    raise PlanRefused(f"{wall} 分區 {zone} 的准用清單只有固定材料：搜尋要一個起點（一種可調材料或「不貼」），"
-                      "請在清單加一種可調材料或不貼")
+    raise PlanRefused(f"{zone_words(wall, zone, names)}只放了固定成品，電腦沒得挑：電腦要從一個能調的東西開始，請在立面圖這一區加上「不貼」"
+                      "或一種可調材料（例如 48K 玻璃棉），或把做法改成「指定貼一種」")
 
 
 def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
@@ -246,7 +247,8 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
     depths, sources = _depths(request, modes, design)
-    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, wall_words(scheme))
+    names = wall_words(scheme)
+    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
     for pair, chosen in list(allowed.items()):
         dropped = unusable.get(surface_of(*pair), frozenset())
@@ -254,7 +256,8 @@ def plan_search(scheme: Scheme, design: DesignSettings | None, request: Gradient
             allowed[pair] = tuple(target for target in chosen if target not in dropped)
     return SearchPlan(
         surfaces=surfaces, modes=per_surface,
-        presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()))
+        presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()),
+                                    names)
                       if mode == "search" else None for pair, mode in zip(pairs, per_surface, strict=True)),
         fixed_surfaces={surface: SCHEME_MATERIAL for surface, mode in zip(surfaces, per_surface, strict=True)
                         if mode != "search"},

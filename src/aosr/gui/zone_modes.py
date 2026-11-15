@@ -6,6 +6,8 @@
   ``scheme-material``）。
 - 「固定這一組材料」選了材料庫的一筆：多層構造貼在原牆上（``MountedOnWall``，最後一層背後接原牆，1-5 的改善基準
   拆得回原牆）；固定阻抗與實測阻抗表本身就是整面的表面阻抗，直接換掉那一區，畫面點明「直接取代、不是貼上」。
+  選的多層構造跟這一區原牆一模一樣（例如天花原牆本身就是那一套吊頂）：不貼上去疊兩層，放原牆、回
+  ``same_as_original``，網頁把做法改成「不貼，保留原牆」（#1175、#1176）。
 
 原牆怎麼來（同 1-5 ``zone_result`` 那一條規則、同一個先後，只是這裡一區一區取）：設計設定指了原方案就照原方案蓋住
 這一區的那一塊；沒指時，現在是貼在原牆上的構造就取它記的原牆；都沒有就當現在的材料是原牆，只有它正是材料庫裡
@@ -19,7 +21,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -100,20 +102,31 @@ def origin(current: SurfaceMaterial, original: OriginalWalls | None, wall: str, 
     return Origin(current, "unknown" if current in replacements else "current")
 
 
-def zone_material(current: SurfaceMaterial, base: Origin, entry: FixedEntry | None) -> tuple[SurfaceMaterial, str]:
+class ZoneChange(NamedTuple):
+    """這一區放什麼、一句給畫面的說明、選的是不是跟原牆一模一樣（是的話放的就是原牆，網頁改成保留原牆）。"""
+
+    material: SurfaceMaterial
+    note: str
+    same_as_original: bool = False
+
+
+def zone_material(current: SurfaceMaterial, base: Origin, entry: FixedEntry | None) -> ZoneChange:
     """選了之後這一區放什麼，和一句給畫面的說明。``entry`` 是 None 表示放原牆。"""
     if entry is None:
-        return base.material, UNKNOWN_ORIGIN if base.source == "unknown" else "這一區放回原牆"
+        return ZoneChange(base.material, UNKNOWN_ORIGIN if base.source == "unknown" else "這一區放回原牆")
     chosen = entry.surface_material()
     if isinstance(chosen, Assembly):
+        # 跟原牆一模一樣（#1175：天花原牆本身就是那一套吊頂，再貼一次等於兩層吊頂疊在一起）：當成不貼。
+        if base.material == chosen:
+            return ZoneChange(base.material, f"選的「{entry.label}」跟這一區原牆一模一樣，當成不貼（保留原牆），不再疊一層", True)
         if isinstance(base.material, MountedOnWall):
             raise ZoneMaterialError("原方案這一區本身就是貼在原牆上的構造，不能再貼一層；原方案請選貼之前的那一份")
         mounted = MountedOnWall(layers=chosen.layers, wall=base.material)
         note = f"「{entry.label}」貼在原牆上（最後一層背後接原牆）"
         if base.source == "unknown":
             note += "；這一區現在是直接取代牆面的材料、看不出原牆，就把它當原牆；要換別的原牆，請在上面「原方案」選切之前那一份方案"
-        return mounted, note
-    return chosen, f"「{entry.label}」是整面的表面阻抗，直接取代這一區的牆（不是貼上去）"
+        return ZoneChange(mounted, note)
+    return ZoneChange(chosen, f"「{entry.label}」是整面的表面阻抗，直接取代這一區的牆（不是貼上去）")
 
 
 class ZoneMaterialHandlers:
@@ -181,8 +194,9 @@ class ZoneMaterialHandlers:
         replacements = [material for item in entries if isinstance(item, FixedEntry)
                         if not isinstance(material := item.surface_material(), Assembly)]
         base = origin(current, self._original(body.original_scheme_id, scheme), body.wall, body.zone, box, replacements)
-        material, note = zone_material(current, base, entry)
-        return {"material": _MATERIAL.dump_python(material, mode="json"), "note": note, "origin": base.source}
+        change = zone_material(current, base, entry)
+        return {"material": _MATERIAL.dump_python(change.material, mode="json"), "note": change.note, "origin": base.source,
+                "same_as_original": change.same_as_original}
 
 
 def zone_material_routes(data_dir: Path, lock: AbstractContextManager[object], *, capabilities: CapabilityTable,

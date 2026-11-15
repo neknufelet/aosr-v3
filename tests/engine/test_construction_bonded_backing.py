@@ -135,7 +135,7 @@ def test_zone_rebuilds_keep_the_bonded_backing() -> None:
                                        "kind": "fixed", "material": BONDED_VPR})
     wall = ConstantImpedance(impedance_pa_s_m=1.0e9)
     chosen = entry.surface_material()
-    mounted, _ = zone_material(wall, Origin(wall, "current"), entry)
+    mounted = zone_material(wall, Origin(wall, "current"), entry).material
     assert isinstance(chosen, Assembly) and isinstance(mounted, MountedOnWall) and mounted.layers == chosen.layers
     target = range_target(mounted)
     assert isinstance(target, Assembly) and target.backing == "rigid" and target.layers == mounted.layers

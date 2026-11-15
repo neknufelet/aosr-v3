@@ -318,9 +318,9 @@ def test_caps_deeper_than_the_family_take_the_stricter_and_too_shallow_caps_are_
     result = zone_limits(_cut(PRESET), design.model_dump(mode="json"), depth_targets=lambda: TARGETS)
     assert result["red"] == 1 and _codes(result, "x0", "auto1") == ["depth_no_group"]
     refusal = cast(list[str], result["refusals"])[0]
-    assert refusal.startswith("前牆「自動 auto1」：准用的材料組一組都放不進深度上限")
+    assert refusal.startswith("前牆「自動 auto1」：電腦能挑的材料沒有一種放得進深度上限")
     assert "0.025 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺（個案上限擋住）" in refusal
-    with pytest.raises(PlanRefused, match="一組都放不進深度上限"):
+    with pytest.raises(PlanRefused, match="沒有一種放得進深度上限"):
         plan_search(scheme, design, GradientRequest(), SETTINGS)
 
 
@@ -379,7 +379,7 @@ def test_plan_drops_groups_that_do_not_fit_and_skips_them_as_start() -> None:
     assert plan.presets[plan.surfaces.index("x0@auto1")] == "glass_wool_48k_50mm_gap50" and plan.allowed == {}
     # 清單只剩不貼：不貼不算救，紅
     only = _design(zones={"x0": {"auto1": {"mode": "search", "max_depth_m": 0.06, "allowed": ["deep_rock_wool", "none"]}}})
-    with pytest.raises(PlanRefused, match="前牆「自動 auto1」：准用的材料組一組都放不進"):
+    with pytest.raises(PlanRefused, match="前牆「自動 auto1」：電腦能挑的材料沒有一種放得進"):
         plan_search(scheme, only, GradientRequest(), targets.settings, fixed_ids, depth_targets=targets)
 
 
@@ -401,7 +401,7 @@ def test_route_judges_groups_from_the_library_and_says_when_it_cannot(tmp_path: 
     (tmp_path / "materials.json").write_text("{壞掉", encoding="utf-8")
     response = client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": design})
     assert response.status_code == 200 and response.json()["red"] == 1
-    assert "查不了交給搜尋的區放不放得下材料組、也認不出固定區是不是選了材料庫的材料" in response.json()["refusals"][0]
+    assert "查不了交給電腦挑的區放不放得下清單裡的材料、也認不出指定貼一種的區是不是選了材料庫的材料" in response.json()["refusals"][0]
     fixed_only = _design(zones={"x0": {"auto1": {"mode": "fixed"}}}).model_dump(mode="json")
     assert client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": fixed_only}).json()["red"] == 0
 

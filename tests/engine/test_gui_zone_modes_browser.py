@@ -1,6 +1,6 @@
-"""真瀏覽器考每一區的做法（#1105，#1082 第 1-3 段）：立面圖下的逐區表選固定材料／不貼／交給搜尋並限定准用；
-再切同一面別處，沒動到的區做法照留（跟著自動補滿重編的代號走）；存檔再打開，切法、做法、准用、原方案都在；
-沒設過做法的舊方案存檔不多寫一份設計設定。房間一律用 109 號房的長寬高。"""
+"""真瀏覽器考每一區的做法（#1105，#1082 第 1-3 段）：立面圖下的逐區表選指定貼一種／不貼／交給電腦挑並改電腦可以挑的清單
+（#1176 起改成交給電腦挑就帶好一份明確清單，存檔也寫明確清單）；再切同一面別處，沒動到的區做法照留（跟著自動補滿重編的代號走）；
+存檔再打開，切法、做法、清單、原方案都在；沒設過做法的舊方案存檔不多寫一份設計設定。房間一律用 109 號房的長寬高。"""
 import json
 from pathlib import Path
 from typing import cast
@@ -16,6 +16,10 @@ from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _w
 
 LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 PRESET = "glass_wool_48k_50mm"
+# 加進清單尾巴的那一筆固定成品（#1176 起清單只列這一面能貼的：地毯只列在地板，牆上改用一筆牆面的固定成品）。
+WALL_FIXED = "glass_wool_48k_50mm_gap100"
+# 改成交給電腦挑時一開始放的清單：一律是三種內建玻璃棉＋不貼（材料庫多了別的可調材料也不放進來）。
+DEFAULT_ALLOWED = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
 
 
 def _layers(material_id: str) -> object:
@@ -56,7 +60,7 @@ def _region(zone: dict[str, object]) -> str:
 
 
 def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]], list[str]]:
-    """x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2（三塊都還是原牆）；三塊各選一種做法、搜尋那塊限定准用。"""
+    """x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2（三塊都還是原牆）；三塊各選一種做法、交給電腦挑那塊改清單。"""
     _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
     assert sorted(str(zone["id"]) for zone in _zones(page, "x0")) == ["auto1", "auto2", "z1"]
     wall = _zones(page, "x0")[0]["material"]
@@ -64,18 +68,22 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     _choose(page, "#zone-fixed-x0-z1", PRESET)
     _choose(page, "#zone-mode-x0-auto1", "search")
     _choose(page, "#zone-mode-x0-auto2", "keep_original")
-    page.locator("#zone-limit-x0-auto1").check()
+    # 改成交給電腦挑就帶好一份清單（不用先全勾再取消）；點「改清單」拿掉一種、加一種。
+    assert _modes(page, "x0")["auto1"] == {"mode": "search", "allowed": DEFAULT_ALLOWED}
+    page.locator("#zone-allowed-summary-x0-auto1").click()
     page.locator("#zone-allow-x0-auto1-glass_wool_96k").uncheck()
-    page.locator("#zone-allow-x0-auto1-carpet_on_concrete").check()
+    expect(page.locator("#zone-allow-x0-auto1-carpet_on_concrete")).to_have_count(0)
+    page.locator(f"#zone-allow-x0-auto1-{WALL_FIXED}").check()
     page.locator("#original-scheme").select_option("room109-original")
     expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
-    expect(page.locator("#zone-note")).to_contain_text("auto2")
+    # 底部那一行寫最後一次改的：auto1 的清單（#1176 起改清單也更新那一行，不留 auto2 那一句）。
+    expect(page.locator("#zone-note")).to_contain_text("「自動 auto1」：清單改成 48K 玻璃棉、24K 玻璃棉、不貼、")
 
     zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
     assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}
     assert zones["auto1"]["material"] == wall and zones["auto2"]["material"] == wall
-    # 打勾時先勾滿預設（可調材料在前、不貼在後）；之後勾的一種接在尾巴（存著的順序原樣帶回，不照選單重排）。
-    allowed = ["glass_wool_48k", "glass_wool_24k", "none", "carpet_on_concrete"]
+    # 預設可調材料在前、不貼在後；之後勾的一種接在尾巴（存著的順序原樣帶回，不照選單重排）。
+    allowed = ["glass_wool_48k", "glass_wool_24k", "none", WALL_FIXED]
     assert _modes(page, "x0") == {"z1": {"mode": "fixed"}, "auto1": {"mode": "search", "allowed": allowed},
                                   "auto2": {"mode": "keep_original"}}
     page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-first-cut.png"))
@@ -115,19 +123,20 @@ def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, br
         expect(page.locator("#original-scheme")).to_have_value("room109-original")
         right = next(key for key, zone in after.items() if _region(zone) == "right" and key != "z2")
         expect(page.locator(f"#zone-mode-x0-{right}")).to_have_value("search")
-        # 准用清單收在一行摘要後面：摘要寫出勾了哪幾種，點開才看得到勾選格。
-        expect(page.locator(f"#zone-allowed-summary-x0-{right}")).to_contain_text("准用 4 種")
-        expect(page.locator(f"#zone-allowed-summary-x0-{right}")).to_contain_text("地毯直接鋪混凝土")
+        # 清單一種一個方塊攤在外面；勾選表收在「改清單」後面，點開才看得到勾選格。
+        expect(page.locator(f"#zone-allowed-chips-x0-{right} .zone-chip")).to_have_count(4)
+        expect(page.locator(f"#zone-allowed-chips-x0-{right}")).to_contain_text("48K 玻璃棉 50 mm＋100 mm 空腔")
+        expect(page.locator(f"#zone-allowed-summary-x0-{right}")).to_contain_text("現在 4 種")
         page.locator(f"#zone-allowed-summary-x0-{right}").click()
         expect(page.locator(f"#zone-allow-x0-{right}-glass_wool_96k")).not_to_be_checked()
-        expect(page.locator(f"#zone-allow-x0-{right}-carpet_on_concrete")).to_be_checked()
+        expect(page.locator(f"#zone-allow-x0-{right}-{WALL_FIXED}")).to_be_checked()
         expect(page.locator("#zone-fixed-x0-z1")).to_have_value(PRESET)
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-reopened.png"))
 
-        # 准用清單拿到只剩固定材料：照實提醒（搜尋要一個起點），開跑時伺服器再擋一次。
+        # 清單拿到只剩固定材料：照實提醒（電腦沒得挑），開跑時伺服器再擋一次。
         for choice in ("glass_wool_48k", "glass_wool_24k", "none"):
             page.locator(f"#zone-allow-x0-{right}-{choice}").uncheck()
-        expect(page.locator(f"#zone-allowed-problem-x0-{right}")).to_contain_text("起點")
+        expect(page.locator(f"#zone-allowed-problem-x0-{right}")).to_contain_text("只放了固定成品，電腦沒得挑")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -229,7 +238,7 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#zone-to-search")).to_have_count(0)
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        expect(page.locator("#zone-to-search")).to_contain_text("1 區交給搜尋")
+        expect(page.locator("#zone-to-search")).to_contain_text("1 區交給電腦挑")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "to-search.png"))
         page.locator("#zone-mode-x0-whole_wall").select_option("fixed")  # 改回固定不換材料、不打伺服器
         expect(page.locator("#zone-to-search")).to_have_count(0)
@@ -249,7 +258,7 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         page.locator("#zone-to-search").click()
         page.wait_for_url(f"{base}/gradient?scheme=room109")
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
-        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search"}}
+        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search", "allowed": DEFAULT_ALLOWED}}
         assert watched.page_errors == []
 
 
@@ -277,13 +286,13 @@ def test_switching_scheme_while_send_to_search_saves_keeps_the_new_scheme_and_do
         assert page.url == f"{base}/"
         assert page.locator("#save-id").input_value() == "other"
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
-        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search"}}
+        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search", "allowed": DEFAULT_ALLOWED}}
         assert watched.page_errors == []
 
 
 def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_path: Path, browser: Browser) -> None:
-    """2-3b 交接：存著的准用清單（ZoneDesign.allowed）打開再存要原樣帶回——順序不動、材料庫找不到的代號不偷丟
-    （照講、留著，開跑時伺服器點名）；勾一種只加在尾巴、拿掉一種只拿那一種。"""
+    """2-3b 交接：存著的清單（ZoneDesign.allowed）打開再存要原樣帶回——順序不動、材料庫找不到的代號不偷丟
+    （照講、留著，開跑時伺服器點名，按它旁邊的 × 才拿掉）；勾一種只加在尾巴、拿掉一種只拿那一種；最後一種拿不掉。"""
     _write(tmp_path, room109_document())
     stored = ["none", "ghost_material", "glass_wool_48k"]
     design = tmp_path / "designs" / "room109.json"
@@ -295,7 +304,8 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator("#zone-allowed-summary-x0-whole_wall")).to_contain_text("准用 3 種")
+        expect(page.locator("#zone-allowed-chips-x0-whole_wall .zone-chip")).to_have_count(3)
+        expect(page.locator("#zone-chip-x0-whole_wall-ghost_material")).to_contain_text("材料庫找不到")
         expect(page.locator("#zone-allowed-missing-x0-whole_wall")).to_contain_text("ghost_material")
         _save(page, "room109")
         assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]["allowed"] == stored
@@ -308,15 +318,17 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         saved = json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]
         assert saved == {"mode": "search", "allowed": ["none", "ghost_material", "glass_wool_24k"]}
 
-        # 重新限定後拿到只剩一種，最後一種拿不掉（空清單伺服器整份拒收）：勾還在、清單不動、照講。
-        page.locator("#zone-limit-x0-whole_wall").uncheck()
-        page.locator("#zone-limit-x0-whole_wall").check()  # 打勾時清單自己攤開
-        for choice in [entry for entry in cast(list[str], _modes(page, "x0")["whole_wall"]["allowed"]) if entry != "none"]:
-            page.locator(f"#zone-allow-x0-whole_wall-{choice}").uncheck()
+        # 找不到的那一種按 × 拿掉、只拿它；拿到只剩一種，最後一種拿不掉（空清單伺服器整份拒收）：勾還在、清單不動、照講。
+        page.locator("#zone-chip-remove-x0-whole_wall-ghost_material").click()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none", "glass_wool_24k"]
+        expect(page.locator("#zone-allowed-missing-x0-whole_wall")).to_have_count(0)
+        page.locator("#zone-allow-x0-whole_wall-glass_wool_24k").uncheck()  # 勾選表重畫後照樣開著
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
         page.locator("#zone-allow-x0-whole_wall-none").click()  # 想拿掉最後一種
         expect(page.locator("#zone-note")).to_contain_text("至少要留一種")
         expect(page.locator("#zone-allow-x0-whole_wall-none")).to_be_checked()
+        page.locator("#zone-chip-remove-x0-whole_wall-none").click()  # 從方塊的 × 拿也一樣
+        expect(page.locator("#zone-chip-x0-whole_wall-none")).to_have_count(1)
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
         _save(page, "room109")
         assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]["allowed"] == ["none"]
@@ -335,8 +347,11 @@ def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: 
         page.locator("#elevation-wall-x0").click()
         _first_cut(page, tmp_path)
         _save(page, "room109")
-        expect(page.locator("#zone-search-now-x0-auto1")).to_contain_text("方案裡現在放：固定阻抗")
+        # #1176：原牆原樣寫白話，阻抗數字收在點開的「數字」裡。
+        expect(page.locator("#zone-search-now-x0-auto1")).to_contain_text("現在：沒貼東西（原牆原樣）")
         expect(page.locator("#zone-search-now-x0-auto1")).to_contain_text("貼在它上面")
+        expect(page.locator("#zone-search-now-x0-auto1")).not_to_contain_text("Pa·s/m")
+        expect(page.locator("#zone-numbers-x0-auto1")).to_contain_text("原牆：固定阻抗")
         path = tmp_path / "designs" / "room109.json"
         stored = json.loads(path.read_text(encoding="utf-8"))
         stored["zones"]["x0"]["z1"] = {"mode": "search"}
@@ -347,7 +362,8 @@ def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: 
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#zone-mode-x0-z1")).to_have_value("search")
         line = page.locator("#zone-search-now-x0-z1")
-        expect(line).to_contain_text("方案裡現在放：48K 玻璃棉 50 mm 貼牆（貼在原牆上）")
+        expect(line).to_contain_text("現在：已貼 48K 玻璃棉 50 mm 貼牆（貼在原牆上）")
         expect(line).not_to_contain_text("先放原牆")
+        expect(line).not_to_contain_text("沒貼東西")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "search-zone-holds.png"))
         assert watched.page_errors == [] and watched.console_errors == []

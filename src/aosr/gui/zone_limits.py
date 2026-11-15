@@ -270,7 +270,7 @@ def target_fits(allowed: Sequence[str] | None, cap: float, targets: DepthTargets
 
 def no_group_words(lines: Sequence[Mapping[str, object]]) -> str:
     """准用的材料組一組都放不下時擋下的那一句（頁面紅、開跑擋同一句）。"""
-    return "准用的材料組一組都放不進深度上限，交給搜尋什麼都貼不上（「不貼」不算）：" + "；".join(str(line["text"]) for line in lines)
+    return "電腦能挑的材料沒有一種放得進深度上限，這一區什麼都貼不上（「不貼」不算）：" + "；".join(str(line["text"]) for line in lines)
 
 
 def _target_problems(allowed: Sequence[str] | None, cap: DepthCap, targets: DepthTargets
@@ -397,7 +397,7 @@ def _loaded(provider: Callable[[], DepthTargets], top: list[Problem]) -> DepthTa
         return provider()
     except ValueError as error:
         top.append(Problem(code="materials_unreadable", level="red",
-                           text=f"查不了交給搜尋的區放不放得下材料組、也認不出固定區是不是選了材料庫的材料：{error}"))
+                           text=f"查不了交給電腦挑的區放不放得下清單裡的材料、也認不出指定貼一種的區是不是選了材料庫的材料：{error}"))
         return False
 
 

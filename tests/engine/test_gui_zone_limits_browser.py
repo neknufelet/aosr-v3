@@ -117,7 +117,9 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         after = {str(zone["id"]): zone for zone in _zones(page, "x0")}
         modes = _modes(page, "x0")
         right = [key for key, zone in after.items() if _region(zone) == "right" and key != "z2"]
-        assert right and all(modes[key] == {"mode": "search", "max_depth_m": 0.08} for key in right)
+        # #1176 起改成交給電腦挑就帶好一份明確清單（三種內建玻璃棉＋不貼）。
+        allowed = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        assert right and all(modes[key] == {"mode": "search", "allowed": allowed, "max_depth_m": 0.08} for key in right)
         _save(page, "room109")
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
         assert stored["room_max_depth_m"] == 0.3 and stored["wall_max_depth_m"] == {"x0": 0.2}
@@ -324,6 +326,11 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-fixed-x0-z1", PRESET)
         _choose(page, "#zone-mode-x0-auto1", "search")
+        # 一開始只帶三種內建玻璃棉＋不貼（#1176）：使用者材料要在「改清單」自己勾進來，勾的排在最後（第 4 組、編號 3）。
+        page.locator("#zone-allowed-summary-x0-auto1").click()
+        page.locator("#zone-allow-x0-auto1-deep_rock_wool").check()
+        assert _modes(page, "x0")["auto1"]["allowed"] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none",
+                                                          "deep_rock_wool"]
         # 房間預設 0.2：玻璃棉照個案（房間預設）擋，使用者材料自己 0.15 比較嚴、寫「材料組自己的上限擋住」。
         _depth(page, "#depth-room", "0.2")
         _clear(page, "z1")
@@ -342,9 +349,36 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         # 這一塊 0.03：每一組都放不下（「不貼」不算救）→ 紅、擋拿去搜尋，原文講哪一條擋。
         _depth(page, "#depth-zone-x0-auto1", "0.03")
         _red(page, "auto1")
-        expect(page.locator("#zone-limits-summary")).to_contain_text("准用的材料組一組都放不進深度上限")
+        expect(page.locator("#zone-limits-summary")).to_contain_text("電腦能挑的材料沒有一種放得進深度上限，這一區什麼都貼不上")
         expect(page.locator("#zone-limits-summary")).to_contain_text("0.03 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺")
         page.locator("#elevation-panel").screenshot(path=str(shots / "depth-nothing-fits-red.png"))
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_changing_the_list_rechecks_the_limits(tmp_path: Path, browser: Browser) -> None:
+    """審查 11-15：改清單（×、勾選、常用組合、紅框按鈕）跟改做法一樣重判限制；不然深度上限那一欄每一組的生效上限、
+    紅燈、「拿去搜尋」停不停用都是改之前的判決（改之前就這樣，這一支把清單變成到處都能改，一起補）。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        _choose(page, "#zone-mode-x0-z1", "search")
+        _depth(page, "#depth-zone-x0-z1", "0.08")
+        expect(page.locator("#depth-target-x0-z1-0")).to_contain_text("48K 玻璃棉")
+        expect(page.locator("#depth-target-x0-z1-2")).to_contain_text("96K 玻璃棉")
+        page.locator("#zone-chip-remove-x0-z1-glass_wool_48k").click()
+        _settled(page)
+        expect(page.locator("#depth-target-x0-z1-0")).to_contain_text("24K 玻璃棉")
+        expect(page.locator("#depth-target-x0-z1-2")).to_have_count(0)
+        # 0.03：剩下兩種玻璃棉都放不下→紅、擋拿去搜尋；清單只留「不貼」就不判這一項，紅燈跟著熄、按鈕跟著恢復。
+        _depth(page, "#depth-zone-x0-z1", "0.03")
+        _red(page, "z1")
+        page.locator("#zone-chip-remove-x0-z1-glass_wool_24k").click()
+        page.locator("#zone-chip-remove-x0-z1-glass_wool_96k").click()
+        _settled(page)
+        _clear(page, "z1")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
