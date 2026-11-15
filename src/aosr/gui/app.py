@@ -981,6 +981,10 @@ def create_app(settings: GuiSettings) -> Starlette:
         response = await call_next(request)
         if response.status_code == 400 and response.headers.get("content-type", "").startswith("text/plain"):
             return _bad(ValueError("Host 不受信任"))
+        # #1181：網頁與靜態檔原本只帶 etag／last-modified，瀏覽器照自己猜的期限沿用舊檔，合併重開後老闆看到舊畫面。
+        # 沒自己設的一律 no-cache（每次先問伺服器，沒變回 304）；已經是 no-store 的照舊。
+        if request.method == "GET" and "cache-control" not in response.headers:
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=json_requests)
