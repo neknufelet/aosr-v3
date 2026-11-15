@@ -417,12 +417,17 @@ function fixedCell(wall, key, zone, cell) {
   const other = here.filter(item => item.placement?.group === "other");
   if (other.length) select.append(optionGroup(zoneSurfaceGroups.other ?? "其他", other));
   const away = current && !usableHere(current, wall);
-  if (away && !zoneShowAll) select.append(fixedOption(current, `${current.label}（現在用的；${groupWords(current)}）`));
+  // 貼上去的才會「不是這一面用的」；直接取代整面的（例如地板本身就是木地板那一筆固定阻抗）就是這一面本身，照實寫、不標紅。
+  const pasted = zone.material.kind === "mounted_on_wall";
+  if (away && !zoneShowAll) {
+    select.append(fixedOption(current, pasted ? `${current.label}（現在用的；${groupWords(current)}）`
+      : `${current.label}（現在用的：整面就是它，不是貼上去的）`));
+  }
   if (zoneShowAll) for (const [title, entries] of hiddenGroups(wall, fixed)) select.append(optionGroup(`不列的：${title}`, entries));
   select.value = current?.id ?? "";
   select.onchange = () => { if (select.value) action(() => chooseFixed(wall, key, select.value)); };
   cell.append(select);
-  if (away) {
+  if (away && pasted) {
     const line = document.createElement("p"); line.className = "notice"; line.id = `zone-fixed-away-${wall}-${key}`;
     line.textContent = `「${current.label}」不是${wallNames[wall]}用的：${current.placement.reason}`;
     cell.append(line);

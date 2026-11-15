@@ -121,7 +121,7 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-chip small{grid-column:1;grid-row:2;color:#5b6670}
 .zone-chip-remove{grid-column:2;grid-row:1/3;min-width:2rem;padding:.1rem .4rem;background:transparent;color:#17212a;border:1px solid #c9ced2}
 .zone-presets{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.3rem 0}
-.zone-presets button{background:#f4f7f8;color:#17212a;border:1px solid #7d95a0;padding:.35rem .7rem}
+.zone-presets button{background:#f4f7f8;color:#17212a;border:1px solid #7d95a0;padding:.35rem .7rem;max-width:26rem;text-align:left}
 .zone-presets button:disabled{background:#fbe7b5;border-color:#e0a526;color:#17212a;opacity:1}
 /* 清單沒有起點（#1176）：紅框裡直接給處理的按鈕。 */
 .zone-problem{border:2px solid #c0392b;background:#fdecea;border-radius:8px;padding:.4rem .7rem;margin:.4rem 0}

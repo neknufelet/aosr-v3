@@ -23,6 +23,7 @@ HIDDEN_ON_WALLS = ("own_room_door_wood_solid", "own_room_window_glass_10mm_singl
                    "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "own_room_floor_wood_on_concrete",
                    "demo109_gw48k_limited", "demo109_measured_gw49_gaborit_s1")
 DOOR = "own_room_door_wood_solid"
+FLOOR_WOOD = "own_room_floor_wood_on_concrete"
 
 
 def _boss_library(tmp_path: Path) -> None:
@@ -95,8 +96,12 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
 
 def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: Path, browser: Browser) -> None:
     """選單只列這一面能貼的，但這一區現在放的就是門（打開「顯示全部材料」選的）：關掉之後選單照樣是它、寫出它不是這一面用的；
-    保留原牆的區寫白話、數字收在細節。"""
-    _write(tmp_path, room109_document())
+    保留原牆的區寫白話、數字收在細節；直接取代整面的（地板本身就是木地板那一筆）照樣顯示、不標紅。"""
+    document = room109_document()
+    floor = next(entry["material"] for entry in BOSS_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
+    cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["floor"][0]["material"] = (
+        cast(dict[str, object], floor))
+    _write(tmp_path, document)
     _boss_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -113,6 +118,12 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
         _choose(page, "#zone-mode-x0-whole_wall", "keep_original")
         expect(page.locator("#zone-keep-x0-whole_wall")).to_have_text("原牆原樣，不貼東西")
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
+
+        # 地板本身就是木地板那一筆（直接取代整面的固定阻抗，老闆房間就是這樣）：選單照樣是它，但它就是地板本身，不標紅說不是地板用的。
+        page.locator("#elevation-wall-floor").click()
+        expect(page.locator("#zone-fixed-floor-whole_wall")).to_have_value(FLOOR_WOOD)
+        expect(page.locator(f"#zone-fixed-floor-whole_wall option[value={FLOOR_WOOD}]")).to_contain_text("整面就是它，不是貼上去的")
+        expect(page.locator("#zone-fixed-away-floor-whole_wall")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
