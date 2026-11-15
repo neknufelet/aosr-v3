@@ -377,7 +377,11 @@ function renderElevation() {
   for (const name of Object.keys(wallNames)) {
     const button = document.createElement("button"); button.id = `elevation-wall-${name}`; button.textContent = wallNames[name];
     button.setAttribute("aria-pressed", String(name === elevationWall));
-    button.onclick = () => { if (elevationWall !== name) { elevationWall = name; elevationSelected = null; elevationThin = []; note("", ""); } renderElevation(); };
+    // 換到別一面：上一面的訊息（立面圖與做法表底部那一行）一起清掉，不留在別面的表下面。
+    button.onclick = () => {
+      if (elevationWall !== name) { elevationWall = name; elevationSelected = null; elevationThin = []; note("", ""); zoneNote("", ""); }
+      renderElevation();
+    };
     buttons.append(button);
   }
   area.replaceChildren();

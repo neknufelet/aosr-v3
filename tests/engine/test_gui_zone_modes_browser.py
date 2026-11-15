@@ -76,7 +76,8 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     page.locator(f"#zone-allow-x0-auto1-{WALL_FIXED}").check()
     page.locator("#original-scheme").select_option("room109-original")
     expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
-    expect(page.locator("#zone-note")).to_contain_text("auto2")
+    # 底部那一行寫最後一次改的：auto1 的清單（#1176 起改清單也更新那一行，不留 auto2 那一句）。
+    expect(page.locator("#zone-note")).to_contain_text("「自動 auto1」：清單改成 48K 玻璃棉、24K 玻璃棉、不貼、")
 
     zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
     assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}

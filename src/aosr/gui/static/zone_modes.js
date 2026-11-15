@@ -26,6 +26,9 @@ const zoneAllowedOpen = new Set();
 // （「只讓電腦決定：這一筆貼或不貼」用）。兩樣都只記在這一頁，不跨重開。
 let zoneLastAllowed = null;
 const zoneFormerFixed = new Map();
+// 剛才選的跟原牆一模一樣、做法自己跳成「不貼，保留原牆」的區（#1175／#1176）：那一列寫為什麼（八區的牆上，底部訊息常在畫面外）。
+// 「牆/區」→ 選的那一筆的名字；只記在這一頁，那一區再改做法、選別的、重切或換方案就拿掉。
+const zoneSameAsOriginal = new Map();
 const ZONE_NONE = "none";
 const WOOL_48K = "glass_wool_48k";
 // 改成交給電腦挑時一開始放的就是這三種內建玻璃棉＋不貼（#1176，跟老闆講好的起點，不隨材料庫多了幾筆而變）。
@@ -79,10 +82,13 @@ async function fetchZoneDesign(name) {
 function applyZoneDesign(state) {
   zoneDesignGeneration += 1;
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
-  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; zoneFormerFixed.clear();
+  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; zoneFormerFixed.clear(); zoneSameAsOriginal.clear();
 }
 // 載入範本：新的方案，沒有設計設定。
-function resetZoneDesign() { zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", ""); zoneLimits = null; zoneFormerFixed.clear(); }
+function resetZoneDesign() {
+  zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
+  zoneLimits = null; zoneFormerFixed.clear(); zoneSameAsOriginal.clear();
+}
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
 async function saveZoneDesign(name) {
@@ -167,6 +173,7 @@ function searchButtonRow() {
 function remapZoneDesign(wall, inherited) {
   // 自動補的代號重編了：「改之前指定貼的那一筆」記的是舊代號，這一面的全部丟掉（不然會掛到別一塊上）。
   for (const name of [...zoneFormerFixed.keys()]) if (name.startsWith(`${wall}/`)) zoneFormerFixed.delete(name);
+  for (const name of [...zoneSameAsOriginal.keys()]) if (name.startsWith(`${wall}/`)) zoneSameAsOriginal.delete(name);
   const old = zoneDesign?.zones?.[wall];
   if (!old) return;
   const next = {};
@@ -324,6 +331,7 @@ async function changeZoneMode(wall, key, mode) {
   if (mode !== "fixed" && !await zoneMaterialChanged(wall, key, {choice: "original"})) { renderZoneTable(wall); return; }
   if (mode === "search" && held && usableHere(held, wall)) zoneFormerFixed.set(`${wall}/${key}`, held.id);
   else zoneFormerFixed.delete(`${wall}/${key}`);
+  zoneSameAsOriginal.delete(`${wall}/${key}`);
   const next = {...before, mode};
   if (mode !== "search") delete next.allowed;
   else if (!next.allowed) {
@@ -333,7 +341,9 @@ async function changeZoneMode(wall, key, mode) {
   setZoneSetting(wall, key, next);
   if (mode === "fixed") zoneNote(`${wallNames[wall]}「${zoneName(key)}」：指定貼一種，在右邊選要貼哪一種；不選就照方案現在的材料`, "ok");
   if (mode === "search" && next.allowed) {
-    zoneNote(`${wallNames[wall]}「${zoneName(key)}」：交給電腦挑，先放了 ${next.allowed.map(choiceName).join("、")}；要改就按「改清單」或下面的常用組合`, "ok");
+    const zone = zoneList(wall).find(item => zoneKey(item) === key);
+    const how = zonePresets(wall, key, zone).length ? "這一區的「改清單」或常用組合" : "這一區的「改清單」";
+    zoneNote(`${wallNames[wall]}「${zoneName(key)}」：交給電腦挑，先放了 ${next.allowed.map(choiceName).join("、")}；要改就按${how}`, "ok");
   }
   await afterZoneChange();
 }
@@ -346,15 +356,17 @@ async function chooseFixed(wall, key, materialId) {
   delete next.allowed;
   setZoneSetting(wall, key, next);
   if (data.same_as_original) {
+    zoneSameAsOriginal.set(`${wall}/${key}`, libraryEntry(materialId)?.label ?? materialId);
     zoneNote(`${wallNames[wall]}「${zoneName(key)}」：選的跟原本一樣，當成不貼（做法改成「不貼，保留原牆」）`, "ok");
-  }
+  } else zoneSameAsOriginal.delete(`${wall}/${key}`);
   await afterZoneChange();
 }
-// 改清單（清單上的 ×、勾選表、常用組合都走這裡）：存成明確清單、記成這一頁「上一次的組合」
-// （起點要是可調材料或不貼，伺服器開跑時再核一次）。
+// 改清單（清單上的 ×、勾選表、常用組合、紅框的按鈕都走這裡）：存成明確清單、記成這一頁「上一次的組合」
+// （起點要是可調材料或不貼，伺服器開跑時再核一次）；底部訊息跟著寫現在的清單（不留改之前那一句）。
 function changeAllowed(wall, key, allowed) {
   setZoneSetting(wall, key, {...zoneSetting(wall, key), mode: "search", allowed});
   zoneLastAllowed = [...allowed];
+  zoneNote(`${wallNames[wall]}「${zoneName(key)}」：清單改成 ${allowed.map(choiceName).join("、")}`, "ok");
   markStale();
   renderZoneTable(wall);
 }
@@ -527,12 +539,16 @@ function allowedChips(wall, key, allowed, edit) {
   return row;
 }
 // 一鍵常用組合（這一面用得到的才出現）；這一區改成交給電腦挑之前指定貼了某一筆，多一顆「只讓電腦決定：這一筆貼或不貼」。
-function presetRow(wall, key, zone, allowed, edit) {
+function zonePresets(wall, key, zone) {
   const presets = ZONE_PRESETS.filter(preset => preset.members.every(id => fitsHere(id, wall)));
   const held = zoneFormerFixed.get(`${wall}/${key}`) ?? libraryLabel(zone.material)?.id;
   if (held && fitsHere(held, wall)) {
     presets.push({id: "this_or_none", words: `只讓電腦決定：「${libraryEntry(held).label}」貼或不貼`, members: [held, ZONE_NONE]});
   }
+  return presets;
+}
+function presetRow(wall, key, zone, allowed, edit) {
+  const presets = zonePresets(wall, key, zone);
   const row = document.createElement("div"); row.className = "zone-presets"; row.id = `zone-presets-${wall}-${key}`;
   if (!presets.length) return row;
   const lead = document.createElement("span"); lead.textContent = "一鍵換成常用組合：";
@@ -656,7 +672,14 @@ function renderZoneTable(wall) {
     else if (setting.mode === "keep_original") {
       const line = document.createElement("p"); line.id = `zone-keep-${wall}-${key}`;
       line.textContent = `${originalWords(originalMaterial(zone.material))}，不貼東西`;
-      material.append(line, numbersDetail(zone.material, `zone-numbers-${wall}-${key}`));
+      material.append(line);
+      const same = zoneSameAsOriginal.get(`${wall}/${key}`);
+      if (same) {
+        const why = document.createElement("p"); why.className = "ok"; why.id = `zone-same-${wall}-${key}`;
+        why.textContent = `剛才選的「${same}」跟原本一樣，當成不貼（做法自己改成「不貼，保留原牆」）`;
+        material.append(why);
+      }
+      material.append(numbersDetail(zone.material, `zone-numbers-${wall}-${key}`));
     }
     else searchCell(wall, key, zone, setting, material);
     const depth = document.createElement("td"); depth.id = `zone-depth-${wall}-${key}`;

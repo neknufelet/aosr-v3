@@ -207,6 +207,31 @@ def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materia
         assert watched.page_errors == [] and watched.console_errors == []
 
 
+def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path: Path, browser: Browser) -> None:
+    """審查 11-15：底部那一行不准留「先放了 48K、不貼」卻畫著別的清單——改清單（×、常用組合）跟著寫現在的清單，換到別一面
+    清掉；「要改就按」指這一區的「改清單」，這一區沒有常用組合（地板）就不提組合。"""
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        note = page.locator("#zone-note")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        expect(note).to_contain_text("先放了 48K 玻璃棉、24K 玻璃棉、96K 玻璃棉、不貼；要改就按這一區的「改清單」或常用組合")
+        page.locator("#zone-chip-remove-x0-whole_wall-glass_wool_48k").click()
+        expect(note).to_contain_text("「整面」：清單改成 24K 玻璃棉、96K 玻璃棉、不貼")
+        expect(note).not_to_contain_text("先放了")
+        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        expect(note).to_contain_text("清單改成 48K 玻璃棉、不貼")
+        page.locator("#elevation-wall-floor").click()
+        expect(note).to_have_text("")
+        _choose(page, "#zone-mode-floor-whole_wall", "search")
+        expect(note).to_contain_text("先放了 不貼；要改就按這一區的「改清單」")
+        expect(note).not_to_contain_text("常用組合")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def _old_search_design(tmp_path: Path) -> Path:
     design = tmp_path / "designs" / "room109.json"
     design.parent.mkdir(exist_ok=True)
@@ -436,7 +461,13 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         _choose(page, "#zone-fixed-ceiling-whole_wall", ceiling)
         expect(page.locator("#zone-mode-ceiling-whole_wall")).to_have_value("keep_original")
         expect(page.locator("#zone-note")).to_contain_text("選的跟原本一樣，當成不貼")
+        # 那一列自己也寫為什麼（八區的牆上，底部那一行常在畫面外）。
+        expect(page.locator("#zone-same-ceiling-whole_wall")).to_contain_text("跟原本一樣，當成不貼")
         assert page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.ceiling[0].material)") == built
         assert _modes(page, "ceiling") == {"whole_wall": {"mode": "keep_original"}}
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "same-as-original.png"))
+        # 那一區再改做法：那一句拿掉，改回不貼也不再出現。
+        _choose(page, "#zone-mode-ceiling-whole_wall", "search")
+        _choose(page, "#zone-mode-ceiling-whole_wall", "keep_original")
+        expect(page.locator("#zone-same-ceiling-whole_wall")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
