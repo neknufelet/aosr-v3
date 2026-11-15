@@ -265,6 +265,29 @@ def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path
         assert watched.page_errors == [] and watched.console_errors == []
 
 
+def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path, browser: Browser) -> None:
+    """「上一次的組合」只在同一份方案裡帶（審查 11-15）：在這一份改成 48K＋不貼，打開另一份方案再改成交給電腦挑，
+    照樣從三種玻璃棉＋不貼開始（同一份方案裡的別一面才照上一次的組合）。"""
+    _write(tmp_path, room109_document())
+    _write(tmp_path, room109_document("room109-b"))
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        page.locator("#elevation-wall-y0").click()
+        _choose(page, "#zone-mode-y0-whole_wall", "search")
+        assert _chips(page, "y0", "whole_wall") == ["glass_wool_48k", "none"]  # 同一份方案：照上一次的組合
+        _open_scheme(page, "room109-b")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        assert _chips(page, "x0", "whole_wall") == three
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def _old_search_design(tmp_path: Path) -> Path:
     design = tmp_path / "designs" / "room109.json"
     design.parent.mkdir(exist_ok=True)

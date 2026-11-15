@@ -24,7 +24,7 @@ let zoneNoteText = "";
 let zoneNoteKind = "";
 const zoneAllowedOpen = new Set();
 // 交給電腦挑的清單（#1176）：這一頁上一次改過的組合（改成交給電腦挑時優先放它）、每一區改成交給電腦挑之前指定貼的那一筆
-// （「只讓電腦決定：這一筆貼或不貼」用）。兩樣都只記在這一頁，不跨重開。
+// （「只讓電腦決定：這一筆貼或不貼」用）。兩樣都只記在這一頁，不跨重開，也不跨方案（打開別的方案、載入範本就清掉）。
 let zoneLastAllowed = null;
 const zoneFormerFixed = new Map();
 // 剛才選的跟原牆一模一樣、做法自己跳成「不貼，保留原牆」的區（#1175／#1176）：那一列寫為什麼（八區的牆上，底部訊息常在畫面外）。
@@ -84,11 +84,12 @@ function applyZoneDesign(state) {
   zoneDesignGeneration += 1;
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
   zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; zoneFormerFixed.clear(); zoneSameAsOriginal.clear();
+  zoneLastAllowed = null;  // 「上一次的組合」不跨方案（審查 11-15）
 }
 // 載入範本：新的方案，沒有設計設定。
 function resetZoneDesign() {
   zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
-  zoneLimits = null; zoneFormerFixed.clear(); zoneSameAsOriginal.clear();
+  zoneLimits = null; zoneFormerFixed.clear(); zoneSameAsOriginal.clear(); zoneLastAllowed = null;
 }
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
