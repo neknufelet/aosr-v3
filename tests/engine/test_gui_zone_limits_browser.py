@@ -117,7 +117,9 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         after = {str(zone["id"]): zone for zone in _zones(page, "x0")}
         modes = _modes(page, "x0")
         right = [key for key, zone in after.items() if _region(zone) == "right" and key != "z2"]
-        assert right and all(modes[key] == {"mode": "search", "max_depth_m": 0.08} for key in right)
+        # #1176 起改成交給電腦挑就帶好一份明確清單（這一面能用的全部可調材料＋不貼）。
+        allowed = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        assert right and all(modes[key] == {"mode": "search", "allowed": allowed, "max_depth_m": 0.08} for key in right)
         _save(page, "room109")
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
         assert stored["room_max_depth_m"] == 0.3 and stored["wall_max_depth_m"] == {"x0": 0.2}

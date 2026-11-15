@@ -4,6 +4,7 @@
 材料庫用老闆 11-15 那 12 筆（``_boss_material_library``），房間用 109 號房的長寬高。"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 
@@ -16,7 +17,7 @@ from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_ide
 from tests.engine._surface_zone_cases import room109_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
-from tests.engine.test_gui_zone_modes_browser import _choose
+from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _save
 
 HIDDEN_ON_WALLS = ("own_room_door_wood_solid", "own_room_window_glass_10mm_single", "own_room_ceiling_calsil_6mm_gap250",
                    "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "own_room_floor_wood_on_concrete",
@@ -56,7 +57,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
 
         # 交給電腦挑、打開清單：可調的寫得出調什麼（24K、96K 起點沒有空腔，空腔不調），不列的只寫一行有幾筆、哪幾組。
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        page.locator("#zone-limit-x0-whole_wall").check()
+        page.locator("#zone-allowed-summary-x0-whole_wall").click()
         listed = _ids(page, "x0", "whole_wall")
         assert listed[:4] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         assert not set(HIDDEN_ON_WALLS) & set(listed)
@@ -85,7 +86,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         fixed = _values(page, "#zone-fixed-floor-whole_wall option")
         assert fixed == ["", "carpet_on_concrete"]
         _choose(page, "#zone-mode-floor-whole_wall", "search")
-        page.locator("#zone-limit-floor-whole_wall").check()
+        page.locator("#zone-allowed-summary-floor-whole_wall").click()
         assert _ids(page, "floor", "whole_wall") == ["none", "carpet_on_concrete"]
         expect(page.locator("#zone-allowed-floor-whole_wall")).to_contain_text("地板沒有可調的材料：電腦只能從「不貼」開始")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "choices-floor.png"))
@@ -112,4 +113,99 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
         _choose(page, "#zone-mode-x0-whole_wall", "keep_original")
         expect(page.locator("#zone-keep-x0-whole_wall")).to_have_text("原牆原樣，不貼東西")
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def _chips(page: Page, wall: str, key: str) -> list[str]:
+    prefix = f"zone-chip-{wall}-{key}-"
+    return [value.removeprefix(prefix) for value in cast(list[str], page.locator(f"#zone-allowed-chips-{wall}-{key} .zone-chip")
+                                                         .evaluate_all("nodes => nodes.map(node => node.id)"))]
+
+
+def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, browser: Browser) -> None:
+    """老闆 11-15「每點一個材料每點一個面都還要重新再勾一次 取消一堆」：改成交給電腦挑直接帶好一份清單（這一面能用的全部可調
+    材料＋不貼，示範房的不算），一鍵常用組合整份換掉；這一頁上一次改過的組合，下一區改成交給電腦挑時優先放（這一面用不了的拿掉）；
+    地板沒有可調材料，只放「不貼」、不出現玻璃棉的組合。存檔一律寫明確清單。"""
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-fixed-x0-whole_wall", "glass_wool_48k_50mm")
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        assert _chips(page, "x0", "whole_wall") == three
+        assert _modes(page, "x0")["whole_wall"] == {"mode": "search", "allowed": three}
+        expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_24k")).to_contain_text("可調：厚 5～20 cm、空腔不調")
+        expect(page.locator("#zone-chip-x0-whole_wall-none")).to_contain_text("保留原牆，電腦可以決定這裡不貼")
+        # 常用組合：現在這一份就是「三種玻璃棉都比」（標現在用的）；這一區剛才指定貼 48K 50 mm，多一顆只決定它貼不貼。
+        expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_be_disabled()
+        expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_contain_text("現在用的")
+        expect(page.locator("#zone-preset-x0-whole_wall-this_or_none")).to_have_text("只讓電腦決定：「48K 玻璃棉 50 mm 貼牆」貼或不貼")
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "search-ready-list.png"))
+        page.locator("#zone-preset-x0-whole_wall-this_or_none").click()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == ["glass_wool_48k_50mm", "none"]
+        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
+        expect(page.locator("#zone-preset-x0-whole_wall-wool48")).to_be_disabled()
+
+        # 下一面改成交給電腦挑：照這一頁上一次的組合（48K＋不貼）。
+        page.locator("#elevation-wall-y0").click()
+        _choose(page, "#zone-mode-y0-whole_wall", "search")
+        assert _modes(page, "y0")["whole_wall"]["allowed"] == ["glass_wool_48k", "none"]
+        # 地板：玻璃棉不是地板用的，上一次的組合拿掉它只剩「不貼」；玻璃棉的組合不出現。
+        page.locator("#elevation-wall-floor").click()
+        _choose(page, "#zone-mode-floor-whole_wall", "search")
+        assert _chips(page, "floor", "whole_wall") == ["none"]
+        expect(page.locator("#zone-presets-floor-whole_wall button")).to_have_count(0)
+        _save(page, "room109")
+        stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))["zones"]
+        assert {wall: zones["whole_wall"] for wall, zones in stored.items()} == {
+            "x0": {"mode": "search", "allowed": ["glass_wool_48k", "none"]},
+            "y0": {"mode": "search", "allowed": ["glass_wool_48k", "none"]},
+            "floor": {"mode": "search", "allowed": ["none"]}}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def _old_search_design(tmp_path: Path) -> Path:
+    design = tmp_path / "designs" / "room109.json"
+    design.parent.mkdir(exist_ok=True)
+    design.write_text(json.dumps({"schema_version": "aosr.zone_design.v1", "scheme_id": "room109",
+                                  "zones": {"x0": {"whole_wall": {"mode": "search"}}}}), encoding="utf-8")
+    return design
+
+
+def test_an_old_zone_without_a_list_shows_and_saves_what_the_server_means(tmp_path: Path, browser: Browser) -> None:
+    """舊的交給搜尋區沒寫清單（null，伺服器的意思是材料庫全部可調材料＋不貼，示範房的也算）：打開照這個意思列成明確清單
+    （示範房那一筆標不是這一面用的），存檔寫成明確清單；伺服器那一邊 null 的意思不改。"""
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    design = _old_search_design(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        everything = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "demo109_gw48k_limited", "none"]
+        assert _chips(page, "x0", "whole_wall") == everything
+        expect(page.locator("#zone-chip-x0-whole_wall-demo109_gw48k_limited")).to_contain_text("不是前牆用的")
+        assert page.evaluate("zoneDesign.zones.x0.whole_wall") == {"mode": "search"}  # 打開不改設計，存檔才寫
+        _save(page, "room109")
+        assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"] == {
+            "mode": "search", "allowed": everything}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unreadable(tmp_path: Path, browser: Browser) -> None:
+    """材料庫讀不全（使用者材料庫壞了）：列不出伺服器那份全部可調材料是哪幾種，照講、不猜；存檔照舊不寫清單（不替伺服器縮小範圍）。"""
+    _write(tmp_path, room109_document())
+    (tmp_path / "materials.json").write_text("{not json", encoding="utf-8")
+    design = _old_search_design(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#zone-allowed-unknown-x0-whole_wall")).to_contain_text("材料庫沒讀全")
+        _save(page, "room109")
+        assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"] == {"mode": "search"}
         assert watched.page_errors == [] and watched.console_errors == []

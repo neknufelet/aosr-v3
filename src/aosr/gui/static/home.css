@@ -114,6 +114,15 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-choice{display:grid;grid-template-columns:auto 1fr;column-gap:.4rem}
 .zone-choice small{grid-column:2;color:#5b6670}
 .zone-numbers summary{color:#5b6670;font-size:.9em}
+/* 交給電腦挑的清單（#1176）：每一種一個方塊、按 × 拿掉；常用組合一排按鈕。 */
+.zone-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.3rem 0}
+.zone-chip{display:inline-grid;grid-template-columns:1fr auto;column-gap:.4rem;align-items:center;border:1px solid #e0a526;
+  background:#fff8e6;border-radius:6px;padding:.2rem .3rem .2rem .55rem;max-width:26rem}
+.zone-chip small{grid-column:1;grid-row:2;color:#5b6670}
+.zone-chip-remove{grid-column:2;grid-row:1/3;min-width:2rem;padding:.1rem .4rem;background:transparent;color:#17212a;border:1px solid #c9ced2}
+.zone-presets{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.3rem 0}
+.zone-presets button{background:#f4f7f8;color:#17212a;border:1px solid #7d95a0;padding:.35rem .7rem}
+.zone-presets button:disabled{background:#fbe7b5;border-color:#e0a526;color:#17212a;opacity:1}
 /* 超過限制（#1111）：紅框紅底；表裡那一列左邊紅條、每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
 .zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:#f9d6d2;stroke:#c0392b;stroke-width:3}
 .zone-table tr.zone-red td{background:#fdecea}
