@@ -10,7 +10,8 @@ from aosr.gui.app import GuiSettings, create_app
 
 def test_pages_and_static_files_ask_the_server_every_time(tmp_path: Path) -> None:
     with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://localhost") as client:
-        for path in ("/", "/static/zone_modes.js", "/static/app.js", "/static/home.css", "/gradient", "/static/gradient.js"):
+        static = [f"/static/{name}" for name in ("zone_modes.js", "app.js", "home.css", "gradient.js")]
+        for path in ("/", "/gradient", *static):
             response = client.get(path)
             assert response.status_code == 200, path
             assert response.headers["cache-control"] == "no-cache", path

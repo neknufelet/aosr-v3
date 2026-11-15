@@ -28,6 +28,7 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.archive_delete import ArchiveDelete, delete_response
+from aosr.gui.cache_policy import ask_every_time
 from aosr.gui.gradient_jobs import GradientJobs, Launcher, SystemdLauncher, gradient_routes
 from aosr.gui.search_jobs import MEMORY_MAX as SEARCH_MEMORY_MAX, SearchJobs, search_job_routes
 from aosr.gui.gradient_follow import GradientFollow, gradient_follow_routes
@@ -114,8 +115,7 @@ class GuiSettings:
     data_dir: Path = Path.home() / "room-acoustic-data"
     runner: tuple[str, ...] | None = None
     modal_runner: tuple[str, ...] | None = None
-    # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字。
-    # 預設空的＝只認本機。
+    # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字；預設空的＝只認本機。
     extra_hosts: tuple[str, ...] = ()
     # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
     client_networks: tuple[ipaddress.IPv4Network, ...] = ()
@@ -981,11 +981,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         response = await call_next(request)
         if response.status_code == 400 and response.headers.get("content-type", "").startswith("text/plain"):
             return _bad(ValueError("Host 不受信任"))
-        # #1181：網頁與靜態檔原本只帶 etag／last-modified，瀏覽器照自己猜的期限沿用舊檔，合併重開後老闆看到舊畫面。
-        # 沒自己設的一律 no-cache（每次先問伺服器，沒變回 304）；已經是 no-store 的照舊。
-        if request.method == "GET" and "cache-control" not in response.headers:
-            response.headers["Cache-Control"] = "no-cache"
-        return response
+        return ask_every_time(request, response)  # #1181：沒設快取規則的 GET 一律 no-cache
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=json_requests)
 
