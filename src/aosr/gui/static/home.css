@@ -110,6 +110,11 @@ button.archive-danger:hover{background:#fff0f0}
 /* 做法表塞進面板寬（#1176）：材料下拉選單跟著欄寬（不照最長那一筆名字撐寬，老闆的 VPR 那幾筆會把深度上限那一欄擠出面板；
    名字在關著的選單裡截掉、打開照樣看全名），代號這類沒有空格的長字照樣換行。 */
 .zone-table td[id^=zone-material-]{overflow-wrap:anywhere}
+/* 「區」「大小」兩欄不在字中間斷行（審查 11-15：「整面」斷成直的兩行）：中文字之間不斷，只在空白與括號前換行。 */
+.zone-table th:nth-child(-n+2),.zone-table td:nth-child(-n+2){word-break:keep-all}
+/* 停用的「拿去搜尋」照樣看得清楚（審查 11-15：白字淺底、整顆半透明太淡）：深字淺灰底、不透明；跟旁邊那一句留間隔。 */
+#zone-to-search:disabled{opacity:1;background:#d5dde1;color:#17212a}
+#zone-to-search-note{margin-left:.75rem}
 .zone-table select[id^=zone-fixed-]{width:100%}
 .zone-allowed{display:flex;flex-direction:column;align-items:flex-start}
 .zone-allowed label{margin:.15rem 0}

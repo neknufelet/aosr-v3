@@ -41,6 +41,29 @@ def _ids(page: Page, wall: str, key: str) -> list[str]:
         "nodes => nodes.map(node => node.id)"))]
 
 
+# 一格字照畫出來的樣子分行（逐字量字的上緣，換了一行上緣就變）。
+LINES = """cell => {
+    const node = cell.firstChild, lines = [];
+    let top = null;
+    for (let i = 0; i < node.data.length; i += 1) {
+        const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1);
+        const rect = range.getBoundingClientRect();
+        if (top === null || Math.abs(rect.top - top) > 2) { lines.push(""); top = rect.top; }
+        lines[lines.length - 1] += node.data[i];
+    }
+    return lines.map(line => line.trim());
+}"""
+# 字色與底色的對比（WCAG 相對亮度）、這一格自己的不透明度。
+CONTRAST = """node => {
+    const style = getComputedStyle(node);
+    const rgb = text => text.match(/[\\d.]+/g).slice(0, 3).map(Number);
+    const channel = value => { const c = value / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const luminance = ([r, g, b]) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    const [light, dark] = [luminance(rgb(style.color)), luminance(rgb(style.backgroundColor))].sort((a, b) => b - a);
+    return {ratio: (light + 0.05) / (dark + 0.05), opacity: Number(style.opacity)};
+}"""
+
+
 def _small(page: Page, wall: str, material: str) -> Locator:
     """勾選表（整面一區）裡那一筆名字底下的小字。"""
     return page.locator("label", has=page.locator(f"#zone-allow-{wall}-whole_wall-{material}")).locator("small")
@@ -373,6 +396,12 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         note = page.locator("#zone-to-search-note")
         expect(note).to_contain_text(f"先處理{front}「整面」、{side}「整面」的紅框")
         expect(note).to_have_class("limit-red")
+        # 停用的按鈕照樣看得清楚（審查 11-15：白字淺底太淡）：字與底的對比至少 4.5:1、不靠透明度變淡；跟紅字留間隔。
+        look = cast(dict[str, float], page.locator("#zone-to-search").evaluate(CONTRAST))
+        assert look["ratio"] >= 4.5 and look["opacity"] == 1, look
+        gap = cast(float, page.evaluate("document.getElementById('zone-to-search-note').getBoundingClientRect().left"
+                                        " - document.getElementById('zone-to-search').getBoundingClientRect().right"))
+        assert gap >= 8, gap
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "send-blocked-by-red-box.png"))
         page.evaluate("sendToSearch()")
         expect(page.locator("#zone-note")).to_contain_text(f"先處理{front}「整面」、{side}「整面」的紅框")
@@ -423,6 +452,24 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
         )) <= 0.5
         expect(page.locator("#depth-zone-x0-z1")).to_be_in_viewport()
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "front-fits.png"))
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_zone_and_size_columns_never_break_inside_a_word(tmp_path: Path, browser: Browser) -> None:
+    """審查 11-15：天花整面一區、交給電腦挑打開清單，「區」那一欄的「整面」斷成直的兩行。窄視窗（760）也不准在字中間斷：
+    「整面」一行，「大小（公尺）」只准在括號前換行。"""
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=760) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-ceiling").click()
+        _choose(page, "#zone-mode-ceiling-whole_wall", "search")
+        page.locator("#zone-allowed-summary-ceiling-whole_wall").click()
+        row = page.locator("#zone-row-ceiling-whole_wall td")
+        assert row.nth(0).evaluate(LINES) == ["整面"] and row.nth(1).evaluate(LINES) == ["整面"]
+        assert page.locator("#zone-table-ceiling th").nth(1).evaluate(LINES) in (["大小（公尺）"], ["大小", "（公尺）"])
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "narrow-columns.png"))
         assert watched.page_errors == [] and watched.console_errors == []
 
 
