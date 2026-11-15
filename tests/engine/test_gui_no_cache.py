@@ -21,7 +21,9 @@ def test_pages_and_static_files_ask_the_server_every_time(tmp_path: Path) -> Non
 def test_no_store_answers_keep_no_store(tmp_path: Path) -> None:
     with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://localhost") as client:
         response = client.get(f"/api/searches/{'f' * 32}")
-        assert response.status_code == 404
+        assert response.status_code == 404 and response.headers["cache-control"] == "no-cache"
+        posted = client.post("/api/material-curve", json={})
+        assert "cache-control" not in posted.headers  # 只補 GET；POST 照原樣
         listing = client.get("/api/materials")
         assert listing.status_code == 200 and listing.headers["cache-control"] == "no-cache"
         assert client.get("/api/searches").headers["cache-control"] == "no-store"
