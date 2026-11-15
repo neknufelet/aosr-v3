@@ -209,3 +209,51 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
         _save(page, "room109")
         assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"] == {"mode": "search"}
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_path: Path, browser: Browser) -> None:
+    """老闆 11-15 看不懂「准用清單只有固定材料：搜尋要一個起點」：只放了固定成品時紅框白話寫電腦沒得挑，下面直接給按鈕——
+    只有一筆就能改成指定貼它（清單跟著拿掉，伺服器不收固定區帶清單）、加上「不貼」、加上 48K 玻璃棉（地板用不了就不出現）。"""
+    vpr = "melamine100_vpr_steel1mm_softfoam100_draft"
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        page.locator("#zone-allowed-summary-x0-whole_wall").click()
+        page.locator(f"#zone-allow-x0-whole_wall-{vpr}").check()
+        for choice in ("glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"):
+            page.locator(f"#zone-chip-remove-x0-whole_wall-{choice}").click()
+        box = page.locator("#zone-allowed-problem-x0-whole_wall")
+        expect(box).to_contain_text("只放了固定成品，電腦沒得挑。")
+        expect(box).not_to_contain_text("准用")
+        expect(box.locator("button")).to_have_text(["就貼這一筆（改成指定貼一種）", "加上「不貼」", "加上 48K 玻璃棉"])
+        page.locator("#zone-allowed-summary-x0-whole_wall").click()  # 收起勾選表，截紅框
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "only-fixed.png"))
+
+        page.locator("#zone-fix-add-none-x0-whole_wall").click()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == [vpr, "none"]
+        expect(box).to_have_count(0)
+        page.locator("#zone-chip-remove-x0-whole_wall-none").click()
+        page.locator("#zone-fix-add-wool-x0-whole_wall").click()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == [vpr, "glass_wool_48k"]
+        page.locator("#zone-chip-remove-x0-whole_wall-glass_wool_48k").click()
+        with page.expect_response("**/api/zone-material"):
+            page.locator("#zone-fix-only-x0-whole_wall").click()
+        page.wait_for_function("!document.querySelector('main').inert")
+        expect(page.locator("#zone-mode-x0-whole_wall")).to_have_value("fixed")
+        expect(page.locator("#zone-fixed-x0-whole_wall")).to_have_value(vpr)
+        assert _modes(page, "x0")["whole_wall"] == {"mode": "fixed"}
+        _save(page, "room109")
+
+        # 地板：48K 玻璃棉不是地板用的，那一顆不出現。
+        page.locator("#elevation-wall-floor").click()
+        _choose(page, "#zone-mode-floor-whole_wall", "search")
+        page.locator("#zone-allowed-summary-floor-whole_wall").click()
+        page.locator("#zone-allow-floor-whole_wall-carpet_on_concrete").check()
+        page.locator("#zone-chip-remove-floor-whole_wall-none").click()
+        expect(page.locator("#zone-allowed-problem-floor-whole_wall button")).to_have_text(
+            ["就貼這一筆（改成指定貼一種）", "加上「不貼」"])
+        assert watched.page_errors == [] and watched.console_errors == []

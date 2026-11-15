@@ -473,7 +473,8 @@ def test_web_start_hands_a_listed_measured_table_to_the_command_line(tmp_path: P
     assert len(lists) == 1 and lists[0].endswith("=glass_wool_48k,fixed:" + MEASURED), lists
 
 
-@pytest.mark.parametrize(("allowed", "words"), [({"x0": (MEASURED,)}, "只有固定材料"), ({"x0": ("no_such",)}, "材料庫裡沒有")])
+@pytest.mark.parametrize(("allowed", "words"), [({"x0": (MEASURED,)}, "只放了固定成品，電腦沒得挑"),
+                                               ({"x0": ("no_such",)}, "材料庫裡沒有")])
 def test_plan_refuses_lists_without_a_start_or_with_unknown_ids(allowed: dict[str, tuple[str, ...]], words: str) -> None:
     scheme, design = _scheme_and_design(allowed)
     with pytest.raises(PlanRefused, match=words):

@@ -123,6 +123,11 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-presets{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.3rem 0}
 .zone-presets button{background:#f4f7f8;color:#17212a;border:1px solid #7d95a0;padding:.35rem .7rem}
 .zone-presets button:disabled{background:#fbe7b5;border-color:#e0a526;color:#17212a;opacity:1}
+/* 清單沒有起點（#1176）：紅框裡直接給處理的按鈕。 */
+.zone-problem{border:2px solid #c0392b;background:#fdecea;border-radius:8px;padding:.4rem .7rem;margin:.4rem 0}
+.zone-problem p{margin:.2rem 0}
+.zone-problem-actions{display:flex;flex-wrap:wrap;gap:.4rem;margin:.3rem 0}
+.zone-problem-actions button{padding:.4rem .8rem}
 /* 超過限制（#1111）：紅框紅底；表裡那一列左邊紅條、每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
 .zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:#f9d6d2;stroke:#c0392b;stroke-width:3}
 .zone-table tr.zone-red td{background:#fdecea}

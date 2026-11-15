@@ -317,7 +317,10 @@ async function changeZoneMode(wall, key, mode) {
 }
 async function chooseFixed(wall, key, materialId) {
   if (!await zoneMaterialChanged(wall, key, {choice: "fixed", material_id: materialId})) { renderZoneTable(wall); return; }
-  setZoneSetting(wall, key, {...zoneSetting(wall, key), mode: "fixed"});
+  // 從交給電腦挑的紅框按「就貼這一筆」也走這裡：清單只給交給電腦挑的區，改成指定貼一種就拿掉（伺服器不收固定區帶清單）。
+  const next = {...zoneSetting(wall, key), mode: "fixed"};
+  delete next.allowed;
+  setZoneSetting(wall, key, next);
   await afterZoneChange();
 }
 // 改清單（清單上的 ×、勾選表、常用組合都走這裡）：存成明確清單、記成這一頁「上一次的組合」
@@ -346,11 +349,31 @@ function choiceName(id) {
   const entry = libraryEntry(id);
   return id === ZONE_NONE ? "不貼" : entry ? shortLabel(entry) : `${id}（材料庫找不到）`;
 }
+// 清單裡沒有起點（可調材料或不貼）：電腦沒得挑（伺服器開跑時 gradient_plan 同一句白話再擋一次）。
 function allowedProblem(allowed) {
   if (!allowed) return "";
   const optimizable = new Set(libraryEntries("optimizable").map(entry => entry.id));
-  return allowed.some(id => id === ZONE_NONE || optimizable.has(id)) ? ""
-    : "只放了固定成品，電腦沒得挑：請再勾一種可調材料或「不貼」";
+  return allowed.some(id => id === ZONE_NONE || optimizable.has(id)) ? "" : "只放了固定成品，電腦沒得挑。";
+}
+// 紅框直接給按鈕（#1176，老闆看不懂「准用清單只有固定材料：搜尋要一個起點…」）：只有一筆就能直接改成指定貼它；
+// 或加上「不貼」、加上 48K 玻璃棉（這一面用不了就不出現）。
+function problemBox(wall, key, allowed, edit) {
+  const box = document.createElement("div"); box.className = "zone-problem"; box.id = `zone-allowed-problem-${wall}-${key}`;
+  box.setAttribute("role", "alert");
+  const head = document.createElement("p"); head.className = "limit-red"; head.textContent = allowedProblem(allowed);
+  const why = document.createElement("p");
+  why.textContent = "電腦要從一個能調的東西開始：可調的材料（例如玻璃棉），或先不貼。你要的是哪一個？";
+  const buttons = document.createElement("div"); buttons.className = "zone-problem-actions";
+  const button = (id, text, onclick) => {
+    const item = document.createElement("button"); item.type = "button"; item.id = `zone-fix-${id}-${wall}-${key}`;
+    item.textContent = text; item.onclick = onclick; buttons.append(item);
+  };
+  const only = allowed.length === 1 ? libraryEntry(allowed[0]) : null;
+  if (only?.kind === "fixed") button("only", "就貼這一筆（改成指定貼一種）", () => action(() => chooseFixed(wall, key, only.id)));
+  button("add-none", "加上「不貼」", () => edit([...allowed, ZONE_NONE]));
+  if (fitsHere(WOOL_48K, wall)) button("add-wool", "加上 48K 玻璃棉", () => edit([...allowed, WOOL_48K]));
+  box.append(head, why, buttons);
+  return box;
 }
 
 function modeSelect(wall, key, setting) {
@@ -538,8 +561,7 @@ function searchCell(wall, key, zone, setting, cell) {
     line.textContent = `清單裡有材料庫找不到的：${missing.join("、")}（照原樣留著，開跑時伺服器會點名；要拿掉就按它旁邊的 ×）`;
     cell.append(line);
   }
-  const problem = allowedProblem(allowed);
-  if (problem) { const line = document.createElement("p"); line.className = "notice"; line.id = `zone-allowed-problem-${wall}-${key}`; line.textContent = problem; cell.append(line); }
+  if (allowedProblem(allowed)) cell.append(problemBox(wall, key, allowed, edit));
 }
 function originalSchemeRow() {
   const row = document.createElement("div"); row.className = "fields";
