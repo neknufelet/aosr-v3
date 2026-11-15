@@ -410,7 +410,7 @@ function allowedProblem(allowed) {
   return allowed.every(id => libraryEntry(id)?.kind === "fixed") ? "只放了固定成品，電腦沒得挑。" : "";
 }
 // 紅框直接給按鈕（#1176，老闆看不懂「准用清單只有固定材料：搜尋要一個起點…」）：只有一筆就能直接改成指定貼它；
-// 或加上「不貼」、加上 48K 玻璃棉（這一面用不了就不出現）。
+// 或加上「不貼」、加上 48K 玻璃棉（這一面用不了就不出現）。按鈕字照樣稿先寫按下去的結果、括號裡寫做了什麼。
 function problemBox(wall, key, allowed, edit) {
   const box = document.createElement("div"); box.className = "zone-problem"; box.id = `zone-allowed-problem-${wall}-${key}`;
   box.setAttribute("role", "alert");
@@ -424,8 +424,8 @@ function problemBox(wall, key, allowed, edit) {
   };
   const only = allowed.length === 1 ? libraryEntry(allowed[0]) : null;
   if (only?.kind === "fixed") button("only", "就貼這一筆（改成指定貼一種）", () => action(() => chooseFixed(wall, key, only.id)));
-  button("add-none", "加上「不貼」", () => edit([...allowed, ZONE_NONE]));
-  if (fitsHere(WOOL_48K, wall)) button("add-wool", "加上 48K 玻璃棉", () => edit([...allowed, WOOL_48K]));
+  button("add-none", "讓電腦決定貼不貼（加上「不貼」）", () => edit([...allowed, ZONE_NONE]));
+  if (fitsHere(WOOL_48K, wall)) button("add-wool", "讓電腦拿它跟 48K 玻璃棉比（加上 48K 玻璃棉）", () => edit([...allowed, WOOL_48K]));
   box.append(head, why, buttons);
   return box;
 }

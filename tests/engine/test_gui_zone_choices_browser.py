@@ -312,7 +312,8 @@ def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_p
         box = page.locator("#zone-allowed-problem-x0-whole_wall")
         expect(box).to_contain_text("只放了固定成品，電腦沒得挑。")
         expect(box).not_to_contain_text("准用")
-        expect(box.locator("button")).to_have_text(["就貼這一筆（改成指定貼一種）", "加上「不貼」", "加上 48K 玻璃棉"])
+        expect(box.locator("button")).to_have_text(
+            ["就貼這一筆（改成指定貼一種）", "讓電腦決定貼不貼（加上「不貼」）", "讓電腦拿它跟 48K 玻璃棉比（加上 48K 玻璃棉）"])
         page.locator("#zone-allowed-summary-x0-whole_wall").click()  # 收起勾選表，截紅框
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "only-fixed.png"))
 
@@ -338,7 +339,7 @@ def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_p
         page.locator("#zone-allow-floor-whole_wall-carpet_on_concrete").check()
         page.locator("#zone-chip-remove-floor-whole_wall-none").click()
         expect(page.locator("#zone-allowed-problem-floor-whole_wall button")).to_have_text(
-            ["就貼這一筆（改成指定貼一種）", "加上「不貼」"])
+            ["就貼這一筆（改成指定貼一種）", "讓電腦決定貼不貼（加上「不貼」）"])
         assert watched.page_errors == [] and watched.console_errors == []
 
 
