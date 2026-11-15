@@ -355,6 +355,33 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         assert watched.page_errors == [] and watched.console_errors == []
 
 
+def test_changing_the_list_rechecks_the_limits(tmp_path: Path, browser: Browser) -> None:
+    """審查 11-15：改清單（×、勾選、常用組合、紅框按鈕）跟改做法一樣重判限制；不然深度上限那一欄每一組的生效上限、
+    紅燈、「拿去搜尋」停不停用都是改之前的判決（改之前就這樣，這一支把清單變成到處都能改，一起補）。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        _choose(page, "#zone-mode-x0-z1", "search")
+        _depth(page, "#depth-zone-x0-z1", "0.08")
+        expect(page.locator("#depth-target-x0-z1-0")).to_contain_text("48K 玻璃棉")
+        expect(page.locator("#depth-target-x0-z1-2")).to_contain_text("96K 玻璃棉")
+        page.locator("#zone-chip-remove-x0-z1-glass_wool_48k").click()
+        _settled(page)
+        expect(page.locator("#depth-target-x0-z1-0")).to_contain_text("24K 玻璃棉")
+        expect(page.locator("#depth-target-x0-z1-2")).to_have_count(0)
+        # 0.03：剩下兩種玻璃棉都放不下→紅、擋拿去搜尋；清單只留「不貼」就不判這一項，紅燈跟著熄、按鈕跟著恢復。
+        _depth(page, "#depth-zone-x0-z1", "0.03")
+        _red(page, "z1")
+        page.locator("#zone-chip-remove-x0-z1-glass_wool_24k").click()
+        page.locator("#zone-chip-remove-x0-z1-glass_wool_96k").click()
+        _settled(page)
+        _clear(page, "z1")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def _deep_user_library() -> str:
     """最淺排法 0.08 m（最薄 0.05 m＋空腔下界 0.03 m）、自己的上限 0.15 m 的使用者可最佳化材料。"""
     from pydantic import TypeAdapter

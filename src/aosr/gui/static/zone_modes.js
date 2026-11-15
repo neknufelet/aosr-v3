@@ -373,12 +373,14 @@ async function chooseFixed(wall, key, materialId) {
 }
 // 改清單（清單上的 ×、勾選表、常用組合、紅框的按鈕都走這裡）：存成明確清單、記成這一頁「上一次的組合」
 // （起點要是可調材料或不貼，伺服器開跑時再核一次）；底部訊息跟著寫現在的清單（不留改之前那一句）。
+// 跟改做法一樣重判限制（審查 11-15）：清單換了，深度上限那一欄每一組的判決、紅燈、「拿去搜尋」停不停用都跟著換。
 function changeAllowed(wall, key, allowed) {
   setZoneSetting(wall, key, {...zoneSetting(wall, key), mode: "search", allowed});
   zoneLastAllowed = [...allowed];
   zoneNote(`${wallNames[wall]}「${zoneName(key)}」：清單改成 ${allowed.map(choiceName).join("、")}`, "ok");
   markStale();
   renderZoneTable(wall);
+  refreshZoneLimits();
 }
 // 伺服器沒寫清單（null）的意思：材料庫全部可調材料＋不貼。材料庫沒讀全（讀不到或使用者檔壞了）就回 null，不替伺服器縮小範圍。
 function serverDefaultAllowed() {
