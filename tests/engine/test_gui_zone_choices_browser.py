@@ -64,8 +64,10 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         assert not set(HIDDEN_ON_WALLS) & set(listed)
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).to_contain_text(
             "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_24k"))).to_contain_text(
-            "可調：厚 5～20 cm、空腔不調")
+        # 空腔不調的最深就是厚度上限 20 cm，材料自己的 30 cm 擋不到：不寫「加起來最深」（審查 11-15 抓到寫 30 cm 是錯的）。
+        for wool in ("glass_wool_24k", "glass_wool_96k"):
+            expect(page.locator("label", has=page.locator(f"#zone-allow-x0-whole_wall-{wool}")).locator("small")).to_have_text(
+                "可調：厚 5～20 cm、空腔不調")
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).not_to_contain_text("（可調厚度與空腔）")
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-fabric_pet_a_gap100"))).to_contain_text(
             "固定成品：整塊貼或不貼，不能調")

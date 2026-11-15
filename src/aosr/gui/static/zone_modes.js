@@ -213,14 +213,20 @@ function hiddenGroups(wall, entries) {
 function shortLabel(entry) { return entry.kind === "optimizable" ? entry.label.replace(/（可調[^）]*）$/, "") : entry.label; }
 function centimetres(metres) { return shownNumber(Math.round(metres * 1000) / 10); }
 // 可調的到底調什麼（#1176）：照條目的多孔層厚度與空腔寫；空腔起點沒有（null 或 0）搜尋就沒有空腔這一格，寫「空腔不調」。
+// 材料自己的總深上限只在真的會擋時寫：比厚度上限加空腔上限（或固定空腔）還淺才寫「加起來最深」（審查 11-15：24K 空腔不調、
+// 最深就是 20 cm，寫 30 cm 是錯的）。
 function adjustWords(entry) {
   const thick = entry.porous_thickness, cavity = entry.cavity;
-  const thickText = thick.adjustable && thick.range_m[1] > thick.range_m[0]
+  const thickTuned = thick.adjustable && thick.range_m[1] > thick.range_m[0];
+  const thickText = thickTuned
     ? `厚 ${centimetres(thick.range_m[0])}～${centimetres(thick.range_m[1])} cm` : `厚度不調（${centimetres(entry.porous.thickness_m)} cm）`;
-  const cavityText = !cavity || !cavity.initial_m ? "空腔不調"
-    : cavity.adjustable && cavity.range_m[1] > cavity.range_m[0]
-      ? `空腔 ${centimetres(cavity.range_m[0])}～${centimetres(cavity.range_m[1])} cm` : `空腔不調（${centimetres(cavity.initial_m)} cm）`;
-  const depth = entry.max_total_depth_m ? `，加起來最深 ${centimetres(entry.max_total_depth_m)} cm` : "";
+  const noCavity = !cavity || !cavity.initial_m;
+  const cavityTuned = !noCavity && cavity.adjustable && cavity.range_m[1] > cavity.range_m[0];
+  const cavityText = noCavity ? "空腔不調"
+    : cavityTuned ? `空腔 ${centimetres(cavity.range_m[0])}～${centimetres(cavity.range_m[1])} cm` : `空腔不調（${centimetres(cavity.initial_m)} cm）`;
+  const deepest = (thickTuned ? thick.range_m[1] : entry.porous.thickness_m) + (noCavity ? 0 : cavityTuned ? cavity.range_m[1] : cavity.initial_m);
+  const cap = entry.max_total_depth_m;
+  const depth = cap && cap < deepest - 1e-9 ? `，加起來最深 ${centimetres(cap)} cm` : "";
   return `可調：${thickText}、${cavityText}${depth}`;
 }
 const FIXED_WORDS = "固定成品：整塊貼或不貼，不能調";
