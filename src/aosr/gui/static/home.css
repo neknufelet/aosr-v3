@@ -107,6 +107,10 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-table tr.zone-mode-keep_original td:first-child{border-left:6px solid #9aa4ab}
 .zone-table tr.zone-mode-search td:first-child{border-left:6px solid #e0a526}
 .zone-table tr.zone-mode-fixed td:first-child{border-left:6px solid #15617b}
+/* 做法表塞進面板寬（#1176）：材料下拉選單跟著欄寬（不照最長那一筆名字撐寬，老闆的 VPR 那幾筆會把深度上限那一欄擠出面板；
+   名字在關著的選單裡截掉、打開照樣看全名），代號這類沒有空格的長字照樣換行。 */
+.zone-table td[id^=zone-material-]{overflow-wrap:anywhere}
+.zone-table select[id^=zone-fixed-]{width:100%}
 .zone-allowed{display:flex;flex-direction:column;align-items:flex-start}
 .zone-allowed label{margin:.15rem 0}
 /* 材料清單分組（#1176）：組的標題粗一點；每一筆名字後面一行小字寫能調什麼或固定成品多厚。 */

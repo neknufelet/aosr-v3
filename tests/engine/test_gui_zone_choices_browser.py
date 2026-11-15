@@ -14,9 +14,9 @@ from pydantic import TypeAdapter
 from aosr.materials.library import LibraryEntry, dump_user_library
 from tests.engine._boss_material_library import BOSS_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
-from tests.engine._surface_zone_cases import room109_document
+from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
-from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
+from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _save
 
 HIDDEN_ON_WALLS = ("own_room_door_wood_solid", "own_room_window_glass_10mm_single", "own_room_ceiling_calsil_6mm_gap250",
@@ -341,6 +341,37 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         page.locator("#zone-fix-add-none-x0-whole_wall").click()
         expect(page.locator("#zone-to-search")).to_be_enabled()
         expect(note).to_have_text("會先照畫面儲存，再打開第三階段搜尋頁")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def _overflow(page: Page) -> dict[str, float]:
+    """做法表、深度上限那一欄的右緣比立面圖面板右緣多出幾 px（0 以下＝塞得進面板）。"""
+    return cast(dict[str, float], page.evaluate("""() => {
+        const panel = document.getElementById('elevation-panel').getBoundingClientRect().right;
+        const table = document.querySelector('.zone-table');
+        const depth = table.querySelector('th:last-child');
+        return {table: table.getBoundingClientRect().right - panel, depth: depth.getBoundingClientRect().right - panel};
+    }"""))
+
+
+def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: Path, browser: Browser) -> None:
+    """老闆的材料庫有幾筆名字很長的固定成品（VPR 那幾筆）：材料下拉選單不准照最長那一筆把表撐寬、把深度上限那一欄擠出面板；
+    指定貼一種與交給電腦挑（方塊、常用組合按鈕、說明一行一行換）兩個樣子都要塞得進立面圖面板。"""
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, ROOM_109["Ly"], ROOM_109["Lz"], (0.02, 0.02), (1.0, 1.2))
+        expect(page.locator("#zone-fixed-x0-z1 option", has_text="VPR").first).to_be_attached()
+        assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
+        _choose(page, "#zone-mode-x0-z1", "search")
+        page.locator("#zone-allowed-summary-x0-z1").click()
+        expect(page.locator("#zone-allowed-x0-z1")).to_be_visible()
+        assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
+        expect(page.locator("#depth-zone-x0-z1")).to_be_in_viewport()
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "front-fits.png"))
         assert watched.page_errors == [] and watched.console_errors == []
 
 
