@@ -187,31 +187,26 @@ async function fetchZoneLibrary() {
   try {
     const data = await api("/api/materials");
     return {library: data.materials.map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
-            groups: data.surface_groups ?? {}, short: data.surface_group_short ?? {},
+            groups: data.surface_groups, short: data.surface_group_short,
             problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {
     return {library: [], groups: {}, short: {}, problem: `材料庫讀不到：${errorText(error)}`};
   }
 }
 function applyZoneLibrary(state) {
-  zoneLibrary = state.library; zoneSurfaceGroups = state.groups ?? {}; zoneSurfaceShort = state.short ?? {}; zoneLibraryProblem = state.problem;
+  zoneLibrary = state.library; zoneSurfaceGroups = state.groups; zoneSurfaceShort = state.short; zoneLibraryProblem = state.problem;
 }
 async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
 function libraryEntry(id) { return (zoneLibrary || []).find(entry => entry.id === id) ?? null; }
-// 這一筆列不列在這一面（伺服器沒給分組的舊回覆照舊全列）。
-function usableHere(entry, wall) { return !entry.placement || entry.placement.surfaces.includes(wall); }
+// 這一筆列不列在這一面（伺服器每一筆都帶分組，跟網頁一起出貨）。
+function usableHere(entry, wall) { return entry.placement.surfaces.includes(wall); }
 // 寫在括號裡的組名用短名（不套括號，審查 11-15）。
-function groupWords(entry) { return zoneSurfaceShort[entry.placement?.group] ?? "其他"; }
+function groupWords(entry) { return zoneSurfaceShort[entry.placement.group]; }
 // 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。
 function hiddenGroups(wall, entries) {
   const groups = new Map(Object.keys(zoneSurfaceGroups).map(group => [group, []]));
-  for (const entry of entries) {
-    if (usableHere(entry, wall)) continue;
-    const group = entry.placement?.group ?? "other";
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group).push(entry);
-  }
+  for (const entry of entries) if (!usableHere(entry, wall)) groups.get(entry.placement.group).push(entry);
   return [...groups].filter(([, items]) => items.length);
 }
 // 可調材料的顯示名拿掉尾巴的「（可調厚度與空腔）」：能調什麼另外照條目寫（24K、96K 空腔其實不調）。
@@ -398,7 +393,7 @@ function startingAllowed(wall) {
   if (!serverDefaultAllowed()) return null;
   const last = (zoneLastAllowed ?? []).filter(id => fitsHere(id, wall));
   if (last.length && !allowedProblem(last)) return last;
-  return [...THREE_WOOLS.filter(id => libraryEntry(id)?.kind === "optimizable" && fitsHere(id, wall)), ZONE_NONE];
+  return [...THREE_WOOLS.filter(id => fitsHere(id, wall)), ZONE_NONE];
 }
 function choiceName(id) {
   const entry = libraryEntry(id);
@@ -423,8 +418,8 @@ function problemBox(wall, key, allowed, edit) {
     const item = document.createElement("button"); item.type = "button"; item.id = `zone-fix-${id}-${wall}-${key}`;
     item.textContent = text; item.onclick = onclick; buttons.append(item);
   };
-  const only = allowed.length === 1 ? libraryEntry(allowed[0]) : null;
-  if (only?.kind === "fixed") button("only", "就貼這一筆（改成指定貼一種）", () => action(() => chooseFixed(wall, key, only.id)));
+  // 紅框只在清單每一種都是固定成品時出現（allowedProblem），只有一筆就是那一筆固定成品。
+  if (allowed.length === 1) button("only", "就貼這一筆（改成指定貼一種）", () => action(() => chooseFixed(wall, key, allowed[0])));
   button("add-none", "讓電腦決定貼不貼（加上「不貼」）", () => edit([...allowed, ZONE_NONE]));
   if (fitsHere(WOOL_48K, wall)) button("add-wool", "讓電腦拿它跟 48K 玻璃棉比（加上 48K 玻璃棉）", () => edit([...allowed, WOOL_48K]));
   box.append(head, why, buttons);
@@ -460,10 +455,7 @@ function fixedCell(wall, key, zone, cell) {
     select.append(now);
   }
   const fixed = libraryEntries("fixed");
-  const here = fixed.filter(entry => usableHere(entry, wall));
-  for (const entry of here.filter(item => item.placement?.group !== "other")) select.append(fixedOption(entry));
-  const other = here.filter(item => item.placement?.group === "other");
-  if (other.length) select.append(optionGroup(zoneSurfaceGroups.other ?? "其他", other));
+  for (const entry of fixed.filter(item => usableHere(item, wall))) select.append(fixedOption(entry));
   const away = current && !usableHere(current, wall);
   // 貼上去的才會「不是這一面用的」；直接取代整面的（例如地板本身就是木地板那一筆固定阻抗）就是這一面本身，照實寫、不標紅。
   const pasted = zone.material.kind === "mounted_on_wall";
@@ -482,7 +474,7 @@ function fixedCell(wall, key, zone, cell) {
   }
   if (!current && zone.material.kind !== "mounted_on_wall") cell.append(numbersDetail(zone.material, `zone-numbers-${wall}-${key}`));
 }
-// 勾選表（#1176）：只列這一面能貼的，分「可調」「不貼」「固定成品」「其他」幾組；「顯示全部材料」打開才分組列出不是這一面
+// 勾選表（#1176）：只列這一面能貼的，分「可調」「不貼」「固定成品」幾組；「顯示全部材料」打開才分組列出不是這一面
 // 用的那幾組（各一個標題說為什麼）。onToggle(代號, 勾選格) 交呼叫的人決定清單怎麼改。
 function allowedChecklist(wall, key, allowed, onToggle) {
   const list = document.createElement("div"); list.className = "zone-allowed"; list.id = `zone-allowed-${wall}-${key}`;
@@ -499,21 +491,18 @@ function allowedChecklist(wall, key, allowed, onToggle) {
     return wrap;
   };
   const here = (zoneLibrary || []).filter(entry => usableHere(entry, wall));
-  const optimizable = here.filter(entry => entry.kind === "optimizable" && entry.placement?.group !== "other");
-  const fixed = here.filter(entry => entry.kind === "fixed" && entry.placement?.group !== "other");
-  const other = here.filter(entry => entry.placement?.group === "other");
+  const optimizable = here.filter(entry => entry.kind === "optimizable");
+  const fixed = here.filter(entry => entry.kind === "fixed");
   list.append(heading("可調：電腦會調厚度（有的連空腔一起調）"));
   if (!optimizable.length) {
     const line = document.createElement("p"); line.className = "note";
     line.textContent = `${wallNames[wall]}沒有可調的材料：電腦只能從「不貼」開始，可以再勾固定成品讓它比`;
     list.append(line);
   }
-  for (const entry of optimizable) list.append(box(entry.id, shortLabel(entry), adjustWords(entry), entry.placement?.reason));
+  for (const entry of optimizable) list.append(box(entry.id, shortLabel(entry), adjustWords(entry), entry.placement.reason));
   list.append(box(ZONE_NONE, "不貼，保留原牆", "放進來，電腦就可以決定這裡不貼"));
   if (fixed.length) list.append(heading("固定成品：整塊貼上去，不能調（電腦只決定貼不貼）"));
-  for (const entry of fixed) list.append(box(entry.id, entry.label, fixedDepthWords(entry), entry.placement?.reason));
-  if (other.length) list.append(heading(zoneSurfaceGroups.other ?? "其他"));
-  for (const entry of other) list.append(box(entry.id, shortLabel(entry), entry.kind === "fixed" ? fixedWords(entry) : adjustWords(entry)));
+  for (const entry of fixed) list.append(box(entry.id, entry.label, fixedDepthWords(entry), entry.placement.reason));
   const hidden = hiddenGroups(wall, zoneLibrary || []);
   const count = hidden.reduce((sum, [, entries]) => sum + entries.length, 0);
   if (zoneShowAll) {
@@ -521,7 +510,7 @@ function allowedChecklist(wall, key, allowed, onToggle) {
       list.append(heading(`不列的：${zoneSurfaceGroups[group]}`));
       for (const entry of entries) {
         const words = entry.kind === "fixed" ? fixedWords(entry) : adjustWords(entry);
-        list.append(box(entry.id, shortLabel(entry), [words, entry.placement?.reason].filter(Boolean).join("；")));
+        list.append(box(entry.id, shortLabel(entry), `${words}；${entry.placement.reason}`));
       }
     }
   } else if (count) {
