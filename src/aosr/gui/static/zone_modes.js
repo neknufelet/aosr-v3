@@ -120,8 +120,22 @@ function searchZoneCount() {
   }
   return count;
 }
+// 交給電腦挑、清單只放了固定成品的區（表上紅框那幾區，只算現在切法裡還在的）：名字列出來，處理好之前不准拿去搜尋（#1176）。
+function stuckZoneNames() {
+  const names = [];
+  for (const [wall, zones] of Object.entries(zoneDesign?.zones || {})) {
+    const keys = new Set(zoneList(wall).map(zoneKey));
+    for (const [key, setting] of Object.entries(zones)) {
+      if (keys.has(key) && setting.mode === "search" && allowedProblem(setting.allowed)) names.push(`${wallNames[wall]}「${zoneName(key)}」`);
+    }
+  }
+  return names;
+}
+function stuckWords(names) { return `先處理${names.join("、")}的紅框（只放了固定成品，電腦沒得挑），處理好才能拿去搜尋`; }
 // 「拿去搜尋」：搜尋頁讀的是存好的方案與做法，先照畫面存一份；兩樣都存成才跳過去，沒存成留在這頁照講。
 async function sendToSearch() {
+  const stuck = stuckZoneNames();
+  if (stuck.length) { zoneNote(stuckWords(stuck), "notice"); return; }
   const limits = await settledZoneLimits();
   if (limits?.status !== "checked") {
     zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
@@ -140,11 +154,12 @@ function searchButtonRow() {
   const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
   button.textContent = `拿去搜尋（${count} 區交給電腦挑）`;
   button.onclick = () => action(sendToSearch);
-  const red = limitsRedCount();
-  button.disabled = red > 0;
+  const red = limitsRedCount(), stuck = stuckZoneNames();
+  button.disabled = red > 0 || stuck.length > 0;
   const note = document.createElement("span"); note.id = "zone-to-search-note";
-  note.className = red ? "limit-red" : "note";
-  note.textContent = red ? `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋` : "會先照畫面儲存，再打開第三階段搜尋頁";
+  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
+  note.className = blocked.length ? "limit-red" : "note";
+  note.textContent = blocked.length ? blocked.join("；") : "會先照畫面儲存，再打開第三階段搜尋頁";
   row.append(button, " ", note);
   return row;
 }
@@ -362,11 +377,11 @@ function choiceName(id) {
   const entry = libraryEntry(id);
   return id === ZONE_NONE ? "不貼" : entry ? shortLabel(entry) : `${id}（材料庫找不到）`;
 }
-// 清單裡沒有起點（可調材料或不貼）：電腦沒得挑（伺服器開跑時 gradient_plan 同一句白話再擋一次）。
+// 清單裡每一種都是材料庫認得的固定成品（沒有可調材料、沒有不貼）：電腦沒得挑（伺服器開跑時 gradient_plan 同一句白話再擋一次）。
+// 材料庫找不到的代號不算固定成品（材料庫沒讀全時可能是可調材料；那一種照「材料庫找不到」那一行講，開跑時伺服器點名）。
 function allowedProblem(allowed) {
-  if (!allowed) return "";
-  const optimizable = new Set(libraryEntries("optimizable").map(entry => entry.id));
-  return allowed.some(id => id === ZONE_NONE || optimizable.has(id)) ? "" : "只放了固定成品，電腦沒得挑。";
+  if (!allowed?.length) return "";
+  return allowed.every(id => libraryEntry(id)?.kind === "fixed") ? "只放了固定成品，電腦沒得挑。" : "";
 }
 // 紅框直接給按鈕（#1176，老闆看不懂「准用清單只有固定材料：搜尋要一個起點…」）：只有一筆就能直接改成指定貼它；
 // 或加上「不貼」、加上 48K 玻璃棉（這一面用不了就不出現）。

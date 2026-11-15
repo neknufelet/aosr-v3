@@ -298,6 +298,52 @@ def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_p
         assert watched.page_errors == [] and watched.console_errors == []
 
 
+def _only_fixed(page: Page, wall: str, product: str) -> None:
+    """把這一面整面一區改成交給電腦挑、清單只剩一筆固定成品（紅框那個樣子）。"""
+    _choose(page, f"#zone-mode-{wall}-whole_wall", "search")
+    page.locator(f"#zone-allowed-summary-{wall}-whole_wall").click()
+    page.locator(f"#zone-allow-{wall}-whole_wall-{product}").check()
+    for choice in ("glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"):
+        page.locator(f"#zone-chip-remove-{wall}-whole_wall-{choice}").click()
+    expect(page.locator(f"#zone-allowed-problem-{wall}-whole_wall")).to_contain_text("只放了固定成品，電腦沒得挑")
+
+
+def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, browser: Browser) -> None:
+    """紅框（只放了固定成品）還在的時候「拿去搜尋」按不下去，旁邊點名是哪幾區的紅框（別面的也算）；處理好一區少一區，
+    全處理好自己恢復。直接叫送出也照樣擋、不存不跳頁。"""
+    vpr = "melamine100_vpr_steel1mm_softfoam100_draft"
+    _write(tmp_path, room109_document())
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        front, side = cast(list[str], page.evaluate("[wallNames.x0, wallNames.y0]"))
+        page.locator("#elevation-wall-x0").click()
+        _only_fixed(page, "x0", vpr)
+        expect(page.locator("#zone-to-search")).to_be_disabled()
+        expect(page.locator("#zone-to-search-note")).to_have_text(
+            f"先處理{front}「整面」的紅框（只放了固定成品，電腦沒得挑），處理好才能拿去搜尋")
+        page.locator("#elevation-wall-y0").click()
+        _only_fixed(page, "y0", vpr)
+        note = page.locator("#zone-to-search-note")
+        expect(note).to_contain_text(f"先處理{front}「整面」、{side}「整面」的紅框")
+        expect(note).to_have_class("limit-red")
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "send-blocked-by-red-box.png"))
+        page.evaluate("sendToSearch()")
+        expect(page.locator("#zone-note")).to_contain_text(f"先處理{front}「整面」、{side}「整面」的紅框")
+        assert page.url.startswith(base) and "/gradient" not in page.url
+        assert not (tmp_path / "designs" / "room109.json").exists()
+
+        page.locator("#zone-fix-add-none-y0-whole_wall").click()
+        expect(note).to_have_text(f"先處理{front}「整面」的紅框（只放了固定成品，電腦沒得挑），處理好才能拿去搜尋")
+        expect(page.locator("#zone-to-search")).to_be_disabled()
+        page.locator("#elevation-wall-x0").click()
+        page.locator("#zone-fix-add-none-x0-whole_wall").click()
+        expect(page.locator("#zone-to-search")).to_be_enabled()
+        expect(note).to_have_text("會先照畫面儲存，再打開第三階段搜尋頁")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: Path, browser: Browser) -> None:
     """#1175（老闆 11-15 天花選了跟現況同一筆吊頂，存成兩層吊頂疊在一起）：選到跟這一區原牆一模一樣的多層構造，
     網頁把做法改成「不貼，保留原牆」、說「選的跟原本一樣，當成不貼」，那一區放的還是原牆一份。"""
