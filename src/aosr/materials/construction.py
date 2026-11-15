@@ -122,9 +122,11 @@ def _layer_matrix(layer: Layer, frequencies: jax.Array, air: PhysicsConstants,
             parameters["porosity"] = jnp.asarray(layer.porosity)
         if layer.tortuosity is not None:
             parameters["tortuosity"] = jnp.asarray(layer.tortuosity)
-        return tmm.porous_layer(frequencies, jnp.asarray(layer.thickness_m),
+        matrix = tmm.porous_layer(frequencies, jnp.asarray(layer.thickness_m),
             jnp.asarray(layer.flow_resistivity_pa_s_m2), air=air, model=layer.model,
             incidence_angles_deg=angles, **parameters)
+        # 沒填骨架兩格就原樣交回，既有構造一個位元都不變；填了才在這層前面串骨架彈簧（#1171）。
+        return matrix if layer.frame_young_modulus_pa is None else _frame_spring(layer, frequencies, angles) @ matrix
     if isinstance(layer, AirLayer):
         return tmm.air_layer(frequencies, jnp.asarray(layer.thickness_m), air=air, incidence_angles_deg=angles)
     if isinstance(layer, BoardLayer):
@@ -146,6 +148,18 @@ def _layer_matrix(layer: Layer, frequencies: jax.Array, air: PhysicsConstants,
             air=air, open_area=_open_area(layer), surface_mass_kg_m2=_panel_mass(layer), method="barrier", incidence_angles_deg=angles)
         return _backed_sheet(matrix, layer, frequencies, angles)
     raise ValueError("不認識的構造層，無法計算；請修正層種類")
+
+
+def _frame_spring(layer: PorousLayer, frequencies: jax.Array, angles: jax.Array | None) -> jax.Array:
+    """黏住薄板的背襯（複合板共振器 VPR，#1171）：骨架當彈簧，對板的反力 E(1+jη)/d 乘位移；
+
+    寫成串在這層前面的一張壓力跳躍阻抗 E(1+jη)/(jωd)，跟前面薄板的 r+jωm 相加就是板的總阻抗。
+    位置規則（最後一層、緊接薄板、剛背或原牆）由構造格式把關；局部反應、不算板彎曲與邊緣進聲。
+    """
+    assert layer.frame_young_modulus_pa is not None and layer.frame_loss_factor is not None
+    stiffness = jnp.asarray(layer.frame_young_modulus_pa) * (1 + 1j * jnp.asarray(layer.frame_loss_factor)) / jnp.asarray(layer.thickness_m)
+    impedance = stiffness / (1j * 2 * jnp.pi * frequencies)
+    return tmm._sheet_layer(tmm._broadcast_angles(impedance, angles))
 
 
 def _panel_mass(layer: MicroPerforatedLayer | PerforatedLayer | SlottedLayer) -> jax.Array | None:

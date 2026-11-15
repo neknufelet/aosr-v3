@@ -22,11 +22,14 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.config.paths import config_path
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer, SurfaceMaterial
 from aosr.runtime import child_process_env, configure_jax
+from tests.engine._bonded_backing_cases import BONDED_VPR
 from tests.engine.test_transfer_matrix_reference import GRADIENT_ABS, GRADIENT_REL, IMPEDANCE_ABS, REFERENCE_REL
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
 
 PROBE = Path(__file__).with_name("_construction_diff_probe.py")
+# 預設以外一起考的構造：#1171 黏住鋼板的背襯（骨架楊氏模數與損耗兩格）沒有預設，從這裡交給子行程。
+EXTRA = {"test_bonded_vpr": BONDED_VPR}
 Bits = dict[str, object]
 
 
@@ -36,8 +39,9 @@ def _run(mode: str, directory: Path) -> dict[str, object]:
     configure_jax(platforms="cpu", enable_x64=True, env=env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TMPDIR"] = str(directory)
-    output = directory / f"{mode}.json"
-    process = subprocess.run([sys.executable, str(PROBE), mode, str(output)], cwd=directory, env=env,
+    output, extra = directory / f"{mode}.json", directory / f"{mode}-extra.json"
+    extra.write_text(json.dumps(EXTRA))
+    process = subprocess.run([sys.executable, str(PROBE), mode, str(output), str(extra)], cwd=directory, env=env,
                              capture_output=True, text=True, timeout=600)
     assert process.returncode == 0, process.stdout + process.stderr
     result = cast(dict[str, object], json.loads(output.read_text()))
@@ -49,6 +53,7 @@ def _presets() -> dict[str, Assembly]:
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
     materials = {preset.id: adapter.validate_python(preset.material)
                  for preset in load_construction_presets(config_path("construction_presets.toml"))}
+    materials.update({name: adapter.validate_python(document) for name, document in EXTRA.items()})
     assert all(isinstance(material, Assembly) for material in materials.values())
     return cast(dict[str, Assembly], materials)
 
@@ -85,6 +90,12 @@ def test_template_exposes_porous_and_cavity_variables(identity: dict[str, dict[s
                 assert {f"layer{index}.thickness_m", f"layer{index}.flow_resistivity_pa_s_m2"} <= names, name
             if isinstance(layer, AirLayer):
                 assert f"layer{index}.thickness_m" in names, name
+
+
+def test_bonded_backing_exposes_frame_variables(identity: dict[str, dict[str, object]]) -> None:
+    """#1171 黏住鋼板的背襯：骨架楊氏模數與損耗也是變數（板重、背襯厚度本來就是）。"""
+    names = set(cast(list[str], identity["test_bonded_vpr"]["variables"]))
+    assert {"layer1.surface_mass_kg_m2", "layer2.thickness_m", "layer2.frame_young_modulus_pa", "layer2.frame_loss_factor"} <= names
 
 
 def test_gradients_match_central_difference(tmp_path: Path, identity: dict[str, dict[str, object]]) -> None:

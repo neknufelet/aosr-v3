@@ -21,6 +21,7 @@ from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.runtime import child_process_env, configure_jax
+from tests.engine import _bonded_backing_cases as bonded
 from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
 
@@ -35,6 +36,12 @@ _MODELS = {
 _VARIANTS = [(model, field) for model, extra in _MODELS.items()
              for field in ("thickness_m", "flow_resistivity_pa_s_m2", *extra)]
 _VARIANTS += [("air", "thickness_m"), ("board", "surface_mass_kg_m2"), ("board", "resistance_pa_s_m")]
+_VARIANTS += [("bonded", "frame_young_modulus_pa"), ("bonded", "frame_loss_factor")]
+# #1171 實測峰位（讀圖二手）：1 mm 鋼板＋10 cm 美耐皿 62–77 Hz、2.5 mm 39–49 Hz；骨架楊氏模數取兩片共用範圍兩端與中間。
+_BONDED_PEAK_HZ = {1.0: (62., 77.), 2.5: (39., 49.)}
+# 試算把板重調到 α0 峰在 37 Hz（0.1 kg/m² 一格）：E 低／中／高 → 22.1／27.9／33.7 kg/m²。
+_BONDED_37HZ = {bonded.E_LOW: 22.1, bonded.E_MID: 27.9, bonded.E_HIGH: 33.7}
+_PEAK_GRID = [15. + 0.25 * i for i in range(421)]
 
 
 def _request(layers: list[dict[str, object]], *, backing: str = "rigid", mode: str = "normal",
@@ -73,7 +80,30 @@ def _requests() -> dict[str, dict[str, object]]:
         for field in ("thickness_m",) if kind == "air" else ("surface_mass_kg_m2", "resistance_pa_s_m"):
             rows[kind + "_" + field] = _request([{**base, field: cast(float, base[field]) * 1.01}], backing=backing)
     _boundary_requests(rows)
+    _bonded_requests(rows)
     return rows
+
+
+def _bonded_requests(rows: dict[str, dict[str, object]]) -> None:
+    """#1171 黏住鋼板的背襯：對獨立轉接逐位、拆掉骨架兩格的對照、老闆問的前面加長縫板、實測峰位。"""
+    steel, backing = bonded.STEEL_2_5MM, bonded.MELAMINE_BONDED
+    low = [20., 37., 50., 80., *_FREQUENCIES]
+    rows["bonded"] = _request([steel, backing], frequencies=low, direct=True)
+    rows["bonded_angles"] = _request([steel, backing], frequencies=low, angles=[0., 37., 75.], direct=True)
+    rows["bonded_diffuse"] = _request([steel, backing], mode="diffuse", direct=True)
+    rows["bonded_front"] = _request([bonded.SLOTTED_FRONT, bonded.MELAMINE_50, steel, backing], frequencies=low, direct=True)
+    rows["bonded_plain"] = _request([steel, bonded.MELAMINE_100], frequencies=low)
+    rows["bonded_plain_angles"] = _request([steel, bonded.MELAMINE_100], frequencies=low, angles=[0., 37., 75.])
+    for field in ("frame_young_modulus_pa", "frame_loss_factor"):
+        rows["bonded_" + field] = _request([steel, {**backing, field: cast(float, backing[field]) * 1.01}], frequencies=low)
+    for thickness in _BONDED_PEAK_HZ:
+        for young in _BONDED_37HZ:
+            plate = {**bonded.STEEL_1MM, "surface_mass_kg_m2": 7.85 * thickness}
+            rows[f"bonded_peak_{thickness}_{young}"] = _request(
+                [plate, {**backing, "frame_young_modulus_pa": young}], frequencies=_PEAK_GRID)
+    for young, mass in _BONDED_37HZ.items():
+        rows[f"bonded_37_{young}"] = _request([{**bonded.STEEL_1MM, "surface_mass_kg_m2": mass},
+                                               {**backing, "frame_young_modulus_pa": young}], frequencies=_PEAK_GRID)
 
 
 def _boundary_requests(rows: dict[str, dict[str, object]]) -> None:
@@ -246,3 +276,39 @@ def test_single_precision_child_rejected(tmp_path: Path) -> None:
     assert rows.keys() == requests.keys()
     for row in rows.values():
         assert "需要雙精度" in cast(str, row["error"])
+
+
+@pytest.mark.parametrize("name", ["bonded", "bonded_angles", "bonded_diffuse", "bonded_front"])
+def test_bonded_backing_matches_direct_bitwise(results: dict[str, dict[str, object]], name: str) -> None:
+    """#1171 抓骨架兩格轉接錯（單位、欄位、角度、無規入射）；前面加長縫板＋棉那一疊也逐位對獨立轉接。"""
+    row = results[name]
+    assert "error" not in row, row
+    assert row["value"] == row["direct"], name
+
+
+def test_bonded_spring_is_the_exact_difference(results: dict[str, dict[str, object]]) -> None:
+    """#1171 黏住與沒黏只差一張彈簧：Z 差 = E(1+jη)/(jωd)，垂直與斜入射都一樣（局部反應，彈簧不隨角度變）。
+
+    尺同這支考卷的解析解（相對 2e-12、絕對 2e-10 Pa·s/m）；抓 2π、正負號、除錯厚度或把彈簧乘上角度因子。
+    """
+    backing = bonded.MELAMINE_BONDED
+    omega = 2 * np.pi * np.asarray([20., 37., 50., 80., *_FREQUENCIES])
+    spring = (cast(float, backing["frame_young_modulus_pa"]) * (1 + 1j * cast(float, backing["frame_loss_factor"]))
+              / cast(float, backing["thickness_m"]) / (1j * omega))
+    np.testing.assert_allclose(_value(results["bonded"]) - _value(results["bonded_plain"]), spring, rtol=2e-12, atol=2e-10)
+    np.testing.assert_allclose(_value(results["bonded_angles"]) - _value(results["bonded_plain_angles"]),
+                               np.repeat(spring[:, None], 3, axis=1), rtol=2e-12, atol=2e-10)
+
+
+def test_bonded_peaks_land_in_measured_bands(results: dict[str, dict[str, object]]) -> None:
+    """#1171 終點線：正式入口在兩片共用的骨架楊氏模數範圍內，1 mm／2.5 mm 鋼板的 Re(ρc/Z) 峰都落在實測峰位範圍；
+    板重 22.1／27.9／33.7 kg/m² 的 α0 峰都在 37 Hz（試算 0.1 kg/m² 一格調出來的，所以容 ±0.25 Hz＝頻格一格）。"""
+    air = load_physics_constants(config_path("physics_constants.toml"))
+    grid = np.asarray(_PEAK_GRID)
+    for thickness, (low, high) in _BONDED_PEAK_HZ.items():
+        for young in _BONDED_37HZ:
+            peak = grid[int(np.argmax(np.real(air.rho_c / _value(results[f"bonded_peak_{thickness}_{young}"]))))]
+            assert low <= peak <= high, (thickness, young, peak)
+    for young in _BONDED_37HZ:
+        peak = grid[int(np.argmax(_value(results[f"bonded_37_{young}"], "absorption").real))]
+        assert abs(peak - 37.) <= 0.25, (young, peak)

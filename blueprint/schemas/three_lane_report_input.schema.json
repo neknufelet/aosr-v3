@@ -1113,6 +1113,44 @@
               "porosity"
             ]
           }
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "frame_young_modulus_pa"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "frame_loss_factor"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "frame_young_modulus_pa": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "frame_loss_factor": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "frame_young_modulus_pa",
+                "frame_loss_factor"
+              ]
+            }
+          ]
         }
       ],
       "description": "PorousLayer（多孔層）：模型決定必填參數，不接受會被忽略的欄位。",
@@ -1196,6 +1234,34 @@
           "default": null,
           "description": "tortuosity（曲折度，無量綱；模型要求時必填）",
           "title": "Tortuosity"
+        },
+        "frame_young_modulus_pa": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "frame_young_modulus_pa（骨架楊氏模數，Pa；填了表示這層整面黏在前面的薄板上、背後是牆，骨架當彈簧串在板後：楊氏模數乘一加 j 損耗、除以厚度；與骨架損耗同給同不給，這層必須是最後一層、緊接薄板層）",
+          "title": "Frame Young Modulus Pa"
+        },
+        "frame_loss_factor": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "frame_loss_factor（骨架損耗因數，無量綱；與骨架楊氏模數同給同不給）",
+          "title": "Frame Loss Factor"
         }
       },
       "required": [
