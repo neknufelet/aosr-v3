@@ -257,3 +257,31 @@ def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_p
         expect(page.locator("#zone-allowed-problem-floor-whole_wall button")).to_have_text(
             ["就貼這一筆（改成指定貼一種）", "加上「不貼」"])
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: Path, browser: Browser) -> None:
+    """#1175（老闆 11-15 天花選了跟現況同一筆吊頂，存成兩層吊頂疊在一起）：選到跟這一區原牆一模一樣的多層構造，
+    網頁把做法改成「不貼，保留原牆」、說「選的跟原本一樣，當成不貼」，那一區放的還是原牆一份。"""
+    ceiling = "own_room_ceiling_calsil_melamine40_on_board_gap210"
+    built = next(entry["material"] for entry in BOSS_USER_ENTRIES if entry["id"] == ceiling)
+    document = room109_document()
+    cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["ceiling"][0]["material"] = (
+        cast(dict[str, object], built))
+    _write(tmp_path, document)
+    _boss_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-ceiling").click()
+        # 整片天花構造平常不列成貼上去的處理；原牆認得出是哪一筆就寫它的名字。
+        assert ceiling not in _values(page, "#zone-fixed-ceiling-whole_wall option")
+        expect(page.locator("#zone-fixed-ceiling-whole_wall option").first).to_contain_text(
+            "現在：沒貼東西（原牆「天花 矽酸鈣板 6 mm＋美耐皿泡棉 40 mm 平放板背＋21 cm 空腔（剛背）」原樣）")
+        page.locator("#zone-show-all").check()
+        _choose(page, "#zone-fixed-ceiling-whole_wall", ceiling)
+        expect(page.locator("#zone-mode-ceiling-whole_wall")).to_have_value("keep_original")
+        expect(page.locator("#zone-note")).to_contain_text("選的跟原本一樣，當成不貼")
+        assert page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.ceiling[0].material)") == built
+        assert _modes(page, "ceiling") == {"whole_wall": {"mode": "keep_original"}}
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "same-as-original.png"))
+        assert watched.page_errors == [] and watched.console_errors == []

@@ -234,7 +234,9 @@ function nowWords(material) {
 function originalMaterial(material) { return material.kind === "mounted_on_wall" ? material.wall : material; }
 // 白話（#1176）：原牆不寫阻抗數字（數字收在點開的「數字」細節）；材料庫認得的寫它的名字。
 function originalWords(material) {
-  const entry = libraryLabel(material);
+  // 原牆本身就是材料庫某一筆多層構造（例如天花那一套吊頂）也寫它的名字。
+  const entry = libraryLabel(material) ?? libraryEntries("fixed").find(item => item.material.kind === "assembly"
+    && material.kind === "assembly" && sameMaterial(item.material, material));
   return entry ? `原牆「${entry.label}」原樣` : "原牆原樣";
 }
 function plainNow(material) {
@@ -255,10 +257,10 @@ function fixedDepthWords(entry) {
   return depth > 0 ? `${FIXED_WORDS}（總厚約 ${centimetres(depth)} cm）` : FIXED_WORDS;
 }
 
-// 交伺服器換這一區的材料；成功才原地換進方案（同切牆面：等回覆時整頁鎖住）。
+// 交伺服器換這一區的材料；成功才原地換進方案（同切牆面：等回覆時整頁鎖住）。回伺服器的回覆，沒換成回 null。
 async function changeZoneMaterial(wall, key, choice) {
-  if (inputBusy) { zoneNote("上一個改動還在處理，請稍等再選", "notice"); return false; }
-  if (measuredDrafts[wall]) { zoneNote(`${wallNames[wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return false; }
+  if (inputBusy) { zoneNote("上一個改動還在處理，請稍等再選", "notice"); return null; }
+  if (measuredDrafts[wall]) { zoneNote(`${wallNames[wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return null; }
   const draft = wallDocument();
   inputBusy = true;
   document.querySelector("main").inert = true;
@@ -267,7 +269,7 @@ async function changeZoneMaterial(wall, key, choice) {
     let response;
     ({response, data} = await reply(fetch("/api/zone-material", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
-    if (!response.ok) { zoneNote(`沒有換：${data.error}`, "notice"); return false; }
+    if (!response.ok) { zoneNote(`沒有換：${data.error}`, "notice"); return null; }
     if (!scheme.scene.surface_zones_by_wall) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
@@ -279,7 +281,7 @@ async function changeZoneMaterial(wall, key, choice) {
     inputBusy = false;
   }
   zoneNote(`${wallNames[wall]}「${zoneName(key)}」：${data.note}`, data.origin === "unknown" ? "notice" : "ok");
-  return true;
+  return data;
 }
 async function afterZoneChange() {
   renderWalls();
@@ -294,7 +296,7 @@ function zoneName(key) { return key === "whole_wall" ? "整面" : key.startsWith
 async function zoneMaterialChanged(wall, key, choice) {
   try { return await changeZoneMaterial(wall, key, choice); } catch (error) {
     zoneNote(`沒有換：${errorText(error)}`, "notice");
-    return false;
+    return null;
   }
 }
 async function changeZoneMode(wall, key, mode) {
@@ -316,11 +318,16 @@ async function changeZoneMode(wall, key, mode) {
   await afterZoneChange();
 }
 async function chooseFixed(wall, key, materialId) {
-  if (!await zoneMaterialChanged(wall, key, {choice: "fixed", material_id: materialId})) { renderZoneTable(wall); return; }
+  const data = await zoneMaterialChanged(wall, key, {choice: "fixed", material_id: materialId});
+  if (!data) { renderZoneTable(wall); return; }
   // 從交給電腦挑的紅框按「就貼這一筆」也走這裡：清單只給交給電腦挑的區，改成指定貼一種就拿掉（伺服器不收固定區帶清單）。
-  const next = {...zoneSetting(wall, key), mode: "fixed"};
+  // 選的跟這一區原牆一模一樣（#1175）：伺服器放回原牆，這裡做法跟著改成「不貼，保留原牆」並說明。
+  const next = {...zoneSetting(wall, key), mode: data.same_as_original ? "keep_original" : "fixed"};
   delete next.allowed;
   setZoneSetting(wall, key, next);
+  if (data.same_as_original) {
+    zoneNote(`${wallNames[wall]}「${zoneName(key)}」：選的跟原本一樣，當成不貼（做法改成「不貼，保留原牆」）`, "ok");
+  }
   await afterZoneChange();
 }
 // 改清單（清單上的 ×、勾選表、常用組合都走這裡）：存成明確清單、記成這一頁「上一次的組合」
