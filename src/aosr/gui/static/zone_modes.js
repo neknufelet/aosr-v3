@@ -341,7 +341,7 @@ async function afterZoneChange() {
 function zoneCalled(wall, key) {
   if (key === "whole_wall") return `${wallNames[wall]}「整面」`;  // 一面只有一區，不必號碼
   const label = zoneLabels(wall).get(key);
-  return label ? `${wallNames[wall]} ${label.numberText}「${label.name}」` : `${wallNames[wall]}「${key}」`;
+  return `${wallNames[wall]} ${label.numberText}「${label.name}」`;
 }
 
 // 換材料連不上或回覆讀不出來：照講、把選單畫回原樣（方案與做法都沒動），不留在新選項上。

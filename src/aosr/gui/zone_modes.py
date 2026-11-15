@@ -132,15 +132,16 @@ class Origin:
     source: OriginSource
 
 
-def _zone_index(zones: Mapping[str, tuple[SurfaceZone, ...]], room: Room, wall: str,
-                zone: str) -> tuple[SurfaceZone, tuple[tuple[float, float], tuple[float, float]]]:
+def _zone_index(zones: Mapping[str, tuple[SurfaceZone, ...]], room: Room, wall: str, zone: str,
+                names: Mapping[str, str]) -> tuple[SurfaceZone, tuple[tuple[float, float], tuple[float, float]]]:
+    """找這一區；找不到時牆照表單上的名字叫（``names``，同限制檢查那一套），不把座標代號丟給人看。"""
     size = wall_size_m(room, wall)
     for item in zones.get(wall, ()):
         key = item.id if isinstance(item, RectangleZone) else WHOLE_WALL_KEY
         if key == zone:
             box = (item.u_m, item.v_m) if isinstance(item, RectangleZone) else ((0.0, size[0]), (0.0, size[1]))
             return item, box
-    raise ZoneMaterialError(f"{wall}沒有「{zone}」這一區；畫面跟方案對不上，請重新打開方案")
+    raise ZoneMaterialError(f"{names.get(wall, wall)}沒有「{zone}」這一區；畫面跟方案對不上，請重新打開方案")
 
 
 def origin(current: SurfaceMaterial, original: OriginalWalls | None, wall: str, zone: str,
@@ -190,13 +191,15 @@ def zone_material(current: SurfaceMaterial, base: Origin, entry: FixedEntry | No
 
 @dataclass(frozen=True)
 class ZoneScene:
-    """一次請求（單筆或一批）共用的：驗過的方案、每一面的分區、材料庫、材料庫裡直接取代牆面的那幾種、原方案的原牆。"""
+    """一次請求（單筆或一批）共用的：驗過的方案、每一面的分區、材料庫、材料庫裡直接取代牆面的那幾種、原方案的原牆、
+    表單上的牆名。"""
 
     scheme: Scheme
     walls: Mapping[str, tuple[SurfaceZone, ...]]
     entries: tuple[LibraryEntry, ...]
     replacements: tuple[SurfaceMaterial, ...]
     original: OriginalWalls | None
+    names: Mapping[str, str]
 
 
 class ZoneMaterialHandlers:
@@ -259,13 +262,14 @@ class ZoneMaterialHandlers:
         entries = self._library()
         replacements = tuple(material for item in entries if isinstance(item, FixedEntry)
                              if not isinstance(material := item.surface_material(), Assembly))
-        return ZoneScene(scheme, walls, entries, replacements, self._original(original_scheme_id, scheme))
+        return ZoneScene(scheme, walls, entries, replacements, self._original(original_scheme_id, scheme),
+                         draft_wall_words(document))
 
     def _one(self, scene: ZoneScene, choice: ZoneChoice) -> dict[str, object]:
         """一區選了之後放什麼（單筆與一批同一套）：原牆照 ``origin`` 的先後取，再照 ``zone_material`` 組。"""
         if choice.choice == "fixed" and choice.material_id is None:
             raise ZoneMaterialError("選固定材料要給材料代號")
-        item, box = _zone_index(scene.walls, scene.scheme.scene.room_m, choice.wall, choice.zone)
+        item, box = _zone_index(scene.walls, scene.scheme.scene.room_m, choice.wall, choice.zone, scene.names)
         current = item.material
         entry = self._entry(scene.entries, choice.material_id) if choice.choice == "fixed" and choice.material_id else None
         base = origin(current, scene.original, choice.wall, choice.zone, box, scene.replacements)
@@ -274,8 +278,6 @@ class ZoneMaterialHandlers:
                 "same_as_original": change.same_as_original}
 
     def change(self, body: ZoneMaterialRequest) -> dict[str, object]:
-        if body.choice == "fixed" and body.material_id is None:
-            raise ZoneMaterialError("選固定材料要給材料代號")
         return self._one(self._scene(body.scheme, body.original_scheme_id), body)
 
     def batch(self, body: ZoneMaterialBatch) -> dict[str, object]:

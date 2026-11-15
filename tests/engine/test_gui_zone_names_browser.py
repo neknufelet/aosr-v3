@@ -143,3 +143,15 @@ def test_hand_made_faces_name_speaker_blocks_strips_and_the_strip_between_two_sp
         assert [page.evaluate("entry => zoneSpecialName(entry)", entry) for entry in (door, window, carpet, wood)] == ["門", "窗", "地毯", None]
         assert page.evaluate("[20, 21].map(zoneNumberText)") == ["⑳", "(21)"]
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_drawn_box_over_the_whole_face_is_whole_and_exactly_three_to_one_is_a_strip(tmp_path: Path, browser: Browser) -> None:
+    """畫的框四邊都貼到牆邊，跟整面一區同叫「整面」（不叫「靠天花那塊」）；長邊剛好是短邊 3 倍（60 × 20 公分，
+    浮點算出來差一點點）兩區都叫「條」，不是一個條一個塊。"""
+    _write(tmp_path, ZONE_NAMING_SCHEME)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        assert _names(page, _face([("full", True, [0.0, 4.0, 0.0, 3.0])])) == {"full": "① 整面"}
+        exact = _names(page, _face([("a", True, [0.0, 0.6, 0.0, 0.2]), ("b", True, [1.0, 1.6, 1.0, 1.2])]))
+        assert sorted(exact) == ["a", "b"] and all(name.endswith("那條") for name in exact.values()), exact
+        assert watched.page_errors == [] and watched.console_errors == []

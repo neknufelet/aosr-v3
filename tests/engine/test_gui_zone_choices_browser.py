@@ -534,7 +534,7 @@ def test_an_unknown_name_in_the_list_is_not_counted_as_a_fixed_product(tmp_path:
 
 def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: Path, browser: Browser) -> None:
     """#1175（老闆 11-15 天花選了跟現況同一筆吊頂，存成兩層吊頂疊在一起）：選到跟這一區原牆一模一樣的多層構造，
-    網頁把做法改成「不貼，保留原牆」、說「選的跟原本一樣，當成不貼」，那一區放的還是原牆一份。"""
+    網頁把做法改成「不貼，保留原樣」、說「選的跟原本一樣，當成不貼」，那一區放的還是原本那一份。"""
     ceiling = "ceiling_fibrecement8mm_wool30_on_board_gap180"
     built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == ceiling)
     document = room109_document()

@@ -53,10 +53,13 @@ function nameZones(face) {
   };
   const numbered = [...face.zones.filter(zone => zone.drawn).sort(order), ...face.zones.filter(zone => !zone.drawn).sort(order)];
   const covers = (box, [a, b]) => a >= box[0] - tol && a <= box[1] + tol && b >= box[2] - tol && b <= box[3] + tol;
+  // 長邊／短邊剛好 3 倍（5 公分格上常見）照容差算「條」，不跟著浮點誤差一下條一下塊。
   const shape = ([a0, a1, b0, b1]) => {
     const sides = [a1 - a0, b1 - b0].sort((x, y) => y - x);
-    return sides[1] > 0 && sides[0] / sides[1] >= ZONE_STRIP_RATIO ? "條" : "塊";
+    return sides[0] >= ZONE_STRIP_RATIO * sides[1] - tol ? "條" : "塊";
   };
+  // 畫的框四邊都貼到牆邊，跟「整面一區」同一個名字。
+  const fills = ([a0, a1, b0, b1]) => near(a0, 0) && near(a1, face.width) && near(b0, 0) && near(b1, face.height);
   const speakersHere = face.surface !== "wall" || face.role === "front";
   const speakerWhere = {wall: "後面", floor: "底下", ceiling: "上面"}[face.surface];
   const primaryWhere = face.surface === "floor" ? "主位底下" : face.surface === "ceiling" ? "主位上面"
@@ -122,8 +125,7 @@ function nameZones(face) {
     const [a0, a1, b0, b1] = zone.box;
     const across = (a0 + a1) / 2 / face.width, up = (b0 + b1) / 2 / face.height;
     const fromEdge = {left: across, right: 1 - across, bottom: up, top: 1 - up};
-    const sideways = edge => edge === "left" || edge === "right";
-    if (face.surface !== "wall" && face.front && face.left && sideways(face.front) !== sideways(face.left)) {
+    if (face.surface !== "wall" && face.front && face.left) {
       return `${ZONE_GRID_FLOOR[third(fromEdge[face.front])][third(fromEdge[face.left])]}那${shape(zone.box)}`;
     }
     return `${ZONE_GRID_WALL[third(fromEdge.top)][third(fromEdge.left)]}那${shape(zone.box)}`;
@@ -131,7 +133,7 @@ function nameZones(face) {
   const named = new Map();
   numbered.forEach((zone, index) => {
     const number = index + 1;
-    const name = zone.whole ? "整面" : subjects.get(zone.key)?.name ?? strip(zone) ?? grid(zone);
+    const name = zone.whole || fills(zone.box) ? "整面" : subjects.get(zone.key)?.name ?? strip(zone) ?? grid(zone);
     named.set(zone.key, {number, numberText: zoneNumberText(number), name});
   });
   return named;

@@ -124,7 +124,7 @@ def test_bad_choices_are_refused_in_plain_words(client: TestClient, choice: dict
 def test_unknown_zone_unreadable_library_and_half_filled_form_are_refused(client: TestClient, tmp_path: Path) -> None:
     document = _cut_document()
     code, data = _post(client, document, "nope", choice="original")
-    assert code == 400 and "沒有「nope」這一區" in str(data["error"])
+    assert code == 400 and "沒有「nope」這一區" in str(data["error"]) and "x0" not in str(data["error"]), data
     (tmp_path / "materials.json").write_text("{not json", encoding="utf-8")
     code, data = _post(client, document, "z1", choice="fixed", material_id=PRESET)
     assert code == 400 and "使用者材料庫讀不進來" in str(data["error"])
@@ -228,13 +228,15 @@ def test_one_bad_zone_in_the_middle_refuses_the_whole_batch_and_says_which(clien
     assert data["index"] == 1 and data["wall"] == "x0" and data["zone"] == "auto1"
     assert data["reason"] == "材料庫裡沒有「no_such_material」這一筆"
     assert str(data["error"]).endswith("「自動 auto1」：材料庫裡沒有「no_such_material」這一筆；一區都沒改"), data
-    # 畫面跟方案對不上的區、可最佳化材料當固定、同一區出現兩次：照樣整批不成、點名那一區。
+    # 畫面跟方案對不上的區、可最佳化材料當固定、指定貼卻沒給材料、同一區出現兩次：照樣整批不成、點名那一區；
+    # 給人看的那一句牆照表單上的名字叫，不出現座標代號 x0。
     for bad, status_code, words in (({"wall": "x0", "zone": "nope", "choice": "original"}, 400, "沒有「nope」這一區"),
                                     ({"wall": "x0", "zone": "auto2", "choice": "fixed", "material_id": "glass_wool_48k"}, 400, "可最佳化材料"),
+                                    ({"wall": "x0", "zone": "auto2", "choice": "fixed"}, 400, "選固定材料要給材料代號"),
                                     ({"wall": "x0", "zone": "z1", "choice": "original"}, 400, "同一區在這一批裡出現兩次")):
         status, data = _batch(client, document, good, bad)
         assert status == status_code and data["index"] == 1 and words in str(data["reason"]), data
-        assert str(data["error"]).endswith("；一區都沒改")
+        assert str(data["error"]).endswith("；一區都沒改") and "x0" not in str(data["error"]), data
     # 不是哪一區的問題（材料庫讀不進來、原方案不在了、請求沒有任何一區）：一樣一區都沒改，沒有第幾筆。
     status, data = _batch(client, document, good, original_scheme_id="gone")
     assert status == 404 and data["index"] is None and str(data["error"]).endswith("不在了；在上面「原方案」重選；一區都沒改")

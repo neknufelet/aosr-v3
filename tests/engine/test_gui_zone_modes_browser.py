@@ -11,6 +11,7 @@ from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
+from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write, _zones
 
@@ -188,6 +189,33 @@ def test_zone_number_stays_inside_a_narrow_strip(tmp_path: Path, browser: Browse
             assert len(zone["circles"]) <= 1, (key, zone)
             for c_left, c_right, c_top, c_bottom in zone["circles"]:
                 assert left <= c_left and c_right <= right and top <= c_top and c_bottom <= bottom, (key, zone)
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_zone_number_is_left_out_when_the_strip_is_narrower_than_the_circle(tmp_path: Path, browser: Browser) -> None:
+    """窄條比號碼圓（直徑加 2 像素）窄就不畫圓，title 照樣有號碼與名字。窄條放在假房間左牆離喇叭與主位最遠的那一端
+    （喇叭、主位離它 2 公尺以上），不讓「被字擋住」頂替「太窄」（上一題的窄條就是被喇叭的字擋住才沒畫）；
+    先量窄條真的比圓窄，量不到就紅，不靜靜綠。"""
+    document = json.loads(json.dumps(ZONE_NAMING_SCHEME))
+    whole = document["scene"]["surface_zones_by_wall"]["x0"][0]["material"]
+    height, length = document["scene"]["room_m"]["Lz"], document["scene"]["room_m"]["Ly"]
+    document["scene"]["surface_zones_by_wall"]["x0"] = [
+        {"area": "rectangle", "id": "z1", "u_m": [0.2, length], "v_m": [0.0, height], "material": whole},
+        {"area": "rectangle", "id": "auto1", "u_m": [0.0, 0.2], "v_m": [0.0, height], "material": whole}]
+    _write(tmp_path, document)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1000) as watched:
+        page = watched.page
+        _open_scheme(page, str(document["scheme_id"]))
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#elevation [data-zone-id=auto1] title")).to_contain_text("代號 auto1")
+        measured = cast(dict[str, float], page.evaluate("""() => {
+          const strip = document.querySelector("#elevation [data-zone-id=auto1]");
+          const big = document.querySelector("#elevation [data-zone-id=z1] .zone-number circle");
+          return {width: strip.querySelector("rect").getBoundingClientRect().width, circles: strip.querySelectorAll(".zone-number").length,
+                  diameter: big ? big.getBoundingClientRect().width : -1};
+        }"""))
+        assert measured["diameter"] > 0 and measured["width"] < measured["diameter"] + 2, measured
+        assert measured["circles"] == 0, measured
         assert watched.page_errors == [] and watched.console_errors == []
 
 
