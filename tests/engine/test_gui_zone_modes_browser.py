@@ -77,7 +77,8 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     page.locator("#original-scheme").select_option("room109-original")
     expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
     # 底部那一行寫最後一次改的：auto1 的清單（#1176 起改清單也更新那一行，不留 auto2 那一句）。
-    expect(page.locator("#zone-note")).to_contain_text("「自動 auto1」：清單改成 48K 玻璃棉、24K 玻璃棉、不貼、")
+    # 訊息用號碼與位置名叫那一區（#1176）：109 號房的兩支喇叭都投影在右邊那一大塊。
+    expect(page.locator("#zone-note")).to_contain_text("前牆 ③「兩支喇叭後面那塊」：清單改成 48K 玻璃棉、24K 玻璃棉、不貼、")
 
     zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
     assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}
@@ -156,8 +157,9 @@ def test_old_scheme_opens_with_every_zone_fixed_and_saving_writes_no_design(tmp_
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_auto_label_is_left_out_of_a_strip_too_narrow_for_it(tmp_path: Path, browser: Browser) -> None:
-    """窄條裡「自動」兩字放不下就不寫（滑過去看 title），不擠出界壓到隔壁區。"""
+def test_zone_number_stays_inside_a_narrow_strip(tmp_path: Path, browser: Browser) -> None:
+    """窄條裡的號碼圓（#1176 起不寫「自動」，畫號碼）放得下才畫、畫了就整個在那一條裡面，不擠出界壓到隔壁區；
+    滑過去看 title 照樣有號碼、位置名與代號。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -167,8 +169,25 @@ def test_auto_label_is_left_out_of_a_strip_too_narrow_for_it(tmp_path: Path, bro
         _drag(page, LY, LZ, (0.02, 0.02), (LY - 0.25, 1.2))
         strip = next(str(zone["id"]) for zone in _zones(page, "x0")
                      if cast(list[float], zone["u_m"])[0] > LY - 0.3)
-        expect(page.locator(f"#elevation [data-zone-id={strip}] text")).to_have_count(0)
-        expect(page.locator(f"#elevation [data-zone-id={strip}] title")).to_contain_text("自動")
+        # 先等立面圖畫好這一條（title 有位置名），再在頁面裡一次量完每一區的框與號碼圓：分開量的話中間重畫一次，
+        # 量到的是被換掉的舊節點（本機紅過一次：框量出 None）。
+        expect(page.locator(f"#elevation [data-zone-id={strip}] title")).to_contain_text(f"靠右牆那條（代號 {strip}）")
+        measured = cast(dict[str, dict[str, list[list[float]]]], page.evaluate(
+            """() => {
+              const edges = node => { const box = node.getBoundingClientRect(); return [box.left, box.right, box.top, box.bottom]; };
+              return Object.fromEntries([...document.querySelectorAll("#elevation [data-zone-id]")].map(zone => [
+                zone.dataset.zoneId,
+                {rect: [edges(zone.querySelector("rect"))], circles: [...zone.querySelectorAll(".zone-number circle")].map(edges)}]));
+            }"""))
+        assert strip in measured, measured
+        # 每一區最多一個號碼圓、畫了就整個在那一區的框裡（窄條這一格這裡被喇叭的字擋住、沒畫，照樣算）；
+        # 整面上至少量到一個圓，免得這一題一個都沒量到也綠。
+        assert sum(len(zone["circles"]) for zone in measured.values()) >= 1, measured
+        for key, zone in measured.items():
+            [[left, right, top, bottom]] = zone["rect"]
+            assert len(zone["circles"]) <= 1, (key, zone)
+            for c_left, c_right, c_top, c_bottom in zone["circles"]:
+                assert left <= c_left and c_right <= right and top <= c_top and c_bottom <= bottom, (key, zone)
         assert watched.page_errors == [] and watched.console_errors == []
 
 

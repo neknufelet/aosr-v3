@@ -287,12 +287,13 @@ function selectedEditor(wall, view, width, height) {
   if (!current) {
     elevationSelected = null;
     const hint = document.createElement("p"); hint.className = "note";
-    hint.textContent = "在牆上空白處（含標「自動」的格子）按住拖曳畫一個框；按住畫好的框拖曳可以整塊搬，點一下可以改尺寸或刪掉。";
+    hint.textContent = "在牆上空白處（含虛線的自動補滿格子）按住拖曳畫一個框；按住畫好的框拖曳可以整塊搬，點一下可以改尺寸或刪掉。";
     area.append(hint); return;
   }
   const [a0, a1, b0, b1] = screenBox(view, width, height, current);
   const heading = document.createElement("p"); heading.id = "elevation-selected-name";
-  heading.textContent = `選取：${current.id}（照畫面方向，公尺）`; area.append(heading);
+  const label = zoneLabels(wall).get(current.id);
+  heading.textContent = `選取：${label.numberText} ${label.name}（代號 ${current.id}；照畫面方向，公尺）`; area.append(heading);
   const fields = document.createElement("div"); fields.className = "fields";
   for (const [field, label, value] of [["left", "離左緣", a0], ["bottom", "離下緣", b0], ["width", "寬", a1 - a0], ["height", "高", b1 - b0]]) {
     const wrap = document.createElement("label"); wrap.textContent = label;
@@ -309,6 +310,39 @@ function selectedEditor(wall, view, width, height) {
 function fieldPoint(prefix, id, fallback) {
   return ["x", "y", "z"].map((axis, index) => $(`${prefix}-${id}-${axis}`) ? numericInput(`${prefix}-${id}-${axis}`) : fallback[index]);
 }
+// 喇叭與主位（照表單上現在填的；填不出數字的那一點不算）：立面圖畫記號、區名（zone_names.js）判蓋住誰，都用這一份。
+function markerItems() {
+  return [...Object.entries(scheme.speakers).map(([id, point]) => ({key: `speaker-${id}`, name: speakerName(id), point: fieldPoint("speaker", id, [point.x, point.y, point.z]), kind: "speaker"})),
+    ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: fieldPoint("receiver", point.receiver_id, point.position_m), kind: "seat"}))]
+    .filter(item => item.point.every(value => typeof value === "number" && Number.isFinite(value)));
+}
+// 牆名定得出前後左右時（#1134）牆的角色；地板天花沒有。只認伺服器排出來的這四個字，座標名一律回 null（不猜）。
+const WALL_ROLES = {"前牆": "front", "後牆": "back", "左牆": "side", "右牆": "side"};
+// 這一面每一區的號碼與位置名（#1176）：立面圖與做法表共用。畫面座標（鏡像翻好）、四邊隔壁那一面的名字、喇叭與主位的投影
+// 交給 zone_names.js 的 nameZones 算；房間尺寸填不出數字時照列表順序編號、名字退回代號（畫不出這一面，也就看不出位置）。
+function zoneLabels(wall) {
+  const zones = wallZones(wall), size = wallSize(wall);
+  const fill = cutSpec().fill_prefix;
+  if (!size) {
+    return new Map(zones.map((zone, index) => [zone.area === "rectangle" ? zone.id : "whole_wall", {number: index + 1,
+      numberText: zoneNumberText(index + 1), name: zone.area !== "rectangle" ? "整面" : zone.id.startsWith(fill) ? `自動 ${zone.id}` : zone.id}]));
+  }
+  const view = views[wall], [width, height] = size;
+  const surface = wall === "floor" || wall === "ceiling" ? wall : "wall";
+  const edges = Object.fromEntries(["left", "right", "top", "bottom"].map(edge => [edge, wallNames[view[edge]]]));
+  const edgeOf = word => Object.keys(edges).find(edge => edges[edge] === word) ?? null;
+  const items = markerItems().map(item => ({...item, at: flip(view, width, height, ...project(wall, item.point))}));
+  return nameZones({
+    surface, role: surface === "wall" ? WALL_ROLES[wallNames[wall]] ?? null : null, width, height,
+    tolerance: cutSpec().edge_merge_tol_m, edges, front: edgeOf("前牆"), left: edgeOf("左牆"),
+    zones: zones.map(zone => zone.area === "rectangle"
+      ? {key: zone.id, drawn: !zone.id.startsWith(fill), whole: false, box: screenBox(view, width, height, zone), entry: zoneLibraryMatch(zone.material)}
+      : {key: "whole_wall", drawn: false, whole: true, box: [0, width, 0, height], entry: zoneLibraryMatch(zone.material ?? wallMaterial(wall))}),
+    speakers: items.filter(item => item.kind === "speaker").map(item => ({name: item.name, at: item.at})),
+    primary: items.find(item => item.kind === "seat")?.at ?? null,
+  });
+}
+window.zoneLabels = zoneLabels;
 // 喇叭與主位先排好位置再畫（#1119）：字的外框用估的寬（14px 字，一字約一個字高），一律留在牆框裡——
 // 點右邊放不下就放到點的左邊，免得壓到牆邊直排的牆名；兩個點投影到同一處（y 兩面牆上的兩支喇叭）字往下一行一行排。
 // 區名（renderElevation）再避開這些點與字。
@@ -322,9 +356,7 @@ function boxesOverlap(a, b) {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 function markerLayout(wall, view, geometry) {
-  const items = [...Object.entries(scheme.speakers).map(([id, point]) => ({key: `speaker-${id}`, name: speakerName(id), point: fieldPoint("speaker", id, [point.x, point.y, point.z]), kind: "speaker"})),
-    ...scheme.receiver_set.points.filter(point => point.role === "primary").map(point => ({key: `receiver-${point.receiver_id}`, name: pointName(point.receiver_id), point: fieldPoint("receiver", point.receiver_id, point.position_m), kind: "seat"}))]
-    .filter(item => item.point.every(value => typeof value === "number" && Number.isFinite(value)));
+  const items = markerItems();
   const frameLeft = geometry.pad, frameRight = geometry.pad + geometry.width * geometry.scale;
   // 先放好所有記號，字再避開全部記號與先排好的字（後畫的記號不會蓋到先排的字）。
   const points = items.map(item => {
@@ -356,18 +388,39 @@ function drawMarkers(svg, layout) {
     svg.append(group);
   }
 }
-// 區名的高度：先試正中，跟點或點的字疊到就往上下各挪一行試，一律留在這一區框內；都不行就回 null 不寫
+// 區號碼（#1176）畫成一個圓：圓心在 (x, y)，半徑 BADGE_PX。
+const BADGE_PX = 11;
+function badgeBox(x, y) { return {left: x - BADGE_PX, right: x + BADGE_PX, top: y - BADGE_PX, bottom: y + BADGE_PX}; }
+// 區號碼的高度：先試正中，跟點或點的字疊到就往上下各挪一行試，一律留在這一區框內；都不行就回 null 不畫
 // （同「窄條放不下就不寫」，滑過去看 title 照樣有）。
-function zoneLabelY(label, centerX, centerY, top, bottom, layout) {
+function zoneLabelY(centerX, centerY, top, bottom, layout) {
   const obstacles = layout.flatMap(placed => [placed.mark, placed.label]);
   for (let step = 0; step <= 8; step += 1) {
     const offset = Math.ceil(step / 2) * 18 * (step % 2 ? -1 : 1);
     const y = centerY + offset;
-    const box = textBox(centerX, y, label, "middle");
+    const box = badgeBox(centerX, y);
     if (box.top < top || box.bottom > bottom) continue;
     if (!obstacles.some(other => boxesOverlap(box, other))) return y;
   }
   return null;
+}
+// 一區的號碼圓（data-zone-key、data-number 給考卷對表上的號碼）；框太窄放不下圓就不畫（title 照樣有號碼與名字）。
+function zoneBadge(key, label, box, geometry, layout) {
+  const {pad, scale, height} = geometry;
+  const [a0, a1, b0, b1] = box;
+  if ((a1 - a0) * scale < 2 * BADGE_PX + 2 || (b1 - b0) * scale < 2 * BADGE_PX + 2) return null;
+  const centerX = pad + (a0 + a1) / 2 * scale, centerY = pad + (height - (b0 + b1) / 2) * scale;
+  const y = zoneLabelY(centerX, centerY, pad + (height - b1) * scale, pad + (height - b0) * scale, layout);
+  if (y === null) return null;
+  const badge = node("g", {class: "zone-number", "data-zone-key": key, "data-number": label.number});
+  badge.append(node("circle", {cx: centerX, cy: y, r: BADGE_PX}),
+    node("text", {x: centerX, y, "text-anchor": "middle", "dominant-baseline": "central"}, String(label.number)));
+  return badge;
+}
+// 滑過去看到的那一句：號碼、位置名、代號（伺服器的訊息寫代號）、做法、超過的限制。
+function zoneHoverText(label, key, mode, limits) {
+  const code = key === "whole_wall" ? "" : `（代號 ${key}）`;
+  return `${label.numberText} ${label.name}${code}：${ZONE_MODE_WORDS[mode]}${limits}`;
 }
 function renderElevation() {
   if (dropDrag) dropDrag();  // 拖到一半被重畫：那一張圖要換掉了，這次拖曳作廢（見 trackDrag）
@@ -402,22 +455,26 @@ function renderElevation() {
   if (wallIsRed(wall)) svg.lastChild.classList.add("wall-red");
   const layout = markerLayout(wall, view, geometry);
   const outside = zones.some(zone => zone.area === "rectangle" && (zone.u_m[1] > width + cutSpec().edge_merge_tol_m || zone.v_m[1] > height + cutSpec().edge_merge_tol_m));
+  // 每一區畫號碼（#1176，跟下面表的「區」那一欄同一個號碼；不再畫「z1」「自動」），滑過去看號碼、位置名與代號。
+  const labels = zoneLabels(wall);
+  const limitsOf = key => zoneLimitLines(wall, key).map(line => `\n${line.text}`).join("");
+  if (!zones.some(zone => zone.area === "rectangle")) {
+    const mode = zoneSetting(wall, "whole_wall").mode;
+    svg.lastChild.append(node("title", {}, zoneHoverText(labels.get("whole_wall"), "whole_wall", mode, limitsOf("whole_wall"))));
+    const badge = zoneBadge("whole_wall", labels.get("whole_wall"), [0, width, 0, height], geometry, layout);
+    if (badge && zoneIsRed(wall, "whole_wall")) badge.classList.add("zone-red");
+    if (badge) svg.append(badge);
+  }
   for (const zone of zones.filter(zone => zone.area === "rectangle")) {
     const auto = zone.id.startsWith(cutSpec().fill_prefix);
-    const [a0, a1, b0, b1] = screenBox(view, width, height, zone);
+    const box = screenBox(view, width, height, zone), [a0, a1, b0, b1] = box;
     const mode = zoneSetting(wall, zone.id).mode;
     const red = zoneIsRed(wall, zone.id);
     const group = node("g", {class: `zone ${auto ? "zone-auto" : "zone-drawn"} zone-mode-${mode}${red ? " zone-red" : ""}${zone.id === elevationSelected ? " selected" : ""}`, "data-zone-id": zone.id});
-    const limits = zoneLimitLines(wall, zone.id).map(line => `\n${line.text}`).join("");
     group.append(node("rect", {x: pad + a0 * scale, y: pad + (height - b1) * scale, width: (a1 - a0) * scale, height: (b1 - b0) * scale}),
-      node("title", {}, `${auto ? "自動 " : ""}${zone.id}：${ZONE_MODE_WORDS[mode]}${limits}`));
-    // 字放得下才寫（窄條裡「自動」兩字會擠出界）；放不下的滑過去看 title。
-    const label = auto ? "自動" : zone.id;
-    if ((a1 - a0) * scale >= 14 * label.length + 6 && (b1 - b0) * scale >= 18) {
-      const centerX = pad + (a0 + a1) / 2 * scale, centerY = pad + (height - (b0 + b1) / 2) * scale;
-      const labelY = zoneLabelY(label, centerX, centerY, pad + (height - b1) * scale, pad + (height - b0) * scale, layout);
-      if (labelY !== null) group.append(node("text", {x: centerX, y: labelY, "text-anchor": "middle"}, label));
-    }
+      node("title", {}, zoneHoverText(labels.get(zone.id), zone.id, mode, limitsOf(zone.id))));
+    const badge = zoneBadge(zone.id, labels.get(zone.id), box, geometry, layout);
+    if (badge) group.append(badge);
     svg.append(group);
   }
   for (const strip of elevationThin) {
@@ -442,7 +499,7 @@ function renderElevation() {
   area.append(svg);
   const count = zones.filter(zone => zone.area === "rectangle").length;
   $("elevation-size").textContent = `${wallNames[wall]}：寬 ${metres(width)} 公尺 × 高 ${metres(height)} 公尺，` +
-    (count ? `分成 ${count} 區（實線是畫的框、虛線標「自動」是補滿的）` : "整面一區") +
+    (count ? `分成 ${count} 區（實線是畫的框、虛線是自動補滿的；圓圈裡的號碼對下面表的「區」）` : "整面一區") +
     `；框邊吸附 ${cutSpec().snap_m * 100} 公分格，最小邊 ${cutSpec().min_side_m * 100} 公分` +
     (outside ? "。這一面有分區超出目前的牆面（房間尺寸改過）：請改框或清掉這一面的切法" : "");
   selectedEditor(wall, view, width, height);
