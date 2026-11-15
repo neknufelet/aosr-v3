@@ -43,11 +43,14 @@ def _bits(value: jax.Array) -> dict[str, object]:
             "dtype": str(value.dtype), "shape": list(array.shape)}
 
 
-def _templates(air: PhysicsConstants) -> dict[str, ConstructionTemplate]:
+def _templates(air: PhysicsConstants, extra: dict[str, object]) -> dict[str, ConstructionTemplate]:
+    """每筆預設，加上父考卷交來的考卷構造（#1171 黏住鋼板的背襯不是預設，從檔案帶進來）。"""
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml"))
     adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
-    return {preset.id: build_template(adapter.validate_python(preset.material), jnp.asarray(FREQUENCIES), air=air, ranges=ranges)
-            for preset in load_construction_presets(config_path("construction_presets.toml"))}
+    documents = {preset.id: preset.material for preset in load_construction_presets(config_path("construction_presets.toml"))}
+    assert not set(documents) & set(extra), "考卷構造不准跟預設同名"
+    return {name: build_template(adapter.validate_python(document), jnp.asarray(FREQUENCIES), air=air, ranges=ranges)
+            for name, document in {**documents, **extra}.items()}
 
 
 def identity(templates: dict[str, ConstructionTemplate], air: PhysicsConstants) -> dict[str, object]:
@@ -205,9 +208,9 @@ def rejections(templates: dict[str, ConstructionTemplate], air: PhysicsConstants
 
 
 def main() -> None:
-    mode, output = sys.argv[1:]
+    mode, output, extra = sys.argv[1:]
     air = load_physics_constants(config_path("physics_constants.toml"))
-    templates = _templates(air)
+    templates = _templates(air, json.loads(Path(extra).read_text()))
     actions = {"identity": identity, "gradients": gradients, "transforms": transforms, "single": single,
                "rejections": rejections, "perturb": perturb}
     result = {"dtype": str(jnp.asarray(0.).dtype), "rows": actions[mode](templates, air)}

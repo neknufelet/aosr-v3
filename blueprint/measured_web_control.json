@@ -113,6 +113,18 @@
           "unit": "無量綱",
           "options": {},
           "default": null
+        },
+        "frame_compression_modulus_pa": {
+          "label": "骨架壓縮模數",
+          "unit": "Pa",
+          "options": {},
+          "default": null
+        },
+        "frame_loss_factor": {
+          "label": "骨架損耗因數",
+          "unit": "無量綱",
+          "options": {},
+          "default": null
         }
       }
     },

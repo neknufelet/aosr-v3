@@ -1113,6 +1113,44 @@
               "porosity"
             ]
           }
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "frame_compression_modulus_pa"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "frame_loss_factor"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "frame_compression_modulus_pa": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "frame_loss_factor": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "frame_compression_modulus_pa",
+                "frame_loss_factor"
+              ]
+            }
+          ]
         }
       ],
       "description": "PorousLayer（多孔層）：模型決定必填參數，不接受會被忽略的欄位。",
@@ -1196,6 +1234,34 @@
           "default": null,
           "description": "tortuosity（曲折度，無量綱；模型要求時必填）",
           "title": "Tortuosity"
+        },
+        "frame_compression_modulus_pa": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "frame_compression_modulus_pa（骨架壓縮模數，Pa；填了表示這層整面黏在前面的薄板上、背後是牆，骨架當彈簧串在板後：壓縮模數乘一加 j 損耗、除以厚度；這是整面黏住、側向不能脹開時的等效值，不是型錄上的楊氏模數（側向受限要換算，泊松比越接近 0.5 差越多）；與骨架損耗同給同不給，這層必須是最後一層、緊接薄板層）",
+          "title": "Frame Compression Modulus Pa"
+        },
+        "frame_loss_factor": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "frame_loss_factor（骨架損耗因數，無量綱；與骨架壓縮模數同給同不給）",
+          "title": "Frame Loss Factor"
         }
       },
       "required": [
