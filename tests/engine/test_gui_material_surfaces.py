@@ -10,7 +10,7 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.material_editor import user_library_path
-from aosr.gui.material_surfaces import GROUP_WORDS, WALLS, placement
+from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, WALLS, placement
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
 from tests.engine._boss_material_library import BOSS_USER_ENTRIES
 
@@ -75,3 +75,6 @@ def test_material_listing_carries_the_placement_of_each_row(tmp_path: Path) -> N
         "group": "door_window", "surfaces": [], "reason": placement(_boss()[2]).reason}
     assert rows["glass_wool_48k"]["placement"]["surfaces"] == list(WALL_GROUP)
     assert listing["surface_groups"] == GROUP_WORDS
+    # 短名（「還有 N 筆不列出來：…」那一句用）：每一組都有、順序同標題，短名裡不准再有括號。
+    assert listing["surface_group_short"] == GROUP_SHORT_WORDS and list(GROUP_SHORT_WORDS) == list(GROUP_WORDS)
+    assert not any("（" in words for words in GROUP_SHORT_WORDS.values())

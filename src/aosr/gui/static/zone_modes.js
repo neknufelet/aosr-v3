@@ -18,6 +18,7 @@ let zoneLibrary = null;
 let zoneLibraryProblem = "";
 // 每一組材料的標題（伺服器 material_surfaces.GROUP_WORDS）；「顯示全部材料」打開才列不是這一面用的那幾組，只記在這一頁。
 let zoneSurfaceGroups = {};
+let zoneSurfaceShort = {};  // 每一組的短名（伺服器 material_surfaces.GROUP_SHORT_WORDS）：「還有 N 筆不列出來」那一句用
 let zoneShowAll = false;
 let zoneNoteText = "";
 let zoneNoteKind = "";
@@ -185,20 +186,23 @@ async function fetchZoneLibrary() {
   try {
     const data = await api("/api/materials");
     return {library: data.materials.map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
-            groups: data.surface_groups ?? {},
+            groups: data.surface_groups ?? {}, short: data.surface_group_short ?? {},
             problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {
-    return {library: [], groups: {}, problem: `材料庫讀不到：${errorText(error)}`};
+    return {library: [], groups: {}, short: {}, problem: `材料庫讀不到：${errorText(error)}`};
   }
 }
-function applyZoneLibrary(state) { zoneLibrary = state.library; zoneSurfaceGroups = state.groups ?? {}; zoneLibraryProblem = state.problem; }
+function applyZoneLibrary(state) {
+  zoneLibrary = state.library; zoneSurfaceGroups = state.groups ?? {}; zoneSurfaceShort = state.short ?? {}; zoneLibraryProblem = state.problem;
+}
 async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
 function libraryEntry(id) { return (zoneLibrary || []).find(entry => entry.id === id) ?? null; }
 // 這一筆列不列在這一面（伺服器沒給分組的舊回覆照舊全列）。
 function usableHere(entry, wall) { return !entry.placement || entry.placement.surfaces.includes(wall); }
-function groupWords(entry) { return zoneSurfaceGroups[entry.placement?.group] ?? "其他"; }
-// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的標題, [材料…]]…]。
+// 寫在括號裡的組名用短名（不套括號，審查 11-15）。
+function groupWords(entry) { return zoneSurfaceShort[entry.placement?.group] ?? "其他"; }
+// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。
 function hiddenGroups(wall, entries) {
   const groups = new Map(Object.keys(zoneSurfaceGroups).map(group => [group, []]));
   for (const entry of entries) {
@@ -207,7 +211,7 @@ function hiddenGroups(wall, entries) {
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(entry);
   }
-  return [...groups].filter(([, items]) => items.length).map(([group, items]) => [zoneSurfaceGroups[group] ?? group, items]);
+  return [...groups].filter(([, items]) => items.length);
 }
 // 可調材料的顯示名拿掉尾巴的「（可調厚度與空腔）」：能調什麼另外照條目寫（24K、96K 空腔其實不調）。
 function shortLabel(entry) { return entry.kind === "optimizable" ? entry.label.replace(/（可調[^）]*）$/, "") : entry.label; }
@@ -282,12 +286,16 @@ function numbersDetail(material, id) {
   details.append(summary, line);
   return details;
 }
-// 固定成品的總厚（每層有厚度的加起來；薄板只給面密度、不算厚度，所以寫「約」）。
+// 固定成品的總厚（每層有厚度的加起來，所以寫「約」）：薄板只給面密度、沒有厚度，有薄板就註明不含（不然跟顯示名裡
+// 「總厚約 17 cm」這種把鋼板算進去的數字打架）；不是多層構造的（固定阻抗、實測表）沒有厚度可寫，回空字串。
 function fixedDepthWords(entry) {
   const layers = entry.material.kind === "assembly" ? entry.material.layers : [];
   const depth = layers.reduce((sum, layer) => sum + (typeof layer.thickness_m === "number" ? layer.thickness_m : 0), 0);
-  return depth > 0 ? `${FIXED_WORDS}（總厚約 ${centimetres(depth)} cm）` : FIXED_WORDS;
+  if (!(depth > 0)) return "";
+  return `總厚約 ${centimetres(depth)} cm${layers.some(layer => layer.kind === "board") ? "（不含薄板）" : ""}`;
 }
+// 不在固定成品那一組標題底下列的固定成品（方塊、不列的那幾組）：自己說是固定成品，再接總厚。
+function fixedWords(entry) { return [FIXED_WORDS, fixedDepthWords(entry)].filter(Boolean).join("，"); }
 
 // 交伺服器換這一區的材料；成功才原地換進方案（同切牆面：等回覆時整頁鎖住）。回伺服器的回覆，沒換成回 null。
 async function changeZoneMaterial(wall, key, choice) {
@@ -462,7 +470,7 @@ function fixedCell(wall, key, zone, cell) {
     select.append(fixedOption(current, pasted ? `${current.label}（現在用的；${groupWords(current)}）`
       : `${current.label}（現在用的：整面就是它，不是貼上去的）`));
   }
-  if (zoneShowAll) for (const [title, entries] of hiddenGroups(wall, fixed)) select.append(optionGroup(`不列的：${title}`, entries));
+  if (zoneShowAll) for (const [group, entries] of hiddenGroups(wall, fixed)) select.append(optionGroup(`不列的：${zoneSurfaceGroups[group]}`, entries));
   select.value = current?.id ?? "";
   select.onchange = () => { if (select.value) action(() => chooseFixed(wall, key, select.value)); };
   cell.append(select);
@@ -504,20 +512,21 @@ function allowedChecklist(wall, key, allowed, onToggle) {
   if (fixed.length) list.append(heading("固定成品：整塊貼上去，不能調（電腦只決定貼不貼）"));
   for (const entry of fixed) list.append(box(entry.id, entry.label, fixedDepthWords(entry), entry.placement?.reason));
   if (other.length) list.append(heading(zoneSurfaceGroups.other ?? "其他"));
-  for (const entry of other) list.append(box(entry.id, shortLabel(entry), entry.kind === "fixed" ? fixedDepthWords(entry) : adjustWords(entry)));
+  for (const entry of other) list.append(box(entry.id, shortLabel(entry), entry.kind === "fixed" ? fixedWords(entry) : adjustWords(entry)));
   const hidden = hiddenGroups(wall, zoneLibrary || []);
   const count = hidden.reduce((sum, [, entries]) => sum + entries.length, 0);
   if (zoneShowAll) {
-    for (const [title, entries] of hidden) {
-      list.append(heading(`不列的：${title}`));
+    for (const [group, entries] of hidden) {
+      list.append(heading(`不列的：${zoneSurfaceGroups[group]}`));
       for (const entry of entries) {
-        const words = entry.kind === "fixed" ? fixedDepthWords(entry) : adjustWords(entry);
-        list.append(box(entry.id, shortLabel(entry), `${words}；${entry.placement?.reason ?? ""}`));
+        const words = entry.kind === "fixed" ? fixedWords(entry) : adjustWords(entry);
+        list.append(box(entry.id, shortLabel(entry), [words, entry.placement?.reason].filter(Boolean).join("；")));
       }
     }
   } else if (count) {
     const line = document.createElement("p"); line.className = "note"; line.id = `zone-allowed-hidden-${wall}-${key}`;
-    line.textContent = `還有 ${count} 筆不是${wallNames[wall]}用的、不列出來（${hidden.map(([title]) => title).join("；")}）。要選就打開表格下面「顯示全部材料」`;
+    line.textContent = `還有 ${count} 筆不是${wallNames[wall]}用的、不列出來：${hidden.map(([group]) => zoneSurfaceShort[group] ?? group).join("、")}。`
+      + "要選就打開表格下面「顯示全部材料」";
     list.append(line);
   }
   return list;

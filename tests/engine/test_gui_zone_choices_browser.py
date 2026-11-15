@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Locator, Page, expect
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
@@ -41,6 +41,11 @@ def _ids(page: Page, wall: str, key: str) -> list[str]:
         "nodes => nodes.map(node => node.id)"))]
 
 
+def _small(page: Page, wall: str, material: str) -> Locator:
+    """勾選表（整面一區）裡那一筆名字底下的小字。"""
+    return page.locator("label", has=page.locator(f"#zone-allow-{wall}-whole_wall-{material}")).locator("small")
+
+
 def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _boss_library(tmp_path)
@@ -69,11 +74,14 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
             expect(page.locator("label", has=page.locator(f"#zone-allow-x0-whole_wall-{wool}")).locator("small")).to_have_text(
                 "可調：厚 5～20 cm、空腔不調")
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).not_to_contain_text("（可調厚度與空腔）")
-        expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-fabric_pet_a_gap100"))).to_contain_text(
-            "固定成品：整塊貼或不貼，不能調")
+        # 固定成品那一組標題已經講過整塊貼或不貼：每一筆只留總厚；有薄板（只給面密度、沒有厚度）的註明不含，
+        # 不然跟顯示名裡把鋼板算進去的「總厚約 17 cm」打架（審查 11-15）。
+        expect(_small(page, "x0", "fabric_pet_a_gap100")).to_have_text("總厚約 10 cm")
+        expect(_small(page, "x0", "slotted16_mel50_vpr_steel3_5mm_mel100_draft")).to_have_text("總厚約 16.6 cm（不含薄板）")
+        # 不列的那一句只列短組名、不套括號。
         hidden = page.locator("#zone-allowed-hidden-x0-whole_wall")
-        expect(hidden).to_contain_text("還有 11 筆不是前牆用的")
-        expect(hidden).to_contain_text("門、窗")
+        expect(hidden).to_have_text("還有 11 筆不是前牆用的、不列出來：地板用的、整片天花構造、門窗、牆面地面本身、示範房的。"
+                                    "要選就打開表格下面「顯示全部材料」")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "choices-wall.png"))
 
         # 「顯示全部材料」：不列的那幾組分組列出、各一個標題；示範房要選自己的材料就從這裡勾。

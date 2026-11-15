@@ -33,6 +33,16 @@ GROUP_WORDS: Final[dict[SurfaceGroup, str]] = {
     "surface_itself": "牆面、地面本身（整面換掉，不是貼上去的）",
     "demo109": "另一間示範房（109 號房）用的",
 }
+# 每一組的短名（網頁「還有 N 筆不列出來：…」那一句只列短名，不套括號）；鍵跟 ``GROUP_WORDS`` 同一組、同一個順序。
+GROUP_SHORT_WORDS: Final[dict[SurfaceGroup, str]] = {
+    "wall": "牆面與天花用的",
+    "floor": "地板用的",
+    "other": "其他",
+    "ceiling_build": "整片天花構造",
+    "door_window": "門窗",
+    "surface_itself": "牆面地面本身",
+    "demo109": "示範房的",
+}
 _DEMO_PREFIX: Final = "demo109"
 
 
