@@ -36,9 +36,10 @@ def _rejected(document: dict[str, object]) -> str:
 
 
 @pytest.mark.parametrize("given", [{"frame_compression_modulus_pa": E_MID}, {"frame_loss_factor": LOSS},
-                                   {"frame_compression_modulus_pa": E_MID, "frame_loss_factor": None}])
+                                   {"frame_compression_modulus_pa": E_MID, "frame_loss_factor": None},
+                                   {"frame_compression_modulus_pa": None, "frame_loss_factor": None}])
 def test_frame_fields_come_in_pairs(given: dict[str, object]) -> None:
-    """抓只填一格（或一格填空值）就被收下：彈簧少了壓縮模數或損耗會靜靜算錯。"""
+    """抓只填一格、一格填空值或兩格都明寫空值就被收下：彈簧少了壓縮模數或損耗會靜靜算錯。"""
     with pytest.raises(ValidationError, match="骨架壓縮模數與骨架損耗必須一起填"):
         PorousLayer.model_validate({**MELAMINE_100, **given})
 
@@ -64,6 +65,7 @@ def test_plain_porous_dump_has_no_frame_keys() -> None:
     (_assembly(STEEL_2_5MM, MELAMINE_BONDED, _AIR), "必須是最後一層"),
     (_assembly(STEEL_2_5MM, MELAMINE_BONDED, backing="air"), "背後負載必須是剛背"),
     ({"kind": "mounted_on_wall", "layers": [STEEL_2_5MM, MELAMINE_BONDED, _AIR], "wall": _WALL}, "必須是最後一層"),
+    ({"kind": "mounted_on_wall", "layers": [MELAMINE_BONDED], "wall": _WALL}, "前面一層必須是薄板層"),
     ({"kind": "measured_impedance", "source_and_conditions": "考卷用的假表",
       "points": [{"frequency_hz": 50.0, "real_pa_s_m": 400.0, "imag_pa_s_m": 0.0},
                  {"frequency_hz": 100.0, "real_pa_s_m": 400.0, "imag_pa_s_m": 0.0}],
@@ -107,11 +109,11 @@ def test_web_form_has_the_two_fields() -> None:
 
 
 def test_plain_name_says_vpr() -> None:
-    """網頁白話名把黏住鋼板的背襯講成 VPR，並寫出骨架彈性；沒黏的照舊。"""
+    """網頁白話名把黏住鋼板的背襯講成 VPR，並寫出骨架壓縮模數；沒黏的照舊。"""
     material = _ADAPTER.validate_python(BONDED_VPR)
     assert isinstance(material, Assembly)
     name = layers_name(material.layers, ()).text
-    assert "VPR 複合板共振背襯" in name and "0.05125 MPa" in name, name
+    assert "VPR 複合板共振背襯" in name and "骨架壓縮模數 0.05125 MPa" in name, name
     plain = _ADAPTER.validate_python(_assembly(STEEL_2_5MM, MELAMINE_100))
     assert isinstance(plain, Assembly) and "VPR" not in layers_name(plain.layers, ()).text
 

@@ -68,8 +68,8 @@ def _layer_words(layer: Layer, library: Sequence[LibraryEntry]) -> str:
                  f"（流阻 {rounded_number(layer.flow_resistivity_pa_s_m2)} Pa·s/m²）") if name is None else f"{name} {_mm(layer.thickness_m)}"
         if layer.frame_compression_modulus_pa is None:
             return words
-        # #1171：黏住前面鋼板的背襯就是複合板共振器（VPR）的背襯，名字直接講出來與骨架彈性。
-        return f"{words}（VPR 複合板共振背襯：整面黏住前面的板，骨架彈性 {rounded_number(layer.frame_compression_modulus_pa / 1e6)} MPa）"
+        # #1171：黏住前面鋼板的背襯就是複合板共振器（VPR）的背襯，名字直接講出來與骨架壓縮模數。
+        return f"{words}（VPR 複合板共振背襯：整面黏住前面的板，骨架壓縮模數 {rounded_number(layer.frame_compression_modulus_pa / 1e6)} MPa）"
     if isinstance(layer, AirLayer):
         return f"{_mm(layer.thickness_m)} 空腔"
     if isinstance(layer, BoardLayer):

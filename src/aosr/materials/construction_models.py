@@ -288,8 +288,8 @@ Layer: TypeAlias = Annotated[PorousLayer | AirLayer | BoardLayer | FabricLayer |
 def _bonded_backing_place(layers: tuple[Layer, ...], backing: str | None) -> None:
     """黏住薄板的背襯（填了骨架兩格的多孔層）骨架彈簧頂著牆：必須是最後一層、緊接薄板層；多層構造要剛背。
 
-    貼在原牆上的構造（backing 給 None）把原牆當成不動，原牆本身的阻抗不改彈簧；原牆是輕隔間或帶空腔時，
-    骨架那一份會算硬（真的反力是板與牆的相對位移乘彈簧），能力表註記寫著。
+    貼在原牆上的構造（backing 給 None）把原牆當成不動，原牆本身的阻抗不改彈簧。真的反力是板與牆的相對位移
+    乘彈簧：原牆在那個頻率剛性主導時骨架那一份算硬、質量主導（輕隔間整片跟著動）時算軟、峰位算低；能力表註記寫著。
     """
     for index, layer in enumerate(layers):
         if not isinstance(layer, PorousLayer) or not layer.bonded():
