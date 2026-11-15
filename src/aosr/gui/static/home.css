@@ -109,6 +109,11 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-table tr.zone-mode-fixed td:first-child{border-left:6px solid #15617b}
 .zone-allowed{display:flex;flex-direction:column;align-items:flex-start}
 .zone-allowed label{margin:.15rem 0}
+/* 材料清單分組（#1176）：組的標題粗一點；每一筆名字後面一行小字寫能調什麼或固定成品多厚。 */
+.zone-allowed .zone-group{margin:.6rem 0 .1rem;font-weight:600}
+.zone-choice{display:grid;grid-template-columns:auto 1fr;column-gap:.4rem}
+.zone-choice small{grid-column:2;color:#5b6670}
+.zone-numbers summary{color:#5b6670;font-size:.9em}
 /* 超過限制（#1111）：紅框紅底；表裡那一列左邊紅條、每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
 .zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:#f9d6d2;stroke:#c0392b;stroke-width:3}
 .zone-table tr.zone-red td{background:#fdecea}
