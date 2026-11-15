@@ -89,7 +89,7 @@ button.archive-danger:hover{background:#fff0f0}
   .archive-scroll-note{display:block}
   #archived table:not([hidden]){display:block;overflow-x:auto;max-width:100%}
 }
-/* 立面圖（#1091）：畫的框實線、補滿的格子虛線標「自動」、太窄的那幾條紅虛線、選取的框加粗；喇叭方塊、主位圓點。
+/* 立面圖（#1091）：畫的框實線、補滿的格子虛線、太窄的那幾條紅虛線、選取的框加粗；喇叭方塊、主位圓點。
    整張圖不讓瀏覽器拿去捲動或選字，按住拖曳才畫得出框。 */
 #elevation svg{max-width:760px;touch-action:none;user-select:none;cursor:crosshair}
 #elevation-frame{fill:#ffffff;stroke:#17212a;stroke-width:2}
@@ -98,6 +98,11 @@ button.archive-danger:hover{background:#fff0f0}
 .zone.selected rect{fill:#b9dbe7;stroke-width:4}
 .zone text,.elevation-edge,.elevation-marker text{font-size:14px;fill:#17212a;pointer-events:none}
 .zone-auto text{fill:#46586a}
+/* 區號碼（#1176）：深色圓白字，跟下面表的「區」那一欄同一個號碼；超過限制的區圓變紅。不接滑鼠（按下去照樣是畫框或搬框）。 */
+#elevation .zone-number{pointer-events:none}
+#elevation .zone-number circle{fill:#17212a;stroke:#ffffff;stroke-width:1.5}
+#elevation .zone-number text{fill:#ffffff;font-size:12px;font-weight:700}
+#elevation .zone-red .zone-number circle,#elevation .zone-number.zone-red circle{fill:#c0392b}
 .zone-drawn{cursor:move}
 .zone.moving rect{fill-opacity:.7;stroke-dasharray:6 3}
 /* 每一區的做法（#1105）：固定＝藍（原樣）、保留原牆＝灰、交給搜尋＝琥珀；立面圖與逐區表同一套。 */
@@ -107,11 +112,17 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-table tr.zone-mode-keep_original td:first-child{border-left:6px solid #9aa4ab}
 .zone-table tr.zone-mode-search td:first-child{border-left:6px solid #e0a526}
 .zone-table tr.zone-mode-fixed td:first-child{border-left:6px solid #15617b}
-/* 做法表塞進面板寬（#1176）：材料下拉選單跟著欄寬（不照最長那一筆名字撐寬，老闆的 VPR 那幾筆會把深度上限那一欄擠出面板；
+/* 做法表塞進面板寬（#1176）：材料下拉選單跟著欄寬（不照最長那一筆名字撐寬，名字很長的 VPR 那幾筆會把深度上限那一欄擠出面板；
    名字在關著的選單裡截掉、打開照樣看全名），代號這類沒有空格的長字照樣換行。 */
 .zone-table td[id^=zone-material-]{overflow-wrap:anywhere}
 /* 「區」「大小」兩欄不在字中間斷行（審查 11-15：「整面」斷成直的兩行）：中文字之間不斷，只在空白與括號前換行。 */
 .zone-table th:nth-child(-n+2),.zone-table td:nth-child(-n+2){word-break:keep-all}
+/* 「區」那一格（#1176）：號碼＋位置名可以在字中間換行（名字長，整句不斷會把表撐寬），整格至少放得下「① 整面」一行；
+   代號小字灰色另起一行。 */
+.zone-table td[id^=zone-name-]{min-width:7.5em}
+.zone-table .zone-label{word-break:normal;display:block}
+.zone-table .zone-num{font-size:1.2em}
+.zone-table .zone-code{display:block;color:#5b6670;font-size:.8em;word-break:normal}
 /* 停用的「拿去搜尋」照樣看得清楚（審查 11-15：白字淺底、整顆半透明太淡）：深字淺灰底、不透明；跟旁邊那一句留間隔。 */
 #zone-to-search:disabled{opacity:1;background:#d5dde1;color:#17212a}
 #zone-to-search-note{margin-left:.75rem}

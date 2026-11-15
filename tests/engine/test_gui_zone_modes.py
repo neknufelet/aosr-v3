@@ -4,6 +4,7 @@
 一律用 109 號房的長寬高；原牆是參考方案的固定阻抗（來自已驗輸入），不在考卷裡自己造阻抗數字當原牆。
 """
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
@@ -123,7 +124,8 @@ def test_bad_choices_are_refused_in_plain_words(client: TestClient, choice: dict
 def test_unknown_zone_unreadable_library_and_half_filled_form_are_refused(client: TestClient, tmp_path: Path) -> None:
     document = _cut_document()
     code, data = _post(client, document, "nope", choice="original")
-    assert code == 400 and "沒有「nope」這一區" in str(data["error"])
+    # 牆照表單上的名字叫（這間 x0 是前牆），不寫座標代號、也不寫「x 起點牆」那種座標名。
+    assert code == 400 and "前牆沒有「nope」這一區" in str(data["error"]) and "x0" not in str(data["error"]), data
     (tmp_path / "materials.json").write_text("{not json", encoding="utf-8")
     code, data = _post(client, document, "z1", choice="fixed", material_id=PRESET)
     assert code == 400 and "使用者材料庫讀不進來" in str(data["error"])
@@ -188,3 +190,75 @@ def test_whole_wall_of_a_six_number_scheme_is_found_through_the_validated_inputs
     data = cast(dict[str, object], response.json())
     assert response.status_code == 200, data
     assert data["material"] == {"kind": "mounted_on_wall", "layers": _preset_layers(PRESET), "wall": wall}
+
+
+# 一次換好幾區（#1176 第 B 支，``/api/zone-material/batch``）：每一區照單筆同一套規則算、全有或全無、不寫檔。
+def _batch(client: TestClient, document: dict[str, object], *changes: Mapping[str, object],
+           **extra: object) -> tuple[int, dict[str, object]]:
+    response = client.post("/api/zone-material/batch", json={"scheme": document, "changes": list(changes), **extra})
+    return response.status_code, cast(dict[str, object], response.json())
+
+
+def _files(root: Path) -> list[tuple[str, bytes]]:
+    return sorted((str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*") if path.is_file())
+
+
+def test_a_batch_gives_each_zone_what_the_one_zone_endpoint_gives_and_writes_nothing(client: TestClient, tmp_path: Path) -> None:
+    document = _cut_document()
+    changes = [{"wall": "x0", "zone": "z1", "choice": "fixed", "material_id": PRESET},
+               {"wall": "x0", "zone": "auto1", "choice": "original"},
+               {"wall": "x0", "zone": "auto2", "choice": "fixed", "material_id": OTHER}]
+    before = _files(tmp_path)
+    status, data = _batch(client, document, *changes)
+    assert status == 200, data
+    singles = [_post(client, document, str(change["zone"]), **{key: value for key, value in change.items()
+                                                               if key not in ("wall", "zone")})[1] for change in changes]
+    assert data == {"changes": singles}
+    assert [cast(dict[str, object], item["material"])["kind"] for item in singles] == ["mounted_on_wall", "constant_impedance",
+                                                                                      "mounted_on_wall"]
+    assert _files(tmp_path) == before
+
+
+def test_one_bad_zone_in_the_middle_refuses_the_whole_batch_and_says_which(client: TestClient, tmp_path: Path) -> None:
+    """中間那一筆不成：整批不成、一區的結果都不回，寫明是哪一區、為什麼、一區都沒改；第幾筆與那一區自己的原因另外回給網頁。"""
+    document = _cut_document()
+    good = {"wall": "x0", "zone": "z1", "choice": "fixed", "material_id": PRESET}
+    status, data = _batch(client, document, good, {"wall": "x0", "zone": "auto1", "choice": "fixed", "material_id": "no_such_material"},
+                          {"wall": "x0", "zone": "auto2", "choice": "original"})
+    assert status == 404 and "changes" not in data
+    assert data["index"] == 1 and data["wall"] == "x0" and data["zone"] == "auto1"
+    assert data["reason"] == "材料庫裡沒有「no_such_material」這一筆"
+    assert str(data["error"]).endswith("「自動 auto1」：材料庫裡沒有「no_such_material」這一筆；一區都沒改"), data
+    # 畫面跟方案對不上的區、可最佳化材料當固定、指定貼卻沒給材料、同一區出現兩次：照樣整批不成、點名那一區；
+    # 給人看的那一句牆照表單上的名字叫，不出現座標代號 x0。
+    for bad, status_code, words in (({"wall": "x0", "zone": "nope", "choice": "original"}, 400, "沒有「nope」這一區"),
+                                    ({"wall": "x0", "zone": "auto2", "choice": "fixed", "material_id": "glass_wool_48k"}, 400, "可最佳化材料"),
+                                    ({"wall": "x0", "zone": "auto2", "choice": "fixed"}, 400, "選固定材料要給材料代號"),
+                                    ({"wall": "x0", "zone": "z1", "choice": "original"}, 400, "同一區在這一批裡出現兩次")):
+        status, data = _batch(client, document, good, bad)
+        assert status == status_code and data["index"] == 1 and words in str(data["reason"]), data
+        assert str(data["error"]).endswith("；一區都沒改") and "x0" not in str(data["error"]), data
+        if bad["zone"] == "nope":  # 那一區自己的原因也照表單牆名（這間 x0 是前牆），整句只有一種叫法
+            assert str(data["reason"]).startswith("前牆沒有「nope」"), data
+    # 不是哪一區的問題（材料庫讀不進來、原方案不在了、請求沒有任何一區）：一樣一區都沒改，沒有第幾筆。
+    status, data = _batch(client, document, good, original_scheme_id="gone")
+    assert status == 404 and data["index"] is None and str(data["error"]).endswith("不在了；在上面「原方案」重選；一區都沒改")
+    status, data = _batch(client, document)
+    assert status == 400 and "至少一區" in str(data["error"])
+    (tmp_path / "materials.json").write_text("{not json", encoding="utf-8")
+    status, data = _batch(client, document, good)
+    assert status == 400 and data["index"] is None and "使用者材料庫讀不進來" in str(data["error"])
+    assert str(data["error"]).endswith("；一區都沒改")
+
+
+def test_a_zone_picked_as_what_it_already_is_is_flagged_inside_a_batch_too(client: TestClient) -> None:
+    """#1175 那一條在一批裡照樣成立：原牆本身就是那一套多層構造的區選同一筆，回原牆一份、旗標 same_as_original；同一批別區照常貼上去。"""
+    document = _cut_document()
+    built = {"kind": "assembly", "layers": _preset_layers(PRESET), "backing": "rigid"}
+    _put(document, "z1", built)
+    status, data = _batch(client, document, {"wall": "x0", "zone": "z1", "choice": "fixed", "material_id": PRESET},
+                          {"wall": "x0", "zone": "auto1", "choice": "fixed", "material_id": PRESET})
+    assert status == 200, data
+    first, second = cast(list[dict[str, object]], data["changes"])
+    assert first["same_as_original"] is True and first["material"] == built and "一模一樣" in str(first["note"])
+    assert second["same_as_original"] is False and cast(dict[str, object], second["material"])["kind"] == "mounted_on_wall"

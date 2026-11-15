@@ -432,7 +432,7 @@ def test_wall_names_speaker_names_zone_names_and_markers_never_overlap(tmp_path:
         found = {}
         for wall in ("y0", "x0"):
             page.locator(f"#elevation-wall-{wall}").click()
-            expect(page.locator("#elevation [data-zone-id=z1] text")).to_have_text("z1")
+            expect(page.locator("#elevation [data-zone-id=z1] .zone-number")).to_have_attribute("data-number", "1")
             boxes = cast(list[dict[str, object]], page.evaluate(_BOXES))
             assert len(boxes) >= 10, boxes
             found[wall] = _clashes(boxes)

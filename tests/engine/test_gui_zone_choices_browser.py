@@ -15,6 +15,7 @@ from aosr.materials.library import LibraryEntry, dump_user_library
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
+from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import _load_template, _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _save
@@ -76,7 +77,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        assert page.locator("#zone-mode-x0-whole_wall option").all_inner_texts() == ["指定貼一種", "不貼，保留原牆", "交給電腦挑"]
+        assert page.locator("#zone-mode-x0-whole_wall option").all_inner_texts() == ["指定貼一種", "不貼，保留原樣", "交給電腦挑"]
         # 指定貼一種：牆上能貼的固定成品（含合成的 VPR），門、窗、天花構造、地毯、示範房一筆都沒有；原牆不寫阻抗數字。
         fixed = _values(page, "#zone-fixed-x0-whole_wall option")
         assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
@@ -182,7 +183,7 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
         assert _chips(page, "x0", "whole_wall") == three
         assert _modes(page, "x0")["whole_wall"] == {"mode": "search", "allowed": three}
         expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_24k")).to_contain_text("可調：厚 5～20 cm、空腔不調")
-        expect(page.locator("#zone-chip-x0-whole_wall-none")).to_contain_text("保留原牆，電腦可以決定這裡不貼")
+        expect(page.locator("#zone-chip-x0-whole_wall-none")).to_contain_text("保留原樣，電腦可以決定這裡不貼")
         # 常用組合：現在這一份就是「三種玻璃棉都比」（標現在用的）；這一區剛才指定貼 48K 50 mm，多一顆只決定它貼不貼。
         expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_be_disabled()
         expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_contain_text("現在用的")
@@ -426,7 +427,8 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         expect(note).to_contain_text(f"先處理{front}「整面」、{side}「整面」的紅框")
         expect(note).to_have_class("limit-red")
         # 停用的按鈕照樣看得清楚（審查 11-15：白字淺底太淡）：字與底的對比至少 4.5:1、不靠透明度變淡；跟紅字留間隔。
-        look = cast(dict[str, float], page.locator("#zone-to-search").evaluate(CONTRAST))
+        # 找按鈕和量顏色寫在同一段裡：伺服器回應晚到會整塊重畫、換一顆新按鈕，先拿到的那顆量到一半就不在頁面上了（顏色變空字串）。
+        look = cast(dict[str, float], page.evaluate(f"({CONTRAST})(document.getElementById('zone-to-search'))"))
         assert look["ratio"] >= 4.5 and look["opacity"] == 1, look
         gap = cast(float, page.evaluate("document.getElementById('zone-to-search-note').getBoundingClientRect().left"
                                         " - document.getElementById('zone-to-search').getBoundingClientRect().right"))
@@ -496,7 +498,9 @@ def test_zone_and_size_columns_never_break_inside_a_word(tmp_path: Path, browser
         _choose(page, "#zone-mode-ceiling-whole_wall", "search")
         page.locator("#zone-allowed-summary-ceiling-whole_wall").click()
         row = page.locator("#zone-row-ceiling-whole_wall td")
-        assert row.nth(0).evaluate(LINES) == ["整面"] and row.nth(1).evaluate(LINES) == ["整面"]
+        # 「區」那一格是「① 整面」（號碼在前面的粗字，名字是它後面那一段字）。
+        assert page.locator("#zone-label-ceiling-whole_wall").evaluate(LINES.replace("cell.firstChild", "cell.lastChild")) == ["整面"]
+        assert row.nth(1).evaluate(LINES) == ["整面"]
         assert page.locator("#zone-table-ceiling th").nth(1).evaluate(LINES) in (["大小（公尺）"], ["大小", "（公尺）"])
         # 兩欄不准斷字之後最窄寬了一點：這麼窄的視窗整張表照樣塞得進面板。
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
@@ -530,7 +534,7 @@ def test_an_unknown_name_in_the_list_is_not_counted_as_a_fixed_product(tmp_path:
 
 def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: Path, browser: Browser) -> None:
     """#1175（老闆 11-15 天花選了跟現況同一筆吊頂，存成兩層吊頂疊在一起）：選到跟這一區原牆一模一樣的多層構造，
-    網頁把做法改成「不貼，保留原牆」、說「選的跟原本一樣，當成不貼」，那一區放的還是原牆一份。"""
+    網頁把做法改成「不貼，保留原樣」、說「選的跟原本一樣，當成不貼」，那一區放的還是原本那一份。"""
     ceiling = "ceiling_fibrecement8mm_wool30_on_board_gap180"
     built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == ceiling)
     document = room109_document()
@@ -545,7 +549,7 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         # 整片天花構造平常不列成貼上去的處理；原牆認得出是哪一筆就寫它的名字。
         assert ceiling not in _values(page, "#zone-fixed-ceiling-whole_wall option")
         expect(page.locator("#zone-fixed-ceiling-whole_wall option").first).to_contain_text(
-            "現在：沒貼東西（原牆「天花 纖維水泥板 8 mm＋岩棉毯 30 mm 平鋪在板背＋18 cm 空腔（剛背）」原樣）")
+            "現在：沒貼東西（原本的天花「天花 纖維水泥板 8 mm＋岩棉毯 30 mm 平鋪在板背＋18 cm 空腔（剛背）」原樣）")
         page.locator("#zone-show-all").check()
         _choose(page, "#zone-fixed-ceiling-whole_wall", ceiling)
         expect(page.locator("#zone-mode-ceiling-whole_wall")).to_have_value("keep_original")
@@ -559,4 +563,47 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         _choose(page, "#zone-mode-ceiling-whole_wall", "search")
         _choose(page, "#zone-mode-ceiling-whole_wall", "keep_original")
         expect(page.locator("#zone-same-ceiling-whole_wall")).to_have_count(0)
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, browser: Browser) -> None:
+    """#1176 第 B 支（用語表）：做法名稱六面一律「不貼，保留原樣」；地板叫「原本的地板」、天花叫「原本的天花」，不叫原牆——
+    表上每一格、底部那一行（伺服器回的那一句也照面叫）、原方案那一列都算。假房間 zone-naming-sample：地板本身是木地板、靠前牆鋪地毯，
+    天花本身是那一套吊頂（另外掛一片雲板、一條吊櫃，這裡考後面那塊沒貼東西的）。牆面照舊叫原牆。"""
+    _write(tmp_path, ZONE_NAMING_SCHEME)
+    write_zone_naming_library(tmp_path)
+    wood = "木地板 架在龍骨上（考卷假設）"
+    built = "天花 礦纖板＋泡棉 45 mm＋22 cm 空腔（考卷假設）"
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "zone-naming-sample")
+        page.locator("#elevation-wall-floor").click()
+        zones = page.locator("#elevation-zones")
+        _choose(page, "#zone-mode-floor-rug", "keep_original")
+        expect(page.locator("#zone-note")).to_contain_text("：這一區放回原本的地板")
+        expect(page.locator("#zone-keep-floor-rug")).to_have_text(f"原本的地板「{wood}」原樣，不貼東西")
+        _choose(page, "#zone-mode-floor-auto2", "search")
+        expect(page.locator("#zone-search-now-floor-auto2")).to_contain_text(f"現在：沒貼東西（原本的地板「{wood}」原樣），電腦挑了")
+        expect(page.locator("#zone-chip-floor-auto2-none")).to_contain_text("保留原樣，電腦可以決定這裡不貼")
+        page.locator("#zone-mode-floor-rug").select_option("fixed")  # 改回指定貼一種不必問伺服器
+        _choose(page, "#zone-fixed-floor-rug", "carpet_on_concrete")
+        expect(page.locator("#zone-note")).to_contain_text("貼在原本的地板上（最後一層背後接原本的地板）")
+        expect(page.locator("#zone-mode-floor-rug option")).to_have_text(["指定貼一種", "不貼，保留原樣", "交給電腦挑"])
+        assert "原牆" not in zones.inner_text() + page.locator("#zone-note").inner_text()
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "floor-words.png"))
+
+        page.locator("#elevation-wall-ceiling").click()
+        expect(page.locator("#zone-fixed-ceiling-auto1 option").first).to_have_text(f"現在：沒貼東西（原本的天花「{built}」原樣）")
+        _choose(page, "#zone-mode-ceiling-auto1", "keep_original")
+        expect(page.locator("#zone-keep-ceiling-auto1")).to_have_text(f"原本的天花「{built}」原樣，不貼東西")
+        expect(page.locator("#zone-numbers-ceiling-auto1")).to_contain_text("原本的天花：")
+        expect(page.locator("#zone-note")).to_contain_text("：這一區放回原本的天花")
+        _choose(page, "#zone-mode-ceiling-auto1", "search")
+        expect(page.locator("#zone-search-now-ceiling-auto1")).to_contain_text(f"現在：沒貼東西（原本的天花「{built}」原樣）")
+        assert "原牆" not in zones.inner_text() + page.locator("#zone-note").inner_text()
+        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "ceiling-words.png"))
+
+        # 牆面照舊叫原牆。
+        page.locator("#elevation-wall-yL").click()
+        expect(page.locator("#zone-fixed-yL-auto1 option").first).to_have_text("現在：沒貼東西（原牆原樣）")
         assert watched.page_errors == [] and watched.console_errors == []
