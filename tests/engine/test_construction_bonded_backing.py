@@ -16,7 +16,7 @@ from aosr.gui.problem_text import material_form_spec
 from aosr.gui.zone_limits import range_target
 from aosr.gui.zone_modes import Origin, zone_material
 from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
-from aosr.materials.library import FixedEntry
+from aosr.materials.library import FixedEntry, OptimizableEntry
 from tests.engine._bonded_backing_cases import (BONDED_VPR, E_MID, LOSS, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED,
                                                 SLOTTED_FRONT, STEEL_2_5MM)
 
@@ -114,6 +114,17 @@ def test_plain_name_says_vpr() -> None:
     assert "VPR 複合板共振背襯" in name and "0.05125 MPa" in name, name
     plain = _ADAPTER.validate_python(_assembly(STEEL_2_5MM, MELAMINE_100))
     assert isinstance(plain, Assembly) and "VPR" not in layers_name(plain.layers, ()).text
+
+
+def test_optimizable_porous_cannot_be_bonded() -> None:
+    """抓可最佳化材料的多孔層填了骨架兩格也存得進去（11-15 測試網頁實測過存得進）：多孔層＋空腔前面沒有薄板，一排出構造就壞。"""
+    entry: dict[str, object] = {
+        "kind": "optimizable", "id": "test_opt", "label": "考卷 可最佳化", "provenance": "model", "source": "考卷",
+        "porous": MELAMINE_BONDED, "porous_thickness": {"adjustable": False, "initial_m": 0.1, "range_m": [0.1, 0.1]},
+        "cavity": {"adjustable": True, "initial_m": 0.05, "range_m": [0.0, 0.1]}}
+    with pytest.raises(ValidationError, match="可最佳化材料的多孔層不能填骨架楊氏模數與骨架損耗"):
+        OptimizableEntry.model_validate(entry)
+    assert OptimizableEntry.model_validate({**entry, "porous": MELAMINE_100}).porous == PorousLayer.model_validate(MELAMINE_100)
 
 
 def test_zone_rebuilds_keep_the_bonded_backing() -> None:

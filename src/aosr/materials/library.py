@@ -124,6 +124,9 @@ class OptimizableEntry(_EntryBase):
     @model_validator(mode="after")
     def _consistent(self) -> Self:
         porous, cavity = self.porous_thickness, self.cavity
+        if self.porous.bonded():
+            raise ValueError("可最佳化材料的多孔層不能填骨架楊氏模數與骨架損耗：那兩格表示整面黏住前面薄板的 VPR 背襯，"
+                             "可最佳化材料是多孔層＋空腔、前面沒有薄板；VPR 請存成固定材料的多層構造（薄板層＋填了兩格的多孔層）")
         if porous.initial_m is None or porous.initial_m != self.porous.thickness_m:
             raise ValueError(f"多孔層厚度 {self.porous.thickness_m} 要等於多孔厚度初值 {porous.initial_m}")
         if porous.adjustable and porous.choices_m is None:
