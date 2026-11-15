@@ -366,9 +366,9 @@ function serverDefaultAllowed() {
 function fitsHere(id, wall) { return id === ZONE_NONE || (libraryEntry(id) !== null && usableHere(libraryEntry(id), wall)); }
 // 改成交給電腦挑時一開始放的清單：這一頁上一次改過的組合優先（這一面用不了的拿掉；拿完沒有起點就不用它），
 // 不然一律是三種內建玻璃棉＋不貼（材料庫沒有的、不是這一面用的拿掉，地板只剩不貼）；使用者自己加的可調材料要用就在「改清單」勾。
-// 材料庫整份讀不到就回 null（照舊不寫清單、照講）。
+// 材料庫沒讀全就回 null（照舊不寫清單、照講；使用者材料庫壞了的時候伺服器本來就不准換做法，輪不到這裡）。
 function startingAllowed(wall) {
-  if (!zoneLibrary?.length) return null;
+  if (!serverDefaultAllowed()) return null;
   const last = (zoneLastAllowed ?? []).filter(id => fitsHere(id, wall));
   if (last.length && !allowedProblem(last)) return last;
   return [...THREE_WOOLS.filter(id => libraryEntry(id)?.kind === "optimizable" && fitsHere(id, wall)), ZONE_NONE];

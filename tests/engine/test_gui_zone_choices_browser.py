@@ -236,7 +236,8 @@ def test_an_old_zone_without_a_list_shows_and_saves_what_the_server_means(tmp_pa
 
 
 def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unreadable(tmp_path: Path, browser: Browser) -> None:
-    """材料庫讀不全（使用者材料庫壞了）：列不出伺服器那份全部可調材料是哪幾種，照講、不猜；存檔照舊不寫清單（不替伺服器縮小範圍）。"""
+    """材料庫讀不全（使用者材料庫壞了）：列不出伺服器那份全部可調材料是哪幾種，照講、不猜；存檔照舊不寫清單（不替伺服器縮小範圍）。
+    這時候伺服器連換做法都不換（/api/zone-material 照講拒收、選單放回原樣），所以新改成交給電腦挑的起點清單輪不到。"""
     _write(tmp_path, room109_document())
     (tmp_path / "materials.json").write_text("{not json", encoding="utf-8")
     design = _old_search_design(tmp_path)
@@ -245,9 +246,17 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#zone-allowed-unknown-x0-whole_wall")).to_contain_text("材料庫沒讀全")
+        page.locator("#elevation-wall-y0").click()
+        with page.expect_response("**/api/zone-material") as response:
+            page.locator("#zone-mode-y0-whole_wall").select_option("search")
+        assert response.value.status == 400
+        page.wait_for_function("!document.querySelector('main').inert")
+        expect(page.locator("#zone-note")).to_contain_text("使用者材料庫讀不進來")
+        expect(page.locator("#zone-mode-y0-whole_wall")).to_have_value("fixed")
         _save(page, "room109")
-        assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"] == {"mode": "search"}
-        assert watched.page_errors == [] and watched.console_errors == []
+        assert json.loads(design.read_text(encoding="utf-8"))["zones"] == {"x0": {"whole_wall": {"mode": "search"}}}
+        # 瀏覽器把那一次 400 記成一條載入失敗；除了它不准有別的錯。
+        assert watched.page_errors == [] and [text for text in watched.console_errors if "status of 400" not in text] == []
 
 
 def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_path: Path, browser: Browser) -> None:
@@ -366,12 +375,42 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
         _drag(page, ROOM_109["Ly"], ROOM_109["Lz"], (0.02, 0.02), (1.0, 1.2))
         expect(page.locator("#zone-fixed-x0-z1 option", has_text="VPR").first).to_be_attached()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
+        _choose(page, "#zone-fixed-x0-z1", "melamine100_vpr_steel1mm_softfoam100_draft")
         _choose(page, "#zone-mode-x0-z1", "search")
+        long_preset = page.locator("#zone-preset-x0-z1-this_or_none")
+        expect(long_preset).to_contain_text("只讓電腦決定：「VPR")
         page.locator("#zone-allowed-summary-x0-z1").click()
         expect(page.locator("#zone-allowed-x0-z1")).to_be_visible()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
+        assert cast(float, long_preset.evaluate(
+            "node => node.getBoundingClientRect().right - document.getElementById('elevation-panel').getBoundingClientRect().right"
+        )) <= 0.5
         expect(page.locator("#depth-zone-x0-z1")).to_be_in_viewport()
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "front-fits.png"))
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_an_unknown_name_in_the_list_is_not_counted_as_a_fixed_product(tmp_path: Path, browser: Browser) -> None:
+    """紅框只在清單每一種都是材料庫認得的固定成品時出現（#1176）：材料庫找不到的代號（使用者材料庫沒讀全時可能是可調材料）
+    不當固定成品——不出紅框、不擋「拿去搜尋」，照「材料庫找不到」那一行講（開跑時伺服器點名）；拿掉它只剩固定成品才出紅框。"""
+    _write(tmp_path, room109_document())
+    design = tmp_path / "designs" / "room109.json"
+    design.parent.mkdir(exist_ok=True)
+    design.write_text(json.dumps({"schema_version": "aosr.zone_design.v1", "scheme_id": "room109", "zones": {
+        "x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k_50mm", "ghost_material"]}},
+        "y0": {"whole_wall": {"mode": "search", "allowed": ["ghost_material"]}}}}), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        for wall in ("x0", "y0"):
+            page.locator(f"#elevation-wall-{wall}").click()
+            expect(page.locator(f"#zone-allowed-missing-{wall}-whole_wall")).to_contain_text("ghost_material")
+            expect(page.locator(f"#zone-allowed-problem-{wall}-whole_wall")).to_have_count(0)
+            expect(page.locator("#zone-to-search")).to_be_enabled()
+        page.locator("#elevation-wall-x0").click()
+        page.locator("#zone-chip-remove-x0-whole_wall-ghost_material").click()
+        expect(page.locator("#zone-allowed-problem-x0-whole_wall")).to_contain_text("只放了固定成品，電腦沒得挑")
+        expect(page.locator("#zone-to-search")).to_be_disabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
