@@ -141,7 +141,7 @@ def _zone_index(zones: Mapping[str, tuple[SurfaceZone, ...]], room: Room, wall: 
         if key == zone:
             box = (item.u_m, item.v_m) if isinstance(item, RectangleZone) else ((0.0, size[0]), (0.0, size[1]))
             return item, box
-    raise ZoneMaterialError(f"{names.get(wall, wall)}沒有「{zone}」這一區；畫面跟方案對不上，請重新打開方案")
+    raise ZoneMaterialError(f"{names[wall]}沒有「{zone}」這一區；畫面跟方案對不上，請重新打開方案")
 
 
 def origin(current: SurfaceMaterial, original: OriginalWalls | None, wall: str, zone: str,

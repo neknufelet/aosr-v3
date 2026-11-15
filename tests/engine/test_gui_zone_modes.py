@@ -124,7 +124,8 @@ def test_bad_choices_are_refused_in_plain_words(client: TestClient, choice: dict
 def test_unknown_zone_unreadable_library_and_half_filled_form_are_refused(client: TestClient, tmp_path: Path) -> None:
     document = _cut_document()
     code, data = _post(client, document, "nope", choice="original")
-    assert code == 400 and "沒有「nope」這一區" in str(data["error"]) and "x0" not in str(data["error"]), data
+    # 牆照表單上的名字叫（這間 x0 是前牆），不寫座標代號、也不寫「x 起點牆」那種座標名。
+    assert code == 400 and "前牆沒有「nope」這一區" in str(data["error"]) and "x0" not in str(data["error"]), data
     (tmp_path / "materials.json").write_text("{not json", encoding="utf-8")
     code, data = _post(client, document, "z1", choice="fixed", material_id=PRESET)
     assert code == 400 and "使用者材料庫讀不進來" in str(data["error"])
@@ -237,6 +238,8 @@ def test_one_bad_zone_in_the_middle_refuses_the_whole_batch_and_says_which(clien
         status, data = _batch(client, document, good, bad)
         assert status == status_code and data["index"] == 1 and words in str(data["reason"]), data
         assert str(data["error"]).endswith("；一區都沒改") and "x0" not in str(data["error"]), data
+        if bad["zone"] == "nope":  # 那一區自己的原因也照表單牆名（這間 x0 是前牆），整句只有一種叫法
+            assert str(data["reason"]).startswith("前牆沒有「nope」"), data
     # 不是哪一區的問題（材料庫讀不進來、原方案不在了、請求沒有任何一區）：一樣一區都沒改，沒有第幾筆。
     status, data = _batch(client, document, good, original_scheme_id="gone")
     assert status == 404 and data["index"] is None and str(data["error"]).endswith("不在了；在上面「原方案」重選；一區都沒改")

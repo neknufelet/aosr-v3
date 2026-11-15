@@ -152,6 +152,9 @@ def test_a_drawn_box_over_the_whole_face_is_whole_and_exactly_three_to_one_is_a_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         assert _names(page, _face([("full", True, [0.0, 4.0, 0.0, 3.0])])) == {"full": "① 整面"}
+        # 整面排在喇叭、主位前面：蓋住兩支喇叭與主位的整面框照樣叫整面（跟沒切的整面一區同一個先後）。
+        speakers = [{"name": "左聲道喇叭", "at": [0.8, 1.0]}, {"name": "右聲道喇叭", "at": [3.2, 1.0]}]
+        assert _names(page, _face([("full", True, [0.0, 4.0, 0.0, 3.0])], speakers=speakers, primary=[2.0, 1.0])) == {"full": "① 整面"}
         exact = _names(page, _face([("a", True, [0.0, 0.6, 0.0, 0.2]), ("b", True, [1.0, 1.6, 1.0, 1.2])]))
         assert sorted(exact) == ["a", "b"] and all(name.endswith("那條") for name in exact.values()), exact
         assert watched.page_errors == [] and watched.console_errors == []
