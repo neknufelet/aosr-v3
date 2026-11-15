@@ -134,8 +134,8 @@ def _chips(page: Page, wall: str, key: str) -> list[str]:
 
 
 def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, browser: Browser) -> None:
-    """老闆 11-15「每點一個材料每點一個面都還要重新再勾一次 取消一堆」：改成交給電腦挑直接帶好一份清單（這一面能用的全部可調
-    材料＋不貼，示範房的不算），一鍵常用組合整份換掉；這一頁上一次改過的組合，下一區改成交給電腦挑時優先放（這一面用不了的拿掉）；
+    """老闆 11-15「每點一個材料每點一個面都還要重新再勾一次 取消一堆」：改成交給電腦挑直接帶好一份清單（三種內建玻璃棉＋
+    不貼），一鍵常用組合整份換掉；這一頁上一次改過的組合，下一區改成交給電腦挑時優先放（這一面用不了的拿掉）；
     地板沒有可調材料，只放「不貼」、不出現玻璃棉的組合。存檔一律寫明確清單。"""
     _write(tmp_path, room109_document())
     _boss_library(tmp_path)
@@ -181,6 +181,29 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
             "x0": {"mode": "search", "allowed": ["glass_wool_48k", "none"]},
             "y0": {"mode": "search", "allowed": ["glass_wool_48k", "none"]},
             "floor": {"mode": "search", "allowed": ["none"]}}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materials(tmp_path: Path, browser: Browser) -> None:
+    """起點要可預期（#1176，跟老闆講好「直接帶好三種玻璃棉＋不貼」）：材料庫多了一筆牆上能用的可調材料，改成交給電腦挑照樣
+    只帶三種玻璃棉＋不貼；那一筆在「改清單」裡列著、沒勾，要用自己勾。"""
+    _write(tmp_path, room109_document())
+    extra = {**next(entry for entry in BOSS_USER_ENTRIES if entry["id"] == "demo109_gw48k_limited"),
+             "id": "own_rock_wool_free", "label": "自填岩棉"}
+    adapter: TypeAdapter[tuple[LibraryEntry, ...]] = TypeAdapter(tuple[LibraryEntry, ...])
+    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python([*BOSS_USER_ENTRIES, extra])),
+                                             encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        assert _chips(page, "x0", "whole_wall") == three
+        page.locator("#zone-allowed-summary-x0-whole_wall").click()
+        expect(page.locator("#zone-allow-x0-whole_wall-own_rock_wool_free")).not_to_be_checked()
+        page.locator("#zone-allow-x0-whole_wall-own_rock_wool_free").check()
+        assert _modes(page, "x0")["whole_wall"]["allowed"] == [*three, "own_rock_wool_free"]
         assert watched.page_errors == [] and watched.console_errors == []
 
 

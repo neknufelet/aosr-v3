@@ -117,7 +117,7 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         after = {str(zone["id"]): zone for zone in _zones(page, "x0")}
         modes = _modes(page, "x0")
         right = [key for key, zone in after.items() if _region(zone) == "right" and key != "z2"]
-        # #1176 起改成交給電腦挑就帶好一份明確清單（這一面能用的全部可調材料＋不貼）。
+        # #1176 起改成交給電腦挑就帶好一份明確清單（三種內建玻璃棉＋不貼）。
         allowed = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         assert right and all(modes[key] == {"mode": "search", "allowed": allowed, "max_depth_m": 0.08} for key in right)
         _save(page, "room109")
@@ -326,6 +326,11 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-fixed-x0-z1", PRESET)
         _choose(page, "#zone-mode-x0-auto1", "search")
+        # 一開始只帶三種內建玻璃棉＋不貼（#1176）：使用者材料要在「改清單」自己勾進來，勾的排在最後（第 4 組、編號 3）。
+        page.locator("#zone-allowed-summary-x0-auto1").click()
+        page.locator("#zone-allow-x0-auto1-deep_rock_wool").check()
+        assert _modes(page, "x0")["auto1"]["allowed"] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none",
+                                                          "deep_rock_wool"]
         # 房間預設 0.2：玻璃棉照個案（房間預設）擋，使用者材料自己 0.15 比較嚴、寫「材料組自己的上限擋住」。
         _depth(page, "#depth-room", "0.2")
         _clear(page, "z1")

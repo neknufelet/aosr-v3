@@ -18,7 +18,7 @@ LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 PRESET = "glass_wool_48k_50mm"
 # 加進清單尾巴的那一筆固定成品（#1176 起清單只列這一面能貼的：地毯只列在地板，牆上改用一筆牆面的固定成品）。
 WALL_FIXED = "glass_wool_48k_50mm_gap100"
-# 改成交給電腦挑時一開始放的清單：這一面能用的全部可調材料＋不貼（只有內建材料時就是三種玻璃棉＋不貼）。
+# 改成交給電腦挑時一開始放的清單：一律是三種內建玻璃棉＋不貼（材料庫多了別的可調材料也不放進來）。
 DEFAULT_ALLOWED = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
 
 

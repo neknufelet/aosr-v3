@@ -26,14 +26,16 @@ const zoneAllowedOpen = new Set();
 // （「只讓電腦決定：這一筆貼或不貼」用）。兩樣都只記在這一頁，不跨重開。
 let zoneLastAllowed = null;
 const zoneFormerFixed = new Map();
+const ZONE_NONE = "none";
+const WOOL_48K = "glass_wool_48k";
+// 改成交給電腦挑時一開始放的就是這三種內建玻璃棉＋不貼（#1176，跟老闆講好的起點，不隨材料庫多了幾筆而變）。
+const THREE_WOOLS = [WOOL_48K, "glass_wool_24k", "glass_wool_96k"];
 // 一鍵常用組合：只用內建代號；材料庫裡沒有、或不是這一面用的，那一顆就不出現。
 const ZONE_PRESETS = [
-  {id: "three_wools", words: "三種玻璃棉都比＋可以不貼", members: ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]},
-  {id: "wool48", words: "48K 玻璃棉＋可以不貼", members: ["glass_wool_48k", "none"]},
+  {id: "three_wools", words: "三種玻璃棉都比＋可以不貼", members: [...THREE_WOOLS, ZONE_NONE]},
+  {id: "wool48", words: "48K 玻璃棉＋可以不貼", members: [WOOL_48K, ZONE_NONE]},
 ];
-const WOOL_48K = "glass_wool_48k";
 const ZONE_MODE_WORDS = {fixed: "指定貼一種", keep_original: "不貼，保留原牆", search: "交給電腦挑"};
-const ZONE_NONE = "none";
 
 // 設計設定裡有沒有東西：每一區的做法、原方案、深度上限（房間預設與每面牆，#1111）任一樣有寫就算。
 function designHasContent(design) {
@@ -348,12 +350,13 @@ function serverDefaultAllowed() {
 }
 function fitsHere(id, wall) { return id === ZONE_NONE || (libraryEntry(id) !== null && usableHere(libraryEntry(id), wall)); }
 // 改成交給電腦挑時一開始放的清單：這一頁上一次改過的組合優先（這一面用不了的拿掉；拿完沒有起點就不用它），
-// 不然是這一面能用的全部可調材料＋不貼（同伺服器沒寫清單時的範圍，扣掉不是這一面用的，例如示範房的；地板只剩不貼）。
+// 不然一律是三種內建玻璃棉＋不貼（材料庫沒有的、不是這一面用的拿掉，地板只剩不貼）；使用者自己加的可調材料要用就在「改清單」勾。
+// 材料庫整份讀不到就回 null（照舊不寫清單、照講）。
 function startingAllowed(wall) {
-  if (!serverDefaultAllowed()) return null;
+  if (!zoneLibrary?.length) return null;
   const last = (zoneLastAllowed ?? []).filter(id => fitsHere(id, wall));
   if (last.length && !allowedProblem(last)) return last;
-  return [...libraryEntries("optimizable").filter(entry => usableHere(entry, wall)).map(entry => entry.id), ZONE_NONE];
+  return [...THREE_WOOLS.filter(id => libraryEntry(id)?.kind === "optimizable" && fitsHere(id, wall)), ZONE_NONE];
 }
 function choiceName(id) {
   const entry = libraryEntry(id);
