@@ -148,6 +148,8 @@ function searchButtonRow() {
 }
 // 切完一面：自動補的代號每次重編，做法跟著 /api/zone-cut 回的 inherited（每一塊沿用了切之前哪一區的材料）走。
 function remapZoneDesign(wall, inherited) {
+  // 自動補的代號重編了：「改之前指定貼的那一筆」記的是舊代號，這一面的全部丟掉（不然會掛到別一塊上）。
+  for (const name of [...zoneFormerFixed.keys()]) if (name.startsWith(`${wall}/`)) zoneFormerFixed.delete(name);
   const old = zoneDesign?.zones?.[wall];
   if (!old) return;
   const next = {};
@@ -304,6 +306,7 @@ async function changeZoneMode(wall, key, mode) {
   const held = libraryLabel(zoneList(wall).find(zone => zoneKey(zone) === key).material);
   if (mode !== "fixed" && !await zoneMaterialChanged(wall, key, {choice: "original"})) { renderZoneTable(wall); return; }
   if (mode === "search" && held && usableHere(held, wall)) zoneFormerFixed.set(`${wall}/${key}`, held.id);
+  else zoneFormerFixed.delete(`${wall}/${key}`);
   const next = {...before, mode};
   if (mode !== "search") delete next.allowed;
   else if (!next.allowed) {

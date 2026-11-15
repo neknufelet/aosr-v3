@@ -160,6 +160,11 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
         page.locator("#zone-preset-x0-whole_wall-wool48").click()
         assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
         expect(page.locator("#zone-preset-x0-whole_wall-wool48")).to_be_disabled()
+        # 改成不貼再改回來：這一區已經不是那一筆了，「只讓電腦決定：這一筆」那一顆不再出現；清單照上一次的組合。
+        _choose(page, "#zone-mode-x0-whole_wall", "keep_original")
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        expect(page.locator("#zone-preset-x0-whole_wall-this_or_none")).to_have_count(0)
+        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
 
         # 下一面改成交給電腦挑：照這一頁上一次的組合（48K＋不貼）。
         page.locator("#elevation-wall-y0").click()
