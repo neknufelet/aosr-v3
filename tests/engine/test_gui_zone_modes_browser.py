@@ -309,10 +309,44 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         assert watched.page_errors == []
 
 
-def test_switching_scheme_while_send_to_search_saves_keeps_the_new_scheme_and_does_not_jump(tmp_path: Path,
-                                                                                           browser: Browser) -> None:
-    """按「拿去搜尋」存檔途中（設計設定的回覆還沒到）打開另一份：晚到的回覆不把舊方案的做法寫回頁面，也不跳頁；
-    舊方案的做法照樣存好。"""
+def test_opening_another_scheme_while_send_to_search_saves_is_refused_and_the_jump_goes_to_the_saved_one(
+        tmp_path: Path, browser: Browser) -> None:
+    """按「拿去搜尋」存檔途中（設計設定的回覆還沒到）去按「打開」另一份：整頁鎖著、打開被擋下照講（#1187，
+    之前是放它換、晚到的回覆再自己作廢）；放行後存的與跳去的都是按下那一刻那一份。"""
+    _write(tmp_path, room109_document())
+    _write(tmp_path, room109_document("other"))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        page.locator("#scheme-list").select_option("other")
+        held: list[Route] = []
+        page.route("**/api/designs/room109",
+                   lambda route: held.append(route) if route.request.method == "PUT" else route.continue_())
+        # 只考跳到哪一個網址（同上一題）：搜尋頁用一頁空殼接住。
+        page.route(f"{base}/gradient?scheme=room109",
+                   lambda route: route.fulfill(status=200, content_type="text/plain", body="gradient"))
+        with page.expect_request(lambda r: r.url.endswith("/api/designs/room109") and r.method == "PUT"):
+            page.locator("#zone-to-search").click()
+        assert page.evaluate("document.querySelector('main').inert") is True
+        # 鎖頁擋得住滑鼠，擋不住頁面程式自己發的點擊：程式裡那道鎖也要擋。
+        page.locator("#open-scheme").evaluate("node => node.click()")
+        expect(page.locator("#open-note")).to_have_text("上一個動作還沒做完，沒有打開「other」；等它做完再按一次「打開」")
+        assert page.evaluate("[scheme.scheme_id, zoneDesign.zones.x0.whole_wall.mode]") == ["room109", "search"]
+        assert page.locator("#save-id").input_value() == "room109"
+        assert watched.page_errors == []
+        held[0].continue_()
+        page.wait_for_url(f"{base}/gradient?scheme=room109")
+        stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
+        assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search", "allowed": DEFAULT_ALLOWED}}
+        assert not (tmp_path / "designs" / "other.json").exists()
+
+
+def test_opening_another_scheme_after_send_to_search_unlocks_but_before_the_jump_stays_and_says_so(
+        tmp_path: Path, browser: Browser) -> None:
+    """「拿去搜尋」存好、鎖已放開、結果清單還在重讀的那一段，真人點得到「打開」：這時打開另一份，
+    清單回來後不准跳去另一份的搜尋頁——留在首頁照講，原本那份的做法照樣存好（#1187 審查）。"""
     _write(tmp_path, room109_document())
     _write(tmp_path, room109_document("other"))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -321,19 +355,23 @@ def test_switching_scheme_while_send_to_search_saves_keeps_the_new_scheme_and_do
         page.locator("#elevation-wall-x0").click()
         _choose(page, "#zone-mode-x0-whole_wall", "search")
         held: list[Route] = []
-        page.route("**/api/designs/room109",
-                   lambda route: held.append(route) if route.request.method == "PUT" else route.continue_())
-        with page.expect_request(lambda r: r.url.endswith("/api/designs/room109") and r.method == "PUT"):
+        page.route("**/api/results",
+                   lambda route: held.append(route) if route.request.method == "GET" and not held else route.continue_())
+        page.route("**/gradient?scheme=*",
+                   lambda route: route.fulfill(status=200, content_type="text/plain", body="gradient"))
+        with page.expect_request("**/api/results"):
             page.locator("#zone-to-search").click()
-        _open_scheme(page, "other")
-        assert page.evaluate("[zoneDesign.scheme_id, zoneDesign.zones]") == ["other", {}]
+        page.wait_for_function("!document.querySelector('main').inert")
+        _open_scheme(page, "other")  # 真的用滑鼠點：鎖已經放開
+        assert page.evaluate("scheme.scheme_id") == "other"
         held[0].continue_()
-        expect(page.locator("#zone-note")).to_contain_text("存檔途中換了方案")
-        assert page.evaluate("[zoneDesign.scheme_id, zoneDesign.zones]") == ["other", {}]
+        expect(page.locator("#zone-note")).to_have_text("存檔途中換了方案：「room109」照樣存好，這次不跳搜尋頁")
+        page.wait_for_load_state("networkidle")
         assert page.url == f"{base}/"
         assert page.locator("#save-id").input_value() == "other"
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
         assert stored["zones"]["x0"] == {"whole_wall": {"mode": "search", "allowed": DEFAULT_ALLOWED}}
+        assert not (tmp_path / "designs" / "other.json").exists()
         assert watched.page_errors == []
 
 

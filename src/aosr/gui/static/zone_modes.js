@@ -98,11 +98,13 @@ function resetZoneDesign() {
 }
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
-async function saveZoneDesign(name) {
+// 分兩步（#1187）：按下儲存那一刻先把要送的那一份做好（這裡，沒有等待點），方案存好之後才送（回傳的那一支）；
+// 中間隔著好幾個等待點，送出去的仍是按下那一刻的做法，不是那時畫面上的。
+function prepareZoneDesignSave(name) {
   zoneDesignSaved = false;
-  if (zoneDesignBroken) throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）");
+  if (zoneDesignBroken) return async () => { throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）"); };
   const touched = zoneDesign && designHasContent(zoneDesign);
-  if (!touched && !zoneDesignStored) { zoneDesignSaved = true; return; }
+  if (!touched && !zoneDesignStored) return async () => { zoneDesignSaved = true; };
   const design = structuredClone(designForEdit());
   design.scheme_id = name;
   for (const wall of Object.keys(design.zones)) {
@@ -120,9 +122,11 @@ async function saveZoneDesign(name) {
     }
   }
   const generation = zoneDesignGeneration;
-  await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
-  zoneDesignSaved = true;
-  if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
+  return async () => {
+    await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
+    zoneDesignSaved = true;
+    if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
+  };
 }
 // 各面交給搜尋的區有幾塊（只算現在切法裡還在的區）。
 function searchZoneCount() {
