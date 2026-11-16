@@ -171,6 +171,28 @@ class FamilySettings(BaseModel):
         return self
 
 
+class VprFamilySettings(BaseModel):
+    """可調 VPR 的家族（#1200 第 1 支）：板重範圍（kg/m²）與可空的板重規格、背襯合法厚度、固定前層深度、總深度上限（公尺）與初值。
+
+    跟 :class:`FamilySettings` 分開、也**不進** :class:`MaterialGradientSettings` 的家族清單：舊家族表示不出板重這個變數，
+    加欄會動到每一個舊家族的指紋；搜尋那一層接上之前（第 2 支）沒有人讀它。內容由材料庫那一筆驗過（板重與厚度的範圍、
+    初值、總深），這裡只存數字；板重或背襯不調時，範圍兩端相等、合法厚度只有初值那一個。總深＝固定前層＋板重除以鋼板密度＋背襯厚度；``template_preset`` 是初值排法那份構造的代號。
+    """
+
+    model_config = _FROZEN
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    plate_density_kg_m3: ExactFloat = Field(gt=0.0)
+    plate_mass_range_kg_m2: tuple[ExactFloat, ExactFloat]
+    plate_mass_choices_kg_m2: tuple[ExactFloat, ...] | None = None
+    initial_plate_mass_kg_m2: ExactFloat = Field(gt=0.0)
+    backing_thicknesses_m: tuple[ExactFloat, ...] = Field(min_length=1)
+    initial_backing_thickness_m: ExactFloat = Field(gt=0.0)
+    front_depth_m: ExactFloat = Field(ge=0.0)
+    max_total_depth_m: ExactFloat = Field(gt=0.0)
+    template_preset: StrictStr
+
+
 class MaterialGradientSettings(BaseModel):
     """六節：下降、重調、候選確認、換樣板、匯出、家族；一個 preset 最多屬於一個家族。"""
 
