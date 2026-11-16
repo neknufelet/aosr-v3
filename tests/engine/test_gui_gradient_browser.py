@@ -853,7 +853,11 @@ def test_a_plan_reply_that_lands_after_a_later_switch_is_dropped(browser: Browse
         _switch(page, SECOND)
         _switch(page, THIRD)
         expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
+        # 第二份等超過 15 秒：它已經不算數，不准在第三份底下寫「還在等伺服器回應」（回覆被丟掉，那一句沒人清）。
+        page.clock.run_for(15_000)
+        expect(page.locator("#scheme-message")).to_have_text("")
         _release(page, held, SECOND)
+        expect(page.locator("#scheme-message")).to_have_text("")
         expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
         expect(page.locator("#depth-table tbody tr")).to_have_count(3)
         expect(page.locator("#scheme-pick")).to_have_value(THIRD)
@@ -879,6 +883,8 @@ def test_a_scheme_that_cannot_run_does_not_fall_back_to_the_old_preview(browser:
         starts = _count_starts(page)
         _switch(page, BARE)
         expect(page.locator("#scheme-message")).to_contain_text("這份方案開不了第三階段搜尋")
+        # 不等輪詢：換方案那一刻「開始搜尋」就停用了。
+        expect(page.locator("#start")).to_be_disabled()
         _poll_once(page)
         for block in BLOCKS:
             expect(page.locator(f"#{block}")).to_be_hidden()
@@ -901,9 +907,13 @@ def test_a_preview_reply_that_lands_after_a_switch_is_dropped(browser: Browser, 
             page.locator("#preview").click()
         _switch(page, SECOND)
         expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 1 區")
+        # 換方案那一刻「正在預覽…」就清掉；舊那份預覽等超過 15 秒，也不准在新那份底下寫「還在等伺服器回應」。
+        expect(page.locator("#form-message")).to_have_text("")
+        page.clock.run_for(15_000)
+        expect(page.locator("#form-message")).to_have_text("")
         _release(page, held, NAME)
         expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 1 區")
-        expect(page.locator("#form-message")).not_to_contain_text("預覽好了")
+        expect(page.locator("#form-message")).to_have_text("")
         expect(page.locator("#start")).to_be_enabled()
         page.locator("#start").click()
         expect(page.locator("#job-title")).to_contain_text(f"這一跑：{SECOND}")
@@ -965,6 +975,31 @@ def test_a_build_finishing_after_a_switch_does_not_preview_for_the_other_scheme(
         event.value.finished()
         _flush(page)
         assert seen == [], f"替身建好時替開不了的那份方案送了預覽：{seen}"
+        for block in BLOCKS:
+            expect(page.locator(f"#{block}")).to_be_hidden()
+        _clean(page, watched.page_errors + [error for error in watched.console_errors if "status of 400" not in error])
+
+
+def test_reading_the_same_scheme_again_voids_its_old_preview_until_the_reply_is_back(browser: Browser, tmp_path: Path) -> None:
+    """抓同一份方案再按一次「讀這份方案的開跑選項」、回覆還沒回來（或回來是開不了）時，上一次讀出來的預覽還能開跑。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#start")).to_be_enabled()
+        starts = _count_starts(page)
+        held = _hold_plan(page, NAME)
+        _switch(page, NAME)
+        _poll_once(page)
+        _force_start(page)
+        assert starts == [] and launcher.launched == [], f"重讀同一份方案、回覆還沒回來時送出了開跑請求 {starts}"
+        assert len(held) == 1
+        with page.expect_response(lambda response: urlsplit(response.url).path == _plan_path(NAME)) as event:
+            held[0].fulfill(status=400, json={"error": "方案在別處被改過，沒有交給搜尋的區了"})
+        event.value.finished()
+        expect(page.locator("#scheme-message")).to_contain_text("這份方案開不了第三階段搜尋：方案在別處被改過")
+        _force_start(page)
+        assert starts == [] and launcher.launched == [], f"重讀同一份方案、這一次開不了時送出了開跑請求 {starts}"
         for block in BLOCKS:
             expect(page.locator(f"#{block}")).to_be_hidden()
         _clean(page, watched.page_errors + [error for error in watched.console_errors if "status of 400" not in error])

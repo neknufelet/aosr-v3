@@ -63,10 +63,13 @@ function say(id, text, bad = false) {
 }
 
 // 伺服器回的錯誤一律照原文；不是 JSON（例如 500）時說狀態碼。等太久先說在等什麼（開跑鎖沒有逾時）。
-async function api(path, body = undefined, messageId = null) {
+// ``wanted``：這一問還算不算數（換了方案就不算，#1188 第 1 條）；不算數的不寫「還在等」——它的回覆會被丟掉，那一句沒人清。
+async function api(path, body = undefined, messageId = null, wanted = () => true) {
   const options = body === undefined ? {} :
     {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)};
-  const slow = messageId ? setTimeout(() => say(messageId, "還在等伺服器回應（可能在等開跑鎖：別的網頁正在開一跑）…"), SLOW_MS) : null;
+  const slow = messageId ? setTimeout(() => {
+    if (wanted()) say(messageId, "還在等伺服器回應（可能在等開跑鎖：別的網頁正在開一跑）…");
+  }, SLOW_MS) : null;
   try {
     const reply = await fetch(path, options);
     let data;
@@ -197,11 +200,11 @@ async function loadPlan() {
   // 開跑會拿新那份的代號配上一份的表單（#1188 第 1 條）。讀不到就一直收著，不退回上一份。
   const seq = ++planSeq;
   for (const id of PLAN_BLOCKS) byId(id).hidden = true;
-  for (const id of ["form-message", "start-message"]) say(id, "");
+  say("form-message", "");
   refreshStart();
   history.replaceState(null, "", `/gradient?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   say("scheme-message", "正在讀這份方案的開跑選項…");
-  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, {}, "scheme-message");
+  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, {}, "scheme-message", () => seq === planSeq);
   // 等的時候又讀了別份（或同一份再讀一次）：畫面歸後來那一次管，這一份回覆整個丟掉。
   if (seq !== planSeq) return false;
   if (!reply.ok) { say("scheme-message", `這份方案開不了第三階段搜尋：${errorText(reply)}`, true); return false; }
@@ -288,7 +291,7 @@ async function preview() {
   say("form-message", "正在預覽…");
   const body = request();
   const seq = planSeq;
-  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, body, "form-message");
+  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, body, "form-message", () => seq === planSeq);
   // 等的時候換了方案：這是上一份的預覽，不畫、不算數（#1188 第 1 條）。
   if (seq !== planSeq) return;
   if (!reply.ok) { say("form-message", errorText(reply), true); return; }
