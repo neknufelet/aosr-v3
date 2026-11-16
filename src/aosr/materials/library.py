@@ -169,8 +169,8 @@ class TunableVariable(BaseModel):
 
     model_config = _FROZEN
 
-    layer: StrictInt = Field(ge=0, description="layer（第幾層，從房間側數、0 起）")
-    field: str = Field(min_length=1, description="field（那一層的哪一格，欄位名）")
+    layer: StrictInt = Field(description="layer（第幾層，從房間側數、0 起）")
+    field: str = Field(description="field（那一層的哪一格，欄位名）")
     range: tuple[StrictFloat, StrictFloat] = Field(description="range（下限、上限，那一格自己的單位）")
     choices: tuple[StrictFloat, ...] | None = Field(default=None, description="choices（產品規格，由小到大；可空＝連續）")
     initial: StrictFloat = Field(description="initial（初值；要等於那一層那一格現在寫的值）")
@@ -257,20 +257,20 @@ class TunableLayersEntry(_EntryBase):
     def _consistent(self) -> Self:
         seen: set[tuple[int, str]] = set()
         for item in self.variables:
-            if item.layer >= len(self.layers):
+            if not 0 <= item.layer < len(self.layers):
                 raise ValueError(f"變數指的{item.words()}不存在：這份構造只有 {len(self.layers)} 層")
             if (item.layer, item.field) in seen:
                 raise ValueError(f"{item.words()}列了兩次")
             seen.add((item.layer, item.field))
         self._vpr()
+        try:  # 先核構造再讀變數指的那一格：過了這一關，倒數第二層一定是薄板、最後一層是多孔層，那兩格都在
+            initial_assembly(self)
+        except ValueError as error:
+            raise ValueError(f"初值排法不是合法的多層構造：{error}") from error
         for item in self.variables:
             written = getattr(self.layers[item.layer], item.field)
             if written != item.initial:
                 raise ValueError(f"{item.words()}寫的是 {written}，要等於這個變數的初值 {item.initial}")
-        try:
-            initial_assembly(self)
-        except ValueError as error:
-            raise ValueError(f"初值排法不是合法的多層構造：{error}") from error
         cap = self.max_total_depth_m
         if cap is not None:
             low = self.depth_bounds()[0]

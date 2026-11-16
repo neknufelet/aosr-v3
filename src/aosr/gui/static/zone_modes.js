@@ -227,7 +227,9 @@ function remapZoneDesign(wall, inherited) {
 async function fetchZoneLibrary() {
   try {
     const data = await api("/api/materials");
-    return {library: data.materials.map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
+    // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）先不進分區頁：電腦挑它還沒接上，選單、勾選表、不列的那幾組都不出現。
+    return {library: data.materials.filter(row => row.entry.kind !== "tunable_layers")
+              .map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
             groups: data.surface_groups, short: data.surface_group_short,
             problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {

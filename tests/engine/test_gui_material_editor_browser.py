@@ -489,3 +489,21 @@ def test_closing_the_editor_during_a_save_says_only_that_it_was_saved(tmp_path: 
         expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 1 筆；已儲存「很硬的牆」")
         expect(page.locator("#editor")).to_be_hidden()
         assert watched.page_errors == []
+
+
+def test_a_tunable_vpr_in_the_library_is_listed_and_does_not_break_the_page(tmp_path: Path, browser: Browser) -> None:
+    """#1200 第 1 支：材料庫有一筆可調 VPR，兩張清單照樣畫得出來、那一列寫得出種類、只能刪（這一頁還不能看內容與編輯）；
+    別筆照樣打得開。"""
+    from tests.engine.test_material_library_vpr import PANEL, VPR, _write_library
+
+    _write_library(user_library_path(tmp_path), with_vpr=True)
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 5 筆")
+        row = page.locator(f'#user-list tr[data-id="{VPR}"]')
+        expect(row).to_contain_text("可調多層構造：可調 VPR（鋼板＋黏住的背襯）")
+        expect(row).to_contain_text("這一頁還不能看內容與編輯")
+        assert row.locator("button").evaluate_all("nodes => nodes.map(node => node.className)") == ["delete danger"]
+        _row(page, "user-list", PANEL, "open")
+        expect(page.locator("#editor-title")).to_contain_text("薄吸音板（自編）")
+        assert (watched.console_errors, watched.page_errors) == ([], [])
