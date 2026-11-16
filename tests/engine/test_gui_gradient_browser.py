@@ -883,8 +883,8 @@ def test_a_scheme_that_cannot_run_does_not_fall_back_to_the_old_preview(browser:
         starts = _count_starts(page)
         _switch(page, BARE)
         expect(page.locator("#scheme-message")).to_contain_text("這份方案開不了第三階段搜尋")
-        # 不等輪詢：換方案那一刻「開始搜尋」就停用了。
-        expect(page.locator("#start")).to_be_disabled()
+        # 換方案那一刻「開始搜尋」就停用了：當下看一次、不重試（重試會等到下一輪輪詢替它停用）。
+        assert page.locator("#start").is_disabled()
         _poll_once(page)
         for block in BLOCKS:
             expect(page.locator(f"#{block}")).to_be_hidden()
