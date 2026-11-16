@@ -6,6 +6,7 @@
   <title>房間方案輸入</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/home.css">
+  <link rel="stylesheet" href="/static/zone_overview.css">
   <script src="/static/plan.js" defer></script>
   <script src="/static/measured.js" defer></script>
   <script src="/static/walls.js" defer></script>
@@ -13,6 +14,8 @@
   <script src="/static/elevation.js" defer></script>
   <script src="/static/zone_modes.js" defer></script>
   <script src="/static/zone_limits.js" defer></script>
+  <script src="/static/zone_rules.js" defer></script>
+  <script src="/static/zone_overview.js" defer></script>
   <script src="/static/home.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
@@ -43,10 +46,10 @@
     </section>
     <section><h2>房間與材料</h2><div id="room-fields" class="fields"></div>
       <p id="rho-c"></p><div id="walls"></div>
-      <div id="elevation-panel"><h3>立面圖：在牆上切區</h3><p class="note">站在房間裡看那一面。畫好的框之外會自動補滿成長方形，不重疊、不留空。</p>
+      <div id="elevation-panel"><h3>立面圖：在牆上切區</h3><p id="zone-methods-row"><button id="zone-page-open" type="button">設定每一區貼什麼 ▸</button><span>每一區要貼什麼、不貼、還是交給電腦挑，都在「這間房貼什麼」那一頁設定。</span></p><p class="note">站在房間裡看那一面。畫好的框之外會自動補滿成長方形，不重疊、不留空。</p>
         <div id="elevation-walls"></div><p id="elevation-size"></p>
         <div id="elevation"></div><div id="elevation-selected"></div><p id="elevation-note" aria-live="polite"></p>
-        <h4>這一面每一區的做法</h4><div id="elevation-zones"></div></div>
+        <details id="zone-table-fold"><summary>深度上限與舊做法表</summary><h4>這一面每一區的做法</h4><div id="elevation-zones"></div></details></div>
       <label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
     </section>
     <section><h2>喇叭與座位</h2><div id="labels-notice" hidden><p class="notice">喇叭與座位的中文名沒載到，下面先用代號顯示。</p>
@@ -99,5 +102,6 @@
         <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
       </details></section>
   </main>
+  <div id="zone-page" hidden></div>
 </body>
 </html>

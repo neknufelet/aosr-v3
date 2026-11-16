@@ -510,6 +510,8 @@ function renderElevation() {
   renderZoneTable(wall);
 }
 window.renderElevation = renderElevation;
+// 六面一起看的那一頁（zone_overview.js）畫圖用同一份幾何：哪一軸往右、鏡不鏡像、牆面寬高、喇叭與主位。
+window.elevationGeometry = {views, wallSize, screenBox, flip, project, markerItems};
 window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());

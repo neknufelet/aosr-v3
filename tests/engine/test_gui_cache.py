@@ -92,3 +92,26 @@ def test_result_memo_preserves_oserror_after_a_hit(
         remembered(path, quality_targets_path=targets)
     assert caught.value is failure
     assert calls == [path]
+
+
+def test_memo_does_not_hand_a_value_measured_under_other_jax_settings_to_a_later_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同一個工人裡，先在沒掛整輪設定夾具的題算出來的身分（量到雙精度關），不准留給後面掛了夾具的題（量到雙精度開）：
+    記憶的鍵要帶這個行程此刻量到的 JAX 設定。兩種設定各只真算一次，換回去拿回原來那一份。"""
+    from aosr import runtime
+
+    calls: list[tuple[str | None, bool]] = []
+
+    def identity(*, capabilities: object) -> str:
+        calls.append(runtime.jax_settings())
+        return f"phys-v1:{runtime.jax_settings()}"
+
+    remembered = _memoize(identity)
+    setting = _Setting(value="capabilities")
+    monkeypatch.setattr(runtime, "jax_settings", lambda **_: ("cpu", False))
+    cold = remembered(capabilities=setting)
+    monkeypatch.setattr(runtime, "jax_settings", lambda **_: ("cpu", True))
+    configured = remembered(capabilities=setting)
+    assert cold != configured and remembered(capabilities=setting) == configured
+    monkeypatch.setattr(runtime, "jax_settings", lambda **_: ("cpu", False))
+    assert remembered(capabilities=setting) == cold
+    assert calls == [("cpu", False), ("cpu", True)]
