@@ -483,9 +483,10 @@ def test_applying_the_panel_only_adds_and_removes_what_was_ticked_and_keeps_the_
 
 
 def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path, browser: Browser) -> None:
-    """加一種材料只加到貼得了的那一面：前牆一區（48K 加不貼）與地板一區（只有不貼）一起選，48K 是第三種狀態；把它勾上，
-    地板那一區還是不會有（地板貼不了），小框照實講；套用後地板的清單不變。右欄清單卡也一樣：前牆、地板兩區清單相同時是一張卡，
-    「加別種材料」列這兩面各自貼得了的（玻璃棉、地毯都有），加 24K 只加到前牆那一區。"""
+    """加一種材料只加到貼得了的那一面，而且勾得上也拿得掉（複查 r2 第二件）：前牆一區（48K 加不貼）與地板一區（只有不貼）一起選。
+    48K 地板貼不了，不算進「幾區有」：貼得了的那一區有，就是勾著，旁邊講有一區貼不了；點一下拿掉、再點一下勾回來，
+    每一下都照使用者點的畫，不會卡在第三種狀態。拿掉後套用：前牆那一區沒有 48K，地板不變。
+    右欄清單卡也一樣：兩區清單相同時是一張卡，「加別種材料」列這兩面各自貼得了的，加 24K 只加到前牆那一區，底下那一句照實講幾區。"""
     _prepare(tmp_path, _design({"yL": {"auto1": {"mode": "search", "allowed": ONLY_48K}}, "floor": {"auto1": {"mode": "search", "allowed": ["none"]}}}))
     state = "box => box.indeterminate ? 'some' : box.checked ? 'all' : 'none'"
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -493,17 +494,18 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         _open_overview(page)
         _click_zone(page, "yL/auto1")
         _click_zone(page, "floor/auto1")
-        assert page.locator("#zone-panel-allow-glass_wool_48k").evaluate(state) == "some"
-        page.locator("#zone-panel-allow-glass_wool_48k").click()
-        assert page.locator("#zone-panel-allow-glass_wool_48k").evaluate(state) == "some"
-        expect(page.locator("#zone-panel-form label[data-choice=glass_wool_48k]")).to_contain_text("選中的 2 區裡 1 區有；其餘的區那一面貼不了這一種，不會加")
+        wool = page.locator("#zone-panel-allow-glass_wool_48k")
+        assert wool.evaluate(state) == "all"
+        expect(page.locator("#zone-panel-form label[data-choice=glass_wool_48k]")).to_contain_text("選中的 2 區裡 1 區那一面貼不了這一種，不會加")
+        seen = []
+        for _ in range(3):
+            wool.click()
+            seen.append(wool.evaluate(state))
+        assert seen == ["none", "all", "none"]
         _apply(page)
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ONLY_48K, "floor/auto1": ["none"]}
-        # 清單卡：把前牆那一區的 48K 拿掉，兩區清單相同（只有不貼）、併成一張卡。
-        page.locator("#zone-list-check-glass_wool_48k").click()
-        _settled(page)
-        expect(page.locator("#zone-page .zv-list")).to_have_count(1)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ["none"], "floor/auto1": ["none"]}
+        # 清單卡：兩區清單相同（只有不貼），是一張卡。
+        expect(page.locator("#zone-page .zv-list")).to_have_count(1)
         page.locator("#zone-list-add").click()
         offered = cast(list[str], page.locator("#zone-list-add-box label").evaluate_all("rows => rows.map(row => row.dataset.choice)"))
         assert "glass_wool_24k" in offered and FLOOR_ONLY in offered
@@ -511,6 +513,109 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         _settled(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"]}
         expect(page.locator("#zone-page .zv-list")).to_have_count(2)
+        expect(page.locator("#zone-page-note")).to_have_text("1 區的清單改成 不貼、24K 玻璃棉；另外 1 區那一面貼不了這一種，沒加")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_half_ticked_material_follows_each_click_and_can_be_taken_off(tmp_path: Path, browser: Browser) -> None:
+    """第三種狀態只給使用者還沒動過的勾：兩區一區有 24K、一區沒有，打開是第三種狀態；點一下勾上、再點一下拿掉，
+    拿掉後套用，兩區都沒有 24K。"""
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    state = "box => box.indeterminate ? 'some' : box.checked ? 'all' : 'none'"
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        _click_zone(page, "y0/auto1")
+        _click_zone(page, "y0/auto2")
+        wool = page.locator("#zone-panel-allow-glass_wool_24k")
+        assert wool.evaluate(state) == "some"
+        seen = []
+        for _ in range(2):
+            wool.click()
+            seen.append(wool.evaluate(state))
+        assert seen == ["all", "none"]
+        expect(page.locator("#zone-panel-form label[data-choice=glass_wool_24k]")).not_to_contain_text("選中的")
+        _apply(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "y0/auto2": ["glass_wool_48k", "glass_wool_96k", "none"]}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_an_open_add_box_stays_with_the_zones_it_was_opened_for_and_closes_when_they_join_another_card(tmp_path: Path, browser: Browser) -> None:
+    """複查 r2 第一件：「加別種材料」的框記的是哪幾區，不是第幾張卡。前牆五區 48K 加不貼、天花 z1 只有 48K、天花 auto1 三種棉加不貼：
+    在天花 z1 那張（第二張）開框、加「不貼」，它跟前牆一樣了、併進第一張——框關掉，不准跑到天花 auto1 那張，每一區的清單除了天花 z1 都不變。
+    同一組的區沒變時（在同一張卡上加了還是那幾區），框照樣開著。"""
+    front: dict[str, object] = dict.fromkeys(("z1", "z2", "z3", "auto1", "auto2"), {"mode": "search", "allowed": ONLY_48K})
+    _prepare(tmp_path, _design({"yL": front, "ceiling": {"z1": {"mode": "search", "allowed": ["glass_wool_48k"]}, "auto1": {"mode": "search", "allowed": WOOLS}}}))
+    cards = """() => [...document.querySelectorAll('#zone-page .zv-list')].map(card => ({id: card.id, zones: card.dataset.zones.split(' ').sort().join(' '),
+        open: Boolean(card.querySelector('.zv-add'))}))"""
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        assert page.locator("#zone-list-2").get_attribute("data-zones") == "ceiling/z1"
+        page.locator("#zone-list-2-add").click()
+        expect(page.locator("#zone-list-2-add-box")).to_be_visible()
+        page.locator("#zone-list-2-add-none").click()
+        _settled(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "ceiling/z1": ONLY_48K}
+        shown = cast(list[dict[str, object]], page.evaluate(cards))
+        assert [card["zones"] for card in shown] == [" ".join(sorted([*FRONT, "ceiling/z1"])), "ceiling/auto1"]
+        assert [card["open"] for card in shown] == [False, False]
+        # 同一張卡上加一種、那幾區沒變：框還開著，再加一種也寫進同樣那幾區。
+        page.locator("#zone-list-2-add").click()
+        page.locator("#zone-list-2-check-glass_wool_96k").click()
+        _settled(page)
+        expect(page.locator("#zone-list-2-add-box")).to_be_visible()
+        page.locator("#zone-list-2-add-glass_wool_96k").click()
+        _settled(page)
+        expect(page.locator("#zone-list-2-add-box")).to_be_visible()
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "ceiling/z1": ONLY_48K, "ceiling/auto1": ["glass_wool_48k", "glass_wool_24k", "none", "glass_wool_96k"]}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_changing_only_the_deepest_keeps_a_code_this_face_cannot_take_in_the_list(tmp_path: Path, browser: Browser) -> None:
+    """守門題（複查 r2 植錯 M2）：前牆一區的清單裡有一筆這一面貼不了的（只有地板能用的那一筆）。只改最深就套用：清單原封不動。"""
+    on_wall = ["glass_wool_48k", FLOOR_ONLY, "none"]
+    _prepare(tmp_path, _design({"yL": {"auto1": {"mode": "search", "allowed": on_wall}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/auto1")
+        page.locator("#zone-panel-depth").fill("9")
+        _apply(page)
+        assert page.evaluate("() => zoneDesign.zones.yL.auto1") == {"mode": "search", "allowed": on_wall, "max_depth_m": 0.09}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_two_zones_pasted_with_different_materials_keep_their_own_when_picked_together_and_applied(tmp_path: Path, browser: Browser) -> None:
+    """守門題（複查 r2 植錯 M3）：兩區指定貼的是材料庫裡不同的兩筆。一起選：下拉停在「照現在貼的，不換」，不帶出哪一筆；
+    什麼都不動就套用，兩區貼的都不變（第一區的材料不准被貼到第二區）；再一起選、按取消，也不變。"""
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    pasted = """() => ['yL/z1', 'ceiling/z2'].map(id => { const [wall, key] = id.split('/');
+        return JSON.stringify(scheme.scene.surface_zones_by_wall[wall].find(zone => zone.id === key).material); })"""
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        options = cast(list[str], page.evaluate("() => libraryEntries('fixed').filter(entry => usableHere(entry, 'yL') && usableHere(entry, 'ceiling')).map(entry => entry.id)"))
+        assert len(options) >= 2
+        for zone, material in (("yL/z1", options[0]), ("ceiling/z2", options[1])):
+            _click_zone(page, zone)
+            page.locator("#zone-panel-mode-fixed").check()
+            page.locator("#zone-panel-material").select_option(material)
+            _apply(page)
+        before = cast(list[str], page.evaluate(pasted))
+        assert before[0] != before[1]
+        _click_zone(page, "yL/z1")
+        _click_zone(page, "ceiling/z2")
+        expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
+        expect(page.locator("#zone-panel-material")).to_have_value("")
+        _apply(page)
+        assert cast(list[str], page.evaluate(pasted)) == before
+        _click_zone(page, "yL/z1")
+        _click_zone(page, "ceiling/z2")
+        page.locator("#zone-panel-cancel").click()
+        assert cast(list[str], page.evaluate(pasted)) == before
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -542,12 +647,17 @@ def test_the_front_wall_is_set_to_48k_only_and_no_zone_on_another_face_changes(t
         page = watched.page
         _open_overview(page)
         before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        rule = page.locator("#zone-rule").get_attribute("data-key")
+        expect(page.locator("#zone-special")).to_have_attribute("data-count", "4")
         page.locator("#zone-whole-yL").click()
         _pick_search(page)
         page.locator("#zone-panel-allow-glass_wool_24k").uncheck()
         page.locator("#zone-panel-allow-glass_wool_96k").uncheck()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, **dict.fromkeys(FRONT, ONLY_48K)}
+        # 守門（複查 r2 植錯 M1）：「其他牆面」那條規則還是同一份；另外指定只多了前牆原本跟著規則的那三區，別面沒有被算成另外指定。
+        assert rule is not None and page.locator("#zone-rule").get_attribute("data-key") == rule
+        expect(page.locator("#zone-special")).to_have_attribute("data-count", "7")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
