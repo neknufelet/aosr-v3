@@ -208,14 +208,15 @@ function selectedRing(rect) {
 function zoneShape(item, x, y, width, height) {
   const group = zoneGroup(item, "", {x, y, width, height});
   const cx = x + width / 2, cy = y + height / 2, small = Math.min(width, height) < 22;
+  // 選到的那一圈白框先畫、號碼與字後畫（#1199）：窄條區的號碼圈比區還寬，白框後畫會把號碼蓋掉。
+  const ring = selected.includes(item.id) ? [selectedRing({x, y, width, height})] : [];
   if (item.shown === "opening") {
-    group.append(svg("rect", {class: "zv-hatch", x, y, width, height}), svg("rect", {class: "zv-tagbg", x: cx - 29, y: cy - 15, width: 58, height: 30, rx: 3}),
+    group.append(svg("rect", {class: "zv-hatch", x, y, width, height}), ...ring, svg("rect", {class: "zv-tagbg", x: cx - 29, y: cy - 15, width: 58, height: 30, rx: 3}),
       badge(cx - 13, cy, item.label.number, false), svg("text", {class: "zv-open-label", x: cx + 12, y: cy + 6}, item.special));
   } else if (item.shown === "fixed" && width >= 44 && height >= 44) {
-    group.append(badge(x + 16, y + 16, item.label.number, false), fixedLabel(item, x, y, width, height));
-  } else group.append(badge(cx, cy, item.label.number, small));
+    group.append(...ring, badge(x + 16, y + 16, item.label.number, false), fixedLabel(item, x, y, width, height));
+  } else group.append(...ring, badge(cx, cy, item.label.number, small));
   if (item.apart) group.append(apartFrame({x, y, width, height}));
-  if (selected.includes(item.id)) group.append(selectedRing({x, y, width, height}));
   return group;
 }
 // 標題旁的小平面圖：方向同地板圖，這面牆那一邊描粗。
@@ -264,6 +265,8 @@ function drawWall(map, role, wall, items, ox, oy, scale, miniSize) {
   title.append(svg("tspan", {class: "zv-quiet", dx: 10}, `面向它站：左手邊是${wallNames[views[wall].left]}，右手邊是${wallNames[views[wall].right]}`));
   face.append(title);
   map.append(face);
+  // 「選整面」那一顆放哪（#1199）：這面牆名字那一行的最右邊（疊在圖上的一顆真的按鈕，見 wholeButtons）。
+  return {wall, right: ox + width * scale, top: oy - 27};
 }
 // 地板圖與天花圖（同一個方向：上邊前牆、左邊左牆，從上往下看）。point(x, y)：房間座標 → 小圖上的 px。
 function tilePlan(roles, room, px, py, scale) {
@@ -348,15 +351,16 @@ function drawMap(faces, roles, room) {
   defs.append(pattern); map.append(defs);
   const miniSize = [15, 15 * sideWidth / frontWidth];
   // 樣稿的排法：上排前牆、右牆，下排後牆、左牆（前後同寬排同一欄）。
+  const whole = [];
   for (const [role, ox, oy] of [["front", col1, row1], ["right", col2, row1], ["back", col1, row2], ["left", col2, row2]]) {
-    drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize);
+    whole.push(drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize));
   }
   const floorX = 440, ceilingX = floorX + tileWidth + 92;
   const allStill = faces.ceiling.every(item => item.shown === "still");
   drawTile(map, "floor", faces.floor, tilePlan(roles, room, floorX, tileY, tileScale), roles, room, faces, "從上往下看", null);
   drawTile(map, "ceiling", faces.ceiling, tilePlan(roles, room, ceilingX, tileY, tileScale), roles, room, faces, "方向同地板圖",
     allStill && faces.ceiling.length === 1 ? ["保留原樣", originalFace("ceiling")] : null);
-  return {map, legendTop: tileY - 10};
+  return {map, legendTop: tileY - 10, whole};
 }
 function legend(top) {
   const box = el("div", "zv-legend"); box.style.top = `${top}px`;
@@ -381,10 +385,22 @@ function select(ids) {
   draft = startingDraft();
   renderZoneOverview();
 }
-function toggleSelected(id) {
-  const next = selected.includes(id) ? selected.filter(other => other !== id) : [...selected, id];
+// 換成選這幾區：面板上已經自己點過選項就留著（只換選了哪幾區），沒點過就照新選的那幾區重新起頭。
+function pick(next) {
   if (draftTouched && next.length) { selected = next; renderZoneOverview(); return; }
   select(next);
+}
+function toggleSelected(id) { pick(selected.includes(id) ? selected.filter(other => other !== id) : [...selected, id]); }
+// 一面牆的「整面」（#1199）：那一面全部的區扣掉門、窗（跟推「其他牆面」時扣的一樣），照號碼排。
+function wholeFace(wall) { return view.faces[wall].filter(item => !item.opening).map(item => item.id); }
+// 四面牆名字旁各一顆「選整面」：一次選那一面全部的區（整面都是門窗就沒有這一顆）。
+function wholeButtons(places) {
+  return places.filter(place => wholeFace(place.wall).length).map(place => {
+    const item = button("zv-whole", "選整面", `zone-whole-${place.wall}`, () => pick(wholeFace(place.wall)));
+    item.setAttribute("aria-label", `${wallNames[place.wall]}選整面`);
+    item.style.left = `${place.right.toFixed(1)}px`; item.style.top = `${place.top.toFixed(1)}px`;
+    return item;
+  });
 }
 // 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
 function listForWall(wall, list) {
@@ -550,22 +566,48 @@ function materialShow(entry, wall) {
   show.append(head, ...curveBlock(entry));
   return show;
 }
+// 「目前」小標（#1199）：選到的區現在是這一種做法的，掛在那一項旁邊（講的是現在存著的樣子，面板上點別項它不跟著跑）。
+// 選到的全是同一種：指定貼的寫現在貼的是什麼，其餘兩種不必多寫；做法不只一種：每一項各寫是哪幾區。
+function nowMark(items, mode) {
+  const here = items.filter(item => zoneMethodMode(item.method) === mode);
+  if (!here.length) return [];
+  const tag = el("span", "zv-now-tag", "目前"); tag.id = `zone-panel-now-${mode}`; tag.dataset.zones = here.map(item => item.id).join(" ");
+  const what = el("span", "zv-now-what");
+  if (here.length < items.length) what.append(zonesBrief(here));
+  else if (mode === "fixed") what.append(new Set(here.map(item => item.method)).size === 1 ? vprWords(pastedWords(here[0])) : "各區貼的不一樣");
+  const line = el("div", "zv-now"); line.append(tag, what);
+  return [line];
+}
 function panelCard() {
   const items = chosenItems(), rule = view.inferred.rule;
   const card = el("div", "zv-edit"); card.id = "zone-panel";
   card.dataset.zones = selected.join(" ");
-  card.append(el("h2", null, `已選 ${items.length} 區`));
-  for (const item of items) {
+  const walls = [...new Set(items.map(item => item.wall))];
+  // 選到的都在同一面牆：剛好是那一面整面（兩區以上）就只寫一行，一區一行的收在摺疊裡；不是整面就給一條「改選整面」。
+  const face = walls.length === 1 && view.roles && WALL_ORDER.some(role => view.roles[role] === walls[0]) ? wholeFace(walls[0]) : [];
+  const isWhole = face.length > 1 && face.length === items.length && face.every(id => selected.includes(id));
+  const top = el("div", "zv-ehead"); top.append(el("h2", null, `已選 ${items.length} 區`));
+  if (face.length && !isWhole && !(face.length === 1 && selected.length === 1 && selected[0] === face[0])) {
+    top.append(button("zv-link", `改選${wallNames[walls[0]]}整面（${face.length} 區）`, "zone-panel-whole", () => pick(face)));
+  }
+  card.append(top);
+  const chips = items.map(item => {
     const chip = el("div", "zv-chip"); chip.dataset.zone = item.id;
     chip.append(zoneWhere(item), button("zv-link zv-x", "不選這區", `zone-panel-drop-${item.wall}-${item.key}`, () => toggleSelected(item.id)));
-    card.append(chip);
-  }
-  card.append(el("div", "zv-addmore", "再點圖上別區可以一起改。"));
+    return chip;
+  });
+  if (isWhole) {
+    const line = el("div", "zv-chip zv-face-line"); line.id = "zone-panel-face";
+    line.append(`${wallNames[walls[0]]}整面 `, ...[...items].sort((left, right) => left.label.number - right.label.number).map(item => numberBadge(item.label.number)));
+    const each = fold("zone-panel-zones", "看每一區、拿掉幾區"); each.classList.add("zv-each");
+    each.append(...chips);
+    card.append(line, each);
+  } else card.append(...chips);
+  card.append(el("div", "zv-addmore", "再點圖上別區可以一起改；牆名旁「選整面」一次選一整面牆。"));
   // 「＝其他牆面」：選到的都是算進規則的牆區時，標在跟規則同一種做法的那一項旁邊；選它＝這幾區不再另外指定。
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
   const sameAs = rule && items.every(item => ruled.has(item.id)) ? rule.mode : null;
   const allPasted = items.every(item => item.pasted);
-  const walls = [...new Set(items.map(item => item.wall))];
   const choose = (mode, materialId = "") => { draft = {mode, materialId}; draftTouched = true; renderZoneOverview(); };
   for (const mode of ["fixed", "keep_original", "search"]) {
     // 一項一列：圓鈕、字（點字也算點圓鈕）、色塊；材料下拉放在字的下面、不包在字的標籤裡（包進去的話點下拉會被當成點圓鈕）。
@@ -582,6 +624,7 @@ function panelCard() {
     const keepsRule = Boolean(rule) && draft?.materialId === "" && items.every(item => item.method === rule.key);
     const sameHere = sameAs === mode && (mode !== "fixed" || draft?.mode !== "fixed" || (ruleMaterial !== null && draft.materialId === ruleMaterial) || keepsRule);
     if (sameHere) { const same = el("span", "zv-same", "＝其他牆面"); same.id = "zone-panel-same"; same.dataset.mode = mode; words.append(same); }
+    body.append(...nowMark(items, mode));
     if (mode === "fixed") {
       const material = el("select", "zv-pick zv-pick-material"); material.id = "zone-panel-material"; material.setAttribute("aria-label", "指定貼哪一種");
       const none = el("option", null, allPasted ? "照現在貼的，不換" : "選要貼哪一種"); none.value = ""; material.append(none);
@@ -608,7 +651,8 @@ function panelCard() {
   const foot = el("div", "zv-editfoot");
   const apply = button("zv-btn zv-main-btn", `套用到選中的 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
   apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !allPasted);
-  foot.append(apply, button("zv-btn", "取消", "zone-panel-cancel", () => select([])));
+  const unchanged = el("span", "zv-cancel-note", "取消＝不改"); unchanged.id = "zone-panel-cancel-note";
+  foot.append(apply, button("zv-btn", "取消", "zone-panel-cancel", () => select([])), unchanged);
   card.append(foot);
   return card;
 }
@@ -965,13 +1009,13 @@ function overviewParts() {
   for (const item of byId.values()) { item.apart = apart.has(item.id); item.named = item.wall === "floor" || item.wall === "ceiling" || item.apart; }
   const body = el("div", "zv-main");
   const mapWrap = el("div", "zv-mapwrap");
-  const {map, legendTop} = drawMap(faces, roles, room);
-  mapWrap.append(map, legend(legendTop));
+  const {map, legendTop, whole} = drawMap(faces, roles, room);
+  mapWrap.append(map, legend(legendTop), ...wholeButtons(whole));
   const side = el("div", "zv-side");
   if (selected.length) side.append(panelCard(), briefRules(), listCard(true));
   else {
     const slot = el("div", "zv-slot"); slot.id = "zone-slot";
-    slot.append(el("b", null, "點圖上任何一塊，這裡就出現它的選項。"), el("br"), "牆、門、窗、天花、地板都能點；再點別塊可以一起改。");
+    slot.append(el("b", null, "點圖上任何一塊，這裡就出現它的選項。"), el("br"), "牆、門、窗、天花、地板都能點；再點別塊可以一起改；牆名旁「選整面」一次選一整面牆。");
     const rules = el("div", "zv-rules");
     rules.append(ruleRow(), specialRow(), othersRow());
     side.append(slot, rules, listCard(false), detailTable());

@@ -88,7 +88,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-what{font-size:14.5px;margin-top:2px}
 #zone-page .zv-acts{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:9px;padding-left:16px}
 #zone-page .zv-num{display:inline-block;width:19px;height:19px;line-height:17px;border:1.3px solid var(--ink);border-radius:50%;text-align:center;
-  font-size:11.5px;font-weight:600;vertical-align:1px;background:#fff}
+  font-size:12px;font-weight:600;vertical-align:1px;background:#fff}
 #zone-page select.zv-pick{font:inherit;font-size:15px;color:var(--ink);border:1.5px solid var(--ink);border-radius:7px;background-color:#fff;
   padding:3px 10px 3px 12px;max-width:100%}
 #zone-page select.zv-pick.search{background-color:var(--search-soft)}
@@ -198,3 +198,14 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-head .zv-unsaved + .zv-link{margin-left:0}
 /* 底列黏在視窗下緣：瀏覽器自己把東西捲進畫面時（跳到某一格、Tab 走到某一格）讓出底列那一段，不讓它停在底列底下 */
 html.zone-page-open{scroll-padding-bottom:112px}
+/* #1199：牆名旁「選整面」、小框標題那一行、整面一行、「目前」小標、取消鈕旁那一句 */
+#zone-page button.zv-whole{position:absolute;transform:translateX(-100%);border:1.5px solid var(--ink);border-radius:7px;background:#fff;color:var(--ink);
+  font:inherit;font-size:12.5px;font-weight:600;line-height:19px;padding:0 7px;white-space:nowrap;cursor:pointer}
+#zone-page .zv-ehead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+#zone-page .zv-ehead h2{margin:0 0 5px}
+#zone-page .zv-face-line{flex-wrap:wrap;gap:3px;font-weight:600}
+#zone-page .zv-each{font-size:13px;margin:0 0 2px}
+#zone-page .zv-now{margin-top:1px;font-size:12.5px;line-height:1.5;color:var(--soft)}
+#zone-page .zv-now-tag{display:inline-block;margin-right:6px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12px;line-height:17px;
+  color:var(--ink);background:#fff;white-space:nowrap}
+#zone-page .zv-cancel-note{font-size:12.5px;color:var(--soft)}
