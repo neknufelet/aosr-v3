@@ -24,11 +24,14 @@ import aosr.gui.gradient_follow as follow_module
 from aosr.gui.gradient_follow import ADOPTED_FILE, RIGID_BASELINE_WARNING, GradientFollow, adopted_name, descent_steps
 from aosr.gui.jobs import JobManager
 from aosr.gui.gradient_plan import GradientRequest
+from aosr.gui.material_editor import USER_LIBRARY_NAME, user_library_path
+from aosr.materials import library
 from aosr.gui.zone_design import read_design, write_design
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, Record, _data, _finish, _folder, _jobs, _scheme
+from tests.engine.test_material_gradient_library import _ENTRY, FIXED, USER, _fixed, _optimizable
 
 DESCENT = folder_files.LEDGER_FILE
 
@@ -314,3 +317,102 @@ def test_rigid_mount_without_an_original_scheme_is_warned(tmp_path: Path, mount:
     detail = _follow(data_dir, launcher).detail(str(view["job_id"]))
     assert (detail["baseline_warning"] == RIGID_BASELINE_WARNING) is warned
     assert (detail["baseline_warning"] is None) is not warned
+
+
+# ---- #1188 第 4 條：舊那一場的材料名照開跑時的材料庫快照，不照現在的材料庫 ----
+
+OLD_WOOL, OLD_PANEL = "60K 岩棉（自填）", "固定吸音板（自填）"
+NEW_WOOL, NEW_PANEL = "60K 岩棉 100 mm（改過）", "固定吸音板 厚版（改過）"
+BUILTIN_FIXED = "glass_wool_48k_50mm_gap50"
+
+
+def _renamed() -> tuple[library.LibraryEntry, ...]:
+    """同兩個代號，開跑之後改了名、固定那一筆連阻抗也改了（現在的使用者材料庫）。"""
+    panel = _ENTRY.validate_python(_fixed().model_dump(mode="json") | {
+        "label": NEW_PANEL, "material": {"kind": "constant_impedance", "impedance_pa_s_m": 6000.0}})
+    return (_optimizable(label=NEW_WOOL), cast(library.FixedEntry, panel))
+
+
+def _tried_job(data_dir: Path, launcher: FakeLauncher, targets: tuple[str, ...]) -> str:
+    """一場搜尋（開跑時使用者材料庫是空的，替身閘門才過得了）加一輪換樣板帳本：x0@r0_c0 各試一次 ``targets``。"""
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    folder = _folder(data_dir, view, None)
+    rows: list[Record] = [{"ledger_version": "v3"}]
+    rows.extend({"phase": "quick_score", "round": 0, "candidate": f"x0@r0_c0->{target}", "value": 3.0 + index}
+                for index, target in enumerate(targets))
+    rows.append({"phase": "template_decision", "round": 0, "value": 2.9, "stop_reason": "沒有超過改善門檻",
+                 "decision": {"baseline_value": 2.9, "accepted": None}})
+    (folder / folder_files.TEMPLATES_FILE).write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    return str(view["job_id"])
+
+
+def _tried_labels(detail: Record) -> list[str]:
+    (only,) = cast(list[Record], detail["template_tries"])
+    return [str(item["label"]) for item in cast(list[Record], only["tries"])]
+
+
+def test_template_tries_name_materials_from_the_library_snapshot_of_that_run(tmp_path: Path) -> None:
+    """抓 #1188 第 4 條：同一個材料代號開跑之後改了名，舊那一場「換樣板試過什麼」印成新名字（配的是舊分數）。
+    工作資料夾裡的材料庫快照寫舊名、使用者材料庫同代號改新名：可調家族與固定候選兩條路都要給舊名，也不該多講那一句。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    job_id = _tried_job(data_dir, launcher, (USER, f"fixed:{FIXED}", f"fixed:{BUILTIN_FIXED}"))
+    snapshot = data_dir / "gradient" / job_id / USER_LIBRARY_NAME
+    snapshot.write_text(library.dump_user_library((_optimizable(), _fixed())), encoding="utf-8")
+    user_library_path(data_dir).write_text(library.dump_user_library(_renamed()), encoding="utf-8")
+    detail = _follow(data_dir, launcher).detail(job_id)
+    builtin = next(entry.label for entry in library.builtin_entries() if entry.id == BUILTIN_FIXED)
+    assert _tried_labels(detail) == [f"{OLD_WOOL}（可調）", f"{OLD_PANEL}（固定，整塊選或不選）",
+                                     f"{builtin}（固定，整塊選或不選）"]
+    assert detail["template_names_note"] is None
+
+
+@pytest.mark.parametrize(("snapshot_text", "reason"), [(None, "沒有存下來"), ("{壞掉的 JSON", "讀不進來")])
+def test_template_tries_without_a_usable_snapshot_say_the_names_are_todays(tmp_path: Path, snapshot_text: str | None,
+                                                                          reason: str) -> None:
+    """抓「開跑時的材料庫沒存（或讀不進來）、帳本裡卻有內建查不到的代號」時默默印現在的名字：名字只能照現在的
+    材料庫，要明講是哪幾筆、為什麼；現在的材料庫也查不到的照印代號、也點名。只有內建材料的那一場不該多講。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    job_id = _tried_job(data_dir, launcher, (USER, f"fixed:{FIXED}", "fixed:gone_panel", f"fixed:{BUILTIN_FIXED}", "none"))
+    if snapshot_text is not None:
+        (data_dir / "gradient" / job_id / USER_LIBRARY_NAME).write_text(snapshot_text, encoding="utf-8")
+    user_library_path(data_dir).write_text(library.dump_user_library(_renamed()), encoding="utf-8")
+    follow = _follow(data_dir, launcher)
+    detail = follow.detail(job_id)
+    assert _tried_labels(detail)[:3] == [f"{NEW_WOOL}（可調）", f"{NEW_PANEL}（固定，整塊選或不選）",
+                                         "gone_panel（固定，整塊選或不選）"]
+    note = cast(str, detail["template_names_note"])
+    assert reason in note and f"「{NEW_WOOL}」「{NEW_PANEL}」的名字照現在的材料庫" in note
+    assert "gone_panel" in note and "照印代號" in note
+    # 對照：同一種情形但帳本裡只有內建材料與「不貼」——內建的名字不靠快照，不講那一句。
+    user_library_path(data_dir).unlink()
+    launcher.active.clear()
+    plain = _tried_job(data_dir, launcher, (f"fixed:{BUILTIN_FIXED}", "none"))
+    if snapshot_text is not None:
+        (data_dir / "gradient" / plain / USER_LIBRARY_NAME).write_text(snapshot_text, encoding="utf-8")
+    user_library_path(data_dir).write_text(library.dump_user_library(_renamed()), encoding="utf-8")
+    assert follow.detail(plain)["template_names_note"] is None
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_baseline_warning_before_adoption_matches_the_library_snapshot_of_that_run(tmp_path: Path, broken: bool) -> None:
+    """抓還沒存成方案時，「結果頁會把哪些區當成沒動」拿現在的材料庫去比那一場的方案快照：開跑之後同代號的固定材料
+    改了阻抗改了名，逐位比不到，那一句就默默不見（那一區照樣會被當成沒動）。照那一場的材料庫快照比、印當時的名字。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    job_dir = data_dir / "gradient" / str(view["job_id"])
+    document = json.loads((job_dir / "scheme.json").read_text(encoding="utf-8"))
+    zone = next(item for item in document["scene"]["surface_zones_by_wall"]["x0"] if item["id"] == "r0_c1")
+    zone["material"] = _fixed().surface_material().model_dump(mode="json")
+    (job_dir / "scheme.json").write_text(Scheme.model_validate(document).model_dump_json(), encoding="utf-8")
+    (job_dir / USER_LIBRARY_NAME).write_text(library.dump_user_library((_fixed(),)), encoding="utf-8")
+    user_library_path(data_dir).write_text(library.dump_user_library(_renamed()), encoding="utf-8")
+    if broken:
+        # 快照讀不進來：退回現在的材料庫比（只比內建的話，使用者材料換上去的區就不點名了）；這裡現在那一份還沒改。
+        (job_dir / USER_LIBRARY_NAME).write_text("{壞掉的 JSON", encoding="utf-8")
+        user_library_path(data_dir).write_text(library.dump_user_library((_fixed(),)), encoding="utf-8")
+    warning = _follow(data_dir, launcher).detail(str(view["job_id"]))["baseline_warning"]
+    assert isinstance(warning, str) and f"「{OLD_PANEL}」" in warning and "r0_c1" in warning
+    assert NEW_PANEL not in warning

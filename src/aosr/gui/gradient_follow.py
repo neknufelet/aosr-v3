@@ -17,7 +17,8 @@
 固定的材料，指它一樣當成沒動，還會把貼牆層拆得回的區也變成沒動）。
 
 - 換樣板試過什麼（#1128）：每一輪每個（區, 換成什麼）的快篩合分、現狀、換上了哪一個（``template_tries``），
-  整塊試過、沒選的固定材料候選看得到差多少。
+  整塊試過、沒選的固定材料候選看得到差多少。材料名照那一跑開跑時的材料庫（工作資料夾裡的快照，#1188），不照現在的：
+  同一個代號之後改了名，舊那一跑的分數還是配當時的名字；快照查不到的代號才照現在的材料庫，並明講（``template_names_note``）。
 """
 from __future__ import annotations
 
@@ -42,10 +43,10 @@ from aosr.gradient.folder_files import LEDGER_FILE, TEMPLATES_FILE
 from aosr.gui.gradient_jobs import JOB_ID, ActionRefused, GradientJobs
 from aosr.gui.gradient_plan import PlanRefused
 from aosr.gui.jobs import JobManager
-from aosr.gui.material_editor import user_library_path
+from aosr.gui.material_editor import USER_LIBRARY_NAME, user_library_path
 from aosr.gui.zone_design import DesignSettings, read_design, write_design
 from aosr.gui.zone_result import RIGID_BASELINE_WARNING as RIGID_BASELINE_WARNING, baseline_warning
-from aosr.materials.library import LibraryEntry, builtin_entries, full_library
+from aosr.materials.library import LibraryEntry, builtin_entries, full_library, load_user_library
 from aosr.reporting.scheme import Scheme
 
 PAGE: Final = Path(__file__).resolve().parent / "static" / "gradient.html"
@@ -62,6 +63,8 @@ TUNABLE_WORDS: Final = "（可調）"
 TUNABLE_MARK: Final = "可調"
 NAME_ROOM: Final = 180  # 方案代號上限 200 字，留給「-search-」與 8 碼
 ADOPTED_WORD: Final = "search"
+SNAPSHOT_ABSENT: Final = "沒有存下來"
+SNAPSHOT_UNREADABLE: Final = "存了但讀不進來"
 
 
 class Adoption(BaseModel):
@@ -153,6 +156,29 @@ def template_tries(folder: Path, labels: Mapping[str, str]) -> list[dict[str, ob
     return found
 
 
+def _tried_ids(rounds: Sequence[Mapping[str, object]]) -> list[str]:
+    """:func:`template_tries` 那幾輪試過的材料代號，照表上出現的先後、不重複（「不貼」不算、固定候選去掉前綴）。"""
+    found: dict[str, None] = {}
+    for item in rounds:
+        tries = item.get("tries")
+        for tried in tries if isinstance(tries, list) else ():
+            target = str(tried["target"])
+            if target != NONE_TARGET:
+                found.setdefault(target.removeprefix(FIXED_TARGET_PREFIX))
+    return list(found)
+
+
+def names_note(reason: str, todays: Sequence[str], unknown: Sequence[str]) -> str:
+    """快照查不到名字時表上要講的那一句（#1188）：哪幾筆照現在的材料庫、哪幾筆連現在也查不到。"""
+    parts = [f"這一場開跑時的材料庫{reason}："]
+    if todays:
+        parts.append("".join(f"「{label}」" for label in todays) + "的名字照現在的材料庫，不一定是開跑當時的名字"
+                     "（分數是照當時那一份材料算的）。")
+    if unknown:
+        parts.append(f"代號 {'、'.join(unknown)} 現在的材料庫也查不到，照印代號。")
+    return "".join(parts)
+
+
 def _lines(path: Path, keep: Callable[[str], bool]) -> list[str]:
     if not path.is_file():
         return []
@@ -195,9 +221,39 @@ class GradientFollow:
         except (OSError, ValueError, ValidationError):
             return builtin_entries()
 
+    def _started_library(self, job_id: str) -> tuple[tuple[LibraryEntry, ...], str | None]:
+        """這一跑開跑時的材料庫（#1188）：內建＋工作資料夾裡的使用者材料庫快照（開跑時寫的那一份，``gradient_jobs.start``），
+        與快照缺了什麼的一句（齊全是 None）。沒有快照就只有內建：開跑時使用者材料庫是空的，或是搜尋還不讀使用者材料庫
+        的舊場次（#1099 之前），兩種都沒有使用者材料參與。內建材料的名字來自現在的程式，快照只管使用者材料。"""
+        path = self._job_dir(job_id) / USER_LIBRARY_NAME
+        if not path.is_file():
+            return builtin_entries(), SNAPSHOT_ABSENT
+        try:
+            return (*builtin_entries(), *load_user_library(path)), None
+        except (OSError, ValueError):
+            return builtin_entries(), SNAPSHOT_UNREADABLE
+
+    def _tries(self, job_id: str, folder: Path) -> tuple[list[dict[str, object]], str | None]:
+        """換樣板試過什麼，名字照開跑時的材料庫；那一份查不到的代號（快照沒存、讀不進來、或裡面沒有這一筆）才照現在的
+        材料庫補，並回一句明講（:func:`names_note`）——不默默換成現在的名字。"""
+        started, problem = self._started_library(job_id)
+        labels = {entry.id: entry.label for entry in started}
+        rounds = template_tries(folder, labels)
+        missing = [name for name in _tried_ids(rounds) if name not in labels]
+        if not missing:
+            return rounds, None
+        current = {entry.id: entry.label for entry in self._library()}
+        todays = {name: current[name] for name in missing if name in current}
+        note = names_note(problem or "裡沒有這幾筆", list(todays.values()), [name for name in missing if name not in todays])
+        return template_tries(folder, {**todays, **labels}), note
+
     def _baseline_warning(self, job_id: str, view: dict[str, object], adoption: Adoption | None) -> str | None:
         """結果頁會把哪些區當成沒動（:func:`aosr.gui.zone_result.baseline_warning`）：照這一跑開跑時的方案與設計設定；
-        存成方案之後照那份方案現在的設計設定（使用者事後替它指了原方案，這一句就不再出）。"""
+        存成方案之後照那份方案現在的設計設定（使用者事後替它指了原方案，這一句就不再出）。
+
+        材料庫跟著方案走（#1188）：還沒存成方案比的是開跑時的方案快照，用開跑時的材料庫（同代號之後改了，逐位就比不到、
+        那一句會默默不見），快照讀不進來才退回現在的材料庫（只比內建會少點名）；存成方案之後用現在的材料庫，跟結果頁同一份
+        （``zone_result_routes._names``），兩頁講同一句。"""
         plan = view["plan"]
         request = plan.get("request") if isinstance(plan, dict) else None
         rigid = isinstance(request, dict) and request.get("mount") == MOUNT_RIGID
@@ -214,7 +270,9 @@ class GradientFollow:
             scheme = Scheme.model_validate_json(scheme_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return RIGID_BASELINE_WARNING if rigid and (design is None or design.original_scheme_id is None) else None
-        return baseline_warning(scheme, design, rigid=rigid, library=self._library())
+        started, problem = self._started_library(job_id)
+        library = started if adoption is None and problem != SNAPSHOT_UNREADABLE else self._library()
+        return baseline_warning(scheme, design, rigid=rigid, library=library)
 
     def detail(self, job_id: str) -> dict[str, object]:
         view = self.gradient.get(job_id)
@@ -229,12 +287,12 @@ class GradientFollow:
         adoption = self._adoption(job_id)
         if steps and isinstance(steps[-1], dict) and steps[-1].get("state") == "finished" and steps[-1].get("exit_code") != 0:
             failures = _lines(logs[-1], lambda line: FAILURE_MARK in line)
+        tries, names = ([], None) if folder is None else self._tries(job_id, Path(str(folder)))
         return {"job_id": job_id, "state": view["state"], "max_steps": view["max_steps"],
                 "descent_steps": None if folder is None else descent_steps(Path(str(folder))),
                 "notes": list(dict.fromkeys(notes)), "failures": failures,
                 "baseline_warning": self._baseline_warning(job_id, view, adoption),
-                "template_tries": [] if folder is None else template_tries(
-                    Path(str(folder)), {entry.id: entry.label for entry in self._library()}),
+                "template_tries": tries, "template_names_note": names,
                 "adopted": self._adoption_view(adoption)}
 
     def _started_run(self, name: str) -> str | None:

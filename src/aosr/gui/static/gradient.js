@@ -537,7 +537,7 @@ const TRY_SCALE_NOTE = "合分是搜尋自己的尺（越小越好），跟結�
   "表裡「比現狀」有重調的拿重調後比；沒進重調的只能拿快篩比，標「（快篩）」。";
 function score(value) { return value === null || value === undefined ? "—" : value.toFixed(4); }
 function signed(value) { return `${value >= 0 ? "+" : ""}${value.toFixed(4)}`; }
-function showTemplateTries(rounds, names) {
+function showTemplateTries(rounds, names, namesNote) {
   const box = byId("job-template-tries");
   box.hidden = !rounds.length;
   if (!rounds.length) { box.replaceChildren(); return; }
@@ -567,7 +567,9 @@ function showTemplateTries(rounds, names) {
     return el("div", {}, el("p", {text: `第 ${round.round} 輪：現狀 ${score(round.baseline)}；${outcome}`}),
       el("table", {}, el("thead", {}, head), body));
   });
-  box.replaceChildren(el("h3", {text: "換樣板試過什麼"}), ...lines, el("p", {class: "hint", text: TRY_SCALE_NOTE}),
+  // 名字照那一場開跑時的材料庫（#1188）；伺服器說有幾筆只能照現在的材料庫時，那一句印在表上面。
+  const named = namesNote ? [el("p", {class: "notice names-note", text: namesNote})] : [];
+  box.replaceChildren(el("h3", {text: "換樣板試過什麼"}), ...named, ...lines, el("p", {class: "hint", text: TRY_SCALE_NOTE}),
     el("details", {}, el("summary", {text: "每一輪全部候選的合分"}), ...tables));
 }
 
@@ -600,7 +602,7 @@ function showJob(job, detail, detailError) {
   byId("job-adopt").hidden = job.state !== "done" || Boolean(adopted);
   byId("job-endpoint-note").hidden = !job.endpoint;
   byId("job-endpoint-note").textContent = job.endpoint ? job.endpoint.baseline_note : "";
-  showTemplateTries(detail ? (detail.template_tries || []) : [], job.wall_names);
+  showTemplateTries(detail ? (detail.template_tries || []) : [], job.wall_names, detail ? detail.template_names_note : null);
   const warning = detail ? detail.baseline_warning : null;
   byId("job-baseline-warning").hidden = !warning;
   byId("job-baseline-warning").textContent = warning || "";

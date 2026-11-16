@@ -624,6 +624,40 @@ def test_template_tries_table_keeps_quick_and_retuned_apart_and_says_why_a_round
         expect(box).to_contain_text("第 2 輪沒開：換樣板求值到上限")
 
 
+def test_template_tries_say_when_a_name_comes_from_todays_library(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 4 條：那一場開跑時的材料庫沒存、帳本裡有內建查不到的代號時，表上的名字只能照現在的材料庫——
+    畫面要把伺服器那一句印在「換樣板試過什麼」裡（拿掉那一行就看不出名字可能不是當時的）；名字都對得上的那一場不印。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    job_id = str(view["job_id"])
+    folder = data_dir / "gradient" / job_id / "root" / ("f" * 32)
+    folder.mkdir(parents=True)
+    (folder / folder_files.PROJECT_FILE).write_text("{}", encoding="utf-8")
+
+    def tried(target: str) -> None:
+        rows = [{"ledger_version": "v3"},
+                {"phase": "quick_score", "round": 0, "candidate": f"x0@r0_c0->{target}", "value": 3.1},
+                {"phase": "template_decision", "round": 0, "value": 2.9358, "stop_reason": "沒有超過改善門檻",
+                 "decision": {"baseline_value": 2.9358, "accepted": None}}]
+        (folder / folder_files.TEMPLATES_FILE).write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    tried(_optimizable().id)
+    user_library_path(data_dir).write_text(library.dump_user_library((_optimizable(label="60K 岩棉（改過名）"),)),
+                                           encoding="utf-8")
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}&job={job_id}",
+                                                  fake_clock=True) as watched:
+        page = watched.page
+        note = page.locator("#job-template-tries p.names-note")
+        expect(note).to_contain_text("這一場開跑時的材料庫沒有存下來")
+        expect(note).to_contain_text("「60K 岩棉（改過名）」的名字照現在的材料庫")
+        expect(note).to_have_class("notice names-note")
+        tried("glass_wool_48k")
+        _tick(page)
+        expect(page.locator("#job-template-tries tbody td").nth(1)).to_contain_text("玻璃棉")
+        expect(note).to_have_count(0)
+
+
 def test_build_sends_the_options_on_the_form_and_lists_every_fixed_check(browser: Browser, tmp_path: Path) -> None:
     """#1128（#1127 審查第 8 條）：預覽之後改了開跑選項、沒再按預覽就按建替身，送出去的要是表單上現在那一份
     （搜尋真的要用的那一組起跑配置），不是舊預覽、也不是預設；建模進度列出開跑那一道固定材料核對每一次的數字。"""
