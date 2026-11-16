@@ -249,13 +249,16 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         assert _shown(page, "opening") == {"xL/door", "xL/window"}
         assert _dataset_zones(page, "#zone-result-search") == searching
         # 清單卡：管全部由程式最佳化的區，列規則那一份；清單不一樣的那一區另外數。
-        expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的每一區，都從這幾種裡選")
+        expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 15 區每一區各自最佳化，都從這幾種裡選")
         expect(page.locator("#zone-list-who")).to_have_text("現在管 15 區：沒另外指定的牆區、後牆 5 靠地板那條、天花 1 主位上面那塊")
         assert page.locator("#zone-list-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
         expect(page.locator("#zone-list-checks label").last).to_have_text("也可以不貼（保留原樣）")
         expect(page.locator("#zone-list-different summary")).to_have_text("有 1 區另外選")
         assert _dataset_zones(page, "#zone-list-different") == {"y0/auto1"}
-        expect(page.locator("#zone-list-ranges summary")).to_have_text("玻璃棉各自能調多厚")
+        # 可調的各自能調多少直接寫在那一列底下（#1199：不再收在「玻璃棉各自能調多厚」後面）。
+        expect(page.locator("#zone-list-ranges")).to_have_count(0)
+        expect(page.locator("#zone-list-checks label[data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
+        expect(page.locator("#zone-list-checks label[data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         expect(page.locator("#zone-others")).to_have_text("天花：由程式最佳化 1 區、指定貼 1 區、保留原樣 4 區地板、門、窗：保留原樣")
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.screenshot(path=str(tmp_path / "overview-search-rule.png"))

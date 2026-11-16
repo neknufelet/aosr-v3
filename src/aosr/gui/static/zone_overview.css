@@ -209,3 +209,30 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-now-tag{display:inline-block;margin-right:6px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12px;line-height:17px;
   color:var(--ink);background:#fff;white-space:nowrap}
 #zone-page .zv-cancel-note{font-size:12.5px;color:var(--soft)}
+/* #1199：小框選了由程式最佳化之後的材料框（一種一列、範圍只是字）、灰掉的成品、收起來的固定成品、框外兩項 */
+#zone-page .zv-form{margin-top:4px;padding:5px 10px 6px;border:1px solid #e2c877;border-radius:8px;background:#fffaf0;font-size:14px;line-height:1.45}
+#zone-page .zv-form-top{display:flex;gap:10px;align-items:baseline;font-size:12.5px;color:var(--soft);padding-bottom:4px;margin-bottom:3px;border-bottom:1px solid #f0dfae}
+#zone-page .zv-form-top button.zv-link{font-size:12.5px}
+#zone-page label.zv-mrow{display:flex;align-items:flex-start;gap:8px;margin:0;padding:3px 0;font-size:14px;font-weight:400;line-height:1.45;color:var(--ink);cursor:pointer}
+#zone-page label.zv-mrow input{flex:none;width:16px;height:16px;margin:3px 0 0;padding:0;accent-color:var(--ink)}
+#zone-page .zv-mwords{flex:1;min-width:0}
+#zone-page .zv-mwords small{display:block;font-size:12.5px;color:var(--soft)}
+#zone-page label.zv-covered{cursor:default;color:var(--soft)}
+#zone-page label.zv-covered input{border:1.5px dashed var(--soft)}
+#zone-page .zv-form-note{font-size:12.5px;color:var(--soft);margin:2px 0 3px 24px}
+#zone-page .zv-form-note a.zv-link{margin-left:8px;font-size:12.5px;color:var(--fixed);text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
+#zone-page .zv-form details{margin-top:3px;padding-top:4px;border-top:1px solid #f0dfae;font-size:12.5px}
+#zone-page .zv-form details summary{color:var(--ink)}
+#zone-page .zv-fixed-rows{max-height:196px;overflow-y:auto;margin-top:2px}
+#zone-page .zv-fixed-rows label.zv-mrow{font-size:13.5px}
+#zone-page .zv-extra{margin:5px 10px 0}
+#zone-page .zv-deepest{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px;font-size:14px}
+#zone-page label.zv-extra-name{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
+#zone-page input.zv-depth{width:66px;font:inherit;font-size:14px;color:var(--ink);border:1.3px solid var(--ink);border-radius:5px;padding:1px 6px;text-align:center;background:#fff}
+#zone-page .zv-unit{font-size:12.5px;color:var(--soft)}
+#zone-page .zv-deepest small{flex-basis:100%;font-size:12.5px;color:var(--soft);line-height:1.45}
+#zone-page .zv-shared{font-size:12.5px;color:var(--ink);padding:4px 8px;border-radius:6px;background:var(--search-soft)}
+#zone-page .zv-panel-problem{margin:7px 0 0;padding:0;font-size:13px;font-weight:600}
+#zone-page label.zv-check .zv-mwords small{font-size:12.5px}
+#zone-page .zv-list h2{flex-wrap:wrap}
+#zone-page .zv-list h2 .zv-muted{flex-basis:100%;margin:0 0 0 31px}

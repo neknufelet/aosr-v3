@@ -562,7 +562,8 @@ def test_the_list_written_to_a_face_drops_what_cannot_go_there_and_keeps_ids_the
             assert list(cast(dict[str, list[str]], page.evaluate(_ALLOWED)).values()) == [listed]
             _click_zone(page, "yL/auto1")
             page.locator("#zone-panel-mode-search").check()
-            expect(page.locator("#zone-panel-search-from")).to_contain_text(f"程式從這 {len(expected)} 種裡選：")
+            expect(page.locator("#zone-panel-search-from")).to_contain_text(f"程式從下面勾的 {len(expected)} 種裡選")
+            assert page.locator("#zone-panel input[id^='zone-panel-allow-']:checked").evaluate_all("boxes => boxes.map(box => box.id.slice(17))") == expected
             _apply(page)
             assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto1"] == expected
             assert watched.page_errors == []

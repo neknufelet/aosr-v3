@@ -85,7 +85,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         expect(page.locator("#zone-fixed-x0-whole_wall option").first).to_have_text("現在：沒貼東西（原牆原樣）")
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
 
-        # 由程式最佳化、打開清單：可調的寫得出調什麼（24K、96K 起點沒有空腔，空腔不調），不列的只寫一行有幾筆、哪幾組。
+        # 由程式最佳化、打開清單：可調的寫得出調什麼（24K、96K 起點沒有空腔，寫「空腔：沒有（直接貼牆）」），不列的只寫一行有幾筆、哪幾組。
         _choose(page, "#zone-mode-x0-whole_wall", "search")
         page.locator("#zone-allowed-summary-x0-whole_wall").click()
         listed = _ids(page, "x0", "whole_wall")
@@ -93,10 +93,10 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         assert not set(HIDDEN_ON_WALLS) & set(listed)
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).to_contain_text(
             "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        # 空腔不調的最深就是厚度上限 20 cm，材料自己的 30 cm 擋不到：不寫「加起來最深」（審查 11-15 抓到寫 30 cm 是錯的）。
+        # 沒有空腔的最深就是厚度上限 20 cm，材料自己的 30 cm 擋不到：不寫「加起來最深」（審查 11-15 抓到寫 30 cm 是錯的）。
         for wool in ("glass_wool_24k", "glass_wool_96k"):
             expect(page.locator("label", has=page.locator(f"#zone-allow-x0-whole_wall-{wool}")).locator("small")).to_have_text(
-                "可調：厚 5～20 cm、空腔不調")
+                "可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).not_to_contain_text("（可調厚度與空腔）")
         # 固定成品那一組標題已經講過整塊貼或不貼：每一筆只留總厚；有薄板（只給面密度、沒有厚度）的註明不含，
         # 不然跟顯示名裡把鋼板算進去的「總厚約 14 cm」打架（審查 11-15）。
@@ -182,7 +182,7 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         assert _chips(page, "x0", "whole_wall") == three
         assert _modes(page, "x0")["whole_wall"] == {"mode": "search", "allowed": three}
-        expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_24k")).to_contain_text("可調：厚 5～20 cm、空腔不調")
+        expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_24k")).to_contain_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         expect(page.locator("#zone-chip-x0-whole_wall-none")).to_contain_text("保留原樣，程式可以決定這裡不貼")
         # 常用組合：現在這一份就是「三種玻璃棉都比」（標現在用的）；這一區剛才指定貼 48K 50 mm，多一顆只決定它貼不貼。
         expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_be_disabled()

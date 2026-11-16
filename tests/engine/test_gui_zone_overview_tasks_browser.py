@@ -616,7 +616,10 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         # 選到由程式最佳化：底下講從哪幾種裡挑；套用後那一區的清單就是那幾種。
         expect(page.locator("#zone-panel-search-from")).to_have_count(0)
         page.locator("#zone-panel-mode-search").check()
-        expect(page.locator("#zone-panel-search-from")).to_have_text("程式從這 4 種裡選：48K 玻璃棉、24K 玻璃棉、96K 玻璃棉、也可以不貼（保留原樣）")
+        # （#1199：是哪幾種改在底下的材料框一種一列勾著，這一句只講幾種。）
+        expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
+        assert page.locator("#zone-panel input[id^='zone-panel-allow-']:checked").evaluate_all("boxes => boxes.map(box => box.id.slice(17))") == [
+            "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         page.screenshot(path=str(tmp_path / "first-time-reader.png"))
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/z3"] == WOOLS

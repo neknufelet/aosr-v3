@@ -255,7 +255,7 @@ function hiddenGroups(wall, entries) {
 // 可調材料的顯示名拿掉尾巴的「（可調厚度與空腔）」：能調什麼另外照條目寫（24K、96K 空腔其實不調）。
 function shortLabel(entry) { return entry.kind === "optimizable" ? entry.label.replace(/（可調[^）]*）$/, "") : entry.label; }
 function centimetres(metres) { return shownNumber(Math.round(metres * 1000) / 10); }
-// 可調的到底調什麼（#1176）：照條目的多孔層厚度與空腔寫；空腔起點沒有（null 或 0）搜尋就沒有空腔這一格，寫「空腔不調」。
+// 可調的到底調什麼（#1176）：照條目的多孔層厚度與空腔寫；空腔起點沒有（null 或 0）搜尋就沒有空腔這一格，寫「空腔：沒有（直接貼牆）」（#1199 用語表：「空腔不調」被讀成棉厚也不調）。
 // 材料自己的總深上限只在真的會擋時寫：比厚度上限加空腔上限（或固定空腔）還淺才寫「加起來最深」（審查 11-15：24K 空腔不調、
 // 最深就是 20 cm，寫 30 cm 是錯的）。
 function adjustWords(entry) {
@@ -265,7 +265,7 @@ function adjustWords(entry) {
     ? `厚 ${centimetres(thick.range_m[0])}～${centimetres(thick.range_m[1])} cm` : `厚度不調（${centimetres(entry.porous.thickness_m)} cm）`;
   const noCavity = !cavity || !cavity.initial_m;
   const cavityTuned = !noCavity && cavity.adjustable && cavity.range_m[1] > cavity.range_m[0];
-  const cavityText = noCavity ? "空腔不調"
+  const cavityText = noCavity ? "空腔：沒有（直接貼牆）"
     : cavityTuned ? `空腔 ${centimetres(cavity.range_m[0])}～${centimetres(cavity.range_m[1])} cm` : `空腔不調（${centimetres(cavity.initial_m)} cm）`;
   const deepest = (thickTuned ? thick.range_m[1] : entry.porous.thickness_m) + (noCavity ? 0 : cavityTuned ? cavity.range_m[1] : cavity.initial_m);
   const cap = entry.max_total_depth_m;
