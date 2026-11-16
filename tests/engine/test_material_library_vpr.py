@@ -1,5 +1,7 @@
 """可調 VPR 的材料格式（#1200 第 1 支）考卷：新的一種材料存得進、讀得回、轉得成家族；舊的東西一個位元都不變。
 
+格式是通用的「可調多層構造」（``tunable_layers``：初值排法的層＋哪一層的哪一格可調），這一支只收、只考 ``structure = "vpr"``。
+
 兩半：
 - 逐位不變：內建材料、一份自編的使用者材料庫、家族快照（v1、v2）、接上材料庫的搜尋設定與指紋、舊材料的搜尋計畫、
   材料頁清單（``/api/materials``）、分區頁限制檢查（``/api/zone-limits``）——每一樣的 SHA-256 與長度釘在 ``PINNED``
@@ -93,16 +95,26 @@ def _backing(thickness_m: float = 0.08) -> Doc:
             "frame_compression_modulus_pa": 60000.0, "frame_loss_factor": 0.1}
 
 
+def _plate(mass_kg_m2: float = 11.775) -> Doc:
+    return {"kind": "board", "surface_mass_kg_m2": mass_kg_m2, "resistance_pa_s_m": 0.0}
+
+
+def _mass(**changes: object) -> Doc:
+    """板重這一格：鋼板 1.5 mm（密度 7850 → 11.775 kg/m²），可調 1～3 mm 的板重、沒給規格（連續）。"""
+    return {"layer": 0, "field": "surface_mass_kg_m2", "range": [7.85, 23.55], "initial": 11.775} | changes
+
+
+def _thickness(**changes: object) -> Doc:
+    """背襯厚度這一格：8 cm，可調 6／8／10 cm。"""
+    return {"layer": 1, "field": "thickness_m", "range": [0.06, 0.1], "choices": [0.06, 0.08, 0.1], "initial": 0.08} | changes
+
+
 def _vpr(**changes: object) -> Doc:
-    """鋼板 1.5 mm（密度 7850 → 11.775 kg/m²，可調 1～3 mm 的板重）＋背襯 8 cm（可調 6／8／10 cm）。"""
+    """可調 VPR：鋼板＋黏住的背襯，兩格都能調；總深上限 12 cm。"""
     entry: Doc = {
-        "kind": "tunable_vpr", "id": VPR, "label": "鋼板 VPR（自編）", "provenance": "model", "source": "考卷自編",
-        "plate": {"kind": "board", "surface_mass_kg_m2": 11.775, "resistance_pa_s_m": 0.0},
-        "plate_density_kg_m3": 7850.0,
-        "plate_mass": {"adjustable": True, "range_kg_m2": [7.85, 23.55], "initial_kg_m2": 11.775},
-        "backing": _backing(),
-        "backing_thickness": {"adjustable": True, "range_m": [0.06, 0.1], "choices_m": [0.06, 0.08, 0.1], "initial_m": 0.08},
-        "max_total_depth_m": 0.12}
+        "kind": "tunable_layers", "id": VPR, "label": "鋼板 VPR（自編）", "provenance": "model", "source": "考卷自編",
+        "structure": "vpr", "layers": [_plate(), _backing()], "variables": [_mass(), _thickness()],
+        "plate_density_kg_m3": 7850.0, "max_total_depth_m": 0.12}
     entry.update(changes)
     return entry
 
@@ -125,7 +137,7 @@ def _write_library(path: Path, with_vpr: bool) -> None:
 
 def _without_vpr(document: Doc) -> Doc:
     rows = cast(list[Doc], document["materials"])
-    return document | {"materials": [row for row in rows if cast(Doc, row.get("entry", row)).get("kind") != "tunable_vpr"]}
+    return document | {"materials": [row for row in rows if cast(Doc, row.get("entry", row)).get("kind") != "tunable_layers"]}
 
 
 def _plan_design() -> DesignSettings:
@@ -204,73 +216,75 @@ def test_a_tunable_vpr_loads_dumps_and_reloads_unchanged(tmp_path: Path) -> None
     _write_library(path, with_vpr=True)
     entries = library.load_user_library(path)
     entry = next(item for item in entries if item.id == VPR)
-    assert entry.kind == "tunable_vpr" and entry.model_dump(mode="json") == _vpr() | {
-        "front_layers": [], "links": [], "notes": [],
-        "plate_mass": {"adjustable": True, "range_kg_m2": [7.85, 23.55], "choices_kg_m2": None, "initial_kg_m2": 11.775}}
+    assert entry.kind == "tunable_layers" and entry.model_dump(mode="json") == _vpr() | {
+        "links": [], "notes": [], "layers": [_plate(), _backing() | {"model": "komatsu"}],
+        "variables": [_mass(choices=None), _thickness()]}
     text = library.dump_user_library(entries)
     path.write_text(text, encoding="utf-8")
     assert library.load_user_library(path) == entries and library.dump_user_library(library.load_user_library(path)) == text
     assert library.basis_label(entry) == "模擬，之後要拿實測對照"
 
 
+_FRONT: list[Doc] = [{"kind": "slotted", "thickness_m": 0.012, "slot_width_m": 0.004, "open_area": 0.2},
+                     {"kind": "porous", "thickness_m": 0.01, "flow_resistivity_pa_s_m2": 8000.0, "material_class": "fibrous"}]
+
+
+def _faced(**changes: object) -> Doc:
+    """前面多兩層固定層（長縫板＋薄棉）：鋼板與背襯變成第 3、4 層，變數的層號跟著走。"""
+    return _vpr(layers=[*_FRONT, _plate(), _backing()], variables=[_mass(layer=2), _thickness(layer=3)],
+                max_total_depth_m=0.2) | changes
+
+
 def test_depth_counts_plate_backing_and_fixed_front_layers() -> None:
     """總深＝固定前層＋板厚（板重除以鋼板密度）＋背襯；範圍照兩格各自的上下限。"""
-    bare = cast("library.TunableVprEntry", _ENTRY.validate_python(_vpr()))
+    bare = cast("library.TunableLayersEntry", _ENTRY.validate_python(_vpr()))
     assert bare.depth_bounds() == pytest.approx((0.001 + 0.06, 0.003 + 0.1), rel=1e-12)
-    front = [{"kind": "slotted", "thickness_m": 0.012, "slot_width_m": 0.004, "open_area": 0.2},
-             {"kind": "porous", "thickness_m": 0.01, "flow_resistivity_pa_s_m2": 8000.0, "material_class": "fibrous"}]
-    faced = cast("library.TunableVprEntry", _ENTRY.validate_python(_vpr(front_layers=front, max_total_depth_m=0.2)))
+    assert bare.initial_depth_m() == pytest.approx(0.0015 + 0.08, rel=1e-12)
+    faced = cast("library.TunableLayersEntry", _ENTRY.validate_python(_faced()))
     assert faced.depth_bounds() == pytest.approx((0.022 + 0.001 + 0.06, 0.022 + 0.003 + 0.1), rel=1e-12)
-    assembly = library.vpr_assembly(faced)
-    assert isinstance(assembly, Assembly) and assembly.backing == "rigid"
+    assembly = library.initial_assembly(faced)
+    assert isinstance(assembly, Assembly) and assembly.backing == "rigid" and assembly.layers == faced.layers
     assert [layer.kind for layer in assembly.layers] == ["slotted", "porous", "board", "porous"]
-    assert assembly.layers[-2] == faced.plate and assembly.layers[-1] == faced.backing
 
 
-def test_a_fixed_plate_or_fixed_backing_is_accepted_when_the_other_one_moves() -> None:
-    plate_only = _vpr(backing_thickness={"adjustable": False, "range_m": [0.08, 0.08], "initial_m": 0.08})
-    backing_only = _vpr(plate_mass={"adjustable": False, "range_kg_m2": [11.775, 11.775], "initial_kg_m2": 11.775})
-    stocked = _vpr(plate_mass={"adjustable": True, "range_kg_m2": [7.85, 15.7], "choices_kg_m2": [7.85, 11.775, 15.7],
-                               "initial_kg_m2": 11.775})
-    for document in (plate_only, backing_only, stocked):
-        assert _ENTRY.validate_python(document).kind == "tunable_vpr"
-
-
-def _mass(**changes: object) -> Doc:
-    return cast(Doc, _vpr()["plate_mass"]) | changes
-
-
-def _thickness(**changes: object) -> Doc:
-    return cast(Doc, _vpr()["backing_thickness"]) | changes
+def test_only_the_listed_cells_move_and_one_is_enough() -> None:
+    """沒列成變數的格子不調：只調板重、只調背襯、板重給規格三種都收；不調的那一格總深照初值算。"""
+    stocked = _vpr(variables=[_mass(range=[7.85, 15.7], choices=[7.85, 11.775, 15.7]), _thickness()])
+    for document in (_vpr(variables=[_mass()]), _vpr(variables=[_thickness()]), stocked):
+        assert _ENTRY.validate_python(document).kind == "tunable_layers"
+    plate_only = cast("library.TunableLayersEntry", _ENTRY.validate_python(_vpr(variables=[_mass()])))
+    assert plate_only.depth_bounds() == pytest.approx((0.001 + 0.08, 0.003 + 0.08), rel=1e-12)
 
 
 _PLAIN_BACKING = {key: value for key, value in _backing().items() if not key.startswith("frame_")}
-_BONDED_FRONT = [{"kind": "board", "surface_mass_kg_m2": 5.0, "resistance_pa_s_m": 0.0}, _backing(0.01)]
 
 REFUSALS: list[tuple[str, Doc, str]] = [
-    ("mass_range_not_positive", {"plate_mass": _mass(range_kg_m2=[0.0, 23.55])}, "板重範圍要 0 < 下限 ≤ 上限"),
-    ("mass_range_reversed", {"plate_mass": _mass(range_kg_m2=[23.55, 7.85])}, "板重範圍要 0 < 下限 ≤ 上限"),
-    ("mass_fixed_but_ranged", {"plate_mass": _mass(adjustable=False)}, "不能調的板重，範圍上下限要相等"),
-    ("mass_choices_unsorted", {"plate_mass": _mass(choices_kg_m2=[23.55, 7.85])}, "板重規格要是正數、由輕到重、不重複"),
-    ("mass_choices_off_range", {"plate_mass": _mass(choices_kg_m2=[7.85, 11.775, 15.7])}, "有板重規格時，範圍就是最輕到最重"),
-    ("mass_initial_off_range", {"plate": {"kind": "board", "surface_mass_kg_m2": 31.4, "resistance_pa_s_m": 0.0},
-                                "plate_mass": _mass(initial_kg_m2=31.4)}, "板重初值 31.4 不在範圍"),
-    ("mass_initial_off_choices", {"plate_mass": _mass(choices_kg_m2=[7.85, 15.7, 23.55])}, "板重初值 11.775 不是板重規格"),
-    ("plate_density_not_positive", {"plate_density_kg_m3": 0.0}, "tunable_vpr.plate_density_kg_m3\n  Input should be greater than 0"),
-    ("backing_not_bonded", {"backing": _PLAIN_BACKING}, "可調 VPR 的背襯要填骨架壓縮模數與骨架損耗"),
-    ("plate_mass_not_initial", {"plate": {"kind": "board", "surface_mass_kg_m2": 15.7, "resistance_pa_s_m": 0.0}},
-     "板的面密度 15.7 要等於板重初值 11.775"),
-    ("backing_not_initial", {"backing": _backing(0.1)}, "背襯厚度 0.1 要等於背襯厚度初值 0.08"),
-    ("backing_initial_empty", {"backing_thickness": {"adjustable": True, "range_m": [0.0, 0.1], "choices_m": None,
-                                                     "initial_m": None}}, "背襯厚度 0.08 要等於背襯厚度初值 None"),
-    ("backing_adjustable_without_choices", {"backing_thickness": _thickness(choices_m=None)}, "能調的背襯厚度要給產品厚度"),
-    ("nothing_adjustable", {"plate_mass": _mass(adjustable=False, range_kg_m2=[11.775, 11.775]),
-                            "backing_thickness": {"adjustable": False, "range_m": [0.08, 0.08], "initial_m": 0.08}},
-     "可調 VPR 至少要有一格能調"),
+    ("range_not_positive", {"variables": [_mass(range=[0.0, 23.55]), _thickness()]}, "第 1 層的 surface_mass_kg_m2：可調範圍要 0 < 下限 < 上限"),
+    ("range_reversed", {"variables": [_mass(range=[23.55, 7.85]), _thickness()]}, "第 1 層的 surface_mass_kg_m2：可調範圍要 0 < 下限 < 上限"),
+    ("range_is_one_point", {"variables": [_mass(range=[11.775, 11.775]), _thickness()]}, "可調範圍要 0 < 下限 < 上限"),
+    ("choices_unsorted", {"variables": [_mass(choices=[23.55, 7.85]), _thickness()]}, "產品規格要是正數、由小到大、不重複"),
+    ("choices_off_range", {"variables": [_mass(choices=[7.85, 11.775, 15.7]), _thickness()]}, "有產品規格時，範圍就是最小到最大"),
+    ("initial_off_range", {"layers": [_plate(31.4), _backing()], "variables": [_mass(initial=31.4), _thickness()]},
+     "初值 31.4 不在範圍"),
+    ("initial_off_choices", {"variables": [_mass(choices=[7.85, 15.7, 23.55]), _thickness()]}, "初值 11.775 不是產品規格"),
+    ("no_variables", {"variables": []}, "tunable_layers.variables\n  Tuple should have at least 1 item"),
+    ("variable_layer_missing", {"variables": [_mass(), _thickness(layer=2)]}, "變數指的第 3 層的 thickness_m不存在：這份構造只有 2 層"),
+    ("variable_listed_twice", {"variables": [_mass(), _thickness(), _thickness()]}, "第 2 層的 thickness_m列了兩次"),
+    ("backing_not_bonded", {"layers": [_plate(), _PLAIN_BACKING]}, "可調 VPR 的最後一層（最靠牆）要是填了骨架壓縮模數與骨架損耗的多孔層"),
+    ("cell_not_tunable_in_a_vpr", {"variables": [_mass(), {"layer": 1, "field": "flow_resistivity_pa_s_m2",
+                                                           "range": [5000.0, 12000.0], "initial": 9000.0}]},
+     "可調 VPR 能調的只有鋼板（倒數第二層）的板重"),
+    ("plate_density_missing", {"plate_density_kg_m3": None}, "可調 VPR 要填鋼板密度 plate_density_kg_m3"),
+    ("plate_density_not_positive", {"plate_density_kg_m3": 0.0}, "tunable_layers.plate_density_kg_m3\n  Input should be greater than 0"),
+    ("backing_without_choices", {"variables": [_mass(), _thickness(choices=None)]}, "能調的背襯厚度要給產品規格"),
+    ("layer_value_not_initial", {"layers": [_plate(15.7), _backing()]}, "第 1 層的 surface_mass_kg_m2寫的是 15.7，要等於這個變數的初值 11.775"),
+    ("backing_value_not_initial", {"layers": [_plate(), _backing(0.1)]}, "第 2 層的 thickness_m寫的是 0.1，要等於這個變數的初值 0.08"),
+    ("layer_before_backing_is_not_a_plate", {"layers": [_plate(), _FRONT[1], _backing()],
+                                             "variables": [_thickness(layer=2)]}, "初值排法不是合法的多層構造"),
     ("thinnest_over_cap", {"max_total_depth_m": 0.05}, "最薄排法的總深"),
     ("initial_over_cap", {"max_total_depth_m": 0.07}, "初值總深"),
-    ("front_layer_is_a_second_backing", {"front_layers": _BONDED_FRONT}, "固定前層不能有填了骨架壓縮模數的多孔層"),
-    ("cap_not_positive", {"max_total_depth_m": 0.0}, "tunable_vpr.max_total_depth_m\n  Input should be greater than 0"),
+    ("cap_not_positive", {"max_total_depth_m": 0.0}, "tunable_layers.max_total_depth_m\n  Input should be greater than 0"),
+    ("structure_unknown", {"structure": "slotted_panel"}, "tunable_layers.structure\n  Input should be 'vpr'"),
 ]
 
 
@@ -292,18 +306,20 @@ def test_the_optimizable_kind_still_refuses_a_bonded_backing() -> None:
 
 def test_a_tunable_vpr_becomes_its_own_family_outside_the_search_settings() -> None:
     """可調 VPR 的家族是另一種（板重範圍＋背襯合法厚度＋總深上限），不進搜尋設定的家族清單：舊家族與指紋不動。"""
-    entry = cast("library.TunableVprEntry", _ENTRY.validate_python(_vpr()))
+    entry = cast("library.TunableLayersEntry", _ENTRY.validate_python(_vpr()))
     family, preset = search_library.vpr_family(entry)
     assert isinstance(family, material_gradient.VprFamilySettings)
     assert family.model_dump(mode="json") == {
         "id": VPR, "plate_density_kg_m3": 7850.0, "plate_mass_range_kg_m2": [7.85, 23.55], "plate_mass_choices_kg_m2": None,
         "initial_plate_mass_kg_m2": 11.775, "backing_thicknesses_m": [0.06, 0.08, 0.1], "initial_backing_thickness_m": 0.08,
         "front_depth_m": 0.0, "max_total_depth_m": 0.12, "template_preset": VPR}
-    assert preset.id == VPR and preset.material == library.vpr_assembly(entry).model_dump(mode="json")
-    uncapped = cast("library.TunableVprEntry", _ENTRY.validate_python(_vpr(
-        max_total_depth_m=None, backing_thickness={"adjustable": False, "range_m": [0.08, 0.08], "initial_m": 0.08})))
-    loose, _ = search_library.vpr_family(uncapped)
-    assert loose.backing_thicknesses_m == (0.08,) and loose.max_total_depth_m == pytest.approx(0.003 + 0.08, rel=1e-12)
+    assert preset.id == VPR and preset.material == library.initial_assembly(entry).model_dump(mode="json")
+    plate_only = cast("library.TunableLayersEntry", _ENTRY.validate_python(_faced(variables=[_mass(layer=2)], max_total_depth_m=None)))
+    loose, _ = search_library.vpr_family(plate_only)
+    assert loose.backing_thicknesses_m == (0.08,) and loose.front_depth_m == pytest.approx(0.022, rel=1e-12)
+    assert loose.max_total_depth_m == pytest.approx(0.022 + 0.003 + 0.08, rel=1e-12)
+    backing_only = cast("library.TunableLayersEntry", _ENTRY.validate_python(_vpr(variables=[_thickness()])))
+    assert search_library.vpr_family(backing_only)[0].plate_mass_range_kg_m2 == (11.775, 11.775)
     presets = load_construction_presets(config_path("construction_presets.toml"))
     settings = load_material_gradient_settings(config_path("material_gradient.toml"))
     merged = search_library.with_user_materials(settings, presets, (entry,))
@@ -345,7 +361,7 @@ def test_material_page_lists_the_tunable_vpr_with_its_kind_label_and_curve_input
     _write_library(user_library_path(tmp_path), with_vpr=True)
     client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
     listing = client.get("/api/materials").json()
-    assert listing["user_file_problem"] is None and listing["entry_kind_labels"]["tunable_vpr"] == "可調 VPR"
+    assert listing["user_file_problem"] is None and listing["entry_kind_labels"]["tunable_layers"] == "可調多層構造"
     row = next(row for row in listing["materials"] if row["entry"]["id"] == VPR)
     assert row["builtin"] is False and row["basis"] == "模擬，之後要拿實測對照" and row["placement"]["group"] == "wall"
 

@@ -31,6 +31,8 @@ from aosr.materials.library import (
     MeasuredTable,
     OptimizableEntry,
     ThicknessSpec,
+    TunableLayersEntry,
+    TunableVariable,
     basis_label,
     builtin_entries,
     dump_user_library,
@@ -41,9 +43,10 @@ USER_LIBRARY_NAME: Final = "materials.json"
 PAGE: Final = Path(__file__).resolve().parent / "static" / "materials.html"
 LAYER_KINDS: Final = ("porous", "air", "board", "fabric", "micro_perforated", "perforated", "slotted")
 FIXED_KINDS: Final = ("assembly", "constant_impedance", "measured_impedance")
-ENTRY_KIND_LABELS: Final = {"optimizable": "可最佳化材料", "fixed": "固定材料"}
+ENTRY_KIND_LABELS: Final = {"optimizable": "可最佳化材料", "fixed": "固定材料", "tunable_layers": "可調多層構造"}
 _ENTRY: Final[TypeAdapter[LibraryEntry]] = TypeAdapter(LibraryEntry)
-_LIBRARY_MODELS: Final[tuple[type[BaseModel], ...]] = (OptimizableEntry, FixedEntry, ThicknessSpec, MeasuredTable, MeasuredPoint)
+_LIBRARY_MODELS: Final[tuple[type[BaseModel], ...]] = (OptimizableEntry, FixedEntry, ThicknessSpec, MeasuredTable, MeasuredPoint,
+                                                            TunableLayersEntry, TunableVariable)
 _INDEX_WORDS: Final = {"layers": "第 {n} 層", "points": "第 {n} 列", "choices_m": "第 {n} 個產品厚度",
                        "links": "第 {n} 行", "notes": "第 {n} 行", "preset_members": "第 {n} 個"}
 _LIST_NAMES: Final = frozenset({"layers", "points"})
