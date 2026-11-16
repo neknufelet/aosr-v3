@@ -5,6 +5,8 @@
 const LAYER_SKIP = new Set(["kind"]);
 let listing = null;
 let current = null; // {entry, builtin, isNew}
+// 有一個存檔還在路上：這段時間打開別筆也不點亮「儲存」，一次只有一個存檔在路上。
+let saving = false;
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -53,7 +55,7 @@ function listTable(rows, builtin) {
   return el("table", {}, el("thead", {}, head), body);
 }
 
-async function loadListing(reopenId = null) {
+async function loadListing() {
   const reply = await api("/api/materials");
   if (!reply.ok) {
     byId("list-state").textContent = `讀不到材料庫：${reply.body.error || reply.status}`;
@@ -71,10 +73,6 @@ async function loadListing(reopenId = null) {
   const mine = rows.filter((row) => !row.builtin).length;
   byId("list-state").textContent = `內建 ${rows.length - mine} 筆、我的材料 ${mine} 筆`;
   byId("list-state").className = "";
-  if (reopenId) {
-    const row = rows.find((item) => item.entry.id === reopenId);
-    if (row) openEntry(row, false);
-  }
 }
 
 function freeId(base) {
@@ -505,7 +503,7 @@ function openEntry(row, isNew) {
     commonBlock(entry, readonly, isNew), kindBlock.block);
   kindBlock.after();
   byId("save").hidden = readonly;
-  byId("save").disabled = Boolean(listing.user_file_problem);
+  byId("save").disabled = saving || Boolean(listing.user_file_problem);
   byId("copy").hidden = isNew;
   byId("copy").disabled = Boolean(listing.user_file_problem);
   byId("editor").hidden = false;
@@ -576,22 +574,39 @@ function collect() {
 }
 
 async function save() {
+  if (saving) return;
   let document;
   try { document = collect(); } catch (error) { say(error.message, "notice"); return; }
   const headers = {"Content-Type": "application/json"};
   if (current.isNew) headers["If-None-Match"] = "*";
   const target = current.isNew ? document.id : current.entry.id;
+  // 回覆回來時編輯器還開著按下那一刻的這一筆，才把結果寫回編輯器；中途打開了別筆（或關掉了）就只更新清單，
+  // 那一句寫在清單那一行並講是哪一筆——不換掉、也不講在人正在改的另一筆草稿上（#1188 第 2 條）。
+  const opened = current;
+  saving = true;
   byId("save").disabled = true;
   say("儲存中…", "");
   try {
     const reply = await api(`/api/materials/${encodeURIComponent(target)}`, {method: "PUT", headers, body: JSON.stringify(document)});
     if (!reply.ok) {
-      say(`沒有存：\n${String(reply.body.error || reply.status).split("；").join("\n")}`, "notice");
+      const why = String(reply.body.error || reply.status);
+      if (current === opened) say(`沒有存：\n${why.split("；").join("\n")}`, "notice");
+      else {
+        byId("list-state").textContent += `；沒有存「${document.label}」：${why}`;
+        byId("list-state").className = "notice";
+      }
       return;
     }
-    await loadListing(reply.body.material_id);
-    say(`已儲存「${document.label}」`, "ok");
+    await loadListing();
+    if (current === opened) {
+      const row = listing.materials.find((item) => item.entry.id === reply.body.material_id);
+      if (row) openEntry(row, false);
+      say(`已儲存「${document.label}」`, "ok");
+    } else {
+      byId("list-state").textContent += `；已儲存「${document.label}」（編輯器現在開著的不是這一筆，沒有動它）`;
+    }
   } finally {
+    saving = false;
     byId("save").disabled = Boolean(listing.user_file_problem);
   }
 }
