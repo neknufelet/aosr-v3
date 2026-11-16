@@ -544,6 +544,11 @@ function shownDepth(items) {
   const depths = items.map(item => zoneSetting(item.wall, item.key).max_depth_m ?? null);
   return depths.every(depth => depth === depths[0]) && depths[0] !== null ? String(centimetres(depths[0])) : "";
 }
+// 「最深」那一格空白是什麼意思（底下那一行與不收時那一句都用它）：選到的區目前都一樣，清空就是不限；各區不同，空白就是沒改。
+function blankDepthWords(items) {
+  const depths = items.map(item => zoneSetting(item.wall, item.key).max_depth_m ?? null);
+  return depths.every(depth => depth === depths[0]) ? "不限" : "各區照目前的";
+}
 // 「最深」那一格要寫什麼：格子的值跟打開時顯示的一樣（沒動過、或打了又改回去）undefined（不寫，各區照目前的）、
 // 清空 null（拿掉）、正數回公尺（記到公釐；不到 1 公釐會變成 0，存檔時伺服器不收，這裡就擋）、其餘 NaN（不收）。
 function draftDepth(items) {
@@ -566,7 +571,7 @@ function draftProblem(items) {
     const stuck = ticks.lists.findIndex(list => allowedProblem(list));
     if (stuck >= 0) return `${who(stuck)}${allowedProblem(ticks.lists[stuck])}程式要從一個能調的東西開始：勾一種可調的材料，或勾「也可以不貼」`;
   }
-  if (Number.isNaN(draftDepth(items))) return "「最深」要填大於 0 的數字（公分）；空白表示不限";
+  if (Number.isNaN(draftDepth(items))) return `「最深」要填大於 0 的數字（公分，最少 0.1）；空白＝${blankDepthWords(items)}`;
   return "";
 }
 async function applyDraft() {
@@ -681,8 +686,11 @@ function tickBox(id, ticks, toggle) {
   check.onchange = () => toggle(id, check.checked);
   return check;
 }
+// 使用者已經把它勾上、卻還是只有幾區有：其餘的區是那一面貼不了（tickedList 不加），照實講。
 function someWords(id, ticks) {
-  return ticks.state(id) === "some" ? [el("small", "zv-some", `選中的 ${ticks.lists.length} 區裡 ${ticks.count(id)} 區有；不動它，各區照目前的`)] : [];
+  if (ticks.state(id) !== "some") return [];
+  const has = `選中的 ${ticks.lists.length} 區裡 ${ticks.count(id)} 區有`;
+  return [el("small", "zv-some", draft.ticks[id] === true ? `${has}；其餘的區那一面貼不了這一種，不會加` : `${has}；不動它，各區照目前的`)];
 }
 function materialRow(entry, ticks, covered, toggle) {
   const row = el("label", `zv-mrow${covered ? " zv-covered" : ""}`); row.dataset.choice = entry.id; row.dataset.kind = entry.kind;
@@ -704,15 +712,13 @@ function materialRow(entry, ticks, covered, toggle) {
 // 格子的值跟打開時一樣就是沒改（draftDepth），所以各區不同時空白＝各區照目前的。
 function deepestRow(items, walls, sync) {
   const row = el("div", "zv-extra zv-deepest"); row.id = "zone-panel-deepest";
-  const depths = items.map(item => zoneSetting(item.wall, item.key).max_depth_m ?? null);
-  const same = depths.every(depth => depth === depths[0]);
   const name = el("label", "zv-extra-name", items.length > 1 ? "這幾區最深" : "這一區最深"); name.htmlFor = "zone-panel-depth";
   const input = el("input", "zv-depth"); input.type = "number"; input.min = "0"; input.step = "any"; input.id = "zone-panel-depth";
   input.value = draft.depthText ?? shownDepth(items);
   input.oninput = () => { draft.depthText = input.value; draft.depthBad = input.validity.badInput; draftTouched = true; sync(); };
   const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
   row.append(name, input, el("span", "zv-unit", "cm"),
-    el("small", null, `從${from}往房間算，貼上去的總厚不超過它；空白＝${same ? "不限" : "各區照目前的"}`));
+    el("small", null, `從${from}往房間算，貼上去的總厚不超過它；空白＝${blankDepthWords(items)}`));
   return row;
 }
 // 小框選了由程式最佳化之後的那一塊（#1199，照樣稿）：材料框（可調的一種一列攤開、材料庫找不到的代號照列、固定成品收在摺疊裡
