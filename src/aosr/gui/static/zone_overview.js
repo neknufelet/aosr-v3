@@ -980,7 +980,7 @@ function overviewParts() {
   return [head, body, noteLines(), resultBar()];
 }
 window.renderZoneOverview = renderZoneOverview;
-window.openZoneOverview = () => { overviewOpen = true; pageSaid = ""; keptSaid = ""; renderZoneOverview(); window.scrollTo(0, 0); };
+window.openZoneOverview = () => { overviewOpen = true; pageSaid = ""; renderZoneOverview(); window.scrollTo(0, 0); };
 // 輸入頁訊息列每寫一句（app.js 的 say）就叫一次：警示照抄到這一頁，換成成功的一句就拿掉。
 // 這一頁打開時從空的開始（上面那一行）：打開之前輸入頁講過的話不帶進來。
 // 方案與每一區的做法都存進檔案了（輸入頁按「儲存」、另存，或「拿去搜尋」先存的那一步）：那一句拿掉。
@@ -993,10 +993,12 @@ window.zonePageSay = (text, kind) => {
 };
 // 「拿去搜尋」被還在路上的一批改動擋下（zone_modes.js 的 sendToSearch，#1188 第 6 條）：那一批落地後平面圖檢查通過，
 // 訊息列換成成功的一句、上面那一支會把警示拿掉——被擋的那一次什麼都沒存、沒跳頁，那一句不能跟著不見。
-// 留到使用者下一次真的按東西（滑鼠或鍵盤按出來的 click；頁面程式自己發的不算）為止。按下去那一刻只就地改那一行、
-// 不重畫整頁：重畫會把正在被按的那一顆換掉。
+// 留到使用者下一次真的按到東西（滑鼠或鍵盤按出來的 click；頁面程式自己發的不算）為止。整頁還鎖著的時候按的不算：
+// 那一下什麼都按不到（點擊落在頁面底層），那一批也還在路上，這時清掉、落地後就看不到了。換方案也清（重畫時看做法換過幾次）；
+// 打開這一頁不必另外清：打開只有那一顆按鈕一條路，那一下 click 已經先清過。
+// 按下去那一刻只就地改那一行、不重畫整頁：重畫會把正在被按的那一顆換掉。
 function forgetKept(event) {
-  if (!event.isTrusted || !keptSaid) return;
+  if (!event.isTrusted || !keptSaid || inputBusy) return;
   keptSaid = "";
   const line = $("zone-page-said");
   if (line && saidWords()) line.textContent = saidWords(); else line?.remove();

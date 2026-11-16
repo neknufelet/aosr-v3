@@ -10,9 +10,11 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_zone_elevation_browser import _write
 from tests.engine.test_gui_zone_overview_browser import SAMPLE
-from tests.engine.test_gui_zone_overview_faults_browser import _hold, _modes, _released, _wait_held
+from tests.engine.test_gui_zone_overview_faults_browser import _Held, _hold, _modes, _released, _wait_held
 from tests.engine.test_gui_zone_overview_tasks_browser import (
     _SELECTED, SEARCH, _apply, _click_zone, _open_overview, _prepare, _settled)
 
@@ -188,3 +190,138 @@ def test_the_words_of_a_blocked_send_to_search_are_still_there_after_what_blocke
         assert watched.page_errors == []
     stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
     assert stored == {"yL": {"z3": SEARCH}, "y0": {"auto2": SEARCH}, "xL": {"auto1": SEARCH}}
+
+
+BLOCKED = "上一個動作還沒做完，這一次沒有儲存；等它做完再按一次"
+OTHER = "send-other"
+
+
+def _blocked_with_the_batch_still_out(page: Page) -> tuple[_Held, _Held]:
+    """走到「拿去搜尋被擋、那一句寫上去了、擋住它的那一批還扣著（整頁鎖著）」。回那一批與它的平面圖檢查兩個扣住器。"""
+    _open_overview(page)
+    _settled(page)
+    _click_zone(page, "yL/z3")
+    page.locator("#zone-panel-mode-search").check()
+    _apply(page)
+    limits = _hold(page, "**/api/zone-limits")
+    _click_zone(page, "y0/auto2")
+    page.locator("#zone-panel-mode-search").check()
+    page.evaluate("void refreshZoneLimits()")
+    _wait_held(page, limits, 1)
+    page.locator("#zone-page-search").click()
+    batch = _hold(page, "**/api/zone-material/batch")
+    plan = _hold(page, "**/api/plan")
+    page.locator("#zone-panel-apply").click()
+    _wait_held(page, batch, 1)
+    limits.release()
+    expect(page.locator("#zone-page-said")).to_have_text(BLOCKED)
+    return batch, plan
+
+
+def _land(page: Page, batch: _Held, plan: _Held) -> None:
+    """那一批落地、平面圖檢查通過、畫面放開。"""
+    batch.release()
+    _wait_held(page, plan, 1)
+    with page.expect_response("**/api/plan") as checked:
+        plan.release()
+    assert checked.value.ok
+    _settled(page)
+    expect(page.locator("#messages")).to_have_class("ok")
+
+
+def test_pressing_again_while_the_page_is_still_locked_does_not_drop_the_blocked_words(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 6 條（審查重現）：被擋那一句剛寫上去、那一批還在路上（整頁鎖著），使用者再按一次「拿去搜尋」——按不到，
+    點擊落在頁面底層。那一下不算「按到東西」：那一批落地後那一句還在，沒存、沒跳頁。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        saved: list[str] = []
+        page.on("request", lambda request: saved.append(request.url) if request.method == "PUT" else None)
+        batch, plan = _blocked_with_the_batch_still_out(page)
+        assert page.evaluate("[document.getElementById('zone-page').inert, inputBusy]") == [True, True]
+        box = page.locator("#zone-page-search").bounding_box()
+        assert box is not None
+        page.evaluate("""() => { window.trustedClicks = 0;
+            document.addEventListener("click", event => { if (event.isTrusted) window.trustedClicks += 1; }, true); }""")
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_function("window.trustedClicks === 1")
+        _land(page, batch, plan)
+        expect(page.locator("#zone-page-said")).to_have_text(BLOCKED)
+        assert saved == [] and "gradient" not in page.url and watched.page_errors == []
+
+
+def test_the_blocked_words_go_away_at_the_next_real_press_and_not_at_a_click_the_page_sends_itself(
+        tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 6 條：那一批落地後那一句留著。頁面程式自己發的點擊不是使用者按的，那一句照留；
+    使用者真的按一下別的東西（這裡點圖上一區）才拿掉——不永遠黏著，也不必等下一批改動。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        batch, plan = _blocked_with_the_batch_still_out(page)
+        _land(page, batch, plan)
+        said = page.locator("#zone-page-said")
+        expect(said).to_have_text(BLOCKED)
+        page.evaluate("""() => { window.sentClicks = 0;
+            document.addEventListener("click", () => { window.sentClicks += 1; }, true);
+            document.getElementById("zone-page").click(); }""")
+        assert page.evaluate("window.sentClicks") == 1
+        expect(said).to_have_text(BLOCKED)
+        _click_zone(page, "xL/auto1")
+        expect(said).to_have_count(0)
+        assert page.evaluate(_SELECTED) == ["xL/auto1"] and watched.page_errors == []
+
+
+def test_the_blocked_words_do_not_follow_into_another_scheme(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 6 條：那一句講的是原本那一份。頁面程式自己發「打開」換成另一份（使用者沒有按到東西，那一句還留著）：
+    換過去之後這一頁不准還寫著上一份的「這一次沒有儲存」。"""
+    _prepare(tmp_path)
+    _write(tmp_path, ZONE_NAMING_SCHEME | {"scheme_id": OTHER})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        batch, plan = _blocked_with_the_batch_still_out(page)
+        _land(page, batch, plan)
+        said = page.locator("#zone-page-said")
+        expect(said).to_have_text(BLOCKED)
+        page.locator("#scheme-list").evaluate("(node, name) => { node.value = name; }", OTHER)
+        page.locator("#open-scheme").evaluate("node => node.click()")
+        page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
+        _settled(page)
+        expect(page.locator("#zone-map")).to_be_visible()
+        expect(said).to_have_count(0)
+        assert watched.page_errors == []
+
+
+def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_search_page_opens(
+        tmp_path: Path, browser: Browser) -> None:
+    """「拿去搜尋」存好、結果清單還在重讀（鎖著，真人按不到）：頁面程式自己發的點擊走得到——先發「套用」
+    （那一批做完會把鎖的旗子放掉，#1188 之前就有、這次不修），再發「打開」另一份。清單回來後不准跳去另一份的搜尋頁：
+    留在這一頁照講，原本那一份照樣存好、是按下那一刻那一份。"""
+    _prepare(tmp_path)
+    _write(tmp_path, ZONE_NAMING_SCHEME | {"scheme_id": OTHER})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        sent: list[str] = []
+        _press_search_with_one_more_zone_ready(page, sent)
+        results = _hold_gets(page, "**/api/results")
+        jumps: list[str] = []
+        page.on("request", lambda request: jumps.append(request.url) if "/gradient" in request.url else None)
+        page.route("**/gradient?scheme=*", lambda route: route.fulfill(status=200, content_type="text/plain", body="gradient"))
+        with page.expect_response(lambda r: r.url.endswith(f"/api/designs/{SAMPLE}") and r.request.method == "PUT") as design:
+            page.locator("#zone-page-search").click()
+        assert design.value.ok
+        _wait_routes(page, results, 1)
+        assert page.evaluate("[document.getElementById('zone-page').inert, inputBusy]") == [True, True]
+        with page.expect_response("**/api/zone-material/batch"):
+            page.locator("#zone-panel-apply").evaluate("node => node.click()")
+        page.wait_for_function("!inputBusy")
+        page.locator("#scheme-list").evaluate("(node, name) => { node.value = name; }", OTHER)
+        page.locator("#open-scheme").evaluate("node => node.click()")
+        page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
+        results[0].continue_()
+        expect(page.locator("#zone-page-note")).to_have_text(f"存檔途中換了方案：「{SAMPLE}」照樣存好，這次不跳搜尋頁")
+        page.wait_for_load_state("networkidle")
+        assert jumps == [] and page.url == f"{base}/"
+        assert page.evaluate("scheme.scheme_id") == OTHER and watched.page_errors == []
+    stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
+    assert stored == {"yL": {"z3": SEARCH}}
+    assert not (tmp_path / "designs" / f"{OTHER}.json").exists()
