@@ -598,7 +598,10 @@ async function save() {
       return;
     }
     await loadListing();
-    if (current === opened) {
+    // 中途重開的是剛存的這一筆（清單上按它的「打開」）也算同一筆：編輯器裡是存檔前的舊內容，留著再存會把舊的寫回去。
+    const sameEntry = current === opened ||
+      (current && !current.isNew && !current.builtin && current.entry.id === reply.body.material_id);
+    if (sameEntry) {
       const row = listing.materials.find((item) => item.entry.id === reply.body.material_id);
       if (row) openEntry(row, false);
       say(`已儲存「${document.label}」`, "ok");

@@ -364,3 +364,23 @@ def test_a_refused_save_landing_late_names_its_material_outside_the_other_draft(
         expect(page.locator("#save")).to_be_enabled()
         assert watched.page_errors == []
     assert _materials(tmp_path)["hard_wall"]["label"] == "硬牆"
+
+
+def test_reopening_the_entry_being_saved_shows_what_was_saved(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條的修補帶出來的：等存檔回覆時在清單上重開「正在存的那一筆」，編輯器裡是存檔前的舊內容；
+    回覆回來要換成存好的那一份（不然再按一次儲存就把舊名字寫回去）。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        _hold_once(page, held, "put")
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        _row(page, "user-list", "hard_wall", "open")
+        expect(page.locator("#material-label")).to_have_value("硬牆")
+        route.continue_()
+        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(page.locator("#material-label")).to_have_value("很硬的牆")
+        expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」")
+        assert watched.page_errors == []
+    assert _materials(tmp_path)["hard_wall"]["label"] == "很硬的牆"

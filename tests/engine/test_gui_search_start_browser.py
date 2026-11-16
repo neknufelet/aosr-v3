@@ -265,6 +265,34 @@ def test_a_stale_previous_reply_does_not_show_the_form_of_a_failed_newer_read(br
         assert watched.page_errors == []
 
 
+def test_reading_the_first_scheme_again_while_the_second_is_loading_fills_it_afresh(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 3 條的修補帶出來的：甲讀好後改讀乙，乙的上一場設定還沒回來又改讀回甲；這時表單已經被乙清過，
+    不准當成「重讀同一份、表單照你填的留著」，要重新帶入甲的（這裡甲沒搜過＝進階四格的預設）。"""
+    data_dir = _data(tmp_path, "other")
+    launcher = FakeLauncher()
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/search-start?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#startup")).to_have_value("12")
+        page.fill("#front-low", "0.6")
+        page.route("**/api/search-jobs/previous", lambda route: held.append(route))
+        page.select_option("#scheme-pick", "other")
+        page.click("#load-scheme")
+        _wait_held(page, held)
+        page.select_option("#scheme-pick", NAME)
+        page.click("#load-scheme")
+        expect(page.locator("#facts-list")).to_be_visible()
+        page.wait_for_timeout(300)
+        for route in list(held):
+            route.continue_()
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#scheme-message")).to_have_text(f"已讀方案「{NAME}」")
+        expect(page.locator("#startup")).to_have_value("12")
+        expect(page.locator("#front-low")).to_have_value("")
+        assert watched.page_errors == []
+
+
 def test_form_problems_name_the_field_and_busy_blocks_start(browser: Browser, tmp_path: Path) -> None:
     """抓空白必填沒擋、伺服器拒收沒照原文、整台忙時還能按開始。"""
     data_dir = _data(tmp_path)
