@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import cast
 
@@ -173,16 +174,17 @@ def test_previous_search_of_the_same_scheme_fills_the_form(browser: Browser, tmp
         # 重讀同一份方案不清掉剛填的表單。
         page.click("#load-scheme")
         expect(page.locator("#scheme-message")).to_contain_text("表單照你填的留著")
+        expect(page.locator("#form-block")).to_be_visible()
         expect(page.locator("#time-budget")).to_have_value("1.5")
         _clean(page, watched.page_errors + watched.console_errors)
 
 
-def _wait_held(page: Page, held: list[Route]) -> Route:
+def _wait_held(page: Page, held: list[Route], count: int = 1) -> Route:
     for _ in range(200):
-        if held:
+        if len(held) >= count:
             return held[0]
         page.wait_for_timeout(50)
-    raise AssertionError("沒有等到「之前的搜尋」那個請求")
+    raise AssertionError(f"沒有等到 {count} 個「之前的搜尋」請求，只扣到 {len(held)} 個")
 
 
 @pytest.mark.parametrize("case", ["same-scheme", "never-searched", "previous-fails"])
@@ -282,14 +284,30 @@ def test_reading_the_first_scheme_again_while_the_second_is_loading_fills_it_afr
         _wait_held(page, held)
         page.select_option("#scheme-pick", NAME)
         page.click("#load-scheme")
-        expect(page.locator("#facts-list")).to_be_visible()
-        page.wait_for_timeout(300)
+        # 兩個「之前的搜尋」請求（乙的、重讀甲的）都扣住了才放行，不賭時間。
+        _wait_held(page, held, count=2)
         for route in list(held):
             route.continue_()
         expect(page.locator("#form-block")).to_be_visible()
         expect(page.locator("#scheme-message")).to_have_text(f"已讀方案「{NAME}」")
         expect(page.locator("#startup")).to_have_value("12")
         expect(page.locator("#front-low")).to_have_value("")
+        assert watched.page_errors == []
+
+
+def test_a_previous_reply_that_is_not_json_still_shows_the_form(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 3 條的修補帶出來的：表單改成等「之前的搜尋」回來才亮；回 200 但不是 JSON 時也要亮（講一句、補預設），
+    不准表單永遠不出來又沒有訊息。"""
+    data_dir = _data(tmp_path)
+    with _serve(data_dir, FakeLauncher()) as url, _open(browser, f"{url}/search-start", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#scheme-pick")).to_have_value(NAME)
+        page.route("**/api/search-jobs/previous", lambda route: route.fulfill(status=200, body="<html>not json</html>"))
+        page.click("#load-scheme")
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#previous-message")).to_contain_text("不是 JSON")
+        expect(page.locator("#previous-message")).to_have_class(re.compile(r"\bnotice\b"))
+        expect(page.locator("#startup")).to_have_value("12")
         assert watched.page_errors == []
 
 

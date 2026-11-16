@@ -60,7 +60,7 @@ async function loadListing() {
   if (!reply.ok) {
     byId("list-state").textContent = `讀不到材料庫：${reply.body.error || reply.status}`;
     byId("list-state").className = "notice";
-    return;
+    return false;
   }
   listing = reply.body;
   const rows = listing.materials;
@@ -73,6 +73,7 @@ async function loadListing() {
   const mine = rows.filter((row) => !row.builtin).length;
   byId("list-state").textContent = `內建 ${rows.length - mine} 筆、我的材料 ${mine} 筆`;
   byId("list-state").className = "";
+  return true;
 }
 
 function freeId(base) {
@@ -597,16 +598,17 @@ async function save() {
       }
       return;
     }
-    await loadListing();
+    // 清單重讀失敗時 listing 還是存檔前那一份：不准拿它那一列重開（編輯器會變回舊內容，再存就把舊的寫回去）。
+    const listed = await loadListing();
     // 中途重開的是剛存的這一筆（清單上按它的「打開」）也算同一筆：編輯器裡是存檔前的舊內容，留著再存會把舊的寫回去。
     const sameEntry = current === opened ||
       (current && !current.isNew && !current.builtin && current.entry.id === reply.body.material_id);
     if (sameEntry) {
-      const row = listing.materials.find((item) => item.entry.id === reply.body.material_id);
+      const row = listed ? listing.materials.find((item) => item.entry.id === reply.body.material_id) : null;
       if (row) openEntry(row, false);
       say(`已儲存「${document.label}」`, "ok");
     } else {
-      byId("list-state").textContent += `；已儲存「${document.label}」（編輯器現在開著的不是這一筆，沒有動它）`;
+      byId("list-state").textContent += `；已儲存「${document.label}」${current ? "（編輯器現在開著的是另一筆，沒有動它）" : ""}`;
     }
   } finally {
     saving = false;

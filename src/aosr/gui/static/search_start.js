@@ -363,7 +363,12 @@ async function loadPrevious(read) {
   const pick = byId("previous-pick");
   pick.replaceChildren();
   if (read !== facts) return;  // 等回覆時又讀了別份方案：這一份回覆不用
-  if (!reply.ok) { say("previous-message", reply.body.error, true); defaultAdvanced(); return; }
+  // 回 200 但內容不是清單（例如不是 JSON）也當讀失敗：照講一句、補預設，表單照樣亮得出來。
+  if (!reply.ok || !Array.isArray(reply.body.searches) || !Array.isArray(reply.body.skipped)) {
+    say("previous-message", reply.body.error || "之前的搜尋讀不懂（伺服器回的內容不對），預算與停止那幾格要自己填", true);
+    defaultAdvanced();
+    return;
+  }
   previous = reply.body.searches;
   byId("previous-row").hidden = !previous.length;
   for (const item of previous) {
