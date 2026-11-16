@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import search_jobs as search_jobs_module
 from aosr.gui.search_jobs import SearchJobs
@@ -175,6 +175,59 @@ def test_previous_search_of_the_same_scheme_fills_the_form(browser: Browser, tmp
         expect(page.locator("#scheme-message")).to_contain_text("表單照你填的留著")
         expect(page.locator("#time-budget")).to_have_value("1.5")
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def _wait_held(page: Page, held: list[Route]) -> Route:
+    for _ in range(200):
+        if held:
+            return held[0]
+        page.wait_for_timeout(50)
+    raise AssertionError("沒有等到「之前的搜尋」那個請求")
+
+
+@pytest.mark.parametrize("case", ["same-scheme", "never-searched", "previous-fails"])
+def test_typing_before_the_previous_search_arrives_is_not_overwritten(browser: Browser, tmp_path: Path, case: str) -> None:
+    """#1188 第 3 條：按「讀這份方案」後上一場設定還沒回來，這時打得進去的字，回來後不准被蓋掉
+    （同一份方案搜過＝整張表帶入；沒搜過或讀失敗＝進階四格的預設）。打不進去的做法也算對，但帶入要照常到。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    if case == "same-scheme":
+        jobs = _jobs(data_dir, launcher)
+        job_id = cast(str, jobs.start(NAME, _rich_body())["job_id"])
+        _folder(jobs, job_id)
+        launcher.active.clear()
+        _finish(jobs, job_id, 0, start=1, auto=None)
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/search-start", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#scheme-pick")).to_have_value(NAME)
+        page.route("**/api/search-jobs/previous", lambda route: held.append(route))
+        page.click("#load-scheme")
+        expect(page.locator("#facts-list")).to_be_visible()
+        route = _wait_held(page, held)
+        typed: dict[str, str] = {}
+        if page.locator("#form-block").is_visible():
+            page.locator("#advanced").evaluate("details => { details.open = true; }")
+        for selector, text in (("#front-low", "1.23"), ("#budget", "77"), ("#startup", "99")):
+            field = page.locator(selector)
+            if field.is_visible() and field.is_enabled():
+                field.fill(text)
+                typed[selector] = text
+        if case == "previous-fails":
+            route.fulfill(status=500, json={"error": "考卷：之前的搜尋讀不到"})
+        else:
+            route.continue_()
+        # 那一行有字＝晚到的回覆整個處理完了（修前修後都有這個訊號）。
+        expect(page.locator("#previous-message")).not_to_be_empty()
+        expect(page.locator("#form-block")).to_be_visible()
+        for selector, text in typed.items():
+            expect(page.locator(selector)).to_have_value(text)
+        if not typed:
+            expect(page.locator("#budget")).to_have_value("40" if case == "same-scheme" else "")
+            expect(page.locator("#startup")).not_to_have_value("")
+            if case != "same-scheme":
+                expect(page.locator("#startup")).to_have_value("12")
+        assert watched.page_errors == []
 
 
 def test_form_problems_name_the_field_and_busy_blocks_start(browser: Browser, tmp_path: Path) -> None:
