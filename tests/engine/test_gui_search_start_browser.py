@@ -230,6 +230,41 @@ def test_typing_before_the_previous_search_arrives_is_not_overwritten(browser: B
         assert watched.page_errors == []
 
 
+def test_a_stale_previous_reply_does_not_show_the_form_of_a_failed_newer_read(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 3 條的修補帶出來的：表單改成等上一場設定回來才亮；等的時候換讀另一份方案而且讀失敗，
+    舊那一次的回覆晚到不准把表單亮出來（讀失敗時表單要收著，不然拿得到上一份的表單開在這一份上）。"""
+    data_dir = _data(tmp_path, "other")
+    launcher = FakeLauncher()
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/search-start", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#scheme-pick option")).to_have_count(2)
+        page.select_option("#scheme-pick", NAME)
+        page.route("**/api/search-jobs/previous", lambda route: held.append(route))
+        page.click("#load-scheme")
+        expect(page.locator("#facts-list")).to_be_visible()
+        route = _wait_held(page, held)
+        page.route("**/api/search-jobs/schemes/other", lambda route: route.abort())
+        page.select_option("#scheme-pick", "other")
+        page.click("#load-scheme")
+        expect(page.locator("#scheme-message")).to_contain_text("連不到網頁伺服器")
+        expect(page.locator("#form-block")).to_be_hidden()
+        with page.expect_response("**/api/search-jobs/previous") as landed:
+            route.continue_()
+        landed.value.finished()
+        page.wait_for_timeout(300)
+        expect(page.locator("#form-block")).to_be_hidden()
+        expect(page.locator("#scheme-message")).to_contain_text("連不到網頁伺服器")
+        # 之後好好讀一次，表單照常亮、進階四格的預設照常到。
+        page.unroute("**/api/search-jobs/schemes/other")
+        page.unroute("**/api/search-jobs/previous")
+        page.click("#load-scheme")
+        expect(page.locator("#scheme-message")).to_have_text("已讀方案「other」")
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#startup")).to_have_value("12")
+        assert watched.page_errors == []
+
+
 def test_form_problems_name_the_field_and_busy_blocks_start(browser: Browser, tmp_path: Path) -> None:
     """抓空白必填沒擋、伺服器拒收沒照原文、整台忙時還能按開始。"""
     data_dir = _data(tmp_path)

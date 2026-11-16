@@ -339,13 +339,18 @@ async function loadScheme() {
   if (facts.zoned) byId("facts-list").append(el("li", {class: "notice", text: facts.zoned}));
   byId("scheme-facts").hidden = false;
   byId("speaker-fields").hidden = facts.has_speaker_setup;
-  byId("form-block").hidden = false;
   if (loadedScheme === schemeId) {
+    byId("form-block").hidden = false;
     say("scheme-message", `已重讀方案「${schemeId}」；表單照你填的留著`);
   } else {
-    loadedScheme = schemeId;
+    // 表單等上一場設定（沒搜過或讀失敗時是進階四格的預設）填好才亮出來：先亮的話，人一打字，
+    // 晚到的那一份就把剛打的字蓋掉（#1188 第 3 條）。
     clearForm();
-    await loadPrevious(facts);
+    await loadPrevious(reply.body);
+    // 等的時候又讀了一次方案（或讀失敗）：表單亮不亮歸後來那一次管，這一次到此為止。
+    if (facts !== reply.body) return;
+    loadedScheme = schemeId;
+    byId("form-block").hidden = false;
   }
   history.replaceState(null, "", `?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   changed();
