@@ -185,7 +185,8 @@ async function sendToSearch() {
   });
 }
 // 送出跳頁、等到離開這一頁（呼叫的人拿著鎖）：搜尋頁回來之前舊的這一頁還在畫面上。離開了這個等待就不會回來，鎖跟著頁面一起消失；
-// 兩種情況會回來、把鎖放開：按「上一頁」時瀏覽器把這一頁原樣搬回來（pageshow），或等了一陣子還在這一頁（搜尋頁沒打開成）。
+// 兩種情況會回來、把鎖放開：按「上一頁」時瀏覽器把這一頁原樣搬回來（pageshow），或等了一陣子還在這一頁（搜尋頁沒打開成；
+// 伺服器關著時瀏覽器會換成錯誤頁、走不到這裡）。等多久是隨手定的，沒有量測依據：本機搜尋頁一般幾十毫秒就回來。
 const LEAVE_WAIT_MS = 10000;
 async function leaveForSearch(url) {
   const stayed = await new Promise(resolve => {
@@ -193,7 +194,7 @@ async function leaveForSearch(url) {
     setTimeout(() => resolve(true), LEAVE_WAIT_MS);
     window.location.href = url;
   });
-  if (stayed) zoneNote("方案與每一區的做法都存好了，但搜尋頁沒有打開：確認網頁伺服器還開著，再按一次「拿去搜尋」", "notice");
+  if (stayed) zoneNote("方案與每一區的做法都存好了，但等了一陣子搜尋頁還沒打開：再按一次「拿去搜尋」", "notice");
 }
 function searchButtonRow() {
   const count = searchZoneCount();
