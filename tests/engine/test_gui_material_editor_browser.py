@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui.material_editor import user_library_path
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
@@ -264,3 +264,228 @@ def test_renaming_only_keeps_a_single_product_thickness_and_a_multi_line_note(tm
             assert (watched.console_errors, watched.page_errors) == ([], [])
     after = _materials(tmp_path)["my_wool"]
     assert after == before | {"label": "我的棉改名"}
+
+
+def _hard_wall(page: Page) -> None:
+    """先存一筆自己的固定阻抗材料 hard_wall，再把顯示名改成「很硬的牆」（還沒按儲存）。"""
+    page.locator("#new-fixed").click()
+    page.locator("#material-id").fill("hard_wall")
+    page.locator("#material-label").fill("硬牆")
+    page.locator("#provenance").select_option("literature")
+    page.locator("#source").fill("混凝土牆，文獻值")
+    page.locator("#fixed-kind").select_option("constant_impedance")
+    page.locator("#impedance").fill("41000")
+    _saved(page)
+    page.locator("#material-label").fill("很硬的牆")
+
+
+def _hold_once(page: Page, held: list[Route], which: str) -> None:
+    """扣住下一個存檔（put）或存好後重讀清單（list）的請求，只扣一個；其餘照放。"""
+    method = "PUT" if which == "put" else "GET"
+
+    def handle(route: Route) -> None:
+        if route.request.method == method and not held:
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/api/materials/hard_wall" if which == "put" else "**/api/materials", handle)
+
+
+def _wait_held(page: Page, held: list[Route]) -> Route:
+    for _ in range(200):
+        if held:
+            return held[0]
+        page.wait_for_timeout(50)
+    raise AssertionError("沒有等到要扣住的那個請求")
+
+
+@pytest.mark.parametrize("which", ["put", "list"])
+def test_a_save_reply_landing_late_keeps_the_draft_opened_meanwhile(tmp_path: Path, browser: Browser, which: str) -> None:
+    """#1188 第 2 條：等「儲存」回覆（或存好後重讀清單）時開了另一筆開始改，回覆回來不准把畫面換回剛存的那一筆。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        _hold_once(page, held, which)
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        page.locator("#new-fixed").click()
+        page.locator("#material-label").fill("還在改的草稿")
+        route.continue_()
+        # 清單那一列換成新名字＝晚到的回覆整個處理完了（修前修後都有這個訊號）。
+        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(page.locator("#material-label")).to_have_value("還在改的草稿")
+        expect(page.locator("#material-id")).to_have_value("new_material")
+        expect(page.locator("#editor-title")).to_contain_text("新材料")
+        # 開著的是還沒存的草稿：存好那一句不准寫在它的訊息格，要寫在清單那一行並講是哪一筆。
+        expect(page.locator("#editor-message")).not_to_contain_text("已儲存")
+        expect(page.locator("#list-state")).to_contain_text("已儲存「很硬的牆」（編輯器現在開著的是另一筆，沒有動它）")
+        assert watched.page_errors == []
+    assert _materials(tmp_path)["hard_wall"]["label"] == "很硬的牆"
+    assert "new_material" not in _materials(tmp_path)
+
+
+def test_opening_another_entry_during_a_save_does_not_relight_the_save_button(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條：上一個存檔還在路上時打開別筆，「儲存」不准重新點亮（不然同時有兩個存檔在路上）；回來後才亮。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        _hold_once(page, held, "put")
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        page.locator("#new-fixed").click()
+        expect(page.locator("#material-id")).to_have_value("new_material")
+        expect(page.locator("#save")).to_be_visible()
+        expect(page.locator("#save")).to_be_disabled()
+        route.continue_()
+        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(page.locator("#save")).to_be_enabled()
+        assert watched.page_errors == []
+
+
+def test_a_refused_save_landing_late_names_its_material_outside_the_other_draft(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條：晚到的是「沒有存」時，那一句也不准寫在後來打開的另一筆草稿上；寫在清單那一行並講是哪一筆。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        _hold_once(page, held, "put")
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        page.locator("#new-fixed").click()
+        page.locator("#material-label").fill("還在改的草稿")
+        route.fulfill(status=400, json={"error": "考卷擋下的"})
+        expect(page.locator("#list-state")).to_contain_text("沒有存「很硬的牆」")
+        expect(page.locator("#list-state")).to_contain_text("考卷擋下的")
+        expect(page.locator("#list-state")).to_have_class("notice")
+        expect(page.locator("#editor-message")).not_to_contain_text("沒有存")
+        expect(page.locator("#material-label")).to_have_value("還在改的草稿")
+        expect(page.locator("#save")).to_be_enabled()
+        assert watched.page_errors == []
+    assert _materials(tmp_path)["hard_wall"]["label"] == "硬牆"
+
+
+def test_reopening_the_entry_being_saved_shows_what_was_saved(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條的修補帶出來的：等存檔回覆時在清單上重開「正在存的那一筆」，編輯器裡是存檔前的舊內容；
+    回覆回來要換成存好的那一份（不然再按一次儲存就把舊名字寫回去）。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        _hold_once(page, held, "put")
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        _row(page, "user-list", "hard_wall", "open")
+        expect(page.locator("#material-label")).to_have_value("硬牆")
+        route.continue_()
+        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(page.locator("#material-label")).to_have_value("很硬的牆")
+        expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」")
+        assert watched.page_errors == []
+    assert _materials(tmp_path)["hard_wall"]["label"] == "很硬的牆"
+
+
+def test_a_failed_list_reload_after_a_good_save_leaves_the_editor_alone(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條審查擋的那條：伺服器收下存檔、接著重讀清單回 500。手上的清單還是存檔前那一份，
+    不准拿它那一列重開（編輯器變回舊名字卻說已儲存，再按儲存就把舊名字寫回磁碟）。"""
+    failing = [True]
+
+    def handle(route: Route) -> None:
+        if route.request.method == "GET" and failing:
+            failing.clear()
+            route.fulfill(status=500, json={"error": "考卷：清單讀不到"})
+        else:
+            route.continue_()
+
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        page.route("**/api/materials", handle)
+        page.locator("#save").click()
+        expect(page.locator("#list-state")).to_contain_text("讀不到材料庫")
+        expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」")
+        expect(page.locator("#material-label")).to_have_value("很硬的牆")
+        _saved(page)
+        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        assert watched.page_errors == []
+    assert _materials(tmp_path)["hard_wall"]["label"] == "很硬的牆"
+
+
+def test_a_second_save_while_one_is_out_sends_nothing(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條：存檔在路上時再叫一次儲存（頁面程式直接叫、或對停用的按鈕發合成點擊）不准再送一個存檔。"""
+    puts: list[Route] = []
+
+    def handle(route: Route) -> None:
+        if route.request.method == "PUT":
+            puts.append(route)
+        else:
+            route.continue_()
+
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        page.route("**/api/materials/hard_wall", handle)
+        page.locator("#save").click()
+        _wait_held(page, puts)
+        page.evaluate("() => { save(); }")
+        page.locator("#save").dispatch_event("click")
+        page.wait_for_timeout(500)
+        sent = len(puts)
+        for route in list(puts):
+            route.continue_()
+        expect(page.locator("#editor-message")).to_have_class("ok")
+        assert sent == 1, f"存檔在路上時又送了 {sent - 1} 個存檔"
+        assert watched.page_errors == []
+
+
+def test_a_new_draft_with_the_same_id_as_the_entry_being_saved_is_kept(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條：存一筆新材料（代號 new_material）途中按「新增」，新草稿拿到同一個代號；
+    它是還沒存的另一筆，回覆回來不准被當成「剛存的那一筆」換掉。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        page.locator("#new-fixed").click()
+        page.locator("#material-label").fill("第一筆")
+        page.locator("#provenance").select_option("literature")
+        page.locator("#source").fill("考卷")
+        page.locator("#fixed-kind").select_option("constant_impedance")
+        page.locator("#impedance").fill("41000")
+
+        def handle(route: Route) -> None:
+            if route.request.method == "PUT" and not held:
+                held.append(route)
+            else:
+                route.continue_()
+
+        page.route("**/api/materials/new_material", handle)
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        page.locator("#new-fixed").click()
+        expect(page.locator("#material-id")).to_have_value("new_material")
+        page.locator("#material-label").fill("第二筆草稿")
+        route.continue_()
+        expect(page.locator('#user-list tr[data-id="new_material"]')).to_contain_text("第一筆")
+        expect(page.locator("#material-label")).to_have_value("第二筆草稿")
+        expect(page.locator("#editor-title")).to_contain_text("新材料")
+        assert watched.page_errors == []
+    assert _materials(tmp_path)["new_material"]["label"] == "第一筆"
+
+
+def test_closing_the_editor_during_a_save_says_only_that_it_was_saved(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 2 條：存檔途中把編輯器關掉（不是換到別筆），回來不重開；清單那一行只講存好了哪一筆，
+    不准說「編輯器現在開著的是另一筆」。"""
+    held: list[Route] = []
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _hard_wall(page)
+        _hold_once(page, held, "put")
+        page.locator("#save").click()
+        route = _wait_held(page, held)
+        page.locator("#close").click()
+        route.continue_()
+        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 1 筆；已儲存「很硬的牆」")
+        expect(page.locator("#editor")).to_be_hidden()
+        assert watched.page_errors == []

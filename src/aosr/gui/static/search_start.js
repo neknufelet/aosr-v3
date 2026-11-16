@@ -339,13 +339,20 @@ async function loadScheme() {
   if (facts.zoned) byId("facts-list").append(el("li", {class: "notice", text: facts.zoned}));
   byId("scheme-facts").hidden = false;
   byId("speaker-fields").hidden = facts.has_speaker_setup;
-  byId("form-block").hidden = false;
   if (loadedScheme === schemeId) {
+    byId("form-block").hidden = false;
     say("scheme-message", `已重讀方案「${schemeId}」；表單照你填的留著`);
   } else {
-    loadedScheme = schemeId;
+    // 表單等上一場設定（沒搜過或讀失敗時是進階四格的預設）填好才亮出來：先亮的話，人一打字，
+    // 晚到的那一份就把剛打的字蓋掉（#1188 第 3 條）。
+    // 表單清掉的那一刻起就不算「讀過這一份」：等的時候改讀回上一份，要重新帶入，不是「表單照你填的留著」。
+    loadedScheme = null;
     clearForm();
-    await loadPrevious(facts);
+    await loadPrevious(reply.body);
+    // 等的時候又讀了一次方案（或讀失敗）：表單亮不亮歸後來那一次管，這一次到此為止。
+    if (facts !== reply.body) return;
+    loadedScheme = schemeId;
+    byId("form-block").hidden = false;
   }
   history.replaceState(null, "", `?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   changed();
@@ -356,7 +363,12 @@ async function loadPrevious(read) {
   const pick = byId("previous-pick");
   pick.replaceChildren();
   if (read !== facts) return;  // 等回覆時又讀了別份方案：這一份回覆不用
-  if (!reply.ok) { say("previous-message", reply.body.error, true); defaultAdvanced(); return; }
+  // 回 200 但內容不是清單（例如不是 JSON）也當讀失敗：照講一句、補預設，表單照樣亮得出來。
+  if (!reply.ok || !Array.isArray(reply.body.searches) || !Array.isArray(reply.body.skipped)) {
+    say("previous-message", reply.body.error || "之前的搜尋讀不懂（伺服器回的內容不對），預算與停止那幾格要自己填", true);
+    defaultAdvanced();
+    return;
+  }
   previous = reply.body.searches;
   byId("previous-row").hidden = !previous.length;
   for (const item of previous) {

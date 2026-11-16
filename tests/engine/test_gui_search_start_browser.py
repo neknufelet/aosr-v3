@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import search_jobs as search_jobs_module
 from aosr.gui.search_jobs import SearchJobs
@@ -173,8 +174,141 @@ def test_previous_search_of_the_same_scheme_fills_the_form(browser: Browser, tmp
         # 重讀同一份方案不清掉剛填的表單。
         page.click("#load-scheme")
         expect(page.locator("#scheme-message")).to_contain_text("表單照你填的留著")
+        expect(page.locator("#form-block")).to_be_visible()
         expect(page.locator("#time-budget")).to_have_value("1.5")
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def _wait_held(page: Page, held: list[Route], count: int = 1) -> Route:
+    for _ in range(200):
+        if len(held) >= count:
+            return held[0]
+        page.wait_for_timeout(50)
+    raise AssertionError(f"沒有等到 {count} 個「之前的搜尋」請求，只扣到 {len(held)} 個")
+
+
+@pytest.mark.parametrize("case", ["same-scheme", "never-searched", "previous-fails"])
+def test_typing_before_the_previous_search_arrives_is_not_overwritten(browser: Browser, tmp_path: Path, case: str) -> None:
+    """#1188 第 3 條：按「讀這份方案」後上一場設定還沒回來，這時打得進去的字，回來後不准被蓋掉
+    （同一份方案搜過＝整張表帶入；沒搜過或讀失敗＝進階四格的預設）。打不進去的做法也算對，但帶入要照常到。"""
+    data_dir = _data(tmp_path)
+    launcher = FakeLauncher()
+    if case == "same-scheme":
+        jobs = _jobs(data_dir, launcher)
+        job_id = cast(str, jobs.start(NAME, _rich_body())["job_id"])
+        _folder(jobs, job_id)
+        launcher.active.clear()
+        _finish(jobs, job_id, 0, start=1, auto=None)
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/search-start", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#scheme-pick")).to_have_value(NAME)
+        page.route("**/api/search-jobs/previous", lambda route: held.append(route))
+        page.click("#load-scheme")
+        expect(page.locator("#facts-list")).to_be_visible()
+        route = _wait_held(page, held)
+        typed: dict[str, str] = {}
+        if page.locator("#form-block").is_visible():
+            page.locator("#advanced").evaluate("details => { details.open = true; }")
+        for selector, text in (("#front-low", "1.23"), ("#budget", "77"), ("#startup", "99")):
+            field = page.locator(selector)
+            if field.is_visible() and field.is_enabled():
+                field.fill(text)
+                typed[selector] = text
+        if case == "previous-fails":
+            route.fulfill(status=500, json={"error": "考卷：之前的搜尋讀不到"})
+        else:
+            route.continue_()
+        # 那一行有字＝晚到的回覆整個處理完了（修前修後都有這個訊號）。
+        expect(page.locator("#previous-message")).not_to_be_empty()
+        expect(page.locator("#form-block")).to_be_visible()
+        for selector, text in typed.items():
+            expect(page.locator(selector)).to_have_value(text)
+        if not typed:
+            expect(page.locator("#budget")).to_have_value("40" if case == "same-scheme" else "")
+            expect(page.locator("#startup")).not_to_have_value("")
+            if case != "same-scheme":
+                expect(page.locator("#startup")).to_have_value("12")
+        assert watched.page_errors == []
+
+
+def test_a_stale_previous_reply_does_not_show_the_form_of_a_failed_newer_read(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 3 條的修補帶出來的：表單改成等上一場設定回來才亮；等的時候換讀另一份方案而且讀失敗，
+    舊那一次的回覆晚到不准把表單亮出來（讀失敗時表單要收著，不然拿得到上一份的表單開在這一份上）。"""
+    data_dir = _data(tmp_path, "other")
+    launcher = FakeLauncher()
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/search-start", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#scheme-pick option")).to_have_count(2)
+        page.select_option("#scheme-pick", NAME)
+        page.route("**/api/search-jobs/previous", lambda route: held.append(route))
+        page.click("#load-scheme")
+        expect(page.locator("#facts-list")).to_be_visible()
+        route = _wait_held(page, held)
+        page.route("**/api/search-jobs/schemes/other", lambda route: route.abort())
+        page.select_option("#scheme-pick", "other")
+        page.click("#load-scheme")
+        expect(page.locator("#scheme-message")).to_contain_text("連不到網頁伺服器")
+        expect(page.locator("#form-block")).to_be_hidden()
+        with page.expect_response("**/api/search-jobs/previous") as landed:
+            route.continue_()
+        landed.value.finished()
+        page.wait_for_timeout(300)
+        expect(page.locator("#form-block")).to_be_hidden()
+        expect(page.locator("#scheme-message")).to_contain_text("連不到網頁伺服器")
+        # 之後好好讀一次，表單照常亮、進階四格的預設照常到。
+        page.unroute("**/api/search-jobs/schemes/other")
+        page.unroute("**/api/search-jobs/previous")
+        page.click("#load-scheme")
+        expect(page.locator("#scheme-message")).to_have_text("已讀方案「other」")
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#startup")).to_have_value("12")
+        assert watched.page_errors == []
+
+
+def test_reading_the_first_scheme_again_while_the_second_is_loading_fills_it_afresh(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 3 條的修補帶出來的：甲讀好後改讀乙，乙的上一場設定還沒回來又改讀回甲；這時表單已經被乙清過，
+    不准當成「重讀同一份、表單照你填的留著」，要重新帶入甲的（這裡甲沒搜過＝進階四格的預設）。"""
+    data_dir = _data(tmp_path, "other")
+    launcher = FakeLauncher()
+    held: list[Route] = []
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/search-start?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#startup")).to_have_value("12")
+        page.fill("#front-low", "0.6")
+        page.route("**/api/search-jobs/previous", lambda route: held.append(route))
+        page.select_option("#scheme-pick", "other")
+        page.click("#load-scheme")
+        _wait_held(page, held)
+        page.select_option("#scheme-pick", NAME)
+        page.click("#load-scheme")
+        # 兩個「之前的搜尋」請求（乙的、重讀甲的）都扣住了才放行，不賭時間。
+        _wait_held(page, held, count=2)
+        for route in list(held):
+            route.continue_()
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#scheme-message")).to_have_text(f"已讀方案「{NAME}」")
+        expect(page.locator("#startup")).to_have_value("12")
+        expect(page.locator("#front-low")).to_have_value("")
+        assert watched.page_errors == []
+
+
+def test_a_previous_reply_that_is_not_json_still_shows_the_form(browser: Browser, tmp_path: Path) -> None:
+    """#1188 第 3 條的修補帶出來的：表單改成等「之前的搜尋」回來才亮；回 200 但不是 JSON 時也要亮（講一句、補預設），
+    不准表單永遠不出來又沒有訊息。"""
+    data_dir = _data(tmp_path)
+    with _serve(data_dir, FakeLauncher()) as url, _open(browser, f"{url}/search-start", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#scheme-pick")).to_have_value(NAME)
+        page.route("**/api/search-jobs/previous", lambda route: route.fulfill(status=200, body="<html>not json</html>"))
+        page.click("#load-scheme")
+        expect(page.locator("#form-block")).to_be_visible()
+        expect(page.locator("#previous-message")).to_contain_text("不是 JSON")
+        expect(page.locator("#previous-message")).to_have_class(re.compile(r"\bnotice\b"))
+        expect(page.locator("#startup")).to_have_value("12")
+        assert watched.page_errors == []
 
 
 def test_form_problems_name_the_field_and_busy_blocks_start(browser: Browser, tmp_path: Path) -> None:
