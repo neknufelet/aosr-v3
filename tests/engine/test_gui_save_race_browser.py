@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Page, Request, Route, expect
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_input_setup_browser import _filled
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 
 A, B, COPY = "race-a", "race-b", "race-copy"
@@ -432,4 +433,52 @@ def test_a_field_changed_during_the_save_gets_its_preview_once_the_page_unlocks(
         page.wait_for_function("inputPreview.field_values['room-Lx'].value === 5.5")
         _settle(page)
         assert seen.count("POST /api/input-preview") == 1
+        assert watched.page_errors == []
+
+
+def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unlock(tmp_path: Path, browser: Browser) -> None:
+    """#1193：表單有一格收不下（預覽回 400）時按「另存新名字」，卡在圖面檢查那一步去按「載入範本」：被擋下、旁邊照講。
+    放行後另存被拒、頁面解鎖、替目前這份補問一次預覽（也是 400，訊息列再換一次）：等那一次回覆處理完，
+    「載入範本」旁邊被擋的那一句與「另存新名字」旁邊沒有另存的原因都還在，訊息列講的是表單的問題。"""
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        # 開機那一份範例就夠：地板換成材料構造、第一層厚度清空，預覽就回 400（房間尺寸亂填預覽不拒）。
+        _filled(page, "#material-kind-floor", "assembly")
+        with page.expect_response("**/api/input-preview") as preview:
+            page.locator("#layer-floor-0-thickness_m").fill("")
+        assert preview.value.status == 400
+        expect(page.locator("#messages")).to_have_class("notice")
+        page.locator("#save-as-id").fill(COPY)
+        held = _hold_first(page, "**/api/plan", "POST")
+        asked_again: list[Route] = []
+        page.route("**/api/input-preview", lambda route: asked_again.append(route))
+        with page.expect_request("**/api/plan"):
+            page.locator("#save-as").click()
+        _press(page, "#load-template")
+        page.wait_for_function("document.getElementById('template-note').textContent !== ''")
+        refused = "上一個動作還沒做完，沒有載入範本；等它做完再按一次「載入範本」"
+        assert page.locator("#template-note").inner_text() == refused
+        # 補問那個請求攔在半路：這時另存自己的話都寫完了，才開始盯訊息列，放行後它一被改寫就是補問的回覆處理完了。
+        with page.expect_request("**/api/input-preview"):
+            held[0].continue_()
+        page.wait_for_function(UNLOCKED)
+        not_saved = page.locator("#save-as-note").inner_text()
+        assert not_saved.startswith("沒有另存：") and page.locator("#template-note").inner_text() == refused
+        page.evaluate("""() => {
+            window.saidAfterUnlock = false;
+            new MutationObserver(() => { window.saidAfterUnlock = true; }).observe(
+                document.getElementById("messages"), {childList: true, characterData: true, subtree: true, attributes: true});
+        }""")
+        assert len(asked_again) == 1
+        with page.expect_response("**/api/input-preview") as reply:
+            asked_again[0].continue_()
+        assert reply.value.status == 400
+        page.wait_for_function("window.saidAfterUnlock")
+        assert page.locator("#template-note").inner_text() == refused
+        assert page.locator("#template-note").get_attribute("class") == "notice"
+        assert page.locator("#save-as-note").inner_text() == not_saved
+        assert page.locator("#save-as-note").get_attribute("class") == "notice"
+        assert page.locator("#messages").get_attribute("class") == "notice"
+        assert "地板材料構造 › 第 1 層" in page.locator("#messages").inner_text()
+        assert not (tmp_path / "schemes" / f"{COPY}.json").exists()
         assert watched.page_errors == []
