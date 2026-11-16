@@ -117,7 +117,7 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         after = {str(zone["id"]): zone for zone in _zones(page, "x0")}
         modes = _modes(page, "x0")
         right = [key for key, zone in after.items() if _region(zone) == "right" and key != "z2"]
-        # #1176 起改成交給電腦挑就帶好一份明確清單（三種內建玻璃棉＋不貼）。
+        # #1176 起改成由程式最佳化就帶好一份明確清單（三種內建玻璃棉＋不貼）。
         allowed = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         assert right and all(modes[key] == {"mode": "search", "allowed": allowed, "max_depth_m": 0.08} for key in right)
         _save(page, "room109")
@@ -349,7 +349,7 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         # 這一塊 0.03：每一組都放不下（「不貼」不算救）→ 紅、擋拿去搜尋，原文講哪一條擋。
         _depth(page, "#depth-zone-x0-auto1", "0.03")
         _red(page, "auto1")
-        expect(page.locator("#zone-limits-summary")).to_contain_text("電腦能挑的材料沒有一種放得進深度上限，這一區什麼都貼不上")
+        expect(page.locator("#zone-limits-summary")).to_contain_text("程式能選的材料沒有一種放得進深度上限，這一區什麼都貼不上")
         expect(page.locator("#zone-limits-summary")).to_contain_text("0.03 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺")
         page.locator("#elevation-panel").screenshot(path=str(shots / "depth-nothing-fits-red.png"))
         assert watched.page_errors == [] and watched.console_errors == []

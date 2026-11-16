@@ -3,7 +3,7 @@
 
    算進來的區：前、後、左、右四面牆的區，扣掉門、窗（呼叫的人先濾好，照「前牆、後牆、左牆、右牆」、每面照號碼排好再交進來）。
    每一區一個「做法鍵」（zoneMethodKey）：
-   - 交給電腦挑：電腦可以挑的那幾種當集合比（順序、重複不算）；
+   - 由程式最佳化：程式可以選的那幾種當集合比（順序、重複不算）；
    - 不貼，保留原樣：一個鍵；
    - 指定貼一種：這一區現在是材料庫哪一筆；認不到哪一筆就拿貼上去的那幾層比——指定貼不同的材料算不同的做法；
    - 指定貼、但材料就是原牆原樣（設計檔沒列到的區照規矩當指定貼，可是上面什麼都沒貼）：跟「不貼，保留原樣」同一個鍵
@@ -11,7 +11,7 @@
    規則＝出現最多次的做法鍵；平手取交進來的順序裡最先出現的那一個。另外指定＝做法鍵跟規則不同的區，同一個鍵一組，
    組照最先出現的順序排。
 
-   清單卡（zoneSearchList）：交給電腦挑的每一區各存一份清單，畫面只列一份——規則本身是交給電腦挑就列規則那一份，
+   清單卡（zoneSearchList）：由程式最佳化的每一區各存一份清單，畫面只列一份——規則本身是由程式最佳化就列規則那一份，
    不然列最多區用的那一份（平手取最先出現的）；清單跟它不同的區另外數出來（「有 N 區另外選」）。 */
 
 // 物件的鍵排過序再寫成字串（值是 null 的鍵當沒有）：兩份材料內容一樣，字串就一樣。
@@ -28,7 +28,7 @@ function zoneFixedIdentity(material, libraryId) {
   if (libraryId) return `library:${libraryId}`;
   return material.kind === "mounted_on_wall" ? `layers:${zoneCanonicalJson(material.layers)}` : `bare:${zoneCanonicalJson(material)}`;
 }
-// 一區的做法鍵。zone：{mode, allowed（交給電腦挑的清單；讀不出是哪幾種時 null）, fixed（zoneFixedIdentity 的結果）}。
+// 一區的做法鍵。zone：{mode, allowed（由程式最佳化的清單；讀不出是哪幾種時 null）, fixed（zoneFixedIdentity 的結果）}。
 function zoneMethodKey(zone) {
   if (zone.mode === "search") return `search:${zone.allowed ? [...new Set(zone.allowed)].sort().join(",") : "?"}`;
   if (zone.mode === "keep_original" || zone.fixed.startsWith("bare:")) return "keep_original";
@@ -55,8 +55,8 @@ function inferOtherWalls(zones, keptKey = null) {
   if (!rule) for (const group of groups) if (!rule || group.zones.length > rule.zones.length) rule = group;
   return {rule, special: groups.filter(group => group !== rule)};
 }
-// 清單卡：{zones: 全部交給電腦挑的區, common: 畫面列的那一份（那一組）或 null, different: 清單跟它不同的區}。
-// ruleKey：規則的做法鍵；規則是交給電腦挑、而且真的有區用那一份時，列的就是它。
+// 清單卡：{zones: 全部由程式最佳化的區, common: 畫面列的那一份（那一組）或 null, different: 清單跟它不同的區}。
+// ruleKey：規則的做法鍵；規則是由程式最佳化、而且真的有區用那一份時，列的就是它。
 function zoneSearchList(zones, ruleKey) {
   const search = zones.filter(zone => zone.mode === "search");
   const groups = zoneMethodGroups(search);

@@ -1,6 +1,6 @@
 /* 「這間房貼什麼」（#1176 第 C 支，照第五版樣稿）：六面攤開在左邊（四面牆站在房間裡看、地板天花從上往下看），顏色看狀態，
    點圖選區（再點別塊加選、再點一次取消）；右邊一欄：選了區就是那幾區的面板（三個做法），沒選就是提示；再來「其他牆面」
-   那條規則、「另外指定的 N 區」、天花地板門窗一行，再來「交給電腦挑的每一區，都從這幾種裡挑」那張清單卡；最底下一條結果列。
+   那條規則、「另外指定的 N 區」、天花地板門窗一行，再來「由程式最佳化的每一區，都從這幾種裡選」那張清單卡；最底下一條結果列。
    規則是從各區現算的（zone_rules.js），設計檔沒有「跟著規則」這一格：改規則＝把新做法寫到每一個沒另外指定的區。
 
    住在方案輸入頁裡當一個整頁的畫面（#zone-page）：打開時把原本那一頁藏起來，方案、每一區的做法、材料庫、區的號碼與名字
@@ -85,9 +85,9 @@ function overviewRoles() {
   return Object.values(named).every(Boolean) ? named : {front: "x0", back: "xL", left: "y0", right: "yL"};
 }
 // 一面的每一區（照號碼排）：做法、材料、號碼與名字、畫面上的框（公尺，a 往右、b 往上）、面積、做法鍵（zone_rules.js）、
-// 圖上畫哪一種顏色。mode／allowed／fixed 三格是交給推法用的：沒寫清單的交給電腦挑照伺服器的意思（全部可調＋不貼）比；
+// 圖上畫哪一種顏色。mode／allowed／fixed 三格是交給推法用的：沒寫清單的由程式最佳化照伺服器的意思（全部可調＋不貼）比；
 // 指定貼的是哪一種只看貼上去的（沒貼東西的一律算原牆原樣，跟「不貼」同一個做法）。
-// shown：search 交給電腦挑、fixed 指定貼一種（真的有貼東西）、still 保留原樣（不貼，或指定貼但其實沒貼；地毯也算）、
+// shown：search 由程式最佳化、fixed 指定貼一種（真的有貼東西）、still 保留原樣（不貼，或指定貼但其實沒貼；地毯也算）、
 // opening 門窗（沒被改成別的做法時畫斜線）。
 function faceZones(wall) {
   const {views, wallSize, screenBox} = window.elevationGeometry;
@@ -110,7 +110,7 @@ function faceZones(wall) {
 }
 // 交給推法的那幾區：四面牆照前、後、左、右，每面照號碼，扣掉門窗。
 function ruleZones(faces, roles) { return WALL_ORDER.flatMap(role => faces[roles[role]].filter(item => !item.opening)); }
-// 六面全部交給電腦挑的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
+// 六面全部由程式最佳化的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
 function searchZones(faces, roles) {
   return [...WALL_ORDER.map(role => roles[role]), "ceiling", "floor"].flatMap(wall => faces[wall]).filter(item => item.mode === "search");
 }
@@ -386,15 +386,15 @@ function toggleSelected(id) {
   if (draftTouched && next.length) { selected = next; renderZoneOverview(); return; }
   select(next);
 }
-// 這一面交給電腦挑時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
+// 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
 function listForWall(wall, list) {
   if (!list) return startingAllowed(wall);
   const fit = list.filter(id => fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id)));
   return fit.length ? fit : [ZONE_NONE];
 }
-// 畫面上那一份清單（清單卡列的）；現在沒有哪一區交給電腦挑就是 null（新的區照「三種玻璃棉＋不貼」起）。
+// 畫面上那一份清單（清單卡列的）；現在沒有哪一區由程式最佳化就是 null（新的區照「三種玻璃棉＋不貼」起）。
 function shownList() { return view.list.common?.zones[0].allowed ?? null; }
-// 把好幾區一次改成同一個做法。method：{mode, materialId（指定貼哪一筆；空的＝照現在貼的不換）, allowed（交給電腦挑的清單）}。
+// 把好幾區一次改成同一個做法。method：{mode, materialId（指定貼哪一筆；空的＝照現在貼的不換）, allowed（由程式最佳化的清單）}。
 // 方案那幾區的材料先交伺服器一批換（指定貼：貼上那一筆；其餘兩種：放回原樣），全部成了才改做法；不成就一區都不動、照講。
 // 等伺服器回那一批的時候整頁鎖住（inert：點圖、按套用都沒作用），所以同時只會有一批在路上。
 // written：做法寫完之後、第一次重畫之前要同步做的事（這一頁自己的變數在這裡改；平面圖檢查回來之後不准再寫）。
@@ -472,14 +472,14 @@ async function resetSpecial() {
 }
 async function applyDraft() {
   const items = chosenItems();
-  // 交給電腦挑：寫畫面上那一份清單（規則本身是交給電腦挑時就是規則那一份，所以選它＝跟其他牆面一樣）。
+  // 由程式最佳化：寫畫面上那一份清單（規則本身是由程式最佳化時就是規則那一份，所以選它＝跟其他牆面一樣）。
   const method = draft.mode === "search" ? {mode: "search", allowed: shownList()} : {mode: draft.mode, materialId: draft.materialId};
   await applyMethod(items, method, () => select([]));
 }
-// 改清單：寫進每一個交給電腦挑的區（各面貼不了的拿掉），跟做法表改清單一樣重判限制。
+// 改清單：寫進每一個由程式最佳化的區（各面貼不了的拿掉），跟做法表改清單一樣重判限制。
 function writeList(list) {
   for (const item of view.list.zones) setZoneSetting(item.wall, item.key, {...zoneSetting(item.wall, item.key), mode: "search", allowed: listForWall(item.wall, list)});
-  // 規則本身是交給電腦挑：清單換了、做法鍵跟著換，規則還是那幾區。
+  // 規則本身是由程式最佳化：清單換了、做法鍵跟著換，規則還是那幾區。
   if (view.inferred.rule?.mode === "search") keptRuleZone = view.inferred.rule.zones[0].id;
   zoneLastAllowed = [...list];
   unsaved = true;
@@ -594,11 +594,11 @@ function panelCard() {
       body.append(material);
     }
     if (mode === "search" && draft?.mode === "search") {
-      // 選到交給電腦挑：講電腦從哪幾種裡挑（套用時寫進去的就是這一份；各面能貼的不同就各面各寫）。
+      // 選到由程式最佳化：講程式從哪幾種裡選（套用時寫進去的就是這一份；各面能貼的不同就各面各寫）。
       const lists = walls.map(wall => listForWall(wall, shownList()));
       const same = lists.every(list => list.join() === lists[0].join());
-      const from = el("div", "zv-from", same ? `電腦從這 ${lists[0].length} 種裡挑：${lists[0].map(listName).join("、")}`
-        : walls.map((wall, index) => `${wallNames[wall]}從這 ${lists[index].length} 種裡挑：${lists[index].map(listName).join("、")}`).join("；"));
+      const from = el("div", "zv-from", same ? `程式從這 ${lists[0].length} 種裡選：${lists[0].map(listName).join("、")}`
+        : walls.map((wall, index) => `${wallNames[wall]}從這 ${lists[index].length} 種裡選：${lists[index].map(listName).join("、")}`).join("；"));
       from.id = "zone-panel-search-from"; body.append(from);
     }
     row.append(radio, body, el("span", `zv-sw ${shownOf(mode)}`));
@@ -717,7 +717,7 @@ function briefRules() {
   return card;
 }
 function listName(id) { return id === ZONE_NONE ? "也可以不貼（保留原樣）" : vprWords(choiceName(id)); }
-// 清單卡管哪幾區：規則本身是交給電腦挑就寫「沒另外指定的牆區」，其餘的區點名。
+// 清單卡管哪幾區：規則本身是由程式最佳化就寫「沒另外指定的牆區」，其餘的區點名。
 function listWho() {
   const {list, inferred} = view;
   const line = el("div", "zv-who"); line.id = "zone-list-who";
@@ -753,15 +753,15 @@ function listCard(compact) {
   card.dataset.count = String(list.zones.length);
   if (!list.zones.length) {
     card.classList.add("empty");
-    const head = el("h2"); head.append(el("i", "zv-sw search"), "現在沒有哪一區交給電腦挑");
+    const head = el("h2"); head.append(el("i", "zv-sw search"), "現在沒有哪一區由程式最佳化");
     card.append(head);
     return card;
   }
-  const head = el("h2"); head.append(el("i", "zv-sw search"), "交給電腦挑的每一區，都從這幾種裡挑");
+  const head = el("h2"); head.append(el("i", "zv-sw search"), "由程式最佳化的每一區，都從這幾種裡選");
   card.append(head);
   const allowed = shownList();
   if (!allowed) {
-    card.append(listWho(), el("div", "zv-who", "電腦從全部可調材料與「不貼」裡挑（材料庫沒讀全，列不出是哪幾種）"));
+    card.append(listWho(), el("div", "zv-who", "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）"));
     return card;
   }
   if (compact) {
@@ -780,17 +780,17 @@ function listCard(compact) {
     check.onchange = () => {
       const next = allowed.filter(other => other !== id);
       if (next.length) { writeList(next); return; }
-      zoneNote(`清單至少要留一種；不想讓電腦挑，就把那幾區改成「${ZONE_MODE_WORDS.fixed}」或「${KEEP_WORDS}」`, "notice");
+      zoneNote(`清單至少要留一種；不想讓程式選，就把那幾區改成「${ZONE_MODE_WORDS.fixed}」或「${KEEP_WORDS}」`, "notice");
       renderZoneOverview();
     };
     row.append(check, el("span", null, listName(id)));
     checks.append(row);
   }
   card.append(checks);
-  // 清單每一種都是固定成品：電腦沒得挑（同做法表的紅框），「拿去搜尋」也按不下去。
+  // 清單每一種都是固定成品：程式沒得選（同做法表的紅框），「拿去搜尋」也按不下去。
   if (allowedProblem(allowed)) {
     const problem = el("p", "zv-problem"); problem.id = "zone-list-problem"; problem.setAttribute("role", "alert");
-    problem.textContent = `${allowedProblem(allowed)}電腦要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓電腦挑：點圖上那一區，改成「${ZONE_MODE_WORDS.fixed}」。`;
+    problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：點圖上那一區，改成「${ZONE_MODE_WORDS.fixed}」。`;
     card.append(problem);
   }
   if (list.different.length) {
@@ -865,10 +865,10 @@ function resultBar() {
   if (windows) still.push(`窗 ${windows} 扇`);
   const rest = el("span", "zv-part"); rest.id = "zone-result-still";
   rest.append(el("span", "zv-sw still"), `保留原樣：${still.length ? still.join("、") : "沒有"}`);
-  // 「拿去搜尋」照做法表那一顆的擋法：沒有區交給電腦挑、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
+  // 「拿去搜尋」照做法表那一顆的擋法：沒有區由程式最佳化、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
   const go = button("zv-go", "拿去搜尋", "zone-page-search", () => action(sendToSearch));
   // 按不下去時旁邊一句講為什麼（細節在上面那一行紅字）。
-  const why = !of("search").length ? "還沒有交給電腦挑的區" : stuckZoneNames().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
+  const why = !of("search").length ? "還沒有由程式最佳化的區" : stuckZoneNames().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
   go.disabled = Boolean(why);
   // 原因那一句收在按鈕正下方（小字一行），不跟前面三項搶同一行的寬度。
   const box = el("span", "zv-gobox"); box.append(go);

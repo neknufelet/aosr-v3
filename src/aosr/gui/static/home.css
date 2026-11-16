@@ -134,7 +134,7 @@ button.archive-danger:hover{background:#fff0f0}
 .zone-choice{display:grid;grid-template-columns:auto 1fr;column-gap:.4rem}
 .zone-choice small{grid-column:2;color:#5b6670}
 .zone-numbers summary{color:#5b6670;font-size:.9em}
-/* 交給電腦挑的清單（#1176）：每一種一個方塊、按 × 拿掉；常用組合一排按鈕。 */
+/* 由程式最佳化的清單（#1176）：每一種一個方塊、按 × 拿掉；常用組合一排按鈕。 */
 .zone-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.3rem 0}
 .zone-chip{display:inline-grid;grid-template-columns:1fr auto;column-gap:.4rem;align-items:center;border:1px solid #e0a526;
   background:#fff8e6;border-radius:6px;padding:.2rem .3rem .2rem .55rem;max-width:26rem}

@@ -99,7 +99,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-group button.zv-btn{font-size:13.5px;padding:1px 10px;margin-top:2px}
 #zone-page button.zv-link{border:0;border-radius:0;background:none;padding:0;font:inherit;font-size:13.5px;color:var(--fixed);
   text-decoration:underline;text-underline-offset:3px;white-space:nowrap;cursor:pointer}
-/* 清單自己一張卡：管所有交給電腦挑的區 */
+/* 清單自己一張卡：管所有由程式最佳化的區 */
 #zone-page .zv-list{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 18px 11px}
 #zone-page .zv-list h2{font-size:16px;font-weight:600;margin:0;display:flex;align-items:center;gap:9px}
 #zone-page .zv-list.empty h2{font-weight:400;font-size:15px}
@@ -180,7 +180,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-methods-row button{font-size:16px;font-weight:600;padding:9px 16px;border-radius:6px;border:1px solid #17212b;background:#17212b;color:#fff;cursor:pointer}
 #zone-table-fold{margin-top:10px}
 #zone-table-fold>summary{cursor:pointer;color:#555}
-/* 另外指定的記號、正在改的號碼、灰掉的原因、電腦從哪幾種挑 */
+/* 另外指定的記號、正在改的號碼、灰掉的原因、程式從哪幾種選 */
 #zone-page .zv-apart{fill:none;stroke:#fff;stroke-width:2;stroke-dasharray:6 4;pointer-events:none}
 #zone-page .zv-zone.still .zv-apart,#zone-page .zv-zone.search .zv-apart{stroke:var(--ink)}
 #zone-page .zv-sw.apart{background:var(--fixed);border:1px solid var(--ink);outline:1.5px dashed #fff;outline-offset:-4px}
