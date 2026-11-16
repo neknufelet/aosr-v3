@@ -609,11 +609,11 @@ def test_two_zones_pasted_with_different_materials_keep_their_own_when_picked_to
         _click_zone(page, "yL/z1")
         _click_zone(page, "ceiling/z2")
         expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
-        expect(page.locator("#zone-panel-material")).to_have_value("")
         _apply(page)
         assert cast(list[str], page.evaluate(pasted)) == before
         _click_zone(page, "yL/z1")
         _click_zone(page, "ceiling/z2")
+        expect(page.locator("#zone-panel-material")).to_have_value("")
         page.locator("#zone-panel-cancel").click()
         assert cast(list[str], page.evaluate(pasted)) == before
         assert watched.page_errors == [] and watched.console_errors == []
