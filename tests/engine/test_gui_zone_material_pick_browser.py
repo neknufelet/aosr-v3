@@ -557,8 +557,15 @@ def test_zones_with_different_lists_get_one_list_card_each_and_a_tick_on_a_card_
         expect(page.locator("#zone-list-2-who")).to_have_text("這一張管 1 區：天花 1 主位上面那塊")
         assert page.locator("#zone-list-checks label").evaluate_all(choices) == ONLY_48K
         assert page.locator("#zone-list-2-checks label").evaluate_all(choices) == WOOLS
-        # 前牆那張加 24K：只有前牆五區多一種。
+        # 前牆那張拿掉「也可以不貼」：只有前牆五區少一種，天花那一區的「不貼」還在；再加回去。
+        page.locator("#zone-list-check-none").click()
+        _settled(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, ["glass_wool_48k"]), "ceiling/z1": WOOLS}
         page.locator("#zone-list-add").click()
+        page.locator("#zone-list-add-none").click()
+        _settled(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, ONLY_48K), "ceiling/z1": WOOLS}
+        # 前牆那張加 24K：只有前牆五區多一種（「加別種材料」那一格還開著）。
         page.locator("#zone-list-add-glass_wool_24k").click()
         _settled(page)
         longer = [*ONLY_48K, "glass_wool_24k"]
