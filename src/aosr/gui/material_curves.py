@@ -72,7 +72,7 @@ def _physics_material(entry: LibraryEntry) -> tuple[SurfaceMaterial, str | None]
     if isinstance(entry, TunableLayersEntry):
         tuned = "、".join(f"{item.words()} {item.initial:g}（可調 {item.range[0]:g}～{item.range[1]:g}）" for item in entry.variables)
         return initial_assembly(entry), (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
-                                         "電腦挑這種材料還沒接上，這條只供對照。")
+                                         "程式最佳化這種材料還沒接上，這條只供對照。")
     if not isinstance(entry, OptimizableEntry):
         return entry.surface_material(), None
     cavity = None if entry.cavity is None else entry.cavity.initial_m

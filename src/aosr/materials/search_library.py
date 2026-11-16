@@ -168,8 +168,8 @@ def refuse_tunable_layers(ids: Sequence[str | None], entries: Sequence[LibraryEn
     for item in ids:
         if item is not None and item in tunable:
             found = tunable[item]
-            raise MaterialsRefused(f"{_name(found)}是{found.structure_label()}：還不能交給電腦挑，搜尋那一層還沒接（#1200 第 2 支）；"
-                                   "先從准用清單或選的材料組拿掉它，其他材料照舊可以交給電腦挑")
+            raise MaterialsRefused(f"{_name(found)}是{found.structure_label()}：還不能由程式最佳化，搜尋那一層還沒接上；"
+                                   "先從准用清單或選的材料組拿掉它，其他材料照舊可以由程式最佳化")
 
 
 def library_preset(entry: OptimizableEntry) -> LibraryPreset:

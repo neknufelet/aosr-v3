@@ -44,7 +44,7 @@ _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
 VPR = "steel_vpr"
 WOOL = "user_wool_32k"
 PANEL = "user_panel"
-REFUSAL = "材料「鋼板 VPR（自編）」（steel_vpr）是可調 VPR：還不能交給電腦挑，搜尋那一層還沒接（#1200 第 2 支）"
+REFUSAL = "材料「鋼板 VPR（自編）」（steel_vpr）是可調 VPR：還不能由程式最佳化，搜尋那一層還沒接上"
 
 # 主線 aff9e22e 的產品程式上 artifacts(…, with_vpr=False) 每一樣的（SHA-256, 位元組數）；樹外
 # baseline/ 存的是同一批位元組。
@@ -345,7 +345,7 @@ def test_plan_refuses_a_tunable_vpr_in_an_allowed_list_in_plain_words(tmp_path: 
         "x0": {"r0_c0": ZoneDesign(mode="search", allowed=("glass_wool_48k", VPR, "none")), "r1_c1": ZoneDesign(mode="search")}})
     with pytest.raises(PlanRefused) as caught:
         _plan(tmp_path, design, GradientRequest())()
-    assert str(caught.value) == REFUSAL + "；先從准用清單或選的材料組拿掉它，其他材料照舊可以交給電腦挑"
+    assert str(caught.value) == REFUSAL + "；先從准用清單或選的材料組拿掉它，其他材料照舊可以由程式最佳化"
 
 
 def test_plan_refuses_a_tunable_vpr_picked_as_the_family(tmp_path: Path) -> None:
@@ -377,4 +377,6 @@ def test_a_zone_cannot_be_pinned_to_a_tunable_vpr(tmp_path: Path) -> None:
     client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
     reply = client.post("/api/zone-material", json={"scheme": _cut(PRESET), "wall": "x0", "zone": "z1", "choice": "fixed",
                                                     "material_id": VPR})
-    assert reply.status_code == 400 and "是可調 VPR" in reply.json()["error"], reply.text
+    assert reply.status_code == 400, reply.text
+    assert reply.json()["error"] == ("「鋼板 VPR（自編）」是可調 VPR：還不能用在分區上（程式最佳化這種材料還沒接上）；"
+                                     "要整塊貼請另存成固定材料的多層構造")

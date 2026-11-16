@@ -224,7 +224,7 @@ class ZoneMaterialHandlers:
         if found is None:
             raise ZoneMaterialError(f"材料庫裡沒有「{material_id}」這一筆", 404)
         if isinstance(found, TunableLayersEntry):
-            raise ZoneMaterialError(f"「{found.label}」是{found.structure_label()}：還不能用在分區上（電腦挑這種材料還沒接上，#1200 第 2 支）；"
+            raise ZoneMaterialError(f"「{found.label}」是{found.structure_label()}：還不能用在分區上（程式最佳化這種材料還沒接上）；"
                                     "要整塊貼請另存成固定材料的多層構造")
         if not isinstance(found, FixedEntry):
             raise ZoneMaterialError(f"「{found.label}」是可最佳化材料：只能放進「交給搜尋」的准用清單，不能指定成固定材料")
