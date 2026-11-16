@@ -10,6 +10,7 @@ const WALLS = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終
 const MODE_WORDS = {fixed: "固定這一組材料", keep_original: "保留原牆", search: "交給搜尋"};
 const WHOLE_WALL = "whole_wall";
 const RUNNING_BUILD = new Set(["preparing", "building", "fixed_checking", "validating", "checking", "installing", "stopping"]);
+const PLAN_BLOCKS = ["form-block", "plan-block", "surrogate-block", "start-block"];
 const RUN_WORDS = {running: "一般計算中", done: "一般計算做完了", failed: "一般計算失敗", stopped: "一般計算已停止",
   interrupted: "一般計算中斷", unknown: "一般計算狀態讀不到"};
 
@@ -21,6 +22,10 @@ let defaults = null;
 let lastPreview = null;
 // 最後一次預覽送出的選項（JSON 字串）：開跑只送這一份；表單改過就要先重新預覽，畫面上的預覽才是真的會跑的。
 let previewedRequest = null;
+// 每按一次「讀這份方案的開跑選項」（含頁面開啟、從舊場次跳去重建）加一：換方案那一刻起，之前的預覽與還在路上的回覆都不算數
+// （#1188 第 1 條）。每一份預覽記它是哪一份方案、第幾次讀的（previewedFor）；開跑只認跟現在對得上的那一份。
+let planSeq = 0;
+let previewedFor = null;
 // 伺服器最後一次說的整機忙碌（一跑代號或服務名）；建替身那一顆按鈕的停用要同時看它，不被建模狀態蓋掉。
 let machineBusy = null;
 let watchedBuild = null;
@@ -58,10 +63,13 @@ function say(id, text, bad = false) {
 }
 
 // 伺服器回的錯誤一律照原文；不是 JSON（例如 500）時說狀態碼。等太久先說在等什麼（開跑鎖沒有逾時）。
-async function api(path, body = undefined, messageId = null) {
+// ``wanted``：這一問還算不算數（換了方案就不算，#1188 第 1 條）；不算數的不寫「還在等」——它的回覆會被丟掉，那一句沒人清。
+async function api(path, body = undefined, messageId = null, wanted = () => true) {
   const options = body === undefined ? {} :
     {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)};
-  const slow = messageId ? setTimeout(() => say(messageId, "還在等伺服器回應（可能在等開跑鎖：別的網頁正在開一跑）…"), SLOW_MS) : null;
+  const slow = messageId ? setTimeout(() => {
+    if (wanted()) say(messageId, "還在等伺服器回應（可能在等開跑鎖：別的網頁正在開一跑）…");
+  }, SLOW_MS) : null;
   try {
     const reply = await fetch(path, options);
     let data;
@@ -176,16 +184,31 @@ function request() {
   return value;
 }
 
+// 畫面上的預覽還算不算數：是現在這份方案、這一次讀出來的才算。
+function previewHolds() {
+  return previewedRequest !== null && Boolean(lastPreview) && previewedFor !== null &&
+    previewedFor.scheme === schemeId && previewedFor.seq === planSeq;
+}
+
+// 回傳這一次有沒有落地（讀到、而且等的時候沒有再換一份）；重建替身那一條路照它決定要不要往下走。
 async function loadPlan() {
   // 換方案：上一份打的預算不帶過去（#1082 段 2-9），這一份照它自己的預設。
   if (byId("scheme-pick").value !== schemeId) budgetTyped = false;
   schemeId = byId("scheme-pick").value;
-  if (!schemeId) return;
+  if (!schemeId) return false;
+  // 新那份回來之前，上一份的表單、預覽、替身、「開始搜尋」都收起來：留著的話按得下去，
+  // 開跑會拿新那份的代號配上一份的表單（#1188 第 1 條）。讀不到就一直收著，不退回上一份。
+  const seq = ++planSeq;
+  for (const id of PLAN_BLOCKS) byId(id).hidden = true;
+  say("form-message", "");
+  refreshStart();
   history.replaceState(null, "", `/gradient?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   say("scheme-message", "正在讀這份方案的開跑選項…");
-  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, {}, "scheme-message");
-  for (const id of ["form-block", "plan-block", "surrogate-block", "start-block"]) byId(id).hidden = !reply.ok;
-  if (!reply.ok) { say("scheme-message", `這份方案開不了第三階段搜尋：${errorText(reply)}`, true); return; }
+  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, {}, "scheme-message", () => seq === planSeq);
+  // 等的時候又讀了別份（或同一份再讀一次）：畫面歸後來那一次管，這一份回覆整個丟掉。
+  if (seq !== planSeq) return false;
+  if (!reply.ok) { say("scheme-message", `這份方案開不了第三階段搜尋：${errorText(reply)}`, true); return false; }
+  for (const id of PLAN_BLOCKS) byId(id).hidden = false;
   say("scheme-message", "");
   Object.assign(WALLS, reply.body.wall_names);
   defaults = reply.body.defaults;
@@ -199,6 +222,7 @@ async function loadPlan() {
   mountWarning();
   drawDepthTable(reply.body.plan);
   showPreview(reply.body, request());
+  return true;
 }
 
 // 結果頁沒指原方案時，是拆「貼在原牆上」的加貼層找回原牆；貼在硬底上的區拆不回去，會被當成沒動、改善算不進來。
@@ -266,7 +290,10 @@ function drawDepthTable(plan) {
 async function preview() {
   say("form-message", "正在預覽…");
   const body = request();
-  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, body, "form-message");
+  const seq = planSeq;
+  const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, body, "form-message", () => seq === planSeq);
+  // 等的時候換了方案：這是上一份的預覽，不畫、不算數（#1188 第 1 條）。
+  if (seq !== planSeq) return;
   if (!reply.ok) { say("form-message", errorText(reply), true); return; }
   say("form-message", "預覽好了，看下面。");
   showPreview(reply.body, body);
@@ -279,14 +306,14 @@ function refreshStart() {
   showBusy(machineBusy);
   const blocked = Boolean(machineBusy) || Boolean(busyProblem);
   byId("build-surrogate").disabled = RUNNING_BUILD.has(watchedBuildState) || blocked;
-  if (previewedRequest === null || !lastPreview) { byId("start").disabled = true; return; }
+  if (!previewHolds()) { byId("start").disabled = true; return; }
   const stale = JSON.stringify(request()) !== previewedRequest;
   byId("start").disabled = stale || !lastPreview.surrogate.found || blocked;
 }
 
 // 表單改過：舊預覽不再是會跑的那一份，先停用開跑、請使用者重新預覽。
 function markStale() {
-  if (previewedRequest === null) return;
+  if (!previewHolds()) return;
   const stale = JSON.stringify(request()) !== previewedRequest;
   say("start-message", stale ? "選項改過了：先按「預覽」看過這一份，才能開跑。" : "", stale);
   refreshStart();
@@ -295,6 +322,7 @@ function markStale() {
 function showPreview(data, sent) {
   lastPreview = data;
   previewedRequest = JSON.stringify(sent);
+  previewedFor = {scheme: schemeId, seq: planSeq};
   machineBusy = data.busy || null;
   say("start-message", "");
   const plan = data.plan;
@@ -425,7 +453,7 @@ function showBuild(build) {
   byId("stop-build").hidden = !build.actions.stop;
   refreshStart();
   // 只在這一份剛建好放進格子（上一次畫它還在建）時重新預覽一次，看這一場的材料它涵不涵蓋；之後不再自己送。
-  if (build.state === "installed" && RUNNING_BUILD.has(before) && lastPreview && !lastPreview.surrogate.found) preview();
+  if (build.state === "installed" && RUNNING_BUILD.has(before) && previewHolds() && !lastPreview.surrogate.found) preview();
 }
 
 async function stopBuild() {
@@ -438,7 +466,8 @@ async function stopBuild() {
 // ---- 5. 開跑 ----
 
 async function start() {
-  if (previewedRequest === null || JSON.stringify(request()) !== previewedRequest) { markStale(); return; }
+  // 只認現在這份方案、這一次讀出來、選項沒改過的那一份預覽（#1188 第 1 條）。
+  if (!previewHolds() || JSON.stringify(request()) !== previewedRequest) { markStale(); return; }
   say("start-message", "正在開跑…");
   byId("start").disabled = true;
   const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/start`, JSON.parse(previewedRequest), "start-message");
@@ -642,7 +671,8 @@ async function rebuild() {
   if (!reply.ok) { say("job-message", errorText(reply), true); return; }
   schemeId = reply.body.scheme_id;
   byId("scheme-pick").value = schemeId;
-  await loadPlan();
+  // 這一份沒落地（讀不到，或等的時候人換到別份）就停在這裡：不拿別份方案去問「換掉舊替身」（#1188 第 1 條）。
+  if (!await loadPlan()) return;
   await loadSurrogatePlan(true);
   byId("surrogate-block").scrollIntoView();
   say("surrogate-message", "這一跑的替身被准用閘門拒收：按「建替身」重建一份（新的建好、核過才換掉舊的）。", true);
