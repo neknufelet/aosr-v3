@@ -395,7 +395,8 @@ def test_template_tries_without_a_usable_snapshot_say_the_names_are_todays(tmp_p
     assert follow.detail(plain)["template_names_note"] is None
 
 
-def test_baseline_warning_before_adoption_matches_the_library_snapshot_of_that_run(tmp_path: Path) -> None:
+@pytest.mark.parametrize("broken", [False, True])
+def test_baseline_warning_before_adoption_matches_the_library_snapshot_of_that_run(tmp_path: Path, broken: bool) -> None:
     """抓還沒存成方案時，「結果頁會把哪些區當成沒動」拿現在的材料庫去比那一場的方案快照：開跑之後同代號的固定材料
     改了阻抗改了名，逐位比不到，那一句就默默不見（那一區照樣會被當成沒動）。照那一場的材料庫快照比、印當時的名字。"""
     data_dir = _data(tmp_path)
@@ -408,6 +409,10 @@ def test_baseline_warning_before_adoption_matches_the_library_snapshot_of_that_r
     (job_dir / "scheme.json").write_text(Scheme.model_validate(document).model_dump_json(), encoding="utf-8")
     (job_dir / USER_LIBRARY_NAME).write_text(library.dump_user_library((_fixed(),)), encoding="utf-8")
     user_library_path(data_dir).write_text(library.dump_user_library(_renamed()), encoding="utf-8")
+    if broken:
+        # 快照讀不進來：退回現在的材料庫比（只比內建的話，使用者材料換上去的區就不點名了）；這裡現在那一份還沒改。
+        (job_dir / USER_LIBRARY_NAME).write_text("{壞掉的 JSON", encoding="utf-8")
+        user_library_path(data_dir).write_text(library.dump_user_library((_fixed(),)), encoding="utf-8")
     warning = _follow(data_dir, launcher).detail(str(view["job_id"]))["baseline_warning"]
     assert isinstance(warning, str) and f"「{OLD_PANEL}」" in warning and "r0_c1" in warning
     assert NEW_PANEL not in warning
