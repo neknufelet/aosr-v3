@@ -42,7 +42,7 @@ let selected = [];              // 選了哪幾區（「牆/區代號」，照�
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
 let ruleDraft = false;          // 「其他牆面」下拉剛選了指定貼一種、還沒選貼哪一種
-let listAdding = null;          // 第幾張清單卡的「加別種材料」開著（從 0 數；都沒開是 null）
+let listAdding = null;          // 哪一組的清單卡開著「加別種材料」：那一組的區代號排好接成一串（groupZones）；都沒開是 null
 let keptRule = null;            // 這次打開方案後定下來的「其他牆面」做法鍵（第一次推出來的，或使用者最後在下拉設的）；換方案才重推
 let keptRuleZone = null;        // 剛照規則寫過的一區：下次重畫時規則就是它現在的做法（改規則、改清單之後做法鍵會換）
 let seenGeneration = -1;        // 上次畫的時候是第幾份做法（換方案就把選取清掉）
@@ -537,7 +537,11 @@ function panelTicks(items) {
   if (lists.some(list => !list)) return null;
   const ids = [...new Set(lists.flat())];
   const count = id => lists.filter(list => list.includes(id)).length;
-  return {lists, ids, count, state: id => count(id) === items.length ? "all" : count(id) ? "some" : "none"};
+  // 「幾區有」只算貼得了這一種的區（清單裡本來就有的也算）：那一面貼不了的區不算進分母，不然永遠湊不滿。
+  const able = id => items.filter((item, index) => lists[index].includes(id) || fitsHere(id, item.wall)).length;
+  // 使用者動過的勾照他點的（勾上就是勾、拿掉就是空），不再重算；第三種狀態只給還沒動過的。
+  const state = id => id in draft.ticks ? (draft.ticks[id] ? "all" : "none") : count(id) === able(id) && count(id) ? "all" : count(id) ? "some" : "none";
+  return {lists, ids, count, able, state};
 }
 // 「最深」那一格打開時顯示什麼（公分）：選到的區都一樣就帶出來，不一樣、或都沒有，就是空的。
 function shownDepth(items) {
@@ -590,6 +594,9 @@ async function applyDraft() {
     select([]);
   });
 }
+// 一組的區是哪幾區（區代號排好接成一串）：「加別種材料」的框記這個、不記第幾張卡——卡片合併或拆開之後那幾區不再是同一張卡，
+// 框就關掉，不會跑到別張卡上（複查 r2）。
+function groupZones(group) { return group.zones.map(item => item.id).sort().join(" "); }
 // 在一張清單卡上勾（#1199 修補 1）：只改那一組的區（清單一樣的那幾區），加一種（change.add）或拿掉一種（change.remove），
 // 加減在每一區自己的清單上——加的那一種某一面貼不了，那一面的區就不加。跟做法表改清單一樣重判限制。
 function writeList(group, change) {
@@ -601,7 +608,9 @@ function writeList(group, change) {
   const list = lists.find(next => change.remove || next.includes(change.add)) ?? lists[0];
   zoneLastAllowed = [...list];
   unsaved = true;
-  zoneNote(`${group.zones.length} 區的清單改成 ${list.map(choiceName).join("、")}`, "ok");
+  // 照實際改到的區數講；加的那一種有幾區那一面貼不了、沒加，也講（不講的話卡片拆成兩張看不出為什麼）。
+  const changed = group.zones.filter((item, index) => lists[index] !== item.allowed).length, skipped = group.zones.length - changed;
+  zoneNote(`${changed} 區的清單改成 ${list.map(choiceName).join("、")}${change.add && skipped ? `；另外 ${skipped} 區那一面貼不了這一種，沒加` : ""}`, "ok");
   markStale();
   window.renderElevation();
   refreshZoneLimits();
@@ -679,18 +688,20 @@ function coveredWhy(family) { return `上面可調的 ${shortLabel(family)} 已�
 // 材料框裡的一列（#1199）：勾選格、名字、底下一行小字（可調的寫調什麼、從多少到多少——只是字，這一支不能改；固定成品寫總厚）。
 // covered：這一筆成品已經被哪一筆勾著的可調材料包含（那一筆的 preset_members）——灰掉、勾不了，寫為什麼；
 // 清單裡本來就同時存著兩筆的照樣勾著、可以取消（只是顯示，不替使用者改寫）。
-// ticks：panelTicks 的結果。選中的區全有＝勾、全沒有＝空、有的有有的沒有＝第三種狀態（indeterminate），旁邊寫幾區有。
+// ticks：panelTicks 的結果。貼得了的區全有＝勾、全沒有＝空、有的有有的沒有＝第三種狀態（indeterminate，只給使用者還沒動過的勾），旁邊寫幾區有。
 function tickBox(id, ticks, toggle) {
   const check = el("input"); check.type = "checkbox"; check.id = `zone-panel-allow-${id}`;
   check.checked = ticks.state(id) === "all"; check.indeterminate = ticks.state(id) === "some";
   check.onchange = () => toggle(id, check.checked);
   return check;
 }
-// 使用者已經把它勾上、卻還是只有幾區有：其餘的區是那一面貼不了（tickedList 不加），照實講。
+// 勾旁邊那一句：第三種狀態寫貼得了的區裡幾區有；勾著、但選中的區裡有那一面貼不了的（tickedList 不會加），照實講有幾區不會加。
 function someWords(id, ticks) {
-  if (ticks.state(id) !== "some") return [];
-  const has = `選中的 ${ticks.lists.length} 區裡 ${ticks.count(id)} 區有`;
-  return [el("small", "zv-some", draft.ticks[id] === true ? `${has}；其餘的區那一面貼不了這一種，不會加` : `${has}；不動它，各區照目前的`)];
+  const all = ticks.lists.length, unable = all - ticks.able(id);
+  if (ticks.state(id) === "some") {
+    return [el("small", "zv-some", `${unable ? `貼得了這一種的 ${ticks.able(id)} 區` : `選中的 ${all} 區`}裡 ${ticks.count(id)} 區有；不動它，各區照目前的`)];
+  }
+  return ticks.state(id) === "all" && unable ? [el("small", "zv-some", `選中的 ${all} 區裡 ${unable} 區那一面貼不了這一種，不會加`)] : [];
 }
 function materialRow(entry, ticks, covered, toggle) {
   const row = el("label", `zv-mrow${covered ? " zv-covered" : ""}`); row.dataset.choice = entry.id; row.dataset.kind = entry.kind;
@@ -729,7 +740,8 @@ function searchForm(items, walls, sync) {
   // 只記被點的那一個代號（勾上或拿掉）；沒點過的代號套用時各區照目前的。
   const toggle = (id, on) => { draft.ticks = {...draft.ticks, [id]: on}; draftTouched = true; renderZoneOverview(); };
   const has = id => ticks.count(id) > 0;
-  const fits = entry => walls.every(wall => usableHere(entry, wall)) || has(entry.id);
+  // 使用者在這個小框裡動過的那幾種照樣列著（拿掉之後那一列不准消失，不然勾不回來）。
+  const fits = entry => walls.every(wall => usableHere(entry, wall)) || has(entry.id) || entry.id in draft.ticks;
   const tunable = libraryEntries("optimizable").filter(fits), products = libraryEntries("fixed").filter(fits);
   const coveredBy = coveredProducts(ticks.ids);
   const form = el("div", "zv-form"); form.id = "zone-panel-form";
@@ -1027,6 +1039,7 @@ function listCards(compact) {
 function listCard(group, index, compact) {
   const {list} = view;
   const prefix = index ? `zone-list-${index + 1}` : "zone-list", alone = list.groups.length === 1, size = group.zones.length;
+  const adding = listAdding === groupZones(group);
   const card = el("div", "zv-list"); card.id = prefix;
   card.dataset.count = String(size); card.dataset.zones = group.zones.map(item => item.id).join(" ");
   const head = el("h2");
@@ -1071,9 +1084,9 @@ function listCard(group, index, compact) {
     card.append(problem);
   }
   const links = el("div", "zv-links");
-  links.append(button("zv-link", listAdding === index ? "加別種材料 ▾" : "加別種材料 ▸", `${prefix}-add`, () => { listAdding = listAdding === index ? null : index; renderZoneOverview(); }));
+  links.append(button("zv-link", adding ? "加別種材料 ▾" : "加別種材料 ▸", `${prefix}-add`, () => { listAdding = adding ? null : groupZones(group); renderZoneOverview(); }));
   card.append(links);
-  if (listAdding === index) card.append(listAddBox(group, allowed, prefix));
+  if (adding) card.append(listAddBox(group, allowed, prefix));
   return card;
 }
 // 「每一區的尺寸與代號」：平常收著，點開才看得到代號與尺寸（伺服器的訊息與搜尋頁寫的是代號）。
