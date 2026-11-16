@@ -17,15 +17,17 @@ from playwright.sync_api import Browser, Locator, Page, expect
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
-from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, SHORT
+from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, SHORT, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
     _ALLOWED, _SELECTED, _apply, _click_zone, _materials_before, _open_overview, _prepare, _save, _send_to_search, _settled, _stored)
 
 FRONT = ["yL/z1", "yL/z2", "yL/z3", "yL/auto1", "yL/auto2"]
 RIGHT_WITHOUT_OPENINGS = [f"xL/auto{n}" for n in range(1, 7)]
 ONLY_48K = ["glass_wool_48k", "none"]
+FLOOR_ONLY = "sample_carpet_11mm"  # 假材料庫裡只有地板能用的那一筆（考卷裡再跟網頁讀到的核一次）
 OLD_WORDS = "交給" + "電腦挑"  # 舊的那一句（拆開寫：改字時整個 repo 搜這一句要是 0 筆）
 # 小框與清單卡裡每一段看得到的字（按鈕除外）：字級（px）、字色對它底下那一層底色的對比。
+# 字色照實際畫出來的算：字色自己的透明度、從這一層往上每一層的 opacity 都乘進去，跟底色混過再比（灰掉的列不准靠調淡）。
 _TEXT_STYLES = """root => {
     const channel = value => { const share = value / 255; return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4; };
     const parse = text => text.match(/[\\d.]+/g).map(Number);
@@ -43,7 +45,10 @@ _TEXT_STYLES = """root => {
         const words = [...element.childNodes].filter(node => node.nodeType === 3 && node.textContent.trim()).map(node => node.textContent.trim()).join('');
         if (!words) continue;
         const style = getComputedStyle(element);
-        const ink = light(parse(style.color)), paper = light(behind(element));
+        const [r, g, b, alpha = 1] = parse(style.color), under = behind(element);
+        let seen = alpha;
+        for (let at = element; at && at !== document.documentElement; at = at.parentElement) seen *= parseFloat(getComputedStyle(at).opacity);
+        const ink = light([r, g, b].map((value, index) => value * seen + under[index] * (1 - seen))), paper = light(under);
         rows.push({words, size: parseFloat(style.fontSize), contrast: (Math.max(ink, paper) + 0.05) / (Math.min(ink, paper) + 0.05)});
     }
     return rows;
@@ -380,31 +385,187 @@ def test_picking_a_whole_face_changing_the_draft_then_cancelling_stores_both_fil
         assert design_file.exists() == (design is not None)
 
 
-def test_ticks_changed_on_the_panel_go_to_every_zone_the_program_optimizes_and_the_panel_says_so(tmp_path: Path, browser: Browser) -> None:
-    """所有由程式最佳化的區共用一份清單（照舊）：小框裡改了勾，套用時寫進選中的區，也寫進其他由程式最佳化的每一區，
-    小框先講會一起改到另外幾區；沒動勾就只寫選中的那幾區，別區原本不一樣的清單不動。"""
+def _design(zones: dict[str, dict[str, object]]) -> dict[str, object]:
+    return {"schema_version": "aosr.zone_design.v1", "scheme_id": SAMPLE, "zones": zones}
+
+
+def test_ticking_a_product_on_the_floor_leaves_every_other_zone_with_its_own_list(tmp_path: Path, browser: Browser) -> None:
+    """小框只改選中的區（審查 r1 第一件）：地板一區改由程式最佳化、勾地毯、套用——小框只列地板能用的，
+    另外 15 區（四面牆、天花）的清單一個字都不變，地板那一區是「不貼」加地毯。"""
     _prepare(tmp_path, SAMPLE_DESIGN)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        searching = set(cast(dict[str, list[str]], page.evaluate(_ALLOWED)))
-        assert len(searching) == 15 and "yL/z1" not in searching
-        # 沒動勾：只寫選中的那一區，清單不一樣的那一區（後牆 auto1）照舊。
-        _click_zone(page, "yL/z2")
+        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        assert len(before) == 15
+        _click_zone(page, "floor/auto1")
         _pick_search(page)
-        expect(page.locator("#zone-panel-shared")).to_contain_text("另外 15 區")
+        page.locator("#zone-panel-fixed summary").click()
+        page.locator("#zone-panel-allow-sample_carpet_11mm").check()
+        told = page.locator("#zone-panel-shared").count()
         _apply(page)
-        allowed = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
-        assert allowed["yL/z2"] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"] and allowed["y0/auto1"] == SHORT
-        # 動了勾：選中的與另外 16 區都換成新的那一份。
-        _click_zone(page, "yL/z1")
+        after = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        assert after == {**before, "floor/auto1": ["none", "sample_carpet_11mm"]}
+        assert told == 0  # 小框不再有「另外 N 區也跟著改」那一句
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_unticking_and_ticking_back_on_the_floor_changes_no_other_zone(tmp_path: Path, browser: Browser) -> None:
+    """審查 r1 第一件的另一條路：地板一區 → 由程式最佳化 →「也可以不貼」取消再勾回（畫面前後一樣）→ 套用：別區都不變。"""
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        _click_zone(page, "floor/auto1")
         _pick_search(page)
-        expect(page.locator("#zone-panel-shared")).to_have_text("由程式最佳化的區共用這一份清單：改了勾，套用後另外 16 區也跟著改。")
+        page.locator("#zone-panel-allow-none").uncheck()
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        page.locator("#zone-panel-allow-none").check()
+        _apply(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "floor/auto1": ["none"]}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_two_zones_with_different_deepest_keep_their_own_when_the_box_is_typed_in_and_cleared(tmp_path: Path, browser: Browser) -> None:
+    """審查 r1 第二件：兩區上限不同（一區 12.5 cm、一區沒有），格子是空的、底下寫「空白＝各區照目前的」（不用「原本」）。
+    打個 5 再清掉＝沒改：套用後兩區的上限都照舊。真的填了數字才兩區都寫。"""
+    _prepare(tmp_path, _design({"yL": {"auto1": {"mode": "search", "allowed": ONLY_48K},
+                                       "auto2": {"mode": "search", "allowed": ONLY_48K, "max_depth_m": 0.125}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/auto1")
+        _click_zone(page, "yL/auto2")
+        expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+        expect(page.locator("#zone-panel-depth")).to_have_value("")
+        page.locator("#zone-panel-depth").fill("5")
+        page.locator("#zone-panel-depth").fill("")
+        _apply(page)
+        zones = cast(dict[str, dict[str, object]], page.evaluate("() => zoneDesign.zones.yL"))
+        assert zones == {"auto1": {"mode": "search", "allowed": ONLY_48K}, "auto2": {"mode": "search", "allowed": ONLY_48K, "max_depth_m": 0.125}}
+        _click_zone(page, "yL/auto1")
+        _click_zone(page, "yL/auto2")
+        expect(page.locator("#zone-panel-deepest small")).to_contain_text("空白＝各區照目前的")
+        assert "原本" not in cast(str, page.locator("#zone-panel-deepest").text_content())
+        page.locator("#zone-panel-depth").fill("5")
+        _apply(page)
+        zones = cast(dict[str, dict[str, object]], page.evaluate("() => zoneDesign.zones.yL"))
+        assert zones == {key: {"mode": "search", "allowed": ONLY_48K, "max_depth_m": 0.05} for key in ("auto1", "auto2")}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_applying_the_panel_only_adds_and_removes_what_was_ticked_and_keeps_the_rest_of_each_zones_list(tmp_path: Path, browser: Browser) -> None:
+    """入口一（套用）：使用者多勾了哪幾種、拿掉了哪幾種，加減到每一個選中區自己的清單上，不拿「照這一面濾過」的那份蓋回去。
+    前牆一區的清單裡有一筆這一面用不了的材料（現行分組沒有「只有天花能用」的，拿只有地板能用的那一筆代）：
+    在前牆的小框勾 24K、拿掉 48K，套用後那一筆原封留著；地板那一區的清單（也有那一筆）一個字都不變。"""
+    on_wall = ["glass_wool_48k", FLOOR_ONLY, "none"]
+    on_floor = [FLOOR_ONLY, "none"]
+    _prepare(tmp_path, _design({"yL": {"auto1": {"mode": "search", "allowed": on_wall}}, "floor": {"auto1": {"mode": "search", "allowed": on_floor}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        assert page.evaluate("id => zoneLibrary.find(entry => entry.id === id).placement.surfaces", FLOOR_ONLY) == ["floor"]
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": on_wall, "floor/auto1": on_floor}
+        _click_zone(page, "yL/auto1")
+        expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+        expect(page.locator("#zone-panel-allow-glass_wool_48k")).to_be_checked()
+        expect(page.locator("#zone-panel-allow-glass_wool_24k")).not_to_be_checked()
+        page.locator("#zone-panel-allow-glass_wool_24k").check()
+        page.locator("#zone-panel-allow-glass_wool_48k").uncheck()
+        _apply(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": [FLOOR_ONLY, "none", "glass_wool_24k"], "floor/auto1": on_floor}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_the_front_wall_is_set_to_48k_only_and_no_zone_on_another_face_changes(tmp_path: Path, browser: Browser) -> None:
+    """老闆那句話在已經有 15 區由程式最佳化的房間做：前牆五區變成 48K 加不貼，後牆、右牆、天花的清單一個字都不變。"""
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        page.locator("#zone-whole-yL").click()
+        _pick_search(page)
+        page.locator("#zone-panel-allow-glass_wool_24k").uncheck()
         page.locator("#zone-panel-allow-glass_wool_96k").uncheck()
         _apply(page)
-        shorter = ["glass_wool_48k", "glass_wool_24k", "none"]
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys([*searching, "yL/z1", "yL/z2"], shorter)
-        expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, **dict.fromkeys(FRONT, ONLY_48K)}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_the_panel_opens_on_the_picked_zones_own_lists_and_a_half_ticked_material_is_left_alone(tmp_path: Path, browser: Browser) -> None:
+    """入口二（打開）：小框的勾從選中的區自己存的清單開始，不是別區那一份。選了兩區、清單不同：兩區都有的勾著、
+    只有一區有的是第三種狀態（indeterminate），旁邊寫「選中的 2 區裡 1 區有」；沒動它，套用後各區照舊——只改最深，清單一個字都不動。
+    動了它（勾下去）才兩區都有。"""
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    state = "box => box.indeterminate ? 'some' : box.checked ? 'all' : 'none'"
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
+        assert before["y0/auto1"] == SHORT and before["y0/auto2"] == WOOLS
+        # 只選清單比較短的那一區：它沒有的兩種是空的。
+        _click_zone(page, "y0/auto1")
+        expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+        assert [page.locator(f"#zone-panel-allow-{choice}").evaluate(state) for choice in WOOLS] == ["all", "none", "none", "all"]
+        # 再加選清單比較長的那一區。
+        _click_zone(page, "y0/auto2")
+        expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+        assert [page.locator(f"#zone-panel-allow-{choice}").evaluate(state) for choice in WOOLS] == ["all", "some", "some", "all"]
+        expect(page.locator("#zone-panel-form label[data-choice=glass_wool_24k]")).to_contain_text("選中的 2 區裡 1 區有")
+        expect(page.locator("#zone-panel-form label[data-choice=glass_wool_48k]")).not_to_contain_text("選中的")
+        expect(page.locator("#zone-panel-search-from")).to_have_text("選中的 2 區清單不一樣：沒動的勾，各區照目前的。每一區各自最佳化。")
+        page.locator("#zone-panel-depth").fill("10")
+        _apply(page)
+        zones = cast(dict[str, dict[str, object]], page.evaluate("() => zoneDesign.zones.y0"))
+        assert zones["auto1"] == {"mode": "search", "allowed": SHORT, "max_depth_m": 0.1}
+        assert zones["auto2"] == {"mode": "search", "allowed": WOOLS, "max_depth_m": 0.1}
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == before
+        # 把只有一區有的那一種勾下去：兩區都有；另一種沒動，照舊只有一區有。
+        _click_zone(page, "y0/auto1")
+        _click_zone(page, "y0/auto2")
+        page.locator("#zone-panel-allow-glass_wool_24k").click()
+        assert [page.locator(f"#zone-panel-allow-{choice}").evaluate(state) for choice in WOOLS] == ["all", "all", "some", "all"]
+        _apply(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "y0/auto1": [*SHORT, "glass_wool_24k"]}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_zones_with_different_lists_get_one_list_card_each_and_a_tick_on_a_card_changes_only_its_zones(tmp_path: Path, browser: Browser) -> None:
+    """入口三（右欄清單卡）：前牆五區只准 48K 加不貼、天花一區三種棉加不貼——兩張卡，各寫是哪幾區、准哪些，
+    都不寫「都從這幾種裡選」。在前牆那張加 24K，天花不動；在天花那張拿掉 96K，前牆不動；兩邊清單變成一樣，就併回一張卡。"""
+    front = dict.fromkeys(("z1", "z2", "z3", "auto1", "auto2"), {"mode": "search", "allowed": ONLY_48K})
+    _prepare(tmp_path, _design({"yL": front, "ceiling": {"z1": {"mode": "search", "allowed": WOOLS}}}))
+    choices = "rows => rows.map(row => row.dataset.choice)"
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        expect(page.locator("#zone-page .zv-list")).to_have_count(2)
+        expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 6 區裡的 5 區每一區各自最佳化，這 5 區從這幾種裡選")
+        expect(page.locator("#zone-list-2 h2")).to_have_text("由程式最佳化的 6 區裡的 1 區這一區從這幾種裡選")
+        assert set(cast(str, page.locator("#zone-list").get_attribute("data-zones")).split()) == set(FRONT)
+        assert page.locator("#zone-list-2").get_attribute("data-zones") == "ceiling/z1"
+        expect(page.locator("#zone-list-who")).to_have_text("這一張管 5 區：前牆整面 12345")
+        expect(page.locator("#zone-list-2-who")).to_have_text("這一張管 1 區：天花 1 主位上面那塊")
+        assert page.locator("#zone-list-checks label").evaluate_all(choices) == ONLY_48K
+        assert page.locator("#zone-list-2-checks label").evaluate_all(choices) == WOOLS
+        # 前牆那張加 24K：只有前牆五區多一種。
+        page.locator("#zone-list-add").click()
+        page.locator("#zone-list-add-glass_wool_24k").click()
+        _settled(page)
+        longer = [*ONLY_48K, "glass_wool_24k"]
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, longer), "ceiling/z1": WOOLS}
+        # 天花那張拿掉 96K：只有天花那一區少一種；兩邊變成同樣三種，併回一張卡，這時才寫「都從這幾種裡選」。
+        page.locator("#zone-list-2-check-glass_wool_96k").click()
+        _settled(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, longer), "ceiling/z1": ["glass_wool_48k", "glass_wool_24k", "none"]}
+        expect(page.locator("#zone-page .zv-list")).to_have_count(1)
+        expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 6 區每一區各自最佳化，都從這幾種裡選")
+        # 併成一張之後，在那一張拿掉 24K：六區一起少一種。
+        page.locator("#zone-list-check-glass_wool_24k").click()
+        _settled(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys([*FRONT, "ceiling/z1"], ONLY_48K)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -420,6 +581,7 @@ def test_the_deepest_for_the_picked_zones_is_written_in_metres_and_only_when_it_
         _pick_search(page)
         expect(page.locator("#zone-panel-depth")).to_have_value("")
         expect(page.locator("#zone-panel-deepest")).to_contain_text("空白＝不限")
+        expect(page.locator("#zone-panel-deepest")).to_contain_text("這一區最深")
         page.locator("#zone-panel-depth").fill("20")
         _apply(page)
         _click_zone(page, "yL/z3")
@@ -445,4 +607,14 @@ def test_the_deepest_for_the_picked_zones_is_written_in_metres_and_only_when_it_
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         expect(page.locator("#zone-panel-problem")).to_contain_text("要填大於 0 的數字")
         assert page.evaluate("() => zoneDesign.zones.yL.auto2") == {"mode": "search", "allowed": ONLY_48K}
+        # 不到 1 公釐（存公尺、記到公釐會變成 0，整份做法存不進去）、打到一半不成數字的：一樣不收。
+        for typed in ("0.04", "1e"):
+            page.locator("#zone-panel-depth").fill("")
+            page.locator("#zone-panel-depth").press_sequentially(typed)
+            expect(page.locator("#zone-panel-apply")).to_be_disabled()
+            expect(page.locator("#zone-panel-problem")).to_contain_text("要填大於 0 的數字")
+        # 存公尺、記到公釐：33.3 cm 是 0.333，不是除出來帶尾巴的那個數。
+        page.locator("#zone-panel-depth").fill("33.3")
+        _apply(page)
+        assert page.evaluate("() => JSON.stringify(zoneDesign.zones.yL.auto2.max_depth_m)") == "0.333"
         assert watched.page_errors == [] and watched.console_errors == []
