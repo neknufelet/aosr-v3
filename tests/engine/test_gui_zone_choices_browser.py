@@ -607,3 +607,23 @@ def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, br
         page.locator("#elevation-wall-yL").click()
         expect(page.locator("#zone-fixed-yL-auto1 option").first).to_have_text("現在：沒貼東西（原牆原樣）")
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_tunable_vpr_in_the_library_never_shows_on_the_zone_page(tmp_path: Path, browser: Browser) -> None:
+    """#1200 第 1 支：材料庫有一筆可調 VPR（電腦挑它還沒接上）：分區頁的勾選表、選單、「顯示全部材料」不列的那幾組都沒有它，
+    頁面不壞；地板那一面（它不是地板用的）也一樣。"""
+    from tests.engine.test_material_library_vpr import VPR, WOOL, _write_library
+
+    _write(tmp_path, room109_document())
+    _write_library(tmp_path / "materials.json", with_vpr=True)
+    _old_search_design(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", WOOL, "none"]
+        assert page.evaluate(f"[zoneLibrary.length > 0, zoneLibrary.some(entry => entry.id === '{VPR}')]") == [True, False]
+        assert page.evaluate(f"['x0', 'floor'].flatMap(wall => hiddenGroups(wall, zoneLibrary).flatMap(([, items]) => items))"
+                             f".some(entry => entry.id === '{VPR}')") is False
+        assert "鋼板 VPR（自編）" not in page.locator("body").inner_text()
+        assert watched.page_errors == [] and watched.console_errors == []

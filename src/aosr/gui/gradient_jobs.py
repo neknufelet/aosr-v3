@@ -70,7 +70,8 @@ from aosr.gui.zone_result import baseline_warning
 from aosr.gui.zone_limits import DepthTargets
 from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries, dump_user_library, load_user_library
 from aosr.materials.search_library import (
-    MaterialsRefused, SearchMaterials, fixed_candidates, refuse_fixed_as_family, user_fixed_entries, with_user_materials,
+    MaterialsRefused, SearchMaterials, fixed_candidates, refuse_fixed_as_family, refuse_tunable_layers, user_fixed_entries,
+    with_user_materials,
 )
 from aosr.physics.fem_reduced_receipt import ReducedModelNotValidated
 from aosr.reporting.scheme import Scheme
@@ -333,8 +334,11 @@ class GradientJobs:
                                                                                                         tuple[LibraryEntry, ...]]:
         """設計設定轉成搜尋參數，跟這一場的材料（設定檔家族＋材料庫）與使用者材料本身；建替身（``surrogate_builds``）走同一支。"""
         materials, entries = self._materials()
+        listed = () if design is None else tuple(target for zones in design.zones.values() for item in zones.values()
+                                                 for target in item.allowed or ())
         try:
             refuse_fixed_as_family((request.family,), entries)
+            refuse_tunable_layers((request.family, *listed), entries)  # 可調 VPR：搜尋那一層還沒接（#1200 第 2 支）
         except MaterialsRefused as error:
             raise PlanRefused(str(error)) from error
         fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),

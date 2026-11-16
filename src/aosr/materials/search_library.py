@@ -13,6 +13,10 @@
 - 使用者材料不准掛構造預設（``preset_members``／``template_preset`` 只給內建材料對應舊家族用）：填了就拒收、點名哪一格；
   填的代號不存在另外講明。
 
+可調多層構造（#1200 第 1 支，現在只有可調 VPR）只有格式：:func:`vpr_family` 轉得出它自己的家族（板重範圍＋背襯合法厚度），但**不接進**搜尋設定、
+不進快照（``with_user_materials`` 只挑可最佳化材料，所以材料庫多一筆可調 VPR 時設定、清單、指紋、快照一個位元都不動）；
+起跑、准用清單或選的家族點名它就拒收（:func:`refuse_tunable_layers`），搜尋那一層是第 2 支。
+
 固定材料只能整塊選或不選，不能當搜尋家族微調：起跑或網頁選的家族填了固定材料的代號就拒收。
 固定材料當換樣板候選、每區准用清單、實測固定材料進搜尋在 2-3b：准用清單點名的固定材料用 ``fixed:<代號>`` 這個目標
 整塊換上（:func:`fixed_candidates`），使用者的那幾筆也進快照（v2）。
@@ -24,15 +28,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final, Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings
+from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings, VprFamilySettings
+from aosr.materials.construction_models import BoardLayer, PorousLayer
 from aosr.materials.library import (
-    BASIS_LABELS, FixedEntry, LibraryEntry, MeasuredTable, OptimizableEntry, impedance_basis, load_user_library, template_assembly,
+    BASIS_LABELS, FixedEntry, LibraryEntry, MeasuredTable, OptimizableEntry, TunableLayersEntry, impedance_basis, initial_assembly,
+    load_user_library, template_assembly,
 )
 
 SNAPSHOT_VERSION: Final = "aosr.material_gradient_materials.v1"
@@ -130,6 +137,39 @@ def _family(entry: OptimizableEntry, known_presets: frozenset[str]) -> tuple[Fam
     except ValidationError as error:
         raise MaterialsRefused(f"{_name(entry)}接不成搜尋家族：{error}") from error
     return family, preset
+
+
+def vpr_family(entry: TunableLayersEntry) -> tuple[VprFamilySettings, LibraryPreset]:
+    """一筆可調 VPR → 它自己的家族與初值排法的構造（代號都是材料代號）。不接進搜尋設定（見模組說明）。
+
+    不調的那一格：板重範圍兩端都是初值、背襯合法厚度只有初值那一個（能調的是產品規格）。
+    總深度上限：材料自己寫了就用它，沒寫用排得出的最深。"""
+    plate_index, backing_index = len(entry.layers) - 2, len(entry.layers) - 1
+    plate, backing = entry.layers[plate_index], entry.layers[backing_index]
+    if entry.plate_density_kg_m3 is None or not isinstance(plate, BoardLayer) or not isinstance(backing, PorousLayer):
+        raise MaterialsRefused(f"{_name(entry)}不是可調 VPR，轉不成 VPR 家族")  # 材料庫那一筆驗過，走不到
+    mass, thickness = entry.variable(plate_index, "surface_mass_kg_m2"), entry.variable(backing_index, "thickness_m")
+    initial_mass, initial_thickness = float(plate.surface_mass_kg_m2), float(backing.thickness_m)
+    front = math.fsum(float(getattr(layer, "thickness_m", 0.0)) for layer in entry.layers[:plate_index])
+    depth = entry.max_total_depth_m if entry.max_total_depth_m is not None else entry.depth_bounds()[1]
+    family = VprFamilySettings(
+        id=entry.id, plate_density_kg_m3=entry.plate_density_kg_m3,
+        plate_mass_range_kg_m2=(initial_mass, initial_mass) if mass is None else mass.range,
+        plate_mass_choices_kg_m2=None if mass is None else mass.choices, initial_plate_mass_kg_m2=initial_mass,
+        backing_thicknesses_m=(initial_thickness,) if thickness is None or thickness.choices is None else thickness.choices,
+        initial_backing_thickness_m=initial_thickness, front_depth_m=front, max_total_depth_m=float(depth),
+        template_preset=entry.id)
+    return family, LibraryPreset(id=entry.id, material=initial_assembly(entry).model_dump(mode="json"))
+
+
+def refuse_tunable_layers(ids: Sequence[str | None], entries: Sequence[LibraryEntry]) -> None:
+    """起跑配置、准用清單或選的家族點名了可調多層構造（現在只有可調 VPR）就拒收：格式存得進來，搜尋那一層還沒接（#1200 第 2 支）。"""
+    tunable = {entry.id: entry for entry in entries if isinstance(entry, TunableLayersEntry)}
+    for item in ids:
+        if item is not None and item in tunable:
+            found = tunable[item]
+            raise MaterialsRefused(f"{_name(found)}是{found.structure_label()}：還不能由程式最佳化，搜尋那一層還沒接上；"
+                                   "先從准用清單或選的材料組拿掉它，其他材料照舊可以由程式最佳化")
 
 
 def library_preset(entry: OptimizableEntry) -> LibraryPreset:

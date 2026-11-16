@@ -83,7 +83,7 @@ def _cases() -> dict[str, dict[str, object]]:
     renamed = _fixed(_assembly(_porous(30000.0)), "curve")
     return {
         "builtins": _case(*(_post(entry.model_dump(mode="json")) for entry in builtins), physics=tuple(
-            (template_assembly(entry) if isinstance(entry, OptimizableEntry) else entry.surface_material()).model_dump(mode="json")
+            (entry.surface_material() if isinstance(entry, FixedEntry) else template_assembly(OptimizableEntry.model_validate(entry))).model_dump(mode="json")
             for entry in builtins)),
         "family": _case(_post(_family_with_cavity()), physics=(
             with_cavity.model_dump(mode="json"),

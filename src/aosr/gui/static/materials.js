@@ -32,7 +32,11 @@ async function api(path, options = {}) {
   return {ok: reply.ok, status: reply.status, body};
 }
 
+// 可調多層構造（現在只有可調 VPR，#1200 第 1 支）：清單列得出來、可以刪；這一頁還不能看內容與編輯。
+function tunableLayers(entry) { return entry.kind === "tunable_layers"; }
+
 function kindText(entry) {
+  if (tunableLayers(entry)) return `${listing.entry_kind_labels.tunable_layers}：${entry.structure === "vpr" ? "可調 VPR（鋼板＋黏住的背襯）" : entry.structure}`;
   if (entry.kind === "optimizable") return listing.entry_kind_labels.optimizable + "：多孔層＋空腔";
   return `${listing.entry_kind_labels.fixed}：${form()[entry.material.kind].label}`;
 }
@@ -43,8 +47,9 @@ function listTable(rows, builtin) {
   for (const row of rows) {
     const entry = row.entry;
     const actions = el("td", {},
-      el("button", {type: "button", class: "open", text: builtin ? "看內容" : "打開", on: {click: () => openEntry(row, false)}}),
-      el("button", {type: "button", class: "copy quiet", text: "複製", on: {click: () => copyEntry(entry)}}),
+      tunableLayers(entry) ? el("span", {class: "hint", text: "這一頁還不能看內容與編輯"}) : null,
+      tunableLayers(entry) ? null : el("button", {type: "button", class: "open", text: builtin ? "看內容" : "打開", on: {click: () => openEntry(row, false)}}),
+      tunableLayers(entry) ? null : el("button", {type: "button", class: "copy quiet", text: "複製", on: {click: () => copyEntry(entry)}}),
       builtin ? null : el("button", {type: "button", class: "delete danger", text: "刪除", on: {click: () => deleteEntry(entry)}}));
     body.append(el("tr", {"data-id": entry.id},
       el("td", {text: entry.label}), el("td", {text: entry.id, "data-head": "代號"}),

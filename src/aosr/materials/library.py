@@ -1,6 +1,6 @@
 """材料庫（#1082 段 2-1）：一筆材料的格式與檢查；內建材料由產品設定檔生成、唯讀。
 
-兩種材料，``kind`` 只說搜尋可以拿它做什麼：
+三種材料，``kind`` 只說搜尋可以拿它做什麼：
 
 - ``optimizable``（可最佳化）：一層多孔加可有可無的空腔。多孔層厚度與空腔深度就是搜尋的兩個變數
   （一面一個多孔厚度、一個空腔，跟第三階段梯度搜尋的變數一樣多，存得進來的搜尋就收得下）；流阻是產品身分、不調。
@@ -8,6 +8,10 @@
   背後接剛背還是貼在原牆上是個案的事，不存在材料裡。
 - ``fixed``（固定）：存一份完整牆面材料，搜尋只能整塊選或不選。實測阻抗表可以整張沒有虛部：
   轉成物理用的實測阻抗表時虛部補 0、標「近似」；物理格式與物理身分一個位元都不動。
+- ``tunable_layers``（可調多層構造，#1200 第 1 支）：存一份初值排法的多層構造，另列「哪一層的哪一格可調、範圍、產品規格、初值」。
+  格式是通用的，現在只收 ``structure = "vpr"``（可調 VPR）：可有可無的固定前層＋鋼板＋整面黏住的背襯（填了骨架兩格的多孔層，
+  #1171），背後是牆、沒有空腔；能調的是板重（kg/m²，毫米只是顯示，用材料自己帶的鋼板密度換算）與背襯厚度。
+  現在只有格式：存得進、讀得回、轉得成家族；搜尋那一層還沒接（第 2 支），交給第三階段時計畫那一步拒收。
 
 畫面標語照「阻抗怎麼得到」推，不照 ``kind``：層構造是模擬、有虛部的實測表是實測、
 沒虛部的實測表與固定實數阻抗是近似。超出算法可信範圍的警告在編輯頁那一段（2-2b），這裡不做。
@@ -23,7 +27,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Final, Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
 
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, load_material_gradient_settings
@@ -31,7 +35,9 @@ from aosr.config.paths import config_path
 from aosr.materials.construction_models import (
     AirLayer,
     Assembly,
+    BoardLayer,
     ConstantImpedance,
+    Layer,
     MeasuredImpedance,
     MeasuredImpedancePoint,
     PorousLayer,
@@ -156,6 +162,142 @@ class OptimizableEntry(_EntryBase):
             raise ValueError(f"建議總深 {suggested} 排不出來：層能排的範圍 {low}～{high}、材料上限 {cap}")
 
 
+class TunableVariable(BaseModel):
+    """可調多層構造的一個變數：第幾層（從房間側數、0 起，同可微樣板 ``construction_diff`` 的數法）的哪一格、範圍、
+    產品規格（買得到的那幾個值，可空＝連續）與初值。單位就是那一格自己的單位（板重 kg/m²、厚度公尺…）。
+    沒列成變數的格子不調。"""
+
+    model_config = _FROZEN
+
+    layer: StrictInt = Field(description="layer（第幾層，從房間側數、0 起）")
+    field: str = Field(description="field（那一層的哪一格，欄位名）")
+    range: tuple[StrictFloat, StrictFloat] = Field(description="range（下限、上限，那一格自己的單位）")
+    choices: tuple[StrictFloat, ...] | None = Field(default=None, description="choices（產品規格，由小到大；可空＝連續）")
+    initial: StrictFloat = Field(description="initial（初值；要等於那一層那一格現在寫的值）")
+
+    def words(self) -> str:
+        return f"第 {self.layer + 1} 層的 {self.field}"
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        low, high = self.range
+        if not 0.0 < low < high:
+            raise ValueError(f"{self.words()}：可調範圍要 0 < 下限 < 上限，收到 {self.range}")
+        choices = self.choices
+        if choices is not None:
+            if not choices or list(choices) != sorted(set(choices)) or choices[0] <= 0.0:
+                raise ValueError(f"{self.words()}：產品規格要是正數、由小到大、不重複，收到 {choices}")
+            if (choices[0], choices[-1]) != self.range:
+                raise ValueError(f"{self.words()}：有產品規格時，範圍就是最小到最大 {(choices[0], choices[-1])}，收到 {self.range}")
+        if not low <= self.initial <= high:
+            raise ValueError(f"{self.words()}：初值 {self.initial} 不在範圍 {self.range} 內")
+        if choices is not None and self.initial not in choices:
+            raise ValueError(f"{self.words()}：初值 {self.initial} 不是產品規格 {choices} 之一")
+        return self
+
+
+Structure: TypeAlias = Literal["vpr"]
+STRUCTURE_LABELS: Final[dict[str, str]] = {"vpr": "可調 VPR"}
+_PLATE_MASS: Final = "surface_mass_kg_m2"
+_THICKNESS: Final = "thickness_m"
+
+
+class TunableLayersEntry(_EntryBase):
+    """可調多層構造（#1200 第 1 支）：``layers`` 是初值排法（房間側 → 牆、剛背），``variables`` 列出哪一層的哪一格可調。
+
+    寫法是通用的（哪一層、哪一格、範圍、產品規格），之後開縫板、圓孔板、微孔板加棉照同一個格式加 ``structure``；
+    現在只收 ``vpr``：最後一層是整面黏住鋼板的背襯（填了骨架兩格的多孔層，#1171）、前一層是鋼板、更前面是不調的固定層，
+    能調的只有鋼板的板重與背襯厚度；板重是不是一定要給規格還沒定（選填），背襯能調就要給產品厚度。
+    """
+
+    kind: Literal["tunable_layers"] = Field(description="kind（tunable_layers：搜尋可以調 variables 列的那幾格；搜尋那一層還沒接）")
+    structure: Structure = Field(description="structure（哪一種構造：vpr 表示複合板共振器，鋼板＋黏住的背襯）")
+    layers: tuple[Layer, ...] = Field(min_length=1, description="layers（初值排法，房間側到牆體側；背後是牆）")
+    variables: tuple[TunableVariable, ...] = Field(min_length=1, description="variables（可調的格子；至少一格）")
+    plate_density_kg_m3: StrictFloat | None = Field(default=None, gt=0.0, description="plate_density_kg_m3（鋼板密度，kg/m³；只用來把板重換成板厚：顯示與總深；vpr 必填）")
+    max_total_depth_m: StrictFloat | None = Field(default=None, gt=0.0, description="max_total_depth_m（材料自己的總深度上限，公尺；硬上限，可空）")
+
+    def variable(self, layer: int, field: str) -> TunableVariable | None:
+        """那一層那一格的變數；沒列（不調）回 None。"""
+        return next((item for item in self.variables if item.layer == layer and item.field == field), None)
+
+    def structure_label(self) -> str:
+        return STRUCTURE_LABELS[self.structure]
+
+    def plate_thickness_m(self, mass_kg_m2: float) -> float:
+        """板重換板厚（公尺）：除以材料自己帶的鋼板密度。"""
+        if self.plate_density_kg_m3 is None:
+            raise ValueError("沒有鋼板密度，板重換不成板厚")
+        return mass_kg_m2 / self.plate_density_kg_m3
+
+    def _layer_depths(self, index: int) -> tuple[float, float, float]:
+        """一層佔的深度（公尺）：最小、最大、初值。有厚度的層照厚度；鋼板（vpr 倒數第二層）照板重換板厚；
+        其他沒有厚度的層（布、前面的薄板）算 0，同貼上去總深的算法。"""
+        layer = self.layers[index]
+        if self.structure == "vpr" and index == len(self.layers) - 2 and isinstance(layer, BoardLayer):
+            tuned = self.variable(index, _PLATE_MASS)
+            initial = layer.surface_mass_kg_m2
+            low, high = (initial, initial) if tuned is None else tuned.range
+            return self.plate_thickness_m(low), self.plate_thickness_m(high), self.plate_thickness_m(initial)
+        initial = float(getattr(layer, _THICKNESS, 0.0))
+        tuned = self.variable(index, _THICKNESS)
+        low, high = (initial, initial) if tuned is None else tuned.range
+        return low, high, initial
+
+    def depth_bounds(self) -> tuple[float, float]:
+        """排得出的總深（公尺）：最小、最大；不含材料自己的上限。"""
+        depths = [self._layer_depths(index) for index in range(len(self.layers))]
+        return math.fsum(item[0] for item in depths), math.fsum(item[1] for item in depths)
+
+    def initial_depth_m(self) -> float:
+        """初值排法的總深（公尺）。"""
+        return math.fsum(self._layer_depths(index)[2] for index in range(len(self.layers)))
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        seen: set[tuple[int, str]] = set()
+        for item in self.variables:
+            if not 0 <= item.layer < len(self.layers):
+                raise ValueError(f"變數指的{item.words()}不存在：這份構造只有 {len(self.layers)} 層")
+            if (item.layer, item.field) in seen:
+                raise ValueError(f"{item.words()}列了兩次")
+            seen.add((item.layer, item.field))
+        self._vpr()
+        try:  # 先核構造再讀變數指的那一格：過了這一關，倒數第二層一定是薄板、最後一層是多孔層，那兩格都在
+            initial_assembly(self)
+        except ValueError as error:
+            raise ValueError(f"初值排法不是合法的多層構造：{error}") from error
+        for item in self.variables:
+            written = getattr(self.layers[item.layer], item.field)
+            if written != item.initial:
+                raise ValueError(f"{item.words()}寫的是 {written}，要等於這個變數的初值 {item.initial}")
+        cap = self.max_total_depth_m
+        if cap is not None:
+            low = self.depth_bounds()[0]
+            if low > cap:
+                raise ValueError(f"最薄排法的總深 {low} 已超過材料自己的總深度上限 {cap}")
+            if self.initial_depth_m() > cap:
+                raise ValueError(f"初值總深 {self.initial_depth_m()} 超過材料自己的總深度上限 {cap}")
+        return self
+
+    def _vpr(self) -> None:
+        backing_index, plate_index = len(self.layers) - 1, len(self.layers) - 2
+        backing = self.layers[backing_index]
+        if not isinstance(backing, PorousLayer) or not backing.bonded():
+            raise ValueError("可調 VPR 的最後一層（最靠牆）要是填了骨架壓縮模數與骨架損耗的多孔層：那兩格表示整面黏住前面的鋼板；"
+                             "沒黏住的多孔層＋空腔請存成可最佳化材料")
+        allowed = {(plate_index, _PLATE_MASS), (backing_index, _THICKNESS)}
+        for item in self.variables:
+            if (item.layer, item.field) not in allowed:
+                raise ValueError(f"可調 VPR 能調的只有鋼板（倒數第二層）的板重 {_PLATE_MASS} 與背襯（最後一層）的厚度 {_THICKNESS}，"
+                                 f"收到{item.words()}")
+        if self.plate_density_kg_m3 is None:
+            raise ValueError("可調 VPR 要填鋼板密度 plate_density_kg_m3：板重靠它換成板厚（顯示與總深）")
+        thickness = self.variable(backing_index, _THICKNESS)
+        if thickness is not None and thickness.choices is None:
+            raise ValueError("能調的背襯厚度要給產品規格（搜尋最後取規格）")
+
+
 class MeasuredPoint(BaseModel):
     """實測列：頻率（Hz）、阻抗實部與虛部（Pa·s/m，時間慣例 e^{+jωt}）；虛部可以整張表都沒有。"""
 
@@ -225,7 +367,7 @@ class FixedEntry(_EntryBase):
         return material.to_physics() if isinstance(material, MeasuredTable) else material
 
 
-LibraryEntry: TypeAlias = Annotated[OptimizableEntry | FixedEntry, Field(discriminator="kind")]
+LibraryEntry: TypeAlias = Annotated[OptimizableEntry | FixedEntry | TunableLayersEntry, Field(discriminator="kind")]
 
 
 class _LibraryFile(BaseModel):
@@ -244,7 +386,7 @@ def _check_distinct(entries: tuple[LibraryEntry, ...]) -> None:
 
 def impedance_basis(entry: LibraryEntry) -> Basis:
     """阻抗怎麼得到：層構造＝模擬；有虛部的實測表＝實測；沒虛部的實測表與固定實數阻抗＝近似。"""
-    if isinstance(entry, OptimizableEntry) or isinstance(entry.material, Assembly):
+    if isinstance(entry, OptimizableEntry | TunableLayersEntry) or isinstance(entry.material, Assembly):
         return "simulated"
     if isinstance(entry.material, MeasuredTable) and not entry.material.imaginary_missing:
         return "measured"
@@ -302,6 +444,11 @@ def template_assembly(entry: OptimizableEntry) -> Assembly:
     cavity = None if entry.cavity is None else entry.cavity.initial_m
     layers = (entry.porous,) if not cavity else (entry.porous, AirLayer(thickness_m=cavity))
     return Assembly(layers=layers, backing="rigid")
+
+
+def initial_assembly(entry: TunableLayersEntry) -> Assembly:
+    """可調多層構造初值排出來的剛背多層構造（位置規則由多層構造自己核）。"""
+    return Assembly(layers=entry.layers, backing="rigid")
 
 
 def load_user_library(path: Path) -> tuple[LibraryEntry, ...]:

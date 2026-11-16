@@ -41,8 +41,10 @@ from aosr.materials.library import (
     PROVENANCE_LABELS,
     LibraryEntry,
     OptimizableEntry,
+    TunableLayersEntry,
     basis_label,
     impedance_basis,
+    initial_assembly,
     template_assembly,
 )
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
@@ -66,7 +68,11 @@ def _plain(message: str) -> str:
 
 
 def _physics_material(entry: LibraryEntry) -> tuple[SurfaceMaterial, str | None]:
-    """要算的牆面材料；可最佳化材料取初值排法，另回一句寫明是哪一種排法。"""
+    """要算的牆面材料；可最佳化材料與可調 VPR 取初值排法，另回一句寫明是哪一種排法。"""
+    if isinstance(entry, TunableLayersEntry):
+        tuned = "、".join(f"{item.words()} {item.initial:g}（可調 {item.range[0]:g}～{item.range[1]:g}）" for item in entry.variables)
+        return initial_assembly(entry), (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
+                                         "程式最佳化這種材料還沒接上，這條只供對照。")
     if not isinstance(entry, OptimizableEntry):
         return entry.surface_material(), None
     cavity = None if entry.cavity is None else entry.cavity.initial_m
@@ -145,7 +151,7 @@ def _unchecked_layers(material: SurfaceMaterial) -> list[dict[str, object]]:
 
 def _basis_detail(entry: LibraryEntry) -> str:
     """標語底下那一行：這條曲線的阻抗是怎麼來的。"""
-    if isinstance(entry, OptimizableEntry) or isinstance(entry.material, Assembly):
+    if isinstance(entry, OptimizableEntry | TunableLayersEntry) or isinstance(entry.material, Assembly):
         return "由各層參數用模型算的，之後要拿實測對照。"
     if isinstance(entry.material, ConstantImpedance):
         return "每個頻率都同一個實數阻抗，是近似。"
