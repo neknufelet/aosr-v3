@@ -70,7 +70,11 @@ function setZoneSetting(wall, key, setting) {
   design.zones[wall] ??= {};
   design.zones[wall][key] = setting;
 }
-function zoneNote(text, kind) { zoneNoteText = text; zoneNoteKind = kind; const line = $("zone-note"); if (line) { line.textContent = text; line.className = kind; } }
+function zoneNote(text, kind) {
+  zoneNoteText = text; zoneNoteKind = kind;
+  // 做法表底下那一行，與六面一起看那一頁（zone_overview.js）結果列上面那一行，寫同一句。
+  for (const id of ["zone-note", "zone-page-note"]) { const line = $(id); if (line) { line.textContent = text; line.className = kind; } }
+}
 
 // 開舊方案：讀它的設計設定（沒有就是全部固定）；讀不到照講、不當成沒有。
 // 先讀、後套：讀的時候不碰頁面狀態，打開方案時跟方案一起在鎖頁期間讀完，成功才一口氣套上（中間沒有等待點）。
@@ -125,6 +129,7 @@ function prepareZoneDesignSave(name) {
   return async () => {
     await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
     zoneDesignSaved = true;
+    window.zonePageSaved?.();  // 「這間房貼什麼」那一頁的「改的還沒存進檔案」那一句（zone_overview.js）
     if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
   };
 }
@@ -680,6 +685,8 @@ function zoneNameCell(wall, key, label, cell) {
   cell.append(code);
 }
 function renderZoneTable(wall) {
+  // 六面一起看的那一頁（zone_overview.js）跟這張表同一條路重畫：開檔、切牆、換材料、改做法都會走到這裡。
+  window.renderZoneOverview?.();
   const area = $("elevation-zones");
   if (!area) return;
   area.replaceChildren();
@@ -735,5 +742,8 @@ function renderZoneTable(wall) {
   if (toSearch) area.append(toSearch);
   const note = document.createElement("p"); note.id = "zone-note"; note.setAttribute("aria-live", "polite");
   note.textContent = zoneNoteText; note.className = zoneNoteKind; area.append(note);
+  // 舊做法表預設收著（做法改在「這間房貼什麼」那一頁設）；裡面有紅字或要人處理的提醒時自己打開，不讓它藏著。
+  const fold = $("zone-table-fold");
+  if (fold && area.querySelector(".limit-red, .notice")) fold.open = true;
 }
 window.renderZoneTable = renderZoneTable;

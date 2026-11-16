@@ -13,6 +13,7 @@ from typing import ParamSpec, TypeVar
 import pytest
 from pydantic import BaseModel
 
+from aosr import runtime
 from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.evaluation import load_result
 
@@ -38,7 +39,12 @@ def _memoize(function: Callable[_P, _T], *,
     def memoized(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         arguments = signature.bind(*args, **kwargs)
         arguments.apply_defaults()
-        serialized = json.dumps(arguments.arguments, default=serializer, sort_keys=True)
+        # 這個行程此刻量到的 JAX 設定也是輸入：物理身分的環境那一段讀它（runtime.jax_settings），而整輪的設定夾具
+        # （tests/engine/conftest.py::calculation_environment）不一定每一題都掛得上——命令列把 tests/engine 外的檔
+        # 夾在兩份引擎考卷中間時，pytest 讓後面那幾份收不到 conftest 的自動夾具。沒掛夾具的那一題先算出來的身分，
+        # 不准留給同一個工人裡後面掛了夾具的題用（#1176 第 C 支查到的順序相依）。
+        serialized = json.dumps({"arguments": arguments.arguments, "jax_settings": runtime.jax_settings()},
+                                default=serializer, sort_keys=True)
         key = hashlib.sha256(serialized.encode()).hexdigest()
         with lock:
             if key not in remembered:

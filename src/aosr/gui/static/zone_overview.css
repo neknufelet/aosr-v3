@@ -1,0 +1,200 @@
+/* 「這間房貼什麼」（#1176 第 C 支，zone_overview.js）：版面、三種狀態色、字級照第五版樣稿。全部圈在 #zone-page 裡，
+   不動方案輸入頁原本的樣式（那一頁的 svg、button、table、label 的通用樣式在這裡一條一條蓋回來）。
+   樣稿是固定一屏；真的頁面右欄會比樣稿長（另外指定的區多），所以整頁可以捲，結果列黏在視窗底。 */
+#zone-page{--paper:#f2f4f1;--card:#ffffff;--ink:#17252c;--soft:#5b6a70;--line:#c3cbc9;
+  --search:#f1bb3c;--search-soft:#fdf1d0;--fixed:#17616b;--fixed-soft:#dcecec;--still:#dfe3e0;
+  width:1400px;min-height:100vh;margin:0 auto;background:var(--paper);color:var(--ink);font-size:15px;line-height:1.55;
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","WenQuanYi Zen Hei",sans-serif}
+#zone-page *{box-sizing:border-box}
+body.zone-page-open{background:#f2f4f1}
+#zone-page .zv-head{height:58px;padding:0 24px;display:flex;align-items:baseline;gap:18px;border-bottom:1px solid var(--line);background:var(--card)}
+#zone-page .zv-head h1{font-size:23px;font-weight:600;margin:0;line-height:58px;letter-spacing:.02em}
+#zone-page .zv-head p{margin:0;color:var(--soft);font-size:14px}
+#zone-page .zv-head .zv-link{margin-left:auto;font-size:14px}
+#zone-page .zv-main{display:grid;grid-template-columns:954px 1fr;gap:22px;padding:12px 24px 0 24px;min-height:814px}
+#zone-page .zv-mapwrap{position:relative;width:954px}
+
+/* 四面牆、地板、天花 */
+#zone-page svg.zv-map{display:block;width:954px;height:auto;background:none;border:0}
+#zone-page .zv-map text{font-family:inherit}
+#zone-page .zv-map{fill:var(--ink)}
+#zone-page .zv-zone .zv-fill{stroke:#3d3a2e;stroke-opacity:.6;stroke-width:1.2}
+#zone-page .zv-zone.search .zv-fill{fill:var(--search)}
+#zone-page .zv-zone.fixed .zv-fill{fill:var(--fixed)}
+#zone-page .zv-zone.still .zv-fill,#zone-page .zv-zone.opening .zv-fill{fill:var(--still)}
+#zone-page .zv-zone.tile.still .zv-fill{stroke:none}
+#zone-page .zv-hatch{fill:url(#zv-hatch);stroke:none}
+#zone-page .zv-tagbg{fill:#fff;opacity:.94}
+#zone-page .zv-outline{fill:none;stroke:var(--ink);stroke-width:1.6}
+#zone-page .zv-floorline{stroke:var(--ink);stroke-width:4}
+#zone-page .zv-rug{fill:none;stroke:#8f9b9c;stroke-width:1.2;stroke-dasharray:5 4}
+#zone-page .zv-edge-open{stroke:var(--ink);stroke-width:5;stroke-dasharray:2 2}
+#zone-page .zv-badge circle{fill:#fff;stroke:var(--ink);stroke-width:1.3}
+#zone-page .zv-badge text{font-size:12px;text-anchor:middle;font-weight:600;fill:var(--ink)}
+#zone-page .zv-badge.small text{font-size:10.5px}
+#zone-page .zv-map .zv-fixed-label{fill:#fff;text-anchor:middle;font-weight:600}
+#zone-page .zv-map .zv-fixed-sub{fill:#d9eeee;text-anchor:middle}
+#zone-page .zv-open-label{font-size:16px;text-anchor:middle;font-weight:600;fill:var(--ink)}
+#zone-page .zv-face-name{font-size:16px;font-weight:600;fill:var(--ink)}
+#zone-page .zv-face-name.big{font-size:19px}
+#zone-page .zv-mini{fill:#fff;stroke:var(--soft);stroke-width:1}
+#zone-page .zv-mini-side{stroke:var(--ink);stroke-width:4;stroke-linecap:square}
+#zone-page .zv-map .zv-quiet{font-size:12.5px;font-weight:400;fill:var(--soft)}
+#zone-page .zv-map .zv-tiny{font-size:11px;fill:var(--soft)}
+#zone-page .zv-map .zv-edge-name{font-size:11px;fill:var(--ink);font-weight:600}
+#zone-page .zv-map .zv-still-word{font-size:15px;fill:var(--soft);font-weight:600}
+#zone-page .zv-spk{fill:var(--ink)}
+#zone-page .zv-seat{fill:#fff;stroke:var(--ink);stroke-width:1.4}
+#zone-page .zv-seat-dot{fill:var(--ink)}
+#zone-page .zv-map .zv-mark-label{font-size:11.5px;fill:var(--soft)}
+#zone-page .zv-legend{position:absolute;left:0;width:412px;font-size:14px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+#zone-page .zv-legend span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+#zone-page .zv-sw{display:inline-block;flex:none;width:22px;height:15px;border:1px solid var(--ink)}
+#zone-page .zv-sw.search{background:var(--search)}
+#zone-page .zv-sw.fixed{background:var(--fixed)}
+#zone-page .zv-sw.still{background:var(--still)}
+#zone-page .zv-sw.hatch{background:repeating-linear-gradient(45deg,#7d8a8c 0 1.6px,var(--still) 1.6px 5px)}
+
+/* 點圖選區：每一區都點得到（蓋在上面的記號與字不擋）；選到的加一圈白框 */
+#zone-page .zv-zone{cursor:pointer}
+#zone-page .zv-face > :not(.zv-zone),#zone-page .zv-zone > :not(.zv-fill){pointer-events:none}
+#zone-page .zv-ring{fill:none;stroke:#fff;stroke-width:6;filter:drop-shadow(0 0 4px rgba(0,0,0,.85))}
+
+/* 右欄：提示、規則、清單卡 */
+#zone-page .zv-side{display:flex;flex-direction:column;gap:12px;padding-bottom:14px;min-width:0}
+#zone-page .zv-slot{border:1.5px dashed #8f9b9c;border-radius:10px;padding:11px 16px;font-size:14.5px;line-height:1.6}
+#zone-page .zv-slot b{font-weight:600}
+#zone-page .zv-rules{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:4px 18px 4px}
+#zone-page .zv-rule{padding:10px 0 11px 16px;border-bottom:1px solid var(--line);position:relative}
+#zone-page .zv-rule:last-child{border-bottom:0}
+#zone-page .zv-rule::before{content:"";position:absolute;left:0;top:13px;bottom:13px;width:6px;border-radius:3px}
+#zone-page .zv-rule.search::before{background:var(--search)}
+#zone-page .zv-rule.fixed::before{background:var(--fixed)}
+#zone-page .zv-rule.still::before{background:#aab3b1}
+#zone-page .zv-rule.zv-special{padding-left:0}
+#zone-page .zv-rule.zv-special::before{content:none}
+#zone-page .zv-rule.zv-special h2{padding-left:16px;margin:0}
+#zone-page .zv-rule h2{font-size:17px;font-weight:600;margin:0 0 8px}
+#zone-page .zv-rule h2.zv-others-line{margin:0}
+#zone-page .zv-plain{font-weight:400;font-size:15px}
+#zone-page .zv-muted{color:var(--soft);font-size:13.5px;font-weight:400;margin-left:8px}
+#zone-page .zv-group{position:relative;display:flex;align-items:flex-start;gap:10px;padding:1px 0 2px 16px;margin-top:8px}
+#zone-page .zv-group > div{flex:1;min-width:0}
+#zone-page .zv-bar{position:absolute;left:0;top:4px;bottom:4px;width:6px;border-radius:3px}
+#zone-page .zv-bar.search{background:var(--search)}
+#zone-page .zv-bar.fixed{background:var(--fixed)}
+#zone-page .zv-bar.still{background:#aab3b1}
+#zone-page .zv-where{font-weight:600;line-height:1.7}
+#zone-page .zv-what{font-size:14.5px;margin-top:2px}
+#zone-page .zv-acts{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:9px;padding-left:16px}
+#zone-page .zv-num{display:inline-block;width:19px;height:19px;line-height:17px;border:1.3px solid var(--ink);border-radius:50%;text-align:center;
+  font-size:11.5px;font-weight:600;vertical-align:1px;background:#fff}
+#zone-page select.zv-pick{font:inherit;font-size:15px;color:var(--ink);border:1.5px solid var(--ink);border-radius:7px;background-color:#fff;
+  padding:3px 10px 3px 12px;max-width:100%}
+#zone-page select.zv-pick.search{background-color:var(--search-soft)}
+#zone-page select.zv-pick.still{background-color:#eef0ee}
+#zone-page select.zv-pick-material{display:block;margin-top:7px;font-size:14px}
+#zone-page button.zv-btn{border:1.5px solid var(--ink);border-radius:7px;background:#fff;color:var(--ink);font:inherit;font-size:14.5px;
+  padding:4px 12px;white-space:nowrap;cursor:pointer}
+#zone-page .zv-group button.zv-btn{font-size:13.5px;padding:1px 10px;margin-top:2px}
+#zone-page button.zv-link{border:0;border-radius:0;background:none;padding:0;font:inherit;font-size:13.5px;color:var(--fixed);
+  text-decoration:underline;text-underline-offset:3px;white-space:nowrap;cursor:pointer}
+/* 清單自己一張卡：管所有交給電腦挑的區 */
+#zone-page .zv-list{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 18px 11px}
+#zone-page .zv-list h2{font-size:16px;font-weight:600;margin:0;display:flex;align-items:center;gap:9px}
+#zone-page .zv-list.empty h2{font-weight:400;font-size:15px}
+#zone-page .zv-who{font-size:13.5px;color:var(--soft);margin:2px 0 0 31px}
+#zone-page .zv-checks{margin:6px 0 0;border:1px solid #e2c877;border-radius:8px;background:#fffaf0;overflow:hidden}
+#zone-page label.zv-check{display:flex;align-items:center;gap:10px;padding:4px 10px;margin:0;font-size:15px;border-top:1px solid #f0dfae;line-height:1.45}
+#zone-page label.zv-check:first-child{border-top:0}
+#zone-page label.zv-check input{width:18px;height:18px;margin:0;padding:0;accent-color:var(--ink)}
+#zone-page .zv-links{display:flex;gap:18px;margin-top:7px;font-size:13.5px;align-items:flex-start}
+#zone-page .zv-different{margin-top:7px;font-size:13.5px}
+#zone-page details summary{cursor:pointer;color:var(--fixed)}
+#zone-page .zv-adjlist{font-size:12.5px;color:var(--soft);margin:4px 0 0}
+#zone-page .zv-more{padding:0 18px;font-size:14px}
+#zone-page .zv-more table{border-collapse:collapse;font-size:12px;margin:6px 0 0;width:auto}
+#zone-page .zv-more td{border:0;padding:1px 8px 1px 0}
+#zone-page .zv-problem{margin:0;padding:0 18px;color:#872c22;font-size:13.5px}
+
+/* 最底下：結果列 */
+#zone-page .zv-foot{position:sticky;bottom:10px;min-height:76px;margin:4px 24px 24px;padding:8px 22px;background:var(--ink);color:#fff;border-radius:10px;
+  display:flex;align-items:center;gap:24px;font-size:16px}
+#zone-page .zv-foot b{font-weight:600;font-size:19px}
+#zone-page .zv-foot .zv-sep{flex:none;width:1px;height:30px;background:#52646c}
+#zone-page .zv-foot .zv-sw{width:13px;height:13px;margin-right:8px;vertical-align:-1px;border:1.5px solid #fff}
+#zone-page button.zv-go{margin-left:auto;flex:none;background:var(--search);color:var(--ink);border:0;border-radius:8px;font:inherit;font-size:18px;
+  font-weight:600;padding:10px 26px;cursor:pointer}
+#zone-page button.zv-go:disabled{opacity:1;background:#8f9b9c;color:#fff;cursor:default}
+
+/* 選了區之後的面板：固定在右欄最上面，不蓋圖；面板開著時規則與清單卡收成幾行 */
+#zone-page .zv-edit{background:#fff;border:2px solid var(--ink);border-radius:10px;padding:11px 14px 12px}
+#zone-page .zv-edit h2{margin:0 0 5px;font-size:18px;font-weight:600}
+#zone-page .zv-chip{display:flex;align-items:center;gap:6px;font-size:14.5px;line-height:1.75}
+#zone-page .zv-chip .zv-x{margin-left:auto;color:var(--soft);font-size:13px}
+#zone-page .zv-addmore{font-size:13px;color:var(--soft);margin:3px 0 7px;padding-top:5px;border-top:1px dashed var(--line)}
+#zone-page .zv-opt{display:flex;align-items:flex-start;gap:9px;padding:5px 8px;border-radius:8px;font-size:15px}
+#zone-page .zv-opt.on{background:var(--fixed-soft)}
+#zone-page .zv-opt input[type=radio]{flex:none;width:17px;height:17px;margin:4px 0 0;padding:0;accent-color:var(--ink)}
+#zone-page .zv-opt-body{flex:1;min-width:0}
+#zone-page label.zv-opt-words{display:block;margin:0;cursor:pointer}
+#zone-page .zv-opt .zv-sw{margin-top:5px}
+#zone-page .zv-opt select.zv-pick-material{margin-top:5px;width:100%}
+#zone-page .zv-same{display:inline-block;margin-left:8px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12.5px;line-height:18px;
+  vertical-align:2px;background:#fff;white-space:nowrap}
+#zone-page .zv-show{margin:5px 0 3px;padding:7px 10px 3px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
+#zone-page .zv-fullname{font-size:13px;line-height:1.45;margin:0 0 7px}
+#zone-page .zv-show h4{margin:0 0 5px;font-size:13px;font-weight:600}
+#zone-page .zv-show h4 span{font-weight:400;color:var(--soft)}
+#zone-page .zv-layers{display:flex;align-items:stretch;height:36px;font-size:11.5px;margin-bottom:3px}
+#zone-page .zv-layers div{display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.2}
+#zone-page .zv-l-room{width:40px;color:var(--soft)}
+#zone-page .zv-l-foam{flex:1;border:1px solid #6f8b8e;background:radial-gradient(circle,#8fa9ab 1.1px,transparent 1.4px) 0 0/8px 8px,#eef4f4}
+#zone-page .zv-l-air{flex:1;border:1px dashed #6f8b8e;background:#fff}
+#zone-page .zv-l-thin{width:6px;background:var(--ink)}
+#zone-page .zv-l-wall{width:52px;background:repeating-linear-gradient(45deg,#55646a 0 1.5px,#e6e9e7 1.5px 6px);border:1px solid #55646a;font-weight:600}
+#zone-page .zv-l-wall span,#zone-page .zv-l-foam span,#zone-page .zv-l-air span{background:#fff;padding:0 3px;border-radius:3px}
+#zone-page .zv-cap{font-size:11.5px;color:var(--soft);text-align:center;margin-bottom:5px}
+#zone-page svg.zv-curve-chart{display:block;width:304px;height:82px;background:none;border:0}
+#zone-page .zv-grid{stroke:#d8dedc;stroke-width:1}
+#zone-page .zv-tick{font-size:10px;fill:var(--soft);font-family:inherit}
+#zone-page .zv-curve{fill:none;stroke:var(--fixed);stroke-width:2.2}
+#zone-page .zv-axis{font-size:11.5px;color:var(--soft);text-align:center;margin-top:-3px}
+#zone-page .zv-editfoot{display:flex;align-items:center;gap:10px;margin-top:9px}
+#zone-page button.zv-main-btn{background:var(--ink);color:#fff;font-size:16px;padding:7px 16px}
+#zone-page button.zv-main-btn:disabled{opacity:1;background:#8f9b9c;border-color:#8f9b9c;cursor:default}
+#zone-page .zv-brief{padding:2px 18px 2px}
+#zone-page .zv-brief .zv-rule{padding:7px 0 7px 16px;font-size:13.5px;line-height:1.55}
+#zone-page .zv-brief .zv-rule::before{top:9px;bottom:9px}
+#zone-page .zv-brief .zv-rule b{font-weight:600}
+#zone-page .zv-names{display:flex;gap:14px;font-size:13.5px;margin:2px 0 0 31px;flex-wrap:wrap}
+#zone-page .zv-add{margin-top:7px;max-height:260px;overflow-y:auto}
+#zone-page .zv-add small{display:block;color:var(--soft);font-size:12px}
+#zone-page .zv-list .zv-problem{padding:0;margin:7px 0 0;font-weight:600}
+/* 結果列上面那一行：剛才那一步的結果、為什麼不能拿去搜尋 */
+#zone-page .zv-notes{margin:0 24px;font-size:14px;min-height:22px}
+#zone-page .zv-notes p{margin:2px 0}
+#zone-page .zv-notes .limit-red{color:#b3261e;font-weight:600}
+/* 房間方案輸入那一頁：進「這間房貼什麼」的那一行，與收起來的舊做法表 */
+#zone-methods-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 12px}
+#zone-methods-row button{font-size:16px;font-weight:600;padding:9px 16px;border-radius:6px;border:1px solid #17212b;background:#17212b;color:#fff;cursor:pointer}
+#zone-table-fold{margin-top:10px}
+#zone-table-fold>summary{cursor:pointer;color:#555}
+/* 另外指定的記號、正在改的號碼、灰掉的原因、電腦從哪幾種挑 */
+#zone-page .zv-apart{fill:none;stroke:#fff;stroke-width:2;stroke-dasharray:6 4;pointer-events:none}
+#zone-page .zv-zone.still .zv-apart,#zone-page .zv-zone.search .zv-apart{stroke:var(--ink)}
+#zone-page .zv-sw.apart{background:var(--fixed);border:1px solid var(--ink);outline:1.5px dashed #fff;outline-offset:-4px}
+#zone-page .zv-num.zv-now{background:var(--ink);color:#fff;font-weight:700}
+#zone-page .zv-editing{display:block;margin-top:3px;font-weight:600}
+/* 底列每一項自己不折行（括號裡的面積跟前面的字同一行）；放不下就整項換到下一行 */
+#zone-page .zv-foot{flex-wrap:wrap}
+#zone-page .zv-foot .zv-part{white-space:nowrap}
+#zone-page .zv-foot .zv-gobox{margin-left:auto;flex:none;display:flex;flex-direction:column;align-items:center;gap:3px}
+#zone-page .zv-foot .zv-gobox button.zv-go{margin-left:0}
+#zone-page .zv-foot .zv-why{font-size:12.5px;color:#c9d2d6;white-space:nowrap}
+#zone-page .zv-from{font-size:12.5px;color:var(--soft);margin-top:3px;line-height:1.45}
+/* 標題列「改的還沒存進檔案…」那一句：靠右、在「回房間方案輸入」左邊，一行不折 */
+#zone-page .zv-head .zv-unsaved{margin-left:auto;align-self:center;padding:4px 12px;border-radius:6px;background:var(--search-soft);color:var(--ink);font-size:14px;font-weight:600;white-space:nowrap}
+#zone-page .zv-head .zv-unsaved + .zv-link{margin-left:0}
+/* 底列黏在視窗下緣：瀏覽器自己把東西捲進畫面時（跳到某一格、Tab 走到某一格）讓出底列那一段，不讓它停在底列底下 */
+html.zone-page-open{scroll-padding-bottom:112px}

@@ -379,10 +379,11 @@ let refusedBeside = null;
 async function holdInput(work) {
   inputBusy = true;
   refusedBeside = null;
-  const main = document.querySelector("main"), focused = document.activeElement;
-  main.inert = true;
+  // 「這間房貼什麼」那一頁（#zone-page，zone_overview.js）不在 main 裡：一起鎖，存檔途中那一頁也點不了、套用不了。
+  const main = document.querySelector("main"), page = $("zone-page"), focused = document.activeElement;
+  main.inert = true; page.inert = true;
   try { return await work(); } finally {
-    main.inert = false;
+    main.inert = false; page.inert = false;
     inputBusy = false;
     if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
       focused.focus({preventScroll: true});
@@ -442,6 +443,8 @@ async function updateMultiples() {
 function say(text, kind) {
   $("messages").textContent = text;
   $("messages").className = kind;
+  // 「這間房貼什麼」那一頁開著時這一列是藏起來的：警示照抄一份到那一頁（zone_overview.js）。
+  window.zonePageSay?.(text, kind);
   for (const note of ["open-note", "template-note", "save-as-note"]) sayBeside(note, "", "");
 }
 // 「打開」與「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它們的結果（沒打開的原因、空名字、
@@ -854,18 +857,25 @@ async function refreshPlan(sent) {
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(sent ?? collect())}));
   if (!response.ok) {
-    if (plan.plan) drawPlan(plan.plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
-      zoomXZ: "zoom-xz", detail: $("plan-detail"), legend: $("plan-legend")});
+    shownPlan = plan.plan ?? null;
+    if (shownPlan) drawShownPlan();
     else for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
     planProblems = plan.problems ? problemLines(plan.problems) : (plan.error || "圖面檢查失敗");
     say(planProblems, "notice");
     return false;
   }
-  drawPlan(plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
-    zoomXZ: "zoom-xz", detail: $("plan-detail"), legend: $("plan-legend")});
+  shownPlan = plan;
+  drawShownPlan();
   say(plan.message, "ok");
   return true;
+}
+// 輸入頁上那幾張平面圖現在畫的是哪一份（沒畫是 null）。圖上的字靠量寬度避開彼此，輸入頁藏著的時候量不到：
+// 「這間房貼什麼」那一頁關掉、輸入頁重新看得到時照同一份再畫一次（zone_overview.js），不必再問伺服器。
+let shownPlan = null;
+function drawShownPlan() {
+  if (shownPlan) drawPlan(shownPlan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
+    zoomXZ: "zoom-xz", detail: $("plan-detail"), legend: $("plan-legend")});
 }
 async function poll() {
   // 這一次問的是哪一筆：等回覆的時候可能已經開了另一筆計算（全域 runId 換了），只認問的那一筆。
