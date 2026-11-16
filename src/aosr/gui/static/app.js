@@ -369,6 +369,41 @@ async function changeInputScheme(load) {
     if (failed && scheme && formScheme === scheme) action(updateInputPreview);
   }
 }
+// 「儲存」「另存新名字」「計算這個方案」跟換表單（打開、載入範本、編輯、切牆、換材料）共用同一道鎖（#1187）：
+// 存到伺服器回覆之前整頁鎖住、換不了表單，換表單的時候也存不了。呼叫的人先看 inputBusy、自己講被擋的那一句。
+// 鎖只包到伺服器收下方案與做法（計算再加開算）為止；之後重讀幾份清單不鎖：訊息列已經寫「存好了」，下一下要按得到。
+// 鎖頁會讓游標離開原本那一格：解鎖後放回去（那一格還在、游標也沒被放到別處才放）。
+// 鎖著的時候晚到的預覽一律作廢（updateInputPreview 的 stale）：解鎖後替目前這份補問一次。
+const busyWords = "上一個動作還沒做完";
+let refusedBeside = null;
+async function holdInput(work) {
+  inputBusy = true;
+  refusedBeside = null;
+  const main = document.querySelector("main"), focused = document.activeElement;
+  main.inert = true;
+  try { return await work(); } finally {
+    main.inert = false;
+    inputBusy = false;
+    if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
+      focused.focus({preventScroll: true});
+    // 存檔途中被擋下的「打開」「載入範本」：存檔自己的訊息會清掉旁邊的字，做完再寫回去，不讓那一下看起來像沒按到。
+    if (refusedBeside) sayBeside(refusedBeside.note, refusedBeside.text, "notice");
+    refusedBeside = null;
+    if (scheme && formScheme === scheme) action(updateInputPreview);
+  }
+}
+function refuseWhileBusy(note, text) {
+  refusedBeside = {note, text};
+  sayBeside(note, text, "notice");
+}
+// 按下那一刻的方案與每一區做法各抄一份（這裡沒有等待點）；後面每個等待點都用這一份，不再讀畫面。
+// samePage：回覆回來時畫面還是不是按下時那一份（鎖著的時候一定是；它是鎖漏掉時的第二道，不是則不動畫面上的名字）。
+function pressedCopy(designName) {
+  const live = scheme, generation = zoneDesignGeneration;
+  const taken = structuredClone(collect());
+  return {document: taken, sendDesign: prepareZoneDesignSave(designName ?? taken.scheme_id),
+          samePage: () => scheme === live && generation === zoneDesignGeneration};
+}
 async function editInput(actionName, value, wall) {
   if (!await changeInputScheme(async () => {
     const data = await api("/api/input-edit", "POST", {scheme: wall ? wallDocument() : collect(), action: actionName, value, ...(wall ? {wall} : {})});
@@ -421,25 +456,40 @@ function collect() {
   collectInputSetup();
   return scheme;
 }
+// 回傳存成了沒有；「拿去搜尋」（zone_modes.js）也叫這一支，所以鎖在這裡面拿。
 async function save() {
-  const document = collect();
-  if (!await refreshPlan()) return false;
+  if (inputBusy) { say(`${busyWords}，這一次沒有儲存；等它做完再按一次`, "notice"); return false; }
+  const stored = await holdInput(storeScheme);
+  if (!stored) return false;
+  await refreshAfterSave(stored.message);
+  return true;
+}
+// 存方案與每一區做法（呼叫的人已經拿著鎖）；存成回方案代號與伺服器那一句，圖面檢查沒過回 null。
+async function storeScheme() {
+  const taken = pressedCopy();
+  const document = taken.document;
   const headers = openedId === null || openedId !== document.scheme_id ? {"If-None-Match": "*"} : {};
+  if (!await refreshPlan(document)) return null;
   const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document, headers);
-  openedId = document.scheme_id;
-  $("scheme-archive-notice").hidden = true;
+  if (taken.samePage()) {
+    openedId = document.scheme_id;
+    $("scheme-archive-notice").hidden = true;
+  }
   say(saved.message, "ok");
   // 每一區的做法跟著方案存（#1105）；方案已經存好，做法沒存成要照講、不算存檔失敗。
-  try { await saveZoneDesign(document.scheme_id); } catch (error) {
+  try { await taken.sendDesign(); } catch (error) {
     say(`${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
   }
+  return {id: document.scheme_id, message: saved.message};
+}
+// 存好之後重讀方案清單與結果清單（不鎖頁）。
+async function refreshAfterSave(message) {
   await loadSchemeList();
   // #755：同名方案改過，清單與封存區那幾筆要馬上標「改之前的方案算的」，不等重新整理。
   // 清單讀不到不算存檔失敗：方案已經存好，後面的「計算」照樣要開。
   try { await loadResultList(); } catch (error) {
-    say(`${saved.message}；結果清單更新不了：${errorText(error)}`, "notice");
+    say(`${message}；結果清單更新不了：${errorText(error)}`, "notice");
   }
-  return true;
 }
 async function loadSchemeList() {
   const data = await api("/api/schemes");
@@ -456,6 +506,7 @@ async function loadSchemeList() {
 async function openScheme() {
   const name = $("scheme-list").value;
   if (!name) return;
+  if (inputBusy) { refuseWhileBusy("open-note", `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`); return; }
   // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。三樣都在鎖頁期間讀完，
   // 成功才同步套上：不准在表單已換、做法還沒換的空檔放使用者按「儲存」。
   let zoneState;
@@ -484,6 +535,7 @@ async function loadTemplate() {
   // 範本換掉整張表單（同「打開」）；不是存過的方案，按「儲存」會另開新檔、不蓋掉同名的。
   const select = $("template-list");
   const label = select.options[select.selectedIndex].text;
+  if (inputBusy) { refuseWhileBusy("template-note", `${busyWords}，沒有載入範本；等它做完再按一次「載入範本」`); return; }
   let example;
   if (!await changeInputScheme(async () => {
     example = await api(`/api/example?template=${encodeURIComponent(select.value)}`);
@@ -513,28 +565,44 @@ async function saveAs() {
     $("save-as-id").focus();
     return;
   }
-  let saved;
+  if (inputBusy) {
+    sayBeside("save-as-note", `沒有另存：${busyWords}，等它做完再按一次「另存新名字」`, "notice");
+    return;
+  }
+  if (!await holdInput(() => storeSchemeAs(name))) return;
+  await loadSchemeList();
+  $("scheme-list").value = name;
+  // 首頁第一屏「已存的方案」跟著重讀（同「儲存」；它自己有序號丟掉晚到的舊回覆，讀不到只寫在它那一行）。
+  // 另存一定是新名字，結果清單與封存區不會變，不多問那兩趟。
+  refreshHome();
+}
+// 存成新名字（呼叫的人已經拿著鎖）；回存成了沒有。
+async function storeSchemeAs(name) {
+  let saved, taken;
   try {
+    // 先抄、後等：存成新名字的是按下那一刻表單上那一份（#1187）。
+    taken = pressedCopy(name);
     // 檢查沒過：問題已經寫進下面的訊息列（伺服器寫好的白話），旁邊照抄同一段。
-    if (!await refreshPlan()) throw new Error(planProblems);
+    if (!await refreshPlan(taken.document)) throw new Error(planProblems);
     // 方案代號欄只顯示現在開著哪一份：伺服器存好了才換成新名字，存失敗就維持原樣。
     saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT",
-      {...collect(), scheme_id: name}, {"If-None-Match": "*"});
+      {...taken.document, scheme_id: name}, {"If-None-Match": "*"});
   } catch (error) {
     say(errorText(error), "notice");
     sayBeside("save-as-note", `沒有另存：${errorText(error)}`, "notice");
-    return;
+    return false;
   }
-  scheme.scheme_id = name; $("save-id").value = name; openedId = name;
-  $("scheme-archive-notice").hidden = true;
+  if (taken.samePage()) {
+    scheme.scheme_id = name; $("save-id").value = name; openedId = name;
+    $("scheme-archive-notice").hidden = true;
+  }
   say(saved.message, "ok");
   sayBeside("save-as-note", `「${name}」：${saved.message}`, "ok");
-  try { await saveZoneDesign(name); } catch (error) {
+  try { await taken.sendDesign(); } catch (error) {
     say(`${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
     sayBeside("save-as-note", `「${name}」：${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
   }
-  await loadSchemeList();
-  $("scheme-list").value = name;
+  return true;
 }
 function markStale() {
   runEdited = true;
@@ -769,11 +837,12 @@ async function follow(id) {
   if (!$("stop").disabled) timer = setInterval(() => action(poll), 1000);
   await showOtherRuns();
 }
-async function refreshPlan() {
+// sent：存檔時檢查的是按下那一刻抄下來的那一份（#1187）；其餘照表單現況。
+async function refreshPlan(sent) {
   // 每次確定的改動都走到這裡：順手重判超過限制的區（#1111；不等它、不鎖頁，晚到的回覆自己丟掉）。
   refreshZoneLimits();
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())}));
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(sent ?? collect())}));
   if (!response.ok) {
     if (plan.plan) drawPlan(plan.plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
       zoomXZ: "zoom-xz", detail: $("plan-detail"), legend: $("plan-legend")});
@@ -887,8 +956,16 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     sayBeside("save-as-note", refused ? newNameHint : "", refused ? "notice" : "");
   });
   $("calculate").onclick = () => action(async () => {
-    if (!await save()) return;
-    const state = await api("/api/runs", "POST", {scheme_id: scheme.scheme_id});
+    if (inputBusy) { say(`${busyWords}，這一次沒有開算；等它做完再按一次`, "notice"); return; }
+    // 鎖涵蓋「存＋開算」整段：開算的是存下去的那一份（按下那一刻表單上那一份），不是那時畫面上的。
+    // 中間重讀清單也在鎖裡（跟改動前同一個順序：存、重讀清單、開算、馬上問第一次進度）。
+    const state = await holdInput(async () => {
+      const stored = await storeScheme();
+      if (!stored) return null;
+      await refreshAfterSave(stored.message);
+      return api("/api/runs", "POST", {scheme_id: stored.id});
+    });
+    if (!state) return;
     // 真的開算了才清記號：存檔被擋（例如正在算的那一份改不得）時，記號要留著。
     runEdited = false;
     runId = state.run_id; $("stop").disabled = false;
