@@ -366,12 +366,14 @@ async function changeInputScheme(load) {
     document.querySelector("main").inert = false;
     inputBusy = false;
     // 失敗時原方案的格子已收進去、等在路上的那次預覽也被作廢：解鎖後替目前這份補問一次，換算座標才不停在舊值。
-    if (failed && scheme && formScheme === scheme) action(updateInputPreview);
+    // 補問又失敗只換訊息列：「打開」「載入範本」旁邊接著寫的「沒有打開…」「沒有載入範本…」照留（#1188 第 8 條）。
+    if (failed && scheme && formScheme === scheme) previewAfterUnlock();
   }
 }
 // 「儲存」「另存新名字」「計算這個方案」跟換表單（打開、載入範本、編輯、切牆、換材料）共用同一道鎖（#1187）：
 // 存到伺服器回覆之前整頁鎖住、換不了表單，換表單的時候也存不了。呼叫的人先看 inputBusy、自己講被擋的那一句。
-// 鎖只包到伺服器收下方案與做法（計算再加開算）為止；之後重讀幾份清單不鎖：訊息列已經寫「存好了」，下一下要按得到。
+// 「儲存」「另存新名字」的鎖只包到伺服器收下方案與做法為止；之後重讀幾份清單不鎖：訊息列已經寫「存好了」，下一下要按得到。
+// 「計算」把重讀清單與開算也包在鎖裡；「拿去搜尋」（zone_modes.js 的 sendToSearch）一路包到離開這一頁（#1188 第 5 條）。
 // 鎖頁會讓游標離開原本那一格：解鎖後放回去（那一格還在、游標也沒被放到別處才放）。
 // 鎖著的時候晚到的預覽一律作廢（updateInputPreview 的 stale）：解鎖後替目前這份補問一次。
 const busyWords = "上一個動作還沒做完";
@@ -382,7 +384,9 @@ async function holdInput(work) {
   // 「這間房貼什麼」那一頁（#zone-page，zone_overview.js）不在 main 裡：一起鎖，存檔途中那一頁也點不了、套用不了。
   const main = document.querySelector("main"), page = $("zone-page"), focused = document.activeElement;
   main.inert = true; page.inert = true;
-  try { return await work(); } finally {
+  // 做的事自己失敗（伺服器不收這一次存檔）：原因在這裡寫進訊息列——同一句，原本是丟出去給 action 寫，
+  // 那會排在下面寫回被擋那一句之後、又把它清掉（#1188 第 7 條）。回 undefined：呼叫的人都當「沒做成」。
+  try { return await work(); } catch (error) { say(errorText(error), "notice"); } finally {
     main.inert = false; page.inert = false;
     inputBusy = false;
     if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
@@ -469,7 +473,7 @@ function collect() {
   collectInputSetup();
   return scheme;
 }
-// 回傳存成了沒有；「拿去搜尋」（zone_modes.js）也叫這一支，所以鎖在這裡面拿。
+// 回傳存成了沒有；鎖在這裡面拿。「拿去搜尋」（zone_modes.js）不叫這一支：它自己拿鎖、叫 storeScheme，鎖要留到離開這一頁。
 async function save() {
   if (inputBusy) { say(`${busyWords}，這一次沒有儲存；等它做完再按一次`, "notice"); return false; }
   const stored = await holdInput(storeScheme);

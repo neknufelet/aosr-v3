@@ -41,6 +41,7 @@ let seenGeneration = -1;        // 上次畫的時候是第幾份做法（換方
 let changing = 0;               // 做法寫完、平面圖檢查還沒回來的改動有幾個（寫在 #zone-page 的 data-changing，考卷等畫面穩用）
 let unsaved = false;            // 這一頁改過、還沒存進檔案（標題列那一句；存好了由 zone_modes.js 叫 window.zonePageSaved 拿掉）
 let pageSaid = "";              // 輸入頁訊息列最近一句警示（這一頁開著時照抄一份，見 window.zonePageSay）
+let keptSaid = "";              // 「拿去搜尋」被還在路上的改動擋下的那一句：留到使用者下一次按東西為止（見 window.zonePageKeep）
 let view = null;                // 最近一次算出來的：{roles, room, faces, byId, inferred, list}
 const openDetails = new Set();  // 哪幾個摺疊開著（重畫後照樣開著）
 const curves = new Map();       // 材料代號 → 吸音曲線的回覆（還在算是 "loading"）
@@ -882,11 +883,15 @@ function noteLines() {
   const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...(red ? [`有 ${red} 條超過限制，改好之前不能拿去搜尋：${(zoneLimits?.refusals ?? []).join("；")}`] : [])];
   if (blocked.length) { const line = el("p", "limit-red", blocked.join("；")); line.id = "zone-page-blocked"; wrap.append(line); }
   for (const text of [zoneDesignNote, zoneLibraryProblem].filter(Boolean)) wrap.append(el("p", "notice", text));
-  if (pageSaid) { const said = el("p", "notice", pageSaid); said.id = "zone-page-said"; said.setAttribute("role", "alert"); wrap.append(said); }
+  const saidText = saidWords();
+  if (saidText) { const said = el("p", "notice", saidText); said.id = "zone-page-said"; said.setAttribute("role", "alert"); wrap.append(said); }
   const note = el("p", zoneNoteKind, zoneNoteText); note.id = "zone-page-note"; note.setAttribute("aria-live", "polite");
   wrap.append(note);
   return wrap;
 }
+
+// 那一行寫什麼：留著的那一句在前，訊息列後來換的警示（跟它不同句才寫）接在後面。
+function saidWords() { return [keptSaid, pageSaid === keptSaid ? "" : pageSaid].filter(Boolean).join("；"); }
 
 function closeOverview() {
   overviewOpen = false;
@@ -939,7 +944,7 @@ function overviewParts() {
     return [head];
   }
   // 換了方案（打開別份、載入範本）：上一份選的區、面板上點的都不算數。
-  if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; listAdding = false; keptRule = null; keptRuleZone = null; unsaved = false; }
+  if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; listAdding = false; keptRule = null; keptRuleZone = null; unsaved = false; keptSaid = ""; }
   const roles = overviewRoles();
   const room = {Lx: wallSize("floor")[0], Ly: wallSize("floor")[1], Lz: wallSize("x0")[1]};
   const depth = roles.front[0] === "x" ? room.Lx : room.Ly, across = roles.front[0] === "x" ? room.Ly : room.Lx;
@@ -986,5 +991,19 @@ window.zonePageSay = (text, kind) => {
   pageSaid = next;
   renderZoneOverview();
 };
+// 「拿去搜尋」被還在路上的一批改動擋下（zone_modes.js 的 sendToSearch，#1188 第 6 條）：那一批落地後平面圖檢查通過，
+// 訊息列換成成功的一句、上面那一支會把警示拿掉——被擋的那一次什麼都沒存、沒跳頁，那一句不能跟著不見。
+// 留到使用者下一次真的按到東西（滑鼠或鍵盤按出來的 click；頁面程式自己發的不算）為止。整頁還鎖著的時候按的不算：
+// 那一下什麼都按不到（點擊落在頁面底層），那一批也還在路上，這時清掉、落地後就看不到了。換方案也清（重畫時看做法換過幾次）；
+// 打開這一頁不必另外清：打開只有那一顆按鈕一條路，那一下 click 已經先清過。
+// 按下去那一刻只就地改那一行、不重畫整頁：重畫會把正在被按的那一顆換掉。
+function forgetKept(event) {
+  if (!event.isTrusted || !keptSaid || inputBusy) return;
+  keptSaid = "";
+  const line = $("zone-page-said");
+  if (line && saidWords()) line.textContent = saidWords(); else line?.remove();
+}
+window.zonePageKeep = text => { keptSaid = text; renderZoneOverview(); };
+document.addEventListener("click", forgetKept, true);
 window.addEventListener("DOMContentLoaded", () => { $("zone-page-open").onclick = () => window.openZoneOverview(); });
 })();
