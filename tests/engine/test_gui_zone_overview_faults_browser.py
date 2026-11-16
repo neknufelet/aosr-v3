@@ -427,6 +427,147 @@ def test_a_send_to_search_blocked_by_a_change_still_on_its_way_says_so_on_the_pa
         assert saved == [] and "gradient" not in page.url and watched.page_errors == []
 
 
+def _hold_gets(page: Page, pattern: str) -> list[Route]:
+    """把符合的 GET 扣住不放（別的方法照放）；扣住的由考卷自己放行。"""
+    held: list[Route] = []
+    page.route(pattern, lambda route: held.append(route) if route.request.method == "GET" else route.continue_())
+    return held
+
+
+def _wait_routes(page: Page, held: list[Route], count: int) -> None:
+    for _ in range(500):
+        if len(held) >= count:
+            return
+        page.wait_for_timeout(20)
+    raise AssertionError(f"等不到第 {count} 個被扣住的請求")
+
+
+def _press_search_with_one_more_zone_ready(page: Page, sent: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+    """一區已經交給電腦挑；面板上再點好一區與做法、先不套用。回圖上另一區與套用鈕的位置（等一下拿真滑鼠去點）。"""
+    _open_overview(page)
+    _settled(page)
+    _click_zone(page, "yL/z3")
+    page.locator("#zone-panel-mode-search").check()
+    _apply(page)
+    _click_zone(page, "y0/auto2")
+    page.locator("#zone-panel-mode-search").check()
+    expect(page.locator("#zone-panel-apply")).to_be_enabled()
+    other = page.locator("#zone-map [data-wall='xL'][data-zone='auto1'] .zv-fill").bounding_box()
+    button = page.locator("#zone-panel-apply").bounding_box()
+    assert other is not None and button is not None
+    page.on("request", lambda request: sent.append(request.url) if request.url.endswith("/api/zone-material/batch") else None)
+    return cast(dict[str, float], other), cast(dict[str, float], button)
+
+
+def _mouse_cannot_change_anything(page: Page, boxes: tuple[dict[str, float], dict[str, float]], sent: list[str]) -> None:
+    for box in boxes:
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.wait_for_timeout(200)
+    assert page.evaluate("document.getElementById('zone-page').inert") is True
+    assert page.evaluate(_SELECTED) == ["y0/auto2"] and sent == []
+    assert set(_modes(page, ["yL/z3", "y0/auto2"]).items()) == {("yL/z3", "search"), ("y0/auto2", "沒列")}
+
+
+def test_nothing_can_be_changed_between_the_save_of_send_to_search_and_the_jump(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 5 條：「拿去搜尋」存好之後還要重讀清單才跳頁。那一段（這裡把結果清單扣住，撐開成必中）這一頁還鎖著：
+    真滑鼠點別區、按套用都沒作用、沒有送出換材料——不然那一批改動沒存就被帶去搜尋頁，搜尋頁讀到的比畫面上少。
+    放行後照常跳到搜尋頁，磁碟上是按下那一刻那一份。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        sent: list[str] = []
+        boxes = _press_search_with_one_more_zone_ready(page, sent)
+        results = _hold_gets(page, "**/api/results")
+        with page.expect_response(lambda r: r.url.endswith(f"/api/designs/{SAMPLE}") and r.request.method == "PUT") as design:
+            page.locator("#zone-page-search").click()
+        assert design.value.ok
+        _wait_routes(page, results, 1)
+        _mouse_cannot_change_anything(page, boxes, sent)
+        results[0].continue_()
+        page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
+        assert sent == [] and watched.page_errors == []
+    stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
+    assert stored == {"yL": {"z3": SEARCH}}
+
+
+def test_nothing_can_be_changed_while_the_search_page_is_on_its_way(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 5 條的尾巴：跳頁送出去了、搜尋頁還沒回來（這裡把那一頁扣住）——舊的這一頁還在畫面上，照樣鎖著，
+    真滑鼠按套用沒有送出換材料。放行後到搜尋頁，磁碟上是按下那一刻那一份。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        sent: list[str] = []
+        boxes = _press_search_with_one_more_zone_ready(page, sent)
+        leaving = _hold_gets(page, "**/gradient?scheme=*")
+        page.locator("#zone-page-search").click()
+        _wait_routes(page, leaving, 1)
+        # 跳頁扣在半路時瀏覽器不讓考卷讀頁面裡的值（會一直等到換頁）：只用真滑鼠按套用，從網路這一側看有沒有送出。
+        page.mouse.click(boxes[1]["x"] + boxes[1]["width"] / 2, boxes[1]["y"] + boxes[1]["height"] / 2)
+        page.wait_for_timeout(300)
+        assert sent == []
+        leaving[0].continue_()
+        page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
+        assert sent == [] and watched.page_errors == []
+    stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
+    assert stored == {"yL": {"z3": SEARCH}}
+
+
+def test_the_words_of_a_blocked_send_to_search_are_still_there_after_what_blocked_it_lands(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 6 條：「拿去搜尋」被還在路上的一批改動擋下（見上面那一題）。那一批落地、平面圖檢查通過之後，被擋的那一句還在
+    這一頁上——那一次什麼都沒存、沒跳頁，不能在零點幾秒內變回一片乾淨，看起來像按了沒反應。
+    之後再套用一批（新的動作）那一句才拿掉；再按一次「拿去搜尋」照常存、照常跳。"""
+    _prepare(tmp_path)
+    blocked = "上一個動作還沒做完，這一次沒有儲存；等它做完再按一次"
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-mode-search").check()
+        _apply(page)
+        saved: list[str] = []
+        page.on("request", lambda request: saved.append(request.url) if request.method == "PUT" else None)
+        limits = _hold(page, "**/api/zone-limits")
+        _click_zone(page, "y0/auto2")
+        page.locator("#zone-panel-mode-search").check()
+        page.evaluate("void refreshZoneLimits()")
+        _wait_held(page, limits, 1)
+        page.locator("#zone-page-search").click()
+        batch = _hold(page, "**/api/zone-material/batch")
+        plan = _hold(page, "**/api/plan")
+        page.locator("#zone-panel-apply").click()
+        _wait_held(page, batch, 1)
+        limits.release()
+        said = page.locator("#zone-page-said")
+        expect(said).to_have_text(blocked)
+        # 那一批落地（做法寫好了）、它的平面圖檢查還扣著：那一句在。
+        batch.release()
+        _wait_held(page, plan, 1)
+        expect(page.locator("#zone-page-note")).to_have_text("1 區改成「交給電腦挑」")
+        expect(said).to_have_text(blocked)
+        # 平面圖檢查通過（輸入頁訊息列換成成功的一句）：那一句還在。
+        with page.expect_response("**/api/plan") as checked:
+            plan.release()
+        assert checked.value.ok
+        _settled(page)
+        expect(page.locator("#messages")).to_have_class("ok")
+        expect(said).to_be_visible()
+        expect(said).to_have_text(blocked)
+        assert saved == [] and "gradient" not in page.url
+        assert _modes(page, ["yL/z3", "y0/auto2"]) == {"yL/z3": "search", "y0/auto2": "search"}
+        # 新的一個動作：那一句拿掉，不永遠黏著。
+        _click_zone(page, "xL/auto1")
+        page.locator("#zone-panel-mode-search").check()
+        _apply(page)
+        expect(said).to_have_count(0)
+        page.route("**/gradient?scheme=*", lambda route: route.fulfill(status=200, content_type="text/plain", body="gradient"))
+        page.locator("#zone-page-search").click()
+        page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
+        assert watched.page_errors == []
+    stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
+    assert stored == {"yL": {"z3": SEARCH}, "y0": {"auto2": SEARCH}, "xL": {"auto1": SEARCH}}
+
+
 def test_a_refused_batch_changes_nothing_and_the_page_names_the_zone_and_the_reason(tmp_path: Path, browser: Browser) -> None:
     """一批換材料被伺服器拒收：一區都不改、選的區與面板照留，新頁那一行寫是哪一區、為什麼（伺服器指名了區就用牆名與號碼叫它；
     沒指名就照它給的那一句）。"""

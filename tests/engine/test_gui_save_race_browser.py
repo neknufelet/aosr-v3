@@ -2,10 +2,12 @@
 「打開」「載入範本」換不了表單；存進去的方案與每一區做法是按下那一刻那一份；另存成功後首頁「已存的方案」馬上有新名字。
 兩份方案與做法都是考卷自己編的（房間尺寸、深度上限、清單都不是任何真資料）；只攔網路、伺服器是考卷自己起的。"""
 import json
+import urllib.request
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+import pytest
 from playwright.sync_api import Browser, Page, Request, Route, expect
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -481,4 +483,97 @@ def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unl
         assert page.locator("#messages").get_attribute("class") == "notice"
         assert "地板材料構造 › 第 1 層" in page.locator("#messages").inner_text()
         assert not (tmp_path / "schemes" / f"{COPY}.json").exists()
+        assert watched.page_errors == []
+
+
+def _watch_messages(page: Page) -> None:
+    """從這一刻起盯訊息列：它一被改寫（字或 class），window.saidSince 就是 true。"""
+    page.evaluate("""() => {
+        window.saidSince = false;
+        new MutationObserver(() => { window.saidSince = true; }).observe(
+            document.getElementById("messages"), {childList: true, characterData: true, subtree: true, attributes: true});
+    }""")
+
+
+@pytest.mark.parametrize("button", ["#save", "#calculate"])
+def test_the_refused_words_beside_the_button_outlive_a_save_the_server_turns_down(
+        tmp_path: Path, browser: Browser, button: str) -> None:
+    """#1188 第 7 條：「儲存」（「計算」先存的那一步同一條路）卡在圖面檢查時按「載入範本」：被擋下、旁邊照講。
+    放行後伺服器不收這一次存檔（開機那一份範本改了一格，資料夾裡已經有同名的方案，照規矩不蓋掉）：訊息列寫伺服器的原因，
+    「載入範本」旁邊被擋的那一句還在——不能因為存檔自己也失敗，那一下就看起來像沒按到。"""
+    with _serve(tmp_path) as base:
+        example = json.loads(urllib.request.urlopen(f"{base}/api/example").read())["scheme"]
+    name = cast(str, example["scheme_id"])
+    _write(tmp_path, example)
+    before = (tmp_path / "schemes" / f"{name}.json").read_bytes()
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        with page.expect_response("**/api/input-preview") as preview:
+            page.locator("#room-Lx").fill(str(example["scene"]["room_m"]["Lx"] + 0.5))
+        assert preview.value.ok
+        page.wait_for_load_state("networkidle")
+        held = _hold_first(page, "**/api/plan", "POST")
+        with page.expect_request("**/api/plan"):
+            page.locator(button).click()
+        _press(page, "#load-template")
+        page.wait_for_function("document.getElementById('template-note').textContent !== ''")
+        refused = "上一個動作還沒做完，沒有載入範本；等它做完再按一次「載入範本」"
+        assert page.locator("#template-note").inner_text() == refused
+        with page.expect_response(lambda r: _is_put(r.request, f"/api/schemes/{name}")) as put:
+            held[0].continue_()
+        assert not put.value.ok
+        turned_down = cast(str, put.value.json()["error"])
+        expect(page.locator("#messages")).to_have_text(turned_down)
+        _settle(page)
+        assert page.locator("#messages").get_attribute("class") == "notice"
+        assert page.locator("#messages").inner_text() == turned_down
+        assert page.locator("#template-note").inner_text() == refused
+        assert page.locator("#template-note").get_attribute("class") == "notice"
+        assert (tmp_path / "schemes" / f"{name}.json").read_bytes() == before
+        assert watched.page_errors == []
+
+
+def test_why_it_was_not_opened_stays_beside_open_when_the_preview_asked_afterwards_fails_too(
+        tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 8 條：表單有一格收不下（預覽回 400）時去「打開」一份現在檢查不過的方案：沒打開、原因寫在「打開」旁邊。
+    表單換不過去之後頁面替原本那一份補問一次預覽（也是 400，訊息列再換一次）：等那一次回覆處理完，
+    「沒有打開…」那一句還在。"""
+    _prepare(tmp_path)
+    outside = json.loads((tmp_path / "schemes" / f"{A}.json").read_text(encoding="utf-8")) | {"scheme_id": "race-outside"}
+    speaker = next(iter(outside["speakers"]))
+    outside["speakers"][speaker]["x"] = ROOM_A["Lx"] + 3
+    (tmp_path / "schemes" / "race-outside.json").write_text(json.dumps(outside), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        # 開機那一份範例：地板換成材料構造、第一層厚度清空，預覽就回 400（同 #1193 那一題）。
+        _filled(page, "#material-kind-floor", "assembly")
+        with page.expect_response("**/api/input-preview") as preview:
+            page.locator("#layer-floor-0-thickness_m").fill("")
+        assert preview.value.status == 400
+        shown = page.locator("#save-id").input_value()
+        # 存著的那一份讀出來就檢查不過，「打開」自己不問預覽：之後唯一的一次預覽就是補問的那一次，攔在半路。
+        asked: list[Route] = []
+        page.route("**/api/input-preview", lambda route: asked.append(route))
+        page.locator("#scheme-list").select_option("race-outside")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("document.getElementById('open-note').textContent !== ''")
+        not_opened = page.locator("#open-note").inner_text()
+        assert not_opened.startswith("沒有打開「race-outside」：") and page.locator("#save-id").input_value() == shown
+        page.wait_for_function(UNLOCKED)
+        for _ in range(500):
+            if asked:
+                break
+            page.wait_for_timeout(20)
+        assert len(asked) == 1, "打開失敗後沒有替原本那一份補問預覽"
+        _watch_messages(page)
+        with page.expect_response("**/api/input-preview") as reply:
+            asked[0].continue_()
+        assert reply.value.status == 400
+        page.wait_for_function("window.saidSince")
+        assert page.locator("#open-note").inner_text() == not_opened
+        assert page.locator("#open-note").get_attribute("class") == "notice"
+        assert page.locator("#messages").get_attribute("class") == "notice"
+        assert "地板材料構造 › 第 1 層" in page.locator("#messages").inner_text()
+        assert page.locator("#save-id").input_value() == shown
         assert watched.page_errors == []
