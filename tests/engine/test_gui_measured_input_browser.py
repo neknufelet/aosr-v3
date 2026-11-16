@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
@@ -133,11 +133,50 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
         with page.expect_response('**/api/input-preview') as preview:
             page.locator('#layer-floor-0-flow_resistivity_pa_s_m2').fill(str(ranges.sample_flow_resistivity_max_pa_s_m2 * 2))
         assert preview.value.status == 400
+        # #1193：另存被拒、頁面解鎖後會替目前這份補問一次預覽；表單有問題時它也回 400、訊息列再換一次。
+        # 按鈕旁的原因要等那一次回覆落地之後還在。兩次拒收在訊息列是同一句，分不出先後，所以把補問那個請求
+        # 攔在半路：這時另存自己的話都寫完了，才開始盯訊息列，放行後它一被改寫就是補問的回覆處理完了。
+        held: list[Route] = []
+        page.route('**/api/input-preview', lambda route: held.append(route))
         page.locator('#save-as-id').fill('bad-base')
-        with page.expect_response('**/api/schemes/bad-base') as saved:
-            page.locator('#save-as').click()
-        assert saved.value.status == 422
-        expect(page.locator('#save-as-note')).to_contain_text('同一面牆的底構造 › 第 1 層 › 流阻')
+        with page.expect_request('**/api/input-preview'):
+            with page.expect_response('**/api/schemes/bad-base') as saved:
+                page.locator('#save-as').click()
+            assert saved.value.status == 422
+        refused = '同一面牆的底構造 › 第 1 層 › 流阻'
+        expect(page.locator('#save-as-note')).to_contain_text(refused)
+        page.evaluate('''() => {
+            window.saidAfterUnlock = false;
+            new MutationObserver(() => { window.saidAfterUnlock = true; }).observe(
+                document.getElementById("messages"), {childList: true, characterData: true, subtree: true, attributes: true});
+        }''')
+        assert len(held) == 1
+        with page.expect_response('**/api/input-preview') as asked_again:
+            held[0].continue_()
+        assert asked_again.value.status == 400
+        page.wait_for_function('window.saidAfterUnlock')
+        assert page.locator('#save-as-note').inner_text().startswith('沒有另存：') and refused in page.locator('#save-as-note').inner_text()
+        assert page.locator('#save-as-note').get_attribute('class') == 'notice'
+        assert page.locator('#messages').get_attribute('class') == 'notice'
+        assert refused in page.locator('#messages').inner_text()
+        # 反過來那一半：補問還在路上時使用者自己改了「新名字」（那一格一打字，旁邊上一次的結果就清掉），
+        # 補問的回覆落地後不准把舊的「沒有另存：…」寫回來——旁邊的字要在換訊息列前一刻才抄，不是解鎖那一刻。
+        with page.expect_request('**/api/input-preview'):
+            with page.expect_response('**/api/schemes/bad-base') as saved_again:
+                page.locator('#save-as').click()
+            assert saved_again.value.status == 422
+        expect(page.locator('#save-as-note')).to_contain_text(refused)
+        assert len(held) == 2
+        page.locator('#save-as-id').fill('other-name')
+        assert page.locator('#save-as-note').inner_text() == ''
+        page.evaluate('() => { window.saidAfterUnlock = false; }')
+        with page.expect_response('**/api/input-preview') as asked_third:
+            held[1].continue_()
+        assert asked_third.value.status == 400
+        page.wait_for_function('window.saidAfterUnlock')
+        assert page.locator('#save-as-note').inner_text() == ''
+        assert page.locator('#save-as-note').get_attribute('class') == ''
+        assert refused in page.locator('#messages').inner_text()
         assert watched.page_errors == []
 
 

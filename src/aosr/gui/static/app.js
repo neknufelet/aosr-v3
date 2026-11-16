@@ -389,7 +389,17 @@ async function holdInput(work) {
     // 存檔途中被擋下的「打開」「載入範本」：存檔自己的訊息會清掉旁邊的字，做完再寫回去，不讓那一下看起來像沒按到。
     if (refusedBeside) sayBeside(refusedBeside.note, refusedBeside.text, "notice");
     refusedBeside = null;
-    if (scheme && formScheme === scheme) action(updateInputPreview);
+    if (scheme && formScheme === scheme) previewAfterUnlock();
+  }
+}
+// 解鎖後補問的那一次預覽不是使用者按出來的：它失敗（表單有一格收不下）只換訊息列那一句，
+// 按鈕旁邊剛寫的結果（沒有另存的原因、被擋下的那一句）照留（#1193）。旁邊的字在 say() 前一刻才抄：
+// 等回覆的時候使用者自己清掉的就不寫回去。
+async function previewAfterUnlock() {
+  try { await updateInputPreview(); } catch (error) {
+    const beside = ["open-note", "template-note", "save-as-note"].map(note => [note, $(note).textContent, $(note).className]);
+    say(errorText(error), "notice");
+    for (const [note, text, kind] of beside) sayBeside(note, text, kind);
   }
 }
 function refuseWhileBusy(note, text) {
