@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -724,4 +725,218 @@ def test_a_poll_due_while_the_last_one_is_still_out_is_made_up_not_dropped(brows
         while len(seen) == count and time.monotonic() < deadline:
             page.wait_for_timeout(50)
         assert len(seen) == count + 1, ("被跳過的那一次沒有補做", seen)
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+# ---- 換方案時回覆晚到（#1188 第 1 條）----
+
+SECOND, THIRD, BARE = "second", "third", "bare"
+ONE_ZONE = {"x0": {"r0_c0": "search"}}
+THREE_ZONES = {"x0": {"r0_c0": "search", "r1_c1": "search"}, "xL": {"r0_c0": "search"}}
+BLOCKS = ("form-block", "plan-block", "surrogate-block", "start-block")
+
+
+def _add_scheme(data_dir: Path, name: str, zones: dict[str, dict[str, str]] | None) -> None:
+    """同一份切法換個名字再存一份（替身照切法放，共用 ``_data`` 放的那一份）；``zones`` 給 None 就不寫設計設定。"""
+    scheme = _axis_scheme().model_copy(update={"scheme_id": name})
+    (data_dir / "schemes" / f"{name}.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    if zones is not None:
+        write_design(data_dir, _design(zones).model_copy(update={"scheme_id": name}), scheme)
+
+
+def _plan_path(name: str) -> str:
+    return f"/api/gradient/schemes/{name}/plan"
+
+
+def _count_starts(page: Page) -> list[str]:
+    """瀏覽器真的送出去的開跑請求（記下網址再照常放行給伺服器）。"""
+    starts: list[str] = []
+
+    def handle(route: Route) -> None:
+        starts.append(urlsplit(route.request.url).path)
+        route.continue_()
+
+    page.route("**/api/gradient/schemes/*/start", handle)
+    return starts
+
+
+def _hold_plan(page: Page, name: str) -> list[Route]:
+    held: list[Route] = []
+    page.route(f"**{_plan_path(name)}", lambda route: held.append(route))
+    return held
+
+
+def _switch(page: Page, name: str) -> None:
+    """選另一份方案、按「讀這份方案的開跑選項」，等到那一份的請求真的送出去。"""
+    page.locator("#scheme-pick").select_option(name)
+    with page.expect_request(lambda request: urlsplit(request.url).path == _plan_path(name)):
+        page.locator("#load-plan").click()
+
+
+def _flush(page: Page) -> None:
+    """頁內跟伺服器來回兩趟：在這之前已經回到瀏覽器的回覆，頁面都處理完了（不靠真時間等）。"""
+    for _ in range(2):
+        page.evaluate("() => fetch('/api/schemes').then((reply) => reply.json())")
+
+
+def _release(page: Page, held: list[Route], name: str) -> None:
+    """放行攔住的那一份回覆，等它整份回到瀏覽器、頁面處理完。"""
+    assert len(held) == 1
+    with page.expect_response(lambda response: urlsplit(response.url).path == _plan_path(name)) as event:
+        held[0].continue_()
+    event.value.finished()
+    _flush(page)
+
+
+def _force_start(page: Page) -> None:
+    """繞過畫面直接按「開始搜尋」（藏著、停用都照按）：考的是開跑那一支自己認不認這份預覽。"""
+    page.evaluate("() => { const button = document.getElementById('start'); button.disabled = false; button.click(); }")
+    _flush(page)
+
+
+def _poll_once(page: Page) -> None:
+    """推一格輪詢、等清單回來處理完：輪詢會重算「開始搜尋」亮不亮。"""
+    with page.expect_response(lambda response: urlsplit(response.url).path == "/api/gradient/jobs") as event:
+        _tick(page)
+    event.value.finished()
+    _flush(page)
+
+
+def test_switching_scheme_voids_the_old_preview_until_the_new_plan_is_back(browser: Browser, tmp_path: Path) -> None:
+    """抓換方案後、新那份的開跑選項還沒回來時，舊那份的預覽、表單、「開始搜尋」還開著，按下去拿新方案代號配舊表單開跑。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        page.locator("#max-steps").fill("45")
+        page.locator("#preview").click()
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 2 區")
+        expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限 45 步")
+        expect(page.locator("#start")).to_be_enabled()
+        starts = _count_starts(page)
+        held = _hold_plan(page, SECOND)
+        _switch(page, SECOND)
+        _poll_once(page)
+        shown = [block for block in BLOCKS if page.locator(f"#{block}").is_visible()]
+        usable = page.locator("#start").is_visible() and page.locator("#start").is_enabled()
+        _force_start(page)
+        _release(page, held, SECOND)
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 1 區")
+        expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限 60 步")
+        expect(page.locator("#max-steps")).to_have_value("60")
+        assert starts == [] and launcher.launched == [], (
+            f"等新方案回覆時送出了開跑請求 {starts}；伺服器照它開了服務，步數上限 "
+            f"{[argv[argv.index('--max-steps') + 1] for _, argv, _, _ in launcher.launched]}（45 是舊那份表單填的）")
+        assert shown == [] and not usable, f"等新方案回覆時舊那份還開著：{shown}，開始搜尋按得下去：{usable}"
+        # 新那份回來、照它自己的選項預覽過，才開得了；開的是新那份、帶它自己的步數。
+        expect(page.locator("#start")).to_be_enabled()
+        page.locator("#start").click()
+        expect(page.locator("#job-title")).to_contain_text(f"這一跑：{SECOND}")
+        assert starts == [f"/api/gradient/schemes/{SECOND}/start"]
+        _, argv, _, _ = launcher.launched[-1]
+        assert argv[argv.index("--max-steps") + 1] == "60"
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_plan_reply_that_lands_after_a_later_switch_is_dropped(browser: Browser, tmp_path: Path) -> None:
+    """抓連換兩次（第一份 → 第二份 → 第三份）、第二份的回覆比第三份晚到時，畫面被晚到的第二份蓋掉、開跑拿第三份的代號配第二份的表單。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    _add_scheme(data_dir, THIRD, THREE_ZONES)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 2 區")
+        starts = _count_starts(page)
+        held = _hold_plan(page, SECOND)
+        _switch(page, SECOND)
+        _switch(page, THIRD)
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
+        _release(page, held, SECOND)
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
+        expect(page.locator("#depth-table tbody tr")).to_have_count(3)
+        expect(page.locator("#scheme-pick")).to_have_value(THIRD)
+        expect(page.locator("#start")).to_be_enabled()
+        page.locator("#start").click()
+        expect(page.locator("#job-title")).to_contain_text(f"這一跑：{THIRD}")
+        assert starts == [f"/api/gradient/schemes/{THIRD}/start"]
+        _, argv, _, _ = launcher.launched[-1]
+        assert "xL@r0_c0" in " ".join(argv)
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_scheme_that_cannot_run_does_not_fall_back_to_the_old_preview(browser: Browser, tmp_path: Path) -> None:
+    """抓換到開不了第三階段搜尋的方案後，舊那份的預覽還算數：按「開始搜尋」拿開不了的那份代號配舊表單送出去。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, BARE, None)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#start")).to_be_enabled()
+        starts = _count_starts(page)
+        _switch(page, BARE)
+        expect(page.locator("#scheme-message")).to_contain_text("這份方案開不了第三階段搜尋")
+        _poll_once(page)
+        for block in BLOCKS:
+            expect(page.locator(f"#{block}")).to_be_hidden()
+        _force_start(page)
+        assert starts == [] and launcher.launched == [], f"開不了的方案送出了開跑請求 {starts}"
+        _clean(page, watched.page_errors + [error for error in watched.console_errors if "status of 400" not in error])
+
+
+def test_a_preview_reply_that_lands_after_a_switch_is_dropped(browser: Browser, tmp_path: Path) -> None:
+    """抓按了「預覽」還沒回來就換方案、舊那份的預覽晚到時，畫面被舊那份蓋掉、「開始搜尋」照舊那份亮起來。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#start")).to_be_enabled()
+        starts = _count_starts(page)
+        held = _hold_plan(page, NAME)
+        with page.expect_request(lambda request: urlsplit(request.url).path == _plan_path(NAME)):
+            page.locator("#preview").click()
+        _switch(page, SECOND)
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 1 區")
+        _release(page, held, NAME)
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 1 區")
+        expect(page.locator("#form-message")).not_to_contain_text("預覽好了")
+        expect(page.locator("#start")).to_be_enabled()
+        page.locator("#start").click()
+        expect(page.locator("#job-title")).to_contain_text(f"這一跑：{SECOND}")
+        assert starts == [f"/api/gradient/schemes/{SECOND}/start"]
+        _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_rebuild_overtaken_by_a_switch_stops_there(browser: Browser, tmp_path: Path) -> None:
+    """抓按了「重建替身」、那一份的開跑選項還沒回來人就換到別份時，重建照樣往下走：拿別份方案去問「換掉舊替身」、
+    把「被准用閘門拒收」那一句寫到別份方案底下。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    _add_scheme(data_dir, THIRD, THREE_ZONES)
+    launcher = FakeLauncher()
+    jobs = _jobs(data_dir, launcher)
+    view = jobs.start(SECOND, GradientRequest())
+    job_id = str(view["job_id"])
+    (data_dir / "gradient" / job_id / "steps" / "0.log").write_text(REFUSED + "\n", encoding="utf-8")
+    _finish(data_dir, launcher, view, 1)
+    with _serve(data_dir, launcher) as url, \
+            _open(browser, f"{url}/gradient?scheme={NAME}&job={job_id}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#job-state")).to_contain_text("替身核不過")
+        replaced: list[str] = []
+        page.on("request", lambda request: replaced.append(urlsplit(request.url).path)
+                if request.url.endswith("/surrogate/plan") and (request.post_data_json or {}).get("replace") else None)
+        held = _hold_plan(page, SECOND)
+        with page.expect_request(lambda request: urlsplit(request.url).path == _plan_path(SECOND)):
+            page.locator("#job-rebuild").click()
+        _switch(page, THIRD)
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
+        _release(page, held, SECOND)
+        _flush(page)
+        assert replaced == [], f"重建被換方案追過之後還去問了換掉舊替身：{replaced}"
+        expect(page.locator("#surrogate-message")).not_to_contain_text("被准用閘門拒收")
+        expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
+        expect(page.locator("#scheme-pick")).to_have_value(THIRD)
         _clean(page, watched.page_errors + watched.console_errors)
