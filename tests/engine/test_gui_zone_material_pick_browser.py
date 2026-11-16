@@ -514,6 +514,8 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"]}
         expect(page.locator("#zone-page .zv-list")).to_have_count(2)
         expect(page.locator("#zone-page-note")).to_have_text("1 區的清單改成 不貼、24K 玻璃棉；另外 1 區那一面貼不了這一種，沒加")
+        # 那一組的區拆成兩張卡了：開著的「加別種材料」關掉，兩張都不開。
+        expect(page.locator("#zone-page .zv-add")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
