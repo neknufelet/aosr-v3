@@ -258,7 +258,7 @@ def test_opening_the_page_and_saving_without_changes_leaves_both_files_byte_iden
             assert json.loads(design_file.read_text(encoding="utf-8"))["zones"] == design["zones"]
 
 
-def test_editing_the_list_card_writes_the_list_into_every_zone_handed_to_the_computer(tmp_path: Path, browser: Browser) -> None:
+def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_no_other(tmp_path: Path, browser: Browser) -> None:
     _prepare(tmp_path, SAMPLE_DESIGN)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -266,16 +266,21 @@ def test_editing_the_list_card_writes_the_list_into_every_zone_handed_to_the_com
         searching = set(cast(dict[str, list[str]], page.evaluate(_ALLOWED)))
         assert {"y0/auto1", "ceiling/z1", "xL/auto4"} <= searching and len(searching) == 15
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"] == SHORT
-        # 拿掉一種：每一個由程式最佳化的區都換成新的那一份（原本清單不一樣的那一區也是）。
+        # 拿掉一種：用這一份清單的 14 區都少一種；清單不一樣的那一區（後牆 auto1，自己一張卡）不動（#1199 修補 1）。
         page.locator("#zone-list-check-glass_wool_96k").click()
         shorter = ["glass_wool_48k", "glass_wool_24k", "none"]
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, shorter)
-        expect(page.locator("#zone-list-different")).to_have_count(0)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(searching, shorter), "y0/auto1": SHORT}
+        # 在那一區自己的卡上加 24K：它的清單跟另外 14 區變成同樣三種，兩張卡併成一張。
+        page.locator("#zone-list-2-add").click()
+        page.locator("#zone-list-2-add-glass_wool_24k").click()
+        expect(page.locator("#zone-page .zv-list")).to_have_count(1)
+        assert set(cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"]) == set(shorter)
+        shorter_everywhere = {**dict.fromkeys(searching, shorter), "y0/auto1": [*SHORT, "glass_wool_24k"]}
         # 加別種材料：勾了就加進每一區的清單。
         page.locator("#zone-list-add").click()
         expect(page.locator(f"label[data-choice={VPR}]")).to_contain_text("VPR（鋼板共振吸音）＋前面聚酯棉 60 mm")
         page.locator(f"#zone-list-add-{VPR}").click()
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, [*shorter, VPR])
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {zone: [*own, VPR] for zone, own in shorter_everywhere.items()}
         # 只剩固定成品：程式沒得選，卡上講明，「拿去搜尋」按不下去；最後一種拿不掉。
         for choice in shorter:
             page.locator(f"#zone-list-check-{choice}").click()

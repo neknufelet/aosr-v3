@@ -509,6 +509,13 @@ def test_the_panel_opens_on_the_picked_zones_own_lists_and_a_half_ticked_materia
         _click_zone(page, "y0/auto1")
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
         assert [page.locator(f"#zone-panel-allow-{choice}").evaluate(state) for choice in WOOLS] == ["all", "none", "none", "all"]
+        # 這一區的清單跟「其他牆面」那一份不一樣：不標「＝其他牆面」；把缺的兩種勾上、跟它一樣了才標。
+        expect(page.locator("#zone-panel-same")).to_have_count(0)
+        page.locator("#zone-panel-allow-glass_wool_24k").check()
+        page.locator("#zone-panel-allow-glass_wool_96k").check()
+        expect(page.locator("#zone-panel-option-search #zone-panel-same")).to_have_text("＝其他牆面")
+        page.locator("#zone-panel-cancel").click()
+        _click_zone(page, "y0/auto1")
         # 再加選清單比較長的那一區。
         _click_zone(page, "y0/auto2")
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()

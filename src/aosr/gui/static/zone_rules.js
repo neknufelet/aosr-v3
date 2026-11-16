@@ -11,8 +11,9 @@
    規則＝出現最多次的做法鍵；平手取交進來的順序裡最先出現的那一個。另外指定＝做法鍵跟規則不同的區，同一個鍵一組，
    組照最先出現的順序排。
 
-   清單卡（zoneSearchList）：由程式最佳化的每一區各存一份清單，畫面只列一份——規則本身是由程式最佳化就列規則那一份，
-   不然列最多區用的那一份（平手取最先出現的）；清單跟它不同的區另外數出來（「有 N 區另外選」）。 */
+   清單卡（zoneSearchList）：由程式最佳化的每一區各存一份清單，清單一樣的區一組、一組一張卡（groups）。排第一的那一組
+   （common）：規則本身是由程式最佳化就是規則那一組，不然是最多區用的那一組（平手取最先出現的）；其餘照最先出現的順序。
+   清單跟第一組不同的區另外數出來（different）。 */
 
 // 物件的鍵排過序再寫成字串（值是 null 的鍵當沒有）：兩份材料內容一樣，字串就一樣。
 function zoneCanonicalJson(value) {
@@ -55,11 +56,12 @@ function inferOtherWalls(zones, keptKey = null) {
   if (!rule) for (const group of groups) if (!rule || group.zones.length > rule.zones.length) rule = group;
   return {rule, special: groups.filter(group => group !== rule)};
 }
-// 清單卡：{zones: 全部由程式最佳化的區, common: 畫面列的那一份（那一組）或 null, different: 清單跟它不同的區}。
+// 清單卡：{zones: 全部由程式最佳化的區, common: 排第一的那一組或 null, different: 清單跟它不同的區, groups: 每一組（common 在最前）}。
 // ruleKey：規則的做法鍵；規則是由程式最佳化、而且真的有區用那一份時，列的就是它。
 function zoneSearchList(zones, ruleKey) {
   const search = zones.filter(zone => zone.mode === "search");
   const groups = zoneMethodGroups(search);
   const common = groups.find(group => group.key === ruleKey) ?? inferOtherWalls(search).rule;
-  return {zones: search, common, different: common ? search.filter(zone => !common.zones.includes(zone)) : []};
+  return {zones: search, common, different: common ? search.filter(zone => !common.zones.includes(zone)) : [],
+          groups: common ? [common, ...groups.filter(group => group.key !== common.key)] : []};
 }
