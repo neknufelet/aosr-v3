@@ -155,6 +155,8 @@ function stuckZoneNames() {
 }
 function stuckWords(names) { return `先處理${names.join("、")}的紅框（只放了固定成品，電腦沒得挑），處理好才能拿去搜尋`; }
 // 「拿去搜尋」：搜尋頁讀的是存好的方案與做法，先照畫面存一份；兩樣都存成才跳過去，沒存成留在這頁照講。
+// 鎖（app.js 的 holdInput）從存檔一路拿到離開這一頁（#1188 第 5 條，同「計算」把重讀清單包在鎖裡）：存好之後還要重讀清單、
+// 搜尋頁也要一點時間才回來，那一段要是點得到、改得動，改的東西沒存就被帶去搜尋頁，搜尋頁讀到的比畫面上少。
 async function sendToSearch() {
   const stuck = stuckZoneNames();
   if (stuck.length) { zoneNote(stuckWords(stuck), "notice"); return; }
@@ -163,11 +165,35 @@ async function sendToSearch() {
     zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
   }
   if (limitsRedCount()) { zoneNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); return; }
-  const generation = zoneDesignGeneration, name = $("save-id").value;
-  if (!await save()) return;
-  if (generation !== zoneDesignGeneration) { zoneNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice"); return; }
-  if (!zoneDesignSaved) { zoneNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice"); return; }
-  window.location.href = `/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`;
+  if (inputBusy) {
+    // 等限制檢查的時候又送了一批改動、還在路上：這一次不存不跳。那一批落地後平面圖檢查會換掉訊息列，
+    // 「這間房貼什麼」那一頁另外留著這一句（zone_overview.js 的 zonePageKeep，#1188 第 6 條）。
+    const refused = `${busyWords}，這一次沒有儲存；等它做完再按一次`;
+    say(refused, "notice");
+    window.zonePageKeep?.(refused);
+    return;
+  }
+  await holdInput(async () => {
+    const generation = zoneDesignGeneration, name = $("save-id").value;
+    const stored = await storeScheme();
+    if (!stored) return;
+    await refreshAfterSave(stored.message);
+    // 鎖著的時候換不了方案；這一條是鎖漏掉時的第二道（同 pressedCopy 的 samePage）。
+    if (generation !== zoneDesignGeneration) { zoneNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice"); return; }
+    if (!zoneDesignSaved) { zoneNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice"); return; }
+    await leaveForSearch(`/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`);
+  });
+}
+// 送出跳頁、等到離開這一頁（呼叫的人拿著鎖）：搜尋頁回來之前舊的這一頁還在畫面上。離開了這個等待就不會回來，鎖跟著頁面一起消失；
+// 兩種情況會回來、把鎖放開：按「上一頁」時瀏覽器把這一頁原樣搬回來（pageshow），或等了一陣子還在這一頁（搜尋頁沒打開成）。
+const LEAVE_WAIT_MS = 10000;
+async function leaveForSearch(url) {
+  const stayed = await new Promise(resolve => {
+    window.addEventListener("pageshow", () => resolve(false), {once: true});
+    setTimeout(() => resolve(true), LEAVE_WAIT_MS);
+    window.location.href = url;
+  });
+  if (stayed) zoneNote("方案與每一區的做法都存好了，但搜尋頁沒有打開：確認網頁伺服器還開著，再按一次「拿去搜尋」", "notice");
 }
 function searchButtonRow() {
   const count = searchZoneCount();

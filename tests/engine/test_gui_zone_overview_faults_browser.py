@@ -512,6 +512,38 @@ def test_nothing_can_be_changed_while_the_search_page_is_on_its_way(tmp_path: Pa
     assert stored == {"yL": {"z3": SEARCH}}
 
 
+def test_a_search_page_that_never_opens_gives_this_page_back_and_says_so(tmp_path: Path, browser: Browser) -> None:
+    """#1188 第 5 條的鎖留到離開這一頁為止：搜尋頁要是一直沒打開（這裡讓那個請求回「沒有內容」，瀏覽器就留在原頁），
+    不能永遠鎖死——等一陣子（這裡把頁面的時鐘往前撥，不真的等）就放開、照講存好了但沒打開，再按一次照常過去。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-mode-search").check()
+        _apply(page)
+        answers = [204]
+        page.route("**/gradient?scheme=*", lambda route: route.fulfill(status=answers[0], content_type="text/plain", body="gradient"))
+        page.clock.install()
+        with page.expect_response("**/gradient?scheme=*"):
+            page.locator("#zone-page-search").click()
+        page.wait_for_timeout(200)
+        assert page.evaluate("[document.getElementById('zone-page').inert, inputBusy]") == [True, True]
+        page.clock.fast_forward(60_000)
+        _released(page)
+        expect(page.locator("#zone-page-note")).to_have_text(
+            "方案與每一區的做法都存好了，但搜尋頁沒有打開：確認網頁伺服器還開著，再按一次「拿去搜尋」")
+        expect(page.locator("#zone-page-note")).to_have_class("notice")
+        assert page.url == f"{base}/"
+        answers[0] = 200
+        page.locator("#zone-page-search").click()
+        page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
+        assert watched.page_errors == []
+    stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
+    assert stored == {"yL": {"z3": SEARCH}}
+
+
 def test_the_words_of_a_blocked_send_to_search_are_still_there_after_what_blocked_it_lands(tmp_path: Path, browser: Browser) -> None:
     """#1188 第 6 條：「拿去搜尋」被還在路上的一批改動擋下（見上面那一題）。那一批落地、平面圖檢查通過之後，被擋的那一句還在
     這一頁上——那一次什麼都沒存、沒跳頁，不能在零點幾秒內變回一片乾淨，看起來像按了沒反應。
