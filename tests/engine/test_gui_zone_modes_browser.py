@@ -1,5 +1,5 @@
-"""真瀏覽器考每一區的做法（#1105，#1082 第 1-3 段）：立面圖下的逐區表選指定貼一種／不貼／交給電腦挑並改電腦可以挑的清單
-（#1176 起改成交給電腦挑就帶好一份明確清單，存檔也寫明確清單）；再切同一面別處，沒動到的區做法照留（跟著自動補滿重編的代號走）；
+"""真瀏覽器考每一區的做法（#1105，#1082 第 1-3 段）：立面圖下的逐區表選指定貼一種／不貼／由程式最佳化並改程式可以挑的清單
+（#1176 起改成由程式最佳化就帶好一份明確清單，存檔也寫明確清單）；再切同一面別處，沒動到的區做法照留（跟著自動補滿重編的代號走）；
 存檔再打開，切法、做法、清單、原方案都在；沒設過做法的舊方案存檔不多寫一份設計設定。房間一律用 109 號房的長寬高。"""
 import json
 from pathlib import Path
@@ -19,7 +19,7 @@ LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 PRESET = "glass_wool_48k_50mm"
 # 加進清單尾巴的那一筆固定成品（#1176 起清單只列這一面能貼的：地毯只列在地板，牆上改用一筆牆面的固定成品）。
 WALL_FIXED = "glass_wool_48k_50mm_gap100"
-# 改成交給電腦挑時一開始放的清單：一律是三種內建玻璃棉＋不貼（材料庫多了別的可調材料也不放進來）。
+# 改成由程式最佳化時一開始放的清單：一律是三種內建玻璃棉＋不貼（材料庫多了別的可調材料也不放進來）。
 DEFAULT_ALLOWED = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
 
 
@@ -61,7 +61,7 @@ def _region(zone: dict[str, object]) -> str:
 
 
 def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]], list[str]]:
-    """x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2（三塊都還是原牆）；三塊各選一種做法、交給電腦挑那塊改清單。"""
+    """x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2（三塊都還是原牆）；三塊各選一種做法、由程式最佳化那塊改清單。"""
     _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
     assert sorted(str(zone["id"]) for zone in _zones(page, "x0")) == ["auto1", "auto2", "z1"]
     wall = _zones(page, "x0")[0]["material"]
@@ -69,7 +69,7 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     _choose(page, "#zone-fixed-x0-z1", PRESET)
     _choose(page, "#zone-mode-x0-auto1", "search")
     _choose(page, "#zone-mode-x0-auto2", "keep_original")
-    # 改成交給電腦挑就帶好一份清單（不用先全勾再取消）；點「改清單」拿掉一種、加一種。
+    # 改成由程式最佳化就帶好一份清單（不用先全勾再取消）；點「改清單」拿掉一種、加一種。
     assert _modes(page, "x0")["auto1"] == {"mode": "search", "allowed": DEFAULT_ALLOWED}
     page.locator("#zone-allowed-summary-x0-auto1").click()
     page.locator("#zone-allow-x0-auto1-glass_wool_96k").uncheck()
@@ -135,10 +135,10 @@ def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, br
         expect(page.locator("#zone-fixed-x0-z1")).to_have_value(PRESET)
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-reopened.png"))
 
-        # 清單拿到只剩固定材料：照實提醒（電腦沒得挑），開跑時伺服器再擋一次。
+        # 清單拿到只剩固定材料：照實提醒（程式沒得選），開跑時伺服器再擋一次。
         for choice in ("glass_wool_48k", "glass_wool_24k", "none"):
             page.locator(f"#zone-allow-x0-{right}-{choice}").uncheck()
-        expect(page.locator(f"#zone-allowed-problem-x0-{right}")).to_contain_text("只放了固定成品，電腦沒得挑")
+        expect(page.locator(f"#zone-allowed-problem-x0-{right}")).to_contain_text("只放了固定成品，程式沒得選")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -285,7 +285,7 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#zone-to-search")).to_have_count(0)
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        expect(page.locator("#zone-to-search")).to_contain_text("1 區交給電腦挑")
+        expect(page.locator("#zone-to-search")).to_contain_text("1 區由程式最佳化")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "to-search.png"))
         page.locator("#zone-mode-x0-whole_wall").select_option("fixed")  # 改回固定不換材料、不打伺服器
         expect(page.locator("#zone-to-search")).to_have_count(0)

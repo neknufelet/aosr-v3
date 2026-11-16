@@ -35,7 +35,7 @@ def _wait_routes(page: Page, held: list[Route], count: int) -> None:
 
 
 def _press_search_with_one_more_zone_ready(page: Page, sent: list[str]) -> tuple[dict[str, float], dict[str, float]]:
-    """一區已經交給電腦挑；面板上再點好一區與做法、先不套用。回圖上另一區與套用鈕的位置（等一下拿真滑鼠去點）。"""
+    """一區已經由程式最佳化；面板上再點好一區與做法、先不套用。回圖上另一區與套用鈕的位置（等一下拿真滑鼠去點）。"""
     _open_overview(page)
     _settled(page)
     _click_zone(page, "yL/z3")
@@ -167,7 +167,7 @@ def test_the_words_of_a_blocked_send_to_search_are_still_there_after_what_blocke
         # 那一批落地（做法寫好了）、它的平面圖檢查還扣著：那一句在。
         batch.release()
         _wait_held(page, plan, 1)
-        expect(page.locator("#zone-page-note")).to_have_text("1 區改成「交給電腦挑」")
+        expect(page.locator("#zone-page-note")).to_have_text("1 區改成「由程式最佳化」")
         expect(said).to_have_text(blocked)
         # 平面圖檢查通過（輸入頁訊息列換成成功的一句）：那一句還在。
         with page.expect_response("**/api/plan") as checked:

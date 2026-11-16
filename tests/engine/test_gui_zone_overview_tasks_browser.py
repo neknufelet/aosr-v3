@@ -2,9 +2,9 @@
 
 資料全是合成的：區名考卷那間假房間（``_zone_naming_room`` 的 zone-naming-sample：前牆 yL、後牆 y0、左牆 x0 整面一區、
 右牆 xL 有門有窗）配它的 5 筆假材料，加上合成材料庫 12 筆（``_sample_material_library``，裡面有名字以 VPR 開頭的三筆）。
-假房間的左牆只有一區，所以樣稿那句「只有左牆③交給電腦挑」在這裡改用右牆③（xL 的 auto4）。
+假房間的左牆只有一區，所以樣稿那句「只有左牆③由程式最佳化」在這裡改用右牆③（xL 的 auto4）。
 
-兩句任務各一題（按完比設計檔每一區的做法與清單、方案裡那幾區的材料）、打開不改就存逐位不變、改清單寫進每一個交給電腦挑的區、
+兩句任務各一題（按完比設計檔每一區的做法與清單、方案裡那幾區的材料）、打開不改就存逐位不變、改清單寫進每一個由程式最佳化的區、
 伺服器回應晚到重畫時選取與剛點的選項還在、VPR 帶中文、選到天花時材料只列天花能貼的。"""
 from __future__ import annotations
 
@@ -102,9 +102,9 @@ def _materials_before() -> dict[str, dict[str, dict[str, object]]]:
 
 
 def test_task_one_front_panels_fixed_and_the_other_walls_handed_to_the_computer(tmp_path: Path, browser: Browser) -> None:
-    """「前牆兩塊板指定貼一種（合成庫裡名字以 VPR 開頭的那一筆），其他牆面交給電腦挑（三種內建玻璃棉、也可以不貼）；
-    門、窗、天花、地板不動」：點前牆兩塊 → 指定貼一種 → 套用；「其他牆面」下拉改成交給電腦挑；剩下兩塊原本貼著別的，
-    點它們 → 交給電腦挑（標著「＝其他牆面」的那一項）→ 套用；拿去搜尋（先存檔）。"""
+    """「前牆兩塊板指定貼一種（合成庫裡名字以 VPR 開頭的那一筆），其他牆面由程式最佳化（三種內建玻璃棉、也可以不貼）；
+    門、窗、天花、地板不動」：點前牆兩塊 → 指定貼一種 → 套用；「其他牆面」下拉改成由程式最佳化；剩下兩塊原本貼著別的，
+    點它們 → 由程式最佳化（標著「＝其他牆面」的那一項）→ 套用；拿去搜尋（先存檔）。"""
     _prepare(tmp_path)
     before = _materials_before()
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -163,16 +163,16 @@ def test_task_one_front_panels_fixed_and_the_other_walls_handed_to_the_computer(
         # 每一層連數值一起比：材料庫那一筆寫的每一格（種類、厚度、流阻、面密度…），存下來的那一層都是同一個值。
         for stored_layer, layer in zip(stored_layers, cast(list[dict[str, object]], vpr_layers)):
             assert {name: stored_layer[name] for name in layer} == layer
-    # 交給電腦挑的區放回原樣（原本貼著東西的那兩塊也是）；門、窗、天花、地板一個字都沒動。
+    # 由程式最佳化的區放回原樣（原本貼著東西的那兩塊也是）；門、窗、天花、地板一個字都沒動。
     assert materials["yL"]["z3"]["kind"] == "constant_impedance" and materials["y0"]["z1"]["kind"] == "constant_impedance"
     assert materials["xL"]["door"] == before["xL"]["door"] and materials["xL"]["window"] == before["xL"]["window"]
     assert materials["ceiling"] == before["ceiling"] and materials["floor"] == before["floor"]
 
 
 def test_task_two_other_walls_bare_and_only_one_zone_handed_to_the_computer(tmp_path: Path, browser: Browser) -> None:
-    """「其他牆面都不貼，只有右牆③交給電腦挑；前牆兩塊照舊」：從其他牆面交給電腦挑的那份設計開始。「其他牆面」下拉改成
+    """「其他牆面都不貼，只有右牆③由程式最佳化；前牆兩塊照舊」：從其他牆面由程式最佳化的那份設計開始。「其他牆面」下拉改成
     不貼（前牆兩塊是另外指定的，不動）；後牆清單不一樣的那一區還是另外指定，點它 → 不貼（＝其他牆面）；點右牆③ →
-    交給電腦挑 → 套用（清單照畫面上那一份，也就是天花那一區用的）；拿去搜尋。"""
+    由程式最佳化 → 套用（清單照畫面上那一份，也就是天花那一區用的）；拿去搜尋。"""
     _prepare(tmp_path, SAMPLE_DESIGN)
     before = _materials_before()
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -258,7 +258,7 @@ def test_opening_the_page_and_saving_without_changes_leaves_both_files_byte_iden
             assert json.loads(design_file.read_text(encoding="utf-8"))["zones"] == design["zones"]
 
 
-def test_editing_the_list_card_writes_the_list_into_every_zone_handed_to_the_computer(tmp_path: Path, browser: Browser) -> None:
+def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_no_other(tmp_path: Path, browser: Browser) -> None:
     _prepare(tmp_path, SAMPLE_DESIGN)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -266,20 +266,25 @@ def test_editing_the_list_card_writes_the_list_into_every_zone_handed_to_the_com
         searching = set(cast(dict[str, list[str]], page.evaluate(_ALLOWED)))
         assert {"y0/auto1", "ceiling/z1", "xL/auto4"} <= searching and len(searching) == 15
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"] == SHORT
-        # 拿掉一種：每一個交給電腦挑的區都換成新的那一份（原本清單不一樣的那一區也是）。
+        # 拿掉一種：用這一份清單的 14 區都少一種；清單不一樣的那一區（後牆 auto1，自己一張卡）不動（#1199 修補 1）。
         page.locator("#zone-list-check-glass_wool_96k").click()
         shorter = ["glass_wool_48k", "glass_wool_24k", "none"]
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, shorter)
-        expect(page.locator("#zone-list-different")).to_have_count(0)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(searching, shorter), "y0/auto1": SHORT}
+        # 在那一區自己的卡上加 24K：它的清單跟另外 14 區變成同樣三種，兩張卡併成一張。
+        page.locator("#zone-list-2-add").click()
+        page.locator("#zone-list-2-add-glass_wool_24k").click()
+        expect(page.locator("#zone-page .zv-list")).to_have_count(1)
+        assert set(cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"]) == set(shorter)
+        shorter_everywhere = {**dict.fromkeys(searching, shorter), "y0/auto1": [*SHORT, "glass_wool_24k"]}
         # 加別種材料：勾了就加進每一區的清單。
         page.locator("#zone-list-add").click()
         expect(page.locator(f"label[data-choice={VPR}]")).to_contain_text("VPR（鋼板共振吸音）＋前面聚酯棉 60 mm")
         page.locator(f"#zone-list-add-{VPR}").click()
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, [*shorter, VPR])
-        # 只剩固定成品：電腦沒得挑，卡上講明，「拿去搜尋」按不下去；最後一種拿不掉。
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {zone: [*own, VPR] for zone, own in shorter_everywhere.items()}
+        # 只剩固定成品：程式沒得選，卡上講明，「拿去搜尋」按不下去；最後一種拿不掉。
         for choice in shorter:
             page.locator(f"#zone-list-check-{choice}").click()
-        expect(page.locator("#zone-list-problem")).to_contain_text("只放了固定成品，電腦沒得挑")
+        expect(page.locator("#zone-list-problem")).to_contain_text("只放了固定成品，程式沒得選")
         # 三條路都講到：加可調的、加「也可以不貼」、要的就是這一筆就把那一區改成指定貼一種。
         problem = cast(str, page.locator("#zone-list-problem").text_content())
         assert "加一種可調的材料" in problem and "加上「也可以不貼」" in problem
@@ -287,7 +292,7 @@ def test_editing_the_list_card_writes_the_list_into_every_zone_handed_to_the_com
         assert not any("a" <= char.lower() <= "z" for char in problem)
         expect(page.locator("#zone-list-problem button")).to_have_count(0)
         expect(page.locator("#zone-page-search")).to_be_disabled()
-        expect(page.locator("#zone-page-blocked")).to_contain_text("的紅框（只放了固定成品，電腦沒得挑），處理好才能拿去搜尋")
+        expect(page.locator("#zone-page-blocked")).to_contain_text("的紅框（只放了固定成品，程式沒得選），處理好才能拿去搜尋")
         page.locator(f"#zone-list-check-{VPR}").click()
         expect(page.locator("#zone-page-note")).to_contain_text("清單至少要留一種")
         expect(page.locator(f"#zone-list-check-{VPR}")).to_be_checked()
@@ -458,7 +463,7 @@ def test_a_rule_pasted_with_something_outside_the_library_still_marks_its_follow
 
 def test_changes_made_on_the_page_are_stored_by_the_ordinary_save_after_going_back(tmp_path: Path, browser: Browser) -> None:
     """新頁沒有自己的存檔鈕：在新頁改完 → 按「◂ 回房間方案輸入」→ 按頁面原本的存檔，改的東西都存進設計檔與方案檔。
-    兩種起點各一次：有設計檔的（改規則、把一區改成跟規則一樣、指定一區交給電腦挑）、沒有設計檔的（指定貼一種、一區不貼）。"""
+    兩種起點各一次：有設計檔的（改規則、把一區改成跟規則一樣、指定一區由程式最佳化）、沒有設計檔的（指定貼一種、一區不貼）。"""
     with_design, no_design = tmp_path / "with-design", tmp_path / "no-design"
     with_design.mkdir()
     no_design.mkdir()
@@ -513,8 +518,8 @@ def test_changes_made_on_the_page_are_stored_by_the_ordinary_save_after_going_ba
 
 
 def test_other_walls_never_changes_by_itself_while_zones_are_changed_one_group_at_a_time(tmp_path: Path, browser: Browser) -> None:
-    """「其他牆面」是這次打開後定下來的那一種，使用者沒碰下拉它就不變：一組一組把牆區改成交給電腦挑，改到跟「不貼」剛好一樣多、
-    再改到比它多，下拉都還是「不貼，保留原樣」，改掉的那幾區列在另外指定；存檔後重新打開方案才重推（這時交給電腦挑最多）。"""
+    """「其他牆面」是這次打開後定下來的那一種，使用者沒碰下拉它就不變：一組一組把牆區改成由程式最佳化，改到跟「不貼」剛好一樣多、
+    再改到比它多，下拉都還是「不貼，保留原樣」，改掉的那幾區列在另外指定；存檔後重新打開方案才重推（這時由程式最佳化最多）。"""
     _prepare(tmp_path)
     count = "key => [...document.querySelectorAll('#zone-map .zv-zone')].filter(zone => zone.dataset.shown === key && !['floor', 'ceiling'].includes(zone.dataset.wall)).length"
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -536,14 +541,14 @@ def test_other_walls_never_changes_by_itself_while_zones_are_changed_one_group_a
             expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "keep_original")
         groups = [group["zones"] for group in cast(list[dict[str, object]], page.evaluate(_GROUPS))]
         assert [f"xL/auto{n}" for n in range(1, 7)] + ["y0/auto1", "y0/auto2"] in [sorted(cast(list[str], zones)) for zones in groups]
-        # 使用者自己在下拉改規則：規則就是剛設的那一種（照著它的只有 4＋1 區，比交給電腦挑的 8 區少，也不會被搶走）。
+        # 使用者自己在下拉改規則：規則就是剛設的那一種（照著它的只有 4＋1 區，比由程式最佳化的 8 區少，也不會被搶走）。
         page.locator("#zone-rule-mode").select_option("fixed")
         page.locator("#zone-rule-material").select_option(VPR)
         _settled(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "fixed")
         expect(page.locator("#zone-rule-material")).to_have_value(VPR)
         assert (page.evaluate(count, "fixed"), page.evaluate(count, "search")) == (9, 8)
-        # 重新打開方案才重推：這時交給電腦挑的區最多。
+        # 重新打開方案才重推：這時由程式最佳化的區最多。
         page.locator("#zone-page-close").click()
         _save(page, design=True)
         _open_scheme(page, SAMPLE)
@@ -592,8 +597,8 @@ def test_the_first_view_shows_the_way_into_the_page_and_keeps_the_old_table_fold
 
 def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, browser: Browser) -> None:
     """沒看過說明的人只看畫面要讀得出來的四件：另外指定的區圖上有虛線框（不靠顏色與名字）、圖例有講；「拿去搜尋」灰掉時
-    旁邊講為什麼；右欄摘要直接點名正在改的是哪一區（號碼塗黑、另起一句），不用跟在清單尾巴的括號；選到交給電腦挑時，
-    選項底下講電腦從哪幾種裡挑，套用後寫進去的就是那幾種。"""
+    旁邊講為什麼；右欄摘要直接點名正在改的是哪一區（號碼塗黑、另起一句），不用跟在清單尾巴的括號；選到由程式最佳化時，
+    選項底下講程式從哪幾種裡選，套用後寫進去的就是那幾種。"""
     _prepare(tmp_path)
     framed = "() => [...document.querySelectorAll('#zone-map .zv-zone')].filter(zone => zone.querySelector('.zv-apart')).map(zone => `${zone.dataset.wall}/${zone.dataset.zone}`).sort()"
     marked = "() => [...document.querySelectorAll('#zone-rules-brief .zv-now')].map(badge => badge.dataset.zone)"
@@ -604,19 +609,22 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         apart = sorted(zone for group in cast(list[dict[str, list[str]]], page.evaluate(_GROUPS)) for zone in group["zones"])
         assert apart == ["y0/z1", "yL/z1", "yL/z2", "yL/z3"] and page.evaluate(framed) == apart
         expect(page.locator("#zone-legend-apart")).to_have_text("虛線框：另外指定（跟其他牆面不同）")
-        # 沒有交給電腦挑的區：按鈕灰掉，旁邊講為什麼。
+        # 沒有由程式最佳化的區：按鈕灰掉，旁邊講為什麼。
         expect(page.locator("#zone-page-search")).to_be_disabled()
-        expect(page.locator("#zone-page-search-why")).to_have_text("還沒有交給電腦挑的區")
+        expect(page.locator("#zone-page-search-why")).to_have_text("還沒有由程式最佳化的區")
         # 選一區：摘要點名是哪一區。
         _click_zone(page, "yL/z3")
         assert page.evaluate(marked) == ["yL/z3", "yL/z3"]
         number = page.locator("#zone-map [data-wall='yL'][data-zone='z3'] .zv-badge text").text_content()
         expect(page.locator("#zone-brief-editing")).to_have_text(f"正在改：前牆 {number}")
         assert "（正在改）" not in page.locator("#zone-rules-brief").inner_text()
-        # 選到交給電腦挑：底下講從哪幾種裡挑；套用後那一區的清單就是那幾種。
+        # 選到由程式最佳化：底下講從哪幾種裡挑；套用後那一區的清單就是那幾種。
         expect(page.locator("#zone-panel-search-from")).to_have_count(0)
         page.locator("#zone-panel-mode-search").check()
-        expect(page.locator("#zone-panel-search-from")).to_have_text("電腦從這 4 種裡挑：48K 玻璃棉、24K 玻璃棉、96K 玻璃棉、也可以不貼（保留原樣）")
+        # （#1199：是哪幾種改在底下的材料框一種一列勾著，這一句只講幾種。）
+        expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
+        assert page.locator("#zone-panel input[id^='zone-panel-allow-']:checked").evaluate_all("boxes => boxes.map(box => box.id.slice(17))") == [
+            "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         page.screenshot(path=str(tmp_path / "first-time-reader.png"))
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/z3"] == WOOLS
@@ -634,7 +642,7 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
 
 
 def test_no_item_on_the_bottom_bar_breaks_in_the_middle_whether_the_button_is_grey_or_lit(tmp_path: Path, browser: Browser) -> None:
-    """1400×1000 下，「拿去搜尋」灰掉與亮著兩種狀態：底列三項（交給電腦挑…、指定貼…、保留原樣…）每一項自己都在同一行
+    """1400×1000 下，「拿去搜尋」灰掉與亮著兩種狀態：底列三項（由程式最佳化…、指定貼…、保留原樣…）每一項自己都在同一行
     （括號裡的面積不准掉到下一行；整項換行可以）；灰掉時原因那一句看得到，在按鈕正下方。"""
     _prepare(tmp_path)
     # 每一項佔幾行：那一項的高除以它自己一行的高（放一個同字型、只有一個字的探針量一行多高）。

@@ -25,7 +25,7 @@ from tests.engine.test_gui_zone_overview_tasks_browser import (
 OTHER = "zone-naming-other"
 _MODES = """() => Object.fromEntries(Object.entries(zoneDesign?.zones ?? {}).flatMap(([wall, zones]) => Object.entries(zones)
     .map(([key, setting]) => [`${wall}/${key}`, setting.mode])))"""
-# 規則是少數那一組時，交給電腦挑的那 8 區（見 _minority_rule）。
+# 規則是少數那一組時，由程式最佳化的那 8 區（見 _minority_rule）。
 _SEARCHING = [f"xL/auto{n}" for n in range(1, 7)] + ["y0/auto1", "y0/auto2"]
 
 
@@ -72,7 +72,7 @@ def _modes(page: Page, zones: list[str]) -> dict[str, str]:
 
 
 def _minority_rule(page: Page) -> None:
-    """規則是「不貼，保留原樣」但照著它的只剩 4 區，交給電腦挑的另外指定有 8 區（比規則那一組多）。"""
+    """規則是「不貼，保留原樣」但照著它的只剩 4 區，由程式最佳化的另外指定有 8 區（比規則那一組多）。"""
     _click_zone(page, "yL/auto1")
     page.locator("#zone-panel-material").select_option(VPR)
     _apply(page)
@@ -182,7 +182,7 @@ def test_a_plan_check_that_fails_once_leaves_the_rule_as_set_and_says_so_on_the_
 
 
 def test_a_refused_save_from_send_to_search_is_explained_on_the_page(tmp_path: Path, browser: Browser) -> None:
-    """開機載入的範本，資料夾裡已經有同名的方案：新頁把牆面交給電腦挑、一面指定貼一種，按「拿去搜尋」，存檔照規矩不蓋掉同名的那一份。
+    """開機載入的範本，資料夾裡已經有同名的方案：新頁把牆面由程式最佳化、一面指定貼一種，按「拿去搜尋」，存檔照規矩不蓋掉同名的那一份。
     被擋的原因要寫在新頁上（不跳頁、不是只寫在藏起來的輸入頁）。"""
     with _serve(tmp_path) as base:
         example = json.loads(urllib.request.urlopen(f"{base}/api/example").read())["scheme"]
@@ -208,8 +208,8 @@ def test_a_refused_save_from_send_to_search_is_explained_on_the_page(tmp_path: P
 
 
 def test_the_startup_template_without_zones_takes_a_rule_change(tmp_path: Path, browser: Browser) -> None:
-    """開機載入的範本沒切過區（方案裡還是每面牆一個阻抗、沒有分區那一格）：在新頁改規則成交給電腦挑，照樣寫得進去——
-    方案長出分區那一格、四面牆都交給電腦挑，天花地板不動。"""
+    """開機載入的範本沒切過區（方案裡還是每面牆一個阻抗、沒有分區那一格）：在新頁改規則成由程式最佳化，照樣寫得進去——
+    方案長出分區那一格、四面牆都由程式最佳化，天花地板不動。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         page.wait_for_function("document.body.dataset.inputReady === 'true'")
@@ -220,7 +220,7 @@ def test_the_startup_template_without_zones_takes_a_rule_change(tmp_path: Path, 
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
-        expect(page.locator("#zone-page-note")).to_have_text("4 區改成「交給電腦挑」")
+        expect(page.locator("#zone-page-note")).to_have_text("4 區改成「由程式最佳化」")
         assert page.evaluate(_MODES) == {f"{wall}/whole_wall": "search" for wall in ("x0", "xL", "y0", "yL")}
         assert page.evaluate("Object.keys(scheme.scene.surface_zones_by_wall).sort()") == ["ceiling", "floor", "x0", "xL", "y0", "yL"]
         assert page.evaluate("'impedance_pa_s_per_m_by_wall' in scheme.scene") is False
@@ -299,7 +299,7 @@ def test_a_drawing_failure_keeps_the_last_screen_and_the_way_back(tmp_path: Path
 
 
 def test_opening_another_scheme_forgets_the_rule_and_the_selection_of_the_last_one(tmp_path: Path, browser: Browser) -> None:
-    """兩份方案的區代號一模一樣。第一份把「其他牆面」設成交給電腦挑、還選著一區；回輸入頁打開第二份（它只有一區交給電腦挑、
+    """兩份方案的區代號一模一樣。第一份把「其他牆面」設成由程式最佳化、還選著一區；回輸入頁打開第二份（它只有一區由程式最佳化、
     清單跟第一份的規則同一份，其餘都沒貼）：第二份的規則照它自己的多數推（不貼，保留原樣），上一份選的區也不算數。"""
     _prepare(tmp_path)
     _write(tmp_path, {**ZONE_NAMING_SCHEME, "scheme_id": OTHER})
@@ -457,7 +457,7 @@ def test_a_refused_batch_changes_nothing_and_the_page_names_the_zone_and_the_rea
 
 
 def test_a_refused_rule_change_puts_other_walls_back_as_it_was_and_says_why(tmp_path: Path, browser: Browser) -> None:
-    """把「其他牆面」選成交給電腦挑，伺服器拒收那一批：一區都沒改，「其他牆面」那一條與它的下拉都回到原本的那一種
+    """把「其他牆面」選成由程式最佳化，伺服器拒收那一批：一區都沒改，「其他牆面」那一條與它的下拉都回到原本的那一種
     （下拉不准停在剛選、但沒寫成的那一項），結果列上面那一行講為什麼。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -545,7 +545,7 @@ def test_picking_what_the_wall_already_is_becomes_keep_original_and_drops_the_ol
 
 
 def test_the_list_written_to_a_face_drops_what_cannot_go_there_and_keeps_ids_the_library_lacks(tmp_path: Path, browser: Browser) -> None:
-    """交給電腦挑時寫進每一區的清單照畫面上那一份，但這一面貼不了的拿掉：
+    """由程式最佳化時寫進每一區的清單照畫面上那一份，但這一面貼不了的拿掉：
     ① 清單裡只有天花才用的一筆：寫到牆區時一種都不剩，就只放「不貼」（不准寫一份空清單）；
     ② 清單裡有材料庫找不到的代號（別台機器存的）：原樣留著，不因為這一頁改了別區就被丟掉。"""
     only_ceiling = "ceiling_gypsum9mm_gap300"
@@ -562,7 +562,8 @@ def test_the_list_written_to_a_face_drops_what_cannot_go_there_and_keeps_ids_the
             assert list(cast(dict[str, list[str]], page.evaluate(_ALLOWED)).values()) == [listed]
             _click_zone(page, "yL/auto1")
             page.locator("#zone-panel-mode-search").check()
-            expect(page.locator("#zone-panel-search-from")).to_contain_text(f"電腦從這 {len(expected)} 種裡挑：")
+            expect(page.locator("#zone-panel-search-from")).to_contain_text(f"程式從下面勾的 {len(expected)} 種裡選")
+            assert page.locator("#zone-panel input[id^='zone-panel-allow-']:checked").evaluate_all("boxes => boxes.map(box => box.id.slice(17))") == expected
             _apply(page)
             assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto1"] == expected
             assert watched.page_errors == []
@@ -602,7 +603,7 @@ def test_reset_is_refused_with_a_reason_when_the_rule_is_pasted_with_something_o
 
 def test_keeping_what_is_pasted_now_applies_without_asking_the_server_to_change_anything(tmp_path: Path, browser: Browser) -> None:
     """選到的都貼著東西、下拉停在「照現在貼的，不換」：套用按得下去，只把做法記成指定貼一種，貼著的東西一個字不動、
-    不送換材料的請求（一塊貼著材料庫認不得的、一塊原本設成交給電腦挑但方案裡還貼著的，一起選）。"""
+    不送換材料的請求（一塊貼著材料庫認不得的、一塊原本設成由程式最佳化但方案裡還貼著的，一起選）。"""
     scheme = _outside_library_scheme()
     _write(tmp_path, scheme)
     _library(tmp_path)
@@ -673,7 +674,7 @@ def test_the_old_table_unfolds_by_itself_when_a_limit_is_red(tmp_path: Path, bro
 
 
 def test_editing_the_list_keeps_other_walls_handed_to_the_computer(tmp_path: Path, browser: Browser) -> None:
-    """「其他牆面」是交給電腦挑、但照著它的區比「不貼」的少：這時改清單（拿掉一種），規則還是交給電腦挑、還是那幾區
+    """「其他牆面」是由程式最佳化、但照著它的區比「不貼」的少：這時改清單（拿掉一種），規則還是由程式最佳化、還是那幾區
     （清單換了不等於規則換了）。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:

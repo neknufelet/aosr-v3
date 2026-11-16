@@ -2,11 +2,11 @@
 看到什麼（照畫面按、比存檔的那幾題在 ``test_gui_zone_overview_tasks_browser``）。
 
 推法（``zone_rules.js`` 的純函式，在頁面裡餵手造的區）：出現最多次的做法是規則、平手取最先出現的（跨牆照交進來的順序）、
-指定貼不同的材料算不同的做法、沒貼東西的指定貼跟不貼算同一個做法、交給電腦挑的清單當集合比；清單卡列哪一份、哪幾區「另外選」。
+指定貼不同的材料算不同的做法、沒貼東西的指定貼跟不貼算同一個做法、由程式最佳化的清單當集合比；清單卡列哪一份、哪幾區「另外選」。
 
 畫面用區名考卷那間假房間（``_zone_naming_room`` 的 zone-naming-sample，數字是考卷自己編的；前牆是 yL、後牆 y0、左牆 x0
 整面一區、右牆 xL 有門有窗）：一題照存檔原樣打開（沒有設計檔，每一區都是指定貼），一題配一份考卷自己寫的設計檔
-（其他牆面交給電腦挑、前牆兩塊照舊、後牆一區清單不一樣、左牆不貼、天花一區交給電腦挑）。比的是具名的區，不是數量。"""
+（其他牆面由程式最佳化、前牆兩塊照舊、後牆一區清單不一樣、左牆不貼、天花一區由程式最佳化）。比的是具名的區，不是數量。"""
 from __future__ import annotations
 
 import json
@@ -75,7 +75,7 @@ def test_the_method_most_wall_zones_share_is_the_rule_and_the_rest_are_listed_ap
     _write(tmp_path, ZONE_NAMING_SCHEME)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        # 交給電腦挑的清單當集合比：順序不同、寫了兩次都算同一種。
+        # 由程式最佳化的清單當集合比：順序不同、寫了兩次都算同一種。
         found = _rules(page, [
             _zone("前1", "fixed", fixed="library:a"), _zone("前2", "search", allowed=["x", "y"]), _zone("前3", "keep_original"),
             _zone("後1", "search", allowed=["y", "x"]), _zone("後2", "keep_original"), _zone("左1", "search", allowed=["x", "y", "x"])])
@@ -97,7 +97,7 @@ def test_a_tie_goes_to_the_method_that_appears_first_across_walls(tmp_path: Path
                       _zone("後1", "search", allowed=["x"]), _zone("後2", "keep_original")]
         assert _rules(page, keep_first) == {"rule": {"mode": "keep_original", "zones": ["前1", "後2"]},
                                             "special": [{"mode": "search", "zones": ["前2", "後1"]}]}
-        # 同樣四區、前牆兩區對調：先出現的換成交給電腦挑，規則跟著換。
+        # 同樣四區、前牆兩區對調：先出現的換成由程式最佳化，規則跟著換。
         search_first = [keep_first[1], keep_first[0], keep_first[2], keep_first[3]]
         assert _rules(page, search_first) == {"rule": {"mode": "search", "zones": ["前2", "後1"]},
                                               "special": [{"mode": "keep_original", "zones": ["前1", "後2"]}]}
@@ -138,7 +138,7 @@ def test_fixed_zones_with_different_materials_are_different_methods(tmp_path: Pa
 
 def test_a_fixed_zone_with_nothing_pasted_counts_as_keep_original(tmp_path: Path, browser: Browser) -> None:
     """設計檔沒列到的區照規矩是指定貼，可是上面什麼都沒貼（材料就是原牆原樣）：跟「不貼，保留原樣」同一個做法。
-    兩區沒貼的指定貼＋一區不貼＝三區，贏過兩區交給電腦挑；分開算的話是 2:2:1，規則會變成最先出現的那一種。"""
+    兩區沒貼的指定貼＋一區不貼＝三區，贏過兩區由程式最佳化；分開算的話是 2:2:1，規則會變成最先出現的那一種。"""
     _write(tmp_path, ZONE_NAMING_SCHEME)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -161,7 +161,7 @@ def test_the_list_card_shows_one_list_and_names_the_zones_that_chose_differently
         # 沒有規則可靠：列最多區用的那一份，其餘「另外選」。
         assert page.evaluate(_LIST, [zones, "keep_original"]) == {
             "zones": ["前1", "後1", "後2", "天花1"], "common": ["後1", "後2", "天花1"], "different": ["前1"]}
-        # 規則本身是交給電腦挑：列規則那一份，就算別份的區比較多。
+        # 規則本身是由程式最佳化：列規則那一份，就算別份的區比較多。
         assert page.evaluate(_LIST, [zones, "search:x"]) == {
             "zones": ["前1", "後1", "後2", "天花1"], "common": ["前1"], "different": ["後1", "後2", "天花1"]}
         # 兩份一樣多：最先出現的那一份。
@@ -197,15 +197,15 @@ def test_the_sample_room_opens_as_saved_with_a_rule_its_exceptions_and_nothing_w
         expect(page.locator("#zone-special h2")).to_have_text("另外指定的 4 區")
         expect(page.locator("#zone-special-reset")).to_have_text("這 4 區改回跟其他牆面一樣")
         expect(page.locator("#zone-special .zv-group").first.locator(".zv-where-line").first).to_have_text("前牆 1 左聲道喇叭後面那塊")
-        # 圖：貼了東西的六塊是指定貼的顏色，門窗畫斜線，沒有哪一區交給電腦挑；地毯算保留原樣。
+        # 圖：貼了東西的六塊是指定貼的顏色，門窗畫斜線，沒有哪一區由程式最佳化；地毯算保留原樣。
         assert _shown(page, "fixed") == {"yL/z1", "yL/z2", "yL/z3", "y0/z1", "ceiling/z1", "ceiling/z2"}
         assert _shown(page, "opening") == {"xL/door", "xL/window"}
         assert _shown(page, "search") == set()
         assert "floor/rug" in _shown(page, "still") and "x0/whole_wall" in _shown(page, "still")
         expect(page.locator("#zone-others")).to_have_text("天花：指定貼 2 區、保留原樣 4 區地板、門、窗：保留原樣")
-        expect(page.locator("#zone-list")).to_have_text("現在沒有哪一區交給電腦挑")
+        expect(page.locator("#zone-list")).to_have_text("現在沒有哪一區由程式最佳化")
         assert _dataset_zones(page, "#zone-result-fixed") == _shown(page, "fixed")
-        expect(page.locator("#zone-result-search")).to_contain_text("交給電腦挑 0 區")
+        expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 0 區")
         expect(page.locator("#zone-result-still")).to_have_text("保留原樣：牆面 13 區、天花 4 區、地板、門 1 扇、窗 1 扇")
         expect(page.locator("#zone-page-search")).to_be_disabled()
         # 代號與尺寸平常收著，點開才有。
@@ -234,13 +234,13 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        # 規則：交給電腦挑（13 區同一份清單）。另外指定照最先出現的順序：前牆兩塊指定貼、後牆清單不一樣的那一區、左牆不貼。
+        # 規則：由程式最佳化（13 區同一份清單）。另外指定照最先出現的順序：前牆兩塊指定貼、後牆清單不一樣的那一區、左牆不貼。
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         expect(page.locator("#zone-rule-mode")).to_have_value("search")
         expect(page.locator("#zone-rule-material")).to_have_count(0)
         groups = cast(list[dict[str, object]], page.evaluate(_GROUPS))
         assert [group["zones"] for group in groups] == [["yL/z1", "yL/z2"], ["y0/auto1"], ["x0/whole_wall"]]
-        assert [cast(str, group["what"]).split("：")[0] for group in groups] == ["指定貼一種", "交給電腦挑", "不貼，保留原樣"]
+        assert [cast(str, group["what"]).split("：")[0] for group in groups] == ["指定貼一種", "由程式最佳化", "不貼，保留原樣"]
         expect(page.locator("#zone-special h2")).to_have_text("另外指定的 4 區")
         searching = ({f"yL/{key}" for key in ("z3", "auto1", "auto2")} | {f"y0/{key}" for key in ("z1", "auto1", "auto2", "auto3", "auto4")}
                      | {f"xL/auto{n}" for n in range(1, 7)} | {"ceiling/z1"})
@@ -248,15 +248,22 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         assert _shown(page, "fixed") == {"yL/z1", "yL/z2", "ceiling/z2"}
         assert _shown(page, "opening") == {"xL/door", "xL/window"}
         assert _dataset_zones(page, "#zone-result-search") == searching
-        # 清單卡：管全部交給電腦挑的區，列規則那一份；清單不一樣的那一區另外數。
-        expect(page.locator("#zone-list h2")).to_have_text("交給電腦挑的每一區，都從這幾種裡挑")
-        expect(page.locator("#zone-list-who")).to_have_text("現在管 15 區：沒另外指定的牆區、後牆 5 靠地板那條、天花 1 主位上面那塊")
+        # 清單卡：清單一樣的區一張（#1199 修補 1）。第一張是規則那一份（14 區），清單不一樣的那一區自己一張。
+        expect(page.locator("#zone-page .zv-list")).to_have_count(2)
+        expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 15 區裡的 14 區每一區各自最佳化，這 14 區從這幾種裡選")
+        expect(page.locator("#zone-list-who")).to_have_text("這一張管 14 區：沒另外指定的牆區、天花 1 主位上面那塊")
         assert page.locator("#zone-list-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
         expect(page.locator("#zone-list-checks label").last).to_have_text("也可以不貼（保留原樣）")
-        expect(page.locator("#zone-list-different summary")).to_have_text("有 1 區另外選")
-        assert _dataset_zones(page, "#zone-list-different") == {"y0/auto1"}
-        expect(page.locator("#zone-list-ranges summary")).to_have_text("玻璃棉各自能調多厚")
-        expect(page.locator("#zone-others")).to_have_text("天花：交給電腦挑 1 區、指定貼 1 區、保留原樣 4 區地板、門、窗：保留原樣")
+        expect(page.locator("#zone-list-different")).to_have_count(0)
+        expect(page.locator("#zone-list-2 h2")).to_have_text("由程式最佳化的 15 區裡的 1 區這一區從這幾種裡選")
+        expect(page.locator("#zone-list-2-who")).to_have_text("這一張管 1 區：後牆 5 靠地板那條")
+        assert _dataset_zones(page, "#zone-list-2") == {"y0/auto1"}
+        assert page.locator("#zone-list-2-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == SHORT
+        # 可調的各自能調多少直接寫在那一列底下（#1199：不再收在「玻璃棉各自能調多厚」後面）。
+        expect(page.locator("#zone-list-ranges")).to_have_count(0)
+        expect(page.locator("#zone-list-checks label[data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
+        expect(page.locator("#zone-list-checks label[data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator("#zone-others")).to_have_text("天花：由程式最佳化 1 區、指定貼 1 區、保留原樣 4 區地板、門、窗：保留原樣")
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.screenshot(path=str(tmp_path / "overview-search-rule.png"))
         assert watched.page_errors == [] and watched.console_errors == []

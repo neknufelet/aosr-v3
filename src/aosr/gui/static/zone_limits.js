@@ -117,7 +117,7 @@ function depthRow(wall) {
     if (!Object.keys(design.wall_max_depth_m).length) delete design.wall_max_depth_m;
   }));
   const hint = document.createElement("span"); hint.className = "note";
-  hint.textContent = "三層（房間預設、這一面、每一塊）取最小的；指定貼一種的區：貼上去的總厚不能超過它；交給電腦挑的區：電腦挑的不會超過它";
+  hint.textContent = "三層（房間預設、這一面、每一塊）取最小的；指定貼一種的區：貼上去的總厚不能超過它；由程式最佳化的區：程式選的不會超過它";
   row.append(hint);
   return row;
 }

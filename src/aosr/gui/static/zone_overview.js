@@ -1,6 +1,6 @@
 /* 「這間房貼什麼」（#1176 第 C 支，照第五版樣稿）：六面攤開在左邊（四面牆站在房間裡看、地板天花從上往下看），顏色看狀態，
    點圖選區（再點別塊加選、再點一次取消）；右邊一欄：選了區就是那幾區的面板（三個做法），沒選就是提示；再來「其他牆面」
-   那條規則、「另外指定的 N 區」、天花地板門窗一行，再來「交給電腦挑的每一區，都從這幾種裡挑」那張清單卡；最底下一條結果列。
+   那條規則、「另外指定的 N 區」、天花地板門窗一行，再來由程式最佳化的區從哪幾種裡選的清單卡（清單一樣的區一張）；最底下一條結果列。
    規則是從各區現算的（zone_rules.js），設計檔沒有「跟著規則」這一格：改規則＝把新做法寫到每一個沒另外指定的區。
 
    住在方案輸入頁裡當一個整頁的畫面（#zone-page）：打開時把原本那一頁藏起來，方案、每一區的做法、材料庫、區的號碼與名字
@@ -20,7 +20,15 @@
    出錯要在這一頁看得到：輸入頁的訊息列（#messages）在這一頁開著時是藏起來的，所以它寫的每一句警示都照抄一份到
    這一頁結果列上面（window.zonePageSay，app.js 的 say 會叫）；組畫面組到一半丟例外時畫面留在上一次的樣子、加一句話，
    「回房間方案輸入」一定按得到。
-   圖上的幾何（哪一軸往右、鏡不鏡像、喇叭與主位的投影）用立面圖那一份（window.elevationGeometry），不另寫一套。 */
+   圖上的幾何（哪一軸往右、鏡不鏡像、喇叭與主位的投影）用立面圖那一份（window.elevationGeometry），不另寫一套。
+
+   材料指定（#1199 第一支，純改畫面）：四面牆名字旁各一顆「選整面」（扣門窗）；面板每一項旁標出選到的區「目前」是哪一種；
+   選了由程式最佳化，底下一個材料框——可調的一種一列攤開、寫調什麼從多少到多少（只是字，範圍是材料頁設的，這裡不能改），
+   被勾著的可調材料包含的成品灰掉，固定成品收在摺疊裡寫幾種勾了幾種；框外兩項「也可以不貼」「這一區最深」。
+   框裡勾的、最深填的都只是草稿（draft），套用才寫、取消就丟。
+   每一區存自己的清單（搜尋那一步本來就逐區照自己的清單），這一頁的三個入口都只改該改的區（#1199 修補 1）：
+   小框打開時的勾照選中的區自己存的清單（各區不同就是第三種狀態）；套用只把使用者動過的那幾個勾加減到每一個選中區
+   自己的清單上，沒選中的區不碰；右欄清單卡一組（清單一樣的區）一張，在一張上勾只改那一組。 */
 (() => {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAP_WIDTH = 954;          // 左邊那張圖的寬（px，樣稿）
@@ -31,10 +39,10 @@ const WALL_ORDER = ["front", "back", "left", "right"];
 const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
-let draft = null;               // 面板上現在點的：{mode, materialId}；還沒點是 null
+let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
 let ruleDraft = false;          // 「其他牆面」下拉剛選了指定貼一種、還沒選貼哪一種
-let listAdding = false;         // 清單卡的「加別種材料」開著
+let listAdding = null;          // 哪一組的清單卡開著「加別種材料」：那一組的區代號排好接成一串（groupZones）；都沒開是 null
 let keptRule = null;            // 這次打開方案後定下來的「其他牆面」做法鍵（第一次推出來的，或使用者最後在下拉設的）；換方案才重推
 let keptRuleZone = null;        // 剛照規則寫過的一區：下次重畫時規則就是它現在的做法（改規則、改清單之後做法鍵會換）
 let seenGeneration = -1;        // 上次畫的時候是第幾份做法（換方案就把選取清掉）
@@ -85,9 +93,9 @@ function overviewRoles() {
   return Object.values(named).every(Boolean) ? named : {front: "x0", back: "xL", left: "y0", right: "yL"};
 }
 // 一面的每一區（照號碼排）：做法、材料、號碼與名字、畫面上的框（公尺，a 往右、b 往上）、面積、做法鍵（zone_rules.js）、
-// 圖上畫哪一種顏色。mode／allowed／fixed 三格是交給推法用的：沒寫清單的交給電腦挑照伺服器的意思（全部可調＋不貼）比；
+// 圖上畫哪一種顏色。mode／allowed／fixed 三格是交給推法用的：沒寫清單的由程式最佳化照伺服器的意思（全部可調＋不貼）比；
 // 指定貼的是哪一種只看貼上去的（沒貼東西的一律算原牆原樣，跟「不貼」同一個做法）。
-// shown：search 交給電腦挑、fixed 指定貼一種（真的有貼東西）、still 保留原樣（不貼，或指定貼但其實沒貼；地毯也算）、
+// shown：search 由程式最佳化、fixed 指定貼一種（真的有貼東西）、still 保留原樣（不貼，或指定貼但其實沒貼；地毯也算）、
 // opening 門窗（沒被改成別的做法時畫斜線）。
 function faceZones(wall) {
   const {views, wallSize, screenBox} = window.elevationGeometry;
@@ -110,7 +118,7 @@ function faceZones(wall) {
 }
 // 交給推法的那幾區：四面牆照前、後、左、右，每面照號碼，扣掉門窗。
 function ruleZones(faces, roles) { return WALL_ORDER.flatMap(role => faces[roles[role]].filter(item => !item.opening)); }
-// 六面全部交給電腦挑的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
+// 六面全部由程式最佳化的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
 function searchZones(faces, roles) {
   return [...WALL_ORDER.map(role => roles[role]), "ceiling", "floor"].flatMap(wall => faces[wall]).filter(item => item.mode === "search");
 }
@@ -208,14 +216,15 @@ function selectedRing(rect) {
 function zoneShape(item, x, y, width, height) {
   const group = zoneGroup(item, "", {x, y, width, height});
   const cx = x + width / 2, cy = y + height / 2, small = Math.min(width, height) < 22;
+  // 選到的那一圈白框先畫、號碼與字後畫（#1199）：窄條區的號碼圈比區還寬，白框後畫會把號碼蓋掉。
+  const ring = selected.includes(item.id) ? [selectedRing({x, y, width, height})] : [];
   if (item.shown === "opening") {
-    group.append(svg("rect", {class: "zv-hatch", x, y, width, height}), svg("rect", {class: "zv-tagbg", x: cx - 29, y: cy - 15, width: 58, height: 30, rx: 3}),
+    group.append(svg("rect", {class: "zv-hatch", x, y, width, height}), ...ring, svg("rect", {class: "zv-tagbg", x: cx - 29, y: cy - 15, width: 58, height: 30, rx: 3}),
       badge(cx - 13, cy, item.label.number, false), svg("text", {class: "zv-open-label", x: cx + 12, y: cy + 6}, item.special));
   } else if (item.shown === "fixed" && width >= 44 && height >= 44) {
-    group.append(badge(x + 16, y + 16, item.label.number, false), fixedLabel(item, x, y, width, height));
-  } else group.append(badge(cx, cy, item.label.number, small));
+    group.append(...ring, badge(x + 16, y + 16, item.label.number, false), fixedLabel(item, x, y, width, height));
+  } else group.append(...ring, badge(cx, cy, item.label.number, small));
   if (item.apart) group.append(apartFrame({x, y, width, height}));
-  if (selected.includes(item.id)) group.append(selectedRing({x, y, width, height}));
   return group;
 }
 // 標題旁的小平面圖：方向同地板圖，這面牆那一邊描粗。
@@ -264,6 +273,8 @@ function drawWall(map, role, wall, items, ox, oy, scale, miniSize) {
   title.append(svg("tspan", {class: "zv-quiet", dx: 10}, `面向它站：左手邊是${wallNames[views[wall].left]}，右手邊是${wallNames[views[wall].right]}`));
   face.append(title);
   map.append(face);
+  // 「選整面」那一顆放哪（#1199）：這面牆名字那一行的最右邊（疊在圖上的一顆真的按鈕，見 wholeButtons）。
+  return {wall, right: ox + width * scale, top: oy - 27};
 }
 // 地板圖與天花圖（同一個方向：上邊前牆、左邊左牆，從上往下看）。point(x, y)：房間座標 → 小圖上的 px。
 function tilePlan(roles, room, px, py, scale) {
@@ -348,15 +359,16 @@ function drawMap(faces, roles, room) {
   defs.append(pattern); map.append(defs);
   const miniSize = [15, 15 * sideWidth / frontWidth];
   // 樣稿的排法：上排前牆、右牆，下排後牆、左牆（前後同寬排同一欄）。
+  const whole = [];
   for (const [role, ox, oy] of [["front", col1, row1], ["right", col2, row1], ["back", col1, row2], ["left", col2, row2]]) {
-    drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize);
+    whole.push(drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize));
   }
   const floorX = 440, ceilingX = floorX + tileWidth + 92;
   const allStill = faces.ceiling.every(item => item.shown === "still");
   drawTile(map, "floor", faces.floor, tilePlan(roles, room, floorX, tileY, tileScale), roles, room, faces, "從上往下看", null);
   drawTile(map, "ceiling", faces.ceiling, tilePlan(roles, room, ceilingX, tileY, tileScale), roles, room, faces, "方向同地板圖",
     allStill && faces.ceiling.length === 1 ? ["保留原樣", originalFace("ceiling")] : null);
-  return {map, legendTop: tileY - 10};
+  return {map, legendTop: tileY - 10, whole};
 }
 function legend(top) {
   const box = el("div", "zv-legend"); box.style.top = `${top}px`;
@@ -369,32 +381,73 @@ function legend(top) {
 
 /* ───── 選取與改動 ───── */
 function chosenItems() { return selected.map(id => view.byId.get(id)).filter(Boolean); }
-// 面板一打開先點在哪一項：選到的區做法都一樣就點那一項（指定貼的連材料一起），不一樣就都不點。
+// 小框裡由程式最佳化那一塊的草稿（#1199），套用才寫進設計檔，取消就丟：
+// ticks：使用者在小框裡動過的勾（材料代號 → 勾上 true／拿掉 false）；沒動過的代號不在裡面，套用時那一種各區照目前的；
+// depthText：「最深」那一格打的字（公分；沒動過是 null）；depthBad：打的不成數字。
+function untouched() { return {ticks: {}, depthText: null, depthBad: false}; }
+// 面板一打開先點在哪一項：選到的區是同一種做法就點那一項（指定貼的：貼的都是同一筆才帶出那一筆），不一樣就都不點。
 function startingDraft() {
   const items = chosenItems();
-  if (!items.length || new Set(items.map(item => item.method)).size !== 1) return null;
-  const mode = zoneMethodMode(items[0].method);
-  return {mode, materialId: mode === "fixed" ? libraryLabel(items[0].zone.material)?.id ?? "" : ""};
+  const modes = new Set(items.map(item => zoneMethodMode(item.method)));
+  if (!items.length || modes.size !== 1) return null;
+  const mode = [...modes][0], sameMethod = new Set(items.map(item => item.method)).size === 1;
+  return {...untouched(), mode, materialId: mode === "fixed" && sameMethod ? libraryLabel(items[0].zone.material)?.id ?? "" : ""};
 }
 function select(ids) {
-  selected = ids; draftTouched = false; ruleDraft = false; listAdding = false;
+  selected = ids; draftTouched = false; ruleDraft = false; listAdding = null;
+  openDetails.delete("zone-panel-fixed"); openDetails.delete("zone-panel-zones");
   draft = startingDraft();
   renderZoneOverview();
 }
-function toggleSelected(id) {
-  const next = selected.includes(id) ? selected.filter(other => other !== id) : [...selected, id];
+// 換成選這幾區：面板上已經自己點過選項就留著（只換選了哪幾區），沒點過就照新選的那幾區重新起頭。
+function pick(next) {
   if (draftTouched && next.length) { selected = next; renderZoneOverview(); return; }
   select(next);
 }
-// 這一面交給電腦挑時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
+function toggleSelected(id) { pick(selected.includes(id) ? selected.filter(other => other !== id) : [...selected, id]); }
+// 一面牆的「整面」（#1199）：那一面全部的區扣掉門、窗（跟推「其他牆面」時扣的一樣），照號碼排。
+function wholeFace(wall) { return view.faces[wall].filter(item => !item.opening).map(item => item.id); }
+// 好幾區照面分開（照交進來的先後）：[{wall, zones, whole}]。whole：這幾區剛好是那一面牆的整面（兩區以上）——右欄就寫一行
+// 「前牆整面」加號碼，不必一區一行。
+function byFace(zones) {
+  return [...new Set(zones.map(item => item.wall))].map(wall => {
+    const here = zones.filter(item => item.wall === wall).sort((left, right) => left.label.number - right.label.number);
+    const face = WALL_ORDER.some(role => view.roles[role] === wall) ? wholeFace(wall) : [];
+    return {wall, zones: here, whole: face.length > 1 && face.length === here.length && here.every(item => face.includes(item.id))};
+  });
+}
+// 四面牆名字旁各一顆「選整面」：一次選那一面全部的區（整面都是門窗就沒有這一顆）。
+function wholeButtons(places) {
+  return places.filter(place => wholeFace(place.wall).length).map(place => {
+    const item = button("zv-whole", "選整面", `zone-whole-${place.wall}`, () => pick(wholeFace(place.wall)));
+    item.setAttribute("aria-label", `${wallNames[place.wall]}選整面`);
+    item.style.left = `${place.right.toFixed(1)}px`; item.style.top = `${place.top.toFixed(1)}px`;
+    return item;
+  });
+}
+// 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
 function listForWall(wall, list) {
   if (!list) return startingAllowed(wall);
   const fit = list.filter(id => fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id)));
   return fit.length ? fit : [ZONE_NONE];
 }
-// 畫面上那一份清單（清單卡列的）；現在沒有哪一區交給電腦挑就是 null（新的區照「三種玻璃棉＋不貼」起）。
+// 最多區用的那一份清單（清單卡第一張列的）；現在沒有哪一區由程式最佳化就是 null（新的區照「三種玻璃棉＋不貼」起）。
 function shownList() { return view.list.common?.zones[0].allowed ?? null; }
-// 把好幾區一次改成同一個做法。method：{mode, materialId（指定貼哪一筆；空的＝照現在貼的不換）, allowed（交給電腦挑的清單）}。
+// 一區自己的清單（小框的勾從這裡開始）：已經由程式最佳化的就是它存的那一份，原樣、不照這一面濾；
+// 還不是的，是改成由程式最佳化時會放的那一份（最多區用的那一份照這一面能貼的濾過）。材料庫沒讀全、列不出來時回 null。
+function ownList(item) { return item.mode === "search" ? item.allowed : listForWall(item.wall, shownList()); }
+// 一區照小框動過的勾加減之後的清單：拿掉的從它自己的清單拿掉；勾上的，它還沒有、這一面又貼得了才加在最後面。
+// 沒動過的代號原封不動（這一面貼不了的、材料庫找不到的照樣留著），順序也不動。
+function tickedList(item, ticks) {
+  const own = ownList(item);
+  if (!own) return null;
+  const next = own.filter(id => ticks[id] !== false);
+  for (const [id, on] of Object.entries(ticks)) if (on && !next.includes(id) && fitsHere(id, item.wall)) next.push(id);
+  return next;
+}
+// 把好幾區一次改成同一個做法。method：{mode, materialId（指定貼哪一筆；空的＝照現在貼的不換）, allowed（由程式最佳化的清單：
+// 規則那條路用，照每一面能貼的濾過再寫）, lists（小框那條路用：區 → 那一區要寫的清單；undefined＝那一區的清單不碰）,
+// depth（最深：undefined 不碰、null 拿掉、數字寫公尺）}。
 // 方案那幾區的材料先交伺服器一批換（指定貼：貼上那一筆；其餘兩種：放回原樣），全部成了才改做法；不成就一區都不動、照講。
 // 等伺服器回那一批的時候整頁鎖住（inert：點圖、按套用都沒作用），所以同時只會有一批在路上。
 // written：做法寫完之後、第一次重畫之前要同步做的事（這一頁自己的變數在這裡改；平面圖檢查回來之後不准再寫）。
@@ -433,11 +486,18 @@ async function applyMethod(items, method, written = () => {}) {
     }
   }
   items.forEach((item, index) => {
+    const kept = zoneSetting(item.wall, item.key).allowed;
     const next = {...zoneSetting(item.wall, item.key), mode: method.mode};
     delete next.allowed;
     // 指定貼的那一筆跟這一區原本的面一模一樣：伺服器放回原樣，這裡做法跟著記成不貼（同做法表）。
     if (method.mode === "fixed" && results[index]?.same_as_original) next.mode = "keep_original";
-    if (method.mode === "search") next.allowed = listForWall(item.wall, method.allowed);
+    if (method.mode === "search" && !method.lists) next.allowed = listForWall(item.wall, method.allowed);
+    if (method.mode === "search" && method.lists) {
+      const list = method.lists.get(item.id);
+      if (list) next.allowed = list; else if (list === undefined && item.mode === "search" && kept) next.allowed = kept;
+    }
+    // 「最深」（小框那一格）：有改才寫——清空就拿掉那一格，填了就寫公尺；沒改的各區照目前的。
+    if (method.depth === null) delete next.max_depth_m; else if (method.depth !== undefined) next.max_depth_m = method.depth;
     setZoneSetting(item.wall, item.key, next);
     zoneFormerFixed.delete(item.id); zoneSameAsOriginal.delete(item.id);
   });
@@ -470,20 +530,87 @@ async function resetSpecial() {
   if (!method) { zoneNote("其他牆面現在貼的不是材料庫裡的一筆，沒辦法照著改回去：先在「其他牆面」選一種", "notice"); return; }
   await applyMethod(view.inferred.special.flatMap(group => group.zones), method);
 }
+// 小框裡每一種材料現在的樣子：選中的每一區照草稿加減之後的清單（lists），加上每一種「選中的區裡幾區有」（count）。
+// ids：出現在任何一區清單裡的代號，照最先出現的順序。材料庫沒讀全、有一區列不出來時回 null。
+function panelTicks(items) {
+  const lists = items.map(item => tickedList(item, draft.ticks));
+  if (lists.some(list => !list)) return null;
+  const ids = [...new Set(lists.flat())];
+  const count = id => lists.filter(list => list.includes(id)).length;
+  // 「幾區有」只算貼得了這一種的區（清單裡本來就有的也算）：那一面貼不了的區不算進分母，不然永遠湊不滿。
+  const able = id => items.filter((item, index) => lists[index].includes(id) || fitsHere(id, item.wall)).length;
+  // 使用者動過的勾照他點的（勾上就是勾、拿掉就是空），不再重算；第三種狀態只給還沒動過的。
+  const state = id => id in draft.ticks ? (draft.ticks[id] ? "all" : "none") : count(id) === able(id) && count(id) ? "all" : count(id) ? "some" : "none";
+  return {lists, ids, count, able, state};
+}
+// 「最深」那一格打開時顯示什麼（公分）：選到的區都一樣就帶出來，不一樣、或都沒有，就是空的。
+function shownDepth(items) {
+  const depths = items.map(item => zoneSetting(item.wall, item.key).max_depth_m ?? null);
+  return depths.every(depth => depth === depths[0]) && depths[0] !== null ? String(centimetres(depths[0])) : "";
+}
+// 「最深」那一格空白是什麼意思（底下那一行與不收時那一句都用它）：選到的區目前都一樣，清空就是不限；各區不同，空白就是沒改。
+function blankDepthWords(items) {
+  const depths = items.map(item => zoneSetting(item.wall, item.key).max_depth_m ?? null);
+  return depths.every(depth => depth === depths[0]) ? "不限" : "各區照目前的";
+}
+// 「最深」那一格要寫什麼：格子的值跟打開時顯示的一樣（沒動過、或打了又改回去）undefined（不寫，各區照目前的）、
+// 清空 null（拿掉）、正數回公尺（記到公釐；不到 1 公釐會變成 0，存檔時伺服器不收，這裡就擋）、其餘 NaN（不收）。
+function draftDepth(items) {
+  if (draft.depthText === null) return undefined;
+  if (draft.depthBad) return NaN;
+  const text = draft.depthText.trim();
+  if (text === shownDepth(items)) return undefined;
+  if (text === "") return null;
+  const millimetres = Math.round(Number(text) * 10);
+  return Number.isFinite(millimetres) && millimetres > 0 ? millimetres / 1000 : NaN;
+}
+// 小框選了由程式最佳化、現在這樣套不套得下去：回一句為什麼不行，可以就回空字串。每一個選中的區各自看它套用後的清單。
+function draftProblem(items) {
+  if (draft?.mode !== "search") return "";
+  const ticks = panelTicks(items);
+  if (ticks) {
+    const who = index => items.length > 1 ? `${zoneWhereText(items[index])}：` : "";
+    const empty = ticks.lists.findIndex(list => !list.length);
+    if (empty >= 0) return `${who(empty)}至少勾一種材料，或勾「也可以不貼」；不想讓程式選，就改選上面的「${ZONE_MODE_WORDS.fixed}」或「${KEEP_WORDS}」`;
+    const stuck = ticks.lists.findIndex(list => allowedProblem(list));
+    if (stuck >= 0) return `${who(stuck)}${allowedProblem(ticks.lists[stuck])}程式要從一個能調的東西開始：勾一種可調的材料，或勾「也可以不貼」`;
+  }
+  if (Number.isNaN(draftDepth(items))) return `「最深」要填大於 0 的數字（公分，最少 0.1）；空白＝${blankDepthWords(items)}`;
+  return "";
+}
 async function applyDraft() {
   const items = chosenItems();
-  // 交給電腦挑：寫畫面上那一份清單（規則本身是交給電腦挑時就是規則那一份，所以選它＝跟其他牆面一樣）。
-  const method = draft.mode === "search" ? {mode: "search", allowed: shownList()} : {mode: draft.mode, materialId: draft.materialId};
-  await applyMethod(items, method, () => select([]));
+  if (draft.mode !== "search") { await applyMethod(items, {mode: draft.mode, materialId: draft.materialId}, () => select([])); return; }
+  // 由程式最佳化：只寫選中的區。每一區寫它自己的清單照動過的勾加減之後的那一份；勾都沒動、那一區本來就是由程式最佳化，
+  // 清單就不碰（只改最深時清單一個字都不動）。沒選中的區一律不寫。
+  const ticks = draft.ticks, moved = Object.keys(ticks).length > 0;
+  const lists = new Map(items.map(item => [item.id, moved || item.mode !== "search" ? tickedList(item, ticks) : undefined]));
+  // 規則本身是由程式最佳化、跟著規則的區全都選中了：清單換了做法鍵跟著換，規則還是那幾區。
+  const rule = view.inferred.rule;
+  const ruled = moved && rule?.mode === "search" && rule.zones.every(item => selected.includes(item.id)) ? rule.zones[0].id : null;
+  await applyMethod(items, {mode: "search", lists, depth: draftDepth(items)}, () => {
+    if (ruled) keptRuleZone = ruled;
+    if (moved && lists.get(items[0].id)) zoneLastAllowed = [...lists.get(items[0].id)];
+    select([]);
+  });
 }
-// 改清單：寫進每一個交給電腦挑的區（各面貼不了的拿掉），跟做法表改清單一樣重判限制。
-function writeList(list) {
-  for (const item of view.list.zones) setZoneSetting(item.wall, item.key, {...zoneSetting(item.wall, item.key), mode: "search", allowed: listForWall(item.wall, list)});
-  // 規則本身是交給電腦挑：清單換了、做法鍵跟著換，規則還是那幾區。
-  if (view.inferred.rule?.mode === "search") keptRuleZone = view.inferred.rule.zones[0].id;
+// 一組的區是哪幾區（區代號排好接成一串）：「加別種材料」的框記這個、不記第幾張卡——卡片合併或拆開之後那幾區不再是同一張卡，
+// 框就關掉，不會跑到別張卡上（複查 r2）。
+function groupZones(group) { return group.zones.map(item => item.id).sort().join(" "); }
+// 在一張清單卡上勾（#1199 修補 1）：只改那一組的區（清單一樣的那幾區），加一種（change.add）或拿掉一種（change.remove），
+// 加減在每一區自己的清單上——加的那一種某一面貼不了，那一面的區就不加。跟做法表改清單一樣重判限制。
+function writeList(group, change) {
+  const lists = group.zones.map(item => change.remove ? item.allowed.filter(id => id !== change.remove)
+    : item.allowed.includes(change.add) || !fitsHere(change.add, item.wall) ? item.allowed : [...item.allowed, change.add]);
+  group.zones.forEach((item, index) => setZoneSetting(item.wall, item.key, {...zoneSetting(item.wall, item.key), mode: "search", allowed: lists[index]}));
+  // 規則本身是由程式最佳化、改的就是規則那一組：清單換了、做法鍵跟著換，規則還是那幾區。
+  if (view.inferred.rule?.mode === "search" && view.inferred.rule.key === group.key) keptRuleZone = view.inferred.rule.zones[0].id;
+  const list = lists.find(next => change.remove || next.includes(change.add)) ?? lists[0];
   zoneLastAllowed = [...list];
   unsaved = true;
-  zoneNote(`清單改成 ${list.map(choiceName).join("、")}`, "ok");
+  // 照實際改到的區數講；加的那一種有幾區那一面貼不了、沒加，也講（不講的話卡片拆成兩張看不出為什麼）。
+  const changed = group.zones.filter((item, index) => lists[index] !== item.allowed).length, skipped = group.zones.length - changed;
+  zoneNote(`${changed} 區的清單改成 ${list.map(choiceName).join("、")}${change.add && skipped ? `；另外 ${skipped} 區那一面貼不了這一種，沒加` : ""}`, "ok");
   markStale();
   window.renderElevation();
   refreshZoneLimits();
@@ -550,23 +677,151 @@ function materialShow(entry, wall) {
   show.append(head, ...curveBlock(entry));
   return show;
 }
+// 清單裡勾著的可調材料已經包含哪幾筆成品（#1199）：成品代號 → 包含它的那一筆可調材料。包含關係是材料庫那一筆的
+// preset_members（內建三種玻璃棉才有；自建的可調材料沒有這一格，就不灰）。兩個都放進清單不會報錯，但程式會多一個重複的候選。
+function coveredProducts(list) {
+  const covered = new Map();
+  for (const entry of libraryEntries("optimizable")) if (list.includes(entry.id)) for (const member of entry.preset_members ?? []) covered.set(member, entry);
+  return covered;
+}
+function coveredWhy(family) { return `上面可調的 ${shortLabel(family)} 已經包含它；只想用成品，先取消上面的 ${shortLabel(family)}`; }
+// 材料框裡的一列（#1199）：勾選格、名字、底下一行小字（可調的寫調什麼、從多少到多少——只是字，這一支不能改；固定成品寫總厚）。
+// covered：這一筆成品已經被哪一筆勾著的可調材料包含（那一筆的 preset_members）——灰掉、勾不了，寫為什麼；
+// 清單裡本來就同時存著兩筆的照樣勾著、可以取消（只是顯示，不替使用者改寫）。
+// ticks：panelTicks 的結果。貼得了的區全有＝勾、全沒有＝空、有的有有的沒有＝第三種狀態（indeterminate，只給使用者還沒動過的勾），旁邊寫幾區有。
+function tickBox(id, ticks, toggle) {
+  const check = el("input"); check.type = "checkbox"; check.id = `zone-panel-allow-${id}`;
+  check.checked = ticks.state(id) === "all"; check.indeterminate = ticks.state(id) === "some";
+  check.onchange = () => toggle(id, check.checked);
+  return check;
+}
+// 勾旁邊那一句：第三種狀態寫貼得了的區裡幾區有；勾著、但選中的區裡有那一面貼不了的（tickedList 不會加），照實講有幾區不會加。
+function someWords(id, ticks) {
+  const all = ticks.lists.length, unable = all - ticks.able(id);
+  if (ticks.state(id) === "some") {
+    return [el("small", "zv-some", `${unable ? `貼得了這一種的 ${ticks.able(id)} 區` : `選中的 ${all} 區`}裡 ${ticks.count(id)} 區有；不動它，各區照目前的`)];
+  }
+  return ticks.state(id) === "all" && unable ? [el("small", "zv-some", `選中的 ${all} 區裡 ${unable} 區那一面貼不了這一種，不會加`)] : [];
+}
+function materialRow(entry, ticks, covered, toggle) {
+  const row = el("label", `zv-mrow${covered ? " zv-covered" : ""}`); row.dataset.choice = entry.id; row.dataset.kind = entry.kind;
+  const check = tickBox(entry.id, ticks, toggle);
+  check.disabled = Boolean(covered) && ticks.state(entry.id) === "none";
+  const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", vprWords(shortLabel(entry))));
+  if (entry.kind === "optimizable") words.append(el("small", "zv-range", adjustWords(entry)));
+  else if (fixedDepthWords(entry)) words.append(el("small", null, fixedDepthWords(entry)));
+  if (covered) {
+    row.dataset.covered = covered.id;
+    words.append(el("small", "zv-covered-why", coveredWhy(covered)));
+  }
+  words.append(...someWords(entry.id, ticks));
+  row.append(check, words);
+  return row;
+}
+// 「這一區最深」（設計檔每一區的深度上限，公尺；這裡填公分）：選到的區目前都一樣就帶出來，不一樣就空著。
+// 打字只記進草稿、就地更新套用鈕（sync），不重畫。空格子裡不放提示字（瀏覽器畫提示字的灰量不到對比），空白是什麼意思寫在底下那一行：
+// 格子的值跟打開時一樣就是沒改（draftDepth），所以各區不同時空白＝各區照目前的。
+function deepestRow(items, walls, sync) {
+  const row = el("div", "zv-extra zv-deepest"); row.id = "zone-panel-deepest";
+  const name = el("label", "zv-extra-name", items.length > 1 ? "這幾區最深" : "這一區最深"); name.htmlFor = "zone-panel-depth";
+  const input = el("input", "zv-depth"); input.type = "number"; input.min = "0"; input.step = "any"; input.id = "zone-panel-depth";
+  input.value = draft.depthText ?? shownDepth(items);
+  input.oninput = () => { draft.depthText = input.value; draft.depthBad = input.validity.badInput; draftTouched = true; sync(); };
+  const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
+  row.append(name, input, el("span", "zv-unit", "cm"),
+    el("small", null, `從${from}往房間算，貼上去的總厚不超過它；空白＝${blankDepthWords(items)}`));
+  return row;
+}
+// 小框選了由程式最佳化之後的那一塊（#1199，照樣稿）：材料框（可調的一種一列攤開、材料庫找不到的代號照列、固定成品收在摺疊裡
+// 寫幾種勾了幾種），框外兩項（也可以不貼、最深）。勾與最深都只改草稿，套用才寫，而且只寫選中的區。
+function searchForm(items, walls, sync) {
+  const ticks = panelTicks(items);
+  if (!ticks) return [];
+  // 只記被點的那一個代號（勾上或拿掉）；沒點過的代號套用時各區照目前的。
+  const toggle = (id, on) => { draft.ticks = {...draft.ticks, [id]: on}; draftTouched = true; renderZoneOverview(); };
+  const has = id => ticks.count(id) > 0;
+  // 使用者在這個小框裡動過的那幾種照樣列著（拿掉之後那一列不准消失，不然勾不回來）。
+  const fits = entry => walls.every(wall => usableHere(entry, wall)) || has(entry.id) || entry.id in draft.ticks;
+  const tunable = libraryEntries("optimizable").filter(fits), products = libraryEntries("fixed").filter(fits);
+  const coveredBy = coveredProducts(ticks.ids);
+  const form = el("div", "zv-form"); form.id = "zone-panel-form";
+  const top = el("div", "zv-form-top");
+  top.append(button("zv-link", "材料的勾全拿掉", "zone-panel-clear", () => {
+    draft.ticks = {...draft.ticks, ...Object.fromEntries(ticks.ids.filter(id => id !== ZONE_NONE).map(id => [id, false]))}; draftTouched = true; renderZoneOverview();
+  }), el("span", null, "「也可以不貼」不受影響"));
+  form.append(top);
+  if (!tunable.length) form.append(el("div", "zv-form-note", "這裡沒有可調的材料：程式只能從「不貼」開始，可以再勾固定成品讓它比"));
+  for (const entry of tunable) form.append(materialRow(entry, ticks, null, toggle));
+  for (const id of ticks.ids.filter(other => other !== ZONE_NONE && !libraryEntry(other))) {
+    const row = el("label", "zv-mrow"); row.dataset.choice = id; row.dataset.kind = "missing";
+    const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", choiceName(id)), el("small", null, "照原樣留著，開跑時伺服器會點名"), ...someWords(id, ticks));
+    row.append(tickBox(id, ticks, toggle), words); form.append(row);
+  }
+  if (tunable.length) {
+    const note = el("div", "zv-form-note", "範圍是材料頁設的，這裡只看不改。"); note.id = "zone-panel-range-note";
+    const link = el("a", "zv-link", "材料頁 ▸"); link.id = "zone-panel-materials"; link.href = "/materials"; link.target = "_blank"; link.rel = "noopener";
+    note.append(link); form.append(note);
+  }
+  const more = fold("zone-panel-fixed", `固定成品（整塊貼或不貼，不能調） ${products.length} 種，勾了 ${products.filter(entry => has(entry.id)).length} 種`);
+  const rows = el("div", "zv-fixed-rows");
+  for (const entry of products) rows.append(materialRow(entry, ticks, coveredBy.get(entry.id) ?? null, toggle));
+  more.append(rows); form.append(more);
+  const none = el("label", "zv-extra zv-mrow"); none.id = "zone-panel-none";
+  const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", "也可以不貼"), el("small", null, "程式算出來不貼比較好的區，就不貼，保留原樣"), ...someWords(ZONE_NONE, ticks));
+  none.append(tickBox(ZONE_NONE, ticks, toggle), words);
+  return [form, none, deepestRow(items, walls, sync)];
+}
+// 「目前」小標（#1199）：選到的區現在是這一種做法的，掛在那一項旁邊（講的是現在存著的樣子，面板上點別項它不跟著跑）。
+// 選到的全是同一種：指定貼的寫現在貼的是什麼，其餘兩種不必多寫；做法不只一種：每一項各寫是哪幾區。
+function nowMark(items, mode) {
+  const here = items.filter(item => zoneMethodMode(item.method) === mode);
+  if (!here.length) return [];
+  const tag = el("span", "zv-now-tag", "目前"); tag.id = `zone-panel-now-${mode}`; tag.dataset.zones = here.map(item => item.id).join(" ");
+  const what = el("span", "zv-now-what");
+  if (here.length < items.length) what.append(zonesBrief(here));
+  else if (mode === "fixed") what.append(new Set(here.map(item => item.method)).size === 1 ? vprWords(pastedWords(here[0])) : "各區貼的不一樣");
+  const line = el("div", "zv-now"); line.append(tag, what);
+  return [line];
+}
 function panelCard() {
   const items = chosenItems(), rule = view.inferred.rule;
   const card = el("div", "zv-edit"); card.id = "zone-panel";
   card.dataset.zones = selected.join(" ");
-  card.append(el("h2", null, `已選 ${items.length} 區`));
-  for (const item of items) {
+  const walls = [...new Set(items.map(item => item.wall))];
+  // 選到的都在同一面牆：剛好是那一面整面（兩區以上）就只寫一行，一區一行的收在摺疊裡；不是整面就給一條「改選整面」。
+  const face = walls.length === 1 && view.roles && WALL_ORDER.some(role => view.roles[role] === walls[0]) ? wholeFace(walls[0]) : [];
+  const isWhole = face.length > 1 && face.length === items.length && face.every(id => selected.includes(id));
+  const top = el("div", "zv-ehead"); top.append(el("h2", null, `已選 ${items.length} 區`));
+  if (face.length && !isWhole && !(face.length === 1 && selected.length === 1 && selected[0] === face[0])) {
+    top.append(button("zv-link", `改選${wallNames[walls[0]]}整面（${face.length} 區）`, "zone-panel-whole", () => pick(face)));
+  }
+  card.append(top);
+  const chips = items.map(item => {
     const chip = el("div", "zv-chip"); chip.dataset.zone = item.id;
     chip.append(zoneWhere(item), button("zv-link zv-x", "不選這區", `zone-panel-drop-${item.wall}-${item.key}`, () => toggleSelected(item.id)));
-    card.append(chip);
-  }
+    return chip;
+  });
+  if (isWhole) {
+    const line = el("div", "zv-chip zv-face-line"); line.id = "zone-panel-face";
+    line.append(`${wallNames[walls[0]]}整面 `, ...[...items].sort((left, right) => left.label.number - right.label.number).map(item => numberBadge(item.label.number)));
+    const each = fold("zone-panel-zones", "看每一區、拿掉幾區"); each.classList.add("zv-each");
+    each.append(...chips);
+    card.append(line, each);
+  } else card.append(...chips);
   card.append(el("div", "zv-addmore", "再點圖上別區可以一起改。"));
   // 「＝其他牆面」：選到的都是算進規則的牆區時，標在跟規則同一種做法的那一項旁邊；選它＝這幾區不再另外指定。
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
   const sameAs = rule && items.every(item => ruled.has(item.id)) ? rule.mode : null;
   const allPasted = items.every(item => item.pasted);
-  const walls = [...new Set(items.map(item => item.wall))];
-  const choose = (mode, materialId = "") => { draft = {mode, materialId}; draftTouched = true; renderZoneOverview(); };
+  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, mode, materialId}; draftTouched = true; renderZoneOverview(); };
+  // 套用鈕與它上面那一句「為什麼不能套用」：在小框裡打字（最深那一格）時就地更新這兩樣，不重畫整頁（重畫會換掉正在打的那一格）。
+  const apply = button("zv-btn zv-main-btn", `套用到選中的 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
+  const problem = el("p", "zv-problem zv-panel-problem"); problem.id = "zone-panel-problem"; problem.setAttribute("role", "alert");
+  const sync = () => {
+    const why = draftProblem(items);
+    problem.textContent = why; problem.hidden = !why;
+    apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !allPasted) || Boolean(why);
+  };
   for (const mode of ["fixed", "keep_original", "search"]) {
     // 一項一列：圓鈕、字（點字也算點圓鈕）、色塊；材料下拉放在字的下面、不包在字的標籤裡（包進去的話點下拉會被當成點圓鈕）。
     const row = el("div", `zv-opt${draft?.mode === mode ? " on" : ""}`); row.id = `zone-panel-option-${mode}`;
@@ -580,8 +835,12 @@ function panelCard() {
     const ruleMaterial = sameAs === "fixed" ? ruleMethod()?.materialId ?? null : null;
     // 下拉停在「照現在貼的，不換」而選到的本來就都跟著規則，也算同一筆（規則貼的不是材料庫裡的成品時只有這條路）。
     const keepsRule = Boolean(rule) && draft?.materialId === "" && items.every(item => item.method === rule.key);
-    const sameHere = sameAs === mode && (mode !== "fixed" || draft?.mode !== "fixed" || (ruleMaterial !== null && draft.materialId === ruleMaterial) || keepsRule);
+    // 由程式最佳化也要連清單都跟規則同一份才算：選中的區套用後的清單（照自己的清單加減）有一區跟規則的不一樣就不標。
+    const ruleList = sameAs === "search" ? rule.zones[0].allowed : null;
+    const listsAsRule = !ruleList || !draft || (panelTicks(items)?.lists.every(list => sameList(list, ruleList)) ?? true);
+    const sameHere = sameAs === mode && listsAsRule && (mode !== "fixed" || draft?.mode !== "fixed" || (ruleMaterial !== null && draft.materialId === ruleMaterial) || keepsRule);
     if (sameHere) { const same = el("span", "zv-same", "＝其他牆面"); same.id = "zone-panel-same"; same.dataset.mode = mode; words.append(same); }
+    body.append(...nowMark(items, mode));
     if (mode === "fixed") {
       const material = el("select", "zv-pick zv-pick-material"); material.id = "zone-panel-material"; material.setAttribute("aria-label", "指定貼哪一種");
       const none = el("option", null, allPasted ? "照現在貼的，不換" : "選要貼哪一種"); none.value = ""; material.append(none);
@@ -594,21 +853,24 @@ function panelCard() {
       body.append(material);
     }
     if (mode === "search" && draft?.mode === "search") {
-      // 選到交給電腦挑：講電腦從哪幾種裡挑（套用時寫進去的就是這一份；各面能貼的不同就各面各寫）。
-      const lists = walls.map(wall => listForWall(wall, shownList()));
-      const same = lists.every(list => list.join() === lists[0].join());
-      const from = el("div", "zv-from", same ? `電腦從這 ${lists[0].length} 種裡挑：${lists[0].map(listName).join("、")}`
-        : walls.map((wall, index) => `${wallNames[wall]}從這 ${lists[index].length} 種裡挑：${lists[index].map(listName).join("、")}`).join("；"));
+      // 選到由程式最佳化：這一列底下講從幾種裡選；是哪幾種、各調多少在下面那個材料框（searchForm），全頁只有那一處。
+      const ticks = panelTicks(items);
+      const mixed = ticks?.ids.some(id => ticks.state(id) === "some");
+      const from = el("div", "zv-from", !ticks ? "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）"
+        : mixed ? `選中的 ${items.length} 區清單不一樣：沒動的勾，各區照目前的。每一區各自最佳化。`
+        : `程式從下面勾的 ${ticks.ids.length} 種裡選，每一區各自最佳化。`);
       from.id = "zone-panel-search-from"; body.append(from);
     }
     row.append(radio, body, el("span", `zv-sw ${shownOf(mode)}`));
     card.append(row);
     if (mode === "fixed" && draft?.mode === "fixed" && draft.materialId && libraryEntry(draft.materialId)) card.append(materialShow(libraryEntry(draft.materialId), walls[0]));
+    if (mode === "search" && draft?.mode === "search") card.append(...searchForm(items, walls, sync));
   }
   const foot = el("div", "zv-editfoot");
-  const apply = button("zv-btn zv-main-btn", `套用到選中的 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
-  apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !allPasted);
-  foot.append(apply, button("zv-btn", "取消", "zone-panel-cancel", () => select([])));
+  sync();
+  card.append(problem);
+  const unchanged = el("span", "zv-cancel-note", "取消＝不改"); unchanged.id = "zone-panel-cancel-note";
+  foot.append(apply, button("zv-btn", "取消", "zone-panel-cancel", () => select([])), unchanged);
   card.append(foot);
   return card;
 }
@@ -658,7 +920,12 @@ function specialRow() {
     block.dataset.key = group.key; block.dataset.zones = group.zones.map(item => item.id).join(" ");
     const body = el("div");
     const where = el("div", "zv-where");
-    for (const item of group.zones) where.append(zoneWhere(item));
+    for (const part of byFace(group.zones)) {
+      if (!part.whole) { for (const item of part.zones) where.append(zoneWhere(item)); continue; }
+      const line = el("div", "zv-where-line"); line.dataset.whole = part.wall;
+      line.append(`${wallNames[part.wall]}整面 `, ...part.zones.map(item => numberBadge(item.label.number)));
+      where.append(line);
+    }
     body.append(where, el("div", "zv-what", methodWords(group)));
     block.append(el("i", `zv-bar ${shownOf(group.mode)}`), body,
       button("zv-btn", "改", `zone-special-edit-${index}`, () => select(group.zones.map(item => item.id))));
@@ -717,103 +984,109 @@ function briefRules() {
   return card;
 }
 function listName(id) { return id === ZONE_NONE ? "也可以不貼（保留原樣）" : vprWords(choiceName(id)); }
-// 清單卡管哪幾區：規則本身是交給電腦挑就寫「沒另外指定的牆區」，其餘的區點名。
-function listWho() {
-  const {list, inferred} = view;
-  const line = el("div", "zv-who"); line.id = "zone-list-who";
-  line.append(`現在管 ${list.zones.length} 區：`);
-  const byRule = inferred.rule?.mode === "search" ? new Set(inferred.rule.zones.map(item => item.id)) : new Set();
+// 一張清單卡管哪幾區：這一組就是規則那一組（規則本身是由程式最佳化）就寫「沒另外指定的牆區」，其餘的區點名。
+// alone：全部由程式最佳化的區只有這一組（一張卡）。
+function listWho(group, prefix, alone) {
+  const {inferred} = view;
+  const line = el("div", "zv-who"); line.id = `${prefix}-who`;
+  line.append(`${alone ? "現在管" : "這一張管"} ${group.zones.length} 區：`);
+  const byRule = inferred.rule?.mode === "search" && inferred.rule.key === group.key ? new Set(inferred.rule.zones.map(item => item.id)) : new Set();
   const pieces = byRule.size ? [["沒另外指定的牆區"]] : [];
-  for (const item of list.zones.filter(zone => !byRule.has(zone.id))) {
-    pieces.push(item.key === "whole_wall" ? [`${wallNames[item.wall]}整面`] : [`${wallNames[item.wall]} `, numberBadge(item.label.number), ` ${item.label.name}`]);
+  for (const part of byFace(group.zones.filter(zone => !byRule.has(zone.id)))) {
+    if (part.whole) { pieces.push([`${wallNames[part.wall]}整面 `, ...part.zones.map(item => numberBadge(item.label.number))]); continue; }
+    for (const item of part.zones) {
+      pieces.push(item.key === "whole_wall" ? [`${wallNames[item.wall]}整面`] : [`${wallNames[item.wall]} `, numberBadge(item.label.number), ` ${item.label.name}`]);
+    }
   }
   pieces.forEach((piece, index) => { if (index) line.append("、"); line.append(...piece); });
   return line;
 }
-// 「加別種材料」：列牆面能貼、還不在清單裡的（可調的在前、固定成品在後），勾了就加進清單。
-function listAddBox(allowed) {
-  const box = el("div", "zv-checks zv-add"); box.id = "zone-list-add-box";
-  const wall = view.roles.front;
+// 「加別種材料」：列這一組的區貼得了、還不在清單裡的（可調的在前、固定成品在後），勾了就加進這一組每一區的清單。
+function listAddBox(group, allowed, prefix) {
+  const box = el("div", "zv-checks zv-add"); box.id = `${prefix}-add-box`;
+  const walls = [...new Set(group.zones.map(item => item.wall))];
   const more = [...(allowed.includes(ZONE_NONE) ? [] : [ZONE_NONE]),
-    ...["optimizable", "fixed"].flatMap(kind => libraryEntries(kind).filter(entry => usableHere(entry, wall) && !allowed.includes(entry.id)).map(entry => entry.id))];
+    ...["optimizable", "fixed"].flatMap(kind => libraryEntries(kind).filter(entry => walls.some(wall => usableHere(entry, wall)) && !allowed.includes(entry.id)).map(entry => entry.id))];
+  // 清單裡勾著的可調材料已經包含的成品：灰掉、勾不了、寫為什麼（跟小框的材料框同一條規則，#1199）。
+  const coveredBy = coveredProducts(allowed);
   for (const id of more) {
     const row = el("label", "zv-check"); row.dataset.choice = id;
-    const check = el("input"); check.type = "checkbox"; check.id = `zone-list-add-${id}`;
-    check.onchange = () => writeList([...allowed, id]);
+    const check = el("input"); check.type = "checkbox"; check.id = `${prefix}-add-${id}`;
+    check.onchange = () => writeList(group, {add: id});
     const words = el("span", null, listName(id));
     if (id !== ZONE_NONE) words.append(el("small", null, choiceWords(libraryEntry(id))));
+    const family = coveredBy.get(id);
+    if (family) {
+      row.classList.add("zv-covered"); row.dataset.covered = family.id; check.disabled = true;
+      words.append(el("small", "zv-covered-why", coveredWhy(family)));
+    }
     row.append(check, words); box.append(row);
   }
-  if (!more.length) box.append(el("div", "zv-who", "牆面能貼的都已經在清單裡了"));
+  if (!more.length) box.append(el("div", "zv-who", "這幾區能貼的都已經在清單裡了"));
   return box;
 }
-function listCard(compact) {
+// 清單卡（#1199 修補 1）：由程式最佳化的區照清單分組（zone_rules.js 的 zoneSearchList），清單一樣的一組一張卡。
+// 各區清單都一樣（最常見）就是一張，寫「都從這幾種裡選」；不一樣就一組一張，每張寫是哪幾區、准哪些，在一張上勾只改那一組。
+// 第一張的代號照舊（zone-list、zone-list-check-…），第二張起加號碼（zone-list-2、zone-list-2-check-…）。
+function listCards(compact) {
   const {list} = view;
-  const card = el("div", "zv-list"); card.id = "zone-list";
-  card.dataset.count = String(list.zones.length);
-  if (!list.zones.length) {
-    card.classList.add("empty");
-    const head = el("h2"); head.append(el("i", "zv-sw search"), "現在沒有哪一區交給電腦挑");
-    card.append(head);
-    return card;
-  }
-  const head = el("h2"); head.append(el("i", "zv-sw search"), "交給電腦挑的每一區，都從這幾種裡挑");
+  if (list.zones.length) return list.groups.map((group, index) => listCard(group, index, compact));
+  const card = el("div", "zv-list empty"); card.id = "zone-list"; card.dataset.count = "0";
+  const head = el("h2"); head.append(el("i", "zv-sw search"), "現在沒有哪一區由程式最佳化");
   card.append(head);
-  const allowed = shownList();
+  return [card];
+}
+function listCard(group, index, compact) {
+  const {list} = view;
+  const prefix = index ? `zone-list-${index + 1}` : "zone-list", alone = list.groups.length === 1, size = group.zones.length;
+  const adding = listAdding === groupZones(group);
+  const card = el("div", "zv-list"); card.id = prefix;
+  card.dataset.count = String(size); card.dataset.zones = group.zones.map(item => item.id).join(" ");
+  const head = el("h2");
+  head.append(el("i", "zv-sw search"), alone ? `由程式最佳化的 ${size} 區` : `由程式最佳化的 ${list.zones.length} 區裡的 ${size} 區`,
+    el("span", "zv-muted", alone ? "每一區各自最佳化，都從這幾種裡選" : size > 1 ? `每一區各自最佳化，這 ${size} 區從這幾種裡選` : "這一區從這幾種裡選"));
+  card.append(head);
+  const allowed = group.zones[0].allowed;
   if (!allowed) {
-    card.append(listWho(), el("div", "zv-who", "電腦從全部可調材料與「不貼」裡挑（材料庫沒讀全，列不出是哪幾種）"));
+    card.append(listWho(group, prefix, alone), el("div", "zv-who", "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）"));
     return card;
   }
   if (compact) {
-    const names = el("div", "zv-names"); names.id = "zone-list-names";
+    const names = el("div", "zv-names"); names.id = `${prefix}-names`;
     const materials = allowed.filter(id => id !== ZONE_NONE).map(id => vprWords(choiceName(id))).join("、");
     names.append(el("span", null, [materials, ...(allowed.includes(ZONE_NONE) ? ["也可以不貼"] : [])].filter(Boolean).join("，")),
-      button("zv-link", "改清單", "zone-list-edit", () => select([])));
+      button("zv-link", "改清單", `${prefix}-edit`, () => select([])));
+    if (!alone) card.append(listWho(group, prefix, alone));
     card.append(names);
     return card;
   }
-  card.append(listWho());
-  const checks = el("div", "zv-checks"); checks.id = "zone-list-checks";
+  card.append(listWho(group, prefix, alone));
+  const checks = el("div", "zv-checks"); checks.id = `${prefix}-checks`;
   for (const id of allowed) {
     const row = el("label", "zv-check"); row.dataset.choice = id;
-    const check = el("input"); check.type = "checkbox"; check.checked = true; check.id = `zone-list-check-${id}`;
+    const check = el("input"); check.type = "checkbox"; check.checked = true; check.id = `${prefix}-check-${id}`;
     check.onchange = () => {
-      const next = allowed.filter(other => other !== id);
-      if (next.length) { writeList(next); return; }
-      zoneNote(`清單至少要留一種；不想讓電腦挑，就把那幾區改成「${ZONE_MODE_WORDS.fixed}」或「${KEEP_WORDS}」`, "notice");
+      if (allowed.length > 1) { writeList(group, {remove: id}); return; }
+      zoneNote(`清單至少要留一種；不想讓程式選，就把那幾區改成「${ZONE_MODE_WORDS.fixed}」或「${KEEP_WORDS}」`, "notice");
       renderZoneOverview();
     };
-    row.append(check, el("span", null, listName(id)));
+    // 可調的一種一列，名字底下寫調什麼、從多少到多少（跟小框的材料框同一種寫法；範圍是材料頁設的）。
+    const words = el("span", "zv-mwords", listName(id)), entry = libraryEntry(id);
+    if (entry?.kind === "optimizable") words.append(el("small", "zv-range", adjustWords(entry)));
+    row.append(check, words);
     checks.append(row);
   }
   card.append(checks);
-  // 清單每一種都是固定成品：電腦沒得挑（同做法表的紅框），「拿去搜尋」也按不下去。
+  // 清單每一種都是固定成品：程式沒得選（同做法表的紅框），「拿去搜尋」也按不下去。
   if (allowedProblem(allowed)) {
-    const problem = el("p", "zv-problem"); problem.id = "zone-list-problem"; problem.setAttribute("role", "alert");
-    problem.textContent = `${allowedProblem(allowed)}電腦要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓電腦挑：點圖上那一區，改成「${ZONE_MODE_WORDS.fixed}」。`;
+    const problem = el("p", "zv-problem"); problem.id = `${prefix}-problem`; problem.setAttribute("role", "alert");
+    problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：點圖上那一區，改成「${ZONE_MODE_WORDS.fixed}」。`;
     card.append(problem);
   }
-  if (list.different.length) {
-    const more = fold("zone-list-different", `有 ${list.different.length} 區另外選`); more.classList.add("zv-different");
-    more.dataset.zones = list.different.map(item => item.id).join(" ");
-    for (const item of list.different) {
-      const line = zoneWhere(item);
-      line.append(`：${item.allowed ? item.allowed.map(choiceName).join("、") : "全部可調材料與不貼"}`);
-      more.append(line);
-    }
-    card.append(more);
-  }
   const links = el("div", "zv-links");
-  const tunable = allowed.map(libraryEntry).filter(entry => entry?.kind === "optimizable");
-  if (tunable.length) {
-    const ranges = fold("zone-list-ranges", tunable.every(entry => entry.label.includes("玻璃棉")) ? "玻璃棉各自能調多厚" : "可調的材料各自能調多厚");
-    const lines = el("div", "zv-adjlist");
-    for (const entry of tunable) lines.append(el("div", null, `${shortLabel(entry)}　${adjustWords(entry)}`));
-    ranges.append(lines); links.append(ranges);
-  }
-  links.append(button("zv-link", listAdding ? "加別種材料 ▾" : "加別種材料 ▸", "zone-list-add", () => { listAdding = !listAdding; renderZoneOverview(); }));
+  links.append(button("zv-link", adding ? "加別種材料 ▾" : "加別種材料 ▸", `${prefix}-add`, () => { listAdding = adding ? null : groupZones(group); renderZoneOverview(); }));
   card.append(links);
-  if (listAdding) card.append(listAddBox(allowed));
+  if (adding) card.append(listAddBox(group, allowed, prefix));
   return card;
 }
 // 「每一區的尺寸與代號」：平常收著，點開才看得到代號與尺寸（伺服器的訊息與搜尋頁寫的是代號）。
@@ -865,10 +1138,10 @@ function resultBar() {
   if (windows) still.push(`窗 ${windows} 扇`);
   const rest = el("span", "zv-part"); rest.id = "zone-result-still";
   rest.append(el("span", "zv-sw still"), `保留原樣：${still.length ? still.join("、") : "沒有"}`);
-  // 「拿去搜尋」照做法表那一顆的擋法：沒有區交給電腦挑、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
+  // 「拿去搜尋」照做法表那一顆的擋法：沒有區由程式最佳化、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
   const go = button("zv-go", "拿去搜尋", "zone-page-search", () => action(sendToSearch));
   // 按不下去時旁邊一句講為什麼（細節在上面那一行紅字）。
-  const why = !of("search").length ? "還沒有交給電腦挑的區" : stuckZoneNames().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
+  const why = !of("search").length ? "還沒有由程式最佳化的區" : stuckZoneNames().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
   go.disabled = Boolean(why);
   // 原因那一句收在按鈕正下方（小字一行），不跟前面三項搶同一行的寬度。
   const box = el("span", "zv-gobox"); box.append(go);
@@ -933,7 +1206,10 @@ function renderZoneOverview() {
     setTimeout(() => { throw error; });
     return;
   }
+  // 正在「最深」那一格打字時別的事觸發重畫（晚到的限制檢查）：字記在草稿裡不會掉，焦點放回那一格。
+  const typing = document.activeElement?.id === "zone-panel-depth";
   page.replaceChildren(...parts);
+  if (typing) $("zone-panel-depth")?.focus();
   window.scrollTo(0, scrolled);
 }
 function overviewParts() {
@@ -944,7 +1220,7 @@ function overviewParts() {
     return [head];
   }
   // 換了方案（打開別份、載入範本）：上一份選的區、面板上點的都不算數。
-  if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; listAdding = false; keptRule = null; keptRuleZone = null; unsaved = false; keptSaid = ""; }
+  if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; listAdding = null; keptRule = null; keptRuleZone = null; unsaved = false; keptSaid = ""; }
   const roles = overviewRoles();
   const room = {Lx: wallSize("floor")[0], Ly: wallSize("floor")[1], Lz: wallSize("x0")[1]};
   const depth = roles.front[0] === "x" ? room.Lx : room.Ly, across = roles.front[0] === "x" ? room.Ly : room.Lx;
@@ -965,16 +1241,16 @@ function overviewParts() {
   for (const item of byId.values()) { item.apart = apart.has(item.id); item.named = item.wall === "floor" || item.wall === "ceiling" || item.apart; }
   const body = el("div", "zv-main");
   const mapWrap = el("div", "zv-mapwrap");
-  const {map, legendTop} = drawMap(faces, roles, room);
-  mapWrap.append(map, legend(legendTop));
+  const {map, legendTop, whole} = drawMap(faces, roles, room);
+  mapWrap.append(map, legend(legendTop), ...wholeButtons(whole));
   const side = el("div", "zv-side");
-  if (selected.length) side.append(panelCard(), briefRules(), listCard(true));
+  if (selected.length) side.append(panelCard(), briefRules(), ...listCards(true));
   else {
     const slot = el("div", "zv-slot"); slot.id = "zone-slot";
-    slot.append(el("b", null, "點圖上任何一塊，這裡就出現它的選項。"), el("br"), "牆、門、窗、天花、地板都能點；再點別塊可以一起改。");
+    slot.append(el("b", null, "點圖上任何一塊，這裡就出現它的選項。"), el("br"), "牆、門、窗、天花、地板都能點；再點別塊可以一起改；牆名旁「選整面」一次選一整面牆。");
     const rules = el("div", "zv-rules");
     rules.append(ruleRow(), specialRow(), othersRow());
-    side.append(slot, rules, listCard(false), detailTable());
+    side.append(slot, rules, ...listCards(false), detailTable());
   }
   body.append(mapWrap, side);
   return [head, body, noteLines(), resultBar()];

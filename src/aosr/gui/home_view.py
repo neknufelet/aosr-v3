@@ -40,7 +40,7 @@ from aosr.reporting.scheme import Scheme
 _BASELINE: Final = re.compile(rf"(?P<name>.+){re.escape(SUFFIX)}[0-9a-f]{{8}}\Z")
 _ADOPTED: Final = re.compile(rf"(?P<name>.+)-{ADOPTED_WORD}-[0-9a-f]{{8}}\Z")
 _REFINED: Final = re.compile(r"[0-9a-f]{32}-(?:baseline|trial-(?P<trial>[0-9]+))-verification\Z")
-MATERIALS_NOTE: Final = "每一面牆、每一區貼哪種吸音材料、貼多厚，交給電腦挑"
+MATERIALS_NOTE: Final = "每一面牆、每一區貼哪種吸音材料、貼多厚，由程式最佳化"
 LAYOUT_NOTE: Final = "喇叭和座位放哪裡最好，交給電腦試很多種擺法"
 RESULT_NOTE: Final = "這一間算出來怎樣、比原牆基準好多少"
 ZONED_LAYOUT_NOTE: Final = "這一間的牆面分了區，電腦試擺位目前只能用在牆面沒分區的方案；到那一頁選一份沒分區的"

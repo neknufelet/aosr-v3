@@ -166,7 +166,7 @@ def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family:
         return listed[0].template_preset
     if targets is None or NONE_TARGET in targets:
         return None
-    raise PlanRefused(f"{zone_words(wall, zone, names)}只放了固定成品，電腦沒得挑：電腦要從一個能調的東西開始，請在立面圖這一區加上「不貼」"
+    raise PlanRefused(f"{zone_words(wall, zone, names)}只放了固定成品，程式沒得選：程式要從一個能調的東西開始，請在立面圖這一區加上「不貼」"
                       "或一種可調材料（例如 48K 玻璃棉），或把做法改成「指定貼一種」")
 
 
