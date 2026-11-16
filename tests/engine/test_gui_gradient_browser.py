@@ -862,7 +862,9 @@ def test_a_plan_reply_that_lands_after_a_later_switch_is_dropped(browser: Browse
         expect(page.locator("#job-title")).to_contain_text(f"這一跑：{THIRD}")
         assert starts == [f"/api/gradient/schemes/{THIRD}/start"]
         _, argv, _, _ = launcher.launched[-1]
-        assert "xL@r0_c0" in " ".join(argv)
+        # 開的是第三份的三區：第二份裡固定不調的那兩區，這一跑沒有被列成固定面。
+        assert not [word for word in argv if word.startswith(("xL@r0_c0=", "x0@r1_c1="))]
+        assert [word for word in argv if word.startswith("xL@r0_c1=")]
         _clean(page, watched.page_errors + watched.console_errors)
 
 
@@ -940,3 +942,29 @@ def test_a_rebuild_overtaken_by_a_switch_stops_there(browser: Browser, tmp_path:
         expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
         expect(page.locator("#scheme-pick")).to_have_value(THIRD)
         _clean(page, watched.page_errors + watched.console_errors)
+
+
+def test_a_build_finishing_after_a_switch_does_not_preview_for_the_other_scheme(browser: Browser, tmp_path: Path) -> None:
+    """抓建替身途中換到開不了的方案、替身建好那一刻，頁面拿那份開不了的方案代號配舊表單自己送一次預覽。"""
+    data_dir = _data(tmp_path, surrogate=False)
+    _add_scheme(data_dir, BARE, None)
+    launcher = FakeLauncher()
+    with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
+        page = watched.page
+        expect(page.locator("#surrogate-state")).to_contain_text("還沒有替身")
+        page.locator("#build-surrogate").click()
+        expect(page.locator("#build-state")).to_contain_text("建替身")
+        unit = launcher.launched[-1][0]
+        _switch(page, BARE)
+        expect(page.locator("#scheme-message")).to_contain_text("這份方案開不了第三階段搜尋")
+        seen = _plan_posts(page)
+        _installed(data_dir, launcher, unit)
+        build = f"/api/gradient/surrogates/{unit.removeprefix(BUILD_UNIT_PREFIX)}"
+        with page.expect_response(lambda response: urlsplit(response.url).path == build) as event:
+            _tick(page)
+        event.value.finished()
+        _flush(page)
+        assert seen == [], f"替身建好時替開不了的那份方案送了預覽：{seen}"
+        for block in BLOCKS:
+            expect(page.locator(f"#{block}")).to_be_hidden()
+        _clean(page, watched.page_errors + [error for error in watched.console_errors if "status of 400" not in error])
