@@ -72,6 +72,7 @@ from aosr.gradient.fixed_surfaces import (
     expanded_allowed_targets, fixed_targets_of,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
+from aosr.gradient.ties import Ties, check_ties_against_start, checked_ties
 from aosr.gradient.material_gradient import (
     COMPONENT_NAMES, Unestimable, ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, check_stop, objective_reading,
     designs_from_presets, is_feasible,
@@ -149,7 +150,7 @@ class GradientProject(BaseModel):
     （資料夾裡的 ``materials.json`` 與它整份的 SHA-256）；沒接的不寫、寫出的檔逐位等於加這兩格之前。
     ``allowed_targets`` 是每區准用清單（#1082 段 2-3b，面 → 目標，照開跑時給的面名，沒展開）；清單裡的固定材料
     每一個都有一筆 ``fixed_candidate_checks``（替身留出驗證，通過才開得了）。沒有清單兩格都不寫（逐位等於加這兩格之前）。
-    使用者固定材料存在材料快照 v2 裡。
+    使用者固定材料存在材料快照 v2 裡。``ties`` 是綁定表（#1206，成對的兩片）：空表不寫、缺這一格讀成不綁。
     """
 
     model_config = _FROZEN
@@ -187,6 +188,7 @@ class GradientProject(BaseModel):
     materials_sha256: str | None = Field(default=None, pattern=_SHA256, exclude_if=lambda value: value is None)
     allowed_targets: AllowedTargets = Field(default_factory=dict, exclude_if=lambda value: not value)
     fixed_candidate_checks: tuple[FixedCandidateCheck, ...] = Field(default=(), exclude_if=lambda value: not value)
+    ties: Ties = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _depth_not_fixed(self) -> Self:
@@ -360,13 +362,15 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
                 mount: Mount = MOUNT_RIGID, fixed_surfaces: Mapping[str, str] | None = None,
                 patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None,
                 frequency_batch: int | None = None, device: Device = "cpu", materials_sha256: str | None = None,
-                allowed_targets: Mapping[str, Sequence[str]] | None = None) -> str:
+                allowed_targets: Mapping[str, Sequence[str]] | None = None,
+                ties: Sequence[tuple[str, str]] | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
     登記簿的代理三格與第一階段設定）算進來：只改那三格就是另一個資料夾，不會撞到加代理之前的那一個。
     安裝方式（#990）只在不是剛背時多一個 ``"mount"`` 鍵：剛背的資料夾名逐位等於加這一格之前，貼在原牆上落在另一個資料夾。
     材料快照（#1082 段 2-3a）只在使用者材料接成家族時多一個 ``"materials"`` 鍵（快照整份的 SHA-256）。
+    綁定表（#1206）只在不是空的時多一個 ``"ties"`` 鍵（固定存法，``A=B`` 與 ``B=A`` 同一個名）。
     """
     identity: dict[str, object] = {
         "scheme": scheme_sha256, "surrogate": surrogate_manifest_sha256, "presets": list(presets), "purpose": purpose,
@@ -385,10 +389,11 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["materials"] = materials_sha256
     if allowed_targets:
         identity["allowed_targets"] = {face: list(targets) for face, targets in sorted(allowed_targets.items())}
+    if ties:
+        identity["ties"] = [list(pair) for pair in checked_ties(ties)]
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
-    content = json.dumps(identity,
-                         sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    content = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:32]
 
 
@@ -695,8 +700,9 @@ def load_problem(project: GradientProject) -> GradientProblem:
     context = TemplateContext(settings, table, named_materials(kept),
                               objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, names),
                               max_depths=project.max_depths, allowed=project_allowed(project, names))
-    return GradientProblem(designs, settings, objective, header_for(model, designs, settings,
-                                                                    objective_constants=six), kept, context)
+    check_ties_against_start(project.ties, designs, context.allowed or {})
+    return GradientProblem(designs, settings, objective, header_for(model, designs, settings, objective_constants=six,
+                                                                    ties=project.ties), kept, context)
 
 
 def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[float], *, density_kg_m3: float,
@@ -860,7 +866,7 @@ def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
         kept_digests=digests, mount=header.mount,
         fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths, boundary_patches=header.boundary_patches,
-        allowed_targets=dict(allowed or {}), fixed_candidate_digests=candidate_digests)
+        allowed_targets=dict(allowed or {}), fixed_candidate_digests=candidate_digests, ties=header.ties)
 
 
 def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:

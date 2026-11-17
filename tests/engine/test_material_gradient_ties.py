@@ -269,7 +269,7 @@ def test_command_line_takes_the_tie_flag_and_refuses_before_loading_anything(tmp
 
     parser = cli._parser()
     arguments = ["start", "--scheme", str(tmp_path / "none.json"), "--surrogate", str(tmp_path / "none.npz"),
-                 "--presets", "none", "--purpose", "music", "--root", str(tmp_path / "root")]
+                 "--presets", ",".join(["none"] * 6), "--purpose", "music", "--root", str(tmp_path / "root")]
     start = next(action for action in parser._actions if isinstance(action.choices, dict)).choices["start"]
     assert "--tie" in start.format_help() and "成對" in start.format_help()
     assert parser.parse_args(arguments).tie == []

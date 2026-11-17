@@ -355,7 +355,8 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
     initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
                           fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table)
     result = checked_result(folder, given, header_for(model, initial, settings,
-        objective_constants=context.constants if current else search_objective_constants(project, scheme, model)), settings, kept,
+        objective_constants=context.constants if current else search_objective_constants(project, scheme, model),
+        ties=project.ties), settings, kept,
         table=table, allowed=project_allowed(project, tuple(design.surface_id for design in initial)))
     designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
                             mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths,

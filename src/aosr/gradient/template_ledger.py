@@ -38,6 +38,7 @@ from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGrad
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
 from aosr.gradient.material_gradient_ledger import CONSTANTS_RERUN_TEXT, PROXY_RERUN_TEXT, ScoreConstants, check_scores
 from aosr.gradient.fixed_surfaces import AllowedTargets, FixedSurfaces, MaxDepths, fixed_targets_of
+from aosr.gradient.ties import Ties, check_ties_in_surfaces
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
@@ -82,6 +83,8 @@ class TemplateHeader(BaseModel):
     # #1082 段 2-3b（版本不升）：每區准用清單（已展開到面片）與清單裡固定材料的材料摘要；沒有清單不寫（逐位等於加這兩格之前）。
     allowed_targets: AllowedTargets = Field(default_factory=dict, exclude_if=lambda value: not value)
     fixed_candidate_digests: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    # #1206（版本不升）：綁定表抄庚二帳本標頭；空表不寫（逐位等於加這一格之前）、缺這一格讀成不綁。重播照這一格算單位。
+    ties: Ties = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
@@ -98,6 +101,7 @@ class TemplateHeader(BaseModel):
             raise ValueError("標頭的固定材料摘要要恰好是准用清單裡每一個 fixed:<代號> 各一個")
         if any(face not in ids or face in self.fixed_surfaces for face in self.allowed_targets):
             raise ValueError("准用清單的面要在起點配置裡、而且不是固定面")
+        check_ties_in_surfaces(self.ties, [name for name in ids if name not in self.fixed_surfaces], "起點配置可換")
         return self
 
 
