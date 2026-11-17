@@ -321,6 +321,13 @@ def test_pair_gives_one_set_of_candidates_and_jumps_together() -> None:
     assert _paired(jumped) and jumped[0] == 0.1 and jumped[2] == 0.05
     alone = loop.apply_candidate(theta, tied[1], designs, ties=TIES)
     assert _paired(alone) and alone[2] == 0.1 and alone[0] == 0.05
+    # 跳厚一格會擠到空腔的起點（厚 0.1、空腔 0.15、總深度上限 0.3）：空腔的位移也是兩片都填，預測變化兩片都算。
+    deep = np.asarray([0.1, 0.15] * 3)
+    steep = np.asarray([-3.0, 1.0, -1.0, 0.0, -5.0, 2.0])
+    squeezed = loop.candidates_from_gradient(deep, steep, designs, settings, ties=TIES)[0]
+    assert squeezed.candidate_id == "y0@a:thicker" and squeezed.delta[1] == squeezed.delta[5] < 0.0
+    assert squeezed.predicted_change == float(np.dot(steep, np.asarray(squeezed.delta)))
+    assert _paired(loop.apply_candidate(deep, squeezed, designs, ties=TIES))
 
 
 def test_round_budget_counts_units_not_surfaces() -> None:
@@ -376,9 +383,15 @@ def test_invariant_stops_descent_and_retune_that_start_one_ulp_apart() -> None:
         search.projected_descent(objective, _one_ulp_off(_start()), search.design_bounds(designs), _settings().descent,
                                  limits=search.depth_limits(designs), tied_cells=CELLS)
     feasible = search.snap_to_specs(_start(), designs).theta
-    with pytest.raises(TieBroken, match="成對"):
+    with pytest.raises(TieBroken, match="空腔重調起點：成對的 y0@a.layer2.thickness_m 與 yL@a.layer2.thickness_m"):
         search.retune_cavities(objective, _one_ulp_off(feasible), designs, _settings(), ties=TIES)
     search.retune_cavities(objective, _one_ulp_off(feasible), designs, _settings())
+    # 起點相等、上界不同的兩格硬綁在一起：走到被各自的界夾成不相等的那一步要擋下來（不是只查起點）。
+    lower, upper = np.zeros(6), np.asarray([1.0, 1.0, 1.0, 1.0, 0.06, 1.0])
+    climb = _quadratic((1.0,) * 6, (0.5,) * 6, cross=0.0)
+    with pytest.raises(TieBroken, match="下降第 [0-9]+ 步：成對的 θ 第 0 格與第 4 格不相等"):
+        search.projected_descent(climb, np.full(6, 0.05, dtype=np.float32), (lower, upper), _settings().descent,
+                                 limits=(), tied_cells=((0, 4),))
 
 
 def test_invariant_stops_snap_jump_and_swap() -> None:
@@ -398,6 +411,24 @@ def test_invariant_stops_snap_jump_and_swap() -> None:
     with pytest.raises(TieBroken, match="換樣板"):
         rounds.swap(designs, broken, "y0@b", "glass_wool_96k", _context(TIES))
     rounds.swap(designs, broken, "y0@b", "glass_wool_96k", _context(()))
+
+
+def test_template_round_counts_units_and_checks_its_start() -> None:
+    """抓換樣板那一輪自己的數目照片數算、進來時沒檢查：不給預算（不求值）時，最壞求值數照單位；起點成對差一個
+    最小浮點單位就在算數目之前拋錯。"""
+    from aosr.gradient.ties import TieBroken
+
+    def never(_: jax.Array) -> tuple[jax.Array, GradientObjectiveArrays]:
+        raise AssertionError("這一題不該求值")
+
+    designs, settings = probe.designs(), probe.settings()
+    segment = 1 + settings.retune.steps * _trials(settings)
+    zeros = (0.0,) * len(search.COMPONENT_NAMES)
+    point = rounds.TemplatePoint(designs, _snapped(), 0.0, 0.0, zeros)
+    assert rounds.template_round(never, point, _context(TIES), budget_left=0).bound == 6 + 3 * segment
+    assert rounds.template_round(never, point, _context(()), budget_left=0).bound == 9 + 3 * segment
+    with pytest.raises(TieBroken, match="換樣板這一輪的起點"):
+        rounds.template_round(never, point._replace(theta=_one_ulp_off(_snapped())), _context(TIES), budget_left=0)
 
 
 def test_invariant_stops_a_round_that_starts_one_ulp_apart() -> None:
@@ -469,10 +500,21 @@ def _command_line_start(folder: Path, model: ReducedModel, request: pytest.Fixtu
                            *arguments], env=forward_cpu_pins(_env(folder)), capture_output=True, text=True, timeout=120)
 
 
+def _rebuilt(folder: Path) -> Record:
+    """在雙精度子行程照 ``project.json`` 重建問題（工人開跑與接續都走的 ``run.load_problem``），回它記下的綁定表或拒收字句。"""
+    from tests.engine.test_material_gradient_cli import _env
+
+    done = subprocess.run([sys.executable, "-m", "tests.engine._material_gradient_carryover_probe", "problem", str(folder)],
+                          env=forward_cpu_pins(_env(folder)), capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    return cast(Record, json.loads((folder / "problem.json").read_text(encoding="utf-8")))
+
+
 def test_command_line_start_carries_the_tie_into_project_and_folder_name(
         model: ReducedModel, request: pytest.FixtureRequest, tmp_path: Path) -> None:
-    """抓旗標收了卻沒接到開跑：真的開跑一次，綁定表要進 ``project.json``、資料夾名要跟不綁的不同、讀回重算得出同一個名；
-    成對兩片起跑樣板不同時，真的命令列非零離開、點名、不留資料夾內容。"""
+    """抓旗標收了卻沒接到開跑：真的開跑一次，綁定表要進 ``project.json``、資料夾名要跟不綁的不同；照 ``project.json`` 重建問題
+    （工人走的那一支）時帳本標頭與換樣板那一側都拿得到同一張表，``project.json`` 被改成樣板不同的一對就點名拒收；
+    成對兩片起跑樣板不同時，真的命令列非零離開、點名、不留 ``project.json``。"""
     plain = _command_line_start(tmp_path / "plain", model, request)
     tied = _command_line_start(tmp_path / "tied", model, request, "x0=floor")
     assert plain.returncode == 0 and tied.returncode == 0, plain.stderr + tied.stderr
@@ -480,6 +522,11 @@ def test_command_line_start_carries_the_tie_into_project_and_folder_name(
     assert before.ties == () and "ties" not in json.loads((tmp_path / "plain" / run.PROJECT_FILE).read_bytes())
     assert after.ties == (("floor", "x0"),) and after.gradient_id != before.gradient_id
     assert json.loads((tmp_path / "tied" / run.PROJECT_FILE).read_bytes())["ties"] == [["floor", "x0"]]
+    assert _rebuilt(tmp_path / "tied") == {"header": [["floor", "x0"]], "templates": [["floor", "x0"]]}
+    assert _rebuilt(tmp_path / "plain") == {"header": [], "templates": []}
+    document = json.loads((tmp_path / "tied" / run.PROJECT_FILE).read_bytes())
+    (tmp_path / "tied" / run.PROJECT_FILE).write_text(json.dumps({**document, "ties": [["x0", "xL"]]}), encoding="utf-8")
+    assert "綁定 x0=xL：起跑樣板不同" in str(_rebuilt(tmp_path / "tied")["error"])
     refused = _command_line_start(tmp_path / "refused", model, request, "x0=xL")
     assert refused.returncode != 0 and "綁定 x0=xL：起跑樣板不同" in refused.stderr
     assert not (tmp_path / "refused" / run.PROJECT_FILE).exists()
@@ -607,6 +654,12 @@ def test_template_replay_refuses_a_row_that_swaps_half_a_pair(runs: tuple[Path, 
     target.write_bytes(b"".join(source[:index]) + (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
     with pytest.raises(ValueError, match="不是起點配置只換那一個單位"):
         templates.read_template_ledger(target)
+    # 兩片都換了、但換成不同的樣板，也不是「一個單位一起換」。
+    other = json.loads(source[index])
+    other["surfaces"][position][1] = "glass_wool_24k_50mm"
+    target.write_bytes(b"".join(source[:index]) + (json.dumps(other, ensure_ascii=False) + "\n").encode("utf-8"))
+    with pytest.raises(ValueError, match="不是起點配置只換那一個單位"):
+        templates.read_template_ledger(target)
 
 
 def test_tampered_ledger_stops_the_resume_with_a_non_zero_exit_error(runs: tuple[Path, Record]) -> None:
@@ -615,4 +668,5 @@ def test_tampered_ledger_stops_the_resume_with_a_non_zero_exit_error(runs: tuple
     broken = cast(Record, runs[1]["broken"])
     assert broken["error"] == "TieBroken" and broken["is_value_error"] is False
     assert "yL@a" in str(broken["message"]) and "成對" in str(broken["message"])
+    assert str(broken["message"]).startswith("接續起點（帳本前段最後一列）")
     assert broken["ledger_unchanged"] is True and broken["result_written"] is False
