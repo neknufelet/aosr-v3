@@ -670,3 +670,54 @@ def test_tampered_ledger_stops_the_resume_with_a_non_zero_exit_error(runs: tuple
     assert "yL@a" in str(broken["message"]) and "成對" in str(broken["message"])
     assert str(broken["message"]).startswith("接續起點（帳本前段最後一列）")
     assert broken["ledger_unchanged"] is True and broken["result_written"] is False
+
+
+class _PastTheGate(Exception):
+    """終點那一題自己的記號：走過「結果檔要由帳本重建」那一道關、到了第一個要重算的地方。"""
+
+
+def test_endpoint_accepts_the_tied_ledgers_at_the_result_gate(runs: tuple[Path, Record],
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓終點那一側重建標頭時沒帶綁定表（綁過的搜尋跑終點會在 ``checked_result`` 被拒）：拿探針跑完的有綁那一場，
+    真的叫 ``endpoint_run.run_endpoint``，要走過 ``checked_result``、停在緊接著的 ``final_designs``（換成拋記號）。
+    真的照跑的：讀 ``project.json`` 與結果檔、起跑設計（``designs_for``）、``checked_result`` 整支（兩本帳重播、重建結果）。"""
+    from types import SimpleNamespace
+
+    from aosr.gradient import endpoint_run
+
+    folder = runs[0] / "tied"
+    before = {path.name: path.read_bytes() for path in folder.iterdir()}
+    scheme = SimpleNamespace(scene=SimpleNamespace(low_frequency_axis="search"))
+    operators = SimpleNamespace(mesh_hash="synthetic", physics_identity="synthetic")
+    given: list[Ties] = []
+
+    def header(model: object, designs: object, settings: object, *, objective_constants: object,
+               ties: Ties = ()) -> ledger.MaterialGradientHeader:
+        given.append(tuple(ties))
+        return probe.header(tuple(ties))
+
+    def reached(*args: object, **kwargs: object) -> None:
+        raise _PastTheGate
+
+    # 探針的搜尋是合成目標，沒有真的方案檔與替身檔：輸入檢查換成交回假方案（只帶終點要看的低頻軸）、假替身與探針的設定。
+    monkeypatch.setattr(endpoint_run, "check_inputs", lambda project, **_: (scheme, object(), probe.settings()))
+    # project.json 記的能力表路徑是假的；這兩份只會被交給下面換掉的那幾支。
+    monkeypatch.setattr(endpoint_run, "load_capabilities", lambda path: None)
+    monkeypatch.setattr(endpoint_run, "load_directivity_defaults", lambda path: None)
+    # 原牆本來從方案讀；這裡交探針自編的八片原牆（帳本標頭的原牆摘要就是用它算的）。
+    monkeypatch.setattr(endpoint_run, "scene_wall_materials", lambda scheme, **_: probe.kept_patches())
+    # 匯出完整模型是重計算；交一個只帶兩格身分的假貨，身分照 project.json 記的。
+    monkeypatch.setattr(endpoint_run, "export_operators", lambda scheme, **_: operators)
+    # 下面兩支核的是完整模型算子的摘要與座位順序，假算子沒有內容可核。
+    monkeypatch.setattr(endpoint_run, "check_operators_digest", lambda project, operators: None)
+    monkeypatch.setattr(endpoint_run, "_ordered_operators", lambda operators, model: operators)
+    # 評分常數要真的方案與替身才建得出來；這一題只需要它有 constants 這一格。
+    monkeypatch.setattr(endpoint_run, "scoring_context", lambda *args, **kwargs: SimpleNamespace(constants=None))
+    # 正式的標頭寫入端要真替身的身分三格；換成探針的標頭寫法，**綁定表照終點傳進來的那一份**——這一題考的就是這一格。
+    monkeypatch.setattr(endpoint_run, "header_for", header)
+    # checked_result 之後第一個呼叫；再往下就是終點的完整解。
+    monkeypatch.setattr(endpoint_run, "final_designs", reached)
+    with pytest.raises(_PastTheGate):
+        endpoint_run.run_endpoint(folder)
+    assert given == [TIES]
+    assert {path.name: path.read_bytes() for path in folder.iterdir()} == before
