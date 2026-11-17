@@ -147,7 +147,7 @@ def check_ties_hold(theta: ArrayLike, designs: Sequence[SurfaceDesign], ties: It
     """帶片代號的不變量檢查（取規格、候選跳點、換樣板、每一輪進來時用）；表是空的什麼都不做。"""
     pairs = tuple(ties)
     if pairs:
-        names = [name for design in designs for name in design.variables]
+        names = [f"{design.surface_id}.{name}" for design in designs for name in design.variables]
         check_tied_equal(theta, tied_cells(designs, pairs), where, names)
 
 
@@ -164,3 +164,20 @@ def tied_evaluator(evaluate: Callable[[Any], Any], cells: Cells) -> Callable[[An
         return output, gradient.at[firsts].set(mean).at[seconds].set(mean)
 
     return averaged
+
+
+def unit_offsets(designs: Sequence[SurfaceDesign],
+                 ties: Iterable[Sequence[str]]) -> tuple[dict[str, str], dict[str, list[int]]]:
+    """成對算一個單位：回（跟著走的片 → 出候選的那一片，每一片 → 它那個單位每一片的 θ 起始格號，自己在最前）。
+    表是空的時每一片自己就是一個單位。"""
+    offsets: dict[str, int] = {}
+    offset = 0
+    for design in designs:
+        offsets[design.surface_id] = offset
+        offset += len(design.variables)
+    pairs = tuple(ties)
+    followers = tie_followers(pairs, list(offsets)) if pairs else {}
+    units = {name: [start] for name, start in offsets.items()}
+    for follower, leader in followers.items():
+        units[leader].append(offsets[follower])
+    return followers, units

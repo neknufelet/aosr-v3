@@ -72,7 +72,7 @@ from aosr.gradient.fixed_surfaces import (
     expanded_allowed_targets, fixed_targets_of,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
-from aosr.gradient.ties import Ties, check_ties_against_start, checked_ties
+from aosr.gradient.ties import Ties, check_ties_against_start, checked_ties, tied_cells
 from aosr.gradient.material_gradient import (
     COMPONENT_NAMES, Unestimable, ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, check_stop, objective_reading,
     designs_from_presets, is_feasible,
@@ -699,7 +699,7 @@ def load_problem(project: GradientProject) -> GradientProblem:
     names = tuple(d.surface_id for d in designs)
     context = TemplateContext(settings, table, named_materials(kept),
                               objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, names),
-                              max_depths=project.max_depths, allowed=project_allowed(project, names))
+                              max_depths=project.max_depths, allowed=project_allowed(project, names), ties=project.ties)
     check_ties_against_start(project.ties, designs, context.allowed or {})
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings, objective_constants=six,
                                                                     ties=project.ties), kept, context)
@@ -752,11 +752,11 @@ def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | Non
     """連續下降、取規格、重調三段，各自整段算完才寫成一批；回重調完的可行 θ（逐位等於帳本前段最後一列）。"""
     designs, settings, objective, header = problem.designs, problem.settings, problem.objective, problem.header
     descent = projected_descent(objective, baseline_theta(designs), design_bounds(designs), settings.descent,
-                                limits=depth_limits(designs), should_stop=should_stop)
+                                limits=depth_limits(designs), should_stop=should_stop, tied_cells=tied_cells(designs, header.ties))
     if not descent.steps:
         raise Unestimable(descent.stop_reason)
     append_rows(path, header, descent_rows(descent, "descent", 0))
-    snapped = snap_to_specs(descent.theta, designs)
+    snapped = snap_to_specs(descent.theta, designs, header.ties)
     check_stop(should_stop)
     clock = time.perf_counter()
     (value, aux), _ = compiled_evaluator(objective)(jnp.asarray(snapped.theta))
@@ -765,7 +765,7 @@ def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | Non
     reading = objective_reading(aux)
     append_rows(path, header, (snap_row(snapped, float(value), reading.screening_total, reading.components,
                                         time.perf_counter() - clock, len(descent.steps)),))
-    retune = retune_cavities(objective, snapped.theta, designs, settings, should_stop=should_stop)
+    retune = retune_cavities(objective, snapped.theta, designs, settings, should_stop=should_stop, ties=header.ties)
     if not retune.steps:
         raise Unestimable("重調不可估：起點當不可行，不寫列")
     append_rows(path, header, descent_rows(retune, "retune", len(descent.steps) + 1))

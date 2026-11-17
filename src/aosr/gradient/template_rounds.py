@@ -38,6 +38,7 @@ from aosr.gradient.material_gradient import (
     ChainObjective, Components, DescentResult, FloatVector, StopCheck, SurfaceDesign, check_stop, checked_theta, compiled_evaluator, design_names, designs_from_presets, is_feasible, retune_cavities,
 )
 from aosr.gradient.material_gradient_loop import retune_evaluation_bound
+from aosr.gradient.ties import check_ties_hold, tie_followers
 from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.gradient.material_gradient import objective_reading, estimable, Unestimable
@@ -76,6 +77,8 @@ class TemplateContext(NamedTuple):
     # 每區准用清單（#1082 段 2-3b；面片代號 → 目標，已展開到面片）：列了的面只換到清單裡的目標，沒列的照舊。
     # 清單裡的 ``fixed:<代號>`` 要在 ``presets`` 裡有同名那一筆（:func:`aosr.materials.search_library.fixed_candidates`）。
     allowed: Mapping[str, tuple[str, ...]] | None = None
+    # 綁定表（#1206）：成對兩片算一個單位，一起換成同一個目標；空表時每一片自己一個單位。
+    ties: tuple[tuple[str, str], ...] = ()
 
 
 class TemplatePoint(NamedTuple):
@@ -171,17 +174,20 @@ def target_order(settings: MaterialGradientSettings) -> tuple[str, ...]:
 def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings,
                  fixed_surfaces: Mapping[str, str] | None = None,
                  allowed: Mapping[str, Sequence[str]] | None = None,
-                 max_depths: Mapping[str, float] | None = None) -> tuple[tuple[str, str], ...]:
+                 max_depths: Mapping[str, float] | None = None,
+                 ties: Sequence[tuple[str, str]] = ()) -> tuple[tuple[str, str], ...]:
     """每一面可換的（面代號, 目標）：沒有准用清單的面是所有家族扣掉它現在的、再加不貼（它現在不是不貼時）；
     有清單的面（``allowed``，面片代號 → 目標）是清單扣掉它現在的、照清單的存法順序。照面序、再照目標序。
 
     ``max_depths``（個案上限，同命令列的寫法，整面或面片）給了時，比那一面上限還深排不下的家族不列
     （#1082 段 2-4，那一組在那一面不可用）；每個家族都放得下時清單逐位跟沒給一樣。固定材料放不放得下在開跑前核
-    （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，放不下就拒收），這裡不再判。"""
+    （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，放不下就拒收），這裡不再判。
+    ``ties`` 是綁定表（#1206）：成對兩片算一個單位，只列面序在前那一片的目標（換的時候兩片一起換）。"""
     caps = expanded_max_depths(max_depths, tuple(surface_id for surface_id, _ in surfaces)) if max_depths else {}
+    followers = tie_followers(ties, [surface_id for surface_id, _ in surfaces]) if ties else {}
     found: list[tuple[str, str]] = []
     for surface_id, preset_id in surfaces:
-        if surface_id in (fixed_surfaces or {}):
+        if surface_id in (fixed_surfaces or {}) or surface_id in followers:
             continue
         current = target_of(preset_id, settings)
         targets = (allowed or {}).get(surface_id)
@@ -219,6 +225,8 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
 
     樣板有空氣層、家族卻沒寫空腔初值（或反過來）拒收；新 θ 要在盒界內、可行（:func:`is_feasible`），不然拒收。
     換成它現在的家族（或現在就不貼還換不貼）不是替換，拒收。
+    綁定表（#1206，``context.ties``）裡成對的片兩片一起換成同一個目標、同一組初值；要給面序在前的那一片，
+    換完整張表檢查一次成對逐位相等。
     """
     if surface_id in (context.fixed_surfaces or {}):
         raise ValueError(f"固定面 {surface_id} 不參與換樣板")
@@ -233,14 +241,19 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
     index = ids.index(surface_id)
     if target_of(surfaces[index][1], context.settings) == target:
         raise ValueError(f"面 {surface_id} 現在就是 {target}，換成自己不是替換")
-    new_surfaces = (*surfaces[:index], (surface_id, preset_for_target(target, context.settings)), *surfaces[index + 1:])
+    followers = tie_followers(context.ties, ids) if context.ties else {}
+    if surface_id in followers:
+        raise ValueError(f"面 {surface_id} 跟 {followers[surface_id]} 成對，換樣板要給 {followers[surface_id]}（兩片一起換）")
+    unit = [surface_id, *(name for name, leader in followers.items() if leader == surface_id)]
+    preset = preset_for_target(target, context.settings)
+    new_surfaces = tuple((name, preset if name in unit else old) for name, old in surfaces)
     new_designs = designs_for_surfaces(new_surfaces, context)
     dtype = values.dtype.type
     pieces: list[np.floating] = []
     offset = 0
     for old, new in zip(designs, new_designs, strict=True):
         size = len(old.variables)
-        if old.surface_id != surface_id:
+        if old.surface_id not in unit:
             pieces.extend(values[offset:offset + size])
         elif new.material is not None:
             family = context.settings.family_by_id(target)
@@ -254,17 +267,20 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
         offset += size
     new_theta = checked_theta(np.asarray(pieces, dtype=values.dtype), new_designs)
     if context.max_depths and new_designs[index].material is not None:
-        # 家族初值不改；只投影新換那一面，其他面的 θ 逐位照搬。
+        # 家族初值不改；只投影新換那一面（成對就兩片各投一次），其他面的 θ 逐位照搬。
         from aosr.gradient.material_gradient import depth_limits, design_bounds, project_to_limits, snap_to_specs
 
-        selected = (new_designs[index],)
-        start = sum(len(design.variables) for design in new_designs[:index])
-        stop = start + len(selected[0].variables)
-        lower, upper = design_bounds(selected)
-        new_theta[start:stop] = snap_to_specs(project_to_limits(new_theta[start:stop], lower.astype(values.dtype),
-                                                               upper.astype(values.dtype), depth_limits(selected)), selected).theta
+        for member in (ids.index(name) for name in unit):
+            selected = (new_designs[member],)
+            start = sum(len(design.variables) for design in new_designs[:member])
+            stop = start + len(selected[0].variables)
+            lower, upper = design_bounds(selected)
+            new_theta[start:stop] = snap_to_specs(project_to_limits(
+                new_theta[start:stop], lower.astype(values.dtype), upper.astype(values.dtype), depth_limits(selected)),
+                selected).theta
     if not is_feasible(new_theta, new_designs):
         raise ValueError(f"面 {surface_id} 換成 {target} 的初值不可行（厚度不是合法值或厚度＋空腔超過總深度上限）")
+    check_ties_hold(new_theta, new_designs, context.ties, "換樣板之後")
     return new_designs, new_theta
 
 
@@ -278,7 +294,7 @@ def quick_scores(point: TemplatePoint, context: TemplateContext, *,
     """
     found = []
     for surface_id, target in alternatives(surfaces_of(point.designs), context.settings, context.fixed_surfaces, context.allowed,
-                                           context.max_depths):
+                                           context.max_depths, context.ties):
         check_stop(should_stop)
         clock = time.perf_counter()
         designs, theta = swap(point.designs, point.theta, surface_id, target, context)
@@ -320,9 +336,9 @@ def template_round_bound(settings: MaterialGradientSettings, quick_count: int, r
 def next_round_bound(surfaces: Surfaces, settings: MaterialGradientSettings,
                      fixed_surfaces: Mapping[str, str] | None = None,
                      allowed: Mapping[str, Sequence[str]] | None = None,
-                     max_depths: Mapping[str, float] | None = None) -> int:
-    """這個配置開下一輪的最壞求值數（候選有沒有只看配置、准用清單與個案上限，不求值）。"""
-    count = len(alternatives(surfaces, settings, fixed_surfaces, allowed, max_depths))
+                     max_depths: Mapping[str, float] | None = None, ties: Sequence[tuple[str, str]] = ()) -> int:
+    """這個配置開下一輪的最壞求值數（候選有沒有只看配置、准用清單、個案上限與綁定表，不求值）。"""
+    count = len(alternatives(surfaces, settings, fixed_surfaces, allowed, max_depths, ties))
     return template_round_bound(settings, count, retune_count(settings, count))
 
 
@@ -342,7 +358,9 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     designs = checked_wall_designs(point.designs)
     if not is_feasible(point.theta, designs):
         raise ValueError("換樣板要從可行的整房配置開始")
-    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces, context.allowed, context.max_depths))
+    check_ties_hold(point.theta, designs, context.ties, "換樣板這一輪的起點")
+    count = len(alternatives(surfaces_of(designs), settings, context.fixed_surfaces, context.allowed, context.max_depths,
+                             context.ties))
     top = retune_count(settings, count)
     bound = template_round_bound(settings, count, top)
     if count == 0 or bound > budget_left:
@@ -350,7 +368,7 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
         return TemplateRoundResult(False, bound, (), None, (), None, point, objective, 0, 0.0, reason)
     clock = time.perf_counter()
     scores = quick_scores(point, context, should_stop=should_stop)
-    baseline = retune_cavities(objective, point.theta, designs, settings, should_stop=should_stop)
+    baseline = retune_cavities(objective, point.theta, designs, settings, should_stop=should_stop, ties=context.ties)
     if not baseline.steps:
         raise Unestimable("換樣板基準重調起點不可估")
     base_value = baseline.steps[-1].value
@@ -358,7 +376,7 @@ def template_round(objective: ChainObjective, point: TemplatePoint, context: Tem
     for score in ranked(scores, top):
         swapped, theta = swap(designs, point.theta, score.surface_id, score.target, context)
         candidate_objective = context.objective_for(swapped)
-        result = retune_cavities(candidate_objective, theta, swapped, settings, should_stop=should_stop)
+        result = retune_cavities(candidate_objective, theta, swapped, settings, should_stop=should_stop, ties=context.ties)
         value = result.steps[-1].value if result.steps else None
         retuned.append(RetunedTemplate(score, swapped, candidate_objective, result, value,
                                        None if value is None else base_value - value))

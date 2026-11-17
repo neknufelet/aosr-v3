@@ -113,7 +113,7 @@ def _stop(result: TemplateRoundResult, round_index: int, total: int, seconds: fl
     if seconds > limits.max_seconds:
         return TEMPLATE_STOP_MAX_SECONDS, None
     bound = next_round_bound(surfaces_of(result.point.designs), context.settings, context.fixed_surfaces, context.allowed,
-                             context.max_depths)
+                             context.max_depths, context.ties)
     if total + bound > limits.max_evaluations:
         return TEMPLATE_STOP_MAX_EVALUATIONS, bound
     return None, bound
