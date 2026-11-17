@@ -40,6 +40,7 @@ from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.surrogate_guard import require_matching_patches
+from aosr.gradient.ties import Cells, check_tied_equal, check_ties_hold, tied_cells, tied_evaluator
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters, variable_name
 from aosr.materials.construction_models import (
@@ -760,17 +761,19 @@ def descent_start(theta0: jax.Array | FloatVector, bounds: tuple[FloatVector, Fl
 def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
              bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
              max_steps: int, stop_on_gradient: bool, limits: Sequence[DepthLimit] = (),
-             should_stop: StopCheck | None = None) -> DescentResult:
+             should_stop: StopCheck | None = None, tied_cells: Cells = ()) -> DescentResult:
     start = descent_start(theta0, bounds, limits)
+    check_tied_equal(np.asarray(start), tied_cells, "下降起點")
     dtype = start.dtype
     lower = jnp.asarray(np.asarray(bounds[0]), dtype=dtype)
     upper = jnp.asarray(np.asarray(bounds[1]), dtype=dtype)
     limits = tuple(limits)
     lower_values, upper_values = np.asarray(lower), np.asarray(upper)
-    evaluate = compiled_evaluator(objective)
+    evaluate = tied_evaluator(compiled_evaluator(objective), tied_cells)
 
     def record(index: int, theta: jax.Array, value: jax.Array, aux: ObjectiveAux,
                gradient: jax.Array, step: float, seconds: float) -> DescentStep:
+        check_tied_equal(np.asarray(theta), tied_cells, f"下降第 {index} 步")
         return _descent_step(index, theta, value, aux, _projected_gradient_norm(theta, gradient, lower, upper, limits),
                              step, seconds)
 
@@ -822,7 +825,8 @@ def _descend(objective: ChainObjective, theta0: jax.Array | FloatVector,
 
 def projected_descent(objective: ChainObjective, theta0: jax.Array | FloatVector,
                       bounds: tuple[FloatVector, FloatVector], settings: DescentSettings, *,
-                      limits: Sequence[DepthLimit], should_stop: StopCheck | None = None) -> DescentResult:
+                      limits: Sequence[DepthLimit], should_stop: StopCheck | None = None,
+                      tied_cells: Cells = ()) -> DescentResult:
     """投影到「盒界 ∩ 每面厚度＋空腔 ≤ 總深度上限」的梯度下降＋回溯線搜尋（Armijo）。
 
     ``limits`` 一般是 :func:`depth_limits` 由設計清單算出來的；空的就只守盒界（合成目標的考卷用）。
@@ -832,9 +836,11 @@ def projected_descent(objective: ChainObjective, theta0: jax.Array | FloatVector
     「梯度夠小」；走滿 ``max_steps`` 停在「步數到上限」。值單調不增；同一起點重跑逐位相同（秒數除外）。
     取規格那一步照舊保留：厚度仍要取合法值，連續段只是不再跑到總深度外面。
     給了 ``should_stop`` 就在每次求值之前查一次，為真拋 :class:`SearchStopped`（這一段不交出結果）。
+    ``tied_cells``（#1206，:func:`aosr.gradient.ties.tied_cells`）是成對的 θ 格：那兩格的梯度換成兩格的平均，試探點、
+    預測降幅、投影梯度範數都用它；起點與每一步都檢查成對的格逐位相等，不等拋 ``TieBroken``。空的就跟沒有這一格一樣。
     """
     return _descend(objective, theta0, bounds, settings, max_steps=settings.max_steps, stop_on_gradient=True,
-                    limits=limits, should_stop=should_stop)
+                    limits=limits, should_stop=should_stop, tied_cells=tied_cells)
 
 
 # ---- 取規格與空腔重調 ----
@@ -852,12 +858,14 @@ def depth_room(max_total: np.floating, thickness: np.floating) -> np.floating:
     return _depth_room(max_total, thickness)
 
 
-def snap_to_specs(theta: jax.Array | FloatVector, designs: Sequence[SurfaceDesign]) -> SnapResult:
+def snap_to_specs(theta: jax.Array | FloatVector, designs: Sequence[SurfaceDesign],
+                  ties: Sequence[tuple[str, str]] = ()) -> SnapResult:
     """棉板厚度取可行的最近合法值，空腔維持連續、總深度上限在取規格時一起滿足。
 
     先取最近（一樣近取較薄）；「厚度＋空腔」超過那面的總深度上限就把空腔切到上限減厚度；
     空腔切到下界仍超過（或沒有空腔層、厚度本身就超過）就退到下一個較薄的合法厚度。
     不是各面各自取最近就交付：取完之後由 :func:`retune_cavities` 聯合重調空腔。
+    ``ties`` 是綁定表（#1206）：取完之後成對兩片的格要逐位相等，不等拋 ``TieBroken``。
     """
     values = checked_theta(theta, designs).copy()
     dtype = values.dtype.type
@@ -890,6 +898,7 @@ def snap_to_specs(theta: jax.Array | FloatVector, designs: Sequence[SurfaceDesig
             design.surface_id, float(legal[nearest]), float(legal[chosen]),
             float(new_cavity) if has_cavity else None, bool(has_cavity and new_cavity < cavity), chosen != nearest))
         offset += len(design.variables)
+    check_ties_hold(values, designs, ties, "取規格之後")
     return SnapResult(values, tuple(choices))
 
 
@@ -932,14 +941,16 @@ def retune_bounds(theta_feasible: jax.Array | FloatVector,
 
 def retune_cavities(objective: ChainObjective, theta_feasible: jax.Array | FloatVector,
                     designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
-                    should_stop: StopCheck | None = None) -> DescentResult:
+                    should_stop: StopCheck | None = None, ties: Sequence[tuple[str, str]] = ()) -> DescentResult:
     """厚度固定在規格、所有面的空腔一起走同一個投影下降，**最多** ``[retune].steps`` 步。
 
     不因梯度小提早停；線搜尋退到步長下限仍沒過就不走這一步、停在「步長到下限」（起點就不可下降時是 0 步、
     θ 原樣），停止原因與最後一次試的步長都交回、進帳本；走滿上限停在「步數到上限」。不硬湊步數。
     厚度的上下界相等，投影把它釘回原值、逐位不變；空腔上界收在總深度內，所以每一步都可行。
-    ``should_stop`` 同 :func:`projected_descent`：每次求值之前查一次。
+    ``should_stop`` 同 :func:`projected_descent`：每次求值之前查一次。``ties`` 是綁定表（#1206）：成對兩片的空腔用平均梯度
+    一起走，進來時與每一步都檢查逐位相等。
     """
     bounds = retune_bounds(theta_feasible, designs)
-    return _descend(objective, np.asarray(theta_feasible), bounds, settings.descent,
-                    max_steps=settings.retune.steps, stop_on_gradient=False, should_stop=should_stop)
+    check_ties_hold(np.asarray(theta_feasible), designs, ties, "空腔重調起點")
+    return _descend(objective, np.asarray(theta_feasible), bounds, settings.descent, max_steps=settings.retune.steps,
+                    stop_on_gradient=False, should_stop=should_stop, tied_cells=tied_cells(designs, ties))

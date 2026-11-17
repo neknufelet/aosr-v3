@@ -9,9 +9,11 @@
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Annotated, Any
 
+import numpy as np
+from numpy.typing import ArrayLike
 from pydantic import AfterValidator
 
 from aosr.gradient.boundary import patch_key
@@ -101,3 +103,64 @@ def tie_followers(ties: Iterable[Sequence[str]], names: Sequence[str]) -> dict[s
         leader, follower = sorted(pair, key=lambda name: order[name])
         found[follower] = leader
     return found
+
+
+# ---- θ 那一側：哪幾格成對、平均梯度、不變量 ----
+
+Cells = tuple[tuple[int, int], ...]
+
+
+class TieBroken(RuntimeError):
+    """成對的兩格 θ 不是逐位相等：搜尋不變量壞了。刻意不是 ``ValueError``——不准被當成「輸入不合」吞掉或改道。"""
+
+
+def tied_cells(designs: Sequence[SurfaceDesign], ties: Iterable[Sequence[str]]) -> Cells:
+    """成對兩片的 θ 格號（面序在前的那一片在前）：厚度配厚度、空腔配空腔。沒有 θ 格的片（不貼）不出格。"""
+    first_cell: dict[str, tuple[int, int]] = {}
+    offset = 0
+    for design in designs:
+        first_cell[design.surface_id] = (offset, len(design.variables))
+        offset += len(design.variables)
+    cells: list[tuple[int, int]] = []
+    for follower, leader in tie_followers(ties, list(first_cell)).items():
+        (mine, count), (theirs, other) = first_cell[leader], first_cell[follower]
+        if count != other:
+            raise TieBroken(f"成對的 {leader} 與 {follower} 的 θ 格數不同（{count} 對 {other}）：兩片不是同一個樣板")
+        cells.extend((mine + index, theirs + index) for index in range(count))
+    return tuple(sorted(cells))
+
+
+def check_tied_equal(theta: ArrayLike, cells: Cells, where: str, names: Sequence[str] = ()) -> None:
+    """不變量的唯一咽喉點：成對的格要逐位相等（比位元組，不是比數值），不等就拋 :class:`TieBroken`。"""
+    if not cells:
+        return
+    values = np.asarray(theta)
+    for first, second in cells:
+        if values[first].tobytes() != values[second].tobytes():
+            label = f"{names[first]} 與 {names[second]}" if len(names) else f"θ 第 {first} 格與第 {second} 格"
+            raise TieBroken(f"{where}：成對的 {label}不相等（{float(values[first]).hex()} 對 "
+                            f"{float(values[second]).hex()}）；成對兩片每一步都要逐位相等，這一場不能再往下跑")
+
+
+def check_ties_hold(theta: ArrayLike, designs: Sequence[SurfaceDesign], ties: Iterable[Sequence[str]],
+                    where: str) -> None:
+    """帶片代號的不變量檢查（取規格、候選跳點、換樣板、每一輪進來時用）；表是空的什麼都不做。"""
+    pairs = tuple(ties)
+    if pairs:
+        names = [name for design in designs for name in design.variables]
+        check_tied_equal(theta, tied_cells(designs, pairs), where, names)
+
+
+def tied_evaluator(evaluate: Callable[[Any], Any], cells: Cells) -> Callable[[Any], Any]:
+    """把求值器包一層：成對兩格的梯度換成兩格的**平均**（把梯度投到「兩格相等」的子空間；不是相加——相加是共用一格的
+    鏈鎖律，在各片保留自己那一格的這裡會讓步長變兩倍）。沒有成對的格就原樣交回，不多一層。"""
+    if not cells:
+        return evaluate
+    firsts, seconds = np.asarray([cell[0] for cell in cells]), np.asarray([cell[1] for cell in cells])
+
+    def averaged(theta: Any) -> Any:
+        output, gradient = evaluate(theta)
+        mean = (gradient[firsts] + gradient[seconds]) / 2
+        return output, gradient.at[firsts].set(mean).at[seconds].set(mean)
+
+    return averaged

@@ -368,7 +368,7 @@ def test_invariant_stops_descent_and_retune_that_start_one_ulp_apart() -> None:
 
     designs, objective = probe.designs(), _quadratic(*LOPSIDED, cross=0.0)
     assert not issubclass(TieBroken, ValueError)
-    with pytest.raises(TieBroken, match="yL@a"):
+    with pytest.raises(TieBroken, match="下降起點：成對的 θ 第 1 格與第 5 格不相等"):
         search.projected_descent(objective, _one_ulp_off(_start()), search.design_bounds(designs), _settings().descent,
                                  limits=search.depth_limits(designs), tied_cells=CELLS)
     feasible = search.snap_to_specs(_start(), designs).theta
