@@ -35,7 +35,7 @@ from aosr.gradient import material_gradient_ledger as ledger
 from aosr.gradient import material_gradient_loop as loop
 from aosr.gradient import run
 from aosr.gradient import template_rounds as rounds
-from aosr.gradient.boundary import named_materials, partition_identity, patch_key
+from aosr.gradient.boundary import BoundaryKey, named_materials, partition_identity, patch_key
 from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.fem_reduced_boundary import PatchKey
@@ -130,29 +130,26 @@ def _factory(kind: str) -> rounds.ObjectiveFactory:
 
 
 def identity(ties: Ties = ()) -> str:
-    """純字串輸入的資料夾名；沒有綁定表時不帶那個引數（主線上原樣叫得動）。"""
-    extra: Record = {"ties": ties} if ties else {}
+    """純字串輸入的資料夾名；空表也明寫 ``ties=()``（開跑的命令列就是這樣叫），要跟沒有這個引數同一個名。"""
     return run.gradient_id(scheme_sha256="a" * 64, surrogate_manifest_sha256="b" * 64, presets=PRESETS, purpose="music",
                            settings_fingerprint=settings().fingerprint, physics_identity="synthetic",
                            objective_settings_fingerprint="d" * 64, fixed_surfaces=FIXED,
-                           patch_keys=tuple(patch_key(name) for name in NAMES), **extra)  # type: ignore[arg-type]
+                           patch_keys=tuple(patch_key(name) for name in NAMES), ties=ties)
 
 
 def project(ties: Ties = ()) -> run.GradientProject:
-    extra: Record = {"ties": ties} if ties else {}
     return run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity(ties), scheme_path="/s", scheme_sha256="a" * 64,
         surrogate_path="/m", surrogate_manifest_sha256="b" * 64, receipt_path="/r", receipt_sha256="f" * 64,
         presets=PRESETS, purpose="music", settings_path="/t", settings_fingerprint=settings().fingerprint,
         capabilities_path="/c", physics_identity="synthetic", mesh_hash="synthetic", source_points={},
         receiver_points={}, engine_commit=None, started_at="2026-11-17T00:00:00+00:00",
-        objective_settings_fingerprint="d" * 64, fixed_surfaces=FIXED, **extra)  # type: ignore[arg-type]
+        objective_settings_fingerprint="d" * 64, fixed_surfaces=FIXED, ties=ties)
 
 
 def header(ties: Ties = ()) -> ledger.MaterialGradientHeader:
     """合成目標沒有替身：身分三格與評分指紋填固定字樣，其他照設計清單；分數常數配合成目標的分項。"""
     made = designs()
-    extra: Record = {"ties": ties} if ties else {}
     return ledger.MaterialGradientHeader(
         ledger_version=ledger.LEDGER_VERSION, input_hash="synthetic", mesh_hash="synthetic",
         physics_identity="synthetic", surfaces=tuple((design.surface_id, design.preset_id) for design in made),
@@ -161,16 +158,15 @@ def header(ties: Ties = ()) -> ledger.MaterialGradientHeader:
         kept_digests=ledger._kept_digests(made), score_constants=SYNTHETIC_SCORES,
         fixed_surfaces={design.surface_id: design.fixed_material_id for design in made
                         if design.fixed_material_id is not None},
-        boundary_patches=partition_identity(tuple(patch_key(name) for name in NAMES)), **extra)  # type: ignore[arg-type]
+        boundary_patches=partition_identity(tuple(patch_key(name) for name in NAMES)), ties=ties)
 
 
 def problem(kind: str, ties: Ties = ()) -> run.GradientProblem:
     made, setting, kept, factory = designs(), settings(), kept_patches(), _factory(kind)
-    extra: Record = {"ties": ties} if ties else {}
     context = rounds.TemplateContext(setting, run.presets_table(), named_materials(kept), factory,
-                                     fixed_surfaces=expanded_fixed_surfaces(FIXED, NAMES), max_depths={},
-                                     **extra)  # type: ignore[arg-type]
-    return run.GradientProblem(made, setting, factory(made), header(ties), kept, context)
+                                     fixed_surfaces=expanded_fixed_surfaces(FIXED, NAMES), max_depths={}, ties=ties)
+    wide: dict[BoundaryKey, SurfaceMaterial] = {key: material for key, material in kept.items()}
+    return run.GradientProblem(made, setting, factory(made), header(ties), wide, context)
 
 
 def _search(folder: Path, case: run.GradientProblem, ties: Ties) -> None:
@@ -243,7 +239,7 @@ def _broken(directory: Path, case: run.GradientProblem) -> Record:
 def main(argv: list[str]) -> int:
     directory, parts = Path(argv[0]), argv[1:]
     for module in (gradient_search, loop, rounds, run):
-        module.time = _Clock  # type: ignore[attr-defined]
+        setattr(module, "time", _Clock)
     output: Record = {}
     for part in parts:
         ties = TIES if part == "tied" else ()

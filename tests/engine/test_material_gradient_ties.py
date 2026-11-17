@@ -12,13 +12,15 @@
 """
 from __future__ import annotations
 
+import argparse
 import dataclasses
+import functools
 import hashlib
 import json
 import math
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -37,11 +39,13 @@ from aosr.gradient import template_ledger as templates
 from aosr.gradient import template_rounds as rounds
 from aosr.gradient.fixed_surfaces import designs_with_max_depths, expanded_fixed_surfaces
 from aosr.materials.construction_models import ConstantImpedance
+from aosr.physics.fem_reduced import ReducedModel
 from aosr.runtime import child_process_env, configure_jax
 from aosr.scoring.gradient_objective_jax import GradientObjectiveArrays
 from tests.engine import _material_gradient_ties_probe as probe
 from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._scheme_cache import shared_json
+from tests.engine._six_search_cli_case import model as model, operators as operators
 
 Record = dict[str, object]
 Ties = tuple[tuple[str, str], ...]
@@ -92,20 +96,18 @@ def _start() -> NDArray[np.float32]:
 
 def _descend(objective: search.ChainObjective, cells: Sequence[tuple[int, int]]) -> search.DescentResult:
     designs = probe.designs()
-    extra: Record = {"tied_cells": cells} if cells else {}
     return search.projected_descent(objective, _start(), search.design_bounds(designs), _settings().descent,
-                                    limits=search.depth_limits(designs), **extra)  # type: ignore[arg-type]
+                                    limits=search.depth_limits(designs), tied_cells=tuple(cells))
 
 
 def _snap_and_retune(objective: search.ChainObjective, theta: NDArray[np.float32],
                      ties: Ties) -> tuple[search.SnapResult, search.DescentResult]:
     designs = probe.designs()
-    extra: Record = {"ties": ties} if ties else {}
-    snapped = search.snap_to_specs(theta, designs, **extra)  # type: ignore[arg-type]
-    return snapped, search.retune_cavities(objective, snapped.theta, designs, _settings(), **extra)  # type: ignore[arg-type]
+    snapped = search.snap_to_specs(theta, designs, ties)
+    return snapped, search.retune_cavities(objective, snapped.theta, designs, _settings(), ties=ties)
 
 
-def _paired(theta: Sequence[float]) -> bool:
+def _paired(theta: Sequence[float] | NDArray[np.floating]) -> bool:
     """成對的格逐位相等（比 float.hex，+0 與 −0 也分得出來）。"""
     return all(float(theta[first]).hex() == float(theta[second]).hex() for first, second in CELLS)
 
@@ -201,8 +203,8 @@ def _refused(ties: Ties, designs: Sequence[search.SurfaceDesign],
 
 
 def _changed(name: str, **changes: object) -> tuple[search.SurfaceDesign, ...]:
-    return tuple(dataclasses.replace(design, **changes) if design.surface_id == name else design  # type: ignore[arg-type]
-                 for design in probe.designs())
+    replace = cast(Callable[..., search.SurfaceDesign], dataclasses.replace)
+    return tuple(replace(design, **changes) if design.surface_id == name else design for design in probe.designs())
 
 
 def test_matching_pair_is_accepted_and_stored_in_one_order() -> None:
@@ -270,7 +272,8 @@ def test_command_line_takes_the_tie_flag_and_refuses_before_loading_anything(tmp
     parser = cli._parser()
     arguments = ["start", "--scheme", str(tmp_path / "none.json"), "--surrogate", str(tmp_path / "none.npz"),
                  "--presets", ",".join(["none"] * 6), "--purpose", "music", "--root", str(tmp_path / "root")]
-    start = next(action for action in parser._actions if isinstance(action.choices, dict)).choices["start"]
+    start = next(cast(dict[str, argparse.ArgumentParser], action.choices)["start"] for action in parser._actions
+                 if isinstance(action.choices, dict))
     assert "--tie" in start.format_help() and "成對" in start.format_help()
     assert parser.parse_args(arguments).tie == []
     args = parser.parse_args([*arguments, "--tie", "y0@a=yL@a", "--tie", "y0@a=y0@b"])
@@ -293,11 +296,12 @@ def test_start_designs_refuses_a_mismatched_tie() -> None:
                                                                       directivity=DIRECTIVITY)))]
     first, second = names[1], names[2]
     presets = tuple(GAP50 if name == first else "glass_wool_24k_50mm" if name == second else None for name in names)
-    given = dict(mount="rigid", fixed={}, caps={}, allowed={}, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    start = functools.partial(cli.start_designs, scheme, probe.settings(), run.presets_table(), mount="rigid", fixed={},
+                              caps={}, allowed={}, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
     with pytest.raises(ValueError, match=f"綁定 {first}={second}：家族不同"):
-        cli.start_designs(scheme, probe.settings(), run.presets_table(), presets, ties=((first, second),), **given)
+        start(presets, ties=((first, second),))
     same = tuple(GAP50 if name in (first, second) else None for name in names)
-    cli.start_designs(scheme, probe.settings(), run.presets_table(), same, ties=((first, second),), **given)
+    start(same, ties=((first, second),))
 
 
 # ---- 5 成對算一個單位：候選、跳點、換樣板、預算 ----
@@ -412,7 +416,7 @@ def test_invariant_stops_a_round_that_starts_one_ulp_apart() -> None:
 
 def test_ties_enter_identity_and_both_headers_only_when_given() -> None:
     """抓綁定表沒進身分（綁與不綁撞同一個資料夾）、空表也寫鍵。"""
-    assert probe.identity() == MAIN_PLAIN_ID
+    assert probe.identity() == probe.identity(()) == MAIN_PLAIN_ID
     assert probe.identity(TIES) != MAIN_PLAIN_ID
     plain, tied = probe.header(), probe.header(TIES)
     assert "ties" not in plain.model_dump(mode="json") and tied.model_dump(mode="json")["ties"] == [["y0@a", "yL@a"]]
@@ -442,6 +446,43 @@ def test_real_header_writer_takes_ties() -> None:
                              ties=(("x0", "xL"),))
     assert tied.ties == (("x0", "xL"),) and plain.ties == ()
     assert tied.model_copy(update={"ties": ()}) == plain
+
+
+# ---- 真的命令列開跑（截在建搜尋之前） ----
+
+def _command_line_start(folder: Path, model: ReducedModel, request: pytest.FixtureRequest,
+                        *ties: str) -> subprocess.CompletedProcess[str]:
+    """照替身沿用考卷的寫法走真的 ``cli.main(["start", …])``：自編小房間的替身與收據，寫完 ``project.json`` 就停。
+    六面起跑樣板是 地板、x0 兩面同一個（帶空腔的 48K），xL 是不帶空腔的 48K。"""
+    from aosr.physics import fem_reduced_store as store
+    from aosr.physics.fem_reduced_receipt import save_validation_receipt
+    from tests.engine.test_material_gradient import _chain_model
+    from tests.engine.test_material_gradient_cli import _env, _good_report, _schemes
+
+    chain = _chain_model(model)
+    folder.mkdir()
+    (folder / "scheme.json").write_text(_schemes()["scheme.json"].model_dump_json(), encoding="utf-8")
+    store.save_reduced(chain, folder / "rom.npz")
+    save_validation_receipt(folder / "rom.npz", _good_report(request, chain), rulers=run.holdout_rulers(), seconds=1.0)
+    arguments = [item for tie in ties for item in ("--tie", tie)]
+    return subprocess.run([sys.executable, "-m", "tests.engine._material_gradient_carryover_probe", "same", str(folder),
+                           *arguments], env=forward_cpu_pins(_env(folder)), capture_output=True, text=True, timeout=120)
+
+
+def test_command_line_start_carries_the_tie_into_project_and_folder_name(
+        model: ReducedModel, request: pytest.FixtureRequest, tmp_path: Path) -> None:
+    """抓旗標收了卻沒接到開跑：真的開跑一次，綁定表要進 ``project.json``、資料夾名要跟不綁的不同、讀回重算得出同一個名；
+    成對兩片起跑樣板不同時，真的命令列非零離開、點名、不留資料夾內容。"""
+    plain = _command_line_start(tmp_path / "plain", model, request)
+    tied = _command_line_start(tmp_path / "tied", model, request, "x0=floor")
+    assert plain.returncode == 0 and tied.returncode == 0, plain.stderr + tied.stderr
+    before, after = run.read_project(tmp_path / "plain"), run.read_project(tmp_path / "tied")
+    assert before.ties == () and "ties" not in json.loads((tmp_path / "plain" / run.PROJECT_FILE).read_bytes())
+    assert after.ties == (("floor", "x0"),) and after.gradient_id != before.gradient_id
+    assert json.loads((tmp_path / "tied" / run.PROJECT_FILE).read_bytes())["ties"] == [["floor", "x0"]]
+    refused = _command_line_start(tmp_path / "refused", model, request, "x0=xL")
+    assert refused.returncode != 0 and "綁定 x0=xL：起跑樣板不同" in refused.stderr
+    assert not (tmp_path / "refused" / run.PROJECT_FILE).exists()
 
 
 # ---- 雙精度子行程：整條產品路徑 ----

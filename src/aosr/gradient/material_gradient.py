@@ -40,7 +40,7 @@ from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.surrogate_guard import require_matching_patches
-from aosr.gradient.ties import Cells, check_tied_equal, check_ties_hold, tied_cells, tied_evaluator
+from aosr.gradient.ties import Cells, check_tied_equal, check_ties_hold, tied_cells
 from aosr.materials.construction import surface_impedance
 from aosr.materials.construction_diff import ConstructionTemplate, build_template, surface_impedance_from_parameters, variable_name
 from aosr.materials.construction_models import (
@@ -726,6 +726,22 @@ def _projected_gradient_norm(theta: jax.Array, gradient: jax.Array, lower: jax.A
         descent = -np.asarray(raw[indices], dtype=np.float64)
         adjusted[indices] = -_cone_projection(descent, normals)
     return float(jnp.linalg.norm(jnp.asarray(adjusted)))
+
+
+def tied_evaluator(evaluate: Evaluator, cells: Cells) -> Evaluator:
+    """把求值器包一層（#1206）：成對兩格的梯度換成兩格的**平均**（把梯度投到「兩格相等」的子空間；不是相加——相加是
+    共用一格的鏈鎖律，在各片保留自己那一格的這裡會讓步長變兩倍）。沒有成對的格就原樣交回，不多一層。"""
+    if not cells:
+        return evaluate
+    firsts, seconds = np.asarray([cell[0] for cell in cells]), np.asarray([cell[1] for cell in cells])
+
+    def averaged(theta: jax.Array) -> tuple[tuple[jax.Array, ObjectiveAux], jax.Array]:
+        output, raw = evaluate(theta)
+        gradient = jnp.asarray(raw)
+        mean = (gradient[firsts] + gradient[seconds]) / 2
+        return output, gradient.at[firsts].set(mean).at[seconds].set(mean)
+
+    return averaged
 
 
 def _descent_step(index: int, theta: jax.Array, value: jax.Array, aux: ObjectiveAux, gradient_norm: float,

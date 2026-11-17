@@ -5,12 +5,12 @@
 成對的兩片算一個單位，代表是**面序在前**的那一片（設計清單的順序；候選代號、換樣板代號都用它）。
 
 存檔缺這一欄一律是「不綁」：預設值只准是空表，「預設打開」是網頁算新計畫那一層的事，不住在任何存檔模型裡。
-這支檔不載入 JAX（陣列運算只用傳進來的陣列自己的方法與 numpy），網頁行程也讀得了。
+這支檔不載入 JAX（只用 numpy），網頁行程也讀得了；梯度取平均那一支住 ``material_gradient.tied_evaluator``。
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, Any
+from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Annotated
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -149,21 +149,6 @@ def check_ties_hold(theta: ArrayLike, designs: Sequence[SurfaceDesign], ties: It
     if pairs:
         names = [f"{design.surface_id}.{name}" for design in designs for name in design.variables]
         check_tied_equal(theta, tied_cells(designs, pairs), where, names)
-
-
-def tied_evaluator(evaluate: Callable[[Any], Any], cells: Cells) -> Callable[[Any], Any]:
-    """把求值器包一層：成對兩格的梯度換成兩格的**平均**（把梯度投到「兩格相等」的子空間；不是相加——相加是共用一格的
-    鏈鎖律，在各片保留自己那一格的這裡會讓步長變兩倍）。沒有成對的格就原樣交回，不多一層。"""
-    if not cells:
-        return evaluate
-    firsts, seconds = np.asarray([cell[0] for cell in cells]), np.asarray([cell[1] for cell in cells])
-
-    def averaged(theta: Any) -> Any:
-        output, gradient = evaluate(theta)
-        mean = (gradient[firsts] + gradient[seconds]) / 2
-        return output, gradient.at[firsts].set(mean).at[seconds].set(mean)
-
-    return averaged
 
 
 def unit_offsets(designs: Sequence[SurfaceDesign],
