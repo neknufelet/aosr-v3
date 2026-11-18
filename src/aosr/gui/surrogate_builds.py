@@ -256,7 +256,8 @@ class SurrogateBuilds:
         text, scheme, design = self.jobs.inputs(scheme_id)
         if scheme.scene.low_frequency_axis is None:
             raise PlanRefused("方案場景沒有低頻軸（low_frequency_axis），搜尋開跑會拒收，不建替身")
-        plan, _, entries = self.jobs.plan(scheme, design, search or GradientRequest())
+        # 建替身只看准用清單與起跑配置的參數，不需要配對（#1206：綁定不進 configuration_arguments）。
+        plan, _, entries = self.jobs.plan(scheme, design, search or GradientRequest(), pair=False)
         return (text, slot_dir(self.data_dir, scheme), slot_key(scheme), entries, plan.allowed,
                 configuration_arguments(plan))
 

@@ -348,7 +348,8 @@ def start_designs(scheme: Scheme, settings: MaterialGradientSettings, table: tup
     """開跑那一組起跑配置：原牆照 ``run.scene_wall_materials``、起跑設計照 ``run.designs_for``、准用清單對起跑配置核過
     （:func:`_checked_allowed`）並展開到面片。開跑與建替身（#1082 段 2-8，裝進格子前先核固定材料）共用這一支，
     兩邊核的是同一組配置。綁定表（#1206，``ties``）也在這裡對起跑配置核，成對兩片不一樣就點名拒收。"""
-    from aosr.gradient import run
+    # 起跑配置的原料住不載入 JAX 的那一檔（網頁行程核綁定也叫這一支，#1206 第 2 支；``run`` 接出去的是同一份）。
+    from aosr.gradient import start_config as run
     from aosr.gradient.ties import check_ties_against_start
 
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)

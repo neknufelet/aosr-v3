@@ -123,7 +123,7 @@ def _layers(material: Mapping[str, object]) -> list[Mapping[str, object]]:
 
 
 def has_air_layer(material: Mapping[str, object]) -> bool:
-    """構造有空氣層（``kind = "air"``）：搜尋設計照這一層開空腔變數（``material_gradient._surface_design`` 同一條）。"""
+    """構造有空氣層（``kind = "air"``）：搜尋設計照這一層開空腔變數（``surface_design._surface_design`` 同一條）。"""
     return any(layer.get("kind") == "air" for layer in _layers(material))
 
 

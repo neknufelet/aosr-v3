@@ -386,6 +386,48 @@ def test_resuming_a_search_started_before_ties_sends_no_tie(tmp_path: Path) -> N
     assert "ties" not in json.loads(job_file.read_text(encoding="utf-8"))["plan"]
 
 
+_NO_JAX_AFTER_A_CALL = """
+import sys, threading
+from pathlib import Path
+from starlette.testclient import TestClient
+from aosr.config.paths import config_path
+from aosr.gui.app import GuiSettings, create_app
+from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_plan import GradientRequest
+from aosr.gui.zone_design import DesignSettings
+from aosr.reporting.scheme import Scheme
+from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, SIDE, searching, symmetry_document
+from tests.engine.test_gui_gradient_jobs import FakeLauncher
+
+assert "jax" not in sys.modules, "載入期就有 JAX（另一題在守）"
+data = Path(sys.argv[1])
+document = symmetry_document({"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED})
+design = searching({"x0": ["b", "a"], "y0": ["s"], "yL": ["s"]})
+client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=data / "page")), base_url="http://127.0.0.1")
+body = client.post("/api/zone-limits", json={"scheme": document, "design": design}).json()
+assert len(body["symmetry"]["pairs"]) == 2, body["symmetry"]
+after_page = "jax" in sys.modules
+jobs = GradientJobs(data / "jobs", launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                    scheme_lock=threading.RLock())
+plan, _, _ = jobs.plan(Scheme.model_validate(document), DesignSettings.model_validate(design), GradientRequest())
+assert len(plan.ties) == 2, plan.ties
+print(f"zone-limits 後 jax={after_page} plan 後 jax={'jax' in sys.modules}")
+raise SystemExit(1 if "jax" in sys.modules else 0)
+"""
+
+
+def test_the_web_process_still_has_no_jax_after_really_pairing(tmp_path: Path) -> None:
+    """網頁行程真的配過一次之後還是沒有 JAX（審查 A 第 1 條）：另開乾淨行程，叫一次分區頁的限制檢查（回兩對）、
+    一次帶兩對的 ``GradientJobs.plan``（預覽與開跑共用），之後 ``sys.modules`` 裡不准有 ``jax``。
+    ``test_web_process_never_imports_jax`` 只看載入那一刻，引擎檢查是第一次被叫才載入它要的模組，那一題抓不到。"""
+    env = forward_cpu_pins(child_process_env())
+    env["TMPDIR"] = str(tmp_path)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    done = subprocess.run([sys.executable, "-c", _NO_JAX_AFTER_A_CALL, str(tmp_path)], env=env, cwd=tmp_path,
+                          capture_output=True, text=True, timeout=300)
+    assert done.returncode == 0, done.stdout[-300:] + done.stderr[-1500:]
+
+
 # ---- 分區頁從伺服器拿結果 ----
 
 def _client(tmp_path: Path) -> TestClient:

@@ -52,9 +52,8 @@ import jax.numpy as jnp
 import numpy as np
 from pydantic import TypeAdapter, BaseModel, ConfigDict, Field, model_validator
 
-from aosr.config.capabilities import CapabilityTable, load_capabilities
-from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
-from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
+from aosr.config.capabilities import load_capabilities
+from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.material_gradient import (
     MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, Mount, is_fixed_target, load_material_gradient_settings, with_max_steps,
 )
@@ -65,10 +64,14 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.gpu import Device, LegacyPrecisionComparison, PrecisionComparison, single_precision_constants
 from aosr.gradient.gpu_preflight import ensure_start_precision
+from aosr.gradient.start_config import (
+    _uncapped_designs_for, _wall_materials_from_inputs, designs_for as designs_for, presets_table as presets_table,
+    scene_wall_materials as scene_wall_materials,
+)
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_candidates import FixedCandidateCheck
 from aosr.gradient.fixed_surfaces import (
-    AllowedTargets, FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_fixed, designs_with_max_depths,
+    AllowedTargets, FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_max_depths,
     expanded_allowed_targets, fixed_targets_of,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
@@ -77,7 +80,7 @@ from aosr.gradient.material_gradient import (
     COMPONENT_NAMES, Unestimable, ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, check_stop, objective_reading,
     designs_from_presets, is_feasible,
     compiled_evaluator, depth_limits, design_bounds, design_names, projected_descent, retune_cavities, snap_to_specs,
-    wall_designs_from_presets, estimable,
+    estimable,
 )
 from aosr.gradient.material_gradient_ledger import (
     LEDGER_VERSION, LEGACY_LEDGER_VERSION, PROXY_RERUN_TEXT, SCORED_RANGE_RERUN_TEXT, MaterialGradientHeader, MaterialGradientRow, append_rows, descent_rows, header_for, read_ledger, snap_row,
@@ -98,12 +101,10 @@ from aosr.materials.search_library import (
 )
 from aosr.gradient.boundary import (BoundaryKey, material_keys, named_materials, partition_identity, scheme_patch_keys, surface_ids)
 from aosr.physics.fem_reduced_boundary import boundary_patches, PatchKeys
-from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.fem_reduced import ReducedModel, checked_axis
 from aosr.physics.fem_reduced_check import PointHex, SurrogateSpotCheck, points_hex
 from aosr.physics.fem_reduced_receipt import HoldoutRulers, Ruler, load_validated_reduced, receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
-from aosr.physics.report_io import ReportInput, solver_inputs
 from aosr.reporting.fem_reduced_scheme import scheme_points
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.reporting.validation import checked_inputs
@@ -586,27 +587,6 @@ def check_inputs(project: GradientProject, *, allow_legacy_objective: bool = Fal
     return scheme, model, settings
 
 
-def scene_wall_materials(scheme: Scheme, *, capabilities: CapabilityTable,
-                         directivity: DirectivityDefaults) -> dict[BoundaryKey, SurfaceMaterial]:
-    """沿 ``export_operators`` 的 checked_inputs 第一對輸入取材料；分區直接取每片的 material。
-
-    整面仍交 solver_inputs 取 materials_by_wall，不另轉固定阻抗；分區鍵與序由 boundary_patches 共用。
-    """
-    _, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-    return _wall_materials_from_inputs(scheme, next(iter(documents.values()))[1])
-
-
-def _wall_materials_from_inputs(scheme: Scheme, inputs: ReportInput) -> dict[BoundaryKey, SurfaceMaterial]:
-    """共用已驗過的逐對輸入；材料與面片序維持 scene_wall_materials 的讀法。"""
-    keys = scheme_patch_keys(scheme)
-    if keys != boundary_patches():
-        zones = inputs.surface_zones_by_wall or {}
-        return {(wall, zone): next(z.material for z in zones[wall.wall_name()]
-                                  if (isinstance(z, RectangleZone) and z.id == zone) or
-                                  (not isinstance(z, RectangleZone) and not zone)) for wall, zone in keys}
-    return cast(dict[BoundaryKey, SurfaceMaterial], dict(solver_inputs(inputs).materials_by_wall))
-
-
 def project_wall_materials(project: GradientProject, scheme: Scheme) -> dict[BoundaryKey, SurfaceMaterial]:
     """:func:`scene_wall_materials`，能力表取 ``project.json`` 記的、指向性取產品預設（跟 ``resume`` 核物理身分同一組）。"""
     return scene_wall_materials(scheme, capabilities=load_capabilities(project.capabilities_path),
@@ -618,43 +598,6 @@ def search_objective_constants(project: GradientProject, scheme: Scheme,
     """這一次搜尋的目標常數：替身的頻率軸、``project.purpose`` 的梯度目標設定、方案座位組、替身的喇叭數。"""
     return gradient_objective_constants(np.asarray(model.frequencies_hz), search_objective_settings(project.purpose),
                                         scheme.receiver_set, len(model.source_names))
-
-
-def _uncapped_designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
-                kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
-                fixed_surfaces: Mapping[str, str] | None = None,
-                table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
-    """有分區照共用面片序、整面照 ``Wall.all()`` 的設計；preset 不認識或不在家族清單裡就拒收。preset 是 None 的面一律帶 ``kept``
-    那一面的材料（方案原本的牆，``scene_wall_materials``），是「不貼、保留原牆」，不是剛性；``mount`` 是貼在原牆上時，
-    貼樣板的面背後接 ``kept`` 那一面。``table`` 是構造清單（不給是產品構造預設；有材料快照的搜尋給 :func:`project_presets`）。"""
-    table = presets_table() if table is None else tuple(table)
-    keys = material_keys(kept)
-    if keys != boundary_patches():
-        names = surface_ids(keys)
-        if len(presets) != len(names):
-            raise ValueError(f"面片清單要給 {len(names)} 個 preset id")
-        return designs_with_fixed(tuple(zip(names, presets, strict=True)), settings, table,
-                                  kept=named_materials(kept), mount=mount, fixed_surfaces=fixed_surfaces or {})
-    whole_kept = cast(Mapping[Wall, SurfaceMaterial], kept)
-    if fixed_surfaces:
-        if len(presets) != len(Wall.all()):
-            raise ValueError("六面牆要給六個 preset id")
-        return designs_with_fixed(tuple(zip((wall.wall_name() for wall in Wall.all()), presets, strict=True)),
-                                  settings, table, kept={w.wall_name(): m for w, m in whole_kept.items()},
-                                  mount=mount, fixed_surfaces=fixed_surfaces)
-    return wall_designs_from_presets(presets, settings, table,
-                                     kept={wall.wall_name(): material for wall, material in whole_kept.items()}, mount=mount)
-
-
-def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: MaterialGradientSettings, *,
-                kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
-                fixed_surfaces: Mapping[str, str] | None = None,
-                max_depths: Mapping[str, float] | None = None,
-                table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
-    """建立起跑設計，套入每面上限（跟起跑家族自己的上限取較嚴；起跑家族最淺排法放不進就拒收，#1082 段 2-4）；
-    空設定沿用舊設計。``table`` 同 :func:`_uncapped_designs_for`。"""
-    designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces, table=table)
-    return designs_with_max_depths(designs, settings, max_depths or {})
 
 
 def load_problem(project: GradientProject) -> GradientProblem:
@@ -739,11 +682,6 @@ def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[flo
             surface_impedance(template, axis, air=air, ranges=ranges)
         except ValueError as error:
             raise MaterialsRefused(f"{name}的多孔層（porous）參數物理拒算，搜尋不開：{error}") from error
-
-
-def presets_table() -> tuple[ConstructionPreset, ...]:
-    """產品的構造預設清單（``construction_presets.toml``）。"""
-    return load_construction_presets(config_path("construction_presets.toml"))
 
 
 # ---- 前段與整場 ----

@@ -263,7 +263,7 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
         from aosr.config.material_gradient import fixed_target_id
         from aosr.gradient.cli import start_designs
         from aosr.gradient.fixed_surfaces import fixed_targets_of
-        from aosr.gradient.run import presets_table
+        from aosr.gradient.start_config import presets_table
         from aosr.gradient.ties import TieRefused, check_ties_against_start
         from aosr.materials.search_library import fixed_candidates, user_fixed_entries
 
