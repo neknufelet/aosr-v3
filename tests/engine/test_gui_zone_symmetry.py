@@ -508,6 +508,22 @@ def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
     assert snapped
 
 
+def test_the_cut_is_judged_on_the_digits_a_person_types_and_the_box_the_page_sends() -> None:
+    """兩個公釐級的例子，守「照句子印的位數」與「照吸完的框切」這兩步：
+    一、鏡像位置的右緣是 3.6004，離 r 的邊 3.80 差 19.96 公分（在吸邊門檻裡）；人打的是印出來的 3.60，剛好差一個最小邊、
+    不吸，切得成。二、鏡像位置的右緣是 3.594，人打 3.59，網頁把它吸到緊鄰的 r 的邊 3.60（差 6 公釐，在容差裡）；
+    照沒吸的 3.59 切會在兩框中間剩一條 1 公分的縫，切牆工具不收。兩個例子那一句都要列，照做都配成一對。"""
+    row = (0.3, 1.2)
+    for boxes, words in (
+            ([("p", (0.3996, 1.2), row), ("q", (2.8, 3.5), row), ("r", (3.8, 4.0), (1.5, 2.4))], "把 {second} 切到離左牆 2.80～3.60 公尺，就和 {first} 配成一對"),
+            ([("p", (0.406, 1.2), row), ("q", (2.8, 3.5), row), ("r", (3.6, 4.0), row)], "把 {second} 切到離左牆 2.80～3.59 公尺，就和 {first} 配成一對")):
+        document = symmetry_document({"x0": cast(list[Box], boxes)})
+        design = searching({"x0": ["p", "q"]})
+        found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
+        assert _missed(found) == [("x0@p", "x0@q", "position")] and words in found.missed[0].cuts, found.missed[0]
+        _do_the_cut(found, document, design, "x0@q", "x0@p", words)
+
+
 FULL = (0.0, HEIGHT)
 
 
