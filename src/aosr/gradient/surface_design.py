@@ -5,7 +5,7 @@
 （``test_web_process_never_imports_jax``）。所以這一檔**不准載入 JAX**，也不准載入會載入 JAX 的模組。
 
 設計變數只有每面棉板厚度（多孔層）與空腔深度（空氣層）；變數名是樣板的 ``layer<層號>.<欄位>``
-（:func:`aosr.materials.construction_models.variable_name`）。純函式，沒有命令列、沒有行程、不印東西。
+（:func:`aosr.materials.variable_names.variable_name`）。純函式，沒有命令列、沒有行程、不印東西。
 """
 from __future__ import annotations
 
@@ -20,8 +20,9 @@ from aosr.config.material_gradient import (
 )
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import (
-    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial, variable_name,
+    AirLayer, Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial,
 )
+from aosr.materials.variable_names import variable_name
 from aosr.materials.search_library import PresetMaterial
 
 _THICKNESS = "thickness_m"

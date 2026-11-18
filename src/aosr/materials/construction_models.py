@@ -424,9 +424,3 @@ class ConstructionNote(_ConstructionRecord):
         elif self.layer_index is None or self.material_class is None:
             raise ValueError("Komatsu 頻率、類別與低流阻註記必填層編號與材料類別")
         return self
-
-
-def variable_name(layer_index: int, field: str) -> str:
-    """參數字典的鍵：layer<層號>.<欄位名>，層號從房間側的一起算，跟註記的層編號同一套。
-    （住這裡而不是 ``construction_diff``：那一檔載入 JAX，起跑配置的設計變數名在不載入 JAX 的行程也要用。）"""
-    return f"layer{layer_index}.{field}"
