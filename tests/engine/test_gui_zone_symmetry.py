@@ -32,7 +32,7 @@ from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Symmetry, pair_zones
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
-from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, NAME, SIDE, Box, Doc, searching, symmetry_document
+from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, HEIGHT, NAME, SIDE, Box, Doc, searching, symmetry_document
 
 SETTINGS = load_material_gradient_settings(config_path("material_gradient.toml"))
 ALL_CUTS: dict[str, list[Box]] = {"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED}
@@ -326,7 +326,8 @@ def test_a_cut_the_wall_tool_would_refuse_is_not_offered() -> None:
 
 
 def _random_front_walls(count: int, seed: int) -> Iterator[tuple[Doc, Doc, bool]]:
-    """固定種子亂擺前牆：兩區 p、q；或再加第三區 r；或只畫 p、另一區挑一塊自動補滿的。回（方案, 設計設定, 有沒有自動那一區）。"""
+    """固定種子亂擺前牆：兩區 p、q；或再加第三區 r；或只畫 p（或 p 與 r 兩個頂天立地的框）、另一區挑一塊自動補滿的。
+    回（方案, 設計設定, 有沒有自動那一區）。"""
     rng = random.Random(seed)
     for _ in range(count):
         a0 = round(rng.uniform(0, 3.5), 2)
@@ -334,12 +335,14 @@ def _random_front_walls(count: int, seed: int) -> Iterator[tuple[Doc, Doc, bool]
         b0 = round(rng.uniform(0, 3.5), 2)
         b1 = round(rng.uniform(b0 + 0.1, 4.0), 2)
         shift = rng.choice((0.0, 0.1, 0.2, 0.3, -0.05))
-        kind = rng.choice(("two", "two", "auto", "third"))
-        boxes: list[Box] = [("p", (a0, a1), (0.3, 2.4))]
+        kind = rng.choice(("two", "two", "auto", "anchored", "third"))
+        height = (0.0, HEIGHT) if kind == "anchored" else (0.3, 2.4)
+        boxes: list[Box] = [("p", (a0, a1), height)]
         if kind != "auto":
             if not (a1 <= b0 or b1 <= a0):
                 continue
-            boxes.append(("q", (b0, b1), (0.3, 2.4)))
+            # anchored：第二個畫的框 r 擋著，補滿出來的那一塊在搬 p 之後有機會原封不動。
+            boxes.append(("r" if kind == "anchored" else "q", (b0, b1), height))
         if kind == "third":
             c0 = round(rng.uniform(0, 3.5), 2)
             c1 = round(rng.uniform(c0 + 0.1, 4.0), 2)
@@ -348,9 +351,10 @@ def _random_front_walls(count: int, seed: int) -> Iterator[tuple[Doc, Doc, bool]
             boxes.append(("r", (c0, c1), (0.3, 2.4)))
         document = symmetry_document({"x0": boxes}, across_shift_m=shift)
         filled = sorted(cast(str, zone["id"]) for zone in _wall_zones(document, "x0") if cast(str, zone["id"]).startswith("auto"))
-        if kind == "auto" and not filled:
+        auto = kind in ("auto", "anchored")
+        if auto and not filled:
             continue
-        yield document, searching({"x0": ["p", rng.choice(filled) if kind == "auto" else "q"]}), kind == "auto"
+        yield document, searching({"x0": ["p", rng.choice(filled) if auto else "q"]}), auto
 
 
 def _do_the_cut(document: Doc, design: Doc, moved: str, stays: str, words: str) -> None:
@@ -383,7 +387,7 @@ def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
     """畫面那句是「切到…就和○配成一對」：固定種子亂擺前牆（兩區；兩區加第三區；一區加一塊自動補滿的），每一種列出來的
     切法都照「房間方案輸入」真的做一遍——這一面畫的框（扣掉自動補滿的）只把要搬的那一區換到那句寫的位置、交給切牆
     工具切、設計設定照 ``inherited`` 跟著走——再配一次，這兩區要配成一對。"""
-    listed = unlisted = with_auto = offered = 0
+    listed = unlisted = with_auto = offered = offered_with_auto = 0
     for document, design, auto in _random_front_walls(1500, seed=1206):
         try:
             found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
@@ -397,12 +401,68 @@ def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
             listed += bool(item.cuts)
             unlisted += not item.cuts
             offered += len(item.cuts)
+            offered_with_auto += auto * len(item.cuts)
             for words in item.cuts:
                 moved, stays = (item.second, item.first) if words.startswith("把 {second}") else (item.first, item.second)
                 _do_the_cut(document, design, moved, stays, words)
-    # 掃到的擺法「有列切法」「不列切法」兩種都要有，其中一區是自動補滿的也要有（數目寫在修補報告）。自動補滿的那幾種
-    # 一種切法都列不出來是對的：自動那一塊搬不動；搬畫的那一區，它讓出來的地方又會被補滿，留著那一塊的形狀跟著變。
-    assert (listed, unlisted, with_auto, offered) == (106, 131, 88, 134)
+    # 掃到的擺法「有列切法」「不列切法」兩種都要有，其中一區是自動補滿的也要有（數目寫在修補報告）。自動那一塊搬不動，
+    # 列得出來的是搬畫的那一區、自動那一塊留著：只有畫的框讓出來的地方被補滿之後，留著那一塊原封不動才列（照位置找回它）。
+    assert (listed, unlisted, with_auto, offered, offered_with_auto) == (85, 142, 112, 104, 5)
+
+
+FULL = (0.0, HEIGHT)
+
+
+@pytest.mark.parametrize(("boxes", "other", "shift", "second_way", "first_way"), [
+    ([("p", (3.8, 4.0), FULL)], "auto1", 0.0,
+     "把 {second} 切到離左牆 0.00～0.20 公尺，它是自動補滿的那一塊，要先在立面圖畫一個框，才搬得動", "把 {first} 切到離左牆 0.20～4.00 公尺，會疊在 {second} 上"),
+    ([("p", (1.2, 2.6), FULL)], "auto2", 0.1,
+     "把 {second} 切到離左牆 1.60～3.00 公尺，會疊在 {first} 上", "把 {first} 切到離左牆 0.20～1.60 公尺，補滿之後 {second} 那一塊的形狀會跟著變"),
+    ([("p", (2.3, 3.1), FULL), ("q", (0.5, 1.1), FULL), ("r", (1.2, 1.8), FULL)], "q", 0.0,
+     "把 {second} 切到離左牆 0.90～1.70 公尺，會疊在這一面別的區上", "把 {first} 切到離左牆 2.90～3.50 公尺，會剩下一條比 20 公分還窄的窄條，切牆工具不收"),
+    ([("p", (2.6, 3.9), FULL), ("q", (1.0, 1.1), FULL)], "q", 0.0,
+     "把 {second} 切到離左牆 0.10～1.40 公尺，會剩下一條比 20 公分還窄的窄條，切牆工具不收", "把 {first} 切到離左牆 2.90～3.00 公尺，切出來的寬或高不到 20 公分，切牆工具不收"),
+    ([("p", (1.5, 1.9), FULL), ("q", (2.2, 3.1), FULL), ("r", (0.0, 0.1), FULL)], "q", 0.0,
+     "把 {second} 切到離左牆 2.10～2.50 公尺，這一面有別的區寬或高不到 20 公分，切牆工具不收", "把 {first} 切到離左牆 0.90～1.80 公尺，這一面有別的區寬或高不到 20 公分，切牆工具不收"),
+])
+def test_each_reason_a_cut_is_not_offered_is_written_out(boxes: list[Box], other: str, shift: float, second_way: str, first_way: str) -> None:
+    """兩種切法都列不出來時，細節兩個方向各寫一句為什麼，每一種原因一個固定的例子：要搬的是自動補滿的那一塊、
+    會疊在留著那一區上、補滿之後留著那一塊（自動的）形狀跟著變、會疊在第三區上、會剩窄條、切出來不到最小邊、
+    這一面別的框不到最小邊（切牆工具整面不收）。超出牆面那一種在 ``test_when_no_cut_is_possible…``。"""
+    found = _found(symmetry_document({"x0": boxes}, across_shift_m=shift), {"x0": ["p", other]})
+    assert _missed(found) == [("x0@p", f"x0@{other}", "position")] and found.missed[0].cuts == ()
+    assert found.missed[0].summary == "只搬其中一區切不出鏡像的位置，各自調"
+    assert found.missed[0].detail.endswith(f"只搬其中一區切不出鏡像的位置：{second_way}；{first_way}。")
+
+
+def test_a_drawn_zone_can_be_cut_to_pair_with_an_auto_filled_one_that_stays_put() -> None:
+    """留著的那一區是自動補滿的也列得出切法：p、r 兩個畫的框，另一區是 r 右邊補滿的那一塊（3.00～4.00 之外的 2.60～4.00）。
+    把 p 切到鏡像位置之後那一塊原封不動（代號會重編，照位置找），照做真的配成一對；反方向（搬自動那一塊）不列。"""
+    document = symmetry_document({"x0": [("p", (1.3, 1.6), FULL), ("r", (2.1, 2.6), FULL)]})
+    design = searching({"x0": ["p", "auto3"]})
+    found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
+    assert _missed(found) == [("x0@p", "x0@auto3", "position")]
+    assert found.missed[0].cuts == ("把 {first} 切到離左牆 0.00～1.40 公尺，就和 {second} 配成一對",)
+    _do_the_cut(document, design, "x0@p", "x0@auto3", found.missed[0].cuts[0])
+
+
+def test_a_whole_wall_zone_can_be_cut_down_to_pair_with_the_box_on_the_other_side() -> None:
+    """左右牆：一面整面一區、另一面只有一個框，兩種切法都列。整面那一面還沒有框，照做就是在鏡像位置畫第一個框
+    （設定沿用整面那一區的）：真的切、設定照 ``inherited`` 跟著走、再配一次，這個框和另一面那個框配成一對。"""
+    document = symmetry_document({"yL": SIDE})
+    design = searching({"y0": ["whole_wall"], "yL": ["s"]})
+    found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
+    assert _missed(found) == [("y0", "yL@s", "position")]
+    assert found.missed[0].cuts == ("把 {second} 切到離前牆 0.00～5.00 公尺、離地 0.00～2.70 公尺，就和 {first} 配成一對",
+                                    "把 {first} 切到離前牆 1.00～3.00 公尺、離地 0.50～2.20 公尺，就和 {second} 配成一對")
+    cut = cut_wall(document, "y0", [CutBox(id="new", u_m=SIDE[0][1], v_m=SIDE[0][2])])
+    assert cast(dict[str, str], cut["inherited"])["new"] == "whole_wall"
+    after = deepcopy(document)
+    cast(dict[str, object], cast(Doc, after["scene"])["surface_zones_by_wall"])["y0"] = cut["zones"]
+    moved_design = deepcopy(design)
+    cast(dict[str, object], moved_design["zones"])["y0"] = {key: {"mode": "search"} for key in cast(dict[str, str], cut["inherited"])}
+    again = pair_zones(Scheme.model_validate(after), DesignSettings.model_validate(moved_design), _Check())
+    assert ("y0@new", "yL@s") in [(pair.first, pair.second) for pair in again.pairs]
 
 
 def test_a_mirror_that_lands_a_hair_outside_the_wall_still_counts_as_inside() -> None:

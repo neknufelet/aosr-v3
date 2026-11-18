@@ -324,8 +324,12 @@ def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays:
     except ZoneCutError as error:
         if error.thin:
             return f"會剩下一條比 {MIN_SIDE_M * 100:g} 公分還窄的窄條，切牆工具不收"
-        if too_small(Box(id=key, u_m=u, v_m=v)):
-            return f"這一區的寬或高不到 {MIN_SIDE_M * 100:g} 公分，切牆工具不收"
+        # 切牆工具另外只會為兩件事拒收：畫的框裡有不到最小邊的（切過去的這一個，或這一面別的框），或框疊在別的框上。
+        narrow = [box.id for box in boxes if too_small(Box(id=box.id, u_m=box.u_m, v_m=box.v_m))]
+        if key in narrow:
+            return f"切出來的寬或高不到 {MIN_SIDE_M * 100:g} 公分，切牆工具不收"
+        if narrow:
+            return f"這一面有別的區寬或高不到 {MIN_SIDE_M * 100:g} 公分，切牆工具不收"
         return "會疊在這一面別的區上"
     inherited = cast(dict[str, str], cut["inherited"])
 
