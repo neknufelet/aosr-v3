@@ -22,7 +22,7 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
 from aosr.gradient.depth_fit import family_fit, fit_words, fixed_fit, target_fit
-from aosr.gradient.material_gradient import SurfaceDesign, designs_from_presets
+from aosr.gradient.surface_design import SurfaceDesign, designs_from_presets
 from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.report_surfaces import WholeWallZone

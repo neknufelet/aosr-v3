@@ -189,7 +189,12 @@ def artifacts(data_dir: Path, *, with_vpr: bool) -> dict[str, bytes]:
         "x0": {"auto1": {"mode": "search", "max_depth_m": 0.06}, "auto2": {"mode": "search", "allowed": [WOOL, PANEL, "none"]}}})
     limits = client.post("/api/zone-limits", json={"scheme": _cut(PRESET), "design": design.model_dump(mode="json")})
     assert limits.status_code == 200, limits.text
-    found["api_zone_limits.json"] = limits.content
+    # #1206 第 2 支起這一支多回一格 symmetry（左右對稱的配對，另有考卷）；拿掉那一格，剩下的照伺服器同一種排法
+    # （JSONResponse：不轉義、最緊的分隔）排回去，要跟主線那一份逐位相同。
+    old_part = limits.json()
+    assert "symmetry" in old_part
+    del old_part["symmetry"]
+    found["api_zone_limits.json"] = json.dumps(old_part, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
     return found
 
 

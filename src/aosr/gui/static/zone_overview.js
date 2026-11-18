@@ -28,7 +28,12 @@
    框裡勾的、最深填的都只是草稿（draft），套用才寫、取消就丟。
    每一區存自己的清單（搜尋那一步本來就逐區照自己的清單），這一頁的三個入口都只改該改的區（#1199 修補 1）：
    小框打開時的勾照選中的區自己存的清單（各區不同就是第三種狀態）；套用只把使用者動過的那幾個勾加減到每一個選中區
-   自己的清單上，沒選中的區不碰；右欄清單卡一組（清單一樣的區）一張，在一張上勾只改那一組。 */
+   自己的清單上，沒選中的區不碰；右欄清單卡一組（清單一樣的區）一張，在一張上勾只改那一組。
+
+   左右對稱（#1206 第 2 支）：圖例底下一塊「左右對稱」開｜關（整頁只有這一個；設計檔只存「關」，開著不寫）。哪兩區成對、
+   哪幾區沒配成與原因、對稱軸在哪，全是伺服器算的（限制檢查那一支順便回，zoneLimits.symmetry；算法在 zone_symmetry.py），
+   這裡只照著畫：成對兩區掛同一個圖形（沒有順序、兩邊一樣）與「和○牆○一對」，沒配成的區掛「沒配成一對」，
+   原因與切法點開「配對細節」才看得到；底下那一條照單位數寫幾對一起調、幾區各自調。 */
 (() => {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAP_WIDTH = 954;          // 左邊那張圖的寬（px，樣稿）
@@ -51,6 +56,8 @@ let unsaved = false;            // 這一頁改過、還沒存進檔案（標題
 let pageSaid = "";              // 輸入頁訊息列最近一句警示（這一頁開著時照抄一份，見 window.zonePageSay）
 let keptSaid = "";              // 「拿去搜尋」被還在路上的改動擋下的那一句：留到使用者下一次按東西為止（見 window.zonePageKeep）
 let view = null;                // 最近一次算出來的：{roles, room, faces, byId, inferred, list}
+let pairing = null;             // 最近一次整理好的左右對稱配對（readPairing）
+let symmetryDetail = false;     // 「配對細節」開著（重畫後照樣開著）
 const openDetails = new Set();  // 哪幾個摺疊開著（重畫後照樣開著）
 const curves = new Map();       // 材料代號 → 吸音曲線的回覆（還在算是 "loading"）
 
@@ -157,6 +164,66 @@ function hoverWords(item) {
   return `${zoneWhereText(item)}：${mode === "fixed" ? `${ZONE_MODE_WORDS.fixed}：${pastedWords(item)}` : ZONE_MODE_WORDS[mode]}`;
 }
 
+/* ───── 左右對稱：伺服器算好的配對整理成畫面要的樣子（不在這裡算誰跟誰一對） ───── */
+const PAIR_SHAPES = ["hexagon", "diamond", "triangle", "square", "pentagon", "octagon"];
+function symmetryIsOn() { return zoneDesign?.left_right_symmetry !== "off"; }
+// state：off 關著、pending 還在等伺服器、unavailable 算不了、no-axis 定不出對稱軸、none 沒有由程式最佳化的區、paired 配對算出來了。
+// marks：區的 id → {partner, shape}（成對）或 {missed: true}（沒配成）。回覆只收最新那一次問的（跟現在的切法、做法同一份；
+// 還在路上就先寫計算中，不拿上一次的來畫），所以伺服器回的片代號（牆@區）一定對得到現在的區。幾對、幾區各自調都用伺服器回的數。
+function readPairing(byId) {
+  const on = symmetryIsOn(), found = zoneLimits?.symmetry;
+  const base = {on, state: "pending", message: "", marks: new Map(), pairs: [], missed: [], axis: null, alone: 0, searched: 0};
+  if (!on) return {...base, state: "off"};
+  if (!zoneLimits || zoneLimitsReceived !== zoneLimitsGeneration) return base;
+  if (!found) return {...base, state: "unavailable", message: `配對沒算成：${zoneLimits.message ?? "限制檢查沒有做成"}`};
+  if (!found.available) return {...base, state: "unavailable", message: found.message};
+  if (found.reason) return {...base, state: "no-axis", message: found.reason};
+  const at = surface => { if (!surface) return null; const [wall, key] = surface.split("@"); return byId.get(`${wall}/${key ?? "whole_wall"}`) ?? null; };
+  const pairs = found.pairs.map((pair, index) => ({first: at(pair.first), second: at(pair.second), shape: PAIR_SHAPES[index % PAIR_SHAPES.length]}));
+  const missed = found.missed.map(entry => ({...entry, firstItem: at(entry.first), secondItem: at(entry.second), otherItem: at(entry.other)}));
+  const marks = new Map();
+  for (const pair of pairs) { marks.set(pair.first.id, {partner: pair.second, shape: pair.shape}); marks.set(pair.second.id, {partner: pair.first, shape: pair.shape}); }
+  for (const entry of missed) for (const item of [entry.firstItem, entry.secondItem]) if (item) marks.set(item.id, {missed: true});
+  return {...base, state: found.searched.length ? "paired" : "none", marks, pairs, missed, axis: found.axis, alone: found.alone, searched: found.searched.length};
+}
+// 成對的記號：幾種不帶順序的圖形（沒有 1、2 或 A、B），同一對兩區畫同一個。
+function pairGlyph(shape, cx, cy, r) {
+  const [sides, turn, squeeze] = {hexagon: [6, 0, 1], diamond: [4, 0, 0.78], triangle: [3, 0, 1], square: [4, 45, 1], pentagon: [5, 0, 1], octagon: [8, 22.5, 1]}[shape];
+  const points = Array.from({length: sides}, (_, index) => {
+    const angle = (turn - 90 + index * 360 / sides) * Math.PI / 180;
+    return `${(cx + r * squeeze * Math.cos(angle)).toFixed(1)},${(cy + r * Math.sin(angle)).toFixed(1)}`;
+  });
+  return svg("polygon", {class: "zv-pair-mark", "data-shape": shape, points: points.join(" ")});
+}
+function glyphIcon(shape) {
+  const icon = svg("svg", {class: "zv-sym-icon", width: 18, height: 18, viewBox: "0 0 18 18", "aria-hidden": "true"});
+  icon.append(pairGlyph(shape, 9, 9, 8));
+  return icon;
+}
+function partnerWords(item) { return item.key === "whole_wall" ? `和${wallNames[item.wall]}整面一對` : `和${wallNames[item.wall]}${item.label.numberText}一對`; }
+// 夠大的區：號碼挪到左上角、中間放記號與一句話；小的區只在號碼旁放記號（那一句照樣在，只是不顯示）。
+function roomyZone(width, height) { return width >= 88 && height >= 96; }
+// 一區的配對記號掛到圖上那一區：成對的掛圖形與「和○牆○一對」，沒配成的掛「沒配成一對」。回這一區有沒有掛。
+function pairDecor(item, group, x, y, width, height) {
+  const mark = pairing?.marks.get(item.id);
+  if (!mark) return false;
+  const cx = x + width / 2, cy = y + height / 2, roomy = roomyZone(width, height);
+  if (mark.missed) {
+    group.setAttribute("data-missed", "true");
+    // 放得下一條字的區（夠大的在中間偏下、窄的在號碼底下）掛整條「沒配成一對」；再小的只掛一個小記號。
+    const band = roomy || (width >= 66 && height >= 76), top = roomy ? cy + 4 : cy + 14;
+    if (band) group.append(svg("rect", {class: "zv-missed-bg", x: x + 1.5, y: top, width: width - 3, height: 22}));
+    group.append(svg("text", {class: `zv-pair-words zv-missed-words${band ? "" : " zv-hide"}`, x: cx, y: top + 16}, "沒配成一對"));
+    if (!band) group.append(svg("rect", {class: "zv-missed-dot", x: cx - 5, y: Math.min(cy + 13, y + height - 9), width: 10, height: 5}));
+    return true;
+  }
+  group.setAttribute("data-pair", mark.partner.id);
+  group.setAttribute("data-shape", mark.shape);
+  if (roomy) group.append(pairGlyph(mark.shape, cx, cy + 6, 11), svg("text", {class: "zv-pair-words", x: cx, y: cy + 36}, partnerWords(mark.partner)));
+  else group.append(pairGlyph(mark.shape, cx, Math.min(cy + 19, y + height - 7), 6), svg("text", {class: "zv-pair-words zv-hide", x: cx, y: cy}, partnerWords(mark.partner)));
+  return true;
+}
+
 /* ───── 左邊：圖 ───── */
 // 字大約多寬（px）：全形一個字高、半形半個多一點；只拿來決定圖上的字放不放得下。
 function textWidth(text, size) { return [...text].reduce((sum, char) => sum + (char.charCodeAt(0) > 0x2e7f ? 1 : 0.58), 0) * size; }
@@ -223,7 +290,10 @@ function zoneShape(item, x, y, width, height) {
       badge(cx - 13, cy, item.label.number, false), svg("text", {class: "zv-open-label", x: cx + 12, y: cy + 6}, item.special));
   } else if (item.shown === "fixed" && width >= 44 && height >= 44) {
     group.append(...ring, badge(x + 16, y + 16, item.label.number, false), fixedLabel(item, x, y, width, height));
+  } else if (pairing?.marks.has(item.id) && roomyZone(width, height)) {
+    group.append(...ring, badge(x + 16, y + 16, item.label.number, false), svg("text", {class: "zv-search-label", x: cx, y: cy - 22}, ZONE_MODE_WORDS.search));
   } else group.append(...ring, badge(cx, cy, item.label.number, small));
+  pairDecor(item, group, x, y, width, height);
   if (item.apart) group.append(apartFrame({x, y, width, height}));
   return group;
 }
@@ -264,6 +334,22 @@ function drawWall(map, role, wall, items, ox, oy, scale, miniSize) {
     face.append(zoneShape(item, ox + a0 * scale, oy + (height - b1) * scale, (a1 - a0) * scale, (b1 - b0) * scale));
   }
   const floorY = oy + height * scale;
+  // 同一面裡成對的兩區（夠大、有地方放記號的）中間拉一條線。
+  for (const pair of pairing?.pairs ?? []) {
+    if (pair.first.wall !== wall || pair.second.wall !== wall) continue;
+    const spots = [pair.first, pair.second].map(item => { const [a0, a1, b0, b1] = item.box;
+      return {x: ox + (a0 + a1) / 2 * scale, y: oy + (height - (b0 + b1) / 2) * scale + 6, roomy: roomyZone((a1 - a0) * scale, (b1 - b0) * scale)}; })
+      .sort((left, right) => left.x - right.x);
+    if (spots.every(spot => spot.roomy)) face.append(svg("line", {class: "zv-pair-link", x1: spots[0].x + 14, y1: spots[0].y, x2: spots[1].x - 14, y2: spots[1].y}));
+  }
+  // 對稱軸在前後牆上是一條直線（伺服器給橫向落在幾公尺）。
+  if (pairing?.axis?.end_walls.includes(wall)) {
+    const [a] = window.elevationGeometry.flip(views[wall], width, height, pairing.axis.across_m, 0);
+    const axis = svg("g", {class: "zv-sym-axis"});  // 線與字包成一組（一條直線自己沒有寬度）
+    axis.append(svg("line", {x1: ox + a * scale, x2: ox + a * scale, y1: oy - 5, y2: floorY + 8}),
+      svg("text", {class: "zv-sym-axis-label", x: ox + a * scale + 6, y: oy + 15}, "對稱軸"));  // 字放牆內上緣（下緣外是喇叭、主位的字）
+    face.append(axis);
+  }
   face.append(svg("rect", {class: "zv-outline", x: ox, y: oy, width: width * scale, height: height * scale}),
     svg("line", {class: "zv-floorline", x1: ox - 1, x2: ox + width * scale + 1, y1: floorY + 1.5, y2: floorY + 1.5}),
     svg("text", {class: "zv-quiet", x: ox + width * scale, y: floorY + 18, "text-anchor": "end"}, wallNames[views[wall].bottom]),
@@ -304,7 +390,12 @@ function drawTile(map, wall, items, plan, roles, room, faces, heading, note) {
         svg("text", {class: "zv-tiny", x: rect.x + rect.width / 2, y: rect.y + rect.height - 6, "text-anchor": "middle"}, "地毯"));
     }
     if (selected.includes(item.id)) group.append(selectedRing(rect));
+    pairDecor(item, group, rect.x, rect.y, rect.width, rect.height);
     face.append(group);
+  }
+  if (pairing?.axis) {
+    const [[x1, y1], [x2, y2]] = pairing.axis.line_m.map(([x, y]) => plan.point(x, y));
+    face.append(svg("line", {class: "zv-sym-axis", x1, y1, x2, y2}));
   }
   if (wall === "floor") {
     for (const item of markerItems()) {
@@ -363,15 +454,16 @@ function drawMap(faces, roles, room) {
   for (const [role, ox, oy] of [["front", col1, row1], ["right", col2, row1], ["back", col1, row2], ["left", col2, row2]]) {
     whole.push(drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize));
   }
-  const floorX = 440, ceilingX = floorX + tileWidth + 92;
+  // 兩張小圖靠右排，左邊留給圖例與「左右對稱」那一塊。
+  const tileGap = 72, floorX = Math.max(440, MAP_WIDTH - 2 * tileWidth - tileGap - 30), ceilingX = floorX + tileWidth + tileGap;
   const allStill = faces.ceiling.every(item => item.shown === "still");
   drawTile(map, "floor", faces.floor, tilePlan(roles, room, floorX, tileY, tileScale), roles, room, faces, "從上往下看", null);
   drawTile(map, "ceiling", faces.ceiling, tilePlan(roles, room, ceilingX, tileY, tileScale), roles, room, faces, "方向同地板圖",
     allStill && faces.ceiling.length === 1 ? ["保留原樣", originalFace("ceiling")] : null);
-  return {map, legendTop: tileY - 10, whole};
+  return {map, legendTop: tileY - 10, whole, underWidth: floorX - 44};
 }
-function legend(top) {
-  const box = el("div", "zv-legend"); box.style.top = `${top}px`;
+function legend() {
+  const box = el("div", "zv-legend");
   for (const [className, words] of [["search", ZONE_MODE_WORDS.search], ["fixed", ZONE_MODE_WORDS.fixed], ["still", "保留原樣"], ["hatch", "門、窗"]]) {
     const item = el("span"); item.append(el("i", `zv-sw ${className}`), words); box.append(item);
   }
@@ -1111,6 +1203,127 @@ function detailTable() {
 }
 
 /* ───── 最底下：結果列 ───── */
+/* ───── 左右對稱那一塊（圖例底下）與配對細節 ───── */
+function setSymmetry(on) {
+  if (on === symmetryIsOn()) return;
+  const design = designForEdit();
+  if (on) delete design.left_right_symmetry; else design.left_right_symmetry = "off";
+  unsaved = true; symmetryDetail = false;
+  refreshZoneLimits();
+  renderZoneOverview();
+}
+// 句子裡的 {first}／{second}／{other} 換成那一區的牆名與號碼。
+function withZones(text, entry) {
+  const line = el("span");
+  const items = {"{first}": entry.firstItem, "{second}": entry.secondItem, "{other}": entry.otherItem};
+  for (const piece of text.split(/(\{first\}|\{second\}|\{other\})/)) {
+    if (items[piece]) line.append(zonesBrief([items[piece]])); else if (piece) line.append(piece);
+  }
+  return line;
+}
+function symmetryBox() {
+  const box = el("div", "zv-sym"); box.id = "zone-symmetry"; box.dataset.state = pairing.state;
+  const head = el("div", "zv-sym-head");
+  const title = el("span", "zv-sym-title", "左右對稱"); title.id = "zone-symmetry-title";
+  const toggle = el("span", "zv-seg"); toggle.setAttribute("role", "group"); toggle.setAttribute("aria-labelledby", "zone-symmetry-title");
+  for (const [on, words, id] of [[true, "開", "zone-symmetry-on"], [false, "關", "zone-symmetry-off"]]) {
+    const item = button("zv-seg-item", words, id, () => setSymmetry(on));
+    item.setAttribute("aria-pressed", String(pairing.on === on));
+    toggle.append(item);
+  }
+  const scope = el("span", "zv-sym-scope", "只管由程式最佳化的區（黃色）；指定貼、保留原樣的區不管"); scope.id = "zone-symmetry-scope";
+  head.append(title, toggle, scope);
+  const body = el("div", "zv-sym-body");
+  const axisLine = () => el("div", "zv-sym-quiet", "對稱軸（圖上的點線）：兩支喇叭中點到主位");
+  if (pairing.state === "off") body.append(el("div", null, "關著：每一區各自調，兩邊可能調出不一樣的材料或厚度。"));
+  else if (pairing.state === "pending") body.append(el("div", "zv-sym-quiet", "配對計算中…"));
+  else if (pairing.state === "unavailable") body.append(el("div", null, pairing.message));
+  else if (pairing.state === "no-axis") body.append(el("div", null, `${pairing.message}，所以現在每一區各自調。`));
+  else if (pairing.state === "none") {
+    body.append(el("div", null, "開著，但現在沒有由程式最佳化的區，所以沒有要配對的。"),
+      el("div", "zv-sym-quiet", "兩邊對應的兩區都改成由程式最佳化，才會配成一對。"), axisLine());
+  } else {
+    const pairs = el("div", "zv-sym-row"); pairs.id = "zone-symmetry-pairs";
+    pairs.append(el("span", "zv-sym-count", pairing.pairs.length ? `配成 ${pairing.pairs.length} 對` : "沒有配成的對"));
+    for (const pair of pairing.pairs) {
+      const item = el("span", "zv-sym-pair"); item.dataset.zones = `${pair.first.id} ${pair.second.id}`;
+      item.append(glyphIcon(pair.shape), zonesBrief([pair.first]), " ＋ ", zonesBrief([pair.second]));
+      pairs.append(item);
+    }
+    if (pairing.pairs.length) pairs.append(el("span", "zv-sym-equal", "兩區一起調，沒有主次"));
+    // 「配對細節」放在第一列右邊：沒配成的列再多，它也不會被擠到底下那一條後面（1440×900 不捲動就點得到）。
+    if (pairing.missed.length) {
+      const more = button("zv-link", symmetryDetail ? "配對細節 ▾" : "配對細節 ▸", "zone-symmetry-details", () => { symmetryDetail = !symmetryDetail; renderZoneOverview(); });
+      more.setAttribute("aria-expanded", String(symmetryDetail));
+      pairs.append(more);
+    }
+    body.append(pairs);
+    if (pairing.missed.length) {
+      const missed = el("div", "zv-sym-row"); missed.id = "zone-symmetry-missed";
+      for (const entry of pairing.missed) {
+        const item = el("span", "zv-sym-missed"); item.dataset.zones = [entry.firstItem, entry.secondItem].filter(Boolean).map(zone => zone.id).join(" ");
+        // 為什麼沒配成、要怎麼辦，直接寫在這一列（伺服器給的那一句）；差幾公分與切法在配對細節。
+        item.append(el("span", "zv-sym-tag", "沒配成一對"), zonesBrief([entry.firstItem, entry.secondItem].filter(Boolean)), el("span", "zv-sym-sum", entry.summary));
+        missed.append(item);
+      }
+      body.append(missed);
+    }
+    body.append(axisLine());
+  }
+  box.append(head, body);
+  return box;
+}
+// 配對細節的小圖：那一面牆、第二區現在的框（黃）、第一區對過來的框（斜線），對稱軸在這一面上就畫出來。
+function missFigure(entry) {
+  const {views, wallSize, screenBox, flip} = window.elevationGeometry;
+  const {wall} = entry.figure, [width, height] = wallSize(wall);
+  const scale = Math.min(300 / width, 150 / height), left = 6, top = 20;
+  const figure = svg("svg", {class: "zv-sym-figure", width: width * scale + 12, height: height * scale + 28,
+                             viewBox: `0 0 ${width * scale + 12} ${height * scale + 28}`, role: "img", "aria-label": `${wallNames[wall]}上這兩區的位置`});
+  const rectOf = (u_m, v_m) => { const [a0, a1, b0, b1] = screenBox(views[wall], width, height, {u_m, v_m});
+    return {x: left + a0 * scale, y: top + (height - b1) * scale, width: (a1 - a0) * scale, height: (b1 - b0) * scale}; };
+  figure.append(svg("rect", {class: "zv-fig-wall", x: left, y: top, width: width * scale, height: height * scale}),
+    svg("rect", {class: "zv-fig-now", ...rectOf(entry.figure.second_u_m, entry.figure.second_v_m)}),
+    svg("rect", {class: "zv-fig-hatch", ...rectOf(entry.figure.mirrored_u_m, entry.figure.mirrored_v_m)}),
+    svg("rect", {class: "zv-fig-over", ...rectOf(entry.figure.mirrored_u_m, entry.figure.mirrored_v_m)}));
+  if (entry.firstItem.wall === wall) figure.append(svg("rect", {class: "zv-fig-now", ...rectOf(entry.firstItem.zone.u_m ?? [0, width], entry.firstItem.zone.v_m ?? [0, height])}));
+  if (pairing.axis?.end_walls.includes(wall)) {
+    const [a] = flip(views[wall], width, height, pairing.axis.across_m, 0);
+    const axis = svg("g", {class: "zv-sym-axis"});
+    axis.append(svg("line", {x1: left + a * scale, x2: left + a * scale, y1: top - 4, y2: top + height * scale + 4}),
+      svg("text", {class: "zv-sym-axis-label", x: left + a * scale, y: 13, "text-anchor": "middle"}, "對稱軸"));
+    figure.append(axis);
+  }
+  return figure;
+}
+function symmetryDetailCard() {
+  const card = el("div", "zv-card zv-sym-detail"); card.id = "zone-symmetry-detail";
+  const head = el("div", "zv-sym-detail-head");
+  head.append(el("h2", null, "配對細節：為什麼沒配成一對"), button("zv-link", "✕ 關閉", "zone-symmetry-detail-close", () => { symmetryDetail = false; renderZoneOverview(); }));
+  card.append(head);
+  for (const entry of pairing.missed) {
+    const part = el("div", "zv-sym-why"); part.dataset.kind = entry.kind;
+    const name = el("div", "zv-sym-why-name"); name.append(zonesBrief([entry.firstItem, entry.secondItem].filter(Boolean)), `：${entry.reason}`);
+    part.append(name);
+    if (entry.figure) {
+      const key = el("div", "zv-sym-quiet");
+      key.append("黃色：", zonesBrief([entry.firstItem, entry.secondItem]), " 現在的位置；斜線：", zonesBrief([entry.firstItem]), " 對過來的位置");
+      part.append(missFigure(entry), key);
+    }
+    part.append(el("p", null).appendChild(withZones(entry.detail, entry)).parentElement);
+    if (entry.cuts.length) {
+      part.append(el("div", "zv-sym-how", "怎麼改就配得上（兩種挑一種，回「房間方案輸入」切）："));
+      const list = el("ul");
+      for (const cut of entry.cuts) { const row = el("li"); row.append(withZones(cut, entry)); list.append(row); }
+      part.append(list);
+    }
+    card.append(part);
+  }
+  const foot = el("div", "zv-sym-quiet", `程式不會自己改你切的分區，也不會自己改每一區的做法。${pairing.axis?.words ?? ""}`); foot.id = "zone-symmetry-axis-words";
+  card.append(foot);
+  return card;
+}
+
 function resultBar() {
   const {faces, roles} = view;
   const all = Object.values(faces).flat();
@@ -1120,7 +1333,11 @@ function resultBar() {
   const part = (shown, words, items) => {
     const item = el("span", "zv-part"); item.id = `zone-result-${shown}`; item.dataset.count = String(items.length);
     item.dataset.zones = items.map(zone => zone.id).join(" ");
-    item.append(el("span", `zv-sw ${shown}`), `${words} `, el("b", null, `${items.length} 區`), `（約 ${area(items)} 平方公尺）`);
+    // 由程式最佳化那一項照單位數寫（#1206）：成對的兩區算一個單位。數字是伺服器回的。
+    const units = shown === "search" && pairing?.state === "paired" && pairing.pairs.length
+      ? `：${[`${pairing.pairs.length} 對一起調`, ...(pairing.alone ? [`${pairing.alone} 區各自調`] : [])].join("、")}` : "";
+    // 面積寫小字（樣稿）：由程式最佳化那一項多了幾對幾區，整條才放得進一行。
+    item.append(el("span", `zv-sw ${shown}`), `${words} `, el("b", null, `${items.length} 區`), units, el("span", "zv-area", `（約 ${area(items)} 平方公尺）`));
     return item;
   };
   bar.append(part("search", ZONE_MODE_WORDS.search, of("search")), el("span", "zv-sep"), part("fixed", "指定貼", of("fixed")), el("span", "zv-sep"));
@@ -1241,9 +1458,14 @@ function overviewParts() {
   for (const item of byId.values()) { item.apart = apart.has(item.id); item.named = item.wall === "floor" || item.wall === "ceiling" || item.apart; }
   const body = el("div", "zv-main");
   const mapWrap = el("div", "zv-mapwrap");
-  const {map, legendTop, whole} = drawMap(faces, roles, room);
-  mapWrap.append(map, legend(legendTop), ...wholeButtons(whole));
+  pairing = readPairing(byId);
+  if (!pairing.missed.length) symmetryDetail = false;
+  const {map, legendTop, whole, underWidth} = drawMap(faces, roles, room);
+  const under = el("div", "zv-under"); under.style.top = `${legendTop}px`; under.style.width = `${underWidth}px`;
+  under.append(legend(), symmetryBox());
+  mapWrap.append(map, under, ...wholeButtons(whole));
   const side = el("div", "zv-side");
+  if (symmetryDetail) side.append(symmetryDetailCard());
   if (selected.length) side.append(panelCard(), briefRules(), ...listCards(true));
   else {
     const slot = el("div", "zv-slot"); slot.id = "zone-slot";

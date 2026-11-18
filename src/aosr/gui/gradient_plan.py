@@ -19,15 +19,24 @@
 （每一組的生效上限與哪一條擋住）；不可用的組從 ``--allowed`` 拿掉、起點也跳過它（沒寫清單的區由命令列換樣板時自己濾），
 一組都不可用就不開（「不貼」不算救）。個案上限比材料組自己的上限大不再拒收，命令列取較嚴的那一個。
 
+左右對稱（#1206 第 2 支）：設計設定的開關開著（缺那一格就是開）時，由程式最佳化、對著對稱軸互為鏡像的兩區配成一對
+（``zone_symmetry.pair_zones``，分區頁看的也是這一支的結果），每一對在開跑參數多一個 ``--tie A=B``（A 是面序在前那一片）。
+位置對上的每一對先過引擎的開跑前檢查（:func:`_engine_check`：命令列開跑那一組起跑配置 ``cli.start_designs``，再逐對叫
+``ties.check_ties_against_start``；這裡不另寫一份規則），引擎拒收的不進計畫。關掉、或沒有位置對上的兩區時這一段一行都不跑，
+計畫與參數跟沒有這一格之前逐位相同。``--tie`` 只加在 :func:`start_arguments`，不進 :func:`configuration_arguments`
+（建替身照那一份核固定材料）。
+
 這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區、准用清單的代號
 不認識或排不出起點、有超過限制的區、准用的材料組一組都放不下）。
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Literal, Self, cast
+import logging
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, NamedTuple, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
@@ -41,11 +50,17 @@ from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, saved_refusals, target_fits, target_line,
     zone_limits, zone_words,
 )
+from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries
+from aosr.materials.search_library import PresetMaterial
 from aosr.reporting.scheme import Scheme
 
+if TYPE_CHECKING:
+    from aosr.gradient.material_gradient import SurfaceDesign
+
 Device = Literal["cpu", "gpu"]
+_LOG = logging.getLogger(__name__)
 _MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 
 
@@ -95,6 +110,8 @@ class SearchPlan(BaseModel):
     depth_sources: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
     # 面片代號 → 每一組材料在那一片的判決（#1082 段 2-4）；只列有上限的搜尋區，沒有上限的計畫不寫這一格。
     depth_targets: dict[str, tuple[TargetLine, ...]] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    # 成對的兩片（左右對稱，#1206）：每一對面序在前的那一片在前，對與對照前面那一片的面序；沒有就不寫這一格（舊計畫逐位不變）。
+    ties: tuple[tuple[str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
 
 
 class TargetLine(BaseModel):
@@ -219,12 +236,123 @@ def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], 
     return dict(sorted(found.items()))
 
 
+class TieInputs(NamedTuple):
+    """引擎核綁定要的、計畫本身沒帶的那幾樣（命令列開跑時自己讀的）：構造清單（不給是產品構造預設）、使用者材料
+    （准用清單點名的固定材料從這裡接進構造清單，同命令列）、能力表的路徑（不給是產品那一份）。"""
+
+    presets: tuple[PresetMaterial, ...] | None = None
+    entries: tuple[LibraryEntry, ...] = ()
+    capabilities: Path | None = None
+
+
+# 引擎拒收一對時說的是哪一項（``ties.TieRefused.what``）→ 給人看的一句。
+_TIE_WORDS = {"准用清單": "兩區讓程式選的材料不一樣", "家族": "兩區讓程式選的材料不一樣（起點的材料不同）",
+              "起跑樣板": "兩區讓程式選的材料不一樣（起點的材料不同）", "θ 上下界": "兩區可調的範圍不一樣",
+              "深度上限": "兩區的最深不一樣", "裝法": "兩區的裝法不一樣", "fixed": "其中一區不是由程式最佳化",
+              "missing": "其中一區不在這一份方案的分區裡"}
+
+
+def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSettings, inputs: TieInputs) -> SettingsCheck:
+    """位置對上的一對能不能綁：問引擎的開跑前檢查（``aosr.gradient.ties.check_ties_against_start``），這裡不另寫規則。
+
+    起跑配置用命令列開跑同一支（``cli.start_designs``，構造清單照命令列的接法），第一次被問才建（要載入搜尋那一層，
+    沒有位置對上的兩區就不載入）；起跑配置本身引擎就不收時，每一對都算沒配成，回 :class:`Unchecked`
+    （不是這一對設定不一樣；例外原文只進伺服器記錄）。"""
+    built: list[tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]] | Unchecked] = []
+
+    def check(first: str, second: str) -> str | Unchecked | None:
+        from aosr.config.capabilities import load_capabilities
+        from aosr.config.directivity_defaults import load_directivity_defaults
+        from aosr.config.material_gradient import fixed_target_id
+        from aosr.gradient.cli import start_designs
+        from aosr.gradient.fixed_surfaces import fixed_targets_of
+        from aosr.gradient.start_config import presets_table
+        from aosr.gradient.ties import TieRefused, check_ties_against_start
+        from aosr.materials.search_library import fixed_candidates, user_fixed_entries
+
+        if not built:
+            try:
+                table = presets_table() if inputs.presets is None else inputs.presets
+                targets = fixed_targets_of(plan.allowed)
+                if targets:
+                    listed = user_fixed_entries([fixed_target_id(target) for target in targets], inputs.entries)
+                    table = (*table, *fixed_candidates(targets, table, listed))
+                built.append(start_designs(
+                    scheme, settings, table, plan.presets, mount=plan.request.mount, fixed=dict(plan.fixed_surfaces),
+                    caps=dict(plan.max_depths), allowed=dict(plan.allowed),
+                    capabilities=load_capabilities(inputs.capabilities or config_path("capabilities.toml")),
+                    directivity=load_directivity_defaults(config_path("directivity_defaults.toml"))))
+            except (ValueError, OSError) as error:  # 引擎拒收，或檢查要的檔讀不到：都不讓分區頁的限制檢查整支倒掉
+                # 原文是程式的話（代號、路徑），只進伺服器記錄，不上畫面。
+                _LOG.warning("左右對稱：建不出開跑那一組起跑配置，核不了綁定：%s", error)
+                built.append(Unchecked("這份設定開跑前檢查沒過", "這份設定開跑前檢查沒過，先看不了兩區的設定一不一樣。"))
+        start = built[0]
+        if isinstance(start, Unchecked):
+            return start
+        try:
+            check_ties_against_start(((first, second),), *start)
+        except TieRefused as error:
+            return _TIE_WORDS.get(error.what, f"兩區的{error.what}不一樣")
+        return None
+
+    return check
+
+
+def plan_symmetry(scheme: Scheme, design: DesignSettings | None, plan: SearchPlan, settings: MaterialGradientSettings,
+                  inputs: TieInputs | None = None) -> Symmetry:
+    """這一份計畫的配對結果（成對的、沒配成的與原因）：``zone_symmetry.pair_zones`` 配上引擎的開跑前檢查。
+    ``plan`` 只拿起跑配置那幾格（起跑樣板、裝法、固定面、深度上限、准用清單），帶不帶 ``ties`` 都一樣。"""
+    return pair_zones(scheme, design, _engine_check(scheme, plan, settings, inputs or TieInputs()))
+
+
+def draft_symmetry(document: object, design_value: object,
+                   plan: Callable[[Scheme, DesignSettings | None], tuple[SearchPlan, MaterialGradientSettings, TieInputs]]
+                   ) -> dict[str, object]:
+    """分區頁要的配對（表單草稿＋還沒存的設計設定）：算得出來回 ``available: True`` 加 :class:`Symmetry` 的每一格；
+    草稿還不是一份合法方案、或設計設定格式不對，回 ``available: False`` 與一句原因。``plan`` 回不帶綁定的計畫
+    （:func:`plan_search` 的 ``pair=False``）、搜尋設定與 :class:`TieInputs`，只在有位置對上的兩區時才叫；
+    它說開不了（:class:`PlanRefused`）時那幾對照那個原因算沒配成。"""
+    try:
+        scheme = Scheme.model_validate(document)
+    except ValidationError:
+        return {"available": False, "message": "方案還有沒填好的地方，先算不了哪幾區成對"}
+    try:
+        design = None if design_value is None else DesignSettings.model_validate(design_value)
+    except ValidationError:
+        return {"available": False, "message": "設計設定格式不對，先算不了哪幾區成對"}
+    checks: list[SettingsCheck] = []
+
+    def check(first: str, second: str) -> str | Unchecked | None:
+        if not checks:
+            try:
+                base, settings, inputs = plan(scheme, design)
+                checks.append(_engine_check(scheme, base, settings, inputs))
+            except PlanRefused as error:  # 原文是寫給畫面的白話，照寫
+                refused = Unchecked("這份設定現在開不了搜尋", f"這份設定現在開不了搜尋：{str(error).rstrip('。')}。")
+                checks.append(lambda first, second: refused)
+        return checks[0](first, second)
+
+    return {"available": True, **pair_zones(scheme, design, check).model_dump(mode="json")}
+
+
 def plan_search(scheme: Scheme, design: DesignSettings | None, request: GradientRequest,
                 settings: MaterialGradientSettings, fixed_ids: frozenset[str] = frozenset(), *,
-                range_check: RangeCheck | None = None, depth_targets: DepthTargets | None = None) -> SearchPlan:
+                range_check: RangeCheck | None = None, depth_targets: DepthTargets | None = None,
+                tie_inputs: TieInputs | None = None, pair: bool = True) -> SearchPlan:
     """``fixed_ids`` 是材料庫裡固定材料的代號（內建構造預設＋使用者的固定材料），准用清單照它認固定材料；
     ``range_check`` 給了就連可信範圍一起擋（跟立面圖標紅同一把，網頁開跑與建替身傳材料頁那一支）；
-    ``depth_targets`` 是判材料組放不放得進上限的那一份（網頁傳接了材料庫的，不給就用 :func:`builtin_depth_targets`）。"""
+    ``depth_targets`` 是判材料組放不放得進上限的那一份（網頁傳接了材料庫的，不給就用 :func:`builtin_depth_targets`）；
+    ``tie_inputs`` 是引擎核綁定要的那幾樣（網頁傳接了材料庫的）；``pair=False`` 不配對（分區頁要自己拿整份配對結果時用）。"""
+    plan = _plan_without_ties(scheme, design, request, settings, fixed_ids, range_check=range_check, depth_targets=depth_targets)
+    if not pair or not symmetry_on(design):
+        return plan
+    pairs = plan_symmetry(scheme, design, plan, settings, tie_inputs).pairs
+    return plan if not pairs else plan.model_copy(update={"ties": tuple((item.first, item.second) for item in pairs)})
+
+
+def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: GradientRequest,
+                       settings: MaterialGradientSettings, fixed_ids: frozenset[str], *,
+                       range_check: RangeCheck | None, depth_targets: DepthTargets | None) -> SearchPlan:
     problems = mismatches(design, scheme) if design is not None else []
     if problems:
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
@@ -313,4 +441,7 @@ def start_arguments(plan: SearchPlan) -> list[str]:
         arguments.extend(("--max-steps", str(plan.request.max_steps)))
     for surface, targets in plan.allowed.items():
         arguments.extend(("--allowed", f"{surface}={','.join(targets)}"))
+    # 成對的兩片（#1206）：只加在這裡、不進 configuration_arguments（建替身照那一份核固定材料，綁定不改起跑配置）。
+    for first, second in plan.ties:
+        arguments.extend(("--tie", f"{first}={second}"))
     return arguments

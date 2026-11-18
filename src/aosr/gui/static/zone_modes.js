@@ -49,7 +49,8 @@ function faceWord(wall) { return {floor: "地板", ceiling: "天花"}[wall] ?? "
 // 設計設定裡有沒有東西：每一區的做法、原方案、深度上限（房間預設與每面牆，#1111）任一樣有寫就算。
 function designHasContent(design) {
   return Object.keys(design.zones || {}).length > 0 || design.original_scheme_id != null
-    || design.room_max_depth_m != null || Object.keys(design.wall_max_depth_m || {}).length > 0;
+    || design.room_max_depth_m != null || Object.keys(design.wall_max_depth_m || {}).length > 0
+    || design.left_right_symmetry != null;  // 左右對稱關著（#1206；開著不寫這一格）
 }
 function freshZoneDesign() {
   return {schema_version: "aosr.zone_design.v1", scheme_id: scheme.scheme_id, zones: {}};
@@ -108,7 +109,8 @@ function prepareZoneDesignSave(name) {
   zoneDesignSaved = false;
   if (zoneDesignBroken) return async () => { throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）"); };
   const touched = zoneDesign && designHasContent(zoneDesign);
-  if (!touched && !zoneDesignStored) return async () => { zoneDesignSaved = true; };
+  // 沒內容、也沒存過：不寫檔。那一頁要是標過「改的還沒存」（例如左右對稱關了又開回來，#1206），這裡一樣要清掉那一句。
+  if (!touched && !zoneDesignStored) return async () => { zoneDesignSaved = true; window.zonePageSaved?.(); };
   const design = structuredClone(designForEdit());
   design.scheme_id = name;
   for (const wall of Object.keys(design.zones)) {
