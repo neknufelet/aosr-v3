@@ -31,10 +31,12 @@ def _turn(point: tuple[float, float, float]) -> tuple[float, float, float]:
 
 
 def symmetry_document(cuts: dict[str, list[Box]] | None = None, *, across_shift_m: float = 0.0, seat_shift_m: float = 0.0,
-                      turned: bool = False, scheme_id: str = NAME) -> Doc:
+                      turned: bool = False, flipped: bool = False, scheme_id: str = NAME) -> Doc:
+    """``flipped=True``：整組喇叭與座位轉 180 度（前牆變成 x 終點那一面 xL、左牆變成 yL），房間尺寸不變。"""
     document = deepcopy(ZONE_NAMING_SCHEME)
     document["scheme_id"] = scheme_id
-    place = _turn if turned else (lambda point: point)
+    assert not (turned and flipped)
+    place = _turn if turned else (lambda point: (LENGTH - point[0], WIDTH - point[1], point[2])) if flipped else (lambda point: point)
     left, right = (0.9, 1.2 + across_shift_m, 1.0), (0.9, 2.8 + across_shift_m, 1.0)
     seat = (3.2, 2.0 + across_shift_m + seat_shift_m, 1.2)
     document["speakers"] = {name: dict(zip("xyz", place(point), strict=True)) for name, point in (("left", left), ("right", right))}

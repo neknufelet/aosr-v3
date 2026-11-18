@@ -213,7 +213,7 @@ def test_whole_walls_pair_and_a_whole_floor_is_centred_only_under_a_middle_axis(
     assert _pairs(found) == (("y0", "yL"),) and found.centred == ("floor",) and found.alone == 1
     shifted = _paired({}, zones, across_shift_m=0.2)
     assert shifted.pairs == () and shifted.centred == ()
-    assert _missed(shifted) == [("y0", "yL", "side_walls"), ("floor", None, "no_zone")]
+    assert _missed(shifted) == [("y0", "yL", "side_walls"), ("floor", None, "outside")]
 
 
 def test_a_pair_the_engine_refuses_is_listed_as_missed_with_its_reason() -> None:
@@ -232,8 +232,85 @@ def test_two_zones_that_almost_mirror_get_both_cuts_spelled_out() -> None:
     assert missed.cuts == ("把 {second} 切到離左牆 2.50～3.60 公尺，就和 {first} 配成一對",
                            "把 {first} 切到離左牆 0.60～1.50 公尺，就和 {second} 配成一對")
     assert "1 公分" in missed.detail and "{first}" in missed.detail and "{second}" in missed.detail
+    # 差幾公分直接寫（不讓人自己減）：靠中間那一邊對齊不提，靠右牆那一邊差 20 公分。
+    assert "疊著比：靠右牆那一邊差 20 公分。" in missed.detail and "靠中間" not in missed.detail
+    # 「左右對稱」那一塊直接寫的那一句（樣稿那一列就寫原因）。
+    assert missed.summary == "大小不同，各自調；要配對，回「房間方案輸入」切到左右對稱的位置"
+    assert found.axis is not None
+    assert found.axis.words == "對稱軸跟著兩支喇叭的中點和主位走，現在離左牆 2.00 公尺、在房間正中；主位不在兩支喇叭中間時，就不配對。"
     assert missed.figure is not None
     assert missed.figure.wall == "x0" and missed.figure.mirrored_u_m == pytest.approx((2.5, 3.6))
+
+
+def _found(document: Doc, zones: dict[str, list[str]]) -> Symmetry:
+    return pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(searching(zones)), _Check())
+
+
+def test_distances_count_from_the_far_end_when_the_left_wall_is_the_far_one() -> None:
+    """審查 A-K1（橫向）：整組轉 180 度，前牆是 xL、左牆是 yL（座標從另一端起算）。切法的「離左牆」要從 yL 那一端反算，
+    不是照抄區的座標。"""
+    found = _found(symmetry_document({"xL": [FRONT_PAIR[0], ("a", (2.5, 3.4), (0.3, 2.4))]}, flipped=True), {"xL": ["b", "a"]})
+    assert found.axis is not None and (found.axis.front, found.axis.left) == ("xL", "yL")
+    assert found.missed[0].cuts == ("把 {second} 切到離左牆 0.40～1.50 公尺，就和 {first} 配成一對",
+                                    "把 {first} 切到離左牆 2.50～3.40 公尺，就和 {second} 配成一對")
+    assert "靠左牆那一邊差 20 公分" in found.missed[0].detail
+
+
+def test_distances_count_from_the_far_end_when_the_front_wall_is_the_far_one() -> None:
+    """審查 A-K1（縱深）：轉 90 度的房間前牆是 yL。天花上一區的鏡像位置，「離前牆」要從 yL 那一端反算。"""
+    found = _found(symmetry_document({"ceiling": [("p", (0.5, 1.5), (1.0, 2.0))]}, turned=True), {"ceiling": ["p"]})
+    assert found.axis is not None and (found.axis.front, found.axis.left) == ("yL", "x0")
+    assert _missed(found) == [("ceiling@p", None, "no_zone")]
+    assert "離左牆 2.50～3.50 公尺、離前牆 3.00～4.00 公尺" in found.missed[0].detail
+
+
+def test_zones_that_only_touch_the_mirror_position_are_not_a_near_miss() -> None:
+    """審查 A-K4：軸偏 20 公分，b 的鏡像右緣剛好碰到 n 的左緣（浮點算出來多一點點重疊）。只是相接，不算「位置對不上」，
+    不准給切法；兩區各自是「鏡像位置沒有一樣大小的區」。"""
+    found = _found(symmetry_document({"x0": [("b", (0.6, 1.7), (0.3, 2.4)), ("n", (3.8, 4.0), (0.3, 2.4))]}, across_shift_m=0.2),
+                   {"x0": ["b", "n"]})
+    assert _missed(found) == [("x0@b", None, "no_zone"), ("x0@n", None, "no_zone")]
+    assert all(item.cuts == () for item in found.missed)
+
+
+def test_exactly_one_centimetre_off_still_pairs() -> None:
+    """審查 A-K6：規格是「差在 1 公分內」含 1 公分。2.50 − 2.49 在浮點上比 0.01 多一點點，照樣算一對。"""
+    found = _found(symmetry_document({"x0": [FRONT_PAIR[0], ("a", (2.49, 3.59), (0.3, 2.4))]}), {"x0": ["b", "a"]})
+    assert _pairs(found) == (("x0@b", "x0@a"),) and found.missed == ()
+
+
+def test_a_cut_that_would_leave_the_wall_is_not_offered() -> None:
+    """切法不准落在牆外（審查 A）：軸偏 20 公分，e 的鏡像位置超出牆面（牆寬 4.0，鏡像到 4.40）。那一種切法不列；
+    另一種（把 e 切到 f 的鏡像位置，在牆裡）照列。"""
+    found = _found(symmetry_document({"x0": [("e", (0.0, 0.5), (0.3, 2.4)), ("f", (3.6, 4.0), (0.3, 2.4))]}, across_shift_m=0.2),
+                   {"x0": ["e", "f"]})
+    assert _missed(found) == [("x0@e", "x0@f", "position")]
+    assert found.missed[0].cuts == ("把 {first} 切到離左牆 0.40～0.80 公尺，就和 {second} 配成一對",)
+    assert "4.40" not in "".join(found.missed[0].cuts)
+
+
+def test_when_no_cut_is_possible_it_says_the_two_zones_cannot_pair() -> None:
+    """兩種切法都做不到：e 的鏡像超出牆面，f 跨在軸上、它的鏡像位置疊在它自己身上。不給切法，寫一句這兩區沒辦法配成一對。"""
+    found = _found(symmetry_document({"x0": [("e", (0.0, 0.5), (0.3, 2.4)), ("f", (1.9, 4.0), (0.3, 2.4))]}, across_shift_m=0.2),
+                   {"x0": ["e", "f"]})
+    assert _missed(found) == [("x0@e", "x0@f", "position")] and found.missed[0].cuts == ()
+    assert found.missed[0].summary == "鏡像過去會超出牆面，這兩區沒辦法配成一對，各自調"
+    assert "鏡像過去會超出牆面，這兩區沒辦法配成一對。" in found.missed[0].detail
+
+
+def test_a_lone_zone_whose_mirror_leaves_the_wall_gets_no_cut() -> None:
+    """落單的區，鏡像位置超出牆面（軸偏 30 公分，貼著左邊牆角的一區）：不叫人「在那裡切出一區」。"""
+    found = _found(symmetry_document({"x0": [("e", (0.0, 0.3), (0.3, 2.4))]}, across_shift_m=0.3), {"x0": ["e"]})
+    assert _missed(found) == [("x0@e", None, "outside")] and found.missed[0].cuts == ()
+    assert "切出" not in found.missed[0].detail and "超出牆面" in found.missed[0].detail and "4.30" not in found.missed[0].detail
+    assert found.missed[0].summary == "鏡像過去會超出牆面，沒辦法配成一對，各自調"
+
+
+def test_a_zone_across_the_axis_but_off_centre_is_not_told_to_cut_on_itself() -> None:
+    """跨在軸上但沒有置中的區：鏡像位置就是它自己那一帶，不叫人「在那裡切出一區」。"""
+    found = _found(symmetry_document({"x0": [("m", (1.0, 3.1), (0.3, 2.4))]}), {"x0": ["m"]})
+    assert _missed(found) == [("x0@m", None, "straddle")] and found.missed[0].cuts == ()
+    assert "切出" not in found.missed[0].detail and "沒有置中" in found.missed[0].detail
 
 
 def test_switched_off_pairs_nothing_and_a_missing_field_means_on() -> None:
@@ -452,6 +529,30 @@ def test_the_zone_page_gets_the_pairing_from_the_limits_route(tmp_path: Path) ->
     response = client.post("/api/zone-limits", json={"scheme": half, "design": searching(ALL_ZONES)})
     assert response.status_code == 200 and response.json()["symmetry"]["available"] is False
     assert response.json()["symmetry"]["message"]
+
+
+def test_a_design_that_cannot_start_a_search_still_answers_the_limits_route(tmp_path: Path) -> None:
+    """審查 A-K2：兩區最深都設 0.03 m（放不下，開不了搜尋），但位置對上。限制檢查照回 200，那一對算沒配成、講原因；
+    不准因為配對那一段就整支回 500（原本的限制紅字也會跟著沒了）。"""
+    design = searching({"x0": ["b", "a"]})
+    for zone in ("b", "a"):
+        cast(dict[str, dict[str, dict[str, object]]], design["zones"])["x0"][zone]["max_depth_m"] = 0.03
+    response = _client(tmp_path).post("/api/zone-limits", json={"scheme": symmetry_document({"x0": FRONT_PAIR}), "design": design})
+    assert response.status_code == 200
+    found = response.json()["symmetry"]
+    assert found["available"] is True and found["pairs"] == []
+    assert [item["kind"] for item in found["missed"]] == ["settings"]
+    assert "現在還開不了搜尋" in found["missed"][0]["reason"]
+
+
+def test_a_start_the_engine_refuses_outright_pairs_nothing_instead_of_crashing() -> None:
+    """審查 A-K3：起跑配置本身引擎就不收（構造清單是空的，起跑樣板不認識）：不丟例外，那一對照原因算沒配成。"""
+    scheme = Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR}))
+    design = DesignSettings.model_validate(searching({"x0": ["b", "a"]}))
+    plan = plan_search(scheme, design, GradientRequest(), SETTINGS, pair=False)
+    found = plan_symmetry(scheme, design, plan, SETTINGS, TieInputs(presets=()))
+    assert found.pairs == () and [item.kind for item in found.missed] == ["settings"]
+    assert "開跑前檢查沒過" in found.missed[0].reason
 
 
 def test_the_page_lists_a_refused_pair_with_the_engine_reason(tmp_path: Path) -> None:
