@@ -19,7 +19,7 @@
   鏡像位置沒有一樣大小的區、鏡像位置超出牆面、跨在軸上但沒有置中、軸不在正中的左右牆上落單的區。
   每一筆帶一句 ``summary``（「左右對稱」那一塊直接寫出來，老闆 11-18 點頭的樣稿那一列就寫原因）；差幾公分、
   兩種切法在配對細節。切法只列「照做之後兩區真的配成一對」的（:func:`_cut_blocked`）：照「房間方案輸入」真的會做的那樣
-  算一遍——只把要搬的那一區換到鏡像位置、交給切牆工具 ``zone_edit.cut_wall`` 切、切完兩塊都還在原位、設定跟著走。
+  算一遍——只把要搬的那一區換到鏡像位置（照句子印的數字、過網頁的吸邊）、交給切牆工具 ``zone_edit.cut_wall`` 切、切完兩塊都還在原位、設定跟著走。
   兩種都切不出來時那一列寫「只搬其中一區切不出鏡像的位置」，細節兩個方向各寫一句為什麼。
 
 一對裡在前的是面序在前的那一片（命令列面片的順序），跟綁定表那一層的代表片一致；沒有主次，兩片共用同一組數字。
@@ -36,9 +36,9 @@ from pydantic import BaseModel, ConfigDict
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.wall_words import LEFT_OF, OPPOSITE, wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, effective_modes
-from aosr.gui.zone_edit import MIN_SIDE_M, CutBox, WallName, ZoneCutError, cut_wall, too_small
+from aosr.gui.zone_edit import CutBox, WallName, ZoneCutError, cut_wall, snap_edges
 from aosr.physics.report_surfaces import RectangleZone
-from aosr.physics.zone_fill import FILL_PREFIX, Box
+from aosr.physics.zone_fill import FILL_PREFIX
 from aosr.reporting.scheme import Scheme, project_facing, project_midpoint
 
 # 配對規則本身（#1206 規格定的「差在 1 公分內才算一對」），不是計算之間的精度契約；同 zone_edit 的 MIN_SIDE_M 那一類。
@@ -59,6 +59,7 @@ class Unchecked(NamedTuple):
 
 # （面序在前的片, 在後的片）→ 可以配回 None；這一對兩區設定不一樣回一句白話原因；整份設定核不了回 :class:`Unchecked`。
 SettingsCheck = Callable[[str, str], "str | Unchecked | None"]
+_PRINTED: Final = 2  # 句子裡的公尺印到小數幾位（``_Frame._from`` 的 ``.2f``）
 _UNCHECKED_SUMMARY: Final = "位置對上了；這份設定現在開不了搜尋，等開得了再看兩區的設定一不一樣"
 Span = tuple[float, float]
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -301,7 +302,8 @@ def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays:
     """「把 ``moved`` 切到 ``to``、``stays`` 留著不動」照做之後兩區會不會真的配成一對：會回 None，不會回一句為什麼。
 
     照「房間方案輸入」真的會做的那樣算：網頁送給切牆工具的是這一面畫的框（矩形區扣掉自動補滿的，``elevation.js`` 的
-    ``drawnBoxes``），只把要搬的那一區換到鏡像位置；切交給 ``zone_edit.cut_wall`` 判（最小邊、不重疊都是它的規則，
+    ``drawnBoxes``），只把要搬的那一區換到鏡像位置——換成人照句子打的數字、再過網頁那一步吸邊，吸完離鏡像位置
+    超過容差就切不到；切交給 ``zone_edit.cut_wall`` 判（最小邊、不重疊都是它的規則，
     這裡不另寫）；切完照位置找回兩塊（自動補的代號每切一次就重編，不照代號找），而且每一塊沿用的設定
     （``inherited``，``zone_modes.js`` 的 ``remapZoneDesign`` 照它搬）要是原來那一區的。``stays_word`` 是句子裡怎麼叫留著的那一區。"""
     wall, u, v = to
@@ -316,21 +318,20 @@ def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays:
     scene = cast(dict[str, object], frame.document()["scene"])
     entries = cast(dict[str, list[dict[str, object]]], scene["surface_zones_by_wall"])[wall]
     drawn = [entry for entry in entries if entry["area"] == "rectangle" and not cast(str, entry["id"]).startswith(FILL_PREFIX)]
-    boxes = [CutBox(id=cast(str, entry["id"]), u_m=cast(Span, tuple(cast(list[float], entry["u_m"]))),
-                    v_m=cast(Span, tuple(cast(list[float], entry["v_m"])))) for entry in drawn if entry["id"] != key]
-    boxes.append(CutBox(id=key, u_m=u, v_m=v))
+    others = [CutBox(id=cast(str, entry["id"]), u_m=cast(Span, tuple(cast(list[float], entry["u_m"]))),
+                     v_m=cast(Span, tuple(cast(list[float], entry["v_m"])))) for entry in drawn if entry["id"] != key]
+    # 人打的是句子印出來的數字（公分），網頁送出之前還會吸邊（``zone_edit.snap_edges``）：照那樣算出真的會送的框。
+    typed = CutBox(id=key, u_m=(round(u[0], _PRINTED), round(u[1], _PRINTED)), v_m=(round(v[0], _PRINTED), round(v[1], _PRINTED)))
+    sent = snap_edges(typed, others, *frame.sizes[wall])
+    if not (_same(sent.u_m, u) and _same(sent.v_m, v)):
+        return "照打數字，框邊會被吸到牆邊或旁邊那一區的邊上，切不到這個位置"
     try:
-        cut = cut_wall(frame.document(), cast(WallName, wall), boxes)
-    except ZoneCutError as error:
-        if error.thin:
-            return f"會剩下一條比 {MIN_SIDE_M * 100:g} 公分還窄的窄條，切牆工具不收"
-        # 切牆工具另外只會為兩件事拒收：畫的框裡有不到最小邊的（切過去的這一個，或這一面別的框），或框疊在別的框上。
-        narrow = [box.id for box in boxes if too_small(Box(id=box.id, u_m=box.u_m, v_m=box.v_m))]
-        if key in narrow:
-            return f"切出來的寬或高不到 {MIN_SIDE_M * 100:g} 公分，切牆工具不收"
-        if narrow:
-            return f"這一面有別的區寬或高不到 {MIN_SIDE_M * 100:g} 公分，切牆工具不收"
-        return "會疊在這一面別的區上"
+        cut = cut_wall(frame.document(), cast(WallName, wall), [*others, sent])
+    except ZoneCutError:
+        # 過了吸邊，網頁畫得出來的擺法只剩「疊在別的框上」會被拒收；不是網頁畫的方案（有不到最小邊的框或縫）另寫一句。
+        if any(_overlap(sent.u_m, sent.v_m, _Zone(other.id, wall, other.u_m, other.v_m)) > 0.0 for other in others):
+            return "會疊在這一面別的區上"
+        return "切牆工具不收這個框"
     inherited = cast(dict[str, str], cut["inherited"])
 
     def kept(at_u: Span, at_v: Span, source: str) -> bool:

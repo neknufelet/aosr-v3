@@ -151,6 +151,29 @@ def too_small(box: Box) -> bool:
     return min(box.u_m[1] - box.u_m[0], box.v_m[1] - box.v_m[0]) < MIN_SIDE_M - EDGE_MERGE_TOL
 
 
+def snap_edges(box: CutBox, others: Sequence[CutBox], width: float, height: float) -> CutBox:
+    """網頁送框之前的吸邊：框的每一條邊，離牆邊或這一面別的畫框的邊差大於 0、又不到「最小邊扣容差」，就貼到最近的那一條
+    （一樣近留先找到的：0、牆寬或牆高，再照別框的順序）。
+
+    跟 ``static/elevation.js`` 的 ``snapEdges`` 是同一把（畫新框、搬框、打數字改框都先過它才送 ``/api/zone-cut``），
+    改一邊要改兩邊；``test_gui_zone_symmetry_browser`` 有一題拿同一批框兩邊各算一次比。伺服器這一份只給
+    「左右對稱」列切法時算「照打數字網頁會送出哪個框」，切牆面本身不吸。"""
+    reach = MIN_SIDE_M - EDGE_MERGE_TOL
+
+    def snap_one(value: float, targets: Sequence[float]) -> float:
+        best, gap = value, reach
+        for target in targets:
+            distance = abs(value - target)
+            if 0 < distance < gap:
+                best, gap = target, distance
+        return best
+
+    u_targets = [0.0, width, *(edge for other in others for edge in other.u_m)]
+    v_targets = [0.0, height, *(edge for other in others for edge in other.v_m)]
+    return CutBox(id=box.id, u_m=(snap_one(box.u_m[0], u_targets), snap_one(box.u_m[1], u_targets)),
+                  v_m=(snap_one(box.v_m[0], v_targets), snap_one(box.v_m[1], v_targets)))
+
+
 def _check_drawn(wall: str, boxes: Sequence[Box]) -> None:
     for box in boxes:
         if box.id.startswith(FILL_PREFIX):

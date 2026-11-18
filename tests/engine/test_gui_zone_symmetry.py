@@ -27,12 +27,13 @@ from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_plan import GradientRequest, SearchPlan, TieInputs, configuration_arguments, plan_search, plan_symmetry, start_arguments
 from aosr.gui.zone_design import DesignSettings, read_design, write_design
-from aosr.gui.zone_edit import CutBox, cut_wall
+from aosr.gui.wall_words import wall_words
+from aosr.gui.zone_edit import CutBox, WallName, cut_wall, snap_edges
 from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Symmetry, pair_zones
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
-from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, HEIGHT, NAME, SIDE, Box, Doc, searching, symmetry_document
+from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, HEIGHT, LENGTH, NAME, SIDE, WIDTH, Box, Doc, searching, symmetry_document
 
 SETTINGS = load_material_gradient_settings(config_path("material_gradient.toml"))
 ALL_CUTS: dict[str, list[Box]] = {"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED}
@@ -315,80 +316,178 @@ def test_when_no_cut_is_possible_it_says_the_two_zones_cannot_pair() -> None:
 
 def test_a_cut_the_wall_tool_would_refuse_is_not_offered() -> None:
     """審查 A 修補第 2 條：軸在 1.95，b 貼著左牆（0.00～1.00）、a 在 2.80～3.80。兩種切法都在牆裡、也不疊在另一區上，
-    可是照做都會剩一條 10 公分的窄條，網頁的切牆工具（``zone_edit.cut_wall``）不收：不列切法，兩個方向都寫窄條。"""
+    可是各有一邊離牆只差 10 公分：照打數字，網頁會先把那條邊吸到牆上（``elevation.js::snapEdges``），切出來差 10 公分，
+    配不成。不列切法，兩個方向都寫吸邊（第三輪：不是「切牆工具不收的窄條」，網頁上窄條先被吸掉了）。"""
     found = _found(symmetry_document({"x0": [("b", (0.0, 1.0), (0.3, 2.4)), ("a", (2.8, 3.8), (0.3, 2.4))]}, across_shift_m=-0.05),
                    {"x0": ["b", "a"]})
     assert _missed(found) == [("x0@b", "x0@a", "position")] and found.missed[0].cuts == ()
     assert found.missed[0].summary == "只搬其中一區切不出鏡像的位置，各自調"
-    thin = "會剩下一條比 20 公分還窄的窄條，切牆工具不收"
-    assert found.missed[0].detail.endswith(f"只搬其中一區切不出鏡像的位置：把 {{second}} 切到離左牆 2.90～3.90 公尺，{thin}；"
-                                           f"把 {{first}} 切到離左牆 0.10～1.10 公尺，{thin}。")
+    assert found.missed[0].detail.endswith(f"只搬其中一區切不出鏡像的位置：把 {{second}} 切到離左牆 2.90～3.90 公尺，{SNAPPED_AWAY}；"
+                                           f"把 {{first}} 切到離左牆 0.10～1.10 公尺，{SNAPPED_AWAY}。")
 
 
-def _random_front_walls(count: int, seed: int) -> Iterator[tuple[Doc, Doc, bool]]:
-    """固定種子亂擺前牆：兩區 p、q；或再加第三區 r；或只畫 p（或 p 與 r 兩個頂天立地的框）、另一區挑一塊自動補滿的。
-    回（方案, 設計設定, 有沒有自動那一區）。"""
+SNAPPED_AWAY = "照打數字，框邊會被吸到牆邊或旁邊那一區的邊上，切不到這個位置"
+CEILING_PAIR: list[Box] = [("p", (1.0, 2.0), (0.5, 1.5)), ("q", (1.0, 2.0), (2.5, 3.55))]
+# 另一欄一個保留原樣的框：它的一條邊離 q 的鏡像位置的邊只有 15 公分（兩框沒有相對，網頁的吸邊不管這個）。
+CEILING_NEAR: Box = ("r", (3.0, 4.0), (3.35, 3.75))
+
+
+def test_a_cut_the_page_would_snap_away_is_not_offered() -> None:
+    """審查 A 第二輪：天花 p、q 差 5 公分，旁邊 r 的一條邊離「把 q 切到離左牆 2.50～3.50」的 3.50 只有 15 公分。照打數字，
+    網頁會把那條邊吸到 3.35，配不成：這一句不列，搬 p 的那一句照列。再加一個 r2 把搬 p 那邊也吸走：兩種都不列，
+    細節兩個方向都寫吸邊。沒有 r 的對照組兩種都列。"""
+    plain = _found(symmetry_document({"ceiling": CEILING_PAIR}), {"ceiling": ["p", "q"]})
+    assert plain.missed[0].cuts == ("把 {second} 切到離左牆 2.50～3.50 公尺，就和 {first} 配成一對",
+                                    "把 {first} 切到離左牆 0.45～1.50 公尺，就和 {second} 配成一對")
+    found = _found(symmetry_document({"ceiling": [*CEILING_PAIR, CEILING_NEAR]}), {"ceiling": ["p", "q"]})
+    assert _missed(found) == [("ceiling@p", "ceiling@q", "position")]
+    assert found.missed[0].cuts == ("把 {first} 切到離左牆 0.45～1.50 公尺，就和 {second} 配成一對",)
+    both = _found(symmetry_document({"ceiling": [*CEILING_PAIR, CEILING_NEAR, ("r2", (3.0, 4.0), (0.3, 1.0))]}), {"ceiling": ["p", "q"]})
+    assert both.missed[0].cuts == () and both.missed[0].summary == "只搬其中一區切不出鏡像的位置，各自調"
+    assert both.missed[0].detail.endswith(f"只搬其中一區切不出鏡像的位置：把 {{second}} 切到離左牆 2.50～3.50 公尺，{SNAPPED_AWAY}；"
+                                          f"把 {{first}} 切到離左牆 0.45～1.50 公尺，{SNAPPED_AWAY}。")
+
+
+SWEEP_ROUNDS = 1500
+_FACES = ("front", "back", "ceiling", "floor", "side")
+
+
+def _wall_size(turned: bool, wall: str) -> tuple[float, float]:
+    lx, ly = (WIDTH, LENGTH) if turned else (LENGTH, WIDTH)
+    return (lx, ly) if wall in ("floor", "ceiling") else (ly if wall[0] == "x" else lx, HEIGHT)
+
+
+def _random_boxes(rng: random.Random, size: tuple[float, float], count: int, step: float) -> list[Box]:
+    """一面上亂擺幾個互不重疊的框（邊落在 ``step`` 的格點上；三成頂天立地）。"""
+    width, height = size
+    placed: list[Box] = []
+    for index in range(count):
+        for _ in range(20):
+            u0 = round(rng.uniform(0, width - 0.2) / step) * step
+            u1 = min(round(rng.uniform(u0 + 0.2, min(width, u0 + 2.5)) / step) * step, width)
+            v0, v1 = 0.0, height
+            if rng.random() >= 0.3:
+                v0 = round(rng.uniform(0, height - 0.2) / step) * step
+                v1 = min(round(rng.uniform(v0 + 0.2, height) / step) * step, height)
+            if u1 - u0 < 0.2 or v1 - v0 < 0.2:
+                continue
+            if any(not (u1 <= low or high <= u0 or v1 <= bottom or top <= v0) for _name, (low, high), (bottom, top) in placed):
+                continue
+            placed.append((f"z{index}", (round(u0, 4), round(u1, 4)), (round(v0, 4), round(v1, 4))))
+            break
+    return placed
+
+
+def _random_rooms(count: int, seed: int) -> Iterator[tuple[str, Doc, Doc]]:
+    """固定種子亂擺每一面（前牆、後牆、天花、地板、左右牆；三種朝向；軸在正中或偏一邊），挑兩三區交給搜尋
+    （畫的框、自動補滿的、整面一區都可能）。回（哪一類面, 方案, 設計設定）。"""
     rng = random.Random(seed)
     for _ in range(count):
-        a0 = round(rng.uniform(0, 3.5), 2)
-        a1 = round(rng.uniform(a0 + 0.1, 4.0), 2)
-        b0 = round(rng.uniform(0, 3.5), 2)
-        b1 = round(rng.uniform(b0 + 0.1, 4.0), 2)
-        shift = rng.choice((0.0, 0.1, 0.2, 0.3, -0.05))
-        kind = rng.choice(("two", "two", "auto", "anchored", "third"))
-        height = (0.0, HEIGHT) if kind == "anchored" else (0.3, 2.4)
-        boxes: list[Box] = [("p", (a0, a1), height)]
-        if kind != "auto":
-            if not (a1 <= b0 or b1 <= a0):
-                continue
-            # anchored：第二個畫的框 r 擋著，補滿出來的那一塊在搬 p 之後有機會原封不動。
-            boxes.append(("r" if kind == "anchored" else "q", (b0, b1), height))
-        if kind == "third":
-            c0 = round(rng.uniform(0, 3.5), 2)
-            c1 = round(rng.uniform(c0 + 0.1, 4.0), 2)
-            if any(not (high <= c0 or c1 <= low) for _name, (low, high), _v in boxes):
-                continue
-            boxes.append(("r", (c0, c1), (0.3, 2.4)))
-        document = symmetry_document({"x0": boxes}, across_shift_m=shift)
-        filled = sorted(cast(str, zone["id"]) for zone in _wall_zones(document, "x0") if cast(str, zone["id"]).startswith("auto"))
-        auto = kind in ("auto", "anchored")
-        if auto and not filled:
+        face = rng.choice((*_FACES, "side_whole"))
+        turned = rng.random() < 0.25
+        flipped = (not turned) and rng.random() < 0.25
+        shift = 0.0 if face.startswith("side") else rng.choice((0.0, 0.0, 0.1, -0.05, 0.25, 0.37))
+        step = rng.choice((0.05, 0.1, 0.01))
+        front = "yL" if turned else "xL" if flipped else "x0"
+        back = {"x0": "xL", "xL": "x0", "yL": "y0"}[front]
+        left = {"x0": "y0", "xL": "yL", "yL": "x0"}[front]
+        right = {"y0": "yL", "yL": "y0", "x0": "xL"}[left]
+        cuts: dict[str, list[Box]] = {}
+        if face in ("front", "back", "ceiling", "floor"):
+            wall = {"front": front, "back": back}.get(face, face)
+            cuts[wall] = _random_boxes(rng, _wall_size(turned, wall), rng.choice((1, 2, 2, 3)), step)
+        elif face == "side":
+            cuts[left] = _random_boxes(rng, _wall_size(turned, left), rng.choice((1, 2)), step)
+            cuts[right] = _random_boxes(rng, _wall_size(turned, right), rng.choice((1, 2)), step)
+        else:
+            cuts[rng.choice((left, right))] = _random_boxes(rng, _wall_size(turned, left), rng.choice((1, 2)), step)
+        document = symmetry_document(cuts, across_shift_m=shift, turned=turned, flipped=flipped)
+        pool = [(wall, cast(str, zone["id"])) for wall in cuts for zone in _wall_zones(document, wall) if zone["area"] == "rectangle"]
+        if face == "side_whole":
+            pool.append((right if left in cuts else left, "whole_wall"))
+        if len(pool) < 2:
             continue
-        yield document, searching({"x0": ["p", rng.choice(filled) if auto else "q"]}), auto
+        zones: dict[str, list[str]] = {}
+        for wall, key in rng.sample(pool, min(len(pool), rng.choice((2, 2, 3)))):
+            zones.setdefault(wall, []).append(key)
+        yield face.removesuffix("_whole"), document, searching(zones)
 
 
-def _do_the_cut(document: Doc, design: Doc, moved: str, stays: str, words: str) -> None:
-    """照那一句切法真的做一遍，再配一次：``moved`` 要配成一對，另一片就在 ``stays`` 原本的位置。"""
-    span = re.search(r"切到離左牆 ([0-9.]+)～([0-9.]+) 公尺，就和", words)
-    assert span is not None, words
-    before = {cast(str, zone["id"]): zone for zone in _wall_zones(document, "x0")}
-    mover, stayer = moved.split("@")[1], stays.split("@")[1]
-    # 網頁送的框：這一面的矩形區扣掉自動補滿的（elevation.js::drawnBoxes），只把要搬的那一區換位置。
-    drawn = [CutBox(id=name, u_m=(float(span[1]), float(span[2])) if name == mover else _span(zone["u_m"]), v_m=_span(zone["v_m"]))
-             for name, zone in before.items() if not name.startswith("auto")]
-    cut = cut_wall(document, "x0", drawn)
+def _box_of(document: Doc, surface: str) -> tuple[str, tuple[float, float], tuple[float, float]]:
+    """一片現在在哪：（牆, u, v）；整面一區就是整面。"""
+    wall, _, key = surface.partition("@")
+    for zone in _wall_zones(document, wall):
+        if key and zone.get("id") == key:
+            return wall, _span(zone["u_m"]), _span(zone["v_m"])
+    room = cast(dict[str, float], cast(Doc, document["scene"])["room_m"])
+    width, height = (room["Lx"], room["Ly"]) if wall in ("floor", "ceiling") else (room["Ly"] if wall[0] == "x" else room["Lx"], room["Lz"])
+    return wall, (0.0, width), (0.0, height)
+
+
+def _typed_box(found: Symmetry, document: Doc, moved: str, words: str) -> tuple[str, tuple[float, float], tuple[float, float]]:
+    """照那一句切法，人會打成哪個框：只拿句子印出來的數字（「離左牆 a～b 公尺」「離前牆…」「離地…」），句子沒寫到的
+    那一邊沿用要搬的那一區現在的位置。「離○牆」從座標終點那一面起算時反算回座標。"""
+    axis = found.axis
+    assert axis is not None
+    wall, u, v = _box_of(document, moved)
+    scheme = Scheme.model_validate(document)
+    names = wall_words(scheme)
+    room = scheme.scene.room_m
+    across_length, along_length = (room.Ly, room.Lx) if axis.along == "x" else (room.Lx, room.Ly)
+    spans = {"u": u, "v": v}
+    flat, end = wall in ("floor", "ceiling"), wall in axis.end_walls
+    printed = re.findall(r"離(\S+?) ([0-9.]+)～([0-9.]+) 公尺", words.split("，就和")[0])
+    assert printed, words
+    for name, low_text, high_text in printed:
+        low, high = float(low_text), float(high_text)
+        if name == "地":
+            spans["v"] = (low, high)
+            continue
+        across = name == names[axis.left]
+        assert across or name == names[axis.front], words
+        from_wall, length = (axis.left, across_length) if across else (axis.front, along_length)
+        span = (low, high) if from_wall.endswith("0") else (length - high, length - low)
+        # 天花地板：u 是 x、v 是 y；前後牆的 u 是橫向；左右牆的 u 是縱深。
+        along_x = axis.along == "x"
+        spans[("v" if across == along_x else "u") if flat else "u"] = span
+        assert flat or across == end, words
+    return wall, spans["u"], spans["v"]
+
+
+def _do_the_cut(found: Symmetry, document: Doc, design: Doc, moved: str, stays: str, words: str) -> None:
+    """照那一句切法、照網頁真的做的那樣做一遍，再配一次：``moved`` 要配成一對，另一片就在 ``stays`` 原本的位置。"""
+    wall, u, v = _typed_box(found, document, moved, words)
+    key = moved.partition("@")[2]
+    # 網頁送的框：這一面的矩形區扣掉自動補滿的（elevation.js::drawnBoxes）、扣掉要搬的那一區；要搬的框先吸邊（snapEdges）。
+    others = [CutBox(id=cast(str, zone["id"]), u_m=_span(zone["u_m"]), v_m=_span(zone["v_m"])) for zone in _wall_zones(document, wall)
+              if zone["area"] == "rectangle" and not cast(str, zone["id"]).startswith("auto") and zone["id"] != key]
+    size = _box_of(document, wall)
+    sent = snap_edges(CutBox(id=key or "new", u_m=u, v_m=v), others, size[1][1], size[2][1])
+    cut = cut_wall(document, cast(WallName, wall), [*others, sent])
     after = deepcopy(document)
-    cast(dict[str, object], cast(Doc, after["scene"])["surface_zones_by_wall"])["x0"] = cut["zones"]
+    cast(dict[str, object], cast(Doc, after["scene"])["surface_zones_by_wall"])[wall] = cut["zones"]
     # 設計設定跟著走：新的每一塊沿用 inherited 指的那一塊舊設定（zone_modes.js::remapZoneDesign）。
-    old = cast(dict[str, dict[str, object]], design["zones"])["x0"]
+    old = cast(dict[str, dict[str, object]], design["zones"])[wall]
     moved_design = deepcopy(design)
-    cast(dict[str, object], moved_design["zones"])["x0"] = {
-        key: deepcopy(old[source]) for key, source in cast(dict[str, str], cut["inherited"]).items() if source in old}
+    cast(dict[str, object], moved_design["zones"])[wall] = {
+        name: deepcopy(old[source]) for name, source in cast(dict[str, str], cut["inherited"]).items() if source in old}
     again = pair_zones(Scheme.model_validate(after), DesignSettings.model_validate(moved_design), _Check())
-    where = {f"x0@{zone['id']}": _span(zone["u_m"]) for zone in cast(list[dict[str, object]], cut["zones"])}
-    partners = [({pair.first, pair.second} - {moved}).pop() for pair in again.pairs if moved in (pair.first, pair.second)]
-    told = (drawn, words, again.pairs, [item.summary for item in again.missed])
+    mine = f"{wall}@{sent.id}"
+    partners = [({pair.first, pair.second} - {mine}).pop() for pair in again.pairs if mine in (pair.first, pair.second)]
+    told = (document["scene"], design, words, sent, again.pairs, [item.summary for item in again.missed])
     assert len(partners) == 1, told
-    assert all(abs(mine - theirs) <= PAIR_WITHIN_M + 1e-9 for mine, theirs in zip(
-        where[partners[0]], _span(before[stayer]["u_m"]), strict=True)), told
+    was, now = _box_of(document, stays), _box_of(after, partners[0])
+    assert was[0] == now[0] and all(abs(new - old_edge) <= PAIR_WITHIN_M + 1e-9 for new, old_edge in zip(
+        (*now[1], *now[2]), (*was[1], *was[2]), strict=True)), told
 
 
 def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
-    """畫面那句是「切到…就和○配成一對」：固定種子亂擺前牆（兩區；兩區加第三區；一區加一塊自動補滿的），每一種列出來的
-    切法都照「房間方案輸入」真的做一遍——這一面畫的框（扣掉自動補滿的）只把要搬的那一區換到那句寫的位置、交給切牆
-    工具切、設計設定照 ``inherited`` 跟著走——再配一次，這兩區要配成一對。"""
-    listed = unlisted = with_auto = offered = offered_with_auto = 0
-    for document, design, auto in _random_front_walls(1500, seed=1206):
+    """畫面那句是「切到…就和○配成一對」：固定種子亂擺每一面（前牆、後牆、天花、地板、左右牆；畫的框、自動補滿的、
+    整面一區、第三區），每一條列出來的切法都照網頁真的做的那樣做一遍——從句子印出來的數字取框、吸邊（``snap_edges``）、
+    交給切牆工具、設計設定照 ``inherited`` 跟著走——再配一次，這兩區要配成一對。"""
+    listed, unlisted = dict.fromkeys(_FACES, 0), dict.fromkeys(_FACES, 0)
+    snapped = offered = 0
+    for face, document, design in _random_rooms(SWEEP_ROUNDS, seed=1206):
         try:
             found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
         except ValidationError:  # 喇叭被挪出房間之類，這一種擺法不算
@@ -397,17 +496,16 @@ def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
             if item.kind != "position":
                 continue
             assert item.second is not None
-            with_auto += auto
-            listed += bool(item.cuts)
-            unlisted += not item.cuts
+            (listed if item.cuts else unlisted)[face] += 1
+            snapped += "框邊會被吸到" in item.detail
             offered += len(item.cuts)
-            offered_with_auto += auto * len(item.cuts)
             for words in item.cuts:
                 moved, stays = (item.second, item.first) if words.startswith("把 {second}") else (item.first, item.second)
-                _do_the_cut(document, design, moved, stays, words)
-    # 掃到的擺法「有列切法」「不列切法」兩種都要有，其中一區是自動補滿的也要有（數目寫在修補報告）。自動那一塊搬不動，
-    # 列得出來的是搬畫的那一區、自動那一塊留著：只有畫的框讓出來的地方被補滿之後，留著那一塊原封不動才列（照位置找回它）。
-    assert (listed, unlisted, with_auto, offered, offered_with_auto) == (85, 142, 112, 104, 5)
+                _do_the_cut(found, document, design, moved, stays, words)
+    print(f"掃描 {SWEEP_ROUNDS} 輪：有列 {listed}；不列 {unlisted}；切法 {offered} 條；細節寫到吸邊 {snapped} 筆")
+    # 不寫死數目：每一面「有列切法」「不列切法」都要掃到，因為吸邊不列的也要有（數目寫在修補報告）。
+    assert all(listed[face] and unlisted[face] for face in _FACES), (listed, unlisted)
+    assert snapped
 
 
 FULL = (0.0, HEIGHT)
@@ -418,17 +516,16 @@ FULL = (0.0, HEIGHT)
      "把 {second} 切到離左牆 0.00～0.20 公尺，它是自動補滿的那一塊，要先在立面圖畫一個框，才搬得動", "把 {first} 切到離左牆 0.20～4.00 公尺，會疊在 {second} 上"),
     ([("p", (1.2, 2.6), FULL)], "auto2", 0.1,
      "把 {second} 切到離左牆 1.60～3.00 公尺，會疊在 {first} 上", "把 {first} 切到離左牆 0.20～1.60 公尺，補滿之後 {second} 那一塊的形狀會跟著變"),
-    ([("p", (2.3, 3.1), FULL), ("q", (0.5, 1.1), FULL), ("r", (1.2, 1.8), FULL)], "q", 0.0,
-     "把 {second} 切到離左牆 0.90～1.70 公尺，會疊在這一面別的區上", "把 {first} 切到離左牆 2.90～3.50 公尺，會剩下一條比 20 公分還窄的窄條，切牆工具不收"),
-    ([("p", (2.6, 3.9), FULL), ("q", (1.0, 1.1), FULL)], "q", 0.0,
-     "把 {second} 切到離左牆 0.10～1.40 公尺，會剩下一條比 20 公分還窄的窄條，切牆工具不收", "把 {first} 切到離左牆 2.90～3.00 公尺，切出來的寬或高不到 20 公分，切牆工具不收"),
+    ([("p", (0.4, 1.4), FULL), ("q", (3.0, 3.8), FULL), ("r", (2.6, 3.0), FULL), ("t", (0.0, 0.4), FULL)], "q", 0.0,
+     "把 {second} 切到離左牆 2.60～3.60 公尺，會疊在這一面別的區上", "把 {first} 切到離左牆 0.20～1.00 公尺，會疊在這一面別的區上"),
+    # 不是網頁畫得出來的方案（r 只有 10 公分寬，網頁不收這種框）：切牆工具整面拒收，照實寫一句，不亂猜原因。
     ([("p", (1.5, 1.9), FULL), ("q", (2.2, 3.1), FULL), ("r", (0.0, 0.1), FULL)], "q", 0.0,
-     "把 {second} 切到離左牆 2.10～2.50 公尺，這一面有別的區寬或高不到 20 公分，切牆工具不收", "把 {first} 切到離左牆 0.90～1.80 公尺，這一面有別的區寬或高不到 20 公分，切牆工具不收"),
+     "把 {second} 切到離左牆 2.10～2.50 公尺，切牆工具不收這個框", "把 {first} 切到離左牆 0.90～1.80 公尺，切牆工具不收這個框"),
 ])
 def test_each_reason_a_cut_is_not_offered_is_written_out(boxes: list[Box], other: str, shift: float, second_way: str, first_way: str) -> None:
     """兩種切法都列不出來時，細節兩個方向各寫一句為什麼，每一種原因一個固定的例子：要搬的是自動補滿的那一塊、
-    會疊在留著那一區上、補滿之後留著那一塊（自動的）形狀跟著變、會疊在第三區上、會剩窄條、切出來不到最小邊、
-    這一面別的框不到最小邊（切牆工具整面不收）。超出牆面那一種在 ``test_when_no_cut_is_possible…``。"""
+    會疊在留著那一區上、補滿之後留著那一塊（自動的）形狀跟著變、會疊在別的區上（前三列都是網頁畫得出來的擺法），
+    以及不是網頁畫的方案被切牆工具拒收。超出牆面在 ``test_when_no_cut_is_possible…``，吸邊在 ``…snap_away…``。"""
     found = _found(symmetry_document({"x0": boxes}, across_shift_m=shift), {"x0": ["p", other]})
     assert _missed(found) == [("x0@p", f"x0@{other}", "position")] and found.missed[0].cuts == ()
     assert found.missed[0].summary == "只搬其中一區切不出鏡像的位置，各自調"
@@ -443,7 +540,7 @@ def test_a_drawn_zone_can_be_cut_to_pair_with_an_auto_filled_one_that_stays_put(
     found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
     assert _missed(found) == [("x0@p", "x0@auto3", "position")]
     assert found.missed[0].cuts == ("把 {first} 切到離左牆 0.00～1.40 公尺，就和 {second} 配成一對",)
-    _do_the_cut(document, design, "x0@p", "x0@auto3", found.missed[0].cuts[0])
+    _do_the_cut(found, document, design, "x0@p", "x0@auto3", found.missed[0].cuts[0])
 
 
 def test_a_whole_wall_zone_can_be_cut_down_to_pair_with_the_box_on_the_other_side() -> None:

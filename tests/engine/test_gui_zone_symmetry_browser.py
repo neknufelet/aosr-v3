@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 from pathlib import Path
 from typing import cast
@@ -13,11 +14,12 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui.zone_design import DesignSettings, write_design
+from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, CutBox, snap_edges
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, NAME, SIDE, Box, Doc, symmetry_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
-from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
+from tests.engine.test_gui_zone_elevation_browser import _cut_by, _open_scheme, _write
 from tests.engine.test_gui_zone_material_pick_browser import _TEXT_STYLES
 
 WOOLS = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
@@ -405,3 +407,116 @@ def test_the_details_link_is_reachable_without_scrolling_at_1440_by_900(tmp_path
         assert cast(float, found["barHeight"]) <= 80, found
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 5 區：1 對一起調、3 區各自調")
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+# ---- 列出的切法照網頁打數字做得到（第三輪）：伺服器算吸邊的那一份跟網頁同一把 ----
+
+def _snap_cases(count: int, seed: int) -> list[dict[str, object]]:
+    """固定種子的（框、別框、牆寬牆高）：框的每一條邊有的隨便擺，有的故意擺在某條線（牆邊或別框的邊）旁邊——
+    差 0、差剛好等於門檻、比門檻小一點點、大一點點、比最小邊小一點點（還在門檻外）；每五組兩組只有牆邊、都不該吸；每五組一組「一樣近」
+    （兩條線離得一樣近，數字挑二進位寫得準的）。"""
+    rng = random.Random(seed)
+    reach = MIN_SIDE_M - EDGE_MERGE_TOL
+    nudges = (0.0, reach, reach - 1e-9, reach + 1e-9, MIN_SIDE_M - EDGE_MERGE_TOL / 2, 0.125, 0.0625, 0.15, 0.3)
+    cases: list[dict[str, object]] = []
+    for index in range(count):
+        width, height = rng.choice((4.0, 5.0, 3.75)), rng.choice((2.7, 2.5, 4.0))
+        others = []
+        for name in range(rng.choice((0, 1, 2, 3))):
+            u0, v0 = round(rng.uniform(0, width - 1) * 20) / 20, round(rng.uniform(0, height - 1) * 20) / 20
+            others.append({"id": f"o{name}", "u_m": [u0, u0 + rng.choice((0.25, 0.5, 1.0))], "v_m": [v0, v0 + rng.choice((0.25, 0.5, 1.0))]})
+        if index % 5 == 0:  # 一樣近：0.125 離牆邊 0 與別框的 0.25 一樣近；1.125 離兩個別框的 1.0、1.25 一樣近
+            others = [{"id": "o0", "u_m": [0.25, 1.0], "v_m": [0.25, 1.0]}, {"id": "o1", "u_m": [1.25, 2.0], "v_m": [1.25, 2.0]}, *others[:1]]
+            box = {"id": "box", "u_m": [0.125, 1.125], "v_m": [1.125, rng.choice((2.0, 2.125))]}
+        elif index % 5 in (1, 2):  # 不該吸的：只有牆邊，邊貼著牆、剛好離一個門檻、比門檻多一點點、或離得遠
+            stay = (0.0, reach, reach + 1e-9, MIN_SIDE_M - EDGE_MERGE_TOL / 2, 0.3, 0.75)
+            others = []
+            box = {"id": "box", "u_m": [rng.choice(stay), width - rng.choice(stay)], "v_m": [rng.choice(stay), height - rng.choice(stay)]}
+        else:
+            def edge(lines: list[float], limit: float) -> float:
+                if rng.random() < 0.35:
+                    return rng.uniform(0, limit)
+                return rng.choice(lines) + rng.choice((-1, 1)) * rng.choice(nudges)
+            u_lines = [0.0, width, *(value for other in others for value in cast(list[float], other["u_m"]))]
+            v_lines = [0.0, height, *(value for other in others for value in cast(list[float], other["v_m"]))]
+            box = {"id": "box", "u_m": [edge(u_lines, width), edge(u_lines, width)], "v_m": [edge(v_lines, height), edge(v_lines, height)]}
+        cases.append({"box": box, "others": others, "width": width, "height": height})
+    return cases
+
+
+# ``snapEdges`` 包在 elevation.js 的閉包裡，頁面全域叫不到：從頁面載入的那一份原始碼把這一支原文切出來，在同一頁裡跑
+# （它只用到 ``cutSpec``，那一支讀的是頁面全域的 ``inputDefaults.zone_cut``；兩支的原文都先核過還在）。
+_PAGE_SNAP = """async cases => {
+  const source = await (await fetch('/static/elevation.js')).text();
+  const spec = 'function cutSpec() { return inputDefaults.zone_cut; }';
+  const start = source.indexOf('function snapEdges(box, others, width, height) {'), end = source.indexOf('function gridSnap(');
+  if (!source.includes(spec) || start < 0 || end < start) throw new Error('elevation.js 的 snapEdges 或 cutSpec 改了寫法，這一題要跟著改');
+  const snapEdges = new Function('inputDefaults', `${spec}\n${source.slice(start, end)}\nreturn snapEdges;`)(inputDefaults);
+  return cases.map(one => snapEdges(one.box, one.others, one.width, one.height)); }"""
+
+
+def test_the_server_snaps_edges_exactly_like_the_page(tmp_path: Path, browser: Browser) -> None:
+    """``zone_edit.snap_edges`` 跟網頁的 ``elevation.js::snapEdges`` 是同一把：固定種子 240 組（框、別框、牆寬牆高），
+    頁面上叫一次、Python 叫一次，逐組一樣；門檻邊上與「一樣近」的都在裡面，而且有吸、沒吸各至少 40 組。"""
+    _prepare(tmp_path, ALL_CUTS, None)
+    cases = _snap_cases(240, seed=1206)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        on_page = cast(list[dict[str, list[float]]], page.evaluate(_PAGE_SNAP, cases))
+    moved = 0
+    for case, theirs in zip(cases, on_page, strict=True):
+        box = cast(dict[str, list[float]], case["box"])
+        others = [CutBox(id=cast(str, other["id"]), u_m=cast(tuple[float, float], tuple(other["u_m"])), v_m=cast(tuple[float, float], tuple(other["v_m"])))
+                  for other in cast(list[dict[str, list[float]]], case["others"])]
+        ours = snap_edges(CutBox(id="box", u_m=(box["u_m"][0], box["u_m"][1]), v_m=(box["v_m"][0], box["v_m"][1])), others,
+                          cast(float, case["width"]), cast(float, case["height"]))
+        assert all(abs(mine - other) <= 1e-9 for mine, other in zip((*ours.u_m, *ours.v_m), (*theirs["u_m"], *theirs["v_m"]), strict=True)), (
+            case, ours, theirs)
+        moved += (*ours.u_m, *ours.v_m) != (*box["u_m"], *box["v_m"])
+    assert moved >= 40 and len(cases) - moved >= 40, (moved, len(cases))
+
+
+_PAIRING = """async design => {
+  const response = await fetch('/api/zone-limits', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scheme: structuredClone(scheme), design})});
+  return (await response.json()).symmetry; }"""
+# 天花（抬頭看，畫面的「離下緣」是牆寬 4.0 減掉方案的 y）：p、q 由程式最佳化、差 5 公分；r 保留原樣，在另一欄。
+_CEILING: list[Box] = [("p", (1.0, 2.0), (0.5, 1.5)), ("q", (1.0, 2.0), (2.5, 3.55))]
+_NEAR: Box = ("r", (3.0, 4.0), (3.35, 3.75))
+_Q_TO_MIRROR = "把 {second} 切到離左牆 2.50～3.50 公尺，就和 {first} 配成一對"
+_P_TO_MIRROR = "把 {first} 切到離左牆 0.45～1.50 公尺，就和 {second} 配成一對"
+
+
+def _type_the_cut(tmp_path: Path, browser: Browser, boxes: list[Box], zone: str, typed: list[tuple[str, str]]) -> tuple[list[str], Doc]:
+    """開方案、問一次配對（回那一筆位置差列的切法），在立面圖點 ``zone``、照 ``typed`` 一格一格打數字送出，再問一次配對。"""
+    design = _design({"ceiling": ["p", "q"]})
+    _prepare(tmp_path, {"ceiling": boxes}, design)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        before = cast(Doc, page.evaluate(_PAIRING, design))
+        offered = [cast(list[str], item["cuts"]) for item in cast(list[Doc], before["missed"]) if item["kind"] == "position"]
+        page.locator("#elevation-wall-ceiling").click()
+        page.locator(f"#elevation [data-zone-id={zone}] rect").click()
+        for field, value in typed:
+            page.locator(f"#elevation-{field}").fill(value)
+            _cut_by(page, "press:Enter")
+        after = cast(Doc, page.evaluate(_PAIRING, design))
+        assert watched.page_errors == [] and watched.console_errors == []
+    assert len(offered) == 1, before
+    return offered[0], after
+
+
+def test_typing_an_offered_cut_into_the_elevation_really_pairs_the_two_zones(tmp_path: Path, browser: Browser) -> None:
+    """審查 A 第二輪：列出來的切法照打數字要真的配成一對。旁邊有 r 時，「把 q 切到 2.50～3.50」打下去會被網頁吸到 r 的邊
+    （落在 2.50～3.35），所以這一句不列；列出來的那一句（把 p 切到 0.45～1.50：高從 1 改成 1.05）照打，配成一對。
+    沒有 r 的對照組，照「2.50～3.50」打（高改成 1、離下緣改成 0.5），配成一對。"""
+    (tmp_path / "near").mkdir()
+    offered, after = _type_the_cut(tmp_path / "near", browser, [*_CEILING, _NEAR], "p", [("height", "1.05")])
+    assert offered == [_P_TO_MIRROR]
+    assert [{pair["first"], pair["second"]} for pair in cast(list[Doc], after["pairs"])] == [{"ceiling@p", "ceiling@q"}], after
+    (tmp_path / "plain").mkdir()
+    offered, after = _type_the_cut(tmp_path / "plain", browser, _CEILING, "q", [("height", "1.00"), ("bottom", "0.50")])
+    assert offered == [_Q_TO_MIRROR, _P_TO_MIRROR]
+    assert [{pair["first"], pair["second"]} for pair in cast(list[Doc], after["pairs"])] == [{"ceiling@p", "ceiling@q"}], after
