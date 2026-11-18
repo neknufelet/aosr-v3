@@ -5,14 +5,14 @@
 （軸跟著離開房間正中），``seat_shift_m`` 只橫移座位（主位離開兩支喇叭中間）。``turned=True`` 把同一間房轉 90 度：
 長寬對調、前牆換成 y 終點那一面（yL），考另一個朝向的鏡像分支。
 
-六面先各整面一區（固定阻抗），再照 ``cuts``（牆 → 幾個框）切，框外自動補滿（代號 auto1…）。
+六面先各整面一區（固定阻抗），再照 ``cuts``（牆 → 幾個框）切，框外自動補滿（代號 auto1…，跟網頁切牆同一支補滿）。
 """
 from __future__ import annotations
 
 from copy import deepcopy
 from typing import cast
 
-from aosr.gui.zone_edit import CutBox, cut_wall
+from aosr.physics.zone_fill import Box as FillBox, fill_wall
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 
 NAME = "sym-sample"
@@ -32,7 +32,7 @@ def _turn(point: tuple[float, float, float]) -> tuple[float, float, float]:
 
 def symmetry_document(cuts: dict[str, list[Box]] | None = None, *, across_shift_m: float = 0.0, seat_shift_m: float = 0.0,
                       turned: bool = False, scheme_id: str = NAME) -> Doc:
-    document = cast(Doc, deepcopy(ZONE_NAMING_SCHEME))
+    document = deepcopy(ZONE_NAMING_SCHEME)
     document["scheme_id"] = scheme_id
     place = _turn if turned else (lambda point: point)
     left, right = (0.9, 1.2 + across_shift_m, 1.0), (0.9, 2.8 + across_shift_m, 1.0)
@@ -46,10 +46,16 @@ def symmetry_document(cuts: dict[str, list[Box]] | None = None, *, across_shift_
     scene["room_m"] = {"Lx": WIDTH, "Ly": LENGTH, "Lz": HEIGHT} if turned else {"Lx": LENGTH, "Ly": WIDTH, "Lz": HEIGHT}
     whole = {"area": "whole_wall", "material": {"kind": "constant_impedance", "impedance_pa_s_m": WALL_IMPEDANCE}}
     scene["surface_zones_by_wall"] = {wall: [deepcopy(whole)] for wall in ("floor", "ceiling", "x0", "xL", "y0", "yL")}
-    zones = cast(dict[str, object], scene["surface_zones_by_wall"])
+    zones = cast(dict[str, list[dict[str, object]]], scene["surface_zones_by_wall"])
+    room = cast(dict[str, float], scene["room_m"])
     for wall, boxes in (cuts or {}).items():
-        drawn = [CutBox(id=name, u_m=u_m, v_m=v_m) for name, u_m, v_m in boxes]
-        zones[wall] = cut_wall(document, wall, drawn)["zones"]  # type: ignore[arg-type]
+        width, height = ((room["Lx"], room["Ly"]) if wall in ("floor", "ceiling")
+                         else (room["Ly"] if wall[0] == "x" else room["Lx"], room["Lz"]))
+        # 補滿不設最小邊：容差那幾題要挪半公分，補出來的窄條照留（方案格式收得下，網頁切牆才擋窄條）。
+        filled = fill_wall(wall, width, height, [FillBox(id=name, u_m=u_m, v_m=v_m) for name, u_m, v_m in boxes], min_side_m=0.0)
+        assert not filled.problems, filled.problems
+        zones[wall] = [{"area": "rectangle", "id": zone.id, "u_m": list(zone.u_m), "v_m": list(zone.v_m),
+                        "material": deepcopy(whole["material"])} for zone in filled.zones]
     return document
 
 

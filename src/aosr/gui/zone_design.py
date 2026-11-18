@@ -15,6 +15,8 @@
 深度上限三層（#1082 段 1-4，全部選填、單位公尺、都要大於 0）：``room_max_depth_m`` 房間預設、``wall_max_depth_m``
 每面牆、``ZoneDesign.max_depth_m`` 每一區。一區實際的上限取三層裡最小的那一個，並記得是哪一層擋的
 （``zone_limits.depth_cap``）。沒給的格子存檔時不寫（舊設計設定逐位不變）。
+
+``left_right_symmetry``（#1206，選填）：左右對稱的開關，只存「關」（``off``）；缺這一格就是開，配對怎麼算在 ``zone_symmetry``。
 """
 from __future__ import annotations
 
@@ -79,6 +81,8 @@ class DesignSettings(BaseModel):
     original_scheme_id: str | None = Field(default=None, pattern="^" + NAME.pattern.removesuffix(r"\Z") + "$")
     room_max_depth_m: Depth | None = Field(default=None, exclude_if=lambda value: value is None)
     wall_max_depth_m: dict[WallName, Depth] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    # 左右對稱的開關（#1206）：只存「關」。缺這一格就是開（``zone_symmetry.symmetry_on``），開著時存檔不寫（舊設計設定逐位不變）。
+    left_right_symmetry: Literal["off"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def design_relative(scheme_id: str) -> Path:
