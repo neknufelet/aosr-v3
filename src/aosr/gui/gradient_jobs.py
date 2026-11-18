@@ -55,7 +55,8 @@ from aosr.gradient.surrogate_fixed_checks import (
 from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJECT_FILE, STATUS_FILE, STOP_FILE, GradientStatus
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import (
-    GradientRequest, PlanRefused, SearchPlan, fixed_depths, library_depth_targets, plan_search, start_arguments,
+    GradientRequest, PlanRefused, SearchPlan, TieInputs, draft_symmetry, fixed_depths, library_depth_targets, plan_search,
+    start_arguments,
 )
 from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
@@ -330,9 +331,10 @@ class GradientJobs:
         except MaterialsRefused as error:
             raise PlanRefused(str(error)) from error
 
-    def plan(self, scheme: Scheme, design: DesignSettings | None, request: GradientRequest) -> tuple[SearchPlan, SearchMaterials,
-                                                                                                        tuple[LibraryEntry, ...]]:
-        """設計設定轉成搜尋參數，跟這一場的材料（設定檔家族＋材料庫）與使用者材料本身；建替身（``surrogate_builds``）走同一支。"""
+    def plan(self, scheme: Scheme, design: DesignSettings | None, request: GradientRequest, *,
+             pair: bool = True) -> tuple[SearchPlan, SearchMaterials, tuple[LibraryEntry, ...]]:
+        """設計設定轉成搜尋參數，跟這一場的材料（設定檔家族＋材料庫）與使用者材料本身；建替身（``surrogate_builds``）走同一支。
+        ``pair=False`` 不配左右對稱（分區頁自己拿整份配對結果時用）。"""
         materials, entries = self._materials()
         listed = () if design is None else tuple(target for zones in design.zones.values() for item in zones.values()
                                                  for target in item.allowed or ())
@@ -344,8 +346,17 @@ class GradientJobs:
         fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
                                *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
         plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check,
-                           depth_targets=library_depth_targets(materials.settings, entries))
+                           depth_targets=library_depth_targets(materials.settings, entries),
+                           tie_inputs=TieInputs(materials.presets, entries, self.capabilities), pair=pair)
         return plan, materials, entries
+
+    def symmetry(self, document: object, design_value: object) -> dict[str, object]:
+        """分區頁的左右對稱配對（#1206；表單草稿與還沒存的設計設定，同開跑那一支算法與引擎檢查）。"""
+        def planned(scheme: Scheme, design: DesignSettings | None) -> tuple[SearchPlan, MaterialGradientSettings, TieInputs]:
+            plan, materials, entries = self.plan(scheme, design, GradientRequest(), pair=False)
+            return plan, materials.settings, TieInputs(materials.presets, entries, self.capabilities)
+
+        return draft_symmetry(document, design_value, planned)
 
     def depth_targets(self) -> DepthTargets:
         """立面圖限制檢查判准用材料組放不放得下用的那一份（跟開跑同一份材料庫）；材料庫讀不進來丟 :class:`PlanRefused`。"""

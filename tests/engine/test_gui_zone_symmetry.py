@@ -3,7 +3,7 @@
 以及一題端到端：網頁算出的參數真的交給命令列 ``start``，引擎的開跑前檢查收下。
 
 房間全是考卷自己編的（``_zone_symmetry_room``，5.0 × 4.0 × 2.7 m）。「跟主線逐位相同」比的是改動前主線
-（e9c69c48）對同一份輸入算出來的雜湊，釘在這個檔裡。新模組在題目裡才載入：還沒有它的時候每一題各自紅。"""
+（e9c69c48）對同一份輸入算出來的雜湊，釘在這個檔裡。"""
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +13,7 @@ import sys
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -21,9 +21,11 @@ from starlette.testclient import TestClient
 
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.gradient_plan import GradientRequest, SearchPlan, configuration_arguments, plan_search, start_arguments
+from aosr.gui.gradient_plan import GradientRequest, SearchPlan, configuration_arguments, plan_search, plan_symmetry, start_arguments
 from aosr.gui.zone_design import DesignSettings, read_design, write_design
+from aosr.gui.zone_symmetry import Symmetry, pair_zones
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -65,24 +67,22 @@ class _Check:
 
 
 def _paired(cuts: dict[str, list[Box]], zones: dict[str, list[str]], check: Callable[[str, str], str | None] | None = None,
-            design: Doc | None = None, **room: Any) -> Any:
-    from aosr.gui.zone_symmetry import pair_zones
-
-    scheme = Scheme.model_validate(symmetry_document(cuts, **room))
+            design: Doc | None = None, *, across_shift_m: float = 0.0, seat_shift_m: float = 0.0, turned: bool = False) -> Symmetry:
+    scheme = Scheme.model_validate(symmetry_document(cuts, across_shift_m=across_shift_m, seat_shift_m=seat_shift_m, turned=turned))
     settings = DesignSettings.model_validate(design if design is not None else searching(zones))
     return pair_zones(scheme, settings, check or _Check())
 
 
-def _pairs(found: Any) -> tuple[tuple[str, str], ...]:
+def _pairs(found: Symmetry) -> tuple[tuple[str, str], ...]:
     return tuple((pair.first, pair.second) for pair in found.pairs)
 
 
-def _missed(found: Any) -> list[tuple[str, str, str]]:
+def _missed(found: Symmetry) -> list[tuple[str, str | None, str]]:
     return [(item.first, item.second, item.kind) for item in found.missed]
 
 
-def _plan(zones: dict[str, list[str]] | None = None, design: Doc | None = None, **room: Any) -> SearchPlan:
-    scheme = Scheme.model_validate(symmetry_document(ALL_CUTS, **room))
+def _plan(zones: dict[str, list[str]] | None = None, design: Doc | None = None) -> SearchPlan:
+    scheme = Scheme.model_validate(symmetry_document(ALL_CUTS))
     settings = DesignSettings.model_validate(design if design is not None else searching(zones or ALL_ZONES))
     return plan_search(scheme, settings, GradientRequest(), SETTINGS)
 
@@ -99,17 +99,43 @@ def test_mirrored_search_zones_pair_and_the_earlier_patch_comes_first() -> None:
     assert _pairs(found) == (FRONT, SIDES) and found.missed == ()
     assert found.centred == ("ceiling@c",) and found.alone == 1
     assert check.asked == [FRONT, SIDES]
+    assert found.axis is not None
     assert found.axis.along == "x" and found.axis.across_m == pytest.approx(2.0) and found.axis.centred is True
 
 
 def test_only_zones_handed_to_the_program_take_part() -> None:
-    """抓「只管由程式最佳化」被拿掉：鏡像位置上的對象是指定貼一種或保留原樣時，不配、不問引擎、也不列進沒配成。"""
+    """抓「只管由程式最佳化」被拿掉：鏡像位置上的對象是指定貼一種或保留原樣時，不配、不問引擎；那個對象自己不算
+    由程式最佳化的區、也不掛沒配成（沒配成的是交給程式的那一區，見下一題）。"""
     design = searching({"x0": ["b"], "y0": ["s"]})
     cast(dict[str, dict[str, object]], design["zones"])["yL"] = {"s": {"mode": "keep_original"}}
     check = _Check()
     found = _paired(ALL_CUTS, {}, check, design=design)
-    assert found.searched == ("x0@b", "y0@s") and found.pairs == () and found.missed == ()
-    assert found.alone == 2 and check.asked == []
+    assert found.searched == ("x0@b", "y0@s") and found.pairs == () and found.alone == 2 and check.asked == []
+    assert [item.first for item in found.missed] == ["x0@b", "y0@s"] and all(item.second is None for item in found.missed)
+
+
+def test_half_a_pair_whose_mirror_zone_is_not_handed_to_the_program_is_missed() -> None:
+    """半對之一：這一區由程式最佳化，鏡像位置那一區是指定貼一種（設計檔沒列）或保留原樣：算沒配成，
+    原因講得出是哪一區不是由程式最佳化、怎麼改；不問引擎。"""
+    design = searching({"x0": ["b"], "y0": ["s"]})
+    cast(dict[str, dict[str, object]], design["zones"])["yL"] = {"s": {"mode": "keep_original"}}
+    check = _Check()
+    found = _paired(ALL_CUTS, {}, check, design=design)
+    assert _missed(found) == [("x0@b", None, "not_search"), ("y0@s", None, "not_search")] and check.asked == []
+    assert [item.other for item in found.missed] == ["x0@a", "yL@s"]
+    for item in found.missed:
+        assert item.reason == "鏡像位置那一區不是由程式最佳化" and item.cuts == () and item.figure is None
+        assert "{first}" in item.detail and "{other}" in item.detail and "也改成由程式最佳化" in item.detail
+
+
+def test_half_a_pair_with_no_zone_at_the_mirror_position_is_missed() -> None:
+    """半對之二：鏡像位置根本沒有一樣大小的區（前牆只切了左邊那一塊）：算沒配成，原因寫鏡像位置在哪裡（離左牆幾公尺）。"""
+    check = _Check()
+    found = _paired({"x0": [FRONT_PAIR[0]]}, {"x0": ["b"]}, check)
+    assert _missed(found) == [("x0@b", None, "no_zone")] and found.missed[0].other is None and check.asked == []
+    assert found.missed[0].reason == "鏡像位置沒有一樣大小的區"
+    assert "離左牆 2.50～3.60 公尺、離地 0.30～2.40 公尺" in found.missed[0].detail and "{first}" in found.missed[0].detail
+    assert found.pairs == () and found.alone == 1 and found.centred == ()
 
 
 @pytest.mark.parametrize(("shift_m", "pairs"), [(0.005, True), (-0.005, True), (0.05, False), (-0.05, False)])
@@ -129,10 +155,14 @@ def test_side_walls_mirror_each_other_only_when_the_axis_is_in_the_middle() -> N
     cuts: dict[str, list[Box]] = {"x0": [("b", (0.6, 1.7), (0.3, 2.4)), ("a", (2.7, 3.8), (0.3, 2.4))], "y0": SIDE, "yL": SIDE}
     check = _Check()
     found = _paired(cuts, {"x0": ["b", "a"], "y0": ["s"], "yL": ["s"]}, check, across_shift_m=0.2)
+    assert found.axis is not None
     assert found.axis.across_m == pytest.approx(2.2) and found.axis.centred is False
     assert _pairs(found) == (FRONT,) and check.asked == [FRONT]
     assert _missed(found) == [("y0@s", "yL@s", "side_walls")]
     assert "不在房間正中" in found.missed[0].reason and found.missed[0].cuts == ()
+    # 軸不在正中時左右牆上落單的一區也是同一個原因。
+    lone = _paired({"y0": SIDE}, {"y0": ["s"]}, across_shift_m=0.2)
+    assert _missed(lone) == [("y0@s", None, "side_walls")] and "不在房間正中" in lone.missed[0].reason
     # 軸離正中半公分還算在正中。
     near = _paired({"y0": SIDE, "yL": SIDE}, {"y0": ["s"], "yL": ["s"]}, across_shift_m=0.005)
     assert _pairs(near) == (SIDES,)
@@ -150,8 +180,6 @@ def test_a_seat_off_the_speaker_midline_pairs_nothing() -> None:
 
 def test_no_front_wall_pairs_nothing_and_says_so() -> None:
     """兩支喇叭的中點就在主位正上方：定不出前牆（``project_facing`` 拒收），整張不配、照實寫原因。"""
-    from aosr.gui.zone_symmetry import pair_zones
-
     document = symmetry_document(ALL_CUTS)
     document["speakers"] = {"left": {"x": 3.2, "y": 1.2, "z": 1.0}, "right": {"x": 3.2, "y": 2.8, "z": 1.0}}
     found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(searching(ALL_ZONES)), _Check())
@@ -164,6 +192,7 @@ def test_the_other_facing_mirrors_the_other_coordinate() -> None:
     cuts: dict[str, list[Box]] = {"yL": FRONT_PAIR, "x0": SIDE, "xL": SIDE, "ceiling": [("c", (1.2, 2.8), (1.5, 3.0))],
                                   "floor": [("p", (0.3, 1.3), (1.0, 2.0)), ("q", (2.7, 3.7), (1.0, 2.0))]}
     found = _paired(cuts, {"yL": ["b", "a"], "x0": ["s"], "xL": ["s"], "ceiling": ["c"], "floor": ["p", "q"]}, turned=True)
+    assert found.axis is not None
     assert found.axis.along == "y" and found.axis.across_m == pytest.approx(2.0)
     assert _pairs(found) == (("floor@p", "floor@q"), ("x0@s", "xL@s"), ("yL@b", "yL@a"))
     assert found.centred == ("ceiling@c",) and found.missed == ()
@@ -178,12 +207,13 @@ def test_the_floor_mirrors_across_the_axis_in_the_default_facing() -> None:
 
 
 def test_whole_walls_pair_and_a_whole_floor_is_centred_only_under_a_middle_axis() -> None:
-    """整面一區的牆照整面的範圍算：左右牆整面互為一對、地板整面自己置中；軸不在正中時地板不置中也不算沒配成。"""
+    """整面一區的牆照整面的範圍算：左右牆整面互為一對、地板整面自己置中；軸不在正中時地板不置中，鏡像位置沒有區。"""
     zones = {"y0": ["whole_wall"], "yL": ["whole_wall"], "floor": ["whole_wall"]}
     found = _paired({}, zones)
     assert _pairs(found) == (("y0", "yL"),) and found.centred == ("floor",) and found.alone == 1
     shifted = _paired({}, zones, across_shift_m=0.2)
-    assert shifted.pairs == () and shifted.centred == () and _missed(shifted) == [("y0", "yL", "side_walls")]
+    assert shifted.pairs == () and shifted.centred == ()
+    assert _missed(shifted) == [("y0", "yL", "side_walls"), ("floor", None, "no_zone")]
 
 
 def test_a_pair_the_engine_refuses_is_listed_as_missed_with_its_reason() -> None:
@@ -202,13 +232,8 @@ def test_two_zones_that_almost_mirror_get_both_cuts_spelled_out() -> None:
     assert missed.cuts == ("把 {second} 切到離左牆 2.50～3.60 公尺，就和 {first} 配成一對",
                            "把 {first} 切到離左牆 0.60～1.50 公尺，就和 {second} 配成一對")
     assert "1 公分" in missed.detail and "{first}" in missed.detail and "{second}" in missed.detail
+    assert missed.figure is not None
     assert missed.figure.wall == "x0" and missed.figure.mirrored_u_m == pytest.approx((2.5, 3.6))
-
-
-def test_a_lone_search_zone_is_tuned_alone_without_a_missed_mark() -> None:
-    """鏡像位置沒有交給程式的對象：各自調，不掛沒配成。"""
-    found = _paired({"x0": FRONT_PAIR}, {"x0": ["b"]})
-    assert found.pairs == () and found.missed == () and found.alone == 1 and found.centred == ()
 
 
 def test_switched_off_pairs_nothing_and_a_missing_field_means_on() -> None:
@@ -287,8 +312,6 @@ def test_switched_off_or_nothing_to_pair_is_byte_for_byte_the_main_branch() -> N
 def test_the_real_engine_check_decides_and_its_refusal_is_said_plainly() -> None:
     """抓不經引擎檢查就配：前牆兩區位置對上，但一區多准一種材料、或兩區最深不同，引擎的開跑前檢查拒收，
     那一對不進計畫、畫面上算沒配成（原因是白話）；左右牆那一對照配。"""
-    from aosr.gui.gradient_plan import plan_symmetry
-
     scheme = Scheme.model_validate(symmetry_document(ALL_CUTS))
     for change, word in (({"allowed": ["glass_wool_48k", "none"]}, "材料"), ({"max_depth_m": 0.2}, "最深")):
         document = searching(ALL_ZONES)
@@ -299,6 +322,38 @@ def test_the_real_engine_check_decides_and_its_refusal_is_said_plainly() -> None
         found = plan_symmetry(scheme, design, plan, SETTINGS)
         assert _pairs(found) == (SIDES,) and _missed(found) == [("x0@b", "x0@a", "settings")]
         assert word in found.missed[0].reason and "綁定" not in found.missed[0].reason and "x0@" not in found.missed[0].reason
+
+
+def test_resuming_a_search_started_before_ties_sends_no_tie(tmp_path: Path) -> None:
+    """預設開不准動到已經開跑的搜尋：一場沒有綁定的舊搜尋（工作記錄裡的計畫沒有 ties 那一格），方案現在剛好配得上兩對；
+    接續送出的只有「resume 資料夾」（讀搜尋資料夾裡存的，不重算計畫），沒有 ``--tie``，存著的計畫也沒被改寫。"""
+    from tests.engine.test_gui_gradient_jobs import STATUS, FakeLauncher, _finish, _folder, _jobs, _place_surrogate
+
+    data_dir = tmp_path / "data"
+    (data_dir / "schemes").mkdir(parents=True)
+    (data_dir / "designs").mkdir()
+    scheme = Scheme.model_validate(symmetry_document(ALL_CUTS))
+    (data_dir / "schemes" / f"{NAME}.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    # 這一支之前開跑的樣子：計畫沒有綁定（用「關」開跑，存下來的計畫跟主線逐位相同）。
+    write_design(data_dir, DesignSettings.model_validate(searching(ALL_ZONES, left_right_symmetry="off")), scheme)
+    _place_surrogate(data_dir, scheme)
+    launcher = FakeLauncher()
+    jobs = _jobs(data_dir, launcher)
+    view = jobs.start(NAME, GradientRequest())
+    job_file = data_dir / "gradient" / str(view["job_id"]) / "job.json"
+    stored = job_file.read_text(encoding="utf-8")
+    assert "--tie" not in launcher.launched[-1][1] and "ties" not in json.loads(stored)["plan"]
+    assert _sha(json.dumps(json.loads(stored)["plan"], separators=(",", ":"))) == MAIN_PLAN
+    folder = _folder(data_dir, view, STATUS)
+    jobs.stop(str(view["job_id"]))
+    _finish(data_dir, launcher, view, EXIT_STOPPED)
+    # 現在的設計檔沒有那一格（預設開），同一份方案新開一場會配出兩對。
+    (data_dir / "designs" / f"{NAME}.json").write_text(OLD_DESIGN, encoding="utf-8")
+    assert jobs.plan(scheme, read_design(data_dir, NAME), GradientRequest())[0].ties == (FRONT, SIDES)
+    jobs.resume(str(view["job_id"]))
+    argv = launcher.launched[-1][1]
+    assert argv[-2:] == ["resume", str(folder)] and "--tie" not in argv
+    assert "ties" not in json.loads(job_file.read_text(encoding="utf-8"))["plan"]
 
 
 # ---- 分區頁從伺服器拿結果 ----
@@ -373,6 +428,6 @@ def test_the_command_line_accepts_the_ties_the_web_page_computed(tmp_path: Path)
     assert arguments.count("--tie") == 2
     done = _start(tmp_path, arguments)
     assert PASSED in done.stderr and "綁定" not in done.stderr, done.stderr
-    wrong = [word if word != "y0@s=yL@s" else "x0@b=x0@auto1" for word in arguments]
+    wrong = [word if word != "x0@b=x0@a" else "x0@b=x0@auto1" for word in arguments]
     refused = _start(tmp_path, wrong)
     assert refused.returncode == 1 and PASSED not in refused.stderr and "綁定 x0@auto1=x0@b" in refused.stderr, refused.stderr

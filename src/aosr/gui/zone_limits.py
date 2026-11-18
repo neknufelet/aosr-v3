@@ -425,8 +425,17 @@ def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings
 
 
 def zone_limit_routes(range_check: RangeCheck | None,
-                      depth_targets: Callable[[], DepthTargets] | None = None) -> list[Route]:
-    """``POST /api/zone-limits``：收 ``{"scheme": 草稿, "design": 設計設定或 null}``，內容有問題一律回 200 照講。"""
+                      depth_targets: Callable[[], DepthTargets] | None = None,
+                      symmetry: Callable[[object, object], dict[str, object]] | None = None) -> list[Route]:
+    """``POST /api/zone-limits``：收 ``{"scheme": 草稿, "design": 設計設定或 null}``，內容有問題一律回 200 照講。
+    ``symmetry`` 給了就順便回左右對稱的配對（#1206，鍵 ``symmetry``；算法在 ``zone_symmetry``，網頁只照著畫）：
+    分區頁每次改動後本來就會問這一支，配對跟著同一份草稿、同一個世代號回來。"""
+
+    def judged(scheme: dict[str, object], design: object) -> dict[str, object]:
+        result = zone_limits(scheme, design, range_check, depth_targets)
+        if symmetry is not None:
+            result["symmetry"] = symmetry(scheme, design)
+        return result
 
     async def limits(request: Request) -> Response:
         try:
@@ -435,7 +444,7 @@ def zone_limit_routes(range_check: RangeCheck | None,
             return JSONResponse({"error": "限制檢查的請求不是 JSON"}, status_code=400)
         if not isinstance(body, dict) or not isinstance(body.get("scheme"), dict):
             return JSONResponse({"error": "限制檢查的請求要有 scheme（整份方案）"}, status_code=400)
-        return JSONResponse(await run_in_threadpool(zone_limits, body["scheme"], body.get("design"), range_check, depth_targets))
+        return JSONResponse(await run_in_threadpool(judged, body["scheme"], body.get("design")))
 
     return [Route("/api/zone-limits", limits, methods=["POST"])]
 

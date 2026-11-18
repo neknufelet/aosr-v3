@@ -24,6 +24,15 @@ if TYPE_CHECKING:
 TiePairs = tuple[tuple[str, str], ...]
 
 
+class TieRefused(ValueError):
+    """開跑前檢查拒收一對綁定。訊息照舊（點名哪一對、哪一項）；``what`` 是哪一項不同（``missing`` 片不在這一場、
+    ``fixed`` 固定面，其餘是訊息裡那個中文項目名），給網頁把原因換成白話用（#1206 第 2 支），不改拒收本身。"""
+
+    def __init__(self, message: str, what: str) -> None:
+        super().__init__(message)
+        self.what = what
+
+
 def checked_ties(value: Iterable[Sequence[str]]) -> TiePairs:
     """成對的片代號：每一對恰兩片、代號認得、不准自己配自己、同一對不准給兩次、一片只能在一對裡。回固定存法。"""
     seen: dict[str, tuple[str, str]] = {}
@@ -75,9 +84,9 @@ def check_ties_against_start(ties: Iterable[Sequence[str]], designs: Sequence[Su
         label = f"綁定 {first}={second}"
         for name in (first, second):
             if name not in by_id:
-                raise ValueError(f"{label}：片 {name} 不在這一場的面片清單 {list(by_id)}")
+                raise TieRefused(f"{label}：片 {name} 不在這一場的面片清單 {list(by_id)}", "missing")
             if by_id[name].fixed_material_id is not None:
-                raise ValueError(f"{label}：{name} 是固定面，不是交給搜尋的片，不能綁")
+                raise TieRefused(f"{label}：{name} 是固定面，不是交給搜尋的片，不能綁", "fixed")
         left, right = by_id[first], by_id[second]
         compared: tuple[tuple[str, object, object], ...] = (
             ("家族", left.family_id, right.family_id), ("起跑樣板", left.preset_id, right.preset_id),
@@ -86,8 +95,8 @@ def check_ties_against_start(ties: Iterable[Sequence[str]], designs: Sequence[Su
             ("裝法", left.mount, right.mount), ("准用清單", allowed.get(first), allowed.get(second)))
         for words, mine, theirs in compared:
             if mine != theirs:
-                raise ValueError(f"{label}：{words}不同（{first} 是 {mine!r}，{second} 是 {theirs!r}）；"
-                                 "成對兩片要完全相同，不會自動拿掉綁定")
+                raise TieRefused(f"{label}：{words}不同（{first} 是 {mine!r}，{second} 是 {theirs!r}）；"
+                                 "成對兩片要完全相同，不會自動拿掉綁定", words)
 
 
 def check_ties_in_surfaces(ties: Iterable[Sequence[str]], names: Sequence[str], what: str) -> None:

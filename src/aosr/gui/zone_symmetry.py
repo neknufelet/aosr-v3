@@ -11,8 +11,10 @@
   而且只有軸在房間正中（差在容差內）時才互為鏡像。自己跨在軸上、左右置中的區不用配。
 - **設定也要一樣**：位置對上的每一對交給呼叫端給的檢查（開跑計畫給的是引擎的開跑前檢查
   ``aosr.gradient.ties.check_ties_against_start``），它拒收的那一對算沒配成、原因照它回的那一句。這裡不另寫一份規則。
-- **沒配成**只列「兩區」的情形：位置對上但設定不同、軸不在正中的左右牆同位置兩區、鏡像位置疊到但差超過容差的兩區
-  （這一種把兩種切法寫出來，數字是離哪面牆幾公尺）。鏡像位置沒有交給程式的對象的區只是各自調。
+- **沒配成**：由程式最佳化的區，沒進一對、也不是自己置中的，都算沒配成、都列原因。兩區的：位置對上但設定不同、
+  鏡像位置疊到但差超過容差（這一種把兩種切法寫出來，數字是離哪面牆幾公尺）、軸不在正中的左右牆同位置兩區。
+  只有一區的（半對）：鏡像位置那一區不是由程式最佳化（指定貼一種或保留原樣，``other`` 記是哪一區，它自己不掛記號）、
+  鏡像位置沒有一樣大小的區、軸不在正中的左右牆上落單的區。
 
 一對裡在前的是面序在前的那一片（命令列面片的順序），跟綁定表那一層的代表片一致；沒有主次，兩片共用同一組數字。
 給人看的句子裡用 ``{first}``／``{second}`` 代表那兩區，畫面換成它自己的號碼。
@@ -76,13 +78,15 @@ class Figure(BaseModel):
 
 
 class Missed(BaseModel):
-    """沒配成一對的兩區：``position`` 位置差超過容差（有兩種切法與小圖）、``settings`` 位置對上但設定檢查拒收、
-    ``side_walls`` 軸不在正中的左右牆同位置兩區。"""
+    """沒配成一對的區（``second`` 是 None 時只有 ``first`` 一區）：``position`` 兩區位置差超過容差（有兩種切法與小圖）、
+    ``settings`` 兩區位置對上但設定檢查拒收、``side_walls`` 軸不在正中的左右牆（同位置兩區，或落單一區）、
+    ``not_search`` 鏡像位置那一區（``other``）不是由程式最佳化、``no_zone`` 鏡像位置沒有一樣大小的區。"""
 
     model_config = _FROZEN
     first: str
-    second: str
-    kind: Literal["position", "settings", "side_walls"]
+    second: str | None = None
+    other: str | None = None
+    kind: Literal["position", "settings", "side_walls", "not_search", "no_zone"]
     reason: str
     detail: str
     cuts: tuple[str, ...] = ()
@@ -148,22 +152,21 @@ def _size(scheme: Scheme, wall: str) -> tuple[float, float]:
     return (room.Lx, room.Ly) if wall in _FLAT else (room.Ly if wall[0] == "x" else room.Lx, room.Lz)
 
 
-def _search_zones(scheme: Scheme, design: DesignSettings | None) -> list[_Zone]:
-    """由程式最佳化的區，照命令列面片的順序；整面一區的牆照整面的範圍。"""
+def _zones(scheme: Scheme, design: DesignSettings | None) -> tuple[list[_Zone], list[_Zone]]:
+    """（由程式最佳化的區, 其餘的區），各照命令列面片的順序；整面一區的牆照整面的範圍。"""
     modes = effective_modes(design, scheme)
     zones_by_wall = scheme.scene.surface_zones_by_wall or {}
-    found = []
+    searched: list[_Zone] = []
+    others: list[_Zone] = []
     for surface in surface_ids(scheme_patch_keys(scheme)):
         wall, separator, key = surface.partition("@")
-        if modes[wall][key if separator else WHOLE_WALL_KEY] != "search":
-            continue
         width, height = _size(scheme, wall)
         u, v = (0.0, width), (0.0, height)
         for zone in zones_by_wall.get(wall, ()):
             if separator and isinstance(zone, RectangleZone) and zone.id == key:
                 u, v = zone.u_m, zone.v_m
-        found.append(_Zone(surface, wall, u, v))
-    return found
+        (searched if modes[wall][key if separator else WHOLE_WALL_KEY] == "search" else others).append(_Zone(surface, wall, u, v))
+    return searched, others
 
 
 class _Frame:
@@ -231,9 +234,31 @@ def _position_miss(frame: _Frame, first: _Zone, second: _Zone) -> Missed:
                   figure=Figure(wall=wall, second_u_m=second.u, second_v_m=second.v, mirrored_u_m=u, mirrored_v_m=v))
 
 
+def _lone_miss(frame: _Frame, zone: _Zone, others: list[_Zone]) -> Missed:
+    """半對：這一區由程式最佳化，鏡像位置沒有由程式最佳化的對象。"""
+    if frame.side(zone.wall) and not frame.axis.centred:
+        return Missed(first=zone.surface, kind="side_walls", reason=SIDES_NOT_MIRRORED,
+                      detail=f"{{first}} 在左右牆上，但{SIDES_NOT_MIRRORED}，所以沒有對象可以配。")
+    wall, u, v = frame.mirrored(zone)
+    other = next((item for item in others if item.wall == wall and _same(u, item.u) and _same(v, item.v)), None)
+    if other is not None:
+        return Missed(first=zone.surface, other=other.surface, kind="not_search", reason="鏡像位置那一區不是由程式最佳化",
+                      detail="{first} 對到對稱軸另一邊是 {other}，但 {other} 是指定貼一種或保留原樣，不是由程式最佳化。"
+                             "把 {other} 也改成由程式最佳化，兩區就配成一對。")
+    where = frame.words(wall, u, v, (True, True))
+    return Missed(first=zone.surface, kind="no_zone", reason="鏡像位置沒有一樣大小的區",
+                  detail=f"{{first}} 對到對稱軸另一邊是{_other_wall(frame, wall, zone)}{where}，那裡沒有剛好這樣大小的一區。"
+                         "在那裡切出一區、也改成由程式最佳化，兩區就配成一對。")
+
+
+def _other_wall(frame: _Frame, wall: str, zone: _Zone) -> str:
+    """鏡像落在另一面牆時先講是哪一面（左右牆互為鏡像）。"""
+    return "" if wall == zone.wall else f"{frame.names[wall]}的"
+
+
 def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsCheck) -> Symmetry:
-    """配對。``check`` 只在位置對上的那幾對上叫（關掉、定不出軸、沒有位置對上的對象時一次都不叫）。"""
-    zones = _search_zones(scheme, design)
+    """配對。``check`` 只在兩區都由程式最佳化、位置對上的那幾對上叫（關掉、定不出軸、沒有這種對象時一次都不叫）。"""
+    zones, others = _zones(scheme, design)
     searched = tuple(zone.surface for zone in zones)
     if not symmetry_on(design):
         return Symmetry(enabled=False, searched=searched, alone=len(zones))
@@ -278,5 +303,6 @@ def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsChe
             other = max(near, key=lambda found: found[0])[1]
             used.update((zone.surface, other.surface))
             missed.append(_position_miss(frame, zone, other))
+    missed.extend(_lone_miss(frame, zone, others) for zone in zones if zone.surface not in used)
     return Symmetry(enabled=True, axis=axis, searched=searched, pairs=tuple(pairs), missed=tuple(missed),
                     centred=tuple(centred), alone=len(zones) - 2 * len(pairs))
