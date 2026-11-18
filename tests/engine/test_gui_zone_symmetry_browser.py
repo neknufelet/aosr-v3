@@ -446,8 +446,8 @@ def _snap_cases(count: int, seed: int) -> list[dict[str, object]]:
 
 # ``snapEdges`` 包在 elevation.js 的閉包裡，頁面全域叫不到：從頁面載入的那一份原始碼把這一支原文切出來，在同一頁裡跑
 # （它只用到 ``cutSpec``，那一支讀的是頁面全域的 ``inputDefaults.zone_cut``；兩支的原文都先核過還在）。
-_PAGE_SNAP = """async cases => {
-  const source = await (await fetch('/static/elevation.js')).text();
+_PAGE_SNAP = """async ([cases, script]) => {
+  const source = await (await fetch(script)).text();
   const spec = 'function cutSpec() { return inputDefaults.zone_cut; }';
   const start = source.indexOf('function snapEdges(box, others, width, height) {'), end = source.indexOf('function gridSnap(');
   if (!source.includes(spec) || start < 0 || end < start) throw new Error('elevation.js 的 snapEdges 或 cutSpec 改了寫法，這一題要跟著改');
@@ -463,7 +463,7 @@ def test_the_server_snaps_edges_exactly_like_the_page(tmp_path: Path, browser: B
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
-        on_page = cast(list[dict[str, list[float]]], page.evaluate(_PAGE_SNAP, cases))
+        on_page = cast(list[dict[str, list[float]]], page.evaluate(_PAGE_SNAP, [cases, "/".join(("", "static", "elevation.js"))]))
     moved = 0
     for case, theirs in zip(cases, on_page, strict=True):
         box = cast(dict[str, list[float]], case["box"])

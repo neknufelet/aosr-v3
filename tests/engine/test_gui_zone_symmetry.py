@@ -502,10 +502,9 @@ def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
             for words in item.cuts:
                 moved, stays = (item.second, item.first) if words.startswith("把 {second}") else (item.first, item.second)
                 _do_the_cut(found, document, design, moved, stays, words)
-    print(f"掃描 {SWEEP_ROUNDS} 輪：有列 {listed}；不列 {unlisted}；切法 {offered} 條；細節寫到吸邊 {snapped} 筆")
     # 不寫死數目：每一面「有列切法」「不列切法」都要掃到，因為吸邊不列的也要有（數目寫在修補報告）。
     assert all(listed[face] and unlisted[face] for face in _FACES), (listed, unlisted)
-    assert snapped
+    assert snapped and offered, (SWEEP_ROUNDS, listed, unlisted, offered, snapped)
 
 
 def test_the_cut_is_judged_on_the_digits_a_person_types_and_the_box_the_page_sends() -> None:
