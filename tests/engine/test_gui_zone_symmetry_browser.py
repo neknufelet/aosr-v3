@@ -12,6 +12,8 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, expect
 
+from aosr.gui.zone_design import DesignSettings, write_design
+from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, NAME, SIDE, Box, Doc, symmetry_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -36,7 +38,8 @@ def _prepare(tmp_path: Path, cuts: dict[str, list[Box]], design: Doc | None) -> 
     path = tmp_path / "designs" / f"{NAME}.json"
     if design is not None:
         path.parent.mkdir(exist_ok=True)
-        path.write_text(json.dumps(design), encoding="utf-8")
+        # 用產品自己的寫法存（跟網頁存出來的同一種排法），「打開不改就存」才比得出逐位相同。
+        write_design(tmp_path, DesignSettings.model_validate(design), Scheme.model_validate(symmetry_document(cuts)))
     return path
 
 
@@ -189,4 +192,32 @@ def test_zones_that_do_not_mirror_say_so_and_the_details_spell_out_both_cuts(tmp
         expect(page.locator("#zone-symmetry-detail")).to_be_visible()
         page.locator("#zone-symmetry-detail-close").click()
         expect(page.locator("#zone-symmetry-detail")).to_have_count(0)
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_half_a_pair_is_marked_missed_and_the_reason_only_shows_in_the_details(tmp_path: Path, browser: Browser) -> None:
+    """半對兩種（主對話補的規格）：前牆只切了左邊一塊、鏡像位置沒有一樣的區；左牆那一區由程式最佳化、右牆同位置那一區沒交給程式。
+    兩區都掛跟「位置對不上」同一種「沒配成一對」；沒交給程式的那一區自己不掛；原因點開「配對細節」才看得到。"""
+    _prepare(tmp_path, {"x0": [FRONT_PAIR[0]], "y0": SIDE, "yL": SIDE}, _design({"x0": ["b"], "y0": ["s"]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        expect(page.locator("#zone-symmetry")).to_have_attribute("data-state", "paired")
+        marks = _marks(page)
+        assert set(marks) == {"x0/b", "y0/s"}
+        assert all(mark["missed"] == "true" and mark["pair"] is None and mark["words"] == "沒配成一對" for mark in marks.values())
+        expect(page.locator("#zone-symmetry-missed .zv-sym-missed")).to_have_count(2)
+        expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(0)
+        expect(page.locator("#zone-result-search")).not_to_contain_text("一起調")
+        for hidden in ("不是由程式最佳化", "沒有一樣大小的區"):
+            expect(page.locator("#zone-page")).not_to_contain_text(hidden)
+        page.locator("#zone-symmetry-details").click()
+        detail = page.locator("#zone-symmetry-detail")
+        expect(detail.locator(".zv-sym-why[data-kind='no_zone']")).to_contain_text("鏡像位置沒有一樣大小的區")
+        expect(detail.locator(".zv-sym-why[data-kind='no_zone']")).to_contain_text("離左牆 2.50～3.60 公尺")
+        expect(detail.locator(".zv-sym-why[data-kind='not_search']")).to_contain_text("鏡像位置那一區不是由程式最佳化")
+        expect(detail.locator(".zv-sym-why[data-kind='not_search']")).to_contain_text(re.compile("把.*右牆.*也改成由程式最佳化"))
+        expect(detail).not_to_contain_text("{")
+        rows = cast(list[dict[str, object]], detail.evaluate(_TEXT_STYLES))
+        assert rows and all(cast(float, row["size"]) >= 12 and cast(float, row["contrast"]) >= 4.5 for row in rows), rows
         assert watched.page_errors == [] and watched.console_errors == []
