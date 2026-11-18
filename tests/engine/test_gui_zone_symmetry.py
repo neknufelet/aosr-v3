@@ -517,7 +517,7 @@ def test_the_cut_is_judged_on_the_digits_a_person_types_and_the_box_the_page_sen
     for boxes, words in (
             ([("p", (0.3996, 1.2), row), ("q", (2.8, 3.5), row), ("r", (3.8, 4.0), (1.5, 2.4))], "把 {second} 切到離左牆 2.80～3.60 公尺，就和 {first} 配成一對"),
             ([("p", (0.406, 1.2), row), ("q", (2.8, 3.5), row), ("r", (3.6, 4.0), row)], "把 {second} 切到離左牆 2.80～3.59 公尺，就和 {first} 配成一對")):
-        document = symmetry_document({"x0": cast(list[Box], boxes)})
+        document = symmetry_document({"x0": boxes})
         design = searching({"x0": ["p", "q"]})
         found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
         assert _missed(found) == [("x0@p", "x0@q", "position")] and words in found.missed[0].cuts, found.missed[0]
