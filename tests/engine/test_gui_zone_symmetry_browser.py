@@ -68,6 +68,30 @@ def _marks(page: Page) -> dict[str, dict[str, str | None]]:
     return cast(dict[str, dict[str, str | None]], page.evaluate(_MARKS))
 
 
+def test_the_frequency_caption_keeps_its_own_style_and_the_axis_group_does_not_take_it(tmp_path: Path, browser: Browser) -> None:
+    """審查 B 修補第 1 條：曲線圖底下「頻率（赫茲）」那一行（``div.zv-axis``，``zone_overview.js::curveBlock``）的樣式照主線：
+    11.5 px、``--soft`` 那個顏色、置中、往上收 3 px。對稱軸那一組（``g.zv-sym-axis``）是另一個名字，不准吃到那個字級。"""
+    _prepare(tmp_path, ALL_CUTS, _design({"x0": ["b", "a"], "y0": ["s"], "yL": ["s"]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        expect(page.locator("#zone-map g.zv-sym-axis").first).to_be_visible()
+        seen = cast(dict[str, str], page.evaluate("""() => {
+          const side = document.querySelector('#zone-page .zv-side');
+          const caption = document.createElement('div'); caption.className = 'zv-axis'; caption.textContent = '頻率（赫茲）';
+          const soft = document.createElement('div'); soft.style.color = 'var(--soft)';
+          side.append(caption, soft);
+          const style = getComputedStyle(caption);
+          const seen = {size: style.fontSize, color: style.color, soft: getComputedStyle(soft).color, align: style.textAlign,
+                        top: style.marginTop, axis: getComputedStyle(document.querySelector('#zone-map g.zv-sym-axis')).fontSize,
+                        plain: getComputedStyle(document.querySelector('#zone-map')).color};
+          caption.remove(); soft.remove();
+          return seen; }"""))
+        assert (seen["size"], seen["align"], seen["top"]) == ("11.5px", "center", "-3px"), seen
+        assert seen["color"] == seen["soft"] != seen["plain"], seen
+        assert seen["axis"] != "11.5px", seen
+
+
 def test_switched_on_paired_zones_carry_the_same_shape_and_name_each_other(tmp_path: Path, browser: Browser) -> None:
     """開著（設計檔沒有那一格）：前牆兩區、左右牆兩區各一對；每一對兩區掛同一個圖形、互相寫「和○牆○一對」，兩對圖形不同；
     天花置中那一區不掛記號；底下那一條寫「2 對一起調、1 區各自調」；開關整頁只有一個（選了區、右欄換成小框時也是）；
@@ -88,8 +112,12 @@ def test_switched_on_paired_zones_carry_the_same_shape_and_name_each_other(tmp_p
         assert set(marks) == {"x0/b", "x0/a", "y0/s", "yL/s"}
         assert marks["x0/b"]["pair"] == "x0/a" and marks["x0/a"]["pair"] == "x0/b"
         assert marks["y0/s"]["pair"] == "yL/s" and marks["yL/s"]["pair"] == "y0/s"
-        assert marks["x0/b"]["shape"] == marks["x0/a"]["shape"] and marks["y0/s"]["shape"] == marks["yL/s"]["shape"]
-        assert marks["x0/b"]["shape"] != marks["y0/s"]["shape"]
+        # 圖形比畫出來的那個多邊形有幾個頂點（審查 B：屬性寫對、畫成同一種也讀得到屬性）：一對兩區一樣，兩對之間不一樣。
+        corners = {f"{wall}/{zone}": cast(int, page.locator(
+            f"#zone-map [data-wall='{wall}'][data-zone='{zone}'] polygon.zv-pair-mark").evaluate("mark => mark.points.numberOfItems"))
+            for wall, zone in (("x0", "b"), ("x0", "a"), ("y0", "s"), ("yL", "s"))}
+        assert corners["x0/b"] == corners["x0/a"] and corners["y0/s"] == corners["yL/s"]
+        assert corners["x0/b"] != corners["y0/s"] and min(corners.values()) >= 3
         assert all(mark["missed"] is None for mark in marks.values())
         assert re.fullmatch(r"和前牆.+一對", cast(str, marks["x0/b"]["words"]))
         assert re.fullmatch(r"和右牆.+一對", cast(str, marks["y0/s"]["words"]))
@@ -226,8 +254,8 @@ def test_half_a_pair_is_marked_missed_and_the_reason_only_shows_in_the_details(t
         expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(0)
         expect(page.locator("#zone-result-search")).not_to_contain_text("一起調")
         # 原因直接寫在那一列（主對話 11-18 更正：以老闆點頭的樣稿為準，不是點開才看得到）。
-        expect(page.locator("#zone-symmetry-missed")).to_contain_text("對面沒有一樣大小的區，各自調")
-        expect(page.locator("#zone-symmetry-missed")).to_contain_text("對面那一區不是由程式最佳化，各自調")
+        expect(page.locator("#zone-symmetry-missed")).to_contain_text("對稱軸另一邊沒有一樣大小的區，各自調")
+        expect(page.locator("#zone-symmetry-missed")).to_contain_text("對稱軸另一邊那一區不是由程式最佳化，各自調")
         expect(page.locator("#zone-page")).not_to_contain_text("2.50～3.60")
         page.locator("#zone-symmetry-details").click()
         detail = page.locator("#zone-symmetry-detail")

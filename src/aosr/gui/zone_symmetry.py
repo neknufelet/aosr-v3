@@ -11,12 +11,16 @@
   而且只有軸在房間正中（差在容差內）時才互為鏡像。自己跨在軸上、左右置中的區不用配。
 - **設定也要一樣**：位置對上的每一對交給呼叫端給的檢查（開跑計畫給的是引擎的開跑前檢查
   ``aosr.gradient.ties.check_ties_against_start``），它拒收的那一對算沒配成、原因照它回的那一句。這裡不另寫一份規則。
+  檢查分得出兩種沒過：這一對兩區設定不一樣（回一句原因），與整份設定現在開不了搜尋、核不了（回 :class:`Unchecked`，
+  那一列不叫人把兩區「設成一樣」——兩區本來可能就一樣）。
 - **沒配成**：由程式最佳化的區，沒進一對、也不是自己置中的，都算沒配成、都列原因。兩區的：位置對上但設定不同、
   鏡像位置疊到但差超過容差（這一種把兩種切法寫出來，數字是離哪面牆幾公尺）、軸不在正中的左右牆同位置兩區。
   只有一區的（半對）：鏡像位置那一區不是由程式最佳化（指定貼一種或保留原樣，``other`` 記是哪一區，它自己不掛記號）、
   鏡像位置沒有一樣大小的區、鏡像位置超出牆面、跨在軸上但沒有置中、軸不在正中的左右牆上落單的區。
   每一筆帶一句 ``summary``（「左右對稱」那一塊直接寫出來，老闆 11-18 點頭的樣稿那一列就寫原因）；差幾公分、
-  兩種切法在配對細節。切法只列做得到的：切過去會超出牆面、或會切在另一區自己身上的不列。
+  兩種切法在配對細節。切法只列「照做之後兩區真的配成一對」的（:func:`_cut_blocked`）：照「房間方案輸入」真的會做的那樣
+  算一遍——只把要搬的那一區換到鏡像位置、交給切牆工具 ``zone_edit.cut_wall`` 切、切完兩塊都還在原位、設定跟著走。
+  兩種都切不出來時那一列寫「只搬其中一區切不出鏡像的位置」，細節兩個方向各寫一句為什麼。
 
 一對裡在前的是面序在前的那一片（命令列面片的順序），跟綁定表那一層的代表片一致；沒有主次，兩片共用同一組數字。
 給人看的句子裡用 ``{first}``／``{second}`` 代表那兩區，畫面換成它自己的號碼。
@@ -25,14 +29,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Final, Literal, NamedTuple, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.wall_words import LEFT_OF, OPPOSITE, wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, effective_modes
+from aosr.gui.zone_edit import MIN_SIDE_M, CutBox, WallName, ZoneCutError, cut_wall, too_small
 from aosr.physics.report_surfaces import RectangleZone
+from aosr.physics.zone_fill import FILL_PREFIX, Box
 from aosr.reporting.scheme import Scheme, project_facing, project_midpoint
 
 # 配對規則本身（#1206 規格定的「差在 1 公分內才算一對」），不是計算之間的精度契約；同 zone_edit 的 MIN_SIDE_M 那一類。
@@ -41,7 +47,19 @@ SWITCHED_OFF: Final = "off"
 NOT_BETWEEN: Final = "主位不在兩支喇叭中間，定不出對稱軸"
 NO_FRONT: Final = "從兩支喇叭的中點和主位看不出哪一面是前牆，定不出對稱軸"
 SIDES_NOT_MIRRORED: Final = "對稱軸不在房間正中，左右兩面牆不互為鏡像"
-SettingsCheck = Callable[[str, str], str | None]  # （面序在前的片, 在後的片）→ 可以配回 None，不行回一句白話原因
+
+
+class Unchecked(NamedTuple):
+    """設定檢查做不成（不是這一對兩區設定不一樣，是整份設定現在開不了搜尋或開跑前檢查沒過）：``reason`` 一句、
+    ``because`` 是細節那一句「…位置對上了，但」後面接的話。"""
+
+    reason: str
+    because: str
+
+
+# （面序在前的片, 在後的片）→ 可以配回 None；這一對兩區設定不一樣回一句白話原因；整份設定核不了回 :class:`Unchecked`。
+SettingsCheck = Callable[[str, str], "str | Unchecked | None"]
+_UNCHECKED_SUMMARY: Final = "位置對上了；這份設定現在開不了搜尋，等開得了再看兩區的設定一不一樣"
 Span = tuple[float, float]
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 _FLAT: Final = ("floor", "ceiling")
@@ -86,7 +104,8 @@ class Missed(BaseModel):
     ``not_search`` 鏡像位置那一區（``other``）不是由程式最佳化、``no_zone`` 鏡像位置沒有一樣大小的區、
     ``outside`` 鏡像位置超出牆面、``straddle`` 跨在軸上但沒有置中（鏡像位置跟它自己疊在一起）。
     ``summary`` 是「左右對稱」那一塊直接寫出來的一句（為什麼沒配成、要怎麼辦），``reason``／``detail``／``cuts`` 在配對細節。
-    ``cuts`` 只列做得到的切法：切過去會超出牆面、或會切在另一區自己身上的不列（一種都沒有就是空的）。"""
+    ``cuts`` 只列照做之後兩區真的配成一對的切法（:func:`_cut_blocked` 照切牆工具算過一遍；一種都沒有就是空的，
+    這時 ``detail`` 兩個方向各寫一句為什麼切不出來）。"""
 
     model_config = _FROZEN
     first: str
@@ -189,6 +208,14 @@ class _Frame:
         room = scheme.scene.room_m
         self.across_length, self.along_length = (room.Ly, room.Lx) if axis.along == "x" else (room.Lx, room.Ly)
         self.sizes = {wall: _size(scheme, wall) for wall in (*_FLAT, "x0", "xL", "y0", "yL")}
+        self._scheme = scheme
+        self._document: dict[str, object] | None = None
+
+    def document(self) -> dict[str, object]:
+        """方案寫成切牆工具吃的那種字典（要試切法時才轉，一份方案只轉一次）。"""
+        if self._document is None:
+            self._document = self._scheme.model_dump(mode="json")
+        return self._document
 
     def side(self, wall: str) -> bool:
         return wall not in _FLAT and wall not in self.axis.end_walls
@@ -270,6 +297,47 @@ def _overlap(u: Span, v: Span, zone: _Zone) -> float:
 _GO_CUT: Final = "要配對，回「房間方案輸入」切到左右對稱的位置"
 
 
+def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays: _Zone, stays_word: str) -> str | None:
+    """「把 ``moved`` 切到 ``to``、``stays`` 留著不動」照做之後兩區會不會真的配成一對：會回 None，不會回一句為什麼。
+
+    照「房間方案輸入」真的會做的那樣算：網頁送給切牆工具的是這一面畫的框（矩形區扣掉自動補滿的，``elevation.js`` 的
+    ``drawnBoxes``），只把要搬的那一區換到鏡像位置；切交給 ``zone_edit.cut_wall`` 判（最小邊、不重疊都是它的規則，
+    這裡不另寫）；切完照位置找回兩塊（自動補的代號每切一次就重編，不照代號找），而且每一塊沿用的設定
+    （``inherited``，``zone_modes.js`` 的 ``remapZoneDesign`` 照它搬）要是原來那一區的。``stays_word`` 是句子裡怎麼叫留著的那一區。"""
+    wall, u, v = to
+    if not frame.inside(wall, u, v):
+        return "會超出牆面"
+    if wall == stays.wall and _overlap(u, v, stays) > 0.0:
+        return f"會疊在 {stays_word} 上"
+    # 整面一區的那一面還沒有框：照做就是在鏡像位置畫第一個框（代號網頁會另取，這裡隨便給一個），設定沿用整面那一區的。
+    key = moved.surface.partition("@")[2] or WHOLE_WALL_KEY
+    if key.startswith(FILL_PREFIX):
+        return "它是自動補滿的那一塊，要先在立面圖畫一個框，才搬得動"
+    scene = cast(dict[str, object], frame.document()["scene"])
+    entries = cast(dict[str, list[dict[str, object]]], scene["surface_zones_by_wall"])[wall]
+    drawn = [entry for entry in entries if entry["area"] == "rectangle" and not cast(str, entry["id"]).startswith(FILL_PREFIX)]
+    boxes = [CutBox(id=cast(str, entry["id"]), u_m=cast(Span, tuple(cast(list[float], entry["u_m"]))),
+                    v_m=cast(Span, tuple(cast(list[float], entry["v_m"])))) for entry in drawn if entry["id"] != key]
+    boxes.append(CutBox(id=key, u_m=u, v_m=v))
+    try:
+        cut = cut_wall(frame.document(), cast(WallName, wall), boxes)
+    except ZoneCutError as error:
+        if error.thin:
+            return f"會剩下一條比 {MIN_SIDE_M * 100:g} 公分還窄的窄條，切牆工具不收"
+        if too_small(Box(id=key, u_m=u, v_m=v)):
+            return f"這一區的寬或高不到 {MIN_SIDE_M * 100:g} 公分，切牆工具不收"
+        return "會疊在這一面別的區上"
+    inherited = cast(dict[str, str], cut["inherited"])
+
+    def kept(at_u: Span, at_v: Span, source: str) -> bool:
+        return any(_same(at_u, cast(Span, tuple(cast(list[float], zone["u_m"])))) and _same(at_v, cast(Span, tuple(cast(list[float], zone["v_m"]))))
+                   and inherited[cast(str, zone["id"])] == source for zone in cast(list[dict[str, object]], cut["zones"]))
+
+    if not kept(u, v, key) or (stays.wall == wall and not kept(stays.u, stays.v, stays.surface.partition("@")[2])):
+        return f"補滿之後 {stays_word} 那一塊的形狀會跟著變"
+    return None
+
+
 def _position_miss(frame: _Frame, first: _Zone, second: _Zone) -> Missed:
     wall, u, v = frame.mirrored(first)
     back_wall, back_u, back_v = frame.mirrored(second)
@@ -278,21 +346,18 @@ def _position_miss(frame: _Frame, first: _Zone, second: _Zone) -> Missed:
     detail = (f"{{first}} 對到對稱軸另一邊是{frame.words(wall, u, v, which)}；{{second}} 是"
               f"{frame.words(wall, second.u, second.v, which)}。把 {{first}} 翻過去跟 {{second}} 疊著比："
               f"{frame.gaps(wall, u, v, second)}。每一邊都要在 {limit}以內才算一對。")
-    # 做得到的切法才列：切過去要整個在牆裡，而且不能切在留著不動的那一區自己身上。
-    cuts = tuple(text for text, (to_wall, to_u, to_v), stays in (
-        (f"把 {{second}} 切到{frame.words(wall, u, v, which)}，就和 {{first}} 配成一對", (wall, u, v), first),
-        (f"把 {{first}} 切到{frame.words(back_wall, back_u, back_v, which)}，就和 {{second}} 配成一對",
-         (back_wall, back_u, back_v), second))
-        if frame.inside(to_wall, to_u, to_v) and not (to_wall == stays.wall and _overlap(to_u, to_v, stays) > 0.0))
-    sized = all(_near(mine[1] - mine[0], theirs[1] - theirs[0]) for mine, theirs in ((u, second.u), (v, second.v)))
-    what = "位置沒對齊" if sized else "大小不同"
+    # 兩個方向各試一次：只搬一區、另一區留著。照做之後真的配成一對的才列。
+    tried = ((f"把 {{second}} 切到{frame.words(wall, u, v, which)}", "{first}",
+              _cut_blocked(frame, second, (wall, u, v), first, "{first}")),
+             (f"把 {{first}} 切到{frame.words(back_wall, back_u, back_v, which)}", "{second}",
+              _cut_blocked(frame, first, (back_wall, back_u, back_v), second, "{second}")))
+    cuts = tuple(f"{move}，就和 {partner} 配成一對" for move, partner, blocked in tried if blocked is None)
     if cuts:
-        summary = f"{what}，各自調；{_GO_CUT}"
+        sized = all(_near(mine[1] - mine[0], theirs[1] - theirs[0]) for mine, theirs in ((u, second.u), (v, second.v)))
+        summary = f"{'位置沒對齊' if sized else '大小不同'}，各自調；{_GO_CUT}"
     else:
-        outside = not frame.inside(wall, u, v) or not frame.inside(back_wall, back_u, back_v)
-        stuck = "鏡像過去會超出牆面" if outside else "鏡像過去會疊在它自己身上"
-        summary = f"{stuck}，這兩區沒辦法配成一對，各自調"
-        detail += f"{stuck}，這兩區沒辦法配成一對。"
+        summary = "只搬其中一區切不出鏡像的位置，各自調"
+        detail += "只搬其中一區切不出鏡像的位置：" + "；".join(f"{move}，{blocked}" for move, _, blocked in tried) + "。"
     return Missed(first=first.surface, second=second.surface, kind="position", summary=summary,
                   reason="兩區大小或位置不一樣，對不成鏡像", detail=detail, cuts=cuts,
                   figure=Figure(wall=wall, second_u_m=second.u, second_v_m=second.v, mirrored_u_m=u, mirrored_v_m=v))
@@ -307,7 +372,7 @@ def _lone_miss(frame: _Frame, zone: _Zone, others: list[_Zone]) -> Missed:
     other = next((item for item in others if item.wall == wall and _same(u, item.u) and _same(v, item.v)), None)
     if other is not None:
         return Missed(first=zone.surface, other=other.surface, kind="not_search",
-                      summary="對面那一區不是由程式最佳化，各自調；兩區都改成由程式最佳化才配對",
+                      summary="對稱軸另一邊那一區不是由程式最佳化，各自調；兩區都改成由程式最佳化才配對",
                       reason="鏡像位置那一區不是由程式最佳化",
                       detail="{first} 對到對稱軸另一邊是 {other}，但 {other} 是指定貼一種或保留原樣，不是由程式最佳化。"
                              "把 {other} 也改成由程式最佳化，兩區就配成一對。")
@@ -321,7 +386,7 @@ def _lone_miss(frame: _Frame, zone: _Zone, others: list[_Zone]) -> Missed:
                       detail="{first} 跨在對稱軸上，但左右沒有置中；鏡像位置跟它自己疊在一起，所以沒有對象可以配。")
     where = frame.words(wall, u, v, (True, True))
     return Missed(first=zone.surface, kind="no_zone",
-                  summary="對面沒有一樣大小的區，各自調；要配對，回「房間方案輸入」在對稱的位置切出一區",
+                  summary="對稱軸另一邊沒有一樣大小的區，各自調；要配對，回「房間方案輸入」在對稱的位置切出一區",
                   reason="鏡像位置沒有一樣大小的區",
                   detail=f"{{first}} 對到對稱軸另一邊是{_other_wall(frame, wall, zone)}{where}，那裡沒有剛好這樣大小的一區。"
                          "在那裡切出一區、也改成由程式最佳化，兩區就配成一對。")
@@ -370,6 +435,9 @@ def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsChe
         refused = check(zone.surface, other.surface)
         if refused is None:
             pairs.append(Pair(first=zone.surface, second=other.surface))
+        elif isinstance(refused, Unchecked):
+            missed.append(Missed(first=zone.surface, second=other.surface, kind="settings", summary=_UNCHECKED_SUMMARY,
+                                 reason=refused.reason, detail=f"{{first}} 和 {{second}} 的位置對上了，但{refused.because}"))
         else:
             missed.append(Missed(first=zone.surface, second=other.surface, kind="settings",
                                  summary=f"{refused}，各自調；兩區設成一樣就配成一對", reason=refused,

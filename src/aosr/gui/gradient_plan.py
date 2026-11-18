@@ -31,6 +31,7 @@
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Self, cast
@@ -49,7 +50,7 @@ from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, saved_refusals, target_fits, target_line,
     zone_limits, zone_words,
 )
-from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, pair_zones, symmetry_on
+from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries
 from aosr.materials.search_library import PresetMaterial
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from aosr.gradient.material_gradient import SurfaceDesign
 
 Device = Literal["cpu", "gpu"]
+_LOG = logging.getLogger(__name__)
 _MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 
 
@@ -254,10 +256,11 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
     """位置對上的一對能不能綁：問引擎的開跑前檢查（``aosr.gradient.ties.check_ties_against_start``），這裡不另寫規則。
 
     起跑配置用命令列開跑同一支（``cli.start_designs``，構造清單照命令列的接法），第一次被問才建（要載入搜尋那一層，
-    沒有位置對上的兩區就不載入）；起跑配置本身引擎就不收時，每一對都照那個原因算沒配成。"""
-    built: list[tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]] | str] = []
+    沒有位置對上的兩區就不載入）；起跑配置本身引擎就不收時，每一對都算沒配成，回 :class:`Unchecked`
+    （不是這一對設定不一樣；例外原文只進伺服器記錄）。"""
+    built: list[tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]] | Unchecked] = []
 
-    def check(first: str, second: str) -> str | None:
+    def check(first: str, second: str) -> str | Unchecked | None:
         from aosr.config.capabilities import load_capabilities
         from aosr.config.directivity_defaults import load_directivity_defaults
         from aosr.config.material_gradient import fixed_target_id
@@ -280,9 +283,11 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
                     capabilities=load_capabilities(inputs.capabilities or config_path("capabilities.toml")),
                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml"))))
             except (ValueError, OSError) as error:  # 引擎拒收，或檢查要的檔讀不到：都不讓分區頁的限制檢查整支倒掉
-                built.append(f"這份設定開跑前檢查沒過，核不了兩區的設定（{error}）")
+                # 原文是程式的話（代號、路徑），只進伺服器記錄，不上畫面。
+                _LOG.warning("左右對稱：建不出開跑那一組起跑配置，核不了綁定：%s", error)
+                built.append(Unchecked("這份設定開跑前檢查沒過", "這份設定開跑前檢查沒過，先看不了兩區的設定一不一樣。"))
         start = built[0]
-        if isinstance(start, str):
+        if isinstance(start, Unchecked):
             return start
         try:
             check_ties_against_start(((first, second),), *start)
@@ -317,14 +322,14 @@ def draft_symmetry(document: object, design_value: object,
         return {"available": False, "message": "設計設定格式不對，先算不了哪幾區成對"}
     checks: list[SettingsCheck] = []
 
-    def check(first: str, second: str) -> str | None:
+    def check(first: str, second: str) -> str | Unchecked | None:
         if not checks:
             try:
                 base, settings, inputs = plan(scheme, design)
                 checks.append(_engine_check(scheme, base, settings, inputs))
-            except PlanRefused as error:
-                reason = f"這份設定現在還開不了搜尋，核不了兩區的設定（{error}）"
-                checks.append(lambda first, second: reason)
+            except PlanRefused as error:  # 原文是寫給畫面的白話，照寫
+                refused = Unchecked("這份設定現在開不了搜尋", f"這份設定現在開不了搜尋：{str(error).rstrip('。')}。")
+                checks.append(lambda first, second: refused)
         return checks[0](first, second)
 
     return {"available": True, **pair_zones(scheme, design, check).model_dump(mode="json")}

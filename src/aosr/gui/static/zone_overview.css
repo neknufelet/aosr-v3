@@ -160,7 +160,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-grid{stroke:#d8dedc;stroke-width:1}
 #zone-page .zv-tick{font-size:10px;fill:var(--soft);font-family:inherit}
 #zone-page .zv-curve{fill:none;stroke:var(--fixed);stroke-width:2.2}
-#zone-page .zv-sym-axis{font-size:11.5px;color:var(--soft);text-align:center;margin-top:-3px}
+#zone-page .zv-axis{font-size:11.5px;color:var(--soft);text-align:center;margin-top:-3px}
 #zone-page .zv-editfoot{display:flex;align-items:center;gap:10px;margin-top:9px}
 #zone-page button.zv-main-btn{background:var(--ink);color:#fff;font-size:16px;padding:7px 16px}
 #zone-page button.zv-main-btn:disabled{opacity:1;background:#8f9b9c;border-color:#8f9b9c;cursor:default}

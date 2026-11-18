@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
+import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
@@ -25,7 +27,8 @@ from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_plan import GradientRequest, SearchPlan, TieInputs, configuration_arguments, plan_search, plan_symmetry, start_arguments
 from aosr.gui.zone_design import DesignSettings, read_design, write_design
-from aosr.gui.zone_symmetry import Symmetry, pair_zones
+from aosr.gui.zone_edit import CutBox, cut_wall
+from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Symmetry, pair_zones
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -242,6 +245,15 @@ def test_two_zones_that_almost_mirror_get_both_cuts_spelled_out() -> None:
     assert missed.figure.wall == "x0" and missed.figure.mirrored_u_m == pytest.approx((2.5, 3.6))
 
 
+def _wall_zones(document: Doc, wall: str) -> list[dict[str, object]]:
+    return cast(dict[str, list[dict[str, object]]], cast(Doc, document["scene"])["surface_zones_by_wall"])[wall]
+
+
+def _span(value: object) -> tuple[float, float]:
+    low, high = cast(list[float], value)
+    return (low, high)
+
+
 def _found(document: Doc, zones: dict[str, list[str]]) -> Symmetry:
     return pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(searching(zones)), _Check())
 
@@ -290,12 +302,133 @@ def test_a_cut_that_would_leave_the_wall_is_not_offered() -> None:
 
 
 def test_when_no_cut_is_possible_it_says_the_two_zones_cannot_pair() -> None:
-    """兩種切法都做不到：e 的鏡像超出牆面，f 跨在軸上、它的鏡像位置疊在它自己身上。不給切法，寫一句這兩區沒辦法配成一對。"""
+    """兩種切法都做不到：e 的鏡像超出牆面，f 跨在軸上、它的鏡像位置疊在 e 身上。不給切法，列上寫只搬一區切不出來，
+    細節兩個方向各寫一句為什麼（不寫「這兩區沒辦法配成一對」：兩區都改有時配得成）。"""
     found = _found(symmetry_document({"x0": [("e", (0.0, 0.5), (0.3, 2.4)), ("f", (1.9, 4.0), (0.3, 2.4))]}, across_shift_m=0.2),
                    {"x0": ["e", "f"]})
     assert _missed(found) == [("x0@e", "x0@f", "position")] and found.missed[0].cuts == ()
-    assert found.missed[0].summary == "鏡像過去會超出牆面，這兩區沒辦法配成一對，各自調"
-    assert "鏡像過去會超出牆面，這兩區沒辦法配成一對。" in found.missed[0].detail
+    assert found.missed[0].summary == "只搬其中一區切不出鏡像的位置，各自調"
+    assert found.missed[0].detail.endswith("只搬其中一區切不出鏡像的位置：把 {second} 切到離左牆 3.90～4.40 公尺，會超出牆面；"
+                                           "把 {first} 切到離左牆 0.40～2.50 公尺，會疊在 {second} 上。")
+    assert "沒辦法配成一對" not in found.missed[0].summary + found.missed[0].detail
+
+
+def test_a_cut_the_wall_tool_would_refuse_is_not_offered() -> None:
+    """審查 A 修補第 2 條：軸在 1.95，b 貼著左牆（0.00～1.00）、a 在 2.80～3.80。兩種切法都在牆裡、也不疊在另一區上，
+    可是照做都會剩一條 10 公分的窄條，網頁的切牆工具（``zone_edit.cut_wall``）不收：不列切法，兩個方向都寫窄條。"""
+    found = _found(symmetry_document({"x0": [("b", (0.0, 1.0), (0.3, 2.4)), ("a", (2.8, 3.8), (0.3, 2.4))]}, across_shift_m=-0.05),
+                   {"x0": ["b", "a"]})
+    assert _missed(found) == [("x0@b", "x0@a", "position")] and found.missed[0].cuts == ()
+    assert found.missed[0].summary == "只搬其中一區切不出鏡像的位置，各自調"
+    thin = "會剩下一條比 20 公分還窄的窄條，切牆工具不收"
+    assert found.missed[0].detail.endswith(f"只搬其中一區切不出鏡像的位置：把 {{second}} 切到離左牆 2.90～3.90 公尺，{thin}；"
+                                           f"把 {{first}} 切到離左牆 0.10～1.10 公尺，{thin}。")
+
+
+def _random_front_walls(count: int, seed: int) -> Iterator[tuple[Doc, Doc, bool]]:
+    """固定種子亂擺前牆：兩區 p、q；或再加第三區 r；或只畫 p、另一區挑一塊自動補滿的。回（方案, 設計設定, 有沒有自動那一區）。"""
+    rng = random.Random(seed)
+    for _ in range(count):
+        a0 = round(rng.uniform(0, 3.5), 2)
+        a1 = round(rng.uniform(a0 + 0.1, 4.0), 2)
+        b0 = round(rng.uniform(0, 3.5), 2)
+        b1 = round(rng.uniform(b0 + 0.1, 4.0), 2)
+        shift = rng.choice((0.0, 0.1, 0.2, 0.3, -0.05))
+        kind = rng.choice(("two", "two", "auto", "third"))
+        boxes: list[Box] = [("p", (a0, a1), (0.3, 2.4))]
+        if kind != "auto":
+            if not (a1 <= b0 or b1 <= a0):
+                continue
+            boxes.append(("q", (b0, b1), (0.3, 2.4)))
+        if kind == "third":
+            c0 = round(rng.uniform(0, 3.5), 2)
+            c1 = round(rng.uniform(c0 + 0.1, 4.0), 2)
+            if any(not (high <= c0 or c1 <= low) for _name, (low, high), _v in boxes):
+                continue
+            boxes.append(("r", (c0, c1), (0.3, 2.4)))
+        document = symmetry_document({"x0": boxes}, across_shift_m=shift)
+        filled = sorted(cast(str, zone["id"]) for zone in _wall_zones(document, "x0") if cast(str, zone["id"]).startswith("auto"))
+        if kind == "auto" and not filled:
+            continue
+        yield document, searching({"x0": ["p", rng.choice(filled) if kind == "auto" else "q"]}), kind == "auto"
+
+
+def _do_the_cut(document: Doc, design: Doc, moved: str, stays: str, words: str) -> None:
+    """照那一句切法真的做一遍，再配一次：``moved`` 要配成一對，另一片就在 ``stays`` 原本的位置。"""
+    span = re.search(r"切到離左牆 ([0-9.]+)～([0-9.]+) 公尺，就和", words)
+    assert span is not None, words
+    before = {cast(str, zone["id"]): zone for zone in _wall_zones(document, "x0")}
+    mover, stayer = moved.split("@")[1], stays.split("@")[1]
+    # 網頁送的框：這一面的矩形區扣掉自動補滿的（elevation.js::drawnBoxes），只把要搬的那一區換位置。
+    drawn = [CutBox(id=name, u_m=(float(span[1]), float(span[2])) if name == mover else _span(zone["u_m"]), v_m=_span(zone["v_m"]))
+             for name, zone in before.items() if not name.startswith("auto")]
+    cut = cut_wall(document, "x0", drawn)
+    after = deepcopy(document)
+    cast(dict[str, object], cast(Doc, after["scene"])["surface_zones_by_wall"])["x0"] = cut["zones"]
+    # 設計設定跟著走：新的每一塊沿用 inherited 指的那一塊舊設定（zone_modes.js::remapZoneDesign）。
+    old = cast(dict[str, dict[str, object]], design["zones"])["x0"]
+    moved_design = deepcopy(design)
+    cast(dict[str, object], moved_design["zones"])["x0"] = {
+        key: deepcopy(old[source]) for key, source in cast(dict[str, str], cut["inherited"]).items() if source in old}
+    again = pair_zones(Scheme.model_validate(after), DesignSettings.model_validate(moved_design), _Check())
+    where = {f"x0@{zone['id']}": _span(zone["u_m"]) for zone in cast(list[dict[str, object]], cut["zones"])}
+    partners = [({pair.first, pair.second} - {moved}).pop() for pair in again.pairs if moved in (pair.first, pair.second)]
+    told = (drawn, words, again.pairs, [item.summary for item in again.missed])
+    assert len(partners) == 1, told
+    assert all(abs(mine - theirs) <= PAIR_WITHIN_M + 1e-9 for mine, theirs in zip(
+        where[partners[0]], _span(before[stayer]["u_m"]), strict=True)), told
+
+
+def test_every_offered_cut_really_makes_the_two_zones_a_pair() -> None:
+    """畫面那句是「切到…就和○配成一對」：固定種子亂擺前牆（兩區；兩區加第三區；一區加一塊自動補滿的），每一種列出來的
+    切法都照「房間方案輸入」真的做一遍——這一面畫的框（扣掉自動補滿的）只把要搬的那一區換到那句寫的位置、交給切牆
+    工具切、設計設定照 ``inherited`` 跟著走——再配一次，這兩區要配成一對。"""
+    listed = unlisted = with_auto = offered = 0
+    for document, design, auto in _random_front_walls(1500, seed=1206):
+        try:
+            found = pair_zones(Scheme.model_validate(document), DesignSettings.model_validate(design), _Check())
+        except ValidationError:  # 喇叭被挪出房間之類，這一種擺法不算
+            continue
+        for item in found.missed:
+            if item.kind != "position":
+                continue
+            assert item.second is not None
+            with_auto += auto
+            listed += bool(item.cuts)
+            unlisted += not item.cuts
+            offered += len(item.cuts)
+            for words in item.cuts:
+                moved, stays = (item.second, item.first) if words.startswith("把 {second}") else (item.first, item.second)
+                _do_the_cut(document, design, moved, stays, words)
+    # 掃到的擺法「有列切法」「不列切法」兩種都要有，其中一區是自動補滿的也要有（數目寫在修補報告）。自動補滿的那幾種
+    # 一種切法都列不出來是對的：自動那一塊搬不動；搬畫的那一區，它讓出來的地方又會被補滿，留著那一塊的形狀跟著變。
+    assert (listed, unlisted, with_auto, offered) == (106, 131, 88, 134)
+
+
+def test_a_mirror_that_lands_a_hair_outside_the_wall_still_counts_as_inside() -> None:
+    """審查 A-N1：軸在 1.55、e 的右緣在 3.10，鏡像左緣算出來是 −4e-16（浮點）。那是貼著牆，不是超出牆面。"""
+    found = _found(symmetry_document({"x0": [("e", (2.2, 3.1), (0.3, 2.4))]}, across_shift_m=-0.45), {"x0": ["e"]})
+    assert _missed(found) == [("x0@e", None, "no_zone")]
+    assert found.missed[0].summary.startswith("對稱軸另一邊沒有一樣大小的區，各自調")
+    assert "超出牆面" not in found.missed[0].summary + found.missed[0].detail
+
+
+def test_same_size_zones_off_by_five_centimetres_read_as_misplaced_not_missized() -> None:
+    """審查 A-N2：兩區一樣大、位置偏 5 公分：列上寫「位置沒對齊」，不是「大小不同」；大小真的不同才寫大小。"""
+    found = _found(symmetry_document({"x0": [FRONT_PAIR[0], ("a", (2.55, 3.65), (0.3, 2.4))]}), {"x0": ["b", "a"]})
+    assert _missed(found) == [("x0@b", "x0@a", "position")]
+    assert found.missed[0].summary.startswith("位置沒對齊，各自調")
+    sized = _found(symmetry_document({"x0": [FRONT_PAIR[0], ("a", (2.5, 3.4), (0.3, 2.4))]}), {"x0": ["b", "a"]})
+    assert sized.missed[0].summary.startswith("大小不同，各自調")
+
+
+def test_front_and_back_swap_in_the_wording_when_the_front_wall_is_the_far_one() -> None:
+    """審查 A-N3：前牆是 xL（整組轉 180 度）時，x 小的那一邊靠的是後牆 x0。天花兩區縱深差 10 公分，差的是靠後牆那一邊。"""
+    found = _found(symmetry_document({"ceiling": [("p", (0.5, 1.5), (0.3, 1.3)), ("q", (0.6, 1.5), (2.7, 3.7))]}, flipped=True),
+                   {"ceiling": ["p", "q"]})
+    assert found.axis is not None and found.axis.front == "xL"
+    assert "疊著比：靠後牆那一邊差 10 公分。" in found.missed[0].detail
+
 
 
 def test_a_lone_zone_whose_mirror_leaves_the_wall_gets_no_cut() -> None:
@@ -420,6 +553,10 @@ def test_starting_from_the_page_sends_one_tie_per_pair(tmp_path: Path) -> None:
     assert stored["plan"]["ties"] == [list(FRONT), list(SIDES)]
 
 
+_CANNOT_START = "位置對上了；這份設定現在開不了搜尋，等開得了再看兩區的設定一不一樣"
+_NOT_CHECKED = "{first} 和 {second} 的位置對上了，但這份設定開跑前檢查沒過，先看不了兩區的設定一不一樣。"
+
+
 def test_a_start_check_that_cannot_even_load_its_inputs_pairs_nothing_instead_of_crashing(tmp_path: Path) -> None:
     """引擎檢查要的檔讀不到（能力表不在）：不丟例外（分區頁的限制檢查約定一律回得出結果），那幾對照原因算沒配成。"""
     scheme = Scheme.model_validate(symmetry_document(ALL_CUTS))
@@ -427,7 +564,10 @@ def test_a_start_check_that_cannot_even_load_its_inputs_pairs_nothing_instead_of
     plan = plan_search(scheme, design, GradientRequest(), SETTINGS, pair=False)
     found = plan_symmetry(scheme, design, plan, SETTINGS, TieInputs(capabilities=tmp_path / "missing.toml"))
     assert found.pairs == () and [item.kind for item in found.missed] == ["settings", "settings"]
-    assert all("開跑前檢查沒過" in item.reason for item in found.missed)
+    # 整份設定核不了，不是這一對兩區設定不一樣：不叫人把兩區「設成一樣」，例外原文（路徑）不上畫面。
+    for item in found.missed:
+        assert (item.summary, item.reason, item.detail) == (_CANNOT_START, "這份設定開跑前檢查沒過", _NOT_CHECKED)
+        assert "missing.toml" not in item.summary + item.reason + item.detail
     assert plan_search(scheme, design, GradientRequest(), SETTINGS, tie_inputs=TieInputs(capabilities=tmp_path / "missing.toml")).ties == ()
 
 
@@ -480,6 +620,11 @@ assert "jax" not in sys.modules, "載入期就有 JAX（另一題在守）"
 data = Path(sys.argv[1])
 document = symmetry_document({"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED})
 design = searching({"x0": ["b", "a"], "y0": ["s"], "yL": ["s"]})
+if sys.argv[2] == "fixed":  # 准用清單帶一筆固定材料：引擎檢查會多走「把固定材料排進構造清單」那一支
+    from aosr.config.construction_presets import load_construction_presets
+    fixed = load_construction_presets(config_path("construction_presets.toml"))[0].id
+    for wall, zone in (("x0", "b"), ("x0", "a"), ("y0", "s"), ("yL", "s")):
+        design["zones"][wall][zone]["allowed"] = ["glass_wool_48k", "none", fixed]
 client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=data / "page")), base_url="http://127.0.0.1")
 body = client.post("/api/zone-limits", json={"scheme": document, "design": design}).json()
 assert len(body["symmetry"]["pairs"]) == 2, body["symmetry"]
@@ -493,14 +638,16 @@ raise SystemExit(1 if "jax" in sys.modules else 0)
 """
 
 
-def test_the_web_process_still_has_no_jax_after_really_pairing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("allowed", ["plain", "fixed"])
+def test_the_web_process_still_has_no_jax_after_really_pairing(tmp_path: Path, allowed: str) -> None:
     """網頁行程真的配過一次之後還是沒有 JAX（審查 A 第 1 條）：另開乾淨行程，叫一次分區頁的限制檢查（回兩對）、
     一次帶兩對的 ``GradientJobs.plan``（預覽與開跑共用），之後 ``sys.modules`` 裡不准有 ``jax``。
+    准用清單兩種都跑：不寫（全部可調材料）與帶一筆固定材料（引擎檢查多走一支）。
     ``test_web_process_never_imports_jax`` 只看載入那一刻，引擎檢查是第一次被叫才載入它要的模組，那一題抓不到。"""
     env = forward_cpu_pins(child_process_env())
     env["TMPDIR"] = str(tmp_path)
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
-    done = subprocess.run([sys.executable, "-c", _NO_JAX_AFTER_A_CALL, str(tmp_path)], env=env, cwd=tmp_path,
+    done = subprocess.run([sys.executable, "-c", _NO_JAX_AFTER_A_CALL, str(tmp_path), allowed], env=env, cwd=tmp_path,
                           capture_output=True, text=True, timeout=300)
     assert done.returncode == 0, done.stdout[-300:] + done.stderr[-1500:]
 
@@ -542,7 +689,11 @@ def test_a_design_that_cannot_start_a_search_still_answers_the_limits_route(tmp_
     found = response.json()["symmetry"]
     assert found["available"] is True and found["pairs"] == []
     assert [item["kind"] for item in found["missed"]] == ["settings"]
-    assert "現在還開不了搜尋" in found["missed"][0]["reason"]
+    missed = found["missed"][0]
+    assert (missed["summary"], missed["reason"]) == (_CANNOT_START, "這份設定現在開不了搜尋")
+    opening = "{first} 和 {second} 的位置對上了，但這份設定現在開不了搜尋：有超過限制的區"
+    assert missed["detail"].startswith(opening) and missed["detail"].endswith("。") and not missed["detail"].endswith("。。")
+    assert "0.03 公尺" in missed["detail"] and "設成一樣" not in missed["summary"] + missed["reason"] + missed["detail"]
 
 
 def test_a_start_the_engine_refuses_outright_pairs_nothing_instead_of_crashing() -> None:
@@ -552,7 +703,9 @@ def test_a_start_the_engine_refuses_outright_pairs_nothing_instead_of_crashing()
     plan = plan_search(scheme, design, GradientRequest(), SETTINGS, pair=False)
     found = plan_symmetry(scheme, design, plan, SETTINGS, TieInputs(presets=()))
     assert found.pairs == () and [item.kind for item in found.missed] == ["settings"]
-    assert "開跑前檢查沒過" in found.missed[0].reason
+    item = found.missed[0]
+    assert (item.summary, item.reason, item.detail) == (_CANNOT_START, "這份設定開跑前檢查沒過", _NOT_CHECKED)
+    assert "preset" not in item.summary + item.reason + item.detail and "glass_wool" not in item.summary + item.reason + item.detail
 
 
 def test_the_page_lists_a_refused_pair_with_the_engine_reason(tmp_path: Path) -> None:
