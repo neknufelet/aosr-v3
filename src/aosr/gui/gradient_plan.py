@@ -279,7 +279,7 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
                     caps=dict(plan.max_depths), allowed=dict(plan.allowed),
                     capabilities=load_capabilities(inputs.capabilities or config_path("capabilities.toml")),
                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml"))))
-            except ValueError as error:
+            except (ValueError, OSError) as error:  # 引擎拒收，或檢查要的檔讀不到：都不讓分區頁的限制檢查整支倒掉
                 built.append(f"這份設定開跑前檢查沒過，核不了兩區的設定（{error}）")
         start = built[0]
         if isinstance(start, str):

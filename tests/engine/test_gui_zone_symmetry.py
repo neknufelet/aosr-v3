@@ -23,7 +23,7 @@ from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.gradient_plan import GradientRequest, SearchPlan, configuration_arguments, plan_search, plan_symmetry, start_arguments
+from aosr.gui.gradient_plan import GradientRequest, SearchPlan, TieInputs, configuration_arguments, plan_search, plan_symmetry, start_arguments
 from aosr.gui.zone_design import DesignSettings, read_design, write_design
 from aosr.gui.zone_symmetry import Symmetry, pair_zones
 from aosr.reporting.scheme import Scheme
@@ -322,6 +322,36 @@ def test_the_real_engine_check_decides_and_its_refusal_is_said_plainly() -> None
         found = plan_symmetry(scheme, design, plan, SETTINGS)
         assert _pairs(found) == (SIDES,) and _missed(found) == [("x0@b", "x0@a", "settings")]
         assert word in found.missed[0].reason and "綁定" not in found.missed[0].reason and "x0@" not in found.missed[0].reason
+
+
+def test_starting_from_the_page_sends_one_tie_per_pair(tmp_path: Path) -> None:
+    """從網頁開跑那條路整段（設計檔沒有那一格＝開）：交給命令列的參數帶兩對 ``--tie``，存下來的計畫也記著。"""
+    from tests.engine.test_gui_gradient_jobs import FakeLauncher, _jobs, _place_surrogate
+
+    data_dir = tmp_path / "data"
+    (data_dir / "schemes").mkdir(parents=True)
+    (data_dir / "designs").mkdir()
+    scheme = Scheme.model_validate(symmetry_document(ALL_CUTS))
+    (data_dir / "schemes" / f"{NAME}.json").write_text(scheme.model_dump_json(), encoding="utf-8")
+    (data_dir / "designs" / f"{NAME}.json").write_text(OLD_DESIGN, encoding="utf-8")
+    _place_surrogate(data_dir, scheme)
+    launcher = FakeLauncher()
+    view = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    argv = launcher.launched[-1][1]
+    assert [argv[index + 1] for index, word in enumerate(argv) if word == "--tie"] == ["x0@b=x0@a", "y0@s=yL@s"]
+    stored = json.loads((data_dir / "gradient" / str(view["job_id"]) / "job.json").read_text(encoding="utf-8"))
+    assert stored["plan"]["ties"] == [list(FRONT), list(SIDES)]
+
+
+def test_a_start_check_that_cannot_even_load_its_inputs_pairs_nothing_instead_of_crashing(tmp_path: Path) -> None:
+    """引擎檢查要的檔讀不到（能力表不在）：不丟例外（分區頁的限制檢查約定一律回得出結果），那幾對照原因算沒配成。"""
+    scheme = Scheme.model_validate(symmetry_document(ALL_CUTS))
+    design = DesignSettings.model_validate(searching(ALL_ZONES))
+    plan = plan_search(scheme, design, GradientRequest(), SETTINGS, pair=False)
+    found = plan_symmetry(scheme, design, plan, SETTINGS, TieInputs(capabilities=tmp_path / "missing.toml"))
+    assert found.pairs == () and [item.kind for item in found.missed] == ["settings", "settings"]
+    assert all("開跑前檢查沒過" in item.reason for item in found.missed)
+    assert plan_search(scheme, design, GradientRequest(), SETTINGS, tie_inputs=TieInputs(capabilities=tmp_path / "missing.toml")).ties == ()
 
 
 def test_resuming_a_search_started_before_ties_sends_no_tie(tmp_path: Path) -> None:
