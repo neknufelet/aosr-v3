@@ -35,6 +35,7 @@ from aosr.gradient.material_gradient_ledger import (
     decision_row, descent_rows, jump_row, read_ledger, truncate_rows,
 )
 from aosr.gradient.material_gradient import objective_reading, estimable, Unestimable
+from aosr.gradient.ties import check_ties_hold, unit_offsets
 
 
 Direction = Literal["thinner", "thicker"]
@@ -119,12 +120,14 @@ class LoopResult(NamedTuple):
 
 def candidates_from_gradient(theta_feasible: jax.Array | FloatVector, gradient: jax.Array | FloatVector,
                              designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
-                             ) -> tuple[Candidate, ...]:
+                             ties: Sequence[tuple[str, str]] = ()) -> tuple[Candidate, ...]:
     """在可行 θ 用「梯度 · 整個可行位移」估每面換到相鄰合法厚度的變化，取最負的前 ``max_per_round`` 個。
 
     兩個以上合法厚度的面往薄一格、往厚一格各一個（到底、到頂那一邊沒有）；只有一個合法厚度的面沒有候選。
     位移是整個可行位移：厚度跳到相鄰合法值，空腔照取規格同一條規則切到「上限減新厚度」（切到下界仍放不下就不是候選）。
     排序：預測變化由小到大、同值照面序、再照薄先厚後。在 θ 的精度下算。
+    ``ties`` 是綁定表（#1206）：成對兩片算一個單位，只由面序在前的那一片出候選（代號用它），位移兩片的格都填同一個值，
+    預測變化就是兩片加起來的。
     """
     values = checked_theta(theta_feasible, designs)
     if not is_feasible(values, designs):
@@ -136,9 +139,14 @@ def candidates_from_gradient(theta_feasible: jax.Array | FloatVector, gradient: 
     dtype = values.dtype.type
     found: list[tuple[float, int, int, Candidate]] = []
     offset = 0
+    followers, offsets = unit_offsets(designs, ties)
     for surface_index, design in enumerate(designs):
         if design.material is None or design.max_total_depth_m is None:
             continue
+        if design.surface_id in followers:
+            offset += len(design.variables)
+            continue
+        mates = offsets[design.surface_id]
         legal = [dtype(value) for value in design.legal_thicknesses_m]
         has_cavity = design.cavity_variable is not None
         current = legal.index(values[offset])
@@ -151,11 +159,11 @@ def candidates_from_gradient(theta_feasible: jax.Array | FloatVector, gradient: 
             if room < cavity_low:
                 continue
             delta = np.zeros_like(values)
-            delta[offset] = thickness - values[offset]
+            delta[mates] = thickness - values[offset]
             cavity: float | None = None
             if has_cavity:
                 new_cavity = min(values[offset + 1], room)
-                delta[offset + 1] = new_cavity - values[offset + 1]
+                delta[[mate + 1 for mate in mates]] = new_cavity - values[offset + 1]
                 cavity = float(new_cavity)
             predicted = float(np.dot(slope, delta))
             found.append((predicted, surface_index, order, Candidate(
@@ -166,21 +174,23 @@ def candidates_from_gradient(theta_feasible: jax.Array | FloatVector, gradient: 
 
 
 def apply_candidate(theta_feasible: jax.Array | FloatVector, candidate: Candidate,
-                    designs: Sequence[SurfaceDesign]) -> FloatVector:
-    """跳到候選點：那一面的厚度與空腔直接換成候選記的值（不做 θ＋Δθ 的浮點加法），回可行 θ（精度不變）。"""
+                    designs: Sequence[SurfaceDesign], ties: Sequence[tuple[str, str]] = ()) -> FloatVector:
+    """跳到候選點：那一面的厚度與空腔直接換成候選記的值（不做 θ＋Δθ 的浮點加法），回可行 θ（精度不變）。
+    ``ties`` 是綁定表（#1206）：候選那一片有成對的片就兩片一起換成同一個值；跳完整張表檢查一次成對逐位相等。"""
     values = checked_theta(theta_feasible, designs).copy()
     dtype = values.dtype.type
-    offset = 0
-    for design in designs:
-        if design.surface_id == candidate.surface_id and design.material is not None:
-            values[offset] = dtype(candidate.thickness_m)
-            if design.cavity_variable is not None and candidate.cavity_m is not None:
-                values[offset + 1] = dtype(candidate.cavity_m)
-            if not is_feasible(values, designs):
-                raise ValueError(f"候選 {candidate.candidate_id} 跳過去不可行")
-            return values
-        offset += len(design.variables)
-    raise ValueError(f"候選的面 {candidate.surface_id} 不在設計清單裡")
+    followers, offsets = unit_offsets(designs, ties)
+    design = next((item for item in designs if item.surface_id == candidate.surface_id), None)
+    if design is None or design.material is None or candidate.surface_id in followers:
+        raise ValueError(f"候選的面 {candidate.surface_id} 不在設計清單裡，或不是它那一對裡出候選的那一片")
+    for offset in offsets[candidate.surface_id]:
+        values[offset] = dtype(candidate.thickness_m)
+        if design.cavity_variable is not None and candidate.cavity_m is not None:
+            values[offset + 1] = dtype(candidate.cavity_m)
+    if not is_feasible(values, designs):
+        raise ValueError(f"候選 {candidate.candidate_id} 跳過去不可行")
+    check_ties_hold(values, designs, ties, "候選跳點之後")
+    return values
 
 
 # ---- 求值預算 ----
@@ -212,29 +222,33 @@ def round_evaluation_bound(settings: MaterialGradientSettings, candidate_count: 
     return 1 + (candidate_count + 1) * retune_evaluation_bound(settings)
 
 
-def _candidate_count(theta: FloatVector, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings) -> int:
-    """這個 θ 上一輪會確認幾個候選；候選有沒有只看厚度位置與總深度，跟梯度無關，所以用零梯度數。"""
-    return len(candidates_from_gradient(theta, np.zeros_like(theta), designs, settings))
+def _candidate_count(theta: FloatVector, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
+                     ties: Sequence[tuple[str, str]] = ()) -> int:
+    """這個 θ 上一輪會確認幾個候選；候選有沒有只看厚度位置與總深度，跟梯度無關，所以用零梯度數。成對兩片算一個單位。"""
+    return len(candidates_from_gradient(theta, np.zeros_like(theta), designs, settings, ties))
 
 
 # ---- 一輪 ----
 
 def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | FloatVector,
                        designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
-                       budget_left: int, should_stop: StopCheck | None = None) -> RoundResult:
+                       budget_left: int, should_stop: StopCheck | None = None,
+                       ties: Sequence[tuple[str, str]] = ()) -> RoundResult:
     """在目前可行 θ 算梯度（一次求值）、產候選，基準與每個候選各自從自己的起點做最多 K 步空腔重調再比。
 
     基準＝目前 θ 原樣重調（不問前面重調過沒有）；候選＝跳到候選點再重調；改善＝基準重調後的值減候選重調後的值。
     最好的候選改善「超過」門檻才接受、交出它重調後的 θ；都沒超過就交出重調後的基準。沒有候選時不重調、θ 原樣。
     最壞求值次數（:func:`round_evaluation_bound`）大於 ``budget_left`` 就不開這一輪、不求值，記「求值到上限」。
     給了 ``should_stop`` 就在每次求值之前查一次（梯度那一次與每段重調裡的每一次），為真拋 ``SearchStopped``。
+    ``ties`` 是綁定表（#1206）：一進來先檢查成對兩片逐位相等（接續時 θ 是從帳本讀回的），候選、跳點、重調都照單位。
     """
     theta = checked_theta(theta_feasible, designs)
     if not is_feasible(theta, designs):
         raise ValueError("候選確認要從取過規格的可行 θ 開始")
     if isinstance(budget_left, bool) or budget_left < 0:
         raise ValueError("剩下的求值次數必須是非負整數")
-    bound = round_evaluation_bound(settings, _candidate_count(theta, designs, settings))
+    check_ties_hold(theta, designs, ties, "候選確認這一輪的起點")
+    bound = round_evaluation_bound(settings, _candidate_count(theta, designs, settings, ties))
     if bound > budget_left:
         return RoundResult(False, bound, None, (), None, (), None, theta, None, None, None, 0, 0.0,
                            LOOP_STOP_MAX_EVALUATIONS)
@@ -244,19 +258,19 @@ def confirmation_round(objective: ChainObjective, theta_feasible: jax.Array | Fl
     if not estimable(value, aux):
         raise Unestimable("候選確認起點不可估")
     start_value = float(value)
-    candidates = candidates_from_gradient(theta, np.asarray(gradient), designs, settings)
+    candidates = candidates_from_gradient(theta, np.asarray(gradient), designs, settings, ties)
     if not candidates:
         reading = objective_reading(aux)
         return RoundResult(True, bound, start_value, (), None, (), None, theta, start_value, reading.screening_total,
                            reading.components, 1, time.perf_counter() - clock, LOOP_STOP_NO_CANDIDATES)
-    baseline = retune_cavities(objective, theta, designs, settings, should_stop=should_stop)
+    baseline = retune_cavities(objective, theta, designs, settings, should_stop=should_stop, ties=ties)
     if not baseline.steps:
         raise Unestimable("基準重調起點不可估")
     base_value = baseline.steps[-1].value
     confirmed = []
     for candidate in candidates:
-        jumped = apply_candidate(theta, candidate, designs)
-        retuned = retune_cavities(objective, jumped, designs, settings, should_stop=should_stop)
+        jumped = apply_candidate(theta, candidate, designs, ties)
+        retuned = retune_cavities(objective, jumped, designs, settings, should_stop=should_stop, ties=ties)
         value_after = retuned.steps[-1].value if retuned.steps else None
         confirmed.append(ConfirmedCandidate(candidate, jumped, retuned, value_after,
                                             None if value_after is None else base_value - value_after))
@@ -311,13 +325,13 @@ def _segment_rows(result: RoundResult, round_index: int, first_step: int) -> lis
 
 
 def _loop_stop(result: RoundResult, rounds_done: int, total: int, designs: Sequence[SurfaceDesign],
-               settings: MaterialGradientSettings) -> tuple[LoopStopReason | None, int | None]:
+               settings: MaterialGradientSettings, ties: Sequence[tuple[str, str]]) -> tuple[LoopStopReason | None, int | None]:
     """一輪做完後整場停不停：這一輪自己的結論優先，再看輪數，最後看下一輪最壞要的次數放不放得進剩下的預算。"""
     if result.stop_reason is not None:
         return result.stop_reason, None
     if rounds_done >= settings.candidates.max_rounds:
         return LOOP_STOP_MAX_ROUNDS, None
-    bound = round_evaluation_bound(settings, _candidate_count(result.theta, designs, settings))
+    bound = round_evaluation_bound(settings, _candidate_count(result.theta, designs, settings, ties))
     if total + bound > settings.candidates.max_evaluations:
         return LOOP_STOP_MAX_EVALUATIONS, bound
     return None, bound
@@ -329,14 +343,14 @@ def _continue_rounds(objective: ChainObjective, start: _LoopStart, designs: Sequ
     theta, value, screening, components = start.theta, start.value, start.screening_total, start.components
     round_index, total, step = start.round, start.total, start.next_step
     while True:
-        result = confirmation_round(objective, theta, designs, settings,
+        result = confirmation_round(objective, theta, designs, settings, ties=header.ties,
                                     budget_left=settings.candidates.max_evaluations - total, should_stop=should_stop)
         for batch in _segment_rows(result, round_index, step):
             append_rows(ledger_path, header, batch)
             step += len(batch)
         total += result.evaluations
         if result.opened:
-            reason, bound = _loop_stop(result, round_index + 1, total, designs, settings)
+            reason, bound = _loop_stop(result, round_index + 1, total, designs, settings, header.ties)
             theta = result.theta
             if (result.baseline is not None and result.value is not None and result.screening_total is not None
                     and result.components is not None):
@@ -417,6 +431,7 @@ def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVecto
     求值次數上限限的是帳本記的求值次數（不含前段、不含接續時丟掉的半輪與重播）；機器實際算的次數可以更多。
     給了 ``should_stop`` 就在每次求值之前查一次，為真拋 ``SearchStopped``：一輪的列等整輪算完才寫，
     所以帳本停在上一列決定（或前段末列），不寫停止原因；接續用 :func:`resume_rounds`。
+    綁定表（#1206）讀標頭的 ``ties``：成對兩片算一個單位，每一輪進來與每個跳點之後都檢查逐位相等。
     """
     theta = checked_theta(theta_feasible, designs)
     _, rows = read_ledger(ledger_path, expected_header=header)
@@ -430,14 +445,15 @@ def run_rounds(objective: ChainObjective, theta_feasible: jax.Array | FloatVecto
 
 
 def _check_should_continue(decision: RoundDecision, start: _LoopStart, designs: Sequence[SurfaceDesign],
-                           settings: MaterialGradientSettings) -> None:
+                           settings: MaterialGradientSettings, ties: Sequence[tuple[str, str]]) -> None:
     """最後一列決定沒有停止原因時，照設定重算一次「該不該停」：輪數到上限、或下一輪最壞值放不進剩下的預算、
     或記的下一輪最壞值跟重算的不同，都是帳本跟設定矛盾，拒收、不開輪（#561 審查 B2）。"""
     limits = settings.candidates
     if start.round >= limits.max_rounds:
         raise ValueError(f"帳本最後一列決定（第 {start.round - 1} 輪）沒有停止原因，但照設定已到輪數上限 "
                          f"{limits.max_rounds}（應記「{LOOP_STOP_MAX_ROUNDS}」）；帳本與設定矛盾，不接續")
-    bound = round_evaluation_bound(settings, _candidate_count(start.theta, designs, settings))
+    check_ties_hold(start.theta, designs, ties, "接續起點（帳本最後一列決定）")
+    bound = round_evaluation_bound(settings, _candidate_count(start.theta, designs, settings, ties))
     if start.total + bound > limits.max_evaluations:
         raise ValueError(f"帳本最後一列決定沒有停止原因，但累計 {start.total} 次加下一輪最壞 {bound} 次超過求值上限 "
                          f"{limits.max_evaluations}（應記「{LOOP_STOP_MAX_EVALUATIONS}」）；帳本與設定矛盾，不接續")
@@ -462,6 +478,7 @@ def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], s
     decisions = [index for index, row in enumerate(rows) if row.phase == "round_decision"]
     if not decisions:
         start = _pre_loop_start(rows, designs)
+        check_ties_hold(start.theta, designs, header.ties, "接續起點（帳本前段最後一列）")
         truncate_rows(ledger_path, header, start.next_step)
     else:
         last = rows[decisions[-1]]
@@ -469,7 +486,7 @@ def resume_rounds(objective: ChainObjective, designs: Sequence[SurfaceDesign], s
             raise ValueError("決定列缺內容")
         start = _LoopStart(np.asarray(last.theta(), dtype=np.float64), *last.scores(), last.round + 1,
                            last.decision.total_evaluations, decisions[-1] + 1)
-        _check_should_continue(last.decision, start, designs, settings)
+        _check_should_continue(last.decision, start, designs, settings, header.ties)
         truncate_rows(ledger_path, header, decisions[-1] + 1)
     _continue_rounds(objective, start, designs, settings, ledger_path, header, should_stop)
     return _read_result(ledger_path, header)

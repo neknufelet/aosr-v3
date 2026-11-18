@@ -38,6 +38,7 @@ from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGrad
 from aosr.gradient.material_gradient import STOP_REASONS, Components, DescentResult
 from aosr.gradient.material_gradient_ledger import CONSTANTS_RERUN_TEXT, PROXY_RERUN_TEXT, ScoreConstants, check_scores
 from aosr.gradient.fixed_surfaces import AllowedTargets, FixedSurfaces, MaxDepths, fixed_targets_of
+from aosr.gradient.ties import Ties, check_ties_in_surfaces, tie_followers
 from aosr.gradient.template_rounds import (
     CANDIDATE_SEPARATOR, TEMPLATE_STOP_MAX_EVALUATIONS, TEMPLATE_STOP_MAX_ROUNDS,
     TEMPLATE_STOP_MAX_SECONDS, TEMPLATE_STOP_NO_ALTERNATIVES, TEMPLATE_STOP_NO_IMPROVEMENT, TEMPLATE_STOP_REASONS,
@@ -82,6 +83,8 @@ class TemplateHeader(BaseModel):
     # #1082 段 2-3b（版本不升）：每區准用清單（已展開到面片）與清單裡固定材料的材料摘要；沒有清單不寫（逐位等於加這兩格之前）。
     allowed_targets: AllowedTargets = Field(default_factory=dict, exclude_if=lambda value: not value)
     fixed_candidate_digests: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    # #1206（版本不升）：綁定表抄庚二帳本標頭；空表不寫（逐位等於加這一格之前）、缺這一格讀成不綁。重播照這一格算單位。
+    ties: Ties = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _surfaces(self) -> Self:
@@ -98,6 +101,7 @@ class TemplateHeader(BaseModel):
             raise ValueError("標頭的固定材料摘要要恰好是准用清單裡每一個 fixed:<代號> 各一個")
         if any(face not in ids or face in self.fixed_surfaces for face in self.allowed_targets):
             raise ValueError("准用清單的面要在起點配置裡、而且不是固定面")
+        check_ties_in_surfaces(self.ties, [name for name in ids if name not in self.fixed_surfaces], "起點配置可換")
         return self
 
 
@@ -386,17 +390,22 @@ def _round_blocks(rows: Sequence[TemplateRow]) -> list[list[TemplateRow]]:
     return blocks
 
 
-def _swapped_surface(start: Surfaces, row: TemplateRow, label: str, settings: MaterialGradientSettings | None) -> None:
-    """快速評分列的配置＝起點配置只換候選代號那一面：不貼 ⇔ preset 是 None；給了設定還要是那個家族的樣板。"""
+def _swapped_surface(start: Surfaces, row: TemplateRow, label: str, settings: MaterialGradientSettings | None,
+                     ties: Sequence[tuple[str, str]] = ()) -> None:
+    """快速評分列的配置＝起點配置只換候選代號那一個單位：不貼 ⇔ preset 是 None；給了設定還要是那個家族的樣板。
+    單位照標頭的綁定表（#1206）：成對兩片是一個單位、代號是面序在前那一片、兩片換成同一個 preset；沒成對的片自己一個單位。"""
     match = _CANDIDATE.match(str(row.candidate))
     if match is None:
         raise ValueError(f"{label}：候選代號 {row.candidate} 不是「面代號->目標」")
     surface, target = match.group("surface"), match.group("target")
     changed = [index for index, (old, new) in enumerate(zip(start, row.surfaces, strict=True)) if old != new]
     ids = [surface_id for surface_id, _ in start]
-    if [item[0] for item in row.surfaces] != ids or surface not in ids or changed != [ids.index(surface)]:
-        raise ValueError(f"{label}：候選 {row.candidate} 的配置不是起點配置只換那一面")
-    preset = row.surfaces[ids.index(surface)][1]
+    followers = tie_followers(ties, ids) if ties else {}
+    unit = sorted(index for index, name in enumerate(ids) if name == surface or followers.get(name) == surface)
+    preset = row.surfaces[ids.index(surface)][1] if surface in ids and len(row.surfaces) == len(ids) else None
+    if ([item[0] for item in row.surfaces] != ids or surface not in ids or surface in followers or changed != unit
+            or any(row.surfaces[index][1] != preset for index in unit)):
+        raise ValueError(f"{label}：候選 {row.candidate} 的配置不是起點配置只換那一{'個單位' if ties else '面'}")
     if (preset is None) != (target == NONE_TARGET):
         raise ValueError(f"{label}：候選 {row.candidate} 的目標與換上去的 preset {preset} 對不上")
     if settings is not None and preset != preset_for_target(target, settings):
@@ -440,7 +449,7 @@ def _split_round(block: Sequence[TemplateRow], label: str) -> _Round:
 def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStart | None, start_surfaces: Surfaces,
                  settings: MaterialGradientSettings | None, fixed_surfaces: Mapping[str, str],
                  allowed: Mapping[str, Sequence[str]] | None = None,
-                 max_depths: Mapping[str, float] | None = None) -> _Round:
+                 max_depths: Mapping[str, float] | None = None, ties: Sequence[tuple[str, str]] = ()) -> _Round:
     """一輪的內容：快速評分照「可換的目標」（給了設定）、候選是快速評分前 k 名、各段起點對得上。"""
     label = f"第 {block[0].round} 輪"
     parts = _split_round(block, label)
@@ -450,12 +459,12 @@ def _check_round(block: Sequence[TemplateRow], start: TemplateRow | TemplateStar
     if len(set(names)) != len(names):
         raise ValueError(f"{label}：快速評分的候選重複")
     for row in parts.quick:
-        _swapped_surface(start_surfaces, row, label, settings)
+        _swapped_surface(start_surfaces, row, label, settings, ties)
     decided = parts.decision.decision if parts.decision is not None else None
     complete = (decided is not None and decided.quick_count > 0) or bool(parts.baseline)
     ranking_available = complete
     if settings is not None:
-        wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings, fixed_surfaces, allowed, max_depths)]
+        wanted = [f"{surface}{CANDIDATE_SEPARATOR}{target}" for surface, target in alternatives(start_surfaces, settings, fixed_surfaces, allowed, max_depths, ties)]
         rejected = block[0].rejected_quick
         if len(set(rejected)) != len(rejected) or any(name not in wanted or name in names for name in rejected):
             raise ValueError(f"{label}：不可估快速評分不是可換目標，或與有效列重複")
@@ -551,7 +560,7 @@ def _check_stop_reason(label: str, row: TemplateRow, decision: TemplateDecision)
 def _check_settings(label: str, row: TemplateRow, decision: TemplateDecision, previous_total: int, seconds: float,
                     settings: MaterialGradientSettings, fixed_surfaces: Mapping[str, str],
                     allowed: Mapping[str, Sequence[str]] | None = None,
-                    max_depths: Mapping[str, float] | None = None) -> None:
+                    max_depths: Mapping[str, float] | None = None, ties: Sequence[tuple[str, str]] = ()) -> None:
     """給了設定：門檻、停止原因與下一輪最壞值都要照設定重算得出來，帳本跟設定矛盾就拒收。
 
     接受了候選的輪照「輪數 → 總時間（各決定列秒數加總，含這一輪）→ 下一輪最壞值放不放得進預算」的順序判停，
@@ -560,8 +569,8 @@ def _check_settings(label: str, row: TemplateRow, decision: TemplateDecision, pr
     reason, limits = row.stop_reason, settings.templates
     if decision.threshold != settings.candidates.improvement_threshold:
         raise ValueError(f"{label}：決定列記的門檻不是設定檔的改善門檻")
-    count = len(alternatives(row.surfaces, settings, fixed_surfaces, allowed, max_depths))
-    bound = next_round_bound(row.surfaces, settings, fixed_surfaces, allowed, max_depths)
+    count = len(alternatives(row.surfaces, settings, fixed_surfaces, allowed, max_depths, ties))
+    bound = next_round_bound(row.surfaces, settings, fixed_surfaces, allowed, max_depths, ties)
     if decision.quick_count == 0:
         expected = TEMPLATE_STOP_NO_ALTERNATIVES if count == 0 else (
             TEMPLATE_STOP_MAX_EVALUATIONS if bound > limits.max_evaluations - previous_total else None)
@@ -615,14 +624,14 @@ def check_template_rows(header: TemplateHeader, rows: Sequence[TemplateRow], *,
     for block in _round_blocks(rows):
         label = f"第 {block[0].round} 輪"
         parts = _check_round(block, previous, surfaces, settings, header.fixed_surfaces, header.allowed_targets,
-                             header.max_depths)
+                             header.max_depths, header.ties)
         if parts.decision is None:
             continue
         decision = _check_decision(label, parts, previous, total, parts.decision is rows[-1])
         seconds += parts.decision.seconds
         if settings is not None:
             _check_settings(label, parts.decision, decision, total, seconds, settings, header.fixed_surfaces,
-                            header.allowed_targets, header.max_depths)
+                            header.allowed_targets, header.max_depths, header.ties)
         previous, surfaces, total = parts.decision, parts.decision.surfaces, decision.total_evaluations
     if header.score_constants is not None:
         check_scores(header.score_constants, rows)

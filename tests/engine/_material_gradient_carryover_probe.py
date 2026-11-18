@@ -26,7 +26,7 @@ from tests.engine.test_material_gradient import PURPOSE
 from tests.engine.test_material_gradient_cli import PRESET_TEXT, _chain_operators, _schemes
 
 
-def start(directory: Path, carryover: bool) -> int:
+def start(directory: Path, carryover: bool, extra: tuple[str, ...] = ()) -> int:
     surrogate = directory / "rom.npz"
     model = load_reduced(surrogate)
     full = export_room_operators(ROOM, SOURCES, SEATS, density_kg_m3=DENSITY, sound_speed_m_s=SOUND_SPEED,
@@ -44,7 +44,7 @@ def start(directory: Path, carryover: bool) -> int:
           patch.object(cli, "_create_and_run", side_effect=capture)):
         return cli.main(["start", "--scheme", str(directory / "scheme.json"), "--surrogate", str(surrogate),
                          "--presets", PRESET_TEXT, "--purpose", PURPOSE, "--root", str(directory),
-                         "--engine-commit", "test"])
+                         "--engine-commit", "test", *extra])
 
 
 def projected_start(directory: Path) -> int:
@@ -69,6 +69,19 @@ def projected_start(directory: Path) -> int:
     return 0
 
 
+def problem_ties(directory: Path) -> int:
+    """讀回 ``project.json``、照產品重建問題（``run.load_problem``），記帳本標頭與換樣板那一側各拿到什麼綁定表（#1206）。"""
+    try:
+        problem = run.load_problem(run.read_project(directory))
+    except ValueError as error:
+        document: dict[str, object] = {"error": str(error)}
+    else:
+        document = {"header": problem.header.ties, "templates": problem.templates.ties}
+    (directory / "problem.json").write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    return 0
+
+
 if __name__ == "__main__":
-    mode, location = sys.argv[1:]
-    raise SystemExit(projected_start(Path(location)) if mode == "projected" else start(Path(location), mode == "carryover"))
+    mode, location, *more = sys.argv[1:]  # 第三個以後原樣接在 start 命令列後面（#1206 的 --tie 用）
+    raise SystemExit(problem_ties(Path(location)) if mode == "problem" else projected_start(Path(location)) if mode == "projected"
+                     else start(Path(location), mode == "carryover", tuple(more)))

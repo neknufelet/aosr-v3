@@ -171,6 +171,9 @@ def _parser() -> argparse.ArgumentParser:
                             "沒給的面照舊換全部家族與 none；起跑那一面的目標一定要在清單裡")
     start.add_argument("--workers", type=_workers, default=1,
                        help="准用清單有固定材料時，開跑前替身留出驗證的完整解工人數；預設 1")
+    start.add_argument("--tie", action="append", default=[], metavar="片=片",
+                       help="成對的兩片（面片代號），可重複，例如 y0@a=yL@a：這兩片的厚度與空腔每一步都相同、換樣板一起換；"
+                            "兩片的家族、起跑樣板、上下界、深度上限、裝法、准用清單要完全相同，不同就拒收；不給就是不綁")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -276,15 +279,15 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.gradient.surrogate_fixed_checks import configuration_document
+    from aosr.gradient.ties import parse_ties
 
-    fixed, caps, allowed = (parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth),
-                            parse_allowed_targets(args.allowed))
+    fixed, caps, allowed, ties = parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth), parse_allowed_targets(args.allowed), parse_ties(args.tie)
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     scheme = _start_scheme(args.root, scheme_path)
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     designs, expanded = start_designs(scheme, settings, materials.presets, args.presets, mount=args.mount, fixed=fixed,
-                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity)
+                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -317,7 +320,7 @@ def _start(args: argparse.Namespace) -> int:
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
                                max_depths=caps, patch_keys=boundary.scheme_patch_keys(scheme), frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha,
-                               allowed_targets=allowed)
+                               allowed_targets=allowed, ties=ties)
     root = args.root.resolve()
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
@@ -332,7 +335,7 @@ def _start(args: argparse.Namespace) -> int:
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
         operators_digest=fingerprint, surrogate_spot_check=spot, materials_sha256=materials_sha,
         materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE),
-        allowed_targets=allowed, fixed_candidate_checks=checks)
+        allowed_targets=allowed, fixed_candidate_checks=checks, ties=ties)
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
@@ -340,15 +343,19 @@ def _start(args: argparse.Namespace) -> int:
 def start_designs(scheme: Scheme, settings: MaterialGradientSettings, table: tuple[PresetMaterial, ...],
                   presets: Sequence[str | None], *, mount: Mount, fixed: dict[str, str], caps: dict[str, float],
                   allowed: dict[str, tuple[str, ...]], capabilities: CapabilityTable,
-                  directivity: DirectivityDefaults) -> tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]]:
+                  directivity: DirectivityDefaults, ties: Sequence[tuple[str, str]] = (),
+                  ) -> tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]]:
     """開跑那一組起跑配置：原牆照 ``run.scene_wall_materials``、起跑設計照 ``run.designs_for``、准用清單對起跑配置核過
     （:func:`_checked_allowed`）並展開到面片。開跑與建替身（#1082 段 2-8，裝進格子前先核固定材料）共用這一支，
-    兩邊核的是同一組配置。"""
+    兩邊核的是同一組配置。綁定表（#1206，``ties``）也在這裡對起跑配置核，成對兩片不一樣就點名拒收。"""
     from aosr.gradient import run
+    from aosr.gradient.ties import check_ties_against_start
 
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
     designs = run.designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed, max_depths=caps, table=table)
-    return designs, _checked_allowed(allowed, designs, settings, fixed, caps, table)
+    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, table)
+    check_ties_against_start(ties, designs, expanded)
+    return designs, expanded
 
 
 def _check_start_materials(materials: SearchMaterials, model: ReducedModel, scheme: Scheme, surrogate: Path,
