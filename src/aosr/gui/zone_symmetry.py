@@ -33,7 +33,7 @@ from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, effective_modes
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.scheme import Scheme, project_facing, project_midpoint
 
-# 配對規則本身（老闆 11-18 定的「差在 1 公分內才算一對」），不是計算之間的精度契約；同 zone_edit 的 MIN_SIDE_M 那一類。
+# 配對規則本身（#1206 規格定的「差在 1 公分內才算一對」），不是計算之間的精度契約；同 zone_edit 的 MIN_SIDE_M 那一類。
 PAIR_WITHIN_M: Final = 0.01
 SWITCHED_OFF: Final = "off"
 NOT_BETWEEN: Final = "主位不在兩支喇叭中間，定不出對稱軸"
