@@ -4,12 +4,16 @@
 其餘五片固定用原牆。原牆是自編的固定阻抗。設定是這支檔自己寫的一份（:data:`SETTINGS`），不讀產品設定檔，
 所以釘死的位元組不跟著產品設定檔的調整變。
 
-三段，各寫一個資料夾（``project.json``、``ledger.jsonl``、``templates.jsonl``、``result.json``）：
+五段，各寫一個資料夾（``project.json``、``ledger.jsonl``、``templates.jsonl``、``result.json``）：
 
 - ``plain``：不給綁定表、目標恆為零。零目標的每一格都是精確的浮點數，位元組跟處理器無關，考卷把四個檔的 SHA-256
-  釘成常數（基準是加綁定表之前的主線 7d73a450）。這一段不碰任何綁定相關的名字，主線上原樣跑得動。
+  釘成常數（``MAIN_PLAIN_*``）。那些數字是用這支探針在提交 93931dd0 的那一版、配主線 7d73a450 的產品程式產的：
+  現在這一版一律明寫 ``ties=``，主線的產品程式收不了。重現：主線的 ``src`` 配 ``git show 93931dd0:`` 這支檔，
+  照考卷 ``_probe`` 的環境跑 ``plain`` 一段，對四個檔的 SHA-256。
 - ``bowl``：不給綁定表、左右不對稱的二次式。位元組跟處理器有關，不釘；施工時在同一台機器拿主線與改後各跑一次比。
 - ``tied``：y0@a 與 yL@a 成對，同一個不對稱二次式；另外截帳本接續、把一格 θ 改一個最小浮點單位再接續。
+- ``wide``：同 ``tied``，每輪候選上限放寬到 10（上限 3 時照單位與照片數截完一樣，看不出預算照哪個算）；也截帳本接續。
+- ``middle``：改綁 y0@a 與 y0@b，跟著走的 y0@b 後面還有 yL@a（候選迴圈跳過它時 θ 格號要照樣推進）。
 
 牆鐘秒數一律換成 0（把四個模組的 ``time`` 換成假時鐘），帳本與結果檔才逐位可重現。
 """
@@ -21,6 +25,7 @@ import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import jax
 import jax.numpy as jnp
@@ -50,6 +55,7 @@ PRESETS: tuple[str | None, ...] = (None, None, None, None, GAP50, GAP50, GAP50, 
 FIXED = {"floor": SCHEME_MATERIAL, "ceiling": SCHEME_MATERIAL, "x0": SCHEME_MATERIAL, "xL": SCHEME_MATERIAL,
          "yL@b": SCHEME_MATERIAL}
 TIES: Ties = (("y0@a", "yL@a"),)
+MIDDLE_TIES: Ties = (("y0@a", "y0@b"),)
 # 自編設定：三個家族用產品構造預設的樣板代號，其餘數字是這份考卷自己的（輪數與步數刻意小、改善門檻 0.01）。
 SETTINGS: Record = {
     "descent": {"max_steps": 2, "initial_step": 0.01, "backtrack_ratio": 0.5, "armijo_constant": 0.0001,
@@ -236,13 +242,42 @@ def _broken(directory: Path, case: run.GradientProblem) -> Record:
     return {"error": None}
 
 
+def _presnap(directory: Path, case: run.GradientProblem) -> Record:
+    """開跑前段：把下降交出來的 θ 換成成對空腔差一個最小浮點單位的（取規格不動空腔），記前段拋什麼、帳本寫到哪一段。"""
+    target = directory / "tied-presnap"
+    target.mkdir()
+    path = target / run.LEDGER_FILE
+    ledger.write_ledger(path, case.header, ())
+    real = getattr(run, "projected_descent")
+    cell = case.header.variable_names.index("yL@a.layer2.thickness_m")
+
+    def split(*args: object, **kwargs: object) -> gradient_search.DescentResult:
+        result = cast(Callable[..., gradient_search.DescentResult], real)(*args, **kwargs)
+        theta = np.asarray(result.theta).copy()
+        theta[cell] = np.nextafter(theta[cell], 1.0)
+        return result._replace(theta=theta)
+
+    setattr(run, "projected_descent", split)
+    try:
+        run._pre_loop(case, path, None)
+    except Exception as error:
+        caught: Record = {"error": type(error).__name__, "message": str(error)}
+    else:
+        caught = {"error": None}
+    finally:
+        setattr(run, "projected_descent", real)
+    phases = [json.loads(line)["phase"] for line in path.read_bytes().splitlines()[1:]]
+    return {**caught, "phases": phases}
+
+
 def main(argv: list[str]) -> int:
     directory, parts = Path(argv[0]), argv[1:]
     for module in (gradient_search, loop, rounds, run):
         setattr(module, "time", _Clock)
     output: Record = {}
     for part in parts:
-        ties = TIES if part == "tied" else ()
+        ties = MIDDLE_TIES if part == "middle" else TIES if part in ("tied", "wide") else ()
+        SETTINGS["candidates"] = {**cast(Record, SETTINGS["candidates"]), "max_per_round": 10 if part == "wide" else 3}
         case = problem("zero" if part == "plain" else "bowl", ties)
         _search(directory / part, case, ties)
         output[part] = {"gradient_id": identity(ties), "resumed": _resumed(directory, part, case),
@@ -250,6 +285,7 @@ def main(argv: list[str]) -> int:
                                     for item in FILES}}
         if part == "tied":
             output["broken"] = _broken(directory, case)
+            output["presnap"] = _presnap(directory, case)
     (directory / "output.json").write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
     return 0
 

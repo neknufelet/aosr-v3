@@ -33,7 +33,10 @@ def checked_ties(value: Iterable[Sequence[str]]) -> TiePairs:
             raise ValueError(f"綁定要是兩片一對，收到 {list(item)}")
         pair = (names[0], names[1])
         for name in pair:
-            patch_key(name)
+            try:
+                patch_key(name)
+            except ValueError as error:
+                raise ValueError(f"綁定 {'='.join(str(given) for given in item)}：{error}") from error
         if pair[0] == pair[1]:
             raise ValueError(f"綁定 {pair[0]}={pair[1]}：兩片相同，不能自己配自己")
         for name in pair:

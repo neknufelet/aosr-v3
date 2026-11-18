@@ -72,7 +72,7 @@ from aosr.gradient.fixed_surfaces import (
     expanded_allowed_targets, fixed_targets_of,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
-from aosr.gradient.ties import Ties, check_ties_against_start, checked_ties, tied_cells
+from aosr.gradient.ties import Ties, check_ties_against_start, check_ties_hold, checked_ties, tied_cells
 from aosr.gradient.material_gradient import (
     COMPONENT_NAMES, Unestimable, ChainObjective, FloatVector, StopCheck, SurfaceDesign, baseline_theta, check_stop, objective_reading,
     designs_from_presets, is_feasible,
@@ -936,8 +936,7 @@ def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], se
 
 
 def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,
-                       expected_header: MaterialGradientHeader | None = None,
-                       expected_template_header: TemplateHeader | None = None, legacy: bool = False,
+                       expected_header: MaterialGradientHeader | None = None, expected_template_header: TemplateHeader | None = None, legacy: bool = False,
                        table: Sequence[PresetMaterial] | None = None) -> GradientResult:
     """從兩本帳重建整份結果，不寫檔：庚二帳本要收尾（給了 ``expected_header`` 標頭要逐格相等）；換樣板帳本要收尾、
     標頭記的庚二帳本摘要等於現在那本、起點是庚二收尾那一點（給了 ``expected_template_header`` 要逐格相等），
@@ -963,6 +962,7 @@ def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientS
                             max_depths=header.max_depths, table=table)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
+    check_ties_hold(closing.theta(), designs, header.ties, f"{TEMPLATES_FILE} 最後交出去的那一點（重播出結果）")
     mounted = header.mount == MOUNT_ON_WALL
     version = (LOW_FREQUENCY_MOUNTED_RESULT_VERSION if mounted else LOW_FREQUENCY_RESULT_VERSION) if legacy else (
         MOUNTED_RESULT_VERSION if mounted else RESULT_VERSION)
