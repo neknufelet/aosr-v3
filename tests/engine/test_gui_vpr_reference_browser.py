@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
@@ -670,6 +671,194 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_
             assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
+class _HeldLimits:
+    """把限制檢查（``/api/zone-limits``）的回覆扣住，到 :meth:`release` 才放行。:meth:`wait` 等到攔截函式真的收到請求才回來
+    （頁面那邊世代號先加、請求後到，只看世代號會搶先）；等不到就紅並講原因。"""
+
+    def __init__(self, page: Page) -> None:
+        self.page, self.routes, self.open = page, cast(list[Route], []), False
+        page.route("**/api/zone-limits", self._take)
+
+    def _take(self, route: Route) -> None:
+        if self.open:
+            route.continue_()
+        else:
+            self.routes.append(route)
+
+    def wait(self, limit_ms: int = 15_000) -> None:
+        waited = 0
+        while not self.routes:
+            assert waited < limit_ms, f"等了 {limit_ms} 毫秒，限制檢查的請求還沒送到攔截函式"
+            self.page.wait_for_timeout(25)
+            waited += 25
+
+    def release(self) -> None:
+        self.open = True
+        for route in self.routes:
+            route.continue_()
+
+
+_CARD_SENTENCES = "#zone-page .zv-list .zv-problem[id$='-reference']"
+
+
+def _no_old_sentence_anywhere(page: Page) -> None:
+    """卡、頁底、「拿去搜尋」旁邊三處都沒有舊句。"""
+    expect(page.locator(_CARD_SENTENCES)).to_have_count(0)
+    expect(page.locator("#zone-page-blocked")).to_have_count(0)
+    expect(page.locator("#zone-page-search-why")).to_have_count(0)
+    expect(page.locator("#zone-page-search")).to_be_enabled()
+
+
+def test_splitting_a_shared_list_hides_the_old_sentence_everywhere_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """兩區共用一份有命中的清單（一句點名兩區）。扣住限制檢查，給其中一區多勾一種玻璃棉並套用（兩區都還有那一筆，但不再是
+    同一份清單）：新結果回來之前，卡、頁底、按鈕旁三處都沒有舊的那一句；回來之後兩張卡各寫自己那一句。"""
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        both = cast(str, _served_refusals(page)[0]["text"])
+        expect(page.locator(_CARD_SENTENCES)).to_have_text([both])
+        expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
+        limits = _HeldLimits(page)
+        _click_zone(page, "x0/a")
+        page.locator("#zone-panel-allow-glass_wool_24k").check()
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        page.wait_for_function("zoneDesign.zones.x0.a.allowed.includes('glass_wool_24k')")
+        limits.wait()
+        assert [row["text"] for row in _served_refusals(page)] == [both] and HIT in _allowed(page)["x0/a"]  # 手上還是舊的那一份
+        _no_old_sentence_anywhere(page)
+        limits.release()
+        _settled(page)
+        first, second = _refused(page, "x0/b"), _refused(page, "x0/a")
+        assert sorted(page.locator(_CARD_SENTENCES).all_text_contents()) == sorted([first, second])
+        expect(page.locator("#zone-page-blocked")).to_have_text(f"{first}；{second}")
+        expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_merging_into_a_shared_list_hides_the_old_sentences_everywhere_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """前牆兩區共用一份有命中的清單，左牆那一區本來就存著那一筆、清單少一種玻璃棉（兩句）。扣住限制檢查，給左牆那一區
+    補勾那一種（三區變成同一份）：新結果回來之前三處都沒有舊的兩句；回來之後一張卡、一句點名三區。"""
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED, "y0/s": [HIT, "none"]})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        old = [cast(str, row["text"]) for row in _served_refusals(page)]
+        assert len(old) == 2
+        assert sorted(page.locator(_CARD_SENTENCES).all_text_contents()) == sorted(old)
+        limits = _HeldLimits(page)
+        _click_zone(page, "y0/s")
+        page.locator("#zone-panel-allow-glass_wool_48k").check()
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        page.wait_for_function("zoneDesign.zones.y0.s.allowed.includes('glass_wool_48k')")
+        limits.wait()
+        assert [row["text"] for row in _served_refusals(page)] == old and HIT in _allowed(page)["y0/s"]
+        _no_old_sentence_anywhere(page)
+        limits.release()
+        _settled(page)
+        served = _served_refusals(page)
+        assert len(served) == 1 and sorted(f"{zone['wall']}/{zone['zone']}" for zone in cast(list[dict[str, str]], served[0]["zones"])) == ["x0/a", "x0/b", "y0/s"]
+        expect(page.locator(_CARD_SENTENCES)).to_have_text([cast(str, served[0]["text"])])
+        expect(page.locator("#zone-page-blocked")).to_have_text(cast(str, served[0]["text"]))
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_a_design_zone_the_scheme_does_not_have_keeps_the_red_box_on_the_card(tmp_path: Path, browser: Browser) -> None:
+    """設計檔裡多一區方案沒有的（x0/ghost），跟前牆兩區共用一份有命中的清單：清單卡照樣有紅框，句子只點名方案裡那兩區，
+    頁底同一句。"""
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED, "x0/ghost": LISTED})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        name = cast(str, page.evaluate("wallNames.x0"))
+        text = reference_only.plan_refused(f"{name}「b」、{name}「a」", HIT_LABEL)
+        expect(page.locator(_CARD_SENTENCES)).to_have_text([text])
+        expect(page.locator("#zone-page-blocked")).to_have_text(text)
+        expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
+        assert "ghost" not in text
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def _scheme_with_original(zones: list[str]) -> dict[str, object]:
+    """假房間，指名的幾區原牆換成命中的構造（等於材料庫那一筆）。"""
+    document = symmetry_document(CUTS)
+    by_wall = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])["surface_zones_by_wall"])
+    for wall, entries in by_wall.items():
+        for entry in entries:
+            if f"{wall}/{entry.get('id', 'whole_wall')}" in zones:
+                entry["material"] = BONDED_VPR
+    return document
+
+
+@pytest.mark.parametrize("zone", ["x0/a", "x0/b"])
+def test_the_other_walls_card_carries_the_reminder_whichever_following_zone_is_such_a_construction(tmp_path: Path, browser: Browser, zone: str) -> None:
+    """其他牆面指定貼一般成品，跟著它的區裡有一區原牆是命中的構造（圖上不寫名字、那兩行沒地方放）：不管那一區是規則裡的
+    第一區還是不是（兩區各試一次；只看第一區的寫法會漏掉其中一個），卡上都有那一行。"""
+    _prepare(tmp_path, document=_scheme_with_original([zone]))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        page.locator("#zone-rule-mode").select_option("fixed")
+        page.locator("#zone-rule-material").select_option(PLAIN_ID)
+        _settled(page)
+        expect(page.locator("#zone-rule #zone-rule-reference")).to_have_text(cast(str, WORDS["map_line"]))
+        assert _map_words(page, zone) == []
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_the_other_walls_card_has_no_reminder_while_the_material_is_still_being_picked(tmp_path: Path, browser: Browser) -> None:
+    """每一面牆每一區的原牆都是命中的構造；其他牆面下拉改成「指定貼一種」、還沒選貼哪一種：卡上沒有那一行。"""
+    _prepare(tmp_path, document=_scheme_with_original(_wall_zones()))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        page.locator("#zone-rule-mode").select_option("fixed")
+        expect(page.locator("#zone-rule-material")).to_have_value("")
+        expect(page.locator("#zone-rule-material option").first).to_have_text("選要貼哪一種")
+        expect(page.locator("#zone-rule-reference")).to_have_count(0)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def _no_library(page: Page) -> None:
+    page.route("**/api/materials", lambda route: route.fulfill(status=500, json={"error": "暫時讀不到材料庫（考卷植的）"}))
+
+
+def test_with_the_library_unread_no_list_is_written_for_other_zones_from_the_panel_or_the_rule(tmp_path: Path, browser: Browser) -> None:
+    """材料庫清單那一次沒讀到（認不出哪一筆是這一類）：別區改成由程式最佳化（面板套用、其他牆面下拉），都不寫清單
+    （照材料庫沒讀全的慣例），存著命中那一筆的還是只有原來那一區。"""
+    _prepare(tmp_path, {"x0/a": LISTED})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _no_library(page)
+        _open_page(page)
+        assert page.evaluate("zoneReference") is None
+        _click_zone(page, "x0/b")
+        page.locator("#zone-panel-mode-search").check()
+        _apply(page)
+        lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
+        assert lists == {"x0/a": LISTED, "x0/b": None}
+        page.locator("#zone-rule-mode").select_option("search")
+        _settled(page)
+        lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
+        assert len(lists) == 19 and lists.pop("x0/a") == LISTED and set(map(str, lists.values())) == {"None"}
+
+
+def test_with_the_library_unread_back_to_the_other_walls_writes_no_list(tmp_path: Path, browser: Browser) -> None:
+    """同樣材料庫沒讀到：其他牆面的清單裡有命中那一筆，另外指定的那一區按「改回跟其他牆面一樣」，不寫清單、那一筆沒有被帶過去。"""
+    shared = [zone for zone in _wall_zones() if zone != "y0/s"]
+    _prepare(tmp_path, dict.fromkeys(shared, LISTED))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _no_library(page)
+        _open_page(page)
+        page.locator("#zone-special-reset").click()
+        _settled(page)
+        lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
+        assert lists.pop("y0/s") is None and list(lists.values()) == [LISTED] * 18
+
+
 def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
     """兩區共用一份有命中那一筆的清單（一句點名兩區）。把限制檢查的回覆扣住，在面板取消其中一區的那一筆並套用：
     新結果回來之前，舊的那一句（還寫著兩區）不留在畫面上——卡上、頁底都沒有；放行之後換成只點名剩下那一區的新句子。"""
@@ -680,28 +869,18 @@ def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_ne
         both = cast(str, _served_refusals(page)[0]["text"])
         assert both.count("、") == 1
         expect(page.locator("#zone-page-blocked")).to_have_text(both)
-        held: list[Route] = []
-        released: list[bool] = []
-
-        def hold(route: Route) -> None:
-            if released:
-                route.continue_()
-            else:
-                held.append(route)
-        page.route("**/api/zone-limits", hold)
+        limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
         page.locator("#zone-panel-fixed summary").click()
         page.locator(f"#zone-panel-allow-{HIT}").uncheck()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         page.wait_for_function("zoneDesign.zones.x0.a.allowed.length === 2 && zoneLimitsShown !== zoneLimitsGeneration")
-        assert len(held) >= 1
+        limits.wait()
         assert _served_refusals(page)[0]["text"] == both  # 手上還是舊的那一份
         expect(page.locator("#zone-page-blocked")).to_have_count(0)
         expect(page.locator("#zone-page .zv-problem[id$='-reference']")).to_have_count(0)
-        released.append(True)
-        for route in held:
-            route.continue_()
+        limits.release()
         _settled(page)
         expect(page.locator("#zone-page-blocked")).to_have_text(_refused(page, "x0/b"))
         assert (watched.console_errors, watched.page_errors) == ([], [])

@@ -135,38 +135,42 @@ def zone_words(wall: str, key: str, names: Mapping[str, str] = WALL_WORDS) -> st
     return f"{names.get(wall, wall)}「{zone}」"
 
 
-def _zone_order(scheme: Mapping[str, object]) -> dict[tuple[str, str], int]:
-    """每一區排第幾：照限制檢查自己逐面逐區走的順序（:data:`WALLS` 的面序，同一面照方案裡那一面的區序）。"""
+def _zone_order(scheme: Mapping[str, object]) -> list[tuple[str, str]]:
+    """方案裡現在有的區，照限制檢查自己逐面逐區走的順序（:data:`WALLS` 的面序，同一面照方案裡那一面的區序）。
+    草稿是壞的時候哪些區算在方案裡：某一面的區清單不是清單（例如是數字）→ 那一面沒有區；某一區不是物件（例如是字串）→
+    那一區不算（矩形沒有字串代號的也不算）；某一面沒寫或是空清單 → 整面一區。"""
     scene = scheme.get("scene")
     by_wall = scene.get("surface_zones_by_wall") if isinstance(scene, Mapping) else None
-    found: dict[tuple[str, str], int] = {}
+    found: dict[tuple[str, str], None] = {}
     for wall in WALLS:
         entries = by_wall.get(wall) if isinstance(by_wall, Mapping) else None
-        for entry in entries if isinstance(entries, list) and entries else [{"area": "whole_wall"}]:
+        if entries is None or entries == []:
+            entries = [{"area": "whole_wall"}]
+        for entry in entries if isinstance(entries, list) else []:
             key = _key(entry) if isinstance(entry, Mapping) else None
             if key is not None:
-                found.setdefault((wall, key), len(found))
-    return found
+                found[wall, key] = None
+    return list(found)
 
 
 def reference_only_refusals(scheme: Mapping[str, object], design: DesignSettings | None, targets: DepthTargets,
                             names: Mapping[str, str]) -> list[dict[str, object]]:
     """准用清單原文裡的「鋼板直接貼在棉上」的固定材料（#1208）：照（哪一筆, 那一區清單去重排序）分組，一組一句
     （分區頁的清單卡也是照清單去重排序分的，同一張卡的區在同一組）。每一組回 ``id``、``zones``（``{wall, zone}``）與
-    ``text``（開跑會拒收的那一句，區名用「、」接）。區照 :func:`_zone_order`，組照組裡第一區、同一批區再照清單裡的順序；
-    設計設定檔裡區寫的先後不影響結果（方案裡沒有的區排最後）。清單原文＝設計設定存的那一份，放不放得下深度都算。"""
-    order = _zone_order(scheme)
-    listed = [(wall, zone, item.allowed) for wall, zones in (design.zones if design is not None else {}).items()
-              for zone, item in zones.items() if item.allowed]
-    listed.sort(key=lambda row: (order.get((row[0], row[1]), len(order)), row[0], row[1]))
+    ``text``（開跑會拒收的那一句，區名用「、」接）。只收方案裡現在有的區（:func:`_zone_order`；設計設定裡方案沒有的區
+    不進任何一組、不出現在句子裡），區照那一支的順序，組照組裡第一區；同一份清單有兩筆命中時，兩組照第一區那份清單裡
+    寫的先後。設計設定檔裡區寫的先後不影響結果。清單原文＝設計設定存的那一份，放不放得下深度都算。"""
+    zones = design.zones if design is not None else {}
     groups: dict[tuple[str, tuple[str, ...]], list[tuple[str, str]]] = {}
-    for wall, zone, allowed in listed:
+    for wall, zone in _zone_order(scheme):
+        item = zones.get(wall, {}).get(zone)
+        allowed = item.allowed if item is not None and item.allowed else []
         for identifier in dict.fromkeys(allowed):
             if reference_only(targets.fixed.get(identifier)):
                 groups.setdefault((identifier, tuple(sorted(set(allowed)))), []).append((wall, zone))
-    return [{"id": identifier, "zones": [{"wall": wall, "zone": zone} for wall, zone in zones],
-             "text": plan_refused("、".join(zone_words(wall, zone, names) for wall, zone in zones), targets.label(identifier))}
-            for (identifier, _), zones in groups.items()]
+    return [{"id": identifier, "zones": [{"wall": wall, "zone": zone} for wall, zone in listed],
+             "text": plan_refused("、".join(zone_words(wall, zone, names) for wall, zone in listed), targets.label(identifier))}
+            for (identifier, _), listed in groups.items()]
 
 
 def _key(entry: Mapping[str, object]) -> str | None:

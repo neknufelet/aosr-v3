@@ -536,6 +536,7 @@ function wholeButtons(places) {
 // 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
 // 「鋼板直接貼在棉上」的構造不跟著帶（#1208，carriedList）：拿掉它之後只剩不貼或空了，改用預設的三種玻璃棉＋不貼。
 function listForWall(wall, list) {
+  if (!serverDefaultAllowed()) return null;
   if (!list) return startingAllowed(wall);
   const fit = carriedList(list, id => fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id)));
   if (!fit) return defaultAllowed(wall);
@@ -1037,9 +1038,9 @@ function ruleRow() {
     material.value = current?.id ?? "";
     material.onchange = () => { if (material.value) action(() => applyRule({mode: "fixed", materialId: material.value})); };
     row.append(material);
-    // 其他牆面指定貼的是「鋼板直接貼在棉上」的構造（#1208）：跟著規則的區圖上不寫名字，那兩行沒地方放，提醒寫在這張卡上
-    // （面板關著也看得到；伺服器給的那一行）。
-    if (!ruleDraft && zoneReferenceOnly(rule.zones[0].zone.material)) {
+    // 其他牆面已經指定貼一種、跟著它的區裡有任何一區是「鋼板直接貼在棉上」的構造（#1208，貼上去的那一筆或原牆本身）：
+    // 跟著規則的區圖上不寫名字，那兩行沒地方放，提醒寫在這張卡上（面板關著也看得到；伺服器給的那一行）。選到一半不寫。
+    if (!ruleDraft && rule.zones.some(item => zoneReferenceOnly(item.zone.material))) {
       const mark = el("p", "zv-rule-ref", zoneReference.map_line); mark.id = "zone-rule-reference"; row.append(mark);
     }
   }
@@ -1222,10 +1223,10 @@ function listCard(group, index, compact) {
     checks.append(row);
   }
   card.append(checks);
-  // 這一組的清單裡有那一類：開跑會被拒收，紅框照伺服器那幾句寫（伺服器照同一個分法一組一句：區集合等於這張卡那幾區的
-  // 就是這張卡的），「拿去搜尋」也按不下去。
+  // 這一組的清單裡有那一類：開跑會被拒收，紅框照伺服器那幾句寫，「拿去搜尋」也按不下去。活著的一句點名的就是一整張卡的區
+  // （referenceRefusals 判的），這裡只認它是哪一張卡的：第一區在這張卡上。
   const mine = new Set(group.zones.map(item => item.id));
-  const refused = referenceRefusals().filter(line => line.zones.length === mine.size && line.zones.every(({wall, zone}) => mine.has(`${wall}/${zone}`)));
+  const refused = referenceRefusals().filter(line => mine.has(`${line.zones[0].wall}/${line.zones[0].zone}`));
   if (refused.length) {
     const problem = el("p", "zv-problem", refused.map(line => line.text).join("；")); problem.id = `${prefix}-reference`; problem.setAttribute("role", "alert");
     card.append(problem);

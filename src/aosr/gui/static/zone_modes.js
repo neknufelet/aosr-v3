@@ -78,13 +78,22 @@ function zoneReferenceOnly(material) {
   return [libraryLabel(material), zoneLibraryMatch(originalMaterial(material))].some(entry => entry && referenceOnly(entry.id));
 }
 // 伺服器說開跑會拒收的那幾句（限制檢查順便回的 reference_only：一組一句 {id, zones: [{wall, zone}…], text}，字與順序都是
-// 伺服器排的，這裡不接字）。一句列的區裡只要有一區現在的清單已經沒有那一筆（剛取消、新的檢查結果還沒回來），整句先不顯示：
-// 那一句的區名已經不對了，等新的結果回來再畫。
+// 伺服器排的，這裡不接字）。一句是不是還「活著」只有這一支判斷（清單卡、頁底、兩顆「拿去搜尋」都只吃這裡回的）：
+// 它點名的區，恰好等於現在由程式最佳化、清單去重排序後是同一份的所有區（方案裡有的），而且那份清單還有那一筆。
+// （不是由程式最佳化的區沒有清單，自己一堆、對不上任何一句。）
+// 剛改過清單（取消那一筆、拆開、併進來）、新的檢查結果還沒回來時對不上，整句先不顯示，等新的結果回來再畫。
 function referenceRefusals() {
-  return (zoneLimits?.reference_only ?? []).filter(line => line.zones.every(({wall, zone}) => {
-    const setting = zoneSetting(wall, zone);
-    return setting.mode === "search" && Boolean(setting.allowed?.includes(line.id));
-  }));
+  const groups = new Map();
+  for (const [wall, zones] of Object.entries(zoneDesign?.zones || {})) {
+    const keys = new Set(zoneList(wall).map(zoneKey));
+    for (const [key, setting] of Object.entries(zones)) {
+      if (!keys.has(key)) continue;
+      const list = [...new Set(setting.allowed)].sort().join("\n");
+      groups.set(list, [...(groups.get(list) ?? []), `${wall}/${key}`]);
+    }
+  }
+  const alive = new Set([...groups].flatMap(([list, names]) => list.split("\n").map(id => `${id}\n${names.sort().join("\n")}`)));
+  return (zoneLimits?.reference_only ?? []).filter(line => alive.has(`${line.id}\n${line.zones.map(({wall, zone}) => `${wall}/${zone}`).sort().join("\n")}`));
 }
 function setZoneSetting(wall, key, setting) {
   const design = designForEdit();

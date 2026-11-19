@@ -35,7 +35,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED, SLOTTED_FRONT, STEEL_1MM, STEEL_2_5MM
-from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, symmetry_document
+from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
 from tests.engine.test_gui_gradient_jobs import FakeLauncher
 
 Doc = dict[str, object]
@@ -608,7 +608,7 @@ def test_zones_are_named_in_the_order_of_the_command_line_patches_across_walls(t
     同一面照方案的區序），不照設計檔寫的先後。限制檢查自己逐面逐區走的順序（``_zone_order``）跟那一支逐片相同
     （方案轉 90 度、轉 180 度也一樣）。"""
     from aosr.gradient.boundary import scheme_patch_keys, surface_ids
-    from tests.engine._zone_symmetry_room import CENTRED, SIDE
+    from tests.engine._zone_symmetry_room import CENTRED
 
     cuts = {"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED}
     for kwargs in ({"turned": False, "flipped": False}, {"turned": True, "flipped": False}, {"turned": False, "flipped": True}):
@@ -625,3 +625,105 @@ def test_zones_are_named_in_the_order_of_the_command_line_patches_across_walls(t
     assert [group["zones"] for group in groups] == [
         [{"wall": "ceiling", "zone": "c"}, {"wall": "x0", "zone": "a"}, {"wall": "yL", "zone": "s"}], [{"wall": "x0", "zone": "b"}]]
     assert groups[0]["text"] == _sentence("天花「c」、前牆「a」、右牆「s」") and groups[1]["text"] == _sentence("前牆「b」")
+
+
+# ---- 修補 2：方案裡沒有的區不進分組；壞草稿哪些區算在方案裡 ----
+
+def _reply(tmp_path: Path, scheme: Doc, design: Doc) -> Doc:
+    reply = _client(tmp_path).post("/api/zone-limits", json={"scheme": scheme, "design": design})
+    assert reply.status_code == 200, reply.text
+    return cast(Doc, reply.json())
+
+
+def _named(reply: Doc) -> list[list[str]]:
+    return [[f"{zone['wall']}/{zone['zone']}" for zone in cast(list[Doc], group["zones"])] for group in cast(list[Doc], reply.get("reference_only", []))]
+
+
+def _walls(document: Doc) -> Doc:
+    return cast(Doc, cast(Doc, document["scene"])["surface_zones_by_wall"])
+
+
+def test_a_design_zone_the_scheme_does_not_have_is_in_no_group_and_no_sentence(tmp_path: Path) -> None:
+    """設計設定裡有一區方案沒有（改過方案後留下的舊區）、跟方案裡兩區共用一份有命中的清單：那一組只點名方案裡的兩區，
+    句子裡沒有它。只有那一區有命中：沒有那一格。"""
+    _write_user_library(tmp_path)
+    shared = ["glass_wool_48k", HIT, "none"]
+    scheme = symmetry_document({"x0": FRONT_PAIR})
+    reply = _reply(tmp_path, scheme, _zones_design({"x0": {"ghost": shared, "a": shared, "b": shared}}))
+    assert reply["reference_only"] == [{"id": HIT, "zones": [{"wall": "x0", "zone": "b"}, {"wall": "x0", "zone": "a"}],
+                                        "text": _sentence("前牆「b」、前牆「a」")}]
+    alone = _reply(tmp_path, scheme, _zones_design({"x0": {"ghost": shared, "a": ["glass_wool_48k", "none"]}}))
+    assert "reference_only" not in alone
+
+
+def test_a_plan_for_a_design_whose_only_such_list_is_on_a_missing_zone_is_refused_as_it_would_be_without_the_judge(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """控制組：只有方案沒有的那一區有命中的清單。開跑計畫本來就先因為設計設定跟方案對不上拒收——結果跟把判斷換成
+    「永遠不命中」時一模一樣（不是這一類的拒收句）。"""
+    _write_user_library(tmp_path)
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    scheme = Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR}))
+    design = DesignSettings.model_validate(_zones_design({"x0": {"ghost": ["glass_wool_48k", HIT, "none"], "a": ["glass_wool_48k", "none"]}}))
+
+    def outcome() -> str:
+        with pytest.raises(PlanRefused) as caught:
+            jobs.plan(scheme, design, GradientRequest())
+        return str(caught.value)
+
+    real = outcome()
+    monkeypatch.setattr(zone_limits, "reference_only", lambda material: False)
+    assert real == outcome() and real.startswith("設計設定跟方案對不上（") and "鋼板直接貼在棉上" not in real
+
+
+def test_two_hits_in_one_list_come_in_the_order_the_first_zone_wrote_them(tmp_path: Path) -> None:
+    """同一份清單有兩筆命中：兩組的區相同，先後照第一區（方案的區序，b）那份清單裡寫的先後——不照代號、
+    不照另一區怎麼寫、不照設計檔裡區的先後。"""
+    _write_user_library(tmp_path, TWO_HITS)
+    assert SECOND > HIT  # 照代號排的話命中那一筆在前；b 那一份把第二塊寫在前面
+    lists = {"b": [SECOND, HIT, "none"], "a": [HIT, "none", SECOND]}
+    zones = [{"wall": "x0", "zone": "b"}, {"wall": "x0", "zone": "a"}]
+    for order in (("a", "b"), ("b", "a")):
+        reply = _reply(tmp_path, symmetry_document({"x0": FRONT_PAIR}), _zones_design({"x0": {zone: lists[zone] for zone in order}}))
+        assert reply["reference_only"] == [
+            {"id": SECOND, "zones": zones, "text": _sentence("前牆「b」、前牆「a」", SECOND_LABEL)},
+            {"id": HIT, "zones": zones, "text": _sentence("前牆「b」、前牆「a」")}], order
+
+
+@pytest.mark.parametrize("broken", ["wall_is_a_number", "zone_is_a_string"])
+def test_a_half_broken_draft_names_only_the_zones_it_still_has(tmp_path: Path, broken: str) -> None:
+    """壞草稿照樣 200。左牆的區清單是數字 → 左牆沒有區；左牆有一區是字串 → 那一區不算。命中的清單放在好的前牆：
+    有那一格、只點名前牆那兩區（壞的那一面寫的清單不進來）；命中的清單只在壞的那一面：沒有那一格。"""
+    _write_user_library(tmp_path)
+    scheme = symmetry_document({"x0": FRONT_PAIR, "y0": SIDE})
+    _walls(scheme)["y0"] = 7 if broken == "wall_is_a_number" else ["s"]
+    shared = ["glass_wool_48k", HIT, "none"]
+    both = _reply(tmp_path, scheme, _zones_design({"y0": {"s": shared, "whole_wall": shared}, "x0": {"a": shared, "b": shared}}))
+    assert _named(both) == [["x0/b", "x0/a"]]
+    assert cast(list[Doc], both["reference_only"])[0]["text"] == _sentence("前牆「b」、前牆「a」")
+    only_bad = _reply(tmp_path, scheme, _zones_design({"y0": {"s": shared, "whole_wall": shared}, "x0": {"a": ["glass_wool_48k", "none"]}}))
+    assert "reference_only" not in only_bad
+
+
+def test_a_wall_with_an_empty_zone_list_is_one_whole_wall_zone_in_face_order(tmp_path: Path) -> None:
+    """某一面的區清單是空的 → 整面一區：左牆（y0）整面、右牆（yL）整面各一份不同的命中清單，組的先後照面序（左牆先），
+    設計檔裡先寫右牆也一樣。"""
+    _write_user_library(tmp_path)
+    scheme = symmetry_document({"x0": FRONT_PAIR})
+    _walls(scheme)["y0"] = []
+    design = _zones_design({"yL": {"whole_wall": [HIT, "none"]}, "y0": {"whole_wall": ["glass_wool_48k", HIT, "none"]}})
+    assert _named(_reply(tmp_path, scheme, design)) == [["y0/whole_wall"], ["yL/whole_wall"]]
+
+
+@pytest.mark.parametrize("scene", [None, {}], ids=["scene_is_null", "scene_is_empty"])
+def test_a_draft_without_a_scene_still_gets_a_reply(tmp_path: Path, scene: object) -> None:
+    """``scene`` 是 null 或空的草稿（沒有哪一面寫了區 → 每一面整面一區）：照樣 200，命中的清單照樣點名。"""
+    _write_user_library(tmp_path)
+    reply = _reply(tmp_path, {"scene": scene}, _zones_design({"x0": {"whole_wall": ["glass_wool_48k", HIT, "none"]}}))
+    assert _named(reply) == [["x0/whole_wall"]]
+
+
+def test_a_rectangle_without_a_text_id_is_not_a_zone() -> None:
+    """矩形的代號不是字串 → 那一區不算（其他區照算）；沒寫的面整面一區。"""
+    order = zone_limits._zone_order({"scene": {"surface_zones_by_wall": {"x0": [{"area": "rectangle", "id": 5}, {"area": "rectangle", "id": "a"}]}}})
+    assert order == [("floor", "whole_wall"), ("ceiling", "whole_wall"), ("x0", "a"), ("xL", "whole_wall"), ("y0", "whole_wall"), ("yL", "whole_wall")]
