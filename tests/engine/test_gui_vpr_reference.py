@@ -676,6 +676,14 @@ def test_a_plan_for_a_design_whose_only_such_list_is_on_a_missing_zone_is_refuse
     assert real == outcome() and real.startswith("設計設定跟方案對不上（") and "鋼板直接貼在棉上" not in real
 
 
+def test_a_plan_without_any_design_gets_the_ordinary_refusal() -> None:
+    """沒有設計設定（每一區都是固定的）：這一類的檢查沒有清單可看，開跑計畫照舊回「沒有任何一區交給搜尋」那一句。"""
+    with pytest.raises(PlanRefused) as caught:
+        plan_search(Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR})), None, GradientRequest(), SETTINGS,
+                    depth_targets=library_depth_targets(SETTINGS, ENTRIES))
+    assert str(caught.value).startswith("沒有任何一區交給搜尋")
+
+
 def test_two_hits_in_one_list_come_in_the_order_the_first_zone_wrote_them(tmp_path: Path) -> None:
     """同一份清單有兩筆命中：兩組的區相同，先後照第一區（方案的區序，b）那份清單裡寫的先後——不照代號、
     不照另一區怎麼寫、不照設計檔裡區的先後。"""
