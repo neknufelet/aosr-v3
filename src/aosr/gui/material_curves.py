@@ -12,6 +12,8 @@
 - JAX 與構造物理延到第一次畫曲線才載入：網頁主程式載入時不帶 JAX（跟主線一樣；``wall_surfaces`` 也是這樣延後）。
 - 表單沒填齊、參數算不出來（例如流阻超出手動試算範圍）都是使用者會走到的正常狀態：回 200 加 ``status`` 一格，不回錯誤碼。
 - 行程沒開雙精度（正式入口一定開；pytest 的行程刻意不開）另給一個狀態，講明是開機設定、不怪材料參數。
+- 「鋼板直接貼在棉上」的固定材料（#1208，判斷與字句在 ``reference_only``）：回覆多一格 ``reference_only``（界線頻率與畫面要的
+  每一句）；其他材料的回覆一個鍵都不多，命中的回覆拿掉那一格就是原本的回覆。只是提醒，曲線的數字照舊算。
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ from aosr.config.porous_model_ranges import PorousModelRanges
 from aosr.config.product_air import product_air_environment
 from aosr.gui.material_editor import plain_error
 from aosr.gui.problem_text import material_form_spec
+from aosr.gui.reference_only import entry_reference_only, words as reference_words
 from aosr.materials.construction_models import (
     Assembly,
     ConstantImpedance,
@@ -202,6 +205,11 @@ def material_curve(document: object) -> dict[str, object]:
         entry = _ENTRY.validate_python(document)
     except ValidationError as exc:
         return {"status": "incomplete", "message": f"表單還沒填齊，曲線畫不出來：{plain_error(exc)}", "range_scope": RANGE_SCOPE}
+    reply = _entry_curve(entry)
+    return {**reply, "reference_only": reference_words()} if entry_reference_only(entry) else reply
+
+
+def _entry_curve(entry: LibraryEntry) -> dict[str, object]:
     material, arrangement = _physics_material(entry)
     axis = _axis(material)
     air, ranges = product_air_environment()

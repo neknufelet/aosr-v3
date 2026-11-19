@@ -281,3 +281,14 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-sym-missed{white-space:normal;align-items:baseline;flex-wrap:wrap}
 #zone-page .zv-sym-sum{font-size:13.5px}
 #zone-page .zv-foot .zv-area{font-size:12.5px}
+
+/* 「鋼板直接貼在棉上」的構造（#1208）：面板曲線界線以下的淡藍底、圖例那一行與「為什麼」（樣式同材料頁那一份）。 */
+#zone-page .zv-ref-band{fill:rgba(60,120,210,.16)}
+#zone-page .ref-note{margin:.4rem 0 .1rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;font-size:12.5px;text-align:left}
+#zone-page .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid #9db9e0}
+#zone-page .ref-note details{display:inline}
+#zone-page .ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap}
+#zone-page .ref-note summary::after{content:" ▸"}
+#zone-page .ref-note details[open] summary::after{content:" ▾"}
+#zone-page .ref-note details[open] p{display:block;margin:.35rem 0 .1rem;color:#5b6a70;white-space:normal}
+#zone-page .zv-rule-ref{margin:6px 0 0;font-size:13px;color:#33434b}

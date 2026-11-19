@@ -47,3 +47,14 @@ textarea:disabled,select:disabled{background:#edf1f2;color:#53636b}
   #user-list td[data-head]::before,#builtin-list td[data-head]::before{content:attr(data-head) "：";color:#53636b}
   #user-list td:last-child,#builtin-list td:last-child{padding-top:.4rem}
 }
+/* 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下的淡藍底、圖例那一行與「為什麼」。 */
+.ref-note{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;font-weight:400;font-size:inherit;background:none;text-align:left;list-style:none}
+.ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid #9db9e0}
+.ref-note details{display:inline}
+.ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap}
+.ref-note summary::after{content:" ▸"}
+.ref-note details[open] summary::after{content:" ▾"}
+.ref-note details[open] p{display:block;margin:.35rem 0 .1rem;color:#5b6a70;max-width:62em;white-space:normal}
+#curve-key li.ref-note{display:block;margin-right:0}
+.ref-band{position:absolute;left:0;top:0;height:100%;pointer-events:none;background:rgba(60,120,210,.16)}
+.ref-band-word{position:absolute;left:0;top:0;pointer-events:none;font-size:12.5px;line-height:1.3;color:#33434b;padding:5px 8px;white-space:nowrap}

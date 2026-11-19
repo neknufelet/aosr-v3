@@ -389,9 +389,26 @@ function chartWidth() {
   return Math.max(byId("curve-chart").clientWidth, 240);
 }
 
+// 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下打淡藍底，頂端內側一行小字。字與界線都是伺服器給的（reply.reference_only）。
+// 藍底是疊在圖上的兩個元素（不是畫在畫布上）：每次重畫照橫軸現在的位置重放，界線在橫軸左端以外就不放。
+function placeBand(u, reference) {
+  const over = u.over;
+  let band = over.querySelector(".ref-band"), word = over.querySelector(".ref-band-word");
+  if (!band) {
+    band = el("div", {class: "ref-band", id: "curve-ref-band"}); word = el("div", {class: "ref-band-word", id: "curve-ref-band-word"});
+    over.append(band, word);
+  }
+  const right = Math.min(u.valToPos(reference.band_hz, "x"), over.clientWidth);
+  band.hidden = word.hidden = !(right > 0);
+  band.style.width = `${Math.max(right, 0)}px`;
+  band.dataset.hz = String(reference.band_hz);
+  word.textContent = reference.band_words;
+}
+
 function drawPlot(reply) {
   destroyPlot();
   const spans = reply.spans;
+  const reference = reply.reference_only || null;
   // 底色畫在清畫布之後、畫線之前；頭尾同一點時至少畫 2 像素寬，看得到。
   const shade = (u) => {
     const ctx = u.ctx, box = u.bbox;
@@ -407,7 +424,8 @@ function drawPlot(reply) {
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}, y: {range: [0, 1]}},
     axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}],
     series: [{}, {label: "吸音係數", stroke: "#15617b", width: 2, points: {show: false}}],
-    hooks: {drawClear: [shade]}}, [reply.frequencies_hz, reply.absorption], byId("curve-chart"));
+    hooks: {drawClear: [shade], draw: reference ? [(u) => placeBand(u, reference)] : []}},
+    [reply.frequencies_hz, reply.absorption], byId("curve-chart"));
 }
 
 function showLabels(reply) {
@@ -441,12 +459,25 @@ function clearCurve() {
   curveReply = null;
 }
 
+// 圖例那一行（#1208）：色塊、「藍底：」、那一句、「為什麼」（點開才看得到原因）。
+function referenceNote(reference) {
+  const more = el("details", {id: "curve-ref-why"}, el("summary", {text: "為什麼"}), el("p", {text: reference.why_only}));
+  return el("li", {class: "ref-note", id: "curve-ref-note", "data-kind": "reference_only"},
+    el("span", {class: "ref-sw"}), "藍底：", el("span", {class: "ref-say", text: reference.sentence}), more);
+}
+
 function showCurve(reply) {
   showLabels(reply);
   const drawn = reply.status === "drawn";
-  byId("curve-key").hidden = !drawn || !reply.spans.length;
+  // 「鋼板直接貼在棉上」的構造：圖例多一行（有圖才有藍底可講），「種類」那一行後面接一句（沒有圖也接）。換一筆、重畫都重放。
+  const reference = reply.reference_only || null;
+  byId("curve-ref-note")?.remove();
+  byId("editor-kind-ref")?.remove();
+  if (reference && drawn) byId("curve-key").prepend(referenceNote(reference));
+  if (reference && byId("editor-kind")) byId("editor-kind").append(el("span", {class: "ref-kind", id: "editor-kind-ref", text: reference.kind_words}));
+  byId("curve-key").hidden = !drawn || !(reply.spans.length || reference);
   // 底色說明只列圖上真的有的那幾種。
-  const kinds = new Set(drawn ? reply.spans.map((span) => span.kind) : []);
+  const kinds = new Set(drawn ? [...reply.spans.map((span) => span.kind), ...(reference ? ["reference_only"] : [])] : []);
   for (const item of byId("curve-key").querySelectorAll("li")) item.hidden = !kinds.has(item.dataset.kind);
   byId("curve-warnings").replaceChildren(...(drawn ? reply.warnings : []).map((line) =>
     el("li", {class: line.level, "data-code": line.code, text: line.text})));
@@ -505,7 +536,7 @@ function openEntry(row, isNew) {
   const kindBlock = entry.kind === "optimizable" ? optimizableBlock(entry, readonly) : fixedBlock(entry, readonly);
   parts = kindBlock;
   byId("editor-body").replaceChildren(
-    el("p", {class: "hint", text: `種類：${entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）" : listing.entry_kind_labels.fixed + "（整塊選或不選）"}`}),
+    el("p", {class: "hint", id: "editor-kind", text: `種類：${entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）" : listing.entry_kind_labels.fixed + "（整塊選或不選）"}`}),
     commonBlock(entry, readonly, isNew), kindBlock.block);
   kindBlock.after();
   byId("save").hidden = readonly;

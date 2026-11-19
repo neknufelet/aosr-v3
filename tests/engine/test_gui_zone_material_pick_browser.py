@@ -25,6 +25,8 @@ FRONT = ["yL/z1", "yL/z2", "yL/z3", "yL/auto1", "yL/auto2"]
 RIGHT_WITHOUT_OPENINGS = [f"xL/auto{n}" for n in range(1, 7)]
 ONLY_48K = ["glass_wool_48k", "none"]
 FLOOR_ONLY = "sample_carpet_11mm"  # 假材料庫裡只有地板能用的那一筆（考卷裡再跟網頁讀到的核一次）
+# 一筆一般的固定成品（內建）：沒被哪一種可調玻璃棉包含、也不是「鋼板直接貼在棉上」的構造（#1208 起那一類勾不進清單，另有考卷）。
+PLAIN_PRODUCT = "slotted_wood_typ9_absorber40_gap98"
 OLD_WORDS = "交給" + "電腦挑"  # 舊的那一句（拆開寫：改字時整個 repo 搜這一句要是 0 筆）
 # 小框與清單卡裡每一段看得到的字（按鈕除外）：字級（px）、字色對它底下那一層底色的對比。
 # 字色照實際畫出來的算：字色自己的透明度、從這一層往上每一層的 opacity 都乘進去，跟底色混過再比（灰掉的列不准靠調淡）。
@@ -243,7 +245,7 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
                 expect(page.locator(f"#zone-panel-allow-{product}")).to_be_disabled()
                 expect(row.locator(".zv-covered-why")).to_have_text(f"上面可調的 {name} 已經包含它；只想用成品，先取消上面的 {name}")
         # 沒被包含的成品照常勾得到。
-        free = "pet60_vpr_steel1p2mm_foam90_sample"
+        free = PLAIN_PRODUCT
         expect(page.locator(f"#zone-panel-allow-{free}")).to_be_enabled()
         assert page.locator(f"#zone-panel-fixed label[data-choice='{free}']").get_attribute("data-covered") is None
         # 取消 48K：它那四筆勾得到了，24K、96K 的照舊灰著。
@@ -270,7 +272,7 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
 def test_fixed_products_stay_folded_and_the_line_says_how_many_there_are_and_how_many_are_ticked(tmp_path: Path, browser: Browser) -> None:
     """固定成品平常收著，那一行寫這一面用得到的有幾種、勾了幾種（照材料庫算）；點開勾一種，數字跟著變，重畫後照樣開著。"""
     _prepare(tmp_path)
-    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
+    vpr = PLAIN_PRODUCT
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)

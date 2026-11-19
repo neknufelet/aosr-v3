@@ -12,6 +12,7 @@ from playwright.sync_api import Browser, Locator, Page, expect
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
+from tests.engine._bonded_backing_cases import MELAMINE_100, STEEL_2_5MM
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
@@ -27,9 +28,22 @@ DOOR = "hall_door_hollow_core"
 FLOOR_WOOD = "joist_floor_plank_fixed"
 
 
-def _sample_library(tmp_path: Path) -> None:
+PLAIN_PRODUCT = "fabric_pet_a_gap100"  # 內建的一筆固定成品：牆面能貼、不是哪一種可調玻璃棉包含的、也不是「鋼板直接貼在棉上」的構造
+
+
+# 考卷自己編的一筆長名一般固定成品（鋼板前面一層棉、背襯沒黏住，不是「鋼板直接貼在棉上」的構造）：名字 60 個字以上，
+# 用來撐「只讓程式決定：這一筆貼或不貼」那一顆按鈕的版面。
+LONG_PLAIN = "own_long_name_panel"
+LONG_PLAIN_LABEL = "自編長名對照板（考卷用）＋前面自編吸音棉 100 mm（鋼板 2.5 mm、後面自編軟泡棉 100 mm 沒有黏住，總厚約 20 cm）"
+assert len(LONG_PLAIN_LABEL) >= 60
+LONG_PLAIN_ENTRY: dict[str, object] = {
+    "id": LONG_PLAIN, "label": LONG_PLAIN_LABEL, "provenance": "model", "source": "合成：考卷自己編的數字", "links": [], "notes": [],
+    "kind": "fixed", "material": {"kind": "assembly", "backing": "rigid", "layers": [MELAMINE_100, STEEL_2_5MM, MELAMINE_100]}}
+
+
+def _sample_library(tmp_path: Path, *extra: dict[str, object]) -> None:
     adapter: TypeAdapter[tuple[LibraryEntry, ...]] = TypeAdapter(tuple[LibraryEntry, ...])
-    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python(SAMPLE_USER_ENTRIES)), encoding="utf-8")
+    (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python([*SAMPLE_USER_ENTRIES, *extra])), encoding="utf-8")
 
 
 def _values(page: Page, selector: str) -> list[str]:
@@ -350,7 +364,7 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
 def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_path: Path, browser: Browser) -> None:
     """老闆 11-15 看不懂「准用清單只有固定材料：搜尋要一個起點」：只放了固定成品時紅框白話寫程式沒得選，下面直接給按鈕——
     只有一筆就能改成指定貼它（清單跟著拿掉，伺服器不收固定區帶清單）、加上「不貼」、加上 48K 玻璃棉（地板用不了就不出現）。"""
-    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
+    vpr = PLAIN_PRODUCT  # #1208 起合成庫那幾筆 VPR 勾不進清單（另有考卷），這一題要的只是一筆固定成品
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -409,7 +423,7 @@ def _only_fixed(page: Page, wall: str, product: str) -> None:
 def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, browser: Browser) -> None:
     """紅框（只放了固定成品）還在的時候「拿去搜尋」按不下去，旁邊點名是哪幾區的紅框（別面的也算）；處理好一區少一區，
     全處理好自己恢復。直接叫送出也照樣擋、不存不跳頁。"""
-    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
+    vpr = PLAIN_PRODUCT  # #1208 起合成庫那幾筆 VPR 勾不進清單（另有考卷），這一題要的只是一筆固定成品
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -463,7 +477,7 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
     """材料庫有幾筆名字很長的固定成品（合成的 VPR 那幾筆）：材料下拉選單不准照最長那一筆把表撐寬、把深度上限那一欄擠出面板；
     指定貼一種與由程式最佳化（方塊、常用組合按鈕、說明一行一行換）兩個樣子都要塞得進立面圖面板。"""
     _write(tmp_path, room109_document())
-    _sample_library(tmp_path)
+    _sample_library(tmp_path, LONG_PLAIN_ENTRY)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -472,9 +486,14 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
         expect(page.locator("#zone-fixed-x0-z1 option", has_text="VPR").first).to_be_attached()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
         _choose(page, "#zone-fixed-x0-z1", "pet60_vpr_steel1p2mm_foam90_sample")
+        assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
+        # #1208 起貼著合成 VPR 的區改成由程式最佳化時不給「只讓程式決定：這一筆貼或不貼」（另有考卷）；
+        # 那一顆名字長的按鈕改用考卷自己編的一筆長名（跟合成 VPR 那幾筆差不多長）一般固定成品撐。
+        _choose(page, "#zone-fixed-x0-z1", LONG_PLAIN)
+        assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
         _choose(page, "#zone-mode-x0-z1", "search")
         long_preset = page.locator("#zone-preset-x0-z1-this_or_none")
-        expect(long_preset).to_contain_text("只讓程式決定：「VPR")
+        expect(long_preset).to_have_text(f"只讓程式決定：「{LONG_PLAIN_LABEL}」貼或不貼")
         page.locator("#zone-allowed-summary-x0-z1").click()
         expect(page.locator("#zone-allowed-x0-z1")).to_be_visible()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)

@@ -21,6 +21,10 @@
   網頁的限制檢查、開跑預覽、開跑與建替身都傳材料頁那一支（正式入口開機釘中央處理器＋雙精度）。
 
 紅的會擋「拿去搜尋」與開跑（``refusals``，``gradient_plan.plan_search`` 也照它擋）；警告與說明只顯示。
+
+「鋼板直接貼在棉上」的構造不進程式最佳化（#1208，判斷與字句在 ``reference_only``）：准用清單裡有這種固定材料的區，
+:func:`reference_only_refusals` 照清單分組、一組一句列出開跑會拒收的那一句（開跑計畫丟的就是第一句）；限制檢查的介面有才多回一格
+``reference_only``，沒有這種構造時回覆一個位元都不多。不算進 ``red``／``refusals``（那兩格照舊只是位置、深度、可信範圍）。
 這一支只讀不寫；草稿有一格讀不出來就照實列，不丟錯誤碼（畫面在改到一半時也要能問）。
 """
 from __future__ import annotations
@@ -41,6 +45,7 @@ from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings,
 from aosr.geometry.shoebox import Room
 from aosr.gradient.depth_fit import TargetFit, fixed_fit, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
+from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
@@ -128,6 +133,44 @@ def zone_words(wall: str, key: str, names: Mapping[str, str] = WALL_WORDS) -> st
     ``wall_words`` 排的前後左右，否則 ``labels.WALLS``），區名同逐區表——整面、自動補的寫「自動 代號」、畫的框寫它的代號。"""
     zone = "整面" if key == WHOLE_WALL_KEY else f"自動 {key}" if key.startswith(FILL_PREFIX) else key
     return f"{names.get(wall, wall)}「{zone}」"
+
+
+def _zone_order(scheme: Mapping[str, object]) -> list[tuple[str, str]]:
+    """方案裡現在有的區，照限制檢查自己逐面逐區走的順序（:data:`WALLS` 的面序，同一面照方案裡那一面的區序）。
+    草稿是壞的時候哪些區算在方案裡：某一面的區清單不是清單（例如是數字）→ 那一面沒有區；某一區不是物件（例如是字串）→
+    那一區不算（矩形沒有字串代號的也不算）；某一面沒寫或是空清單 → 整面一區。"""
+    scene = scheme.get("scene")
+    by_wall = scene.get("surface_zones_by_wall") if isinstance(scene, Mapping) else None
+    found: dict[tuple[str, str], None] = {}
+    for wall in WALLS:
+        entries = by_wall.get(wall) if isinstance(by_wall, Mapping) else None
+        if entries is None or entries == []:
+            entries = [{"area": "whole_wall"}]
+        for entry in entries if isinstance(entries, list) else []:
+            key = _key(entry) if isinstance(entry, Mapping) else None
+            if key is not None:
+                found[wall, key] = None
+    return list(found)
+
+
+def reference_only_refusals(scheme: Mapping[str, object], design: DesignSettings | None, targets: DepthTargets,
+                            names: Mapping[str, str]) -> list[dict[str, object]]:
+    """准用清單原文裡的「鋼板直接貼在棉上」的固定材料（#1208）：照（哪一筆, 那一區清單去重排序）分組，一組一句
+    （分區頁的清單卡也是照清單去重排序分的，同一張卡的區在同一組）。每一組回 ``id``、``zones``（``{wall, zone}``）與
+    ``text``（開跑會拒收的那一句，區名用「、」接）。只收方案裡現在有的區（:func:`_zone_order`；設計設定裡方案沒有的區
+    不進任何一組、不出現在句子裡），區照那一支的順序，組照組裡第一區；同一份清單有兩筆命中時，兩組照第一區那份清單裡
+    寫的先後。設計設定檔裡區寫的先後不影響結果。清單原文＝設計設定存的那一份，放不放得下深度都算。"""
+    zones = design.zones if design is not None else {}
+    groups: dict[tuple[str, tuple[str, ...]], list[tuple[str, str]]] = {}
+    for wall, zone in _zone_order(scheme):
+        item = zones.get(wall, {}).get(zone)
+        allowed = item.allowed if item is not None and item.allowed else []
+        for identifier in dict.fromkeys(allowed):
+            if reference_only(targets.fixed.get(identifier)):
+                groups.setdefault((identifier, tuple(sorted(set(allowed)))), []).append((wall, zone))
+    return [{"id": identifier, "zones": [{"wall": wall, "zone": zone} for wall, zone in listed],
+             "text": plan_refused("、".join(zone_words(wall, zone, names) for wall, zone in listed), targets.label(identifier))}
+            for (identifier, _), listed in groups.items()]
 
 
 def _key(entry: Mapping[str, object]) -> str | None:
@@ -424,6 +467,25 @@ def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings
     return cast(list[str], zone_limits(scheme_document, value, range_check, provider)["refusals"])
 
 
+def _draft_reference_only(scheme: Mapping[str, object], design_value: object,
+                          depth_targets: Callable[[], DepthTargets] | None) -> list[dict[str, object]]:
+    """草稿那一份的 :func:`reference_only_refusals`。沒有一區寫准用清單就不讀材料庫；設計設定格式不對、材料庫讀不進來
+    都回空的（那兩件事限制檢查自己會講）。"""
+    if depth_targets is None or design_value is None:
+        return []
+    try:
+        design = DesignSettings.model_validate(design_value)
+    except ValidationError:
+        return []
+    if not any(item.allowed for zones in design.zones.values() for item in zones.values()):
+        return []
+    try:
+        targets = depth_targets()
+    except ValueError:
+        return []
+    return reference_only_refusals(scheme, design, targets, draft_wall_words(scheme))
+
+
 def zone_limit_routes(range_check: RangeCheck | None,
                       depth_targets: Callable[[], DepthTargets] | None = None,
                       symmetry: Callable[[object, object], dict[str, object]] | None = None) -> list[Route]:
@@ -433,6 +495,9 @@ def zone_limit_routes(range_check: RangeCheck | None,
 
     def judged(scheme: dict[str, object], design: object) -> dict[str, object]:
         result = zone_limits(scheme, design, range_check, depth_targets)
+        refused = _draft_reference_only(scheme, design, depth_targets)
+        if refused:
+            result["reference_only"] = refused
         if symmetry is not None:
             result["symmetry"] = symmetry(scheme, design)
         return result

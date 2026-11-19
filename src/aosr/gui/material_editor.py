@@ -23,6 +23,7 @@ from starlette.routing import Route
 
 from aosr.gui.problem_text import MATERIAL_MODELS, _plain_material_message, material_form_spec
 from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, placement
+from aosr.gui.reference_only import listing_block
 from aosr.materials.library import (
     PROVENANCE_LABELS,
     FixedEntry,
@@ -196,10 +197,14 @@ class MaterialStore:
         rows = [{"entry": entry.model_dump(mode="json"), "builtin": builtin, "basis": basis_label(entry),
                  "placement": placement(entry).to_json()}
                 for entries, builtin in ((builtin_entries(), True), (user, False)) for entry in entries]
+        # 「鋼板直接貼在棉上」的固定材料（#1208）：命中的代號與畫面要的字另放一格、不塞進每一筆材料裡（分區頁會把材料那一筆
+        # 原樣送回曲線介面，這一頁會把它存回材料庫檔）；一筆都沒有就不多這一格，回覆跟之前逐位相同。
+        reference = listing_block((*builtin_entries(), *user))
         return {"materials": rows, "user_file_problem": problem, "material_form": material_form_spec(),
                 "required_fields": _required_fields(), "layer_kinds": list(LAYER_KINDS), "fixed_kinds": list(FIXED_KINDS),
                 "provenance_labels": PROVENANCE_LABELS, "entry_kind_labels": ENTRY_KIND_LABELS,
-                "surface_groups": GROUP_WORDS, "surface_group_short": GROUP_SHORT_WORDS}
+                "surface_groups": GROUP_WORDS, "surface_group_short": GROUP_SHORT_WORDS,
+                **({"reference_only": reference} if reference is not None else {})}
 
     def _write(self, entries: tuple[LibraryEntry, ...]) -> None:
         text = dump_user_library(entries)

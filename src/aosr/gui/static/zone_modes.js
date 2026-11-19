@@ -66,9 +66,43 @@ function zoneList(wall) {
   return scheme.scene.surface_zones_by_wall?.[wall] ?? [{area: "whole_wall", material: wallMaterial(wall)}];
 }
 function zoneSetting(wall, key) { return zoneDesign?.zones?.[wall]?.[key] ?? {mode: "fixed"}; }
+// 「鋼板直接貼在棉上」的構造（#1208）：哪幾筆是、畫面上那幾句字，都是伺服器給的（/api/materials 的 reference_only：
+// {ids, sentence, why, search_why, listed_why, map_words, band_hz…}；材料庫裡一筆都沒有就沒有這一格，這裡是 null）。
+// 這一類不進程式最佳化：一區的清單不准「新加」這種代號，本來就存著的照樣留著、可以拿掉（伺服器開跑時會點名拒收）。
+let zoneReference = null;
+function referenceOnly(id) { return Boolean(zoneReference?.ids.includes(id)); }
+// 一份新清單裡這一類的代號，只留那一區本來就存著的（kept）。每一條會寫清單的路都過這一支。
+function keepReferenceOut(next, kept) { return next.filter(id => !referenceOnly(id) || (kept ?? []).includes(id)); }
+// 一區現在的材料是不是這一類：貼上去的那一筆，或原本的面本身（原牆就是材料庫裡那一筆）。材料庫認不到的層管不到。
+function zoneReferenceOnly(material) {
+  return [libraryLabel(material), zoneLibraryMatch(originalMaterial(material))].some(entry => entry && referenceOnly(entry.id));
+}
+// 伺服器說開跑會拒收的那幾句（限制檢查順便回的 reference_only：一組一句 {id, zones: [{wall, zone}…], text}，字與順序都是
+// 伺服器排的，這裡不接字）。一句是不是還「活著」只有這一支判斷（清單卡、頁底、兩顆「拿去搜尋」都只吃這裡回的）：
+// 它點名的區，恰好等於現在由程式最佳化、清單去重排序後是同一份的所有區（方案裡有的），而且那份清單還有那一筆。
+// （不是由程式最佳化的區沒有清單，自己一堆、對不上任何一句。）
+// 剛改過清單（取消那一筆、拆開、併進來）、新的檢查結果還沒回來時對不上，整句先不顯示，等新的結果回來再畫。
+function referenceRefusals() {
+  const groups = new Map();
+  for (const [wall, zones] of Object.entries(zoneDesign?.zones || {})) {
+    const keys = new Set(zoneList(wall).map(zoneKey));
+    for (const [key, setting] of Object.entries(zones)) {
+      if (!keys.has(key)) continue;
+      const list = [...new Set(setting.allowed)].sort().join("\n");
+      groups.set(list, [...(groups.get(list) ?? []), `${wall}/${key}`]);
+    }
+  }
+  const alive = new Set([...groups].flatMap(([list, names]) => list.split("\n").map(id => `${id}\n${names.sort().join("\n")}`)));
+  return (zoneLimits?.reference_only ?? []).filter(line => alive.has(`${line.id}\n${line.zones.map(({wall, zone}) => `${wall}/${zone}`).sort().join("\n")}`));
+}
 function setZoneSetting(wall, key, setting) {
   const design = designForEdit();
   design.zones[wall] ??= {};
+  // 最後一道（#1208）：不管從哪一條路來，這一區的新清單不准多出本來沒有的「鋼板直接貼在棉上」的構造；拿掉之後空了就只放不貼。
+  if (setting.allowed) {
+    const allowed = keepReferenceOut(setting.allowed, design.zones[wall][key]?.allowed);
+    if (allowed.length !== setting.allowed.length) setting = {...setting, allowed: allowed.length ? allowed : [ZONE_NONE]};
+  }
   design.zones[wall][key] = setting;
 }
 function zoneNote(text, kind) {
@@ -167,6 +201,9 @@ async function sendToSearch() {
     zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
   }
   if (limitsRedCount()) { zoneNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); return; }
+  // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，不存不跳，照伺服器那一句講。
+  const refused = referenceRefusals();
+  if (refused.length) { zoneNote(refused.map(line => line.text).join("；"), "notice"); return; }
   if (inputBusy) {
     // 等限制檢查的時候又送了一批改動、還在路上：這一次不存不跳。那一批落地後平面圖檢查會換掉訊息列，
     // 「這間房貼什麼」那一頁另外留著這一句（zone_overview.js 的 zonePageKeep，#1188 第 6 條）。
@@ -205,10 +242,11 @@ function searchButtonRow() {
   const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
   button.textContent = `拿去搜尋（${count} 區由程式最佳化）`;
   button.onclick = () => action(sendToSearch);
-  const red = limitsRedCount(), stuck = stuckZoneNames();
-  button.disabled = red > 0 || stuck.length > 0;
+  // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，這一列跟紅框同一個樣子——按鈕停用、旁邊紅字寫伺服器那幾句。
+  const red = limitsRedCount(), stuck = stuckZoneNames(), refused = referenceRefusals().map(line => line.text);
+  button.disabled = red > 0 || stuck.length > 0 || refused.length > 0;
   const note = document.createElement("span"); note.id = "zone-to-search-note";
-  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
+  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
   note.className = blocked.length ? "limit-red" : "note";
   note.textContent = blocked.length ? blocked.join("；") : "會先照畫面儲存，再打開第三階段搜尋頁";
   row.append(button, " ", note);
@@ -232,14 +270,15 @@ async function fetchZoneLibrary() {
     // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）先不進分區頁：電腦挑它還沒接上，選單、勾選表、不列的那幾組都不出現。
     return {library: data.materials.filter(row => row.entry.kind !== "tunable_layers")
               .map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
-            groups: data.surface_groups, short: data.surface_group_short,
+            groups: data.surface_groups, short: data.surface_group_short, reference: data.reference_only ?? null,
             problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {
-    return {library: [], groups: {}, short: {}, problem: `材料庫讀不到：${errorText(error)}`};
+    return {library: [], groups: {}, short: {}, reference: null, problem: `材料庫讀不到：${errorText(error)}`};
   }
 }
 function applyZoneLibrary(state) {
   zoneLibrary = state.library; zoneSurfaceGroups = state.groups; zoneSurfaceShort = state.short; zoneLibraryProblem = state.problem;
+  zoneReference = state.reference ?? null;
 }
 async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
@@ -449,9 +488,17 @@ function fitsHere(id, wall) { return id === ZONE_NONE || (libraryEntry(id) !== n
 // 材料庫沒讀全就回 null（照舊不寫清單、照講；使用者材料庫壞了的時候伺服器本來就不准換做法，輪不到這裡）。
 function startingAllowed(wall) {
   if (!serverDefaultAllowed()) return null;
-  const last = (zoneLastAllowed ?? []).filter(id => fitsHere(id, wall));
-  if (last.length && !allowedProblem(last)) return last;
-  return [...THREE_WOOLS.filter(id => fitsHere(id, wall)), ZONE_NONE];
+  const last = carriedList(zoneLastAllowed ?? [], id => fitsHere(id, wall));
+  if (last?.length && !allowedProblem(last)) return last;
+  return defaultAllowed(wall);
+}
+function defaultAllowed(wall) { return [...THREE_WOOLS.filter(id => fitsHere(id, wall)), ZONE_NONE]; }
+// 別區的一份清單帶到新的一區（#1208）：「鋼板直接貼在棉上」的構造不帶（別區本來就存著的那一筆，不准跟著帶進新的一區）。
+// 拿掉它之後只剩「不貼」或什麼都不剩，回 null（呼叫的人改用預設的三種玻璃棉＋不貼）：那一份清單本來是「它或不貼」，
+// 帶過來變成「只有不貼」等於程式什麼都不做，不是使用者選的。來源本來就沒有它的照舊（本來就只有「不貼」的也照舊）。
+function carriedList(list, keeps) {
+  const kept = list.filter(id => !referenceOnly(id) && keeps(id));
+  return list.some(referenceOnly) && !kept.some(id => id !== ZONE_NONE) ? null : kept;
 }
 function choiceName(id) {
   const entry = libraryEntry(id);
@@ -545,6 +592,12 @@ function allowedChecklist(wall, key, allowed, onToggle) {
     input.onchange = () => onToggle(id, input);
     const text = document.createElement("span"); text.textContent = name;
     const small = document.createElement("small"); small.textContent = words;
+    // 「鋼板直接貼在棉上」的構造（#1208）：還沒勾的勾不了；本來就勾著的可以取消。為什麼寫在滑過去的說明（伺服器那一句），
+    // 這張舊表不另加樣式（做法改在「這間房貼什麼」那一頁設，那裡才有灰列與小字）。
+    if (referenceOnly(id)) {
+      input.disabled = !input.checked; wrap.dataset.reference = input.checked ? "listed" : "off";
+      wrap.title = input.checked ? zoneReference.listed_why : zoneReference.search_why;
+    }
     wrap.append(input, text, small);
     return wrap;
   };
@@ -605,7 +658,8 @@ function allowedChips(wall, key, allowed, edit) {
 function zonePresets(wall, key, zone) {
   const presets = ZONE_PRESETS.filter(preset => preset.members.every(id => fitsHere(id, wall)));
   const held = zoneFormerFixed.get(`${wall}/${key}`) ?? libraryLabel(zone.material)?.id;
-  if (held && fitsHere(held, wall)) {
+  // 現在貼的是「鋼板直接貼在棉上」的構造（#1208）：不給這一顆（它不進程式最佳化）。
+  if (held && fitsHere(held, wall) && !referenceOnly(held)) {
     presets.push({id: "this_or_none", words: `只讓程式決定：「${libraryEntry(held).label}」貼或不貼`, members: [held, ZONE_NONE]});
   }
   return presets;
@@ -642,7 +696,8 @@ function searchCell(wall, key, zone, setting, cell) {
     return;
   }
   // 最後一種不准拿掉：空清單伺服器整份拒收（整份做法都存不進去）。
-  const edit = next => {
+  const edit = wanted => {
+    const next = keepReferenceOut(wanted, allowed);  // #1208：不准新加「鋼板直接貼在棉上」的構造
     if (!next.length) {
       zoneNote(`${zoneCalled(wall, key)}：清單至少要留一種；不想讓程式選，就把做法改成「指定貼一種」或「${KEEP_WORDS}」`, "notice");
       renderZoneTable(wall);

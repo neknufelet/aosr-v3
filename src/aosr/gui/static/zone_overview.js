@@ -161,7 +161,9 @@ function methodWords(group) {
 function shownOf(mode) { return {search: "search", fixed: "fixed", keep_original: "still"}[mode]; }
 function hoverWords(item) {
   const mode = zoneMethodMode(item.method);
-  return `${zoneWhereText(item)}：${mode === "fixed" ? `${ZONE_MODE_WORDS.fixed}：${pastedWords(item)}` : ZONE_MODE_WORDS[mode]}`;
+  // 這一區的材料是「鋼板直接貼在棉上」的構造（#1208）：滑過去的說明接那一句（圖上寫不下字的區也看得到）。
+  const reference = zoneReferenceOnly(item.zone.material) ? `；${zoneReference.sentence}` : "";
+  return `${zoneWhereText(item)}：${mode === "fixed" ? `${ZONE_MODE_WORDS.fixed}：${pastedWords(item)}` : ZONE_MODE_WORDS[mode]}${reference}`;
 }
 
 /* ───── 左右對稱：伺服器算好的配對整理成畫面要的樣子（不在這裡算誰跟誰一對） ───── */
@@ -233,27 +235,41 @@ function fixedLabel(item, x, y, width, height) {
   const entry = libraryLabel(item.zone.material);
   const group = svg("g", {class: "zv-fixed-words"});
   if (!entry || !item.named) return group;
-  const lines = entry.label.split(/[（）]|(?=＋)/).map(part => part.trim()).filter(Boolean);
+  const named = entry.label.split(/[（）]|(?=＋)/).map(part => part.trim()).filter(Boolean);
   // 第一行就是「VPR」而名字自己沒接著說明：底下加一行小字說它是什麼（同右欄的「VPR（鋼板共振吸音）」）。
-  if (lines[0] === "VPR" && vprWords(entry.label) !== entry.label) lines.splice(1, 0, VPR_WORDS);
+  if (named[0] === "VPR" && vprWords(entry.label) !== entry.label) named.splice(1, 0, VPR_WORDS);
   const room = Math.max(0, Math.floor((height - 44) / 18));
-  let big = [20, 15].find(size => textWidth(lines[0], size) <= width - 10);
-  if (!big) {
-    // 第一行整句放不下：照空白折成幾行。
-    const wrapped = [];
-    for (const word of lines[0].split(" ")) {
-      const joined = wrapped.length ? `${wrapped.at(-1)} ${word}` : word;
-      if (wrapped.length && textWidth(joined, 15) <= width - 10) wrapped[wrapped.length - 1] = joined; else wrapped.push(word);
+  // 名字最多用 nameRoom 行：第一行大字（放不下就小一號、再不行照空白折），後面幾行從頭照順序放到放不下為止。
+  const laid = nameRoom => {
+    const lines = [...named];
+    let big = [20, 15].find(size => textWidth(lines[0], size) <= width - 10);
+    if (!big) {
+      // 第一行整句放不下：照空白折成幾行。
+      const wrapped = [];
+      for (const word of lines[0].split(" ")) {
+        const joined = wrapped.length ? `${wrapped.at(-1)} ${word}` : word;
+        if (wrapped.length && textWidth(joined, 15) <= width - 10) wrapped[wrapped.length - 1] = joined; else wrapped.push(word);
+      }
+      // 折完要整句都寫得下（每一行夠寬、行數夠高）才寫：寫一半的名字比不寫更容易看錯。
+      if (wrapped.length > 1 && wrapped.length <= nameRoom && wrapped.every((line, index) => textWidth(line, index ? 13 : 15) <= width - 10)) { lines.splice(0, 1, ...wrapped); big = 15; }
     }
-    // 折完要整句都寫得下（每一行夠寬、行數夠高）才寫：寫一半的名字比不寫更容易看錯。
-    if (wrapped.length > 1 && wrapped.length <= room && wrapped.every((line, index) => textWidth(line, index ? 13 : 15) <= width - 10)) { lines.splice(0, 1, ...wrapped); big = 15; }
-  }
-  if (!big || !room) return group;
-  const fits = [lines[0]];
-  for (const line of lines.slice(1)) { if (fits.length >= room || textWidth(line, 13) > width - 10) break; fits.push(line); }
-  const top = y + height / 2 - (fits.length - 1) * 9;
+    if (!big || nameRoom < 1) return null;
+    const fits = [lines[0]];
+    for (const line of lines.slice(1)) { if (fits.length >= nameRoom || textWidth(line, 13) > width - 10) break; fits.push(line); }
+    return {big, fits};
+  };
+  // 這一區貼的是「鋼板直接貼在棉上」的構造（#1208）：材料字下面多兩行（伺服器給的字），面板關著也看得到。
+  // 這兩行用 12 px（這一頁最小的字級；1.1 公尺寬的一塊板寫得下）。行數不夠時這兩行先留、名字後面的幾行讓出來；連名字第一行都擠不下就不留這兩行（滑過去的說明照樣有那一句）。
+  const marks = zoneReferenceOnly(item.zone.material) ? zoneReference.map_words : [];
+  const marked = marks.length && marks.every(line => textWidth(line, 12) <= width - 10) ? laid(room - marks.length) : null;
+  const found = marked ?? laid(room);
+  if (!found) return group;
+  const {big, fits} = found, noted = marked ? marks : [];
+  const top = y + height / 2 - (fits.length + noted.length - 1) * 9;
   fits.forEach((line, index) => group.append(svg("text", {class: index ? "zv-fixed-sub" : "zv-fixed-label", "font-size": index ? 13 : big,
     x: x + width / 2, y: top + (index ? 2 + index * 19 : 0)}, line)));
+  noted.forEach((line, index) => group.append(svg("text", {class: "zv-fixed-sub zv-ref-map", "font-size": 12,
+    x: x + width / 2, y: top + 6 + (fits.length + index) * 19 - (index ? 2 : 0)}, line)));
   return group;
 }
 function badge(cx, cy, number, small) {
@@ -487,7 +503,7 @@ function startingDraft() {
 }
 function select(ids) {
   selected = ids; draftTouched = false; ruleDraft = false; listAdding = null;
-  openDetails.delete("zone-panel-fixed"); openDetails.delete("zone-panel-zones");
+  openDetails.delete("zone-panel-fixed"); openDetails.delete("zone-panel-zones"); openDetails.delete("zone-panel-ref-why");
   draft = startingDraft();
   renderZoneOverview();
 }
@@ -518,9 +534,12 @@ function wholeButtons(places) {
   });
 }
 // 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
+// 「鋼板直接貼在棉上」的構造不跟著帶（#1208，carriedList）：拿掉它之後只剩不貼或空了，改用預設的三種玻璃棉＋不貼。
 function listForWall(wall, list) {
+  if (!serverDefaultAllowed()) return null;
   if (!list) return startingAllowed(wall);
-  const fit = list.filter(id => fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id)));
+  const fit = carriedList(list, id => fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id)));
+  if (!fit) return defaultAllowed(wall);
   return fit.length ? fit : [ZONE_NONE];
 }
 // 最多區用的那一份清單（清單卡第一張列的）；現在沒有哪一區由程式最佳化就是 null（新的區照「三種玻璃棉＋不貼」起）。
@@ -620,6 +639,10 @@ async function applyRule(method) {
 async function resetSpecial() {
   const method = ruleMethod();
   if (!method) { zoneNote("其他牆面現在貼的不是材料庫裡的一筆，沒辦法照著改回去：先在「其他牆面」選一種", "notice"); return; }
+  // 其他牆面的清單裡有「鋼板直接貼在棉上」的構造（#1208）：那一筆帶不過來，這幾區的清單跟規則永遠差一種、併不回去。
+  // 不改、照講（伺服器給的那一句），不寫「改好了」。
+  const held = method.mode === "search" ? (method.allowed ?? []).find(referenceOnly) : null;
+  if (held) { zoneNote(zoneReference.reset_blocked[held], "notice"); return; }
   await applyMethod(view.inferred.special.flatMap(group => group.zones), method);
 }
 // 小框裡每一種材料現在的樣子：選中的每一區照草稿加減之後的清單（lists），加上每一種「選中的區裡幾區有」（count）。
@@ -692,6 +715,7 @@ function groupZones(group) { return group.zones.map(item => item.id).sort().join
 // 在一張清單卡上勾（#1199 修補 1）：只改那一組的區（清單一樣的那幾區），加一種（change.add）或拿掉一種（change.remove），
 // 加減在每一區自己的清單上——加的那一種某一面貼不了，那一面的區就不加。跟做法表改清單一樣重判限制。
 function writeList(group, change) {
+  if (change.add && referenceOnly(change.add)) return;  // #1208：這一類不准加進清單（那一格本來就勾不了，這裡是第二道）
   const lists = group.zones.map(item => change.remove ? item.allowed.filter(id => id !== change.remove)
     : item.allowed.includes(change.add) || !fitsHere(change.add, item.wall) ? item.allowed : [...item.allowed, change.add]);
   group.zones.forEach((item, index) => setZoneSetting(item.wall, item.key, {...zoneSetting(item.wall, item.key), mode: "search", allowed: lists[index]}));
@@ -745,6 +769,12 @@ function curveBlock(entry) {
   const x = hz => left + (Math.log10(hz) - Math.log10(low)) / (Math.log10(high) - Math.log10(low)) * (width - left - 8);
   const y = value => top + (1 - value) * (height - top - bottom);
   const chart = svg("svg", {class: "zv-curve-chart", width, height, viewBox: `0 0 ${width} ${height}`});
+  // 「鋼板直接貼在棉上」的構造（#1208，伺服器在曲線回覆裡給界線與字）：界線以下淡藍底，圖下面一行圖例與「為什麼」。
+  const reference = state.reference_only ?? null;
+  if (reference && reference.band_hz > low) {
+    const band = svg("rect", {class: "zv-ref-band", x: left, y: top, width: x(Math.min(reference.band_hz, high)) - left, height: height - top - bottom});
+    band.dataset.hz = String(reference.band_hz); chart.append(band);
+  }
   for (const value of [0, 0.5, 1]) {
     chart.append(svg("line", {class: "zv-grid", x1: left, x2: width - 8, y1: y(value), y2: y(value)}),
       svg("text", {class: "zv-tick", x: left - 5, y: y(value) + 3.5, "text-anchor": "end"}, String(value)));
@@ -755,7 +785,11 @@ function curveBlock(entry) {
   }
   const points = state.frequencies_hz.map((hz, index) => [hz, state.absorption[index]]).filter(([hz]) => hz >= low && hz <= high);
   chart.append(svg("polyline", {class: "zv-curve", points: points.map(([hz, value]) => `${x(hz).toFixed(1)},${y(Math.min(Math.max(value, 0), 1)).toFixed(1)}`).join(" ")}));
-  return [chart, el("div", "zv-axis", "頻率（赫茲）")];
+  if (!reference) return [chart, el("div", "zv-axis", "頻率（赫茲）")];
+  const note = el("div", "ref-note"); note.id = "zone-panel-ref-note";
+  const more = fold("zone-panel-ref-why", "為什麼"); more.append(el("p", null, reference.why));
+  note.append(el("span", "ref-sw"), "藍底：", el("span", "ref-say", reference.sentence), more);
+  return [chart, el("div", "zv-axis", "頻率（赫茲）"), note];
 }
 function materialShow(entry, wall) {
   const show = el("div", "zv-show"); show.id = "zone-panel-show";
@@ -795,14 +829,20 @@ function someWords(id, ticks) {
   }
   return ticks.state(id) === "all" && unable ? [el("small", "zv-some", `選中的 ${all} 區裡 ${unable} 區那一面貼不了這一種，不會加`)] : [];
 }
+// 「鋼板直接貼在棉上」的構造（#1208，referenceOnly）照同一套畫：還沒勾的灰掉、勾不了、寫為什麼；選中的區裡本來就有它的
+// 照樣勾著（或第三種狀態）、灰字、可以取消——點它一律是拿掉（不會加到還沒有它的區），拿掉之後勾不回來。
 function materialRow(entry, ticks, covered, toggle) {
-  const row = el("label", `zv-mrow${covered ? " zv-covered" : ""}`); row.dataset.choice = entry.id; row.dataset.kind = entry.kind;
-  const check = tickBox(entry.id, ticks, toggle);
-  check.disabled = Boolean(covered) && ticks.state(entry.id) === "none";
+  const reference = referenceOnly(entry.id), listed = reference && ticks.state(entry.id) !== "none";
+  const row = el("label", `zv-mrow${covered || reference ? " zv-covered" : ""}`); row.dataset.choice = entry.id; row.dataset.kind = entry.kind;
+  const check = tickBox(entry.id, ticks, reference ? id => toggle(id, false) : toggle);
+  check.disabled = (Boolean(covered) || reference) && ticks.state(entry.id) === "none";
   const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", vprWords(shortLabel(entry))));
   if (entry.kind === "optimizable") words.append(el("small", "zv-range", adjustWords(entry)));
   else if (fixedDepthWords(entry)) words.append(el("small", null, fixedDepthWords(entry)));
-  if (covered) {
+  if (reference) {
+    row.dataset.reference = listed ? "listed" : "off";
+    words.append(el("small", "zv-covered-why", listed ? zoneReference.listed_why : zoneReference.search_why));
+  } else if (covered) {
     row.dataset.covered = covered.id;
     words.append(el("small", "zv-covered-why", coveredWhy(covered)));
   }
@@ -950,7 +990,7 @@ function panelCard() {
       const mixed = ticks?.ids.some(id => ticks.state(id) === "some");
       const from = el("div", "zv-from", !ticks ? "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）"
         : mixed ? `選中的 ${items.length} 區清單不一樣：沒動的勾，各區照目前的。每一區各自最佳化。`
-        : `程式從下面勾的 ${ticks.ids.length} 種裡選，每一區各自最佳化。`);
+        : `程式從下面勾的 ${ticks.ids.filter(id => !referenceOnly(id)).length} 種裡選，每一區各自最佳化。`);  // #1208：程式不會挑的那一類不算
       from.id = "zone-panel-search-from"; body.append(from);
     }
     row.append(radio, body, el("span", `zv-sw ${shownOf(mode)}`));
@@ -998,6 +1038,11 @@ function ruleRow() {
     material.value = current?.id ?? "";
     material.onchange = () => { if (material.value) action(() => applyRule({mode: "fixed", materialId: material.value})); };
     row.append(material);
+    // 其他牆面已經指定貼一種、跟著它的區裡有任何一區是「鋼板直接貼在棉上」的構造（#1208，貼上去的那一筆或原牆本身）：
+    // 跟著規則的區圖上不寫名字，那兩行沒地方放，提醒寫在這張卡上（面板關著也看得到；伺服器給的那一行）。選到一半不寫。
+    if (!ruleDraft && rule.zones.some(item => zoneReferenceOnly(item.zone.material))) {
+      const mark = el("p", "zv-rule-ref", zoneReference.map_line); mark.id = "zone-rule-reference"; row.append(mark);
+    }
   }
   return row;
 }
@@ -1108,7 +1153,11 @@ function listAddBox(group, allowed, prefix) {
     const words = el("span", null, listName(id));
     if (id !== ZONE_NONE) words.append(el("small", null, choiceWords(libraryEntry(id))));
     const family = coveredBy.get(id);
-    if (family) {
+    if (referenceOnly(id)) {
+      // 「鋼板直接貼在棉上」的構造（#1208）：灰掉、勾不了、寫為什麼（伺服器給的那一句）。
+      row.classList.add("zv-covered"); row.dataset.reference = "off"; check.disabled = true;
+      words.append(el("small", "zv-covered-why", zoneReference.search_why));
+    } else if (family) {
       row.classList.add("zv-covered"); row.dataset.covered = family.id; check.disabled = true;
       words.append(el("small", "zv-covered-why", coveredWhy(family)));
     }
@@ -1165,10 +1214,23 @@ function listCard(group, index, compact) {
     // 可調的一種一列，名字底下寫調什麼、從多少到多少（跟小框的材料框同一種寫法；範圍是材料頁設的）。
     const words = el("span", "zv-mwords", listName(id)), entry = libraryEntry(id);
     if (entry?.kind === "optimizable") words.append(el("small", "zv-range", adjustWords(entry)));
+    // 清單裡本來就存著「鋼板直接貼在棉上」的構造（#1208）：照樣勾著、灰字、可以取消，取消後加不回來。
+    if (referenceOnly(id)) {
+      row.classList.add("zv-covered"); row.dataset.reference = "listed";
+      words.append(el("small", "zv-covered-why", zoneReference.listed_why));
+    }
     row.append(check, words);
     checks.append(row);
   }
   card.append(checks);
+  // 這一組的清單裡有那一類：開跑會被拒收，紅框照伺服器那幾句寫，「拿去搜尋」也按不下去。活著的一句點名的就是一整張卡的區
+  // （referenceRefusals 判的），這裡只認它是哪一張卡的：第一區在這張卡上。
+  const mine = new Set(group.zones.map(item => item.id));
+  const refused = referenceRefusals().filter(line => mine.has(`${line.zones[0].wall}/${line.zones[0].zone}`));
+  if (refused.length) {
+    const problem = el("p", "zv-problem", refused.map(line => line.text).join("；")); problem.id = `${prefix}-reference`; problem.setAttribute("role", "alert");
+    card.append(problem);
+  }
   // 清單每一種都是固定成品：程式沒得選（同做法表的紅框），「拿去搜尋」也按不下去。
   if (allowedProblem(allowed)) {
     const problem = el("p", "zv-problem"); problem.id = `${prefix}-problem`; problem.setAttribute("role", "alert");
@@ -1358,7 +1420,7 @@ function resultBar() {
   // 「拿去搜尋」照做法表那一顆的擋法：沒有區由程式最佳化、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
   const go = button("zv-go", "拿去搜尋", "zone-page-search", () => action(sendToSearch));
   // 按不下去時旁邊一句講為什麼（細節在上面那一行紅字）。
-  const why = !of("search").length ? "還沒有由程式最佳化的區" : stuckZoneNames().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
+  const why = !of("search").length ? "還沒有由程式最佳化的區" : stuckZoneNames().length || referenceRefusals().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
   go.disabled = Boolean(why);
   // 原因那一句收在按鈕正下方（小字一行），不跟前面三項搶同一行的寬度。
   const box = el("span", "zv-gobox"); box.append(go);
@@ -1370,7 +1432,9 @@ function resultBar() {
 function noteLines() {
   const wrap = el("div", "zv-notes");
   const red = limitsRedCount(), stuck = stuckZoneNames();
-  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...(red ? [`有 ${red} 條超過限制，改好之前不能拿去搜尋：${(zoneLimits?.refusals ?? []).join("；")}`] : [])];
+  // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑會拒收的那一句（伺服器給的）也寫在這一行。
+  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...referenceRefusals().map(line => line.text),
+    ...(red ? [`有 ${red} 條超過限制，改好之前不能拿去搜尋：${(zoneLimits?.refusals ?? []).join("；")}`] : [])];
   if (blocked.length) { const line = el("p", "limit-red", blocked.join("；")); line.id = "zone-page-blocked"; wrap.append(line); }
   for (const text of [zoneDesignNote, zoneLibraryProblem].filter(Boolean)) wrap.append(el("p", "notice", text));
   const saidText = saidWords();
