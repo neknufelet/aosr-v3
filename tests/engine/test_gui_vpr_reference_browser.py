@@ -420,3 +420,43 @@ def test_the_old_table_lets_a_stored_one_be_unticked_and_not_ticked_back(tmp_pat
         expect(box).to_be_disabled()
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == ["glass_wool_48k", "none"]
         assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+# 把最底下那一道（``setZoneSetting`` 裡的那一段）拿掉，只留原本的寫入：考每一條路自己的那一道。
+_NO_LAST_GUARD = """() => { setZoneSetting = (wall, key, setting) => {
+    const design = designForEdit(); design.zones[wall] ??= {}; design.zones[wall][key] = setting; }; }"""
+
+
+def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guard(tmp_path: Path, browser: Browser) -> None:
+    """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①舊做法表剛改過的清單（上一次的組合）帶到下一區；
+    ②舊做法表勾選表那一格被人改成勾得到再點；③清單卡「加別種材料」那一格被人改成勾得到再點。"""
+    _prepare(tmp_path, {"x0/a": LISTED})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        page.evaluate(_NO_LAST_GUARD)
+        page.locator("#elevation-wall-x0").click()
+        # ① 動有它的那一份清單，再把另一區改成由程式最佳化：預帶的清單與底下那一句都沒有它。
+        page.locator("#zone-chip-remove-x0-a-glass_wool_48k").click()
+        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == [HIT, "none"]
+        with page.expect_response("**/api/zone-material"):
+            page.locator("#zone-mode-x0-b").select_option("search")
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == ["none"]
+        # ② 勾選表那一格硬改成勾得到再點：清單不變。
+        page.locator("#zone-allowed-summary-x0-b").click()
+        expect(page.locator("#zone-allowed-x0-b")).to_be_visible()
+        page.locator(f"#zone-allow-x0-b-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
+        expect(page.locator(f"#zone-allow-x0-b-{HIT}")).not_to_be_checked()
+        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == ["none"]
+        # ③ 清單卡「加別種材料」那一格硬改成勾得到再點：清單不變。
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-map")).to_be_visible()
+        _settled(page)
+        before = _allowed(page)
+        page.locator("#zone-list-add").click()
+        expect(page.locator(f"#zone-list-add-{HIT}")).to_be_disabled()
+        page.locator(f"#zone-list-add-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
+        _settled(page)
+        assert _allowed(page) == before and HIT not in before["x0/b"]
+        assert (watched.console_errors, watched.page_errors) == ([], [])

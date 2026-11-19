@@ -551,8 +551,7 @@ function tickedList(item, ticks) {
   const own = ownList(item);
   if (!own) return null;
   const next = own.filter(id => ticks[id] !== false);
-  // 「鋼板直接貼在棉上」的構造（#1208）只准拿掉、不准加：勾上的那一筆是這一類就不加到還沒有它的區。
-  for (const [id, on] of Object.entries(ticks)) if (on && !next.includes(id) && fitsHere(id, item.wall) && !referenceOnly(id)) next.push(id);
+  for (const [id, on] of Object.entries(ticks)) if (on && !next.includes(id) && fitsHere(id, item.wall)) next.push(id);
   return next;
 }
 // 把好幾區一次改成同一個做法。method：{mode, materialId（指定貼哪一筆；空的＝照現在貼的不換）, allowed（由程式最佳化的清單：
