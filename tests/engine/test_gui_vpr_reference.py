@@ -724,6 +724,7 @@ def test_a_draft_without_a_scene_still_gets_a_reply(tmp_path: Path, scene: objec
 
 
 def test_a_rectangle_without_a_text_id_is_not_a_zone() -> None:
-    """矩形的代號不是字串 → 那一區不算（其他區照算）；沒寫的面整面一區。"""
-    order = zone_limits._zone_order({"scene": {"surface_zones_by_wall": {"x0": [{"area": "rectangle", "id": 5}, {"area": "rectangle", "id": "a"}]}}})
+    """矩形的代號不是字串 → 那一區不算（其他區照算）；同一個代號寫兩次只算一區；沒寫的面整面一區。"""
+    front = [{"area": "rectangle", "id": 5}, {"area": "rectangle", "id": "a"}, {"area": "rectangle", "id": "a"}]
+    order = zone_limits._zone_order({"scene": {"surface_zones_by_wall": {"x0": front}}})
     assert order == [("floor", "whole_wall"), ("ceiling", "whole_wall"), ("x0", "a"), ("xL", "whole_wall"), ("y0", "whole_wall"), ("yL", "whole_wall")]

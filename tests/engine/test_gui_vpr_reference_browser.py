@@ -737,6 +737,31 @@ def test_splitting_a_shared_list_hides_the_old_sentence_everywhere_until_the_new
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
+def test_a_sentence_for_a_list_that_no_longer_has_it_is_hidden_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """只有一區的清單有命中那一筆。扣住限制檢查，取消它並套用（區還是同一區，清單沒有那一筆了）：新結果回來之前三處都沒有
+    舊的那一句；回來之後也沒有。"""
+    _prepare(tmp_path, {"x0/a": LISTED})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        expect(page.locator(_CARD_SENTENCES)).to_have_text([_refused(page, "x0/a")])
+        limits = _HeldLimits(page)
+        _click_zone(page, "x0/a")
+        page.locator("#zone-panel-fixed summary").click()
+        page.locator(f"#zone-panel-allow-{HIT}").uncheck()
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        page.wait_for_function("zoneDesign.zones.x0.a.allowed.length === 2")
+        limits.wait()
+        assert len(_served_refusals(page)) == 1  # 手上還是舊的那一份
+        _no_old_sentence_anywhere(page)
+        limits.release()
+        _settled(page)
+        assert _served_refusals(page) == []
+        _no_old_sentence_anywhere(page)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
 def test_merging_into_a_shared_list_hides_the_old_sentences_everywhere_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
     """前牆兩區共用一份有命中的清單，左牆那一區本來就存著那一筆、清單少一種玻璃棉（兩句）。扣住限制檢查，給左牆那一區
     補勾那一種（三區變成同一份）：新結果回來之前三處都沒有舊的兩句；回來之後一張卡、一句點名三區。"""
