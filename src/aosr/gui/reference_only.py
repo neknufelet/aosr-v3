@@ -131,29 +131,29 @@ _Section = Literal["purpose", "stage_one"]
 # 不計分、尚未評估的類寫空的＝不標。少一類、多一類都報錯（:func:`marked_categories`）。
 RESULT_RANGES: Final[dict[str, tuple[tuple[_Section, str, _Read], ...]]] = {
     "timbre_balance": (
-        ("purpose", "timbre_balance.coverage_range_hz", "range"),   # scoring/timbre.py::load_timbre_settings
+        ("purpose", "timbre_balance.coverage_range_hz", "range"),   # src/aosr/scoring/timbre.py::load_timbre_settings
         ("purpose", "timbre_balance.tilt_fit_range_hz", "range"),   # 同上
         ("purpose", "timbre_balance.ripple_range_hz", "range"),     # 同上
         ("purpose", "timbre_balance.feature_range_hz", "range"),    # 同上
     ),
     "listening_area_stability": (
-        # 位置之間的整體音量差：reporting/evaluation.py::read_registry_settings（BROADBAND_KEY）
-        # → scoring/listening_area.py::evaluate_listening_area
+        # 位置之間的整體音量差：src/aosr/reporting/evaluation.py::read_registry_settings（BROADBAND_KEY）
+        # → src/aosr/scoring/listening_area.py::evaluate_listening_area
         ("purpose", "channel_matching.broadband_range_hz", "range"),
-        # 位置之間的斜率差、起伏差、峰谷對不對得上，拿的是逐點音色評估的結果：scoring/timbre.py::load_timbre_settings
+        # 位置之間的斜率差、起伏差、峰谷對不對得上，拿的是逐點音色評估的結果：src/aosr/scoring/timbre.py::load_timbre_settings
         ("purpose", "timbre_balance.tilt_fit_range_hz", "range"),
         ("purpose", "timbre_balance.ripple_range_hz", "range"),
         ("purpose", "timbre_balance.feature_range_hz", "range"),
     ),
-    # scoring/stage_one_score.py::stage_one_settings_from_section（第一階段那一段）
+    # src/aosr/scoring/stage_one_score.py::stage_one_settings_from_section（第一階段那一段）
     "low_frequency_response": (("stage_one", SCORED_RANGE_KEY, "range"),),
     "low_frequency_decay": (),  # 不計分：不標
-    # scoring/reflections_cost.py::_checked_payload
+    # src/aosr/scoring/reflections_cost.py::_checked_payload
     "reflections_and_echo": (("purpose", "reflections_and_echo.frequency_range_hz", "range"),),
-    # scoring/reverberation_cost.py::target_intervals（逐帶目標的中心頻率）
+    # src/aosr/scoring/reverberation_cost.py::target_intervals（逐帶目標的中心頻率）
     "reverberation": (("purpose", "reverberation.target_band_centers_hz", "centers"),),
     "channel_matching": (
-        ("purpose", "channel_matching.ripple_range_hz", "range"),      # scoring/channel_matching_settings.py::_load_settings
+        ("purpose", "channel_matching.ripple_range_hz", "range"),      # src/aosr/scoring/channel_matching_settings.py::_load_settings
         ("purpose", "channel_matching.broadband_range_hz", "range"),   # 同上
     ),
     "spatial_impression": (),  # 尚未評估：不標
