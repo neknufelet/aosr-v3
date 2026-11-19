@@ -172,10 +172,10 @@ def test_the_compare_page_and_its_text_export_are_the_same_with_or_without_the_b
 ALL_COSTED = {category.value: "costed" for category in QualityCategory}
 
 
-def _registry(tmp_path: Path, key: str, value: str) -> QualityTargets:
-    """登記簿複製一份到暫存資料夾，把用途那一段指名的那一格的值換掉。"""
+def _registry(tmp_path: Path, key: str, value: str, section: str = "[[purpose]]") -> QualityTargets:
+    """登記簿複製一份到暫存資料夾，把指名那一段（預設用途那一段）指名的那一格的值換掉。"""
     text = TARGETS.read_text(encoding="utf-8")
-    start = text.index(f'key = "{key}"', text.index("[[purpose]]"))
+    start = text.index(f'key = "{key}"', text.index(section))
     at = text.index("value = ", start)
     end = text.index("\n", at)
     changed = tmp_path / "quality_targets.toml"
@@ -220,6 +220,16 @@ def test_any_one_span_below_the_band_is_enough_and_all_at_or_above_is_not(tmp_pa
     assert "reverberation" in reference_only.marked_categories(ALL_COSTED, registry, PURPOSE, 126.0)
 
 
+def test_the_band_and_the_tag_come_from_the_registry_the_result_page_was_given(tmp_path: Path) -> None:
+    """界線讀的是結果頁手上那一份登記簿，不是另一份：第一階段計分範圍上界改成 250 的那一份，句子與小標籤都寫 250，
+    下界 300 的音色起伏那一段不再算在界線以下（音色平衡另外幾段還是低於 250，照標）。"""
+    lowered = _registry(tmp_path, "stage_one_low_frequency.scored_range_hz", "[20.0, 250.0]", "[[stage_one]]")
+    block = reference_only.result_block(["後牆"], ALL_COSTED, lowered, PURPOSE)
+    assert block is not None and block["tag"] == "含 250 Hz 以下" and block["categories"] == MARKED
+    assert block["sentence"] == _sentence("後牆").replace("300", "250")
+    assert reference_only.result_block([], ALL_COSTED, lowered, PURPOSE) is None
+
+
 def test_the_table_names_the_keys_the_scoring_code_reads() -> None:
     """對照表每一類的鍵名，就是評分程式讀登記簿用的那幾個常數；每一類都在表上，不計分、尚未評估的兩類寫空的。"""
     table = {category: [(section, key) for section, key, _ in spans] for category, spans in reference_only.RESULT_RANGES.items()}
@@ -251,15 +261,20 @@ def test_the_table_names_the_keys_the_scoring_code_reads() -> None:
     ({"timbre_balance": (("purpose", "reflections_and_echo.window_upper_ms", "centers"),)}, TypeError),
     ({"timbre_balance": (("purpose", "reverberation.target_band_centers_hz", "range"),)}, TypeError),   # 七個數，不是一段
     ({"timbre_balance": (("purpose", "timbre_balance.target_tilt_db_per_octave", "range"),)}, TypeError),  # 是目標，不是量法設定
+    # 資格那一條的值剛好是兩個頻率，但它不是量法設定：兩種讀法都不收
+    ({"timbre_balance": (("purpose", "ranking.eligibility.critical_bands", "range"),)}, TypeError),
+    ({"timbre_balance": (("purpose", "ranking.eligibility.critical_bands", "centers"),)}, TypeError),
 ], ids=["one_category_missing", "one_category_extra", "no_such_key", "wrong_section", "a_number_read_as_range",
-        "a_number_read_as_centers", "centers_read_as_range", "a_target_entry"])
+        "a_number_read_as_centers", "centers_read_as_range", "a_target_entry", "a_qualification_read_as_range",
+        "a_qualification_read_as_centers"])
 def test_a_table_that_does_not_fit_the_registry_is_an_error_and_not_a_silent_no_mark(
         monkeypatch: pytest.MonkeyPatch, ranges: dict[str, object], error: type[Exception]) -> None:
     """對照表少一類、多一類、鍵名在登記簿讀不到、讀不出一段頻率：一律報錯，不默默不標。就算那一類沒有算出代價也照查。"""
     changed = {**reference_only.RESULT_RANGES, **ranges}
     monkeypatch.setattr(reference_only, "RESULT_RANGES", {key: value for key, value in changed.items() if value is not None})
     states = {**ALL_COSTED, "timbre_balance": "unavailable"}
-    with pytest.raises(error):
+    match = {ValueError: "RESULT_RANGES 要剛好列出每一個品質類別", KeyError: "沒有這個品質鍵", TypeError: "讀不出一段頻率範圍"}[error]
+    with pytest.raises(error, match=match):
         reference_only.marked_categories(states, load_quality_targets(TARGETS), PURPOSE, 300.0)
 
 

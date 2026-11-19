@@ -163,10 +163,10 @@ _COSTED: Final = ("measured", "costed")
 
 
 def _lower_hz(section: QualityPurpose, key: str, read: _Read) -> float:
-    """那一格的下界（Hz）；登記簿沒有這一格（KeyError）、或讀不出一段頻率就報錯，不當成沒有。"""
+    """那一格的下界（Hz）；登記簿沒有這一格（KeyError）、不是量法設定、或讀不出一段頻率就報錯，不當成沒有。"""
     entry = section.entry(key)
     value = entry.value if isinstance(entry, SettingEntry) else None
-    if not isinstance(value, tuple) or (len(value) != 2 if read == "range" else len(value) < 1):
+    if not isinstance(value, tuple) or (read == "range" and len(value) != 2):
         raise TypeError(f"{key} 讀不出一段頻率範圍")
     return float(value[0])
 
