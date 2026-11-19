@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import cast
@@ -25,6 +27,8 @@ from aosr.gui.zone_design import DesignSettings
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import SCHEMA_VERSION, LibraryEntry, builtin_entries
 from aosr.reporting.scheme import Scheme
+from aosr.runtime import child_process_env
+from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED, SLOTTED_FRONT, STEEL_1MM, STEEL_2_5MM
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, symmetry_document
 from tests.engine.test_gui_gradient_jobs import FakeLauncher
@@ -226,3 +230,72 @@ def test_the_web_plan_reads_the_user_library_and_refuses_the_same_way(tmp_path: 
     assert str(caught.value) == REFUSED
     assert jobs.plan(scheme, _design(["glass_wool_48k", PLAIN_ID, "none"]), GradientRequest())[0].allowed == {
         "x0@a": ("glass_wool_48k", f"fixed:{PLAIN_ID}", "none")}
+
+
+# ---- 材料庫頁的曲線介面 ----
+
+# 主線（de6f12b2）畫得出曲線時回覆的鍵：沒命中的材料一個都不准多、不准少。
+MAIN_KEYS = {"status", "basis", "basis_code", "basis_detail", "provenance", "source", "links", "arrangement", "range_scope",
+             "frequencies_hz", "absorption", "measured_range_hz", "spans", "warnings", "axis_text"}
+# 冷子行程（正式開機設定：雙精度）：每一份材料打兩次曲線介面，一次照常、一次把判斷換成永遠不命中，兩份回覆都交回來。
+_CURVE_TWICE = """
+import json, sys
+from pathlib import Path
+from aosr.runtime import configure_calculation_jax
+configure_calculation_jax()
+from starlette.testclient import TestClient
+from aosr.gui import material_curves
+from aosr.gui.app import GuiSettings, create_app
+
+cases = json.load(sys.stdin)
+out = {}
+with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=Path(sys.argv[1]))), base_url="http://localhost") as client:
+    for name, document in cases.items():
+        real = client.post("/api/material-curve", json=document).json()
+        judge = material_curves.entry_reference_only
+        material_curves.entry_reference_only = lambda entry: False
+        try:
+            off = client.post("/api/material-curve", json=document).json()
+        finally:
+            material_curves.entry_reference_only = judge
+        out[name] = {"real": real, "off": off}
+json.dump(out, sys.stdout)
+"""
+
+
+@pytest.fixture(scope="module")
+def curves(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Doc]]:
+    from tests.engine.test_material_library_vpr import _vpr
+
+    folder = tmp_path_factory.mktemp("vpr-curves")
+    cases = {"hit": USER[0], "fronted": _fixed("own_fronted_panel", "自編前置板", FRONTED), "table": _fixed("own_table", "自編表", _table(BONDED_VPR)),
+             "plain": USER[1], "tunable": _vpr(), "unfinished": {"kind": "fixed", "id": "own_unfinished"}}
+    env = forward_cpu_pins(child_process_env())
+    env["TMPDIR"] = str(folder)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    done = subprocess.run([sys.executable, "-c", _CURVE_TWICE, str(folder)], input=json.dumps(cases), env=env, cwd=folder,
+                          capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, done.stderr[-2000:]
+    return cast(dict[str, dict[str, Doc]], json.loads(done.stdout))
+
+
+@pytest.mark.parametrize("name", ["hit", "fronted", "table"])
+def test_a_hit_curve_reply_is_the_ordinary_reply_plus_one_field(curves: dict[str, dict[str, Doc]], name: str) -> None:
+    """命中：回覆多一格（界線與每一句字）；拿掉那一格，等於同一行程裡判斷換成永遠不命中的回覆——曲線的數字沒有被動到。"""
+    real, off = curves[name]["real"], curves[name]["off"]
+    assert real["status"] == "drawn" and set(off) == MAIN_KEYS
+    assert real["reference_only"] == reference_only.words()
+    assert {key: value for key, value in real.items() if key != "reference_only"} == off
+
+
+@pytest.mark.parametrize("name", ["plain", "tunable"])
+def test_a_curve_reply_for_anything_else_has_exactly_the_keys_it_had(curves: dict[str, dict[str, Doc]], name: str) -> None:
+    """沒命中（同樣的鋼板與棉但沒黏住、可調 VPR）：鍵集合跟主線一樣，判斷開或關回覆一模一樣。"""
+    real, off = curves[name]["real"], curves[name]["off"]
+    assert real["status"] == "drawn" and set(real) == MAIN_KEYS
+    assert real == off
+
+
+def test_an_unfinished_form_gets_no_field(curves: dict[str, dict[str, Doc]]) -> None:
+    real = curves["unfinished"]["real"]
+    assert real["status"] == "incomplete" and set(real) == {"status", "message", "range_scope"}
