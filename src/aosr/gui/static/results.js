@@ -174,6 +174,21 @@ function drawCategories() {
     for (const text of item.note.split("\n")) content.append(node("p", text));
     categories.rows[index + 1].cells[4].replaceChildren(folded(`${label(item.category)}詳情`, content));
   });
+  // 方案裡有「鋼板直接貼在棉上」的構造（#1208 第 2 支）：伺服器給的那一格（view.reference_only）有才畫——表上方一塊說明
+  // （一句＋點開才有的原因），要標的那幾列「注意事項」最前面一個小標籤。字與哪幾列都是伺服器定的，這裡不判斷、不寫字。
+  const reference = view.reference_only;
+  if (reference) {
+    const note = document.createElement("div");
+    note.className = "ref-note"; note.id = "categories-reference";
+    const say = node("span", reference.sentence); say.className = "ref-say";
+    note.append(say, folded(reference.why_label, node("p", reference.why)));
+    $("categories").prepend(note);
+    view.categories.forEach((item, index) => {
+      if (!reference.categories.includes(item.category)) return;
+      const tag = node("span", reference.tag); tag.className = "ref-tag";
+      categories.rows[index + 1].cells[3].prepend(tag, " ");
+    });
+  }
   // 評估器版本與原因碼是給查問題用的，收在「技術細節」摺疊區。
   table($("category-technical"), ["類別", "評估器版本", "原因碼"],
     view.categories.map((item) => [label(item.category), item.evaluator_version || "—",

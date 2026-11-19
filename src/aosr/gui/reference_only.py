@@ -11,14 +11,17 @@
 
 畫面上的字只住這裡：網頁從介面回覆拿（``/api/materials`` 的 ``reference_only``、``/api/material-curve`` 命中時的同名那一格），
 腳本不另寫一份。這一支不載入 JAX，不算物理，數字一個都不改。
+
+結果頁（第 2 支）：存的方案裡有這類構造時，「各類結果」表上方多一句、頻率範圍含界線以下的那幾列多一個小標籤
+（:func:`result_block`）。哪一類讀登記簿哪幾格寫在 :data:`RESULT_RANGES`，跟評分程式實際讀的那幾格對（每一格旁邊註明是哪一支讀的）。
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Final
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Final, Literal
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import SettingEntry, load_quality_targets
+from aosr.config.quality_targets import QualityPurpose, QualityTargets, SettingEntry, load_quality_targets
 from aosr.materials.construction_models import Assembly, Layer, MeasuredImpedance, MountedOnWall, PorousLayer
 from aosr.materials.library import FixedEntry, LibraryEntry, MeasuredTable
 
@@ -51,9 +54,13 @@ def entry_reference_only(entry: LibraryEntry) -> bool:
 
 def band_hz() -> float:
     """界線頻率（Hz）：第一階段計分範圍的上界，每次從設定檔現讀。"""
-    sections = load_quality_targets(config_path("quality_targets.toml")).stage_one_sections
+    return registry_band_hz(load_quality_targets(config_path("quality_targets.toml")))
+
+
+def registry_band_hz(registry: QualityTargets) -> float:
+    """同一條界線，從已經載入的那一份登記簿讀（結果頁用它自己那一份）。"""
     found: set[float] = set()
-    for section in sections:
+    for section in registry.stage_one_sections:
         entry = section.entry(SCORED_RANGE_KEY)
         if not isinstance(entry, SettingEntry) or not isinstance(entry.value, tuple) or len(entry.value) != 2:
             raise TypeError(f"{SCORED_RANGE_KEY} 不是一段頻率範圍")
@@ -112,3 +119,85 @@ def listing_block(entries: Iterable[LibraryEntry]) -> dict[str, object] | None:
     if not hits:
         return None
     return {"ids": [entry.id for entry in hits], **words(), "reset_blocked": {entry.id: reset_blocked(entry.label) for entry in hits}}
+
+
+# ---- 結果頁「各類結果」（第 2 支） ----
+
+# 一格怎麼讀：``range`` 是一段 [下界, 上界]（剛好兩個數）；``centers`` 是一串遞增的頻帶中心（下界取最低那一個中心）。
+_Read = Literal["range", "centers"]
+# 那一格住登記簿哪一段：``purpose`` 是用途那一段，``stage_one`` 是同一個用途的第一階段那一段。
+_Section = Literal["purpose", "stage_one"]
+# 類別（``QualityCategory`` 的值）→ 它計分時讀的每一段頻率（段、鍵名、讀法）。每一格後面註明評分程式哪一支讀它。
+# 不計分、尚未評估的類寫空的＝不標。少一類、多一類都報錯（:func:`marked_categories`）。
+RESULT_RANGES: Final[dict[str, tuple[tuple[_Section, str, _Read], ...]]] = {
+    "timbre_balance": (
+        ("purpose", "timbre_balance.coverage_range_hz", "range"),   # scoring/timbre.py::load_timbre_settings
+        ("purpose", "timbre_balance.tilt_fit_range_hz", "range"),   # 同上
+        ("purpose", "timbre_balance.ripple_range_hz", "range"),     # 同上
+        ("purpose", "timbre_balance.feature_range_hz", "range"),    # 同上
+    ),
+    "listening_area_stability": (
+        # 位置之間的整體音量差：reporting/evaluation.py::read_registry_settings（BROADBAND_KEY）
+        # → scoring/listening_area.py::evaluate_listening_area
+        ("purpose", "channel_matching.broadband_range_hz", "range"),
+        # 位置之間的斜率差、起伏差、峰谷對不對得上，拿的是逐點音色評估的結果：scoring/timbre.py::load_timbre_settings
+        ("purpose", "timbre_balance.tilt_fit_range_hz", "range"),
+        ("purpose", "timbre_balance.ripple_range_hz", "range"),
+        ("purpose", "timbre_balance.feature_range_hz", "range"),
+    ),
+    # scoring/stage_one_score.py::stage_one_settings_from_section（第一階段那一段）
+    "low_frequency_response": (("stage_one", SCORED_RANGE_KEY, "range"),),
+    "low_frequency_decay": (),  # 不計分：不標
+    # scoring/reflections_cost.py::_checked_payload
+    "reflections_and_echo": (("purpose", "reflections_and_echo.frequency_range_hz", "range"),),
+    # scoring/reverberation_cost.py::target_intervals（逐帶目標的中心頻率）
+    "reverberation": (("purpose", "reverberation.target_band_centers_hz", "centers"),),
+    "channel_matching": (
+        ("purpose", "channel_matching.ripple_range_hz", "range"),      # scoring/channel_matching_settings.py::_load_settings
+        ("purpose", "channel_matching.broadband_range_hz", "range"),   # 同上
+    ),
+    "spatial_impression": (),  # 尚未評估：不標
+}
+# 有算出代價的狀態（``EvaluationState`` 的值）：已量、已算代價。
+_COSTED: Final = ("measured", "costed")
+
+
+def _lower_hz(section: QualityPurpose, key: str, read: _Read) -> float:
+    """那一格的下界（Hz）；登記簿沒有這一格（KeyError）、或讀不出一段頻率就報錯，不當成沒有。"""
+    entry = section.entry(key)
+    value = entry.value if isinstance(entry, SettingEntry) else None
+    if not isinstance(value, tuple) or (len(value) != 2 if read == "range" else len(value) < 1):
+        raise TypeError(f"{key} 讀不出一段頻率範圍")
+    return float(value[0])
+
+
+def marked_categories(states: Mapping[str, str], registry: QualityTargets, purpose: str, band: float) -> list[str]:
+    """哪幾類要標「含界線以下」：有算出代價，而且它計分讀的範圍裡有一段的下界嚴格小於界線（剛好等於的不標）。
+    ``states`` 是結果頁每一類的狀態（照表上的順序）。範圍只讀登記簿現行的值，照這份結果的用途取。"""
+    from aosr.scoring.contract import QualityCategory
+
+    if set(RESULT_RANGES) != {category.value for category in QualityCategory}:
+        raise ValueError("RESULT_RANGES 要剛好列出每一個品質類別")
+    sections: dict[str, QualityPurpose] = {"purpose": registry.purpose(purpose), "stage_one": registry.stage_one(purpose)}
+    lowest = {category: [_lower_hz(sections[section], key, read) for section, key, read in spans]
+              for category, spans in RESULT_RANGES.items()}
+    return [category for category, state in states.items()
+            if state in _COSTED and any(lower < band for lower in lowest[category])]
+
+
+def result_block(walls: Sequence[str], states: Mapping[str, str], registry: QualityTargets, purpose: str) -> dict[str, object] | None:
+    """結果頁回覆旁邊那一格。``walls``：存的方案裡哪幾面有這類構造（給人看的牆名，照面序）。一面都沒有就回 None，
+    而且不讀界線、不讀範圍。有：表上方那一句（``sentence``）、「為什麼」（``why_label``、``why``）、小標籤的字（``tag``）、
+    要標的類別（``categories``）。"""
+    if not walls:
+        return None
+    edge = registry_band_hz(registry)
+    band = f"{edge:g}"
+    return {
+        "sentence": (f"{'、'.join(walls)}有 VPR（鋼板共振吸音）{_KIND}：{band} Hz 以下的數字只能參考；"
+                     f"下表標了「含 {band} Hz 以下」的幾列都受影響。"),
+        "why_label": "為什麼",
+        "why": f"{_WHY}。",
+        "tag": f"含 {band} Hz 以下",
+        "categories": marked_categories(states, registry, purpose, edge),
+    }
