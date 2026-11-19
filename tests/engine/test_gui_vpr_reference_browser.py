@@ -427,7 +427,8 @@ _NO_LAST_GUARD = """() => { setZoneSetting = (wall, key, setting) => {
 
 def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guard(tmp_path: Path, browser: Browser) -> None:
     """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①舊做法表剛改過的清單（上一次的組合）帶到下一區；
-    ②舊做法表勾選表那一格被人改成勾得到再點；③清單卡「加別種材料」那一格被人改成勾得到再點。"""
+    ②舊做法表勾選表那一格被人改成勾得到再點；③清單卡「加別種材料」那一格被人改成勾得到再點；④選整面套用時，
+    還沒交給程式的區照畫面上那一份清單起頭、但不帶它。"""
     _prepare(tmp_path, {"x0/a": LISTED})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -457,4 +458,16 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         page.locator(f"#zone-list-add-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
         _settled(page)
         assert _allowed(page) == before and HIT not in before["x0/b"]
+        # ④ 選整面套用：先把沒有它的那一區放回不貼，剩下有它的那一區（畫面上那一份清單就是它的）；整面交給程式套用，
+        # 還沒交給程式的區拿到的起始清單照那一份、但不帶它。
+        page.locator("#zone-list-add").click()
+        _click_zone(page, "x0/b")
+        page.locator("#zone-panel-mode-keep_original").check()
+        _apply(page)
+        page.locator("#zone-whole-x0").click()
+        page.locator("#zone-panel-mode-search").check()
+        expect(page.locator("#zone-panel-form")).to_be_visible()
+        _apply(page)
+        lists = _allowed(page)
+        assert len(lists) > 2 and [zone for zone, allowed in lists.items() if HIT in allowed] == ["x0/a"], lists
         assert (watched.console_errors, watched.page_errors) == ([], [])
