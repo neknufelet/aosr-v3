@@ -26,6 +26,11 @@
 計畫與參數跟沒有這一格之前逐位相同。``--tie`` 只加在 :func:`start_arguments`，不進 :func:`configuration_arguments`
 （建替身照那一份核固定材料）。
 
+「鋼板直接貼在棉上」的構造不進程式最佳化（#1208 第 1 支，判斷在 ``reference_only``：界線頻率以下的數字只能參考）：
+准用清單原文（設計設定存的那一份，還沒拿掉任何一組之前）裡有一筆固定材料是這種構造就拒收、點名哪一區哪一筆；
+不默默拿掉、不改存檔。判在限制檢查與深度之前：太深放不下的那一筆照樣是這一句，不會先被別的理由蓋掉。
+沒有這種構造時這一段一個字都不產生，計畫與參數跟之前逐位相同。命令列照舊收 ``--allowed fixed:<代號>``，這裡只管網頁。
+
 這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區、准用清單的代號
 不認識或排不出起點、有超過限制的區、准用的材料組一組都放不下）。
 """
@@ -44,6 +49,7 @@ from aosr.config.material_gradient import (
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
+from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
@@ -195,6 +201,15 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
             if item.allowed is not None:
                 found[(wall, zone)] = _targets(wall, zone, item.allowed, settings, fixed_ids)
     return found
+
+
+def _refuse_reference_only(design: DesignSettings | None, targets: DepthTargets, names: Mapping[str, str]) -> None:
+    """准用清單原文裡有「鋼板直接貼在棉上」的固定材料就拒收（#1208）：照設計設定的順序點名第一筆。"""
+    for wall, zones in (design.zones if design is not None else {}).items():
+        for zone, item in zones.items():
+            for identifier in item.allowed or ():
+                if reference_only(targets.fixed.get(identifier)):
+                    raise PlanRefused(plan_refused(zone_words(wall, zone, names), targets.label(identifier)))
 
 
 def builtin_depth_targets(settings: MaterialGradientSettings) -> DepthTargets:
@@ -357,6 +372,8 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
     if problems:
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
     targets_for_depth = depth_targets if depth_targets is not None else builtin_depth_targets(settings)
+    names = wall_words(scheme)
+    _refuse_reference_only(design, targets_for_depth, names)
     refusals = saved_refusals(scheme.model_dump(mode="json"), design, range_check, targets_for_depth)
     if refusals:
         raise PlanRefused("有超過限制的區（立面圖上標紅的），先改好再開：" + "；".join(refusals))
@@ -375,7 +392,6 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
     depths, sources = _depths(request, modes, design)
-    names = wall_words(scheme)
     lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
     for pair, chosen in list(allowed.items()):

@@ -6,17 +6,28 @@
 """
 from __future__ import annotations
 
+import json
+import threading
 from pathlib import Path
 from typing import cast
 
 import pytest
 from pydantic import TypeAdapter
 
+from aosr.config.construction_presets import load_construction_presets
+from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
-from aosr.gui import reference_only
+from aosr.gui import gradient_plan, reference_only
+from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, library_depth_targets, plan_search, start_arguments
+from aosr.gui.material_editor import user_library_path
+from aosr.gui.zone_design import DesignSettings
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.materials.library import LibraryEntry, builtin_entries
+from aosr.materials.library import SCHEMA_VERSION, LibraryEntry, builtin_entries
+from aosr.reporting.scheme import Scheme
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED, SLOTTED_FRONT, STEEL_1MM, STEEL_2_5MM
+from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, symmetry_document
+from tests.engine.test_gui_gradient_jobs import FakeLauncher
 
 Doc = dict[str, object]
 _MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
@@ -127,3 +138,91 @@ def test_the_band_comes_from_the_registry_and_every_sentence_follows_it(tmp_path
         assert after[key] == cast(str, before[key]).replace("300 Hz", "262.5 Hz") != before[key]
     assert (after["why"], after["why_only"]) == (before["why"], before["why_only"])  # 這兩句沒有界線
     assert "262.5 Hz 以下" in reference_only.plan_refused("前牆「z1」", "自編牆板")
+
+
+# ---- 開跑計畫拒收 ----
+
+SETTINGS = load_material_gradient_settings(config_path("material_gradient.toml"))
+HIT, PLAIN_ID, HIT_LABEL = "own_quiet_panel", "own_plain_panel", "自編牆板"
+USER: list[Doc] = [_fixed(HIT, HIT_LABEL, BONDED_VPR), _fixed(PLAIN_ID, "自編對照板", PLAIN)]
+ENTRIES = tuple(_ENTRY.validate_python(entry) for entry in USER)
+REFUSED = ("前牆「a」的准用清單裡有自編牆板：這類「鋼板直接貼在棉上」的構造 300 Hz 以下的數字只能參考，所以不進程式最佳化；"
+           "請在分區頁取消它，或把這一區改成「指定貼一種」")
+
+
+def _design(allowed: list[str], **fields: object) -> DesignSettings:
+    """前牆（x0）切兩塊，a 那一塊由程式最佳化、清單照給；其餘照預設（指定貼、不動）。"""
+    return DesignSettings.model_validate({"schema_version": "aosr.zone_design.v1", "scheme_id": NAME,
+                                          "zones": {"x0": {"a": {"mode": "search", "allowed": allowed, **fields}}}})
+
+
+def _plan(allowed: list[str], **fields: object) -> SearchPlan:
+    fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
+                           *(entry.id for entry in ENTRIES)))
+    return plan_search(Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR})), _design(allowed, **fields), GradientRequest(),
+                       SETTINGS, fixed_ids, depth_targets=library_depth_targets(SETTINGS, ENTRIES))
+
+
+def test_a_list_with_such_a_construction_is_refused_by_name_and_opens_without_it() -> None:
+    with pytest.raises(PlanRefused) as caught:
+        _plan(["glass_wool_48k", HIT, "none"])
+    assert str(caught.value) == REFUSED
+    opened = _plan(["glass_wool_48k", "none"])
+    assert opened.allowed == {"x0@a": ("glass_wool_48k", "none")}
+
+
+def test_an_ordinary_fixed_product_with_the_same_plate_and_foam_still_goes_through() -> None:
+    """對照：同樣的鋼板與棉、只是背襯沒黏住的固定成品照舊進清單，開跑參數照舊帶 ``fixed:<代號>``。"""
+    plan = _plan(["glass_wool_48k", PLAIN_ID, "none"])
+    assert plan.allowed == {"x0@a": ("glass_wool_48k", f"fixed:{PLAIN_ID}", "none")}
+    arguments = start_arguments(plan)
+    assert arguments[arguments.index("--allowed") + 1] == f"x0@a=glass_wool_48k,fixed:{PLAIN_ID},none"
+
+
+@pytest.mark.parametrize("allowed", [[HIT, "glass_wool_48k", "none"], [HIT, "none"], [HIT]], ids=["with_wool", "with_none", "alone"])
+def test_one_that_also_does_not_fit_the_depth_is_still_refused_with_this_sentence(allowed: list[str]) -> None:
+    """命中的那一筆同時放不下深度（背襯 10 cm、上限 5 cm）：照樣是這一句，不是先被當成放不下默默拿掉，
+    也不是「一組都放不下」「只放了固定成品」。對照：同一個上限、清單拿掉它（還有可調的）就開得了。"""
+    with pytest.raises(PlanRefused) as caught:
+        _plan(allowed, max_depth_m=0.05)
+    assert str(caught.value) == REFUSED
+    assert _plan(["glass_wool_48k", "none"], max_depth_m=0.05).allowed == {"x0@a": ("glass_wool_48k", "none")}
+
+
+def test_alone_in_the_list_it_is_this_sentence_and_not_the_only_fixed_products_one() -> None:
+    with pytest.raises(PlanRefused) as caught:
+        _plan([HIT])
+    assert str(caught.value) == REFUSED
+    with pytest.raises(PlanRefused, match="只放了固定成品"):
+        _plan([PLAIN_ID])
+
+
+def test_with_the_judgment_switched_off_the_same_list_plans_as_any_fixed_product(monkeypatch: pytest.MonkeyPatch) -> None:
+    """控制組（同一跑裡比）：把判斷換成永遠不命中，同一份清單排出來的計畫就是一般固定成品那一條路——
+    多的只有那一句拒收，計畫其他地方沒有被這一支動到。"""
+    monkeypatch.setattr(gradient_plan, "reference_only", lambda material: False)
+    plan = _plan(["glass_wool_48k", HIT, "none"])
+    assert plan.allowed == {"x0@a": ("glass_wool_48k", f"fixed:{HIT}", "none")}
+    assert plan.model_dump(mode="json", exclude={"allowed"}) == _plan(["glass_wool_48k", PLAIN_ID, "none"]).model_dump(
+        mode="json", exclude={"allowed"})
+
+
+def _write_user_library(data_dir: Path) -> Path:
+    path = user_library_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "materials": USER}, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_the_web_plan_reads_the_user_library_and_refuses_the_same_way(tmp_path: Path) -> None:
+    """網頁那一層（預覽、開跑、建替身、分區頁配對共用的 ``GradientJobs.plan``）：使用者材料庫裡的那一筆照樣被認出來，
+    名字照材料庫顯示名。"""
+    _write_user_library(tmp_path)
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    scheme = Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR}))
+    with pytest.raises(PlanRefused) as caught:
+        jobs.plan(scheme, _design(["glass_wool_48k", HIT, "none"]), GradientRequest())
+    assert str(caught.value) == REFUSED
+    assert jobs.plan(scheme, _design(["glass_wool_48k", PLAIN_ID, "none"]), GradientRequest())[0].allowed == {
+        "x0@a": ("glass_wool_48k", f"fixed:{PLAIN_ID}", "none")}
