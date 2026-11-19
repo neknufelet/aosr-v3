@@ -611,8 +611,8 @@ def test_zones_are_named_in_the_order_of_the_command_line_patches_across_walls(t
     from tests.engine._zone_symmetry_room import CENTRED, SIDE
 
     cuts = {"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED}
-    for kwargs in ({}, {"turned": True}, {"flipped": True}):
-        document = Scheme.model_validate(symmetry_document(cuts, **kwargs)).model_dump(mode="json")
+    for kwargs in ({"turned": False, "flipped": False}, {"turned": True, "flipped": False}, {"turned": False, "flipped": True}):
+        document = Scheme.model_validate(symmetry_document(cuts, turned=kwargs["turned"], flipped=kwargs["flipped"])).model_dump(mode="json")
         walked = [wall if zone == "whole_wall" else f"{wall}@{zone}" for wall, zone in zone_limits._zone_order(document)]
         assert walked == list(surface_ids(scheme_patch_keys(Scheme.model_validate(document)))), kwargs
     _write_user_library(tmp_path)
