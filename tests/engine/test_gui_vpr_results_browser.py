@@ -119,4 +119,6 @@ def test_a_result_without_such_a_construction_has_neither(tmp_path: Path, browse
         seen = cast(dict[str, object], page.evaluate(_SEEN))
         assert seen["names"] == ROWS and seen["children"] == ["TABLE"] and seen["note"] is None
         assert seen["tags"] == [[]] * 8 and page.locator(".ref-tag, .ref-note").count() == 0
+        # 表格後面的東西照常畫完（沒有那一格時不准在半路停下來）：技術細節那張表也在。
+        expect(page.locator("#category-technical table tr")).to_have_count(1 + 8)
         assert (watched.console_errors, watched.page_errors) == ([], [])
