@@ -235,8 +235,8 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
 
 def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_be_taken_off(tmp_path: Path, browser: Browser) -> None:
     """存檔的清單裡本來就有命中的那一筆：清單卡那一列照樣勾著、灰字、寫「清單裡本來有它，程式不會挑」；卡上紅框與頁底紅字
-    寫開跑會拒收的那一句（伺服器原文）、「拿去搜尋」按不下去；面板那一列勾著、可取消，「從下面勾的 N 種」不算它；
-    取消後那一格馬上勾不回來，套用後清單沒有它、紅字消失、「拿去搜尋」恢復。"""
+    寫開跑會拒收的那一句（伺服器原文）、「拿去搜尋」旁邊寫清單有紅框要先處理、直接叫送出也不存不跳頁；面板那一列勾著、可取消，「從下面勾的 N 種」不算它；
+    取消後那一格馬上勾不回來，套用後清單沒有它、紅字消失。"""
     _prepare(tmp_path, {"x0/a": LISTED})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -251,7 +251,6 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         expect(page.locator("#zone-list-reference")).to_have_class("zv-problem")
         expect(page.locator("#zone-page-blocked")).to_have_text(refused)
         expect(page.locator("#zone-page-blocked")).to_have_class("limit-red")
-        expect(page.locator("#zone-page-search")).to_be_disabled()
         expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
         # 直接叫送出也照樣擋：不存、不跳頁，訊息就是那一句。
         page.evaluate("sendToSearch()")
@@ -279,7 +278,6 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         assert _allowed(page) == {"x0/a": ["glass_wool_48k", "none"]}
         expect(page.locator("#zone-page-blocked")).to_have_count(0)
         expect(page.locator("#zone-list-reference")).to_have_count(0)
-        expect(page.locator("#zone-page-search")).to_be_enabled()
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 

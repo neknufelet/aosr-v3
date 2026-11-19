@@ -334,6 +334,20 @@ def test_the_library_listing_names_the_hits_beside_the_rows_and_never_inside_the
     assert [row for row in hit["materials"] if row["entry"]["id"] != HIT] == plain["materials"]
 
 
+def test_saving_every_listed_row_back_leaves_the_library_file_byte_identical(tmp_path: Path) -> None:
+    """材料頁的做法：清單拿到的那一筆原樣存回去。有命中那一筆的材料庫，每一筆使用者材料都存回一次，材料庫檔逐位不變
+    （旗標要是塞進每一筆材料裡，這裡不是存不進去就是檔案變了）。"""
+    path = _write_user_library(tmp_path)
+    before = path.read_bytes()
+    client = _client(tmp_path)
+    rows = [row for row in client.get("/api/materials").json()["materials"] if not row["builtin"]]
+    assert [row["entry"]["id"] for row in rows] == [HIT, PLAIN_ID]
+    for row in rows:
+        reply = client.put(f"/api/materials/{row['entry']['id']}", json=row["entry"])
+        assert reply.status_code == 200, reply.text
+    assert path.read_bytes() == before
+
+
 def _limits(client: TestClient, allowed: list[str]) -> Doc:
     body = {"scheme": symmetry_document({"x0": FRONT_PAIR}), "design": _design(allowed).model_dump(mode="json")}
     reply = client.post("/api/zone-limits", json=body)
