@@ -25,6 +25,7 @@ from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, SHORT, WOOLS
 
 VPR = "pet60_vpr_steel1p2mm_foam90_sample"
+PRODUCT = "slotted_wood_typ9_absorber40_gap98"  # 內建的一筆一般固定成品（牆面能貼、不被可調玻璃棉包含）
 KEEP = {"mode": "keep_original"}
 SEARCH = {"mode": "search", "allowed": WOOLS}
 _SELECTED = """() => [...document.querySelectorAll('#zone-map [data-selected=true]')].map(zone => `${zone.dataset.wall}/${zone.dataset.zone}`)"""
@@ -278,9 +279,10 @@ def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_
         shorter_everywhere = {**dict.fromkeys(searching, shorter), "y0/auto1": [*SHORT, "glass_wool_24k"]}
         # 加別種材料：勾了就加進每一區的清單。
         page.locator("#zone-list-add").click()
+        # （#1208 起合成庫那幾筆 VPR 列著但勾不了，另有考卷；這裡加的是一筆一般的固定成品。）
         expect(page.locator(f"label[data-choice={VPR}]")).to_contain_text("VPR（鋼板共振吸音）＋前面聚酯棉 60 mm")
-        page.locator(f"#zone-list-add-{VPR}").click()
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {zone: [*own, VPR] for zone, own in shorter_everywhere.items()}
+        page.locator(f"#zone-list-add-{PRODUCT}").click()
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {zone: [*own, PRODUCT] for zone, own in shorter_everywhere.items()}
         # 只剩固定成品：程式沒得選，卡上講明，「拿去搜尋」按不下去；最後一種拿不掉。
         for choice in shorter:
             page.locator(f"#zone-list-check-{choice}").click()
@@ -293,10 +295,10 @@ def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_
         expect(page.locator("#zone-list-problem button")).to_have_count(0)
         expect(page.locator("#zone-page-search")).to_be_disabled()
         expect(page.locator("#zone-page-blocked")).to_contain_text("的紅框（只放了固定成品，程式沒得選），處理好才能拿去搜尋")
-        page.locator(f"#zone-list-check-{VPR}").click()
+        page.locator(f"#zone-list-check-{PRODUCT}").click()
         expect(page.locator("#zone-page-note")).to_contain_text("清單至少要留一種")
-        expect(page.locator(f"#zone-list-check-{VPR}")).to_be_checked()
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, [VPR])
+        expect(page.locator(f"#zone-list-check-{PRODUCT}")).to_be_checked()
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, [PRODUCT])
         # 「加別種材料」那一格還開著（重畫後照樣開著）：把「也可以不貼」加回去就好了。
         page.locator("#zone-list-add-none").click()
         _settled(page)

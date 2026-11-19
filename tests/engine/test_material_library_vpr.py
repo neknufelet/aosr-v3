@@ -181,6 +181,9 @@ def artifacts(data_dir: Path, *, with_vpr: bool) -> dict[str, bytes]:
     listing = client.get("/api/materials")
     assert listing.status_code == 200, listing.text
     body = _without_vpr(cast(Doc, listing.json()))
+    # #1208 起材料庫裡有「鋼板直接貼在棉上」的固定材料時這一支多回一格 reference_only（命中的代號與字，另有考卷）；
+    # 這份材料庫那一筆固定 VPR 就是。拿掉那一格，剩下的要跟主線那一份逐位相同。
+    assert cast(Doc, body.pop("reference_only"))["ids"] == [_fixed_vpr()["id"]]
     found["api_materials_rows.json"] = _canonical(body.pop("materials"))
     labels = cast(dict[str, str], body.pop("entry_kind_labels"))
     found["api_materials_old_kind_labels.json"] = _canonical({kind: labels[kind] for kind in ("optimizable", "fixed")})

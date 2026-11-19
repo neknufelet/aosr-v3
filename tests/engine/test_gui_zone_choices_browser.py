@@ -27,6 +27,9 @@ DOOR = "hall_door_hollow_core"
 FLOOR_WOOD = "joist_floor_plank_fixed"
 
 
+PLAIN_PRODUCT = "fabric_pet_a_gap100"  # 內建的一筆固定成品：牆面能貼、不是哪一種可調玻璃棉包含的、也不是「鋼板直接貼在棉上」的構造
+
+
 def _sample_library(tmp_path: Path) -> None:
     adapter: TypeAdapter[tuple[LibraryEntry, ...]] = TypeAdapter(tuple[LibraryEntry, ...])
     (tmp_path / "materials.json").write_text(dump_user_library(adapter.validate_python(SAMPLE_USER_ENTRIES)), encoding="utf-8")
@@ -350,7 +353,7 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
 def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_path: Path, browser: Browser) -> None:
     """老闆 11-15 看不懂「准用清單只有固定材料：搜尋要一個起點」：只放了固定成品時紅框白話寫程式沒得選，下面直接給按鈕——
     只有一筆就能改成指定貼它（清單跟著拿掉，伺服器不收固定區帶清單）、加上「不貼」、加上 48K 玻璃棉（地板用不了就不出現）。"""
-    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
+    vpr = PLAIN_PRODUCT  # #1208 起合成庫那幾筆 VPR 勾不進清單（另有考卷），這一題要的只是一筆固定成品
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -409,7 +412,7 @@ def _only_fixed(page: Page, wall: str, product: str) -> None:
 def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, browser: Browser) -> None:
     """紅框（只放了固定成品）還在的時候「拿去搜尋」按不下去，旁邊點名是哪幾區的紅框（別面的也算）；處理好一區少一區，
     全處理好自己恢復。直接叫送出也照樣擋、不存不跳頁。"""
-    vpr = "pet60_vpr_steel1p2mm_foam90_sample"
+    vpr = PLAIN_PRODUCT  # #1208 起合成庫那幾筆 VPR 勾不進清單（另有考卷），這一題要的只是一筆固定成品
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -472,9 +475,13 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
         expect(page.locator("#zone-fixed-x0-z1 option", has_text="VPR").first).to_be_attached()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
         _choose(page, "#zone-fixed-x0-z1", "pet60_vpr_steel1p2mm_foam90_sample")
+        assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
+        # #1208 起貼著合成 VPR 的區改成由程式最佳化時不給「只讓程式決定：這一筆貼或不貼」（另有考卷）；
+        # 那一顆名字長的按鈕改用內建裡名字最長的一筆固定成品撐。
+        _choose(page, "#zone-fixed-x0-z1", "slotted_gypsum_b6_backed_gap65")
         _choose(page, "#zone-mode-x0-z1", "search")
         long_preset = page.locator("#zone-preset-x0-z1-this_or_none")
-        expect(long_preset).to_contain_text("只讓程式決定：「VPR")
+        expect(long_preset).to_contain_text("只讓程式決定：「開縫石膏板 Slotline B6 背面貼布＋65 mm 空腔」")
         page.locator("#zone-allowed-summary-x0-z1").click()
         expect(page.locator("#zone-allowed-x0-z1")).to_be_visible()
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)

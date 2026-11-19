@@ -49,12 +49,11 @@ from aosr.config.material_gradient import (
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
-from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
-    DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, saved_refusals, target_fits, target_line,
-    zone_limits, zone_words,
+    DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
+    target_line, zone_limits, zone_words,
 )
 from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
@@ -204,12 +203,11 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
 
 
 def _refuse_reference_only(design: DesignSettings | None, targets: DepthTargets, names: Mapping[str, str]) -> None:
-    """准用清單原文裡有「鋼板直接貼在棉上」的固定材料就拒收（#1208）：照設計設定的順序點名第一筆。"""
-    for wall, zones in (design.zones if design is not None else {}).items():
-        for zone, item in zones.items():
-            for identifier in item.allowed or ():
-                if reference_only(targets.fixed.get(identifier)):
-                    raise PlanRefused(plan_refused(zone_words(wall, zone, names), targets.label(identifier)))
+    """准用清單原文裡有「鋼板直接貼在棉上」的固定材料就拒收（#1208）：照設計設定的順序點名第一筆
+    （分區頁列的是同一支 ``zone_limits.reference_only_refusals`` 的每一筆）。"""
+    refused = reference_only_refusals(design, targets, names)
+    if refused:
+        raise PlanRefused(refused[0]["text"])
 
 
 def builtin_depth_targets(settings: MaterialGradientSettings) -> DepthTargets:

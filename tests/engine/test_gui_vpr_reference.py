@@ -15,17 +15,19 @@ from typing import cast
 
 import pytest
 from pydantic import TypeAdapter
+from starlette.testclient import TestClient
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
-from aosr.gui import gradient_plan, reference_only
+from aosr.gui import reference_only, zone_limits
+from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import GradientJobs
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, library_depth_targets, plan_search, start_arguments
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.zone_design import DesignSettings
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.materials.library import SCHEMA_VERSION, LibraryEntry, builtin_entries
+from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -204,17 +206,18 @@ def test_alone_in_the_list_it_is_this_sentence_and_not_the_only_fixed_products_o
 def test_with_the_judgment_switched_off_the_same_list_plans_as_any_fixed_product(monkeypatch: pytest.MonkeyPatch) -> None:
     """控制組（同一跑裡比）：把判斷換成永遠不命中，同一份清單排出來的計畫就是一般固定成品那一條路——
     多的只有那一句拒收，計畫其他地方沒有被這一支動到。"""
-    monkeypatch.setattr(gradient_plan, "reference_only", lambda material: False)
+    monkeypatch.setattr(zone_limits, "reference_only", lambda material: False)
     plan = _plan(["glass_wool_48k", HIT, "none"])
     assert plan.allowed == {"x0@a": ("glass_wool_48k", f"fixed:{HIT}", "none")}
     assert plan.model_dump(mode="json", exclude={"allowed"}) == _plan(["glass_wool_48k", PLAIN_ID, "none"]).model_dump(
         mode="json", exclude={"allowed"})
 
 
-def _write_user_library(data_dir: Path) -> Path:
+def _write_user_library(data_dir: Path, entries: tuple[LibraryEntry, ...] = ENTRIES) -> Path:
+    """用產品自己的寫法存（跟材料頁存出來的同一種排法），「存回去位元組不變」才比得出來。"""
     path = user_library_path(data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "materials": USER}, ensure_ascii=False), encoding="utf-8")
+    path.write_text(dump_user_library(entries), encoding="utf-8")
     return path
 
 
@@ -299,3 +302,104 @@ def test_a_curve_reply_for_anything_else_has_exactly_the_keys_it_had(curves: dic
 def test_an_unfinished_form_gets_no_field(curves: dict[str, dict[str, Doc]]) -> None:
     real = curves["unfinished"]["real"]
     assert real["status"] == "incomplete" and set(real) == {"status", "message", "range_scope"}
+
+
+# ---- 分區頁拿的兩個介面：材料庫清單、限制檢查 ----
+
+# 主線（de6f12b2）材料庫清單回覆的鍵與每一筆的鍵：沒有這類構造時一個都不准多。
+LISTING_KEYS = {"materials", "user_file_problem", "material_form", "required_fields", "layer_kinds", "fixed_kinds", "provenance_labels",
+                "entry_kind_labels", "surface_groups", "surface_group_short"}
+ROW_KEYS = {"entry", "builtin", "basis", "placement"}
+
+
+def _client(data_dir: Path) -> TestClient:
+    return TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=data_dir)), base_url="http://127.0.0.1")
+
+
+def test_the_library_listing_names_the_hits_beside_the_rows_and_never_inside_them(tmp_path: Path) -> None:
+    """材料庫清單（分區頁與材料頁共用）：命中的代號與字放在旁邊一格；每一筆材料那一列的鍵、材料內文都跟沒有這一支時一樣
+    （分區頁會把材料那一筆原樣送回曲線介面，材料頁會把它存回材料庫檔）。材料庫裡一筆都沒有時，回覆的鍵跟主線一樣。"""
+    plain_dir, hit_dir = tmp_path / "plain", tmp_path / "hit"
+    _write_user_library(plain_dir, ENTRIES[1:])
+    _write_user_library(hit_dir)
+    plain, hit = _client(plain_dir).get("/api/materials").json(), _client(hit_dir).get("/api/materials").json()
+    assert set(plain) == LISTING_KEYS and set(hit) == LISTING_KEYS | {"reference_only"}
+    assert hit["reference_only"] == {"ids": [HIT], **reference_only.words()}
+    rows = {row["entry"]["id"]: row for row in hit["materials"]}
+    assert all(set(row) == ROW_KEYS for row in hit["materials"])
+    assert rows[HIT]["entry"] == ENTRIES[0].model_dump(mode="json")
+    # 兩份回覆除了多的那一筆材料與那一格，其餘一模一樣。
+    assert {key: value for key, value in hit.items() if key not in ("materials", "reference_only")} == {
+        key: value for key, value in plain.items() if key != "materials"}
+    assert [row for row in hit["materials"] if row["entry"]["id"] != HIT] == plain["materials"]
+
+
+def _limits(client: TestClient, allowed: list[str]) -> Doc:
+    body = {"scheme": symmetry_document({"x0": FRONT_PAIR}), "design": _design(allowed).model_dump(mode="json")}
+    reply = client.post("/api/zone-limits", json=body)
+    assert reply.status_code == 200, reply.text
+    return cast(Doc, reply.json())
+
+
+def test_the_limits_route_hands_the_page_the_refusal_sentence_only_when_there_is_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """分區頁每次改動都會問的限制檢查：准用清單裡有命中的那一筆，多回一格（哪一面、哪一區、哪一筆、開跑會拒收的那一句）；
+    沒有就不多這一格。控制組（同一跑）：把判斷換成永遠不命中，同一份清單的回覆就是拿掉那一格的回覆。"""
+    _write_user_library(tmp_path)
+    client = _client(tmp_path)
+    hit = _limits(client, ["glass_wool_48k", HIT, "none"])
+    assert hit["reference_only"] == [{"wall": "x0", "zone": "a", "id": HIT, "text": REFUSED}]
+    assert "reference_only" not in _limits(client, ["glass_wool_48k", PLAIN_ID, "none"])
+    assert "reference_only" not in _limits(client, ["glass_wool_48k", "none"])
+    monkeypatch.setattr(zone_limits, "reference_only", lambda material: False)
+    off = _limits(client, ["glass_wool_48k", HIT, "none"])
+    # 配對那一格（symmetry）會抄開跑拒收的那一句，另外比；其餘逐鍵相同。
+    assert {key: value for key, value in hit.items() if key not in ("reference_only", "symmetry")} == {
+        key: value for key, value in off.items() if key != "symmetry"}
+
+
+_NO_JAX = """
+import json, sys, threading
+from pathlib import Path
+from starlette.testclient import TestClient
+from aosr.config.paths import config_path
+from aosr.gui.app import GuiSettings, create_app
+from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_plan import GradientRequest, PlanRefused
+from aosr.reporting.scheme import Scheme
+from tests.engine._zone_symmetry_room import FRONT_PAIR, symmetry_document
+from tests.engine.test_gui_gradient_jobs import FakeLauncher
+from tests.engine.test_gui_vpr_reference import HIT, REFUSED, _design, _write_user_library
+
+assert "jax" not in sys.modules, "載入期就有 JAX（另一題在守）"
+data = Path(sys.argv[1])
+_write_user_library(data)
+document = symmetry_document({"x0": FRONT_PAIR})
+design = _design(["glass_wool_48k", HIT, "none"])
+client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=data)), base_url="http://127.0.0.1")
+assert client.get("/").status_code == 200
+listing = client.get("/api/materials").json()
+assert listing["reference_only"]["ids"] == [HIT], listing.get("reference_only")
+limits = client.post("/api/zone-limits", json={"scheme": document, "design": design.model_dump(mode="json")}).json()
+assert limits["reference_only"][0]["text"] == REFUSED, limits.get("reference_only")
+after_page = "jax" in sys.modules
+jobs = GradientJobs(data, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                    scheme_lock=threading.RLock())
+try:
+    jobs.plan(Scheme.model_validate(document), design, GradientRequest())
+except PlanRefused as refused:
+    assert str(refused) == REFUSED, str(refused)
+else:
+    raise AssertionError("計畫沒有拒收")
+print(f"分區頁兩個介面後 jax={after_page} 計畫拒收後 jax={'jax' in sys.modules}")
+raise SystemExit(1 if "jax" in sys.modules else 0)
+"""
+
+
+def test_the_web_process_still_has_no_jax_after_the_zone_page_asks_about_such_a_construction(tmp_path: Path) -> None:
+    """照 #1213 那一題的寫法：另開乾淨行程，開首頁、拿材料庫清單（有命中的那一格）、問一次限制檢查（回拒收那一句）、
+    排一次會被拒收的計畫，之後 ``sys.modules`` 裡不准有 ``jax``。"""
+    env = forward_cpu_pins(child_process_env())
+    env["TMPDIR"] = str(tmp_path)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    done = subprocess.run([sys.executable, "-c", _NO_JAX, str(tmp_path)], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=300)
+    assert done.returncode == 0, done.stdout[-300:] + done.stderr[-1500:]
