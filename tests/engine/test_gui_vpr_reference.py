@@ -244,15 +244,20 @@ def test_the_web_plan_reads_the_user_library_and_refuses_the_same_way(tmp_path: 
 # 主線（de6f12b2）畫得出曲線時回覆的鍵：沒命中的材料一個都不准多、不准少。
 MAIN_KEYS = {"status", "basis", "basis_code", "basis_detail", "provenance", "source", "links", "arrangement", "range_scope",
              "frequencies_hz", "absorption", "measured_range_hz", "spans", "warnings", "axis_text"}
-# 冷子行程（正式開機設定：雙精度）：每一份材料打兩次曲線介面，一次照常、一次把判斷換成永遠不命中，兩份回覆都交回來。
+# 冷子行程（正式開機設定：雙精度）：每一份材料打三次曲線介面，照常、把判斷換成永遠不命中、把界線換成讀不出來，三份回覆都交回來。
 _CURVE_TWICE = """
 import json, sys
 from pathlib import Path
 from aosr.runtime import configure_calculation_jax
 configure_calculation_jax()
 from starlette.testclient import TestClient
-from aosr.gui import material_curves
+from aosr.gui import material_curves, reference_only
 from aosr.gui.app import GuiSettings, create_app
+
+
+def broken_band():
+    raise ValueError("界線讀不出來（考卷植的）")
+
 
 cases = json.load(sys.stdin)
 out = {}
@@ -265,7 +270,16 @@ with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=Path(sys
             off = client.post("/api/material-curve", json=document).json()
         finally:
             material_curves.entry_reference_only = judge
-        out[name] = {"real": real, "off": off}
+        # 第三次：界線換成讀不出來（修補第 7 條）。沒命中的材料照樣畫得出來；命中的會炸，記下來當對照。
+        band = reference_only.band_hz
+        reference_only.band_hz = broken_band
+        try:
+            noband = client.post("/api/material-curve", json=document).json()
+        except ValueError as error:
+            noband = {"raised": str(error)}
+        finally:
+            reference_only.band_hz = band
+        out[name] = {"real": real, "off": off, "noband": noband}
 json.dump(out, sys.stdout)
 """
 
@@ -500,6 +514,7 @@ def test_a_library_without_such_a_construction_never_reads_the_band(tmp_path: Pa
     after = replies()
     assert after == before
     assert set(cast(Doc, after[0])) == LISTING_KEYS and "reference_only" not in cast(Doc, after[1]) and "reference_only" not in cast(Doc, after[2])
+    # 這個行程沒開雙精度，曲線那一支走不到畫得出來的路；畫得出來的那一趟在冷子行程那一題（下一題）。
     hit_dir = tmp_path / "hit"
     _write_user_library(hit_dir)
     with pytest.raises(ValueError, match="界線讀不出來"):
@@ -577,3 +592,36 @@ def test_without_any_list_the_user_library_is_not_read_for_this(tmp_path: Path) 
     listed = _design(["glass_wool_48k", HIT, "none"]).model_dump(mode="json")
     assert [row["text"] for row in zone_limits._draft_reference_only(scheme, listed, provider)] == [REFUSED]
     assert calls == [1]
+
+
+@pytest.mark.parametrize("name", ["plain", "tunable"])
+def test_a_drawn_curve_for_anything_else_never_reads_the_band(curves: dict[str, dict[str, Doc]], name: str) -> None:
+    """修補第 7 條的曲線那一段（冷子行程、雙精度，真的畫得出來）：界線讀不出來時，沒命中的材料回覆跟平常一模一樣、
+    鍵就是主線那幾個。對照：命中的那一筆同樣的植法會炸（這一題真的植到了）。"""
+    real, noband = curves[name]["real"], curves[name]["noband"]
+    assert noband == real and noband["status"] == "drawn" and set(noband) == MAIN_KEYS
+    assert curves["hit"]["noband"] == {"raised": "界線讀不出來（考卷植的）"}
+
+
+def test_zones_are_named_in_the_order_of_the_command_line_patches_across_walls(tmp_path: Path) -> None:
+    """跨面的順序：句子裡的區、組與組的先後，都照命令列面片的順序（``surface_ids(scheme_patch_keys(…))``，天花在牆前面、
+    同一面照方案的區序），不照設計檔寫的先後。限制檢查自己逐面逐區走的順序（``_zone_order``）跟那一支逐片相同
+    （方案轉 90 度、轉 180 度也一樣）。"""
+    from aosr.gradient.boundary import scheme_patch_keys, surface_ids
+    from tests.engine._zone_symmetry_room import CENTRED, SIDE
+
+    cuts = {"x0": FRONT_PAIR, "y0": SIDE, "yL": SIDE, "ceiling": CENTRED}
+    for kwargs in ({}, {"turned": True}, {"flipped": True}):
+        document = Scheme.model_validate(symmetry_document(cuts, **kwargs)).model_dump(mode="json")
+        walked = [wall if zone == "whole_wall" else f"{wall}@{zone}" for wall, zone in zone_limits._zone_order(document)]
+        assert walked == list(surface_ids(scheme_patch_keys(Scheme.model_validate(document)))), kwargs
+    _write_user_library(tmp_path)
+    shared = ["glass_wool_48k", HIT, "none"]
+    # 設計檔故意倒著寫：右牆、前牆 a、天花、前牆 b。
+    design = _zones_design({"yL": {"s": shared}, "x0": {"a": shared, "b": [HIT, "none"]}, "ceiling": {"c": shared}})
+    reply = _client(tmp_path).post("/api/zone-limits", json={"scheme": symmetry_document(cuts), "design": design})
+    assert reply.status_code == 200
+    groups = cast(list[Doc], reply.json()["reference_only"])
+    assert [group["zones"] for group in groups] == [
+        [{"wall": "ceiling", "zone": "c"}, {"wall": "x0", "zone": "a"}, {"wall": "yL", "zone": "s"}], [{"wall": "x0", "zone": "b"}]]
+    assert groups[0]["text"] == _sentence("天花「c」、前牆「a」、右牆「s」") and groups[1]["text"] == _sentence("前牆「b」")
