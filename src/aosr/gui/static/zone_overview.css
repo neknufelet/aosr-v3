@@ -291,3 +291,4 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .ref-note summary::after{content:" ▸"}
 #zone-page .ref-note details[open] summary::after{content:" ▾"}
 #zone-page .ref-note details[open] p{display:block;margin:.35rem 0 .1rem;color:#5b6a70;white-space:normal}
+#zone-page .zv-rule-ref{margin:6px 0 0;font-size:13px;color:#33434b}

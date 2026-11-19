@@ -77,13 +77,14 @@ function keepReferenceOut(next, kept) { return next.filter(id => !referenceOnly(
 function zoneReferenceOnly(material) {
   return [libraryLabel(material), zoneLibraryMatch(originalMaterial(material))].some(entry => entry && referenceOnly(entry.id));
 }
-// 伺服器說開跑會拒收的那幾句（限制檢查順便回的 reference_only：{wall, zone, id, text}）；只留現在清單裡還有那一筆的
-// （剛取消、新的檢查結果還沒回來時，舊的那一句不留在畫面上）。
+// 伺服器說開跑會拒收的那幾句（限制檢查順便回的 reference_only：一組一句 {id, zones: [{wall, zone}…], text}，字與順序都是
+// 伺服器排的，這裡不接字）。一句列的區裡只要有一區現在的清單已經沒有那一筆（剛取消、新的檢查結果還沒回來），整句先不顯示：
+// 那一句的區名已經不對了，等新的結果回來再畫。
 function referenceRefusals() {
-  return (zoneLimits?.reference_only ?? []).filter(line => {
-    const setting = zoneSetting(line.wall, line.zone);
+  return (zoneLimits?.reference_only ?? []).filter(line => line.zones.every(({wall, zone}) => {
+    const setting = zoneSetting(wall, zone);
     return setting.mode === "search" && Boolean(setting.allowed?.includes(line.id));
-  });
+  }));
 }
 function setZoneSetting(wall, key, setting) {
   const design = designForEdit();
@@ -232,10 +233,11 @@ function searchButtonRow() {
   const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
   button.textContent = `拿去搜尋（${count} 區由程式最佳化）`;
   button.onclick = () => action(sendToSearch);
-  const red = limitsRedCount(), stuck = stuckZoneNames();
-  button.disabled = red > 0 || stuck.length > 0;
+  // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，這一列跟紅框同一個樣子——按鈕停用、旁邊紅字寫伺服器那幾句。
+  const red = limitsRedCount(), stuck = stuckZoneNames(), refused = referenceRefusals().map(line => line.text);
+  button.disabled = red > 0 || stuck.length > 0 || refused.length > 0;
   const note = document.createElement("span"); note.id = "zone-to-search-note";
-  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
+  const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
   note.className = blocked.length ? "limit-red" : "note";
   note.textContent = blocked.length ? blocked.join("；") : "會先照畫面儲存，再打開第三階段搜尋頁";
   row.append(button, " ", note);
@@ -477,10 +479,17 @@ function fitsHere(id, wall) { return id === ZONE_NONE || (libraryEntry(id) !== n
 // 材料庫沒讀全就回 null（照舊不寫清單、照講；使用者材料庫壞了的時候伺服器本來就不准換做法，輪不到這裡）。
 function startingAllowed(wall) {
   if (!serverDefaultAllowed()) return null;
-  // 上一次的組合裡「鋼板直接貼在棉上」的構造不帶過來（#1208：別區本來就存著的那一筆，不准跟著帶進新的一區）。
-  const last = (zoneLastAllowed ?? []).filter(id => fitsHere(id, wall) && !referenceOnly(id));
-  if (last.length && !allowedProblem(last)) return last;
-  return [...THREE_WOOLS.filter(id => fitsHere(id, wall)), ZONE_NONE];
+  const last = carriedList(zoneLastAllowed ?? [], id => fitsHere(id, wall));
+  if (last?.length && !allowedProblem(last)) return last;
+  return defaultAllowed(wall);
+}
+function defaultAllowed(wall) { return [...THREE_WOOLS.filter(id => fitsHere(id, wall)), ZONE_NONE]; }
+// 別區的一份清單帶到新的一區（#1208）：「鋼板直接貼在棉上」的構造不帶（別區本來就存著的那一筆，不准跟著帶進新的一區）。
+// 拿掉它之後只剩「不貼」或什麼都不剩，回 null（呼叫的人改用預設的三種玻璃棉＋不貼）：那一份清單本來是「它或不貼」，
+// 帶過來變成「只有不貼」等於程式什麼都不做，不是使用者選的。來源本來就沒有它的照舊（本來就只有「不貼」的也照舊）。
+function carriedList(list, keeps) {
+  const kept = list.filter(id => !referenceOnly(id) && keeps(id));
+  return list.some(referenceOnly) && !kept.some(id => id !== ZONE_NONE) ? null : kept;
 }
 function choiceName(id) {
   const entry = libraryEntry(id);

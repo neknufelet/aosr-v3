@@ -135,13 +135,38 @@ def zone_words(wall: str, key: str, names: Mapping[str, str] = WALL_WORDS) -> st
     return f"{names.get(wall, wall)}「{zone}」"
 
 
-def reference_only_refusals(design: DesignSettings | None, targets: DepthTargets, names: Mapping[str, str]) -> list[dict[str, str]]:
-    """准用清單原文裡每一筆「鋼板直接貼在棉上」的固定材料（#1208）：哪一面、哪一區、哪一筆與開跑會拒收的那一句，
-    照設計設定的順序。清單原文＝設計設定存的那一份，放不放得下深度都算。"""
-    return [{"wall": wall, "zone": zone, "id": identifier,
-             "text": plan_refused(zone_words(wall, zone, names), targets.label(identifier))}
-            for wall, zones in (design.zones if design is not None else {}).items() for zone, item in zones.items()
-            for identifier in item.allowed or () if reference_only(targets.fixed.get(identifier))]
+def _zone_order(scheme: Mapping[str, object]) -> dict[tuple[str, str], int]:
+    """每一區排第幾：照限制檢查自己逐面逐區走的順序（:data:`WALLS` 的面序，同一面照方案裡那一面的區序）。"""
+    scene = scheme.get("scene")
+    by_wall = scene.get("surface_zones_by_wall") if isinstance(scene, Mapping) else None
+    found: dict[tuple[str, str], int] = {}
+    for wall in WALLS:
+        entries = by_wall.get(wall) if isinstance(by_wall, Mapping) else None
+        for entry in entries if isinstance(entries, list) and entries else [{"area": "whole_wall"}]:
+            key = _key(entry) if isinstance(entry, Mapping) else None
+            if key is not None:
+                found.setdefault((wall, key), len(found))
+    return found
+
+
+def reference_only_refusals(scheme: Mapping[str, object], design: DesignSettings | None, targets: DepthTargets,
+                            names: Mapping[str, str]) -> list[dict[str, object]]:
+    """准用清單原文裡的「鋼板直接貼在棉上」的固定材料（#1208）：照（哪一筆, 那一區清單去重排序）分組，一組一句
+    （分區頁的清單卡也是照清單去重排序分的，同一張卡的區在同一組）。每一組回 ``id``、``zones``（``{wall, zone}``）與
+    ``text``（開跑會拒收的那一句，區名用「、」接）。區照 :func:`_zone_order`，組照組裡第一區、同一批區再照清單裡的順序；
+    設計設定檔裡區寫的先後不影響結果（方案裡沒有的區排最後）。清單原文＝設計設定存的那一份，放不放得下深度都算。"""
+    order = _zone_order(scheme)
+    listed = [(wall, zone, item.allowed) for wall, zones in (design.zones if design is not None else {}).items()
+              for zone, item in zones.items() if item.allowed]
+    listed.sort(key=lambda row: (order.get((row[0], row[1]), len(order)), row[0], row[1]))
+    groups: dict[tuple[str, tuple[str, ...]], list[tuple[str, str]]] = {}
+    for wall, zone, allowed in listed:
+        for identifier in dict.fromkeys(allowed):
+            if reference_only(targets.fixed.get(identifier)):
+                groups.setdefault((identifier, tuple(sorted(set(allowed)))), []).append((wall, zone))
+    return [{"id": identifier, "zones": [{"wall": wall, "zone": zone} for wall, zone in zones],
+             "text": plan_refused("、".join(zone_words(wall, zone, names) for wall, zone in zones), targets.label(identifier))}
+            for (identifier, _), zones in groups.items()]
 
 
 def _key(entry: Mapping[str, object]) -> str | None:
@@ -439,7 +464,7 @@ def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings
 
 
 def _draft_reference_only(scheme: Mapping[str, object], design_value: object,
-                          depth_targets: Callable[[], DepthTargets] | None) -> list[dict[str, str]]:
+                          depth_targets: Callable[[], DepthTargets] | None) -> list[dict[str, object]]:
     """草稿那一份的 :func:`reference_only_refusals`。沒有一區寫准用清單就不讀材料庫；設計設定格式不對、材料庫讀不進來
     都回空的（那兩件事限制檢查自己會講）。"""
     if depth_targets is None or design_value is None:
@@ -454,7 +479,7 @@ def _draft_reference_only(scheme: Mapping[str, object], design_value: object,
         targets = depth_targets()
     except ValueError:
         return []
-    return reference_only_refusals(design, targets, draft_wall_words(scheme))
+    return reference_only_refusals(scheme, design, targets, draft_wall_words(scheme))
 
 
 def zone_limit_routes(range_check: RangeCheck | None,

@@ -534,10 +534,11 @@ function wholeButtons(places) {
   });
 }
 // 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
-// 「鋼板直接貼在棉上」的構造不跟著帶（#1208）：那一份清單是別區的，這一區不准因此多出這一種。
+// 「鋼板直接貼在棉上」的構造不跟著帶（#1208，carriedList）：拿掉它之後只剩不貼或空了，改用預設的三種玻璃棉＋不貼。
 function listForWall(wall, list) {
   if (!list) return startingAllowed(wall);
-  const fit = list.filter(id => !referenceOnly(id) && (fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id))));
+  const fit = carriedList(list, id => fitsHere(id, wall) || (id !== ZONE_NONE && !libraryEntry(id)));
+  if (!fit) return defaultAllowed(wall);
   return fit.length ? fit : [ZONE_NONE];
 }
 // 最多區用的那一份清單（清單卡第一張列的）；現在沒有哪一區由程式最佳化就是 null（新的區照「三種玻璃棉＋不貼」起）。
@@ -637,6 +638,10 @@ async function applyRule(method) {
 async function resetSpecial() {
   const method = ruleMethod();
   if (!method) { zoneNote("其他牆面現在貼的不是材料庫裡的一筆，沒辦法照著改回去：先在「其他牆面」選一種", "notice"); return; }
+  // 其他牆面的清單裡有「鋼板直接貼在棉上」的構造（#1208）：那一筆帶不過來，這幾區的清單跟規則永遠差一種、併不回去。
+  // 不改、照講（伺服器給的那一句），不寫「改好了」。
+  const held = method.mode === "search" ? (method.allowed ?? []).find(referenceOnly) : null;
+  if (held) { zoneNote(zoneReference.reset_blocked[held], "notice"); return; }
   await applyMethod(view.inferred.special.flatMap(group => group.zones), method);
 }
 // 小框裡每一種材料現在的樣子：選中的每一區照草稿加減之後的清單（lists），加上每一種「選中的區裡幾區有」（count）。
@@ -1032,6 +1037,11 @@ function ruleRow() {
     material.value = current?.id ?? "";
     material.onchange = () => { if (material.value) action(() => applyRule({mode: "fixed", materialId: material.value})); };
     row.append(material);
+    // 其他牆面指定貼的是「鋼板直接貼在棉上」的構造（#1208）：跟著規則的區圖上不寫名字，那兩行沒地方放，提醒寫在這張卡上
+    // （面板關著也看得到；伺服器給的那一行）。
+    if (!ruleDraft && zoneReferenceOnly(rule.zones[0].zone.material)) {
+      const mark = el("p", "zv-rule-ref", zoneReference.map_line); mark.id = "zone-rule-reference"; row.append(mark);
+    }
   }
   return row;
 }
@@ -1212,8 +1222,10 @@ function listCard(group, index, compact) {
     checks.append(row);
   }
   card.append(checks);
-  // 這一組的清單裡有那一類：開跑會被拒收，紅框照伺服器那一句寫（一區一句），「拿去搜尋」也按不下去。
-  const refused = referenceRefusals().filter(line => group.zones.some(item => item.wall === line.wall && item.key === line.zone));
+  // 這一組的清單裡有那一類：開跑會被拒收，紅框照伺服器那幾句寫（伺服器照同一個分法一組一句：區集合等於這張卡那幾區的
+  // 就是這張卡的），「拿去搜尋」也按不下去。
+  const mine = new Set(group.zones.map(item => item.id));
+  const refused = referenceRefusals().filter(line => line.zones.length === mine.size && line.zones.every(({wall, zone}) => mine.has(`${wall}/${zone}`)));
   if (refused.length) {
     const problem = el("p", "zv-problem", refused.map(line => line.text).join("；")); problem.id = `${prefix}-reference`; problem.setAttribute("role", "alert");
     card.append(problem);

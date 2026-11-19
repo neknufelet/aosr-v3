@@ -76,7 +76,8 @@ def search_why() -> str:
 
 
 def plan_refused(zone: str, name: str) -> str:
-    """開跑計畫拒收那一句；``zone`` 是 ``zone_limits.zone_words`` 的寫法，``name`` 是材料庫顯示名。"""
+    """開跑計畫拒收那一句；``zone`` 是 ``zone_limits.zone_words`` 的寫法（好幾區共用同一份清單時用「、」接起來），
+    ``name`` 是材料庫顯示名。"""
     return (f"{zone}的准用清單裡有{name}：{_KIND} {_band()} Hz 以下的數字只能參考，所以不進程式最佳化；"
             "請在分區頁取消它，或把這一區改成「指定貼一種」")
 
@@ -89,6 +90,7 @@ def words() -> dict[str, object]:
         "sentence": sentence(),
         "band_words": f"{band} Hz 以下只能參考",
         "map_words": [f"{band} Hz 以下", "數字只能參考"],
+        "map_line": f"{band} Hz 以下數字只能參考",
         "why": f"{_WHY}；{_WHY_PICK}",
         "why_only": f"{_WHY}。",
         "kind_words": f"；這一筆 {band} Hz 以下的數字只能參考，所以「由程式最佳化」不會挑，要用就在分區頁「指定貼一種」。",
@@ -97,7 +99,16 @@ def words() -> dict[str, object]:
     }
 
 
-def listing_block(entries: Iterable[LibraryEntry]) -> dict[str, object]:
-    """材料庫清單回覆旁邊那一格：命中的代號（照清單順序）與字句。旗標不塞進每一筆材料裡——分區頁會把材料那一筆
-    原樣送回曲線介面，材料頁會把它存回材料庫檔。"""
-    return {"ids": [entry.id for entry in entries if entry_reference_only(entry)], **words()}
+def reset_blocked(name: str) -> str:
+    """分區頁「改回跟其他牆面一樣」改不回去時講的那一句；``name`` 是材料庫顯示名。"""
+    return f"其他牆面的清單裡有{name}（不進程式最佳化）：先在「其他牆面」取消它，才能改回跟其他牆面一樣。"
+
+
+def listing_block(entries: Iterable[LibraryEntry]) -> dict[str, object] | None:
+    """材料庫清單回覆旁邊那一格：命中的代號（照清單順序）、字句、每一筆「改不回去」的那一句（``reset_blocked``：代號 → 句子）。
+    旗標不塞進每一筆材料裡——分區頁會把材料那一筆原樣送回曲線介面，材料頁會把它存回材料庫檔。
+    一筆都沒有就回 None，而且不讀界線：沒有這類構造的材料庫不靠品質登記簿那一格。"""
+    hits = [entry for entry in entries if entry_reference_only(entry)]
+    if not hits:
+        return None
+    return {"ids": [entry.id for entry in hits], **words(), "reset_blocked": {entry.id: reset_blocked(entry.label) for entry in hits}}

@@ -204,7 +204,7 @@ class MaterialStore:
                 "required_fields": _required_fields(), "layer_kinds": list(LAYER_KINDS), "fixed_kinds": list(FIXED_KINDS),
                 "provenance_labels": PROVENANCE_LABELS, "entry_kind_labels": ENTRY_KIND_LABELS,
                 "surface_groups": GROUP_WORDS, "surface_group_short": GROUP_SHORT_WORDS,
-                **({"reference_only": reference} if reference["ids"] else {})}
+                **({"reference_only": reference} if reference is not None else {})}
 
     def _write(self, entries: tuple[LibraryEntry, ...]) -> None:
         text = dump_user_library(entries)

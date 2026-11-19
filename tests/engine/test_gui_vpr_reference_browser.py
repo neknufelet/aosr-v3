@@ -10,14 +10,15 @@ import json
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
-from tests.engine.test_gui_vpr_reference import HIT, HIT_LABEL, PLAIN_ID, _write_user_library
+from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_BONDED, STEEL_2_5MM
+from tests.engine.test_gui_vpr_reference import ENTRIES, HIT, HIT_LABEL, PLAIN_ID, _ENTRY, _fixed, _write_user_library
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 
 COMPUTED_MS = 60_000  # 等伺服器算完曲線的上限（冷行程第一次算一種新構造要編譯）
@@ -90,9 +91,9 @@ _ALLOWED = """() => Object.fromEntries(Object.entries(zoneDesign.zones).flatMap(
 _STATE = "box => box.indeterminate ? 'some' : box.checked ? 'all' : 'none'"
 
 
-def _prepare(tmp_path: Path, lists: dict[str, list[str]] | None = None) -> None:
+def _prepare(tmp_path: Path, lists: dict[str, list[str]] | None = None, document: dict[str, object] | None = None) -> None:
     """自編的假房間（5.0 × 4.0 × 2.7 m，前牆左右各一塊、左右牆各一塊）、自編的兩筆材料；``lists``：哪幾區由程式最佳化、清單各是什麼。"""
-    _write(tmp_path, symmetry_document(CUTS))
+    _write(tmp_path, document or symmetry_document(CUTS))
     _write_user_library(tmp_path)
     if lists is not None:
         zones: dict[str, dict[str, object]] = {}
@@ -441,13 +442,13 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         with page.expect_response("**/api/zone-material"):
             page.locator("#zone-mode-x0-b").select_option("search")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
-        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == ["none"]
+        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
         # ② 勾選表那一格硬改成勾得到再點：清單不變。
         page.locator("#zone-allowed-summary-x0-b").click()
         expect(page.locator("#zone-allowed-x0-b")).to_be_visible()
         page.locator(f"#zone-allow-x0-b-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
         expect(page.locator(f"#zone-allow-x0-b-{HIT}")).not_to_be_checked()
-        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == ["none"]
+        assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
         # ③ 清單卡「加別種材料」那一格硬改成勾得到再點：清單不變。
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
@@ -471,3 +472,325 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         lists = _allowed(page)
         assert len(lists) > 2 and [zone for zone, allowed in lists.items() if HIT in allowed] == ["x0/a"], lists
         assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+# ---- 修補第 1 輪 ----
+
+KIND = "這類「鋼板直接貼在棉上」的構造"
+_OLD_TABLE_SETTLED = "!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration"
+
+
+def _wall_zones() -> list[str]:
+    """四面牆每一區的代號（方案裡的順序）。"""
+    scene = cast(dict[str, object], symmetry_document(CUTS)["scene"])
+    zones = cast(dict[str, list[dict[str, object]]], scene["surface_zones_by_wall"])
+    return [f"{wall}/{zone.get('id', 'whole_wall')}" for wall in ("x0", "xL", "y0", "yL") for zone in zones[wall]]
+
+
+def _served_refusals(page: Page) -> list[dict[str, object]]:
+    return cast(list[dict[str, object]], page.evaluate("zoneLimits.reference_only ?? []"))
+
+
+def test_the_old_table_search_row_is_stopped_and_says_the_refusal_in_red(tmp_path: Path, browser: Browser) -> None:
+    """舊做法表「拿去搜尋」那一列：清單裡有命中那一筆，按鈕停用、旁邊紅字就是開跑會拒收的那一句（伺服器原文）；
+    在勾選表取消它，按鈕恢復、旁邊回到平常那一句。"""
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": WOOLS})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function(_OLD_TABLE_SETTLED)
+        expect(page.locator("#zone-to-search")).to_be_disabled()
+        expect(page.locator("#zone-to-search-note")).to_have_class("limit-red")
+        expect(page.locator("#zone-to-search-note")).to_have_text(_refused(page, "x0/a"))
+        page.locator("#zone-allowed-summary-x0-a").click()
+        page.locator(f"#zone-allow-x0-a-{HIT}").uncheck()
+        page.wait_for_function(_OLD_TABLE_SETTLED)
+        expect(page.locator("#zone-to-search")).to_be_enabled()
+        expect(page.locator("#zone-to-search-note")).to_have_class("note")
+        expect(page.locator("#zone-to-search-note")).to_have_text("會先照畫面儲存，再打開第三階段搜尋頁")
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_zones_sharing_a_list_are_named_in_one_sentence_on_the_card_and_at_the_bottom(tmp_path: Path, browser: Browser) -> None:
+    """18 區共用一份有命中那一筆的清單：清單卡紅框與頁底紅字各只有一句（伺服器那一句，區名用「、」接了 18 個），不是照區數重複。
+    兩張清單卡各有命中：每張卡寫自己那一句，頁底兩句照伺服器的順序。"""
+    shared = [zone for zone in _wall_zones() if zone != "y0/s"]
+    assert len(shared) == 18
+    _prepare(tmp_path, dict.fromkeys(shared, LISTED))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        served = _served_refusals(page)
+        assert len(served) == 1 and len(cast(list[object], served[0]["zones"])) == 18
+        text = cast(str, served[0]["text"])
+        assert text.count(KIND) == 1 and text.count("、") == 17 and text.endswith(_refused(page, "x0/a").split("」", 1)[1])
+        expect(page.locator("#zone-list-reference")).to_have_text(text)
+        expect(page.locator("#zone-page-blocked")).to_have_text(text)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": [HIT, "none"]})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        first, second = _refused(page, "x0/b"), _refused(page, "x0/a")  # 方案裡 b 排在 a 前面
+        assert [row["text"] for row in _served_refusals(page)] == [first, second]
+        cards = {cast(str, card.get_attribute("id")): card.text_content() for card in page.locator("#zone-page .zv-list .zv-problem[id$='-reference']").all()}
+        assert sorted(cast(str, text) for text in cards.values()) == sorted([first, second]) and len(cards) == 2, cards
+        expect(page.locator("#zone-page-blocked")).to_have_text(f"{first}；{second}")
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_the_other_walls_card_carries_the_reminder_when_the_rule_pastes_such_a_construction(tmp_path: Path, browser: Browser) -> None:
+    """「其他牆面」指定貼命中那一筆：跟著規則的區圖上不寫名字，提醒寫在右欄那張卡的材料下面（伺服器給的一行），面板關著就看得到；
+    換成沒黏住的那一筆，那一行就沒有。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        page.locator("#zone-rule-mode").select_option("fixed")
+        expect(page.locator("#zone-rule-reference")).to_have_count(0)  # 還沒選貼哪一種
+        page.locator("#zone-rule-material").select_option(HIT)
+        _settled(page)
+        expect(page.locator("#zone-rule-material")).to_have_value(HIT)
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        mark = page.locator("#zone-rule #zone-rule-reference")
+        expect(mark).to_be_visible()
+        expect(mark).to_have_text(cast(str, WORDS["map_line"]))
+        assert WORDS["map_line"] == "".join(cast(list[str], WORDS["map_words"]))
+        assert cast(float, mark.evaluate("node => parseFloat(getComputedStyle(node).fontSize)")) >= 12
+        box, select = mark.bounding_box(), page.locator("#zone-rule-material").bounding_box()
+        assert box is not None and select is not None and box["y"] >= select["y"] + select["height"]  # 在材料下拉的下面
+        page.locator("#zone-rule-material").select_option(PLAIN_ID)
+        _settled(page)
+        expect(page.locator("#zone-rule-material")).to_have_value(PLAIN_ID)
+        expect(page.locator("#zone-rule-reference")).to_have_count(0)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_a_plain_product_pasted_on_an_original_wall_that_is_such_a_construction_keeps_the_two_lines(tmp_path: Path, browser: Browser) -> None:
+    """原牆本身就是命中的構造（等於材料庫那一筆），上面貼沒黏住的一般成品：整份（貼的＋原牆）伺服器判命中，
+    圖上那一區照樣有那兩行。原牆是一般牆面、貼同一筆一般成品的那一區沒有。"""
+    document = symmetry_document(CUTS)
+    zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])["surface_zones_by_wall"])
+    next(zone for zone in zones["x0"] if zone.get("id") == "a")["material"] = BONDED_VPR
+    _prepare(tmp_path, document=document)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        _click_zone(page, "x0/a")
+        _click_zone(page, "x0/b")
+        page.locator("#zone-panel-material").select_option(PLAIN_ID)
+        _apply(page)
+        pasted = cast(dict[str, dict[str, object]], page.evaluate(
+            "Object.fromEntries(scheme.scene.surface_zones_by_wall.x0.filter(zone => zone.id).map(zone => [zone.id, zone.material]))"))
+        assert pasted["a"]["kind"] == pasted["b"]["kind"] == "mounted_on_wall" and pasted["a"]["wall"] == BONDED_VPR
+        # 伺服器的判斷（同一支）：a 那一份命中、b 那一份不命中。
+        from pydantic import TypeAdapter
+
+        from aosr.materials.construction_models import SurfaceMaterial
+        adapter: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
+        assert [reference_only.reference_only(adapter.validate_python(pasted[zone])) for zone in ("a", "b")] == [True, False]
+        assert page.locator("#zone-map [data-wall='x0'][data-zone='a'] .zv-fixed-label").text_content() == "自編對照板"
+        assert _map_words(page, "x0/a") == WORDS["map_words"]
+        assert page.locator("#zone-map [data-wall='x0'][data-zone='b'] .zv-fixed-label").text_content() == "自編對照板"
+        assert _map_words(page, "x0/b") == []
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_back_to_the_other_walls_says_why_it_cannot_and_changes_nothing(tmp_path: Path, browser: Browser) -> None:
+    """其他牆面是由程式最佳化、清單裡有命中那一筆；另外指定的一區按「改回跟其他牆面一樣」：那一筆帶不過來、併不回去，
+    所以不改，訊息是伺服器那一句（不寫「改好了」）。其他牆面的清單沒有它時照常改得回去。"""
+    shared = [zone for zone in _wall_zones() if zone != "y0/s"]
+    _prepare(tmp_path, dict.fromkeys(shared, LISTED))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
+        before = page.evaluate("JSON.stringify([zoneDesign.zones, scheme.scene.surface_zones_by_wall])")
+        page.locator("#zone-special-reset").click()
+        expect(page.locator("#zone-page-note")).to_have_text(
+            f"其他牆面的清單裡有{HIT_LABEL}（不進程式最佳化）：先在「其他牆面」取消它，才能改回跟其他牆面一樣。")
+        _settled(page)
+        assert page.evaluate("JSON.stringify([zoneDesign.zones, scheme.scene.surface_zones_by_wall])") == before
+        expect(page.locator("#zone-special-reset")).to_have_count(1)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+    _prepare(tmp_path, dict.fromkeys(shared, WOOLS))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        page.locator("#zone-special-reset").click()
+        _settled(page)
+        assert _allowed(page)["y0/s"] == WOOLS
+        expect(page.locator("#zone-special-reset")).to_have_count(0)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_on_the_page(tmp_path: Path, browser: Browser) -> None:
+    """分區頁（來源：畫面上那一份清單）：那一份是「命中那一筆或不貼」，其他牆面改成由程式最佳化時，新的區拿到的不是
+    「只有不貼」而是預設的三種玻璃棉＋不貼。來源本來就只有「不貼」的，照舊帶「只有不貼」。"""
+    _prepare(tmp_path, {"x0/a": [HIT, "none"]})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        page.locator("#zone-rule-mode").select_option("search")
+        _settled(page)
+        lists = _allowed(page)
+        assert len(lists) > 3 and lists["x0/a"] == [HIT, "none"]
+        assert {zone: allowed for zone, allowed in lists.items() if zone != "x0/a"} == dict.fromkeys([z for z in lists if z != "x0/a"], WOOLS)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+    _prepare(tmp_path, {"x0/a": ["none"]})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        page.locator("#zone-rule-mode").select_option("search")
+        _settled(page)
+        lists = _allowed(page)
+        assert len(lists) > 3 and set(map(tuple, lists.values())) == {("none",)}, lists
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_old_table(tmp_path: Path, browser: Browser) -> None:
+    """舊做法表（來源：這一頁上一次改過的組合）：剛改過的那一份剩「命中那一筆或不貼」，再把另一區改成由程式最佳化，
+    那一區拿到三種玻璃棉＋不貼。剛改過的那一份沒有命中、只剩「不貼」的，照舊帶「只有不貼」。"""
+    for start, left in ((LISTED, [HIT, "none"]), (["glass_wool_48k", "none"], ["none"])):
+        _prepare(tmp_path, {"x0/a": start})
+        with _serve(tmp_path) as base, _open(browser, base) as watched:
+            page = watched.page
+            _open_scheme(page, NAME)
+            page.locator("#elevation-wall-x0").click()
+            page.locator("#zone-chip-remove-x0-a-glass_wool_48k").click()
+            assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == left
+            with page.expect_response("**/api/zone-material"):
+                page.locator("#zone-mode-x0-b").select_option("search")
+            page.wait_for_function(_OLD_TABLE_SETTLED)
+            assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == (WOOLS if HIT in left else ["none"]), left
+            assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """兩區共用一份有命中那一筆的清單（一句點名兩區）。把限制檢查的回覆扣住，在面板取消其中一區的那一筆並套用：
+    新結果回來之前，舊的那一句（還寫著兩區）不留在畫面上——卡上、頁底都沒有；放行之後換成只點名剩下那一區的新句子。"""
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        both = cast(str, _served_refusals(page)[0]["text"])
+        assert both.count("、") == 1
+        expect(page.locator("#zone-page-blocked")).to_have_text(both)
+        held: list[Route] = []
+        released: list[bool] = []
+
+        def hold(route: Route) -> None:
+            if released:
+                route.continue_()
+            else:
+                held.append(route)
+        page.route("**/api/zone-limits", hold)
+        _click_zone(page, "x0/a")
+        page.locator("#zone-panel-fixed summary").click()
+        page.locator(f"#zone-panel-allow-{HIT}").uncheck()
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        page.wait_for_function("zoneDesign.zones.x0.a.allowed.length === 2 && zoneLimitsShown !== zoneLimitsGeneration")
+        assert len(held) >= 1
+        assert _served_refusals(page)[0]["text"] == both  # 手上還是舊的那一份
+        expect(page.locator("#zone-page-blocked")).to_have_count(0)
+        expect(page.locator("#zone-page .zv-problem[id$='-reference']")).to_have_count(0)
+        released.append(True)
+        for route in held:
+            route.continue_()
+        _settled(page)
+        expect(page.locator("#zone-page-blocked")).to_have_text(_refused(page, "x0/b"))
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+# 命中、但曲線沒有橘底外推的一筆：同樣的鋼板，背襯換成沒登記可信範圍的三木經驗式。
+NO_ORANGE = "own_miki_panel"
+NO_ORANGE_ENTRIES = (*ENTRIES, _ENTRY.validate_python(_fixed(NO_ORANGE, "自編三木板", {
+    "kind": "assembly", "backing": "rigid", "layers": [STEEL_2_5MM, {**MELAMINE_BONDED, "model": "miki"}]})))
+
+
+def _band_at(page: Page, hz: float) -> None:
+    """把曲線介面回覆裡的界線換掉（伺服器起在另一個行程，改不到它的設定檔）：界線是從設定檔讀的，會變。"""
+    def changed(route: Route) -> None:
+        response = route.fetch()
+        body = response.json()
+        if "reference_only" in body:
+            body["reference_only"]["band_hz"] = hz
+        route.fulfill(response=response, json=body)
+    page.unroute("**/api/material-curve")
+    page.route("**/api/material-curve", changed)
+
+
+def test_the_material_page_keeps_the_legend_without_an_orange_span_and_the_band_inside_the_chart(tmp_path: Path, browser: Browser) -> None:
+    """材料庫頁：①命中、但沒有橘底外推的一筆，圖例那一塊照樣出現（裡面只有藍底那一行）。②界線落在橫軸左邊外面（10 Hz）：
+    藍底與小字都不畫；落在右邊外面（20000 Hz）：藍底只畫到圖的右緣、不超出去；圖例那一行都照樣在，頁面沒有錯。"""
+    _write_user_library(tmp_path, NO_ORANGE_ENTRIES)
+    with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        _open_material(page, NO_ORANGE)
+        expect(page.locator("#curve-ref-band")).to_be_visible(timeout=COMPUTED_MS)
+        expect(page.locator('#curve-key li[data-kind="extrapolation"]')).to_be_hidden()
+        assert cast(int, page.evaluate("plot.series.length")) >= 2 and cast(list[object], page.evaluate(
+            "[...document.querySelectorAll('#curve-key li')].filter(item => !item.hidden).map(item => item.id)")) == ["curve-ref-note"]
+        expect(page.locator("#curve-key")).to_be_visible()
+        expect(page.locator("#curve-key li#curve-ref-note .ref-say")).to_be_visible()
+        expect(page.locator("#curve-key li#curve-ref-note .ref-say")).to_have_text(cast(str, WORDS["sentence"]))
+        _band_at(page, 10.0)
+        _open_material(page, HIT)
+        expect(page.locator("#curve-ref-note")).to_be_visible(timeout=COMPUTED_MS)
+        page.wait_for_function("document.getElementById('curve-ref-band')?.dataset.hz === '10'")
+        expect(page.locator("#curve-ref-band")).to_be_hidden()
+        expect(page.locator("#curve-ref-band-word")).to_be_hidden()
+        _band_at(page, 20000.0)
+        _open_material(page, NO_ORANGE)
+        page.wait_for_function("document.getElementById('curve-ref-band')?.dataset.hz === '20000'", timeout=COMPUTED_MS)
+        found = cast(dict[str, object], page.evaluate(_BAND))
+        over, band = cast(list[float], found["over"]), cast(list[float], found["band"])
+        assert cast(float, found["max"]) < 20000 and abs(band[0] - over[0]) < 1 and abs(band[2] - over[2]) < 1.5, found
+        expect(page.locator("#curve-ref-note")).to_be_visible()
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_the_panel_curve_keeps_the_band_inside_the_chart_and_folds_the_reason_again_for_the_next_pick(tmp_path: Path, browser: Browser) -> None:
+    """分區頁面板曲線：①「為什麼」點開之後取消、再選一區，摺疊是收著的（上一次開著不帶到下一次選的區）。
+    ②界線在橫軸左邊外面（10 Hz）：不畫藍底，圖例那一行照樣在；在右邊外面（20000 Hz）：藍底只畫到圖的右緣。"""
+    _prepare(tmp_path)
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        _click_zone(page, "x0/a")
+        page.locator("#zone-panel-material").select_option(HIT)
+        expect(page.locator("#zone-panel .zv-ref-band")).to_have_count(1, timeout=COMPUTED_MS)
+        page.locator("#zone-panel-ref-note summary").click()
+        expect(page.locator("#zone-panel-ref-note details p")).to_be_visible()
+        page.locator("#zone-panel-cancel").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        _click_zone(page, "x0/b")
+        page.locator("#zone-panel-material").select_option(HIT)
+        expect(page.locator("#zone-panel-ref-note")).to_have_count(1, timeout=COMPUTED_MS)
+        assert page.locator("#zone-panel-ref-why").evaluate("fold => fold.open") is False
+        expect(page.locator("#zone-panel-ref-note details p")).to_be_hidden()
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+
+    edge = """() => { const chart = document.querySelector('#zone-panel .zv-curve-chart'), band = chart.querySelector('rect.zv-ref-band');
+        const grid = [...chart.querySelectorAll('line.zv-grid')].map(line => Number(line.getAttribute('x2')));
+        return {band: band ? Number(band.getAttribute('x')) + Number(band.getAttribute('width')) : null, right: Math.max(...grid)}; }"""
+    for hz, drawn in ((10.0, False), (20000.0, True)):
+        _prepare(tmp_path)
+        with real_server(tmp_path) as base, _open(browser, base) as watched:
+            page = watched.page
+            _band_at(page, hz)
+            _open_page(page)
+            _click_zone(page, "x0/a")
+            page.locator("#zone-panel-material").select_option(HIT)
+            expect(page.locator("#zone-panel-ref-note .ref-say")).to_have_text(cast(str, WORDS["sentence"]), timeout=COMPUTED_MS)
+            seen = cast(dict[str, float | None], page.evaluate(edge))
+            if drawn:
+                assert seen["band"] is not None and abs(seen["band"] - cast(float, seen["right"])) < 0.01, seen
+            else:
+                assert seen["band"] is None, seen
+            assert (watched.console_errors, watched.page_errors) == ([], [])

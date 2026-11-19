@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -20,12 +21,14 @@ from starlette.testclient import TestClient
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.config.quality_targets import load_quality_targets
 from aosr.gui import reference_only, zone_limits
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.gradient_jobs import GradientJobs
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, library_depth_targets, plan_search, start_arguments
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.zone_design import DesignSettings
+from aosr.gui.zone_limits import DepthTargets
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
 from aosr.reporting.scheme import Scheme
@@ -94,7 +97,7 @@ def test_it_reads_the_layers_and_never_the_name() -> None:
     rows = [{"frequency_hz": 110.0, "real_pa_s_m": 930.5}, {"frequency_hz": 410.0, "real_pa_s_m": 705.5}]
     table = _ENTRY.validate_python(_fixed("own_table_panel", "自編表列板", {**_table(BONDED_VPR), "points": rows}))
     assert [reference_only.entry_reference_only(entry) for entry in (named, quiet, table)] == [False, True, True]
-    assert reference_only.listing_block((named, quiet, table))["ids"] == ["own_quiet_panel", "own_table_panel"]
+    assert cast(Doc, reference_only.listing_block((named, quiet, table)))["ids"] == ["own_quiet_panel", "own_table_panel"]
 
 
 def test_only_fixed_entries_are_judged_and_no_builtin_material_is_one() -> None:
@@ -104,7 +107,7 @@ def test_only_fixed_entries_are_judged_and_no_builtin_material_is_one() -> None:
     tunable = _ENTRY.validate_python(_vpr())
     assert tunable.id == VPR and tunable.kind == "tunable_layers"
     assert reference_only.entry_reference_only(tunable) is False
-    assert reference_only.listing_block(builtin_entries())["ids"] == []
+    assert reference_only.listing_block(builtin_entries()) is None
 
 
 def _band_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upper: str) -> None:
@@ -124,6 +127,7 @@ def test_the_band_comes_from_the_registry_and_every_sentence_follows_it(tmp_path
         "sentence": "VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：300 Hz 以下的數字只能參考。",
         "band_words": "300 Hz 以下只能參考",
         "map_words": ["300 Hz 以下", "數字只能參考"],
+        "map_line": "300 Hz 以下數字只能參考",
         "why": "程式算這類構造用的是簡化算法（一維、鋼板當成整塊一起動）。跟 Fraunhofer 的實測比，算出來的共振偏高、頻寬偏窄。"
                "數字沒有改，照舊算；「指定貼一種」照舊能選、能貼，「由程式最佳化」不會挑它。",
         "why_only": "程式算這類構造用的是簡化算法（一維、鋼板當成整塊一起動）。跟 Fraunhofer 的實測比，算出來的共振偏高、頻寬偏窄。"
@@ -324,7 +328,8 @@ def test_the_library_listing_names_the_hits_beside_the_rows_and_never_inside_the
     _write_user_library(hit_dir)
     plain, hit = _client(plain_dir).get("/api/materials").json(), _client(hit_dir).get("/api/materials").json()
     assert set(plain) == LISTING_KEYS and set(hit) == LISTING_KEYS | {"reference_only"}
-    assert hit["reference_only"] == {"ids": [HIT], **reference_only.words()}
+    assert hit["reference_only"] == {"ids": [HIT], **reference_only.words(), "reset_blocked": {
+        HIT: "其他牆面的清單裡有自編牆板（不進程式最佳化）：先在「其他牆面」取消它，才能改回跟其他牆面一樣。"}}
     rows = {row["entry"]["id"]: row for row in hit["materials"]}
     assert all(set(row) == ROW_KEYS for row in hit["materials"])
     assert rows[HIT]["entry"] == ENTRIES[0].model_dump(mode="json")
@@ -348,8 +353,8 @@ def test_saving_every_listed_row_back_leaves_the_library_file_byte_identical(tmp
     assert path.read_bytes() == before
 
 
-def _limits(client: TestClient, allowed: list[str]) -> Doc:
-    body = {"scheme": symmetry_document({"x0": FRONT_PAIR}), "design": _design(allowed).model_dump(mode="json")}
+def _limits(client: TestClient, allowed: list[str], design: Doc | None = None) -> Doc:
+    body = {"scheme": symmetry_document({"x0": FRONT_PAIR}), "design": design or _design(allowed).model_dump(mode="json")}
     reply = client.post("/api/zone-limits", json=body)
     assert reply.status_code == 200, reply.text
     return cast(Doc, reply.json())
@@ -361,7 +366,7 @@ def test_the_limits_route_hands_the_page_the_refusal_sentence_only_when_there_is
     _write_user_library(tmp_path)
     client = _client(tmp_path)
     hit = _limits(client, ["glass_wool_48k", HIT, "none"])
-    assert hit["reference_only"] == [{"wall": "x0", "zone": "a", "id": HIT, "text": REFUSED}]
+    assert hit["reference_only"] == [{"id": HIT, "zones": [{"wall": "x0", "zone": "a"}], "text": REFUSED}]
     assert "reference_only" not in _limits(client, ["glass_wool_48k", PLAIN_ID, "none"])
     assert "reference_only" not in _limits(client, ["glass_wool_48k", "none"])
     monkeypatch.setattr(zone_limits, "reference_only", lambda material: False)
@@ -417,3 +422,158 @@ def test_the_web_process_still_has_no_jax_after_the_zone_page_asks_about_such_a_
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
     done = subprocess.run([sys.executable, "-c", _NO_JAX, str(tmp_path)], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=300)
     assert done.returncode == 0, done.stdout[-300:] + done.stderr[-1500:]
+
+
+# ---- 修補第 1 輪：一組一句、順序、沒命中不讀界線、幾道守門 ----
+
+SECOND, SECOND_LABEL = "own_second_panel", "自編第二塊板"
+TWO_HITS = (*ENTRIES, _ENTRY.validate_python(_fixed(SECOND, SECOND_LABEL, FRONTED)))
+
+
+def _zones_design(zones: dict[str, dict[str, list[str]]]) -> Doc:
+    return {"schema_version": "aosr.zone_design.v1", "scheme_id": NAME,
+            "zones": {wall: {zone: {"mode": "search", "allowed": allowed} for zone, allowed in keys.items()} for wall, keys in zones.items()}}
+
+
+def _sentence(zones: str, label: str = HIT_LABEL) -> str:
+    return (f"{zones}的准用清單裡有{label}：這類「鋼板直接貼在棉上」的構造 300 Hz 以下的數字只能參考，所以不進程式最佳化；"
+            "請在分區頁取消它，或把這一區改成「指定貼一種」")
+
+
+def test_zones_sharing_one_list_get_one_sentence_naming_them_all(tmp_path: Path) -> None:
+    """好幾區共用同一份清單（排序後一樣就算，寫的先後不同也算）：一組一句，區名用「、」接，照方案裡那一面的區序
+    （b 在 a 前面）；清單不一樣的區自己一句。只有一區時逐字等於原本那一句。"""
+    _write_user_library(tmp_path)
+    client = _client(tmp_path)
+    shared = _limits(client, [], _zones_design({"x0": {"a": ["glass_wool_48k", HIT, "none"], "b": ["none", HIT, "glass_wool_48k"]}}))
+    assert shared["reference_only"] == [{"id": HIT, "zones": [{"wall": "x0", "zone": "b"}, {"wall": "x0", "zone": "a"}],
+                                         "text": _sentence("前牆「b」、前牆「a」")}]
+    apart = _limits(client, [], _zones_design({"x0": {"a": ["glass_wool_48k", HIT, "none"], "b": [HIT, "none"]}}))
+    assert apart["reference_only"] == [{"id": HIT, "zones": [{"wall": "x0", "zone": "b"}], "text": _sentence("前牆「b」")},
+                                        {"id": HIT, "zones": [{"wall": "x0", "zone": "a"}], "text": REFUSED}]
+    assert _sentence("前牆「a」") == REFUSED
+
+
+def test_the_order_of_zones_in_the_design_file_changes_neither_the_sentences_nor_which_one_the_plan_refuses_with(tmp_path: Path) -> None:
+    """兩區各有一筆不同的命中材料：設計檔裡兩區寫的先後對調，限制檢查回的句子與順序都不變（照方案的區序，b 先）；
+    開跑計畫拒收寫的就是限制檢查的第一句。"""
+    _write_user_library(tmp_path, TWO_HITS)
+    client = _client(tmp_path)
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    scheme = Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR}))
+    lists = {"a": ["glass_wool_48k", HIT, "none"], "b": ["glass_wool_48k", SECOND, "none"]}
+    expected = [{"id": SECOND, "zones": [{"wall": "x0", "zone": "b"}], "text": _sentence("前牆「b」", SECOND_LABEL)},
+                {"id": HIT, "zones": [{"wall": "x0", "zone": "a"}], "text": REFUSED}]
+    for order in (("a", "b"), ("b", "a")):
+        design = _zones_design({"x0": {zone: lists[zone] for zone in order}})
+        assert list(cast(Doc, cast(Doc, design["zones"])["x0"])) == list(order)
+        assert _limits(client, [], design)["reference_only"] == expected, order
+        with pytest.raises(PlanRefused) as caught:
+            jobs.plan(scheme, DesignSettings.model_validate(design), GradientRequest())
+        assert str(caught.value) == expected[0]["text"], order
+
+
+def _no_band(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken() -> float:
+        raise ValueError("界線讀不出來（考卷植的）")
+    monkeypatch.setattr(reference_only, "band_hz", broken)
+
+
+def test_a_library_without_such_a_construction_never_reads_the_band(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """沒有命中的材料庫不靠界線：把界線換成讀不出來，材料庫清單、限制檢查、曲線三個介面照樣 200，回覆跟界線讀得出來時
+    （同一跑先打一次）一模一樣，鍵也就是主線那幾個。有命中的材料庫同樣的植法會炸（對照：這一題真的植到了）。"""
+    _write_user_library(tmp_path, ENTRIES[1:])
+    client = _client(tmp_path)
+    design = _zones_design({"x0": {"a": ["glass_wool_48k", PLAIN_ID, "none"]}})
+    curve = USER[1]
+
+    def replies() -> list[object]:
+        listing = client.get("/api/materials")
+        limits = client.post("/api/zone-limits", json={"scheme": symmetry_document({"x0": FRONT_PAIR}), "design": design})
+        drawn = client.post("/api/material-curve", json=curve)
+        assert (listing.status_code, limits.status_code, drawn.status_code) == (200, 200, 200), (listing.text[:200], limits.text[:200], drawn.text[:200])
+        return [listing.json(), limits.json(), drawn.json()]
+
+    before = replies()
+    _no_band(monkeypatch)
+    after = replies()
+    assert after == before
+    assert set(cast(Doc, after[0])) == LISTING_KEYS and "reference_only" not in cast(Doc, after[1]) and "reference_only" not in cast(Doc, after[2])
+    hit_dir = tmp_path / "hit"
+    _write_user_library(hit_dir)
+    with pytest.raises(ValueError, match="界線讀不出來"):
+        _client(hit_dir).get("/api/materials")
+
+
+def _registry(monkeypatch: pytest.MonkeyPatch, sections: list[object]) -> None:
+    class Registry:
+        stage_one_sections = sections
+    monkeypatch.setattr(reference_only, "load_quality_targets", lambda path: Registry())
+
+
+class _Section:
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def entry(self, key: str) -> object:
+        assert key == reference_only.SCORED_RANGE_KEY
+        return self._value
+
+
+def _setting(value: object) -> object:
+    real = load_quality_targets(config_path("quality_targets.toml")).stage_one_sections[0].entry(reference_only.SCORED_RANGE_KEY)
+    return real.model_copy(update={"value": value})
+
+
+def test_two_sections_with_different_upper_edges_are_an_error_and_not_a_pick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """品質登記簿第一階段有兩段、上界不一樣：材料沒有用途可問，不挑一個，報錯並列出讀到的值。兩段上界一樣就照讀。"""
+    _registry(monkeypatch, [_Section(_setting((20.0, 300.0))), _Section(_setting((20.0, 250.0)))])
+    with pytest.raises(ValueError, match=r"上界要剛好一個值，讀到 \[250\.0, 300\.0\]"):
+        reference_only.band_hz()
+    _registry(monkeypatch, [_Section(_setting((20.0, 250.0))), _Section(_setting((30.0, 250.0)))])
+    assert reference_only.band_hz() == 250.0
+
+
+@pytest.mark.parametrize("value", [300.0, (20.0, 300.0, 400.0), None], ids=["one_number", "three_numbers", "not_a_setting"])
+def test_a_scored_range_that_is_not_a_range_is_an_error(monkeypatch: pytest.MonkeyPatch, value: object) -> None:
+    """那一格不是一段頻率範圍（一個數、三個數、根本不是設定值）：報錯，不猜上界。"""
+    _registry(monkeypatch, [_Section(None if value is None else _setting(value))])
+    with pytest.raises(TypeError, match="不是一段頻率範圍"):
+        reference_only.band_hz()
+
+
+def test_a_design_that_does_not_validate_gets_the_ordinary_limits_reply_without_the_field(tmp_path: Path) -> None:
+    """設計設定格式不對（不是由程式最佳化的區給了清單，清單裡還是命中那一筆）：限制檢查照樣 200，沒有那一格
+    （格式不對這件事限制檢查自己會講）。"""
+    _write_user_library(tmp_path)
+    design: Doc = {"schema_version": "aosr.zone_design.v1", "scheme_id": NAME,
+                   "zones": {"x0": {"a": {"mode": "fixed", "allowed": ["glass_wool_48k", HIT]}}}}
+    reply = _limits(_client(tmp_path), [], design)
+    assert "reference_only" not in reply and "zones" in reply
+
+
+def test_a_user_library_that_cannot_be_read_gets_the_ordinary_limits_reply_without_the_field(tmp_path: Path) -> None:
+    """使用者材料庫讀不進來、又有一區寫了清單：限制檢查照樣 200，沒有那一格（材料庫讀不進來限制檢查自己有一條紅）。"""
+    path = user_library_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("這不是材料庫 [[[\n", encoding="utf-8")
+    reply = _limits(_client(tmp_path), ["glass_wool_48k", HIT, "none"])
+    assert "reference_only" not in reply and "zones" in reply
+
+
+def test_without_any_list_the_user_library_is_not_read_for_this(tmp_path: Path) -> None:
+    """沒有任何一區寫准用清單：這一格不為了自己去讀材料庫（分區頁每次改動都會問限制檢查；讀材料庫要開檔、驗每一筆）。
+    有一區寫了清單才讀，而且只讀一次。"""
+    calls: list[int] = []
+
+    def provider() -> DepthTargets:
+        calls.append(1)
+        return library_depth_targets(SETTINGS, ENTRIES)
+
+    scheme = symmetry_document({"x0": FRONT_PAIR})
+    none_listed: Doc = {"schema_version": "aosr.zone_design.v1", "scheme_id": NAME, "zones": {"x0": {"a": {"mode": "search"}}}}
+    assert zone_limits._draft_reference_only(scheme, none_listed, provider) == [] and calls == []
+    listed = _design(["glass_wool_48k", HIT, "none"]).model_dump(mode="json")
+    assert [row["text"] for row in zone_limits._draft_reference_only(scheme, listed, provider)] == [REFUSED]
+    assert calls == [1]

@@ -202,12 +202,13 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
     return found
 
 
-def _refuse_reference_only(design: DesignSettings | None, targets: DepthTargets, names: Mapping[str, str]) -> None:
-    """准用清單原文裡有「鋼板直接貼在棉上」的固定材料就拒收（#1208）：照設計設定的順序點名第一筆
-    （分區頁列的是同一支 ``zone_limits.reference_only_refusals`` 的每一筆）。"""
-    refused = reference_only_refusals(design, targets, names)
+def _refuse_reference_only(scheme: Mapping[str, object], design: DesignSettings | None, targets: DepthTargets,
+                           names: Mapping[str, str]) -> None:
+    """准用清單原文裡有「鋼板直接貼在棉上」的固定材料就拒收（#1208）：寫排第一的那一組的整句
+    （分區頁列的是同一支 ``zone_limits.reference_only_refusals`` 的每一組，順序也是它排的）。"""
+    refused = reference_only_refusals(scheme, design, targets, names)
     if refused:
-        raise PlanRefused(refused[0]["text"])
+        raise PlanRefused(str(refused[0]["text"]))
 
 
 def builtin_depth_targets(settings: MaterialGradientSettings) -> DepthTargets:
@@ -371,8 +372,9 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
         raise PlanRefused("設計設定跟方案對不上（" + "；".join(problems) + "），先在立面圖重存每一區的做法")
     targets_for_depth = depth_targets if depth_targets is not None else builtin_depth_targets(settings)
     names = wall_words(scheme)
-    _refuse_reference_only(design, targets_for_depth, names)
-    refusals = saved_refusals(scheme.model_dump(mode="json"), design, range_check, targets_for_depth)
+    document = scheme.model_dump(mode="json")
+    _refuse_reference_only(document, design, targets_for_depth, names)
+    refusals = saved_refusals(document, design, range_check, targets_for_depth)
     if refusals:
         raise PlanRefused("有超過限制的區（立面圖上標紅的），先改好再開：" + "；".join(refusals))
     modes = effective_modes(design, scheme)
