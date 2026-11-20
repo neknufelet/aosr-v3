@@ -27,7 +27,7 @@ from tests.engine.test_gui_vpr_results import (
     LOOSE, PLAIN_WALL, PURPOSE, TARGETS, WHY, _mounted, _registry, _saved, _zone, plain as plain)
 
 Doc = dict[str, object]
-STAGE_THREE = "有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段只算 30～300 Hz，全在 300 Hz 以下，這一跑的數字都只能參考。"
+STAGE_THREE = "有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段本來就只算 30～300 Hz，整段都在 300 Hz 以下，所以這一跑的數字都只能參考。"
 RESULT = ("有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：300 Hz 以下的數字只能參考；"
           "下表標了「含 300 Hz 以下」的幾列都受影響。")
 # 改善表預期被標的五類（寫死成列上印的名字，不拿規則跟自己比）；低頻拖尾不計分、空間感尚未評估、反射與回聲下界剛好等於界線。
@@ -160,7 +160,7 @@ def test_the_sentence_changes_when_the_stage_three_range_reaches_above_the_band(
     lower = _registry(tmp_path, reference_only.GRADIENT_RANGE_KEY, "[40.0, 250.0]", section="[[stage_one]]")
     block = reference_only.stage_three_block(["後牆"], lower, PURPOSE)
     assert block is not None and block["sentence"] == (
-        "後牆有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段只算 40～250 Hz，全在 300 Hz 以下，這一跑的數字都只能參考。")
+        "後牆有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段本來就只算 40～250 Hz，整段都在 300 Hz 以下，所以這一跑的數字都只能參考。")
 
 
 def test_the_range_is_the_one_the_gradient_objective_reads_and_a_bad_one_is_an_error(

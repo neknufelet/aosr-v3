@@ -238,7 +238,7 @@ def stage_three_block(walls: Sequence[str], registry: QualityTargets, purpose: s
     low, high = (float(value) for value in entry.value)
     edge = registry_band_hz(registry)
     head = f"{'、'.join(walls)}有 VPR（鋼板共振吸音）{_KIND}："
-    tail = (f"第三階段只算 {low:g}～{high:g} Hz，全在 {edge:g} Hz 以下，這一跑的數字都只能參考。" if high <= edge
+    tail = (f"第三階段本來就只算 {low:g}～{high:g} Hz，整段都在 {edge:g} Hz 以下，所以這一跑的數字都只能參考。" if high <= edge
             else f"第三階段算 {low:g}～{high:g} Hz，其中 {edge:g} Hz 以下的部分只能參考。")
     return {"sentence": head + tail, "why_label": "為什麼", "why": f"{_WHY}。"}
 
