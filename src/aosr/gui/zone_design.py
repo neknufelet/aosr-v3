@@ -17,6 +17,10 @@
 （``zone_limits.depth_cap``）。沒給的格子存檔時不寫（舊設計設定逐位不變）。
 
 ``left_right_symmetry``（#1206，選填）：左右對稱的開關，只存「關」（``off``）；缺這一格就是開，配對怎麼算在 ``zone_symmetry``。
+
+``ZoneDesign.ranges``（#1199，選填、只給交給搜尋的區）：這一區替某幾種可最佳化材料自己定的可調範圍（材料代號 →
+棉厚下上、空腔下上，:class:`~aosr.gradient.depth_fit.ZoneRange`）。這裡只守形狀；只准收窄、棉厚要是產品厚度、
+收窄後放不放得下，對材料庫核（``zone_limits`` 標紅、開跑計畫照擋）。沒給的區存檔時不寫（舊設計設定逐位不變）。
 """
 from __future__ import annotations
 
@@ -33,6 +37,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.gradient.depth_fit import ZoneRange
 from aosr.gui.problem_text import checked_scheme
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.scheme import Scheme
@@ -60,6 +65,9 @@ class ZoneDesign(BaseModel):
         default=None, min_length=1, exclude_if=lambda value: value is None)
     # 這一區自己的深度上限（公尺；#1082 段 1-4）：固定區比貼上去的總深、搜尋區當搜尋的上限；保留原牆的區不加層、管不到。
     max_depth_m: Depth | None = Field(default=None, exclude_if=lambda value: value is None)
+    # 這一區自己的可調範圍（#1199）：可最佳化材料代號 → 範圍；只給交給搜尋的區，准用清單有寫時代號要在清單裡。
+    ranges: dict[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")], ZoneRange] | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _allowed_only_for_search(self) -> Self:
@@ -68,6 +76,14 @@ class ZoneDesign(BaseModel):
                 raise ValueError(f"准用清單只給交給搜尋的區，這一區是「{MODE_WORDS[self.mode]}」")
             if len(set(self.allowed)) != len(self.allowed):
                 raise ValueError(f"准用清單有重複：{list(self.allowed)}")
+        if self.ranges is not None:
+            if self.mode != "search":
+                raise ValueError(f"可調範圍只給交給搜尋的區，這一區是「{MODE_WORDS[self.mode]}」")
+            if "none" in self.ranges:
+                raise ValueError("可調範圍只給可最佳化材料，「不貼」（none）沒有範圍")
+            missing = [code for code in self.ranges if self.allowed is not None and code not in self.allowed]
+            if missing:
+                raise ValueError(f"可調範圍的材料 {missing} 不在這一區的准用清單 {list(self.allowed or ())} 裡")
         return self
 
 
