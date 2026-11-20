@@ -114,6 +114,11 @@ def test_zone_range_search_zoned_plan_carries_the_range_to_the_start_designs() -
     ceiling = next(design for design in designs if design.surface_id == "ceiling@c")
     assert _box(ceiling) == ((0.05, 0.0), (0.1, 0.08), (0.05, 0.1))
     assert SearchPlan.model_validate_json(plan.model_dump_json()) == plan
+    # 開跑計畫照分區頁標紅那一把擋（同一句、點名哪一區哪一種材料）。
+    with pytest.raises(PlanRefused, match="立面圖上標紅.*天花「c」：48K 玻璃棉.*的可調範圍：棉厚 0.05～0.4 公尺超出材料頁的範圍.*要放寬請到材料頁改那份材料"):
+        control_plan(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.05, 0.4]}}}}))
+    with pytest.raises(PlanRefused, match="立面圖上標紅.*左牆「s」：可調範圍的材料 demo_unknown_wool 材料庫裡沒有"):
+        control_plan(_ranged({"y0@s": {"ranges": {"demo_unknown_wool": {"porous_m": [0.05, 0.1]}}}}))
 
 
 def test_zone_range_search_start_value_outside_the_range_is_refused_like_the_material_page() -> None:
@@ -126,6 +131,12 @@ def test_zone_range_search_start_value_outside_the_range_is_refused_like_the_mat
                         ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.0, 0.03))}})
     with pytest.raises(PlanRefused, match="「c」從48K 玻璃棉.*起跑：起跑值棉厚 0.05 公尺不在這一區的範圍 0.1～0.2 公尺內"):
         control_plan(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.1, 0.2]}}}}))
+    # 接續與終點重建問題只走 designs_for（不經命令列的 check_ranges）：範圍本身不合、固定面給範圍也要在這裡擋。
+    with pytest.raises(ValueError, match="面 x0 的 glass_wool_48k：.*要放寬請到材料頁改那份材料"):
+        run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.4))}})
+    with pytest.raises(ValueError, match="面 x0 是固定面（不換樣板），不能再給可調範圍"):
+        run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), fixed_surfaces={"x0": "glass_wool_24k_50mm"},
+                        ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.1))}})
 
 
 @pytest.mark.parametrize(("value", "extra", "message"), [
@@ -138,6 +149,7 @@ def test_zone_range_search_start_value_outside_the_range_is_refused_like_the_mat
     ("floor=glass_wool_48k:0.05,0.1", ("--fixed-surface", "floor=glass_wool_24k_50mm"), "固定面"),
     ("x0=glass_wool_24k:0.1,0.2", ("--max-depth", "x0=0.08", "--allowed", "x0=glass_wool_48k,glass_wool_24k,none"),
      "照這一面的可調範圍收窄後"),
+    ("x0=glass_wool_24k:0.1,0.2", ("--max-depth", "x0=0.08"), "面 x0 照這一面的可調範圍收窄後"),
     ("x0=glass_wool_48k:0.05,0.1:0.05,0.1", ("--max-depth", "x0=0.08"), "最淺排法 0.1 m"),
     ("x0=glass_wool_48k:0.05", (), "要寫成 下,上"),
     ("x0=glass_wool_48k:0.05,abc", (), "不是數字"),
@@ -195,6 +207,11 @@ def test_zone_range_search_swap_projects_into_the_range_and_the_cap_together() -
     assert _box(swapped[2]) == ((0.1, 0.0), (0.2, 0.03), (0.1, 0.2)) and swapped[2].max_total_depth_m == 0.12
     assert _x0(theta, swapped) == [0.1, 0.12 - 0.1]  # 棉在範圍下界 0.1，空腔切到「上限減棉」
     assert search.is_feasible(theta, swapped)
+    # 收窄後最淺 0.1 放不進 0.08（沒收窄的最淺 0.05 放得進）：換過去照收窄後的判拒收、句子是收窄後的最淺。
+    tight = _context(ranges, caps={"x0": 0.08})
+    start = run.designs_for((PRESET, PRESET, None, PRESET, PRESET, PRESET), SETTINGS, kept=_kept(), max_depths={"x0": 0.08})
+    with pytest.raises(ValueError, match="面 x0 的深度上限 0.08 m 放不下家族 glass_wool_48k 最淺排法 0.1 m"):
+        rounds.swap(start, search.baseline_theta(start), "x0", WOOL, tight)
 
 
 def test_zone_range_search_candidates_only_step_to_the_cut_thicknesses() -> None:
@@ -342,6 +359,8 @@ def test_zone_range_search_ranges_enter_identity_in_a_fixed_order() -> None:
     assert run.gradient_id(**base, ranges={}) == plain  # type: ignore[arg-type]
     named = run.gradient_id(**base, ranges=first)  # type: ignore[arg-type]
     assert named != plain and run.gradient_id(**base, ranges=second) == named  # type: ignore[arg-type]
+    raw = {"xL": {WOOL24: first["xL"][WOOL24]}, "x0": {"glass_wool_96k": first["x0"]["glass_wool_96k"], WOOL: first["x0"][WOOL]}}
+    assert list(raw) == ["xL", "x0"] and run.gradient_id(**base, ranges=raw) == named  # type: ignore[arg-type]
     other = faces.parse_ranges(["xL=glass_wool_24k:0.1,0.2", "x0=glass_wool_48k:0.05,0.1:0.0,0.06", "x0=glass_wool_96k:0.05,0.05"])
     assert run.gradient_id(**base, ranges=other) != named  # type: ignore[arg-type]
     project = _project().model_copy(update={"ranges": first})
@@ -349,6 +368,16 @@ def test_zone_range_search_ranges_enter_identity_in_a_fixed_order() -> None:
     assert "ranges" not in _project().model_dump_json()
     with pytest.raises(ValueError, match="同一面"):
         faces.parse_ranges(["x0=glass_wool_48k:0.05,0.1", "x0=glass_wool_48k:0.05,0.2"])
+    one = ZoneRange(porous_m=(0.05, 0.1))
+    with pytest.raises(ValueError, match="同時給牆名與面片代號：x0"):
+        faces.checked_ranges({"x0": {WOOL: one}, "x0@a": {WOOL: one}})
+    with pytest.raises(ValueError, match="面 x0 的可調範圍是空的"):
+        faces.checked_ranges({"x0": {}})
+    with pytest.raises(ValueError, match="只給可最佳化材料（家族代號），收到 \\['none'\\]"):
+        faces.checked_ranges({"x0": {"none": one}})
+    with pytest.raises(ValueError, match="可調範圍的面 x0@q 不在搜尋面片清單"):
+        faces.expanded_ranges({"x0@q": {WOOL: one}}, ["x0@a", "x0@b"])
+    assert faces.expanded_ranges({"x0": {WOOL: one}}, ["floor", "x0@a", "x0@b"]) == {"x0@a": {WOOL: one}, "x0@b": {WOOL: one}}
 
 
 def test_zone_range_search_ledger_headers_bind_the_ranges(tmp_path: Path) -> None:
@@ -377,6 +406,8 @@ def test_zone_range_search_ledger_headers_bind_the_ranges(tmp_path: Path) -> Non
     template = run.template_header_for(headers[0], SETTINGS, _kept(), base_ledger_sha256="e" * 64)
     assert template.ranges == mine and "ranges" not in run.template_header_for(
         headers[2], SETTINGS, _kept(), base_ledger_sha256="e" * 64).model_dump()
+    with pytest.raises(ValueError, match="可調範圍的面要在標頭的面裡"):
+        ledger.MaterialGradientHeader.model_validate({**headers[0].model_dump(), "ranges": {"x0@a": mine["x0"]}})
     with pytest.raises(ValueError, match="可調範圍的面"):
         template.model_copy(update={"fixed_surfaces": {"x0": "glass_wool_24k_50mm"}}).model_validate(
             {**template.model_dump(), "fixed_surfaces": {"x0": "glass_wool_24k_50mm"}})
@@ -451,3 +482,31 @@ def test_zone_range_search_plan_without_ranges_has_no_ranges_anywhere() -> None:
         control_scheme(), SETTINGS, run.presets_table(), plan.presets, mount=plan.request.mount, fixed=dict(plan.fixed_surfaces),
         caps=dict(plan.max_depths), allowed=dict(plan.allowed), capabilities=load_capabilities(config_path("capabilities.toml")),
         directivity=load_directivity_defaults(config_path("directivity_defaults.toml")), ties=plan.ties))
+
+
+# ---- 深度：分區頁標紅與命令列開跑同一把 ----
+
+@pytest.mark.parametrize("listed", [True, False], ids=["allowed-list", "no-list"])
+def test_zone_range_search_zone_page_red_and_engine_refuse_the_same_depth_case(listed: bool) -> None:
+    """抓兩邊判法分家：左牆 s 的 48K 收窄到棉 0.1～0.2、空腔 0.05 起，最淺 0.1＋0.05；上限 0.15 照搜尋那一把的浮點放不下、
+    0.16 放得下。分區頁標紅（點名哪一種材料）與命令列開跑核可選目標（``check_depth_targets``，點名面與材料）在同一個邊上
+    一起紅、一起不紅；有准用清單與沒有清單（可選的是全部家族）都一樣。"""
+    from tests.engine.test_zone_range import _limits, _red
+
+    given = ZoneRange(porous_m=(0.1, 0.2), cavity_m=(0.05, 0.2))
+    zone: Record = {"ranges": {WOOL: given.model_dump(mode="json")}, **({"allowed": [WOOL, "none"]} if listed else {})}
+    allowed = {"y0": (WOOL, "none")} if listed else {}
+    for cap, red in ((0.15, True), (0.16, False)):
+        page = _red(_limits(_ranged({"y0@s": {**zone, "max_depth_m": cap}})), "y0", "s")
+        try:
+            faces.check_depth_targets([("y0", None)], SETTINGS, fixed_surfaces={}, max_depths={"y0": cap},
+                                      allowed=allowed, fixed_materials={}, ranges={"y0": {WOOL: given}})
+        except ValueError as error:
+            engine: str | None = str(error)
+        else:
+            engine = None
+        assert bool(page) is red and (engine is not None) is red, (cap, page, engine)
+        if red:
+            ranged = [line for line in page if line["code"] == "range_depth"]
+            assert len(ranged) == 1 and "48K 玻璃棉" in str(ranged[0]["text"]) and "收窄" in str(ranged[0]["text"])
+            assert engine is not None and engine.startswith("面 y0 照這一面的可調範圍收窄後：") and WOOL in engine

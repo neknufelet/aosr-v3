@@ -692,7 +692,8 @@ def test_endpoint_accepts_the_tied_ledgers_at_the_result_gate(runs: tuple[Path, 
     given: list[Ties] = []
 
     def header(model: object, designs: object, settings: object, *, objective_constants: object,
-               ties: Ties = ()) -> ledger.MaterialGradientHeader:
+               ties: Ties = (), ranges: object = None) -> ledger.MaterialGradientHeader:
+        assert not ranges  # 這一場沒寫可調範圍（#1199）：終點照展開過的那一份傳，空的
         given.append(tuple(ties))
         return probe.header(tuple(ties))
 

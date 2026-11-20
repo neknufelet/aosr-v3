@@ -32,7 +32,7 @@
 沒有這種構造時這一段一個字都不產生，計畫與參數跟之前逐位相同。命令列照舊收 ``--allowed fixed:<代號>``，這裡只管網頁。
 
 每一區自己的可調範圍（#1199，設計設定的 ``ranges``，材料代號 → 棉厚與空腔的下上）：對材料庫核（只准收窄、棉厚是產品厚度、
-收窄後放得下）跟立面圖標紅同一把（``zone_limits.zone_range_problems``，紅的就不開；:func:`_ranges` 在准用清單旁邊再守一次），
+收窄後放得下）跟立面圖標紅同一把（``zone_limits.zone_range_problems``，紅的就不開；命令列開跑照同一條再核一次），
 起跑那一族有範圍時起跑值（樣板的初值）要在範圍裡，不在就拒收（``depth_fit.start_problem``，同材料頁「初值不在範圍內」）。
 計畫記 ``ranges``（面片代號 → 家族 → 範圍），開跑參數每一族多一個 ``--range``（只加在 :func:`start_arguments`：
 範圍只收窄、家族代號不變，建替身那一份不帶、不用重建替身）。沒有範圍時這一段一個字都不產生，計畫與參數跟之前逐位相同。
@@ -55,7 +55,7 @@ from aosr.config.material_gradient import (
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
-from aosr.gradient.depth_fit import START_ADVICE, ZoneRange, narrowed_family, range_problem, start_problem
+from aosr.gradient.depth_fit import START_ADVICE, ZoneRange, narrowed_family, start_problem
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
@@ -211,24 +211,13 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
     return found
 
 
-def _ranges(design: DesignSettings | None, settings: MaterialGradientSettings,
-            names: Mapping[str, str]) -> dict[tuple[str, str], dict[str, ZoneRange]]:
-    """每一區自己的可調範圍對這一場的可最佳化材料核（准用清單對材料庫核的同一處；判法 ``depth_fit.range_problem``）。
-    立面圖那一把（``zone_limits.zone_range_problems``）先擋過，這裡是同一條規則的最後一道，句子點名哪一區哪一種。"""
-    found: dict[tuple[str, str], dict[str, ZoneRange]] = {}
-    families = {family.id for family in settings.family}
-    for wall, zones in (design.zones if design is not None else {}).items():
-        for zone, item in zones.items():
-            if item.ranges is None:
-                continue
-            for code, given in item.ranges.items():
-                if code not in families:
-                    raise PlanRefused(f"{zone_words(wall, zone, names)}的可調範圍有不是可最佳化材料的代號 {code}")
-                problem = range_problem(settings.family_by_id(code), given)
-                if problem is not None:
-                    raise PlanRefused(f"{zone_words(wall, zone, names)}的 {code} 可調範圍：{problem}")
-            found[(wall, zone)] = dict(sorted(item.ranges.items()))
-    return found
+def _ranges(design: DesignSettings | None) -> dict[tuple[str, str], dict[str, ZoneRange]]:
+    """每一區自己的可調範圍（區 → 材料代號 → 範圍）。對材料庫核（只准收窄、棉厚是產品厚度、收窄後放得下）在前面
+    立面圖標紅那一把（``saved_refusals`` → ``zone_limits.zone_range_problems``，判法 ``depth_fit.range_problem``）已經擋過、
+    紅的就不開；命令列開跑再照同一條核一次（``fixed_surfaces.check_ranges``）。"""
+    return {(wall, zone): dict(sorted(item.ranges.items()))
+            for wall, zones in (design.zones if design is not None else {}).items()
+            for zone, item in zones.items() if item.ranges is not None}
 
 
 def _refuse_start_outside(pairs: Sequence[tuple[str, str]], presets: Sequence[str | None],
@@ -296,7 +285,7 @@ def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], 
         if mode != "search" or surface not in depths:
             continue
         item = design.zones.get(wall, {}).get(zone) if design is not None else None
-        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, None if item is None else item.ranges)
+        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, None)
         if not fits:
             continue
         source = sources.get(surface, "request")
@@ -450,7 +439,7 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
-    ranges = _ranges(design, settings, names)
+    ranges = _ranges(design)
     depths, sources = _depths(request, modes, design)
     lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}

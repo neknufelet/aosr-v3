@@ -264,19 +264,15 @@ def expanded_ranges(value: Mapping[str, Mapping[str, ZoneRange]] | None,
 
 
 def check_ranges(ranges: Mapping[str, Mapping[str, ZoneRange]], surfaces: Sequence[tuple[str, str | None]],
-                 settings: MaterialGradientSettings, *, fixed_surfaces: Mapping[str, str],
-                 allowed: Mapping[str, Sequence[str]]) -> None:
-    """開跑前把每一區的可調範圍對這一場的家族核一次，都點名是哪一面哪一族拒收：固定面不准給；家族要在這一場的家族裡；
+                 settings: MaterialGradientSettings, *, allowed: Mapping[str, Sequence[str]]) -> None:
+    """開跑前把每一區的可調範圍對這一場的家族核一次，都點名是哪一面哪一族拒收（固定面給範圍在起跑設計收窄那一步（:func:`designs_with_ranges`）先擋）：家族要在這一場的家族裡；
     那一面有准用清單時要在清單裡；範圍本身照 :func:`~aosr.gradient.depth_fit.range_problem`（只准收窄、棉厚是產品厚度、
     空腔在範圍內、收窄後放得進材料自己的總深）。收窄後放不放得進個案上限由 :func:`check_depth_targets` 判。"""
     names = [name for name, _ in surfaces]
     expanded = expanded_ranges(ranges, names)
-    frozen = expanded_fixed_surfaces(fixed_surfaces, names) if fixed_surfaces else {}
     lists = expanded_allowed_targets(allowed, names)
     families = {family.id for family in settings.family}
     for name, given_by_family in expanded.items():
-        if name in frozen:
-            raise ValueError(f"面 {name} 是固定面（不換樣板），不能再給可調範圍")
         for family_id, given in given_by_family.items():
             if family_id not in families:
                 raise ValueError(f"面 {name} 的可調範圍有不認識的家族 {family_id}；這一場的家族是 {sorted(families)}")

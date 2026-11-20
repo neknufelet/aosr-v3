@@ -176,7 +176,7 @@ def _parser() -> argparse.ArgumentParser:
                        help="成對的兩片（面片代號），可重複，例如 y0@a=yL@a：這兩片的厚度與空腔每一步都相同、換樣板一起換；"
                             "兩片的家族、起跑樣板、上下界、深度上限、裝法、准用清單要完全相同，不同就拒收；不給就是不綁")
     start.add_argument("--range", action="append", default=[], metavar="面=家族:棉下,棉上[:空腔下,空腔上]",
-                       help="這一面這一族自己的可調範圍（公尺），可重複，例如 x0@a=glass_wool_48k:0.05,0.1:0,0.03：只准收窄、"
+                       help="這一面這一族自己的可調範圍（公尺），可重複，例如 x0@a=glass_wool_48k:0.05,0.1:0,0.08：只准收窄、"
                             "棉厚下上要是產品厚度；搜尋（起跑、換樣板、終點）在那一面用那一族時只在範圍裡調；不給照家族的範圍")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
@@ -426,7 +426,7 @@ def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[Surface
         raise ValueError("--presets 不能直接寫固定材料（fixed:…）：起點要是家族樣板或 none，固定材料從 --allowed 進來")
     check_allowed_against_start(allowed, surfaces, settings, fixed_surfaces=fixed, max_depths=caps)
     if ranges:
-        check_ranges(ranges, surfaces, settings, fixed_surfaces=fixed, allowed=allowed)
+        check_ranges(ranges, surfaces, settings, allowed=allowed)
     expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
     check_depth_targets(surfaces, settings, fixed_surfaces=fixed, max_depths=caps, allowed=allowed,
                         fixed_materials=_listed_fixed_materials(expanded, table), ranges=ranges)

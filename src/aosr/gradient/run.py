@@ -911,7 +911,7 @@ def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientS
     closing = template_rows[-1]
     value, screening, components = closing.scores()
     designs = final_designs(final.surfaces, settings, kept, mount=header.mount, fixed_surfaces=header.fixed_surfaces,
-                            max_depths=header.max_depths, table=table, ranges=header.ranges)
+                            max_depths=header.max_depths, table=table)
     if design_names(designs) != final.variable_names:
         raise ValueError("換樣板帳本最後配置的變數名跟重建的設計不同")
     check_ties_hold(closing.theta(), designs, header.ties, f"{TEMPLATES_FILE} 最後交出去的那一點（重播出結果）")
