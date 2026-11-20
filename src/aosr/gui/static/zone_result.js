@@ -60,7 +60,25 @@ function zoneImprovementTable(improvement) {
     lines.map((row) => [row.category, row.baseline, row.design, row.change]));
   lines.forEach((row, index) => { element.rows[index + 1].cells[3].dataset.verdict = row.verdict; });
   if (improvement.total) element.rows[lines.length].classList.add("zone-total");
+  // 設計或原牆基準有「鋼板直接貼在棉上」的構造（#1208 第 3 支）：伺服器給的那一格（improvement.reference_only）有才畫——
+  // 要標的那幾列類別名後面一個小標籤。字與哪幾列都是伺服器定的，這裡不判斷、不寫字。
+  const reference = improvement.reference_only;
+  if (reference) {
+    lines.forEach((row, index) => {
+      if (!reference.rows.includes(row.category)) return;
+      const tag = node("span", reference.tag); tag.className = "ref-tag";
+      element.rows[index + 1].cells[0].append(" ", tag);
+    });
+  }
   return element;
+}
+// 表上方那一塊說明（一句＋點開才有的原因），樣子同「各類結果」那一塊。
+function zoneImprovementNote(reference) {
+  const note = document.createElement("div");
+  note.className = "ref-note"; note.id = "zone-improvement-reference";
+  const say = node("span", reference.sentence); say.className = "ref-say";
+  note.append(say, folded(reference.why_label, node("p", reference.why)));
+  return note;
 }
 // 「這一間挑材料」只給存著的方案（第三階段頁只收存檔裡的方案）；讀不到清單就不給，不猜（#1134）。
 async function showMaterialsLink() {
@@ -84,7 +102,8 @@ function drawZoneResult(runId, data) {
   $("zone-baseline-link").hidden = !data.baseline_result_url;
   if (data.baseline_result_url) $("zone-baseline-link").querySelector("a").href = data.baseline_result_url;
   const improvement = data.improvement;
-  $("zone-improvement").replaceChildren(...(improvement ? [zoneImprovementTable(improvement)] : []));
+  $("zone-improvement").replaceChildren(...(improvement ? [
+    ...(improvement.reference_only ? [zoneImprovementNote(improvement.reference_only)] : []), zoneImprovementTable(improvement)] : []));
   $("zone-total-note").textContent = improvement ? improvement.total_note : "";
   $("zone-improvement-note").textContent = improvement ? improvement.note : "";
   clearTimeout(zonePollTimer);

@@ -909,18 +909,6 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _reference_walls(scheme: Scheme) -> list[str]:
-    """存的方案裡哪幾面有「鋼板直接貼在棉上」的構造（#1208）：看那一面每一區的材料（整面一區、矩形分區都是區；貼在
-    原牆上的與原牆本身由判斷函式自己看）。只寫牆名、一面一次，面序同開頭那一句（room_words.treated_words）。
-    六面只給固定阻抗的方案沒有構造，一面都不算。"""
-    zones = scheme.scene.surface_zones_by_wall
-    if zones is None:
-        return []
-    names = wall_words(scheme)
-    return [names[wall] for wall in (*FOUR_WALLS, "ceiling", "floor")
-            if any(reference_only.reference_only(zone.material) for zone in zones[wall])]
-
-
 def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
     """只接受先經 load_result 驗證的結果；呼叫端負責拒收錯誤。"""
     from aosr.physics.report_research_text import komatsu_research_notice
@@ -980,5 +968,6 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         reflections=_reflections(result),
         listening_area=_listening_area(result, quality_targets_path, registry),
         reference_only=reference_only.result_block(
-            _reference_walls(result.scheme), {row.category: row.state for row in categories}, registry, result.scheme.purpose),
+            reference_only.scheme_walls(result.scheme), {row.category: row.state for row in categories}, registry,
+            result.scheme.purpose),
     )

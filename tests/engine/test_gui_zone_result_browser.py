@@ -94,6 +94,10 @@ def test_zone_page_lists_zones_then_computes_the_baseline_and_shows_the_improvem
         verdicts = page.locator("#zone-improvement td[data-verdict]").evaluate_all(
             "cells => cells.map(cell => cell.dataset.verdict)")
         assert verdicts == [row.verdict for row in (*expected.rows, expected.total)]
+        # 這一份兩邊都沒有「鋼板直接貼在棉上」的構造（#1208 第 3 支）：改善表沒有那一塊說明、沒有小標籤。
+        assert expected.reference_only is None and page.locator("#zone-result .ref-note, #zone-result .ref-tag").count() == 0
+        if os.environ.get("AOSR_SHOTS"):
+            page.locator("#zone-result").screenshot(path=str(Path(os.environ["AOSR_SHOTS"]) / "vpr-stage3-plain-improvement.png"))
         expect(page.locator("#zone-baseline-link a")).to_have_attribute("href", f"/results/{run.stem}")
         with httpx.Client(base_url=base, trust_env=False, timeout=120) as client:
             assert client.get(f"/api/results/{DESIGN_RUN}/zones").json()["improvement"] == expected.model_dump(mode="json")

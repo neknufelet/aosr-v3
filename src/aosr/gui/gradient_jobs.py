@@ -67,6 +67,7 @@ from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.physics.fem_reduced_store import manifest_path
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
+from aosr.gui import reference_only
 from aosr.gui.zone_result import baseline_warning
 from aosr.gui.zone_limits import DepthTargets
 from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries, dump_user_library, load_user_library
@@ -582,7 +583,10 @@ class GradientJobs:
         # 代號 → 材料庫顯示名（內建構造預設、家族、使用者材料），只給預覽表看；計畫本身照舊只存代號（#1119）。
         targets = library_depth_targets(settings, entries)
         labels = dict(targets.labels)
-        return {"plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan), "labels": labels,
+        # 方案裡有「鋼板直接貼在棉上」的構造才多這一格（#1208 第 3 支；沒命中時回覆逐位不變）。
+        reference = reference_only.scheme_stage_three_block(scheme)
+        return {**({} if reference is None else {"reference_only": reference}),
+                "plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan), "labels": labels,
                 # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
                 "wall_names": wall_words(scheme),
                 "fixed_depths": fixed_depths(plan, scheme, design, targets),

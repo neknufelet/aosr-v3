@@ -56,6 +56,13 @@ function el(tag, attributes = {}, ...children) {
   return node;
 }
 
+// 方案裡有「鋼板直接貼在棉上」的構造（#1208 第 3 支）：伺服器給的那一格（reference_only）有才畫——一句＋點開才有的原因。
+// 字都是伺服器定的，這裡不判斷、不寫字。
+function referenceNote(tag, id, reference) {
+  return el(tag, {class: "ref-note", id}, el("span", {class: "ref-say", text: reference.sentence}),
+    el("details", {}, el("summary", {text: reference.why_label}), el("p", {text: reference.why})));
+}
+
 function say(id, text, bad = false) {
   const node = byId(id);
   node.textContent = text || "";
@@ -331,6 +338,8 @@ function showPreview(data, sent) {
     `往下走步數上限 ${plan.max_steps} 步；裝法「${plan.request.mount === "on_wall" ? "貼在原牆上" : "貼在硬底上"}」；` +
     `用${plan.request.device === "gpu" ? "顯卡" : "處理器"}算。`;
   // 結果頁會把哪些區當成沒動（#1128）：開跑前先講，要指原方案就在跑之前指。
+  if (byId("plan-reference")) byId("plan-reference").remove();
+  if (data.reference_only) byId("plan-summary").before(referenceNote("div", "plan-reference", data.reference_only));
   byId("plan-baseline-warning").hidden = !data.baseline_warning;
   byId("plan-baseline-warning").textContent = data.baseline_warning || "";
   const body = el("tbody");
@@ -613,8 +622,10 @@ function showJob(job, detail, detailError) {
   if (detailError) lines.push(`進度細節讀不到：${detailError}`);
   byId("job-progress").replaceChildren(...lines.map((text) => el("li", {text})));
   const notes = detail ? detail.notes : [];
-  byId("job-notes").hidden = !notes.length;
-  byId("job-notes").querySelector("ul").replaceChildren(...notes.map((text) => el("li", {text})));
+  const reference = detail ? detail.reference_only : null;
+  byId("job-notes").hidden = !notes.length && !reference;
+  byId("job-notes").querySelector("ul").replaceChildren(
+    ...(reference ? [referenceNote("li", "job-reference", reference)] : []), ...notes.map((text) => el("li", {text})));
   showJobDepths(job.plan, job.wall_names);
   const lastStep = job.steps[job.steps.length - 1];
   const failures = [...(detail ? detail.failures : [])];
