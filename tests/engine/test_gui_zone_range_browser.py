@@ -12,10 +12,11 @@ from __future__ import annotations
 import copy
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.reporting.scheme import Scheme
@@ -546,3 +547,93 @@ def test_narrowing_only_the_wool_thickness_writes_no_cavity(tmp_path: Path, brow
         assert watched.page_errors == [] and watched.console_errors == []
     zones, _ = _stored(tmp_path)
     assert zones["yL"]["z3"] == {**SEARCH, "ranges": {WOOL: {"porous_m": [0.05, 0.1]}}}
+
+
+_HOLD = "**/api/zone-limits"
+
+
+def _late_verdict_redraws(page: Page, box: str, enter: Callable[[], None]) -> None:
+    """一次限制判決卡在路上的時候 ``enter``（游標進 ``box`` 那一格、做完該做的），再放行、等判決落地；回來前核過整頁真的重畫了
+    （那一格換成新畫的一個）而且焦點還在那一格。"""
+    held: list[Route] = []
+    page.route(_HOLD, lambda route: held.append(route))
+    with page.expect_request(_HOLD):
+        page.evaluate("() => { refreshZoneLimits(); }")       # 例如前一步套用之後那一次，回覆還在路上
+    enter()
+    old = page.locator(box).element_handle()
+    with page.expect_response(_HOLD):
+        held[0].continue_()
+    page.unroute(_HOLD)
+    page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+    assert not old.evaluate("node => node.isConnected")
+    expect(page.locator(box)).to_be_focused()
+
+
+def _tab_into(page: Page, box: str) -> None:
+    """Tab 進那一格（瀏覽器把整格反白）：先把焦點放到它前面一個停得住的東西，再按 Tab。"""
+    page.locator(box).evaluate("""node => { const stops = [...document.querySelectorAll('#zone-panel input, #zone-panel select, #zone-panel button')]
+        .filter(stop => !stop.disabled && stop.offsetParent !== null); stops[stops.indexOf(node) - 1].focus(); }""")
+    page.keyboard.press("Tab")
+    expect(page.locator(box)).to_be_focused()
+
+
+def _depth_design() -> Doc:
+    design = _design()
+    cast(dict[str, dict[str, Doc]], design["zones"])["yL"]["z2"] = {**SEARCH, "max_depth_m": 0.125}
+    return design
+
+
+def test_a_verdict_landing_after_entering_the_deepest_box_never_glues_the_typed_number_onto_the_old_one(tmp_path: Path, browser: Browser) -> None:
+    """#1231 修補 1：「最深」原本 12.5，Tab 進去（整格反白）、還沒打字，限制判決晚到重畫整頁、焦點放回新畫的那一格：
+    那一格要跟進去的時候一樣整格反白，打 20 是換掉舊值。反白沒了就黏成 12.520——合法的數字，伺服器不擋，會套用成錯的深度上限。"""
+    _prepare(tmp_path, _depth_design())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z2")
+        expect(page.locator("#zone-panel-depth")).to_have_value("12.5")
+        _late_verdict_redraws(page, "#zone-panel-depth", lambda: _tab_into(page, "#zone-panel-depth"))
+        page.keyboard.type("20")
+        expect(page.locator("#zone-panel-depth")).to_have_value("20")
+        _apply(page)
+        assert page.evaluate("zoneDesign.zones.yL.z2.max_depth_m") == 0.2
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_verdict_landing_after_entering_a_cavity_box_never_glues_the_typed_number_onto_the_old_one(tmp_path: Path, browser: Browser) -> None:
+    """#1231 修補 1：範圍格同一件事。48K 空腔「到」原本 25，Tab 進去還沒打字，判決晚到重畫：打 15 是換掉舊值，不是黏成 2515。"""
+    _prepare(tmp_path, _design())
+    box = _cell_id(WOOL, "cavity", "high")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z2")
+        expect(page.locator(box)).to_have_value("25")
+        _late_verdict_redraws(page, box, lambda: _tab_into(page, box))
+        page.keyboard.type("15")
+        expect(page.locator(box)).to_have_value("15")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_verdict_landing_mid_typing_keeps_the_half_typed_number_and_the_next_key_goes_after_it(tmp_path: Path, browser: Browser) -> None:
+    """對照（#1231 修補 1）：打到一半判決晚到重畫，打的字留著、接著打的字接在後面，不准整格反白把它換掉。
+    「最深」清空後打 2、重畫、再打 0 → 20；空腔「到」同樣打 1、重畫、再打 5 → 15。"""
+    _prepare(tmp_path, _depth_design())
+    cavity = _cell_id(WOOL, "cavity", "high")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z2")
+        for box, first, second, whole in (("#zone-panel-depth", "2", "0", "20"), (cavity, "1", "5", "15")):
+            def half(box: str = box, first: str = first) -> None:
+                _tab_into(page, box)
+                page.keyboard.type(first)          # 整格反白著打：換掉舊值，格子裡只剩這一個字
+                expect(page.locator(box)).to_have_value(first)
+            _late_verdict_redraws(page, box, half)
+            expect(page.locator(box)).to_have_value(first)
+            page.keyboard.type(second)
+            expect(page.locator(box)).to_have_value(whole)
+        assert watched.page_errors == [] and watched.console_errors == []

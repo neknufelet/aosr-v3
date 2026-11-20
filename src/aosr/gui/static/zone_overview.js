@@ -1012,6 +1012,7 @@ function rangeRow(entry, items, ticks, sync) {
     }
     const input = el("input", "zv-rbox"); input.type = "number"; input.min = "0"; input.step = "any"; input.id = id; input.setAttribute("aria-label", words);
     input.value = value;
+    if (typed[part][end] != null) input.dataset.typed = "1";  // 畫的是打到一半的字：重畫後放回焦點時不整格反白（renderZoneOverview）
     input.oninput = () => edit(part, end, input.validity.badInput ? "?" : input.value);
     return input;
   };
@@ -1031,6 +1032,7 @@ function deepestRow(items, walls, sync) {
   const name = el("label", "zv-extra-name", items.length > 1 ? "這幾區最深" : "這一區最深"); name.htmlFor = "zone-panel-depth";
   const input = el("input", "zv-depth"); input.type = "number"; input.min = "0"; input.step = "any"; input.id = "zone-panel-depth";
   input.value = draft.depthText ?? shownDepth(items);
+  if (draft.depthText !== null) input.dataset.typed = "1";  // 畫的是打到一半的字：重畫後放回焦點時不整格反白（renderZoneOverview）
   input.oninput = () => { draft.depthText = input.value; draft.depthBad = input.validity.badInput; draft.rangeRefused = ""; draftTouched = true; sync(); };
   const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
   row.append(name, input, el("span", "zv-unit", "cm"),
@@ -1686,7 +1688,12 @@ function renderZoneOverview() {
   const focused = document.activeElement?.id ?? "";
   const typing = focused === "zone-panel-depth" || focused.startsWith("zone-panel-range-") ? focused : null;
   page.replaceChildren(...parts);
-  if (typing) $(typing)?.focus();
+  const again = typing ? $(typing) : null;
+  again?.focus();
+  // 放回去的是新畫的一格，原本的反白帶不過來（數字格讀不到選取範圍）。那一格畫的是原值（草稿裡沒有它的字，沒有 typed 記號）
+  // ＝使用者進了格子還沒打字：整格反白，跟 Tab 進去時一樣，接著打的字換掉舊值——不然黏在舊值後面，12.5 打 20 變成 12.520（#1231）。
+  // 畫的是打到一半的字就不動：游標在字尾，接著打的字接在後面。
+  if (again instanceof HTMLInputElement && !again.dataset.typed) again.select();
   window.scrollTo(0, scrolled);
 }
 function overviewParts() {

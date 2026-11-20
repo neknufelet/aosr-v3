@@ -520,3 +520,33 @@ def test_typing_an_offered_cut_into_the_elevation_really_pairs_the_two_zones(tmp
     offered, after = _type_the_cut(tmp_path / "plain", browser, _CEILING, "q", [("height", "1.00"), ("bottom", "0.50")])
     assert offered == [_Q_TO_MIRROR, _P_TO_MIRROR]
     assert [{pair["first"], pair["second"]} for pair in cast(list[Doc], after["pairs"])] == [{"ceiling@p", "ceiling@q"}], after
+
+
+def test_a_verdict_landing_after_entering_a_box_never_glues_the_typed_number_onto_the_old_one(tmp_path: Path, browser: Browser) -> None:
+    """#1231：連切兩刀。第一刀之後的限制判決晚到，剛好落在「游標已經進了下一格（Tab 進去，整格反白）、字還沒打」那一下：
+    判決重畫立面圖、照 id 把焦點放回新畫的那一格，那一格要跟進去的時候一樣整格反白，打的數字才是換掉舊值。
+    反白沒了的話，打的 0.50 會黏在舊值 0.45 前面變成一個很大的數字，天花鏡像回方案座標就是負的，伺服器回「座標超出牆面範圍」。"""
+    _prepare(tmp_path, {"ceiling": _CEILING}, _design({"ceiling": ["p", "q"]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        page.locator("#elevation-wall-ceiling").click()
+        page.locator("#elevation [data-zone-id=q] rect").click()
+        page.wait_for_function("zoneLimitsReceived === zoneLimitsGeneration")
+        held: list[Route] = []
+        page.route(_HOLD, lambda route: held.append(route))
+        page.locator("#elevation-height").fill("1.00")
+        with page.expect_request(_HOLD):          # 第一刀切成之後那一次判決：卡在路上
+            _cut_by(page, "press:Enter")
+        page.locator("#elevation-left").focus()
+        page.keyboard.press("Tab")                # Tab 進「離下緣」：瀏覽器把整格反白
+        expect(page.locator("#elevation-bottom")).to_be_focused()
+        with page.expect_response(_HOLD):
+            held[0].continue_()
+        page.unroute(_HOLD)
+        page.wait_for_function("zoneLimitsReceived === zoneLimitsGeneration")   # 判決落地了（格子沒有打到一半的字，照畫）
+        page.keyboard.type("0.50")
+        _cut_by(page, "press:Enter")
+        zone = cast(Doc, page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.ceiling.find(zone => zone.id === 'q'))"))
+        assert (zone["u_m"], zone["v_m"]) == ([1, 2], [2.5, 3.5]), zone
+        assert watched.page_errors == [] and watched.console_errors == []
