@@ -150,6 +150,16 @@ function allowedText(plan, surface, mode) {
     `${materialLabel(target.slice("fixed:".length))}（固定，整塊選或不選）` : materialLabel(target)).join("、");
 }
 
+// 這一區自己的可調範圍（#1199，預覽回的 ranges：面片 → 材料代號 → 這一跑實際用的範圍，公尺；沒有一區寫範圍時沒有這一格）：
+// 准用材料那一格底下一種一行「48K 玻璃棉…：棉 5～10 cm、空腔 0～15 cm」（材料沒有空腔只寫棉；寫法同分區頁清單卡）。
+function centimetres(metres) { return shownNumber(Math.round(metres * 1000) / 10); }
+function spanWords(pair) { return pair[0] === pair[1] ? centimetres(pair[0]) : `${centimetres(pair[0])}～${centimetres(pair[1])}`; }
+function rangeLines(surface) {
+  const found = ((lastPreview && lastPreview.ranges) || {})[surface] || {};
+  return Object.entries(found).map(([code, used]) => el("p", {class: "note range-line", "data-family": code,
+    text: `${materialLabel(code)}：${[`棉 ${spanWords(used.porous_m)} cm`, ...(used.cavity_m ? [`空腔 ${spanWords(used.cavity_m)} cm`] : [])].join("、")}`}));
+}
+
 // 代號照預覽回的材料庫顯示名印（#1119）；對不到就照印代號。代號本身看「交給搜尋命令列的參數」。
 function materialLabel(id) {
   return (lastPreview && lastPreview.labels && lastPreview.labels[id]) || id;
@@ -349,7 +359,7 @@ function showPreview(data, sent) {
     body.append(el("tr", {"data-surface": surface}, el("td", {text: WALLS[wall] || wall}), el("td", {text: zoneText(zone)}),
       el("td", {text: MODE_WORDS[mode] || mode, class: mode === "search" ? "mode-search" : null}),
       el("td", {text: plan.presets[index] ? materialLabel(plan.presets[index]) : (mode === "search" ? "" : "方案裡這一區的材料，不調")}),
-      el("td", {text: allowedText(plan, surface, mode)}),
+      el("td", {}, allowedText(plan, surface, mode), ...rangeLines(surface)),
       depthCell(plan, surface, mode)));
   });
   const head = el("tr", {}, ...["牆", "區", "做法", "起跑樣板", "准用材料", "深度上限"].map((text) => el("th", {text})));

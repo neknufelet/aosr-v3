@@ -233,6 +233,15 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-unit{font-size:12.5px;color:var(--soft)}
 #zone-page .zv-deepest small{flex-basis:100%;font-size:12.5px;color:var(--soft);line-height:1.45}
 #zone-page .zv-panel-problem{margin:7px 0 0;padding:0;font-size:13px;font-weight:600}
+/* #1199 範圍第 2 支：材料框上方那一行、勾著的可調材料底下的範圍格子 */
+#zone-page .zv-range-note{margin:6px 0 0;font-size:12.5px;color:var(--soft)}
+#zone-page .zv-range-note a.zv-link{margin-left:8px;font-size:12.5px;color:var(--fixed);text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
+#zone-page .zv-mrange{display:flex;flex-wrap:wrap;gap:3px 14px;margin:0 0 4px 24px;font-size:13px;color:var(--ink)}
+#zone-page .zv-rpart{display:inline-flex;align-items:baseline;flex-wrap:wrap;gap:4px}
+#zone-page .zv-rname{font-weight:600}
+#zone-page select.zv-rpick,#zone-page input.zv-rbox{font:inherit;font-size:13px;color:var(--ink);border:1.3px solid var(--ink);border-radius:5px;padding:0 3px;background:#fff}
+#zone-page input.zv-rbox{width:54px;text-align:center}
+#zone-page .zv-rpart small.zv-mixed{flex-basis:100%;font-size:12.5px;color:var(--soft)}
 #zone-page label.zv-check .zv-mwords small{font-size:12.5px}
 #zone-page .zv-list h2{flex-wrap:wrap}
 #zone-page .zv-list h2 .zv-muted{flex-basis:100%;margin:0 0 0 31px}

@@ -95,15 +95,28 @@ function referenceRefusals() {
   const alive = new Set([...groups].flatMap(([list, names]) => list.split("\n").map(id => `${id}\n${names.sort().join("\n")}`)));
   return (zoneLimits?.reference_only ?? []).filter(line => alive.has(`${line.id}\n${line.zones.map(({wall, zone}) => `${wall}/${zone}`).sort().join("\n")}`));
 }
+// 一區要寫進去的那一份，照存檔規矩收好（每一條寫做法的路都過這一支；kept 是這一區原本的清單）：
+// - 最後一道（#1208）：新清單不准多出本來沒有的「鋼板直接貼在棉上」的構造；拿掉之後空了就只放不貼。
+// - 這一區自己的可調範圍（#1199，ranges：材料代號 → {porous_m, cavity_m}）只給由程式最佳化的區、只給清單裡有的那幾種：
+//   做法換掉、清單拿掉那一種，那一份跟著拿掉；一種都不剩就整格不寫（伺服器不收空的，存檔也回到沒寫範圍的樣子）。
+function settledSetting(setting, kept) {
+  if (setting.allowed) {
+    const allowed = keepReferenceOut(setting.allowed, kept);
+    if (allowed.length !== setting.allowed.length) setting = {...setting, allowed: allowed.length ? allowed : [ZONE_NONE]};
+  }
+  if (setting.ranges) {
+    const ranges = Object.entries(setting.ranges).filter(([id]) => setting.mode === "search" && (!setting.allowed || setting.allowed.includes(id)));
+    if (ranges.length !== Object.keys(setting.ranges).length) {
+      setting = {...setting};
+      if (ranges.length) setting.ranges = Object.fromEntries(ranges); else delete setting.ranges;
+    }
+  }
+  return setting;
+}
 function setZoneSetting(wall, key, setting) {
   const design = designForEdit();
   design.zones[wall] ??= {};
-  // 最後一道（#1208）：不管從哪一條路來，這一區的新清單不准多出本來沒有的「鋼板直接貼在棉上」的構造；拿掉之後空了就只放不貼。
-  if (setting.allowed) {
-    const allowed = keepReferenceOut(setting.allowed, design.zones[wall][key]?.allowed);
-    if (allowed.length !== setting.allowed.length) setting = {...setting, allowed: allowed.length ? allowed : [ZONE_NONE]};
-  }
-  design.zones[wall][key] = setting;
+  design.zones[wall][key] = settledSetting(setting, design.zones[wall][key]?.allowed);
 }
 function zoneNote(text, kind) {
   zoneNoteText = text; zoneNoteKind = kind;

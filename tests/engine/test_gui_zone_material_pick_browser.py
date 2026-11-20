@@ -184,8 +184,9 @@ def test_the_panel_marks_what_each_picked_zone_is_now_and_cancel_changes_nothing
 
 
 def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_text(tmp_path: Path, browser: Browser) -> None:
-    """選「由程式最佳化」：材料框裡可調的一種一列，各寫調什麼、從多少到多少——只是字，整個框沒有一格能打字；
-    框底一句說範圍是材料頁設的，旁邊一條去材料頁的連結。「也可以不貼」與「這一區最深」在材料框外面。"""
+    """選「由程式最佳化」：材料框裡可調的一種一列，各寫調什麼、從多少到多少；框裡除了勾選格，只有每一種底下改這一區範圍的那幾格
+    （#1199 範圍第 2 支，怎麼改見 ``test_gui_zone_range_browser``）；框上一句說範圍從材料頁帶來、只改這一區，旁邊一條去材料頁的連結。
+    「也可以不貼」與「這一區最深」在材料框外面。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -199,10 +200,13 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         expect(rows.nth(0).locator(".zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
         expect(rows.nth(1).locator(".zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         expect(rows.nth(2).locator(".zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
-        # 範圍這一支只顯示：框裡除了勾選格沒有別的輸入格，也不寫「可以改」。
-        assert page.locator("#zone-panel-form input:not([type=checkbox]), #zone-panel-form select, #zone-panel-form textarea").count() == 0
-        assert "可以改" not in page.locator("#zone-panel-form").inner_text()
-        expect(page.locator("#zone-panel-range-note")).to_contain_text("範圍是材料頁設的")
+        # 框裡除了勾選格，能打字的只有範圍那幾格（每一種的棉厚、48K 的空腔）。
+        cells = page.locator("#zone-panel-form input:not([type=checkbox]), #zone-panel-form select, #zone-panel-form textarea")
+        assert cells.evaluate_all("cells => cells.map(cell => cell.id)") == [
+            f"zone-panel-range-{choice}-{part}-{end}" for choice, parts in (
+                ("glass_wool_48k", ("porous", "cavity")), ("glass_wool_24k", ("porous",)), ("glass_wool_96k", ("porous",)))
+            for part in parts for end in ("low", "high")]
+        expect(page.locator("#zone-panel-range-note")).to_contain_text("範圍從材料頁帶來，可以改（只改這一區，不改材料頁）")
         expect(page.locator("#zone-panel-materials")).to_have_attribute("href", "/materials")
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
         # 材料框外：也可以不貼、這一區最深。
