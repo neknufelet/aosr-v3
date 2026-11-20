@@ -13,7 +13,9 @@
 
    清單卡（zoneSearchList）：由程式最佳化的每一區各存一份清單，清單一樣的區一組、一組一張卡（groups）。排第一的那一組
    （common）：規則本身是由程式最佳化就是規則那一組，不然是最多區用的那一組（平手取最先出現的）；其餘照最先出現的順序。
-   清單跟第一組不同的區另外數出來（different）。 */
+   清單跟第一組不同的區另外數出來（different）。
+   每一區自己的可調範圍（#1199，設計檔的 ranges）只拆清單卡、不進做法鍵：清單一樣、範圍不同的區分成兩張卡（範圍跟「這一區最深」
+   一樣不算另一種做法，「其他牆面」怎麼推、哪幾區算另外指定都照舊）。規則那一組被範圍拆開時，排第一的是其中區數最多的那一張。 */
 
 // 物件的鍵排過序再寫成字串（值是 null 的鍵當沒有）：兩份材料內容一樣，字串就一樣。
 function zoneCanonicalJson(value) {
@@ -58,10 +60,19 @@ function inferOtherWalls(zones, keptKey = null) {
 }
 // 清單卡：{zones: 全部由程式最佳化的區, common: 排第一的那一組或 null, different: 清單跟它不同的區, groups: 每一組（common 在最前）}。
 // ruleKey：規則的做法鍵；規則是由程式最佳化、而且真的有區用那一份時，列的就是它。
+// 一區自己的可調範圍寫成一個鍵（#1199）：沒寫是空字串；材料代號與欄位排過序，數字一樣字串就一樣。
+function zoneRangesKey(zone) { return zone.ranges ? zoneCanonicalJson(zone.ranges) : ""; }
 function zoneSearchList(zones, ruleKey) {
   const search = zones.filter(zone => zone.mode === "search");
-  const groups = zoneMethodGroups(search);
-  const common = groups.find(group => group.key === ruleKey) ?? inferOtherWalls(search).rule;
+  // 清單一樣的那一組再照各區自己的範圍拆開（照最先出現的順序；沒寫範圍的區照舊一組）。
+  const groups = zoneMethodGroups(search).flatMap(group => {
+    const parts = new Map();
+    for (const zone of group.zones) parts.set(zoneRangesKey(zone), [...(parts.get(zoneRangesKey(zone)) ?? []), zone]);
+    return [...parts.values()].map(members => ({...group, zones: members}));
+  });
+  // 區數最多的那一張（平手取最先出現的，同 inferOtherWalls）。
+  const biggest = list => list.reduce((best, group) => !best || group.zones.length > best.zones.length ? group : best, null);
+  const common = biggest(groups.filter(group => group.key === ruleKey)) ?? biggest(groups);
   return {zones: search, common, different: common ? search.filter(zone => !common.zones.includes(zone)) : [],
-          groups: common ? [common, ...groups.filter(group => group.key !== common.key)] : []};
+          groups: common ? [common, ...groups.filter(group => group !== common)] : []};
 }
