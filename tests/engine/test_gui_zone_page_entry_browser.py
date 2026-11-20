@@ -8,6 +8,7 @@
 - 「打開來改」或「打開」之後，方案那一節的入口就在視窗裡，再一下進那一頁。
 - 帶著名字進來但那一份打不開（存著的檢查不過、清單裡沒有）：原因寫在「打開」旁邊，不開那一頁。
 - 結果頁「這一間挑材料」連到同一條路。
+- 帶著名字進來、輪到打開那一份時輸入頁正忙（開頁還沒完就改了表單，那一筆還在路上）：不開那一頁，也不把它開在範本上。
 """
 from __future__ import annotations
 
@@ -138,6 +139,44 @@ def test_a_link_to_a_scheme_that_cannot_open_says_why_and_stays_off_the_zone_pag
         assert _inside(page, "#open-note")
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
+
+
+def test_a_link_arriving_while_the_form_is_busy_does_not_open_the_zone_page(tmp_path: Path, browser: Browser) -> None:
+    """帶著 ?zones=<名> 開頁，清單還沒載完就勾了沙發，那一筆改動還沒回來：輪到打開那一份時「打開」被擋下
+    （上一個動作還沒做完）。這時不准開「這間房貼什麼」——表單上還是範本，開了就是開在範本上。那一筆回來之後也不開。"""
+    _prepare(tmp_path, SAMPLE)
+    held: dict[str, Route] = {}
+    errors: list[str] = []
+    with _serve(tmp_path) as base:
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        try:
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            # 結果清單那一支卡住：開頁停在「清單還沒載完」；表單改動那一支也卡住：頁面一直鎖著。
+            page.route("**/api/results", lambda route: held.__setitem__("results", route))
+            page.route("**/api/input-edit", lambda route: held.__setitem__("edit", route))
+            page.goto(f"{base}/?zones={SAMPLE}", wait_until="commit")
+            page.wait_for_function("document.querySelectorAll('#scheme-list option').length > 0")
+            template = page.locator("#save-id").input_value()
+            assert template and template not in (SAMPLE, WHOLE)
+            page.locator("#furniture-sofa").click()
+            page.wait_for_function("inputBusy")
+            while not {"results", "edit"} <= held.keys():
+                page.wait_for_timeout(20)
+            held["results"].continue_()
+            page.wait_for_function("document.body.dataset.inputReady === 'true'")
+            # 開頁做完的同一步就輪到那條連結：被擋下的那一句寫在「打開」旁邊，那一頁沒開。
+            assert page.evaluate("inputBusy") is True
+            expect(page.locator("#open-note")).to_have_text(
+                f"上一個動作還沒做完，沒有打開「{SAMPLE}」；等它做完再按一次「打開」")
+            expect(page.locator("#zone-page")).to_be_hidden()
+            held["edit"].continue_()
+            page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+            expect(page.locator("#zone-page")).to_be_hidden()
+            expect(page.locator("main")).to_be_visible()
+            expect(page.locator("#save-id")).to_have_value(template)
+            assert errors == []
+        finally:
+            page.close()
 
 
 def test_result_page_link_goes_to_the_zone_page_of_that_scheme(tmp_path: Path, browser: Browser,

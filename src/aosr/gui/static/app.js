@@ -558,7 +558,6 @@ async function openZonesFromLink() {
   const list = $("scheme-list");
   if ([...list.options].some(option => option.value === name)) {
     list.value = name;
-    $("archive-scheme").disabled = false;
     if (await openScheme()) { window.openZoneOverview(); return; }
   } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「開舊方案」另選一份`, "notice");
   $("scheme-section").scrollIntoView();
