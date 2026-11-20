@@ -323,7 +323,10 @@ def _require_low_frequency_axis(scheme: Scheme) -> None:
 
 
 def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> EndpointRecord:
-    """首次計算終點；低頻結果 v4/v5 也算六類、寫 endpoint v5。已有任何終點檔都拒絕覆寫。"""
+    """首次計算終點；低頻結果 v4/v5 也算六類、寫 endpoint v5。已有任何終點檔都拒絕覆寫。
+
+    每一區的可調範圍（#1199，``project.ranges``）：起跑設計與終點用的設計，那一面那一族有範圍就照範圍收窄（合法厚度只到切過的
+    那幾個、空腔界是範圍），θ 不在收窄後的盒界裡就不可行、拒收；重建帳本標頭時給展開到面片的那一份（同開跑）。"""
     checked_device_workers(device, workers)
     if (folder / ENDPOINT_FILE).exists():
         raise ValueError("已有 endpoint.json；要重算先把舊檔移走")
@@ -353,17 +356,14 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
                                capabilities_path=Path(project.capabilities_path), engine_commit=project.engine_commit)
     table = project_presets(project)
     initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table,
-                          ranges=project.ranges)
-    zone_ranges = expanded_ranges(project.ranges, tuple(design.surface_id for design in initial))
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table, ranges=project.ranges)
     result = checked_result(folder, given, header_for(model, initial, settings,
         objective_constants=context.constants if current else search_objective_constants(project, scheme, model),
-        ties=project.ties, ranges=zone_ranges), settings, kept,
+        ties=project.ties, ranges=expanded_ranges(project.ranges, tuple(design.surface_id for design in initial))), settings, kept,
         table=table, allowed=project_allowed(project, tuple(design.surface_id for design in initial)))
-    # 終點用的設計：最後那一族有範圍的面照範圍收窄（合法厚度只到切過的那幾個、空腔界是範圍），θ 不可行就拒收（#1199）。
     designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
                             mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths,
-                            table=table, ranges=zone_ranges)
+                            table=table, ranges=project.ranges)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     objective = search_objective_settings(project.purpose)
     clock = time.perf_counter()

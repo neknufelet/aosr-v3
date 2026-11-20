@@ -351,23 +351,27 @@ def test_zone_range_search_ranged_run_passes_the_launch_gate_without_a_rebuild(t
 
 # ---- 身分：沒寫範圍逐位不變；寫了範圍進身分 ----
 
+def _identity(ranges: dict[str, dict[str, ZoneRange]] | None = None) -> str:
+    """資料夾名（``run.gradient_id``）：其他輸入全是固定的假值，只換可調範圍。"""
+    return run.gradient_id(scheme_sha256="a" * 64, surrogate_manifest_sha256="b" * 64, presets=(PRESET,) * 6, purpose="music",
+                           settings_fingerprint="c" * 64, physics_identity="phys", objective_settings_fingerprint="d" * 64,
+                           ranges=ranges)
+
+
 def test_zone_range_search_ranges_enter_identity_in_a_fixed_order() -> None:
     """抓範圍沒進資料夾名、或存法跟著輸入順序走：命令列寫法讀回逐位相同；換順序同一個名；換一份範圍另一個名。"""
     first = faces.parse_ranges(["xL=glass_wool_24k:0.1,0.2", "x0=glass_wool_48k:0.05,0.1:0.0,0.08", "x0=glass_wool_96k:0.05,0.05"])
     second = faces.parse_ranges(["x0=glass_wool_96k:0.05,0.05", "x0=glass_wool_48k:0.05,0.1:0.0,0.08", "xL=glass_wool_24k:0.1,0.2"])
     assert first == second and list(first) == ["x0", "xL"] and list(first["x0"]) == [WOOL, "glass_wool_96k"]
     assert faces.parse_ranges([faces.range_argument("x0", WOOL, first["x0"][WOOL])]) == {"x0": {WOOL: first["x0"][WOOL]}}
-    base: Record = {"scheme_sha256": "a" * 64, "surrogate_manifest_sha256": "b" * 64, "presets": (PRESET,) * 6,
-                    "purpose": "music", "settings_fingerprint": "c" * 64, "physics_identity": "phys",
-                    "objective_settings_fingerprint": "d" * 64}
-    plain = run.gradient_id(**base)  # type: ignore[arg-type]
-    assert run.gradient_id(**base, ranges={}) == plain  # type: ignore[arg-type]
-    named = run.gradient_id(**base, ranges=first)  # type: ignore[arg-type]
-    assert named != plain and run.gradient_id(**base, ranges=second) == named  # type: ignore[arg-type]
+    plain = _identity()
+    assert _identity({}) == plain
+    named = _identity(first)
+    assert named != plain and _identity(second) == named
     raw = {"xL": {WOOL24: first["xL"][WOOL24]}, "x0": {"glass_wool_96k": first["x0"]["glass_wool_96k"], WOOL: first["x0"][WOOL]}}
-    assert list(raw) == ["xL", "x0"] and run.gradient_id(**base, ranges=raw) == named  # type: ignore[arg-type]
+    assert list(raw) == ["xL", "x0"] and _identity(raw) == named
     other = faces.parse_ranges(["xL=glass_wool_24k:0.1,0.2", "x0=glass_wool_48k:0.05,0.1:0.0,0.06", "x0=glass_wool_96k:0.05,0.05"])
-    assert run.gradient_id(**base, ranges=other) != named  # type: ignore[arg-type]
+    assert _identity(other) != named
     project = _project().model_copy(update={"ranges": first})
     assert run.GradientProject.model_validate_json(project.model_dump_json()) == project
     assert "ranges" not in _project().model_dump_json()

@@ -278,24 +278,20 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.gradient import run
-    from aosr.gradient.fixed_surfaces import (
-        fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths, parse_ranges,
-    )
+    from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths, parse_ranges
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.gradient.surrogate_fixed_checks import configuration_document
     from aosr.gradient.ties import parse_ties
 
-    fixed, caps, allowed, ties = parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth), parse_allowed_targets(args.allowed), parse_ties(args.tie)
-    ranges = parse_ranges(args.range)
+    fixed, caps, allowed, ties, ranges = parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth), parse_allowed_targets(args.allowed), parse_ties(args.tie), parse_ranges(args.range)
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     scheme = _start_scheme(args.root, scheme_path)
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     designs, expanded = start_designs(scheme, settings, materials.presets, args.presets, mount=args.mount, fixed=fixed,
-                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties,
-                                      ranges=ranges)
+                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties, ranges=ranges)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
