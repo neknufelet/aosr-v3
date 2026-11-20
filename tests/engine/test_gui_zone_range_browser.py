@@ -159,6 +159,10 @@ def test_zones_with_different_ranges_show_empty_cells_and_keep_their_own_unless_
             expect(page.locator(f"#zone-panel-range-{WOOL}-{part}-mixed")).to_have_text("各區不同；不動它，各區照目前的")
             for end in ("low", "high"):
                 expect(page.locator(_cell(page, WOOL, part, end))).to_have_value("")
+        # 選著區時右欄的清單卡收起來：清單一樣、範圍不同的兩張也寫出各自的範圍，不是只差區名。
+        expect(page.locator(".zv-list[data-zones='yL/z1'] .zv-ranges")).to_have_text("這一區自己的範圍：48K 玻璃棉（棉 5～10 cm、空腔 0～15 cm）")
+        expect(page.locator(".zv-list[data-zones='yL/z2'] .zv-ranges")).to_have_text("這一區自己的範圍：48K 玻璃棉（棉 5～20 cm、空腔 0～10 cm）")
+        expect(page.locator(".zv-list[data-zones*='yL/z3'] .zv-ranges")).to_have_count(0)
         _shot(page, "2-zones-differ")
         page.locator("#zone-panel-depth").fill("28")
         _apply(page)
@@ -378,3 +382,25 @@ def test_control_a_range_already_stored_survives_edits_elsewhere_byte_for_byte(t
         _close_and_save(page)
         assert watched.page_errors == [] and watched.console_errors == []
     assert path.read_bytes() == _CONTROL_KEPT
+
+
+def test_when_the_range_check_cannot_reach_the_server_nothing_is_applied_and_the_page_is_not_left_locked(tmp_path: Path, browser: Browser) -> None:
+    """套用前的限制檢查連不上（請求被中斷）：提示列說範圍沒檢查成、這次沒有套用，設計一個字都沒改；頁面沒被鎖著（還能再按套用），
+    連線回來再按一次就套用進去。"""
+    _prepare(tmp_path, _design())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = page.evaluate("() => JSON.stringify(zoneDesign)")
+        _click_zone(page, "yL/z1")
+        page.locator(_cell(page, WOOL, "cavity", "high")).fill("15")
+        page.route("**/api/zone-limits", lambda route: route.abort())
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-page-note")).to_contain_text("範圍沒檢查成，這次沒有套用")
+        assert page.evaluate("() => [document.querySelector('main').inert, document.getElementById('zone-page').inert]") == [False, False]
+        assert page.evaluate("() => JSON.stringify(zoneDesign)") == before
+        page.unroute("**/api/zone-limits")
+        _apply(page)
+        zones = cast(dict[str, dict[str, Doc]], page.evaluate("() => zoneDesign.zones"))
+        assert zones["yL"]["z1"]["ranges"] == {WOOL: {"porous_m": [0.05, 0.2], "cavity_m": [0.0, 0.15]}}
+        assert watched.page_errors == []

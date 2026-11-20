@@ -1383,6 +1383,13 @@ function listCard(group, index, compact) {
       button("zv-link", "改清單", `${prefix}-edit`, () => select([])));
     if (!alone) card.append(listWho(group, prefix, alone));
     card.append(names);
+    // 收起來的卡也寫這一組自己定的範圍（#1199）：不然清單一樣、範圍不同的幾張卡看起來只差區名。
+    const ranged = allowed.filter(id => group.zones[0].ranges?.[id] && libraryEntry(id)?.kind === "optimizable");
+    if (ranged.length) {
+      const line = el("div", "zv-who zv-ranges", `${size > 1 ? "這幾區" : "這一區"}自己的範圍：${ranged.map(id =>
+        `${vprWords(choiceName(id))}（${rangeWords(ownRange(group.zones[0], libraryEntry(id)))}）`).join("、")}`);
+      line.id = `${prefix}-ranges`; card.append(line);
+    }
     return card;
   }
   card.append(listWho(group, prefix, alone));
