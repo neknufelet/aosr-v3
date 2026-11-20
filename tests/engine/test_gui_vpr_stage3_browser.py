@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
 import httpx
 from playwright.sync_api import Browser, Page, expect
@@ -29,6 +31,23 @@ LINE = "前牆" + STAGE_THREE
 ROWS = ["音色平衡", "聆聽區穩定性", "低頻頻響", "反射與回聲", "殘響", "聲道匹配", "總分"]
 MARKED = ["音色平衡", "聆聽區穩定性", "低頻頻響", "殘響", "聲道匹配", "總分"]
 _NOTE_STYLE = "node => { const s = getComputedStyle(node); return [s.borderLeftStyle, s.listStyleType]; }"
+
+
+def _ready(page: Page) -> None:
+    """頁面開好之後把瀏覽器的時鐘停住：這一頁每 5 秒自己重讀一次、把這一跑的清單整個重畫，考卷連讀幾步的中間被它換掉
+    就讀到舊的那一個。停住之後只有考卷自己快轉（``_tick``）才會重讀。"""
+    expect(page.locator("#surrogate-state")).to_contain_text("已經有替身")
+    page.clock.pause_at(datetime.now() + timedelta(seconds=1))
+
+
+def _preview(page: Page) -> None:
+    """按「預覽」，等這一次的回覆回來、而且畫上去了才回來。開頁時就畫過一次預覽，所以預覽那一塊裡的字不能當成等到了：
+    按下去那一刻訊息先換成「正在預覽…」，回覆畫上去的同一步才換成「預覽好了」。"""
+    plan = f"/api/gradient/schemes/{NAME}/plan"
+    with page.expect_response(lambda response: urlsplit(response.url).path == plan and response.request.method == "POST") as landed:
+        page.locator("#preview").click()
+    landed.value.finished()
+    expect(page.locator("#form-message")).to_have_text("預覽好了，看下面。")
 
 
 def _opens(page: Page, note: str) -> None:
@@ -50,10 +69,11 @@ def test_the_stage_three_page_says_it_above_the_preview_and_in_the_notes_of_the_
     launcher = FakeLauncher()
     with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
         page = watched.page
-        expect(page.locator("#surrogate-state")).to_contain_text("已經有替身")
-        page.locator("#preview").click()
+        _ready(page)
+        _preview(page)
         expect(page.locator("#plan-reference .ref-say")).to_have_text(LINE)
-        page.locator("#preview").click()
+        _preview(page)
+        expect(page.locator("#plan-reference .ref-say")).to_have_text(LINE)
         expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限")
         order = page.evaluate("() => [...document.getElementById('plan-block').children].map(node => node.id || node.tagName)")
         assert cast(list[str], order)[:3] == ["H2", "plan-reference", "plan-summary"] and page.locator("#plan-reference").count() == 1
@@ -82,8 +102,8 @@ def test_the_stage_three_page_without_such_a_construction_has_neither(browser: B
     launcher = FakeLauncher()
     with _serve(data_dir, launcher) as url, _open(browser, f"{url}/gradient?scheme={NAME}", fake_clock=True) as watched:
         page = watched.page
-        expect(page.locator("#surrogate-state")).to_contain_text("已經有替身")
-        page.locator("#preview").click()
+        _ready(page)
+        _preview(page)
         expect(page.locator("#plan-summary")).to_contain_text("往下走步數上限")
         order = page.evaluate("() => [...document.getElementById('plan-block').children].map(node => node.id || node.tagName)")
         assert cast(list[str], order)[:2] == ["H2", "plan-summary"]
