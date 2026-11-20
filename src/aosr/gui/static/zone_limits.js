@@ -14,7 +14,7 @@ const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間�
 
 // 正在打字＝焦點在立面圖那一區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同；
 // 數字格打了「.」這種還不成數字的字時，值讀起來是空的，瀏覽器另外標 badInput，也算）。
-// 按 Tab 換到別格、按 Enter 確定之後那一格是乾淨的：照畫，畫完把焦點放回同一格。
+// 按 Tab 換到別格、按 Enter 確定之後那一格是乾淨的：照畫，畫完把焦點放回同一格，並把那一格整格反白（showZoneLimits）。
 function typingInElevation() {
   const active = document.activeElement;
   return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest("#elevation-panel")
@@ -26,7 +26,13 @@ function showZoneLimits(generation) {
   const active = document.activeElement;
   const focused = active?.id && active.closest?.("#elevation-panel") ? active.id : null;
   if (typeof renderElevation === "function") renderElevation();
-  if (focused) document.getElementById(focused)?.focus();
+  if (!focused) return;
+  const again = document.getElementById(focused);
+  again?.focus();
+  // 放回去的是新畫的一格，原本那一格的反白與游標位置帶不過來（數字格讀不到選取範圍）：打字的格子一律整格反白，
+  // 跟 Tab 進去時一樣，接著打的字是換掉舊值。不反白的話游標落在最前面，打的字會黏在舊值前面：
+  // 「0.45」打 0.50 變成 0500.45，送出去就是一個超出牆面的框（#1231）。
+  if (again instanceof HTMLInputElement && again.type !== "checkbox") again.select();
 }
 
 function refreshZoneLimits() {
