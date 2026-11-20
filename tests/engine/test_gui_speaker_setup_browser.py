@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from aosr.reporting.scheme import Scheme
 from tests.engine import _speaker_setup_cases as cases
@@ -43,6 +43,37 @@ def test_input_notice_save_as_and_clearing(browser: Browser, tmp_path: Path) -> 
         _assert_quiet(watched)
 
 
+# 「儲存」那一支 PUT 的回覆照常從網路回來（考卷的 expect_response 看得到），頁面的程式晚 hold 毫秒才拿到：
+# 這段時間整頁還鎖著。只咬 loaded-* 那一支，另存的 copy-* 不拖。
+_PAGE_GETS_THE_SAVE_REPLY_LATE = """hold => { const real = window.fetch; window.fetch = async (path, options) => {
+  const response = await real(path, options);
+  if (options?.method === "PUT" && String(path).includes("/api/schemes/loaded-"))
+    await new Promise(done => setTimeout(done, hold));
+  return response; }; }"""
+
+
+def test_save_as_name_is_typed_only_after_the_save_unlocks_the_page(browser: Browser, tmp_path: Path) -> None:
+    """儲存的回覆到了、整頁還鎖著的那一下，考卷不准就去填「新名字」（#1231）。
+
+    鎖著的格子收不下字：playwright 的 fill 不看整頁鎖，字靜靜沒進去；接著的點擊會等解鎖才按，
+    頁面看到空名字就不送另存（旁邊寫「這一格還空著」），考卷等另存的回覆等到逾時。
+    本機解鎖只比填字早幾毫秒；雲端偶發紅推測是反過來（未驗）。這裡把頁面拿到回覆的時間硬拖晚，每次都踩到那一下。
+    """
+    (tmp_path / "schemes").mkdir()
+    mount, representative, title = MOUNTS[0]
+    document = cases.document(mount)
+    cast(dict[str, object], document["speaker_setup"])["representative"] = representative
+    scheme = Scheme.model_validate(document | {"scheme_id": f"loaded-{mount}"})
+    (tmp_path / "schemes" / f"loaded-{mount}.json").write_text(scheme.model_dump_json())
+    (tmp_path / "schemes" / "plain.json").write_text(
+        Scheme.model_validate(cases.document() | {"scheme_id": "plain", "speaker_setup": None}).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        page.evaluate(_PAGE_GETS_THE_SAVE_REPLY_LATE, 500)
+        _check_notice_save_and_clear(page, tmp_path, mount, title, scheme)
+        _assert_quiet(watched)
+
+
 def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: str, scheme: Scheme) -> None:
     name = scheme.scheme_id
     path = tmp_path / "schemes" / f"{name}.json"
@@ -62,7 +93,11 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     assert persisted.speakers["left"].x == 2.01
     assert persisted.speaker_setup == scheme.speaker_setup
     copy = f"copy-{mount}"
+    # 儲存的回覆一到考卷就往下走，頁面那邊整頁可能還鎖著（本機只早幾毫秒解鎖）：鎖著的格子收不下字，
+    # fill 也不報錯。等解鎖才填，填完核字真的在格子裡，沒進去就紅在這一行、不是等另存的回覆逾時（#1231）。
+    page.wait_for_function("!document.querySelector('main').inert")
     page.locator("#save-as-id").fill(copy)
+    expect(page.locator("#save-as-id")).to_have_value(copy)
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{copy}")
                               and response.request.method == "PUT") as copied:
         page.locator("#save-as").click()
