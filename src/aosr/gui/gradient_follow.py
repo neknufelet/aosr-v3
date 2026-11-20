@@ -45,6 +45,7 @@ from aosr.gui.gradient_plan import PlanRefused
 from aosr.gui.jobs import JobManager
 from aosr.gui.material_editor import USER_LIBRARY_NAME, user_library_path
 from aosr.gui.zone_design import DesignSettings, read_design, write_design
+from aosr.gui import reference_only
 from aosr.gui.zone_result import RIGID_BASELINE_WARNING as RIGID_BASELINE_WARNING, baseline_warning
 from aosr.materials.library import LibraryEntry, builtin_entries, full_library, load_user_library
 from aosr.reporting.scheme import Scheme
@@ -247,6 +248,20 @@ class GradientFollow:
         note = names_note(problem or "裡沒有這幾筆", list(todays.values()), [name for name in missing if name not in todays])
         return template_tries(folder, {**todays, **labels}), note
 
+    def _scheme_path(self, job_id: str, adoption: Adoption | None) -> Path:
+        """這一跑要看的方案：開跑時存的快照；存成方案之後照存成的那一份（搜尋整塊換上固定材料的區只在那一份裡）。"""
+        return (self._job_dir(job_id) / "scheme.json" if adoption is None
+                else self.gradient.data_dir / "schemes" / f"{adoption.scheme_id}.json")
+
+    def _reference_only(self, job_id: str, adoption: Adoption | None) -> dict[str, object] | None:
+        """這一跑的方案裡有「鋼板直接貼在棉上」的構造時「注意」多的那一條（#1208 第 3 支）：每次現算、不寫進步驟紀錄，
+        舊的跑也看得到。方案檔讀不到就沒有這一條。"""
+        try:
+            scheme = Scheme.model_validate_json(self._scheme_path(job_id, adoption).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return reference_only.scheme_stage_three_block(scheme)
+
     def _baseline_warning(self, job_id: str, view: dict[str, object], adoption: Adoption | None) -> str | None:
         """結果頁會把哪些區當成沒動（:func:`aosr.gui.zone_result.baseline_warning`）：照這一跑開跑時的方案與設計設定；
         存成方案之後照那份方案現在的設計設定（使用者事後替它指了原方案，這一句就不再出）。
@@ -259,9 +274,7 @@ class GradientFollow:
         rigid = isinstance(request, dict) and request.get("mount") == MOUNT_RIGID
         folder = self._job_dir(job_id)
         design: DesignSettings | None = None
-        # 存成方案之後照存成的那一份（搜尋整塊換上固定材料的區只在那一份裡）與它現在的設計設定。
-        scheme_path = (folder / "scheme.json" if adoption is None
-                       else self.gradient.data_dir / "schemes" / f"{adoption.scheme_id}.json")
+        scheme_path = self._scheme_path(job_id, adoption)
         try:
             if adoption is not None:
                 design = read_design(self.gradient.data_dir, adoption.scheme_id)
@@ -288,7 +301,9 @@ class GradientFollow:
         if steps and isinstance(steps[-1], dict) and steps[-1].get("state") == "finished" and steps[-1].get("exit_code") != 0:
             failures = _lines(logs[-1], lambda line: FAILURE_MARK in line)
         tries, names = ([], None) if folder is None else self._tries(job_id, Path(str(folder)))
-        return {"job_id": job_id, "state": view["state"], "max_steps": view["max_steps"],
+        reference = self._reference_only(job_id, adoption)
+        return {**({} if reference is None else {"reference_only": reference}),
+                "job_id": job_id, "state": view["state"], "max_steps": view["max_steps"],
                 "descent_steps": None if folder is None else descent_steps(Path(str(folder))),
                 "notes": list(dict.fromkeys(notes)), "failures": failures,
                 "baseline_warning": self._baseline_warning(job_id, view, adoption),

@@ -24,11 +24,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityTargets
+from aosr.gui import reference_only
 from aosr.gui.labels import LABELS, WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.gui.material_names import original_wall_words, plain_words, registered_entry, zone_material_words
@@ -58,6 +59,7 @@ PLACE_NOTE = "位置從房間座標原點那個角量起：長向＝x、寬向�
 STATUS_WORDS = {CandidateStatus.RANKABLE: "可排名", CandidateStatus.ELIMINATED: "被淘汰",
                 CandidateStatus.NOT_EVALUATED: "有類別還沒評", CandidateStatus.NOT_COMPARABLE: "跟另一份算到的類別或評分身分不同、不能同表",
                 CandidateStatus.ILLEGAL: "不合法"}
+TOTAL_LABEL = "總分"
 IMPROVEMENT_NOTE = "代價越低越好；兩邊用同一份評分設定、同一版物理、同一套切法，差只來自每一區換了什麼。"
 
 
@@ -377,6 +379,9 @@ class Improvement(BaseModel):
     total: ImprovementRow | None
     total_note: str
     note: str = IMPROVEMENT_NOTE
+    # 設計或原牆基準的方案裡有「鋼板直接貼在棉上」的構造才有（#1208 第 3 支，字與要標的列都在
+    # reference_only.improvement_block）；沒有時這一格不輸出，回覆逐位不變。
+    reference_only: dict[str, object] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _cost_text(value: float | None) -> str:
@@ -399,19 +404,21 @@ def _change(baseline: float | None, design: float | None) -> tuple[str, Verdict]
 
 
 def _side(result: SchemeResult, registry: QualityTargets
-          ) -> tuple[dict[QualityCategory, float | None], float | None, CandidateStatus]:
-    """跟結果頁同一個取法：可排名就取排名表的逐類代價與總分，不然取評估裡算得出的那幾類、沒有總分。"""
+          ) -> tuple[dict[QualityCategory, float | None], float | None, CandidateStatus, frozenset[QualityCategory]]:
+    """跟結果頁同一個取法：可排名就取排名表的逐類代價與總分，不然取評估裡算得出的那幾類、沒有總分。
+    最後一格是算進這一邊總分的類別（排名列裡的那幾類，總分就是它們加權相加；沒有總分就是空的）。"""
     ranking = compare_results((result,), quality_targets=registry, run_date=result.run_date)
     name = result.scheme.scheme_id
     status = ranking.status_of(name)
     row = next((item for item in ranking.rankable if item.candidate_id == name), None)
     if row is not None:
-        return {line.identity.category: line.category_cost for line in row.categories}, row.total_cost, status
+        return ({line.identity.category: line.category_cost for line in row.categories}, row.total_cost, status,
+                frozenset(line.identity.category for line in row.categories))
     unranked = [item.evaluations for item in ranking.eliminated if item.candidate_id == name]
     unranked += [item.evaluations for item in ranking.not_evaluated if item.candidate_id == name]
     evaluations = unranked[0] if unranked else result.candidate.evaluations
     return ({item.category: item.category_cost.value if item.category_cost else None for item in evaluations},
-            None, status)
+            None, status, frozenset())
 
 
 def improvement(design: SchemeResult, baseline: SchemeResult, registry: QualityTargets) -> Improvement:
@@ -420,9 +427,11 @@ def improvement(design: SchemeResult, baseline: SchemeResult, registry: QualityT
     逐類跟各自結果頁的數字一樣（同一份評分設定各排一次）；總分另外把兩份放進同一張排名表，兩份都可排名才比。
     """
     joint = compare_results((design, baseline), quality_targets=registry, run_date=design.run_date)
-    design_costs, design_total, design_status = _side(design, registry)
-    baseline_costs, baseline_total, baseline_status = _side(baseline, registry)
+    design_costs, design_total, design_status, design_counted = _side(design, registry)
+    baseline_costs, baseline_total, baseline_status, baseline_counted = _side(baseline, registry)
     rows = []
+    costed: dict[str, bool] = {}
+    printed: dict[str, str] = {}
     for category in QualityCategory:
         if category not in design_costs and category not in baseline_costs:
             continue
@@ -430,15 +439,25 @@ def improvement(design: SchemeResult, baseline: SchemeResult, registry: QualityT
         change, verdict = _change(before, after)
         rows.append(ImprovementRow(category=LABELS.get(category.value, category.value), baseline=_cost_text(before),
                                    design=_cost_text(after), change=change, verdict=verdict))
+        # 這一列有沒有算出代價：任一邊有數字就算（那一邊的數字就是受影響的數字）。
+        costed[category.value] = before is not None or after is not None
+        printed[category.value] = rows[-1].category
+
+    def block(in_total: dict[str, str]) -> dict[str, object] | None:
+        # 改善是設計減原牆基準：任一邊的方案命中就標，牆名取兩邊的聯集（#1208 第 3 支）。
+        return reference_only.improvement_block(reference_only.scheme_walls(design.scheme, baseline.scheme), costed, in_total,
+                                                registry, design.scheme.purpose, printed)
+
     # 各自排一次就不可排名的，講各自的原因；各自可排名、放進同一張表才不行的，講同表的原因。
     statuses = {side: own if own is not CandidateStatus.RANKABLE else joint.status_of(result.scheme.scheme_id)
                 for side, own, result in (("設計", design_status, design), ("原牆基準", baseline_status, baseline))}
     if all(status is CandidateStatus.RANKABLE for status in statuses.values()) and None not in (design_total,
                                                                                                  baseline_total):
         change, verdict = _change(baseline_total, design_total)
-        total = ImprovementRow(category="總分", baseline=_cost_text(baseline_total), design=_cost_text(design_total),
+        total = ImprovementRow(category=TOTAL_LABEL, baseline=_cost_text(baseline_total), design=_cost_text(design_total),
                                change=change, verdict=verdict)
-        return Improvement(rows=tuple(rows), total=total, total_note="")
+        counted = {category.value: TOTAL_LABEL for category in design_counted | baseline_counted}
+        return Improvement(rows=tuple(rows), total=total, total_note="", reference_only=block(counted))
     note = "總分不比：" + "；".join(f"{side}{STATUS_WORDS[status]}" for side, status in statuses.items()
                                     if status is not CandidateStatus.RANKABLE)
-    return Improvement(rows=tuple(rows), total=None, total_note=note)
+    return Improvement(rows=tuple(rows), total=None, total_note=note, reference_only=block({}))

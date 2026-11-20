@@ -18,13 +18,13 @@ td[data-verdict="within_range"]{color:#1a7f37}
 #categories td:nth-child(5){min-width:10em}
 /* 「鋼板直接貼在棉上」的構造（#1208 第 2 支）：表上方那一塊說明同材料庫頁那一塊（左邊細灰線、「為什麼」點開才有原因），
    沒有藍色小方塊；被標的列「注意事項」最前面一個淡藍底小標籤（同材料庫頁藍底那一色），不折行。 */
-#categories .ref-note{margin:.3rem 0 .6rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;text-align:left}
-#categories .ref-note details{display:inline;margin:0}
-#categories .ref-note summary{display:inline;cursor:pointer;font-weight:400;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;padding:0;white-space:nowrap}
-#categories .ref-note summary::after{content:" ▸"}
-#categories .ref-note details[open] summary::after{content:" ▾"}
-#categories .ref-note details p{margin:.35rem 0 .1rem;color:#5b6a70;max-width:62em}
-#categories .ref-tag{display:inline-block;padding:0 .4em;margin-right:.2em;background:rgba(60,120,210,.16);border:1px solid #9db9e0;border-radius:4px;font-size:.9em;white-space:nowrap}
+#categories .ref-note,#zone-improvement .ref-note{margin:.3rem 0 .6rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;text-align:left}
+#categories .ref-note details,#zone-improvement .ref-note details{display:inline;margin:0}
+#categories .ref-note summary,#zone-improvement .ref-note summary{display:inline;cursor:pointer;font-weight:400;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;padding:0;white-space:nowrap}
+#categories .ref-note summary::after,#zone-improvement .ref-note summary::after{content:" ▸"}
+#categories .ref-note details[open] summary::after,#zone-improvement .ref-note details[open] summary::after{content:" ▾"}
+#categories .ref-note details p,#zone-improvement .ref-note details p{margin:.35rem 0 .1rem;color:#5b6a70;max-width:62em}
+#categories .ref-tag,#zone-improvement .ref-tag{display:inline-block;padding:0 .4em;margin-right:.2em;background:rgba(60,120,210,.16);border:1px solid #9db9e0;border-radius:4px;font-size:.9em;white-space:nowrap}
 /* 重算的說明：問題一條一行（伺服器給的訊息用換行分隔），連結跟在句子後面。 */
 #fingerprint-rerun-state{white-space:pre-line}
 #fingerprint-rerun-state a,#rerun-state a{margin-left:.4rem;white-space:nowrap}

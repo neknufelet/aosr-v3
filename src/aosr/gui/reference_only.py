@@ -14,6 +14,12 @@
 
 結果頁（第 2 支）：存的方案裡有這類構造時，「各類結果」表上方多一句、頻率範圍含界線以下的那幾列多一個小標籤
 （:func:`result_block`）。哪一類讀登記簿哪幾格寫在 :data:`RESULT_RANGES`，跟評分程式實際讀的那幾格對（每一格旁邊註明是哪一支讀的）。
+
+第三階段頁與「逐區表與改善多少」（第 3 支）：哪幾面命中一律看方案每一區的材料（:func:`scheme_walls`；第三階段的設計設定
+不存材料，固定、保留原牆、交給搜尋的區的材料都住在方案裡）。交給搜尋的區不分裝法都看：貼在原牆上時搜尋貼的層背後接它
+（src/aosr/gradient/surface_design.py::_backing），貼在硬底上時「不貼」那個候選保留的也是它
+（src/aosr/gradient/surface_design.py 的保留原牆設計 ``kept_material``，src/aosr/gradient/material_gradient.py::kept_impedance_rows 算它）。
+第三階段頁的句子在 :func:`stage_three_block`，改善表的在 :func:`improvement_block`。
 """
 from __future__ import annotations
 
@@ -22,10 +28,15 @@ from typing import Final, Literal
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, SettingEntry, load_quality_targets
+from aosr.gui.room_words import FOUR_WALLS
+from aosr.gui.wall_words import wall_words
 from aosr.materials.construction_models import Assembly, Layer, MeasuredImpedance, MountedOnWall, PorousLayer
 from aosr.materials.library import FixedEntry, LibraryEntry, MeasuredTable
+from aosr.reporting.scheme import Scheme
 
 SCORED_RANGE_KEY: Final = "stage_one_low_frequency.scored_range_hz"
+# 第三階段梯度目標的計分範圍（src/aosr/scoring/gradient_objective_settings.py::gradient_objective_settings_from_section 讀的那一格）。
+GRADIENT_RANGE_KEY: Final = "stage_three_gradient.scored_range_hz"
 _KIND: Final = "這類「鋼板直接貼在棉上」的構造"
 _WHY: Final = ("程式算這類構造用的是簡化算法（一維、鋼板當成整塊一起動）。跟 Fraunhofer 的實測比，算出來的共振偏高、頻寬偏窄。"
                "數字沒有改，照舊算")
@@ -201,3 +212,56 @@ def result_block(walls: Sequence[str], states: Mapping[str, str], registry: Qual
         "tag": f"含 {band} Hz 以下",
         "categories": marked_categories(states, registry, purpose, edge),
     }
+
+
+# ---- 第三階段頁與「改善多少」（第 3 支） ----
+
+def scheme_walls(*schemes: Scheme) -> list[str]:
+    """這幾份方案裡哪幾面有「鋼板直接貼在棉上」的構造：看那一面每一區的材料（整面一區、矩形分區都是區；貼在原牆上的
+    與原牆本身由 :func:`reference_only` 自己看）。只寫牆名、一面一次，面序同結果頁開頭那一句（room_words.treated_words）；
+    好幾份取聯集，牆名照第一份。六面只給固定阻抗的方案沒有構造，一面都不算。"""
+    hit = {wall for scheme in schemes for wall, zones in (scheme.scene.surface_zones_by_wall or {}).items()
+           if any(reference_only(zone.material) for zone in zones)}
+    names = wall_words(schemes[0])
+    return [names[wall] for wall in (*FOUR_WALLS, "ceiling", "floor") if wall in hit]
+
+
+def stage_three_block(walls: Sequence[str], registry: QualityTargets, purpose: str) -> dict[str, object] | None:
+    """第三階段頁（開跑前的預覽、每一跑的「注意」）那一格；一面都沒有就回 None，而且不讀界線、不讀範圍。
+    第三階段只算登記簿那一段（:data:`GRADIENT_RANGE_KEY`）：整段都在界線以下（上界不超過界線）就講這一跑的數字都只能參考，
+    超過界線就只講界線以下那一部分。"""
+    if not walls:
+        return None
+    entry = registry.stage_one(purpose).entry(GRADIENT_RANGE_KEY)
+    if not isinstance(entry, SettingEntry) or not isinstance(entry.value, tuple) or len(entry.value) != 2:
+        raise TypeError(f"{GRADIENT_RANGE_KEY} 不是一段頻率範圍")
+    low, high = (float(value) for value in entry.value)
+    edge = registry_band_hz(registry)
+    head = f"{'、'.join(walls)}有 VPR（鋼板共振吸音）{_KIND}："
+    tail = (f"第三階段只算 {low:g}～{high:g} Hz，全在 {edge:g} Hz 以下，這一跑的數字都只能參考。" if high <= edge
+            else f"第三階段算 {low:g}～{high:g} Hz，其中 {edge:g} Hz 以下的部分只能參考。")
+    return {"sentence": head + tail, "why_label": "為什麼", "why": f"{_WHY}。"}
+
+
+def scheme_stage_three_block(scheme: Scheme) -> dict[str, object] | None:
+    """一份方案的第三階段那一格（預覽、每一跑共用）；沒命中回 None，而且不讀品質登記簿。"""
+    walls = scheme_walls(scheme)
+    if not walls:
+        return None
+    return stage_three_block(walls, load_quality_targets(config_path("quality_targets.toml")), scheme.purpose)
+
+
+def improvement_block(walls: Sequence[str], costed: Mapping[str, bool], in_total: Mapping[str, str], registry: QualityTargets,
+                      purpose: str, labels: Mapping[str, str]) -> dict[str, object] | None:
+    """「改善多少」表旁邊那一格：句子、「為什麼」、標籤都是結果頁那一份（:func:`result_block`），不另寫字。
+    ``costed``：類別 → 這一列有沒有算出代價（照表上的順序）；``in_total``：算進總分的類別 → 總分那一列印的名字
+    （沒有總分列就是空的）；``labels``：類別 → 那一列印的名字。``rows`` 是要標的列（列上印的名字）：被標的類別，
+    其中有任何一類算進總分，總分那一列也標。一面都沒有就回 None，而且不讀界線。"""
+    block = result_block(walls, {category: "costed" if has else "unavailable" for category, has in costed.items()},
+                         registry, purpose)
+    if block is None:
+        return None
+    marked = block.pop("categories")
+    assert isinstance(marked, list)
+    totals = list(dict.fromkeys(in_total[category] for category in marked if category in in_total))
+    return {**block, "rows": [*(labels[category] for category in marked), *totals]}
