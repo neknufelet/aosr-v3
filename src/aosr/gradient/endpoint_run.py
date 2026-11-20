@@ -41,7 +41,7 @@ from aosr.scoring.stage_one_score import stage_one_score_settings
 from aosr.gradient.cli import keep_signal_handlers
 from aosr.gradient.gpu import Device
 from aosr.physics.fem_full_batch import checked_device_workers
-from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
+from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths, expanded_ranges
 from aosr.gradient.endpoint_six import EndpointSix, score_endpoint, scoring_context
 from aosr.gradient.endpoint import (
     EndpointReport, EndpointResult, big_peaks, endpoint_check, full_model_pressures, materials_from_surfaces, scene_with_materials,
@@ -353,14 +353,17 @@ def run_endpoint(folder: Path, *, workers: int = 1, device: Device = "cpu") -> E
                                capabilities_path=Path(project.capabilities_path), engine_commit=project.engine_commit)
     table = project_presets(project)
     initial = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table)
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table,
+                          ranges=project.ranges)
+    zone_ranges = expanded_ranges(project.ranges, tuple(design.surface_id for design in initial))
     result = checked_result(folder, given, header_for(model, initial, settings,
         objective_constants=context.constants if current else search_objective_constants(project, scheme, model),
-        ties=project.ties), settings, kept,
+        ties=project.ties, ranges=zone_ranges), settings, kept,
         table=table, allowed=project_allowed(project, tuple(design.surface_id for design in initial)))
+    # 終點用的設計：最後那一族有範圍的面照範圍收窄（合法厚度只到切過的那幾個、空腔界是範圍），θ 不可行就拒收（#1199）。
     designs = final_designs([(spec.surface_id, spec.preset_id) for spec in result.surfaces], settings, kept,
                             mount=project.mount, fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths,
-                            table=table)
+                            table=table, ranges=zone_ranges)
     theta = np.asarray([float.fromhex(value) for value in result.theta_hex], dtype=np.float64)
     objective = search_objective_settings(project.purpose)
     clock = time.perf_counter()

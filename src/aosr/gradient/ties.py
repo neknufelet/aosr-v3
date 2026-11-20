@@ -73,11 +73,13 @@ def parse_ties(values: Sequence[str]) -> TiePairs:
 
 
 def check_ties_against_start(ties: Iterable[Sequence[str]], designs: Sequence[SurfaceDesign],
-                             allowed: Mapping[str, Sequence[str]]) -> None:
+                             allowed: Mapping[str, Sequence[str]], ranges: Mapping[str, object] | None = None) -> None:
     """開跑前把綁定表跟起跑配置對一次，點名拒收，不悄悄拿掉綁定。``allowed`` 是展開到每一片的准用清單。
 
     兩片都要在這一場的面片清單裡、都要是交給搜尋的片（固定面不是）；成對兩片的家族、起跑樣板、θ 上下界、
     深度上限（家族與個案取嚴之後的總深度，以及個案上限本身）、裝法、准用清單要完全相同。
+    ``ranges`` 是展開到每一片的可調範圍（#1199，片 → 家族 → 範圍）：兩片的整份範圍（每一族，不只起跑那一族）也要完全相同
+    ——θ 上下界只看得到起跑那一族收窄後的界，換樣板換到別族時兩片要一起換、範圍不同就對不齊。
     """
     by_id = {design.surface_id: design for design in designs}
     for first, second in checked_ties(ties):
@@ -92,7 +94,8 @@ def check_ties_against_start(ties: Iterable[Sequence[str]], designs: Sequence[Su
             ("家族", left.family_id, right.family_id), ("起跑樣板", left.preset_id, right.preset_id),
             ("θ 上下界", (left.lower, left.upper), (right.lower, right.upper)),
             ("深度上限", (left.max_total_depth_m, left.max_depth_m), (right.max_total_depth_m, right.max_depth_m)),
-            ("裝法", left.mount, right.mount), ("准用清單", allowed.get(first), allowed.get(second)))
+            ("裝法", left.mount, right.mount), ("准用清單", allowed.get(first), allowed.get(second)),
+            ("可調範圍", (ranges or {}).get(first), (ranges or {}).get(second)))
         for words, mine, theirs in compared:
             if mine != theirs:
                 raise TieRefused(f"{label}：{words}不同（{first} 是 {mine!r}，{second} 是 {theirs!r}）；"

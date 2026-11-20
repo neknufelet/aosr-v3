@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from aosr.gradient.gpu import Device
     from aosr.gradient.run import GradientProject
     from aosr.gradient.material_gradient import SurfaceDesign
+    from aosr.gradient.depth_fit import ZoneRange
     from aosr.config.material_gradient import MaterialGradientSettings
     from aosr.physics.fem_reduced import FullOperators, ReducedModel
     from aosr.physics.fem_reduced_check import SurrogateSpotCheck
@@ -174,6 +175,9 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--tie", action="append", default=[], metavar="片=片",
                        help="成對的兩片（面片代號），可重複，例如 y0@a=yL@a：這兩片的厚度與空腔每一步都相同、換樣板一起換；"
                             "兩片的家族、起跑樣板、上下界、深度上限、裝法、准用清單要完全相同，不同就拒收；不給就是不綁")
+    start.add_argument("--range", action="append", default=[], metavar="面=家族:棉下,棉上[:空腔下,空腔上]",
+                       help="這一面這一族自己的可調範圍（公尺），可重複，例如 x0@a=glass_wool_48k:0.05,0.1:0,0.03：只准收窄、"
+                            "棉厚下上要是產品厚度；搜尋（起跑、換樣板、終點）在那一面用那一族時只在範圍裡調；不給照家族的範圍")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -274,7 +278,9 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.gradient import run
-    from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths
+    from aosr.gradient.fixed_surfaces import (
+        fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths, parse_ranges,
+    )
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
@@ -282,12 +288,14 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.gradient.ties import parse_ties
 
     fixed, caps, allowed, ties = parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth), parse_allowed_targets(args.allowed), parse_ties(args.tie)
+    ranges = parse_ranges(args.range)
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     scheme = _start_scheme(args.root, scheme_path)
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     designs, expanded = start_designs(scheme, settings, materials.presets, args.presets, mount=args.mount, fixed=fixed,
-                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties)
+                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties,
+                                      ranges=ranges)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -320,7 +328,7 @@ def _start(args: argparse.Namespace) -> int:
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
                                max_depths=caps, patch_keys=boundary.scheme_patch_keys(scheme), frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha,
-                               allowed_targets=allowed, ties=ties)
+                               allowed_targets=allowed, ties=ties, ranges=ranges)
     root = args.root.resolve()
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
@@ -335,7 +343,7 @@ def _start(args: argparse.Namespace) -> int:
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
         operators_digest=fingerprint, surrogate_spot_check=spot, materials_sha256=materials_sha,
         materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE),
-        allowed_targets=allowed, fixed_candidate_checks=checks, ties=ties)
+        allowed_targets=allowed, fixed_candidate_checks=checks, ties=ties, ranges=ranges)
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
@@ -344,18 +352,23 @@ def start_designs(scheme: Scheme, settings: MaterialGradientSettings, table: tup
                   presets: Sequence[str | None], *, mount: Mount, fixed: dict[str, str], caps: dict[str, float],
                   allowed: dict[str, tuple[str, ...]], capabilities: CapabilityTable,
                   directivity: DirectivityDefaults, ties: Sequence[tuple[str, str]] = (),
+                  ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None,
                   ) -> tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]]:
     """開跑那一組起跑配置：原牆照 ``run.scene_wall_materials``、起跑設計照 ``run.designs_for``、准用清單對起跑配置核過
     （:func:`_checked_allowed`）並展開到面片。開跑與建替身（#1082 段 2-8，裝進格子前先核固定材料）共用這一支，
-    兩邊核的是同一組配置。綁定表（#1206，``ties``）也在這裡對起跑配置核，成對兩片不一樣就點名拒收。"""
+    兩邊核的是同一組配置。綁定表（#1206，``ties``）也在這裡對起跑配置核，成對兩片不一樣就點名拒收。
+    每一區的可調範圍（#1199，``ranges``）：起跑設計照它收窄，再跟准用清單一起對這一場的家族核（``fixed_surfaces.check_ranges``）；
+    建替身不給（範圍只收窄、家族代號不變，替身照舊涵蓋）。"""
     # 起跑配置的原料住不載入 JAX 的那一檔（網頁行程核綁定也叫這一支，#1206 第 2 支；``run`` 接出去的是同一份）。
     from aosr.gradient import start_config as run
+    from aosr.gradient.fixed_surfaces import expanded_ranges
     from aosr.gradient.ties import check_ties_against_start
 
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    designs = run.designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed, max_depths=caps, table=table)
-    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, table)
-    check_ties_against_start(ties, designs, expanded)
+    designs = run.designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed, max_depths=caps, table=table,
+                              ranges=ranges)
+    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, table, ranges)
+    check_ties_against_start(ties, designs, expanded, expanded_ranges(ranges, [design.surface_id for design in designs]))
     return designs, expanded
 
 
@@ -400,20 +413,23 @@ def _start_scheme(root: Path, scheme_path: Path) -> Scheme:
 
 def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[SurfaceDesign, ...],
                      settings: MaterialGradientSettings, fixed: dict[str, str],
-                     caps: dict[str, float], table: tuple[PresetMaterial, ...]) -> dict[str, tuple[str, ...]]:
+                     caps: dict[str, float], table: tuple[PresetMaterial, ...],
+                     ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> dict[str, tuple[str, ...]]:
     """准用清單對起跑配置核一次（:func:`~aosr.gradient.fixed_surfaces.check_allowed_against_start`），回展開到面片的清單。
     起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）。實測阻抗表照收（#1082 段 2-3d：六類評分照產品入口
     表內／表外分流）。"""
     from aosr.config.material_gradient import is_fixed_target
-    from aosr.gradient.fixed_surfaces import check_allowed_against_start, check_depth_targets, expanded_allowed_targets
+    from aosr.gradient.fixed_surfaces import check_allowed_against_start, check_depth_targets, check_ranges, expanded_allowed_targets
 
     surfaces = tuple((design.surface_id, design.preset_id) for design in designs)
     if any(is_fixed_target(preset) for _, preset in surfaces):
         raise ValueError("--presets 不能直接寫固定材料（fixed:…）：起點要是家族樣板或 none，固定材料從 --allowed 進來")
     check_allowed_against_start(allowed, surfaces, settings, fixed_surfaces=fixed, max_depths=caps)
+    if ranges:
+        check_ranges(ranges, surfaces, settings, fixed_surfaces=fixed, allowed=allowed)
     expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
     check_depth_targets(surfaces, settings, fixed_surfaces=fixed, max_depths=caps, allowed=allowed,
-                        fixed_materials=_listed_fixed_materials(expanded, table))
+                        fixed_materials=_listed_fixed_materials(expanded, table), ranges=ranges)
     return expanded
 
 

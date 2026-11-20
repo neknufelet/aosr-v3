@@ -21,7 +21,10 @@ from aosr.config.material_gradient import (
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
-from aosr.gradient.depth_fit import family_fit, fit_words, fixed_fit, target_fit
+from aosr.gradient.depth_fit import (
+    START_ADVICE, ZoneRange, family_fit, fit_words, fixed_fit, narrowed_family, range_problem, range_thicknesses, ranged_misfits,
+    start_problem, target_fit,
+)
 from aosr.gradient.surface_design import SurfaceDesign, designs_from_presets
 from aosr.materials.search_library import PresetMaterial
 from aosr.materials.construction_models import SurfaceMaterial
@@ -148,12 +151,15 @@ def expanded_max_depths(value: Mapping[str, float], names: Sequence[str]) -> dic
 # ---- 個案上限跟材料組自己的限制取較嚴（#1082 段 2-4；判法在 depth_fit，網頁行程也讀它、不載入 JAX） ----
 
 def designs_with_max_depths(designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
-                            value: Mapping[str, float]) -> tuple[SurfaceDesign, ...]:
+                            value: Mapping[str, float],
+                            ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> tuple[SurfaceDesign, ...]:
     """套入每面生效上限：個案上限跟家族自己的上限取較嚴的那一個（個案比家族大不再拒收，#1082 段 2-4）；
     不貼的面也保留選項，後續換家族繼續套用。這一面現在的家族比個案上限還深排不下（最淺排法放不進）就拒收：
     那一組在這一面不可用，起跑要換一組或不貼（換樣板的候選也不會換過去，:func:`~aosr.gradient.template_rounds.alternatives`）。
-    不貼的面不跟任何家族比；換成固定材料的面比它整塊的總深（:func:`fixed_fit`）。"""
+    不貼的面不跟任何家族比；換成固定材料的面比它整塊的總深（:func:`fixed_fit`）。
+    ``ranges``（#1199，同 :func:`designs_with_ranges` 那一份）給了時，那一面那一族照收窄後的判（設計要先收窄過）。"""
     caps = expanded_max_depths(value, tuple(d.surface_id for d in designs))
+    narrowed = expanded_ranges(ranges, tuple(d.surface_id for d in designs)) if ranges else {}
     result = []
     for design in designs:
         cap = caps.get(design.surface_id)
@@ -171,13 +177,163 @@ def designs_with_max_depths(designs: Sequence[SurfaceDesign], settings: Material
             continue
         families = (settings.family_by_id(design.family_id),) if design.family_id else settings.family
         for family in families:
-            fit = family_fit(family, cap)
+            given = narrowed.get(design.surface_id, {}).get(family.id)
+            fit = family_fit(family if given is None else narrowed_family(family, given), cap)
             if not fit.usable:
                 raise ValueError(f"面 {design.surface_id} 的深度上限 {cap} m 放不下家族 {family.id} 最淺排法 "
                                  f"{fit.shallowest_m} m（最薄棉 {family.thicknesses_m[0]} m 加空腔下界）："
                                  "這一組在這一面不可用，起跑換一組或不貼")
         effective = None if design.max_total_depth_m is None else min(design.max_total_depth_m, cap)
         result.append(replace(design, max_depth_m=cap, max_total_depth_m=effective))
+    return tuple(result)
+
+
+# ---- 每區自己的可調範圍（#1199；判法在 depth_fit，網頁行程也讀它、不載入 JAX） ----
+
+_FAMILY = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def checked_ranges(value: Mapping[str, Mapping[str, ZoneRange]]) -> dict[str, dict[str, ZoneRange]]:
+    """面 → 家族代號 → 這一面那一族的可調範圍。面名同深度上限的規則（同一牆不准混整面與面片）；每一面至少一族、
+    代號是家族代號（不是 ``none``、不是固定材料）。存法固定：面與家族都照名字排（身分不會因順序變）。"""
+    result: dict[str, dict[str, ZoneRange]] = {}
+    for name, families in value.items():
+        patch_key(name)
+        wall, separator, _ = name.partition("@")
+        if separator and wall in value:
+            raise ValueError(f"可調範圍同一面不能同時給牆名與面片代號：{wall}")
+        if not families:
+            raise ValueError(f"面 {name} 的可調範圍是空的：至少要給一種材料")
+        bad = [family for family in families if family == NONE_TARGET or not _FAMILY.match(family)]
+        if bad:
+            raise ValueError(f"面 {name} 的可調範圍只給可最佳化材料（家族代號），收到 {bad}")
+        result[name] = {family: ZoneRange.model_validate(families[family]) for family in sorted(families)}
+    return dict(sorted(result.items()))
+
+
+ZoneRanges = Annotated[dict[str, dict[str, ZoneRange]], AfterValidator(checked_ranges)]
+
+
+def range_argument(surface: str, family: str, given: ZoneRange) -> str:
+    """命令列 ``--range`` 的一格：``面=家族:棉下,棉上`` 再接（有空腔範圍時）``:空腔下,空腔上``；數字照 ``repr``，讀回逐位相同。"""
+    text = f"{surface}={family}:{given.porous_m[0]!r},{given.porous_m[1]!r}"
+    return text if given.cavity_m is None else f"{text}:{given.cavity_m[0]!r},{given.cavity_m[1]!r}"
+
+
+def _pair(text: str, item: str) -> tuple[float, float]:
+    parts = text.split(",")
+    if len(parts) != 2:
+        raise ValueError(f"--range 的範圍要寫成 下,上，收到 {item!r}")
+    try:
+        return float(parts[0]), float(parts[1])
+    except ValueError as error:
+        raise ValueError(f"--range 的範圍不是數字：{item!r}") from error
+
+
+def parse_ranges(values: Sequence[str]) -> dict[str, dict[str, ZoneRange]]:
+    """可重複的 ``--range 面=家族:棉下,棉上[:空腔下,空腔上]``（公尺）；同一面同一族給兩次拒收。"""
+    found: dict[str, dict[str, ZoneRange]] = {}
+    for item in values:
+        face, separator, text = item.partition("=")
+        parts = text.split(":")
+        if not separator or not face or len(parts) not in (2, 3) or not parts[0]:
+            raise ValueError(f"--range 要寫成 面=家族:棉下,棉上[:空腔下,空腔上]（公尺），收到 {item!r}")
+        family = parts[0]
+        if family in found.get(face, {}):
+            raise ValueError(f"--range 同一面 {face} 的 {family} 給了兩次")
+        porous = _pair(parts[1], item)
+        cavity = _pair(parts[2], item) if len(parts) == 3 else None
+        try:
+            given = ZoneRange(porous_m=porous, cavity_m=cavity)
+        except ValueError as error:
+            raise ValueError(f"--range 面 {face} 的 {family}：{error}") from error
+        found.setdefault(face, {})[family] = given
+    return checked_ranges(found)
+
+
+def expanded_ranges(value: Mapping[str, Mapping[str, ZoneRange]] | None,
+                    names: Sequence[str]) -> dict[str, dict[str, ZoneRange]]:
+    """整面的範圍套到那面每一片；面片必須在本次搜尋清單中。"""
+    result: dict[str, dict[str, ZoneRange]] = {}
+    for face, families in checked_ranges(value or {}).items():
+        matches = [name for name in names if name == face or ("@" not in face and name.partition("@")[0] == face)]
+        if not matches:
+            raise ValueError(f"可調範圍的面 {face} 不在搜尋面片清單")
+        result.update((name, families) for name in matches)
+    return dict(sorted(result.items()))
+
+
+def check_ranges(ranges: Mapping[str, Mapping[str, ZoneRange]], surfaces: Sequence[tuple[str, str | None]],
+                 settings: MaterialGradientSettings, *, fixed_surfaces: Mapping[str, str],
+                 allowed: Mapping[str, Sequence[str]]) -> None:
+    """開跑前把每一區的可調範圍對這一場的家族核一次，都點名是哪一面哪一族拒收：固定面不准給；家族要在這一場的家族裡；
+    那一面有准用清單時要在清單裡；範圍本身照 :func:`~aosr.gradient.depth_fit.range_problem`（只准收窄、棉厚是產品厚度、
+    空腔在範圍內、收窄後放得進材料自己的總深）。收窄後放不放得進個案上限由 :func:`check_depth_targets` 判。"""
+    names = [name for name, _ in surfaces]
+    expanded = expanded_ranges(ranges, names)
+    frozen = expanded_fixed_surfaces(fixed_surfaces, names) if fixed_surfaces else {}
+    lists = expanded_allowed_targets(allowed, names)
+    families = {family.id for family in settings.family}
+    for name, given_by_family in expanded.items():
+        if name in frozen:
+            raise ValueError(f"面 {name} 是固定面（不換樣板），不能再給可調範圍")
+        for family_id, given in given_by_family.items():
+            if family_id not in families:
+                raise ValueError(f"面 {name} 的可調範圍有不認識的家族 {family_id}；這一場的家族是 {sorted(families)}")
+            listed = lists.get(name)
+            if listed is not None and family_id not in listed:
+                raise ValueError(f"面 {name} 的可調範圍給了 {family_id}，它不在這一面的准用清單 {list(listed)} 裡")
+            problem = range_problem(settings.family_by_id(family_id), given)
+            if problem is not None:
+                raise ValueError(f"面 {name} 的 {family_id}：{problem}")
+
+
+def narrowed_design(design: SurfaceDesign, given: ZoneRange) -> SurfaceDesign:
+    """一面設計照它這一族的範圍收窄：合法厚度切成範圍裡那幾個（``SurfaceDesign`` 要厚度界等於合法厚度最薄到最厚，兩邊一起切）、
+    空腔界換成範圍給的（沒給照原樣）；樣板、家族代號、總深度上限不動。"""
+    legal = range_thicknesses(design.legal_thicknesses_m, given)
+    lower, upper = [legal[0]], [legal[-1]]
+    if design.cavity_variable is not None:
+        cavity = given.cavity_m if given.cavity_m is not None else (design.lower[1], design.upper[1])
+        lower.append(cavity[0])
+        upper.append(cavity[1])
+    return replace(design, lower=tuple(lower), upper=tuple(upper), legal_thicknesses_m=legal)
+
+
+def _start_values(design: SurfaceDesign) -> tuple[float, float | None]:
+    """樣板本身的棉厚與空腔（搜尋起點 ``baseline_theta`` 讀的同一格；沒有空腔變數是 None）。"""
+    assert design.material is not None
+    values = [float(getattr(design.material.layers[int(name.split(".")[0].removeprefix("layer")) - 1], "thickness_m"))
+              for name in design.variables]
+    return values[0], values[1] if len(values) > 1 else None
+
+
+def designs_with_ranges(designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
+                        value: Mapping[str, Mapping[str, ZoneRange]] | None, *, start: bool = False) -> tuple[SurfaceDesign, ...]:
+    """每面現在那一族有範圍就收窄（:func:`narrowed_design`）；沒有範圍的面、不貼與固定面原樣交回（沒給範圍整份原樣）。
+    範圍不合（:func:`~aosr.gradient.depth_fit.range_problem`）點名拒收。``start``：這一組是起跑配置，樣板的起跑值
+    不在收窄後的範圍裡就拒收（:func:`~aosr.gradient.depth_fit.start_problem`；同起點盒界外拒收那一條，不投影）。"""
+    if not value:
+        return tuple(designs)
+    ranges = expanded_ranges(value, tuple(design.surface_id for design in designs))
+    result = []
+    for design in designs:
+        given_by_family = ranges.get(design.surface_id, {})
+        if given_by_family and design.fixed_material_id is not None:
+            raise ValueError(f"面 {design.surface_id} 是固定面（不換樣板），不能再給可調範圍")
+        given = None if design.material is None or design.family_id is None else given_by_family.get(design.family_id)
+        if given is None or design.family_id is None:
+            result.append(design)
+            continue
+        family = settings.family_by_id(design.family_id)
+        problem = range_problem(family, given)
+        if problem is not None:
+            raise ValueError(f"面 {design.surface_id} 的 {family.id}：{problem}")
+        if start:
+            outside = start_problem(family, given, *_start_values(design))
+            if outside is not None:
+                raise ValueError(f"面 {design.surface_id} 起跑的 {family.id}：{outside}；{START_ADVICE}")
+        result.append(narrowed_design(design, given))
     return tuple(result)
 
 
@@ -276,26 +432,35 @@ def check_allowed_against_start(allowed: Mapping[str, Sequence[str]], surfaces: 
 
 def check_depth_targets(surfaces: Sequence[tuple[str, str | None]], settings: MaterialGradientSettings, *,
                         fixed_surfaces: Mapping[str, str], max_depths: Mapping[str, float],
-                        allowed: Mapping[str, Sequence[str]], fixed_materials: Mapping[str, SurfaceMaterial]) -> None:
+                        allowed: Mapping[str, Sequence[str]], fixed_materials: Mapping[str, SurfaceMaterial],
+                        ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> None:
     """開跑前把個案上限跟每一面可選的材料組對一次（#1082 段 2-4），兩條都點名拒收：
     准用清單裡的固定材料放不下（總深超過、或直接取代牆面看不出多深）——固定材料整塊不變，放不下就是清單寫錯，請拿掉；
     一面可選的材料組（清單列的家族與固定材料；沒有清單就是全部家族）一組都放不下——「不貼」不算救（交給搜尋卻什麼都貼不上）。
-    清單裡本來就沒有材料組（只有不貼）的面不判。放不下的家族不拒收：換樣板不換過去（:func:`~aosr.gradient.template_rounds.alternatives`）。"""
+    清單裡本來就沒有材料組（只有不貼）的面不判。放不下的家族不拒收：換樣板不換過去（:func:`~aosr.gradient.template_rounds.alternatives`）。
+    ``ranges``（#1199）給了時，有範圍的家族照收窄後的判，收窄後放不下就點名拒收（:func:`~aosr.gradient.depth_fit.ranged_misfits`，
+    分區頁標紅同一把）。"""
     names = [name for name, _ in surfaces]
     caps = expanded_max_depths(max_depths, names)
     if not caps:
         return
     lists = expanded_allowed_targets(allowed, names)
     frozen = expanded_fixed_surfaces(fixed_surfaces, names) if fixed_surfaces else {}
+    narrowed = expanded_ranges(ranges, names) if ranges else {}
     for name, _ in surfaces:
         cap = caps.get(name)
         if cap is None or name in frozen:
             continue
         targets = lists.get(name, tuple(family.id for family in settings.family))
         groups = [target for target in targets if target != NONE_TARGET]
-        fits = [target_fit(target, cap, settings, fixed_materials) for target in groups]
+        given = narrowed.get(name)
+        fits = [target_fit(target, cap, settings, fixed_materials, given) for target in groups]
         bad = [fit for fit in fits if is_fixed_target(fit.target) and not fit.usable]
         if bad:
             raise ValueError(f"面 {name} 的准用清單：" + "；".join(fit_words(fit, cap) for fit in bad) + "。請拿掉它或放寬上限")
+        misfits = ranged_misfits(fits, given)
+        if misfits:
+            raise ValueError(f"面 {name} 照這一面的可調範圍收窄後：" + "；".join(fit_words(fit, cap) for fit in misfits)
+                             + "。請調小範圍的下限或放寬上限")
         if groups and not any(fit.usable for fit in fits):
             raise ValueError(f"面 {name} 可選的材料組一組都放不進深度上限：" + "；".join(fit_words(fit, cap) for fit in fits))

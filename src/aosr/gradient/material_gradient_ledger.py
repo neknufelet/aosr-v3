@@ -34,7 +34,7 @@ import json
 import math
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import BinaryIO, Final, Literal, Protocol, Self
 
@@ -47,7 +47,8 @@ from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.physics.fem_reduced import ReducedModel
 from aosr.scoring.gradient_objective_jax import GradientObjectiveConstants
 from aosr.scoring.six_category_jax import SixCategoryConstants
-from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths
+from aosr.gradient.depth_fit import ZoneRange
+from aosr.gradient.fixed_surfaces import FixedSurfaces, MaxDepths, ZoneRanges
 from aosr.gradient.ties import Ties, check_ties_in_surfaces
 from aosr.gradient.material_gradient import (
     LOOP_STOP_MAX_EVALUATIONS, LOOP_STOP_MAX_ROUNDS, LOOP_STOP_NO_CANDIDATES, LOOP_STOP_NO_IMPROVEMENT,
@@ -195,10 +196,14 @@ class MaterialGradientHeader(BaseModel):
     boundary_patches: tuple[tuple[str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
     # #1206（版本不升）：綁定表（成對的兩片）；空表不寫（逐位等於加這一格之前）、缺這一格讀成不綁。
     ties: Ties = Field(default=(), exclude_if=lambda value: not value)
+    # #1199（版本不升）：每一區自己的可調範圍（已展開到面片，面 → 家族 → 範圍）；沒有不寫（逐位等於加這一格之前）。
+    ranges: ZoneRanges = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _score_constants_by_version(self) -> Self:
         check_ties_in_surfaces(self.ties, [surface_id for surface_id, _ in self.surfaces], "標頭")
+        if any(face not in [surface_id for surface_id, _ in self.surfaces] or face in self.fixed_surfaces for face in self.ranges):
+            raise ValueError("可調範圍的面要在標頭的面裡、而且不是固定面")
         if (self.score_constants is None) != (self.ledger_version == PRE_PROXY_LEDGER_VERSION):
             raise ValueError(f"{LEDGER_VERSION} 的標頭要記分數常數（score_constants），上一版沒有")
         if self.ledger_version == LEGACY_LEDGER_VERSION and self.score_constants is not None and self.score_constants.category_weights is not None:
@@ -427,8 +432,10 @@ def objective_fingerprint(constants: GradientObjectiveConstants | SixCategoryCon
 
 def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings, *,
                objective_constants: GradientObjectiveConstants | SixCategoryConstants,
-               ties: Sequence[tuple[str, str]] = ()) -> MaterialGradientHeader:
-    """這一次搜尋的標頭：綁替身身分（輸入雜湊、網格雜湊、物理身分）、設計清單、搜尋設定與評分常數；有綁定表就記綁定表。
+               ties: Sequence[tuple[str, str]] = (),
+               ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> MaterialGradientHeader:
+    """這一次搜尋的標頭：綁替身身分（輸入雜湊、網格雜湊、物理身分）、設計清單、搜尋設定與評分常數；有綁定表就記綁定表；
+    有每一區的可調範圍（#1199，已展開到面片）就記範圍（接續換一份範圍，標頭不同就拒收）。
 
     呼叫端另外注入目標函式的空氣常數（``air``）與多孔材範圍（``ranges``）不在標頭內，只靠替身物理身分裡
     那幾份資料檔的雜湊守：沿用舊替身、另外注入新的常數時，標頭照樣相同、守不到（#561 審查另記的既存缺口）。
@@ -444,7 +451,7 @@ def header_for(model: ReducedModel, designs: Sequence[SurfaceDesign], settings: 
         kept_digests=_kept_digests(designs), mount=designs_mount(designs),
         fixed_surfaces=dict(sorted((d.surface_id, d.fixed_material_id) for d in designs if d.fixed_material_id is not None)),
         max_depths=dict(sorted((d.surface_id, d.max_depth_m) for d in designs if d.max_depth_m is not None)),
-        ties=tuple(ties))
+        ties=tuple(ties), ranges={face: dict(families) for face, families in (ranges or {}).items()})
 
 
 def _kept_digests(designs: Sequence[SurfaceDesign]) -> dict[str, str]:

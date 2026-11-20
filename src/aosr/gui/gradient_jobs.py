@@ -56,7 +56,7 @@ from aosr.gradient.folder_files import ENDPOINT_FILE, EXPORTED_SCHEME_FILE, PROJ
 from aosr.gui.gradient_exec import StepExit, write_exit
 from aosr.gui.gradient_plan import (
     GradientRequest, PlanRefused, SearchPlan, TieInputs, draft_symmetry, fixed_depths, library_depth_targets, plan_search,
-    start_arguments,
+    start_arguments, used_ranges,
 )
 from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
@@ -585,7 +585,9 @@ class GradientJobs:
         labels = dict(targets.labels)
         # 方案裡有「鋼板直接貼在棉上」的構造才多這一格（#1208 第 3 支；沒命中時回覆逐位不變）。
         reference = reference_only.scheme_stage_three_block(scheme)
-        return {**({} if reference is None else {"reference_only": reference}),
+        # 有一區寫了自己的可調範圍才多這一格（#1199，給分區頁畫實際用的範圍；沒有時回覆逐位不變）。
+        ranges = {"ranges": used_ranges(plan, settings)} if plan.ranges else {}
+        return {**({} if reference is None else {"reference_only": reference}), **ranges,
                 "plan": plan.model_dump(mode="json"), "arguments": start_arguments(plan), "labels": labels,
                 # 牆名跟著方案走（#1134）：定得出前牆時叫前後左右。
                 "wall_names": wall_words(scheme),
