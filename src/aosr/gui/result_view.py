@@ -13,8 +13,9 @@ from aosr.physics.zone_fill import whole_wall_entries
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.measured_view import MeasuredWallView, build_measured_view, measured_note_text
-from aosr.gui.room_words import size_words, treated_words
+from aosr.gui.room_words import FOUR_WALLS, size_words, treated_words
 from aosr.gui.wall_words import wall_words
+from aosr.gui import reference_only
 from aosr.gui.capability_view import capability_lists
 from aosr.gui.furniture_view import furniture_rows, furniture_surface, has_furniture_paths
 from aosr.config.quality_targets import QualityTargets, TargetEntry, load_quality_targets
@@ -291,6 +292,9 @@ class ResultView(ViewModel):
     reverberation: ReverberationView
     reflections: tuple[ReflectionView, ...]
     listening_area: ListeningAreaView
+    # 存的方案裡有「鋼板直接貼在棉上」的構造才有（#1208 第 2 支，字與要標的類別都在 reference_only.result_block）；
+    # 沒有就不出現在回覆裡。放在各類那幾列外面：比較頁拿的是 categories，不受影響。
+    reference_only: dict[str, object] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _text(value: float | None, unit: str = "") -> str:
@@ -905,6 +909,18 @@ def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _reference_walls(scheme: Scheme) -> list[str]:
+    """存的方案裡哪幾面有「鋼板直接貼在棉上」的構造（#1208）：看那一面每一區的材料（整面一區、矩形分區都是區；貼在
+    原牆上的與原牆本身由判斷函式自己看）。只寫牆名、一面一次，面序同開頭那一句（room_words.treated_words）。
+    六面只給固定阻抗的方案沒有構造，一面都不算。"""
+    zones = scheme.scene.surface_zones_by_wall
+    if zones is None:
+        return []
+    names = wall_words(scheme)
+    return [names[wall] for wall in (*FOUR_WALLS, "ceiling", "floor")
+            if any(reference_only.reference_only(zone.material) for zone in zones[wall])]
+
+
 def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
     """只接受先經 load_result 驗證的結果；呼叫端負責拒收錯誤。"""
     from aosr.physics.report_research_text import komatsu_research_notice
@@ -963,4 +979,6 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         reverberation=_reverberation(result, registry, ranked.get(QualityCategory.REVERBERATION)),
         reflections=_reflections(result),
         listening_area=_listening_area(result, quality_targets_path, registry),
+        reference_only=reference_only.result_block(
+            _reference_walls(result.scheme), {row.category: row.state for row in categories}, registry, result.scheme.purpose),
     )
