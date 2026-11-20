@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from aosr.gradient.gpu import Device
     from aosr.gradient.run import GradientProject
     from aosr.gradient.material_gradient import SurfaceDesign
+    from aosr.gradient.depth_fit import ZoneRange
     from aosr.config.material_gradient import MaterialGradientSettings
     from aosr.physics.fem_reduced import FullOperators, ReducedModel
     from aosr.physics.fem_reduced_check import SurrogateSpotCheck
@@ -174,6 +175,9 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--tie", action="append", default=[], metavar="片=片",
                        help="成對的兩片（面片代號），可重複，例如 y0@a=yL@a：這兩片的厚度與空腔每一步都相同、換樣板一起換；"
                             "兩片的家族、起跑樣板、上下界、深度上限、裝法、准用清單要完全相同，不同就拒收；不給就是不綁")
+    start.add_argument("--range", action="append", default=[], metavar="面=家族:棉下,棉上[:空腔下,空腔上]",
+                       help="這一面這一族自己的可調範圍（公尺），可重複，例如 x0@a=glass_wool_48k:0.05,0.1:0,0.08：只准收窄、"
+                            "棉厚下上要是產品厚度；搜尋（起跑、換樣板、終點）在那一面用那一族時只在範圍裡調；不給照家族的範圍")
     resume = commands.add_parser("resume", help="接續")
     resume.add_argument("folder", type=Path)
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -274,20 +278,20 @@ def _start(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.gradient import run
-    from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths
+    from aosr.gradient.fixed_surfaces import fixed_targets_of, parse_allowed_targets, parse_fixed_surfaces, parse_max_depths, parse_ranges
     from aosr.physics import fem_reduced, fem_reduced_check, fem_reduced_receipt
     from aosr.gradient import boundary
     from aosr.reporting.fem_reduced_scheme import export_operators
     from aosr.gradient.surrogate_fixed_checks import configuration_document
     from aosr.gradient.ties import parse_ties
 
-    fixed, caps, allowed, ties = parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth), parse_allowed_targets(args.allowed), parse_ties(args.tie)
+    fixed, caps, allowed, ties, ranges = parse_fixed_surfaces(args.fixed_surface), parse_max_depths(args.max_depth), parse_allowed_targets(args.allowed), parse_ties(args.tie), parse_ranges(args.range)
     scheme_path, surrogate, settings_path = args.scheme.resolve(), args.surrogate.resolve(), args.settings.resolve()
     scheme = _start_scheme(args.root, scheme_path)
     materials, settings, snapshot, materials_sha = _start_materials(args, settings_path, allowed)
     capabilities, directivity = load_capabilities(args.capabilities), load_directivity_defaults(config_path("directivity_defaults.toml"))
     designs, expanded = start_designs(scheme, settings, materials.presets, args.presets, mount=args.mount, fixed=fixed,
-                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties)
+                                      caps=caps, allowed=allowed, capabilities=capabilities, directivity=directivity, ties=ties, ranges=ranges)
     objective = run.search_objective_settings(args.purpose)
     with keep_signal_handlers():
         operators = export_operators(scheme, capabilities=capabilities, directivity=directivity)
@@ -308,11 +312,11 @@ def _start(args: argparse.Namespace) -> int:
     configuration = configuration_document(presets=args.presets, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
                                            allowed=allowed, scene_json=scheme.scene.model_dump_json())
     checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers,
-                                     surrogate, configuration=configuration, carryover=fingerprint is not None)
+                                     surrogate, configuration=configuration, carryover=fingerprint is not None, ranges=ranges)
     del full_operators
     spot = None
     if fingerprint is not None:
-        spot = _carryover_spot_check(model, operators, designs, scheme)
+        spot = _carryover_spot_check(model, operators, designs, scheme, ranges)
         del operators
     del model
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
@@ -320,7 +324,7 @@ def _start(args: argparse.Namespace) -> int:
                                settings_fingerprint=settings.fingerprint, physics_identity=physics,
                                objective_settings_fingerprint=objective.fingerprint, mount=args.mount, fixed_surfaces=fixed,
                                max_depths=caps, patch_keys=boundary.scheme_patch_keys(scheme), frequency_batch=args.frequency_batch, device=args.device, materials_sha256=materials_sha,
-                               allowed_targets=allowed, ties=ties)
+                               allowed_targets=allowed, ties=ties, ranges=ranges)
     root = args.root.resolve()
     project = run.GradientProject(
         format_version=run.PROJECT_VERSION, gradient_id=identity, scheme_path=str(scheme_path),
@@ -335,7 +339,7 @@ def _start(args: argparse.Namespace) -> int:
         surrogate_physics_identity=str(manifest_identity) if fingerprint is not None else None,
         operators_digest=fingerprint, surrogate_spot_check=spot, materials_sha256=materials_sha,
         materials_path=None if snapshot is None else str(root / identity / SNAPSHOT_FILE),
-        allowed_targets=allowed, fixed_candidate_checks=checks, ties=ties)
+        allowed_targets=allowed, fixed_candidate_checks=checks, ties=ties, ranges=ranges)
     root.mkdir(parents=True, exist_ok=True)
     return _create_and_run(root, project) if snapshot is None else _create_and_run(root, project, snapshot)
 
@@ -344,18 +348,23 @@ def start_designs(scheme: Scheme, settings: MaterialGradientSettings, table: tup
                   presets: Sequence[str | None], *, mount: Mount, fixed: dict[str, str], caps: dict[str, float],
                   allowed: dict[str, tuple[str, ...]], capabilities: CapabilityTable,
                   directivity: DirectivityDefaults, ties: Sequence[tuple[str, str]] = (),
+                  ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None,
                   ) -> tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]]:
     """開跑那一組起跑配置：原牆照 ``run.scene_wall_materials``、起跑設計照 ``run.designs_for``、准用清單對起跑配置核過
     （:func:`_checked_allowed`）並展開到面片。開跑與建替身（#1082 段 2-8，裝進格子前先核固定材料）共用這一支，
-    兩邊核的是同一組配置。綁定表（#1206，``ties``）也在這裡對起跑配置核，成對兩片不一樣就點名拒收。"""
+    兩邊核的是同一組配置。綁定表（#1206，``ties``）也在這裡對起跑配置核，成對兩片不一樣就點名拒收。
+    每一區的可調範圍（#1199，``ranges``）：起跑設計照它收窄，再跟准用清單一起對這一場的家族核（``fixed_surfaces.check_ranges``）；
+    建替身不給（範圍只收窄、家族代號不變，替身照舊涵蓋）。"""
     # 起跑配置的原料住不載入 JAX 的那一檔（網頁行程核綁定也叫這一支，#1206 第 2 支；``run`` 接出去的是同一份）。
     from aosr.gradient import start_config as run
+    from aosr.gradient.fixed_surfaces import expanded_ranges
     from aosr.gradient.ties import check_ties_against_start
 
     kept = run.scene_wall_materials(scheme, capabilities=capabilities, directivity=directivity)
-    designs = run.designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed, max_depths=caps, table=table)
-    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, table)
-    check_ties_against_start(ties, designs, expanded)
+    designs = run.designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed, max_depths=caps, table=table,
+                              ranges=ranges)
+    expanded = _checked_allowed(allowed, designs, settings, fixed, caps, table, ranges)
+    check_ties_against_start(ties, designs, expanded, expanded_ranges(ranges, [design.surface_id for design in designs]))
     return designs, expanded
 
 
@@ -400,20 +409,23 @@ def _start_scheme(root: Path, scheme_path: Path) -> Scheme:
 
 def _checked_allowed(allowed: dict[str, tuple[str, ...]], designs: tuple[SurfaceDesign, ...],
                      settings: MaterialGradientSettings, fixed: dict[str, str],
-                     caps: dict[str, float], table: tuple[PresetMaterial, ...]) -> dict[str, tuple[str, ...]]:
+                     caps: dict[str, float], table: tuple[PresetMaterial, ...],
+                     ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> dict[str, tuple[str, ...]]:
     """准用清單對起跑配置核一次（:func:`~aosr.gradient.fixed_surfaces.check_allowed_against_start`），回展開到面片的清單。
     起跑配置任何一面直接寫固定材料都拒收（起點要是家族樣板或 none）。實測阻抗表照收（#1082 段 2-3d：六類評分照產品入口
     表內／表外分流）。"""
     from aosr.config.material_gradient import is_fixed_target
-    from aosr.gradient.fixed_surfaces import check_allowed_against_start, check_depth_targets, expanded_allowed_targets
+    from aosr.gradient.fixed_surfaces import check_allowed_against_start, check_depth_targets, check_ranges, expanded_allowed_targets
 
     surfaces = tuple((design.surface_id, design.preset_id) for design in designs)
     if any(is_fixed_target(preset) for _, preset in surfaces):
         raise ValueError("--presets 不能直接寫固定材料（fixed:…）：起點要是家族樣板或 none，固定材料從 --allowed 進來")
     check_allowed_against_start(allowed, surfaces, settings, fixed_surfaces=fixed, max_depths=caps)
+    if ranges:
+        check_ranges(ranges, surfaces, settings, allowed=allowed)
     expanded = expanded_allowed_targets(allowed, [name for name, _ in surfaces])
     check_depth_targets(surfaces, settings, fixed_surfaces=fixed, max_depths=caps, allowed=allowed,
-                        fixed_materials=_listed_fixed_materials(expanded, table))
+                        fixed_materials=_listed_fixed_materials(expanded, table), ranges=ranges)
     return expanded
 
 
@@ -434,19 +446,23 @@ def _listed_fixed_materials(allowed: dict[str, tuple[str, ...]], table: tuple[Pr
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],
                             allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...], scheme: Scheme,
                             workers: int, surrogate: Path, *, configuration: Mapping[str, object],
-                            carryover: bool) -> tuple[FixedCandidateCheck, ...]:
+                            carryover: bool, ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None,
+                            ) -> tuple[FixedCandidateCheck, ...]:
     """准用清單有固定材料：表外補值照實印、每一個各做一組替身留出驗證（全部核完、有沒過的就拒收）；沒有就什麼都不做。
     替身旁訓練說明記過的固定材料算「訓練過」（拒收的句子說訓練過但在哪個頻率不夠準，不說沒學過）。
 
     #1142（老闆 2026-11-13 拍 A）：替身旁建替身時的核對紀錄身分逐欄都跟這一次相同（:func:`_reusable`），就沿用紀錄的
     數字、不再完整解，輸出講一句「沿用建替身時核過的數字」；任何一欄不同、舊格式紀錄、或替身是接續（carry-over，
-    ``carryover``）沿用的，照舊重核，輸出講為什麼沒沿用。兩句都用「注意：」開頭，網頁那一跑的「注意」一節看得到。"""
+    ``carryover``）沿用的，照舊重核，輸出講為什麼沒沿用。兩句都用「注意：」開頭，網頁那一跑的「注意」一節看得到。
+
+    ``ranges``（``--range``，#1199）：核對配置裡沒換成固定材料的片，起點照可調範圍投影（同下降起點）；建替身那一份不帶範圍，
+    起點被投影時核對配置的阻抗跟紀錄對不上，就照舊重核。"""
     from aosr.gradient.fixed_candidates import check_fixed_candidates, reused_check, table_range_notes
-    from aosr.gradient.fixed_surfaces import fixed_targets_of
+    from aosr.gradient.fixed_surfaces import fixed_targets_of, ranged_starts
     from aosr.gradient.surrogate_coverage import read_coverage
     from aosr.gradient.surrogate_files import TRAINING_FILE
 
-    targets = fixed_targets_of(allowed)
+    targets, ranged = fixed_targets_of(allowed), ranged_starts(designs, ranges)
     if not targets:
         return ()
     assert operators is not None
@@ -457,7 +473,7 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     if carryover:
         sys.stderr.write("注意：替身是接續（carry-over）沿用的，不沿用建替身時核過的固定材料數字，開跑前照舊重核\n")
     else:
-        found, configurations = _reusable(model, operators, designs, allowed, table, scheme, surrogate, configuration)
+        found, configurations = _reusable(model, operators, designs, allowed, table, scheme, surrogate, configuration, ranged)
         if not isinstance(found, str):
             checks = tuple(reused_check(row) for row in found)
             for check in checks:
@@ -470,7 +486,7 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     trained = frozenset(item.target for item in coverage.fixed) if coverage is not None else frozenset()
     checks = check_fixed_candidates(model, operators, designs, allowed, table, density_kg_m3=scheme.scene.density_kg_m3,
                                     sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers, trained=trained,
-                                    configurations=configurations)
+                                    configurations=configurations, ranged=ranged)
     for check in checks:
         sys.stderr.write(f"固定材料 {check.target} 替身留出驗證通過：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
                          f"{check.band_db:g} dB（完整解 {check.full_solves} 次、{check.seconds:.1f} 秒）\n")
@@ -480,9 +496,10 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
 def _reusable(model: ReducedModel, operators: FullOperators, designs: tuple[SurfaceDesign, ...],
               allowed: dict[str, tuple[str, ...]],
               table: tuple[PresetMaterial, ...], scheme: Scheme, surrogate: Path, configuration: Mapping[str, object],
+              ranged: Set[str] = frozenset(),
               ) -> tuple[tuple[FixedCheckRow, ...] | str, dict[str, FrequencyBoundaryImpedances]]:
     """這一次的身分跟建替身時的核對紀錄逐欄比（:func:`aosr.gradient.surrogate_fixed_checks.reused_rows`）：回沿用得了的
-    紀錄列或沒沿用的原因，以及這一次算的核對配置（沒沿用就直接拿去重核，不算第二次）。"""
+    紀錄列或沒沿用的原因，以及這一次算的核對配置（沒沿用就直接拿去重核，不算第二次；``ranged`` 那幾面起點照範圍投影）。"""
     from aosr.gradient.fixed_candidates import (
         candidate_configurations, candidate_material_digest, candidate_surfaces, check_code_identity, holdout_ruler_values,
     )
@@ -496,7 +513,7 @@ def _reusable(model: ReducedModel, operators: FullOperators, designs: tuple[Surf
 
     axis = tuple(float(value) for value in model.frequencies_hz)
     configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=scheme.scene.density_kg_m3,
-                                              sound_speed_m_s=scheme.scene.sound_speed_m_s)
+                                              sound_speed_m_s=scheme.scene.sound_speed_m_s, ranged=ranged)
     contents = {item.target: item.coverage().material_sha256 for item in fixed_targets(allowed, table)}
     candidates = tuple(CandidateIdentity(target=target, material_sha256=contents[target],
                                          material_digest=candidate_material_digest(target, table),
@@ -563,14 +580,15 @@ def _surrogate_identity(surrogate: Path, current: str) -> str:
 
 
 def _carryover_spot_check(model: ReducedModel, operators: FullOperators, designs: tuple[SurfaceDesign, ...],
-                           scheme: Scheme) -> SurrogateSpotCheck:
-    """用下降真正的起跑材料做抽查，尺由登記簿讀；不套終點離散規格與匯出空腔裁切。"""
+                           scheme: Scheme, ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> SurrogateSpotCheck:
+    """用下降真正的起跑材料做抽查（``ranges`` 有範圍的面起點照範圍投影，#1199），尺由登記簿讀；不套終點離散規格與匯出空腔裁切。"""
+    from aosr.gradient.fixed_surfaces import ranged_starts
     from aosr.gradient.run import holdout_rulers
     from aosr.physics.fem_reduced import even_indices
     from aosr.physics.fem_reduced_check import spot_check_reduced
 
     axis = tuple(model.frequencies_hz[index] for index in even_indices(8, len(model.frequencies_hz)))
-    impedances = _starting_impedances(designs, axis, scheme)
+    impedances = _starting_impedances(designs, axis, scheme, ranged_starts(designs, ranges))
     ruler = holdout_rulers().frequency
     spot = spot_check_reduced(model, operators, impedances, axis, ruler_name=ruler.name, frequency_db=ruler.value)
     if not spot.passed:
@@ -581,12 +599,13 @@ def _carryover_spot_check(model: ReducedModel, operators: FullOperators, designs
 
 
 def _starting_impedances(designs: tuple[SurfaceDesign, ...], frequencies_hz: tuple[float, ...],
-                         scheme: Scheme) -> FrequencyBoundaryImpedances:
-    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內（:func:`~aosr.gradient.fixed_candidates.design_impedances`）。"""
+                         scheme: Scheme, ranged: Set[str] = frozenset()) -> FrequencyBoundaryImpedances:
+    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內（``ranged`` 那幾面先照可調範圍投影，
+    :func:`~aosr.gradient.fixed_candidates.design_impedances`）。"""
     from aosr.gradient.fixed_candidates import design_impedances
 
     return design_impedances(designs, frequencies_hz, density_kg_m3=scheme.scene.density_kg_m3,
-                             sound_speed_m_s=scheme.scene.sound_speed_m_s)
+                             sound_speed_m_s=scheme.scene.sound_speed_m_s, ranged=ranged)
 
 
 def _create_and_run(root: Path, project: GradientProject, snapshot: bytes | None = None) -> int:

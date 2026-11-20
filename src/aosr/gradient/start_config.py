@@ -16,7 +16,8 @@ from aosr.config.material_gradient import MOUNT_RIGID, MaterialGradientSettings,
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import BoundaryKey, material_keys, named_materials, scheme_patch_keys, surface_ids
-from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths
+from aosr.gradient.depth_fit import ZoneRange
+from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths, designs_with_ranges
 from aosr.gradient.surface_design import SurfaceDesign, wall_designs_from_presets
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.search_library import PresetMaterial
@@ -83,8 +84,12 @@ def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: Materia
                 kept: Mapping[K, SurfaceMaterial], mount: Mount = MOUNT_RIGID,
                 fixed_surfaces: Mapping[str, str] | None = None,
                 max_depths: Mapping[str, float] | None = None,
-                table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
+                table: Sequence[PresetMaterial] | None = None,
+                ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> tuple[SurfaceDesign, ...]:
     """建立起跑設計，套入每面上限（跟起跑家族自己的上限取較嚴；起跑家族最淺排法放不進就拒收，#1082 段 2-4）；
-    空設定沿用舊設計。``table`` 同 :func:`_uncapped_designs_for`。"""
+    空設定沿用舊設計。``table`` 同 :func:`_uncapped_designs_for`。``ranges``（#1199，面 → 家族 → 範圍）給了時，
+    起跑那一族有範圍的面先收窄（``fixed_surfaces.designs_with_ranges``），再套上限；樣板的起跑值不在範圍裡不拒收，
+    起點在算 θ 時才投影進範圍（``material_gradient.baseline_theta`` 的 ``ranged``，這裡不載入 JAX）。"""
     designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces, table=table)
-    return designs_with_max_depths(designs, settings, max_depths or {})
+    designs = designs_with_ranges(designs, settings, ranges)
+    return designs_with_max_depths(designs, settings, max_depths or {}, ranges)

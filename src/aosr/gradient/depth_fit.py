@@ -1,6 +1,10 @@
 """個案深度上限跟材料組自己的限制取較嚴（#1082 段 2-4）：一個換樣板目標（家族、固定材料或不貼）在一面的個案上限下
 能不能用、生效上限多少、是哪一條定的。判法只有這一份：命令列開跑前、換樣板候選、搜尋報告與網頁（立面圖標紅、開跑預覽）
 都叫這裡。純函式、只讀設定與材料資料，不載入 JAX（網頁行程也匯入它）。
+
+每一區自己的可調範圍（#1199，:class:`ZoneRange`）：一區替一種可最佳化材料寫「棉厚從哪個產品厚度到哪個、空腔從幾公尺到幾公尺」，
+只准收窄（:func:`range_problem`；家族代號不變，替身訓練過的範圍照舊涵蓋）。收窄後那一族放不放得進上限也是這裡判
+（:func:`target_fit` 給了 ``ranges`` 就拿 :func:`narrowed_family` 判）：網頁標紅與命令列開跑同一把。
 """
 from __future__ import annotations
 
@@ -8,9 +12,10 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Self
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, is_fixed_target
 from aosr.materials.construction_models import Assembly, MeasuredImpedance
@@ -21,6 +26,79 @@ DEPTH_SLACK_M = 1e-6
 上限減厚度，存回方案的那幾層照寫下來相加可能多出 1e-17 量級，不放過這一點，搜尋結果帶著上限重開就會自己標紅。"""
 
 FitReason = Literal["fits", "shallower_than_family", "fixed_too_deep", "fixed_not_comparable"]
+
+
+class ZoneRange(BaseModel):
+    """一區一種可最佳化材料自己的可調範圍（#1199）：棉厚的下、上（公尺，要是那一種材料的產品厚度）與空腔的下、上
+    （公尺；選填，沒給照材料頁）。這裡只守形狀（有限、不為負、下不大於上）；對材料頁那一份合不合由 :func:`range_problem` 判。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    porous_m: tuple[float, float]
+    cavity_m: tuple[float, float] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        for words, pair in (("棉厚", self.porous_m), ("空腔", self.cavity_m)):
+            if pair is None:
+                continue
+            if pair[0] < 0.0:
+                raise ValueError(f"{words}範圍不能是負的，收到 {list(pair)}")
+            if pair[0] > pair[1]:
+                raise ValueError(f"{words}範圍的下限要不大於上限，收到 {list(pair)}")
+        return self
+
+
+def range_thicknesses(thicknesses: Sequence[float], given: ZoneRange) -> tuple[float, ...]:
+    """產品厚度裡落在範圍下～上的那幾個（取原本那幾個數字本身，合法厚度逐位比得到）。"""
+    low, high = given.porous_m
+    return tuple(value for value in thicknesses if low <= value <= high)
+
+
+def narrowed_family(family: FamilySettings, given: ZoneRange) -> FamilySettings:
+    """收窄後的那一族（判放不放得下、畫面用）：產品厚度切成範圍裡那幾個，空腔範圍換成這一區給的（沒給照原樣）；
+    代號、初值與總深度上限不動（初值可能不在範圍裡，所以不重驗：起點照換樣板那一把投影進範圍，``material_gradient.project_initial``）。"""
+    update: dict[str, object] = {"thicknesses_m": range_thicknesses(family.thicknesses_m, given)}
+    if given.cavity_m is not None:
+        update["cavity_range_m"] = given.cavity_m
+    return family.model_copy(update=update)
+
+
+def centimeters(value: float) -> str:
+    """範圍那幾句給人看的數字（#1199）：公尺換成公分、照 ``:g`` 去掉多餘的零（第 2 支的範圍格子是公分）。"""
+    return f"{value * 100:g}"
+
+
+def _centimeter_list(values: Sequence[float]) -> str:
+    return "、".join(centimeters(value) for value in values)
+
+
+def range_problem(family: FamilySettings, given: ZoneRange) -> str | None:
+    """一區的範圍對那一種材料（材料頁那一份，也就是這一場的家族）合不合；不合回一句白話（區名、材料名由呼叫端加），合回 None。
+
+    只准收窄：超出材料頁的範圍拒收、叫人到材料頁改；棉厚兩端要是產品厚度之一；空腔要在材料的空腔範圍裡，材料搜尋不調空腔
+    （樣板沒有空氣層，同 :func:`family_shallowest_m` 的判法）時不准給；收窄後的最淺排法要放得進材料自己的總深度上限。
+    句子裡的數字是公分（:func:`centimeters`）；命令列 ``--range`` 拒收也是這一句。"""
+    thicknesses = family.thicknesses_m
+    low, high = given.porous_m
+    page = f"材料頁的產品厚度是 {_centimeter_list(thicknesses)} cm"
+    if low < thicknesses[0] or high > thicknesses[-1]:
+        return f"棉厚 {centimeters(low)}～{centimeters(high)} cm 超出材料頁的範圍（{page}）；這裡只准收窄，要放寬請到材料頁改那份材料"
+    off = [value for value in dict.fromkeys((low, high)) if value not in thicknesses]
+    if off:
+        return f"棉厚的下、上要是產品厚度之一，{_centimeter_list(off)} cm 不是（{page}）"
+    if given.cavity_m is not None:
+        if family.initial_cavity_m is None:
+            return "這種材料搜尋不調空腔（樣板沒有空氣層），不能給空腔範圍"
+        (cavity_low, cavity_high), (page_low, page_high) = given.cavity_m, family.cavity_range_m
+        if cavity_low < page_low or cavity_high > page_high:
+            return (f"空腔 {centimeters(cavity_low)}～{centimeters(cavity_high)} cm 超出材料頁的範圍"
+                    f"（{centimeters(page_low)}～{centimeters(page_high)} cm）；"
+                    "這裡只准收窄，要放寬請到材料頁改那份材料")
+    narrowed = narrowed_family(family, given)
+    if not _snap_fits(narrowed, family.max_total_depth_m):
+        return (f"收窄後的最淺排法 {centimeters(family_shallowest_m(narrowed))} cm（最薄棉加空腔下界）放不進材料自己的總深度上限 "
+                f"{centimeters(family.max_total_depth_m)} cm；請把下限調小")
+    return None
 
 
 @dataclass(frozen=True)
@@ -117,8 +195,9 @@ def fixed_fit(target: str, material: object, cap: float) -> TargetFit:
 
 
 def target_fit(target: str, cap: float, settings: MaterialGradientSettings,
-               fixed_materials: Mapping[str, object]) -> TargetFit:
-    """一個換樣板目標在個案上限 ``cap`` 下的判法；不貼不加層、一定可用。``fixed_materials`` 鍵是 ``fixed:<代號>``。"""
+               fixed_materials: Mapping[str, object], ranges: Mapping[str, ZoneRange] | None = None) -> TargetFit:
+    """一個換樣板目標在個案上限 ``cap`` 下的判法；不貼不加層、一定可用。``fixed_materials`` 鍵是 ``fixed:<代號>``。
+    ``ranges`` 是這一面每一種材料自己的可調範圍（#1199，家族代號 → 範圍）：有範圍的家族照收窄後的那一族判。"""
     if target == NONE_TARGET:
         return TargetFit(target, True, "fits", None, None)
     if is_fixed_target(target):
@@ -126,7 +205,9 @@ def target_fit(target: str, cap: float, settings: MaterialGradientSettings,
         if material is None:
             raise ValueError(f"固定材料 {target} 不在這一場的材料清單裡，判不了放不放得進深度上限")
         return fixed_fit(target, material, cap)
-    return family_fit(settings.family_by_id(target), cap)
+    family = settings.family_by_id(target)
+    given = None if ranges is None else ranges.get(target)
+    return family_fit(family if given is None else narrowed_family(family, given), cap)
 
 
 def fit_words(fit: TargetFit, cap: float) -> str:
@@ -144,6 +225,12 @@ def fit_words(fit: TargetFit, cap: float) -> str:
         return f"{fit.target} 生效 {fit.effective_m:g} m（材料組自己的上限，比個案上限 {cap:g} m 嚴）"
     return f"{fit.target} 生效 {fit.effective_m:g} m（個案上限" + (
         f"，比材料組自己的 {fit.material_m:g} m 嚴）" if fit.material_m is not None and fit.material_m > cap else "）")
+
+
+def ranged_misfits(fits: Sequence[TargetFit], ranges: Mapping[str, ZoneRange] | None) -> list[TargetFit]:
+    """寫了範圍、收窄後放不進上限的那幾組（#1199）：這一區點名要這種材料、還自己定了範圍，放不下就擋（分區頁標紅、
+    開跑拒收同一把），不像沒寫範圍的組只是不換過去。``fits`` 要是照 ``ranges`` 判的（:func:`target_fit`）。"""
+    return [fit for fit in fits if ranges and fit.target in ranges and not fit.usable]
 
 
 def family_fits(family: FamilySettings, cap: float | None) -> bool:

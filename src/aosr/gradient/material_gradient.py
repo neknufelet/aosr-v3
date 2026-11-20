@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 import jax
@@ -220,17 +220,35 @@ def depth_limits(designs: Sequence[SurfaceDesign]) -> tuple[DepthLimit, ...]:
     return tuple(limits)
 
 
-def baseline_theta(designs: Sequence[SurfaceDesign]) -> FloatVector:
-    """每面樣板本身的厚度與空腔當起點；超出盒界就拒收（例如 preset 的空腔比家族範圍深）。"""
-    values = []
+def baseline_theta(designs: Sequence[SurfaceDesign], ranged: Collection[str] = ()) -> FloatVector:
+    """每面樣板本身的厚度與空腔當起點；超出盒界就拒收（例如 preset 的空腔比家族範圍深）。
+
+    ``ranged`` 是起跑那一族有可調範圍的面片（#1199，``fixed_surfaces.ranged_starts``）：這幾面的樣板值先用換樣板那一把
+    （:func:`project_initial`：盒界 ∩ 總深，再取規格）投影進收窄後的範圍，不拒收；樣板本來就在範圍裡、總深也放得下時
+    投影不動它（逐位等於樣板）。沒給（空）整份逐位照舊。"""
+    values: list[float] = []
     for design in designs:
         if design.material is None:
             continue
+        own = []
         for name in design.variables:
             layer_index = int(name.split(".")[0].removeprefix("layer"))
-            values.append(float(getattr(design.material.layers[layer_index - 1], _THICKNESS)))
+            own.append(float(getattr(design.material.layers[layer_index - 1], _THICKNESS)))
+        values.extend(project_initial(np.asarray(own, dtype=np.float64), design) if design.surface_id in ranged else own)
     theta = np.asarray(values, dtype=np.float64)
     return checked_theta(theta, designs)
+
+
+def project_initial(values: FloatVector, design: SurfaceDesign) -> FloatVector:
+    """一面的初值（照 ``design.variables`` 的格序）投影進這一面的可行域：盒界 ∩ 總深（:func:`project_to_limits`，精確最近點），
+    再取規格（:func:`snap_to_specs`：棉取合法厚度、空腔照總深切）；在 ``values`` 的精度下算、回同精度。
+
+    換樣板（有深度上限或範圍時把家族初值投進新那一面）與有範圍的起跑（:func:`baseline_theta` 的 ``ranged``）共用這一把（#1199）。"""
+    values = np.asarray(values)
+    selected = (design,)
+    lower, upper = design_bounds(selected)
+    return snap_to_specs(project_to_limits(values, lower.astype(values.dtype), upper.astype(values.dtype),
+                                           depth_limits(selected)), selected).theta
 
 
 def checked_theta(theta: jax.Array | FloatVector, designs: Sequence[SurfaceDesign]) -> FloatVector:

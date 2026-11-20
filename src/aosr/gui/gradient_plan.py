@@ -31,6 +31,13 @@
 不默默拿掉、不改存檔。判在限制檢查與深度之前：太深放不下的那一筆照樣是這一句，不會先被別的理由蓋掉。
 沒有這種構造時這一段一個字都不產生，計畫與參數跟之前逐位相同。命令列照舊收 ``--allowed fixed:<代號>``，這裡只管網頁。
 
+每一區自己的可調範圍（#1199，設計設定的 ``ranges``，材料代號 → 棉厚與空腔的下上）：對材料庫核（只准收窄、棉厚是產品厚度、
+收窄後放得下）跟立面圖標紅同一把（``zone_limits.zone_range_problems``，紅的就不開；命令列開跑照同一條再核一次），
+第三階段頁另填的上限（分區頁看不到）收窄後放不下也拒收、同一句（:func:`_depth_targets`）。
+起跑那一族有範圍時起跑值（樣板的初值）不在範圍裡不拒收：引擎照換樣板那一把把起點投影進範圍（``material_gradient.project_initial``）。
+計畫記 ``ranges``（面片代號 → 家族 → 範圍），開跑參數每一族多一個 ``--range``（只加在 :func:`start_arguments`：
+範圍只收窄、家族代號不變，建替身那一份不帶、不用重建替身）。沒有範圍時這一段一個字都不產生，計畫與參數跟之前逐位相同。
+
 這裡只擋網頁講得清楚的事（設計設定對不上方案、一區都沒交給搜尋、家族不認識、深度上限給在不是搜尋的區、准用清單的代號
 不認識或排不出起點、有超過限制的區、准用的材料組一組都放不下）。
 """
@@ -49,11 +56,12 @@ from aosr.config.material_gradient import (
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
+from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
-    target_line, zone_limits, zone_words,
+    ranged_misfit_words, target_line, zone_limits, zone_words,
 )
 from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
@@ -117,6 +125,8 @@ class SearchPlan(BaseModel):
     depth_targets: dict[str, tuple[TargetLine, ...]] = Field(default_factory=dict, exclude_if=lambda value: not value)
     # 成對的兩片（左右對稱，#1206）：每一對面序在前的那一片在前，對與對照前面那一片的面序；沒有就不寫這一格（舊計畫逐位不變）。
     ties: tuple[tuple[str, str], ...] = Field(default=(), exclude_if=lambda value: not value)
+    # 面片代號 → 家族代號 → 這一區自己的可調範圍（#1199，命令列 --range 的寫法）；沒有就不寫這一格（舊計畫逐位不變）。
+    ranges: dict[str, dict[str, ZoneRange]] = Field(default_factory=dict, exclude_if=lambda value: not value)
 
 
 class TargetLine(BaseModel):
@@ -202,6 +212,29 @@ def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
     return found
 
 
+def _ranges(design: DesignSettings | None) -> dict[tuple[str, str], dict[str, ZoneRange]]:
+    """每一區自己的可調範圍（區 → 材料代號 → 範圍）。對材料庫核（只准收窄、棉厚是產品厚度、收窄後放得下）在前面
+    立面圖標紅那一把（``saved_refusals`` → ``zone_limits.zone_range_problems``，判法 ``depth_fit.range_problem``）已經擋過、
+    紅的就不開；命令列開跑再照同一條核一次（``fixed_surfaces.check_ranges``）。"""
+    return {(wall, zone): dict(sorted(item.ranges.items()))
+            for wall, zones in (design.zones if design is not None else {}).items()
+            for zone, item in zones.items() if item.ranges is not None}
+
+
+def used_ranges(plan: SearchPlan, settings: MaterialGradientSettings) -> dict[str, dict[str, dict[str, object]]]:
+    """開跑預覽給畫面的（#1199）：有範圍的每一片每一族實際用的範圍——棉厚下上、切過的產品厚度、空腔下上
+    （材料搜尋不調空腔是 None）。只排給人看，不進計畫。"""
+    found: dict[str, dict[str, dict[str, object]]] = {}
+    for surface, families in plan.ranges.items():
+        for code, given in families.items():
+            family = settings.family_by_id(code)
+            narrowed = narrowed_family(family, given)
+            found.setdefault(surface, {})[code] = {
+                "porous_m": list(given.porous_m), "thicknesses_m": list(narrowed.thicknesses_m),
+                "cavity_m": None if family.initial_cavity_m is None else list(narrowed.cavity_range_m)}
+    return found
+
+
 def _refuse_reference_only(scheme: Mapping[str, object], design: DesignSettings | None, targets: DepthTargets,
                            names: Mapping[str, str]) -> None:
     """准用清單原文裡有「鋼板直接貼在棉上」的固定材料就拒收（#1208）：寫排第一的那一組的整句
@@ -232,18 +265,29 @@ _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設"
 def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], per_surface: tuple[ZoneMode, ...],
                    depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets,
                    names: Mapping[str, str]) -> dict[str, tuple[TargetLine, ...]]:
+    """交給搜尋、有上限的每一區，准用的每一組在生效上限下的判決（開跑預覽那一格；准用清單照它拿掉放不下的組）。
+
+    寫了可調範圍的組照收窄後的判（#1199，同分區頁 ``zone_limits._target_problems`` 與命令列 ``check_depth_targets``）：
+    收窄後放不下的（``depth_fit.ranged_misfits``）拒收，句子同分區頁那一句（``ranged_misfit_words``）。分區頁看不到
+    第三階段頁另填的上限（``GradientRequest.max_depths``），那一格只有這裡擋得到；這裡在左右對稱那一段之前，
+    所以不會變成「建不出起跑配置、悄悄不綁」。准用的組一組都放不下照舊拒收。"""
     found: dict[str, tuple[TargetLine, ...]] = {}
     for (wall, zone), mode in zip(pairs, per_surface, strict=True):
         surface = surface_of(wall, zone)
         if mode != "search" or surface not in depths:
             continue
         item = design.zones.get(wall, {}).get(zone) if design is not None else None
-        fits = target_fits(None if item is None else item.allowed, depths[surface], targets)
+        given = None if item is None else item.ranges
+        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, given)
         if not fits:
             continue
         source = sources.get(surface, "request")
         cap = DepthCap(depths[surface], cast(DepthLevel, source if source in ("zone", "wall", "room") else "zone"))
         lines = [target_line(fit, cap, targets, level_words=_LEVEL_WORDS.get(source, source)) for fit in fits]
+        misfits = ranged_misfits(fits, given)
+        if misfits:
+            raise PlanRefused(f"{zone_words(wall, zone, names)}：" + "；".join(
+                ranged_misfit_words(fit, cap, targets, level_words=_LEVEL_WORDS.get(source, source)) for fit in misfits))
         if not any(fit.usable for fit in fits):
             raise PlanRefused(f"{zone_words(wall, zone, names)}：{no_group_words(lines)}")
         found[surface] = tuple(TargetLine.model_validate(line) for line in lines)
@@ -262,7 +306,7 @@ class TieInputs(NamedTuple):
 # 引擎拒收一對時說的是哪一項（``ties.TieRefused.what``）→ 給人看的一句。
 _TIE_WORDS = {"准用清單": "兩區讓程式選的材料不一樣", "家族": "兩區讓程式選的材料不一樣（起點的材料不同）",
               "起跑樣板": "兩區讓程式選的材料不一樣（起點的材料不同）", "θ 上下界": "兩區可調的範圍不一樣",
-              "深度上限": "兩區的最深不一樣", "裝法": "兩區的裝法不一樣", "fixed": "其中一區不是由程式最佳化",
+              "深度上限": "兩區的最深不一樣", "可調範圍": "兩區可調的範圍不一樣", "裝法": "兩區的裝法不一樣", "fixed": "其中一區不是由程式最佳化",
               "missing": "其中一區不在這一份方案的分區裡"}
 
 
@@ -272,14 +316,14 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
     起跑配置用命令列開跑同一支（``cli.start_designs``，構造清單照命令列的接法），第一次被問才建（要載入搜尋那一層，
     沒有位置對上的兩區就不載入）；起跑配置本身引擎就不收時，每一對都算沒配成，回 :class:`Unchecked`
     （不是這一對設定不一樣；例外原文只進伺服器記錄）。"""
-    built: list[tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]]] | Unchecked] = []
+    built: list[tuple[tuple[SurfaceDesign, ...], dict[str, tuple[str, ...]], dict[str, dict[str, ZoneRange]]] | Unchecked] = []
 
     def check(first: str, second: str) -> str | Unchecked | None:
         from aosr.config.capabilities import load_capabilities
         from aosr.config.directivity_defaults import load_directivity_defaults
         from aosr.config.material_gradient import fixed_target_id
         from aosr.gradient.cli import start_designs
-        from aosr.gradient.fixed_surfaces import fixed_targets_of
+        from aosr.gradient.fixed_surfaces import expanded_ranges, fixed_targets_of
         from aosr.gradient.start_config import presets_table
         from aosr.gradient.ties import TieRefused, check_ties_against_start
         from aosr.materials.search_library import fixed_candidates, user_fixed_entries
@@ -291,11 +335,12 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
                 if targets:
                     listed = user_fixed_entries([fixed_target_id(target) for target in targets], inputs.entries)
                     table = (*table, *fixed_candidates(targets, table, listed))
-                built.append(start_designs(
+                designs, expanded = start_designs(
                     scheme, settings, table, plan.presets, mount=plan.request.mount, fixed=dict(plan.fixed_surfaces),
                     caps=dict(plan.max_depths), allowed=dict(plan.allowed),
                     capabilities=load_capabilities(inputs.capabilities or config_path("capabilities.toml")),
-                    directivity=load_directivity_defaults(config_path("directivity_defaults.toml"))))
+                    directivity=load_directivity_defaults(config_path("directivity_defaults.toml")), ranges=plan.ranges)
+                built.append((designs, expanded, expanded_ranges(plan.ranges, [design.surface_id for design in designs])))
             except (ValueError, OSError) as error:  # 引擎拒收，或檢查要的檔讀不到：都不讓分區頁的限制檢查整支倒掉
                 # 原文是程式的話（代號、路徑），只進伺服器記錄，不上畫面。
                 _LOG.warning("左右對稱：建不出開跑那一組起跑配置，核不了綁定：%s", error)
@@ -304,7 +349,7 @@ def _engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSe
         if isinstance(start, Unchecked):
             return start
         try:
-            check_ties_against_start(((first, second),), *start)
+            check_ties_against_start(((first, second),), *start)  # 起跑設計、准用清單、可調範圍（都展開到面片）
         except TieRefused as error:
             return _TIE_WORDS.get(error.what, f"兩區的{error.what}不一樣")
         return None
@@ -391,6 +436,7 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
     allowed = _allowed(design, settings, fixed_ids)
+    ranges = _ranges(design)
     depths, sources = _depths(request, modes, design)
     lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
@@ -398,16 +444,17 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
         dropped = unusable.get(surface_of(*pair), frozenset())
         if dropped:
             allowed[pair] = tuple(target for target in chosen if target not in dropped)
+    presets = tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()), names)
+                    if mode == "search" else None for pair, mode in zip(pairs, per_surface, strict=True))
     return SearchPlan(
         surfaces=surfaces, modes=per_surface,
-        presets=tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()),
-                                    names)
-                      if mode == "search" else None for pair, mode in zip(pairs, per_surface, strict=True)),
+        presets=presets,
         fixed_surfaces={surface: SCHEME_MATERIAL for surface, mode in zip(surfaces, per_surface, strict=True)
                         if mode != "search"},
         max_depths=depths, depth_sources=sources, depth_targets=lines, family=family.id,
         max_steps=request.max_steps if request.max_steps is not None else settings.descent.max_steps, request=request,
-        allowed={surface_of(*pair): targets for pair, targets in sorted(allowed.items())})
+        allowed={surface_of(*pair): targets for pair, targets in sorted(allowed.items())},
+        ranges={surface_of(*pair): given for pair, given in sorted(ranges.items())})
 
 
 SearchPlan.model_rebuild()
@@ -457,6 +504,12 @@ def start_arguments(plan: SearchPlan) -> list[str]:
         arguments.extend(("--max-steps", str(plan.request.max_steps)))
     for surface, targets in plan.allowed.items():
         arguments.extend(("--allowed", f"{surface}={','.join(targets)}"))
+    # 每一區的可調範圍（#1199）：同綁定只加在這裡（建替身那一份不帶，範圍只收窄、不用重建替身）；寫法跟命令列讀回那一支同一份。
+    from aosr.gradient.fixed_surfaces import range_argument
+
+    for surface, families in plan.ranges.items():
+        for code, given in families.items():
+            arguments.extend(("--range", range_argument(surface, code, given)))
     # 成對的兩片（#1206）：只加在這裡、不進 configuration_arguments（建替身照那一份核固定材料，綁定不改起跑配置）。
     for first, second in plan.ties:
         arguments.extend(("--tie", f"{first}={second}"))

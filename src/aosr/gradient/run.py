@@ -70,9 +70,10 @@ from aosr.gradient.start_config import (
 )
 from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_candidates import FixedCandidateCheck
+from aosr.gradient.depth_fit import ZoneRange
 from aosr.gradient.fixed_surfaces import (
-    AllowedTargets, FixedSurfaces, MaxDepths, check_fixed_depth_conflicts, designs_with_max_depths,
-    expanded_allowed_targets, fixed_targets_of,
+    AllowedTargets, FixedSurfaces, MaxDepths, ZoneRanges, check_fixed_depth_conflicts, designs_with_max_depths,
+    designs_with_ranges, expanded_allowed_targets, expanded_ranges, fixed_targets_of, ranged_starts,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.ties import Ties, check_ties_against_start, check_ties_hold, checked_ties, tied_cells
@@ -152,6 +153,7 @@ class GradientProject(BaseModel):
     ``allowed_targets`` 是每區准用清單（#1082 段 2-3b，面 → 目標，照開跑時給的面名，沒展開）；清單裡的固定材料
     每一個都有一筆 ``fixed_candidate_checks``（替身留出驗證，通過才開得了）。沒有清單兩格都不寫（逐位等於加這兩格之前）。
     使用者固定材料存在材料快照 v2 裡。``ties`` 是綁定表（#1206，成對的兩片）：空表不寫、缺這一格讀成不綁。
+    ``ranges`` 是每一區自己的可調範圍（#1199，面 → 家族 → 範圍，照開跑時給的面名，沒展開）：沒有就不寫（逐位等於加這一格之前）。
     """
 
     model_config = _FROZEN
@@ -190,6 +192,7 @@ class GradientProject(BaseModel):
     allowed_targets: AllowedTargets = Field(default_factory=dict, exclude_if=lambda value: not value)
     fixed_candidate_checks: tuple[FixedCandidateCheck, ...] = Field(default=(), exclude_if=lambda value: not value)
     ties: Ties = Field(default=(), exclude_if=lambda value: not value)
+    ranges: ZoneRanges = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def _depth_not_fixed(self) -> Self:
@@ -364,7 +367,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
                 patch_keys: PatchKeys = boundary_patches(), max_depths: Mapping[str, float] | None = None,
                 frequency_batch: int | None = None, device: Device = "cpu", materials_sha256: str | None = None,
                 allowed_targets: Mapping[str, Sequence[str]] | None = None,
-                ties: Sequence[tuple[str, str]] | None = None) -> str:
+                ties: Sequence[tuple[str, str]] | None = None,
+                ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> str:
     """資料夾名：輸入（方案、替身、六面 preset、用途、設定、物理身分、梯度目標設定）正規化 JSON 的 SHA-256 前 32 位。
 
     同一組輸入一定落在同一個資料夾，兩個 ``start`` 同時跑同一組輸入會搶同一把資料夾鎖。梯度目標設定（#561 壬一：
@@ -372,6 +376,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
     安裝方式（#990）只在不是剛背時多一個 ``"mount"`` 鍵：剛背的資料夾名逐位等於加這一格之前，貼在原牆上落在另一個資料夾。
     材料快照（#1082 段 2-3a）只在使用者材料接成家族時多一個 ``"materials"`` 鍵（快照整份的 SHA-256）。
     綁定表（#1206）只在不是空的時多一個 ``"ties"`` 鍵（固定存法，``A=B`` 與 ``B=A`` 同一個名）。
+    每一區的可調範圍（#1199）只在不是空的時多一個 ``"ranges"`` 鍵（整份照鍵排好再寫，面與家族的先後不影響）：
+    換一份範圍就是另一個資料夾。
     """
     identity: dict[str, object] = {
         "scheme": scheme_sha256, "surrogate": surrogate_manifest_sha256, "presets": list(presets), "purpose": purpose,
@@ -392,6 +398,9 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["allowed_targets"] = {face: list(targets) for face, targets in sorted(allowed_targets.items())}
     if ties:
         identity["ties"] = [list(pair) for pair in checked_ties(ties)]
+    if ranges:
+        identity["ranges"] = {face: {family: given.model_dump(mode="json") for family, given in families.items()}
+                              for face, families in ranges.items()}
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
     content = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -618,7 +627,8 @@ def load_problem(project: GradientProject) -> GradientProblem:
     kept = _wall_materials_from_inputs(score_scheme, next(iter(pairs.values()))[1])
     table = project_presets(project)
     designs = designs_for(project.presets, settings, kept=kept, mount=project.mount,
-                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table)
+                          fixed_surfaces=project.fixed_surfaces, max_depths=project.max_depths, table=table,
+                          ranges=project.ranges)
     air, ranges = construction_environment(density_kg_m3=scheme.scene.density_kg_m3,
                                            sound_speed_m_s=scheme.scene.sound_speed_m_s)
     six = build_constants(score_scheme, pair_inputs={key: item[1] for key, item in pairs.items()},
@@ -640,12 +650,14 @@ def load_problem(project: GradientProject) -> GradientProblem:
     from aosr.gradient.fixed_surfaces import expanded_fixed_surfaces
 
     names = tuple(d.surface_id for d in designs)
+    zone_ranges = expanded_ranges(project.ranges, names)
     context = TemplateContext(settings, table, named_materials(kept),
                               objective_for, project.mount, expanded_fixed_surfaces(project.fixed_surfaces, names),
-                              max_depths=project.max_depths, allowed=project_allowed(project, names), ties=project.ties)
-    check_ties_against_start(project.ties, designs, context.allowed or {})
+                              max_depths=project.max_depths, allowed=project_allowed(project, names), ties=project.ties,
+                              ranges=zone_ranges or None)
+    check_ties_against_start(project.ties, designs, context.allowed or {}, zone_ranges)
     return GradientProblem(designs, settings, objective, header_for(model, designs, settings, objective_constants=six,
-                                                                    ties=project.ties), kept, context)
+                                                                    ties=project.ties, ranges=zone_ranges), kept, context)
 
 
 def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[float], *, density_kg_m3: float,
@@ -687,9 +699,10 @@ def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[flo
 # ---- 前段與整場 ----
 
 def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | None) -> FloatVector:
-    """連續下降、取規格、重調三段，各自整段算完才寫成一批；回重調完的可行 θ（逐位等於帳本前段最後一列）。"""
+    """連續下降、取規格、重調三段，各自整段算完才寫成一批；回重調完的可行 θ（逐位等於帳本前段最後一列）。
+    起點照標頭記的可調範圍投影（#1199，``baseline_theta`` 的 ``ranged``；開跑與接續都從 ``project.json`` 重建到這裡）。"""
     designs, settings, objective, header = problem.designs, problem.settings, problem.objective, problem.header
-    descent = projected_descent(objective, baseline_theta(designs), design_bounds(designs), settings.descent,
+    descent = projected_descent(objective, baseline_theta(designs, ranged_starts(designs, header.ranges)), design_bounds(designs), settings.descent,
                                 limits=depth_limits(designs), should_stop=should_stop, tied_cells=tied_cells(designs, header.ties))
     if not descent.steps:
         raise Unestimable(descent.stop_reason)
@@ -804,7 +817,7 @@ def template_header_for[K: BoundaryKey](header: MaterialGradientHeader, settings
         initial_surfaces=header.surfaces, score_constants=header.score_constants,
         kept_digests=digests, mount=header.mount,
         fixed_surfaces=header.fixed_surfaces, max_depths=header.max_depths, boundary_patches=header.boundary_patches,
-        allowed_targets=dict(allowed or {}), fixed_candidate_digests=candidate_digests, ties=header.ties)
+        allowed_targets=dict(allowed or {}), fixed_candidate_digests=candidate_digests, ties=header.ties, ranges=header.ranges)
 
 
 def _template_segment(problem: GradientProblem, folder: Path, should_stop: StopCheck | None) -> TemplateResult:
@@ -860,17 +873,20 @@ def final_designs[K: BoundaryKey](surfaces: Sequence[tuple[str, str | None]], se
                   kept: Mapping[K, SurfaceMaterial], *, mount: Mount = MOUNT_RIGID,
                   fixed_surfaces: Mapping[str, str] | None = None,
                   max_depths: Mapping[str, float] | None = None,
-                  table: Sequence[PresetMaterial] | None = None) -> tuple[SurfaceDesign, ...]:
+                  table: Sequence[PresetMaterial] | None = None,
+                  ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> tuple[SurfaceDesign, ...]:
     """最後配置（每面 preset 或 None，照 ``Wall.all()``）→ 每面設計；不貼的面帶方案原本那面的牆；安裝方式照 ``mount``。
     ``table`` 同 :func:`_uncapped_designs_for`（有材料快照的搜尋要給 :func:`project_presets`）。
 
     每面上限已在起跑驗證，換家族後沿用換樣板的 min 規則（放不下的家族換樣板根本不換過去）。
+    ``ranges``（#1199）同換樣板那一把收窄（最後那一族有範圍的面，合法厚度與界都只到範圍裡；不核起跑值）。
     """
     if tuple(surface_id for surface_id, _ in surfaces) != surface_ids(material_keys(kept)):
         raise ValueError(f"配置的面要照 Wall.all() 給六面，收到 {[surface_id for surface_id, _ in surfaces]}")
     designs = _uncapped_designs_for(tuple(preset for _, preset in surfaces), settings, kept=kept, mount=mount,
                                     fixed_surfaces=fixed_surfaces, table=table)
-    return designs_with_max_depths(designs, settings, max_depths or {})
+    designs = designs_with_ranges(designs, settings, ranges)
+    return designs_with_max_depths(designs, settings, max_depths or {}, ranges)
 
 
 def result_from_ledger[K: BoundaryKey](folder: Path, settings: MaterialGradientSettings, kept: Mapping[K, SurfaceMaterial], *,

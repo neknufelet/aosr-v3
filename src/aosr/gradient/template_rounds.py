@@ -29,8 +29,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.material_gradient import MOUNT_RIGID, NONE_TARGET, MaterialGradientSettings, Mount, is_fixed_target
-from aosr.gradient.depth_fit import family_fits
-from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths, expanded_max_depths
+from aosr.gradient.depth_fit import ZoneRange, family_fits
+from aosr.gradient.fixed_surfaces import designs_with_fixed, designs_with_max_depths, designs_with_ranges, expanded_max_depths
 from aosr.gradient.endpoint import checked_wall_designs
 from aosr.gradient.gpu import SinglePrecisionObjective
 from aosr.gradient.six_category_gpu import SixCategorySinglePrecisionObjective
@@ -79,6 +79,8 @@ class TemplateContext(NamedTuple):
     allowed: Mapping[str, tuple[str, ...]] | None = None
     # 綁定表（#1206）：成對兩片算一個單位，一起換成同一個目標；空表時每一片自己一個單位。
     ties: tuple[tuple[str, str], ...] = ()
+    # 每一區自己的可調範圍（#1199；面片代號 → 家族 → 範圍，已展開到面片）：換到有範圍的那一族就照範圍收窄、初值投影進範圍。
+    ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None
 
 
 class TemplatePoint(NamedTuple):
@@ -182,7 +184,12 @@ def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings,
     ``max_depths``（個案上限，同命令列的寫法，整面或面片）給了時，比那一面上限還深排不下的家族不列
     （#1082 段 2-4，那一組在那一面不可用）；每個家族都放得下時清單逐位跟沒給一樣。固定材料放不放得下在開跑前核
     （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，放不下就拒收），這裡不再判。
-    ``ties`` 是綁定表（#1206）：成對兩片算一個單位，只列面序在前那一片的目標（換的時候兩片一起換）。"""
+    ``ties`` 是綁定表（#1206）：成對兩片算一個單位，只列面序在前那一片的目標（換的時候兩片一起換）。
+
+    可調範圍（#1199）這裡不收：放不放得下照沒收窄的家族判。寫了範圍、收窄後放不下的家族，開跑閘門
+    （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，``depth_fit.ranged_misfits``）一律拒收，所以這裡列出的家族
+    換過去（:func:`swap` 照範圍收窄）都放得下。接續（``run.load_problem``）不重跑那一道閘門，一致性全靠開跑那一次；
+    哪天閘門放寬（收窄後放不下只列不可用），這裡要改成照 ``depth_fit.target_fit(..., ranges)`` 判。"""
     caps = expanded_max_depths(max_depths, tuple(surface_id for surface_id, _ in surfaces)) if max_depths else {}
     followers = tie_followers(ties, [surface_id for surface_id, _ in surfaces]) if ties else {}
     found: list[tuple[str, str]] = []
@@ -212,7 +219,8 @@ def designs_for_surfaces(surfaces: Surfaces, context: TemplateContext) -> tuple[
                                      mount=context.mount, fixed_surfaces=context.fixed_surfaces)
     else:
         designs = designs_from_presets(surfaces, context.settings, context.presets, kept=context.kept, mount=context.mount)
-    designs = designs_with_max_depths(designs, context.settings, context.max_depths or {})
+    designs = designs_with_ranges(designs, context.settings, context.ranges)
+    designs = designs_with_max_depths(designs, context.settings, context.max_depths or {}, context.ranges)
     return checked_wall_designs(designs)
 
 
@@ -227,6 +235,9 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
     換成它現在的家族（或現在就不貼還換不貼）不是替換，拒收。
     綁定表（#1206，``context.ties``）裡成對的片兩片一起換成同一個目標、同一組初值；要給面序在前的那一片，
     換完整張表檢查一次成對逐位相等。
+    ``context.ranges``（#1199）裡那一面有目標那一族的範圍時，新設計照範圍收窄（:func:`designs_for_surfaces`），
+    家族初值照有深度上限時那一把投影（:func:`~aosr.gradient.material_gradient.project_initial`：盒界 ∩ 總深，再取規格）
+    進範圍；換回來也是同一條（有範圍的起跑也用這一把）。
     """
     if surface_id in (context.fixed_surfaces or {}):
         raise ValueError(f"固定面 {surface_id} 不參與換樣板")
@@ -265,19 +276,20 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
             if family.initial_cavity_m is not None:
                 pieces.append(dtype(family.initial_cavity_m))
         offset += size
-    new_theta = checked_theta(np.asarray(pieces, dtype=values.dtype), new_designs)
-    if context.max_depths and new_designs[index].material is not None:
+    raw = np.asarray(pieces, dtype=values.dtype)
+    ranged = new_designs[index].material is not None and any(target in (context.ranges or {}).get(name, {}) for name in unit)
+    # 有範圍時初值可能在收窄後的盒界外：先投影再核（沒有範圍照舊先核）。
+    new_theta = raw if ranged else checked_theta(raw, new_designs)
+    if (context.max_depths or ranged) and new_designs[index].material is not None:
         # 家族初值不改；只投影新換那一面（成對就兩片各投一次），其他面的 θ 逐位照搬。
-        from aosr.gradient.material_gradient import depth_limits, design_bounds, project_to_limits, snap_to_specs
+        from aosr.gradient.material_gradient import project_initial
 
         for member in (ids.index(name) for name in unit):
-            selected = (new_designs[member],)
             start = sum(len(design.variables) for design in new_designs[:member])
-            stop = start + len(selected[0].variables)
-            lower, upper = design_bounds(selected)
-            new_theta[start:stop] = snap_to_specs(project_to_limits(
-                new_theta[start:stop], lower.astype(values.dtype), upper.astype(values.dtype), depth_limits(selected)),
-                selected).theta
+            stop = start + len(new_designs[member].variables)
+            new_theta[start:stop] = project_initial(new_theta[start:stop], new_designs[member])
+    if ranged:
+        new_theta = checked_theta(new_theta, new_designs)
     if not is_feasible(new_theta, new_designs):
         raise ValueError(f"面 {surface_id} 換成 {target} 的初值不可行（厚度不是合法值或厚度＋空腔超過總深度上限）")
     check_ties_hold(new_theta, new_designs, context.ties, "換樣板之後")

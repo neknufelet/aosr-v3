@@ -16,6 +16,10 @@
   （沒寫清單就是全部可調材料）列出生效上限與是哪一條擋住的（個案哪一層／材料組自己）；比一組最淺排法還淺、或固定材料
   總深超過（量不出多深也算）＝那一組在這一區不可用（列在 ``caps`` 的 ``targets``、不擋，搜尋不換過去）；准用的材料組一組都不可用＝紅
   （「不貼」不算救：交給搜尋卻什麼都貼不上）。清單本來只有「不貼」的區不判。沒傳材料組（``depth_targets``）就不判這一項。
+- 每一區自己的可調範圍（#1199，設計設定 ``ZoneDesign.ranges``；判法在引擎一份 ``depth_fit``）：對材料庫核（:func:`zone_range_problems`，
+  跟准用清單認代號那一支 :func:`zone_targets` 放在一起）——不是可最佳化材料、超出材料頁的範圍（只准收窄，要放寬到材料頁改）、
+  棉厚不是產品厚度、空腔超出或材料不調空腔、收窄後放不進材料自己的總深，都紅；有上限時寫了範圍的那一組照收窄後的判，
+  放不下就紅（``depth_fit.ranged_misfits``，開跑前檢查同一把），不像沒寫範圍的組只列「不可用」。沒寫範圍時一個字都不多。
 - 可信範圍（固定區的材料參數，跟材料頁同一個出處 ``material_curves.range_check``）：物理拒算的標紅；照算但醒目提醒的
   標「警告」、不擋（計畫段 2-2b 寫的是「超出可信範圍警告」，物理那邊也照算）。沒傳檢查函式就不判這一項；
   網頁的限制檢查、開跑預覽、開跑與建替身都傳材料頁那一支（正式入口開機釘中央處理器＋雙精度）。
@@ -43,11 +47,11 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, fixed_fit, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, centimeters, fixed_fit, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
-from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode
+from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneDesign, ZoneMode
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.materials.library import MeasuredTable
@@ -280,6 +284,28 @@ def zone_targets(allowed: Sequence[str] | None, targets: DepthTargets) -> tuple[
     return tuple(found)
 
 
+def zone_range_problems(ranges: Mapping[str, ZoneRange] | None, targets: DepthTargets) -> tuple[list[Problem], dict[str, ZoneRange]]:
+    """一區的可調範圍對材料庫核（#1199，判法 ``depth_fit.range_problem``）：回紅的那幾條與核過的那幾種（給深度判法用）。
+    代號要是這一場的可最佳化材料（家族代號就是材料庫代號）；不合的每一種一條紅，句子點名是哪一種材料。"""
+    families = {family.id: family for family in targets.settings.family}
+    problems: list[Problem] = []
+    valid: dict[str, ZoneRange] = {}
+    for code, given in (ranges or {}).items():
+        name = targets.label(code)
+        family = families.get(code)
+        if family is None:
+            text = (f"{name}是固定成品，沒有可調範圍（範圍只給可最佳化材料）" if code in targets.fixed
+                    else f"可調範圍的材料 {code} 材料庫裡沒有")
+            problems.append(Problem(code="range_unknown", level="red", text=text))
+            continue
+        problem = range_problem(family, given)
+        if problem is not None:
+            problems.append(Problem(code="range_invalid", level="red", text=f"{name}的可調範圍：{problem}"))
+            continue
+        valid[code] = given
+    return problems, valid
+
+
 def target_line(fit: TargetFit, cap: DepthCap, targets: DepthTargets, *, level_words: str | None = None) -> dict[str, object]:
     """一組在一區的判決給畫面：代號、名字、可不可用、生效上限、哪一條擋住（``case`` 個案／``material`` 材料組自己）與一句白話。"""
     identifier = fit.target[len("fixed:"):] if is_fixed_target(fit.target) else fit.target
@@ -302,13 +328,15 @@ def target_line(fit: TargetFit, cap: DepthCap, targets: DepthTargets, *, level_w
             "blocker": fit.blocker, "text": text}
 
 
-def target_fits(allowed: Sequence[str] | None, cap: float, targets: DepthTargets) -> tuple[TargetFit, ...] | None:
-    """一區每一個材料組（不含不貼）在上限 ``cap`` 下的判決；清單有不認識的代號回 None。"""
+def target_fits(allowed: Sequence[str] | None, cap: float, targets: DepthTargets,
+                ranges: Mapping[str, ZoneRange] | None = None) -> tuple[TargetFit, ...] | None:
+    """一區每一個材料組（不含不貼）在上限 ``cap`` 下的判決；清單有不認識的代號回 None。
+    ``ranges`` 是這一區核過的可調範圍（:func:`zone_range_problems` 回的）：有範圍的組照收窄後的判。"""
     listed = zone_targets(allowed, targets)
     if listed is None:
         return None
     fixed = {fixed_target(key): material for key, material in targets.fixed.items()}
-    return tuple(target_fit(target, cap, targets.settings, fixed) for target in listed if target != NONE_TARGET)
+    return tuple(target_fit(target, cap, targets.settings, fixed, ranges) for target in listed if target != NONE_TARGET)
 
 
 def no_group_words(lines: Sequence[Mapping[str, object]]) -> str:
@@ -316,15 +344,40 @@ def no_group_words(lines: Sequence[Mapping[str, object]]) -> str:
     return "程式能選的材料沒有一種放得進深度上限，這一區什麼都貼不上（「不貼」不算）：" + "；".join(str(line["text"]) for line in lines)
 
 
-def _target_problems(allowed: Sequence[str] | None, cap: DepthCap, targets: DepthTargets
-                     ) -> tuple[list[Problem], list[dict[str, object]]]:
-    fits = target_fits(allowed, cap.value_m, targets)
+def ranged_misfit_words(fit: TargetFit, cap: DepthCap, targets: DepthTargets, *, level_words: str | None = None) -> str:
+    """寫了範圍、收窄後放不下的那一組擋下的那一句（頁面紅、網頁開跑擋同一句）。``fit`` 是 ``depth_fit.ranged_misfits``
+    挑出來的那一組（家族、比最淺排法淺）。寫法同 :func:`target_line` 那一句，數字換成公分（:func:`~aosr.gradient.depth_fit.
+    centimeters`，第 2 支的範圍格子是公分）；沒寫範圍的組那一句照舊是公尺。"""
+    case = f"{centimeters(cap.value_m)} cm（{level_words or LEVEL_WORDS[cap.level]}的上限）"
+    return (f"{targets.label(fit.target)}：不可用——深度上限 {case}比這一組最淺排法 {centimeters(cast(float, fit.shallowest_m))} cm "
+            "還淺（個案上限擋住）；這是照這一區的可調範圍收窄後的最淺排法（最薄棉加空腔下界），請調小範圍的下限或放寬上限")
+
+
+def _target_problems(allowed: Sequence[str] | None, cap: DepthCap, targets: DepthTargets,
+                     ranges: Mapping[str, ZoneRange] | None = None) -> tuple[list[Problem], list[dict[str, object]]]:
+    fits = target_fits(allowed, cap.value_m, targets, ranges)
     if fits is None or not fits:
         return [], []
     lines = [target_line(fit, cap, targets) for fit in fits]
+    problems = [Problem(code="range_depth", level="red", text=ranged_misfit_words(fit, cap, targets))
+                for fit in ranged_misfits(fits, ranges)]
     if not any(fit.usable for fit in fits):
-        return [Problem(code="depth_no_group", level="red", text=no_group_words(lines))], lines
-    return [], lines
+        return [*problems, Problem(code="depth_no_group", level="red", text=no_group_words(lines))], lines
+    return problems, lines
+
+
+def _search_problems(item: ZoneDesign | None, cap: DepthCap | None, targets: Callable[[], DepthTargets | None]
+                     ) -> tuple[list[Problem], list[dict[str, object]]]:
+    """交給搜尋的一區：寫了可調範圍就對材料庫核（#1199），有上限時准用的每一組放不放得下（有範圍的組照收窄後的判）。
+    材料組（``targets``）只在寫了範圍或有上限時才讀。"""
+    ranges = None if item is None else item.ranges
+    problems: list[Problem] = []
+    if ranges and (found := targets()) is not None:
+        problems, ranges = zone_range_problems(ranges, found)
+    if cap is None or (found := targets()) is None:
+        return problems, []
+    depth, lines = _target_problems(None if item is None else item.allowed, cap, found, ranges)
+    return [*problems, *depth], lines
 
 
 def range_target(material: SurfaceMaterial) -> SurfaceMaterial | None:
@@ -368,7 +421,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                 depth_targets: Callable[[], DepthTargets] | None = None) -> dict[str, object]:
     """一份方案（草稿也可以）逐面逐區的限制檢查；回 ``zones``（牆 → 區 → 幾條）、``walls``（整面的）、``caps``（每區生效上限；
     搜尋區另有 ``targets``：每一組的生效上限與哪一條擋住）、``red``（擋下的條數）與 ``refusals``（擋下的每一條，給開跑與
-    「拿去搜尋」照講）。``depth_targets`` 只在有一區交給搜尋又有上限、或固定區的材料直接取代牆面又有上限時才叫
+    「拿去搜尋」照講）。``depth_targets`` 只在有一區交給搜尋又有上限或寫了可調範圍、或固定區的材料直接取代牆面又有上限時才叫
     （讀材料庫），整份最多叫一次；叫失敗照講成一條紅。"""
     scheme_id = str(document.get("scheme_id", ""))
     design, top = _design_of(design_value, scheme_id)
@@ -411,9 +464,9 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             material = _material(entry.get("material"))
             lines = found.setdefault(key, [])
             lines.extend(_depth_problems(material, mode, cap, targets))
-            if cap is not None and mode == "search" and (found_targets := targets()) is not None:
-                item = design.zones.get(wall, {}).get(key) if design is not None else None
-                problems, lines_by_group = _target_problems(None if item is None else item.allowed, cap, found_targets)
+            if mode == "search":
+                problems, lines_by_group = _search_problems(design.zones.get(wall, {}).get(key) if design is not None else None,
+                                                            cap, targets)
                 lines.extend(problems)
                 if lines_by_group:
                     caps[wall][key]["targets"] = lines_by_group

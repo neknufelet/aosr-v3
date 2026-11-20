@@ -76,9 +76,10 @@ def candidate_designs(designs: Sequence[SurfaceDesign], target: str, allowed: Ma
 
 
 def design_impedances(designs: Sequence[SurfaceDesign], frequencies_hz: Sequence[float], *,
-                      density_kg_m3: float, sound_speed_m_s: float) -> FrequencyBoundaryImpedances:
+                      density_kg_m3: float, sound_speed_m_s: float, ranged: Collection[str] = ()) -> FrequencyBoundaryImpedances:
     """設計清單在指定頻點的每片阻抗：保留原牆、固定材料與樣板全用搜尋同一條材料鏈；樣板片的 θ 取下降起點
-    （投影到盒界與總深度內）。空氣照方案場景（跟替身建模、搜尋同一組）。要在雙精度已開的行程裡叫。"""
+    （投影到盒界與總深度內；``ranged`` 那幾面先照可調範圍投影，同 ``baseline_theta``，#1199）。空氣照方案場景
+    （跟替身建模、搜尋同一組）。要在雙精度已開的行程裡叫。"""
     import jax.numpy as jnp
     import numpy as np
 
@@ -89,7 +90,7 @@ def design_impedances(designs: Sequence[SurfaceDesign], frequencies_hz: Sequence
     from aosr.materials.construction_diff import surface_impedance_from_parameters
 
     air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
-    theta = descent_start(baseline_theta(designs), design_bounds(designs), depth_limits(designs))
+    theta = descent_start(baseline_theta(designs, ranged), design_bounds(designs), depth_limits(designs))
     axis = jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64))
     templates = design_templates(designs, axis, air=air, ranges=ranges)
     parameters = surface_parameters(designs, theta)
@@ -136,9 +137,9 @@ class CandidateVerdict:
 
 def candidate_configurations(designs: Sequence[SurfaceDesign], allowed: Mapping[str, Sequence[str]],
                              table: Sequence[PresetMaterial], frequencies_hz: Sequence[float], *, density_kg_m3: float,
-                             sound_speed_m_s: float) -> dict[str, FrequencyBoundaryImpedances]:
-    """准用清單裡每一個固定材料的核對配置：起跑設計裡准用它的片換成它、其他片照起跑配置，整條頻率軸的每片阻抗。
-    算不出阻抗（物理拒算、不是有限數）就拒收、點名哪一個。"""
+                             sound_speed_m_s: float, ranged: Collection[str] = ()) -> dict[str, FrequencyBoundaryImpedances]:
+    """准用清單裡每一個固定材料的核對配置：起跑設計裡准用它的片換成它、其他片照起跑配置（``ranged`` 那幾面的起點照可調範圍
+    投影，:func:`design_impedances`），整條頻率軸的每片阻抗。算不出阻抗（物理拒算、不是有限數）就拒收、點名哪一個。"""
     import numpy as np
 
     from aosr.gradient.fixed_surfaces import fixed_targets_of
@@ -148,7 +149,7 @@ def candidate_configurations(designs: Sequence[SurfaceDesign], allowed: Mapping[
         swapped = candidate_designs(designs, target, allowed, table)
         try:
             impedances = design_impedances(swapped, frequencies_hz, density_kg_m3=density_kg_m3,
-                                           sound_speed_m_s=sound_speed_m_s)
+                                           sound_speed_m_s=sound_speed_m_s, ranged=ranged)
         except ValueError as error:
             raise MaterialsRefused(f"固定材料 {fixed_target_id(target)} 在搜尋頻點物理拒算，搜尋不開：{error}") from error
         if not all(np.all(np.isfinite(np.asarray(row))) for row in impedances.values() if row is not None):
@@ -240,15 +241,16 @@ def check_fixed_candidates(model: ReducedModel, operators: FullOperators, design
                            density_kg_m3: float, sound_speed_m_s: float, workers: int = 1,
                            trained: Collection[str] = (),
                            configurations: Mapping[str, FrequencyBoundaryImpedances] | None = None,
+                           ranged: Collection[str] = (),
                            ) -> tuple[FixedCandidateCheck, ...]:
     """准用清單裡每一個固定材料各一組留出驗證（整條頻率軸、兩把尺）；全部過了回每一筆的紀錄，有沒過的就全部核完再拒收、
     一次寫出每一個沒過的數字與尺，不放寬。``trained`` 是替身訓練說明記過的固定材料（措辭用：訓練過但不夠準、或沒學過）。
     算不出阻抗（物理拒算、不是有限數）也拒收、點名哪一個。``configurations`` 給了就用它（開跑那一道先算好、比過沿用不成的
-    那一份，:func:`candidate_configurations` 同一支算的），沒給就在這裡算。"""
+    那一份，:func:`candidate_configurations` 同一支算的），沒給就在這裡算（``ranged`` 同那一支）。"""
     axis = tuple(float(value) for value in model.frequencies_hz)
     if configurations is None:
         configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=density_kg_m3,
-                                                  sound_speed_m_s=sound_speed_m_s)
+                                                  sound_speed_m_s=sound_speed_m_s, ranged=ranged)
     verdicts = judge_candidates(model, operators, configurations, allowed, workers=workers)
     failed = [verdict for verdict in verdicts.values() if not verdict.passed]
     frequency_ruler, band_ruler = holdout_ruler_values()

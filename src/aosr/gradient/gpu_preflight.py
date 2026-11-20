@@ -21,7 +21,12 @@ if TYPE_CHECKING:
 
 
 def _start_theta(problem: GradientProblem) -> tuple[float, ...]:
-    start = descent_start(baseline_theta(problem.designs), design_bounds(problem.designs), depth_limits(problem.designs))
+    """下降真正的起點（同 ``run._pre_loop``：有可調範圍的面照標頭記的範圍投影，#1199）。"""
+    from aosr.gradient.fixed_surfaces import ranged_starts
+
+    designs = problem.designs
+    start = descent_start(baseline_theta(designs, ranged_starts(designs, problem.header.ranges)), design_bounds(designs),
+                          depth_limits(designs))
     return tuple(float(x) for x in start)
 
 
