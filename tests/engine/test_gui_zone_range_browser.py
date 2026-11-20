@@ -201,7 +201,7 @@ def test_widening_past_the_material_page_or_from_above_to_is_refused_on_the_spot
         page.locator(_cell(page, WOOL, "cavity", "high")).fill("30")
         page.locator("#zone-panel-apply").click()
         problem = page.locator("#zone-panel-problem")
-        expect(problem).to_contain_text("可調範圍：空腔 0～0.3 公尺超出材料頁的範圍（0～0.25 公尺）；這裡只准收窄，要放寬請到材料頁改那份材料")
+        expect(problem).to_contain_text("可調範圍：空腔 0～30 cm 超出材料頁的範圍（0～25 cm）；這裡只准收窄，要放寬請到材料頁改那份材料")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         _shot(page, "3-widening-refused")
         assert page.evaluate("() => JSON.stringify(zoneDesign)") == before
