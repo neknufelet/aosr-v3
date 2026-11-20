@@ -722,6 +722,7 @@ function searchCell(wall, key, zone, setting, cell) {
   // 勾選表收在「改清單」後面（每一區都攤開二十幾格，整張表讀不下去）；點開過的那幾區重畫後照樣開著。
   // 只加減勾的這一種：存著的清單原樣帶回（順序不動、材料庫找不到的代號也不偷丟）。
   const details = document.createElement("details"); details.id = `zone-allowed-box-${wall}-${key}`;
+  details.dataset.openKey = `${wall}/${key}`;
   details.open = zoneAllowedOpen.has(`${wall}/${key}`);
   const summary = document.createElement("summary"); summary.id = `zone-allowed-summary-${wall}-${key}`;
   const words = () => details.open ? "收起清單" : `改清單（現在 ${allowed.length} 種，勾要讓程式選的）`;
@@ -788,6 +789,11 @@ function renderZoneTable(wall) {
   window.renderZoneOverview?.();
   const area = $("elevation-zones");
   if (!area) return;
+  // 清掉之前先照畫面上每個清單現在開不開記一次（#1195）：點「改清單」當下清單就開或收了，toggle 要晚一步才送來；
+  // 前一步晚到的回覆剛好在這中間重畫，只看 toggle 記的那一份會把剛點開的畫成收著、點收的畫成開著。
+  for (const box of area.querySelectorAll("details[data-open-key]")) {
+    if (box.open) zoneAllowedOpen.add(box.dataset.openKey); else zoneAllowedOpen.delete(box.dataset.openKey);
+  }
   area.replaceChildren();
   if (!wall || !scheme) return;
   area.append(originalSchemeRow());
