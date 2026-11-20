@@ -15,9 +15,9 @@ from playwright.sync_api import Browser, expect
 from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui import home_view as home_words
-from aosr.gui.home_view import (LAYOUT_NOTE, MATERIALS_NOTE, NO_WHOLE_LAYOUT_NOTE, ZONED_LAYOUT_NOTE, home_data, home_view,
-                                latest_picks, name_words, room_overview, scheme_line)
+from aosr.gui.home_view import (LAYOUT_NOTE, MATERIALS_NOTE, NO_SCHEME_MATERIALS_NOTE, NO_WHOLE_LAYOUT_NOTE,
+                                ZONED_LAYOUT_NOTE, home_data, home_view, latest_picks, name_words, room_overview,
+                                scheme_line)
 from aosr.gui.room_words import treated, treated_words
 from aosr.gui.result_list import ResultSummary
 from aosr.gui.wall_words import wall_words
@@ -169,11 +169,11 @@ def test_links_follow_whether_the_latest_scheme_is_saved_and_zoned() -> None:
     links = cast(dict[str, dict[str, str]], home_view(("/results/r2", whole), {}, library)["links"])
     assert links["layout"]["url"] == "/search-start"
     # 沒有帶得過去的那一份（封存了，或還沒算過）：連到下面方案那一節（那裡有同一顆入口），小字講先打開一份。
-    assert (links["materials"]["url"], links["materials"]["note"]) == ("#scheme-section", home_words.NO_SCHEME_MATERIALS_NOTE)
+    assert (links["materials"]["url"], links["materials"]["note"]) == ("#scheme-section", NO_SCHEME_MATERIALS_NOTE)
     empty = home_view(None, {"whole": whole}, library)
     links = cast(dict[str, dict[str, str]], empty["links"])
     assert empty["room"] is None and links["result"]["url"] == ""
-    assert (links["materials"]["url"], links["materials"]["note"]) == ("#scheme-section", home_words.NO_SCHEME_MATERIALS_NOTE)
+    assert (links["materials"]["url"], links["materials"]["note"]) == ("#scheme-section", NO_SCHEME_MATERIALS_NOTE)
 
 
 def test_scheme_line_says_cut_treated_and_searched() -> None:

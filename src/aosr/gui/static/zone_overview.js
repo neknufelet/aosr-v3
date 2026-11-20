@@ -1753,7 +1753,8 @@ window.zonePageSay = (text, kind) => {
 // 訊息列換成成功的一句、上面那一支會把警示拿掉——被擋的那一次什麼都沒存、沒跳頁，那一句不能跟著不見。
 // 留到使用者下一次真的按到東西（滑鼠或鍵盤按出來的 click；頁面程式自己發的不算）為止。整頁還鎖著的時候按的不算：
 // 那一下什麼都按不到（點擊落在頁面底層），那一批也還在路上，這時清掉、落地後就看不到了。換方案也清（重畫時看做法換過幾次）；
-// 打開這一頁不必另外清：打開只有那一顆按鈕一條路，那一下 click 已經先清過。
+// 打開這一頁不必另外清：用按鈕打開（立面圖那一顆、方案那一節那一顆）時那一下 click 已經先清過；
+// 帶著方案名的連結進來（app.js 的 openZonesFromLink，#1198）是整頁重新載入，本來就是空的。
 // 按下去那一刻只就地改那一行、不重畫整頁：重畫會把正在被按的那一顆換掉。
 function forgetKept(event) {
   if (!event.isTrusted || !keptSaid || inputBusy) return;
@@ -1763,5 +1764,6 @@ function forgetKept(event) {
 }
 window.zonePageKeep = text => { keptSaid = text; renderZoneOverview(); };
 document.addEventListener("click", forgetKept, true);
-window.addEventListener("DOMContentLoaded", () => { $("zone-page-open").onclick = () => window.openZoneOverview(); });
+// 入口兩顆，同一件事：立面圖那一段最上面的（切區時就在手邊），與方案那一節的（打開方案後第一屏就看得到，#1198）。
+window.addEventListener("DOMContentLoaded", () => { for (const id of ["zone-page-open", "scheme-zone-open"]) $(id).onclick = () => window.openZoneOverview(); });
 })();

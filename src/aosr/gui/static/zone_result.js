@@ -80,12 +80,13 @@ function zoneImprovementNote(reference) {
   note.append(say, folded(reference.why_label, node("p", reference.why)));
   return note;
 }
-// 「這一間挑材料」只給存著的方案（第三階段頁只收存檔裡的方案）；讀不到清單就不給，不猜（#1134）。
+// 「這一間挑材料」只給存著的方案；讀不到清單就不給，不猜（#1134）。連到輸入頁、帶著方案名：
+// 那一頁打開這一份再開「這間房貼什麼」（app.js 的 openZonesFromLink，#1198）；第三階段搜尋從那一頁的「拿去搜尋」進。
 async function showMaterialsLink() {
   try {
     const listing = await (await fetch("/api/schemes")).json();
     if (!listing.schemes.includes(view.scheme_id)) return;
-    $("next-materials").href = `/gradient?scheme=${encodeURIComponent(view.scheme_id)}`;
+    $("next-materials").href = `/?zones=${encodeURIComponent(view.scheme_id)}`;
     $("next-materials").hidden = false;
   } catch { /* 清單讀不到：不給這個連結 */ }
 }

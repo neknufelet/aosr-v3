@@ -26,7 +26,7 @@ from tests.engine.test_gui_wall_words import _part2d_layout
 from tests.engine.test_gui_zone_elevation_browser import _write
 
 SAMPLE, WHOLE = "zone-naming-sample", "a-whole-room"
-SAMPLE_ROOM, WHOLE_ROOM = "深 5.5 × 寬 5.2 × 高 3.15 公尺", "深 5.19 × 寬 4.1 × 高 2.8 公尺"
+SAMPLE_ROOM, WHOLE_ROOM = "深 5.5 × 寬 5.2 × 高 3.15 公尺", "深 6.99 × 寬 4.42 × 高 3.16 公尺"
 _INSIDE = """selector => { const node = document.querySelector(selector);
     if (!node) return false;
     const box = node.getBoundingClientRect();
@@ -84,6 +84,7 @@ def test_home_first_screen_goes_straight_to_the_zone_page_of_the_latest_scheme(
         assert _inside(page, "#home-materials")
         link.click()  # 第一下，也是唯一的一下
         page.wait_for_url(f"{base}/?zones={latest}")
+        _opened(page, latest)  # 整頁重載後打開方案：等的時間照打開那一條（不擠在下面斷言的幾秒裡）
         _on_zone_page(page, latest, room)
         assert page.evaluate("window.scrollY") == 0
         _assert_quiet(watched)
@@ -91,13 +92,13 @@ def test_home_first_screen_goes_straight_to_the_zone_page_of_the_latest_scheme(
 
 @pytest.mark.parametrize("way", ["home-row", "open-button"])
 def test_after_opening_a_scheme_the_way_in_is_on_the_first_screen(tmp_path: Path, browser: Browser, way: str) -> None:
-    """首頁那一列的「打開來改」（第一下）→ 方案那一節的入口（第二下）：兩下進任何一份的那一頁；自己用「打開」也一樣看得到。"""
+    """首頁那一列的「打開來改」（第一下）→ 方案那一節的入口（第二下）：兩下進任何一份的那一頁；自己用「打開」也一樣看得到。
+    「已存的方案」那幾列在不在第一屏這裡不量：它排在俯視圖底下，份數多了本來就要捲（最近算的那一份走上一題那條路，不用捲）。"""
     _prepare(tmp_path, WHOLE)
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
         _first_screen(page)
         if way == "home-row":
-            assert _inside(page, f'#home-schemes li[data-scheme="{SAMPLE}"] button.home-open')
             page.locator(f'#home-schemes li[data-scheme="{SAMPLE}"] button.home-open').click()
         else:
             page.locator("#scheme-list").select_option(SAMPLE)
@@ -165,6 +166,7 @@ def test_result_page_link_goes_to_the_zone_page_of_that_scheme(tmp_path: Path, b
         assert _inside(page, "#next-materials")
         link.click()
         page.wait_for_url(f"{base}/?zones={name}")
+        _opened(page, name)
         expect(page.locator("#zone-page")).to_be_visible()
         expect(page.locator("#zone-map")).to_be_visible()
         expect(page.locator("#save-id")).to_have_value(name)

@@ -40,7 +40,12 @@ from aosr.reporting.scheme import Scheme
 _BASELINE: Final = re.compile(rf"(?P<name>.+){re.escape(SUFFIX)}[0-9a-f]{{8}}\Z")
 _ADOPTED: Final = re.compile(rf"(?P<name>.+)-{ADOPTED_WORD}-[0-9a-f]{{8}}\Z")
 _REFINED: Final = re.compile(r"[0-9a-f]{32}-(?:baseline|trial-(?P<trial>[0-9]+))-verification\Z")
-MATERIALS_NOTE: Final = "每一面牆、每一區貼哪種吸音材料、貼多厚，由程式最佳化"
+MATERIALS_NOTE: Final = "每一面牆、每一區：指定貼哪一種、不貼，或交給程式最佳化；設好再從那一頁拿去搜尋"
+NO_SCHEME_MATERIALS_NOTE: Final = "先在下面「方案」那一節打開一份方案，再按那裡的「設定每一區貼什麼」"
+# 「挑材料」進的是首頁上「這間房貼什麼」那一層（#1198）：帶著方案名回首頁，首頁打開那一份再開那一頁（app.js 的 openZonesFromLink）。
+# 沒有帶得過去的那一份（還沒算過、最近算的那一份已經不在存檔裡）：連到下面方案那一節，那裡有同一顆入口。
+ZONES_PARAMETER: Final = "zones"
+SCHEME_SECTION: Final = "#scheme-section"
 LAYOUT_NOTE: Final = "喇叭和座位放哪裡最好，交給電腦試很多種擺法"
 RESULT_NOTE: Final = "這一間算出來怎樣、比原牆基準好多少"
 ZONED_LAYOUT_NOTE: Final = "這一間的牆面分了區，電腦試擺位目前只能用在牆面沒分區的方案；到那一頁選一份沒分區的"
@@ -141,6 +146,13 @@ def _with_scheme(url: str, name: str | None) -> str:
     return url if name is None else f"{url}?scheme={quote(name, safe='')}"
 
 
+def zones_link(name: str | None) -> dict[str, str]:
+    """「挑材料」那個入口連去哪、小字寫什麼；``name`` 是存著的方案名，沒有就是 None。有沒有切區都帶得過去。"""
+    if name is None:
+        return {"url": SCHEME_SECTION, "note": NO_SCHEME_MATERIALS_NOTE}
+    return {"url": f"/?{ZONES_PARAMETER}={quote(name, safe='')}", "note": MATERIALS_NOTE}
+
+
 def latest_picks(rows: Sequence[tuple[str, str, str, str]]) -> Iterator[tuple[str, str]]:
     """結果清單（新的在前；每列方案代號、計算代號、結果頁網址、狀態）裡正常算完、不是只為比較或細算存的，新的先給；
     給計算代號與結果頁網址。"""
@@ -156,7 +168,7 @@ def home_view(latest: tuple[str, Scheme] | None, saved: Mapping[str, Scheme],
     if latest is None:
         return {"title": "還沒有算好的房間", "facts": "先在下面填房間、喇叭和座位，按「計算這個方案」。", "room": None,
                 "links": {"result": {"url": "", "note": ""},
-                          "materials": {"url": "/gradient", "note": MATERIALS_NOTE},
+                          "materials": zones_link(None),
                           "layout": {"url": "/search-start", "note": LAYOUT_NOTE}},
                 "schemes": schemes}
     url, scheme = latest
@@ -167,8 +179,7 @@ def home_view(latest: tuple[str, Scheme] | None, saved: Mapping[str, Scheme],
             "facts": f"{size_words(scheme)}；{treated_words(scheme)}",
             "room": room_overview(scheme, library),
             "links": {"result": {"url": url, "note": RESULT_NOTE},
-                      "materials": {"url": _with_scheme("/gradient", name if stored and cut else None),
-                                    "note": MATERIALS_NOTE},
+                      "materials": zones_link(name if stored else None),
                       "layout": {"url": _with_scheme("/search-start", name if stored and not cut else None),
                                  "note": LAYOUT_NOTE if not cut else ZONED_LAYOUT_NOTE if any(
                                      not zoned(other) for other in saved.values()) else NO_WHOLE_LAYOUT_NOTE}},

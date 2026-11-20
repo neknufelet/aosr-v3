@@ -177,8 +177,8 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-notes p{margin:2px 0}
 #zone-page .zv-notes .limit-red{color:#b3261e;font-weight:600}
 /* 房間方案輸入那一頁：進「這間房貼什麼」的那一行，與收起來的舊做法表 */
-#zone-methods-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 12px}
-#zone-methods-row button{font-size:16px;font-weight:600;padding:9px 16px;border-radius:6px;border:1px solid #17212b;background:#17212b;color:#fff;cursor:pointer}
+#zone-methods-row,#scheme-zone-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 12px}
+#zone-methods-row button,#scheme-zone-row button{font-size:16px;font-weight:600;padding:9px 16px;border-radius:6px;border:1px solid #17212b;background:#17212b;color:#fff;cursor:pointer}
 #zone-table-fold{margin-top:10px}
 #zone-table-fold>summary{cursor:pointer;color:#555}
 /* 另外指定的記號、正在改的號碼、灰掉的原因、程式從哪幾種選 */

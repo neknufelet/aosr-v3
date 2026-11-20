@@ -520,10 +520,11 @@ async function loadSchemeList() {
   if (data.schemes.includes(selected)) list.value = selected;
   $("archive-scheme").disabled = !list.value;
 }
+// 回有沒有真的打開（帶著方案名進來的那條路 openZonesFromLink 要知道，#1198）。
 async function openScheme() {
   const name = $("scheme-list").value;
-  if (!name) return;
-  if (inputBusy) { refuseWhileBusy("open-note", `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`); return; }
+  if (!name) return false;
+  if (inputBusy) { refuseWhileBusy("open-note", `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`); return false; }
   // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。三樣都在鎖頁期間讀完，
   // 成功才同步套上：不准在表單已換、做法還沒換的空檔放使用者按「儲存」。
   let zoneState;
@@ -536,7 +537,7 @@ async function openScheme() {
   })) {
     // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列，也寫在「打開」旁邊。
     sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
-    return;
+    return false;
   }
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
   applyZoneDesign(zoneState.design);
@@ -547,6 +548,20 @@ async function openScheme() {
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
   await refreshPlan();
+  return true;
+}
+// 首頁「挑材料」與結果頁「這一間挑材料」帶著 ?zones=<方案名> 進來（#1198）：打開那一份，真的打開了才開「這間房貼什麼」。
+// 打不開（清單裡沒有、存著的那一份檢查不過、讀不出）：原因寫在「打開」旁邊、捲到那裡，不開那一頁。
+async function openZonesFromLink() {
+  const name = new URLSearchParams(location.search).get("zones");
+  if (!name) return;
+  const list = $("scheme-list");
+  if ([...list.options].some(option => option.value === name)) {
+    list.value = name;
+    $("archive-scheme").disabled = false;
+    if (await openScheme()) { window.openZoneOverview(); return; }
+  } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「開舊方案」另選一份`, "notice");
+  $("scheme-section").scrollIntoView();
 }
 async function loadTemplate() {
   // 範本換掉整張表單（同「打開」）；不是存過的方案，按「儲存」會另開新檔、不蓋掉同名的。
@@ -1009,4 +1024,5 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   // 首頁第一屏的「打開來改」借上面「開舊方案」那一組：按鈕綁好、清單載好才放它按（#1134 審查：太早按會靜靜失敗）。
   document.body.dataset.inputReady = "true";
   document.dispatchEvent(new Event("input-ready"));
+  await openZonesFromLink();
 }));
