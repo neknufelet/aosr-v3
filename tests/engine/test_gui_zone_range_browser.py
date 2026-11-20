@@ -9,6 +9,8 @@
 畫面不靠起跑值在不在範圍裡的那一句。截圖存 ``AOSR_SHOTS``（有給才存）。"""
 from __future__ import annotations
 
+import copy
+import json
 import os
 from pathlib import Path
 from typing import cast
@@ -23,7 +25,7 @@ from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME as SYMMETRY, symme
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_material_pick_browser import _TEXT_STYLES
-from tests.engine.test_gui_zone_overview_browser import SAMPLE, WOOLS
+from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
     _apply, _click_zone, _library, _open_overview, _save, _send_to_search, _settled, _stored)
 
@@ -60,6 +62,10 @@ def _shot(page: Page, name: str) -> None:
 
 
 def _cell(page: Page, choice: str, part: str, end: str) -> str:
+    return _cell_id(choice, part, end)
+
+
+def _cell_id(choice: str, part: str, end: str) -> str:
     return f"#zone-panel-range-{choice}-{part}-{end}"
 
 
@@ -404,3 +410,139 @@ def test_when_the_range_check_cannot_reach_the_server_nothing_is_applied_and_the
         zones = cast(dict[str, dict[str, Doc]], page.evaluate("() => zoneDesign.zones"))
         assert zones["yL"]["z1"]["ranges"] == {WOOL: {"porous_m": [0.05, 0.2], "cavity_m": [0.0, 0.15]}}
         assert watched.page_errors == []
+
+
+# ───── 修補 1（審查第 1 輪 S1～S7）：每一處判斷各一題 ─────
+
+def _fake_limits(page: Page, answer: Doc) -> None:
+    """套用前那一次限制檢查改回考卷編的回覆（只這一次；之後的照常交伺服器判）。回覆的形狀照 ``zone_limits.py``。"""
+    body = json.dumps(answer, ensure_ascii=False)
+    page.route("**/api/zone-limits", lambda route: route.fulfill(status=200, content_type="application/json", body=body), times=1)
+
+
+def _retype(page: Page, selector: str, text: str) -> None:
+    """同一格重打一次（改了任何一格，上一次被擋的那一句才拿掉）。"""
+    page.locator(selector).fill("")
+    page.locator(selector).fill(text)
+
+
+def test_the_apply_check_needs_a_checked_answer_with_no_design_red_and_ignores_reds_that_are_not_about_ranges(
+        tmp_path: Path, browser: Browser) -> None:
+    """套用前的限制檢查（``rangesPass``）三種回覆，每一種都是考卷編的、形狀照伺服器：
+    ①不是「查過了」（status room，房間讀不出來）：提示列寫範圍沒檢查成、這次沒有套用，設計一個字都沒改（S1）；
+    ②查過了、整份設計層級有一條紅（材料庫讀不進來，範圍根本沒判）：那一句寫在小框、不套用（S2）；
+    ③查過了、選中的區有一條紅但不是範圍那幾條（最深放不下）：不擋範圍，照樣套用、寫進去（S7）。"""
+    _prepare(tmp_path, _design())
+    high = _cell_id(WOOL, "cavity", "high")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        before = page.evaluate("() => JSON.stringify(zoneDesign)")
+        _click_zone(page, "yL/z1")
+        page.locator(high).fill("15")
+        _fake_limits(page, {"status": "room", "message": "考卷編的：房間尺寸讀不出來", "zones": {}, "walls": {}, "caps": {},
+                            "red": 0, "refusals": []})
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-page-note")).to_have_text("範圍沒檢查成，這次沒有套用：考卷編的：房間尺寸讀不出來")
+        expect(page.locator("#zone-panel")).to_be_visible()
+        assert page.evaluate("() => JSON.stringify(zoneDesign)") == before
+
+        _fake_limits(page, {"status": "checked", "zones": {}, "walls": {}, "caps": {}, "red": 1, "refusals": [],
+                            "design": [{"code": "materials_unreadable", "level": "red", "text": "考卷編的：材料庫讀不進來"}]})
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel-problem")).to_have_text("考卷編的：材料庫讀不進來")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        assert page.evaluate("() => JSON.stringify(zoneDesign)") == before
+
+        _retype(page, high, "15")
+        expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        _fake_limits(page, {"status": "checked", "design": [], "walls": {}, "caps": {}, "red": 1, "refusals": [],
+                            "zones": {"yL": {"z1": [{"code": "depth_over", "level": "red", "text": "考卷編的：這一區的最深放不下"}]}}})
+        _apply(page)
+        zones = cast(dict[str, dict[str, Doc]], page.evaluate("() => zoneDesign.zones"))
+        assert zones["yL"]["z1"] == {**SEARCH, "ranges": {WOOL: {"porous_m": [0.05, 0.2], "cavity_m": [0.0, 0.15]}}}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_cells_that_are_negative_or_not_numbers_are_refused_on_the_spot(tmp_path: Path, browser: Browser) -> None:
+    """空腔打負數（-5）：當場寫「要填 0 以上的數字（公分）」、不能套用（S3）。各區不同、兩格空著時打「.」（不成數字，
+    格子讀起來是空的）：照樣算改了——只打一格寫要兩格都填，兩格都打寫要填數字；不會被當成沒動而放行。"""
+    _prepare(tmp_path, _design({"z1": {WOOL: NARROW}, "z2": {WOOL: SHALLOW}}))
+    low, high = _cell_id(WOOL, "cavity", "low"), _cell_id(WOOL, "cavity", "high")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator(low).fill("-5")
+        expect(page.locator("#zone-panel-problem")).to_have_text("48K 玻璃棉的空腔要填 0 以上的數字（公分）")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        page.locator("#zone-panel-cancel").click()
+        _click_zone(page, "yL/z1")
+        _click_zone(page, "yL/z2")
+        expect(page.locator(low)).to_have_value("")
+        page.locator(low).focus()
+        page.keyboard.type(".")
+        assert page.locator(low).evaluate("cell => cell.validity.badInput")
+        expect(page.locator("#zone-panel-problem")).to_have_text("48K 玻璃棉的空腔：各區不同，要改就「從」「到」兩格都填")
+        page.locator(high).focus()
+        page.keyboard.type(".")
+        expect(page.locator("#zone-panel-problem")).to_have_text("48K 玻璃棉的空腔要填 0 以上的數字（公分）")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_late_limits_answer_redraws_the_page_but_keeps_the_cursor_in_the_range_cell(tmp_path: Path, browser: Browser) -> None:
+    """正在空腔格子打字時晚到的限制檢查把整頁重畫（那一格換成新的元件）：焦點回到同一格、打的字還在（S4）。"""
+    _prepare(tmp_path, _design())
+    high = _cell_id(WOOL, "cavity", "high")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z1")
+        page.locator(high).fill("1")
+        page.locator(high).evaluate("cell => { cell.dataset.old = 'yes'; }")
+        with page.expect_response("**/api/zone-limits"):
+            page.evaluate("() => refreshZoneLimits()")
+        _settled(page)
+        assert page.locator(high).evaluate("cell => cell.dataset.old === undefined")   # 真的換成重畫後的新元件
+        expect(page.locator(high)).to_be_focused()
+        expect(page.locator(high)).to_have_value("1")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_when_ranges_split_the_rule_group_no_card_claims_the_zones_that_follow_the_rule(tmp_path: Path, browser: Browser) -> None:
+    """其他牆面的規則是由程式最佳化（考卷那份設計，14 區照規則）：清單卡寫「沒另外指定的牆區」。右牆六區有自己的範圍、規則那一組
+    拆成兩張：哪一張都沒管全部照規則的區，兩張都照名字點區，不寫「沒另外指定的牆區」（S5）。"""
+    plain, split = tmp_path / "plain", tmp_path / "split"
+    plain.mkdir()
+    split.mkdir()
+    _prepare(plain, SAMPLE_DESIGN)
+    ranged = copy.deepcopy(SAMPLE_DESIGN)
+    for key in (f"auto{n}" for n in range(1, 7)):
+        cast(dict[str, dict[str, Doc]], ranged["zones"])["xL"][key] = {**SEARCH, "ranges": {WOOL: NARROW}}
+    _prepare(split, ranged)
+    for folder, claimed in ((plain, True), (split, False)):
+        with _serve(folder) as base, _open(browser, base) as watched:
+            page = watched.page
+            _open_overview(page)
+            who = page.locator("#zone-page .zv-list .zv-who").all_inner_texts()
+            assert any("沒另外指定的牆區" in line for line in who) is claimed, who
+            if not claimed:
+                expect(page.locator("#zone-page .zv-range[data-ranged]")).to_have_count(1)
+                assert sum(line.startswith("這一張管 6 區：右牆整面") for line in who) == 1, who
+            assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_narrowing_only_the_wool_thickness_writes_no_cavity(tmp_path: Path, browser: Browser) -> None:
+    """只改 48K 的棉厚（5～10 cm）、空腔沒動：那一區只寫 ``porous_m``，沒有 ``cavity_m``（照材料頁）（S6）。"""
+    _prepare(tmp_path, _design())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator(_cell(page, WOOL, "porous", "high")).select_option("0.1")
+        _apply(page)
+        _close_and_save(page)
+        assert watched.page_errors == [] and watched.console_errors == []
+    zones, _ = _stored(tmp_path)
+    assert zones["yL"]["z3"] == {**SEARCH, "ranges": {WOOL: {"porous_m": [0.05, 0.1]}}}
