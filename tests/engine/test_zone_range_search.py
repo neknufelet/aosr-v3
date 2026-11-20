@@ -479,23 +479,31 @@ def test_zone_range_search_ledger_headers_bind_the_ranges(tmp_path: Path) -> Non
 
 # ---- 真的命令列開跑與接續（雙精度子行程，替身是自編小房間那一顆） ----
 
+CARRYOVER_PROBE = "tests.engine._material_gradient_carryover_probe"
+
+
 def _start(folder: Path, model: ReducedModel, request: pytest.FixtureRequest, *ranges: str,
-           extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess[str]:
+           extra: tuple[str, ...] = (), stamp: FullOperators | None = None,
+           probe: tuple[str, str] = (CARRYOVER_PROBE, "same")) -> subprocess.CompletedProcess[str]:
     """真的 ``cli.main(["start", …])``：替身與收據照替身沿用考卷的寫法放好，寫完 ``project.json`` 就停。
-    起跑樣板 地板、x0 兩面是帶空腔的 48K（0.05／0.05）。``extra`` 原樣接在命令列後面（綁定用）。"""
+    起跑樣板 地板、x0 兩面是帶空腔的 48K（0.05／0.05）。``extra`` 原樣接在命令列後面（綁定用）。
+    ``stamp`` 給了就照替身沿用考卷再蓋一份算子戳記（配 ``probe=(CARRYOVER_PROBE, "carryover")`` 走替身沿用那一條）；
+    ``probe`` 是哪一支子行程、哪一種（``_zone_range_probe fixed`` 在 ``_start`` 外層樁住固定材料核對）。"""
     from aosr.physics import fem_reduced_store as store
     from aosr.physics.fem_reduced_receipt import save_validation_receipt
     from tests.engine.test_material_gradient import _chain_model
-    from tests.engine.test_material_gradient_cli import _env, _good_report, _schemes
+    from tests.engine.test_material_gradient_cli import _chain_operators, _env, _good_report, _schemes
 
     chain = _chain_model(model)
     folder.mkdir()
     (folder / "scheme.json").write_text(_schemes()["scheme.json"].model_dump_json(), encoding="utf-8")
     store.save_reduced(chain, folder / "rom.npz")
     save_validation_receipt(folder / "rom.npz", _good_report(request, chain), rulers=run.holdout_rulers(), seconds=1.0)
+    if stamp is not None:
+        store.save_operators_stamp(folder / "rom.npz", _chain_operators(stamp, chain), rulers=run.holdout_rulers())
     arguments = [*(item for given in ranges for item in ("--range", given)), *extra]
-    return subprocess.run([sys.executable, "-m", "tests.engine._material_gradient_carryover_probe", "same", str(folder),
-                           *arguments], env=forward_cpu_pins(_env(folder)), capture_output=True, text=True, timeout=300)
+    return subprocess.run([sys.executable, "-m", probe[0], probe[1], str(folder), *arguments],
+                          env=forward_cpu_pins(_env(folder)), capture_output=True, text=True, timeout=300)
 
 
 def _probe(folder: Path, mode: str) -> Record:
@@ -560,6 +568,33 @@ def test_zone_range_search_projected_start_is_the_same_on_start_and_resume(
     spot = cast(dict[str, list[list[float]]], found["spot"])
     actual = np.asarray(spot["actual"][0]) + 1j * np.asarray(spot["actual"][1])
     np.testing.assert_allclose(actual, np.asarray(spot["reference"][0]) + 1j * np.asarray(spot["reference"][1]), rtol=1e-12, atol=0)
+
+
+def test_zone_range_search_carryover_start_with_a_start_value_outside_the_range_is_accepted(
+        model: ReducedModel, operators: FullOperators, request: pytest.FixtureRequest, tmp_path: Path) -> None:
+    """抓命令列開跑（``cli._start``）的替身沿用抽查那一行沒把範圍交下去（#1199 修補 3，審查 e）：替身是接續沿用的
+    （物理身分不同、算子戳記相同），x0 的 48K 收窄到棉 0.1～0.2（樣板 0.05 在範圍外）；沿用抽查要從投影後的起點算阻抗，
+    照收、抽查真的跑了、寫出 ``project.json``。沒交範圍時抽查拿樣板起點，開跑被拒（θ 超出盒界）。"""
+    folder = tmp_path / "carryover"
+    started = _start(folder, model, request, "x0=glass_wool_48k:0.1,0.2", stamp=operators, probe=(CARRYOVER_PROBE, "carryover"))
+    assert started.returncode == 0, started.stderr
+    assert "抽查 8 點最大差" in started.stderr, started.stderr  # 真的走了沿用分支
+    project = run.read_project(folder)
+    assert project.ranges == {"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}} and project.surrogate_spot_check is not None
+
+
+def test_zone_range_search_command_line_start_hands_the_ranges_to_the_fixed_candidate_checks(
+        model: ReducedModel, request: pytest.FixtureRequest, tmp_path: Path) -> None:
+    """抓命令列開跑（``cli._start``）叫固定材料核對那一行沒把範圍交下去（#1199 修補 3，審查 f）：在 ``_start`` 外層樁住
+    ``cli._fixed_candidate_checks``（照叫真的那一支），真的開跑一次 ``--range x0=48K:0.1,0.2``，它收到的就是那一份範圍；
+    沒寫範圍的那一場收到空的。准用清單沒有固定材料，核對本身什麼都不做（交下去的範圍才是這一題要看的）。"""
+    found: list[object] = []
+    for name, ranges in (("ranged", ("x0=glass_wool_48k:0.1,0.2",)), ("plain", ())):
+        done = _start(tmp_path / name, model, request, *ranges, probe=("tests.engine._zone_range_probe", "fixed"))
+        assert done.returncode == 0, done.stderr
+        found.append(json.loads((tmp_path / name / "probe.json").read_text(encoding="utf-8")))
+    assert found == [{"exit": 0, "ranges": [{"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2)).model_dump(mode="json")}}]},
+                     {"exit": 0, "ranges": [{}]}]
 
 
 def test_zone_range_search_fixed_candidate_checks_start_from_the_projected_start(monkeypatch: pytest.MonkeyPatch,

@@ -6,7 +6,11 @@
 ``start``（修補 1，起點投影進範圍）：真的工人開跑入口（``run.run_search``）與接續入口（``run.resume_search``）各走一次，
 走到交給連續下降那一步就停（下降換成記下第一個求值 θ 的樁，不求值），記兩次的第一個 θ；再記顯卡把關那一支
 （``gpu_preflight._start_theta``）照 ``project.json`` 重建出來的起點，以及命令列沿用抽查（``cli._carryover_spot_check``，
-抽查本身換成記下阻抗的樁）拿到的 x0 那一片阻抗與照手算投影後那一組構造（棉 0.1、空腔 0.05）算的阻抗。"""
+抽查本身換成記下阻抗的樁）拿到的 x0 那一片阻抗與照手算投影後那一組構造（棉 0.1、空腔 0.05）算的阻抗。
+
+``fixed``（修補 3）：真的 ``cli.main(["start", …])``（同 ``_material_gradient_carryover_probe same``，第三個以後的參數
+原樣接在命令列後面），在 ``_start`` 外層把 ``cli._fixed_candidate_checks`` 換成照叫真的那一支的樁，記它每一次收到的
+``ranges``。"""
 from __future__ import annotations
 
 import json
@@ -128,9 +132,18 @@ def start(directory: Path) -> dict[str, object]:
             "spot": _spot_rows(project, rebuilt.designs)}
 
 
+def fixed_ranges(directory: Path, extra: Sequence[str]) -> dict[str, object]:
+    from tests.engine._material_gradient_carryover_probe import start as command_start
+
+    with patch.object(cli, "_fixed_candidate_checks", wraps=cli._fixed_candidate_checks) as checks:
+        code = command_start(directory, False, tuple(extra))
+    return {"exit": code, "ranges": [_ranges(call.kwargs.get("ranges")) for call in checks.call_args_list]}
+
+
 if __name__ == "__main__":
-    mode, location = sys.argv[1:]
+    mode, location, *more = sys.argv[1:]
     modes = {"problem": problem, "ledger": write_header, "resume": resume, "same": same_header, "start": start}
     folder = Path(location)
-    (folder / "probe.json").write_text(json.dumps(modes[mode](folder), ensure_ascii=False), encoding="utf-8")
+    document = fixed_ranges(folder, more) if mode == "fixed" else modes[mode](folder)
+    (folder / "probe.json").write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
     raise SystemExit(0)
