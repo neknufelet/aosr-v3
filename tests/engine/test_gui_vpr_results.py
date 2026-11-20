@@ -153,6 +153,20 @@ def test_the_block_sits_beside_the_rows_and_changes_nothing_else(plain: SchemeRe
     assert set(real) - set(off) == {"reference_only"} and {key: value for key, value in real.items() if key != "reference_only"} == off
 
 
+def test_on_the_whole_page_a_category_the_saved_result_could_not_estimate_is_not_marked(plain: SchemeResult) -> None:
+    """整頁：存的結果裡音色平衡是「不可估」（資料範圍不夠）——它有低於界線的計分範圍，但沒算出代價，所以不標；其他四類照標。"""
+    document = plain.model_dump(mode="json")
+    for item in cast(list[Doc], cast(Doc, document["candidate"])["evaluations"]):
+        if item["category"] == "timbre_balance":
+            item.update(state="unavailable", payload=None, category_cost=None, raw_quantities=[],
+                        reason_codes=["insufficient_coverage"])
+    hit = _saved(SchemeResult.model_validate(document), {"xL": _zone(BONDED_VPR)})
+    view = build_result_view(hit, quality_targets_path=TARGETS).model_dump(mode="json")
+    states = {row["category"]: row["state"] for row in view["categories"]}
+    assert states["timbre_balance"] == "unavailable" and all(states[name] in ("measured", "costed") for name in MARKED[1:])
+    assert view["reference_only"]["categories"] == MARKED[1:]
+
+
 def test_the_compare_page_and_its_text_export_are_the_same_with_or_without_the_block(plain: SchemeResult) -> None:
     """比較頁不改：一邊有命中、一邊沒有，比較頁的回覆與文字匯出，跟把那一格拿掉的結果頁資料算出來的一模一樣。"""
     hit = _saved(plain, {"xL": _zone(BONDED_VPR)})
