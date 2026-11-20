@@ -33,6 +33,7 @@
 
 每一區自己的可調範圍（#1199，設計設定的 ``ranges``，材料代號 → 棉厚與空腔的下上）：對材料庫核（只准收窄、棉厚是產品厚度、
 收窄後放得下）跟立面圖標紅同一把（``zone_limits.zone_range_problems``，紅的就不開；命令列開跑照同一條再核一次），
+第三階段頁另填的上限（分區頁看不到）收窄後放不下也拒收、同一句（:func:`_depth_targets`）。
 起跑那一族有範圍時起跑值（樣板的初值）不在範圍裡不拒收：引擎照換樣板那一把把起點投影進範圍（``material_gradient.project_initial``）。
 計畫記 ``ranges``（面片代號 → 家族 → 範圍），開跑參數每一族多一個 ``--range``（只加在 :func:`start_arguments`：
 範圍只收窄、家族代號不變，建替身那一份不帶、不用重建替身）。沒有範圍時這一段一個字都不產生，計畫與參數跟之前逐位相同。
@@ -55,12 +56,12 @@ from aosr.config.material_gradient import (
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
-from aosr.gradient.depth_fit import ZoneRange, narrowed_family
+from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
-    target_line, zone_limits, zone_words,
+    ranged_misfit_words, target_line, zone_limits, zone_words,
 )
 from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
@@ -264,18 +265,29 @@ _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設"
 def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], per_surface: tuple[ZoneMode, ...],
                    depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets,
                    names: Mapping[str, str]) -> dict[str, tuple[TargetLine, ...]]:
+    """交給搜尋、有上限的每一區，准用的每一組在生效上限下的判決（開跑預覽那一格；准用清單照它拿掉放不下的組）。
+
+    寫了可調範圍的組照收窄後的判（#1199，同分區頁 ``zone_limits._target_problems`` 與命令列 ``check_depth_targets``）：
+    收窄後放不下的（``depth_fit.ranged_misfits``）拒收，句子同分區頁那一句（``ranged_misfit_words``）。分區頁看不到
+    第三階段頁另填的上限（``GradientRequest.max_depths``），那一格只有這裡擋得到；這裡在左右對稱那一段之前，
+    所以不會變成「建不出起跑配置、悄悄不綁」。准用的組一組都放不下照舊拒收。"""
     found: dict[str, tuple[TargetLine, ...]] = {}
     for (wall, zone), mode in zip(pairs, per_surface, strict=True):
         surface = surface_of(wall, zone)
         if mode != "search" or surface not in depths:
             continue
         item = design.zones.get(wall, {}).get(zone) if design is not None else None
-        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, None)
+        given = None if item is None else item.ranges
+        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, given)
         if not fits:
             continue
         source = sources.get(surface, "request")
         cap = DepthCap(depths[surface], cast(DepthLevel, source if source in ("zone", "wall", "room") else "zone"))
         lines = [target_line(fit, cap, targets, level_words=_LEVEL_WORDS.get(source, source)) for fit in fits]
+        misfits = ranged_misfits(fits, given)
+        if misfits:
+            raise PlanRefused(f"{zone_words(wall, zone, names)}：" + "；".join(
+                ranged_misfit_words(fit, cap, targets, level_words=_LEVEL_WORDS.get(source, source)) for fit in misfits))
         if not any(fit.usable for fit in fits):
             raise PlanRefused(f"{zone_words(wall, zone, names)}：{no_group_words(lines)}")
         found[surface] = tuple(TargetLine.model_validate(line) for line in lines)

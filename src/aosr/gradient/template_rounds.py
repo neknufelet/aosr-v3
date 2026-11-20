@@ -184,7 +184,12 @@ def alternatives(surfaces: Surfaces, settings: MaterialGradientSettings,
     ``max_depths``（個案上限，同命令列的寫法，整面或面片）給了時，比那一面上限還深排不下的家族不列
     （#1082 段 2-4，那一組在那一面不可用）；每個家族都放得下時清單逐位跟沒給一樣。固定材料放不放得下在開跑前核
     （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，放不下就拒收），這裡不再判。
-    ``ties`` 是綁定表（#1206）：成對兩片算一個單位，只列面序在前那一片的目標（換的時候兩片一起換）。"""
+    ``ties`` 是綁定表（#1206）：成對兩片算一個單位，只列面序在前那一片的目標（換的時候兩片一起換）。
+
+    可調範圍（#1199）這裡不收：放不放得下照沒收窄的家族判。寫了範圍、收窄後放不下的家族，開跑閘門
+    （:func:`~aosr.gradient.fixed_surfaces.check_depth_targets`，``depth_fit.ranged_misfits``）一律拒收，所以這裡列出的家族
+    換過去（:func:`swap` 照範圍收窄）都放得下。接續（``run.load_problem``）不重跑那一道閘門，一致性全靠開跑那一次；
+    哪天閘門放寬（收窄後放不下只列不可用），這裡要改成照 ``depth_fit.target_fit(..., ranges)`` 判。"""
     caps = expanded_max_depths(max_depths, tuple(surface_id for surface_id, _ in surfaces)) if max_depths else {}
     followers = tie_followers(ties, [surface_id for surface_id, _ in surfaces]) if ties else {}
     found: list[tuple[str, str]] = []

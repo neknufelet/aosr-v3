@@ -63,34 +63,41 @@ def narrowed_family(family: FamilySettings, given: ZoneRange) -> FamilySettings:
     return family.model_copy(update=update)
 
 
-def _meters(values: Sequence[float]) -> str:
-    return "、".join(f"{value:g}" for value in values)
+def centimeters(value: float) -> str:
+    """範圍那幾句給人看的數字（#1199）：公尺換成公分、照 ``:g`` 去掉多餘的零（第 2 支的範圍格子是公分）。"""
+    return f"{value * 100:g}"
+
+
+def _centimeter_list(values: Sequence[float]) -> str:
+    return "、".join(centimeters(value) for value in values)
 
 
 def range_problem(family: FamilySettings, given: ZoneRange) -> str | None:
     """一區的範圍對那一種材料（材料頁那一份，也就是這一場的家族）合不合；不合回一句白話（區名、材料名由呼叫端加），合回 None。
 
     只准收窄：超出材料頁的範圍拒收、叫人到材料頁改；棉厚兩端要是產品厚度之一；空腔要在材料的空腔範圍裡，材料搜尋不調空腔
-    （樣板沒有空氣層，同 :func:`family_shallowest_m` 的判法）時不准給；收窄後的最淺排法要放得進材料自己的總深度上限。"""
+    （樣板沒有空氣層，同 :func:`family_shallowest_m` 的判法）時不准給；收窄後的最淺排法要放得進材料自己的總深度上限。
+    句子裡的數字是公分（:func:`centimeters`）；命令列 ``--range`` 拒收也是這一句。"""
     thicknesses = family.thicknesses_m
     low, high = given.porous_m
-    page = f"材料頁的產品厚度是 {_meters(thicknesses)} 公尺"
+    page = f"材料頁的產品厚度是 {_centimeter_list(thicknesses)} cm"
     if low < thicknesses[0] or high > thicknesses[-1]:
-        return f"棉厚 {low:g}～{high:g} 公尺超出材料頁的範圍（{page}）；這裡只准收窄，要放寬請到材料頁改那份材料"
+        return f"棉厚 {centimeters(low)}～{centimeters(high)} cm 超出材料頁的範圍（{page}）；這裡只准收窄，要放寬請到材料頁改那份材料"
     off = [value for value in dict.fromkeys((low, high)) if value not in thicknesses]
     if off:
-        return f"棉厚的下、上要是產品厚度之一，{_meters(off)} 公尺不是（{page}）"
+        return f"棉厚的下、上要是產品厚度之一，{_centimeter_list(off)} cm 不是（{page}）"
     if given.cavity_m is not None:
         if family.initial_cavity_m is None:
             return "這種材料搜尋不調空腔（樣板沒有空氣層），不能給空腔範圍"
         (cavity_low, cavity_high), (page_low, page_high) = given.cavity_m, family.cavity_range_m
         if cavity_low < page_low or cavity_high > page_high:
-            return (f"空腔 {cavity_low:g}～{cavity_high:g} 公尺超出材料頁的範圍（{page_low:g}～{page_high:g} 公尺）；"
+            return (f"空腔 {centimeters(cavity_low)}～{centimeters(cavity_high)} cm 超出材料頁的範圍"
+                    f"（{centimeters(page_low)}～{centimeters(page_high)} cm）；"
                     "這裡只准收窄，要放寬請到材料頁改那份材料")
     narrowed = narrowed_family(family, given)
     if not _snap_fits(narrowed, family.max_total_depth_m):
-        return (f"收窄後的最淺排法 {family_shallowest_m(narrowed):g} 公尺（最薄棉加空腔下界）放不進材料自己的總深度上限 "
-                f"{family.max_total_depth_m:g} 公尺；請把下限調小")
+        return (f"收窄後的最淺排法 {centimeters(family_shallowest_m(narrowed))} cm（最薄棉加空腔下界）放不進材料自己的總深度上限 "
+                f"{centimeters(family.max_total_depth_m)} cm；請把下限調小")
     return None
 
 

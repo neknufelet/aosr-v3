@@ -177,10 +177,11 @@ def designs_with_max_depths(designs: Sequence[SurfaceDesign], settings: Material
         families = (settings.family_by_id(design.family_id),) if design.family_id else settings.family
         for family in families:
             given = narrowed.get(design.surface_id, {}).get(family.id)
-            fit = family_fit(family if given is None else narrowed_family(family, given), cap)
+            judged = family if given is None else narrowed_family(family, given)
+            fit = family_fit(judged, cap)
             if not fit.usable:
                 raise ValueError(f"面 {design.surface_id} 的深度上限 {cap} m 放不下家族 {family.id} 最淺排法 "
-                                 f"{fit.shallowest_m} m（最薄棉 {family.thicknesses_m[0]} m 加空腔下界）："
+                                 f"{fit.shallowest_m} m（最薄棉 {judged.thicknesses_m[0]} m 加空腔下界）："
                                  "這一組在這一面不可用，起跑換一組或不貼")
         effective = None if design.max_total_depth_m is None else min(design.max_total_depth_m, cap)
         result.append(replace(design, max_depth_m=cap, max_total_depth_m=effective))

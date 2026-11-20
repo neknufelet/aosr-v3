@@ -132,13 +132,13 @@ def test_zone_range_wider_than_the_material_page_is_refused_and_says_where_to_wi
     """抓「只准收窄」那條拿掉：棉厚或空腔超出材料頁的範圍都拒收，句子寫材料頁的範圍、叫人去材料頁改。"""
     family = SETTINGS.family_by_id(WOOL)
     porous = range_problem(family, ZoneRange(porous_m=(0.05, 0.4)))
-    assert porous is not None and "要放寬請到材料頁改那份材料" in porous and "材料頁的產品厚度是 0.05、0.1、0.2 公尺" in porous
-    assert range_problem(family, ZoneRange(porous_m=(0.03, 0.1))) == porous.replace("0.05～0.4", "0.03～0.1")
+    assert porous is not None and "要放寬請到材料頁改那份材料" in porous and "材料頁的產品厚度是 5、10、20 cm" in porous
+    assert range_problem(family, ZoneRange(porous_m=(0.03, 0.1))) == porous.replace("棉厚 5～40 cm", "棉厚 3～10 cm")
     cavity = range_problem(family, ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.0, 0.3)))
-    assert cavity == "空腔 0～0.3 公尺超出材料頁的範圍（0～0.25 公尺）；這裡只准收窄，要放寬請到材料頁改那份材料"
+    assert cavity == "空腔 0～30 cm 超出材料頁的範圍（0～25 cm）；這裡只准收窄，要放寬請到材料頁改那份材料"
     sample = _library_settings().family_by_id(SAMPLE)
     over = range_problem(sample, ZoneRange(porous_m=(0.075, 0.075), cavity_m=(0.01, 0.13)))
-    assert over is not None and "（0～0.12 公尺）" in over and "材料頁" in over
+    assert over is not None and "（0～12 cm）" in over and "材料頁" in over
     assert range_problem(sample, ZoneRange(porous_m=(0.075, 0.075), cavity_m=(0.01, 0.09))) is None
     reply = _limits(_ranged({"x0@b": {"ranges": {WOOL: {"porous_m": [0.05, 0.4]}}}}))
     lines = _red(reply, "x0", "b")
@@ -182,7 +182,8 @@ def test_zone_range_on_a_user_material_is_checked_against_that_material() -> Non
     assert _red(_limits(good, _targets()), "y0", "s") == []
     bad = _ranged({"y0@s": {"ranges": {STEPS: {"porous_m": [0.04, 0.08]}}}})
     lines = _red(_limits(bad, _targets()), "y0", "s")
-    assert [line["code"] for line in lines] == ["range_invalid"] and "0.03、0.05、0.08、0.12" in lines[0]["text"]
+    assert [line["code"] for line in lines] == ["range_invalid"] and lines[0]["text"] == (
+        "示範階梯棉（自編）的可調範圍：棉厚的下、上要是產品厚度之一，4 cm 不是（材料頁的產品厚度是 3、5、8、12 cm）")
 
 
 # ---- 深度：收窄後的最淺排法（分區頁與開跑同一把） ----
@@ -194,7 +195,8 @@ def test_zone_range_narrowed_shallowest_that_does_not_fit_the_cap_is_red_on_the_
     reply = _limits(_ranged({"y0@s": {"ranges": {WOOL: given}}}))
     lines = _red(reply, "y0", "s")
     assert [line["code"] for line in lines] == ["range_depth"]
-    assert "48K 玻璃棉" in lines[0]["text"] and "0.22" in lines[0]["text"] and "收窄" in lines[0]["text"]
+    assert lines[0]["text"] == ("48K 玻璃棉（可調厚度與空腔）：不可用——深度上限 20 cm（這一塊的上限）比這一組最淺排法 22 cm 還淺"
+                                "（個案上限擋住）；這是照這一區的可調範圍收窄後的最淺排法（最薄棉加空腔下界），請調小範圍的下限或放寬上限")
     caps = cast(dict[str, dict[str, dict[str, list[dict[str, object]]]]], reply["caps"])
     usable = {line["target"]: line["usable"] for line in caps["y0"]["s"]["targets"]}
     assert usable[WOOL] is False and usable["glass_wool_24k"] is True
@@ -220,7 +222,8 @@ def test_zone_range_narrowed_shallowest_beyond_the_material_own_depth_is_red_wit
     """沒有個案上限也要放得進材料自己的總深：48K 收窄到棉 0.2、空腔 0.15 起，最淺 0.35 超過 0.3。"""
     given = ZoneRange(porous_m=(0.2, 0.2), cavity_m=(0.15, 0.25))
     problem = range_problem(SETTINGS.family_by_id(WOOL), given)
-    assert problem is not None and "0.35" in problem and "0.3 公尺" in problem
+    assert problem is not None and problem == ("收窄後的最淺排法 35 cm（最薄棉加空腔下界）放不進材料自己的總深度上限 30 cm；"
+                                   "請把下限調小")
     lines = _red(_limits(_ranged({"ceiling@c": {"ranges": {WOOL: given.model_dump(mode="json")}}})), "ceiling", "c")
     assert [line["code"] for line in lines] == ["range_invalid"]
 

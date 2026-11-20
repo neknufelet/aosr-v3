@@ -47,7 +47,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, range_problem, ranged_misfits, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, centimeters, fixed_fit, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
@@ -344,9 +344,13 @@ def no_group_words(lines: Sequence[Mapping[str, object]]) -> str:
     return "程式能選的材料沒有一種放得進深度上限，這一區什麼都貼不上（「不貼」不算）：" + "；".join(str(line["text"]) for line in lines)
 
 
-def ranged_misfit_words(line: Mapping[str, object]) -> str:
-    """寫了範圍、收窄後放不下的那一組擋下的那一句（頁面紅、開跑擋同一句）。"""
-    return f"{line['text']}；這是照這一區的可調範圍收窄後的最淺排法（最薄棉加空腔下界），請調小範圍的下限或放寬上限"
+def ranged_misfit_words(fit: TargetFit, cap: DepthCap, targets: DepthTargets, *, level_words: str | None = None) -> str:
+    """寫了範圍、收窄後放不下的那一組擋下的那一句（頁面紅、網頁開跑擋同一句）。``fit`` 是 ``depth_fit.ranged_misfits``
+    挑出來的那一組（家族、比最淺排法淺）。寫法同 :func:`target_line` 那一句，數字換成公分（:func:`~aosr.gradient.depth_fit.
+    centimeters`，第 2 支的範圍格子是公分）；沒寫範圍的組那一句照舊是公尺。"""
+    case = f"{centimeters(cap.value_m)} cm（{level_words or LEVEL_WORDS[cap.level]}的上限）"
+    return (f"{targets.label(fit.target)}：不可用——深度上限 {case}比這一組最淺排法 {centimeters(cast(float, fit.shallowest_m))} cm "
+            "還淺（個案上限擋住）；這是照這一區的可調範圍收窄後的最淺排法（最薄棉加空腔下界），請調小範圍的下限或放寬上限")
 
 
 def _target_problems(allowed: Sequence[str] | None, cap: DepthCap, targets: DepthTargets,
@@ -355,9 +359,8 @@ def _target_problems(allowed: Sequence[str] | None, cap: DepthCap, targets: Dept
     if fits is None or not fits:
         return [], []
     lines = [target_line(fit, cap, targets) for fit in fits]
-    misfits = {fit.target for fit in ranged_misfits(fits, ranges)}
-    problems = [Problem(code="range_depth", level="red", text=ranged_misfit_words(line))
-                for line in lines if line["target"] in misfits]
+    problems = [Problem(code="range_depth", level="red", text=ranged_misfit_words(fit, cap, targets))
+                for fit in ranged_misfits(fits, ranges)]
     if not any(fit.usable for fit in fits):
         return [*problems, Problem(code="depth_no_group", level="red", text=no_group_words(lines))], lines
     return problems, lines

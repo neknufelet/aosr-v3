@@ -31,8 +31,12 @@ from aosr.gradient import template_rounds as rounds
 from aosr.gradient.depth_fit import ZoneRange
 from aosr.gradient.ties import TieRefused
 from aosr.gui.gradient_jobs import plan_configuration
-from aosr.gui.gradient_plan import PlanRefused, SearchPlan, configuration_arguments, plan_symmetry, start_arguments
+from aosr.gui import gradient_plan
+from aosr.gui.gradient_plan import (
+    GradientRequest, PlanRefused, SearchPlan, configuration_arguments, plan_search, plan_symmetry, start_arguments, used_ranges,
+)
 from aosr.gui.zone_design import DesignSettings, write_design
+from aosr.gui.zone_symmetry import SettingsCheck, symmetry_on
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.materials.search_library import PresetMaterial
 from aosr.reporting.scheme import Scheme
@@ -123,7 +127,7 @@ def test_zone_range_search_zoned_plan_carries_the_range_to_the_start_designs() -
     assert _box(ceiling) == ((0.05, 0.0), (0.1, 0.08), (0.05, 0.1))
     assert SearchPlan.model_validate_json(plan.model_dump_json()) == plan
     # 開跑計畫照分區頁標紅那一把擋（同一句、點名哪一區哪一種材料）。
-    with pytest.raises(PlanRefused, match="立面圖上標紅.*天花「c」：48K 玻璃棉.*的可調範圍：棉厚 0.05～0.4 公尺超出材料頁的範圍.*要放寬請到材料頁改那份材料"):
+    with pytest.raises(PlanRefused, match="立面圖上標紅.*天花「c」：48K 玻璃棉.*的可調範圍：棉厚 5～40 cm 超出材料頁的範圍.*要放寬請到材料頁改那份材料"):
         control_plan(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.05, 0.4]}}}}))
     with pytest.raises(PlanRefused, match="立面圖上標紅.*左牆「s」：可調範圍的材料 demo_unknown_wool 材料庫裡沒有"):
         control_plan(_ranged({"y0@s": {"ranges": {"demo_unknown_wool": {"porous_m": [0.05, 0.1]}}}}))
@@ -203,6 +207,7 @@ def test_zone_range_search_start_already_inside_the_range_stays_the_template_bit
     ("x0=glass_wool_48k:0.05,0.1:0.05,0.1", ("--max-depth", "x0=0.08"),
      "面 x0 的深度上限 0.08 m 放不下家族 glass_wool_48k 最淺排法 0.1 m"),
     ("x0=glass_wool_48k:0.05", (), "要寫成 下,上"),
+    ("x0glass_wool_48k:0.05,0.1", (), "--range 要寫成 面=家族:棉下,棉上[:空腔下,空腔上]（公尺），收到 'x0glass_wool_48k:0.05,0.1'"),
     ("x0=glass_wool_48k:0.05,abc", (), "不是數字"),
 ])
 def test_zone_range_search_command_line_refuses_before_exporting_or_creating_a_folder(
@@ -463,6 +468,10 @@ def test_zone_range_search_ledger_headers_bind_the_ranges(tmp_path: Path) -> Non
         headers[2], SETTINGS, _kept(), base_ledger_sha256="e" * 64).model_dump()
     with pytest.raises(ValueError, match="可調範圍的面要在標頭的面裡"):
         ledger.MaterialGradientHeader.model_validate({**headers[0].model_dump(), "ranges": {"x0@a": mine["x0"]}})
+    with pytest.raises(ValueError, match="可調範圍的面要在標頭的面裡、而且不是固定面"):  # 範圍的面是固定面（那半句）
+        ledger.MaterialGradientHeader.model_validate({**headers[0].model_dump(), "fixed_surfaces": {"x0": "glass_wool_24k_50mm"}})
+    with pytest.raises(ValueError, match="可調範圍的面要在起點配置裡、而且不是固定面"):  # 範圍的面不在起點配置（那半句）
+        type(template).model_validate({**template.model_dump(), "ranges": {"x0@a": mine["x0"]}})
     with pytest.raises(ValueError, match="可調範圍的面"):
         template.model_copy(update={"fixed_surfaces": {"x0": "glass_wool_24k_50mm"}}).model_validate(
             {**template.model_dump(), "fixed_surfaces": {"x0": "glass_wool_24k_50mm"}})
@@ -662,3 +671,92 @@ def test_zone_range_search_zone_page_red_and_engine_refuse_the_same_depth_case(l
             ranged = [line for line in page if line["code"] == "range_depth"]
             assert len(ranged) == 1 and "48K 玻璃棉" in str(ranged[0]["text"]) and "收窄" in str(ranged[0]["text"])
             assert engine is not None and engine.startswith("面 y0 照這一面的可調範圍收窄後：") and WOOL in engine
+
+
+# ---- 第三階段頁另填的上限：收窄後放不下，網頁先擋（修補 2，審查第 1 條） ----
+
+REQUEST_WORDS = ("天花「c」：48K 玻璃棉（可調厚度與空腔）：不可用——深度上限 15 cm（這一跑另填的上限）比這一組最淺排法 15 cm 還淺"
+                 "（個案上限擋住）；這是照這一區的可調範圍收窄後的最淺排法（最薄棉加空腔下界），請調小範圍的下限或放寬上限")
+
+
+@pytest.mark.parametrize("case", ["start-family", "other-family"])
+def test_zone_range_search_request_cap_too_shallow_for_the_range_is_refused_by_the_page_and_the_engine(case: str) -> None:
+    """抓第三階段頁另填的上限（``GradientRequest.max_depths``，分區頁看不到）收窄後放不下時網頁照收、背景才被引擎擋：
+    天花 c 寫 48K 範圍棉 0.1～0.2、空腔 0.05 起（最淺 0.1＋0.05）。A 從 48K 起跑（範圍寫在起跑那一族）；B 准用 24K、48K，
+    從 24K 起跑（範圍寫在准用的另一族）。這一跑另填天花 c 上限 0.15 照搜尋那一把的浮點放不下、0.16 放得下：網頁開跑計畫
+    與命令列開跑核可選目標（``check_depth_targets``）在同一個邊上一起拒收、一起照收；網頁那一句同分區頁、寫死。"""
+    given = ZoneRange(porous_m=(0.1, 0.2), cavity_m=(0.05, 0.2))
+    allowed = (WOOL, "none") if case == "start-family" else (WOOL24, WOOL, "none")
+    document = _ranged({"ceiling@c": {"allowed": list(allowed), "ranges": {WOOL: given.model_dump(mode="json")}}})
+    for cap, red in ((0.15, True), (0.16, False)):
+        request = GradientRequest(max_steps=5, max_depths={"ceiling": {"c": cap}}, family=None if case == "start-family" else WOOL24)
+        try:
+            plan = plan_search(control_scheme(), DesignSettings.model_validate(document), request, SETTINGS)
+        except PlanRefused as error:
+            page: str | None = str(error)
+        else:
+            page = None
+            assert plan.ranges == {"ceiling@c": {WOOL: given}} and plan.ties == (FRONT, SIDES)
+            assert all(line.usable for line in plan.depth_targets["ceiling@c"]) and plan.allowed["ceiling@c"] == allowed
+            start_designs(plan)  # 命令列開跑那一組起跑配置照收
+        try:
+            faces.check_depth_targets([("ceiling", None)], SETTINGS, fixed_surfaces={}, max_depths={"ceiling": cap},
+                                      allowed={"ceiling": allowed}, fixed_materials={}, ranges={"ceiling": {WOOL: given}})
+        except ValueError as error:
+            engine: str | None = str(error)
+        else:
+            engine = None
+        assert (page is not None) is red and (engine is not None) is red, (cap, page, engine)
+        if red:
+            assert page == REQUEST_WORDS
+            assert engine is not None and engine.startswith("面 ceiling 照這一面的可調範圍收窄後：") and WOOL in engine
+
+
+def test_zone_range_search_request_cap_refusal_comes_before_the_symmetry_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓「建不出起跑配置、悄悄不綁」：左右對稱開著（控制組：前牆兩區、左右牆兩區成對），天花 c 寫 48K 範圍棉 0.05～0.1、
+    空腔 0.05～0.1（起跑值在範圍裡），第三階段頁另填天花 c 上限 0.08（收窄後最淺 0.1，沒收窄的 0.05 放得進）：開跑計畫
+    拒收、點名天花 c，左右對稱那一段（建起跑配置核綁定）一次都沒走到；上限給 0.1 照收、兩對照綁。"""
+    design = DesignSettings.model_validate(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.05, 0.1], "cavity_m": [0.05, 0.1]}}}}))
+    assert symmetry_on(design)
+    asked: list[object] = []
+    real = gradient_plan._engine_check
+
+    def engine_check(scheme: Scheme, plan: SearchPlan, settings: MaterialGradientSettings,
+                     inputs: gradient_plan.TieInputs) -> SettingsCheck:
+        asked.append(plan)
+        return real(scheme, plan, settings, inputs)
+
+    monkeypatch.setattr(gradient_plan, "_engine_check", engine_check)
+    with pytest.raises(PlanRefused, match="^天花「c」：48K 玻璃棉（可調厚度與空腔）：不可用——深度上限 8 cm（這一跑另填的上限）比這一組最淺排法 10 cm 還淺"):
+        plan_search(control_scheme(), design, GradientRequest(max_steps=5, max_depths={"ceiling": {"c": 0.08}}), SETTINGS)
+    assert asked == []
+    plan = plan_search(control_scheme(), design, GradientRequest(max_steps=5, max_depths={"ceiling": {"c": 0.1}}), SETTINGS)
+    assert plan.ties == (FRONT, SIDES) and len(asked) == 1
+
+
+def test_zone_range_search_range_argument_of_the_wrong_shape_is_named_in_plain_words() -> None:
+    """抓 ``--range`` 外形那一關拿掉（缺「=」、缺面、缺家族、段數不對變成 ``IndexError`` 或照收）：每一種都是同一句白話。"""
+    for value in ("x0glass_wool_48k:0.05,0.1", "=glass_wool_48k:0.05,0.1", "x0=:0.05,0.1", "x0=glass_wool_48k",
+                  "x0=glass_wool_48k:0.05,0.1:0.0,0.1:0.0,0.2"):
+        with pytest.raises(ValueError) as refused:
+            faces.parse_ranges([value])
+        assert str(refused.value) == f"--range 要寫成 面=家族:棉下,棉上[:空腔下,空腔上]（公尺），收到 {value!r}"
+
+
+def test_zone_range_search_preview_ranges_leave_the_cavity_out_for_materials_without_one() -> None:
+    """抓預覽給第 2 支畫的範圍把不調空腔的材料也帶上空腔範圍：天花 c 准用 48K 與 24K，兩族都寫範圍；48K 帶空腔下上，
+    24K（樣板沒有空氣層）的空腔是 None。"""
+    plan = control_plan(_ranged({"ceiling@c": {"allowed": [WOOL, WOOL24, "none"], "ranges": {
+        WOOL: {"porous_m": [0.05, 0.1], "cavity_m": [0.0, 0.08]}, WOOL24: {"porous_m": [0.1, 0.2]}}}}))
+    assert used_ranges(plan, SETTINGS) == {"ceiling@c": {
+        WOOL: {"porous_m": [0.05, 0.1], "thicknesses_m": [0.05, 0.1], "cavity_m": [0.0, 0.08]},
+        WOOL24: {"porous_m": [0.1, 0.2], "thicknesses_m": [0.1, 0.2], "cavity_m": None}}}
+
+
+def test_zone_range_search_cap_refusal_names_the_narrowed_thinnest_wool() -> None:
+    """抓起跑那一族收窄後放不進上限時，句子括號裡印的是沒收窄的最薄棉：48K 收到棉 0.1～0.2、上限 0.08，
+    最淺 0.1 是收窄後的最薄棉 0.1 加空腔下界 0（不是 0.05）。"""
+    with pytest.raises(ValueError) as refused:
+        run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), max_depths={"x0": 0.08}, ranges={"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}})
+    assert str(refused.value) == ("面 x0 的深度上限 0.08 m 放不下家族 glass_wool_48k 最淺排法 0.1 m（最薄棉 0.1 m 加空腔下界）："
+                                  "這一組在這一面不可用，起跑換一組或不貼")
