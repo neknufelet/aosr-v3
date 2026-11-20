@@ -72,7 +72,7 @@ from aosr.gradient.surrogate_guard import require_matching_patches
 from aosr.gradient.fixed_candidates import FixedCandidateCheck
 from aosr.gradient.depth_fit import ZoneRange
 from aosr.gradient.fixed_surfaces import (
-    AllowedTargets, FixedSurfaces, MaxDepths, ZoneRanges, check_fixed_depth_conflicts, checked_ranges, designs_with_max_depths,
+    AllowedTargets, FixedSurfaces, MaxDepths, ZoneRanges, check_fixed_depth_conflicts, designs_with_max_depths,
     designs_with_ranges, expanded_allowed_targets, expanded_ranges, fixed_targets_of,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
@@ -376,7 +376,8 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
     安裝方式（#990）只在不是剛背時多一個 ``"mount"`` 鍵：剛背的資料夾名逐位等於加這一格之前，貼在原牆上落在另一個資料夾。
     材料快照（#1082 段 2-3a）只在使用者材料接成家族時多一個 ``"materials"`` 鍵（快照整份的 SHA-256）。
     綁定表（#1206）只在不是空的時多一個 ``"ties"`` 鍵（固定存法，``A=B`` 與 ``B=A`` 同一個名）。
-    每一區的可調範圍（#1199）只在不是空的時多一個 ``"ranges"`` 鍵（面與家族照名字排）：換一份範圍就是另一個資料夾。
+    每一區的可調範圍（#1199）只在不是空的時多一個 ``"ranges"`` 鍵（整份照鍵排好再寫，面與家族的先後不影響）：
+    換一份範圍就是另一個資料夾。
     """
     identity: dict[str, object] = {
         "scheme": scheme_sha256, "surrogate": surrogate_manifest_sha256, "presets": list(presets), "purpose": purpose,
@@ -399,7 +400,7 @@ def gradient_id(*, scheme_sha256: str, surrogate_manifest_sha256: str, presets: 
         identity["ties"] = [list(pair) for pair in checked_ties(ties)]
     if ranges:
         identity["ranges"] = {face: {family: given.model_dump(mode="json") for family, given in families.items()}
-                              for face, families in checked_ranges(ranges).items()}
+                              for face, families in ranges.items()}
     if patches := partition_identity(patch_keys):
         identity["boundary_patches"] = patches
     content = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

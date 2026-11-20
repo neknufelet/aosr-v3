@@ -95,6 +95,10 @@ def test_zone_range_search_start_bounds_and_legal_thicknesses_are_the_range() ->
     assert designs[:2] + designs[3:] == plain[:2] + plain[3:]
     assert _x0(search.baseline_theta(designs), designs) == [0.05, 0.05]
     capped = run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges=ranges, max_depths={"x0": 0.12})
+    # 起跑那一族收窄後最淺 0.05＋0.05 放不進 0.08（沒收窄的最淺 0.05 放得進）：接續重建問題也只走這一支，照收窄後的判拒收。
+    with pytest.raises(ValueError, match="面 x0 的深度上限 0.08 m 放不下家族 glass_wool_48k 最淺排法 0.1 m"):
+        run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), max_depths={"x0": 0.08},
+                        ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.05, 0.1))}})
     assert _box(capped[2]) == _box(designs[2]) and capped[2].max_total_depth_m == 0.12
     bounds = search.design_bounds(designs)
     assert bounds[0][4:6].tolist() == [0.05, 0.02] and bounds[1][4:6].tolist() == [0.1, 0.08]
@@ -150,7 +154,8 @@ def test_zone_range_search_start_value_outside_the_range_is_refused_like_the_mat
     ("x0=glass_wool_24k:0.1,0.2", ("--max-depth", "x0=0.08", "--allowed", "x0=glass_wool_48k,glass_wool_24k,none"),
      "照這一面的可調範圍收窄後"),
     ("x0=glass_wool_24k:0.1,0.2", ("--max-depth", "x0=0.08"), "面 x0 照這一面的可調範圍收窄後"),
-    ("x0=glass_wool_48k:0.05,0.1:0.05,0.1", ("--max-depth", "x0=0.08"), "最淺排法 0.1 m"),
+    ("x0=glass_wool_48k:0.05,0.1:0.05,0.1", ("--max-depth", "x0=0.08"),
+     "面 x0 的深度上限 0.08 m 放不下家族 glass_wool_48k 最淺排法 0.1 m"),
     ("x0=glass_wool_48k:0.05", (), "要寫成 下,上"),
     ("x0=glass_wool_48k:0.05,abc", (), "不是數字"),
 ])
@@ -415,9 +420,10 @@ def test_zone_range_search_ledger_headers_bind_the_ranges(tmp_path: Path) -> Non
 
 # ---- 真的命令列開跑與接續（雙精度子行程，替身是自編小房間那一顆） ----
 
-def _start(folder: Path, model: ReducedModel, request: pytest.FixtureRequest, *ranges: str) -> subprocess.CompletedProcess[str]:
+def _start(folder: Path, model: ReducedModel, request: pytest.FixtureRequest, *ranges: str,
+           extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess[str]:
     """真的 ``cli.main(["start", …])``：替身與收據照替身沿用考卷的寫法放好，寫完 ``project.json`` 就停。
-    起跑樣板 地板、x0 兩面是帶空腔的 48K（0.05／0.05）。"""
+    起跑樣板 地板、x0 兩面是帶空腔的 48K（0.05／0.05）。``extra`` 原樣接在命令列後面（綁定用）。"""
     from aosr.physics import fem_reduced_store as store
     from aosr.physics.fem_reduced_receipt import save_validation_receipt
     from tests.engine.test_material_gradient import _chain_model
@@ -428,7 +434,7 @@ def _start(folder: Path, model: ReducedModel, request: pytest.FixtureRequest, *r
     (folder / "scheme.json").write_text(_schemes()["scheme.json"].model_dump_json(), encoding="utf-8")
     store.save_reduced(chain, folder / "rom.npz")
     save_validation_receipt(folder / "rom.npz", _good_report(request, chain), rulers=run.holdout_rulers(), seconds=1.0)
-    arguments = [item for given in ranges for item in ("--range", given)]
+    arguments = [*(item for given in ranges for item in ("--range", given)), *extra]
     return subprocess.run([sys.executable, "-m", "tests.engine._material_gradient_carryover_probe", "same", str(folder),
                            *arguments], env=forward_cpu_pins(_env(folder)), capture_output=True, text=True, timeout=300)
 
@@ -470,6 +476,25 @@ def test_zone_range_search_command_line_start_and_resume_bind_the_ranges(
     outside = _start(tmp_path / "outside", model, request, "x0=glass_wool_48k:0.1,0.2")
     assert outside.returncode != 0 and "起跑值棉厚 0.05 公尺不在這一區的範圍 0.1～0.2 公尺內" in outside.stderr
     assert not (tmp_path / "outside" / run.PROJECT_FILE).exists()
+
+
+def test_zone_range_search_rebuilt_problem_refuses_a_tied_pair_whose_ranges_were_edited_apart(
+        model: ReducedModel, request: pytest.FixtureRequest, tmp_path: Path) -> None:
+    """抓接續重建問題時綁定不比範圍：真的開跑綁 地板=x0、兩面同一份範圍（起跑那一族 48K），照收、兩邊標頭都記；
+    把 ``project.json`` 改成 x0 多一族 24K 的範圍（起跑那一族的界不變，θ 上下界比不出來），照 ``project.json`` 重建問題
+    （工人開跑與接續都走的 ``run.load_problem``）點名拒收「可調範圍不同」。"""
+    same = "glass_wool_48k:0.05,0.1:0.0,0.08"
+    tied = _start(tmp_path / "tied", model, request, f"x0={same}", f"floor={same}", extra=("--tie", "x0=floor"))
+    assert tied.returncode == 0, tied.stderr
+    assert run.read_project(tmp_path / "tied").ties == (("floor", "x0"),)
+    given = {WOOL: {"porous_m": [0.05, 0.1], "cavity_m": [0.0, 0.08]}}
+    assert _probe(tmp_path / "tied", "problem") == {"header": {"floor": given, "x0": given}, "templates": {"floor": given, "x0": given},
+                                                     "x0": [[0.05, 0.0], [0.1, 0.08], [0.05, 0.1]]}
+    document = json.loads((tmp_path / "tied" / run.PROJECT_FILE).read_bytes())
+    document["ranges"]["x0"][WOOL24] = {"porous_m": [0.05, 0.1]}
+    (tmp_path / "tied" / run.PROJECT_FILE).write_text(json.dumps(document), encoding="utf-8")
+    refused = _probe(tmp_path / "tied", "problem")
+    assert "綁定 floor=x0：可調範圍不同" in str(refused["error"]), refused
 
 
 # ---- 控制組：沒寫範圍的網頁預覽回覆沒有這一格 ----
