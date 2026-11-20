@@ -16,17 +16,19 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.gui import reference_only
 from aosr.gui.app import STATIC
 from aosr.gui.gradient_plan import GradientRequest
+from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.gui.zone_result import Improvement, improvement
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from aosr.scoring import gradient_objective_settings
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50
 from tests.engine.test_gui_gradient_follow import _done_job, _exported, _follow
-from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data, _jobs, _scheme
+from tests.engine.test_gui_gradient_jobs import NAME, SETTINGS, FakeLauncher, _data, _jobs, _scheme
 from tests.engine.test_gui_vpr_results import (
     LOOSE, PLAIN_WALL, PURPOSE, TARGETS, WHY, _mounted, _registry, _saved, _zone, plain as plain)
 
 Doc = dict[str, object]
+FAMILY = SETTINGS.family[0].id
 STAGE_THREE = "有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段本來就只算 30～300 Hz，整段都在 300 Hz 以下，所以這一跑的數字都只能參考。"
 RESULT = ("有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：300 Hz 以下的數字只能參考；"
           "下表標了「含 300 Hz 以下」的幾列都受影響。")
@@ -75,6 +77,45 @@ def test_the_preview_says_which_faces_keep_such_a_construction_before_the_run(
     _put(data_dir, wall, zone, material)
     preview = _jobs(data_dir, FakeLauncher()).preview(NAME, GradientRequest.model_validate({"mount": mount}))
     assert preview["reference_only"] == _block(walls) and set(preview) == PREVIEW_KEYS | {"reference_only"}
+
+
+def _searched_vpr(tmp_path: Path, allowed: list[str] | None) -> Path:
+    """前牆 r0_c0（交給搜尋）的原牆是這類構造；那一區的准用清單照 ``allowed``（None＝設計設定沒寫這一格）。"""
+    data_dir = _data(tmp_path)
+    _put(data_dir, "x0", "r0_c0", BONDED_VPR)
+    scheme = Scheme.model_validate_json((data_dir / "schemes" / f"{NAME}.json").read_text(encoding="utf-8"))
+    zone: Doc = {"mode": "search"} if allowed is None else {"mode": "search", "allowed": allowed}
+    write_design(data_dir, DesignSettings.model_validate({"scheme_id": NAME, "zones": {
+        "x0": {"r0_c0": zone, "r1_c1": {"mode": "search"}}, "ceiling": {"r0_c1": {"mode": "keep_original"}}}}), scheme)
+    return data_dir
+
+
+# 交給搜尋的區的原牆不分裝法、不分准用清單都算：硬底又不准「不貼」時搜尋本身碰不到它，但終點那一步照樣用每一面的原牆
+# 完整解一次當基準（src/aosr/gradient/endpoint_run.py::run_endpoint 的 ``_baseline_for``）。
+SEARCHED = [
+    pytest.param("rigid", [FAMILY], id="rigid_without_none"),
+    pytest.param("rigid", [FAMILY, "none"], id="rigid_with_none"),
+    pytest.param("rigid", None, id="rigid_list_not_written"),
+    pytest.param("on_wall", [FAMILY], id="on_wall_without_none"),
+]
+
+
+@pytest.mark.parametrize(("mount", "allowed"), SEARCHED)
+def test_the_original_wall_of_a_searched_zone_counts_in_the_preview(tmp_path: Path, mount: str, allowed: list[str] | None) -> None:
+    preview = _jobs(_searched_vpr(tmp_path, allowed), FakeLauncher()).preview(NAME, GradientRequest.model_validate({"mount": mount}))
+    assert preview["reference_only"] == _block("前牆")
+    arguments = cast("list[str]", preview["arguments"])
+    assert arguments[arguments.index("--mount") + 1] == mount
+    assert ("--allowed" in arguments) is (allowed is not None)
+
+
+@pytest.mark.parametrize(("mount", "allowed"), SEARCHED)
+def test_the_original_wall_of_a_searched_zone_counts_in_the_notes_of_the_run(
+        tmp_path: Path, mount: str, allowed: list[str] | None) -> None:
+    data_dir = _searched_vpr(tmp_path, allowed)
+    launcher = FakeLauncher()
+    job_id = str(_jobs(data_dir, launcher).start(NAME, GradientRequest.model_validate({"mount": mount}))["job_id"])
+    assert _follow(data_dir, launcher).detail(job_id)["reference_only"] == _block("前牆")
 
 
 def test_several_faces_are_named_once_each_in_face_order(tmp_path: Path) -> None:
@@ -147,6 +188,28 @@ def test_a_run_whose_scheme_snapshot_cannot_be_read_has_no_line(tmp_path: Path) 
     assert set(_follow(data_dir, launcher).detail(job_id)) == DETAIL_KEYS
 
 
+@pytest.mark.parametrize("adopted", [False, True])
+def test_a_run_whose_scheme_file_is_gone_still_answers_and_has_no_line(tmp_path: Path, adopted: bool) -> None:
+    """方案檔不在了（開跑時的快照被刪；或存成方案之後那份方案檔被刪）：明細照常回，只是沒有那一條。"""
+    data_dir = _data(tmp_path)
+    _put(data_dir, "x0", "r0_c1", BONDED_VPR)
+    launcher = FakeLauncher()
+    exported = _exported()
+    walls = cast("dict[str, list[Doc]]", cast(Doc, exported["scene"])["surface_zones_by_wall"])
+    next(item for item in walls["yL"] if item["id"] == "r1_c1")["material"] = BONDED_VPR
+    job_id = _done_job(data_dir, launcher, exported)
+    follow = _follow(data_dir, launcher)
+    if adopted:
+        name = str(cast(Doc, follow.adopt(job_id)["adopted"])["scheme_id"])
+        assert follow.detail(job_id)["reference_only"] == _block("右牆")
+        (data_dir / "schemes" / f"{name}.json").unlink()
+    else:
+        assert follow.detail(job_id)["reference_only"] == _block("前牆")
+        (data_dir / "gradient" / job_id / "scheme.json").unlink()
+    detail = follow.detail(job_id)
+    assert set(detail) == DETAIL_KEYS and detail["job_id"] == job_id
+
+
 # ---- 出句子的函式 ----
 
 def test_the_sentence_changes_when_the_stage_three_range_reaches_above_the_band(tmp_path: Path) -> None:
@@ -193,6 +256,13 @@ def test_walls_of_several_schemes_are_joined_in_face_order_and_named_once() -> N
     assert reference_only.scheme_walls(with_hit(("ceiling", "r0_c0")), plain_scheme, with_hit(("x0", "r1_c1"), ("ceiling", "r1_c0"))) == [
         "前牆", "天花"]
     assert reference_only.scheme_walls(_scheme("whole")) == []
+    # 牆名照第一份：另一份喇叭搬到主位另一邊（定不出前後左右，牆名退回座標叫法），兩份的牆名不同。
+    turned_document = with_hit(("x0", "r1_c1")).model_dump(mode="json")
+    turned_document["speakers"] = {"left": {"x": 3.9, "y": 2.5, "z": 1.2}, "right": {"x": 3.9, "y": 1.3, "z": 1.2}}
+    turned = Scheme.model_validate(turned_document)
+    assert reference_only.scheme_walls(turned) == ["x 起點牆"]
+    assert reference_only.scheme_walls(with_hit(("ceiling", "r0_c0")), turned) == ["前牆", "天花"]
+    assert reference_only.scheme_walls(turned, with_hit(("ceiling", "r0_c0"))) == ["x 起點牆", "天花"]
 
 
 # ---- 改善多少 ----

@@ -19,6 +19,8 @@
 不存材料，固定、保留原牆、交給搜尋的區的材料都住在方案裡）。交給搜尋的區不分裝法都看：貼在原牆上時搜尋貼的層背後接它
 （src/aosr/gradient/surface_design.py::_backing），貼在硬底上時「不貼」那個候選保留的也是它
 （src/aosr/gradient/surface_design.py 的保留原牆設計 ``kept_material``，src/aosr/gradient/material_gradient.py::kept_impedance_rows 算它）。
+貼在硬底上、准用清單又沒有「不貼」時，起跑設計與換樣板都碰不到它，但終點那一步照樣用每一面的原牆完整解一次當基準
+（src/aosr/gradient/endpoint_run.py::run_endpoint 呼叫 ``_baseline_for``，終點檔的基準與改善數字從它來），所以一樣算。
 第三階段頁的句子在 :func:`stage_three_block`，改善表的在 :func:`improvement_block`。
 """
 from __future__ import annotations
