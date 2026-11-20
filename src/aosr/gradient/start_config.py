@@ -88,7 +88,8 @@ def designs_for[K: BoundaryKey](presets: Sequence[str | None], settings: Materia
                 ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> tuple[SurfaceDesign, ...]:
     """建立起跑設計，套入每面上限（跟起跑家族自己的上限取較嚴；起跑家族最淺排法放不進就拒收，#1082 段 2-4）；
     空設定沿用舊設計。``table`` 同 :func:`_uncapped_designs_for`。``ranges``（#1199，面 → 家族 → 範圍）給了時，
-    起跑那一族有範圍的面先收窄、樣板的起跑值不在範圍裡就拒收（``fixed_surfaces.designs_with_ranges``），再套上限。"""
+    起跑那一族有範圍的面先收窄（``fixed_surfaces.designs_with_ranges``），再套上限；樣板的起跑值不在範圍裡不拒收，
+    起點在算 θ 時才投影進範圍（``material_gradient.baseline_theta`` 的 ``ranged``，這裡不載入 JAX）。"""
     designs = _uncapped_designs_for(presets, settings, kept=kept, mount=mount, fixed_surfaces=fixed_surfaces, table=table)
-    designs = designs_with_ranges(designs, settings, ranges, start=True)
+    designs = designs_with_ranges(designs, settings, ranges)
     return designs_with_max_depths(designs, settings, max_depths or {}, ranges)

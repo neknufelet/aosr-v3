@@ -15,8 +15,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from aosr.config.material_gradient import MaterialGradientSettings
-from aosr.gradient import depth_fit
-from aosr.gradient.depth_fit import ZoneRange, narrowed_family, range_problem, start_problem, target_fit
+from aosr.gradient.depth_fit import ZoneRange, narrowed_family, range_problem, target_fit
 from aosr.gradient.start_config import presets_table
 from aosr.gui.gradient_plan import builtin_depth_targets, library_depth_targets
 from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
@@ -224,17 +223,6 @@ def test_zone_range_narrowed_shallowest_beyond_the_material_own_depth_is_red_wit
     assert problem is not None and "0.35" in problem and "0.3 公尺" in problem
     lines = _red(_limits(_ranged({"ceiling@c": {"ranges": {WOOL: given.model_dump(mode="json")}}})), "ceiling", "c")
     assert [line["code"] for line in lines] == ["range_invalid"]
-
-
-# ---- 起跑值（給第 2 單元用的同一條規則） ----
-
-def test_zone_range_start_value_outside_the_range_is_named() -> None:
-    family = SETTINGS.family_by_id(WOOL)
-    assert start_problem(family, ZoneRange(porous_m=(0.05, 0.1)), 0.05, 0.05) is None
-    assert start_problem(family, ZoneRange(porous_m=(0.1, 0.2)), 0.05, 0.05) == "起跑值棉厚 0.05 公尺不在這一區的範圍 0.1～0.2 公尺內"
-    assert (start_problem(family, ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.0, 0.03)), 0.05, 0.05)
-            == "起跑值空腔 0.05 公尺不在這一區的範圍 0～0.03 公尺內")
-    assert "初值不在範圍內" in depth_fit.START_ADVICE
 
 
 # ---- 控制組：沒寫範圍跟主線逐位相同 ----

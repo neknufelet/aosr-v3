@@ -22,8 +22,7 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.gradient.boundary import patch_key
 from aosr.gradient.depth_fit import (
-    START_ADVICE, ZoneRange, family_fit, fit_words, fixed_fit, narrowed_family, range_problem, range_thicknesses, ranged_misfits,
-    start_problem, target_fit,
+    ZoneRange, family_fit, fit_words, fixed_fit, narrowed_family, range_problem, range_thicknesses, ranged_misfits, target_fit,
 )
 from aosr.gradient.surface_design import SurfaceDesign, designs_from_presets
 from aosr.materials.search_library import PresetMaterial
@@ -296,19 +295,11 @@ def narrowed_design(design: SurfaceDesign, given: ZoneRange) -> SurfaceDesign:
     return replace(design, lower=tuple(lower), upper=tuple(upper), legal_thicknesses_m=legal)
 
 
-def _start_values(design: SurfaceDesign) -> tuple[float, float | None]:
-    """樣板本身的棉厚與空腔（搜尋起點 ``baseline_theta`` 讀的同一格；沒有空腔變數是 None）。"""
-    assert design.material is not None
-    values = [float(getattr(design.material.layers[int(name.split(".")[0].removeprefix("layer")) - 1], "thickness_m"))
-              for name in design.variables]
-    return values[0], values[1] if len(values) > 1 else None
-
-
 def designs_with_ranges(designs: Sequence[SurfaceDesign], settings: MaterialGradientSettings,
-                        value: Mapping[str, Mapping[str, ZoneRange]] | None, *, start: bool = False) -> tuple[SurfaceDesign, ...]:
+                        value: Mapping[str, Mapping[str, ZoneRange]] | None) -> tuple[SurfaceDesign, ...]:
     """每面現在那一族有範圍就收窄（:func:`narrowed_design`）；沒有範圍的面、不貼與固定面原樣交回（沒給範圍整份原樣）。
-    範圍不合（:func:`~aosr.gradient.depth_fit.range_problem`）點名拒收。``start``：這一組是起跑配置，樣板的起跑值
-    不在收窄後的範圍裡就拒收（:func:`~aosr.gradient.depth_fit.start_problem`；同起點盒界外拒收那一條，不投影）。"""
+    範圍不合（:func:`~aosr.gradient.depth_fit.range_problem`）點名拒收。起跑值（樣板的棉厚與空腔）不在收窄後的範圍裡
+    不拒收：起點照換樣板那一把投影進範圍（:func:`ranged_starts` 點名那幾面，``material_gradient.baseline_theta``）。"""
     if not value:
         return tuple(designs)
     ranges = expanded_ranges(value, tuple(design.surface_id for design in designs))
@@ -325,12 +316,19 @@ def designs_with_ranges(designs: Sequence[SurfaceDesign], settings: MaterialGrad
         problem = range_problem(family, given)
         if problem is not None:
             raise ValueError(f"面 {design.surface_id} 的 {family.id}：{problem}")
-        if start:
-            outside = start_problem(family, given, *_start_values(design))
-            if outside is not None:
-                raise ValueError(f"面 {design.surface_id} 起跑的 {family.id}：{outside}；{START_ADVICE}")
         result.append(narrowed_design(design, given))
     return tuple(result)
+
+
+def ranged_starts(designs: Sequence[SurfaceDesign], value: Mapping[str, Mapping[str, ZoneRange]] | None) -> frozenset[str]:
+    """這一組設計裡哪幾面現在那一族有可調範圍（#1199，同 :func:`designs_with_ranges` 收窄的那幾面）：起點要投影進範圍的面片
+    （``material_gradient.baseline_theta`` 的 ``ranged``）。``value`` 整面或面片寫法都收（照 :func:`expanded_ranges` 展開）；
+    沒給範圍是空集合，起點逐位照舊。不載入 JAX（只排面名）。"""
+    if not value:
+        return frozenset()
+    ranges = expanded_ranges(value, tuple(design.surface_id for design in designs))
+    return frozenset(design.surface_id for design in designs if design.material is not None and design.family_id is not None
+                     and design.family_id in ranges.get(design.surface_id, {}))
 
 
 # ---- 每區准用清單（#1082 段 2-3b） ----

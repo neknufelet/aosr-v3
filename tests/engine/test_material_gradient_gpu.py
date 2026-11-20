@@ -225,7 +225,8 @@ def _assert_preflight_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, 
     settings = _settings()
     designs = run.designs_for((PRESET,) * 6, settings, kept=_kept(), max_depths={"x0": 0.08})
     objective = synthetic_objective(designs, [0])
-    problem = cast(run.GradientProblem, SimpleNamespace(designs=designs, objective=objective))
+    # 標頭只放起點會讀的那一格（沒有可調範圍，#1199）。
+    problem = cast(run.GradientProblem, SimpleNamespace(designs=designs, objective=objective, header=SimpleNamespace(ranges={})))
     project = run.GradientProject.model_validate({**_project().model_dump(), "device": "gpu", "max_depths": {"x0": 0.08}})
     if cached_start:
         project = project.model_copy(update={"precision_check": precision_comparison(

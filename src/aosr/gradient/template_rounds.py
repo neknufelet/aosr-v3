@@ -231,7 +231,8 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
     綁定表（#1206，``context.ties``）裡成對的片兩片一起換成同一個目標、同一組初值；要給面序在前的那一片，
     換完整張表檢查一次成對逐位相等。
     ``context.ranges``（#1199）裡那一面有目標那一族的範圍時，新設計照範圍收窄（:func:`designs_for_surfaces`），
-    家族初值照有深度上限時那一把投影（盒界 ∩ 總深，再取規格）進範圍；換回來也是同一條。
+    家族初值照有深度上限時那一把投影（:func:`~aosr.gradient.material_gradient.project_initial`：盒界 ∩ 總深，再取規格）
+    進範圍；換回來也是同一條（有範圍的起跑也用這一把）。
     """
     if surface_id in (context.fixed_surfaces or {}):
         raise ValueError(f"固定面 {surface_id} 不參與換樣板")
@@ -276,16 +277,12 @@ def swap(designs: Sequence[SurfaceDesign], theta: FloatVector, surface_id: str, 
     new_theta = raw if ranged else checked_theta(raw, new_designs)
     if (context.max_depths or ranged) and new_designs[index].material is not None:
         # 家族初值不改；只投影新換那一面（成對就兩片各投一次），其他面的 θ 逐位照搬。
-        from aosr.gradient.material_gradient import depth_limits, design_bounds, project_to_limits, snap_to_specs
+        from aosr.gradient.material_gradient import project_initial
 
         for member in (ids.index(name) for name in unit):
-            selected = (new_designs[member],)
             start = sum(len(design.variables) for design in new_designs[:member])
-            stop = start + len(selected[0].variables)
-            lower, upper = design_bounds(selected)
-            new_theta[start:stop] = snap_to_specs(project_to_limits(
-                new_theta[start:stop], lower.astype(values.dtype), upper.astype(values.dtype), depth_limits(selected)),
-                selected).theta
+            stop = start + len(new_designs[member].variables)
+            new_theta[start:stop] = project_initial(new_theta[start:stop], new_designs[member])
     if ranged:
         new_theta = checked_theta(new_theta, new_designs)
     if not is_feasible(new_theta, new_designs):

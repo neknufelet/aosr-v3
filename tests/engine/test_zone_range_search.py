@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from aosr.config.capabilities import load_capabilities
+from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.config.paths import config_path
@@ -33,7 +34,9 @@ from aosr.gui.gradient_jobs import plan_configuration
 from aosr.gui.gradient_plan import PlanRefused, SearchPlan, configuration_arguments, plan_symmetry, start_arguments
 from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
-from aosr.physics.fem_reduced import ReducedModel
+from aosr.materials.search_library import PresetMaterial
+from aosr.reporting.scheme import Scheme
+from aosr.physics.fem_reduced import FullOperators, ReducedModel
 from aosr.physics.fem_reduced_boundary import boundary_patches
 from aosr.scoring.gradient_objective_jax import gradient_objective_constants
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -45,6 +48,7 @@ from tests.engine.test_material_gradient_mount import _project
 from tests.engine.test_zone_range import _ranged
 
 PRESET = "glass_wool_48k_50mm_gap50"
+DEEP = "demo_wool_48k_200mm_gap250"
 WOOL24 = "glass_wool_24k"
 FRONT = ("x0@b", "x0@a")
 SIDES = ("y0@s", "yL@s")
@@ -125,17 +129,47 @@ def test_zone_range_search_zoned_plan_carries_the_range_to_the_start_designs() -
         control_plan(_ranged({"y0@s": {"ranges": {"demo_unknown_wool": {"porous_m": [0.05, 0.1]}}}}))
 
 
-def test_zone_range_search_start_value_outside_the_range_is_refused_like_the_material_page() -> None:
-    """起跑值不在範圍：照材料頁「初值不在範圍內」、搜尋起點盒界外拒收那一條拒收（不投影、不換起點），點名那一面那一族；
-    網頁開跑計畫也擋、句子講哪一區、哪一種材料從哪個值起跑。"""
-    with pytest.raises(ValueError, match="面 x0 起跑的 glass_wool_48k：起跑值棉厚 0.05 公尺不在這一區的範圍 0.1～0.2 公尺內"):
-        run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges={"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}})
-    with pytest.raises(ValueError, match="起跑值空腔 0.05 公尺不在這一區的範圍 0～0.03 公尺內.*初值不在範圍內"):
-        run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(),
-                        ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.0, 0.03))}})
-    with pytest.raises(PlanRefused, match="「c」從48K 玻璃棉.*起跑：起跑值棉厚 0.05 公尺不在這一區的範圍 0.1～0.2 公尺內"):
-        control_plan(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.1, 0.2]}}}}))
-    # 接續與終點重建問題只走 designs_for（不經命令列的 check_ranges）：範圍本身不合、固定面給範圍也要在這裡擋。
+def _deep_start() -> tuple[MaterialGradientSettings, tuple[PresetMaterial, ...]]:
+    """自編一份 48K 起跑構造「棉 0.2＋空腔 0.25」（總深 0.45，比材料自己的總深 0.3 深；只在這幾題用，不進產品設定）。"""
+    table = run.presets_table()
+    base = next(preset for preset in table if preset.id == PRESET)
+    material = cast(dict[str, list[dict[str, object]]], json.loads(json.dumps(base.material)))
+    material["layers"][0]["thickness_m"], material["layers"][1]["thickness_m"] = 0.2, 0.25
+    family = tuple(item.model_copy(update={"presets": (*item.presets, DEEP)}) if item.id == WOOL else item for item in SETTINGS.family)
+    return SETTINGS.model_copy(update={"family": family}), (*table, base.model_copy(update={"id": DEEP, "material": material}))
+
+
+def test_zone_range_search_start_value_outside_the_range_is_projected_into_it() -> None:
+    """抓起跑值在範圍外照樣板值起跑（或拒收）、投影不取規格、投影不管總深：起點照換樣板那一把（盒界 ∩ 總深，再取規格）
+    投影進範圍開跑。x0 起跑的 48K（樣板 0.05／0.05）：棉收到 0.1～0.2 → 0.1／0.05；空腔收到 0～0.03 → 0.05／0.03；
+    棉 0.1～0.2、空腔 0.08～0.2 → 0.1／0.08。自編的深樣板（0.2／0.25，總深 0.3）棉收到 0.1～0.2 → 先投到斜邊（0.125／0.175）
+    再取規格成 0.1、空腔照總深留 0.175（沒範圍的同一面照主線只投斜邊、不取規格）。其他面逐位等於樣板；網頁開跑計畫照收。
+    範圍本身不合、固定面給範圍照舊拒收（接續與終點重建問題只走 designs_for）。"""
+    for given, expected in ((ZoneRange(porous_m=(0.1, 0.2)), [0.1, 0.05]),
+                            (ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.0, 0.03)), [0.05, 0.03]),
+                            (ZoneRange(porous_m=(0.1, 0.2), cavity_m=(0.08, 0.2)), [0.1, 0.08])):
+        ranges = {"x0": {WOOL: given}}
+        designs = run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges=ranges)
+        theta = search.baseline_theta(designs, faces.ranged_starts(designs, ranges))
+        assert faces.ranged_starts(designs, ranges) == {"x0"} and _x0(theta, designs) == expected, given
+        assert search.is_feasible(theta, designs) and sum(expected) <= cast(float, designs[2].max_total_depth_m)
+        template = search.baseline_theta(run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept()))
+        assert [value.hex() for index, value in enumerate(theta.tolist()) if index not in (4, 5)] == [
+            value.hex() for index, value in enumerate(template.tolist()) if index not in (4, 5)]
+        with pytest.raises(ValueError, match="超出盒界"):  # 不投影就是盒界外
+            search.baseline_theta(designs)
+    settings, table = _deep_start()
+    presets = (PRESET, PRESET, DEEP, PRESET, PRESET, PRESET)
+    ranges = {"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}}
+    designs = run.designs_for(presets, settings, kept=_kept(), table=table, ranges=ranges)
+    theta = search.baseline_theta(designs, faces.ranged_starts(designs, ranges))
+    assert _x0(theta, designs) == [0.1, 0.175] and search.is_feasible(theta, designs)
+    plain = run.designs_for(presets, settings, kept=_kept(), table=table)
+    lower, upper = search.design_bounds(plain)
+    edge = search.project_to_limits(search.baseline_theta(plain), lower, upper, search.depth_limits(plain))
+    assert _x0(search.baseline_theta(plain), plain) == [0.2, 0.25] and _x0(edge, plain) == [0.125, 0.175]
+    plan = control_plan(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.1, 0.2]}}}}))
+    assert plan.ranges == {"ceiling@c": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}}
     with pytest.raises(ValueError, match="面 x0 的 glass_wool_48k：.*要放寬請到材料頁改那份材料"):
         run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.4))}})
     with pytest.raises(ValueError, match="面 x0 是固定面（不換樣板），不能再給可調範圍"):
@@ -143,8 +177,20 @@ def test_zone_range_search_start_value_outside_the_range_is_refused_like_the_mat
                         ranges={"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.1))}})
 
 
+def test_zone_range_search_start_already_inside_the_range_stays_the_template_bit_for_bit() -> None:
+    """抓樣板本來就在範圍裡還被動到：x0 的 48K 收窄到棉 0.05～0.1、空腔 0.02～0.08（樣板 0.05／0.05 在裡面），
+    加個案上限 0.12（放得下）也一樣：起點逐位等於不寫範圍的樣板起點。只給別一族（24K）範圍的面不投影。"""
+    plain = search.baseline_theta(run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept()))
+    inside = {"x0": {WOOL: ZoneRange(porous_m=(0.05, 0.1), cavity_m=(0.02, 0.08))}, "y0": {WOOL24: ZoneRange(porous_m=(0.1, 0.2))}}
+    for caps in ({}, {"x0": 0.12}):
+        designs = run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges=inside, max_depths=caps)
+        assert faces.ranged_starts(designs, inside) == {"x0"}
+        theta = search.baseline_theta(designs, faces.ranged_starts(designs, inside))
+        assert theta.tobytes() == plain.tobytes() and _x0(theta, designs) == [0.05, 0.05], caps
+    assert faces.ranged_starts(run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept()), None) == frozenset()
+
+
 @pytest.mark.parametrize(("value", "extra", "message"), [
-    ("x0=glass_wool_48k:0.1,0.2", (), "起跑值棉厚 0.05 公尺不在這一區的範圍"),
     ("x0=glass_wool_48k:0.05,0.4", (), "要放寬請到材料頁改那份材料"),
     ("x0=glass_wool_48k:0.05,0.15", (), "要是產品厚度之一"),
     ("x0=glass_wool_24k:0.05,0.1:0,0.03", (), "不調空腔"),
@@ -456,7 +502,7 @@ def test_zone_range_search_command_line_start_and_resume_bind_the_ranges(
         model: ReducedModel, request: pytest.FixtureRequest, tmp_path: Path) -> None:
     """真的開跑一次（同一顆替身，沒寫範圍的那一場也開得了：不用重建替身）：範圍進 ``project.json``、資料夾名跟不寫的不同；
     照 ``project.json`` 重建問題時帳本標頭、換樣板那一側、x0 的起跑界都照範圍；寫下帳本標頭之後把 ``project.json`` 的範圍
-    換一份，真的接續入口拒收（標頭對不上），換回原來那份照收；起跑值不在範圍的開跑非零離開、不留 ``project.json``。"""
+    換一份，真的接續入口拒收（標頭對不上），換回原來那份照收。"""
     given = "x0=glass_wool_48k:0.05,0.1:0.0,0.08"
     plain, ranged = _start(tmp_path / "plain", model, request), _start(tmp_path / "ranged", model, request, given)
     assert plain.returncode == 0 and ranged.returncode == 0, plain.stderr + ranged.stderr
@@ -477,9 +523,86 @@ def test_zone_range_search_command_line_start_and_resume_bind_the_ranges(
     assert refused == {"error": "帳本標頭跟這一次對不上：['ranges']"}
     (tmp_path / "ranged" / run.PROJECT_FILE).write_text(json.dumps(document), encoding="utf-8")
     assert _probe(tmp_path / "ranged", "same") == {"error": None}
-    outside = _start(tmp_path / "outside", model, request, "x0=glass_wool_48k:0.1,0.2")
-    assert outside.returncode != 0 and "起跑值棉厚 0.05 公尺不在這一區的範圍 0.1～0.2 公尺內" in outside.stderr
-    assert not (tmp_path / "outside" / run.PROJECT_FILE).exists()
+
+
+def test_zone_range_search_projected_start_is_the_same_on_start_and_resume(
+        model: ReducedModel, request: pytest.FixtureRequest, tmp_path: Path) -> None:
+    """抓起點投影只在一處做、或網頁還拒收：天花 c 的 48K 收窄到棉 0.1～0.2（樣板 0.05 在範圍外），網頁開跑計畫照收、
+    起點投影成 0.1／0.05；命令列真的開跑 x0 收到棉 0.1～0.2（寫出 ``project.json``，不拒收），工人開跑入口（``run.run_search``）
+    與接續入口（``run.resume_search``，帳本只有標頭、前段重跑）各自照 ``project.json`` 重建，交給下降的第一個 θ 逐位相同、
+    就是投影後那一組（地板照樣板 0.05／0.05、x0 0.1／0.05、xL 與 yL 的 24K 照樣板 0.05）；顯卡把關記的起點同一組；命令列沿用抽查拿的 x0 阻抗是投影後
+    那一組構造（棉 0.1、空腔 0.05）的阻抗。"""
+    plan = control_plan(_ranged({"ceiling@c": {"ranges": {WOOL: {"porous_m": [0.1, 0.2]}}}}))
+    assert "--range" in start_arguments(plan)
+    designs, _ = start_designs(plan)
+    start = search.baseline_theta(designs, faces.ranged_starts(designs, plan.ranges))
+    named = dict(zip(search.design_names(designs), start.tolist(), strict=True))
+    assert [named["ceiling@c.layer1.thickness_m"], named["ceiling@c.layer2.thickness_m"]] == [0.1, 0.05]
+    folder = tmp_path / "outside"
+    started = _start(folder, model, request, "x0=glass_wool_48k:0.1,0.2")
+    assert started.returncode == 0, started.stderr
+    assert run.read_project(folder).ranges == {"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}}
+    found = _probe(folder, "start")
+    expected = {"floor.layer1.thickness_m": 0.05, "floor.layer2.thickness_m": 0.05, "x0.layer1.thickness_m": 0.1,
+                "x0.layer2.thickness_m": 0.05, "xL.layer1.thickness_m": 0.05, "yL.layer1.thickness_m": 0.05}
+    assert dict(zip(cast(list[str], found["names"]), cast(list[str], found["run"]), strict=True)) == {
+        name: value.hex() for name, value in expected.items()}, found
+    assert found["resume"] == found["run"] and found["gpu"] == found["run"] and found["rows"] == 0
+    spot = cast(dict[str, list[list[float]]], found["spot"])
+    actual = np.asarray(spot["actual"][0]) + 1j * np.asarray(spot["actual"][1])
+    np.testing.assert_allclose(actual, np.asarray(spot["reference"][0]) + 1j * np.asarray(spot["reference"][1]), rtol=1e-12, atol=0)
+
+
+def test_zone_range_search_fixed_candidate_checks_start_from_the_projected_start(monkeypatch: pytest.MonkeyPatch,
+                                                                                   tmp_path: Path) -> None:
+    """抓命令列開跑那一側（固定材料的核對配置）沒拿範圍：沿用比對那一份、重核那一份（交進去的與它自己算的）、
+    核對配置裡每一組的阻抗，起點都照起跑那一族有範圍的面（x0）投影。"""
+    from aosr.gradient import fixed_candidates
+
+    class _Built(Exception):
+        pass
+
+    ranges = {"x0": {WOOL: ZoneRange(porous_m=(0.1, 0.2))}}
+    designs = run.designs_for((PRESET,) * 6, SETTINGS, kept=_kept(), ranges=ranges)
+    seen: list[tuple[str, object]] = []
+    real, real_check = fixed_candidates.candidate_configurations, fixed_candidates.check_fixed_candidates
+
+    def configurations(*args: object, **kwargs: object) -> NoReturn:
+        seen.append(("核對配置", kwargs.get("ranged")))
+        raise _Built
+
+    def recheck(*args: object, **kwargs: object) -> tuple[()]:
+        seen.append(("重核", kwargs.get("ranged")))
+        return ()
+
+    monkeypatch.setattr(fixed_candidates, "candidate_configurations", configurations)
+    monkeypatch.setattr(fixed_candidates, "check_fixed_candidates", recheck)
+    monkeypatch.setattr(fixed_candidates, "table_range_notes", lambda *args: ())  # 構造清單是樁，沒有實測表
+    allowed: dict[str, tuple[str, ...]] = {"floor": (WOOL, "fixed:glass_wool_24k_50mm", "none")}
+    gate = SimpleNamespace(model=SimpleNamespace(frequencies_hz=(50.0,)), scheme=SimpleNamespace(
+        scene=SimpleNamespace(density_kg_m3=1.2, sound_speed_m_s=343.0)))
+    for carryover in (False, True):
+        try:
+            cli._fixed_candidate_checks(cast(ReducedModel, gate.model), cast(FullOperators, object()), designs, allowed,
+                                        run.presets_table(), cast(Scheme, gate.scheme), 1, tmp_path / "rom.npz",
+                                        configuration={}, carryover=carryover, ranges=ranges)
+        except _Built:
+            pass
+    assert seen == [("核對配置", frozenset({"x0"})), ("重核", frozenset({"x0"}))]
+    with pytest.raises(_Built):  # 重核本身沒拿到核對配置（接續替身那一條）時自己算的那一份
+        real_check(cast(ReducedModel, gate.model), cast(FullOperators, object()), designs, allowed, run.presets_table(),
+                   density_kg_m3=1.2, sound_speed_m_s=343.0, ranged=frozenset({"x0"}))
+    assert seen[-1] == ("核對配置", frozenset({"x0"}))
+    given: list[object] = []
+
+    def impedances(*args: object, **kwargs: object) -> dict[str, tuple[complex, ...]]:
+        given.append(kwargs.get("ranged"))
+        return {"x0": (1.0 + 0.0j,)}
+
+    monkeypatch.setattr(fixed_candidates, "candidate_designs", lambda designs, *args: designs)
+    monkeypatch.setattr(fixed_candidates, "design_impedances", impedances)
+    real(designs, allowed, run.presets_table(), (50.0,), density_kg_m3=1.2, sound_speed_m_s=343.0, ranged=frozenset({"x0"}))
+    assert given == [frozenset({"x0"})]
 
 
 def test_zone_range_search_rebuilt_problem_refuses_a_tied_pair_whose_ranges_were_edited_apart(

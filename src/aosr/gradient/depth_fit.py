@@ -56,7 +56,7 @@ def range_thicknesses(thicknesses: Sequence[float], given: ZoneRange) -> tuple[f
 
 def narrowed_family(family: FamilySettings, given: ZoneRange) -> FamilySettings:
     """收窄後的那一族（判放不放得下、畫面用）：產品厚度切成範圍裡那幾個，空腔範圍換成這一區給的（沒給照原樣）；
-    代號、初值與總深度上限不動（初值可能不在範圍裡，所以不重驗：起跑值不在範圍照開跑前那一條拒收）。"""
+    代號、初值與總深度上限不動（初值可能不在範圍裡，所以不重驗：起點照換樣板那一把投影進範圍，``material_gradient.project_initial``）。"""
     update: dict[str, object] = {"thicknesses_m": range_thicknesses(family.thicknesses_m, given)}
     if given.cavity_m is not None:
         update["cavity_range_m"] = given.cavity_m
@@ -92,22 +92,6 @@ def range_problem(family: FamilySettings, given: ZoneRange) -> str | None:
         return (f"收窄後的最淺排法 {family_shallowest_m(narrowed):g} 公尺（最薄棉加空腔下界）放不進材料自己的總深度上限 "
                 f"{family.max_total_depth_m:g} 公尺；請把下限調小")
     return None
-
-
-def start_problem(family: FamilySettings, given: ZoneRange, thickness_m: float, cavity_m: float | None) -> str | None:
-    """起跑值（樣板的棉厚與空腔；沒有空氣層是 None）在不在這一區收窄後的範圍裡，不在回一句。照材料頁「初值不在範圍內」
-    與搜尋起點「θ 超出盒界就拒收」（``material_gradient.baseline_theta``）那一條：拒收、不投影。``given`` 要先過 :func:`range_problem`。"""
-    narrowed = narrowed_family(family, given)
-    low, high = narrowed.thicknesses_m[0], narrowed.thicknesses_m[-1]
-    if not low <= thickness_m <= high:
-        return f"起跑值棉厚 {thickness_m:g} 公尺不在這一區的範圍 {low:g}～{high:g} 公尺內"
-    cavity_low, cavity_high = narrowed.cavity_range_m
-    if cavity_m is not None and not cavity_low <= cavity_m <= cavity_high:
-        return f"起跑值空腔 {cavity_m:g} 公尺不在這一區的範圍 {cavity_low:g}～{cavity_high:g} 公尺內"
-    return None
-
-
-START_ADVICE = "起跑值要在範圍內（同材料頁「初值不在範圍內」那一條）：請把範圍放寬到含起跑值，或讓這一區從別種材料起跑"
 
 
 @dataclass(frozen=True)

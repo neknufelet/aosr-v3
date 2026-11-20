@@ -312,11 +312,11 @@ def _start(args: argparse.Namespace) -> int:
     configuration = configuration_document(presets=args.presets, mount=args.mount, fixed_surfaces=fixed, max_depths=caps,
                                            allowed=allowed, scene_json=scheme.scene.model_dump_json())
     checks = _fixed_candidate_checks(model, full_operators, designs, expanded, materials.presets, scheme, args.workers,
-                                     surrogate, configuration=configuration, carryover=fingerprint is not None)
+                                     surrogate, configuration=configuration, carryover=fingerprint is not None, ranges=ranges)
     del full_operators
     spot = None
     if fingerprint is not None:
-        spot = _carryover_spot_check(model, operators, designs, scheme)
+        spot = _carryover_spot_check(model, operators, designs, scheme, ranges)
         del operators
     del model
     hashes = {"scheme_sha256": run.file_sha256(scheme_path), "surrogate_manifest_sha256": run.manifest_sha256(surrogate)}
@@ -446,19 +446,23 @@ def _listed_fixed_materials(allowed: dict[str, tuple[str, ...]], table: tuple[Pr
 def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None, designs: tuple[SurfaceDesign, ...],
                             allowed: dict[str, tuple[str, ...]], table: tuple[PresetMaterial, ...], scheme: Scheme,
                             workers: int, surrogate: Path, *, configuration: Mapping[str, object],
-                            carryover: bool) -> tuple[FixedCandidateCheck, ...]:
+                            carryover: bool, ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None,
+                            ) -> tuple[FixedCandidateCheck, ...]:
     """准用清單有固定材料：表外補值照實印、每一個各做一組替身留出驗證（全部核完、有沒過的就拒收）；沒有就什麼都不做。
     替身旁訓練說明記過的固定材料算「訓練過」（拒收的句子說訓練過但在哪個頻率不夠準，不說沒學過）。
 
     #1142（老闆 2026-11-13 拍 A）：替身旁建替身時的核對紀錄身分逐欄都跟這一次相同（:func:`_reusable`），就沿用紀錄的
     數字、不再完整解，輸出講一句「沿用建替身時核過的數字」；任何一欄不同、舊格式紀錄、或替身是接續（carry-over，
-    ``carryover``）沿用的，照舊重核，輸出講為什麼沒沿用。兩句都用「注意：」開頭，網頁那一跑的「注意」一節看得到。"""
+    ``carryover``）沿用的，照舊重核，輸出講為什麼沒沿用。兩句都用「注意：」開頭，網頁那一跑的「注意」一節看得到。
+
+    ``ranges``（``--range``，#1199）：核對配置裡沒換成固定材料的片，起點照可調範圍投影（同下降起點）；建替身那一份不帶範圍，
+    起點被投影時核對配置的阻抗跟紀錄對不上，就照舊重核。"""
     from aosr.gradient.fixed_candidates import check_fixed_candidates, reused_check, table_range_notes
-    from aosr.gradient.fixed_surfaces import fixed_targets_of
+    from aosr.gradient.fixed_surfaces import fixed_targets_of, ranged_starts
     from aosr.gradient.surrogate_coverage import read_coverage
     from aosr.gradient.surrogate_files import TRAINING_FILE
 
-    targets = fixed_targets_of(allowed)
+    targets, ranged = fixed_targets_of(allowed), ranged_starts(designs, ranges)
     if not targets:
         return ()
     assert operators is not None
@@ -469,7 +473,7 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     if carryover:
         sys.stderr.write("注意：替身是接續（carry-over）沿用的，不沿用建替身時核過的固定材料數字，開跑前照舊重核\n")
     else:
-        found, configurations = _reusable(model, operators, designs, allowed, table, scheme, surrogate, configuration)
+        found, configurations = _reusable(model, operators, designs, allowed, table, scheme, surrogate, configuration, ranged)
         if not isinstance(found, str):
             checks = tuple(reused_check(row) for row in found)
             for check in checks:
@@ -482,7 +486,7 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
     trained = frozenset(item.target for item in coverage.fixed) if coverage is not None else frozenset()
     checks = check_fixed_candidates(model, operators, designs, allowed, table, density_kg_m3=scheme.scene.density_kg_m3,
                                     sound_speed_m_s=scheme.scene.sound_speed_m_s, workers=workers, trained=trained,
-                                    configurations=configurations)
+                                    configurations=configurations, ranged=ranged)
     for check in checks:
         sys.stderr.write(f"固定材料 {check.target} 替身留出驗證通過：逐頻最大差 {check.frequency_db:g} dB、帶能量最大差 "
                          f"{check.band_db:g} dB（完整解 {check.full_solves} 次、{check.seconds:.1f} 秒）\n")
@@ -492,9 +496,10 @@ def _fixed_candidate_checks(model: ReducedModel, operators: FullOperators | None
 def _reusable(model: ReducedModel, operators: FullOperators, designs: tuple[SurfaceDesign, ...],
               allowed: dict[str, tuple[str, ...]],
               table: tuple[PresetMaterial, ...], scheme: Scheme, surrogate: Path, configuration: Mapping[str, object],
+              ranged: Set[str] = frozenset(),
               ) -> tuple[tuple[FixedCheckRow, ...] | str, dict[str, FrequencyBoundaryImpedances]]:
     """這一次的身分跟建替身時的核對紀錄逐欄比（:func:`aosr.gradient.surrogate_fixed_checks.reused_rows`）：回沿用得了的
-    紀錄列或沒沿用的原因，以及這一次算的核對配置（沒沿用就直接拿去重核，不算第二次）。"""
+    紀錄列或沒沿用的原因，以及這一次算的核對配置（沒沿用就直接拿去重核，不算第二次；``ranged`` 那幾面起點照範圍投影）。"""
     from aosr.gradient.fixed_candidates import (
         candidate_configurations, candidate_material_digest, candidate_surfaces, check_code_identity, holdout_ruler_values,
     )
@@ -508,7 +513,7 @@ def _reusable(model: ReducedModel, operators: FullOperators, designs: tuple[Surf
 
     axis = tuple(float(value) for value in model.frequencies_hz)
     configurations = candidate_configurations(designs, allowed, table, axis, density_kg_m3=scheme.scene.density_kg_m3,
-                                              sound_speed_m_s=scheme.scene.sound_speed_m_s)
+                                              sound_speed_m_s=scheme.scene.sound_speed_m_s, ranged=ranged)
     contents = {item.target: item.coverage().material_sha256 for item in fixed_targets(allowed, table)}
     candidates = tuple(CandidateIdentity(target=target, material_sha256=contents[target],
                                          material_digest=candidate_material_digest(target, table),
@@ -575,14 +580,15 @@ def _surrogate_identity(surrogate: Path, current: str) -> str:
 
 
 def _carryover_spot_check(model: ReducedModel, operators: FullOperators, designs: tuple[SurfaceDesign, ...],
-                           scheme: Scheme) -> SurrogateSpotCheck:
-    """用下降真正的起跑材料做抽查，尺由登記簿讀；不套終點離散規格與匯出空腔裁切。"""
+                           scheme: Scheme, ranges: Mapping[str, Mapping[str, ZoneRange]] | None = None) -> SurrogateSpotCheck:
+    """用下降真正的起跑材料做抽查（``ranges`` 有範圍的面起點照範圍投影，#1199），尺由登記簿讀；不套終點離散規格與匯出空腔裁切。"""
+    from aosr.gradient.fixed_surfaces import ranged_starts
     from aosr.gradient.run import holdout_rulers
     from aosr.physics.fem_reduced import even_indices
     from aosr.physics.fem_reduced_check import spot_check_reduced
 
     axis = tuple(model.frequencies_hz[index] for index in even_indices(8, len(model.frequencies_hz)))
-    impedances = _starting_impedances(designs, axis, scheme)
+    impedances = _starting_impedances(designs, axis, scheme, ranged_starts(designs, ranges))
     ruler = holdout_rulers().frequency
     spot = spot_check_reduced(model, operators, impedances, axis, ruler_name=ruler.name, frequency_db=ruler.value)
     if not spot.passed:
@@ -593,12 +599,13 @@ def _carryover_spot_check(model: ReducedModel, operators: FullOperators, designs
 
 
 def _starting_impedances(designs: tuple[SurfaceDesign, ...], frequencies_hz: tuple[float, ...],
-                         scheme: Scheme) -> FrequencyBoundaryImpedances:
-    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內（:func:`~aosr.gradient.fixed_candidates.design_impedances`）。"""
+                         scheme: Scheme, ranged: Set[str] = frozenset()) -> FrequencyBoundaryImpedances:
+    """保留原牆、固定材料與樣板全用搜尋同一條材料鏈；θ 先投影到盒界與總深度內（``ranged`` 那幾面先照可調範圍投影，
+    :func:`~aosr.gradient.fixed_candidates.design_impedances`）。"""
     from aosr.gradient.fixed_candidates import design_impedances
 
     return design_impedances(designs, frequencies_hz, density_kg_m3=scheme.scene.density_kg_m3,
-                             sound_speed_m_s=scheme.scene.sound_speed_m_s)
+                             sound_speed_m_s=scheme.scene.sound_speed_m_s, ranged=ranged)
 
 
 def _create_and_run(root: Path, project: GradientProject, snapshot: bytes | None = None) -> int:

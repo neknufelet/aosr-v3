@@ -73,7 +73,7 @@ from aosr.gradient.fixed_candidates import FixedCandidateCheck
 from aosr.gradient.depth_fit import ZoneRange
 from aosr.gradient.fixed_surfaces import (
     AllowedTargets, FixedSurfaces, MaxDepths, ZoneRanges, check_fixed_depth_conflicts, designs_with_max_depths,
-    designs_with_ranges, expanded_allowed_targets, expanded_ranges, fixed_targets_of,
+    designs_with_ranges, expanded_allowed_targets, expanded_ranges, fixed_targets_of, ranged_starts,
 )
 from aosr.gradient.endpoint import design_digest, material_digest
 from aosr.gradient.ties import Ties, check_ties_against_start, check_ties_hold, checked_ties, tied_cells
@@ -699,9 +699,10 @@ def check_user_families(materials: SearchMaterials, frequencies_hz: Sequence[flo
 # ---- 前段與整場 ----
 
 def _pre_loop(problem: GradientProblem, path: Path, should_stop: StopCheck | None) -> FloatVector:
-    """連續下降、取規格、重調三段，各自整段算完才寫成一批；回重調完的可行 θ（逐位等於帳本前段最後一列）。"""
+    """連續下降、取規格、重調三段，各自整段算完才寫成一批；回重調完的可行 θ（逐位等於帳本前段最後一列）。
+    起點照標頭記的可調範圍投影（#1199，``baseline_theta`` 的 ``ranged``；開跑與接續都從 ``project.json`` 重建到這裡）。"""
     designs, settings, objective, header = problem.designs, problem.settings, problem.objective, problem.header
-    descent = projected_descent(objective, baseline_theta(designs), design_bounds(designs), settings.descent,
+    descent = projected_descent(objective, baseline_theta(designs, ranged_starts(designs, header.ranges)), design_bounds(designs), settings.descent,
                                 limits=depth_limits(designs), should_stop=should_stop, tied_cells=tied_cells(designs, header.ties))
     if not descent.steps:
         raise Unestimable(descent.stop_reason)
