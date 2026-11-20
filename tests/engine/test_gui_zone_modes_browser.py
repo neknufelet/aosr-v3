@@ -454,3 +454,31 @@ def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: 
         expect(line).not_to_contain_text("沒貼東西")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "search-zone-holds.png"))
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+# 點完同一步就重畫，回重畫當下新畫的那一個開不開。不等：之後若又重畫一次（點擊本身有時會引來），toggle 記好的那一份會把它救回來，
+# 雲端紅的那幾次就是沒等到那一次（#1195 留言的探針：重畫當下點開的畫成收著、點收的畫成開著）。
+_CLICK_THEN_REDRAW = """([summary, wall, box]) => {
+  document.getElementById(summary).click();
+  renderZoneTable(wall);
+  return document.getElementById(box).open;
+}"""
+
+
+def test_a_redraw_between_the_click_and_the_toggle_keeps_what_was_clicked(tmp_path: Path, browser: Browser) -> None:
+    """#1195：點「改清單」之後、瀏覽器送來 toggle 之前，表剛好重畫（前一步晚到的回覆）：新畫的清單要照剛點的開或收，
+    不准畫成點之前那樣（雲端三次紅的形狀：點了、清單沒開、勾選格一直看不到）。這裡點完同一步就重畫，toggle 一定排在重畫之後。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        _choose(page, "#zone-mode-x0-auto1", "search")
+        ids = ["zone-allowed-summary-x0-auto1", "x0", "zone-allowed-box-x0-auto1"]
+        assert page.evaluate("document.getElementById('zone-allowed-box-x0-auto1').open") is False
+        assert page.evaluate(_CLICK_THEN_REDRAW, ids) is True, "點開之後重畫，清單收起來了"
+        expect(page.locator("#zone-allow-x0-auto1-glass_wool_96k")).to_be_visible()
+        assert page.evaluate(_CLICK_THEN_REDRAW, ids) is False, "收起之後重畫，清單又打開了"
+        expect(page.locator("#zone-allow-x0-auto1-glass_wool_96k")).to_be_hidden()
+        assert watched.page_errors == [] and watched.console_errors == []
