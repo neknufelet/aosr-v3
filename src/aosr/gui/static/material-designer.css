@@ -16,6 +16,9 @@ h2{font-size:1.25rem}h3{font-size:1.05rem}h2 small{font-weight:400;margin-left:.
 .tune{display:grid;justify-items:end;flex:none;font-size:.78rem;color:#53636b}
 .tune button{background:#82969d;padding:0;width:2rem;height:1.05rem;border-radius:1rem;vertical-align:middle}
 .tune button::after{content:"";display:block;background:white;border-radius:100%;width:.75rem;height:.75rem;margin-left:.16rem}
+.tune button[aria-checked=true]{background:#15617b}
+.tune button[aria-checked=true]::after{margin-left:1.08rem}
+#tuned-backing{color:#394e59;line-height:1.55}
 .layer-body{padding:.7rem;border-top:1px solid #d5e0e4}
 .params{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.55rem}
 .advanced{margin-top:.7rem;border-top:1px solid #d5e0e4;padding-top:.5rem}

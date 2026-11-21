@@ -43,12 +43,12 @@ def _row(page: Page, kind: str, material_id: str) -> None:
 def test_a_builtin_opens_with_its_curve_labels_and_shaded_extrapolation(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        _row(page, "optimizable", "glass_wool_48k")
+        _row(page, "fixed", "glass_wool_48k_50mm")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         expect(page.locator("#curve-basis")).to_have_text("阻抗怎麼得到：模擬，之後要拿實測對照")
         expect(page.locator("#curve-basis")).to_have_class("badge basis-simulated")
         expect(page.locator("#curve-provenance")).to_have_text("數字從哪來：文獻")
-        expect(page.locator("#curve-arrangement")).to_contain_text("這條是初值排法")
+        expect(page.locator("#curve-arrangement")).to_be_hidden()
         note = page.locator('#curve-warnings li[data-code="komatsu_frequency_extrapolation"]')
         expect(note).to_be_visible()
         expect(note).to_have_class("note")
@@ -115,7 +115,7 @@ def test_redraw_uses_unsaved_form_values_and_says_when_the_curve_is_stale(tmp_pa
 def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        _row(page, "optimizable", "glass_wool_48k")
+        _row(page, "fixed", "glass_wool_48k_50mm")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         held: list[Route] = []
         page.route("**/api/material-curve", lambda route: held.append(route))
@@ -126,15 +126,15 @@ def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen
         expect(page.locator("#curve-labels")).to_be_hidden()
         expect(page.locator("#curve-warnings li")).to_have_count(0)
         with page.expect_request("**/api/material-curve"):
-            _row(page, "optimizable", "glass_wool_24k")
+            _row(page, "fixed", "glass_wool_48k_50mm")
         held[1].continue_()
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
-        expect(page.locator("#curve-arrangement")).to_be_visible()
+        expect(page.locator('#curve-warnings li[data-code="komatsu_frequency_extrapolation"]')).to_be_visible()
         shown = page.locator("#curve-source").inner_text()
         with page.expect_response("**/api/material-curve", timeout=COMPUTED_MS):
             held[0].continue_()
         page.wait_for_timeout(500)
-        expect(page.locator("#curve-arrangement")).to_be_visible()  # 布那份晚到的回應沒有初值排法；蓋上去這一行就會藏起來
+        expect(page.locator('#curve-warnings li[data-code="komatsu_frequency_extrapolation"]')).to_be_visible()  # 布那份晚到的回應不能蓋掉棉的外推提醒
         assert page.locator("#curve-source").inner_text() == shown
         assert (watched.console_errors, watched.page_errors) == ([], [])
         page.unroute("**/api/material-curve")
@@ -152,7 +152,7 @@ def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen
 def test_the_curve_fits_a_phone_and_follows_a_resize(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials", viewport_width=390) as watched:
         page = watched.page
-        _row(page, "optimizable", "glass_wool_48k")
+        _row(page, "fixed", "glass_wool_48k_50mm")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
         # 區塊自己會橫向捲（共用樣式 overflow-x:auto），整頁量不到：出處裡的長網址要斷得開
@@ -163,3 +163,18 @@ def test_the_curve_fits_a_phone_and_follows_a_resize(tmp_path: Path, browser: Br
         page.set_viewport_size({"width": 1000, "height": 1100})
         page.wait_for_function("document.querySelector('#curve-chart canvas').getBoundingClientRect().width > 500")
         assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_new_optimizable_form_labels_the_initial_curve(tmp_path: Path, browser: Browser) -> None:
+    with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        page.locator("#tab-optimizable").click()
+        page.get_by_role("button", name="新增可最佳化材料").click()
+        page.locator("#provenance").select_option("model")
+        page.locator("#source").fill("自編試片紀錄")
+        page.locator('#porous-fields input[name="flow_resistivity_pa_s_m2"]').fill("14900")
+        page.locator("#curve-redraw").click()
+        expect(page.locator("#curve-chart canvas")).to_be_visible(timeout=COMPUTED_MS)
+        note = page.locator("#curve-arrangement")
+        expect(note).to_be_visible()
+        expect(note).to_contain_text("這條是初值排法")

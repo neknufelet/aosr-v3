@@ -170,6 +170,15 @@ def test_saved_copy_reveals_its_tab_group_and_row(tmp_path: Path, browser: Brows
         page = watched.page
         page.locator(f"#tab-{kind}").click()
         page.locator(f'[data-id="{source}"] button.copy').click()
+        if kind == "optimizable":
+            page.locator("#name").fill(label)
+            page.locator("#save").click()
+            expect(page.locator("#save-message")).to_contain_text("已存到「參數構造」頁")
+            page.get_by_role("link", name="參數構造").click()
+            folded = page.locator(f'#panel-optimizable details[data-name="{group}"]')
+            folded.locator("summary").first.click()
+            expect(folded.locator(f'[data-id="{source}_copy"]')).to_contain_text(label)
+            return
         page.locator("#material-id").fill(saved_id)
         page.locator("#material-label").fill(label)
         page.locator("#tab-" + ("fixed" if kind == "optimizable" else "optimizable")).click()

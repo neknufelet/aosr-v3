@@ -240,23 +240,28 @@ class MaterialStore:
             raise MaterialEditError(plain_error(exc)) from exc
         if entry.id != material_id:
             raise MaterialEditError(f"網址的代號 {material_id} 跟材料內文的代號 {entry.id} 不一樣")
-        if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
-            floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0], adjustable=entry.cavity.adjustable)
-            if floor is not None:
-                raise MaterialEditError(floor)
         with self._lock:
             current = self._user_entries()
-            ids = [item.id for item in current]
+            existing = next((item for item in current if item.id == material_id), None)
             taken = next((item for item in (*builtin_entries(), *current)
                           if item.id != material_id and item.label == entry.label), None)
+            if existing and existing.kind != entry.kind and not create:
+                old, new = ENTRY_KIND_LABELS[existing.kind], ENTRY_KIND_LABELS[entry.kind]
+                raise MaterialEditError(f"這一筆已經存成{old}，不能直接改成{new}；要換就複製一份", 409)
             if taken is not None:
                 raise MaterialEditError(f"已有材料使用名稱「{taken.label}」，請換一個名稱", 409)
-            if create and material_id in ids:
-                existing = current[ids.index(material_id)]
+            if create and existing:
                 if existing.label == entry.label:
                     raise MaterialEditError(f"已有材料使用名稱「{existing.label}」，請重新打開或複製一份", 409)
                 raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409, conflict="id")
-            entries = (tuple(entry if item.id == material_id else item for item in current) if material_id in ids
+            if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
+                floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0], adjustable=entry.cavity.adjustable)
+                if floor is not None:
+                    raise MaterialEditError(floor)
+            # 設計器原樣存回時，保留舊檔本身的空白、鍵順序與省略的選填欄位。
+            if isinstance(entry, OptimizableEntry) and existing == entry:
+                return entry
+            entries = (tuple(entry if item.id == material_id else item for item in current) if existing
                        else (*current, entry))
             try:
                 self._write(entries)

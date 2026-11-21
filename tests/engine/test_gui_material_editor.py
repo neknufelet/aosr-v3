@@ -232,3 +232,82 @@ def test_a_body_that_is_not_json_is_a_plain_400(tmp_path: Path) -> None:
         reply = client.put("/api/materials/mine", content=b"{ broken", headers={"Content-Type": "application/json"})
     assert (reply.status_code, reply.json()) == (400, {"error": "內文不是有效 JSON"})
     assert not user_library_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize(("material_id", "label", "error", "conflict"), [
+    ("panel_a", "試片丙", "已經有代號 panel_a 的材料；換一個代號，或打開那一筆再改", "id"),
+    ("panel_a", "試片甲", "已有材料使用名稱「試片甲」，請重新打開或複製一份", None),
+    ("panel_a", "試片乙", "已有材料使用名稱「試片乙」，請換一個名稱", None),
+    ("panel_c", "試片乙", "已有材料使用名稱「試片乙」，請換一個名稱", None),
+])
+def test_create_conflict_response(tmp_path: Path, material_id: str, label: str, error: str, conflict: str | None) -> None:
+    with _client(tmp_path) as client:
+        for key, name in (("panel_a", "試片甲"), ("panel_b", "試片乙")):
+            assert client.put(f"/api/materials/{key}", json=_fixed(_assembly(), key, name), headers=CREATE).is_success
+        reply = client.put(f"/api/materials/{material_id}", json=_fixed(_assembly(), material_id, label), headers=CREATE)
+        assert reply.status_code == 409
+        assert reply.json() == {"error": error, **({"conflict": conflict} if conflict else {})}
+
+
+def test_existing_material_cannot_change_kind(tmp_path: Path) -> None:
+    porous = {"kind": "porous", "material_class": "fibrous", "thickness_m": .036, "flow_resistivity_pa_s_m2": 14700}
+    common = {"id": "sample", "label": "自編短棉", "provenance": "model", "source": "試片紀錄"}
+    entries = {
+        "構造": common | {"kind": "construction", "layers": [porous], "backing": "rigid", "product": False, "placement": "wall"},
+        "固定材料": _fixed(_assembly(), "sample", "自編短棉"),
+        "可最佳化材料": common | {"kind": "optimizable", "porous": porous, "porous_thickness": {
+            "adjustable": True, "range_m": [.036, .072], "choices_m": [.036, .072], "initial_m": .036}},
+    }
+    with _client(tmp_path) as client:
+        for kind, original in entries.items():
+            assert client.put("/api/materials/sample", json=original, headers=CREATE).is_success
+            before = user_library_path(tmp_path).read_bytes()
+            for other, replacement in entries.items():
+                if other == kind:
+                    continue
+                reply = client.put("/api/materials/sample", json=replacement)
+                assert reply.status_code == 409
+                assert reply.json()["error"] == f"這一筆已經存成{kind}，不能直接改成{other}；要換就複製一份"
+                assert user_library_path(tmp_path).read_bytes() == before
+            assert client.post("/api/materials/sample/delete", json={}).is_success
+
+
+def test_creating_another_material_serializes_the_whole_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui import material_editor
+    from aosr.materials.library import LibraryEntry, dump_user_library
+
+    serialized = []
+
+    def record_write(entries: tuple[LibraryEntry, ...]) -> str:
+        serialized.append([entry.id for entry in entries])
+        return dump_user_library(entries)
+
+    monkeypatch.setattr(material_editor, "dump_user_library", record_write)
+    with _client(tmp_path) as client:
+        for key, label in [("panel_a", "第一片"), ("panel_b", "第二片")]:
+            assert client.put(f"/api/materials/{key}", json=_fixed(_assembly(), key, label), headers=CREATE).is_success
+    assert serialized == [["panel_a"], ["panel_a", "panel_b"]]
+
+
+def test_fixed_air_with_blank_initial_depth_can_be_written(tmp_path: Path) -> None:
+    document = {"kind": "optimizable", "id": "soft_sample", "label": "可調試片", "provenance": "model", "source": "樣片簿",
+                "porous": {"kind": "porous", "material_class": "fibrous", "thickness_m": .034, "flow_resistivity_pa_s_m2": 14700},
+                "porous_thickness": {"adjustable": True, "range_m": [.034, .068], "choices_m": [.034, .068], "initial_m": .034},
+                "cavity": {"adjustable": False, "range_m": [0, 0], "initial_m": None}}
+    with _client(tmp_path) as client:
+        response = client.put("/api/materials/soft_sample", json=document, headers=CREATE)
+    assert response.status_code == 200, response.text
+    saved, = load_user_library(user_library_path(tmp_path))
+    assert saved == _ENTRY.validate_python(document)
+
+
+def test_create_with_id_of_another_kind_reports_id_conflict(tmp_path: Path) -> None:
+    porous = {"kind": "porous", "material_class": "fibrous", "thickness_m": .043, "flow_resistivity_pa_s_m2": 15230}
+    wool = {"kind": "optimizable", "id": "slab_k", "label": "試作棉丁", "provenance": "model", "source": "自編試片",
+            "porous": porous, "porous_thickness": {"adjustable": True, "range_m": [.043, .086],
+                                                   "choices_m": [.043, .086], "initial_m": .043}}
+    with _client(tmp_path) as client:
+        assert client.put("/api/materials/slab_k", json=_fixed(_assembly(), "slab_k", "試作板丙"), headers=CREATE).is_success
+        reply = client.put("/api/materials/slab_k", json=wool, headers=CREATE)
+    assert reply.status_code == 409
+    assert reply.json() == {"error": "已經有代號 slab_k 的材料；換一個代號，或打開那一筆再改", "conflict": "id"}

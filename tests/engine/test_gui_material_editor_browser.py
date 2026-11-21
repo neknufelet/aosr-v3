@@ -45,16 +45,19 @@ def test_copy_a_builtin_family_change_its_thicknesses_and_save(tmp_path: Path, b
         page = watched.page
         expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 0 筆")
         _row(page, "optimizable", "glass_wool_48k", "copy")
-        expect(page.locator("#material-id")).to_have_value("glass_wool_48k_copy")
-        expect(page.locator("#porous-thickness")).to_be_hidden()
-        page.locator("#material-label").fill("我的 48K 棉")
-        page.locator("#porous-choices").fill("0.05, 0.075, 0.1")
-        page.locator("#porous-initial").fill("0.075")
-        page.locator("#cavity-adjustable").uncheck()
-        expect(page.locator("#cavity-low")).to_be_hidden()
-        page.locator("#cavity-depth").fill("0.05")
-        _saved(page)
+        page.locator("#name").fill("我的 48K 棉")
+        page.locator(".layer-select").first.click()
+        page.get_by_label("範圍下限（mm）").fill("50")
+        page.get_by_label("範圍上限（mm）").fill("100")
+        page.get_by_label("買得到的厚度（mm）").fill("50, 75, 100")
+        page.locator('[name="thickness_m"]').fill("75")
+        page.get_by_role("switch").nth(1).click()
+        expect(page.get_by_label("範圍下限（mm）")).to_be_hidden()
+        page.locator('[name="thickness_m"]').fill("50")
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).to_have_class("ok")
         assert not RAW_VALUES.search(page.locator("body").inner_text())
+        page.goto(f"{base}/materials#param")
         expect(_user_row(page, "glass_wool_48k_copy")).to_contain_text("我的 48K 棉")
         assert (watched.console_errors, watched.page_errors) == ([], [])
     entry = _materials(tmp_path)["glass_wool_48k_copy"]
@@ -160,7 +163,7 @@ def test_an_unreadable_user_file_is_shown_and_writes_are_disabled(tmp_path: Path
         expect(page.locator("#file-problem")).to_contain_text("讀不進來")
         expect(page.locator("#new-optimizable")).to_be_disabled()
         _row(page, "optimizable", "glass_wool_96k", "open")
-        expect(page.locator("#copy")).to_be_disabled()
+        expect(page.locator("#copy-designer")).to_be_disabled()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert (watched.console_errors, watched.page_errors) == ([], [])
     assert library.read_text(encoding="utf-8") == "{ broken"
@@ -173,13 +176,21 @@ def test_every_builtin_copied_and_saved_untouched_keeps_every_field(tmp_path: Pa
         page = watched.page
         for entry in builtins:
             _row(page, entry.kind, entry.id, "copy")
-            _saved(page)
+            if entry.kind == "optimizable":
+                page.locator("#save").click()
+                expect(page.locator("#save-message")).to_have_class("ok")
+                page.goto(f"{base}/materials")
+            else:
+                _saved(page)
         assert (watched.console_errors, watched.page_errors) == ([], [])
     saved = _materials(tmp_path)
     for entry in builtins:
         want = entry.model_dump(mode="json")
         got = saved[f"{entry.id}_copy"]
-        for name in set(want) - {"id", "label", "preset_members", "template_preset"}:
+        changed = {"id", "label", "preset_members", "template_preset"}
+        if entry.kind == "optimizable":
+            assert got["preset_members"] == [] and got["template_preset"] is None
+        for name in set(want) - changed:
             assert got[name] == want[name], (entry.id, name)
 
 
@@ -268,8 +279,9 @@ def test_renaming_only_keeps_a_single_product_thickness_and_a_multi_line_note(tm
         with _open(browser, f"{base}/materials") as watched:
             page = watched.page
             _row(page, "optimizable", "my_wool", "open")
-            page.locator("#material-label").fill("我的棉改名")
-            _saved(page)
+            page.locator("#name").fill("我的棉改名")
+            page.locator("#save").click()
+            expect(page.locator("#save-message")).to_have_class("ok")
             assert (watched.console_errors, watched.page_errors) == ([], [])
     after = _materials(tmp_path)["my_wool"]
     assert after == before | {"label": "我的棉改名"}

@@ -3,11 +3,14 @@
 const backingLabels = {rigid: "硬牆", air: "空氣", zone_wall: "這一區原本的牆"};
 let elements, dimensionFields, draft;
 let savedSnapshot;
+let uncertainCreate;
+let copiedOptimizable;
 let selected = -1;
 let readOnly = false;
 let isNew = true;
 let curveGeneration = 0;
 let curveTimer;
+const collidingIds = new Set();
 const inactiveFields = new WeakMap();
 const clothFields = ["backing_fabric_surface_mass_kg_m2", "backing_fabric_flow_resistance_pa_s_m"];
 
@@ -42,6 +45,7 @@ function displayNumber(number) {
 }
 
 function thicknessText(layer) {
+  if (adjustableAir(layer) && !layer.thickness_m) return "初值無空腔";
   return layer.thickness_m == null ? "" : displayNumber(layer.thickness_m * 1000) + " mm";
 }
 
@@ -51,8 +55,15 @@ function selectLayer(index) {
   renderFigure();
 }
 
-function stackChanged() {
-  renderStack();
+function stackChanged(advancedOpen = false) {
+  if (tuningUnavailable()) {
+    for (const layer of draft.layers) {
+      const spec = thicknessSpecs.get(layer);
+      if (spec) spec.adjustable = false;
+    }
+  }
+  renderTuningOptions();
+  renderStack(advancedOpen);
   renderFigure();
   requestCurve();
 }
@@ -62,7 +73,7 @@ function moveLayer(index, offset) {
   const [layer] = layers.splice(index, 1);
   selected = index + offset;
   layers.splice(selected, 0, layer);
-  stackChanged();
+  stackChanged(byId("stack").querySelector(".advanced")?.open);
 }
 
 function removeLayer(index) {
@@ -119,7 +130,10 @@ function parameterField(layer, key, required = listing.required_fields[layer.kin
       value: value == null ? "" : displayNumber(value * scale)});
   }
   input.addEventListener("input", () => {
-    if (!input.value && !required) delete layer[key];
+    // 還原原本省略的選項（例如流阻來源「未註明」），保留開檔時的欄位。
+    const original = layer.kind === "porous" && (copiedOptimizable ?? openedEntry)?.porous;
+    const restoreOmitted = original && !Object.hasOwn(original, key) && input.value === spec.default;
+    if ((!input.value && !required) || restoreOmitted) delete layer[key];
     else if (!input.value) layer[key] = null;
     else if (options.length) layer[key] = input.value;
     else layer[key] = scale === 1 ? Number(input.value) : displayNumber(Number(input.value) / scale);
@@ -189,7 +203,8 @@ function plateOptions(layer) {
 
 function layerBody(layer, index, advancedOpen) {
   const keys = listing.required_fields[layer.kind].filter(key => key !== "kind");
-  const params = fieldGrid(layer, keys);
+  const params = el("div", {class: "params"}, ...keys.map(key => parameterField(layer, key,
+    !(key === "thickness_m" && adjustableAir(layer)))));
   const fields = listing.material_form[layer.kind].fields;
   const options = layer.kind === "porous" ? porousOptions(layer) : fields.open_area ? [fieldGrid(layer, ["surface_mass_kg_m2"])] : [];
   const advanced = options.length ? el("details", {class: "advanced", open: advancedOpen}, el("summary", {text: "進階，一般不用填"}), ...options) : null;
@@ -197,7 +212,7 @@ function layerBody(layer, index, advancedOpen) {
     button("往房間側移", () => moveLayer(index, -1), {class: "quiet", disabled: index === 0}),
     button("往牆側移", () => moveLayer(index, 1), {class: "quiet", disabled: index === draft.layers.length - 1}),
     button("拿掉", () => removeLayer(index), {class: "danger"}));
-  return el("div", {class: "layer-body"}, params, ...(fields.open_area ? plateOptions(layer) : []), advanced, readOnly ? null : tools);
+  return el("div", {class: "layer-body"}, params, tuningFields(layer), ...(fields.open_area ? plateOptions(layer) : []), advanced, readOnly ? null : tools);
 }
 
 function renderStack(advancedOpen = false) {
@@ -206,37 +221,32 @@ function renderStack(advancedOpen = false) {
     const head = button("", () => selectLayer(open ? -1 : i), {class: "layer-select", "aria-expanded": String(open)});
     head.append(String(i + 1), textureChip(layer), el("span", {class: "element-name", text: elementName(layer)}), el("span", {class: "size", text: thicknessText(layer)}));
     return el("article", {class: open ? "selected" : "", "data-kind": layer.kind},
-      el("div", {class: "layer-head"}, head, el("div", {class: "tune"},
-        el("span", {}, "給程式調 ", el("button", {type: "button", role: "switch", "aria-label": `第 ${i+1} 層給程式調`,
-          "aria-checked": "false", disabled: true})), el("span", {text: "第二批才能給程式調"}))),
+      el("div", {class: "layer-head"}, head, tuningControl(layer, i)),
       open ? layerBody(layer, i, advancedOpen) : null);
   });
   byId("stack").replaceChildren(...rows);
 }
 
 function renderFigure() {
+  const backing = tuningActive() ? "rigid" : draft.backing;
   const layers = draft.layers.map(layer => ({name: elementName(layer), texture: materialTexture(layer.kind, layer.material_class),
     mm: Math.max(0, (layer.thickness_m ?? 0) * 1000)}));
-  byId("figure").replaceChildren(draft.layers.length ? materialCutaway(layers, draft.backing, layers.map(l => l.name).join("、"),
+  byId("figure").replaceChildren(draft.layers.length ? materialCutaway(layers, backing, layers.map(l => l.name).join("、"),
     {index: selected, pick: selectLayer}) : el("p", {class: "hint", text: "加一層後即可查看剖面"}));
   byId("figure-key").replaceChildren(...layers.map((layer, i) => button(`${i+1}　${layer.name} ${thicknessText(draft.layers[i])}`,
     () => selectLayer(i), {"aria-pressed": String(i === selected)})));
-  byId("figure-key").append(el("small", {class: "back-key", text: "背後：" + backingLabels[draft.backing]}));
-  const known = draft.layers.filter(layer => layer.thickness_m != null);
-  const total = known.reduce((sum, layer) => sum + layer.thickness_m * 1000, 0);
+  byId("figure-key").append(el("small", {class: "back-key", text: "背後：" + backingLabels[backing]}));
+  const known = draft.layers.filter(layer => layer.thickness_m != null || (layer.kind === "air" && tuningActive()));
+  const total = known.reduce((sum, layer) => sum + (layer.thickness_m ?? 0) * 1000, 0);
   byId("total").textContent = !known.length ? "—" : `${displayNumber(total)} mm` +
     (known.length === layers.length ? "" : "（未計無厚度資料的層）");
 }
 
 function renderCurve(reply) {
   byId("curve-state").textContent = reply.status === "drawn" ? "" : reply.message || reply.error;
+  if (reply.status !== "drawn") return;
   byId("curve-basis").textContent = reply.basis || "";
   showPlotKey(reply);
-  if (reply.status !== "drawn") {
-    destroyPlot();
-    byId("curve-notes").hidden = true;
-    return;
-  }
   drawPlot(reply);
   const warnings = reply.warnings.map(note => note.text);
   byId("curve-notes").querySelector("ul").replaceChildren(...warnings.map(text => el("li", {text})));
@@ -249,9 +259,18 @@ function missingLayerField() {
     const required = [...listing.required_fields[layer.kind]];
     if (fields.open_area) required.push(...plateGeometry(layer));
     if (Object.hasOwn(layer, clothFields[0])) required.push(...clothFields);
-    if (layer.kind === "porous") required.push(...porousModelFields(layer));
-    const missing = required.find(key => layer[key] == null && fields[key].default == null);
+    if (layer.kind === "porous") {
+      required.push(...porousModelFields(layer));
+      const frame = ["frame_compression_modulus_pa", "frame_loss_factor"];
+      if (frame.some(key => layer[key] != null)) required.push(...frame);
+    }
+    const missing = required.find(key => layer[key] == null && fields[key].default == null &&
+      !(key === "thickness_m" && adjustableAir(layer)));
+    if (layer.kind === "air" && missing === "thickness_m") return `第 ${i + 1} 層 空氣層的厚度還沒填`;
     if (missing) return `第 ${i + 1} 層的${fields[missing].label}還沒填`;
+    if (layer.kind === "air" && tuningActive() && !adjustableAir(layer) && layer.thickness_m <= 0) {
+      return `第 ${i + 1} 層 空氣層的厚度要大於 0；不要空氣就拿掉這一層`;
+    }
   }
   return "";
 }
@@ -259,14 +278,20 @@ function missingLayerField() {
 function requestCurve() {
   const ticket = ++curveGeneration;
   clearTimeout(curveTimer);
-  byId("condition").textContent = "無規入射・背後：" + backingLabels[draft.backing] +
-    (draft.backing === "zone_wall" ? "（先當硬牆算）" : "");
+  const backing = tuningActive() ? "rigid" : draft.backing;
+  renderProvenance();
+  byId("condition").textContent = (tuningActive() ? "初值排法・" : "") + "無規入射・背後：" + backingLabels[backing] +
+    (backing === "zone_wall" ? "（先當硬牆算）" : "");
   byId("save-message").textContent = "";
   byId("curve-state").textContent = plot ? "改過了，停手後重算" : "計算中…";
   // 預覽只取疊層和背後，讓尚未填完的出處、名稱不影響物理曲線。
-  const body = JSON.stringify(readOnly ? draft : {...draft, label: "構造預覽", provenance: "model", source: "依各層物性推算", notes: [], links: []});
+  const unchanged = unchangedOptimizable();
+  const entry = unchanged ? openedEntry : draftDocument();
+  const origin = unchangedPorousSource();
+  const body = JSON.stringify(readOnly || unchanged ? entry : {...entry, label: "構造預覽",
+    provenance: origin?.provenance ?? "model", source: origin?.source ?? "依各層物性推算", notes: [], links: origin?.links ?? []});
   curveTimer = setTimeout(async () => {
-    const missing = missingLayerField();
+    const missing = !unchanged && (missingLayerField() || tuningProblem(entry));
     if (missing) {
       renderCurve({status: "incomplete", message: missing});
       return;
@@ -304,6 +329,26 @@ function freshConstruction() {
     layers: [], backing: "rigid", placement: "wall", product: false, provenance: "model", source: "材料設計器依各層物性推算", links: [], notes: []};
 }
 
+function unchangedOptimizable() {
+  return openedEntry?.kind === "optimizable" && snapshot() === savedSnapshot;
+}
+
+function unchangedPorousSource() {
+  const original = copiedOptimizable ?? openedEntry;
+  if (original?.kind !== "optimizable" || !tuningActive()) return null;
+  const porous = draft.layers[0];
+  const fields = listing.material_form.porous.fields;
+  const same = Object.keys({...original.porous, ...porous}).every(key =>
+    key === "thickness_m" || (porous[key] ?? fields[key].default) === (original.porous[key] ?? fields[key].default));
+  return same ? original : null;
+}
+
+function renderProvenance() {
+  const provenance = listing.provenance_labels[readOnly ? draft.provenance : unchangedPorousSource()?.provenance ?? "model"];
+  byId("source").textContent = provenance;
+  byId("citation-provenance").textContent = provenance;
+}
+
 function renderDesigner() {
   byId("name").value = draft.label;
   byId("name").disabled = readOnly;
@@ -313,37 +358,47 @@ function renderDesigner() {
   }
   byId("product").checked = draft.product;
   byId("product").disabled = readOnly;
-  const provenance = listing.provenance_labels[readOnly ? draft.provenance : "model"];
-  byId("source").textContent = provenance;
-  byId("citation-provenance").textContent = provenance;
+  renderProvenance();
   for (const key of ["source", "links", "notes"]) {
     const input = byId("citation-" + key);
-    input.value = key === "source" ? draft.source : draft[key].join("\n");
+    input.value = key === "source" ? draft.source : (draft[key] ?? []).join("\n");
     input.disabled = readOnly;
   }
   byId("source").title = draft.source;
   byId("workspace").hidden = false;
   byId("entry-status").textContent = isNew ? "從房間側往牆側疊層，儲存後可在分區頁指定。" :
-    (readOnly ? "成品唯讀，可複製到設計器" : "改這一筆，已經貼在分區上的不會跟著變");
+    (readOnly ? (draft.product ? "成品唯讀，可複製到設計器" : "內建材料唯讀，可複製到設計器") : "改這一筆，已經貼在分區上的不會跟著變");
   byId("palette").closest(".add").hidden = readOnly;
   byId("save").hidden = readOnly;
   byId("copy-designer").hidden = isNew;
+  byId("copy-designer").disabled = Boolean(listing.user_file_problem);
   byId("copy-designer").textContent = readOnly ? "複製到設計器" : "複製一份";
+  renderTuningOptions();
   renderStack(byId("stack").querySelector(".advanced")?.open);
   renderFigure();
 }
 
-function modelNotes(original, notes) {
+function modelNotes(original, notes = []) {
   if (original.provenance === "model") return notes;
-  const citation = `原來源：${listing.provenance_labels[original.provenance]}，出處：${original.source}，網址：${original.links.join("、") || "無"}`;
+  const citation = `原來源：${listing.provenance_labels[original.provenance]}，出處：${original.source}，網址：${(original.links ?? []).join("、") || "無"}`;
   const line = citation.replace(/[\r\n]+/g, " ");
   return [line, ...notes.filter(note => note !== line)];
 }
 
+function copyIdentity(original, recovered) {
+  return {id: recovered?.id ?? freeId(original.id + "_copy", collidingIds), label: freeLabel(original.label + "（複本）", recovered?.id)};
+}
+
+function modelCopyCitation(original, notes, label = original.label) {
+  return {provenance: "model", source: `照「${label}」改的`, links: [], notes: modelNotes(original, notes)};
+}
+
 function makeCopy(original) {
-  const saved = listing.materials.find(row => row.entry.id === original.id)?.entry ?? original;
-  draft = {...draft, id: freeId(original.id + "_copy"), label: freeLabel(original.label + "（複本）"), product: false,
-    provenance: "model", source: `照「${original.label}」改的`, links: [], notes: modelNotes(saved, original.notes)};
+  copiedOptimizable = openedEntry?.kind === "optimizable" ? openedEntry : null;
+  const citation = copiedOptimizable ? {} : modelCopyCitation(openedEntry ?? original, original.notes, original.label);
+  draft = {...draft, ...copyIdentity(original), ...citation, product: false};
+  openedEntry = null;
+  uncertainCreate = null;
   isNew = true;
   readOnly = false;
   savedSnapshot = null;
@@ -353,19 +408,23 @@ async function initDesigner() {
   const [materials, parts] = await Promise.all([api("/api/materials"), api("/api/material-elements")]);
   if (!materials.ok || !parts.ok) throw new Error(materials.body.error || parts.body.error || "讀不到材料資料");
   listing = materials.body;
-  if (listing.user_file_problem) throw new Error(listing.user_file_problem);
+
   elements = parts.body.elements;
   dimensionFields = parts.body.dimension_fields;
   const query = new URLSearchParams(location.search);
   const copying = query.has("copy");
   const id = query.get(copying ? "copy" : "id");
+  if (listing.user_file_problem && (id === null || copying)) throw new Error(listing.user_file_problem);
   if (id === null) {
     draft = freshConstruction();
   } else {
     const row = listing.materials.find(item => item.entry.id === id);
-    if (!row) throw new Error("材料庫找不到這一筆材料");
+    if (!row) throw new Error(listing.user_file_problem || "材料庫找不到這一筆材料");
     const entry = row.entry;
-    if (entry.kind === "construction") {
+    openedEntry = entry;
+    if (entry.kind === "optimizable") {
+      draft = optimizableDraft(entry);
+    } else if (entry.kind === "construction") {
       draft = structuredClone(entry);
     } else if (copying && entry.kind === "fixed" && entry.material.kind === "assembly") {
       const {id, label, provenance, source, links, notes} = entry;
@@ -380,7 +439,7 @@ async function initDesigner() {
       makeCopy(entry);
     } else {
       isNew = false;
-      readOnly = entry.product || row.builtin;
+      readOnly = Boolean(entry.product || row.builtin);
     }
   }
   savedSnapshot = copying ? null : snapshot();
@@ -389,9 +448,46 @@ async function initDesigner() {
   requestCurve();
 }
 
-function putConstruction(document) {
-  return api("/api/materials/" + encodeURIComponent(document.id), {method: "PUT",
-    headers: {"Content-Type": "application/json", ...(isNew ? {"If-None-Match": "*"} : {})}, body: JSON.stringify(document)});
+async function putConstruction(document, create) {
+  // 斷線時只記這一頁剛送出的那份；收到明確拒收就不是遺失回覆。
+  if (create) uncertainCreate = structuredClone(document);
+  const reply = await api("/api/materials/" + encodeURIComponent(document.id), {method: "PUT",
+    headers: {"Content-Type": "application/json", ...(create ? {"If-None-Match": "*"} : {})}, body: JSON.stringify(document)});
+  if (reply.ok && !reply.body.material_id) throw new Error(reply.body.error || "沒有收到存檔回覆");
+  if (reply.ok || (create && reply.status < 500)) uncertainCreate = null;
+  return reply;
+}
+
+function comparableEntry(entry) {
+  // 清單會展開預設值，並修掉字串兩端空白；只在核對失去回覆的新筆時這樣比較。
+  return JSON.stringify(entry, (_, value) => {
+    if (typeof value === "string") return value.trim();
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const fields = {...value};
+    if (fields.kind === "porous") {
+      fields.model ??= listing.material_form.porous.fields.model.default;
+      if (fields.flow_resistivity_source === "unspecified") delete fields.flow_resistivity_source;
+    }
+    return Object.fromEntries(Object.keys(fields).sort()
+      .filter(key => fields[key] != null && !(Array.isArray(fields[key]) && !fields[key].length))
+      .map(key => [key, fields[key]]));
+  });
+}
+
+async function recoverCreate() {
+  if (!uncertainCreate) return;
+  const reply = await api("/api/materials");
+  if (!reply.ok || reply.body.user_file_problem || !reply.body.materials) {
+    throw new Error(reply.body.user_file_problem || reply.body.error || "無法核對上次存檔");
+  }
+  listing = reply.body;
+  const found = listing.materials.find(row => row.entry.id === uncertainCreate.id);
+  if (found && !found.builtin && comparableEntry(found.entry) === comparableEntry(uncertainCreate)) {
+    if (!isNew) return found.entry;  // 換種類另存的複本已在檔內，畫面仍編輯原草稿。
+    openedEntry = found.entry;
+    isNew = false;
+  }
+  uncertainCreate = null;
 }
 
 async function saveConstruction() {
@@ -401,21 +497,53 @@ async function saveConstruction() {
   byId("workspace").inert = true;
   byId("name").disabled = true;
   try {
-    const missing = missingLayerField();
-    if (missing) throw new Error(missing);
-    const original = listing.materials.find(item => item.entry.id === draft.id)?.entry ?? draft;
-    const document = {...draft, provenance: "model", notes: modelNotes(original, draft.notes)};
-    let reply = await putConstruction(document);
-    if (isNew && reply.status === 409 && reply.body.conflict === "id") {
+    const recovered = await recoverCreate();
+    const unchanged = !isNew && snapshot() === savedSnapshot;
+    const document = unchanged ? structuredClone(openedEntry) : draftDocument();
+    if (!unchanged) {
+      const problem = missingLayerField() || tuningProblem(document);
+      if (problem) throw new Error(problem);
+    }
+    const switching = !isNew && document.kind !== openedEntry.kind;
+    let copy;
+    if (switching) {
+      const names = listing.entry_kind_labels;
+      if (!window.confirm(`這一筆已經存成${names[openedEntry.kind]}，改成${names[document.kind]}只能另存一份新的；原本那筆不動。`)) return;
+      copy = {...copyIdentity(draft, recovered?.kind === document.kind ? recovered : null),
+        ...modelCopyCitation(openedEntry, draft.notes, openedEntry.kind === "optimizable" ? openedEntry.label : draft.label)};
+    } else if (copiedOptimizable && document.kind === "construction") {
+      copy = modelCopyCitation(copiedOptimizable, draft.notes);
+    }
+    if (copy) {
+      Object.assign(document, copy);
+    } else if (!unchanged && !unchangedPorousSource()) {
+      const original = copiedOptimizable ?? openedEntry ?? draft;
+      document.provenance = "model";
+      if (document.notes || original.provenance !== "model") document.notes = modelNotes(original, draft.notes);
+    }
+    const create = isNew || (switching && recovered?.kind !== document.kind);
+    let reply = await putConstruction(document, create);
+    if (create && reply.status === 409 && reply.body.conflict === "id") {
+      collidingIds.add(document.id);
       document.id = newConstructionId();
-      reply = await putConstruction(document);
-      if (reply.status === 409 && reply.body.conflict === "id") throw new Error("自動編號又重複了，請再按一次儲存。");
+      if (isNew) draft.id = document.id;
+      reply = await putConstruction(document, true);
+      if (reply.status === 409 && reply.body.conflict === "id") {
+        collidingIds.add(document.id);
+        if (isNew) draft.id = newConstructionId();
+        throw new Error("自動編號又重複了，請再按一次儲存。");
+      }
     }
     if (!reply.ok) throw new Error(reply.body.error || String(reply.status));
-    draft = document;
+    if (copy) Object.assign(draft, copy);
+    draft.id = document.id;
+    draft.provenance = document.provenance;
+    draft.notes = document.notes;
+    openedEntry = structuredClone(document);
+    copiedOptimizable = null;
     const row = listing.materials.find(item => item.entry.id === draft.id);
-    if (row) row.entry = structuredClone(draft);
-    else listing.materials.push({entry: structuredClone(draft), builtin: false});
+    if (row) row.entry = openedEntry;
+    else listing.materials.push({entry: openedEntry, builtin: false});
     isNew = false;
     savedSnapshot = snapshot();
     readOnly = draft.product;
@@ -435,7 +563,7 @@ async function saveConstruction() {
 
 function snapshot() {
   // 相同欄位刪掉再填回來，鍵的排列順序不算修改。
-  return JSON.stringify(draft, (_, value) => value && typeof value === "object" && !Array.isArray(value)
+  return JSON.stringify(draftDocument(), (_, value) => value && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 }
 
@@ -455,6 +583,7 @@ for (const key of ["source", "links", "notes"]) {
     const text = event.target.value;
     draft[key] = key === "source" ? text : text.split("\n").map(line => line.trim()).filter(Boolean);
     byId("source").title = draft.source;
+    renderProvenance();
     byId("save-message").textContent = "";
   });
 }
@@ -465,9 +594,14 @@ byId("copy-designer").addEventListener("click", () => {
   makeCopy(draft);
   history.replaceState(null, "", url);
   renderDesigner();
+  requestCurve();
   byId("save-message").textContent = "這是複本，儲存後會新增一筆參數構造。";
 });
-byId("name").addEventListener("input", event => { draft.label = event.target.value; byId("save-message").textContent = ""; });
+byId("name").addEventListener("input", event => {
+  draft.label = event.target.value;
+  renderProvenance();
+  byId("save-message").textContent = "";
+});
 for (const input of document.querySelectorAll(".backs input, .where input")) {
   input.addEventListener("change", () => {
     draft[input.name] = input.value;
@@ -478,5 +612,13 @@ for (const input of document.querySelectorAll(".backs input, .where input")) {
     }
   });
 }
-byId("product").addEventListener("change", event => { draft.product = event.target.checked; byId("save-message").textContent = ""; });
+byId("product").addEventListener("change", event => {
+  const wasTuning = tuningActive();
+  draft.product = event.target.checked;
+  if (wasTuning) stackChanged();
+  else {
+    renderStack(byId("stack").querySelector(".advanced")?.open);
+    byId("save-message").textContent = "";
+  }
+});
 initDesigner().catch(error => { byId("entry-status").textContent = error.message; });

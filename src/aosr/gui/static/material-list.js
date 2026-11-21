@@ -96,8 +96,9 @@ function catalogRow(row, previews) {
   const box = el("div", {class: "preview", text: "計算中…"});
   previews.push({entry, box});
   const actions = el("div", {class: "catalog-actions"});
+  const inDesigner = entry.kind === "construction" || entry.kind === "optimizable";
   if (tunableLayers(entry)) actions.append(el("small", {text: "這一頁還不能看內容與編輯"}));
-  else if (entry.kind === "construction") {
+  else if (inDesigner) {
     actions.append(el("button", {class: "open", text: "打開", on: {click: () => location.assign(designerUrl(entry.id))}}),
       el("button", {class: "copy quiet", text: "複製到設計器", disabled: !!listing.user_file_problem,
         on: {click: () => location.assign(designerUrl(entry.id, true))}}));
@@ -115,7 +116,7 @@ function catalogRow(row, previews) {
   return el("article", {class: "material-item", "data-id": entry.id},
     el("div", {class: "catalog-grid"},
       materialCutaway(layers, backing, section),
-      el("div", {class: "material-name"}, el("strong", {}, entry.kind === "construction" ?
+      el("div", {class: "material-name"}, el("strong", {}, inDesigner ?
         el("a", {href: designerUrl(entry.id), text: entry.label}) : entry.label),
         el("div", {class:"material-depth"}, "總厚 ", el("b", {text: total}), note),
         entry.kind === "construction" ? el("small", {text: backingWords(backing)}) : null, builtin ? el("small", {text: "內建・唯讀"}) : null),
