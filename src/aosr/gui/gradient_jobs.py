@@ -70,7 +70,7 @@ from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.gui import reference_only
 from aosr.gui.zone_result import baseline_warning
 from aosr.gui.zone_limits import DepthTargets
-from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries, dump_user_library, load_user_library
+from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library, fixed_surface, load_user_library
 from aosr.materials.search_library import (
     MaterialsRefused, SearchMaterials, fixed_candidates, refuse_fixed_as_family, refuse_tunable_layers, user_fixed_entries,
     with_user_materials,
@@ -345,7 +345,7 @@ class GradientJobs:
         except MaterialsRefused as error:
             raise PlanRefused(str(error)) from error
         fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
-                               *(entry.id for entry in entries if isinstance(entry, FixedEntry))))
+                               *(entry.id for entry in entries if fixed_surface(entry) is not None)))
         plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check,
                            depth_targets=library_depth_targets(materials.settings, entries),
                            tie_inputs=TieInputs(materials.presets, entries, self.capabilities), pair=pair)

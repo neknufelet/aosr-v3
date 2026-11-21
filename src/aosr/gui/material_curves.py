@@ -46,6 +46,7 @@ from aosr.materials.library import (
     OptimizableEntry,
     TunableLayersEntry,
     basis_label,
+    fixed_surface,
     impedance_basis,
     initial_assembly,
     template_assembly,
@@ -77,7 +78,7 @@ def _physics_material(entry: LibraryEntry) -> tuple[SurfaceMaterial, str | None]
         return initial_assembly(entry), (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
                                          "程式最佳化這種材料還沒接上，這條只供對照。")
     if not isinstance(entry, OptimizableEntry):
-        return entry.surface_material(), None
+        return fixed_surface(entry), None
     cavity = None if entry.cavity is None else entry.cavity.initial_m
     layers = f"多孔層 {entry.porous.thickness_m:g} m" + (f"＋空腔 {cavity:g} m" if cavity else "、沒有空腔")
     return template_assembly(entry), (f"這條是初值排法：{layers}，背後是硬牆。可最佳化材料是一族，"
@@ -154,11 +155,11 @@ def _unchecked_layers(material: SurfaceMaterial) -> list[dict[str, object]]:
 
 def _basis_detail(entry: LibraryEntry) -> str:
     """標語底下那一行：這條曲線的阻抗是怎麼來的。"""
-    if isinstance(entry, OptimizableEntry | TunableLayersEntry) or isinstance(entry.material, Assembly):
+    table = fixed_surface(entry)
+    if table is None or isinstance(table, Assembly):
         return "由各層參數用模型算的，之後要拿實測對照。"
-    if isinstance(entry.material, ConstantImpedance):
+    if isinstance(table, ConstantImpedance):
         return "每個頻率都同一個實數阻抗，是近似。"
-    table = entry.material
     basis = impedance_basis(entry)
     coverage = f"實測表涵蓋 {table.points[0].frequency_hz:g}–{table.points[-1].frequency_hz:g} Hz，表內假設與入射角無關；表外用底構造算。"
     return ("實測表沒有虛部，虛部當 0 算，所以是近似；" if basis == "approximate" else "") + coverage

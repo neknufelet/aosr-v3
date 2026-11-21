@@ -294,3 +294,9 @@ def test_two_user_materials_with_the_same_id_are_refused() -> None:
     two = _ENTRY.validate_python(_fixed(label="另一塊"))
     with pytest.raises(ValueError, match="不可重複"):
         library.dump_user_library((one, two))
+
+
+def test_fixed_surface_distinguishes_standalone_material_from_a_family() -> None:
+    entry = library.FixedEntry.model_validate(_fixed())
+    assert library.fixed_surface(entry) == entry.surface_material()
+    assert library.fixed_surface(_ENTRY.validate_python(_optimizable())) is None

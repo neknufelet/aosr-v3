@@ -21,7 +21,7 @@ from aosr.gui.problem_text import kind_word, rounded_number
 from aosr.materials.construction_models import (
     AirLayer, Assembly, BoardLayer, ConstantImpedance, Layer, MeasuredImpedance, MountedOnWall, PorousLayer,
     SurfaceMaterial)
-from aosr.materials.library import FixedEntry, LibraryEntry, OptimizableEntry
+from aosr.materials.library import LibraryEntry, OptimizableEntry, fixed_surface
 
 COMPOSED_NOTE = "（依參數組名）"
 MOUNTED_NOTE = "貼在原牆上"
@@ -77,12 +77,10 @@ def _layer_words(layer: Layer, library: Sequence[LibraryEntry]) -> str:
     return kind_word(layer.kind)
 
 
-def registered_entry(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> FixedEntry | None:
+def registered_entry(material: SurfaceMaterial, library: Sequence[LibraryEntry]) -> LibraryEntry | None:
     """材料庫固定材料逐位相等的那一筆；貼在原牆上的比貼上去的那幾層。"""
     for entry in library:
-        if not isinstance(entry, FixedEntry):
-            continue
-        chosen = entry.surface_material()
+        chosen = fixed_surface(entry)
         if isinstance(material, MountedOnWall):
             if isinstance(chosen, Assembly) and chosen.layers == material.layers:
                 return entry

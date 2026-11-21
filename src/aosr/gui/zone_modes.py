@@ -45,7 +45,7 @@ from aosr.gui.zone_design import NAME, WHOLE_WALL_KEY
 from aosr.gui.zone_limits import zone_words
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material, original_walls
 from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceMaterial
-from aosr.materials.library import FixedEntry, LibraryEntry, TunableLayersEntry, full_library
+from aosr.materials.library import LibraryEntry, TunableLayersEntry, fixed_surface, full_library
 from aosr.geometry.shoebox import Room
 from aosr.physics.report_surfaces import RectangleZone, SurfaceZone
 from aosr.physics.zone_fill import wall_size_m
@@ -168,12 +168,14 @@ class ZoneChange(NamedTuple):
     same_as_original: bool = False
 
 
-def zone_material(current: SurfaceMaterial, base: Origin, entry: FixedEntry | None, wall: str | None = None) -> ZoneChange:
+def zone_material(current: SurfaceMaterial, base: Origin, entry: LibraryEntry | None, wall: str | None = None) -> ZoneChange:
     """選了之後這一區放什麼，和一句給畫面的說明（照 ``wall`` 那一面叫原本的面）。``entry`` 是 None 表示放原牆。"""
     face = original_face(wall)
     if entry is None:
         return ZoneChange(base.material, unknown_origin(wall) if base.source == "unknown" else f"這一區放回{face}")
-    chosen = entry.surface_material()
+    chosen = fixed_surface(entry)
+    if chosen is None:
+        raise ZoneMaterialError(f"「{entry.label}」不能指定成固定材料")
     if isinstance(chosen, Assembly):
         # 跟原牆一模一樣（#1175：天花原牆本身就是那一套吊頂，再貼一次等於兩層吊頂疊在一起）：當成不貼。
         if base.material == chosen:
@@ -219,14 +221,14 @@ class ZoneMaterialHandlers:
             detail = plain_error(exc) if isinstance(exc, (ValidationError, json.JSONDecodeError)) else str(exc)
             raise ZoneMaterialError(f"使用者材料庫讀不進來，選不了材料：{detail}") from exc
 
-    def _entry(self, entries: tuple[LibraryEntry, ...], material_id: str) -> FixedEntry:
+    def _entry(self, entries: tuple[LibraryEntry, ...], material_id: str) -> LibraryEntry:
         found = next((entry for entry in entries if entry.id == material_id), None)
         if found is None:
             raise ZoneMaterialError(f"材料庫裡沒有「{material_id}」這一筆", 404)
         if isinstance(found, TunableLayersEntry):
             raise ZoneMaterialError(f"「{found.label}」是{found.structure_label()}：還不能用在分區上（程式最佳化這種材料還沒接上）；"
                                     "要整塊貼請另存成固定材料的多層構造")
-        if not isinstance(found, FixedEntry):
+        if fixed_surface(found) is None:
             raise ZoneMaterialError(f"「{found.label}」是可最佳化材料：只能放進「交給搜尋」的准用清單，不能指定成固定材料")
         return found
 
@@ -263,8 +265,8 @@ class ZoneMaterialHandlers:
             raise ZoneMaterialError("方案表單還有格子沒填好或填錯，先改好再選這一區的材料（按「檢查」看是哪一格）") from exc
         walls = self._walls(scheme)
         entries = self._library()
-        replacements = tuple(material for item in entries if isinstance(item, FixedEntry)
-                             if not isinstance(material := item.surface_material(), Assembly))
+        replacements = tuple(material for item in entries if (material := fixed_surface(item)) is not None
+                             if not isinstance(material, Assembly))
         return ZoneScene(scheme, walls, entries, replacements, self._original(original_scheme_id, scheme),
                          draft_wall_words(document))
 

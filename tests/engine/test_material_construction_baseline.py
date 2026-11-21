@@ -24,9 +24,9 @@ ANSWER = Path(__file__).parent / "data" / "material_construction_baseline.json"
 
 def legacy_entries() -> tuple[library.LibraryEntry, ...]:
     """剛背、空氣背、固定阻抗、兩種實測表、兩種家族與可調 VPR。"""
-    common = {"provenance": "model", "source": "考卷自編，非實物"}
+    common: dict[str, object] = {"provenance": "model", "source": "考卷自編，非實物"}
     wool = {"kind": "porous", "thickness_m": 0.04, "flow_resistivity_pa_s_m2": 17000.0, "material_class": "fibrous"}
-    docs = []
+    docs: list[dict[str, object]] = []
     for backing in ("rigid", "air"):
         docs.append(common | {"kind": "fixed", "id": f"pin_{backing}", "label": f"自編層 {backing}",
                               "material": {"kind": "assembly", "layers": [wool, {"kind": "air", "thickness_m": 0.06}],
@@ -49,7 +49,7 @@ def legacy_entries() -> tuple[library.LibraryEntry, ...]:
                                      wool | {"frame_compression_modulus_pa": 51000.0, "frame_loss_factor": 0.12}],
                           "plate_density_kg_m3": 7500.0,
                           "variables": [{"layer": 0, "field": "surface_mass_kg_m2", "range": [6.0, 12.0], "initial": 9.0}]})
-    adapter = TypeAdapter(library.LibraryEntry)
+    adapter: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
     return tuple(adapter.validate_python(doc) for doc in docs)
 
 

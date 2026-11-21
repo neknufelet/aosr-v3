@@ -33,7 +33,7 @@ from aosr.config.quality_targets import QualityPurpose, QualityTargets, SettingE
 from aosr.gui.room_words import FOUR_WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.materials.construction_models import Assembly, Layer, MeasuredImpedance, MountedOnWall, PorousLayer
-from aosr.materials.library import FixedEntry, LibraryEntry, MeasuredTable
+from aosr.materials.library import LibraryEntry, MeasuredTable, fixed_surface
 from aosr.reporting.scheme import Scheme
 
 SCORED_RANGE_KEY: Final = "stage_one_low_frequency.scored_range_hz"
@@ -63,7 +63,7 @@ def reference_only(material: object) -> bool:
 
 def entry_reference_only(entry: LibraryEntry) -> bool:
     """材料庫的一筆：只認固定材料（可最佳化材料的多孔層不准黏板；可調 VPR 不歸這一支）。"""
-    return isinstance(entry, FixedEntry) and reference_only(entry.material)
+    return reference_only(fixed_surface(entry))
 
 
 def band_hz() -> float:

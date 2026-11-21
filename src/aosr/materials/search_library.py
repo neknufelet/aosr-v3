@@ -38,9 +38,9 @@ from typing import Final, Literal, NamedTuple, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from aosr.config.material_gradient import ExportSettings, FamilySettings, MaterialGradientSettings, VprFamilySettings
-from aosr.materials.construction_models import BoardLayer, PorousLayer
+from aosr.materials.construction_models import BoardLayer, MeasuredImpedance, PorousLayer
 from aosr.materials.library import (
-    BASIS_LABELS, FixedEntry, LibraryEntry, MeasuredTable, OptimizableEntry, TunableLayersEntry, impedance_basis, initial_assembly,
+    BASIS_LABELS, FixedEntry, LibraryEntry, OptimizableEntry, TunableLayersEntry, fixed_surface, impedance_basis, initial_assembly,
     load_user_library, template_assembly,
 )
 
@@ -214,7 +214,7 @@ def cavity_notes(materials: SearchMaterials) -> tuple[str, ...]:
 
 def refuse_fixed_as_family(ids: Sequence[str | None], entries: Sequence[LibraryEntry]) -> None:
     """起跑配置或選的家族填了使用者固定材料的代號就拒收：固定材料只能整塊選或不選，不能微調。"""
-    fixed = {entry.id: entry for entry in entries if isinstance(entry, FixedEntry)}
+    fixed = {entry.id: entry for entry in entries if fixed_surface(entry) is not None}
     for item in ids:
         if item is not None and item in fixed:
             raise MaterialsRefused(f"{_name(fixed[item])}是固定材料：搜尋只能整塊選或不選、不能微調，"
@@ -272,7 +272,7 @@ def fixed_candidates(targets: Sequence[str], presets: Sequence[PresetMaterial],
     for target in sorted(set(targets)):
         material_id = fixed_target_id(target)
         if material_id in users:
-            material = users[material_id].surface_material().model_dump(mode="json")
+            material = fixed_surface(users[material_id]).model_dump(mode="json")
         elif material_id in builtin and not isinstance(builtin[material_id], LibraryPreset):
             material = dict(builtin[material_id].material)
         else:
@@ -286,7 +286,7 @@ def approximate_notes(user_fixed: Sequence[FixedEntry]) -> tuple[str, ...]:
     label = BASIS_LABELS["approximate"]
     return tuple(f"固定材料 {entry.id}（{entry.label}）的實測表沒有虛部：虛部當 0、當純實數阻抗算，結果是{label}"
                  for entry in user_fixed
-                 if isinstance(entry.material, MeasuredTable) and impedance_basis(entry) == "approximate")
+                 if isinstance(fixed_surface(entry), MeasuredImpedance) and impedance_basis(entry) == "approximate")
 
 
 def user_fixed_entries(ids: Sequence[str], entries: Sequence[LibraryEntry]) -> tuple[FixedEntry, ...]:

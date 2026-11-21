@@ -25,7 +25,7 @@ import json
 import math
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Final, Literal, Self, TypeAlias
+from typing import Annotated, Final, Literal, Self, TypeAlias, overload
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
 
@@ -41,7 +41,6 @@ from aosr.materials.construction_models import (
     MeasuredImpedance,
     MeasuredImpedancePoint,
     PorousLayer,
-    SurfaceMaterial,
 )
 
 SCHEMA_VERSION: Final = "aosr.material_library.v1"
@@ -355,19 +354,35 @@ class MeasuredTable(BaseModel):
 FixedMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance | MeasuredTable, Field(discriminator="kind")]
 
 
+StandaloneSurface: TypeAlias = Assembly | ConstantImpedance | MeasuredImpedance
+
+
 class FixedEntry(_EntryBase):
     """固定材料：一份完整牆面材料（多層構造、固定實數阻抗或實測阻抗表），搜尋只能整塊選或不選。"""
 
     kind: Literal["fixed"] = Field(description="kind（fixed：整塊選或不選，不能微調）")
     material: FixedMaterial
 
-    def surface_material(self) -> SurfaceMaterial:
+    def surface_material(self) -> StandaloneSurface:
         """物理用的牆面材料。"""
         material = self.material
         return material.to_physics() if isinstance(material, MeasuredTable) else material
 
 
 LibraryEntry: TypeAlias = Annotated[OptimizableEntry | FixedEntry | TunableLayersEntry, Field(discriminator="kind")]
+
+
+@overload
+def fixed_surface(entry: FixedEntry) -> StandaloneSurface: ...
+
+
+@overload
+def fixed_surface(entry: LibraryEntry) -> StandaloneSurface | None: ...
+
+
+def fixed_surface(entry: LibraryEntry) -> StandaloneSurface | None:
+    """可獨立使用的固定牆面材料；需要其他輸入才決定的條目回 None。"""
+    return entry.surface_material() if isinstance(entry, FixedEntry) else None
 
 
 class _LibraryFile(BaseModel):
@@ -386,9 +401,10 @@ def _check_distinct(entries: tuple[LibraryEntry, ...]) -> None:
 
 def impedance_basis(entry: LibraryEntry) -> Basis:
     """阻抗怎麼得到：層構造＝模擬；有虛部的實測表＝實測；沒虛部的實測表與固定實數阻抗＝近似。"""
-    if isinstance(entry, OptimizableEntry | TunableLayersEntry) or isinstance(entry.material, Assembly):
+    material = fixed_surface(entry)
+    if material is None or isinstance(material, Assembly):
         return "simulated"
-    if isinstance(entry.material, MeasuredTable) and not entry.material.imaginary_missing:
+    if isinstance(entry, FixedEntry) and isinstance(entry.material, MeasuredTable) and not entry.material.imaginary_missing:
         return "measured"
     return "approximate"
 

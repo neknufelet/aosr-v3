@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
 from aosr.materials.construction_models import Assembly, ConstantImpedance
-from aosr.materials.library import FixedEntry, LibraryEntry
+from aosr.materials.library import LibraryEntry, fixed_surface
 
 SurfaceGroup: TypeAlias = Literal["demo109", "surface_itself", "door_window", "ceiling_build", "floor", "wall"]
 WALLS: Final = ("x0", "xL", "y0", "yL")
@@ -59,7 +59,7 @@ class Placement:
 
 def placement(entry: LibraryEntry) -> Placement:
     """照模組說明那六條規則的先後分組。"""
-    material = entry.material if isinstance(entry, FixedEntry) else None
+    material = fixed_surface(entry)
     if entry.id.startswith(_DEMO_PREFIX):
         return Placement("demo109", (), "代號是 demo109 開頭，是另一間示範房（109 號房）的材料，這間房平常用不到")
     if material is not None and not isinstance(material, Assembly):
