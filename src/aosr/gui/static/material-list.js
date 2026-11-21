@@ -2,6 +2,7 @@
 
 const catalogKinds = ["fixed", "optimizable"];
 const PREVIEW_TIMEOUT_MS = 60_000;
+const SMALL_CURVE_HZ = {low: 31.5, high: 2000};
 const previewCache = new Map();
 let pendingPreviews = [];
 let drawingPreview = false;
@@ -33,9 +34,18 @@ function sourceBadge(key) {
   return el("span", {class: "source-badge " + key}, el("i", {"aria-hidden": "true"}), listing.provenance_labels[key]);
 }
 
+function overlapsSmallCurve(span) {
+  return span.high_hz >= SMALL_CURVE_HZ.low && span.low_hz <= SMALL_CURVE_HZ.high;
+}
+
+function needsPreviewBadge(result) {
+  return result.spans.some(overlapsSmallCurve) || result.warnings.some(line => line.level !== "note") || Boolean(result.reference_only);
+}
+
 // 取現有無規入射曲線的同一段對數頻軸，縱軸一律 0～1。實測表只在表內原有頻點加點。
 function smallCurve(entry, result) {
-  const w = 168, h = 56, low = 31.5, high = 2000;
+  const w = 168, h = 56;
+  const {low, high} = SMALL_CURVE_HZ;
   const x = hz => 2 + (w - 4) * Math.log(hz / low) / Math.log(high / low);
   const y = alpha => 2 + (h - 4) * (1 - alpha);
   const svg = materialSvg("svg", {class: "curve " + entry.provenance, viewBox: `0 0 ${w} ${h}`,
@@ -49,7 +59,7 @@ function smallCurve(entry, result) {
   const mask = materialSvg("mask", {id: maskId, maskUnits: "userSpaceOnUse", x: 0, y: 0, width: w, height: h});
   mask.append(materialSvg("rect", {width: w, height: h, fill: "white"}));
   for (const span of result.spans) {
-    if (span.high_hz < low || span.low_hz > high) continue;
+    if (!overlapsSmallCurve(span)) continue;
     const left = x(Math.max(low, span.low_hz)), right = x(Math.min(high, span.high_hz));
     const rect = {x: left, width: Math.max(2, right - left), height: h};
     mask.append(materialSvg("rect", {...rect, "data-kind": span.kind, fill: "#888"}));
@@ -71,10 +81,12 @@ function smallCurve(entry, result) {
   return svg;
 }
 
-function showPreview(box, {svg, warnings}) {
+function showPreview(box, {svg, warnings, showBadge}) {
   box.replaceChildren(svg.cloneNode(true));
+  if (showBadge) {
+    box.append(el("span", {class: "preview-warning", text: "⚠ 有提醒", title: warnings.join("\n")}));
+  }
   if (!warnings.length) return;
-  box.append(el("span", {class: "preview-warning", text: "⚠ 有提醒", title: warnings.join("\n")}));
   const details = box.closest("article").querySelector("dl");
   details.append(el("dt", {text: "曲線提醒"}), el("dd", {}, el("ul", {}, ...warnings.map(text => el("li", {text})))));
 }
@@ -102,7 +114,7 @@ async function drawPreviews() {
         const warnings = reply.body.warnings.map(line => line.text);
         const reference = reply.body.reference_only;
         if (reference) warnings.push(reference.sentence, reference.why_only);
-        const preview = {body, svg: smallCurve(entry, reply.body), warnings};
+        const preview = {body, svg: smallCurve(entry, reply.body), warnings, showBadge: needsPreviewBadge(reply.body)};
         previewCache.set(entry.id, preview);
         showPreview(box, preview);
       } catch (error) {

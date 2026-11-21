@@ -100,6 +100,35 @@ def test_preview_shows_flagged_bands_and_verbatim_warnings_after_reload(tmp_path
             expect(row.get_by_role("listitem")).to_have_text(expected_warnings)
 
 
+@pytest.mark.parametrize(("fields", "show_badge"), [
+    pytest.param({"spans": [{"kind": "extrapolation", "low_hz": 20, "high_hz": 26},
+                            {"kind": "extrapolation", "low_hz": 5900, "high_hz": 11000}],
+                  "warnings": [{"level": "note", "text": "低頻段採外推。"}, {"level": "note", "text": "高頻段採外推。"}]},
+                 False, id="offscreen-notes"),
+    pytest.param({"spans": [{"kind": "extrapolation", "low_hz": 20, "high_hz": 71}]}, True, id="overlapping-span"),
+    pytest.param({"warnings": [{"level": "strong", "text": "材料條件超出限制。"}]}, True, id="strong-warning"),
+    pytest.param({"reference_only": {"band_hz": 25, "sentence": "低頻僅供參考。", "why_only": "超出適用範圍。"}},
+                 True, id="reference-only"),
+])
+def test_preview_warning_badge(tmp_path: Path, browser: Browser, fields: dict[str, object], show_badge: bool) -> None:
+    _sample_library(tmp_path)
+    reply = {"status": "drawn", "frequencies_hz": [100, 500], "absorption": [.2, .5], "spans": [], "warnings": [], **fields}
+    with _serve(tmp_path) as base, _open(browser, "about:blank") as watched:
+        page = watched.page
+        page.route("**/api/material-curve?preview", lambda route: route.fulfill(json=reply))
+        page.goto(f"{base}/materials")
+        row = page.locator('[data-id="user_panel"]')
+        expect(row.locator("svg.curve")).to_be_visible()
+        badge = row.get_by_text("⚠ 有提醒", exact=True)
+        if show_badge:
+            expect(badge).to_be_visible()
+        else:
+            expect(badge).to_have_count(0)
+            row.get_by_text("細節", exact=True).click()
+            expect(row.get_by_text("曲線提醒", exact=True)).to_be_visible()
+            expect(row.get_by_role("listitem")).to_have_text(["低頻段採外推。", "高頻段採外推。"])
+
+
 def test_timed_out_preview_allows_next_row_and_retries_after_reload(tmp_path: Path, browser: Browser) -> None:
     _sample_library(tmp_path)
     calls: list[str] = []
