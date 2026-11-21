@@ -658,6 +658,10 @@ byId("curve-redraw").addEventListener("click", redrawCurve);
 for (const event of ["input", "change"]) byId("editor-body").addEventListener(event, markCurveStale);
 // 加層、刪層、上下移是按鈕，不會觸發 input／change，也算改過。
 byId("editor-body").addEventListener("click", (event) => { if (event.target.closest("button")) markCurveStale(); });
-window.addEventListener("resize", () => { if (plot) plot.setSize({width: chartWidth(), height: 320}); });
+function resizeEditorPlot() {
+  if (plot && !byId("entry-workspace").hidden) plot.setSize({width: chartWidth(), height: 320});
+}
+window.addEventListener("resize", resizeEditorPlot);
 initCatalog();
+void loadElements();
 loadListing().catch((error) => { byId("list-state").textContent = `讀不到材料庫：${error.message}`; byId("list-state").className = "notice"; });

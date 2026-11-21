@@ -7,6 +7,11 @@ function materialSvg(tag, attributes) {
   return node;
 }
 
+function materialTexture(kind, materialClass) {
+  if (kind === "porous") return materialClass === "foam" ? "foam" : "wool";
+  return {micro_perforated: "mpp", perforated: "perf", slotted: "slot"}[kind] || kind;
+}
+
 function materialCutaway(layers, backing, description) {
   const svg = materialSvg("svg", {class: "cutaway", role: "img", "aria-label": "剖面：" + description});
   const title = materialSvg("title", {});

@@ -25,6 +25,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.gui.material_elements import material_elements
 from aosr.gui.problem_text import MATERIAL_MODELS, _plain_material_message, material_form_spec
 from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, placement
 from aosr.gui.reference_only import listing_block
@@ -283,6 +284,9 @@ def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradie
     async def listing(request: Request) -> Response:
         return JSONResponse(await run_in_threadpool(store.listing))
 
+    async def elements(request: Request) -> Response:
+        return JSONResponse(await run_in_threadpool(lambda: material_elements((search_settings or _product_search_settings)())))
+
     async def item(request: Request) -> Response:
         material_id = request.path_params["material_id"]
         document = cast(object, await request.json())
@@ -300,6 +304,6 @@ def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradie
             return failed(exc)
         return JSONResponse({"material_id": request.path_params["material_id"], "message": "材料已刪除"})
 
-    return [Route("/materials", page), Route("/api/materials", listing),
+    return [Route("/materials", page), Route("/api/materials", listing), Route("/api/material-elements", elements),
             Route("/api/materials/{material_id}", item, methods=["PUT"]),
             Route("/api/materials/{material_id}/delete", delete, methods=["POST"])]

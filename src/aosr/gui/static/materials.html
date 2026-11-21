@@ -10,18 +10,20 @@
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/material-cutaway.js" defer></script>
   <script src="/static/material-list.js" defer></script>
+  <script src="/static/material-elements.js" defer></script>
   <script src="/static/materials.js" defer></script>
 </head>
 <body><main>
   <header>
     <div class="catalog-top"><h1>材料庫</h1><nav><a href="/">回方案輸入頁</a>　<a href="/searches">查看搜尋進度</a></nav></div>
-    <p><b>成品</b>整面使用，尺寸固定。<b>參數構造</b>可以調整層的參數，列表顯示初始排法。</p>
+    <p><b>成品</b>整面使用，尺寸固定。<b>參數構造</b>可以調整層的參數，列表顯示初始排法。<b>元件</b>列出內建樣板各層的物性與尺寸。</p>
     <div id="source-legend" role="group" aria-label="數據來源圖例"><strong>數據來源怎麼看</strong></div>
     <p id="file-problem" class="notice" hidden></p>
   </header>
   <div class="catalog-tabs" role="tablist" aria-label="材料種類">
     <button type="button" id="tab-fixed" role="tab" aria-controls="panel-fixed" aria-selected="true">成品 <small></small></button>
     <button type="button" id="tab-optimizable" role="tab" aria-controls="panel-optimizable" aria-selected="false" tabindex="-1">參數構造 <small></small></button>
+    <button type="button" id="tab-elements" role="tab" aria-controls="panel-elements" aria-selected="false" tabindex="-1">元件 <small></small></button>
   </div>
   <section id="panel-fixed" role="tabpanel" aria-labelledby="tab-fixed">
     <div class="catalog-top"><p>內建成品可打開查看，複製後可編輯自己的材料。</p><button id="new-fixed" type="button">新增成品</button></div>
@@ -31,6 +33,10 @@
     <div class="catalog-top"><p>剖面上的橘框標出可調的層，總厚與曲線按初始尺寸顯示。</p><button id="new-optimizable" type="button">新增參數構造</button></div>
     <div class="catalog-list"></div>
   </section>
+  <section id="panel-elements" role="tabpanel" aria-labelledby="tab-elements" hidden>
+    <div id="element-list">正在讀取元件…</div>
+  </section>
+  <div id="entry-workspace">
   <p id="list-state" aria-live="polite">正在讀取材料庫…</p>
   <section id="editor" hidden>
     <h2 id="editor-title"></h2>
@@ -58,5 +64,6 @@
       <button id="close" type="button" class="quiet">關閉</button></div>
     <p id="editor-message" aria-live="polite"></p>
   </section>
+  </div>
 </main></body>
 </html>
