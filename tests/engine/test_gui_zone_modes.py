@@ -293,6 +293,7 @@ def test_assign_construction_obeys_backing_and_recognizes_an_uncertain_origin(cl
     original = _zones(scheme)["x0"][0]["material"]
     code, data = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
     assert code == 200, data
+    assert data["picked_entry"] == (None if backing == "zone_wall" else doc["id"])
     if backing == "zone_wall":
         assert data["material"] == {"kind": "mounted_on_wall", "layers": doc["layers"], "wall": original}
     else:
@@ -300,6 +301,7 @@ def test_assign_construction_obeys_backing_and_recognizes_an_uncertain_origin(cl
         assert "直接取代" in str(data["note"])
     _put(scheme, "z1", data["material"])
     code, restored = _post(client, scheme, "z1", choice="original")
+    assert restored["picked_entry"] is None
     assert code == 200 and restored["origin"] == ("unwrapped" if backing == "zone_wall" else "unknown")
 
 
@@ -340,7 +342,7 @@ def test_unknown_original_cannot_match_a_zone_wall_stack(client: TestClient) -> 
     assert mounted["material"] == {"kind": "mounted_on_wall", "layers": facing["layers"], "wall": replaced["material"]}
 
 
-def test_reselecting_a_bare_copy_without_an_original_keeps_its_origin_unknown(client: TestClient) -> None:
+def test_reselecting_a_bare_copy_is_recorded_and_over_depth_without_an_original(client: TestClient) -> None:
     doc = construction("air")
     scheme = _cut_document()
     surface = {"kind": "assembly", "backing": "air", "layers": doc["layers"]}
@@ -349,5 +351,97 @@ def test_reselecting_a_bare_copy_without_an_original_keeps_its_origin_unknown(cl
     code, original = _post(client, scheme, "z1", choice="original")
     assert code == 200 and original["origin"] == "unknown" and "看不出" in str(original["note"])
     code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
-    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is False and "看不出" in str(picked["note"])
+    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is False
+    assert picked["picked_entry"] == doc["id"]
+    design = {"scheme_id": scheme["scheme_id"], "zones": {"x0": {"z1": {
+        "mode": "fixed", "max_depth_m": 0.01, "picked_entry": picked["picked_entry"]}}}}
+    page = client.post("/api/zone-limits", json={"scheme": scheme, "design": design}).json()
+    assert page["picked_constructions"]["x0"]["z1"]["state"] == "picked" and page["red"] == 1
+    note = str(picked["note"])
+    assert f"記成選上去的「{doc['label']}」" in note and "看不出" not in note
+    assert "如果這一區本來就是它，改選「不貼，保留原樣」或在上面指定原方案" in note
     assert "picked_construction" not in picked
+
+
+def test_reselecting_a_bare_copy_with_a_different_original_only_explains_the_pick(client: TestClient, tmp_path: Path) -> None:
+    doc = construction("air")
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    (tmp_path / "schemes" / "before.json").write_text(json.dumps(room109_document("before")))
+    scheme = _cut_document()
+    _put(scheme, "z1", {"kind": "assembly", "backing": "air", "layers": doc["layers"]})
+    code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"], original_scheme_id="before")
+    assert code == 200 and picked["origin"] == "original_scheme" and picked["same_as_original"] is False
+    assert picked["note"] == f"記成選上去的「{doc['label']}」，整塊構造直接取代這一區的牆面。"
+
+
+def test_legacy_only_library_keeps_the_single_and_batch_response_bytes(client: TestClient) -> None:
+    scheme = _cut_document()
+    choice = {"choice": "original", "wall": "x0", "zone": "z1"}
+    expected = {"material": _zones(scheme)["x0"][0]["material"], "note": "這一區放回原牆",
+                "origin": "current", "same_as_original": False}
+    for path, arguments, response in (("", choice, expected), ("/batch", {"changes": [choice]}, {"changes": [expected]})):
+        received = client.post("/api/zone-material" + path, json={"scheme": scheme, **arguments})
+        assert received.status_code == 200
+        assert received.content == json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()
+    _, modern = _post(client, scheme, "z1", choice="original", picked_entry=None)
+    assert modern == {**expected, "picked_entry": None}
+
+
+def test_recorded_pick_preserves_the_reason_restoring_a_crossed_original_fails(client: TestClient, tmp_path: Path) -> None:
+    doc = construction("air", id="crossed_sample")
+    assert client.put("/api/materials/crossed_sample", json=doc).status_code == 200
+    scheme = _cut_document()
+    material = {"kind": "assembly", "backing": "air", "layers": doc["layers"]}
+    _put(scheme, "z1", material)
+    original = room109_document("before")
+    pieces = cut_wall(original, "x0", [CutBox(id="small", u_m=(0.0, 0.5), v_m=(0.0, 0.6))])
+    _zones(original)["x0"] = cast(list[dict[str, object]], pieces["zones"])
+    (tmp_path / "schemes" / "before.json").write_text(json.dumps(original))
+    args = {"choice": "original", "original_scheme_id": "before"}
+    expected = _post(client, scheme, "z1", **args)
+    assert expected[0] == 400 and "沿原方案的切線切開" in str(expected[1]["error"])
+    assert _post(client, scheme, "z1", **args, picked_entry=doc["id"]) == expected
+
+
+def test_recorded_id_only_affects_the_material_mismatch_note(client: TestClient) -> None:
+    scheme = _cut_document()
+    choice = {"choice": "fixed", "material_id": PRESET}
+    code, expected = _post(client, scheme, "z1", **choice, picked_entry=None)
+    assert code == 200
+    code, stale = _post(client, scheme, "z1", **choice, picked_entry="missing_sample")
+    assert code == 200 and stale == {**expected, "note": f"{expected['note']}；設計設定記的那一筆「missing_sample」跟這一區現在的材料對不上"}
+
+
+@pytest.mark.parametrize("bare", [False, True])
+@pytest.mark.parametrize("original", [None, "before"])
+@pytest.mark.parametrize("choice", ["original", "rigid_sample", PRESET])
+def test_recorded_id_preserves_the_four_material_reply_fields(client: TestClient, tmp_path: Path,
+                                                             bare: bool, original: str | None, choice: str) -> None:
+    entry = construction("rigid", id="rigid_sample")
+    assert client.put("/api/materials/rigid_sample", json=entry).status_code == 200
+    scheme = _cut_document()
+    if bare:
+        _put(scheme, "z1", {"kind": "assembly", "backing": "rigid", "layers": entry["layers"]})
+    args = {"choice": "original"} if choice == "original" else {"choice": "fixed", "material_id": choice}
+    if original is not None:
+        (tmp_path / "schemes" / "before.json").write_text(json.dumps(room109_document(original)))
+        args["original_scheme_id"] = original
+    code, plain = _post(client, scheme, "z1", **args)
+    assert code == 200, plain
+    fields = ("material", "origin", "same_as_original", "picked_entry")
+    for recorded in (None, entry["id"], "missing_sample"):
+        status, data = _post(client, scheme, "z1", **args, picked_entry=recorded)
+        assert status == code, recorded
+        assert [data[key] for key in fields] == [plain[key] for key in fields], recorded
+
+
+def test_original_wall_resolution_reports_value_errors(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui import zone_modes
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise ValueError("自編原牆換算失敗\n後續細節")
+
+    (tmp_path / "schemes" / "before.json").write_text(json.dumps(room109_document("before")))
+    monkeypatch.setattr(zone_modes, "original_walls", refuse)
+    code, data = _post(client, _cut_document(), "z1", choice="original", original_scheme_id="before")
+    assert (code, data["error"]) == (400, "自編原牆換算失敗")

@@ -9,7 +9,8 @@
   固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過上限加 ``EDGE_MERGE_TOL`` 就紅（跟搜尋的固定材料候選 ``depth_fit.layers_exceed`` 同一把）。
   固定阻抗與實測表按物理內容認出材料庫那一筆（:func:`picked_entry`），用搜尋的同一把尺判深度。
   裸構造要跟原方案同位置比過才知道是不是選上去的；相同就保留原牆，不同才判深度，六個數字代表六面整面固定阻抗，一定與裸構造不同。
-  原方案尺寸不同、切線劃過或缺面時只說明原因和深度。
+  沒指原方案，或原方案檔不在、讀不進來（含缺面）、尺寸不同、切線劃過時，改查設計設定記的那一筆；對不上只說明原因和深度。
+  放回原牆另外需要取得材料；六個數字要轉成材料時，放進設計擺位過不了檢查也用不上。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
 - 搜尋區的上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法只在引擎一份 ``fixed_surfaces.target_fit``）：准用的每一組
   （沒寫清單就是全部可調材料）列出生效上限與是哪一條擋住的（個案哪一層／材料組自己）；比一組最淺排法還淺、或固定材料
@@ -51,9 +52,9 @@ from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, range_probl
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
-from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneDesign, ZoneMode
+from aosr.gui.zone_design import DEFAULT_MODE, WHOLE_WALL_KEY, DesignSettings, ZoneDesign, ZoneMode
 from aosr.gui.zone_construction import (
-    Bounds, ComparisonWalls, ConstructionComparison, OriginalProblem, OriginalReader, different_from_original, matching_construction,
+    Bounds, ComparisonWalls, ConstructionComparison, OriginalProblem, OriginalReader, construction_pick, mismatch_words,
 )
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
@@ -463,9 +464,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
     walls: dict[str, list[Problem]] = {wall: [] for wall in WALLS}
     zones: dict[str, dict[str, list[Problem]]] = {}
     caps: dict[str, dict[str, dict[str, object]]] = {}
-    modes = _modes(design)
     checked: dict[str, list[Problem]] = {}
-    catalog = _ZoneCatalog(depth_targets, design.original_scheme_id if design else None, top, document)
+    catalog = _ZoneCatalog(depth_targets, design.original_scheme_id if design else None, top)
 
     for wall in WALLS:
         entries = cast(list[Mapping[str, object]], by_wall.get(wall) if isinstance(by_wall, dict) else None) or [{"area": "whole_wall"}]
@@ -478,17 +478,17 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             key = _key(entry) if isinstance(entry, Mapping) else None
             if key is None:
                 continue
-            mode = modes.get(wall, {}).get(key, "fixed")
+            setting = design.zones.get(wall, {}).get(key) if design else None
+            mode = setting.mode if setting else DEFAULT_MODE
             cap = depth_cap(design, wall, key)
             if cap is not None and mode != "keep_original":
                 caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words()}
             material = _material(entry.get("material"))
             lines = found.setdefault(key, [])
-            construction = catalog.construction(room, wall, key, entry, material)
+            construction = catalog.construction(room, wall, key, entry, material, setting, lines)
             lines.extend(_depth_problems(material, mode, cap, catalog.required, construction=construction))
             if mode == "search":
-                problems, lines_by_group = _search_problems(design.zones.get(wall, {}).get(key) if design is not None else None,
-                                                            cap, catalog.required)
+                problems, lines_by_group = _search_problems(setting, cap, catalog.required)
                 lines.extend(problems)
                 if lines_by_group:
                     caps[wall][key]["targets"] = lines_by_group
@@ -516,7 +516,6 @@ class _ZoneCatalog:
     provider: Callable[[], DepthTargets] | None
     original_id: str | None
     problems: list[Problem]
-    document: Mapping[str, object]
     picked: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
     load_error: Problem | None = None
 
@@ -541,7 +540,7 @@ class _ZoneCatalog:
         if not self.original_id:
             return None
         if self.targets and self.targets.read_original:
-            return self.targets.read_original(self.original_id, self.document)
+            return self.targets.read_original(self.original_id)
         return OriginalProblem(f"指的原方案「{self.original_id}」讀不進來")
 
     @cached_property
@@ -550,15 +549,24 @@ class _ZoneCatalog:
         return {} if targets is None else {key: value for key, value in targets.fixed.items() if key in targets.standalone_constructions}
 
     def construction(self, room: Room, wall: str, key: str, entry: Mapping[str, object],
-                     material: SurfaceMaterial | None) -> tuple[str, ConstructionComparison] | None:
-        if not isinstance(material, Assembly):
+                     material: SurfaceMaterial | None, setting: ZoneDesign | None,
+                     lines: list[Problem]) -> tuple[str, ConstructionComparison] | None:
+        recorded = setting.picked_entry if setting else None
+        if not isinstance(material, Assembly) and recorded is None:
             return None
-        identifier = matching_construction(material, self.standalone)
-        if identifier is None or self.targets is None:
+        targets = self.required() if recorded else self.targets
+        if targets is None:
             return None
-        comparison = different_from_original(self.original, room, wall, key, _zone_bounds(room, wall, entry), material)
-        self.picked.setdefault(wall, {})[key] = {"state": comparison.state, "id": identifier, "label": self.targets.label(identifier)}
-        return identifier, comparison
+        pick = construction_pick(material, self.standalone, recorded, lambda: self.original,
+                                 room, wall, key, _zone_bounds(room, wall, entry))
+        if pick is None:
+            return None
+        if pick.mismatch:
+            lines.append(Problem(code="depth_pick_mismatch", level="note", text=mismatch_words(targets.label(pick.mismatch))))
+        if pick.identifier is None:
+            return None
+        self.picked.setdefault(wall, {})[key] = {"state": pick.comparison.state, "id": pick.identifier, "label": targets.label(pick.identifier)}
+        return pick.identifier, pick.comparison
 
 
 def _material(value: object) -> SurfaceMaterial | None:
@@ -566,13 +574,6 @@ def _material(value: object) -> SurfaceMaterial | None:
         return _MATERIAL.validate_python(value)
     except ValidationError:
         return None
-
-
-def _modes(design: DesignSettings | None) -> dict[str, dict[str, ZoneMode]]:
-    """草稿的做法：設計設定有寫照寫，沒寫是固定（同 ``effective_modes``，只是草稿還不是合法方案、不能先驗）。"""
-    if design is None:
-        return {}
-    return {wall: {key: item.mode for key, item in items.items()} for wall, items in design.zones.items()}
 
 
 def saved_refusals(scheme_document: Mapping[str, object], design: DesignSettings | None,

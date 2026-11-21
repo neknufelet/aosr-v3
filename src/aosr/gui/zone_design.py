@@ -49,6 +49,7 @@ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}\Z")
 ZoneMode = Literal["fixed", "keep_original", "search"]
 MODE_WORDS: dict[str, str] = {"fixed": "固定這一組材料", "keep_original": "保留原牆", "search": "交給搜尋"}
 DEFAULT_MODE: ZoneMode = "fixed"
+LibraryId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")]
 
 
 class ZoneDesign(BaseModel):
@@ -57,20 +58,24 @@ class ZoneDesign(BaseModel):
     ``allowed``（#1082 段 2-3b，選填、只給交給搜尋的區）：這一區准用的材料代號（材料庫的代號：可最佳化材料、固定材料）
     或 ``none``（不貼、保留原牆）。搜尋換樣板只換到清單裡的，起點也要在清單裡；沒給照舊換全部家族與不貼。
     沒給的區存檔時不寫這一格（舊設計設定逐位不變）。
+    ``picked_entry`` 只給固定區，記下指定的剛背或空氣背構造代號；沒給就沿用原牆比對。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     mode: ZoneMode
-    allowed: tuple[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")], ...] | None = Field(
+    picked_entry: LibraryId | None = Field(default=None, exclude_if=lambda value: value is None)
+    allowed: tuple[LibraryId, ...] | None = Field(
         default=None, min_length=1, exclude_if=lambda value: value is None)
     # 這一區自己的深度上限（公尺；#1082 段 1-4）：固定區比貼上去的總深、搜尋區當搜尋的上限；保留原牆的區不加層、管不到。
     max_depth_m: Depth | None = Field(default=None, exclude_if=lambda value: value is None)
     # 這一區自己的可調範圍（#1199）：可最佳化材料代號 → 範圍；只給交給搜尋的區，准用清單有寫時代號要在清單裡。
-    ranges: dict[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")], ZoneRange] | None = Field(
+    ranges: dict[LibraryId, ZoneRange] | None = Field(
         default=None, min_length=1, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
-    def _allowed_only_for_search(self) -> Self:
+    def _fields_for_mode(self) -> Self:
+        if self.mode != "fixed" and "picked_entry" in self.model_fields_set:
+            raise ValueError("選的構造只給指定貼一種的區")
         if self.allowed is not None:
             if self.mode != "search":
                 raise ValueError(f"准用清單只給交給搜尋的區，這一區是「{MODE_WORDS[self.mode]}」")

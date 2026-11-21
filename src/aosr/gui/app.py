@@ -27,6 +27,10 @@ from aosr.physics.zone_fill import whole_wall_entries
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
+from aosr.gui.listen import (
+    HOST_NAME as HOST_NAME, LOCAL_HOSTS as LOCAL_HOSTS, LOOPBACK as LOOPBACK, TAILNET_CLIENTS as TAILNET_CLIENTS,
+    TAILSCALE_NET as TAILSCALE_NET, allowed_hosts, client_allowed as client_allowed, listen_address as listen_address,
+)
 from aosr.gui.archive_delete import ArchiveDelete, delete_response
 from aosr.gui.cache_policy import ask_every_time
 from aosr.gui.gradient_jobs import GradientJobs, Launcher, SystemdLauncher, gradient_routes
@@ -86,19 +90,6 @@ STATIC_NAMES = {"app.js", "home.js", "walls.js", "elevation.js", "zone_names.js"
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "material-cutaway.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css"}
-LOCAL_HOSTS = ("127.0.0.1", "localhost")
-# 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
-# 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
-HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\Z")
-# 伺服器可以聽的位址：本機，或 Tailscale（私人網路）發給這台的位址（100.64.0.0/10）。不收 0.0.0.0 與區網位址。
-# 聽在 Tailscale 位址也擋不住區網與容器：Linux 會把任何網卡收到、寄給本機任一位址的封包照收
-# （弱主機模型），這台的防火牆也沒開。所以聽 Tailscale 位址時，另外只接受下面兩個網段來的連線。
-LOOPBACK = ipaddress.IPv4Address("127.0.0.1")
-TAILSCALE_NET = ipaddress.IPv4Network("100.64.0.0/10")
-# 扣掉 100.115.92.0/23：Tailscale 不會把這段發給裝置，它自己的防火牆規則對這段也不擋（留給 ChromeOS 虛擬機），
-# 區網裡收得到閘道流量的人可以拿這段當來源、完成連線。
-TAILNET_CLIENTS = (ipaddress.IPv4Network("127.0.0.1/32"),
-                   *TAILSCALE_NET.address_exclude(ipaddress.IPv4Network("100.115.92.0/23")))
 
 
 def repo_root() -> Path:
@@ -125,33 +116,6 @@ class GuiSettings:
     gradient_launcher: Launcher | None = None
     gradient_settings: Path | None = None
     search_launcher: Launcher | None = None  # 第一、二階段搜尋（#700）；不給就跟第三階段共用，整台一次一件才看得到彼此
-
-
-def client_allowed(host: str | None, networks: tuple[ipaddress.IPv4Network, ...]) -> bool:
-    """連線來源位址是否落在准許的網段；讀不出位址一律不准。"""
-    try:
-        address = ipaddress.IPv4Address(host or "")
-    except ValueError:
-        return False
-    return any(address in network for network in networks)
-
-
-def listen_address(value: str) -> str:
-    """伺服器要聽的位址：只准本機或 Tailscale 位址，其他一律拒絕。"""
-    try:
-        address = ipaddress.IPv4Address(value)
-    except ValueError as exc:
-        raise ValueError(f"聽的位址要是 IPv4：{value!r}") from exc
-    if address != LOOPBACK and address not in TAILSCALE_NET:
-        raise ValueError(f"只准聽 127.0.0.1 或 Tailscale 位址（100.64.0.0/10），不准 {value}")
-    return str(address)
-
-
-def _allowed_hosts(settings: GuiSettings) -> list[str]:
-    for host in settings.extra_hosts:
-        if not HOST_NAME.fullmatch(host):
-            raise ValueError(f"另外准許的網址只收小寫主機名，不收萬用字元或埠號：{host!r}")
-    return [*LOCAL_HOSTS, *settings.extra_hosts]
 
 
 def _scheme_path(data_dir: Path, name: str) -> Path:
@@ -322,7 +286,7 @@ class GuiHandlers:
         self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
         self.gradient = GradientJobs(self.data_dir, launcher=settings.gradient_launcher or SystemdLauncher(),
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
-                                     scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings, capability_table=self.capabilities, directivity=self.directivity)
+                                     scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
         self.surrogates = SurrogateBuilds(self.gradient)
         search_launcher = settings.search_launcher or settings.gradient_launcher or SystemdLauncher(memory_max=SEARCH_MEMORY_MAX)
         self.search_jobs = SearchJobs(self.data_dir, launcher=search_launcher, engine_commit=settings.engine_commit,
@@ -932,7 +896,7 @@ def _archive_routes(handlers: GuiHandlers) -> list[Route]:
 
 def create_app(settings: GuiSettings) -> Starlette:
     """建立本機入口；不啟動網路伺服器。"""
-    allowed_hosts = _allowed_hosts(settings)
+    hosts = allowed_hosts(settings.extra_hosts)
     handlers = GuiHandlers(settings)
     app = Starlette(routes=[
         Route("/", handlers.index), Route("/static/{name}", handlers.asset),
@@ -970,7 +934,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs, handlers.capabilities, handlers.directivity,
             handlers.startup_physics_identity, handlers._server_stale, handlers._updated_response, handlers._load_result)),
     ])
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     async def json_requests(request: Request, call_next: RequestResponseEndpoint) -> Response:
         if settings.client_networks and not client_allowed(

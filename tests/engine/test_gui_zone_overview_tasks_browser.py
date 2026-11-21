@@ -17,6 +17,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
+from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._zone_naming_room import ZONE_NAMING_LIBRARY, ZONE_NAMING_SCHEME
@@ -100,6 +101,23 @@ def _materials_before() -> dict[str, dict[str, dict[str, object]]]:
     scene = cast(dict[str, dict[str, list[dict[str, object]]]], ZONE_NAMING_SCHEME["scene"])
     return {wall: {cast(str, zone.get("id", "whole_wall")): cast(dict[str, object], zone["material"]) for zone in zones}
             for wall, zones in scene["surface_zones_by_wall"].items()}
+
+
+def test_batch_material_pick_shows_the_recorded_construction_note(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        entry = construction("rigid", id="batch_panel", label="自編硬背板")
+        assert page.request.put(f"{base}/api/materials/batch_panel", data=entry).ok
+        _open_overview(page)
+        _click_zone(page, "yL/z1")
+        _click_zone(page, "yL/z2")
+        page.locator("#zone-panel-material").select_option("batch_panel")
+        _apply(page)
+        note = page.locator("#zone-page-note")
+        expect(note).to_be_visible()
+        expect(note).to_contain_text("2 區改成")
+        expect(note).to_contain_text("記成選上去的「自編硬背板」，整塊構造直接取代這一區的牆面。")
 
 
 def test_task_one_front_panels_fixed_and_the_other_walls_handed_to_the_computer(tmp_path: Path, browser: Browser) -> None:

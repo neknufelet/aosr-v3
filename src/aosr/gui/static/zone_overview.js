@@ -592,7 +592,8 @@ async function applyMethod(items, method, written = () => {}) {
     document.querySelector("main").inert = true; $("zone-page").inert = true;
     try {
       const {response, data} = await reply(fetch("/api/zone-material/batch", {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({scheme: document_, original_scheme_id: zoneDesign?.original_scheme_id ?? null, changes})}));
+        body: JSON.stringify({scheme: document_, original_scheme_id: zoneDesign?.original_scheme_id ?? null,
+          changes: changes.map(change => ({...change, picked_entry: zoneSetting(change.wall, change.zone).picked_entry ?? null}))})}));
       if (!response.ok) {
         const where = data.wall && data.zone && view.byId.get(`${data.wall}/${data.zone}`);
         zoneNote(where && data.reason ? `沒有改：${zoneWhereText(where)}：${data.reason}；一區都沒改` : `沒有改：${data.error}`, "notice");
@@ -615,11 +616,12 @@ async function applyMethod(items, method, written = () => {}) {
     }
   }
   items.forEach((item, index) => {
-    setZoneSetting(item.wall, item.key, settingAfter(item, method, Boolean(results[index]?.same_as_original)));
+    setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
     zoneFormerFixed.delete(item.id); zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
-  zoneNote(`${items.length} 區改成「${what}」`, "ok");
+  const pickedNotes = new Set(results.filter(change => change.picked_entry).map(change => change.note));
+  zoneNote([`${items.length} 區改成「${what}」`, ...pickedNotes].join(" "), "ok");
   unsaved = true;
   written();
   changing += 1; showChanging();
@@ -627,12 +629,15 @@ async function applyMethod(items, method, written = () => {}) {
   return true;
 }
 // 一區照 method 改過之後的那一份（寫進去之前還要過 setZoneSetting 的收法）；套用與套用前的範圍檢查都用這一支。
-// sameAsOriginal：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼（同做法表）。
-function settingAfter(item, method, sameAsOriginal = false) {
+// change.same_as_original：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼（同做法表）。
+function settingAfter(item, method, change) {
   const kept = zoneSetting(item.wall, item.key).allowed;
   const next = {...zoneSetting(item.wall, item.key), mode: method.mode};
   delete next.allowed;
-  if (method.mode === "fixed" && sameAsOriginal) next.mode = "keep_original";
+  if (change) {
+    if (change.picked_entry) next.picked_entry = change.picked_entry; else delete next.picked_entry;
+  }
+  if (method.mode === "fixed" && change?.same_as_original) next.mode = "keep_original";
   if (method.mode === "search" && !method.lists) next.allowed = listForWall(item.wall, method.allowed);
   if (method.mode === "search" && method.lists) {
     const list = method.lists.get(item.id);
