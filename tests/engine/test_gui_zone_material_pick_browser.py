@@ -973,3 +973,106 @@ def test_keep_original_table_words_follow_the_ceiling_verdict(tmp_path: Path, br
         expect(page.locator("#zone-keep-ceiling-auto1")).to_have_text(f"{words}，不貼東西" if with_original else "不貼，保留原樣")
         now = page.evaluate('plainNow(zoneList("ceiling").find(z => z.id === "auto1").material, "ceiling", "auto1")')
         assert now == (f"沒貼東西（{words}）" if with_original else "不貼，保留原樣")
+
+
+def _prepare_candidates(tmp_path: Path) -> None:
+    _prepare(tmp_path)
+    path = tmp_path / "materials.json"
+    library = json.loads(path.read_bytes())
+    tunable = next(entry for entry in library["materials"] if entry["kind"] == "optimizable")
+    panel = construction("rigid", id="sample_rigid", label="自編剛背構造")
+    product = {"id": "sample_product", "kind": "fixed", "label": "自編吸音成品", "provenance": "model",
+               "source": "考卷自編", "material": {"kind": "assembly", "backing": "rigid", "layers": panel["layers"]}}
+    library["materials"].extend([tunable | {"id": "sample_tunable", "label": "自編可調岩棉"}, panel, product])
+    path.write_text(json.dumps(library), encoding="utf-8")
+
+
+def _open_candidate_table(page: Page) -> Locator:
+    page.locator("#elevation-wall-yL").click()
+    details = page.locator("#zone-allowed-box-yL-z3")
+    if not details.evaluate("box => box.open"):
+        details.locator("summary").click()
+    return page.locator("#zone-allowed-yL-z3")
+
+
+def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, browser: Browser) -> None:
+    """補既有行為：自編可調材料、剛背構造、固定成品都能用，首次改由程式最佳化仍只存內建玻璃棉和不貼。"""
+    from tests.engine.test_gui_zone_modes_browser import _choose
+
+    _prepare_candidates(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, SAMPLE)
+        page.locator("#elevation-wall-yL").click()
+        _choose(page, "#zone-mode-yL-z3", "search")
+        table = _open_candidate_table(page)
+        for choice in ("sample_tunable", "sample_rigid", "sample_product"):
+            box = table.locator(f"#zone-allow-yL-z3-{choice}")
+            expect(box).to_be_visible()
+            expect(box).to_be_enabled()
+        _save(page, design=True)
+    zones, _ = _stored(tmp_path)
+    assert zones["yL"]["z3"] == {"mode": "search", "allowed": WOOLS}
+
+
+def _expect_candidate_cost(surface: Locator, present: bool) -> None:
+    expect(surface).to_be_visible()
+    note = surface.get_by_text("預覽轉好的參數", exact=False)
+    if not present:
+        expect(note).to_have_count(0)
+        return
+    expect(note).to_be_visible()
+    words = note.inner_text()
+    for phrase in ("整塊", "每筆", "開跑選項", "核對", "開跑就會被拒", "重建", "第三階段搜尋頁", "「預覽轉好的參數」", "缺什麼"):
+        assert phrase in words
+    assert not any(char.isdecimal() for char in words)
+    style = next(row for row in surface.evaluate(_TEXT_STYLES) if row["words"] == words)
+    assert style["size"] >= 12 and style["contrast"] >= 4.5, style
+
+
+def test_whole_candidate_cost_follows_the_choice_in_all_three_views(tmp_path: Path, browser: Browser) -> None:
+    _prepare_candidates(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for choice, checked in (("sample_product", True), ("sample_product", False), ("sample_rigid", True)):
+            _click_zone(page, "yL/z3")
+            _pick_search(page)
+            fold = page.locator("#zone-panel-fixed")
+            if not fold.evaluate("box => box.open"):
+                fold.locator("summary").click()
+            page.locator(f"#zone-panel-allow-{choice}").set_checked(checked)
+            form = page.locator("#zone-panel-form")
+            _expect_candidate_cost(form, checked)
+            if checked and choice == "sample_product":
+                product = form.locator("#zone-panel-allow-sample_product")
+                expect(product).to_be_checked()
+                product.scroll_into_view_if_needed()
+                form.screenshot(path=tmp_path / "panel.png")
+            _apply(page)
+            card = page.locator("#zone-list")
+            _expect_candidate_cost(card, checked)
+            if checked and choice == "sample_product":
+                expect(card.locator("#zone-list-check-sample_product")).to_be_checked()
+                card.screenshot(path=tmp_path / "card.png")
+            page.locator("#zone-page-close").click()
+            _expect_candidate_cost(_open_candidate_table(page), checked)
+            page.locator("#zone-page-open").click()
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_only_tunable_candidates_and_none_show_no_cost_in_all_three_views(tmp_path: Path, browser: Browser) -> None:
+    _prepare_candidates(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        _pick_search(page)
+        page.locator("#zone-panel-allow-sample_tunable").check()
+        expect(page.locator("#zone-panel-allow-none")).to_be_checked()
+        _expect_candidate_cost(page.locator("#zone-panel-form"), False)
+        _apply(page)
+        _expect_candidate_cost(page.locator("#zone-list"), False)
+        page.locator("#zone-page-close").click()
+        _expect_candidate_cost(_open_candidate_table(page), False)
+        assert watched.page_errors == [] and watched.console_errors == []

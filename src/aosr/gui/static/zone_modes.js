@@ -301,6 +301,14 @@ async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
 function assignableEntries() { return (zoneLibrary || []).filter(entry => entry.kind === "fixed" || entry.kind === "construction"); }
 function fixedCandidate(entry) { return entry?.kind === "fixed" || (entry?.kind === "construction" && entry.backing !== "zone_wall"); }
+function appendFixedCandidateNote(container, allowed) {
+  if (!allowed.some(id => fixedCandidate(libraryEntry(id)))) return;
+  const note = document.createElement("p");
+  note.className = "zone-candidate-cost";
+  note.textContent = "清單裡有整塊貼上去的材料。建替身時，每筆都要照開跑選項多做一道核對。"
+    + "如果現有的替身沒核過其中一筆，開跑就會被拒，要重建替身。開跑前到第三階段搜尋頁按「預覽轉好的參數」，就能看到缺什麼。";
+  container.append(note);
+}
 function fixedSurface(entry) {
   if (entry.kind === "construction") {
     return entry.backing === "zone_wall" ? null : {kind: "assembly", layers: entry.layers, backing: entry.backing};
@@ -658,6 +666,7 @@ function allowedChecklist(wall, key, allowed, onToggle) {
   }
   for (const entry of optimizable) list.append(box(entry.id, shortLabel(entry), adjustWords(entry), entry.placement.reason));
   list.append(box(ZONE_NONE, KEEP_WORDS, "放進來，程式就可以決定這裡不貼"));
+  appendFixedCandidateNote(list, allowed);
   if (fixed.length) list.append(heading("固定成品：整塊貼上去，不能調（程式只決定貼不貼）"));
   for (const entry of fixed) list.append(box(entry.id, entry.label, fixedDepthWords(entry), entry.placement.reason));
   const hidden = hiddenGroups(wall, (zoneLibrary || []).filter(entry => entry.kind === "optimizable" || fixedCandidate(entry)));

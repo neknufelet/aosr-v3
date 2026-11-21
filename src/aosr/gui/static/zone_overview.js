@@ -1089,6 +1089,7 @@ function searchForm(items, walls, sync) {
   const rows = el("div", "zv-fixed-rows");
   for (const entry of products) rows.append(materialRow(entry, ticks, coveredBy.get(entry.id) ?? null, toggle));
   more.append(rows); form.append(more);
+  appendFixedCandidateNote(form, ticks.ids);
   const none = el("label", "zv-extra zv-mrow"); none.id = "zone-panel-none";
   const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", "也可以不貼"), el("small", null, "程式算出來不貼比較好的區，就不貼，保留原樣"), ...someWords(ZONE_NONE, ticks));
   none.append(tickBox(ZONE_NONE, ticks, toggle), words);
@@ -1398,6 +1399,7 @@ function listCard(group, index, compact) {
     card.append(listWho(group, prefix, alone), el("div", "zv-who", "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）"));
     return card;
   }
+  appendFixedCandidateNote(card, allowed);
   if (compact) {
     const names = el("div", "zv-names"); names.id = `${prefix}-names`;
     const materials = allowed.filter(id => id !== ZONE_NONE).map(id => vprWords(choiceName(id))).join("、");
