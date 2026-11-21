@@ -65,7 +65,7 @@ from aosr.gui.zone_limits import (
 )
 from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.materials.library import LibraryEntry, builtin_entries, fixed_surface
+from aosr.materials.library import ConstructionEntry, LibraryEntry, builtin_entries, fixed_surface
 from aosr.materials.search_library import PresetMaterial
 from aosr.reporting.scheme import Scheme
 
@@ -256,7 +256,8 @@ def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[
     名字照材料庫。"""
     base = builtin_depth_targets(settings)
     return DepthTargets(settings, {**base.fixed, **{entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None}},
-                        {**base.labels, **{entry.id: entry.label for entry in entries}})
+                        {**base.labels, **{entry.id: entry.label for entry in entries}},
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"))
 
 
 _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設", "request": "這一跑另填"}

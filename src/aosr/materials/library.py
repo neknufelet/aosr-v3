@@ -364,6 +364,10 @@ class FixedEntry(_EntryBase):
     kind: Literal["fixed"] = Field(description="kind（fixed：整塊選或不選，不能微調）")
     material: FixedMaterial
 
+    @property
+    def imaginary_missing(self) -> bool:
+        return isinstance(self.material, MeasuredTable) and self.material.imaginary_missing
+
     def surface_material(self) -> StandaloneSurface:
         """物理用的牆面材料。"""
         material = self.material
@@ -426,7 +430,7 @@ def impedance_basis(entry: LibraryEntry) -> Basis:
     material = fixed_surface(entry)
     if material is None or isinstance(material, Assembly):
         return "simulated"
-    if isinstance(entry, FixedEntry) and isinstance(entry.material, MeasuredTable) and not entry.material.imaginary_missing:
+    if isinstance(material, MeasuredImpedance) and isinstance(entry, FixedEntry) and not entry.imaginary_missing:
         return "measured"
     return "approximate"
 

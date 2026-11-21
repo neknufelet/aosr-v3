@@ -45,7 +45,7 @@ from aosr.gui.zone_design import NAME, WHOLE_WALL_KEY
 from aosr.gui.zone_limits import zone_words
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material, original_walls
 from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceMaterial
-from aosr.materials.library import LibraryEntry, TunableLayersEntry, fixed_surface, full_library
+from aosr.materials.library import ConstructionEntry, LibraryEntry, TunableLayersEntry, fixed_surface, full_library
 from aosr.geometry.shoebox import Room
 from aosr.physics.report_surfaces import RectangleZone, SurfaceZone
 from aosr.physics.zone_fill import wall_size_m
@@ -174,21 +174,27 @@ def zone_material(current: SurfaceMaterial, base: Origin, entry: LibraryEntry | 
     if entry is None:
         return ZoneChange(base.material, unknown_origin(wall) if base.source == "unknown" else f"這一區放回{face}")
     chosen = fixed_surface(entry)
-    if chosen is None:
+    if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
+        layers = entry.layers
+        same = isinstance(base.material, Assembly) and base.material.layers == layers
+    elif isinstance(chosen, Assembly) and not isinstance(entry, ConstructionEntry):
+        layers = chosen.layers
+        same = base.material == chosen
+    elif chosen is not None:
+        what = "整塊構造" if isinstance(entry, ConstructionEntry) else "整面的表面阻抗"
+        return ZoneChange(chosen, f"「{entry.label}」是{what}，直接取代這一區的{face_itself(wall)}（不是貼上去）")
+    else:
         raise ZoneMaterialError(f"「{entry.label}」不能指定成固定材料")
-    if isinstance(chosen, Assembly):
-        # 跟原牆一模一樣（#1175：天花原牆本身就是那一套吊頂，再貼一次等於兩層吊頂疊在一起）：當成不貼。
-        if base.material == chosen:
-            return ZoneChange(base.material, f"選的「{entry.label}」跟這一區{face}一模一樣，當成不貼（保留原樣），不再疊一層", True)
-        if isinstance(base.material, MountedOnWall):
-            raise ZoneMaterialError(f"原方案這一區本身就是貼在{face}上的構造，不能再貼一層；原方案請選貼之前的那一份")
-        mounted = MountedOnWall(layers=chosen.layers, wall=base.material)
-        note = f"「{entry.label}」貼在{face}上（最後一層背後接{face}）"
-        if base.source == "unknown":
-            note += (f"；這一區現在是直接取代{face_itself(wall)}的材料、看不出{face}，就把它當{face}；"
-                     f"要換別的{face}，請在上面「原方案」選切之前那一份方案")
-        return ZoneChange(mounted, note)
-    return ZoneChange(chosen, f"「{entry.label}」是整面的表面阻抗，直接取代這一區的{face_itself(wall)}（不是貼上去）")
+    if same:
+        return ZoneChange(base.material, f"選的「{entry.label}」跟這一區{face}一模一樣，當成不貼（保留原樣），不再疊一層", True)
+    if isinstance(base.material, MountedOnWall):
+        raise ZoneMaterialError(f"原方案這一區本身就是貼在{face}上的構造，不能再貼一層；原方案請選貼之前的那一份")
+    mounted = MountedOnWall(layers=layers, wall=base.material)
+    note = f"「{entry.label}」貼在{face}上（最後一層背後接{face}）"
+    if base.source == "unknown":
+        note += (f"；這一區現在是直接取代{face_itself(wall)}的材料、看不出{face}，就把它當{face}；"
+                 f"要換別的{face}，請在上面「原方案」選切之前那一份方案")
+    return ZoneChange(mounted, note)
 
 
 @dataclass(frozen=True)
@@ -228,7 +234,7 @@ class ZoneMaterialHandlers:
         if isinstance(found, TunableLayersEntry):
             raise ZoneMaterialError(f"「{found.label}」是{found.structure_label()}：還不能用在分區上（程式最佳化這種材料還沒接上）；"
                                     "要整塊貼請另存成固定材料的多層構造")
-        if fixed_surface(found) is None:
+        if not isinstance(found, ConstructionEntry) and fixed_surface(found) is None:
             raise ZoneMaterialError(f"「{found.label}」是可最佳化材料：只能放進「交給搜尋」的准用清單，不能指定成固定材料")
         return found
 
@@ -266,7 +272,7 @@ class ZoneMaterialHandlers:
         walls = self._walls(scheme)
         entries = self._library()
         replacements = tuple(material for item in entries if (material := fixed_surface(item)) is not None
-                             if not isinstance(material, Assembly))
+                             if isinstance(item, ConstructionEntry) or not isinstance(material, Assembly))
         return ZoneScene(scheme, walls, entries, replacements, self._original(original_scheme_id, scheme),
                          draft_wall_words(document))
 

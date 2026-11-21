@@ -124,7 +124,7 @@ function faceZones(wall) {
     const item = {id: `${wall}/${key}`, wall, key, zone, setting, label, entry, special, opening, box, pasted,
                   area: box ? (box[1] - box[0]) * (box[3] - box[2]) : 0, mode: setting.mode,
                   allowed: setting.allowed ?? serverDefaultAllowed(), ranges: setting.mode === "search" ? setting.ranges ?? null : null,
-                  fixed: zoneFixedIdentity(zone.material, pasted ? libraryLabel(zone.material)?.id ?? null : null)};
+                  fixed: zoneFixedIdentity(zone.material, pasted || entry?.kind === "construction" ? entry?.id : null)};
     item.method = zoneMethodKey(item);
     const mode = zoneMethodMode(item.method);
     item.shown = mode === "search" ? "search" : mode === "fixed" && !special ? "fixed" : opening ? "opening" : "still";
@@ -872,24 +872,25 @@ function writeList(group, change) {
 
 /* ───── 右邊：面板 ───── */
 // 選的那一筆的構造：房間這側 → 每一層 → 原本的面。薄的（薄板、開孔板、布）畫成一條線，下面一句說是什麼。
-function structureStrip(entry, wall) {
+function structureStrip(entry, backingText) {
   const spec = inputDefaults.material_form;
   const strip = el("div", "zv-layers");
   strip.append(el("div", "zv-l-room", "房間這側"));
   const thin = [];
-  for (const layer of entry.material.layers) {
+  for (const layer of fixedLayers(entry)) {
     const name = spec[layer.kind]?.label ?? layer.kind;
     const thick = typeof layer.thickness_m === "number" ? ` ${shownNumber(layer.thickness_m * 1000)} mm` : "";
     if (layer.kind === "porous" || layer.kind === "air") {
       const box = el("div", layer.kind === "air" ? "zv-l-air" : "zv-l-foam"); box.append(el("span", null, `${name}${thick}`)); strip.append(box);
     } else { strip.append(el("div", "zv-l-thin")); thin.push(`${name}${thick}`); }
   }
-  const back = el("div", "zv-l-wall"); back.append(el("span", null, originalFace(wall))); strip.append(back);
+  const back = el("div", "zv-l-wall"); back.append(el("span", null, backingText)); strip.append(back);
   return [strip, ...(thin.length ? [el("div", "zv-cap", `黑線：${thin.join("、")}`)] : [])];
 }
 async function loadCurve(entry) {
   curves.set(entry.id, "loading");
   const {basis: _basis, placement: _placement, ...document_} = entry;
+  if (entry.kind === "construction") document_.placement = entry.placement.group;
   let result;
   try {
     const {response, data} = await reply(fetch("/api/material-curve", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(document_)}));
@@ -923,19 +924,21 @@ function curveBlock(entry) {
   }
   const points = state.frequencies_hz.map((hz, index) => [hz, state.absorption[index]]).filter(([hz]) => hz >= low && hz <= high);
   chart.append(svg("polyline", {class: "zv-curve", points: points.map(([hz, value]) => `${x(hz).toFixed(1)},${y(Math.min(Math.max(value, 0), 1)).toFixed(1)}`).join(" ")}));
-  if (!reference) return [chart, el("div", "zv-axis", "頻率（赫茲）")];
+  const preview = entry.backing === "zone_wall" && state.arrangement ? [el("div", "zv-cap", state.arrangement)] : [];
+  if (!reference) return [chart, el("div", "zv-axis", "頻率（赫茲）"), ...preview];
   const note = el("div", "ref-note"); note.id = "zone-panel-ref-note";
   const more = fold("zone-panel-ref-why", "為什麼"); more.append(el("p", null, reference.why));
   note.append(el("span", "ref-sw"), "藍底：", el("span", "ref-say", reference.sentence), more);
-  return [chart, el("div", "zv-axis", "頻率（赫茲）"), note];
+  return [chart, el("div", "zv-axis", "頻率（赫茲）"), ...preview, note];
 }
 function materialShow(entry, wall) {
   const show = el("div", "zv-show"); show.id = "zone-panel-show";
   // 整個名字寫一次（會折行）：下拉收起來的那一格只有一行，名字長的會被截掉。
   const name = el("div", "zv-fullname", vprWords(entry.label)); name.id = "zone-panel-name"; show.append(name);
-  if (entry.material.kind === "assembly") {
-    const head = el("h4", null, "構造 "); head.append(el("span", null, [fixedDepthWords(entry), `貼在${originalFace(wall)}上`].filter(Boolean).join("，")));
-    show.append(head, ...structureStrip(entry, wall));
+  if (fixedLayers(entry).length) {
+    const backing = entry.kind === "construction" && entry.backing !== "zone_wall" ? (entry.backing === "air" ? "空氣" : "硬牆") : null;
+    const head = el("h4", null, "構造 "); head.append(el("span", null, [fixedDepthWords(entry), backing ? `背後是${backing}` : `貼在${originalFace(wall)}上`].filter(Boolean).join("，")));
+    show.append(head, ...structureStrip(entry, backing ?? originalFace(wall)));
   }
   const head = el("h4", null, "吸音率 "); head.append(el("span", null, "各方向來的平均；模型算的"));
   show.append(head, ...curveBlock(entry));
@@ -1049,7 +1052,7 @@ function searchForm(items, walls, sync) {
   const has = id => ticks.count(id) > 0;
   // 使用者在這個小框裡動過的那幾種照樣列著（拿掉之後那一列不准消失，不然勾不回來）。
   const fits = entry => walls.every(wall => usableHere(entry, wall)) || has(entry.id) || entry.id in draft.ticks;
-  const tunable = libraryEntries("optimizable").filter(fits), products = libraryEntries("fixed").filter(fits);
+  const tunable = libraryEntries("optimizable").filter(fits), products = assignableEntries().filter(fixedCandidate).filter(fits);
   const coveredBy = coveredProducts(ticks.ids);
   const form = el("div", "zv-form"); form.id = "zone-panel-form";
   const top = el("div", "zv-form-top");
@@ -1153,7 +1156,7 @@ function panelCard() {
       const material = el("select", "zv-pick zv-pick-material"); material.id = "zone-panel-material"; material.setAttribute("aria-label", "指定貼哪一種");
       const none = el("option", null, allPasted ? "照現在貼的，不換" : "選要貼哪一種"); none.value = ""; material.append(none);
       const current = draft?.mode === "fixed" && draft.materialId ? libraryEntry(draft.materialId) : null;
-      for (const entry of libraryEntries("fixed").filter(item => walls.every(wall => usableHere(item, wall)) || item === current)) {
+      for (const entry of assignableEntries().filter(item => walls.every(wall => usableHere(item, wall)) || item === current)) {
         const option = el("option", null, `${vprWords(entry.label)}${entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : ""}`); option.value = entry.id; material.append(option);
       }
       material.value = draft?.mode === "fixed" ? draft.materialId : "";
@@ -1208,7 +1211,7 @@ function ruleRow() {
     const current = ruleDraft ? null : libraryLabel(rule.zones[0].zone.material);
     if (!current) { const now = el("option", null, ruleDraft ? "選要貼哪一種" : `現在：${pastedWords(rule.zones[0])}`); now.value = ""; material.append(now); }
     const walls = WALL_ORDER.map(role => roles[role]);
-    for (const entry of libraryEntries("fixed").filter(item => walls.every(wall => usableHere(item, wall)) || item === current)) {
+    for (const entry of assignableEntries().filter(item => walls.every(wall => usableHere(item, wall)) || item === current)) {
       const option = el("option", null, vprWords(entry.label)); option.value = entry.id; material.append(option);
     }
     material.value = current?.id ?? "";
@@ -1329,7 +1332,8 @@ function listAddBox(group, allowed, prefix) {
   const box = el("div", "zv-checks zv-add"); box.id = `${prefix}-add-box`;
   const walls = [...new Set(group.zones.map(item => item.wall))];
   const more = [...(allowed.includes(ZONE_NONE) ? [] : [ZONE_NONE]),
-    ...["optimizable", "fixed"].flatMap(kind => libraryEntries(kind).filter(entry => walls.some(wall => usableHere(entry, wall)) && !allowed.includes(entry.id)).map(entry => entry.id))];
+    ...[...libraryEntries("optimizable"), ...assignableEntries().filter(fixedCandidate)]
+      .filter(entry => walls.some(wall => usableHere(entry, wall)) && !allowed.includes(entry.id)).map(entry => entry.id)];
   // 清單裡勾著的可調材料已經包含的成品：灰掉、勾不了、寫為什麼（跟小框的材料框同一條規則，#1199）。
   const coveredBy = coveredProducts(allowed);
   for (const id of more) {

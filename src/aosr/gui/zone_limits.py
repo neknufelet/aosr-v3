@@ -74,6 +74,7 @@ class DepthTargets:
     settings: MaterialGradientSettings
     fixed: Mapping[str, object]
     labels: Mapping[str, str]
+    standalone_constructions: frozenset[str] = frozenset()
 
     def label(self, identifier: str) -> str:
         return self.labels.get(identifier, identifier)
@@ -170,7 +171,7 @@ def reference_only_refusals(scheme: Mapping[str, object], design: DesignSettings
         item = zones.get(wall, {}).get(zone)
         allowed = item.allowed if item is not None and item.allowed else []
         for identifier in dict.fromkeys(allowed):
-            if reference_only(targets.fixed.get(identifier)):
+            if identifier not in targets.standalone_constructions and reference_only(targets.fixed.get(identifier)):
                 groups.setdefault((identifier, tuple(sorted(set(allowed)))), []).append((wall, zone))
     return [{"id": identifier, "zones": [{"wall": wall, "zone": zone} for wall, zone in listed],
              "text": plan_refused("、".join(zone_words(wall, zone, names) for wall, zone in listed), targets.label(identifier))}
@@ -224,14 +225,14 @@ def _place_problems(room: Room, wall: str, entries: Sequence[Mapping[str, object
 
 
 def picked_entry(material: SurfaceMaterial, targets: DepthTargets) -> str | None:
-    """固定區的材料正是材料庫裡直接取代牆面的哪一筆（固定阻抗、實測表；多層構造選上去一定是貼在原牆上，不在這裡認）：
+    """固定區的材料正是材料庫裡直接取代牆面的哪一筆（固定阻抗、實測表、明寫剛背或空氣背的構造）：
     內容逐欄相同才算，同換材料那一支認原牆的那一條（``zone_modes.origin`` 的 ``replacements``；實測表比物理那一份）。
     不是就回 None——那是方案原本的牆。"""
-    if isinstance(material, MountedOnWall | Assembly):
+    if isinstance(material, MountedOnWall):
         return None
     for identifier, entry in targets.fixed.items():
         physics = entry.to_physics() if isinstance(entry, MeasuredTable) else entry
-        if not isinstance(physics, Assembly) and physics == material:
+        if physics == material and (not isinstance(physics, Assembly) or identifier in targets.standalone_constructions):
             return identifier
     return None
 

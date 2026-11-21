@@ -30,6 +30,7 @@ from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceM
 from aosr.materials.library import FixedEntry, builtin_entries
 from aosr.materials.search_library import with_user_materials
 from aosr.reporting.scheme import Scheme
+from tests.engine.test_material_construction import construction
 from tests.engine._construction_gui_server import real_server
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
@@ -611,3 +612,19 @@ def test_the_page_and_the_search_preview_judge_picks_from_the_web_library(tmp_pa
     (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
     response = client.post("/api/gradient/schemes/room109/plan", json={})
     assert response.status_code == 400 and "前牆「z1」：實測吸音板（自填）：不可用" in response.json()["error"]
+
+
+@pytest.mark.parametrize("backing", ["rigid", "air"])
+def test_fixed_zone_uses_constructed_assembly_depth_only_while_registered(backing: str) -> None:
+    entry = _ENTRY.validate_python(construction(backing))
+    document = _cut(PRESET)
+    chosen = library.fixed_surface(entry)
+    assert chosen is not None
+    next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")["material"] = chosen.model_dump(mode="json")
+    design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}}}).model_dump(mode="json")
+    loaded = zone_limits(document, design, depth_targets=lambda: library_depth_targets(SETTINGS, [entry]))
+    assert [line["code"] for line in _lines(loaded, "x0", "z1")] == ["depth_over"]
+    old = FixedEntry.model_validate({**{key: getattr(entry, key) for key in ("id", "label", "source", "provenance")},
+                                     "kind": "fixed", "material": chosen})
+    removed = zone_limits(document, design, depth_targets=lambda: library_depth_targets(SETTINGS, [old]))
+    assert [line["code"] for line in _lines(removed, "x0", "z1")] == ["depth_not_comparable"]

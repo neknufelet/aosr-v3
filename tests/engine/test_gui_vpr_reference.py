@@ -33,6 +33,7 @@ from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
+from tests.engine.test_material_construction import construction
 from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED, SLOTTED_FRONT, STEEL_1MM, STEEL_2_5MM
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
@@ -736,3 +737,19 @@ def test_a_rectangle_without_a_text_id_is_not_a_zone() -> None:
     front = [{"area": "rectangle", "id": 5}, {"area": "rectangle", "id": "a"}, {"area": "rectangle", "id": "a"}]
     order = zone_limits._zone_order({"scene": {"surface_zones_by_wall": {"x0": front}}})
     assert order == [("floor", "whole_wall"), ("ceiling", "whole_wall"), ("x0", "a"), ("xL", "whole_wall"), ("y0", "whole_wall"), ("yL", "whole_wall")]
+
+
+@pytest.mark.parametrize("backing", ["rigid", "zone_wall"])
+def test_web_plan_allows_standalone_bonded_construction_and_explains_wall_dependency(tmp_path: Path, backing: str) -> None:
+    entry = _ENTRY.validate_python(construction(backing, layers=BONDED_VPR["layers"], product=True))
+    _write_user_library(tmp_path, (entry,))
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    scheme = Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR}))
+    design = _design(["glass_wool_48k", entry.id, "none"])
+    if backing == "zone_wall":
+        with pytest.raises(PlanRefused, match="第一批還不能整塊當候選.*分區頁直接指定"):
+            jobs.plan(scheme, design, GradientRequest())
+    else:
+        assert jobs.plan(scheme, design, GradientRequest())[0].allowed == {
+            "x0@a": ("glass_wool_48k", f"fixed:{entry.id}", "none")}

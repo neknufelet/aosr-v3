@@ -7,7 +7,8 @@ from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 from aosr.gui.material_editor import material_routes
-from aosr.materials import library
+from aosr.gui.material_names import registered_entry
+from aosr.materials import library, search_library
 from aosr.materials.construction_models import Assembly
 
 
@@ -54,3 +55,40 @@ def test_invalid_construction_rejected_at_its_field(field: str, bad: object) -> 
     with pytest.raises(ValidationError) as error:
         _ENTRY.validate_python(construction() | {field: bad})
     assert any(field in item["loc"] for item in error.value.errors())
+
+
+@pytest.mark.parametrize("backing", ["rigid", "air"])
+def test_search_converts_only_requested_constructions_to_identical_v2_fixed_entries(backing: str) -> None:
+    doc = construction(backing)
+    entry = _ENTRY.validate_python(doc)
+    legacy = library.FixedEntry.model_validate({**{key: doc[key] for key in ("id", "label", "source", "provenance", "links", "notes")},
+        "kind": "fixed", "material": {"kind": "assembly", "layers": doc["layers"], "backing": backing}})
+    other = _ENTRY.validate_python(construction("zone_wall", id="other"))
+    fixed = search_library.user_fixed_entries([entry.id], [entry, other])
+    assert fixed == (legacy,)
+    assert search_library.snapshot_bytes([], fixed) == search_library.snapshot_bytes([], [legacy])
+    candidate, = search_library.fixed_candidates([f"fixed:{entry.id}"], [], fixed)
+    assert candidate.material == legacy.surface_material().model_dump(mode="json")
+
+
+@pytest.mark.parametrize("backing", ["rigid", "air", "zone_wall"])
+def test_construction_cannot_be_the_starting_family(backing: str) -> None:
+    entry = _ENTRY.validate_python(construction(backing))
+    with pytest.raises(search_library.MaterialsRefused, match="不能拿來當搜尋的家族或起跑樣板"):
+        search_library.refuse_fixed_as_family([entry.id], [entry])
+
+
+def test_zone_wall_search_refusal_names_the_zone_page() -> None:
+    entry = _ENTRY.validate_python(construction("zone_wall"))
+    with pytest.raises(search_library.MaterialsRefused, match="第一批還不能整塊當候選.*分區頁直接指定"):
+        search_library.user_fixed_entries([entry.id], [entry])
+
+
+def test_registered_name_for_a_direct_replacement_matches_the_zone_picker() -> None:
+    doc = construction("air")
+    entry = _ENTRY.validate_python(doc)
+    surface = library.fixed_surface(entry)
+    assert isinstance(surface, Assembly)
+    legacy = library.FixedEntry(kind="fixed", id="old_panel", label="舊面板", source="自編", provenance="model", material=surface)
+    assert registered_entry(surface, [legacy, entry]) == entry
+    assert registered_entry(surface, [legacy]) == legacy

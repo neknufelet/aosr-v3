@@ -212,7 +212,13 @@ def material_curve(document: object) -> dict[str, object]:
     except ValidationError as exc:
         return {"status": "incomplete", "message": f"表單還沒填齊，曲線畫不出來：{plain_error(exc)}", "range_scope": RANGE_SCOPE}
     reply = _entry_curve(entry)
-    return {**reply, "reference_only": reference_words()} if entry_reference_only(entry) else reply
+    if entry_reference_only(entry):
+        words = reference_words()
+        if isinstance(entry, ConstructionEntry):
+            words = {key: words[key] for key in ("band_hz", "sentence", "band_words", "why_only", "map_words")}
+            words.update(why=words["why_only"], kind_words=words["sentence"])
+        reply["reference_only"] = words
+    return reply
 
 
 def _entry_curve(entry: LibraryEntry) -> dict[str, object]:
