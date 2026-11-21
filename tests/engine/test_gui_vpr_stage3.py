@@ -18,6 +18,7 @@ from aosr.gui.app import STATIC
 from aosr.gui.gradient_plan import GradientRequest
 from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.gui.zone_result import Improvement, improvement
+from aosr.reporting.display import LABELS
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from aosr.scoring import gradient_objective_settings
@@ -29,7 +30,9 @@ from tests.engine.test_gui_vpr_results import (
 
 Doc = dict[str, object]
 FAMILY = SETTINGS.family[0].id
-STAGE_THREE = "有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段本來就只算 30～300 Hz，整段都在 300 Hz 以下，所以這一跑的數字都只能參考。"
+# 第三階段的合分是六類加起來的（src/aosr/scoring/six_category_jax.py::category_totals），30～300 只是低頻頻響那一類的範圍（#1235）。
+STAGE_THREE = ("有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段的合分是六類加起來的，"
+               "其中「低頻頻響」那一類算 30～300 Hz，整段在 300 Hz 以下，所以這一跑的數字都只能參考。")
 RESULT = ("有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：300 Hz 以下的數字只能參考；"
           "下表標了「含 300 Hz 以下」的幾列都受影響。")
 # 改善表預期被標的五類（寫死成列上印的名字，不拿規則跟自己比）；低頻拖尾不計分、空間感尚未評估、反射與回聲下界剛好等於界線。
@@ -213,17 +216,25 @@ def test_a_run_whose_scheme_file_is_gone_still_answers_and_has_no_line(tmp_path:
 # ---- 出句子的函式 ----
 
 def test_the_sentence_changes_when_the_stage_three_range_reaches_above_the_band(tmp_path: Path) -> None:
-    """現行 30～300、界線 300：上界剛好等於界線，整段都在界線以下。上界改到界線以上就只講界線以下那一部分。"""
+    """現行 30～300、界線 300：低頻頻響那一類的上界剛好等於界線，整段在界線以下。上界改到界線以上時那一類只有一段在界線
+    以下，但合分照樣含著它，結論一樣是整跑都只能參考，不放寬成「只有界線以下那部分」（#1235）。那一類整段不在界線以下
+    （下界剛好等於界線也算不在，跟結果頁 ``marked_categories`` 同一條）時這一句的理由不成立：報錯，不印。"""
     registry = load_quality_targets(TARGETS)
     assert reference_only.stage_three_block(["前牆", "天花"], registry, PURPOSE) == _block("前牆、天花")
+    # 類名跟結果頁那一列同一個字。
+    assert f"「{LABELS['low_frequency_response']}」那一類" in STAGE_THREE
+    head = "後牆有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段的合分是六類加起來的，"
     wider = _registry(tmp_path, reference_only.GRADIENT_RANGE_KEY, "[40.0, 300.5]", section="[[stage_one]]")
     assert reference_only.stage_three_block(["後牆"], wider, PURPOSE) == {
-        "sentence": "後牆有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段算 40～300.5 Hz，其中 300 Hz 以下的部分只能參考。",
+        "sentence": head + "其中「低頻頻響」那一類算 40～300.5 Hz，有一段在 300 Hz 以下，所以這一跑的數字都只能參考。",
         "why_label": "為什麼", "why": WHY}
     lower = _registry(tmp_path, reference_only.GRADIENT_RANGE_KEY, "[40.0, 250.0]", section="[[stage_one]]")
     block = reference_only.stage_three_block(["後牆"], lower, PURPOSE)
     assert block is not None and block["sentence"] == (
-        "後牆有 VPR（鋼板共振吸音）這類「鋼板直接貼在棉上」的構造：第三階段本來就只算 40～250 Hz，整段都在 300 Hz 以下，所以這一跑的數字都只能參考。")
+        head + "其中「低頻頻響」那一類算 40～250 Hz，整段在 300 Hz 以下，所以這一跑的數字都只能參考。")
+    above = _registry(tmp_path, reference_only.GRADIENT_RANGE_KEY, "[300.0, 400.0]", section="[[stage_one]]")
+    with pytest.raises(ValueError, match="沒有一段在 300 Hz 以下"):
+        reference_only.stage_three_block(["後牆"], above, PURPOSE)
 
 
 def test_the_range_is_the_one_the_gradient_objective_reads_and_a_bad_one_is_an_error(

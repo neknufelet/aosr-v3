@@ -37,7 +37,8 @@ from aosr.materials.library import FixedEntry, LibraryEntry, MeasuredTable
 from aosr.reporting.scheme import Scheme
 
 SCORED_RANGE_KEY: Final = "stage_one_low_frequency.scored_range_hz"
-# 第三階段梯度目標的計分範圍（src/aosr/scoring/gradient_objective_settings.py::gradient_objective_settings_from_section 讀的那一格）。
+# 第三階段梯度目標裡低頻頻響那一類的計分範圍（src/aosr/scoring/gradient_objective_settings.py::gradient_objective_settings_from_section
+# 讀的那一格）；不是整個第三階段的範圍，另外五類各讀各的（#1235）。
 GRADIENT_RANGE_KEY: Final = "stage_three_gradient.scored_range_hz"
 _KIND: Final = "這類「鋼板直接貼在棉上」的構造"
 _WHY: Final = ("程式算這類構造用的是簡化算法（一維、鋼板當成整塊一起動）。跟 Fraunhofer 的實測比，算出來的共振偏高、頻寬偏窄。"
@@ -230,8 +231,10 @@ def scheme_walls(*schemes: Scheme) -> list[str]:
 
 def stage_three_block(walls: Sequence[str], registry: QualityTargets, purpose: str) -> dict[str, object] | None:
     """第三階段頁（開跑前的預覽、每一跑的「注意」）那一格；一面都沒有就回 None，而且不讀界線、不讀範圍。
-    第三階段只算登記簿那一段（:data:`GRADIENT_RANGE_KEY`）：整段都在界線以下（上界不超過界線）就講這一跑的數字都只能參考，
-    超過界線就只講界線以下那一部分。"""
+    搜尋比的合分是六類加起來的（src/aosr/scoring/six_category_jax.py::category_totals 的 ``objective_total``），
+    登記簿那一段（:data:`GRADIENT_RANGE_KEY`）只是其中低頻頻響那一類的範圍（#1235）。那一類有一段在界線以下（下界嚴格小於
+    界線，跟 :func:`marked_categories` 同一條），合分就含著界線以下的數字，所以不論上界有沒有超過界線，都講這一跑的數字
+    都只能參考；只差那一類是整段（上界不超過界線）還是有一段在界線以下。一段都不在時這個理由不成立：報錯，不印。"""
     if not walls:
         return None
     entry = registry.stage_one(purpose).entry(GRADIENT_RANGE_KEY)
@@ -239,10 +242,13 @@ def stage_three_block(walls: Sequence[str], registry: QualityTargets, purpose: s
         raise TypeError(f"{GRADIENT_RANGE_KEY} 不是一段頻率範圍")
     low, high = (float(value) for value in entry.value)
     edge = registry_band_hz(registry)
-    head = f"{'、'.join(walls)}有 VPR（鋼板共振吸音）{_KIND}："
-    tail = (f"第三階段本來就只算 {low:g}～{high:g} Hz，整段都在 {edge:g} Hz 以下，所以這一跑的數字都只能參考。" if high <= edge
-            else f"第三階段算 {low:g}～{high:g} Hz，其中 {edge:g} Hz 以下的部分只能參考。")
-    return {"sentence": head + tail, "why_label": "為什麼", "why": f"{_WHY}。"}
+    if low >= edge:
+        raise ValueError(f"{GRADIENT_RANGE_KEY}（低頻頻響那一類的範圍）{low:g}～{high:g} Hz 沒有一段在 {edge:g} Hz 以下，"
+                         "第三階段那一句的理由不成立")
+    where = "整段在" if high <= edge else "有一段在"
+    sentence = (f"{'、'.join(walls)}有 VPR（鋼板共振吸音）{_KIND}：第三階段的合分是六類加起來的，"
+                f"其中「低頻頻響」那一類算 {low:g}～{high:g} Hz，{where} {edge:g} Hz 以下，所以這一跑的數字都只能參考。")
+    return {"sentence": sentence, "why_label": "為什麼", "why": f"{_WHY}。"}
 
 
 def scheme_stage_three_block(scheme: Scheme) -> dict[str, object] | None:
