@@ -578,6 +578,7 @@ async function applyMethod(items, method, written = () => {}) {
   if (drafted) { zoneNote(`${wallNames[drafted.wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return false; }
   const changes = items.filter(() => method.mode !== "fixed" || method.materialId).map(item => method.mode === "fixed"
     ? {wall: item.wall, zone: item.key, choice: "fixed", material_id: method.materialId} : {wall: item.wall, zone: item.key, choice: "original"});
+  for (const [index, change] of changes.entries()) change.previous_construction = recentConstruction.get(items[index].zone.material);
   let results = [];
   if (changes.length) {
     const document_ = wallDocument();
@@ -597,7 +598,7 @@ async function applyMethod(items, method, written = () => {}) {
       }
       results = data.changes;
       changes.forEach((change, index) => {
-        scheme.scene.surface_zones_by_wall[change.wall].find(zone => zoneKey(zone) === change.zone).material = results[index].material;
+        scheme.scene.surface_zones_by_wall[change.wall].find(zone => zoneKey(zone) === change.zone).material = assignedSurface(results[index]);
       });
     } catch (error) {
       zoneNote(`沒有改：${errorText(error)}`, "notice");

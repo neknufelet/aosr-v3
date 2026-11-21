@@ -338,6 +338,23 @@ function adjustWords(entry) {
 const FIXED_WORDS = "固定成品：整塊貼或不貼，不能調";
 function choiceWords(entry) { return entry.kind === "optimizable" ? adjustWords(entry) : FIXED_WORDS; }
 // 這一區現在的材料是材料庫哪一筆：多層構造比貼上去的那幾層，固定阻抗與實測表比整份。
+// 裸構造沒有材料庫代號。只認本次換料的回覆，或限制檢查已經跟另存原方案比過的那一區。
+const recentConstruction = new WeakMap();
+let checkedConstruction = new WeakMap();
+function assignedSurface(result) {
+  if (result.picked_construction) recentConstruction.set(result.material, result.picked_construction);
+  return result.material;
+}
+function recentChoices() {
+  const choices = {};
+  for (const [wall, zones] of Object.entries(scheme.scene.surface_zones_by_wall ?? {})) {
+    for (const zone of zones) {
+      const id = recentConstruction.get(zone.material);
+      if (id) (choices[wall] ??= {})[zoneKey(zone)] = id;
+    }
+  }
+  return choices;
+}
 function libraryLabel(material) {
   for (const entry of assignableEntries()) {
     const chosen = fixedSurface(entry);
@@ -347,7 +364,10 @@ function libraryLabel(material) {
       // 實測表進物理時，原本空白的虛部補成 0。
       const points = chosen.points.map(point => ({...point, imag_pa_s_m: point.imag_pa_s_m ?? 0}));
       if (sameMaterial({...chosen, points}, material)) return entry;
-    } else if ((entry.kind === "construction" || chosen?.kind !== "assembly") && sameMaterial(chosen, material)) {
+    } else if (entry.kind === "construction") {
+      const confirmed = zoneDesign?.original_scheme_id ? checkedConstruction.get(material) : recentConstruction.get(material);
+      if (entry.id === confirmed && sameMaterial(chosen, material)) return entry;
+    } else if (chosen?.kind !== "assembly" && sameMaterial(chosen, material)) {
       return entry;
     }
   }
@@ -419,14 +439,14 @@ async function changeZoneMaterial(wall, key, choice) {
   try {
     let response;
     ({response, data} = await reply(fetch("/api/zone-material", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
+      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, previous_construction: recentConstruction.get(zoneList(wall).find(zone => zoneKey(zone) === key)?.material), original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
     if (!response.ok) { zoneNote(`沒有換：${data.error}`, "notice"); return null; }
     if (!scheme.scene.surface_zones_by_wall) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
     }
     const zone = scheme.scene.surface_zones_by_wall[wall].find(item => zoneKey(item) === key);
-    zone.material = data.material;
+    zone.material = assignedSurface(data);
   } finally {
     document.querySelector("main").inert = false;
     inputBusy = false;
@@ -774,7 +794,7 @@ function originalSchemeRow() {
     const missing = document.createElement("option"); missing.value = chosen; missing.textContent = `${chosen}（不在清單裡）`; select.append(missing);
   }
   select.value = chosen;
-  select.onchange = () => { designForEdit().original_scheme_id = select.value || null; markStale(); };
+  select.onchange = () => { designForEdit().original_scheme_id = select.value || null; checkedConstruction = new WeakMap(); markStale(); refreshZoneLimits(); };
   wrap.append(select); row.append(wrap);
   return row;
 }

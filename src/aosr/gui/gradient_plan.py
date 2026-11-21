@@ -251,13 +251,15 @@ def builtin_depth_targets(settings: MaterialGradientSettings) -> DepthTargets:
     return DepthTargets(settings, {preset.id: _MATERIAL.validate_python(preset.material) for preset in presets}, labels)
 
 
-def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[LibraryEntry]) -> DepthTargets:
+def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[LibraryEntry], *,
+                          read_original: Callable[[str], Scheme | None] | None = None) -> DepthTargets:
     """網頁那一份：``settings`` 已接上使用者可最佳化材料（``with_user_materials``）；固定材料是內建構造加使用者的固定材料，
     名字照材料庫。"""
     base = builtin_depth_targets(settings)
     return DepthTargets(settings, {**base.fixed, **{entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None}},
                         {**base.labels, **{entry.id: entry.label for entry in entries}},
-                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"))
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"),
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original)
 
 
 _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設", "request": "這一跑另填"}

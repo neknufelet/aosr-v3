@@ -14,7 +14,8 @@ from typing import cast
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
-from tests.engine.test_material_construction import construction
+from tests.engine._construction_cases import construction
+from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
@@ -812,7 +813,7 @@ def test_the_deepest_for_the_picked_zones_is_written_in_metres_and_only_when_it_
 
 def test_constructions_can_be_assigned_but_only_standalone_ones_can_be_checked(tmp_path: Path, browser: Browser) -> None:
     _prepare(tmp_path)
-    with _serve(tmp_path) as base, _open(browser, base) as watched:
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         for backing in ("rigid", "air", "zone_wall"):
             doc = construction(backing, id=f"panel_{backing}", label=f"自編面板 {backing}")
@@ -827,7 +828,7 @@ def test_constructions_can_be_assigned_but_only_standalone_ones_can_be_checked(t
             expect(select.locator(f"option[value='panel_{backing}']")).to_have_count(1)
             with page.expect_response(lambda response: response.url.endswith("/api/material-curve")) as curve:
                 select.select_option(f"panel_{backing}")
-            assert curve.value.json()["status"] != "incomplete"
+            assert curve.value.json()["status"] == "drawn"
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         _click_zone(page, "yL/z3")
@@ -841,4 +842,25 @@ def test_constructions_can_be_assigned_but_only_standalone_ones_can_be_checked(t
             expect(choice).not_to_be_checked()
             choice.check()
         expect(page.locator("#zone-panel-allow-panel_zone_wall")).to_have_count(0)
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_copy_of_ceiling_keeps_original_until_assigned_to_a_different_wall(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        saved = page.request.get(f"{base}/api/schemes/{SAMPLE}").json()["scheme"]
+        ceiling = next(zone for zone in saved["scene"]["surface_zones_by_wall"]["ceiling"] if zone["id"] == "auto1")
+        doc = construction("rigid", id="ceiling_copy", label="布置用面板", layers=ceiling["material"]["layers"])
+        assert page.request.put(f"{base}/api/materials/ceiling_copy", data=doc).ok
+        _open_overview(page)
+        def shown(wall: str, key: str) -> Locator:
+            return page.locator(f"#zone-map [data-wall='{wall}'][data-zone='{key}']")
+        expect(shown("ceiling", "auto1")).to_have_attribute("data-shown", "still")
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-mode-fixed").check()
+        page.locator("#zone-panel-material").select_option("ceiling_copy")
+        _apply(page)
+        expect(shown("yL", "z3")).to_have_attribute("data-shown", "fixed")
+        expect(shown("ceiling", "auto1")).to_have_attribute("data-shown", "still")
         assert watched.page_errors == []

@@ -182,10 +182,10 @@ def refuse_tunable_layers(ids: Sequence[str | None], entries: Sequence[LibraryEn
 
 def refuse_zone_wall(ids: Sequence[str], entries: Sequence[LibraryEntry]) -> None:
     """原牆由分區決定，無法寫成獨立的固定候選。"""
-    wanted = {item.removeprefix("fixed:") for item in ids}
+    wanted = set(ids)
     for entry in entries:
         if entry.id in wanted and isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
-            raise MaterialsRefused(f"{_name(entry)}的背後要接這一區的原牆，第一批還不能整塊當候選，要用請在分區頁直接指定。")
+            raise MaterialsRefused(f"{_name(entry)}的背後要接這一區的原牆，現在還不能整塊當候選，要用請在分區頁直接指定。")
 
 
 def library_preset(entry: OptimizableEntry) -> LibraryPreset:

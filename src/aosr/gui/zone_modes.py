@@ -80,6 +80,7 @@ class ZoneChoice(BaseModel):
     wall: WallName
     zone: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     choice: Literal["original", "fixed"]
+    previous_construction: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
     material_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
 
 
@@ -176,10 +177,12 @@ def zone_material(current: SurfaceMaterial, base: Origin, entry: LibraryEntry | 
     chosen = fixed_surface(entry)
     if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
         layers = entry.layers
-        same = isinstance(base.material, Assembly) and base.material.layers == layers
+        same = base.source != "unknown" and isinstance(base.material, Assembly) and base.material.layers == layers
     elif isinstance(chosen, Assembly) and not isinstance(entry, ConstructionEntry):
         layers = chosen.layers
         same = base.material == chosen
+    elif isinstance(entry, ConstructionEntry) and chosen == base.material and base.source != "unknown":
+        return ZoneChange(base.material, f"選的「{entry.label}」跟這一區{face}一模一樣，當成不貼（保留原樣）", True)
     elif chosen is not None:
         what = "整塊構造" if isinstance(entry, ConstructionEntry) else "整面的表面阻抗"
         return ZoneChange(chosen, f"「{entry.label}」是{what}，直接取代這一區的{face_itself(wall)}（不是貼上去）")
@@ -272,7 +275,7 @@ class ZoneMaterialHandlers:
         walls = self._walls(scheme)
         entries = self._library()
         replacements = tuple(material for item in entries if (material := fixed_surface(item)) is not None
-                             if isinstance(item, ConstructionEntry) or not isinstance(material, Assembly))
+                             if not isinstance(material, Assembly))
         return ZoneScene(scheme, walls, entries, replacements, self._original(original_scheme_id, scheme),
                          draft_wall_words(document))
 
@@ -284,8 +287,15 @@ class ZoneMaterialHandlers:
         current = item.material
         entry = self._entry(scene.entries, choice.material_id) if choice.choice == "fixed" and choice.material_id else None
         base = origin(current, scene.original, choice.wall, choice.zone, box, scene.replacements)
+        if base.source == "current" and choice.previous_construction:
+            prior = next((item for item in scene.entries if item.id == choice.previous_construction), None)
+            if isinstance(prior, ConstructionEntry) and fixed_surface(prior) == current:
+                base = Origin(current, "unknown")
         change = zone_material(current, base, entry, choice.wall)
-        return {"material": _MATERIAL.dump_python(change.material, mode="json"), "note": change.note, "origin": base.source,
+        picked = isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall" and (
+            base.source == "unknown" or change.material != base.material)
+        return {**({"picked_construction": entry.id} if picked and entry is not None else {}),
+                "material": _MATERIAL.dump_python(change.material, mode="json"), "note": change.note, "origin": base.source,
                 "same_as_original": change.same_as_original}
 
     def change(self, body: ZoneMaterialRequest) -> dict[str, object]:

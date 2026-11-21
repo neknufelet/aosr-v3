@@ -30,8 +30,9 @@ from aosr.materials.library import (
 )
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
 from aosr.runtime import child_process_env
+from tests.engine._bonded_backing_cases import BONDED_VPR
 from tests.engine._cpu_pins import forward_cpu_pins
-from tests.engine.test_material_construction import construction
+from tests.engine._construction_cases import construction
 
 PROBE = Path(__file__).with_name("_material_curve_probe.py")
 CURVE = "/api/material-curve"
@@ -85,6 +86,7 @@ def _cases() -> dict[str, dict[str, object]]:
     return {
         **{backing: _case(_post(construction(backing)), physics=({"kind": "assembly", "layers": construction()["layers"],
                  "backing": "rigid" if backing == "zone_wall" else backing},)) for backing in ("rigid", "air", "zone_wall")},
+        "bonded_construction": _case(_post(construction(layers=BONDED_VPR["layers"]))),
         "builtins": _case(*(_post(entry.model_dump(mode="json")) for entry in builtins), physics=tuple(
             (entry.surface_material() if isinstance(entry, FixedEntry) else template_assembly(OptimizableEntry.model_validate(entry))).model_dump(mode="json")
             for entry in builtins)),
@@ -284,3 +286,13 @@ def test_a_server_without_double_precision_blames_its_start_up_not_the_material(
     body = cast(Reply, reply.json())
     assert (reply.status_code, body["status"], body["basis"]) == (200, "no_precision", "模擬，之後要拿實測對照")
     assert body["message"] == "這個網頁行程沒有開雙精度，算不出吸音曲線；這是網頁開機設定的問題，不是材料參數的問題。"
+
+
+def test_bonded_construction_curve_warns_without_excluding_search(probe: dict[str, dict[str, object]]) -> None:
+    reply = _reply(probe, "bonded_construction")
+    assert reply["status"] == "drawn"
+    words = cast(Reply, reply["reference_only"])
+    assert set(words) == {"band_hz", "sentence", "band_words", "why_only", "map_words", "why", "kind_words"}
+    assert "只能參考" in str(words["sentence"]) and words["why"] == words["why_only"]
+    assert words["kind_words"] == "；" + str(words["sentence"])
+    assert "不會挑" not in str(words)

@@ -377,7 +377,7 @@ class FixedEntry(_EntryBase):
 class ConstructionEntry(_EntryBase):
     """構造的各層從房間側到牆側；成品也保留整份構造。"""
 
-    kind: Literal["construction"]
+    kind: Literal["construction"] = Field(description="kind（構造：各層與背後負載）")
     layers: tuple[Layer, ...] = Field(min_length=1, description="layers（從房間側到牆側的各層）")
     backing: Literal["rigid", "air", "zone_wall"] = Field(description="backing（背後負載）")
     product: StrictBool = Field(description="product（是否為成品）")

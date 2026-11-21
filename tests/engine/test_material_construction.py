@@ -6,6 +6,8 @@ from pydantic import TypeAdapter, ValidationError
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+from tests.engine._construction_cases import construction
+from tests.engine._bonded_backing_cases import BONDED_VPR
 from aosr.gui.material_editor import material_routes
 from aosr.gui.material_names import registered_entry
 from aosr.materials import library, search_library
@@ -13,13 +15,6 @@ from aosr.materials.construction_models import Assembly
 
 
 _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
-
-
-def construction(backing: str = "rigid", placement: str = "wall", **changes: object) -> dict[str, object]:
-    return {"kind": "construction", "id": "demo109_floor_sample", "label": "天花自編樣品", "source": "考卷自編",
-            "provenance": "literature", "links": ["https://example.org/test"], "notes": ["自編條件"],
-            "layers": [{"kind": "fabric", "surface_mass_kg_m2": 0.19, "flow_resistance_pa_s_m": 180.0}, {"kind": "air", "thickness_m": 0.063}],
-            "product": False, "placement": placement, "backing": backing, **changes}
 
 
 @pytest.mark.parametrize(("place", "surfaces"), [
@@ -80,7 +75,7 @@ def test_construction_cannot_be_the_starting_family(backing: str) -> None:
 
 def test_zone_wall_search_refusal_names_the_zone_page() -> None:
     entry = _ENTRY.validate_python(construction("zone_wall"))
-    with pytest.raises(search_library.MaterialsRefused, match="第一批還不能整塊當候選.*分區頁直接指定"):
+    with pytest.raises(search_library.MaterialsRefused, match="現在還不能整塊當候選.*分區頁直接指定"):
         search_library.user_fixed_entries([entry.id], [entry])
 
 
@@ -92,3 +87,17 @@ def test_registered_name_for_a_direct_replacement_matches_the_zone_picker() -> N
     legacy = library.FixedEntry(kind="fixed", id="old_panel", label="舊面板", source="自編", provenance="model", material=surface)
     assert registered_entry(surface, [legacy, entry]) == entry
     assert registered_entry(surface, [legacy]) == legacy
+
+
+def test_bonded_backing_in_a_construction_requires_rigid_load() -> None:
+    with pytest.raises(ValidationError, match="背後負載必須是剛背"):
+        _ENTRY.validate_python(construction("air", layers=BONDED_VPR["layers"]))
+
+
+def test_construction_kind_field_has_a_chinese_description() -> None:
+    assert "構造" in (library.ConstructionEntry.model_fields["kind"].description or "")
+
+
+def test_candidate_lookup_accepts_only_bare_material_ids() -> None:
+    entry = _ENTRY.validate_python(construction("zone_wall"))
+    assert search_library.user_fixed_entries([f"fixed:{entry.id}"], [entry]) == ()

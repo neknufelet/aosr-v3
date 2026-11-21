@@ -17,7 +17,7 @@ from aosr.gui.zone_edit import CutBox, cut_wall
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
 from aosr.reporting.scheme import Scheme
-from tests.engine.test_material_construction import construction
+from tests.engine._construction_cases import construction
 from tests.engine._surface_zone_cases import NEW, room109_document
 
 PRESET = "glass_wool_48k_50mm"
@@ -279,7 +279,7 @@ def test_assign_construction_obeys_backing_and_remembers_direct_replacement(clie
         assert data["material"] == {"kind": "assembly", "layers": doc["layers"], "backing": backing}
         assert "直接取代" in str(data["note"])
     _put(scheme, "z1", data["material"])
-    code, restored = _post(client, scheme, "z1", choice="original")
+    code, restored = _post(client, scheme, "z1", choice="original", previous_construction=data.get("picked_construction"))
     assert code == 200 and restored["origin"] == ("unwrapped" if backing == "zone_wall" else "unknown")
 
 
@@ -303,3 +303,32 @@ def test_zone_wall_refuses_to_mount_over_an_already_mounted_original(client: Tes
     (tmp_path / "schemes" / "built.json").write_text(Scheme.model_validate(original).model_dump_json())
     code, data = _post(client, _cut_document(), "z1", choice="fixed", material_id=doc["id"], original_scheme_id="built")
     assert code == 400 and "不能再貼一層" in str(data["error"])
+
+
+def test_unknown_original_cannot_match_a_zone_wall_stack(client: TestClient) -> None:
+    base = construction("rigid", id="base_panel", label="整塊面板")
+    facing = construction("zone_wall")
+    for doc in (base, facing):
+        assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    scheme = _cut_document()
+    code, replaced = _post(client, scheme, "z1", choice="fixed", material_id=base["id"])
+    assert code == 200
+    _put(scheme, "z1", replaced["material"])
+    code, mounted = _post(client, scheme, "z1", choice="fixed", material_id=facing["id"],
+                          previous_construction=replaced["picked_construction"])
+    assert code == 200 and mounted["origin"] == "unknown"
+    assert mounted["same_as_original"] is False and "看不出原牆" in str(mounted["note"])
+    assert mounted["material"] == {"kind": "mounted_on_wall", "layers": facing["layers"], "wall": replaced["material"]}
+
+
+def test_selecting_a_copy_of_this_original_face_keeps_it_original(client: TestClient) -> None:
+    doc = construction("air")
+    scheme = _cut_document()
+    surface = {"kind": "assembly", "backing": "air", "layers": doc["layers"]}
+    _put(scheme, "z1", surface)
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    code, original = _post(client, scheme, "z1", choice="original")
+    assert code == 200 and original["origin"] == "current" and "看不出" not in str(original["note"])
+    code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
+    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is True
+    assert "picked_construction" not in picked

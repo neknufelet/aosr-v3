@@ -30,7 +30,7 @@ from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceM
 from aosr.materials.library import FixedEntry, builtin_entries
 from aosr.materials.search_library import with_user_materials
 from aosr.reporting.scheme import Scheme
-from tests.engine.test_material_construction import construction
+from tests.engine._construction_cases import construction
 from tests.engine._construction_gui_server import real_server
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
@@ -622,9 +622,54 @@ def test_fixed_zone_uses_constructed_assembly_depth_only_while_registered(backin
     assert chosen is not None
     next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")["material"] = chosen.model_dump(mode="json")
     design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}}}).model_dump(mode="json")
-    loaded = zone_limits(document, design, depth_targets=lambda: library_depth_targets(SETTINGS, [entry]))
+    loaded = zone_limits(document, design, recent_choices={"x0": {"z1": entry.id}}, depth_targets=lambda: library_depth_targets(SETTINGS, [entry]))
     assert [line["code"] for line in _lines(loaded, "x0", "z1")] == ["depth_over"]
     old = FixedEntry.model_validate({**{key: getattr(entry, key) for key in ("id", "label", "source", "provenance")},
                                      "kind": "fixed", "material": chosen})
-    removed = zone_limits(document, design, depth_targets=lambda: library_depth_targets(SETTINGS, [old]))
+    removed = zone_limits(document, design, recent_choices={"x0": {"z1": entry.id}}, depth_targets=lambda: library_depth_targets(SETTINGS, [old]))
     assert [line["code"] for line in _lines(removed, "x0", "z1")] == ["depth_not_comparable"]
+    for entries in ([], [_ENTRY.validate_python(construction(backing, layers=_layers(DEEP)))],
+                    [_ENTRY.validate_python(construction("rigid" if backing == "air" else "air"))]):
+        result = zone_limits(document, design, recent_choices={"x0": {"z1": entry.id}}, depth_targets=lambda: library_depth_targets(SETTINGS, entries))
+        assert _codes(result, "x0", "z1") == ["depth_not_comparable"]
+
+
+def test_copying_an_existing_wall_into_a_construction_does_not_turn_an_untouched_zone_red() -> None:
+    layers = _layers(PRESET)
+    document = _cut(None)
+    next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")["material"] = {
+        "kind": "assembly", "layers": layers, "backing": "rigid"}
+    design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.01}}}).model_dump(mode="json")
+    copy = _ENTRY.validate_python(construction("rigid", id="my_copy", label="照抄的 48K 棉", layers=layers, product=True))
+    before = zone_limits(document, design, depth_targets=lambda: library_depth_targets(SETTINGS, []))
+    after = zone_limits(document, design, depth_targets=lambda: library_depth_targets(SETTINGS, [copy]))
+    assert _codes(before, "x0", "z1") == _codes(after, "x0", "z1") == ["depth_not_comparable"]
+
+
+def test_zone_wall_range_explains_wall_dependency() -> None:
+    entry = _ENTRY.validate_python(construction("zone_wall"))
+    design = _design(zones={"x0": {"z1": {"mode": "search", "ranges": {entry.id: {"porous_m": [0.05, 0.05]}}}}})
+    result = zone_limits(_cut(None), design.model_dump(mode="json"), depth_targets=lambda: library_depth_targets(SETTINGS, [entry]))
+    line, = _lines(result, "x0", "z1")
+    assert line["code"] == "range_unknown" and entry.label in line["text"] and "不能整塊當候選" in line["text"]
+
+
+@pytest.mark.parametrize("backing", ["rigid", "air"])
+def test_same_construction_on_a_different_original_wall_still_checks_depth(tmp_path: Path, backing: str) -> None:
+    material = {"kind": "assembly", "layers": _layers(PRESET), "backing": backing}
+    original = room109_document("original")
+    _zones(original)["x0"][0]["material"] = material
+    current = deepcopy(original) | {"scheme_id": "draft"}
+    doc = construction(backing, id="copied_panel", layers=material["layers"])
+    design = DesignSettings(scheme_id="draft", original_scheme_id="original", room_max_depth_m=0.01)
+    with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        (tmp_path / "schemes" / "original.json").write_text(Scheme.model_validate(original).model_dump_json())
+        assert client.put("/api/materials/copied_panel", json=doc).status_code == 200
+        result = client.post("/api/zone-material", json={"scheme": current, "wall": "xL", "zone": "whole_wall",
+                             "choice": "fixed", "material_id": doc["id"], "original_scheme_id": "original"})
+        assert result.status_code == 200
+        _zones(current)["xL"][0]["material"] = result.json()["material"]
+        judged = client.post("/api/zone-limits", json={"scheme": current, "design": design.model_dump(mode="json")}).json()
+    assert [code for code in _codes(judged, "x0", "whole_wall") if code.startswith("depth_")] == ["depth_not_comparable"]
+    assert [code for code in _codes(judged, "xL", "whole_wall") if code.startswith("depth_")] == ["depth_over"]
+    assert judged["picked_constructions"] == {"xL": {"whole_wall": "copied_panel"}}

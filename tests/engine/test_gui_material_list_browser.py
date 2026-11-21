@@ -12,6 +12,7 @@ from aosr.gui.material_editor import user_library_path
 from aosr.materials.library import SCHEMA_VERSION
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine._construction_cases import construction
 from tests.engine.test_material_library_vpr import _panel, _table, _vpr, _wool
 
 
@@ -173,8 +174,47 @@ def test_saved_copy_reveals_its_tab_group_and_row(tmp_path: Path, browser: Brows
         page.locator("#material-label").fill(label)
         page.locator("#tab-" + ("fixed" if kind == "optimizable" else "optimizable")).click()
         page.locator("#save").click()
-        expect(page.locator("#editor-message")).to_have_text(f"已儲存「{label}」")
+        message = page.locator("#editor-message")
+        tab_name = "成品" if kind == "fixed" else "參數構造"
+        expect(message).to_have_class("ok")
+        expect(message).to_be_in_viewport(ratio=1)
+        expect(message).to_have_text(f"已儲存「{label}」：在「{tab_name}」頁「{group}」")
         expect(page.locator(f"#tab-{kind}")).to_have_attribute("aria-selected", "true")
         row = page.get_by_role("tabpanel").locator(f'details[open][data-name="{group}"] [data-id="{saved_id}"]')
         expect(row.get_by_role("button", name="刪除")).to_be_visible()
-        expect(row).to_be_in_viewport(ratio=1)
+
+
+def test_materials_page_lists_old_product_and_three_construction_backings(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, "about:blank") as watched:
+        page = watched.page
+        docs = [_panel(), *(construction(back, id=f"panel_{back}", label=label, product=back == "rigid")
+                            for back, label in (("rigid", "剛背布面成品"), ("air", "空氣背布面"), ("zone_wall", "原牆布面")))]
+        for doc in docs:
+            response = page.request.put(f"{base}/api/materials/{doc['id']}", data=doc)
+            assert response.ok, response.text()
+        page.goto(f"{base}/materials")
+        for tab, ids in (("fixed", ["user_panel", "panel_rigid"]), ("optimizable", ["panel_air", "panel_zone_wall"])):
+            page.locator(f"#tab-{tab}").click()
+            panel = page.get_by_role("tabpanel")
+            for identifier in ids:
+                row = panel.locator(f'[data-id="{identifier}"]')
+                expect(row).to_be_visible()
+                if identifier == "user_panel":
+                    continue
+                expect(row.locator("svg.cutaway g")).to_have_count(3 if identifier == "panel_rigid" else 2)
+                if identifier == "panel_zone_wall":
+                    expect(row.get_by_text("背後接原牆", exact=True)).to_be_visible()
+                row.get_by_role("button", name="打開").click()
+                expect(page.locator("#material-label")).to_be_disabled()
+                expect(page.locator("#save")).to_be_hidden()
+        row.get_by_role("button", name="複製").click()
+        page.locator("#save").click()
+        copy = panel.locator('[data-id="panel_zone_wall_copy"]')
+        expect(copy).to_be_visible()
+        stored = page.request.get(f"{base}/api/materials").json()["materials"]
+        entries = {item["entry"]["id"]: item["entry"] for item in stored}
+        assert entries["panel_zone_wall_copy"] == {**entries["panel_zone_wall"], "id": "panel_zone_wall_copy", "label": "原牆布面（複本）"}
+        page.once("dialog", lambda dialog: dialog.accept())
+        copy.get_by_role("button", name="刪除").click()
+        expect(copy).to_have_count(0)
+        assert watched.page_errors == []

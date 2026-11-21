@@ -262,8 +262,8 @@ def tail_lines(path: Path) -> list[str]:
 def plan_fixed(plan: SearchPlan, materials: SearchMaterials, entries: tuple[LibraryEntry, ...]) -> tuple[FixedTarget, ...]:
     """計畫准用清單裡的固定材料候選（材料照命令列開跑同一條 ``fixed_candidates`` 取；網頁的清單本來就是逐片）。"""
     targets = sorted({target for targets in plan.allowed.values() for target in targets if is_fixed_target(target)})
-    user = user_fixed_entries([fixed_target_id(target) for target in targets], entries)
     try:
+        user = user_fixed_entries([fixed_target_id(target) for target in targets], entries)
         return fixed_targets(plan.allowed, fixed_candidates(targets, materials.presets, user))
     except MaterialsRefused as error:
         raise PlanRefused(str(error)) from error
@@ -348,7 +348,7 @@ class GradientJobs:
         fixed_ids = frozenset((*(preset.id for preset in load_construction_presets(config_path("construction_presets.toml"))),
                                *(entry.id for entry in entries if fixed_surface(entry) is not None)))
         plan = plan_search(scheme, design, request, materials.settings, fixed_ids, range_check=range_check,
-                           depth_targets=library_depth_targets(materials.settings, entries),
+                           depth_targets=library_depth_targets(materials.settings, entries, read_original=self._read_original),
                            tie_inputs=TieInputs(materials.presets, entries, self.capabilities), pair=pair)
         return plan, materials, entries
 
@@ -360,10 +360,19 @@ class GradientJobs:
 
         return draft_symmetry(document, design_value, planned)
 
+    def _read_original(self, name: str) -> Scheme | None:
+        """限制檢查找不到獨立的原牆時，裸構造就只能列為比不了。"""
+        if not NAME.fullmatch(name):
+            return None
+        try:
+            return Scheme.model_validate_json((self.data_dir / "schemes" / f"{name}.json").read_bytes())
+        except (OSError, ValueError):
+            return None
+
     def depth_targets(self) -> DepthTargets:
         """立面圖限制檢查判准用材料組放不放得下用的那一份（跟開跑同一份材料庫）；材料庫讀不進來丟 :class:`PlanRefused`。"""
         materials, entries = self._materials()
-        return library_depth_targets(materials.settings, entries)
+        return library_depth_targets(materials.settings, entries, read_original=self._read_original)
 
     def search_settings(self) -> MaterialGradientSettings:
         return load_material_gradient_settings(self.settings_path or config_path("material_gradient.toml"))
@@ -582,7 +591,7 @@ class GradientJobs:
         with self.lock:
             busy = self.active_job()
         # 代號 → 材料庫顯示名（內建構造預設、家族、使用者材料），只給預覽表看；計畫本身照舊只存代號（#1119）。
-        targets = library_depth_targets(settings, entries)
+        targets = library_depth_targets(settings, entries, read_original=self._read_original)
         labels = dict(targets.labels)
         # 方案裡有「鋼板直接貼在棉上」的構造才多這一格（#1208 第 3 支；沒命中時回覆逐位不變）。
         reference = reference_only.scheme_stage_three_block(scheme)

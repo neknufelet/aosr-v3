@@ -216,7 +216,7 @@ def material_curve(document: object) -> dict[str, object]:
         words = reference_words()
         if isinstance(entry, ConstructionEntry):
             words = {key: words[key] for key in ("band_hz", "sentence", "band_words", "why_only", "map_words")}
-            words.update(why=words["why_only"], kind_words=words["sentence"])
+            words.update(why=words["why_only"], kind_words=f"；{words['sentence']}")
         reply["reference_only"] = words
     return reply
 

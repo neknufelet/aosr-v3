@@ -55,13 +55,21 @@ async function checkZoneLimits() {
   let result;
   try {
     const document = wallDocument();
+    const recent = recentChoices();
     const {response, data} = await reply(fetch("/api/zone-limits", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: document, design: zoneDesign})}));
+      body: JSON.stringify({scheme: document, design: zoneDesign, ...(Object.keys(recent).length ? {recent_choices: recent} : {})})}));
     result = response.ok ? data : {status: "error", message: data.error || "限制檢查失敗", red: 0, zones: {}, walls: {}, caps: {}, refusals: []};
   } catch (error) {
     result = {status: "error", message: `限制檢查沒有做成：${errorText(error)}`, red: 0, zones: {}, walls: {}, caps: {}, refusals: []};
   }
   if (generation !== zoneLimitsGeneration) return;
+  checkedConstruction = new WeakMap();
+  for (const [wall, choices] of Object.entries(result.picked_constructions ?? {})) {
+    for (const zone of zoneList(wall)) {
+      const id = choices[zoneKey(zone)];
+      if (id) checkedConstruction.set(zone.material, id);
+    }
+  }
   zoneLimits = result;
   zoneLimitsReceived = generation;
   const typing = typingInElevation();
