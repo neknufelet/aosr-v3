@@ -2,14 +2,14 @@
 
 let listing = null;
 
-function freeId(base) {
-  const taken = new Set(listing.materials.map((row) => row.entry.id));
+function freeId(base, unavailable = []) {
+  const taken = new Set([...unavailable, ...listing.materials.map(row => row.entry.id)]);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n += 1) if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
 }
 
-function freeLabel(base) {
-  const taken = new Set(listing.materials.map((row) => row.entry.label));
+function freeLabel(base, exceptId) {
+  const taken = new Set(listing.materials.filter(row => row.entry.id !== exceptId).map(row => row.entry.label));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
 }

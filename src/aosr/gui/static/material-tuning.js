@@ -30,6 +30,10 @@ function tuningActive() {
   return !tuningUnavailable() && draft.layers.some(layer => thicknessSpecs.get(layer)?.adjustable);
 }
 
+function adjustableAir(layer) {
+  return layer.kind === "air" && !tuningUnavailable() && thicknessSpecs.get(layer)?.adjustable;
+}
+
 function tuningControl(layer, index) {
   const reason = tuningUnavailable();
   const spec = thicknessSpecs.get(layer);
@@ -38,8 +42,9 @@ function tuningControl(layer, index) {
     const depth = layer.thickness_m ?? 0;
     if (!spec) thicknessSpecs.set(layer, {range_m: [layer.kind === "air" ? 0 : depth, depth], choices_m: null});
     thicknessSpecs.get(layer).adjustable = !checked;
+    const advancedOpen = selected === index && byId("stack").querySelector(".advanced")?.open;
     selected = index;
-    stackChanged();
+    stackChanged(advancedOpen);
     byId("stack").querySelectorAll('[role="switch"]')[index].focus();
   }, {role: "switch", "aria-label": `第 ${index + 1} 層給程式調`, "aria-checked": String(checked), disabled: readOnly || Boolean(reason)});
   return el("div", {class: "tune"}, el("span", {}, "給程式調 ", toggle), reason ? el("span", {text: reason}) : null);
@@ -102,11 +107,7 @@ function thicknessDocument(layer) {
 }
 
 function draftDocument() {
-  if (!tuningActive()) {
-    // 空腔初值為零或空白，在固定的初值排法裡沒有這一層。
-    const layers = draft.layers.filter(layer => !(layer.kind === "air" && thicknessSpecs.has(layer) && !layer.thickness_m));
-    return {...draft, layers};
-  }
+  if (!tuningActive()) return {...draft};
   const {layers, backing, placement, product, ...common} = draft;
   const [porous, air] = layers;
   const original = openedEntry?.kind === "optimizable" ? openedEntry : {};
@@ -120,7 +121,7 @@ function draftDocument() {
 
 function tuningProblem(entry) {
   if (entry.kind !== "optimizable") return "";
-  if (entry.porous.frame_compression_modulus_pa != null) return "棉厚給程式調時不能填骨架壓縮模數與骨架損耗因數";
+  if (entry.porous.frame_compression_modulus_pa != null) return "多孔層填了骨架兩格就不能給程式調";
   for (const [name, spec] of [["棉厚", entry.porous_thickness], ["空氣深度", entry.cavity]]) {
     if (!spec) continue;
     const [low, high] = spec.range_m;
@@ -141,7 +142,8 @@ function tuningProblem(entry) {
   const sum = (a, b) => a + (b ?? 0);
   const low = sum(entry.porous_thickness.range_m[0], entry.cavity?.range_m[0]);
   const high = sum(entry.porous_thickness.range_m[1], entry.cavity?.range_m[1]);
-  if (cap != null && (cap <= 0 || low > cap || sum(entry.porous.thickness_m, entry.cavity?.initial_m) > cap)) {
+  if (cap != null && cap <= 0) return "總深度上限要大於 0";
+  if (cap != null && (low > cap || sum(entry.porous.thickness_m, entry.cavity?.initial_m) > cap)) {
     return "總深度上限要容得下最薄排法與初值總深";
   }
   if (suggested != null && (suggested <= 0 || suggested < low || suggested > Math.min(high, cap ?? Infinity))) {

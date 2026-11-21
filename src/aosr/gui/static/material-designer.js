@@ -9,6 +9,7 @@ let readOnly = false;
 let isNew = true;
 let curveGeneration = 0;
 let curveTimer;
+const collidingIds = new Set();
 const inactiveFields = new WeakMap();
 const clothFields = ["backing_fabric_surface_mass_kg_m2", "backing_fabric_flow_resistance_pa_s_m"];
 
@@ -43,7 +44,7 @@ function displayNumber(number) {
 }
 
 function thicknessText(layer) {
-  if (layer.kind === "air" && tuningActive() && !layer.thickness_m) return "初值無空腔";
+  if (adjustableAir(layer) && !layer.thickness_m) return "初值無空腔";
   return layer.thickness_m == null ? "" : displayNumber(layer.thickness_m * 1000) + " mm";
 }
 
@@ -260,7 +261,8 @@ function missingLayerField() {
       if (frame.some(key => layer[key] != null)) required.push(...frame);
     }
     const missing = required.find(key => layer[key] == null && fields[key].default == null &&
-      !(layer.kind === "air" && key === "thickness_m" && (tuningActive() || thicknessSpecs.has(layer))));
+      !(key === "thickness_m" && adjustableAir(layer)));
+    if (layer.kind === "air" && missing === "thickness_m") return `第 ${i + 1} 層 空氣層的厚度還沒填`;
     if (missing) return `第 ${i + 1} 層的${fields[missing].label}還沒填`;
   }
   return "";
@@ -363,10 +365,14 @@ function modelNotes(original, notes = []) {
   return [line, ...notes.filter(note => note !== line)];
 }
 
-function makeCopy(original) {
+function copyFields(original, recovered) {
   const saved = listing.materials.find(row => row.entry.id === original.id)?.entry ?? original;
-  draft = {...draft, id: freeId(original.id + "_copy"), label: freeLabel(original.label + "（複本）"), product: false,
+  return {id: recovered?.id ?? freeId(original.id + "_copy", collidingIds), label: freeLabel(original.label + "（複本）", recovered?.id),
     provenance: "model", source: `照「${original.label}」改的`, links: [], notes: modelNotes(saved, original.notes)};
+}
+
+function makeCopy(original) {
+  draft = {...draft, ...copyFields(original), product: false};
   openedEntry = null;
   uncertainCreate = null;
   isNew = true;
@@ -389,7 +395,7 @@ async function initDesigner() {
     draft = freshConstruction();
   } else {
     const row = listing.materials.find(item => item.entry.id === id);
-    if (!row) throw new Error("材料庫找不到這一筆材料");
+    if (!row) throw new Error(listing.user_file_problem || "材料庫找不到這一筆材料");
     const entry = row.entry;
     openedEntry = entry;
     if (entry.kind === "optimizable") {
@@ -418,13 +424,13 @@ async function initDesigner() {
   requestCurve();
 }
 
-async function putConstruction(document) {
+async function putConstruction(document, create) {
   // 斷線時只記這一頁剛送出的那份；收到明確拒收就不是遺失回覆。
-  if (isNew) uncertainCreate = structuredClone(document);
+  if (create) uncertainCreate = structuredClone(document);
   const reply = await api("/api/materials/" + encodeURIComponent(document.id), {method: "PUT",
-    headers: {"Content-Type": "application/json", ...(isNew ? {"If-None-Match": "*"} : {})}, body: JSON.stringify(document)});
+    headers: {"Content-Type": "application/json", ...(create ? {"If-None-Match": "*"} : {})}, body: JSON.stringify(document)});
   if (reply.ok && !reply.body.material_id) throw new Error(reply.body.error || "沒有收到存檔回覆");
-  if (reply.status < 500) uncertainCreate = null;
+  if (reply.ok || (create && reply.status < 500)) uncertainCreate = null;
   return reply;
 }
 
@@ -453,6 +459,7 @@ async function recoverCreate() {
   listing = reply.body;
   const found = listing.materials.find(row => row.entry.id === uncertainCreate.id);
   if (found && !found.builtin && comparableEntry(found.entry) === comparableEntry(uncertainCreate)) {
+    if (!isNew) return found.entry;  // 換種類另存的複本已在檔內，畫面仍編輯原草稿。
     openedEntry = found.entry;
     isNew = false;
   }
@@ -468,41 +475,38 @@ async function saveConstruction() {
   try {
     const missing = missingLayerField();
     if (missing) throw new Error(missing);
-    await recoverCreate();
+    const recovered = await recoverCreate();
     let document = draftDocument();
     const problem = tuningProblem(document);
     if (problem) throw new Error(problem);
-    const kind = document.kind;
-    if (!isNew && kind !== openedEntry.kind) {
+    const switching = !isNew && document.kind !== openedEntry.kind;
+    let copy;
+    if (switching) {
       const names = listing.entry_kind_labels;
-      if (!window.confirm(`這一筆已經存成${names[openedEntry.kind]}，改成${names[kind]}只能另存一份新的；原本那筆不動。`)) return;
-      const product = draft.product;
-      makeCopy(draft);
-      draft.product = product;
-      renderDesigner();
-      document = draftDocument();
-    }
-    if (openedEntry && snapshot() === savedSnapshot) {
+      if (!window.confirm(`這一筆已經存成${names[openedEntry.kind]}，改成${names[document.kind]}只能另存一份新的；原本那筆不動。`)) return;
+      copy = copyFields(draft, recovered?.kind === document.kind ? recovered : null);
+      Object.assign(document, copy);
+    } else if (openedEntry && snapshot() === savedSnapshot) {
       document = structuredClone(openedEntry);
     } else {
       document.provenance = "model";
       if (document.notes || openedEntry?.provenance !== "model") document.notes = modelNotes(openedEntry ?? draft, draft.notes);
     }
-    let reply = await putConstruction(document);
-    if (isNew && reply.status === 409 && reply.body.conflict === "id") {
-      draft.id = document.id = newConstructionId();
-      reply = await putConstruction(document);
+    const create = isNew || (switching && recovered?.kind !== document.kind);
+    let reply = await putConstruction(document, create);
+    if (create && reply.status === 409 && reply.body.conflict === "id") {
+      collidingIds.add(document.id);
+      document.id = newConstructionId();
+      if (isNew) draft.id = document.id;
+      reply = await putConstruction(document, true);
       if (reply.status === 409 && reply.body.conflict === "id") {
-        draft.id = newConstructionId();
+        collidingIds.add(document.id);
+        if (isNew) draft.id = newConstructionId();
         throw new Error("自動編號又重複了，請再按一次儲存。");
       }
     }
     if (!reply.ok) throw new Error(reply.body.error || String(reply.status));
-    if (document.kind === "construction" && document.layers.length !== draft.layers.length) {
-      const currentLayer = draft.layers[selected];
-      draft.layers = document.layers;
-      selected = draft.layers.indexOf(currentLayer);
-    }
+    if (copy) Object.assign(draft, copy);
     draft.id = document.id;
     draft.provenance = document.provenance;
     draft.notes = document.notes;

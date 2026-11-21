@@ -163,3 +163,18 @@ def test_the_curve_fits_a_phone_and_follows_a_resize(tmp_path: Path, browser: Br
         page.set_viewport_size({"width": 1000, "height": 1100})
         page.wait_for_function("document.querySelector('#curve-chart canvas').getBoundingClientRect().width > 500")
         assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_new_optimizable_form_labels_the_initial_curve(tmp_path: Path, browser: Browser) -> None:
+    with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        page.locator("#tab-optimizable").click()
+        page.get_by_role("button", name="新增可最佳化材料").click()
+        page.locator("#provenance").select_option("model")
+        page.locator("#source").fill("自編試片紀錄")
+        page.locator('#porous-fields input[name="flow_resistivity_pa_s_m2"]').fill("14900")
+        page.locator("#curve-redraw").click()
+        expect(page.locator("#curve-chart canvas")).to_be_visible(timeout=COMPUTED_MS)
+        note = page.locator("#curve-arrangement")
+        expect(note).to_be_visible()
+        expect(note).to_contain_text("這條是初值排法")

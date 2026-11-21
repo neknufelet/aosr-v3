@@ -9,7 +9,7 @@ import pytest
 
 from playwright.sync_api import Browser, Dialog, Locator, Page, Response, Route, expect
 
-from aosr.materials.library import SCHEMA_VERSION
+from aosr.materials.library import SCHEMA_VERSION, load_user_library
 from tests.engine._construction_cases import construction
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, browser as browser
@@ -875,20 +875,32 @@ def test_tuning_invalid_choices_initial_and_total_depths_stop_put(tmp_path: Path
         assert not puts
 
 
-def test_switch_kind_keeps_sparse_original_bytes(tmp_path: Path, browser: Browser) -> None:
-    library = tmp_path / "materials.json"
-    record = json.dumps(_tuning_sample(False), ensure_ascii=False, separators=(",", ": ")).encode()
-    library.write_bytes(b'{"materials":[' + record + b'],"schema_version":"' + SCHEMA_VERSION.encode() + b'"}')
-    with _designer(tmp_path, browser) as (page, base):
+@pytest.mark.parametrize("compact", [False, True], ids=["server_bytes", "compact_content"])
+def test_switch_kind_keeps_original_entry(tmp_path: Path, browser: Browser, compact: bool) -> None:
+    folder = tmp_path / "materials"
+    folder.mkdir()
+    library = folder / "materials.json"
+    sample = _tuning_sample(False)
+    if compact:
+        library.write_text(json.dumps({"materials": [sample], "schema_version": SCHEMA_VERSION}, ensure_ascii=False))
+    with _designer(folder, browser) as (page, base):
+        if not compact:
+            assert page.request.put(f"{base}/api/materials/woven_sample", data=sample).ok
+        original, = load_user_library(library)
+        before = library.read_bytes()
         _open_sample(page, base)
         page.get_by_role("switch").click()
         page.once("dialog", lambda dialog: dialog.dismiss())
         page.locator("#save").click()
-        assert list(_stored(page, base)) == ["woven_sample"]
+        assert library.read_bytes() == before
         page.once("dialog", lambda dialog: dialog.accept())
         _save(page, "參數構造")
-        assert _stored(page, base)["woven_sample_copy"]["kind"] == "construction"
-        assert record in library.read_bytes()
+        entries = _stored(page, base)
+        assert entries["woven_sample_copy"]["kind"] == "construction"
+        assert load_user_library(library)[0] == original
+        if not compact:
+            kept = before[:before.rindex(b"\n  ]")]
+            assert library.read_bytes().startswith(kept + b",\n")
 
 
 def test_tuning_save_reports_server_cavity_floor_verbatim(tmp_path: Path, browser: Browser) -> None:
@@ -910,3 +922,72 @@ def test_tuning_save_reports_server_cavity_floor_verbatim(tmp_path: Path, browse
         expect(page.locator("#save-message")).to_have_text(result.value.json()["error"])
         assert (tmp_path / "materials.json").read_bytes() == before
         assert not watched.page_errors and all("400" in line for line in watched.console_errors)
+
+
+@pytest.mark.parametrize("fixed_air", [False, True], ids=["three_layers", "only_porous_adjustable"])
+def test_blank_air_depth_names_layer_before_save(tmp_path: Path, browser: Browser, fixed_air: bool) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        _add(page, "porous", "air")
+        page.get_by_role("switch").nth(1).click()
+        _fields(page, 1)
+        page.locator('[name="thickness_m"]').fill("")
+        if fixed_air:
+            page.get_by_role("switch").nth(1).click()
+            page.get_by_role("switch").first.click()
+            depth = page.locator('[name="thickness_m"]').input_value()
+            page.get_by_label("買得到的厚度（mm）").fill(depth)
+        else:
+            _add(page, "fabric")
+        puts: list[str] = []
+        page.on("request", lambda r: puts.append(r.url) if r.method == "PUT" else None)
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).to_have_text("第 2 層 空氣層的厚度還沒填")
+        assert not puts and _stored(page, base) == {}
+        expect(page.locator("#stack article").nth(1)).to_have_attribute("data-kind", "air")
+        if not fixed_air:
+            _fields(page, 2)
+            page.get_by_role("button", name="拿掉").click()
+        page.get_by_role("switch").nth(1).click()
+        _save(page, "參數構造")
+        saved, = _stored(page, base).values()
+        assert saved["kind"] == "optimizable" and saved["cavity"]["adjustable"] and saved["cavity"]["initial_m"] is None
+
+
+def test_toggling_tuning_keeps_advanced_open_or_closed(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "porous")
+        _fields(page, 0)
+        _advanced(page)
+        page.get_by_role("switch").click()
+        assert page.locator(".advanced").evaluate("n => n.open")
+        page.locator(".advanced summary").click()
+        page.get_by_role("switch").click()
+        assert not page.locator(".advanced").evaluate("n => n.open")
+
+
+def test_retyping_original_values_preserves_payload_and_file(tmp_path: Path, browser: Browser) -> None:
+    folder = tmp_path / "materials"
+    folder.mkdir()
+    library = folder / "materials.json"
+    entry = _tuning_sample() | {"provenance": "literature"}
+    library.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "materials": [entry]}, ensure_ascii=False), encoding="utf-8")
+    before = library.read_bytes()
+    with _designer(folder, browser) as (page, base):
+        original = _stored(page, base)["woven_sample"]
+        _open_sample(page, base)
+        for index, thickness, low, high in [(0, "37", "37", "73"), (1, "27", "0", "90")]:
+            _fields(page, index)
+            for field, value in [(page.locator('[name="thickness_m"]'), thickness),
+                                 (page.get_by_label("範圍下限（mm）"), low), (page.get_by_label("範圍上限（mm）"), high)]:
+                field.fill("42")
+                field.fill(value)
+            if index == 0:
+                page.get_by_label("買得到的厚度（mm）").fill("42")
+                page.get_by_label("買得到的厚度（mm）").fill("37, 73")
+        for label, value in [("總深度上限", "150"), ("建議總深", "85")]:
+            page.get_by_label(label).fill("100")
+            page.get_by_label(label).fill(value)
+        with page.expect_request(lambda r: r.method == "PUT") as sent:
+            _save(page, "參數構造")
+        assert sent.value.post_data == page.evaluate("entry => JSON.stringify(entry)", original)
+        assert library.read_bytes() == before

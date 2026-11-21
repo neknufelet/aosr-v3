@@ -219,17 +219,8 @@ class MaterialStore:
                 "surface_groups": GROUP_WORDS, "surface_group_short": GROUP_SHORT_WORDS,
                 **({"reference_only": reference} if reference is not None else {})}
 
-    def _write(self, entries: tuple[LibraryEntry, ...], *, append: bool = False) -> None:
-        if append:
-            # 鎖內已讀過並驗證 v1：最外層只有版本字串和 materials 陣列。
-            # 從單筆的正式輸出取陣列內文，接在現有非空陣列尾端，保留每筆舊資料的位元。
-            original = self.path.read_bytes().decode("utf-8")
-            end = original.rindex("]")
-            single = dump_user_library(entries[-1:])
-            addition = single[single.index("[") + 1:single.rindex("]")]
-            text = original[:end].rstrip() + "," + addition + original[end:]
-        else:
-            text = dump_user_library(entries)
+    def _write(self, entries: tuple[LibraryEntry, ...]) -> None:
+        text = dump_user_library(entries)
         descriptor, name = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp")
         temporary = Path(name)
         try:
@@ -249,29 +240,35 @@ class MaterialStore:
             raise MaterialEditError(plain_error(exc)) from exc
         if entry.id != material_id:
             raise MaterialEditError(f"網址的代號 {material_id} 跟材料內文的代號 {entry.id} 不一樣")
-        if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
-            floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0], adjustable=entry.cavity.adjustable)
-            if floor is not None:
-                raise MaterialEditError(floor)
         with self._lock:
             current = self._user_entries()
-            ids = [item.id for item in current]
+            existing = next((item for item in current if item.id == material_id), None)
             taken = next((item for item in (*builtin_entries(), *current)
                           if item.id != material_id and item.label == entry.label), None)
+            if existing and existing.kind != entry.kind:
+                old, new = ENTRY_KIND_LABELS[existing.kind], ENTRY_KIND_LABELS[entry.kind]
+                collision = create and taken is None and existing.label != entry.label
+                raise MaterialEditError(f"這一筆已經存成{old}，不能直接改成{new}；要換就複製一份", 409,
+                                        conflict="id" if collision else None)
             if taken is not None:
                 raise MaterialEditError(f"已有材料使用名稱「{taken.label}」，請換一個名稱", 409)
-            if create and material_id in ids:
-                existing = current[ids.index(material_id)]
+            if create and existing:
                 if existing.label == entry.label:
                     raise MaterialEditError(f"已有材料使用名稱「{existing.label}」，請重新打開或複製一份", 409)
                 raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409, conflict="id")
+            if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
+                if not entry.cavity.adjustable and entry.cavity.initial_m is None:
+                    raise MaterialEditError("第 2 層 空氣層的厚度還沒填")
+                floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0], adjustable=entry.cavity.adjustable)
+                if floor is not None:
+                    raise MaterialEditError(floor)
             # 設計器原樣存回時，保留舊檔本身的空白、鍵順序與省略的選填欄位。
-            if isinstance(entry, OptimizableEntry) and material_id in ids and current[ids.index(material_id)] == entry:
+            if isinstance(entry, OptimizableEntry) and existing == entry:
                 return entry
-            entries = (tuple(entry if item.id == material_id else item for item in current) if material_id in ids
+            entries = (tuple(entry if item.id == material_id else item for item in current) if existing
                        else (*current, entry))
             try:
-                self._write(entries, append=create and bool(current))
+                self._write(entries)
             except (ValueError, ValidationError) as exc:
                 raise MaterialEditError(plain_error(exc)) from exc
         return entry
