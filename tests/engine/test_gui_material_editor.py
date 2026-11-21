@@ -105,7 +105,9 @@ def _unchanged_after(tmp_path: Path, request: str, path: str, body: object, head
     ("刪內建", "POST", f"/api/materials/{builtin_entries()[-1].id}/delete", {}, None, 403, "內建材料唯讀"),
     ("網址代號對不上", "PUT", "/api/materials/other", _fixed(_assembly(), "mine", "我的"), None, 400, "網址的代號 other"),
     ("新增撞到已有代號", "PUT", "/api/materials/keep", _fixed(_assembly(), "keep", "另一個"), CREATE, 409, "已經有代號 keep"),
-    ("顯示名撞內建", "PUT", "/api/materials/mine", _fixed(_assembly(), "mine", builtin_entries()[0].label), None, 409, "已經被代號"),
+    ("兩頁新增同名同代號", "PUT", "/api/materials/keep", _fixed(_assembly(), "keep", "留著"), CREATE, 409,
+     "已有材料使用名稱「留著」，請重新打開或複製一份"),
+    ("顯示名撞內建", "PUT", "/api/materials/mine", _fixed(_assembly(), "mine", builtin_entries()[0].label), None, 409, f"已有材料使用名稱「{builtin_entries()[0].label}」，請換一個名稱"),
     ("檢查不過", "PUT", "/api/materials/mine", _fixed(_assembly(-0.05), "mine", "我的"), None, 400, "多層構造›第 1 層›多孔層›層厚度：要大於 0"),
     ("刪不存在的", "POST", "/api/materials/nothing/delete", {}, None, 404, "沒有這筆使用者材料"),
 ])
@@ -115,6 +117,8 @@ def test_refused_saves_and_deletes_leave_the_file_byte_identical(
 ) -> None:
     code, message = _unchanged_after(tmp_path, request_kind, path, body, headers)
     assert (code, words in message) == (status, True), (case, message)
+    if case in ("顯示名撞內建", "兩頁新增同名同代號"):
+        assert message == words
 
 
 def test_deleting_a_user_material_removes_only_that_one(tmp_path: Path) -> None:
@@ -157,13 +161,13 @@ def test_measured_tables_with_and_without_imaginary_parts_round_trip_with_their_
 def test_the_page_and_its_static_files_are_served(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         page = client.get("/materials")
-        assets = [client.get(f"/static/{name}") for name in ("material-cutaway.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", *(path.removeprefix(STATIC) for path in CHART_LIBRARY))]
+        assets = [client.get(f"/static/{name}") for name in ("material-cutaway.js", "material-ui.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", *(path.removeprefix(STATIC) for path in CHART_LIBRARY))]
         home = client.get("/")
     assert page.status_code == 200
     # 段 2-2b 起多載入畫吸音曲線的圖表庫（跟結果頁同一份內附檔）
     assert re.findall(r'<script src="/static/([^"]+)"', page.text) == [
-        CHART_LIBRARY[0].removeprefix(STATIC), "material-cutaway.js", "material-list.js", "material-elements.js", "materials.js"]
-    assert [asset.status_code for asset in assets] == [200] * 7
+        CHART_LIBRARY[0].removeprefix(STATIC), "material-cutaway.js", "material-ui.js", "material-list.js", "material-elements.js", "materials.js"]
+    assert [asset.status_code for asset in assets] == [200] * 8
     assert 'href="/materials"' in home.text
 
 

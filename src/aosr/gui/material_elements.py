@@ -9,6 +9,7 @@ from typing import cast
 from aosr.config.material_gradient import MaterialGradientSettings
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import KomatsuRanges, load_porous_model_ranges
+from aosr.gui.material_names import family_display_name
 from aosr.gui.problem_text import MATERIAL_MODELS, _enum_word, kind_word, material_form_spec
 from aosr.materials.construction_models import Assembly, Layer, PorousLayer
 from aosr.materials.library import PROVENANCE_LABELS, builtin_entries, fixed_surface
@@ -49,18 +50,19 @@ class Element:
     kind: str
     name: str
     parameters: list[str]
+    first_layer: dict[str, object] | None = None
     material_class: str | None = None
     range_title: str = "還沒填範圍"
     ranges: list[str] = field(default_factory=list)
     spec_title: str = "還沒填規格"
     families: dict[str, tuple[float, ...]] = field(default_factory=dict)
-    template_note: str = "內建樣板："
+    template_note: str = "用這組物性的內建樣板："
     templates: dict[str, list[str]] = field(default_factory=dict)
     provenance: list[str] = field(default_factory=list)
     flow_sources: dict[str, list[str]] = field(default_factory=dict)
 
     def payload(self) -> dict[str, object]:
-        return asdict(self) | {"flow_sources": [f"流阻：{source}（{'、'.join(labels)}）" for source, labels in self.flow_sources.items()]}
+        return asdict(self) | {"flow_sources": [f"流阻：{source}，樣板：{'、'.join(labels)}" for source, labels in self.flow_sources.items()]}
 
 
 def _research_word(key: str, value: str, fallback: str) -> str:
@@ -106,6 +108,8 @@ def _element(kind: str, identity: Identity, fields: Fields) -> Element:
 
 def _record_layer(row: Element, layer: Layer, fields: Fields, label: str, provenance: str) -> None:
     data = layer.model_dump()
+    if row.first_layer is None:
+        row.first_layer = data
     sizes = row.templates.setdefault(label, [])
     size = "、".join(_word(fields, k, data[k]) for k in _DIMENSIONS[row.kind] if k in data)
     if size and size not in sizes:
@@ -140,7 +144,7 @@ def material_elements(settings: MaterialGradientSettings) -> dict[str, object]:
     groups: dict[str, dict[Identity, Element]] = {kind: {} for kind in _DIMENSIONS}
     entries = builtin_entries()
     family_ids = {family.id for family in settings.family}
-    family_labels = {entry.id: entry.label.partition("（")[0] for entry in entries if entry.id in family_ids}
+    family_labels = {entry.id: family_display_name(entry.label) for entry in entries if entry.id in family_ids}
     template_families = {family.template_preset: family for family in settings.family}
     for entry in entries:
         surface = fixed_surface(entry)
@@ -175,4 +179,4 @@ def material_elements(settings: MaterialGradientSettings) -> dict[str, object]:
             _set_range(row, dict(identity), research)
             rows.append(row)
     _distinguish_names(rows)
-    return {"elements": [row.payload() for row in rows], "family_labels": family_labels, "provenance_labels": PROVENANCE_LABELS}
+    return {"elements": [row.payload() for row in rows], "dimension_fields": _DIMENSIONS, "family_labels": family_labels, "provenance_labels": PROVENANCE_LABELS}

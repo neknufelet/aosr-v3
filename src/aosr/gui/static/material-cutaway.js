@@ -12,13 +12,14 @@ function materialTexture(kind, materialClass) {
   return {micro_perforated: "mpp", perforated: "perf", slotted: "slot"}[kind] || kind;
 }
 
-function materialCutaway(layers, backing, description) {
+function materialCutaway(layers, backing, description, selection = null) {
   const svg = materialSvg("svg", {class: "cutaway", role: "img", "aria-label": "剖面：" + description});
   const title = materialSvg("title", {});
   title.textContent = description;
   svg.append(title);
-  const slabs = layers.map(layer => ({...layer, width: Math.max(3, (4 + 3 * Math.pow(layer.mm, .8)) * .33)}));
-  if (backing === "rigid") slabs.push({texture: "wall", width: 8});
+  const scale = Math.min(1, 150 / (layers.reduce((sum, layer) => sum + Math.max(0, layer.mm), 0) || 1));
+  const slabs = layers.map(layer => ({...layer, width: selection ? Math.max(5, layer.mm * scale) : Math.max(3, (4 + 3 * Math.pow(layer.mm, .8)) * .33)}));
+  if (backing === "rigid" || (selection && backing === "zone_wall")) slabs.push({texture: "wall", width: 8});
   if (!slabs.length) {
     svg.setAttribute("viewBox", "0 0 96 68");
     svg.setAttribute("width", 96);
@@ -50,6 +51,15 @@ function materialCutaway(layers, backing, description) {
       materialSvg("polygon", {points: `${x},${top} ${x+width},${top} ${x+width-26},${top-13} ${x-26},${top-13}`}),
       materialSvg("rect", {x, y: top, width, height: bottom-top}));
     if (texture === "air") group.setAttribute("fill-opacity", ".7");
+    if (texture === "wall" && backing === "zone_wall") group.setAttribute("opacity", ".42");
+    if (selection && i < layers.length) {
+      group.dataset.layer = String(i);
+      group.setAttribute("class", i === selection.index ? "picked" : "");
+      const label = materialSvg("title", {});
+      label.textContent = layers[i].name;
+      group.append(label);
+      group.addEventListener("click", () => selection.pick(i));
+    }
     svg.append(group);
   }
   return svg;

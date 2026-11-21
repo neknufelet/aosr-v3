@@ -3,34 +3,13 @@
 // 長度一律公尺，不在畫面換成公厘再換回來（來回換算會讓存回去的數字跟原本差末位）。
 
 const LAYER_SKIP = new Set(["kind"]);
-let listing = null;
 let current = null; // {entry, builtin, isNew}
 // 有一個存檔還在路上：這段時間打開別筆也不點亮「儲存」，一次只有一個存檔在路上。
 let saving = false;
 
-function el(tag, attributes = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [name, value] of Object.entries(attributes)) {
-    if (value === false || value === null || value === undefined) continue;
-    if (name === "text") node.textContent = value;
-    else if (name === "on") for (const [event, handler] of Object.entries(value)) node.addEventListener(event, handler);
-    else node.setAttribute(name, value === true ? "" : String(value));
-  }
-  for (const child of children) if (child !== null && child !== undefined) node.append(child);
-  return node;
-}
-
-const byId = (id) => document.getElementById(id);
 const form = () => listing.material_form;
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const shown = (value) => (value === null || value === undefined ? "" : String(value));
-
-async function api(path, options = {}) {
-  const reply = await fetch(path, options);
-  let body;
-  try { body = await reply.json(); } catch { body = {error: `伺服器回的不是 JSON（狀態 ${reply.status}）`}; }
-  return {ok: reply.ok, status: reply.status, body};
-}
 
 // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）：清單列得出來、可以刪；這一頁還不能看內容與編輯。
 function tunableLayers(entry) { return entry.kind === "tunable_layers"; }
@@ -59,23 +38,11 @@ async function loadListing() {
   const problem = listing.user_file_problem;
   byId("file-problem").hidden = !problem;
   byId("file-problem").textContent = problem ? `${problem}（修好之前不能存、不能刪）` : "";
-  for (const id of ["new-optimizable", "new-fixed"]) byId(id).disabled = Boolean(problem);
+  for (const id of ["new-optimizable", "new-fixed", "new-construction"]) byId(id).disabled = Boolean(problem);
   const mine = rows.filter((row) => !row.builtin).length;
   byId("list-state").textContent = `內建 ${rows.length - mine} 筆、我的材料 ${mine} 筆`;
   byId("list-state").className = "";
   return true;
-}
-
-function freeId(base) {
-  const taken = new Set(listing.materials.map((row) => row.entry.id));
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
-}
-
-function freeLabel(base) {
-  const taken = new Set(listing.materials.map((row) => row.entry.label));
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
 }
 
 function defaultsFor(kind) {
@@ -317,11 +284,6 @@ function pointsText(points) {
 }
 
 function fixedBlock(entry, readonly) {
-  if (entry.kind === "construction") {
-    const block = el("div", {class: "block"}, el("h3", {text: kindText(entry)}),
-      layerEditor("construction-layers", entry.layers, true));
-    return {block, after: () => {}};
-  }
   const material = entry.material;
   const kindSelect = el("select", {id: "fixed-kind", disabled: readonly});
   for (const kind of listing.fixed_kinds) kindSelect.append(el("option", {value: kind, text: form()[kind].label}));
@@ -357,65 +319,14 @@ function fixedBlock(entry, readonly) {
 // ---- 吸音曲線、數字來源、可信範圍提醒（段 2-2b） ----
 // 曲線與提醒全由伺服器現算（同一套物理）；這裡只畫圖、照實印。標語也由伺服器從送去的內文判，不在這裡自己猜。
 
-let plot = null;
 let curveTicket = 0;
 let curveReply = null; // 畫面上正在顯示的那一份回應（畫好的、或講為什麼沒畫的）
 let curveDirty = false; // 送出那一份之後表單又改過：晚到的回應不准把「表單改過」的提示清掉
 const STALE = "表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。";
-const SPAN_FILL = {extrapolation: "rgba(230,140,40,0.22)", model_fill: "rgba(110,125,135,0.2)"};
-
-function destroyPlot() {
-  if (plot) plot.destroy();
-  plot = null;
-  byId("curve-chart").replaceChildren();
-}
 
 function curveState(text, kind) {
   byId("curve-state").textContent = text;
   byId("curve-state").className = kind;
-}
-
-function chartWidth() {
-  return Math.max(byId("curve-chart").clientWidth, 240);
-}
-
-// 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下打淡藍底，頂端內側一行小字。字與界線都是伺服器給的（reply.reference_only）。
-// 藍底是疊在圖上的兩個元素（不是畫在畫布上）：每次重畫照橫軸現在的位置重放，界線在橫軸左端以外就不放。
-function placeBand(u, reference) {
-  const over = u.over;
-  let band = over.querySelector(".ref-band"), word = over.querySelector(".ref-band-word");
-  if (!band) {
-    band = el("div", {class: "ref-band", id: "curve-ref-band"}); word = el("div", {class: "ref-band-word", id: "curve-ref-band-word"});
-    over.append(band, word);
-  }
-  const right = Math.min(u.valToPos(reference.band_hz, "x"), over.clientWidth);
-  band.hidden = word.hidden = !(right > 0);
-  band.style.width = `${Math.max(right, 0)}px`;
-  band.dataset.hz = String(reference.band_hz);
-  word.textContent = reference.band_words;
-}
-
-function drawPlot(reply) {
-  destroyPlot();
-  const spans = reply.spans;
-  const reference = reply.reference_only || null;
-  // 底色畫在清畫布之後、畫線之前；頭尾同一點時至少畫 2 像素寬，看得到。
-  const shade = (u) => {
-    const ctx = u.ctx, box = u.bbox;
-    ctx.save();
-    for (const span of spans) {
-      const left = u.valToPos(span.low_hz, "x", true), right = u.valToPos(span.high_hz, "x", true);
-      ctx.fillStyle = SPAN_FILL[span.kind];
-      ctx.fillRect(left, box.top, Math.max(right - left, 2 * devicePixelRatio), box.height);
-    }
-    ctx.restore();
-  };
-  plot = new uPlot({width: chartWidth(), height: 320, legend: {show: false},
-    scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}, y: {range: [0, 1]}},
-    axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}],
-    series: [{}, {label: "吸音係數", stroke: "#15617b", width: 2, points: {show: false}}],
-    hooks: {drawClear: [shade], draw: reference ? [(u) => placeBand(u, reference)] : []}},
-    [reply.frequencies_hz, reply.absorption], byId("curve-chart"));
 }
 
 function showLabels(reply) {
@@ -449,26 +360,14 @@ function clearCurve() {
   curveReply = null;
 }
 
-// 圖例那一行（#1208）：色塊、「藍底：」、那一句、「為什麼」（點開才看得到原因）。
-function referenceNote(reference) {
-  const more = el("details", {id: "curve-ref-why"}, el("summary", {text: "為什麼"}), el("p", {text: reference.why_only}));
-  return el("li", {class: "ref-note", id: "curve-ref-note", "data-kind": "reference_only"},
-    el("span", {class: "ref-sw"}), "藍底：", el("span", {class: "ref-say", text: reference.sentence}), more);
-}
-
 function showCurve(reply) {
   showLabels(reply);
   const drawn = reply.status === "drawn";
   // 「鋼板直接貼在棉上」的構造：圖例多一行（有圖才有藍底可講），「種類」那一行後面接一句（沒有圖也接）。換一筆、重畫都重放。
   const reference = reply.reference_only || null;
-  byId("curve-ref-note")?.remove();
+  showPlotKey(reply);
   byId("editor-kind-ref")?.remove();
-  if (reference && drawn) byId("curve-key").prepend(referenceNote(reference));
   if (reference && byId("editor-kind")) byId("editor-kind").append(el("span", {class: "ref-kind", id: "editor-kind-ref", text: reference.kind_words}));
-  byId("curve-key").hidden = !drawn || !(reply.spans.length || reference);
-  // 底色說明只列圖上真的有的那幾種。
-  const kinds = new Set(drawn ? [...reply.spans.map((span) => span.kind), ...(reference ? ["reference_only"] : [])] : []);
-  for (const item of byId("curve-key").querySelectorAll("li")) item.hidden = !kinds.has(item.dataset.kind);
   byId("curve-warnings").replaceChildren(...(drawn ? reply.warnings : []).map((line) =>
     el("li", {class: line.level, "data-code": line.code, text: line.text})));
   byId("curve-axis").textContent = drawn ? reply.axis_text : "";
@@ -519,14 +418,13 @@ let parts = null;
 
 function openEntry(row, isNew, scroll = true) {
   const entry = row.entry;
-  const construction = entry.kind === "construction";
-  const readonly = row.builtin || (construction && !isNew);
+  const assembly = entry.kind === "fixed" && entry.material.kind === "assembly";
+  const readonly = row.builtin;
   current = {entry, builtin: row.builtin, isNew};
   byId("editor-title").textContent = isNew ? `新材料：${entry.label}` : `${row.builtin ? "內建材料" : "我的材料"}：${entry.label}`;
   byId("editor-readonly").hidden = !row.builtin;
   const kindBlock = entry.kind === "optimizable" ? optimizableBlock(entry, readonly) : fixedBlock(entry, readonly);
-  const kind = construction ? kindText(entry) + "（構造內容唯讀）"
-    : entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）"
+  const kind = entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）"
     : listing.entry_kind_labels.fixed + "（整塊選或不選）";
   parts = kindBlock;
   byId("editor-body").replaceChildren(
@@ -535,6 +433,8 @@ function openEntry(row, isNew, scroll = true) {
   kindBlock.after();
   byId("save").hidden = readonly;
   byId("save").disabled = saving || Boolean(listing.user_file_problem);
+  byId("copy-to-designer").hidden = isNew || !assembly;
+  byId("copy-to-designer").disabled = Boolean(listing.user_file_problem);
   byId("copy").hidden = isNew;
   byId("copy").disabled = Boolean(listing.user_file_problem);
   byId("editor").hidden = false;
@@ -559,7 +459,6 @@ function collect() {
   const document = {...base, id: byId("material-id").value.trim(), label: byId("material-label").value.trim(),
                     provenance: byId("provenance").value || null, source: byId("source").value.trim(),
                     links: keptLines("links", base.links), notes: keptLines("notes", base.notes)};
-  if (document.kind === "construction") return document;
   if (document.kind === "optimizable") {
     const adjustable = byId("porous-adjustable").checked;
     const thickness = adjustable ? readNumber("porous-initial") : readNumber("porous-thickness");
@@ -649,6 +548,8 @@ async function save() {
   }
 }
 
+byId("copy-to-designer").addEventListener("click", () => location.assign(designerUrl(current.entry.id, true)));
+byId("new-construction").addEventListener("click", () => location.assign("/materials/designer"));
 byId("new-optimizable").addEventListener("click", () => { openEntry({entry: newEntry("optimizable"), builtin: false}, true); say("新材料，還沒存。", ""); });
 byId("new-fixed").addEventListener("click", () => { openEntry({entry: newEntry("fixed"), builtin: false}, true); say("新材料，還沒存。", ""); });
 byId("save").addEventListener("click", save);
@@ -663,5 +564,6 @@ function resizeEditorPlot() {
 }
 window.addEventListener("resize", resizeEditorPlot);
 initCatalog();
+if (location.hash === "#param") selectCatalog("optimizable");
 void loadElements();
 loadListing().catch((error) => { byId("list-state").textContent = `讀不到材料庫：${error.message}`; byId("list-state").className = "notice"; });

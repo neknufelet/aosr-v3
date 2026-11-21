@@ -72,9 +72,10 @@ _TYPE_WORDS: Final = {
 class MaterialEditError(ValueError):
     """存或刪不成的原因（中文）；``status`` 是要回的狀態碼。"""
 
-    def __init__(self, message: str, status: int = 400) -> None:
+    def __init__(self, message: str, status: int = 400, *, conflict: str | None = None) -> None:
         super().__init__(message)
         self.status = status
+        self.conflict = conflict
 
 
 def user_library_path(data_dir: Path) -> Path:
@@ -246,12 +247,15 @@ class MaterialStore:
         with self._lock:
             current = self._user_entries()
             ids = [item.id for item in current]
-            if create and material_id in ids:
-                raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409)
             taken = next((item for item in (*builtin_entries(), *current)
                           if item.id != material_id and item.label == entry.label), None)
             if taken is not None:
-                raise MaterialEditError(f"顯示名「{entry.label}」已經被代號 {taken.id} 用了，換一個顯示名", 409)
+                raise MaterialEditError(f"已有材料使用名稱「{taken.label}」，請換一個名稱", 409)
+            if create and material_id in ids:
+                existing = current[ids.index(material_id)]
+                if existing.label == entry.label:
+                    raise MaterialEditError(f"已有材料使用名稱「{existing.label}」，請重新打開或複製一份", 409)
+                raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409, conflict="id")
             entries = (tuple(entry if item.id == material_id else item for item in current) if material_id in ids
                        else (*current, entry))
             try:
@@ -276,10 +280,16 @@ def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradie
     store = MaterialStore(data_dir, search_settings)
 
     def failed(exc: MaterialEditError) -> JSONResponse:
-        return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        body = {"error": str(exc)}
+        if exc.conflict:
+            body["conflict"] = exc.conflict
+        return JSONResponse(body, status_code=exc.status)
 
     async def page(request: Request) -> Response:
         return FileResponse(PAGE, media_type="text/html")
+
+    async def designer(request: Request) -> Response:
+        return FileResponse(PAGE.with_name("material-designer.html"), media_type="text/html")
 
     async def listing(request: Request) -> Response:
         return JSONResponse(await run_in_threadpool(store.listing))
@@ -304,6 +314,6 @@ def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradie
             return failed(exc)
         return JSONResponse({"material_id": request.path_params["material_id"], "message": "材料已刪除"})
 
-    return [Route("/materials", page), Route("/api/materials", listing), Route("/api/material-elements", elements),
+    return [Route("/materials", page), Route("/materials/designer", designer), Route("/api/materials", listing), Route("/api/material-elements", elements),
             Route("/api/materials/{material_id}", item, methods=["PUT"]),
             Route("/api/materials/{material_id}/delete", delete, methods=["POST"])]

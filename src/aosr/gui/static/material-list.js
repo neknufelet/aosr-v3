@@ -3,7 +3,6 @@
 const entryKinds = ["fixed", "optimizable"];
 const catalogKinds = [...entryKinds, "elements"];
 const PREVIEW_TIMEOUT_MS = 60_000;
-const SMALL_CURVE_HZ = {low: 31.5, high: 2000};
 const previewCache = new Map();
 let pendingPreviews = [];
 let drawingPreview = false;
@@ -34,51 +33,8 @@ function sourceBadge(key, labels = listing.provenance_labels) {
   return el("span", {class: "source-badge " + key}, el("i", {"aria-hidden": "true"}), labels[key]);
 }
 
-function overlapsSmallCurve(span) {
-  return span.high_hz >= SMALL_CURVE_HZ.low && span.low_hz <= SMALL_CURVE_HZ.high;
-}
-
 function needsPreviewBadge(result) {
   return result.spans.some(overlapsSmallCurve) || result.warnings.some(line => line.level !== "note") || Boolean(result.reference_only);
-}
-
-// 取現有無規入射曲線的同一段對數頻軸，縱軸一律 0～1。實測表只在表內原有頻點加點。
-function smallCurve(entry, result) {
-  const w = 168, h = 56;
-  const {low, high} = SMALL_CURVE_HZ;
-  const x = hz => 2 + (w - 4) * Math.log(hz / low) / Math.log(high / low);
-  const y = alpha => 2 + (h - 4) * (1 - alpha);
-  const svg = materialSvg("svg", {class: "curve " + entry.provenance, viewBox: `0 0 ${w} ${h}`,
-    role: "img", "aria-label": "無規入射吸音曲線，31.5 Hz 至 2 kHz，吸音率 0 至 1"});
-  if (result.reference_only && result.reference_only.band_hz > low) {
-    svg.append(materialSvg("rect", {class: "reference-only", width: x(Math.min(result.reference_only.band_hz, high)),
-      height: h, fill: "rgba(60,120,210,.16)"}));
-  }
-  // 用同一條曲線，遮罩只淡化被標記的頻段；橘／灰底對應提醒原文中的顏色。
-  const maskId = "preview-spans-" + entry.id;
-  const mask = materialSvg("mask", {id: maskId, maskUnits: "userSpaceOnUse", x: 0, y: 0, width: w, height: h});
-  mask.append(materialSvg("rect", {width: w, height: h, fill: "white"}));
-  for (const span of result.spans) {
-    if (!overlapsSmallCurve(span)) continue;
-    const left = x(Math.max(low, span.low_hz)), right = x(Math.min(high, span.high_hz));
-    const rect = {x: left, width: Math.max(2, right - left), height: h};
-    mask.append(materialSvg("rect", {...rect, "data-kind": span.kind, fill: "#888"}));
-    svg.append(materialSvg("rect", {...rect, fill: SPAN_FILL[span.kind]}));
-  }
-  svg.append(mask);
-  for (const hz of [63, 125, 250, 500, 1000]) svg.append(materialSvg("line", {x1:x(hz), x2:x(hz), y1:0, y2:h}));
-  svg.append(materialSvg("line", {x1:0, x2:w, y1:y(.5), y2:y(.5)}));
-  const measured = new Set(entry.material?.points?.map(p => p.frequency_hz));
-  const points = [];
-  for (const [index, hz] of result.frequencies_hz.entries()) {
-    // 多留左右各一點，由 SVG 視窗裁切，避免軸端取最近頻點而出現空隙。
-    if (result.frequencies_hz[index + 1] < low || result.frequencies_hz[index - 1] > high) continue;
-    const cx = x(hz).toFixed(2), cy = y(result.absorption[index]).toFixed(2);
-    points.push(cx + "," + cy);
-    if (entry.provenance === "measured" && measured.has(hz)) svg.append(materialSvg("circle", {cx, cy, r: 2.4}));
-  }
-  svg.append(materialSvg("polyline", {points: points.join(" "), fill: "none", stroke: "currentColor", "stroke-width": 2, mask: `url(#${maskId})`}));
-  return svg;
 }
 
 function showPreview(box, {svg, warnings, showBadge}) {
@@ -141,7 +97,11 @@ function catalogRow(row, previews) {
   previews.push({entry, box});
   const actions = el("div", {class: "catalog-actions"});
   if (tunableLayers(entry)) actions.append(el("small", {text: "這一頁還不能看內容與編輯"}));
-  else actions.append(el("button", {type: "button", class: "open", text: "打開", on: {click: () => openEntry(row, false)}}),
+  else if (entry.kind === "construction") {
+    actions.append(el("button", {class: "open", text: "打開", on: {click: () => location.assign(designerUrl(entry.id))}}),
+      el("button", {class: "copy quiet", text: "複製到設計器", disabled: !!listing.user_file_problem,
+        on: {click: () => location.assign(designerUrl(entry.id, true))}}));
+  } else actions.append(el("button", {type: "button", class: "open", text: "打開", on: {click: () => openEntry(row, false)}}),
     el("button", {type: "button", class: "copy quiet", text: "複製", disabled: !!listing.user_file_problem, on: {click: () => copyEntry(entry)}}));
   if (!builtin) actions.append(el("button", {type: "button", class: "delete danger", text: "刪除", on: {click: () => deleteEntry(entry)}}));
   const details = el("dl");
@@ -155,7 +115,8 @@ function catalogRow(row, previews) {
   return el("article", {class: "material-item", "data-id": entry.id},
     el("div", {class: "catalog-grid"},
       materialCutaway(layers, backing, section),
-      el("div", {class: "material-name"}, el("strong", {text: entry.label}),
+      el("div", {class: "material-name"}, el("strong", {}, entry.kind === "construction" ?
+        el("a", {href: designerUrl(entry.id), text: entry.label}) : entry.label),
         el("div", {class:"material-depth"}, "總厚 ", el("b", {text: total}), note),
         entry.kind === "construction" ? el("small", {text: backingWords(backing)}) : null, builtin ? el("small", {text: "內建・唯讀"}) : null),
       box, el("div", {class:"source-cell"}, sourceBadge(entry.provenance)),

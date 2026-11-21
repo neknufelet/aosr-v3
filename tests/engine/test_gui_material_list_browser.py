@@ -205,15 +205,26 @@ def test_materials_page_lists_old_product_and_three_construction_backings(tmp_pa
                 if identifier == "panel_zone_wall":
                     expect(row.get_by_text("背後接原牆", exact=True)).to_be_visible()
                 row.get_by_role("button", name="打開").click()
-                expect(page.locator("#material-label")).to_be_disabled()
-                expect(page.locator("#save")).to_be_hidden()
+                name = page.get_by_label("名稱", exact=True)
+                if tab == "fixed":
+                    expect(name).to_be_disabled()
+                    expect(page.locator("#save")).to_be_hidden()
+                else:
+                    expect(name).to_be_editable()
+                    expect(page.locator("#save")).to_be_visible()
+                page.goto(f"{base}/materials")
+                page.locator(f"#tab-{tab}").click()
         row.get_by_role("button", name="複製").click()
         page.locator("#save").click()
+        expect(page.locator("#save-message")).to_contain_text("已存到「參數構造」頁")
+        page.goto(f"{base}/materials#param")
         copy = panel.locator('[data-id="panel_zone_wall_copy"]')
         expect(copy).to_be_visible()
         stored = page.request.get(f"{base}/api/materials").json()["materials"]
         entries = {item["entry"]["id"]: item["entry"] for item in stored}
-        assert entries["panel_zone_wall_copy"] == {**entries["panel_zone_wall"], "id": "panel_zone_wall_copy", "label": "原牆布面（複本）"}
+        assert entries["panel_zone_wall_copy"] == {**entries["panel_zone_wall"], "id": "panel_zone_wall_copy", "label": "原牆布面（複本）",
+            "source": "照「原牆布面」改的", "provenance": "model", "links": [],
+            "notes": ["原來源：文獻，出處：考卷自編，網址：https://example.org/test", "自編條件"]}
         page.once("dialog", lambda dialog: dialog.accept())
         copy.get_by_role("button", name="刪除").click()
         expect(copy).to_have_count(0)

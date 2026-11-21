@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>材料設計器</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/static/materials.css">
+  <link rel="stylesheet" href="/static/material-designer.css">
+  <script defer src="/static/vendor/uplot/uPlot.iife.min.js"></script>
+  <script defer src="/static/material-cutaway.js"></script>
+  <script defer src="/static/material-ui.js"></script>
+  <script defer src="/static/material-designer.js"></script>
+</head>
+<body><main>
+  <header>
+    <nav aria-label="麵包屑"><a href="/materials">材料庫</a> › <a href="/materials#param">參數構造</a> › 設計器</nav>
+    <input id="name" aria-label="名稱" disabled>
+    <p id="entry-status" role="status">正在讀取材料…</p>
+  </header>
+  <div id="workspace" hidden>
+    <div class="halves">
+      <section>
+        <h2>疊層 <small>點一層查看或修改參數</small></h2>
+        <div class="end">房間側</div>
+        <div id="stack"></div>
+        <div class="add"><strong>加一層</strong> <small>新層會放在最靠牆的位置</small><div id="palette"></div></div>
+        <fieldset class="backs"><legend>背後</legend>
+          <div class="back-options">
+            <label><span><input type="radio" name="backing" value="rigid"> 硬牆</span><small>當成完全不動的牆（例如混凝土）。</small></label>
+            <label><span><input type="radio" name="backing" value="air"> 空氣</span><small>後面是空的。</small></label>
+            <label><span><input type="radio" name="backing" value="zone_wall"> 這一區原本的牆</span><small>貼到哪一區，就接那一區原本的牆（例如輕隔間）；預覽曲線先當硬牆算。</small></label>
+          </div>
+        </fieldset>
+        <div class="end">牆側</div>
+      </section>
+      <section>
+        <h2>示意圖 <small>示意，不是計算結果</small></h2>
+        <div id="figure"></div>
+        <div id="figure-key"></div>
+        <p class="hint">從房間側往牆側看。點一層可查看參數，薄層以最小寬度顯示。</p>
+        <div class="performance">
+          <div><h3>吸音曲線</h3><div id="curve"><span id="curve-state" role="status"></span><div id="curve-chart"></div></div>
+            <ul id="curve-key" class="hint" hidden></ul>
+            <div id="curve-basis"></div><div id="condition"></div><details id="curve-notes" hidden><summary>曲線提醒</summary><ul></ul></details></div>
+          <div><h3>性能表</h3><table><tbody><tr><th>總厚</th><td id="total"></td></tr><tr><th>數據來源</th><td id="source"></td></tr></tbody></table></div>
+        </div>
+      </section>
+    </div>
+    <section><fieldset class="where"><legend>能貼在哪</legend>
+      <label><input type="radio" name="placement" value="wall"> 牆</label>
+      <label><input type="radio" name="placement" value="ceiling_build"> 天花</label>
+      <label><input type="radio" name="placement" value="floor"> 地板</label>
+      <label><input type="radio" name="placement" value="door_window"> 門窗</label>
+    </fieldset></section>
+    <section class="citation"><details><summary>出處與註記</summary>
+      <p>數據來源　<strong id="citation-provenance"></strong></p>
+      <label>出處文字<input id="citation-source"></label>
+      <label>網址（每行一個）<textarea id="citation-links" rows="2"></textarea></label>
+      <label>註記<textarea id="citation-notes" rows="3"></textarea></label>
+    </details></section>
+    <section class="save-bar"><label><input type="checkbox" id="product"> 這是買來的或照抄的，不拆</label>
+      <button id="copy-designer" type="button" hidden>複製到設計器</button><button id="save" type="button">儲存</button>
+      <p id="save-message" role="status"></p>
+    </section>
+  </div>
+</main></body></html>

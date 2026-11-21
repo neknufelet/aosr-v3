@@ -30,6 +30,11 @@ MOUNTED_NOTE = "貼在原牆上"
 _TRAILING_NOTE = re.compile(r"\s*（[^（）]*）\Z")
 
 
+def family_display_name(label: str) -> str:
+    """去掉內建家族名末尾的說明，保留名稱中間的括號。"""
+    return _TRAILING_NOTE.sub("", label) or label
+
+
 @dataclass(frozen=True)
 class MaterialName:
     """名字與它怎麼來：``composed`` 是真的表示對不到材料庫、依層的參數組的。"""
@@ -57,7 +62,7 @@ def _porous_name(layer: PorousLayer, library: Sequence[LibraryEntry]) -> str | N
                 update={"thickness_m": layer.thickness_m}) == layer:
             if entry.template_preset is None:
                 return entry.label
-            return _TRAILING_NOTE.sub("", entry.label) or entry.label
+            return family_display_name(entry.label)
     return None
 
 
