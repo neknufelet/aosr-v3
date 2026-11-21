@@ -42,10 +42,12 @@ from aosr.materials.construction_models import (
 )
 from aosr.materials.library import (
     PROVENANCE_LABELS,
+    ConstructionEntry,
     LibraryEntry,
     OptimizableEntry,
     TunableLayersEntry,
     basis_label,
+    fixed_surface,
     impedance_basis,
     initial_assembly,
     template_assembly,
@@ -76,8 +78,12 @@ def _physics_material(entry: LibraryEntry) -> tuple[SurfaceMaterial, str | None]
         tuned = "、".join(f"{item.words()} {item.initial:g}（可調 {item.range[0]:g}～{item.range[1]:g}）" for item in entry.variables)
         return initial_assembly(entry), (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
                                          "程式最佳化這種材料還沒接上，這條只供對照。")
+    if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
+        return entry.preview_assembly(), "預覽背後當硬牆；指定給分區時用該區原本的牆。"
     if not isinstance(entry, OptimizableEntry):
-        return entry.surface_material(), None
+        material = fixed_surface(entry)
+        assert material is not None
+        return material, None
     cavity = None if entry.cavity is None else entry.cavity.initial_m
     layers = f"多孔層 {entry.porous.thickness_m:g} m" + (f"＋空腔 {cavity:g} m" if cavity else "、沒有空腔")
     return template_assembly(entry), (f"這條是初值排法：{layers}，背後是硬牆。可最佳化材料是一族，"
@@ -154,11 +160,11 @@ def _unchecked_layers(material: SurfaceMaterial) -> list[dict[str, object]]:
 
 def _basis_detail(entry: LibraryEntry) -> str:
     """標語底下那一行：這條曲線的阻抗是怎麼來的。"""
-    if isinstance(entry, OptimizableEntry | TunableLayersEntry) or isinstance(entry.material, Assembly):
+    table = fixed_surface(entry)
+    if table is None or isinstance(table, Assembly):
         return "由各層參數用模型算的，之後要拿實測對照。"
-    if isinstance(entry.material, ConstantImpedance):
+    if isinstance(table, ConstantImpedance):
         return "每個頻率都同一個實數阻抗，是近似。"
-    table = entry.material
     basis = impedance_basis(entry)
     coverage = f"實測表涵蓋 {table.points[0].frequency_hz:g}–{table.points[-1].frequency_hz:g} Hz，表內假設與入射角無關；表外用底構造算。"
     return ("實測表沒有虛部，虛部當 0 算，所以是近似；" if basis == "approximate" else "") + coverage
@@ -206,7 +212,13 @@ def material_curve(document: object) -> dict[str, object]:
     except ValidationError as exc:
         return {"status": "incomplete", "message": f"表單還沒填齊，曲線畫不出來：{plain_error(exc)}", "range_scope": RANGE_SCOPE}
     reply = _entry_curve(entry)
-    return {**reply, "reference_only": reference_words()} if entry_reference_only(entry) else reply
+    if entry_reference_only(entry):
+        words = reference_words()
+        if isinstance(entry, ConstructionEntry):
+            words = {key: words[key] for key in ("band_hz", "sentence", "band_words", "why_only", "map_words")}
+            words.update(why=words["why_only"], kind_words=f"；{words['sentence']}")
+        reply["reference_only"] = words
+    return reply
 
 
 def _entry_curve(entry: LibraryEntry) -> dict[str, object]:

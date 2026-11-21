@@ -70,12 +70,12 @@ function zoneSetting(wall, key) { return zoneDesign?.zones?.[wall]?.[key] ?? {mo
 // {ids, sentence, why, search_why, listed_why, map_words, band_hz…}；材料庫裡一筆都沒有就沒有這一格，這裡是 null）。
 // 這一類不進程式最佳化：一區的清單不准「新加」這種代號，本來就存著的照樣留著、可以拿掉（伺服器開跑時會點名拒收）。
 let zoneReference = null;
-function referenceOnly(id) { return Boolean(zoneReference?.ids.includes(id)); }
+function referenceOnly(id) { return Boolean(zoneReference?.ids.includes(id)) && libraryEntry(id)?.kind !== "construction"; }
 // 一份新清單裡這一類的代號，只留那一區本來就存著的（kept）。每一條會寫清單的路都過這一支。
 function keepReferenceOut(next, kept) { return next.filter(id => !referenceOnly(id) || (kept ?? []).includes(id)); }
 // 一區現在的材料是不是這一類：貼上去的那一筆，或原本的面本身（原牆就是材料庫裡那一筆）。材料庫認不到的層管不到。
-function zoneReferenceOnly(material) {
-  return [libraryLabel(material), zoneLibraryMatch(originalMaterial(material))].some(entry => entry && referenceOnly(entry.id));
+function zoneReferenceOnly(material, wall, key) {
+  return [libraryLabel(material, wall, key), zoneLibraryMatch(originalMaterial(material), wall, key)].some(entry => entry && zoneReference?.ids.includes(entry.id));
 }
 // 伺服器說開跑會拒收的那幾句（限制檢查順便回的 reference_only：一組一句 {id, zones: [{wall, zone}…], text}，字與順序都是
 // 伺服器排的，這裡不接字）。一句是不是還「活著」只有這一支判斷（清單卡、頁底、兩顆「拿去搜尋」都只吃這裡回的）：
@@ -295,6 +295,15 @@ function applyZoneLibrary(state) {
 }
 async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
+function assignableEntries() { return (zoneLibrary || []).filter(entry => entry.kind === "fixed" || entry.kind === "construction"); }
+function fixedCandidate(entry) { return entry?.kind === "fixed" || (entry?.kind === "construction" && entry.backing !== "zone_wall"); }
+function fixedSurface(entry) {
+  if (entry.kind === "construction") {
+    return entry.backing === "zone_wall" ? null : {kind: "assembly", layers: entry.layers, backing: entry.backing};
+  }
+  return entry.kind === "fixed" ? entry.material : null;
+}
+function fixedLayers(entry) { return entry.kind === "construction" ? entry.layers : fixedSurface(entry)?.layers ?? []; }
 function libraryEntry(id) { return (zoneLibrary || []).find(entry => entry.id === id) ?? null; }
 // 這一筆列不列在這一面（伺服器每一筆都帶分組，跟網頁一起出貨）。
 function usableHere(entry, wall) { return entry.placement.surfaces.includes(wall); }
@@ -329,20 +338,30 @@ function adjustWords(entry) {
 const FIXED_WORDS = "固定成品：整塊貼或不貼，不能調";
 function choiceWords(entry) { return entry.kind === "optimizable" ? adjustWords(entry) : FIXED_WORDS; }
 // 這一區現在的材料是材料庫哪一筆：多層構造比貼上去的那幾層，固定阻抗與實測表比整份。
-function libraryLabel(material) {
-  for (const entry of libraryEntries("fixed")) {
-    const chosen = entry.material.kind === "measured_impedance" ? null : entry.material;
-    if (material.kind === "mounted_on_wall" && chosen?.kind === "assembly" && sameMaterial(chosen.layers, material.layers)) return entry;
-    if (chosen && chosen.kind !== "assembly" && sameMaterial(chosen, material)) return entry;
-    // 實測表：材料庫存的虛部可以整張沒有（物理那邊補 0），其餘欄與每一列都要一樣才算同一筆。
-    if (entry.material.kind === "measured_impedance" && material.kind === "measured_impedance"
-        && sameMaterial({...entry.material, points: entry.material.points.map(point => ({...point, imag_pa_s_m: point.imag_pa_s_m ?? 0}))}, material))
+// 裸構造只讀這一面、這一區的伺服器判決。上一份草稿的判決不能套到新位置。
+function constructionAt(wall, key) {
+  return zoneLimitsReceived === zoneLimitsGeneration ? zoneLimits?.picked_constructions?.[wall]?.[key] : null;
+}
+function uncertainWords(verdict) { return `看不出：跟材料庫「${verdict.label}」一樣`; }
+function libraryLabel(material, wall, key) {
+  const verdict = constructionAt(wall, key);
+  if (material.kind === "assembly") return verdict?.state === "picked" ? libraryEntry(verdict.id) : null;
+  for (const entry of assignableEntries()) {
+    const chosen = fixedSurface(entry);
+    if (material.kind === "mounted_on_wall") {
+      if ((entry.kind === "fixed" || entry.backing === "zone_wall") && sameMaterial(fixedLayers(entry), material.layers)) return entry;
+    } else if (chosen?.kind === "measured_impedance" && material.kind === "measured_impedance") {
+      // 實測表進物理時，原本空白的虛部補成 0。
+      const points = chosen.points.map(point => ({...point, imag_pa_s_m: point.imag_pa_s_m ?? 0}));
+      if (sameMaterial({...chosen, points}, material)) return entry;
+    } else if (entry.kind === "fixed" && chosen?.kind !== "assembly" && sameMaterial(chosen, material)) {
       return entry;
+    }
   }
   return null;
 }
-function materialWords(material, wall) {
-  const entry = libraryLabel(material);
+function materialWords(material, wall, key) {
+  const entry = libraryLabel(material, wall, key);
   if (entry) return `${entry.label}（${material.kind === "mounted_on_wall" ? `貼在${originalFace(wall)}上` : `直接取代${faceWord(wall)}`}）`;
   return material.kind === "mounted_on_wall" ? `${wallText(material)}（${originalFace(wall)}：${wallText(material.wall)}）` : wallText(material);
 }
@@ -356,26 +375,31 @@ function layersText(material) {
     return `${kind}${thick}${flow}`;
   }).join("＋");
 }
-function nowWords(material, wall) {
-  if (material.kind !== "mounted_on_wall" || libraryLabel(material)) return materialWords(material, wall);
+function nowWords(material, wall, key) {
+  if (material.kind !== "mounted_on_wall" || libraryLabel(material, wall, key)) return materialWords(material, wall, key);
   return `${layersText(material)}，貼在${originalFace(wall)}上`;
 }
 function originalMaterial(material) { return material.kind === "mounted_on_wall" ? material.wall : material; }
 // 這一區現在的材料對到材料庫哪一筆：貼上去的（libraryLabel），或這一區本身就是材料庫某一筆多層構造（例如天花那一套吊頂、
 // 門、窗這種整塊就是那一筆、不是貼上去的）。區名認門窗地毯（zone_names.js）與原牆的名字都用它。
 // 「指定貼一種」選單上這一區選的那一筆照舊只認 libraryLabel（整塊就是門的那一區沒貼東西，選單寫「現在：沒貼東西」）。
-function zoneLibraryMatch(material) {
+function zoneLibraryMatch(material, wall, key) {
   if (!material) return null;
-  return libraryLabel(material) ?? libraryEntries("fixed").find(item => item.material.kind === "assembly"
-    && material.kind === "assembly" && sameMaterial(item.material, material)) ?? null;
+  if (constructionAt(wall, key)?.state === "unknown") return null;
+  return libraryLabel(material, wall, key) ?? libraryEntries("fixed").find(item => material.kind === "assembly" && sameMaterial(fixedSurface(item), material)) ?? null;
 }
 // 白話（#1176）：原牆不寫阻抗數字（數字收在點開的「數字」細節）；材料庫認得的寫它的名字。
-function originalWords(material, wall) {
-  const entry = zoneLibraryMatch(material);
+function originalWords(material, wall, key) {
+  const verdict = constructionAt(wall, key);
+  if (verdict?.state === "unknown") return uncertainWords(verdict);
+  const entry = zoneLibraryMatch(material, wall, key);
   return entry ? `${originalFace(wall)}「${entry.label}」原樣` : `${originalFace(wall)}原樣`;
 }
-function plainNow(material, wall) {
-  return material.kind === "mounted_on_wall" ? `已貼 ${nowWords(material, wall)}` : `沒貼東西（${originalWords(material, wall)}）`;
+function plainNow(material, wall, key) {
+  const verdict = constructionAt(wall, key);
+  if (verdict?.state === "unknown") return uncertainWords(verdict);
+  if (verdict?.state === "picked") return materialWords(material, wall, key);
+  return material.kind === "mounted_on_wall" ? `已貼 ${nowWords(material, wall, key)}` : `沒貼東西（${originalWords(material, wall, key)}）`;
 }
 function numbersDetail(material, id, wall) {
   const details = document.createElement("details"); details.className = "zone-numbers"; details.id = id;
@@ -388,7 +412,7 @@ function numbersDetail(material, id, wall) {
 // 固定成品的總厚（每層有厚度的加起來，所以寫「約」）：薄板只給面密度、沒有厚度，有薄板就註明不含（不然跟顯示名裡
 // 「總厚約 14 cm」這種把鋼板算進去的數字打架）；不是多層構造的（固定阻抗、實測表）沒有厚度可寫，回空字串。
 function fixedDepthWords(entry) {
-  const layers = entry.material.kind === "assembly" ? entry.material.layers : [];
+  const layers = fixedLayers(entry);
   const depth = layers.reduce((sum, layer) => sum + (typeof layer.thickness_m === "number" ? layer.thickness_m : 0), 0);
   if (!(depth > 0)) return "";
   return `總厚約 ${centimetres(depth)} cm${layers.some(layer => layer.kind === "board") ? "（不含薄板）" : ""}`;
@@ -445,7 +469,7 @@ async function zoneMaterialChanged(wall, key, choice) {
 }
 async function changeZoneMode(wall, key, mode) {
   const before = zoneSetting(wall, key);
-  const held = libraryLabel(zoneList(wall).find(zone => zoneKey(zone) === key).material);
+  const held = libraryLabel(zoneList(wall).find(zone => zoneKey(zone) === key).material, wall, key);
   if (mode !== "fixed" && !await zoneMaterialChanged(wall, key, {choice: "original"})) { renderZoneTable(wall); return; }
   if (mode === "search" && held && usableHere(held, wall)) zoneFormerFixed.set(`${wall}/${key}`, held.id);
   else zoneFormerFixed.delete(`${wall}/${key}`);
@@ -495,7 +519,10 @@ function serverDefaultAllowed() {
   if (!zoneLibrary?.length || zoneLibraryProblem) return null;
   return [...libraryEntries("optimizable").map(entry => entry.id), ZONE_NONE];
 }
-function fitsHere(id, wall) { return id === ZONE_NONE || (libraryEntry(id) !== null && usableHere(libraryEntry(id), wall)); }
+function fitsHere(id, wall) {
+  const entry = libraryEntry(id);
+  return id === ZONE_NONE || (entry !== null && entry.backing !== "zone_wall" && usableHere(entry, wall));
+}
 // 改成由程式最佳化時一開始放的清單：這一頁上一次改過的組合優先（這一面用不了的拿掉；拿完沒有起點就不用它），
 // 不然一律是三種內建玻璃棉＋不貼（材料庫沒有的、不是這一面用的拿掉，地板只剩不貼）；使用者自己加的可調材料要用就在「改清單」勾。
 // 材料庫沒讀全就回 null（照舊不寫清單、照講；使用者材料庫壞了的時候伺服器本來就不准換做法，輪不到這裡）。
@@ -521,7 +548,7 @@ function choiceName(id) {
 // 材料庫找不到的代號不算固定成品（材料庫沒讀全時可能是可調材料；那一種照「材料庫找不到」那一行講，開跑時伺服器點名）。
 function allowedProblem(allowed) {
   if (!allowed?.length) return "";
-  return allowed.every(id => libraryEntry(id)?.kind === "fixed") ? "只放了固定成品，程式沒得選。" : "";
+  return allowed.every(id => fixedCandidate(libraryEntry(id))) ? "只放了固定成品，程式沒得選。" : "";
 }
 // 紅框直接給按鈕（#1176，老闆看不懂「准用清單只有固定材料：搜尋要一個起點…」）：只有一筆就能直接改成指定貼它；
 // 或加上「不貼」、加上 48K 玻璃棉（這一面用不了就不出現）。按鈕字照樣稿先寫按下去的結果、括號裡寫做了什麼。
@@ -567,12 +594,12 @@ function optionGroup(label, entries) {
 function fixedCell(wall, key, zone, cell) {
   const select = document.createElement("select"); select.id = `zone-fixed-${wall}-${key}`;
   select.setAttribute("aria-label", `${zoneCalled(wall, key)} 要貼哪一種`);
-  const current = libraryLabel(zone.material);
+  const current = libraryLabel(zone.material, wall, key);
   if (!current) {
-    const now = document.createElement("option"); now.value = ""; now.textContent = `現在：${plainNow(zone.material, wall)}`;
+    const now = document.createElement("option"); now.value = ""; now.textContent = `現在：${plainNow(zone.material, wall, key)}`;
     select.append(now);
   }
-  const fixed = libraryEntries("fixed");
+  const fixed = assignableEntries();
   for (const entry of fixed.filter(item => usableHere(item, wall))) select.append(fixedOption(entry));
   const away = current && !usableHere(current, wall);
   // 貼上去的才會「不是這一面用的」；直接取代整面的（例如地板本身就是木地板那一筆固定阻抗）就是這一面本身，照實寫、不標紅。
@@ -616,7 +643,7 @@ function allowedChecklist(wall, key, allowed, onToggle) {
   };
   const here = (zoneLibrary || []).filter(entry => usableHere(entry, wall));
   const optimizable = here.filter(entry => entry.kind === "optimizable");
-  const fixed = here.filter(entry => entry.kind === "fixed");
+  const fixed = here.filter(fixedCandidate);
   list.append(heading("可調：程式會調厚度（有的連空腔一起調）"));
   if (!optimizable.length) {
     const line = document.createElement("p"); line.className = "note";
@@ -627,13 +654,13 @@ function allowedChecklist(wall, key, allowed, onToggle) {
   list.append(box(ZONE_NONE, KEEP_WORDS, "放進來，程式就可以決定這裡不貼"));
   if (fixed.length) list.append(heading("固定成品：整塊貼上去，不能調（程式只決定貼不貼）"));
   for (const entry of fixed) list.append(box(entry.id, entry.label, fixedDepthWords(entry), entry.placement.reason));
-  const hidden = hiddenGroups(wall, zoneLibrary || []);
+  const hidden = hiddenGroups(wall, (zoneLibrary || []).filter(entry => entry.kind === "optimizable" || fixedCandidate(entry)));
   const count = hidden.reduce((sum, [, entries]) => sum + entries.length, 0);
   if (zoneShowAll) {
     for (const [group, entries] of hidden) {
       list.append(heading(`不列的：${zoneSurfaceGroups[group]}`));
       for (const entry of entries) {
-        const words = entry.kind === "fixed" ? fixedWords(entry) : adjustWords(entry);
+        const words = fixedCandidate(entry) ? fixedWords(entry) : adjustWords(entry);
         list.append(box(entry.id, shortLabel(entry), `${words}；${entry.placement.reason}`));
       }
     }
@@ -670,7 +697,7 @@ function allowedChips(wall, key, allowed, edit) {
 // 一鍵常用組合（這一面用得到的才出現）；這一區改成由程式最佳化之前指定貼了某一筆，多一顆「只讓程式決定：這一筆貼或不貼」。
 function zonePresets(wall, key, zone) {
   const presets = ZONE_PRESETS.filter(preset => preset.members.every(id => fitsHere(id, wall)));
-  const held = zoneFormerFixed.get(`${wall}/${key}`) ?? libraryLabel(zone.material)?.id;
+  const held = zoneFormerFixed.get(`${wall}/${key}`) ?? libraryLabel(zone.material, wall, key)?.id;
   // 現在貼的是「鋼板直接貼在棉上」的構造（#1208）：不給這一顆（它不進程式最佳化）。
   if (held && fitsHere(held, wall) && !referenceOnly(held)) {
     presets.push({id: "this_or_none", words: `只讓程式決定：「${libraryEntry(held).label}」貼或不貼`, members: [held, ZONE_NONE]});
@@ -697,8 +724,8 @@ function searchCell(wall, key, zone, setting, cell) {
   // 寫方案裡這一區現在真的放什麼（#1128）：網頁改成由程式最佳化時放原牆，但搜尋存成的方案（或它的另存）放的是搜尋選的材料。
   const start = document.createElement("p"); start.className = "note"; start.id = `zone-search-now-${wall}-${key}`;
   start.textContent = zone.material.kind === "mounted_on_wall"
-    ? `現在：${plainNow(zone.material, wall)}`
-    : `現在：${plainNow(zone.material, wall)}，程式選了要貼的就貼在它上面`;
+    ? `現在：${plainNow(zone.material, wall, key)}`
+    : `現在：${plainNow(zone.material, wall, key)}，程式選了要貼的就貼在它上面`;
   cell.append(start, numbersDetail(zone.material, `zone-numbers-${wall}-${key}`, wall));
   // 舊的沒寫清單（null）照伺服器的意思列成明確清單（全部可調材料＋不貼）；材料庫沒讀全就只能照講，不猜。
   const allowed = setting.allowed ?? serverDefaultAllowed();
@@ -759,7 +786,7 @@ function originalSchemeRow() {
     const missing = document.createElement("option"); missing.value = chosen; missing.textContent = `${chosen}（不在清單裡）`; select.append(missing);
   }
   select.value = chosen;
-  select.onchange = () => { designForEdit().original_scheme_id = select.value || null; markStale(); };
+  select.onchange = () => { designForEdit().original_scheme_id = select.value || null; markStale(); refreshZoneLimits(); };
   wrap.append(select); row.append(wrap);
   return row;
 }
@@ -825,7 +852,7 @@ function renderZoneTable(wall) {
     if (setting.mode === "fixed") fixedCell(wall, key, zone, material);
     else if (setting.mode === "keep_original") {
       const line = document.createElement("p"); line.id = `zone-keep-${wall}-${key}`;
-      line.textContent = `${originalWords(originalMaterial(zone.material), wall)}，不貼東西`;
+      line.textContent = `${originalWords(originalMaterial(zone.material), wall, key)}，不貼東西`;
       material.append(line);
       const same = zoneSameAsOriginal.get(`${wall}/${key}`);
       if (same) {

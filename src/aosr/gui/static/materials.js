@@ -35,7 +35,12 @@ async function api(path, options = {}) {
 // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）：清單列得出來、可以刪；這一頁還不能看內容與編輯。
 function tunableLayers(entry) { return entry.kind === "tunable_layers"; }
 
+function backingWords(backing) {
+  return {rigid: "背後是硬牆", air: "背後是空氣", zone_wall: "背後接原牆"}[backing];
+}
+
 function kindText(entry) {
+  if (entry.kind === "construction") return listing.entry_kind_labels.construction + "：" + backingWords(entry.backing);
   if (tunableLayers(entry)) return `${listing.entry_kind_labels.tunable_layers}：${entry.structure === "vpr" ? "可調 VPR（鋼板＋黏住的背襯）" : entry.structure}`;
   if (entry.kind === "optimizable") return listing.entry_kind_labels.optimizable + "：多孔層＋空腔";
   return `${listing.entry_kind_labels.fixed}：${form()[entry.material.kind].label}`;
@@ -312,6 +317,11 @@ function pointsText(points) {
 }
 
 function fixedBlock(entry, readonly) {
+  if (entry.kind === "construction") {
+    const block = el("div", {class: "block"}, el("h3", {text: kindText(entry)}),
+      layerEditor("construction-layers", entry.layers, true));
+    return {block, after: () => {}};
+  }
   const material = entry.material;
   const kindSelect = el("select", {id: "fixed-kind", disabled: readonly});
   for (const kind of listing.fixed_kinds) kindSelect.append(el("option", {value: kind, text: form()[kind].label}));
@@ -507,16 +517,20 @@ function markCurveStale() {
 
 let parts = null;
 
-function openEntry(row, isNew) {
+function openEntry(row, isNew, scroll = true) {
   const entry = row.entry;
-  const readonly = row.builtin;
+  const construction = entry.kind === "construction";
+  const readonly = row.builtin || (construction && !isNew);
   current = {entry, builtin: row.builtin, isNew};
   byId("editor-title").textContent = isNew ? `新材料：${entry.label}` : `${row.builtin ? "內建材料" : "我的材料"}：${entry.label}`;
-  byId("editor-readonly").hidden = !readonly;
+  byId("editor-readonly").hidden = !row.builtin;
   const kindBlock = entry.kind === "optimizable" ? optimizableBlock(entry, readonly) : fixedBlock(entry, readonly);
+  const kind = construction ? kindText(entry) + "（構造內容唯讀）"
+    : entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）"
+    : listing.entry_kind_labels.fixed + "（整塊選或不選）";
   parts = kindBlock;
   byId("editor-body").replaceChildren(
-    el("p", {class: "hint", id: "editor-kind", text: `種類：${entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）" : listing.entry_kind_labels.fixed + "（整塊選或不選）"}`}),
+    el("p", {class: "hint", id: "editor-kind", text: `種類：${kind}`}),
     commonBlock(entry, readonly, isNew), kindBlock.block);
   kindBlock.after();
   byId("save").hidden = readonly;
@@ -525,7 +539,7 @@ function openEntry(row, isNew) {
   byId("copy").disabled = Boolean(listing.user_file_problem);
   byId("editor").hidden = false;
   say("", "");
-  byId("editor").scrollIntoView({block: "start"});
+  if (scroll) byId("editor").scrollIntoView({block: "start"});
   // 表單先顯示再畫：藏著的時候圖的寬度量出來是 0。
   clearCurve();
   drawCurve(entry);
@@ -545,6 +559,7 @@ function collect() {
   const document = {...base, id: byId("material-id").value.trim(), label: byId("material-label").value.trim(),
                     provenance: byId("provenance").value || null, source: byId("source").value.trim(),
                     links: keptLines("links", base.links), notes: keptLines("notes", base.notes)};
+  if (document.kind === "construction") return document;
   if (document.kind === "optimizable") {
     const adjustable = byId("porous-adjustable").checked;
     const thickness = adjustable ? readNumber("porous-initial") : readNumber("porous-thickness");
@@ -621,11 +636,10 @@ async function save() {
       (current && !current.isNew && !current.builtin && current.entry.id === reply.body.material_id);
     if (sameEntry) {
       const row = listed ? listing.materials.find((item) => item.entry.id === reply.body.material_id) : null;
-      if (row) {
-        openEntry(row, false);
-        revealSavedEntry(row.entry);
-      }
-      say(`已儲存「${document.label}」`, "ok");
+      const location = row ? "：" + revealSavedEntry(row.entry) : "";
+      if (row) openEntry(row, false, false);
+      say(`已儲存「${document.label}」${location}`, "ok");
+      byId("editor-message").scrollIntoView({block: "nearest"});
     } else {
       byId("list-state").textContent += `；已儲存「${document.label}」${current ? "（編輯器現在開著的是另一筆，沒有動它）" : ""}`;
     }

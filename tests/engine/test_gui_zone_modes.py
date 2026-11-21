@@ -17,6 +17,7 @@ from aosr.gui.zone_edit import CutBox, cut_wall
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
 from aosr.reporting.scheme import Scheme
+from tests.engine._construction_cases import construction
 from tests.engine._surface_zone_cases import NEW, room109_document
 
 PRESET = "glass_wool_48k_50mm"
@@ -203,6 +204,26 @@ def _files(root: Path) -> list[tuple[str, bytes]]:
     return sorted((str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*") if path.is_file())
 
 
+def test_missing_other_wall_refuses_even_a_batch_of_bare_constructions(client: TestClient, tmp_path: Path) -> None:
+    original = room109_document("before")
+    del _zones(original)["y0"]
+    folder = tmp_path / "schemes"
+    folder.mkdir(exist_ok=True)
+    (folder / "before.json").write_text(json.dumps(original))
+    current = _cut_document()
+    choice = {"wall": "x0", "zone": "z1", "choice": "original"}
+    other = {**choice, "zone": "auto1"}
+    ordinary = _batch(client, current, choice, other, original_scheme_id="before")
+    assert ordinary[0] == 400 and ordinary[1]["index"] is None
+    doc = construction("air", id="test_panel")
+    assert client.put("/api/materials/test_panel", json=doc).status_code == 200
+    material = {"kind": "assembly", "layers": doc["layers"], "backing": "air"}
+    _put(current, "z1", material)
+    assert _batch(client, current, choice, other, original_scheme_id="before") == ordinary
+    _put(current, "auto1", material)
+    assert _batch(client, current, choice, other, original_scheme_id="before") == ordinary
+
+
 def test_a_batch_gives_each_zone_what_the_one_zone_endpoint_gives_and_writes_nothing(client: TestClient, tmp_path: Path) -> None:
     document = _cut_document()
     changes = [{"wall": "x0", "zone": "z1", "choice": "fixed", "material_id": PRESET},
@@ -262,3 +283,71 @@ def test_a_zone_picked_as_what_it_already_is_is_flagged_inside_a_batch_too(clien
     first, second = cast(list[dict[str, object]], data["changes"])
     assert first["same_as_original"] is True and first["material"] == built and "一模一樣" in str(first["note"])
     assert second["same_as_original"] is False and cast(dict[str, object], second["material"])["kind"] == "mounted_on_wall"
+
+
+@pytest.mark.parametrize("backing", ["rigid", "air", "zone_wall"])
+def test_assign_construction_obeys_backing_and_recognizes_an_uncertain_origin(client: TestClient, backing: str) -> None:
+    doc = construction(backing)
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    scheme = _cut_document()
+    original = _zones(scheme)["x0"][0]["material"]
+    code, data = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
+    assert code == 200, data
+    if backing == "zone_wall":
+        assert data["material"] == {"kind": "mounted_on_wall", "layers": doc["layers"], "wall": original}
+    else:
+        assert data["material"] == {"kind": "assembly", "layers": doc["layers"], "backing": backing}
+        assert "直接取代" in str(data["note"])
+    _put(scheme, "z1", data["material"])
+    code, restored = _post(client, scheme, "z1", choice="original")
+    assert code == 200 and restored["origin"] == ("unwrapped" if backing == "zone_wall" else "unknown")
+
+
+@pytest.mark.parametrize("backing", ["air", "rigid"])
+def test_zone_wall_with_identical_original_layers_keeps_that_wall(client: TestClient, backing: str) -> None:
+    doc = construction("zone_wall")
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    scheme = _cut_document()
+    original = {"kind": "assembly", "layers": doc["layers"], "backing": backing}
+    _put(scheme, "z1", original)
+    code, data = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
+    assert code == 200 and data["same_as_original"] is True and data["material"] == original
+
+
+def test_zone_wall_refuses_to_mount_over_an_already_mounted_original(client: TestClient, tmp_path: Path) -> None:
+    doc = construction("zone_wall")
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    original = room109_document("built")
+    zone = _zones(original)["x0"][0]
+    zone["material"] = {"kind": "mounted_on_wall", "layers": doc["layers"], "wall": zone["material"]}
+    (tmp_path / "schemes" / "built.json").write_text(Scheme.model_validate(original).model_dump_json())
+    code, data = _post(client, _cut_document(), "z1", choice="fixed", material_id=doc["id"], original_scheme_id="built")
+    assert code == 400 and "不能再貼一層" in str(data["error"])
+
+
+def test_unknown_original_cannot_match_a_zone_wall_stack(client: TestClient) -> None:
+    base = construction("rigid", id="base_panel", label="整塊面板")
+    facing = construction("zone_wall")
+    for doc in (base, facing):
+        assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    scheme = _cut_document()
+    code, replaced = _post(client, scheme, "z1", choice="fixed", material_id=base["id"])
+    assert code == 200
+    _put(scheme, "z1", replaced["material"])
+    code, mounted = _post(client, scheme, "z1", choice="fixed", material_id=facing["id"])
+    assert code == 200 and mounted["origin"] == "unknown"
+    assert mounted["same_as_original"] is False and "看不出原牆" in str(mounted["note"])
+    assert mounted["material"] == {"kind": "mounted_on_wall", "layers": facing["layers"], "wall": replaced["material"]}
+
+
+def test_reselecting_a_bare_copy_without_an_original_keeps_its_origin_unknown(client: TestClient) -> None:
+    doc = construction("air")
+    scheme = _cut_document()
+    surface = {"kind": "assembly", "backing": "air", "layers": doc["layers"]}
+    _put(scheme, "z1", surface)
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    code, original = _post(client, scheme, "z1", choice="original")
+    assert code == 200 and original["origin"] == "unknown" and "看不出" in str(original["note"])
+    code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
+    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is False and "看不出" in str(picked["note"])
+    assert "picked_construction" not in picked

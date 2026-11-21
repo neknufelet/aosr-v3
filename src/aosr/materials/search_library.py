@@ -38,9 +38,9 @@ from typing import Final, Literal, NamedTuple, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from aosr.config.material_gradient import ExportSettings, FamilySettings, MaterialGradientSettings, VprFamilySettings
-from aosr.materials.construction_models import BoardLayer, PorousLayer
+from aosr.materials.construction_models import BoardLayer, MeasuredImpedance, PorousLayer
 from aosr.materials.library import (
-    BASIS_LABELS, FixedEntry, LibraryEntry, MeasuredTable, OptimizableEntry, TunableLayersEntry, impedance_basis, initial_assembly,
+    BASIS_LABELS, ConstructionEntry, FixedEntry, LibraryEntry, OptimizableEntry, TunableLayersEntry, fixed_surface, impedance_basis, initial_assembly,
     load_user_library, template_assembly,
 )
 
@@ -180,6 +180,14 @@ def refuse_tunable_layers(ids: Sequence[str | None], entries: Sequence[LibraryEn
                                    "先從准用清單或選的材料組拿掉它，其他材料照舊可以由程式最佳化")
 
 
+def refuse_zone_wall(ids: Sequence[str], entries: Sequence[LibraryEntry]) -> None:
+    """原牆由分區決定，無法寫成獨立的固定候選。"""
+    wanted = set(ids)
+    for entry in entries:
+        if entry.id in wanted and isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
+            raise MaterialsRefused(f"{_name(entry)}的背後要接這一區的原牆，現在還不能整塊當候選，要用請在分區頁直接指定。")
+
+
 def library_preset(entry: OptimizableEntry) -> LibraryPreset:
     """一筆使用者可最佳化材料的構造：代號＝材料代號、材料＝初值排法（剛背）。"""
     return LibraryPreset(id=entry.id, material=template_assembly(entry).model_dump(mode="json"))
@@ -214,7 +222,7 @@ def cavity_notes(materials: SearchMaterials) -> tuple[str, ...]:
 
 def refuse_fixed_as_family(ids: Sequence[str | None], entries: Sequence[LibraryEntry]) -> None:
     """起跑配置或選的家族填了使用者固定材料的代號就拒收：固定材料只能整塊選或不選，不能微調。"""
-    fixed = {entry.id: entry for entry in entries if isinstance(entry, FixedEntry)}
+    fixed = {entry.id: entry for entry in entries if isinstance(entry, (FixedEntry, ConstructionEntry))}
     for item in ids:
         if item is not None and item in fixed:
             raise MaterialsRefused(f"{_name(fixed[item])}是固定材料：搜尋只能整塊選或不選、不能微調，"
@@ -272,7 +280,7 @@ def fixed_candidates(targets: Sequence[str], presets: Sequence[PresetMaterial],
     for target in sorted(set(targets)):
         material_id = fixed_target_id(target)
         if material_id in users:
-            material = users[material_id].surface_material().model_dump(mode="json")
+            material = fixed_surface(users[material_id]).model_dump(mode="json")
         elif material_id in builtin and not isinstance(builtin[material_id], LibraryPreset):
             material = dict(builtin[material_id].material)
         else:
@@ -286,11 +294,20 @@ def approximate_notes(user_fixed: Sequence[FixedEntry]) -> tuple[str, ...]:
     label = BASIS_LABELS["approximate"]
     return tuple(f"固定材料 {entry.id}（{entry.label}）的實測表沒有虛部：虛部當 0、當純實數阻抗算，結果是{label}"
                  for entry in user_fixed
-                 if isinstance(entry.material, MeasuredTable) and impedance_basis(entry) == "approximate")
+                 if isinstance(fixed_surface(entry), MeasuredImpedance) and impedance_basis(entry) == "approximate")
 
 
 def user_fixed_entries(ids: Sequence[str], entries: Sequence[LibraryEntry]) -> tuple[FixedEntry, ...]:
     """准用清單點名、而且是使用者固定材料的那幾筆（照代號排）；快照要存它們，網頁之後改材料庫不影響這一場。"""
     wanted = set(ids)
-    return tuple(sorted((entry for entry in entries if isinstance(entry, FixedEntry) and entry.id in wanted),
-                        key=lambda entry: entry.id))
+    refuse_zone_wall(ids, entries)
+    fixed = []
+    for entry in entries:
+        if entry.id not in wanted:
+            continue
+        if isinstance(entry, FixedEntry):
+            fixed.append(entry)
+        elif isinstance(entry, ConstructionEntry):
+            common = entry.model_dump(exclude={"kind", "layers", "backing", "placement", "product"})
+            fixed.append(FixedEntry.model_validate({**common, "kind": "fixed", "material": fixed_surface(entry)}))
+    return tuple(sorted(fixed, key=lambda entry: entry.id))

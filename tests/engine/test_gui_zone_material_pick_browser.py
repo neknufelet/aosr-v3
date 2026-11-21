@@ -9,11 +9,15 @@
 再比存檔。其餘每一項新行為各一題。"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from tests.engine._construction_cases import construction
+from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
@@ -806,4 +810,84 @@ def test_the_deepest_for_the_picked_zones_is_written_in_metres_and_only_when_it_
         page.locator("#zone-panel-depth").fill("33.3")
         _apply(page)
         assert page.evaluate("() => JSON.stringify(zoneDesign.zones.yL.auto2.max_depth_m)") == "0.333"
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_constructions_can_be_assigned_but_only_standalone_ones_can_be_checked(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        for backing in ("rigid", "air", "zone_wall"):
+            doc = construction(backing, id=f"panel_{backing}", label=f"自編面板 {backing}")
+            assert page.request.put(f"{base}/api/materials/{doc['id']}", data=doc).ok
+        page.reload()
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-mode-fixed").check()
+        select = page.locator("#zone-panel-material")
+        assert not any(identifier.startswith("panel_") for identifier in page.evaluate("serverDefaultAllowed()"))
+        for backing in ("zone_wall", "rigid", "air"):
+            expect(select.locator(f"option[value='panel_{backing}']")).to_have_count(1)
+            with page.expect_response(lambda response: response.url.endswith("/api/material-curve")) as curve:
+                select.select_option(f"panel_{backing}")
+            assert curve.value.json()["status"] == "drawn"
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        _click_zone(page, "yL/z3")
+        expect(page.locator("#zone-panel")).to_contain_text("看不出：跟材料庫「自編面板 air」一樣")
+        expect(page.locator("#zone-panel-now-fixed")).to_have_count(0)
+        expect(select).to_have_value("")
+        _pick_search(page)
+        page.locator("#zone-panel-fixed summary").click()
+        for backing in ("rigid", "air"):
+            choice = page.locator(f"#zone-panel-allow-panel_{backing}")
+            expect(choice).to_be_enabled()
+            expect(choice).not_to_be_checked()
+            choice.check()
+        expect(page.locator("#zone-panel-allow-panel_zone_wall")).to_have_count(0)
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+@pytest.mark.parametrize("with_original", [False, True])
+def test_zone_map_uses_the_saved_original_to_identify_a_bare_copy(tmp_path: Path, browser: Browser, with_original: bool) -> None:
+    _prepare(tmp_path, {"scheme_id": SAMPLE, "original_scheme_id": "before"} if with_original else None)
+    if with_original:
+        folder = tmp_path / "schemes"
+        original = json.loads((folder / f"{SAMPLE}.json").read_text()) | {"scheme_id": "before"}
+        (folder / "before.json").write_text(json.dumps(original))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        saved = page.request.get(f"{base}/api/schemes/{SAMPLE}").json()["scheme"]
+        ceiling = next(zone for zone in saved["scene"]["surface_zones_by_wall"]["ceiling"] if zone["id"] == "auto1")
+        doc = construction("rigid", id="ceiling_copy", label="布置用面板", layers=ceiling["material"]["layers"])
+        assert page.request.put(f"{base}/api/materials/ceiling_copy", data=doc).ok
+        _open_overview(page)
+        def shown(wall: str, key: str) -> Locator:
+            return page.locator(f"#zone-map [data-wall='{wall}'][data-zone='{key}']")
+        expect(shown("ceiling", "auto1")).to_have_attribute("data-shown", "still" if with_original else "unknown")
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-mode-fixed").check()
+        page.locator("#zone-panel-material").select_option("ceiling_copy")
+        _apply(page)
+        for reopened in (False, True):
+            if reopened:
+                page.locator("#zone-page-close").click()
+                _save(page, design=True)
+                page.reload()
+                _open_overview(page)
+            zone = shown("yL", "z3")
+            expect(zone).to_have_attribute("data-shown", "fixed" if with_original else "unknown")
+            expect(shown("ceiling", "auto1")).to_have_attribute("data-shown", "still" if with_original else "unknown")
+            if not with_original:
+                expect(zone.locator("title")).to_contain_text("看不出：跟材料庫「布置用面板」一樣")
+                expect(page.locator(".zv-legend")).to_contain_text("看不出")
+        if not with_original:
+            _click_zone(page, "yL/z3")
+            page.locator("#zone-panel-mode-keep_original").check()
+            _apply(page)
+            expect(zone).to_have_attribute("data-shown", "still")
+            expect(zone.locator("title")).to_contain_text("不貼，保留原樣")
+            _click_zone(page, "yL/z3")
+            expect(page.locator("#zone-panel-now-keep_original")).to_have_attribute("data-zones", "yL/z3")
+            expect(page.locator(".zv-chip[data-zone='yL/z3']")).not_to_contain_text("看不出")
         assert watched.page_errors == [] and watched.console_errors == []

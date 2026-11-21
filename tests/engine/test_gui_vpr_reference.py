@@ -24,7 +24,7 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui import reference_only, zone_limits
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_jobs import GradientJobs, plan_fixed
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, SearchPlan, library_depth_targets, plan_search, start_arguments
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.zone_design import DesignSettings
@@ -33,6 +33,7 @@ from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
+from tests.engine._construction_cases import construction
 from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED, SLOTTED_FRONT, STEEL_1MM, STEEL_2_5MM
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
@@ -396,7 +397,7 @@ from pathlib import Path
 from starlette.testclient import TestClient
 from aosr.config.paths import config_path
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.gradient_jobs import GradientJobs
+from aosr.gui.gradient_jobs import GradientJobs, plan_fixed
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused
 from aosr.reporting.scheme import Scheme
 from tests.engine._zone_symmetry_room import FRONT_PAIR, symmetry_document
@@ -736,3 +737,46 @@ def test_a_rectangle_without_a_text_id_is_not_a_zone() -> None:
     front = [{"area": "rectangle", "id": 5}, {"area": "rectangle", "id": "a"}, {"area": "rectangle", "id": "a"}]
     order = zone_limits._zone_order({"scene": {"surface_zones_by_wall": {"x0": front}}})
     assert order == [("floor", "whole_wall"), ("ceiling", "whole_wall"), ("x0", "a"), ("xL", "whole_wall"), ("y0", "whole_wall"), ("yL", "whole_wall")]
+
+
+@pytest.mark.parametrize("backing", ["rigid", "zone_wall"])
+def test_web_plan_allows_standalone_bonded_construction_and_explains_wall_dependency(tmp_path: Path, backing: str) -> None:
+    entry = _ENTRY.validate_python(construction(backing, layers=BONDED_VPR["layers"], product=True))
+    _write_user_library(tmp_path, (entry,))
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    scheme = Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR}))
+    design = _design(["glass_wool_48k", entry.id, "none"])
+    if backing == "zone_wall":
+        with pytest.raises(PlanRefused, match="現在還不能整塊當候選.*分區頁直接指定"):
+            jobs.plan(scheme, design, GradientRequest())
+    else:
+        assert jobs.plan(scheme, design, GradientRequest())[0].allowed == {
+            "x0@a": ("glass_wool_48k", f"fixed:{entry.id}", "none")}
+
+
+def test_plan_fixed_translates_zone_wall_refusal(tmp_path: Path) -> None:
+    entry = _ENTRY.validate_python(construction("zone_wall"))
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    plan, materials, _ = jobs.plan(Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR})),
+                                    _design(["glass_wool_48k", "none"]), GradientRequest())
+    listed = plan.model_copy(update={"allowed": {"x0@a": (f"fixed:{entry.id}",)}})
+    with pytest.raises(PlanRefused, match="背後要接這一區的原牆"):
+        plan_fixed(listed, materials, (entry,))
+
+
+def test_bonded_construction_in_allowed_list_keeps_warning_and_candidate(tmp_path: Path) -> None:
+    entry = _ENTRY.validate_python(construction(layers=BONDED_VPR["layers"]))
+    _write_user_library(tmp_path, (entry,))
+    with _client(tmp_path) as client:
+        warning = client.get("/api/materials").json()["reference_only"]
+        assert entry.id in warning["ids"] and "只能參考" in warning["sentence"]
+        assert entry.id not in warning["reset_blocked"]
+        assert "reference_only" not in _limits(client, ["glass_wool_48k", entry.id, "none"])
+    jobs = GradientJobs(tmp_path, launcher=FakeLauncher(), engine_commit="c" * 40, capabilities=config_path("capabilities.toml"),
+                        scheme_lock=threading.RLock())
+    design = _design(["glass_wool_48k", entry.id, "none"])
+    plan, materials, entries = jobs.plan(Scheme.model_validate(symmetry_document({"x0": FRONT_PAIR})), design, GradientRequest())
+    candidate, = plan_fixed(plan, materials, entries)
+    assert candidate.target == f"fixed:{entry.id}"

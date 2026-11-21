@@ -58,6 +58,7 @@ from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
 from aosr.gui.wall_words import wall_words
+from aosr.gui.zone_construction import OriginalReader
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
@@ -65,7 +66,7 @@ from aosr.gui.zone_limits import (
 )
 from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.materials.library import FixedEntry, LibraryEntry, builtin_entries
+from aosr.materials.library import ConstructionEntry, LibraryEntry, builtin_entries, fixed_surface
 from aosr.materials.search_library import PresetMaterial
 from aosr.reporting.scheme import Scheme
 
@@ -251,12 +252,15 @@ def builtin_depth_targets(settings: MaterialGradientSettings) -> DepthTargets:
     return DepthTargets(settings, {preset.id: _MATERIAL.validate_python(preset.material) for preset in presets}, labels)
 
 
-def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[LibraryEntry]) -> DepthTargets:
+def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[LibraryEntry], *,
+                          read_original: OriginalReader | None = None) -> DepthTargets:
     """網頁那一份：``settings`` 已接上使用者可最佳化材料（``with_user_materials``）；固定材料是內建構造加使用者的固定材料，
     名字照材料庫。"""
     base = builtin_depth_targets(settings)
-    return DepthTargets(settings, {**base.fixed, **{entry.id: entry.material for entry in entries if isinstance(entry, FixedEntry)}},
-                        {**base.labels, **{entry.id: entry.label for entry in entries}})
+    return DepthTargets(settings, {**base.fixed, **{entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None}},
+                        {**base.labels, **{entry.id: entry.label for entry in entries}},
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"),
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original)
 
 
 _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設", "request": "這一跑另填"}

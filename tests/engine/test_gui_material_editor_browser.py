@@ -391,7 +391,7 @@ def test_reopening_the_entry_being_saved_shows_what_was_saved(tmp_path: Path, br
         route.continue_()
         expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         expect(page.locator("#material-label")).to_have_value("很硬的牆")
-        expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」")
+        expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」：在「成品」頁「我的材料」")
         assert watched.page_errors == []
     assert _materials(tmp_path)["hard_wall"]["label"] == "很硬的牆"
 

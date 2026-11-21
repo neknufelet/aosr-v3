@@ -37,6 +37,7 @@ from aosr.gui.gradient_jobs import (
 )
 from aosr.gui.gradient_plan import GradientRequest, PlanRefused, plan_search, start_arguments
 from aosr.gui.surrogate_slots import found_surrogate, slot_key, surrogate_path
+from aosr.gui.zone_result import OriginalWalls
 from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
 from aosr.physics.fem_reduced_receipt import receipt_path
 from aosr.physics.fem_reduced_store import manifest_path
@@ -779,3 +780,22 @@ def test_a_library_family_no_search_zone_may_use_keeps_the_old_surrogate(tmp_pat
     with pytest.raises(NeedsSurrogate, match=f"家族 {USER} 沒訓練過"):
         _jobs(data_dir, refused).start(NAME, GradientRequest())
     assert refused.launched == []
+
+
+def test_original_scheme_is_read_under_the_scheme_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scheme = _scheme()
+    path = tmp_path / "schemes" / f"{NAME}.json"
+    path.parent.mkdir()
+    path.write_text(scheme.model_dump_json())
+    jobs = _jobs(tmp_path, FakeLauncher())
+    lock = threading.Lock()
+    jobs.scheme_lock = lock
+    read = Path.read_bytes
+
+    def checked(path: Path) -> bytes:
+        assert lock.locked(), "讀原方案檔時應持有方案鎖"
+        return read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", checked)
+    assert scheme.scene.surface_zones_by_wall is not None
+    assert jobs._read_original(NAME, scheme.model_dump(mode="json")) == OriginalWalls(NAME, scheme.scene.room_m, scheme.scene.surface_zones_by_wall)

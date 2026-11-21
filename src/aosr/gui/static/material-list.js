@@ -16,6 +16,7 @@ function sectionLayers(entry) {
     layers = [entry.porous];
     if (entry.cavity?.initial_m) layers.push({kind: "air", thickness_m: entry.cavity.initial_m});
   } else {
+    if (entry.kind === "construction") backing = entry.backing;
     layers = entry.layers;
   }
   return {backing, layers: layers.map((layer, index) => {
@@ -136,6 +137,7 @@ function catalogRow(row, previews) {
   const {layers, backing} = sectionLayers(entry);
   const total = layers.some(l => l.hasThickness) ? (Number(layers.reduce((sum, layer) => sum + layer.mm, 0).toFixed(2)) + " mm") : "未知";
   const stack = layers.map(layer => layer.name).join("、") || "無分層資料";
+  const section = entry.kind === "construction" ? stack + "，" + backingWords(backing) : stack;
   const box = el("div", {class: "preview", text: "計算中…"});
   previews.push({entry, box});
   const actions = el("div", {class: "catalog-actions"});
@@ -147,15 +149,16 @@ function catalogRow(row, previews) {
   for (const [name, value] of [["代號", entry.id], ["種類", kindText(entry)], ["阻抗怎麼得到", row.basis],
     ["吸音曲線算法", layers.length ? "各層以傳遞矩陣法疊合，再算無規入射吸音率" :
       entry.material.kind === "measured_impedance" ? "按實測表面阻抗算無規入射吸音率，表外用底構造補值" :
-        "按固定表面阻抗算無規入射吸音率"], ["房間側 → 牆側", stack], ["出處與條件", entry.source], ["能貼在哪", placement.reason]]) {
+        "按固定表面阻抗算無規入射吸音率"], ["房間側 → 牆側", section], ["出處與條件", entry.source], ["能貼在哪", placement.reason]]) {
     details.append(el("dt", {text: name}), el("dd", {text: value}));
   }
   const note = layers.some(l => !l.hasThickness) && total !== "未知" ? "（未計無厚度資料的層）" : "";
   return el("article", {class: "material-item", "data-id": entry.id},
     el("div", {class: "catalog-grid"},
-      materialCutaway(layers, backing, stack),
+      materialCutaway(layers, backing, section),
       el("div", {class: "material-name"}, el("strong", {text: entry.label}),
-        el("div", {class:"material-depth"}, "總厚 ", el("b", {text: total}), note), builtin ? el("small", {text: "內建・唯讀"}) : null),
+        el("div", {class:"material-depth"}, "總厚 ", el("b", {text: total}), note),
+        entry.kind === "construction" ? el("small", {text: backingWords(backing)}) : null, builtin ? el("small", {text: "內建・唯讀"}) : null),
       box, el("div", {class:"source-cell"}, sourceBadge(entry.provenance)),
       el("div", {class: "placement-cell"}, el("span", {class: "placement-tag", text: listing.surface_group_short[placement.group], title: placement.reason})),
       actions),
@@ -201,6 +204,10 @@ function queuePreviews() {
   void drawPreviews();
 }
 
+function catalogKind(entry) {
+  return entry.kind === "fixed" || (entry.kind === "construction" && entry.product) ? "fixed" : "optimizable";
+}
+
 function renderCatalog(rows) {
   const legend = byId("source-legend");
   legend.replaceChildren(el("strong", {text:"數據來源怎麼看"}));
@@ -210,7 +217,7 @@ function renderCatalog(rows) {
   // 自己的材料排前面，接著列出唯讀的內建預設。
   const ordered = [...rows.filter(row => !row.builtin), ...rows.filter(row => row.builtin)];
   catalogPreviews = catalogKinds.flatMap(kind => catalogPanel(kind, ordered.filter(row =>
-    (row.entry.kind === "fixed") === (kind === "fixed"))));
+    catalogKind(row.entry) === kind)));
   queuePreviews();
 }
 
@@ -225,12 +232,13 @@ function selectCatalog(kind) {
 }
 
 function revealSavedEntry(entry) {
-  const kind = entry.kind === "fixed" ? "fixed" : "optimizable";
+  const kind = catalogKind(entry);
   const row = byId("panel-" + kind).querySelector(`[data-id="${CSS.escape(entry.id)}"]`);
   const group = row.closest(".catalog-group");
   if (group) group.open = true;
   selectCatalog(kind);
-  row.scrollIntoView({block: "center"});
+  const tab = kind === "fixed" ? "成品" : "參數構造";
+  return `在「${tab}」頁「${group?.dataset.name ?? "我的材料"}」`;
 }
 
 function initCatalog() {
