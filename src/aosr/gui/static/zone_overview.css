@@ -223,6 +223,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page label.zv-covered{cursor:default;color:var(--soft)}
 #zone-page label.zv-covered input{border:1.5px dashed var(--soft)}
 #zone-page .zv-form-note{font-size:12.5px;color:var(--soft);margin:2px 0 3px 24px}
+.zone-candidate-cost{font-size:12.5px;line-height:1.5;color:var(--soft,#46586a);margin:6px 0}
 #zone-page .zv-form-note a.zv-link{margin-left:8px;font-size:12.5px;color:var(--fixed);text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
 #zone-page .zv-form details{margin-top:3px;padding-top:4px;border-top:1px solid #f0dfae;font-size:12.5px}
 #zone-page .zv-form details summary{color:var(--ink)}
