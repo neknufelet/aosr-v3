@@ -34,7 +34,7 @@ _BAND = """() => {
 
 
 def _open_material(page: Page, material_id: str) -> None:
-    page.locator(f'#user-list tr[data-id="{material_id}"] button.open').click()
+    page.locator(f'#panel-fixed [data-id="{material_id}"] button.open').click()
     expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
 
 

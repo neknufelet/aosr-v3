@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page, Route, expect
+from playwright.sync_api import Browser, Locator, Page, Route, expect
 
 from aosr.gui.material_editor import user_library_path
 from aosr.materials.construction_models import AirLayer, Assembly, PorousLayer
@@ -30,15 +30,21 @@ def _materials(data_dir: Path) -> dict[str, dict[str, object]]:
     return {entry["id"]: entry for entry in document["materials"]}
 
 
-def _row(page: Page, where: str, material_id: str, button: str) -> None:
-    page.locator(f'#{where} tr[data-id="{material_id}"] button.{button}').click()
+def _row(page: Page, kind: str, material_id: str, button: str) -> None:
+    page.locator(f"#tab-{kind}").click()
+    page.locator(f'#panel-{kind} [data-id="{material_id}"] button.{button}').click()
+
+
+def _user_row(page: Page, material_id: str) -> Locator:
+    row = page.get_by_role("tabpanel").locator(f'[data-id="{material_id}"]')
+    return row.filter(has=page.get_by_role("button", name="刪除", exact=True))
 
 
 def test_copy_a_builtin_family_change_its_thicknesses_and_save(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
         expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 0 筆")
-        _row(page, "builtin-list", "glass_wool_48k", "copy")
+        _row(page, "optimizable", "glass_wool_48k", "copy")
         expect(page.locator("#material-id")).to_have_value("glass_wool_48k_copy")
         expect(page.locator("#porous-thickness")).to_be_hidden()
         page.locator("#material-label").fill("我的 48K 棉")
@@ -49,7 +55,7 @@ def test_copy_a_builtin_family_change_its_thicknesses_and_save(tmp_path: Path, b
         page.locator("#cavity-depth").fill("0.05")
         _saved(page)
         assert not RAW_VALUES.search(page.locator("body").inner_text())
-        expect(page.locator('#user-list tr[data-id="glass_wool_48k_copy"]')).to_contain_text("我的 48K 棉")
+        expect(_user_row(page, "glass_wool_48k_copy")).to_contain_text("我的 48K 棉")
         assert (watched.console_errors, watched.page_errors) == ([], [])
     entry = _materials(tmp_path)["glass_wool_48k_copy"]
     assert entry["porous_thickness"] == {"adjustable": True, "choices_m": [0.05, 0.075, 0.1], "initial_m": 0.075, "range_m": [0.05, 0.1]}
@@ -116,7 +122,8 @@ def test_a_measured_table_without_imaginary_parts_saves_as_approximate(tmp_path:
         page.locator("#points").fill("100 950\n200, 820\n400 610")
         page.locator("#measured-source").fill("阻抗管、垂直入射、50 mm 樣品")
         _saved(page)
-        expect(page.locator('#user-list tr[data-id="tube_panel"]')).to_contain_text("近似")
+        _user_row(page, "tube_panel").locator("summary").click()
+        expect(_user_row(page, "tube_panel")).to_contain_text("近似")
         expect(page.locator("#points")).to_have_value("100 950\n200 820\n400 610")
         assert (watched.console_errors, watched.page_errors) == ([], [])
     material = _materials(tmp_path)["tube_panel"]["material"]
@@ -128,7 +135,7 @@ def test_a_measured_table_without_imaginary_parts_saves_as_approximate(tmp_path:
 def test_builtins_open_read_only_and_user_materials_can_be_deleted(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        _row(page, "builtin-list", "glass_wool_48k_50mm", "open")
+        _row(page, "fixed", "glass_wool_48k_50mm", "open")
         expect(page.locator("#editor-readonly")).to_be_visible()
         expect(page.locator("#save")).to_be_hidden()
         assert page.locator("#editor-body input:enabled, #editor-body select:enabled, #editor-body textarea:enabled").count() == 0
@@ -137,7 +144,7 @@ def test_builtins_open_read_only_and_user_materials_can_be_deleted(tmp_path: Pat
         page.locator("#material-label").fill("板 A")
         _saved(page)
         page.once("dialog", lambda dialog: dialog.accept())
-        _row(page, "user-list", "glass_wool_48k_50mm_copy", "delete")
+        _row(page, "fixed", "glass_wool_48k_50mm_copy", "delete")
         expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 0 筆；已刪除「板 A」")
         expect(page.locator("#editor")).to_be_hidden()
         assert (watched.console_errors, watched.page_errors) == ([], [])
@@ -152,7 +159,7 @@ def test_an_unreadable_user_file_is_shown_and_writes_are_disabled(tmp_path: Path
         page = watched.page
         expect(page.locator("#file-problem")).to_contain_text("讀不進來")
         expect(page.locator("#new-optimizable")).to_be_disabled()
-        _row(page, "builtin-list", "glass_wool_96k", "open")
+        _row(page, "optimizable", "glass_wool_96k", "open")
         expect(page.locator("#copy")).to_be_disabled()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert (watched.console_errors, watched.page_errors) == ([], [])
@@ -165,7 +172,7 @@ def test_every_builtin_copied_and_saved_untouched_keeps_every_field(tmp_path: Pa
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
         for entry in builtins:
-            _row(page, "builtin-list", entry.id, "copy")
+            _row(page, entry.kind, entry.id, "copy")
             _saved(page)
         assert (watched.console_errors, watched.page_errors) == ([], [])
     saved = _materials(tmp_path)
@@ -190,13 +197,13 @@ def test_constant_impedance_then_reopen_edit_and_save_in_place(tmp_path: Path, b
         page.locator("#impedance").fill("41000")
         _saved(page)
         page.locator("#close").click()
-        _row(page, "user-list", "hard_wall", "open")
+        _row(page, "fixed", "hard_wall", "open")
         expect(page.locator("#material-id")).to_be_disabled()
         expect(page.locator("#impedance")).to_have_value("41000")
         page.locator("#impedance").fill("82000")
         page.locator("#material-label").fill("很硬的牆")
         _saved(page)
-        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         assert all(REFUSED.search(text) for text in watched.console_errors) and len(watched.console_errors) == 1
         assert watched.page_errors == []
     entry = _materials(tmp_path)["hard_wall"]
@@ -206,6 +213,7 @@ def test_constant_impedance_then_reopen_edit_and_save_in_place(tmp_path: Path, b
 def test_fixed_thickness_without_cavity_and_a_three_column_table(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
+        page.locator("#tab-optimizable").click()
         page.locator("#new-optimizable").click()
         page.locator("#material-id").fill("slab")
         page.locator("#provenance").select_option("literature")
@@ -220,6 +228,7 @@ def test_fixed_thickness_without_cavity_and_a_three_column_table(tmp_path: Path,
         expect(page.locator("#editor-message")).to_contain_text("可最佳化材料至少要有一格能調")
         page.locator("#cavity-present").check()
         _saved(page)
+        page.locator("#tab-fixed").click()
         page.locator("#new-fixed").click()
         page.locator("#material-id").fill("tube_full")
         page.locator("#provenance").select_option("measured")
@@ -228,7 +237,7 @@ def test_fixed_thickness_without_cavity_and_a_three_column_table(tmp_path: Path,
         page.locator("#points").fill("100 950 -320\n200 820 -210")
         page.locator("#measured-source").fill("阻抗管、垂直入射")
         _saved(page)
-        expect(page.locator('#user-list tr[data-id="tube_full"]')).to_contain_text("實測")
+        expect(_user_row(page, "tube_full")).to_contain_text("實測")
         assert all(REFUSED.search(text) for text in watched.console_errors) and len(watched.console_errors) == 1
         assert watched.page_errors == []
     saved = _materials(tmp_path)
@@ -258,7 +267,7 @@ def test_renaming_only_keeps_a_single_product_thickness_and_a_multi_line_note(tm
         before = _materials(tmp_path)["my_wool"]
         with _open(browser, f"{base}/materials") as watched:
             page = watched.page
-            _row(page, "user-list", "my_wool", "open")
+            _row(page, "optimizable", "my_wool", "open")
             page.locator("#material-label").fill("我的棉改名")
             _saved(page)
             assert (watched.console_errors, watched.page_errors) == ([], [])
@@ -314,7 +323,7 @@ def test_a_save_reply_landing_late_keeps_the_draft_opened_meanwhile(tmp_path: Pa
         page.locator("#material-label").fill("還在改的草稿")
         route.continue_()
         # 清單那一列換成新名字＝晚到的回覆整個處理完了（修前修後都有這個訊號）。
-        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         expect(page.locator("#material-label")).to_have_value("還在改的草稿")
         expect(page.locator("#material-id")).to_have_value("new_material")
         expect(page.locator("#editor-title")).to_contain_text("新材料")
@@ -340,7 +349,7 @@ def test_opening_another_entry_during_a_save_does_not_relight_the_save_button(tm
         expect(page.locator("#save")).to_be_visible()
         expect(page.locator("#save")).to_be_disabled()
         route.continue_()
-        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         expect(page.locator("#save")).to_be_enabled()
         assert watched.page_errors == []
 
@@ -377,10 +386,10 @@ def test_reopening_the_entry_being_saved_shows_what_was_saved(tmp_path: Path, br
         _hold_once(page, held, "put")
         page.locator("#save").click()
         route = _wait_held(page, held)
-        _row(page, "user-list", "hard_wall", "open")
+        _row(page, "fixed", "hard_wall", "open")
         expect(page.locator("#material-label")).to_have_value("硬牆")
         route.continue_()
-        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         expect(page.locator("#material-label")).to_have_value("很硬的牆")
         expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」")
         assert watched.page_errors == []
@@ -408,7 +417,7 @@ def test_a_failed_list_reload_after_a_good_save_leaves_the_editor_alone(tmp_path
         expect(page.locator("#editor-message")).to_have_text("已儲存「很硬的牆」")
         expect(page.locator("#material-label")).to_have_value("很硬的牆")
         _saved(page)
-        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         assert watched.page_errors == []
     assert _materials(tmp_path)["hard_wall"]["label"] == "很硬的牆"
 
@@ -466,7 +475,7 @@ def test_a_new_draft_with_the_same_id_as_the_entry_being_saved_is_kept(tmp_path:
         expect(page.locator("#material-id")).to_have_value("new_material")
         page.locator("#material-label").fill("第二筆草稿")
         route.continue_()
-        expect(page.locator('#user-list tr[data-id="new_material"]')).to_contain_text("第一筆")
+        expect(_user_row(page, "new_material")).to_contain_text("第一筆")
         expect(page.locator("#material-label")).to_have_value("第二筆草稿")
         expect(page.locator("#editor-title")).to_contain_text("新材料")
         assert watched.page_errors == []
@@ -485,7 +494,7 @@ def test_closing_the_editor_during_a_save_says_only_that_it_was_saved(tmp_path: 
         route = _wait_held(page, held)
         page.locator("#close").click()
         route.continue_()
-        expect(page.locator('#user-list tr[data-id="hard_wall"]')).to_contain_text("很硬的牆")
+        expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
         expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 1 筆；已儲存「很硬的牆」")
         expect(page.locator("#editor")).to_be_hidden()
         assert watched.page_errors == []
@@ -500,10 +509,12 @@ def test_a_tunable_vpr_in_the_library_is_listed_and_does_not_break_the_page(tmp_
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
         expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 5 筆")
-        row = page.locator(f'#user-list tr[data-id="{VPR}"]')
+        page.locator("#tab-optimizable").click()
+        row = page.locator(f'#panel-optimizable [data-id="{VPR}"]')
+        row.get_by_text("細節", exact=True).click()
         expect(row).to_contain_text("可調多層構造：可調 VPR（鋼板＋黏住的背襯）")
         expect(row).to_contain_text("這一頁還不能看內容與編輯")
         assert row.locator("button").evaluate_all("nodes => nodes.map(node => node.className)") == ["delete danger"]
-        _row(page, "user-list", PANEL, "open")
+        _row(page, "fixed", PANEL, "open")
         expect(page.locator("#editor-title")).to_contain_text("薄吸音板（自編）")
         assert (watched.console_errors, watched.page_errors) == ([], [])

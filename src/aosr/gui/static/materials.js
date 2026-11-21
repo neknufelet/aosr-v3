@@ -41,25 +41,6 @@ function kindText(entry) {
   return `${listing.entry_kind_labels.fixed}：${form()[entry.material.kind].label}`;
 }
 
-function listTable(rows, builtin) {
-  if (!rows.length) return el("p", {text: builtin ? "沒有內建材料" : "還沒有自己的材料；按上面的「新增」，或在下面內建材料按「複製」。"});
-  const body = el("tbody");
-  for (const row of rows) {
-    const entry = row.entry;
-    const actions = el("td", {},
-      tunableLayers(entry) ? el("span", {class: "hint", text: "這一頁還不能看內容與編輯"}) : null,
-      tunableLayers(entry) ? null : el("button", {type: "button", class: "open", text: builtin ? "看內容" : "打開", on: {click: () => openEntry(row, false)}}),
-      tunableLayers(entry) ? null : el("button", {type: "button", class: "copy quiet", text: "複製", on: {click: () => copyEntry(entry)}}),
-      builtin ? null : el("button", {type: "button", class: "delete danger", text: "刪除", on: {click: () => deleteEntry(entry)}}));
-    body.append(el("tr", {"data-id": entry.id},
-      el("td", {text: entry.label}), el("td", {text: entry.id, "data-head": "代號"}),
-      el("td", {text: kindText(entry), "data-head": "種類"}), el("td", {text: row.basis, "data-head": "阻抗怎麼得到"}),
-      el("td", {text: listing.provenance_labels[entry.provenance], "data-head": "數字從哪來"}), actions));
-  }
-  const head = el("tr", {}, ...["顯示名", "代號", "種類", "阻抗怎麼得到", "數字從哪來", ""].map((text) => el("th", {text})));
-  return el("table", {}, el("thead", {}, head), body);
-}
-
 async function loadListing() {
   const reply = await api("/api/materials");
   if (!reply.ok) {
@@ -69,8 +50,7 @@ async function loadListing() {
   }
   listing = reply.body;
   const rows = listing.materials;
-  byId("builtin-list").replaceChildren(listTable(rows.filter((row) => row.builtin), true));
-  byId("user-list").replaceChildren(listTable(rows.filter((row) => !row.builtin), false));
+  renderCatalog(rows);
   const problem = listing.user_file_problem;
   byId("file-problem").hidden = !problem;
   byId("file-problem").textContent = problem ? `${problem}（修好之前不能存、不能刪）` : "";
@@ -641,7 +621,10 @@ async function save() {
       (current && !current.isNew && !current.builtin && current.entry.id === reply.body.material_id);
     if (sameEntry) {
       const row = listed ? listing.materials.find((item) => item.entry.id === reply.body.material_id) : null;
-      if (row) openEntry(row, false);
+      if (row) {
+        openEntry(row, false);
+        revealSavedEntry(row.entry);
+      }
       say(`已儲存「${document.label}」`, "ok");
     } else {
       byId("list-state").textContent += `；已儲存「${document.label}」${current ? "（編輯器現在開著的是另一筆，沒有動它）" : ""}`;
@@ -662,4 +645,5 @@ for (const event of ["input", "change"]) byId("editor-body").addEventListener(ev
 // 加層、刪層、上下移是按鈕，不會觸發 input／change，也算改過。
 byId("editor-body").addEventListener("click", (event) => { if (event.target.closest("button")) markCurveStale(); });
 window.addEventListener("resize", () => { if (plot) plot.setSize({width: chartWidth(), height: 320}); });
+initCatalog();
 loadListing().catch((error) => { byId("list-state").textContent = `讀不到材料庫：${error.message}`; byId("list-state").className = "notice"; });

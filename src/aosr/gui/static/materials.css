@@ -1,10 +1,6 @@
 /* 材料編輯頁：清單一筆一列；表單分塊，長欄名直排，多層構造一層一塊。 */
 /* 共用樣式把 .fields 設成 flex，會蓋掉 hidden；這一頁靠 hidden 切「能調／不能調」兩組欄位，所以要壓回去。 */
 #editor [hidden]{display:none!important}
-#user-list td:last-child,#builtin-list td:last-child{white-space:nowrap}
-#user-list td:nth-child(2),#builtin-list td:nth-child(2){font-family:ui-monospace,monospace;font-size:.85rem;overflow-wrap:anywhere}
-#user-list td:nth-child(3),#builtin-list td:nth-child(3),#user-list td:nth-child(4),#builtin-list td:nth-child(4){min-width:8rem}
-#user-list button,#builtin-list button{padding:.3rem .7rem;margin-right:.3rem}
 button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
 button.danger{background:#9b2c22}
 .block{border-top:1px solid #d5e0e4;padding:.8rem 0}
@@ -38,15 +34,6 @@ textarea:disabled,select:disabled{background:#edf1f2;color:#53636b}
 #curve-state{white-space:pre-line}
 /* 出處網址很長、沒有空白可斷：手機寬度要能在任何地方斷行，不然整塊表單會橫向捲。 */
 #curve-source{overflow-wrap:anywhere}
-/* 手機寬度：表格擠成一字一行看不了，改成一筆一張卡，欄名寫在值前面。 */
-@media(max-width:700px){
-  #user-list thead,#builtin-list thead{display:none}
-  #user-list tr,#builtin-list tr{display:block;border-bottom:1px solid #d5e0e4;padding:.5rem 0}
-  #user-list td,#builtin-list td{display:block;border:0;padding:.15rem 0;min-width:0}
-  #user-list td:first-child,#builtin-list td:first-child{font-weight:600}
-  #user-list td[data-head]::before,#builtin-list td[data-head]::before{content:attr(data-head) "：";color:#53636b}
-  #user-list td:last-child,#builtin-list td:last-child{padding-top:.4rem}
-}
 /* 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下的淡藍底、圖例那一行與「為什麼」。 */
 .ref-note{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;font-weight:400;font-size:inherit;background:none;text-align:left;list-style:none}
 .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid #9db9e0}
@@ -58,3 +45,65 @@ textarea:disabled,select:disabled{background:#edf1f2;color:#53636b}
 #curve-key li.ref-note{display:block;margin-right:0}
 .ref-band{position:absolute;left:0;top:0;height:100%;pointer-events:none;background:rgba(60,120,210,.16)}
 .ref-band-word{position:absolute;left:0;top:0;pointer-events:none;font-size:12.5px;line-height:1.3;color:#33434b;padding:5px 8px;white-space:nowrap}
+
+main{max-width:1320px}
+.catalog-top,.catalog-tabs,#source-legend,#source-legend>span,.catalog-actions{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
+.catalog-top{justify-content:space-between}
+.catalog-top h1,.catalog-top p{margin:0}
+.catalog-top a{color:#15617b}
+#source-legend{border-top:1px solid #d5e0e4;padding-top:.7rem;gap:.5rem 1.5rem;font-size:.95rem}
+#source-legend>span{gap:.4rem}
+.source-badge{display:inline-flex;align-items:center;gap:.4rem;border-radius:2rem;padding:.15rem .65rem;background:#edf4f6;color:#225265;font-size:.9rem;font-weight:600;white-space:nowrap}
+.source-badge i{position:relative;width:1.45rem;border-top:2px solid}
+.source-badge.measured{color:#24633f;background:#e1f1e6}
+.source-badge.measured i::before,.source-badge.measured i::after{content:"";position:absolute;width:4px;height:4px;top:-3px;left:3px;border-radius:50%;background:currentColor}
+.source-badge.measured i::after{left:auto;right:3px}
+.source-badge.model{background:white;border:1px dashed #7889ac;color:#4b5d86}
+.source-badge.model i{border-top-style:dashed}
+.catalog-tabs{gap:.35rem;margin:0 .6rem -1px}
+.catalog-tabs button{border:1px solid #cddde2;background:#e5edf0;color:#33434b;border-radius:9px 9px 0 0;padding:.6rem 1.2rem}
+.catalog-tabs [aria-selected=true]{background:white;color:#15617b;border-bottom-color:white;font-weight:bold;z-index:1}
+.catalog-tabs small{font-weight:400;color:#53636b}
+.catalog-list{margin-top:.85rem}
+.catalog-grid{display:grid;grid-template-columns:minmax(85px,1.05fr) minmax(180px,2fr) minmax(115px,1.13fr) minmax(80px,.68fr) minmax(90px,.88fr) minmax(145px,1.25fr);align-items:center;gap:1rem}
+.columns{background:#edf4f6;border-radius:6px;padding:.55rem .8rem;font-weight:600}
+.columns small,.material-name small,.catalog-actions small{display:block;font-size:.84rem;font-weight:400;color:#53636b}
+.columns small{white-space:pre-line}
+.material-item{border:0;border-bottom:1px solid #d5e0e4;padding:.75rem .8rem .4rem;overflow-wrap:anywhere}
+.material-name strong{font-size:1.06rem}
+.material-depth{margin:.25rem 0;font-size:.95rem}
+.catalog-grid .cutaway{width:auto;max-width:100%;height:auto;max-height:78px;border:0;background:none}
+.preview{color:#53636b;font-size:.88rem}
+.preview-warning{display:inline-block;margin-top:.2rem;color:#854c12;font-weight:600}
+.material-details dd ul{margin:0;padding-inline-start:1.25rem}
+.curve{display:block;max-width:168px;box-sizing:border-box}
+.curve line{stroke:#e1eaed}
+.curve.measured{color:#24633f;fill:currentColor}
+.curve.literature{color:#15617b}
+.curve.model{color:#4b5d86}
+.curve.model polyline{stroke-dasharray:5 3}
+.placement-tag{display:inline-block;border:1px solid #c2d0d5;border-radius:5px;padding:.12rem .4rem;font-size:.92rem}
+.catalog-actions{justify-content:flex-end;gap:.35rem}
+.catalog-actions button{padding:.3rem .65rem}
+.material-details{margin-top:.3rem}
+.material-details summary{width:max-content;cursor:pointer;color:#53636b;font-size:.88rem}
+.material-details dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem .8rem;padding:.65rem;background:#f5f8f9}
+.material-details dd{margin:0}
+.catalog-group{margin-top:.75rem;border:1px solid #cddde2;border-radius:8px;background:#fafcfc}
+.catalog-group>summary{padding:.65rem .8rem;cursor:pointer;font-weight:bold}
+#list-state{color:#53636b}
+@media(max-width:900px){
+  main{padding:.7rem}
+  .columns{display:none}
+  .catalog-list::before{content:"無規入射吸音率 0～1 · 31.5 Hz～2 kHz";display:block;color:#53636b;font-size:.85rem;margin-bottom:.6rem}
+  .catalog-grid:not(.columns){grid-template-columns:90px minmax(0,1fr);gap:.45rem .8rem}
+  .catalog-grid .cutaway{grid-column:1}
+  .preview{grid-row:2;grid-column:1}
+  .source-cell{grid-row:2;grid-column:2}
+  .placement-cell,.catalog-actions{grid-column:1 / -1}
+  .placement-cell::before{content:"能貼在哪　";font-size:.9rem;color:#53636b}
+  .catalog-actions{justify-content:flex-start}
+  .catalog-tabs button{padding:.5rem}
+  .catalog-tabs small{display:block}
+  [role=tabpanel]{padding:.8rem}
+}
