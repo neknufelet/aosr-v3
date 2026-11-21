@@ -1,0 +1,6 @@
+③、[[by_design]]：登記寫死到函式，標記搬進 if 底下一支沒登記的巢狀函式，照放行判（#1236）。
+
+迷你卡頂層的 [[by_design]] 准許 tests/test_probe.py 的 probe 一處 `# type: ignore[arg-type]`；那一處卻寫在 probe 裡
+`if` 底下的巢狀函式 hidden 裡——那一行屬於 probe.hidden，不屬於 probe。hidden 沒登記，那一行就是一筆沒寫兩格的放行，紅；
+probe 本身也因此一處都沒有，跟登記的 1 處對不上，紅。同一件錯一定紅這兩筆。
+認函式時不穿過 if 的話，那一行會被算成 probe，處數剛好對上，整份放行——這份樣本就是在咬那個洞。
