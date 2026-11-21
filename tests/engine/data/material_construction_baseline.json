@@ -1,0 +1,2261 @@
+{
+  "basis": {
+    "pin_air": "simulated",
+    "pin_family_false": "simulated",
+    "pin_family_true": "simulated",
+    "pin_impedance": "approximate",
+    "pin_rigid": "simulated",
+    "pin_table_false": "approximate",
+    "pin_table_true": "measured",
+    "pin_vpr": "simulated"
+  },
+  "candidates": [
+    {
+      "id": "fixed:pin_air",
+      "material": {
+        "backing": "air",
+        "kind": "assembly",
+        "layers": [
+          {
+            "flow_resistivity_pa_s_m2": 17000.0,
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.04
+          },
+          {
+            "kind": "air",
+            "thickness_m": 0.06
+          }
+        ]
+      }
+    },
+    {
+      "id": "fixed:pin_impedance",
+      "material": {
+        "impedance_pa_s_m": 4321.0,
+        "kind": "constant_impedance"
+      }
+    },
+    {
+      "id": "fixed:pin_rigid",
+      "material": {
+        "backing": "rigid",
+        "kind": "assembly",
+        "layers": [
+          {
+            "flow_resistivity_pa_s_m2": 17000.0,
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.04
+          },
+          {
+            "kind": "air",
+            "thickness_m": 0.06
+          }
+        ]
+      }
+    },
+    {
+      "id": "fixed:pin_table_false",
+      "material": {
+        "base_assembly": {
+          "backing": "rigid",
+          "kind": "assembly",
+          "layers": [
+            {
+              "flow_resistivity_pa_s_m2": 17000.0,
+              "kind": "porous",
+              "material_class": "fibrous",
+              "model": "komatsu",
+              "thickness_m": 0.04
+            }
+          ]
+        },
+        "fill_rule": "log_linear_table_base_assembly_outside_v1",
+        "kind": "measured_impedance",
+        "points": [
+          {
+            "frequency_hz": 110.0,
+            "imag_pa_s_m": 0.0,
+            "real_pa_s_m": 830.0
+          },
+          {
+            "frequency_hz": 440.0,
+            "imag_pa_s_m": 0.0,
+            "real_pa_s_m": 610.0
+          }
+        ],
+        "source_and_conditions": "自編"
+      }
+    },
+    {
+      "id": "fixed:pin_table_true",
+      "material": {
+        "base_assembly": {
+          "backing": "rigid",
+          "kind": "assembly",
+          "layers": [
+            {
+              "flow_resistivity_pa_s_m2": 17000.0,
+              "kind": "porous",
+              "material_class": "fibrous",
+              "model": "komatsu",
+              "thickness_m": 0.04
+            }
+          ]
+        },
+        "fill_rule": "log_linear_table_base_assembly_outside_v1",
+        "kind": "measured_impedance",
+        "points": [
+          {
+            "frequency_hz": 110.0,
+            "imag_pa_s_m": -125.0,
+            "real_pa_s_m": 830.0
+          },
+          {
+            "frequency_hz": 440.0,
+            "imag_pa_s_m": -125.0,
+            "real_pa_s_m": 610.0
+          }
+        ],
+        "source_and_conditions": "自編"
+      }
+    }
+  ],
+  "coverage": [
+    {
+      "cavity_m": [
+        0.0,
+        0.25
+      ],
+      "id": "glass_wool_48k",
+      "max_total_depth_m": 0.3,
+      "template_preset": "glass_wool_48k_50mm_gap50",
+      "template_sha256": "64067cbc21c4ed16397af5af4a3aec65599c74d3f28ecbab0f98d4d11da0266d",
+      "thickness_m": [
+        0.05,
+        0.2
+      ]
+    },
+    {
+      "cavity_m": null,
+      "id": "glass_wool_24k",
+      "max_total_depth_m": 0.3,
+      "template_preset": "glass_wool_24k_50mm",
+      "template_sha256": "9aa0be661d4d1836d45bda2695460415acb4847912bb17f78b140d673c4e4fec",
+      "thickness_m": [
+        0.05,
+        0.2
+      ]
+    },
+    {
+      "cavity_m": null,
+      "id": "glass_wool_96k",
+      "max_total_depth_m": 0.3,
+      "template_preset": "glass_wool_96k_50mm",
+      "template_sha256": "2797e61c99ef3aad0bfcb22db35a584500845aaf93ac87911402131d6dd27184",
+      "thickness_m": [
+        0.05,
+        0.2
+      ]
+    },
+    {
+      "cavity_m": null,
+      "id": "pin_family_false",
+      "max_total_depth_m": 0.08,
+      "template_preset": "pin_family_false",
+      "template_sha256": "191cc3a1908f133b9c3fad947219dbcc41e3cadecdd9152d79988e42195a0a1f",
+      "thickness_m": [
+        0.02,
+        0.08
+      ]
+    },
+    {
+      "cavity_m": [
+        0.0,
+        0.1
+      ],
+      "id": "pin_family_true",
+      "max_total_depth_m": 0.18,
+      "template_preset": "pin_family_true",
+      "template_sha256": "153000c2dafa928c8f356e8f7217452c86b15a9316bb892778016de1b57cfa53",
+      "thickness_m": [
+        0.02,
+        0.08
+      ]
+    }
+  ],
+  "fingerprint": "2afaab43cb369d69d2656e77918baea12757b62d82e6cd32d950851374ef4a53",
+  "listing": {
+    "entry_kind_labels": {
+      "fixed": "固定材料",
+      "optimizable": "可最佳化材料",
+      "tunable_layers": "可調多層構造"
+    },
+    "fixed_kinds": [
+      "assembly",
+      "constant_impedance",
+      "measured_impedance"
+    ],
+    "layer_kinds": [
+      "porous",
+      "air",
+      "board",
+      "fabric",
+      "micro_perforated",
+      "perforated",
+      "slotted"
+    ],
+    "material_form": {
+      "air": {
+        "fields": {
+          "kind": {
+            "default": "air",
+            "label": "層種類代號",
+            "options": {
+              "air": "空氣層"
+            },
+            "unit": ""
+          },
+          "thickness_m": {
+            "default": null,
+            "label": "空腔厚度",
+            "options": {},
+            "unit": "m"
+          }
+        },
+        "label": "空氣層"
+      },
+      "assembly": {
+        "fields": {
+          "backing": {
+            "default": null,
+            "label": "背後負載",
+            "options": {
+              "air": "空氣負載",
+              "rigid": "剛背"
+            },
+            "unit": ""
+          },
+          "kind": {
+            "default": "assembly",
+            "label": "表面種類代號",
+            "options": {
+              "assembly": "多層構造"
+            },
+            "unit": ""
+          },
+          "layers": {
+            "default": null,
+            "label": "至少一層",
+            "options": {},
+            "unit": "依房間側到牆體側排序"
+          }
+        },
+        "label": "多層構造"
+      },
+      "board": {
+        "fields": {
+          "kind": {
+            "default": "board",
+            "label": "層種類代號",
+            "options": {
+              "board": "薄板層"
+            },
+            "unit": ""
+          },
+          "resistance_pa_s_m": {
+            "default": null,
+            "label": "面阻力",
+            "options": {},
+            "unit": "Pa·s/m"
+          },
+          "surface_mass_kg_m2": {
+            "default": null,
+            "label": "面密度",
+            "options": {},
+            "unit": "kg/m²"
+          }
+        },
+        "label": "薄板層"
+      },
+      "constant_impedance": {
+        "fields": {
+          "impedance_pa_s_m": {
+            "default": null,
+            "label": "阻抗",
+            "options": {},
+            "unit": "Pa·s/m"
+          },
+          "kind": {
+            "default": "constant_impedance",
+            "label": "表面種類代號",
+            "options": {
+              "constant_impedance": "固定阻抗"
+            },
+            "unit": ""
+          }
+        },
+        "label": "固定阻抗"
+      },
+      "fabric": {
+        "fields": {
+          "flow_resistance_pa_s_m": {
+            "default": null,
+            "label": "面流阻",
+            "options": {},
+            "required": true,
+            "unit": "Pa·s/m"
+          },
+          "kind": {
+            "default": "fabric",
+            "label": "層種類代號",
+            "options": {
+              "fabric": "布層"
+            },
+            "required": false,
+            "unit": ""
+          },
+          "surface_mass_kg_m2": {
+            "default": null,
+            "label": "面密度",
+            "options": {},
+            "required": true,
+            "unit": "kg/m²"
+          }
+        },
+        "label": "布層"
+      },
+      "measured_impedance": {
+        "fields": {
+          "base_assembly": {
+            "default": null,
+            "label": "同一面牆的底構造；表外模型補值",
+            "options": {},
+            "unit": "只收多層構造"
+          },
+          "fill_rule": {
+            "default": "log_linear_table_base_assembly_outside_v1",
+            "label": "補值規則版本",
+            "options": {
+              "log_linear_table_base_assembly_outside_v1": "表內對數頻率線性內插、表外底構造補值第一版"
+            },
+            "unit": ""
+          },
+          "kind": {
+            "default": "measured_impedance",
+            "label": "表面種類代號",
+            "options": {
+              "measured_impedance": "實測阻抗表"
+            },
+            "unit": ""
+          },
+          "points": {
+            "default": null,
+            "label": "實測阻抗列；至少兩列",
+            "options": {},
+            "unit": "頻率嚴格遞增"
+          },
+          "source_and_conditions": {
+            "default": null,
+            "hint": "包含阻抗管、入射方式與樣品厚度",
+            "label": "量測出處與條件",
+            "options": {},
+            "unit": "包含阻抗管、入射方式與樣品厚度"
+          }
+        },
+        "label": "實測阻抗表",
+        "point_fields": {
+          "frequency_hz": {
+            "description": "量測頻率，Hz；有限正數、逐列嚴格遞增",
+            "label": "量測頻率",
+            "unit": "Hz"
+          },
+          "imag_pa_s_m": {
+            "description": "阻抗虛部，Pa·s/m；有限，時間慣例 e^{+jωt}；e^{−iωt} 的表須將虛部變號",
+            "label": "阻抗虛部",
+            "unit": "Pa·s/m"
+          },
+          "real_pa_s_m": {
+            "description": "阻抗實部，Pa·s/m；有限且大於零，不收正規化值",
+            "label": "阻抗實部",
+            "unit": "Pa·s/m"
+          }
+        }
+      },
+      "micro_perforated": {
+        "fields": {
+          "hole_diameter_m": {
+            "default": null,
+            "label": "孔徑",
+            "options": {},
+            "required": true,
+            "unit": "m"
+          },
+          "hole_pattern": {
+            "default": null,
+            "label": "孔排法",
+            "options": {
+              "rectangular": "長方格",
+              "square": "方格",
+              "staggered_45": "交錯 45°",
+              "staggered_60": "交錯 60°"
+            },
+            "required": false,
+            "unit": ""
+          },
+          "hole_spacing_2_m": {
+            "default": null,
+            "label": "排距",
+            "options": {},
+            "required": false,
+            "unit": "m"
+          },
+          "hole_spacing_m": {
+            "default": null,
+            "label": "孔距",
+            "options": {},
+            "required": false,
+            "unit": "m"
+          },
+          "kind": {
+            "default": "micro_perforated",
+            "label": "層種類代號",
+            "options": {
+              "micro_perforated": "微孔板"
+            },
+            "required": false,
+            "unit": ""
+          },
+          "open_area": {
+            "default": null,
+            "label": "開孔率",
+            "options": {},
+            "required": false,
+            "unit": "比例"
+          },
+          "surface_mass_kg_m2": {
+            "default": null,
+            "label": "面密度",
+            "options": {},
+            "required": false,
+            "unit": "kg/m²"
+          },
+          "thickness_m": {
+            "default": null,
+            "label": "層厚度",
+            "options": {},
+            "required": true,
+            "unit": "m"
+          }
+        },
+        "label": "微孔板"
+      },
+      "mounted_on_wall": {
+        "fields": {
+          "kind": {
+            "default": "mounted_on_wall",
+            "label": "表面種類代號",
+            "options": {
+              "mounted_on_wall": "貼在原牆上的構造"
+            },
+            "unit": ""
+          },
+          "layers": {
+            "default": null,
+            "label": "至少一層",
+            "options": {},
+            "unit": "依房間側到牆體側排序"
+          },
+          "wall": {
+            "default": null,
+            "label": "原牆",
+            "options": {},
+            "unit": ""
+          }
+        },
+        "label": "貼在原牆上的構造"
+      },
+      "perforated": {
+        "fields": {
+          "backing_fabric_flow_resistance_pa_s_m": {
+            "default": null,
+            "label": "背面貼布面流阻",
+            "options": {},
+            "required": false,
+            "unit": "Pa·s/m"
+          },
+          "backing_fabric_surface_mass_kg_m2": {
+            "default": null,
+            "label": "背面貼布面密度",
+            "options": {},
+            "required": false,
+            "unit": "kg/m²"
+          },
+          "hole_diameter_m": {
+            "default": null,
+            "label": "孔徑",
+            "options": {},
+            "required": true,
+            "unit": "m"
+          },
+          "hole_pattern": {
+            "default": null,
+            "label": "孔排法",
+            "options": {
+              "rectangular": "長方格",
+              "square": "方格",
+              "staggered_45": "交錯 45°",
+              "staggered_60": "交錯 60°"
+            },
+            "required": false,
+            "unit": ""
+          },
+          "hole_spacing_2_m": {
+            "default": null,
+            "label": "排距",
+            "options": {},
+            "required": false,
+            "unit": "m"
+          },
+          "hole_spacing_m": {
+            "default": null,
+            "label": "孔距",
+            "options": {},
+            "required": false,
+            "unit": "m"
+          },
+          "kind": {
+            "default": "perforated",
+            "label": "層種類代號",
+            "options": {
+              "perforated": "一般圓孔板"
+            },
+            "required": false,
+            "unit": ""
+          },
+          "open_area": {
+            "default": null,
+            "label": "開孔率",
+            "options": {},
+            "required": false,
+            "unit": "比例"
+          },
+          "surface_mass_kg_m2": {
+            "default": null,
+            "label": "面密度",
+            "options": {},
+            "required": false,
+            "unit": "kg/m²"
+          },
+          "thickness_m": {
+            "default": null,
+            "label": "層厚度",
+            "options": {},
+            "required": true,
+            "unit": "m"
+          }
+        },
+        "label": "一般圓孔板"
+      },
+      "porous": {
+        "fields": {
+          "flow_resistivity_pa_s_m2": {
+            "default": null,
+            "label": "流阻",
+            "options": {},
+            "unit": "Pa·s/m²"
+          },
+          "flow_resistivity_source": {
+            "default": "unspecified",
+            "label": "流阻從哪裡來",
+            "options": {
+              "catalog": "廠商型錄",
+              "density_table": "照密度查論文表",
+              "measured": "實測",
+              "unspecified": "未註明"
+            },
+            "unit": ""
+          },
+          "frame_compression_modulus_pa": {
+            "default": null,
+            "label": "骨架壓縮模數",
+            "options": {},
+            "unit": "Pa"
+          },
+          "frame_loss_factor": {
+            "default": null,
+            "label": "骨架損耗因數",
+            "options": {},
+            "unit": "無量綱"
+          },
+          "kind": {
+            "default": "porous",
+            "label": "層種類代號",
+            "options": {
+              "porous": "多孔層"
+            },
+            "unit": ""
+          },
+          "material_class": {
+            "default": null,
+            "label": "材料類別",
+            "options": {
+              "fibrous": "纖維類",
+              "foam": "泡棉"
+            },
+            "unit": ""
+          },
+          "model": {
+            "default": "komatsu",
+            "label": "多孔模型",
+            "options": {
+              "komatsu": "小松纖維經驗式",
+              "mechel_1976": "梅歇爾低頻延伸式",
+              "miki": "三木纖維經驗式",
+              "wilson_2015": "威爾森鬆弛模型"
+            },
+            "unit": ""
+          },
+          "porosity": {
+            "default": null,
+            "label": "孔隙率",
+            "options": {},
+            "unit": "無量綱"
+          },
+          "thickness_m": {
+            "default": null,
+            "label": "層厚度",
+            "options": {},
+            "unit": "m"
+          },
+          "tortuosity": {
+            "default": null,
+            "label": "曲折度",
+            "options": {},
+            "unit": "無量綱"
+          }
+        },
+        "label": "多孔層"
+      },
+      "slotted": {
+        "fields": {
+          "backing_fabric_flow_resistance_pa_s_m": {
+            "default": null,
+            "label": "背面貼布面流阻",
+            "options": {},
+            "required": false,
+            "unit": "Pa·s/m"
+          },
+          "backing_fabric_surface_mass_kg_m2": {
+            "default": null,
+            "label": "背面貼布面密度",
+            "options": {},
+            "required": false,
+            "unit": "kg/m²"
+          },
+          "kind": {
+            "default": "slotted",
+            "label": "層種類代號",
+            "options": {
+              "slotted": "長縫板"
+            },
+            "required": false,
+            "unit": ""
+          },
+          "open_area": {
+            "default": null,
+            "label": "開孔率",
+            "options": {},
+            "required": false,
+            "unit": "比例"
+          },
+          "slot_spacing_m": {
+            "default": null,
+            "label": "縫距",
+            "options": {},
+            "required": false,
+            "unit": "m"
+          },
+          "slot_width_m": {
+            "default": null,
+            "label": "縫寬",
+            "options": {},
+            "required": true,
+            "unit": "m"
+          },
+          "surface_mass_kg_m2": {
+            "default": null,
+            "label": "面密度",
+            "options": {},
+            "required": false,
+            "unit": "kg/m²"
+          },
+          "thickness_m": {
+            "default": null,
+            "label": "層厚度",
+            "options": {},
+            "required": true,
+            "unit": "m"
+          }
+        },
+        "label": "長縫板"
+      }
+    },
+    "materials": [
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "glass_wool_48k_50mm",
+          "kind": "fixed",
+          "label": "48K 玻璃棉 50 mm 貼牆",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 19100.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "glass_wool_48k_50mm_gap50",
+          "kind": "fixed",
+          "label": "48K 玻璃棉 50 mm＋50 mm 空腔",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 19100.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.05
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "glass_wool_48k_50mm_gap100",
+          "kind": "fixed",
+          "label": "48K 玻璃棉 50 mm＋100 mm 空腔",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 19100.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.05
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.1
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "glass_wool_48k_100mm",
+          "kind": "fixed",
+          "label": "48K 玻璃棉 100 mm 貼牆",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 19100.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.1
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "glass_wool_24k_50mm",
+          "kind": "fixed",
+          "label": "24K 玻璃棉 50 mm 貼牆",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 6900.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "厚度本版取 50 mm，選完可改；公稱密度不是樣品的實測密度。",
+            "同密度帶流阻散布大：下一顆 glass wool 04 是 28.0 kg/m³、流阻 12,300 Pa·s/m²。"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 03（樣品厚度與密度：54.0 mm、22.2 kg/m³；流阻 6,900 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "glass_wool_96k_50mm",
+          "kind": "fixed",
+          "label": "96K 玻璃棉 50 mm 貼牆",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 53100.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "厚度本版取 50 mm，選完可改；公稱密度不是樣品的實測密度。"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 11（樣品厚度與密度：26.5 mm、90.9 kg/m³；流阻 53,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "fabric_pet_a_gap100",
+          "kind": "fixed",
+          "label": "PET（聚酯）織布 A＋100 mm 空腔",
+          "links": [
+            "https://hdl.handle.net/20.500.14094/90005850",
+            "https://da.lib.kobe-u.ac.jp/da/kernel/90005850/90005850.pdf",
+            "https://doi.org/10.3390/su11072185"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistance_pa_s_m": 196.0,
+                "kind": "fabric",
+                "surface_mass_kg_m2": 0.065
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.1
+              }
+            ]
+          },
+          "notes": [
+            "布的兩個數字是論文實測值。流阻參照 ISO 9053（流阻量測標準），因為最低風速只到 0.005 m/s，用外推法求得。",
+            "論文量的就是這個構造（布＋100 mm 空腔、阻抗管垂直入射），但只有曲線圖、沒有數字表。",
+            "軟布採質量與面流阻並聯算法。"
+          ],
+          "provenance": "literature",
+          "source": "Sakagami, K.; Okuzono, T.; Somatomo, Y.; Funahashi, K.; Toyoda, M. (2019).\nA Basic Study on a Rectangular Plane Space Sound Absorber Using Permeable Membranes.\nSustainability 11(7), 2185. https://doi.org/10.3390/su11072185\nTable 1 Membrane A；Fig. 3 阻抗管垂直入射，背後 100 mm 空腔。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "fabric_pet_b_gap100",
+          "kind": "fixed",
+          "label": "PET（聚酯）織布 B＋100 mm 空腔",
+          "links": [
+            "https://hdl.handle.net/20.500.14094/90005850",
+            "https://da.lib.kobe-u.ac.jp/da/kernel/90005850/90005850.pdf",
+            "https://doi.org/10.3390/su11072185"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistance_pa_s_m": 462.0,
+                "kind": "fabric",
+                "surface_mass_kg_m2": 0.12
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.1
+              }
+            ]
+          },
+          "notes": [
+            "布的兩個數字是論文實測值。流阻參照 ISO 9053（流阻量測標準），因為最低風速只到 0.005 m/s，用外推法求得。",
+            "論文量的就是這個構造（布＋100 mm 空腔、阻抗管垂直入射），但只有曲線圖、沒有數字表。",
+            "軟布採質量與面流阻並聯算法。"
+          ],
+          "provenance": "literature",
+          "source": "Sakagami, K.; Okuzono, T.; Somatomo, Y.; Funahashi, K.; Toyoda, M. (2019).\nA Basic Study on a Rectangular Plane Space Sound Absorber Using Permeable Membranes.\nSustainability 11(7), 2185. https://doi.org/10.3390/su11072185\nTable 1 Membrane B（PET 織布，面流阻接近空氣阻抗）；Fig. 3 阻抗管垂直入射，背後 100 mm 空腔。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "perforated_gypsum_8_18r_backed_gw30_ceiling",
+          "kind": "fixed",
+          "label": "穿孔石膏板 8/18R 背面貼布＋30 mm 玻璃棉＋吊頂空腔",
+          "links": [
+            "https://cdn.atkar.com.au/wp-content/uploads/2017/09/23111246/VoglFuge-Acoustic-Data.pdf",
+            "https://cdn.atkar.com.au/wp-content/uploads/2018/10/01163401/VoglFuge-Brochure-2018-WEB.pdf",
+            "https://patents.google.com/patent/US8684134B2/en",
+            "https://cdn.chausson.fr/catalog-document/6e8fa6a5-6789-46f3-8c9e-3173a6c31217/ft.pdf",
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "backing_fabric_flow_resistance_pa_s_m": 236.0,
+                "backing_fabric_surface_mass_kg_m2": 0.063,
+                "hole_diameter_m": 0.008,
+                "hole_pattern": "square",
+                "hole_spacing_m": 0.018,
+                "kind": "perforated",
+                "thickness_m": 0.0125
+              },
+              {
+                "flow_resistivity_pa_s_m2": 6900.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.03
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.17
+              }
+            ]
+          },
+          "notes": [
+            "這是吊頂的量測，不是牆面；型錄沒寫試驗標準與實驗室。",
+            "背面那層布型錄沒給數字，借同類產品 Soundtex 代填（63 g/m²、236 Pa·s/m）。那是美國專利以 16.4 mm/s 風速量的，不是 ISO 9053（流阻量測標準）的低風速。",
+            "板厚型錄沒寫，先填 12.5 mm（別家同孔型的厚度，未驗，推測）；板本身面密度不填，不計板質量。",
+            "型錄的棉約 18 kg/m³，這裡用 24K 玻璃棉的流阻 6,900 Pa·s/m² 代填。200 mm 吊頂空腔拆成棉 30 mm＋空氣 170 mm 是未驗、推測；若型錄空腔不含棉，另一讀法是空氣 200 mm。",
+            "孔徑 8 mm、孔距 18 mm、方格，換算開孔率約 15.51%，型錄印 15.5%。",
+            "量測條件跟這組不完全一樣，只能大概對照。"
+          ],
+          "provenance": "literature",
+          "source": "VoglFuge — Continuously perforated plasterboard acoustic ceiling, Perforation Patterns & Acoustic Data.\nAtkar Group, ©2018，8/18R 那一列（30 mm Glass Wool、Ceiling Cavity 200 mm）；VoglFuge Brochure 2018。\n背布代填：Dugan, E. 等，US 8,684,134 B2，Gypsum-panel acoustical monolithic ceiling，USG Interiors，2014-04-01。\nSoundtex 名義 63 g/m²、面流阻 236 Pa·s/m。板厚旁證：Knauf Belgium，Fiche technique SoundDesign Cleaneo，09/2020。\n棉代填：Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 03，樣品 22.2 kg/m³、流阻 6,900 Pa·s/m²，借為 24K 玻璃棉。"
+        },
+        "placement": {
+          "group": "ceiling_build",
+          "reason": "描述的是整片天花（板加吊頂空腔），貼上去會跟原本的天花疊成兩層",
+          "surfaces": []
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "perforated_0p8mm_d10_gw24k_50mm",
+          "kind": "fixed",
+          "label": "0.8 mm 圓孔面板（孔 10 mm）＋24K 玻璃棉 50 mm 貼牆",
+          "links": [
+            "https://doi.org/10.1250/ast.27.87",
+            "https://www.jstage.jst.go.jp/article/ast/27/2/27_2_87/_pdf",
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "hole_diameter_m": 0.01,
+                "kind": "perforated",
+                "open_area": 0.31,
+                "thickness_m": 0.0008
+              },
+              {
+                "flow_resistivity_pa_s_m2": 6900.0,
+                "flow_resistivity_source": "density_table",
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "面板材質與板重原文沒寫；面密度不填，不計板質量。",
+            "原文的棉是 32 kg/m³、作者反推流阻約 7,500 Pa·s/m²，這裡用 24K 玻璃棉的 6,900 代填。",
+            "原文是阻抗管垂直入射，管子上限約 2 kHz，只有曲線圖。",
+            "面板直接貼棉，沒有空氣層、膜或背面貼布；量測條件跟這組不完全一樣，只能大概對照。"
+          ],
+          "provenance": "literature",
+          "source": "Sugie, S.; Yoshimura, J.; Ogawa, H. (2006). Absorption characteristics of fibrous material covered with perforated facing and film.\nAcoustical Science and Technology 27(2), 87–96. https://doi.org/10.1250/ast.27.87 Fig. 2。\n棉代填：Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 03，樣品 22.2 kg/m³、流阻 6,900 Pa·s/m²，借為 24K 玻璃棉。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "mpp_t1mm_d0p5_gap50",
+          "kind": "fixed",
+          "label": "微孔板 1 mm 厚、孔 0.5 mm＋50 mm 空腔",
+          "links": [
+            "https://hdl.handle.net/20.500.14094/90006344"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "hole_diameter_m": 0.0005,
+                "kind": "micro_perforated",
+                "open_area": 0.0077,
+                "surface_mass_kg_m2": 1.13,
+                "thickness_m": 0.001
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "原文的 50 mm 空腔裡塞滿蜂巢格，背後是盒子背板。這裡當成空的空腔＋剛性牆，斜入射時跟殘響室量測不能直接比。",
+            "開孔率 0.77% 是原文值。用方格算是 0.785%，原文說按加工稍微改過；未給排法，不填孔距。",
+            "原文是殘響室量測（JIS A 1409，量測標準；9 m²），只有曲線圖。"
+          ],
+          "provenance": "literature",
+          "source": "Hoshi, K.; Hanyu, T.; Okuzono, T.; Sakagami, K.; Yairi, M.; Harada, S.; Takahashi, S.; Ueda, Y. (2020).\nImplementation experiment of a honeycomb-backed MPP sound absorber in a meeting room.\nApplied Acoustics 157, 107000. Table 1。JSP Corp. 製作的 polymethacrylstyrene sheet（樹脂板）。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "mpp_t0p5mm_d0p5_gap50",
+          "kind": "fixed",
+          "label": "微孔板 0.5 mm 厚、孔 0.5 mm＋50 mm 空腔",
+          "links": [
+            "https://hdl.handle.net/20.500.14094/90001285"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "hole_diameter_m": 0.0005,
+                "kind": "micro_perforated",
+                "open_area": 0.00785,
+                "thickness_m": 0.0005
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.05
+              }
+            ]
+          },
+          "notes": [
+            "原文的空腔裡有鋁蜂巢。這裡當成空的空腔，殘響室量測只能大概對照。",
+            "板的材質原文沒寫；面密度不填，不計板質量。",
+            "原文是殘響室量測（10 m²），只有曲線圖。原文寫的標準號 JIS A1419 可能是 A1409 的筆誤（日本殘響室量測標準）。"
+          ],
+          "provenance": "literature",
+          "source": "Sakagami, K.; Yamashita, I.; Yairi, M.; Morimoto, M. (2010).\nSound absorption characteristics of a honeycomb-backed microperforated panel absorber: Revised theory and experimental validation.\nNoise Control Engineering Journal 58(2), 157–162. Table 1 Specimen C；Fig. 2(a)。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "slotted_gypsum_b6_backed_gap65",
+          "kind": "fixed",
+          "label": "開縫石膏板 Slotline B6 背面貼布＋65 mm 空腔",
+          "links": [
+            "https://documentacion.generadordeprecios.info/documentaciontecnica/knauf/knauf_d12.pdf",
+            "https://patents.google.com/patent/US8684134B2/en"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "backing_fabric_flow_resistance_pa_s_m": 236.0,
+                "backing_fabric_surface_mass_kg_m2": 0.063,
+                "kind": "slotted",
+                "open_area": 0.157,
+                "slot_width_m": 0.005,
+                "thickness_m": 0.0125
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.065
+              }
+            ]
+          },
+          "notes": [
+            "縫是一段一段的（5×82 mm），程式當成無限長的縫算，只能近似。",
+            "背面那層布型錄沒給數字，借同類產品 Soundtex 代填（63 g/m²、236 Pa·s/m，美國專利以 16.4 mm/s 量，不是低風速流阻量測）。",
+            "開孔率採型錄整板值 15.7%；開孔區局部約 0.216（由原圖推算），不採縫寬除縫距路線。",
+            "原文是吊頂的殘響室量測，空腔裡有龍骨；65 mm 含不含龍骨高度沒寫，全當空氣 65 mm。實驗室與報告號型錄沒寫。",
+            "板本身面密度不填，不計板質量；布流阻、開孔率取法、板重、空腔實際深度都有不確定性，量測只能大概對照。"
+          ],
+          "provenance": "literature",
+          "source": "Knauf，《D12.es Techo Knauf Cleaneo Akustik — Hoja técnica 01/2020》。p.12 B6 Slotline；p.30 Con velo acústico 65。\nUNE-EN ISO 354 與 ISO 11654（殘響室與吸音評級標準），型錄未列實驗室與報告號；連結是第三方站的型錄複本。\n背布代填：Dugan, E. 等，US 8,684,134 B2，Gypsum-panel acoustical monolithic ceiling，USG Interiors，2014-04-01。\nSoundtex 名義 63 g/m²、面流阻 236 Pa·s/m。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "slotted_wood_typ9_absorber40_gap98",
+          "kind": "fixed",
+          "label": "開縫木板 Typ 9＋40 mm 吸音材＋98 mm 空腔",
+          "links": [
+            "https://www.lignatur.ch/fileadmin/ablage/downloads/raumakustik/schallabsorptionsgrad-typ-9.pdf",
+            "https://www.lignatur.ch/produkt/raumakustik/schallabsorptionsgrade",
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "kind": "slotted",
+                "open_area": 0.133,
+                "slot_width_m": 0.0055,
+                "thickness_m": 0.031
+              },
+              {
+                "flow_resistivity_pa_s_m2": 19100.0,
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.04
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.098
+              }
+            ]
+          },
+          "notes": [
+            "縫長 380 mm、每 600 mm 斷一次，程式用無限長的縫近似，只算部分修正。",
+            "開孔率取含肋的整片平均 0.133（20×5.5×380÷（524×600）推算）；縫區約 0.145。沿縫方向 600 mm 格距是類推，另一位核對員用歐洲技術評估文件的圖對過；縫兩頭可圓可方，實際面積還會小一點。",
+            "40 mm 吸音材借 48K 預設代填，實際材料原文沒寫，流阻 19,100 Pa·s/m²；纖維類是未驗、推測，流阻來源未註明。背面貼不貼布原文也沒寫。",
+            "原件背後是 31 mm 木板，空腔被肋隔成約 210 mm 寬的長條，這裡當成剛性牆（未驗，推測），算法不處理肋分格。",
+            "板本身面密度不填，不計板質量。殘響室量測，量測條件跟這組不完全一樣，只能大概對照。"
+          ],
+          "provenance": "literature",
+          "source": "Hochschule für Technik Stuttgart（斯圖加特應用科大），Projekt 122 001 12P-212，Anlage 5（第 5 號附件，Typ 9）。\n試驗日 7.3.2012，報告日 28.3.2012；委託人 Lignatur AG，產品為 LFE 平面元件。\nDIN EN ISO 354（殘響室量測標準），殘響室 203 m³，試體 10.9 m²。\n吸音材借 48K 預設代填：Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 09，樣品 47.2 kg/m³、流阻 19,100 Pa·s/m²；原文未給材料與密度，並非照本產品密度查表。"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "id": "carpet_on_concrete",
+          "kind": "fixed",
+          "label": "地毯直接鋪混凝土（文獻擬合）",
+          "links": [
+            "https://www.osha.gov/otm/section-3-health-hazards/chapter-5",
+            "https://doi.org/10.3390/ma18020315"
+          ],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 7800.0,
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.007
+              }
+            ]
+          },
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "數字是擬合文獻吸音係數得來的，不是這款地毯的量測；實際地毯可能差很多。",
+            "Komatsu 模型原本擬合的是玻璃棉與岩棉，不是地毯絨毛；原研究只量到 100 Hz 以上，低頻是外推。",
+            "厚度 7 mm 是推測：出處沒給厚度，地毯絨毛常見約 5～10 mm（未驗，推測）。",
+            "加墊的地毯在 125／250／500 Hz 約 0.08／0.24／0.57（OSHA 同表），比這一筆吸得多，這次沒算。",
+            "流阻的挑法：厚度固定 7 mm，在 6,000～72,900 Pa·s/m² 取 30 個對數等距格點，選三帶對數誤差平方和最小的一點（約 7,769），再取整成 7,800 Pa·s/m²。",
+            "取整後 125／250／500 Hz 的無規入射吸音係數算出 0.021／0.056／0.128，跟目標 0.02／0.06／0.14 差 +6%／−7%／−9%。",
+            "有限元素用的是垂直入射：同三帶算出約 0.006／0.014／0.031，比無規入射更小。"
+          ],
+          "provenance": "literature",
+          "source": "OSHA Technical Manual（技術手冊）Sec III Ch 5 Table V-2（材料吸音係數表），列名 \"Carpet, heavy, on concrete\"。\n125／250／500 Hz 的無規入射吸音係數為 0.02／0.06／0.14；屬殘響室類資料的二手彙編，表下注明來源為 NIOSH 與 Cox、D'Antonio。\nBroda, et al. (2025), Materials 18(2), 315：ISO 10534-2（雙傳聲器阻抗管法）、80～5000 Hz。\n至 250 Hz 的原句：\"for all samples with and without the underlayment, the SAC achieves a low value below 0.1.\"\nSAC 是吸音係數；阻抗管為垂直入射，僅作低頻趨勢對照，不與 OSHA 無規入射數值混成擬合目標。"
+        },
+        "placement": {
+          "group": "floor",
+          "reason": "地毯、地板類，只鋪在地板",
+          "surfaces": [
+            "floor"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "cavity": {
+            "adjustable": true,
+            "choices_m": null,
+            "initial_m": 0.05,
+            "range_m": [
+              0.0,
+              0.25
+            ]
+          },
+          "id": "glass_wool_48k",
+          "kind": "optimizable",
+          "label": "48K 玻璃棉（可調厚度與空腔）",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "max_total_depth_m": 0.3,
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"
+          ],
+          "porous": {
+            "flow_resistivity_pa_s_m2": 19100.0,
+            "flow_resistivity_source": "density_table",
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.05
+          },
+          "porous_thickness": {
+            "adjustable": true,
+            "choices_m": [
+              0.05,
+              0.1,
+              0.2
+            ],
+            "initial_m": 0.05,
+            "range_m": [
+              0.05,
+              0.2
+            ]
+          },
+          "preset_members": [
+            "glass_wool_48k_50mm",
+            "glass_wool_48k_50mm_gap50",
+            "glass_wool_48k_50mm_gap100",
+            "glass_wool_48k_100mm"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。",
+          "suggested_total_depth_m": null,
+          "template_preset": "glass_wool_48k_50mm_gap50"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "cavity": {
+            "adjustable": true,
+            "choices_m": null,
+            "initial_m": null,
+            "range_m": [
+              0.0,
+              0.25
+            ]
+          },
+          "id": "glass_wool_24k",
+          "kind": "optimizable",
+          "label": "24K 玻璃棉（可調厚度與空腔）",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "max_total_depth_m": 0.3,
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "厚度本版取 50 mm，選完可改；公稱密度不是樣品的實測密度。",
+            "同密度帶流阻散布大：下一顆 glass wool 04 是 28.0 kg/m³、流阻 12,300 Pa·s/m²。"
+          ],
+          "porous": {
+            "flow_resistivity_pa_s_m2": 6900.0,
+            "flow_resistivity_source": "density_table",
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.05
+          },
+          "porous_thickness": {
+            "adjustable": true,
+            "choices_m": [
+              0.05,
+              0.1,
+              0.2
+            ],
+            "initial_m": 0.05,
+            "range_m": [
+              0.05,
+              0.2
+            ]
+          },
+          "preset_members": [
+            "glass_wool_24k_50mm"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 03（樣品厚度與密度：54.0 mm、22.2 kg/m³；流阻 6,900 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。",
+          "suggested_total_depth_m": null,
+          "template_preset": "glass_wool_24k_50mm"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": true,
+        "entry": {
+          "cavity": {
+            "adjustable": true,
+            "choices_m": null,
+            "initial_m": null,
+            "range_m": [
+              0.0,
+              0.25
+            ]
+          },
+          "id": "glass_wool_96k",
+          "kind": "optimizable",
+          "label": "96K 玻璃棉（可調厚度與空腔）",
+          "links": [
+            "https://doi.org/10.1250/ast.29.121",
+            "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf",
+            "https://doi.org/10.1250/ast.12.79"
+          ],
+          "max_total_depth_m": 0.3,
+          "notes": [
+            "實際產品流阻可能差數倍",
+            "厚度本版取 50 mm，選完可改；公稱密度不是樣品的實測密度。"
+          ],
+          "porous": {
+            "flow_resistivity_pa_s_m2": 53100.0,
+            "flow_resistivity_source": "density_table",
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.05
+          },
+          "porous_thickness": {
+            "adjustable": true,
+            "choices_m": [
+              0.05,
+              0.1,
+              0.2
+            ],
+            "initial_m": 0.05,
+            "range_m": [
+              0.05,
+              0.2
+            ]
+          },
+          "preset_members": [
+            "glass_wool_96k_50mm"
+          ],
+          "provenance": "literature",
+          "source": "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.\nAcoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121\nTable 3 glass wool 11（樣品厚度與密度：26.5 mm、90.9 kg/m³；流阻 53,100 Pa·s/m²）。\n開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf\n散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.\nJournal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79\n48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。",
+          "suggested_total_depth_m": null,
+          "template_preset": "glass_wool_96k_50mm"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": false,
+        "entry": {
+          "id": "pin_rigid",
+          "kind": "fixed",
+          "label": "自編層 rigid",
+          "links": [],
+          "material": {
+            "backing": "rigid",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 17000.0,
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.04
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.06
+              }
+            ]
+          },
+          "notes": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物"
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": false,
+        "entry": {
+          "id": "pin_air",
+          "kind": "fixed",
+          "label": "自編層 air",
+          "links": [],
+          "material": {
+            "backing": "air",
+            "kind": "assembly",
+            "layers": [
+              {
+                "flow_resistivity_pa_s_m2": 17000.0,
+                "kind": "porous",
+                "material_class": "fibrous",
+                "model": "komatsu",
+                "thickness_m": 0.04
+              },
+              {
+                "kind": "air",
+                "thickness_m": 0.06
+              }
+            ]
+          },
+          "notes": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物"
+        },
+        "placement": {
+          "group": "door_window",
+          "reason": "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的",
+          "surfaces": []
+        }
+      },
+      {
+        "basis": "近似",
+        "builtin": false,
+        "entry": {
+          "id": "pin_impedance",
+          "kind": "fixed",
+          "label": "自編阻抗",
+          "links": [],
+          "material": {
+            "impedance_pa_s_m": 4321.0,
+            "kind": "constant_impedance"
+          },
+          "notes": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物"
+        },
+        "placement": {
+          "group": "surface_itself",
+          "reason": "它本身就是一整面的表面阻抗（固定阻抗），只能整面換掉，不是貼上去的",
+          "surfaces": []
+        }
+      },
+      {
+        "basis": "近似",
+        "builtin": false,
+        "entry": {
+          "id": "pin_table_false",
+          "kind": "fixed",
+          "label": "自編表 False",
+          "links": [],
+          "material": {
+            "base_assembly": {
+              "backing": "rigid",
+              "kind": "assembly",
+              "layers": [
+                {
+                  "flow_resistivity_pa_s_m2": 17000.0,
+                  "kind": "porous",
+                  "material_class": "fibrous",
+                  "model": "komatsu",
+                  "thickness_m": 0.04
+                }
+              ]
+            },
+            "fill_rule": "log_linear_table_base_assembly_outside_v1",
+            "kind": "measured_impedance",
+            "points": [
+              {
+                "frequency_hz": 110.0,
+                "imag_pa_s_m": null,
+                "real_pa_s_m": 830.0
+              },
+              {
+                "frequency_hz": 440.0,
+                "imag_pa_s_m": null,
+                "real_pa_s_m": 610.0
+              }
+            ],
+            "source_and_conditions": "自編"
+          },
+          "notes": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物"
+        },
+        "placement": {
+          "group": "surface_itself",
+          "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
+          "surfaces": []
+        }
+      },
+      {
+        "basis": "實測",
+        "builtin": false,
+        "entry": {
+          "id": "pin_table_true",
+          "kind": "fixed",
+          "label": "自編表 True",
+          "links": [],
+          "material": {
+            "base_assembly": {
+              "backing": "rigid",
+              "kind": "assembly",
+              "layers": [
+                {
+                  "flow_resistivity_pa_s_m2": 17000.0,
+                  "kind": "porous",
+                  "material_class": "fibrous",
+                  "model": "komatsu",
+                  "thickness_m": 0.04
+                }
+              ]
+            },
+            "fill_rule": "log_linear_table_base_assembly_outside_v1",
+            "kind": "measured_impedance",
+            "points": [
+              {
+                "frequency_hz": 110.0,
+                "imag_pa_s_m": -125.0,
+                "real_pa_s_m": 830.0
+              },
+              {
+                "frequency_hz": 440.0,
+                "imag_pa_s_m": -125.0,
+                "real_pa_s_m": 610.0
+              }
+            ],
+            "source_and_conditions": "自編"
+          },
+          "notes": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物"
+        },
+        "placement": {
+          "group": "surface_itself",
+          "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
+          "surfaces": []
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": false,
+        "entry": {
+          "cavity": null,
+          "id": "pin_family_false",
+          "kind": "optimizable",
+          "label": "自編家族 False",
+          "links": [],
+          "max_total_depth_m": null,
+          "notes": [],
+          "porous": {
+            "flow_resistivity_pa_s_m2": 17000.0,
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.04
+          },
+          "porous_thickness": {
+            "adjustable": true,
+            "choices_m": [
+              0.02,
+              0.04,
+              0.08
+            ],
+            "initial_m": 0.04,
+            "range_m": [
+              0.02,
+              0.08
+            ]
+          },
+          "preset_members": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物",
+          "suggested_total_depth_m": null,
+          "template_preset": null
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": false,
+        "entry": {
+          "cavity": {
+            "adjustable": true,
+            "choices_m": null,
+            "initial_m": 0.03,
+            "range_m": [
+              0.0,
+              0.1
+            ]
+          },
+          "id": "pin_family_true",
+          "kind": "optimizable",
+          "label": "自編家族 True",
+          "links": [],
+          "max_total_depth_m": null,
+          "notes": [],
+          "porous": {
+            "flow_resistivity_pa_s_m2": 17000.0,
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.04
+          },
+          "porous_thickness": {
+            "adjustable": true,
+            "choices_m": [
+              0.02,
+              0.04,
+              0.08
+            ],
+            "initial_m": 0.04,
+            "range_m": [
+              0.02,
+              0.08
+            ]
+          },
+          "preset_members": [],
+          "provenance": "model",
+          "source": "考卷自編，非實物",
+          "suggested_total_depth_m": null,
+          "template_preset": null
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      },
+      {
+        "basis": "模擬，之後要拿實測對照",
+        "builtin": false,
+        "entry": {
+          "id": "pin_vpr",
+          "kind": "tunable_layers",
+          "label": "自編可調板",
+          "layers": [
+            {
+              "kind": "board",
+              "resistance_pa_s_m": 0.0,
+              "surface_mass_kg_m2": 9.0
+            },
+            {
+              "flow_resistivity_pa_s_m2": 17000.0,
+              "frame_compression_modulus_pa": 51000.0,
+              "frame_loss_factor": 0.12,
+              "kind": "porous",
+              "material_class": "fibrous",
+              "model": "komatsu",
+              "thickness_m": 0.04
+            }
+          ],
+          "links": [],
+          "max_total_depth_m": null,
+          "notes": [],
+          "plate_density_kg_m3": 7500.0,
+          "provenance": "model",
+          "source": "考卷自編，非實物",
+          "structure": "vpr",
+          "variables": [
+            {
+              "choices": null,
+              "field": "surface_mass_kg_m2",
+              "initial": 9.0,
+              "layer": 0,
+              "range": [
+                6.0,
+                12.0
+              ]
+            }
+          ]
+        },
+        "placement": {
+          "group": "wall",
+          "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
+        }
+      }
+    ],
+    "provenance_labels": {
+      "literature": "文獻",
+      "measured": "實測",
+      "model": "模型"
+    },
+    "required_fields": {
+      "air": [
+        "thickness_m"
+      ],
+      "assembly": [
+        "layers",
+        "backing"
+      ],
+      "board": [
+        "surface_mass_kg_m2",
+        "resistance_pa_s_m"
+      ],
+      "constant_impedance": [
+        "impedance_pa_s_m"
+      ],
+      "fabric": [
+        "surface_mass_kg_m2",
+        "flow_resistance_pa_s_m"
+      ],
+      "measured_impedance": [
+        "points",
+        "base_assembly",
+        "source_and_conditions"
+      ],
+      "micro_perforated": [
+        "thickness_m",
+        "hole_diameter_m"
+      ],
+      "perforated": [
+        "thickness_m",
+        "hole_diameter_m"
+      ],
+      "porous": [
+        "thickness_m",
+        "flow_resistivity_pa_s_m2",
+        "material_class"
+      ],
+      "slotted": [
+        "thickness_m",
+        "slot_width_m"
+      ]
+    },
+    "surface_group_short": {
+      "ceiling_build": "整片天花構造",
+      "demo109": "示範房的",
+      "door_window": "門窗",
+      "floor": "地板用的",
+      "surface_itself": "牆面地面本身",
+      "wall": "牆面與天花用的"
+    },
+    "surface_groups": {
+      "ceiling_build": "整片天花構造（描述的是整片天花本身，不是貼上去的處理）",
+      "demo109": "另一間示範房（109 號房）用的",
+      "door_window": "門、窗",
+      "floor": "地板用的",
+      "surface_itself": "牆面、地面本身（整面換掉，不是貼上去的）",
+      "wall": "牆面與天花用的（貼在牆上、或貼在吊頂下面）"
+    },
+    "user_file_problem": null
+  },
+  "placement": {
+    "pin_air": {
+      "group": "door_window",
+      "reason": "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的",
+      "surfaces": []
+    },
+    "pin_family_false": {
+      "group": "wall",
+      "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
+    },
+    "pin_family_true": {
+      "group": "wall",
+      "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
+    },
+    "pin_impedance": {
+      "group": "surface_itself",
+      "reason": "它本身就是一整面的表面阻抗（固定阻抗），只能整面換掉，不是貼上去的",
+      "surfaces": []
+    },
+    "pin_rigid": {
+      "group": "wall",
+      "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
+    },
+    "pin_table_false": {
+      "group": "surface_itself",
+      "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
+      "surfaces": []
+    },
+    "pin_table_true": {
+      "group": "surface_itself",
+      "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
+      "surfaces": []
+    },
+    "pin_vpr": {
+      "group": "wall",
+      "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
+    }
+  },
+  "snapshot_family_sha256": "d13f64eba212d85aa99801e904aa7e24a83df9fc64a687e368da7766f113c0cb",
+  "snapshot_fixed_sha256": "a7aedc5ace8994a038e84be2ca9d6f49528b97c3acff7cd0fe3e4ba06d7b3ece",
+  "zones": {
+    "pin_air": {
+      "material": {
+        "kind": "mounted_on_wall",
+        "layers": [
+          {
+            "flow_resistivity_pa_s_m2": 17000.0,
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.04
+          },
+          {
+            "kind": "air",
+            "thickness_m": 0.06
+          }
+        ],
+        "wall": {
+          "impedance_pa_s_m": 7654.0,
+          "kind": "constant_impedance"
+        }
+      },
+      "note": "「自編層 air」貼在原牆上（最後一層背後接原牆）",
+      "same_as_original": false
+    },
+    "pin_impedance": {
+      "material": {
+        "impedance_pa_s_m": 4321.0,
+        "kind": "constant_impedance"
+      },
+      "note": "「自編阻抗」是整面的表面阻抗，直接取代這一區的牆面（不是貼上去）",
+      "same_as_original": false
+    },
+    "pin_rigid": {
+      "material": {
+        "kind": "mounted_on_wall",
+        "layers": [
+          {
+            "flow_resistivity_pa_s_m2": 17000.0,
+            "kind": "porous",
+            "material_class": "fibrous",
+            "model": "komatsu",
+            "thickness_m": 0.04
+          },
+          {
+            "kind": "air",
+            "thickness_m": 0.06
+          }
+        ],
+        "wall": {
+          "impedance_pa_s_m": 7654.0,
+          "kind": "constant_impedance"
+        }
+      },
+      "note": "「自編層 rigid」貼在原牆上（最後一層背後接原牆）",
+      "same_as_original": false
+    },
+    "pin_table_false": {
+      "material": {
+        "base_assembly": {
+          "backing": "rigid",
+          "kind": "assembly",
+          "layers": [
+            {
+              "flow_resistivity_pa_s_m2": 17000.0,
+              "kind": "porous",
+              "material_class": "fibrous",
+              "model": "komatsu",
+              "thickness_m": 0.04
+            }
+          ]
+        },
+        "fill_rule": "log_linear_table_base_assembly_outside_v1",
+        "kind": "measured_impedance",
+        "points": [
+          {
+            "frequency_hz": 110.0,
+            "imag_pa_s_m": 0.0,
+            "real_pa_s_m": 830.0
+          },
+          {
+            "frequency_hz": 440.0,
+            "imag_pa_s_m": 0.0,
+            "real_pa_s_m": 610.0
+          }
+        ],
+        "source_and_conditions": "自編"
+      },
+      "note": "「自編表 False」是整面的表面阻抗，直接取代這一區的牆面（不是貼上去）",
+      "same_as_original": false
+    },
+    "pin_table_true": {
+      "material": {
+        "base_assembly": {
+          "backing": "rigid",
+          "kind": "assembly",
+          "layers": [
+            {
+              "flow_resistivity_pa_s_m2": 17000.0,
+              "kind": "porous",
+              "material_class": "fibrous",
+              "model": "komatsu",
+              "thickness_m": 0.04
+            }
+          ]
+        },
+        "fill_rule": "log_linear_table_base_assembly_outside_v1",
+        "kind": "measured_impedance",
+        "points": [
+          {
+            "frequency_hz": 110.0,
+            "imag_pa_s_m": -125.0,
+            "real_pa_s_m": 830.0
+          },
+          {
+            "frequency_hz": 440.0,
+            "imag_pa_s_m": -125.0,
+            "real_pa_s_m": 610.0
+          }
+        ],
+        "source_and_conditions": "自編"
+      },
+      "note": "「自編表 True」是整面的表面阻抗，直接取代這一區的牆面（不是貼上去）",
+      "same_as_original": false
+    }
+  }
+}
