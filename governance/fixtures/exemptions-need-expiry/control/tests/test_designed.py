@@ -8,3 +8,16 @@ LONG = 1  # noqa: E501
 class Probe:
     def run(self, build):
         return build(frequency=1)  # type: ignore[arg-type]
+
+
+def guarded(build, flag):
+    if flag:
+        def first():
+            return build(frequency=2)
+        return build(frequency=first)  # type: ignore[arg-type]
+    try:
+        def second():
+            return build(frequency=3)
+        return build(frequency=second)  # type: ignore[arg-type]
+    except TypeError:
+        return None

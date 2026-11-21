@@ -328,22 +328,29 @@ def _annotation(comment: str) -> dict[str, object]:
 
 
 def _scopes(text: str, rel: str) -> dict[int, str]:
-    """每一行落在哪個函式：行號 → 函式全名（類別與巢狀函式用點連起來；不在任何函式裡的行不在表上）。"""
+    """每一行落在哪個函式：行號 → 函式全名（類別與巢狀函式用點連起來；不在任何函式裡的行不在表上）。
+
+    走全部子節點，只有進到函式或類別時才把名字接上去：``if``、``try``、``with``、``for``、``while``、
+    ``match`` 底下定義的函式（模組層的也一樣），裡面的行算那支函式，不算外層（#1236）。外層的行範圍
+    先寫、巢狀的後寫蓋上去；同一層的定義行範圍不重疊，所以走的先後不影響結果。用一疊待走的節點
+    而不是遞迴：要走進運算式，很深的運算式不准把這支檢查撐爆。
+    """
     try:
         tree = ast.parse(text, filename=rel)
     except SyntaxError as exc:
         raise ToolBroken(f"{rel} 第 {exc.lineno} 行剖不開（{exc.msg}）——我沒看懂就不出結論") from exc
     out: dict[int, str] = {}
-
-    def walk(node: ast.AST, chain: tuple[str, ...]) -> None:
+    pending: list[tuple[ast.AST, tuple[str, ...]]] = [(tree, ())]
+    while pending:
+        node, chain = pending.pop()
         for child in ast.iter_child_nodes(node):
             if isinstance(child, SCOPE_NODES):
                 inner = (*chain, child.name)
                 for line in range(child.lineno, (child.end_lineno or child.lineno) + 1):
                     out[line] = ".".join(inner)
-                walk(child, inner)
-
-    walk(tree, ())
+                pending.append((child, inner))
+            else:
+                pending.append((child, chain))
     return out
 
 

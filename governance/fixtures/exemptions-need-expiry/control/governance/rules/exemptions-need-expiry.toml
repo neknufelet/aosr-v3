@@ -46,6 +46,13 @@ reason = "樣本：這一題就是要餵壞形狀進去看它炸。"
 
 [[by_design]]
 path = "tests/test_designed.py"
+function = "guarded"
+comment = "# type: ignore[arg-type]"
+count = 2
+reason = "樣本：這一題就是要餵壞形狀進去看它炸。"
+
+[[by_design]]
+path = "tests/test_designed.py"
 function = "<module>"
 comment = "# noqa: E501"
 count = 1
