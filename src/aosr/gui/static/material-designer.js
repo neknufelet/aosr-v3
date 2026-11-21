@@ -4,6 +4,7 @@ const backingLabels = {rigid: "硬牆", air: "空氣", zone_wall: "這一區原�
 let elements, dimensionFields, draft;
 let savedSnapshot;
 let uncertainCreate;
+let copiedOptimizable;
 let selected = -1;
 let readOnly = false;
 let isNew = true;
@@ -129,7 +130,10 @@ function parameterField(layer, key, required = listing.required_fields[layer.kin
       value: value == null ? "" : displayNumber(value * scale)});
   }
   input.addEventListener("input", () => {
-    if (!input.value && !required) delete layer[key];
+    // 還原原本省略的選項（例如流阻來源「未註明」），保留開檔時的欄位。
+    const original = layer.kind === "porous" && (copiedOptimizable ?? openedEntry)?.porous;
+    const restoreOmitted = original && !Object.hasOwn(original, key) && input.value === spec.default;
+    if ((!input.value && !required) || restoreOmitted) delete layer[key];
     else if (!input.value) layer[key] = null;
     else if (options.length) layer[key] = input.value;
     else layer[key] = scale === 1 ? Number(input.value) : displayNumber(Number(input.value) / scale);
@@ -278,10 +282,13 @@ function requestCurve() {
   byId("save-message").textContent = "";
   byId("curve-state").textContent = plot ? "改過了，停手後重算" : "計算中…";
   // 預覽只取疊層和背後，讓尚未填完的出處、名稱不影響物理曲線。
-  const entry = draftDocument();
-  const body = JSON.stringify(readOnly || unchangedOptimizable() ? entry : {...entry, label: "構造預覽", provenance: "model", source: "依各層物性推算", notes: [], links: []});
+  const unchanged = unchangedOptimizable();
+  const entry = unchanged ? openedEntry : draftDocument();
+  const origin = unchangedPorousSource();
+  const body = JSON.stringify(readOnly || unchanged ? entry : {...entry, label: "構造預覽",
+    provenance: origin?.provenance ?? "model", source: origin?.source ?? "依各層物性推算", notes: [], links: origin?.links ?? []});
   curveTimer = setTimeout(async () => {
-    const missing = missingLayerField() || tuningProblem(entry);
+    const missing = !unchanged && (missingLayerField() || tuningProblem(entry));
     if (missing) {
       renderCurve({status: "incomplete", message: missing});
       return;
@@ -323,8 +330,17 @@ function unchangedOptimizable() {
   return openedEntry?.kind === "optimizable" && snapshot() === savedSnapshot;
 }
 
+function unchangedPorousSource() {
+  const original = copiedOptimizable ?? openedEntry;
+  if (original?.kind !== "optimizable" || !tuningActive()) return null;
+  const porous = draft.layers[0];
+  const same = Object.keys({...original.porous, ...porous}).every(key =>
+    key === "thickness_m" || (porous[key] ?? null) === (original.porous[key] ?? null));
+  return same ? original : null;
+}
+
 function renderProvenance() {
-  const provenance = listing.provenance_labels[readOnly || unchangedOptimizable() ? draft.provenance : "model"];
+  const provenance = listing.provenance_labels[readOnly ? draft.provenance : unchangedPorousSource()?.provenance ?? "model"];
   byId("source").textContent = provenance;
   byId("citation-provenance").textContent = provenance;
 }
@@ -365,14 +381,20 @@ function modelNotes(original, notes = []) {
   return [line, ...notes.filter(note => note !== line)];
 }
 
-function copyFields(original, recovered) {
-  const saved = listing.materials.find(row => row.entry.id === original.id)?.entry ?? original;
-  return {id: recovered?.id ?? freeId(original.id + "_copy", collidingIds), label: freeLabel(original.label + "（複本）", recovered?.id),
+function copyIdentity(original, recovered) {
+  return {id: recovered?.id ?? freeId(original.id + "_copy", collidingIds), label: freeLabel(original.label + "（複本）", recovered?.id)};
+}
+
+function modelCopyFields(original, recovered) {
+  const saved = openedEntry ?? original;
+  return {...copyIdentity(original, recovered),
     provenance: "model", source: `照「${original.label}」改的`, links: [], notes: modelNotes(saved, original.notes)};
 }
 
 function makeCopy(original) {
-  draft = {...draft, ...copyFields(original), product: false};
+  copiedOptimizable = openedEntry?.kind === "optimizable" ? openedEntry : null;
+  const fields = copiedOptimizable ? copyIdentity(original) : modelCopyFields(original);
+  draft = {...draft, ...fields, product: false};
   openedEntry = null;
   uncertainCreate = null;
   isNew = true;
@@ -473,24 +495,24 @@ async function saveConstruction() {
   byId("workspace").inert = true;
   byId("name").disabled = true;
   try {
-    const missing = missingLayerField();
-    if (missing) throw new Error(missing);
     const recovered = await recoverCreate();
-    let document = draftDocument();
-    const problem = tuningProblem(document);
-    if (problem) throw new Error(problem);
+    const unchanged = !isNew && snapshot() === savedSnapshot;
+    const document = unchanged ? structuredClone(openedEntry) : draftDocument();
+    if (!unchanged) {
+      const problem = missingLayerField() || tuningProblem(document);
+      if (problem) throw new Error(problem);
+    }
     const switching = !isNew && document.kind !== openedEntry.kind;
     let copy;
     if (switching) {
       const names = listing.entry_kind_labels;
       if (!window.confirm(`這一筆已經存成${names[openedEntry.kind]}，改成${names[document.kind]}只能另存一份新的；原本那筆不動。`)) return;
-      copy = copyFields(draft, recovered?.kind === document.kind ? recovered : null);
+      copy = modelCopyFields(draft, recovered?.kind === document.kind ? recovered : null);
       Object.assign(document, copy);
-    } else if (openedEntry && snapshot() === savedSnapshot) {
-      document = structuredClone(openedEntry);
-    } else {
+    } else if (!unchanged && !unchangedPorousSource()) {
+      const original = copiedOptimizable ?? openedEntry ?? draft;
       document.provenance = "model";
-      if (document.notes || openedEntry?.provenance !== "model") document.notes = modelNotes(openedEntry ?? draft, draft.notes);
+      if (document.notes || original.provenance !== "model") document.notes = modelNotes(original, draft.notes);
     }
     const create = isNew || (switching && recovered?.kind !== document.kind);
     let reply = await putConstruction(document, create);
@@ -511,6 +533,7 @@ async function saveConstruction() {
     draft.provenance = document.provenance;
     draft.notes = document.notes;
     openedEntry = structuredClone(document);
+    copiedOptimizable = null;
     const row = listing.materials.find(item => item.entry.id === draft.id);
     if (row) row.entry = openedEntry;
     else listing.materials.push({entry: openedEntry, builtin: false});

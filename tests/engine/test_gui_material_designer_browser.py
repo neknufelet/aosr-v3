@@ -714,12 +714,18 @@ def test_tuning_untouched_preserves_file_and_request_order(tmp_path: Path, brows
 
 def test_tuning_range_edit_preserves_other_fields(tmp_path: Path, browser: Browser) -> None:
     with _designer(tmp_path, browser) as (page, base):
-        assert page.request.put(f"{base}/api/materials/woven_sample", data=_tuning_sample()).ok
+        entry = _tuning_sample() | {"provenance": "literature"}
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=entry).ok
         before = _stored(page, base)["woven_sample"]
         _open_sample(page, base)
         _fields(page, 0)
         page.get_by_label("範圍上限（mm）").fill("81")
-        page.get_by_label("買得到的厚度（mm）").fill("37, 81")
+        with page.expect_request(lambda r: r.url.endswith("/api/material-curve") and isinstance(body := r.post_data_json, dict)
+                                 and body["porous_thickness"]["choices_m"] == [.037, .081]) as preview:
+            page.get_by_label("買得到的厚度（mm）").fill("37, 81")
+        body = preview.value.post_data_json
+        assert isinstance(body, dict) and body["provenance"] == "literature"
+        expect(page.locator("#citation-provenance")).to_have_text("文獻")
         _save(page, "參數構造")
         spec = {"range_m": [.037, .081], "initial_m": .037, "adjustable": True, "choices_m": [.037, .081]}
         assert _stored(page, base)["woven_sample"] == before | {"porous_thickness": spec}

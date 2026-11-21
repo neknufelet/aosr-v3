@@ -189,15 +189,7 @@ def test_every_builtin_copied_and_saved_untouched_keeps_every_field(tmp_path: Pa
         got = saved[f"{entry.id}_copy"]
         changed = {"id", "label", "preset_members", "template_preset"}
         if entry.kind == "optimizable":
-            changed.update(("source", "provenance", "links", "notes"))
-            assert got["source"] == f"照「{entry.label}」改的" and got["provenance"] == "model"
-            assert got["links"] == [] and got["preset_members"] == [] and got["template_preset"] is None
-            notes = got["notes"]
-            assert isinstance(notes, list)
-            if entry.provenance != "model":
-                assert notes[0].startswith("原來源：")
-                notes = notes[1:]
-            assert notes == want["notes"]
+            assert got["preset_members"] == [] and got["template_preset"] is None
         for name in set(want) - changed:
             assert got[name] == want[name], (entry.id, name)
 

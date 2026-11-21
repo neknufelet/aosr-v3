@@ -257,8 +257,6 @@ class MaterialStore:
                     raise MaterialEditError(f"已有材料使用名稱「{existing.label}」，請重新打開或複製一份", 409)
                 raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409, conflict="id")
             if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
-                if not entry.cavity.adjustable and entry.cavity.initial_m is None:
-                    raise MaterialEditError("第 2 層 空氣層的厚度還沒填")
                 floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0], adjustable=entry.cavity.adjustable)
                 if floor is not None:
                     raise MaterialEditError(floor)

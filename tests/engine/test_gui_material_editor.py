@@ -289,12 +289,13 @@ def test_creating_another_material_serializes_the_whole_library(tmp_path: Path, 
     assert serialized == [["panel_a"], ["panel_a", "panel_b"]]
 
 
-def test_fixed_air_with_blank_initial_depth_cannot_be_written(tmp_path: Path) -> None:
+def test_fixed_air_with_blank_initial_depth_can_be_written(tmp_path: Path) -> None:
     document = {"kind": "optimizable", "id": "soft_sample", "label": "可調試片", "provenance": "model", "source": "樣片簿",
                 "porous": {"kind": "porous", "material_class": "fibrous", "thickness_m": .034, "flow_resistivity_pa_s_m2": 14700},
                 "porous_thickness": {"adjustable": True, "range_m": [.034, .068], "choices_m": [.034, .068], "initial_m": .034},
                 "cavity": {"adjustable": False, "range_m": [0, 0], "initial_m": None}}
     with _client(tmp_path) as client:
         response = client.put("/api/materials/soft_sample", json=document, headers=CREATE)
-    assert (response.status_code, response.json()) == (400, {"error": "第 2 層 空氣層的厚度還沒填"})
-    assert not user_library_path(tmp_path).exists()
+    assert response.status_code == 200, response.text
+    saved, = load_user_library(user_library_path(tmp_path))
+    assert saved == _ENTRY.validate_python(document)

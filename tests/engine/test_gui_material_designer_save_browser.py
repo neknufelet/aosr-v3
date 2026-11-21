@@ -1,15 +1,77 @@
 """材料設計器讀取失敗、存檔拒收與另存重試的畫面考卷。"""
+import json
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser, Route, expect
 
+from aosr.materials.library import SCHEMA_VERSION
 from tests.engine._construction_cases import construction
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_material_designer_browser import (
     _add, _advanced, _designer, _fields, _open_sample, _save, _stored, _tuning_sample,
 )
+
+
+def test_blank_fixed_cavity_saves_untouched_but_blocks_an_edit(tmp_path: Path, browser: Browser) -> None:
+    folder = tmp_path / "materials"
+    folder.mkdir()
+    library = folder / "materials.json"
+    entry = _tuning_sample(False) | {"cavity": {"adjustable": False, "range_m": [0, 0], "initial_m": None}}
+    library.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "materials": [entry]}, indent=3), encoding="utf-8")
+    before = library.read_bytes()
+    with _designer(folder, browser) as (page, base):
+        original = _stored(page, base)["woven_sample"]
+        _open_sample(page, base)
+        puts: list[str | None] = []
+        page.on("request", lambda request: puts.append(request.post_data) if request.method == "PUT" else None)
+        _save(page, "參數構造")
+        expect(page.locator("#curve canvas").first).to_be_visible(timeout=60_000)
+        expect(page.locator("#curve-state")).to_be_empty()
+        assert library.read_bytes() == before
+        page.locator("#name").fill("試織棉樣乙")
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).to_have_text("第 2 層 空氣層的厚度還沒填")
+        assert puts == [page.evaluate("entry => JSON.stringify(entry)", original)]
+        assert library.read_bytes() == before
+
+
+@pytest.mark.parametrize("copy", [False, True], ids=["in_place", "copy"])
+def test_flow_resistivity_edit_records_literature_once(tmp_path: Path, browser: Browser, copy: bool) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        entry = _tuning_sample() | {"provenance": "literature"}
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=entry).ok
+        _open_sample(page, base)
+        if copy:
+            page.get_by_role("button", name="複製一份").click()
+        _fields(page, 0)
+        expect(page.locator("#citation-provenance")).to_have_text("文獻")
+        for flow in ("17800", "18200"):
+            page.locator('[name="flow_resistivity_pa_s_m2"]').fill(flow)
+            expect(page.locator("#citation-provenance")).to_have_text("模型")
+            _save(page, "參數構造")
+            saved = _stored(page, base)["woven_sample_copy" if copy else "woven_sample"]
+            assert saved["provenance"] == "model"
+            assert saved["notes"] == ["原來源：文獻，出處：試片紀錄，網址：https://example.org/woven", "自編試片\n第二面"]
+
+
+def test_restoring_unspecified_flow_source_keeps_literature(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        entry = _tuning_sample(False) | {"provenance": "literature"}
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=entry).ok
+        original = _stored(page, base)["woven_sample"]
+        _open_sample(page, base)
+        _fields(page, 0)
+        _advanced(page)
+        field = page.locator('[name="flow_resistivity_source"]')
+        field.select_option("catalog")
+        expect(page.locator("#source")).to_have_text("模型")
+        field.select_option("unspecified")
+        expect(page.locator("#source")).to_have_text("文獻")
+        with page.expect_request(lambda r: r.method == "PUT") as sent:
+            _save(page, "參數構造")
+        assert sent.value.post_data == page.evaluate("entry => JSON.stringify(entry)", original)
 
 
 @pytest.mark.parametrize("written", [False, True], ids=["refused", "reply_lost_after_write"])
