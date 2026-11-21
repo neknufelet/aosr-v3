@@ -620,7 +620,8 @@ async function applyMethod(items, method, written = () => {}) {
     zoneFormerFixed.delete(item.id); zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
-  zoneNote(`${items.length} 區改成「${what}」`, "ok");
+  const pickedNotes = new Set(results.filter(change => change.picked_entry).map(change => change.note));
+  zoneNote([`${items.length} 區改成「${what}」`, ...pickedNotes].join(" "), "ok");
   unsaved = true;
   written();
   changing += 1; showChanging();

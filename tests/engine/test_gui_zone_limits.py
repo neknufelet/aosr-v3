@@ -887,6 +887,31 @@ def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str)
         assert any(f"設計設定記的那一筆「{label}」跟這一區現在的材料對不上" in line["text"] for line in lines)
 
 
+def test_preview_refuses_an_unexpected_original_wall_conversion_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui import gradient_jobs
+    from tests.engine.test_gui_gradient_jobs import FakeLauncher
+
+    def refuse(scheme: Scheme) -> None:
+        raise ValueError("自編原牆換算失敗\n後續細節")
+
+    monkeypatch.setattr(gradient_jobs, "comparison_walls", refuse)
+    entry = construction("rigid")
+    current = _cut(None)
+    zone = next(item for item in _zones(current)["x0"] if item["id"] == "z1")
+    zone["material"] = {"kind": "assembly", "backing": "rigid", "layers": entry["layers"]}
+    design = _design(original_scheme_id="before", zones={"x0": {
+        "z1": {"mode": "fixed", "max_depth_m": 0.05}, "auto1": {"mode": "search"}}})
+    settings = GuiSettings(engine_commit="a" * 40, data_dir=tmp_path, gradient_launcher=FakeLauncher())
+    with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
+        schemes = tmp_path / "schemes"
+        (schemes / "before.json").write_text(json.dumps(room109_document("before")))
+        (schemes / "room109.json").write_text(_scheme(current).model_dump_json())
+        (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json())
+        assert client.put(f"/api/materials/{entry['id']}", json=entry).status_code == 200
+        response = client.post("/api/gradient/schemes/room109/plan", json={})
+    assert (response.status_code, response.json().get("error")) == (400, "自編原牆換算失敗\n後續細節")
+
+
 def test_depth_and_material_pick_both_include_builtin_constructions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.engine.test_gui_gradient_jobs import FakeLauncher, _jobs
 

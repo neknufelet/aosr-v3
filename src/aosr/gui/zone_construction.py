@@ -77,7 +77,7 @@ def read_original(data_dir: Path, name: str, lock: AbstractContextManager[object
         return OriginalProblem(f"原方案「{name}」讀不進來：{reasons}", error=str(exc).splitlines()[0])
     try:
         return resolve(scheme)
-    except ValueError as exc:
+    except BaselineRefused as exc:
         return OriginalProblem(str(exc), error=str(exc).partition("\n")[0])
 
 

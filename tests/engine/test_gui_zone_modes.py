@@ -363,6 +363,17 @@ def test_reselecting_a_bare_copy_is_recorded_and_over_depth_without_an_original(
     assert "picked_construction" not in picked
 
 
+def test_reselecting_a_bare_copy_with_a_different_original_only_explains_the_pick(client: TestClient, tmp_path: Path) -> None:
+    doc = construction("air")
+    assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
+    (tmp_path / "schemes" / "before.json").write_text(json.dumps(room109_document("before")))
+    scheme = _cut_document()
+    _put(scheme, "z1", {"kind": "assembly", "backing": "air", "layers": doc["layers"]})
+    code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"], original_scheme_id="before")
+    assert code == 200 and picked["origin"] == "original_scheme" and picked["same_as_original"] is False
+    assert picked["note"] == f"記成選上去的「{doc['label']}」，整塊構造直接取代這一區的牆面。"
+
+
 def test_legacy_only_library_keeps_the_single_and_batch_response_bytes(client: TestClient) -> None:
     scheme = _cut_document()
     choice = {"choice": "original", "wall": "x0", "zone": "z1"}
@@ -399,6 +410,29 @@ def test_recorded_id_only_affects_the_material_mismatch_note(client: TestClient)
     assert code == 200
     code, stale = _post(client, scheme, "z1", **choice, picked_entry="missing_sample")
     assert code == 200 and stale == {**expected, "note": f"{expected['note']}；設計設定記的那一筆「missing_sample」跟這一區現在的材料對不上"}
+
+
+@pytest.mark.parametrize("bare", [False, True])
+@pytest.mark.parametrize("original", [None, "before"])
+@pytest.mark.parametrize("choice", ["original", "rigid_sample", PRESET])
+def test_recorded_id_preserves_the_four_material_reply_fields(client: TestClient, tmp_path: Path,
+                                                             bare: bool, original: str | None, choice: str) -> None:
+    entry = construction("rigid", id="rigid_sample")
+    assert client.put("/api/materials/rigid_sample", json=entry).status_code == 200
+    scheme = _cut_document()
+    if bare:
+        _put(scheme, "z1", {"kind": "assembly", "backing": "rigid", "layers": entry["layers"]})
+    args = {"choice": "original"} if choice == "original" else {"choice": "fixed", "material_id": choice}
+    if original is not None:
+        (tmp_path / "schemes" / "before.json").write_text(json.dumps(room109_document(original)))
+        args["original_scheme_id"] = original
+    code, plain = _post(client, scheme, "z1", **args)
+    assert code == 200, plain
+    fields = ("material", "origin", "same_as_original", "picked_entry")
+    for recorded in (None, entry["id"], "missing_sample"):
+        status, data = _post(client, scheme, "z1", **args, picked_entry=recorded)
+        assert status == code, recorded
+        assert [data[key] for key in fields] == [plain[key] for key in fields], recorded
 
 
 def test_original_wall_resolution_reports_value_errors(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

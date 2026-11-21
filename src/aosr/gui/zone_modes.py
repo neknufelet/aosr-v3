@@ -185,8 +185,10 @@ def zone_material(current: SurfaceMaterial, base: Origin, entry: LibraryEntry | 
     elif isinstance(entry, ConstructionEntry) and chosen is not None:
         if chosen == base.material and base.source != "unknown":
             return ZoneChange(base.material, f"選的「{entry.label}」跟這一區{face}一模一樣，當成不貼（保留原樣）", True)
-        return ZoneChange(chosen, f"記成選上去的「{entry.label}」，整塊構造直接取代這一區的{face_itself(wall)}。"
-                                  "如果這一區本來就是它，改選「不貼，保留原樣」或在上面指定原方案")
+        note = f"記成選上去的「{entry.label}」，整塊構造直接取代這一區的{face_itself(wall)}。"
+        if base.source != "original_scheme":
+            note += "如果這一區本來就是它，改選「不貼，保留原樣」或在上面指定原方案"
+        return ZoneChange(chosen, note)
     elif chosen is not None:
         note = f"「{entry.label}」是整面的表面阻抗，直接取代這一區的{face_itself(wall)}（不是貼上去）"
         if base.source == "unknown" and isinstance(current, Assembly):
@@ -270,10 +272,13 @@ class ZoneMaterialHandlers:
         standalone = {item.id: fixed_surface(item) for item in entries if isinstance(item, ConstructionEntry) and item.backing != "zone_wall"}
         prior = None
         if original_scheme_id is not None:
-            resolved = read_original(
-                self.data_dir, original_scheme_id, self.lock,
-                lambda original: original_walls(original, scheme, capabilities=self.capabilities, directivity=self.directivity),
-            )
+            def resolve(original: Scheme) -> OriginalWalls:
+                try:
+                    return original_walls(original, scheme, capabilities=self.capabilities, directivity=self.directivity)
+                except ValueError as exc:
+                    raise ZoneMaterialError(str(exc).partition("\n")[0]) from exc
+
+            resolved = read_original(self.data_dir, original_scheme_id, self.lock, resolve)
             if isinstance(resolved, OriginalProblem):
                 raise ZoneMaterialError(resolved.error or resolved.reason, resolved.status)
             prior = resolved
