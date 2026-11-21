@@ -787,7 +787,7 @@ def test_unreadable_original_has_a_plain_validation_reason(tmp_path: Path, case:
     from aosr.gui.zone_construction import OriginalProblem
 
     (tmp_path / "schemes").mkdir()
-    (tmp_path / "schemes/original.json").write_text(_saved_original_for_comparison(case, {}))
+    (tmp_path / "schemes" / "original.json").write_text(_saved_original_for_comparison(case, {}))
     problem = _jobs(tmp_path, FakeLauncher())._read_original("original")
     assert isinstance(problem, OriginalProblem)
     assert "讀不進來" in problem.reason and words in problem.reason
@@ -841,13 +841,13 @@ def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str)
     settings["zones"]["x0"]["z1"] = {"mode": "fixed", "picked_entry": "chosen", "max_depth_m": 0.05}
     with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         if case == "same":
-            (tmp_path / "schemes/original.json").write_text(_saved_original_for_comparison(case, material))
+            (tmp_path / "schemes" / "original.json").write_text(_saved_original_for_comparison(case, material))
         assert client.put("/api/materials/another", json=duplicate).status_code == 200
         if case != "deleted":
             assert client.put("/api/materials/chosen", json=entry | ({"backing": "rigid"} if case == "wrong_backing" else {})).status_code == 200
         page = client.post("/api/zone-limits", json={"scheme": current, "design": settings}).json()
-    (tmp_path / "schemes/room109.json").write_text(scheme.model_dump_json())
-    (tmp_path / "designs/room109.json").write_text(json.dumps(settings))
+    (tmp_path / "schemes" / "room109.json").write_text(scheme.model_dump_json())
+    (tmp_path / "designs" / "room109.json").write_text(json.dumps(settings))
     jobs = _jobs(tmp_path, FakeLauncher())
     _, scheme, design = jobs.inputs("room109")
     targets = jobs.depth_targets()

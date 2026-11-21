@@ -377,7 +377,7 @@ def test_recorded_pick_preserves_the_reason_restoring_a_crossed_original_fails(c
     original = room109_document("before")
     pieces = cut_wall(original, "x0", [CutBox(id="small", u_m=(0.0, 0.5), v_m=(0.0, 0.6))])
     _zones(original)["x0"] = cast(list[dict[str, object]], pieces["zones"])
-    (tmp_path / "schemes/before.json").write_text(json.dumps(original))
+    (tmp_path / "schemes" / "before.json").write_text(json.dumps(original))
     args = {"choice": "original", "original_scheme_id": "before"}
     expected = _post(client, scheme, "z1", **args)
     assert expected[0] == 400 and "沿原方案的切線切開" in str(expected[1]["error"])
