@@ -204,6 +204,26 @@ def _files(root: Path) -> list[tuple[str, bytes]]:
     return sorted((str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*") if path.is_file())
 
 
+def test_missing_other_wall_refuses_even_a_batch_of_bare_constructions(client: TestClient, tmp_path: Path) -> None:
+    original = room109_document("before")
+    del _zones(original)["y0"]
+    folder = tmp_path / "schemes"
+    folder.mkdir(exist_ok=True)
+    (folder / "before.json").write_text(json.dumps(original))
+    current = _cut_document()
+    choice = {"wall": "x0", "zone": "z1", "choice": "original"}
+    other = {**choice, "zone": "auto1"}
+    ordinary = _batch(client, current, choice, other, original_scheme_id="before")
+    assert ordinary[0] == 400 and ordinary[1]["index"] is None
+    doc = construction("air", id="test_panel")
+    assert client.put("/api/materials/test_panel", json=doc).status_code == 200
+    material = {"kind": "assembly", "layers": doc["layers"], "backing": "air"}
+    _put(current, "z1", material)
+    assert _batch(client, current, choice, other, original_scheme_id="before") == ordinary
+    _put(current, "auto1", material)
+    assert _batch(client, current, choice, other, original_scheme_id="before") == ordinary
+
+
 def test_a_batch_gives_each_zone_what_the_one_zone_endpoint_gives_and_writes_nothing(client: TestClient, tmp_path: Path) -> None:
     document = _cut_document()
     changes = [{"wall": "x0", "zone": "z1", "choice": "fixed", "material_id": PRESET},

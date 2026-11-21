@@ -678,10 +678,55 @@ def test_same_construction_on_a_different_original_wall_still_checks_depth(tmp_p
         "xL": {"whole_wall": {"state": "picked", "id": doc["id"], "label": doc["label"]}}}
 
 
+def test_untreated_six_number_original_can_tell_a_picked_construction(tmp_path: Path) -> None:
+    doc = construction("air", id="test_panel", label="試作面板")
+    material = {"kind": "assembly", "layers": doc["layers"], "backing": "air"}
+    current = _cut(None)
+    next(zone for zone in _zones(current)["x0"] if zone["id"] == "z1")["material"] = material
+    design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}}}, original_scheme_id="original")
+    original = room109_document("original")
+    wall = {"kind": "constant_impedance", "impedance_pa_s_m": 1731.0}
+    _zones(original)["x0"][0]["material"] = wall
+    untreated = _scheme(original)
+    assert untreated.scene.surface_zones_by_wall is None
+    with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        (tmp_path / "schemes" / "original.json").write_text(untreated.model_dump_json())
+        assert client.put("/api/materials/test_panel", json=doc).status_code == 200
+        page = client.post("/api/zone-limits", json={"scheme": current, "design": design.model_dump(mode="json")}).json()
+        back = client.post("/api/zone-material", json={"scheme": current, "wall": "x0", "zone": "z1",
+                                                       "choice": "original", "original_scheme_id": "original"}).json()
+    seen = (page["picked_constructions"]["x0"]["z1"]["state"], page["red"], back["origin"], back["material"] != material)
+    assert seen == ("picked", 1, "original_scheme", True)
+    assert back["material"] == wall
+
+
+def _saved_original_for_comparison(case: str, material: Doc) -> str:
+    original = room109_document("original")
+    scene = cast(Doc, original["scene"])
+    if case == "invalid_impedance":
+        six = _scheme(original).model_dump(mode="json")
+        six["scene"]["impedance_pa_s_per_m_by_wall"]["y0"] = -1.0
+        return json.dumps(six)
+    if case not in ("legacy", "explicit_walls"):
+        _zones(original)["floor"][0]["material"] = {"kind": "assembly", "layers": _layers(PRESET), "backing": "rigid"}
+    if case == "invalid_scheme":
+        del original["purpose"]
+    elif case == "same":
+        _zones(original)["x0"][0]["material"] = material
+    elif case == "resized":
+        scene["room_m"] = {**ROOM_109, "Lx": 8.0}
+    elif case in ("missing_face", "missing_other_face"):
+        del _zones(original)["x0" if case == "missing_face" else "y0"]
+    elif case == "crossed":
+        _zones(original)["x0"] = cast(list[Doc], cut_wall(original, "x0", [CutBox(id="small", u_m=(0.0, 0.5), v_m=(0.0, 0.6))])["zones"])
+    return _scheme(original).model_dump_json() if case == "legacy" else json.dumps(original)
+
+
 @pytest.mark.parametrize(("case", "state", "reason"), [
     ("none", "unknown", "沒指原方案"), ("changed", "picked", ""), ("explicit_walls", "picked", ""), ("same", "original", ""),
-    ("crossed", "unknown", "切線劃過"), ("resized", "unknown", "房間尺寸"), ("legacy", "unknown", "六個數字"),
-    ("missing_face", "unknown", "缺少牆面"), ("missing_other_face", "picked", ""), ("gone", "unknown", "不在"),
+    ("crossed", "unknown", "切線劃過"), ("resized", "unknown", "房間尺寸"), ("legacy", "picked", ""),
+    ("missing_face", "unknown", "缺少牆面"), ("missing_other_face", "unknown", "缺少牆面 y0"), ("gone", "unknown", "不在"),
+    ("invalid_scheme", "unknown", "purpose"), ("invalid_impedance", "unknown", "阻抗"),
 ])
 def test_saved_construction_verdict_agrees_across_page_launch_preview_and_material_change(
         tmp_path: Path, case: str, state: str, reason: str) -> None:
@@ -691,19 +736,8 @@ def test_saved_construction_verdict_agrees_across_page_launch_preview_and_materi
     material = {"kind": "assembly", "layers": doc["layers"], "backing": "air"}
     current = _cut(None)
     next(zone for zone in _zones(current)["x0"] if zone["id"] == "z1")["material"] = material
-    original = room109_document("original")
-    scene = cast(Doc, original["scene"])
-    if case not in ("legacy", "explicit_walls"):
-        _zones(original)["floor"][0]["material"] = {"kind": "assembly", "layers": _layers(PRESET), "backing": "rigid"}
-    if case == "same":
-        _zones(original)["x0"][0]["material"] = material
-    elif case == "resized":
-        scene["room_m"] = {**ROOM_109, "Lx": 8.0}
-    elif case in ("missing_face", "missing_other_face"):
-        del _zones(original)["x0" if case == "missing_face" else "y0"]
-    elif case == "crossed":
-        _zones(original)["x0"] = cast(list[Doc], cut_wall(original, "x0", [CutBox(id="small", u_m=(0.0, 0.5), v_m=(0.0, 0.6))])["zones"])
     original_id = None if case == "none" else "original"
+    unusable = original_id is not None and state == "unknown"
     modes = {"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}, "auto1": {"mode": "search"}}}
     design = _design(zones=modes, original_scheme_id=original_id)
     scheme = _scheme(current)
@@ -711,11 +745,17 @@ def test_saved_construction_verdict_agrees_across_page_launch_preview_and_materi
     plan = plan_search(scheme, _design(zones={"x0": {"auto1": {"mode": "search"}}}), GradientRequest(), SETTINGS)
     with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         if case not in ("none", "gone"):
-            (tmp_path / "schemes" / "original.json").write_text(_scheme(original).model_dump_json() if case == "legacy" else json.dumps(original))
+            (tmp_path / "schemes" / "original.json").write_text(_saved_original_for_comparison(case, material))
         assert client.put("/api/materials/test_panel", json=doc).status_code == 200
         page = client.post("/api/zone-limits", json={"scheme": current, "design": design.model_dump(mode="json")}).json()
-        change = client.post("/api/zone-material", json={"scheme": current, "wall": "x0", "zone": "z1", "choice": "fixed",
-                                                          "material_id": doc["id"], "original_scheme_id": original_id})
+        request = {"scheme": current, "wall": "x0", "zone": "z1", "choice": "fixed", "material_id": doc["id"], "original_scheme_id": original_id}
+        change = client.post("/api/zone-material", json=request)
+        if unusable:
+            ordinary = client.post("/api/zone-material", json={**request, "scheme": _cut(None)})
+            assert ordinary.status_code == (404 if case == "gone" else 400)
+            assert (change.status_code, change.json()) == (ordinary.status_code, ordinary.json())
+            if case == "crossed":
+                assert "把設計這一區沿原方案的切線切開" in change.json()["error"]
     targets = _jobs(tmp_path, FakeLauncher()).depth_targets()
     refused = saved_refusals(current, design, depth_targets=targets)
     preview = fixed_depths(plan, scheme, design, targets)
@@ -732,9 +772,10 @@ def test_saved_construction_verdict_agrees_across_page_launch_preview_and_materi
     elif state == "original":
         assert lines == []
     assert page["picked_constructions"]["x0"]["z1"] == {"state": state, "id": doc["id"], "label": doc["label"]}
-    assert change.status_code == 200
-    assert change.json()["origin"] == ("unknown" if reason else "original_scheme")
-    assert change.json()["same_as_original"] == (state == "original")
+    if not unusable:
+        assert change.status_code == 200
+        assert change.json()["origin"] == ("unknown" if reason else "original_scheme")
+        assert change.json()["same_as_original"] == (state == "original")
 
 
 @pytest.mark.parametrize(("cap", "words"), [(None, "沒設深度上限"), (0.08, "0.08 公尺")])

@@ -881,4 +881,13 @@ def test_zone_map_uses_the_saved_original_to_identify_a_bare_copy(tmp_path: Path
             if not with_original:
                 expect(zone.locator("title")).to_contain_text("看不出：跟材料庫「布置用面板」一樣")
                 expect(page.locator(".zv-legend")).to_contain_text("看不出")
+        if not with_original:
+            _click_zone(page, "yL/z3")
+            page.locator("#zone-panel-mode-keep_original").check()
+            _apply(page)
+            expect(zone).to_have_attribute("data-shown", "still")
+            expect(zone.locator("title")).to_contain_text("不貼，保留原樣")
+            _click_zone(page, "yL/z3")
+            expect(page.locator("#zone-panel-now-keep_original")).to_have_attribute("data-zones", "yL/z3")
+            expect(page.locator(".zv-chip[data-zone='yL/z3']")).not_to_contain_text("看不出")
         assert watched.page_errors == [] and watched.console_errors == []

@@ -322,7 +322,8 @@ class GuiHandlers:
         self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
         self.gradient = GradientJobs(self.data_dir, launcher=settings.gradient_launcher or SystemdLauncher(),
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
-                                     scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
+                                     scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings,
+                                     capability_table=self.capabilities, directivity=self.directivity)
         self.surrogates = SurrogateBuilds(self.gradient)
         search_launcher = settings.search_launcher or settings.gradient_launcher or SystemdLauncher(memory_max=SEARCH_MEMORY_MAX)
         self.search_jobs = SearchJobs(self.data_dir, launcher=search_launcher, engine_commit=settings.engine_commit,

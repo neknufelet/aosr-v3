@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +38,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.construction_presets import load_construction_presets
+from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.material_gradient import (
     MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, fixed_target_id, is_fixed_target, load_material_gradient_settings,
 )
@@ -66,10 +68,10 @@ from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.physics.fem_reduced_store import manifest_path
-from aosr.gui.zone_construction import ComparisonWalls, SavedOriginal, read_original
+from aosr.gui.zone_construction import ComparisonWalls, OriginalProblem, read_original
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.gui import reference_only
-from aosr.gui.zone_result import baseline_warning
+from aosr.gui.zone_result import OriginalWalls, baseline_warning, original_walls
 from aosr.gui.zone_limits import DepthTargets
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library, fixed_surface, load_user_library
 from aosr.materials.search_library import (
@@ -305,7 +307,8 @@ class GradientJobs:
 
     def __init__(self, data_dir: Path, *, launcher: Launcher, engine_commit: str, capabilities: Path,
                  scheme_lock: AbstractContextManager[object], settings_path: Path | None = None,
-                 python: str = sys.executable) -> None:
+                 python: str = sys.executable, capability_table: CapabilityTable | None = None,
+                 directivity: DirectivityDefaults | None = None) -> None:
         # 服務的工作目錄是 repo 根，交給命令列的路徑一律先換成絕對路徑（相對路徑在服務裡會指到別處）。
         self.data_dir = data_dir.resolve()
         self.root = self.data_dir / JOBS_DIR
@@ -313,6 +316,8 @@ class GradientJobs:
         self.launcher = launcher
         self.engine_commit = engine_commit
         self.capabilities = capabilities.resolve()
+        self.capability_table = capability_table
+        self.directivity = directivity
         self.scheme_lock = scheme_lock
         self.settings_path = None if settings_path is None else settings_path.resolve()
         self.python = python
@@ -361,10 +366,20 @@ class GradientJobs:
 
         return draft_symmetry(document, design_value, planned)
 
-    def _read_original(self, name: str) -> ComparisonWalls:
-        """跟換料共用方案鎖讀原方案；讀不到也把原因交給深度提醒。"""
+    def _read_original(self, name: str, document: Mapping[str, object]) -> ComparisonWalls:
+        """深度檢查讀已驗的原牆。六個阻抗數字要跟換料一樣，放進設計的擺位驗過才採用。"""
         original = read_original(self.data_dir, name, self.scheme_lock)
-        return original.walls if isinstance(original, SavedOriginal) else original
+        if isinstance(original, OriginalProblem):
+            return original
+        zones = original.scene.surface_zones_by_wall
+        if zones is not None:
+            return OriginalWalls(original.scheme_id, original.scene.room_m, zones)
+        try:
+            return original_walls(original, checked_scheme(document),
+                                  capabilities=self.capability_table or load_capabilities(self.capabilities),
+                                  directivity=self.directivity or load_directivity_defaults(config_path("directivity_defaults.toml")))
+        except ValueError as exc:
+            return OriginalProblem(str(exc))
 
     def depth_targets(self) -> DepthTargets:
         """立面圖限制檢查判准用材料組放不放得下用的那一份（跟開跑同一份材料庫）；材料庫讀不進來丟 :class:`PlanRefused`。"""

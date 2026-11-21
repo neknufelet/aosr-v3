@@ -34,8 +34,9 @@ function zoneFixedIdentity(material, libraryId) {
 // 一區的做法鍵。zone：{mode, allowed（由程式最佳化的清單；讀不出是哪幾種時 null）, fixed（zoneFixedIdentity 的結果）}。
 function zoneMethodKey(zone) {
   if (zone.mode === "search") return `search:${zone.allowed ? [...new Set(zone.allowed)].sort().join(",") : "?"}`;
+  if (zone.mode === "keep_original") return "keep_original";
   if (zone.construction?.state === "unknown") return `unknown:${zone.construction.id}`;
-  if (zone.mode === "keep_original" || zone.fixed.startsWith("bare:")) return "keep_original";
+  if (zone.fixed.startsWith("bare:")) return "keep_original";
   return `fixed:${zone.fixed}`;
 }
 // 做法鍵是哪一種做法（畫面上叫什麼、畫什麼顏色用它，不直接用設計檔那一格）。

@@ -798,4 +798,4 @@ def test_original_scheme_is_read_under_the_scheme_lock(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(Path, "read_bytes", checked)
     assert scheme.scene.surface_zones_by_wall is not None
-    assert jobs._read_original(NAME) == OriginalWalls(NAME, scheme.scene.room_m, scheme.scene.surface_zones_by_wall)
+    assert jobs._read_original(NAME, scheme.model_dump(mode="json")) == OriginalWalls(NAME, scheme.scene.room_m, scheme.scene.surface_zones_by_wall)

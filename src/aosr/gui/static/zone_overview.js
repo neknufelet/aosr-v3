@@ -1116,7 +1116,7 @@ function panelCard() {
   card.append(top);
   const chips = items.map(item => {
     const chip = el("div", "zv-chip"); chip.dataset.zone = item.id;
-    if (item.construction?.state === "unknown") chip.append(uncertainWords(item.construction));
+    if (item.mode !== "keep_original" && item.construction?.state === "unknown") chip.append(uncertainWords(item.construction));
     chip.append(zoneWhere(item), button("zv-link zv-x", "不選這區", `zone-panel-drop-${item.wall}-${item.key}`, () => toggleSelected(item.id)));
     return chip;
   });
