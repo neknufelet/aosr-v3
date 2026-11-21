@@ -219,8 +219,17 @@ class MaterialStore:
                 "surface_groups": GROUP_WORDS, "surface_group_short": GROUP_SHORT_WORDS,
                 **({"reference_only": reference} if reference is not None else {})}
 
-    def _write(self, entries: tuple[LibraryEntry, ...]) -> None:
-        text = dump_user_library(entries)
+    def _write(self, entries: tuple[LibraryEntry, ...], *, append: bool = False) -> None:
+        if append:
+            # 鎖內已讀過並驗證 v1：最外層只有版本字串和 materials 陣列。
+            # 從單筆的正式輸出取陣列內文，接在現有非空陣列尾端，保留每筆舊資料的位元。
+            original = self.path.read_bytes().decode("utf-8")
+            end = original.rindex("]")
+            single = dump_user_library(entries[-1:])
+            addition = single[single.index("[") + 1:single.rindex("]")]
+            text = original[:end].rstrip() + "," + addition + original[end:]
+        else:
+            text = dump_user_library(entries)
         descriptor, name = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp")
         temporary = Path(name)
         try:
@@ -256,10 +265,13 @@ class MaterialStore:
                 if existing.label == entry.label:
                     raise MaterialEditError(f"已有材料使用名稱「{existing.label}」，請重新打開或複製一份", 409)
                 raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409, conflict="id")
+            # 設計器原樣存回時，保留舊檔本身的空白、鍵順序與省略的選填欄位。
+            if isinstance(entry, OptimizableEntry) and material_id in ids and current[ids.index(material_id)] == entry:
+                return entry
             entries = (tuple(entry if item.id == material_id else item for item in current) if material_id in ids
                        else (*current, entry))
             try:
-                self._write(entries)
+                self._write(entries, append=create and bool(current))
             except (ValueError, ValidationError) as exc:
                 raise MaterialEditError(plain_error(exc)) from exc
         return entry

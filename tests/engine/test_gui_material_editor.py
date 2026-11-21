@@ -232,3 +232,18 @@ def test_a_body_that_is_not_json_is_a_plain_400(tmp_path: Path) -> None:
         reply = client.put("/api/materials/mine", content=b"{ broken", headers={"Content-Type": "application/json"})
     assert (reply.status_code, reply.json()) == (400, {"error": "內文不是有效 JSON"})
     assert not user_library_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize(("material_id", "label", "error", "conflict"), [
+    ("panel_a", "試片丙", "已經有代號 panel_a 的材料；換一個代號，或打開那一筆再改", "id"),
+    ("panel_a", "試片甲", "已有材料使用名稱「試片甲」，請重新打開或複製一份", None),
+    ("panel_a", "試片乙", "已有材料使用名稱「試片乙」，請換一個名稱", None),
+    ("panel_c", "試片乙", "已有材料使用名稱「試片乙」，請換一個名稱", None),
+])
+def test_create_conflict_response(tmp_path: Path, material_id: str, label: str, error: str, conflict: str | None) -> None:
+    with _client(tmp_path) as client:
+        for key, name in (("panel_a", "試片甲"), ("panel_b", "試片乙")):
+            assert client.put(f"/api/materials/{key}", json=_fixed(_assembly(), key, name), headers=CREATE).is_success
+        reply = client.put(f"/api/materials/{material_id}", json=_fixed(_assembly(), material_id, label), headers=CREATE)
+        assert reply.status_code == 409
+        assert reply.json() == {"error": error, **({"conflict": conflict} if conflict else {})}

@@ -1,4 +1,5 @@
 """從材料庫實際進設計器、存入暫存庫、重新開啟並到分區選材。"""
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 
 from playwright.sync_api import Browser, Dialog, Locator, Page, Response, Route, expect
 
+from aosr.materials.library import SCHEMA_VERSION
 from tests.engine._construction_cases import construction
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, browser as browser
@@ -111,6 +113,7 @@ def test_change_thickness_updates_cutaway_curve_and_total(tmp_path: Path, browse
         expect(page.locator("#total")).not_to_have_text(total)
         page.locator('#figure g[data-layer="1"] rect').click()
         expect(page.locator("#stack article").nth(1).locator(".layer-select")).to_have_attribute("aria-expanded", "true")
+        previous = curve.evaluate("canvas => canvas.toDataURL()")
         held: list[Route] = []
         page.route("**/api/material-curve", lambda route: held.append(route), times=1)
         with page.expect_request("**/api/material-curve"):
@@ -122,7 +125,8 @@ def test_change_thickness_updates_cutaway_curve_and_total(tmp_path: Path, browse
             held[0].fulfill(json=after.value.json())
         page.evaluate("new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))")
         expect(page.locator("#curve")).to_have_text(invalid.value.json()["message"])
-        expect(curve).to_have_count(0)
+        expect(curve).to_be_visible()
+        assert curve.evaluate("canvas => canvas.toDataURL()") == previous
 
 
 def test_product_copy_is_a_separate_editable_construction(tmp_path: Path, browser: Browser) -> None:
@@ -186,6 +190,8 @@ def test_phone_stack_fields_figure_and_save_fit(tmp_path: Path, browser: Browser
 
 
 class SavedMaterial(TypedDict):
+    kind: str
+    cavity: dict[str, object]
     id: str
     label: str
     layers: list[dict[str, object]]
@@ -537,7 +543,7 @@ def test_id_collision_retries_once(tmp_path: Path, browser: Browser, second_coll
             assert route.request.url.endswith("/" + material_id)
             assert route.request.headers["if-none-match"] == "*"
             attempts.append(material_id)
-            if len(attempts) == 1 or second_collision:
+            if len(attempts) == 1 or (second_collision and len(attempts) == 2):
                 rival = construction(id=material_id, label=f"同時存入的布{len(attempts)}")
                 assert page.request.put(route.request.url, data=rival).ok
             route.continue_()
@@ -553,6 +559,8 @@ def test_id_collision_retries_once(tmp_path: Path, browser: Browser, second_coll
             expect(message).to_have_text("自動編號又重複了，請再按一次儲存。")
             assert entries[attempts[1]]["label"] == "同時存入的布2"
             expect(page.get_by_label("名稱", exact=True)).to_have_value("另一片布")
+            _save(page, "參數構造")
+            assert len(attempts) == len(set(attempts)) == 3
         else:
             expect(message).to_contain_text("已存到")
             assert entries[attempts[1]]["label"] == "另一片布"
@@ -666,3 +674,239 @@ def test_bonded_warning_only_in_legend(tmp_path: Path, browser: Browser) -> None
             expect(page.locator("#curve-key")).to_contain_text(words)
             expect(page.locator("#curve-notes")).not_to_contain_text(words)
         assert page.locator("#curve-notes li").all_text_contents() == [warn["text"] for warn in reply["warnings"]]
+
+
+def _tuning_sample(full: bool = True) -> dict[str, object]:
+    porous: dict[str, object] = {"kind": "porous", "material_class": "fibrous", "thickness_m": .037,
+                                 "flow_resistivity_pa_s_m2": 16437}
+    entry: dict[str, object] = {"label": "試織棉樣", "id": "woven_sample", "kind": "optimizable",
+                                "source": "試片紀錄", "provenance": "model", "porous": porous,
+                                "porous_thickness": {"range_m": [.037, .073], "initial_m": .037,
+                                                     "adjustable": True, "choices_m": [.037, .073]}}
+    if full:
+        porous.update(flow_resistivity_source="catalog", model="wilson_2015", porosity=.94, tortuosity=1.17)
+        entry.update(cavity={"adjustable": True, "range_m": [0, .09], "initial_m": .027, "choices_m": None},
+                     max_total_depth_m=.15, suggested_total_depth_m=.085, preset_members=["woven_trial"],
+                     template_preset="woven_trial", links=["https://example.org/woven"], notes=["自編試片\n第二面"])
+    return entry
+
+
+def _open_sample(page: Page, base: str) -> None:
+    _list_row(page, base, "optimizable", "試織棉樣").get_by_role("button", name="打開").click()
+    expect(page.locator("#name")).to_have_value("試織棉樣")
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_tuning_untouched_preserves_file_and_request_order(tmp_path: Path, browser: Browser, full: bool) -> None:
+    library = tmp_path / "materials.json"
+    entry = _tuning_sample(full) | {"provenance": "literature"}
+    library.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "materials": [entry]}, ensure_ascii=False))
+    before = library.read_bytes()
+    with _designer(tmp_path, browser) as (page, base):
+        original = _stored(page, base)["woven_sample"]
+        _open_sample(page, base)
+        expect(page.get_by_role("switch")).to_have_count(2 if full else 1)
+        with page.expect_request(lambda r: r.method == "PUT") as sent:
+            _save(page, "參數構造")
+        assert sent.value.post_data == page.evaluate("entry => JSON.stringify(entry)", original)
+        assert library.read_bytes() == before
+
+
+def test_tuning_range_edit_preserves_other_fields(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=_tuning_sample()).ok
+        before = _stored(page, base)["woven_sample"]
+        _open_sample(page, base)
+        _fields(page, 0)
+        page.get_by_label("範圍上限（mm）").fill("81")
+        page.get_by_label("買得到的厚度（mm）").fill("37, 81")
+        _save(page, "參數構造")
+        spec = {"range_m": [.037, .081], "initial_m": .037, "adjustable": True, "choices_m": [.037, .081]}
+        assert _stored(page, base)["woven_sample"] == before | {"porous_thickness": spec}
+
+
+def test_tuning_new_air_range_and_copy_on_kind_change(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        page.locator("#name").fill("試作空腔")
+        _add(page, "porous", "air")
+        switches = page.get_by_role("switch")
+        expect(switches.nth(1)).to_be_enabled()
+        switches.nth(1).click()
+        _fields(page, 1)
+        page.get_by_label("範圍下限（mm）").fill("0")
+        page.get_by_label("範圍上限（mm）").fill("190")
+        expect(page.locator(".where")).to_be_hidden()
+        expect(page.get_by_text("背後：照第三階段搜尋頁選的裝法（貼在原牆上，或貼在硬底上）；這裡的曲線先當硬底畫")).to_be_visible()
+        _save(page, "參數構造")
+        before, = _stored(page, base).values()
+        assert before["kind"] == "optimizable" and before["cavity"]["range_m"] == [0, .19]
+        _list_row(page, base, "optimizable", "試作空腔").get_by_role("button", name="打開").click()
+        expect(switches.nth(0)).not_to_be_checked()
+        expect(switches.nth(1)).to_be_checked()
+        _fields(page, 1)
+        expect(page.get_by_label("範圍上限（mm）")).to_have_value("190")
+        switches.nth(1).click()
+        dialogs: list[str] = []
+
+        def confirm(dialog: Dialog) -> None:
+            dialogs.append(dialog.message)
+            dialog.accept()
+
+        page.once("dialog", confirm)
+        _save(page, "參數構造")
+        assert dialogs == ["這一筆已經存成可最佳化材料，改成構造只能另存一份新的；原本那筆不動。"]
+        entries = _stored(page, base)
+        assert json.dumps(entries[before["id"]]) == json.dumps(before)
+        copy = entries[before["id"] + "_copy"]
+        assert copy["label"] == "試作空腔（複本）" and copy["kind"] == "construction"
+        switches.nth(1).click()
+        page.once("dialog", confirm)
+        _save(page, "參數構造")
+        assert dialogs[-1] == "這一筆已經存成構造，改成可最佳化材料只能另存一份新的；原本那筆不動。"
+        assert _stored(page, base)[copy["id"]] == copy
+
+
+def test_tuning_product_and_third_layer_switch_off(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "porous", "air")
+        switch = page.get_by_role("switch").first
+        expect(switch).to_be_enabled()
+        switch.click()
+        page.locator("#product").check()
+        for control in page.get_by_role("switch").all():
+            expect(control).to_be_disabled()
+            expect(control).not_to_be_checked()
+        expect(page.locator(".tune").first).to_contain_text("成品不拆，不給程式調")
+        page.locator("#product").uncheck()
+        _add(page, "fabric")
+        for control in page.get_by_role("switch").all():
+            expect(control).to_be_disabled()
+            expect(control).not_to_be_checked()
+        expect(page.locator(".tune").first).to_contain_text("第二批才能給程式調")
+
+
+@pytest.mark.parametrize("density", [24, 48, 96])
+def test_tuning_builtin_readonly_then_copy(tmp_path: Path, browser: Browser, density: int) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        key = f"glass_wool_{density}k"
+        page.goto(f"{base}/materials#param")
+        page.locator(f'[data-id="{key}"] button.open').click()
+        expect(page.locator("#name")).to_be_disabled()
+        expect(page.get_by_role("switch").first).to_be_disabled()
+        name = page.locator("#name").input_value()
+        page.get_by_role("button", name="複製到設計器").click()
+        expect(page.locator("#name")).to_have_value(name + "（複本）")
+        _save(page, "參數構造")
+        assert _stored(page, base)[key + "_copy"]["kind"] == "optimizable"
+
+
+def test_move_preserves_advanced(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "board", "porous")
+        _fields(page, 1)
+        _advanced(page)
+        for direction in ("往房間側移", "往牆側移"):
+            page.get_by_role("button", name=direction).click()
+            assert page.locator(".advanced").evaluate("n => n.open")
+
+
+def test_tuning_missing_frame_partner(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "porous")
+        _fields(page, 0)
+        _advanced(page)
+        requests: list[str] = []
+        page.on("request", lambda r: requests.append(r.url) if r.method == "PUT" else None)
+        page.locator('[name="frame_compression_modulus_pa"]').fill("16230")
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).to_contain_text("第 1 層的骨架損耗因數還沒填")
+        assert not requests
+
+
+def test_tuning_missing_field_keeps_last_curve(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "porous")
+        _fields(page, 0)
+        canvas = page.locator("#curve canvas")
+        expect(canvas).to_be_visible()
+        image = canvas.evaluate("n => n.toDataURL()")
+        page.locator('[name="thickness_m"]').fill("")
+        expect(page.locator("#curve-state")).to_contain_text("還沒填")
+        expect(canvas).to_be_visible()
+        assert canvas.evaluate("n => n.toDataURL()") == image
+
+
+def test_lost_create_response_updates_same_entry_after_rename(tmp_path: Path, browser: Browser) -> None:
+    with real_server(tmp_path) as base, _open(browser, f"{base}/materials/designer") as watched:
+        page = watched.page
+        _add(page, "porous")
+        def lose_reply(route: Route) -> None:
+            assert route.fetch().ok
+            route.abort()
+        page.route("**/api/materials/*", lose_reply, times=1)
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).not_to_be_empty()
+        first, = _stored(page, base)
+        page.locator("#name").fill("斷線後改名")
+        with page.expect_request(lambda r: r.method == "GET" and r.url.endswith("/api/materials")):
+            _save(page, "參數構造")
+        entries = _stored(page, base)
+        assert list(entries) == [first] and entries[first]["label"] == "斷線後改名"
+
+
+def test_tuning_invalid_choices_initial_and_total_depths_stop_put(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=_tuning_sample()).ok
+        _open_sample(page, base)
+        _fields(page, 0)
+        puts: list[str] = []
+        page.on("request", lambda r: puts.append(r.url) if r.method == "PUT" else None)
+        choices = page.get_by_label("買得到的厚度（mm）")
+        for field, bad, message, good in [
+            (choices, "", "買得到的厚度", "37, 73"),
+            (page.locator('[name="thickness_m"]'), "38", "初值", "37"),
+            (page.get_by_label("總深度上限"), "60", "總深度上限", "150"),
+            (page.get_by_label("建議總深"), "170", "建議總深", "85"),
+        ]:
+            field.fill(bad)
+            page.locator("#save").click()
+            expect(page.locator("#save-message")).to_contain_text(message)
+            field.fill(good)
+        assert not puts
+
+
+def test_switch_kind_keeps_sparse_original_bytes(tmp_path: Path, browser: Browser) -> None:
+    library = tmp_path / "materials.json"
+    record = json.dumps(_tuning_sample(False), ensure_ascii=False, separators=(",", ": ")).encode()
+    library.write_bytes(b'{"materials":[' + record + b'],"schema_version":"' + SCHEMA_VERSION.encode() + b'"}')
+    with _designer(tmp_path, browser) as (page, base):
+        _open_sample(page, base)
+        page.get_by_role("switch").click()
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        page.locator("#save").click()
+        assert list(_stored(page, base)) == ["woven_sample"]
+        page.once("dialog", lambda dialog: dialog.accept())
+        _save(page, "參數構造")
+        assert _stored(page, base)["woven_sample_copy"]["kind"] == "construction"
+        assert record in library.read_bytes()
+
+
+def test_tuning_save_reports_server_cavity_floor_verbatim(tmp_path: Path, browser: Browser) -> None:
+    with real_server(tmp_path) as base, _open(browser, "about:blank") as watched:
+        page = watched.page
+        entry = _tuning_sample()
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=entry).ok
+        with page.expect_response("**/api/material-curve") as preview:
+            page.goto(f"{base}/materials/designer?id=woven_sample")
+        body = preview.value.request.post_data_json
+        assert isinstance(body, dict) and body["kind"] == "optimizable"
+        assert "初值排法" in preview.value.json()["arrangement"]
+        _fields(page, 1)
+        page.get_by_label("範圍下限（mm）").fill("0.5")
+        before = (tmp_path / "materials.json").read_bytes()
+        with page.expect_response(lambda r: r.request.method == "PUT") as result:
+            page.locator("#save").click()
+        assert result.value.status == 400
+        expect(page.locator("#save-message")).to_have_text(result.value.json()["error"])
+        assert (tmp_path / "materials.json").read_bytes() == before
+        assert not watched.page_errors and all("400" in line for line in watched.console_errors)

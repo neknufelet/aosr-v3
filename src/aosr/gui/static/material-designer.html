@@ -11,6 +11,7 @@
   <script defer src="/static/vendor/uplot/uPlot.iife.min.js"></script>
   <script defer src="/static/material-cutaway.js"></script>
   <script defer src="/static/material-ui.js"></script>
+  <script defer src="/static/material-tuning.js"></script>
   <script defer src="/static/material-designer.js"></script>
 </head>
 <body><main>
@@ -33,6 +34,11 @@
             <label><span><input type="radio" name="backing" value="zone_wall"> 這一區原本的牆</span><small>貼到哪一區，就接那一區原本的牆（例如輕隔間）；預覽曲線先當硬牆算。</small></label>
           </div>
         </fieldset>
+        <p id="tuned-backing" hidden>背後：照第三階段搜尋頁選的裝法（貼在原牆上，或貼在硬底上）；這裡的曲線先當硬底畫</p>
+        <fieldset id="depth-limits" class="geometry" hidden><legend>總深度（選填）</legend><div class="params">
+          <label>總深度上限（mm）<input name="max_total_depth_m" type="number" min="0" step="any"></label>
+          <label>建議總深（mm）<input name="suggested_total_depth_m" type="number" min="0" step="any"></label>
+        </div></fieldset>
         <div class="end">牆側</div>
       </section>
       <section>
