@@ -1,6 +1,6 @@
 """材料能用在哪幾面（#1176）：立面圖下「這一面每一區的做法」只列這一面能貼的處理材料，其餘分組收起來、各一句理由。
 
-現算、不改材料庫格式：照代號、顯示名與材料種類分組，規則有先後（前面的先吃）：
+構造照條目明寫的位置；舊材料現算：照代號、顯示名與材料種類分組，規則有先後（前面的先吃）：
 
 1. 代號 ``demo109`` 開頭 → 另一間示範房（109 號房）的，平常不列；
 2. 固定材料本身是固定阻抗或實測表 → 牆面、地面本身（整面換掉，不是貼上去的），不列；
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
 from aosr.materials.construction_models import Assembly, ConstantImpedance
-from aosr.materials.library import LibraryEntry, fixed_surface
+from aosr.materials.library import ConstructionEntry, LibraryEntry, fixed_surface
 
 SurfaceGroup: TypeAlias = Literal["demo109", "surface_itself", "door_window", "ceiling_build", "floor", "wall"]
 WALLS: Final = ("x0", "xL", "y0", "yL")
@@ -59,6 +59,9 @@ class Placement:
 
 def placement(entry: LibraryEntry) -> Placement:
     """照模組說明那六條規則的先後分組。"""
+    if isinstance(entry, ConstructionEntry):
+        surfaces = {"wall": (*WALLS, "ceiling"), "floor": ("floor",), "ceiling_build": ("ceiling",), "door_window": WALLS}
+        return Placement(entry.placement, surfaces[entry.placement], GROUP_WORDS[entry.placement])
     material = fixed_surface(entry)
     if entry.id.startswith(_DEMO_PREFIX):
         return Placement("demo109", (), "代號是 demo109 開頭，是另一間示範房（109 號房）的材料，這間房平常用不到")

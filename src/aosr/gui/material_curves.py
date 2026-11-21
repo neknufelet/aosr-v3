@@ -42,6 +42,7 @@ from aosr.materials.construction_models import (
 )
 from aosr.materials.library import (
     PROVENANCE_LABELS,
+    ConstructionEntry,
     LibraryEntry,
     OptimizableEntry,
     TunableLayersEntry,
@@ -77,8 +78,12 @@ def _physics_material(entry: LibraryEntry) -> tuple[SurfaceMaterial, str | None]
         tuned = "、".join(f"{item.words()} {item.initial:g}（可調 {item.range[0]:g}～{item.range[1]:g}）" for item in entry.variables)
         return initial_assembly(entry), (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
                                          "程式最佳化這種材料還沒接上，這條只供對照。")
+    if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
+        return entry.preview_assembly(), "預覽背後當硬牆；指定給分區時用該區原本的牆。"
     if not isinstance(entry, OptimizableEntry):
-        return fixed_surface(entry), None
+        material = fixed_surface(entry)
+        assert material is not None
+        return material, None
     cavity = None if entry.cavity is None else entry.cavity.initial_m
     layers = f"多孔層 {entry.porous.thickness_m:g} m" + (f"＋空腔 {cavity:g} m" if cavity else "、沒有空腔")
     return template_assembly(entry), (f"這條是初值排法：{layers}，背後是硬牆。可最佳化材料是一族，"

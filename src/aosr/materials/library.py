@@ -1,6 +1,6 @@
 """材料庫（#1082 段 2-1）：一筆材料的格式與檢查；內建材料由產品設定檔生成、唯讀。
 
-三種材料，``kind`` 只說搜尋可以拿它做什麼：
+四種材料，``kind`` 只說搜尋可以拿它做什麼：
 
 - ``optimizable``（可最佳化）：一層多孔加可有可無的空腔。多孔層厚度與空腔深度就是搜尋的兩個變數
   （一面一個多孔厚度、一個空腔，跟第三階段梯度搜尋的變數一樣多，存得進來的搜尋就收得下）；流阻是產品身分、不調。
@@ -8,6 +8,7 @@
   背後接剛背還是貼在原牆上是個案的事，不存在材料裡。
 - ``fixed``（固定）：存一份完整牆面材料，搜尋只能整塊選或不選。實測阻抗表可以整張沒有虛部：
   轉成物理用的實測阻抗表時虛部補 0、標「近似」；物理格式與物理身分一個位元都不動。
+- ``construction``（構造）：依序存層，明寫背後、成品旗標與放置位置。剛背與空氣背可整塊使用，接原牆的需由分區供應背後。
 - ``tunable_layers``（可調多層構造，#1200 第 1 支）：存一份初值排法的多層構造，另列「哪一層的哪一格可調、範圍、產品規格、初值」。
   格式是通用的，現在只收 ``structure = "vpr"``（可調 VPR）：可有可無的固定前層＋鋼板＋整面黏住的背襯（填了骨架兩格的多孔層，
   #1171），背後是牆、沒有空腔；能調的是板重（kg/m²，毫米只是顯示，用材料自己帶的鋼板密度換算）與背襯厚度。
@@ -369,7 +370,26 @@ class FixedEntry(_EntryBase):
         return material.to_physics() if isinstance(material, MeasuredTable) else material
 
 
-LibraryEntry: TypeAlias = Annotated[OptimizableEntry | FixedEntry | TunableLayersEntry, Field(discriminator="kind")]
+class ConstructionEntry(_EntryBase):
+    """構造的各層從房間側到牆側；成品也保留整份構造。"""
+
+    kind: Literal["construction"]
+    layers: tuple[Layer, ...] = Field(min_length=1, description="layers（從房間側到牆側的各層）")
+    backing: Literal["rigid", "air", "zone_wall"] = Field(description="backing（背後負載）")
+    product: StrictBool = Field(description="product（是否為成品）")
+    placement: Literal["wall", "floor", "ceiling_build", "door_window"] = Field(description="placement（能貼在哪）")
+
+    def preview_assembly(self) -> Assembly:
+        """預覽缺原牆時採剛背；其他構造的預覽就是實際的背後。"""
+        return Assembly(layers=self.layers, backing="rigid" if self.backing == "zone_wall" else self.backing)
+
+    @model_validator(mode="after")
+    def _validate_stack(self) -> Self:
+        self.preview_assembly()  # 共用物理構造對黏住背襯的位置與負載檢查。
+        return self
+
+
+LibraryEntry: TypeAlias = Annotated[OptimizableEntry | FixedEntry | TunableLayersEntry | ConstructionEntry, Field(discriminator="kind")]
 
 
 @overload
@@ -382,6 +402,8 @@ def fixed_surface(entry: LibraryEntry) -> StandaloneSurface | None: ...
 
 def fixed_surface(entry: LibraryEntry) -> StandaloneSurface | None:
     """可獨立使用的固定牆面材料；需要其他輸入才決定的條目回 None。"""
+    if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall":
+        return entry.preview_assembly()
     return entry.surface_material() if isinstance(entry, FixedEntry) else None
 
 

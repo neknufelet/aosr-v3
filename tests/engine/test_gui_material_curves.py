@@ -31,6 +31,7 @@ from aosr.materials.library import (
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
 from aosr.runtime import child_process_env
 from tests.engine._cpu_pins import forward_cpu_pins
+from tests.engine.test_material_construction import construction
 
 PROBE = Path(__file__).with_name("_material_curve_probe.py")
 CURVE = "/api/material-curve"
@@ -82,6 +83,8 @@ def _cases() -> dict[str, dict[str, object]]:
     with_cavity = template_assembly(family)
     renamed = _fixed(_assembly(_porous(30000.0)), "curve")
     return {
+        **{backing: _case(_post(construction(backing)), physics=({"kind": "assembly", "layers": construction()["layers"],
+                 "backing": "rigid" if backing == "zone_wall" else backing},)) for backing in ("rigid", "air", "zone_wall")},
         "builtins": _case(*(_post(entry.model_dump(mode="json")) for entry in builtins), physics=tuple(
             (entry.surface_material() if isinstance(entry, FixedEntry) else template_assembly(OptimizableEntry.model_validate(entry))).model_dump(mode="json")
             for entry in builtins)),
@@ -152,6 +155,14 @@ def _runs(axis: list[float], flagged: set[float]) -> list[tuple[float, float]]:
         else:
             runs.append([index])
     return [(axis[run[0]], axis[run[-1]]) for run in runs]
+
+
+@pytest.mark.parametrize("backing", ["rigid", "air", "zone_wall"])
+def test_construction_curve_uses_its_own_load(probe: dict[str, dict[str, object]], backing: str) -> None:
+    reply = _reply(probe, backing)
+    assert reply["status"] == "drawn" and reply["basis_code"] == "simulated"
+    assert reply["absorption"] == _expected(probe, backing)
+    assert ("預覽背後當硬牆" in str(reply["arrangement"])) == (backing == "zone_wall")
 
 
 def test_every_builtin_is_drawn_on_the_room_axis_with_exactly_what_the_physics_returns(probe: dict[str, dict[str, object]]) -> None:
