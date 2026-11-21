@@ -336,8 +336,8 @@ function zoneLabels(wall) {
     surface, role: surface === "wall" ? WALL_ROLES[wallNames[wall]] ?? null : null, width, height,
     tolerance: cutSpec().edge_merge_tol_m, edges, front: edgeOf("前牆"), left: edgeOf("左牆"),
     zones: zones.map(zone => zone.area === "rectangle"
-      ? {key: zone.id, drawn: !zone.id.startsWith(fill), whole: false, box: screenBox(view, width, height, zone), entry: zoneLibraryMatch(zone.material)}
-      : {key: "whole_wall", drawn: false, whole: true, box: [0, width, 0, height], entry: zoneLibraryMatch(zone.material ?? wallMaterial(wall))}),
+      ? {key: zone.id, drawn: !zone.id.startsWith(fill), whole: false, box: screenBox(view, width, height, zone), entry: zoneLibraryMatch(zone.material, wall, zone.id)}
+      : {key: "whole_wall", drawn: false, whole: true, box: [0, width, 0, height], entry: zoneLibraryMatch(zone.material ?? wallMaterial(wall), wall, "whole_wall")}),
     speakers: items.filter(item => item.kind === "speaker").map(item => ({name: item.name, at: item.at})),
     primary: items.find(item => item.kind === "seat")?.at ?? null,
   });

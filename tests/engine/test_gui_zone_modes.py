@@ -266,7 +266,7 @@ def test_a_zone_picked_as_what_it_already_is_is_flagged_inside_a_batch_too(clien
 
 
 @pytest.mark.parametrize("backing", ["rigid", "air", "zone_wall"])
-def test_assign_construction_obeys_backing_and_remembers_direct_replacement(client: TestClient, backing: str) -> None:
+def test_assign_construction_obeys_backing_and_recognizes_an_uncertain_origin(client: TestClient, backing: str) -> None:
     doc = construction(backing)
     assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
     scheme = _cut_document()
@@ -279,7 +279,7 @@ def test_assign_construction_obeys_backing_and_remembers_direct_replacement(clie
         assert data["material"] == {"kind": "assembly", "layers": doc["layers"], "backing": backing}
         assert "直接取代" in str(data["note"])
     _put(scheme, "z1", data["material"])
-    code, restored = _post(client, scheme, "z1", choice="original", previous_construction=data.get("picked_construction"))
+    code, restored = _post(client, scheme, "z1", choice="original")
     assert code == 200 and restored["origin"] == ("unwrapped" if backing == "zone_wall" else "unknown")
 
 
@@ -314,21 +314,20 @@ def test_unknown_original_cannot_match_a_zone_wall_stack(client: TestClient) -> 
     code, replaced = _post(client, scheme, "z1", choice="fixed", material_id=base["id"])
     assert code == 200
     _put(scheme, "z1", replaced["material"])
-    code, mounted = _post(client, scheme, "z1", choice="fixed", material_id=facing["id"],
-                          previous_construction=replaced["picked_construction"])
+    code, mounted = _post(client, scheme, "z1", choice="fixed", material_id=facing["id"])
     assert code == 200 and mounted["origin"] == "unknown"
     assert mounted["same_as_original"] is False and "看不出原牆" in str(mounted["note"])
     assert mounted["material"] == {"kind": "mounted_on_wall", "layers": facing["layers"], "wall": replaced["material"]}
 
 
-def test_selecting_a_copy_of_this_original_face_keeps_it_original(client: TestClient) -> None:
+def test_reselecting_a_bare_copy_without_an_original_keeps_its_origin_unknown(client: TestClient) -> None:
     doc = construction("air")
     scheme = _cut_document()
     surface = {"kind": "assembly", "backing": "air", "layers": doc["layers"]}
     _put(scheme, "z1", surface)
     assert client.put(f"/api/materials/{doc['id']}", json=doc).status_code == 200
     code, original = _post(client, scheme, "z1", choice="original")
-    assert code == 200 and original["origin"] == "current" and "看不出" not in str(original["note"])
+    assert code == 200 and original["origin"] == "unknown" and "看不出" in str(original["note"])
     code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
-    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is True
+    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is False and "看不出" in str(picked["note"])
     assert "picked_construction" not in picked

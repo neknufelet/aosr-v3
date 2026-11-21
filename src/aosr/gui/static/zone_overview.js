@@ -111,23 +111,25 @@ function overviewRoles() {
 // 圖上畫哪一種顏色。mode／allowed／fixed 三格是交給推法用的：沒寫清單的由程式最佳化照伺服器的意思（全部可調＋不貼）比；
 // 指定貼的是哪一種只看貼上去的（沒貼東西的一律算原牆原樣，跟「不貼」同一個做法）。
 // shown：search 由程式最佳化、fixed 指定貼一種（真的有貼東西）、still 保留原樣（不貼，或指定貼但其實沒貼；地毯也算）、
-// opening 門窗（沒被改成別的做法時畫斜線）。
+// opening 門窗（沒被改成別的做法時畫斜線）、unknown 裸構造與原牆的關係看不出來。
 function faceZones(wall) {
   const {views, wallSize, screenBox} = window.elevationGeometry;
   const size = wallSize(wall), labels = zoneLabels(wall);
   return zoneList(wall).map(zone => {
     const key = zoneKey(zone), setting = zoneSetting(wall, key), label = labels.get(key);
-    const entry = zoneLibraryMatch(zone.material), special = zoneSpecialName(entry);
+    const entry = zoneLibraryMatch(zone.material, wall, key), special = zoneSpecialName(entry);
     const box = !size ? null : zone.area === "rectangle" ? screenBox(views[wall], size[0], size[1], zone) : [0, size[0], 0, size[1]];
     const pasted = zone.material.kind === "mounted_on_wall";
     const opening = special === "門" || special === "窗";
-    const item = {id: `${wall}/${key}`, wall, key, zone, setting, label, entry, special, opening, box, pasted,
+    const construction = constructionAt(wall, key);
+    const fixedId = construction?.state === "picked" ? construction.id : pasted ? entry?.id : null;
+    const item = {construction, id: `${wall}/${key}`, wall, key, zone, setting, label, entry, special, opening, box, pasted,
                   area: box ? (box[1] - box[0]) * (box[3] - box[2]) : 0, mode: setting.mode,
                   allowed: setting.allowed ?? serverDefaultAllowed(), ranges: setting.mode === "search" ? setting.ranges ?? null : null,
-                  fixed: zoneFixedIdentity(zone.material, pasted || entry?.kind === "construction" ? entry?.id : null)};
+                  fixed: zoneFixedIdentity(zone.material, fixedId)};
     item.method = zoneMethodKey(item);
     const mode = zoneMethodMode(item.method);
-    item.shown = mode === "search" ? "search" : mode === "fixed" && !special ? "fixed" : opening ? "opening" : "still";
+    item.shown = mode === "unknown" || mode === "search" ? mode : mode === "fixed" && !special ? "fixed" : opening ? "opening" : "still";
     return item;
   }).sort((left, right) => left.label.number - right.label.number);
 }
@@ -162,15 +164,17 @@ function zonesBrief(items, marked = new Set()) {
   return line;
 }
 // 貼上去的那一種怎麼叫：材料庫認得寫它的名字，認不到寫那幾層。
-function pastedWords(item) { return libraryLabel(item.zone.material)?.label ?? layersText(item.zone.material); }
+function pastedWords(item) { return item.construction?.label ?? item.entry?.label ?? layersText(item.zone.material); }
 function methodWords(group) {
+  if (group.mode === "unknown") return uncertainWords(group.zones[0].construction);
   return group.mode === "fixed" ? vprWords(`${ZONE_MODE_WORDS.fixed}：${pastedWords(group.zones[0])}`) : ZONE_MODE_WORDS[group.mode];
 }
-function shownOf(mode) { return {search: "search", fixed: "fixed", keep_original: "still"}[mode]; }
+function shownOf(mode) { return {search: "search", fixed: "fixed", keep_original: "still", unknown: "unknown"}[mode]; }
 function hoverWords(item) {
   const mode = zoneMethodMode(item.method);
+  if (mode === "unknown") return `${zoneWhereText(item)}：${uncertainWords(item.construction)}`;
   // 這一區的材料是「鋼板直接貼在棉上」的構造（#1208）：滑過去的說明接那一句（圖上寫不下字的區也看得到）。
-  const reference = zoneReferenceOnly(item.zone.material) ? `；${zoneReference.sentence}` : "";
+  const reference = zoneReferenceOnly(item.zone.material, item.wall, item.key) ? `；${zoneReference.sentence}` : "";
   return `${zoneWhereText(item)}：${mode === "fixed" ? `${ZONE_MODE_WORDS.fixed}：${pastedWords(item)}` : ZONE_MODE_WORDS[mode]}${reference}`;
 }
 
@@ -240,7 +244,7 @@ function textWidth(text, size) { return [...text].reduce((sum, char) => sum + (c
 // 指定貼的那一塊上面寫材料名：照括號與「＋」斷成幾行，第一行大字（放不下就小一號），後面幾行從頭照順序放到放不下為止；
 // 第一行都放不下就不寫（滑過去的說明照樣有整個名字）。只寫在另外指定的區上：跟著規則的那一大片不重複寫同一個名字。
 function fixedLabel(item, x, y, width, height) {
-  const entry = libraryLabel(item.zone.material);
+  const entry = item.construction ?? item.entry;
   const group = svg("g", {class: "zv-fixed-words"});
   if (!entry || !item.named) return group;
   const named = entry.label.split(/[（）]|(?=＋)/).map(part => part.trim()).filter(Boolean);
@@ -268,7 +272,7 @@ function fixedLabel(item, x, y, width, height) {
   };
   // 這一區貼的是「鋼板直接貼在棉上」的構造（#1208）：材料字下面多兩行（伺服器給的字），面板關著也看得到。
   // 這兩行用 12 px（這一頁最小的字級；1.1 公尺寬的一塊板寫得下）。行數不夠時這兩行先留、名字後面的幾行讓出來；連名字第一行都擠不下就不留這兩行（滑過去的說明照樣有那一句）。
-  const marks = zoneReferenceOnly(item.zone.material) ? zoneReference.map_words : [];
+  const marks = zoneReferenceOnly(item.zone.material, item.wall, item.key) ? zoneReference.map_words : [];
   const marked = marks.length && marks.every(line => textWidth(line, 12) <= width - 10) ? laid(room - marks.length) : null;
   const found = marked ?? laid(room);
   if (!found) return group;
@@ -488,7 +492,9 @@ function drawMap(faces, roles, room) {
 }
 function legend() {
   const box = el("div", "zv-legend");
-  for (const [className, words] of [["search", ZONE_MODE_WORDS.search], ["fixed", ZONE_MODE_WORDS.fixed], ["still", "保留原樣"], ["hatch", "門、窗"]]) {
+  const entries = [["search", ZONE_MODE_WORDS.search], ["fixed", ZONE_MODE_WORDS.fixed], ["still", "保留原樣"], ["hatch", "門、窗"]];
+  if ([...view.byId.values()].some(item => item.shown === "unknown")) entries.push(["unknown", "看不出"]);
+  for (const [className, words] of entries) {
     const item = el("span"); item.append(el("i", `zv-sw ${className}`), words); box.append(item);
   }
   const apart = el("span"); apart.id = "zone-legend-apart"; apart.append(el("i", "zv-sw apart"), "虛線框：另外指定（跟其他牆面不同）"); box.append(apart);
@@ -509,7 +515,8 @@ function startingDraft() {
   const modes = new Set(items.map(item => zoneMethodMode(item.method)));
   if (!items.length || modes.size !== 1) return null;
   const mode = [...modes][0], sameMethod = new Set(items.map(item => item.method)).size === 1;
-  return {...untouched(), mode, materialId: mode === "fixed" && sameMethod ? libraryLabel(items[0].zone.material)?.id ?? "" : ""};
+  if (mode === "unknown") return null;
+  return {...untouched(), mode, materialId: mode === "fixed" && sameMethod ? libraryLabel(items[0].zone.material, items[0].wall, items[0].key)?.id ?? "" : ""};
 }
 function select(ids) {
   selected = ids; draftTouched = false; ruleDraft = false; listAdding = null;
@@ -578,7 +585,6 @@ async function applyMethod(items, method, written = () => {}) {
   if (drafted) { zoneNote(`${wallNames[drafted.wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return false; }
   const changes = items.filter(() => method.mode !== "fixed" || method.materialId).map(item => method.mode === "fixed"
     ? {wall: item.wall, zone: item.key, choice: "fixed", material_id: method.materialId} : {wall: item.wall, zone: item.key, choice: "original"});
-  for (const [index, change] of changes.entries()) change.previous_construction = recentConstruction.get(items[index].zone.material);
   let results = [];
   if (changes.length) {
     const document_ = wallDocument();
@@ -598,7 +604,7 @@ async function applyMethod(items, method, written = () => {}) {
       }
       results = data.changes;
       changes.forEach((change, index) => {
-        scheme.scene.surface_zones_by_wall[change.wall].find(zone => zoneKey(zone) === change.zone).material = assignedSurface(results[index]);
+        scheme.scene.surface_zones_by_wall[change.wall].find(zone => zoneKey(zone) === change.zone).material = results[index].material;
       });
     } catch (error) {
       zoneNote(`沒有改：${errorText(error)}`, "notice");
@@ -643,9 +649,9 @@ function showChanging() { $("zone-page").dataset.changing = String(changing); }
 // 「其他牆面」現在的做法（改回、面板上「＝其他牆面」那一項用）；規則貼的不是材料庫裡的一筆就回 null（沒有代號可以照貼）。
 function ruleMethod() {
   const rule = view.inferred.rule;
-  if (!rule) return null;
+  if (!rule || rule.mode === "unknown") return null;
   if (rule.mode !== "fixed") return {mode: rule.mode, allowed: rule.mode === "search" ? rule.zones[0].allowed : null};
-  const entry = libraryLabel(rule.zones[0].zone.material);
+  const entry = libraryLabel(rule.zones[0].zone.material, rule.zones[0].wall, rule.zones[0].key);
   return entry ? {mode: "fixed", materialId: entry.id} : null;
 }
 // 改規則：寫到所有不是另外指定的區（現在跟著規則的那幾區），另外指定的不動。
@@ -1110,6 +1116,7 @@ function panelCard() {
   card.append(top);
   const chips = items.map(item => {
     const chip = el("div", "zv-chip"); chip.dataset.zone = item.id;
+    if (item.construction?.state === "unknown") chip.append(uncertainWords(item.construction));
     chip.append(zoneWhere(item), button("zv-link zv-x", "不選這區", `zone-panel-drop-${item.wall}-${item.key}`, () => toggleSelected(item.id)));
     return chip;
   });
@@ -1200,6 +1207,9 @@ function ruleRow() {
   row.dataset.mode = rule.mode; row.dataset.key = rule.key;
   const pick = el("select", `zv-pick ${shownOf(mode)}`); pick.id = "zone-rule-mode"; pick.setAttribute("aria-label", "其他牆面的做法");
   for (const [value, words] of Object.entries(ZONE_MODE_WORDS)) { const option = el("option", null, words); option.value = value; pick.append(option); }
+  if (mode === "unknown") {
+    const option = el("option", null, methodWords(rule)); option.value = mode; option.disabled = true; pick.append(option);
+  }
   pick.value = mode;
   pick.onchange = () => {
     if (pick.value === rule.mode) { ruleDraft = false; renderZoneOverview(); }
@@ -1209,7 +1219,7 @@ function ruleRow() {
   row.append(pick);
   if (mode === "fixed") {
     const material = el("select", "zv-pick zv-pick-material"); material.id = "zone-rule-material"; material.setAttribute("aria-label", "其他牆面指定貼哪一種");
-    const current = ruleDraft ? null : libraryLabel(rule.zones[0].zone.material);
+    const current = ruleDraft ? null : libraryLabel(rule.zones[0].zone.material, rule.zones[0].wall, rule.zones[0].key);
     if (!current) { const now = el("option", null, ruleDraft ? "選要貼哪一種" : `現在：${pastedWords(rule.zones[0])}`); now.value = ""; material.append(now); }
     const walls = WALL_ORDER.map(role => roles[role]);
     for (const entry of assignableEntries().filter(item => walls.every(wall => usableHere(item, wall)) || item === current)) {
@@ -1220,7 +1230,7 @@ function ruleRow() {
     row.append(material);
     // 其他牆面已經指定貼一種、跟著它的區裡有任何一區是「鋼板直接貼在棉上」的構造（#1208，貼上去的那一筆或原牆本身）：
     // 跟著規則的區圖上不寫名字，那兩行沒地方放，提醒寫在這張卡上（面板關著也看得到；伺服器給的那一行）。選到一半不寫。
-    if (!ruleDraft && rule.zones.some(item => zoneReferenceOnly(item.zone.material))) {
+    if (!ruleDraft && rule.zones.some(item => zoneReferenceOnly(item.zone.material, item.wall, item.key))) {
       const mark = el("p", "zv-rule-ref", zoneReference.map_line); mark.id = "zone-rule-reference"; row.append(mark);
     }
   }
@@ -1262,11 +1272,11 @@ function othersLines() {
   const parts = [["天花", faces.ceiling], ["地板", faces.floor], ["門", openings.filter(item => item.special === "門")],
                  ["窗", openings.filter(item => item.special === "窗")]].filter(([, items]) => items.length);
   const words = items => {
-    const counts = {search: 0, fixed: 0, still: 0};
+    const counts = {search: 0, fixed: 0, still: 0, unknown: 0};
     for (const item of items) counts[item.shown === "opening" ? "still" : item.shown] += 1;
     if (counts.still === items.length) return "保留原樣";
     return [counts.search ? `${ZONE_MODE_WORDS.search} ${counts.search} 區` : "", counts.fixed ? `指定貼 ${counts.fixed} 區` : "",
-            counts.still ? `保留原樣 ${counts.still} 區` : ""].filter(Boolean).join("、");
+            counts.still ? `保留原樣 ${counts.still} 區` : "", counts.unknown ? `看不出 ${counts.unknown} 區` : ""].filter(Boolean).join("、");
   };
   const merged = [];
   for (const [name, items] of parts) {
@@ -1457,7 +1467,7 @@ function detailTable() {
       const flat = wall === "floor" || wall === "ceiling";
       const size = !item.box ? "" : flat ? `${shownMetres(item.box[1] - item.box[0], 2)} × ${shownMetres(item.box[3] - item.box[2], 2)} 公尺`
         : `寬 ${shownMetres(item.box[1] - item.box[0], 2)} × 高 ${shownMetres(item.box[3] - item.box[2], 2)} 公尺`;
-      const what = item.shown === "search" ? ZONE_MODE_WORDS.search : item.shown === "fixed" ? ZONE_MODE_WORDS.fixed : "保留原樣";
+      const what = item.shown === "unknown" ? uncertainWords(item.construction) : item.shown === "search" ? ZONE_MODE_WORDS.search : item.shown === "fixed" ? ZONE_MODE_WORDS.fixed : "保留原樣";
       row.append(el("td", null, zoneWhereText(item)), el("td", null, item.key === "whole_wall" ? "" : `代號 ${item.key}`), el("td", null, size), el("td", null, what));
       table.append(row);
     }
@@ -1605,6 +1615,7 @@ function resultBar() {
     return item;
   };
   bar.append(part("search", ZONE_MODE_WORDS.search, of("search")), el("span", "zv-sep"), part("fixed", "指定貼", of("fixed")), el("span", "zv-sep"));
+  if (of("unknown").length) bar.append(part("unknown", "看不出", of("unknown")), el("span", "zv-sep"));
   const walls = WALL_ORDER.flatMap(role => faces[roles[role]]);
   const still = [];
   const stillWalls = walls.filter(item => item.shown === "still").length;

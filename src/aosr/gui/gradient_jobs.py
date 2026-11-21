@@ -66,6 +66,7 @@ from aosr.gui.surrogate_slots import missing_parts, surrogate_path
 from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import wall_words
 from aosr.physics.fem_reduced_store import manifest_path
+from aosr.gui.zone_construction import ComparisonWalls, SavedOriginal, read_original
 from aosr.gui.zone_design import NAME, DesignSettings, read_design
 from aosr.gui import reference_only
 from aosr.gui.zone_result import baseline_warning
@@ -360,14 +361,10 @@ class GradientJobs:
 
         return draft_symmetry(document, design_value, planned)
 
-    def _read_original(self, name: str) -> Scheme | None:
-        """限制檢查找不到獨立的原牆時，裸構造就只能列為比不了。"""
-        if not NAME.fullmatch(name):
-            return None
-        try:
-            return Scheme.model_validate_json((self.data_dir / "schemes" / f"{name}.json").read_bytes())
-        except (OSError, ValueError):
-            return None
+    def _read_original(self, name: str) -> ComparisonWalls:
+        """跟換料共用方案鎖讀原方案；讀不到也把原因交給深度提醒。"""
+        original = read_original(self.data_dir, name, self.scheme_lock)
+        return original.walls if isinstance(original, SavedOriginal) else original
 
     def depth_targets(self) -> DepthTargets:
         """立面圖限制檢查判准用材料組放不放得下用的那一份（跟開跑同一份材料庫）；材料庫讀不進來丟 :class:`PlanRefused`。"""

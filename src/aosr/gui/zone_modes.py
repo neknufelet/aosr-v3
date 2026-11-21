@@ -41,7 +41,8 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.gui.material_editor import plain_error, user_library_path
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.wall_words import draft_wall_words
-from aosr.gui.zone_design import NAME, WHOLE_WALL_KEY
+from aosr.gui.zone_construction import ComparisonWalls, OriginalProblem, SavedOriginal, _different_from_original, matching_construction, read_original
+from aosr.gui.zone_design import WHOLE_WALL_KEY
 from aosr.gui.zone_limits import zone_words
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material, original_walls
 from aosr.materials.construction_models import Assembly, MountedOnWall, SurfaceMaterial
@@ -80,7 +81,6 @@ class ZoneChoice(BaseModel):
     wall: WallName
     zone: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     choice: Literal["original", "fixed"]
-    previous_construction: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
     material_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
 
 
@@ -106,6 +106,10 @@ class ZoneMaterialError(ValueError):
     def __init__(self, message: str, status: int = 400) -> None:
         super().__init__(message)
         self.status = status
+
+
+class OriginalSchemeError(ZoneMaterialError):
+    """整份原方案不能用，沿用單筆與整批原有的錯誤回覆。"""
 
 
 class ZoneBatchError(ZoneMaterialError):
@@ -180,12 +184,15 @@ def zone_material(current: SurfaceMaterial, base: Origin, entry: LibraryEntry | 
         same = base.source != "unknown" and isinstance(base.material, Assembly) and base.material.layers == layers
     elif isinstance(chosen, Assembly) and not isinstance(entry, ConstructionEntry):
         layers = chosen.layers
-        same = base.material == chosen
+        same = base.source != "unknown" and base.material == chosen
     elif isinstance(entry, ConstructionEntry) and chosen == base.material and base.source != "unknown":
         return ZoneChange(base.material, f"選的「{entry.label}」跟這一區{face}一模一樣，當成不貼（保留原樣）", True)
     elif chosen is not None:
         what = "整塊構造" if isinstance(entry, ConstructionEntry) else "整面的表面阻抗"
-        return ZoneChange(chosen, f"「{entry.label}」是{what}，直接取代這一區的{face_itself(wall)}（不是貼上去）")
+        note = f"「{entry.label}」是{what}，直接取代這一區的{face_itself(wall)}（不是貼上去）"
+        if base.source == "unknown" and isinstance(current, Assembly):
+            note += f"；看不出{face}，要換回{face}請在上面「原方案」選切之前那一份方案"
+        return ZoneChange(chosen, note)
     else:
         raise ZoneMaterialError(f"「{entry.label}」不能指定成固定材料")
     if same:
@@ -209,7 +216,9 @@ class ZoneScene:
     walls: Mapping[str, tuple[SurfaceZone, ...]]
     entries: tuple[LibraryEntry, ...]
     replacements: tuple[SurfaceMaterial, ...]
-    original: OriginalWalls | None
+    standalone: Mapping[str, object]
+    original: ComparisonWalls | None
+    original_walls: OriginalWalls | OriginalProblem | None
     names: Mapping[str, str]
 
 
@@ -241,22 +250,6 @@ class ZoneMaterialHandlers:
             raise ZoneMaterialError(f"「{found.label}」是可最佳化材料：只能放進「交給搜尋」的准用清單，不能指定成固定材料")
         return found
 
-    def _original(self, name: str | None, design: Scheme) -> OriginalWalls | None:
-        if name is None:
-            return None
-        if not NAME.fullmatch(name):
-            raise ZoneMaterialError("原方案代號只收英數字、底線與連字號")
-        path = self.data_dir / "schemes" / f"{name}.json"
-        with self.lock:
-            if not path.is_file():
-                raise ZoneMaterialError(f"指的原方案「{name}」不在了；在上面「原方案」重選", 404)
-            text = path.read_text(encoding="utf-8")
-        try:
-            return original_walls(Scheme.model_validate_json(text), design, capabilities=self.capabilities,
-                                  directivity=self.directivity)
-        except (ValueError, BaselineRefused) as exc:
-            raise ZoneMaterialError(str(exc).splitlines()[0]) from exc
-
     def _walls(self, scheme: Scheme) -> Mapping[str, tuple[SurfaceZone, ...]]:
         """方案每一面的分區；六面都是整面固定阻抗的方案存成六個數字，走計算同一條驗證拿那六面材料
         （固定阻抗只在已驗輸入出生，見 ``zone_result.original_walls``），不在這裡自己建。"""
@@ -276,8 +269,20 @@ class ZoneMaterialHandlers:
         entries = self._library()
         replacements = tuple(material for item in entries if (material := fixed_surface(item)) is not None
                              if not isinstance(material, Assembly))
-        return ZoneScene(scheme, walls, entries, replacements, self._original(original_scheme_id, scheme),
-                         draft_wall_words(document))
+        standalone = {item.id: fixed_surface(item) for item in entries if isinstance(item, ConstructionEntry) and item.backing != "zone_wall"}
+        original = read_original(self.data_dir, original_scheme_id, self.lock) if original_scheme_id is not None else None
+        comparison = original.walls if isinstance(original, SavedOriginal) else original
+        source = original.scheme if isinstance(original, SavedOriginal) else original
+        if isinstance(source, Scheme):
+            try:
+                prior: OriginalWalls | OriginalProblem | None = original_walls(source, scheme, capabilities=self.capabilities, directivity=self.directivity)
+            except (ValueError, BaselineRefused) as exc:
+                prior = OriginalProblem(str(exc).splitlines()[0])
+        else:
+            prior = source
+        if isinstance(prior, OriginalProblem) and not standalone:
+            raise OriginalSchemeError(prior.error or prior.reason, prior.status)
+        return ZoneScene(scheme, walls, entries, replacements, standalone, comparison, prior, draft_wall_words(document))
 
     def _one(self, scene: ZoneScene, choice: ZoneChoice) -> dict[str, object]:
         """一區選了之後放什麼（單筆與一批同一套）：原牆照 ``origin`` 的先後取，再照 ``zone_material`` 組。"""
@@ -286,16 +291,16 @@ class ZoneMaterialHandlers:
         item, box = _zone_index(scene.walls, scene.scheme.scene.room_m, choice.wall, choice.zone, scene.names)
         current = item.material
         entry = self._entry(scene.entries, choice.material_id) if choice.choice == "fixed" and choice.material_id else None
-        base = origin(current, scene.original, choice.wall, choice.zone, box, scene.replacements)
-        if base.source == "current" and choice.previous_construction:
-            prior = next((item for item in scene.entries if item.id == choice.previous_construction), None)
-            if isinstance(prior, ConstructionEntry) and fixed_surface(prior) == current:
-                base = Origin(current, "unknown")
+        if isinstance(current, Assembly) and matching_construction(current, scene.standalone) is not None:
+            comparison = _different_from_original(scene.original, scene.scheme.scene.room_m, choice.wall, choice.zone, box, current)
+            # 無法證明裸構造是原牆時要明說，否則重選同一筆會把做法默默改成「保留原樣」。
+            base = Origin(current, "unknown") if comparison.original is None else Origin(comparison.original, "original_scheme")
+        else:
+            if isinstance(scene.original_walls, OriginalProblem):
+                raise OriginalSchemeError(scene.original_walls.error or scene.original_walls.reason, scene.original_walls.status)
+            base = origin(current, scene.original_walls, choice.wall, choice.zone, box, scene.replacements)
         change = zone_material(current, base, entry, choice.wall)
-        picked = isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall" and (
-            base.source == "unknown" or change.material != base.material)
-        return {**({"picked_construction": entry.id} if picked and entry is not None else {}),
-                "material": _MATERIAL.dump_python(change.material, mode="json"), "note": change.note, "origin": base.source,
+        return {"material": _MATERIAL.dump_python(change.material, mode="json"), "note": change.note, "origin": base.source,
                 "same_as_original": change.same_as_original}
 
     def change(self, body: ZoneMaterialRequest) -> dict[str, object]:
@@ -320,6 +325,8 @@ class ZoneMaterialHandlers:
         for index, choice in enumerate(body.changes):
             try:
                 results.append(self._one(scene, choice))
+            except OriginalSchemeError as exc:
+                raise ZoneBatchError(f"{exc}；{NOTHING_CHANGED}", exc.status) from exc
             except ZoneMaterialError as exc:
                 raise ZoneBatchError(f"{zone_words(choice.wall, choice.zone, names)}：{exc}；{NOTHING_CHANGED}", exc.status,
                                      index=index, choice=choice, reason=str(exc)) from exc
