@@ -47,6 +47,7 @@ input[type=radio],input[type=checkbox]{accent-color:#15617b}
 .back-key{align-self:center;margin-inline-start:.35rem}
 #figure-key button[aria-pressed=true]{outline:2px solid #1668c5}
 .performance{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(0,1fr);gap:1rem;border-top:1px solid #d5e0e4;margin-top:.9rem;padding-top:.9rem}
+#curve-state{display:block;min-height:1.5em}
 #curve-basis{margin:.35rem 0;color:#33434b}
 #curve,#curve-notes,#total,#source{overflow-wrap:anywhere}
 .where{border:0;padding:0;margin:0}.where legend{float:left;margin:.35rem 1rem 0 0}

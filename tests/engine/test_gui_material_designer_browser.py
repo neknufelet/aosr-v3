@@ -227,8 +227,6 @@ def test_converted_units_are_exact_in_saved_material(tmp_path: Path, browser: Br
         _fields(page, 0)
         page.locator('[name="thickness_m"]').fill("5.1")
         area = page.locator('[name="open_area"]')
-        if not area.is_visible():
-            _advanced(page)
         area.fill("1.1")
         _save(page, "參數構造")
         entry, = _stored(page, base).values()
@@ -263,7 +261,7 @@ def test_porous_fields_follow_model(tmp_path: Path, browser: Browser) -> None:
         _add(page, "porous")
         _fields(page, 0)
         fields = page.locator(".layer-body [name]:visible")
-        assert fields.evaluate_all("ns => ns.map(n => n.name).sort()") == ["flow_resistivity_pa_s_m2", "thickness_m"]
+        assert fields.evaluate_all("ns => ns.map(n => n.name).sort()") == ["flow_resistivity_pa_s_m2", "material_class", "thickness_m"]
         _advanced(page)
         model = page.locator('[name="model"]')
         porosity = page.locator('[name="porosity"]')
@@ -287,7 +285,11 @@ def test_plate_saves_only_selected_geometry(tmp_path: Path, browser: Browser, ki
     with _designer(tmp_path, browser) as (page, base):
         _add(page, kind)
         _fields(page, 0)
-        _advanced(page)
+        visible = page.locator(".layer-body [name]:visible").evaluate_all("ns => ns.map(n => n.name)")
+        assert visible.count("geometry") == 2
+        assert {"thickness_m", "slot_width_m" if kind == "slotted" else "hole_diameter_m"} <= set(visible)
+        assert {"open_area", "slot_spacing_m", "hole_spacing_m"}.intersection(visible)
+        assert page.locator(".advanced [name]").evaluate_all("ns => ns.map(n => n.name)") == ["surface_mass_kg_m2"]
         slotted = kind == "slotted"
         pitch = "slot_spacing_m" if slotted else "hole_spacing_m"
         page.get_by_label("用縫距" if slotted else "用孔距＋排法", exact=True).check()
@@ -310,8 +312,6 @@ def test_plate_saves_only_selected_geometry(tmp_path: Path, browser: Browser, ki
         assert layer[pitch] == .0342 and {"open_area", "hole_spacing_2_m"}.isdisjoint(layer)
         if kind != "micro_perforated":
             assert (layer["backing_fabric_surface_mass_kg_m2"], layer["backing_fabric_flow_resistance_pa_s_m"]) == (.13, 347)
-        if not page.get_by_label("用開孔率", exact=True).is_visible():
-            _advanced(page)
         page.get_by_label("用開孔率", exact=True).check()
         page.locator('[name="open_area"]').fill("8.2")
         if kind != "micro_perforated":
@@ -360,21 +360,30 @@ def test_chart_ticks_legend_basis_and_debounce(tmp_path: Path, browser: Browser)
         assert len(requests) == 1
 
 
-def test_readonly_header(tmp_path: Path, browser: Browser) -> None:
+@pytest.mark.parametrize(("provenance", "word"), [("measured", "實測"), ("literature", "文獻"), ("model", "模型")])
+def test_readonly_header(tmp_path: Path, browser: Browser, provenance: str, word: str) -> None:
     with _designer(tmp_path, browser) as (page, base):
-        product = construction(id="linen", product=True, provenance="measured", source="自編織物紀錄")
+        product = construction(id="linen", product=True, provenance=provenance, source="自編織物紀錄")
         assert page.request.put(f"{base}/api/materials/linen", data=product).ok
-        page.goto(f"{base}/materials/designer?id=linen")
+        with page.expect_request("**/api/material-curve") as preview:
+            page.goto(f"{base}/materials/designer?id=linen")
+        body = preview.value.post_data_json
+        assert isinstance(body, dict) and body["provenance"] == provenance
         expect(page.locator("#entry-status")).to_have_text("成品唯讀，可複製到設計器")
         page.get_by_text("出處與註記", exact=True).click()
-        expect(page.locator("#citation-provenance")).to_have_text("模型")
+        expect(page.locator("#source")).to_have_text(word)
+        expect(page.locator("#citation-provenance")).to_have_text(word)
         expect(page.get_by_label("出處文字")).to_be_disabled()
         page.get_by_role("button", name="複製到設計器").click()
         _save(page, "參數構造")
         stored = _stored(page, base)
-        assert stored["linen"]["provenance"] == "measured"
+        assert stored["linen"]["provenance"] == provenance
         assert stored["linen_copy"]["provenance"] == "model"
-        assert "實測" in stored["linen_copy"]["notes"][0] and "自編織物紀錄" in stored["linen_copy"]["notes"][0]
+        notes = stored["linen_copy"]["notes"]
+        if provenance == "model":
+            assert notes == product["notes"]
+        else:
+            assert notes[0].startswith(f"原來源：{word}，出處：自編織物紀錄")
 
 
 def test_dirty_navigation_can_be_cancelled(tmp_path: Path, browser: Browser) -> None:
@@ -448,6 +457,7 @@ def test_own_construction_can_be_duplicated(tmp_path: Path, browser: Browser) ->
         _save(page, "參數構造")
         entries = _stored(page, base)
         assert entries[original["id"]] == original
+        assert entries[original["id"] + "_copy"]["notes"] == original["notes"]
         assert entries[original["id"] + "_copy"]["layers"][0]["thickness_m"] == .0709
 
 
@@ -459,3 +469,200 @@ def test_old_fixed_multilayer_copies_layers_backing_and_model(tmp_path: Path, br
         assert copy["layers"] == old["material"]["layers"]
         assert copy["backing"] == old["material"]["backing"]
         assert copy["provenance"] == "model"
+
+
+@pytest.mark.parametrize("kind", ["perforated", "slotted"])
+def test_plate_cloth_matches_first_template_and_title(tmp_path: Path, browser: Browser, kind: str) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        elements = page.request.get(f"{base}/api/material-elements").json()["elements"]
+        template = next(row["first_layer"] for row in elements if row["kind"] == kind)
+        _add(page, kind)
+        _fields(page, 0)
+        cloth = page.get_by_label("背面貼布", exact=True)
+        assert cloth.is_visible() and cloth.is_checked()
+        title = page.locator(".layer-select")
+        mass = page.locator('[name="backing_fabric_surface_mass_kg_m2"]')
+        flow = page.locator('[name="backing_fabric_flow_resistance_pa_s_m"]')
+        assert float(mass.input_value()) == template["backing_fabric_surface_mass_kg_m2"]
+        assert float(flow.input_value()) == template["backing_fabric_flow_resistance_pa_s_m"]
+        mass.fill("")
+        flow.fill("")
+        expect(title).to_contain_text("（背面貼布）")
+        mass.fill("0.218")
+        flow.fill("381")
+        expect(title).to_contain_text("（背面貼布）")
+        cloth.uncheck()
+        expect(title).not_to_contain_text("（背面貼布）")
+        expect(mass).to_be_hidden()
+        expect(flow).to_be_hidden()
+        cloth.check()
+        expect(title).to_contain_text("（背面貼布）")
+        expect(mass).to_have_value("0.218")
+        expect(flow).to_have_value("381")
+
+
+@pytest.mark.parametrize(("provenance", "word"), [("literature", "文獻"), ("measured", "實測")])
+def test_inplace_source_recorded_once(tmp_path: Path, browser: Browser, provenance: str, word: str) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        entry = construction(id="woven", provenance=provenance, source="自編織物筆記", notes=["保留這行"])
+        assert page.request.put(f"{base}/api/materials/woven", data=entry).ok
+        page.goto(f"{base}/materials/designer?id=woven")
+        page.get_by_text("出處與註記", exact=True).click()
+        page.get_by_label("出處文字").fill("自編修改說明")
+        page.get_by_label("網址").fill("https://example.org/revision")
+        for _ in range(2):
+            _save(page, "參數構造")
+            saved = _stored(page, base)["woven"]
+            assert saved["provenance"] == "model" and saved["source"] == "自編修改說明"
+            assert saved["notes"] == [f"原來源：{word}，出處：自編織物筆記，網址：https://example.org/test", "保留這行"]
+        page.get_by_role("button", name="複製一份").click()
+        _save(page, "參數構造")
+        assert _stored(page, base)["woven_copy"]["notes"] == saved["notes"]
+
+
+@pytest.mark.parametrize("second_collision", [False, True])
+def test_id_collision_retries_once(tmp_path: Path, browser: Browser, second_collision: bool) -> None:
+    original = construction(id="weave", label="自編布樣")
+    with real_server(tmp_path) as base, _open(browser, "about:blank") as watched:
+        page = watched.page
+        assert page.request.put(f"{base}/api/materials/weave", data=original).ok
+        page.goto(f"{base}/materials/designer?copy=weave")
+        page.get_by_label("名稱", exact=True).fill("另一片布")
+        attempts: list[str] = []
+
+        def intercept(route: Route) -> None:
+            body = route.request.post_data_json
+            assert isinstance(body, dict)
+            material_id = body["id"]
+            assert route.request.url.endswith("/" + material_id)
+            assert route.request.headers["if-none-match"] == "*"
+            attempts.append(material_id)
+            if len(attempts) == 1 or second_collision:
+                rival = construction(id=material_id, label=f"同時存入的布{len(attempts)}")
+                assert page.request.put(route.request.url, data=rival).ok
+            route.continue_()
+
+        page.route("**/api/materials/*", intercept)
+        page.locator("#save").click()
+        message = page.locator("#save-message")
+        expect(message).not_to_be_empty()
+        assert len(attempts) == len(set(attempts)) == 2
+        entries = _stored(page, base)
+        assert entries[attempts[0]]["label"] == "同時存入的布1"
+        if second_collision:
+            expect(message).to_have_text("自動編號又重複了，請再按一次儲存。")
+            assert entries[attempts[1]]["label"] == "同時存入的布2"
+            expect(page.get_by_label("名稱", exact=True)).to_have_value("另一片布")
+        else:
+            expect(message).to_contain_text("已存到")
+            assert entries[attempts[1]]["label"] == "另一片布"
+        assert not watched.page_errors
+        assert all("409" in text for text in watched.console_errors)
+
+
+def test_missing_geometry_names_field_before_sending(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "micro_perforated")
+        _fields(page, 0)
+        pitch = page.get_by_label("用孔距＋排法", exact=True)
+        pitch.check()
+        puts: list[str] = []
+        page.on("request", lambda req: puts.append(req.url) if req.method == "PUT" else None)
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).to_contain_text("孔距還沒填")
+        assert not puts
+        page.locator('[name="hole_spacing_m"]').fill("9.1")
+        page.locator('[name="hole_pattern"]').select_option("rectangular")
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).to_contain_text("排距還沒填")
+        expect(page.locator("#curve-state")).to_contain_text("排距還沒填")
+        assert not puts
+
+
+def test_old_plot_stays_while_waiting(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "porous")
+        _fields(page, 0)
+        canvas = page.locator("#curve canvas")
+        expect(canvas).to_be_visible()
+        previous = canvas.evaluate("c => c.toDataURL()")
+        panel = page.locator(".performance")
+        height = panel.evaluate("n => n.offsetHeight")
+        held: list[Route] = []
+        page.route("**/api/material-curve", lambda route: held.append(route))
+        with page.expect_request("**/api/material-curve"):
+            page.locator('[name="thickness_m"]').fill("57.8")
+        expect(page.locator("#curve-state")).to_have_text("改過了，停手後重算")
+        assert canvas.evaluate("c => c.toDataURL()") == previous
+        assert panel.evaluate("n => n.offsetHeight") == height
+        held[0].continue_()
+        expect(page.locator("#curve-state")).to_be_empty()
+        assert canvas.evaluate("c => c.toDataURL()") != previous
+
+
+def test_save_keeps_selected_advanced_open(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, _):
+        _add(page, "air", "porous")
+        _fields(page, 1)
+        _advanced(page)
+        _save(page, "參數構造")
+        expect(page.locator("#stack article").nth(1).locator(".layer-select")).to_have_attribute("aria-expanded", "true")
+        assert page.locator(".advanced").evaluate("n => n.open")
+
+
+def test_inactive_geometry_and_model_values_return(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        _add(page, "porous", "perforated")
+        _fields(page, 1)
+        area = page.get_by_label("用開孔率", exact=True)
+        area.check()
+        page.locator('[name="open_area"]').fill("6.9")
+        spacing = page.get_by_label("用孔距＋排法", exact=True)
+        spacing.check()
+        page.locator('[name="hole_spacing_m"]').fill("31.2")
+        pattern = page.locator('[name="hole_pattern"]')
+        pattern.select_option("rectangular")
+        row_pitch = page.locator('[name="hole_spacing_2_m"]')
+        row_pitch.fill("19.4")
+        pattern.select_option("square")
+        pattern.select_option("rectangular")
+        expect(row_pitch).to_have_value("19.4")
+        area.check()
+        expect(page.locator('[name="open_area"]')).to_have_value("6.9")
+        _fields(page, 0)
+        _advanced(page)
+        model = page.locator('[name="model"]')
+        model.select_option("wilson_2015")
+        page.locator('[name="porosity"]').fill("0.89")
+        page.locator('[name="tortuosity"]').fill("1.32")
+        model.select_option("miki")
+        _save(page, "參數構造")
+        saved, = _stored(page, base).values()
+        porous, plate = saved["layers"]
+        assert {"porosity", "tortuosity"}.isdisjoint(porous)
+        assert {"hole_pattern", "hole_spacing_m", "hole_spacing_2_m"}.isdisjoint(plate)
+        model.select_option("wilson_2015")
+        expect(page.locator('[name="porosity"]')).to_have_value("0.89")
+        expect(page.locator('[name="tortuosity"]')).to_have_value("1.32")
+        _fields(page, 1)
+        spacing.check()
+        expect(pattern).to_have_value("rectangular")
+        expect(row_pitch).to_have_value("19.4")
+        expect(page.locator('[name="hole_spacing_m"]')).to_have_value("31.2")
+
+
+def test_bonded_warning_only_in_legend(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        entry = construction(id="bonded_weave", layers=[
+            {"kind": "board", "surface_mass_kg_m2": 2.7, "resistance_pa_s_m": 17},
+            {"kind": "porous", "thickness_m": .043, "flow_resistivity_pa_s_m2": 18311, "material_class": "fibrous",
+             "frame_compression_modulus_pa": 27100, "frame_loss_factor": .21}])
+        assert page.request.put(f"{base}/api/materials/bonded_weave", data=entry).ok
+        with page.expect_response("**/api/material-curve") as response:
+            page.goto(f"{base}/materials/designer?id=bonded_weave")
+        reply = response.value.json()
+        for key in ("sentence", "why_only"):
+            words = reply["reference_only"][key]
+            expect(page.locator("#curve-key")).to_contain_text(words)
+            expect(page.locator("#curve-notes")).not_to_contain_text(words)
+        assert page.locator("#curve-notes li").all_text_contents() == [warn["text"] for warn in reply["warnings"]]
