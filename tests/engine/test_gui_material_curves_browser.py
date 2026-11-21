@@ -35,14 +35,15 @@ def _pixels(page: Page) -> dict[str, int]:
     return cast(dict[str, int], page.locator("#curve-chart canvas").evaluate(PIXELS_JS))
 
 
-def _row(page: Page, material_id: str) -> None:
-    page.locator(f'#builtin-list tr[data-id="{material_id}"] button.open').click()
+def _row(page: Page, kind: str, material_id: str) -> None:
+    page.locator(f"#tab-{kind}").click()
+    page.locator(f'#panel-{kind} [data-id="{material_id}"] button.open').click()
 
 
 def test_a_builtin_opens_with_its_curve_labels_and_shaded_extrapolation(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        _row(page, "glass_wool_48k")
+        _row(page, "optimizable", "glass_wool_48k")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         expect(page.locator("#curve-basis")).to_have_text("阻抗怎麼得到：模擬，之後要拿實測對照")
         expect(page.locator("#curve-basis")).to_have_class("badge basis-simulated")
@@ -114,18 +115,18 @@ def test_redraw_uses_unsaved_form_values_and_says_when_the_curve_is_stale(tmp_pa
 def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        _row(page, "glass_wool_48k")
+        _row(page, "optimizable", "glass_wool_48k")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         held: list[Route] = []
         page.route("**/api/material-curve", lambda route: held.append(route))
         with page.expect_request("**/api/material-curve"):
-            _row(page, "fabric_pet_a_gap100")
+            _row(page, "fixed", "fabric_pet_a_gap100")
         # 換開另一筆：新回應回來前，上一筆的圖、標語、提醒先拿掉
         expect(page.locator("#curve-chart canvas")).to_have_count(0)
         expect(page.locator("#curve-labels")).to_be_hidden()
         expect(page.locator("#curve-warnings li")).to_have_count(0)
         with page.expect_request("**/api/material-curve"):
-            _row(page, "glass_wool_24k")
+            _row(page, "optimizable", "glass_wool_24k")
         held[1].continue_()
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         expect(page.locator("#curve-arrangement")).to_be_visible()
@@ -151,7 +152,7 @@ def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen
 def test_the_curve_fits_a_phone_and_follows_a_resize(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials", viewport_width=390) as watched:
         page = watched.page
-        _row(page, "glass_wool_48k")
+        _row(page, "optimizable", "glass_wool_48k")
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
         # 區塊自己會橫向捲（共用樣式 overflow-x:auto），整頁量不到：出處裡的長網址要斷得開
