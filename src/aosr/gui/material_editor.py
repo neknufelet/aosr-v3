@@ -247,11 +247,14 @@ class MaterialStore:
             current = self._user_entries()
             ids = [item.id for item in current]
             if create and material_id in ids:
+                existing = current[ids.index(material_id)]
+                if existing.label == entry.label:
+                    raise MaterialEditError(f"已有材料使用名稱「{existing.label}」，請重新打開或複製一份", 409)
                 raise MaterialEditError(f"已經有代號 {material_id} 的材料；換一個代號，或打開那一筆再改", 409)
             taken = next((item for item in (*builtin_entries(), *current)
                           if item.id != material_id and item.label == entry.label), None)
             if taken is not None:
-                raise MaterialEditError(f"顯示名「{entry.label}」已經被代號 {taken.id} 用了，換一個顯示名", 409)
+                raise MaterialEditError(f"已有材料使用名稱「{taken.label}」，請換一個名稱", 409)
             entries = (tuple(entry if item.id == material_id else item for item in current) if material_id in ids
                        else (*current, entry))
             try:

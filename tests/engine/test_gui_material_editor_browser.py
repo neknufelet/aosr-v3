@@ -518,3 +518,30 @@ def test_a_tunable_vpr_in_the_library_is_listed_and_does_not_break_the_page(tmp_
         _row(page, "fixed", PANEL, "open")
         expect(page.locator("#editor-title")).to_contain_text("薄吸音板（自編）")
         assert (watched.console_errors, watched.page_errors) == ([], [])
+
+
+def test_user_fixed_assembly_reopens_and_saves_in_place(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
+        page = watched.page
+        page.locator("#new-fixed").click()
+        page.locator("#material-id").fill("woven_pair")
+        page.locator("#material-label").fill("雙層試片")
+        page.locator("#provenance").select_option("model")
+        page.locator("#source").fill("雙層自編")
+        layer = page.locator("#assembly-layers > li").first
+        layer.locator('[name="thickness_m"]').fill("0.074")
+        layer.locator('[name="flow_resistivity_pa_s_m2"]').fill("14321")
+        page.locator("#panel-assembly button.add-layer").click()
+        other = page.locator("#assembly-layers > li").last
+        other.locator("select").first.select_option("air")
+        other.locator('[name="thickness_m"]').fill("0.021")
+        _saved(page)
+        page.locator("#close").click()
+        _row(page, "fixed", "woven_pair", "open")
+        expect(page.locator("#copy-to-designer")).to_be_visible()
+        expect(layer.locator('[name="thickness_m"]')).to_be_editable()
+        layer.locator('[name="thickness_m"]').fill("0.076")
+        _saved(page)
+        assert (watched.console_errors, watched.page_errors) == ([], [])
+    material = _materials(tmp_path)["woven_pair"]["material"]
+    assert isinstance(material, dict) and material["layers"][0]["thickness_m"] == .076

@@ -222,7 +222,9 @@ def test_materials_page_lists_old_product_and_three_construction_backings(tmp_pa
         expect(copy).to_be_visible()
         stored = page.request.get(f"{base}/api/materials").json()["materials"]
         entries = {item["entry"]["id"]: item["entry"] for item in stored}
-        assert entries["panel_zone_wall_copy"] == {**entries["panel_zone_wall"], "id": "panel_zone_wall_copy", "label": "原牆布面（複製）"}
+        assert entries["panel_zone_wall_copy"] == {**entries["panel_zone_wall"], "id": "panel_zone_wall_copy", "label": "原牆布面（複本）",
+            "source": "照「原牆布面」改的", "provenance": "model", "links": [],
+            "notes": ["原來源：文獻，出處：考卷自編，網址：https://example.org/test", "自編條件"]}
         page.once("dialog", lambda dialog: dialog.accept())
         copy.get_by_role("button", name="刪除").click()
         expect(copy).to_have_count(0)

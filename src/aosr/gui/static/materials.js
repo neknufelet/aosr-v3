@@ -319,64 +319,14 @@ function fixedBlock(entry, readonly) {
 // ---- 吸音曲線、數字來源、可信範圍提醒（段 2-2b） ----
 // 曲線與提醒全由伺服器現算（同一套物理）；這裡只畫圖、照實印。標語也由伺服器從送去的內文判，不在這裡自己猜。
 
-let plot = null;
 let curveTicket = 0;
 let curveReply = null; // 畫面上正在顯示的那一份回應（畫好的、或講為什麼沒畫的）
 let curveDirty = false; // 送出那一份之後表單又改過：晚到的回應不准把「表單改過」的提示清掉
 const STALE = "表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。";
 
-function destroyPlot() {
-  if (plot) plot.destroy();
-  plot = null;
-  byId("curve-chart").replaceChildren();
-}
-
 function curveState(text, kind) {
   byId("curve-state").textContent = text;
   byId("curve-state").className = kind;
-}
-
-function chartWidth() {
-  return Math.max(byId("curve-chart").clientWidth, 240);
-}
-
-// 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下打淡藍底，頂端內側一行小字。字與界線都是伺服器給的（reply.reference_only）。
-// 藍底是疊在圖上的兩個元素（不是畫在畫布上）：每次重畫照橫軸現在的位置重放，界線在橫軸左端以外就不放。
-function placeBand(u, reference) {
-  const over = u.over;
-  let band = over.querySelector(".ref-band"), word = over.querySelector(".ref-band-word");
-  if (!band) {
-    band = el("div", {class: "ref-band", id: "curve-ref-band"}); word = el("div", {class: "ref-band-word", id: "curve-ref-band-word"});
-    over.append(band, word);
-  }
-  const right = Math.min(u.valToPos(reference.band_hz, "x"), over.clientWidth);
-  band.hidden = word.hidden = !(right > 0);
-  band.style.width = `${Math.max(right, 0)}px`;
-  band.dataset.hz = String(reference.band_hz);
-  word.textContent = reference.band_words;
-}
-
-function drawPlot(reply) {
-  destroyPlot();
-  const spans = reply.spans;
-  const reference = reply.reference_only || null;
-  // 底色畫在清畫布之後、畫線之前；頭尾同一點時至少畫 2 像素寬，看得到。
-  const shade = (u) => {
-    const ctx = u.ctx, box = u.bbox;
-    ctx.save();
-    for (const span of spans) {
-      const left = u.valToPos(span.low_hz, "x", true), right = u.valToPos(span.high_hz, "x", true);
-      ctx.fillStyle = SPAN_FILL[span.kind];
-      ctx.fillRect(left, box.top, Math.max(right - left, 2 * devicePixelRatio), box.height);
-    }
-    ctx.restore();
-  };
-  plot = new uPlot({width: chartWidth(), height: 320, legend: {show: false},
-    scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}, y: {range: [0, 1]}},
-    axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}],
-    series: [{}, {label: "吸音係數", stroke: "#15617b", width: 2, points: {show: false}}],
-    hooks: {drawClear: [shade], draw: reference ? [(u) => placeBand(u, reference)] : []}},
-    [reply.frequencies_hz, reply.absorption], byId("curve-chart"));
 }
 
 function showLabels(reply) {
@@ -410,26 +360,14 @@ function clearCurve() {
   curveReply = null;
 }
 
-// 圖例那一行（#1208）：色塊、「藍底：」、那一句、「為什麼」（點開才看得到原因）。
-function referenceNote(reference) {
-  const more = el("details", {id: "curve-ref-why"}, el("summary", {text: "為什麼"}), el("p", {text: reference.why_only}));
-  return el("li", {class: "ref-note", id: "curve-ref-note", "data-kind": "reference_only"},
-    el("span", {class: "ref-sw"}), "藍底：", el("span", {class: "ref-say", text: reference.sentence}), more);
-}
-
 function showCurve(reply) {
   showLabels(reply);
   const drawn = reply.status === "drawn";
   // 「鋼板直接貼在棉上」的構造：圖例多一行（有圖才有藍底可講），「種類」那一行後面接一句（沒有圖也接）。換一筆、重畫都重放。
   const reference = reply.reference_only || null;
-  byId("curve-ref-note")?.remove();
+  showPlotKey(reply);
   byId("editor-kind-ref")?.remove();
-  if (reference && drawn) byId("curve-key").prepend(referenceNote(reference));
   if (reference && byId("editor-kind")) byId("editor-kind").append(el("span", {class: "ref-kind", id: "editor-kind-ref", text: reference.kind_words}));
-  byId("curve-key").hidden = !drawn || !(reply.spans.length || reference);
-  // 底色說明只列圖上真的有的那幾種。
-  const kinds = new Set(drawn ? [...reply.spans.map((span) => span.kind), ...(reference ? ["reference_only"] : [])] : []);
-  for (const item of byId("curve-key").querySelectorAll("li")) item.hidden = !kinds.has(item.dataset.kind);
   byId("curve-warnings").replaceChildren(...(drawn ? reply.warnings : []).map((line) =>
     el("li", {class: line.level, "data-code": line.code, text: line.text})));
   byId("curve-axis").textContent = drawn ? reply.axis_text : "";
@@ -481,7 +419,7 @@ let parts = null;
 function openEntry(row, isNew, scroll = true) {
   const entry = row.entry;
   const assembly = entry.kind === "fixed" && entry.material.kind === "assembly";
-  const readonly = row.builtin || (assembly && !isNew);
+  const readonly = row.builtin;
   current = {entry, builtin: row.builtin, isNew};
   byId("editor-title").textContent = isNew ? `新材料：${entry.label}` : `${row.builtin ? "內建材料" : "我的材料"}：${entry.label}`;
   byId("editor-readonly").hidden = !row.builtin;

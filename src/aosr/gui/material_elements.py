@@ -179,4 +179,4 @@ def material_elements(settings: MaterialGradientSettings) -> dict[str, object]:
             _set_range(row, dict(identity), research)
             rows.append(row)
     _distinguish_names(rows)
-    return {"elements": [row.payload() for row in rows], "family_labels": family_labels, "provenance_labels": PROVENANCE_LABELS}
+    return {"elements": [row.payload() for row in rows], "dimension_fields": _DIMENSIONS, "family_labels": family_labels, "provenance_labels": PROVENANCE_LABELS}

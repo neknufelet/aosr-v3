@@ -18,6 +18,13 @@ h2{font-size:1.25rem}h3{font-size:1.05rem}h2 small{font-weight:400;margin-left:.
 .tune button::after{content:"";display:block;background:white;border-radius:100%;width:.75rem;height:.75rem;margin-left:.16rem}
 .layer-body{padding:.7rem;border-top:1px solid #d5e0e4}
 .params{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.55rem}
+.advanced{margin-top:.7rem;border-top:1px solid #d5e0e4;padding-top:.5rem}
+.advanced summary,.citation summary{cursor:pointer;color:#28576a;font-weight:600}
+.advanced .params:not(:empty){margin:.5rem 0}
+.geometry{border:1px solid #cddde2;border-radius:6px;min-width:0;margin:.6rem 0}
+.geometry legend{font-size:.9rem;color:#394e59}
+.citation label{display:grid;max-width:48rem;margin:.5rem 0}
+.citation textarea{font:inherit;padding:.35rem;border:1px solid #97aeb8;border-radius:5px;resize:vertical}
 .params label{display:grid;gap:.15rem;font-size:.88rem;margin:0;color:#394e59}
 .params input,.params select{width:100%;max-width:100%;box-sizing:border-box}
 .layer-tools{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
@@ -39,9 +46,8 @@ input[type=radio],input[type=checkbox]{accent-color:#15617b}
 #figure .picked{stroke:#1668c5;stroke-width:1.8}
 .back-key{align-self:center;margin-inline-start:.35rem}
 #figure-key button[aria-pressed=true]{outline:2px solid #1668c5}
-.performance{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:1rem;border-top:1px solid #d5e0e4;margin-top:.9rem;padding-top:.9rem}
-#curve .curve{width:100%;max-width:none;border-radius:3px;background:#f8fbfc}
-.axis{display:flex;justify-content:space-between;font-size:.8rem;color:#53636b}
+.performance{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(0,1fr);gap:1rem;border-top:1px solid #d5e0e4;margin-top:.9rem;padding-top:.9rem}
+#curve-basis{margin:.35rem 0;color:#33434b}
 #curve,#curve-notes,#total,#source{overflow-wrap:anywhere}
 .where{border:0;padding:0;margin:0}.where legend{float:left;margin:.35rem 1rem 0 0}
 .save-bar{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:.6rem}

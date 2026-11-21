@@ -105,7 +105,9 @@ def _unchanged_after(tmp_path: Path, request: str, path: str, body: object, head
     ("刪內建", "POST", f"/api/materials/{builtin_entries()[-1].id}/delete", {}, None, 403, "內建材料唯讀"),
     ("網址代號對不上", "PUT", "/api/materials/other", _fixed(_assembly(), "mine", "我的"), None, 400, "網址的代號 other"),
     ("新增撞到已有代號", "PUT", "/api/materials/keep", _fixed(_assembly(), "keep", "另一個"), CREATE, 409, "已經有代號 keep"),
-    ("顯示名撞內建", "PUT", "/api/materials/mine", _fixed(_assembly(), "mine", builtin_entries()[0].label), None, 409, "已經被代號"),
+    ("兩頁新增同名同代號", "PUT", "/api/materials/keep", _fixed(_assembly(), "keep", "留著"), CREATE, 409,
+     "已有材料使用名稱「留著」，請重新打開或複製一份"),
+    ("顯示名撞內建", "PUT", "/api/materials/mine", _fixed(_assembly(), "mine", builtin_entries()[0].label), None, 409, f"已有材料使用名稱「{builtin_entries()[0].label}」，請換一個名稱"),
     ("檢查不過", "PUT", "/api/materials/mine", _fixed(_assembly(-0.05), "mine", "我的"), None, 400, "多層構造›第 1 層›多孔層›層厚度：要大於 0"),
     ("刪不存在的", "POST", "/api/materials/nothing/delete", {}, None, 404, "沒有這筆使用者材料"),
 ])
@@ -115,6 +117,8 @@ def test_refused_saves_and_deletes_leave_the_file_byte_identical(
 ) -> None:
     code, message = _unchanged_after(tmp_path, request_kind, path, body, headers)
     assert (code, words in message) == (status, True), (case, message)
+    if case in ("顯示名撞內建", "兩頁新增同名同代號"):
+        assert message == words
 
 
 def test_deleting_a_user_material_removes_only_that_one(tmp_path: Path) -> None:
