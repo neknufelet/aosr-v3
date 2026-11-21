@@ -693,6 +693,9 @@ def test_untreated_six_number_original_can_tell_a_picked_construction(tmp_path: 
         (tmp_path / "schemes" / "original.json").write_text(untreated.model_dump_json())
         assert client.put("/api/materials/test_panel", json=doc).status_code == 200
         page = client.post("/api/zone-limits", json={"scheme": current, "design": design.model_dump(mode="json")}).json()
+        incomplete = {key: value for key, value in current.items() if key != "purpose"}
+        gap = client.post("/api/zone-limits", json={"scheme": incomplete, "design": design.model_dump(mode="json")}).json()
+        assert gap["picked_constructions"] == page["picked_constructions"] and gap["red"] == page["red"] == 1
         back = client.post("/api/zone-material", json={"scheme": current, "wall": "x0", "zone": "z1",
                                                        "choice": "original", "original_scheme_id": "original"}).json()
     seen = (page["picked_constructions"]["x0"]["z1"]["state"], page["red"], back["origin"], back["material"] != material)
@@ -725,8 +728,8 @@ def _saved_original_for_comparison(case: str, material: Doc) -> str:
 @pytest.mark.parametrize(("case", "state", "reason"), [
     ("none", "unknown", "沒指原方案"), ("changed", "picked", ""), ("explicit_walls", "picked", ""), ("same", "original", ""),
     ("crossed", "unknown", "切線劃過"), ("resized", "unknown", "房間尺寸"), ("legacy", "picked", ""),
-    ("missing_face", "unknown", "缺少牆面"), ("missing_other_face", "unknown", "缺少牆面 y0"), ("gone", "unknown", "不在"),
-    ("invalid_scheme", "unknown", "purpose"), ("invalid_impedance", "unknown", "阻抗"),
+    ("missing_face", "unknown", "缺少牆面"), ("missing_other_face", "unknown", "缺少牆面"), ("gone", "unknown", "不在"),
+    ("invalid_scheme", "unknown", "缺這一格"), ("invalid_impedance", "unknown", "阻抗"),
 ])
 def test_saved_construction_verdict_agrees_across_page_launch_preview_and_material_change(
         tmp_path: Path, case: str, state: str, reason: str) -> None:
@@ -778,6 +781,19 @@ def test_saved_construction_verdict_agrees_across_page_launch_preview_and_materi
         assert change.json()["same_as_original"] == (state == "original")
 
 
+@pytest.mark.parametrize(("case", "words"), [("invalid_scheme", "方案用途"), ("missing_other_face", "缺少牆面")])
+def test_unreadable_original_has_a_plain_validation_reason(tmp_path: Path, case: str, words: str) -> None:
+    from tests.engine.test_gui_gradient_jobs import FakeLauncher, _jobs
+    from aosr.gui.zone_construction import OriginalProblem
+
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes/original.json").write_text(_saved_original_for_comparison(case, {}))
+    problem = _jobs(tmp_path, FakeLauncher())._read_original("original")
+    assert isinstance(problem, OriginalProblem)
+    assert "讀不進來" in problem.reason and words in problem.reason
+    assert all(raw not in problem.reason for raw in ("Field required", "purpose", "surface_zones_by_wall"))
+
+
 @pytest.mark.parametrize(("cap", "words"), [(None, "沒設深度上限"), (0.08, "0.08 公尺")])
 def test_uncertain_construction_explains_its_depth_even_when_it_fits(cap: float | None, words: str) -> None:
     entry = _ENTRY.validate_python(construction())
@@ -790,3 +806,77 @@ def test_uncertain_construction_explains_its_depth_even_when_it_fits(cap: float 
     line, = _lines(result, "x0", "z1")
     assert line["level"] == "note" and all(word in line["text"] for word in (words, entry.label, "0.063", "沒指原方案"))
     assert "超過" not in line["text"] and result["red"] == 0
+
+
+def test_design_remembers_only_a_fixed_library_id_and_roundtrips_legacy_bytes() -> None:
+    old = ('{"schema_version":"aosr.zone_design.v1","scheme_id":"old","zones":{"x0":{"sample":{"mode":"fixed",'
+           '"max_depth_m":0.04}}},"original_scheme_id":null}')
+    assert DesignSettings.model_validate_json(old).model_dump_json().encode() == old.encode()
+    for mode, identifier in (("search", "my_panel"), ("keep_original", "my_panel"),
+                             ("search", None), ("keep_original", None), ("fixed", "bad-id")):
+        with pytest.raises(ValidationError):
+            ZoneDesign.model_validate({"mode": mode, "picked_entry": identifier})
+    remembered = old.replace('"mode":"fixed"', '"mode":"fixed","picked_entry":"my_panel"')
+    assert DesignSettings.model_validate_json(remembered).zones["x0"]["sample"].picked_entry == "my_panel"
+
+
+@pytest.mark.parametrize("case", ["none", "none_rigid", "gone", "same", "wrong_backing", "deleted", "changed_surface"])
+def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str) -> None:
+    from tests.engine.test_gui_gradient_jobs import FakeLauncher, _jobs
+
+    current = _cut(None)
+    backing = "rigid" if case == "none_rigid" else "air"
+    entry = construction(backing, id="chosen", label="自編選中的面板")
+    duplicate = construction(backing, id="another", label="自編同構面板")
+    material = {"kind": "assembly", "layers": entry["layers"], "backing": backing}
+    zone = next(item for item in _zones(current)["x0"] if item["id"] == "z1")
+    if case != "changed_surface":
+        zone["material"] = material
+    prior = "original" if case in ("same", "gone") else None
+    plan_design = _design(zones={"x0": {"auto1": {"mode": "search"}}})
+    scheme = _scheme(current)
+    plan = plan_search(scheme, plan_design, GradientRequest(), SETTINGS)
+    settings = plan_design.model_dump(mode="json")
+    settings["original_scheme_id"] = prior
+    settings["zones"]["x0"]["z1"] = {"mode": "fixed", "picked_entry": "chosen", "max_depth_m": 0.05}
+    with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        if case == "same":
+            (tmp_path / "schemes/original.json").write_text(_saved_original_for_comparison(case, material))
+        assert client.put("/api/materials/another", json=duplicate).status_code == 200
+        if case != "deleted":
+            assert client.put("/api/materials/chosen", json=entry | ({"backing": "rigid"} if case == "wrong_backing" else {})).status_code == 200
+        page = client.post("/api/zone-limits", json={"scheme": current, "design": settings}).json()
+    (tmp_path / "schemes/room109.json").write_text(scheme.model_dump_json())
+    (tmp_path / "designs/room109.json").write_text(json.dumps(settings))
+    jobs = _jobs(tmp_path, FakeLauncher())
+    _, scheme, design = jobs.inputs("room109")
+    targets = jobs.depth_targets()
+    assert page["refusals"] == saved_refusals(current, design, depth_targets=targets)
+    lines = _lines(page, "x0", "z1")
+    preview = fixed_depths(plan, scheme, design, targets)
+    assert preview["x0@z1"]["lines"] == [{"text": line["text"], "level": line["level"]} for line in lines]
+    if case in ("none", "none_rigid", "gone"):
+        assert page["picked_constructions"]["x0"]["z1"] == {"state": "picked", "id": "chosen", "label": entry["label"]}
+        assert page["red"] == 1 and page["refusals"] == ["前牆「z1」：" + lines[0]["text"]]
+        assert lines[0]["code"] == "depth_over"
+        with pytest.raises(PlanRefused, match="前牆「z1」"):
+            jobs.plan(scheme, design, GradientRequest())
+    elif case == "same":
+        assert page["picked_constructions"]["x0"]["z1"]["state"] == "original" and lines == []
+    else:
+        assert page["red"] == 0
+        label = entry["label"] if case != "deleted" else "chosen"
+        assert any(f"設計設定記的那一筆「{label}」跟這一區現在的材料對不上" in line["text"] for line in lines)
+
+
+def test_depth_and_material_pick_both_include_builtin_constructions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.engine.test_gui_gradient_jobs import FakeLauncher, _jobs
+
+    entry = _ENTRY.validate_python(construction("rigid", id="builtin_sample"))
+    builtins = (*library.builtin_entries(), entry)
+    monkeypatch.setattr(library, "builtin_entries", lambda: builtins)
+    with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        chosen = client.post("/api/zone-material", json={"scheme": _cut(None), "wall": "x0", "zone": "z1",
+                                                         "choice": "fixed", "material_id": entry.id})
+    assert chosen.json()["picked_entry"] == entry.id
+    assert entry.id in _jobs(tmp_path, FakeLauncher()).depth_targets().standalone_constructions

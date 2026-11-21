@@ -100,6 +100,10 @@ function referenceRefusals() {
 // - 這一區自己的可調範圍（#1199，ranges：材料代號 → {porous_m, cavity_m}）只給由程式最佳化的區、只給清單裡有的那幾種：
 //   做法換掉、清單拿掉那一種，那一份跟著拿掉；一種都不剩就整格不寫（伺服器不收空的，存檔也回到沒寫範圍的樣子）。
 function settledSetting(setting, kept) {
+  if (setting.mode !== "fixed" && "picked_entry" in setting) {
+    setting = {...setting};
+    delete setting.picked_entry;
+  }
   if (setting.allowed) {
     const allowed = keepReferenceOut(setting.allowed, kept);
     if (allowed.length !== setting.allowed.length) setting = {...setting, allowed: allowed.length ? allowed : [ZONE_NONE]};
@@ -391,12 +395,14 @@ function zoneLibraryMatch(material, wall, key) {
 // 白話（#1176）：原牆不寫阻抗數字（數字收在點開的「數字」細節）；材料庫認得的寫它的名字。
 function originalWords(material, wall, key) {
   const verdict = constructionAt(wall, key);
+  if (verdict && zoneSetting(wall, key).mode === "keep_original") return KEEP_WORDS;
   if (verdict?.state === "unknown") return uncertainWords(verdict);
   const entry = zoneLibraryMatch(material, wall, key);
   return entry ? `${originalFace(wall)}「${entry.label}」原樣` : `${originalFace(wall)}原樣`;
 }
 function plainNow(material, wall, key) {
   const verdict = constructionAt(wall, key);
+  if (verdict && zoneSetting(wall, key).mode === "keep_original") return KEEP_WORDS;
   if (verdict?.state === "unknown") return uncertainWords(verdict);
   if (verdict?.state === "picked") return materialWords(material, wall, key);
   return material.kind === "mounted_on_wall" ? `已貼 ${nowWords(material, wall, key)}` : `沒貼東西（${originalWords(material, wall, key)}）`;
@@ -431,7 +437,7 @@ async function changeZoneMaterial(wall, key, choice) {
   try {
     let response;
     ({response, data} = await reply(fetch("/api/zone-material", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
+      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, setting: zoneSetting(wall, key), original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
     if (!response.ok) { zoneNote(`沒有換：${data.error}`, "notice"); return null; }
     if (!scheme.scene.surface_zones_by_wall) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
@@ -496,6 +502,7 @@ async function chooseFixed(wall, key, materialId) {
   // 選的跟這一區原牆一模一樣（#1175）：伺服器放回原牆，這裡做法跟著改成「不貼，保留原樣」並說明。
   const next = {...zoneSetting(wall, key), mode: data.same_as_original ? "keep_original" : "fixed"};
   delete next.allowed;
+  if (data.picked_entry) next.picked_entry = data.picked_entry; else delete next.picked_entry;
   setZoneSetting(wall, key, next);
   if (data.same_as_original) {
     zoneSameAsOriginal.set(`${wall}/${key}`, libraryEntry(materialId).label);
@@ -852,7 +859,8 @@ function renderZoneTable(wall) {
     if (setting.mode === "fixed") fixedCell(wall, key, zone, material);
     else if (setting.mode === "keep_original") {
       const line = document.createElement("p"); line.id = `zone-keep-${wall}-${key}`;
-      line.textContent = `${originalWords(originalMaterial(zone.material), wall, key)}，不貼東西`;
+      const words = originalWords(originalMaterial(zone.material), wall, key);
+      line.textContent = words === KEEP_WORDS ? words : `${words}，不貼東西`;
       material.append(line);
       const same = zoneSameAsOriginal.get(`${wall}/${key}`);
       if (same) {

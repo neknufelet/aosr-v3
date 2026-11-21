@@ -66,7 +66,7 @@ from aosr.gui.zone_limits import (
 )
 from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.materials.library import ConstructionEntry, LibraryEntry, builtin_entries, fixed_surface
+from aosr.materials.library import ConstructionEntry, LibraryEntry, builtin_entries, fixed_surface, full_library
 from aosr.materials.search_library import PresetMaterial
 from aosr.reporting.scheme import Scheme
 
@@ -256,9 +256,9 @@ def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[
                           read_original: OriginalReader | None = None) -> DepthTargets:
     """網頁那一份：``settings`` 已接上使用者可最佳化材料（``with_user_materials``）；固定材料是內建構造加使用者的固定材料，
     名字照材料庫。"""
-    base = builtin_depth_targets(settings)
-    return DepthTargets(settings, {**base.fixed, **{entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None}},
-                        {**base.labels, **{entry.id: entry.label for entry in entries}},
+    entries = (*full_library(None), *entries)
+    return DepthTargets(settings, {entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None},
+                        {entry.id: entry.label for entry in entries},
                         frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"),
                         frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original)
 

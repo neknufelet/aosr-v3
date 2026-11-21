@@ -831,12 +831,11 @@ def test_constructions_can_be_assigned_but_only_standalone_ones_can_be_checked(t
             with page.expect_response(lambda response: response.url.endswith("/api/material-curve")) as curve:
                 select.select_option(f"panel_{backing}")
             assert curve.value.json()["status"] == "drawn"
-        page.locator("#zone-panel-apply").click()
-        expect(page.locator("#zone-panel")).to_have_count(0)
+        _apply(page)
         _click_zone(page, "yL/z3")
-        expect(page.locator("#zone-panel")).to_contain_text("看不出：跟材料庫「自編面板 air」一樣")
-        expect(page.locator("#zone-panel-now-fixed")).to_have_count(0)
-        expect(select).to_have_value("")
+        expect(page.locator("#zone-panel")).to_contain_text("自編面板 air")
+        expect(page.locator("#zone-panel-now-fixed")).to_have_count(1)
+        expect(select).to_have_value("panel_air")
         _pick_search(page)
         page.locator("#zone-panel-fixed summary").click()
         for backing in ("rigid", "air"):
@@ -876,18 +875,47 @@ def test_zone_map_uses_the_saved_original_to_identify_a_bare_copy(tmp_path: Path
                 page.reload()
                 _open_overview(page)
             zone = shown("yL", "z3")
-            expect(zone).to_have_attribute("data-shown", "fixed" if with_original else "unknown")
+            expect(zone).to_have_attribute("data-shown", "fixed")
             expect(shown("ceiling", "auto1")).to_have_attribute("data-shown", "still" if with_original else "unknown")
             if not with_original:
-                expect(zone.locator("title")).to_contain_text("看不出：跟材料庫「布置用面板」一樣")
+                expect(zone.locator("title")).to_contain_text("布置用面板")
+                assert page.evaluate('zoneSetting("yL", "z3").picked_entry') == "ceiling_copy"
                 expect(page.locator(".zv-legend")).to_contain_text("看不出")
         if not with_original:
             _click_zone(page, "yL/z3")
             page.locator("#zone-panel-mode-keep_original").check()
             _apply(page)
             expect(zone).to_have_attribute("data-shown", "still")
+            assert page.evaluate("""() => {
+                const mat = zoneList("yL").find(z => z.id === "z3").material;
+                return [plainNow(mat, "yL", "z3"), originalWords(mat, "yL", "z3")];
+            }""") == ["不貼，保留原樣"] * 2
             expect(zone.locator("title")).to_contain_text("不貼，保留原樣")
             _click_zone(page, "yL/z3")
             expect(page.locator("#zone-panel-now-keep_original")).to_have_attribute("data-zones", "yL/z3")
             expect(page.locator(".zv-chip[data-zone='yL/z3']")).not_to_contain_text("看不出")
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_table_pick_saves_the_entry_and_clears_it_on_replacement_or_mode_change(tmp_path: Path, browser: Browser) -> None:
+    from tests.engine.test_gui_zone_modes_browser import _choose
+
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        doc = construction("rigid", id="table_sample")
+        assert page.request.put(f"{base}/api/materials/table_sample", data=doc).ok
+        _open_scheme(page, SAMPLE)
+        page.locator("#elevation-wall-yL").click()
+        selector = "#zone-fixed-yL-z3"
+        _choose(page, selector, "table_sample")
+        _save(page, design=True)
+        path = tmp_path / "designs" / f"{SAMPLE}.json"
+        assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "fixed", "picked_entry": "table_sample"}
+        _choose(page, selector, PLAIN_PRODUCT)
+        _save(page, design=True)
+        assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "fixed"}
+        _choose(page, selector, "table_sample")
+        _choose(page, "#zone-mode-yL-z3", "keep_original")
+        _save(page, design=True)
+        assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "keep_original"}

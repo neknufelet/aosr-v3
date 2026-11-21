@@ -1,20 +1,24 @@
 """分區裡沒有材料代號的裸構造：換料、限制檢查與開跑都照同位置的原方案辨認。"""
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 from pydantic import ValidationError
 
 from aosr.geometry.shoebox import Room
 from aosr.gui.labels import WALLS
+from aosr.gui.problem_text import plain_problems
 from aosr.gui.zone_design import NAME
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material
 from aosr.materials.construction_models import Assembly, SurfaceMaterial
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import SchemeProblem
 
 Bounds = tuple[tuple[float, float], tuple[float, float]]
 
@@ -26,11 +30,30 @@ class OriginalProblem:
     error: str = ""
 
 
-ComparisonWalls = OriginalWalls | OriginalProblem
-OriginalReader = Callable[[str, Mapping[str, object]], ComparisonWalls]
+@dataclass(frozen=True)
+class ImpedanceWalls:
+    """原檔是六個阻抗數字；辨認裸構造只需要核對房間尺寸。"""
+
+    room_m: Room
 
 
-def read_original(data_dir: Path, name: str, lock: AbstractContextManager[object]) -> Scheme | OriginalProblem:
+ComparisonWalls = OriginalWalls | ImpedanceWalls | OriginalProblem
+OriginalReader = Callable[[str], ComparisonWalls]
+_Walls = TypeVar("_Walls", OriginalWalls, OriginalWalls | ImpedanceWalls)
+
+
+def comparison_walls(scheme: Scheme) -> OriginalWalls | ImpedanceWalls:
+    zones = scheme.scene.surface_zones_by_wall
+    if zones is None:
+        numbers = scheme.scene.impedance_pa_s_per_m_by_wall or {}
+        if numbers.keys() != WALLS.keys() or not all(math.isfinite(value) and value > 0 for value in numbers.values()):
+            raise BaselineRefused(f"原方案「{scheme.scheme_id}」讀不進來：六面牆各要填一個大於零的有限阻抗")
+        return ImpedanceWalls(scheme.scene.room_m)
+    return OriginalWalls(scheme.scheme_id, scheme.scene.room_m, zones)
+
+
+def read_original(data_dir: Path, name: str, lock: AbstractContextManager[object],
+                  resolve: Callable[[Scheme], _Walls]) -> _Walls | OriginalProblem:
     """只有整份原方案通過驗證，才能用它的牆辨認構造。"""
     if not NAME.fullmatch(name):
         return OriginalProblem("原方案代號只收英數字、底線與連字號")
@@ -42,10 +65,20 @@ def read_original(data_dir: Path, name: str, lock: AbstractContextManager[object
     except OSError:
         return OriginalProblem(f"原方案「{name}」讀不進來")
     try:
-        return Scheme.model_validate_json(document)
+        scheme = Scheme.model_validate_json(document)
     except ValidationError as exc:
-        reasons = "、".join(f"{'.'.join(map(str, error['loc']))} {error['msg']}".strip() for error in exc.errors(include_input=False))
+        try:
+            fields = json.loads(document)
+        except (ValueError, UnicodeError):
+            return OriginalProblem(f"原方案「{name}」讀不進來：檔案格式不對", error=str(exc).splitlines()[0])
+        problems = [SchemeProblem(".".join(map(str, error["loc"])), error["msg"].removeprefix("Value error, "))
+                    for error in exc.errors(include_input=False)]
+        reasons = "、".join(str(row["text"]) for row in plain_problems(problems, fields))
         return OriginalProblem(f"原方案「{name}」讀不進來：{reasons}", error=str(exc).splitlines()[0])
+    try:
+        return resolve(scheme)
+    except BaselineRefused as exc:
+        return OriginalProblem(str(exc), error=str(exc).splitlines()[0])
 
 
 def matching_construction(material: SurfaceMaterial | None, standalone: Mapping[str, object]) -> str | None:
@@ -63,7 +96,7 @@ class ConstructionComparison:
 
 
 def different_from_original(original: ComparisonWalls | None, room: Room, wall: str, key: str,
-                            box: Bounds | None, material: Assembly) -> ConstructionComparison:
+                            box: Bounds | None, material: SurfaceMaterial | None) -> ConstructionComparison:
     """比較裸構造與蓋住這一區的原牆。能比時帶回原牆材料，無法比較時帶回原因。"""
     if original is None:
         return ConstructionComparison("unknown", reason="沒指原方案")
@@ -71,8 +104,8 @@ def different_from_original(original: ComparisonWalls | None, room: Room, wall: 
         return ConstructionComparison("unknown", reason=original.reason)
     if original.room_m != room:
         return ConstructionComparison("unknown", reason="原方案的房間尺寸跟設計不同")
-    if wall not in original.zones:
-        return ConstructionComparison("unknown", reason=f"原方案缺少牆面「{WALLS[wall]}」")
+    if isinstance(original, ImpedanceWalls):
+        return ConstructionComparison("picked")
     if box is None:
         return ConstructionComparison("unknown", reason="這一區的座標讀不出來")
     try:
@@ -80,3 +113,29 @@ def different_from_original(original: ComparisonWalls | None, room: Room, wall: 
     except BaselineRefused as exc:
         return ConstructionComparison("unknown", reason=str(exc))
     return ConstructionComparison("original" if base == material else "picked", base)
+
+
+@dataclass(frozen=True)
+class ConstructionPick:
+    identifier: str | None
+    comparison: ConstructionComparison
+    mismatch: str = ""
+
+
+def construction_pick(material: SurfaceMaterial | None, standalone: Mapping[str, object], recorded: str | None,
+                      original: Callable[[], ComparisonWalls | None], room: Room, wall: str, key: str,
+                      box: Bounds | None) -> ConstructionPick | None:
+    """能比原牆時照原牆。否則只採用仍逐欄對得上現有材料的指定紀錄。"""
+    identifier = matching_construction(material, standalone)
+    if identifier is None and recorded is None:
+        return None
+    comparison = different_from_original(original(), room, wall, key, box, material)
+    if comparison.state == "unknown" and recorded is not None:
+        if isinstance(material, Assembly) and standalone.get(recorded) == material:
+            return ConstructionPick(recorded, ConstructionComparison("picked", reason=comparison.reason))
+        return ConstructionPick(identifier, comparison, recorded)
+    return ConstructionPick(identifier, comparison)
+
+
+def mismatch_words(label: str) -> str:
+    return f"設計設定記的那一筆「{label}」跟這一區現在的材料對不上"
