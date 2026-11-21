@@ -1,6 +1,7 @@
 "use strict";
 
-const catalogKinds = ["fixed", "optimizable"];
+const entryKinds = ["fixed", "optimizable"];
+const catalogKinds = [...entryKinds, "elements"];
 const PREVIEW_TIMEOUT_MS = 60_000;
 const SMALL_CURVE_HZ = {low: 31.5, high: 2000};
 const previewCache = new Map();
@@ -21,18 +22,16 @@ function sectionLayers(entry) {
   }
   return {backing, layers: layers.map((layer, index) => {
     const plate = entry.structure === "vpr" && index === layers.length - 2;
-    const textures = {micro_perforated: "mpp", perforated: "perf", slotted: "slot",
-      porous: layer.material_class === "foam" ? "foam" : "wool"};
     const thickness = plate ? layer.surface_mass_kg_m2 / entry.plate_density_kg_m3 : layer.thickness_m;
     const adjustable = entry.kind === "optimizable" ? (index ? entry.cavity : entry.porous_thickness).adjustable :
       entry.variables?.some(variable => variable.layer === index);
-    return {texture: plate ? "steel" : textures[layer.kind] || layer.kind, name: form()[layer.kind].label,
+    return {texture: plate ? "steel" : materialTexture(layer.kind, layer.material_class), name: form()[layer.kind].label,
       mm: (thickness ?? 0) * 1000, adjustable, hasThickness: thickness != null};
   })};
 }
 
-function sourceBadge(key) {
-  return el("span", {class: "source-badge " + key}, el("i", {"aria-hidden": "true"}), listing.provenance_labels[key]);
+function sourceBadge(key, labels = listing.provenance_labels) {
+  return el("span", {class: "source-badge " + key}, el("i", {"aria-hidden": "true"}), labels[key]);
 }
 
 function overlapsSmallCurve(span) {
@@ -216,18 +215,22 @@ function renderCatalog(rows) {
   }
   // 自己的材料排前面，接著列出唯讀的內建預設。
   const ordered = [...rows.filter(row => !row.builtin), ...rows.filter(row => row.builtin)];
-  catalogPreviews = catalogKinds.flatMap(kind => catalogPanel(kind, ordered.filter(row =>
+  catalogPreviews = entryKinds.flatMap(kind => catalogPanel(kind, ordered.filter(row =>
     catalogKind(row.entry) === kind)));
   queuePreviews();
 }
 
 function selectCatalog(kind) {
+  const workspace = byId("entry-workspace");
+  const wasHidden = workspace.hidden;
+  workspace.hidden = kind === "elements";
   for (const item of catalogKinds) {
     const active = kind === item, tab = byId("tab-" + item);
     tab.setAttribute("aria-selected", String(active));
     tab.tabIndex = active ? 0 : -1;
     byId("panel-" + item).hidden = !active;
   }
+  if (wasHidden && !workspace.hidden) resizeEditorPlot();
   queuePreviews();
 }
 
@@ -246,7 +249,8 @@ function initCatalog() {
     const tab = byId("tab-" + kind);
     tab.addEventListener("click", () => selectCatalog(kind));
     tab.addEventListener("keydown", event => {
-      const keys = {ArrowLeft: 1-i, ArrowRight: 1-i, Home: 0, End: 1};
+      const count = catalogKinds.length;
+      const keys = {ArrowLeft: (i + count - 1) % count, ArrowRight: (i + 1) % count, Home: 0, End: count - 1};
       if (!Object.hasOwn(keys, event.key)) return;
       event.preventDefault();
       const next = catalogKinds[keys[event.key]];

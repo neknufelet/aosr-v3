@@ -157,13 +157,13 @@ def test_measured_tables_with_and_without_imaginary_parts_round_trip_with_their_
 def test_the_page_and_its_static_files_are_served(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         page = client.get("/materials")
-        assets = [client.get(f"/static/{name}") for name in ("material-cutaway.js", "material-list.js", "materials.js", "materials.css", *(path.removeprefix(STATIC) for path in CHART_LIBRARY))]
+        assets = [client.get(f"/static/{name}") for name in ("material-cutaway.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", *(path.removeprefix(STATIC) for path in CHART_LIBRARY))]
         home = client.get("/")
     assert page.status_code == 200
     # 段 2-2b 起多載入畫吸音曲線的圖表庫（跟結果頁同一份內附檔）
     assert re.findall(r'<script src="/static/([^"]+)"', page.text) == [
-        CHART_LIBRARY[0].removeprefix(STATIC), "material-cutaway.js", "material-list.js", "materials.js"]
-    assert [asset.status_code for asset in assets] == [200] * 6
+        CHART_LIBRARY[0].removeprefix(STATIC), "material-cutaway.js", "material-list.js", "material-elements.js", "materials.js"]
+    assert [asset.status_code for asset in assets] == [200] * 7
     assert 'href="/materials"' in home.text
 
 

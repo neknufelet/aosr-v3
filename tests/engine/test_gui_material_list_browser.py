@@ -27,7 +27,7 @@ def test_material_tabs_count_folded_rows_and_show_sections_and_curves(tmp_path: 
     _sample_library(tmp_path)
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        expect(page.get_by_role("tab")).to_have_count(2)
+        expect(page.get_by_role("tab")).to_have_count(3)
         product = page.get_by_role("tab", name=re.compile("成品"))
         parameters = page.get_by_role("tab", name=re.compile("參數構造"))
         expect(product).to_have_text(re.compile(r"成品\s*19 筆"))
