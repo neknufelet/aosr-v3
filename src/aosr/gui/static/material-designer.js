@@ -204,7 +204,7 @@ function plateOptions(layer) {
 function layerBody(layer, index, advancedOpen) {
   const keys = listing.required_fields[layer.kind].filter(key => key !== "kind");
   const params = el("div", {class: "params"}, ...keys.map(key => parameterField(layer, key,
-    !(layer.kind === "air" && key === "thickness_m" && tuningActive()))));
+    !(key === "thickness_m" && adjustableAir(layer)))));
   const fields = listing.material_form[layer.kind].fields;
   const options = layer.kind === "porous" ? porousOptions(layer) : fields.open_area ? [fieldGrid(layer, ["surface_mass_kg_m2"])] : [];
   const advanced = options.length ? el("details", {class: "advanced", open: advancedOpen}, el("summary", {text: "進階，一般不用填"}), ...options) : null;
@@ -268,6 +268,9 @@ function missingLayerField() {
       !(key === "thickness_m" && adjustableAir(layer)));
     if (layer.kind === "air" && missing === "thickness_m") return `第 ${i + 1} 層 空氣層的厚度還沒填`;
     if (missing) return `第 ${i + 1} 層的${fields[missing].label}還沒填`;
+    if (layer.kind === "air" && tuningActive() && !adjustableAir(layer) && layer.thickness_m <= 0) {
+      return `第 ${i + 1} 層 空氣層的厚度要大於 0；不要空氣就拿掉這一層`;
+    }
   }
   return "";
 }
@@ -334,8 +337,9 @@ function unchangedPorousSource() {
   const original = copiedOptimizable ?? openedEntry;
   if (original?.kind !== "optimizable" || !tuningActive()) return null;
   const porous = draft.layers[0];
+  const fields = listing.material_form.porous.fields;
   const same = Object.keys({...original.porous, ...porous}).every(key =>
-    key === "thickness_m" || (porous[key] ?? null) === (original.porous[key] ?? null));
+    key === "thickness_m" || (porous[key] ?? fields[key].default) === (original.porous[key] ?? fields[key].default));
   return same ? original : null;
 }
 
@@ -385,16 +389,14 @@ function copyIdentity(original, recovered) {
   return {id: recovered?.id ?? freeId(original.id + "_copy", collidingIds), label: freeLabel(original.label + "（複本）", recovered?.id)};
 }
 
-function modelCopyFields(original, recovered) {
-  const saved = openedEntry ?? original;
-  return {...copyIdentity(original, recovered),
-    provenance: "model", source: `照「${original.label}」改的`, links: [], notes: modelNotes(saved, original.notes)};
+function modelCopyCitation(original, notes, label = original.label) {
+  return {provenance: "model", source: `照「${label}」改的`, links: [], notes: modelNotes(original, notes)};
 }
 
 function makeCopy(original) {
   copiedOptimizable = openedEntry?.kind === "optimizable" ? openedEntry : null;
-  const fields = copiedOptimizable ? copyIdentity(original) : modelCopyFields(original);
-  draft = {...draft, ...fields, product: false};
+  const citation = copiedOptimizable ? {} : modelCopyCitation(openedEntry ?? original, original.notes, original.label);
+  draft = {...draft, ...copyIdentity(original), ...citation, product: false};
   openedEntry = null;
   uncertainCreate = null;
   isNew = true;
@@ -507,7 +509,12 @@ async function saveConstruction() {
     if (switching) {
       const names = listing.entry_kind_labels;
       if (!window.confirm(`這一筆已經存成${names[openedEntry.kind]}，改成${names[document.kind]}只能另存一份新的；原本那筆不動。`)) return;
-      copy = modelCopyFields(draft, recovered?.kind === document.kind ? recovered : null);
+      copy = {...copyIdentity(draft, recovered?.kind === document.kind ? recovered : null),
+        ...modelCopyCitation(openedEntry, draft.notes, openedEntry.kind === "optimizable" ? openedEntry.label : draft.label)};
+    } else if (copiedOptimizable && document.kind === "construction") {
+      copy = modelCopyCitation(copiedOptimizable, draft.notes);
+    }
+    if (copy) {
       Object.assign(document, copy);
     } else if (!unchanged && !unchangedPorousSource()) {
       const original = copiedOptimizable ?? openedEntry ?? draft;

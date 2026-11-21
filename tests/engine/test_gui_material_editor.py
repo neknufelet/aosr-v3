@@ -299,3 +299,15 @@ def test_fixed_air_with_blank_initial_depth_can_be_written(tmp_path: Path) -> No
     assert response.status_code == 200, response.text
     saved, = load_user_library(user_library_path(tmp_path))
     assert saved == _ENTRY.validate_python(document)
+
+
+def test_create_with_id_of_another_kind_reports_id_conflict(tmp_path: Path) -> None:
+    porous = {"kind": "porous", "material_class": "fibrous", "thickness_m": .043, "flow_resistivity_pa_s_m2": 15230}
+    wool = {"kind": "optimizable", "id": "slab_k", "label": "試作棉丁", "provenance": "model", "source": "自編試片",
+            "porous": porous, "porous_thickness": {"adjustable": True, "range_m": [.043, .086],
+                                                   "choices_m": [.043, .086], "initial_m": .043}}
+    with _client(tmp_path) as client:
+        assert client.put("/api/materials/slab_k", json=_fixed(_assembly(), "slab_k", "試作板丙"), headers=CREATE).is_success
+        reply = client.put("/api/materials/slab_k", json=wool, headers=CREATE)
+    assert reply.status_code == 409
+    assert reply.json() == {"error": "已經有代號 slab_k 的材料；換一個代號，或打開那一筆再改", "conflict": "id"}

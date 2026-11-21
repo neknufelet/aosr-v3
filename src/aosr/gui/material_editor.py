@@ -245,11 +245,9 @@ class MaterialStore:
             existing = next((item for item in current if item.id == material_id), None)
             taken = next((item for item in (*builtin_entries(), *current)
                           if item.id != material_id and item.label == entry.label), None)
-            if existing and existing.kind != entry.kind:
+            if existing and existing.kind != entry.kind and not create:
                 old, new = ENTRY_KIND_LABELS[existing.kind], ENTRY_KIND_LABELS[entry.kind]
-                collision = create and taken is None and existing.label != entry.label
-                raise MaterialEditError(f"這一筆已經存成{old}，不能直接改成{new}；要換就複製一份", 409,
-                                        conflict="id" if collision else None)
+                raise MaterialEditError(f"這一筆已經存成{old}，不能直接改成{new}；要換就複製一份", 409)
             if taken is not None:
                 raise MaterialEditError(f"已有材料使用名稱「{taken.label}」，請換一個名稱", 409)
             if create and existing:

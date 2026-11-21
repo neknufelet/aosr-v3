@@ -168,3 +168,57 @@ def test_kind_change_retries_with_unused_copy_id_after_two_collisions(tmp_path: 
         _save(page, "參數構造")
         assert len(attempts) == len(set(attempts)) == 3
         assert _stored(page, base)["woven_sample"]["kind"] == "optimizable"
+
+
+def test_both_routes_to_construction_copy_record_original_source(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        entry = _tuning_sample(False) | {"provenance": "literature", "links": ["https://example.org/recheck-weave"],
+                                         "notes": ["試片側面"]}
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=entry).ok
+        _open_sample(page, base)
+        page.get_by_role("button", name="複製一份").click()
+        page.get_by_role("switch").click()
+        _save(page, "參數構造")
+        _open_sample(page, base)
+        page.get_by_role("switch").click()
+        page.once("dialog", lambda dialog: dialog.accept())
+        _save(page, "參數構造")
+        copies = [row for key, row in _stored(page, base).items() if key != "woven_sample"]
+        assert len(copies) == 2
+        for row in copies:
+            assert (row["kind"], row["provenance"], row["source"], row["links"]) == (
+                "construction", "model", "照「試織棉樣」改的", [])
+            assert row["notes"] == ["原來源：文獻，出處：試片紀錄，網址：https://example.org/recheck-weave", "試片側面"]
+
+
+def test_blank_default_model_keeps_literature_and_notes(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        entry = _tuning_sample(False) | {"provenance": "literature", "notes": ["自編試片"]}
+        assert page.request.put(f"{base}/api/materials/woven_sample", data=entry).ok
+        _open_sample(page, base)
+        _fields(page, 0)
+        _advanced(page)
+        page.locator('[name="model"]').select_option("")
+        shown = page.locator("#source").inner_text()
+        _save(page, "參數構造")
+        saved = _stored(page, base)["woven_sample"]
+        assert (shown, saved["provenance"], saved["notes"]) == ("文獻", "literature", ["自編試片"])
+
+
+def test_zero_fixed_air_requires_positive_thickness_before_save(tmp_path: Path, browser: Browser) -> None:
+    with _designer(tmp_path, browser) as (page, base):
+        _add(page, "porous", "air")
+        page.get_by_role("switch").first.click()
+        depth = page.locator('[name="thickness_m"]').input_value()
+        page.get_by_label("買得到的厚度（mm）").fill(depth)
+        _fields(page, 1)
+        thickness = page.locator('[name="thickness_m"]')
+        label = page.locator("label").filter(has=thickness).inner_text()
+        thickness.fill("0")
+        puts: list[str] = []
+        page.on("request", lambda request: puts.append(request.url) if request.method == "PUT" else None)
+        page.locator("#save").click()
+        expect(page.locator("#save-message")).not_to_be_empty()
+        assert (page.locator("#save-message").inner_text(), label.endswith("＊"), puts, list(_stored(page, base))) == (
+            "第 2 層 空氣層的厚度要大於 0；不要空氣就拿掉這一層", True, [], [])
+        assert not (tmp_path / "materials.json").exists()
