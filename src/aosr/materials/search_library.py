@@ -8,6 +8,8 @@
 - 家族代號＝材料代號；它唯一的構造預設代號也是材料代號（材料庫已保證代號跟內建的都不撞），構造是
   :func:`~aosr.materials.library.template_assembly`（初值排法、剛背）——同一份當起跑樣板也當換樣板構造。
 - 合法厚度：能調的是產品厚度；不能調的只有初值那一個。空腔範圍照材料；沒有空腔這一格是 (0, 0)。
+  空腔下限要是 0 或至少這一場的最小空腔（設定檔 ``[export] min_cavity_m``，#1234）：比它薄的匯出時整層拿掉，
+  交出去的構造會違反材料頁那一份範圍，所以接成家族之前就點名拒收（判法 ``ExportSettings.cavity_floor_problem``）。
 - 總深度上限：材料自己寫了就用它；沒寫用層自己排得出的最深（多孔最厚＋空腔最深）。個案上限跟它取嚴是 2-4 的事。
 - 空腔初值空白或 0：樣板沒有空氣層，這一場搜尋**不調它的空腔**（跟內建 24K、96K 同一條規則），:func:`cavity_notes` 照實寫出來。
 - 使用者材料不准掛構造預設（``preset_members``／``template_preset`` 只給內建材料對應舊家族用）：填了就拒收、點名哪一格；
@@ -35,7 +37,7 @@ from typing import Final, Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from aosr.config.material_gradient import FamilySettings, MaterialGradientSettings, VprFamilySettings
+from aosr.config.material_gradient import ExportSettings, FamilySettings, MaterialGradientSettings, VprFamilySettings
 from aosr.materials.construction_models import BoardLayer, PorousLayer
 from aosr.materials.library import (
     BASIS_LABELS, FixedEntry, LibraryEntry, MeasuredTable, OptimizableEntry, TunableLayersEntry, impedance_basis, initial_assembly,
@@ -115,7 +117,8 @@ def read_user_entries(path: Path) -> tuple[LibraryEntry, ...]:
         raise MaterialsRefused(f"使用者材料庫 {path} 讀不進來，搜尋不開：{error}") from error
 
 
-def _family(entry: OptimizableEntry, known_presets: frozenset[str]) -> tuple[FamilySettings, LibraryPreset]:
+def _family(entry: OptimizableEntry, known_presets: frozenset[str],
+            export: ExportSettings) -> tuple[FamilySettings, LibraryPreset]:
     for field, ids in (("preset_members（屬於這組的構造預設）", entry.preset_members),
                        ("template_preset（換樣板構造）", () if entry.template_preset is None else (entry.template_preset,))):
         missing = [item for item in ids if item not in known_presets]
@@ -125,6 +128,11 @@ def _family(entry: OptimizableEntry, known_presets: frozenset[str]) -> tuple[Fam
             raise MaterialsRefused(f"{_name(entry)}的 {field} 有填：使用者材料不能掛構造預設（這兩格只給內建材料對應舊家族用），"
                                    "請清掉這一格再開搜尋")
     porous, cavity = entry.porous_thickness, entry.cavity
+    if cavity is not None:
+        floor = export.cavity_floor_problem(float(cavity.range_m[0]), adjustable=cavity.adjustable)
+        if floor is not None:
+            where = "空腔範圍" if cavity.adjustable else "空腔"
+            raise MaterialsRefused(f"{_name(entry)}的{floor}；請到材料頁改那份材料的{where}，搜尋不開")
     thicknesses = porous.choices_m if porous.choices_m is not None else (float(entry.porous.thickness_m),)
     initial_cavity = None if cavity is None or not cavity.initial_m else float(cavity.initial_m)
     depth = entry.max_total_depth_m if entry.max_total_depth_m is not None else entry.depth_bounds()[1]
@@ -189,7 +197,7 @@ def with_user_materials(settings: MaterialGradientSettings, presets: Sequence[Pr
     if not chosen:
         return SearchMaterials(settings, tuple(presets), ())
     known = frozenset(preset.id for preset in presets)
-    built = [_family(entry, known) for entry in chosen]
+    built = [_family(entry, known, settings.export) for entry in chosen]
     merged = MaterialGradientSettings(descent=settings.descent, retune=settings.retune, candidates=settings.candidates,
                                       templates=settings.templates, export=settings.export,
                                       family=(*settings.family, *(family for family, _ in built)))

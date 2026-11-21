@@ -118,12 +118,34 @@ class TemplateSettings(BaseModel):
     max_seconds: StrictInt = Field(ge=1)
 
 
+def centimeters(value: float) -> str:
+    """範圍那幾句給人看的數字（#1199）：公尺換成公分、照 ``:g`` 去掉多餘的零（第 2 支的範圍格子是公分）。
+    住設定層（#1234）：材料庫接成搜尋家族那一步（``materials`` 層）寫空腔下限那一句也用這一支。"""
+    return f"{value * 100:g}"
+
+
 class ExportSettings(BaseModel):
     """終點把六面規格匯出成材料：空腔小於 ``min_cavity_m``（公尺）就整層拿掉、不放空氣層。"""
 
     model_config = _FROZEN
 
     min_cavity_m: ExactFloat = Field(gt=0.0)
+
+    def cavity_floor_problem(self, low_m: float, *, adjustable: bool = True) -> str | None:
+        """空腔範圍的下限合不合匯出規則（#1234）：0（可以沒有空腔）或至少 ``min_cavity_m`` 才收，介於中間回一句白話（公分）。
+
+        下限介於中間時，搜尋落在下限附近、匯出照規則整層拿掉，交出去的構造違反範圍；下限 0 本來就是「可以沒有空腔」，
+        拿掉不違反。判法只有這一份：分區範圍（``depth_fit.range_problem``）、材料庫接成家族（``search_library``）、
+        材料頁存檔、搜尋設定的家族都叫這裡；句子只講空腔本身，哪一區、哪一份材料由呼叫端加。
+        ``adjustable`` 只換字、不換判法：材料頁上不能調的空腔（上下限相等）那一格只有「深度」，句子照那一格的字面講
+        「空腔深度…要至少…，或取消勾選「有空腔這一格」」（``materials.js`` 那一個勾選的名字）；能調的與分區範圍講下限。"""
+        if not 0.0 < low_m < self.min_cavity_m:
+            return None
+        floor = centimeters(self.min_cavity_m)
+        reason = f"因為比 {floor} cm 薄的空腔匯出時會整層拿掉"
+        if not adjustable:
+            return f"空腔深度 {centimeters(low_m)} cm 要至少 {floor} cm，或取消勾選「有空腔這一格」，{reason}"
+        return f"空腔下限 {centimeters(low_m)} cm 要寫 0（可以沒有空腔）或至少 {floor} cm，{reason}"
 
 
 class FamilySettings(BaseModel):
@@ -211,6 +233,16 @@ class MaterialGradientSettings(BaseModel):
         presets = [preset for item in self.family for preset in item.presets]
         if len(set(ids)) != len(ids) or len(set(presets)) != len(presets):
             raise ValueError("家族代號不可重複，一個 preset 最多屬於一個家族")
+        return self
+
+    @model_validator(mode="after")
+    def _cavity_floors(self) -> Self:
+        """每個家族的空腔下限照匯出規則核（:meth:`ExportSettings.cavity_floor_problem`，#1234）：家族的範圍跟最小空腔
+        只在這一份設定裡碰得到面，設定檔的家族在這裡擋；使用者材料接成家族那一步先點名材料擋過。"""
+        for item in self.family:
+            problem = self.export.cavity_floor_problem(item.cavity_range_m[0])
+            if problem is not None:
+                raise ValueError(f"家族 {item.id} 的{problem}")
         return self
 
     def family_of(self, preset_id: str) -> FamilySettings | None:
