@@ -77,8 +77,8 @@ def read_original(data_dir: Path, name: str, lock: AbstractContextManager[object
         return OriginalProblem(f"原方案「{name}」讀不進來：{reasons}", error=str(exc).splitlines()[0])
     try:
         return resolve(scheme)
-    except BaselineRefused as exc:
-        return OriginalProblem(str(exc), error=str(exc).splitlines()[0])
+    except ValueError as exc:
+        return OriginalProblem(str(exc), error=str(exc).partition("\n")[0])
 
 
 def matching_construction(material: SurfaceMaterial | None, standalone: Mapping[str, object]) -> str | None:

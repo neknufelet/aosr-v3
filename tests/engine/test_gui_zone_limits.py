@@ -703,6 +703,24 @@ def test_untreated_six_number_original_can_tell_a_picked_construction(tmp_path: 
     assert back["material"] == wall
 
 
+def test_six_impedance_walls_still_identify_a_pick_with_unreadable_zone_bounds(tmp_path: Path) -> None:
+    entry = construction("air", id="test_panel")
+    current = _cut(None)
+    zone = next(item for item in _zones(current)["x0"] if item["id"] == "z1")
+    zone["material"] = {"kind": "assembly", "layers": entry["layers"], "backing": "air"}
+    del zone["u_m"]
+    original = _scheme(room109_document("original"))
+    assert original.scene.surface_zones_by_wall is None
+    design = _design(zones={"x0": {"z1": {"mode": "fixed", "max_depth_m": 0.05}}}, original_scheme_id="original")
+    with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        (tmp_path / "schemes" / "original.json").write_text(original.model_dump_json())
+        assert client.put("/api/materials/test_panel", json=entry).status_code == 200
+        page = client.post("/api/zone-limits", json={"scheme": current, "design": design.model_dump(mode="json")}).json()
+    assert page["picked_constructions"]["x0"]["z1"] == {"state": "picked", "id": entry["id"], "label": entry["label"]}
+    assert [(row["level"], row["code"]) for row in page["walls"]["x0"]] == [("red", "unreadable")]
+    assert [(row["level"], row["code"]) for row in _lines(page, "x0", "z1")] == [("red", "depth_over")]
+
+
 def _saved_original_for_comparison(case: str, material: Doc) -> str:
     original = room109_document("original")
     scene = cast(Doc, original["scene"])
@@ -820,7 +838,7 @@ def test_design_remembers_only_a_fixed_library_id_and_roundtrips_legacy_bytes() 
     assert DesignSettings.model_validate_json(remembered).zones["x0"]["sample"].picked_entry == "my_panel"
 
 
-@pytest.mark.parametrize("case", ["none", "none_rigid", "gone", "same", "wrong_backing", "deleted", "changed_surface"])
+@pytest.mark.parametrize("case", ["none", "none_rigid", "gone", "same", "crossed", "resized", "wrong_backing", "deleted", "changed_surface"])
 def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str) -> None:
     from tests.engine.test_gui_gradient_jobs import FakeLauncher, _jobs
 
@@ -832,7 +850,7 @@ def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str)
     zone = next(item for item in _zones(current)["x0"] if item["id"] == "z1")
     if case != "changed_surface":
         zone["material"] = material
-    prior = "original" if case in ("same", "gone") else None
+    prior = "original" if case in ("same", "gone", "crossed", "resized") else None
     plan_design = _design(zones={"x0": {"auto1": {"mode": "search"}}})
     scheme = _scheme(current)
     plan = plan_search(scheme, plan_design, GradientRequest(), SETTINGS)
@@ -840,7 +858,7 @@ def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str)
     settings["original_scheme_id"] = prior
     settings["zones"]["x0"]["z1"] = {"mode": "fixed", "picked_entry": "chosen", "max_depth_m": 0.05}
     with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
-        if case == "same":
+        if prior and case != "gone":
             (tmp_path / "schemes" / "original.json").write_text(_saved_original_for_comparison(case, material))
         assert client.put("/api/materials/another", json=duplicate).status_code == 200
         if case != "deleted":
@@ -855,7 +873,7 @@ def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str)
     lines = _lines(page, "x0", "z1")
     preview = fixed_depths(plan, scheme, design, targets)
     assert preview["x0@z1"]["lines"] == [{"text": line["text"], "level": line["level"]} for line in lines]
-    if case in ("none", "none_rigid", "gone"):
+    if case in ("none", "none_rigid", "gone", "crossed", "resized"):
         assert page["picked_constructions"]["x0"]["z1"] == {"state": "picked", "id": "chosen", "label": entry["label"]}
         assert page["red"] == 1 and page["refusals"] == ["前牆「z1」：" + lines[0]["text"]]
         assert lines[0]["code"] == "depth_over"

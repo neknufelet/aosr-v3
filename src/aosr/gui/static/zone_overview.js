@@ -593,7 +593,7 @@ async function applyMethod(items, method, written = () => {}) {
     try {
       const {response, data} = await reply(fetch("/api/zone-material/batch", {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({scheme: document_, original_scheme_id: zoneDesign?.original_scheme_id ?? null,
-          changes: changes.map(change => ({...change, setting: zoneSetting(change.wall, change.zone)}))})}));
+          changes: changes.map(change => ({...change, picked_entry: zoneSetting(change.wall, change.zone).picked_entry ?? null}))})}));
       if (!response.ok) {
         const where = data.wall && data.zone && view.byId.get(`${data.wall}/${data.zone}`);
         zoneNote(where && data.reason ? `沒有改：${zoneWhereText(where)}：${data.reason}；一區都沒改` : `沒有改：${data.error}`, "notice");

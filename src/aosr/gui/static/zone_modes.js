@@ -395,15 +395,13 @@ function zoneLibraryMatch(material, wall, key) {
 // 白話（#1176）：原牆不寫阻抗數字（數字收在點開的「數字」細節）；材料庫認得的寫它的名字。
 function originalWords(material, wall, key) {
   const verdict = constructionAt(wall, key);
-  if (verdict && zoneSetting(wall, key).mode === "keep_original") return KEEP_WORDS;
-  if (verdict?.state === "unknown") return uncertainWords(verdict);
-  const entry = zoneLibraryMatch(material, wall, key);
-  return entry ? `${originalFace(wall)}「${entry.label}」原樣` : `${originalFace(wall)}原樣`;
+  if (verdict?.state === "unknown") return zoneSetting(wall, key).mode === "keep_original" ? KEEP_WORDS : uncertainWords(verdict);
+  const label = zoneLibraryMatch(material, wall, key)?.label ?? (verdict?.state === "original" ? verdict.label : null);
+  return label ? `${originalFace(wall)}「${label}」原樣` : `${originalFace(wall)}原樣`;
 }
 function plainNow(material, wall, key) {
   const verdict = constructionAt(wall, key);
-  if (verdict && zoneSetting(wall, key).mode === "keep_original") return KEEP_WORDS;
-  if (verdict?.state === "unknown") return uncertainWords(verdict);
+  if (verdict?.state === "unknown") return zoneSetting(wall, key).mode === "keep_original" ? KEEP_WORDS : uncertainWords(verdict);
   if (verdict?.state === "picked") return materialWords(material, wall, key);
   return material.kind === "mounted_on_wall" ? `已貼 ${nowWords(material, wall, key)}` : `沒貼東西（${originalWords(material, wall, key)}）`;
 }
@@ -437,7 +435,8 @@ async function changeZoneMaterial(wall, key, choice) {
   try {
     let response;
     ({response, data} = await reply(fetch("/api/zone-material", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, setting: zoneSetting(wall, key), original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
+      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, picked_entry: zoneSetting(wall, key).picked_entry ?? null,
+        original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
     if (!response.ok) { zoneNote(`沒有換：${data.error}`, "notice"); return null; }
     if (!scheme.scene.surface_zones_by_wall) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;

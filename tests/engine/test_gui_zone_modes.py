@@ -342,7 +342,7 @@ def test_unknown_original_cannot_match_a_zone_wall_stack(client: TestClient) -> 
     assert mounted["material"] == {"kind": "mounted_on_wall", "layers": facing["layers"], "wall": replaced["material"]}
 
 
-def test_reselecting_a_bare_copy_without_an_original_keeps_its_origin_unknown(client: TestClient) -> None:
+def test_reselecting_a_bare_copy_is_recorded_and_over_depth_without_an_original(client: TestClient) -> None:
     doc = construction("air")
     scheme = _cut_document()
     surface = {"kind": "assembly", "backing": "air", "layers": doc["layers"]}
@@ -351,7 +351,15 @@ def test_reselecting_a_bare_copy_without_an_original_keeps_its_origin_unknown(cl
     code, original = _post(client, scheme, "z1", choice="original")
     assert code == 200 and original["origin"] == "unknown" and "看不出" in str(original["note"])
     code, picked = _post(client, scheme, "z1", choice="fixed", material_id=doc["id"])
-    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is False and "看不出" in str(picked["note"])
+    assert code == 200 and picked["material"] == surface and picked["same_as_original"] is False
+    assert picked["picked_entry"] == doc["id"]
+    design = {"scheme_id": scheme["scheme_id"], "zones": {"x0": {"z1": {
+        "mode": "fixed", "max_depth_m": 0.01, "picked_entry": picked["picked_entry"]}}}}
+    page = client.post("/api/zone-limits", json={"scheme": scheme, "design": design}).json()
+    assert page["picked_constructions"]["x0"]["z1"]["state"] == "picked" and page["red"] == 1
+    note = str(picked["note"])
+    assert f"記成選上去的「{doc['label']}」" in note and "看不出" not in note
+    assert "如果這一區本來就是它，改選「不貼，保留原樣」或在上面指定原方案" in note
     assert "picked_construction" not in picked
 
 
@@ -364,7 +372,7 @@ def test_legacy_only_library_keeps_the_single_and_batch_response_bytes(client: T
         received = client.post("/api/zone-material" + path, json={"scheme": scheme, **arguments})
         assert received.status_code == 200
         assert received.content == json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()
-    _, modern = _post(client, scheme, "z1", choice="original", setting={"mode": "fixed"})
+    _, modern = _post(client, scheme, "z1", choice="original", picked_entry=None)
     assert modern == {**expected, "picked_entry": None}
 
 
@@ -381,4 +389,25 @@ def test_recorded_pick_preserves_the_reason_restoring_a_crossed_original_fails(c
     args = {"choice": "original", "original_scheme_id": "before"}
     expected = _post(client, scheme, "z1", **args)
     assert expected[0] == 400 and "沿原方案的切線切開" in str(expected[1]["error"])
-    assert _post(client, scheme, "z1", **args, setting={"mode": "fixed", "picked_entry": doc["id"]}) == expected
+    assert _post(client, scheme, "z1", **args, picked_entry=doc["id"]) == expected
+
+
+def test_recorded_id_only_affects_the_material_mismatch_note(client: TestClient) -> None:
+    scheme = _cut_document()
+    choice = {"choice": "fixed", "material_id": PRESET}
+    code, expected = _post(client, scheme, "z1", **choice, picked_entry=None)
+    assert code == 200
+    code, stale = _post(client, scheme, "z1", **choice, picked_entry="missing_sample")
+    assert code == 200 and stale == {**expected, "note": f"{expected['note']}；設計設定記的那一筆「missing_sample」跟這一區現在的材料對不上"}
+
+
+def test_original_wall_resolution_reports_value_errors(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui import zone_modes
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise ValueError("自編原牆換算失敗\n後續細節")
+
+    (tmp_path / "schemes" / "before.json").write_text(json.dumps(room109_document("before")))
+    monkeypatch.setattr(zone_modes, "original_walls", refuse)
+    code, data = _post(client, _cut_document(), "z1", choice="original", original_scheme_id="before")
+    assert (code, data["error"]) == (400, "自編原牆換算失敗")
