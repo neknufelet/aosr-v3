@@ -3,34 +3,13 @@
 // 長度一律公尺，不在畫面換成公厘再換回來（來回換算會讓存回去的數字跟原本差末位）。
 
 const LAYER_SKIP = new Set(["kind"]);
-let listing = null;
 let current = null; // {entry, builtin, isNew}
 // 有一個存檔還在路上：這段時間打開別筆也不點亮「儲存」，一次只有一個存檔在路上。
 let saving = false;
 
-function el(tag, attributes = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [name, value] of Object.entries(attributes)) {
-    if (value === false || value === null || value === undefined) continue;
-    if (name === "text") node.textContent = value;
-    else if (name === "on") for (const [event, handler] of Object.entries(value)) node.addEventListener(event, handler);
-    else node.setAttribute(name, value === true ? "" : String(value));
-  }
-  for (const child of children) if (child !== null && child !== undefined) node.append(child);
-  return node;
-}
-
-const byId = (id) => document.getElementById(id);
 const form = () => listing.material_form;
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const shown = (value) => (value === null || value === undefined ? "" : String(value));
-
-async function api(path, options = {}) {
-  const reply = await fetch(path, options);
-  let body;
-  try { body = await reply.json(); } catch { body = {error: `伺服器回的不是 JSON（狀態 ${reply.status}）`}; }
-  return {ok: reply.ok, status: reply.status, body};
-}
 
 // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）：清單列得出來、可以刪；這一頁還不能看內容與編輯。
 function tunableLayers(entry) { return entry.kind === "tunable_layers"; }
@@ -59,23 +38,11 @@ async function loadListing() {
   const problem = listing.user_file_problem;
   byId("file-problem").hidden = !problem;
   byId("file-problem").textContent = problem ? `${problem}（修好之前不能存、不能刪）` : "";
-  for (const id of ["new-optimizable", "new-fixed"]) byId(id).disabled = Boolean(problem);
+  for (const id of ["new-optimizable", "new-fixed", "new-construction"]) byId(id).disabled = Boolean(problem);
   const mine = rows.filter((row) => !row.builtin).length;
   byId("list-state").textContent = `內建 ${rows.length - mine} 筆、我的材料 ${mine} 筆`;
   byId("list-state").className = "";
   return true;
-}
-
-function freeId(base) {
-  const taken = new Set(listing.materials.map((row) => row.entry.id));
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
-}
-
-function freeLabel(base) {
-  const taken = new Set(listing.materials.map((row) => row.entry.label));
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
 }
 
 function defaultsFor(kind) {
@@ -317,11 +284,6 @@ function pointsText(points) {
 }
 
 function fixedBlock(entry, readonly) {
-  if (entry.kind === "construction") {
-    const block = el("div", {class: "block"}, el("h3", {text: kindText(entry)}),
-      layerEditor("construction-layers", entry.layers, true));
-    return {block, after: () => {}};
-  }
   const material = entry.material;
   const kindSelect = el("select", {id: "fixed-kind", disabled: readonly});
   for (const kind of listing.fixed_kinds) kindSelect.append(el("option", {value: kind, text: form()[kind].label}));
@@ -362,7 +324,6 @@ let curveTicket = 0;
 let curveReply = null; // 畫面上正在顯示的那一份回應（畫好的、或講為什麼沒畫的）
 let curveDirty = false; // 送出那一份之後表單又改過：晚到的回應不准把「表單改過」的提示清掉
 const STALE = "表單改過，曲線還是上次畫的；按「用表單現在的值重畫曲線」更新。";
-const SPAN_FILL = {extrapolation: "rgba(230,140,40,0.22)", model_fill: "rgba(110,125,135,0.2)"};
 
 function destroyPlot() {
   if (plot) plot.destroy();
@@ -519,14 +480,13 @@ let parts = null;
 
 function openEntry(row, isNew, scroll = true) {
   const entry = row.entry;
-  const construction = entry.kind === "construction";
-  const readonly = row.builtin || (construction && !isNew);
+  const assembly = entry.kind === "fixed" && entry.material.kind === "assembly";
+  const readonly = row.builtin || (assembly && !isNew);
   current = {entry, builtin: row.builtin, isNew};
   byId("editor-title").textContent = isNew ? `新材料：${entry.label}` : `${row.builtin ? "內建材料" : "我的材料"}：${entry.label}`;
   byId("editor-readonly").hidden = !row.builtin;
   const kindBlock = entry.kind === "optimizable" ? optimizableBlock(entry, readonly) : fixedBlock(entry, readonly);
-  const kind = construction ? kindText(entry) + "（構造內容唯讀）"
-    : entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）"
+  const kind = entry.kind === "optimizable" ? listing.entry_kind_labels.optimizable + "（搜尋可以調厚度與空腔）"
     : listing.entry_kind_labels.fixed + "（整塊選或不選）";
   parts = kindBlock;
   byId("editor-body").replaceChildren(
@@ -535,6 +495,8 @@ function openEntry(row, isNew, scroll = true) {
   kindBlock.after();
   byId("save").hidden = readonly;
   byId("save").disabled = saving || Boolean(listing.user_file_problem);
+  byId("copy-to-designer").hidden = isNew || !assembly;
+  byId("copy-to-designer").disabled = Boolean(listing.user_file_problem);
   byId("copy").hidden = isNew;
   byId("copy").disabled = Boolean(listing.user_file_problem);
   byId("editor").hidden = false;
@@ -559,7 +521,6 @@ function collect() {
   const document = {...base, id: byId("material-id").value.trim(), label: byId("material-label").value.trim(),
                     provenance: byId("provenance").value || null, source: byId("source").value.trim(),
                     links: keptLines("links", base.links), notes: keptLines("notes", base.notes)};
-  if (document.kind === "construction") return document;
   if (document.kind === "optimizable") {
     const adjustable = byId("porous-adjustable").checked;
     const thickness = adjustable ? readNumber("porous-initial") : readNumber("porous-thickness");
@@ -649,6 +610,8 @@ async function save() {
   }
 }
 
+byId("copy-to-designer").addEventListener("click", () => location.assign(designerUrl(current.entry.id, true)));
+byId("new-construction").addEventListener("click", () => location.assign("/materials/designer"));
 byId("new-optimizable").addEventListener("click", () => { openEntry({entry: newEntry("optimizable"), builtin: false}, true); say("新材料，還沒存。", ""); });
 byId("new-fixed").addEventListener("click", () => { openEntry({entry: newEntry("fixed"), builtin: false}, true); say("新材料，還沒存。", ""); });
 byId("save").addEventListener("click", save);
@@ -663,5 +626,6 @@ function resizeEditorPlot() {
 }
 window.addEventListener("resize", resizeEditorPlot);
 initCatalog();
+if (location.hash === "#param") selectCatalog("optimizable");
 void loadElements();
 loadListing().catch((error) => { byId("list-state").textContent = `讀不到材料庫：${error.message}`; byId("list-state").className = "notice"; });

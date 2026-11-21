@@ -281,6 +281,9 @@ def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradie
     async def page(request: Request) -> Response:
         return FileResponse(PAGE, media_type="text/html")
 
+    async def designer(request: Request) -> Response:
+        return FileResponse(PAGE.with_name("material-designer.html"), media_type="text/html")
+
     async def listing(request: Request) -> Response:
         return JSONResponse(await run_in_threadpool(store.listing))
 
@@ -304,6 +307,6 @@ def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradie
             return failed(exc)
         return JSONResponse({"material_id": request.path_params["material_id"], "message": "材料已刪除"})
 
-    return [Route("/materials", page), Route("/api/materials", listing), Route("/api/material-elements", elements),
+    return [Route("/materials", page), Route("/materials/designer", designer), Route("/api/materials", listing), Route("/api/material-elements", elements),
             Route("/api/materials/{material_id}", item, methods=["PUT"]),
             Route("/api/materials/{material_id}/delete", delete, methods=["POST"])]

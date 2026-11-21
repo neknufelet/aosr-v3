@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/materials.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/material-cutaway.js" defer></script>
+  <script src="/static/material-ui.js" defer></script>
   <script src="/static/material-list.js" defer></script>
   <script src="/static/material-elements.js" defer></script>
   <script src="/static/materials.js" defer></script>
@@ -30,7 +31,7 @@
     <div class="catalog-list"></div>
   </section>
   <section id="panel-optimizable" role="tabpanel" aria-labelledby="tab-optimizable" hidden>
-    <div class="catalog-top"><p>剖面上的橘框標出可調的層，總厚與曲線按初始尺寸顯示。</p><button id="new-optimizable" type="button">新增參數構造</button></div>
+    <div class="catalog-top"><p>剖面上的橘框標出可調的層，總厚與曲線按初始尺寸顯示。</p><button id="new-optimizable" type="button">新增可最佳化材料</button><button id="new-construction" type="button">新增構造</button></div>
     <div class="catalog-list"></div>
   </section>
   <section id="panel-elements" role="tabpanel" aria-labelledby="tab-elements" hidden>
@@ -60,6 +61,7 @@
     </div>
     <div id="editor-body"></div>
     <div class="actions"><button id="save" type="button">儲存</button>
+      <button id="copy-to-designer" type="button" hidden>複製到設計器</button>
       <button id="copy" type="button">複製成新材料</button>
       <button id="close" type="button" class="quiet">關閉</button></div>
     <p id="editor-message" aria-live="polite"></p>

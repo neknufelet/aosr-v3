@@ -9,6 +9,7 @@ from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.app import GuiSettings, create_app
+from aosr.gui.material_names import family_display_name
 from aosr.gui.problem_text import kind_word, rounded_number
 from aosr.materials.construction_models import Assembly, MicroPerforatedLayer, PerforatedLayer, PorousLayer
 from aosr.materials.library import FixedEntry, builtin_entries
@@ -28,7 +29,7 @@ def test_shared_wool_uses_template_labels_sources_and_only_matched_family_sizes(
     row, = [r for r in rows if r["kind"] == "porous" and wool.label in r["templates"]]
     assert {wool.label, entries["slotted_wood_typ9_absorber40_gap98"].label} <= row["templates"].keys()
     settings = load_material_gradient_settings(config_path("material_gradient.toml"))
-    labels = {e.id: e.label.partition("（")[0] for e in builtin_entries()}
+    labels = {e.id: family_display_name(e.label) for e in builtin_entries()}
     for family in settings.family:
         member, = [r for r in rows if r["kind"] == "porous" and entries[family.template_preset].label in r["templates"]]
         template = entries[family.template_preset].material
@@ -37,6 +38,8 @@ def test_shared_wool_uses_template_labels_sources_and_only_matched_family_sizes(
         assert member["name"] == f"{labels[family.id]}　流阻 {rounded_number(layer.flow_resistivity_pa_s_m2)} Pa·s/m²"
         assert member["families"] == {family.id: list(family.thicknesses_m)}
     carpet, = [r for r in rows if entries["carpet_on_concrete"].label in r["templates"]]
+    assert carpet["template_note"] == "用這組物性的內建樣板："
+    assert carpet["flow_sources"] == [f"流阻：未註明，樣板：{entries['carpet_on_concrete'].label}"]
     assert carpet["name"].startswith(kind_word("porous") + "　")
     assert not carpet["families"] and carpet["spec_title"] == "還沒填規格"
     ranges = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu
@@ -95,7 +98,7 @@ def test_flow_sources_list_their_own_templates(tmp_path: Path, monkeypatch: pyte
     second = _sample("second", "model", [layer], "板後棉樣板")
     monkeypatch.setattr("aosr.gui.material_elements.builtin_entries", lambda: (first, second))
     row, = [r for r in _catalog(tmp_path).json()["elements"] if r["kind"] == "porous"]
-    assert row["flow_sources"] == [f"流阻：照密度查論文表（{first.label}）", f"流阻：未註明（{second.label}）"]
+    assert row["flow_sources"] == [f"流阻：照密度查論文表，樣板：{first.label}", f"流阻：未註明，樣板：{second.label}"]
 
 
 def test_komatsu_names_fitted_materials_only_for_unmatched_layers(tmp_path: Path) -> None:
@@ -118,3 +121,12 @@ def test_perforated_plates_differing_only_in_pitch_share_one_row(tmp_path: Path,
     row, = [r for r in _catalog(tmp_path).json()["elements"] if r["kind"] == "perforated"]
     assert list(row["templates"]) == [e.label for e in entries]
     assert row["templates"]["one"] != row["templates"]["two"]
+
+
+def test_family_label_keeps_parentheses_inside_the_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    entries = builtin_entries()
+    family = next(e for e in entries if e.kind == "optimizable")
+    renamed = family.model_copy(update={"label": "自編（甲）棉（備註）"})
+    monkeypatch.setattr("aosr.gui.material_elements.builtin_entries", lambda: tuple(
+        renamed if e.id == family.id else e for e in entries))
+    assert _catalog(tmp_path).json()["family_labels"][family.id] == "自編（甲）棉"
