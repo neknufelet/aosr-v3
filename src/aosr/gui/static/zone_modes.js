@@ -305,8 +305,9 @@ function appendFixedCandidateNote(container, allowed) {
   if (!allowed.some(id => fixedCandidate(libraryEntry(id)))) return;
   const note = document.createElement("p");
   note.className = "zone-candidate-cost";
-  note.textContent = "清單裡有整塊貼上去的材料。建替身時，每筆都要照開跑選項多做一道核對。"
-    + "如果現有的替身沒核過其中一筆，開跑就會被拒，要重建替身。開跑前到第三階段搜尋頁按「預覽轉好的參數」，就能看到缺什麼。";
+  note.textContent = "清單裡有整塊貼上去的材料。建替身時，每筆都要放進訓練，再多核對一次。"
+    + "之後只要清單、深度上限、裝法或方案有改，就要重建替身。"
+    + "存檔後，開跑前到第三階段搜尋頁按「預覽轉好的參數」，就能看到是否需要重建及原因。";
   container.append(note);
 }
 function fixedSurface(entry) {
