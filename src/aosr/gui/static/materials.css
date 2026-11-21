@@ -74,6 +74,8 @@ main{max-width:1320px}
 .material-depth{margin:.25rem 0;font-size:.95rem}
 .catalog-grid .cutaway{width:auto;max-width:100%;height:auto;max-height:78px;border:0;background:none}
 .preview{color:#53636b;font-size:.88rem}
+.preview-warning{display:inline-block;margin-top:.2rem;color:#854c12;font-weight:600}
+.material-details dd ul{margin:0;padding-inline-start:1.25rem}
 .curve{display:block;max-width:168px;box-sizing:border-box}
 .curve line{stroke:#e1eaed}
 .curve.measured{color:#24633f;fill:currentColor}

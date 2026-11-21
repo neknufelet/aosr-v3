@@ -621,7 +621,10 @@ async function save() {
       (current && !current.isNew && !current.builtin && current.entry.id === reply.body.material_id);
     if (sameEntry) {
       const row = listed ? listing.materials.find((item) => item.entry.id === reply.body.material_id) : null;
-      if (row) openEntry(row, false);
+      if (row) {
+        openEntry(row, false);
+        revealSavedEntry(row.entry);
+      }
       say(`已儲存「${document.label}」`, "ok");
     } else {
       byId("list-state").textContent += `；已儲存「${document.label}」${current ? "（編輯器現在開著的是另一筆，沒有動它）" : ""}`;

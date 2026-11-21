@@ -1,6 +1,7 @@
 "use strict";
 
 const catalogKinds = ["fixed", "optimizable"];
+const PREVIEW_TIMEOUT_MS = 60_000;
 const previewCache = new Map();
 let pendingPreviews = [];
 let drawingPreview = false;
@@ -39,6 +40,22 @@ function smallCurve(entry, result) {
   const y = alpha => 2 + (h - 4) * (1 - alpha);
   const svg = materialSvg("svg", {class: "curve " + entry.provenance, viewBox: `0 0 ${w} ${h}`,
     role: "img", "aria-label": "無規入射吸音曲線，31.5 Hz 至 2 kHz，吸音率 0 至 1"});
+  if (result.reference_only && result.reference_only.band_hz > low) {
+    svg.append(materialSvg("rect", {class: "reference-only", width: x(Math.min(result.reference_only.band_hz, high)),
+      height: h, fill: "rgba(60,120,210,.16)"}));
+  }
+  // 用同一條曲線，遮罩只淡化被標記的頻段；橘／灰底對應提醒原文中的顏色。
+  const maskId = "preview-spans-" + entry.id;
+  const mask = materialSvg("mask", {id: maskId, maskUnits: "userSpaceOnUse", x: 0, y: 0, width: w, height: h});
+  mask.append(materialSvg("rect", {width: w, height: h, fill: "white"}));
+  for (const span of result.spans) {
+    if (span.high_hz < low || span.low_hz > high) continue;
+    const left = x(Math.max(low, span.low_hz)), right = x(Math.min(high, span.high_hz));
+    const rect = {x: left, width: Math.max(2, right - left), height: h};
+    mask.append(materialSvg("rect", {...rect, "data-kind": span.kind, fill: "#888"}));
+    svg.append(materialSvg("rect", {...rect, fill: SPAN_FILL[span.kind]}));
+  }
+  svg.append(mask);
   for (const hz of [63, 125, 250, 500, 1000]) svg.append(materialSvg("line", {x1:x(hz), x2:x(hz), y1:0, y2:h}));
   svg.append(materialSvg("line", {x1:0, x2:w, y1:y(.5), y2:y(.5)}));
   const measured = new Set(entry.material?.points?.map(p => p.frequency_hz));
@@ -50,8 +67,16 @@ function smallCurve(entry, result) {
     points.push(cx + "," + cy);
     if (entry.provenance === "measured" && measured.has(hz)) svg.append(materialSvg("circle", {cx, cy, r: 2.4}));
   }
-  svg.append(materialSvg("polyline", {points: points.join(" "), fill: "none", stroke: "currentColor", "stroke-width": 2}));
+  svg.append(materialSvg("polyline", {points: points.join(" "), fill: "none", stroke: "currentColor", "stroke-width": 2, mask: `url(#${maskId})`}));
   return svg;
+}
+
+function showPreview(box, {svg, warnings}) {
+  box.replaceChildren(svg.cloneNode(true));
+  if (!warnings.length) return;
+  box.append(el("span", {class: "preview-warning", text: "⚠ 有提醒", title: warnings.join("\n")}));
+  const details = box.closest("article").querySelector("dl");
+  details.append(el("dt", {text: "曲線提醒"}), el("dd", {}, el("ul", {}, ...warnings.map(text => el("li", {text})))));
 }
 
 async function drawPreviews() {
@@ -60,22 +85,33 @@ async function drawPreviews() {
   try {
     while (pendingPreviews.length) {
       const {entry, box} = pendingPreviews.shift();
-      if (!box.isConnected || box.closest("[hidden],details:not([open])")) continue;
+      if (box.childElementCount || !box.isConnected || box.closest("[hidden],details:not([open])")) continue;
       const body = JSON.stringify(entry);
       const cached = previewCache.get(entry.id);
       if (cached?.body === body) {
-        box.replaceChildren(cached.svg.cloneNode(true));
+        showPreview(box, cached);
         continue;
       }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PREVIEW_TIMEOUT_MS);
       try {
-        const reply = await api("/api/material-curve?preview", {method: "POST", headers: {"Content-Type": "application/json"}, body});
+        // ?preview 只標示清單請求，讓瀏覽器考卷可單獨攔截編輯器的 /api/material-curve；伺服器的算法相同。
+        const reply = await api("/api/material-curve?preview", {method: "POST", headers: {"Content-Type": "application/json"},
+          body, signal: controller.signal});
         if (!reply.ok || reply.body.status !== "drawn") throw new Error(reply.body.message || reply.body.error || reply.status);
-        const svg = smallCurve(entry, reply.body);
-        previewCache.set(entry.id, {body, svg});
-        box.replaceChildren(svg.cloneNode(true));
+        const warnings = reply.body.warnings.map(line => line.text);
+        const reference = reply.body.reference_only;
+        if (reference) warnings.push(reference.sentence, reference.why_only);
+        const preview = {body, svg: smallCurve(entry, reply.body), warnings};
+        previewCache.set(entry.id, preview);
+        showPreview(box, preview);
       } catch (error) {
-        box.replaceChildren(el("span", {text: "曲線無法顯示", title: error.message}));
-        box.closest("article").querySelector("dl").append(el("dt", {text: "曲線"}), el("dd", {text: error.message}));
+        const timedOut = controller.signal.aborted;
+        const reason = timedOut ? `曲線計算逾時：已等候 ${PREVIEW_TIMEOUT_MS / 1000} 秒。` : error.message;
+        box.replaceChildren(el("span", {text: timedOut ? "曲線沒算完（等太久）" : "曲線無法顯示", title: reason}));
+        box.closest("article").querySelector("dl").append(el("dt", {text: "曲線"}), el("dd", {text: reason}));
+      } finally {
+        clearTimeout(timer);
       }
     }
   } finally {
@@ -166,25 +202,35 @@ function renderCatalog(rows) {
   queuePreviews();
 }
 
-function initCatalog() {
-  function select(kind) {
-    for (const item of catalogKinds) {
-      const active = kind === item, tab = byId("tab-" + item);
-      tab.setAttribute("aria-selected", String(active));
-      tab.tabIndex = active ? 0 : -1;
-      byId("panel-" + item).hidden = !active;
-    }
-    queuePreviews();
+function selectCatalog(kind) {
+  for (const item of catalogKinds) {
+    const active = kind === item, tab = byId("tab-" + item);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+    byId("panel-" + item).hidden = !active;
   }
+  queuePreviews();
+}
+
+function revealSavedEntry(entry) {
+  const kind = entry.kind === "fixed" ? "fixed" : "optimizable";
+  const row = byId("panel-" + kind).querySelector(`[data-id="${CSS.escape(entry.id)}"]`);
+  const group = row.closest(".catalog-group");
+  if (group) group.open = true;
+  selectCatalog(kind);
+  row.scrollIntoView({block: "center"});
+}
+
+function initCatalog() {
   for (const [i, kind] of catalogKinds.entries()) {
     const tab = byId("tab-" + kind);
-    tab.addEventListener("click", () => select(kind));
+    tab.addEventListener("click", () => selectCatalog(kind));
     tab.addEventListener("keydown", event => {
       const keys = {ArrowLeft: 1-i, ArrowRight: 1-i, Home: 0, End: 1};
       if (!Object.hasOwn(keys, event.key)) return;
       event.preventDefault();
       const next = catalogKinds[keys[event.key]];
-      select(next);
+      selectCatalog(next);
       byId("tab-" + next).focus();
     });
   }
