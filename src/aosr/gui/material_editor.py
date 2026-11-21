@@ -238,7 +238,7 @@ class MaterialStore:
         if entry.id != material_id:
             raise MaterialEditError(f"網址的代號 {material_id} 跟材料內文的代號 {entry.id} 不一樣")
         if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
-            floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0])
+            floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0], adjustable=entry.cavity.adjustable)
             if floor is not None:
                 raise MaterialEditError(floor)
         with self._lock:

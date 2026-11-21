@@ -131,17 +131,21 @@ class ExportSettings(BaseModel):
 
     min_cavity_m: ExactFloat = Field(gt=0.0)
 
-    def cavity_floor_problem(self, low_m: float) -> str | None:
+    def cavity_floor_problem(self, low_m: float, *, adjustable: bool = True) -> str | None:
         """空腔範圍的下限合不合匯出規則（#1234）：0（可以沒有空腔）或至少 ``min_cavity_m`` 才收，介於中間回一句白話（公分）。
 
         下限介於中間時，搜尋落在下限附近、匯出照規則整層拿掉，交出去的構造違反範圍；下限 0 本來就是「可以沒有空腔」，
         拿掉不違反。判法只有這一份：分區範圍（``depth_fit.range_problem``）、材料庫接成家族（``search_library``）、
-        材料頁存檔、搜尋設定的家族都叫這裡；句子只講空腔本身，哪一區、哪一份材料由呼叫端加。"""
+        材料頁存檔、搜尋設定的家族都叫這裡；句子只講空腔本身，哪一區、哪一份材料由呼叫端加。
+        ``adjustable`` 只換字、不換判法：材料頁上不能調的空腔（上下限相等）那一格只有「深度」，句子照那一格的字面講
+        「空腔深度…要至少…，或取消勾選「有空腔這一格」」（``materials.js`` 那一個勾選的名字）；能調的與分區範圍講下限。"""
         if not 0.0 < low_m < self.min_cavity_m:
             return None
         floor = centimeters(self.min_cavity_m)
-        return (f"空腔下限 {centimeters(low_m)} cm 要寫 0（可以沒有空腔）或至少 {floor} cm，"
-                f"因為比 {floor} cm 薄的空腔匯出時會整層拿掉")
+        reason = f"因為比 {floor} cm 薄的空腔匯出時會整層拿掉"
+        if not adjustable:
+            return f"空腔深度 {centimeters(low_m)} cm 要至少 {floor} cm，或取消勾選「有空腔這一格」，{reason}"
+        return f"空腔下限 {centimeters(low_m)} cm 要寫 0（可以沒有空腔）或至少 {floor} cm，{reason}"
 
 
 class FamilySettings(BaseModel):

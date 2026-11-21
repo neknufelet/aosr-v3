@@ -128,9 +128,11 @@ def _family(entry: OptimizableEntry, known_presets: frozenset[str],
             raise MaterialsRefused(f"{_name(entry)}的 {field} 有填：使用者材料不能掛構造預設（這兩格只給內建材料對應舊家族用），"
                                    "請清掉這一格再開搜尋")
     porous, cavity = entry.porous_thickness, entry.cavity
-    floor = None if cavity is None else export.cavity_floor_problem(float(cavity.range_m[0]))
-    if floor is not None:
-        raise MaterialsRefused(f"{_name(entry)}的{floor}；請到材料頁改那份材料的空腔範圍，搜尋不開")
+    if cavity is not None:
+        floor = export.cavity_floor_problem(float(cavity.range_m[0]), adjustable=cavity.adjustable)
+        if floor is not None:
+            where = "空腔範圍" if cavity.adjustable else "空腔"
+            raise MaterialsRefused(f"{_name(entry)}的{floor}；請到材料頁改那份材料的{where}，搜尋不開")
     thicknesses = porous.choices_m if porous.choices_m is not None else (float(entry.porous.thickness_m),)
     initial_cavity = None if cavity is None or not cavity.initial_m else float(cavity.initial_m)
     depth = entry.max_total_depth_m if entry.max_total_depth_m is not None else entry.depth_bounds()[1]

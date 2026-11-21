@@ -142,8 +142,14 @@ def _sentence(low_cm: str, floor_cm: str) -> str:
     return f"空腔下限 {low_cm} cm 要寫 0（可以沒有空腔）或至少 {floor_cm} cm，因為比 {floor_cm} cm 薄的空腔匯出時會整層拿掉"
 
 
+def _fixed_sentence(depth_cm: str, floor_cm: str) -> str:
+    """不能調的空腔（材料頁那一格只有「深度」）那一句；「有空腔這一格」是材料頁那個勾選的名字（``materials.js``）。"""
+    return f"空腔深度 {depth_cm} cm 要至少 {floor_cm} cm，或取消勾選「有空腔這一格」，因為比 {floor_cm} cm 薄的空腔匯出時會整層拿掉"
+
+
 def test_cavity_floor_takes_zero_or_the_minimum_and_says_why_in_centimeters() -> None:
-    """抓邊界放錯或數字寫死：0 與恰好最小空腔照收，介於中間（含差最小空腔一個浮點格）拒收；句子是公分、最小空腔照設定。"""
+    """抓邊界放錯或數字寫死：0 與恰好最小空腔照收，介於中間（含差最小空腔一個浮點格）拒收；句子是公分、最小空腔照設定。
+    不能調的空腔只換字（講深度、叫人取消勾選「有空腔這一格」），收不收照同一條。"""
     export, doubled = SETTINGS.export, _doubled().export
     minimum = export.min_cavity_m
     assert export.cavity_floor_problem(0.0) is None and export.cavity_floor_problem(minimum) is None
@@ -152,6 +158,9 @@ def test_cavity_floor_takes_zero_or_the_minimum_and_says_why_in_centimeters() ->
     assert export.cavity_floor_problem(float(np.nextafter(minimum, 0.0))) is not None
     assert doubled.cavity_floor_problem(minimum) == _sentence("0.1", "0.2")
     assert doubled.cavity_floor_problem(minimum * 2.0) is None
+    assert export.cavity_floor_problem(minimum / 2.0, adjustable=False) == _fixed_sentence("0.05", "0.1")
+    assert export.cavity_floor_problem(minimum, adjustable=False) is None
+    assert export.cavity_floor_problem(0.0, adjustable=False) is None
 
 
 def test_zone_page_red_and_command_line_range_refuse_with_the_same_sentence() -> None:
@@ -181,7 +190,8 @@ def test_zone_page_red_and_command_line_range_refuse_with_the_same_sentence() ->
 
 
 def test_search_start_names_the_material_whose_own_cavity_floor_is_too_thin(tmp_path: Path) -> None:
-    """抓材料庫接成家族那一步只講一個籠統的錯：拒收句點名是哪一份材料、叫人到材料頁改（網頁開跑那一步照這一句擋）。"""
+    """抓材料庫接成家族那一步只講一個籠統的錯：拒收句點名是哪一份材料、叫人到材料頁改（網頁開跑那一步照這一句擋）。
+    固定深度（不能調、上下限相等）的空腔一樣點名擋，句子照材料頁那一格講深度。"""
     from aosr.materials.search_library import MaterialsRefused
 
     minimum = SETTINGS.export.min_cavity_m
@@ -190,6 +200,11 @@ def test_search_start_names_the_material_whose_own_cavity_floor_is_too_thin(tmp_
     assert str(caught.value) == (f"材料「示範薄空腔棉（自編）」（{PAGE}）的{_sentence('0.05', '0.1')}；"
                                  "請到材料頁改那份材料的空腔範圍，搜尋不開")
     assert with_user_materials(SETTINGS, presets_table(), (_page_entry((0.0, 0.05)),)).settings.family[-1].id == PAGE
+    with pytest.raises(MaterialsRefused) as fixed:
+        with_user_materials(SETTINGS, presets_table(), (_page_entry((minimum / 2.0, minimum / 2.0)),))
+    assert str(fixed.value) == (f"材料「示範薄空腔棉（自編）」（{PAGE}）的{_fixed_sentence('0.05', '0.1')}；"
+                                "請到材料頁改那份材料的空腔，搜尋不開")
+    assert with_user_materials(SETTINGS, presets_table(), (_page_entry((minimum, minimum)),)).settings.family[-1].id == PAGE
     # 最小空腔照這一場的設定：加倍後設定檔那個最小空腔也點名拒收（不是等合併設定時丟一個籠統的檢查錯）。
     with pytest.raises(MaterialsRefused, match=re.escape(f"（{PAGE}）的{_sentence('0.1', '0.2')}；")):
         with_user_materials(_doubled(), presets_table(), (_page_entry((minimum, 0.05)),))
@@ -216,13 +231,15 @@ def test_settings_file_family_with_a_too_thin_cavity_floor_is_refused_on_load(tm
     assert load_material_gradient_settings(good).family[0].cavity_range_m == (minimum, 0.25)
 
 
-def _page_document(low: float) -> dict[str, object]:
-    return cast(dict[str, object], _page_entry((low, 0.05)).model_dump(mode="json"))
+def _page_document(low: float, high: float = 0.05) -> dict[str, object]:
+    """材料頁送來的那一份；``high`` 等於 ``low`` 就是固定深度（不能調）。"""
+    return cast(dict[str, object], _page_entry((low, high)).model_dump(mode="json"))
 
 
 def test_material_page_refuses_to_save_a_too_thin_cavity_floor_and_writes_nothing(tmp_path: Path) -> None:
     """抓材料頁照存、等開跑才講：可最佳化材料的空腔下限介於 0 和最小空腔之間就不存（檔一個位元組都不寫）、旁邊那一句是公分；
-    0 與恰好最小空腔照存。網頁開著的搜尋設定另給了一份（最小空腔加倍）時照那一份核。"""
+    0 與恰好最小空腔照存。固定深度（不能調、上下限相等）一樣不存，句子照那一格講深度。
+    網頁開著的搜尋設定另給了一份（最小空腔加倍）時照那一份核。"""
     from starlette.testclient import TestClient
 
     from aosr.gui.app import GuiSettings, create_app
@@ -233,7 +250,11 @@ def test_material_page_refuses_to_save_a_too_thin_cavity_floor_and_writes_nothin
     with pytest.raises(MaterialEditError) as caught:
         store.save(PAGE, _page_document(minimum / 2.0), create=True)
     assert str(caught.value) == _sentence("0.05", "0.1") and caught.value.status == 400
+    with pytest.raises(MaterialEditError) as fixed:
+        store.save(PAGE, _page_document(minimum / 2.0, minimum / 2.0), create=True)
+    assert str(fixed.value) == _fixed_sentence("0.05", "0.1") and fixed.value.status == 400
     assert not user_library_path(tmp_path).exists()
+    assert store.save(PAGE, _page_document(minimum, minimum), create=True).id == PAGE
     assert store.save(PAGE, _page_document(minimum)).id == PAGE
     assert store.save(PAGE, _page_document(0.0)).id == PAGE
     web = tmp_path / "web"
