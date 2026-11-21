@@ -8,10 +8,11 @@ function elementSwatch(row) {
   return svg;
 }
 
-function elementRow(row, labels) {
+function elementRow(row, labels, familyLabels) {
   const templates = Object.keys(row.templates);
   const sizes = Object.entries(row.templates).filter(([, lines]) => lines.length);
-  const specs = Object.entries(row.families).map(([id, meters]) => el("div", {}, el("small", {text: id}),
+  const specs = Object.entries(row.families).map(([id, meters]) => el("div", {},
+    el("small", {text: familyLabels[id] ? `搜尋家族：${familyLabels[id]}（${id}）` : `搜尋家族：${id}`}),
     meters.map(m => Number((m * 1000).toPrecision(15))).join("、") + " mm"));
   const sizeList = el("dl", {class: "element-sizes"});
   for (const [label, lines] of sizes) {
@@ -22,6 +23,7 @@ function elementRow(row, labels) {
     el("div", {class: "element-name"}, el("strong", {text: row.name}),
       el("small", {text: row.template_note + templates.join("、")})),
     el("div", {}, el("b", {class: "element-mobile-label", text: "自己的參數"}),
+      templates.length ? null : el("div", {text: "可填的參數："}),
       ...(row.parameters.length ? row.parameters : ["沒有自己的參數"]).map(text => el("div", {text})),
       el("b", {class: "element-range", text: row.range_title}), ...row.ranges.map(text => el("div", {text}))),
     el("div", {}, el("b", {class: "element-mobile-label", text: "規格"}), row.spec_title, ...specs),
@@ -40,7 +42,9 @@ async function loadElements() {
     const rows = reply.body.elements;
     const head = el("div", {class: "element-grid columns"}, ...["花紋", "元件", "自己的參數與範圍",
       "規格", "內建樣板用過的尺寸", "數據來源"].map(text => el("div", {text})));
-    list.replaceChildren(head, ...rows.map(row => elementRow(row, reply.body.provenance_labels)));
+    list.replaceChildren(head, ...rows.map(row => elementRow(row, reply.body.provenance_labels, reply.body.family_labels)));
+    const withTemplates = rows.filter(row => Object.keys(row.templates).length).length;
+    byId("element-description").textContent = `有內建樣板的 ${withTemplates} 種，另列內建沒有的種類。`;
     byId("tab-elements").querySelector("small").textContent = rows.length + " 種";
   } catch (error) {
     list.textContent = "讀不到元件：" + error.message;

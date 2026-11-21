@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, expect
 
+from aosr.materials.library import builtin_entries
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 
 
@@ -37,10 +38,17 @@ def test_element_tab_navigation_readonly_rows_and_phone_width(tmp_path: Path, br
         rows = page.request.get(f"{base}/api/material-elements").json()["elements"]
         expect(tabs.last).to_have_text(f"元件 {len(rows)} 種")
         expect(panel.get_by_role("article")).to_have_count(len(rows))
+        with_templates = sum(bool(row["templates"]) for row in rows)
+        expect(page.locator("header")).to_contain_text(f"有內建樣板的 {with_templates} 種，另列內建沒有的種類")
+        family_names = {e.id: e.label.partition("（")[0] for e in builtin_entries()}
         for article, row in zip(panel.get_by_role("article").all(), rows, strict=True):
             expect(article).to_contain_text(row["name"])
             if row["templates"]:
                 expect(article).to_contain_text("內建樣板：" + "、".join(row["templates"]))
+            else:
+                expect(article).to_contain_text("可填的參數：" + row["parameters"][0])
+            for family in row["families"]:
+                expect(article).to_contain_text(f"搜尋家族：{family_names[family]}（{family}）")
         expect(panel.locator("button,input,select,svg.curve")).to_have_count(0)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert panel.evaluate("p => p.scrollWidth <= p.clientWidth")
