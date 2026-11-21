@@ -331,7 +331,10 @@ def test_nothing_new_on_the_panel_is_smaller_than_twelve_pixels_or_too_pale_to_r
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        card = cast(list[dict[str, object]], page.locator("#zone-list").evaluate(_TEXT_STYLES))
+        # 地圖看得到就開量，雲端慢的時候清單卡還沒排好版，量到零段字（PR #1252 第一跑）；等量得到字再量。
+        expect(page.locator("#zone-list h2")).to_contain_text("由程式最佳化的 15 區")
+        page.wait_for_function(f"() => ({_TEXT_STYLES})(document.getElementById('zone-list')).length > 5")
+        card =cast(list[dict[str, object]], page.locator("#zone-list").evaluate(_TEXT_STYLES))
         page.locator("#zone-whole-yL").click()
         _pick_search(page)
         page.locator("#zone-panel-fixed summary").click()
