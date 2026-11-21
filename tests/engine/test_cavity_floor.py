@@ -10,11 +10,14 @@ x0 那一面收窄成棉 0.05～0.1、只換空腔範圍；材料頁那一組是
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import numpy as np
-from pydantic import TypeAdapter
+import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from aosr.config.material_gradient import ExportSettings, MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
@@ -131,3 +134,115 @@ def test_accepted_cavity_ranges_are_kept_by_the_exported_material(tmp_path: Path
                                           f"空腔 {end} 匯出成 {exported}")
     assert violations == []
     assert refused == expected
+
+
+# ---- 判法與拒收句（一份判法，四個地方叫） ----
+
+def _sentence(low_cm: str, floor_cm: str) -> str:
+    return f"空腔下限 {low_cm} cm 要寫 0（可以沒有空腔）或至少 {floor_cm} cm，因為比 {floor_cm} cm 薄的空腔匯出時會整層拿掉"
+
+
+def test_cavity_floor_takes_zero_or_the_minimum_and_says_why_in_centimeters() -> None:
+    """抓邊界放錯或數字寫死：0 與恰好最小空腔照收，介於中間（含差最小空腔一個浮點格）拒收；句子是公分、最小空腔照設定。"""
+    export, doubled = SETTINGS.export, _doubled().export
+    minimum = export.min_cavity_m
+    assert export.cavity_floor_problem(0.0) is None and export.cavity_floor_problem(minimum) is None
+    assert export.cavity_floor_problem(minimum * 3.0) is None
+    assert export.cavity_floor_problem(minimum / 2.0) == _sentence("0.05", "0.1")
+    assert export.cavity_floor_problem(float(np.nextafter(minimum, 0.0))) is not None
+    assert doubled.cavity_floor_problem(minimum) == _sentence("0.1", "0.2")
+    assert doubled.cavity_floor_problem(minimum * 2.0) is None
+
+
+def test_zone_page_red_and_command_line_range_refuse_with_the_same_sentence() -> None:
+    """抓分區頁標紅或命令列 ``--range`` 沒接上（只有起跑設計那一步擋）：同一份範圍，立面圖那一區紅、句子點名材料；
+    命令列開跑前核範圍（``check_ranges``）點名哪一面哪一族；兩邊的最小空腔都照這一場的設定（加倍後原本的最小空腔也拒收）。"""
+    from aosr.gradient import fixed_surfaces
+    from aosr.gui.gradient_plan import builtin_depth_targets
+    from aosr.gui.zone_limits import zone_range_problems
+    from tests.engine.test_zone_range import _limits, _ranged, _red
+
+    minimum = SETTINGS.export.min_cavity_m
+    given = ZoneRange(porous_m=(0.05, 0.1), cavity_m=(minimum / 2.0, 0.05))
+    lines = _red(_limits(_ranged({"y0@s": {"ranges": {WOOL: given.model_dump(mode="json")}}})), "y0", "s")
+    label = next(entry.label for entry in library.builtin_entries() if entry.id == WOOL)
+    assert [(line["code"], line["text"]) for line in lines] == [("range_invalid", f"{label}的可調範圍：{_sentence('0.05', '0.1')}")]
+    surfaces = tuple((wall.wall_name(), PRESET) for wall in Wall.all())
+    with pytest.raises(ValueError) as caught:
+        fixed_surfaces.check_ranges({FACE: {WOOL: given}}, surfaces, SETTINGS, allowed={})
+    assert str(caught.value) == f"面 x0 的 glass_wool_48k：{_sentence('0.05', '0.1')}"
+    at_minimum = ZoneRange(porous_m=(0.05, 0.1), cavity_m=(minimum, 0.05))
+    assert zone_range_problems({WOOL: at_minimum}, builtin_depth_targets(SETTINGS))[0] == []
+    fixed_surfaces.check_ranges({FACE: {WOOL: at_minimum}}, surfaces, SETTINGS, allowed={})
+    problems, valid = zone_range_problems({WOOL: at_minimum}, builtin_depth_targets(_doubled()))
+    assert [problem.text for problem in problems] == [f"{label}的可調範圍：{_sentence('0.1', '0.2')}"] and valid == {}
+    with pytest.raises(ValueError, match="面 x0 的 glass_wool_48k：空腔下限 0.1 cm 要寫 0（可以沒有空腔）或至少 0.2 cm"):
+        fixed_surfaces.check_ranges({FACE: {WOOL: at_minimum}}, surfaces, _doubled(), allowed={})
+
+
+def test_search_start_names_the_material_whose_own_cavity_floor_is_too_thin(tmp_path: Path) -> None:
+    """抓材料庫接成家族那一步只講一個籠統的錯：拒收句點名是哪一份材料、叫人到材料頁改（網頁開跑那一步照這一句擋）。"""
+    from aosr.materials.search_library import MaterialsRefused
+
+    minimum = SETTINGS.export.min_cavity_m
+    with pytest.raises(MaterialsRefused) as caught:
+        with_user_materials(SETTINGS, presets_table(), (_page_entry((minimum / 2.0, 0.05)),))
+    assert str(caught.value) == (f"材料「示範薄空腔棉（自編）」（{PAGE}）的{_sentence('0.05', '0.1')}；"
+                                 "請到材料頁改那份材料的空腔範圍，搜尋不開")
+    assert with_user_materials(SETTINGS, presets_table(), (_page_entry((0.0, 0.05)),)).settings.family[-1].id == PAGE
+    # 最小空腔照這一場的設定：加倍後設定檔那個最小空腔也點名拒收（不是等合併設定時丟一個籠統的檢查錯）。
+    with pytest.raises(MaterialsRefused, match=re.escape(f"（{PAGE}）的{_sentence('0.1', '0.2')}；")):
+        with_user_materials(_doubled(), presets_table(), (_page_entry((minimum, 0.05)),))
+
+
+def _custom_settings_file(folder: Path, **replace: str) -> Path:
+    """產品設定檔照抄一份，只換掉給的那幾行（鍵 → 那一行新的值；同名的行只換第一行）。"""
+    text = config_path("material_gradient.toml").read_text(encoding="utf-8")
+    for key, value in replace.items():
+        text, count = re.subn(rf"^{key} = .*$", f"{key} = {value}", text, count=1, flags=re.MULTILINE)
+        assert count == 1, key
+    path = folder / "material_gradient.toml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_settings_file_family_with_a_too_thin_cavity_floor_is_refused_on_load(tmp_path: Path) -> None:
+    """抓設定檔家族（材料頁的內建材料就是它們）沒核：第一個家族（48K）的空腔下限改成最小空腔的一半，讀設定就拒收、點名家族。"""
+    minimum = SETTINGS.export.min_cavity_m
+    path = _custom_settings_file(tmp_path, cavity_range_m=f"[{minimum / 2.0!r}, 0.250]")
+    with pytest.raises(ValidationError, match=f"家族 glass_wool_48k 的{re.escape(_sentence('0.05', '0.1'))}"):
+        load_material_gradient_settings(path)
+    good = _custom_settings_file(tmp_path, cavity_range_m=f"[{minimum!r}, 0.250]")
+    assert load_material_gradient_settings(good).family[0].cavity_range_m == (minimum, 0.25)
+
+
+def _page_document(low: float) -> dict[str, object]:
+    return cast(dict[str, object], _page_entry((low, 0.05)).model_dump(mode="json"))
+
+
+def test_material_page_refuses_to_save_a_too_thin_cavity_floor_and_writes_nothing(tmp_path: Path) -> None:
+    """抓材料頁照存、等開跑才講：可最佳化材料的空腔下限介於 0 和最小空腔之間就不存（檔一個位元組都不寫）、旁邊那一句是公分；
+    0 與恰好最小空腔照存。網頁開著的搜尋設定另給了一份（最小空腔加倍）時照那一份核。"""
+    from starlette.testclient import TestClient
+
+    from aosr.gui.app import GuiSettings, create_app
+    from aosr.gui.material_editor import MaterialEditError, MaterialStore, user_library_path
+
+    minimum = SETTINGS.export.min_cavity_m
+    store = MaterialStore(tmp_path)
+    with pytest.raises(MaterialEditError) as caught:
+        store.save(PAGE, _page_document(minimum / 2.0), create=True)
+    assert str(caught.value) == _sentence("0.05", "0.1") and caught.value.status == 400
+    assert not user_library_path(tmp_path).exists()
+    assert store.save(PAGE, _page_document(minimum)).id == PAGE
+    assert store.save(PAGE, _page_document(0.0)).id == PAGE
+    web = tmp_path / "web"
+    web.mkdir()
+    settings = GuiSettings(engine_commit="a" * 40, data_dir=web,
+                           gradient_settings=_custom_settings_file(tmp_path, min_cavity_m=repr(minimum * 2.0)))
+    with TestClient(create_app(settings), base_url="http://localhost") as client:
+        refused = client.put(f"/api/materials/{PAGE}", json=_page_document(minimum), headers={"If-None-Match": "*"})
+        assert (refused.status_code, refused.json()) == (400, {"error": _sentence("0.1", "0.2")})
+        assert not user_library_path(web).exists()
+        saved = client.put(f"/api/materials/{PAGE}", json=_page_document(minimum * 2.0), headers={"If-None-Match": "*"})
+        assert saved.status_code == 200, saved.text

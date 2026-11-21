@@ -17,7 +17,9 @@ from typing import Literal, Self
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, is_fixed_target
+from aosr.config.material_gradient import (
+    NONE_TARGET, ExportSettings, FamilySettings, MaterialGradientSettings, centimeters, is_fixed_target,
+)
 from aosr.materials.construction_models import Assembly, MeasuredImpedance
 from aosr.materials.library import MeasuredTable
 
@@ -63,21 +65,18 @@ def narrowed_family(family: FamilySettings, given: ZoneRange) -> FamilySettings:
     return family.model_copy(update=update)
 
 
-def centimeters(value: float) -> str:
-    """範圍那幾句給人看的數字（#1199）：公尺換成公分、照 ``:g`` 去掉多餘的零（第 2 支的範圍格子是公分）。"""
-    return f"{value * 100:g}"
-
-
 def _centimeter_list(values: Sequence[float]) -> str:
     return "、".join(centimeters(value) for value in values)
 
 
-def range_problem(family: FamilySettings, given: ZoneRange) -> str | None:
+def range_problem(family: FamilySettings, given: ZoneRange, export: ExportSettings) -> str | None:
     """一區的範圍對那一種材料（材料頁那一份，也就是這一場的家族）合不合；不合回一句白話（區名、材料名由呼叫端加），合回 None。
 
     只准收窄：超出材料頁的範圍拒收、叫人到材料頁改；棉厚兩端要是產品厚度之一；空腔要在材料的空腔範圍裡，材料搜尋不調空腔
-    （樣板沒有空氣層，同 :func:`family_shallowest_m` 的判法）時不准給；收窄後的最淺排法要放得進材料自己的總深度上限。
-    句子裡的數字是公分（:func:`centimeters`）；命令列 ``--range`` 拒收也是這一句。"""
+    （樣板沒有空氣層，同 :func:`family_shallowest_m` 的判法）時不准給；空腔下限要是 0 或至少這一場的最小空腔（``export``，
+    設定檔 ``[export]``，:meth:`~aosr.config.material_gradient.ExportSettings.cavity_floor_problem`，#1234：比它薄的匯出時整層拿掉，
+    交出去的構造會違反範圍）；收窄後的最淺排法要放得進材料自己的總深度上限。
+    句子裡的數字是公分（:func:`~aosr.config.material_gradient.centimeters`）；命令列 ``--range`` 拒收也是這一句。"""
     thicknesses = family.thicknesses_m
     low, high = given.porous_m
     page = f"材料頁的產品厚度是 {_centimeter_list(thicknesses)} cm"
@@ -94,6 +93,9 @@ def range_problem(family: FamilySettings, given: ZoneRange) -> str | None:
             return (f"空腔 {centimeters(cavity_low)}～{centimeters(cavity_high)} cm 超出材料頁的範圍"
                     f"（{centimeters(page_low)}～{centimeters(page_high)} cm）；"
                     "這裡只准收窄，要放寬請到材料頁改那份材料")
+        floor = export.cavity_floor_problem(cavity_low)
+        if floor is not None:
+            return floor
     narrowed = narrowed_family(family, given)
     if not _snap_fits(narrowed, family.max_total_depth_m):
         return (f"收窄後的最淺排法 {centimeters(family_shallowest_m(narrowed))} cm（最薄棉加空腔下界）放不進材料自己的總深度上限 "

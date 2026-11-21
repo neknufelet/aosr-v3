@@ -45,9 +45,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, fixed_target, is_fixed_target
+from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, ZoneRange, centimeters, fixed_fit, range_problem, ranged_misfits, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
@@ -298,7 +298,7 @@ def zone_range_problems(ranges: Mapping[str, ZoneRange] | None, targets: DepthTa
                     else f"可調範圍的材料 {code} 材料庫裡沒有")
             problems.append(Problem(code="range_unknown", level="red", text=text))
             continue
-        problem = range_problem(family, given)
+        problem = range_problem(family, given, targets.settings.export)
         if problem is not None:
             problems.append(Problem(code="range_invalid", level="red", text=f"{name}的可調範圍：{problem}"))
             continue
@@ -346,7 +346,7 @@ def no_group_words(lines: Sequence[Mapping[str, object]]) -> str:
 
 def ranged_misfit_words(fit: TargetFit, cap: DepthCap, targets: DepthTargets, *, level_words: str | None = None) -> str:
     """寫了範圍、收窄後放不下的那一組擋下的那一句（頁面紅、網頁開跑擋同一句）。``fit`` 是 ``depth_fit.ranged_misfits``
-    挑出來的那一組（家族、比最淺排法淺）。寫法同 :func:`target_line` 那一句，數字換成公分（:func:`~aosr.gradient.depth_fit.
+    挑出來的那一組（家族、比最淺排法淺）。寫法同 :func:`target_line` 那一句，數字換成公分（:func:`~aosr.config.material_gradient.
     centimeters`，第 2 支的範圍格子是公分）；沒寫範圍的組那一句照舊是公尺。"""
     case = f"{centimeters(cap.value_m)} cm（{level_words or LEVEL_WORDS[cap.level]}的上限）"
     return (f"{targets.label(fit.target)}：不可用——深度上限 {case}比這一組最淺排法 {centimeters(cast(float, fit.shallowest_m))} cm "

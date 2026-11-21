@@ -2,6 +2,8 @@
 
 使用者材料庫是網頁資料夾裡的一份 JSON（:func:`user_library_path`，之後 1-3 的材料選單、2-3a 的搜尋也讀這一份）。
 每次讀寫都走材料庫自己的 ``load_user_library``／``dump_user_library``：內建唯讀、代號與顯示名不准撞。
+存可最佳化材料時另核空腔下限（#1234）：要是 0 或至少這一場搜尋設定的最小空腔（``ExportSettings.cavity_floor_problem``，
+比它薄的匯出時整層拿掉）；讀檔不核，舊檔照樣打得開、在這一頁改好再存（搜尋開跑接成家族那一步也會點名擋）。
 檔案讀不進來（壞掉、或後來新增的內建跟它撞名）時照實講原因、拒絕寫入——不當成空的，否則下一次存檔會把檔洗掉。
 寫入先寫同資料夾暫存檔再換名；檢查不過就不動原檔，一個位元組都不變。
 """
@@ -11,7 +13,7 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Final, cast
 
@@ -21,6 +23,8 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from aosr.config.material_gradient import MaterialGradientSettings, load_material_gradient_settings
+from aosr.config.paths import config_path
 from aosr.gui.problem_text import MATERIAL_MODELS, _plain_material_message, material_form_spec
 from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, placement
 from aosr.gui.reference_only import listing_block
@@ -171,12 +175,18 @@ def _required_fields() -> dict[str, list[str]]:
             for kind in (*LAYER_KINDS, *FIXED_KINDS)}
 
 
-class MaterialStore:
-    """一個網頁資料夾的使用者材料庫；同一時間只准一個寫入。"""
+def _product_search_settings() -> MaterialGradientSettings:
+    return load_material_gradient_settings(config_path("material_gradient.toml"))
 
-    def __init__(self, data_dir: Path) -> None:
+
+class MaterialStore:
+    """一個網頁資料夾的使用者材料庫；同一時間只准一個寫入。``search_settings`` 是這個網頁開的第三階段搜尋用的那一份設定
+    （``GradientJobs.search_settings``；不給是產品設定檔），存檔核空腔下限照它的最小空腔。"""
+
+    def __init__(self, data_dir: Path, search_settings: Callable[[], MaterialGradientSettings] | None = None) -> None:
         self.path = user_library_path(data_dir)
         self._lock = threading.Lock()
+        self._search_settings = search_settings or _product_search_settings
 
     def _user_entries(self) -> tuple[LibraryEntry, ...]:
         try:
@@ -227,6 +237,10 @@ class MaterialStore:
             raise MaterialEditError(plain_error(exc)) from exc
         if entry.id != material_id:
             raise MaterialEditError(f"網址的代號 {material_id} 跟材料內文的代號 {entry.id} 不一樣")
+        if isinstance(entry, OptimizableEntry) and entry.cavity is not None:
+            floor = self._search_settings().export.cavity_floor_problem(entry.cavity.range_m[0])
+            if floor is not None:
+                raise MaterialEditError(floor)
         with self._lock:
             current = self._user_entries()
             ids = [item.id for item in current]
@@ -255,9 +269,9 @@ class MaterialStore:
             self._write(tuple(item for item in current if item.id != material_id))
 
 
-def material_routes(data_dir: Path) -> list[Route]:
-    """材料編輯頁與它的三個介面：清單、存（PUT；``If-None-Match: *`` 表示新增）、刪（POST）。"""
-    store = MaterialStore(data_dir)
+def material_routes(data_dir: Path, search_settings: Callable[[], MaterialGradientSettings] | None = None) -> list[Route]:
+    """材料編輯頁與它的三個介面：清單、存（PUT；``If-None-Match: *`` 表示新增）、刪（POST）。``search_settings`` 同 :class:`MaterialStore`。"""
+    store = MaterialStore(data_dir, search_settings)
 
     def failed(exc: MaterialEditError) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=exc.status)

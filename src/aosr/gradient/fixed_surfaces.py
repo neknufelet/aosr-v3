@@ -267,7 +267,7 @@ def check_ranges(ranges: Mapping[str, Mapping[str, ZoneRange]], surfaces: Sequen
                  settings: MaterialGradientSettings, *, allowed: Mapping[str, Sequence[str]]) -> None:
     """開跑前把每一區的可調範圍對這一場的家族核一次，都點名是哪一面哪一族拒收（固定面給範圍在起跑設計收窄那一步（:func:`designs_with_ranges`）先擋）：家族要在這一場的家族裡；
     那一面有准用清單時要在清單裡；範圍本身照 :func:`~aosr.gradient.depth_fit.range_problem`（只准收窄、棉厚是產品厚度、
-    空腔在範圍內、收窄後放得進材料自己的總深）。收窄後放不放得進個案上限由 :func:`check_depth_targets` 判。"""
+    空腔在範圍內、空腔下限是 0 或至少這一場的最小空腔、收窄後放得進材料自己的總深）。收窄後放不放得進個案上限由 :func:`check_depth_targets` 判。"""
     names = [name for name, _ in surfaces]
     expanded = expanded_ranges(ranges, names)
     lists = expanded_allowed_targets(allowed, names)
@@ -279,7 +279,7 @@ def check_ranges(ranges: Mapping[str, Mapping[str, ZoneRange]], surfaces: Sequen
             listed = lists.get(name)
             if listed is not None and family_id not in listed:
                 raise ValueError(f"面 {name} 的可調範圍給了 {family_id}，它不在這一面的准用清單 {list(listed)} 裡")
-            problem = range_problem(settings.family_by_id(family_id), given)
+            problem = range_problem(settings.family_by_id(family_id), given, settings.export)
             if problem is not None:
                 raise ValueError(f"面 {name} 的 {family_id}：{problem}")
 
@@ -314,7 +314,7 @@ def designs_with_ranges(designs: Sequence[SurfaceDesign], settings: MaterialGrad
             result.append(design)
             continue
         family = settings.family_by_id(design.family_id)
-        problem = range_problem(family, given)
+        problem = range_problem(family, given, settings.export)
         if problem is not None:
             raise ValueError(f"面 {design.surface_id} 的 {family.id}：{problem}")
         result.append(narrowed_design(design, given))
