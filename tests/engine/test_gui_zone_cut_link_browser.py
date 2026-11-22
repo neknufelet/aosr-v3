@@ -184,7 +184,7 @@ def _back_door_scheme() -> dict[str, object]:
     """假房間改一份：後牆（y0）靠右開一扇門（借右牆那扇門的構造；位置是這裡自己編的）。地板小圖下緣外寫「門」，
     「切區 ▸」不准壓到它。"""
     scheme = json.loads(json.dumps(ZONE_NAMING_SCHEME))
-    scheme["scheme_id"] = "zone-back-door-sample"
+    scheme["scheme_id"] = "zone-rear-opening-sample"
     zones = scheme["scene"]["surface_zones_by_wall"]
     door = next(zone for zone in zones["xL"] if zone["id"] == "door")["material"]
     plain = {"kind": "constant_impedance", "impedance_pa_s_m": 71500.0}
@@ -216,7 +216,7 @@ def test_face_titles_make_room_for_their_buttons(tmp_path: Path, browser: Browse
         asides = _check_rows(page)
         assert asides["yL"] is None and asides["y0"] is None, asides
         assert all((asides[wall] or "").startswith("面向它站") for wall in ("x0", "xL")), asides
-        _switch_to(page, "zone-back-door-sample")
+        _switch_to(page, "zone-rear-opening-sample")
         _check_rows(page)
         doors = page.locator("#zone-map [data-face='floor'] text.zv-tiny", has_text="門")
         expect(doors).to_have_count(2)  # 右牆、後牆各一扇（後牆那扇的字在小圖下緣外）
