@@ -626,7 +626,7 @@ async function applyMethod(items, method, written = () => {}) {
   }
   items.forEach((item, index) => {
     setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
-    zoneFormerFixed.delete(item.id); zoneSameAsOriginal.delete(item.id);
+    zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
   const pickedNotes = new Set(results.filter(change => change.picked_entry).map(change => change.note));
@@ -830,7 +830,7 @@ async function rangesPass(items, method) {
   renderZoneOverview();
   return false;
 }
-// 小框選了由程式最佳化、現在這樣套不套得下去：回一句為什麼不行，可以就回空字串。每一個選中的區各自看它套用後的清單。
+// 小框現在能不能套用：指定貼與由程式最佳化都檢查最深；由程式最佳化另看每個選中區套用後的清單。
 function draftProblem(items) {
   if (!draft || draft.mode === "keep_original") return "";
   const ticks = draft.mode === "search" && panelTicks(items);
@@ -1594,6 +1594,10 @@ function ruleCard(group) {
 function spanWords(pair) { return pair[0] === pair[1] ? `${centimetres(pair[0])}` : `${centimetres(pair[0])}～${centimetres(pair[1])}`; }
 // 「棉 5～10 cm、空腔 0～15 cm」（#1199）：材料沒有空腔就只寫棉。第三階段頁的預覽寫法同這一句（gradient.js）。
 function rangeWords(range) { return [`棉 ${spanWords(range.porous)} cm`, ...(range.cavity ? [`空腔 ${spanWords(range.cavity)} cm`] : [])].join("、"); }
+function zoneRangeDescription(setting, entry, who = "這一區") {
+  return `${who}自己的範圍：${rangeWords(ownRange(setting, entry))}（材料頁是${rangeWords(pageRange(entry))}）`;
+}
+window.zoneRangeDescription = zoneRangeDescription;
 // 一張清單卡管哪幾區：這一組就是規則那一組（規則本身是由程式最佳化）就寫「沒另外指定的牆區」，其餘的區點名。
 // alone：全部由程式最佳化的區只有這一組（一張卡）。
 function listWho(group, prefix, alone) {
@@ -1615,8 +1619,10 @@ function listWho(group, prefix, alone) {
 function listCards(compact) {
   const {list} = view;
   if (list.zones.length) {
-    const hint = el("p", "zv-card-hint", "只看；要改就點圖上的區，或按卡上的「選這幾區」");
-    return [hint, ...list.groups.map((group, index) => listCard(group, index, compact))];
+    const cards = list.groups.map((group, index) => listCard(group, index, compact));
+    const editing = cards.some(card => card.querySelector(".zv-editing"));
+    const hint = "只看；要改就點圖上的區，或按卡上的「選這幾區」" + (editing ? "；寫「正在改」的那一組，就在上面的小框改" : "");
+    return [el("p", "zv-card-hint", hint), ...cards];
   }
   const card = el("div", "zv-list empty"); card.id = "zone-list"; card.dataset.count = "0";
   const head = el("h2"); head.append(el("i", "zv-sw search"), "現在沒有哪一區由程式最佳化");
@@ -1635,13 +1641,14 @@ function listCard(group, index, compact) {
   card.append(head, listWho(group, prefix, alone));
   const selectId = `${prefix}-select`;
   let selectGroup;
-  if (sameList(ids, selected)) {
+  const editing = sameList(ids, selected);
+  if (editing) {
     selectGroup = el("span", "zv-editing", "正在改");
     selectGroup.id = selectId;
   } else {
     selectGroup = button("zv-btn", "選這幾區", selectId, () => {
       pick(ids);
-      document.querySelector("#zone-panel h2")?.scrollIntoView({block: "nearest"});
+      $("zone-panel")?.scrollIntoView({block: "start"});
     });
   }
   const allowed = first.allowed;
@@ -1676,7 +1683,7 @@ function listCard(group, index, compact) {
       const row = el("li", null, listName(id)), entry = libraryEntry(id);
       row.dataset.choice = id;
       if (ranged.includes(id)) {
-        const line = el("small", "zv-range", `${size > 1 ? "這幾區" : "這一區"}自己的範圍：${rangeWords(ownRange(first, entry))}（材料頁是${rangeWords(pageRange(entry))}）`);
+        const line = el("small", "zv-range", zoneRangeDescription(first, entry, size > 1 ? "這幾區" : "這一區"));
         line.dataset.ranged = "true"; row.append(line);
       } else if (entry?.kind === "optimizable") row.append(el("small", "zv-range", adjustWords(entry)));
       if (referenceOnly(id)) {
@@ -1698,7 +1705,7 @@ function listCard(group, index, compact) {
   // 清單每一種都是固定成品：程式沒得選（同做法表的紅框），「拿去搜尋」也按不下去。
   if (allowedProblem(allowed)) {
     const problem = el("p", "zv-problem"); problem.id = `${prefix}-problem`; problem.setAttribute("role", "alert");
-    problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：按這張卡的「選這幾區」，改成「${ZONE_MODE_WORDS.fixed}」。`;
+    problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：${editing ? "在上面的小框" : "按這張卡的「選這幾區」，"}改成「${ZONE_MODE_WORDS.fixed}」。`;
     card.append(problem);
   }
   card.append(selectGroup);
@@ -2010,7 +2017,12 @@ function overviewParts() {
   return [head, body, noteLines(), resultBar()];
 }
 window.renderZoneOverview = renderZoneOverview;
-window.openZoneOverview = () => { overviewOpen = true; pageSaid = ""; renderZoneOverview(); window.scrollTo(0, 0); };
+window.openZoneOverview = id => {
+  overviewOpen = true; pageSaid = "";
+  renderZoneOverview();
+  if (id && view?.byId.has(id)) pick([id]);
+  window.scrollTo(0, 0);
+};
 // 輸入頁訊息列每寫一句（app.js 的 say）就叫一次：警示照抄到這一頁，換成成功的一句就拿掉。
 // 這一頁打開時從空的開始（上面那一行）：打開之前輸入頁講過的話不帶進來。
 // 方案與每一區的做法都存進檔案了（輸入頁按「儲存」、另存，或「拿去搜尋」先存的那一步）：那一句拿掉。

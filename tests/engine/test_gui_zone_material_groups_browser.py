@@ -62,6 +62,7 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         add.click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {
+            # yL/auto2 也釘住新開的區照上一份套用的清單起頭（zoneLastAllowed）。
             "yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"], "yL/auto2": ["none", "glass_wool_24k"]}
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -127,7 +128,7 @@ def test_cards_show_their_choices_depth_and_only_a_group_selection_button(tmp_pa
             expect(card.locator(f"span#{card.get_attribute('id')}-select")).to_have_text("正在改")
             expect(cards.locator("input,select")).to_have_count(0)
             expect(cards.locator("button")).to_have_count(2)
-            expect(hint).to_have_count(1)
+            expect(page.get_by_text(CARD_HINT + "；寫「正在改」的那一組，就在上面的小框改", exact=True)).to_have_count(1)
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)
         page.locator("#zone-page-close").click()
@@ -552,4 +553,4 @@ def test_fixed_only_card_explains_how_to_fix_it_in_both_views(tmp_path: Path, br
                 page.locator("#zone-list-select").click()
             expect(page.locator("#zone-list-problem")).to_have_text(
                 "只放了固定成品，程式沒得選。程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。"
-                "要的就是這一筆、不必讓程式選：按這張卡的「選這幾區」，改成「指定貼一種」。")
+                "要的就是這一筆、不必讓程式選：" + ("在上面的小框" if compact else "按這張卡的「選這幾區」，") + "改成「指定貼一種」。")

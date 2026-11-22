@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, expect
 from aosr.gui import reference_only
+from tests.engine._zone_panel_steps import edit_candidates
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import NAME, symmetry_document
@@ -48,7 +49,7 @@ from tests.engine.test_gui_vpr_reference_browser import (
 
 def test_the_old_table_search_row_is_stopped_and_says_the_refusal_in_red(tmp_path: Path, browser: Browser) -> None:
     """舊做法表「拿去搜尋」那一列：清單裡有命中那一筆，按鈕停用、旁邊紅字就是開跑會拒收的那一句（伺服器原文）；
-    在勾選表取消它，按鈕恢復、旁邊回到平常那一句。"""
+    從這列進小框拿掉它，按鈕恢復、旁邊回到平常那一句。"""
     _prepare(tmp_path, {"x0/a": LISTED, "x0/b": WOOLS})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -58,8 +59,7 @@ def test_the_old_table_search_row_is_stopped_and_says_the_refusal_in_red(tmp_pat
         expect(page.locator("#zone-to-search")).to_be_disabled()
         expect(page.locator("#zone-to-search-note")).to_have_class("limit-red")
         expect(page.locator("#zone-to-search-note")).to_have_text(_refused(page, "x0/a"))
-        page.locator("#zone-allowed-summary-x0-a").click()
-        page.locator(f"#zone-allow-x0-a-{HIT}").uncheck()
+        edit_candidates(page, "x0", "a", remove=(HIT,))
         page.wait_for_function(_OLD_TABLE_SETTLED)
         expect(page.locator("#zone-to-search")).to_be_enabled()
         expect(page.locator("#zone-to-search-note")).to_have_class("note")
@@ -216,7 +216,7 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_
             page = watched.page
             _open_scheme(page, NAME)
             page.locator("#elevation-wall-x0").click()
-            page.locator("#zone-chip-remove-x0-a-glass_wool_48k").click()
+            edit_candidates(page, "x0", "a", remove=("glass_wool_48k",))
             assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == left
             with page.expect_response("**/api/zone-material"):
                 page.locator("#zone-mode-x0-b").select_option("search")

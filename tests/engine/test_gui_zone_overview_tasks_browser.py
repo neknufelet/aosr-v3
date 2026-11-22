@@ -696,9 +696,9 @@ def test_no_item_on_the_bottom_bar_breaks_in_the_middle_whether_the_button_is_gr
         _open_overview(page)
         expect(page.locator("#zone-page-search")).to_be_disabled()
         assert page.evaluate(lines) == [1, 1, 1]
+        expect(page.locator("#zone-page-search-why")).to_be_visible()
         why, go = page.locator("#zone-page-search-why").bounding_box(), page.locator("#zone-page-search").bounding_box()
         assert why is not None and go is not None
-        expect(page.locator("#zone-page-search-why")).to_be_visible()
         assert why["y"] >= go["y"] + go["height"] and abs((why["x"] + why["width"] / 2) - (go["x"] + go["width"] / 2)) < 2
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-search").check()

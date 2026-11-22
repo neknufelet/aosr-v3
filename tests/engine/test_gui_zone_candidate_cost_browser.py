@@ -6,6 +6,7 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from tests.engine._zone_panel_steps import open_panel
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -31,10 +32,7 @@ def _prepare_candidates(tmp_path: Path) -> None:
 
 def _open_candidate_table(page: Page) -> Locator:
     page.locator("#elevation-wall-yL").click()
-    details = page.locator("#zone-allowed-box-yL-z3")
-    if not details.evaluate("box => box.open"):
-        details.locator("summary").click()
-    return page.locator("#zone-allowed-yL-z3")
+    return page.locator("#zone-material-yL-z3")
 
 
 def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, browser: Browser) -> None:
@@ -45,11 +43,14 @@ def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, brows
         _open_scheme(page, SAMPLE)
         page.locator("#elevation-wall-yL").click()
         _choose(page, "#zone-mode-yL-z3", "search")
-        table = _open_candidate_table(page)
+        open_panel(page, "yL", "z3")
+        page.locator("#zone-panel-add").click()
         for choice in ("sample_tunable", "sample_rigid", "sample_product"):
-            box = table.locator(f"#zone-allow-yL-z3-{choice}")
+            box = page.locator(f"#zone-panel-pick-{choice}")
             expect(box).to_be_visible()
             expect(box).to_be_enabled()
+        page.locator("#zone-panel-cancel").click()
+        page.locator("#zone-page-close").click()
         _save(page, design=True)
     zones, _ = _stored(tmp_path)
     assert zones["yL"]["z3"] == {"mode": "search", "allowed": WOOLS}

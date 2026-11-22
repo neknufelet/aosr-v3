@@ -9,6 +9,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._zone_panel_steps import edit_candidates, edit_depth
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
@@ -77,13 +78,13 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         # 牆不給、改給這一塊 0.12：還是紅，寫的是「這一塊」。
         _depth(page, "#depth-wall-x0", "")
         _clear(page, "z1")
-        _depth(page, "#depth-zone-x0-z1", "0.12")
+        edit_depth(page, "x0", "z1", "12")
         _red(page, "z1")
         expect(page.locator("#limit-x0-z1-0")).to_contain_text("這一塊的上限")
         expect(page.locator("#depth-cap-x0-z1")).to_have_text("生效：0.12 公尺（這一塊擋的）")
 
         # 這一塊不給、房間預設 0.1：紅，寫「房間預設」；房間放寬到 0.2 就解除，交給搜尋那塊照房間預設。
-        _depth(page, "#depth-zone-x0-z1", "")
+        edit_depth(page, "x0", "z1", "")
         _depth(page, "#depth-room", "0.1")
         _red(page, "z1")
         expect(page.locator("#limit-x0-z1-0")).to_contain_text("房間預設的上限")
@@ -110,7 +111,7 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         _choose(page, "#zone-mode-x0-auto1", "search")
         _depth(page, "#depth-room", "0.3")
         _depth(page, "#depth-wall-x0", "0.2")
-        _depth(page, "#depth-zone-x0-auto1", "0.08")
+        edit_depth(page, "x0", "auto1", "8")
         expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.08 公尺（這一塊）；每一組跟自己的上限取較嚴：")
         # 在右邊那一大塊（交給搜尋、上限 0.08）裡再畫一框：自動區重編，上限跟著做法走。
         _drag(page, LY, LZ, (2.02, 0.02), (3.0, 1.0))
@@ -131,7 +132,7 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#depth-room")).to_have_value("0.3")
         expect(page.locator("#depth-wall-x0")).to_have_value("0.2")
-        expect(page.locator(f"#depth-zone-x0-{right[0]}")).to_have_value("0.08")
+        expect(page.locator(f"#depth-zone-x0-{right[0]}")).to_have_text("這一區給 0.08")
         expect(page.locator(f"#depth-cap-x0-{right[0]}")).to_have_text("個案上限 0.08 公尺（這一塊）；每一組跟自己的上限取較嚴：")
         _clear(page, "z1")
         # 別面沒填牆的上限：照房間預設。
@@ -326,9 +327,8 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-fixed-x0-z1", PRESET)
         _choose(page, "#zone-mode-x0-auto1", "search")
-        # 一開始只帶三種內建玻璃棉＋不貼（#1176）：使用者材料要在「改清單」自己勾進來，勾的排在最後（第 4 組、編號 3）。
-        page.locator("#zone-allowed-summary-x0-auto1").click()
-        page.locator("#zone-allow-x0-auto1-deep_rock_wool").check()
+        # 一開始只帶三種內建玻璃棉＋不貼（#1176）：使用者材料要在小框自己加進來，勾的排在最後（第 4 組、編號 3）。
+        edit_candidates(page, "x0", "auto1", add=("deep_rock_wool",))
         assert _modes(page, "x0")["auto1"]["allowed"] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none",
                                                           "deep_rock_wool"]
         # 房間預設 0.2：玻璃棉照個案（房間預設）擋，使用者材料自己 0.15 比較嚴、寫「材料組自己的上限擋住」。
@@ -339,7 +339,7 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         expect(page.locator("#depth-target-x0-auto1-3")).to_have_text(
             "深背岩棉（自填）：生效 0.15 公尺（材料組自己的上限擋住；0.2 公尺（房間預設的上限）比較寬）")
         # 這一塊 0.06：比使用者材料最淺排法 0.08 還淺，那一組不可用（橘字、不擋），玻璃棉照樣可用。
-        _depth(page, "#depth-zone-x0-auto1", "0.06")
+        edit_depth(page, "x0", "auto1", "6")
         _clear(page, "auto1")
         unusable = page.locator("#depth-target-x0-auto1-3")
         expect(unusable).to_have_text("深背岩棉（自填）：不可用——深度上限 0.06 公尺（這一塊的上限）比這一組最淺排法 0.08 公尺還淺（個案上限擋住）")
@@ -347,7 +347,7 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)  # 給了資料夾就把截圖存去那裡（證據），沒給存暫存
         page.locator("#elevation-panel").screenshot(path=str(shots / "depth-which-limit.png"))
         # 這一塊 0.03：每一組都放不下（「不貼」不算救）→ 紅、擋拿去搜尋，原文講哪一條擋。
-        _depth(page, "#depth-zone-x0-auto1", "0.03")
+        edit_depth(page, "x0", "auto1", "3")
         _red(page, "auto1")
         expect(page.locator("#zone-limits-summary")).to_contain_text("程式能選的材料沒有一種放得進深度上限，這一區什麼都貼不上")
         expect(page.locator("#zone-limits-summary")).to_contain_text("0.03 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺")
@@ -356,7 +356,7 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
 
 
 def test_changing_the_list_rechecks_the_limits(tmp_path: Path, browser: Browser) -> None:
-    """審查 11-15：改清單（×、勾選、常用組合、紅框按鈕）跟改做法一樣重判限制；不然深度上限那一欄每一組的生效上限、
+    """審查 11-15：在小框套用候選清單跟改做法一樣重判限制；不然深度上限那一欄每一組的生效上限、
     紅燈、「拿去搜尋」停不停用都是改之前的判決（改之前就這樣，這一支把清單變成到處都能改，一起補）。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -365,18 +365,18 @@ def test_changing_the_list_rechecks_the_limits(tmp_path: Path, browser: Browser)
         page.locator("#elevation-wall-x0").click()
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-mode-x0-z1", "search")
-        _depth(page, "#depth-zone-x0-z1", "0.08")
+        edit_depth(page, "x0", "z1", "8")
         expect(page.locator("#depth-target-x0-z1-0")).to_contain_text("48K 玻璃棉")
         expect(page.locator("#depth-target-x0-z1-2")).to_contain_text("96K 玻璃棉")
-        page.locator("#zone-chip-remove-x0-z1-glass_wool_48k").click()
+        edit_candidates(page, "x0", "z1", remove=("glass_wool_48k",))
         _settled(page)
         expect(page.locator("#depth-target-x0-z1-0")).to_contain_text("24K 玻璃棉")
         expect(page.locator("#depth-target-x0-z1-2")).to_have_count(0)
         # 0.03：剩下兩種玻璃棉都放不下→紅、擋拿去搜尋；清單只留「不貼」就不判這一項，紅燈跟著熄、按鈕跟著恢復。
-        _depth(page, "#depth-zone-x0-z1", "0.03")
+        edit_depth(page, "x0", "z1", "3")
         _red(page, "z1")
-        page.locator("#zone-chip-remove-x0-z1-glass_wool_24k").click()
-        page.locator("#zone-chip-remove-x0-z1-glass_wool_96k").click()
+        edit_candidates(page, "x0", "z1", remove=("glass_wool_24k",))
+        edit_candidates(page, "x0", "z1", remove=("glass_wool_96k",))
         _settled(page)
         _clear(page, "z1")
         assert watched.page_errors == [] and watched.console_errors == []

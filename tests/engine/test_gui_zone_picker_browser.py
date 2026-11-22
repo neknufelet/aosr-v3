@@ -332,6 +332,8 @@ def test_picking_a_card_scrolls_the_panel_heading_into_view(tmp_path: Path, brow
         heading = page.locator("#zone-panel h2").bounding_box()
         assert heading is not None
         assert 0 <= heading["y"] <= 700 - heading["height"]
+        panel = page.locator("#zone-panel").bounding_box()
+        assert panel is not None and 8 <= panel["y"] < 700
 
 
 @pytest.mark.parametrize("action", ["remove-glass_wool_24k", "only-glass_wool_48k"])
@@ -698,3 +700,110 @@ def test_starting_list_groups_two_pasted_zones_by_the_ineligible_wall(tmp_path: 
         page.locator("#zone-panel-mode-search").check()
         reason = page.locator(".zv-start-note").filter(has_text="沒放進清單")
         expect(reason).to_have_text("①② 原本指定貼的 自編前牆吸音板 沒放進清單，前牆那一面貼不了這一筆")
+
+
+def test_table_links_select_one_zone_and_discard_another_zones_list_draft(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for entrance in ("scheme-zone-open", "zone-page-open"):
+            page.locator("#zone-page-close").click()
+            page.locator(f"#{entrance}").click()
+            expect(page.locator("#zone-panel")).to_have_count(0)
+        _click_zone(page, "yL/z1")
+        page.locator("#zone-panel-remove-glass_wool_48k").click()
+        page.locator("#zone-page-close").click()
+        page.locator("#elevation-wall-xL").click()
+        rows = page.locator("#zone-table-xL tr[id]")
+        assert rows.count() == 8
+        for row in rows.all():
+            key = str(row.get_attribute("id")).removeprefix("zone-row-xL-")
+            called = page.evaluate("key => zoneCalled('xL', key)", key)
+            button = row.get_by_role("button", name="到「這間房貼什麼」改" + called, exact=True)
+            expect(button).to_have_text("改這一區 ▸")
+            expect(button).to_have_id(f"zone-goto-xL-{key}")
+        third = rows.nth(2)
+        key = str(third.get_attribute("id")).removeprefix("zone-row-xL-")
+        third.locator(f"#zone-goto-xL-{key}").click()
+        expect(page.locator("#zone-panel")).to_have_attribute("data-zones", f"xL/{key}")
+        expect(page.locator("#zone-panel h2")).to_be_in_viewport()
+        expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
+        page.evaluate("window.openZoneOverview('missing/id')")
+        expect(page.locator("#zone-panel")).to_have_attribute("data-zones", f"xL/{key}")
+        assert watched.page_errors == []
+
+
+def test_table_displays_saved_depth_ranges_and_only_the_retained_controls(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, _design({"yL": {
+        "z3": {"mode": "search", "allowed": WOOLS, "max_depth_m": 0.12,
+               "ranges": {WOOLS[0]: {"porous_m": [0.05, 0.10], "cavity_m": [0, 0.05]}}},
+        "auto1": {"mode": "keep_original"},
+    }}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        page.locator("#zone-page-close").click()
+        page.locator("#elevation-wall-yL").click()
+        table = page.locator("#zone-table-yL")
+        expect(table.locator("input")).to_have_count(0)
+        expect(table.locator("button:not([id^=zone-goto-])")).to_have_count(0)
+        expect(table.locator("select:not([id^=zone-mode-]):not([id^=zone-fixed-])")).to_have_count(0)
+        expect(page.locator("#zone-table-readonly")).to_have_text(
+            "每一區的候選材料和最深，在「這間房貼什麼」那一頁改（按每一列的「改這一區 ▸」）；這張表只列出來對照。")
+        expect(page.locator("#depth-limits .note")).to_have_text(
+            "三層（房間預設、這一面、每一區）取最小的；每一區的最深在「這間房貼什麼」選那一區設。指定貼一種的區：貼上去的總厚不能超過它；由程式最佳化的區：程式選的不會超過它")
+        expect(table.locator("#depth-zone-yL-z3")).to_have_text("這一區給 0.12")
+        expect(table.locator("#depth-zone-yL-z1")).to_have_text("這一區沒給")
+        expect(table.locator("#zone-depth-yL-auto1")).to_have_text("不加層")
+        expect(table.locator("#zone-chip-yL-z3-glass_wool_48k small")).to_have_text(
+            "這一區自己的範圍：棉 5～10 cm、空腔 0～5 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+
+
+def test_only_fixed_card_points_to_the_editor_while_selected(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, _design({"yL": {"z3": {"mode": "search", "allowed": [PLAIN_PRODUCT]}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        problem = page.locator("#zone-list-problem")
+        expect(problem).to_contain_text("按這張卡的「選這幾區」，改成「指定貼一種」。")
+        page.locator("#zone-list-select").click()
+        expect(problem).to_contain_text("要的就是這一筆、不必讓程式選：在上面的小框改成「指定貼一種」。")
+
+
+def test_card_hint_names_the_editor_only_for_an_exact_selection(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        hint = page.locator(".zv-card-hint")
+        start = "只看；要改就點圖上的區，或按卡上的「選這幾區」"
+        expect(hint).to_have_text(start)
+        page.locator("#zone-list-select").click()
+        expect(hint).to_have_text(start + "；寫「正在改」的那一組，就在上面的小框改")
+        _click_zone(page, "yL/auto1")
+        expect(hint).to_have_text(start)
+
+
+def test_changing_a_card_selection_on_the_map_restores_its_button(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        page.locator("button#zone-list-select").click()
+        expect(page.locator("span#zone-list-select")).to_have_text("正在改")
+        _click_zone(page, "ceiling/z1")
+        expect(page.locator("button#zone-list-select")).to_have_text("選這幾區")
+
+
+def test_clicking_a_visible_map_zone_keeps_the_scroll_position(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        page.evaluate("window.scrollTo(0, 100)")
+        before = page.evaluate("window.scrollY")
+        assert before > 0
+        _click_zone(page, "yL/z3")
+        expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "yL/z3")
+        assert page.evaluate("window.scrollY") == before
