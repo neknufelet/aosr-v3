@@ -529,7 +529,7 @@ function pick(next) {
   if (next.length === selected.length && next.every(id => selected.includes(id))) return;
   if (draftTouched && next.length) {
     selected = next;
-    const discarded = draft.mode === "search" && (Object.keys(draft.ticks).length || Object.keys(draft.ranges).length);
+    const discarded = Object.keys(draft.ticks).length || Object.keys(draft.ranges).length;
     draft = {...untouched(), mode: draft.mode, materialId: draft.materialId, depthText: draft.depthText, depthBad: draft.depthBad};
     if (discarded) draft.notice = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
     renderZoneOverview(); return;
@@ -1126,10 +1126,20 @@ function describeRange(line, items, ticks, entry) {
     pairs[part] = pair;
     narrowed ||= pair ? !samePair(pair, page[part]) : items.some((item, i) => ticks.lists[i].includes(entry.id) && !samePair(ownRange(item, entry)[part], page[part]));
   }
-  const depth = Number(draft.depthText ?? shownDepth(items)), material = entry.max_total_depth_m;
+  const depth = Number(draft.depthText ?? shownDepth(items)) / 100;
+  const zoneLimit = !draft.depthBad && depth > 0 ? depth : Infinity;
+  const limit = Math.min(zoneLimit, entry.max_total_depth_m ?? Infinity);
   let cap = "";
-  if (!draft.depthBad && depth > 0 && (material == null || depth <= material * 100)) cap = `，兩個加起來最多 ${depth} cm（這一區最深）`;
-  else if (material != null) cap = `，加起來最多 ${centimetres(material)} cm（材料本身）`;
+  if (items.every((item, index) => {
+    if (!ticks.lists[index].includes(entry.id)) return true;
+    const own = ownRange(item, entry);
+    const thick = parts.porous ? (pairs.porous ?? own.porous)[1] : entry.porous.thickness_m;
+    const cavity = parts.cavity ? (pairs.cavity ?? own.cavity)[1] : (entry.cavity?.initial_m ?? 0);
+    return limit < thick + cavity - 1e-9;
+  })) {
+    const source = limit === zoneLimit ? (items.length === 1 ? "這一區最深" : "這幾區最深") : "材料本身";
+    cap = `，${entry.cavity?.initial_m ? "兩個加起來" : "總厚"}最多 ${centimetres(limit)} cm（${source}）`;
+  }
   line.replaceChildren(rangeDescription(entry, pairs) + cap);
   if (narrowed) line.append(el("strong", "zv-narrow", "改窄了"));
 }
@@ -1305,8 +1315,13 @@ function startingListNotes(items, walls, ticks, covered) {
     const id = item.construction?.id ?? item.entry?.id;
     if (zoneMethodMode(item.method) === "fixed" && !ticks.lists[index].includes(id)) {
       const entry = libraryEntry(id);
-      const why = candidateRestriction(entry, covered.get(id), false) ||
-        (!pickerFits(entry, walls, ticks) || !usableHere(entry, item.wall) ? "這次選中的面貼不了這一筆" : "");
+      let why = candidateRestriction(entry, covered.get(id), false);
+      if (!why && !usableHere(entry, item.wall)) {
+        why = `${item.label.numberText || wallNames[item.wall]}那一面貼不了這一筆`;
+      } else if (!why && !pickerFits(entry, walls, ticks)) {
+        const names = walls.filter(wall => !usableHere(entry, wall)).map(wall => wallNames[wall]);
+        why = `選中的另一面（${names.join("、")}）貼不了這一筆`;
+      }
       notes.push(`原本指定貼的 ${vprWords(pastedWords(item))} 沒放進清單，${why || "要用就從「＋加一筆候選」加"}`);
     }
     for (const message of notes) {

@@ -306,6 +306,34 @@ def test_changing_selection_discards_the_old_list_action(tmp_path: Path, browser
         assert page.evaluate(_ALLOWED) == before
 
 
+@pytest.mark.parametrize("change", ["add", "panel-drop", "wall-whole"])
+def test_changing_selection_in_fixed_mode_reports_the_discarded_list(
+    tmp_path: Path, browser: Browser, change: str,
+) -> None:
+    allowed = {"z1": ONLY_48K, "z2": ["none"], "z3": WOOLS, "auto1": [WOOLS[1], "none"], "auto2": ONLY_48K}
+    _prepare(tmp_path, _design({"yL": {key: {"mode": "search", "allowed": ids} for key, ids in allowed.items()}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        if change == "panel-drop":
+            _click_zone(page, "yL/auto1")
+        page.locator("#zone-panel-remove-glass_wool_24k").click()
+        page.locator("#zone-panel-mode-fixed").check()
+        if change == "panel-drop":
+            page.locator("#zone-panel-drop-yL-auto1").click()
+        elif change == "wall-whole":
+            page.locator("#zone-whole-yL").click()
+        else:
+            _click_zone(page, "yL/auto1")
+        page.locator("#zone-panel-mode-search").check()
+        expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
+        expect(page.locator("#zone-panel-undo")).to_have_count(0)
+        expect(page.locator("#zone-panel-row-glass_wool_24k")).to_be_visible()
+        _apply(page)
+        assert page.evaluate(_ALLOWED) == {f"yL/{key}": ids for key, ids in allowed.items()}
+
+
 @pytest.mark.parametrize("change", ["drop", "whole"])
 def test_selection_change_drops_range_only_draft_but_keeps_depth_and_mode(
     tmp_path: Path, browser: Browser, change: str,
@@ -372,6 +400,18 @@ def test_previous_reference_reminder_gives_the_disabled_options_reason(tmp_path:
         expect(note).not_to_contain_text("要用就從")
 
 
+def test_starting_list_names_the_other_face_that_cannot_take_the_previous_product(tmp_path: Path, browser: Browser) -> None:
+    _boss_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z1")
+        _click_zone(page, "floor/auto1")
+        page.locator("#zone-panel-mode-search").check()
+        note = page.locator(".zv-start-note").filter(has_text="原本指定貼的 自編前牆吸音板")
+        expect(note).to_have_text("① 原本指定貼的 自編前牆吸音板 沒放進清單，選中的另一面（地板）貼不了這一筆")
+
+
 def _append_material(tmp_path: Path, entry: dict[str, object]) -> None:
     path = tmp_path / "materials.json"
     data = json.loads(path.read_bytes())
@@ -389,16 +429,39 @@ def test_range_description_names_fixed_parts_and_the_tighter_depth_limit(tmp_pat
         _click_zone(page, "yL/z3")
         words = page.locator(f"#zone-panel-row-{wool} .zv-range")
         expected = "棉厚 7.5 cm 不調；給程式調：空腔 0–12 cm"
-        expect(words).to_have_text(expected + "，加起來最多 18 cm（材料本身）")
+        expect(words).to_have_text(expected + "，兩個加起來最多 18 cm（材料本身）")
         depth = page.locator("#zone-panel-depth")
         depth.fill("20")
-        expect(words).to_have_text(expected + "，加起來最多 18 cm（材料本身）")
+        expect(words).to_have_text(expected + "，兩個加起來最多 18 cm（材料本身）")
         depth.fill("12")
         expect(words).to_have_text(expected + "，兩個加起來最多 12 cm（這一區最深）")
         page.locator(f"#zone-panel-remove-{wool}").click()
         page.locator("#zone-panel-add").click()
         expect(page.locator(f"#zone-panel-pick-{wool} .zv-description")).to_have_text(
             "棉厚 7.5 cm 不調；給程式調：空腔 0–12 cm")
+
+
+def test_depth_limit_is_shown_only_when_it_restricts_the_stack(tmp_path: Path, browser: Browser) -> None:
+    _boss_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        direct = page.locator("#zone-panel-row-glass_wool_24k .zv-range")
+        cavity = page.locator("#zone-panel-row-glass_wool_48k .zv-range")
+        direct_words = "空腔：沒有（直接貼牆）；給程式調：棉厚 5–20 cm"
+        cavity_words = "給程式調：棉厚 5–20 cm、空腔 0–25 cm"
+        expect(direct).to_have_text(direct_words)
+        depth = page.locator("#zone-panel-depth")
+        depth.fill("15")
+        expect(cavity).to_have_text(cavity_words + "，兩個加起來最多 15 cm（這一區最深）")
+        expect(direct).to_have_text(direct_words + "，總厚最多 15 cm（這一區最深）")
+        for limit in ("20", "25"):
+            depth.fill(limit)
+            expect(direct).to_have_text(direct_words)
+            expect(cavity).to_have_text(cavity_words + f"，兩個加起來最多 {limit} cm（這一區最深）")
+        _click_zone(page, "yL/auto2")
+        expect(cavity).to_have_text(cavity_words + "，兩個加起來最多 25 cm（這幾區最深）")
 
 
 def test_rows_only_offer_range_and_only_buttons_when_they_can_act(tmp_path: Path, browser: Browser) -> None:
@@ -416,8 +479,7 @@ def test_rows_only_offer_range_and_only_buttons_when_they_can_act(tmp_path: Path
         expect(page.locator(f"#zone-panel-range-toggle-{still}")).to_have_count(0)
         expect(page.locator(f"#zone-panel-only-{FLOOR_ONLY}")).to_have_count(0)
         words = page.locator(f"#zone-panel-row-{still} .zv-range")
-        expect(words).to_contain_text("棉厚 7.5 cm 不調；空腔 10 cm 不調")
-        expect(words).not_to_contain_text("給程式調")
+        expect(words).to_have_text("棉厚 7.5 cm 不調；空腔 10 cm 不調")
 
 
 def test_cross_face_footer_counts_only_candidates_omitted_for_placement(tmp_path: Path, browser: Browser) -> None:
@@ -475,6 +537,11 @@ def test_floor_without_tunable_material_explains_the_search_start(tmp_path: Path
         _open_overview(page)
         _click_zone(page, "floor/auto1")
         page.locator("#zone-panel-mode-search").check()
+        note = page.locator("#zone-panel .zv-form-note")
+        expect(note).to_be_visible()
+        expect(note).to_contain_text("這裡沒有可調的材料")
+        size = note.evaluate("node => parseFloat(getComputedStyle(node).fontSize)")
+        assert size >= 13
         page.locator("#zone-panel-add").click()
         expect(page.locator("#zone-panel")).to_contain_text("這裡沒有可調的材料：程式只能從「不貼」開始，可以再勾固定成品讓它比")
 
