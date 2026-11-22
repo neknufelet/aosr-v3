@@ -20,12 +20,13 @@ from tests.engine.test_gui_zone_overview_tasks_browser import _SELECTED, _click_
 FACES = ["ceiling", "floor", "x0", "xL", "y0", "yL"]
 WALLS = ["x0", "xL", "y0", "yL"]
 FRONT_SIZE = (5.2, 3.15)  # 假房間前牆（yL）在立面圖上的寬與高（公尺）
-# 每一面的牆名那一行與那一面的鈕各占多大（視窗像素：左、右、上、下）。
-_ROWS = """() => [...document.querySelectorAll('#zone-page .zv-face-tools')].map(tools => {
-    const wall = tools.dataset.wall, title = document.getElementById(`zone-face-title-${wall}`);
-    const box = item => { const rect = item.getBoundingClientRect(); return [rect.left, rect.right, rect.top, rect.bottom]; };
-    return {wall, title: box(title), tools: box(tools), aside: title.querySelector('tspan')?.textContent ?? null,
-            map: box(document.getElementById('zone-map'))}; })"""
+# 每一面的鈕、牆名那一行（旁白寫了什麼）、圖上每一段字各占多大（視窗像素：左、右、上、下）。
+_ROWS = """() => { const box = item => { const rect = item.getBoundingClientRect(); return [rect.left, rect.right, rect.top, rect.bottom]; };
+    return {map: box(document.getElementById('zone-map')),
+            texts: [...document.querySelectorAll('#zone-map text')].map(text => ({words: text.textContent, box: box(text)})),
+            rows: [...document.querySelectorAll('#zone-page .zv-face-tools')].map(tools => {
+              const wall = tools.dataset.wall, title = document.getElementById(`zone-face-title-${wall}`);
+              return {wall, tools: box(tools), aside: title.querySelector('tspan')?.textContent ?? null}; })}; }"""
 
 
 def _shape(page: Page, zone: str) -> list[float] | None:
@@ -87,7 +88,7 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         _settled(page)
         _click_zone(page, "yL/auto2")
         expect(page.locator("#zone-panel")).to_be_visible()
-        page.locator("#zone-panel-mode-keep_original").check()
+        page.locator("#zone-panel-mode-search").check()  # 小框動過（那一格原本不貼）
         shape = _shape(page, "yL/auto2")
         # 走原本那條路（不靠新鈕）：回輸入頁、自己點前牆、切框、按「設定每一區貼什麼 ▸」回來。
         page.locator("#zone-page-close").click()
@@ -100,6 +101,7 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         assert after is not None and after != shape  # 這一刀切下去，auto2 這個代號確實換了一塊（不然這一題考不到）
         assert page.evaluate(_SELECTED) == []
         expect(page.locator("#zone-panel")).to_have_count(0)
+        expect(page.locator("#zone-page-said")).to_have_text("剛才選的區有 1 區那一面重切過、換成另一塊了，不再算選著；小框還沒套用的改動放掉了，要的話重新選")
         # 對照：選右牆一區，切前牆（右牆不動），回來照樣選著。
         _click_zone(page, "xL/auto3")
         expect(page.locator("#zone-panel")).to_be_visible()
@@ -109,6 +111,30 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
         assert page.evaluate(_SELECTED) == ["xL/auto3"]
+        expect(page.locator("#zone-panel")).to_be_visible()
+
+
+def test_changing_room_size_keeps_the_selection(tmp_path: Path, browser: Browser) -> None:
+    """只改房間尺寸、沒重切：選的區（整面一區、鏡像面的長方形）照樣選著，也不講「重切過」那一句。
+    畫面座標會跟著房間尺寸變，比的是方案裡的座標。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "x0/whole_wall")
+        _click_zone(page, "xL/auto3")
+        chosen = sorted(cast(list[str], page.evaluate(_SELECTED)))
+        assert chosen == ["x0/whole_wall", "xL/auto3"]
+        page.locator("#zone-page-close").click()
+        page.locator("#room-Lz").fill("3.2")
+        page.locator("#room-Lz").press("Tab")
+        page.wait_for_function("!document.querySelector('main').inert")
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-map")).to_be_visible()
+        _settled(page)
+        assert sorted(cast(list[str], page.evaluate(_SELECTED))) == chosen
+        expect(page.locator("#zone-page-said")).to_have_count(0)
         expect(page.locator("#zone-panel")).to_be_visible()
 
 
@@ -126,39 +152,71 @@ def _narrow_scheme() -> dict[str, object]:
     return cast(dict[str, object], scheme)
 
 
-def _check_rows(page: Page) -> list[dict[str, object]]:
-    rows = cast(list[dict[str, list[float]]], page.evaluate(_ROWS))
+def _check_rows(page: Page) -> dict[str, str | None]:
+    """每一組鈕都在圖裡、不壓到圖上任何一段字（牆名那一行、隔壁那一面的、門窗、喇叭的字都算）；回每一面旁白寫了什麼。"""
+    found = cast(dict[str, object], page.evaluate(_ROWS))
+    rows = cast(list[dict[str, object]], found["rows"])
+    map_box = cast(list[float], found["map"])
+    texts = cast(list[dict[str, object]], found["texts"])
     assert sorted(cast(str, row["wall"]) for row in rows) == FACES
     for row in rows:
-        tools, map_box = row["tools"], row["map"]
-        assert map_box[0] - 1 <= tools[0] and tools[1] <= map_box[1] + 1, row  # 鈕不跑出圖外
-        for other in rows:  # 哪一面的名字那一行都不跟哪一組鈕疊（含隔壁那一面的）
-            title = other["title"]
-            apart = title[1] <= tools[0] - 4 or tools[1] <= title[0] or title[3] <= tools[2] or tools[3] <= title[2]
-            assert apart, (other["wall"], title, row["wall"], tools)
-    return cast(list[dict[str, object]], rows)
+        tools = cast(list[float], row["tools"])
+        assert map_box[0] - 1 <= tools[0] and tools[1] <= map_box[1] + 1 and tools[3] <= map_box[3] + 1, row  # 鈕不跑出圖外
+        for text in texts:
+            box = cast(list[float], text["box"])
+            apart = box[1] <= tools[0] - 4 or tools[1] <= box[0] or box[3] <= tools[2] or tools[3] <= box[2]
+            assert apart, (text["words"], box, row["wall"], tools)
+    return {cast(str, row["wall"]): cast(str | None, row["aside"]) for row in rows}
+
+
+def _switch_to(page: Page, scheme_id: str) -> None:
+    page.locator("#zone-page-close").click()
+    page.locator("#scheme-list").select_option(scheme_id)
+    page.locator("#open-scheme").click()
+    page.wait_for_function("name => document.getElementById('save-id').value === name", arg=scheme_id)
+    page.wait_for_function("!document.querySelector('main').inert")
+    page.locator("#zone-page-open").click()
+    expect(page.locator("#zone-map")).to_be_visible()
+    _settled(page)
+
+
+def _back_door_scheme() -> dict[str, object]:
+    """假房間改一份：後牆（y0）靠右開一扇門（借右牆那扇門的構造；位置是這裡自己編的）。地板小圖下緣外寫「門」，
+    「切區 ▸」不准壓到它。"""
+    scheme = json.loads(json.dumps(ZONE_NAMING_SCHEME))
+    scheme["scheme_id"] = "zone-back-door-sample"
+    zones = scheme["scene"]["surface_zones_by_wall"]
+    door = next(zone for zone in zones["xL"] if zone["id"] == "door")["material"]
+    plain = {"kind": "constant_impedance", "impedance_pa_s_m": 71500.0}
+    zones["y0"] = [
+        {"area": "rectangle", "id": "door", "u_m": [3.9, 4.8], "v_m": [0.0, 2.05], "material": door},
+        {"area": "rectangle", "id": "auto1", "u_m": [0.0, 3.9], "v_m": [0.0, 3.15], "material": plain},
+        {"area": "rectangle", "id": "auto2", "u_m": [4.8, 5.2], "v_m": [0.0, 3.15], "material": plain},
+        {"area": "rectangle", "id": "auto3", "u_m": [3.9, 4.8], "v_m": [2.05, 3.15], "material": plain}]
+    return cast(dict[str, object], scheme)
 
 
 def test_face_titles_make_room_for_their_buttons(tmp_path: Path, browser: Browser) -> None:
     """牆名那一行的「面向它站…」放得下就照寫，放不下改短句，再放不下就不寫；量的是畫出來的字與鈕，不是估的。
-    假房間（前後牆五公尺多）與窄房間（前後牆三公尺多）各看一次：哪一面的字都不壓到鈕。"""
+    三間房各看一次，哪一組鈕都不壓到圖上的字：假房間（前後牆五公尺多：四面都換短句）、窄房間（前後牆三公尺多：
+    前後牆不寫、側牆寫得下整句）、後牆靠右有門的假房間（地板小圖下緣外的「門」字不被「切區 ▸」蓋住）。"""
     _prepare(tmp_path)
     narrow = _narrow_scheme()
     narrow["scheme_id"] = "zone-narrow-sample"
     _write(tmp_path, narrow)
+    _write(tmp_path, _back_door_scheme())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
         _settled(page)
-        rows = {row["wall"]: row for row in _check_rows(page)}
-        assert any(row["aside"] for wall, row in rows.items() if wall in WALLS)  # 寬的那幾面還寫得下一句
-        page.locator("#zone-page-close").click()
-        page.locator("#scheme-list").select_option("zone-narrow-sample")
-        page.locator("#open-scheme").click()
-        page.wait_for_function("name => document.getElementById('save-id').value === name", arg="zone-narrow-sample")
-        page.wait_for_function("!document.querySelector('main').inert")
-        page.locator("#zone-page-open").click()
-        expect(page.locator("#zone-map")).to_be_visible()
-        _settled(page)
-        narrow_rows = {row["wall"]: row for row in _check_rows(page)}
-        assert page.locator("#zone-page [id^='zone-cut-']").count() == 6
+        asides = _check_rows(page)
+        assert all((asides[wall] or "").startswith("左手邊") for wall in WALLS), asides
+        assert (asides["floor"], asides["ceiling"]) == ("從上往下看", "方向同地板圖")
+        _switch_to(page, "zone-narrow-sample")
+        asides = _check_rows(page)
+        assert asides["yL"] is None and asides["y0"] is None, asides
+        assert all((asides[wall] or "").startswith("面向它站") for wall in ("x0", "xL")), asides
+        _switch_to(page, "zone-back-door-sample")
+        _check_rows(page)
+        doors = page.locator("#zone-map [data-face='floor'] text.zv-tiny", has_text="門")
+        expect(doors).to_have_count(2)  # 右牆、後牆各一扇（後牆那扇的字在小圖下緣外）

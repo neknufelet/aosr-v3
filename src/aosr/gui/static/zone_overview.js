@@ -461,8 +461,8 @@ function drawTile(map, wall, items, plan, roles, room, faces, heading, note) {
   title.append(svg("tspan", {class: "zv-quiet", dx: 10}, heading));
   face.append(title);
   map.append(face);
-  // 小圖窄，名字那一行放不下鈕：「切區 ▸」放小圖下緣外的右邊（#1262）。
-  return {wall, right: px + plan.width, top: py + plan.height + 6, titleRow: false};
+  // 小圖窄，名字那一行放不下鈕：「切區 ▸」放小圖下緣外的右邊（#1262），讓過後牆門、窗那一行字（下緣外 14 px 的基線）。
+  return {wall, right: px + plan.width, top: py + plan.height + 22, titleRow: false};
 }
 function drawMap(faces, roles, room) {
   const {wallSize} = window.elevationGeometry;
@@ -473,7 +473,7 @@ function drawMap(faces, roles, room) {
   const row1 = 30, row2 = row1 + rowHeight + 56, tileY = row2 + rowHeight + 48;
   const col1 = 2, col2 = col1 + frontWidth * scale + WALL_GAP;
   const tileWidth = frontWidth * tileScale, tileDepth = sideWidth * tileScale;
-  const height = Math.max(tileY + tileDepth + 34, 790);  // 小圖底下留一顆「切區 ▸」的高
+  const height = Math.max(tileY + tileDepth + 50, 790);  // 小圖底下留後牆門窗那一行字、再一顆「切區 ▸」的高
   const map = svg("svg", {id: "zone-map", class: "zv-map", width: MAP_WIDTH, height, viewBox: `0 0 ${MAP_WIDTH} ${height}`,
                           role: "img", "aria-label": "四面牆、地板、天花"});
   const defs = svg("defs");
@@ -553,8 +553,8 @@ function byFace(zones) {
     return {wall, zones: here, whole: face.length > 1 && face.length === here.length && here.every(item => face.includes(item.id))};
   });
 }
-// 四面牆名字旁各一顆「選整面」：一次選那一面全部的區（整面都是門窗就沒有這一顆）。
-// 每一面一組鈕（疊在圖上，靠右對齊 place.right）：「切區 ▸」回輸入頁立面圖畫框（#1262），四面牆再加「選整面」（#1199）。
+// 每一面一組鈕（疊在圖上，靠右對齊 place.right）：「切區 ▸」回輸入頁立面圖畫框（#1262）；
+// 四面牆再加「選整面」（#1199），一次選那一面全部的區。
 // 整面都是門窗的牆沒有「選整面」，「切區 ▸」照樣有（門窗也要能重切）。
 function faceTools(places) {
   return places.map(place => {
@@ -578,6 +578,7 @@ function cutFace(wall) {
   closeOverview();
   window.showElevationWall(wall);
   $("elevation-panel")?.scrollIntoView({block: "start"});
+  $(`elevation-wall-${wall}`)?.focus({preventScroll: true});  // 鍵盤從那一面的牆名鈕接著走，不必從頁首重來
 }
 // 牆名那一行讓出右邊那組鈕（#1262）：「面向它站…」壓到鈕就換短句，還壓到就不寫。量畫出來的字（字型各台不同，估的不準）。
 function fitFaceTitles() {
@@ -2029,10 +2030,15 @@ function overviewParts() {
   keptRule = inferred.rule?.key ?? null;
   const earlier = view?.byId;
   view = {roles, room, faces, byId, inferred, list: zoneSearchList(searchZones(faces, roles), inferred.rule?.key)};
-  // 選的區不在了，或同一個代號換成另一塊長方形（那一面重切過，自動補滿的區重新編號，#1262）就拿掉：
-  // 不然小框還沒套用的改動會套到另一塊上。一區都不剩，面板也收起來。
-  const sameBox = id => !earlier?.has(id) || JSON.stringify(earlier.get(id).box) === JSON.stringify(byId.get(id).box);
-  selected = selected.filter(id => byId.has(id) && sameBox(id));
+  // 選的區不在了就拿掉。同一個代號換成另一塊長方形（那一面重切過，自動補滿的區重新編號，#1262）也拿掉，講一句：
+  // 不然小框還沒套用的改動會套到另一塊上。比方案裡的座標（不比畫面座標：只改房間尺寸時整面一區、鏡像面的畫面座標會跟著變）。
+  // 一區都不剩，面板也收起來。
+  const shape = item => JSON.stringify([item.zone.area, item.zone.u_m ?? null, item.zone.v_m ?? null]);
+  const moved = selected.filter(id => byId.has(id) && earlier?.has(id) && shape(earlier.get(id)) !== shape(byId.get(id)));
+  if (moved.length) {
+    keptSaid = `剛才選的區有 ${moved.length} 區那一面重切過、換成另一塊了，不再算選著${draftTouched ? "；小框還沒套用的改動放掉了" : ""}，要的話重新選`;
+  }
+  selected = selected.filter(id => byId.has(id) && !moved.includes(id));
   if (!selected.length) { draft = null; draftTouched = false; }
   // 圖上只在另外指定的區（與天花、地板）寫材料名。
   const apart = new Set(inferred.special.flatMap(group => group.zones.map(item => item.id)));
