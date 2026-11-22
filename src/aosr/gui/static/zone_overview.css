@@ -107,14 +107,15 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-list h2{font-size:16px;font-weight:600;margin:0;display:flex;align-items:center;gap:9px}
 #zone-page .zv-list.empty h2{font-weight:400;font-size:15px}
 #zone-page .zv-who{font-size:13.5px;color:var(--soft);margin:2px 0 0 31px}
-#zone-page .zv-checks{margin:6px 0 0;border:1px solid #e2c877;border-radius:8px;background:#fffaf0;overflow:hidden}
-#zone-page label.zv-check{display:flex;align-items:center;gap:10px;padding:4px 10px;margin:0;font-size:15px;border-top:1px solid #f0dfae;line-height:1.45}
-#zone-page label.zv-check:first-child{border-top:0}
-#zone-page label.zv-check input{width:18px;height:18px;margin:0;padding:0;accent-color:var(--ink)}
-#zone-page .zv-links{display:flex;gap:18px;margin-top:7px;font-size:13.5px;align-items:flex-start}
-#zone-page .zv-different{margin-top:7px;font-size:13.5px}
+#zone-page .zv-card-hint{margin:0;font-size:14px;color:var(--ink)}
+#zone-page .zv-card-choices{margin:7px 0;padding:0;list-style:none;border-block:1px solid var(--line)}
+#zone-page .zv-card-choices li{padding:4px 0;font-size:15px;line-height:1.45}
+#zone-page .zv-card-choices li + li{border-top:1px solid var(--line)}
+#zone-page .zv-card-choices small,#zone-page .zv-card-reason{display:block;color:var(--soft);font-size:13px}
+#zone-page .zv-card-choices [data-reference=listed]{color:var(--soft)}
+#zone-page .zv-list .zv-num{font-size:13px}
+#zone-page .zv-card-summary{display:flex;gap:12px;margin:6px 0;color:var(--soft);font-size:13.5px}
 #zone-page details summary{cursor:pointer;color:var(--fixed)}
-#zone-page .zv-adjlist{font-size:12.5px;color:var(--soft);margin:4px 0 0}
 #zone-page .zv-more{padding:0 18px;font-size:14px}
 #zone-page .zv-more table{border-collapse:collapse;font-size:12px;margin:6px 0 0;width:auto}
 #zone-page .zv-more td{border:0;padding:1px 8px 1px 0}
@@ -171,8 +172,6 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-brief .zv-rule::before{top:9px;bottom:9px}
 #zone-page .zv-brief .zv-rule b{font-weight:600}
 #zone-page .zv-names{display:flex;gap:14px;font-size:13.5px;margin:2px 0 0 31px;flex-wrap:wrap}
-#zone-page .zv-add{margin-top:7px;max-height:260px;overflow-y:auto}
-#zone-page .zv-add small{display:block;color:var(--soft);font-size:12px}
 #zone-page .zv-list .zv-problem{padding:0;margin:7px 0 0;font-weight:600}
 /* 結果列上面那一行：剛才那一步的結果、為什麼不能拿去搜尋 */
 #zone-page .zv-notes{margin:0 24px;font-size:14px;min-height:22px}
@@ -197,8 +196,12 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-foot .zv-why{font-size:12.5px;color:#c9d2d6;white-space:nowrap}
 #zone-page .zv-from{font-size:12.5px;color:var(--soft);margin-top:3px;line-height:1.45}
 /* 標題列「改的還沒存進檔案…」那一句：靠右、在「回房間方案輸入」左邊，一行不折 */
-#zone-page .zv-head .zv-unsaved{margin-left:auto;align-self:center;padding:4px 12px;border-radius:6px;background:var(--search-soft);color:var(--ink);font-size:14px;font-weight:600;white-space:nowrap}
-#zone-page .zv-head .zv-unsaved + .zv-link{margin-left:0}
+#zone-page .zv-head:has(.zv-unsaved){display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto;
+  align-content:center;align-items:baseline;gap:0 18px}
+#zone-page .zv-head:has(.zv-unsaved) h1{line-height:1.2}
+#zone-page .zv-head .zv-unsaved{grid-column:1 / 3;justify-self:start;padding:0 8px;border-radius:6px;
+  background:var(--search-soft);color:var(--ink);font-size:14px;font-weight:600;white-space:nowrap}
+#zone-page .zv-head .zv-unsaved + .zv-link{grid-column:3;grid-row:1 / 3;align-self:center}
 /* 底列黏在視窗下緣：瀏覽器自己把東西捲進畫面時（跳到某一格、Tab 走到某一格）讓出底列那一段，不讓它停在底列底下 */
 html.zone-page-open{scroll-padding-bottom:112px}
 /* #1199：牆名旁「選整面」、小框標題那一行、整面一行、「目前」小標、取消鈕旁那一句 */
@@ -245,7 +248,6 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page select.zv-rpick,#zone-page input.zv-rbox{font:inherit;font-size:13px;color:var(--ink);border:1.3px solid var(--ink);border-radius:5px;padding:0 3px;background:#fff}
 #zone-page input.zv-rbox{width:54px;text-align:center}
 #zone-page .zv-rpart small.zv-mixed{flex-basis:100%;font-size:12.5px;color:var(--soft)}
-#zone-page label.zv-check .zv-mwords small{font-size:12.5px}
 #zone-page .zv-list h2{flex-wrap:wrap}
 #zone-page .zv-list h2 .zv-muted{flex-basis:100%;margin:0 0 0 31px}
 

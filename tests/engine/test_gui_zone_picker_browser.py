@@ -16,11 +16,11 @@ from tests.engine.test_gui_vpr_reference_browser import (
     COMPUTED_MS, _click_zone as click_reference_zone, _no_library, _open_page, _prepare as prepare_reference,
 )
 from tests.engine.test_gui_zone_material_pick_browser import (
-    FLOOR_ONLY, ONLY_48K, PLAIN_PRODUCT, _TEXT_STYLES, _add_candidate, _boss_room, _design,
+    FLOOR_ONLY, FRONT, ONLY_48K, PLAIN_PRODUCT, _TEXT_STYLES, _add_candidate, _boss_room, _design,
 )
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _apply, _click_zone, _open_overview, _prepare, _send_to_search, _stored,
+    _ALLOWED, _SELECTED, _apply, _click_zone, _open_overview, _prepare, _send_to_search, _stored,
 )
 
 
@@ -150,13 +150,18 @@ def test_picker_width_and_readability_in_four_panel_states(tmp_path: Path, brows
         _click_zone(page, "yL/z3")
         panel = page.locator("#zone-panel")
         assert abs(panel.evaluate("p => p.getBoundingClientRect().width") - 472) <= 1
-        for state in ("single", "multiple", "range", "picker"):
+        for state in ("single", "multiple", "range", "picker", "floor"):
             if state == "multiple":
                 _click_zone(page, "yL/auto2")
             elif state == "range":
                 page.locator("#zone-panel-range-toggle-glass_wool_48k").click()
             elif state == "picker":
                 page.locator("#zone-panel-add").click()
+            elif state == "floor":
+                page.locator("#zone-panel-cancel").click()
+                _click_zone(page, "floor/auto1")
+                page.locator("#zone-panel-mode-search").check()
+                expect(panel.locator(".zv-form-note")).to_contain_text("這裡沒有可調的材料")
             samples = panel.evaluate(_TEXT_STYLES)
             assert samples and all(row["size"] >= 13 and row["contrast"] >= 4.5 for row in samples), (state, samples)
             if state == "multiple":
@@ -289,6 +294,46 @@ def test_stored_covered_product_stays_listed_and_can_be_removed_independently(tm
 DISCARDED = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區"
 
 
+def _prepare_two_cards(tmp_path: Path) -> None:
+    front: dict[str, object] = dict.fromkeys(("z1", "z2", "z3", "auto1", "auto2"), {"mode": "search", "allowed": ONLY_48K})
+    _prepare(tmp_path, _design({"yL": front, "ceiling": {"z1": {"mode": "search", "allowed": WOOLS}}}))
+
+
+def test_picking_another_card_keeps_draft_depth_and_method_and_loads_its_saved_list(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        page.locator("#zone-list-2-select").click()
+        page.locator("#zone-panel-remove-glass_wool_48k").click()
+        page.locator("#zone-panel-depth").fill("12.5")
+        fixed = page.locator("#zone-panel-mode-fixed")
+        fixed.check()
+        page.locator("#zone-list-select").click()
+        assert set(page.evaluate(_SELECTED)) == set(FRONT)
+        expect(fixed).to_be_checked()
+        page.locator("#zone-panel-mode-search").check()
+        expect(page.locator("#zone-panel-depth")).to_have_value("12.5")
+        expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
+        assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == ONLY_48K
+        _apply(page)
+        assert page.evaluate(_ALLOWED) == {**dict.fromkeys(FRONT, ONLY_48K), "ceiling/z1": WOOLS}
+
+
+def test_picking_a_card_scrolls_the_panel_heading_into_view(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.set_viewport_size({"width": 1440, "height": 700})
+        _open_overview(page)
+        button = page.locator("#zone-list-2-select")
+        button.scroll_into_view_if_needed()
+        button.click()
+        heading = page.locator("#zone-panel h2").bounding_box()
+        assert heading is not None
+        assert 0 <= heading["y"] <= 700 - heading["height"]
+
+
 @pytest.mark.parametrize("action", ["remove-glass_wool_24k", "only-glass_wool_48k"])
 def test_changing_selection_discards_the_old_list_action(tmp_path: Path, browser: Browser, action: str) -> None:
     _boss_room(tmp_path)
@@ -326,6 +371,7 @@ def test_changing_selection_in_fixed_mode_reports_the_discarded_list(
             page.locator("#zone-whole-yL").click()
         else:
             _click_zone(page, "yL/auto1")
+        _click_zone(page, "yL/auto2")
         page.locator("#zone-panel-mode-search").check()
         expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
         expect(page.locator("#zone-panel-undo")).to_have_count(0)
@@ -622,3 +668,33 @@ def test_notice_undo_open_layers_and_mixed_range_text_meet_readability_minimum(t
         for words in ("拿掉 也可以不貼", "復原", "每一層現在還不能調", "各區不同；不動它", "③ 5–20、④ 5–10 cm"):
             assert any(words in row["words"] for row in samples), words
         assert [row for row in samples if row["size"] < 13 or row["contrast"] < 4.5] == []
+
+
+@pytest.mark.parametrize("depth", ["19.96", "0.04"])
+def test_depth_caption_uses_the_same_millimetres_as_apply(tmp_path: Path, browser: Browser, depth: str) -> None:
+    _boss_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-depth").fill(depth)
+        line = page.locator("#zone-panel-row-glass_wool_24k .zv-range")
+        expect(line).to_contain_text("棉厚")
+        expect(line).not_to_contain_text("最多")
+
+
+def test_starting_list_groups_two_pasted_zones_by_the_ineligible_wall(tmp_path: Path, browser: Browser) -> None:
+    _boss_room(tmp_path)
+    path = tmp_path / "materials.json"
+    library = json.loads(path.read_bytes())
+    entry = next(row for row in library["materials"] if row["id"] == "sample_front_panel")
+    entry["id"] = "sample_floor_panel"
+    path.write_text(json.dumps(library))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for zone in ("yL/z1", "yL/z2"):
+            _click_zone(page, zone)
+        page.locator("#zone-panel-mode-search").check()
+        reason = page.locator(".zv-start-note").filter(has_text="沒放進清單")
+        expect(reason).to_have_text("①② 原本指定貼的 自編前牆吸音板 沒放進清單，前牆那一面貼不了這一筆")

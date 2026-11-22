@@ -71,7 +71,7 @@ def _expect_candidate_cost(surface: Locator, present: bool) -> None:
     assert style["size"] >= 12 and style["contrast"] >= 4.5, style
 
 
-def test_whole_candidate_cost_follows_the_choice_in_all_three_views(tmp_path: Path, browser: Browser) -> None:
+def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Path, browser: Browser) -> None:
     _prepare_candidates(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -91,11 +91,15 @@ def test_whole_candidate_cost_follows_the_choice_in_all_three_views(tmp_path: Pa
                 expect(product).to_have_attribute("data-state", "all")
             _apply(page)
             card = page.locator("#zone-list")
-            _expect_candidate_cost(card, checked)
+            _expect_candidate_cost(card, False)
             if checked and choice == "sample_product":
-                expect(card.locator("#zone-list-check-sample_product")).to_be_checked()
+                expect(card.locator("[data-choice=sample_product]")).to_be_visible()
+            card.get_by_role("button", name="選這幾區").click()
+            _expect_candidate_cost(form, checked)
+            _expect_candidate_cost(card, False)
+            page.locator("#zone-panel-cancel").click()
             page.locator("#zone-page-close").click()
-            _expect_candidate_cost(_open_candidate_table(page), checked)
+            _expect_candidate_cost(_open_candidate_table(page), False)
             page.locator("#zone-page-open").click()
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -112,7 +116,12 @@ def test_only_tunable_candidates_and_none_show_no_cost_in_all_three_views(tmp_pa
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         _expect_candidate_cost(page.locator("#zone-panel-form"), False)
         _apply(page)
-        _expect_candidate_cost(page.locator("#zone-list"), False)
+        card = page.locator("#zone-list")
+        _expect_candidate_cost(card, False)
+        page.locator("#zone-list-select").click()
+        _expect_candidate_cost(page.locator("#zone-panel-form"), False)
+        _expect_candidate_cost(card, False)
+        page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         _expect_candidate_cost(_open_candidate_table(page), False)
         assert watched.page_errors == [] and watched.console_errors == []
