@@ -2030,15 +2030,16 @@ function overviewParts() {
   keptRule = inferred.rule?.key ?? null;
   const earlier = view?.byId;
   view = {roles, room, faces, byId, inferred, list: zoneSearchList(searchZones(faces, roles), inferred.rule?.key)};
-  // 選的區不在了就拿掉。同一個代號換成另一塊長方形（那一面重切過，自動補滿的區重新編號，#1262）也拿掉，講一句：
-  // 不然小框還沒套用的改動會套到另一塊上。比方案裡的座標（不比畫面座標：只改房間尺寸時整面一區、鏡像面的畫面座標會跟著變）。
-  // 一區都不剩，面板也收起來。
+  // 選的區那一面重切過（#1262）：代號不在了，或同一個代號換成另一塊長方形（自動補滿的區重新編號），就不再算選著、講一句——
+  // 不然小框還沒套用的改動會套到另一塊上。同一份方案裡代號只會因為切面而消失（換方案上面那一行已先清掉選取）。
+  // 比方案裡的座標（不比畫面座標：只改房間尺寸時整面一區、鏡像面的畫面座標會跟著變）。一區都不剩，面板與草稿也收起來。
   const shape = item => JSON.stringify([item.zone.area, item.zone.u_m ?? null, item.zone.v_m ?? null]);
-  const moved = selected.filter(id => byId.has(id) && earlier?.has(id) && shape(earlier.get(id)) !== shape(byId.get(id)));
+  const moved = selected.filter(id => !byId.has(id) || (earlier?.has(id) && shape(earlier.get(id)) !== shape(byId.get(id))));
+  selected = selected.filter(id => !moved.includes(id));
   if (moved.length) {
-    keptSaid = `剛才選的區有 ${moved.length} 區那一面重切過、換成另一塊了，不再算選著${draftTouched ? "；小框還沒套用的改動放掉了" : ""}，要的話重新選`;
+    const lost = !selected.length && draftTouched;  // 草稿只在一區都不剩時才丟
+    keptSaid = `剛才選的區有 ${moved.length} 區那一面重切過，已經不是原來那一塊，不再算選著${lost ? "；小框還沒套用的改動放掉了" : ""}，要的話重新選`;
   }
-  selected = selected.filter(id => byId.has(id) && !moved.includes(id));
   if (!selected.length) { draft = null; draftTouched = false; }
   // 圖上只在另外指定的區（與天花、地板）寫材料名。
   const apart = new Set(inferred.special.flatMap(group => group.zones.map(item => item.id)));

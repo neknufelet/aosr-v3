@@ -68,6 +68,7 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         before = page.locator("#zone-map [data-wall='yL'][data-zone]").count()
         page.locator("#zone-cut-yL").click()
         expect(page.locator("#elevation-wall-yL")).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("#elevation-wall-yL")).to_be_focused()  # 鍵盤從那一面的牆名鈕接著走
         expect(page.locator("#elevation-wall-floor")).to_have_attribute("aria-pressed", "false")
         expect(page.locator("#elevation-frame")).to_be_in_viewport()
         _cut_front_inside_auto2(page)
@@ -78,45 +79,68 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         assert page.locator("#zone-map [data-wall='yL'][data-zone]").count() > before
 
 
+def _said(page: Page) -> str:
+    return cast(str, page.evaluate("document.getElementById('zone-page-said')?.textContent ?? ''"))
+
+
+def _back_to_overview(page: Page) -> None:
+    page.locator("#zone-page-open").click()
+    expect(page.locator("#zone-map")).to_be_visible()
+    _settled(page)
+
+
 def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: Path, browser: Browser) -> None:
-    """選了前牆 auto2、小框還開著，回輸入頁在那一格裡切一個框再回來：auto2 這個代號若換成另一塊長方形，就不再算選著，
-    小框收起來（不然小框的改動會套到另一塊上）。對照：選右牆一區、切的是前牆，那一區沒動，回來照樣選著、小框還在。"""
+    """切過那一面再回來：選到的區代號不在了、或同一個代號換成另一塊長方形（自動補滿的區重新編號），就不再算選著，
+    訊息列講一句（不然小框還沒套用的改動會套到另一塊上）；同一面沒動到的區、別一面的區照樣選著。
+    小框的草稿只在一區都不剩時才丟，那時那一句才加「還沒套用的改動放掉了」。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
         _settled(page)
+        # 一、同一面兩區：auto2 被切到、z1（左邊那一大塊）沒動。走原本那條路（不靠新鈕）：回輸入頁、自己點前牆、切框、回來。
         _click_zone(page, "yL/auto2")
+        _click_zone(page, "yL/z1")
         expect(page.locator("#zone-panel")).to_be_visible()
-        page.locator("#zone-panel-mode-search").check()  # 小框動過（那一格原本不貼）
+        page.locator("#zone-panel-mode-search").check()  # 小框動過（兩區原本都不是由程式最佳化）
         shape = _shape(page, "yL/auto2")
-        # 走原本那條路（不靠新鈕）：回輸入頁、自己點前牆、切框、按「設定每一區貼什麼 ▸」回來。
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-yL").click()
         _cut_front_inside_auto2(page)
-        page.locator("#zone-page-open").click()
-        expect(page.locator("#zone-map")).to_be_visible()
-        _settled(page)
+        _back_to_overview(page)
         after = _shape(page, "yL/auto2")
         assert after is not None and after != shape  # 這一刀切下去，auto2 這個代號確實換了一塊（不然這一題考不到）
+        assert page.evaluate(_SELECTED) == ["yL/z1"]
+        expect(page.locator("#zone-panel")).to_be_visible()
+        expect(page.locator("#zone-panel-mode-search")).to_be_checked()  # 還有一區選著：草稿留著
+        assert _said(page) == "剛才選的區有 1 區那一面重切過，已經不是原來那一塊，不再算選著，要的話重新選"
+        # 二、整面一區被切開（代號不在了），小框動過：一區都不剩，草稿也丟，那一句多半句。
+        _click_zone(page, "yL/z1")
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        assert _said(page) == ""  # 下一次按東西就收掉
+        _click_zone(page, "x0/whole_wall")
+        page.locator("#zone-panel-mode-search").check()
+        page.locator("#zone-cut-x0").click()
+        _drag(page, 5.5, 3.15, (2.0, 1.0), (3.0, 2.0))
+        _back_to_overview(page)
+        expect(page.locator("#zone-map [data-wall='x0'][data-zone='z1']")).to_have_count(1)
         assert page.evaluate(_SELECTED) == []
         expect(page.locator("#zone-panel")).to_have_count(0)
-        expect(page.locator("#zone-page-said")).to_have_text("剛才選的區有 1 區那一面重切過、換成另一塊了，不再算選著；小框還沒套用的改動放掉了，要的話重新選")
-        # 對照：選右牆一區，切前牆（右牆不動），回來照樣選著。
+        assert _said(page) == "剛才選的區有 1 區那一面重切過，已經不是原來那一塊，不再算選著；小框還沒套用的改動放掉了，要的話重新選"
+        # 三、對照：選右牆一區，切前牆（右牆不動），回來照樣選著、不講那一句。
         _click_zone(page, "xL/auto3")
         expect(page.locator("#zone-panel")).to_be_visible()
         page.locator("#zone-cut-yL").click()
         _drag(page, *FRONT_SIZE, (2.35, 0.2), (2.85, 0.6))
-        page.locator("#zone-page-open").click()
-        expect(page.locator("#zone-map")).to_be_visible()
-        _settled(page)
+        _back_to_overview(page)
         assert page.evaluate(_SELECTED) == ["xL/auto3"]
         expect(page.locator("#zone-panel")).to_be_visible()
+        assert "重切過" not in _said(page)
 
 
 def test_changing_room_size_keeps_the_selection(tmp_path: Path, browser: Browser) -> None:
     """只改房間尺寸、沒重切：選的區（整面一區、鏡像面的長方形）照樣選著，也不講「重切過」那一句。
-    畫面座標會跟著房間尺寸變，比的是方案裡的座標。"""
+    畫面座標會跟著房間尺寸變（先改高：整面一區變；再改右牆那個方向的長：鏡像面的長方形變），比的是方案裡的座標。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -130,12 +154,18 @@ def test_changing_room_size_keeps_the_selection(tmp_path: Path, browser: Browser
         page.locator("#room-Lz").fill("3.2")
         page.locator("#room-Lz").press("Tab")
         page.wait_for_function("!document.querySelector('main').inert")
-        page.locator("#zone-page-open").click()
-        expect(page.locator("#zone-map")).to_be_visible()
-        _settled(page)
+        _back_to_overview(page)
         assert sorted(cast(list[str], page.evaluate(_SELECTED))) == chosen
-        expect(page.locator("#zone-page-said")).to_have_count(0)
+        assert "重切過" not in _said(page)
         expect(page.locator("#zone-panel")).to_be_visible()
+        # 再改右牆那個方向的長度：右牆是鏡像面，xL/auto3 的畫面座標跟著變，方案座標沒變，照樣選著。
+        page.locator("#zone-page-close").click()
+        page.locator("#room-Ly").fill("5.6")
+        page.locator("#room-Ly").press("Tab")
+        page.wait_for_function("!document.querySelector('main').inert")
+        _back_to_overview(page)
+        assert sorted(cast(list[str], page.evaluate(_SELECTED))) == chosen
+        assert "重切過" not in _said(page)
 
 
 def _narrow_scheme() -> dict[str, object]:
