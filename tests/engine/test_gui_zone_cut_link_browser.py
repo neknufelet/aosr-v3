@@ -58,8 +58,11 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         expect(page.locator("#zone-page")).to_be_hidden()
         expect(page.locator("#elevation-wall-floor")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#elevation-frame")).to_be_in_viewport()
-        # 回分區頁，換按前牆：立面圖換成前牆，捲到立面圖那一塊（不是捲回打開分區頁之前的地方）。
-        page.locator("#zone-page-open").click()
+        # 從頁面最上面那顆（方案那一列）回分區頁，換按前牆：立面圖換成前牆，捲到立面圖那一塊
+        # （不是捲回打開分區頁之前的地方：那時捲在最上面，立面圖在視窗外）。
+        page.evaluate("window.scrollTo(0, 0)")
+        expect(page.locator("#elevation-frame")).not_to_be_in_viewport()
+        page.locator("#scheme-zone-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
         before = page.locator("#zone-map [data-wall='yL'][data-zone]").count()
         page.locator("#zone-cut-yL").click()
@@ -101,7 +104,7 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         _click_zone(page, "xL/auto3")
         expect(page.locator("#zone-panel")).to_be_visible()
         page.locator("#zone-cut-yL").click()
-        _drag(page, *FRONT_SIZE, (2.3, 0.15), (2.8, 0.55))
+        _drag(page, *FRONT_SIZE, (2.35, 0.2), (2.85, 0.6))
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
@@ -113,13 +116,13 @@ def _narrow_scheme() -> dict[str, object]:
     """假房間改一份窄的：前後牆窄、側牆長，六面各一整面（尺寸、喇叭、座位都是這裡自己編的）。"""
     scheme = json.loads(json.dumps(ZONE_NAMING_SCHEME))
     scene = scheme["scene"]
-    scene["room_m"] = {"Lx": 3.3, "Ly": 7.6, "Lz": 2.7}
+    scene["room_m"] = {"Lx": 3.4, "Ly": 7.8, "Lz": 2.7}
     plain = {"kind": "constant_impedance", "impedance_pa_s_m": 50000.0}
     scene["surface_zones_by_wall"] = {face: [{"area": "whole_wall", "material": plain}] for face in FACES}
-    scheme["speakers"] = {"left": {"x": 0.9, "y": 7.0, "z": 0.9}, "right": {"x": 2.4, "y": 7.0, "z": 0.9}}
+    scheme["speakers"] = {"left": {"x": 0.9, "y": 7.1, "z": 0.9}, "right": {"x": 2.5, "y": 7.1, "z": 0.9}}
     for point in scheme["receiver_set"]["points"]:
         offset = [axis - centre for axis, centre in zip(point["position_m"], [2.45, 2.5, 1.42], strict=True)]
-        point["position_m"] = [round(1.65 + offset[0], 3), round(4.6 + offset[1], 3), round(1.42 + offset[2], 3)]
+        point["position_m"] = [round(1.7 + offset[0], 3), round(4.4 + offset[1], 3), round(1.42 + offset[2], 3)]
     return cast(dict[str, object], scheme)
 
 
