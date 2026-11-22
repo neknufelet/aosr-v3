@@ -383,12 +383,14 @@ function drawWall(map, role, wall, items, ox, oy, scale, miniSize) {
     svg("text", {class: "zv-quiet", x: ox + width * scale, y: floorY + 18, "text-anchor": "end"}, wallNames[views[wall].bottom]),
     ...miniPlan({front: "top", back: "bottom", left: "left", right: "right"}[role], ox + 2, oy - 5.5 - miniSize[1], ...miniSize),
     ...wallMarks(role, wall, ox, floorY, scale));
-  const title = svg("text", {class: "zv-face-name big", x: ox + miniSize[0] + 10, y: oy - 8}, wallNames[wall]);
-  title.append(svg("tspan", {class: "zv-quiet", dx: 10}, `面向它站：左手邊是${wallNames[views[wall].left]}，右手邊是${wallNames[views[wall].right]}`));
+  const title = svg("text", {class: "zv-face-name big", id: `zone-face-title-${wall}`, x: ox + miniSize[0] + 10, y: oy - 8}, wallNames[wall]);
+  const left = wallNames[views[wall].left], right = wallNames[views[wall].right];
+  // 牆窄放不下時換短句、再放不下就不寫（量畫出來的字，見 fitFaceTitles）。
+  title.append(svg("tspan", {class: "zv-quiet", dx: 10, "data-short": `左手邊${left}、右手邊${right}`}, `面向它站：左手邊是${left}，右手邊是${right}`));
   face.append(title);
   map.append(face);
-  // 「選整面」那一顆放哪（#1199）：這面牆名字那一行的最右邊（疊在圖上的一顆真的按鈕，見 wholeButtons）。
-  return {wall, right: ox + width * scale, top: oy - 27};
+  // 「切區 ▸」與「選整面」放哪（#1199、#1262）：這面牆名字那一行的最右邊（疊在圖上的真按鈕，見 faceTools）。
+  return {wall, right: ox + width * scale, top: oy - 27, titleRow: true};
 }
 // 地板圖與天花圖（同一個方向：上邊前牆、左邊左牆，從上往下看）。point(x, y)：房間座標 → 小圖上的 px。
 function tilePlan(roles, room, px, py, scale) {
@@ -455,10 +457,12 @@ function drawTile(map, wall, items, plan, roles, room, faces, heading, note) {
     svg("text", {class: "zv-edge-name", x: px + plan.width / 2, y: py + plan.height - 5, "text-anchor": "middle"}, wallNames[roles.back]),
     svg("text", {class: "zv-edge-name", x: px + 5, y: py + plan.height / 2 + 4}, wallNames[roles.left]),
     svg("text", {class: "zv-edge-name", x: px + plan.width - 5, y: py + plan.height / 2 + 4, "text-anchor": "end"}, wallNames[roles.right]));
-  const title = svg("text", {class: "zv-face-name", x: px, y: py - 8}, wallNames[wall]);
+  const title = svg("text", {class: "zv-face-name", id: `zone-face-title-${wall}`, x: px, y: py - 8}, wallNames[wall]);
   title.append(svg("tspan", {class: "zv-quiet", dx: 10}, heading));
   face.append(title);
   map.append(face);
+  // 小圖窄，名字那一行放不下鈕：「切區 ▸」放小圖下緣外的右邊（#1262），讓過後牆門、窗那一行字（下緣外 14 px 的基線）。
+  return {wall, right: px + plan.width, top: py + plan.height + 22, titleRow: false};
 }
 function drawMap(faces, roles, room) {
   const {wallSize} = window.elevationGeometry;
@@ -469,7 +473,7 @@ function drawMap(faces, roles, room) {
   const row1 = 30, row2 = row1 + rowHeight + 56, tileY = row2 + rowHeight + 48;
   const col1 = 2, col2 = col1 + frontWidth * scale + WALL_GAP;
   const tileWidth = frontWidth * tileScale, tileDepth = sideWidth * tileScale;
-  const height = Math.max(tileY + tileDepth + 22, 790);
+  const height = Math.max(tileY + tileDepth + 50, 790);  // 小圖底下留後牆門窗那一行字、再一顆「切區 ▸」的高
   const map = svg("svg", {id: "zone-map", class: "zv-map", width: MAP_WIDTH, height, viewBox: `0 0 ${MAP_WIDTH} ${height}`,
                           role: "img", "aria-label": "四面牆、地板、天花"});
   const defs = svg("defs");
@@ -478,17 +482,17 @@ function drawMap(faces, roles, room) {
   defs.append(pattern); map.append(defs);
   const miniSize = [15, 15 * sideWidth / frontWidth];
   // 樣稿的排法：上排前牆、右牆，下排後牆、左牆（前後同寬排同一欄）。
-  const whole = [];
+  const places = [];
   for (const [role, ox, oy] of [["front", col1, row1], ["right", col2, row1], ["back", col1, row2], ["left", col2, row2]]) {
-    whole.push(drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize));
+    places.push(drawWall(map, role, roles[role], faces[roles[role]], ox, oy, scale, miniSize));
   }
   // 兩張小圖靠右排，左邊留給圖例與「左右對稱」那一塊。
   const tileGap = 72, floorX = Math.max(440, MAP_WIDTH - 2 * tileWidth - tileGap - 30), ceilingX = floorX + tileWidth + tileGap;
   const allStill = faces.ceiling.every(item => item.shown === "still");
-  drawTile(map, "floor", faces.floor, tilePlan(roles, room, floorX, tileY, tileScale), roles, room, faces, "從上往下看", null);
-  drawTile(map, "ceiling", faces.ceiling, tilePlan(roles, room, ceilingX, tileY, tileScale), roles, room, faces, "方向同地板圖",
-    allStill && faces.ceiling.length === 1 ? ["保留原樣", originalFace("ceiling")] : null);
-  return {map, legendTop: tileY - 10, whole, underWidth: floorX - 44};
+  places.push(drawTile(map, "floor", faces.floor, tilePlan(roles, room, floorX, tileY, tileScale), roles, room, faces, "從上往下看", null),
+    drawTile(map, "ceiling", faces.ceiling, tilePlan(roles, room, ceilingX, tileY, tileScale), roles, room, faces, "方向同地板圖",
+      allStill && faces.ceiling.length === 1 ? ["保留原樣", originalFace("ceiling")] : null));
+  return {map, legendTop: tileY - 10, places, underWidth: floorX - 44};
 }
 function legend() {
   const box = el("div", "zv-legend");
@@ -549,14 +553,43 @@ function byFace(zones) {
     return {wall, zones: here, whole: face.length > 1 && face.length === here.length && here.every(item => face.includes(item.id))};
   });
 }
-// 四面牆名字旁各一顆「選整面」：一次選那一面全部的區（整面都是門窗就沒有這一顆）。
-function wholeButtons(places) {
-  return places.filter(place => wholeFace(place.wall).length).map(place => {
-    const item = button("zv-whole", "選整面", `zone-whole-${place.wall}`, () => pick(wholeFace(place.wall)));
-    item.setAttribute("aria-label", `${wallNames[place.wall]}選整面`);
-    item.style.left = `${place.right.toFixed(1)}px`; item.style.top = `${place.top.toFixed(1)}px`;
-    return item;
+// 每一面一組鈕（疊在圖上，靠右對齊 place.right）：「切區 ▸」回輸入頁立面圖畫框（#1262）；
+// 四面牆再加「選整面」（#1199），一次選那一面全部的區。
+// 整面都是門窗的牆沒有「選整面」，「切區 ▸」照樣有（門窗也要能重切）。
+function faceTools(places) {
+  return places.map(place => {
+    const tools = el("div", "zv-face-tools"); tools.id = `zone-tools-${place.wall}`; tools.dataset.wall = place.wall;
+    if (place.titleRow) tools.dataset.titleRow = "true";
+    const cut = button("zv-whole", "切區 ▸", `zone-cut-${place.wall}`, () => cutFace(place.wall));
+    cut.setAttribute("aria-label", `${wallNames[place.wall]}切區：回「房間方案輸入」在立面圖畫框`);
+    tools.append(cut);
+    if (place.titleRow && wholeFace(place.wall).length) {
+      const whole = button("zv-whole", "選整面", `zone-whole-${place.wall}`, () => pick(wholeFace(place.wall)));
+      whole.setAttribute("aria-label", `${wallNames[place.wall]}選整面`);
+      tools.append(whole);
+    }
+    tools.style.left = `${place.right.toFixed(1)}px`; tools.style.top = `${place.top.toFixed(1)}px`;
+    return tools;
   });
+}
+// 「切區 ▸」（#1262）：畫框在輸入頁的立面圖，這一頁只選區、選貼什麼。關掉這一頁、打開那一面的立面圖、捲到立面圖那一塊。
+// 先關頁再開立面圖（這一頁開著時輸入頁藏著，立面圖量不到寬度）；關頁會捲回打開這一頁之前的地方，所以捲動放最後。
+function cutFace(wall) {
+  closeOverview();
+  window.showElevationWall(wall);
+  $("elevation-panel")?.scrollIntoView({block: "start"});
+  $(`elevation-wall-${wall}`)?.focus({preventScroll: true});  // 鍵盤從那一面的牆名鈕接著走，不必從頁首重來
+}
+// 牆名那一行讓出右邊那組鈕（#1262）：「面向它站…」壓到鈕就換短句，還壓到就不寫。量畫出來的字（字型各台不同，估的不準）。
+function fitFaceTitles() {
+  for (const tools of document.querySelectorAll("#zone-page .zv-face-tools[data-title-row]")) {
+    const title = $(`zone-face-title-${tools.dataset.wall}`), aside = title?.querySelector("tspan");
+    if (!aside) continue;
+    const clear = () => title.getBoundingClientRect().right <= tools.getBoundingClientRect().left - 8;
+    if (clear()) continue;
+    aside.textContent = aside.dataset.short;
+    if (!clear()) aside.remove();
+  }
 }
 // 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
 // 「鋼板直接貼在棉上」的構造不跟著帶（#1208，carriedList）：拿掉它之後只剩不貼或空了，改用預設的三種玻璃棉＋不貼。
@@ -1966,6 +1999,7 @@ function renderZoneOverview() {
   const focused = document.activeElement?.id ?? "";
   const typing = focused === "zone-panel-depth" || focused === "zone-panel-picker-search" || focused.startsWith("zone-panel-range-") ? focused : null;
   page.replaceChildren(...parts);
+  fitFaceTitles();
   const again = typing ? $(typing) : null;
   again?.focus();
   // 放回去的是新畫的一格，原本的反白帶不過來（數字格讀不到選取範圍）。那一格畫的是原值（草稿裡沒有它的字，沒有 typed 記號）
@@ -1994,9 +2028,18 @@ function overviewParts() {
   if (keptRuleZone) { keptRule = ruled.find(item => item.id === keptRuleZone)?.method ?? keptRule; keptRuleZone = null; }
   const inferred = inferOtherWalls(ruled, keptRule);
   keptRule = inferred.rule?.key ?? null;
+  const earlier = view?.byId;
   view = {roles, room, faces, byId, inferred, list: zoneSearchList(searchZones(faces, roles), inferred.rule?.key)};
-  // 選的區不在了（那一面重切過）就拿掉；一區都不剩，面板也收起來。
-  selected = selected.filter(id => byId.has(id));
+  // 選的區那一面重切過（#1262）：代號不在了，或同一個代號換成另一塊長方形（自動補滿的區重新編號），就不再算選著、講一句——
+  // 不然小框還沒套用的改動會套到另一塊上。同一份方案裡代號只會因為切面而消失（換方案上面那一行已先清掉選取）。
+  // 比方案裡的座標（不比畫面座標：只改房間尺寸時整面一區、鏡像面的畫面座標會跟著變）。一區都不剩，面板與草稿也收起來。
+  const shape = item => JSON.stringify([item.zone.area, item.zone.u_m ?? null, item.zone.v_m ?? null]);
+  const moved = selected.filter(id => !byId.has(id) || (earlier?.has(id) && shape(earlier.get(id)) !== shape(byId.get(id))));
+  selected = selected.filter(id => !moved.includes(id));
+  if (moved.length) {
+    const lost = !selected.length && draftTouched;  // 草稿只在一區都不剩時才丟
+    keptSaid = `剛才選的區有 ${moved.length} 區那一面重切過，已經不是原來那一塊，不再算選著${lost ? "；小框還沒套用的改動放掉了" : ""}，要的話重新選`;
+  }
   if (!selected.length) { draft = null; draftTouched = false; }
   // 圖上只在另外指定的區（與天花、地板）寫材料名。
   const apart = new Set(inferred.special.flatMap(group => group.zones.map(item => item.id)));
@@ -2005,10 +2048,10 @@ function overviewParts() {
   const mapWrap = el("div", "zv-mapwrap");
   pairing = readPairing(byId);
   if (!pairing.missed.length) symmetryDetail = false;
-  const {map, legendTop, whole, underWidth} = drawMap(faces, roles, room);
+  const {map, legendTop, places, underWidth} = drawMap(faces, roles, room);
   const under = el("div", "zv-under"); under.style.top = `${legendTop}px`; under.style.width = `${underWidth}px`;
   under.append(legend(), symmetryBox());
-  mapWrap.append(map, under, ...wholeButtons(whole));
+  mapWrap.append(map, under, ...faceTools(places));
   const side = el("div", "zv-side");
   if (symmetryDetail) side.append(symmetryDetailCard());
   if (selected.length) side.append(panelCard(), briefRules(), ...listCards(true));
