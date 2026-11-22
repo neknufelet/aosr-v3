@@ -123,17 +123,15 @@ function depthRow(wall) {
     if (!Object.keys(design.wall_max_depth_m).length) delete design.wall_max_depth_m;
   }));
   const hint = document.createElement("span"); hint.className = "note";
-  hint.textContent = "三層（房間預設、這一面、每一塊）取最小的；指定貼一種的區：貼上去的總厚不能超過它；由程式最佳化的區：程式選的不會超過它";
+  hint.textContent = "三層（房間預設、這一面、每一區）取最小的；每一區的最深在「這間房貼什麼」選那一區設。指定貼一種的區：貼上去的總厚不能超過它；由程式最佳化的區：程式選的不會超過它";
   row.append(hint);
   return row;
 }
 function zoneDepthCell(wall, key, setting, cell) {
   if (setting.mode === "keep_original") { cell.textContent = "不加層"; return; }
-  cell.append(depthInput(`depth-zone-${wall}-${key}`, "", setting.max_depth_m, value => {
-    const next = {...zoneSetting(wall, key)};
-    if (value === null) delete next.max_depth_m; else next.max_depth_m = value;
-    setZoneSetting(wall, key, next);
-  }));
+  const depth = document.createElement("p"); depth.className = "note"; depth.id = `depth-zone-${wall}-${key}`;
+  depth.textContent = setting.max_depth_m == null ? "這一區沒給" : `這一區給 ${shownNumber(setting.max_depth_m)}`;
+  cell.append(depth);
   const cap = zoneCap(wall, key);
   const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
   const targets = cap?.targets ?? [];

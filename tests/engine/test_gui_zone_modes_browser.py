@@ -9,6 +9,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
+from tests.engine._zone_panel_steps import apply_and_return, edit_candidates, open_panel
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
@@ -69,17 +70,23 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     _choose(page, "#zone-fixed-x0-z1", PRESET)
     _choose(page, "#zone-mode-x0-auto1", "search")
     _choose(page, "#zone-mode-x0-auto2", "keep_original")
-    # 改成由程式最佳化就帶好一份清單（不用先全勾再取消）；點「改清單」拿掉一種、加一種。
+    # 改成由程式最佳化就帶好一份清單（不用先全勾再取消）；進小框拿掉一種、加一種。
     assert _modes(page, "x0")["auto1"] == {"mode": "search", "allowed": DEFAULT_ALLOWED}
-    page.locator("#zone-allowed-summary-x0-auto1").click()
-    page.locator("#zone-allow-x0-auto1-glass_wool_96k").uncheck()
-    expect(page.locator("#zone-allow-x0-auto1-carpet_on_concrete")).to_have_count(0)
-    page.locator(f"#zone-allow-x0-auto1-{WALL_FIXED}").check()
+    open_panel(page, "x0", "auto1")
+    # 48K 固定成品在可調 48K 已列入時不能新增。先拿掉，再把可調那筆加回。
+    for wool in ("glass_wool_96k", "glass_wool_48k"):
+        page.locator(f"#zone-panel-remove-{wool}").click()
+    page.locator("#zone-panel-add").click()
+    expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_have_count(0)
+    page.locator(f"#zone-panel-pick-{WALL_FIXED}").click()
+    page.locator("#zone-panel-add").click()
+    page.locator("#zone-panel-pick-glass_wool_48k").click()
+    apply_and_return(page)
+    # 用號碼與位置名叫那一區（#1176）：109 號房的兩支喇叭都投影在右邊那一大塊。
+    expect(page.locator("#zone-goto-x0-auto1")).to_have_attribute("aria-label", "到「這間房貼什麼」改前牆 ③「兩支喇叭後面那塊」")
     page.locator("#original-scheme").select_option("room109-original")
     expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
-    # 底部那一行寫最後一次改的：auto1 的清單（#1176 起改清單也更新那一行，不留 auto2 那一句）。
-    # 訊息用號碼與位置名叫那一區（#1176）：109 號房的兩支喇叭都投影在右邊那一大塊。
-    expect(page.locator("#zone-note")).to_contain_text("前牆 ③「兩支喇叭後面那塊」：清單改成 48K 玻璃棉、24K 玻璃棉、不貼、")
+    expect(page.locator("#zone-note")).to_have_text("1 區改成「由程式最佳化」")
 
     zones = {str(zone["id"]): zone for zone in _zones(page, "x0")}
     assert zones["z1"]["material"] == {"kind": "mounted_on_wall", "layers": _layers(PRESET), "wall": wall}
@@ -125,20 +132,20 @@ def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, br
         expect(page.locator("#original-scheme")).to_have_value("room109-original")
         right = next(key for key, zone in after.items() if _region(zone) == "right" and key != "z2")
         expect(page.locator(f"#zone-mode-x0-{right}")).to_have_value("search")
-        # 清單一種一個方塊攤在外面；勾選表收在「改清單」後面，點開才看得到勾選格。
+        # 清單一種一個方塊攤在外面；在小框加減候選。
         expect(page.locator(f"#zone-allowed-chips-x0-{right} .zone-chip")).to_have_count(4)
         expect(page.locator(f"#zone-allowed-chips-x0-{right}")).to_contain_text("48K 玻璃棉 50 mm＋100 mm 空腔")
-        expect(page.locator(f"#zone-allowed-summary-x0-{right}")).to_contain_text("現在 4 種")
-        page.locator(f"#zone-allowed-summary-x0-{right}").click()
-        expect(page.locator(f"#zone-allow-x0-{right}-glass_wool_96k")).not_to_be_checked()
-        expect(page.locator(f"#zone-allow-x0-{right}-{WALL_FIXED}")).to_be_checked()
+        expect(page.locator(f"#zone-chip-x0-{right}-glass_wool_96k")).to_have_count(0)
+        expect(page.locator(f"#zone-chip-x0-{right}-{WALL_FIXED}")).to_be_visible()
         expect(page.locator("#zone-fixed-x0-z1")).to_have_value(PRESET)
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-reopened.png"))
 
         # 清單拿到只剩固定材料：照實提醒（程式沒得選），開跑時伺服器再擋一次。
+        open_panel(page, "x0", right)
         for choice in ("glass_wool_48k", "glass_wool_24k", "none"):
-            page.locator(f"#zone-allow-x0-{right}-{choice}").uncheck()
-        expect(page.locator(f"#zone-allowed-problem-x0-{right}")).to_contain_text("只放了固定成品，程式沒得選")
+            page.locator(f"#zone-panel-remove-{choice}").click()
+        expect(page.locator("#zone-panel-problem")).to_contain_text("只放了固定成品，程式沒得選")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -379,7 +386,7 @@ def test_another_scheme_cannot_be_opened_between_the_save_of_send_to_search_and_
 
 def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_path: Path, browser: Browser) -> None:
     """2-3b 交接：存著的清單（ZoneDesign.allowed）打開再存要原樣帶回——順序不動、材料庫找不到的代號不偷丟
-    （照講、留著，開跑時伺服器點名，按它旁邊的 × 才拿掉）；勾一種只加在尾巴、拿掉一種只拿那一種；最後一種拿不掉。"""
+    （照講、留著，開跑時伺服器點名，進小框才拿掉）；勾一種只加在尾巴、拿掉一種只拿那一種；最後一種拿不掉。"""
     _write(tmp_path, room109_document())
     stored = ["none", "ghost_material", "glass_wool_48k"]
     design = tmp_path / "designs" / "room109.json"
@@ -397,24 +404,24 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         _save(page, "room109")
         assert json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]["allowed"] == stored
 
-        page.locator("#zone-allowed-summary-x0-whole_wall").click()
-        page.locator("#zone-allow-x0-whole_wall-glass_wool_48k").uncheck()
-        page.locator("#zone-allow-x0-whole_wall-glass_wool_24k").check()
+        edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_48k",), add=("glass_wool_24k",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none", "ghost_material", "glass_wool_24k"]
         _save(page, "room109")
         saved = json.loads(design.read_text(encoding="utf-8"))["zones"]["x0"]["whole_wall"]
         assert saved == {"mode": "search", "allowed": ["none", "ghost_material", "glass_wool_24k"]}
 
         # 找不到的那一種按 × 拿掉、只拿它；拿到只剩一種，最後一種拿不掉（空清單伺服器整份拒收）：勾還在、清單不動、照講。
-        page.locator("#zone-chip-remove-x0-whole_wall-ghost_material").click()
+        edit_candidates(page, "x0", "whole_wall", remove=("ghost_material",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none", "glass_wool_24k"]
         expect(page.locator("#zone-allowed-missing-x0-whole_wall")).to_have_count(0)
-        page.locator("#zone-allow-x0-whole_wall-glass_wool_24k").uncheck()  # 勾選表重畫後照樣開著
+        edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_24k",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
-        page.locator("#zone-allow-x0-whole_wall-none").click()  # 想拿掉最後一種
-        expect(page.locator("#zone-note")).to_contain_text("至少要留一種")
-        expect(page.locator("#zone-allow-x0-whole_wall-none")).to_be_checked()
-        page.locator("#zone-chip-remove-x0-whole_wall-none").click()  # 從方塊的 × 拿也一樣
+        open_panel(page, "x0", "whole_wall")
+        page.locator("#zone-panel-remove-none").click()
+        expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種材料")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        page.locator("#zone-panel-cancel").click()
+        page.locator("#zone-page-close").click()
         expect(page.locator("#zone-chip-x0-whole_wall-none")).to_have_count(1)
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
         _save(page, "room109")
@@ -456,18 +463,8 @@ def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: 
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-# 點完同一步就重畫，回重畫當下新畫的那一個開不開。不等：之後若又重畫一次（點擊本身有時會引來），toggle 記好的那一份會把它救回來，
-# 雲端紅的那幾次就是沒等到那一次（#1195 留言的探針：重畫當下點開的畫成收著、點收的畫成開著）。
-_CLICK_THEN_REDRAW = """([summary, wall, box]) => {
-  document.getElementById(summary).click();
-  renderZoneTable(wall);
-  return document.getElementById(box).open;
-}"""
-
-
-def test_a_redraw_between_the_click_and_the_toggle_keeps_what_was_clicked(tmp_path: Path, browser: Browser) -> None:
-    """#1195：點「改清單」之後、瀏覽器送來 toggle 之前，表剛好重畫（前一步晚到的回覆）：新畫的清單要照剛點的開或收，
-    不准畫成點之前那樣（雲端三次紅的形狀：點了、清單沒開、勾選格一直看不到）。這裡點完同一步就重畫，toggle 一定排在重畫之後。"""
+def test_redrawing_the_table_keeps_the_list_read_only(tmp_path: Path, browser: Browser) -> None:
+    """#1195 的折疊勾選表已停用。限制重畫後仍只列出方塊。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -475,10 +472,8 @@ def test_a_redraw_between_the_click_and_the_toggle_keeps_what_was_clicked(tmp_pa
         page.locator("#elevation-wall-x0").click()
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-mode-x0-auto1", "search")
-        ids = ["zone-allowed-summary-x0-auto1", "x0", "zone-allowed-box-x0-auto1"]
-        assert page.evaluate("document.getElementById('zone-allowed-box-x0-auto1').open") is False
-        assert page.evaluate(_CLICK_THEN_REDRAW, ids) is True, "點開之後重畫，清單收起來了"
-        expect(page.locator("#zone-allow-x0-auto1-glass_wool_96k")).to_be_visible()
-        assert page.evaluate(_CLICK_THEN_REDRAW, ids) is False, "收起之後重畫，清單又打開了"
-        expect(page.locator("#zone-allow-x0-auto1-glass_wool_96k")).to_be_hidden()
+        for _ in range(2):
+            expect(page.locator("#zone-allowed-box-x0-auto1")).to_have_count(0)
+            expect(page.locator("#zone-allowed-chips-x0-auto1 .zone-chip")).to_have_count(4)
+            page.evaluate("renderZoneTable('x0')")
         assert watched.page_errors == [] and watched.console_errors == []

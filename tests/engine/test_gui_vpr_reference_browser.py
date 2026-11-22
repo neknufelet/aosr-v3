@@ -9,6 +9,7 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
+from tests.engine._zone_panel_steps import apply_and_return, edit_candidates, open_panel
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
@@ -395,32 +396,30 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
         expect(page.locator("#zone-mode-x0-a")).to_have_value("search")
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == WOOLS
         expect(page.locator("#zone-preset-x0-a-this_or_none")).to_have_count(0)
-        # 勾選表：它勾不了、滑過去寫為什麼；沒黏住的那一筆勾得到。
-        page.locator("#zone-allowed-summary-x0-a").click()
-        expect(page.locator("#zone-allowed-x0-a")).to_be_visible()
-        expect(page.locator(f"#zone-allow-x0-a-{HIT}")).to_be_disabled()
-        expect(page.locator("label", has=page.locator(f"#zone-allow-x0-a-{HIT}"))).to_have_attribute("title", cast(str, WORDS["search_why"]))
-        page.locator(f"#zone-allow-x0-a-{PLAIN_ID}").check()
+        open_panel(page, "x0", "a")
+        page.locator("#zone-panel-add").click()
+        pick = page.locator(f"#zone-panel-pick-{HIT}")
+        expect(pick).to_be_disabled()
+        expect(pick.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
+        page.locator(f"#zone-panel-pick-{PLAIN_ID}").click()
+        apply_and_return(page)
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == [*WOOLS, PLAIN_ID]
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
 def test_the_old_table_lets_a_stored_one_be_unticked_and_not_ticked_back(tmp_path: Path, browser: Browser) -> None:
-    """舊做法表的勾選表：存檔清單裡本來有它的那一格勾著、可以取消（滑過去寫「清單裡本來有它」那一句）；取消後勾不回來。"""
+    """舊表方塊寫明清單裡本來有它；小框可以拿掉、不能加回。"""
     _prepare(tmp_path, {"x0/a": LISTED})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
         page.locator("#elevation-wall-x0").click()
-        page.locator("#zone-allowed-summary-x0-a").click()
-        box = page.locator(f"#zone-allow-x0-a-{HIT}")
-        expect(box).to_be_checked()
-        expect(box).to_be_enabled()
-        expect(page.locator("label", has=box)).to_have_attribute("title", cast(str, WORDS["listed_why"]))
-        box.uncheck()
-        box = page.locator(f"#zone-allow-x0-a-{HIT}")
-        expect(box).not_to_be_checked()
-        expect(box).to_be_disabled()
+        expect(page.locator(f"#zone-chip-x0-a-{HIT} small")).to_have_text(cast(str, WORDS["listed_why"]))
+        edit_candidates(page, "x0", "a", remove=(HIT,))
+        open_panel(page, "x0", "a")
+        expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
+        page.locator("#zone-panel-add").click()
+        expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == ["glass_wool_48k", "none"]
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
@@ -432,7 +431,7 @@ _NO_LAST_GUARD = """() => { setZoneSetting = (wall, key, setting) => {
 
 def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guard(tmp_path: Path, browser: Browser) -> None:
     """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①舊做法表剛改過的清單（上一次的組合）帶到下一區；
-    ②舊做法表勾選表那一格被人改成勾得到再點；③從卡選區後小框的候選按鈕被人改成勾得到再點；④選整面套用時，
+    ②逐區表沒有候選輸入格；③從卡選區後小框的候選按鈕被人改成勾得到再點；④選整面套用時，
     還沒交給程式的區照畫面上那一份清單起頭、但不帶它。"""
     _prepare(tmp_path, {"x0/a": LISTED})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -441,17 +440,14 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         page.evaluate(_NO_LAST_GUARD)
         page.locator("#elevation-wall-x0").click()
         # ① 動有它的那一份清單，再把另一區改成由程式最佳化：預帶的清單與底下那一句都沒有它。
-        page.locator("#zone-chip-remove-x0-a-glass_wool_48k").click()
+        edit_candidates(page, "x0", "a", remove=("glass_wool_48k",))
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == [HIT, "none"]
         with page.expect_response("**/api/zone-material"):
             page.locator("#zone-mode-x0-b").select_option("search")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
-        # ② 勾選表那一格硬改成勾得到再點：清單不變。
-        page.locator("#zone-allowed-summary-x0-b").click()
-        expect(page.locator("#zone-allowed-x0-b")).to_be_visible()
-        page.locator(f"#zone-allow-x0-b-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
-        expect(page.locator(f"#zone-allow-x0-b-{HIT}")).not_to_be_checked()
+        # ② 舊表沒有這個寫入入口。
+        expect(page.locator("#zone-table-x0 input")).to_have_count(0)
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
         # ③ 從卡選區後小框的候選按鈕硬改成勾得到再點：清單不變。
         page.locator("#zone-page-open").click()

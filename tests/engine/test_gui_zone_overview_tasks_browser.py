@@ -696,9 +696,9 @@ def test_no_item_on_the_bottom_bar_breaks_in_the_middle_whether_the_button_is_gr
         _open_overview(page)
         expect(page.locator("#zone-page-search")).to_be_disabled()
         assert page.evaluate(lines) == [1, 1, 1]
+        expect(page.locator("#zone-page-search-why")).to_be_visible()
         why, go = page.locator("#zone-page-search-why").bounding_box(), page.locator("#zone-page-search").bounding_box()
         assert why is not None and go is not None
-        expect(page.locator("#zone-page-search-why")).to_be_visible()
         assert why["y"] >= go["y"] + go["height"] and abs((why["x"] + why["width"] / 2) - (go["x"] + go["width"] / 2)) < 2
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-search").check()
@@ -714,3 +714,66 @@ def test_no_item_on_the_bottom_bar_breaks_in_the_middle_whether_the_button_is_gr
         assert page.evaluate(lines) == [1, 1, 1]
         assert errors == []
     context.close()
+
+
+def test_fixed_depth_only_keeps_every_material_and_other_zone(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z1")
+        page.locator("#zone-panel-material").select_option("")
+        expect(page.locator("#zone-panel-material option:checked")).to_have_text("照現在貼的，不換")
+        expect(page.locator("#zone-panel-depth")).to_be_visible()
+        page.locator("#zone-panel-depth").fill("12")
+        _apply(page)
+        page.locator("#zone-page-close").click()
+        page.locator("#elevation-wall-yL").click()
+        expect(page.locator("#depth-cap-yL-z1")).to_have_text("生效：0.12 公尺（這一塊擋的）")
+        _save(page, design=True)
+        zones, materials = _stored(tmp_path)
+        before = cast(dict[str, dict[str, object]], SAMPLE_DESIGN["zones"])
+        assert zones == {**before, "yL": {**before["yL"], "z1": {"mode": "fixed", "max_depth_m": 0.12}}}
+        assert materials == _materials_before()
+
+
+def test_fixed_depth_refuses_a_value_that_rounds_to_zero(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z1")
+        expect(page.locator("#zone-panel-depth")).to_be_visible()
+        page.locator("#zone-panel-depth").fill("0.04")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        expect(page.locator("#zone-panel-problem")).to_have_text("「最深」要填大於 0 的數字（公分，最少 0.1）；空白＝不限")
+
+
+def test_keep_original_ignores_the_unapplied_search_depth(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-depth").fill("12")
+        page.locator("#zone-panel-mode-keep_original").check()
+        expect(page.locator("#zone-panel-depth")).to_have_count(0)
+        _apply(page)
+        page.locator("#zone-page-close").click()
+        _save(page, design=True)
+        zones, _ = _stored(tmp_path)
+        assert zones["yL"]["z3"] == {"mode": "keep_original"}
+
+
+def test_fixed_depth_allows_apply_and_displays_the_server_refusal(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, SAMPLE_DESIGN)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm_gap100")
+        expect(page.locator("#zone-panel-depth")).to_be_visible()
+        page.locator("#zone-panel-depth").fill("12")
+        _apply(page)
+        expect(page.locator("#zone-page-blocked")).to_contain_text("超過限制")
+        expect(page.locator("#zone-page-blocked")).to_contain_text("0.15 公尺")

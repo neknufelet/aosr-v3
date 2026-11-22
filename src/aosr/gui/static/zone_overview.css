@@ -107,6 +107,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-list h2{font-size:16px;font-weight:600;margin:0;display:flex;align-items:center;gap:9px}
 #zone-page .zv-list.empty h2{font-weight:400;font-size:15px}
 #zone-page .zv-who{font-size:13.5px;color:var(--soft);margin:2px 0 0 31px}
+#zone-panel{scroll-margin-top:12px}
 #zone-page .zv-card-hint{margin:0;font-size:14px;color:var(--ink)}
 #zone-page .zv-card-choices{margin:7px 0;padding:0;list-style:none;border-block:1px solid var(--line)}
 #zone-page .zv-card-choices li{padding:4px 0;font-size:15px;line-height:1.45}

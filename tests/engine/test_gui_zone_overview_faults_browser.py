@@ -516,6 +516,25 @@ def _bare_vpr_scheme() -> dict[str, object]:
     return cast(dict[str, object], scheme)
 
 
+def test_a_pick_that_is_the_wall_itself_writes_no_depth(tmp_path: Path, browser: Browser) -> None:
+    """#1258 2b 審查：小框指定貼一種、選的跟原牆一模一樣，做法變成「不貼，保留原樣」；「最深」那一格打的值不寫進去
+    （不貼不加層：舊表那一格寫「不加層」、小框的不貼也不畫最深，寫進去就看不到也清不掉）。"""
+    _write(tmp_path, _bare_vpr_scheme())
+    _library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, SAMPLE)
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-map")).to_be_visible()
+        _settled(page)
+        _click_zone(page, "xL/auto1")
+        page.locator("#zone-panel-material").select_option(VPR)
+        page.locator("#zone-panel-depth").fill("12")
+        _apply(page)
+        assert page.evaluate("structuredClone(zoneDesign.zones.xL.auto1)") == {"mode": "keep_original"}
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def test_picking_what_the_wall_already_is_becomes_keep_original_and_drops_the_old_table_remark(tmp_path: Path, browser: Browser) -> None:
     """選的那一筆跟這一區原牆一模一樣（伺服器不疊一層、放回原樣）：新頁把做法記成「不貼，保留原樣」，不是指定貼。
     舊做法表上那一區原本寫著「選的跟原本一樣，當成不貼」的那一句，在新頁改過那一區之後就拿掉（改回不貼也不再出現）。"""

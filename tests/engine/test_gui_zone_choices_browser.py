@@ -1,5 +1,5 @@
 """真瀏覽器考做法表的材料清單（#1176，老闆 11-15「109示範又不知道是娥麼這也能當成一個材料」「都不知道在講甚麼」）：
-選單與勾選表只列這一面能貼的（門、窗、地板、整片吊頂、另一間示範房的不出現），「顯示全部材料」打開才分組列出；
+選單與小框只列這一面能貼的（門、窗、地板、整片吊頂、另一間示範房的不出現），指定貼一種的下拉可以打開「顯示全部材料」分組列出；
 這一區現在放的那一筆就算不是這一面用的也照樣顯示；用語是白話（做法三種、原牆不寫阻抗數字、可調寫得出調什麼）。
 材料庫用自己編的合成 12 筆（``_sample_material_library``），房間用 109 號房的長寬高。"""
 from __future__ import annotations
@@ -8,10 +8,11 @@ import json
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Locator, Page, expect
+from playwright.sync_api import Browser, Page, expect
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
+from tests.engine._zone_panel_steps import apply_and_return, edit_candidates, open_panel
 from tests.engine._bonded_backing_cases import MELAMINE_100, STEEL_2_5MM
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -32,7 +33,7 @@ PLAIN_PRODUCT = "fabric_pet_a_gap100"  # 內建的一筆固定成品：牆面能
 
 
 # 考卷自己編的一筆長名一般固定成品（鋼板前面一層棉、背襯沒黏住，不是「鋼板直接貼在棉上」的構造）：名字 60 個字以上，
-# 用來撐「只讓程式決定：這一筆貼或不貼」那一顆按鈕的版面。
+# 用來量固定下拉與唯讀方塊的版面。
 LONG_PLAIN = "own_long_name_panel"
 LONG_PLAIN_LABEL = "自編長名對照板（考卷用）＋前面自編吸音棉 100 mm（鋼板 2.5 mm、後面自編軟泡棉 100 mm 沒有黏住，總厚約 20 cm）"
 assert len(LONG_PLAIN_LABEL) >= 60
@@ -48,12 +49,6 @@ def _sample_library(tmp_path: Path, *extra: dict[str, object]) -> None:
 
 def _values(page: Page, selector: str) -> list[str]:
     return cast(list[str], page.locator(selector).evaluate_all("nodes => nodes.map(node => node.value)"))
-
-
-def _ids(page: Page, wall: str, key: str) -> list[str]:
-    prefix = f"zone-allow-{wall}-{key}-"
-    return [value.removeprefix(prefix) for value in cast(list[str], page.locator(f"#zone-allowed-{wall}-{key} input").evaluate_all(
-        "nodes => nodes.map(node => node.id)"))]
 
 
 # 一格字照畫出來的樣子分行（逐字量字的上緣，換了一行上緣就變）。
@@ -79,11 +74,6 @@ CONTRAST = """node => {
 }"""
 
 
-def _small(page: Page, wall: str, material: str) -> Locator:
-    """勾選表（整面一區）裡那一筆名字底下的小字。"""
-    return page.locator("label", has=page.locator(f"#zone-allow-{wall}-whole_wall-{material}")).locator("small")
-
-
 def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
@@ -99,46 +89,37 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         expect(page.locator("#zone-fixed-x0-whole_wall option").first).to_have_text("現在：沒貼東西（原牆原樣）")
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
 
-        # 由程式最佳化、打開清單：可調的寫得出調什麼（24K、96K 起點沒有空腔，寫「空腔：沒有（直接貼牆）」），不列的只寫一行有幾筆、哪幾組。
-        _choose(page, "#zone-mode-x0-whole_wall", "search")
-        page.locator("#zone-allowed-summary-x0-whole_wall").click()
-        listed = _ids(page, "x0", "whole_wall")
-        assert listed[:4] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
-        assert not set(HIDDEN_ON_WALLS) & set(listed)
-        expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).to_contain_text(
-            "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        # 沒有空腔的最深就是厚度上限 20 cm，材料自己的 30 cm 擋不到：不寫「加起來最深」（審查 11-15 抓到寫 30 cm 是錯的）。
-        for wool in ("glass_wool_24k", "glass_wool_96k"):
-            expect(page.locator("label", has=page.locator(f"#zone-allow-x0-whole_wall-{wool}")).locator("small")).to_have_text(
-                "可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
-        expect(page.locator("label", has=page.locator("#zone-allow-x0-whole_wall-glass_wool_48k"))).not_to_contain_text("（可調厚度與空腔）")
-        # 固定成品那一組標題已經講過整塊貼或不貼：每一筆只留總厚；有薄板（只給面密度、沒有厚度）的註明不含，
-        # 不然跟顯示名裡把鋼板算進去的「總厚約 14 cm」打架（審查 11-15）。
-        expect(_small(page, "x0", "fabric_pet_a_gap100")).to_have_text("總厚約 10 cm")
-        expect(_small(page, "x0", "slotted18_pet45_vpr_steel2p25mm_foam70_sample")).to_have_text("總厚約 13.3 cm（不含薄板）")
-        # 不列的那一句只列短組名、不套括號。
-        hidden = page.locator("#zone-allowed-hidden-x0-whole_wall")
-        expect(hidden).to_have_text("還有 11 筆不是前牆用的、不列出來：地板用的、整片天花構造、門窗、牆面地面本身、示範房的。"
-                                    "要選就打開表格下面「顯示全部材料」")
-        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "choices-wall.png"))
-
-        # 「顯示全部材料」：不列的那幾組分組列出、各一個標題；示範房要選自己的材料就從這裡勾。
         page.locator("#zone-show-all").check()
-        listed = _ids(page, "x0", "whole_wall")
-        assert set(HIDDEN_ON_WALLS) <= set(listed)
-        expect(page.locator("#zone-allowed-x0-whole_wall")).to_contain_text("不列的：另一間示範房（109 號房）用的")
-        expect(page.locator("#zone-allowed-hidden-x0-whole_wall")).to_have_count(0)
-
-        # 地板：只有地毯能鋪；沒有可調材料，照實寫程式只能從「不貼」開始。
+        assert set(HIDDEN_ON_WALLS) - {"demo109_rockwool60k_capped"} <= set(_values(page, "#zone-fixed-x0-whole_wall option"))
+        page.locator("#zone-show-all").uncheck()
+        _choose(page, "#zone-mode-x0-whole_wall", "search")
+        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_48k small")).to_have_text(
+            "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
+        expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_48k")).not_to_contain_text("（可調厚度與空腔）")
+        for wool in ("glass_wool_24k", "glass_wool_96k"):
+            expect(page.locator(f"#zone-chip-x0-whole_wall-{wool} small")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        page.locator("#zone-show-all").check()
+        expect(page.locator("#zone-material-x0-whole_wall input")).to_have_count(0)
+        open_panel(page, "x0", "whole_wall")
+        page.locator("#zone-panel-add").click()
+        for choice in HIDDEN_ON_WALLS:
+            expect(page.locator(f"#zone-panel-pick-{choice}")).to_have_count(0)
+        expect(page.locator("#zone-panel-pick-fabric_pet_a_gap100 .zv-description")).to_have_text("整塊貼、固定 10 cm")
+        expect(page.locator("#zone-panel-pick-slotted18_pet45_vpr_steel2p25mm_foam70_sample .zv-description")).to_have_text(
+            "整塊貼、固定 13.3 cm（不含薄板）")
+        page.locator("#zone-panel-cancel").click()
+        page.locator("#zone-page-close").click()
         page.locator("#zone-show-all").uncheck()
         page.locator("#elevation-wall-floor").click()
-        fixed = _values(page, "#zone-fixed-floor-whole_wall option")
-        assert fixed == ["", "carpet_on_concrete"]
+        assert _values(page, "#zone-fixed-floor-whole_wall option") == ["", "carpet_on_concrete"]
         _choose(page, "#zone-mode-floor-whole_wall", "search")
-        page.locator("#zone-allowed-summary-floor-whole_wall").click()
-        assert _ids(page, "floor", "whole_wall") == ["none", "carpet_on_concrete"]
-        expect(page.locator("#zone-allowed-floor-whole_wall")).to_contain_text("地板沒有可調的材料：程式只能從「不貼」開始")
-        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "choices-floor.png"))
+        assert _chips(page, "floor", "whole_wall") == ["none"]
+        open_panel(page, "floor", "whole_wall")
+        expect(page.locator("#zone-panel-form")).to_contain_text("這裡沒有可調的材料：程式只能從「不貼」開始")
+        page.locator("#zone-panel-add").click()
+        expect(page.locator("#zone-panel-picker button")).to_have_count(1)
+        expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -181,9 +162,9 @@ def _chips(page: Page, wall: str, key: str) -> list[str]:
                                                          .evaluate_all("nodes => nodes.map(node => node.id)"))]
 
 
-def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, browser: Browser) -> None:
+def test_search_starts_from_a_ready_list_and_panel_edits_carry_to_the_next_face(tmp_path: Path, browser: Browser) -> None:
     """老闆 11-15「每點一個材料每點一個面都還要重新再勾一次 取消一堆」：改成由程式最佳化直接帶好一份清單（三種內建玻璃棉＋
-    不貼），一鍵常用組合整份換掉；這一頁上一次改過的組合，下一區改成由程式最佳化時優先放（這一面用不了的拿掉）；
+    不貼），在小框調成同一份清單；這一頁上一次改過的組合，下一區改成由程式最佳化時優先放（這一面用不了的拿掉）；
     地板沒有可調材料，只放「不貼」、不出現玻璃棉的組合。存檔一律寫明確清單。"""
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
@@ -198,16 +179,15 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
         assert _modes(page, "x0")["whole_wall"] == {"mode": "search", "allowed": three}
         expect(page.locator("#zone-chip-x0-whole_wall-glass_wool_24k")).to_contain_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         expect(page.locator("#zone-chip-x0-whole_wall-none")).to_contain_text("保留原樣，程式可以決定這裡不貼")
-        # 常用組合：現在這一份就是「三種玻璃棉都比」（標現在用的）；這一區剛才指定貼 48K 50 mm，多一顆只決定它貼不貼。
-        expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_be_disabled()
-        expect(page.locator("#zone-preset-x0-whole_wall-three_wools")).to_contain_text("現在用的")
-        expect(page.locator("#zone-preset-x0-whole_wall-this_or_none")).to_have_text("只讓程式決定：「48K 玻璃棉 50 mm 貼牆」貼或不貼")
-        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "search-ready-list.png"))
-        page.locator("#zone-preset-x0-whole_wall-this_or_none").click()
+        expect(page.locator("[id^=zone-preset]")).to_have_count(0)
+        # 原本的「這一筆或不貼」：先讓小框加得進固定 48K，再加不貼，保留存檔的先後。
+        edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_48k", "none"), add=("glass_wool_48k_50mm",))
+        edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_24k", "glass_wool_96k"), add=("none",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["glass_wool_48k_50mm", "none"]
-        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        # 回到「48K 或不貼」：先留下 48K，再加不貼。
+        edit_candidates(page, "x0", "whole_wall", remove=("none",), add=("glass_wool_48k",), only="glass_wool_48k")
+        edit_candidates(page, "x0", "whole_wall", add=("none",))
         assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
-        expect(page.locator("#zone-preset-x0-whole_wall-wool48")).to_be_disabled()
         # 改成不貼再改回來：這一區已經不是那一筆了，「只讓程式決定：這一筆」那一顆不再出現；清單照上一次的組合。
         _choose(page, "#zone-mode-x0-whole_wall", "keep_original")
         _choose(page, "#zone-mode-x0-whole_wall", "search")
@@ -234,7 +214,7 @@ def test_search_starts_from_a_ready_list_and_presets_replace_it(tmp_path: Path, 
 
 def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materials(tmp_path: Path, browser: Browser) -> None:
     """起點要可預期（#1176，跟老闆講好「直接帶好三種玻璃棉＋不貼」）：材料庫多了一筆牆上能用的可調材料，改成由程式最佳化照樣
-    只帶三種玻璃棉＋不貼；那一筆在「改清單」裡列著、沒勾，要用自己勾。"""
+    只帶三種玻璃棉＋不貼；那一筆要用就到小框加進來。"""
     _write(tmp_path, room109_document())
     extra = {**next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == "demo109_rockwool60k_capped"),
              "id": "own_rock_wool_free", "label": "自填岩棉"}
@@ -248,16 +228,14 @@ def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materia
         _choose(page, "#zone-mode-x0-whole_wall", "search")
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         assert _chips(page, "x0", "whole_wall") == three
-        page.locator("#zone-allowed-summary-x0-whole_wall").click()
-        expect(page.locator("#zone-allow-x0-whole_wall-own_rock_wool_free")).not_to_be_checked()
-        page.locator("#zone-allow-x0-whole_wall-own_rock_wool_free").check()
+        expect(page.locator("#zone-chip-x0-whole_wall-own_rock_wool_free")).to_have_count(0)
+        edit_candidates(page, "x0", "whole_wall", add=("own_rock_wool_free",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == [*three, "own_rock_wool_free"]
         assert watched.page_errors == [] and watched.console_errors == []
 
 
 def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path: Path, browser: Browser) -> None:
-    """審查 11-15：底部那一行不准留「先放了 48K、不貼」卻畫著別的清單——改清單（×、常用組合）跟著寫現在的清單，換到別一面
-    清掉；「要改就按」指這一區的「改清單」，這一區沒有常用組合（地板）就不提組合。"""
+    """套用小框與換面後都不殘留上一份清單的提示。"""
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -266,17 +244,14 @@ def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path
         note = page.locator("#zone-note")
         page.locator("#elevation-wall-x0").click()
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        expect(note).to_contain_text("先放了 48K 玻璃棉、24K 玻璃棉、96K 玻璃棉、不貼；要改就按這一區的「改清單」或常用組合")
-        page.locator("#zone-chip-remove-x0-whole_wall-glass_wool_48k").click()
-        expect(note).to_contain_text("「整面」：清單改成 24K 玻璃棉、96K 玻璃棉、不貼")
-        expect(note).not_to_contain_text("先放了")
-        page.locator("#zone-preset-x0-whole_wall-wool48").click()
-        expect(note).to_contain_text("清單改成 48K 玻璃棉、不貼")
+        expect(note).to_have_text("前牆「整面」：由程式最佳化，先放了 48K 玻璃棉、24K 玻璃棉、96K 玻璃棉、不貼；要改就按這一列的「改這一區 ▸」")
+        edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_48k",))
+        expect(note).to_have_text("1 區改成「由程式最佳化」")
+        assert _chips(page, "x0", "whole_wall") == ["glass_wool_24k", "glass_wool_96k", "none"]
         page.locator("#elevation-wall-floor").click()
         expect(note).to_have_text("")
         _choose(page, "#zone-mode-floor-whole_wall", "search")
-        expect(note).to_contain_text("先放了 不貼；要改就按這一區的「改清單」")
-        expect(note).not_to_contain_text("常用組合")
+        expect(note).to_have_text("地板「整面」：由程式最佳化，先放了 不貼；要改就按這一列的「改這一區 ▸」")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -292,7 +267,7 @@ def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        edit_candidates(page, "x0", "whole_wall", only="glass_wool_48k")
         page.locator("#elevation-wall-y0").click()
         _choose(page, "#zone-mode-y0-whole_wall", "search")
         assert _chips(page, "y0", "whole_wall") == ["glass_wool_48k", "none"]  # 同一份方案：照上一次的組合
@@ -301,7 +276,7 @@ def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path
         _choose(page, "#zone-mode-x0-whole_wall", "search")
         assert _chips(page, "x0", "whole_wall") == three
         # 這一份也改成 48K＋不貼，再載入範本（resetZoneDesign）：一樣從頭。
-        page.locator("#zone-preset-x0-whole_wall-wool48").click()
+        edit_candidates(page, "x0", "whole_wall", only="glass_wool_48k")
         _load_template(page)
         page.locator("#elevation-wall-x0").click()
         _choose(page, "#zone-mode-x0-whole_wall", "search")
@@ -347,7 +322,7 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator("#zone-allowed-unknown-x0-whole_wall")).to_contain_text("材料庫沒讀全")
+        expect(page.locator("#zone-allowed-unknown-x0-whole_wall")).to_have_text("程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）")
         page.locator("#elevation-wall-y0").click()
         with page.expect_response("**/api/zone-material") as response:
             page.locator("#zone-mode-y0-whole_wall").select_option("search")
@@ -361,82 +336,72 @@ def test_an_old_zone_without_a_list_stays_without_one_when_the_library_is_unread
         assert watched.page_errors == [] and [text for text in watched.console_errors if "status of 400" not in text] == []
 
 
-def test_a_list_of_only_a_fixed_product_offers_buttons_instead_of_a_riddle(tmp_path: Path, browser: Browser) -> None:
-    """老闆 11-15 看不懂「准用清單只有固定材料：搜尋要一個起點」：只放了固定成品時紅框白話寫程式沒得選，下面直接給按鈕——
-    只有一筆就能改成指定貼它（清單跟著拿掉，伺服器不收固定區帶清單）、加上「不貼」、加上 48K 玻璃棉（地板用不了就不出現）。"""
-    vpr = PLAIN_PRODUCT  # #1208 起合成庫那幾筆 VPR 勾不進清單（另有考卷），這一題要的只是一筆固定成品
+def _open_only_fixed(page: Page, *walls: str) -> None:
+    """載入考卷自編的舊清單。小框會擋下只剩固定成品的草稿，紅框考的是既存資料。"""
+    design = {"schema_version": "aosr.zone_design.v1", "scheme_id": "room109",
+              "zones": {wall: {"whole_wall": {"mode": "search", "allowed": ["carpet_on_concrete" if wall == "floor" else PLAIN_PRODUCT]}}
+                        for wall in walls}}
+    page.route("**/api/designs/room109", lambda route: route.fulfill(json={"design": design, "problems": []}), times=1)
+    _open_scheme(page, "room109")
+    page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+
+
+def test_a_fixed_only_list_points_to_the_panel_for_all_three_repairs(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        _open_scheme(page, "room109")
+        for addition in ("none", "glass_wool_48k"):
+            _open_only_fixed(page, "x0")
+            page.locator("#elevation-wall-x0").click()
+            box = page.locator("#zone-allowed-problem-x0-whole_wall")
+            expect(box).to_have_attribute("role", "alert")
+            expect(box.locator("p").first).to_have_text("只放了固定成品，程式沒得選。")
+            expect(box.locator("p").last).to_have_text(
+                "程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」；要的就是這一筆、不必讓程式選，就把做法改成「指定貼一種」。要改清單就按這一列的「改這一區 ▸」。")
+            expect(box.locator("button")).to_have_count(0)
+            edit_candidates(page, "x0", "whole_wall", add=(addition,))
+            assert _modes(page, "x0")["whole_wall"]["allowed"] == [PLAIN_PRODUCT, addition]
+            expect(box).to_have_count(0)
+        _open_only_fixed(page, "x0")
         page.locator("#elevation-wall-x0").click()
-        _choose(page, "#zone-mode-x0-whole_wall", "search")
-        page.locator("#zone-allowed-summary-x0-whole_wall").click()
-        page.locator(f"#zone-allow-x0-whole_wall-{vpr}").check()
-        for choice in ("glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"):
-            page.locator(f"#zone-chip-remove-x0-whole_wall-{choice}").click()
-        box = page.locator("#zone-allowed-problem-x0-whole_wall")
-        expect(box).to_contain_text("只放了固定成品，程式沒得選。")
-        expect(box).not_to_contain_text("准用")
-        expect(box.locator("button")).to_have_text(
-            ["就貼這一筆（改成指定貼一種）", "讓程式決定貼不貼（加上「不貼」）", "讓程式拿它跟 48K 玻璃棉比（加上 48K 玻璃棉）"])
-        page.locator("#zone-allowed-summary-x0-whole_wall").click()  # 收起勾選表，截紅框
-        page.locator("#elevation-panel").screenshot(path=str(tmp_path / "only-fixed.png"))
-
-        page.locator("#zone-fix-add-none-x0-whole_wall").click()
-        assert _modes(page, "x0")["whole_wall"]["allowed"] == [vpr, "none"]
-        expect(box).to_have_count(0)
-        page.locator("#zone-chip-remove-x0-whole_wall-none").click()
-        page.locator("#zone-fix-add-wool-x0-whole_wall").click()
-        assert _modes(page, "x0")["whole_wall"]["allowed"] == [vpr, "glass_wool_48k"]
-        page.locator("#zone-chip-remove-x0-whole_wall-glass_wool_48k").click()
-        with page.expect_response("**/api/zone-material"):
-            page.locator("#zone-fix-only-x0-whole_wall").click()
-        page.wait_for_function("!document.querySelector('main').inert")
+        open_panel(page, "x0", "whole_wall")
+        page.locator("#zone-panel-material").select_option(PLAIN_PRODUCT)
+        apply_and_return(page)
         expect(page.locator("#zone-mode-x0-whole_wall")).to_have_value("fixed")
-        expect(page.locator("#zone-fixed-x0-whole_wall")).to_have_value(vpr)
+        expect(page.locator("#zone-fixed-x0-whole_wall")).to_have_value(PLAIN_PRODUCT)
         assert _modes(page, "x0")["whole_wall"] == {"mode": "fixed"}
         _save(page, "room109")
-
-        # 地板：48K 玻璃棉不是地板用的，那一顆不出現。
+        _open_only_fixed(page, "floor")
         page.locator("#elevation-wall-floor").click()
-        _choose(page, "#zone-mode-floor-whole_wall", "search")
-        page.locator("#zone-allowed-summary-floor-whole_wall").click()
-        page.locator("#zone-allow-floor-whole_wall-carpet_on_concrete").check()
-        page.locator("#zone-chip-remove-floor-whole_wall-none").click()
-        expect(page.locator("#zone-allowed-problem-floor-whole_wall button")).to_have_text(
-            ["就貼這一筆（改成指定貼一種）", "讓程式決定貼不貼（加上「不貼」）"])
+        floor_box = page.locator("#zone-allowed-problem-floor-whole_wall")
+        expect(floor_box).to_contain_text("只放了固定成品，程式沒得選。")
+        expect(floor_box.locator("button")).to_have_count(0)
+        open_panel(page, "floor", "whole_wall")
+        page.locator("#zone-panel-add").click()
+        expect(page.locator("#zone-panel-pick-glass_wool_48k")).to_have_count(0)
+        page.locator("#zone-panel-picker-search").press("Escape")
+        page.locator("#zone-panel-addto-none").click()
+        apply_and_return(page)
+        assert _modes(page, "floor")["whole_wall"]["allowed"] == ["carpet_on_concrete", "none"]
         assert watched.page_errors == [] and watched.console_errors == []
-
-
-def _only_fixed(page: Page, wall: str, product: str) -> None:
-    """把這一面整面一區改成由程式最佳化、清單只剩一筆固定成品（紅框那個樣子）。"""
-    _choose(page, f"#zone-mode-{wall}-whole_wall", "search")
-    page.locator(f"#zone-allowed-summary-{wall}-whole_wall").click()
-    page.locator(f"#zone-allow-{wall}-whole_wall-{product}").check()
-    for choice in ("glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"):
-        page.locator(f"#zone-chip-remove-{wall}-whole_wall-{choice}").click()
-    expect(page.locator(f"#zone-allowed-problem-{wall}-whole_wall")).to_contain_text("只放了固定成品，程式沒得選")
 
 
 def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, browser: Browser) -> None:
     """紅框（只放了固定成品）還在的時候「拿去搜尋」按不下去，旁邊點名是哪幾區的紅框（別面的也算）；處理好一區少一區，
     全處理好自己恢復。直接叫送出也照樣擋、不存不跳頁。"""
-    vpr = PLAIN_PRODUCT  # #1208 起合成庫那幾筆 VPR 勾不進清單（另有考卷），這一題要的只是一筆固定成品
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        _open_scheme(page, "room109")
+        _open_only_fixed(page, "x0")
         front, side = cast(list[str], page.evaluate("[wallNames.x0, wallNames.y0]"))
         page.locator("#elevation-wall-x0").click()
-        _only_fixed(page, "x0", vpr)
         expect(page.locator("#zone-to-search")).to_be_disabled()
         expect(page.locator("#zone-to-search-note")).to_have_text(
             f"先處理{front}「整面」的紅框（只放了固定成品，程式沒得選），處理好才能拿去搜尋")
+        _open_only_fixed(page, "x0", "y0")
         page.locator("#elevation-wall-y0").click()
-        _only_fixed(page, "y0", vpr)
         note = page.locator("#zone-to-search-note")
         expect(note).to_contain_text(f"先處理{front}「整面」、{side}「整面」的紅框")
         expect(note).to_have_class("limit-red")
@@ -453,11 +418,11 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         assert page.url.startswith(base) and "/gradient" not in page.url
         assert not (tmp_path / "designs" / "room109.json").exists()
 
-        page.locator("#zone-fix-add-none-y0-whole_wall").click()
+        edit_candidates(page, "y0", "whole_wall", add=("none",))
         expect(note).to_have_text(f"先處理{front}「整面」的紅框（只放了固定成品，程式沒得選），處理好才能拿去搜尋")
         expect(page.locator("#zone-to-search")).to_be_disabled()
         page.locator("#elevation-wall-x0").click()
-        page.locator("#zone-fix-add-none-x0-whole_wall").click()
+        edit_candidates(page, "x0", "whole_wall", add=("none",))
         expect(page.locator("#zone-to-search")).to_be_enabled()
         expect(note).to_have_text("會先照畫面儲存，再打開第三階段搜尋頁")
         assert watched.page_errors == [] and watched.console_errors == []
@@ -475,7 +440,7 @@ def _overflow(page: Page) -> dict[str, float]:
 
 def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: Path, browser: Browser) -> None:
     """材料庫有幾筆名字很長的固定成品（合成的 VPR 那幾筆）：材料下拉選單不准照最長那一筆把表撐寬、把深度上限那一欄擠出面板；
-    指定貼一種與由程式最佳化（方塊、常用組合按鈕、說明一行一行換）兩個樣子都要塞得進立面圖面板。"""
+    指定貼一種與由程式最佳化（方塊、說明一行一行換）兩個樣子都要塞得進立面圖面板。"""
     _write(tmp_path, room109_document())
     _sample_library(tmp_path, LONG_PLAIN_ENTRY)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -487,19 +452,18 @@ def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: P
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
         _choose(page, "#zone-fixed-x0-z1", "pet60_vpr_steel1p2mm_foam90_sample")
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
-        # #1208 起貼著合成 VPR 的區改成由程式最佳化時不給「只讓程式決定：這一筆貼或不貼」（另有考卷）；
-        # 那一顆名字長的按鈕改用考卷自己編的一筆長名（跟合成 VPR 那幾筆差不多長）一般固定成品撐。
+        # 切換前後以同一筆自編長名成品量固定下拉與候選方塊。
         _choose(page, "#zone-fixed-x0-z1", LONG_PLAIN)
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
         _choose(page, "#zone-mode-x0-z1", "search")
-        long_preset = page.locator("#zone-preset-x0-z1-this_or_none")
-        expect(long_preset).to_have_text(f"只讓程式決定：「{LONG_PLAIN_LABEL}」貼或不貼")
-        page.locator("#zone-allowed-summary-x0-z1").click()
-        expect(page.locator("#zone-allowed-x0-z1")).to_be_visible()
+        edit_candidates(page, "x0", "z1", add=(LONG_PLAIN,), only=LONG_PLAIN)
+        long_chip = page.locator(f"#zone-chip-x0-z1-{LONG_PLAIN}")
+        expect(long_chip.locator("strong")).to_have_text(LONG_PLAIN_LABEL)
         assert all(value <= 0.5 for value in _overflow(page).values()), _overflow(page)
-        assert cast(float, long_preset.evaluate(
+        assert cast(float, long_chip.evaluate(
             "node => node.getBoundingClientRect().right - document.getElementById('elevation-panel').getBoundingClientRect().right"
         )) <= 0.5
+        page.locator("#zone-name-x0-z1").scroll_into_view_if_needed()
         expect(page.locator("#depth-zone-x0-z1")).to_be_in_viewport()
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "front-fits.png"))
         assert watched.page_errors == [] and watched.console_errors == []
@@ -515,7 +479,6 @@ def test_zone_and_size_columns_never_break_inside_a_word(tmp_path: Path, browser
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
         _choose(page, "#zone-mode-ceiling-whole_wall", "search")
-        page.locator("#zone-allowed-summary-ceiling-whole_wall").click()
         row = page.locator("#zone-row-ceiling-whole_wall td")
         # 「區」那一格是「① 整面」（號碼在前面的粗字，名字是它後面那一段字）。
         assert page.locator("#zone-label-ceiling-whole_wall").evaluate(LINES.replace("cell.firstChild", "cell.lastChild")) == ["整面"]
@@ -541,13 +504,15 @@ def test_an_unknown_name_in_the_list_is_not_counted_as_a_fixed_product(tmp_path:
         _open_scheme(page, "room109")
         for wall in ("x0", "y0"):
             page.locator(f"#elevation-wall-{wall}").click()
-            expect(page.locator(f"#zone-allowed-missing-{wall}-whole_wall")).to_contain_text("ghost_material")
+            expect(page.locator(f"#zone-allowed-missing-{wall}-whole_wall")).to_have_text(
+                "清單裡有材料庫找不到的：ghost_material（照原樣留著，開跑時伺服器會點名；要拿掉就按這一列的「改這一區 ▸」）")
             expect(page.locator(f"#zone-allowed-problem-{wall}-whole_wall")).to_have_count(0)
             expect(page.locator("#zone-to-search")).to_be_enabled()
         page.locator("#elevation-wall-x0").click()
-        page.locator("#zone-chip-remove-x0-whole_wall-ghost_material").click()
-        expect(page.locator("#zone-allowed-problem-x0-whole_wall")).to_contain_text("只放了固定成品，程式沒得選")
-        expect(page.locator("#zone-to-search")).to_be_disabled()
+        open_panel(page, "x0", "whole_wall")
+        page.locator("#zone-panel-remove-ghost_material").click()
+        expect(page.locator("#zone-panel-problem")).to_contain_text("只放了固定成品，程式沒得選")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 

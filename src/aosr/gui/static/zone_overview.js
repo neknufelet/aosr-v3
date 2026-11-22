@@ -51,6 +51,7 @@ const TILE_DEPTH = 190, TILE_WIDTH = 140;  // 地板、天花那兩張小圖最�
 const WALL_ORDER = ["front", "back", "left", "right"];
 const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
+let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
@@ -626,7 +627,7 @@ async function applyMethod(items, method, written = () => {}) {
   }
   items.forEach((item, index) => {
     setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
-    zoneFormerFixed.delete(item.id); zoneSameAsOriginal.delete(item.id);
+    zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
   const pickedNotes = new Set(results.filter(change => change.picked_entry).map(change => change.note));
@@ -653,7 +654,10 @@ function settingAfter(item, method, change) {
     if (list) next.allowed = list; else if (list === undefined && item.mode === "search" && kept) next.allowed = kept;
   }
   // 「最深」（小框那一格）：有改才寫——清空就拿掉那一格，填了就寫公尺；沒改的各區照目前的。
-  if (method.depth === null) delete next.max_depth_m; else if (method.depth !== undefined) next.max_depth_m = method.depth;
+  // 指定貼的那一筆跟原本一樣、做法變成不貼時不寫（不貼不加層：舊表那一格寫「不加層」、小框也不畫，寫進去就看不到也清不掉）。
+  if (next.mode !== "keep_original") {
+    if (method.depth === null) delete next.max_depth_m; else if (method.depth !== undefined) next.max_depth_m = method.depth;
+  }
   // 可調範圍（#1199）：小框改了範圍才有這一格；清單換掉、做法換掉時多出來的那幾種由 setZoneSetting 拿掉。
   const ranges = method.ranges?.get(item.id);
   if (ranges === null) delete next.ranges; else if (ranges !== undefined) next.ranges = ranges;
@@ -830,10 +834,10 @@ async function rangesPass(items, method) {
   renderZoneOverview();
   return false;
 }
-// 小框選了由程式最佳化、現在這樣套不套得下去：回一句為什麼不行，可以就回空字串。每一個選中的區各自看它套用後的清單。
+// 小框現在能不能套用：指定貼與由程式最佳化都檢查最深；由程式最佳化另看每個選中區套用後的清單。
 function draftProblem(items) {
-  if (draft?.mode !== "search") return "";
-  const ticks = panelTicks(items);
+  if (!draft || draft.mode === "keep_original") return "";
+  const ticks = draft.mode === "search" && panelTicks(items);
   if (ticks) {
     const who = index => items.length > 1 ? `${zoneWhereText(items[index])}：` : "";
     const empty = ticks.lists.findIndex(list => !list.length);
@@ -844,11 +848,16 @@ function draftProblem(items) {
     if (ranged.problem) return ranged.problem;
   }
   if (Number.isNaN(draftDepth(items))) return `「最深」要填大於 0 的數字（公分，最少 0.1）；空白＝${blankDepthWords(items)}`;
-  return draft.rangeRefused;
+  return draft.mode === "search" ? draft.rangeRefused : "";
 }
 async function applyDraft() {
   const items = chosenItems();
-  if (draft.mode !== "search") { await applyMethod(items, {mode: draft.mode, materialId: draft.materialId}, () => select([])); return; }
+  if (draft.mode !== "search") {
+    const method = {mode: draft.mode, materialId: draft.materialId};
+    if (method.mode === "fixed") method.depth = draftDepth(items);
+    await applyMethod(items, method, () => select([]));
+    return;
+  }
   // 由程式最佳化：只寫選中的區。每一區寫它自己的清單照動過的勾加減之後的那一份；勾都沒動、那一區本來就是由程式最佳化，
   // 清單就不碰（只改最深時清單一個字都不動）。沒選中的區一律不寫。
   const ticks = draft.ticks, moved = Object.keys(ticks).length > 0;
@@ -1446,7 +1455,11 @@ function panelCard() {
     }
     row.append(radio, body, el("span", `zv-sw ${shownOf(mode)}`));
     card.append(row);
-    if (mode === "fixed" && draft?.mode === "fixed" && draft.materialId && libraryEntry(draft.materialId)) card.append(materialShow(libraryEntry(draft.materialId), walls[0]));
+    if (mode === "fixed" && draft?.mode === "fixed") {
+      const entry = libraryEntry(draft.materialId);
+      if (entry) card.append(materialShow(entry, walls[0]));
+      card.append(deepestRow(items, walls, sync));
+    }
     if (mode === "search" && draft?.mode === "search") card.append(...searchForm(items, walls, sync));
   }
   const foot = el("div", "zv-editfoot");
@@ -1585,6 +1598,10 @@ function ruleCard(group) {
 function spanWords(pair) { return pair[0] === pair[1] ? `${centimetres(pair[0])}` : `${centimetres(pair[0])}～${centimetres(pair[1])}`; }
 // 「棉 5～10 cm、空腔 0～15 cm」（#1199）：材料沒有空腔就只寫棉。第三階段頁的預覽寫法同這一句（gradient.js）。
 function rangeWords(range) { return [`棉 ${spanWords(range.porous)} cm`, ...(range.cavity ? [`空腔 ${spanWords(range.cavity)} cm`] : [])].join("、"); }
+function zoneRangeDescription(setting, entry, who = "這一區") {
+  return `${who}自己的範圍：${rangeWords(ownRange(setting, entry))}（材料頁是${rangeWords(pageRange(entry))}）`;
+}
+window.zoneRangeDescription = zoneRangeDescription;
 // 一張清單卡管哪幾區：這一組就是規則那一組（規則本身是由程式最佳化）就寫「沒另外指定的牆區」，其餘的區點名。
 // alone：全部由程式最佳化的區只有這一組（一張卡）。
 function listWho(group, prefix, alone) {
@@ -1606,8 +1623,10 @@ function listWho(group, prefix, alone) {
 function listCards(compact) {
   const {list} = view;
   if (list.zones.length) {
-    const hint = el("p", "zv-card-hint", "只看；要改就點圖上的區，或按卡上的「選這幾區」");
-    return [hint, ...list.groups.map((group, index) => listCard(group, index, compact))];
+    const cards = list.groups.map((group, index) => listCard(group, index, compact));
+    const editing = cards.some(card => card.querySelector(".zv-editing"));
+    const hint = "只看；要改就點圖上的區，或按卡上的「選這幾區」" + (editing ? "；寫「正在改」的那一組，就在上面的小框改" : "");
+    return [el("p", "zv-card-hint", hint), ...cards];
   }
   const card = el("div", "zv-list empty"); card.id = "zone-list"; card.dataset.count = "0";
   const head = el("h2"); head.append(el("i", "zv-sw search"), "現在沒有哪一區由程式最佳化");
@@ -1626,13 +1645,14 @@ function listCard(group, index, compact) {
   card.append(head, listWho(group, prefix, alone));
   const selectId = `${prefix}-select`;
   let selectGroup;
-  if (sameList(ids, selected)) {
+  const editing = sameList(ids, selected);
+  if (editing) {
     selectGroup = el("span", "zv-editing", "正在改");
     selectGroup.id = selectId;
   } else {
     selectGroup = button("zv-btn", "選這幾區", selectId, () => {
       pick(ids);
-      document.querySelector("#zone-panel h2")?.scrollIntoView({block: "nearest"});
+      $("zone-panel")?.scrollIntoView({block: "start"});
     });
   }
   const allowed = first.allowed;
@@ -1667,7 +1687,7 @@ function listCard(group, index, compact) {
       const row = el("li", null, listName(id)), entry = libraryEntry(id);
       row.dataset.choice = id;
       if (ranged.includes(id)) {
-        const line = el("small", "zv-range", `${size > 1 ? "這幾區" : "這一區"}自己的範圍：${rangeWords(ownRange(first, entry))}（材料頁是${rangeWords(pageRange(entry))}）`);
+        const line = el("small", "zv-range", zoneRangeDescription(first, entry, size > 1 ? "這幾區" : "這一區"));
         line.dataset.ranged = "true"; row.append(line);
       } else if (entry?.kind === "optimizable") row.append(el("small", "zv-range", adjustWords(entry)));
       if (referenceOnly(id)) {
@@ -1689,7 +1709,7 @@ function listCard(group, index, compact) {
   // 清單每一種都是固定成品：程式沒得選（同做法表的紅框），「拿去搜尋」也按不下去。
   if (allowedProblem(allowed)) {
     const problem = el("p", "zv-problem"); problem.id = `${prefix}-problem`; problem.setAttribute("role", "alert");
-    problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：按這張卡的「選這幾區」，改成「${ZONE_MODE_WORDS.fixed}」。`;
+    problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：${editing ? "在上面的小框" : "按這張卡的「選這幾區」，"}改成「${ZONE_MODE_WORDS.fixed}」。`;
     card.append(problem);
   }
   card.append(selectGroup);
@@ -1905,6 +1925,8 @@ function closeOverview() {
   renderZoneOverview();
   // 這一頁開著時輸入頁是藏起來的：那時重畫的平面圖，字量不到寬度、避不開彼此。回來看得到了，照同一份再畫一次。
   drawShownPlan();
+  // 捲回打開這一頁之前的地方（從舊表某一列按「改這一區 ▸」進來的，改完回到那一列）。
+  window.scrollTo(0, overviewReturnY);
 }
 // 這一頁沒有存檔鍵：改動當場套到畫面，但要存檔才進檔案。改過、還沒存的時候標題列講一句怎麼存（兩條路）。
 function unsavedLine() {
@@ -2001,7 +2023,13 @@ function overviewParts() {
   return [head, body, noteLines(), resultBar()];
 }
 window.renderZoneOverview = renderZoneOverview;
-window.openZoneOverview = () => { overviewOpen = true; pageSaid = ""; renderZoneOverview(); window.scrollTo(0, 0); };
+window.openZoneOverview = id => {
+  if (!overviewOpen) overviewReturnY = window.scrollY;
+  overviewOpen = true; pageSaid = "";
+  renderZoneOverview();
+  if (id && view?.byId.has(id)) pick([id]);
+  window.scrollTo(0, 0);
+};
 // 輸入頁訊息列每寫一句（app.js 的 say）就叫一次：警示照抄到這一頁，換成成功的一句就拿掉。
 // 這一頁打開時從空的開始（上面那一行）：打開之前輸入頁講過的話不帶進來。
 // 方案與每一區的做法都存進檔案了（輸入頁按「儲存」、另存，或「拿去搜尋」先存的那一步）：那一句拿掉。
