@@ -227,9 +227,9 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         rows = page.locator("#zone-panel-list [data-kind='optimizable']")
         assert rows.evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         expect(rows.nth(0)).to_contain_text("48K 玻璃棉")
-        expect(rows.nth(0).locator(".zv-range")).to_have_text("給程式調：棉厚 5–20 cm、空腔 0–25 cm")
-        expect(rows.nth(1).locator(".zv-range")).to_have_text("給程式調：棉厚 5–20 cm、空腔：沒有（直接貼牆）")
-        expect(rows.nth(2).locator(".zv-range")).to_have_text("給程式調：棉厚 5–20 cm、空腔：沒有（直接貼牆）")
+        expect(rows.nth(0).locator(".zv-range")).to_have_text("給程式調：棉厚 5–20 cm、空腔 0–25 cm，加起來最多 30 cm（材料本身）")
+        expect(rows.nth(1).locator(".zv-range")).to_have_text("空腔：沒有（直接貼牆）；給程式調：棉厚 5–20 cm，加起來最多 30 cm（材料本身）")
+        expect(rows.nth(2).locator(".zv-range")).to_have_text("空腔：沒有（直接貼牆）；給程式調：棉厚 5–20 cm，加起來最多 30 cm（材料本身）")
         cells = page.locator("#zone-panel-list input, #zone-panel-list select, #zone-panel-list textarea")
         expect(cells).to_have_count(0)
         for choice in WOOLS[:-1]:
@@ -250,7 +250,7 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         # 「材料的勾全拿掉」不動「也可以不貼」；一種都沒勾（連不貼也拿掉）就不能套用。
         page.locator("#zone-panel-only-glass_wool_48k").click()
         page.locator("#zone-panel-remove-glass_wool_48k").click()
-        assert page.locator("#zone-panel-list [data-kind=optimizable]").count() == 0
+        assert page.locator("#zone-panel-list > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         page.locator("#zone-panel-remove-none").click()

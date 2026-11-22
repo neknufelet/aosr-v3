@@ -526,9 +526,12 @@ function select(ids) {
 }
 // 換成選這幾區：面板上已經自己點過選項就留著（只換選了哪幾區），沒點過就照新選的那幾區重新起頭。
 function pick(next) {
+  if (next.length === selected.length && next.every(id => selected.includes(id))) return;
   if (draftTouched && next.length) {
     selected = next;
-    Object.assign(draft, {history: [], notice: "", order: null, query: null, expanded: []});
+    const discarded = draft.mode === "search" && (Object.keys(draft.ticks).length || Object.keys(draft.ranges).length);
+    draft = {...untouched(), mode: draft.mode, materialId: draft.materialId, depthText: draft.depthText, depthBad: draft.depthBad};
+    if (discarded) draft.notice = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
     renderZoneOverview(); return;
   }
   select(next);
@@ -1047,8 +1050,8 @@ function zoneNumbers(items) {
     items.filter(item => item.wall === wall).map(item => item.label.numberText).join("")).join("、");
 }
 function candidateAction(items, ticks, id, operation) {
-  const before = {ticks: {...draft.ticks}, ranges: structuredClone(draft.ranges), order: candidateIds(ticks),
-                  expanded: draft.expanded, rangeRefused: draft.rangeRefused, notice: draft.notice};
+  const before = {ticks: {...draft.ticks}, removedRanges: {}, order: candidateIds(ticks),
+                  expanded: draft.expanded, notice: draft.notice};
   const name = candidateName(id), only = operation === "only", add = operation !== "remove";
   // 「加到」保留草稿裡已有的；先前已拿掉的不能從存檔復活，只在可貼的區補回。
   const previouslyCleared = draft.ticks[id] === "remove" || draft.ticks[id] === "only";
@@ -1056,6 +1059,12 @@ function candidateAction(items, ticks, id, operation) {
   const cleared = only ? before.order.filter(other => other !== id) : [];
   for (const other of cleared) draft.ticks[other] = "remove";
   const after = panelTicks(items);
+  for (const other of before.order) {
+    if (!after.count(other) && other in draft.ranges) {
+      before.removedRanges[other] = draft.ranges[other];
+      delete draft.ranges[other];
+    }
+  }
   draft.expanded = draft.expanded.filter(other => after.count(other));
   const changed = items.filter((item, i) => !sameList(after.lists[i], ticks.lists[i]));
   const words = [];
@@ -1082,7 +1091,11 @@ function candidateAction(items, ticks, id, operation) {
   renderZoneOverview();
 }
 function undoCandidate() {
-  Object.assign(draft, draft.history.pop());
+  const {removedRanges, ...before} = draft.history.pop();
+  for (const id of Object.keys(draft.ranges)) if (!before.order.includes(id)) delete draft.ranges[id];
+  Object.assign(draft.ranges, removedRanges);
+  Object.assign(draft, before);
+  draft.rangeRefused = "";
   draft.query = null;
   renderZoneOverview();
 }
@@ -1091,19 +1104,33 @@ function fixedDescription(entry) {
   return depth ? `整塊貼、固定 ${depth.replace("總厚約 ", "")}` : "整塊貼、固定厚度未提供";
 }
 function cmPair(pair) { return pair.map(centimetres).join("–"); }
-function describeRange(line, items, ticks, entry) {
-  const shown = shownRange(items, ticks.lists, entry), page = pageRange(entry);
-  let narrowed = false;
-  const words = [];
+function rangeDescription(entry, pairs) {
+  const fixed = [], adjusted = [], parts = rangeParts(entry);
   for (const part of ["porous", "cavity"]) {
-    if (!page[part]) { words.push("空腔：沒有（直接貼牆）"); continue; }
+    const name = RANGE_WORDS[part];
+    if (parts[part]) {
+      adjusted.push(name + (pairs[part] ? ` ${cmPair(pairs[part])} cm` : "各區不同"));
+    } else {
+      const metres = part === "porous" ? entry.porous.thickness_m : entry.cavity?.initial_m;
+      fixed.push(metres ? `${name} ${centimetres(metres)} cm 不調` : "空腔：沒有（直接貼牆）");
+    }
+  }
+  return [...fixed, ...(adjusted.length ? ["給程式調：" + adjusted.join("、")] : [])].join("；");
+}
+function describeRange(line, items, ticks, entry) {
+  const shown = shownRange(items, ticks.lists, entry), page = pageRange(entry), parts = rangeParts(entry);
+  let narrowed = false;
+  const pairs = {};
+  for (const part of ["porous", "cavity"].filter(key => parts[key])) {
     const pair = draftPair(entry, part, shown[part]).pair ?? shown[part]?.values;
-    words.push(RANGE_WORDS[part] + (pair ? ` ${cmPair(pair)} cm` : "各區不同"));
+    pairs[part] = pair;
     narrowed ||= pair ? !samePair(pair, page[part]) : items.some((item, i) => ticks.lists[i].includes(entry.id) && !samePair(ownRange(item, entry)[part], page[part]));
   }
-  const depth = draft.depthText ?? shownDepth(items);
-  const cap = depth && Number(depth) > 0 && !draft.depthBad ? `，兩個加起來最多 ${depth} cm（這一區最深）` : "";
-  line.replaceChildren(`給程式調：${words.join("、")}${cap}`);
+  const depth = Number(draft.depthText ?? shownDepth(items)), material = entry.max_total_depth_m;
+  let cap = "";
+  if (!draft.depthBad && depth > 0 && (material == null || depth <= material * 100)) cap = `，兩個加起來最多 ${depth} cm（這一區最深）`;
+  else if (material != null) cap = `，加起來最多 ${centimetres(material)} cm（材料本身）`;
+  line.replaceChildren(rangeDescription(entry, pairs) + cap);
   if (narrowed) line.append(el("strong", "zv-narrow", "改窄了"));
 }
 // 一筆材料自己的層序。沒有分層資料就留空，不能從材料名稱猜厚度。
@@ -1114,17 +1141,19 @@ function candidateCutaway(entry) {
   for (const layer of layers) strip.append(el("i", `zv-slab ${layer.kind}`));
   return strip;
 }
+function candidateRestriction(entry, covered, listed) {
+  if (!entry) return "材料庫找不到這一筆";
+  if (entry.backing === "zone_wall") return "背後要接這一區的原牆，不能整塊當候選";
+  if (referenceOnly(entry.id)) return listed ? zoneReference.listed_why : zoneReference.search_why;
+  return covered ? coveredWhy(covered) : "";
+}
 function restrictedReason(node, entry, covered, listed) {
-  let reason = "";
-  if (referenceOnly(entry.id)) {
-    node.dataset.reference = listed ? "listed" : "off";
-    reason = listed ? zoneReference.listed_why : zoneReference.search_why;
-  } else if (covered) {
-    node.dataset.covered = covered.id;
-    reason = coveredWhy(covered);
-  }
-  if (reason) node.append(el("small", "zv-covered-why", reason));
-  return Boolean(reason);
+  const reason = candidateRestriction(entry, covered, listed);
+  if (!reason) return false;
+  if (referenceOnly(entry.id)) node.dataset.reference = listed ? "listed" : "off";
+  else if (covered) node.dataset.covered = covered.id;
+  node.append(el("small", "zv-covered-why", reason));
+  return true;
 }
 function candidateRow(id, items, ticks, covered, sync) {
   const entry = libraryEntry(id), none = id === ZONE_NONE, name = candidateName(id);
@@ -1150,8 +1179,8 @@ function candidateRow(id, items, ticks, covered, sync) {
   else if (entry.kind === "optimizable") {
     line.classList.add("zv-range");
     describeRange(line, items, ticks, entry);
-  } else line.textContent = fixedDescription(entry);
-  row.append(line);
+  } else if (entry.backing !== "zone_wall") line.textContent = fixedDescription(entry);
+  if (line.hasChildNodes()) row.append(line);
   const restricted = entry && restrictedReason(row, entry, covered, true);
   if (items.length > 1) {
     const dots = el("div", "zv-dots");
@@ -1168,7 +1197,7 @@ function candidateRow(id, items, ticks, covered, sync) {
   const missing = ticks.able(id) - ticks.count(id);
   if (missing && !restricted) actions.append(button("zv-mini", none && !ticks.count(id) ? "加上" : `加到 ${missing} 區`,
     `zone-panel-addto-${id}`, () => candidateAction(items, ticks, id, "add")));
-  if (entry?.kind === "optimizable") {
+  if (entry?.kind === "optimizable" && Object.values(rangeParts(entry)).some(Boolean)) {
     const open = draft.expanded.includes(id);
     const toggle = button("zv-link", "改範圍", `zone-panel-range-toggle-${id}`, () => {
       draft.expanded = open ? draft.expanded.filter(other => other !== id) : [...draft.expanded, id];
@@ -1176,7 +1205,7 @@ function candidateRow(id, items, ticks, covered, sync) {
     });
     toggle.setAttribute("aria-expanded", String(open)); actions.append(toggle);
   }
-  if (!none && entry && !restricted) actions.append(button("zv-mini", "清掉其他候選", `zone-panel-only-${id}`,
+  if (entry && !restricted && items.some(item => fitsHere(id, item.wall))) actions.append(button("zv-mini", "清掉其他候選", `zone-panel-only-${id}`,
     () => candidateAction(items, ticks, id, "only")));
   row.append(actions);
   if (entry?.kind === "optimizable" && draft.expanded.includes(id)) {
@@ -1184,7 +1213,7 @@ function candidateRow(id, items, ticks, covered, sync) {
     if (items.length > 1) row.append(el("small", null, `填了，${ticks.count(id)} 區都改成這個`));
     row.append(...fields);
   }
-  if (entry?.kind === "construction" && catalogKind(entry) !== "fixed") {
+  if (entry?.kind === "construction" && !restricted && catalogKind(entry) !== "fixed") {
     const layers = fold(`zone-panel-layers-${id}`, "看每一層");
     layers.append(el("p", null, "每一層現在還不能調，之後的版本會開"));
     for (const layer of fixedLayers(entry)) {
@@ -1205,18 +1234,22 @@ function matchedName(name, query) {
   span.append(name.slice(pos));
   return span;
 }
+function pickerFits(entry, walls, ticks) {
+  return walls.every(wall => usableHere(entry, wall)) ||
+    ((ticks.count(entry.id) || entry.id in draft.ticks) && walls.some(wall => usableHere(entry, wall)));
+}
 function candidatePicker(items, walls, ticks, covered) {
   const picker = el("div", "zv-picker"); picker.id = "zone-panel-picker";
   const label = el("label", null, "找候選"); label.htmlFor = "zone-panel-picker-search";
   const input = el("input"); input.type = "search"; input.id = label.htmlFor; input.value = draft.query;
   const results = el("div", "zv-picker-results");
   const candidates = [...libraryEntries("optimizable"), ...assignableEntries().filter(fixedCandidate)].filter(entry => entry.backing !== "zone_wall");
-  const fits = candidates.filter(entry => walls.every(wall => usableHere(entry, wall) && fitsHere(entry.id, wall)));
+  const fits = candidates.filter(entry => pickerFits(entry, walls, ticks));
   const update = () => {
     const query = input.value.trim().toLowerCase();
     draft.query = input.value;
     results.replaceChildren();
-    const matches = fits.filter(entry => ticks.count(entry.id) < items.length && candidateName(entry.id).toLowerCase().includes(query));
+    const matches = fits.filter(entry => ticks.state(entry.id) !== "all" && candidateName(entry.id).toLowerCase().includes(query));
     for (const [kind, title, help] of [["optimizable", "參數構造", "自己疊的；有的層給程式調，有的整塊貼"], ["fixed", "成品", "買來的或照抄的，整塊貼，不能調"]]) {
       const group = el("div"); group.setAttribute("role", "group"); group.setAttribute("aria-label", title);
       const heading = el("div", "zv-group-head"); heading.append(el("strong", null, title), el("span", null, help));
@@ -1227,8 +1260,12 @@ function candidatePicker(items, walls, ticks, covered) {
         pick.dataset.kind = entry.kind;
         pick.append(matchedName(candidateName(id), query));
         if (ticks.count(id)) pick.append(el("span", "zv-owned", `${ticks.count(id)} 區已有`));
-        pick.append(el("small", "zv-description", entry.kind === "optimizable" ?
-          `厚度給程式調：棉厚 ${cmPair(pageRange(entry).porous)} cm` : fixedDescription(entry)));
+        let description;
+        if (entry.kind === "optimizable") {
+          const range = pageRange(entry);
+          description = rangeParts(entry).porous ? `厚度給程式調：棉厚 ${cmPair(range.porous)} cm` : rangeDescription(entry, range);
+        } else description = fixedDescription(entry);
+        pick.append(el("small", "zv-description", description));
         pick.disabled = restrictedReason(pick, entry, covered.get(id), false);
         group.append(pick);
       }
@@ -1243,7 +1280,9 @@ function candidatePicker(items, walls, ticks, covered) {
     if (event.key === "Enter" && event.target === input) { event.preventDefault(); results.querySelector("button:enabled")?.click(); }
   };
   update();
-  picker.append(label, input, results, el("small", "zv-picker-foot", `只能貼在別面的 ${candidates.length - fits.length} 筆不列`));
+  const omitted = candidates.filter(entry => !pickerFits(entry, walls, ticks) && !ticks.count(entry.id)).length;
+  const why = walls.length === 1 ? "只能貼在別面的" : "選中的面有一面貼不了的";
+  picker.append(label, input, results, el("small", "zv-picker-foot", `${why} ${omitted} 筆不列`));
   return picker;
 }
 function closePicker(focus = false) {
@@ -1256,15 +1295,19 @@ function closePicker(focus = false) {
 document.addEventListener("click", event => {
   if (!event.target.closest?.("#zone-panel-add, #zone-panel-picker")) closePicker();
 });
-function startingListNotes(items, lists) {
+function startingListNotes(items, walls, ticks, covered) {
   const groups = new Map();
   for (const [index, item] of items.entries()) {
     if (item.mode === "search") continue;
     const list = ownList(item);
     const start = `原本不是由程式最佳化，先放：${list.map(candidateName).join("、")}`;
     const notes = [start];
-    if (zoneMethodMode(item.method) === "fixed" && !lists[index].includes(item.construction?.id ?? item.entry?.id)) {
-      notes.push(`原本指定貼的 ${vprWords(pastedWords(item))} 沒放進清單，要用就從「＋加一筆候選」加`);
+    const id = item.construction?.id ?? item.entry?.id;
+    if (zoneMethodMode(item.method) === "fixed" && !ticks.lists[index].includes(id)) {
+      const entry = libraryEntry(id);
+      const why = candidateRestriction(entry, covered.get(id), false) ||
+        (!pickerFits(entry, walls, ticks) || !usableHere(entry, item.wall) ? "這次選中的面貼不了這一筆" : "");
+      notes.push(`原本指定貼的 ${vprWords(pastedWords(item))} 沒放進清單，${why || "要用就從「＋加一筆候選」加"}`);
     }
     for (const message of notes) {
       if (!groups.has(message)) groups.set(message, []);
@@ -1284,11 +1327,15 @@ function searchForm(items, walls, sync) {
   const covered = coveredProducts(ticks.ids);
   const list = el("div"); list.id = "zone-panel-list";
   for (const id of [...candidateIds(ticks), ZONE_NONE]) list.append(candidateRow(id, items, ticks, covered.get(id), sync));
-  form.append(el("h3", null, "候選清單"), deepestRow(items, walls, sync), ...startingListNotes(items, ticks.lists), note,
+  form.append(el("h3", null, "候選清單"), deepestRow(items, walls, sync), ...startingListNotes(items, walls, ticks, covered), note,
     el("p", "zv-list-hint", "清掉其他候選不會動到「也可以不貼」"));
+  if (!libraryEntries("optimizable").some(entry => pickerFits(entry, walls, ticks))) {
+    form.append(el("p", "zv-form-note", "這裡沒有可調的材料：程式只能從「不貼」開始，可以再勾固定成品讓它比"));
+  }
   if (draft.notice) {
     const notice = el("div", "zv-notice", draft.notice); notice.id = "zone-panel-notice"; notice.setAttribute("role", "status");
-    notice.append(button("zv-link", "復原", "zone-panel-undo", undoCandidate)); form.append(notice);
+    if (draft.history.length) notice.append(button("zv-link", "復原", "zone-panel-undo", undoCandidate));
+    form.append(notice);
   }
   const add = button("zv-add-candidate", "＋加一筆候選", "zone-panel-add", () => {
     if (draft.query != null) { closePicker(true); return; }

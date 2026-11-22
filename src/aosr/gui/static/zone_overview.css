@@ -309,7 +309,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page #zone-panel :is(small,.zv-now,.zv-now-tag,.zv-same,.zv-cancel-note,.zv-unit,.zv-num,
   .zv-cap,.zv-axis,.zv-layers,.zv-tick,.zv-from,.zv-range-note,.zv-range-note a,.zone-candidate-cost,
   .zv-form details,.zv-cutaway,.zv-kind,.zv-covered-why,.zv-owned){font-size:13px}
-#zone-page #zone-panel button:disabled{opacity:1;color:#445056;background:#e9eeec}
+#zone-page #zone-panel .zv-pick-option:disabled{opacity:1;color:#445056;background:#e9eeec}
 #zone-page .zv-method-counts,#zone-page .zv-start-note,#zone-page .zv-list-hint{font-size:13px;margin:5px 0;color:#445158}
 #zone-page .zv-form{padding:8px 11px;margin-top:9px;overflow-wrap:anywhere}
 #zone-page .zv-form h3{font-size:16px;margin:0}
