@@ -258,18 +258,22 @@ def test_list_cards_split_by_range_and_read_out_the_range_each_group_uses(tmp_pa
         _open_overview(page)
         cards = page.locator("#zone-page .zv-list").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
         assert cards == [["zone-list", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-list-2", ["yL/z1", "yL/z2"]]], cards
-        expect(page.locator(f"#zone-list-checks label[data-choice={WOOL}] .zv-range")).to_have_text(
+        expect(page.locator(f"#zone-list-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
             "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        ranged = page.locator(f"#zone-list-2-checks label[data-choice={WOOL}] .zv-range")
+        ranged = page.locator(f"#zone-list-2-choices > [data-choice={WOOL}] .zv-range")
         expect(ranged).to_have_text("這幾區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
         expect(ranged).to_have_attribute("data-ranged", "true")
-        expect(page.locator(f"#zone-list-2-checks label[data-choice={THIN}] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator(f"#zone-list-2-choices > [data-choice={THIN}] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         groups = page.locator("#zone-special .zv-group").evaluate_all("groups => groups.map(group => group.dataset.zones.split(' ').sort())")
         assert ["yL/auto1", "yL/auto2", "yL/z1", "yL/z2", "yL/z3"] in groups, groups
         page.locator("#zone-list-2").scroll_into_view_if_needed()
         _shot(page, "4-cards-read-ranges")
-        page.locator(f"#zone-list-2-check-{WOOL}").click()
-        _settled(page)
+        page.locator("#zone-list-2-select").click()
+        expect(page.locator("#zone-list-2-ranges")).to_have_text(
+            "這幾區自己的範圍：48K 玻璃棉（棉 5～10 cm、空腔 0～15 cm）")
+        expect(page.locator("#zone-list-2")).to_contain_text("1 筆範圍改窄了")
+        page.locator(f"#zone-panel-remove-{WOOL}").click()
+        _apply(page)
         expect(page.locator("#zone-page .zv-range[data-ranged]")).to_have_count(0)
         _close_and_save(page)
         assert watched.page_errors == [] and watched.console_errors == []
@@ -380,8 +384,9 @@ def test_control_without_touching_ranges_the_saved_design_is_byte_for_byte_part_
         _click_zone(page, "x0/whole_wall")
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
-        page.locator("#zone-list-check-glass_wool_96k").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        _apply(page)
         _close_and_save(page)
         assert watched.page_errors == [] and watched.console_errors == []
     assert path.read_bytes() == _CONTROL_PLAIN

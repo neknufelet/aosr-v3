@@ -199,7 +199,7 @@ def test_pasting_such_a_construction_shades_the_panel_curve_and_marks_the_zone_o
 
 
 def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_with_the_reason(tmp_path: Path, browser: Browser) -> None:
-    """「由程式最佳化」的准用清單：命中的那一筆灰掉、勾不了、小字寫為什麼（面板的固定成品那一列、清單卡「加別種材料」那一格）；
+    """「由程式最佳化」的准用清單：命中的那一筆灰掉、勾不了、小字寫為什麼（從地圖或清單卡選區後的小框）；
     沒黏住的那一筆照常勾得到、加得進去。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -221,18 +221,19 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 5 種裡選，每一區各自最佳化。")
         _apply(page)
         assert _allowed(page) == {"y0/s": [*WOOLS, PLAIN_ID]}
-        # 清單卡「加別種材料」同一條規則。
-        page.locator("#zone-list-add").click()
-        add = page.locator(f"#zone-list-add-box label[data-choice='{HIT}']")
+        # 從清單卡選區後，小框也照同一條規則。
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-add").click()
+        add = page.locator(f"#zone-panel-pick-{HIT}")
         expect(add).to_have_attribute("data-reference", "off")
-        expect(page.locator(f"#zone-list-add-{HIT}")).to_be_disabled()
+        expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
         expect(add.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
         assert _allowed(page) == {"y0/s": [*WOOLS, PLAIN_ID]}
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
 def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_be_taken_off(tmp_path: Path, browser: Browser) -> None:
-    """存檔的清單裡本來就有命中的那一筆：清單卡那一列照樣勾著、灰字、寫「清單裡本來有它，程式不會挑」；卡上紅框與頁底紅字
+    """存檔的清單裡本來就有命中的那一筆：清單卡那一列照樣寫名字、灰字、寫「清單裡本來有它，程式不會挑」；卡上紅框與頁底紅字
     寫開跑會拒收的那一句（伺服器原文）、「拿去搜尋」旁邊寫清單有紅框要先處理、直接叫送出也不存不跳頁；面板那一列勾著、可取消，「從下面勾的 N 種」不算它；
     取消後那一格馬上勾不回來，套用後清單沒有它、紅字消失。"""
     _prepare(tmp_path, {"x0/a": LISTED})
@@ -240,10 +241,10 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         page = watched.page
         _open_page(page)
         refused = _refused(page, "x0/a")
-        card = page.locator(f"#zone-page .zv-list label[data-choice='{HIT}']")
+        card = page.locator(f"#zone-page .zv-list [data-choice='{HIT}']")
         expect(card).to_have_attribute("data-reference", "listed")
-        expect(page.locator(f"#zone-list-check-{HIT}")).to_be_checked()
-        expect(page.locator(f"#zone-list-check-{HIT}")).to_be_enabled()
+        expect(card.locator("input,button")).to_have_count(0)
+        expect(card).to_contain_text(HIT_LABEL)
         expect(card.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["listed_why"]))
         expect(page.locator("#zone-list-reference")).to_have_text(refused)
         expect(page.locator("#zone-list-reference")).to_have_class("zv-problem")
@@ -255,7 +256,9 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         expect(page.locator("#zone-page-note")).to_have_text(refused)
         assert not page.url.endswith("/gradient") and "gradient?" not in page.url
         # 面板：勾著、灰字、可取消；N 不算它（48K 與不貼＝2 種）。
-        _click_zone(page, "x0/a")
+        page.locator("#zone-list-select").click()
+        expect(page.locator("#zone-list-reference")).to_have_text(refused)
+        expect(page.locator("#zone-list")).to_contain_text(cast(str, WORDS["listed_why"]))
         expect(page.locator("#zone-panel-list [data-kind=fixed]")).to_have_count(1)
         row = page.locator(f"#zone-panel-row-{HIT}")
         box = page.locator(f"#zone-panel-remove-{HIT}")
@@ -280,21 +283,23 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
 
 
 def test_taking_it_off_on_the_list_card_is_final_and_the_add_box_will_not_put_it_back(tmp_path: Path, browser: Browser) -> None:
-    """清單卡上取消命中的那一筆：清單少了它；「加別種材料」那一格裡它灰著、勾不了；直接叫寫清單的那一支要它加回來也不動。"""
+    """從清單卡選區，拿掉命中那一筆並套用，再開小框也加不回來。"""
     _prepare(tmp_path, {"x0/a": LISTED})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
-        page.locator(f"#zone-list-check-{HIT}").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator(f"#zone-panel-remove-{HIT}").click()
+        _apply(page)
         assert _allowed(page) == {"x0/a": ["glass_wool_48k", "none"]}
-        expect(page.locator(f"#zone-list-check-{HIT}")).to_have_count(0)
+        expect(page.locator(f"#zone-list [data-choice={HIT}]")).to_have_count(0)
         expect(page.locator("#zone-page-blocked")).to_have_count(0)
-        page.locator("#zone-list-add").click()
-        expect(page.locator(f"#zone-list-add-{HIT}")).to_be_disabled()
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-add").click()
+        expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
         # 那一格被人改成勾得到再點：寫清單的那一支自己也不收。
-        page.locator(f"#zone-list-add-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
-        _settled(page)
+        page.locator(f"#zone-panel-pick-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
+        _apply(page)
         assert _allowed(page) == {"x0/a": ["glass_wool_48k", "none"]}
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
@@ -354,8 +359,9 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
         page = watched.page
         _open_page(page)
         # ② 動一下有它的那一份清單（這一頁「上一次的組合」就是它），再把別區交給程式。
-        page.locator("#zone-list-check-glass_wool_48k").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-glass_wool_48k").click()
+        _apply(page)
         assert _allowed(page) == {"x0/a": [HIT, "none"]}
         _click_zone(page, "y0/s")
         page.locator("#zone-panel-mode-search").check()
@@ -426,7 +432,7 @@ _NO_LAST_GUARD = """() => { setZoneSetting = (wall, key, setting) => {
 
 def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guard(tmp_path: Path, browser: Browser) -> None:
     """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①舊做法表剛改過的清單（上一次的組合）帶到下一區；
-    ②舊做法表勾選表那一格被人改成勾得到再點；③清單卡「加別種材料」那一格被人改成勾得到再點；④選整面套用時，
+    ②舊做法表勾選表那一格被人改成勾得到再點；③從卡選區後小框的候選按鈕被人改成勾得到再點；④選整面套用時，
     還沒交給程式的區照畫面上那一份清單起頭、但不帶它。"""
     _prepare(tmp_path, {"x0/a": LISTED})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -447,19 +453,19 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         page.locator(f"#zone-allow-x0-b-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
         expect(page.locator(f"#zone-allow-x0-b-{HIT}")).not_to_be_checked()
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
-        # ③ 清單卡「加別種材料」那一格硬改成勾得到再點：清單不變。
+        # ③ 從卡選區後小框的候選按鈕硬改成勾得到再點：清單不變。
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
         before = _allowed(page)
-        page.locator("#zone-list-add").click()
-        expect(page.locator(f"#zone-list-add-{HIT}")).to_be_disabled()
-        page.locator(f"#zone-list-add-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-add").click()
+        expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
+        page.locator(f"#zone-panel-pick-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
+        _apply(page)
         assert _allowed(page) == before and HIT not in before["x0/b"]
         # ④ 選整面套用：先把沒有它的那一區放回不貼，剩下有它的那一區（畫面上那一份清單就是它的）；整面交給程式套用，
         # 還沒交給程式的區拿到的起始清單照那一份、但不帶它。
-        page.locator("#zone-list-add").click()
         _click_zone(page, "x0/b")
         page.locator("#zone-panel-mode-keep_original").check()
         _apply(page)

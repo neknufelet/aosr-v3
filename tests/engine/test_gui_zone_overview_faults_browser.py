@@ -690,8 +690,9 @@ def test_editing_the_list_keeps_other_walls_handed_to_the_computer(tmp_path: Pat
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         followers = [zone for zone, mode in cast(dict[str, str], page.evaluate(_MODES)).items() if mode == "search"]
         assert len(followers) == 3
-        page.locator("#zone-list-check-glass_wool_96k").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        _apply(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         expect(page.locator("#zone-rule-mode")).to_have_value("search")
         expect(page.locator("#zone-list-who")).to_have_text("現在管 3 區：沒另外指定的牆區")
@@ -759,13 +760,24 @@ def test_a_line_says_changes_are_not_in_the_file_yet_until_they_are_saved(tmp_pa
         _settled(page)
         expect(line).to_be_visible()
         text = cast(str, line.text_content())
-        assert "還沒存進檔案" in text and "回「房間方案輸入」按「儲存」" in text and "「拿去搜尋」" in text
+        assert text == "改的還沒存進檔案：回「房間方案輸入」按「儲存」，或按底下的「拿去搜尋」（會先存再跳到搜尋頁，不會自己開始算；到那一頁按「開始搜尋」才會算）"
         assert not any("a" <= char.lower() <= "z" for char in text)
         box, back, now = line.bounding_box(), page.locator("#zone-page-close").bounding_box(), page.locator("#zone-page .zv-head").bounding_box()
         assert box is not None and back is not None and head is not None and now is not None
         # 第一屏看得到、整句在視窗裡、一行；標題列沒被撐高；「回房間方案輸入」還在它右邊、沒被擠出去。
         assert box["y"] >= 0 and box["y"] + box["height"] <= 1000 and box["x"] >= 0 and box["height"] < 40
         assert now["height"] == head["height"] and back["x"] >= box["x"] + box["width"] and back["x"] + back["width"] <= 1400
+        for width in (1280, 1400, 1440):
+            page.set_viewport_size({"width": width, "height": 1000})
+            assert page.locator("#zone-page .zv-head").evaluate("""head => {
+                const bounds = head.getBoundingClientRect();
+                const text = document.createRange();
+                text.selectNodeContents(head.querySelector(".zv-unsaved"));
+                return [...head.children].every(child => {
+                    const r = child.getBoundingClientRect();
+                    return r.top >= bounds.top && r.bottom <= bounds.bottom && r.right <= bounds.right;
+                }) && text.getClientRects().length === 1;
+            }"""), width
         tops = {round(cast(dict[str, float], page.locator(f"#zone-result-{key}").bounding_box())["y"]) for key in ("search", "fixed", "still")}
         assert max(tops) - min(tops) < 8
         # 回輸入頁再進來，還沒存：照樣在。
@@ -779,8 +791,9 @@ def test_a_line_says_changes_are_not_in_the_file_yet_until_they_are_saved(tmp_pa
         expect(page.locator("#zone-map")).to_be_visible()
         expect(line).to_have_count(0)
         # 改清單也算改動；存過之後再改，那一句再出現。
-        page.locator("#zone-list-check-glass_wool_96k").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        _apply(page)
         expect(line).to_be_visible()
         page.locator("#zone-page-close").click()
         _save(page, design=True)
@@ -870,7 +883,7 @@ def test_scrolled_to_the_end_nothing_is_left_under_the_bottom_bar(tmp_path: Path
     """底列黏在視窗下緣。視窗開矮（1400×700）讓左右兩欄都比視窗長：
     ① 瀏覽器把清單卡捲進畫面、靠視窗下緣時（跳到某一格、Tab 走到某一格），卡要停在底列上面，不准有一截被底列壓住；
     ② 捲到最底：清單卡、右欄最後一個東西、左邊那張圖都整個在底列上面。
-    「加別種材料」打開、清單卡變長時兩樣都再考一次。底列仍是一行。"""
+    小框打開、清單卡收起來時兩樣都再考一次。底列仍是一行。"""
     _prepare(tmp_path)
     context = browser.new_context(viewport={"width": 1400, "height": 700})
     with _serve(tmp_path) as base:
@@ -885,8 +898,8 @@ def test_scrolled_to_the_end_nothing_is_left_under_the_bottom_bar(tmp_path: Path
         _settled(page)
         for opened in (False, True):
             if opened:
-                page.locator("#zone-list-add").click()
-                expect(page.locator("#zone-list-add-box")).to_be_visible()
+                page.locator("#zone-list-select").click()
+                expect(page.locator("#zone-panel")).to_be_visible()
             brought = cast(dict[str, float], page.evaluate(_BROUGHT_INTO_VIEW))
             assert brought["list"] <= brought["bar"], (opened, brought)
             found = cast(dict[str, float], page.evaluate(_BOTTOMS))

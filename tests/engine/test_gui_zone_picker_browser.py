@@ -150,13 +150,18 @@ def test_picker_width_and_readability_in_four_panel_states(tmp_path: Path, brows
         _click_zone(page, "yL/z3")
         panel = page.locator("#zone-panel")
         assert abs(panel.evaluate("p => p.getBoundingClientRect().width") - 472) <= 1
-        for state in ("single", "multiple", "range", "picker"):
+        for state in ("single", "multiple", "range", "picker", "floor"):
             if state == "multiple":
                 _click_zone(page, "yL/auto2")
             elif state == "range":
                 page.locator("#zone-panel-range-toggle-glass_wool_48k").click()
             elif state == "picker":
                 page.locator("#zone-panel-add").click()
+            elif state == "floor":
+                page.locator("#zone-panel-cancel").click()
+                _click_zone(page, "floor/auto1")
+                page.locator("#zone-panel-mode-search").check()
+                expect(panel.locator(".zv-form-note")).to_contain_text("這裡沒有可調的材料")
             samples = panel.evaluate(_TEXT_STYLES)
             assert samples and all(row["size"] >= 13 and row["contrast"] >= 4.5 for row in samples), (state, samples)
             if state == "multiple":
@@ -326,6 +331,7 @@ def test_changing_selection_in_fixed_mode_reports_the_discarded_list(
             page.locator("#zone-whole-yL").click()
         else:
             _click_zone(page, "yL/auto1")
+        _click_zone(page, "yL/auto2")
         page.locator("#zone-panel-mode-search").check()
         expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
         expect(page.locator("#zone-panel-undo")).to_have_count(0)
@@ -622,3 +628,33 @@ def test_notice_undo_open_layers_and_mixed_range_text_meet_readability_minimum(t
         for words in ("拿掉 也可以不貼", "復原", "每一層現在還不能調", "各區不同；不動它", "③ 5–20、④ 5–10 cm"):
             assert any(words in row["words"] for row in samples), words
         assert [row for row in samples if row["size"] < 13 or row["contrast"] < 4.5] == []
+
+
+@pytest.mark.parametrize("depth", ["19.96", "0.04"])
+def test_depth_caption_uses_the_same_millimetres_as_apply(tmp_path: Path, browser: Browser, depth: str) -> None:
+    _boss_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-depth").fill(depth)
+        line = page.locator("#zone-panel-row-glass_wool_24k .zv-range")
+        expect(line).to_contain_text("棉厚")
+        expect(line).not_to_contain_text("最多")
+
+
+def test_starting_list_groups_two_pasted_zones_by_the_ineligible_wall(tmp_path: Path, browser: Browser) -> None:
+    _boss_room(tmp_path)
+    path = tmp_path / "materials.json"
+    library = json.loads(path.read_bytes())
+    entry = next(row for row in library["materials"] if row["id"] == "sample_front_panel")
+    entry["id"] = "sample_floor_panel"
+    path.write_text(json.dumps(library))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for zone in ("yL/z1", "yL/z2"):
+            _click_zone(page, zone)
+        page.locator("#zone-panel-mode-search").check()
+        reason = page.locator(".zv-start-note").filter(has_text="沒放進清單")
+        expect(reason).to_have_text("①② 原本指定貼的 自編前牆吸音板 沒放進清單，前牆那一面貼不了這一筆")

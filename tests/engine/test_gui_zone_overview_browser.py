@@ -252,17 +252,17 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         expect(page.locator("#zone-page .zv-list")).to_have_count(2)
         expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 15 區裡的 14 區每一區各自最佳化，這 14 區從這幾種裡選")
         expect(page.locator("#zone-list-who")).to_have_text("這一張管 14 區：沒另外指定的牆區、天花 1 主位上面那塊")
-        assert page.locator("#zone-list-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
-        expect(page.locator("#zone-list-checks label").last).to_have_text("也可以不貼（保留原樣）")
+        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
+        expect(page.locator("#zone-list-choices > [data-choice]").last).to_have_text("也可以不貼（保留原樣）")
         expect(page.locator("#zone-list-different")).to_have_count(0)
         expect(page.locator("#zone-list-2 h2")).to_have_text("由程式最佳化的 15 區裡的 1 區這一區從這幾種裡選")
         expect(page.locator("#zone-list-2-who")).to_have_text("這一張管 1 區：後牆 5 靠地板那條")
         assert _dataset_zones(page, "#zone-list-2") == {"y0/auto1"}
-        assert page.locator("#zone-list-2-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == SHORT
+        assert page.locator("#zone-list-2-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == SHORT
         # 可調的各自能調多少直接寫在那一列底下（#1199：不再收在「玻璃棉各自能調多厚」後面）。
         expect(page.locator("#zone-list-ranges")).to_have_count(0)
-        expect(page.locator("#zone-list-checks label[data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        expect(page.locator("#zone-list-checks label[data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator("#zone-list-choices > [data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
+        expect(page.locator("#zone-list-choices > [data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         expect(page.locator("#zone-others")).to_have_text("天花：由程式最佳化 1 區、指定貼 1 區、保留原樣 4 區地板、門、窗：保留原樣")
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.screenshot(path=str(tmp_path / "overview-search-rule.png"))

@@ -13,7 +13,7 @@ from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, SHORT, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _apply, _click_zone, _open_overview, _prepare, _save, _settled)
+    _ALLOWED, _SELECTED, _apply, _click_zone, _open_overview, _prepare, _save, _settled, _stored)
 from tests.engine.test_gui_zone_material_pick_browser import (
     FLOOR_ONLY,
     FRONT,
@@ -30,7 +30,7 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
     """加一種材料只加到貼得了的那一面，而且勾得上也拿得掉（複查 r2 第二件）：前牆一區（48K 加不貼）與地板一區（只有不貼）一起選。
     48K 地板貼不了，不算進「幾區有」：貼得了的那一區有，就是勾著，旁邊講有一區貼不了；點一下拿掉、再點一下勾回來，
     每一下都照使用者點的畫，不會卡在第三種狀態。拿掉後套用：前牆那一區沒有 48K，地板不變。
-    右欄清單卡也一樣：兩區清單相同時是一張卡，「加別種材料」列這兩面各自貼得了的，加 24K 只加到前牆那一區，底下那一句照實講幾區。"""
+    從卡選這兩區，再加選已有 24K 的牆區。小框按「加到 1 區」只補前牆，地板與原有 24K 的區不動。"""
     _prepare(tmp_path, _design({"yL": {"auto1": {"mode": "search", "allowed": ONLY_48K}}, "floor": {"auto1": {"mode": "search", "allowed": ["none"]}}}))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -48,18 +48,22 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         assert _candidate_state(page, choice) == "none"
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ["none"], "floor/auto1": ["none"]}
-        # 清單卡：兩區清單相同（只有不貼），是一張卡。
+        # 選這兩區，再加選一個已有 24K 的牆區，才能在同一列按「加到 1 區」。
         expect(page.locator("#zone-page .zv-list")).to_have_count(1)
-        page.locator("#zone-list-add").click()
-        offered = cast(list[str], page.locator("#zone-list-add-box label").evaluate_all("rows => rows.map(row => row.dataset.choice)"))
-        assert "glass_wool_24k" in offered and FLOOR_ONLY in offered
-        page.locator("#zone-list-add-glass_wool_24k").click()
-        _settled(page)
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"]}
-        expect(page.locator("#zone-page .zv-list")).to_have_count(2)
-        expect(page.locator("#zone-page-note")).to_have_text("1 區的清單改成 不貼、24K 玻璃棉；另外 1 區那一面貼不了這一種，沒加")
-        # 那一組的區拆成兩張卡了：開著的「加別種材料」關掉，兩張都不開。
-        expect(page.locator("#zone-page .zv-add")).to_have_count(0)
+        _click_zone(page, "yL/auto2")
+        _pick_search(page)
+        _add_candidate(page, "glass_wool_24k")
+        _apply(page)
+        source = cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto2"]
+        page.locator("#zone-list-select").click()
+        _click_zone(page, "yL/auto2")
+        row = page.locator("#zone-panel-row-glass_wool_24k")
+        expect(row).to_contain_text("1 區那一面貼不了這一種，不會加")
+        add = row.get_by_role("button", name="加到 1 區")
+        add.click()
+        _apply(page)
+        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {
+            "yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"], "yL/auto2": source}
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -85,37 +89,62 @@ def test_a_half_ticked_material_follows_each_click_and_can_be_taken_off(tmp_path
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_an_open_add_box_stays_with_the_zones_it_was_opened_for_and_closes_when_they_join_another_card(tmp_path: Path, browser: Browser) -> None:
-    """複查 r2 第一件：「加別種材料」的框記的是哪幾區，不是第幾張卡。前牆五區 48K 加不貼、天花 z1 只有 48K、天花 auto1 三種棉加不貼：
-    在天花 z1 那張（第二張）開框、加「不貼」，它跟前牆一樣了、併進第一張——框關掉，不准跑到天花 auto1 那張，每一區的清單除了天花 z1 都不變。
-    同一組的區沒變時（在同一張卡上加了還是那幾區），框照樣開著。"""
-    front: dict[str, object] = dict.fromkeys(("z1", "z2", "z3", "auto1", "auto2"), {"mode": "search", "allowed": ONLY_48K})
-    _prepare(tmp_path, _design({"yL": front, "ceiling": {"z1": {"mode": "search", "allowed": ["glass_wool_48k"]}, "auto1": {"mode": "search", "allowed": WOOLS}}}))
-    cards = """() => [...document.querySelectorAll('#zone-page .zv-list')].map(card => ({id: card.id, zones: card.dataset.zones.split(' ').sort().join(' '),
-        open: Boolean(card.querySelector('.zv-add'))}))"""
+CARD_HINT = "只看；要改就點圖上的區，或按卡上的「選這幾區」"
+
+
+def test_cards_show_their_choices_depth_and_only_a_group_selection_button(tmp_path: Path, browser: Browser) -> None:
+    front: dict[str, object] = {key: {"mode": "search", "allowed": ["none", WOOLS[0]], "max_depth_m": 0.125}
+                                for key in ("z1", "z2", "z3", "auto1", "auto2")}
+    ceiling: dict[str, object] = {"z1": {"mode": "search", "allowed": WOOLS}, "auto1": {"mode": "search", "allowed": WOOLS, "max_depth_m": 0.1}}
+    floor: dict[str, object] = {"auto1": {"mode": "search", "allowed": ["none"]}}
+    _prepare(tmp_path, _design({"yL": front, "ceiling": ceiling, "floor": floor}))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
-        assert page.locator("#zone-list-2").get_attribute("data-zones") == "ceiling/z1"
-        page.locator("#zone-list-2-add").click()
-        expect(page.locator("#zone-list-2-add-box")).to_be_visible()
-        page.locator("#zone-list-2-add-none").click()
-        _settled(page)
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "ceiling/z1": ONLY_48K}
-        shown = cast(list[dict[str, object]], page.evaluate(cards))
-        assert [card["zones"] for card in shown] == [" ".join(sorted([*FRONT, "ceiling/z1"])), "ceiling/auto1"]
-        assert [card["open"] for card in shown] == [False, False]
-        # 同一張卡上加一種、那幾區沒變：框還開著，再加一種也寫進同樣那幾區。
-        page.locator("#zone-list-2-add").click()
-        page.locator("#zone-list-2-check-glass_wool_96k").click()
-        _settled(page)
-        expect(page.locator("#zone-list-2-add-box")).to_be_visible()
-        page.locator("#zone-list-2-add-glass_wool_96k").click()
-        _settled(page)
-        expect(page.locator("#zone-list-2-add-box")).to_be_visible()
-        assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "ceiling/z1": ONLY_48K, "ceiling/auto1": ["glass_wool_48k", "glass_wool_24k", "none", "glass_wool_96k"]}
+        hint = page.get_by_text(CARD_HINT, exact=True)
+        cards = page.locator("#zone-page .zv-list")
+        expect(cards).to_have_count(3)
+        expected = [(set(FRONT), ONLY_48K, "最深 12.5 cm"), ({"ceiling/z1", "ceiling/auto1"}, WOOLS, "最深各區不同"),
+                    ({"floor/auto1"}, ["none"], "最深不限")]
+        for card, (zones, choices, depth) in zip(cards.all(), expected, strict=True):
+            assert set((card.get_attribute("data-zones") or "").split()) == zones
+            expect(card.locator(".zv-who").first).to_contain_text(f"{len(zones)} 區")
+            assert card.locator("[data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == choices
+            expect(card.locator("input,select")).to_have_count(0)
+            expect(card.get_by_text(depth, exact=True)).to_be_visible()
+            expect(card.locator("button")).to_have_id(f"{card.get_attribute('id')}-select")
+            expect(card.locator("button")).to_have_text("選這幾區")
+        expect(hint).to_have_count(1)
+        for index in (0, 1):
+            cards.nth(index).get_by_role("button", name="選這幾區").click()
+            assert set(page.evaluate(_SELECTED)) == expected[index][0]
+            expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+            assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == expected[index][1]
+            expect(cards.locator("input,select")).to_have_count(0)
+            expect(cards.locator("button")).to_have_count(3)
+            expect(hint).to_have_count(1)
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        _apply(page)
+        page.locator("#zone-page-close").click()
+        _save(page, design=True)
         assert watched.page_errors == [] and watched.console_errors == []
+    stored, _ = _stored(tmp_path)
+    remaining = [WOOLS[0], WOOLS[1], "none"]
+    assert stored == {"yL": front, "floor": floor, "ceiling": {
+        "z1": {"mode": "search", "allowed": remaining},
+        "auto1": {"mode": "search", "allowed": remaining, "max_depth_m": 0.1}}}
+
+
+def test_no_search_zone_has_no_card_instructions(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        expect(page.locator("#zone-list")).to_have_text("現在沒有哪一區由程式最佳化")
+        expect(page.get_by_text(CARD_HINT, exact=True)).to_have_count(0)
+        page.locator("#zone-rule-mode").select_option("search")
+        _settled(page)
+        expect(page.get_by_text(CARD_HINT, exact=True)).to_have_count(1)
 
 
 def test_changing_only_the_deepest_keeps_a_code_this_face_cannot_take_in_the_list(tmp_path: Path, browser: Browser) -> None:
@@ -265,30 +294,34 @@ def test_zones_with_different_lists_get_one_list_card_each_and_a_tick_on_a_card_
         assert page.locator("#zone-list-2").get_attribute("data-zones") == "ceiling/z1"
         expect(page.locator("#zone-list-who")).to_have_text("這一張管 5 區：前牆整面 12345")
         expect(page.locator("#zone-list-2-who")).to_have_text("這一張管 1 區：天花 1 主位上面那塊")
-        assert page.locator("#zone-list-checks label").evaluate_all(choices) == ONLY_48K
-        assert page.locator("#zone-list-2-checks label").evaluate_all(choices) == WOOLS
+        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all(choices) == ONLY_48K
+        assert page.locator("#zone-list-2-choices > [data-choice]").evaluate_all(choices) == WOOLS
         # 前牆那張拿掉「也可以不貼」：只有前牆五區少一種，天花那一區的「不貼」還在；再加回去。
-        page.locator("#zone-list-check-none").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-none").click()
+        _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, ["glass_wool_48k"]), "ceiling/z1": WOOLS}
-        page.locator("#zone-list-add").click()
-        page.locator("#zone-list-add-none").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-addto-none").click()
+        _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, ONLY_48K), "ceiling/z1": WOOLS}
-        # 前牆那張加 24K：只有前牆五區多一種（「加別種材料」那一格還開著）。
-        page.locator("#zone-list-add-glass_wool_24k").click()
-        _settled(page)
+        # 前牆那張加 24K：只有前牆五區多一種。
+        page.locator("#zone-list-select").click()
+        _add_candidate(page, "glass_wool_24k")
+        _apply(page)
         longer = [*ONLY_48K, "glass_wool_24k"]
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, longer), "ceiling/z1": WOOLS}
         # 天花那張拿掉 96K：只有天花那一區少一種；兩邊變成同樣三種，併回一張卡，這時才寫「都從這幾種裡選」。
-        page.locator("#zone-list-2-check-glass_wool_96k").click()
-        _settled(page)
+        page.locator("#zone-list-2-select").click()
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, longer), "ceiling/z1": ["glass_wool_48k", "glass_wool_24k", "none"]}
         expect(page.locator("#zone-page .zv-list")).to_have_count(1)
         expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 6 區每一區各自最佳化，都從這幾種裡選")
         # 併成一張之後，在那一張拿掉 24K：六區一起少一種。
-        page.locator("#zone-list-check-glass_wool_24k").click()
-        _settled(page)
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-glass_wool_24k").click()
+        _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys([*FRONT, "ceiling/z1"], ONLY_48K)
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -502,3 +535,16 @@ def test_keep_original_table_words_follow_the_ceiling_verdict(tmp_path: Path, br
         expect(page.locator("#zone-keep-ceiling-auto1")).to_have_text(f"{words}，不貼東西" if with_original else "不貼，保留原樣")
         now = page.evaluate('plainNow(zoneList("ceiling").find(z => z.id === "auto1").material, "ceiling", "auto1")')
         assert now == (f"沒貼東西（{words}）" if with_original else "不貼，保留原樣")
+
+
+def test_fixed_only_card_explains_how_to_fix_it_in_both_views(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, _design({"yL": {"auto1": {"mode": "search", "allowed": [PLAIN_PRODUCT]}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for compact in (False, True):
+            if compact:
+                page.locator("#zone-list-select").click()
+            expect(page.locator("#zone-list-problem")).to_have_text(
+                "只放了固定成品，程式沒得選。程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。"
+                "要的就是這一筆、不必讓程式選：按這張卡的「選這幾區」，改成「指定貼一種」。")

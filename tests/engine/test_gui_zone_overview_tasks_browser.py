@@ -162,7 +162,7 @@ def test_task_one_front_panels_fixed_and_the_other_walls_handed_to_the_computer(
         _apply(page)
         assert [group["zones"] for group in cast(list[dict[str, object]], page.evaluate(_GROUPS))] == [["yL/z1", "yL/z2"]]
         expect(page.locator("#zone-list-who")).to_have_text("現在管 15 區：沒另外指定的牆區")
-        assert page.locator("#zone-list-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
+        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
         expect(page.locator("#zone-result-fixed")).to_contain_text("指定貼 4 區")
         page.screenshot(path=str(tmp_path / "task-one-done.png"))
         _send_to_search(page)
@@ -286,40 +286,52 @@ def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_
         assert {"y0/auto1", "ceiling/z1", "xL/auto4"} <= searching and len(searching) == 15
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"] == SHORT
         # 拿掉一種：用這一份清單的 14 區都少一種；清單不一樣的那一區（後牆 auto1，自己一張卡）不動（#1199 修補 1）。
-        page.locator("#zone-list-check-glass_wool_96k").click()
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        _apply(page)
         shorter = ["glass_wool_48k", "glass_wool_24k", "none"]
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(searching, shorter), "y0/auto1": SHORT}
         # 在那一區自己的卡上加 24K：它的清單跟另外 14 區變成同樣三種，兩張卡併成一張。
-        page.locator("#zone-list-2-add").click()
-        page.locator("#zone-list-2-add-glass_wool_24k").click()
+        page.locator("#zone-list-2-select").click()
+        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-pick-glass_wool_24k").click()
+        _apply(page)
         expect(page.locator("#zone-page .zv-list")).to_have_count(1)
         assert set(cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"]) == set(shorter)
         shorter_everywhere = {**dict.fromkeys(searching, shorter), "y0/auto1": [*SHORT, "glass_wool_24k"]}
-        # 加別種材料：勾了就加進每一區的清單。
-        page.locator("#zone-list-add").click()
+        # 從合併後的卡選區，小框加一筆普通成品，套用到整組。
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-add").click()
         # （#1208 起合成庫那幾筆 VPR 列著但勾不了，另有考卷；這裡加的是一筆一般的固定成品。）
-        expect(page.locator(f"label[data-choice={VPR}]")).to_contain_text("VPR（鋼板共振吸音）＋前面聚酯棉 60 mm")
-        page.locator(f"#zone-list-add-{PRODUCT}").click()
+        expect(page.locator(f"#zone-panel-pick-{VPR}")).to_contain_text("VPR（鋼板共振吸音）＋前面聚酯棉 60 mm")
+        page.locator(f"#zone-panel-pick-{PRODUCT}").click()
+        _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {zone: [*own, PRODUCT] for zone, own in shorter_everywhere.items()}
-        # 只剩固定成品：程式沒得選，卡上講明，「拿去搜尋」按不下去；最後一種拿不掉。
-        for choice in shorter:
-            page.locator(f"#zone-list-check-{choice}").click()
-        expect(page.locator("#zone-list-problem")).to_contain_text("只放了固定成品，程式沒得選")
-        # 三條路都講到：加可調的、加「也可以不貼」、要的就是這一筆就把那一區改成指定貼一種。
-        problem = cast(str, page.locator("#zone-list-problem").text_content())
-        assert "加一種可調的材料" in problem and "加上「也可以不貼」" in problem
-        assert "要的就是這一筆" in problem and "點圖上那一區，改成「指定貼一種」" in problem
-        assert not any("a" <= char.lower() <= "z" for char in problem)
+        assert watched.page_errors == [] and watched.console_errors == []
+
+    # 小框擋住只剩固定成品的草稿。另開舊存檔考卡上的紅字與修復。
+    fixed: dict[str, dict[str, object]] = {}
+    for zone in searching:
+        wall, key = zone.split("/")
+        fixed.setdefault(wall, {})[key] = {"mode": "search", "allowed": [PRODUCT]}
+    _prepare(tmp_path, {**SAMPLE_DESIGN, "zones": fixed})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        expect(page.locator("#zone-list-problem")).to_have_text(
+            "只放了固定成品，程式沒得選。程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。"
+            "要的就是這一筆、不必讓程式選：按這張卡的「選這幾區」，改成「指定貼一種」。")
         expect(page.locator("#zone-list-problem button")).to_have_count(0)
         expect(page.locator("#zone-page-search")).to_be_disabled()
         expect(page.locator("#zone-page-blocked")).to_contain_text("的紅框（只放了固定成品，程式沒得選），處理好才能拿去搜尋")
-        page.locator(f"#zone-list-check-{PRODUCT}").click()
-        expect(page.locator("#zone-page-note")).to_contain_text("清單至少要留一種")
-        expect(page.locator(f"#zone-list-check-{PRODUCT}")).to_be_checked()
+        page.locator("#zone-list-select").click()
+        page.locator(f"#zone-panel-remove-{PRODUCT}").click()
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種材料，或勾「也可以不貼」")
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, [PRODUCT])
-        # 「加別種材料」那一格還開著（重畫後照樣開著）：把「也可以不貼」加回去就好了。
-        page.locator("#zone-list-add-none").click()
-        _settled(page)
+        page.locator("#zone-panel-undo").click()
+        page.locator("#zone-panel-addto-none").click()
+        _apply(page)
         expect(page.locator("#zone-page-search")).to_be_enabled()
         expect(page.locator("#zone-list-problem")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []

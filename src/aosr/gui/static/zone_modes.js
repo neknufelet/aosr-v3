@@ -667,7 +667,6 @@ function allowedChecklist(wall, key, allowed, onToggle) {
   }
   for (const entry of optimizable) list.append(box(entry.id, shortLabel(entry), adjustWords(entry), entry.placement.reason));
   list.append(box(ZONE_NONE, KEEP_WORDS, "放進來，程式就可以決定這裡不貼"));
-  appendFixedCandidateNote(list, allowed);
   if (fixed.length) list.append(heading("固定成品：整塊貼上去，不能調（程式只決定貼不貼）"));
   for (const entry of fixed) list.append(box(entry.id, entry.label, fixedDepthWords(entry), entry.placement.reason));
   const hidden = hiddenGroups(wall, (zoneLibrary || []).filter(entry => entry.kind === "optimizable" || fixedCandidate(entry)));

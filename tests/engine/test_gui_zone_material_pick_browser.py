@@ -129,7 +129,7 @@ def test_the_front_wall_is_handed_to_the_program_with_only_48k_or_nothing_in_fiv
         # 右欄把這五區寫成一行「前牆整面」，清單卡只剩 48K 玻璃棉與也可以不貼。
         expect(page.locator("#zone-special [data-whole='yL']")).to_have_text("前牆整面 12345")
         expect(page.locator("#zone-list-who")).to_have_text("現在管 5 區：前牆整面 12345")
-        assert page.locator("#zone-list-checks label").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ONLY_48K
+        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ONLY_48K
         _send_to_search(page)
         assert watched.page_errors == [] and watched.console_errors == []
     zones, materials = _stored(tmp_path)
@@ -289,14 +289,15 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto1"] == [
             "glass_wool_24k", "glass_wool_96k", "none", covered["glass_wool_48k"][0]]
-        # 清單卡的「加別種材料」同一條規則：清單裡的 24K 已經包含的那一筆灰著、勾不了、寫為什麼；48K 不在清單裡，它那幾筆勾得到。
-        page.locator("#zone-list-add").click()
+        # 從清單卡重新打開小框，也遵守同一條規則：清單裡的 24K 已經包含的那一筆灰著、勾不了、寫為什麼；48K 不在清單裡，它那幾筆勾得到。
+        page.locator("#zone-list-select").click()
+        page.locator("#zone-panel-add").click()
         inside = covered["glass_wool_24k"][0]
-        expect(page.locator(f"#zone-list-add-{inside}")).to_be_disabled()
-        expect(page.locator(f"#zone-list-add-box label[data-choice='{inside}']")).to_have_attribute("data-covered", "glass_wool_24k")
-        expect(page.locator(f"#zone-list-add-box label[data-choice='{inside}'] .zv-covered-why")).to_have_text(
+        expect(page.locator(f"#zone-panel-pick-{inside}")).to_be_disabled()
+        expect(page.locator(f"#zone-panel-pick-{inside}")).to_have_attribute("data-covered", "glass_wool_24k")
+        expect(page.locator(f"#zone-panel-pick-{inside} .zv-covered-why")).to_have_text(
             "上面可調的 24K 玻璃棉 已經包含它；只想用成品，先取消上面的 24K 玻璃棉")
-        expect(page.locator(f"#zone-list-add-{covered['glass_wool_48k'][1]}")).to_be_enabled()
+        expect(page.locator(f"#zone-panel-pick-{covered['glass_wool_48k'][1]}")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -348,8 +349,8 @@ def test_the_page_says_optimized_by_the_program_everywhere(tmp_path: Path, brows
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_nothing_new_on_the_panel_is_smaller_than_twelve_pixels_or_too_pale_to_read(tmp_path: Path, browser: Browser) -> None:
-    """小框（選了由程式最佳化、固定成品點開、有灰掉的列）與清單卡裡每一段字：不小於 12 px，字色對底色的對比至少 4.5:1。"""
+def test_nothing_new_on_the_panel_is_smaller_than_thirteen_pixels_or_too_pale_to_read(tmp_path: Path, browser: Browser) -> None:
+    """小框（選了由程式最佳化、固定成品點開、有灰掉的列）與清單卡裡每一段字：不小於 13 px，字色對底色的對比至少 4.5:1。"""
     _prepare(tmp_path, SAMPLE_DESIGN)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -368,7 +369,7 @@ def test_nothing_new_on_the_panel_is_smaller_than_twelve_pixels_or_too_pale_to_r
         # 空格子裡的提示字是瀏覽器另外畫的灰字，上面那一支量不到：小框裡不准有，空白的意思寫成看得到的字。
         assert page.locator("#zone-panel input[placeholder]").count() == 0
         assert any("空白＝不限" in cast(str, row["words"]) for row in panel)
-        small = [row for row in panel if cast(float, row["size"]) < 13] + [row for row in card if cast(float, row["size"]) < 12]
+        small = [row for row in [*panel, *card] if cast(float, row["size"]) < 13]
         pale = [row for row in [*panel, *card] if cast(float, row["contrast"]) < 4.5]
         assert small == [] and pale == []
         assert watched.page_errors == [] and watched.console_errors == []

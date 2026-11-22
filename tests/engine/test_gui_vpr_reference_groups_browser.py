@@ -364,6 +364,11 @@ def test_with_the_library_unread_no_list_is_written_for_other_zones_from_the_pan
         _apply(page)
         lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
         assert lists == {"x0/a": LISTED, "x0/b": None}
+        unknown = page.locator(".zv-list[data-zones='x0/b']")
+        expect(unknown).to_contain_text("程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）")
+        unknown.get_by_role("button", name="選這幾區").click()
+        expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+        page.locator("#zone-panel-cancel").click()
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
