@@ -63,6 +63,9 @@ def _shot(page: Page, name: str) -> None:
 
 
 def _cell(page: Page, choice: str, part: str, end: str) -> str:
+    toggle = page.locator(f"#zone-panel-range-toggle-{choice}")
+    if toggle.get_attribute("aria-expanded") == "false":
+        toggle.click()
     return _cell_id(choice, part, end)
 
 
@@ -93,6 +96,7 @@ def test_a_narrowed_range_is_written_in_metres_into_the_picked_zones_only(tmp_pa
             ["5", "0.05"], ["10", "0.1"], ["20", "0.2"]]
         for part, end, value in (("porous", "low", "0.05"), ("porous", "high", "0.2"), ("cavity", "low", "0"), ("cavity", "high", "25")):
             expect(page.locator(_cell(page, WOOL, part, end))).to_have_value(value)
+        page.locator(f"#zone-panel-range-toggle-{THIN}").click()
         expect(page.locator(f"#zone-panel-range-{THIN}-porous")).to_be_visible()
         expect(page.locator(f"#zone-panel-range-{THIN}-cavity")).to_have_count(0)
         expect(page.locator(f"#zone-panel-range-{WOOL}")).to_contain_text("棉厚從")
@@ -110,22 +114,27 @@ def test_a_narrowed_range_is_written_in_metres_into_the_picked_zones_only(tmp_pa
 
 def test_one_zone_panel_offers_cells_only_under_ticked_tunable_materials(tmp_path: Path, browser: Browser) -> None:
     """只選一區：那一行寫「只改這一區」；拿掉 96K 的勾，96K 那一列就沒有格子（勾回來又有）；固定成品、也可以不貼沒有格子。
-    小框裡新加的字不小於 12 px、對比至少 4.5（截一張：一區改範圍的小框）。"""
+    小框裡新加的字不小於 13 px、對比至少 4.5（截一張：一區改範圍的小框）。"""
     _prepare(tmp_path, _design())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")
         expect(page.locator("#zone-panel-range-note")).to_contain_text("只改這一區，不改材料頁")
-        page.locator("#zone-panel-allow-glass_wool_96k").uncheck()
+        for choice in (WOOL, THIN, "glass_wool_96k"):
+            page.locator(f"#zone-panel-range-toggle-{choice}").click()
+        page.locator("#zone-panel-remove-glass_wool_96k").click()
         expect(page.locator("#zone-panel-range-glass_wool_96k")).to_have_count(0)
         assert page.locator("#zone-panel .zv-mrange").evaluate_all("rows => rows.map(row => row.dataset.choice)") == [WOOL, THIN]
-        page.locator("#zone-panel-allow-glass_wool_96k").check()
+        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-pick-glass_wool_96k").click()
+        expect(page.locator("#zone-panel-range-toggle-glass_wool_96k")).to_have_attribute("aria-expanded", "false")
+        page.locator("#zone-panel-range-toggle-glass_wool_96k").click()
         expect(page.locator("#zone-panel-range-glass_wool_96k")).to_be_visible()
         page.locator(_cell(page, WOOL, "porous", "high")).select_option("0.1")
         page.locator(_cell(page, WOOL, "cavity", "high")).fill("15")
         rows = cast(list[dict[str, object]], page.locator("#zone-panel").evaluate(_TEXT_STYLES))
-        assert rows and all(cast(float, row["size"]) >= 12 and cast(float, row["contrast"]) >= 4.5 for row in rows), rows
+        assert rows and all(cast(float, row["size"]) >= 13 and cast(float, row["contrast"]) >= 4.5 for row in rows), rows
         page.locator("#zone-panel").scroll_into_view_if_needed()
         _shot(page, "1-one-zone-panel")
         assert watched.page_errors == [] and watched.console_errors == []
@@ -162,6 +171,7 @@ def test_zones_with_different_ranges_show_empty_cells_and_keep_their_own_unless_
         _open_overview(page)
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         for part in ("porous", "cavity"):
             expect(page.locator(f"#zone-panel-range-{WOOL}-{part}-mixed")).to_have_text("各區不同；不動它，各區照目前的")
             for end in ("low", "high"):
@@ -364,7 +374,7 @@ def test_control_without_touching_ranges_the_saved_design_is_byte_for_byte_part_
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
         page.locator("#zone-panel-mode-search").check()
-        page.locator(f"#zone-panel-allow-{THIN}").uncheck()
+        page.locator(f"#zone-panel-remove-{THIN}").click()
         page.locator("#zone-panel-depth").fill("25")
         _apply(page)
         _click_zone(page, "x0/whole_wall")
@@ -440,6 +450,7 @@ def test_the_apply_check_needs_a_checked_answer_with_no_design_red_and_ignores_r
         _open_overview(page)
         before = page.evaluate("() => JSON.stringify(zoneDesign)")
         _click_zone(page, "yL/z1")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         page.locator(high).fill("15")
         _fake_limits(page, {"status": "room", "message": "考卷編的：房間尺寸讀不出來", "zones": {}, "walls": {}, "caps": {},
                             "red": 0, "refusals": []})
@@ -474,12 +485,14 @@ def test_cells_that_are_negative_or_not_numbers_are_refused_on_the_spot(tmp_path
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         page.locator(low).fill("-5")
         expect(page.locator("#zone-panel-problem")).to_have_text("48K 玻璃棉的空腔要填 0 以上的數字（公分）")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         page.locator("#zone-panel-cancel").click()
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         expect(page.locator(low)).to_have_value("")
         page.locator(low).focus()
         page.keyboard.type(".")
@@ -500,6 +513,7 @@ def test_a_late_limits_answer_redraws_the_page_but_keeps_the_cursor_in_the_range
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z1")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         page.locator(high).fill("1")
         page.locator(high).evaluate("cell => { cell.dataset.old = 'yes'; }")
         with page.expect_response("**/api/zone-limits"):
@@ -610,6 +624,7 @@ def test_a_verdict_landing_after_entering_a_cavity_box_never_glues_the_typed_num
         _open_overview(page)
         _settled(page)
         _click_zone(page, "yL/z2")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         expect(page.locator(box)).to_have_value("25")
         _late_verdict_redraws(page, box, lambda: _tab_into(page, box))
         page.keyboard.type("15")
@@ -627,6 +642,7 @@ def test_a_verdict_landing_mid_typing_keeps_the_half_typed_number_and_the_next_k
         _open_overview(page)
         _settled(page)
         _click_zone(page, "yL/z2")
+        page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         for box, first, second, whole in (("#zone-panel-depth", "2", "0", "20"), (cavity, "1", "5", "15")):
             def half(box: str = box, first: str = first) -> None:
                 _tab_into(page, box)

@@ -3,7 +3,7 @@
    樣稿是固定一屏；真的頁面右欄會比樣稿長（另外指定的區多），所以整頁可以捲，結果列黏在視窗底。 */
 #zone-page{--paper:#f2f4f1;--card:#ffffff;--ink:#17252c;--soft:#5b6a70;--line:#c3cbc9;
   --search:#f1bb3c;--search-soft:#fdf1d0;--fixed:#17616b;--fixed-soft:#dcecec;--still:#dfe3e0;
-  width:1400px;min-height:100vh;margin:0 auto;background:var(--paper);color:var(--ink);font-size:15px;line-height:1.55;
+  width:clamp(1280px,100%,1440px);min-height:100vh;margin:0 auto;background:var(--paper);color:var(--ink);font-size:15px;line-height:1.55;
   font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","WenQuanYi Zen Hei",sans-serif}
 #zone-page *{box-sizing:border-box}
 body.zone-page-open{background:#f2f4f1}
@@ -11,11 +11,11 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-head h1{font-size:23px;font-weight:600;margin:0;line-height:58px;letter-spacing:.02em}
 #zone-page .zv-head p{margin:0;color:var(--soft);font-size:14px}
 #zone-page .zv-head .zv-link{margin-left:auto;font-size:14px}
-#zone-page .zv-main{display:grid;grid-template-columns:954px 1fr;gap:22px;padding:12px 24px 0 24px;min-height:814px}
-#zone-page .zv-mapwrap{position:relative;width:954px}
+#zone-page .zv-main{display:grid;grid-template-columns:898px 1fr;gap:22px;padding:12px 24px 0 24px;min-height:814px}
+#zone-page .zv-mapwrap{position:relative;width:898px}
 
 /* 四面牆、地板、天花 */
-#zone-page svg.zv-map{display:block;width:954px;height:auto;background:none;border:0}
+#zone-page svg.zv-map{display:block;width:898px;height:auto;background:none;border:0}
 #zone-page .zv-map text{font-family:inherit}
 #zone-page .zv-map{fill:var(--ink)}
 #zone-page .zv-zone .zv-fill{stroke:#3d3a2e;stroke-opacity:.6;stroke-width:1.2}
@@ -296,7 +296,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 
 /* 「鋼板直接貼在棉上」的構造（#1208）：面板曲線界線以下的淡藍底、圖例那一行與「為什麼」（樣式同材料頁那一份）。 */
 #zone-page .zv-ref-band{fill:rgba(60,120,210,.16)}
-#zone-page .ref-note{margin:.4rem 0 .1rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;font-size:12.5px;text-align:left}
+#zone-page .ref-note{margin:.4rem 0 .1rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;font-size:13px;text-align:left}
 #zone-page .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid #9db9e0}
 #zone-page .ref-note details{display:inline}
 #zone-page .ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap}
@@ -304,3 +304,56 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .ref-note details[open] summary::after{content:" ▾"}
 #zone-page .ref-note details[open] p{display:block;margin:.35rem 0 .1rem;color:#5b6a70;white-space:normal}
 #zone-page .zv-rule-ref{margin:6px 0 0;font-size:13px;color:#33434b}
+
+/* 小框：候選與這幾區的限制，套用前都只改草稿。 */
+#zone-page #zone-panel :is(small,.zv-now,.zv-now-tag,.zv-same,.zv-cancel-note,.zv-unit,.zv-num,
+  .zv-cap,.zv-axis,.zv-layers,.zv-tick,.zv-from,.zv-range-note,.zv-range-note a,.zone-candidate-cost,
+  .zv-form details,.zv-cutaway,.zv-kind,.zv-covered-why,.zv-owned){font-size:13px}
+#zone-page #zone-panel button:disabled{opacity:1;color:#445056;background:#e9eeec}
+#zone-page .zv-method-counts,#zone-page .zv-start-note,#zone-page .zv-list-hint{font-size:13px;margin:5px 0;color:#445158}
+#zone-page .zv-form{padding:8px 11px;margin-top:9px;overflow-wrap:anywhere}
+#zone-page .zv-form h3{font-size:16px;margin:0}
+#zone-page .zv-form .zv-deepest{margin:5px 0;padding:6px 0;border-block:1px solid #e6d9af}
+#zone-page .zv-candidate{position:relative;display:grid;grid-template-columns:33px minmax(0,1fr);gap:2px 9px;
+  border-top:1px solid #dfd2aa;padding:8px 0}
+#zone-page .zv-candidate > :not(.zv-cutaway){grid-column:2}
+#zone-page .zv-candidate-head{display:flex;align-items:baseline;gap:6px;line-height:1.4;font-size:15px}
+#zone-page .zv-kind{flex:none;padding:0 5px;background:white;border:1px solid #586870;color:#3c4d58;border-radius:4px}
+#zone-page .zv-kind.fixed{background:#283a42;color:white}
+#zone-page .zv-cutaway{grid-column:1;grid-row:1 / span 3;width:33px;height:27px;display:flex;margin-top:3px;align-self:start}
+#zone-page .zv-cutaway:not(:empty)::after{content:"";width:5px;background:repeating-linear-gradient(45deg,#586a70 0 1px,#d5dddd 1px 4px);border:1px solid #586a70}
+#zone-page .zv-slab{flex:1;background:#c6bda8;border:1px solid #67787d}
+#zone-page .zv-slab.porous{background:radial-gradient(circle,#698b91 1px, transparent 1.4px) 0 0/5px 5px,#e7efee}
+#zone-page .zv-slab.air{border-style:dashed;background:white}
+#zone-page button.zv-remove{margin-left:auto;align-self:start;color:#465860;background:transparent;border:0;font:inherit;font-size:19px;
+  padding:0 5px;line-height:22px}
+#zone-page .zv-description{display:block;font-size:13.5px;color:#35454c}
+#zone-page .zv-narrow{margin-left:6px;color:#69418a;font-size:13px}
+#zone-page .zv-candidate-actions,#zone-page .zv-dots{display:flex;align-items:center;flex-wrap:wrap;gap:5px}
+#zone-page .zv-candidate-actions:empty,#zone-page .zv-dots:empty{display:none}
+#zone-page .zv-candidate-actions{margin-top:2px}
+#zone-page .zv-candidate-actions button.zv-link,#zone-page .zv-notice button{font-size:13px;color:#344d72}
+#zone-page .zv-candidate-actions .zv-mini{font:inherit;font-size:13px;line-height:1.5;padding:1px 7px;color:#34444d;background:white;border:1px solid #6b777b;border-radius:5px}
+#zone-page .zv-candidate-actions [id^="zone-panel-only-"]{margin-left:auto}
+#zone-page .zv-dots .has{background:#26383f;color:white;border-color:#26383f}
+#zone-page .zv-dots .absent{color:#46545b;border:1.5px dashed #58666c;background:#fff}
+#zone-page .zv-candidate .zv-mrange{margin:3px 0 0;padding:5px 7px;background:white;border:1px solid var(--line);border-radius:5px}
+#zone-page .zv-current-ranges{flex-basis:100%}
+#zone-page .zv-candidate details p{margin:4px 0}
+#zone-page .zv-notice{padding:6px 8px;border-left:3px solid #567390;background:#eef3f8;color:#263c51;font-size:13px;margin:6px 0}
+#zone-page .zv-notice button{margin-left:7px}
+#zone-page button.zv-add-candidate{width:100%;text-align:left;padding:6px 9px;border:1px solid #57686e;border-radius:6px;background:white;color:var(--ink);font:inherit}
+#zone-page .zv-add-candidate::after{content:"▾";float:right}
+#zone-page .zv-picker{background:white;border:1.5px solid #586970;border-radius:6px;margin-top:4px;overflow:hidden}
+#zone-page .zv-picker label{display:inline-block;font-size:14px;margin:7px 8px}
+#zone-page .zv-picker input{width:calc(100% - 78px);color:var(--ink);font:inherit;padding:4px 7px}
+#zone-page .zv-picker-results{max-height:310px;overflow:auto}
+#zone-page .zv-group-head{display:flex;align-items:baseline;gap:7px;background:#e9eeed;padding:5px 8px;color:#34464c;font-size:13px}
+#zone-page .zv-group-head strong{flex:none;font-size:14px}
+#zone-page button.zv-pick-option{width:100%;display:block;border:0;border-top:1px solid #d9e1df;border-radius:0;padding:6px 9px;text-align:left;
+  font:inherit;background:white;color:var(--ink)}
+#zone-page .zv-pick-option:enabled:hover,#zone-page .zv-pick-option:focus-visible{background:#eaf1f6}
+#zone-page .zv-pick-option mark{background:#e4ebfa;color:#283e66;font-weight:700}
+#zone-page .zv-pick-option small,#zone-page .zv-picker-foot{display:block}
+#zone-page .zv-owned{margin-left:6px}
+#zone-page .zv-picker-foot,#zone-page .zv-picker-results > p{margin:0;padding:6px 9px;color:#46545b}

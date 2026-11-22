@@ -165,10 +165,6 @@ function queuePreviews() {
   void drawPreviews();
 }
 
-function catalogKind(entry) {
-  return entry.kind === "fixed" || (entry.kind === "construction" && entry.product) ? "fixed" : "optimizable";
-}
-
 function renderCatalog(rows) {
   const legend = byId("source-legend");
   legend.replaceChildren(el("strong", {text:"數據來源怎麼看"}));

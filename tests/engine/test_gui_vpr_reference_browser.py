@@ -1,9 +1,5 @@
 """真瀏覽器考「鋼板直接貼在棉上」的構造（#1208 第 1 支）在材料庫頁與分區頁看到什麼。
-
-資料全是自編的：材料是 ``test_gui_vpr_reference`` 那兩筆（同樣的鋼板與棉，一筆背襯黏住、一筆沒有），房間是左右對稱考卷
-那間假房間（5.0 × 4.0 × 2.7 m）。畫面上的字逐字跟伺服器那一份（``reference_only.words``）比；那一份的原文另由函式層考卷釘住。
-曲線要雙精度，材料庫頁與面板曲線那幾題的伺服器用正式網頁入口起在獨立行程（``real_server``）。
-"""
+資料使用自編對稱房與鋼板構造，文案逐字與伺服器比對，曲線由獨立行程以雙精度計算。"""
 from __future__ import annotations
 
 import json
@@ -21,6 +17,8 @@ from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_BONDED, STEEL_2_5MM
 from tests.engine.test_gui_vpr_reference import ENTRIES, HIT, HIT_LABEL, PLAIN_ID, _ENTRY, _fixed, _write_user_library
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
+
+from tests.engine.test_gui_zone_material_pick_browser import _add_candidate
 
 COMPUTED_MS = 60_000  # 等伺服器算完曲線的上限（冷行程第一次算一種新構造要編譯）
 WORDS = reference_only.words()
@@ -211,17 +209,17 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         _open_page(page)
         _click_zone(page, "y0/s")
         page.locator("#zone-panel-mode-search").check()
-        page.locator("#zone-panel-fixed summary").click()
-        row = page.locator(f"#zone-panel-fixed label[data-choice='{HIT}']")
-        expect(row).to_have_class("zv-mrow zv-covered")
+        page.locator("#zone-panel-add").click()
+        row = page.locator(f"#zone-panel-pick-{HIT}")
+        expect(row.locator(".zv-covered-why")).to_be_visible()
         expect(row).to_have_attribute("data-reference", "off")
-        expect(page.locator(f"#zone-panel-allow-{HIT}")).to_be_disabled()
-        expect(page.locator(f"#zone-panel-allow-{HIT}")).not_to_be_checked()
+        expect(row).to_be_disabled()
+        expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
         expect(row.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
-        plain = page.locator(f"#zone-panel-fixed label[data-choice='{PLAIN_ID}']")
-        expect(plain).to_have_class("zv-mrow")
+        plain = page.locator(f"#zone-panel-pick-{PLAIN_ID}")
+        expect(plain).to_be_enabled()
         expect(plain.locator(".zv-covered-why")).to_have_count(0)
-        page.locator(f"#zone-panel-allow-{PLAIN_ID}").check()
+        plain.click()
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 5 種裡選，每一區各自最佳化。")
         _apply(page)
         assert _allowed(page) == {"y0/s": [*WOOLS, PLAIN_ID]}
@@ -260,22 +258,22 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         assert not page.url.endswith("/gradient") and "gradient?" not in page.url
         # 面板：勾著、灰字、可取消；N 不算它（48K 與不貼＝2 種）。
         _click_zone(page, "x0/a")
-        expect(page.locator("#zone-panel-fixed summary")).to_contain_text("勾了 1 種")
-        page.locator("#zone-panel-fixed summary").click()
-        row = page.locator(f"#zone-panel-form label[data-choice='{HIT}']")
-        box = page.locator(f"#zone-panel-allow-{HIT}")
+        expect(page.locator("#zone-panel-list [data-kind=fixed]")).to_have_count(1)
+        row = page.locator(f"#zone-panel-row-{HIT}")
+        box = page.locator(f"#zone-panel-remove-{HIT}")
         expect(row).to_have_attribute("data-reference", "listed")
-        expect(row).to_have_class("zv-mrow zv-covered")
+        expect(row.locator(".zv-covered-why")).to_be_visible()
         expect(row.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["listed_why"]))
-        expect(box).to_be_checked()
+        expect(row).to_have_attribute("data-state", "all")
         expect(box).to_be_enabled()
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 2 種裡選，每一區各自最佳化。")
-        box.uncheck()
-        box = page.locator(f"#zone-panel-allow-{HIT}")
-        expect(box).not_to_be_checked()
+        box.click()
+        expect(row).to_have_count(0)
+        page.locator("#zone-panel-add").click()
+        box = page.locator(f"#zone-panel-pick-{HIT}")
         expect(box).to_be_disabled()
-        expect(page.locator(f"#zone-panel-form label[data-choice='{HIT}']")).to_have_attribute("data-reference", "off")
-        expect(page.locator(f"#zone-panel-form label[data-choice='{HIT}'] .zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
+        expect(page.locator(f"#zone-panel-pick-{HIT}")).to_have_attribute("data-reference", "off")
+        expect(page.locator(f"#zone-panel-pick-{HIT} .zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
         _apply(page)
         assert _allowed(page) == {"x0/a": ["glass_wool_48k", "none"]}
         expect(page.locator("#zone-page-blocked")).to_have_count(0)
@@ -312,21 +310,22 @@ def test_a_half_ticked_one_can_only_be_taken_off_and_never_spreads_to_the_other_
         _open_page(page)
         _click_zone(page, "x0/a")
         _click_zone(page, "x0/b")
-        box = page.locator(f"#zone-panel-allow-{HIT}")
-        assert box.evaluate(_STATE) == "some"
+        box = page.locator(f"#zone-panel-remove-{HIT}")
+        expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_attribute("data-state", "some")
+        expect(page.locator(f"#zone-panel-addto-{HIT}")).to_have_count(0)
         expect(box).to_be_enabled()
-        page.locator("#zone-panel-allow-glass_wool_48k").uncheck()  # 動別的勾（兩區都有的 48K），命中那一格不碰
+        page.locator("#zone-panel-remove-glass_wool_48k").click()  # 動別的勾（兩區都有的 48K），命中那一格不碰
         _apply(page)
         assert _allowed(page) == {"x0/a": [HIT, "none"], "x0/b": ["glass_wool_24k", "glass_wool_96k", "none"]}
         _click_zone(page, "x0/a")
         _click_zone(page, "x0/b")
-        box = page.locator(f"#zone-panel-allow-{HIT}")
-        assert box.evaluate(_STATE) == "some"
-        page.locator("#zone-panel-fixed summary").click()
+        box = page.locator(f"#zone-panel-remove-{HIT}")
+        expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_attribute("data-state", "some")
+        expect(page.locator(f"#zone-panel-addto-{HIT}")).to_have_count(0)
         box.click()
-        box = page.locator(f"#zone-panel-allow-{HIT}")
-        assert box.evaluate(_STATE) == "none"
-        expect(box).to_be_disabled()
+        expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
+        page.locator("#zone-panel-add").click()
+        expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
         _apply(page)
         assert _allowed(page) == {"x0/a": ["none"], "x0/b": ["glass_wool_24k", "glass_wool_96k", "none"]}
         assert (watched.console_errors, watched.page_errors) == ([], [])
@@ -362,7 +361,7 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
         assert _allowed(page) == {"x0/a": [HIT, "none"]}
         _click_zone(page, "y0/s")
         page.locator("#zone-panel-mode-search").check()
-        expect(page.locator(f"#zone-panel-allow-{HIT}")).not_to_be_checked()
+        expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
         _apply(page)
         assert HIT not in _allowed(page)["y0/s"] and _allowed(page)["x0/a"] == [HIT, "none"]
         # ① 規則改成由程式最佳化：沒另外指定的區全部交給程式，一區都不帶它。
@@ -721,7 +720,7 @@ def test_splitting_a_shared_list_hides_the_old_sentence_everywhere_until_the_new
         expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
-        page.locator("#zone-panel-allow-glass_wool_24k").check()
+        _add_candidate(page, "glass_wool_24k")
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         page.wait_for_function("zoneDesign.zones.x0.a.allowed.includes('glass_wool_24k')")
@@ -747,8 +746,7 @@ def test_a_sentence_for_a_list_that_no_longer_has_it_is_hidden_until_the_new_che
         expect(page.locator(_CARD_SENTENCES)).to_have_text([_refused(page, "x0/a")])
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
-        page.locator("#zone-panel-fixed summary").click()
-        page.locator(f"#zone-panel-allow-{HIT}").uncheck()
+        page.locator(f"#zone-panel-remove-{HIT}").click()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         page.wait_for_function("zoneDesign.zones.x0.a.allowed.length === 2")
@@ -774,7 +772,7 @@ def test_merging_into_a_shared_list_hides_the_old_sentences_everywhere_until_the
         assert sorted(page.locator(_CARD_SENTENCES).all_text_contents()) == sorted(old)
         limits = _HeldLimits(page)
         _click_zone(page, "y0/s")
-        page.locator("#zone-panel-allow-glass_wool_48k").check()
+        _add_candidate(page, "glass_wool_48k")
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         page.wait_for_function("zoneDesign.zones.y0.s.allowed.includes('glass_wool_48k')")
@@ -896,8 +894,7 @@ def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_ne
         expect(page.locator("#zone-page-blocked")).to_have_text(both)
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
-        page.locator("#zone-panel-fixed summary").click()
-        page.locator(f"#zone-panel-allow-{HIT}").uncheck()
+        page.locator(f"#zone-panel-remove-{HIT}").click()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         page.wait_for_function("zoneDesign.zones.x0.a.allowed.length === 2 && zoneLimitsShown !== zoneLimitsGeneration")

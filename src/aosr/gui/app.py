@@ -89,7 +89,7 @@ STANDING_TEXT = {
 STATIC_NAMES = {"material-tuning.js", "app.js", "home.js", "walls.js", "elevation.js", "zone_names.js", "zone_modes.js", "zone_limits.js", "zone_rules.js", "zone_overview.js", "zone_overview.css", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
-                "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css"}
+                "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css"}
 
 
 def repo_root() -> Path:
