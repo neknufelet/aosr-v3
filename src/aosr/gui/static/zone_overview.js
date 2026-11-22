@@ -832,8 +832,8 @@ async function rangesPass(items, method) {
 }
 // 小框選了由程式最佳化、現在這樣套不套得下去：回一句為什麼不行，可以就回空字串。每一個選中的區各自看它套用後的清單。
 function draftProblem(items) {
-  if (draft?.mode !== "search") return "";
-  const ticks = panelTicks(items);
+  if (!draft || draft.mode === "keep_original") return "";
+  const ticks = draft.mode === "search" && panelTicks(items);
   if (ticks) {
     const who = index => items.length > 1 ? `${zoneWhereText(items[index])}：` : "";
     const empty = ticks.lists.findIndex(list => !list.length);
@@ -844,11 +844,16 @@ function draftProblem(items) {
     if (ranged.problem) return ranged.problem;
   }
   if (Number.isNaN(draftDepth(items))) return `「最深」要填大於 0 的數字（公分，最少 0.1）；空白＝${blankDepthWords(items)}`;
-  return draft.rangeRefused;
+  return draft.mode === "search" ? draft.rangeRefused : "";
 }
 async function applyDraft() {
   const items = chosenItems();
-  if (draft.mode !== "search") { await applyMethod(items, {mode: draft.mode, materialId: draft.materialId}, () => select([])); return; }
+  if (draft.mode !== "search") {
+    const method = {mode: draft.mode, materialId: draft.materialId};
+    if (method.mode === "fixed") method.depth = draftDepth(items);
+    await applyMethod(items, method, () => select([]));
+    return;
+  }
   // 由程式最佳化：只寫選中的區。每一區寫它自己的清單照動過的勾加減之後的那一份；勾都沒動、那一區本來就是由程式最佳化，
   // 清單就不碰（只改最深時清單一個字都不動）。沒選中的區一律不寫。
   const ticks = draft.ticks, moved = Object.keys(ticks).length > 0;
@@ -1446,7 +1451,11 @@ function panelCard() {
     }
     row.append(radio, body, el("span", `zv-sw ${shownOf(mode)}`));
     card.append(row);
-    if (mode === "fixed" && draft?.mode === "fixed" && draft.materialId && libraryEntry(draft.materialId)) card.append(materialShow(libraryEntry(draft.materialId), walls[0]));
+    if (mode === "fixed" && draft?.mode === "fixed") {
+      const entry = libraryEntry(draft.materialId);
+      if (entry) card.append(materialShow(entry, walls[0]));
+      card.append(deepestRow(items, walls, sync));
+    }
     if (mode === "search" && draft?.mode === "search") card.append(...searchForm(items, walls, sync));
   }
   const foot = el("div", "zv-editfoot");
