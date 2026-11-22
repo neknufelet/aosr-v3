@@ -205,8 +205,9 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-head .zv-unsaved + .zv-link{grid-column:3;grid-row:1 / 3;align-self:center}
 /* 底列黏在視窗下緣：瀏覽器自己把東西捲進畫面時（跳到某一格、Tab 走到某一格）讓出底列那一段，不讓它停在底列底下 */
 html.zone-page-open{scroll-padding-bottom:112px}
-/* #1199：牆名旁「選整面」、小框標題那一行、整面一行、「目前」小標、取消鈕旁那一句 */
-#zone-page button.zv-whole{position:absolute;transform:translateX(-100%);border:1.5px solid var(--ink);border-radius:7px;background:#fff;color:var(--ink);
+/* #1199：牆名旁「選整面」（#1262 起跟「切區 ▸」排成一組）、小框標題那一行、整面一行、「目前」小標、取消鈕旁那一句 */
+#zone-page .zv-face-tools{position:absolute;transform:translateX(-100%);display:flex;gap:6px}
+#zone-page button.zv-whole{border:1.5px solid var(--ink);border-radius:7px;background:#fff;color:var(--ink);
   font:inherit;font-size:12.5px;font-weight:600;line-height:19px;padding:0 7px;white-space:nowrap;cursor:pointer}
 #zone-page .zv-ehead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 #zone-page .zv-ehead h2{margin:0 0 5px}
