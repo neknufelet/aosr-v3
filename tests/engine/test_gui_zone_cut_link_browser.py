@@ -1,6 +1,6 @@
 """真瀏覽器考「這間房貼什麼」每一面的「切區 ▸」（#1262）：畫框在「房間方案輸入」的立面圖，這一頁只選區、選貼什麼；
-按「切區 ▸」回輸入頁、打開那一面的立面圖。切過之後回來，選到的區換了一塊長方形就不再算選著（自動補滿的區會重新編號，
-同一個代號可能指到另一塊）。牆窄的時候，牆名那一行的字讓出右邊兩顆鈕，不疊在一起。
+按「切區 ▸」回輸入頁、打開那一面的立面圖。切過之後回來，選到的區代號不在了、或換了一塊長方形，就不再算選著
+（自動補滿的區會重新編號，同一個代號可能指到另一塊）。牆窄的時候，牆名那一行的字讓出右邊兩顆鈕，不疊在一起。
 
 房間用區名考卷那間假房間（``_zone_naming_room``，數字是考卷自己編的）；窄房間是同一份改的，尺寸也是這裡自己編的。"""
 from __future__ import annotations
@@ -130,12 +130,30 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         # 三、對照：選右牆一區，切前牆（右牆不動），回來照樣選著、不講那一句。
         _click_zone(page, "xL/auto3")
         expect(page.locator("#zone-panel")).to_be_visible()
+        expect(page.locator("#zone-panel-mode-search")).not_to_be_checked()  # 上一段丟掉的草稿沒有帶過來
         page.locator("#zone-cut-yL").click()
         _drag(page, *FRONT_SIZE, (2.35, 0.2), (2.85, 0.6))
         _back_to_overview(page)
         assert page.evaluate(_SELECTED) == ["xL/auto3"]
         expect(page.locator("#zone-panel")).to_be_visible()
         assert "重切過" not in _said(page)
+
+
+def test_all_dropped_with_an_untouched_panel_says_nothing_about_changes(tmp_path: Path, browser: Browser) -> None:
+    """選了左牆整面、小框開著但沒動過，切開那一面再回來：一區都不剩，那一句不提「還沒套用的改動」（本來就沒有）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "x0/whole_wall")
+        expect(page.locator("#zone-panel")).to_be_visible()
+        page.locator("#zone-cut-x0").click()
+        _drag(page, 5.5, 3.15, (2.0, 1.0), (3.0, 2.0))
+        _back_to_overview(page)
+        assert page.evaluate(_SELECTED) == []
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        assert _said(page) == "剛才選的區有 1 區那一面重切過，已經不是原來那一塊，不再算選著，要的話重新選"
 
 
 def test_changing_room_size_keeps_the_selection(tmp_path: Path, browser: Browser) -> None:
