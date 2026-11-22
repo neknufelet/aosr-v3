@@ -44,7 +44,7 @@
    原因與切法點開「配對細節」才看得到；底下那一條照單位數寫幾對一起調、幾區各自調。 */
 (() => {
 const SVG_NS = "http://www.w3.org/2000/svg";
-const MAP_WIDTH = 954;          // 左邊那張圖的寬（px，樣稿）
+const MAP_WIDTH = 898;          // 左邊那張圖的寬（px，樣稿）
 const WALL_GAP = 26;            // 同一排兩面牆中間的空
 const WALL_ROW_HEIGHT = 224;    // 一面牆最高畫多高（px）
 const TILE_DEPTH = 190, TILE_WIDTH = 140;  // 地板、天花那兩張小圖最大的深與寬（px）
@@ -504,11 +504,11 @@ function legend() {
 /* ───── 選取與改動 ───── */
 function chosenItems() { return selected.map(id => view.byId.get(id)).filter(Boolean); }
 // 小框裡由程式最佳化那一塊的草稿（#1199），套用才寫進設計檔，取消就丟：
-// ticks：使用者在小框裡動過的勾（材料代號 → 勾上 true／拿掉 false）；沒動過的代號不在裡面，套用時那一種各區照目前的；
+// ticks：使用者在小框裡動過的勾（材料代號 → add 只補、only 只留可貼的區、remove 拿掉）；沒動過的代號不在裡面，套用時那一種各區照目前的；
 // depthText：「最深」那一格打的字（公分；沒動過是 null）；depthBad：打的不成數字；
 // ranges：範圍格子打的字（材料代號 → {porous: [從, 到], cavity: [從, 到]}，棉厚是下拉的值、空腔是公分，沒動過的那一格是 null）；
 // rangeRefused：套用前伺服器判範圍紅的那幾句（改了任何一格就清掉）。
-function untouched() { return {ticks: {}, depthText: null, depthBad: false, ranges: {}, rangeRefused: ""}; }
+function untouched() { return {ticks: {}, history: [], expanded: [], query: null, notice: "", order: null, depthText: null, depthBad: false, ranges: {}, rangeRefused: ""}; }
 // 面板一打開先點在哪一項：選到的區是同一種做法就點那一項（指定貼的：貼的都是同一筆才帶出那一筆），不一樣就都不點。
 function startingDraft() {
   const items = chosenItems();
@@ -520,13 +520,20 @@ function startingDraft() {
 }
 function select(ids) {
   selected = ids; draftTouched = false; ruleDraft = false; listAdding = null;
-  openDetails.delete("zone-panel-fixed"); openDetails.delete("zone-panel-zones"); openDetails.delete("zone-panel-ref-why");
+  openDetails.delete("zone-panel-zones"); openDetails.delete("zone-panel-ref-why");
   draft = startingDraft();
   renderZoneOverview();
 }
 // 換成選這幾區：面板上已經自己點過選項就留著（只換選了哪幾區），沒點過就照新選的那幾區重新起頭。
 function pick(next) {
-  if (draftTouched && next.length) { selected = next; renderZoneOverview(); return; }
+  if (next.length === selected.length && next.every(id => selected.includes(id))) return;
+  if (draftTouched && next.length) {
+    selected = next;
+    const discarded = Object.keys(draft.ticks).length || Object.keys(draft.ranges).length;
+    draft = {...untouched(), mode: draft.mode, materialId: draft.materialId, depthText: draft.depthText, depthBad: draft.depthBad};
+    if (discarded) draft.notice = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
+    renderZoneOverview(); return;
+  }
   select(next);
 }
 function toggleSelected(id) { pick(selected.includes(id) ? selected.filter(other => other !== id) : [...selected, id]); }
@@ -569,8 +576,10 @@ function ownList(item) { return item.mode === "search" ? item.allowed : listForW
 function tickedList(item, ticks) {
   const own = ownList(item);
   if (!own) return null;
-  const next = own.filter(id => ticks[id] !== false);
-  for (const [id, on] of Object.entries(ticks)) if (on && !next.includes(id) && fitsHere(id, item.wall)) next.push(id);
+  const next = own.filter(id => ticks[id] !== "remove" && (ticks[id] !== "only" || fitsHere(id, item.wall)));
+  for (const [id, action] of Object.entries(ticks)) {
+    if (action !== "remove" && !next.includes(id) && fitsHere(id, item.wall)) next.push(id);
+  }
   return next;
 }
 // 把好幾區一次改成同一個做法。method：{mode, materialId（指定貼哪一筆；空的＝照現在貼的不換）, allowed（由程式最佳化的清單：
@@ -684,8 +693,7 @@ function panelTicks(items) {
   const count = id => lists.filter(list => list.includes(id)).length;
   // 「幾區有」只算貼得了這一種的區（清單裡本來就有的也算）：那一面貼不了的區不算進分母，不然永遠湊不滿。
   const able = id => items.filter((item, index) => lists[index].includes(id) || fitsHere(id, item.wall)).length;
-  // 使用者動過的勾照他點的（勾上就是勾、拿掉就是空），不再重算；第三種狀態只給還沒動過的。
-  const state = id => id in draft.ticks ? (draft.ticks[id] ? "all" : "none") : count(id) === able(id) && count(id) ? "all" : count(id) ? "some" : "none";
+  const state = id => !count(id) ? "none" : count(id) === able(id) ? "all" : "some";
   return {lists, ids, count, able, state};
 }
 // 「最深」那一格打開時顯示什麼（公分）：選到的區都一樣就帶出來，不一樣、或都沒有，就是空的。
@@ -964,44 +972,15 @@ function coveredProducts(list) {
   return covered;
 }
 function coveredWhy(family) { return `上面可調的 ${shortLabel(family)} 已經包含它；只想用成品，先取消上面的 ${shortLabel(family)}`; }
-// 材料框裡的一列（#1199）：勾選格、名字、底下一行小字（可調的寫調什麼、從多少到多少——只是字，這一支不能改；固定成品寫總厚）。
-// covered：這一筆成品已經被哪一筆勾著的可調材料包含（那一筆的 preset_members）——灰掉、勾不了，寫為什麼；
-// 清單裡本來就同時存著兩筆的照樣勾著、可以取消（只是顯示，不替使用者改寫）。
-// ticks：panelTicks 的結果。貼得了的區全有＝勾、全沒有＝空、有的有有的沒有＝第三種狀態（indeterminate，只給使用者還沒動過的勾），旁邊寫幾區有。
-function tickBox(id, ticks, toggle) {
-  const check = el("input"); check.type = "checkbox"; check.id = `zone-panel-allow-${id}`;
-  check.checked = ticks.state(id) === "all"; check.indeterminate = ticks.state(id) === "some";
-  check.onchange = () => toggle(id, check.checked);
-  return check;
-}
 // 勾旁邊那一句：第三種狀態寫貼得了的區裡幾區有；勾著、但選中的區裡有那一面貼不了的（tickedList 不會加），照實講有幾區不會加。
-function someWords(id, ticks) {
-  const all = ticks.lists.length, unable = all - ticks.able(id);
+function someWords(id, ticks, items) {
+  const all = items.length, fitting = items.filter(item => fitsHere(id, item.wall)).length;
+  const unable = all - fitting;
   if (ticks.state(id) === "some") {
-    return [el("small", "zv-some", `${unable ? `貼得了這一種的 ${ticks.able(id)} 區` : `選中的 ${all} 區`}裡 ${ticks.count(id)} 區有；不動它，各區照目前的`)];
+    const group = unable && fitting === ticks.able(id) ? `貼得了這一種的 ${fitting} 區` : `選中的 ${all} 區`;
+    return [el("small", "zv-some", `${group}裡 ${ticks.count(id)} 區有；不動它，各區照目前的${unable ? `；${unable} 區那一面貼不了這一種，不會加` : ""}`)];
   }
   return ticks.state(id) === "all" && unable ? [el("small", "zv-some", `選中的 ${all} 區裡 ${unable} 區那一面貼不了這一種，不會加`)] : [];
-}
-// 「鋼板直接貼在棉上」的構造（#1208，referenceOnly）照同一套畫：還沒勾的灰掉、勾不了、寫為什麼；選中的區裡本來就有它的
-// 照樣勾著（或第三種狀態）、灰字、可以取消——點它一律是拿掉（不會加到還沒有它的區），拿掉之後勾不回來。
-function materialRow(entry, ticks, covered, toggle) {
-  const reference = referenceOnly(entry.id), listed = reference && ticks.state(entry.id) !== "none";
-  const row = el("label", `zv-mrow${covered || reference ? " zv-covered" : ""}`); row.dataset.choice = entry.id; row.dataset.kind = entry.kind;
-  const check = tickBox(entry.id, ticks, reference ? id => toggle(id, false) : toggle);
-  check.disabled = (Boolean(covered) || reference) && ticks.state(entry.id) === "none";
-  const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", vprWords(shortLabel(entry))));
-  if (entry.kind === "optimizable") words.append(el("small", "zv-range", adjustWords(entry)));
-  else if (fixedDepthWords(entry)) words.append(el("small", null, fixedDepthWords(entry)));
-  if (reference) {
-    row.dataset.reference = listed ? "listed" : "off";
-    words.append(el("small", "zv-covered-why", listed ? zoneReference.listed_why : zoneReference.search_why));
-  } else if (covered) {
-    row.dataset.covered = covered.id;
-    words.append(el("small", "zv-covered-why", coveredWhy(covered)));
-  }
-  words.append(...someWords(entry.id, ticks));
-  row.append(check, words);
-  return row;
 }
 // 勾著的一種可調材料底下那一列（#1199）：棉厚兩個下拉（那份材料的產品厚度）、空腔兩格（公分；材料沒有空腔就沒有）。
 // 帶出會拿到這一種的區現在用的（都一樣才帶，各區不同就空著、旁邊寫一句）。選、打字只記草稿、就地更新套用鈕（sync），不重畫。
@@ -1035,6 +1014,11 @@ function rangeRow(entry, items, ticks, sync) {
     const group = el("span", "zv-rpart"); group.id = `zone-panel-range-${entry.id}-${part}`;
     group.append(el("span", "zv-rname", RANGE_WORDS[part]), "從", cell(part, 0), "到", cell(part, 1), el("span", "zv-unit", "cm"));
     if (!shown[part]) { const mixed = el("small", "zv-mixed", "各區不同；不動它，各區照目前的"); mixed.id = `${group.id}-mixed`; group.append(mixed); }
+    if (!shown[part]) {
+      const values = items.flatMap((item, index) => ticks.lists[index].includes(entry.id)
+        ? [`${item.label.numberText} ${cmPair(ownRange(item, entry)[part])}`] : []);
+      group.append(el("small", "zv-current-ranges", values.join("、") + " cm"));
+    }
     row.append(group);
   }
   return [row];
@@ -1054,46 +1038,331 @@ function deepestRow(items, walls, sync) {
     el("small", null, `從${from}往房間算，貼上去的總厚不超過它；空白＝${blankDepthWords(items)}`));
   return row;
 }
-// 小框選了由程式最佳化之後的那一塊（#1199，照樣稿）：材料框（可調的一種一列攤開、材料庫找不到的代號照列、固定成品收在摺疊裡
-// 寫幾種勾了幾種），框外兩項（也可以不貼、最深）。勾與最深都只改草稿，套用才寫，而且只寫選中的區。
+// 草稿的順序獨立於各區存檔順序：跨區第一次出現的先列，剛加入的接在後面。
+function candidateIds(ticks) {
+  const order = new Set([...(draft.order ?? []), ...ticks.ids]);
+  return [...order].filter(id => id !== ZONE_NONE && ticks.count(id));
+}
+function candidateName(id) { return id === ZONE_NONE ? "也可以不貼" : vprWords(choiceName(id)); }
+function zoneNumbers(items) {
+  const walls = [...new Set(items.map(item => item.wall))];
+  return walls.map(wall => (walls.length > 1 ? wallNames[wall] : "") +
+    items.filter(item => item.wall === wall).map(item => item.label.numberText).join("")).join("、");
+}
+function candidateAction(items, ticks, id, operation) {
+  const before = {ticks: {...draft.ticks}, removedRanges: {}, order: candidateIds(ticks),
+                  expanded: draft.expanded, notice: draft.notice};
+  const name = candidateName(id), only = operation === "only", add = operation !== "remove";
+  // 「加到」保留草稿裡已有的；先前已拿掉的不能從存檔復活，只在可貼的區補回。
+  const previouslyCleared = draft.ticks[id] === "remove" || draft.ticks[id] === "only";
+  draft.ticks = {...draft.ticks, [id]: operation === "add" && previouslyCleared ? "only" : operation};
+  const cleared = only ? before.order.filter(other => other !== id) : [];
+  for (const other of cleared) draft.ticks[other] = "remove";
+  const after = panelTicks(items);
+  for (const other of before.order) {
+    if (!after.count(other) && other in draft.ranges) {
+      before.removedRanges[other] = draft.ranges[other];
+      delete draft.ranges[other];
+    }
+  }
+  draft.expanded = draft.expanded.filter(other => after.count(other));
+  const changed = items.filter((item, i) => !sameList(after.lists[i], ticks.lists[i]));
+  const words = [];
+  if (only) {
+    words.push(`已只留 ${name}（${zoneNumbers(items)}）`);
+    if (cleared.length) words.push("清掉 " + cleared.map(other => `${candidateName(other)}（${ticks.count(other)} 區有）`).join("、"));
+    if (changed.length) words.push(`改了 ${zoneNumbers(changed)}`);
+    items.forEach((item, index) => {
+      if (!after.lists[index].includes(id)) {
+        const who = item.label.numberText;
+        words.push(`${wallNames[item.wall]}${who}那一面貼不了 ${name}，${who}${after.lists[index].length ? "只剩「也可以不貼」" : "清單空了"}`);
+      }
+    });
+  } else {
+    words.push(`${zoneNumbers(changed)} ${add ? "加上" : "拿掉"} ${name}${add ? "" : `（${ticks.count(id)} 區有）`}`);
+  }
+  if (id !== ZONE_NONE) words.push("「也可以不貼」沒動");
+  draft.history.push(before);
+  draft.order = [...before.order.filter(other => after.count(other)), ...after.ids.filter(other => !before.order.includes(other))];
+  draft.notice = words.join("；");
+  draft.query = null;
+  draft.rangeRefused = "";
+  draftTouched = true;
+  renderZoneOverview();
+}
+function undoCandidate() {
+  const {removedRanges, ...before} = draft.history.pop();
+  for (const id of Object.keys(draft.ranges)) if (!before.order.includes(id)) delete draft.ranges[id];
+  Object.assign(draft.ranges, removedRanges);
+  Object.assign(draft, before);
+  draft.rangeRefused = "";
+  draft.query = null;
+  renderZoneOverview();
+}
+function fixedDescription(entry) {
+  const depth = fixedDepthWords(entry);
+  return depth ? `整塊貼、固定 ${depth.replace("總厚約 ", "")}` : "整塊貼、固定厚度未提供";
+}
+function cmPair(pair) { return pair.map(centimetres).join("–"); }
+function rangeDescription(entry, pairs) {
+  const fixed = [], adjusted = [], parts = rangeParts(entry);
+  for (const part of ["porous", "cavity"]) {
+    const name = RANGE_WORDS[part];
+    if (parts[part]) {
+      adjusted.push(name + (pairs[part] ? ` ${cmPair(pairs[part])} cm` : "各區不同"));
+    } else {
+      const metres = part === "porous" ? entry.porous.thickness_m : entry.cavity?.initial_m;
+      fixed.push(metres ? `${name} ${centimetres(metres)} cm 不調` : "空腔：沒有（直接貼牆）");
+    }
+  }
+  return [...fixed, ...(adjusted.length ? ["給程式調：" + adjusted.join("、")] : [])].join("；");
+}
+function describeRange(line, items, ticks, entry) {
+  const shown = shownRange(items, ticks.lists, entry), page = pageRange(entry), parts = rangeParts(entry);
+  let narrowed = false;
+  const pairs = {};
+  for (const part of ["porous", "cavity"].filter(key => parts[key])) {
+    const pair = draftPair(entry, part, shown[part]).pair ?? shown[part]?.values;
+    pairs[part] = pair;
+    narrowed ||= pair ? !samePair(pair, page[part]) : items.some((item, i) => ticks.lists[i].includes(entry.id) && !samePair(ownRange(item, entry)[part], page[part]));
+  }
+  const depth = Number(draft.depthText ?? shownDepth(items)) / 100;
+  const zoneLimit = !draft.depthBad && depth > 0 ? depth : Infinity;
+  const limit = Math.min(zoneLimit, entry.max_total_depth_m ?? Infinity);
+  let cap = "";
+  if (items.every((item, index) => {
+    if (!ticks.lists[index].includes(entry.id)) return true;
+    const own = ownRange(item, entry);
+    const thick = parts.porous ? (pairs.porous ?? own.porous)[1] : entry.porous.thickness_m;
+    const cavity = parts.cavity ? (pairs.cavity ?? own.cavity)[1] : (entry.cavity?.initial_m ?? 0);
+    return limit < thick + cavity - 1e-9;
+  })) {
+    const source = limit === zoneLimit ? (items.length === 1 ? "這一區最深" : "這幾區最深") : "材料本身";
+    cap = `，${entry.cavity?.initial_m ? "兩個加起來" : "總厚"}最多 ${centimetres(limit)} cm（${source}）`;
+  }
+  line.replaceChildren(rangeDescription(entry, pairs) + cap);
+  if (narrowed) line.append(el("strong", "zv-narrow", "改窄了"));
+}
+// 一筆材料自己的層序。沒有分層資料就留空，不能從材料名稱猜厚度。
+function candidateCutaway(entry) {
+  const strip = el("span", "zv-cutaway");
+  strip.setAttribute("aria-hidden", "true");
+  const layers = entry.kind === "optimizable" ? [entry.porous, ...(entry.cavity?.initial_m ? [{kind: "air"}] : [])] : fixedLayers(entry);
+  for (const layer of layers) strip.append(el("i", `zv-slab ${layer.kind}`));
+  return strip;
+}
+function candidateRestriction(entry, covered, listed) {
+  if (!entry) return "材料庫找不到這一筆";
+  if (entry.backing === "zone_wall") return "背後要接這一區的原牆，不能整塊當候選";
+  if (referenceOnly(entry.id)) return listed ? zoneReference.listed_why : zoneReference.search_why;
+  return covered ? coveredWhy(covered) : "";
+}
+function restrictedReason(node, entry, covered, listed) {
+  const reason = candidateRestriction(entry, covered, listed);
+  if (!reason) return false;
+  if (referenceOnly(entry.id)) node.dataset.reference = listed ? "listed" : "off";
+  else if (covered) node.dataset.covered = covered.id;
+  node.append(el("small", "zv-covered-why", reason));
+  return true;
+}
+function candidateRow(id, items, ticks, covered, sync) {
+  const entry = libraryEntry(id), none = id === ZONE_NONE, name = candidateName(id);
+  const row = el("div", "zv-candidate");
+  row.id = none ? "zone-panel-none-row" : `zone-panel-row-${id}`;
+  row.dataset.choice = id; row.dataset.kind = entry?.kind ?? (none ? "none" : "missing"); row.dataset.state = ticks.state(id);
+  const head = el("div", "zv-candidate-head");
+  if (entry) row.append(candidateCutaway(entry));
+  head.append(el("strong", null, name));
+  if (entry) {
+    const kind = catalogKind(entry);
+    head.append(el("span", `zv-kind ${kind}`, kind === "fixed" ? "成品" : "參數構造"));
+  }
+  if (ticks.count(id)) {
+    const remove = button("zv-remove", "×", `zone-panel-remove-${id}`, () => candidateAction(items, ticks, id, "remove"));
+    remove.setAttribute("aria-label", `拿掉 ${name}`);
+    head.append(remove);
+  }
+  row.append(head);
+  const line = el("div", "zv-description");
+  if (none) line.textContent = (ticks.count(id) ? "" : "沒有。") + "程式算出來不貼比較好的區，就不貼，保留原樣";
+  else if (!entry) line.textContent = "照原樣留著，開跑時伺服器會點名";
+  else if (entry.kind === "optimizable") {
+    line.classList.add("zv-range");
+    describeRange(line, items, ticks, entry);
+  } else if (entry.backing !== "zone_wall") line.textContent = fixedDescription(entry);
+  if (line.hasChildNodes()) row.append(line);
+  const restricted = entry && restrictedReason(row, entry, covered, true);
+  if (items.length > 1) {
+    const dots = el("div", "zv-dots");
+    items.forEach((item, index) => {
+      if (!fitsHere(id, item.wall)) return;
+      const has = ticks.lists[index].includes(id), dot = numberBadge(item.label.number);
+      dot.classList.add(has ? "has" : "absent");
+      dot.title = `${zoneWhereText(item)}：${has ? "有" : "沒有"}`;
+      dot.setAttribute("aria-label", dot.title); dots.append(dot);
+    });
+    dots.append(...someWords(id, ticks, items)); row.append(dots);
+  }
+  const actions = el("div", "zv-candidate-actions");
+  const missing = ticks.able(id) - ticks.count(id);
+  if (missing && !restricted) actions.append(button("zv-mini", none && !ticks.count(id) ? "加上" : `加到 ${missing} 區`,
+    `zone-panel-addto-${id}`, () => candidateAction(items, ticks, id, "add")));
+  if (entry?.kind === "optimizable" && Object.values(rangeParts(entry)).some(Boolean)) {
+    const open = draft.expanded.includes(id);
+    const toggle = button("zv-link", "改範圍", `zone-panel-range-toggle-${id}`, () => {
+      draft.expanded = open ? draft.expanded.filter(other => other !== id) : [...draft.expanded, id];
+      renderZoneOverview();
+    });
+    toggle.setAttribute("aria-expanded", String(open)); actions.append(toggle);
+  }
+  if (entry && !restricted && items.some(item => fitsHere(id, item.wall))) actions.append(button("zv-mini", "清掉其他候選", `zone-panel-only-${id}`,
+    () => candidateAction(items, ticks, id, "only")));
+  row.append(actions);
+  if (entry?.kind === "optimizable" && draft.expanded.includes(id)) {
+    const fields = rangeRow(entry, items, ticks, sync);
+    if (items.length > 1) row.append(el("small", null, `填了，${ticks.count(id)} 區都改成這個`));
+    row.append(...fields);
+  }
+  if (entry?.kind === "construction" && !restricted && catalogKind(entry) !== "fixed") {
+    const layers = fold(`zone-panel-layers-${id}`, "看每一層");
+    layers.append(el("p", null, "每一層現在還不能調，之後的版本會開"));
+    for (const layer of fixedLayers(entry)) {
+      const depth = layer.thickness_m == null ? "厚度未提供" : `${centimetres(layer.thickness_m)} cm`;
+      layers.append(el("div", null, `${inputDefaults.material_form[layer.kind]?.label ?? layer.kind} · ${depth}`));
+    }
+    row.append(layers);
+  }
+  return row;
+}
+function matchedName(name, query) {
+  const span = el("span", "zv-option-name");
+  let pos = 0, hit;
+  while (query && (hit = name.toLowerCase().indexOf(query, pos)) !== -1) {
+    span.append(name.slice(pos, hit), el("mark", null, name.slice(hit, hit + query.length)));
+    pos = hit + query.length;
+  }
+  span.append(name.slice(pos));
+  return span;
+}
+function pickerFits(entry, walls, ticks) {
+  return walls.every(wall => usableHere(entry, wall)) ||
+    ((ticks.count(entry.id) || entry.id in draft.ticks) && walls.some(wall => usableHere(entry, wall)));
+}
+function candidatePicker(items, walls, ticks, covered) {
+  const picker = el("div", "zv-picker"); picker.id = "zone-panel-picker";
+  const label = el("label", null, "找候選"); label.htmlFor = "zone-panel-picker-search";
+  const input = el("input"); input.type = "search"; input.id = label.htmlFor; input.value = draft.query;
+  const results = el("div", "zv-picker-results");
+  const candidates = [...libraryEntries("optimizable"), ...assignableEntries().filter(fixedCandidate)].filter(entry => entry.backing !== "zone_wall");
+  const fits = candidates.filter(entry => pickerFits(entry, walls, ticks));
+  const update = () => {
+    const query = input.value.trim().toLowerCase();
+    draft.query = input.value;
+    results.replaceChildren();
+    const matches = fits.filter(entry => ticks.state(entry.id) !== "all" && candidateName(entry.id).toLowerCase().includes(query));
+    for (const [kind, title, help] of [["optimizable", "參數構造", "自己疊的；有的層給程式調，有的整塊貼"], ["fixed", "成品", "買來的或照抄的，整塊貼，不能調"]]) {
+      const group = el("div"); group.setAttribute("role", "group"); group.setAttribute("aria-label", title);
+      const heading = el("div", "zv-group-head"); heading.append(el("strong", null, title), el("span", null, help));
+      group.append(heading);
+      for (const entry of matches.filter(option => catalogKind(option) === kind)) {
+        const id = entry.id;
+        const pick = button("zv-pick-option", "", `zone-panel-pick-${id}`, () => candidateAction(items, ticks, id, "add"));
+        pick.dataset.kind = entry.kind;
+        pick.append(matchedName(candidateName(id), query));
+        if (ticks.count(id)) pick.append(el("span", "zv-owned", `${ticks.count(id)} 區已有`));
+        let description;
+        if (entry.kind === "optimizable") {
+          const range = pageRange(entry);
+          description = rangeParts(entry).porous ? `厚度給程式調：棉厚 ${cmPair(range.porous)} cm` : rangeDescription(entry, range);
+        } else description = fixedDescription(entry);
+        pick.append(el("small", "zv-description", description));
+        pick.disabled = restrictedReason(pick, entry, covered.get(id), false);
+        group.append(pick);
+      }
+      if (group.childElementCount > 1 || !query) results.append(group);
+    }
+    if (!matches.length) results.append(el("p", null, query ? `沒有符合「${input.value.trim()}」的` : "沒有其他候選"));
+  };
+  input.oninput = update;
+  picker.onkeydown = event => {
+    if (event.isComposing) return;
+    if (event.key === "Escape") { event.preventDefault(); closePicker(true); }
+    if (event.key === "Enter" && event.target === input) { event.preventDefault(); results.querySelector("button:enabled")?.click(); }
+  };
+  update();
+  const omitted = candidates.filter(entry => !pickerFits(entry, walls, ticks) && !ticks.count(entry.id)).length;
+  const why = walls.length === 1 ? "只能貼在別面的" : "選中的面有一面貼不了的";
+  picker.append(label, input, results, el("small", "zv-picker-foot", `${why} ${omitted} 筆不列`));
+  return picker;
+}
+function closePicker(focus = false) {
+  if (!draft || draft.query == null) return;
+  draft.query = null;
+  $("zone-panel-picker")?.remove();
+  $("zone-panel-add")?.setAttribute("aria-expanded", "false");
+  if (focus) $("zone-panel-add")?.focus();
+}
+document.addEventListener("click", event => {
+  if (!event.target.closest?.("#zone-panel-add, #zone-panel-picker")) closePicker();
+});
+function startingListNotes(items, walls, ticks, covered) {
+  const groups = new Map();
+  for (const [index, item] of items.entries()) {
+    if (item.mode === "search") continue;
+    const list = ownList(item);
+    const start = `原本不是由程式最佳化，先放：${list.map(candidateName).join("、")}`;
+    const notes = [start];
+    const id = item.construction?.id ?? item.entry?.id;
+    if (zoneMethodMode(item.method) === "fixed" && !ticks.lists[index].includes(id)) {
+      const entry = libraryEntry(id);
+      let why = candidateRestriction(entry, covered.get(id), false);
+      if (!why && !usableHere(entry, item.wall)) {
+        why = `${item.label.numberText || wallNames[item.wall]}那一面貼不了這一筆`;
+      } else if (!why && !pickerFits(entry, walls, ticks)) {
+        const names = walls.filter(wall => !usableHere(entry, wall)).map(wall => wallNames[wall]);
+        why = `選中的另一面（${names.join("、")}）貼不了這一筆`;
+      }
+      notes.push(`原本指定貼的 ${vprWords(pastedWords(item))} 沒放進清單，${why || "要用就從「＋加一筆候選」加"}`);
+    }
+    for (const message of notes) {
+      if (!groups.has(message)) groups.set(message, []);
+      groups.get(message).push(item);
+    }
+  }
+  return [...groups].map(([message, zones]) => el("p", "zv-start-note", `${zoneNumbers(zones)} ${message}`));
+}
 function searchForm(items, walls, sync) {
   const ticks = panelTicks(items);
   if (!ticks) return [];
-  // 只記被點的那一個代號（勾上或拿掉）；沒點過的代號套用時各區照目前的。
-  const toggle = (id, on) => { draft.ticks = {...draft.ticks, [id]: on}; draft.rangeRefused = ""; draftTouched = true; renderZoneOverview(); };
-  const has = id => ticks.count(id) > 0;
-  // 使用者在這個小框裡動過的那幾種照樣列著（拿掉之後那一列不准消失，不然勾不回來）。
-  const fits = entry => walls.every(wall => usableHere(entry, wall)) || has(entry.id) || entry.id in draft.ticks;
-  const tunable = libraryEntries("optimizable").filter(fits), products = assignableEntries().filter(fixedCandidate).filter(fits);
-  const coveredBy = coveredProducts(ticks.ids);
-  const form = el("div", "zv-form"); form.id = "zone-panel-form";
-  const top = el("div", "zv-form-top");
-  top.append(button("zv-link", "材料的勾全拿掉", "zone-panel-clear", () => {
-    draft.ticks = {...draft.ticks, ...Object.fromEntries(ticks.ids.filter(id => id !== ZONE_NONE).map(id => [id, false]))}; draft.rangeRefused = ""; draftTouched = true; renderZoneOverview();
-  }), el("span", null, "「也可以不貼」不受影響"));
-  form.append(top);
-  if (!tunable.length) form.append(el("div", "zv-form-note", "這裡沒有可調的材料：程式只能從「不貼」開始，可以再勾固定成品讓它比"));
-  // 勾著的（全有或有的有）底下多一列範圍格子；沒勾的不出。
-  for (const entry of tunable) form.append(materialRow(entry, ticks, null, toggle), ...(ticks.state(entry.id) === "none" ? [] : rangeRow(entry, items, ticks, sync)));
-  for (const id of ticks.ids.filter(other => other !== ZONE_NONE && !libraryEntry(other))) {
-    const row = el("label", "zv-mrow"); row.dataset.choice = id; row.dataset.kind = "missing";
-    const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", choiceName(id)), el("small", null, "照原樣留著，開跑時伺服器會點名"), ...someWords(id, ticks));
-    row.append(tickBox(id, ticks, toggle), words); form.append(row);
-  }
-  // 材料框上方一行（#1199）：範圍從材料頁帶來、在這裡改只改選中的區；要放寬到材料頁以外，去材料頁。
+  const form = el("section", "zv-form"); form.id = "zone-panel-form";
   const note = el("div", "zv-range-note", `範圍從材料頁帶來，可以改（${items.length > 1 ? "只改這幾區" : "只改這一區"}，不改材料頁）`);
   note.id = "zone-panel-range-note";
   const link = el("a", "zv-link", "材料頁 ▸"); link.id = "zone-panel-materials"; link.href = "/materials"; link.target = "_blank"; link.rel = "noopener";
   note.append(link);
-  const more = fold("zone-panel-fixed", `固定成品（整塊貼或不貼，不能調） ${products.length} 種，勾了 ${products.filter(entry => has(entry.id)).length} 種`);
-  const rows = el("div", "zv-fixed-rows");
-  for (const entry of products) rows.append(materialRow(entry, ticks, coveredBy.get(entry.id) ?? null, toggle));
-  more.append(rows); form.append(more);
+  const covered = coveredProducts(ticks.ids);
+  const list = el("div"); list.id = "zone-panel-list";
+  for (const id of [...candidateIds(ticks), ZONE_NONE]) list.append(candidateRow(id, items, ticks, covered.get(id), sync));
+  form.append(el("h3", null, "候選清單"), deepestRow(items, walls, sync), ...startingListNotes(items, walls, ticks, covered), note,
+    el("p", "zv-list-hint", "清掉其他候選不會動到「也可以不貼」"));
+  if (!libraryEntries("optimizable").some(entry => pickerFits(entry, walls, ticks))) {
+    form.append(el("p", "zv-form-note", "這裡沒有可調的材料：程式只能從「不貼」開始，可以再勾固定成品讓它比"));
+  }
+  if (draft.notice) {
+    const notice = el("div", "zv-notice", draft.notice); notice.id = "zone-panel-notice"; notice.setAttribute("role", "status");
+    if (draft.history.length) notice.append(button("zv-link", "復原", "zone-panel-undo", undoCandidate));
+    form.append(notice);
+  }
+  const add = button("zv-add-candidate", "＋加一筆候選", "zone-panel-add", () => {
+    if (draft.query != null) { closePicker(true); return; }
+    draft.query = "";
+    add.after(candidatePicker(items, walls, ticks, covered));
+    add.setAttribute("aria-expanded", "true"); $("zone-panel-picker-search").focus();
+  });
+  add.setAttribute("aria-expanded", String(draft.query != null));
+  form.append(list, add);
+  if (draft.query != null) form.append(candidatePicker(items, walls, ticks, covered));
   appendFixedCandidateNote(form, ticks.ids);
-  const none = el("label", "zv-extra zv-mrow"); none.id = "zone-panel-none";
-  const words = el("span", "zv-mwords"); words.append(el("span", "zv-mname", "也可以不貼"), el("small", null, "程式算出來不貼比較好的區，就不貼，保留原樣"), ...someWords(ZONE_NONE, ticks));
-  none.append(tickBox(ZONE_NONE, ticks, toggle), words);
-  return [...(tunable.length ? [note] : []), form, none, deepestRow(items, walls, sync)];
+  return [form];
 }
 // 「目前」小標（#1199）：選到的區現在是這一種做法的，掛在那一項旁邊（講的是現在存著的樣子，面板上點別項它不跟著跑）。
 // 選到的全是同一種：指定貼的寫現在貼的是什麼，其餘兩種不必多寫；做法不只一種：每一項各寫是哪幾區。
@@ -1144,10 +1413,20 @@ function panelCard() {
   const problem = el("p", "zv-problem zv-panel-problem"); problem.id = "zone-panel-problem"; problem.setAttribute("role", "alert");
   const sync = () => {
     const why = draftProblem(items);
+    const ticks = draft?.mode === "search" && panelTicks(items);
+    if (ticks) for (const line of card.querySelectorAll(".zv-candidate .zv-range")) {
+      describeRange(line, items, ticks, libraryEntry(line.parentElement.dataset.choice));
+    }
     problem.textContent = why; problem.hidden = !why;
     apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !allPasted) || Boolean(why);
   };
-  for (const mode of ["fixed", "keep_original", "search"]) {
+  const modes = ["fixed", "keep_original", "search"];
+  const counts = modes.map(mode => items.filter(item => zoneMethodMode(item.method) === mode).length);
+  if (counts.filter(Boolean).length > 1) {
+    const labels = ["指定貼", KEEP_WORDS, ZONE_MODE_WORDS.search];
+    card.append(el("p", "zv-method-counts", "現在：" + counts.flatMap((count, index) => count ? [`${count} 區${labels[index]}`] : []).join("、")));
+  }
+  for (const mode of modes) {
     // 一項一列：圓鈕、字（點字也算點圓鈕）、色塊；材料下拉放在字的下面、不包在字的標籤裡（包進去的話點下拉會被當成點圓鈕）。
     const row = el("div", `zv-opt${draft?.mode === mode ? " on" : ""}`); row.id = `zone-panel-option-${mode}`;
     const radio = el("input"); radio.type = "radio"; radio.name = "zone-panel-mode"; radio.id = `zone-panel-mode-${mode}`; radio.checked = draft?.mode === mode;
@@ -1709,14 +1988,14 @@ function renderZoneOverview() {
   }
   // 正在「最深」或範圍那幾格打字時別的事觸發重畫（晚到的限制檢查）：字記在草稿裡不會掉，焦點放回那一格。
   const focused = document.activeElement?.id ?? "";
-  const typing = focused === "zone-panel-depth" || focused.startsWith("zone-panel-range-") ? focused : null;
+  const typing = focused === "zone-panel-depth" || focused === "zone-panel-picker-search" || focused.startsWith("zone-panel-range-") ? focused : null;
   page.replaceChildren(...parts);
   const again = typing ? $(typing) : null;
   again?.focus();
   // 放回去的是新畫的一格，原本的反白帶不過來（數字格讀不到選取範圍）。那一格畫的是原值（草稿裡沒有它的字，沒有 typed 記號）
   // ＝使用者進了格子還沒打字：整格反白，跟 Tab 進去時一樣，接著打的字換掉舊值——不然黏在舊值後面，12.5 打 20 變成 12.520（#1231）。
   // 畫的是打到一半的字就不動：游標在字尾，接著打的字接在後面。
-  if (again instanceof HTMLInputElement && !again.dataset.typed) again.select();
+  if (again instanceof HTMLInputElement && again.type === "number" && !again.dataset.typed) again.select();
   window.scrollTo(0, scrolled);
 }
 function overviewParts() {
