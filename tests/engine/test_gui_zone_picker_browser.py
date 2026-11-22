@@ -16,11 +16,11 @@ from tests.engine.test_gui_vpr_reference_browser import (
     COMPUTED_MS, _click_zone as click_reference_zone, _no_library, _open_page, _prepare as prepare_reference,
 )
 from tests.engine.test_gui_zone_material_pick_browser import (
-    FLOOR_ONLY, ONLY_48K, PLAIN_PRODUCT, _TEXT_STYLES, _add_candidate, _boss_room, _design,
+    FLOOR_ONLY, FRONT, ONLY_48K, PLAIN_PRODUCT, _TEXT_STYLES, _add_candidate, _boss_room, _design,
 )
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _apply, _click_zone, _open_overview, _prepare, _send_to_search, _stored,
+    _ALLOWED, _SELECTED, _apply, _click_zone, _open_overview, _prepare, _send_to_search, _stored,
 )
 
 
@@ -292,6 +292,46 @@ def test_stored_covered_product_stays_listed_and_can_be_removed_independently(tm
 
 
 DISCARDED = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區"
+
+
+def _prepare_two_cards(tmp_path: Path) -> None:
+    front: dict[str, object] = dict.fromkeys(("z1", "z2", "z3", "auto1", "auto2"), {"mode": "search", "allowed": ONLY_48K})
+    _prepare(tmp_path, _design({"yL": front, "ceiling": {"z1": {"mode": "search", "allowed": WOOLS}}}))
+
+
+def test_picking_another_card_keeps_draft_depth_and_method_and_loads_its_saved_list(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        page.locator("#zone-list-2-select").click()
+        page.locator("#zone-panel-remove-glass_wool_48k").click()
+        page.locator("#zone-panel-depth").fill("12.5")
+        fixed = page.locator("#zone-panel-mode-fixed")
+        fixed.check()
+        page.locator("#zone-list-select").click()
+        assert set(page.evaluate(_SELECTED)) == set(FRONT)
+        expect(fixed).to_be_checked()
+        page.locator("#zone-panel-mode-search").check()
+        expect(page.locator("#zone-panel-depth")).to_have_value("12.5")
+        expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
+        assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == ONLY_48K
+        _apply(page)
+        assert page.evaluate(_ALLOWED) == {**dict.fromkeys(FRONT, ONLY_48K), "ceiling/z1": WOOLS}
+
+
+def test_picking_a_card_scrolls_the_panel_heading_into_view(tmp_path: Path, browser: Browser) -> None:
+    _prepare_two_cards(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.set_viewport_size({"width": 1440, "height": 700})
+        _open_overview(page)
+        button = page.locator("#zone-list-2-select")
+        button.scroll_into_view_if_needed()
+        button.click()
+        heading = page.locator("#zone-panel h2").bounding_box()
+        assert heading is not None
+        assert 0 <= heading["y"] <= 700 - heading["height"]
 
 
 @pytest.mark.parametrize("action", ["remove-glass_wool_24k", "only-glass_wool_48k"])

@@ -54,7 +54,6 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         _pick_search(page)
         _add_candidate(page, "glass_wool_24k")
         _apply(page)
-        source = cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto2"]
         page.locator("#zone-list-select").click()
         _click_zone(page, "yL/auto2")
         row = page.locator("#zone-panel-row-glass_wool_24k")
@@ -63,7 +62,7 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         add.click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {
-            "yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"], "yL/auto2": source}
+            "yL/auto1": ["none", "glass_wool_24k"], "floor/auto1": ["none"], "yL/auto2": ["none", "glass_wool_24k"]}
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -115,13 +114,19 @@ def test_cards_show_their_choices_depth_and_only_a_group_selection_button(tmp_pa
             expect(card.locator("button")).to_have_id(f"{card.get_attribute('id')}-select")
             expect(card.locator("button")).to_have_text("選這幾區")
         expect(hint).to_have_count(1)
-        for index in (0, 1):
-            cards.nth(index).get_by_role("button", name="選這幾區").click()
+        for index, panel_depth in enumerate(("12.5", "")):
+            card = cards.nth(index)
+            card.get_by_role("button", name="選這幾區").click()
             assert set(page.evaluate(_SELECTED)) == expected[index][0]
             expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+            expect(page.locator("#zone-panel-depth")).to_have_value(panel_depth)
+            expect(page.locator("#zone-panel-notice")).to_have_count(0)
             assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == expected[index][1]
+            expect(card.locator(".zv-card-summary")).to_have_text(expected[index][2])
+            expect(card.locator("button")).to_have_count(0)
+            expect(card.locator(f"span#{card.get_attribute('id')}-select")).to_have_text("正在改")
             expect(cards.locator("input,select")).to_have_count(0)
-            expect(cards.locator("button")).to_have_count(3)
+            expect(cards.locator("button")).to_have_count(2)
             expect(hint).to_have_count(1)
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)

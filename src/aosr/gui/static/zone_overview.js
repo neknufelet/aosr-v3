@@ -1624,7 +1624,17 @@ function listCard(group, index, compact) {
   head.append(el("i", "zv-sw search"), alone ? `由程式最佳化的 ${size} 區` : `由程式最佳化的 ${list.zones.length} 區裡的 ${size} 區`,
     el("span", "zv-muted", alone ? "每一區各自最佳化，都從這幾種裡選" : size > 1 ? `每一區各自最佳化，這 ${size} 區從這幾種裡選` : "這一區從這幾種裡選"));
   card.append(head, listWho(group, prefix, alone));
-  const selectGroup = button("zv-btn", "選這幾區", `${prefix}-select`, () => select(ids));
+  const selectId = `${prefix}-select`;
+  let selectGroup;
+  if (sameList(ids, selected)) {
+    selectGroup = el("span", "zv-editing", "正在改");
+    selectGroup.id = selectId;
+  } else {
+    selectGroup = button("zv-btn", "選這幾區", selectId, () => {
+      pick(ids);
+      document.querySelector("#zone-panel h2")?.scrollIntoView({block: "nearest"});
+    });
+  }
   const allowed = first.allowed;
   const depth = shownDepth(group.zones);
   const summary = el("div", "zv-card-summary");
