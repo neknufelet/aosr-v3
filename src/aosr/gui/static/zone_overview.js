@@ -51,6 +51,7 @@ const TILE_DEPTH = 190, TILE_WIDTH = 140;  // 地板、天花那兩張小圖最�
 const WALL_ORDER = ["front", "back", "left", "right"];
 const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
+let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
@@ -653,7 +654,10 @@ function settingAfter(item, method, change) {
     if (list) next.allowed = list; else if (list === undefined && item.mode === "search" && kept) next.allowed = kept;
   }
   // 「最深」（小框那一格）：有改才寫——清空就拿掉那一格，填了就寫公尺；沒改的各區照目前的。
-  if (method.depth === null) delete next.max_depth_m; else if (method.depth !== undefined) next.max_depth_m = method.depth;
+  // 指定貼的那一筆跟原本一樣、做法變成不貼時不寫（不貼不加層：舊表那一格寫「不加層」、小框也不畫，寫進去就看不到也清不掉）。
+  if (next.mode !== "keep_original") {
+    if (method.depth === null) delete next.max_depth_m; else if (method.depth !== undefined) next.max_depth_m = method.depth;
+  }
   // 可調範圍（#1199）：小框改了範圍才有這一格；清單換掉、做法換掉時多出來的那幾種由 setZoneSetting 拿掉。
   const ranges = method.ranges?.get(item.id);
   if (ranges === null) delete next.ranges; else if (ranges !== undefined) next.ranges = ranges;
@@ -1921,6 +1925,8 @@ function closeOverview() {
   renderZoneOverview();
   // 這一頁開著時輸入頁是藏起來的：那時重畫的平面圖，字量不到寬度、避不開彼此。回來看得到了，照同一份再畫一次。
   drawShownPlan();
+  // 捲回打開這一頁之前的地方（從舊表某一列按「改這一區 ▸」進來的，改完回到那一列）。
+  window.scrollTo(0, overviewReturnY);
 }
 // 這一頁沒有存檔鍵：改動當場套到畫面，但要存檔才進檔案。改過、還沒存的時候標題列講一句怎麼存（兩條路）。
 function unsavedLine() {
@@ -2018,6 +2024,7 @@ function overviewParts() {
 }
 window.renderZoneOverview = renderZoneOverview;
 window.openZoneOverview = id => {
+  if (!overviewOpen) overviewReturnY = window.scrollY;
   overviewOpen = true; pageSaid = "";
   renderZoneOverview();
   if (id && view?.byId.has(id)) pick([id]);

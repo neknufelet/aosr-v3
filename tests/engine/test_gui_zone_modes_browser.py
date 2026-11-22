@@ -82,6 +82,8 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     page.locator("#zone-panel-add").click()
     page.locator("#zone-panel-pick-glass_wool_48k").click()
     apply_and_return(page)
+    # 用號碼與位置名叫那一區（#1176）：109 號房的兩支喇叭都投影在右邊那一大塊。
+    expect(page.locator("#zone-goto-x0-auto1")).to_have_attribute("aria-label", "到「這間房貼什麼」改前牆 ③「兩支喇叭後面那塊」")
     page.locator("#original-scheme").select_option("room109-original")
     expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
     expect(page.locator("#zone-note")).to_have_text("1 區改成「由程式最佳化」")

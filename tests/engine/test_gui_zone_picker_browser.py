@@ -725,12 +725,19 @@ def test_table_links_select_one_zone_and_discard_another_zones_list_draft(tmp_pa
             expect(button).to_have_id(f"zone-goto-xL-{key}")
         third = rows.nth(2)
         key = str(third.get_attribute("id")).removeprefix("zone-row-xL-")
+        third.locator(f"#zone-goto-xL-{key}").scroll_into_view_if_needed()
+        where = page.evaluate("window.scrollY")
+        assert where > 0
         third.locator(f"#zone-goto-xL-{key}").click()
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", f"xL/{key}")
         expect(page.locator("#zone-panel h2")).to_be_in_viewport()
         expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
         page.evaluate("window.openZoneOverview('missing/id')")
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", f"xL/{key}")
+        # 回輸入頁捲回剛才那一列（#1258 2b 審查：不然每改一區都要重新捲回舊表）。
+        page.locator("#zone-page-close").click()
+        expect(third).to_be_in_viewport()
+        assert abs(page.evaluate("window.scrollY") - where) <= 1
         assert watched.page_errors == []
 
 
