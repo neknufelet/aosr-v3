@@ -312,6 +312,11 @@ function svgBox(view, g, box) {
   const [a0, a1, b0, b1] = screenBox(view, g.width, g.height, box);
   return {x: g.pad + a0 * g.scale, y: g.pad + (g.height - b1) * g.scale, width: (a1 - a0) * g.scale, height: (b1 - b0) * g.scale};
 }
+// 搬框時提示列已經寫著「搬到：…（放開才切）」：預覽的判決接在後面，不蓋掉它。
+function previewNote(text, kind) {
+  const moving = $("elevation-note").textContent.match(/^搬到：[^；]*（放開才切）/);
+  note(moving ? `${moving[0]}；${text}` : text, kind);
+}
 function drawMirrorPreview(svg, wall, g, mirror, reason) {
   svg.querySelector(".mirror-preview")?.remove();
   if (!mirror || mirror.wall !== wall) return;
@@ -341,10 +346,12 @@ function mirrorPreview(svg, wall, g, before = null) {
         try {
           draft ??= wallDocument();
           others ??= drawnBoxes(wall).filter(peer => peer.id !== box.id);
-          const data = await api("/api/zone-cut?preview=1", "POST", {scheme: draft, wall, boxes: [...others, box],
+          const data = await api("/api/zone-mirror-check", "POST", {scheme: draft, wall, boxes: [...others, box],
             mirror: {before, after: box, protected_walls: Object.keys(measuredDrafts)}});
           if (!live(position)) continue;
-          const reason = data.other && data.reason ? data.reason.replaceAll("{other}", zoneCalled(...data.other.split("@"))) : data.reason;
+          let reason = data.other && data.reason ? data.reason.replaceAll("{other}", zoneCalled(...data.other.split("@"))) : data.reason;
+          // 伺服器有幾句原因是接在「{first}」後面寫的（「的對面還有實測阻抗草稿」）；預覽沒有那一段，補成「這一塊」。
+          if (reason?.startsWith("的")) reason = `這一塊${reason}`;
           drawMirrorPreview(svg, wall, g, mirror, reason ?? "");
           if (reason) position.note = [`放開後另一邊不會跟著畫：${reason}`, "notice"];
           else if (mirror.wall !== wall) position.note = [`放開後，${wallNames[mirror.wall]}同一個位置跟著出現`, ""];
@@ -352,7 +359,7 @@ function mirrorPreview(svg, wall, g, before = null) {
           if (!live(position)) continue;
           position.note = [`鏡像預覽無法確認：${errorText(error)}`, "notice"];
         }
-        if (position.note) note(...position.note);
+        if (position.note) previewNote(...position.note);
         break;
       }
     } finally { checking = false; }
@@ -361,7 +368,7 @@ function mirrorPreview(svg, wall, g, before = null) {
     if (!symmetryResult()?.axis) return;
     const key = JSON.stringify(box);
     if (latest?.key === key) {
-      if (latest.note) note(...latest.note);
+      if (latest.note) previewNote(...latest.note);
       return;
     }
     const line = $("elevation-note");

@@ -12,7 +12,7 @@ from aosr.gui.zone_symmetry import Frame, symmetry_axis
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import browser as browser
-from tests.engine.test_gui_zone_elevation_browser import _drag
+from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag
 from tests.engine.test_gui_zone_mirror_draw_browser import (
     BLOCK, END, FRONT, H, OTHER, START, W, _drawn, _matches_mirror, _room,
 )
@@ -61,8 +61,8 @@ def test_outside_preview_and_selection(tmp_path: Path, browser: Browser, wall: W
 
         def during() -> None:
             reason = _refusal(page)
-            assert f"超出左牆那一側 {distance}" in reason
-            assert f"往對稱軸挪 {distance}" in reason and f"改窄 {distance}" in reason
+            assert f"超出牆面，左牆那一側多出 {distance}" in reason
+            assert f"把框靠右牆那一邊往內收 {distance}" in reason and f"或整塊往對稱軸挪 {distance}" in reason
             reasons.append(reason)
             page.screenshot(path=tmp_path / "outside-dragging.png")
 
@@ -154,3 +154,50 @@ def test_move_at_suggested_distance(tmp_path: Path, browser: Browser) -> None:
         _matches_mirror(page, FRONT, zones["z1"], zones["z2"])
         assert zones["z1"]["u_m"] == pytest.approx([RIGHT_START[0] - shift, W - shift])
         page.screenshot(path=tmp_path / "repaired.png")
+
+
+def test_thin_remainder_is_refused_while_dragging(tmp_path: Path, browser: Browser) -> None:
+    """對面切完會剩窄條：拖著時就講放不下，跟放開後同一句（審查 #1）。"""
+    with _room(tmp_path, browser) as page:
+        reasons: list[str] = []
+
+        def during() -> None:
+            reason = _refusal(page)
+            assert "窄條" in reason, reason
+            reasons.append(reason)
+
+        _drag(page, W, H, (2.8, 0.02), (4.8, 1.8), during=during)
+        _settled(page)
+        expect(page.locator("#elevation-note")).to_contain_text(reasons[0])
+        assert set(_drawn(page)) == {"z1"}
+
+
+def test_wide_box_is_told_to_shrink_not_to_move(tmp_path: Path, browser: Browser) -> None:
+    """框寬到整塊挪過去會跨軸：只講收靠牆那一邊；照著把寬度改小，兩邊就都在（審查 #2）。"""
+    with _room(tmp_path, browser) as page:
+        _drag(page, W, H, (2.6, 0.02), RIGHT_END)  # 離軸 0.15：收完兩塊中間還留 0.30，不會剩窄條
+        _settled(page)
+        distance = _outside(page, FRONT)
+        reason = page.locator("#elevation-note").inner_text()
+        assert f"把框靠右牆那一邊往內收 {distance:.2f} 公尺" in reason, reason
+        assert "整塊往對稱軸挪" not in reason, reason
+        page.locator("#elevation [data-zone-id=z1] > rect").click()
+        width = float(page.locator("#elevation-width").input_value())
+        page.locator("#elevation-width").fill(f"{width - distance:.2f}")
+        _cut_by(page, "press:Enter")
+        _settled(page)
+        zones = _drawn(page)
+        _matches_mirror(page, FRONT, zones["z1"], zones["z2"])
+
+
+def test_editing_a_box_whose_mirror_still_does_not_fit_says_so(tmp_path: Path, browser: Browser) -> None:
+    """落單、因為翻過去放不下才落單的框：改了還是放不下，提示列照樣講（不是安靜的「切成 N 區」）。"""
+    with _room(tmp_path, browser) as page:
+        _drag(page, W, H, RIGHT_START, RIGHT_END)
+        _settled(page)
+        page.locator("#elevation [data-zone-id=z1] > rect").click()
+        page.locator("#elevation-height").fill("1.1")
+        _cut_by(page, "press:Enter")
+        _settled(page)
+        expect(page.locator("#elevation-note.notice")).to_contain_text("另一邊沒有跟著畫")
+        assert set(_drawn(page)) == {"z1"} and _drawn(page)["z1"]["v_m"] == pytest.approx([0, 1.1])

@@ -279,7 +279,7 @@ def _changed_boxes(body: ZoneCut, change: MirrorChange) -> tuple[str, list[CutBo
 
 
 def _source_cut(body: ZoneCut, change: MirrorChange, key: str, source: list[CutBox],
-                reason: str = "", other: str = "", fix: str = "", *, category: str = "", preview: bool = False) -> dict[str, object]:
+                reason: str = "", other: str = "", fix: str = "", *, preview: bool = False) -> dict[str, object]:
     """鏡像不能切時仍套用手畫的那一面；補畫只動鏡像，失敗時兩面都保留。"""
     if preview:
         return {"reason": reason, "other": other}
@@ -287,8 +287,7 @@ def _source_cut(body: ZoneCut, change: MirrorChange, key: str, source: list[CutB
     verb = "畫" if change.after else "刪"
     if change.after is None:
         fix = "原來選的框已刪除。若也要刪另一邊，請選取那一塊再刪。"
-    why = f"（{category}）" if category else ""
-    message = f"另一邊沒有跟著{verb}{why}：{{first}} {reason}。{fix}" if reason else ""
+    message = f"另一邊沒有跟著{verb}：{{first}} {reason}。{fix}" if reason else ""
     return {"walls": walls, "message": message, "first": f"{body.wall}@{key}", "other": other}
 
 
@@ -347,7 +346,7 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange, *, preview: bool = False) 
             reply.update(message="{first_number} 現在跨在對稱軸正中，{other_number} 不再跟著它；要的話自己刪 {other_number}", other=partner)
         return reply
     if change.after and (refused := frame.mirror_refusal(shape)):
-        return source_only(refused[1], category=refused[0])
+        return source_only(refused[1])
     if target in change.protected_walls:
         return source_only("的對面還有實測阻抗草稿", fix="請先套用或取消草稿，再補畫另一邊。")
     try:
@@ -369,13 +368,14 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange, *, preview: bool = False) 
                 return {**reply, "blocked": {"wall": target, "u_m": u, "v_m": v}}
         if len(boxes) >= MAX_BOXES:
             return source_only("對面的畫框數量已滿", fix="請先刪除多餘的框，再補畫另一邊。")
-        if preview:
-            return {"reason": ""}
         boxes, identifier = _place_partner(peers, partner_id, u, v)
     try:
         other_cut = cut_wall(doc, target, boxes)
     except ZoneCutError as exc:
         return source_only(f"翻過去切不成（{exc}）", fix="請調整框邊後再試。")
+    if preview:
+        # 預覽也要試切另一面（窄條等切不成的情形），才跟放開後同一個答案；只回判決，不回分區。
+        return {"reason": ""}
     walls = {} if target == wall or change.complete else {wall: cut_wall(doc, wall, source)}
     walls[target] = other_cut
     if change.complete:
@@ -392,12 +392,26 @@ async def zone_cut(request: Request) -> Response:
         return JSONResponse({"error": "切牆面的請求格式不完整：要有方案、哪一面牆與畫的框"}, status_code=400)
     try:
         if body.mirror is not None:
-            return JSONResponse(cut_mirrored(body, body.mirror, preview=request.query_params.get("preview") == "1"))
+            return JSONResponse(cut_mirrored(body, body.mirror))
         return JSONResponse(cut_wall(body.scheme, body.wall, body.boxes))
     except ZoneCutError as exc:
         return JSONResponse({"error": str(exc), "problems": [{"text": text} for text in exc.problems],
                              "thin": [{"u_m": list(box.u_m), "v_m": list(box.v_m)} for box in exc.thin]},
                             status_code=400)
+
+
+async def zone_mirror_check(request: Request) -> Response:
+    """拖曳時的鏡像預覽：跟放開後同一套判斷（``cut_mirrored``），只回放不放得下與原因，不切牆、不寫任何東西。"""
+    try:
+        body = ZoneCut.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        return JSONResponse({"error": "鏡像預覽的請求格式不完整：要有方案、哪一面牆、畫的框與鏡像"}, status_code=400)
+    if body.mirror is None:
+        return JSONResponse({"error": "鏡像預覽要帶鏡像那一欄"}, status_code=400)
+    try:
+        return JSONResponse(cut_mirrored(body, body.mirror, preview=True))
+    except ZoneCutError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
 
 
 def _at_moving_edge(value: float, old: float, new: float) -> bool:
@@ -460,4 +474,5 @@ async def zone_resize(request: Request) -> Response:
 
 def zone_edit_routes() -> list[Route]:
     return [Route("/api/zone-cut", zone_cut, methods=["POST"]),
+            Route("/api/zone-mirror-check", zone_mirror_check, methods=["POST"]),
             Route("/api/zone-resize", zone_resize, methods=["POST"])]

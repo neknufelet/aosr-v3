@@ -321,8 +321,17 @@ class Frame:
                     correction = math.ceil((extra - _SLACK) * 100) / 100
                     move_text = f"{correction:.2f}"
                     distance = move_text if abs(extra - correction) <= _SLACK else f"不到 {move_text}"
-                    return "超出牆面", (f"照鏡子翻過去會超出{side}那一側 {distance} 公尺："
-                                    f"把框往對稱軸挪 {move_text} 公尺或改窄 {move_text} 公尺，兩邊就都放得下")
+                    fix = f"把框改小 {move_text} 公尺"
+                    if across:
+                        # 鏡像超出低的那一側，是畫的框高的那一緣太靠牆（反之亦然）：收那一緣；整塊挪只在挪完不跨軸時才講。
+                        low = edge == names[0]
+                        src = shape.u if across_u else shape.v
+                        near = names[1 if low else 0].removeprefix("靠").removesuffix("那一邊")
+                        fix = f"把框靠{near}那一邊往內收 {move_text} 公尺"
+                        axis = self.axis.across_m
+                        if (src[0] - correction >= axis - _SLACK) if low else (src[1] + correction <= axis + _SLACK):
+                            fix += f"，或整塊往對稱軸挪 {move_text} 公尺"
+                    return "超出牆面", f"照鏡子翻過去會超出牆面，{side}那一側多出 {distance} 公尺：{fix}，兩邊就都放得下"
         return None
 
     def gaps(self, wall: str, u: Span, v: Span, zone: ZoneFrame) -> str:
