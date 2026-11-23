@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Literal, NamedTuple, cast
@@ -36,7 +37,7 @@ from pydantic import BaseModel, ConfigDict
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.wall_words import LEFT_OF, OPPOSITE, wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, effective_modes
-from aosr.gui.zone_edit import CutBox, WallName, ZoneCutError, cut_wall, snap_edges
+from aosr.gui.zone_edit import MIN_SIDE_M, CutBox, WallName, ZoneCutError, cut_wall, snap_edges
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.zone_fill import FILL_PREFIX
 from aosr.reporting.scheme import Scheme, project_facing, project_midpoint
@@ -261,6 +262,10 @@ class Frame:
         width, height = self.sizes[wall]
         return u[0] >= -_SLACK and u[1] <= width + _SLACK and v[0] >= -_SLACK and v[1] <= height + _SLACK
 
+    def _across_walls(self) -> tuple[str, str]:
+        left, right = self.axis.left, OPPOSITE[self.axis.left]
+        return (self.names[left], self.names[right]) if left.endswith("0") else (self.names[right], self.names[left])
+
     def _edge_names(self, wall: str, across: bool, upright: bool, span: Span) -> tuple[str, str]:
         """一段範圍的兩個邊叫什麼（先小的那一邊）：橫向的講靠中間還是靠哪面牆、縱深的講靠前牆還是後牆、高度講下緣上緣。"""
         if upright:
@@ -268,13 +273,83 @@ class Frame:
         if not across:
             front, back = f"靠{self.names[self.axis.front]}那一邊", f"靠{self.names[OPPOSITE[self.axis.front]]}那一邊"
             return (front, back) if self.axis.front.endswith("0") else (back, front)
-        low_wall, high_wall = (self.axis.left, OPPOSITE[self.axis.left]) if self.axis.left.endswith("0") else (OPPOSITE[self.axis.left], self.axis.left)
-        low, high = f"靠{self.names[low_wall]}那一邊", f"靠{self.names[high_wall]}那一邊"
+        low_wall, high_wall = self._across_walls()
+        low, high = f"靠{low_wall}那一邊", f"靠{high_wall}那一邊"
         if span[1] <= self.axis.across_m + PAIR_WITHIN_M:
             return low, "靠中間那一邊"
         if span[0] >= self.axis.across_m - PAIR_WITHIN_M:
             return "靠中間那一邊", high
         return low, high
+
+    def mirror_refusal(self, shape: ZoneFrame) -> tuple[str, str] | None:
+        """鏡像本身放不下的類別、原因與修法。選取提示、拖曳預覽、放開切牆共用。"""
+        wall, u, v = self.mirrored(shape)
+        if same_frame(wall, u, v, shape):
+            return None
+        across_u = self._across_is_u(wall)
+        if wall == shape.wall and overlap_area(u, v, shape):
+            return "跨軸", "跨在對稱軸上但沒有置中"
+        if self.inside(wall, u, v):
+            return None
+        for span, length, across, upright in (
+            (u, self.sizes[wall][0], across_u, False),
+            (v, self.sizes[wall][1], wall in _FLAT and not across_u, wall not in _FLAT),
+        ):
+            names = self._across_walls() if across else self._edge_names(wall, False, upright, (0, length))
+            for edge, extra in zip(names, (-span[0], span[1] - length), strict=True):
+                if extra > _SLACK:
+                    side = edge.removeprefix("靠").removesuffix("那一邊")
+                    # 修正量進到足夠的整公分；避免照著四捨五入後的數字挪仍超界。
+                    correction = math.ceil((extra - _SLACK) * 100) / 100
+                    move_text = f"{correction:.2f}"
+                    distance = move_text if abs(extra - correction) <= _SLACK else f"不到 {move_text}"
+                    return "超出牆面", f"照鏡子翻過去會超出牆面，{side}那一側多出 {distance} 公尺"
+        return None
+
+    def repair_candidates(self, shape: ZoneFrame, kind: str) -> list[tuple[str, CutBox]]:
+        """用實際牆邊與軸座標產生候選；是否容得下交給切牆工具。"""
+        _, flip = self.projection(shape.wall)
+        if not flip:
+            return []
+        lo, hi = shape.u if flip == "u" else shape.v
+        axis = self.axis.across_m
+        key = shape.surface.partition("@")[2]
+
+        def candidate(words: str, span: Span) -> tuple[str, CutBox]:
+            return words, CutBox(id=key, u_m=span if flip == "u" else shape.u, v_m=span if flip == "v" else shape.v)
+
+        def metres(distance: float) -> str:
+            # 修法若只印到公分，人照打會在遠端牆邊多留一條縫；保留到切牆的浮點容差內。
+            whole, decimals = f"{abs(distance):.9f}".split(".")
+            return whole + "." + decimals.rstrip("0").ljust(2, "0")
+
+        if kind == "跨軸":
+            shift = axis - (lo + hi) / 2
+            centred = (lo + 2 * shift, hi) if shift > 0 else (lo, hi + 2 * shift)
+            return [candidate(f"整塊挪 {metres(shift)} 公尺到置中", (lo + shift, hi + shift)),
+                    candidate(f"收一緣 {metres(2 * shift)} 公尺到置中", centred)]
+        low, high = self._flipped((lo, hi))
+        if low >= -_SLACK and high <= self.across_length + _SLACK:
+            return []
+        shift = low if low < 0 else high - self.across_length
+        amount = abs(shift)
+        side = self._across_walls()[int(shift < 0)]
+        shrink = (lo, hi + shift) if shift < 0 else (lo + shift, hi)
+        choices = [candidate(f"整塊往對稱軸挪 {metres(amount)} 公尺", (lo + shift, hi + shift)),
+                   candidate(f"把框靠{side}那一邊往內收 {metres(amount)} 公尺", shrink)]
+        if amount < MIN_SIDE_M + _SLACK:
+            # 只差不到一個最小邊：照差多少挪或收，手畫那一面靠牆會剩一條窄條；多挪（收）一個最小邊，兩面牆邊都留得下一格。
+            wide = shift - MIN_SIDE_M if shift < 0 else shift + MIN_SIDE_M
+            choices += [candidate(f"整塊往對稱軸挪 {metres(abs(wide))} 公尺", (lo + wide, hi + wide)),
+                        candidate(f"把框靠{side}那一邊往內收 {metres(abs(wide))} 公尺",
+                                  (lo, hi + wide) if shift < 0 else (lo + wide, hi))]
+        # 靠牆的一邊收回後，若兩框間距太窄，另一緣也收一些，恰好留一個最小邊。
+        gap = 2 * (lo - axis if shift < 0 else axis - hi)
+        if 0 < gap < MIN_SIDE_M:
+            extra = (MIN_SIDE_M - gap) / 2
+            span = (lo + extra, shrink[1]) if shift < 0 else (shrink[0], hi - extra)
+            choices.append(candidate(f"靠牆一緣收 {metres(amount)} 公尺、靠軸一緣收 {metres(extra)} 公尺", span))
+        return choices
 
     def gaps(self, wall: str, u: Span, v: Span, zone: ZoneFrame) -> str:
         """框（u, v）跟 ``zone`` 疊著比，哪幾個邊差多少：「靠中間那一邊差 20 公分、靠右牆那一邊差 5 公分」。"""
@@ -291,11 +366,15 @@ def same_frame(wall: str, u: Span, v: Span, zone: ZoneFrame) -> bool:
     return wall == zone.wall and _same(u, zone.u) and _same(v, zone.v)
 
 
+def drawn_frames(scheme: Scheme) -> list[ZoneFrame]:
+    return [ZoneFrame(f"{wall}@{zone.id}", wall, zone.u_m, zone.v_m)
+            for wall, entries in (scheme.scene.surface_zones_by_wall or {}).items()
+            for zone in entries if isinstance(zone, RectangleZone) and not zone.id.startswith(FILL_PREFIX)]
+
+
 def drawn_partners(scheme: Scheme, frame: Frame, added: ZoneFrame | None = None) -> dict[str, str]:
     """不看做法，只收畫的矩形。鍵和值都是「牆@代號」，每一對雙向登記。"""
-    drawn = [ZoneFrame(f"{wall}@{zone.id}", wall, zone.u_m, zone.v_m)
-             for wall, entries in (scheme.scene.surface_zones_by_wall or {}).items()
-             for zone in entries if isinstance(zone, RectangleZone) and not zone.id.startswith(FILL_PREFIX)]
+    drawn = drawn_frames(scheme)
     if added is not None:
         drawn.append(added)  # 新畫時先照同一把尺找既有夥伴；找到了就不用補切。
     partners: dict[str, str] = {}

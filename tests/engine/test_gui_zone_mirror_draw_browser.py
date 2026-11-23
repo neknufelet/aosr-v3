@@ -321,7 +321,12 @@ def test_centre_crossing_and_thin_remainder(tmp_path: Path, browser: Browser, st
         line = page.locator("#elevation-note")
         if reason:
             expect(line).to_contain_text(reason)
-            expect(page.locator("#elevation-complete")).to_be_visible()
+            if reason == "跨在對稱軸上但沒有置中":
+                # #1274：跨在軸上沒置中，補畫一樣放不下：不出「補畫另一邊」，改寫放不下的原因。
+                expect(page.locator("#elevation-complete")).to_have_count(0)
+                expect(page.get_by_text("這一塊沒有另一邊：跨在對稱軸上但沒有置中")).to_be_visible()
+            else:
+                expect(page.locator("#elevation-complete")).to_be_visible()
         else:
             expect(page.locator(".mirror-axis text")).to_have_text("對稱軸")
             expect(line).not_to_contain_text("另一邊沒有跟著畫")
