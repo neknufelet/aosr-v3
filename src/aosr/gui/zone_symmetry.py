@@ -37,7 +37,7 @@ from pydantic import BaseModel, ConfigDict
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gui.wall_words import LEFT_OF, OPPOSITE, wall_words
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, effective_modes
-from aosr.gui.zone_edit import CutBox, WallName, ZoneCutError, cut_wall, snap_edges
+from aosr.gui.zone_edit import MIN_SIDE_M, CutBox, WallName, ZoneCutError, cut_wall, snap_edges
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.physics.zone_fill import FILL_PREFIX
 from aosr.reporting.scheme import Scheme, project_facing, project_midpoint
@@ -288,25 +288,7 @@ class Frame:
             return None
         across_u = self._across_is_u(wall)
         if wall == shape.wall and overlap_area(u, v, shape):
-            span = shape.u if across_u else shape.v
-            axis = self.axis.across_m
-            low, high = self._across_walls()
-            width = span[1] - span[0]
-            side_room = min(axis, self.across_length - axis)
-            if width <= side_room + _SLACK:
-                # 整塊挪到軸的一側；選挪得較少的方向，翻過去在另一側也容得下同寬的一塊。
-                shift, edge = min((span[1] - axis, low), (axis - span[0], high))
-                move = math.ceil((shift - _SLACK) * 100) / 100
-                fix = f"把框往{edge}挪 {move:.2f} 公尺，讓整塊落在軸的一側"
-            elif width <= 2 * side_room + _SLACK:
-                shift = axis - sum(span) / 2
-                edge = high if shift > 0 else low
-                fix = f"把框往{edge}挪 {abs(shift):.2f} 公尺，讓框置中"
-            else:
-                shift = axis - sum(span) / 2
-                edge = high if shift < 0 else low
-                fix = f"把靠{edge}的框緣往軸收 {2 * abs(shift):.2f} 公尺，讓框置中"
-            return "跨軸", f"跨在對稱軸上但沒有置中：{fix}"
+            return "跨軸", "跨在對稱軸上但沒有置中"
         if self.inside(wall, u, v):
             return None
         for span, length, across, upright in (
@@ -321,18 +303,47 @@ class Frame:
                     correction = math.ceil((extra - _SLACK) * 100) / 100
                     move_text = f"{correction:.2f}"
                     distance = move_text if abs(extra - correction) <= _SLACK else f"不到 {move_text}"
-                    fix = f"把框改小 {move_text} 公尺"
-                    if across:
-                        # 鏡像超出低的那一側，是畫的框高的那一緣太靠牆（反之亦然）：收那一緣；整塊挪只在挪完不跨軸時才講。
-                        low = edge == names[0]
-                        src = shape.u if across_u else shape.v
-                        near = names[1 if low else 0].removeprefix("靠").removesuffix("那一邊")
-                        fix = f"把框靠{near}那一邊往內收 {move_text} 公尺"
-                        axis = self.axis.across_m
-                        if (src[0] - correction >= axis - _SLACK) if low else (src[1] + correction <= axis + _SLACK):
-                            fix += f"，或整塊往對稱軸挪 {move_text} 公尺"
-                    return "超出牆面", f"照鏡子翻過去會超出牆面，{side}那一側多出 {distance} 公尺：{fix}，兩邊就都放得下"
+                    return "超出牆面", f"照鏡子翻過去會超出牆面，{side}那一側多出 {distance} 公尺"
         return None
+
+    def repair_candidates(self, shape: ZoneFrame, kind: str) -> list[tuple[str, CutBox]]:
+        """用實際牆邊與軸座標產生候選；是否容得下交給切牆工具。"""
+        _, flip = self.projection(shape.wall)
+        if not flip:
+            return []
+        lo, hi = shape.u if flip == "u" else shape.v
+        axis = self.axis.across_m
+        key = shape.surface.partition("@")[2]
+
+        def candidate(words: str, span: Span) -> tuple[str, CutBox]:
+            return words, CutBox(id=key, u_m=span if flip == "u" else shape.u, v_m=span if flip == "v" else shape.v)
+
+        def metres(distance: float) -> str:
+            # 修法若只印到公分，人照打會在遠端牆邊多留一條縫；保留到切牆的浮點容差內。
+            whole, decimals = f"{abs(distance):.9f}".split(".")
+            return whole + "." + decimals.rstrip("0").ljust(2, "0")
+
+        if kind == "跨軸":
+            shift = axis - (lo + hi) / 2
+            centred = (lo + 2 * shift, hi) if shift > 0 else (lo, hi + 2 * shift)
+            return [candidate(f"整塊挪 {metres(shift)} 公尺到置中", (lo + shift, hi + shift)),
+                    candidate(f"收一緣 {metres(2 * shift)} 公尺到置中", centred)]
+        low, high = self._flipped((lo, hi))
+        if low >= -_SLACK and high <= self.across_length + _SLACK:
+            return []
+        shift = low if low < 0 else high - self.across_length
+        amount = abs(shift)
+        side = self._across_walls()[int(shift < 0)]
+        shrink = (lo, hi + shift) if shift < 0 else (lo + shift, hi)
+        choices = [candidate(f"整塊往對稱軸挪 {metres(amount)} 公尺", (lo + shift, hi + shift)),
+                   candidate(f"把框靠{side}那一邊往內收 {metres(amount)} 公尺", shrink)]
+        # 靠牆的一邊收回後，若兩框間距太窄，另一緣也收一些，恰好留一個最小邊。
+        gap = 2 * (lo - axis if shift < 0 else axis - hi)
+        if 0 < gap < MIN_SIDE_M:
+            extra = (MIN_SIDE_M - gap) / 2
+            span = (lo + extra, shrink[1]) if shift < 0 else (shrink[0], hi - extra)
+            choices.append(candidate(f"靠牆一緣收 {metres(amount)} 公尺、靠軸一緣收 {metres(extra)} 公尺", span))
+        return choices
 
     def gaps(self, wall: str, u: Span, v: Span, zone: ZoneFrame) -> str:
         """框（u, v）跟 ``zone`` 疊著比，哪幾個邊差多少：「靠中間那一邊差 20 公分、靠右牆那一邊差 5 公分」。"""

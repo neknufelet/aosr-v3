@@ -91,7 +91,14 @@ button.archive-danger:hover{background:#fff0f0}
 }
 /* 立面圖（#1091）：畫的框實線、補滿的格子虛線、太窄的那幾條紅虛線、選取的框加粗；喇叭方塊、主位圓點。
    整張圖不讓瀏覽器拿去捲動或選字，按住拖曳才畫得出框。 */
-#elevation svg{max-width:760px;touch-action:none;user-select:none;cursor:crosshair}
+section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
+#elevation{display:grid}
+#elevation > *{grid-area:1 / 1}
+#elevation-banner{position:sticky;top:0;z-index:1;align-self:start;pointer-events:none;
+  background:rgb(255 252 243 / 88%);border-inline-start:4px solid currentColor;padding:.35rem .65rem;line-height:1.4}
+#elevation-banner.ok{background:rgb(244 253 246 / 88%)}
+#elevation-banner button{pointer-events:auto;margin-inline-start:.65rem;padding:.25rem .65rem}
+#elevation svg{max-width:760px;margin-top:2.75rem;touch-action:none;user-select:none;cursor:crosshair}
 #elevation-frame{fill:#ffffff;stroke:#17212a;stroke-width:2}
 .zone rect{fill:#dcecf2;stroke:#15617b;stroke-width:2}
 .zone-auto rect{fill:#f4f7f8;stroke:#7d95a0;stroke-dasharray:6 4}
@@ -197,4 +204,5 @@ a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
 .mirror-preview.refused text{fill:#a52714;font-weight:700}
 .mirror-resize{cursor:nesw-resize;fill:white;stroke:#155b70;stroke-width:2}
 .mirror-blocked{pointer-events:none;fill:none;stroke:#a52714;stroke-width:2;stroke-dasharray:6 4}
+.elevation-pair-status button{flex:none;white-space:nowrap}
 .elevation-pair-status{flex-basis:100%;min-height:2.75rem;display:flex;align-items:center;gap:.5rem}

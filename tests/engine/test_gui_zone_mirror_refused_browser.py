@@ -62,14 +62,17 @@ def test_outside_preview_and_selection(tmp_path: Path, browser: Browser, wall: W
         def during() -> None:
             reason = _refusal(page)
             assert f"超出牆面，左牆那一側多出 {distance}" in reason
-            assert f"把框靠右牆那一邊往內收 {distance}" in reason and f"或整塊往對稱軸挪 {distance}" in reason
+            # 修法只寫一次，用畫面上選取那一列的欄位名稱與數字（後牆左右顛倒也照畫面講）。
+            assert "。改成：離左緣 " in reason and f"（整塊往對稱軸挪 {distance}）" in reason
+            assert "往內收" not in reason
             reasons.append(reason)
             page.screenshot(path=tmp_path / "outside-dragging.png")
 
         with page.expect_response("**/api/zone-cut") as released:
             _drag(page, W, H, start, end, during=during)
         _settled(page)
-        assert reasons[0] in released.value.json()["message"]
+        cause = reasons[0].split("。改成：")[0]
+        assert cause in released.value.json()["message"] and "改成" not in released.value.json()["message"]
         note = page.locator("#elevation-note")
         expect(note).to_contain_text(reasons[0])
         assert note.evaluate("e => e.previousElementSibling.id === 'elevation' && e.nextElementSibling.id === 'elevation-selected'")
@@ -109,7 +112,7 @@ def test_off_centre_crossing(tmp_path: Path, browser: Browser) -> None:
         _drag(page, W, H, (2.0, 0.02), (2.6, 1.8), during=during)
         _settled(page)
         expect(page.locator("#elevation-note")).to_contain_text(reasons[0])
-        expect(page.locator("#elevation-selected")).to_contain_text("這一塊翻過去放不下：" + reasons[0])
+        expect(page.locator("#elevation-selected")).to_contain_text("這一塊沒有另一邊：" + reasons[0])
         expect(page.locator("#elevation-complete")).to_have_count(0)
 
 
@@ -201,3 +204,153 @@ def test_editing_a_box_whose_mirror_still_does_not_fit_says_so(tmp_path: Path, b
         _settled(page)
         expect(page.locator("#elevation-note.notice")).to_contain_text("另一邊沒有跟著畫")
         assert set(_drawn(page)) == {"z1"} and _drawn(page)["z1"]["v_m"] == pytest.approx([0, 1.1])
+
+
+def _zoom(page: Page) -> None:
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.evaluate("document.documentElement.style.zoom = '125%'")
+    page.locator("#elevation-svg").evaluate("e => e.scrollIntoView({block:'end'})")
+
+
+def _banner_in_view(page: Page) -> str:
+    banner = page.locator("#elevation-banner")
+    expect(banner).to_be_visible()
+    assert banner.evaluate("e => { const r=e.getBoundingClientRect(); return r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth }")
+    return banner.inner_text()
+
+
+def _apply_repair(page: Page, *, selected: bool = False) -> None:
+    selector = "#elevation-selected" if selected else "#elevation-banner"
+    button = page.locator(selector).get_by_role("button", name="照這樣改")
+    expect(button).to_be_visible()
+    calls = []
+    page.on("request", lambda req: calls.append(req.post_data_json) if req.url.endswith("/api/zone-cut") else None)
+    with page.expect_response("**/api/zone-cut") as cut:
+        button.click()
+    assert cut.value.ok, cut.value.text()
+    _settled(page)
+    assert len(calls) == 1
+    assert calls[0]["mirror"]["before"]["id"] == calls[0]["mirror"]["after"]["id"]
+
+
+def test_repair_banner_stays_visible(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        _zoom(page)
+
+        def during() -> None:
+            expect(page.locator("#elevation-banner")).to_contain_text("改成")
+            assert "超出牆面" in _banner_in_view(page)
+            page.screenshot(path=tmp_path / "dragging.png")
+
+        _drag(page, W, H, RIGHT_START, RIGHT_END, during=during)
+        _settled(page)
+        text = _banner_in_view(page)
+        assert "超出牆面" in text and "照這樣改" in text
+        page.screenshot(path=tmp_path / "released.png")
+        page.locator("#elevation-svg").evaluate("e => window.scrollBy(0, e.getBoundingClientRect().top + 100)")
+        assert "照這樣改" in _banner_in_view(page)
+
+
+def test_repair_narrow_gap(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        _zoom(page)
+        _drag(page, W, H, (2.5, 0.02), RIGHT_END)
+        _settled(page)
+        assert "把框靠右牆那一邊往內收 0.30 公尺，兩邊就都放得下" not in page.locator("#elevation-note").inner_text()
+        _apply_repair(page)
+        boxes = _drawn(page)
+        _matches_mirror(page, FRONT, boxes["z1"], boxes["z2"])
+        expect(page.locator("#elevation-banner.ok")).to_contain_text("改好了：兩邊都在")
+        page.screenshot(path=tmp_path / "pair.png")
+
+
+def test_repair_fractional_wall(tmp_path: Path, browser: Browser) -> None:
+    width = 5.207
+    with _room(tmp_path, browser) as page:
+        page.locator("#room-Lx").fill(str(width))
+        page.locator("#room-Lx").press("Tab")
+        page.evaluate("pendingRoomResize()")
+        _settled(page)
+        _drag(page, width, H, RIGHT_START, RIGHT_END)
+        _settled(page)
+        _apply_repair(page)
+        boxes = _drawn(page)
+        _matches_mirror(page, FRONT, boxes["z1"], boxes["z2"])
+
+
+def test_repair_none_fits(tmp_path: Path, browser: Browser) -> None:
+    obstacle = CutBox(id="occupied", u_m=(0, 1.3), v_m=(0, 2.0))
+    with _room(tmp_path, browser, (obstacle,)) as page:
+        _drag(page, W, H, RIGHT_START, RIGHT_END)
+        _settled(page)
+        expect(page.locator("#elevation-note")).to_contain_text("試過挪和收都不行")
+        expect(page.locator("#elevation-banner")).to_contain_text("壓到")
+        expect(page.get_by_role("button", name="照這樣改")).to_have_count(0)
+
+
+def test_repair_crossing_centres_box(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        _drag(page, W, H, (2.0, 0.02), (2.6, 1.8))
+        _settled(page)
+        expect(page.locator("#elevation-selected")).to_contain_text("這一塊沒有另一邊：跨在對稱軸上但沒有置中")
+        _apply_repair(page, selected=True)
+        boxes = _drawn(page)
+        assert set(boxes) == {"z1"}
+        _matches_mirror(page, FRONT, boxes["z1"], boxes["z1"])
+        expect(page.locator("#elevation-selected")).to_contain_text("自己對稱")
+
+
+def test_repair_side_message_and_switch(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser, wall="x0") as page:
+        _zoom(page)
+        words = "左右牆不跟著畫：對稱軸離左牆 2.45 公尺，房間正中是 2.60 公尺"
+
+        def during() -> None:
+            expect(page.locator("#elevation-banner")).to_contain_text(words)
+            page.screenshot(path=tmp_path / "side.png")
+
+        _drag(page, 5.5, H, START, END, during=during)
+        _settled(page)
+        expect(page.locator("#elevation-banner")).to_contain_text(words)
+        expect(page.locator("#elevation-note")).to_contain_text("喇叭與座位")
+        expect(page.locator("#elevation-note")).not_to_contain_text("補畫另一邊")
+        page.locator("#elevation-wall-xL").click()
+        expect(page.locator("#elevation-note")).to_be_empty()
+        expect(page.locator("#elevation-banner")).to_be_hidden()
+
+
+def test_repair_back_wall_fields(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser, wall="y0") as page:
+        _zoom(page)
+        _drag(page, W, H, (0.02, 0.02), (1.5, 2.6))
+        _settled(page)
+        banner = page.locator("#elevation-banner")
+        expect(banner).to_contain_text("改成：離左緣 0.30、寬 1.50")
+        page.screenshot(path=tmp_path / "back.png")
+        page.locator("#elevation [data-zone-id=z1] > rect").click()
+        expect(page.locator("#elevation-selected").get_by_role("button", name="照這樣改")).to_be_visible()
+        _apply_repair(page)
+        assert float(page.locator("#elevation-left").input_value()) == 0.30
+        assert float(page.locator("#elevation-width").input_value()) == 1.50
+        boxes = _drawn(page, "y0")
+        _matches_mirror(page, "y0", boxes["z1"], boxes["z2"])
+
+
+def test_repair_pair_waits_for_limits(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        _drag(page, W, H, RIGHT_START, RIGHT_END)
+        _settled(page)
+        _drag(page, W, H, (4.75, 1.0), (4.45, 1.0))
+        _settled(page)
+        expect(page.locator(".elevation-pair-status")).to_contain_text("左右對稱")
+        pending = []
+        page.route("**/api/zone-limits", lambda route: pending.append(route))
+        _drag(page, W, H, (4.45, 1.0), (4.75, 1.0))
+        expect(page.locator("#elevation-note")).to_contain_text("超出牆面")
+        assert "左右對稱" not in page.locator(".elevation-pair-status").inner_text()
+        assert pending
+        for route in pending:
+            route.continue_()
+        page.unroute("**/api/zone-limits")
+        _settled(page)
+        expect(page.locator(".elevation-pair-status")).to_contain_text("超出牆面")
