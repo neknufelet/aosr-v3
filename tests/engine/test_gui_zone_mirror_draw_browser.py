@@ -32,7 +32,8 @@ OTHER = CutBox(id="stay", u_m=(2.0, 2.8), v_m=(2.2, H))
 BLOCK = CutBox(id="block", u_m=(3.9, 4.85), v_m=(0, 2.1))
 Rect = dict[str, object]
 
-# 重錄方式見票號 1270 工作資料夾的 evidence 裡的 record-off-digests.sh：fe5b6bf9 從分區頁關閉對稱，原始請求／回覆各取 SHA-256。
+# 錄法（#1270 驗收時在本機重跑過、三組逐字對上）：取 fe5b6bf9 的產品與考卷，從分區頁關閉對稱、存檔重開，照這一題畫、搬、刪三次，
+# 原始請求與回覆各取 SHA-256。主線那時沒有鏡像，等同關著。
 OFF_DIGESTS = [
     ("068c882e4a5855c5be8920c140d8accafec87b5363c82b33bd5b21af9dc43ef4",
      "be05d91968b98338f1b8afb08f7dc82326651f7f455bed5415a527ef39eaf8d1"),
