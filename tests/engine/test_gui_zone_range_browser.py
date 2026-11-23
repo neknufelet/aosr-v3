@@ -256,6 +256,7 @@ def test_list_cards_split_by_range_and_read_out_the_range_each_group_uses(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        _settled(page)  # 限制檢查回來會重畫整頁：先等它畫好再讀、再捲（雲端慢機器上撞過「元素已不在頁面上」）
         cards = page.locator("#zone-page .zv-list").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
         assert cards == [["zone-list", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-list-2", ["yL/z1", "yL/z2"]]], cards
         expect(page.locator(f"#zone-list-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
