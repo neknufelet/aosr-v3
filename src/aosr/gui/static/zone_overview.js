@@ -529,8 +529,27 @@ function select(ids) {
   renderZoneOverview();
 }
 // 換成選這幾區：面板上已經自己點過選項就留著（只換選了哪幾區），沒點過就照新選的那幾區重新起頭。
-function pick(next) {
+let followed = [];
+async function pick(next, toggled = null) {
+  if (symmetryIsOn() && zoneLimitsReceived !== zoneLimitsGeneration) {
+    const generation = zoneDesignGeneration;
+    await settledZoneLimits();
+    if (!overviewOpen || zoneDesignGeneration !== generation) return;
+  }
+  const partners = symmetryIsOn() ? zoneLimits?.symmetry?.partners : null;
+  const partner = id => partners?.[id.replace("/", "@")]?.replace("@", "/");
+  if (toggled) {
+    if (!view.byId.has(toggled)) return;
+    next = selected.includes(toggled) ? selected.filter(id => id !== toggled && id !== partner(toggled)) : [...selected, toggled];
+  }
+  const added = [];
+  for (const id of next) {
+    const other = partner(id);
+    if (other && view.byId.has(other) && !next.includes(other) && !added.includes(other)) added.push(other);
+  }
+  next = [...next, ...added];
   if (next.length === selected.length && next.every(id => selected.includes(id))) return;
+  followed = added;
   if (draftTouched && next.length) {
     selected = next;
     const message = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
@@ -541,7 +560,7 @@ function pick(next) {
   }
   select(next);
 }
-function toggleSelected(id) { pick(selected.includes(id) ? selected.filter(other => other !== id) : [...selected, id]); }
+function toggleSelected(id) { pick([], id); }
 // 一面牆的「整面」（#1199）：那一面全部的區扣掉門、窗（跟推「其他牆面」時扣的一樣），照號碼排。
 function wholeFace(wall) { return view.faces[wall].filter(item => !item.opening).map(item => item.id); }
 // 好幾區照面分開（照交進來的先後）：[{wall, zones, whole}]。whole：這幾區剛好是那一面牆的整面（兩區以上）——右欄就寫一行
@@ -1423,6 +1442,9 @@ function panelCard() {
     each.append(...chips);
     card.append(line, each);
   } else card.append(...chips);
+  for (const item of items.filter(item => symmetryIsOn() && followed.includes(item.id))) {
+    card.append(el("div", "zv-addmore", `${item.label.numberText}（${item.label.name}）跟著一起選（左右對稱）`));
+  }
   card.append(el("div", "zv-addmore", "再點圖上別區可以一起改。"));
   // 「＝其他牆面」：選到的都是算進規則的牆區時，標在跟規則同一種做法的那一項旁邊；選它＝這幾區不再另外指定。
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
@@ -1565,7 +1587,7 @@ function specialRow() {
     }
     body.append(where, el("div", "zv-what", methodWords(group)));
     block.append(el("i", `zv-bar ${shownOf(group.mode)}`), body,
-      button("zv-btn", "改", `zone-special-edit-${index}`, () => select(group.zones.map(item => item.id))));
+      button("zv-btn", "改", `zone-special-edit-${index}`, () => pick(group.zones.map(item => item.id))));
     row.append(block);
   });
   if (zones.length) {
@@ -1771,14 +1793,18 @@ function detailTable() {
 
 /* ───── 最底下：結果列 ───── */
 /* ───── 左右對稱那一塊（圖例底下）與配對細節 ───── */
+let symmetryEditGeneration = null;
 function setSymmetry(on) {
   if (on === symmetryIsOn()) return;
   const design = designForEdit();
   if (on) delete design.left_right_symmetry; else design.left_right_symmetry = "off";
-  unsaved = true; symmetryDetail = false;
+  unsaved = true; symmetryEditGeneration = zoneDesignGeneration; symmetryDetail = false; followed = [];
+  markStale();
+  renderElevation();
   refreshZoneLimits();
   renderZoneOverview();
 }
+window.zoneSymmetry = {isOn: symmetryIsOn, set: setSymmetry};
 // 句子裡的 {first}／{second}／{other} 換成那一區的牆名與號碼。
 function withZones(text, entry) {
   const line = el("span");
@@ -2016,7 +2042,7 @@ function overviewParts() {
     return [head];
   }
   // 換了方案（打開別份、載入範本）：上一份選的區、面板上點的都不算數。
-  if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; keptRule = null; keptRuleZone = null; unsaved = false; keptSaid = ""; }
+  if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; keptRule = null; keptRuleZone = null; unsaved = symmetryEditGeneration === zoneDesignGeneration; followed = []; keptSaid = ""; }
   const roles = overviewRoles();
   const room = {Lx: wallSize("floor")[0], Ly: wallSize("floor")[1], Lz: wallSize("x0")[1]};
   const depth = roles.front[0] === "x" ? room.Lx : room.Ly, across = roles.front[0] === "x" ? room.Ly : room.Lx;
@@ -2082,7 +2108,7 @@ window.openZoneOverview = id => {
 // 輸入頁訊息列每寫一句（app.js 的 say）就叫一次：警示照抄到這一頁，換成成功的一句就拿掉。
 // 這一頁打開時從空的開始（上面那一行）：打開之前輸入頁講過的話不帶進來。
 // 方案與每一區的做法都存進檔案了（輸入頁按「儲存」、另存，或「拿去搜尋」先存的那一步）：那一句拿掉。
-window.zonePageSaved = () => { unsaved = false; renderZoneOverview(); };
+window.zonePageSaved = () => { symmetryEditGeneration = null; unsaved = false; renderZoneOverview(); };
 window.zonePageSay = (text, kind) => {
   const next = kind === "notice" ? text : "";
   if (next === pageSaid) return;

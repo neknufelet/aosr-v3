@@ -64,7 +64,7 @@ from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
     ranged_misfit_words, target_line, zone_limits, zone_words,
 )
-from aosr.gui.zone_symmetry import SettingsCheck, Symmetry, Unchecked, pair_zones, symmetry_on
+from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Frame, SettingsCheck, Symmetry, Unchecked, drawn_partners, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import ConstructionEntry, LibraryEntry, builtin_entries, fixed_surface, full_library
 from aosr.materials.search_library import PresetMaterial
@@ -378,11 +378,11 @@ def draft_symmetry(document: object, design_value: object,
     try:
         scheme = Scheme.model_validate(document)
     except ValidationError:
-        return {"available": False, "message": "方案還有沒填好的地方，先算不了哪幾區成對"}
+        return {"available": False, "partners": {}, "message": "方案還有沒填好的地方，先算不了哪幾區成對"}
     try:
         design = None if design_value is None else DesignSettings.model_validate(design_value)
     except ValidationError:
-        return {"available": False, "message": "設計設定格式不對，先算不了哪幾區成對"}
+        return {"available": False, "partners": {}, "message": "設計設定格式不對，先算不了哪幾區成對"}
     checks: list[SettingsCheck] = []
 
     def check(first: str, second: str) -> str | Unchecked | None:
@@ -395,7 +395,11 @@ def draft_symmetry(document: object, design_value: object,
                 checks.append(lambda first, second: refused)
         return checks[0](first, second)
 
-    return {"available": True, **pair_zones(scheme, design, check).model_dump(mode="json")}
+    result = pair_zones(scheme, design, check)
+    frame = Frame(scheme, result.axis) if result.axis else None
+    return {"available": True, **result.model_dump(mode="json"), "partners": drawn_partners(scheme, frame) if frame else {},
+            "projections": {wall: frame.projection(wall) for wall in frame.sizes} if frame else {},
+            "pair_within_m": PAIR_WITHIN_M}
 
 
 def plan_search(scheme: Scheme, design: DesignSettings | None, request: GradientRequest,

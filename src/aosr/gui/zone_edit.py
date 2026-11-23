@@ -28,6 +28,7 @@ from starlette.routing import Route
 
 from aosr.geometry.shoebox import Room
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
+from aosr.reporting.scheme import Scheme
 from aosr.physics.zone_fill import FILL_PREFIX, Box, FillResult, fill_wall, wall_size_m
 
 SNAP_M = 0.05
@@ -52,6 +53,16 @@ class CutBox(BaseModel):
     v_m: tuple[float, float]
 
 
+class MirrorChange(BaseModel):
+    """只允許一個畫框的前後差異；補畫時兩個值必須是同一個原框。"""
+
+    model_config = ConfigDict(extra="forbid")
+    before: CutBox | None
+    after: CutBox | None
+    complete: bool = False
+    protected_walls: tuple[WallName, ...] = ()
+
+
 class ZoneCut(BaseModel):
     """一次切一面：整份方案（拿房間尺寸與切之前的材料）、哪一面、這一面所有畫的框。"""
 
@@ -59,6 +70,7 @@ class ZoneCut(BaseModel):
     scheme: dict[str, object]
     wall: WallName
     boxes: list[CutBox] = Field(max_length=MAX_BOXES)
+    mirror: MirrorChange | None = None
 
 
 class ZoneCutError(ValueError):
@@ -238,12 +250,105 @@ def cut_wall(document: dict[str, object], wall: WallName, boxes: Sequence[CutBox
     return {"zones": zones, "filled_ids": list(result.filled_ids), "inherited": inherited}
 
 
+def _drawn(document: dict[str, object], wall: str) -> list[CutBox]:
+    return [CutBox(id=box.id, u_m=box.u_m, v_m=box.v_m) for box, _ in _old_rectangles(_old_entries(document, wall))
+            if not box.id.startswith(FILL_PREFIX)]
+
+
+def _changed_boxes(body: ZoneCut, change: MirrorChange) -> tuple[str, list[CutBox]]:
+    """核對改前、改後及所有旁框；舊框留在原來的次序，免得改到別區的代號或吸邊。"""
+    before, after = change.before, change.after
+    active = after or before
+    if active is None or (before and before.id != active.id) or (change.complete and before != after):
+        raise ZoneCutError("改框前後的代號或補畫的位置對不上，請重新選框")
+    old = _drawn(body.scheme, body.wall)
+    expected = {box.id: box for box in old}
+    if expected.get(active.id) != before:
+        raise ZoneCutError("原來的框已改變，請重新選取這一區")
+    if after:
+        expected[active.id] = after
+    else:
+        del expected[active.id]
+    if len(body.boxes) != len(expected) or {box.id: box for box in body.boxes} != expected:
+        raise ZoneCutError("送出的切法還改到其他區，請重新選框")
+    return active.id, list(expected.values())
+
+
+def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
+    # 配對的建議切法也會呼叫 cut_wall；到請求進來才載入鏡像幾何。
+    from aosr.gui.zone_symmetry import Frame, SIDES_NOT_MIRRORED, ZoneFrame, drawn_partners, overlap_area, same_frame, symmetry_axis
+
+    wall, doc = body.wall, body.scheme
+    key, source = _changed_boxes(body, change)
+
+    def source_only(reason: str = "", other: str = "", fix: str = "") -> dict[str, object]:
+        walls = {} if change.complete else {wall: cut_wall(doc, wall, source)}
+        verb = "畫" if change.after else "刪"
+        if change.after is None:
+            fix = "原來選的框已刪除。若也要刪另一邊，請選取那一塊再刪。"
+        message = f"另一邊沒有跟著{verb}：{{first}} {reason}。{fix}" if reason else ""
+        return {"walls": walls, "message": message, "first": f"{wall}@{key}", "other": other}
+
+    try:
+        scheme = Scheme.model_validate(doc)
+    except ValidationError:
+        return source_only("的方案還有沒填好的地方，定不出對稱軸", fix="請先檢查方案。")
+    axis = symmetry_axis(scheme)
+    if isinstance(axis, str):
+        return source_only(axis, fix="請調整喇叭或主位，再選框按「補畫另一邊」。")
+    frame = Frame(scheme, axis)
+    if frame.side(wall) and not axis.centred:
+        return source_only(SIDES_NOT_MIRRORED, fix="請讓對稱軸通過房間正中，再補畫另一邊。")
+    partner = drawn_partners(scheme, frame).get(f"{wall}@{key}") if change.before else None
+    if change.complete and partner:
+        return source_only()
+    if change.before and not change.complete and not partner:
+        return source_only()
+    active = change.after or change.before
+    assert active is not None
+    shape = ZoneFrame(key, wall, active.u_m, active.v_m)
+    destination, u, v = frame.mirrored(shape)
+    target = cast(WallName, destination)
+    if target in change.protected_walls:
+        return source_only("的對面還有實測阻抗草稿", fix="請先套用或取消草稿，再補畫另一邊。")
+    peers = source if target == wall else _drawn(doc, target)
+    partner_id = partner.partition("@")[2] if partner else None
+    boxes = [box for box in peers if box.id != partner_id]
+    if change.after and not same_frame(target, u, v, shape):
+        if not frame.inside(target, u, v):
+            return source_only("照鏡子翻過去會超出牆面", fix="先把框移進兩邊都放得下的位置，再按「補畫另一邊」。")
+        if target == wall and overlap_area(u, v, shape):
+            return source_only("跨在對稱軸上但沒有置中", fix="先把框移到軸的一側，再按「補畫另一邊」。")
+        for box in boxes:
+            if overlap_area(u, v, ZoneFrame(box.id, target, box.u_m, box.v_m)):
+                reply = source_only("照鏡子翻過去會壓到 {other}", f"{target}@{box.id}",
+                                    "要另一邊的話，先把 {other} 改小或刪掉，再選 {first} 按「補畫另一邊」。")
+                return {**reply, "blocked": {"wall": target, "u_m": u, "v_m": v}}
+        if len(boxes) >= MAX_BOXES:
+            return source_only("對面的畫框數量已滿", fix="請先刪除多餘的框，再補畫另一邊。")
+        used = {box.id for box in peers}
+        identifier = partner_id or next(f"z{i}" for i in range(1, len(used) + 2) if f"z{i}" not in used)
+        mirrored = CutBox(id=identifier, u_m=u, v_m=v)
+        boxes = [mirrored if b.id == partner_id else b for b in peers] if partner else [*boxes, mirrored]
+    elif not partner:
+        return source_only()
+    try:
+        other_cut = cut_wall(doc, target, boxes)
+    except ZoneCutError as exc:
+        return source_only(f"翻過去切不成（{exc}）", fix="請調整框邊後再試。")
+    walls = {} if target == wall or change.complete else {wall: cut_wall(doc, wall, source)}
+    walls[target] = other_cut
+    return {"walls": walls, "message": ""}
+
+
 async def zone_cut(request: Request) -> Response:
     try:
         body = ZoneCut.model_validate(await request.json())
     except (ValidationError, ValueError):
         return JSONResponse({"error": "切牆面的請求格式不完整：要有方案、哪一面牆與畫的框"}, status_code=400)
     try:
+        if body.mirror is not None:
+            return JSONResponse(cut_mirrored(body, body.mirror))
         return JSONResponse(cut_wall(body.scheme, body.wall, body.boxes))
     except ZoneCutError as exc:
         return JSONResponse({"error": str(exc), "problems": [{"text": text} for text in exc.problems],

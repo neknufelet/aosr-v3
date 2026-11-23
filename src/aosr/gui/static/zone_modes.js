@@ -203,6 +203,8 @@ function stuckWords(names) { return `先處理${names.join("、")}的紅框（�
 // 鎖（app.js 的 holdInput）從存檔一路拿到離開這一頁（#1188 第 5 條，同「計算」把重讀清單包在鎖裡）：存好之後還要重讀清單、
 // 搜尋頁也要一點時間才回來，那一段要是點得到、改得動，改的東西沒存就被帶去搜尋頁，搜尋頁讀到的比畫面上少。
 async function sendToSearch() {
+  const cut = window.pendingMirrorCut?.();
+  if (cut) await cut;
   const stuck = stuckZoneNames();
   if (stuck.length) { zoneNote(stuckWords(stuck), "notice"); return; }
   // 房間尺寸調整還在路上（#1266）：先等它落地，底下等到的限制判決才是照新尺寸重問的那一次。
