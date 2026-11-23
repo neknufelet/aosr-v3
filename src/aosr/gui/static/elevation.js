@@ -10,6 +10,7 @@ let mirrorWarning = null;
 let minLimitsGeneration = 0;
 let movingText = "";
 let showSelectionBanner = false;
+let bannerOwner = null;  // 說明條是哪一份方案上講的；換方案或對稱關掉就清（#1274）
 let elevationDrawing = false;  // 正在拖框：限制判決回來先不重畫（#1111），放開滑鼠才畫
 // 站在房間裡看那一面：畫面往右、往上各是方案的哪一軸（反了就鏡像），四邊標的是隔壁哪一面。
 // 四面牆：往上是 z；x 起點牆面向 -x、右手邊是 +y；x 終點牆面向 +x、右手邊是 -y（鏡像）；
@@ -110,12 +111,13 @@ function banner(text = "", kind = "", button = null) {
   line.textContent = text;
   line.className = kind;
   line.hidden = !text;
+  bannerOwner = text ? scheme : null;
   if (button) line.append(button);
 }
 function repairWords(wall, before, repair) {
   const size = wallSize(wall), view = views[wall];
   const [a0, a1, b0, b1] = screenBox(view, ...size, repair);
-  const vertical = repair.v_m.some((v, i) => v !== before.v_m[i]);
+  const vertical = repair.v_m.some((v, i) => Math.abs(v - before.v_m[i]) > cutSpec().edge_merge_tol_m);
   const display = value => metres(value).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 3, useGrouping: false});
   const fields = vertical ? `離下緣 ${display(b0)}、高 ${display(b1 - b0)}` : `離左緣 ${display(a0)}、寬 ${display(a1 - a0)}`;
   return `改成：${fields}（${repair.action}）`;
@@ -124,6 +126,7 @@ function repairButton(wall, before, repair) {
   const button = document.createElement("button");
   button.type = "button"; button.textContent = "照這樣改";
   button.onclick = () => {
+    if (!window.zoneSymmetry.isOn()) { banner(); return; }  // 對稱已經關了：照這樣改只會改一邊，不送
     const {id, u_m, v_m} = repair, after = {id, u_m, v_m};
     const boxes = drawnBoxes(wall).map(b => b.id === id ? after : b);
     action(() => cutWall(wall, boxes, () => { elevationSelected = id; }, {before, after}, true));
@@ -416,11 +419,11 @@ function mirrorPreview(svg, wall, g, before = null) {
           let reason = data.other && data.reason ? data.reason.replaceAll("{other}", zoneCalled(...data.other.split("@"))) : data.reason;
           // 伺服器有幾句原因是接在「{first}」後面寫的（「的對面還有實測阻抗草稿」）；預覽沒有那一段，補成「這一塊」。
           if (reason?.startsWith("的")) reason = `這一塊${reason}`;
-          drawMirrorPreview(svg, wall, g, mirror, reason ?? "");
+          drawMirrorPreview(svg, wall, g, data.source_refused ? null : mirror, reason ?? "");
           if (reason) {
             const repair = data.repairs?.[0];
             const shown = repair ? `${data.cause}。${repairWords(wall, box, repair)}` : reason;
-            const full = data.source_refused ? `放開後不會切：${shown}` : mirror ? `放開後另一邊不會跟著畫：${shown}` : shown;
+            const full = data.source_refused ? `放開後不會切：${shown}` : mirror ? `放開後另一邊不會跟著畫：${shown}` : `放開後，${shown}`;
             position.note = [full, "notice", repair ? `放開後：${shown}` : (data.cause && !mirror ? data.cause : full)];
           } else if (mirror && mirror.wall !== wall) position.note = [`放開後，${wallNames[mirror.wall]}同一個位置跟著出現`, ""];
           else position.note = ["放開後，另一邊跟著出現", ""];
@@ -503,12 +506,10 @@ function startDrawing(svg, event, geometry, view, wall) {
                      others, geometry.width, geometry.height);
   };
   const move = moved => {
-    const [a0, a1, b0, b1] = corners(pointerMetres(svg, moved, geometry));
-    preview.setAttribute("x", geometry.pad + a0 * geometry.scale);
-    preview.setAttribute("y", geometry.pad + (geometry.height - b1) * geometry.scale);
-    preview.setAttribute("width", (a1 - a0) * geometry.scale);
-    preview.setAttribute("height", (b1 - b0) * geometry.scale);
-    previewMirror(snapped(a0, a1, b0, b1));
+    // 畫的就是吸過格點與邊、放開後要交出去的那一塊（#1274：不然鏡像預覽照吸過的框算，跟眼睛看到的對不上）。
+    const box = snapped(...corners(pointerMetres(svg, moved, geometry)));
+    for (const [key, value] of Object.entries(svgBox(view, geometry, box))) preview.setAttribute(key, value);
+    previewMirror(box);
   };
   const complete = ended => {
     preview.remove();
@@ -860,6 +861,8 @@ function renderElevation() {
     mirrorWarning = null; banner();
     note("", "");
   }
+  if (!on) showSelectionBanner = false;
+  if (bannerOwner && (!on || bannerOwner !== scheme)) banner();
   if (mirrorWarning) { note(mirrorWarning.message, mirrorWarning.kind); resultBanner(mirrorWarning); }
   const buttons = $("elevation-walls"); buttons.replaceChildren();
   for (const name of Object.keys(wallNames)) {
@@ -953,6 +956,7 @@ window.elevationGeometry = {views, wallSize, screenBox, flip, project, markerIte
 window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => {
+    showSelectionBanner = false;
     if (mirrorWarning || !$("elevation-banner").hidden) { mirrorWarning = null; banner(); note("", ""); }
     renderElevation();
   });

@@ -341,7 +341,11 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
     if frame.side(wall) and not axis.centred and change.after:
         distance = axis.across_m if axis.left.endswith("0") else frame.across_length - axis.across_m
         reason = f"左右牆不跟著畫：對稱軸離左牆 {distance:.2f} 公尺，房間正中是 {frame.across_length / 2:.2f} 公尺"
-        guidance = "要左右牆跟著畫，到下面『喇叭與座位』，把兩支喇叭和主位左右對稱擺在房間正中兩側"
+        shift = frame.across_length / 2 - axis.across_m
+        amount = f"{abs(shift):.4f}".rstrip("0").ljust(4, "0")
+        coordinate = "y" if axis.along == "x" else "x"
+        guidance = (f"要左右牆跟著畫，到下面『喇叭與座位』，把兩支喇叭、主位與周圍點的 {coordinate} "
+                    f"都{'加上' if shift > 0 else '減掉'} {amount}，對稱軸就在房間正中")
         reply = source_only(reason)
         return {**reply, "cause": reason, "reason": f"{reason}。{guidance}", "source_edit": editing,
                 "message": f"{reason}（軸不在房間正中）。{guidance}。"}

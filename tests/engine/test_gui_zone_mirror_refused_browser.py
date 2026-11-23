@@ -354,3 +354,69 @@ def test_repair_pair_waits_for_limits(tmp_path: Path, browser: Browser) -> None:
         page.unroute("**/api/zone-limits")
         _settled(page)
         expect(page.locator(".elevation-pair-status")).to_contain_text("超出牆面")
+
+
+def test_drawing_preview_is_the_box_that_lands(tmp_path: Path, browser: Browser) -> None:
+    """拖著畫的虛線框就是吸過格點與牆邊、放開後要交出去的那一塊；鏡像預覽照同一塊算，眼睛看到的跟落地的一樣。"""
+    with _room(tmp_path, browser) as page:
+        frame = page.locator("#elevation-frame")
+        seen: list[float] = []
+
+        def during() -> None:
+            seen.append(float(page.locator("#elevation .zone-preview").get_attribute("x") or "nan"))
+
+        _drag(page, W, H, (0.12, 0.02), (1.0, 1.8), during=during)
+        _settled(page)
+        assert seen and seen[-1] == pytest.approx(float(frame.get_attribute("x") or "nan"))
+        page.locator("#elevation [data-zone-id=z1] > rect").click()
+        assert float(page.locator("#elevation-left").input_value()) == 0
+
+
+def test_banner_goes_when_symmetry_is_switched_off_elsewhere(tmp_path: Path, browser: Browser) -> None:
+    """分區頁那邊關掉左右對稱：立面圖的說明條與「照這樣改」一起收掉（按了只會改一邊）。"""
+    with _room(tmp_path, browser) as page:
+        _drag(page, W, H, (2.0, 0.02), (2.6, 1.8))
+        _settled(page)
+        page.locator("#elevation [data-zone-id=z1] > rect").click()
+        banner = page.locator("#elevation-banner")
+        expect(banner.get_by_role("button", name="照這樣改")).to_be_visible()
+        page.evaluate("window.zoneSymmetry.set(false)")
+        _settled(page)
+        expect(banner).to_be_hidden()
+
+
+def test_repair_leaves_a_full_strip_at_the_wall(tmp_path: Path, browser: Browser) -> None:
+    """軸只偏一點、框貼牆角：照多出的量挪或收，牆邊都剩窄條；改法要多挪一個最小邊，不能說「都不行」。"""
+    width = 5.0  # 軸離左牆 2.45、正中 2.50：貼右牆角的框翻過去只多出 0.10
+    with _room(tmp_path, browser) as page:
+        page.locator("#room-Lx").fill(str(width))
+        page.locator("#room-Lx").press("Tab")
+        page.evaluate("pendingRoomResize()")
+        _settled(page)
+        _drag(page, width, H, RIGHT_START, (4.99, 2.0))
+        _settled(page)
+        note = page.locator("#elevation-note")
+        expect(note).to_contain_text("多出 0.10 公尺")
+        expect(note).not_to_contain_text("試過挪和收都不行")
+        expect(page.locator("#elevation-banner")).to_contain_text("（整塊往對稱軸挪 0.30 公尺）")
+        _apply_repair(page)
+        boxes = _drawn(page)
+        _matches_mirror(page, FRONT, boxes["z1"], boxes["z2"])
+
+
+def test_side_wall_says_which_numbers_to_change(tmp_path: Path, browser: Browser) -> None:
+    """左右牆不跟著畫時，說到「喇叭與座位」哪一格加多少；照著加完，對稱軸就在房間正中。"""
+    with _room(tmp_path, browser, wall="x0") as page:
+        _drag(page, 5.5, H, START, END)
+        _settled(page)
+        expect(page.locator("#elevation-note")).to_contain_text("把兩支喇叭、主位與周圍點的 x 都加上 0.15，對稱軸就在房間正中")
+        page.evaluate("""() => {
+          for (const field of document.querySelectorAll('#speakers input[id$="-x"], #receivers input[id$="-x"]')) {
+            field.value = (Number(field.value) + 0.15).toFixed(4);
+            field.dispatchEvent(new Event("input", {bubbles: true}));
+            field.dispatchEvent(new Event("change", {bubbles: true}));
+          }
+        }""")
+        _settled(page)
+        expect(page.locator("#elevation-axis-words")).to_contain_text("2.60")
+        expect(page.locator("#elevation-axis-words")).not_to_contain_text("不在房間正中")

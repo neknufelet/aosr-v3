@@ -337,6 +337,12 @@ class Frame:
         shrink = (lo, hi + shift) if shift < 0 else (lo + shift, hi)
         choices = [candidate(f"整塊往對稱軸挪 {metres(amount)} 公尺", (lo + shift, hi + shift)),
                    candidate(f"把框靠{side}那一邊往內收 {metres(amount)} 公尺", shrink)]
+        if amount < MIN_SIDE_M + _SLACK:
+            # 只差不到一個最小邊：照差多少挪或收，手畫那一面靠牆會剩一條窄條；多挪（收）一個最小邊，兩面牆邊都留得下一格。
+            wide = shift - MIN_SIDE_M if shift < 0 else shift + MIN_SIDE_M
+            choices += [candidate(f"整塊往對稱軸挪 {metres(abs(wide))} 公尺", (lo + wide, hi + wide)),
+                        candidate(f"把框靠{side}那一邊往內收 {metres(abs(wide))} 公尺",
+                                  (lo, hi + wide) if shift < 0 else (lo + wide, hi))]
         # 靠牆的一邊收回後，若兩框間距太窄，另一緣也收一些，恰好留一個最小邊。
         gap = 2 * (lo - axis if shift < 0 else axis - hi)
         if 0 < gap < MIN_SIDE_M:
