@@ -20,7 +20,7 @@ from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import _load_template, _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
-from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _save
+from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _write_room109_design, _save
 
 HIDDEN_ON_WALLS = ("hall_door_hollow_core", "side_window_glass_12mm_single", "ceiling_gypsum9mm_gap300",
                    "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "joist_floor_plank_fixed",
@@ -441,7 +441,7 @@ def _overflow(page: Page) -> dict[str, float]:
 def test_the_front_wall_table_fits_the_panel_with_long_product_names(tmp_path: Path, browser: Browser) -> None:
     """材料庫有幾筆名字很長的固定成品（合成的 VPR 那幾筆）：材料下拉選單不准照最長那一筆把表撐寬、把深度上限那一欄擠出面板；
     指定貼一種與由程式最佳化（方塊、說明一行一行換）兩個樣子都要塞得進立面圖面板。"""
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     _sample_library(tmp_path, LONG_PLAIN_ENTRY)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page

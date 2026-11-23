@@ -256,6 +256,7 @@ def test_list_cards_split_by_range_and_read_out_the_range_each_group_uses(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        _settled(page)  # 限制檢查回來會重畫整頁：先等它畫好再讀、再捲（雲端慢機器上撞過「元素已不在頁面上」）
         cards = page.locator("#zone-page .zv-list").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
         assert cards == [["zone-list", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-list-2", ["yL/z1", "yL/z2"]]], cards
         expect(page.locator(f"#zone-list-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
@@ -334,10 +335,14 @@ def test_a_mirrored_pair_with_different_ranges_says_why_in_the_symmetry_box(tmp_
         expect(page.locator("#zone-symmetry")).to_have_attribute("data-state", "paired")
         expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(1)
         for zone in ("x0/b", "x0/a"):
+            page.locator("#zone-symmetry-off").click()
+            _settled(page)
             _click_zone(page, zone)
             page.locator(_cell(page, WOOL, "porous", "high")).select_option("0.1")
             page.locator(_cell(page, WOOL, "cavity", "high")).fill("15")
             _apply(page)
+            page.locator("#zone-symmetry-on").click()
+            _settled(page)
             expect(page.locator("#zone-symmetry")).to_have_attribute("data-state", "paired")
             if zone == "x0/b":
                 expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(0)

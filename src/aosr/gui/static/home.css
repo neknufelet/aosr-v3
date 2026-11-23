@@ -182,3 +182,16 @@ a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
 #home-auto summary{cursor:pointer;color:#15617b}
 /* 手機寬：三個下一步排在圖前面，第一屏就看得到要按哪裡。 */
 @media (max-width:700px){.home-next{order:-1}}
+
+#elevation-symmetry{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;margin:.5rem 0}
+#elevation-symmetry button{padding:.25rem .65rem;border:1px solid #567580;border-radius:0;color:#244652;background:#fff}
+#elevation-symmetry button:first-child{border-radius:.35rem 0 0 .35rem}
+#elevation-symmetry button:last-child{border-radius:0 .35rem .35rem 0;border-left:0}
+#elevation-symmetry button[aria-pressed=true]{color:white;background:#0b3a4a;font-weight:700}
+.mirror-axis,.mirror-preview,.mirror-link{pointer-events:none}
+.mirror-axis line,.mirror-link path{fill:none;stroke:#46586a;stroke-width:1.5;stroke-dasharray:2 4}
+.mirror-axis text,.mirror-link text,.mirror-preview text{font-size:13px;fill:#244652;paint-order:stroke;stroke:white;stroke-width:3px;stroke-linejoin:round}
+.mirror-preview rect{fill:#15617b12;stroke:#15617b;stroke-width:2;stroke-dasharray:6 4}
+.mirror-resize{cursor:nesw-resize;fill:white;stroke:#155b70;stroke-width:2}
+.mirror-blocked{pointer-events:none;fill:none;stroke:#a52714;stroke-width:2;stroke-dasharray:6 4}
+.elevation-pair-status{flex-basis:100%;min-height:2.75rem;display:flex;align-items:center;gap:.5rem}

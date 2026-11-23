@@ -89,18 +89,20 @@ _ALLOWED = """() => Object.fromEntries(Object.entries(zoneDesign.zones).flatMap(
 _STATE = "box => box.indeterminate ? 'some' : box.checked ? 'all' : 'none'"
 
 
-def _prepare(tmp_path: Path, lists: dict[str, list[str]] | None = None, document: dict[str, object] | None = None) -> None:
+def _prepare(tmp_path: Path, lists: dict[str, list[str]] | None = None, document: dict[str, object] | None = None,
+             *, left_right_symmetry: str | None = None) -> None:
     """自編的假房間（5.0 × 4.0 × 2.7 m，前牆左右各一塊、左右牆各一塊）、自編的兩筆材料；``lists``：哪幾區由程式最佳化、清單各是什麼。"""
     _write(tmp_path, document or symmetry_document(CUTS))
     _write_user_library(tmp_path)
-    if lists is not None:
+    if lists is not None or left_right_symmetry is not None:
         zones: dict[str, dict[str, object]] = {}
-        for zone, allowed in lists.items():
+        for zone, allowed in (lists or {}).items():
             wall, key = zone.split("/")
             zones.setdefault(wall, {})[key] = {"mode": "search", "allowed": allowed}
         (tmp_path / "designs").mkdir(exist_ok=True)
         (tmp_path / "designs" / f"{NAME}.json").write_text(json.dumps(
-            {"schema_version": "aosr.zone_design.v1", "scheme_id": NAME, "zones": zones}), encoding="utf-8")
+            {"schema_version": "aosr.zone_design.v1", "scheme_id": NAME, "zones": zones,
+             **({"left_right_symmetry": left_right_symmetry} if left_right_symmetry else {})}), encoding="utf-8")
 
 
 def _settled(page: Page) -> None:
@@ -148,7 +150,7 @@ def test_pasting_such_a_construction_shades_the_panel_curve_and_marks_the_zone_o
     另一區貼同樣鋼板與棉、背襯沒黏住的那一筆：曲線沒有藍底與那一行，圖上沒有那兩行。照舊貼得上去、存得進方案。"""
     import math
 
-    _prepare(tmp_path)
+    _prepare(tmp_path, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -202,7 +204,7 @@ def test_pasting_such_a_construction_shades_the_panel_curve_and_marks_the_zone_o
 def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_with_the_reason(tmp_path: Path, browser: Browser) -> None:
     """「由程式最佳化」的准用清單：命中的那一筆灰掉、勾不了、小字寫為什麼（從地圖或清單卡選區後的小框）；
     沒黏住的那一筆照常勾得到、加得進去。"""
-    _prepare(tmp_path)
+    _prepare(tmp_path, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -237,7 +239,7 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
     """存檔的清單裡本來就有命中的那一筆：清單卡那一列照樣寫名字、灰字、寫「清單裡本來有它，程式不會挑」；卡上紅框與頁底紅字
     寫開跑會拒收的那一句（伺服器原文）、「拿去搜尋」旁邊寫清單有紅框要先處理、直接叫送出也不存不跳頁；面板那一列勾著、可取消，「從下面勾的 N 種」不算它；
     取消後那一格馬上勾不回來，套用後清單沒有它、紅字消失。"""
-    _prepare(tmp_path, {"x0/a": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -285,7 +287,7 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
 
 def test_taking_it_off_on_the_list_card_is_final_and_the_add_box_will_not_put_it_back(tmp_path: Path, browser: Browser) -> None:
     """從清單卡選區，拿掉命中那一筆並套用，再開小框也加不回來。"""
-    _prepare(tmp_path, {"x0/a": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -308,7 +310,7 @@ def test_taking_it_off_on_the_list_card_is_final_and_the_add_box_will_not_put_it
 def test_a_half_ticked_one_can_only_be_taken_off_and_never_spreads_to_the_other_zone(tmp_path: Path, browser: Browser) -> None:
     """兩區一區的清單有命中那一筆、一區沒有：一起選，那一格是第三種狀態；不碰它就套用，各區照舊（沒有的那一區不會多出它）；
     點一下是拿掉（不是勾上），套用後兩區都沒有。"""
-    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": WOOLS})
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": WOOLS}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -355,7 +357,7 @@ def test_picking_the_whole_face_never_copies_it_into_the_zones_that_did_not_have
 def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_or_the_pasted_one(tmp_path: Path, browser: Browser) -> None:
     """切成由程式最佳化時預帶的清單不准帶它，三條來路：①「其他牆面」規則照畫面上那一份清單套到別區；②剛改過的那一份清單
     （上一次的組合）帶到下一區；③這一區現在就貼著它，改成由程式最佳化（舊做法表不給「只讓程式決定：這一筆貼或不貼」）。"""
-    _prepare(tmp_path, {"x0/a": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -380,7 +382,7 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
     # ③ 舊做法表：貼著它的區改成由程式最佳化。
-    _prepare(tmp_path)
+    _prepare(tmp_path, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
@@ -409,7 +411,7 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
 
 def test_the_old_table_lets_a_stored_one_be_unticked_and_not_ticked_back(tmp_path: Path, browser: Browser) -> None:
     """舊表方塊寫明清單裡本來有它；小框可以拿掉、不能加回。"""
-    _prepare(tmp_path, {"x0/a": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
@@ -433,7 +435,7 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
     """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①舊做法表剛改過的清單（上一次的組合）帶到下一區；
     ②逐區表沒有候選輸入格；③從卡選區後小框的候選按鈕被人改成勾得到再點；④選整面套用時，
     還沒交給程式的區照畫面上那一份清單起頭、但不帶它。"""
-    _prepare(tmp_path, {"x0/a": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)

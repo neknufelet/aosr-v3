@@ -133,10 +133,11 @@ def test_switched_on_paired_zones_carry_the_same_shape_and_name_each_other(tmp_p
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 5 區：2 對一起調、1 區各自調")
         rows = cast(list[dict[str, object]], box.evaluate(_TEXT_STYLES))
         assert rows and all(cast(float, row["size"]) >= 12 and cast(float, row["contrast"]) >= 4.5 for row in rows), rows
-        expect(page.locator("text=左右對稱")).to_have_count(1)
+        expect(page.locator("text=左右對稱 >> visible=true")).to_have_count(1)
         page.locator("#zone-map [data-wall='x0'][data-zone='b'] .zv-fill").click()
         expect(page.locator("#zone-panel")).to_be_visible()
-        expect(page.locator("text=左右對稱")).to_have_count(1)
+        expect(page.locator("#zone-panel .zv-addmore", has_text="跟著一起選（左右對稱）")).to_have_count(1)
+        expect(page.locator("text=左右對稱 >> visible=true")).to_have_count(2)
         page.locator("#zone-panel-cancel").click()
         before = path.read_bytes()
         _save(page)

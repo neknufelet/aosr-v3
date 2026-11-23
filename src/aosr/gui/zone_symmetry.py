@@ -59,7 +59,7 @@ class Unchecked(NamedTuple):
 
 # （面序在前的片, 在後的片）→ 可以配回 None；這一對兩區設定不一樣回一句白話原因；整份設定核不了回 :class:`Unchecked`。
 SettingsCheck = Callable[[str, str], "str | Unchecked | None"]
-_PRINTED: Final = 2  # 句子裡的公尺印到小數幾位（``_Frame._from`` 的 ``.2f``）
+_PRINTED: Final = 2  # 句子裡的公尺印到小數幾位（``Frame._from`` 的 ``.2f``）
 _UNCHECKED_SUMMARY: Final = "位置對上了；這份設定現在開不了搜尋，等開得了再看兩區的設定一不一樣"
 Span = tuple[float, float]
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -136,7 +136,7 @@ class Symmetry(BaseModel):
 
 
 @dataclass(frozen=True)
-class _Zone:
+class ZoneFrame:
     surface: str
     wall: str
     u: Span
@@ -156,7 +156,7 @@ def _same(left: Span, right: Span) -> bool:
     return _near(left[0], right[0]) and _near(left[1], right[1])
 
 
-def _axis(scheme: Scheme) -> Axis | str:
+def symmetry_axis(scheme: Scheme) -> Axis | str:
     try:
         facing, middle = project_facing(scheme), project_midpoint(scheme)
     except ValueError:
@@ -183,12 +183,12 @@ def _size(scheme: Scheme, wall: str) -> tuple[float, float]:
     return (room.Lx, room.Ly) if wall in _FLAT else (room.Ly if wall[0] == "x" else room.Lx, room.Lz)
 
 
-def _zones(scheme: Scheme, design: DesignSettings | None) -> tuple[list[_Zone], list[_Zone]]:
+def _zones(scheme: Scheme, design: DesignSettings | None) -> tuple[list[ZoneFrame], list[ZoneFrame]]:
     """（由程式最佳化的區, 其餘的區），各照命令列面片的順序；整面一區的牆照整面的範圍。"""
     modes = effective_modes(design, scheme)
     zones_by_wall = scheme.scene.surface_zones_by_wall or {}
-    searched: list[_Zone] = []
-    others: list[_Zone] = []
+    searched: list[ZoneFrame] = []
+    others: list[ZoneFrame] = []
     for surface in surface_ids(scheme_patch_keys(scheme)):
         wall, separator, key = surface.partition("@")
         width, height = _size(scheme, wall)
@@ -196,11 +196,11 @@ def _zones(scheme: Scheme, design: DesignSettings | None) -> tuple[list[_Zone], 
         for zone in zones_by_wall.get(wall, ()):
             if separator and isinstance(zone, RectangleZone) and zone.id == key:
                 u, v = zone.u_m, zone.v_m
-        (searched if modes[wall][key if separator else WHOLE_WALL_KEY] == "search" else others).append(_Zone(surface, wall, u, v))
+        (searched if modes[wall][key if separator else WHOLE_WALL_KEY] == "search" else others).append(ZoneFrame(surface, wall, u, v))
     return searched, others
 
 
-class _Frame:
+class Frame:
     """一份方案的鏡像與說法：哪幾面是左右牆、每一面的 u／v 哪一個是橫向，以及「離哪面牆幾公尺」怎麼寫。"""
 
     def __init__(self, scheme: Scheme, axis: Axis) -> None:
@@ -227,13 +227,15 @@ class _Frame:
     def _flipped(self, span: Span) -> Span:
         return 2 * self.axis.across_m - span[1], 2 * self.axis.across_m - span[0]
 
-    def mirrored(self, zone: _Zone) -> tuple[str, Span, Span]:
-        """這一區對到軸的另一邊：左右牆是對面那一面的同位置，其餘是同一面裡橫向翻過去。"""
-        if self.side(zone.wall):
-            return OPPOSITE[zone.wall], zone.u, zone.v
-        if self._across_is_u(zone.wall):
-            return zone.wall, self._flipped(zone.u), zone.v
-        return zone.wall, zone.u, self._flipped(zone.v)
+    def projection(self, wall: str) -> tuple[str, Literal["u", "v"] | None]:
+        """鏡像落在哪一面、翻哪一軸；網頁預覽與正式切法使用同一份投影。"""
+        if self.side(wall):
+            return OPPOSITE[wall], None
+        return wall, "u" if self._across_is_u(wall) else "v"
+
+    def mirrored(self, zone: ZoneFrame) -> tuple[str, Span, Span]:
+        wall, flip = self.projection(zone.wall)
+        return wall, self._flipped(zone.u) if flip == "u" else zone.u, self._flipped(zone.v) if flip == "v" else zone.v
 
     def _from(self, wall: str, span: Span, length: float) -> str:
         low, high = span if wall.endswith("0") else (length - span[1], length - span[0])
@@ -274,7 +276,7 @@ class _Frame:
             return "靠中間那一邊", high
         return low, high
 
-    def gaps(self, wall: str, u: Span, v: Span, zone: _Zone) -> str:
+    def gaps(self, wall: str, u: Span, v: Span, zone: ZoneFrame) -> str:
         """框（u, v）跟 ``zone`` 疊著比，哪幾個邊差多少：「靠中間那一邊差 20 公分、靠右牆那一邊差 5 公分」。"""
         flat, u_across = wall in _FLAT, self._across_is_u(wall)
         found = []
@@ -285,11 +287,36 @@ class _Frame:
         return "、".join(found)
 
 
+def same_frame(wall: str, u: Span, v: Span, zone: ZoneFrame) -> bool:
+    return wall == zone.wall and _same(u, zone.u) and _same(v, zone.v)
+
+
+def drawn_partners(scheme: Scheme, frame: Frame, added: ZoneFrame | None = None) -> dict[str, str]:
+    """不看做法，只收畫的矩形。鍵和值都是「牆@代號」，每一對雙向登記。"""
+    drawn = [ZoneFrame(f"{wall}@{zone.id}", wall, zone.u_m, zone.v_m)
+             for wall, entries in (scheme.scene.surface_zones_by_wall or {}).items()
+             for zone in entries if isinstance(zone, RectangleZone) and not zone.id.startswith(FILL_PREFIX)]
+    if added is not None:
+        drawn.append(added)  # 新畫時先照同一把尺找既有夥伴；找到了就不用補切。
+    partners: dict[str, str] = {}
+    for zone in drawn:
+        if zone.surface in partners or (frame.side(zone.wall) and not frame.axis.centred):
+            continue
+        wall, u, v = frame.mirrored(zone)
+        if same_frame(wall, u, v, zone):
+            continue
+        other = next((item for item in drawn if item.surface not in partners and same_frame(wall, u, v, item)), None)
+        if other:
+            partners[zone.surface] = other.surface
+            partners[other.surface] = zone.surface
+    return partners
+
+
 def _centimetres(metres: float) -> str:
     return f"{metres * 100:.1f}".rstrip("0").rstrip(".")
 
 
-def _overlap(u: Span, v: Span, zone: _Zone) -> float:
+def overlap_area(u: Span, v: Span, zone: ZoneFrame) -> float:
     wide = min(u[1], zone.u[1]) - max(u[0], zone.u[0])
     tall = min(v[1], zone.v[1]) - max(v[0], zone.v[0])
     return wide * tall if wide > _SLACK and tall > _SLACK else 0.0
@@ -298,7 +325,7 @@ def _overlap(u: Span, v: Span, zone: _Zone) -> float:
 _GO_CUT: Final = "要配對，回「房間方案輸入」切到左右對稱的位置"
 
 
-def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays: _Zone, stays_word: str) -> str | None:
+def _cut_blocked(frame: Frame, moved: ZoneFrame, to: tuple[str, Span, Span], stays: ZoneFrame, stays_word: str) -> str | None:
     """「把 ``moved`` 切到 ``to``、``stays`` 留著不動」照做之後兩區會不會真的配成一對：會回 None，不會回一句為什麼。
 
     照「房間方案輸入」真的會做的那樣算：網頁送給切牆工具的是這一面畫的框（矩形區扣掉自動補滿的，``elevation.js`` 的
@@ -309,7 +336,7 @@ def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays:
     wall, u, v = to
     if not frame.inside(wall, u, v):
         return "會超出牆面"
-    if wall == stays.wall and _overlap(u, v, stays) > 0.0:
+    if wall == stays.wall and overlap_area(u, v, stays) > 0.0:
         return f"會疊在 {stays_word} 上"
     # 整面一區的那一面還沒有框：照做就是在鏡像位置畫第一個框（代號網頁會另取，這裡隨便給一個），設定沿用整面那一區的。
     key = moved.surface.partition("@")[2] or WHOLE_WALL_KEY
@@ -329,7 +356,7 @@ def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays:
         cut = cut_wall(frame.document(), cast(WallName, wall), [*others, sent])
     except ZoneCutError:
         # 過了吸邊，網頁畫得出來的擺法只剩「疊在別的框上」會被拒收；不是網頁畫的方案（有不到最小邊的框或縫）另寫一句。
-        if any(_overlap(sent.u_m, sent.v_m, _Zone(other.id, wall, other.u_m, other.v_m)) > 0.0 for other in others):
+        if any(overlap_area(sent.u_m, sent.v_m, ZoneFrame(other.id, wall, other.u_m, other.v_m)) > 0.0 for other in others):
             return "會疊在這一面別的區上"
         return "切牆工具不收這個框"
     inherited = cast(dict[str, str], cut["inherited"])
@@ -343,7 +370,7 @@ def _cut_blocked(frame: _Frame, moved: _Zone, to: tuple[str, Span, Span], stays:
     return None
 
 
-def _position_miss(frame: _Frame, first: _Zone, second: _Zone) -> Missed:
+def _position_miss(frame: Frame, first: ZoneFrame, second: ZoneFrame) -> Missed:
     wall, u, v = frame.mirrored(first)
     back_wall, back_u, back_v = frame.mirrored(second)
     which = (not _same(u, second.u), not _same(v, second.v))
@@ -368,7 +395,7 @@ def _position_miss(frame: _Frame, first: _Zone, second: _Zone) -> Missed:
                   figure=Figure(wall=wall, second_u_m=second.u, second_v_m=second.v, mirrored_u_m=u, mirrored_v_m=v))
 
 
-def _lone_miss(frame: _Frame, zone: _Zone, others: list[_Zone]) -> Missed:
+def _lone_miss(frame: Frame, zone: ZoneFrame, others: list[ZoneFrame]) -> Missed:
     """半對：這一區由程式最佳化，鏡像位置沒有由程式最佳化的對象。"""
     if frame.side(zone.wall) and not frame.axis.centred:
         return Missed(first=zone.surface, kind="side_walls", summary=_SIDES_SUMMARY, reason=SIDES_NOT_MIRRORED,
@@ -385,7 +412,7 @@ def _lone_miss(frame: _Frame, zone: _Zone, others: list[_Zone]) -> Missed:
         return Missed(first=zone.surface, kind="outside", summary="鏡像過去會超出牆面，沒辦法配成一對，各自調",
                       reason="鏡像過去會超出牆面",
                       detail="{first} 對到對稱軸另一邊會超出牆面，這一區沒辦法配成一對。")
-    if wall == zone.wall and _overlap(u, v, zone) > 0.0:
+    if wall == zone.wall and overlap_area(u, v, zone) > 0.0:
         return Missed(first=zone.surface, kind="straddle", summary="跨在對稱軸上但左右沒有置中，各自調",
                       reason="跨在對稱軸上，但左右沒有置中",
                       detail="{first} 跨在對稱軸上，但左右沒有置中；鏡像位置跟它自己疊在一起，所以沒有對象可以配。")
@@ -400,7 +427,7 @@ def _lone_miss(frame: _Frame, zone: _Zone, others: list[_Zone]) -> Missed:
 _SIDES_SUMMARY: Final = "對稱軸不在房間正中，左右牆不配對，各自調"
 
 
-def _other_wall(frame: _Frame, wall: str, zone: _Zone) -> str:
+def _other_wall(frame: Frame, wall: str, zone: ZoneFrame) -> str:
     """鏡像落在另一面牆時先講是哪一面（左右牆互為鏡像）。"""
     return "" if wall == zone.wall else f"{frame.names[wall]}的"
 
@@ -411,10 +438,10 @@ def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsChe
     searched = tuple(zone.surface for zone in zones)
     if not symmetry_on(design):
         return Symmetry(enabled=False, searched=searched, alone=len(zones))
-    axis = _axis(scheme)
+    axis = symmetry_axis(scheme)
     if isinstance(axis, str):
         return Symmetry(enabled=True, reason=axis, searched=searched, alone=len(zones))
-    frame = _Frame(scheme, axis)
+    frame = Frame(scheme, axis)
     pairs: list[Pair] = []
     missed: list[Missed] = []
     centred: list[str] = []
@@ -423,12 +450,11 @@ def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsChe
         if zone.surface in used:
             continue
         wall, u, v = frame.mirrored(zone)
-        if wall == zone.wall and _same(u, zone.u) and _same(v, zone.v):
+        if same_frame(wall, u, v, zone):
             centred.append(zone.surface)
             used.add(zone.surface)
             continue
-        other = next((item for item in zones if item.surface not in used and item is not zone and item.wall == wall
-                      and _same(u, item.u) and _same(v, item.v)), None)
+        other = next((item for item in zones if item.surface not in used and item is not zone and same_frame(wall, u, v, item)), None)
         if other is None:
             continue
         used.update((zone.surface, other.surface))
@@ -452,7 +478,7 @@ def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsChe
             continue
         wall, u, v = frame.mirrored(zone)
         near = [(area, item) for item in zones if item.surface not in used and item is not zone and item.wall == wall
-                and (area := _overlap(u, v, item)) > 0.0]
+                and (area := overlap_area(u, v, item)) > 0.0]
         if near:
             other = max(near, key=lambda found: found[0])[1]
             used.update((zone.surface, other.surface))

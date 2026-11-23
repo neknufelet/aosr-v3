@@ -50,7 +50,7 @@ from tests.engine.test_gui_vpr_reference_browser import (
 def test_the_old_table_search_row_is_stopped_and_says_the_refusal_in_red(tmp_path: Path, browser: Browser) -> None:
     """舊做法表「拿去搜尋」那一列：清單裡有命中那一筆，按鈕停用、旁邊紅字就是開跑會拒收的那一句（伺服器原文）；
     從這列進小框拿掉它，按鈕恢復、旁邊回到平常那一句。"""
-    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": WOOLS})
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": WOOLS}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
@@ -129,7 +129,7 @@ def test_a_plain_product_pasted_on_an_original_wall_that_is_such_a_construction_
     document = symmetry_document(CUTS)
     zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])["surface_zones_by_wall"])
     next(zone for zone in zones["x0"] if zone.get("id") == "a")["material"] = BONDED_VPR
-    _prepare(tmp_path, document=document)
+    _prepare(tmp_path, document=document, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -211,7 +211,7 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_
     """舊做法表（來源：這一頁上一次改過的組合）：剛改過的那一份剩「命中那一筆或不貼」，再把另一區改成由程式最佳化，
     那一區拿到三種玻璃棉＋不貼。剛改過的那一份沒有命中、只剩「不貼」的，照舊帶「只有不貼」。"""
     for start, left in ((LISTED, [HIT, "none"]), (["glass_wool_48k", "none"], ["none"])):
-        _prepare(tmp_path, {"x0/a": start})
+        _prepare(tmp_path, {"x0/a": start}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
         with _serve(tmp_path) as base, _open(browser, base) as watched:
             page = watched.page
             _open_scheme(page, NAME)
@@ -228,7 +228,7 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_
 def test_splitting_a_shared_list_hides_the_old_sentence_everywhere_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
     """兩區共用一份有命中的清單（一句點名兩區）。扣住限制檢查，給其中一區多勾一種玻璃棉並套用（兩區都還有那一筆，但不再是
     同一份清單）：新結果回來之前，卡、頁底、按鈕旁三處都沒有舊的那一句；回來之後兩張卡各寫自己那一句。"""
-    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -256,7 +256,7 @@ def test_splitting_a_shared_list_hides_the_old_sentence_everywhere_until_the_new
 def test_a_sentence_for_a_list_that_no_longer_has_it_is_hidden_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
     """只有一區的清單有命中那一筆。扣住限制檢查，取消它並套用（區還是同一區，清單沒有那一筆了）：新結果回來之前三處都沒有
     舊的那一句；回來之後也沒有。"""
-    _prepare(tmp_path, {"x0/a": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -280,7 +280,7 @@ def test_a_sentence_for_a_list_that_no_longer_has_it_is_hidden_until_the_new_che
 def test_merging_into_a_shared_list_hides_the_old_sentences_everywhere_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
     """前牆兩區共用一份有命中的清單，左牆那一區本來就存著那一筆、清單少一種玻璃棉（兩句）。扣住限制檢查，給左牆那一區
     補勾那一種（三區變成同一份）：新結果回來之前三處都沒有舊的兩句；回來之後一張卡、一句點名三區。"""
-    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED, "y0/s": [HIT, "none"]})
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED, "y0/s": [HIT, "none"]}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
@@ -392,7 +392,7 @@ def test_with_the_library_unread_back_to_the_other_walls_writes_no_list(tmp_path
 def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_new_check_comes_back(tmp_path: Path, browser: Browser) -> None:
     """兩區共用一份有命中那一筆的清單（一句點名兩區）。把限制檢查的回覆扣住，在面板取消其中一區的那一筆並套用：
     新結果回來之前，舊的那一句（還寫著兩區）不留在畫面上——卡上、頁底都沒有；放行之後換成只點名剩下那一區的新句子。"""
-    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED})
+    _prepare(tmp_path, {"x0/a": LISTED, "x0/b": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)

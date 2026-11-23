@@ -481,6 +481,8 @@ function collect() {
 }
 // 回傳存成了沒有；鎖在這裡面拿。「拿去搜尋」（zone_modes.js）不叫這一支：它自己拿鎖、叫 storeScheme，鎖要留到離開這一頁。
 async function save() {
+  const cut = window.pendingMirrorCut();
+  if (cut) await cut;
   if (inputBusy) { say(`${busyWords}，這一次沒有儲存；等它做完再按一次`, "notice"); return false; }
   const stored = await holdInput(storeScheme);
   if (!stored) return false;
