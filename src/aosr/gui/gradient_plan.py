@@ -64,7 +64,7 @@ from aosr.gui.zone_limits import (
     DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
     ranged_misfit_words, target_line, zone_limits, zone_words,
 )
-from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Frame, SettingsCheck, Symmetry, Unchecked, drawn_partners, pair_zones, symmetry_on
+from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Frame, SettingsCheck, Symmetry, Unchecked, drawn_frames, drawn_partners, pair_zones, symmetry_on
 from aosr.materials.construction_models import SurfaceMaterial
 from aosr.materials.library import ConstructionEntry, LibraryEntry, builtin_entries, fixed_surface, full_library
 from aosr.materials.search_library import PresetMaterial
@@ -399,6 +399,8 @@ def draft_symmetry(document: object, design_value: object,
     frame = Frame(scheme, result.axis) if result.axis else None
     return {"available": True, **result.model_dump(mode="json"), "partners": drawn_partners(scheme, frame) if frame else {},
             "projections": {wall: frame.projection(wall) for wall in frame.sizes} if frame else {},
+            "placement_refusals": {z.surface: refused[1] for z in drawn_frames(scheme)
+                                   if (refused := frame.mirror_refusal(z))} if frame else {},
             "pair_within_m": PAIR_WITHIN_M}
 
 

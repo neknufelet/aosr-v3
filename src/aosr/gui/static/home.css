@@ -192,6 +192,9 @@ a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
 .mirror-axis line,.mirror-link path{fill:none;stroke:#46586a;stroke-width:1.5;stroke-dasharray:2 4}
 .mirror-axis text,.mirror-link text,.mirror-preview text{font-size:13px;fill:#244652;paint-order:stroke;stroke:white;stroke-width:3px;stroke-linejoin:round}
 .mirror-preview rect{fill:#15617b12;stroke:#15617b;stroke-width:2;stroke-dasharray:6 4}
+.mirror-preview.pending rect{fill:none;stroke:#68747b}
+.mirror-preview.refused rect{fill:#a5271414;stroke:#a52714}
+.mirror-preview.refused text{fill:#a52714;font-weight:700}
 .mirror-resize{cursor:nesw-resize;fill:white;stroke:#155b70;stroke-width:2}
 .mirror-blocked{pointer-events:none;fill:none;stroke:#a52714;stroke-width:2;stroke-dasharray:6 4}
 .elevation-pair-status{flex-basis:100%;min-height:2.75rem;display:flex;align-items:center;gap:.5rem}

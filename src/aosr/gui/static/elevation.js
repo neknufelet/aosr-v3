@@ -269,7 +269,7 @@ function trackDrag(svg, event, move, complete, cancelled = () => {}) {
   const stop = () => {
     if (!live) return false;
     live = false; dropDrag = null;
-    if (line.textContent.startsWith("放開後，")) note(...previous);
+    if (!line.textContent || line.textContent.startsWith("放開後") || line.textContent.startsWith("鏡像預覽")) note(...previous);
     svg.removeEventListener("pointermove", move);
     svg.removeEventListener("pointerup", finish);
     svg.removeEventListener("lostpointercapture", lost);
@@ -304,27 +304,73 @@ function selfMirrored(wall, box) {
   return mirror?.wall === wall && ["u_m", "v_m"].every(k => box[k].every((x, i) =>
     Math.abs(x - mirror.box[k][i]) <= symmetryResult().pair_within_m + 1e-9));
 }
+function followsEdit(wall, id) {
+  const result = symmetryResult(), key = `${wall}@${id}`;
+  return result?.partners?.[key] || result?.placement_refusals?.[key];
+}
 function svgBox(view, g, box) {
   const [a0, a1, b0, b1] = screenBox(view, g.width, g.height, box);
   return {x: g.pad + a0 * g.scale, y: g.pad + (g.height - b1) * g.scale, width: (a1 - a0) * g.scale, height: (b1 - b0) * g.scale};
 }
-function mirrorPreview(svg, wall, box, g) {
+function drawMirrorPreview(svg, wall, g, mirror, reason) {
   svg.querySelector(".mirror-preview")?.remove();
-  const mirror = mirrorBox(wall, box);
-  if (!mirror || selfMirrored(wall, box)) return;
-  if (mirror.wall !== wall) {
-    note(`放開後，${wallNames[mirror.wall]}同一個位置跟著出現`, "");
-    return;
-  }
+  if (!mirror || mirror.wall !== wall) return;
   const bounds = svgBox(views[wall], g, mirror.box);
   const group = node("g", {class: "mirror-preview"});
   group.append(node("rect", bounds));
-  const x = bounds.x + bounds.width / 2, y = bounds.y + 18;
-  if (bounds.width > 40 && bounds.height > 34) {
-    const lines = ["放開後", "這裡跟著出現"];
-    lines.forEach((line, i) => group.append(node("text", {x, y: y + i * 15, "text-anchor": "middle"}, line)));
-  }
   svg.append(group);
+  if (reason === null) { group.classList.add("pending"); return; }
+  if (reason) group.classList.add("refused");
+  if (!reason && (bounds.width <= 40 || bounds.height <= 34)) return;
+  // 完全超出圖外時，標字仍留在看得到的那一側。
+  const x = Math.min(Math.max(bounds.x + bounds.width / 2, 24), svg.viewBox.baseVal.width - 24);
+  const y = Math.min(Math.max(bounds.y + 18, 16), svg.viewBox.baseVal.height - 5);
+  const lines = reason ? ["放不下"] : ["放開後", "這裡跟著出現"];
+  lines.forEach((line, i) => group.append(node("text", {x, y: y + i * 15, "text-anchor": "middle"}, line)));
+}
+// 每次拖曳只取一次草稿，一次最多一個請求。等待時的新落點取代舊的；放開、取消或換圖後，舊回覆失效。
+function mirrorPreview(svg, wall, g, before = null) {
+  let draft, others, latest, checking = false;
+  const live = position => position === latest && dropDrag === position.drag && svg.isConnected;
+  async function check() {
+    checking = true;
+    try {
+      while (latest && live(latest)) {
+        const position = latest;
+        const {box, mirror} = position;
+        try {
+          draft ??= wallDocument();
+          others ??= drawnBoxes(wall).filter(peer => peer.id !== box.id);
+          const data = await api("/api/zone-cut?preview=1", "POST", {scheme: draft, wall, boxes: [...others, box],
+            mirror: {before, after: box, protected_walls: Object.keys(measuredDrafts)}});
+          if (!live(position)) continue;
+          const reason = data.other && data.reason ? data.reason.replaceAll("{other}", zoneCalled(...data.other.split("@"))) : data.reason;
+          drawMirrorPreview(svg, wall, g, mirror, reason ?? "");
+          if (reason) position.note = [`放開後另一邊不會跟著畫：${reason}`, "notice"];
+          else if (mirror.wall !== wall) position.note = [`放開後，${wallNames[mirror.wall]}同一個位置跟著出現`, ""];
+        } catch (error) {
+          if (!live(position)) continue;
+          position.note = [`鏡像預覽無法確認：${errorText(error)}`, "notice"];
+        }
+        if (position.note) note(...position.note);
+        break;
+      }
+    } finally { checking = false; }
+  }
+  return box => {
+    if (!symmetryResult()?.axis) return;
+    const key = JSON.stringify(box);
+    if (latest?.key === key) {
+      if (latest.note) note(...latest.note);
+      return;
+    }
+    const line = $("elevation-note");
+    if (line.textContent.startsWith("放開後") || line.textContent.startsWith("鏡像預覽")) note("", "");
+    const mirror = selfMirrored(wall, box) || boxTooSmall(box) ? null : mirrorBox(wall, box);
+    drawMirrorPreview(svg, wall, g, mirror, null);
+    latest = mirror ? {key, box, mirror, drag: dropDrag} : null;
+    if (latest && !checking) void check();
+  };
 }
 function showSymmetry(svg, wall, g, layout) {
   const result = symmetryResult();
@@ -369,6 +415,7 @@ function startDrawing(svg, event, geometry, view, wall) {
   svg.append(preview);
   const corners = end => [Math.min(start[0], end[0]), Math.max(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[1], end[1])];
   const others = drawnBoxes(wall);
+  const previewMirror = mirrorPreview(svg, wall, geometry);
   const snapped = (a0, a1, b0, b1) => {
     // 格點量的是畫面上離左緣、離下緣的距離（鏡像的牆也一樣），選取後四格數字才是整數格。
     const [g0, g1] = [a0, a1].map(value => gridSnap(value, geometry.width));
@@ -382,7 +429,7 @@ function startDrawing(svg, event, geometry, view, wall) {
     preview.setAttribute("y", geometry.pad + (geometry.height - b1) * geometry.scale);
     preview.setAttribute("width", (a1 - a0) * geometry.scale);
     preview.setAttribute("height", (b1 - b0) * geometry.scale);
-    mirrorPreview(svg, wall, snapped(a0, a1, b0, b1), geometry);
+    previewMirror(snapped(a0, a1, b0, b1));
   };
   const complete = ended => {
     preview.remove();
@@ -418,6 +465,7 @@ function startMoving(svg, event, geometry, view, wall, group) {
   const current = drawnBoxes(wall).find(box => box.id === id);
   const others = drawnBoxes(wall).filter(box => box.id !== id);
   if (!current) return;
+  const previewMirror = mirrorPreview(svg, wall, geometry, current);
   const {width, height, scale} = geometry;
   const [a0, a1, b0, b1] = screenBox(view, width, height, current);
   const start = pointerMetres(svg, event, geometry);
@@ -439,7 +487,7 @@ function startMoving(svg, event, geometry, view, wall, group) {
     const [c0, , d0] = screenBox(view, width, height, box);
     group.setAttribute("transform", `translate(${(c0 - a0) * scale} ${(b0 - d0) * scale})`);
     note(`搬到：離左緣 ${metres(c0)}、離下緣 ${metres(d0)} 公尺（放開才切）`, "");
-    if (symmetryResult()?.partners?.[`${wall}@${id}`]) mirrorPreview(svg, wall, box, geometry);
+    if (followsEdit(wall, id)) previewMirror(box);
   };
   const complete = ended => {
     elevationSelected = id;
@@ -473,6 +521,7 @@ function resizeHandle(svg, wall, box, g) {
     event.preventDefault(); event.stopPropagation();
     const [left, , bottom] = screenBox(view, g.width, g.height, box);
     const others = drawnBoxes(wall).filter(other => other.id !== box.id);
+    const previewMirror = mirrorPreview(svg, wall, g, box);
     const landing = e => {
       const [a, b] = pointerMetres(svg, e, g);
       return snapEdges(wallBox(view, g.width, g.height, left, Math.max(left, gridSnap(a, g.width)), bottom,
@@ -483,7 +532,7 @@ function resizeHandle(svg, wall, box, g) {
     trackDrag(svg, event, moved => {
       const next = landing(moved);
       for (const [key, value] of Object.entries(svgBox(view, g, next))) preview.setAttribute(key, value);
-      if (symmetryResult()?.partners?.[`${wall}@${box.id}`]) mirrorPreview(svg, wall, next, g);
+      if (followsEdit(wall, box.id)) previewMirror(next);
     }, ended => {
       const next = landing(ended);
       preview.remove(); svg.querySelector(".mirror-preview")?.remove();
@@ -557,6 +606,8 @@ function selectedEditor(wall, view, width, height) {
     } else if (result.projections[wall][0] !== wall && !result.axis.centred) {
       const distances = axisDistances(result.axis);
       if (distances) status.textContent = `對稱軸離左牆 ${distances.left} 公尺，房間正中是 ${distances.centre} 公尺：主位和兩支喇叭的中點都要在正中，左右牆才會跟著畫`;
+    } else if (result.placement_refusals?.[`${wall}@${current.id}`]) {
+      status.textContent = `這一塊翻過去放不下：${result.placement_refusals[`${wall}@${current.id}`]}`;
     } else {
       const complete = document.createElement("button");
       complete.id = "elevation-complete"; complete.textContent = "補畫另一邊";

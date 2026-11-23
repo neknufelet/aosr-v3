@@ -20,7 +20,7 @@ import math
 from collections.abc import Sequence
 from copy import deepcopy
 from functools import partial
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.requests import Request
@@ -31,6 +31,9 @@ from aosr.geometry.shoebox import Room
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.reporting.scheme import Scheme
 from aosr.physics.zone_fill import FILL_PREFIX, Box, FillResult, fill_wall, wall_size_m
+
+if TYPE_CHECKING:
+    from aosr.gui.zone_symmetry import Frame, ZoneFrame
 
 SNAP_M = 0.05
 MIN_SIDE_M = 0.20
@@ -276,13 +279,16 @@ def _changed_boxes(body: ZoneCut, change: MirrorChange) -> tuple[str, list[CutBo
 
 
 def _source_cut(body: ZoneCut, change: MirrorChange, key: str, source: list[CutBox],
-                reason: str = "", other: str = "", fix: str = "") -> dict[str, object]:
+                reason: str = "", other: str = "", fix: str = "", *, category: str = "", preview: bool = False) -> dict[str, object]:
     """鏡像不能切時仍套用手畫的那一面；補畫只動鏡像，失敗時兩面都保留。"""
+    if preview:
+        return {"reason": reason, "other": other}
     walls = {} if change.complete else {body.wall: cut_wall(body.scheme, body.wall, source)}
     verb = "畫" if change.after else "刪"
     if change.after is None:
         fix = "原來選的框已刪除。若也要刪另一邊，請選取那一塊再刪。"
-    message = f"另一邊沒有跟著{verb}：{{first}} {reason}。{fix}" if reason else ""
+    why = f"（{category}）" if category else ""
+    message = f"另一邊沒有跟著{verb}{why}：{{first}} {reason}。{fix}" if reason else ""
     return {"walls": walls, "message": message, "first": f"{body.wall}@{key}", "other": other}
 
 
@@ -296,14 +302,25 @@ def _place_partner(peers: list[CutBox], partner_id: str | None, u: tuple[float, 
     return [mirrored if b.id == partner_id else b for b in peers], key
 
 
-def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
-    # 配對的建議切法也會呼叫 cut_wall；到請求進來才載入鏡像幾何。
+def _follow_mirror(change: MirrorChange, frame: Frame, shape: ZoneFrame, partner: str | None) -> bool:
+    """新畫或補畫會找另一邊；搬動落單框時，只有原先因幾何放不下的框才重試。"""
+    from aosr.gui.zone_symmetry import ZoneFrame
+
+    if change.before is None or change.complete:
+        return partner is None
+    if partner:
+        return True
+    before = ZoneFrame(shape.surface, shape.wall, change.before.u_m, change.before.v_m)
+    return change.after is not None and frame.mirror_refusal(before) is not None
+
+
+def cut_mirrored(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -> dict[str, object]:
+    """檢查鏡像畫框。拖曳預覽只回放置判決；放開才切牆、回傳新的分區。"""
     from aosr.gui.zone_symmetry import Frame, SIDES_NOT_MIRRORED, ZoneFrame, drawn_partners, overlap_area, same_frame, symmetry_axis
 
     wall, doc = body.wall, body.scheme
     key, source = _changed_boxes(body, change)
-
-    source_only = partial(_source_cut, body, change, key, source)
+    source_only = partial(_source_cut, body, change, key, source, preview=preview)
     editing = change.before is not None and not change.complete
     try:
         scheme = Scheme.model_validate(doc)
@@ -316,8 +333,9 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
     active = change.after or change.before
     assert active is not None
     shape = ZoneFrame(f"{wall}@{key}", wall, active.u_m, active.v_m)
-    partner = drawn_partners(scheme, frame, added=shape if change.before is None else None).get(shape.surface)
-    if (editing and not partner) or (not editing and partner):
+    partners = drawn_partners(scheme, frame, added=shape if change.before is None else None)
+    partner = partners.get(shape.surface)
+    if not _follow_mirror(change, frame, shape, partner):
         return source_only()
     if frame.side(wall) and not axis.centred:
         return source_only(SIDES_NOT_MIRRORED, fix="請讓對稱軸通過房間正中，再補畫另一邊。")
@@ -328,8 +346,8 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
         if partner:
             reply.update(message="{first_number} 現在跨在對稱軸正中，{other_number} 不再跟著它；要的話自己刪 {other_number}", other=partner)
         return reply
-    if change.after and target == wall and overlap_area(u, v, shape):
-        return source_only("跨在對稱軸上但沒有置中", fix="先把框移到軸的一側，再按「補畫另一邊」。")
+    if change.after and (refused := frame.mirror_refusal(shape)):
+        return source_only(refused[1], category=refused[0])
     if target in change.protected_walls:
         return source_only("的對面還有實測阻抗草稿", fix="請先套用或取消草稿，再補畫另一邊。")
     try:
@@ -341,15 +359,18 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
     partner_id = partner.partition("@")[2] if partner else None
     boxes = [box for box in peers if box.id != partner_id]
     if change.after:
-        if not frame.inside(target, u, v):
-            return source_only("照鏡子翻過去會超出牆面", fix="先把框移進兩邊都放得下的位置，再按「補畫另一邊」。")
         for box in boxes:
-            if overlap_area(u, v, ZoneFrame(box.id, target, box.u_m, box.v_m)):
+            peer = ZoneFrame(f"{target}@{box.id}", target, box.u_m, box.v_m)
+            if editing and not partner and peer.surface not in partners and same_frame(target, u, v, peer):
+                return source_only()  # 挪回可放的位置時，正好已有同樣的另一塊。
+            if overlap_area(u, v, peer):
                 reply = source_only("照鏡子翻過去會壓到 {other}", f"{target}@{box.id}",
                                     "要另一邊的話，先把 {other} 改小或刪掉，再選 {first} 按「補畫另一邊」。")
                 return {**reply, "blocked": {"wall": target, "u_m": u, "v_m": v}}
         if len(boxes) >= MAX_BOXES:
             return source_only("對面的畫框數量已滿", fix="請先刪除多餘的框，再補畫另一邊。")
+        if preview:
+            return {"reason": ""}
         boxes, identifier = _place_partner(peers, partner_id, u, v)
     try:
         other_cut = cut_wall(doc, target, boxes)
@@ -371,7 +392,7 @@ async def zone_cut(request: Request) -> Response:
         return JSONResponse({"error": "切牆面的請求格式不完整：要有方案、哪一面牆與畫的框"}, status_code=400)
     try:
         if body.mirror is not None:
-            return JSONResponse(cut_mirrored(body, body.mirror))
+            return JSONResponse(cut_mirrored(body, body.mirror, preview=request.query_params.get("preview") == "1"))
         return JSONResponse(cut_wall(body.scheme, body.wall, body.boxes))
     except ZoneCutError as exc:
         return JSONResponse({"error": str(exc), "problems": [{"text": text} for text in exc.problems],
