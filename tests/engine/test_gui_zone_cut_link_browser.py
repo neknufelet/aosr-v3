@@ -171,7 +171,7 @@ def test_changing_room_size_keeps_the_selection(tmp_path: Path, browser: Browser
         page.locator("#zone-page-close").click()
         page.locator("#room-Lz").fill("3.2")
         page.locator("#room-Lz").press("Tab")
-        page.wait_for_function("!document.querySelector('main').inert")
+        page.wait_for_function("!pendingRoomResize() && !document.querySelector('main').inert")
         _back_to_overview(page)
         assert sorted(cast(list[str], page.evaluate(_SELECTED))) == chosen
         assert "重切過" not in _said(page)
@@ -180,7 +180,7 @@ def test_changing_room_size_keeps_the_selection(tmp_path: Path, browser: Browser
         page.locator("#zone-page-close").click()
         page.locator("#room-Ly").fill("5.6")
         page.locator("#room-Ly").press("Tab")
-        page.wait_for_function("!document.querySelector('main').inert")
+        page.wait_for_function("!pendingRoomResize() && !document.querySelector('main').inert")
         _back_to_overview(page)
         assert sorted(cast(list[str], page.evaluate(_SELECTED))) == chosen
         assert "重切過" not in _said(page)

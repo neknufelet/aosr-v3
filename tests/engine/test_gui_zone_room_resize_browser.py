@@ -44,7 +44,9 @@ def test_resize_saves_each_original_zone(tmp_path: Path, browser: Browser, axis:
         _open_scheme(page, SAMPLE)
         page.locator("#zone-table-fold > summary").click()
         page.locator("#room-" + axis).fill(str(value))
-        assert json.loads(path.read_text()) == before
+        page.locator("#room-" + axis).press("Tab")
+        page.wait_for_function("!pendingRoomResize()")
+        assert json.loads(path.read_text()) == before  # 調整只動網頁上的草稿：沒按儲存，檔案一個字都不變
         page.locator("#save").click()
         expect(page.locator("#messages")).to_have_text("方案已儲存")
         page.wait_for_function("!inputBusy")
@@ -98,6 +100,10 @@ def test_save_locks_the_form_while_resizing(tmp_path: Path, browser: Browser) ->
         page.route("**/api/zone-resize", lambda route: held.append(route))
         page.locator("#room-Lz").fill("3.2")
         page.locator("#save").click()
+        for _ in range(200):  # 攔到的那一筆要等瀏覽器送出才進得了清單：最多等 10 秒
+            if held:
+                break
+            page.wait_for_timeout(50)
         assert held
         try:
             assert page.locator("main").evaluate("node => node.inert")
