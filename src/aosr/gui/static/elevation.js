@@ -174,6 +174,12 @@ async function cutWall(wall, boxes, done, change) {
   if (changed) await refreshPlan();
 }
 
+function cutZoneLabel(surface, wall) {
+  const [face, key] = surface.split("@");
+  const label = zoneLabels(face).get(key);
+  return `${label.numberText}（${face === wall ? "" : wallNames[face] + " "}${label.name}）`;
+}
+
 async function applyCut(wall, boxes, done, mirror) {
   if (inputBusy) { note("上一個改動還在處理，請稍等再切", "notice"); return; }
   if (measuredDrafts[wall]) { note(`${wallNames[wall]}有還沒套用的實測阻抗草稿：先套用或取消，再切這一面`, "notice"); return; }
@@ -181,7 +187,7 @@ async function applyCut(wall, boxes, done, mirror) {
   mirrorWarning = null;
   inputBusy = true;
   document.querySelector("main").inert = true;
-  let data, changedWalls, message = "";
+  let data, changedWalls, message = "", kind = "ok";
   const payload = {scheme: draft, wall, boxes};
   if (mirror) payload.mirror = {...mirror, protected_walls: Object.keys(measuredDrafts)};
   try {
@@ -199,6 +205,10 @@ async function applyCut(wall, boxes, done, mirror) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
     }
+    const named = surface => zoneCalled(...surface.split("@"));
+    if (data.deleted_partner) {
+      message = `刪掉 ${cutZoneLabel(`${wall}@${mirror.before.id}`, wall)}，${cutZoneLabel(data.deleted_partner, wall)} 因為左右對稱一起刪了`;
+    }
     const first = mirror?.before ? zoneCalled(wall, mirror.before.id) : "";
     for (const [face, cut] of Object.entries(changes)) {
       scheme.scene.surface_zones_by_wall[face] = cut.zones;
@@ -206,11 +216,18 @@ async function applyCut(wall, boxes, done, mirror) {
       resizeProblems.delete(face);
     }
     if (data.message) {
-      const named = surface => zoneCalled(...surface.split("@"));
+      kind = "notice";
       message = data.message.replaceAll("{first}", mirror.after ? named(data.first) : first);
-      if (data.other) message = message.replaceAll("{other}", named(data.other));
+      if (data.other) {
+        const [face, key] = data.other.split("@");
+        message = message.replaceAll("{other}", named(data.other))
+          .replaceAll("{other_number}", zoneLabels(face).get(key).numberText)
+          .replaceAll("{first_number}", zoneLabels(wall).get(mirror.after.id).numberText);
+      }
       if (changes[wall]) message += `（${wallNames[wall]}切成 ${changes[wall].zones.length} 區）`;
       mirrorWarning = {owner: scheme, generation: zoneDesignGeneration, message, blocked: data.blocked};
+    } else if (data.completed) {
+      message = `補好了：${cutZoneLabel(data.completed, wall)}`;
     }
     if (!Object.keys(changes).length) { renderElevation(); return; }
     changedWalls = changes;
@@ -222,7 +239,7 @@ async function applyCut(wall, boxes, done, mirror) {
   }
   if (done) done(data);
   renderWalls();
-  if (message) note(message, "notice");
+  if (message) note(message, kind);
   else note(Object.entries(changedWalls).map(([face, cut]) => {
     const filled = cut.filled_ids.length;
     return cut.zones[0].area === "whole_wall" ? `${wallNames[face]}回到整面一區`
@@ -247,10 +264,12 @@ function pointerMetres(svg, event, geometry) {
 // 收著的限制判決在拖曳結束（不管走哪條路）之後才畫：收尾要用的這張圖在那之前不能換掉。
 let dropDrag = null;
 function trackDrag(svg, event, move, complete, cancelled = () => {}) {
+  const line = $("elevation-note"), previous = [line.textContent, line.className];
   let live = true;
   const stop = () => {
     if (!live) return false;
     live = false; dropDrag = null;
+    if (line.textContent.startsWith("放開後，")) note(...previous);
     svg.removeEventListener("pointermove", move);
     svg.removeEventListener("pointerup", finish);
     svg.removeEventListener("lostpointercapture", lost);
@@ -293,13 +312,16 @@ function mirrorPreview(svg, wall, box, g) {
   svg.querySelector(".mirror-preview")?.remove();
   const mirror = mirrorBox(wall, box);
   if (!mirror || selfMirrored(wall, box)) return;
-  const bounds = svgBox(views[mirror.wall], g, mirror.box);
+  if (mirror.wall !== wall) {
+    note(`放開後，${wallNames[mirror.wall]}同一個位置跟著出現`, "");
+    return;
+  }
+  const bounds = svgBox(views[wall], g, mirror.box);
   const group = node("g", {class: "mirror-preview"});
   group.append(node("rect", bounds));
-  const words = `${wallNames[mirror.wall]}同位置`;
   const x = bounds.x + bounds.width / 2, y = bounds.y + 18;
   if (bounds.width > 40 && bounds.height > 34) {
-    const lines = mirror.wall === wall ? ["放開後", "這裡跟著出現"] : [words];
+    const lines = ["放開後", "這裡跟著出現"];
     lines.forEach((line, i) => group.append(node("text", {x, y: y + i * 15, "text-anchor": "middle"}, line)));
   }
   svg.append(group);
@@ -414,10 +436,10 @@ function startMoving(svg, event, geometry, view, wall, group) {
   };
   const move = moved => {
     const box = landing(pointerMetres(svg, moved, geometry));
-    if (symmetryResult()?.partners?.[`${wall}@${id}`]) mirrorPreview(svg, wall, box, geometry);
     const [c0, , d0] = screenBox(view, width, height, box);
     group.setAttribute("transform", `translate(${(c0 - a0) * scale} ${(b0 - d0) * scale})`);
     note(`搬到：離左緣 ${metres(c0)}、離下緣 ${metres(d0)} 公尺（放開才切）`, "");
+    if (symmetryResult()?.partners?.[`${wall}@${id}`]) mirrorPreview(svg, wall, box, geometry);
   };
   const complete = ended => {
     elevationSelected = id;
@@ -488,6 +510,17 @@ function editSelected(wall, view, width, height, field, value) {
   if (boxTooSmall(box)) { note(`框太小：寬與高都要至少 ${cutSpec().min_side_m * 100} 公分`, "notice"); return; }
   action(() => cutWall(wall, [...others, box], null, {before: current, after: box}));
 }
+function axisDistances(axis) {
+  const width = wallSize(axis.front)?.[0];
+  if (!width) return null;
+  const distance = axis.left.endsWith("0") ? axis.across_m : width - axis.across_m;
+  return {left: distance.toFixed(2), centre: (width / 2).toFixed(2)};
+}
+function inputAxisWords(result) {
+  const axis = result?.axis, distances = axis && axisDistances(axis);
+  if (!distances) return result?.reason || result?.message || "正在確認對稱軸…";
+  return `對稱軸：兩支喇叭中點到主位，離左牆 ${distances.left} 公尺${axis.centred ? "" : "（不在房間正中，左右牆不跟著畫）"}`;
+}
 function selectedEditor(wall, view, width, height) {
   const area = $("elevation-selected"); area.replaceChildren();
   const current = drawnBoxes(wall).find(box => box.id === elevationSelected);
@@ -502,7 +535,6 @@ function selectedEditor(wall, view, width, height) {
   const label = zoneLabels(wall).get(current.id);
   heading.textContent = `選取：${label.numberText} ${label.name}（代號 ${current.id}；照畫面方向，公尺）`; area.append(heading);
   const partner = symmetryResult()?.partners?.[`${wall}@${current.id}`]?.split("@");
-  if (partner && partner[0] !== wall) heading.append(`，和${zoneCalled(...partner)}左右對稱`);
   const fields = document.createElement("div"); fields.className = "fields";
   for (const [field, label, value] of [["left", "離左緣", a0], ["bottom", "離下緣", b0], ["width", "寬", a1 - a0], ["height", "高", b1 - b0]]) {
     const wrap = document.createElement("label"); wrap.textContent = label;
@@ -513,13 +545,25 @@ function selectedEditor(wall, view, width, height) {
   }
   const remove = document.createElement("button"); remove.id = "elevation-delete"; remove.textContent = "刪掉這個框";
   remove.onclick = () => action(() => cutWall(wall, drawnBoxes(wall).filter(box => box.id !== current.id), () => { elevationSelected = null; }, {before: current, after: null}));
-  if (window.zoneSymmetry.isOn() && !partner && !selfMirrored(wall, current)) {
-    const complete = document.createElement("button");
-    complete.id = "elevation-complete"; complete.textContent = "補畫另一邊";
-    complete.onclick = () => action(() => cutWall(wall, drawnBoxes(wall), null, {before: current, after: current, complete: true}));
-    fields.append(complete);
-  }
   fields.append(remove); area.append(fields);
+  if (window.zoneSymmetry.isOn()) {
+    const status = document.createElement("div"); status.className = "elevation-pair-status";
+    area.append(status);
+    const result = symmetryResult();
+    if (partner) status.textContent = `和${zoneCalled(...partner)}左右對稱`;
+    if (!result || partner || selfMirrored(wall, current)) return;
+    if (!result.axis) {
+      status.textContent = `${inputAxisWords(result)}。請先檢查方案，讓主位對齊兩支喇叭的中點。`;
+    } else if (result.projections[wall][0] !== wall && !result.axis.centred) {
+      const distances = axisDistances(result.axis);
+      if (distances) status.textContent = `對稱軸離左牆 ${distances.left} 公尺，房間正中是 ${distances.centre} 公尺：主位和兩支喇叭的中點都要在正中，左右牆才會跟著畫`;
+    } else {
+      const complete = document.createElement("button");
+      complete.id = "elevation-complete"; complete.textContent = "補畫另一邊";
+      complete.onclick = () => action(() => cutWall(wall, drawnBoxes(wall), null, {before: current, after: current, complete: true}));
+      status.append("這一塊沒有另一邊", complete);
+    }
+  }
 }
 // 喇叭與主位的座標照表單上現在填的（還沒交伺服器也算，同房間尺寸）；沒改過的格子取方案原值，填不出數字就不畫那一點。
 function fieldPoint(prefix, id, fallback) {
@@ -654,7 +698,7 @@ function renderElevation() {
     button.setAttribute("aria-pressed", String(on === state));
     button.onclick = () => window.zoneSymmetry.set(state);
   }
-  $("elevation-axis-words").textContent = on ? result?.axis?.words ?? result?.reason ?? result?.message ?? "正在確認對稱軸…"
+  $("elevation-axis-words").textContent = on ? inputAxisWords(result)
     : "跟「這間房貼什麼」那一頁的「左右對稱」是同一個開關，哪一頁切換都一樣。";
   if (mirrorWarning && (mirrorWarning.owner !== scheme || mirrorWarning.generation !== zoneDesignGeneration || !on)) {
     mirrorWarning = null;
@@ -755,6 +799,8 @@ window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());
   // 房間尺寸改定（離開格子）後調分區，再用調好的草稿重判限制。
   $("room-fields").addEventListener("change", resizeRoom);
-  for (const id of ["speakers", "receivers"]) $(id).addEventListener("change", refreshZoneLimits);
+  for (const id of ["speakers", "receivers"]) $(id).addEventListener("change", () => {
+    if (window.zoneSymmetry.isOn()) refreshZoneLimits();
+  });
 });
 })();

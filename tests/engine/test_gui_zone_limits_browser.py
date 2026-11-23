@@ -15,7 +15,7 @@ from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_ide
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write, _zones
-from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _region, _save
+from tests.engine.test_gui_zone_modes_browser import _choose, _modes, _write_room109_design, _region, _save
 
 LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 PRESET = "glass_wool_48k_50mm"          # 總深 0.05 m
@@ -50,7 +50,7 @@ def _clear(page: Page, zone: str) -> None:
 
 def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_path: Path, browser: Browser) -> None:
     """用正式網頁入口起（雙精度開著、可信範圍真的判）：截圖就是產品真正的樣子。"""
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -101,7 +101,7 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
 
 
 def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: Path, browser: Browser) -> None:
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -214,7 +214,7 @@ def test_a_verdict_arriving_mid_drag_waits_for_the_mouse_and_replies_out_of_orde
                                                                                               browser: Browser) -> None:
     """拖框拖到一半判決回來：先收著不重畫（重畫會換掉正在拖的那張圖），放開滑鼠才畫，框照樣切成。
     兩次判決倒序回來：晚到的舊判決丟掉，畫面上是最新那次。"""
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
@@ -318,7 +318,7 @@ def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp
 def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path: Path, browser: Browser) -> None:
     """#1082 段 2-4：交給搜尋的區逐組寫出生效上限與哪一條擋住（個案哪一層／材料組自己）；比某一組最淺排法還淺，
     那一組標「不可用」但不擋；准用的組全放不下才紅、擋「拿去搜尋」。用正式網頁入口起、109 號房，截圖存證。"""
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     (tmp_path / "materials.json").write_text(_deep_user_library(), encoding="utf-8")
     with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -358,7 +358,7 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
 def test_changing_the_list_rechecks_the_limits(tmp_path: Path, browser: Browser) -> None:
     """審查 11-15：在小框套用候選清單跟改做法一樣重判限制；不然深度上限那一欄每一組的生效上限、
     紅燈、「拿去搜尋」停不停用都是改之前的判決（改之前就這樣，這一支把清單變成到處都能改，一起補）。"""
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")

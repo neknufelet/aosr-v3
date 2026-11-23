@@ -334,10 +334,14 @@ def test_a_mirrored_pair_with_different_ranges_says_why_in_the_symmetry_box(tmp_
         expect(page.locator("#zone-symmetry")).to_have_attribute("data-state", "paired")
         expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(1)
         for zone in ("x0/b", "x0/a"):
+            page.locator("#zone-symmetry-off").click()
+            _settled(page)
             _click_zone(page, zone)
             page.locator(_cell(page, WOOL, "porous", "high")).select_option("0.1")
             page.locator(_cell(page, WOOL, "cavity", "high")).fill("15")
             _apply(page)
+            page.locator("#zone-symmetry-on").click()
+            _settled(page)
             expect(page.locator("#zone-symmetry")).to_have_attribute("data-state", "paired")
             if zone == "x0/b":
                 expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(0)

@@ -1587,7 +1587,7 @@ function specialRow() {
     }
     body.append(where, el("div", "zv-what", methodWords(group)));
     block.append(el("i", `zv-bar ${shownOf(group.mode)}`), body,
-      button("zv-btn", "改", `zone-special-edit-${index}`, () => pick(group.zones.map(item => item.id))));
+      button("zv-btn", "改", `zone-special-edit-${index}`, () => (symmetryIsOn() ? pick : select)(group.zones.map(item => item.id))));
     row.append(block);
   });
   if (zones.length) {
@@ -1799,7 +1799,6 @@ function setSymmetry(on) {
   const design = designForEdit();
   if (on) delete design.left_right_symmetry; else design.left_right_symmetry = "off";
   unsaved = true; symmetryEditGeneration = zoneDesignGeneration; symmetryDetail = false; followed = [];
-  markStale();
   renderElevation();
   refreshZoneLimits();
   renderZoneOverview();

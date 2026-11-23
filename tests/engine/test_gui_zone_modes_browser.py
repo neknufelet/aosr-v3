@@ -61,6 +61,13 @@ def _region(zone: dict[str, object]) -> str:
     return "z1" if u < 1.0 and v < 1.2 else "top-left" if u < 1.0 else "right"
 
 
+def _write_room109_design(tmp_path: Path, settings: dict[str, object]) -> None:
+    _write(tmp_path, room109_document())
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({"schema_version": "aosr.zone_design.v1", "scheme_id": "room109", **settings}), encoding="utf-8")
+
+
 def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]], list[str]]:
     """x 起點牆不鏡像：左下畫一框 → z1、右邊一大塊 auto1、z1 上面 auto2（三塊都還是原牆）；三塊各選一種做法、由程式最佳化那塊改清單。"""
     _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
@@ -100,7 +107,7 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
 
 
 def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, browser: Browser) -> None:
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     _write(tmp_path, room109_document("room109-original"))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -433,7 +440,7 @@ def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: 
     """#1128：交給搜尋的區寫方案裡現在真的放什麼。網頁改成交給搜尋時放原牆（寫原牆、會貼在它上面）；搜尋存成的方案
     （或它的另存）那一區放的是搜尋選的貼牆構造，不准還寫「先放原牆」。這裡把貼了一層的 z1 在設計設定改成交給搜尋，
     就是存成方案那一份的形狀。"""
-    _write(tmp_path, room109_document())
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
     _write(tmp_path, room109_document("room109-original"))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page

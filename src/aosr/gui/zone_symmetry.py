@@ -291,11 +291,13 @@ def same_frame(wall: str, u: Span, v: Span, zone: ZoneFrame) -> bool:
     return wall == zone.wall and _same(u, zone.u) and _same(v, zone.v)
 
 
-def drawn_partners(scheme: Scheme, frame: Frame) -> dict[str, str]:
+def drawn_partners(scheme: Scheme, frame: Frame, added: ZoneFrame | None = None) -> dict[str, str]:
     """不看做法，只收畫的矩形。鍵和值都是「牆@代號」，每一對雙向登記。"""
     drawn = [ZoneFrame(f"{wall}@{zone.id}", wall, zone.u_m, zone.v_m)
              for wall, entries in (scheme.scene.surface_zones_by_wall or {}).items()
              for zone in entries if isinstance(zone, RectangleZone) and not zone.id.startswith(FILL_PREFIX)]
+    if added is not None:
+        drawn.append(added)  # 新畫時先照同一把尺找既有夥伴；找到了就不用補切。
     partners: dict[str, str] = {}
     for zone in drawn:
         if zone.surface in partners or (frame.side(zone.wall) and not frame.axis.centred):

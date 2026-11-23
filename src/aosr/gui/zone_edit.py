@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from copy import deepcopy
+from functools import partial
 from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -274,6 +275,27 @@ def _changed_boxes(body: ZoneCut, change: MirrorChange) -> tuple[str, list[CutBo
     return active.id, list(expected.values())
 
 
+def _source_cut(body: ZoneCut, change: MirrorChange, key: str, source: list[CutBox],
+                reason: str = "", other: str = "", fix: str = "") -> dict[str, object]:
+    """鏡像不能切時仍套用手畫的那一面；補畫只動鏡像，失敗時兩面都保留。"""
+    walls = {} if change.complete else {body.wall: cut_wall(body.scheme, body.wall, source)}
+    verb = "畫" if change.after else "刪"
+    if change.after is None:
+        fix = "原來選的框已刪除。若也要刪另一邊，請選取那一塊再刪。"
+    message = f"另一邊沒有跟著{verb}：{{first}} {reason}。{fix}" if reason else ""
+    return {"walls": walls, "message": message, "first": f"{body.wall}@{key}", "other": other}
+
+
+def _place_partner(peers: list[CutBox], partner_id: str | None, u: tuple[float, float],
+                   v: tuple[float, float]) -> tuple[list[CutBox], str]:
+    used = {box.id for box in peers}
+    key = partner_id or next(f"z{i}" for i in range(1, len(used) + 2) if f"z{i}" not in used)
+    mirrored = CutBox(id=key, u_m=u, v_m=v)
+    if partner_id is None:
+        return [*peers, mirrored], key
+    return [mirrored if b.id == partner_id else b for b in peers], key
+
+
 def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
     # 配對的建議切法也會呼叫 cut_wall；到請求進來才載入鏡像幾何。
     from aosr.gui.zone_symmetry import Frame, SIDES_NOT_MIRRORED, ZoneFrame, drawn_partners, overlap_area, same_frame, symmetry_axis
@@ -281,44 +303,46 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
     wall, doc = body.wall, body.scheme
     key, source = _changed_boxes(body, change)
 
-    def source_only(reason: str = "", other: str = "", fix: str = "") -> dict[str, object]:
-        walls = {} if change.complete else {wall: cut_wall(doc, wall, source)}
-        verb = "畫" if change.after else "刪"
-        if change.after is None:
-            fix = "原來選的框已刪除。若也要刪另一邊，請選取那一塊再刪。"
-        message = f"另一邊沒有跟著{verb}：{{first}} {reason}。{fix}" if reason else ""
-        return {"walls": walls, "message": message, "first": f"{wall}@{key}", "other": other}
-
+    source_only = partial(_source_cut, body, change, key, source)
+    editing = change.before is not None and not change.complete
     try:
         scheme = Scheme.model_validate(doc)
     except ValidationError:
-        return source_only("的方案還有沒填好的地方，定不出對稱軸", fix="請先檢查方案。")
+        return source_only() if editing else source_only("的方案還有沒填好的地方，定不出對稱軸", fix="請先檢查方案。")
     axis = symmetry_axis(scheme)
     if isinstance(axis, str):
-        return source_only(axis, fix="請調整喇叭或主位，再選框按「補畫另一邊」。")
+        return source_only() if editing else source_only(axis, fix="請調整喇叭或主位，再選框按「補畫另一邊」。")
     frame = Frame(scheme, axis)
-    if frame.side(wall) and not axis.centred:
-        return source_only(SIDES_NOT_MIRRORED, fix="請讓對稱軸通過房間正中，再補畫另一邊。")
-    partner = drawn_partners(scheme, frame).get(f"{wall}@{key}") if change.before else None
-    if change.complete and partner:
-        return source_only()
-    if change.before and not change.complete and not partner:
-        return source_only()
     active = change.after or change.before
     assert active is not None
-    shape = ZoneFrame(key, wall, active.u_m, active.v_m)
+    shape = ZoneFrame(f"{wall}@{key}", wall, active.u_m, active.v_m)
+    partner = drawn_partners(scheme, frame, added=shape if change.before is None else None).get(shape.surface)
+    if (editing and not partner) or (not editing and partner):
+        return source_only()
+    if frame.side(wall) and not axis.centred:
+        return source_only(SIDES_NOT_MIRRORED, fix="請讓對稱軸通過房間正中，再補畫另一邊。")
     destination, u, v = frame.mirrored(shape)
     target = cast(WallName, destination)
+    if change.after and same_frame(target, u, v, shape):
+        reply = source_only()
+        if partner:
+            reply.update(message="{first_number} 現在跨在對稱軸正中，{other_number} 不再跟著它；要的話自己刪 {other_number}", other=partner)
+        return reply
+    if change.after and target == wall and overlap_area(u, v, shape):
+        return source_only("跨在對稱軸上但沒有置中", fix="先把框移到軸的一側，再按「補畫另一邊」。")
     if target in change.protected_walls:
         return source_only("的對面還有實測阻抗草稿", fix="請先套用或取消草稿，再補畫另一邊。")
-    peers = source if target == wall else _drawn(doc, target)
+    try:
+        peers = source if target == wall else _drawn(doc, target)
+    except ZoneCutError as exc:
+        return source_only(f"對面的分區讀不出來（{exc}）", fix="請先檢查對面分區。")
+    except ValidationError:
+        return source_only("對面的既有框代號無法用來切牆", fix="請先修正對面框的代號，再補畫另一邊。")
     partner_id = partner.partition("@")[2] if partner else None
     boxes = [box for box in peers if box.id != partner_id]
-    if change.after and not same_frame(target, u, v, shape):
+    if change.after:
         if not frame.inside(target, u, v):
             return source_only("照鏡子翻過去會超出牆面", fix="先把框移進兩邊都放得下的位置，再按「補畫另一邊」。")
-        if target == wall and overlap_area(u, v, shape):
-            return source_only("跨在對稱軸上但沒有置中", fix="先把框移到軸的一側，再按「補畫另一邊」。")
         for box in boxes:
             if overlap_area(u, v, ZoneFrame(box.id, target, box.u_m, box.v_m)):
                 reply = source_only("照鏡子翻過去會壓到 {other}", f"{target}@{box.id}",
@@ -326,18 +350,17 @@ def cut_mirrored(body: ZoneCut, change: MirrorChange) -> dict[str, object]:
                 return {**reply, "blocked": {"wall": target, "u_m": u, "v_m": v}}
         if len(boxes) >= MAX_BOXES:
             return source_only("對面的畫框數量已滿", fix="請先刪除多餘的框，再補畫另一邊。")
-        used = {box.id for box in peers}
-        identifier = partner_id or next(f"z{i}" for i in range(1, len(used) + 2) if f"z{i}" not in used)
-        mirrored = CutBox(id=identifier, u_m=u, v_m=v)
-        boxes = [mirrored if b.id == partner_id else b for b in peers] if partner else [*boxes, mirrored]
-    elif not partner:
-        return source_only()
+        boxes, identifier = _place_partner(peers, partner_id, u, v)
     try:
         other_cut = cut_wall(doc, target, boxes)
     except ZoneCutError as exc:
         return source_only(f"翻過去切不成（{exc}）", fix="請調整框邊後再試。")
     walls = {} if target == wall or change.complete else {wall: cut_wall(doc, wall, source)}
     walls[target] = other_cut
+    if change.complete:
+        return {"walls": walls, "completed": f"{target}@{identifier}"}
+    if change.after is None:
+        return {"walls": walls, "deleted_partner": partner}
     return {"walls": walls, "message": ""}
 
 
