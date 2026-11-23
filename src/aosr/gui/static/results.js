@@ -338,6 +338,7 @@ async function load() {
   $("run-notice").hidden = !data.run_notice;
   $("run-notice").textContent = data.run_notice || "";
   if (!response.ok) { showRejection(response, data); return; }
+  if (data.scheme_id) $("back-to-input").href = `/?scheme=${encodeURIComponent(data.scheme_id)}`;
   view = data; $("content").hidden = false;
   drawPlan(view.plan, {planXY: "result-plan-xy", planXZ: "result-plan-xz",
     detail: $("result-plan-detail"), legend: $("result-plan-legend")});

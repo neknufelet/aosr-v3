@@ -205,6 +205,9 @@ function stuckWords(names) { return `先處理${names.join("、")}的紅框（�
 async function sendToSearch() {
   const stuck = stuckZoneNames();
   if (stuck.length) { zoneNote(stuckWords(stuck), "notice"); return; }
+  // 房間尺寸調整還在路上（#1266）：先等它落地，底下等到的限制判決才是照新尺寸重問的那一次。
+  const resize = window.pendingRoomResize?.();
+  if (resize) await resize;
   const limits = await settledZoneLimits();
   if (limits?.status !== "checked") {
     zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;

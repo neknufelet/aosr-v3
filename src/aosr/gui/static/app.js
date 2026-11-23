@@ -342,6 +342,8 @@ async function changeInputScheme(load) {
   // 開檔、家具、快捷、喇叭設定與開機共用交接；等待時三樣都留在原版本。
   document.querySelector("main").inert = true;
   try {
+    const resize = window.pendingRoomResize();
+    if (resize) await resize;
     const loading = load();
     // 先收完現有格子，再把勾選與選單畫回原版本；候選值已在請求裡，成功才顯示。
     if (scheme) { renderInputSetup(); renderWalls(); }
@@ -386,7 +388,11 @@ async function holdInput(work) {
   main.inert = true; page.inert = true;
   // 做的事自己失敗（伺服器不收這一次存檔）：原因在這裡寫進訊息列——同一句，原本是丟出去給 action 寫，
   // 那會排在下面寫回被擋那一句之後、又把它清掉（#1188 第 7 條）。回 undefined：呼叫的人都當「沒做成」。
-  try { return await work(); } catch (error) { say(errorText(error), "notice"); } finally {
+  try {
+    const resize = window.pendingRoomResize();
+    if (resize) await resize;
+    return await work();
+  } catch (error) { say(errorText(error), "notice"); } finally {
     main.inert = false; page.inert = false;
     inputBusy = false;
     if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
@@ -520,7 +526,7 @@ async function loadSchemeList() {
   if (data.schemes.includes(selected)) list.value = selected;
   $("archive-scheme").disabled = !list.value;
 }
-// 回有沒有真的打開（帶著方案名進來的那條路 openZonesFromLink 要知道，#1198）。
+// 回有沒有真的打開（帶著方案名進來的那條路 openSchemeFromLink 要知道，#1198）。
 async function openScheme() {
   const name = $("scheme-list").value;
   if (!name) return false;
@@ -550,15 +556,17 @@ async function openScheme() {
   await refreshPlan();
   return true;
 }
-// 首頁「挑材料」與結果頁「這一間挑材料」帶著 ?zones=<方案名> 進來（#1198）：打開那一份，真的打開了才開「這間房貼什麼」。
+// ?scheme= 回輸入頁的方案段落；?zones= 打開同一份後再進「這間房貼什麼」。
 // 打不開（清單裡沒有、存著的那一份檢查不過、讀不出）：原因寫在「打開」旁邊、捲到那裡，不開那一頁。
-async function openZonesFromLink() {
-  const name = new URLSearchParams(location.search).get("zones");
+async function openSchemeFromLink() {
+  const params = new URLSearchParams(location.search);
+  const zones = params.get("zones");
+  const name = zones || params.get("scheme");
   if (!name) return;
   const list = $("scheme-list");
   if ([...list.options].some(option => option.value === name)) {
     list.value = name;
-    if (await openScheme()) { window.openZoneOverview(); return; }
+    if (await openScheme() && zones) { window.openZoneOverview(); return; }
   } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「開舊方案」另選一份`, "notice");
   $("scheme-section").scrollIntoView();
 }
@@ -870,6 +878,8 @@ async function follow(id) {
 }
 // sent：存檔時檢查的是按下那一刻抄下來的那一份（#1187）；其餘照表單現況。
 async function refreshPlan(sent) {
+  const resize = window.pendingRoomResize();
+  if (resize && !sent) await resize;
   // 每次確定的改動都走到這裡：順手重判超過限制的區（#1111；不等它、不鎖頁，晚到的回覆自己丟掉）。
   refreshZoneLimits();
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
@@ -1023,5 +1033,5 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   // 首頁第一屏的「打開來改」借上面「開舊方案」那一組：按鈕綁好、清單載好才放它按（#1134 審查：太早按會靜靜失敗）。
   document.body.dataset.inputReady = "true";
   document.dispatchEvent(new Event("input-ready"));
-  await openZonesFromLink();
+  await openSchemeFromLink();
 }));

@@ -28,12 +28,13 @@ from starlette.routing import Route
 
 from aosr.geometry.shoebox import Room
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
-from aosr.physics.zone_fill import FILL_PREFIX, Box, fill_wall, wall_size_m
+from aosr.physics.zone_fill import FILL_PREFIX, Box, FillResult, fill_wall, wall_size_m
 
 SNAP_M = 0.05
 MIN_SIDE_M = 0.20
 # 演算法容差（同 fem_lane 的 *_TOL：判「是不是同一條邊」，不是精度契約），單位公尺。
 EDGE_MERGE_TOL = 1e-6
+RESIZE_EDGE_M = 0.001
 MAX_BOXES = 100
 ZONE_FIELD = "surface_zones_by_wall"
 WHOLE_WALL_KEY = "whole_wall"
@@ -98,7 +99,10 @@ def _old_entries(document: dict[str, object], wall: str) -> list[dict[str, objec
     return cast(list[dict[str, object]], entries)
 
 
-def _old_rectangles(entries: Sequence[dict[str, object]]) -> list[tuple[str, Box, dict[str, object]]]:
+type MaterialBox = tuple[Box, dict[str, object]]
+
+
+def _old_rectangles(entries: Sequence[dict[str, object]]) -> list[MaterialBox]:
     """切之前這一面的矩形區（座標讀不出來的跳過，只拿來找材料）。"""
     found = []
     for entry in entries:
@@ -113,7 +117,7 @@ def _old_rectangles(entries: Sequence[dict[str, object]]) -> list[tuple[str, Box
             continue
         box = Box(id=identifier, u_m=(float(cast(list[float], u)[0]), float(cast(list[float], u)[1])),
                   v_m=(float(cast(list[float], v)[0]), float(cast(list[float], v)[1])))
-        found.append((identifier, box, cast(dict[str, object], entry["material"])))
+        found.append((box, cast(dict[str, object], entry["material"])))
     return found
 
 
@@ -123,13 +127,26 @@ def _distance(box: Box, u: float, v: float) -> float:
     return math.hypot(du, dv)
 
 
-def _source_at(entries: Sequence[dict[str, object]], u: float, v: float) -> tuple[str, dict[str, object]]:
-    """切之前蓋住 (u, v) 的那一區：照方案順序取第一個蓋住的；都沒蓋到取最近的；沒有矩形就是整面那一區。"""
-    rectangles = _old_rectangles(entries)
+def _source_at(rectangles: Sequence[MaterialBox], u: float, v: float,
+               whole: dict[str, object]) -> tuple[str, dict[str, object]]:
+    """照方案順序取第一個蓋住 (u, v) 的區；都沒蓋到取最近的；沒有矩形就是整面那一區。"""
     if not rectangles:
-        return WHOLE_WALL_KEY, cast(dict[str, object], entries[0]["material"])
-    identifier, _box, material = min(rectangles, key=lambda item: _distance(item[1], u, v))
-    return identifier, material
+        return WHOLE_WALL_KEY, whole
+    box, material = min(rectangles, key=lambda item: _distance(item[0], u, v))
+    return box.id, material
+
+
+def _inherited(result: FillResult, rectangles: Sequence[MaterialBox],
+               whole: dict[str, object]) -> dict[str, tuple[str, dict[str, object]]]:
+    """畫框與尺寸調整用同一份歸屬：原來畫的框認代號，自動補滿的框認中心所在的原區。"""
+    old = {box.id: material for box, material in rectangles}
+    sources = {}
+    for zone in result.zones:
+        if zone.id not in result.filled_ids and zone.id in old:
+            sources[zone.id] = (zone.id, old[zone.id])
+        else:
+            sources[zone.id] = _source_at(rectangles, sum(zone.u_m) / 2, sum(zone.v_m) / 2, whole)
+    return sources
 
 
 def _pull(value: float, edges: list[float]) -> float:
@@ -189,8 +206,10 @@ def cut_wall(document: dict[str, object], wall: WallName, boxes: Sequence[CutBox
     width, height = wall_size_m(room, wall)
     drawn = _pulled(boxes, width, height)
     _check_drawn(wall, drawn)
+    previous = _old_rectangles(entries)
+    whole = cast(dict[str, object], entries[0]["material"])
     if not drawn:
-        source, material = _source_at(entries, width / 2, height / 2)
+        source, material = _source_at(previous, width / 2, height / 2, whole)
         return {"zones": [{"area": "whole_wall", "material": deepcopy(material)}], "filled_ids": [],
                 "inherited": {WHOLE_WALL_KEY: source}}
     # 窄條自己判（最小邊扣掉容差：0.7 − 0.5 在浮點不到 0.2，不能因此說它太窄），補滿只管不重疊、不留空。
@@ -202,14 +221,11 @@ def cut_wall(document: dict[str, object], wall: WallName, boxes: Sequence[CutBox
         problems = [f"牆面 {wall}：補滿後剩一條 u {box.u_m[0]:.3f}–{box.u_m[1]:.3f}、v {box.v_m[0]:.3f}–{box.v_m[1]:.3f} 公尺的窄條，"
                     f"比最小邊 {MIN_SIDE_M:g} 公尺還窄；請把畫的框貼齊牆邊或鄰框，或離開至少 {MIN_SIDE_M:g} 公尺" for box in thin]
         raise ZoneCutError("；".join(problems), problems, thin)
-    old = {identifier: material for identifier, _box, material in _old_rectangles(entries)}
+    sources = _inherited(result, previous, whole)
     zones: list[dict[str, object]] = []
     inherited: dict[str, str] = {}
     for zone in result.zones:
-        if zone.id not in result.filled_ids and zone.id in old:
-            source, material = zone.id, old[zone.id]
-        else:
-            source, material = _source_at(entries, sum(zone.u_m) / 2, sum(zone.v_m) / 2)
+        source, material = sources[zone.id]
         inherited[zone.id] = source
         zones.append({"area": "rectangle", "id": zone.id, "u_m": list(zone.u_m), "v_m": list(zone.v_m),
                       "material": deepcopy(material)})
@@ -235,5 +251,64 @@ async def zone_cut(request: Request) -> Response:
                             status_code=400)
 
 
+def _at_moving_edge(value: float, old: float, new: float) -> bool:
+    # 邊長先相減，剛好 1 毫米的十進位輸入可能多出最後一位浮點誤差。
+    return new != old and abs(value - old) <= RESIZE_EDGE_M + math.ulp(old)
+
+
+def _resize_wall(entries: list[dict[str, object]], wall: str, width: float, height: float) -> dict[str, object]:
+    """方案座標沿房間正軸；每面用仍保留的分區外緣當舊尺寸，縮不下的面可在下一次重新調。"""
+    rectangles = _old_rectangles(entries)
+    if len(rectangles) != len(entries):
+        raise ZoneCutError(SHAPE_ERROR)
+    old_w = max(box.u_m[1] for box, _ in rectangles)
+    old_h = max(box.v_m[1] for box, _ in rectangles)
+    if (width, height) == (old_w, old_h):
+        return {}
+    resized: list[MaterialBox] = []
+    for box, material in rectangles:
+        key = box.id
+        u0, u1 = box.u_m
+        v0, v1 = box.v_m
+        new = Box(key, (u0, width if _at_moving_edge(u1, old_w, width) else u1),
+                  (v0, height if _at_moving_edge(v1, old_h, height) else v1))
+        if u0 >= width or v0 >= height or new.u_m[1] > width or new.v_m[1] > height:
+            return {"blocked": key, "reason": "超出目前的牆面"}
+        if (width < old_w or height < old_h) and too_small(new):
+            return {"blocked": key, "reason": f"寬或高不到最小邊 {MIN_SIDE_M:g} 公尺"}
+        if (u0 > 0 and _at_moving_edge(u0, old_w, width)) or (v0 > 0 and _at_moving_edge(v0, old_h, height)):
+            return {"blocked": key, "reason": "距牆邊在 1 毫米內，調整後會與鄰區重疊"}
+        resized.append((new, material))
+    # 跟畫框共用補滿。用調整後的矩形辨認原區，讓自動代號、材料和做法一起沿用；
+    # 匯入的方案可能手動細分過補滿格，這些既有接縫也必須保留。
+    moved = [box for box, _ in resized]
+    drawn = [box for box in moved if not box.id.startswith(FILL_PREFIX)]
+    filled = fill_wall(wall, width, height, drawn, min_side_m=0.0)
+    bounds = {(box.u_m, box.v_m) for box in moved}
+    if {(box.u_m, box.v_m) for box in filled.zones} != bounds:
+        filled = fill_wall(wall, width, height, moved, min_side_m=0.0)
+    if filled.problems or any((box.u_m, box.v_m) not in bounds for box in filled.zones):
+        return {"blocked": moved[0].id, "reason": "調整後的分區無法無縫蓋滿這一面"}
+    sources = _inherited(filled, resized, resized[0][1])
+    return {"zones": {sources[box.id][0]: {"u_m": box.u_m, "v_m": box.v_m} for box in filled.zones}}
+
+
+async def zone_resize(request: Request) -> Response:
+    try:
+        document = await request.json()
+        if not isinstance(document, dict):
+            raise ZoneCutError(SHAPE_ERROR)
+        room = draft_room(document)
+        changes = {}
+        for wall in ("x0", "xL", "y0", "yL", "floor", "ceiling"):
+            entries = _old_entries(document, wall)
+            if entries[0].get("area") != "whole_wall":
+                changes[wall] = _resize_wall(entries, wall, *wall_size_m(room, wall))
+        return JSONResponse(changes)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
 def zone_edit_routes() -> list[Route]:
-    return [Route("/api/zone-cut", zone_cut, methods=["POST"])]
+    return [Route("/api/zone-cut", zone_cut, methods=["POST"]),
+            Route("/api/zone-resize", zone_resize, methods=["POST"])]
