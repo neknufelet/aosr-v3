@@ -30,9 +30,13 @@ function node(tag, attributes, text) {
 }
 // 牆面寬高照表單上現在填的房間尺寸（還沒交伺服器也算），讀不出正數就不畫。沒改過的格子用方案原值
 // （格子裡顯示的是伺服器排過位數的字，4.41988145469 不等於 4.41988145469311），跟存檔時 collect 讀的同一份。
-function wallSize(wall) {
+function roomDimensions() {
   const room = Object.fromEntries(["Lx", "Ly", "Lz"].map(key => [key, $(`room-${key}`) ? numericInput(`room-${key}`) : scheme.scene.room_m[key]]));
-  if (!Object.values(room).every(value => typeof value === "number" && Number.isFinite(value) && value > 0)) return null;
+  return Object.values(room).every(value => Number.isFinite(value) && value > 0) ? room : null;
+}
+function wallSize(wall) {
+  const room = roomDimensions();
+  if (!room) return null;
   return {floor: [room.Lx, room.Ly], ceiling: [room.Lx, room.Ly], x0: [room.Ly, room.Lz], xL: [room.Ly, room.Lz],
           y0: [room.Lx, room.Lz], yL: [room.Lx, room.Lz]}[wall];
 }
@@ -96,6 +100,66 @@ function note(text, kind) {
   const line = $("elevation-note");
   line.textContent = text; line.className = kind;
 }
+// 尺寸確定時一趟重算六面。回覆只換座標，材料和以區代號記的做法繼續用原件。
+const resizeProblems = new Map();
+let resizeRequest = null;
+let resizePending = null;
+window.pendingRoomResize = () => resizePending;
+
+async function applyRoomResize(live, request) {
+  const changes = await request;
+  if (live !== scheme || request !== resizeRequest) return;
+  for (const [wall, change] of Object.entries(changes)) {
+    if (change.blocked) {
+      resizeProblems.set(wall, {...change, generation: zoneDesignGeneration});
+      continue;
+    }
+    resizeProblems.delete(wall);
+    if (!change.zones) continue;
+    for (const zone of wallZones(wall)) {
+      const next = change.zones[zone.id];
+      window.zoneOverviewResized(wall, zone, next);
+      Object.assign(zone, next);
+    }
+    const row = $(`wall-editor-${wall}`);
+    row.replaceChildren();
+    renderZonedWall(wall, row);
+  }
+  renderElevation();
+  window.renderZoneOverview();
+}
+function resizeRoom() {
+  resizeRequest = null;
+  resizePending = null;
+  const zones = scheme.scene.surface_zones_by_wall;
+  const room = roomDimensions();
+  const pending = room && zones && Object.values(zones).some(entries => entries[0].area === "rectangle");
+  const editors = ["walls", "elevation", "elevation-selected", "elevation-zones"].map($);
+  // 框的拖曳起點、數字欄與牆面材料要等新座標，房間尺寸格仍可繼續改。
+  for (const editor of editors) editor.inert = Boolean(pending);
+  if (!pending) { refreshZoneLimits(); return; }
+  const live = scheme;
+  const request = api("/api/zone-resize", "POST", {scene: {room_m: room, surface_zones_by_wall: zones}});
+  resizeRequest = request;
+  resizePending = applyRoomResize(live, request).catch(error => {
+    if (request === resizeRequest && live === scheme) note(`分區尺寸沒有調整：${errorText(error)}`, "notice");
+  }).finally(() => {
+    if (request !== resizeRequest) return;
+    resizePending = null;
+    for (const editor of editors) editor.inert = false;
+    refreshZoneLimits();
+    action(updateMultiples);
+    action(updateInputPreview);
+  });
+}
+
+function resizeProblem(wall) {
+  const issue = resizeProblems.get(wall);
+  if (!issue || issue.generation !== zoneDesignGeneration || !wallZones(wall).some(zone => zone.id === issue.blocked)) return "";
+  const where = zoneCalled(wall, issue.blocked);
+  const fix = issue.blocked.startsWith(cutSpec().fill_prefix) ? "調整旁邊畫的框" : "把這一區的框改窄、移開或刪掉";
+  return `${where}${issue.reason}，這一面的分區保留原位。請先恢復原尺寸，${fix}，再改房間尺寸。`;
+}
 // 交伺服器切這一面；成功才原地換掉這一面的分區。等回覆時整頁鎖住（同交接），免得半路又改了別格被畫面蓋掉。
 async function cutWall(wall, boxes, done) {
   if (inputBusy) { note("上一個改動還在處理，請稍等再切", "notice"); return; }
@@ -119,6 +183,7 @@ async function cutWall(wall, boxes, done) {
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
     }
     scheme.scene.surface_zones_by_wall[wall] = data.zones;
+    resizeProblems.delete(wall);
     remapZoneDesign(wall, data.inherited);
     elevationThin = [];
   } finally {
@@ -442,7 +507,8 @@ function renderElevation() {
   }
   area.replaceChildren();
   $("elevation-selected").replaceChildren();
-  if (!elevationWall) { $("elevation-size").textContent = "選一面牆打開立面圖。"; renderZoneTable(null); return; }
+  const problems = Object.keys(wallNames).map(resizeProblem).filter(Boolean).join(" ");
+  if (!elevationWall) { $("elevation-size").textContent = problems || "選一面牆打開立面圖。"; renderZoneTable(null); return; }
   const wall = elevationWall, view = views[wall], size = wallSize(wall);
   if (!size) { $("elevation-size").textContent = "先把房間的長、寬、高都填好正數，才畫得出這一面。"; renderZoneTable(wall); return; }
   const [width, height] = size;
@@ -504,7 +570,7 @@ function renderElevation() {
   $("elevation-size").textContent = `${wallNames[wall]}：寬 ${metres(width)} 公尺 × 高 ${metres(height)} 公尺，` +
     (count ? `分成 ${count} 區（實線是畫的框、虛線是自動補滿的；圓圈裡的號碼對下面表的「區」）` : "整面一區") +
     `；框邊吸附 ${cutSpec().snap_m * 100} 公分格，最小邊 ${cutSpec().min_side_m * 100} 公分` +
-    (outside ? "。這一面有分區超出目前的牆面（房間尺寸改過）：請改框或清掉這一面的切法" : "");
+    (problems ? "。" + problems : outside ? "。這一面有分區超出目前的牆面（房間尺寸改過）：請改框或清掉這一面的切法" : "");
   selectedEditor(wall, view, width, height);
   const clear = document.createElement("button"); clear.id = "elevation-clear"; clear.textContent = "清掉這一面的切法";
   clear.disabled = !count;
@@ -518,7 +584,7 @@ window.elevationGeometry = {views, wallSize, screenBox, flip, project, markerIte
 window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => renderElevation());
-  // 房間尺寸改定了（離開格子）才重判限制：分區可能超出變小的牆面（#1111）。
-  $("room-fields").addEventListener("change", () => refreshZoneLimits());
+  // 房間尺寸改定（離開格子）後調分區，再用調好的草稿重判限制。
+  $("room-fields").addEventListener("change", resizeRoom);
 });
 })();

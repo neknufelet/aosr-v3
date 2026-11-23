@@ -18,6 +18,7 @@ const byId = (id) => document.getElementById(id);
 const params = new URLSearchParams(window.location.search);
 let schemeId = params.get("scheme");
 let selectedJob = params.get("job");
+let returnToJob = Boolean(selectedJob && !schemeId);
 let defaults = null;
 let lastPreview = null;
 // 最後一次預覽送出的選項（JSON 字串）：開跑只送這一份；表單改過就要先重新預覽，畫面上的預覽才是真的會跑的。
@@ -175,6 +176,9 @@ function zoneText(zone) {
 }
 
 // ---- 1. 方案 ----
+function linkToInput(name) {
+  byId("back-to-input").href = name ? `/?scheme=${encodeURIComponent(name)}` : "/";
+}
 
 async function loadSchemes() {
   const reply = await api("/api/schemes");
@@ -212,6 +216,8 @@ async function loadPlan() {
   // 換方案：上一份打的預算不帶過去（#1082 段 2-9），這一份照它自己的預設。
   if (byId("scheme-pick").value !== schemeId) budgetTyped = false;
   schemeId = byId("scheme-pick").value;
+  returnToJob = false;
+  linkToInput(schemeId);
   if (!schemeId) return false;
   // 新那份回來之前，上一份的表單、預覽、替身、「開始搜尋」都收起來：留著的話按得下去，
   // 開跑會拿新那份的代號配上一份的表單（#1188 第 1 條）。讀不到就一直收著，不退回上一份。
@@ -525,6 +531,8 @@ async function refreshJobs() {
 
 function selectJob(jobId) {
   selectedJob = jobId;
+  returnToJob = true;
+  linkToInput(knownJobs.find(job => job.job_id === jobId)?.scheme_id || schemeId);
   const query = new URLSearchParams();
   if (schemeId) query.set("scheme", schemeId);
   query.set("job", jobId);
@@ -536,9 +544,12 @@ function selectJob(jobId) {
 
 async function refreshJob() {
   if (!selectedJob) return;
+  const job = selectedJob;
   const [view, detail] = await Promise.all([api(`/api/gradient/jobs/${selectedJob}`), api(`/api/gradient/runs/${selectedJob}/detail`)]);
+  if (job !== selectedJob) return;
   byId("job-block").hidden = false;
   if (!view.ok) { say("job-state", `讀不到這一跑：${errorText(view)}`, true); return; }
+  if (returnToJob) linkToInput(view.body.scheme_id);
   showJob(view.body, detail.ok ? detail.body : null, detail.ok ? null : errorText(detail));
 }
 
@@ -726,6 +737,7 @@ async function poll() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  linkToInput(schemeId);
   byId("load-plan").addEventListener("click", loadPlan);
   byId("preview").addEventListener("click", preview);
   byId("build-surrogate").addEventListener("click", buildSurrogate);

@@ -178,11 +178,15 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
 
 
 def _thin_wall_document() -> dict[str, object]:
-    """右牆（多層構造）有一框離左牆邊只有 10 公分（檔案裡的方案可以這樣存）；x 兩面是 109 的 2×2。"""
+    """右牆（多層構造）有一框離左牆邊只有 10 公分（檔案裡的方案可以這樣存）；x 兩面各切 2×2，上下分界高於縮小後的牆。"""
     document = room109_document("shrink")
     room109_quarters(document, "x0", (100.0, 200.0, 300.0, 400.0))
     room109_quarters(document, "xL", (500.0, 600.0, 700.0, 800.0))
     zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])[NEW])
+    # 縮到 2.5 時，上排整區在牆外，兩面都必須保留原狀才能繼續考逐面清除。
+    for wall in ("x0", "xL"):
+        for zone in zones[wall]:
+            zone["v_m"] = [0.0, 2.65] if cast(str, zone["id"]).endswith("v0") else [2.65, LZ]
     material = ASSEMBLY
     drawn = [Box("z1", (0.1, 2.0), (0.0, LZ)), Box("z2", (3.0, 4.0), (0.0, 1.0))]
     filled = fill_wall("yL", LX, LZ, drawn, min_side_m=0.0)
@@ -382,8 +386,14 @@ def test_cancelled_or_redrawn_drag_leaves_nothing_behind(tmp_path: Path, browser
         assert page.evaluate("elevationDrawing()") is False
         page.mouse.up()
         page.evaluate("document.activeElement?.blur()")
-        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
-        assert page.evaluate("window.cutsSent") == 0 and _zones(page, "xL") == before
+        page.wait_for_function("!pendingRoomResize() && zoneLimitsShown === zoneLimitsGeneration")
+        height = float(page.locator("#room-Lz").input_value())
+        assert height > LZ
+        expected = []
+        for zone in before:
+            low, high = cast(list[float], zone["v_m"])
+            expected.append(zone | {"v_m": [low, height if high == LZ else high]})
+        assert page.evaluate("window.cutsSent") == 0 and _zones(page, "xL") == expected
         assert watched.page_errors == []
 
 

@@ -2065,6 +2065,12 @@ function overviewParts() {
   body.append(mapWrap, side);
   return [head, body, noteLines(), resultBar()];
 }
+// 同一區隨尺寸移動，讓上次選取的幾何跟上。若先前已經真的重切，保留原快照交 #1262 判斷。
+window.zoneOverviewResized = (wall, zone, next) => {
+  const prior = view?.byId.get(`${wall}/${zone.id}`);
+  if (prior && prior.zone.area === zone.area && sameList(prior.zone.u_m, zone.u_m) && sameList(prior.zone.v_m, zone.v_m))
+    prior.zone = {...zone, ...next};
+};
 window.renderZoneOverview = renderZoneOverview;
 window.openZoneOverview = id => {
   if (!overviewOpen) overviewReturnY = window.scrollY;
