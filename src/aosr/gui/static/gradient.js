@@ -18,7 +18,10 @@ const byId = (id) => document.getElementById(id);
 const params = new URLSearchParams(window.location.search);
 let schemeId = params.get("scheme");
 let selectedJob = params.get("job");
-let returnToJob = Boolean(selectedJob && !schemeId);
+// 按「看這一跑」時記下工作所屬的方案，重整後不用等工作詳情回來就能點返回。
+const restoredJobScheme = selectedJob && params.get("jobScheme");
+// 舊書籤只記開跑方案與工作。除非使用者明確讀了開跑方案，返回就跟工作。
+let returnToJob = Boolean(selectedJob && !(schemeId && params.get("returnTo") === "scheme"));
 let defaults = null;
 let lastPreview = null;
 // 最後一次預覽送出的選項（JSON 字串）：開跑只送這一份；表單改過就要先重新預覽，畫面上的預覽才是真的會跑的。
@@ -187,7 +190,7 @@ async function loadSchemes() {
   pick.replaceChildren(...reply.body.schemes.map((name) => el("option", {value: name, text: name})));
   if (schemeId && reply.body.schemes.includes(schemeId)) pick.value = schemeId;
   say("connection", reply.body.schemes.length ? "" : "還沒有存好的方案；先在方案輸入頁存一份、在立面圖把要搜尋的區設成「交給搜尋」。");
-  if (schemeId && reply.body.schemes.includes(schemeId)) await loadPlan();
+  if (schemeId && reply.body.schemes.includes(schemeId)) await readPlan();
 }
 
 function request() {
@@ -211,13 +214,26 @@ function previewHolds() {
     previewedFor.scheme === schemeId && previewedFor.seq === planSeq;
 }
 
-// 回傳這一次有沒有落地（讀到、而且等的時候沒有再換一份）；重建替身那一條路照它決定要不要往下走。
-async function loadPlan() {
+// 主動讀開跑方案（含重建替身）才把返回目標切到這一份；開頁還原表單只走 readPlan。
+function loadPlan() {
   // 換方案：上一份打的預算不帶過去（#1082 段 2-9），這一份照它自己的預設。
   if (byId("scheme-pick").value !== schemeId) budgetTyped = false;
   schemeId = byId("scheme-pick").value;
   returnToJob = false;
   linkToInput(schemeId);
+  if (schemeId) {
+    const query = new URLSearchParams({scheme: schemeId});
+    if (selectedJob) {
+      query.set("job", selectedJob);
+      query.set("returnTo", "scheme");
+    }
+    history.replaceState(null, "", `/gradient?${query}`);
+  }
+  return readPlan();
+}
+
+// 回傳這一次有沒有落地（讀到、而且等的時候沒有再換一份）；重建替身那一條路照它決定要不要往下走。
+async function readPlan() {
   if (!schemeId) return false;
   // 新那份回來之前，上一份的表單、預覽、替身、「開始搜尋」都收起來：留著的話按得下去，
   // 開跑會拿新那份的代號配上一份的表單（#1188 第 1 條）。讀不到就一直收著，不退回上一份。
@@ -225,7 +241,6 @@ async function loadPlan() {
   for (const id of PLAN_BLOCKS) byId(id).hidden = true;
   say("form-message", "");
   refreshStart();
-  history.replaceState(null, "", `/gradient?scheme=${encodeURIComponent(schemeId)}${selectedJob ? `&job=${selectedJob}` : ""}`);
   say("scheme-message", "正在讀這份方案的開跑選項…");
   const reply = await api(`/api/gradient/schemes/${encodeURIComponent(schemeId)}/plan`, {}, "scheme-message", () => seq === planSeq);
   // 等的時候又讀了別份（或同一份再讀一次）：畫面歸後來那一次管，這一份回覆整個丟掉。
@@ -532,10 +547,12 @@ async function refreshJobs() {
 function selectJob(jobId) {
   selectedJob = jobId;
   returnToJob = true;
-  linkToInput(knownJobs.find(job => job.job_id === jobId)?.scheme_id || schemeId);
+  const jobScheme = knownJobs.find(job => job.job_id === jobId)?.scheme_id || schemeId;
+  linkToInput(jobScheme);
   const query = new URLSearchParams();
   if (schemeId) query.set("scheme", schemeId);
   query.set("job", jobId);
+  if (jobScheme) query.set("jobScheme", jobScheme);
   history.replaceState(null, "", `/gradient?${query}`);
   say("job-message", "");
   refreshJob();
@@ -548,7 +565,11 @@ async function refreshJob() {
   const [view, detail] = await Promise.all([api(`/api/gradient/jobs/${selectedJob}`), api(`/api/gradient/runs/${selectedJob}/detail`)]);
   if (job !== selectedJob) return;
   byId("job-block").hidden = false;
-  if (!view.ok) { say("job-state", `讀不到這一跑：${errorText(view)}`, true); return; }
+  if (!view.ok) {
+    say("job-state", `讀不到這一跑：${errorText(view)}`, true);
+    if (!byId("back-to-input").hasAttribute("href")) linkToInput(schemeId);
+    return;
+  }
   if (returnToJob) linkToInput(view.body.scheme_id);
   showJob(view.body, detail.ok ? detail.body : null, detail.ok ? null : errorText(detail));
 }
@@ -737,7 +758,8 @@ async function poll() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  linkToInput(schemeId);
+  // 舊網址沒有工作的方案代號：等工作回覆才給連結，避免在載入途中先點回另一份方案。
+  if (!returnToJob || restoredJobScheme) linkToInput(returnToJob ? restoredJobScheme : schemeId);
   byId("load-plan").addEventListener("click", loadPlan);
   byId("preview").addEventListener("click", preview);
   byId("build-surrogate").addEventListener("click", buildSurrogate);
