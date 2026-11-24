@@ -630,9 +630,12 @@ def test_the_first_view_shows_the_way_into_the_page_and_keeps_the_old_table_fold
         expect(enter).to_have_text("設定每一區貼什麼 ▸")
         # #1265 單元 3 起按鈕底下那一行照示意圖：「到「這間房貼什麼」，六面一起看、一起改；沒存的改動也帶著」。
         expect(page.locator("#zone-methods-row")).to_contain_text("到「這間房貼什麼」，六面一起看、一起改")
-        # 按鈕在立面圖那一段的最上面：在牆的圖、舊表的那一行之上。
+        # #1265 單元 3 起按鈕在第 2 段右欄（示意圖 input-page-v3：「前牆這 N 區」清單底下），跟立面圖並排、在舊表那一行之上；
+        # 不選牆時右欄只有它和摺疊，選了牆清單排在它上面。
+        expect(page.locator("#elevation-panel .card.side #zone-page-open")).to_have_count(1)
         top = "selector => document.querySelector(selector).getBoundingClientRect().top"
-        assert cast(float, page.evaluate(top, "#zone-page-open")) < cast(float, page.evaluate(top, "#elevation")) < cast(float, page.evaluate(top, "#zone-table-fold"))
+        assert cast(float, page.evaluate(top, "#zone-page-open")) < cast(float, page.evaluate(top, "#zone-table-fold"))
+        assert cast(float, page.evaluate(top, "#elevation-panel")) <= cast(float, page.evaluate(top, "#zone-page-open"))
         page.locator("#elevation-panel").scroll_into_view_if_needed()
         page.screenshot(path=str(tmp_path / "first-view.png"))
         page.locator("#elevation-wall-xL").click()

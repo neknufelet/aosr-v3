@@ -107,9 +107,11 @@ def test_after_opening_a_scheme_the_way_in_is_on_the_first_screen(tmp_path: Path
             open_scheme(page, SAMPLE)
         _opened(page, SAMPLE)
         # 碰那顆入口之前量：Playwright 的 click 會自己捲，量在後面就量不出「不用捲」。
-        assert _inside(page, "#scheme-zone-open")
-        expect(page.locator("#scheme-zone-open")).to_have_text("設定每一區貼什麼 ▸")
-        page.locator("#scheme-zone-open").click()
+        # #1265 單元 3 拿掉方案那一列那顆（派工單細節裁決 5）；第一屏上進那一頁的是頂上導覽列的「這間房貼什麼」
+        # （第 2 段右欄那顆在第一屏外，見回報量值）。
+        assert _inside(page, "#nav-zones")
+        expect(page.locator("#nav-zones")).to_have_text("這間房貼什麼")
+        page.locator("#nav-zones").click()
         _on_zone_page(page, SAMPLE, SAMPLE_ROOM)
         _assert_quiet(watched)
 

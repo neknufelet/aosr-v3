@@ -708,7 +708,7 @@ def test_table_links_select_one_zone_and_discard_another_zones_list_draft(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        for entrance in ("scheme-zone-open", "zone-page-open"):
+        for entrance in ("nav-zones", "zone-page-open"):  # #1265 單元 3 拿掉方案那一列那顆，頂上導覽列那一個代替
             page.locator("#zone-page-close").click()
             page.locator(f"#{entrance}").click()
             expect(page.locator("#zone-panel")).to_have_count(0)
@@ -716,16 +716,18 @@ def test_table_links_select_one_zone_and_discard_another_zones_list_draft(tmp_pa
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-xL").click()
-        rows = page.locator("#zone-table-xL tr[id]")
+        # #1265 單元 3 起「改這一區 ▸」整顆搬到第 2 段右欄清單（派工單細節裁決 8），舊做法表裡不再有：一區一列改看清單。
+        rows = page.locator("#elevation-list-zones .zone-item")
         assert rows.count() == 8
+        expect(page.locator("#zone-table-xL [id^=zone-goto-]")).to_have_count(0)
         for row in rows.all():
-            key = str(row.get_attribute("id")).removeprefix("zone-row-xL-")
+            key = str(row.get_attribute("id")).removeprefix("wall-zone-xL-")
             called = page.evaluate("key => zoneCalled('xL', key)", key)
             button = row.get_by_role("button", name="到「這間房貼什麼」改" + called, exact=True)
             expect(button).to_have_text("改這一區 ▸")
             expect(button).to_have_id(f"zone-goto-xL-{key}")
         third = rows.nth(2)
-        key = str(third.get_attribute("id")).removeprefix("zone-row-xL-")
+        key = str(third.get_attribute("id")).removeprefix("wall-zone-xL-")
         third.locator(f"#zone-goto-xL-{key}").scroll_into_view_if_needed()
         where = page.evaluate("window.scrollY")
         assert where > 0

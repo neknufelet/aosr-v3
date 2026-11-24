@@ -289,7 +289,7 @@ def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp
     """只點一下沒拖（收尾那條路會先重畫）不讓「拖框中」卡住；打完上限按 Tab 換格或按 Enter，判決照樣畫上去、
     焦點留在原來那一格（只有那一格打了還沒確定的字才延後）。
     #1265 起房間預設那一格在第 1 段右卡，Tab 換到的是右卡下一顆鈕；「換到立面圖同一區另一個、判決重畫整區後焦點放回那一個」
-    那條路改用這一面那一格考（Tab 換到同一區下一個帶 id 的，現在是表上第一列的「改這一區 ▸」）。"""
+    那條路改用這一面那一格考（Tab 換到同一區下一個帶 id 的，單元 3 起是第 2 段右欄清單第一區的「改這一區 ▸」）。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -321,11 +321,13 @@ def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp
         _clear(page, "z1")
         expect(page.locator("#depth-room")).to_be_focused()
         # 這一面那一格：Tab 換到立面圖同一區下一個帶 id 的；判決回來整區重畫，焦點放回那一個（不掉到頁面本身）。
+        # #1265 單元 3 起下一個帶 id 的是第 2 段右欄清單第一區的「改這一區 ▸」：清單照做法分組、由程式最佳化排最前，
+        # 是 auto1（舊做法表照區號排，第一列是 z1）。清單跟判決一起重畫，考的還是「重畫後焦點放回同一個」。
         page.locator("#depth-wall-x0").fill("10")
         page.locator("#depth-wall-x0").press("Tab")
         _settled(page)
         _red(page, "z1")
-        expect(page.locator("#elevation-panel #zone-goto-x0-z1")).to_be_focused()
+        expect(page.locator("#elevation-panel #zone-goto-x0-auto1")).to_be_focused()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
