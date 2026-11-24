@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from playwright.sync_api import Browser, Locator, Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -92,9 +93,23 @@ def _add_candidate(page: Page, choice: str) -> None:
     page.locator(f"#zone-panel-pick-{choice}").click()
 
 
-def _candidate_state(page: Page, choice: str) -> str:
-    row = page.locator(f"#zone-panel-list [data-choice='{choice}']")
-    return row.get_attribute("data-state") or "none" if row.count() else "none"
+_STATES_HELD = """wanted => Object.entries(wanted).every(([choice, state]) => {
+  const row = document.querySelector(`#zone-panel-list [data-choice="${choice}"]`);
+  return (row ? row.getAttribute("data-state") || "none" : "none") === state;
+})"""
+_STATES_NOW = """choices => Object.fromEntries(choices.map(choice => {
+  const row = document.querySelector(`#zone-panel-list [data-choice="${choice}"]`);
+  return [choice, row ? row.getAttribute("data-state") || "none" : "none"];
+}))"""
+
+
+def _expect_candidate_states(page: Page, wanted: dict[str, str]) -> None:
+    """等小框清單每一列畫成要的狀態（沒有那一列算 none）。點區、按鈕後清單是非同步重畫，讀一次就判會讀到
+    上一個畫面（#1231：機器忙時本機連跑 5 次紅 5 次）；等 10 秒還不對才紅，並印出當下每一列的狀態。"""
+    try:
+        page.wait_for_function(_STATES_HELD, arg=wanted, timeout=10_000)
+    except PlaywrightTimeoutError as exc:
+        raise AssertionError(f"等了 10 秒，清單是 {page.evaluate(_STATES_NOW, list(wanted))}，要 {wanted}") from exc
 
 
 def _pick_search(page: Page) -> None:
@@ -509,8 +524,7 @@ def test_applying_the_panel_only_adds_and_removes_what_was_ticked_and_keeps_the_
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": on_wall, "floor/auto1": on_floor}
         _click_zone(page, "yL/auto1")
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
-        assert _candidate_state(page, WOOLS[0]) == "all"
-        assert _candidate_state(page, WOOLS[1]) == "none"
+        _expect_candidate_states(page, {WOOLS[0]: "all", WOOLS[1]: "none"})
         _add_candidate(page, "glass_wool_24k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         _apply(page)

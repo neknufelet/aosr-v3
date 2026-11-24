@@ -20,8 +20,8 @@ from tests.engine.test_gui_zone_material_pick_browser import (
     ONLY_48K,
     PLAIN_PRODUCT,
     _add_candidate,
-    _candidate_state,
     _design,
+    _expect_candidate_states,
     _pick_search,
 )
 
@@ -38,14 +38,14 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         _click_zone(page, "yL/auto1")
         _click_zone(page, "floor/auto1")
         choice = WOOLS[0]
-        assert _candidate_state(page, choice) == "all"
+        _expect_candidate_states(page, {choice: "all"})
         expect(page.locator(f"#zone-panel-row-{choice}")).to_contain_text("選中的 2 區裡 1 區那一面貼不了這一種，不會加")
         page.locator(f"#zone-panel-remove-{choice}").click()
-        assert _candidate_state(page, choice) == "none"
+        _expect_candidate_states(page, {choice: "none"})
         page.locator("#zone-panel-undo").click()
-        assert _candidate_state(page, choice) == "all"
+        _expect_candidate_states(page, {choice: "all"})
         page.locator(f"#zone-panel-remove-{choice}").click()
-        assert _candidate_state(page, choice) == "none"
+        _expect_candidate_states(page, {choice: "none"})
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": ["none"], "floor/auto1": ["none"]}
         # 選這兩區，再加選一個已有 24K 的牆區，才能在同一列按「加到 1 區」。
@@ -78,11 +78,11 @@ def test_a_half_ticked_material_follows_each_click_and_can_be_taken_off(tmp_path
         _click_zone(page, "y0/auto1")
         _click_zone(page, "y0/auto2")
         choice = WOOLS[1]
-        assert _candidate_state(page, choice) == "some"
+        _expect_candidate_states(page, {choice: "some"})
         page.locator(f"#zone-panel-addto-{choice}").click()
-        assert _candidate_state(page, choice) == "all"
+        _expect_candidate_states(page, {choice: "all"})
         page.locator(f"#zone-panel-remove-{choice}").click()
-        assert _candidate_state(page, choice) == "none"
+        _expect_candidate_states(page, {choice: "none"})
         expect(page.locator(f"#zone-panel-row-{choice}")).to_have_count(0)
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "y0/auto2": ["glass_wool_48k", "glass_wool_96k", "none"]}
@@ -253,7 +253,7 @@ def test_the_panel_opens_on_the_picked_zones_own_lists_and_a_half_ticked_materia
         # 只選清單比較短的那一區：它沒有的兩種是空的。
         _click_zone(page, "y0/auto1")
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
-        assert [_candidate_state(page, choice) for choice in WOOLS] == ["all", "none", "none", "all"]
+        _expect_candidate_states(page, dict(zip(WOOLS, ["all", "none", "none", "all"], strict=True)))
         # 這一區的清單跟「其他牆面」那一份不一樣：不標「＝其他牆面」；把缺的兩種勾上、跟它一樣了才標。
         expect(page.locator("#zone-panel-same")).to_have_count(0)
         _add_candidate(page, "glass_wool_24k")
@@ -264,7 +264,7 @@ def test_the_panel_opens_on_the_picked_zones_own_lists_and_a_half_ticked_materia
         # 再加選清單比較長的那一區。
         _click_zone(page, "y0/auto2")
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
-        assert [_candidate_state(page, choice) for choice in WOOLS] == ["all", "some", "some", "all"]
+        _expect_candidate_states(page, dict(zip(WOOLS, ["all", "some", "some", "all"], strict=True)))
         expect(page.locator("#zone-panel-list [data-choice=glass_wool_24k]")).to_contain_text("選中的 2 區裡 1 區有")
         expect(page.locator("#zone-panel-list [data-choice=glass_wool_48k]")).not_to_contain_text("選中的")
         expect(page.locator("#zone-panel-search-from")).to_have_text("選中的 2 區清單不一樣：沒動的勾，各區照目前的。每一區各自最佳化。")
@@ -278,7 +278,7 @@ def test_the_panel_opens_on_the_picked_zones_own_lists_and_a_half_ticked_materia
         _click_zone(page, "y0/auto1")
         _click_zone(page, "y0/auto2")
         page.locator("#zone-panel-addto-glass_wool_24k").click()
-        assert [_candidate_state(page, choice) for choice in WOOLS] == ["all", "all", "some", "all"]
+        _expect_candidate_states(page, dict(zip(WOOLS, ["all", "all", "some", "all"], strict=True)))
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "y0/auto1": [*SHORT, "glass_wool_24k"]}
         assert watched.page_errors == [] and watched.console_errors == []
