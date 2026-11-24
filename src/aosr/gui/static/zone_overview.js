@@ -1800,6 +1800,7 @@ function setSymmetry(on) {
   const design = designForEdit();
   if (on) delete design.left_right_symmetry; else design.left_right_symmetry = "off";
   unsaved = true; symmetryEditGeneration = zoneDesignGeneration; symmetryDetail = false; followed = [];
+  renderInputBars();
   renderElevation();
   refreshZoneLimits();
   renderZoneOverview();
@@ -2108,6 +2109,7 @@ window.openZoneOverview = id => {
 // 輸入頁訊息列每寫一句（app.js 的 say）就叫一次：警示照抄到這一頁，換成成功的一句就拿掉。
 // 這一頁打開時從空的開始（上面那一行）：打開之前輸入頁講過的話不帶進來。
 // 方案與每一區的做法都存進檔案了（輸入頁按「儲存」、另存，或「拿去搜尋」先存的那一步）：那一句拿掉。
+window.zonePageHasEdits = () => unsaved && (seenGeneration === zoneDesignGeneration || symmetryEditGeneration === zoneDesignGeneration);
 window.zonePageSaved = () => { symmetryEditGeneration = null; unsaved = false; renderZoneOverview(); };
 window.zonePageSay = (text, kind) => {
   const next = kind === "notice" ? text : "";

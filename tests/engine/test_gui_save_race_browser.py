@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Browser, Locator, Page, Request, Route, expect
 
-from tests.engine._input_page_steps import open_scheme, scheme_open_button
+from tests.engine._input_page_steps import open_save_as, open_scheme, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -141,6 +141,7 @@ def test_loading_a_template_while_saving_as_is_refused_and_the_copy_is_the_press
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         scheme_a, design_a = (json.loads(content) for content in _control_save(page, tmp_path))
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, "**/api/plan", "POST")
         seen = _requests(page)
@@ -201,14 +202,15 @@ def test_save_as_shows_the_new_name_on_the_home_screen_without_a_reload(tmp_path
         page = watched.page
         _open_scheme(page, A)
         page.wait_for_load_state("networkidle")
-        expect(page.locator(f"#home-schemes li[data-scheme='{A}']")).to_have_count(1)
-        expect(page.locator(f"#home-schemes li[data-scheme='{COPY}']")).to_have_count(0)
+        expect(page.locator(f"#home-schemes [data-scheme='{A}']")).to_have_count(1)
+        expect(page.locator(f"#home-schemes [data-scheme='{COPY}']")).to_have_count(0)
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         with page.expect_response(lambda r: _is_put(r.request, f"/api/schemes/{COPY}")) as saved:
             page.locator("#save-as").click()
         assert saved.value.ok, saved.value.text()
-        expect(page.locator(f"#home-schemes li[data-scheme='{COPY}']")).to_have_count(1)
-        assert page.locator("#scheme-list").input_value() == COPY
+        expect(page.locator(f"#home-schemes [data-scheme='{COPY}']")).to_have_count(1)
+        expect(page.locator(f'[data-scheme="{COPY}"] .home-open')).to_have_attribute("aria-current", "true")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -250,6 +252,7 @@ def test_saving_while_another_scheme_is_being_opened_is_refused(tmp_path: Path, 
         _open_scheme(page, A)
         page.wait_for_load_state("networkidle")
         before = (_files(tmp_path, A), _files(tmp_path, B))
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         open_b = scheme_open_button(page, B)
         held = _hold_first(page, f"**/api/schemes/{B}", "GET")
@@ -332,6 +335,7 @@ def test_a_save_as_reply_does_not_rename_a_page_that_was_swapped_behind_the_lock
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         scheme_a, design_a = (json.loads(content) for content in _control_save(page, tmp_path))
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, f"**/api/schemes/{COPY}", "PUT")
         with page.expect_request(lambda r: _is_put(r, f"/api/schemes/{COPY}")):
@@ -451,6 +455,7 @@ def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unl
             page.locator("#layer-floor-0-thickness_m").fill("")
         assert preview.value.status == 400
         expect(page.locator("#messages")).to_have_class("notice")
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, "**/api/plan", "POST")
         asked_again: list[Route] = []

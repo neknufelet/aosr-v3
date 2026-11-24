@@ -6,7 +6,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -30,6 +30,7 @@ def _filled(page: Page, selector: str, value: str | bool) -> None:
 
 def _save_readback(page: Page, name: str) -> dict[str, object]:
     expected = page.evaluate("collect()") | {"scheme_id": name}
+    open_save_as(page)
     page.locator("#save-as-id").fill(name)
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{name}")
                               and response.request.method == "PUT") as response:
@@ -187,6 +188,7 @@ def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tm
         field = page.locator("#speaker-left-z")
         assert field.input_value() == "1.23456789012"
         # 未動過的格子保留全部精度；答案讀正式存檔回應，不拿 collect() 當答案。
+        open_save_as(page)
         page.locator("#save-as-id").fill("untouched")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/untouched")
                                   and response.request.method == "PUT") as unchanged:
@@ -195,6 +197,7 @@ def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tm
         assert page.request.get(f"{url}/api/schemes/untouched").json()["scheme"]["speakers"]["left"]["z"] == 1.23456789012345
         field.fill("")
         field.press_sequentially("1.23456789012")
+        open_save_as(page)
         page.locator("#save-as-id").fill("retyped")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/retyped")
                                   and response.request.method == "PUT") as changed:
@@ -230,6 +233,7 @@ def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Bro
             assert changed.value.json()["scheme"]["speaker_setup"] == setup
             page.wait_for_function("!document.getElementById('input-setup').hasAttribute('aria-busy')")
             assert page.locator("#speaker-mount").input_value() == "desk"
+        open_save_as(page)
         page.locator("#save-as-id").fill("kept-desk")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/kept-desk")
                                   and response.request.method == "PUT") as saved:

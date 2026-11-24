@@ -9,6 +9,7 @@ let otherAsking = false;
 let followSeq = 0;
 // 這一次開算之後表單有沒有被改過；改過的話算完不把連結掛在表單旁邊。
 let runEdited = false;
+let editRevision = 0;
 // 最近一次圖面檢查沒過時伺服器寫的問題（已照印在訊息列）；「另存新名字」旁邊照抄同一段。
 let planProblems = "";
 const compareChoice = {a: null, b: null};
@@ -421,8 +422,10 @@ function refuseWhileBusy(note, text) {
 // samePage：回覆回來時畫面還是不是按下時那一份（鎖著的時候一定是；它是鎖漏掉時的第二道，不是則不動畫面上的名字）。
 function pressedCopy(designName) {
   const live = scheme, generation = zoneDesignGeneration;
+  const revision = editRevision;
   const taken = structuredClone(collect());
   return {document: taken, sendDesign: prepareZoneDesignSave(designName ?? taken.scheme_id),
+          sameEdits: () => revision === editRevision,
           samePage: () => scheme === live && generation === zoneDesignGeneration};
 }
 async function editInput(actionName, value, wall) {
@@ -452,6 +455,7 @@ async function updateMultiples() {
 // 訊息列換了新的一句，「打開」「載入範本」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
 function say(text, kind) {
   $("messages").textContent = text;
+  $("save-feedback").textContent = "";
   $("messages").className = kind;
   // 「這間房貼什麼」那一頁開著時這一列是藏起來的：警示照抄一份到那一頁（zone_overview.js）。
   window.zonePageSay?.(text, kind);
@@ -485,6 +489,8 @@ async function save() {
   if (cut) await cut;
   if (inputBusy) { say(`${busyWords}，這一次沒有儲存；等它做完再按一次`, "notice"); return false; }
   const stored = await holdInput(storeScheme);
+  $("save-feedback").textContent = $("messages").textContent;
+  $("save-feedback").className = $("messages").className;
   if (!stored) return false;
   await refreshAfterSave(stored.message);
   return true;
@@ -502,9 +508,13 @@ async function storeScheme() {
   }
   say(saved.message, "ok");
   // 每一區的做法跟著方案存（#1105）；方案已經存好，做法沒存成要照講、不算存檔失敗。
-  try { await taken.sendDesign(); } catch (error) {
+  try {
+    await taken.sendDesign();
+    if (taken.samePage() && taken.sameEdits()) { runEdited = false; dirtyField = ""; }
+  } catch (error) {
     say(`${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
   }
+  renderInputBars();
   return {id: document.scheme_id, message: saved.message};
 }
 // 存好之後重讀方案清單與結果清單（不鎖頁）。
@@ -518,19 +528,13 @@ async function refreshAfterSave(message) {
 }
 async function loadSchemeList() {
   const data = await api("/api/schemes");
-  const list = $("scheme-list");
-  const selected = list.value;
-  list.replaceChildren();
-  for (const name of data.schemes) {
-    const option = document.createElement("option");
-    option.value = name; option.textContent = name; list.append(option);
-  }
-  if (data.schemes.includes(selected)) list.value = selected;
-  $("archive-scheme").disabled = !list.value;
+  schemeNames = data.schemes;
+  savedTimes = data.saved_at || {};
+  // 使用者正要點選單時，晚到的清單不能把焦點所在的按鈕換掉；下次展開就畫新清單。
+  if ($("scheme-menu").hidden || !$("home-schemes").childElementCount) drawSchemeMenu();
 }
-// 回有沒有真的打開（帶著方案名進來的那條路 openSchemeFromLink 要知道，#1198）。
-async function openScheme() {
-  const name = $("scheme-list").value;
+// 回有沒有真的打開，讓帶名字的連結知道是否繼續進入分區頁。
+async function openScheme(name) {
   if (!name) return false;
   if (inputBusy) { refuseWhileBusy("open-note", `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`); return false; }
   // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。三樣都在鎖頁期間讀完，
@@ -552,9 +556,13 @@ async function openScheme() {
   applyZoneLibrary(zoneState.library);
   renderWalls();
   openedId = name;
+  runEdited = false; dirtyField = "";
   $("scheme-archive-notice").hidden = true;
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
+  renderInputBars();
+  const running = formRunning();
+  if (running && running.run_id !== runId) await follow(running.run_id);
   await refreshPlan();
   return true;
 }
@@ -565,11 +573,9 @@ async function openSchemeFromLink() {
   const zones = params.get("zones");
   const name = zones || params.get("scheme");
   if (!name) return;
-  const list = $("scheme-list");
-  if ([...list.options].some(option => option.value === name)) {
-    list.value = name;
-    if (await openScheme() && zones) { window.openZoneOverview(); return; }
-  } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「開舊方案」另選一份`, "notice");
+  if (schemeNames.includes(name)) {
+    if (await openScheme(name) && zones) { window.openZoneOverview(); return; }
+  } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「換一個方案」另選一份`, "notice");
   $("scheme-section").scrollIntoView();
 }
 async function loadTemplate() {
@@ -591,9 +597,11 @@ async function loadTemplate() {
   resetZoneDesign();
   renderWalls();
   openedId = null;
+  runEdited = false; dirtyField = "";
   $("scheme-archive-notice").hidden = true;
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
+  renderInputBars();
   // 檢查會換訊息列、清掉旁邊的字，所以載入成功那句等檢查完才寫。
   await refreshPlan();
   sayBeside("template-note", `已載入「${label}」；要留下來請按「另存新名字」`, "ok");
@@ -612,7 +620,6 @@ async function saveAs() {
   }
   if (!await holdInput(() => storeSchemeAs(name))) return;
   await loadSchemeList();
-  $("scheme-list").value = name;
   // 首頁第一屏「已存的方案」跟著重讀（同「儲存」；它自己有序號丟掉晚到的舊回覆，讀不到只寫在它那一行）。
   // 另存一定是新名字，結果清單與封存區不會變，不多問那兩趟。
   refreshHome();
@@ -635,18 +642,29 @@ async function storeSchemeAs(name) {
   }
   if (taken.samePage()) {
     scheme.scheme_id = name; $("save-id").value = name; openedId = name;
+    $("result-link").hidden = true; $("result-stale").hidden = true;
     $("scheme-archive-notice").hidden = true;
   }
   say(saved.message, "ok");
   sayBeside("save-as-note", `「${name}」：${saved.message}`, "ok");
-  try { await taken.sendDesign(); } catch (error) {
+  try {
+    await taken.sendDesign();
+    if (taken.samePage() && taken.sameEdits()) { runEdited = false; dirtyField = ""; }
+  } catch (error) {
     say(`${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
     sayBeside("save-as-note", `「${name}」：${saved.message}；每一區的做法沒存成：${errorText(error)}`, "notice");
   }
+  if (taken.samePage() && zoneDesignSaved) closeBarBoxes();
+  renderInputBars();
   return true;
 }
-function markStale() {
+function markStale(event) {
+  ++editRevision;
   runEdited = true;
+  const field = event?.target;
+  dirtyField = ({"room-Lx": "房間長度", "room-Ly": "房間寬度", "room-Lz": "房間高度"})[field?.id] ||
+    field?.labels?.[0]?.firstChild?.textContent?.trim() || "";
+  renderInputBars();
   if (!$("result-link").hidden) $("result-stale").hidden = false;
 }
 function chooseCompare(side, item) {
@@ -816,6 +834,8 @@ async function loadResultList() {
   const data = await api("/api/results");
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
+  finishedNames = new Set(data.results.filter(row => ["done", "none"].includes(row.run_status)).map(row => row.scheme_id));
+  renderInputBars();
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
     const row = resultRow(item);
@@ -837,7 +857,8 @@ async function resumeRuns() {
   // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
   // 同時在算好幾筆時主畫面跟最新開的那一筆（清單照開始時間新到舊），其餘的列在底下（#796）。
   // 接回跟「改看這一筆」走同一條路：同一套號碼，開頁時還在等回覆的開算也不會多排一條計時器。
-  const state = (await api("/api/runs")).running[0];
+  activeRuns = (await api("/api/runs")).running;
+  const state = activeRuns[0];
   if (!state) return;
   await follow(state.run_id);
 }
@@ -848,7 +869,9 @@ async function showOtherRuns() {
   otherAsking = true;
   let others;
   try {
-    others = (await api("/api/runs")).running.filter((item) => item.run_id !== runId);
+    activeRuns = (await api("/api/runs")).running;
+    others = activeRuns.filter((item) => item.run_id !== runId);
+    renderInputBars();
   } finally {
     otherAsking = false;
   }
@@ -913,9 +936,12 @@ async function poll() {
   const state = await api(`/api/runs/${polled}`);
   if (polled !== runId) return;
   // 主畫面只寫白話的進度；計算程式自己印的英文輸出收進可展開的技術細節，出錯時照樣找得到原文。
+  followedState = state;
+  activeRuns = activeRuns.filter(item => item.run_id !== polled);
   $("run-state").textContent = state.display_text;
-  $("run-log").hidden = !state.stderr_tail.length;
-  $("run-log-text").textContent = state.stderr_tail.join("\n");
+
+  $("run-log-text").textContent = state.stderr_tail.join("\n") || "沒有留下出錯紀錄";
+  renderInputBars();
   if (state.status !== "running") {
     clearInterval(timer);
     if (state.status !== "done") { $("stop").disabled = true; return; }
@@ -935,14 +961,15 @@ async function poll() {
     // 表單還是算的那一份、開算後也沒改過、清單上那一列在而且沒標「改之前的方案算的」，連結才掛在表單旁邊；
     // 找不到那一列（例如另一個分頁已經封存）也不掛，不能說它跟表單是同一份。
     if (state.scheme_id === openedId && !runEdited && row !== undefined && !row.scheme_text) {
-      // 講白話就好：結果檔路徑與 32 位計算代號不印，看結果交給下面的「查看結果頁」連結。
-      say(`「${state.scheme_id}」算完了，按下面的「查看結果頁」看結果`, "ok");
+      // 講白話就好：結果檔路徑與 32 位計算代號不印，看結果交給頁底的「算好了 ▸ 看結果」連結。
+      say(`「${state.scheme_id}」算完了，按頁底的「算好了 ▸ 看結果」看結果`, "ok");
       $("result-link").href = state.result_url;
       $("result-link").hidden = false;
       $("result-stale").hidden = true;
     } else {
       say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單`, "notice");
     }
+    renderInputBars();
   }
 }
 async function action(work) {
@@ -994,11 +1021,8 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   }
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
-  $("open-scheme").onclick = () => action(openScheme);
-  $("load-template").onclick = () => action(loadTemplate);
-  $("archive-scheme").onclick = () => action(() => archiveScheme($("scheme-list").value));
-  $("scheme-list").onchange = () => { $("archive-scheme").disabled = !$("scheme-list").value; };
-  $("save-as").onclick = () => action(saveAs);
+  bindBars();
+  $("load-template").onclick = () => action(async () => { if (!inputBusy) closeBarBoxes(); await loadTemplate(); });
   // 新名字一邊打一邊看：打了收不下的字（中文、空格、/ 之類）就先在旁邊說，不用等按下去才知道。
   $("save-as-id").addEventListener("input", () => {
     const typed = $("save-as-id").value.trim();
@@ -1016,23 +1040,17 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
       return api("/api/runs", "POST", {scheme_id: stored.id});
     });
     if (!state) return;
-    // 真的開算了才清記號：存檔被擋（例如正在算的那一份改不得）時，記號要留著。
-    runEdited = false;
-    runId = state.run_id; $("stop").disabled = false;
-    const mine = ++followSeq;
-    // 上一筆的計時器先停：留著的話它會每秒去跑算完那一段，蓋掉訊息、藏掉舊結果標示。
-    clearInterval(timer);
-    await poll();
-    // 等回覆時按了「改看這一筆」：計時器歸那一次排（#796 審查）。
-    if (mine !== followSeq) return;
-    if (!$("stop").disabled) timer = setInterval(() => action(poll), 1000);
-    // 上一筆若還在算，換到底下那一列，停得掉（#796）。
-    await showOtherRuns();
+    followedState = state;
+    $("run-log").open = false;
+    $("result-link").hidden = true;
+    $("result-stale").hidden = true;
+    renderInputBars();
+    await follow(state.run_id);
   });
   $("stop").onclick = () => action(async () => { await api(`/api/runs/${runId}/stop`, "POST"); await poll(); });
   await refreshPlan();
   for (const load of [loadSchemeList, loadResultList, resumeRuns]) await action(load);
-  // 首頁第一屏的「打開來改」借上面「開舊方案」那一組：按鈕綁好、清單載好才放它按（#1134 審查：太早按會靜靜失敗）。
+  // 按鈕綁好、清單讀完才接帶名字的連結。
   document.body.dataset.inputReady = "true";
   document.dispatchEvent(new Event("input-ready"));
   await openSchemeFromLink();

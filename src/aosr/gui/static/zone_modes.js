@@ -249,22 +249,16 @@ async function leaveForSearch(url) {
   });
   if (stayed) zoneNote("方案與每一區的做法都存好了，但等了一陣子搜尋頁還沒打開：再按一次「拿去搜尋」", "notice");
 }
-function searchButtonRow() {
-  const count = searchZoneCount();
-  if (!count) return null;
-  const row = document.createElement("p"); row.className = "fields";
-  const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
-  button.textContent = `拿去搜尋（${count} 區由程式最佳化）`;
-  button.onclick = () => action(sendToSearch);
-  // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，這一列跟紅框同一個樣子——按鈕停用、旁邊紅字寫伺服器那幾句。
+function renderSearchAction() {
+  const count = searchZoneCount(), button = $("zone-to-search"), note = $("zone-to-search-note");
   const red = limitsRedCount(), stuck = stuckZoneNames(), refused = referenceRefusals().map(line => line.text);
-  button.disabled = red > 0 || stuck.length > 0 || refused.length > 0;
-  const note = document.createElement("span"); note.id = "zone-to-search-note";
+  const lockedEdit = finishedNames.has(openedId) && formHasEdits();
+  button.disabled = !count || !!formRunning() || lockedEdit || red > 0 || stuck.length > 0 || refused.length > 0;
   const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
   note.className = blocked.length ? "limit-red" : "note";
-  note.textContent = blocked.length ? blocked.join("；") : "會先照畫面儲存，再打開第三階段搜尋頁";
-  row.append(button, " ", note);
-  return row;
+  note.textContent = formRunning() ? "等這一次算完" : lockedEdit ? "先另存新名字" : blocked.length ? blocked.join("；") :
+    count ? `交出黃色的 ${count} 區；下一頁按「開始搜尋」才開始算` : "到「這間房貼什麼」設定要交給程式的區";
+
 }
 // 切完一面：自動補的代號每次重編，做法跟著 /api/zone-cut 回的 inherited（每一塊沿用了切之前哪一區的材料）走。
 function remapZoneDesign(wall, inherited) {
@@ -651,9 +645,9 @@ function originalSchemeRow() {
   const select = document.createElement("select"); select.id = "original-scheme";
   const none = document.createElement("option"); none.value = ""; none.textContent = "未指定（拆掉貼上去的層，當成原本的樣子）"; select.append(none);
   const self = $("save-id").value;
-  for (const option of $("scheme-list").options) {
-    if (option.value === self) continue;
-    const item = document.createElement("option"); item.value = option.value; item.textContent = option.value; select.append(item);
+  for (const name of schemeNames) {
+    if (name === self) continue;
+    const item = document.createElement("option"); item.value = name; item.textContent = name; select.append(item);
   }
   const chosen = zoneDesign?.original_scheme_id ?? "";
   if (chosen && ![...select.options].some(option => option.value === chosen)) {
@@ -747,8 +741,7 @@ function renderZoneTable(wall) {
     row.append(name, size, mode, material, depth); table.append(row);
   }
   area.append(table, showAllRow(wall));
-  const toSearch = searchButtonRow();
-  if (toSearch) area.append(toSearch);
+  renderSearchAction();
   const note = document.createElement("p"); note.id = "zone-note"; note.setAttribute("aria-live", "polite");
   note.textContent = zoneNoteText; note.className = zoneNoteKind; area.append(note);
   // 舊做法表預設收著（做法改在「這間房貼什麼」那一頁設）；裡面有紅字或要人處理的提醒時自己打開，不讓它藏著。

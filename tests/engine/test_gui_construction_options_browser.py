@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, expect
 
-from tests.engine._input_page_steps import scheme_open_button
+from tests.engine._input_page_steps import open_save_as, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_construction_options import P1, first_layer
@@ -16,6 +16,7 @@ S2 = "slotted_wood_typ9_absorber40_gap98"
 
 
 def save_reload(page: Page, name: str) -> dict[str, object]:
+    open_save_as(page)
     page.locator("#save-as-id").fill(name)
     with page.expect_response(lambda reply: reply.url.endswith(f"/api/schemes/{name}") and reply.request.method == "PUT") as reply:
         page.locator("#save-as").click()

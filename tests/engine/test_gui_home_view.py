@@ -208,9 +208,10 @@ def test_home_first_screen_opens_a_saved_scheme_into_the_form(tmp_path: Path, br
         expect(page.locator("#home-title")).to_have_text("還沒有算好的房間")
         expect(page.locator("#home-result")).to_be_hidden()
         expect(page.locator("#home-materials")).to_be_visible()
-        row = page.locator('#home-schemes li[data-scheme="mine"]')
+        page.locator("#scheme-menu-button").click()
+        row = page.locator('#home-schemes [data-scheme="mine"]')
         expect(row).to_contain_text("貼了吸音材料：後牆整面")
-        row.get_by_role("button", name="打開來改").click()
+        row.get_by_role("menuitem", name="mine", exact=True).click()
         expect(page.locator("#save-id")).to_have_value("mine")
         _assert_quiet(watched)
 

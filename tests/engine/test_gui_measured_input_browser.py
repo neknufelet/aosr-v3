@@ -7,7 +7,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
-from tests.engine._input_page_steps import scheme_open_button
+from tests.engine._input_page_steps import open_save_as, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
@@ -139,6 +139,7 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
         # 攔在半路：這時另存自己的話都寫完了，才開始盯訊息列，放行後它一被改寫就是補問的回覆處理完了。
         held: list[Route] = []
         page.route('**/api/input-preview', lambda route: held.append(route))
+        open_save_as(page)
         page.locator('#save-as-id').fill('bad-base')
         with page.expect_request('**/api/input-preview'):
             with page.expect_response('**/api/schemes/bad-base') as saved:
@@ -168,6 +169,7 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
             assert saved_again.value.status == 422
         expect(page.locator('#save-as-note')).to_contain_text(refused)
         assert len(held) == 2
+        open_save_as(page)
         page.locator('#save-as-id').fill('other-name')
         assert page.locator('#save-as-note').inner_text() == ''
         page.evaluate('() => { window.saidAfterUnlock = false; }')

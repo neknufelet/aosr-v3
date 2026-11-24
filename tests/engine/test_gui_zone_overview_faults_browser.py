@@ -13,7 +13,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._zone_naming_room import ZONE_NAMING_LIBRARY, ZONE_NAMING_SCHEME
@@ -864,6 +864,7 @@ def test_the_not_saved_line_stays_when_a_save_did_not_really_store_everything(tm
         expect(line).to_be_visible()
         # 另存撞名：方案那一步就被擋（409），做法也沒送。
         page.locator("#zone-page-close").click()
+        open_save_as(page)
         page.locator("#save-as-id").fill(OTHER)
         with page.expect_response(lambda r: r.url.endswith(f"/api/schemes/{OTHER}") and r.request.method == "PUT") as taken:
             page.locator("#save-as").click()

@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page
 
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 
@@ -42,17 +42,13 @@ def test_scheme_rows_keep_each_button_beside_its_field(tmp_path: Path, browser: 
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
         page.locator("#plan-legend li").first.wait_for()
-        opened, listing, open_button = (_box(page, name) for name in ("#save-id", "#scheme-list", "#open-scheme"))
-        new_name, save_as, source = (_box(page, name) for name in ("#save-as-id", "#save-as", "#source-model"))
-        # 第一列：方案代號、開舊方案、打開。
-        assert abs(_middle(opened) - _middle(listing)) < SAME_LINE_PX
-        assert abs(_middle(listing) - _middle(open_button)) < SAME_LINE_PX
-        # 第二列：「另存新名字」按鈕緊跟在新名字那一格右邊，不掉到下一行。
-        assert abs(_middle(new_name) - _middle(save_as)) < SAME_LINE_PX
-        assert 0 <= save_as["x"] - (new_name["x"] + new_name["width"]) < 24
-        # 三列上下排開，每列第一格左邊對齊。
-        assert _middle(opened) < _middle(new_name) < _middle(source)
-        assert abs(opened["x"] - new_name["x"]) < EDGE_PX and abs(new_name["x"] - source["x"]) < EDGE_PX
+        for width in (1280, WIDTH):
+            page.set_viewport_size({"width": width, "height": 900})
+            for group in (("#save-id", "#scheme-menu-button", "#save-state"),
+                          ("#show-results", "#save-as-toggle", "#save")):
+                first, middle, last = (_box(page, selector) for selector in group)
+                assert max(abs(_middle(first) - _middle(box)) for box in (middle, last)) < SAME_LINE_PX
+                assert first["x"] + first["width"] <= middle["x"] < last["x"]
         # 峰谷配對容差那句講的是評分怎麼配對峰谷，不是聲源：不准擺在方案區（聲源模型底下）。
         note = page.locator("#feature-note")
         assert "峰谷配對容差" in note.inner_text()
@@ -206,6 +202,8 @@ def _blank_and_press(page: Page, button: str, fields: tuple[str, ...], trail: ob
     # 全部填完才一起讀：每填一格就讀一次會在兩格之間多一趟來回，正好把那段先後蓋掉、病就看不到了。
     assert all(page.locator(field).input_value() == "" for field in fields), f"清空了沒留住\n{trail}"
     page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+    if button == "#save-as":
+        open_save_as(page)
     page.locator(button).click()
     page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
 
@@ -217,17 +215,18 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         page = watched.page
         trail = _Trail(page)
         page.locator("#plan-legend li").first.wait_for()
+        open_save_as(page)
         note, button = page.locator("#save-as-note"), _box(page, "#save-as")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
         # 空名字：提示貼在按鈕右邊、同一行，用這一列的字（新名字、另存新名字），游標回到新名字那一格。
         hint = _box(page, "#save-as-note")
-        assert abs(_middle(hint) - _middle(button)) < SAME_LINE_PX
-        assert 0 <= hint["x"] - (button["x"] + button["width"]) < 24
+        assert 0 <= hint["y"] - (button["y"] + button["height"]) < 24
         assert "「新名字」" in note.inner_text() and "「另存新名字」" in note.inner_text() and "代號" not in note.inner_text()
         assert note.get_attribute("class") == "notice"
         assert page.evaluate("() => document.activeElement.id") == "save-as-id"
         # 開始打字，提示就收掉。
+        open_save_as(page)
         page.locator("#save-as-id").fill("next")
         assert note.inner_text() == ""
         # 檢查沒過：問題（伺服器寫好的白話，同一句只一行、列出哪幾格）寫在按鈕旁邊，也寫在底下的訊息列。
@@ -247,6 +246,7 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         for field, value in before.items():
             page.locator(field).fill(value)
         assert {field: page.locator(field).input_value() for field in before} == before, f"填回去沒留住\n{trail}"
+        open_save_as(page)
         page.locator("#save-as").click()
         # 存好了、沒存成（「沒有另存：…」）都寫在旁邊：等旁邊有字就是有結局，沒存成立刻紅、印出原因，不空等逾時。
         page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
@@ -312,8 +312,10 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
         page.locator("#plan-legend li").first.wait_for()
         sent: list[str] = []
         page.on("request", lambda request: sent.append(request.url) if request.method == "PUT" else None)
+        open_save_as(page)
         note, button = page.locator("#save-as-note"), _box(page, "#save-as")
         for name in REFUSED_NAMES:
+            open_save_as(page)
             page.locator("#save-as-id").fill(name)
             # 一邊打就說：用這一列的字（新名字），講得出收哪些字、中文不收，不提別列的「方案代號」。
             live = note.inner_text()
@@ -325,9 +327,9 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
             assert note.inner_text() == f"沒有另存：{live}"
             assert page.evaluate("() => document.activeElement.id") == "save-as-id"
             hint = _box(page, "#save-as-note")
-            assert hint["y"] < _middle(button) < hint["y"] + hint["height"]
-            assert 0 <= hint["x"] - (button["x"] + button["width"]) < 24
+            assert 0 <= hint["y"] - (button["y"] + button["height"]) < 24
         # 收得下的名字打出來，旁邊的提示就收掉；底下的訊息列沒被這些提示蓋掉。
+        open_save_as(page)
         page.locator("#save-as-id").fill("living-room_2")
         assert note.inner_text() == ""
         assert page.locator("#messages").inner_text() == "檢查通過"
@@ -360,7 +362,7 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
         assert page.locator("#save-id").input_value() == opened
         assert page.locator("#room-Lx").input_value() == room
         # 那句緊跟著「打開」：在按鈕旁邊或正下方，整句落在視窗裡（bounding_box 以目前視窗的左上角為原點）。
-        button, hint, viewport = _box(page, "#open-scheme"), _box(page, "#open-note"), page.viewport_size
+        button, hint, viewport = _box(page, "#scheme-menu-button"), _box(page, "#open-note"), page.viewport_size
         assert viewport is not None
         assert button["y"] <= hint["y"] + hint["height"] and hint["y"] < button["y"] + button["height"] + 24
         assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
@@ -425,4 +427,4 @@ def test_calculation_output_stays_in_technical_details() -> None:
     assert '$("run-state").textContent = state.display_text;' in script
     assert not re.search(r'\$\("run-state"\)[^;]*stderr_tail', script)
     assert '$("run-log-text").textContent = state.stderr_tail.join' in script
-    assert re.search(r'<details id="run-log" hidden><summary>[^<]*技術細節[^<]*</summary><pre id="run-log-text">', page)
+    assert re.search(r'<details id="run-log" hidden><summary>看出錯紀錄</summary><pre id="run-log-text">', page)

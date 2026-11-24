@@ -8,7 +8,7 @@ from playwright.sync_api import Browser, Request, Response, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme, scheme_open_button
+from tests.engine._input_page_steps import open_save_as, open_scheme, scheme_open_button
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -62,6 +62,7 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
         held[0].continue_()
         page.wait_for_function("document.getElementById('save-id').value === 'readonly' && !document.querySelector('main').inert")
         page.wait_for_load_state("networkidle")
+        open_save_as(page)
         page.locator("#save-as-id").fill("kept-readonly")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/kept-readonly")
                                   and response.request.method == "PUT") as saved:
@@ -97,6 +98,7 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
         failure_text = page.locator("#messages").inner_text()
         assert_chinese_lines(failure_text.splitlines())
         # 失敗後立即存檔；舊版補問預覽後仍缺天雲格子，這裡會印出英文空元素錯誤。
+        open_save_as(page)
         page.locator("#save-as-id").fill("kept-without-cloud")
         page.locator("#save-as").click()
         page.wait_for_function("document.getElementById('save-as-note').textContent !== ''")
@@ -133,6 +135,7 @@ def test_failed_preview_keeps_shortcut_and_speaker_setup_old(browser: Browser, t
             assert not page.locator("#furniture-sofa").is_checked(), selector
             assert page.locator("#furniture-table-kind").input_value() == "none", selector
             name = f"unchanged-{index}"
+            open_save_as(page)
             page.locator("#save-as-id").fill(name)
             def is_save(response: Response, name: str = name) -> bool:
                 return response.url.endswith(f"/api/schemes/{name}") and response.request.method == "PUT"
@@ -194,6 +197,7 @@ def test_delayed_cloud_edit_keeps_controls_and_fields_old_until_preview(browser:
         assert held
         held[0].continue_()
         page.wait_for_function("document.getElementById('furniture-cloud').checked && !document.querySelector('main').inert")
+        open_save_as(page)
         page.locator("#save-as-id").fill("confirmed-cloud")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/confirmed-cloud")
                                   and response.request.method == "PUT") as saved:

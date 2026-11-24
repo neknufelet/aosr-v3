@@ -24,7 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme, open_templates
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -195,7 +195,7 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         assert first is not None
         # 算完的訊息講白話：不印結果檔的路徑、也不印 32 位計算代號，看結果交給旁邊的「查看結果頁」連結。
         finished = page.locator("#messages").inner_text()
-        assert "算完了" in finished and "查看結果頁" in finished
+        assert "算完了" in finished and "算好了 ▸ 看結果" in finished
         assert first.rsplit("/", 1)[1] not in finished and "/" not in finished and ".json" not in finished
         assert page.locator("#result-stale").is_hidden()
         # 訊息叫人「按」查看結果頁，它就要長得像按鈕：跟結果清單的「查看」同一種樣子，沒有底線。
@@ -205,6 +205,7 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         page.locator("#speaker-left-x").fill("1.7")
         assert page.locator("#result-stale").is_visible()
         assert page.locator("#result-link").get_attribute("href") == first
+        open_save_as(page)
         page.locator("#save-as-id").fill("next")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'next'")
@@ -246,22 +247,27 @@ def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browse
 
 def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
                                             result: SchemeResult) -> None:
-    # 在算的時候改一格、再按計算：正在算的那份改不得，存檔被 409 擋。「開算後改過」的記號要留著，
-    # 不然原本那筆算完會把連結掛在改過的表單旁邊。
+    # 正在算的那份改動要保住：另存帶走改動，原本那筆算完也不能把連結掛在新表單旁邊。
     with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
         page = watched.page
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
         page.locator("#room-Lx").fill("5.5")
-        page.locator("#calculate").click()
-        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('正在計算')")
+        assert page.locator("#save").is_hidden() and page.locator("#calculate").is_hidden()
+        assert "有改動還沒存：房間長度" in page.locator("#save-state").inner_text()
+        assert page.evaluate("runEdited")
+        open_save_as(page)
+        page.locator("#save-as-id").fill("edited-room")
+        page.locator("#save-as").click()
+        page.wait_for_function("openedId === 'edited-room'")
+        edited = json.loads((tmp_path / "schemes" / "edited-room.json").read_text())
+        assert edited["scene"]["room_m"]["Lx"] == 5.5
         (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
                                timeout=15_000)
         assert page.locator("#result-link").is_hidden()
-        assert all("409" in text for text in watched.console_errors), watched.console_errors
-        assert watched.page_errors == []
+        _assert_quiet(watched)
 
 
 def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Browser,
@@ -270,8 +276,15 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
     with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
         page = watched.page
+        second = "another-room"
+        document = page.evaluate("structuredClone(scheme)")
+        document["scheme_id"] = second
+        (tmp_path / "schemes" / f"{second}.json").write_text(json.dumps(document))
+        first = page.locator("#save-id").input_value()
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
+        open_scheme(page, second)
+        page.wait_for_function("name => openedId === name", arg=second)
         with page.expect_response(lambda response: response.url == f"{base}/api/runs"
                                   and response.request.method == "POST") as second_run:
             page.locator("#calculate").click()
@@ -284,7 +297,7 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
                 pass
         # #796：第一筆還在算，換到底下那一列；兩筆都算完後那一列拿掉。
         page.wait_for_function("() => !document.querySelector('#other-runs').hidden")
-        assert [text.startswith("另一筆：") and "計算中" in text for text in page.locator("#other-runs li").all_inner_texts()] == [True]
+        assert [text.startswith(f"另一筆：「{first}」") and "計算中" in text for text in page.locator("#other-runs li").all_inner_texts()] == [True]
         (tmp_path / "release").touch()
         page.locator("#result-link").wait_for(state="visible", timeout=15_000)
         page.wait_for_function("() => document.querySelector('#other-runs').hidden", timeout=10_000)
@@ -406,6 +419,7 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
         page.locator("#room-Lx").fill("5.5")
+        open_save_as(page)
         page.locator("#save-as-id").fill("A")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'A'")
@@ -419,11 +433,13 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
         assert (tmp_path / "schemes" / "A.json").read_bytes() != before
         before = (tmp_path / "schemes" / "A.json").read_bytes()
+        open_save_as(page)
         page.locator("#save-as-id").fill("b")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'b'")
         page.locator("#room-Lx").fill("5.6")
         assert (tmp_path / "schemes" / "A.json").read_bytes() == before
+        open_save_as(page)
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
         # 撞名時伺服器照設計回 409，瀏覽器會記一筆「載入失敗」，那是預期的；JS 自己不准拋錯。
@@ -435,6 +451,7 @@ def _load_template(page: Page) -> None:
     # 先清掉旁邊與訊息列上一次的字：載入最後一步是檢查（寫訊息列、清旁邊），
     # 兩格同時有這一次的字才算載完，成功那句被檢查清掉就等不到。
     page.evaluate("() => { for (const id of ['template-note', 'messages']) document.getElementById(id).textContent = ''; }")
+    open_templates(page)
     page.locator("#load-template").click()
     page.wait_for_function("() => document.querySelector('#messages').textContent !== ''"
                            " && document.querySelector('#template-note').textContent.startsWith('已載入')")
@@ -461,7 +478,9 @@ def _check_template_same_name(page: Page, tmp_path: Path) -> None:
 def _check_template_load_failure(page: Page) -> None:
     """原 test_template_load_failure_keeps_form：範本讀不到，表單原樣、原因寫在按鈕旁邊。"""
     page.route(_template_url, lambda route: route.fulfill(status=400, json={"error": "範本壞了"}))
+    open_templates(page)
     page.locator("#template-list").select_option("stage_one")
+    open_templates(page)
     page.locator("#load-template").click()
     page.wait_for_function("() => document.querySelector('#template-note').textContent.startsWith('沒有載入範本')")
     assert "範本壞了" in str(page.locator("#template-note").text_content())
@@ -481,6 +500,7 @@ def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
     page.wait_for_selector("#measured-cancel-ceiling")
     page.evaluate("() => { for (const id of ['result-link', 'result-stale', 'scheme-archive-notice'])"
                   " document.getElementById(id).hidden = false; }")
+    open_templates(page)
     page.locator("#template-list").select_option("stage_one")
     _load_template(page)
     assert page.locator("#template-note").text_content() == \
@@ -517,6 +537,7 @@ def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
     assert saved.read_bytes() == before
     assert page.locator("#template-note").text_content() == ""
     # 換回參考房：整張表單跟開頁時一樣。
+    open_templates(page)
     page.locator("#template-list").select_option("reference")
     _load_template(page)
     assert page.locator("#save-id").input_value() == "reference-room-centred"

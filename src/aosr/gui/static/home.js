@@ -54,32 +54,6 @@ function homeLink(id, link) {
   anchor.hidden = !link.url;
   anchor.querySelector(".home-note").textContent = link.note;
 }
-// 方案清單一行：名字、白話、「打開來改」（打開到下面表單）（借下面「開舊方案」那一組，不另寫一套）。
-function homeSchemeRow(item) {
-  const row = homeElement("li");
-  row.dataset.scheme = item.name;
-  row.append(homeElement("b", item.title), homeElement("span", `：${item.text}`));
-  const button = homeElement("button", "打開來改", "home-open");
-  button.type = "button";
-  // 下面表單還沒準備好（範本、材料庫、方案清單還在載）時先不給按，準備好由 app.js 發 input-ready。
-  button.disabled = document.body.dataset.inputReady !== "true";
-  button.onclick = () => {
-    const list = document.getElementById("scheme-list");
-    if (![...list.options].some((option) => option.value === item.name)) return;
-    list.value = item.name;
-    document.getElementById("open-scheme").click();
-    document.getElementById("scheme-section").scrollIntoView();
-  };
-  row.append(" ", button);
-  return row;
-}
-function drawHomeSchemes(schemes) {
-  const own = schemes.filter((item) => !item.auto), auto = schemes.filter((item) => item.auto);
-  document.getElementById("home-schemes").replaceChildren(...own.map(homeSchemeRow));
-  document.getElementById("home-auto").hidden = !auto.length;
-  document.getElementById("home-auto-count").textContent = `電腦自動存的方案（${auto.length} 份：搜尋與比較時自己存的，平常不用看）`;
-  document.getElementById("home-auto-schemes").replaceChildren(...auto.map(homeSchemeRow));
-}
 // 每讀一次加一：晚到的舊回覆不蓋掉新的（開頁時這一支與結果清單各叫一次）。
 let homeSeq = 0;
 async function refreshHome() {
@@ -101,9 +75,173 @@ async function drawHome(mine) {
   if (data.room) drawHomeRoom(data.room);
   for (const [id, key] of [["home-result", "result"], ["home-materials", "materials"], ["home-layout", "layout"]])
     homeLink(id, data.links[key]);
-  drawHomeSchemes(data.schemes);
+  schemeSummaries = new Map(data.schemes.map(item => [item.name, item.text]));
+  if ($("scheme-menu").hidden) drawSchemeMenu();
 }
 window.addEventListener("DOMContentLoaded", refreshHome);
-document.addEventListener("input-ready", () => {
-  for (const button of document.querySelectorAll("button.home-open")) button.disabled = false;
-});
+
+// 輸入頁兩條操作列。存檔與計算仍走 app.js 共用的鎖；狀態用同一份表單的改動記號。
+let schemeNames = [], savedTimes = {}, schemeSummaries = new Map(), finishedNames = new Set();
+let activeRuns = [], followedState = null, dirtyField = "", allSchemes = false;
+const copyFirst = "改了以後先按右上「另存新名字」存成新的一份，才能再算";
+
+function menuItems() {
+  return [...$("scheme-menu").querySelectorAll('[role="menuitem"]')].filter(node => node.offsetHeight);
+}
+function closeBarBoxes() {
+  for (const id of ["scheme-menu", "save-as-box", "template-box"]) $(id).hidden = true;
+  for (const id of ["scheme-menu-button", "save-as-toggle"]) $(id).setAttribute("aria-expanded", "false");
+}
+function toggleMenu() {
+  const open = $("scheme-menu").hidden;
+  closeBarBoxes();
+  if (!open) return;
+  allSchemes = false;
+  drawSchemeMenu();
+  $("scheme-menu").hidden = false;
+  $("scheme-menu-button").setAttribute("aria-expanded", "true");
+  menuItems()[0]?.focus();
+}
+function drawSchemeMenu() {
+  const rows = $("home-schemes");
+  const names = [...schemeNames].sort((a, b) => (savedTimes[b] || 0) - (savedTimes[a] || 0));
+  rows.replaceChildren(...names.map((name, index) => {
+    const row = document.createElement("div");
+    row.dataset.scheme = name;
+    row.hidden = !allSchemes && index >= 5;
+    const open = homeElement("button"), archive = homeElement("button", "封存");
+    for (const button of [open, archive]) button.setAttribute("role", "menuitem");
+    open.className = "home-open"; open.tabIndex = archive.tabIndex = -1;
+    const saved = savedTimes[name];
+    const when = saved ? new Date(saved * 1000).toLocaleString("zh-TW", {hour12: false}) + " 存的，" : "";
+    const status = runningFor(name) ? "正在算" : finishedNames.has(name) ? "算過，鎖住" : "還沒算過";
+    open.append(homeElement("b", name), homeElement("small", (name === openedId ? "現在開著；" : "") + when + status));
+    if (schemeSummaries.get(name)) open.append(homeElement("small", schemeSummaries.get(name)));
+    open.setAttribute("aria-label", name);
+    open.setAttribute("aria-current", String(name === openedId));
+    open.onclick = () => action(async () => {
+      closeBarBoxes();
+      $("scheme-menu-button").focus();
+      if (!await canLeaveForm()) return;
+      if (!inputBusy) $("scheme-section").scrollIntoView();
+      await openScheme(name);
+    });
+    archive.setAttribute("aria-label", "封存 " + name);
+    archive.title = "收起來、拿得回來";
+    archive.onclick = () => action(async () => {
+      closeBarBoxes(); $("scheme-menu-button").focus(); await archiveScheme(name);
+    });
+    row.append(open, archive);
+    return row;
+  }));
+  $("all-schemes").hidden = allSchemes || names.length <= 5;
+  $("all-schemes").textContent = `看全部方案（${names.length} 份）`;
+}
+function formHasEdits() { return runEdited || window.zonePageHasEdits(); }
+async function canLeaveForm() {
+  // 鎖頁中的程式點擊照走 openScheme 自己的拒收提示。
+  if (!formHasEdits() || inputBusy) return true;
+  const dialog = $("leave-edits"), locked = formRunning() || finishedNames.has(openedId);
+  dialog.querySelector('[value="save"]').disabled = Boolean(locked);
+  $("leave-note").textContent = locked ? "要留下改動，請取消後按「另存新名字」。" : "要先儲存目前的改動嗎？";
+  dialog.returnValue = "cancel";
+  dialog.showModal();
+  await new Promise(resolve => dialog.addEventListener("close", resolve, {once: true}));
+  if (dialog.returnValue === "save") return await save() && !formHasEdits();
+  return dialog.returnValue === "discard";
+}
+function bindBars() {
+  $("nav-zones").onclick = event => { event.preventDefault(); window.openZoneOverview(); };
+  document.querySelector(".input-nav").addEventListener("click", event => {
+    const link = event.target.closest("a");
+    if (!link || link.hash || !formHasEdits() || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    action(async () => { if (await canLeaveForm()) location.assign(link.href); });
+  });
+  $("scheme-menu-button").onclick = toggleMenu;
+  $("scheme-menu-button").disabled = false;
+  $("scheme-menu-button").onkeydown = event => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault(); toggleMenu();
+    if (event.key === "ArrowUp") menuItems().at(-1)?.focus();
+  };
+  $("scheme-menu").onkeydown = event => {
+    const items = menuItems(), index = items.indexOf(document.activeElement);
+    const next = {ArrowDown: (index + 1) % items.length, ArrowUp: (index + items.length - 1) % items.length,
+                  Home: 0, End: items.length - 1}[event.key];
+    if (next !== undefined) { event.preventDefault(); items[next].focus(); }
+    if (event.key === "Tab") { closeBarBoxes(); $("scheme-menu-button").focus(); }
+  };
+  $("show-results").onclick = () => $("result-section").scrollIntoView();
+  $("all-schemes").onclick = () => { allSchemes = true; drawSchemeMenu(); menuItems()[0]?.focus(); };
+  $("choose-template").onclick = () => {
+    closeBarBoxes(); $("template-box").hidden = false; $("template-list").focus();
+  };
+  $("show-archived").onclick = () => {
+    closeBarBoxes(); $("archived").hidden = false; $("archived").open = true;
+    $("archived").scrollIntoView(); $("archived").querySelector("summary").focus({preventScroll: true});
+  };
+  $("save-as-toggle").onclick = () => {
+    const open = $("save-as-box").hidden;
+    closeBarBoxes();
+    if (open) {
+      $("save-as-box").hidden = false; $("save-as-toggle").setAttribute("aria-expanded", "true"); $("save-as-id").focus();
+    }
+  };
+  $("cancel-save-as").onclick = () => { closeBarBoxes(); $("save-as-toggle").focus(); };
+  $("save-as-box").onsubmit = event => { event.preventDefault(); action(saveAs); };
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const button = $("save-as-box").hidden ? $("scheme-menu-button") : $("save-as-toggle");
+    if (["scheme-menu", "save-as-box", "template-box"].every(id => $(id).hidden)) return;
+    closeBarBoxes(); button.focus();
+  });
+  document.addEventListener("pointerdown", event => {
+    if (!event.target.closest?.(".bar-anchor")) closeBarBoxes();
+  });
+  $("zone-to-search").onclick = () => action(sendToSearch);
+}
+function runningFor(name) {
+  if (!name) return null;
+  if (followedState?.status === "running" && followedState.scheme_id === name) return followedState;
+  return activeRuns.find(item => item.scheme_id === name);
+}
+function formRunning() { return runningFor(openedId); }
+function renderInputBars() {
+  const running = formRunning(), locked = running || finishedNames.has(openedId);
+  const job = followedState, failed = job && job.scheme_id === openedId && ["failed", "stopped"].includes(job.status);
+  const dirty = formHasEdits(), state = $("save-state");
+  state.dataset.kind = dirty ? "dirty" : locked ? "locked" : openedId ? "saved" : "template";
+  state.textContent = dirty ? "有改動還沒存" + (dirtyField ? "：" + dirtyField : "") +
+    (locked ? "。請另存新名字" : "。按右邊「儲存」") : running ? "正在算，這一份已鎖住" :
+    locked ? "算過了，內容鎖住留著比較" : openedId ? "都存好了（還沒算過）" : $("scheme-archive-notice").hidden ? "範本還沒存" : "這份方案已封存";
+  $("save").hidden = Boolean(locked);
+  $("save-as-toggle").classList.toggle("primary", Boolean(locked));
+  $("lock-bar").hidden = !locked;
+  $("lock-bar").textContent = (running ? "這一份正在算，內容鎖住。" : "這一份算過了，內容鎖住，之後拿來跟別份比。") +
+    "要改的話照樣在下面改，改完按「另存新名字」存成新的一份；原來這份不動。";
+  const done = !$("result-link").hidden && !dirty;
+  $("calculate-action").hidden = Boolean(running || done);
+  $("calculate").disabled = Boolean(locked && dirty);
+  $("calculate").textContent = failed ? "再算一次" : "照現在牆上貼的算一次";
+  $("calculate-note").hidden = Boolean(failed);
+  const other = job && job.scheme_id !== openedId;
+  const stopHome = $(other ? "followed-stop" : "current-stop");
+  if ($("stop").parentNode !== stopHome) stopHome.append($("stop"));
+  $("stop").hidden = job?.status !== "running";
+  $("run-log").hidden = !job || (other && openedId !== null) || (!failed && !job.stderr_tail?.length);
+  $("run-state").hidden = Boolean(other && openedId && job.status !== "running");
+  $("search-action").hidden = Boolean(failed);
+  const lastLine = job?.stderr_tail?.filter(line => line.trim()).at(-1);
+  const reason = job?.process_note || (lastLine && (/[\u3400-\u9fff]/u.test(lastLine) ? lastLine : "計算程式回報：" + lastLine)) ||
+    (job?.status === "stopped" ? "已停止" : "原因不明，看出錯紀錄");
+  $("next-title").textContent = running ? `正在算這一份：已跑 ${running.elapsed_s} 秒` :
+    failed ? "沒算完：" + reason :
+    done ? "算好了" : locked ? "這一份已經算過了" : "改好了就選一個往下走";
+  $("input-footer").dataset.state = running ? "running" : failed ? "failed" : done ? "done" : locked ? "locked" : "idle";
+  $("next-note").textContent = running ? "算的是按下那一刻存好的版本。可以離開這頁，回來再看。" :
+    failed ? "方案已經存好。先看出錯紀錄，再決定要不要再算。" : locked && dirty ? copyFirst :
+    done ? "這一份現在鎖住，留著比較。要再改就另存新名字。" : locked ? "沒改過可以直接再算。要修改這份方案，請另存新名字。" :
+    "不用先按儲存：按這兩顆會自動先存。算過的方案會留著比較。";
+  if (scheme) renderSearchAction();
+}

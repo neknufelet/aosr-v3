@@ -8,7 +8,7 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme
 from tests.engine import _speaker_setup_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
@@ -96,6 +96,7 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     # 儲存的回覆一到考卷就往下走，頁面那邊整頁可能還鎖著（本機只早幾毫秒解鎖）：鎖著的格子收不下字，
     # fill 也不報錯。等解鎖才填，填完核字真的在格子裡，沒進去就紅在這一行、不是等另存的回覆逾時（#1231）。
     page.wait_for_function("!document.querySelector('main').inert")
+    open_save_as(page)
     page.locator("#save-as-id").fill(copy)
     expect(page.locator("#save-as-id")).to_have_value(copy)
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{copy}")

@@ -22,7 +22,37 @@
 </head>
 <body>
   <main>
-    <header><p><a href="/search-start">開始擺位搜尋</a>　<a href="/searches">查看搜尋進度</a>　<a href="/materials">材料庫：新增與編輯材料</a>　<a href="/gradient">第三階段搜尋：開跑與看結果</a></p><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
+    <header id="input-bars">
+      <nav aria-label="網站導覽" class="input-nav"><a href="#input-bars" aria-current="page">方案輸入</a>
+        <a href="#zone-page" id="nav-zones">這間房貼什麼</a><a href="/materials">材料庫</a>
+        <a href="/search-start">找喇叭和座位的位置</a><a href="/gradient">程式最佳化（挑材料）</a></nav>
+      <div class="bar-row">
+        <label class="scheme-name">房間方案<input id="save-id" readonly></label>
+        <div class="bar-anchor"><button id="scheme-menu-button" disabled aria-haspopup="menu" aria-expanded="false" aria-controls="scheme-menu">換一個方案 ▾</button>
+          <div id="scheme-menu" role="menu" aria-label="換一個方案" hidden>
+            <strong>最近的方案</strong><div id="home-schemes" role="group" aria-label="方案"></div>
+            <button role="menuitem" id="all-schemes" hidden></button>
+            <button role="menuitem" id="choose-template">從範本開一份新的…</button>
+            <button role="menuitem" id="show-archived">看已封存的</button>
+          </div>
+          <div class="bar-popup" id="template-box" hidden><label>範本<select id="template-list"><option value="reference">參考房（第二階段）</option><option value="stage_one">第一階段範本（六面 30ρc、全向聲源、無家具）</option></select></label><button id="load-template">載入範本</button></div>
+        </div>
+        <span id="save-state" role="status"></span>
+        <div class="bar-actions"><button id="show-results" type="button">算過的結果與比較 ▸</button>
+          <div class="bar-anchor"><button id="save-as-toggle" aria-expanded="false" aria-controls="save-as-box">另存新名字</button>
+            <form id="save-as-box" class="bar-popup" hidden><label>新名字<input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label>
+              <button id="save-as" type="submit">確定</button><button id="cancel-save-as" type="button">取消</button><span id="save-as-note" aria-live="polite"></span></form>
+          </div><button id="save" class="primary">儲存</button>
+        </div>
+      </div>
+      <div id="open-note" aria-live="polite"></div><div id="template-note" aria-live="polite"></div>
+      <div id="save-feedback" aria-live="polite"></div><div id="lock-bar" hidden></div>
+    </header>
+    <dialog id="leave-edits" aria-labelledby="leave-title"><form method="dialog">
+      <h2 id="leave-title">這一份有改動還沒存</h2><p id="leave-note"></p>
+      <button value="cancel" autofocus>取消</button><button value="discard">不存走</button><button value="save">存了再走</button>
+    </form></dialog>
+    <h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p>
     <section id="home"><h2 id="home-title">讀取中…</h2><p id="home-facts"></p>
       <div class="home-top"><figure id="home-picture" hidden><svg id="home-room" role="img" aria-label="最近算的房間俯視圖：前牆在上"></svg>
           <figcaption><span class="home-legend"><span class="home-key home-simulated"></span>貼了吸音材料，數字是電腦算的（模擬，之後要拿實測對照）</span>
@@ -32,16 +62,11 @@
           <a id="home-result" class="home-go" hidden><b>看這一間的結果</b><span class="home-note"></span></a>
           <a id="home-materials" class="home-go" href="#scheme-section"><b>挑材料：每一面牆貼什麼</b><span class="home-note"></span></a>
           <a id="home-layout" class="home-go" href="/search-start"><b>挑擺位：喇叭和座位放哪（擺位搜尋）</b><span class="home-note"></span></a>
-          <p class="note">要改房間、喇叭或座位：在下面「已存的方案」按那一份的「打開來改」，改完按頁面下方的「計算這個方案」。下面的表單一開頁是範本，不是上面這一間。</p></nav></div>
-      <h3>已存的方案</h3><ul id="home-schemes" class="home-schemes"></ul>
-      <details id="home-auto" hidden><summary id="home-auto-count"></summary><ul id="home-auto-schemes" class="home-schemes"></ul></details></section>
+          <p class="note">要改房間、喇叭或座位：在頂條按「換一個方案」選那一份，改完按頁底「照現在牆上貼的算一次」。下面的表單一開頁是範本，不是上面這一間。</p></nav></div>
+    </section>
     <section id="scheme-section"><h2>方案</h2>
-      <div class="scheme-row"><label><span class="row-name">方案代號</span><input id="save-id" readonly></label>
-        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button><button id="archive-scheme" disabled>封存這個方案</button><span id="open-note" aria-live="polite"></span></div>
       <p id="scheme-zone-row"><button id="scheme-zone-open" type="button">設定每一區貼什麼 ▸</button><span>上面這一份方案每一面牆、每一區要貼什麼、不貼、還是由程式最佳化，都在「這間房貼什麼」那一頁設定。</span></p>
       <p id="scheme-archive-notice" class="notice" aria-live="polite" hidden></p>
-      <div class="scheme-row"><label><span class="row-name">範本</span><select id="template-list"><option value="reference">參考房（第二階段）</option><option value="stage_one">第一階段範本（六面 30ρc、全向聲源、無家具）</option></select></label><button id="load-template">載入範本</button><span id="template-note" aria-live="polite"></span></div>
-      <div class="scheme-row"><label><span class="row-name">新名字</span><input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label><button id="save-as">另存新名字</button><span id="save-as-note" aria-live="polite"></span></div>
       <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
       <p id="furniture-notice" class="notice" hidden></p>
       <p id="speaker-setup-notice" class="notice" hidden></p>
@@ -93,12 +118,9 @@
       <div><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div>
       <div><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
       <p id="plan-detail" aria-live="polite"></p><ul id="plan-legend"></ul></section>
-    <section><h2>檢查與計算</h2><div class="actions"><button id="check">檢查</button><button id="save">儲存</button><button id="calculate">計算這個方案</button><button id="stop" disabled>停止</button></div>
-      <p id="messages" aria-live="polite"></p><p id="run-state" aria-live="polite"></p><ul id="other-runs" hidden></ul>
-      <details id="run-log" hidden><summary>計算程式的輸出（英文原文，技術細節）</summary><pre id="run-log-text"></pre></details>
-      <a id="result-link" class="button-link" hidden>查看結果頁</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
-    </section>
-    <section><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>
+    <section><h2>檢查</h2><div class="actions"><button id="check">檢查</button></div>
+      <p id="messages" aria-live="polite"></p></section>
+    <section id="result-section"><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>
       <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>物理</th><th>評分設定</th><th>查看</th><th>選為 A</th><th>選為 B</th><th>封存方案</th></tr></thead><tbody id="results-list"></tbody></table>
       <details id="archived" hidden><summary>已封存</summary>
         <p><button id="clear-archive" type="button" class="archive-danger" hidden>全部清除封存</button></p>
@@ -106,6 +128,16 @@
         <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th><th>永久刪除</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
         <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
       </details></section>
+    <footer id="input-footer">
+      <div class="bar-row"><div class="bar-prompt"><strong id="next-title"></strong><small id="next-note"></small></div>
+        <span id="current-stop"><button id="stop" disabled hidden>停止</button></span>
+        <details id="run-log" hidden><summary>看出錯紀錄</summary><pre id="run-log-text"></pre></details>
+        <div id="calculate-action"><button id="calculate">照現在牆上貼的算一次</button><small id="calculate-note">黃色的區照它們現在存的材料算</small></div>
+        <a id="result-link" class="button-link" hidden>算好了 ▸ 看結果</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
+        <div id="search-action"><button id="zone-to-search" disabled>交給程式最佳化 ▸</button><small id="zone-to-search-note"></small></div>
+      </div>
+      <div class="followed-run"><span id="run-state" aria-live="polite"></span><span id="followed-stop"></span></div><ul id="other-runs" hidden></ul>
+    </footer>
   </main>
   <div id="zone-page" hidden></div>
 </body>

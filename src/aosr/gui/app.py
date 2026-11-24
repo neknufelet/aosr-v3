@@ -444,7 +444,13 @@ class GuiHandlers:
 
     async def schemes(self, request: Request) -> Response:
         # 要拿工作鎖的路由放到執行緒等鎖：結果清單在執行緒裡持鎖慢讀時，主迴圈不能卡在這裡（#796）。
-        return JSONResponse({"schemes": await run_in_threadpool(self._scheme_names)})
+        saved_at = await run_in_threadpool(self._scheme_times)
+        return JSONResponse({"schemes": sorted(saved_at), "saved_at": saved_at})
+
+    def _scheme_times(self) -> dict[str, float]:
+        with self.jobs._lock:
+            return {path.stem: path.stat().st_mtime for path in (self.data_dir / "schemes").glob("*.json")
+                    if SAFE_ID.fullmatch(path.stem)}
 
     def _scheme_names(self) -> list[str]:
         with self.jobs._lock:

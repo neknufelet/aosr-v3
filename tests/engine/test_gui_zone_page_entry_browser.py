@@ -101,7 +101,8 @@ def test_after_opening_a_scheme_the_way_in_is_on_the_first_screen(tmp_path: Path
         page = watched.page
         _first_screen(page)
         if way == "home-row":
-            page.locator(f'#home-schemes li[data-scheme="{SAMPLE}"] button.home-open').click()
+            page.locator("#scheme-menu-button").click()
+            page.locator(f'#home-schemes [data-scheme="{SAMPLE}"] button.home-open').click()
         else:
             open_scheme(page, SAMPLE)
         _opened(page, SAMPLE)
@@ -155,7 +156,7 @@ def test_a_link_arriving_while_the_form_is_busy_does_not_open_the_zone_page(tmp_
             page.route("**/api/results", lambda route: held.__setitem__("results", route))
             page.route("**/api/input-edit", lambda route: held.__setitem__("edit", route))
             page.goto(f"{base}/?zones={SAMPLE}", wait_until="commit")
-            page.wait_for_function("document.querySelectorAll('#scheme-list option').length > 0")
+            page.wait_for_function("document.querySelectorAll('#home-schemes .home-open').length > 0")
             template = page.locator("#save-id").input_value()
             assert template and template not in (SAMPLE, WHOLE)
             page.locator("#furniture-sofa").click()

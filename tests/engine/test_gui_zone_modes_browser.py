@@ -298,12 +298,16 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator("#zone-to-search")).to_have_count(0)
+        expect(page.locator("#zone-to-search")).to_be_visible()
+        expect(page.locator("#zone-to-search")).to_be_disabled()
+        expect(page.locator("#zone-to-search-note")).to_contain_text("這間房貼什麼")
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        expect(page.locator("#zone-to-search")).to_contain_text("1 區由程式最佳化")
+        expect(page.locator("#zone-to-search-note")).to_contain_text("交出黃色的 1 區")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "to-search.png"))
         page.locator("#zone-mode-x0-whole_wall").select_option("fixed")  # 改回固定不換材料、不打伺服器
-        expect(page.locator("#zone-to-search")).to_have_count(0)
+        expect(page.locator("#zone-to-search")).to_be_visible()
+        expect(page.locator("#zone-to-search")).to_be_disabled()
+        expect(page.locator("#zone-to-search-note")).to_contain_text("這間房貼什麼")
         _choose(page, "#zone-mode-x0-whole_wall", "search")
 
         page.route("**/api/designs/room109", lambda route: route.abort() if route.request.method == "PUT"

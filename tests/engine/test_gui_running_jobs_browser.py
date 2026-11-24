@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Page
 
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_save_as
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser, result
 
 
@@ -224,6 +225,7 @@ def test_each_calculation_runs_the_form_on_screen(tmp_path: Path, browser: Brows
             if lx is not None:
                 page.locator("#room-Lx").fill(lx)
             if save_as is not None:
+                open_save_as(page)
                 page.locator("#save-as-id").fill(save_as)
                 page.locator("#save-as").click()
                 page.wait_for_function("name => document.querySelector('#save-id').value === name", arg=save_as)

@@ -11,7 +11,7 @@ from playwright.sync_api import Browser, Dialog, Locator, Page, Request, expect
 
 from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import open_scheme, select_scheme
+from tests.engine._input_page_steps import archive_scheme, open_save_as, open_scheme
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import BUTTON_LOOK_JS, _assert_quiet, _open, _serve, browser, result
@@ -48,32 +48,38 @@ def test_open_form_archive_restore_then_save_keeps_unsaved_changes(
         _confirm(page)
         for run_status, item in cases.items():
             name = item.scheme.scheme_id
+            before = (tmp_path / "schemes" / f"{name}.json").read_bytes()
             open_scheme(page, name)
             expect(page.locator("#save-id")).to_have_value(name)
             page.locator("#room-Lx").fill("6.7")
-            page.get_by_role("button", name="封存這個方案", exact=True).click()
+            archive_scheme(page, name)
             expect(page.locator("#scheme-archive-notice")).to_be_visible()
             _expand_archived(page)
             _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
             expect(page.locator("#scheme-archive-notice")).to_be_hidden()
             expect(page.locator("#room-Lx")).to_have_value("6.7")
             _clear_messages(page)
+            if run_status == "done":
+                original = tmp_path / "schemes" / f"{name}.json"
+                assert original.read_bytes() == before
+                expect(page.locator("#save")).to_be_hidden()
+                expect(page.locator("#save-as-toggle")).to_have_class("primary")
+                open_save_as(page)
+                page.locator("#save-as-id").fill("restored-copy")
+                page.locator("#save-as").click()
+                expect(page.locator("#save-id")).to_have_value("restored-copy")
+                assert json.loads((original.parent / "restored-copy.json").read_text())["scene"]["room_m"]["Lx"] == 6.7
+                assert original.read_bytes() == before
+                continue
             def is_save(request: Request, name: str = name) -> bool:
                 return request.method == "PUT" and request.url.endswith(f"/api/schemes/{name}")
             with page.expect_request(is_save) as saved:
                 page.locator("#save").click()
             assert "if-none-match" not in saved.value.headers, run_status
-            if run_status == "done":
-                expect(page.locator("#messages")).to_contain_text("已經有算好的結果")
-                assert page.request.get(f"{base}/api/schemes/{name}").json()["scheme"] == \
-                    item.scheme.model_dump(mode="json")
-                continue
             expect(page.locator("#messages")).to_have_text("方案已儲存")
             document = page.request.get(f"{base}/api/schemes/{name}").json()["scheme"]
             assert document["scene"]["room_m"]["Lx"] == float("6.7"), run_status
-        # 只有算完那一格撞 409（伺服器照設計回）；JS 自己不准拋錯。
-        assert watched.page_errors == []
-        assert all("409" in error for error in watched.console_errors), watched.console_errors
+        _assert_quiet(watched)
 
 
 def test_restore_other_package_does_not_reconnect_open_form(
@@ -88,10 +94,9 @@ def test_restore_other_package_does_not_reconnect_open_form(
         expect(page.locator("#save-id")).to_have_value(name)
         page.locator("#room-Lx").fill("6.7")
         _confirm(page)
-        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        archive_scheme(page, name)
         expect(page.locator("#scheme-archive-notice")).to_be_visible()
-        select_scheme(page, "other-scheme")
-        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        archive_scheme(page, "other-scheme")
         expect(_package_row(page, "other-scheme")).to_be_attached()
         page.locator("#archived summary").click()
         _package_row(page, "other-scheme").get_by_role("button", name="搬回", exact=True).click()
@@ -120,10 +125,9 @@ def test_archive_confirmation_uses_server_count_for_broken_result(
         messages = _confirm(page)
         for index, (identity_source, (item, _)) in enumerate(cases.items()):
             name = item.scheme.scheme_id
-            select_scheme(page, name)
             _clear_messages(page)
-            page.get_by_role("button", name="封存這個方案", exact=True).click()
-            expect(page.locator(f'#scheme-list option[value="{name}"]')).not_to_be_attached()
+            archive_scheme(page, name)
+            expect(page.locator(f'[data-scheme="{name}"] .home-open b')).not_to_be_attached()
             assert f"{len(expected_results)} 筆結果" in messages[index], identity_source
             expect(page.locator("#messages")).to_contain_text(f"{len(expected_results)} 筆結果")
             _expand_archived(page)
@@ -234,7 +238,7 @@ def test_archive_restore_buttons_confirmation_and_whole_scheme(
         archive.click()
         for run_id in ids:
             expect(_row(page, run_id)).to_have_count(0)
-        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_count(0)
+        expect(page.locator(f'[data-scheme="{name}"] .home-open b')).to_have_count(0)
         assert messages and f"{len(ids)} 筆結果" in messages[0]
         assert "設定檔" in messages[0] and "下拉和清單都看不到" in messages[0]
         expect(page.locator("#scheme-archive-notice")).to_have_text("這份方案已封存，存檔會用這個名字重新建一份")
@@ -249,7 +253,7 @@ def test_archive_restore_buttons_confirmation_and_whole_scheme(
         archived.get_by_role("button", name="搬回", exact=True).click()
         for run_id in ids:
             expect(_row(page, run_id)).to_be_visible()
-        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_text(name)
+        expect(page.locator(f'[data-scheme="{name}"] .home-open b')).to_have_text(name)
         expect(page.locator("#archived")).to_be_hidden()
         expect(page.locator("#messages")).to_contain_text("已搬回")
         _assert_quiet(watched)
@@ -262,13 +266,12 @@ def test_dropdown_archives_scheme_without_results(
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _confirm(page)
-        select_scheme(page, name)
-        page.get_by_role("button", name="封存這個方案", exact=True).click()
-        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_count(0)
+        archive_scheme(page, name)
+        expect(page.locator(f'[data-scheme="{name}"] .home-open b')).to_have_count(0)
         page.locator("#archived summary").click()
         expect(_package_row(page, name).locator("td").nth(2)).to_have_text("0 筆")
         _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
-        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_text(name)
+        expect(page.locator(f'[data-scheme="{name}"] .home-open b')).to_have_text(name)
         _assert_quiet(watched)
 
 
@@ -462,7 +465,7 @@ def test_finished_rerun_of_old_scheme_is_not_attached_to_the_form(tmp_path: Path
             if scheme_text:
                 assert shown == {"link": False, "message": f"「{page.evaluate('scheme.scheme_id')}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單"}
             else:
-                assert shown["link"] is True and "算完了，按下面的「查看結果頁」看結果" in shown["message"]
+                assert shown["link"] is True and "算完了，按頁底的「算好了 ▸ 看結果」看結果" in shown["message"]
         _assert_quiet(watched)
 
 
@@ -547,7 +550,7 @@ def test_archived_open_form_can_save_same_name_as_new_scheme(
         page.locator("#room-Lx").fill(str(result.scheme.scene.room_m.Lx + 0.1))
         page.locator("#save").click()
         expect(page.locator("#messages")).to_have_text("方案已儲存")
-        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_text(name)
+        expect(page.locator(f'[data-scheme="{name}"] .home-open b')).to_have_text(name)
         expect(page.locator("#scheme-archive-notice")).to_be_hidden()
         expect(_row(page, run_id)).to_have_count(0)
         _assert_quiet(watched)

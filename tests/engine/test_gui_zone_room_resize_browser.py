@@ -119,7 +119,7 @@ def _returned(page: Page, name: str = SAMPLE) -> None:
     for axis, value in (("Lx", "5.2"), ("Ly", "5.5"), ("Lz", "3.15")):
         expect(page.locator("#room-" + axis)).to_have_value(value)
     expect(page.locator("#zone-page")).to_be_hidden()
-    expect(page.locator("#open-scheme")).to_be_in_viewport()
+    expect(page.locator("#scheme-menu-button")).to_be_in_viewport()
 
 
 def test_return_from_gradient_opens_saved_input(tmp_path: Path, browser: Browser) -> None:

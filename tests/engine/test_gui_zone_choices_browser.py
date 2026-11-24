@@ -342,8 +342,9 @@ def _open_only_fixed(page: Page, *walls: str) -> None:
               "zones": {wall: {"whole_wall": {"mode": "search", "allowed": ["carpet_on_concrete" if wall == "floor" else PLAIN_PRODUCT]}}
                         for wall in walls}}
     page.route("**/api/designs/room109", lambda route: route.fulfill(json={"design": design, "problems": []}), times=1)
+    before = page.evaluate("zoneDesignGeneration")
     _open_scheme(page, "room109")
-    page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+    page.wait_for_function("before => zoneDesignGeneration > before && !inputBusy && zoneLimitsShown === zoneLimitsGeneration", arg=before)
 
 
 def test_a_fixed_only_list_points_to_the_panel_for_all_three_repairs(tmp_path: Path, browser: Browser) -> None:
@@ -409,8 +410,8 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         # 找按鈕和量顏色寫在同一段裡：伺服器回應晚到會整塊重畫、換一顆新按鈕，先拿到的那顆量到一半就不在頁面上了（顏色變空字串）。
         look = cast(dict[str, float], page.evaluate(f"({CONTRAST})(document.getElementById('zone-to-search'))"))
         assert look["ratio"] >= 4.5 and look["opacity"] == 1, look
-        gap = cast(float, page.evaluate("document.getElementById('zone-to-search-note').getBoundingClientRect().left"
-                                        " - document.getElementById('zone-to-search').getBoundingClientRect().right"))
+        gap = cast(float, page.evaluate("document.getElementById('zone-to-search-note').getBoundingClientRect().top"
+                                        " - document.getElementById('zone-to-search').getBoundingClientRect().bottom"))
         assert gap >= 8, gap
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "send-blocked-by-red-box.png"))
         page.evaluate("sendToSearch()")
@@ -424,7 +425,7 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         page.locator("#elevation-wall-x0").click()
         edit_candidates(page, "x0", "whole_wall", add=("none",))
         expect(page.locator("#zone-to-search")).to_be_enabled()
-        expect(note).to_have_text("會先照畫面儲存，再打開第三階段搜尋頁")
+        expect(note).to_have_text("交出黃色的 2 區；下一頁按「開始搜尋」才開始算")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
