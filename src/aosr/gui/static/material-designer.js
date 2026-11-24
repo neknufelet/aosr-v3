@@ -498,7 +498,7 @@ async function saveConstruction() {
   byId("name").disabled = true;
   try {
     const recovered = await recoverCreate();
-    const unchanged = !isNew && snapshot() === savedSnapshot;
+    const unchanged = unchangedOptimizable();
     const document = unchanged ? structuredClone(openedEntry) : draftDocument();
     if (!unchanged) {
       const problem = missingLayerField() || tuningProblem(document);
