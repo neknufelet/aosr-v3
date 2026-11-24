@@ -203,7 +203,7 @@ def test_delayed_cloud_edit_keeps_controls_and_fields_old_until_preview(browser:
         assert page.request.get(f"{url}/api/schemes/confirmed-cloud").json()["scheme"]["furniture"] == [{
             "furniture_id": "cloud", "kind": "ceiling_cloud", "material": "absorptive_cloud",
             "width_m": 1.35, "depth_m": 1.8, "height_m": 0.05,
-            "placement": {"bottom_center_m": [2.1, 1.9, 2.85], "yaw_deg": 90}}]
+            "placement": {"bottom_center_m": [2.1, 2.0, 2.85], "yaw_deg": 90}}]
         assert watched.page_errors == []
 
 

@@ -467,7 +467,7 @@ def _check_template_load_failure(page: Page) -> None:
     page.wait_for_function("() => document.querySelector('#template-note').textContent.startsWith('沒有載入範本')")
     assert "範本壞了" in str(page.locator("#template-note").text_content())
     assert page.locator("#room-Lx").input_value() == "5.5"
-    assert page.locator("#save-id").input_value() == "reference-room-original"
+    assert page.locator("#save-id").input_value() == "reference-room-centred"
     page.unroute(_template_url)
 
 
@@ -475,7 +475,7 @@ def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
     """原 test_stage_one_template_loads_and_never_overwrites。"""
     raw = json.loads((repo_root() / "blueprint" / "scheme_stage_one_template.json").read_text(encoding="utf-8"))
     walls = raw["scene"]["impedance_pa_s_per_m_by_wall"]
-    assert page.locator("#save-id").input_value() == "reference-room-original"
+    assert page.locator("#save-id").input_value() == "reference-room-centred"
     page.locator("#room-Lx").fill("5.5")
     # 換範本跟「打開」一樣：上一份的量測草稿、結果連結、封存提示都收掉。
     page.locator("#material-kind-ceiling").select_option("measured_impedance")
@@ -520,7 +520,7 @@ def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
     # 換回參考房：整張表單跟開頁時一樣。
     page.locator("#template-list").select_option("reference")
     _load_template(page)
-    assert page.locator("#save-id").input_value() == "reference-room-original"
+    assert page.locator("#save-id").input_value() == "reference-room-centred"
     assert page.locator("#source-model").input_value() == "product_default"
 
 
@@ -723,8 +723,10 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
             role: 'other_seat', importance: 0, direction_relative_to_primary: null});
           renderForm();
         }""")
-        page.locator("#speaker-right-x").fill("3.2")
-        page.locator("#speaker-right-y").fill("1.8")
+        # 右喇叭搬到「左」那個周圍點上，兩個疊成一格（座標照範例現讀，不寫死）。
+        left = page.evaluate("() => scheme.receiver_set.points.find(point => point.receiver_id === 'left').position_m")
+        page.locator("#speaker-right-x").fill(str(left[0]))
+        page.locator("#speaker-right-y").fill(str(left[1]))
         page.locator("#check").click()
         page.wait_for_function("() => document.querySelectorAll('#plan-legend li').length > 0")
         scheme = page.evaluate("() => collect()")

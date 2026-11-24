@@ -125,7 +125,10 @@ def test_scene_error_is_deduplicated_with_structured_path(tmp_path: Path) -> Non
 def test_pair_error_keeps_pair_path(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         document = _example(client)
-        _object_cell(document, "speakers")["left"] = {"x": 3.2, "y": 1.9, "z": 1.2}
+        # 左喇叭放在主位上：瞄準向量變零，錯誤要掛在左聲道那一對底下（主位座標照範例現讀，不寫死）。
+        points = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
+        x, y, z = cast(list[float], next(point for point in points if point["receiver_id"] == "main")["position_m"])
+        _object_cell(document, "speakers")["left"] = {"x": x, "y": y, "z": z}
         problems = client.post("/api/validate", json=document).json()["problems"]
     assert any(path.startswith("pairs.left.") and path.endswith("source_model.aim_m")
                for item in problems for path in item["paths"])
