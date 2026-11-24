@@ -158,7 +158,27 @@ def test_blank_fixed_cavity_saves_untouched_but_blocks_an_edit(tmp_path: Path, b
         assert library.read_bytes() == before
 
 
-@pytest.mark.parametrize(("full", "origin"), [(False, "literature"), (True, "measured")])
+@pytest.mark.parametrize(("origin", "word"), [("literature", "文獻"), ("measured", "實測")])
+def test_reload_then_save_again_keeps_one_citation(tmp_path: Path, browser: Browser, origin: str, word: str) -> None:
+    """未改的文獻／實測構造存成模型後，重新載入設計器再存三輪：原來源註記一直只有一行。"""
+    entry = construction(id="reed_reload", label="葦面重開", provenance=origin, source="重開樣片簿")
+    citation = f"原來源：{word}，出處：重開樣片簿，網址：https://example.org/test"
+    with _designer(tmp_path, browser) as (page, base):
+        assert page.request.put(f"{base}/api/materials/reed_reload", data=entry, headers={"If-None-Match": "*"}).ok
+        for _ in range(3):
+            page.goto(f"{base}/materials/designer?id=reed_reload")
+            expect(page.locator("#name")).to_have_value("葦面重開")
+            expect(page.locator("#source")).to_have_text("模型")
+            _save(page, "參數構造")
+            stored = _stored(page, base)["reed_reload"]
+            assert (stored["provenance"], stored["notes"]) == ("model", [citation, "自編條件"])
+
+
+# 檔裡把預設值明寫出來（原審查的十二份裡有一半是這樣寫的）：存回時不准被省略或改寫。
+_SPELLED_DEFAULTS: dict[str, object] = {"links": [], "notes": [], "max_total_depth_m": None, "preset_members": [], "template_preset": None}
+
+
+@pytest.mark.parametrize(("written", "origin"), [("minimal", "literature"), ("full", "measured"), ("spelled_defaults", "literature")])
 @pytest.mark.parametrize("air", [
     pytest.param({}, id="omitted"),
     pytest.param({"cavity": None}, id="null"),
@@ -166,12 +186,19 @@ def test_blank_fixed_cavity_saves_untouched_but_blocks_an_edit(tmp_path: Path, b
     pytest.param({"cavity": {"adjustable": False, "range_m": [.02613, .02613], "initial_m": .02613}}, id="fixed"),
     pytest.param({"cavity": {"adjustable": True, "range_m": [0, .0847], "initial_m": None}}, id="adjustable_blank"),
     pytest.param({"cavity": {"adjustable": True, "range_m": [0, .0847], "initial_m": .02139}}, id="adjustable"),
+    pytest.param({"cavity": {"adjustable": True, "range_m": [.0013, .0847], "initial_m": .02139}}, id="adjustable_floor"),
 ])
-def test_legacy_tuning_save_is_byte_identical(tmp_path: Path, browser: Browser, full: bool, origin: str, air: dict[str, object]) -> None:
+def test_legacy_tuning_save_is_byte_identical(tmp_path: Path, browser: Browser, written: str, origin: str, air: dict[str, object]) -> None:
+    full = written == "full"
     entry = _tuning_sample(full)
     entry.pop("cavity", None)
     if full:
         entry["suggested_total_depth_m"] = .0701234
+    if written == "spelled_defaults":
+        porous = entry["porous"]
+        assert isinstance(porous, dict)
+        porous["model"] = "komatsu"
+        entry.update(_SPELLED_DEFAULTS, suggested_total_depth_m=None)
     entry.update(air, provenance=origin)
     library = tmp_path / "materials.json"
     library.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "materials": [entry]}, ensure_ascii=False, indent=3) + "\n")
