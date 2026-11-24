@@ -108,7 +108,109 @@ def test_saved_panel_depth_controls(tmp_path: Path, case: str, code: str | None)
         assert jobs.plan(_scheme(document), design, GradientRequest())[0].fixed_surfaces["x0"] == "scheme-material"
 
 
-def test_cli_rejects_capped_fixed_scheme_panel_after_deletion(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def _surface_trial(tmp_path: Path, material: Doc, *, prior: Doc | None, saved_numbers: bool = False,
+                   prior_numbers: bool = False, registered: bool = False) -> tuple[Doc, Doc]:
+    """同一固定區以分區或六個數字存檔，另一面留給搜尋。"""
+    document, panel = _panel_trial()
+    other_wall = {"kind": "assembly", "layers": panel["layers"], "backing": "air"}
+    original = deepcopy(document) | {"scheme_id": "maple_source"}
+    if prior is not None:
+        _zones(original)["x0"][0]["material"] = prior
+        if not prior_numbers:
+            _zones(original)["ceiling"][0]["material"] = other_wall
+        (tmp_path / "schemes").mkdir()
+        source = _scheme(original)
+        assert (source.scene.surface_zones_by_wall is None) == prior_numbers
+        (tmp_path / "schemes" / "maple_source.json").write_text(source.model_dump_json())
+    _zones(document)["x0"][0]["material"] = material
+    if not saved_numbers:
+        _zones(document)["ceiling"][0]["material"] = other_wall
+    scheme = _scheme(document)
+    assert (scheme.scene.surface_zones_by_wall is None) == saved_numbers
+    if registered:
+        item = _ENTRY.validate_python({"kind": "fixed", "id": "maple_face", "label": "楓面試片",
+                                       "provenance": "model", "source": "本題自編", "material": material})
+        (tmp_path / "materials.json").write_text(library.dump_user_library((item,)))
+    design: Doc = {"scheme_id": scheme.scheme_id, "original_scheme_id": "maple_source" if prior is not None else None,
+              "zones": {"x0": {"whole_wall": {"mode": "fixed", "max_depth_m": 0.05}},
+                        "xL": {"whole_wall": {"mode": "search"}}}}
+    return scheme.model_dump(mode="json"), design
+
+
+def _with_record(design: Doc) -> Doc:
+    result = deepcopy(design)
+    zones = cast(dict[str, dict[str, Doc]], result["zones"])
+    zones["x0"]["whole_wall"]["picked_entry"] = "old_maple"
+    return result
+
+
+def _limits(tmp_path: Path, document: Doc, design: Doc) -> Doc:
+    return zone_limits(document, design, depth_targets=_jobs(tmp_path, FakeLauncher()).depth_targets)
+
+
+def test_capped_bare_assembly_requires_readable_catalog(tmp_path: Path) -> None:
+    face: Doc = {"kind": "assembly", "layers": [{"kind": "air", "thickness_m": 0.077}], "backing": "rigid"}
+    document, design = _surface_trial(tmp_path, face, prior=None)
+    (tmp_path / "materials.json").write_text("{")
+    refusal, = cast(list[str], _limits(tmp_path, document, design)["refusals"])
+    assert "材料" in refusal and "讀不進來" in refusal
+
+
+def test_record_cannot_exempt_mounted_layers(tmp_path: Path) -> None:
+    face: Doc = {"kind": "mounted_on_wall", "layers": [{"kind": "air", "thickness_m": 0.081}],
+            "wall": {"kind": "assembly", "layers": [{"kind": "air", "thickness_m": 0.117}], "backing": "rigid"}}
+    document, design = _surface_trial(tmp_path, face, prior=face)
+    old = _limits(tmp_path, document, design)
+    recorded = _limits(tmp_path, document, _with_record(design))
+    assert recorded["refusals"] == old["refusals"]
+    refusal, = cast(list[str], old["refusals"])
+    assert "貼上去總深 0.081 公尺，超過深度上限 0.05 公尺" in refusal
+
+
+def test_record_cannot_exempt_registered_impedance(tmp_path: Path) -> None:
+    face: Doc = {"kind": "constant_impedance", "impedance_pa_s_m": 2137.0}
+    document, design = _surface_trial(tmp_path, face, prior=face, registered=True)
+    old = _limits(tmp_path, document, design)
+    recorded = _limits(tmp_path, document, _with_record(design))
+    assert recorded["refusals"] == old["refusals"]
+    refusal, = cast(list[str], old["refusals"])
+    assert "楓面試片：不可用" in refusal and "有深度上限的區不能用" in refusal
+
+
+@pytest.mark.parametrize("saved_numbers", [False, True], ids=["zoned", "six"])
+@pytest.mark.parametrize("prior_numbers", [False, True], ids=["original_zoned", "original_six"])
+def test_record_keeps_original_impedance(tmp_path: Path, saved_numbers: bool, prior_numbers: bool) -> None:
+    face: Doc = {"kind": "constant_impedance", "impedance_pa_s_m": 2413.0}
+    document, design = _surface_trial(tmp_path, face, prior=face, saved_numbers=saved_numbers, prior_numbers=prior_numbers)
+    assert _limits(tmp_path, document, design)["refusals"] == []
+    assert _limits(tmp_path, document, _with_record(design))["refusals"] == []
+
+
+def test_changed_six_number_impedance_requires_reselection(tmp_path: Path) -> None:
+    face: Doc = {"kind": "constant_impedance", "impedance_pa_s_m": 2413.0}
+    prior = face | {"impedance_pa_s_m": 2413.0000001}
+    document, design = _surface_trial(tmp_path, face, prior=prior, saved_numbers=True, prior_numbers=True)
+    refusal, = cast(list[str], _limits(tmp_path, document, _with_record(design))["refusals"])
+    assert "固定阻抗" in refusal and "重選一筆材料" in refusal
+
+
+@pytest.mark.parametrize(("prior_same", "depth", "words", "level"), [
+    (True, 0.081, "", None), (False, 0.081, "總深 0.081 公尺，超過", "red"),
+    (False, 0.037, "總深 0.037 公尺，放得進", "note"),
+], ids=["original", "deep", "fits"])
+def test_recorded_measured_table_uses_backing_depth(tmp_path: Path, prior_same: bool, depth: float,
+                                                   words: str, level: str | None) -> None:
+    face: Doc = {"kind": "measured_impedance", "source_and_conditions": "自編正入射試片",
+            "points": [{"frequency_hz": f, "real_pa_s_m": 1627.0 + f, "imag_pa_s_m": -173.0} for f in (71.0, 137.0)],
+            "base_assembly": {"kind": "assembly", "layers": [{"kind": "air", "thickness_m": depth}], "backing": "air"}}
+    document, design = _surface_trial(tmp_path, face, prior=face if prior_same else None)
+    result = _limits(tmp_path, document, _with_record(design))
+    assert result["red"] == int(level == "red")
+    if level is not None:
+        assert any(line["level"] == level and words in line["text"] for line in _lines(result, "x0", "whole_wall"))
+
+
+def test_cli_rejects_depth_cap_on_fixed_surface(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from aosr.gradient import cli
 
     document, entry = _panel_trial()
@@ -213,6 +315,8 @@ def test_saved_fixed_depth_through_dispatch(tmp_path: Path, original: str, delet
     limits = zone_limits(scheme.model_dump(mode="json"), design.model_dump(mode="json"), depth_targets=jobs.depth_targets)
     if original == "same":
         assert limits["refusals"] == []
+        picks = cast(Doc, limits.get("picked_constructions", {})).get("x0", {})
+        assert picks == ({} if deleted else {"whole_wall": {"state": "original", "id": "reed_panel", "label": "蘆葦試片"}})
         assert jobs.plan(scheme, design, request)[0].fixed_surfaces["x0"] == "scheme-material"
         preview = jobs.preview(name, request)
         assert cast(Doc, preview["surrogate"])["found"] is True
@@ -222,6 +326,7 @@ def test_saved_fixed_depth_through_dispatch(tmp_path: Path, original: str, delet
     else:
         refusal, = cast(list[str], limits["refusals"])
         assert all(word in refusal for word in ("總深 0.081 公尺", "超過", "0.05 公尺", "這一塊"))
+        assert ("這一區現在的構造總深" if deleted else "蘆葦試片：不可用") in refusal
         with pytest.raises(PlanRefused) as plan:
             jobs.plan(scheme, design, request)
         with pytest.raises(PlanRefused) as preview_error:

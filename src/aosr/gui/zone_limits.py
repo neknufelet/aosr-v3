@@ -7,9 +7,10 @@
   （``validate_surface_partition``）。
 - 深度：一區的上限取「房間預設／這面牆／這一塊」三層裡最小的那一個（一樣小時取範圍最小的那一層），並記是哪一層擋的；
   固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過上限加 ``EDGE_MERGE_TOL`` 就紅（跟搜尋的固定材料候選 ``depth_fit.layers_exceed`` 同一把）。
-  固定阻抗與實測表按物理內容認出材料庫那一筆（:func:`picked_entry`），用搜尋的同一把尺判深度。
+  分區的固定阻抗與實測表若按物理內容認出材料庫那一筆（:func:`picked_entry`），優先用搜尋的同一把尺判深度。
   裸構造要跟原方案同位置比過才知道是不是選上去的；相同就保留原牆，不同才判深度，六個數字代表六面整面固定阻抗，一定與裸構造不同。
-  原牆比不出時，改查設計設定記的選料。記錄失配仍按方案現有構造判上限，量不出深度要重選；從未記選料的裸構造沿用原牆比對。
+  原牆比不出時，改查設計設定記的選料。紀錄失配仍按方案現有構造判上限，量不出深度要重選；能證明未更換的材料照原判。
+  六個數字的固定阻抗與分區存法照同一面牆的阻抗值比對。
   放回原牆另外需要取得材料；六個數字要轉成材料時，放進設計擺位過不了檢查也用不上。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
 - 搜尋區的上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法只在引擎一份 ``fixed_surfaces.target_fit``）：准用的每一組
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -54,10 +56,10 @@ from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
 from aosr.gui.zone_design import DEFAULT_MODE, WHOLE_WALL_KEY, DesignSettings, ZoneDesign, ZoneMode
 from aosr.gui.zone_construction import (
-    Bounds, ComparisonWalls, ConstructionPick, OriginalProblem, OriginalReader, construction_pick, mismatch_words,
+    Bounds, ComparisonMaterial, ComparisonWalls, ConstructionPick, OriginalProblem, OriginalReader, construction_pick, mismatch_words,
 )
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
-from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
 from aosr.materials.library import MeasuredTable
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.physics.zone_fill import FILL_PREFIX, Box, wall_size_m
@@ -261,10 +263,30 @@ def _picked_problems(identifier: str, cap: DepthCap, targets: DepthTargets) -> l
     return [Problem(code="depth_over", level="red", text=text)]
 
 
-def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: DepthCap | None,
+def _saved_depth_problems(material: ComparisonMaterial, cap: DepthCap) -> list[Problem]:
+    fit = fixed_fit(SCHEME_MATERIAL, material, cap.value_m)
+    if fit.material_m is None:
+        reason = ("這一區存的是固定阻抗，從阻抗值看不出加貼厚度" if isinstance(material, (ConstantImpedance, float))
+                  else "看不出這一區現在的材料有多深")
+        return [Problem(code="depth_unknown", level="red",
+                        text=f"{reason}，無法確認是否符合上限 {cap.words()}。請回「這間房貼什麼」重選一筆材料")]
+    depth = f"這一區現在的構造總深 {fit.material_m:g} 公尺"
+    if fit.usable:
+        return [Problem(code="depth_fits", level="note", text=f"{depth}，放得進深度上限 {cap.words()}")]
+    return [Problem(code="depth_over", level="red", text=f"{depth}，超過深度上限 {cap.words()}")]
+
+
+def _depth_problems(material: ComparisonMaterial, mode: ZoneMode, cap: DepthCap | None,
                     targets: Callable[[], DepthTargets | None] = lambda: None, *, construction: ConstructionPick | None = None) -> list[Problem]:
     """固定區照已判的裸構造身分給深度與原因；其他直接取代牆面的材料有上限時才查。"""
-    if mode != "fixed" or (construction is not None and construction.comparison.state == "original"):
+    if mode != "fixed":
+        return []
+    # 有上限的裸構造也要能查材料庫；讀取失敗由 required 記進拒收理由。
+    if cap is not None and isinstance(material, (Assembly, ConstantImpedance, MeasuredImpedance)):
+        loaded = targets()
+        if loaded is not None and (picked := picked_entry(material, loaded)) is not None:
+            return _picked_problems(picked, cap, loaded)
+    if construction is not None and construction.comparison.state == "original":
         return []
     if construction is not None and construction.identifier is not None and not construction.mismatch:
         identifier, comparison = construction.identifier, construction.comparison
@@ -280,23 +302,13 @@ def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: Depth
                         text=f"看不出：跟材料庫「{loaded.label(identifier)}」一樣，總深 {fit.material_m:g} 公尺，{limit}；{comparison.reason}")]
     if cap is None:
         return []
-    depth = None if material is None else added_depth(material)
+    depth = added_depth(material) if isinstance(material, MountedOnWall) else None
     if depth is None:
         if construction is not None:
             # 有選料紀錄或已比出跟原牆不同，直接量方案裡保存的實物。
-            fit = fixed_fit(SCHEME_MATERIAL, material, cap.value_m)
-            if fit.usable:
-                return []
-            if fit.material_m is None:
-                return [Problem(code="depth_unknown", level="red",
-                                text=f"看不出這一區現在的材料有多深，無法確認是否符合上限 {cap.words()}。請回「這間房貼什麼」重選一筆材料")]
-            return [Problem(code="depth_over", level="red",
-                            text=f"這一區現在的構造總深 {fit.material_m:g} 公尺，超過深度上限 {cap.words()}")]
-        loaded = None if material is None else targets()
-        if loaded is not None and material is not None:
-            picked = picked_entry(material, loaded)
-            if picked is not None:
-                return _picked_problems(picked, cap, loaded)
+            return _saved_depth_problems(material, cap)
+        if isinstance(material, float):
+            return [Problem(code="depth_not_comparable", level="note", text=f"這面牆只記了固定阻抗值，沒有加貼厚度可與上限 {cap.words()} 比對")]
         return [Problem(code="depth_not_comparable", level="note",
                         text=f"這一區的材料直接取代牆面、看不出貼了多深，上限 {cap.words()} 比不了")]
     if depth > cap.value_m + EDGE_MERGE_TOL:
@@ -471,6 +483,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
         return {"status": "room", "message": str(exc), "zones": {}, "walls": {}, "caps": {}, "red": 0, "refusals": []}
     scene = cast(Mapping[str, object], document.get("scene") or {})
     by_wall = scene.get("surface_zones_by_wall")
+    impedances = scene.get("impedance_pa_s_per_m_by_wall") if by_wall is None else None
     walls: dict[str, list[Problem]] = {wall: [] for wall in WALLS}
     zones: dict[str, dict[str, list[Problem]]] = {}
     caps: dict[str, dict[str, dict[str, object]]] = {}
@@ -482,6 +495,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
         if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
             walls[wall].append(Problem(code="unreadable", level="red", text="這一面的分區讀不出來；請重新打開方案"))
             continue
+        number = impedances.get(wall) if isinstance(impedances, Mapping) else None
+        folded = float(number) if isinstance(number, (int, float)) and not isinstance(number, bool) and 0 < number <= sys.float_info.max else None
         found: dict[str, list[Problem]] = {}
         _place_problems(room, wall, entries, found, walls)
         for entry in entries:
@@ -494,9 +509,10 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             if cap is not None and mode != "keep_original":
                 caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words()}
             material = _material(entry.get("material"))
+            current = folded if folded is not None else material
             lines = found.setdefault(key, [])
-            construction = catalog.construction(room, wall, key, entry, material, setting, lines)
-            lines.extend(_depth_problems(material, mode, cap, catalog.required, construction=construction))
+            construction = catalog.construction(room, wall, key, entry, current, setting, lines)
+            lines.extend(_depth_problems(current, mode, cap, catalog.required, construction=construction))
             if mode == "search":
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
                 lines.extend(problems)
@@ -559,7 +575,7 @@ class _ZoneCatalog:
         return {} if targets is None else {key: value for key, value in targets.fixed.items() if key in targets.standalone_constructions}
 
     def construction(self, room: Room, wall: str, key: str, entry: Mapping[str, object],
-                     material: SurfaceMaterial | None, setting: ZoneDesign | None,
+                     material: ComparisonMaterial, setting: ZoneDesign | None,
                      lines: list[Problem]) -> ConstructionPick | None:
         recorded = setting.picked_entry if setting else None
         if not isinstance(material, Assembly) and recorded is None:

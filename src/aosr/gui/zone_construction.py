@@ -16,7 +16,7 @@ from aosr.gui.labels import WALLS
 from aosr.gui.problem_text import plain_problems
 from aosr.gui.zone_design import NAME
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material
-from aosr.materials.construction_models import Assembly, SurfaceMaterial
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall, SurfaceMaterial
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeProblem
 
@@ -32,12 +32,14 @@ class OriginalProblem:
 
 @dataclass(frozen=True)
 class ImpedanceWalls:
-    """原檔是六個阻抗數字；辨認裸構造只需要核對房間尺寸。"""
+    """原檔是六個阻抗數字；比較時照牆名取值，不另建物理材料。"""
 
     room_m: Room
+    by_wall: Mapping[str, float]
 
 
 ComparisonWalls = OriginalWalls | ImpedanceWalls | OriginalProblem
+ComparisonMaterial = SurfaceMaterial | float | None
 OriginalReader = Callable[[str], ComparisonWalls]
 _Walls = TypeVar("_Walls", OriginalWalls, OriginalWalls | ImpedanceWalls)
 
@@ -48,7 +50,7 @@ def comparison_walls(scheme: Scheme) -> OriginalWalls | ImpedanceWalls:
         numbers = scheme.scene.impedance_pa_s_per_m_by_wall or {}
         if numbers.keys() != WALLS.keys() or not all(math.isfinite(value) and value > 0 for value in numbers.values()):
             raise BaselineRefused(f"原方案「{scheme.scheme_id}」讀不進來：六面牆各要填一個大於零的有限阻抗")
-        return ImpedanceWalls(scheme.scene.room_m)
+        return ImpedanceWalls(scheme.scene.room_m, numbers)
     return OriginalWalls(scheme.scheme_id, scheme.scene.room_m, zones)
 
 
@@ -81,7 +83,7 @@ def read_original(data_dir: Path, name: str, lock: AbstractContextManager[object
         return OriginalProblem(str(exc), error=str(exc).partition("\n")[0])
 
 
-def matching_construction(material: SurfaceMaterial | None, standalone: Mapping[str, object]) -> str | None:
+def matching_construction(material: ComparisonMaterial, standalone: Mapping[str, object]) -> str | None:
     """只比材料庫裡剛背、空氣背的構造，含背後逐欄相同。重複的取材料庫順序第一筆。"""
     if isinstance(material, Assembly):
         return next((identifier for identifier, surface in standalone.items() if material == surface), None)
@@ -95,9 +97,14 @@ class ConstructionComparison:
     reason: str = ""
 
 
+def _comparison_value(material: ComparisonMaterial) -> ComparisonMaterial:
+    """固定阻抗以同一個數值相比，其餘材料沿用整份相等。"""
+    return material.impedance_pa_s_m if isinstance(material, ConstantImpedance) else material
+
+
 def different_from_original(original: ComparisonWalls | None, room: Room, wall: str, key: str,
-                            box: Bounds | None, material: SurfaceMaterial | None) -> ConstructionComparison:
-    """比較裸構造與蓋住這一區的原牆。能比時帶回原牆材料，無法比較時帶回原因。"""
+                            box: Bounds | None, material: ComparisonMaterial) -> ConstructionComparison:
+    """比較方案與蓋住這一區的原牆；原檔有分區時帶回原牆材料。"""
     if original is None:
         return ConstructionComparison("unknown", reason="沒指原方案")
     if isinstance(original, OriginalProblem):
@@ -105,14 +112,14 @@ def different_from_original(original: ComparisonWalls | None, room: Room, wall: 
     if original.room_m != room:
         return ConstructionComparison("unknown", reason="原方案的房間尺寸跟設計不同")
     if isinstance(original, ImpedanceWalls):
-        return ConstructionComparison("picked")
+        return ConstructionComparison("original" if original.by_wall[wall] == _comparison_value(material) else "picked")
     if box is None:
         return ConstructionComparison("unknown", reason="這一區的座標讀不出來")
     try:
         base = original_material(original, wall, key, box)
     except BaselineRefused as exc:
         return ConstructionComparison("unknown", reason=str(exc))
-    return ConstructionComparison("original" if base == material else "picked", base)
+    return ConstructionComparison("original" if _comparison_value(base) == _comparison_value(material) else "picked", base)
 
 
 @dataclass(frozen=True)
@@ -122,12 +129,15 @@ class ConstructionPick:
     mismatch: str = ""
 
 
-def construction_pick(material: SurfaceMaterial | None, standalone: Mapping[str, object], recorded: str | None,
+def construction_pick(material: ComparisonMaterial, standalone: Mapping[str, object], recorded: str | None,
                       original: Callable[[], ComparisonWalls | None], room: Room, wall: str, key: str,
                       box: Bounds | None) -> ConstructionPick | None:
     """先比原牆。舊檔沒有選料代號也能據此認出更換過的裸構造。"""
     if recorded is None and not isinstance(material, Assembly):
         return None
+    if isinstance(material, MountedOnWall):
+        # 舊代號記的是裸構造；現有加貼層一定要量，不需讀原牆。
+        return ConstructionPick(None, ConstructionComparison("picked"), recorded or "")
     identifier = matching_construction(material, standalone)
     comparison = different_from_original(original(), room, wall, key, box, material)
     if comparison.state == "unknown" and recorded is None and identifier is None:
