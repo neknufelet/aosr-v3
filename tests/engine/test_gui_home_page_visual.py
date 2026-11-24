@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
@@ -71,22 +71,22 @@ LABELS_OUTSIDE_JS = """svg => {
 }"""
 
 
-def test_plan_panels_are_a_two_by_two_grid_with_readable_labels(tmp_path: Path, browser: Browser) -> None:
+def test_plan_views_show_one_drawing_at_a_time_with_readable_labels(tmp_path: Path, browser: Browser) -> None:
+    """#1265 起四張圖疊在第 1 段左邊同一格、上方切換一次露一張（原本兩欄兩列）：四張一樣寬、疊在同一處；
+    字級、字在畫框裡、外框置中塞滿這幾條照舊逐張考（切到那一張再量）。"""
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#zoom-xz circle").first.wait_for()
-        plan, side, zoom_plan, zoom_side = (_box(page, name) for name in PANELS)
-        # 兩欄兩列：上排整間房、下排聆聽區放大；同一欄左緣對齊、同一列上緣對齊，四格一樣寬、同列一樣高。
-        assert _same(plan["x"], zoom_plan["x"]) and _same(side["x"], zoom_side["x"]) and plan["x"] < side["x"]
-        assert _same(plan["y"], side["y"]) and _same(zoom_plan["y"], zoom_side["y"]) and plan["y"] < zoom_plan["y"]
-        assert all(_same(box["width"], plan["width"]) for box in (side, zoom_plan, zoom_side))
-        assert _same(plan["height"], side["height"]) and _same(zoom_plan["height"], zoom_side["height"])
-        # 兩欄合起來佔滿整個區塊的內寬（沒有落單的第四格旁邊空一塊）。
-        section = page.locator("#plan-drawings").bounding_box()
-        assert section is not None
-        assert _same(side["x"] + side["width"], section["x"] + section["width"])
+        page.locator("#zoom-xz circle").first.wait_for(state="attached")
+        first = _box(page, PANELS[0])
         every_size: list[float] = []
         for name in PANELS:
+            page.locator(f"#view-{name[1:]}").click()
+            expect(page.locator(name)).to_be_visible()
+            for other in PANELS:
+                if other != name:
+                    expect(page.locator(other)).to_be_hidden()
+            box = _box(page, name)
+            assert _same(box["x"], first["x"]) and _same(box["width"], first["width"]), name
             sizes = cast(list[float], page.locator(name).evaluate(LABEL_PX_JS))
             assert sizes, name
             every_size += sizes
@@ -96,11 +96,10 @@ def test_plan_panels_are_a_two_by_two_grid_with_readable_labels(tmp_path: Path, 
             assert page.locator(name).evaluate(LABELS_OUTSIDE_JS) == [], name
             # 房間（或聆聽區）的外框置中、塞滿格子：寬或高至少佔四分之三，左右留白一樣。
             frame = page.locator(f"{name} rect").first.bounding_box()
-            panel = _box(page, name)
             assert frame is not None
-            assert max(frame["width"] / panel["width"], frame["height"] / panel["height"]) >= 0.75, name
-            left_gap = frame["x"] - panel["x"]
-            right_gap = panel["x"] + panel["width"] - (frame["x"] + frame["width"])
+            assert max(frame["width"] / box["width"], frame["height"] / box["height"]) >= 0.75, name
+            left_gap = frame["x"] - box["x"]
+            right_gap = box["x"] + box["width"] - (frame["x"] + frame["width"])
             assert abs(left_gap - right_gap) < 2, (name, left_gap, right_gap)
         # 四張圖的畫框大小不同，字照樣一樣大（字級跟著畫框換算），不會放大圖的字特別大。
         assert max(every_size) - min(every_size) < 0.5, every_size

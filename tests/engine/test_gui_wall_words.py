@@ -212,17 +212,26 @@ def test_a_click_on_a_wall_label_while_a_rename_waits_lands_in_its_box(tmp_path:
 
 def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_path: Path, browser: Browser) -> None:
     # 複查實測：600 寬時換名讓牆名變長、折行，下面的格子往下移；在按下與放開之間重畫，那一下就按到別處。
+    # #1265 起散射那一格搬到第 1 段「進階」摺疊（在牆面表單上面，換名擠不到它）：改按牆面表單底下、換名那兩區之外的
+    # 「檢查」。立面圖裡的鈕不行：焦點一進立面圖那一區換名本來就先不換，考不到「按著先不換」這一道。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=600) as watched:
         page = watched.page
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
-        reveal(page, "#use-scattering")  # #1265 起收在第 1 段「進階」摺疊裡，換名之前先打開
+        check = page.locator("#check")
+        assert check.evaluate("""node => !node.closest('#walls, #elevation-panel')
+          && Boolean(document.getElementById('walls').compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)""")
         held = _late_rename(page)
         page.locator("#wall-floor").focus()
         _arrive(page, held)
-        page.locator("#use-scattering").click()
-        expect(page.locator("#use-scattering")).to_be_checked()
+        walls, button = page.locator("#walls").bounding_box(), check.bounding_box()
+        assert walls is not None and button is not None and button["y"] >= walls["y"] + walls["height"]
+        assert page.locator("#messages").inner_text() != "寬 Ly（公尺）：空著沒填"
+        check.click()
+        expect(page.locator("#messages")).to_have_text("寬 Ly（公尺）：空著沒填")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        # 寬 Ly 空著，檢查照設計回 422：主控台只准剛好那一條，頁面不准有錯。
+        assert watched.page_errors == []
+        assert watched.console_errors == ["Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"]
 
 
 def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases_it(tmp_path: Path,

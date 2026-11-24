@@ -16,12 +16,13 @@ from playwright.sync_api import Browser, Page, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
-from tests.engine import _furniture_cases as cases
-from tests.engine._input_page_steps import open_fact_editor, open_fold, open_scheme
+from tests.engine import _furniture_cases as cases, _speaker_setup_cases as speaker_cases
+from tests.engine._input_page_steps import open_fact_editor, open_fold, open_scheme, show_view
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser as browser, result as result
 from tests.engine.test_gui_home_page_visual import LABEL_PX_JS
 from tests.engine.test_gui_input_setup_browser import _filled
+from tests.engine.test_gui_speaker_setup_browser import MOUNTS
 from tests.engine.test_scheme_pipeline import _run_control
 
 ROOM = "room-facts"
@@ -132,6 +133,51 @@ def test_each_view_button_shows_only_its_drawing(tmp_path: Path, browser: Browse
         _assert_quiet(watched)
 
 
+SIZE_LABELS = {"Lx": "長 Lx（公尺）", "Ly": "寬 Ly（公尺）", "Lz": "高 Lz（公尺）"}
+
+
+def _on_plan_edges(page: Page) -> None:
+    drawing = _box(page, "#plan-xy")
+    across, along, height = (_box(page, f"label:has(#room-{key})") for key in ("Ly", "Lx", "Lz"))
+    bottom = drawing["y"] + drawing["height"]
+    assert across["x"] + across["width"] <= drawing["x"] and drawing["y"] < across["y"] < bottom
+    assert along["y"] >= bottom and drawing["x"] < along["x"] < drawing["x"] + drawing["width"]
+    assert height["y"] >= bottom and height["x"] > along["x"] + along["width"]
+
+
+def test_size_boxes_move_under_the_other_drawings_and_back_to_the_plan_edges(tmp_path: Path, browser: Browser) -> None:
+    """側面、聆聽區平面放大、聆聽區側面放大：同一組長寬高三格（同一批元素，不另做一份）排成圖底下一列，
+    看得到、不壓在圖上、各只有一個；改了照樣連動。切回平面圖，三格回到圖邊。"""
+    _write(tmp_path, _room(ROOM))
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _opened(page, ROOM)
+        _on_plan_edges(page)
+        boxes = {key: page.locator(f"#room-{key}").element_handle() for key in SIZE_LABELS}
+        for view in VIEWS[1:]:
+            show_view(page, view)
+            drawing = _box(page, f"#{view}")
+            bottom = drawing["y"] + drawing["height"]
+            rows = []
+            for key, word in SIZE_LABELS.items():
+                expect(page.locator(f"#room-{key}")).to_have_count(1)
+                expect(page.get_by_label(word)).to_have_count(1)
+                expect(page.locator(f"#room-{key}")).to_be_visible()
+                assert boxes[key].evaluate(f"node => node === document.getElementById('room-{key}')"), (view, key)
+                label = _box(page, f"label:has(#room-{key})")
+                # 在圖底下、橫向不超出圖的左右兩邊：不壓在圖上。
+                assert label["y"] >= bottom, (view, key, label, drawing)
+                assert drawing["x"] - 1 <= label["x"] and label["x"] + label["width"] <= drawing["x"] + drawing["width"] + 1, (view, key)
+                rows.append(label["y"])
+            assert max(rows) - min(rows) < 2, (view, rows)
+        page.locator("#room-Lx").fill("7.5")
+        page.locator("#room-Lx").blur()
+        expect(page.locator("#fact-room-text")).to_have_text("寬 6（Ly）× 深 7.5（Lx）× 高 3.2 公尺")
+        show_view(page, "plan-xy")
+        _on_plan_edges(page)
+        _assert_quiet(watched)
+
+
 def test_card_lines_follow_the_coordinates_and_the_posture(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, _room(ROOM))
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
@@ -156,7 +202,7 @@ def test_card_lines_follow_the_coordinates_and_the_posture(tmp_path: Path, brows
         expect(page.locator("#shortcut-listening")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#fact-furniture-text")).to_have_text("沙發、茶几")
         expect(page.locator("#fact-primary-text")).to_contain_text("耳朵高 1.05 公尺")
-        expect(page.locator("#furniture-notice")).to_contain_text("這份方案有 2 件家具：按「改家具」修改")
+        expect(page.locator("#furniture-editor #furniture-notice")).to_contain_text("這份方案有 2 件家具：按「改家具」修改")
         page.locator("#shortcut-working").click()
         expect(page.locator("#shortcut-working")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#shortcut-listening")).to_have_attribute("aria-pressed", "false")
@@ -189,14 +235,54 @@ def test_speaker_setup_line_moves_from_none_to_the_set_kind(tmp_path: Path, brow
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         _opened(page, ROOM)
-        expect(page.locator("#speaker-setup-notice")).to_be_hidden()
+        expect(page.locator("#fact-speakers-kind")).to_have_text("沒設喇叭類型與擺法")
+        # 長提示住在「改喇叭與擺法」打開的那一塊裡：先打開再看它藏著（收著時看不到不算數）。
         open_fact_editor(page, "edit-speakers")
+        expect(page.locator("#speaker-setup-notice")).to_be_hidden()
         page.locator("#use-speaker-setup").click()
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && scheme.speaker_setup")
-        expect(page.locator("#fact-speakers-kind")).to_be_hidden()
-        expect(page.locator("#speaker-setup-notice")).to_be_visible()
-        expect(page.locator("#speaker-setup-notice")).to_contain_text("按「改喇叭與擺法」修改")
+        expect(page.locator("#fact-speakers-kind")).to_be_visible()
+        expect(page.locator("#fact-speakers-kind")).to_have_text(MOUNTS[0][2])
+        expect(page.locator("#speaker-editor #speaker-setup-notice")).to_be_visible()
+        expect(page.locator("#speaker-setup-notice")).to_have_text(f"這份方案設了喇叭：{MOUNTS[0][2]}；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
+        expect(page.locator("#fact-speakers .v #speaker-setup-notice")).to_have_count(0)
         _assert_quiet(watched)
+
+
+def test_speaker_line_is_the_short_name_for_each_mount_and_the_long_notice_waits_in_the_editor(
+        tmp_path: Path, browser: Browser) -> None:
+    """右卡喇叭那一行只寫短句（名字跟長提示同一份名稱表）；長提示只在「改喇叭與擺法」那一塊、收著就看不到。"""
+    for mount, representative, title in MOUNTS:
+        document = speaker_cases.document(mount)
+        cast(Doc, document["speaker_setup"])["representative"] = representative
+        _write(tmp_path, document | {"scheme_id": f"mount-{mount}"})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _ready(page)
+        for mount, _, title in MOUNTS:
+            _opened(page, f"mount-{mount}")
+            expect(page.locator("#fact-speakers-kind")).to_have_text(title)
+            expect(page.locator("#speaker-setup-notice")).to_be_hidden()
+            open_fact_editor(page, "edit-speakers")
+            expect(page.locator("#speaker-setup-notice")).to_have_text(f"這份方案設了喇叭：{title}；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
+            page.locator("#edit-speakers").click()
+            expect(page.locator("#speaker-editor")).to_be_hidden()
+        _assert_quiet(watched)
+
+
+def test_speaker_line_falls_back_to_one_phrase_when_the_names_did_not_load(tmp_path: Path, browser: Browser) -> None:
+    """名稱表載不到：短句整句換成備用句，不逐格代入英文代號（同長提示那一句的做法）。"""
+    _write(tmp_path, speaker_cases.document() | {"scheme_id": ROOM})
+    with _serve(tmp_path) as base, _open(browser, "about:blank", viewport_width=1440) as watched:
+        page = watched.page
+        page.route("**/api/labels", lambda route: route.fulfill(
+            status=500, content_type="application/json", body='{"error": "名稱表壞了"}'))
+        page.goto(base, wait_until="networkidle")
+        _opened(page, ROOM)
+        expect(page.locator("#fact-speakers-kind")).to_have_text("設了喇叭類型與擺法（中文名沒載到）")
+        # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。
+        assert all("500" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
 
 
 def test_total_depth_limit_saves_reopens_and_is_what_the_zone_page_reads(tmp_path: Path, browser: Browser) -> None:
@@ -328,7 +414,8 @@ def test_both_folds_start_closed_and_what_is_changed_inside_saves(tmp_path: Path
 
 
 def test_section_one_fits_in_700_pixels_at_1440_by_900(tmp_path: Path, browser: Browser) -> None:
-    """開頁預設（摺疊收著）不超過 700 像素；示意圖那個狀態（沙發、茶几、設了喇叭類型，小字多兩段）也一樣。"""
+    """開頁預設（摺疊收著）不超過 700 像素；示意圖那個狀態（沙發、茶几、設了喇叭類型）也一樣。
+    那個狀態右卡只有短句，兩段長提示收在「改喇叭與擺法」「改家具」各自那一塊裡（收著）。"""
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         page.set_viewport_size({"width": 1440, "height": 900})
@@ -340,8 +427,10 @@ def test_section_one_fits_in_700_pixels_at_1440_by_900(tmp_path: Path, browser: 
         page.locator("#use-speaker-setup").click()
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && scheme.speaker_setup")
         page.locator("#edit-speakers").click()
-        expect(page.locator("#speaker-setup-notice")).to_be_visible()
-        expect(page.locator("#furniture-notice")).to_be_visible()
+        expect(page.locator("#fact-speakers-kind")).to_have_text(MOUNTS[0][2])
+        expect(page.locator("#fact-furniture-text")).to_have_text("沙發、茶几")
+        expect(page.locator("#speaker-setup-notice")).to_be_hidden()
+        expect(page.locator("#furniture-notice")).to_be_hidden()
         assert _box(page, "#scheme-section")["height"] <= 700
         _assert_quiet(watched)
 
@@ -405,6 +494,29 @@ def test_result_line_names_when_this_scheme_was_computed(tmp_path: Path, browser
         _assert_quiet(watched)
 
 
+def test_result_line_says_the_result_was_computed_before_an_edit(tmp_path: Path, browser: Browser,
+                                                                 result: SchemeResult) -> None:
+    """算過的那一份改了一格：頂條寫「有改動還沒存」的同一份狀態，結果那一行的字後面註明是修改前的設定算的。"""
+    room = _computed(result)
+    _saved(tmp_path, room)
+    _bundle(tmp_path, room, RUN)
+    stamp = datetime(2026, 11, 20, 14, 5).timestamp()
+    os.utime(tmp_path / "results" / f"{RUN}.json", (stamp, stamp))
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _ready(page)
+        _opened(page, ROOM)
+        expect(page.locator("#room-result-text")).to_have_text("2026-11-20 14:05")
+        height = page.locator("#room-Lz")
+        assert height.input_value() != "3.3"
+        height.fill("3.3")
+        expect(page.locator("#save-state")).to_contain_text("有改動還沒存")
+        expect(page.locator("#room-result-title")).to_have_text("算好的結果")
+        expect(page.locator("#room-result-text")).to_have_text("2026-11-20 14:05（修改前的設定算的）")
+        expect(page.locator("#room-result-link")).to_have_attribute("href", f"/results/{RUN}")
+        _assert_quiet(watched)
+
+
 def test_result_line_follows_a_running_then_finished_calculation(tmp_path: Path, browser: Browser,
                                                                  result: SchemeResult) -> None:
     room = _computed(result)
@@ -420,6 +532,11 @@ def test_result_line_follows_a_running_then_finished_calculation(tmp_path: Path,
         (tmp_path / "release").write_text("", encoding="utf-8")
         expect(page.locator("#room-result-title")).to_have_text("算好的結果", timeout=20_000)
         expect(page.locator("#room-result-link")).to_be_visible()
+        expect(page.locator("#room-result-text")).not_to_contain_text("修改前的設定算的")
+        # 算完再改一格：頁底那句「設定已修改，這份結果是修改前算的」亮起來，結果那一行也註明（同一份狀態）。
+        page.locator("#room-Lz").fill("3.3")
+        expect(page.locator("#result-stale")).to_be_visible()
+        expect(page.locator("#room-result-text")).to_contain_text("（修改前的設定算的）")
         _assert_quiet(watched)
 
 

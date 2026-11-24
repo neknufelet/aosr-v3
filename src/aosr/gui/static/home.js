@@ -242,8 +242,9 @@ function renderInputBars() {
     done ? "這一份現在鎖住，留著比較。要再改就另存新名字。" : locked ? "沒改過可以直接再算。要修改這份方案，請另存新名字。" :
     "不用先按儲存：按這兩顆會自動先存。算過的方案會留著比較。";
   if (scheme) renderSearchAction();
-  // 第 1 段右卡（room_facts.js）：結果那一行跟這一條同一份狀態與原因；總厚度上限、改造前跟著設計設定換字。
-  renderRoomResult(running, failed, reason);
+  // 第 1 段右卡（room_facts.js）：結果那一行跟這一條同一份狀態與原因（有沒有改過也是頂條那一份 dirty）；
+  // 總厚度上限、改造前跟著設計設定換字。
+  renderRoomResult(running, failed, reason, dirty);
   renderRoomEditors();
 }
 // 沒算完的原因：計算程式自己寫的那一句，沒有就拿出錯紀錄最後一行（英文的加一句是誰說的），都沒有照狀態講。

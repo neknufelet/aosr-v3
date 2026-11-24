@@ -74,7 +74,7 @@
         <div class="card room-plan">
           <div class="viewrow"><span id="plan-views-title">看哪一張圖</span><span class="seg" id="plan-views" role="group" aria-labelledby="plan-views-title">
             <button type="button" id="view-plan-xy" data-view="plan-xy" aria-pressed="true">平面</button><button type="button" id="view-plan-xz" data-view="plan-xz" aria-pressed="false">側面</button><button type="button" id="view-zoom-xy" data-view="zoom-xy" aria-pressed="false">聆聽區平面放大</button><button type="button" id="view-zoom-xz" data-view="zoom-xz" aria-pressed="false">聆聽區側面放大</button></span></div>
-          <div class="plan-frame">
+          <div class="plan-frame" id="plan-frame" data-view="plan-xy">
             <div id="room-fields" class="room-dims"></div>
             <div class="drawings" id="plan-drawings">
               <div class="drawing shown" data-view="plan-xy"><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
@@ -93,9 +93,10 @@
             <div class="fact-editor" id="depth-editor" hidden></div></div>
           <div class="fact" id="fact-speakers"><span class="k">喇叭</span>
             <div class="v"><span id="fact-speakers-text"></span><small id="fact-speakers-kind"></small>
-              <p id="speaker-setup-notice" class="notice fact-note" hidden></p><p id="stand-height-hint" class="notice fact-note" aria-live="polite"></p></div>
+              <p id="stand-height-hint" class="notice fact-note" aria-live="polite"></p></div>
             <button type="button" class="mini" id="edit-speakers" aria-expanded="false" aria-controls="speaker-editor">改喇叭與擺法</button>
             <div class="fact-editor" id="speaker-editor" hidden>
+              <p id="speaker-setup-notice" class="notice fact-note" hidden></p>
               <label><input id="use-speaker-setup" type="checkbox">設定喇叭箱體與擺法</label>
               <div id="speaker-setup-fields" hidden>
                 <div class="fields"><label>喇叭類型<select id="speaker-kind"></select></label>
@@ -109,9 +110,10 @@
             <div class="v"><span id="fact-primary-text"></span><small>工作／聆聽姿勢切換會一起改主位與周圍點的高度和家具；喇叭高度與天雲不動</small></div>
             <span class="seg shortcut-actions" role="group" aria-label="姿勢"><button type="button" id="shortcut-working" aria-pressed="false">工作姿勢</button><button type="button" id="shortcut-listening" aria-pressed="false">聆聽姿勢</button></span></div>
           <div class="fact" id="fact-furniture"><span class="k">家具</span>
-            <div class="v"><span id="fact-furniture-text"></span><p id="furniture-notice" class="notice fact-note" hidden></p></div>
+            <div class="v"><span id="fact-furniture-text"></span></div>
             <button type="button" class="mini" id="edit-furniture" aria-expanded="false" aria-controls="furniture-editor">改家具</button>
             <div class="fact-editor" id="furniture-editor" hidden>
+              <p id="furniture-notice" class="notice fact-note" hidden></p>
               <div class="fields">
                 <label><input id="furniture-sofa" type="checkbox">沙發</label>
                 <label>前方桌面<select id="furniture-table-kind"><option value="none">無</option><option value="coffee_table">茶几</option><option value="desk">書桌</option></select></label>

@@ -23,11 +23,13 @@ function toggleEditor(button) {
   first?.focus({preventScroll: true});
   area.scrollIntoView({block: "nearest"});
 }
+// 圖框記著現在露哪一張：長寬高三格只在平面圖貼圖邊，其他三張排到圖底下一列（同一組格子，換位置全交給 home.css）。
 function showView(name) {
   for (const button of document.querySelectorAll("#plan-views [data-view]"))
     button.setAttribute("aria-pressed", String(button.dataset.view === name));
   for (const drawing of document.querySelectorAll("#plan-drawings .drawing"))
     drawing.classList.toggle("shown", drawing.dataset.view === name);
+  byId("plan-frame").dataset.view = name;
 }
 
 // 房間、喇叭、主位、家具四行與姿勢：伺服器那一份（每次預覽回來都重畫）。
@@ -38,15 +40,17 @@ function renderRoomFacts() {
     byId(`fact-${key}-text`).textContent = facts[key] ?? NOT_FILLED;
   for (const name of Object.keys(inputDefaults?.shortcuts || {}))
     byId(`shortcut-${name}`).setAttribute("aria-pressed", String(facts.posture === name));
-  const setup = scheme?.speaker_setup;
-  byId("fact-speakers-kind").hidden = Boolean(setup);
-  byId("fact-speakers-kind").textContent = setup ? "" : "沒設喇叭類型與擺法";
+  // 喇叭那一行的小字只寫短句；長提示（怎麼改、圖怎麼畫）在「改喇叭與擺法」打開的那一塊裡。名字跟那句同一份名稱表。
+  const setup = scheme?.speaker_setup, names = setup ? speakerSetupNames(setup) : null;
+  byId("fact-speakers-kind").textContent = !setup ? "沒設喇叭類型與擺法"
+    : names ? `${names[0]}、放${names[1]}（${names[2]}）` : "設了喇叭類型與擺法（中文名沒載到）";
   const around = (scheme?.receiver_set?.points || []).filter(point => point.role === "surrounding").length;
   byId("coordinates-summary").textContent = `座標數字（喇叭、主位，和主位周圍一起算聲音的 ${around} 個點；x、y、z）`;
 }
 
 // 結果那一行：正在算＞沒算完（兩句都跟頁底條同一份）＞算好的結果（清單裡這一份最新的那一列）＞還沒算過。
-function renderRoomResult(running, failed, reason) {
+// 算好之後又改了（edited：頂條「有改動還沒存」那一份），字後面註明那份結果是修改前的設定算的。
+function renderRoomResult(running, failed, reason, edited) {
   const row = byId("room-result"), title = byId("room-result-title"), text = byId("room-result-text"), link = byId("room-result-link");
   const finished = openedId ? (resultRows || []).find(item => item.scheme_id === openedId && ["done", "none"].includes(item.run_status)) : undefined;
   const state = running ? "running" : failed ? "failed" : finished ? "done" : "never";
@@ -60,7 +64,8 @@ function renderRoomResult(running, failed, reason) {
     text.textContent = `${reason}；看頁底的出錯紀錄`;
   } else if (state === "done") {
     title.textContent = "算好的結果";
-    text.textContent = finished.scheme_text ? `${finished.finished_text}，${finished.scheme_text}` : finished.finished_text;
+    text.textContent = (finished.scheme_text ? `${finished.finished_text}，${finished.scheme_text}` : finished.finished_text) +
+      (edited ? "（修改前的設定算的）" : "");
     link.href = finished.result_url;
   } else {
     title.textContent = "還沒算過";

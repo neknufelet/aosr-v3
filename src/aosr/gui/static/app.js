@@ -136,20 +136,26 @@ function renderForm() {
   renderInputPreview();
   action(updateMultiples);
 }
+// 喇叭類型、擺法、代表模型與否的中文名（名稱表那一份）；表上缺任何一個就回 null，由呼叫的人整句換備用句。
+// 「改喇叭與擺法」裡那句長提示與右卡喇叭那一行的短句（room_facts.js）共用這一份，不各查各的。
+function speakerSetupNames(setup) {
+  const names = labels.speaker_setup ?? {};
+  const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
+  return keys.every((key) => Object.hasOwn(names, key)) ? keys.map((key) => names[key]) : null;
+}
 function renderSpeakerSetupNotice() {
   const setup = scheme.speaker_setup;
   const notice = $("speaker-setup-notice");
   notice.hidden = !setup;
   notice.textContent = "";
   if (!setup) return;
-  const names = labels.speaker_setup ?? {};
-  const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
-  if (!keys.every((key) => Object.hasOwn(names, key))) {
+  const names = speakerSetupNames(setup);
+  if (!names) {
     // 名稱表沒載到：整句換備用句，不把英文代號逐格代進句型。
     notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。";
     return;
   }
-  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。`;
+  notice.textContent = `這份方案設了喇叭：${names[0]}、放${names[1]}（${names[2]}）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。`;
 }
 // 伺服器回的牆名跟現在不同才換（喇叭搬到靠另一面牆、開了別份方案）；回傳有沒有換，換了由呼叫的人重畫。
 function useWallNames(names) {

@@ -26,8 +26,9 @@
 .seg button[aria-pressed=true]{background:#172f3d;color:white}
 .room-step :focus-visible{outline:3px solid #15617b;outline-offset:2px}
 /* 長寬高三格在圖邊上：寬 Ly 在左邊（平面圖直的那一軸），長 Lx 在圖下（橫的那一軸），高 Lz 在右下角。
-   格子仍住在 #room-fields 裡（改尺寸連動掛在它身上，elevation.js），容器本身不佔格、三格直接排進外框。 */
-.plan-frame{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"ly draw draw" ". lx lz";align-items:center;gap:.4rem .5rem}
+   格子仍住在 #room-fields 裡（改尺寸連動掛在它身上，elevation.js），容器本身不佔格、三格直接排進外框。
+   左欄定寬（不跟著寬 Ly 那一格縮放）：切到別張圖時那一格搬走，圖的位置與寬度四張照樣一樣。 */
+.plan-frame{display:grid;grid-template-columns:3.6rem minmax(0,1fr) auto;grid-template-areas:"ly draw draw" ". lx lz";align-items:center;gap:.4rem .5rem}
 #room-fields{display:contents}
 #room-fields label{margin:0;font-size:.8125rem;color:#46586a;gap:.3rem}
 #room-fields input{width:4rem;font-size:.9375rem;text-align:right;border:1.5px solid #17212a}
@@ -35,6 +36,14 @@
 #room-fields label:has(#room-Ly){grid-area:ly;flex-direction:column;align-items:flex-start;max-width:3.6rem;word-break:keep-all}
 #room-Ly{max-width:3.6rem;box-sizing:border-box}
 #room-fields label:has(#room-Lz){grid-area:lz;justify-self:end}
+/* 側面、聆聽區平面放大、聆聽區側面放大：同一組三格（不另做一份）改排成圖底下一列。那幾張圖直的那一軸是高、
+   放大圖畫的是聆聽區，格子貼在圖邊會被讀成那張圖的尺寸；只換位置（showView 設圖框的 data-view），連動照舊。
+   三格的字放在格子上面（字跟格子並排的話三格加起來比圖寬，第三格會掉到下一行）。 */
+.plan-frame:not([data-view=plan-xy]){grid-template-areas:". draw draw" ". dims dims"}
+.plan-frame:not([data-view=plan-xy]) #room-fields{display:flex;grid-area:dims;flex-wrap:wrap;gap:.4rem 1.5rem}
+.plan-frame:not([data-view=plan-xy]) #room-fields label,
+.plan-frame:not([data-view=plan-xy]) #room-fields label:has(#room-Ly){flex-direction:column;align-items:flex-start;max-width:none}
+.plan-frame:not([data-view=plan-xy]) #room-Ly{max-width:none}
 /* 四張圖疊在同一格、一次露一張（圖上的字靠量寬度躲開彼此，不能用 display:none 藏）；外框算在寬度裡。 */
 #plan-drawings{grid-area:draw;display:grid;grid-template-columns:minmax(0,1fr);gap:0}
 #plan-drawings>.drawing{grid-area:1/1;display:flex;flex-direction:column}

@@ -37,7 +37,7 @@ def test_input_notice_save_as_and_clearing(browser: Browser, tmp_path: Path) -> 
     plain_path.write_text(Scheme.model_validate(cases.document() | {"scheme_id": "plain", "speaker_setup": None}).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        notice = page.locator("#speaker-setup-notice")
+        notice = reveal(page, "#speaker-setup-notice")  # #1265 起長提示收在「改喇叭與擺法」打開的那一塊裡，先打開
         assert not notice.is_visible() and notice.evaluate("el => el.hidden")
         for mount, _, title in MOUNTS:
             _check_notice_save_and_clear(page, tmp_path, mount, title, schemes[mount])
@@ -81,6 +81,7 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     notice = page.locator("#speaker-setup-notice")
     open_scheme(page, name)
     page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
+    reveal(page, "#speaker-setup-notice")  # #1265 起長提示收在「改喇叭與擺法」打開的那一塊裡，先打開
     assert notice.is_visible() and notice.evaluate("el => el.tagName") == "P", mount
     # 編輯器已能改設定；取消舊「不能修改」宣稱，仍守存檔和讀回原值。
     assert notice.inner_text() == (f"這份方案設了喇叭：{title}；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
@@ -180,7 +181,7 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         page.goto(url, wait_until="networkidle")
         open_scheme(page, "loaded")
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
-        notice = page.locator("#speaker-setup-notice")
+        notice = reveal(page, "#speaker-setup-notice")  # #1265 起長提示收在「改喇叭與擺法」打開的那一塊裡，先打開
         assert notice.is_visible()
         assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
         # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。

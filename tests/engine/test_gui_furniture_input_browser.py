@@ -5,7 +5,7 @@ from playwright.sync_api import Browser
 from typing import cast
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_scheme, reveal
 from tests.engine import _furniture_cases as schemes
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser as browser
@@ -51,6 +51,7 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
     path.write_text(scheme.model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        reveal(page, "#furniture-notice")  # #1265 起家具提示收在「改家具」打開的那一塊裡，先打開
         assert not page.locator("#furniture-notice").is_visible()
         open_scheme(page, "loaded")
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
@@ -80,7 +81,7 @@ def test_input_furniture_notice_is_cleared_when_a_plain_scheme_is_opened_next(br
             Scheme.model_validate(document | {"scheme_id": name}).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        notice = page.locator("#furniture-notice")
+        notice = reveal(page, "#furniture-notice")  # #1265 起家具提示收在「改家具」打開的那一塊裡，先打開
         assert not notice.is_visible()
         for name, shown in (("furnished", True), ("plain", False)):
             open_scheme(page, name)
