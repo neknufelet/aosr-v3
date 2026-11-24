@@ -21,6 +21,7 @@ from aosr.config.paths import config_path
 from aosr.gui.app import STATIC, TEMPLATES, GuiSettings, create_app, repo_root
 from aosr.gui.labels import label_tables, listening_point_label, speaker_label
 from aosr.gui.plan_view import _plan_views, plan_for as _plan
+from aosr.gui.zone_symmetry import symmetry_axis
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine._gui_plan_before_move import RESPONSES
@@ -124,6 +125,10 @@ def test_page_example_is_centred_copy_of_reference_room(tmp_path: Path) -> None:
     assert (left + right) / 2 == pytest.approx(centre, abs=1e-12)
     main = next(point for point in page["receiver_set"]["points"] if point["role"] == "primary")
     assert main["position_m"][1] == pytest.approx(centre, abs=1e-12)
+    # 網頁的左右對稱照這一把判：軸在房間正中，左右牆才會跟著畫。
+    axis = symmetry_axis(Scheme.model_validate(page))
+    assert not isinstance(axis, str), axis
+    assert axis.centred
     shift = centre - (original["speakers"]["left"]["y"] + original["speakers"]["right"]["y"]) / 2
     expected = json.loads(json.dumps(original))
     expected["scheme_id"] = "reference-room-centred"
