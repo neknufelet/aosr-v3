@@ -64,7 +64,8 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         # （不是捲回打開分區頁之前的地方：那時捲在最上面，立面圖在視窗外）。
         page.evaluate("window.scrollTo(0, 0)")
         expect(page.locator("#elevation-frame")).not_to_be_in_viewport()
-        page.locator("#scheme-zone-open").click()
+        # #1265 單元 3 拿掉方案那一列那顆（派工單細節裁決 5）：頁面最上面改按頂上導覽列的「這間房貼什麼」（同一支 openZoneOverview）。
+        page.locator("#nav-zones").click()
         expect(page.locator("#zone-map")).to_be_visible()
         before = page.locator("#zone-map [data-wall='yL'][data-zone]").count()
         page.locator("#zone-cut-yL").click()

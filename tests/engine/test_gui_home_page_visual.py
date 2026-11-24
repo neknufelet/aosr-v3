@@ -86,7 +86,8 @@ def test_plan_views_show_one_drawing_at_a_time_with_readable_labels(tmp_path: Pa
                 if other != name:
                     expect(page.locator(other)).to_be_hidden()
             box = _box(page, name)
-            assert _same(box["x"], first["x"]) and _same(box["width"], first["width"]), name
+            # 疊在同一處：左緣、寬，還有上緣（#1265 單元 2 審查建議：只比 x 與寬，某一張往下掉也不會紅）。
+            assert _same(box["x"], first["x"]) and _same(box["width"], first["width"]) and _same(box["y"], first["y"]), name
             sizes = cast(list[float], page.locator(name).evaluate(LABEL_PX_JS))
             assert sizes, name
             every_size += sizes
@@ -196,6 +197,9 @@ class _Trail:
 
 
 def _blank_and_press(page: Page, button: str, fields: tuple[str, ...], trail: object = "") -> None:
+    # #1265 單元 3 起牆面表單收在第 2 段「換原本的牆」裡：先全部打開，清空那幾下之間才不夾別的操作。
+    for field in fields:
+        reveal(page, field)
     for field in fields:
         page.locator(field).fill("")
     # 填了要真的留在格子裡：#1145 那次是按鍵落到頁面本身、格子沒清到，到後面才以別的樣子紅。
@@ -403,15 +407,15 @@ def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: P
         page.wait_for_function("() => document.getElementById('multiple-floor').textContent !== ''")
         before = _multiples(page)
         assert all(text.startswith("約 ρc 的") for text in before.values()), before
-        floor = page.locator("#wall-floor").input_value()
+        floor = reveal(page, "#wall-floor").input_value()  # #1265 單元 3 起收在第 2 段「換原本的牆」裡
         page.locator("#wall-floor").fill("")
         page.wait_for_function("() => document.getElementById('multiple-floor').textContent === ''")
         assert {key: text for key, text in _multiples(page).items() if key != "multiple-floor"} == \
             {key: text for key, text in before.items() if key != "multiple-floor"}
-        page.locator("#wall-ceiling").fill("1000")
+        reveal(page, "#wall-ceiling").fill("1000")
         page.wait_for_function("() => document.getElementById('multiple-ceiling').textContent === ''")
         assert _multiples(page)["multiple-x0"] == before["multiple-x0"]
-        page.locator("#wall-floor").fill(floor)
+        reveal(page, "#wall-floor").fill(floor)
         page.wait_for_function("() => document.getElementById('multiple-ceiling').textContent !== ''")
         after = _multiples(page)
         assert after["multiple-floor"] == before["multiple-floor"]

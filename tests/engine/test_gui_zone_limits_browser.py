@@ -30,8 +30,8 @@ def _settled(page: Page) -> None:
 
 
 def _depth(page: Page, selector: str, value: str) -> None:
-    """填一格深度上限（離開那一格才算確定），等這一次的判決畫上去。"""
-    reveal(page, selector)  # #1265 起房間那一格收在第 1 段「改總厚度上限」裡，先打開
+    """填一格深度上限（離開那一格才算確定），等這一次的判決畫上去。#1265 單元 3 起兩格都填公分（存的照舊是公尺）。"""
+    reveal(page, selector)  # #1265 起房間那一格收在第 1 段「改總厚度上限」裡，單元 3 起這一面那一格收在「這一面另設」裡，先打開
     before = cast(int, page.evaluate("zoneLimitsGeneration"))
     page.locator(selector).fill(value)
     page.locator(selector).blur()
@@ -63,7 +63,7 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         _clear(page, "z1")
 
         # 這面牆上限 0.1：貼 0.05 的還在限內；換成 0.15 的那一刻（換材料也重判）就紅。
-        _depth(page, "#depth-wall-x0", "0.1")
+        _depth(page, "#depth-wall-x0", "10")
         _clear(page, "z1")
         expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.1 公尺（這面牆）；每一組跟自己的上限取較嚴：")
         expect(page.locator("#depth-target-x0-auto1-0")).to_have_text("48K 玻璃棉（可調厚度與空腔）：生效 0.1 公尺（這面牆的上限擋住；材料組自己 0.3 公尺比較寬）")
@@ -87,18 +87,19 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
 
         # 這一塊不給、房間預設 0.1：紅，寫「房間預設」；房間放寬到 0.2 就解除，交給搜尋那塊照房間預設。
         edit_depth(page, "x0", "z1", "")
-        _depth(page, "#depth-room", "0.1")
+        _depth(page, "#depth-room", "10")
         _red(page, "z1")
         expect(page.locator("#limit-x0-z1-0")).to_contain_text("房間預設的上限")
-        _depth(page, "#depth-room", "0.2")
+        _depth(page, "#depth-room", "20")
         _clear(page, "z1")
         expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.2 公尺（房間預設）；每一組跟自己的上限取較嚴：")
 
         # 不合理的值不收：照講、格子畫回原值、不打伺服器。
         page.locator("#depth-room").fill("-1")
         page.locator("#depth-room").blur()
-        expect(page.locator("#zone-note")).to_contain_text("大於 0")
-        expect(page.locator("#depth-room")).to_have_value("0.2")
+        # #1265 單元 2 審查發現 2 起收不收只判一次、提示句寫在那一格底下（#depth-room-note），不再寫進做法表底下那一行。
+        expect(page.locator("#depth-room-note")).to_contain_text("大於 0")
+        expect(page.locator("#depth-room")).to_have_value("20")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -111,8 +112,8 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-fixed-x0-z1", DEEP)
         _choose(page, "#zone-mode-x0-auto1", "search")
-        _depth(page, "#depth-room", "0.3")
-        _depth(page, "#depth-wall-x0", "0.2")
+        _depth(page, "#depth-room", "30")
+        _depth(page, "#depth-wall-x0", "20")
         edit_depth(page, "x0", "auto1", "8")
         expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.08 公尺（這一塊）；每一組跟自己的上限取較嚴：")
         # 在右邊那一大塊（交給搜尋、上限 0.08）裡再畫一框：自動區重編，上限跟著做法走。
@@ -132,8 +133,8 @@ def test_depth_limits_survive_a_reopen_and_a_zone_cap_follows_a_recut(tmp_path: 
         page.wait_for_function("typeof inputDefaults !== 'undefined' && inputDefaults !== undefined")
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator("#depth-room")).to_have_value("0.3")
-        expect(page.locator("#depth-wall-x0")).to_have_value("0.2")
+        expect(page.locator("#depth-room")).to_have_value("30")
+        expect(page.locator("#depth-wall-x0")).to_have_value("20")
         expect(page.locator(f"#depth-zone-x0-{right[0]}")).to_have_text("這一區給 0.08")
         expect(page.locator(f"#depth-cap-x0-{right[0]}")).to_have_text("個案上限 0.08 公尺（這一塊）；每一組跟自己的上限取較嚴：")
         _clear(page, "z1")
@@ -154,7 +155,7 @@ def test_send_to_search_stays_put_while_red(tmp_path: Path, browser: Browser) ->
         _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
         _choose(page, "#zone-fixed-x0-z1", DEEP)
         _choose(page, "#zone-mode-x0-auto1", "search")
-        _depth(page, "#depth-wall-x0", "0.1")
+        _depth(page, "#depth-wall-x0", "10")
         _red(page, "z1")
         page.evaluate("sendToSearch()")
         expect(page.locator("#zone-note")).to_contain_text("改好之前不能拿去搜尋")
@@ -175,17 +176,18 @@ def test_a_late_verdict_never_eats_a_half_typed_limit(tmp_path: Path, browser: B
         _choose(page, "#zone-fixed-x0-z1", DEEP)
         _choose(page, "#zone-mode-x0-auto1", "search")
         _settled(page)
+        reveal(page, "#depth-wall-x0")  # #1265 單元 3 起這一面那一格收在「這一面另設」裡：扣住判決之前先打開
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
         with page.expect_request("**/api/zone-limits"):
             page.evaluate("() => { window.before = zoneLimits; refreshZoneLimits(); }")   # 例如換材料之後那一次，回覆還在路上
-        page.locator("#depth-wall-x0").fill("0.1")    # 這時開始打牆的上限，還沒離開那一格
+        page.locator("#depth-wall-x0").fill("10")    # 這時開始打牆的上限（公分），還沒離開那一格
         with page.expect_response("**/api/zone-limits"):
             held[0].continue_()
         page.unroute("**/api/zone-limits")
         page.wait_for_function("zoneLimits !== window.before")   # 判決收下了，但正在打字：不畫
         assert page.evaluate("zoneLimitsShown < zoneLimitsGeneration")
-        expect(page.locator("#depth-wall-x0")).to_have_value("0.1")
+        expect(page.locator("#depth-wall-x0")).to_have_value("10")
         expect(page.locator("#depth-wall-x0")).to_be_focused()
         page.locator("#depth-wall-x0").blur()           # 離開才算確定：記進設計設定、重判、畫紅
         _settled(page)
@@ -209,7 +211,7 @@ def test_a_late_verdict_never_eats_a_half_typed_limit(tmp_path: Path, browser: B
         page.keyboard.type("2")
         page.locator("#depth-room").blur()
         _settled(page)
-        assert page.evaluate("zoneDesign.room_max_depth_m") == 0.2
+        assert page.evaluate("zoneDesign.room_max_depth_m") == 0.002  # #1265 單元 3 起填公分：「.2」公分＝0.002 公尺
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -302,24 +304,24 @@ def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp
         assert box is not None
         page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         assert page.evaluate("elevationDrawing()") is False
-        _depth(page, "#depth-wall-x0", "0.1")
+        _depth(page, "#depth-wall-x0", "10")
         _red(page, "z1")
         _depth(page, "#depth-wall-x0", "")
         _clear(page, "z1")
 
         # 房間預設那一格：Tab 落到右卡下一顆鈕（不在限制區），判決照畫、焦點不被拉走。
-        reveal(page, "#depth-room").fill("0.1")
+        reveal(page, "#depth-room").fill("10")
         page.locator("#depth-room").press("Tab")
         _settled(page)
         _red(page, "z1")
         expect(page.locator("#edit-speakers")).to_be_focused()
-        page.locator("#depth-room").fill("0.3")
+        page.locator("#depth-room").fill("30")
         page.locator("#depth-room").press("Enter")
         _settled(page)
         _clear(page, "z1")
         expect(page.locator("#depth-room")).to_be_focused()
         # 這一面那一格：Tab 換到立面圖同一區下一個帶 id 的；判決回來整區重畫，焦點放回那一個（不掉到頁面本身）。
-        page.locator("#depth-wall-x0").fill("0.1")
+        page.locator("#depth-wall-x0").fill("10")
         page.locator("#depth-wall-x0").press("Tab")
         _settled(page)
         _red(page, "z1")
@@ -344,7 +346,7 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         assert _modes(page, "x0")["auto1"]["allowed"] == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none",
                                                           "deep_rock_wool"]
         # 房間預設 0.2：玻璃棉照個案（房間預設）擋，使用者材料自己 0.15 比較嚴、寫「材料組自己的上限擋住」。
-        _depth(page, "#depth-room", "0.2")
+        _depth(page, "#depth-room", "20")
         _clear(page, "z1")
         expect(page.locator("#depth-target-x0-auto1-0")).to_have_text(
             "48K 玻璃棉（可調厚度與空腔）：生效 0.2 公尺（房間預設的上限擋住；材料組自己 0.3 公尺比較寬）")

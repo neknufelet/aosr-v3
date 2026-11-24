@@ -133,6 +133,8 @@ function faceZones(wall) {
     return item;
   }).sort((left, right) => left.label.number - right.label.number);
 }
+// 第 2 段右欄唯讀清單（wall_section.js，#1265 單元 3）照同一份分組：沒貼東西的「指定貼一種」算保留原樣、門窗另認。
+window.zoneFaceZones = faceZones;
 // 交給推法的那幾區：四面牆照前、後、左、右，每面照號碼，扣掉門窗。
 function ruleZones(faces, roles) { return WALL_ORDER.flatMap(role => faces[roles[role]].filter(item => !item.opening)); }
 // 六面全部由程式最佳化的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
@@ -770,8 +772,7 @@ function draftDepth(items) {
   const text = draft.depthText.trim();
   if (text === shownDepth(items)) return undefined;
   if (text === "") return null;
-  const millimetres = Math.round(Number(text) * 10);
-  return Number.isFinite(millimetres) && millimetres > 0 ? millimetres / 1000 : NaN;
+  return depthFromCentimetres(text);
 }
 /* ───── 這一區自己的可調範圍（#1199 範圍第 2 支） ───── */
 const RANGE_WORDS = {porous: "棉厚", cavity: "空腔"};
@@ -2133,5 +2134,6 @@ function forgetKept(event) {
 window.zonePageKeep = text => { keptSaid = text; renderZoneOverview(); };
 document.addEventListener("click", forgetKept, true);
 // 入口兩顆，同一件事：立面圖那一段最上面的（切區時就在手邊），與方案那一節的（打開方案後第一屏就看得到，#1198）。
-window.addEventListener("DOMContentLoaded", () => { for (const id of ["zone-page-open", "scheme-zone-open"]) $(id).onclick = () => window.openZoneOverview(); });
+// 進這一頁的鈕只留第 2 段右欄那一顆（#1265；第 1 段頂上那一顆拿掉了，頂條導覽「這間房貼什麼」照舊）。
+window.addEventListener("DOMContentLoaded", () => { $("zone-page-open").onclick = () => window.openZoneOverview(); });
 })();

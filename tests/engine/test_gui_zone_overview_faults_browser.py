@@ -13,7 +13,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
-from tests.engine._input_page_steps import open_save_as, open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._zone_naming_room import ZONE_NAMING_LIBRARY, ZONE_NAMING_SCHEME
@@ -487,7 +487,8 @@ def test_a_wall_with_an_unapplied_measured_draft_is_not_changed_and_the_page_say
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, SAMPLE)
-        page.locator("#material-kind-x0").select_option("measured_impedance")
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選那一面、打開。
+        reveal(page, "#material-kind-x0").select_option("measured_impedance")
         expect(page.locator("#measured-draft-x0")).to_be_visible()
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()

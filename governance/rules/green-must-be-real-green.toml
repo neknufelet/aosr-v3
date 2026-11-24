@@ -568,8 +568,9 @@ prefix = "tests.engine."
 # #1105 每一區選做法＋拿去搜尋＋准用清單原樣帶回：test_gui_zone_modes.py 10 題、test_gui_zone_modes_browser.py 8 題；主線 a9356783 上 CPU 單行程純收集實量 11479（主線 11461 為推算：減本支 18 題）。
 # #1111 超過限制標紅：test_gui_zone_limits.py 35 題、test_gui_zone_limits_browser.py 7 題，共 42 題；主線 49049fa1 上 CPU 單行程純收集實量 11521（主線登記 11479＋42）。
 # #1265 單元 2 輸入頁第 1 段重排：test_gui_room_facts.py 11 題、test_gui_input_room_section_browser.py 25 題，共 36 題；加上本支改動後 CPU 單行程純收集逐檔加總實量 12783。
+# #1265 單元 3 輸入頁第 2 段牆上切區（含單元 2 審查修補）：新檔 test_gui_input_wall_section_browser.py 14 題、test_gui_input_room_section_browser.py 加 6 題（25→31）、test_gui_room_facts.py 加 5 題（11→16），共 25 題；同一量法逐檔加總實量 12808（597 檔）。
 # 量法：在樹裡跑 `JAX_PLATFORMS=cpu uv run pytest --collect-only -q -n 0 -p no:randomly tests/engine`，把每一行「檔名: 題數」加起來（596 檔）。#1111 之後各支加題沒調這一籃的地板，所以比上一個登記值多出的不只這 36 題。
-collected_floor = 12783
+collected_floor = 12808
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

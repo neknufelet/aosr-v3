@@ -5,12 +5,15 @@
   這四格本身驗不過回 None（畫面寫「還沒填完」）。房間那一句只要長寬高三格是正數。
 - 家具那一句只讀家具清單的種類，名字跟名稱表同一份。
 - 房間那一句的寬、深照前牆分，每個數後面寫是長寬高哪一格（欄名是固定軸）。
+- 收到的方案草稿已經過入口的形狀檢查（``input_setup.check_input_shape``：scene、room_m 與三格都在，家具是清單、每一件
+  照 ``FurnitureSpec`` 核過（種類只准五種），沒有非數與無限大）；``draft_layout`` 驗得過時 ``Scheme`` 保證剛好兩個聲道、兩支喇叭就是聲道用到的那兩支。
+  這裡不再另守這些（#1265 單元 2 審查第 6 條），只守入口放得進來的：長寬高打到一半（空白、0、負數）或不是數字。
 - 數字照首頁那一句的寫法（``room_words``）：到公分、去掉尾巴的 0；「一樣」「在中線上」都比寫出來的字，不另設容差。
 """
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Final, cast
 
 from aosr.gui.problem_text import speaker_name
@@ -30,13 +33,10 @@ def metres(value: float) -> str:
 
 
 def _room_sizes(document: dict[str, object]) -> tuple[float, float, float] | None:
-    scene = document.get("scene")
-    room = scene.get("room_m") if isinstance(scene, Mapping) else None
-    if not isinstance(room, Mapping):
-        return None
-    sizes = [room.get(key) for key in ("Lx", "Ly", "Lz")]
-    numbers = [float(size) for size in sizes
-               if isinstance(size, int | float) and not isinstance(size, bool) and math.isfinite(size) and size > 0]
+    """長寬高三格都是正數才算填好。打到一半（空白、0、負數）或不是數字（真假值、字串；表單送不出來，入口收得到）回 None。"""
+    room = cast(dict[str, object], cast(dict[str, object], document["scene"])["room_m"])
+    sizes = [room[key] for key in ("Lx", "Ly", "Lz")]
+    numbers = [float(size) for size in sizes if isinstance(size, int | float) and not isinstance(size, bool) and size > 0]
     return (numbers[0], numbers[1], numbers[2]) if len(numbers) == 3 else None
 
 
@@ -72,19 +72,12 @@ def _each(names: Sequence[str], values: Sequence[str]) -> str:
     return "、".join(f"{name} {value}" for name, value in zip(names, values, strict=True))
 
 
-def _ordered_speakers(layout: Scheme) -> list[str]:
-    ordered = [channel.speaker_id for channel in layout.channel_group.channels if channel.speaker_id in layout.speakers]
-    return list(dict.fromkeys(ordered + sorted(layout.speakers)))
-
-
 def _speakers_line(document: dict[str, object], layout: Scheme, front: str | None) -> str:
-    ids = _ordered_speakers(layout)
+    # 照聲道順序（左、右）：Scheme 保證剛好兩個聲道、兩支喇叭就是它們用到的那兩支，不另排、不另數。
+    ids = [channel.speaker_id for channel in layout.channel_group.channels]
     names = [speaker_name(document, speaker_id) for speaker_id in ids]
     points = [layout.speakers[speaker_id] for speaker_id in ids]
     heights = _each(names, [metres(point.z) for point in points])
-    if len(points) != 2:
-        return "；".join(f"{name}在 x {metres(point.x)}、y {metres(point.y)}，高 {metres(point.z)} 公尺"
-                        for name, point in zip(names, points, strict=True))
     apart = metres(math.hypot(points[0].x - points[1].x, points[0].y - points[1].y))
     if front is None:
         return f"兩支相距 {apart} 公尺，高 {heights} 公尺（分不出前牆，位置看「座標數字」）"
@@ -93,9 +86,7 @@ def _speakers_line(document: dict[str, object], layout: Scheme, front: str | Non
 
 
 def _midline(layout: Scheme, front: str, x: float, y: float) -> str:
-    points = list(layout.speakers.values())
-    if len(points) != 2:
-        return ""
+    points = list(layout.speakers.values())  # 剛好兩支（Scheme 保證）
     middle = sum(_leftward(front, point.x, point.y) for point in points) / 2
     offset = _leftward(front, x, y) - middle
     if metres(abs(offset)) == "0":
@@ -111,16 +102,17 @@ def _primary_line(layout: Scheme, front: str | None) -> str:
 
 
 def _furniture_line(document: dict[str, object]) -> str:
-    items = document.get("furniture")
-    kinds = [item.get("kind") for item in items if isinstance(item, Mapping)] if isinstance(items, list) else []
-    if not kinds:
+    # 沒有家具：缺這一格或 null。種類入口逐件照 FurnitureSpec 核過（只准五種），名稱表涵蓋每一種由
+    # tests/engine/test_furniture_display.py 守，不另寫找不到時的字。
+    items = cast(list[dict[str, object]], document.get("furniture") or [])
+    if not items:
         return "沒有家具"
-    return "、".join(FURNITURE_KINDS.get(str(kind), "家具") for kind in kinds)
+    return "、".join(FURNITURE_KINDS[cast(str, item["kind"])] for item in items)
 
 
-def room_facts(document: object) -> dict[str, str | None]:
+def room_facts(document: dict[str, object]) -> dict[str, str | None]:
     """右卡四句；喇叭、主位（還有前牆）要四格驗得過才寫，否則 None。"""
-    raw = cast(dict[str, object], dict(document)) if isinstance(document, Mapping) else {}
+    raw = document
     layout = draft_layout(document)
     front = front_wall(layout) if layout is not None else None
     sizes = (layout.scene.room_m.Lx, layout.scene.room_m.Ly, layout.scene.room_m.Lz) if layout is not None else _room_sizes(raw)

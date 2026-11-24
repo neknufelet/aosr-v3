@@ -6,10 +6,11 @@
    - 四張圖疊在同一格、只露一張（不用 display:none：圖上的字靠量寬度躲開彼此，藏起來量不到）。 */
 (() => {
 const byId = (id) => document.getElementById(id);
+// 第 2 段牆那一行的兩顆（#1265 單元 3）也走同一條：打開那一面唯一的編輯處（牆面表單只露選中那一面，elevation.js）。
 const EDITORS = {"edit-depth": "depth-editor", "edit-speakers": "speaker-editor", "edit-furniture": "furniture-editor",
-                 "edit-original": "original-editor"};
+                 "edit-original": "original-editor", "edit-wall-original": "wall-original-editor", "edit-wall-depth": "wall-depth-editor"};
 const NOT_FILLED = "還沒填完";
-const ROOM_DEPTH_LABEL = "貼的東西總厚度最多（公尺；空白表示房間不設上限）";
+const ROOM_DEPTH_LABEL = "貼的東西總厚度最多（公分；空白表示房間不設上限）";
 const ROOM_DEPTH_NOTE = "從原牆表面往房間裡量；程式挑材料也不會超過。這是房間預設，某一面要不同在下面立面圖那一面另設。";
 
 // 「改…」：打開（再按一次收起）那件事唯一的編輯處，焦點放進第一格；不另做一份彈出視窗複製同一批格子。
@@ -19,7 +20,9 @@ function toggleEditor(button) {
   area.hidden = !opening;
   button.setAttribute("aria-expanded", String(opening));
   if (!opening) return;
-  const first = area.querySelector("input:not([disabled]), select:not([disabled]), button:not([disabled])");
+  // 第一個看得到的格子（牆面表單六面都在，只露選中那一面）。
+  const first = [...area.querySelectorAll("input:not([disabled]), select:not([disabled]), button:not([disabled])")]
+    .find(node => node.getClientRects().length > 0);
   first?.focus({preventScroll: true});
   area.scrollIntoView({block: "nearest"});
 }
@@ -34,8 +37,9 @@ function showView(name) {
 
 // 房間、喇叭、主位、家具四行與姿勢：伺服器那一份（每次預覽回來都重畫）。
 function renderRoomFacts() {
-  const facts = inputPreview?.room_facts;
-  if (!facts) return;
+  // 只在 renderInputPreview 收尾叫：那時 inputPreview 一定是 /api/input-preview 的回覆（兩條路都是），伺服器每一份都帶
+  // room_facts（input_setup.py :: input_preview）。開頁三種先後量過都不會沒有（#1265 單元 2 審查第 6 條），不另守。
+  const facts = inputPreview.room_facts;
   for (const key of ["room", "speakers", "primary", "furniture"])
     byId(`fact-${key}-text`).textContent = facts[key] ?? NOT_FILLED;
   for (const name of Object.keys(inputDefaults?.shortcuts || {}))
@@ -49,10 +53,11 @@ function renderRoomFacts() {
 }
 
 // 結果那一行：正在算＞沒算完（兩句都跟頁底條同一份）＞算好的結果（清單裡這一份最新的那一列）＞還沒算過。
-// 算好之後又改了（edited：頂條「有改動還沒存」那一份），字後面註明那份結果是修改前的設定算的。
+// 算好之後又改了（edited：頂條「有改動還沒存」那一份），字後面註明那份結果是修改前的設定算的；結果列自己已經寫
+// 「改之前的方案算的」（存著的方案檔在算完之後改過，伺服器的 scheme_text）就不再加，同一件事不講兩次（審查設計洞 1）。
 function renderRoomResult(running, failed, reason, edited) {
   const row = byId("room-result"), title = byId("room-result-title"), text = byId("room-result-text"), link = byId("room-result-link");
-  const finished = openedId ? (resultRows || []).find(item => item.scheme_id === openedId && ["done", "none"].includes(item.run_status)) : undefined;
+  const finished = openedId ? (resultRows || []).find(item => item.scheme_id === openedId && runFinished(item)) : undefined;
   const state = running ? "running" : failed ? "failed" : finished ? "done" : "never";
   row.dataset.state = state;
   link.hidden = state !== "done";
@@ -65,7 +70,7 @@ function renderRoomResult(running, failed, reason, edited) {
   } else if (state === "done") {
     title.textContent = "算好的結果";
     text.textContent = (finished.scheme_text ? `${finished.finished_text}，${finished.scheme_text}` : finished.finished_text) +
-      (edited ? "（修改前的設定算的）" : "");
+      (edited && !finished.scheme_text ? "（修改前的設定算的）" : "");
     link.href = finished.result_url;
   } else {
     title.textContent = "還沒算過";
@@ -88,19 +93,21 @@ function originalWords() {
 function renderRoomEditors() {
   byId("fact-depth-text").textContent = depthWords();
   byId("fact-original-text").textContent = originalWords();
+  // 還沒有方案（開頁讀不到範例）時之後的重畫照樣走到這裡（renderInputBars：鎖頁、輪詢都叫它）：沒有方案可改，不擺編輯格。
   if (!scheme) return;
   const depth = byId("depth-editor");
   if (!depth.contains(document.activeElement)) {
-    const field = depthInput("depth-room", ROOM_DEPTH_LABEL, zoneDesign?.room_max_depth_m, value => {
+    const said = depthNote("depth-room-note", String(openedId));  // 填錯的那一句重畫照留（審查發現 2）
+    const field = depthInput("depth-room", ROOM_DEPTH_LABEL, zoneDesign?.room_max_depth_m, "房間不設上限", said, value => {
       const design = designForEdit();
       if (value === null) delete design.room_max_depth_m; else design.room_max_depth_m = value;
     });
     const note = document.createElement("p"); note.className = "note"; note.textContent = ROOM_DEPTH_NOTE;
-    const said = document.createElement("p"); said.id = "depth-room-note"; said.setAttribute("aria-live", "polite");
     depth.replaceChildren(field, note, said);
   }
   const original = byId("original-editor");
-  if (!original.contains(document.activeElement)) {
+  original.dataset.stale = String(original.contains(document.activeElement));  // 焦點在裡面：這次不換，離開時補畫
+  if (original.dataset.stale === "false") {
     const clear = document.createElement("button"); clear.type = "button"; clear.id = "original-clear"; clear.className = "mini";
     clear.textContent = "清掉（每一面都只有原本的牆）";
     clear.disabled = !zoneDesign?.original_scheme_id;
@@ -117,16 +124,13 @@ window.addEventListener("DOMContentLoaded", () => {
   for (const id of Object.keys(EDITORS)) byId(id).addEventListener("click", event => toggleEditor(event.currentTarget));
   for (const button of document.querySelectorAll("#plan-views [data-view]"))
     button.addEventListener("click", () => showView(button.dataset.view));
-  // 總厚度上限填錯：做法表底下那一行照寫（depthInput），這張卡上也寫一份（那一行可能不在眼前）。
-  // 捕獲階段先看：depthInput 自己的監聽會把格子畫回原值。
-  byId("depth-editor").addEventListener("change", event => {
-    if (event.target.id !== "depth-room") return;
-    const text = event.target.value.trim(), number = Number(text);
-    const refused = text !== "" && !(Number.isFinite(number) && number > 0);
-    byId("depth-room-note").textContent = refused ? "總厚度上限要填大於 0 的數字（公尺）；空白表示房間不設上限" : "";
-    byId("depth-room-note").className = refused ? "notice" : "";
-  }, true);
   byId("depth-editor").addEventListener("change", () => { byId("fact-depth-text").textContent = depthWords(); });
+  // 方案清單晚到時焦點正在改造前那一塊裡（renderRoomEditors 那次沒換選單）：焦點離開那一塊就補畫一次（審查設計洞 3）。
+  // 等焦點真的落到別處再畫（focusout 當下焦點還沒換過去）。
+  byId("original-editor").addEventListener("focusout", event => {
+    if (byId("original-editor").dataset.stale === "true" && !byId("original-editor").contains(event.relatedTarget))
+      setTimeout(renderRoomEditors);
+  });
   byId("original-editor").addEventListener("change", () => {
     byId("fact-original-text").textContent = originalWords();
     byId("original-clear").disabled = !zoneDesign?.original_scheme_id;
@@ -135,5 +139,4 @@ window.addEventListener("DOMContentLoaded", () => {
 window.renderRoomFacts = renderRoomFacts;
 window.renderRoomResult = renderRoomResult;
 window.renderRoomEditors = renderRoomEditors;
-window.showPlanView = showView;
 })();

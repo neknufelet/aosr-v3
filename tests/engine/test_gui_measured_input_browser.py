@@ -7,7 +7,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
-from tests.engine._input_page_steps import open_save_as, scheme_open_button
+from tests.engine._input_page_steps import open_save_as, reveal, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
@@ -29,7 +29,8 @@ def pasted(separator: str = '\t', header: bool = False) -> str:
 
 def start_draft(page: Page) -> None:
     original = page.evaluate('collect()')
-    page.locator('#material-kind-floor').select_option('measured_impedance')
+    # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開。
+    reveal(page, '#material-kind-floor').select_option('measured_impedance')
     expect(page.locator('#measured-draft-floor')).to_be_visible()
     assert page.evaluate('collect()') == original
     page.locator('#measured-paste-floor').fill(pasted())
@@ -202,7 +203,8 @@ def test_raw_point_and_base_values_survive_save_and_parser_errors_keep_line_numb
         with page.expect_response('**/api/input-preview'):
             open_button.click()
         page.wait_for_function("!document.querySelector('main').inert")
-        page.locator('#measured-source-floor').fill('只改出處；原始數字必須原樣保存')
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開。
+        reveal(page, '#measured-source-floor').fill('只改出處；原始數字必須原樣保存')
         saved = _save_readback(page, 'precision-saved')
         assert floor(saved)['points'] == floor(data)['points']
         assert floor(saved)['base_assembly'] == floor(data)['base_assembly']

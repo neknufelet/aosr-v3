@@ -680,12 +680,13 @@ function markStale(event) {
     field?.labels?.[0]?.firstChild?.textContent?.trim() || "";
   renderInputBars();
   if (!$("result-link").hidden) $("result-stale").hidden = false;
+  refreshClearUndo();  // 第 2 段「清掉這一面的切法」的復原只到下一個改動之前（elevation.js）
 }
 function chooseCompare(side, item) {
   compareChoice[side] = item;
   $(side === "a" ? "compare-a" : "compare-b").textContent =
     item ? `${side.toUpperCase()}：${item.scheme_id}（${item.finished_text}）` +
-    (["done", "none"].includes(item.run_status) ? "" : `・${item.status_text}`) : `${side.toUpperCase()}：未選`;
+    (runFinished(item) ? "" : `・${item.status_text}`) : `${side.toUpperCase()}：未選`;
   const link = $("compare-link");
   link.hidden = !compareChoice.a || !compareChoice.b;
   if (!link.hidden) link.href = `/compare/${compareChoice.a.run_id}/${compareChoice.b.run_id}`;
@@ -700,10 +701,15 @@ function finishedCell(cell, text) {
     span.textContent = part; cell.append(span);
   }
 }
+// 結果清單那一列算好了沒（done：算完；none：沒有計算紀錄，結果檔本身就是算好的那一份）：整個網頁只在這裡寫一次，
+// 結果表、A／B 那一格、頁底條鎖不鎖、第 1 段右卡結果那一行都叫這一支（#1265 單元 2 審查設計洞 1）。
+function runFinished(row) {
+  return ["done", "none"].includes(row.run_status);
+}
 function resultRow(item, archived = false) {
   const row = document.createElement("tr");
   row.dataset.runId = item.run_id;
-  const finished = ["done", "none"].includes(item.run_status);
+  const finished = runFinished(item);
   row.classList.toggle("not-finished", !finished || (archived && item.restore_available === false));
   // 「物理」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
   // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
@@ -848,7 +854,7 @@ async function loadResultList() {
   const data = await api("/api/results");
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
-  finishedNames = new Set(data.results.filter(row => ["done", "none"].includes(row.run_status)).map(row => row.scheme_id));
+  finishedNames = new Set(data.results.filter(runFinished).map(row => row.scheme_id));
   resultRows = data.results;
   renderInputBars();
   const list = $("results-list"); list.replaceChildren();

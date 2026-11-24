@@ -56,8 +56,10 @@ def test_resize_saves_each_original_zone(tmp_path: Path, browser: Browser, axis:
         assert saved["scene"]["surface_zones_by_wall"] == expected
         assert json.loads(design.read_text())["zones"] == settings["zones"]
         if axis == "Lz":
-            expect(page.locator("#zoned-list-yL li").first).to_contain_text("v 0–3.2 公尺")
+            # #1265 單元 3 起分區的牆每一區列在第 2 段右欄「每一區的位置與大小」（選中那一面才列；寫寬 × 高，不寫 u／v）：
+            # 先點前牆再看第一區（z1，原本落地到頂）的高跟著變成 3.2。
             page.locator("#elevation-wall-yL").click()
+            expect(page.locator("#zoned-list-yL #zone-size-yL-z1")).to_contain_text("× 3.2")
             page.locator("#elevation-panel").screenshot(path=tmp_path / "front-saved.png")
 
 

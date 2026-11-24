@@ -1,6 +1,7 @@
 """輸入頁第 1 段右卡「這間房現在」四句與姿勢（#1265）：走正式的 /api/input-preview，答案逐句手寫。
 
 房間用 cases.document 的四種面向（喇叭靠哪一面牆），尺寸改成長寬不同，才分得出「寬」「深」各取哪一軸。"""
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
@@ -8,6 +9,7 @@ from typing import cast
 import pytest
 from starlette.testclient import TestClient
 
+import aosr.gui
 from aosr.gui.room_facts import metres
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -109,3 +111,30 @@ def test_a_shortcut_marks_its_posture_and_names_the_furniture(tmp_path: Path, na
 
 def test_metres_round_to_centimetres_and_drop_trailing_zeros() -> None:
     assert [metres(value) for value in (3.0, 0.5, 1.206, 2.0049, -0.004)] == ["3", "0.5", "1.21", "2", "0"]
+
+
+# ---- #1265 單元 2 審查修補（build-brief-4b-u2fix.md）----
+
+
+@pytest.mark.parametrize("size", [0, -1.5, True, "abc"])
+def test_a_half_typed_or_non_number_room_size_is_not_filled(tmp_path: Path, size: object) -> None:
+    """審查第 6 條留下的那一格：長寬高打到一半（0、負數；表單送得出來）或不是數字（真假值、字串；表單送不出來，
+    /api/input-preview 收得到，入口不核這三格的型別）：房間那一句寫還沒填完，不把真假值當成 1 公尺。"""
+    document = _room("west")
+    cast(Doc, cast(Doc, document["scene"])["room_m"])["Ly"] = size
+    with _app(tmp_path) as client:
+        facts = _facts(client, document)
+    assert facts["room"] is None
+
+
+def test_the_finished_run_states_are_written_in_one_place() -> None:
+    """審查設計洞 1 前半：結果「算好了」那一份狀態（done、none）整個網頁程式只寫一次（app.js 的 runFinished），
+    第 1 段右卡結果那一行與結果清單、頁底條鎖不鎖都叫它；不准哪一支自己再寫一份，改狀態時只改一處兩邊就不會對不上。"""
+    static = Path(aosr.gui.__file__).parent / "static"
+    sources = {path.name: path.read_text(encoding="utf-8") for path in sorted(static.glob("*.js"))}
+    written = [(name, line.strip()) for name, text in sources.items() for line in text.splitlines()
+               if re.search(r'"done",\s*"none"', line)]
+    assert len(written) == 1, written
+    assert "function runFinished(" in sources["app.js"]
+    for name in ("app.js", "room_facts.js"):
+        assert "runFinished(" in sources[name].replace("function runFinished(", ""), name

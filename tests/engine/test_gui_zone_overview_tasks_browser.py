@@ -623,11 +623,13 @@ def test_the_first_view_shows_the_way_into_the_page_and_keeps_the_old_table_fold
         fold, table, enter = page.locator("#zone-table-fold"), page.locator("#elevation-zones"), page.locator("#zone-page-open")
         assert fold.evaluate("fold => fold.open") is False
         expect(table).to_be_hidden()
-        expect(fold.locator("> summary")).to_have_text("深度上限與舊做法表")
+        # #1265 單元 3 起這一面的深度格搬到牆那一行「這一面另設」，摺疊標題改成「舊做法表」（派工單細節裁決 7）。
+        expect(fold.locator("> summary")).to_have_text("舊做法表")
         expect(enter).to_be_visible()
         # 按鈕講的是動作（去設定），不是去看。
         expect(enter).to_have_text("設定每一區貼什麼 ▸")
-        expect(page.locator("#zone-methods-row")).to_contain_text("都在「這間房貼什麼」那一頁設定")
+        # #1265 單元 3 起按鈕底下那一行照示意圖：「到「這間房貼什麼」，六面一起看、一起改；沒存的改動也帶著」。
+        expect(page.locator("#zone-methods-row")).to_contain_text("到「這間房貼什麼」，六面一起看、一起改")
         # 按鈕在立面圖那一段的最上面：在牆的圖、舊表的那一行之上。
         top = "selector => document.querySelector(selector).getBoundingClientRect().top"
         assert cast(float, page.evaluate(top, "#zone-page-open")) < cast(float, page.evaluate(top, "#elevation")) < cast(float, page.evaluate(top, "#zone-table-fold"))

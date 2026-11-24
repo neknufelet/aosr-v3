@@ -679,21 +679,35 @@ function zoneNameCell(wall, key, label, cell) {
     const code = document.createElement("small"); code.className = "zone-code"; code.textContent = `代號 ${key}`;
     cell.append(code);
   }
-  const go = document.createElement("button"); go.type = "button"; go.id = `zone-goto-${wall}-${key}`;
+}
+// 「改這一區 ▸」（#1258 2b）：回「這間房貼什麼」打開那一區的小框。#1265 單元 3 起住在第 2 段右欄唯讀清單
+// （wall_section.js），舊做法表裡不再有；一區一顆、整頁只有一處。
+function zoneGotoButton(wall, key) {
+  const go = document.createElement("button"); go.type = "button"; go.id = `zone-goto-${wall}-${key}`; go.className = "lnk";
   go.textContent = "改這一區 ▸"; go.setAttribute("aria-label", `到「這間房貼什麼」改${zoneCalled(wall, key)}`);
   go.onclick = () => window.openZoneOverview(`${wall}/${key}`);
-  cell.append(go);
+  return go;
+}
+// 保留原樣的區寫什麼（做法表那一格與第 2 段右欄清單同一句）：原本的面叫什麼、不貼東西。
+function keepWords(zone, wall, key) {
+  const words = originalWords(originalMaterial(zone.material), wall, key);
+  return words === KEEP_WORDS ? words : `${words}，不貼東西`;
 }
 function renderZoneTable(wall) {
   // 六面一起看的那一頁（zone_overview.js）跟這張表同一條路重畫：開檔、切牆、換材料、改做法都會走到這裡。
   window.renderZoneOverview?.();
   // 原方案與總厚度上限（房間預設）兩格在第 1 段右卡（#1265）：跟這張表同一條路重畫。
-  window.renderRoomEditors?.();
+  renderRoomEditors();
+  // 第 2 段牆那一行、右欄唯讀清單、「每一區的位置與大小」（#1265 單元 3）也跟這張表同一條路重畫；
+  // 這一面的總厚度上限那一格搬到牆那一行「這一面另設」打開的那一塊。
+  renderWallSection(wall);
+  refreshClearUndo();
   const area = $("elevation-zones");
-  if (!area) return;
   area.replaceChildren();
+  const depthSaid = wall && scheme ? depthNote("depth-wall-note", `${openedId}/${wall}`) : null;  // 清掉那一塊之前拿
+  $("wall-depth-editor").replaceChildren();
   if (!wall || !scheme) return;
-  area.append(depthRow(wall));
+  $("wall-depth-editor").append(depthRow(wall, depthSaid));
   const hint = document.createElement("p"); hint.className = "note"; hint.id = "zone-table-readonly";
   hint.textContent = "每一區的候選材料和最深，在「這間房貼什麼」那一頁改（按每一列的「改這一區 ▸」）；這張表只列出來對照。";
   area.append(limitsSummary(), hint);
@@ -723,8 +737,7 @@ function renderZoneTable(wall) {
     if (setting.mode === "fixed") fixedCell(wall, key, zone, material);
     else if (setting.mode === "keep_original") {
       const line = document.createElement("p"); line.id = `zone-keep-${wall}-${key}`;
-      const words = originalWords(originalMaterial(zone.material), wall, key);
-      line.textContent = words === KEEP_WORDS ? words : `${words}，不貼東西`;
+      line.textContent = keepWords(zone, wall, key);
       material.append(line);
       const same = zoneSameAsOriginal.get(`${wall}/${key}`);
       if (same) {

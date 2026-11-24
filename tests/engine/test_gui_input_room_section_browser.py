@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as cases, _speaker_setup_cases as speaker_cases
-from tests.engine._input_page_steps import open_fact_editor, open_fold, open_scheme, show_view
+from tests.engine._input_page_steps import archive_scheme, open_fact_editor, open_fold, open_scheme, show_view
 from tests.engine.test_gui_archive import _bundle, _saved
+from tests.engine.test_gui_archive_browser import _confirm
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser as browser, result as result
 from tests.engine.test_gui_home_page_visual import LABEL_PX_JS
 from tests.engine.test_gui_input_setup_browser import _filled
@@ -298,7 +299,7 @@ def test_total_depth_limit_saves_reopens_and_is_what_the_zone_page_reads(tmp_pat
         depth.blur()
         expect(page.locator("#depth-room-note")).to_contain_text("大於 0")
         expect(depth).to_have_value("")
-        depth.fill("0.15")
+        depth.fill("15")  # #1265 單元 3 起填公分（存的照舊是公尺）
         depth.blur()
         expect(page.locator("#fact-depth-text")).to_have_text(
             "貼的東西總厚度最多 15 公分（從原牆表面往房間裡量，程式挑材料也不會超過）；這是房間預設，某一面要不同在下面立面圖那一面另設")
@@ -307,10 +308,10 @@ def test_total_depth_limit_saves_reopens_and_is_what_the_zone_page_reads(tmp_pat
         _reopen(page, ROOM)
         expect(page.locator("#fact-depth-text")).to_contain_text("最多 15 公分")
         open_fact_editor(page, "edit-depth")
-        expect(page.locator("#depth-room")).to_have_value("0.15")
+        expect(page.locator("#depth-room")).to_have_value("15")
         # 「這間房貼什麼」那一頁不另寫房間上限：它跟立面圖的限制判決用的是開檔時從伺服器讀回的那一份設計設定。
         # 打開那一頁、送去判限制的那一份帶的就是 0.15；伺服器存的也是。
-        page.locator("#scheme-zone-open").click()
+        page.locator("#zone-page-open").click()  # #1265 單元 3 起只剩第 2 段右欄那一顆
         expect(page.locator("#zone-page")).to_be_visible()
         with page.expect_request("**/api/zone-limits") as sent:
             page.evaluate("refreshZoneLimits()")
@@ -329,7 +330,7 @@ def test_enter_in_the_total_depth_box_keeps_focus_and_the_verdict_draws(tmp_path
         open_fact_editor(page, "edit-depth")
         depth = page.locator("#depth-room")
         before = cast(int, page.evaluate("zoneLimitsGeneration"))
-        depth.fill("0.3")
+        depth.fill("30")  # #1265 單元 3 起填公分
         depth.press("Enter")
         page.wait_for_function("before => zoneLimitsGeneration > before && zoneLimitsShown === zoneLimitsGeneration",
                                arg=before)
@@ -553,3 +554,150 @@ def test_result_line_says_why_a_calculation_did_not_finish(tmp_path: Path, brows
         expect(page.locator("#room-result-text")).to_have_text("考卷房的計算停在一半；看頁底的出錯紀錄")
         expect(page.locator("#room-result-link")).to_be_hidden()
         _assert_quiet(watched)
+
+
+# ---- #1265 單元 2 審查修補（build-brief-4b-u2fix.md）：每一題先在修之前跑紅，再修。 ----
+
+
+def test_a_refused_total_depth_goes_back_to_the_last_confirmed_value(tmp_path: Path, browser: Browser) -> None:
+    """審查發現 1：確認過 15 公分（按 Enter）之後同一格再填 -1 按 Enter，格子退回 15（最後一次確認的值），不是建格當時的
+    空白；焦點還在那一格，但不算打到一半（不擋後面的限制判決重畫）；離開那一格也還是 15。"""
+    _write(tmp_path, _room(ROOM))
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _opened(page, ROOM)
+        open_fact_editor(page, "edit-depth")
+        depth = page.locator("#depth-room")
+        before = cast(int, page.evaluate("zoneLimitsGeneration"))
+        depth.fill("15")
+        depth.press("Enter")
+        page.wait_for_function("before => zoneLimitsGeneration > before && zoneLimitsShown === zoneLimitsGeneration",
+                               arg=before)
+        depth.fill("-1")
+        depth.press("Enter")
+        expect(depth).to_be_focused()
+        expect(depth).to_have_value("15")
+        assert page.evaluate("zoneDesign.room_max_depth_m") == 0.15
+        assert page.evaluate("Boolean(typingInElevation())") is False
+        depth.blur()
+        expect(depth).to_have_value("15")
+        _assert_quiet(watched)
+
+
+def test_a_refused_total_depth_note_stays_through_redraws_until_a_good_value(tmp_path: Path, browser: Browser) -> None:
+    """審查發現 2：填錯的那一句寫在那一格底下，之後任何重畫（計算中每秒輪詢走的 renderInputBars）都不洗掉；
+    改成合法值才消失。收不收只在 depthInput 判一次（room_facts.js 不另寫一份判斷）。"""
+    _write(tmp_path, _room(ROOM))
+    refused = "總厚度上限要填大於 0 的數字（公分）；空白表示房間不設上限"
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _opened(page, ROOM)
+        open_fact_editor(page, "edit-depth")
+        depth, note = page.locator("#depth-room"), page.locator("#depth-room-note")
+        depth.fill("-1")
+        depth.blur()
+        expect(note).to_have_text(refused)
+        page.evaluate("renderInputBars()")
+        expect(note).to_have_text(refused)
+        page.evaluate("renderElevation()")  # 第 2 段整個重畫（換牆、判決回來都走這裡）
+        expect(note).to_have_text(refused)
+        depth = page.locator("#depth-room")
+        depth.fill("12")
+        depth.blur()
+        expect(note).to_have_text("")
+        assert page.evaluate("zoneDesign.room_max_depth_m") == 0.12
+        _assert_quiet(watched)
+
+
+def test_result_line_does_not_say_twice_that_the_result_is_older_than_the_scheme(tmp_path: Path, browser: Browser,
+                                                                                  result: SchemeResult) -> None:
+    """審查設計洞 1 後半：存著的方案檔在算完之後改過，結果列自己就寫「改之前的方案算的」；表單再改一格，
+    結果那一行不再加「（修改前的設定算的）」——同一件事不講兩次。"""
+    room = _computed(result)
+    _saved(tmp_path, room)
+    _bundle(tmp_path, room, RUN)
+    stamp = datetime(2026, 11, 20, 14, 5).timestamp()
+    os.utime(tmp_path / "results" / f"{RUN}.json", (stamp, stamp))
+    path = tmp_path / "schemes" / f"{ROOM}.json"
+    document = cast(Doc, json.loads(path.read_text(encoding="utf-8")))
+    size = cast(dict[str, float], cast(Doc, document["scene"])["room_m"])
+    size["Lz"] = round(size["Lz"] + 0.25, 2)
+    path.write_text(Scheme.model_validate(document).model_dump_json(), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _ready(page)
+        _opened(page, ROOM)
+        text = page.locator("#room-result-text")
+        expect(text).to_have_text("2026-11-20 14:05，改之前的方案算的")
+        height = page.locator("#room-Lz")
+        height.fill(str(round(float(height.input_value()) + 0.1, 2)))
+        expect(page.locator("#save-state")).to_contain_text("有改動還沒存")
+        expect(page.locator("#room-result-title")).to_have_text("算好的結果")
+        expect(text).to_have_text("2026-11-20 14:05，改之前的方案算的")
+        _assert_quiet(watched)
+
+
+def test_a_late_scheme_list_reaches_the_original_choice_once_focus_leaves(tmp_path: Path, browser: Browser) -> None:
+    """審查設計洞 3：方案清單晚到時焦點正在「改造前」那個選單上：那時不換（換掉會搶走正在用的選單），焦點離開那一塊
+    就補畫一次，選單列的是新清單。"""
+    _write(tmp_path, _room(ROOM))
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _opened(page, ROOM)
+        open_fact_editor(page, "edit-original")
+        select = page.locator("#original-scheme")
+        expect(select.locator(f'option[value="{BEFORE}"]')).to_have_count(0)
+        held: list[Route] = []
+        page.route("**/api/schemes", lambda route: held.append(route))
+        _write(tmp_path, _room(BEFORE))  # 別處另存了一份：下一次讀清單才有
+        select.focus()
+        page.evaluate("void loadSchemeList()")
+        while not held:
+            page.wait_for_timeout(20)
+        held[0].continue_()
+        page.unroute("**/api/schemes")
+        page.wait_for_function("name => schemeNames.includes(name)", arg=BEFORE)
+        expect(select).to_be_focused()
+        expect(select.locator(f'option[value="{BEFORE}"]')).to_have_count(0)  # 焦點還在：先不換
+        page.locator("#fact-room-text").click()
+        expect(page.locator(f'#original-scheme option[value="{BEFORE}"]')).to_have_count(1)
+        _assert_quiet(watched)
+
+
+def test_original_pointing_at_an_archived_scheme_says_it_is_not_in_the_list(tmp_path: Path, browser: Browser) -> None:
+    """審查第 6 條：改造前指到一份已經封存的方案，那一行照講是哪一份，再註明「不在方案清單裡」。"""
+    _write(tmp_path, _room(ROOM))
+    _write(tmp_path, _room(BEFORE))
+    design = tmp_path / "designs" / f"{ROOM}.json"
+    design.parent.mkdir(exist_ok=True)
+    design.write_text(json.dumps({"schema_version": "aosr.zone_design.v1", "scheme_id": ROOM,
+                                  "original_scheme_id": BEFORE}), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _ready(page)
+        _confirm(page)  # 封存前那一句「確定封存嗎？」按確定
+        archive_scheme(page, BEFORE)
+        page.wait_for_function("name => !schemeNames.includes(name)", arg=BEFORE)
+        _opened(page, ROOM)
+        expect(page.locator("#fact-original-text")).to_have_text(f"照「{BEFORE}」那一份方案（不在方案清單裡）")
+        _assert_quiet(watched)
+
+
+def test_a_redraw_before_any_scheme_has_loaded_puts_no_editing_box_on_the_card(tmp_path: Path, browser: Browser) -> None:
+    """審查第 6 條留下的那一行（room_facts.js :: renderRoomEditors 的「還沒有方案就不擺編輯格」）：開頁讀不到範例時整頁
+    一直沒有方案，之後的重畫（renderInputBars：鎖頁、輪詢都叫它）走得到這一行；那時總厚度上限與改造前的編輯格不擺
+    （沒有方案可改），頁面不出錯。開頁讀得到範例時三種先後都走不到（回報第 6 條附量法）。"""
+    with _serve(tmp_path) as base:
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        try:
+            page.route("**/api/example", lambda route: route.abort())
+            page.goto(f"{base}/", wait_until="networkidle")
+            assert page.evaluate("scheme === undefined")
+            page.evaluate("renderInputBars()")
+            expect(page.locator("#depth-room")).to_have_count(0)
+            expect(page.locator("#original-scheme")).to_have_count(0)
+            assert errors == []
+        finally:
+            page.close()

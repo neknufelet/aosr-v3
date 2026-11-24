@@ -15,9 +15,9 @@
 .room-step h2{display:flex;align-items:baseline;flex-wrap:wrap;gap:.75rem;font-size:1.25rem;margin:.25rem 0 .5rem}
 .room-step .step-no{display:inline-grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:50%;background:#172f3d;color:white;font-size:.9375rem;align-self:center}
 .room-step .say{font-size:.8125rem;font-weight:400;color:#46586a}
-#scheme-zone-row{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem;margin:0 0 .6rem;font-size:.8125rem;color:#46586a;line-height:1.4}
 .roomrow{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);gap:1.375rem;align-items:start}
 .room-step .card{background:white;border:1px solid #d5e0e4;border-radius:10px}
+#wall-section.room-step{background:transparent;border:0;padding:0;overflow:visible}
 .room-plan{padding:.75rem .875rem .625rem}
 .viewrow{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem;font-size:.8125rem;color:#46586a;margin:0 0 .4rem}
 .seg{display:inline-flex;gap:0;border:1px solid #97aeb8;border-radius:6px;overflow:hidden;background:white}
@@ -169,7 +169,9 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
   background:#fffcf3;border-inline-start:4px solid currentColor;padding:.35rem .65rem;line-height:1.4}
 #elevation-banner.ok{background:#f4fdf6}
 #elevation-banner button{pointer-events:auto;margin-inline-start:.65rem;padding:.25rem .65rem}
-#elevation svg{max-width:760px;margin-top:2.75rem;touch-action:none;user-select:none;cursor:crosshair}
+/* 立面圖照它自己算的大小畫（一公尺幾像素由 elevation.js 定），不跟著卡片寬等比放大：圖裡的字一律 14 像素（homes.md 字級那一條）；
+   卡片比圖窄時才縮。 */
+#elevation svg{width:auto;max-width:100%;margin-top:2.75rem;touch-action:none;user-select:none;cursor:crosshair}
 #elevation-frame{fill:#ffffff;stroke:#17212a;stroke-width:2}
 .zone rect{fill:#dcecf2;stroke:#15617b;stroke-width:2}
 .zone-auto rect{fill:#f4f7f8;stroke:#7d95a0;stroke-dasharray:6 4}
@@ -226,8 +228,6 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 .elevation-marker{pointer-events:none}
 .elevation-marker.speaker rect{fill:#872c22}
 .elevation-marker.seat circle{fill:#1d7a3a}
-#elevation-walls{display:flex;gap:.5rem;flex-wrap:wrap}
-#elevation-walls button[aria-pressed=true]{background:#0b3a4a;outline:2px solid #f0b429}
 #elevation-selected{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 
 /* 首頁第一屏（#1134）：左邊最近算的房間俯視圖（前牆在上），右邊三個大入口；窄螢幕上下排。 */
@@ -258,13 +258,10 @@ a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
 /* 手機寬：三個下一步排在圖前面，第一屏就看得到要按哪裡。 */
 @media (max-width:700px){.home-next{order:-1}}
 
-#elevation-symmetry{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;margin:.5rem 0}
-#elevation-symmetry button{padding:.25rem .65rem;border:1px solid #567580;border-radius:0;color:#244652;background:#fff}
-#elevation-symmetry button:first-child{border-radius:.35rem 0 0 .35rem}
-#elevation-symmetry button:last-child{border-radius:0 .35rem .35rem 0;border-left:0}
-#elevation-symmetry button[aria-pressed=true]{color:white;background:#0b3a4a;font-weight:700}
 .mirror-axis,.mirror-preview,.mirror-link{pointer-events:none}
 .mirror-axis line,.mirror-link path{fill:none;stroke:#46586a;stroke-width:1.5;stroke-dasharray:2 4}
+/* 鏡子線（對稱軸）用點劃線，跟補滿格子的灰虛線分得開（#1265 單元 3：只換線型，位置與算法照舊）。 */
+.mirror-axis line{stroke-dasharray:10 4 2 4}
 .mirror-axis text,.mirror-link text,.mirror-preview text{font-size:13px;fill:#244652;paint-order:stroke;stroke:white;stroke-width:3px;stroke-linejoin:round}
 .mirror-preview rect{fill:#15617b12;stroke:#15617b;stroke-width:2;stroke-dasharray:6 4}
 .mirror-preview.pending rect{fill:none;stroke:#68747b}
@@ -318,7 +315,7 @@ main:has(#input-bars){padding-top:0;padding-bottom:0}
 #run-log{position:relative}
 #run-log summary{cursor:pointer;color:#15617b}
 #run-log pre{position:absolute;right:0;bottom:100%;width:min(34rem,75vw);max-height:40vh;overflow:auto;background:white;border:1px solid #d5e0e4;padding:.7rem}
-#scheme-section,#result-section,#archived{scroll-margin-top:9rem}
+#scheme-section,#wall-section,#result-section,#archived{scroll-margin-top:9rem}
 html:has(#input-bars){scroll-padding-bottom:7rem}
 @media(max-width:1020px){
   #input-bars .bar-row,#input-footer .bar-row{flex-wrap:wrap}
@@ -351,3 +348,68 @@ html:has(#input-bars){scroll-padding-bottom:7rem}
 #followed-stop button{padding:.25rem .65rem}
 #input-footer:not([data-state=failed]) #calculate,#input-footer #stop,#run-log summary{background:white;color:#17212a;border:1px solid #97aeb8}
 #run-log summary{padding:.55rem .75rem;border-radius:6px}
+
+/* 第 2 段「牆上切區」（#1265 單元 3，示意圖 input-page-v3 第 2 段）：左邊立面圖卡（牆名鈕、兩邊一起畫、選中那一面的一行、
+   圖、圖例），右邊這一面每一區的唯讀清單卡；字級同第 1 段四級。 */
+.cutrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,27.5rem);gap:1.375rem;align-items:start}
+@media (max-width:1000px){.cutrow{grid-template-columns:minmax(0,1fr)}}
+.room-step .card.elev{padding:.875rem 1.125rem .75rem;min-width:0}
+.walls-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.5rem 1rem}
+#elevation-walls{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+#elevation-walls button.wall{background:white;color:#17212a;border:1px solid #d5e0e4;border-radius:7px;padding:.3rem .75rem;font-size:.9375rem}
+#elevation-walls button.wall small{color:#46586a;margin-left:.3rem;font-size:.8125rem}
+#elevation-walls button.wall[aria-pressed=true]{background:#172f3d;color:white;border-color:#172f3d}
+#elevation-walls button.wall[aria-pressed=true] small{color:#c9d2d6}
+#elevation-symmetry{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:.15rem;text-align:right}
+/* 開關按下的樣子照改名前（只改名字、不改開關；#1206 的考卷考這個顏色） */
+#elevation-symmetry .seg button[aria-pressed=true]{background:#0b3a4a;color:white}
+.mirror-switch{display:flex;align-items:center;gap:.6rem;font-size:.9375rem}
+.mirror-switch strong{font-weight:400}
+#elevation-axis-words{color:#46586a;font-size:.8125rem;line-height:1.4}
+.wallline{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1.125rem;margin:.6rem .125rem .4rem;font-size:.8125rem;color:#46586a}
+.wallline b{color:#17212a;font-weight:600}
+.wallline .spacer{flex:1}
+.wallline [hidden]{display:none}
+.wallline .mini{margin-left:.25rem}
+button.danger,button.lnk{border:0;background:none;padding:0;text-decoration:underline;text-underline-offset:3px;font-size:.8125rem}
+button.danger{color:#a52714}
+button.danger:disabled{color:#46586a}
+button.lnk{color:#155b70;margin-left:.4rem}
+#elevation-cleared{color:#17212a}
+.card.elev>.fact-editor{margin:.25rem 0 .5rem}
+.wall-editor[hidden]{display:none}
+#wall-original-editor .wall-editor{padding:.25rem 0}
+.legend{display:flex;flex-wrap:wrap;gap:.35rem 1.125rem;font-size:.8125rem;color:#46586a;margin:.5rem .125rem 0}
+.legend[hidden]{display:none}
+.legend .sw{display:inline-block;width:.75rem;height:.75rem;border-radius:2px;margin-right:.35rem;vertical-align:-1px;border:1px solid #97aeb8}
+.legend .sw.zone-mode-search{background:#fbe7b5}
+.legend .sw.zone-mode-fixed{background:#dcecf2}
+.legend .sw.zone-mode-keep_original{background:#e6e8ea}
+.legend .sw-mirror{display:inline-block;width:1.5rem;height:2px;margin-right:.35rem;vertical-align:4px;
+  background:repeating-linear-gradient(90deg,#46586a 0 10px,transparent 10px 14px,#46586a 14px 16px,transparent 16px 20px)}
+#elevation-note:empty{display:none}
+.zone-preview-hint{font-size:13px;fill:#15617b;paint-order:stroke;stroke:white;stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+.room-step .card.side{padding:1rem 1.25rem}
+.side h3{font-size:1rem;margin:0 0 .15rem;font-weight:600}
+.side p.say{color:#46586a;font-size:.8125rem;margin:0 0 .5rem;line-height:1.5}
+.zone-item{display:grid;grid-template-columns:1.75rem minmax(0,1fr);gap:.6rem;padding:.5rem 0;border-top:1px solid #edf1f2;font-size:.9375rem}
+.zone-item .zone-num{display:inline-grid;place-items:center;width:1.5rem;height:1.5rem;border-radius:5px;background:#172f3d;color:white;font-size:.8125rem}
+.zone-item.zone-mode-keep_original .zone-num,.zone-group[data-group=still] .zone-num{background:#e6e8ea;color:#17212a;border:1px solid #d5e0e4}
+.zone-item.zone-red .zone-num{background:#c0392b;color:white}
+.zone-item b{font-weight:600}
+.zone-item .what{font-size:.8125rem;color:#46586a;line-height:1.5}
+.tag{display:inline-block;font-size:.8125rem;padding:0 .45rem;border-radius:4px;margin-left:.4rem}
+.tag-search{background:#fbe7b5;color:#6d4d00;border:1px solid #ecd08a}
+.tag-fixed{background:#dcecf2;color:#15475a}
+.tag-still,.tag-unknown{background:#e6e8ea;color:#46545b}
+#zone-methods-row{margin:.75rem 0 0}
+#zone-methods-row button.go{display:block;width:100%;padding:.65rem .875rem;border-radius:8px;border:0;background:#172f3d;color:white;font-weight:600;font-size:.9375rem;text-align:left}
+#zone-methods-row small{display:block;color:#46586a;font-size:.8125rem;margin-top:.25rem}
+.side details.fold{margin-top:.6rem;border-top:1px solid #edf1f2;padding-top:.45rem}
+.side details.fold summary{cursor:pointer;font-size:.9375rem}
+.side details.fold summary::marker{color:#46586a}
+#zone-numbers .note{font-size:.8125rem;margin:.4rem 0 0}
+.zone-sizes{font-size:.8125rem;margin:.4rem 0 0}
+.zone-sizes th,.zone-sizes td{padding:.3rem .35rem}
+.zone-sizes td:nth-child(2),.zone-sizes td:nth-child(3),.zone-sizes td:nth-child(4){text-align:right;white-space:nowrap}
+#wall-section #zone-table-fold{margin-top:.75rem}

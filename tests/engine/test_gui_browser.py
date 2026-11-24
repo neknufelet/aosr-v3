@@ -496,7 +496,8 @@ def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
     assert page.locator("#save-id").input_value() == "reference-room-centred"
     page.locator("#room-Lx").fill("5.5")
     # 換範本跟「打開」一樣：上一份的量測草稿、結果連結、封存提示都收掉。
-    page.locator("#material-kind-ceiling").select_option("measured_impedance")
+    # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選那一面、打開。
+    reveal(page, "#material-kind-ceiling").select_option("measured_impedance")
     page.wait_for_selector("#measured-cancel-ceiling")
     page.evaluate("() => { for (const id of ['result-link', 'result-stale', 'scheme-archive-notice'])"
                   " document.getElementById(id).hidden = false; }")
@@ -515,7 +516,7 @@ def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
     for hidden in ("result-link", "result-stale", "scheme-archive-notice"):
         assert page.evaluate("id => document.getElementById(id).hidden", hidden) is True, hidden
     # 牆換成構造再換回固定阻抗：填回去的是載入範本的 30ρc，不是開頁時參考房的值。
-    page.locator("#material-kind-floor").select_option("assembly")
+    reveal(page, "#material-kind-floor").select_option("assembly")
     page.wait_for_selector("#wall-editor-floor [data-layer-field]")
     page.locator("#material-kind-floor").select_option("constant_impedance")
     page.wait_for_selector("#wall-floor")

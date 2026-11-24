@@ -12,21 +12,24 @@ let zoneLimitsRequest = Promise.resolve();
 let zoneLimitsAfterDrag = 0; // 拖框中收下、放開滑鼠才畫的那一次
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
 
-// 這兩區的格子判決回來會重畫：立面圖那一區，和第 1 段右卡的總厚度上限（房間預設）那一格（#1265 從做法表搬過去）。
+// 這兩區的格子判決回來會重畫：立面圖那一區（第 2 段整段，#1265），和第 1 段右卡的總厚度上限（房間預設）那一格。
 const LIMIT_TYPING_AREAS = "#elevation-panel, #depth-editor";
+// 牆面表單（第 2 段「換原本的牆」打開的那一塊，#1265 搬進立面圖那一區）不在內：判決重畫不換它的格子，
+// 以前它在立面圖那一區外面，打字不延後判決、也不被放回焦點反白。
+function inLimitArea(node) { return Boolean(node?.closest?.(LIMIT_TYPING_AREAS)) && !node.closest("#walls"); }
 // 正在打字＝焦點在上面兩區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同；
 // 數字格打了「.」這種還不成數字的字時，值讀起來是空的，瀏覽器另外標 badInput，也算）。
 // 按 Tab 換到別格、按 Enter 確定之後那一格是乾淨的：照畫，畫完把焦點放回同一格，並把那一格整格反白（showZoneLimits）。
 function typingInElevation() {
   const active = document.activeElement;
-  return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest(LIMIT_TYPING_AREAS)
+  return active instanceof HTMLInputElement && active.type !== "checkbox" && inLimitArea(active)
     && (active.value !== active.defaultValue || active.validity.badInput) ? active : null;
 }
 function showZoneLimits(generation) {
   if (generation !== zoneLimitsGeneration) return;
   zoneLimitsShown = generation;
   const active = document.activeElement;
-  const focused = active?.id && active.closest?.(LIMIT_TYPING_AREAS) ? active.id : null;
+  const focused = active?.id && inLimitArea(active) ? active.id : null;
   if (typeof renderElevation === "function") renderElevation();
   if (!focused) return;
   const again = document.getElementById(focused);
@@ -91,20 +94,39 @@ function limitLinesBlock(lines, idPrefix) {
   return block;
 }
 
-// 深度上限：空白＝不給（照下一層或材料自己的限制）；給了要大於 0。改了就重判。
-function depthInput(id, label, value, apply) {
+// 填公分的深度格共用的換算（#1265：輸入頁兩格與「這間房貼什麼」那一頁的「最深」同一支）：記到公釐、大於 0 才收，
+// 回公尺；不收（不是數字、不到 0.1 公分、0 或負的）回 NaN。空白怎麼算由各格自己定，這裡不收空白。
+function depthFromCentimetres(text) {
+  const millimetres = Math.round(Number(text) * 10);
+  return Number.isFinite(millimetres) && millimetres > 0 ? millimetres / 1000 : NaN;
+}
+// 深度上限（填公分，存公尺）：空白＝不給（照下一層或材料自己的限制）；給了要大於 0。改了就重判。
+// 總厚度上限那一格底下的提示句（第 1 段右卡房間預設、第 2 段「這一面另設」）：重畫時搬回同一個節點、不新建，
+// 還沒處理的提示句才不會被洗掉（#1265 單元 2 審查發現 2）；記著是哪一份方案（哪一面）寫的，換了就清——那句講的是別一格。
+// 要在清掉那一塊之前拿（清掉之後節點不在頁面上，找不到就會新建一個空的）。
+function depthNote(id, owner) {
+  const line = document.getElementById(id) ?? document.createElement("p");
+  line.id = id; line.setAttribute("aria-live", "polite");
+  if (line.dataset.owner !== owner) { line.textContent = ""; line.className = ""; line.dataset.owner = owner; }
+  return line;
+}
+// 總厚度上限那幾格共用：收不收只在這裡判一次（空白，或大於 0 的公分數），提示句寫進 note（depthNote 那一行），
+// 收了就清掉。拒收時格子退回最後一次確認的值（defaultValue）：那一格有焦點時不重建，建格當時的值早就過期
+// （#1265 單元 2 審查發現 1：確認過 15 公分再填錯，退回的是空白，還被當成打到一半）。
+function depthInput(id, label, value, blankMeans, note, apply) {
   const wrap = document.createElement("label"); wrap.textContent = label;
-  const input = document.createElement("input"); input.type = "number"; input.min = "0"; input.step = "0.01"; input.id = id;
-  input.defaultValue = value ?? "";  // 確定過的值：跟它不同才算「正在打字」
+  const input = document.createElement("input"); input.type = "number"; input.min = "0"; input.step = "0.1"; input.id = id;
+  input.defaultValue = value == null ? "" : String(centimetres(value));  // 確定過的值：跟它不同才算「正在打字」
   input.addEventListener("change", () => {
     const text = input.value.trim();
-    const number = Number(text);
-    if (text !== "" && !(Number.isFinite(number) && number > 0)) {
-      zoneNote("深度上限要填大於 0 的數字（公尺）；空白表示不給", "notice");
-      input.value = value ?? "";
+    const metres = text === "" ? null : depthFromCentimetres(text);
+    if (Number.isNaN(metres)) {
+      note.textContent = `總厚度上限要填大於 0 的數字（公分）；空白表示${blankMeans}`; note.className = "notice";
+      input.value = input.defaultValue;
       return;
     }
-    apply(text === "" ? null : number);
+    note.textContent = ""; note.className = "";
+    apply(metres);
     input.defaultValue = input.value;
     markStale();
     refreshZoneLimits();
@@ -113,9 +135,9 @@ function depthInput(id, label, value, apply) {
   return wrap;
 }
 // 房間預設那一格在第 1 段右卡（room_facts.js，#1265）；這裡只留這一面。
-function depthRow(wall) {
+function depthRow(wall, note) {
   const row = document.createElement("div"); row.className = "fields"; row.id = "depth-limits";
-  row.append(depthInput(`depth-wall-${wall}`, `${wallNames[wall]}（公尺）`, zoneDesign?.wall_max_depth_m?.[wall], value => {
+  row.append(depthInput(`depth-wall-${wall}`, `${wallNames[wall]}總厚度最多（公分；空白表示照房間預設）`, zoneDesign?.wall_max_depth_m?.[wall], "照房間預設", note, value => {
     const design = designForEdit();
     design.wall_max_depth_m ??= {};
     if (value === null) delete design.wall_max_depth_m[wall]; else design.wall_max_depth_m[wall] = value;
@@ -123,7 +145,7 @@ function depthRow(wall) {
   }));
   const hint = document.createElement("span"); hint.className = "note";
   hint.textContent = "三層（房間預設、這一面、每一區）取最小的；每一區的最深在「這間房貼什麼」選那一區設。指定貼一種的區：貼上去的總厚不能超過它；由程式最佳化的區：程式選的不會超過它";
-  row.append(hint);
+  row.append(hint, note);
   return row;
 }
 function zoneDepthCell(wall, key, setting, cell) {

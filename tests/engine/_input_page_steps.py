@@ -1,4 +1,4 @@
-"""輸入頁的選單、另存框與範本框，第 1 段的摺疊、「改…」與看哪一張圖。鎖頁考題另由頁面程式發點擊。"""
+"""輸入頁的選單、另存框與範本框，第 1 段的摺疊、「改…」與看哪一張圖，第 2 段某一面的牆面表單。鎖頁考題另由頁面程式發點擊。"""
 from typing import cast
 
 from playwright.sync_api import Locator, Page, expect
@@ -76,8 +76,21 @@ def show_view(page: Page, view: str) -> None:
     expect(page.locator(f"#view-{view}")).to_have_attribute("aria-pressed", "true")
 
 
-# 這一格住在第 1 段哪一塊收起來的地方：摺疊、「改…」打開的那一塊、或沒露出來的那一張圖；都不是回 null。
+def show_wall_form(page: Page, wall: str) -> None:
+    """第 2 段某一面原本的牆（#1265 單元 3：牆面表單只露選中那一面，住在牆那一行「換原本的牆」打開的那一塊）：
+    先點那一面的牆名鈕，再打開那一塊；已經選中、已經打開就不動。"""
+    tab = page.locator(f"#elevation-wall-{wall}")
+    if tab.get_attribute("aria-pressed") != "true":
+        _unlocked(page)
+        tab.click()
+        expect(tab).to_have_attribute("aria-pressed", "true")
+    open_fact_editor(page, "edit-wall-original")
+
+
+# 這一格住在哪一塊收起來的地方：第 2 段某一面的牆面表單、摺疊、「改…」打開的那一塊、或沒露出來的那一張圖；都不是回 null。
 _HOLDER_JS = """node => {
+  const wall = node.closest('#walls .wall-editor');
+  if (wall) return ['wall', wall.id.slice('wall-editor-'.length)];
   const fold = node.closest('details.fold');
   if (fold) return ['fold', fold.id];
   const area = node.closest('.fact-editor');
@@ -88,11 +101,11 @@ _HOLDER_JS = """node => {
 
 
 def reveal(page: Page, selector: str) -> Locator:
-    """第 1 段收起來的格子（#1265 起座標、進階、家具、喇叭擺法、總厚度上限、原方案與另外三張圖都要先打開才點得到）：
-    先打開它住的那一塊，回傳那一格；本來就露著的不動。"""
+    """收起來的格子（#1265 起第 1 段的座標、進階、家具、喇叭擺法、總厚度上限、原方案與另外三張圖，單元 3 起第 2 段
+    每一面的牆面表單，都要先打開才點得到）：先打開它住的那一塊，回傳那一格；本來就露著的不動。"""
     target = page.locator(selector)
     holder = cast(list[str] | None, target.first.evaluate(_HOLDER_JS))
     if holder is not None:
         kind, name = holder
-        {"fold": open_fold, "editor": open_fact_editor, "view": show_view}[kind](page, name)
+        {"wall": show_wall_form, "fold": open_fold, "editor": open_fact_editor, "view": show_view}[kind](page, name)
     return target
