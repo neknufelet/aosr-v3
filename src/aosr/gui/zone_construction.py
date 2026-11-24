@@ -125,11 +125,13 @@ class ConstructionPick:
 def construction_pick(material: SurfaceMaterial | None, standalone: Mapping[str, object], recorded: str | None,
                       original: Callable[[], ComparisonWalls | None], room: Room, wall: str, key: str,
                       box: Bounds | None) -> ConstructionPick | None:
-    """能比原牆時照原牆。否則只採用仍逐欄對得上現有材料的指定紀錄。"""
-    identifier = matching_construction(material, standalone)
-    if identifier is None and recorded is None:
+    """先比原牆。舊檔沒有選料代號也能據此認出更換過的裸構造。"""
+    if recorded is None and not isinstance(material, Assembly):
         return None
+    identifier = matching_construction(material, standalone)
     comparison = different_from_original(original(), room, wall, key, box, material)
+    if comparison.state == "unknown" and recorded is None and identifier is None:
+        return None
     if comparison.state == "unknown" and recorded is not None:
         if isinstance(material, Assembly) and standalone.get(recorded) == material:
             return ConstructionPick(recorded, ConstructionComparison("picked", reason=comparison.reason))

@@ -423,12 +423,15 @@ def test_route_answers_drafts_with_200_and_refuses_non_json(tmp_path: Path) -> N
 
 def test_the_search_page_preview_refuses_a_saved_design_with_red_zones(tmp_path: Path) -> None:
     """存好的方案裡固定區貼太深：搜尋頁要開跑參數那一步就被擋（400、原文照講），不必等按開跑。"""
+    from tests.engine.test_gui_gradient_jobs import FakeLauncher
+
     (tmp_path / "schemes").mkdir()
     (tmp_path / "designs").mkdir()
     (tmp_path / "schemes" / "room109.json").write_text(_scheme(_cut()).model_dump_json(), encoding="utf-8")
     design = _design(wall_max_depth_m={"x0": 0.1}, zones={"x0": {"auto1": {"mode": "search"}}})
     (tmp_path / "designs" / "room109.json").write_text(design.model_dump_json(), encoding="utf-8")
-    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1")
+    settings = GuiSettings(engine_commit="a" * 40, data_dir=tmp_path, gradient_launcher=FakeLauncher())
+    client = TestClient(create_app(settings), base_url="http://127.0.0.1")
     response = client.post("/api/gradient/schemes/room109/plan", json={})
     assert response.status_code == 400 and "有超過限制的區" in response.json()["error"]
     (tmp_path / "designs" / "room109.json").write_text(_design(wall_max_depth_m={"x0": 0.2}, zones={"x0": {"auto1": {"mode": "search"}}})
@@ -882,7 +885,9 @@ def test_recorded_pick_across_page_launch_and_preview(tmp_path: Path, case: str)
     elif case == "same":
         assert page["picked_constructions"]["x0"]["z1"]["state"] == "original" and lines == []
     else:
-        assert page["red"] == 0
+        red, = [line for line in lines if line["level"] == "red"]
+        assert page["red"] == 1 and page["refusals"] == ["前牆「z1」：" + red["text"]]
+        assert red["code"] == ("depth_unknown" if case == "changed_surface" else "depth_over")
         label = entry["label"] if case != "deleted" else "chosen"
         assert any(f"設計設定記的那一筆「{label}」跟這一區現在的材料對不上" in line["text"] for line in lines)
 

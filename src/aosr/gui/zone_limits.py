@@ -9,7 +9,7 @@
   固定區貼上去的總深（``MountedOnWall`` 加貼的每一層厚度加總，板與布這類層沒有厚度欄、當 0）超過上限加 ``EDGE_MERGE_TOL`` 就紅（跟搜尋的固定材料候選 ``depth_fit.layers_exceed`` 同一把）。
   固定阻抗與實測表按物理內容認出材料庫那一筆（:func:`picked_entry`），用搜尋的同一把尺判深度。
   裸構造要跟原方案同位置比過才知道是不是選上去的；相同就保留原牆，不同才判深度，六個數字代表六面整面固定阻抗，一定與裸構造不同。
-  沒指原方案，或原方案檔不在、讀不進來（含缺面）、尺寸不同、切線劃過時，改查設計設定記的那一筆；對不上只說明原因和深度。
+  原牆比不出時，改查設計設定記的選料。記錄失配仍按方案現有構造判上限，量不出深度要重選；從未記選料的裸構造沿用原牆比對。
   放回原牆另外需要取得材料；六個數字要轉成材料時，放進設計擺位過不了檢查也用不上。
   搜尋區的上限交給搜尋（開跑請求的 ``max_depths``）；保留原牆的區不加層、管不到。
 - 搜尋區的上限跟材料組自己的限制取較嚴（#1082 段 2-4，判法只在引擎一份 ``fixed_surfaces.target_fit``）：准用的每一組
@@ -46,7 +46,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from aosr.config.material_gradient import NONE_TARGET, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
+from aosr.config.material_gradient import NONE_TARGET, SCHEME_MATERIAL, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
 from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
@@ -54,7 +54,7 @@ from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
 from aosr.gui.zone_design import DEFAULT_MODE, WHOLE_WALL_KEY, DesignSettings, ZoneDesign, ZoneMode
 from aosr.gui.zone_construction import (
-    Bounds, ComparisonWalls, ConstructionComparison, OriginalProblem, OriginalReader, construction_pick, mismatch_words,
+    Bounds, ComparisonWalls, ConstructionPick, OriginalProblem, OriginalReader, construction_pick, mismatch_words,
 )
 from aosr.gui.zone_edit import EDGE_MERGE_TOL, MIN_SIDE_M, ZoneCutError, draft_room, too_small
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MountedOnWall, PorousLayer, SurfaceMaterial
@@ -262,14 +262,14 @@ def _picked_problems(identifier: str, cap: DepthCap, targets: DepthTargets) -> l
 
 
 def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: DepthCap | None,
-                    targets: Callable[[], DepthTargets | None] = lambda: None, *, construction: tuple[str, ConstructionComparison] | None = None) -> list[Problem]:
+                    targets: Callable[[], DepthTargets | None] = lambda: None, *, construction: ConstructionPick | None = None) -> list[Problem]:
     """固定區照已判的裸構造身分給深度與原因；其他直接取代牆面的材料有上限時才查。"""
-    if mode != "fixed":
+    if mode != "fixed" or (construction is not None and construction.comparison.state == "original"):
         return []
-    if construction is not None:
-        identifier, comparison = construction
+    if construction is not None and construction.identifier is not None and not construction.mismatch:
+        identifier, comparison = construction.identifier, construction.comparison
         loaded = targets()
-        if loaded is None or comparison.state == "original":
+        if loaded is None:
             return []
         if comparison.state == "picked":
             return _picked_problems(identifier, cap, loaded) if cap else []
@@ -282,6 +282,16 @@ def _depth_problems(material: SurfaceMaterial | None, mode: ZoneMode, cap: Depth
         return []
     depth = None if material is None else added_depth(material)
     if depth is None:
+        if construction is not None:
+            # 有選料紀錄或已比出跟原牆不同，直接量方案裡保存的實物。
+            fit = fixed_fit(SCHEME_MATERIAL, material, cap.value_m)
+            if fit.usable:
+                return []
+            if fit.material_m is None:
+                return [Problem(code="depth_unknown", level="red",
+                                text=f"看不出這一區現在的材料有多深，無法確認是否符合上限 {cap.words()}。請回「這間房貼什麼」重選一筆材料")]
+            return [Problem(code="depth_over", level="red",
+                            text=f"這一區現在的構造總深 {fit.material_m:g} 公尺，超過深度上限 {cap.words()}")]
         loaded = None if material is None else targets()
         if loaded is not None and material is not None:
             picked = picked_entry(material, loaded)
@@ -550,23 +560,23 @@ class _ZoneCatalog:
 
     def construction(self, room: Room, wall: str, key: str, entry: Mapping[str, object],
                      material: SurfaceMaterial | None, setting: ZoneDesign | None,
-                     lines: list[Problem]) -> tuple[str, ConstructionComparison] | None:
+                     lines: list[Problem]) -> ConstructionPick | None:
         recorded = setting.picked_entry if setting else None
         if not isinstance(material, Assembly) and recorded is None:
             return None
         targets = self.required() if recorded else self.targets
-        if targets is None:
+        if targets is None and recorded is None:
             return None
         pick = construction_pick(material, self.standalone, recorded, lambda: self.original,
                                  room, wall, key, _zone_bounds(room, wall, entry))
         if pick is None:
             return None
         if pick.mismatch:
-            lines.append(Problem(code="depth_pick_mismatch", level="note", text=mismatch_words(targets.label(pick.mismatch))))
-        if pick.identifier is None:
-            return None
-        self.picked.setdefault(wall, {})[key] = {"state": pick.comparison.state, "id": pick.identifier, "label": targets.label(pick.identifier)}
-        return pick.identifier, pick.comparison
+            label = targets.label(pick.mismatch) if targets else pick.mismatch
+            lines.append(Problem(code="depth_pick_mismatch", level="note", text=mismatch_words(label)))
+        if pick.identifier is not None and targets is not None:
+            self.picked.setdefault(wall, {})[key] = {"state": pick.comparison.state, "id": pick.identifier, "label": targets.label(pick.identifier)}
+        return pick
 
 
 def _material(value: object) -> SurfaceMaterial | None:
