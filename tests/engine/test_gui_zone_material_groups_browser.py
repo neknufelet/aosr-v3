@@ -13,7 +13,7 @@ from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, SHORT, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _SELECTED, _apply, _click_zone, _open_overview, _prepare, _save, _settled, _stored)
+    _ALLOWED, _SELECTED, _apply, _click_zone, _expect_selected, _open_overview, _prepare, _save, _settled, _stored)
 from tests.engine.test_gui_zone_material_pick_browser import (
     FLOOR_ONLY,
     FRONT,
@@ -118,7 +118,7 @@ def test_cards_show_their_choices_depth_and_only_a_group_selection_button(tmp_pa
         for index, panel_depth in enumerate(("12.5", "")):
             card = cards.nth(index)
             card.get_by_role("button", name="選這幾區").click()
-            assert set(page.evaluate(_SELECTED)) == expected[index][0]
+            _expect_selected(page, expected[index][0])
             expect(page.locator("#zone-panel-mode-search")).to_be_checked()
             expect(page.locator("#zone-panel-depth")).to_have_value(panel_depth)
             expect(page.locator("#zone-panel-notice")).to_have_count(0)
