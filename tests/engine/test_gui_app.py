@@ -87,9 +87,9 @@ def test_example_template_reads_only_registered_names(tmp_path: Path) -> None:
     raw = json.loads((repo_root() / "blueprint" / "scheme_stage_one_template.json").read_text(encoding="utf-8"))
     rho_c = raw["scene"]["density_kg_m3"] * raw["scene"]["sound_speed_m_s"]
     with _app(tmp_path) as client:
-        # 沒給範本就是參考房，跟明寫 reference 整份相同（開頁預設不變）。
+        # 沒給範本就是參考房，跟明寫 reference 整份相同；網頁用置中那份（#1276）。
         default = client.get("/api/example").json()
-        assert default["scheme"]["scheme_id"] == "reference-room-original"
+        assert default["scheme"]["scheme_id"] == "reference-room-centred"
         assert client.get("/api/example?template=reference").json() == default
         stage_one = client.get("/api/example?template=stage_one")
         assert stage_one.status_code == 200
@@ -114,14 +114,46 @@ def test_example_template_reads_only_registered_names(tmp_path: Path) -> None:
             assert refused.json() == {"error": f"不認得的範本：{name}"}
 
 
+def test_page_example_is_centred_copy_of_reference_room(tmp_path: Path) -> None:
+    """#1276：開頁範例兩支喇叭的中線與主位在房間正中；跟考卷用的原檔只差 y 那幾格與名字。"""
+    original = json.loads((repo_root() / "blueprint" / "scheme_reference_room.json").read_text(encoding="utf-8"))
+    with _app(tmp_path) as client:
+        page = client.get("/api/example").json()["scheme"]
+    centre = page["scene"]["room_m"]["Ly"] / 2
+    left, right = page["speakers"]["left"]["y"], page["speakers"]["right"]["y"]
+    assert (left + right) / 2 == pytest.approx(centre, abs=1e-12)
+    main = next(point for point in page["receiver_set"]["points"] if point["role"] == "primary")
+    assert main["position_m"][1] == pytest.approx(centre, abs=1e-12)
+    shift = centre - (original["speakers"]["left"]["y"] + original["speakers"]["right"]["y"]) / 2
+    expected = json.loads(json.dumps(original))
+    expected["scheme_id"] = "reference-room-centred"
+    for speaker in expected["speakers"].values():
+        speaker["y"] += shift
+    for point in expected["receiver_set"]["points"]:
+        point["position_m"][1] += shift
+    shifted = Scheme.model_validate(expected).model_dump(mode="json")
+    assert _rounded(page) == _rounded(shifted)
+
+
+def _rounded(value: object) -> object:
+    """小數捨到第 9 位再比：y 加位移有二進位尾差，其他每一格要一字不差。"""
+    if isinstance(value, dict):
+        return {key: _rounded(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_rounded(item) for item in value]
+    if isinstance(value, float):
+        return round(value, 9)
+    return value
+
+
 def test_feature_match_note_follows_example_tolerance(tmp_path: Path,
                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     fake_repo = tmp_path / "repo"
     (fake_repo / "blueprint").mkdir(parents=True)
-    example = json.loads((repo_root() / "blueprint" / "scheme_reference_room.json").read_text(
+    example = json.loads((repo_root() / "blueprint" / TEMPLATES["reference"]).read_text(
         encoding="utf-8"))
     example["channel_group"]["feature_match_tolerance_hz"] = 12.5
-    (fake_repo / "blueprint" / "scheme_reference_room.json").write_text(
+    (fake_repo / "blueprint" / TEMPLATES["reference"]).write_text(
         json.dumps(example), encoding="utf-8")
     monkeypatch.setattr("aosr.gui.app.repo_root", lambda: fake_repo)
     with _app(tmp_path / "data") as client:
@@ -201,9 +233,10 @@ def test_plan_endpoint_unchanged_after_move_except_names(tmp_path: Path) -> None
     # 答案是搬家前主線 594b1e6 實跑的原文（出處見 _gui_plan_before_move 的說明），不准重產。
     # #516 視覺一輪第 8 項只改名字：明細從「代號（中文）」改成「中文名（代號）」，中文名查顯示名稱表
     # （喇叭用聲道、座位用座位代號）。所以明細字的冒號後半（座標）與其他每一個欄位仍要跟搬家前一字不差。
+    # 凍結答案是用考卷那份原檔算的；開頁範例 #1276 換成置中那份，所以這題照原檔送。
     tables = label_tables()
+    example = json.loads(Path("blueprint/scheme_reference_room.json").read_text(encoding="utf-8"))
     with _app(tmp_path) as client:
-        example = client.get("/api/example").json()["scheme"]
         roles = {channel["speaker_id"]: channel["role"] for channel in example["channel_group"]["channels"]}
         assert set(RESPONSES) == {"product_default", "omnidirectional"}
         for source_model, expected in RESPONSES.items():

@@ -61,9 +61,9 @@ def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, 
         page.locator("#speaker-left-z").fill("0.955")
         page.locator("#speaker-right-z").fill("0.955")
         page.wait_for_function("document.getElementById('height-left').textContent === ''")
-        assert page.locator("#furniture-table-coordinate").inner_text() == "房間底面中心：x 2.375、y 1.9、z 0.72 公尺"
+        assert page.locator("#furniture-table-coordinate").inner_text() == "房間底面中心：x 2.375、y 2、z 0.72 公尺"
         saved = _save_readback(page, "furnished")
-        expected_cloud = FURNITURE["ceiling_cloud"] | {"placement": {"bottom_center_m": [2.1, 1.9, 2.85], "yaw_deg": 90}}
+        expected_cloud = FURNITURE["ceiling_cloud"] | {"placement": {"bottom_center_m": [2.1, 2.0, 2.85], "yaw_deg": 90}}
         assert saved["furniture"] == [expected_cloud, FURNITURE["sofa"], FURNITURE["desk"]]
         # 每格都能改；材質選單只准用表那一組，平面角不露出。
         assert page.locator("#furniture-sofa-material option").evaluate_all("nodes => nodes.map(n => n.textContent)") == ["布面", "皮面"]

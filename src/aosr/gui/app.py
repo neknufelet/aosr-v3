@@ -161,7 +161,8 @@ def _problems_response(problems: tuple[SchemeProblem, ...], document: object) ->
 
 
 # 輸入頁「範本」選單的兩份：第二階段的參考房、第一階段的六面 30ρc 全向聲源範本（#558）。
-TEMPLATES = {"reference": "scheme_reference_room.json", "stage_one": "scheme_stage_one_template.json"}
+# 參考房給網頁用置中那份（兩支喇叭的中線在房間正中，#1276）；考卷與計算身分用的原檔不動。
+TEMPLATES = {"reference": "scheme_reference_room_centred.json", "stage_one": "scheme_stage_one_template.json"}
 
 
 def _bad(exc: Exception, code: int = 400) -> JSONResponse:
