@@ -398,6 +398,11 @@ button.lnk{color:#155b70;margin-left:.4rem}
 .zone-item.zone-red .zone-num{background:#c0392b;color:white}
 .zone-item b{font-weight:600}
 .zone-item .what{font-size:.8125rem;color:#46586a;line-height:1.5}
+/* 交給搜尋的區底下逐組生效上限（#1265 單元 3 之二第 C 條；放不下的那一組 .limit-warn 橘字照全頁那一條）。 */
+.zone-item .zone-depths{margin-top:.25rem;font-size:.8125rem;line-height:1.45}
+.zone-item .zone-depths p{margin:.1rem 0 0}
+.zone-item .zone-depths .note{color:#46586a}
+#elevation-list-notes .notice{margin:.25rem 0 .5rem;font-size:.8125rem;line-height:1.45}
 .tag{display:inline-block;font-size:.8125rem;padding:0 .45rem;border-radius:4px;margin-left:.4rem}
 .tag-search{background:#fbe7b5;color:#6d4d00;border:1px solid #ecd08a}
 .tag-fixed{background:#dcecf2;color:#15475a}

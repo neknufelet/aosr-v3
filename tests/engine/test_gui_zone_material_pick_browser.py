@@ -353,8 +353,10 @@ def test_the_page_says_optimized_by_the_program_everywhere(tmp_path: Path, brows
         _open_scheme(page, SAMPLE)
         # #1265 單元 3 起進這一頁那一行照示意圖改成「到「這間房貼什麼」，六面一起看…」，不再講做法；輸入頁講做法的地方
         # 是第 2 段的圖例與右欄清單的組名。
-        expect(page.locator("#elevation-legend")).to_contain_text("由程式最佳化")
+        # 圖例選了一面牆才露出來：先點前牆、再看得見的圖例（審查：以前先量，那時圖例還藏著）。
         page.locator("#elevation-wall-yL").click()
+        expect(page.locator("#elevation-legend")).to_be_visible()
+        expect(page.locator("#elevation-legend")).to_contain_text("由程式最佳化")
         expect(page.locator("#wall-zones-search .tag").first).to_have_text("由程式最佳化")
         assert OLD_WORDS not in page.locator("body").inner_text()
         page.locator("#zone-page-open").click()

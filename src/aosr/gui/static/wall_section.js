@@ -41,37 +41,55 @@ function depthLine(wall) {
   if (room != null) return `貼的東西總厚度最多 ${centimetres(room)} 公分（照房間預設）`;
   return "貼的東西總厚度：這一面沒另設，房間預設也沒設上限";
 }
+// 收起牆那一行打開的一塊（room_facts.js 的 toggleEditor 打開的）：那一塊藏起來、鈕記成收著。
+function closeEditor(button, area) {
+  if (byId(area).hidden) return;
+  byId(area).hidden = true;
+  byId(button).setAttribute("aria-expanded", "false");
+}
 function renderWallLine(wall) {
-  const ready = Boolean(wall && scheme && window.elevationGeometry.wallSize(wall));
+  const ready = Boolean(wall && window.elevationGeometry.wallSize(wall));
   byId("elevation-original-line").hidden = !ready;
   byId("elevation-depth-line").hidden = !ready;
   if (!ready) return;
   byId("elevation-original").textContent = `原本的牆：${originalLine(wall)}`;
   byId("elevation-depth").textContent = depthLine(wall);
   // 分區的牆：牆面表單不改它（每一區各自存一份），「換原本的牆」那一塊沒有東西可改，鈕收起來、打開的那一塊也關上。
-  const editable = !zonedWall(wall), button = byId("edit-wall-original");
-  button.hidden = !editable;
-  if (!editable && !byId("wall-original-editor").hidden) {
-    byId("wall-original-editor").hidden = true;
-    button.setAttribute("aria-expanded", "false");
-  }
+  const editable = !zonedWall(wall);
+  byId("edit-wall-original").hidden = !editable;
+  if (!editable) closeEditor("edit-wall-original", "wall-original-editor");
 }
 
 function capWords(wall, key) {
   const cap = zoneCap(wall, key);
   return cap ? `總厚度最多 ${centimetres(cap.value_m)} 公分（${DEPTH_LEVEL_WORDS[cap.level]}）` : "";
 }
-// 每一區那一句：照做法講現在怎樣，接「跟誰左右對稱」（伺服器配好的那一對）。
-function zoneSentence(wall, item, group) {
+// 由程式最佳化的區沒有上限時那一句：只有最新那一次限制檢查回來、而且做成了，才講「沒給上限」；還在路上、沒做成照實講
+// （左邊牆那一行照設計設定寫上限，這裡不能說沒有；#1265 單元 3 審查真錯 5）。
+function noCapWords() {
+  if (!zoneLimits || zoneLimitsReceived !== zoneLimitsGeneration) return "總厚度上限還在核對";
+  if (zoneLimits.status !== "checked") return "總厚度上限沒核對成（限制檢查沒做成）";
+  return "總厚度沒給上限：照材料自己的限制";
+}
+// 「跟誰一對」：用「這間房貼什麼」那一頁同一份配對（zone_overview.js 的 zonePairMarks），兩頁說法一致；選取框底下那一句
+// （elevation.js 的 pairWords）講的是畫框時的幾何鏡像，照舊。
+function pairSentence(marks, item) {
+  const mark = marks.get(item.id);
+  if (mark?.partner) return `${window.zonePartnerWords(mark.partner)}${PAIR_WHERE}。`;
+  return mark?.missed ? `沒配成一對${PAIR_WHERE}。` : "";
+}
+// 每一區那一句：照做法講現在怎樣，接「跟誰一對」。
+function zoneSentence(wall, item, group, marks) {
   const {zone, key} = item;
-  const pair = window.zonePairWords(wall, key);
-  const paired = pair ? `${pair}${PAIR_WHERE}。` : "";
+  const paired = pairSentence(marks, item);
   if (group === "unknown") return `${uncertainWords(item.construction)}。${paired}`;
   if (group === "search") {
     const allowed = item.allowed;
-    const pick = allowed ? `從 ${allowed.length} 種裡挑（${allowed.map(choiceName).join("、")}）`
+    // 從幾種裡挑：跟那一頁小框同一支算（pickableChoices，程式不會挑的那一類不算進 N，另外點名；#1265 單元 3 審查設計洞 2）。
+    const pickable = allowed && pickableChoices(allowed), aside = allowed ? allowed.filter(id => !pickable.includes(id)) : [];
+    const pick = allowed ? `從 ${pickable.length} 種裡挑（${pickable.map(choiceName).join("、")}${aside.length ? `；${aside.map(choiceName).join("、")}程式不會挑` : ""}）`
       : "從全部可調材料與「不貼」裡挑（材料庫沒讀全，列不出是哪幾種）";
-    const cap = capWords(wall, key) || "總厚度沒給上限：照材料自己的限制";
+    const cap = capWords(wall, key) || noCapWords();
     return `已交給程式挑：${pick}，${cap}。現在存的是「${plainNow(zone.material, wall, key)}」，直接算就照它算。${paired}`;
   }
   if (group === "fixed") {
@@ -81,31 +99,39 @@ function zoneSentence(wall, item, group) {
   const words = item.setting.mode === "keep_original" ? keepWords(zone, wall, key) : plainNow(zone.material, wall, key);
   return `${words}。${paired}`;
 }
-function zoneRow(wall, item, group, words) {
+function zoneRow(wall, item, group, words, marks) {
   const row = el("div", `zone-item zone-mode-${item.setting.mode}${zoneIsRed(wall, item.key) ? " zone-red" : ""}`);
   row.id = `wall-zone-${wall}-${item.key}`; row.dataset.zone = `${wall}/${item.key}`;
   const body = el("div");
   const name = el("b", null, item.label.name); name.id = `wall-zone-name-${wall}-${item.key}`;
-  const what = el("div", "what", zoneSentence(wall, item, group)); what.id = `wall-zone-what-${wall}-${item.key}`;
+  const what = el("div", "what", zoneSentence(wall, item, group, marks)); what.id = `wall-zone-what-${wall}-${item.key}`;
   what.append(zoneGotoButton(wall, item.key));
   body.append(name, el("span", `tag tag-${group}`, words), what);
+  const depths = depthTargetLines(wall, item.key, item.setting);
+  if (depths.length) {
+    const block = el("div", "zone-depths"); block.id = `wall-zone-depths-${wall}-${item.key}`;
+    block.append(...depths); body.append(block);
+  }
   row.append(el("span", "zone-num", String(item.label.number)), body);
   return row;
 }
 function renderList(wall) {
   const title = byId("elevation-list-title"), area = byId("elevation-list-zones");
   area.replaceChildren();
-  if (!wall || !scheme || !window.elevationGeometry.wallSize(wall)) {
+  // 兩句錯誤提示（設計設定讀不到、材料庫有問題）講的是整份方案：有方案就寫在清單上方，選不選牆都看得到。
+  byId("elevation-list-notes").replaceChildren(...zoneProblemLines());
+  if (!wall || !window.elevationGeometry.wallSize(wall)) {
     title.textContent = "選一面牆，這裡列出那一面的每一區";
     return;
   }
-  const items = window.zoneFaceZones(wall);
+  const items = window.zoneFaceZones(wall), marks = window.zonePairMarks();
+  // 交給搜尋的區那一句底下接逐組生效上限（zone_limits.js 的 depthTargetLines）。
   title.textContent = items.length === 1 ? `${wallNames[wall]}整面一區` : `${wallNames[wall]}這 ${items.length} 區`;
   for (const [group, words] of GROUPS) {
     const here = items.filter(item => (item.shown === "opening" ? "still" : item.shown) === group);
     if (!here.length) continue;
     const block = el("div", "zone-group"); block.id = `wall-zones-${group}`; block.dataset.group = group;
-    for (const item of here) block.append(zoneRow(wall, item, group, words));
+    for (const item of here) block.append(zoneRow(wall, item, group, words, marks));
     area.append(block);
   }
 }
@@ -114,7 +140,7 @@ function renderNumbers(wall) {
   const area = byId("zone-numbers");
   area.replaceChildren();
   const {views, wallSize, screenBox} = window.elevationGeometry;
-  const size = wall && scheme ? wallSize(wall) : null;
+  const size = wall ? wallSize(wall) : null;
   if (!size) return;
   const [width, height] = size, labels = zoneLabels(wall);
   const zones = zoneList(wall).toSorted((left, right) => labels.get(zoneKey(left)).number - labels.get(zoneKey(right)).number);
@@ -137,11 +163,13 @@ function renderNumbers(wall) {
   }
   area.append(table);
 }
+// 只從 renderZoneTable 叫，而它只在有方案時叫（renderElevation 開頭擋掉沒方案；做法表的下拉、開關也只在有方案時才畫）：
+// 這一支底下都不另判沒方案（#1265 單元 3 審查保險行）。
 function renderWallSection(wall) {
   renderWallLine(wall);
   renderList(wall);
   renderNumbers(wall);
-  byId("elevation-legend").hidden = !(wall && scheme && window.elevationGeometry.wallSize(wall));
+  byId("elevation-legend").hidden = !(wall && window.elevationGeometry.wallSize(wall));
 }
 window.renderWallSection = renderWallSection;
 })();

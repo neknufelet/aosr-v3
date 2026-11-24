@@ -517,6 +517,7 @@ async function storeScheme() {
   if (taken.samePage()) {
     openedId = document.scheme_id;
     $("scheme-archive-notice").hidden = true;
+    window.forgetClearUndo();  // 存好了：「清掉這一面的切法」的復原只到下一個改動之前（#1265 單元 3 審查真錯 3）
   }
   say(saved.message, "ok");
   // 每一區的做法跟著方案存（#1105）；方案已經存好，做法沒存成要照講、不算存檔失敗。
@@ -656,6 +657,7 @@ async function storeSchemeAs(name) {
   }
   if (taken.samePage()) {
     scheme.scheme_id = name; $("save-id").value = name; openedId = name;
+    window.forgetClearUndo();  // 另存成新名字：舊方案清掉前的區不准復原進新方案（#1265 單元 3 審查真錯 3）
     $("result-link").hidden = true; $("result-stale").hidden = true;
     $("scheme-archive-notice").hidden = true;
   }

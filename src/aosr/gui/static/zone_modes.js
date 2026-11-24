@@ -63,6 +63,9 @@ function zoneSetting(wall, key) { return zoneDesign?.zones?.[wall]?.[key] ?? {mo
 // 這一類不進程式最佳化：一區的清單不准「新加」這種代號，本來就存著的照樣留著、可以拿掉（伺服器開跑時會點名拒收）。
 let zoneReference = null;
 function referenceOnly(id) { return Boolean(zoneReference?.ids.includes(id)) && libraryEntry(id)?.kind !== "construction"; }
+// 由程式最佳化的清單裡程式真的會挑的那幾種（#1208：「鋼板直接貼在棉上」那一類不算）；「這間房貼什麼」小框「從 N 種裡選」
+// 與第 2 段右欄「從 N 種裡挑」同一支（#1265 單元 3 審查設計洞 2）。
+function pickableChoices(list) { return list.filter(id => !referenceOnly(id)); }
 // 一份新清單裡這一類的代號，只留那一區本來就存著的（kept）。每一條會寫清單的路都過這一支。
 function keepReferenceOut(next, kept) { return next.filter(id => !referenceOnly(id) || (kept ?? []).includes(id)); }
 // 一區現在的材料是不是這一類：貼上去的那一筆，或原本的面本身（原牆就是材料庫裡那一筆）。材料庫認不到的層管不到。
@@ -312,10 +315,12 @@ function libraryEntry(id) { return (zoneLibrary || []).find(entry => entry.id ==
 function usableHere(entry, wall) { return entry.placement.surfaces.includes(wall); }
 // 寫在括號裡的組名用短名（不套括號，審查 11-15）。
 function groupWords(entry) { return zoneSurfaceShort[entry.placement.group]; }
-// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。
-function hiddenGroups(wall, entries) {
+// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。walls 是一面或幾面（「這間房貼什麼」小框一次選
+// 好幾面，#1265）：小框只列每一面都能貼的，所以有任何一面不能貼就算不列的（照 usableHere 反過來列）。
+function hiddenGroups(walls, entries) {
+  const faces = [walls].flat();
   const groups = new Map(Object.keys(zoneSurfaceGroups).map(group => [group, []]));
-  for (const entry of entries) if (!usableHere(entry, wall)) groups.get(entry.placement.group).push(entry);
+  for (const entry of entries) if (!faces.every(wall => usableHere(entry, wall))) groups.get(entry.placement.group).push(entry);
   return [...groups].filter(([, items]) => items.length);
 }
 // 可調材料的顯示名拿掉尾巴的「（可調厚度與空腔）」：能調什麼另外照條目寫（24K、96K 空腔其實不調）。
@@ -486,6 +491,8 @@ async function changeZoneMode(wall, key, mode) {
   }
   await afterZoneChange();
 }
+// 選的跟這一區原牆一模一樣（#1175）那一句：舊做法表與「這間房貼什麼」小框（#1265 單元 3 之二第 E 條）同一支。
+function sameAsOriginalWords(wall, key) { return `${zoneCalled(wall, key)}：選的跟原本一樣，當成不貼（做法改成「${KEEP_WORDS}」）`; }
 async function chooseFixed(wall, key, materialId) {
   const data = await zoneMaterialChanged(wall, key, {choice: "fixed", material_id: materialId});
   if (!data) { renderZoneTable(wall); return; }
@@ -497,7 +504,7 @@ async function chooseFixed(wall, key, materialId) {
   setZoneSetting(wall, key, next);
   if (data.same_as_original) {
     zoneSameAsOriginal.set(`${wall}/${key}`, libraryEntry(materialId).label);
-    zoneNote(`${zoneCalled(wall, key)}：選的跟原本一樣，當成不貼（做法改成「${KEEP_WORDS}」）`, "ok");
+    zoneNote(sameAsOriginalWords(wall, key), "ok");
   } else zoneSameAsOriginal.delete(`${wall}/${key}`);
   await afterZoneChange();
 }
@@ -561,6 +568,10 @@ function fixedOption(entry, text = `${entry.label}（${entry.basis}）`) {
   const option = document.createElement("option"); option.value = entry.id; option.textContent = text;
   return option;
 }
+// 「顯示全部材料」那幾組的組標題、開關的字、「不是這一面用的」那一句：舊做法表與「這間房貼什麼」小框（#1265）同一份。
+function hiddenGroupLabel(group) { return `不列的：${zoneSurfaceGroups[group]}`; }
+const SHOW_ALL_WORDS = "顯示全部材料（門、窗、整片天花構造、另一間示範房的這些平常不列；要選它們才打開）";
+function awayWords(entry, wall) { return `「${entry.label}」不是${wallNames[wall]}用的：${entry.placement.reason}`; }
 function optionGroup(label, entries) {
   const group = document.createElement("optgroup"); group.label = label;
   for (const entry of entries) group.append(fixedOption(entry));
@@ -584,13 +595,13 @@ function fixedCell(wall, key, zone, cell) {
     select.append(fixedOption(current, pasted ? `${current.label}（現在用的；${groupWords(current)}）`
       : `${current.label}（現在用的：整面就是它，不是貼上去的）`));
   }
-  if (zoneShowAll) for (const [group, entries] of hiddenGroups(wall, fixed)) select.append(optionGroup(`不列的：${zoneSurfaceGroups[group]}`, entries));
+  if (zoneShowAll) for (const [group, entries] of hiddenGroups(wall, fixed)) select.append(optionGroup(hiddenGroupLabel(group), entries));
   select.value = current?.id ?? "";
   select.onchange = () => { if (select.value) action(() => chooseFixed(wall, key, select.value)); };
   cell.append(select);
   if (away && pasted) {
     const line = document.createElement("p"); line.className = "notice"; line.id = `zone-fixed-away-${wall}-${key}`;
-    line.textContent = `「${current.label}」不是${wallNames[wall]}用的：${current.placement.reason}`;
+    line.textContent = awayWords(current, wall);
     cell.append(line);
   }
   if (!current && zone.material.kind !== "mounted_on_wall") cell.append(numbersDetail(zone.material, `zone-numbers-${wall}-${key}`, wall));
@@ -664,7 +675,7 @@ function showAllRow(wall) {
   const wrap = document.createElement("label");
   const box = document.createElement("input"); box.type = "checkbox"; box.id = "zone-show-all"; box.checked = zoneShowAll;
   box.onchange = () => { zoneShowAll = box.checked; renderZoneTable(wall); };
-  wrap.append(box, document.createTextNode("顯示全部材料（門、窗、整片天花構造、另一間示範房的這些平常不列；要選它們才打開）"));
+  wrap.append(box, document.createTextNode(SHOW_ALL_WORDS));
   row.append(wrap);
   return row;
 }
@@ -693,6 +704,13 @@ function keepWords(zone, wall, key) {
   const words = originalWords(originalMaterial(zone.material), wall, key);
   return words === KEEP_WORDS ? words : `${words}，不貼東西`;
 }
+// 設計設定讀不到、材料庫有問題那兩句：第 2 段右欄清單上方（wall_section.js，#1265 單元 3 之二第 D 條）與舊做法表同一支。
+function zoneProblemLines() {
+  return [zoneDesignNote, zoneLibraryProblem].filter(Boolean).map(text => {
+    const line = document.createElement("p"); line.className = "notice"; line.textContent = text;
+    return line;
+  });
+}
 function renderZoneTable(wall) {
   // 六面一起看的那一頁（zone_overview.js）跟這張表同一條路重畫：開檔、切牆、換材料、改做法都會走到這裡。
   window.renderZoneOverview?.();
@@ -704,7 +722,8 @@ function renderZoneTable(wall) {
   refreshClearUndo();
   const area = $("elevation-zones");
   area.replaceChildren();
-  const depthSaid = wall && scheme ? depthNote("depth-wall-note", `${openedId}/${wall}`) : null;  // 清掉那一塊之前拿
+  // 清掉那一塊之前拿；擁有者是第幾次打開＋哪一面（同 room_facts.js 房間預設那一句，#1265 單元 3 審查真錯 4）。
+  const depthSaid = wall && scheme ? depthNote("depth-wall-note", `${zoneDesignGeneration}/${wall}`) : null;
   $("wall-depth-editor").replaceChildren();
   if (!wall || !scheme) return;
   $("wall-depth-editor").append(depthRow(wall, depthSaid));
@@ -712,10 +731,8 @@ function renderZoneTable(wall) {
   hint.textContent = "每一區的候選材料和最深，在「這間房貼什麼」那一頁改（按每一列的「改這一區 ▸」）；這張表只列出來對照。";
   area.append(limitsSummary(), hint);
   if (wallLimitLines(wall).length) area.append(limitLinesBlock(wallLimitLines(wall), `limit-wall-${wall}`));
-  for (const text of [zoneDesignNote, zoneLibraryProblem]) {
-    if (!text) continue;
-    const line = document.createElement("p"); line.className = "notice"; line.textContent = text; area.append(line);
-  }
+  // 這一趟只加不刪（#1265 單元 3 之二）：右欄清單上方加一份，舊表這一份照留到拆表（舊考卷在這裡讀它）。
+  area.append(...zoneProblemLines());
   const table = document.createElement("table"); table.id = `zone-table-${wall}`; table.className = "zone-table";
   const head = document.createElement("tr");
   for (const text of ["區", "大小（公尺）", "做法", "材料", "深度上限（公尺）"]) { const cell = document.createElement("th"); cell.textContent = text; head.append(cell); }

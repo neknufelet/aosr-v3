@@ -145,6 +145,10 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page label.zv-opt-words{display:block;margin:0;cursor:pointer}
 #zone-page .zv-opt .zv-sw{margin-top:5px}
 #zone-page .zv-opt select.zv-pick-material{margin-top:5px;width:100%}
+/* 「顯示全部材料」開關與「不是這一面用的」那一句（#1176 舊做法表那一個搬到小框，#1265）。 */
+#zone-page .zv-show-all{display:flex;gap:6px;align-items:flex-start;margin-top:6px;font-size:13px;color:var(--soft);line-height:1.4}
+#zone-page .zv-show-all input{margin-top:2px}
+#zone-page .zv-away{margin:6px 0 0;font-size:13px;color:#a33;line-height:1.4}
 #zone-page .zv-same{display:inline-block;margin-left:8px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12.5px;line-height:18px;
   vertical-align:2px;background:#fff;white-space:nowrap}
 #zone-page .zv-show{margin:5px 0 3px;padding:7px 10px 3px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}

@@ -215,7 +215,7 @@ def test_a_refused_wall_depth_goes_back_to_the_last_confirmed_value(tmp_path: Pa
         expect(box).to_have_value("15")
         assert page.evaluate("zoneDesign.wall_max_depth_m") == {"x0": 0.15}
         assert page.evaluate("Boolean(typingInElevation())") is False
-        expect(page.locator("#depth-wall-note")).to_have_text("總厚度上限要填大於 0 的數字（公分）；空白表示照房間預設")
+        expect(page.locator("#depth-wall-note")).to_have_text("總厚度上限要填大於 0 的數字（公分，最少 0.1）；空白表示照房間預設")
         for route in held:
             route.continue_()
         page.unroute("**/api/zone-limits")

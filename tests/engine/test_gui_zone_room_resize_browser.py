@@ -8,6 +8,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_fold
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import RUN_ID, _open, _save, _serve, browser as browser, result as result
@@ -59,6 +60,8 @@ def test_resize_saves_each_original_zone(tmp_path: Path, browser: Browser, axis:
             # #1265 單元 3 起分區的牆每一區列在第 2 段右欄「每一區的位置與大小」（選中那一面才列；寫寬 × 高，不寫 u／v）：
             # 先點前牆再看第一區（z1，原本落地到頂）的高跟著變成 3.2。
             page.locator("#elevation-wall-yL").click()
+            open_fold(page, "zone-numbers-fold")  # 摺疊預設收著：點開、看得見才算（審查：收著時 to_contain_text 也讀得到字）
+            expect(page.locator("#zoned-list-yL #zone-size-yL-z1")).to_be_visible()
             expect(page.locator("#zoned-list-yL #zone-size-yL-z1")).to_contain_text("× 3.2")
             page.locator("#elevation-panel").screenshot(path=tmp_path / "front-saved.png")
 

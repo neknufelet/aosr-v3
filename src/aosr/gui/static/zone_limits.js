@@ -100,9 +100,22 @@ function depthFromCentimetres(text) {
   const millimetres = Math.round(Number(text) * 10);
   return Number.isFinite(millimetres) && millimetres > 0 ? millimetres / 1000 : NaN;
 }
+// 數字格裡的公分（#1265 單元 3 審查真錯 1）：數字格收不下千分位逗號（「1,000」會變空白、又被當成正在打字），
+// 格子的值一律用這一支；給人看的字照用 centimetres（帶千分位）。
+function centimetresBox(metres) { return String(Math.round(metres * 1000) / 10); }
+// 公分深度格填的是什麼（輸入頁兩格與「這間房貼什麼」小框的「最深」同一支判法，#1265 單元 3 審查真錯 2）：
+// 瀏覽器讀不出來（unreadable＝validity.badInput，例如打了 --1，這時 value 是空字串）NaN，不當成空白；
+// 空白 null；其餘照 depthFromCentimetres（不收回 NaN）。
+function depthBoxValue(text, unreadable) {
+  if (unreadable) return NaN;
+  const trimmed = text.trim();
+  return trimmed === "" ? null : depthFromCentimetres(trimmed);
+}
+// 不收時那一句（同一支寫）：subject 是哪一格，blank 是那一格空白的意思（各格自己的）。
+function depthRefusedWords(subject, blank) { return `${subject}要填大於 0 的數字（公分，最少 0.1）；空白${blank}`; }
 // 深度上限（填公分，存公尺）：空白＝不給（照下一層或材料自己的限制）；給了要大於 0。改了就重判。
 // 總厚度上限那一格底下的提示句（第 1 段右卡房間預設、第 2 段「這一面另設」）：重畫時搬回同一個節點、不新建，
-// 還沒處理的提示句才不會被洗掉（#1265 單元 2 審查發現 2）；記著是哪一份方案（哪一面）寫的，換了就清——那句講的是別一格。
+// 還沒處理的提示句才不會被洗掉（#1265 單元 2 審查發現 2）；記著是哪一次打開（哪一面）寫的，換了就清——那句講的是別一格。
 // 要在清掉那一塊之前拿（清掉之後節點不在頁面上，找不到就會新建一個空的）。
 function depthNote(id, owner) {
   const line = document.getElementById(id) ?? document.createElement("p");
@@ -116,12 +129,11 @@ function depthNote(id, owner) {
 function depthInput(id, label, value, blankMeans, note, apply) {
   const wrap = document.createElement("label"); wrap.textContent = label;
   const input = document.createElement("input"); input.type = "number"; input.min = "0"; input.step = "0.1"; input.id = id;
-  input.defaultValue = value == null ? "" : String(centimetres(value));  // 確定過的值：跟它不同才算「正在打字」
+  input.defaultValue = value == null ? "" : centimetresBox(value);  // 確定過的值：跟它不同才算「正在打字」
   input.addEventListener("change", () => {
-    const text = input.value.trim();
-    const metres = text === "" ? null : depthFromCentimetres(text);
+    const metres = depthBoxValue(input.value, input.validity.badInput);
     if (Number.isNaN(metres)) {
-      note.textContent = `總厚度上限要填大於 0 的數字（公分）；空白表示${blankMeans}`; note.className = "notice";
+      note.textContent = depthRefusedWords("總厚度上限", `表示${blankMeans}`); note.className = "notice";
       input.value = input.defaultValue;
       return;
     }
@@ -148,26 +160,34 @@ function depthRow(wall, note) {
   row.append(hint, note);
   return row;
 }
+// 交給搜尋的區（#1082 段 2-4）：「個案上限…每一組跟自己的上限取較嚴」那半句，接准用的每一組各自的生效上限、哪一條擋住；
+// 放不下的那一組標出來（橘字，搜尋不換過去）。伺服器逐組寫好一句（zoneLimits.caps[牆][區].targets）。
+// #1265 單元 3 之二第 C 條起畫在第 2 段右欄那一區底下（wall_section.js），舊做法表那一格不再寫；整頁一份、id 照舊。
+// 沒有逐組的（固定的區、沒給上限的）回空的，那一句照舊寫在舊做法表（zoneDepthCell）。
+function depthTargetLines(wall, key, setting) {
+  const cap = zoneCap(wall, key), targets = cap?.targets ?? [];
+  if (setting.mode === "keep_original" || !targets.length) return [];
+  const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
+  now.textContent = `個案上限 ${shownNumber(cap.value_m)} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}）；每一組跟自己的上限取較嚴：`;
+  return [now, ...targets.map((target, index) => {
+    const line = document.createElement("p");
+    line.className = target.usable ? "note" : "limit-warn";
+    line.id = `depth-target-${wall}-${key}-${index}`;
+    line.textContent = target.text;
+    return line;
+  })];
+}
 function zoneDepthCell(wall, key, setting, cell) {
   if (setting.mode === "keep_original") { cell.textContent = "不加層"; return; }
   const depth = document.createElement("p"); depth.className = "note"; depth.id = `depth-zone-${wall}-${key}`;
   depth.textContent = setting.max_depth_m == null ? "這一區沒給" : `這一區給 ${shownNumber(setting.max_depth_m)}`;
   cell.append(depth);
   const cap = zoneCap(wall, key);
+  if (cap?.targets?.length) return;  // 逐組那幾行連那半句在第 2 段右欄（depthTargetLines）
   const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
-  const targets = cap?.targets ?? [];
   now.textContent = !cap ? (setting.mode === "search" ? "沒給：照材料自己的限制" : "沒給上限")
-    : targets.length ? `個案上限 ${shownNumber(cap.value_m)} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}）；每一組跟自己的上限取較嚴：`
     : `生效：${shownNumber(cap.value_m)} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}擋的）`;
   cell.append(now);
-  // 交給搜尋的區（#1082 段 2-4）：准用的每一組各自的生效上限、哪一條擋住；放不下的那一組標出來（搜尋不換過去）。
-  targets.forEach((target, index) => {
-    const line = document.createElement("p");
-    line.className = target.usable ? "note" : "limit-warn";
-    line.id = `depth-target-${wall}-${key}-${index}`;
-    line.textContent = target.text;
-    cell.append(line);
-  });
 }
 function limitsSummary() {
   const line = document.createElement("p"); line.id = "zone-limits-summary";

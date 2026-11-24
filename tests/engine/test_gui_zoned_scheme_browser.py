@@ -6,7 +6,7 @@ from typing import cast
 from playwright.sync_api import Browser, expect
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme, reveal
+from tests.engine._input_page_steps import open_fold, open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ASSEMBLY, NEW, rectangle_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -38,8 +38,11 @@ def test_zoned_walls_are_listed_and_left_alone_when_another_wall_is_edited(tmp_p
         # #1265 單元 3 起分區的牆每一區列在第 2 段右欄「每一區的位置與大小」摺疊（選中那一面才列；一區一列，用區號不寫代號，
         # 列的 id 帶代號）：先點天花。
         page.locator("#elevation-wall-ceiling").click()
+        open_fold(page, "zone-numbers-fold")  # 摺疊預設收著：點開、看得見才算（審查：收著時 to_contain_text 也讀得到字）
+        expect(page.locator("#zoned-ceiling")).to_be_visible()
         expect(page.locator("#zoned-ceiling")).to_contain_text("分成 4 區")
         last = page.locator("#zoned-list-ceiling #zone-size-ceiling-r1_c1")
+        expect(last).to_be_visible()
         expect(last).to_contain_text("1,234.5")  # 只給人看的收位寫法（#1119，千分位）
         for wall in ZONED_WALLS:
             assert page.locator(f"#wall-{wall}").count() == 0 and page.locator(f"#material-kind-{wall}").count() == 0

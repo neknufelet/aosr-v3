@@ -588,7 +588,7 @@ def test_a_refused_total_depth_note_stays_through_redraws_until_a_good_value(tmp
     """審查發現 2：填錯的那一句寫在那一格底下，之後任何重畫（計算中每秒輪詢走的 renderInputBars）都不洗掉；
     改成合法值才消失。收不收只在 depthInput 判一次（room_facts.js 不另寫一份判斷）。"""
     _write(tmp_path, _room(ROOM))
-    refused = "總厚度上限要填大於 0 的數字（公分）；空白表示房間不設上限"
+    refused = "總厚度上限要填大於 0 的數字（公分，最少 0.1）；空白表示房間不設上限"
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         _opened(page, ROOM)

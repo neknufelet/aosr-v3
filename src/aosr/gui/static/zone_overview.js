@@ -53,6 +53,7 @@ const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
 let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
+let panelShowAll = false;       // 小框「指定貼一種」下拉的「顯示全部材料」（#1176 舊做法表那一個搬來，#1265）：只記在這一頁
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
 let ruleDraft = false;          // 「其他牆面」下拉剛選了指定貼一種、還沒選貼哪一種
@@ -135,6 +136,13 @@ function faceZones(wall) {
 }
 // 第 2 段右欄唯讀清單（wall_section.js，#1265 單元 3）照同一份分組：沒貼東西的「指定貼一種」算保留原樣、門窗另認。
 window.zoneFaceZones = faceZones;
+// 第 2 段右欄每一區那一句「跟誰一對」（wall_section.js，#1265 單元 3 審查真錯 5）：用這一頁同一份配對（readPairing，伺服器的 pairs），
+// 不另讀幾何鏡像（partners 只配畫的框、不管做法）。回區代號（牆/區）→ {partner: 那一區} 或 {missed: true}；沒算出配對是空的。
+window.zonePairMarks = () => {
+  const found = readPairing(new Map(Object.keys(wallNames).flatMap(face => faceZones(face)).map(item => [item.id, item])));
+  return found.state === "paired" ? found.marks : new Map();
+};
+window.zonePartnerWords = item => partnerWords(item);
 // 交給推法的那幾區：四面牆照前、後、左、右，每面照號碼，扣掉門窗。
 function ruleZones(faces, roles) { return WALL_ORDER.flatMap(role => faces[roles[role]].filter(item => !item.opening)); }
 // 六面全部由程式最佳化的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
@@ -679,13 +687,18 @@ async function applyMethod(items, method, written = () => {}) {
       inputBusy = false;
     }
   }
+  // 選的跟那一區原牆一模一樣（伺服器回 same_as_original，做法變成不貼）：回話照舊做法表那一句講，不說成改成指定貼一種
+  // （#1265 單元 3 之二第 E 條：回話跟存下來的要對得上）。
+  const same = items.filter((item, index) => method.mode === "fixed" && results[index]?.same_as_original);
+  // 舊做法表那一格「選的跟原本一樣」只寫在表上選的那一次；在這一頁選的照舊收掉（不把話寫回表上）。
   items.forEach((item, index) => {
     setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
     zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
   const pickedNotes = new Set(results.filter(change => change.picked_entry).map(change => change.note));
-  zoneNote([`${items.length} 區改成「${what}」`, ...pickedNotes].join(" "), "ok");
+  const changed = items.length - same.length;
+  zoneNote([...(changed ? [`${changed} 區改成「${what}」`] : []), ...same.map(item => sameAsOriginalWords(item.wall, item.key)), ...pickedNotes].join(" "), "ok");
   unsaved = true;
   written();
   changing += 1; showChanging();
@@ -757,7 +770,7 @@ function panelTicks(items) {
 // 「最深」那一格打開時顯示什麼（公分）：選到的區都一樣就帶出來，不一樣、或都沒有，就是空的。
 function shownDepth(items) {
   const depths = items.map(item => zoneSetting(item.wall, item.key).max_depth_m ?? null);
-  return depths.every(depth => depth === depths[0]) && depths[0] !== null ? String(centimetres(depths[0])) : "";
+  return depths.every(depth => depth === depths[0]) && depths[0] !== null ? centimetresBox(depths[0]) : "";  // 數字格：不帶逗號
 }
 // 「最深」那一格空白是什麼意思（底下那一行與不收時那一句都用它）：選到的區目前都一樣，清空就是不限；各區不同，空白就是沒改。
 function blankDepthWords(items) {
@@ -768,11 +781,8 @@ function blankDepthWords(items) {
 // 清空 null（拿掉）、正數回公尺（記到公釐；不到 1 公釐會變成 0，存檔時伺服器不收，這裡就擋）、其餘 NaN（不收）。
 function draftDepth(items) {
   if (draft.depthText === null) return undefined;
-  if (draft.depthBad) return NaN;
-  const text = draft.depthText.trim();
-  if (text === shownDepth(items)) return undefined;
-  if (text === "") return null;
-  return depthFromCentimetres(text);
+  if (!draft.depthBad && draft.depthText.trim() === shownDepth(items)) return undefined;
+  return depthBoxValue(draft.depthText, draft.depthBad);  // 讀不出來、空白、公分數：跟輸入頁兩格同一支判
 }
 /* ───── 這一區自己的可調範圍（#1199 範圍第 2 支） ───── */
 const RANGE_WORDS = {porous: "棉厚", cavity: "空腔"};
@@ -791,7 +801,7 @@ function ownRange(item, entry) {
   return {porous: own?.porous_m ?? page.porous, cavity: own?.cavity_m ?? page.cavity};
 }
 // 格子裡的字：棉厚是下拉的值（產品厚度的原數，公尺，存檔逐位照它），空腔寫公分。
-function rangeText(part, metres) { return part === "porous" ? String(metres) : String(centimetres(metres)); }
+function rangeText(part, metres) { return part === "porous" ? String(metres) : centimetresBox(metres); }  // 空腔是數字格：不帶逗號
 // 小框打開時每一對格子帶出什麼：會拿到這一種的區（套用後清單裡有它的）現在用的都一樣，就是那一對（values 是原數、texts 是格子裡的字）；
 // 不一樣是 null（兩格空著）。
 function shownRange(items, lists, entry) {
@@ -900,7 +910,7 @@ function draftProblem(items) {
     const ranged = rangeEdits(items, ticks);
     if (ranged.problem) return ranged.problem;
   }
-  if (Number.isNaN(draftDepth(items))) return `「最深」要填大於 0 的數字（公分，最少 0.1）；空白＝${blankDepthWords(items)}`;
+  if (Number.isNaN(draftDepth(items))) return depthRefusedWords("「最深」", `＝${blankDepthWords(items)}`);
   return draft.mode === "search" ? draft.rangeRefused : "";
 }
 async function applyDraft() {
@@ -1065,6 +1075,16 @@ function rangeRow(entry, items, ticks, sync) {
 // 「這一區最深」（設計檔每一區的深度上限，公尺；這裡填公分）：選到的區目前都一樣就帶出來，不一樣就空著。
 // 打字只記進草稿、就地更新套用鈕（sync），不重畫。空格子裡不放提示字（瀏覽器畫提示字的灰量不到對比），空白是什麼意思寫在底下那一行：
 // 格子的值跟打開時一樣就是沒改（draftDepth），所以各區不同時空白＝各區照目前的。
+// 選中的區現在貼的是「不是這一面用的」那一筆（「顯示全部材料」選的，例如前牆貼門）：照舊做法表那一句寫出來；
+// 直接取代整面的（地板本身就是木地板那一筆）是那一面本身，不寫。
+function awayLines(items) {
+  return items.flatMap(item => {
+    const current = libraryLabel(item.zone.material, item.wall, item.key);
+    if (item.zone.material.kind !== "mounted_on_wall" || !current || usableHere(current, item.wall)) return [];
+    const line = el("p", "zv-away", awayWords(current, item.wall)); line.id = `zone-panel-away-${item.wall}-${item.key}`;
+    return [line];
+  });
+}
 function deepestRow(items, walls, sync) {
   const row = el("div", "zv-extra zv-deepest"); row.id = "zone-panel-deepest";
   const name = el("label", "zv-extra-name", items.length > 1 ? "這幾區最深" : "這一區最深"); name.htmlFor = "zone-panel-depth";
@@ -1493,12 +1513,23 @@ function panelCard() {
       const material = el("select", "zv-pick zv-pick-material"); material.id = "zone-panel-material"; material.setAttribute("aria-label", "指定貼哪一種");
       const none = el("option", null, allPasted ? "照現在貼的，不換" : "選要貼哪一種"); none.value = ""; material.append(none);
       const current = draft?.mode === "fixed" && draft.materialId ? libraryEntry(draft.materialId) : null;
-      for (const entry of assignableEntries().filter(item => walls.every(wall => usableHere(item, wall)) || item === current)) {
-        const option = el("option", null, `${vprWords(entry.label)}${entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : ""}`); option.value = entry.id; material.append(option);
+      const option = entry => {
+        const node = el("option", null, `${vprWords(entry.label)}${entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : ""}`); node.value = entry.id;
+        return node;
+      };
+      // 平常只列選中的每一面都能貼的；選了不列的那一筆再關掉「顯示全部」，那一筆照樣列（不然下拉跟選的對不上）。
+      for (const entry of assignableEntries().filter(item => walls.every(wall => usableHere(item, wall)) || (item === current && !panelShowAll))) material.append(option(entry));
+      // 「顯示全部材料」打開：不列的分組列在後面（分組、組標題同舊做法表，zone_modes.js 的 hiddenGroups）。
+      if (panelShowAll) for (const [group, entries] of hiddenGroups(walls, assignableEntries())) {
+        const block = el("optgroup"); block.label = hiddenGroupLabel(group); block.append(...entries.map(option)); material.append(block);
       }
       material.value = draft?.mode === "fixed" ? draft.materialId : "";
       material.onchange = () => choose("fixed", material.value);
-      body.append(material);
+      const all = el("label", "zv-show-all"), box = el("input");
+      box.type = "checkbox"; box.id = "zone-panel-show-all"; box.checked = panelShowAll;
+      box.onchange = () => { panelShowAll = box.checked; renderZoneOverview(); };
+      all.append(box, SHOW_ALL_WORDS);
+      body.append(material, all, ...awayLines(items));
     }
     if (mode === "search" && draft?.mode === "search") {
       // 選到由程式最佳化：這一列底下講從幾種裡選；是哪幾種、各調多少在下面那個材料框（searchForm），全頁只有那一處。
@@ -1506,7 +1537,7 @@ function panelCard() {
       const mixed = ticks?.ids.some(id => ticks.state(id) === "some");
       const from = el("div", "zv-from", !ticks ? "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）"
         : mixed ? `選中的 ${items.length} 區清單不一樣：沒動的勾，各區照目前的。每一區各自最佳化。`
-        : `程式從下面勾的 ${ticks.ids.filter(id => !referenceOnly(id)).length} 種裡選，每一區各自最佳化。`);  // #1208：程式不會挑的那一類不算
+        : `程式從下面勾的 ${pickableChoices(ticks.ids).length} 種裡選，每一區各自最佳化。`);  // #1208：程式不會挑的那一類不算
       from.id = "zone-panel-search-from"; body.append(from);
     }
     row.append(radio, body, el("span", `zv-sw ${shownOf(mode)}`));

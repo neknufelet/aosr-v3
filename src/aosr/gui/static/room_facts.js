@@ -97,7 +97,9 @@ function renderRoomEditors() {
   if (!scheme) return;
   const depth = byId("depth-editor");
   if (!depth.contains(document.activeElement)) {
-    const said = depthNote("depth-room-note", String(openedId));  // 填錯的那一句重畫照留（審查發現 2）
+    // 填錯的那一句重畫照留（審查發現 2）；擁有者是「第幾次打開」（做法世代號：開方案、重開同一份、載入範本都加一），
+    // 不用方案代號（範本都是空的、重開同一份一樣，換了也認不出來；#1265 單元 3 審查真錯 4）。
+    const said = depthNote("depth-room-note", String(zoneDesignGeneration));
     const field = depthInput("depth-room", ROOM_DEPTH_LABEL, zoneDesign?.room_max_depth_m, "房間不設上限", said, value => {
       const design = designForEdit();
       if (value === null) delete design.room_max_depth_m; else design.room_max_depth_m = value;
