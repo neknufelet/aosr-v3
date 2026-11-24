@@ -14,7 +14,7 @@ from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _SELECTED, _apply, _click_zone, _expect_selected, _materials_before, _open_overview, _prepare, _save, _send_to_search,
+    _ALLOWED, _apply, _click_zone, _expect_selected, _materials_before, _open_overview, _prepare, _save, _send_to_search,
     _settled, _stored)
 
 FRONT = ["yL/z1", "yL/z2", "yL/z3", "yL/auto1", "yL/auto2"]

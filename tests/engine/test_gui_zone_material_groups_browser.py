@@ -13,7 +13,7 @@ from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, SHORT, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _SELECTED, _apply, _click_zone, _expect_selected, _open_overview, _prepare, _save, _settled, _stored)
+    _ALLOWED, _apply, _click_zone, _expect_selected, _open_overview, _prepare, _save, _settled, _stored)
 from tests.engine.test_gui_zone_material_pick_browser import (
     FLOOR_ONLY,
     FRONT,
