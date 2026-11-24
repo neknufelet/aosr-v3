@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from collections.abc import Iterable
 from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
@@ -30,6 +32,25 @@ PRODUCT = "slotted_wood_typ9_absorber40_gap98"  # 內建的一筆一般固定成
 KEEP = {"mode": "keep_original"}
 SEARCH = {"mode": "search", "allowed": WOOLS}
 _SELECTED = """() => [...document.querySelectorAll('#zone-map [data-selected=true]')].map(zone => `${zone.dataset.wall}/${zone.dataset.zone}`)"""
+
+
+def _expect_value(page: Page, expression: str, wanted: object, *, sort: bool = False) -> None:
+    """等頁面上某個值（``expression`` 是一支不帶引數的 JS 函式）變成要的：JSON 相同才算，``sort`` 先排序再比；
+    等 10 秒還不對才紅，並印出當下讀到什麼。開著左右對稱時，點區要先等限制檢查回來才換選取（``zone_overview.js``
+    的 ``pick``，#1231）：點完就讀一次，限制檢查一慢就讀到上一個畫面。"""
+    read = f"[...({expression})()].sort()" if sort else f"({expression})()"
+    try:
+        page.wait_for_function(f"wanted => JSON.stringify({read}) === JSON.stringify(wanted)", arg=wanted, timeout=10_000)
+    except PlaywrightTimeoutError as exc:
+        now = page.evaluate(f"() => {read}")
+        raise AssertionError(f"等了 10 秒，讀到 {now}，要 {wanted}") from exc
+
+
+def _expect_selected(page: Page, zones: Iterable[str]) -> None:
+    """等選取變成這幾區（不管先後）。"""
+    _expect_value(page, _SELECTED, sorted(zones), sort=True)
+
+
 _GROUPS = """() => [...document.querySelectorAll('#zone-special .zv-group')].map(group =>
     ({zones: group.dataset.zones.split(' '), what: group.querySelector('.zv-what').textContent}))"""
 _ALLOWED = """() => Object.fromEntries(Object.entries(zoneDesign.zones).flatMap(([wall, zones]) => Object.entries(zones)
@@ -646,7 +667,7 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         expect(page.locator("#zone-page-search-why")).to_have_text("還沒有由程式最佳化的區")
         # 選一區：摘要點名是哪一區。
         _click_zone(page, "yL/z3")
-        assert page.evaluate(marked) == ["yL/z3", "yL/z3"]
+        _expect_value(page, marked, ["yL/z3", "yL/z3"])
         number = page.locator("#zone-map [data-wall='yL'][data-zone='z3'] .zv-badge text").text_content()
         expect(page.locator("#zone-brief-editing")).to_have_text(f"正在改：前牆 {number}")
         assert "（正在改）" not in page.locator("#zone-rules-brief").inner_text()

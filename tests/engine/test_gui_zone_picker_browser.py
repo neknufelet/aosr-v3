@@ -20,7 +20,7 @@ from tests.engine.test_gui_zone_material_pick_browser import (
 )
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _SELECTED, _apply, _click_zone, _open_overview, _prepare, _send_to_search, _stored,
+    _ALLOWED, _SELECTED, _apply, _click_zone, _expect_value, _open_overview, _prepare, _send_to_search, _stored,
 )
 
 
@@ -31,7 +31,8 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
         _open_overview(page)
         _click_zone(page, "yL/z3")
         rows = page.locator("#zone-panel-list > [data-choice]")
-        assert rows.evaluate_all("rows => rows.map(row => row.dataset.choice)") == [WOOLS[0], WOOLS[1], "none"]
+        _expect_value(page, "() => [...document.querySelectorAll('#zone-panel-list > [data-choice]')].map(row => row.dataset.choice)",
+                      [WOOLS[0], WOOLS[1], "none"])
         expect(page.locator("#zone-panel-picker")).to_have_count(0)
         page.locator("#zone-panel-add").click()
         search = page.locator("#zone-panel-picker-search")

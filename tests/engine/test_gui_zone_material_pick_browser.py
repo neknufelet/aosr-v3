@@ -7,13 +7,15 @@ from pathlib import Path
 from typing import cast
 
 from playwright.sync_api import Browser, Locator, Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _SELECTED, _apply, _click_zone, _materials_before, _open_overview, _prepare, _save, _send_to_search, _settled, _stored)
+    _ALLOWED, _apply, _click_zone, _expect_selected, _materials_before, _open_overview, _prepare, _save, _send_to_search,
+    _settled, _stored)
 
 FRONT = ["yL/z1", "yL/z2", "yL/z3", "yL/auto1", "yL/auto2"]
 RIGHT_WITHOUT_OPENINGS = [f"xL/auto{n}" for n in range(1, 7)]
@@ -92,9 +94,25 @@ def _add_candidate(page: Page, choice: str) -> None:
     page.locator(f"#zone-panel-pick-{choice}").click()
 
 
-def _candidate_state(page: Page, choice: str) -> str:
-    row = page.locator(f"#zone-panel-list [data-choice='{choice}']")
-    return row.get_attribute("data-state") or "none" if row.count() else "none"
+_STATES_HELD = """wanted => Object.entries(wanted).every(([choice, state]) => {
+  const row = document.querySelector(`#zone-panel-list [data-choice="${choice}"]`);
+  return (row ? row.getAttribute("data-state") || "none" : "none") === state;
+})"""
+_STATES_NOW = """choices => Object.fromEntries(choices.map(choice => {
+  const row = document.querySelector(`#zone-panel-list [data-choice="${choice}"]`);
+  return [choice, row ? row.getAttribute("data-state") || "none" : "none"];
+}))"""
+
+
+def _expect_candidate_states(page: Page, wanted: dict[str, str]) -> None:
+    """等小框清單每一列畫成要的狀態（沒有那一列算 none）。開著左右對稱時，點區要先等限制檢查回來才換選取
+    （``zone_overview.js`` 的 ``pick``，#1231：本機連跑 5 次紅 5 次）：讀一次就判會讀到上一個畫面。按鈕那幾條路是當下重畫，
+    等一下也無妨。等 10 秒還不對才紅，並印出當下每一列的狀態。"""
+    assert wanted, "至少要指定一列，空的一定綠"
+    try:
+        page.wait_for_function(_STATES_HELD, arg=wanted, timeout=10_000)
+    except PlaywrightTimeoutError as exc:
+        raise AssertionError(f"等了 10 秒，清單是 {page.evaluate(_STATES_NOW, list(wanted))}，要 {wanted}") from exc
 
 
 def _pick_search(page: Page) -> None:
@@ -111,7 +129,7 @@ def test_the_front_wall_is_handed_to_the_program_with_only_48k_or_nothing_in_fiv
         _open_overview(page)
         actions = _Actions()
         actions.click(page.locator("#zone-whole-yL"), "前牆「選整面」")
-        assert sorted(cast(list[str], page.evaluate(_SELECTED))) == sorted(FRONT)
+        _expect_selected(page, FRONT)
         actions.click(page.locator("#zone-panel-mode-search"), "由程式最佳化")
         actions.click(page.locator("#zone-panel-only-glass_wool_48k"), "清掉其他候選")
         actions.fill(page.locator("#zone-panel-depth"), "15")
@@ -154,7 +172,7 @@ def test_select_whole_face_takes_every_zone_of_that_wall_except_doors_and_window
             "zone-whole-x0", "zone-whole-xL", "zone-whole-y0", "zone-whole-yL"]
         expect(page.locator("#zone-whole-xL")).to_have_text("選整面")
         page.locator("#zone-whole-xL").click()
-        assert sorted(cast(list[str], page.evaluate(_SELECTED))) == RIGHT_WITHOUT_OPENINGS
+        _expect_selected(page, RIGHT_WITHOUT_OPENINGS)
         expect(page.locator("#zone-panel h2")).to_have_text("已選 6 區")
         expect(page.locator("#zone-panel-face")).to_contain_text("右牆整面")
         assert page.locator("#zone-panel-face .zv-num").count() == 6
@@ -167,7 +185,7 @@ def test_select_whole_face_takes_every_zone_of_that_wall_except_doors_and_window
         expect(page.locator("#zone-panel-face")).to_have_count(0)
         expect(page.locator("#zone-panel-whole")).to_have_text("改選右牆整面（6 區）")
         page.locator("#zone-panel-whole").click()
-        assert sorted(cast(list[str], page.evaluate(_SELECTED))) == RIGHT_WITHOUT_OPENINGS
+        _expect_selected(page, RIGHT_WITHOUT_OPENINGS)
         # 只點圖上一區：也有那一條；選到的跨兩面牆就沒有。
         page.locator("#zone-panel-cancel").click()
         _click_zone(page, "yL/z3")
@@ -219,6 +237,7 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/auto1")
+        _expect_selected(page, ["yL/auto1"])  # 小框換成這一區之後再判，不然還沒畫出來就先過
         expect(page.locator("#zone-panel-form")).to_have_count(0)
         _pick_search(page)
         rows = page.locator("#zone-panel-list [data-kind='optimizable']")
@@ -382,6 +401,7 @@ def test_the_white_frame_of_a_picked_zone_is_drawn_under_its_number(tmp_path: Pa
         page = watched.page
         _open_overview(page)
         page.locator("#zone-whole-xL").click()
+        _expect_selected(page, RIGHT_WITHOUT_OPENINGS)
         order = cast(list[list[object]], page.evaluate("""() => [...document.querySelectorAll('#zone-map .zv-zone.selected')].map(zone => {
             const ring = zone.querySelector('.zv-ring'), badge = zone.querySelector('.zv-badge');
             return [zone.dataset.zone, Boolean(ring && badge && (ring.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING))]; })"""))
@@ -509,8 +529,7 @@ def test_applying_the_panel_only_adds_and_removes_what_was_ticked_and_keeps_the_
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": on_wall, "floor/auto1": on_floor}
         _click_zone(page, "yL/auto1")
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
-        assert _candidate_state(page, WOOLS[0]) == "all"
-        assert _candidate_state(page, WOOLS[1]) == "none"
+        _expect_candidate_states(page, {WOOLS[0]: "all", WOOLS[1]: "none"})
         _add_candidate(page, "glass_wool_24k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         _apply(page)

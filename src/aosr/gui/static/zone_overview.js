@@ -1705,8 +1705,9 @@ function listCard(group, index, compact) {
     selectGroup = el("span", "zv-editing", "正在改");
     selectGroup.id = selectId;
   } else {
-    selectGroup = button("zv-btn", "選這幾區", selectId, () => {
-      pick(ids);
+    selectGroup = button("zv-btn", "選這幾區", selectId, async () => {
+      // 開著左右對稱時 pick 要先等限制檢查回來才換選取（#1231）：等它換完再捲，先捲的話小框換了內容、標題就不在眼前。
+      await pick(ids);
       $("zone-panel")?.scrollIntoView({block: "start"});
     });
   }
