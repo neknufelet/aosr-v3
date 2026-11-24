@@ -529,6 +529,8 @@ async function refreshJobs() {
   say("connection", "");
   const jobs = reply.body.jobs;
   knownJobs = jobs;
+  // 舊書籤還在等工作詳情：清單裡已經看得到這份工作屬於哪一份，先把返回指過去。
+  if (returnToJob && !byId("back-to-input").hasAttribute("href") && jobOwner(selectedJob)) linkToInput(jobOwner(selectedJob));
   machineBusy = reply.body.busy || null;
   busyProblem = reply.body.busy_problem || null;
   refreshStart();
@@ -544,10 +546,15 @@ async function refreshJobs() {
   byId("job-list").replaceChildren(el("table", {}, el("thead", {}, head), body));
 }
 
+// 工作清單裡記的所屬方案；清單還沒讀到或沒有這一筆就回 null。
+function jobOwner(jobId) {
+  return knownJobs.find(job => job.job_id === jobId)?.scheme_id || null;
+}
+
 function selectJob(jobId) {
   selectedJob = jobId;
   returnToJob = true;
-  const jobScheme = knownJobs.find(job => job.job_id === jobId)?.scheme_id || schemeId;
+  const jobScheme = jobOwner(jobId) || schemeId;
   linkToInput(jobScheme);
   const query = new URLSearchParams();
   if (schemeId) query.set("scheme", schemeId);
@@ -567,7 +574,7 @@ async function refreshJob() {
   byId("job-block").hidden = false;
   if (!view.ok) {
     say("job-state", `讀不到這一跑：${errorText(view)}`, true);
-    if (!byId("back-to-input").hasAttribute("href")) linkToInput(schemeId);
+    if (!byId("back-to-input").hasAttribute("href")) linkToInput(jobOwner(job) || schemeId);
     return;
   }
   if (returnToJob) linkToInput(view.body.scheme_id);

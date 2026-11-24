@@ -190,13 +190,48 @@ def test_loading_bookmark_waits_for_owner_and_respects_a_new_plan(browser: Brows
         with page.expect_request(lambda request: urlsplit(request.url).path == path):
             page.reload()
         back = page.locator("#back-to-input")
-        assert back.get_attribute("href") is None
+        # 工作詳情還沒回來，但工作清單已經記著它屬於哪一份：返回先指向那一份，不指開跑方案。
+        expect(back).to_have_attribute("href", f"/?scheme={NAME}")
         _switch(page, SECOND)
         expect(back).to_have_attribute("href", f"/?scheme={SECOND}")
         held[0].continue_()
         expect(page.locator("#job-title")).to_contain_text(f"這一跑：{NAME}")
         back.click()
         expect(page.locator("#save-id")).to_have_value(SECOND)
+
+
+@pytest.mark.parametrize("plan", [SECOND, None], ids=["with-scheme", "job-only"])
+def test_unknown_job_falls_back_to_the_open_plan_or_home(browser: Browser, tmp_path: Path, plan: str | None) -> None:
+    """網址裡的工作不在清單、詳情也讀不到：返回退回開跑方案，沒有開跑方案就回首頁，不能一直點不動。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    query = "job=0123456789abcdef"
+    if plan:
+        query = f"scheme={plan}&{query}"
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?{query}") as watched:
+        page = watched.page
+        expect(page.locator("#job-state")).to_contain_text("讀不到這一跑")
+        expect(page.locator("#back-to-input")).to_have_attribute("href", f"/?scheme={plan}" if plan else "/")
+
+
+def test_job_detail_failure_still_returns_to_the_job_owner(browser: Browser, tmp_path: Path) -> None:
+    """舊網址（開跑方案是別份）讀工作詳情失敗時，返回照工作清單記的所屬方案，不退回開跑方案。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    job = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    _finish(data_dir, launcher, job, EXIT_STOPPED)
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?scheme={SECOND}&job={job['job_id']}") as watched:
+        page = watched.page
+        page.route(f"**/api/gradient/jobs/{job['job_id']}",
+                   lambda route: route.fulfill(status=500, json={"error": "暫時讀不到"}))
+        page.reload()
+        expect(page.locator("#job-state")).to_contain_text("讀不到這一跑")
+        back = page.locator("#back-to-input")
+        expect(back).to_have_attribute("href", f"/?scheme={NAME}")
+        back.click()
+        expect(page.locator("#save-id")).to_have_value(NAME)
 
 
 def test_switching_scheme_voids_the_old_preview_until_the_new_plan_is_back(browser: Browser, tmp_path: Path) -> None:
