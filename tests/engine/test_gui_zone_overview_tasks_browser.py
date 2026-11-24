@@ -19,6 +19,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -616,8 +617,7 @@ def test_the_first_view_shows_the_way_into_the_page_and_keeps_the_old_table_fold
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(SAMPLE)
-        page.locator("#open-scheme").click()
+        open_scheme(page, SAMPLE)
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg=SAMPLE)
         page.wait_for_function("!document.querySelector('main').inert")
         fold, table, enter = page.locator("#zone-table-fold"), page.locator("#elevation-zones"), page.locator("#zone-page-open")

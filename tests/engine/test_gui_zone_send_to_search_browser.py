@@ -9,6 +9,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._input_page_steps import scripted_open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -282,8 +283,7 @@ def test_the_blocked_words_do_not_follow_into_another_scheme(tmp_path: Path, bro
         _land(page, batch, plan)
         said = page.locator("#zone-page-said")
         expect(said).to_have_text(BLOCKED)
-        page.locator("#scheme-list").evaluate("(node, name) => { node.value = name; }", OTHER)
-        page.locator("#open-scheme").evaluate("node => node.click()")
+        scripted_open_scheme(page, OTHER)
         page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
         _settled(page)
         expect(page.locator("#zone-map")).to_be_visible()
@@ -314,8 +314,7 @@ def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_
         with page.expect_response("**/api/zone-material/batch"):
             page.locator("#zone-panel-apply").evaluate("node => node.click()")
         page.wait_for_function("!inputBusy")
-        page.locator("#scheme-list").evaluate("(node, name) => { node.value = name; }", OTHER)
-        page.locator("#open-scheme").evaluate("node => node.click()")
+        scripted_open_scheme(page, OTHER)
         page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
         results[0].continue_()
         expect(page.locator("#zone-page-note")).to_have_text(f"存檔途中換了方案：「{SAMPLE}」照樣存好，這次不跳搜尋頁")

@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Page, expect
 
 from aosr.physics.zone_fill import Box, fill_wall
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ASSEMBLY, NEW, ROOM_109, room109_document, room109_quarters
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -26,8 +27,7 @@ def _write(tmp_path: Path, document: dict[str, object]) -> None:
 
 
 def _open_scheme(page: Page, name: str) -> None:
-    page.locator("#scheme-list").select_option(name)
-    page.locator("#open-scheme").click()
+    open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
     page.wait_for_function("!document.querySelector('main').inert")
     _unfold_old_table(page)

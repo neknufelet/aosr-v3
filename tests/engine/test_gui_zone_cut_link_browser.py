@@ -11,6 +11,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -219,8 +220,7 @@ def _check_rows(page: Page) -> dict[str, str | None]:
 
 def _switch_to(page: Page, scheme_id: str) -> None:
     page.locator("#zone-page-close").click()
-    page.locator("#scheme-list").select_option(scheme_id)
-    page.locator("#open-scheme").click()
+    open_scheme(page, scheme_id)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=scheme_id)
     page.wait_for_function("!document.querySelector('main').inert")
     page.locator("#zone-page-open").click()

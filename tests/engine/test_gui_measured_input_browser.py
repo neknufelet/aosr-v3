@@ -7,6 +7,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
+from tests.engine._input_page_steps import scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
@@ -195,9 +196,9 @@ def test_raw_point_and_base_values_survive_save_and_parser_errors_keep_line_numb
     (tmp_path / 'schemes' / 'precision.json').write_text(Scheme.model_validate(data).model_dump_json())
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
-        page.locator('#scheme-list').select_option('precision')
+        open_button = scheme_open_button(page, 'precision')
         with page.expect_response('**/api/input-preview'):
-            page.locator('#open-scheme').click()
+            open_button.click()
         page.wait_for_function("!document.querySelector('main').inert")
         page.locator('#measured-source-floor').fill('只改出處；原始數字必須原樣保存')
         saved = _save_readback(page, 'precision-saved')

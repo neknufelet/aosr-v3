@@ -9,6 +9,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
+from tests.engine._input_page_steps import scheme_open_button, scripted_open_scheme
 from tests.engine._zone_panel_steps import apply_and_return, edit_candidates, open_panel
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
@@ -273,9 +274,9 @@ def test_opening_a_scheme_swaps_the_form_only_after_its_zone_design_arrives(tmp_
         page = watched.page
         held: list[Route] = []
         page.route("**/api/designs/room109", lambda route: held.append(route))
-        page.locator("#scheme-list").select_option("room109")
+        open_button = scheme_open_button(page, "room109")
         with page.expect_request("**/api/designs/room109"):
-            page.locator("#open-scheme").click()
+            open_button.click()
         page.wait_for_function("document.querySelector('main').inert")
         assert page.locator("#save-id").input_value() != "room109"
         assert page.evaluate("zoneDesign") is None
@@ -334,7 +335,7 @@ def test_opening_another_scheme_while_send_to_search_saves_is_refused_and_the_ju
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
         _choose(page, "#zone-mode-x0-whole_wall", "search")
-        page.locator("#scheme-list").select_option("other")
+        open_other = scheme_open_button(page, "other")
         held: list[Route] = []
         page.route("**/api/designs/room109",
                    lambda route: held.append(route) if route.request.method == "PUT" else route.continue_())
@@ -345,7 +346,7 @@ def test_opening_another_scheme_while_send_to_search_saves_is_refused_and_the_ju
             page.locator("#zone-to-search").click()
         assert page.evaluate("document.querySelector('main').inert") is True
         # 鎖頁擋得住滑鼠，擋不住頁面程式自己發的點擊：程式裡那道鎖也要擋。
-        page.locator("#open-scheme").evaluate("node => node.click()")
+        open_other.evaluate("node => node.click()")
         expect(page.locator("#open-note")).to_have_text("上一個動作還沒做完，沒有打開「other」；等它做完再按一次「打開」")
         assert page.evaluate("[scheme.scheme_id, zoneDesign.zones.x0.whole_wall.mode]") == ["room109", "search"]
         assert page.locator("#save-id").input_value() == "room109"
@@ -379,8 +380,7 @@ def test_another_scheme_cannot_be_opened_between_the_save_of_send_to_search_and_
         with page.expect_request("**/api/results"):
             page.locator("#zone-to-search").click()
         assert page.evaluate("[document.querySelector('main').inert, inputBusy]") == [True, True]
-        page.locator("#scheme-list").evaluate("node => { node.value = 'other'; }")
-        page.locator("#open-scheme").evaluate("node => node.click()")
+        scripted_open_scheme(page, "other")
         expect(page.locator("#open-note")).to_have_text("上一個動作還沒做完，沒有打開「other」；等它做完再按一次「打開」")
         assert page.evaluate("[scheme.scheme_id, document.querySelector('main').inert]") == ["room109", True]
         held[0].continue_()

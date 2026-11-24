@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page
 
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 
@@ -349,8 +350,7 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
         page.reload(wait_until="networkidle")
         page.locator("#plan-legend li").first.wait_for()
         room = page.locator("#room-Lx").input_value()
-        page.locator("#scheme-list").select_option("outside")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "outside")
         page.wait_for_function("() => document.getElementById('open-note').textContent !== ''")
         below = page.locator("#messages").inner_text()
         note = page.locator("#open-note")

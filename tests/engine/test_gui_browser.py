@@ -24,6 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -213,8 +214,7 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         # 開舊方案時結果連結與舊結果標示一起藏：畫面上那份結果不一定是打開的這一份算的。
         page.locator("#speaker-left-x").fill("1.8")
         assert page.locator("#result-stale").is_visible()
-        page.locator("#scheme-list").select_option("next")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "next")
         page.wait_for_function("() => document.querySelector('#result-link').hidden")
         assert page.locator("#result-stale").is_hidden()
         _assert_quiet(watched)
@@ -411,8 +411,7 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         page.wait_for_function("() => document.querySelector('#save-id').value === 'A'")
         before = (tmp_path / "schemes" / "A.json").read_bytes()
         page.locator("#room-Lx").fill("4.5")
-        page.locator("#scheme-list").select_option("A")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "A")
         page.wait_for_function("() => document.querySelector('#room-Lx').value === '5.5'")
         # 打開的那一份還沒有結果：改了按「儲存」要真的存進去，不是當成另存撞名。
         page.locator("#room-Lx").fill("5.7")

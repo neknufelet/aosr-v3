@@ -21,6 +21,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import RUN_ID, _assert_quiet, _open, _save, _serve, browser as browser, result as result
 from tests.engine.test_gui_wall_words import _part2d_layout
@@ -102,8 +103,7 @@ def test_after_opening_a_scheme_the_way_in_is_on_the_first_screen(tmp_path: Path
         if way == "home-row":
             page.locator(f'#home-schemes li[data-scheme="{SAMPLE}"] button.home-open').click()
         else:
-            page.locator("#scheme-list").select_option(SAMPLE)
-            page.locator("#open-scheme").click()
+            open_scheme(page, SAMPLE)
         _opened(page, SAMPLE)
         # 碰那顆入口之前量：Playwright 的 click 會自己捲，量在後面就量不出「不用捲」。
         assert _inside(page, "#scheme-zone-open")

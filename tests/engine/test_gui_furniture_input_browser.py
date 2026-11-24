@@ -5,6 +5,7 @@ from playwright.sync_api import Browser
 from typing import cast
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine import _furniture_cases as schemes
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser as browser
@@ -23,8 +24,7 @@ def test_input_bad_furniture_plan_shows_chinese_problem_lines(browser: Browser, 
     (tmp_path / "schemes" / "bad-furniture.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("bad-furniture")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "bad-furniture")
         page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間接觸界線')")
         lines = page.locator("#messages").inner_text().splitlines()
         assert_chinese_lines(lines)
@@ -52,8 +52,7 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
         assert not page.locator("#furniture-notice").is_visible()
-        page.locator("#scheme-list").select_option("loaded")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "loaded")
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#furniture-notice")
         assert notice.is_visible()
@@ -84,8 +83,7 @@ def test_input_furniture_notice_is_cleared_when_a_plain_scheme_is_opened_next(br
         notice = page.locator("#furniture-notice")
         assert not notice.is_visible()
         for name, shown in (("furnished", True), ("plain", False)):
-            page.locator("#scheme-list").select_option(name)
-            page.locator("#open-scheme").click()
+            open_scheme(page, name)
             page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
             assert notice.is_visible() is shown and notice.evaluate("el => el.hidden") is not shown
             assert notice.evaluate("el => el.tagName") == "P"

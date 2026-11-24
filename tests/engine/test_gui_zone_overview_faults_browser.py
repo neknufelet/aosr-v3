@@ -13,6 +13,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._zone_naming_room import ZONE_NAMING_LIBRARY, ZONE_NAMING_SCHEME
@@ -681,8 +682,7 @@ def test_the_old_table_unfolds_by_itself_when_a_limit_is_red(tmp_path: Path, bro
     _prepare(tmp_path, {"schema_version": "aosr.zone_design.v1", "scheme_id": SAMPLE, "zones": {}, "wall_max_depth_m": {"yL": 0.01}})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(SAMPLE)
-        page.locator("#open-scheme").click()
+        open_scheme(page, SAMPLE)
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg=SAMPLE)
         page.locator("#elevation-wall-yL").click()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")

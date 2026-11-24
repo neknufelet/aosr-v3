@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine import _speaker_setup_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
@@ -78,8 +79,7 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     name = scheme.scheme_id
     path = tmp_path / "schemes" / f"{name}.json"
     notice = page.locator("#speaker-setup-notice")
-    page.locator("#scheme-list").select_option(name)
-    page.locator("#open-scheme").click()
+    open_scheme(page, name)
     page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
     assert notice.is_visible() and notice.evaluate("el => el.tagName") == "P", mount
     # 編輯器已能改設定；取消舊「不能修改」宣稱，仍守存檔和讀回原值。
@@ -104,8 +104,7 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     assert copied.value.ok
     assert Scheme.model_validate_json((tmp_path / "schemes" / f"{copy}.json").read_bytes()).speaker_setup == scheme.speaker_setup
     page.locator("#scheme-section").screenshot(path=str(tmp_path / f"input-speaker-{mount}.png"))
-    page.locator("#scheme-list").select_option("plain")
-    page.locator("#open-scheme").click()
+    open_scheme(page, "plain")
     page.wait_for_function("document.getElementById('save-id').value === 'plain'")
     assert not notice.is_visible() and notice.evaluate("el => el.hidden"), mount
     assert notice.inner_text() == ""
@@ -178,8 +177,7 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         page.route("**/api/labels", lambda route: route.fulfill(
             status=500, content_type="application/json", body='{"error": "名稱表壞了"}'))
         page.goto(url, wait_until="networkidle")
-        page.locator("#scheme-list").select_option("loaded")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "loaded")
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#speaker-setup-notice")
         assert notice.is_visible()

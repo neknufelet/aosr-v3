@@ -6,6 +6,7 @@ from typing import cast
 from playwright.sync_api import Browser, expect
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ASSEMBLY, NEW, rectangle_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -31,8 +32,7 @@ def test_zoned_walls_are_listed_and_left_alone_when_another_wall_is_edited(tmp_p
     (tmp_path / "schemes" / "zoned.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("zoned")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "zoned")
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg="zoned")
         page.wait_for_function("!document.querySelector('main').inert")
         expect(page.locator("#zoned-ceiling")).to_contain_text("分成 4 區")

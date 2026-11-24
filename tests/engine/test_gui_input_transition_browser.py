@@ -8,6 +8,7 @@ from playwright.sync_api import Browser, Request, Response, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme, scheme_open_button
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -33,8 +34,7 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
         (tmp_path / "schemes" / f"{name}.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("editable")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "editable")
         page.wait_for_function("document.getElementById('save-id').value === 'editable' && !document.querySelector('main').inert")
         page.wait_for_load_state("networkidle")
         held: list[Route] = []
@@ -49,10 +49,10 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
                 route.continue_()
 
         page.route("**/api/input-preview", delay_preview)
-        page.locator("#scheme-list").select_option("readonly")
+        open_button = scheme_open_button(page, "readonly")
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")
                                  and _posted_scheme(request)["scheme_id"] == "readonly"):
-            page.locator("#open-scheme").click()
+            open_button.click()
         # 真鍵盤嘗試修改任一數字格：新版 inert（暫停互動）擋住，舊版會收舊桌子格進新方案。
         page.locator("#room-Lx").evaluate("node => node.focus()")
         page.keyboard.press("ControlOrMeta+A")
@@ -160,8 +160,7 @@ def test_delayed_old_preview_cannot_replace_new_scheme_preview(browser: Browser,
         page.route("**/api/input-preview", lambda route: held.append(route), times=1)
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
             page.locator("#room-Lx").fill("6")
-        page.locator("#scheme-list").select_option("readonly")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "readonly")
         page.wait_for_function("document.getElementById('save-id').value === 'readonly' && !document.querySelector('main').inert")
         assert held
         with page.expect_response(lambda response: response.url.endswith("/api/input-preview")
@@ -218,8 +217,7 @@ def test_failed_handover_refreshes_preview_for_edited_values(browser: Browser, t
     (tmp_path / "schemes" / "desk-scheme.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("desk-scheme")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "desk-scheme")
         page.wait_for_function("document.getElementById('save-id').value === 'desk-scheme' && !document.querySelector('main').inert")
         page.wait_for_load_state("networkidle")
         assert "y 3.825" in page.locator("#furniture-table-coordinate").inner_text()

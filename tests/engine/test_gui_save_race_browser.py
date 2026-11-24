@@ -8,8 +8,9 @@ from typing import cast
 from urllib.parse import urlsplit
 
 import pytest
-from playwright.sync_api import Browser, Page, Request, Route, expect
+from playwright.sync_api import Browser, Locator, Page, Request, Route, expect
 
+from tests.engine._input_page_steps import open_scheme, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -87,9 +88,9 @@ def _press(page: Page, button: str) -> None:
     page.locator(button).evaluate("node => node.click()")
 
 
-def _try_open_b(page: Page) -> None:
+def _try_open_b(page: Page, button: Locator) -> None:
     """存檔卡在半路時去按「打開」B；等到有結果才回：被擋下（旁邊寫了原因）或真的換成 B 了。"""
-    _press(page, "#open-scheme")
+    button.evaluate("node => node.click()")
     page.wait_for_function(
         "name => document.getElementById('open-note').textContent !== '' ||"
         " (document.getElementById('save-id').value === name && !document.querySelector('main').inert)", arg=B)
@@ -112,12 +113,12 @@ def test_opening_another_scheme_while_saving_is_refused_and_the_saved_design_is_
         page = watched.page
         control = _control_save(page, tmp_path)
         b_before = _files(tmp_path, B)
-        page.locator("#scheme-list").select_option(B)
+        open_b = scheme_open_button(page, B)
         held = _hold_first(page, f"**/api/schemes/{A}", "PUT")
         seen = _requests(page)
         with page.expect_request(lambda r: _is_put(r, f"/api/schemes/{A}")):
             page.locator("#save").click()
-        _try_open_b(page)
+        _try_open_b(page, open_b)
         _assert_open_was_refused(page, seen)
         with page.expect_response(lambda r: _is_put(r.request, f"/api/designs/{A}")) as design:
             held[0].continue_()
@@ -175,13 +176,13 @@ def test_calculate_starts_the_scheme_that_was_on_the_form_when_pressed(tmp_path:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         control = _control_save(page, tmp_path)
-        page.locator("#scheme-list").select_option(B)
+        open_b = scheme_open_button(page, B)
         started = _catch_start(page)
         held = _hold_first(page, f"**/api/schemes/{A}", "PUT")
         seen = _requests(page)
         with page.expect_request(lambda r: _is_put(r, f"/api/schemes/{A}")):
             page.locator("#calculate").click()
-        _try_open_b(page)
+        _try_open_b(page, open_b)
         _assert_open_was_refused(page, seen)
         with page.expect_request(lambda r: r.method == "POST" and urlsplit(r.url).path == "/api/runs"):
             held[0].continue_()
@@ -250,11 +251,11 @@ def test_saving_while_another_scheme_is_being_opened_is_refused(tmp_path: Path, 
         page.wait_for_load_state("networkidle")
         before = (_files(tmp_path, A), _files(tmp_path, B))
         page.locator("#save-as-id").fill(COPY)
-        page.locator("#scheme-list").select_option(B)
+        open_b = scheme_open_button(page, B)
         held = _hold_first(page, f"**/api/schemes/{B}", "GET")
         seen = _requests(page)
         with page.expect_request(f"**/api/schemes/{B}"):
-            page.locator("#open-scheme").click()
+            open_b.click()
         _press(page, "#save-as")
         expect(page.locator("#save-as-note")).to_have_text("沒有另存：上一個動作還沒做完，等它做完再按一次「另存新名字」")
         _press(page, "#save")
@@ -555,8 +556,7 @@ def test_why_it_was_not_opened_stays_beside_open_when_the_preview_asked_afterwar
         # 存著的那一份讀出來就檢查不過，「打開」自己不問預覽：之後唯一的一次預覽就是補問的那一次，攔在半路。
         asked: list[Route] = []
         page.route("**/api/input-preview", lambda route: asked.append(route))
-        page.locator("#scheme-list").select_option("race-outside")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "race-outside")
         page.wait_for_function("document.getElementById('open-note').textContent !== ''")
         not_opened = page.locator("#open-note").inner_text()
         assert not_opened.startswith("沒有打開「race-outside」：") and page.locator("#save-id").input_value() == shown

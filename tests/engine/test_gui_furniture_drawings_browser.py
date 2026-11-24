@@ -9,6 +9,7 @@ from playwright.sync_api import Browser, Page
 
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_best_cases import best_store
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._gui_furniture_drawings import listening_document, working_document
@@ -62,8 +63,7 @@ def test_input_draws_boxes_before_points_and_leaves_zoom_clear(browser: Browser,
     (tmp_path / "schemes" / f"{scheme.scheme_id}.json").write_text(scheme.model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url, viewport_width=1440) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(scheme.scheme_id)
-        page.locator("#open-scheme").click()
+        open_scheme(page, scheme.scheme_id)
         page.wait_for_selector("#plan-xy [data-cabinet]")
         names = {item.furniture_id for item in scheme.furniture or ()}
         _assert_boxes(page, "#plan-xy", "#plan-xz", names)
@@ -154,8 +154,7 @@ def test_input_undefined_cabinet_note_keeps_other_cabinet(browser: Browser, tmp_
     (tmp_path / "schemes" / "listen.json").write_text(scheme.model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("listen")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "listen")
         page.wait_for_selector('#plan-xy [data-cabinet="right"]')
         for selector in ("#plan-xy", "#plan-xz"):
             assert page.locator(f"{selector} [data-cabinet]").evaluate_all(
@@ -189,8 +188,7 @@ def test_input_outside_and_blocked_furniture_remains_visible(browser: Browser, t
     (tmp_path / "schemes" / "mix.json").write_text(scheme.model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url, viewport_width=1440) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("mix")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "mix")
         page.wait_for_selector('#plan-xy [data-furniture="seat"]')
         page.locator("#check").click()
         page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間')")

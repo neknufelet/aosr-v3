@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Dialog, Locator, Page, Request, expect
 
 from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
+from tests.engine._input_page_steps import open_scheme, select_scheme
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import BUTTON_LOOK_JS, _assert_quiet, _open, _serve, browser, result
@@ -47,8 +48,7 @@ def test_open_form_archive_restore_then_save_keeps_unsaved_changes(
         _confirm(page)
         for run_status, item in cases.items():
             name = item.scheme.scheme_id
-            page.locator("#scheme-list").select_option(name)
-            page.locator("#open-scheme").click()
+            open_scheme(page, name)
             expect(page.locator("#save-id")).to_have_value(name)
             page.locator("#room-Lx").fill("6.7")
             page.get_by_role("button", name="封存這個方案", exact=True).click()
@@ -84,14 +84,13 @@ def test_restore_other_package_does_not_reconnect_open_form(
     _saved(tmp_path, other)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(name)
-        page.locator("#open-scheme").click()
+        open_scheme(page, name)
         expect(page.locator("#save-id")).to_have_value(name)
         page.locator("#room-Lx").fill("6.7")
         _confirm(page)
         page.get_by_role("button", name="封存這個方案", exact=True).click()
         expect(page.locator("#scheme-archive-notice")).to_be_visible()
-        page.locator("#scheme-list").select_option("other-scheme")
+        select_scheme(page, "other-scheme")
         page.get_by_role("button", name="封存這個方案", exact=True).click()
         expect(_package_row(page, "other-scheme")).to_be_attached()
         page.locator("#archived summary").click()
@@ -121,7 +120,7 @@ def test_archive_confirmation_uses_server_count_for_broken_result(
         messages = _confirm(page)
         for index, (identity_source, (item, _)) in enumerate(cases.items()):
             name = item.scheme.scheme_id
-            page.locator("#scheme-list").select_option(name)
+            select_scheme(page, name)
             _clear_messages(page)
             page.get_by_role("button", name="封存這個方案", exact=True).click()
             expect(page.locator(f'#scheme-list option[value="{name}"]')).not_to_be_attached()
@@ -214,8 +213,7 @@ def test_archive_restore_buttons_confirmation_and_whole_scheme(
     _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(name)
-        page.locator("#open-scheme").click()
+        open_scheme(page, name)
         expect(page.locator("#save-id")).to_have_value(name)
         page.locator("#room-Lx").fill("6.7")
         row = _row(page, "a" * 32)
@@ -264,7 +262,7 @@ def test_dropdown_archives_scheme_without_results(
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _confirm(page)
-        page.locator("#scheme-list").select_option(name)
+        select_scheme(page, name)
         page.get_by_role("button", name="封存這個方案", exact=True).click()
         expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_count(0)
         page.locator("#archived summary").click()
@@ -339,8 +337,7 @@ def test_archive_hides_latest_result_link(
         response = page.request.put(f"{base}/api/schemes/{name}", data=result.scheme.model_dump(mode="json"))
         assert response.status == 200
         page.reload(wait_until="networkidle")
-        page.locator("#scheme-list").select_option(name)
-        page.locator("#open-scheme").click()
+        open_scheme(page, name)
         expect(page.locator("#save-id")).to_have_value(name)
         page.locator("#calculate").click()
         expect(page.locator("#result-link")).to_be_visible(timeout=20_000)
@@ -479,8 +476,7 @@ def test_saving_changed_scheme_marks_archived_row_without_reload(
     saved.write_text(result.scheme.model_dump_json(), encoding="utf-8")
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(result.scheme.scheme_id)
-        page.locator("#open-scheme").click()
+        open_scheme(page, result.scheme.scheme_id)
         page.wait_for_function("id => document.getElementById('save-id').value === id"
                                " && !document.querySelector('main').inert", arg=result.scheme.scheme_id)
         page.locator("#room-Lx").fill(str(result.scheme.scene.room_m.Lx + 0.1))
@@ -544,8 +540,7 @@ def test_archived_open_form_can_save_same_name_as_new_scheme(
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _confirm(page)
-        page.locator("#scheme-list").select_option(name)
-        page.locator("#open-scheme").click()
+        open_scheme(page, name)
         expect(page.locator("#save-id")).to_have_value(name)
         _row(page, run_id).get_by_role("button", name="封存方案", exact=True).click()
         expect(page.locator("#scheme-archive-notice")).to_be_visible()

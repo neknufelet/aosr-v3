@@ -6,6 +6,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -36,8 +37,7 @@ def _save_readback(page: Page, name: str) -> dict[str, object]:
     assert response.value.ok, response.value.text()
     saved = page.request.get(f"{page.url.rstrip('/')}/api/schemes/{name}").json()["scheme"]
     assert saved == Scheme.model_validate(expected).model_dump(mode="json")
-    page.locator("#scheme-list").select_option(name)
-    page.locator("#open-scheme").click()
+    open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
     # 另存已先顯示新名字；開檔還要等預覽交接完，才可開始下一次選單操作。
     page.wait_for_function("!document.querySelector('main').inert")
@@ -139,8 +139,7 @@ def test_readonly_extra_item_survives_browser_collect_and_save(browser: Browser,
     (tmp_path / "schemes" / "old.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("old")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "old")
         page.wait_for_function("document.getElementById('save-id').value === 'old'")
         page.wait_for_function("document.getElementById('readonly-furniture').textContent.includes('舊座椅')")
         assert "這一頁不能改" in page.locator("#readonly-furniture").inner_text()
@@ -183,8 +182,7 @@ def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tm
     (tmp_path / "schemes" / "precise.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("precise")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "precise")
         page.wait_for_function("document.getElementById('save-id').value === 'precise'")
         field = page.locator("#speaker-left-z")
         assert field.input_value() == "1.23456789012"
@@ -218,8 +216,7 @@ def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Bro
     (tmp_path / "schemes" / "readonly-desk.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("readonly-desk")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "readonly-desk")
         page.wait_for_function("document.getElementById('save-id').value === 'readonly-desk'")
         assert page.locator("#furniture-table-kind").is_disabled()
         assert page.locator("#speaker-mount").input_value() == "desk"
@@ -274,8 +271,7 @@ def test_placement_warnings_are_listed_under_speaker_setup(browser: Browser, tmp
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
         expect(page.locator("#placement-warnings")).to_be_hidden()
-        page.locator("#scheme-list").select_option(project.scheme_id)
-        page.locator("#open-scheme").click()
+        open_scheme(page, project.scheme_id)
         page.wait_for_function("id => document.getElementById('save-id').value === id"
                                " && !document.querySelector('main').inert", arg=project.scheme_id)
         tail = "，差 0.16 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。"
