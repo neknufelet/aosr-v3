@@ -8,14 +8,16 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
+from aosr.gradient.cli import EXIT_STOPPED
 from aosr.gui.gradient_plan import GradientRequest
 from aosr.gui.surrogate_builds import BUILD_UNIT_PREFIX
 from aosr.gui.zone_design import write_design
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_gradient_browser import (
-    REFUSED, _axis_scheme, _clean, _data, _installed, _plan_posts, _serve, _tick,
+    REFUSED, _axis_scheme, _clean, _data, _installed, _plan_posts, _serve, _shot, _tick,
 )
 from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _design, _finish, _jobs
 
@@ -89,6 +91,150 @@ def _poll_once(page: Page) -> None:
         _tick(page)
     event.value.finished()
     _flush(page)
+
+
+def _saved_files(data_dir: Path, folders: tuple[str, ...] = ("schemes", "designs", "gradient")) -> dict[Path, bytes]:
+    """比對工作、方案及分區設計的相對路徑和原始位元組，連新增或消失的檔案也會被抓到。"""
+    return {path.relative_to(data_dir): path.read_bytes()
+            for folder in folders
+            for path in (data_dir / folder).rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("reload_page", [False, True], ids=["direct", "reloaded"])
+@pytest.mark.parametrize("read_new_plan", [False, True], ids=["job", "plan"])
+def test_return_to_input_follows_last_selection(browser: Browser, tmp_path: Path,
+                                                read_new_plan: bool, reload_page: bool) -> None:
+    """從甲拿去搜尋、看乙的舊工作；再讀丙的開跑選項才改回丙。重整前後都實際點回輸入頁。"""
+    origin, old, other = "maple-loft", "birch-gallery", "cedar-studio"
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, origin, ONE_ZONE)
+    _add_scheme(data_dir, old, ONE_ZONE)
+    _add_scheme(data_dir, other, THREE_ZONES)
+    launcher = FakeLauncher()
+    job = _jobs(data_dir, launcher).start(old, GradientRequest())
+    _finish(data_dir, launcher, job, EXIT_STOPPED)
+    before = _saved_files(data_dir, ("schemes", "gradient"))
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/?zones={origin}") as watched:
+        page = watched.page
+        page.locator("#zone-page-search").click()
+        expect(page.locator("#scheme-pick")).to_have_value(origin)
+        expect(page.locator("#form-block")).to_be_visible()
+        # 分區頁的「拿去搜尋」會先存設計再換頁。從搜尋頁開始，三類檔案都必須逐位相同。
+        designs_at_search = _saved_files(data_dir, ("designs",))
+        page.get_by_role("row").filter(has_text=old).get_by_role("button", name="看這一跑").click()
+        title = page.locator("#job-title")
+        job_title = f"這一跑：{old}（{str(job['job_id'])[:8]}"
+        expect(title).to_contain_text(job_title)
+        back = page.get_by_role("link", name="回方案輸入頁")
+        expect(back).to_have_attribute("href", f"/?scheme={old}")
+        expect(page.locator("#scheme-pick")).to_have_value(origin)
+        if read_new_plan:
+            _switch(page, other)
+            expect(page.locator("#plan-summary")).to_contain_text("交給搜尋 3 區")
+        if reload_page:
+            page.reload()
+            expect(title).to_contain_text(job_title)
+            expect(page.locator("#scheme-pick")).to_have_value(other if read_new_plan else origin)
+            _shot(page, f"1282-search-{'plan' if read_new_plan else 'job'}")
+        back.click()
+        try:
+            expect(page.locator("#save-id")).to_have_value(other if read_new_plan else old)
+        finally:
+            _shot(page, f"1282-input-{'plan' if read_new_plan else 'job'}-{'reloaded' if reload_page else 'direct'}")
+        page.go_back()
+        expect(page.locator("#scheme-pick")).to_have_value(other if read_new_plan else origin)
+        expect(title).to_contain_text(job_title)
+    assert _saved_files(data_dir) == before | designs_at_search
+
+
+@pytest.mark.parametrize("plan", ["alder-hall", None, NAME], ids=["mixed", "job-only", "same"])
+def test_saved_job_url_returns_to_its_owner(browser: Browser, tmp_path: Path, plan: str | None) -> None:
+    """舊書籤只記工作和可選的開跑方案；重整同一網址再點返回，以實際打開的方案代號為準。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, "alder-hall", ONE_ZONE)
+    launcher = FakeLauncher()
+    job = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    _finish(data_dir, launcher, job, EXIT_STOPPED)
+    before = _saved_files(data_dir)
+    query = f"job={job['job_id']}"
+    if plan:
+        query = f"scheme={plan}&{query}"
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?{query}") as watched:
+        page = watched.page
+        page.reload()
+        expect(page.locator("#job-title")).to_contain_text(f"這一跑：{NAME}（{str(job['job_id'])[:8]}")
+        # 沒指定開跑方案時，下拉仍顯示清單首項，沒有替使用者讀入工作所屬方案的表單。
+        expect(page.locator("#scheme-pick")).to_have_value(plan or "alder-hall")
+        expect(page.locator("#form-block")).to_be_visible(visible=bool(plan))
+        _shot(page, f"1282-bookmark-search-{plan or 'job-only'}")
+        page.get_by_role("link", name="回方案輸入頁").click()
+        try:
+            expect(page.locator("#save-id")).to_have_value(NAME)
+        finally:
+            _shot(page, f"1282-bookmark-input-{plan or 'job-only'}")
+    assert _saved_files(data_dir) == before
+
+
+def test_loading_bookmark_waits_for_owner_and_respects_a_new_plan(browser: Browser, tmp_path: Path) -> None:
+    """舊網址等工作詳情時不能先開錯方案；等候中明確讀取開跑方案，晚到的工作也不能改掉返回目標。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    job = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    _finish(data_dir, launcher, job, EXIT_STOPPED)
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?scheme={SECOND}&job={job['job_id']}") as watched:
+        page = watched.page
+        path = f"/api/gradient/jobs/{job['job_id']}"
+        held: list[Route] = []
+        page.route(f"**{path}", lambda route: held.append(route))
+        with page.expect_request(lambda request: urlsplit(request.url).path == path):
+            page.reload()
+        back = page.locator("#back-to-input")
+        # 工作詳情還沒回來，但工作清單已經記著它屬於哪一份：返回先指向那一份，不指開跑方案。
+        expect(back).to_have_attribute("href", f"/?scheme={NAME}")
+        _switch(page, SECOND)
+        expect(back).to_have_attribute("href", f"/?scheme={SECOND}")
+        held[0].continue_()
+        expect(page.locator("#job-title")).to_contain_text(f"這一跑：{NAME}")
+        back.click()
+        expect(page.locator("#save-id")).to_have_value(SECOND)
+
+
+@pytest.mark.parametrize("plan", [SECOND, None], ids=["with-scheme", "job-only"])
+def test_unknown_job_falls_back_to_the_open_plan_or_home(browser: Browser, tmp_path: Path, plan: str | None) -> None:
+    """網址裡的工作不在清單、詳情也讀不到：返回退回開跑方案，沒有開跑方案就回首頁，不能一直點不動。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    query = "job=0123456789abcdef"
+    if plan:
+        query = f"scheme={plan}&{query}"
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?{query}") as watched:
+        page = watched.page
+        expect(page.locator("#job-state")).to_contain_text("讀不到這一跑")
+        expect(page.locator("#back-to-input")).to_have_attribute("href", f"/?scheme={plan}" if plan else "/")
+
+
+def test_job_detail_failure_still_returns_to_the_job_owner(browser: Browser, tmp_path: Path) -> None:
+    """舊網址（開跑方案是別份）讀工作詳情失敗時，返回照工作清單記的所屬方案，不退回開跑方案。
+    清單另有一筆較新的、屬於別份方案的工作排在最前面：所屬方案要照工作代號找，不是拿清單第一筆。"""
+    data_dir = _data(tmp_path)
+    _add_scheme(data_dir, SECOND, ONE_ZONE)
+    launcher = FakeLauncher()
+    job = _jobs(data_dir, launcher).start(NAME, GradientRequest())
+    _finish(data_dir, launcher, job, EXIT_STOPPED)
+    newer = _jobs(data_dir, launcher).start(SECOND, GradientRequest())
+    _finish(data_dir, launcher, newer, EXIT_STOPPED)
+    with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?scheme={SECOND}&job={job['job_id']}") as watched:
+        page = watched.page
+        page.route(f"**/api/gradient/jobs/{job['job_id']}",
+                   lambda route: route.fulfill(status=500, json={"error": "暫時讀不到"}))
+        page.reload()
+        expect(page.locator("#job-state")).to_contain_text("讀不到這一跑")
+        back = page.locator("#back-to-input")
+        expect(back).to_have_attribute("href", f"/?scheme={NAME}")
+        back.click()
+        expect(page.locator("#save-id")).to_have_value(NAME)
 
 
 def test_switching_scheme_voids_the_old_preview_until_the_new_plan_is_back(browser: Browser, tmp_path: Path) -> None:
