@@ -216,12 +216,15 @@ def test_unknown_job_falls_back_to_the_open_plan_or_home(browser: Browser, tmp_p
 
 
 def test_job_detail_failure_still_returns_to_the_job_owner(browser: Browser, tmp_path: Path) -> None:
-    """舊網址（開跑方案是別份）讀工作詳情失敗時，返回照工作清單記的所屬方案，不退回開跑方案。"""
+    """舊網址（開跑方案是別份）讀工作詳情失敗時，返回照工作清單記的所屬方案，不退回開跑方案。
+    清單另有一筆較新的、屬於別份方案的工作排在最前面：所屬方案要照工作代號找，不是拿清單第一筆。"""
     data_dir = _data(tmp_path)
     _add_scheme(data_dir, SECOND, ONE_ZONE)
     launcher = FakeLauncher()
     job = _jobs(data_dir, launcher).start(NAME, GradientRequest())
     _finish(data_dir, launcher, job, EXIT_STOPPED)
+    newer = _jobs(data_dir, launcher).start(SECOND, GradientRequest())
+    _finish(data_dir, launcher, newer, EXIT_STOPPED)
     with _serve(data_dir, launcher) as base, _open(browser, f"{base}/gradient?scheme={SECOND}&job={job['job_id']}") as watched:
         page = watched.page
         page.route(f"**/api/gradient/jobs/{job['job_id']}",
