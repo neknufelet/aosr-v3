@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.material_editor import MaterialStore, _ENTRY, plain_error, user_library_path
 from aosr.materials.library import builtin_entries, load_user_library
+from tests.engine._construction_cases import construction
 
 COMMIT = "a" * 40
 CREATE = {"If-None-Match": "*"}
@@ -270,6 +271,33 @@ def test_existing_material_cannot_change_kind(tmp_path: Path) -> None:
                 assert reply.json()["error"] == f"這一筆已經存成{kind}，不能直接改成{other}；要換就複製一份"
                 assert user_library_path(tmp_path).read_bytes() == before
             assert client.post("/api/materials/sample/delete", json={}).is_success
+
+
+@pytest.mark.parametrize(("origin", "word"), [("literature", "文獻"), ("measured", "實測")])
+def test_construction_model_put_round_trips_its_citation(tmp_path: Path, origin: str, word: str) -> None:
+    original = construction(id="reed_cassette", label="編葦框", provenance=origin, source="編葦框試片簿")
+    path = "/api/materials/reed_cassette"
+    with _client(tmp_path) as client:
+        assert client.put(path, json=original, headers=CREATE).is_success
+        saved, = json.loads(user_library_path(tmp_path).read_bytes())["materials"]
+        assert saved == original
+        document = saved | {"provenance": "model", "notes": [
+            f"原來源：{word}，出處：編葦框試片簿，網址：https://example.org/test", "自編條件"]}
+        for _ in range(2):
+            assert client.put(path, json=document).is_success
+            assert json.loads(user_library_path(tmp_path).read_bytes())["materials"] == [document]
+
+
+def test_user_product_can_be_updated_through_the_material_api(tmp_path: Path) -> None:
+    original = construction(id="folded_felt", label="摺氈試片", product=True, provenance="measured")
+    path = "/api/materials/folded_felt"
+    with _client(tmp_path) as client:
+        assert client.put(path, json=original, headers=CREATE).is_success
+        assert client.put(path, json=original).is_success  # 已經寫成成品後重送同一筆。
+        updated = original | {"label": "摺氈試片乙"}
+        reply = client.put(path, json=updated)
+        assert reply.status_code == 200, reply.text
+        assert json.loads(user_library_path(tmp_path).read_bytes())["materials"] == [updated]
 
 
 def test_creating_another_material_serializes_the_whole_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
