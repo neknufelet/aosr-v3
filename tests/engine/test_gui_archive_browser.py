@@ -11,7 +11,7 @@ from playwright.sync_api import Browser, Dialog, Locator, Page, Request, expect
 
 from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import archive_scheme, open_save_as, open_scheme
+from tests.engine._input_page_steps import archive_scheme, open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import BUTTON_LOOK_JS, _assert_quiet, _open, _serve, browser, result
@@ -344,7 +344,7 @@ def test_archive_hides_latest_result_link(
         expect(page.locator("#save-id")).to_have_value(name)
         page.locator("#calculate").click()
         expect(page.locator("#result-link")).to_be_visible(timeout=20_000)
-        page.locator("#speaker-left-x").fill("1.7")
+        reveal(page, "#speaker-left-x").fill("1.7")
         expect(page.locator("#result-stale")).to_be_visible()
         expect(page.locator("#result-stale")).to_have_text("設定已修改，這份結果是修改前算的")
         run_id = str(page.locator("#result-link").get_attribute("href")).rsplit("/", 1)[1]

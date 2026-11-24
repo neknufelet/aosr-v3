@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import Browser, expect
 
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import archive_scheme, open_save_as, open_scheme, open_templates, scheme_open_button
+from tests.engine._input_page_steps import archive_scheme, open_save_as, open_scheme, open_templates, reveal, scheme_open_button
 from tests.engine.test_scheme_pipeline import _run_control
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser, result
@@ -83,7 +83,7 @@ def test_locked_then_edited_requires_a_copy(tmp_path: Path, browser: Browser, re
         expect(page.locator("#save")).to_be_hidden()
         expect(page.locator("#calculate")).to_be_enabled()
         expect(page.locator("#zone-to-search")).to_be_enabled()
-        page.locator("#speaker-left-x").fill("1.62")
+        reveal(page, "#speaker-left-x").fill("1.62")
         expect(page.locator("#calculate")).to_be_disabled()
         expect(page.locator("#zone-to-search")).to_be_disabled()
         expect(page.locator("#next-note")).to_have_text("改了以後先按右上「另存新名字」存成新的一份，才能再算")

@@ -21,7 +21,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_scheme, reveal
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import RUN_ID, _assert_quiet, _open, _save, _serve, browser as browser, result as result
 from tests.engine.test_gui_wall_words import _part2d_layout
@@ -159,7 +159,7 @@ def test_a_link_arriving_while_the_form_is_busy_does_not_open_the_zone_page(tmp_
             page.wait_for_function("document.querySelectorAll('#home-schemes .home-open').length > 0")
             template = page.locator("#save-id").input_value()
             assert template and template not in (SAMPLE, WHOLE)
-            page.locator("#furniture-sofa").click()
+            reveal(page, "#furniture-sofa").click()
             page.wait_for_function("inputBusy")
             while not {"results", "edit"} <= held.keys():
                 page.wait_for_timeout(20)

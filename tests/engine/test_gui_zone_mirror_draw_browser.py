@@ -17,6 +17,7 @@ from aosr.gui.zone_edit import CutBox, WallName, cut_wall
 from aosr.gui.zone_symmetry import Frame, ZoneFrame, symmetry_axis
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._input_page_steps import reveal
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag, _open_scheme, _ready_pixel, _write, _zones
@@ -336,7 +337,7 @@ def test_centre_crossing_and_thin_remainder(tmp_path: Path, browser: Browser, st
 def test_axis_unavailable_and_existing_boxes_stay_in_place(tmp_path: Path, browser: Browser) -> None:
     with _room(tmp_path, browser, (FIRST, SECOND)) as page:
         original = _drawn(page)
-        page.locator("#receiver-main-x").fill("2.8")
+        reveal(page, "#receiver-main-x").fill("2.8")
         page.locator("#receiver-main-x").press("Tab")
         _settled(page)
         expect(page.locator("#elevation-axis-words")).to_contain_text("主位不在兩支喇叭中間")
@@ -422,6 +423,7 @@ def test_centring_keeps_the_previous_partner(tmp_path: Path, browser: Browser, m
 @pytest.mark.parametrize("condition", ["side", "axis", "scheme"])
 def test_unpaired_edit_stays_green(tmp_path: Path, browser: Browser, condition: str) -> None:
     with _room(tmp_path, browser, (FIRST,)) as page:
+        reveal(page, "#receiver-main-x")  # #1265 起座標收在第 1 段「座標數字」摺疊裡，點框之前先打開
         if condition == "side":
             page.locator("#elevation-wall-x0").click()
             _drag(page, 5.5, H, START, END)
@@ -491,7 +493,7 @@ def test_positions_off_leave_the_limits_alone(tmp_path: Path, browser: Browser) 
         _settled(page)
         generation = page.evaluate("zoneLimitsGeneration")
         for field in ("speaker-left-x", "receiver-main-x"):
-            page.locator(f"#{field}").fill("2.8")
+            reveal(page, f"#{field}").fill("2.8")
             page.locator(f"#{field}").press("Tab")
             assert page.evaluate("zoneLimitsGeneration") == generation
         page.locator("#zone-page-open").click()

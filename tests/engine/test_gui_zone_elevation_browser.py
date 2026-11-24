@@ -11,7 +11,7 @@ from playwright.sync_api import Browser, Page, expect
 
 from aosr.physics.zone_fill import Box, fill_wall
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ASSEMBLY, NEW, ROOM_109, room109_document, room109_quarters
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -119,6 +119,7 @@ def _check_orientation_and_markers(page: Page) -> None:
     expect(page.locator("#elevation-edge-top")).to_have_text("左牆")
 
     # 表單上改了左喇叭的 y（還沒存），立面圖上的記號跟著搬：x 起點牆上往右移。
+    reveal(page, "#speaker-left-y")  # #1265 起座標收在第 1 段「座標數字」摺疊裡，量之前先打開
     page.locator("#elevation-wall-x0").click()
     before = _centre_x(page, "#elevation-speaker-left")
     page.locator("#speaker-left-y").fill("2.0")

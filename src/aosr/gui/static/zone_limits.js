@@ -12,19 +12,21 @@ let zoneLimitsRequest = Promise.resolve();
 let zoneLimitsAfterDrag = 0; // 拖框中收下、放開滑鼠才畫的那一次
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
 
-// 正在打字＝焦點在立面圖那一區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同；
+// 這兩區的格子判決回來會重畫：立面圖那一區，和第 1 段右卡的總厚度上限（房間預設）那一格（#1265 從做法表搬過去）。
+const LIMIT_TYPING_AREAS = "#elevation-panel, #depth-editor";
+// 正在打字＝焦點在上面兩區的某一格、而且那一格有還沒確定的字（跟畫出來時或上次確定的值不同；
 // 數字格打了「.」這種還不成數字的字時，值讀起來是空的，瀏覽器另外標 badInput，也算）。
 // 按 Tab 換到別格、按 Enter 確定之後那一格是乾淨的：照畫，畫完把焦點放回同一格，並把那一格整格反白（showZoneLimits）。
 function typingInElevation() {
   const active = document.activeElement;
-  return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest("#elevation-panel")
+  return active instanceof HTMLInputElement && active.type !== "checkbox" && active.closest(LIMIT_TYPING_AREAS)
     && (active.value !== active.defaultValue || active.validity.badInput) ? active : null;
 }
 function showZoneLimits(generation) {
   if (generation !== zoneLimitsGeneration) return;
   zoneLimitsShown = generation;
   const active = document.activeElement;
-  const focused = active?.id && active.closest?.("#elevation-panel") ? active.id : null;
+  const focused = active?.id && active.closest?.(LIMIT_TYPING_AREAS) ? active.id : null;
   if (typeof renderElevation === "function") renderElevation();
   if (!focused) return;
   const again = document.getElementById(focused);
@@ -110,12 +112,9 @@ function depthInput(id, label, value, apply) {
   wrap.append(input);
   return wrap;
 }
+// 房間預設那一格在第 1 段右卡（room_facts.js，#1265）；這裡只留這一面。
 function depthRow(wall) {
   const row = document.createElement("div"); row.className = "fields"; row.id = "depth-limits";
-  row.append(depthInput("depth-room", "深度上限：房間預設（公尺）", zoneDesign?.room_max_depth_m, value => {
-    const design = designForEdit();
-    if (value === null) delete design.room_max_depth_m; else design.room_max_depth_m = value;
-  }));
   row.append(depthInput(`depth-wall-${wall}`, `${wallNames[wall]}（公尺）`, zoneDesign?.wall_max_depth_m?.[wall], value => {
     const design = designForEdit();
     design.wall_max_depth_m ??= {};

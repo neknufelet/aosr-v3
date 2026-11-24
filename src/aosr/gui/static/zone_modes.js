@@ -641,9 +641,9 @@ function searchCell(wall, key, zone, setting, cell) {
 }
 function originalSchemeRow() {
   const row = document.createElement("div"); row.className = "fields";
-  const wrap = document.createElement("label"); wrap.textContent = "原方案（算「改善多少」時每一區原本的樣子；也給拆不出原樣的區用）";
+  const wrap = document.createElement("label"); wrap.textContent = "改造前用哪一份方案（算「改善多少」時每一區原本的樣子；也給拆不出原樣的區用）";
   const select = document.createElement("select"); select.id = "original-scheme";
-  const none = document.createElement("option"); none.value = ""; none.textContent = "未指定（拆掉貼上去的層，當成原本的樣子）"; select.append(none);
+  const none = document.createElement("option"); none.value = ""; none.textContent = "沒指定：每一面都只有原本的牆（拆掉貼上去的層）"; select.append(none);
   const self = $("save-id").value;
   for (const name of schemeNames) {
     if (name === self) continue;
@@ -687,11 +687,12 @@ function zoneNameCell(wall, key, label, cell) {
 function renderZoneTable(wall) {
   // 六面一起看的那一頁（zone_overview.js）跟這張表同一條路重畫：開檔、切牆、換材料、改做法都會走到這裡。
   window.renderZoneOverview?.();
+  // 原方案與總厚度上限（房間預設）兩格在第 1 段右卡（#1265）：跟這張表同一條路重畫。
+  window.renderRoomEditors?.();
   const area = $("elevation-zones");
   if (!area) return;
   area.replaceChildren();
   if (!wall || !scheme) return;
-  area.append(originalSchemeRow());
   area.append(depthRow(wall));
   const hint = document.createElement("p"); hint.className = "note"; hint.id = "zone-table-readonly";
   hint.textContent = "每一區的候選材料和最深，在「這間房貼什麼」那一頁改（按每一列的「改這一區 ▸」）；這張表只列出來對照。";

@@ -8,7 +8,7 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_save_as, open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine import _speaker_setup_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
@@ -83,8 +83,8 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
     assert notice.is_visible() and notice.evaluate("el => el.tagName") == "P", mount
     # 編輯器已能改設定；取消舊「不能修改」宣稱，仍守存檔和讀回原值。
-    assert notice.inner_text() == (f"這份方案設了喇叭：{title}；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。")
-    page.locator("#speaker-left-x").fill("2.01")
+    assert notice.inner_text() == (f"這份方案設了喇叭：{title}；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
+    reveal(page, "#speaker-left-x").fill("2.01")
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{name}")
                               and response.request.method == "PUT") as saved:
         page.locator("#save").click()
@@ -182,7 +182,7 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#speaker-setup-notice")
         assert notice.is_visible()
-        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。")
+        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
         # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。
         assert all("500" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []

@@ -9,6 +9,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._input_page_steps import reveal
 from tests.engine._zone_panel_steps import edit_candidates, edit_depth
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -30,6 +31,7 @@ def _settled(page: Page) -> None:
 
 def _depth(page: Page, selector: str, value: str) -> None:
     """填一格深度上限（離開那一格才算確定），等這一次的判決畫上去。"""
+    reveal(page, selector)  # #1265 起房間那一格收在第 1 段「改總厚度上限」裡，先打開
     before = cast(int, page.evaluate("zoneLimitsGeneration"))
     page.locator(selector).fill(value)
     page.locator(selector).blur()
@@ -191,6 +193,7 @@ def test_a_late_verdict_never_eats_a_half_typed_limit(tmp_path: Path, browser: B
         _red(page, "z1")
 
         # 空白的房間格只打了「.」：值讀起來是空的、跟確定過的一樣，但那是打到一半的字，不准被重畫吃掉。
+        reveal(page, "#depth-room")
         page.route("**/api/zone-limits", lambda route: held.append(route))
         with page.expect_request("**/api/zone-limits"):
             page.evaluate("() => { window.before = zoneLimits; refreshZoneLimits(); }")
@@ -302,7 +305,7 @@ def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp
         _depth(page, "#depth-wall-x0", "")
         _clear(page, "z1")
 
-        page.locator("#depth-room").fill("0.1")
+        reveal(page, "#depth-room").fill("0.1")
         page.locator("#depth-room").press("Tab")
         _settled(page)
         _red(page, "z1")

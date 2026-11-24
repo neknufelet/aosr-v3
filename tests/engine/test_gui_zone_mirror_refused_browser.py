@@ -312,7 +312,7 @@ def test_repair_side_message_and_switch(tmp_path: Path, browser: Browser) -> Non
         _drag(page, 5.5, H, START, END, during=during)
         _settled(page)
         expect(page.locator("#elevation-banner")).to_contain_text(words)
-        expect(page.locator("#elevation-note")).to_contain_text("喇叭與座位")
+        expect(page.locator("#elevation-note")).to_contain_text("『房間和擺位』的『座標數字』")
         expect(page.locator("#elevation-note")).not_to_contain_text("補畫另一邊")
         page.locator("#elevation-wall-xL").click()
         expect(page.locator("#elevation-note")).to_be_empty()

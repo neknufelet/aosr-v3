@@ -17,6 +17,7 @@
   <script src="/static/zone_rules.js" defer></script>
   <script src="/static/material-kind.js" defer></script>
   <script src="/static/zone_overview.js" defer></script>
+  <script src="/static/room_facts.js" defer></script>
   <script src="/static/home.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
@@ -52,7 +53,7 @@
       <h2 id="leave-title">這一份有改動還沒存</h2><p id="leave-note"></p>
       <button value="cancel" autofocus>取消</button><button value="discard">不存走</button><button value="save">存了再走</button>
     </form></dialog>
-    <h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p>
+    <h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p>
     <section id="home"><h2 id="home-title">讀取中…</h2><p id="home-facts"></p>
       <div class="home-top"><figure id="home-picture" hidden><svg id="home-room" role="img" aria-label="最近算的房間俯視圖：前牆在上"></svg>
           <figcaption><span class="home-legend"><span class="home-key home-simulated"></span>貼了吸音材料，數字是電腦算的（模擬，之後要拿實測對照）</span>
@@ -64,15 +65,84 @@
           <a id="home-layout" class="home-go" href="/search-start"><b>挑擺位：喇叭和座位放哪（擺位搜尋）</b><span class="home-note"></span></a>
           <p class="note">要改房間、喇叭或座位：在頂條按「換一個方案」選那一份，改完按頁底「照現在牆上貼的算一次」。下面的表單一開頁是範本，不是上面這一間。</p></nav></div>
     </section>
-    <section id="scheme-section"><h2>方案</h2>
+    <section id="scheme-section" class="room-step" aria-labelledby="room-step-title">
+      <h2 id="room-step-title"><span class="step-no" aria-hidden="true">1</span><span class="step-title">房間和擺位</span>
+        <span class="say">邊上的數字是房間尺寸，直接改；喇叭與主位的位置在右邊改</span></h2>
       <p id="scheme-zone-row"><button id="scheme-zone-open" type="button">設定每一區貼什麼 ▸</button><span>上面這一份方案每一面牆、每一區要貼什麼、不貼、還是由程式最佳化，都在「這間房貼什麼」那一頁設定。</span></p>
       <p id="scheme-archive-notice" class="notice" aria-live="polite" hidden></p>
-      <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
-      <p id="furniture-notice" class="notice" hidden></p>
-      <p id="speaker-setup-notice" class="notice" hidden></p>
+      <div class="roomrow">
+        <div class="card room-plan">
+          <div class="viewrow"><span id="plan-views-title">看哪一張圖</span><span class="seg" id="plan-views" role="group" aria-labelledby="plan-views-title">
+            <button type="button" id="view-plan-xy" data-view="plan-xy" aria-pressed="true">平面</button><button type="button" id="view-plan-xz" data-view="plan-xz" aria-pressed="false">側面</button><button type="button" id="view-zoom-xy" data-view="zoom-xy" aria-pressed="false">聆聽區平面放大</button><button type="button" id="view-zoom-xz" data-view="zoom-xz" aria-pressed="false">聆聽區側面放大</button></span></div>
+          <div class="plan-frame">
+            <div id="room-fields" class="room-dims"></div>
+            <div class="drawings" id="plan-drawings">
+              <div class="drawing shown" data-view="plan-xy"><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
+              <div class="drawing" data-view="plan-xz"><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div>
+              <div class="drawing" data-view="zoom-xy"><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div>
+              <div class="drawing" data-view="zoom-xz"><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
+          </div>
+          <p id="plan-detail" aria-live="polite"></p>
+          <p class="hint">尺寸改了，牆上切好的區會跟著牆邊長或縮；放不下的那一面會講是哪一區。</p>
+        </div>
+        <div id="input-setup" class="card facts" role="group" aria-label="這間房現在">
+          <div id="room-result" class="last" data-state="never"><span class="k" id="room-result-title">還沒算過</span><span id="room-result-text">按頁底「照現在牆上貼的算一次」；算好後，結果就出現在這一行。</span><a id="room-result-link" hidden>看結果 ▸</a></div>
+          <div class="fact" id="fact-room"><span class="k">房間</span>
+            <div class="v"><span id="fact-room-text"></span><small id="fact-depth-text"></small></div>
+            <button type="button" class="mini" id="edit-depth" aria-expanded="false" aria-controls="depth-editor">改總厚度上限</button>
+            <div class="fact-editor" id="depth-editor" hidden></div></div>
+          <div class="fact" id="fact-speakers"><span class="k">喇叭</span>
+            <div class="v"><span id="fact-speakers-text"></span><small id="fact-speakers-kind"></small>
+              <p id="speaker-setup-notice" class="notice fact-note" hidden></p><p id="stand-height-hint" class="notice fact-note" aria-live="polite"></p></div>
+            <button type="button" class="mini" id="edit-speakers" aria-expanded="false" aria-controls="speaker-editor">改喇叭與擺法</button>
+            <div class="fact-editor" id="speaker-editor" hidden>
+              <label><input id="use-speaker-setup" type="checkbox">設定喇叭箱體與擺法</label>
+              <div id="speaker-setup-fields" hidden>
+                <div class="fields"><label>喇叭類型<select id="speaker-kind"></select></label>
+                  <label>喇叭擺法<select id="speaker-mount"></select></label>
+                  <label><input id="representative" type="checkbox">代表模型</label><span id="representative-state"></span></div>
+                <div id="cabinet-fields" class="fields"></div>
+                <p>喇叭聲學中心高度在「座標數字」裡喇叭的 z 格填寫，可以手改；切換擺法會保留原高度。</p>
+              </div>
+              <p class="note">兩支喇叭放在哪（x、y、z）在下面「座標數字」改。</p></div></div>
+          <div class="fact" id="fact-primary"><span class="k">主位</span>
+            <div class="v"><span id="fact-primary-text"></span><small>工作／聆聽姿勢切換會一起改主位與周圍點的高度和家具；喇叭高度與天雲不動</small></div>
+            <span class="seg shortcut-actions" role="group" aria-label="姿勢"><button type="button" id="shortcut-working" aria-pressed="false">工作姿勢</button><button type="button" id="shortcut-listening" aria-pressed="false">聆聽姿勢</button></span></div>
+          <div class="fact" id="fact-furniture"><span class="k">家具</span>
+            <div class="v"><span id="fact-furniture-text"></span><p id="furniture-notice" class="notice fact-note" hidden></p></div>
+            <button type="button" class="mini" id="edit-furniture" aria-expanded="false" aria-controls="furniture-editor">改家具</button>
+            <div class="fact-editor" id="furniture-editor" hidden>
+              <div class="fields">
+                <label><input id="furniture-sofa" type="checkbox">沙發</label>
+                <label>前方桌面<select id="furniture-table-kind"><option value="none">無</option><option value="coffee_table">茶几</option><option value="desk">書桌</option></select></label>
+                <label><input id="furniture-cloud" type="checkbox">天雲</label>
+              </div>
+              <p>沙發與桌面填相對主位的位置，旁邊顯示房間底面中心；天雲填固定房間座標。</p>
+              <div id="furniture-sofa-fields" class="furniture-fields" hidden></div>
+              <div id="furniture-table-fields" class="furniture-fields" hidden></div>
+              <div id="furniture-cloud-fields" class="furniture-fields" hidden></div>
+              <ul id="readonly-furniture" class="note" hidden></ul></div></div>
+          <div class="fact" id="fact-original"><span class="k">改造前（原方案）</span>
+            <div class="v"><span id="fact-original-text">每一面都只有原本的牆（沒指定原方案）</span><small>結果頁的「改善多少」從這裡算起；要並排比兩次結果，用右上的「算過的結果與比較」</small></div>
+            <button type="button" class="mini" id="edit-original" aria-expanded="false" aria-controls="original-editor">指定一份方案當改造前</button>
+            <div class="fact-editor" id="original-editor" hidden></div></div>
+          <ul id="placement-warnings" class="notice" aria-live="polite" hidden></ul>
+          <div id="labels-notice" hidden><p class="notice">喇叭與座位的中文名沒載到，下面先用代號顯示。</p>
+            <details><summary>技術細節</summary><p id="labels-technical"></p></details></div>
+          <details class="fold" id="coordinates-fold"><summary id="coordinates-summary">座標數字（喇叭、主位，和主位周圍一起算聲音的點；x、y、z）</summary>
+            <h3>喇叭座標（公尺）</h3><div id="speakers"></div>
+            <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
+            <p>主位 z 座標只改主位；周圍點要逐點改。</p>
+            <ul id="plan-legend"></ul></details>
+          <details class="fold" id="advanced-fold"><summary>進階：聲源模型、散射係數、比對設定、空氣（聲速、密度）</summary>
+            <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
+            <h4>散射係數</h4><label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
+            <h4>比對設定</h4><p id="feature-note" class="note"></p>
+            <h4>空氣</h4><p id="rho-c"></p></details>
+        </div>
+      </div>
     </section>
-    <section><h2>房間與材料</h2><div id="room-fields" class="fields"></div>
-      <p id="rho-c"></p><div id="walls"></div>
+    <section><h2>房間與材料</h2><div id="walls"></div>
       <div id="elevation-panel"><h3>立面圖：在牆上切區</h3><p id="zone-methods-row"><button id="zone-page-open" type="button">設定每一區貼什麼 ▸</button><span>每一區要貼什麼、不貼、還是由程式最佳化，都在「這間房貼什麼」那一頁設定。</span></p><p class="note">站在房間裡看那一面。畫好的框之外會自動補滿成長方形，不重疊、不留空。</p>
         <div id="elevation-walls"></div><p id="elevation-size"></p>
         <div id="elevation-symmetry" role="group" aria-label="左右對稱"><strong>左右對稱</strong>
@@ -80,44 +150,7 @@
           <span id="elevation-axis-words" class="note"></span></div>
         <div id="elevation"><div id="elevation-banner" hidden></div></div><p id="elevation-note" aria-live="polite"></p><div id="elevation-selected"></div>
         <details id="zone-table-fold"><summary>深度上限與舊做法表</summary><h4>這一面每一區的做法</h4><div id="elevation-zones"></div></details></div>
-      <label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
     </section>
-    <section><h2>喇叭與座位</h2><div id="labels-notice" hidden><p class="notice">喇叭與座位的中文名沒載到，下面先用代號顯示。</p>
-      <details><summary>技術細節</summary><p id="labels-technical"></p></details></div><h3>喇叭座標（公尺）</h3><div id="speakers"></div>
-      <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
-      <p>主位 z 座標只改主位；周圍點要逐點改。</p>
-      <p id="feature-note" class="note"></p>
-    </section>
-    <section id="input-setup"><h2>家具與喇叭設定</h2>
-      <div class="shortcut-actions"><button id="shortcut-working">工作</button><button id="shortcut-listening">聆聽</button></div>
-      <p>快捷會填入家具選項，並一起平移主位與全部周圍點的 z 座標；喇叭高度與天雲位置維持原值。</p>
-      <h3>家具</h3><div class="fields">
-        <label><input id="furniture-sofa" type="checkbox">沙發</label>
-        <label>前方桌面<select id="furniture-table-kind"><option value="none">無</option><option value="coffee_table">茶几</option><option value="desk">書桌</option></select></label>
-        <label><input id="furniture-cloud" type="checkbox">天雲</label>
-      </div>
-      <p>沙發與桌面填相對主位的位置，旁邊顯示房間底面中心；天雲填固定房間座標。</p>
-      <div id="furniture-sofa-fields" class="furniture-fields" hidden></div>
-      <div id="furniture-table-fields" class="furniture-fields" hidden></div>
-      <div id="furniture-cloud-fields" class="furniture-fields" hidden></div>
-      <ul id="readonly-furniture" class="note" hidden></ul>
-      <h3>喇叭類型與擺法</h3><label><input id="use-speaker-setup" type="checkbox">設定喇叭箱體與擺法</label>
-      <div id="speaker-setup-fields" hidden>
-        <div class="fields"><label>喇叭類型<select id="speaker-kind"></select></label>
-          <label>喇叭擺法<select id="speaker-mount"></select></label>
-          <label><input id="representative" type="checkbox">代表模型</label><span id="representative-state"></span></div>
-        <div id="cabinet-fields" class="fields"></div>
-        <p>喇叭聲學中心高度在上方喇叭座標的 z 格填寫，可以手改；切換擺法會保留原高度。</p>
-      </div>
-      <p id="stand-height-hint" class="notice" aria-live="polite"></p>
-      <ul id="placement-warnings" class="notice" aria-live="polite" hidden></ul>
-    </section>
-    <section><h2>平面圖與側面圖</h2><div class="drawings" id="plan-drawings">
-      <div><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
-      <div><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div>
-      <div><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div>
-      <div><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
-      <p id="plan-detail" aria-live="polite"></p><ul id="plan-legend"></ul></section>
     <section><h2>檢查</h2><div class="actions"><button id="check">檢查</button></div>
       <p id="messages" aria-live="polite"></p></section>
     <section id="result-section"><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>

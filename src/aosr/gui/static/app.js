@@ -32,6 +32,8 @@ let inputPreviewScheme = null;
 let formScheme = null;
 let inputBusy = false;
 let previewAsked = 0;
+// 結果清單最近一次讀到的那幾列（新到舊）：第 1 段右卡結果那一行拿這一份找「這一份」最新算好的那一列（room_facts.js）。
+let resultRows = [];
 
 // 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
 // 換成白話，原文放在 cause，只進技術細節。伺服器自己寫的中文訊息照原樣往上交。
@@ -113,8 +115,8 @@ function renderForm() {
   requireInputMatch();
   const furnitureCount = scheme.furniture?.length ?? 0;
   $("furniture-notice").hidden = furnitureCount === 0;
-  // 第八支已能編輯固定角色；其他原件在下方唯讀列出，存檔仍完整保留。
-  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：下方可修改本頁支援的家具；其餘唯讀列出並原樣保留。平面圖與側面圖照方案檔畫。` : "";
+  // 第八支已能編輯固定角色；其他原件在「改家具」打開的那一塊唯讀列出，存檔仍完整保留。
+  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：按「改家具」修改本頁支援的家具；其餘唯讀列出並原樣保留。平面圖與側面圖照方案檔畫。` : "";
   renderSpeakerSetupNotice();
   $("save-id").value = scheme.scheme_id;
   $("source-model").value = scheme.source_model;
@@ -144,10 +146,10 @@ function renderSpeakerSetupNotice() {
   const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
   if (!keys.every((key) => Object.hasOwn(names, key))) {
     // 名稱表沒載到：整句換備用句，不把英文代號逐格代進句型。
-    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。";
+    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。";
     return;
   }
-  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。`;
+  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。`;
 }
 // 伺服器回的牆名跟現在不同才換（喇叭搬到靠另一面牆、開了別份方案）；回傳有沒有換，換了由呼叫的人重畫。
 function useWallNames(names) {
@@ -326,12 +328,16 @@ function renderInputPreview() {
     const row = document.createElement("li"); row.textContent = item.text; list.append(row);
   }
   for (const name of Object.keys(scheme.speakers)) $( `height-${name}`).textContent = data.height_problems[name] || "";
+  // 喇叭高度跟擺法推出值不同的提醒寫在「座標數字」摺疊裡那一支的 z 旁邊（#1265）：擺法是在「改喇叭與擺法」改的，
+  // 摺疊收著就看不到；有提醒就自己打開，不讓它藏著（同立面圖底下的做法表）。
+  if (Object.keys(scheme.speakers).some(name => data.height_problems[name])) $("coordinates-fold").open = true;
   $("stand-height-hint").textContent = data.stand_hint;
   // #753：建搜尋才查的三條擺放問題先在這裡提醒，不擋存檔；字由伺服器寫。
   const warnings = $("placement-warnings"); warnings.replaceChildren(); warnings.hidden = !data.placement_warnings.length;
   for (const text of data.placement_warnings) {
     const item = document.createElement("li"); item.textContent = text; warnings.append(item);
   }
+  renderRoomFacts();
 }
 async function changeInputScheme(load) {
   if (inputBusy) return false;
@@ -532,6 +538,8 @@ async function loadSchemeList() {
   savedTimes = data.saved_at || {};
   // 使用者正要點選單時，晚到的清單不能把焦點所在的按鈕換掉；下次展開就畫新清單。
   if ($("scheme-menu").hidden || !$("home-schemes").childElementCount) drawSchemeMenu();
+  // 右卡「改造前」那一格的選單列的是方案清單：清單晚到也要換上。
+  renderRoomEditors();
 }
 // 回有沒有真的打開，讓帶名字的連結知道是否繼續進入分區頁。
 async function openScheme(name) {
@@ -835,6 +843,7 @@ async function loadResultList() {
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
   finishedNames = new Set(data.results.filter(row => ["done", "none"].includes(row.run_status)).map(row => row.scheme_id));
+  resultRows = data.results;
   renderInputBars();
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
@@ -981,7 +990,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   inputDefaults = await api("/api/input-defaults");
   await loadZoneLibrary();
   fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
-  // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
+  // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在第 1 段右卡自己的一行（座標數字摺疊的上面），
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
   // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。
   try { labels = await api("/api/labels"); } catch (error) {
@@ -1016,7 +1025,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("speaker-mount").onchange = () => action(() => editInput("mount", $("speaker-mount").value));
   $("representative").onchange = () => action(() => editInput("representative", $("representative").checked));
   for (const name of Object.keys(inputDefaults.shortcuts)) {
-    $(`shortcut-${name}`).textContent = inputDefaults.shortcuts[name].label;
+    $(`shortcut-${name}`).textContent = `${inputDefaults.shortcuts[name].label}姿勢`;
     $(`shortcut-${name}`).onclick = () => action(() => editInput("shortcut", name));
   }
   $("check").onclick = () => action(refreshPlan);

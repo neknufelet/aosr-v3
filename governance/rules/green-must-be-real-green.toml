@@ -567,7 +567,8 @@ prefix = "tests.engine."
 # #1091 立面圖畫框：test_gui_zone_cut.py 16 題、test_gui_zone_elevation_browser.py 2 題；主線 198ffc29 上 CPU 單行程純收集實量 11400（主線實量 11382）。
 # #1105 每一區選做法＋拿去搜尋＋准用清單原樣帶回：test_gui_zone_modes.py 10 題、test_gui_zone_modes_browser.py 8 題；主線 a9356783 上 CPU 單行程純收集實量 11479（主線 11461 為推算：減本支 18 題）。
 # #1111 超過限制標紅：test_gui_zone_limits.py 35 題、test_gui_zone_limits_browser.py 7 題，共 42 題；主線 49049fa1 上 CPU 單行程純收集實量 11521（主線登記 11479＋42）。
-collected_floor = 11521
+# #1265 單元 2 輸入頁第 1 段重排：test_gui_room_facts.py 11 題、test_gui_input_room_section_browser.py 21 題，共 32 題；86167746 加本支改動上 CPU 單行程純收集逐檔加總實量 12779（#1111 之後各支加題沒調地板；86167746 本身未另量，推算 12747）。
+collected_floor = 12779
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

@@ -24,7 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._input_page_steps import open_save_as, open_scheme, open_templates
+from tests.engine._input_page_steps import open_save_as, open_scheme, open_templates, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -202,7 +202,7 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         page.locator("#results-list tr a").first.wait_for()
         look = page.locator("#result-link").evaluate(BUTTON_LOOK_JS)
         assert look[5] == "none" and look == page.locator("#results-list tr a").first.evaluate(BUTTON_LOOK_JS)
-        page.locator("#speaker-left-x").fill("1.7")
+        reveal(page, "#speaker-left-x").fill("1.7")
         assert page.locator("#result-stale").is_visible()
         assert page.locator("#result-link").get_attribute("href") == first
         open_save_as(page)
@@ -237,7 +237,7 @@ def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browse
         (tmp_path / "release").unlink()
         page.locator("#calculate").click()
         page.wait_for_function("() => !document.querySelector('#stop').disabled")
-        page.locator("#speaker-left-x").fill("1.7")
+        reveal(page, "#speaker-left-x").fill("1.7")
         (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#stop').disabled", timeout=15_000)
         assert "算完了" in page.locator("#messages").inner_text()
@@ -353,10 +353,10 @@ def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -
                 if broken is not server_error:
                     # 瀏覽器的英文原文沒有丟掉，只是收進技術細節。
                     assert "瀏覽器原文：" in (technical.text_content() or "")
-                title = page.locator("#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
+                title = reveal(page, "#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
                 assert title.inner_text() == "left"
-                # 名稱表的說明跟喇叭與座位的列放在同一區，再按一次檢查也還在。
-                assert notice.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
+                # 名稱表的說明跟喇叭與座位的列放在同一區（#1265 起是第 1 段），再按一次檢查也還在。
+                assert notice.evaluate("node => node.closest('section').querySelector('h2 .step-title').textContent") == "房間和擺位"
                 page.locator("#messages").evaluate("node => { node.textContent = ''; }")
                 page.locator("#check").click()
                 page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
@@ -373,8 +373,8 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
     # 表單上那一格的中文名加白話，訊息列照印。座位用順序號找到是哪一個座位、軸用 0／1／2 對 x／y／z。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
-        page.locator("#use-scattering").check()
+        reveal(page, "#plan-legend li").first.wait_for()
+        reveal(page, "#use-scattering").check()
         for scatter in page.locator("#scattering input").all():
             scatter.fill("0.2")
 
@@ -388,7 +388,7 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
                             ("#scatter-ceiling", "天花散射"), ("#speaker-right-y", "右聲道喇叭 y 座標"),
                             ("#receiver-up-z", "主位上方 z 座標"), ("#receiver-main-x", "主位 x 座標")):
             before = page.locator(field).input_value()
-            page.locator(field).fill("")
+            reveal(page, field).fill("")
             assert shown_after_check() == f"{name}：空著沒填", field
             page.locator(field).fill(before)
             assert shown_after_check() == "檢查通過", field
@@ -643,7 +643,7 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
         page = watched.page
         # 平面圖與側面圖一打開就畫（第二步截圖抓過「要先存檔才畫」）。
         for svg in ("#plan-xy", "#plan-xz"):
-            page.locator(f"{svg} circle").first.wait_for()
+            reveal(page, f"{svg} circle").first.wait_for()
             assert page.locator(f"{svg} rect").count() > 0, svg
         # 六面牆的阻抗倍數（幾倍 ρc）是伺服器算好回來填的；載入時出錯會被接住、訊息又被「檢查通過」蓋掉，
         # 只有這幾格空著看得出來。
@@ -662,7 +662,7 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
 def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
-        page.locator("#zoom-xy circle").first.wait_for()
+        reveal(page, "#zoom-xy circle").first.wait_for()
         for svg in ("#zoom-xy", "#zoom-xz"):
             boxes = page.locator(f"{svg} text").evaluate_all(
                 "nodes => nodes.map(node => { const b = node.getBBox(); return {x:b.x,y:b.y,w:b.width,h:b.height}; })")
@@ -713,9 +713,9 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
 def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
-        page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
+        reveal(page, "#zoom-xy g[data-keys]").first.locator("circle").click()
         assert page.locator("#plan-detail").inner_text()
-        page.locator("#receiver-front-x").fill("3.0")
+        reveal(page, "#receiver-front-x").fill("3.0")
         page.locator("#check").click()
         page.wait_for_function("() => document.querySelector('#plan-detail').textContent === ''")
         assert "x 3.00" in page.locator("#plan-legend li[data-id='receiver:front']").inner_text()
@@ -745,7 +745,7 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         }""")
         # 右喇叭搬到「左」那個周圍點上，兩個疊成一格（座標照範例現讀，不寫死）。
         left = page.evaluate("() => scheme.receiver_set.points.find(point => point.receiver_id === 'left').position_m")
-        page.locator("#speaker-right-x").fill(str(left[0]))
+        reveal(page, "#speaker-right-x").fill(str(left[0]))
         page.locator("#speaker-right-y").fill(str(left[1]))
         page.locator("#check").click()
         page.wait_for_function("() => document.querySelectorAll('#plan-legend li').length > 0")

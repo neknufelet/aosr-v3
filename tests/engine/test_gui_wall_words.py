@@ -18,6 +18,7 @@ from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import draft_wall_words, front_wall, wall_words
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import reference_document
+from tests.engine._input_page_steps import reveal
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data, _jobs
@@ -118,7 +119,7 @@ def test_home_form_renames_walls_when_the_speakers_move_to_the_other_end(tmp_pat
         expect(page.locator("#elevation-wall-xL")).to_have_text("後牆")
         # 兩支喇叭搬到主位另一邊、靠 xL：前後左右整組換過來，表單與立面圖按鈕都跟著改。
         for name in ("left", "right"):
-            page.locator(f"#speaker-{name}-x").fill("5")
+            reveal(page, f"#speaker-{name}-x").fill("5")
         expect(page.locator("#wall-editor-xL")).to_contain_text("前牆材料")
         expect(page.locator("#wall-editor-x0")).to_contain_text("後牆材料")
         expect(page.locator("#wall-editor-yL")).to_contain_text("左牆材料")
@@ -214,6 +215,7 @@ def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_p
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=600) as watched:
         page = watched.page
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        reveal(page, "#use-scattering")  # #1265 起收在第 1 段「進階」摺疊裡，換名之前先打開
         held = _late_rename(page)
         page.locator("#wall-floor").focus()
         _arrive(page, held)
@@ -250,7 +252,8 @@ def test_a_late_rename_never_swaps_the_elevation_box_being_typed_in(tmp_path: Pa
         # 不是這裡考的，先等它畫完再點進去。
         page.locator("#room-Lx").focus()
         page.wait_for_function("() => zoneLimitsShown === zoneLimitsGeneration")
-        depth = page.locator("#depth-room")
+        # #1265 起房間預設那一格搬到第 1 段右卡；立面圖底下同一列（#depth-limits）剩這一面那一格，帶牆名、換名會重畫。
+        depth = page.locator("#depth-wall-x0")
         depth.focus()
         box = depth.element_handle()
         _arrive(page, held)

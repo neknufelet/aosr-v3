@@ -9,7 +9,7 @@ from playwright.sync_api import Browser, Page
 
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_scheme, reveal
 from tests.engine._gui_best_cases import best_store
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._gui_furniture_drawings import listening_document, working_document
@@ -95,7 +95,7 @@ def test_input_draws_boxes_before_points_and_leaves_zoom_clear(browser: Browser,
         page.locator("#plan-detail").evaluate("node => node.textContent = ''")
         target.locator("polygon").click(force=True)
         assert page.locator("#plan-detail").inner_text() == detail
-        assert "箱體只做碰撞檢查，反射暫不計" in page.locator("#plan-legend").inner_text()
+        assert "箱體只做碰撞檢查，反射暫不計" in reveal(page, "#plan-legend").inner_text()
         target.evaluate("node => node.blur()")
         page.locator("#plan-drawings").locator("xpath=..").screenshot(path=str(tmp_path / f"input-{'work' if work else 'listen'}.png"))
         _assert_quiet(watched)
@@ -159,7 +159,7 @@ def test_input_undefined_cabinet_note_keeps_other_cabinet(browser: Browser, tmp_
         for selector in ("#plan-xy", "#plan-xz"):
             assert page.locator(f"{selector} [data-cabinet]").evaluate_all(
                 "nodes => nodes.map(n => n.dataset.cabinet)") == ["right"]
-        assert "左聲道喇叭箱體沒畫：喇叭跟主位在同一個水平位置，定不出朝向" in page.locator("#plan-legend").inner_text()
+        assert "左聲道喇叭箱體沒畫：喇叭跟主位在同一個水平位置，定不出朝向" in reveal(page, "#plan-legend").inner_text()
         page.locator("#plan-drawings").locator("xpath=..").screenshot(path=str(tmp_path / "undefined-cabinet.png"))
         _assert_quiet(watched)
 
@@ -205,7 +205,7 @@ def test_input_outside_and_blocked_furniture_remains_visible(browser: Browser, t
         ]
         assert "沒有聲音" not in messages
         for selector in ("#plan-xy", "#plan-xz"):
-            svg = page.locator(selector)
+            svg = reveal(page, selector)
             assert svg.locator('[data-furniture="desk"] .blocked-furniture').is_visible()
             assert svg.locator('[data-furniture="desk"] .blocked-furniture').get_attribute("stroke") == "#c62828"
             assert svg.locator('[data-furniture="seat"] .blocked-furniture').all() == []

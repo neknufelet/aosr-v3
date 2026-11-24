@@ -9,14 +9,76 @@
 .row strong small{font-weight:400;font-size:.85em;color:#46586a}
 /* 灰字補充說明（例如峰谷配對容差），跟上面的操作提示分開。 */
 .note{color:#46586a}
-/* 四張圖排成兩欄兩列：上排整間房（平面、側面），下排聆聽區放大；同一列兩格一樣高、圖置中；
-   外框算在寬度裡，不然寬 100% 再加 1 像素框線會超出欄寬。 */
-.drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
-.drawings>div{display:flex;flex-direction:column}
-.drawings svg{flex:1 1 auto;box-sizing:border-box}
-@media (max-width:700px){.drawings{grid-template-columns:minmax(0,1fr)}}
+/* 第 1 段「房間和擺位」（#1265，示意圖 input-page-v3 第 1 段）：段落本身不是卡，裡面左邊平面圖卡、右邊「這間房現在」卡。
+   字級只用四級：.8125rem（說明、小字）、.9375rem（右卡內文）、1rem、1.25rem（段標題）。 */
+#scheme-section.room-step{background:transparent;border:0;padding:0;overflow:visible}
+.room-step h2{display:flex;align-items:baseline;flex-wrap:wrap;gap:.75rem;font-size:1.25rem;margin:.25rem 0 .5rem}
+.room-step .step-no{display:inline-grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:50%;background:#172f3d;color:white;font-size:.9375rem;align-self:center}
+.room-step .say{font-size:.8125rem;font-weight:400;color:#46586a}
+#scheme-zone-row{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem;margin:0 0 .6rem;font-size:.8125rem;color:#46586a;line-height:1.4}
+.roomrow{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);gap:1.375rem;align-items:start}
+.room-step .card{background:white;border:1px solid #d5e0e4;border-radius:10px}
+.room-plan{padding:.75rem .875rem .625rem}
+.viewrow{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem;font-size:.8125rem;color:#46586a;margin:0 0 .4rem}
+.seg{display:inline-flex;gap:0;border:1px solid #97aeb8;border-radius:6px;overflow:hidden;background:white}
+.seg button{border:0;border-radius:0;background:white;color:#17212a;padding:.25rem .6rem;font-size:.8125rem}
+.seg button+button{border-left:1px solid #d5e0e4}
+.seg button[aria-pressed=true]{background:#172f3d;color:white}
+.room-step :focus-visible{outline:3px solid #15617b;outline-offset:2px}
+/* 長寬高三格在圖邊上：寬 Ly 在左邊（平面圖直的那一軸），長 Lx 在圖下（橫的那一軸），高 Lz 在右下角。
+   格子仍住在 #room-fields 裡（改尺寸連動掛在它身上，elevation.js），容器本身不佔格、三格直接排進外框。 */
+.plan-frame{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"ly draw draw" ". lx lz";align-items:center;gap:.4rem .5rem}
+#room-fields{display:contents}
+#room-fields label{margin:0;font-size:.8125rem;color:#46586a;gap:.3rem}
+#room-fields input{width:4rem;font-size:.9375rem;text-align:right;border:1.5px solid #17212a}
+#room-fields label:has(#room-Lx){grid-area:lx;justify-self:center}
+#room-fields label:has(#room-Ly){grid-area:ly;flex-direction:column;align-items:flex-start;max-width:3.6rem;word-break:keep-all}
+#room-Ly{max-width:3.6rem;box-sizing:border-box}
+#room-fields label:has(#room-Lz){grid-area:lz;justify-self:end}
+/* 四張圖疊在同一格、一次露一張（圖上的字靠量寬度躲開彼此，不能用 display:none 藏）；外框算在寬度裡。 */
+#plan-drawings{grid-area:draw;display:grid;grid-template-columns:minmax(0,1fr);gap:0}
+#plan-drawings>.drawing{grid-area:1/1;display:flex;flex-direction:column}
+#plan-drawings>.drawing:not(.shown){visibility:hidden}
+#plan-drawings h3{font-size:.8125rem;font-weight:400;color:#46586a;margin:0 0 .25rem}
+#plan-drawings svg{box-sizing:border-box}
 /* 點平面圖上合併的標記時，一點一行（伺服器給的明細用換行分隔）。 */
-#plan-detail{white-space:pre-line}
+#plan-detail{white-space:pre-line;font-size:.8125rem;margin:.4rem 0 0}
+#plan-detail:empty{display:none}
+.room-plan .hint{color:#46586a;font-size:.8125rem;margin:.4rem .25rem 0;line-height:1.5}
+/* 右卡：結果一行，接著一行一件事（名字、現在的樣子、改那件事的鈕）；「改…」打開的那一塊排在那一行底下。 */
+.facts{padding:.75rem 1.25rem}
+.last{display:flex;align-items:baseline;flex-wrap:wrap;gap:.6rem;padding:.5rem .875rem;margin:0 0 .25rem;border-radius:8px;background:#f4f7f8;font-size:.9375rem;line-height:1.5}
+.last .k{color:#46586a;font-size:.8125rem;white-space:nowrap}
+.last[data-state=failed] .k{color:#872c22;font-weight:600}
+#room-result-link{margin-left:auto;color:#15617b;font-weight:600}
+#room-result-link[hidden]{display:none}
+.fact{display:grid;grid-template-columns:4.25rem minmax(0,1fr) auto;gap:.6rem;align-items:start;padding:.5rem 0;border-top:1px solid #edf1f2;font-size:.9375rem}
+.fact .k{color:#46586a;font-size:.8125rem;padding-top:.125rem;word-break:keep-all}
+.fact .v{line-height:1.5;min-width:0}
+.fact .v small{display:block;color:#46586a;font-size:.8125rem}
+.fact .v small[hidden]{display:none}
+.fact-note{margin:.2rem 0 0;font-size:.8125rem;line-height:1.5}
+.fact-note:empty,.fact-note[hidden]{display:none}
+#speaker-setup-notice,#furniture-notice{color:#46586a;font-weight:400}
+.mini{background:white;color:#17212a;border:1px solid #97aeb8;border-radius:6px;padding:.2rem .6rem;font-size:.8125rem;white-space:nowrap}
+.mini:disabled{background:#edf1f2}
+.mini[aria-expanded=true]{background:#edf4f6;border-color:#15617b}
+.fact-editor{grid-column:1/-1;border-left:3px solid #d5e0e4;padding:.25rem 0 .25rem .75rem;margin:.25rem 0 0;font-size:1rem}
+.fact-editor[hidden]{display:none}
+.fact-editor p{margin:.4rem 0}
+#depth-room-note:empty{display:none}
+.facts details.fold{margin-top:.4rem;border-top:1px solid #edf1f2;padding-top:.45rem}
+.facts details.fold summary{cursor:pointer;font-size:.9375rem}
+.facts details.fold summary::marker{color:#46586a}
+.facts details.fold[open]{padding-bottom:.4rem}
+/* 座標數字在右卡裡比以前窄：名字欄與數字格收窄，一個點的 x、y、z 排得進同一行（不收的話 z 掉到下一行，打開後高一倍）。 */
+#coordinates-fold .row strong{min-width:9rem}
+#coordinates-fold input[type=number]{width:5rem}
+.facts h3{font-size:1rem;margin:.75rem 0 .4rem}
+.facts h4{font-size:.9375rem;margin:.75rem 0 .3rem}
+#placement-warnings:not([hidden]){margin:.5rem 0;padding-left:1.2rem;font-size:.8125rem}
+#plan-legend{font-size:.8125rem;color:#46586a;padding-left:1.2rem}
+@media (max-width:1000px){.roomrow{grid-template-columns:minmax(0,1fr)}}
 /* 訊息列：多條問題一條一行；字級跟內文一樣，成功的綠色與問題的警示色由 style.css 的 .ok／.notice 管。 */
 #messages{white-space:pre-line;min-height:1.5em}
 /* 結果清單：代號、秒數、「查看」不折行（「查看」折成直排看不懂）；時間可在日期與時刻之間折行；物理與評分設定兩格字長，讓它折。

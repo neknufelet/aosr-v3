@@ -8,7 +8,7 @@ from playwright.sync_api import Browser, Request, Response, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_save_as, open_scheme, scheme_open_button
+from tests.engine._input_page_steps import open_save_as, open_scheme, reveal, scheme_open_button
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -89,6 +89,7 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
             else:
                 route.continue_()
 
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", fail_first_cloud_preview)
         with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as edited:
             page.locator("#furniture-cloud").click()
@@ -122,6 +123,7 @@ def test_failed_preview_keeps_shortcut_and_speaker_setup_old(browser: Browser, t
     存檔也是舊的。每一格前清掉訊息列，「換不過去」才等得到這一格的字。"""
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        reveal(page, "#use-speaker-setup")
         for index, selector in enumerate(("#shortcut-working", "#shortcut-listening", "#use-speaker-setup")):
             page.evaluate("() => { document.getElementById('messages').textContent = ''; }")
             page.route("**/api/input-preview", lambda route: route.fulfill(status=503, json={"error": "預覽暫時讀不到"}), times=1)
@@ -185,6 +187,7 @@ def test_delayed_cloud_edit_keeps_controls_and_fields_old_until_preview(browser:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
         held: list[Route] = []
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", lambda route: held.append(route), times=1)
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
             with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as edited:
@@ -236,6 +239,8 @@ def test_failed_handover_refreshes_preview_for_edited_values(browser: Browser, t
             else:
                 route.continue_()
 
+        reveal(page, "#receiver-main-y")
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", hold_then_fail_cloud)
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
             page.locator("#receiver-main-y").fill("3.5")
@@ -271,6 +276,7 @@ def test_stale_refresh_failure_does_not_overwrite_newer_message(browser: Browser
             else:
                 route.continue_()
 
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", route_preview)
         page.locator("#furniture-cloud").click()
         page.wait_for_function("!document.querySelector('main').inert")

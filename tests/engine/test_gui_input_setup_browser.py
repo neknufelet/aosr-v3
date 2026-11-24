@@ -6,7 +6,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_save_as, open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -15,6 +15,7 @@ from tests.engine.test_gui_furniture_problem_text import assert_chinese_lines
 
 
 def _filled(page: Page, selector: str, value: str | bool) -> None:
+    reveal(page, selector)  # #1265 起家具與喇叭擺法收在「改家具」「改喇叭與擺法」裡，先打開
     with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as response:
         if isinstance(value, bool):
             # 勾選只表示送出意圖；等候預覽時仍畫舊值，完成後才核勾選狀態。
@@ -59,7 +60,7 @@ def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, 
         assert_chinese_lines(page.locator("#height-left").inner_text().splitlines())
         assert page.locator("#speaker-left-z").is_enabled()
         assert page.locator("#speaker-left-z").input_value() == "1.2"
-        page.locator("#speaker-left-z").fill("0.955")
+        reveal(page, "#speaker-left-z").fill("0.955")
         page.locator("#speaker-right-z").fill("0.955")
         page.wait_for_function("document.getElementById('height-left').textContent === ''")
         assert page.locator("#furniture-table-coordinate").inner_text() == "房間底面中心：x 2.375、y 2、z 0.72 公尺"
@@ -121,7 +122,7 @@ def test_without_table_cannot_choose_desk_and_stand_hint_does_not_block_save(bro
         page = watched.page
         _filled(page, "#use-speaker-setup", True)
         assert page.locator('#speaker-mount option[value="desk"]').all() == []
-        page.locator("#speaker-left-z").fill("1.21")
+        reveal(page, "#speaker-left-z").fill("1.21")
         page.wait_for_function("document.getElementById('stand-height-hint').textContent !== ''")
         assert page.locator("#stand-height-hint").inner_text() == "搜尋只用一個高度，兩支要一樣"
         _save_readback(page, "different-height")
@@ -185,7 +186,7 @@ def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tm
         page = watched.page
         open_scheme(page, "precise")
         page.wait_for_function("document.getElementById('save-id').value === 'precise'")
-        field = page.locator("#speaker-left-z")
+        field = reveal(page, "#speaker-left-z")
         assert field.input_value() == "1.23456789012"
         # 未動過的格子保留全部精度；答案讀正式存檔回應，不拿 collect() 當答案。
         open_save_as(page)

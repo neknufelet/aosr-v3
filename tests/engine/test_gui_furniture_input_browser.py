@@ -60,7 +60,7 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
         assert notice.evaluate("el => el.tagName") == "P"
         # 第八支第三步之二已提供編輯器：提示改為固定角色可改、其他原件唯讀保留。
         assert notice.inner_text() == (
-            f"這份方案有 {len(scheme.furniture)} 件家具：下方可修改本頁支援的家具；"
+            f"這份方案有 {len(scheme.furniture)} 件家具：按「改家具」修改本頁支援的家具；"
             "其餘唯讀列出並原樣保留。平面圖與側面圖照方案檔畫。")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/loaded")
                                   and response.request.method == "PUT") as saved:

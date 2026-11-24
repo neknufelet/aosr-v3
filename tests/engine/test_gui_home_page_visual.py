@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page
 
-from tests.engine._input_page_steps import open_save_as, open_scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 
@@ -41,7 +41,7 @@ def _same(first: float, second: float) -> bool:
 def test_scheme_rows_keep_each_button_beside_its_field(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         for width in (1280, WIDTH):
             page.set_viewport_size({"width": width, "height": 900})
             for group in (("#save-id", "#scheme-menu-button", "#save-state"),
@@ -50,9 +50,10 @@ def test_scheme_rows_keep_each_button_beside_its_field(tmp_path: Path, browser: 
                 assert max(abs(_middle(first) - _middle(box)) for box in (middle, last)) < SAME_LINE_PX
                 assert first["x"] + first["width"] <= middle["x"] < last["x"]
         # 峰谷配對容差那句講的是評分怎麼配對峰谷，不是聲源：不准擺在方案區（聲源模型底下）。
-        note = page.locator("#feature-note")
+        # #1265 起跟聲源模型同收在第 1 段「進階」摺疊，但在自己的「比對設定」小標底下，不在聲源模型那一列。
+        note = reveal(page, "#feature-note")
         assert "峰谷配對容差" in note.inner_text()
-        assert note.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
+        assert note.evaluate("node => [node.previousElementSibling.textContent, !node.closest('.scheme-row')]") == ["比對設定", True]
         _assert_quiet(watched)
 
 
@@ -141,7 +142,7 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
 def test_rows_and_legend_use_chinese_names_from_label_table(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         tables = page.request.get(f"{base}/api/labels").json()
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
         roles = {channel["speaker_id"]: channel["role"] for channel in scheme["channel_group"]["channels"]}
@@ -214,7 +215,7 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
         trail = _Trail(page)
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         open_save_as(page)
         note, button = page.locator("#save-as-note"), _box(page, "#save-as")
         page.locator("#save-as").click()
@@ -261,7 +262,7 @@ def test_save_problems_show_right_under_the_buttons(tmp_path: Path, browser: Bro
     # 按「儲存」與「檢查」：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         name = page.locator("#save-id").input_value()
         _blank_and_press(page, "#save", ("#room-Ly", "#speaker-right-y"))
         shown = page.locator("#messages").inner_text()
@@ -284,7 +285,7 @@ def test_browser_errors_are_said_in_plain_chinese(tmp_path: Path, browser: Brows
     # 訊息列要寫白話，不印英文原文。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         for answer, words in ((lambda route: route.abort(), "連不上本機的網頁伺服器"),
                               (lambda route: route.fulfill(status=500, content_type="text/html",
                                                            body="<html>Internal Server Error</html>"),
@@ -309,7 +310,7 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
     # 有 / 或 .. 的名字更只拿到英文的「Not Found」。現在打字時就在旁邊說，按下去也不送出。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         sent: list[str] = []
         page.on("request", lambda request: sent.append(request.url) if request.method == "PUT" else None)
         open_save_as(page)
@@ -342,7 +343,7 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
     # 存著的方案現在檢查不過時按「打開」：以前原因只寫在頁面最底下的訊息列，最上面看起來像沒反應。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
         opened = page.locator("#save-id").input_value()
         speaker = next(iter(scheme["speakers"]))
@@ -350,7 +351,7 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
         (tmp_path / "schemes").mkdir(parents=True, exist_ok=True)
         (tmp_path / "schemes" / "outside.json").write_text(json.dumps({**scheme, "scheme_id": "outside"}))
         page.reload(wait_until="networkidle")
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         room = page.locator("#room-Lx").input_value()
         open_scheme(page, "outside")
         page.wait_for_function("() => document.getElementById('open-note').textContent !== ''")
@@ -399,7 +400,7 @@ def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: P
     # 沒改過的牆仍是那個數字的倍數、照留；改過或清空的那一格清掉；表單補齊了就全部回來。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         page.wait_for_function("() => document.getElementById('multiple-floor').textContent !== ''")
         before = _multiples(page)
         assert all(text.startswith("約 ρc 的") for text in before.values()), before

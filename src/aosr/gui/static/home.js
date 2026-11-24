@@ -232,9 +232,7 @@ function renderInputBars() {
   $("run-log").hidden = !job || (other && openedId !== null) || (!failed && !job.stderr_tail?.length);
   $("run-state").hidden = Boolean(other && openedId && job.status !== "running");
   $("search-action").hidden = Boolean(failed);
-  const lastLine = job?.stderr_tail?.filter(line => line.trim()).at(-1);
-  const reason = job?.process_note || (lastLine && (/[\u3400-\u9fff]/u.test(lastLine) ? lastLine : "計算程式回報：" + lastLine)) ||
-    (job?.status === "stopped" ? "已停止" : "原因不明，看出錯紀錄");
+  const reason = runFailureReason(job);
   $("next-title").textContent = running ? `正在算這一份：已跑 ${running.elapsed_s} 秒` :
     failed ? "沒算完：" + reason :
     done ? "算好了" : locked ? "這一份已經算過了" : "改好了就選一個往下走";
@@ -244,4 +242,13 @@ function renderInputBars() {
     done ? "這一份現在鎖住，留著比較。要再改就另存新名字。" : locked ? "沒改過可以直接再算。要修改這份方案，請另存新名字。" :
     "不用先按儲存：按這兩顆會自動先存。算過的方案會留著比較。";
   if (scheme) renderSearchAction();
+  // 第 1 段右卡（room_facts.js）：結果那一行跟這一條同一份狀態與原因；總厚度上限、改造前跟著設計設定換字。
+  renderRoomResult(running, failed, reason);
+  renderRoomEditors();
+}
+// 沒算完的原因：計算程式自己寫的那一句，沒有就拿出錯紀錄最後一行（英文的加一句是誰說的），都沒有照狀態講。
+function runFailureReason(job) {
+  const lastLine = job?.stderr_tail?.filter(line => line.trim()).at(-1);
+  return job?.process_note || (lastLine && (/[\u3400-\u9fff]/u.test(lastLine) ? lastLine : "計算程式回報：" + lastLine)) ||
+    (job?.status === "stopped" ? "已停止" : "原因不明，看出錯紀錄");
 }

@@ -9,7 +9,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
-from tests.engine._input_page_steps import scheme_open_button, scripted_open_scheme
+from tests.engine._input_page_steps import reveal, scheme_open_button, scripted_open_scheme
 from tests.engine._zone_panel_steps import apply_and_return, edit_candidates, open_panel
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
@@ -92,7 +92,7 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     apply_and_return(page)
     # 用號碼與位置名叫那一區（#1176）：109 號房的兩支喇叭都投影在右邊那一大塊。
     expect(page.locator("#zone-goto-x0-auto1")).to_have_attribute("aria-label", "到「這間房貼什麼」改前牆 ③「兩支喇叭後面那塊」")
-    page.locator("#original-scheme").select_option("room109-original")
+    reveal(page, "#original-scheme").select_option("room109-original")  # #1265 起在第 1 段「指定一份方案當改造前」裡
     expect(page.locator("#elevation [data-zone-id=auto1]")).to_have_class("zone zone-auto zone-mode-search")
     expect(page.locator("#zone-note")).to_have_text("1 區改成「由程式最佳化」")
 
