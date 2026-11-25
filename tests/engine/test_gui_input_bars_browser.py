@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import Browser, expect
 
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import archive_scheme, close_results, open_save_as, open_scheme, open_templates, reveal, scheme_open_button
+from tests.engine._input_page_steps import archive_scheme, close_results, open_example_scheme, open_save_as, open_scheme, open_templates, reveal, scheme_open_button
 from tests.engine.test_scheme_pipeline import _run_control
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser, result
@@ -55,6 +55,7 @@ def test_dirty_copy_cancel_and_save(tmp_path: Path, browser: Browser, result: Sc
     path = _saved(tmp_path, _studio(result))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_scheme(page, ROOM)
         expect(page.locator("#save-id")).to_have_value(ROOM)
         page.locator("#room-Lz").fill("3.7")

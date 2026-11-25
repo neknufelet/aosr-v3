@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Browser, Locator, Page, Request, Route, expect
 
-from tests.engine._input_page_steps import open_save_as, open_scheme, scheme_open_button
+from tests.engine._input_page_steps import open_example_scheme, open_save_as, open_scheme, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -449,6 +449,7 @@ def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unl
     「載入範本」旁邊被擋的那一句與「另存新名字」旁邊沒有另存的原因都還在，訊息列講的是表單的問題。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         # 開機那一份範例就夠：地板換成材料構造、第一層厚度清空，預覽就回 400（房間尺寸亂填預覽不拒）。
         _filled(page, "#material-kind-floor", "assembly")
         with page.expect_response("**/api/input-preview") as preview:

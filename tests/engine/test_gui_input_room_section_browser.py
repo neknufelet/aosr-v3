@@ -17,7 +17,8 @@ from playwright.sync_api import Browser, Page, Route, expect
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as cases, _speaker_setup_cases as speaker_cases
-from tests.engine._input_page_steps import archive_scheme, open_fact_editor, open_fold, open_scheme, show_view
+from tests.engine._input_page_steps import (archive_scheme, open_example_scheme, open_fact_editor, open_fold, open_scheme,
+                                            show_view)
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_archive_browser import _confirm
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser as browser, result as result
@@ -112,7 +113,7 @@ def test_size_boxes_sit_on_the_plan_edges_and_a_new_size_saves(tmp_path: Path, b
 def test_each_view_button_shows_only_its_drawing(tmp_path: Path, browser: Browser, view: str) -> None:
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        _ready(page)
+        open_example_scheme(page, base, tmp_path)
         page.locator("#zoom-xz circle").first.wait_for(state="attached")
         expect(page.locator("#view-plan-xy")).to_have_attribute("aria-pressed", "true")
         page.locator(f"#view-{view}").click()
@@ -219,7 +220,7 @@ def test_each_change_button_opens_its_one_editor_with_focus_inside(tmp_path: Pat
                                                                     button: str, area: str, first: str) -> None:
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        _ready(page)
+        open_example_scheme(page, base, tmp_path)
         expect(page.locator(f"#{area}")).to_be_hidden()
         page.locator(f"#{button}").click()
         expect(page.locator(f"#{button}")).to_have_attribute("aria-expanded", "true")
@@ -344,7 +345,7 @@ def test_a_height_warning_from_the_mount_opens_the_coordinates_fold(tmp_path: Pa
     """擺法在「改喇叭與擺法」改；推出的高度跟 z 不同時，提醒寫在「座標數字」裡那一支的 z 旁邊：摺疊收著就自己打開。"""
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        _ready(page)
+        open_example_scheme(page, base, tmp_path)
         fold = page.locator("#coordinates-fold")
         _filled(page, "#furniture-table-kind", "desk")
         _filled(page, "#use-speaker-setup", True)
@@ -420,7 +421,7 @@ def test_section_one_fits_in_700_pixels_at_1440_by_900(tmp_path: Path, browser: 
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         page.set_viewport_size({"width": 1440, "height": 900})
-        _ready(page)
+        open_example_scheme(page, base, tmp_path)
         assert _box(page, "#scheme-section")["height"] <= 700
         page.locator("#shortcut-listening").click()
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && scheme.furniture?.length === 2")
@@ -447,7 +448,7 @@ LABEL_WORDS = ("長 Lx（公尺）", "寬 Ly（公尺）", "高 Lz（公尺）",
 def test_every_moved_box_lives_in_one_place(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        _ready(page)
+        open_example_scheme(page, base, tmp_path)
         for fold in ("coordinates-fold", "advanced-fold"):
             open_fold(page, fold)
         for button in ("edit-depth", "edit-speakers", "edit-furniture", "edit-original"):
@@ -478,8 +479,8 @@ def test_result_line_names_when_this_scheme_was_computed(tmp_path: Path, browser
     os.utime(tmp_path / "results" / f"{RUN}.json", (stamp, stamp))
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        _ready(page)
-        # 開頁的範本沒算過。
+        open_example_scheme(page, base, tmp_path)
+        # 開著的範例沒算過。
         expect(page.locator("#room-result-title")).to_have_text("還沒算過")
         expect(page.locator("#room-result-text")).to_have_text(NEVER)
         expect(page.locator("#room-result-link")).to_be_hidden()

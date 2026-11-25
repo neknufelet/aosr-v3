@@ -13,7 +13,7 @@ from playwright.sync_api import Browser, Dialog, Locator, Page, Route, expect
 from aosr.gui.labels import RESULT_RUN_LABELS
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
-from tests.engine._input_page_steps import check_result, open_archived, open_results, open_scheme, result_row
+from tests.engine._input_page_steps import check_result, open_archived, open_example_scheme, open_results, open_scheme, result_row
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser, result
 from tests.engine.test_gui_result_standing import changed_snapshot
@@ -133,6 +133,7 @@ def test_same_scheme_twice_is_two_rows_and_open_one_is_marked(
     _bundle(tmp_path, result, SECOND)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         for run_id in (FIRST, SECOND):
             expect(result_row(page, run_id)).to_contain_text(name)
             expect(result_row(page, run_id).locator(".opened-mark")).to_have_count(0)

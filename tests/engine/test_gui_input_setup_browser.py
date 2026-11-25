@@ -6,7 +6,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
+from tests.engine._input_page_steps import open_example_scheme, open_save_as, open_scheme, page_origin, reveal
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -37,7 +37,7 @@ def _save_readback(page: Page, name: str) -> dict[str, object]:
                               and response.request.method == "PUT") as response:
         page.locator("#save-as").click()
     assert response.value.ok, response.value.text()
-    saved = page.request.get(f"{page.url.rstrip('/')}/api/schemes/{name}").json()["scheme"]
+    saved = page.request.get(f"{page_origin(page)}/api/schemes/{name}").json()["scheme"]
     assert saved == Scheme.model_validate(expected).model_dump(mode="json")
     open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
@@ -49,6 +49,7 @@ def _save_readback(page: Page, name: str) -> dict[str, object]:
 def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         _filled(page, "#furniture-sofa", True)
         _filled(page, "#furniture-table-kind", "desk")
         _filled(page, "#use-speaker-setup", True)
@@ -97,6 +98,7 @@ def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, 
 def test_representative_lock_flag_and_kind_switch_height_preserved(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         _filled(page, "#use-speaker-setup", True)
         for kind, fields in CABINETS.items():
             if kind != "bookshelf":
@@ -120,6 +122,7 @@ def test_representative_lock_flag_and_kind_switch_height_preserved(browser: Brow
 def test_without_table_cannot_choose_desk_and_stand_hint_does_not_block_save(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         _filled(page, "#use-speaker-setup", True)
         assert page.locator('#speaker-mount option[value="desk"]').all() == []
         reveal(page, "#speaker-left-z").fill("1.21")
@@ -160,6 +163,7 @@ def test_shortcut_browser_and_saved_fields(browser: Browser, tmp_path: Path, sho
                                          kinds: list[str], ear: float, up: float, down: float) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as response:
             page.locator(f"#shortcut-{shortcut}").click()
         assert response.value.ok
@@ -249,6 +253,7 @@ def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Bro
 def test_browser_draws_server_editability_and_mount_choices(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
 
         def preview(route: Route) -> None:
             response = route.fetch()
@@ -275,6 +280,7 @@ def test_placement_warnings_are_listed_under_speaker_setup(browser: Browser, tmp
         Scheme.model_validate(project.model_dump(mode="json")).model_dump_json(), encoding="utf-8")
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         expect(page.locator("#placement-warnings")).to_be_hidden()
         open_scheme(page, project.scheme_id)
         page.wait_for_function("id => document.getElementById('save-id').value === id"

@@ -7,7 +7,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
-from tests.engine._input_page_steps import open_save_as, reveal, scheme_open_button
+from tests.engine._input_page_steps import open_example_scheme, open_save_as, reveal, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
@@ -48,6 +48,7 @@ def apply_draft(page: Page, status: int = 200) -> None:
 def test_draft_edit_roundtrip_switch_and_paste_formats(tmp_path: Path, browser: Browser, width: int) -> None:
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         expect(page.locator('#preset-floor')).to_have_value('')
         _filled_draft_preset(page, 'glass_wool_96k_50mm')
@@ -96,6 +97,7 @@ def test_refusal_keeps_draft_and_original_scheme(tmp_path: Path, browser: Browse
     width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         original = page.evaluate('collect()')
         if case != 'base':
@@ -128,6 +130,7 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
     width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         _filled_draft_preset(page, 'glass_wool_96k_50mm')
         apply_draft(page)

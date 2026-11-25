@@ -24,7 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._input_page_steps import check_result, close_results, open_results, open_save_as, open_scheme, open_templates, reveal
+from tests.engine._input_page_steps import check_result, close_results, open_example_scheme, open_results, open_save_as, open_scheme, open_templates, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -188,7 +188,7 @@ def _copy_runner(tmp_path: Path, result: SchemeResult, *, wait: bool = False) ->
 def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: Browser,
                                                       result: SchemeResult) -> None:
     with _serve(tmp_path, _copy_runner(tmp_path, result)) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#calculate").click()
         page.locator("#result-link").wait_for(state="visible")
         first = page.locator("#result-link").get_attribute("href")
@@ -252,7 +252,7 @@ def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
     # 正在算的那份改動要保住：另存帶走改動，原本那筆算完也不能把連結掛在新表單旁邊。
     with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
         page.locator("#room-Lx").fill("5.5")
@@ -374,7 +374,7 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
     # 檢查回的是方案裡的欄位路徑（英文，例如 receiver_set.points.5.position_m.2）；伺服器把它寫成
     # 表單上那一格的中文名加白話，訊息列照印。座位用順序號找到是哪一個座位、軸用 0／1／2 對 x／y／z。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         reveal(page, "#use-scattering").check()
         for scatter in page.locator("#scattering input").all():
@@ -419,7 +419,7 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
 
 def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#room-Lx").fill("5.5")
         open_save_as(page)
         page.locator("#save-as-id").fill("A")
@@ -647,7 +647,7 @@ def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) 
 def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
                                                                 browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         # 平面圖與側面圖一打開就畫（第二步截圖抓過「要先存檔才畫」）。
         for svg in ("#plan-xy", "#plan-xz"):
             reveal(page, f"{svg} circle").first.wait_for()
@@ -668,7 +668,7 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
 
 def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         reveal(page, "#zoom-xy circle").first.wait_for()
         for svg in ("#zoom-xy", "#zoom-xz"):
             boxes = page.locator(f"{svg} text").evaluate_all(
@@ -719,7 +719,7 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
 
 def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         reveal(page, "#zoom-xy g[data-keys]").first.locator("circle").click()
         assert page.locator("#plan-detail").inner_text()
         reveal(page, "#receiver-front-x").fill("3.0")
@@ -744,7 +744,7 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
 def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
                                                             browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.evaluate("""() => {
           scheme.receiver_set.points.push({receiver_id: 'seat2', position_m: [1.5, 1.2, 1.2],
             role: 'other_seat', importance: 0, direction_relative_to_primary: null});

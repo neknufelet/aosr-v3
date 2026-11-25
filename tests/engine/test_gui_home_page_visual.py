@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page, expect
 
-from tests.engine._input_page_steps import open_results, open_save_as, open_scheme, reveal
+from tests.engine._input_page_steps import open_example_scheme, open_results, open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 
@@ -41,6 +41,7 @@ def _same(first: float, second: float) -> bool:
 def test_scheme_rows_keep_each_button_beside_its_field(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         for width in (1280, WIDTH):
             page.set_viewport_size({"width": width, "height": 900})
@@ -76,6 +77,7 @@ def test_plan_views_show_one_drawing_at_a_time_with_readable_labels(tmp_path: Pa
     字級、字在畫框裡、外框置中塞滿這幾條照舊逐張考（切到那一張再量）。"""
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         page.locator("#zoom-xz circle").first.wait_for(state="attached")
         first = _box(page, PANELS[0])
         every_size: list[float] = []
@@ -118,6 +120,7 @@ def _message_style(page: Page) -> dict[str, str]:
 def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
         page.locator("#check").click()
         page.wait_for_function("() => document.getElementById('messages').textContent === '檢查通過'")
@@ -142,6 +145,7 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
 def test_rows_and_legend_use_chinese_names_from_label_table(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         tables = page.request.get(f"{base}/api/labels").json()
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
@@ -217,6 +221,7 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
     # 空名字的提示還寫「新代號」，跟這一列的「新名字」對不上。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         trail = _Trail(page)
         reveal(page, "#plan-legend li").first.wait_for()
         open_save_as(page)
@@ -288,6 +293,7 @@ def test_browser_errors_are_said_in_plain_chinese(tmp_path: Path, browser: Brows
     # 訊息列要寫白話，不印英文原文。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         for answer, words in ((lambda route: route.abort(), "連不上本機的網頁伺服器"),
                               (lambda route: route.fulfill(status=500, content_type="text/html",
@@ -346,6 +352,7 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
     # 存著的方案現在檢查不過時按「打開」：以前原因只寫在頁面最底下的訊息列，最上面看起來像沒反應。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
         opened = page.locator("#save-id").input_value()
@@ -406,6 +413,7 @@ def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: P
     # 沒改過的牆仍是那個數字的倍數、照留；改過或清空的那一格清掉；表單補齊了就全部回來。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         page.wait_for_function("() => document.getElementById('multiple-floor').textContent !== ''")
         before = _multiples(page)

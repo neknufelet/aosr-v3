@@ -17,6 +17,7 @@ from starlette.testclient import TestClient
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from tests.engine._gui_cache import gui_startup_identity_memo
+from tests.engine._input_page_steps import open_example_scheme
 from aosr.gui.app import (STATIC, GuiSettings, _is_json_media_type, _read_scheme,
                           _require_scheme_id, create_app, repo_root)
 from aosr.gui.jobs import JobManager
@@ -80,6 +81,7 @@ def test_js_uses_one_scale_for_both_axes(browser: Browser, tmp_path: Path) -> No
     assert "Math.log" not in script and "Math.pow" not in script
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         room = cast(dict[str, float], page.request.get(f"{url}/api/example").json()["scheme"]["scene"]["room_m"])
         page.wait_for_selector("#plan-xy rect")
         for selector, axis in (("#plan-xy", "Ly"), ("#plan-xz", "Lz")):

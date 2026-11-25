@@ -16,7 +16,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
-from tests.engine._input_page_steps import open_fact_editor, reveal
+from tests.engine._input_page_steps import open_example_scheme, open_fact_editor, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_input_clear_undo_browser import _release
@@ -212,6 +212,7 @@ def test_a_wall_tab_click_while_a_rename_waits_lands_on_that_wall_and_keeps_the_
     點到的就是那一面（選中、編輯處換成那一面），牆名換成新的那一份，地板那一格打的 2000 照留。"""
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
         reveal(page, "#wall-floor")
         held = _late_rename(page)

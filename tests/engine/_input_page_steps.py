@@ -1,5 +1,8 @@
 """輸入頁的選單、另存框與範本框，結果抽屜，第 1 段的摺疊、「改…」與看哪一張圖，第 2 段某一面的牆面表單。鎖頁考題另由頁面程式發點擊。"""
+import json
+from pathlib import Path
 from typing import cast
+from urllib.parse import quote, urlsplit
 
 from playwright.sync_api import Locator, Page, expect
 
@@ -18,6 +21,37 @@ def open_scheme(page: Page, name: str) -> None:
     scheme_open_button(page, name).click()
     if page.locator("#leave-edits").is_visible():
         page.get_by_role("button", name="不存走", exact=True).click()
+
+
+# 開頁先開的那一份存好的範例預設叫這個名字（open_example_scheme）。
+EXAMPLE = "example"
+
+
+def open_example_scheme(page: Page, base_url: str, data_dir: Path, name: str = EXAMPLE, *,
+                        template: str | None = None) -> dict[str, object]:
+    """開頁先開一份存好的範例（#1265 單元 5a）：向這一台伺服器要 /api/example（範本，``template`` 指定哪一份，
+    沒給是開頁預設那份）的方案，只把方案代號換成 ``name``、原樣存成 ``data_dir/schemes/<name>.json``，
+    用 ``<base_url>/?scheme=<name>`` 打開；等到表單是那一份、``main`` 沒鎖、``inputBusy``（頁面忙碌旗）為假才回來。
+    單元 5 起開頁不再把沒存的範本放進表單，只需要「開著一份方案」的考題都走這一步，起點跟舊開法一樣
+    （test_gui_input_open_example_browser 守）。回傳存下去的那一份。"""
+    query = "" if template is None else f"?template={quote(template)}"
+    reply = page.request.get(f"{base_url}/api/example{query}")
+    assert reply.ok, reply.text()
+    scheme = cast(dict[str, object], reply.json()["scheme"]) | {"scheme_id": name}
+    path = data_dir / "schemes" / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(scheme, ensure_ascii=False), encoding="utf-8")
+    page.goto(f"{base_url}/?scheme={quote(name)}", wait_until="networkidle")
+    page.wait_for_function("document.body.dataset.inputReady === 'true'")
+    page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
+    page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+    return scheme
+
+
+def page_origin(page: Page) -> str:
+    """這一頁的伺服器位址（``http://127.0.0.1:<埠>``）：頁面網址可能帶 ``?scheme=`` 之類的查詢，不能直接接 /api/…。"""
+    parts = urlsplit(page.url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def archive_scheme(page: Page, name: str) -> None:

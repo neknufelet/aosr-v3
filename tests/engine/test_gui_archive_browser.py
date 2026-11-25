@@ -12,7 +12,7 @@ from playwright.sync_api import Browser, Dialog, Locator, Page, Request, expect
 
 from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import (archive_scheme, check_result, close_results, open_archived, open_results, open_save_as,
+from tests.engine._input_page_steps import (archive_scheme, check_result, close_results, open_archived, open_example_scheme, open_results, open_save_as,
                                             open_scheme, result_row, reveal)
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle, _saved
@@ -229,6 +229,7 @@ def test_archive_restore_buttons_confirmation_and_whole_scheme(
     _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_scheme(page, name)
         expect(page.locator("#save-id")).to_have_value(name)
         page.locator("#room-Lx").fill("6.7")
