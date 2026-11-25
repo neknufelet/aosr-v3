@@ -160,6 +160,11 @@ def test_blanking_the_height_while_a_clear_is_being_checked_never_puts_the_clear
         page.route("**/api/plan", lambda route: held_plan.append(route))
         page.route("**/api/zone-limits", lambda route: held_limits.append(route))
         _cut_by(page, "#elevation-clear")
+        # 攔截的回呼是瀏覽器那邊排隊送回來的：機器忙時按完馬上看會是空的，給它跑到（5b 第三趟整套 -n 8 紅過一次）。
+        for _ in range(200):
+            if held_plan:
+                break
+            page.wait_for_timeout(25)
         assert held_plan, "圖面檢查應該還在路上"
         # 審查設計洞 1：切完那一刻就畫「已清掉…｜復原」，不等圖面檢查回來（檢查丟錯也看得到復原）。
         expect(page.locator("#elevation-undo-clear")).to_be_visible()
