@@ -474,6 +474,8 @@ function say(text, kind) {
   $("messages").className = kind;
   // 「這間房貼什麼」那一頁開著時這一列是藏起來的：警示照抄一份到那一頁（zone_overview.js）。
   window.zonePageSay?.(text, kind);
+  // 結果抽屜開著時訊息列被遮住：封存、搬回、刪除的回話照抄一份到抽屜上方（#1265 單元 4）。
+  if (!$("results-drawer").hidden) { $("results-note").textContent = text; $("results-note").className = kind; }
   for (const note of ["open-note", "template-note", "save-as-note"]) sayBeside(note, "", "");
 }
 // 「打開」與「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它們的結果（沒打開的原因、空名字、
@@ -697,14 +699,31 @@ function markStale(event) {
   if (!$("result-link").hidden) $("result-stale").hidden = false;
   refreshClearUndo();  // 第 2 段「清掉這一面的切法」的復原只到下一個改動之前（elevation.js）
 }
+// 結果抽屜的比較（#1265 單元 4）：兩格 A、B，勾一筆填進空的那一格（A 先），取消勾選就空出那一格；
+// 兩格都有了，其餘的勾選格停用（第三筆擋下、不偷換）：要換一筆，先取消勾選其中一筆。比較網址照舊 A 在前。
 function chooseCompare(side, item) {
   compareChoice[side] = item;
-  $(side === "a" ? "compare-a" : "compare-b").textContent =
-    item ? `${side.toUpperCase()}：${item.scheme_id}（${item.finished_text}）` +
-    (runFinished(item) ? "" : `・${item.status_text}`) : `${side.toUpperCase()}：未選`;
-  const link = $("compare-link");
-  link.hidden = !compareChoice.a || !compareChoice.b;
-  if (!link.hidden) link.href = `/compare/${compareChoice.a.run_id}/${compareChoice.b.run_id}`;
+  drawCompareChoice();
+}
+function drawCompareChoice() {
+  const {a, b} = compareChoice, both = Boolean(a && b);
+  const differs = both && a.registry_text !== b.registry_text;
+  for (const row of $("results-list").querySelectorAll("tr")) {
+    const side = ["a", "b"].find(key => compareChoice[key]?.run_id === row.dataset.runId);
+    const box = row.querySelector("input[type=checkbox]");
+    box.checked = Boolean(side);
+    box.disabled = both && !side;
+    row.querySelector(".compare-mark").textContent = side ? side.toUpperCase() : "";
+    row.classList.toggle("registry-differs", Boolean(differs && side));
+  }
+  const link = $("compare-go");
+  if (both) link.href = `/compare/${a.run_id}/${b.run_id}`; else link.removeAttribute("href");
+  link.setAttribute("aria-disabled", String(!both));
+  $("compare-warning").hidden = !differs;
+  const picked = a || b;
+  $("compare-hint").textContent = both ? "已勾兩筆（A 是先勾的）；要換一筆，先取消勾選其中一筆" :
+    picked ? `已勾 ${a ? "A" : "B"}：${picked.scheme_id}（${picked.finished_text}）` +
+    (runFinished(picked) ? "" : `・${picked.status_text}`) + "；再勾一筆就能比較" : "勾兩筆就能比較";
 }
 function finishedCell(cell, text) {
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$/.test(text)) return;
@@ -722,15 +741,14 @@ function runFinished(row) {
   return ["done", "none"].includes(row.run_status);
 }
 function resultRow(item, archived = false) {
+  if (!archived) return drawerRow(item);
   const row = document.createElement("tr");
   row.dataset.runId = item.run_id;
   const finished = runFinished(item);
-  row.classList.toggle("not-finished", !finished || (archived && item.restore_available === false));
+  row.classList.toggle("not-finished", !finished || item.restore_available === false);
   // 「物理」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
   // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
-  const values = archived ? [[item.scheme_id], [item.finished_text],
-    [item.calculation_text, item.calculation_detail]] : [[item.scheme_id], [item.finished_text],
-    [item.duration_text], [item.calculation_text, item.calculation_detail], [item.registry_text]];
+  const values = [[item.scheme_id], [item.finished_text], [item.calculation_text, item.calculation_detail]];
   for (const [index, [value, detail]] of values.entries()) {
     const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     if (index === 1) finishedCell(cell, value);
@@ -739,19 +757,71 @@ function resultRow(item, archived = false) {
   // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
   // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
   // 封存動作另有按鈕欄；方案代號保持完整，日期與時刻各自不折、只在兩段之間換行，留出新欄的位置。
-  if (!finished || (archived && item.restore_available === false)) {
+  runNotes(row.firstElementChild, item, !finished || item.restore_available === false);
+  return row;
+}
+// 沒有正常完成的那一筆（失敗、已停止、計算中）多一行狀態；#755 同名方案在這筆算完之後改過，再多一行（伺服器給的字）。
+function runNotes(cell, item, statusLine) {
+  if (statusLine) {
     const status = document.createElement("span");
     status.className = "run-status"; status.textContent = item.status_text;
-    row.firstElementChild.append(status);
+    cell.append(status);
   }
-  // #755：同名方案在這筆算完之後改過，代號底下再多一行（伺服器給的字）。
   if (item.scheme_text) {
     const changed = document.createElement("span");
     changed.className = "run-status scheme-changed"; changed.textContent = item.scheme_text;
-    row.firstElementChild.append(changed);
+    cell.append(changed);
   }
+}
+// 結果抽屜的一列＝一筆結果（一次計算）：勾選格（勾了標 A／B）、方案名字（現在開著的那一份加註）、
+// 一行小字「算完時間；評分：評分設定；物理：…」、看、封存。全程時間在結果頁「技術細節」裡，這裡不放；
+// 「物理」那一格的判定（跟現在同不同）照留在小字裡，物理身分與程式提交仍只在滑鼠停留的說明。
+function drawerRow(item) {
+  const row = document.createElement("tr");
+  row.dataset.runId = item.run_id;
+  const finished = runFinished(item);
+  row.classList.toggle("not-finished", !finished);
+  const pick = document.createElement("td"), main = document.createElement("td"), acts = document.createElement("td");
+  pick.className = "res-pick"; main.className = "res-main"; acts.className = "res-acts";
+  const box = document.createElement("input"), mark = document.createElement("span");
+  box.type = "checkbox"; mark.className = "compare-mark";
+  box.setAttribute("aria-label", `勾來比較：${item.scheme_id}（${item.finished_text}）`);
+  box.onchange = () => {
+    const side = ["a", "b"].find(key => compareChoice[key]?.run_id === item.run_id);
+    if (side) chooseCompare(side, null);
+    else if (!compareChoice.a) chooseCompare("a", item);
+    else if (!compareChoice.b) chooseCompare("b", item);
+    else drawCompareChoice();
+  };
+  pick.append(box, mark);
+  main.append(document.createTextNode(item.scheme_id));
+  if (item.scheme_id === openedId) {
+    const opened = document.createElement("span");
+    opened.className = "opened-mark"; opened.textContent = "（現在開著）";
+    main.append(opened);
+  }
+  const line = document.createElement("small"), when = document.createElement("span");
+  line.className = "res-line"; when.className = "res-finished"; when.textContent = item.finished_text;
+  finishedCell(when, item.finished_text);
+  const registry = document.createElement("span"), physics = document.createElement("span");
+  registry.className = "res-registry"; registry.textContent = item.registry_text;
+  physics.className = "res-physics"; physics.textContent = item.calculation_text;
+  if (item.calculation_detail) physics.title = item.calculation_detail;
+  line.append(when, document.createTextNode(" 算完；評分："), registry, document.createTextNode("；物理："), physics);
+  main.append(line);
+  runNotes(main, item, !finished);
+  const link = document.createElement("a");
+  // 「看」是連到結果頁的連結，外觀跟同一列的「封存」按鈕一樣（home.css）。
+  link.className = "button-link"; link.href = item.result_url; link.textContent = "看";
+  const archive = document.createElement("button");
+  archive.type = "button"; archive.textContent = "封存"; archive.className = "res-archive";
+  archive.setAttribute("aria-label", `封存 ${item.scheme_id}（${item.finished_text}）`);
+  archive.onclick = () => action(() => moveResult(item));
+  acts.append(link, archive);
+  row.append(pick, main, acts);
   return row;
 }
+
 function rowButton(row, text, work, danger = false) {
   const cell = document.createElement("td"), button = document.createElement("button");
   button.type = "button"; button.textContent = text;
@@ -831,7 +901,8 @@ async function loadArchiveList() {
   $("clear-archive").hidden = !preview || (!preview.package_ids.length && !preview.run_ids.length);
   $("clear-archive").onclick = () => action(() => clearArchive(preview));
   archive.hidden = !packages.length && !data.results.length;
-  archive.querySelector("summary").textContent = `已封存（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
+  archive.querySelector("summary").textContent = `看已封存的結果（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
+  $("archive-say").hidden = archive.hidden;
   const packageList = $("archived-packages-list"); packageList.replaceChildren();
   $("archived-packages").hidden = !packages.length;
   for (const item of packages) {
@@ -872,22 +943,26 @@ async function loadResultList() {
   finishedNames = new Set(data.results.filter(runFinished).map(row => row.scheme_id));
   resultRows = data.results;
   renderInputBars();
-  const list = $("results-list"); list.replaceChildren();
-  for (const item of data.results) {
-    const row = resultRow(item);
-    const cell = document.createElement("td");
-    const link = document.createElement("a");
-    // 「查看」是連到結果頁的連結，外觀跟同一列的「選為 A／B」按鈕一樣（home.css）。
-    link.className = "button-link";
-    link.href = item.result_url; link.textContent = "查看"; cell.append(link); row.append(cell);
-    for (const side of ["a", "b"]) {
-      rowButton(row, `選為 ${side.toUpperCase()}`, () => chooseCompare(side, item));
-    }
-    rowButton(row, "封存方案", () => moveResult(item));
-    list.append(row);
-  }
+  drawResultRows();
   await loadArchiveList();
   return data.results;
+}
+// 抽屜裡的結果列：每次重讀清單、打開抽屜（「現在開著」跟著換）都重畫；勾選跟著計算代號留住（清單裡沒有了就放掉），
+// 游標在某一列的勾選格或「看」上時，重畫後放回同一列的同一顆。
+function drawResultRows() {
+  for (const side of ["a", "b"]) {
+    const item = compareChoice[side];
+    if (item) compareChoice[side] = resultRows.find(row => row.run_id === item.run_id) || null;
+  }
+  const active = document.activeElement, focusedRow = active?.closest?.("#results-list tr");
+  const again = focusedRow && [focusedRow.dataset.runId, active.matches("input") ? "input" : ".res-acts a"];
+  $("results-list").replaceChildren(...resultRows.map(item => resultRow(item)));
+  const empty = !resultRows.length;
+  $("results-empty").hidden = !empty;
+  $("results-table").hidden = empty;
+  $("compare-row").hidden = empty;
+  drawCompareChoice();
+  if (again) $("results-list").querySelector(`tr[data-run-id="${again[0]}"] ${again[1]}`)?.focus({preventScroll: true});
 }
 async function resumeRuns() {
   // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
@@ -1003,7 +1078,7 @@ async function poll() {
       $("result-link").hidden = false;
       $("result-stale").hidden = true;
     } else {
-      say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單`, "notice");
+      say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在頂條「算過的結果與比較」裡`, "notice");
     }
     renderInputBars();
   }

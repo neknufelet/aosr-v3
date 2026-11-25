@@ -10,6 +10,7 @@ from playwright.sync_api import Browser, Dialog, Page, expect
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle, _saved, _tree
+from tests.engine._input_page_steps import open_archived, open_results
 from tests.engine.test_gui_archive_browser import _assert_text_on_one_line, _confirm, _package_row, _row
 from tests.engine.test_gui_archive_delete import _damage
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser, result
@@ -26,7 +27,7 @@ def test_package_delete_cancel_then_accept(tmp_path: Path, browser: Browser, res
         page = watched.page
         package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
         page.reload(wait_until="networkidle")
-        page.locator("#archived summary").click()
+        open_archived(page)
         row = _package_row(page, result.scheme.scheme_id)
         button = row.get_by_role("button", name="永久刪除", exact=True)
         expect(button).to_be_visible()
@@ -55,8 +56,9 @@ def test_package_delete_cancel_then_accept(tmp_path: Path, browser: Browser, res
         _confirm(page)
         button.click()
         expect(row).not_to_be_attached()
+        open_results(page)
         expect(page.locator("#archived")).to_be_hidden()
-        expect(page.locator("#archived summary")).to_have_text("已封存（0 包方案、0 筆舊的單筆封存）")
+        expect(page.locator("#archived summary")).to_have_text("看已封存的結果（0 包方案、0 筆舊的單筆封存）")
         assert not folder.exists()
         _assert_quiet(watched)
 
@@ -80,7 +82,7 @@ def test_clear_keeps_skipped_packages_and_tables_fit(
         broken.mkdir()
         (broken / "manifest.json").write_text("{")
         page.reload(wait_until="networkidle")
-        page.locator("#archived summary").click()
+        open_archived(page)
         for package_id in (incomplete["package_id"], broken.name):
             row = page.locator(f'#archived-packages-list tr[data-package-id="{package_id}"]')
             expect(row.get_by_role("button", name="永久刪除")).not_to_be_attached()
@@ -120,9 +122,10 @@ def test_legacy_confirmation_and_last_row_hides_archive(tmp_path: Path, browser:
     _bundle(tmp_path / "archive", result, run_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#archived summary").click()
+        open_archived(page)
         messages = _confirm(page)
         _row(page, run_id, True).get_by_role("button", name="永久刪除", exact=True).click()
+        open_results(page)
         expect(page.locator("#archived")).to_be_hidden()
         assert WARNING in messages[0] and result.scheme.scheme_id in messages[0] and "算完" in messages[0]
         _assert_quiet(watched)
@@ -136,7 +139,7 @@ def test_clear_cancel_then_accept_hides_empty_archive(
         page = watched.page
         page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={})
         page.reload(wait_until="networkidle")
-        page.locator("#archived summary").click()
+        open_archived(page)
         before = _tree(tmp_path)
         sent: list[str] = []
         messages: list[str] = []
@@ -163,6 +166,7 @@ def test_clear_cancel_then_accept_hides_empty_archive(
         expect(page.locator("#archived")).to_be_visible()
         _confirm(page)
         page.get_by_role("button", name="全部清除封存", exact=True).click()
+        open_results(page)
         expect(page.locator("#archived")).to_be_hidden()
         listing = page.request.get(f"{base}/api/archive").json()
         assert listing["packages"] == [] and listing["results"] == []
@@ -184,13 +188,13 @@ def _narrow_legacy_only_hides_empty_package_table(page: Page, base: str, tmp_pat
     """窄畫面只有舊的單筆封存時不畫空的方案包表格；刪掉最後一包後表格也收起來、舊的單筆照留
     （#972 原 test_narrow_legacy_only_hides_empty_package_table 併進 clear_keeps[390] 開頭，斷言原樣保留）。
     呼叫前頁面已掛好自動按確定的對話框處理。"""
-    page.locator("#archived summary").click()
+    open_archived(page)
     expect(_row(page, "a" * 32, True)).to_be_visible()
     expect(page.locator("#archived-packages")).to_be_hidden()
     _saved(tmp_path, result)
     package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
     page.reload(wait_until="networkidle")
-    page.locator("#archived summary").click()
+    open_archived(page)
     page.locator(f'tr[data-package-id="{package["package_id"]}"]').get_by_role(
         "button", name="永久刪除", exact=True).click()
     expect(page.locator("#archived-packages-list tr")).not_to_be_attached()
@@ -212,7 +216,7 @@ def test_partial_delete_refreshes_row_and_disables_restore(
             package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
             folder = tmp_path / "archive" / "packages" / package["package_id"]
             page.reload(wait_until="networkidle")
-        page.locator("#archived summary").click()
+        open_archived(page)
         row = _row(page, run_id, True) if legacy else _package_row(page, result.scheme.scheme_id)
         unlink = Path.unlink
         deleted: list[Path] = []

@@ -90,23 +90,22 @@
 @media (max-width:1000px){.roomrow{grid-template-columns:minmax(0,1fr)}}
 /* 訊息列：多條問題一條一行；字級跟內文一樣，成功的綠色與問題的警示色由 style.css 的 .ok／.notice 管。 */
 #messages{white-space:pre-line;min-height:1.5em}
-/* 結果清單：代號、秒數、「查看」不折行（「查看」折成直排看不懂）；時間可在日期與時刻之間折行；物理與評分設定兩格字長，讓它折。
+/* 舊的單筆封存：代號、「搬回」不折行；時間可在日期與時刻之間折行；物理那一格字長，讓它折。
    物理那一格滑鼠停上去有技術細節（物理身分、程式提交），游標改成問號提示有東西可看。 */
-table:has(#results-list) th,table:has(#archived-list) th,#results-list td:not(:nth-child(2)):not(:nth-child(4)):not(:nth-child(5)),#archived-list td:not(:nth-child(2)):not(:nth-child(3)){white-space:nowrap}
-#results-list td[title],#archived-list td[title]{cursor:help}
-/* 這兩格折行只在標點後折（「，要重算」整段換到下一行），不在字中間折出一個落單的字。 */
-#results-list td:nth-child(4),#results-list td:nth-child(5),#archived-list td:nth-child(3){word-break:keep-all}
-/* 加封存欄後，時間允許在日期與時刻中間換行；兩小段各自完整，日期不在連字號斷開。
-   主清單與封存區的方案代號都保持完整，不從字中間切斷。 */
-#results-list td:nth-child(2),#archived-list td:nth-child(2){white-space:normal}
+table:has(#archived-list) th,#archived-list td:not(:nth-child(2)):not(:nth-child(3)){white-space:nowrap}
+#archived-list td[title],#results-list .res-physics[title]{cursor:help}
+/* 這一格折行只在標點後折（「，要重算」整段換到下一行），不在字中間折出一個落單的字。 */
+#archived-list td:nth-child(3){word-break:keep-all}
+/* 時間允許在日期與時刻中間換行；兩小段各自完整，日期不在連字號斷開。方案代號保持完整，不從字中間切斷。 */
+#archived-list td:nth-child(2){white-space:normal}
 .finished-date,.finished-time{display:inline-block;white-space:nowrap}
 #archived summary{cursor:pointer;color:#15617b}
 /* 非正常完成的產物整列染色，查看與比較仍可用於診斷；代號底下那一行狀態加粗，只在標點後折。 */
 #results-list tr.not-finished,#archived-list tr.not-finished{background:#fff2e8;color:#872c22}
 #results-list .run-status,#archived-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}
-/* 結果清單每一列的三個動作（查看、選為 A、選為 B）、選好 A、B 後的「比較」、算完後的「查看結果頁」長一樣：
-   這三個連結外觀做成跟按鈕一樣（訊息叫人「按」它，它就要長得像能按的）。
-   「比較」沒選好之前藏著：顯示方式寫成 inline-block 會蓋掉 hidden，藏著時要另外寫回 none。 */
+/* 結果抽屜每一列的兩個動作（看、封存）、勾好兩筆後的「比較」、算完後的「查看結果頁」長一樣：
+   連結外觀做成跟按鈕一樣（訊息叫人「按」它，它就要長得像能按的）。
+   顯示方式寫成 inline-block 會蓋掉 hidden，藏著時要另外寫回 none。 */
 a.button-link{display:inline-block;border-radius:6px;background:#15617b;color:white;text-decoration:none}
 a.button-link[hidden]{display:none}
 a.button-link,#results-list button,#archived-list button{padding:.4rem .8rem;line-height:1.3}
@@ -126,7 +125,7 @@ input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 #labels-notice summary{cursor:pointer;color:#15617b}
 #labels-technical{color:#46586a}
 
-/* 評分設定的白話加長後，桌面多留空間放完整列操作；小螢幕仍用區塊內的橫向捲動。 */
+/* 主欄寬照結果清單還在頁面中間時的寬（#1265 單元 4 搬進抽屜，頁面寬不跟著變）。 */
 main:has(#results-list){max-width:1220px}
 #archived-packages-list td{white-space:nowrap}
 #archived-packages-list button{padding:.4rem .8rem;line-height:1.3}
@@ -290,7 +289,7 @@ main:has(#input-bars){padding-top:0;padding-bottom:0}
 #run-log{position:relative}
 #run-log summary{cursor:pointer;color:#15617b}
 #run-log pre{position:absolute;right:0;bottom:100%;width:min(34rem,75vw);max-height:40vh;overflow:auto;background:white;border:1px solid #d5e0e4;padding:.7rem}
-#scheme-section,#wall-section,#result-section,#archived{scroll-margin-top:9rem}
+#scheme-section,#wall-section{scroll-margin-top:9rem}
 html:has(#input-bars){scroll-padding-bottom:7rem}
 @media(max-width:1020px){
   #input-bars .bar-row,#input-footer .bar-row{flex-wrap:wrap}
@@ -392,3 +391,38 @@ button.lnk{color:#155b70;margin-left:.4rem}
 .zone-sizes{font-size:.8125rem;margin:.4rem 0 0}
 .zone-sizes th,.zone-sizes td{padding:.3rem .35rem}
 .zone-sizes td:nth-child(2),.zone-sizes td:nth-child(3),.zone-sizes td:nth-child(4){text-align:right;white-space:nowrap}
+
+/* 結果抽屜（#1265 單元 4，示意圖第三版「算過的結果」）：右側整高一條，底下半透明遮罩，點遮罩關。
+   一列＝一筆結果：勾選格（勾了標 A／B）、名字與一行小字、看與封存；評分設定不同的兩筆勾在一起時兩列標紅。 */
+#results-drawer[hidden]{display:none}
+#results-mask{position:fixed;inset:0;background:#17252c47;z-index:20}
+#results-panel{position:fixed;top:0;right:0;bottom:0;box-sizing:border-box;width:min(680px,100vw);margin:0;border:0;border-radius:0;
+  z-index:21;background:white;box-shadow:-10px 0 30px #17252c2e;padding:1.25rem 1.5rem;overflow:auto}
+html.drawer-open{overflow:hidden}
+#results-panel .drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+#results-panel h2{font-size:1.25rem;margin:0 0 .25rem}
+#results-close{background:white;color:#17212a;border:1px solid #17212a;padding:.35rem .7rem;white-space:nowrap}
+#results-panel p.say{color:#46586a;font-size:.8125rem;margin:0 0 .75rem}
+#results-note:empty{display:none}
+#results-table{margin:0}
+#results-table td{padding:.7rem .35rem;border-bottom:0;border-top:1px solid #d5e0e4}
+#results-list .res-pick{width:2.6rem;white-space:nowrap}
+#results-list .res-pick input{margin:.2rem .15rem 0 0;width:1rem;height:1rem;vertical-align:top}
+.compare-mark{font-weight:700;color:#15617b;font-size:.85rem}
+#results-list .res-main{overflow-wrap:anywhere}
+#results-list .opened-mark{color:#46586a}
+#results-list .res-line{display:block;color:#46586a;font-size:.8125rem;margin-top:.15rem;word-break:keep-all}
+#results-list .res-acts{white-space:nowrap;text-align:right}
+#results-list .res-acts>*{margin-left:.4rem}
+#results-list button{padding:.4rem .8rem;line-height:1.3}
+#results-list tr.not-finished{background:#fff2e8;color:#872c22}
+#results-list tr.not-finished .res-line{color:#872c22}
+#results-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}
+#results-list tr.registry-differs{background:#fdecea;box-shadow:inset 3px 0 0 #a12020}
+#results-list tr.registry-differs .res-registry{color:#a12020;font-weight:600}
+#compare-row:not([hidden]){display:flex;align-items:center;gap:.75rem;margin-top:.5rem;padding-top:.75rem;border-top:1px solid #97aeb8;color:#46586a}
+#compare-hint{flex:1;font-size:.8125rem}
+#compare-go[aria-disabled="true"]{opacity:.45;cursor:default}
+#compare-warning:not([hidden]){color:#a12020;font-weight:600;font-size:.8125rem;margin:.4rem 0 0}
+#archive-say{margin-top:1rem}
+#results-panel #archived{border:0;padding:0;margin:0}

@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page, expect
 
-from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
+from tests.engine._input_page_steps import open_results, open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 
@@ -384,12 +384,15 @@ def test_only_the_calculation_cell_carries_the_technical_tooltip(tmp_path: Path,
         {"scheme": {"scheme_id": "unreadable"}, "schema_version": "aosr.scheme_result.v4"}))
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        # #1265 單元 4：結果清單搬進結果抽屜，一列的算完時間、評分設定、物理收成小字裡的三段（全程時間不在抽屜，
+        # 在結果頁）；滑鼠說明只准掛在「物理」那一段。
+        open_results(page)
         row = page.locator("#results-list tr", has_text="unreadable")
         row.wait_for()
-        headers = page.locator("table:has(#results-list) th").all_inner_texts()
-        cells = row.locator("td").evaluate_all("cells => cells.map(cell => [cell.textContent, cell.title])")
-        assert {text for text, _ in cells[1:5]} == {"讀不出"}
-        assert {headers[index] for index, (_, title) in enumerate(cells) if title} == {"物理"}
+        cells = row.locator(".res-finished, .res-registry, .res-physics").evaluate_all(
+            "cells => cells.map(cell => [cell.textContent, cell.title])")
+        assert len(cells) == 3 and {text for text, _ in cells} == {"讀不出"}
+        assert row.locator("[title]").evaluate_all("nodes => nodes.map(node => node.className)") == ["res-physics"]
         _assert_quiet(watched)
 
 

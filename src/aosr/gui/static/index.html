@@ -185,14 +185,6 @@
     </section>
     <section><h2>檢查</h2><div class="actions"><button id="check">檢查</button></div>
       <p id="messages" aria-live="polite"></p></section>
-    <section id="result-section"><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>
-      <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>物理</th><th>評分設定</th><th>查看</th><th>選為 A</th><th>選為 B</th><th>封存方案</th></tr></thead><tbody id="results-list"></tbody></table>
-      <details id="archived" hidden><summary>已封存</summary>
-        <p><button id="clear-archive" type="button" class="archive-danger" hidden>全部清除封存</button></p>
-        <p class="archive-scroll-note note">表格可左右滑動查看完整內容與操作按鈕。</p>
-        <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th><th>永久刪除</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
-        <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
-      </details></section>
     <footer id="input-footer">
       <div class="bar-row"><div class="bar-prompt"><strong id="next-title"></strong><small id="next-note"></small></div>
         <span id="current-stop"><button id="stop" disabled hidden>停止</button></span>
@@ -203,6 +195,25 @@
       </div>
       <div class="followed-run"><span id="run-state" aria-live="polite"></span><span id="followed-stop"></span></div><ul id="other-runs" hidden></ul>
     </footer>
+    <div id="results-drawer" hidden>
+      <div id="results-mask"></div>
+      <section id="results-panel" role="dialog" aria-modal="true" aria-labelledby="results-title" aria-describedby="results-say" tabindex="-1">
+        <div class="drawer-head"><h2 id="results-title">算過的結果與比較</h2><button id="results-close" type="button">關閉 ✕</button></div>
+        <p class="say" id="results-say">每算一次就多一列，新的在上面：同一份方案算過好幾次（算失敗再算、留著的舊紀錄、搜尋放進來的）就有好幾列。勾兩筆就能並排比，先勾的是 A。</p>
+        <p id="results-note" aria-live="polite"></p>
+        <p id="results-empty" hidden>還沒有算過的結果；在頁底按「照現在牆上貼的算一次」，算好就列在這裡。</p>
+        <table id="results-table"><tbody id="results-list"></tbody></table>
+        <div id="compare-row"><span id="compare-hint" aria-live="polite"></span><a id="compare-go" class="button-link" aria-disabled="true">比較 ▸</a></div>
+        <p id="compare-warning" hidden>評分設定不同，放在一起比會不準</p>
+        <p class="say" id="archive-say">封存＝從清單收起來，隨時拿得回來。</p>
+        <details id="archived" hidden><summary>看已封存的結果</summary>
+          <p><button id="clear-archive" type="button" class="archive-danger" hidden>全部清除封存</button></p>
+          <p class="archive-scroll-note note">表格可左右滑動查看完整內容與操作按鈕。</p>
+          <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th><th>永久刪除</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
+          <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
+        </details>
+      </section>
+    </div>
   </main>
   <div id="zone-page" hidden></div>
 </body>

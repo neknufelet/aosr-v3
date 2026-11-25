@@ -172,15 +172,17 @@ function bindBars() {
     if (next !== undefined) { event.preventDefault(); items[next].focus(); }
     if (event.key === "Tab") { closeBarBoxes(); $("scheme-menu-button").focus(); }
   };
-  $("show-results").onclick = () => $("result-section").scrollIntoView();
+  $("show-results").onclick = () => openResults();
   $("all-schemes").onclick = () => { allSchemes = true; drawSchemeMenu(); menuItems()[0]?.focus(); };
   $("choose-template").onclick = () => {
     closeBarBoxes(); $("template-box").hidden = false; $("template-list").focus();
   };
   $("show-archived").onclick = () => {
-    closeBarBoxes(); $("archived").hidden = false; $("archived").open = true;
-    $("archived").scrollIntoView(); $("archived").querySelector("summary").focus({preventScroll: true});
+    closeBarBoxes(); openResults();
+    $("archived").hidden = false; $("archived").open = true; $("archive-say").hidden = false;
+    $("archived").scrollIntoView({block: "nearest"}); $("archived").querySelector("summary").focus({preventScroll: true});
   };
+  bindResultsDrawer();
   $("save-as-toggle").onclick = () => {
     const open = $("save-as-box").hidden;
     closeBarBoxes();
@@ -200,6 +202,45 @@ function bindBars() {
     if (!event.target.closest?.(".bar-anchor")) closeBarBoxes();
   });
   $("zone-to-search").onclick = () => action(sendToSearch);
+}
+// 結果抽屜（#1265 單元 4）：頂條「算過的結果與比較 ▸」打開；關閉鈕、Esc、點遮罩關，關了游標回那顆鈕。
+// 開著時 Tab 只在抽屜裡轉。抽屜住在 main 裡：存檔、計算、開檔、切牆等把 main 鎖住（inert）的時候，
+// 抽屜裡的封存、搬回、刪除也一起按不了（這道鎖不另外接）。
+function openResults() {
+  closeBarBoxes();
+  $("results-note").textContent = "";
+  $("results-drawer").hidden = false;
+  document.documentElement.classList.add("drawer-open");
+  drawResultRows();
+  $("results-close").focus();
+}
+function closeResults() {
+  if ($("results-drawer").hidden) return;
+  $("results-drawer").hidden = true;
+  document.documentElement.classList.remove("drawer-open");
+  $("show-results").focus();
+}
+function drawerStops() {
+  return [...$("results-panel").querySelectorAll("button, a[href], input, summary")]
+    .filter(node => !node.disabled && node.getClientRects().length);
+}
+function bindResultsDrawer() {
+  $("results-close").onclick = closeResults;
+  $("results-mask").onclick = closeResults;
+  document.addEventListener("keydown", event => {
+    if ($("results-drawer").hidden || $("leave-edits").open) return;
+    if (event.key === "Escape") { event.preventDefault(); closeResults(); return; }
+    if (event.key !== "Tab") return;
+    const stops = drawerStops(), index = stops.indexOf(document.activeElement);
+    if (!stops.length) return;
+    if (event.shiftKey && index <= 0) { event.preventDefault(); stops.at(-1).focus(); }
+    else if (!event.shiftKey && (index === -1 || index === stops.length - 1)) { event.preventDefault(); stops[0].focus(); }
+  });
+  // 游標被別處搶走（鎖頁解開後放回、點到遮罩外）時拉回抽屜。
+  document.addEventListener("focusin", event => {
+    if (!$("results-drawer").hidden && !$("results-drawer").contains(event.target) &&
+        !$("leave-edits").open) $("results-close").focus();
+  });
 }
 function runningFor(name) {
   if (!name) return null;

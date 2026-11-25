@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import Browser, expect
 
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import archive_scheme, open_save_as, open_scheme, open_templates, reveal, scheme_open_button
+from tests.engine._input_page_steps import archive_scheme, close_results, open_save_as, open_scheme, open_templates, reveal, scheme_open_button
 from tests.engine.test_scheme_pipeline import _run_control
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser, result
@@ -43,7 +43,8 @@ def test_saved_idle_and_sticky_results_jump(tmp_path: Path, browser: Browser, re
         page.locator("#save").click()
         expect(page.locator("#save-feedback")).to_have_text("方案沒有變動")
         page.locator("#show-results").click()
-        expect(page.locator("#result-section h2")).to_be_in_viewport()
+        expect(page.locator("#results-title")).to_be_in_viewport()
+        close_results(page)
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         expect(page.locator("#scheme-menu-button")).to_be_in_viewport()
         expect(page.locator("#calculate")).to_be_in_viewport()

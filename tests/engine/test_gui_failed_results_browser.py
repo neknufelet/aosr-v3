@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Locator, Page, expect
 from aosr.gui.labels import RESULT_RUN_LABELS, RUN_EXIT_TEXT
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
+from tests.engine._input_page_steps import open_results
 from tests.engine.test_gui_browser import _open, _serve, browser, result
 from tests.engine.test_gui_compare_routes import pair
 from tests.engine.test_gui_compare_browser import _has_lines
@@ -59,6 +60,7 @@ def pair_runs(tmp_path_factory: pytest.TempPathFactory, pair: tuple[SchemeResult
 
 
 def _result_row(page: Page, run_id: str) -> Locator:
+    open_results(page)  # #1265 單元 4：結果清單住在結果抽屜裡
     return page.locator("#results-list tr").filter(has=page.locator(f'a[href="/results/{run_id}"]'))
 
 
@@ -71,17 +73,19 @@ def test_home_marks_four_statuses_and_compare_selection(
         failed_row, done_row = _result_row(page, failed), _result_row(page, done)
         for run_id, text in ((failed, "失敗：內容可能不完整"), (stopped, "已停止：內容可能不完整")):
             row = _result_row(page, run_id)
-            expect(row.locator("td").first.locator(".run-status")).to_have_text(text)
+            expect(row.locator("td.res-main").locator(".run-status")).to_have_text(text)
             assert "not-finished" in (row.get_attribute("class") or "").split()
         for run_id in (done, untracked):
             row = _result_row(page, run_id)
             expect(row).to_be_visible()
             assert "not-finished" not in (row.get_attribute("class") or "").split()
-            assert row.locator("td").first.evaluate("node => node.querySelector('.run-status') === null")
+            assert row.locator("td.res-main").evaluate("node => node.querySelector('.run-status') === null")
         assert failed_row.evaluate("node => getComputedStyle(node).backgroundColor") != (
             done_row.evaluate("node => getComputedStyle(node).backgroundColor"))
-        _result_row(page, stopped).get_by_role("button", name="選為 A", exact=True).click()
-        expect(page.locator("#compare-a")).to_contain_text("已停止：內容可能不完整")
+        # 勾成 A 的那一筆（舊的「選為 A」）：比較那一列寫出它的狀態。
+        _result_row(page, stopped).get_by_role("checkbox").check()
+        expect(_result_row(page, stopped).locator(".compare-mark")).to_have_text("A")
+        expect(page.locator("#compare-hint")).to_contain_text("已停止：內容可能不完整")
         assert watched.page_errors == []
 
 

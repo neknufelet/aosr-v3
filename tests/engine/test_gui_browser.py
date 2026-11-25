@@ -24,7 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._input_page_steps import open_save_as, open_scheme, open_templates, reveal
+from tests.engine._input_page_steps import check_result, close_results, open_results, open_save_as, open_scheme, open_templates, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -199,9 +199,11 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         assert first.rsplit("/", 1)[1] not in finished and "/" not in finished and ".json" not in finished
         assert page.locator("#result-stale").is_hidden()
         # 訊息叫人「按」查看結果頁，它就要長得像按鈕：跟結果清單的「查看」同一種樣子，沒有底線。
+        open_results(page)
         page.locator("#results-list tr a").first.wait_for()
         look = page.locator("#result-link").evaluate(BUTTON_LOOK_JS)
         assert look[5] == "none" and look == page.locator("#results-list tr a").first.evaluate(BUTTON_LOOK_JS)
+        close_results(page)
         reveal(page, "#speaker-left-x").fill("1.7")
         assert page.locator("#result-stale").is_visible()
         assert page.locator("#result-link").get_attribute("href") == first
@@ -562,30 +564,34 @@ def test_template_save_load_failure_and_stage_one_template(tmp_path: Path, brows
 def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
                                           result: SchemeResult) -> None:
     _save(tmp_path, result)
+    # #1265 單元 4：選為 A／B 改成勾兩筆（同一筆不能同時當 A 和 B），多放一筆同一份方案的結果才勾得出兩筆。
+    save_result(result, tmp_path / "results" / f"{'b' * 32}.json")
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_results(page)
         page.locator("#results-list tr").first.wait_for()
         assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
         _assert_text_is_formatted(page)
         # 「物理」格只講白話（跟現在的物理同不同）；物理身分與提交代號只在滑鼠停留的說明裡。
-        version = page.locator("#results-list tr").first.locator("td").nth(3)
+        # （#1265 單元 4：結果抽屜裡「物理」是那一列小字裡的一段 .res-physics。）
+        version = page.locator("#results-list tr").first.locator(".res-physics")
         assert version.inner_text() in {"跟現在相同", "物理改過，要重算"}
         assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", version.inner_text())
         tip = version.get_attribute("title") or ""
         assert "物理身分" in tip and "程式提交" in tip
-        # 「查看」仍是連結（連到結果頁），但外觀跟同一列的「選為 A／B」按鈕一樣：底色、字色、圓角、
+        # 「看」仍是連結（連到結果頁），但外觀跟同一列的「封存」按鈕一樣：底色、字色、圓角、
         # 內距、高度都相同，沒有底線（以前是藍色底線字，跟旁邊的按鈕不像同一組動作）。
         row = page.locator("#results-list tr").first
         looks = [row.locator("a").evaluate(BUTTON_LOOK_JS),
                  *row.locator("button").evaluate_all(f"nodes => nodes.map({BUTTON_LOOK_JS})")]
         assert looks[0][5] == "none" and looks[1:]
         assert all(item == looks[0] for item in looks[1:]), looks
-        # 選好 A、B 才出現的「比較」也是同一種按鈕（以前是藍色底線小字）；沒選好之前藏著。
-        assert page.locator("#compare-link").is_hidden()
-        row.get_by_role("button", name="選為 A").click()
-        row.get_by_role("button", name="選為 B").click()
-        assert page.locator("#compare-link").is_visible()
-        assert page.locator("#compare-link").evaluate(BUTTON_LOOK_JS) == looks[0]
+        # 勾好兩筆才按得到的「比較」也是同一種按鈕（以前是藍色底線小字）；沒勾好之前停用。
+        assert page.locator("#compare-go").get_attribute("aria-disabled") == "true"
+        check_result(page, str(row.get_attribute("data-run-id")))
+        check_result(page, str(page.locator("#results-list tr").nth(1).get_attribute("data-run-id")))
+        assert page.locator("#compare-go").get_attribute("aria-disabled") == "false"
+        assert page.locator("#compare-go").evaluate(BUTTON_LOOK_JS) == looks[0]
         page.locator("#results-list tr a").first.click()
         _wait_for_lines(page)
         _assert_quiet(watched)
@@ -846,6 +852,7 @@ def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
     notice = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
     with _serve(tmp_path) as base:
         with _open(browser, base) as watched:
+            open_results(watched.page)
             watched.page.locator("#results-list tr").first.wait_for(state="visible")
             assert watched.page.locator("#server-notice").is_hidden()
         state["current"] = "calc-v1:" + "1" * 64

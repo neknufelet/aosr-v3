@@ -17,6 +17,7 @@ from aosr.reporting.compare import comparison_problems
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
+from tests.engine._input_page_steps import open_results
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
@@ -934,10 +935,11 @@ def test_home_page_picks_a_and_b_then_opens_compare(tmp_path: Path, browser: Bro
         _files(tmp_path, pair[1], B_ID)
         with _open(browser, f"{base}/") as watched:
             page = watched.page
+            open_results(page)
             rows = page.locator("#results-list tr")
-            rows.filter(has_text="wall-1").get_by_role("button", name="選為 A").click()
-            assert page.locator("#compare-link").is_hidden()
-            rows.filter(has_text="wall-2").get_by_role("button", name="選為 B").click()
+            rows.filter(has_text="wall-1").get_by_role("checkbox").check()
+            assert page.locator("#compare-go").get_attribute("aria-disabled") == "true"
+            rows.filter(has_text="wall-2").get_by_role("checkbox").check()
             link = page.get_by_role("link", name="比較")
             assert link.get_attribute("href") == f"/compare/{A_ID}/{B_ID}"
             link.click()

@@ -1,10 +1,11 @@
-"""輸入頁的選單、另存框與範本框，第 1 段的摺疊、「改…」與看哪一張圖，第 2 段某一面的牆面表單。鎖頁考題另由頁面程式發點擊。"""
+"""輸入頁的選單、另存框與範本框，結果抽屜，第 1 段的摺疊、「改…」與看哪一張圖，第 2 段某一面的牆面表單。鎖頁考題另由頁面程式發點擊。"""
 from typing import cast
 
 from playwright.sync_api import Locator, Page, expect
 
 
 def scheme_open_button(page: Page, name: str) -> Locator:
+    close_results(page)
     if page.locator("#scheme-menu").is_hidden():
         page.locator("#scheme-menu-button").click()
     row = page.locator(f'[data-scheme="{name}"] .home-open')
@@ -34,15 +35,54 @@ def scripted_open_scheme(page: Page, name: str) -> None:
 
 
 def open_save_as(page: Page) -> None:
+    close_results(page)
     if page.locator("#save-as-box").is_hidden():
         page.locator("#save-as-toggle").click()
 
 
 def open_templates(page: Page) -> None:
+    close_results(page)
     if page.locator("#template-box").is_hidden():
         page.locator("#scheme-menu-button").click()
         page.locator("#choose-template").click()
 
+
+
+def open_results(page: Page) -> None:
+    """頂條「算過的結果與比較 ▸」打開結果抽屜（#1265 單元 4：結果清單、比較、已封存都搬進去）；
+    已經開著就不動（再叫一次不會關掉），叫完一定看得見，抽屜裡的否定斷言才不會因為整塊藏著而假綠。"""
+    if page.locator("#results-panel").is_hidden():
+        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        page.locator("#show-results").click()
+    expect(page.locator("#results-panel")).to_be_visible()
+
+
+def close_results(page: Page) -> None:
+    """按抽屜的「關閉 ✕」；本來就關著不動。抽屜蓋著整頁，要點頁面上別的東西前先關。"""
+    if page.locator("#results-panel").is_visible():
+        page.locator("#results-close").click()
+        expect(page.locator("#results-panel")).to_be_hidden()
+
+
+def result_row(page: Page, run_id: str) -> Locator:
+    """結果抽屜裡那一筆結果（一列＝一次計算，照計算代號找）；先打開抽屜。"""
+    open_results(page)
+    return page.locator(f'#results-list tr[data-run-id="{run_id}"]')
+
+
+def check_result(page: Page, run_id: str) -> None:
+    """勾那一筆來比較（舊的「選為 A／B」：先勾的是 A、第二筆是 B）。"""
+    box = result_row(page, run_id).get_by_role("checkbox")
+    box.check()
+    expect(box).to_be_checked()
+
+
+def open_archived(page: Page) -> None:
+    """打開抽屜並展開「看已封存的結果」；同一頁第二次以後它可能還開著，再點會收起來，所以只在收著時點。"""
+    open_results(page)
+    expect(page.locator("#archived")).to_be_visible()
+    if not page.locator("#archived").evaluate("node => node.open"):
+        page.locator("#archived summary").click()
 
 
 def _unlocked(page: Page) -> None:
