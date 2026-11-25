@@ -347,15 +347,17 @@ function renderInputPreview() {
   }
   renderRoomFacts();
 }
-async function changeInputScheme(load) {
-  if (inputBusy) return false;
+// held：呼叫的人已經用 holdInput 鎖著整頁（從範本開新的：存檔、重讀清單、打開一路鎖，審查第 4 條）；這裡不再上鎖、
+// 也不在做完時解鎖，解鎖與解鎖後補問預覽交給那一道鎖。
+async function changeInputScheme(load, held = false) {
+  if (!held && inputBusy) return false;
   inputBusy = true;
   let failed = false;
   $("input-setup").setAttribute("aria-busy", "true");
   ++previewAsked;
   ++multiplesAsked;
   // 開檔、家具、快捷、喇叭設定與開機共用交接；等待時三樣都留在原版本。
-  document.querySelector("main").inert = true;
+  if (!held) document.querySelector("main").inert = true;
   try {
     const resize = window.pendingRoomResize();
     if (resize) await resize;
@@ -383,11 +385,13 @@ async function changeInputScheme(load) {
     return false;
   } finally {
     $("input-setup").removeAttribute("aria-busy");
-    document.querySelector("main").inert = false;
-    inputBusy = false;
-    // 失敗時原方案的格子已收進去、等在路上的那次預覽也被作廢：解鎖後替目前這份補問一次，換算座標才不停在舊值。
-    // 補問又失敗只換訊息列：「打開」「開一份新的」旁邊接著寫的「沒有打開…」「沒有開新的…」照留（#1188 第 8 條）。
-    if (failed && scheme && formScheme === scheme) previewAfterUnlock();
+    if (!held) {
+      document.querySelector("main").inert = false;
+      inputBusy = false;
+      // 失敗時原方案的格子已收進去、等在路上的那次預覽也被作廢：解鎖後替目前這份補問一次，換算座標才不停在舊值。
+      // 補問又失敗只換訊息列：「打開」「開一份新的」旁邊接著寫的「沒有打開…」「沒有開新的…」照留（#1188 第 8 條）。
+      if (failed && scheme && formScheme === scheme) previewAfterUnlock();
+    }
   }
 }
 // 「儲存」「另存新名字」「計算這個方案」跟換表單（打開、從範本開新的、編輯、切牆、換材料）共用同一道鎖（#1187）：
@@ -555,10 +559,17 @@ async function loadSchemeList() {
   // 右卡「改造前」那一格的選單列的是方案清單：清單晚到也要換上。
   renderRoomEditors();
 }
-// 回有沒有真的打開，讓帶名字的連結知道是否繼續進入分區頁。
-async function openScheme(name) {
+// 回有沒有真的打開，讓帶名字的連結知道是否繼續進入分區頁。沒打開時原因記在 openProblem：呼叫的人拿這一句，
+// 不抄訊息列（被鎖擋下時訊息列沒換，上面還是別人留的舊句，審查第 4 條）。held 見 changeInputScheme。
+let openProblem = "";
+async function openScheme(name, held = false) {
+  openProblem = "";
   if (!name) return false;
-  if (inputBusy) { refuseWhileBusy("open-note", `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`); return false; }
+  if (!held && inputBusy) {
+    openProblem = `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`;
+    refuseWhileBusy("open-note", openProblem);
+    return false;
+  }
   // 每一區的做法跟著方案讀（#1105）；材料庫可能在別的分頁改過，一起重讀。三樣都在鎖頁期間讀完，
   // 成功才同步套上：不准在表單已換、做法還沒換的空檔放使用者按「儲存」。
   let zoneState;
@@ -568,9 +579,10 @@ async function openScheme(name) {
     const [design, library] = await Promise.all([fetchZoneDesign(name), fetchZoneLibrary()]);
     zoneState = {design, library};
     return opened.scheme;
-  })) {
-    // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列，也寫在「打開」旁邊。
-    sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
+  }, held)) {
+    // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列（changeInputScheme 剛寫的），也寫在「打開」旁邊。
+    openProblem = $("messages").textContent;
+    sayBeside("open-note", `沒有打開「${name}」：${openProblem}`, "notice");
     return false;
   }
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
@@ -620,6 +632,7 @@ async function openSchemeFromLink() {
 // 「從範本開一份新的」（#1265 單元 5b，取代「載入範本」）：頂條選單打開的那一塊與完全沒有方案時的空畫面共用這一份表單、
 // 這一支。先取名、先存（名字照「另存新名字」同一套規則；存檔帶 If-None-Match: *，撞名伺服器也擋），存成了才用「打開」
 // 那條路打開它：畫面上從頭到尾不會有一份沒名字、沒存的範本。擋下來的原因寫在這一塊最底下，表單不動。
+let newSchemePending = false;
 async function newFromTemplate() {
   const note = "new-scheme-note", name = $("new-scheme-id").value.trim();
   const picked = document.querySelector('input[name="new-template"]:checked');
@@ -633,29 +646,46 @@ async function newFromTemplate() {
     $("new-scheme-id").focus();
     return;
   }
-  // 開著的那一份有改動沒存：跟「換一個方案」同一道詢問；問在存新檔之前，按「取消」就什麼都沒有存。
-  if (!await canLeaveForm()) return;
-  sayBeside(note, "", "");
-  let problem = "";
-  const stored = await holdInput(async () => {
-    try {
-      const example = await api(`/api/example?template=${encodeURIComponent(picked.value)}`);
-      await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT", {...example.scheme, scheme_id: name}, {"If-None-Match": "*"});
-      return true;
-    } catch (error) { problem = errorText(error); return false; }
-  });
-  if (!stored) { sayBeside(note, `沒有開新的：${problem || $("messages").textContent}`, "notice"); return; }
-  // 清單讀不到不算失敗：新的那一份已經存好，照樣打開。
-  try { await loadSchemeList(); } catch { /* 下一次讀清單再補 */ }
-  if (!await openScheme(name)) {
-    sayBeside(note, `「${name}」已經存好，但沒有打開：${$("messages").textContent}`, "notice");
-    return;
-  }
-  $("new-scheme-id").value = "";
-  closeBarBoxes();
-  leaveEmptyStart();
-  sayBeside("open-note", `已從範本「${label}」開一份新的「${name}」，存好了`, "ok");
-  refreshHome();
+  // 從這裡到打開好（或講完沒開成的原因）那一塊都不准被關掉：#leave-edits 的點擊、鎖頁中的 Esc 都不關（home.js 讀
+  // newSchemePending，審查第 1 條），失敗的原因才不會寫在一塊看不見的地方。
+  newSchemePending = true;
+  try {
+    // 開著的那一份有改動沒存：跟「換一個方案」同一道詢問；問在存新檔之前，按「取消」就什麼都沒有存。
+    if (!await canLeaveForm()) return;
+    sayBeside(note, "", "");
+    let problem = "", stored = false;
+    // 要範本、存檔、重讀清單、打開一路鎖著（審查第 4 條）：中間不留空窗給第二下「開一份新的」「打開」「儲存」「另存」「計算」。
+    const opened = await holdInput(async () => {
+      try {
+        const example = await api(`/api/example?template=${encodeURIComponent(picked.value)}`);
+        await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT", {...example.scheme, scheme_id: name}, {"If-None-Match": "*"});
+      } catch (error) { problem = errorText(error); return false; }
+      stored = true;
+      // 清單讀不到不算失敗：新的那一份已經存好，照樣打開。
+      try { await loadSchemeList(); } catch { /* 下一次讀清單再補 */ }
+      try {
+        if (await openScheme(name, true)) return true;
+        problem = openProblem;
+        return false;
+      } catch (error) {
+        // 已經換成新的那一份、只是之後接進度或圖面檢查丟錯：算打開了，原因留在訊息列。
+        if (openedId === name) { say(errorText(error), "notice"); return true; }
+        problem = errorText(error);
+        return false;
+      }
+    });
+    if (!opened) {
+      sayBeside(note, stored ? `「${name}」已經存好，但沒有打開：${problem}` :
+        `沒有開新的：${problem || $("messages").textContent}`, "notice");
+      $("new-scheme-id").focus();
+      return;
+    }
+    $("new-scheme-id").value = "";
+    closeBarBoxes();
+    leaveEmptyStart();
+    sayBeside("open-note", `已從範本「${label}」開一份新的「${name}」，存好了`, "ok");
+    refreshHome();
+  } finally { newSchemePending = false; }
 }
 // 空畫面（#1265 單元 5b）：開頁時已存的方案一份都沒有（或清單讀不到）。表單搬進那張卡，頂條與兩段由 CSS 照
 // body 的 data-input-start 藏起來（main 不藏：結果抽屜住在裡面，卡片底下「看已封存的方案」要打得開它）。
@@ -671,9 +701,17 @@ function enterEmptyStart(listProblem) {
 }
 function leaveEmptyStart() {
   if (document.body.dataset.inputStart !== "empty") return;
-  delete document.body.dataset.inputStart;
   $("template-box").append($("new-scheme"));
   $("empty-start").hidden = true;
+  showInputPage();
+}
+// 開頁的那道門（#1265 單元 5b 第二趟，審查第 5 條；單元 5c 用同一道）：body 的 data-input-start 開頁就是 "loading"
+// （index.html 寫好的），判定完才換——"empty" 是空畫面，拿掉是照常的輸入頁。藏哪些東西只看這一格（home.css 一條規則：
+// 第 1、2 段、頁底、頂條按鈕、「這間房貼什麼」），還沒判定時只有「讀取中…」那一行。
+// 拿掉的那一刻第 1 段剛看得到：藏著時畫的平面圖量不到字框（字疊在收音點上），照同一份重畫一次（審查第 2 條）。
+function showInputPage() {
+  delete document.body.dataset.inputStart;
+  drawShownPlan();
   markInputReady();
 }
 function markInputReady() {
@@ -910,15 +948,34 @@ async function archiveScheme(name) {
   await refreshMovedLists(data.message);
 }
 async function movePackage(item) {
-  const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
   // 空畫面（還沒開任何方案）搬回一份：直接打開搬回的那一份（#1265 單元 5b）；表單上藏著的開機範本不算開著。
+  // 搬回、重讀清單、打開一路鎖著（第二趟追加，跟 newFromTemplate 同一套 held＋openProblem）：中間不留空窗給「開一份新的」，
+  // 沒打開時寫 openScheme 記下的原因，不抄訊息列。
   if (document.body.dataset.inputStart === "empty") {
-    await refreshMovedLists(data.message);
+    if (inputBusy) { say(`${busyWords}，沒有搬回「${item.scheme_id}」；等它做完再按一次「搬回」`, "notice"); return; }
+    let restored = false, problem = "";
+    const opened = await holdInput(async () => {
+      const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
+      restored = true;
+      await refreshMovedLists(data.message);
+      try {
+        if (await openScheme(item.scheme_id, true)) return true;
+        problem = openProblem;
+        return false;
+      } catch (error) {
+        if (openedId === item.scheme_id) { say(errorText(error), "notice"); return true; }
+        problem = errorText(error);
+        return false;
+      }
+    });
+    // 搬回本身沒成：holdInput 已把原因寫進訊息列，抽屜開著時照抄在抽屜上方，抽屜不關。
+    if (!restored) return;
     closeResults();
-    if (await openScheme(item.scheme_id)) leaveEmptyStart();
-    else sayBeside("new-scheme-note", `「${item.scheme_id}」已經搬回，但沒有打開：${$("messages").textContent}`, "notice");
+    if (opened) leaveEmptyStart();
+    else sayBeside("new-scheme-note", `「${item.scheme_id}」已經搬回，但沒有打開：${problem}`, "notice");
     return;
   }
+  const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
   if ($("save-id").value === item.scheme_id) {
     openedId = item.scheme_id;
     $("scheme-archive-notice").hidden = true;
@@ -1149,7 +1206,7 @@ async function action(work) {
   // 只印伺服器給的中文訊息，不帶 JS 的英文字首「Error: 」。
   try { await work(); } catch (error) { say(errorText(error), "notice"); }
 }
-window.addEventListener("DOMContentLoaded", () => action(async () => {
+async function bootInputPage() {
   const example = await api("/api/example");
   inputDefaults = await api("/api/input-defaults");
   await loadZoneLibrary();
@@ -1238,7 +1295,14 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     if (listProblem === null) await openSchemeFromLink();
     return;
   }
-  // 按鈕綁好、清單讀完才接帶名字的連結。
-  markInputReady();
+  // 按鈕綁好、清單讀完才開門、接帶名字的連結。
+  showInputPage();
   await openSchemeFromLink();
+}
+window.addEventListener("DOMContentLoaded", () => action(async () => {
+  try { await bootInputPage(); } catch (error) { say(errorText(error), "notice"); }
+  // 開頁沒走到判定（範例、預設值讀不到，或表單換不上去）：門不開，訊息列藏在門後，原因改寫在「讀取中…」那一行。
+  if (document.body.dataset.inputStart !== "loading") return;
+  $("boot-note").textContent = `這一頁沒有讀完：${$("messages").textContent}；先確認本機的網頁伺服器開著，再重新整理這一頁。`;
+  $("boot-note").className = "notice";
 }));

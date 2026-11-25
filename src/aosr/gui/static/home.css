@@ -447,7 +447,11 @@ html.drawer-open{overflow:hidden}
    卡片底下「看已封存的方案」打開的抽屜照樣住在 main 裡（main 不藏）。 */
 #empty-title{display:none;font-size:1rem}
 body[data-input-start=empty] #empty-title{display:inline}
-body[data-input-start=empty] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, .bar-actions, #lock-bar, #nav-zones){display:none}
+/* 開頁的那道門（第二趟，審查第 5 條）："loading" 是還沒判定有沒有存過的方案，跟空畫面藏同一批；只多一行「讀取中…」。 */
+body[data-input-start] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, .bar-actions, #lock-bar, #nav-zones){display:none}
+#boot-note{display:none;max-width:44rem;margin:4rem auto 2rem;color:#46586a}
+body[data-input-start=loading] #boot-note{display:block}
+#boot-note.notice{color:#872c22;font-weight:600}
 #choose-template small{display:block}
 #empty-start{max-width:44rem;margin:4rem auto 2rem;background:white;border:1px solid #d5e0e4;border-radius:12px;padding:2rem 2rem 1.75rem}
 #empty-start[hidden]{display:none}

@@ -22,7 +22,7 @@
   <script src="/static/home.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
-<body>
+<body data-input-start="loading">
   <main>
     <header id="input-bars">
       <nav aria-label="網站導覽" class="input-nav"><a href="#input-bars" aria-current="page">方案輸入</a>
@@ -61,6 +61,7 @@
       <h2 id="leave-title">這一份有改動還沒存</h2><p id="leave-note"></p>
       <button value="cancel" autofocus>取消</button><button value="discard">不存走</button><button value="save">存了再走</button>
     </form></dialog>
+    <p id="boot-note" role="status">讀取中…</p>
     <div id="empty-start" hidden><h2>從一份範本開始</h2>
       <p class="say">選一份範本、取個名字，存好就能開始改房間、擺位和牆面。</p>
       <p id="empty-list-note" class="notice" hidden></p><div id="empty-slot"></div>

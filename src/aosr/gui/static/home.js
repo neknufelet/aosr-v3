@@ -191,14 +191,16 @@ function bindBars() {
   };
   $("cancel-save-as").onclick = () => { closeBarBoxes(); $("save-as-toggle").focus(); };
   $("save-as-box").onsubmit = event => { event.preventDefault(); action(saveAs); };
+  // 「開一份新的」按下去到打開好之前（app.js 的 newSchemePending）：#leave-edits 的點擊、鎖頁中的 Esc 都不關那一塊，
+  // 沒開成的原因寫在那一塊裡、要看得到（審查第 1 條）。
   document.addEventListener("keydown", event => {
-    if (event.key !== "Escape") return;
+    if (event.key !== "Escape" || newSchemePending) return;
     const button = $("save-as-box").hidden ? $("scheme-menu-button") : $("save-as-toggle");
     if (["scheme-menu", "save-as-box", "template-box"].every(id => $(id).hidden)) return;
     closeBarBoxes(); button.focus();
   });
   document.addEventListener("pointerdown", event => {
-    if (!event.target.closest?.(".bar-anchor")) closeBarBoxes();
+    if (!event.target.closest?.(".bar-anchor") && !newSchemePending) closeBarBoxes();
   });
   $("zone-to-search").onclick = () => action(sendToSearch);
 }
@@ -232,8 +234,11 @@ function closeResults() {
   if ($("results-drawer").hidden) return;
   $("results-drawer").hidden = true;
   document.documentElement.classList.remove("drawer-open");
-  // 空畫面沒有「算過的結果與比較」那顆鈕：游標回卡片上打開抽屜的那一句（#1265 單元 5b）。
-  $(document.body.dataset.inputStart === "empty" ? "empty-archived" : "show-results").focus();
+  // 空畫面沒有「算過的結果與比較」那顆鈕：游標回卡片上打開抽屜的那一句（#1265 單元 5b）；封存刪光了那一句也藏起來，
+  // 就落在卡片裡選中的那個範本（第二趟，審查第 3 條），不掉到頁面底層。
+  if (document.body.dataset.inputStart !== "empty") $("show-results").focus();
+  else if (!$("empty-archived").hidden) $("empty-archived").focus();
+  else document.querySelector('input[name="new-template"]:checked').focus();
 }
 // 抽屜開著時清單重畫（重讀、封存、搬回、刪除、換方案）或鎖頁解開（第二趟 F1、F3）：節點被換掉、或 main 被鎖住
 // 那一下，游標會無聲掉回 body，不會有 focusin。所以游標進抽屜時先記住它在哪（哪張表、哪一筆、哪一種按鈕，
