@@ -501,6 +501,8 @@ def test_a_running_scheme_whose_progress_cannot_be_read_still_gets_its_limits_ch
         page.locator('#home-schemes [data-scheme="room109"] .home-open').click()
         page.wait_for_function("document.getElementById('save-id').value === 'room109'")
         _settled(page)
+        # 等新的判決：開頁那一次的判決世代號也相等，只等 _verdict_shown 會在進度請求還在路上時就斷言（5b 第二趟審查 6B）。
+        page.wait_for_function("zoneLimitsFresh()")
         _verdict_shown(page)
         assert asked, "打開之後應該問過限制"
         expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
@@ -630,6 +632,8 @@ def test_a_running_scheme_whose_progress_and_plan_both_fail_keeps_both_reasons(t
         page.locator('#home-schemes [data-scheme="room109"] .home-open').click()
         page.wait_for_function("document.getElementById('save-id').value === 'room109'")
         _settled(page)
+        # 等新的判決：開頁那一次的判決世代號也相等，只等 _verdict_shown 會在進度請求還在路上時就斷言（5b 第二趟審查 6B）。
+        page.wait_for_function("zoneLimitsFresh()")
         _verdict_shown(page)
         assert asked, "打開之後應該問過限制"
         messages = page.locator("#messages")

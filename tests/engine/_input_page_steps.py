@@ -18,6 +18,9 @@ def scheme_open_button(page: Page, name: str) -> Locator:
 
 
 def open_scheme(page: Page, name: str) -> None:
+    # 先等方案清單讀到這一份：存檔、另存之後清單是解鎖後才重讀的，選單若在清單回來前就打開，
+    # 已經展開的選單不會補畫新的那一列（#1265 單元 5b 第二趟審查 6A，整套 -n 8 時逾時）。
+    page.wait_for_function("name => schemeNames.includes(name)", arg=name)
     scheme_open_button(page, name).click()
     if page.locator("#leave-edits").is_visible():
         page.get_by_role("button", name="不存走", exact=True).click()
