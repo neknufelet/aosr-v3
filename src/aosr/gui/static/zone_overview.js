@@ -2101,7 +2101,7 @@ function overviewParts() {
     head.append(el("p", null, "先把房間的長、寬、高都填好正數，才畫得出這間房。"), back);
     return [head];
   }
-  // 換了方案（打開別份、載入範本）：上一份選的區、面板上點的都不算數。
+  // 換了方案（打開別份、從範本開新的）：上一份選的區、面板上點的都不算數。
   if (seenGeneration !== zoneDesignGeneration) { seenGeneration = zoneDesignGeneration; selected = []; draft = null; draftTouched = false; ruleDraft = false; keptRule = null; keptRuleZone = null; unsaved = symmetryEditGeneration === zoneDesignGeneration; followed = []; keptSaid = ""; }
   const roles = overviewRoles();
   const room = {Lx: wallSize("floor")[0], Ly: wallSize("floor")[1], Lz: wallSize("x0")[1]};

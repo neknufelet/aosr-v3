@@ -116,7 +116,7 @@ input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 /* 「打開」與「另存新名字」的結果寫在按鈕旁邊（這兩列在頁面最上面，底下的訊息列看不到）：按鈕右邊留得下
    28 字寬就貼著按鈕、長句在那裡折行（多條問題一條一行）；「打開」那一列右邊只剩一小段，擠進去會折成
    四、五行窄條，就整句換到這一列正下方、用整列的寬。顏色用共用的 .ok／.notice。 */
-#open-note,#template-note,#save-as-note{flex:1 1 28rem;white-space:pre-line}
+#open-note,#save-as-note{flex:1 1 28rem;white-space:pre-line}
 /* 新名字格裡的灰字提示（收哪些字）整句看得到。 */
 #save-as-id{min-width:14em}
 /* 名稱表載不到的說明：白話那一句用警示色；技術細節摺起來，打開後是一般字。 */
@@ -278,7 +278,7 @@ main:has(#input-bars){padding-top:0;padding-bottom:0}
 #save-as-box{right:0;white-space:normal;min-width:min(25rem,88vw)}
 #save-as-box label{display:block}
 #save-as-note:not(:empty){display:block;margin:.5rem 0}
-#open-note:not(:empty),#template-note:not(:empty),#save-feedback:not(:empty){padding-bottom:.4rem}
+#open-note:not(:empty),#save-feedback:not(:empty){padding-bottom:.4rem}
 #input-footer .bar-row{align-items:center}
 .bar-prompt{flex:1}
 #input-footer small{margin-top:.2rem;max-width:30rem}
@@ -425,3 +425,35 @@ html.drawer-open{overflow:hidden}
 #archive-say,#archive-none{margin-top:1rem}
 #archive-none{color:#46586a}
 #results-panel #archived{border:0;padding:0;margin:0}
+
+/* 「從範本開一份新的」（#1265 單元 5b，示意圖 input-page-v3 空畫面那張卡）：同一份表單平常住在頂條選單打開的那一塊，
+   完全沒有方案時搬進空畫面那張卡。範本兩張單選卡、名字一格、「開一份新的」；擋下來的原因寫在這一塊最底下。 */
+#template-box{width:min(34rem,90vw)}
+#template-box>strong{display:block;font-size:.85rem;color:#46586a;margin-bottom:.5rem}
+.new-scheme .tpl{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:.75rem;border:0;padding:0;margin:0 0 1rem}
+.new-scheme legend{position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden}
+.new-scheme .tpl label{display:flex;align-items:flex-start;gap:.75rem;margin:0;padding:.9rem 1rem;border:1px solid #d5e0e4;border-radius:10px;cursor:pointer;background:white}
+.new-scheme .tpl label:has(:checked){border:2px solid #17212a;padding:calc(.9rem - 1px) calc(1rem - 1px);background:#f4f7f8}
+.new-scheme .tpl input{margin:.25rem 0 0}
+.new-scheme .tpl b{display:block;font-weight:500}
+.new-scheme .tpl small{display:block;margin-top:.2rem;font-size:.8125rem;color:#46586a;line-height:1.5}
+.new-name{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem .75rem}
+.new-name label{margin:0}
+#new-scheme-id{flex:1 1 14rem;max-width:19rem;padding:.55rem .65rem;border:1.5px solid #17212a;border-radius:6px}
+#empty-start .new-name button,#new-scheme-go{background:#172f3d;color:white;border:1px solid #172f3d;border-radius:6px;padding:.6rem 1.1rem;font:inherit}
+#new-scheme-note{white-space:pre-line;margin:.6rem 0 0}
+#new-scheme-note:empty{display:none}
+/* 空畫面：已存的方案一份都沒有（或清單讀不到）。頂條只留「還沒有開任何方案」，兩段、檢查、頁底、首頁兩張卡都不出現；
+   卡片底下「看已封存的方案」打開的抽屜照樣住在 main 裡（main 不藏）。 */
+#empty-title{display:none;font-size:1rem}
+body[data-input-start=empty] #empty-title{display:inline}
+body[data-input-start=empty] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, .bar-actions, #lock-bar, #nav-zones){display:none}
+#choose-template small{display:block}
+#empty-start{max-width:44rem;margin:4rem auto 2rem;background:white;border:1px solid #d5e0e4;border-radius:12px;padding:2rem 2rem 1.75rem}
+#empty-start[hidden]{display:none}
+#empty-start h2{font-size:1.25rem;font-weight:500;margin:0 0 .5rem}
+#empty-start .say{color:#46586a;margin:0 0 1.25rem}
+#empty-start #new-scheme-cancel{display:none}
+#empty-list-note{margin:0 0 1rem}
+#empty-archived{background:none;border:0;padding:0;color:#15617b;font-size:.8125rem;text-decoration:underline;cursor:pointer}
+#empty-archived[hidden]{display:none}

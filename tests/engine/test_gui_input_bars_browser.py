@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import Browser, expect
 
 from aosr.reporting.result import SchemeResult
-from tests.engine._input_page_steps import archive_scheme, close_results, open_example_scheme, open_save_as, open_scheme, open_templates, reveal, scheme_open_button
+from tests.engine._input_page_steps import archive_scheme, close_results, new_from_template, open_example_scheme, open_save_as, open_scheme, reveal, scheme_open_button
 from tests.engine.test_scheme_pipeline import _run_control
 from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import _assert_quiet, _copy_runner, _open, _serve, browser, result
@@ -114,11 +114,10 @@ def test_menu_keyboard_archive_and_template(tmp_path: Path, browser: Browser, re
         trigger.click()
         page.locator("#show-archived").click()
         expect(page.locator("#archived-packages-list")).to_contain_text(ROOM)
-        open_templates(page)
-        page.locator("#template-list").select_option("stage_one")
-        page.locator("#load-template").click()
-        expect(page.locator("#template-note")).to_contain_text("已載入「第一階段範本")
-        expect(page.locator("#save-state")).to_have_text("範本還沒存")
+        new_from_template(page, "stage-copy", "stage_one")
+        expect(page.locator("#open-note")).to_have_text("已從範本「第一階段範本」開一份新的「stage-copy」，存好了")
+        expect(page.locator("#save-state")).to_have_text("都存好了（還沒算過）")
+        expect(page.locator("#scheme-archive-notice")).to_be_hidden()
         _assert_quiet(watched)
 
 

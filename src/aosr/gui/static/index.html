@@ -29,15 +29,22 @@
         <a href="#zone-page" id="nav-zones">這間房貼什麼</a><a href="/materials">材料庫</a>
         <a href="/search-start">找喇叭和座位的位置</a><a href="/gradient">程式最佳化（挑材料）</a></nav>
       <div class="bar-row">
+        <span id="empty-title">還沒有開任何方案</span>
         <label class="scheme-name">房間方案<input id="save-id" readonly></label>
         <div class="bar-anchor"><button id="scheme-menu-button" disabled aria-haspopup="menu" aria-expanded="false" aria-controls="scheme-menu">換一個方案 ▾</button>
           <div id="scheme-menu" role="menu" aria-label="換一個方案" hidden>
             <strong>最近的方案</strong><div id="home-schemes" role="group" aria-label="方案"></div>
             <button role="menuitem" id="all-schemes" hidden></button>
-            <button role="menuitem" id="choose-template">從範本開一份新的…</button>
+            <button role="menuitem" id="choose-template">從範本開一份新的…<small>選範本、取名字，存好才開始改</small></button>
             <button role="menuitem" id="show-archived">看已封存的</button>
           </div>
-          <div class="bar-popup" id="template-box" hidden><label>範本<select id="template-list"><option value="reference">參考房（第二階段）</option><option value="stage_one">第一階段範本（六面 30ρc、全向聲源、無家具）</option></select></label><button id="load-template">載入範本</button></div>
+          <div class="bar-popup" id="template-box" hidden><strong>從範本開一份新的</strong>
+            <form id="new-scheme" class="new-scheme"><fieldset class="tpl"><legend>範本</legend>
+                <label><input type="radio" name="new-template" id="new-template-reference" value="reference" checked><span><b>參考房</b><small>寬 4 × 深 6 × 高 3 公尺，兩支喇叭左右對稱擺，主位和周圍 6 點</small></span></label>
+                <label><input type="radio" name="new-template" id="new-template-stage_one" value="stage_one"><span><b>第一階段範本</b><small>六面同一種牆、全向聲源、沒有家具；看房間本身的共振</small></span></label></fieldset>
+              <div class="new-name"><label for="new-scheme-id">新方案的名字</label><input id="new-scheme-id" autocomplete="off" placeholder="例如：study-v1（英文字母、數字、_ 或 -）">
+                <button id="new-scheme-go" type="submit" class="primary">開一份新的</button><button id="new-scheme-cancel" type="button">取消</button></div>
+              <p id="new-scheme-note" aria-live="polite"></p></form></div>
         </div>
         <span id="save-state" role="status"></span>
         <div class="bar-actions"><button id="show-results" type="button">算過的結果與比較 ▸</button>
@@ -47,13 +54,17 @@
           </div><button id="save" class="primary">儲存</button>
         </div>
       </div>
-      <div id="open-note" aria-live="polite"></div><div id="template-note" aria-live="polite"></div>
+      <div id="open-note" aria-live="polite"></div>
       <div id="save-feedback" aria-live="polite"></div><div id="lock-bar" hidden></div>
     </header>
     <dialog id="leave-edits" aria-labelledby="leave-title"><form method="dialog">
       <h2 id="leave-title">這一份有改動還沒存</h2><p id="leave-note"></p>
       <button value="cancel" autofocus>取消</button><button value="discard">不存走</button><button value="save">存了再走</button>
     </form></dialog>
+    <div id="empty-start" hidden><h2>從一份範本開始</h2>
+      <p class="say">選一份範本、取個名字，存好就能開始改房間、擺位和牆面。</p>
+      <p id="empty-list-note" class="notice" hidden></p><div id="empty-slot"></div>
+      <p><button type="button" id="empty-archived" hidden></button></p></div>
     <h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p>
     <section id="home"><h2 id="home-title">讀取中…</h2><p id="home-facts"></p>
       <div class="home-top"><figure id="home-picture" hidden><svg id="home-room" role="img" aria-label="最近算的房間俯視圖：前牆在上"></svg>

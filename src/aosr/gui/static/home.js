@@ -174,21 +174,13 @@ function bindBars() {
   };
   $("show-results").onclick = () => openResults();
   $("all-schemes").onclick = () => { allSchemes = true; drawSchemeMenu(); menuItems()[0]?.focus(); };
+  // 「從範本開一份新的…」：打開那一塊（範本、新方案的名字、開一份新的；app.js 的 newFromTemplate），游標到選中的範本。
   $("choose-template").onclick = () => {
-    closeBarBoxes(); $("template-box").hidden = false; $("template-list").focus();
+    closeBarBoxes(); $("template-box").hidden = false;
+    document.querySelector('input[name="new-template"]:checked').focus();
   };
-  // 頂條選單「看已封存的」：有封存就展開那一塊、游標到它的標題；沒有封存（第二趟 F5）照樣打開抽屜，
-  // 那一塊只寫一句「還沒有封存的結果」，不展開空表。
-  $("show-archived").onclick = () => {
-    closeBarBoxes(); openResults();
-    archiveAsked = true;
-    if ($("archived").hidden) {
-      $("archive-none").hidden = false; $("archive-none").focus({preventScroll: true});
-      return;
-    }
-    $("archived").open = true;
-    $("archived").scrollIntoView({block: "nearest"}); $("archived").querySelector("summary").focus({preventScroll: true});
-  };
+  $("show-archived").onclick = showArchived;
+  $("empty-archived").onclick = showArchived;
   bindResultsDrawer();
   $("save-as-toggle").onclick = () => {
     const open = $("save-as-box").hidden;
@@ -210,6 +202,18 @@ function bindBars() {
   });
   $("zone-to-search").onclick = () => action(sendToSearch);
 }
+// 頂條選單「看已封存的」與空畫面「看已封存的方案（N 份）」：有封存就展開那一塊、游標到它的標題；沒有封存（第二趟 F5）
+// 照樣打開抽屜，那一塊只寫一句「還沒有封存的結果」，不展開空表。
+function showArchived() {
+  closeBarBoxes(); openResults();
+  archiveAsked = true;
+  if ($("archived").hidden) {
+    $("archive-none").hidden = false; $("archive-none").focus({preventScroll: true});
+    return;
+  }
+  $("archived").open = true;
+  $("archived").scrollIntoView({block: "nearest"}); $("archived").querySelector("summary").focus({preventScroll: true});
+}
 // 結果抽屜（#1265 單元 4）：頂條「算過的結果與比較 ▸」打開；關閉鈕、Esc、點遮罩關，關了游標回那顆鈕。
 // 開著時 Tab 只在抽屜裡轉。抽屜住在 main 裡：存檔、計算、開檔、切牆等把 main 鎖住（inert）的時候，
 // 抽屜裡的封存、搬回、刪除也一起按不了（這道鎖不另外接）。
@@ -228,7 +232,8 @@ function closeResults() {
   if ($("results-drawer").hidden) return;
   $("results-drawer").hidden = true;
   document.documentElement.classList.remove("drawer-open");
-  $("show-results").focus();
+  // 空畫面沒有「算過的結果與比較」那顆鈕：游標回卡片上打開抽屜的那一句（#1265 單元 5b）。
+  $(document.body.dataset.inputStart === "empty" ? "empty-archived" : "show-results").focus();
 }
 // 抽屜開著時清單重畫（重讀、封存、搬回、刪除、換方案）或鎖頁解開（第二趟 F1、F3）：節點被換掉、或 main 被鎖住
 // 那一下，游標會無聲掉回 body，不會有 focusin。所以游標進抽屜時先記住它在哪（哪張表、哪一筆、哪一種按鈕，

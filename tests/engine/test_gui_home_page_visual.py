@@ -267,16 +267,20 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
 
 
 def test_save_problems_show_right_under_the_buttons(tmp_path: Path, browser: Browser) -> None:
-    # 按「儲存」與「檢查」：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔。
+    # 按「儲存」與「檢查」：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔
+    # （開著的那一份存好的檔逐位沒變、沒有多出別的檔）。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
         name = page.locator("#save-id").input_value()
+        before = {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")}
         _blank_and_press(page, "#save", ("#room-Ly", "#speaker-right-y"))
         shown = page.locator("#messages").inner_text()
         assert shown.split("\n") == ["寬 Ly（公尺）、右聲道喇叭 y 座標：空著沒填"], shown
         assert page.locator("#messages").get_attribute("class") == "notice"
-        assert not (tmp_path / "schemes" / f"{name}.json").exists()
+        assert {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")} == before
+        assert set(before) == {f"{name}.json"}
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
         page.locator("#check").click()
         page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
@@ -319,7 +323,9 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
     # 有 / 或 .. 的名字更只拿到英文的「Not Found」。現在打字時就在旁邊說，按下去也不送出。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         reveal(page, "#plan-legend li").first.wait_for()
+        before = {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")}
         sent: list[str] = []
         page.on("request", lambda request: sent.append(request.url) if request.method == "PUT" else None)
         open_save_as(page)
@@ -344,7 +350,7 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
         assert note.inner_text() == ""
         assert page.locator("#messages").inner_text() == "檢查通過"
         assert not sent, sent
-        assert not list((tmp_path / "schemes").glob("*.json"))
+        assert {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")} == before
         _assert_quiet(watched)
 
 
@@ -391,6 +397,7 @@ def test_only_the_calculation_cell_carries_the_technical_tooltip(tmp_path: Path,
         {"scheme": {"scheme_id": "unreadable"}, "schema_version": "aosr.scheme_result.v4"}))
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         # #1265 單元 4：結果清單搬進結果抽屜，一列的算完時間、評分設定、物理收成小字裡的三段（全程時間不在抽屜，
         # 在結果頁）；滑鼠說明只准掛在「物理」那一段。
         open_results(page)

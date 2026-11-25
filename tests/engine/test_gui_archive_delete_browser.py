@@ -10,7 +10,7 @@ from playwright.sync_api import Browser, Dialog, Page, expect
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle, _saved, _tree
-from tests.engine._input_page_steps import open_archived, open_results
+from tests.engine._input_page_steps import open_archived, open_example_scheme, open_results
 from tests.engine.test_gui_archive_browser import _assert_text_on_one_line, _confirm, _package_row, _row
 from tests.engine.test_gui_archive_delete import _damage
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser, result
@@ -25,6 +25,7 @@ def test_package_delete_cancel_then_accept(tmp_path: Path, browser: Browser, res
         _bundle(tmp_path, result, run_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         package = page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={}).json()
         page.reload(wait_until="networkidle")
         open_archived(page)
@@ -70,6 +71,7 @@ def test_clear_keeps_skipped_packages_and_tables_fit(
     _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         messages = _confirm(page)
         if width == 390:
             _narrow_legacy_only_hides_empty_package_table(page, base, tmp_path, result)
@@ -122,6 +124,7 @@ def test_legacy_confirmation_and_last_row_hides_archive(tmp_path: Path, browser:
     _bundle(tmp_path / "archive", result, run_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_archived(page)
         messages = _confirm(page)
         _row(page, run_id, True).get_by_role("button", name="永久刪除", exact=True).click()
@@ -137,6 +140,7 @@ def test_clear_cancel_then_accept_hides_empty_archive(
     _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         page.request.post(f"{base}/api/schemes/{result.scheme.scheme_id}/archive", data={})
         page.reload(wait_until="networkidle")
         open_archived(page)
@@ -210,6 +214,7 @@ def test_partial_delete_refreshes_row_and_disables_restore(
     _bundle(tmp_path / "archive" if legacy else tmp_path, result, run_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         if legacy:
             folder = tmp_path / "archive"
         else:

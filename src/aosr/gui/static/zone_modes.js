@@ -11,7 +11,7 @@ let zoneDesignNote = "";
 let zoneDesignBroken = false;
 // 最近一次存方案時每一區的做法有沒有存成（沒設過、不必寫也算存成）；「拿去搜尋」靠它決定跳不跳。
 let zoneDesignSaved = false;
-// 頁面上那一份做法換過幾次（打開方案、載入範本各算一次）：存檔途中使用者換了方案，晚到的回覆不准把舊做法寫回來。
+// 頁面上那一份做法換過幾次（每打開一份方案算一次）：存檔途中使用者換了方案，晚到的回覆不准把舊做法寫回來。
 let zoneDesignGeneration = 0;
 let zoneLibrary = null;
 let zoneLibraryProblem = "";
@@ -35,7 +35,7 @@ let zoneLastAllowed = null;
 // 「牆/區」→ {label：選的那一筆的名字, material：記下時那一區原本那一面的材料}。畫的時候只認 sameAsOriginalLabel：那一區原本那一面
 // 跟記下時一樣才寫（#1265 單元 3 之二收尾追加第 5 條：之後「換原本的牆」、換構造預設、套實測阻抗改了原本那一面，
 // 那一句講的就不是現在的樣子；從源頭比，不逐條路去清）。做法不另比（收尾植錯判走不到、拿掉）：改得到一區做法的只有 applyMethod
-// （小框套用、改規則、改回跟其他牆面一樣三個入口 → setZoneSetting），它每套用一次照新的結果重記或拿掉；清掉再復原、重切（自動補的代號重編）、換方案、載入範本都整面清掉。
+// （小框套用、改規則、改回跟其他牆面一樣三個入口 → setZoneSetting），它每套用一次照新的結果重記或拿掉；清掉再復原、重切（自動補的代號重編）、換方案（含從範本開新的）都整面清掉。
 const zoneSameAsOriginal = new Map();
 function rememberSameAsOriginal(wall, key, label) {
   const zone = zoneList(wall).find(item => zoneKey(item) === key);
@@ -172,11 +172,6 @@ function applyZoneDesign(state) {
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
   zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; zoneSameAsOriginal.clear();
   zoneLastAllowed = null;  // 「上一次的組合」不跨方案（審查 11-15）
-}
-// 載入範本：新的方案，沒有設計設定。
-function resetZoneDesign() {
-  zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
-  zoneLimits = null; zoneSameAsOriginal.clear(); zoneLastAllowed = null;
 }
 // 做法這一次算存好了（寫了檔，或沒內容也沒存過、不用寫）：每一條這樣的路都只叫這一支（#1265 單元 3 之二收尾第三趟 E1）。
 function zoneDesignWritten() {

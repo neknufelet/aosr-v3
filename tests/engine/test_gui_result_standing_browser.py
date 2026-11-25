@@ -4,7 +4,7 @@ from pathlib import Path
 from playwright.sync_api import Browser
 
 from tests.engine._gui_cache import gui_startup_identity_memo
-from tests.engine._input_page_steps import open_results
+from tests.engine._input_page_steps import open_example_scheme, open_results
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_gui_browser import RUN_ID, _assert_quiet, _open, _save, _serve, browser
 from tests.engine.test_gui_result_standing import TEXT, variant_result
@@ -35,6 +35,7 @@ def test_browser_home_physics_and_settings_columns(tmp_path: Path, browser: Brow
             result.scheme.scheme_id, f"{standing}-wall"))
         save_result(renamed, tmp_path / "results" / f"{digit * 32}{'.json'}")
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        open_example_scheme(watched.page, base, tmp_path)
         # #1265 單元 4：結果清單搬進結果抽屜，欄名變成每一列小字裡的「評分：」「物理：」兩段。
         open_results(watched.page)
         watched.page.locator("#results-list tr").first.wait_for()

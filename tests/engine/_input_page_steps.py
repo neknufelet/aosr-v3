@@ -1,4 +1,4 @@
-"""輸入頁的選單、另存框與範本框，結果抽屜，第 1 段的摺疊、「改…」與看哪一張圖，第 2 段某一面的牆面表單。鎖頁考題另由頁面程式發點擊。"""
+"""輸入頁的選單、另存框與「從範本開一份新的」那一塊，結果抽屜，第 1 段的摺疊、「改…」與看哪一張圖，第 2 段某一面的牆面表單。鎖頁考題另由頁面程式發點擊。"""
 import json
 from pathlib import Path
 from typing import cast
@@ -75,11 +75,52 @@ def open_save_as(page: Page) -> None:
         page.locator("#save-as-toggle").click()
 
 
-def open_templates(page: Page) -> None:
+def open_new_scheme_box(page: Page) -> None:
+    """「從範本開一份新的」那一塊（#1265 單元 5b）：空畫面上它就在卡片裡，不用開；平常從頂條「換一個方案 ▾」打開。"""
+    if page.evaluate("document.body.dataset.inputStart === 'empty'"):
+        return
     close_results(page)
     if page.locator("#template-box").is_hidden():
         page.locator("#scheme-menu-button").click()
         page.locator("#choose-template").click()
+    expect(page.locator("#new-scheme")).to_be_visible()
+
+
+def fill_new_scheme(page: Page, name: str, template: str = "reference") -> None:
+    """打開那一塊、選範本、填名字，還沒按「開一份新的」。"""
+    open_new_scheme_box(page)
+    page.locator(f"#new-template-{template}").check()
+    page.locator("#new-scheme-id").fill(name)
+
+
+def new_from_template(page: Page, name: str, template: str = "reference") -> None:
+    """從範本開一份新的（#1265 單元 5b，取代「載入範本」）：選範本、取名字、按「開一份新的」；等到那一份存好、打開、
+    頁面解鎖、``inputReady``（頁面載完的旗子）設好才回來。開著那一份有沒存的改動時會先問，呼叫的人自己答。"""
+    fill_new_scheme(page, name, template)
+    page.locator("#new-scheme-go").click()
+    if page.locator("#leave-edits").is_visible():
+        page.get_by_role("button", name="不存走", exact=True).click()
+    # 等最後一步：打開之後還有一趟圖面檢查，檢查完才收那一塊、清名字格、在「打開」旁邊寫這一句。
+    page.wait_for_function("name => openedId === name && document.getElementById('save-id').value === name"
+                           " && document.body.dataset.inputReady === 'true'"
+                           " && document.getElementById('open-note').textContent.includes(`「${name}」，存好了`)", arg=name)
+    page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+
+
+def archive_then_recreate(page: Page, data_dir: Path, name: str) -> bytes:
+    """把開著的 ``name`` 從選單封存（表單留著、寫「這份方案已封存，存檔會用這個名字重新建一份」），再在磁碟上放回一份
+    同名的方案檔，頁面不知道：之後從這張表單存檔會當成新建（If-None-Match: *），伺服器照規矩不蓋掉同名的那一份、回 409。
+    回傳放回去那一份的位元組。"""
+    path = data_dir / "schemes" / f"{name}.json"
+    content = path.read_bytes()
+    page.once("dialog", lambda dialog: dialog.accept())
+    archive_scheme(page, name)
+    expect(page.locator("#scheme-archive-notice")).to_be_visible()
+    page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+    page.wait_for_load_state("networkidle")
+    assert not path.exists()
+    path.write_bytes(content)
+    return content
 
 
 

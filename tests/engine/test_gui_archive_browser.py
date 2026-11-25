@@ -144,6 +144,7 @@ def test_archive_displays_incomplete_and_corrupt_packages_with_legacy(
     _bundle(tmp_path / "archive", result, "a" * 32, "failed")
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         name = result.scheme.scheme_id
         package = page.request.post(f"{base}/api/schemes/{name}/archive", data={}).json()
         manifest = tmp_path / "archive" / "packages" / package["package_id"] / "manifest.json"
@@ -296,6 +297,7 @@ def test_legacy_single_archive_label_and_restore(
     _bundle(tmp_path / "archive", result, run_id, "failed")
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_archived(page)
         expect(page.locator("#legacy-archive h3")).to_have_text("舊的單筆封存")
         row = _row(page, run_id, True)
@@ -320,6 +322,7 @@ def test_archive_clears_selected_compare_sides(
         _bundle(tmp_path, _renamed(result, "same-scheme"), run_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _confirm(page)
         # 原 [A]：封存勾成 A 的那份，A 那一筆放掉、B 那一筆留著。（#1265 單元 4：選為 A／B 改成勾選，先勾的是 A；
         # 「比較」看得見／藏起來＝比較鈕能按／停用。第二趟 F4：「先勾的是 A」照字面成立，留下的那筆遞補成 A、B 空出來。）
@@ -379,6 +382,7 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
     _long_name_results(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _confirm(page)
         for run_id, name in (("a" * 32, "reference-room-original2"),
                              ("d" * 32, "classroom_reference_original_2")):

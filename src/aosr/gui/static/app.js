@@ -34,6 +34,8 @@ let inputBusy = false;
 let previewAsked = 0;
 // 結果清單最近一次讀到的那幾列（新到舊）：第 1 段右卡結果那一行拿這一份找「這一份」最新算好的那一列（room_facts.js）。
 let resultRows = [];
+// 開頁範本六面的固定阻抗：打開一份方案時，不是整面固定阻抗的那幾面改回固定阻抗就填這個（openScheme）。
+let startupWallDefaults = {};
 
 // 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
 // 換成白話，原文放在 cause，只進技術細節。伺服器自己寫的中文訊息照原樣往上交。
@@ -363,7 +365,7 @@ async function changeInputScheme(load) {
     const nextScheme = await loading;
     const nextPreview = await api("/api/input-preview", "POST", nextScheme);
     // 這一段沒有等待點：方案、預覽與格子一起換，舊回覆已由序號作廢。
-    // 上一份的限制判決對的是上一份方案：先標判決在路上再畫（#1265 單元 3 之二收尾追加設計洞；打開、載入範本、換牆面材料、
+    // 上一份的限制判決對的是上一份方案：先標判決在路上再畫（#1265 單元 3 之二收尾追加設計洞；打開、換牆面材料、
     // 改構造預設、套實測阻抗這幾個呼叫的人換成功之後都接著 refreshPlan，一定會重問；打開時接回計算進度失敗也照問，第二趟 B3）。
     staleZoneLimits();
     scheme = nextScheme;
@@ -384,11 +386,11 @@ async function changeInputScheme(load) {
     document.querySelector("main").inert = false;
     inputBusy = false;
     // 失敗時原方案的格子已收進去、等在路上的那次預覽也被作廢：解鎖後替目前這份補問一次，換算座標才不停在舊值。
-    // 補問又失敗只換訊息列：「打開」「載入範本」旁邊接著寫的「沒有打開…」「沒有載入範本…」照留（#1188 第 8 條）。
+    // 補問又失敗只換訊息列：「打開」「開一份新的」旁邊接著寫的「沒有打開…」「沒有開新的…」照留（#1188 第 8 條）。
     if (failed && scheme && formScheme === scheme) previewAfterUnlock();
   }
 }
-// 「儲存」「另存新名字」「計算這個方案」跟換表單（打開、載入範本、編輯、切牆、換材料）共用同一道鎖（#1187）：
+// 「儲存」「另存新名字」「計算這個方案」跟換表單（打開、從範本開新的、編輯、切牆、換材料）共用同一道鎖（#1187）：
 // 存到伺服器回覆之前整頁鎖住、換不了表單，換表單的時候也存不了。呼叫的人先看 inputBusy、自己講被擋的那一句。
 // 「儲存」「另存新名字」的鎖只包到伺服器收下方案與做法為止；之後重讀幾份清單不鎖：訊息列已經寫「存好了」，下一下要按得到。
 // 「計算」把重讀清單與開算也包在鎖裡；「拿去搜尋」（zone_modes.js 的 sendToSearch）一路包到離開這一頁（#1188 第 5 條）。
@@ -413,7 +415,7 @@ async function holdInput(work) {
     inputBusy = false;
     if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
       focused.focus({preventScroll: true});
-    // 存檔途中被擋下的「打開」「載入範本」：存檔自己的訊息會清掉旁邊的字，做完再寫回去，不讓那一下看起來像沒按到。
+    // 存檔途中被擋下的「打開」「開一份新的」：存檔自己的訊息會清掉旁邊的字，做完再寫回去，不讓那一下看起來像沒按到。
     if (refusedBeside) sayBeside(refusedBeside.note, refusedBeside.text, "notice");
     refusedBeside = null;
     if (scheme && formScheme === scheme) previewAfterUnlock();
@@ -424,7 +426,7 @@ async function holdInput(work) {
 // 等回覆的時候使用者自己清掉的就不寫回去。
 async function previewAfterUnlock() {
   try { await updateInputPreview(); } catch (error) {
-    const beside = ["open-note", "template-note", "save-as-note"].map(note => [note, $(note).textContent, $(note).className]);
+    const beside = ["open-note", "new-scheme-note", "save-as-note"].map(note => [note, $(note).textContent, $(note).className]);
     say(errorText(error), "notice");
     for (const [note, text, kind] of beside) sayBeside(note, text, kind);
   }
@@ -467,7 +469,7 @@ async function updateMultiples() {
   }
 }
 // 訊息列：成功（存好了、檢查通過、算完了）用 .ok，警示與錯誤用 .notice；兩種都是內文字級。
-// 訊息列換了新的一句，「打開」「載入範本」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
+// 訊息列換了新的一句，「打開」「開一份新的」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
 function say(text, kind) {
   $("messages").textContent = text;
   $("save-feedback").textContent = "";
@@ -476,7 +478,7 @@ function say(text, kind) {
   window.zonePageSay?.(text, kind);
   // 結果抽屜開著時訊息列被遮住：封存、搬回、刪除的回話照抄一份到抽屜上方（#1265 單元 4）。
   if (!$("results-drawer").hidden) { $("results-note").textContent = text; $("results-note").className = kind; }
-  for (const note of ["open-note", "template-note", "save-as-note"]) sayBeside(note, "", "");
+  for (const note of ["open-note", "new-scheme-note", "save-as-note"]) sayBeside(note, "", "");
 }
 // 「打開」與「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它們的結果（沒打開的原因、空名字、
 // 檢查沒過、撞名、存好了）寫在按鈕旁邊，用那一列自己的字眼。
@@ -574,6 +576,13 @@ async function openScheme(name) {
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
   applyZoneDesign(zoneState.design);
   applyZoneLibrary(zoneState.library);
+  // 牆改回「固定阻抗」時填的預設值跟著打開的這一份（#1265 單元 5b）：整面固定阻抗的那幾面記它自己的值
+  // （從第一階段範本開的新方案就是那份範本的 30ρc），別種材料或切了區的面用開頁範本的值（不看上一份開過什麼）。
+  fixedWallDefaults = structuredClone(startupWallDefaults);
+  for (const wall of formWalls()) {
+    const material = wallMaterial(wall);
+    if (material.kind === "constant_impedance") fixedWallDefaults[wall] = material.impedance_pa_s_m;
+  }
   renderWalls();
   openedId = name;
   runEdited = false; dirtyField = "";
@@ -608,33 +617,68 @@ async function openSchemeFromLink() {
   } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「換一個方案」另選一份`, "notice");
   $("scheme-section").scrollIntoView();
 }
-async function loadTemplate() {
-  // 範本換掉整張表單（同「打開」）；不是存過的方案，按「儲存」會另開新檔、不蓋掉同名的。
-  const select = $("template-list");
-  const label = select.options[select.selectedIndex].text;
-  if (inputBusy) { refuseWhileBusy("template-note", `${busyWords}，沒有載入範本；等它做完再按一次「載入範本」`); return; }
-  let example;
-  if (!await changeInputScheme(async () => {
-    example = await api(`/api/example?template=${encodeURIComponent(select.value)}`);
-    return example.scheme;
-  })) {
-    sayBeside("template-note", `沒有載入範本：${$("messages").textContent}`, "notice");
+// 「從範本開一份新的」（#1265 單元 5b，取代「載入範本」）：頂條選單打開的那一塊與完全沒有方案時的空畫面共用這一份表單、
+// 這一支。先取名、先存（名字照「另存新名字」同一套規則；存檔帶 If-None-Match: *，撞名伺服器也擋），存成了才用「打開」
+// 那條路打開它：畫面上從頭到尾不會有一份沒名字、沒存的範本。擋下來的原因寫在這一塊最底下，表單不動。
+async function newFromTemplate() {
+  const note = "new-scheme-note", name = $("new-scheme-id").value.trim();
+  const picked = document.querySelector('input[name="new-template"]:checked');
+  const label = picked.closest("label").querySelector("b").textContent;
+  if (inputBusy) { refuseWhileBusy(note, `${busyWords}，沒有開新的；等它做完再按一次「開一份新的」`); return; }
+  const refused = !name ? "「新方案的名字」這一格還空著：先填名字，再按「開一份新的」" :
+    !newNameShape.test(name) ? newNameHint.replace("「新名字」", "「新方案的名字」") :
+    schemeNames.includes(name) ? `已經有叫「${name}」的方案；換一個名字（要改那一份，從「換一個方案」打開它）` : "";
+  if (refused) {
+    sayBeside(note, `沒有開新的：${refused}`, "notice");
+    $("new-scheme-id").focus();
     return;
   }
-  // 牆改回「固定阻抗」時填的預設值跟著載入的範本（第一階段範本是 30ρc）。
-  fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
-  for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
-  resetZoneDesign();
-  renderWalls();
-  openedId = null;
-  runEdited = false; dirtyField = "";
-  $("scheme-archive-notice").hidden = true;
-  $("result-link").hidden = true;
-  $("result-stale").hidden = true;
-  renderInputBars();
-  // 檢查會換訊息列、清掉旁邊的字，所以載入成功那句等檢查完才寫。
-  await refreshPlan();
-  sayBeside("template-note", `已載入「${label}」；要留下來請按「另存新名字」`, "ok");
+  // 開著的那一份有改動沒存：跟「換一個方案」同一道詢問；問在存新檔之前，按「取消」就什麼都沒有存。
+  if (!await canLeaveForm()) return;
+  sayBeside(note, "", "");
+  let problem = "";
+  const stored = await holdInput(async () => {
+    try {
+      const example = await api(`/api/example?template=${encodeURIComponent(picked.value)}`);
+      await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT", {...example.scheme, scheme_id: name}, {"If-None-Match": "*"});
+      return true;
+    } catch (error) { problem = errorText(error); return false; }
+  });
+  if (!stored) { sayBeside(note, `沒有開新的：${problem || $("messages").textContent}`, "notice"); return; }
+  // 清單讀不到不算失敗：新的那一份已經存好，照樣打開。
+  try { await loadSchemeList(); } catch { /* 下一次讀清單再補 */ }
+  if (!await openScheme(name)) {
+    sayBeside(note, `「${name}」已經存好，但沒有打開：${$("messages").textContent}`, "notice");
+    return;
+  }
+  $("new-scheme-id").value = "";
+  closeBarBoxes();
+  leaveEmptyStart();
+  sayBeside("open-note", `已從範本「${label}」開一份新的「${name}」，存好了`, "ok");
+  refreshHome();
+}
+// 空畫面（#1265 單元 5b）：開頁時已存的方案一份都沒有（或清單讀不到）。表單搬進那張卡，頂條與兩段由 CSS 照
+// body 的 data-input-start 藏起來（main 不藏：結果抽屜住在裡面，卡片底下「看已封存的方案」要打得開它）。
+// 這時還沒開任何方案，inputReady 不設；開了一份（從範本開新的、從封存區搬回）才收掉空畫面、設 inputReady。
+function enterEmptyStart(listProblem) {
+  document.body.dataset.inputStart = "empty";
+  $("empty-slot").append($("new-scheme"));
+  $("empty-start").hidden = false;
+  $("empty-list-note").hidden = listProblem === null;
+  $("empty-list-note").textContent = listProblem === null ? "" :
+    `方案清單讀不到（${listProblem}），不知道有沒有存過的方案：先確認本機的網頁伺服器開著，再重新整理這一頁。` +
+    "也可以直接從範本開一份新的；名字跟已存的撞到時，伺服器會擋下來、不蓋掉。";
+}
+function leaveEmptyStart() {
+  if (document.body.dataset.inputStart !== "empty") return;
+  delete document.body.dataset.inputStart;
+  $("template-box").append($("new-scheme"));
+  $("empty-start").hidden = true;
+  markInputReady();
+}
+function markInputReady() {
+  document.body.dataset.inputReady = "true";
+  document.dispatchEvent(new Event("input-ready"));
 }
 async function saveAs() {
   const name = $("save-as-id").value.trim();
@@ -867,6 +911,14 @@ async function archiveScheme(name) {
 }
 async function movePackage(item) {
   const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
+  // 空畫面（還沒開任何方案）搬回一份：直接打開搬回的那一份（#1265 單元 5b）；表單上藏著的開機範本不算開著。
+  if (document.body.dataset.inputStart === "empty") {
+    await refreshMovedLists(data.message);
+    closeResults();
+    if (await openScheme(item.scheme_id)) leaveEmptyStart();
+    else sayBeside("new-scheme-note", `「${item.scheme_id}」已經搬回，但沒有打開：${$("messages").textContent}`, "notice");
+    return;
+  }
   if ($("save-id").value === item.scheme_id) {
     openedId = item.scheme_id;
     $("scheme-archive-notice").hidden = true;
@@ -914,6 +966,8 @@ async function loadArchiveList() {
   noteDrawerFocus();
   const packageList = $("archived-packages-list"); packageList.replaceChildren();
   $("archived-packages").hidden = !packages.length;
+  $("empty-archived").hidden = !packages.length;
+  $("empty-archived").textContent = `看已封存的方案（${packages.length} 份）`;
   for (const item of packages) {
     const row = document.createElement("tr"); row.dataset.packageId = item.package_id;
     row.dataset.schemeId = item.scheme_id;
@@ -1100,6 +1154,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   inputDefaults = await api("/api/input-defaults");
   await loadZoneLibrary();
   fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
+  startupWallDefaults = structuredClone(fixedWallDefaults);
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在第 1 段右卡自己的一行（座標數字摺疊的上面），
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
   // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。
@@ -1143,13 +1198,16 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
   bindBars();
-  $("load-template").onclick = () => action(async () => { if (!inputBusy) closeBarBoxes(); await loadTemplate(); });
+  $("new-scheme").onsubmit = event => { event.preventDefault(); action(newFromTemplate); };
+  $("new-scheme-cancel").onclick = () => { closeBarBoxes(); $("scheme-menu-button").focus(); };
   // 新名字一邊打一邊看：打了收不下的字（中文、空格、/ 之類）就先在旁邊說，不用等按下去才知道。
-  $("save-as-id").addEventListener("input", () => {
-    const typed = $("save-as-id").value.trim();
-    const refused = typed !== "" && !newNameShape.test(typed);
-    sayBeside("save-as-note", refused ? newNameHint : "", refused ? "notice" : "");
-  });
+  for (const [field, note, hint] of [["save-as-id", "save-as-note", newNameHint],
+                                     ["new-scheme-id", "new-scheme-note", newNameHint.replace("「新名字」", "「新方案的名字」")]])
+    $(field).addEventListener("input", () => {
+      const typed = $(field).value.trim();
+      const refused = typed !== "" && !newNameShape.test(typed);
+      sayBeside(note, refused ? hint : "", refused ? "notice" : "");
+    });
   $("calculate").onclick = () => action(async () => {
     if (inputBusy) { say(`${busyWords}，這一次沒有開算；等它做完再按一次`, "notice"); return; }
     // 鎖涵蓋「存＋開算」整段：開算的是存下去的那一份（按下那一刻表單上那一份），不是那時畫面上的。
@@ -1170,9 +1228,17 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   });
   $("stop").onclick = () => action(async () => { await api(`/api/runs/${runId}/stop`, "POST"); await poll(); });
   await refreshPlan();
-  for (const load of [loadSchemeList, loadResultList, resumeRuns]) await action(load);
+  // 方案清單讀不到要記下來：不准跟「真的一份都沒有」混成同一個空清單（#1265 單元 5b）。
+  let listProblem = null;
+  try { await loadSchemeList(); } catch (error) { listProblem = errorText(error); }
+  for (const load of [loadResultList, resumeRuns]) await action(load);
+  // 已存的方案一份都沒有（網址帶的那一份當然也不在）或清單讀不到：整頁換成空畫面，不把藏著的開機範本攤出來。
+  if (listProblem !== null || !schemeNames.length) {
+    enterEmptyStart(listProblem);
+    if (listProblem === null) await openSchemeFromLink();
+    return;
+  }
   // 按鈕綁好、清單讀完才接帶名字的連結。
-  document.body.dataset.inputReady = "true";
-  document.dispatchEvent(new Event("input-ready"));
+  markInputReady();
   await openSchemeFromLink();
 }));

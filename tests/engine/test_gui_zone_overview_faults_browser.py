@@ -7,13 +7,12 @@
 from __future__ import annotations
 
 import json
-import urllib.request
 from pathlib import Path
 from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
-from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
+from tests.engine._input_page_steps import archive_then_recreate, open_example_scheme, open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._zone_panel_steps import choose_fixed, expect_mode
@@ -184,14 +183,12 @@ def test_a_plan_check_that_fails_once_leaves_the_rule_as_set_and_says_so_on_the_
 
 
 def test_a_refused_save_from_send_to_search_is_explained_on_the_page(tmp_path: Path, browser: Browser) -> None:
-    """開機載入的範本，資料夾裡已經有同名的方案：新頁把牆面由程式最佳化、一面指定貼一種，按「拿去搜尋」，存檔照規矩不蓋掉同名的那一份。
-    被擋的原因要寫在新頁上（不跳頁、不是只寫在藏起來的輸入頁）。"""
-    with _serve(tmp_path) as base:
-        example = json.loads(urllib.request.urlopen(f"{base}/api/example").read())["scheme"]
-    _write(tmp_path, example)
+    """開著的那一份從選單封存了（表單留著），資料夾裡又有了同名的方案：新頁把牆面由程式最佳化、一面指定貼一種，按「拿去搜尋」，
+    存檔當成新建、照規矩不蓋掉同名的那一份。被擋的原因要寫在新頁上（不跳頁、不是只寫在藏起來的輸入頁）。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        name = cast(str, open_example_scheme(page, base, tmp_path)["scheme_id"])
+        before = archive_then_recreate(page, tmp_path, name)
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
         page.locator("#zone-rule-mode").select_option("search")
@@ -206,15 +203,16 @@ def test_a_refused_save_from_send_to_search_is_explained_on_the_page(tmp_path: P
         expect(said).to_be_visible()
         expect(said).to_contain_text("已經有叫")
         assert "gradient" not in page.url and page.locator("main").is_hidden()
+        assert (tmp_path / "schemes" / f"{name}.json").read_bytes() == before
         assert watched.page_errors == []
 
 
-def test_the_startup_template_without_zones_takes_a_rule_change(tmp_path: Path, browser: Browser) -> None:
-    """開機載入的範本沒切過區（方案裡還是每面牆一個阻抗、沒有分區那一格）：在新頁改規則成由程式最佳化，照樣寫得進去——
+def test_a_scheme_without_zones_takes_a_rule_change(tmp_path: Path, browser: Browser) -> None:
+    """沒切過區的方案（存好的範例：方案裡還是每面牆一個阻抗、沒有分區那一格）：在新頁改規則成由程式最佳化，照樣寫得進去——
     方案長出分區那一格、四面牆都由程式最佳化，天花地板不動。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        open_example_scheme(page, base, tmp_path)
         assert page.evaluate("scheme.scene.surface_zones_by_wall === undefined || scheme.scene.surface_zones_by_wall === null")
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()

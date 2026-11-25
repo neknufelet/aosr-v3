@@ -15,7 +15,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from tests.engine.test_gui_input_clear_undo_browser import _release
 
-from tests.engine._input_page_steps import open_fact_editor, open_scheme, open_templates
+from tests.engine._input_page_steps import new_from_template, open_fact_editor, open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import room109_document
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
@@ -126,14 +126,14 @@ def test_a_box_the_browser_cannot_read_is_refused_and_keeps_the_saved_cap(tmp_pa
 
 
 def test_a_refused_note_does_not_follow_into_another_template(tmp_path: Path, browser: Browser) -> None:
-    """審查真錯 4 之一：範本上兩格各填錯一次，換另一個範本：兩句提示句都不在（範本的方案代號都是空的，不能拿它當擁有者）。"""
+    """審查真錯 4 之一：從範本開的新方案上兩格各填錯一次，再從另一個範本開一份新的：兩句提示句都不在
+    （#1265 單元 5b 起範本一定先取名存好才打開；擁有者換成新的那一份，填錯的那一句不跟過去）。"""
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        page.wait_for_function("document.body.dataset.inputStart === 'empty'")
+        new_from_template(page, "first-room")
         _both_refused(page)
-        open_templates(page)
-        page.locator("#template-list").select_option("stage_one")
-        page.locator("#load-template").click()
+        new_from_template(page, "second-room", "stage_one")
         page.wait_for_function("!inputBusy && scheme.source_model === 'omnidirectional'")
         expect(page.locator("#depth-room-note")).to_have_text("")
         expect(page.locator("#depth-wall-note")).to_have_text("")

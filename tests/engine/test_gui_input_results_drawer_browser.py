@@ -52,6 +52,7 @@ def test_drawer_opens_closes_three_ways_and_traps_tab(tmp_path: Path, browser: B
     _three(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         # 頁面中間不再有第二份結果清單：舊的段落、A／B 兩格、舊比較連結、「選為 A」都不在了。
         for gone in ("#result-section", "#compare-a", "#compare-b", "#compare-link"):
             expect(page.locator(gone)).to_have_count(0)
@@ -89,6 +90,7 @@ def test_drawer_opens_closes_three_ways_and_traps_tab(tmp_path: Path, browser: B
 def test_empty_drawer_says_so_without_compare_row(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_results(page)
         expect(page.locator("#results-empty")).to_have_text(
             "還沒有算過的結果；在頁底按「照現在牆上貼的算一次」，算好就列在這裡。")
@@ -114,6 +116,7 @@ def test_running_and_failed_rows_say_their_state(tmp_path: Path, browser: Browse
 
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         page.route(f"{base}/api/results", mark_running)
         page.reload(wait_until="networkidle")
         expect(result_row(page, FIRST).locator(".run-status")).to_have_text(RESULT_RUN_LABELS["failed"][0])
@@ -150,6 +153,7 @@ def test_check_two_to_compare_third_is_blocked(tmp_path: Path, browser: Browser,
     _three(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_results(page)
         go, hint = page.locator("#compare-go"), page.locator("#compare-hint")
         expect(hint).to_have_text("勾兩筆就能比較")
@@ -228,6 +232,7 @@ def test_different_scoring_settings_turn_both_rows_red(tmp_path: Path, browser: 
     _bundle(tmp_path, other.model_copy(update={"purpose_settings": changed_snapshot(other)}), THIRD)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         warning = page.locator("#compare-warning")
         check_result(page, FIRST)
         check_result(page, SECOND)
@@ -293,6 +298,7 @@ def test_menu_show_archived_opens_drawer_on_archive(tmp_path: Path, browser: Bro
     _saved(tmp_path, _renamed(result, name))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         assert page.request.post(f"{base}/api/schemes/{name}/archive", data={}).ok
         page.reload(wait_until="networkidle")
         page.wait_for_function("document.body.dataset.inputReady === 'true'")
@@ -319,6 +325,8 @@ def test_drawer_buttons_do_nothing_while_save_holds_the_page(
     _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
+        page.locator("#room-Lx").fill("5.5")  # 存好的範例原樣存是「方案沒有變動」：改一格，存的才是新的內容
         held: list[Route] = []
         page.route("**/api/schemes/*", lambda route: held.append(route) if route.request.method == "PUT"
                    else route.continue_())
@@ -365,6 +373,7 @@ def test_redraw_keeps_focus_on_same_button_of_same_row(tmp_path: Path, browser: 
     _three(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         row = result_row(page, SECOND)
         for target in (row.get_by_role("button", name="封存"), row.get_by_role("link", name="看", exact=True),
                        row.get_by_role("checkbox")):
@@ -396,6 +405,7 @@ def test_row_gone_moves_focus_to_next_row_same_button_or_close(
     _three(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _dialogs(page)
         order = _order(page, "#results-list", "runId")
         result_row(page, order[1]).get_by_role("button", name="封存").focus()
@@ -483,6 +493,7 @@ def test_archive_block_folds_after_clear_then_new_archive(
     _three(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _dialogs(page)
         result_row(page, FIRST).get_by_role("button", name="封存").click()
         expect(result_row(page, FIRST)).to_have_count(0)
@@ -503,6 +514,8 @@ def test_locked_page_ignores_escape_and_unlock_keeps_focus(
     _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
+        page.locator("#room-Lx").fill("5.5")  # 存好的範例原樣存是「方案沒有變動」：改一格，存的才是新的內容
         held: list[Route] = []
         page.route("**/api/schemes/*", lambda route: held.append(route) if route.request.method == "PUT"
                    else route.continue_())
@@ -551,6 +564,7 @@ def test_show_archived_with_nothing_archived_says_so(tmp_path: Path, browser: Br
     _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=600) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _dialogs(page)
         none, archived, say = page.locator("#archive-none"), page.locator("#archived"), page.locator("#archive-say")
         scroll_note = page.locator(".archive-scroll-note")
@@ -589,6 +603,7 @@ def test_results_note_keeps_line_breaks_like_messages(tmp_path: Path, browser: B
     _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         open_results(page)
         page.evaluate("() => say('第一行\\n第二行', 'notice')")
         assert page.locator("#messages").inner_text() == "第一行\n第二行"

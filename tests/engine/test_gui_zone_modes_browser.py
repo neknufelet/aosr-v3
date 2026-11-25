@@ -9,7 +9,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
-from tests.engine._input_page_steps import reveal, scheme_open_button, scripted_open_scheme
+from tests.engine._input_page_steps import open_example_scheme, reveal, scheme_open_button, scripted_open_scheme
 from tests.engine._zone_panel_steps import (apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, fixed_value,
                                             listed, open_alone, open_panel)
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -274,14 +274,16 @@ def test_opening_a_scheme_swaps_the_form_only_after_its_zone_design_arrives(tmp_
          "zones": {"x0": {"whole_wall": {"mode": "search"}}}}), encoding="utf-8")
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        # 先開著另一份存好的（範例，沒有做法檔）：等待中表單、方案名字與做法都還是那一份的。
+        open_example_scheme(page, base, tmp_path)
         held: list[Route] = []
         page.route("**/api/designs/room109", lambda route: held.append(route))
         open_button = scheme_open_button(page, "room109")
         with page.expect_request("**/api/designs/room109"):
             open_button.click()
         page.wait_for_function("document.querySelector('main').inert")
-        assert page.locator("#save-id").input_value() != "room109"
-        assert page.evaluate("zoneDesign") is None
+        assert page.locator("#save-id").input_value() == "example"
+        assert page.evaluate("[zoneDesign.scheme_id, scheme.scheme_id, openedId]") == ["example", "example", "example"]
         held[0].continue_()
         page.wait_for_function("document.getElementById('save-id').value === 'room109'")
         assert page.evaluate("[zoneDesign.scheme_id, zoneDesign.original_scheme_id]") == ["room109", "room109-original"]

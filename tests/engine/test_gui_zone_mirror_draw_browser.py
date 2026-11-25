@@ -276,7 +276,7 @@ def test_delayed_cut_then_save(tmp_path: Path, browser: Browser, send: bool) -> 
         assert page.evaluate("inputBusy && document.querySelector('main').inert")
         assert not _drawn(page, "x0") and not _drawn(page, "xL")
         for button, note, refused in (("#calculate", "messages", "沒有開算"), (f'[data-scheme="{NAME}"] .home-open', "open-note", "沒有打開"),
-                                      ("#load-template", "template-note", "沒有載入範本")):
+                                      ("#new-scheme-go", "new-scheme-note", "沒有開新的")):
             page.locator(button).dispatch_event("click")
             expect(page.locator(f"#{note}")).to_contain_text(refused)
         page.locator("#zone-to-search" if send else "#save").dispatch_event("click")
