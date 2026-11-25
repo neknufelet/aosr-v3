@@ -699,13 +699,15 @@ function markStale(event) {
   if (!$("result-link").hidden) $("result-stale").hidden = false;
   refreshClearUndo();  // 第 2 段「清掉這一面的切法」的復原只到下一個改動之前（elevation.js）
 }
-// 結果抽屜的比較（#1265 單元 4）：兩格 A、B，勾一筆填進空的那一格（A 先），取消勾選就空出那一格；
+// 結果抽屜的比較（#1265 單元 4）：兩格 A、B，勾一筆填進空的那一格（A 先），取消勾選就空出那一格（A 空出來時 B 遞補成 A）；
 // 兩格都有了，其餘的勾選格停用（第三筆擋下、不偷換）：要換一筆，先取消勾選其中一筆。比較網址照舊 A 在前。
 function chooseCompare(side, item) {
   compareChoice[side] = item;
   drawCompareChoice();
 }
 function drawCompareChoice() {
+  // 「先勾的是 A」照字面成立（第二趟 F4）：A 那一筆取消勾選、封存或不在清單了，留著的 B 遞補成 A，再勾的是 B。
+  if (!compareChoice.a && compareChoice.b) [compareChoice.a, compareChoice.b] = [compareChoice.b, null];
   const {a, b} = compareChoice, both = Boolean(a && b);
   const differs = both && a.registry_text !== b.registry_text;
   for (const row of $("results-list").querySelectorAll("tr")) {
@@ -720,10 +722,9 @@ function drawCompareChoice() {
   if (both) link.href = `/compare/${a.run_id}/${b.run_id}`; else link.removeAttribute("href");
   link.setAttribute("aria-disabled", String(!both));
   $("compare-warning").hidden = !differs;
-  const picked = a || b;
   $("compare-hint").textContent = both ? "已勾兩筆（A 是先勾的）；要換一筆，先取消勾選其中一筆" :
-    picked ? `已勾 ${a ? "A" : "B"}：${picked.scheme_id}（${picked.finished_text}）` +
-    (runFinished(picked) ? "" : `・${picked.status_text}`) + "；再勾一筆就能比較" : "勾兩筆就能比較";
+    a ? `已勾 A：${a.scheme_id}（${a.finished_text}）` +
+    (runFinished(a) ? "" : `・${a.status_text}`) + "；再勾一筆就能比較" : "勾兩筆就能比較";
 }
 function finishedCell(cell, text) {
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$/.test(text)) return;
@@ -903,6 +904,10 @@ async function loadArchiveList() {
   archive.hidden = !packages.length && !data.results.length;
   archive.querySelector("summary").textContent = `看已封存的結果（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
   $("archive-say").hidden = archive.hidden;
+  // 頂條「看已封存的」問過、而且真的一包也沒有：寫一句（home.js）；滑動提示只在真有表格時出現（第二趟 F5）。
+  $("archive-none").hidden = !(archiveAsked && archive.hidden);
+  archive.querySelector(".archive-scroll-note").hidden = archive.hidden;
+  noteDrawerFocus();
   const packageList = $("archived-packages-list"); packageList.replaceChildren();
   $("archived-packages").hidden = !packages.length;
   for (const item of packages) {
@@ -933,6 +938,7 @@ async function loadArchiveList() {
     rowButton(row, "永久刪除", () => deleteArchive(item, false), true);
     list.append(row);
   }
+  keepDrawerFocus();
 }
 async function loadResultList() {
   // 首頁第一屏跟著結果清單重讀（算完、封存之後「最近算的房間」會變）；它自己讀不到只寫在它那一行，不擋清單。
@@ -948,21 +954,20 @@ async function loadResultList() {
   return data.results;
 }
 // 抽屜裡的結果列：每次重讀清單、打開抽屜（「現在開著」跟著換）都重畫；勾選跟著計算代號留住（清單裡沒有了就放掉），
-// 游標在某一列的勾選格或「看」上時，重畫後放回同一列的同一顆。
+// 游標放回同一列的同一顆（那一列不在了放下一列，home.js 的 keepDrawerFocus）。
 function drawResultRows() {
   for (const side of ["a", "b"]) {
     const item = compareChoice[side];
     if (item) compareChoice[side] = resultRows.find(row => row.run_id === item.run_id) || null;
   }
-  const active = document.activeElement, focusedRow = active?.closest?.("#results-list tr");
-  const again = focusedRow && [focusedRow.dataset.runId, active.matches("input") ? "input" : ".res-acts a"];
+  noteDrawerFocus();
   $("results-list").replaceChildren(...resultRows.map(item => resultRow(item)));
   const empty = !resultRows.length;
   $("results-empty").hidden = !empty;
   $("results-table").hidden = empty;
   $("compare-row").hidden = empty;
   drawCompareChoice();
-  if (again) $("results-list").querySelector(`tr[data-run-id="${again[0]}"] ${again[1]}`)?.focus({preventScroll: true});
+  keepDrawerFocus();
 }
 async function resumeRuns() {
   // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
@@ -1063,7 +1068,7 @@ async function poll() {
     } catch (error) {
       if (polled !== runId) return;
       $("stop").disabled = true;
-      say(`「${state.scheme_id}」算完了，但結果清單讀不到：${errorText(error)}；重新整理頁面後在結果清單看`, "notice");
+      say(`「${state.scheme_id}」算完了，但結果清單讀不到：${errorText(error)}；重新整理頁面後在頂條「算過的結果與比較」裡看`, "notice");
       return;
     }
     if (polled !== runId) return;

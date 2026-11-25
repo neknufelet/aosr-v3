@@ -707,7 +707,7 @@ def _rejected_side_offers_rerun(tmp_path: Path, browser: Browser, base: str,
         assert button.is_disabled()
         state = page.locator("#rerun-state").inner_text()
         assert "started" not in state and not re.search(r"[0-9a-f]{32}", state)
-        assert "回方案輸入頁的結果清單" in state
+        assert "算完後回方案輸入頁，打開頂條「算過的結果與比較」" in state
         assert watched.page_errors == []
         assert all(any(code in error for code in ("409", "404", "400")) for error in watched.console_errors)
 

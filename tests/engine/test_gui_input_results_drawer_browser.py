@@ -163,16 +163,20 @@ def test_check_two_to_compare_third_is_blocked(tmp_path: Path, browser: Browser,
         expect(third).to_be_disabled()
         expect(hint).to_contain_text("先取消勾選其中一筆")
         expect(go).to_have_attribute("href", f"/compare/{SECOND}/{FIRST}")
-        # 取消 A：A 那一格空出來、B 不動；再勾第三筆就補進 A。
+        # 取消 A：B 遞補成 A（「先勾的是 A」照字面成立，第二趟 F4）；再勾第三筆是 B。網址、標記、提示句三處一致。
         result_row(page, SECOND).get_by_role("checkbox").uncheck()
         expect(go).to_have_attribute("aria-disabled", "true")
-        expect(result_row(page, FIRST).locator(".compare-mark")).to_have_text("B")
+        expect(result_row(page, FIRST).locator(".compare-mark")).to_have_text("A")
+        expect(hint).to_contain_text("已勾 A：room-one")
         expect(third).to_be_enabled()
         check_result(page, THIRD)
-        expect(go).to_have_attribute("href", f"/compare/{THIRD}/{FIRST}")
+        expect(result_row(page, FIRST).locator(".compare-mark")).to_have_text("A")
+        expect(result_row(page, THIRD).locator(".compare-mark")).to_have_text("B")
+        expect(go).to_have_attribute("href", f"/compare/{FIRST}/{THIRD}")
+        expect(hint).to_have_text("已勾兩筆（A 是先勾的）；要換一筆，先取消勾選其中一筆")
         # 重讀清單（存檔、封存、算完都會）之後勾選照留。
         page.evaluate("() => loadResultList()")
-        expect(go).to_have_attribute("href", f"/compare/{THIRD}/{FIRST}")
+        expect(go).to_have_attribute("href", f"/compare/{FIRST}/{THIRD}")
         expect(result_row(page, THIRD).get_by_role("checkbox")).to_be_checked()
         _assert_quiet(watched)
 
@@ -201,6 +205,11 @@ def test_different_scoring_settings_turn_both_rows_red(tmp_path: Path, browser: 
         expect(warning).to_have_text("評分設定不同，放在一起比會不準")
         # 不擋比較。
         expect(page.locator("#compare-go")).to_have_attribute("href", f"/compare/{FIRST}/{THIRD}")
+        # 取消其中一筆：紅底與那一句一起收起（審查建議 3）。
+        result_row(page, THIRD).get_by_role("checkbox").uncheck()
+        for run_id in (FIRST, THIRD):
+            expect(result_row(page, run_id)).not_to_have_class("registry-differs")
+        expect(warning).to_be_hidden()
         _assert_quiet(watched)
 
 
@@ -303,4 +312,186 @@ def test_drawer_buttons_do_nothing_while_save_holds_the_page(
             _click_center(page, archive)
         assert len(dialogs) == 1 and "確定封存嗎" in dialogs[0]
         expect(result_row(page, FIRST)).to_be_visible()
+        _assert_quiet(watched)
+
+
+def _order(page: Page, body: str, key: str) -> list[str]:
+    """抽屜裡那張表由上到下每一列的代號（結果列 data-run-id、整包 data-package-id）。"""
+    return list(page.locator(f"{body} tr").evaluate_all(f"rows => rows.map(row => row.dataset.{key})"))
+
+
+def test_redraw_keeps_focus_on_same_button_of_same_row(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第二趟 F1：抽屜開著時重讀清單（存檔解鎖、算完、封存之後都會），游標留在同一筆的同一顆，不准跳去「看」。"""
+    _three(tmp_path, result)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        row = result_row(page, SECOND)
+        for target in (row.get_by_role("button", name="封存"), row.get_by_role("link", name="看", exact=True),
+                       row.get_by_role("checkbox")):
+            target.focus()
+            page.evaluate("() => loadResultList().then(() => null)")
+            expect(target).to_be_focused()
+        # 結果列重畫完、封存清單還在路上（伺服器慢）的那一段：游標已經放回去了，不等封存清單回來。
+        held: list[Route] = []
+        page.route("**/api/archive", lambda route: held.append(route))
+        target = row.get_by_role("button", name="封存")
+        target.focus()
+        page.evaluate("() => { window.reloaded = loadResultList(); }")
+        for _ in range(100):
+            if held:
+                break
+            page.wait_for_timeout(50)
+        assert len(held) == 1
+        expect(target).to_be_focused()
+        held[0].continue_()
+        page.unroute("**/api/archive")
+        page.evaluate("() => window.reloaded.then(() => null)")
+        expect(target).to_be_focused()
+        _assert_quiet(watched)
+
+
+def test_row_gone_moves_focus_to_next_row_same_button_or_close(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第二趟 F3：封存、搬回把游標所在那一列拿掉時，游標落到下一列的同一顆；沒有下一列就落到「關閉 ✕」，不准掉出抽屜。"""
+    _three(tmp_path, result)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _dialogs(page)
+        order = _order(page, "#results-list", "runId")
+        result_row(page, order[1]).get_by_role("button", name="封存").focus()
+        page.keyboard.press("Enter")
+        expect(result_row(page, order[1])).to_have_count(0)
+        expect(result_row(page, order[2]).get_by_role("button", name="封存")).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(result_row(page, order[2])).to_have_count(0)
+        expect(page.locator("#results-close")).to_be_focused()
+        # 已封存那一塊：搬回第一包，游標落到下一包的「搬回」；搬回最後一包，落到關閉鈕。
+        open_archived(page)
+        packages = _order(page, "#archived-packages-list", "packageId")
+        assert len(packages) == 2
+
+        def restore(package: str) -> Locator:
+            row = page.locator(f'#archived-packages-list tr[data-package-id="{package}"]')
+            return row.get_by_role("button", name="搬回", exact=True)
+
+        restore(packages[0]).focus()
+        page.keyboard.press("Enter")
+        expect(restore(packages[0])).to_have_count(0)
+        expect(restore(packages[1])).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(restore(packages[1])).to_have_count(0)
+        expect(page.locator("#results-close")).to_be_focused()
+        # 固定的那一顆被藏起來：游標在「全部清除封存」上按確認，清完那一顆與整塊都藏起來，游標落到關閉鈕。
+        result_row(page, order[0]).get_by_role("button", name="封存").click()
+        expect(result_row(page, order[0])).to_have_count(0)
+        open_archived(page)
+        page.wait_for_load_state("networkidle")
+        # 藏起來的同一拍就要放好（不是等之後哪一次重讀清單才順手放回）：記下藏起來那一下的游標。
+        page.evaluate("""() => new MutationObserver((changes, watch) => {
+          window.whenHidden = document.activeElement.id || document.activeElement.tagName; watch.disconnect();
+        }).observe(document.getElementById('clear-archive'), {attributes: true, attributeFilter: ['hidden']})""")
+        page.locator("#clear-archive").focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#clear-archive")).to_be_hidden()
+        assert page.evaluate("() => window.whenHidden") == "results-close"
+        expect(page.locator("#results-close")).to_be_focused()
+        _assert_quiet(watched)
+
+
+def test_locked_page_ignores_escape_and_unlock_keeps_focus(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第二趟 F2＋F3：整頁鎖著（inert）時 Esc 不關抽屜；存檔、換方案解鎖後，游標還在抽屜裡同一筆的同一顆。"""
+    _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        held: list[Route] = []
+        page.route("**/api/schemes/*", lambda route: held.append(route) if route.request.method == "PUT"
+                   else route.continue_())
+        archive = result_row(page, FIRST).get_by_role("button", name="封存")
+        archive.focus()
+        page.evaluate("() => { action(save); }")
+        page.wait_for_function("document.querySelector('main').inert && inputBusy")
+        for _ in range(100):  # 存檔先跑圖面檢查，再送方案：等送方案那一趟被攔住
+            if held:
+                break
+            page.wait_for_timeout(100)
+        assert len(held) == 1
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        expect(page.locator("#results-panel")).to_be_visible()
+        held[0].continue_()
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+        expect(page.locator("#messages")).to_have_text("方案已儲存")
+        expect(archive).to_be_focused()
+        # 換方案（開檔、範本共用的交接）鎖頁再解開：鎖著那一段伺服器慢、游標已掉回 body；解鎖後放回同一顆。
+        page.wait_for_load_state("networkidle")
+        previews: list[Route] = []
+        page.route("**/api/input-preview", lambda route: previews.append(route))
+        archive.focus()
+        page.evaluate("() => { window.changed = changeInputScheme(async () => structuredClone(scheme)); }")
+        page.wait_for_function("document.querySelector('main').inert && document.activeElement === document.body")
+        for _ in range(100):
+            if previews:
+                break
+            page.wait_for_timeout(50)
+        assert len(previews) == 1
+        previews[0].continue_()
+        page.unroute("**/api/input-preview")
+        # 解鎖那一下就放回去（不是等之後哪一次重讀清單才順手放回）。
+        assert page.evaluate("""async () => {
+          const changed = await window.changed, active = document.activeElement;
+          return [changed, active.tagName, active.textContent];
+        }""") == [True, "BUTTON", "封存"]
+        expect(archive).to_be_focused()
+        _assert_quiet(watched)
+
+
+def test_show_archived_with_nothing_archived_says_so(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第二趟 F5：沒有封存時頂條「看已封存的」照樣打開抽屜、寫一句還沒有，不展開空表、不出滑動提示；
+    之後從頂條結果鈕重開，那一塊照有沒有封存決定；真有表格時窄畫面才出滑動提示。"""
+    _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=600) as watched:
+        page = watched.page
+        _dialogs(page)
+        none, archived, say = page.locator("#archive-none"), page.locator("#archived"), page.locator("#archive-say")
+        scroll_note = page.locator(".archive-scroll-note")
+
+        def show_archived() -> None:
+            page.wait_for_function("document.body.dataset.inputReady === 'true'")
+            page.locator("#scheme-menu-button").click()
+            page.locator("#show-archived").click()
+            expect(page.locator("#results-panel")).to_be_visible()
+
+        show_archived()
+        expect(none).to_be_visible()
+        expect(none).to_have_text("還沒有封存的結果")
+        expect(none).to_be_focused()
+        for gone in (archived, say):
+            expect(gone).to_be_hidden()
+        assert scroll_note.evaluate("node => getComputedStyle(node).display") == "none"
+        page.keyboard.press("Escape")
+        open_results(page)
+        for gone in (none, archived, say):
+            expect(gone).to_be_hidden()
+        page.keyboard.press("Escape")
+        show_archived()
+        expect(none).to_be_visible()
+        result_row(page, FIRST).get_by_role("button", name="封存").click()
+        expect(result_row(page, FIRST)).to_have_count(0)
+        expect(none).to_be_hidden()
+        open_archived(page)
+        expect(say).to_be_visible()
+        expect(scroll_note).to_be_visible()
+        _assert_quiet(watched)
+
+
+def test_results_note_keeps_line_breaks_like_messages(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第二趟 F6：抽屜上方的回話跟訊息列一樣保留換行（全部清除封存有跳過的包時是兩行）。"""
+    _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        open_results(page)
+        page.evaluate("() => say('第一行\\n第二行', 'notice')")
+        assert page.locator("#messages").inner_text() == "第一行\n第二行"
+        assert page.locator("#results-note").inner_text() == "第一行\n第二行"
         _assert_quiet(watched)

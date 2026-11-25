@@ -156,7 +156,7 @@ button.archive-danger:hover{background:#fff0f0}
 .archive-scroll-note{display:none}
 #archived-packages-list td:nth-child(2){white-space:normal}
 @media(max-width:700px){
-  .archive-scroll-note{display:block}
+  .archive-scroll-note:not([hidden]){display:block}
   #archived table:not([hidden]){display:block;overflow-x:auto;max-width:100%}
 }
 /* 立面圖（#1091）：畫的框實線、補滿的格子虛線、太窄的那幾條紅虛線、選取的框加粗；喇叭方塊、主位圓點。
@@ -403,6 +403,7 @@ html.drawer-open{overflow:hidden}
 #results-panel h2{font-size:1.25rem;margin:0 0 .25rem}
 #results-close{background:white;color:#17212a;border:1px solid #17212a;padding:.35rem .7rem;white-space:nowrap}
 #results-panel p.say{color:#46586a;font-size:.8125rem;margin:0 0 .75rem}
+#results-note{white-space:pre-line}
 #results-note:empty{display:none}
 #results-table{margin:0}
 #results-table td{padding:.7rem .35rem;border-bottom:0;border-top:1px solid #d5e0e4}
@@ -414,15 +415,13 @@ html.drawer-open{overflow:hidden}
 #results-list .res-line{display:block;color:#46586a;font-size:.8125rem;margin-top:.15rem;word-break:keep-all}
 #results-list .res-acts{white-space:nowrap;text-align:right}
 #results-list .res-acts>*{margin-left:.4rem}
-#results-list button{padding:.4rem .8rem;line-height:1.3}
-#results-list tr.not-finished{background:#fff2e8;color:#872c22}
 #results-list tr.not-finished .res-line{color:#872c22}
-#results-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}
 #results-list tr.registry-differs{background:#fdecea;box-shadow:inset 3px 0 0 #a12020}
 #results-list tr.registry-differs .res-registry{color:#a12020;font-weight:600}
 #compare-row:not([hidden]){display:flex;align-items:center;gap:.75rem;margin-top:.5rem;padding-top:.75rem;border-top:1px solid #97aeb8;color:#46586a}
 #compare-hint{flex:1;font-size:.8125rem}
 #compare-go[aria-disabled="true"]{opacity:.45;cursor:default}
 #compare-warning:not([hidden]){color:#a12020;font-weight:600;font-size:.8125rem;margin:.4rem 0 0}
-#archive-say{margin-top:1rem}
+#archive-say,#archive-none{margin-top:1rem}
+#archive-none{color:#46586a}
 #results-panel #archived{border:0;padding:0;margin:0}

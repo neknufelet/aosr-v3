@@ -177,9 +177,16 @@ function bindBars() {
   $("choose-template").onclick = () => {
     closeBarBoxes(); $("template-box").hidden = false; $("template-list").focus();
   };
+  // 頂條選單「看已封存的」：有封存就展開那一塊、游標到它的標題；沒有封存（第二趟 F5）照樣打開抽屜，
+  // 那一塊只寫一句「還沒有封存的結果」，不展開空表。
   $("show-archived").onclick = () => {
     closeBarBoxes(); openResults();
-    $("archived").hidden = false; $("archived").open = true; $("archive-say").hidden = false;
+    archiveAsked = true;
+    if ($("archived").hidden) {
+      $("archive-none").hidden = false; $("archive-none").focus({preventScroll: true});
+      return;
+    }
+    $("archived").open = true;
     $("archived").scrollIntoView({block: "nearest"}); $("archived").querySelector("summary").focus({preventScroll: true});
   };
   bindResultsDrawer();
@@ -206,9 +213,12 @@ function bindBars() {
 // 結果抽屜（#1265 單元 4）：頂條「算過的結果與比較 ▸」打開；關閉鈕、Esc、點遮罩關，關了游標回那顆鈕。
 // 開著時 Tab 只在抽屜裡轉。抽屜住在 main 裡：存檔、計算、開檔、切牆等把 main 鎖住（inert）的時候，
 // 抽屜裡的封存、搬回、刪除也一起按不了（這道鎖不另外接）。
+let archiveAsked = false;
 function openResults() {
   closeBarBoxes();
-  $("results-note").textContent = "";
+  $("results-note").textContent = ""; $("results-note").className = "";
+  archiveAsked = false; $("archive-none").hidden = true;
+  drawerFocus = null;
   $("results-drawer").hidden = false;
   document.documentElement.classList.add("drawer-open");
   drawResultRows();
@@ -220,6 +230,38 @@ function closeResults() {
   document.documentElement.classList.remove("drawer-open");
   $("show-results").focus();
 }
+// 抽屜開著時清單重畫（重讀、封存、搬回、刪除、換方案）或鎖頁解開（第二趟 F1、F3）：節點被換掉、或 main 被鎖住
+// 那一下，游標會無聲掉回 body，不會有 focusin。所以游標進抽屜時先記住它在哪（哪張表、哪一筆、哪一種按鈕，
+// 照按鈕種類認：勾選格、看、封存、搬回、永久刪除），重畫完與解鎖後放回同一筆的同一顆；那一筆不在了，
+// 放到原位置的下一列同一顆，沒有就放到「關閉 ✕」。main 鎖著時 .focus() 沒作用，留到解鎖再放。
+const drawerLists = {"results-list": "runId", "archived-packages-list": "packageId", "archived-list": "runId"};
+let drawerFocus = null;
+const drawerKind = node => `${node.tagName}:${node.textContent}`;
+function rowStops(row) {
+  return [...row.querySelectorAll("input, a[href], button")];
+}
+function noteDrawerFocus(node = document.activeElement) {
+  if (!(node instanceof HTMLElement) || !$("results-panel").contains(node) || !node.getClientRects().length) return;
+  const row = node.closest("tr"), body = row?.parentElement;
+  drawerFocus = body && body.id in drawerLists
+    ? {list: body.id, id: row.dataset[drawerLists[body.id]], kind: drawerKind(node), index: [...body.children].indexOf(row)}
+    : {node};
+}
+function keepDrawerFocus() {
+  const active = document.activeElement;
+  if ($("results-drawer").hidden || $("leave-edits").open || document.querySelector("main").inert) return;
+  if ($("results-panel").contains(active) && active.getClientRects().length) return;
+  const key = drawerFocus;
+  let target = key?.node?.isConnected ? key.node : null;
+  if (key?.list) {
+    const rows = [...$(key.list).children];
+    const row = rows.find(item => item.dataset[drawerLists[key.list]] === key.id) || rows[key.index];
+    target = row && rowStops(row).find(node => drawerKind(node) === key.kind);
+  }
+  if (!target || target.disabled || !target.getClientRects().length) target = $("results-close");
+  target.focus({preventScroll: true});
+  noteDrawerFocus(target);
+}
 function drawerStops() {
   return [...$("results-panel").querySelectorAll("button, a[href], input, summary")]
     .filter(node => !node.disabled && node.getClientRects().length);
@@ -229,6 +271,11 @@ function bindResultsDrawer() {
   $("results-mask").onclick = closeResults;
   document.addEventListener("keydown", event => {
     if ($("results-drawer").hidden || $("leave-edits").open) return;
+    // 整頁鎖著（存檔、計算、換方案…，main.inert）：Esc 不關、Tab 不動，解鎖後游標還在抽屜裡（第二趟 F2）。
+    if (document.querySelector("main").inert) {
+      if (["Escape", "Tab"].includes(event.key)) event.preventDefault();
+      return;
+    }
     if (event.key === "Escape") { event.preventDefault(); closeResults(); return; }
     if (event.key !== "Tab") return;
     const stops = drawerStops(), index = stops.indexOf(document.activeElement);
@@ -240,7 +287,10 @@ function bindResultsDrawer() {
   document.addEventListener("focusin", event => {
     if (!$("results-drawer").hidden && !$("results-drawer").contains(event.target) &&
         !$("leave-edits").open) $("results-close").focus();
+    else noteDrawerFocus(event.target);
   });
+  // 鎖頁解開（main 拿掉 inert）：游標若在鎖住那一下掉回 body，放回記住的那一顆。
+  new MutationObserver(keepDrawerFocus).observe(document.querySelector("main"), {attributes: true, attributeFilter: ["inert"]});
 }
 function runningFor(name) {
   if (!name) return null;

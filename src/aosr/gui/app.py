@@ -682,7 +682,7 @@ class GuiHandlers:
                 label = f"「{item.scheme_id}」" if item else "這一筆結果"
                 if item and item.finished_text != "讀不出":
                     label += f"（{item.finished_text} 算完）"
-                message = (f"已搬回{label}；在結果清單可以查看" if restore else
+                message = (f"已搬回{label}；在「算過的結果與比較」裡可以查看" if restore else
                            f"已封存{label}；在下面「已封存」可以搬回")
                 return JSONResponse({"message": message})
         except ResultMoveConflict as exc:

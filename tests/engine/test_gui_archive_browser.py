@@ -301,6 +301,7 @@ def test_legacy_single_archive_label_and_restore(
         expect(row.locator(".run-status")).to_have_text("失敗：內容可能不完整")
         row.get_by_role("button", name="搬回", exact=True).click()
         expect(_row(page, run_id)).to_be_visible()
+        expect(page.locator("#results-note")).to_contain_text("；在「算過的結果與比較」裡可以查看")
         open_results(page)
         expect(page.locator("#archived")).to_be_hidden()
         _assert_quiet(watched)
@@ -319,25 +320,25 @@ def test_archive_clears_selected_compare_sides(
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _confirm(page)
-        # 原 [A]：封存勾成 A 的那份，A 回到未選、B 不動。（#1265 單元 4：選為 A／B 改成勾選，先勾的是 A；
-        # 「A：未選」＝沒有一列標 A；「比較」看得見／藏起來＝比較鈕能按／停用。）
+        # 原 [A]：封存勾成 A 的那份，A 那一筆放掉、B 那一筆留著。（#1265 單元 4：選為 A／B 改成勾選，先勾的是 A；
+        # 「比較」看得見／藏起來＝比較鈕能按／停用。第二趟 F4：「先勾的是 A」照字面成立，留下的那筆遞補成 A、B 空出來。）
         check_result(page, first)
         check_result(page, other)
         expect(page.locator("#compare-go")).to_have_attribute("aria-disabled", "false")
         _row(page, first).get_by_role("button", name="封存").click()
-        expect(_marked(page, "A")).to_have_count(0)
-        expect(_marked(page, "B")).to_contain_text("other-scheme")
+        expect(_marked(page, "B")).to_have_count(0)
+        expect(_marked(page, "A")).to_contain_text("other-scheme")
         expect(page.locator("#compare-go")).to_have_attribute("aria-disabled", "true")
         # 原 [B]：封存勾成 B 的那份，B 回到未選、A 不動。
         check_result(page, third)
         expect(page.locator("#compare-go")).to_have_attribute("aria-disabled", "false")
-        _row(page, other).get_by_role("button", name="封存").click()
+        _row(page, third).get_by_role("button", name="封存").click()
         expect(_marked(page, "B")).to_have_count(0)
-        expect(_marked(page, "A")).to_contain_text("third-scheme")
+        expect(_marked(page, "A")).to_contain_text("other-scheme")
         expect(page.locator("#compare-go")).to_have_attribute("aria-disabled", "true")
         # 原 clears_both：兩邊是同一份方案的兩筆結果，封存一次兩邊都清。（舊的「選為 A」會換掉 A；
-        # 勾選第三筆被擋下，先取消勾選 third 那一筆。）
-        _row(page, third).get_by_role("checkbox").uncheck()
+        # 勾選第三筆被擋下，先取消勾選留著的 other 那一筆。）
+        _row(page, other).get_by_role("checkbox").uncheck()
         check_result(page, both[0])
         check_result(page, both[1])
         expect(page.locator("#compare-go")).to_have_attribute("aria-disabled", "false")
@@ -390,9 +391,9 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
           const card = table.closest('section');
           return card.scrollWidth <= card.clientWidth;
         }""")
-        # 1100 寬、兩個長名字都在時表格一定被擠到最窄（跟字型寬窄無關）：
-        # 只驗名字與日期各自不斷行，不驗凸不凸出；驗完回 1440 寬。
-        page.set_viewport_size({"width": 1100, "height": 900})
+        # 擠窄：抽屜寬是 min(680px,100vw)，1100 寬時跟 1440 一樣 680、擠不到（第二趟實量：名字格 441 對 441）；
+        # 640 寬抽屜跟著縮成 640（名字格 410）。只驗名字與日期各自不斷行，不驗凸不凸出；驗完回 1440 寬。
+        page.set_viewport_size({"width": 640, "height": 900})
         for run_id in ("a" * 32, "d" * 32):
             squeezed = _row(page, run_id)
             _assert_text_on_one_line(squeezed.locator("td.res-main"))
@@ -550,6 +551,7 @@ def test_poll_and_save_survive_list_races_and_failures(tmp_path: Path, browser: 
         assert outcome["raced"] == {"link": False, "message": "前一句"}
         assert outcome["failed"]["link"] is False and outcome["failed"]["stop"] is True
         assert "算完了，但結果清單讀不到：封存清單讀不到" in outcome["failed"]["message"]
+        assert outcome["failed"]["message"].endswith("；重新整理頁面後在頂條「算過的結果與比較」裡看")
         assert outcome["saved"] is True
 
 
