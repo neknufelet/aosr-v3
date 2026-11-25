@@ -159,6 +159,9 @@ async function applyRoomResize(live, request) {
     }
   }
   // 每一區的新座標由下面重畫立面圖時一起寫進第 2 段右欄「每一區的位置與大小」（#1265 單元 3：牆面表單不再列分區的牆）。
+  // 先畫後問（同 applyCut）：上一版判決對的是舊尺寸；走到這裡 request 還是最新那一次，resizeRoom 的 finally 一定接著重問
+  // （#1265 單元 3 之二收尾追加第 4 條順手查到的）。
+  staleZoneLimits();
   renderElevation();
   window.renderZoneOverview();
 }
@@ -669,6 +672,9 @@ function pairWords(wall, key) {
 const MIRROR_LINE_WORDS = "鏡子：兩支喇叭的中線";
 function inputAxisWords(result) {
   const axis = result?.axis, distances = axis && axisDistances(axis);
+  // 最新那一次判決回來了、可是沒做成（連不上、房間尺寸讀不出來）：沒有鏡子可講，照實講沒確認成，不寫成還在等
+  // （#1265 單元 3 之二收尾追加設計洞）。判決在路上才是「正在確認」。
+  if (!distances && !result && zoneLimitsFresh() && zoneLimits.status !== "checked") return `鏡子在哪沒確認成：${zoneLimits.message}`;
   if (!distances) return result?.reason || result?.message || "正在確認鏡子在哪…";
   return `畫一邊，另一邊照鏡子出現；鏡子是兩支喇叭的中線（離左牆 ${distances.left} 公尺，`
     + `${axis.centred ? "在房間正中" : "不在房間正中，左右牆不跟著畫"}）。只管畫框；兩邊貼不貼一樣，在「這間房貼什麼」設`;
@@ -884,17 +890,17 @@ function refreshClearUndo() {
 }
 window.refreshClearUndo = refreshClearUndo;
 // 存檔、另存新名字（app.js）：方案物件沒換、改動序號也沒動，比對認不出來，由存檔那一路直接收掉（#1265 單元 3 審查真錯 3）。
-// 跟 refreshClearUndo 同一個判法（#1265 單元 3 之二第二趟 C 之 1）：只在那一格正寫著「已清掉…｜復原」時才重畫，
-// 沒選牆、尺寸不齊（那一格本來就空著）時不會因為存檔而畫出清掉鈕。
+// 不另判那一格寫著什麼（#1265 單元 3 之二收尾 B 改判，回到第一趟的寫法）：第二趟加的那一道兩家實測都走不到，拿掉。
+// 還能復原（clearedWall 在）時一定選過牆：elevationWall 只在 showElevationWall 換成牆名，不會回到沒選。
 window.forgetClearUndo = () => {
   if (!clearedWall) return;
   clearedWall = null;
-  if ($("elevation-cleared")) renderClearSlot(elevationWall);
+  renderClearSlot(elevationWall);
 };
 function renderClearSlot(wall) {
   // 叫到這裡時一定選了一面、畫得出這一面：立面圖重畫時沒選牆、尺寸不齊就先清空這一格回去了（renderElevation）；
-  // 清掉鈕那一路在切完那一刻同步畫（cut，那時剛畫好這一面）；存檔與改動那兩路（forgetClearUndo、refreshClearUndo）
-  // 只在「已清掉…｜復原」那一句還在時才叫。房間高度清空那一刻先重畫立面圖（markStale 先叫 renderInputBars），那一句已經不在。
+  // 清掉鈕那一路在切完那一刻同步畫（cut，那時剛畫好這一面）；改動那一路（refreshClearUndo）只在「已清掉…｜復原」那一句還在時才叫，
+  // 存檔那一路（forgetClearUndo）只在還能復原時叫。房間高度清空那一刻先重畫立面圖（markStale 先叫 renderInputBars），那一句已經不在。
   // 以前清掉鈕在等圖面檢查回來之後才畫，空檔裡清空高度會被塞回去（#1265 單元 3 之二第二趟追加第 2 條），所以改到 cut 裡。
   const slot = $("elevation-clear-slot"); slot.replaceChildren();
   if (clearedWall?.wall === wall && clearUndoable()) {

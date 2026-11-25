@@ -513,7 +513,9 @@ def test_invalid_draft_depth_does_not_block_a_material_change(tmp_path: Path, br
 
 
 @pytest.mark.parametrize("with_original", [False, True])
-def test_keep_original_table_words_follow_the_ceiling_verdict(tmp_path: Path, browser: Browser, with_original: bool) -> None:
+def test_keep_original_words_in_the_right_list_follow_the_ceiling_verdict(tmp_path: Path, browser: Browser, with_original: bool) -> None:
+    """天花那一區不貼、保留原樣：第 2 段右欄那一區那一句（keepWords）照天花讀不讀得出來講（#1265 單元 3 之二收尾改名，原名
+    test_keep_original_table_words_follow_the_ceiling_verdict：舊做法表「不貼」那一格拆了，同一句搬到右欄）。"""
     design: dict[str, object] = {"scheme_id": SAMPLE, "zones": {"ceiling": {"auto1": {"mode": "keep_original"}}}}
     _prepare(tmp_path, design | ({"original_scheme_id": "before"} if with_original else {}))
     doc = construction("air", id="ceiling_sample", label="自編天花板")
@@ -549,3 +551,5 @@ def test_fixed_only_card_explains_how_to_fix_it_in_both_views(tmp_path: Path, br
             expect(page.locator("#zone-list-problem")).to_have_text(
                 "只放了固定成品，程式沒得選。程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。"
                 "要的就是這一筆、不必讓程式選：" + ("在上面的小框" if compact else "按這張卡的「選這幾區」，") + "改成「指定貼一種」。")
+            # 那一頁的紅框是一出來就要唸給讀螢幕的人聽的那一種（role=alert；舊做法表那一格原本也考這一條，#1265 單元 3 之二收尾 J）。
+            expect(page.locator("#zone-list-problem")).to_have_attribute("role", "alert")

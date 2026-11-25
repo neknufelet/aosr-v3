@@ -405,8 +405,9 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
-def test_the_old_table_lets_a_stored_one_be_unticked_and_not_ticked_back(tmp_path: Path, browser: Browser) -> None:
-    """舊表方塊寫明清單裡本來有它；小框可以拿掉、不能加回。"""
+def test_the_panel_says_a_stored_one_is_already_listed_and_lets_it_be_unticked_but_not_ticked_back(tmp_path: Path, browser: Browser) -> None:
+    """小框那一列寫明清單裡本來有它；小框可以拿掉、不能加回（#1265 單元 3 之二收尾改名，原名
+    test_the_old_table_lets_a_stored_one_be_unticked_and_not_ticked_back：舊做法表拆了，那一句只剩小框那一列）。"""
     _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page

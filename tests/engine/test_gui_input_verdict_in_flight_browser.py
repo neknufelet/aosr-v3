@@ -9,18 +9,22 @@ import json
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, Route, expect
+from playwright.sync_api import Browser, Error, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._construction_cases import construction
+from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
-from tests.engine._zone_panel_steps import open_alone
+from tests.engine._zone_panel_steps import choose_fixed, open_alone
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
 from tests.engine.test_gui_input_clear_undo_browser import _release
-from tests.engine.test_gui_input_wall_list_browser import WOOL, _box, _pair_room
+from tests.engine.test_gui_input_wall_list_browser import WALL, WOOL, _box, _pair_room
+from tests.engine.test_gui_zone_choices_browser import _sample_library
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag, _open_scheme, _write
 from tests.engine.test_gui_zone_limits_browser import _deep_user_library
 from tests.engine.test_gui_zone_modes_browser import _write_room109_design
+from tests.engine.test_gui_zone_panel_show_all_browser import CEILING
 
 Doc = dict[str, object]
 
@@ -251,6 +255,8 @@ def test_a_new_deepest_on_a_search_zone_says_checking_until_the_verdict_comes_ba
         _verdict_shown(page)
         what = page.locator("#wall-zone-what-x0-whole_wall")
         expect(what).to_contain_text("總厚度最多 15 公分（房間預設）")
+        depths = page.locator("#wall-zone-depths-x0-whole_wall")
+        expect(depths).to_have_count(1)  # 上一版判決寫了逐組上限（審查建議這一題順手釘住逐組上限那一道）
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
         open_alone(page, "x0", "whole_wall")
@@ -263,8 +269,215 @@ def test_a_new_deepest_on_a_search_zone_says_checking_until_the_verdict_comes_ba
         assert held, "限制檢查應該還在路上"
         expect(what).to_contain_text("總厚度上限還在核對")
         expect(what).not_to_contain_text("15 公分")
+        expect(depths).to_have_count(0)
         page.unroute("**/api/zone-limits")
         _release(held)
         _verdict_shown(page)
         expect(what).to_contain_text("總厚度最多 10 公分（這一塊）")
         _assert_quiet(watched)
+
+
+def test_a_new_deepest_on_a_search_zone_drops_the_group_caps_until_the_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """逐組上限（depthTargetLines）判決新鮮那一道（#1265 單元 3 之二收尾）：前牆整面由程式最佳化、照房間預設 6 公分，
+    清單裡有一筆自己限制比房間預設深的（判決寫逐組上限）；在小框把「最深」改成 5，做法照樣是由程式最佳化。判決回來之前
+    右欄那一區底下不准還掛著上一版（6 公分）的逐組上限；回來才寫 5 公分（這一塊）的那一份。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off", "room_max_depth_m": 0.06,
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none", "deep_rock_wool"]}}}})
+    (tmp_path / "materials.json").write_text(_deep_user_library(), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _verdict_shown(page)
+        cap = page.locator("#depth-cap-x0-whole_wall")
+        expect(cap).to_have_text("個案上限 0.06 公尺（房間預設）；每一組跟自己的上限取較嚴：")
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        open_alone(page, "x0", "whole_wall")
+        page.locator("#zone-panel-depth").fill("5")
+        page.locator("#zone-panel-apply").click()
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        page.wait_for_function("""() => { const zones = document.getElementById('zone-page');
+            return !zones.inert && !inputBusy && !(Number(zones.dataset.changing) > 0) && zoneLimitsReceived !== zoneLimitsGeneration; }""")
+        page.locator("#zone-page-close").click()
+        assert held, "限制檢查應該還在路上"
+        expect(page.locator("#wall-zone-x0-whole_wall .tag")).to_have_text("由程式最佳化")
+        expect(page.locator("#wall-zone-depths-x0-whole_wall")).to_have_count(0)
+        expect(page.locator("[id^=depth-target-x0-whole_wall-], #depth-cap-x0-whole_wall")).to_have_count(0)
+        page.unroute("**/api/zone-limits")
+        _release(held)
+        _verdict_shown(page)
+        expect(page.locator("#wall-zone-depths-x0-whole_wall")).to_have_count(1)
+        expect(cap).to_have_text("個案上限 0.05 公尺（這一塊）；每一組跟自己的上限取較嚴：")
+        _assert_quiet(watched)
+
+
+def test_a_construction_put_back_by_a_new_method_is_not_named_until_the_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """裸構造身分（constructionAt 讀判決的 picked_constructions）同一個訊號（#1265 單元 3 之二收尾追加第 3 條）：天花整面指定貼
+    一筆自編構造（伺服器認得是材料庫那一筆），再在小框改回由程式最佳化（材料放回原本的天花）。判決回來之前右欄那一句不准還說
+    現在存的是那一筆自編構造（上一版判決對的是貼著它的時候）。"""
+    built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == CEILING)
+    document = room109_document()
+    cast(dict[str, list[Doc]], cast(Doc, document["scene"])["surface_zones_by_wall"])["ceiling"][0]["material"] = built
+    _write(tmp_path, document)
+    original = json.loads(json.dumps(document)) | {"scheme_id": "orig109"}
+    (tmp_path / "schemes" / "orig109.json").write_text(json.dumps(original), encoding="utf-8")
+    (tmp_path / "designs").mkdir(exist_ok=True)
+    (tmp_path / "designs" / "room109.json").write_text(json.dumps({
+        "schema_version": "aosr.zone_design.v1", "scheme_id": "room109", "original_scheme_id": "orig109",
+        "left_right_symmetry": "off", "zones": {}}), encoding="utf-8")
+    _sample_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        assert page.request.put(f"{base}/api/materials/table_sample", data=construction("rigid", id="table_sample")).ok
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-ceiling").click()
+        _verdict_shown(page)
+        choose_fixed(page, "ceiling", "whole_wall", "table_sample", show_all=True)
+        _verdict_shown(page)
+        what = page.locator("#wall-zone-what-ceiling-whole_wall")
+        held = _hold_limits_and_apply(page, "ceiling", "whole_wall", "search")
+        expect(what).to_contain_text("總厚度上限還在核對")
+        expect(what).not_to_contain_text("天花自編樣品")
+        page.unroute("**/api/zone-limits")
+        _release(held)
+        _verdict_shown(page)
+        expect(what).not_to_contain_text("天花自編樣品")
+        _assert_quiet(watched)
+
+
+def test_turning_symmetry_on_does_not_blame_the_seat_before_the_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """左右對稱從關切到開（setSymmetry，#1265 單元 3 之二收尾追加第 4 條）：上一版判決是關著時問的（沒有鏡子）。新判決回來
+    之前，選取框底下不准拿上一版說「請先檢查方案，讓主位對齊兩支喇叭的中點」（這一間是對稱的），立面圖上方那一句照講還在確認。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off", "zones": {}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _verdict_shown(page)
+        _drag(page, 4.0, 2.8, (0.3, 0.3), (1.3, 1.3))
+        _ran_to_the_end(page)
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.locator("#elevation-symmetry-on").click()
+        expect(page.locator("#elevation-axis-words")).to_have_text("正在確認鏡子在哪…")
+        status = page.locator(".elevation-pair-status")
+        expect(status).to_have_text("")
+        assert held, "限制檢查應該還在路上"
+        page.unroute("**/api/zone-limits")
+        _release(held)
+        _verdict_shown(page)
+        expect(status).not_to_contain_text("請先檢查方案")
+        _assert_quiet(watched)
+
+
+def test_a_room_resize_does_not_reuse_the_verdict_while_the_new_one_is_on_its_way(tmp_path: Path, browser: Browser) -> None:
+    """改房間尺寸（applyRoomResize，#1265 單元 3 之二收尾追加第 4 條順手查的那一條路）：分區照新尺寸調好就重畫，限制判決之後
+    才重問。新判決回來之前右欄不准拿上一版（舊尺寸）寫「一對」、上限，寫還在核對；回來才照新的寫。"""
+    _pair_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        _verdict_shown(page)
+        page.locator("#elevation-wall-y0").click()
+        what = page.locator("#wall-zone-what-y0-whole_wall")
+        expect(what).to_contain_text("和右牆整面一對")
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.locator("#room-Lx").fill("6.2")
+        page.locator("#room-Lx").press("Tab")
+        page.wait_for_function("!document.getElementById('elevation-list').inert && !window.pendingRoomResize()")
+        page.wait_for_function("zoneLimitsReceived !== zoneLimitsGeneration")
+        assert held, "限制檢查應該還在路上"
+        words = _in_flight_words(page, "y0")
+        assert all("總厚度上限還在核對" in text for text in words), words
+        page.unroute("**/api/zone-limits")
+        _release(held)
+        _verdict_shown(page)
+        expect(what).to_contain_text("和右牆整面一對")
+        _assert_quiet(watched)
+
+
+# 第 2 段右欄每畫一次配對就記一筆（那時開著哪一份、配到幾區）：換方案那一下是同一個工作裡畫完的，等畫面看不到，只能這樣記。
+_RECORD_PAIR_MARKS = """() => { window.pairMarksSeen = []; const original = window.zonePairMarks;
+    window.zonePairMarks = () => { const marks = original(); window.pairMarksSeen.push({id: scheme.scheme_id, marks: marks.size}); return marks; }; }"""
+
+
+def test_opening_another_scheme_never_pairs_its_zones_with_the_last_schemes_verdict(tmp_path: Path, browser: Browser) -> None:
+    """換方案（changeInputScheme，#1265 單元 3 之二收尾追加設計洞）：新方案的格子先畫、做法與判決後換，中間那一次重畫不准拿上一份
+    方案的判決配新方案的區。上一份左右牆整面配成一對（只點名整面，新方案也有那兩區）；新方案關著左右對稱，一對都不該有。"""
+    _pair_room(tmp_path)
+    path = tmp_path / "schemes" / "room109.json"
+    document = cast(Doc, json.loads(path.read_text(encoding="utf-8")))
+    cast(dict[str, list[Doc]], cast(Doc, document["scene"])["surface_zones_by_wall"])["x0"] = [{"area": "whole_wall", "material": WALL}]
+    path.write_text(Scheme.model_validate(document).model_dump_json(), encoding="utf-8")
+    design_path = tmp_path / "designs" / "room109.json"
+    design = cast(Doc, json.loads(design_path.read_text(encoding="utf-8")))
+    cast(dict[str, object], design["zones"]).pop("x0", None)
+    design_path.write_text(json.dumps(design), encoding="utf-8")
+    plain = room109_document() | {"scheme_id": "plain109"}
+    (tmp_path / "schemes" / "plain109.json").write_text(Scheme.model_validate(plain).model_dump_json(), encoding="utf-8")
+    (tmp_path / "designs" / "plain109.json").write_text(json.dumps({
+        "schema_version": "aosr.zone_design.v1", "scheme_id": "plain109", "left_right_symmetry": "off", "zones": {}}), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        _verdict_shown(page)
+        page.locator("#elevation-wall-y0").click()
+        expect(page.locator("#wall-zone-what-y0-whole_wall")).to_contain_text("和右牆整面一對")
+        page.evaluate(_RECORD_PAIR_MARKS)
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        _open_scheme(page, "plain109")
+        page.wait_for_function("name => document.getElementById('save-id').value === name", arg="plain109")
+        _settled(page)
+        seen = cast(list[dict[str, object]], page.evaluate("window.pairMarksSeen"))
+        assert any(entry["id"] == "plain109" for entry in seen), seen
+        assert [entry for entry in seen if entry["id"] == "plain109" and entry["marks"]] == [], seen
+        expect(page.locator("#wall-zone-what-y0-whole_wall")).not_to_contain_text("一對")
+        page.unroute("**/api/zone-limits")
+        _release(held)
+        _verdict_shown(page)
+        expect(page.locator("#wall-zone-what-y0-whole_wall")).not_to_contain_text("一對")
+        _assert_quiet(watched)
+
+
+def test_the_mirror_sentence_says_not_confirmed_when_the_check_fails_not_still_checking(tmp_path: Path, browser: Browser) -> None:
+    """立面圖上方鏡子那一句（inputAxisWords，#1265 單元 3 之二收尾追加設計洞）：判決在路上寫「正在確認鏡子在哪…」；
+    限制檢查失敗（連不上）就照實講沒確認成，不准一直寫正在確認。"""
+    _write_room109_design(tmp_path, {"zones": {}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _verdict_shown(page)
+        words = page.locator("#elevation-axis-words")
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.locator("#elevation-symmetry-off").click()
+        page.locator("#elevation-symmetry-on").click()
+        expect(words).to_have_text("正在確認鏡子在哪…")
+        assert held, "限制檢查應該還在路上"
+        for route in held:  # 先斷再 unroute（unroute 會把還扣著的放掉）；關掉那一下問的那一次已經被蓋掉、頁面自己放棄了，不用再斷
+            try:
+                route.abort()
+            except Error as error:
+                assert "already handled" in str(error), error
+        page.unroute("**/api/zone-limits")
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
+        expect(words).not_to_contain_text("正在確認")
+        expect(words).to_contain_text("鏡子在哪沒確認成")
+        # 失敗之後再問一次（關掉再打開左右對稱）：新的判決在路上時照樣寫「正在確認」，不拿上一次失敗那份講（收尾植錯：
+        # 那一句只看「有判決、不是 checked」會活下來，這一段釘住 zoneLimitsFresh 那一道）。
+        held.clear()
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.locator("#elevation-symmetry-off").click()
+        page.locator("#elevation-symmetry-on").click()
+        expect(words).to_have_text("正在確認鏡子在哪…")
+        assert held, "限制檢查應該還在路上"
+        _release(held)
+        page.unroute("**/api/zone-limits")
+        _verdict_shown(page)
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        assert watched.page_errors == []

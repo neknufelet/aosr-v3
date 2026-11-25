@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Page, expect
 from pydantic import TypeAdapter
 
@@ -460,6 +461,37 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         assert watched.page_errors == [] and watched.console_errors == []
 
 
+
+@pytest.mark.parametrize("change", ["kind", "preset"])
+def test_the_same_as_original_remark_goes_once_the_original_ceiling_changes(tmp_path: Path, browser: Browser, change: str) -> None:
+    """「選的跟原本一樣，當成不貼」那一句（#1265 單元 3 之二收尾追加第 5 條）：只在那一區現在跟記下它的時候一樣才寫——
+    之後在輸入頁「換原本的牆」把天花換成固定阻抗（kind）、或換一套構造預設（preset），原本那一面變了，那一句就不寫
+    （做法照樣是不貼，主句照新的原本那一面講）。"""
+    ceiling = "ceiling_fibrecement8mm_wool30_on_board_gap180"
+    built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == ceiling)
+    document = room109_document()
+    cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["ceiling"][0]["material"] = (
+        cast(dict[str, object], built))
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-ceiling").click()
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        same = page.locator("#zone-same-ceiling-whole_wall")
+        expect(same).to_contain_text("跟原本一樣，當成不貼")
+        page.locator("#edit-wall-original").click()
+        if change == "kind":
+            page.locator("#material-kind-ceiling").select_option("constant_impedance")
+        else:
+            page.locator("#preset-ceiling").select_option("glass_wool_48k_50mm_gap50")
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        assert page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.ceiling[0].material)") != built
+        expect_mode(page, "ceiling", "whole_wall", "keep_original")
+        expect(same).to_have_count(0)
+        assert watched.page_errors == [] and watched.console_errors == []
+
 def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, browser: Browser) -> None:
     """#1176 第 B 支（用語表）：做法名稱六面一律「不貼，保留原樣」；地板叫「原本的地板」、天花叫「原本的天花」，不叫原牆——
     表上每一格、底部那一行（伺服器回的那一句也照面叫）、原方案那一列都算。假房間 zone-naming-sample：地板本身是木地板、靠前牆鋪地毯，
@@ -475,15 +507,20 @@ def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, br
         # 舊表（#elevation-zones）拆了：表上每一格 → 第 2 段右欄清單與「每一區的位置與大小」（都在 #elevation-list 裡）；
         # 底部那一行（伺服器回的那一句）→ 小框套用後那一頁結果列上面那一行，回輸入頁前讀（said_part）。
         zones = page.locator("#elevation-list")
-        # 舊表改做法那一路伺服器回的「：這一區放回原本的地板」只有舊表那一路會講（丙）；小框的回話不准叫原牆。
+        # 舊表改做法那一路伺服器回的「：這一區放回原本的地板」只有舊表那一路會講（丙）；小框的回話（#zone-page-note）不准叫原牆，
+        # 原題考的三處（地板改不貼、地板貼地毯、天花改不貼）照考，回話逐字比，免得空的那一句也算過（#1265 單元 3 之二收尾追加設計洞）。
+        said = page.locator("#zone-page-note")
         choose_mode(page, "floor", "rug", "keep_original")
-        expect(page.locator("#zone-page-note")).not_to_contain_text("原牆")
+        expect(said).to_have_text("1 區改成「不貼，保留原樣」")
+        expect(said).not_to_contain_text("原牆")
         expect(page.locator("#wall-zone-what-floor-rug")).to_have_text(re.compile(rf"^原本的地板「{re.escape(wood)}」原樣，不貼東西。"))
         choose_mode(page, "floor", "auto2", "search")
         # 舊表「現在：…，程式選了」那一格 → 右欄那一句（改字：「現在存的是「…」」）；「不貼」方塊上的字跟著表走（丙）。
         expect(page.locator("#wall-zone-what-floor-auto2")).to_contain_text(f"現在存的是「沒貼東西（原本的地板「{wood}」原樣）」")
         # 「貼在原本的地板上（最後一層背後接原本的地板）」也是舊表那一路伺服器回的那一句（丙）。
         choose_fixed(page, "floor", "rug", "carpet_on_concrete")
+        expect(said).to_have_text("1 區改成「指定貼一種：地毯直接鋪混凝土（文獻擬合）」")
+        expect(said).not_to_contain_text("原牆")
         assert mode_words(page, "floor", "rug") == ["指定貼一種", "不貼，保留原樣", "由程式最佳化"]
         assert "原牆" not in zones.inner_text()
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "floor-words.png"))
@@ -492,6 +529,8 @@ def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, br
         # 舊表下拉第一項「現在：沒貼東西（…）」→ 右欄那一句（改字：拿掉「現在：」）。
         expect(page.locator("#wall-zone-what-ceiling-auto1")).to_contain_text(f"沒貼東西（原本的天花「{built}」原樣）")
         choose_mode(page, "ceiling", "auto1", "keep_original")  # 「：這一區放回原本的天花」同上（丙）
+        expect(said).to_have_text("1 區改成「不貼，保留原樣」")
+        expect(said).not_to_contain_text("原牆")
         expect(page.locator("#wall-zone-what-ceiling-auto1")).to_have_text(re.compile(rf"^原本的天花「{re.escape(built)}」原樣，不貼東西。"))
         expect(page.locator("#zone-numbers-ceiling-auto1")).to_contain_text("原本的天花：")
         choose_mode(page, "ceiling", "auto1", "search")

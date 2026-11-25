@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -148,7 +149,7 @@ def test_an_unreadable_depth_stays_refused_and_says_so_after_show_all_redraws_th
         page.locator("#zone-panel-show-all").check()
         expect(page.locator("#zone-panel-depth")).to_have_value("")
         lost = page.locator("#zone-panel-depth-lost")
-        expect(lost).to_have_text("剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收，重打一次")
+        expect(lost).to_have_text("剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收；重打一次，或按退格鍵、刪除鍵清成空白（空白＝不限）")
         expect(page.locator("#zone-panel-depth")).to_have_attribute("aria-invalid", "true")
         expect(problem).to_contain_text("「最深」要填大於 0 的數字（公分，最少 0.1）")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
@@ -157,4 +158,34 @@ def test_an_unreadable_depth_stays_refused_and_says_so_after_show_all_redraws_th
         expect(page.locator("#zone-panel-depth")).not_to_have_attribute("aria-invalid", "true")
         expect(problem).to_be_hidden()
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+@pytest.mark.parametrize("key", ["Backspace", "Delete"])
+def test_an_unreadable_depth_lost_in_a_redraw_can_be_cleared_back_to_blank_with_one_key(tmp_path: Path, browser: Browser, key: str) -> None:
+    """同一個情況的出口（#1265 單元 3 之二收尾追加第 6 條）：重畫後格子是空的，對它按退格或刪除就是人要的空白——不必亂打一個字，
+    那一句收掉、套用按得下去，套用之後那一區沒有最深（空白＝不限）。沒按之前照樣不收（不默默換成空白）。"""
+    _write(tmp_path, room109_document())
+    _sample_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        _fixed_panel(page, "x0")
+        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        depth = page.locator("#zone-panel-depth")
+        depth.press_sequentially("--1")
+        page.locator("#zone-panel-show-all").check()
+        lost = page.locator("#zone-panel-depth-lost")
+        expect(lost).to_be_visible()  # 那一句的字（講出口）上一題逐字考
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        depth.click()
+        page.keyboard.press(key)
+        expect(depth).to_have_value("")
+        expect(lost).to_have_count(0)
+        expect(depth).not_to_have_attribute("aria-invalid", "true")
+        expect(page.locator("#zone-panel-problem")).to_be_hidden()
+        expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        _apply(page)
+        stored = cast(dict[str, object], page.evaluate("structuredClone(zoneDesign.zones.x0.whole_wall)"))
+        assert stored["mode"] == "fixed" and "max_depth_m" not in stored, stored
         assert watched.page_errors == [] and watched.console_errors == []

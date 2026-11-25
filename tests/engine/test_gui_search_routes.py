@@ -38,7 +38,10 @@ def test_search_routes_missing_and_readable_folder(tmp_path: Path) -> None:
         assert client.get("/searches").status_code == 200
         for asset_name in ("searches.js", "searches.css", "capabilities.js"):
             assert client.get(f"/static/{asset_name}").status_code == 200
-        assert '/searches' in client.get("/").text
+        # 搜尋清單的入口：首頁不直接連（#1265 單元 1 改版），首頁連到擺位搜尋那一頁、「查看搜尋進度」就在那一頁
+        # （#1265 首頁設計稿那一張表第 7 列，老闆點過頭）。
+        assert 'href="/search-start"' in client.get("/").text
+        assert 'href="/searches"' in client.get("/search-start").text
 
 
 def test_search_listing_ignores_unusable_names_and_symlinks(tmp_path: Path) -> None:

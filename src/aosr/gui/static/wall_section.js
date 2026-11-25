@@ -111,21 +111,26 @@ function zoneSentence(wall, item, group, marks) {
   return `${words}。${paired}`;
 }
 function zoneRow(wall, item, group, words, marks) {
-  const row = el("div", `zone-item zone-mode-${item.setting.mode}${zoneIsRed(wall, item.key) ? " zone-red" : ""}`);
+  const red = zoneIsRed(wall, item.key);
+  const row = el("div", `zone-item zone-mode-${item.setting.mode}${red ? " zone-red" : ""}`);
   row.id = `wall-zone-${wall}-${item.key}`; row.dataset.zone = `${wall}/${item.key}`;
   const body = el("div");
   const name = el("b", null, item.label.name); name.id = `wall-zone-name-${wall}-${item.key}`;
   const what = el("div", "what", zoneSentence(wall, item, group, marks)); what.id = `wall-zone-what-${wall}-${item.key}`;
   what.append(zoneGotoButton(wall, item.key));
   body.append(name, el("span", `tag tag-${group}`, words), what);
+  // 紅的那一區底下寫出它的每一條限制（同一份 zoneLimitLines，原文照伺服器；#1265 單元 3 之二收尾 G）：立面圖那一塊滑過去也有，
+  // 這裡不必滑就看得到。跟這一列標紅同一個判法，不紅的區不寫。id limit-<牆>-<區>-<i>（舊做法表那一區底下那幾行的 id），整頁只這一份。
+  if (red) body.append(limitLinesBlock(zoneLimitLines(wall, item.key), `limit-${wall}-${item.key}`));
   // 選的跟原本一樣、自己改成不貼的區（#1175）：那一區自己寫為什麼（舊做法表那一列的新家，#1265 單元 3 之二第二趟；
-  // 「這間房貼什麼」小框套用時記，zone_modes.js 的 zoneSameAsOriginal）。
-  const same = item.setting.mode === "keep_original" ? zoneSameAsOriginal.get(item.id) : null;
+  // 「這間房貼什麼」小框套用時記，zone_modes.js 的 zoneSameAsOriginal）。原本那一面跟記下時一樣才寫（sameAsOriginalLabel 自己比，
+  // 收尾追加第 5 條起這裡不另判做法：改做法只有小框套用一條路，它自己重記或拿掉）。
+  const same = sameAsOriginalLabel(wall, item.key);
   if (same) {
     const why = el("p", "ok", `選的「${same}」跟原本一樣，當成不貼（做法自己改成「${KEEP_WORDS}」）`); why.id = `zone-same-${wall}-${item.key}`;
     body.append(why);
   }
-  const depths = depthTargetLines(wall, item.key, item.setting);
+  const depths = depthTargetLines(wall, item.key);
   if (depths.length) {
     const block = el("div", "zone-depths"); block.id = `wall-zone-depths-${wall}-${item.key}`;
     block.append(...depths); body.append(block);
@@ -139,7 +144,7 @@ function renderList(wall) {
   // 清單上方：限制總結與兩句錯誤提示（設計設定讀不到、材料庫有問題）講的是整份方案，有方案就寫，選不選牆都看得到；
   // 這一面整面的判決接在總結底下（舊做法表上方那幾行，#1265 單元 3 之二第二趟搬來，id 照舊）。
   const shown = Boolean(wall && window.elevationGeometry.wallSize(wall)), lines = shown ? wallLimitLines(wall) : [];
-  byId("elevation-list-notes").replaceChildren(limitsSummary(), ...(lines.length ? [limitLinesBlock(lines, `limit-wall-${wall}`)] : []),
+  byId("elevation-list-notes").replaceChildren(limitsSummary(shown ? wall : null), ...(lines.length ? [limitLinesBlock(lines, `limit-wall-${wall}`)] : []),
                                                ...zoneProblemLines());
   if (!shown) {
     title.textContent = "選一面牆，這裡列出那一面的每一區";

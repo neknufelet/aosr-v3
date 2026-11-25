@@ -171,9 +171,11 @@ function depthRow(wall, note) {
 // 放不下的那一組標出來（橘字，搜尋不換過去）。伺服器逐組寫好一句（zoneLimits.caps[牆][區].targets）。
 // #1265 單元 3 之二第 C 條起畫在第 2 段右欄那一區底下（wall_section.js）；整頁一份、id 照舊。
 // 沒有逐組的（固定的區、沒給上限的）回空的：那一區的上限照右欄那一句（capWords、noCapWords）寫。
-function depthTargetLines(wall, key, setting) {
-  // 只給由程式最佳化的區（伺服器也只替它算 targets）；判決在路上就不畫上一版的（做法剛改、切法剛換，那幾行對的是舊的）。
-  if (setting.mode !== "search" || !zoneLimitsFresh()) return [];
+// 判決在路上就不畫上一版的（做法剛改、最深剛改、切法剛換，那幾行對的是舊的）。不另判做法（#1265 單元 3 之二收尾）：
+// 伺服器只替由程式最佳化的區寫 targets（zone_limits.py 的 zone_limits，mode == "search" 那一段），判決新鮮時它看的就是
+// 現在這一份做法——改做法的每一條路（小框套用、切牆、清掉再復原）重畫之前都先 staleZoneLimits()，換方案把判決清成 null。
+function depthTargetLines(wall, key) {
+  if (!zoneLimitsFresh()) return [];
   const cap = zoneCap(wall, key), targets = cap?.targets ?? [];
   if (!targets.length) return [];
   const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
@@ -186,13 +188,19 @@ function depthTargetLines(wall, key, setting) {
     return line;
   })];
 }
-function limitsSummary() {
+// wall：第 2 段右欄現在列的那一面（沒列是 null）。那一面整面的判決就寫在總結底下（limit-wall-<牆>-<i>），總結不再抄一次，
+// 改說寫在下面（#1265 單元 3 之二收尾 K：右欄上方同一句只出現一次）。認哪一條是它照伺服器拒收原文的寫法（牆名：原文，
+// zone_limits.py 的 refusals）；對不上就照抄（多寫一次），不會把別一面的那一條藏掉。
+function limitsSummary(wall = null) {
   const line = document.createElement("p"); line.id = "zone-limits-summary";
   if (!zoneLimits) { line.className = "note"; line.textContent = "還沒檢查限制"; return line; }
   if (zoneLimits.status !== "checked") { line.className = "notice"; line.textContent = `限制沒檢查成：${zoneLimits.message}`; return line; }
   const red = limitsRedCount();
   line.className = red ? "limit-red" : "ok";
-  line.textContent = red ? `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋：${zoneLimits.refusals.join("；")}` : "限制都沒超過";
+  const below = new Set(wall ? wallLimitLines(wall).filter(item => item.level === "red").map(item => `${wallNames[wall]}：${item.text}`) : []);
+  const listed = zoneLimits.refusals.filter(text => !below.has(text)), moved = zoneLimits.refusals.length - listed.length;
+  const parts = [...listed, ...(moved ? [`${wallNames[wall]}整面的 ${moved} 條寫在下面`] : [])];
+  line.textContent = red ? `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋：${parts.join("；")}` : "限制都沒超過";
   return line;
 }
 window.refreshZoneLimits = refreshZoneLimits;

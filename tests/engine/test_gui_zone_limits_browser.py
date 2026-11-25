@@ -50,6 +50,24 @@ def _clear(page: Page, zone: str) -> None:
     expect(page.locator("#zone-to-search")).to_be_enabled()
 
 
+def _no_limit_lines(page: Page, *zones: str) -> None:
+    """不紅的區底下不寫限制（#1265 單元 3 之二收尾 G）。"""
+    for zone in zones:
+        expect(page.locator(f"[id^=limit-x0-{zone}-], #wall-zone-x0-{zone} .limit-lines")).to_have_count(0)
+
+
+def _red_zone_lines(page: Page, zone: str, *words: str) -> None:
+    """紅的那一區底下寫出它的每一條限制（#limit-x0-z1-0：舊做法表那一區底下那幾行的 id，#1265 單元 3 之二收尾 G 搬到第 2 段
+    右欄那一區底下），字照判決原文、整頁只一份。"""
+    first = page.locator(f"#wall-zone-x0-{zone} #limit-x0-{zone}-0")
+    for word in words:
+        expect(first).to_contain_text(word)
+    expect(first).to_have_class("limit-red")
+    expect(page.locator(f"#limit-x0-{zone}-0")).to_have_count(1)
+    served = cast(list[str], page.evaluate(f"zoneLimits.zones.x0.{zone}.map(line => line.text)"))
+    expect(page.locator(f"#wall-zone-x0-{zone} .limit-lines p")).to_have_text(served)
+
+
 def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_path: Path, browser: Browser) -> None:
     """用正式網頁入口起（雙精度開著、可信範圍真的判）：截圖就是產品真正的樣子。"""
     _write_room109_design(tmp_path, {"left_right_symmetry": "off"})  # 這一題不考左右對稱，明寫關著
@@ -65,13 +83,19 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         # 這面牆上限 0.1：貼 0.05 的還在限內；換成 0.15 的那一刻（換材料也重判）就紅。
         _depth(page, "#depth-wall-x0", "10")
         _clear(page, "z1")
+        # 不紅的區底下不寫限制（#1265 單元 3 之二收尾 G）：auto2（沒設做法、照預設算指定貼一種，材料是原本那一面）這時判決裡有一條說明（直接取代牆面、上限比不了，
+        # 不擋），右欄那一區底下照樣沒有；z1 不紅也沒有。
+        assert cast(list[str], page.evaluate("zoneLimits.zones.x0.auto2.map(line => line.level)")) == ["note"]
+        _no_limit_lines(page, "auto2", "z1")
         expect(page.locator("#depth-cap-x0-auto1")).to_have_text("個案上限 0.1 公尺（這面牆）；每一組跟自己的上限取較嚴：")
         expect(page.locator("#depth-target-x0-auto1-0")).to_have_text("48K 玻璃棉（可調厚度與空腔）：生效 0.1 公尺（這面牆的上限擋住；材料組自己 0.3 公尺比較寬）")
         choose_fixed(page, "x0", "z1", DEEP)
         _settled(page)
         _red(page, "z1")
-        # 舊表那一區底下第一條（#limit-x0-z1-0）跟著表拆了：同一份 zoneLimitLines 的字寫在立面圖那一塊滑過去的 title 裡
-        # （一區全部幾條接在一起，所以比的是「含」）。
+        # 紅的那一區底下寫出它的每一條限制；不紅的那兩塊（交給搜尋的 auto1、判決有一條說明的 auto2）底下沒有。
+        _red_zone_lines(page, "z1", "0.15 公尺", "這面牆的上限")
+        _no_limit_lines(page, "auto1", "auto2")
+        # 立面圖那一塊滑過去的 title 照樣寫同一份（一區全部幾條接在一起，所以比的是「含」）。
         hover = page.locator("#elevation [data-zone-id=z1] title")
         expect(hover).to_contain_text("0.15 公尺")
         expect(hover).to_contain_text("這面牆的上限")
@@ -85,6 +109,7 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         _clear(page, "z1")
         edit_depth(page, "x0", "z1", "12")
         _red(page, "z1")
+        expect(page.locator("#limit-x0-z1-0")).to_contain_text("這一塊的上限")
         expect(page.locator("#elevation [data-zone-id=z1] title")).to_contain_text("這一塊的上限")
         # 舊表那一格「生效：0.12 公尺（這一塊擋的）」跟著表走；指定貼一種那一區的上限改讀右欄那一句（改字：公尺→公分、「擋的」拿掉）。
         expect(page.locator("#wall-zone-what-x0-z1")).to_contain_text("總厚度最多 12 公分（這一塊）")
@@ -93,6 +118,7 @@ def test_too_deep_fixed_zone_goes_red_names_the_level_and_blocks_the_search(tmp_
         edit_depth(page, "x0", "z1", "")
         _depth(page, "#depth-room", "10")
         _red(page, "z1")
+        expect(page.locator("#limit-x0-z1-0")).to_contain_text("房間預設的上限")
         expect(page.locator("#elevation [data-zone-id=z1] title")).to_contain_text("房間預設的上限")
         _depth(page, "#depth-room", "20")
         _clear(page, "z1")

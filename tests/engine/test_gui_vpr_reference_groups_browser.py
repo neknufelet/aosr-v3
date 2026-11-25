@@ -207,9 +207,11 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_on_
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
-def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_old_table(tmp_path: Path, browser: Browser) -> None:
-    """舊做法表（來源：這一頁上一次改過的組合）：剛改過的那一份剩「命中那一筆或不貼」，再把另一區改成由程式最佳化，
-    那一區拿到三種玻璃棉＋不貼。剛改過的那一份沒有命中、只剩「不貼」的，照舊帶「只有不貼」。"""
+def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_panel(tmp_path: Path, browser: Browser) -> None:
+    """上一次改過的組合帶到另一區（小框）：剛改過的那一份剩「命中那一筆或不貼」，再把另一區改成由程式最佳化，
+    那一區拿到三種玻璃棉＋不貼。剛改過的那一份沒有命中、只剩「不貼」的，照舊帶「只有不貼」。
+    （#1265 單元 3 之二收尾改名，原名 test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_old_table：
+    舊做法表拆了，另一區改從輸入頁「改這一區 ▸」開小框改。）"""
     for start, left in ((LISTED, [HIT, "none"]), (["glass_wool_48k", "none"], ["none"])):
         _prepare(tmp_path, {"x0/a": start}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
         with _serve(tmp_path) as base, _open(browser, base) as watched:

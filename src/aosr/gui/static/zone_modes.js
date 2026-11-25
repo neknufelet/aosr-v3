@@ -19,15 +19,29 @@ let zoneLibraryProblem = "";
 let zoneSurfaceGroups = {};
 let zoneNoteText = "";
 let zoneNoteKind = "";
-// 「拿去搜尋」（sendToSearch）沒送出去的那一句：{text, kind}。輸入頁寫在頁底那顆鈕底下（zone-to-search-note，renderSearchAction），
-// 「這間房貼什麼」那一頁照舊寫在 zone-page-note；下一次有別的回話（zoneNote）、換牆、換方案就拿掉。
+// 「拿去搜尋」（sendToSearch）沒送出去的那一句：{text, kind, generation}。輸入頁寫在頁底那顆鈕底下（zone-to-search-note，
+// renderSearchAction），「這間房貼什麼」那一頁照舊寫在 zone-page-note；下一次有別的回話（zoneNote）、換牆、換方案就拿掉。
+// 寫的時候記下那時問到第幾次限制判決（generation）：之後又問了一次、新的那一份畫上去了，那一句講的是舊的樣子，收掉
+// （#1265 單元 3 之二收尾追加第 2 條）。按下去那一次存檔自己問的那一份不算之後（那一句是看著它寫的）。
 let zoneSearchSaid = null;
 // 同一份方案上次套用的候選清單，給新開的區當起點。
 let zoneLastAllowed = null;
 // 選的跟原牆一模一樣、做法自己跳成「不貼，保留原樣」的區（#1175／#1176）：那一區自己寫為什麼（八區的牆上，回話那一行常在畫面外）。
 // #1265 單元 3 之二第二趟起寫在第 2 段右欄那一區底下（wall_section.js），由「這間房貼什麼」小框套用時記（zone_overview.js 的 applyMethod）。
-// 「牆/區」→ 選的那一筆的名字；只記在這一頁，那一區再改做法、選別的、重切或換方案就拿掉。
+// 「牆/區」→ {label：選的那一筆的名字, material：記下時那一區原本那一面的材料}。畫的時候只認 sameAsOriginalLabel：那一區原本那一面
+// 跟記下時一樣才寫（#1265 單元 3 之二收尾追加第 5 條：之後「換原本的牆」、換構造預設、套實測阻抗改了原本那一面，
+// 那一句講的就不是現在的樣子；從源頭比，不逐條路去清）。做法不另比（收尾植錯判走不到、拿掉）：改得到一區做法的只有小框套用
+// （applyMethod → setZoneSetting），它每套用一次照新的結果重記或拿掉；清掉再復原、重切（自動補的代號重編）、換方案、載入範本都整面清掉。
 const zoneSameAsOriginal = new Map();
+function rememberSameAsOriginal(wall, key, label) {
+  const zone = zoneList(wall).find(item => zoneKey(item) === key);
+  zoneSameAsOriginal.set(`${wall}/${key}`, {label, material: structuredClone(zone.material)});
+}
+function sameAsOriginalLabel(wall, key) {
+  const said = zoneSameAsOriginal.get(`${wall}/${key}`);
+  const zone = said ? zoneList(wall).find(item => zoneKey(item) === key) : null;
+  return zone && sameMaterial(zone.material, said.material) ? said.label : null;
+}
 const ZONE_NONE = "none";
 const WOOL_48K = "glass_wool_48k";
 // 改成由程式最佳化時一開始放的就是這三種內建玻璃棉＋不貼（#1176，跟老闆講好的起點，不隨材料庫多了幾筆而變）。
@@ -128,7 +142,7 @@ function zoneNote(text, kind) {
 // 「拿去搜尋」的回話：那一頁照舊（zoneNote），輸入頁寫在頁底那顆鈕底下（renderSearchAction 讀 zoneSearchSaid）。
 function searchNote(text, kind) {
   zoneNote(text, kind);
-  zoneSearchSaid = {text, kind};
+  zoneSearchSaid = {text, kind, generation: zoneLimitsGeneration};
   renderSearchAction();
 }
 
@@ -268,6 +282,7 @@ function renderSearchAction() {
   button.disabled = !count || !!formRunning() || lockedEdit || red > 0 || stuck.length > 0 || refused.length > 0;
   const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
   // 按了沒送出去的那一句（zoneSearchSaid）排在擋住的理由後面：擋住時那一句就是其中一條，照擋住的寫；沒擋才寫它，不被下一次重畫換掉。
+  if (zoneSearchSaid && zoneLimitsShown > zoneSearchSaid.generation) zoneSearchSaid = null;
   const said = formRunning() || lockedEdit || blocked.length ? null : zoneSearchSaid;
   note.className = blocked.length ? "limit-red" : said ? said.kind : "note";
   note.textContent = formRunning() ? "等這一次算完" : lockedEdit ? "先另存新名字" : blocked.length ? blocked.join("；") : said ? said.text :
@@ -353,9 +368,10 @@ function adjustWords(entry) {
   return `可調：${thickText}、${cavityText}${depth}`;
 }
 // 這一區現在的材料是材料庫哪一筆：多層構造比貼上去的那幾層，固定阻抗與實測表比整份。
-// 裸構造只讀這一面、這一區的伺服器判決。上一份草稿的判決不能套到新位置。
+// 裸構造只讀這一面、這一區的伺服器判決。上一份草稿的判決不能套到新位置；判決在路上（剛改做法、剛切牆，zoneLimitsFresh）
+// 也不讀上一版的（#1265 單元 3 之二收尾追加第 3 條：改回由程式最佳化、材料放回原樣之後，上一版還認得是那一筆構造）。
 function constructionAt(wall, key) {
-  return zoneLimitsReceived === zoneLimitsGeneration ? zoneLimits?.picked_constructions?.[wall]?.[key] : null;
+  return zoneLimitsFresh() ? zoneLimits.picked_constructions?.[wall]?.[key] : null;
 }
 function uncertainWords(verdict) { return `看不出：跟材料庫「${verdict.label}」一樣`; }
 function libraryLabel(material, wall, key) {
@@ -534,11 +550,14 @@ function renderZoneTable(wall) {
   // 這一面的總厚度上限那一格在牆那一行「這一面另設」打開的那一塊。
   renderWallSection(wall);
   refreshClearUndo();
-  // 清掉那一塊之前拿；擁有者是第幾次打開＋哪一面（同 room_facts.js 房間預設那一句，#1265 單元 3 審查真錯 4）。
-  const depthSaid = wall && scheme ? depthNote("depth-wall-note", `${zoneDesignGeneration}/${wall}`) : null;
-  $("wall-depth-editor").replaceChildren();
-  if (!wall || !scheme) return;
-  $("wall-depth-editor").append(depthRow(wall, depthSaid));
+  // 頁底「交給程式最佳化 ▸」講的是整份方案，跟右欄上方的限制總結一起重畫：選不選牆都畫（#1265 單元 3 之二收尾追加第 1 條；
+  // 以前排在下面「沒選牆就走」之後，開檔沒點牆時鈕跟總結對不上）。
   renderSearchAction();
+  // 清掉那一塊之前拿；擁有者是第幾次打開＋哪一面（同 room_facts.js 房間預設那一句，#1265 單元 3 審查真錯 4）。
+  // 沒方案不必另判：唯一叫這一支的 renderElevation 開頭就擋掉沒方案（收尾保險行）。
+  const depthSaid = wall ? depthNote("depth-wall-note", `${zoneDesignGeneration}/${wall}`) : null;
+  $("wall-depth-editor").replaceChildren();
+  if (!wall) return;
+  $("wall-depth-editor").append(depthRow(wall, depthSaid));
 }
 window.renderZoneTable = renderZoneTable;

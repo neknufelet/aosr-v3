@@ -20,7 +20,8 @@ function toggleEditor(button) {
   area.hidden = !opening;
   button.setAttribute("aria-expanded", String(opening));
   // 第 2 段牆那一行的兩塊：房間尺寸空著時那一行只因為這一塊開著才留著，關掉就照 wall_section.js 再判一次（設計洞 4 走乙）。
-  if (!opening && button.id.startsWith("edit-wall-")) window.refreshWallLine?.();
+  // 只有輸入頁載這一支，wall_section.js 排在它前面（index.html），一定有（收尾保險行）。
+  if (!opening && button.id.startsWith("edit-wall-")) window.refreshWallLine();
   if (!opening) return;
   // 第一個看得到的格子（牆面表單六面都在，只露選中那一面）。
   const first = [...area.querySelectorAll("input:not([disabled]), select:not([disabled]), button:not([disabled])")]

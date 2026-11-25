@@ -481,3 +481,88 @@ def test_search_zone_says_what_the_scheme_really_holds(tmp_path: Path, browser: 
         expect(line).not_to_contain_text("沒貼東西")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "search-zone-holds.png"))
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_with_no_wall_picked_the_footer_button_follows_the_limits_summary(tmp_path: Path, browser: Browser) -> None:
+    """頁底「交給程式最佳化 ▸」講整份方案（#1265 單元 3 之二收尾追加第 1 條）：還沒點任何一面牆時，它跟右欄上方的限制總結
+    一起重畫——開檔就有紅，鈕要鎖、底下寫超過限制；把房間預設放寬、紅解掉，鈕要開、那一句換成交出幾區。
+    先在一頁把後牆整面改成指定貼一種、存起來（貼上去 5 公分，房間預設 2 公分 → 紅），再開一頁重開那一份、不點牆。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off", "room_max_depth_m": 0.02,
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}},
+                                               "xL": {"whole_wall": {"mode": "fixed"}}}})
+    with _serve(tmp_path) as base:
+        with _open(browser, base, viewport_width=1440) as watched:
+            page = watched.page
+            _open_scheme(page, "room109")
+            page.locator("#elevation-wall-xL").click()
+            choose_fixed(page, "xL", "whole_wall", PRESET)
+            page.locator("#save").click()
+            page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+            expect(page.locator("#messages")).to_have_class("ok")
+        with _open(browser, base, viewport_width=1440) as watched:
+            page = watched.page
+            _open_scheme(page, "room109")
+            page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration")
+            expect(page.locator("#elevation-walls button[aria-pressed=true]")).to_have_count(0)  # 一面牆都沒點
+            expect(page.locator("#zone-limits-summary")).to_contain_text("超過限制")
+            expect(page.locator("#zone-to-search")).to_be_disabled()
+            expect(page.locator("#zone-to-search-note")).to_contain_text("超過限制")
+            page.locator("#edit-depth").click()
+            page.locator("#depth-room").fill("20")
+            page.locator("#depth-room").press("Tab")
+            page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+            expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+            expect(page.locator("#zone-to-search")).to_be_enabled()
+            expect(page.locator("#zone-to-search-note")).to_have_text("交出黃色的 1 區；下一頁按「開始搜尋」才開始算")
+            assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_a_footer_reply_is_dropped_once_a_later_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """頁底那一句（searchNote 寫的，#1265 單元 3 之二收尾追加第 2 條）：限制檢查斷了時按「交給程式最佳化 ▸」，底下寫沒檢查成；
+    恢復後按「檢查」、新判決回來，那一句要收掉，照現在的樣子寫交出幾區。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off",
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        page.route("**/api/zone-limits", lambda route: route.abort())
+        page.locator("#check").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
+        page.locator("#zone-to-search").click()
+        note = page.locator("#zone-to-search-note")
+        expect(note).to_contain_text("限制沒檢查成")
+        page.unroute("**/api/zone-limits")
+        page.locator("#check").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
+        expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        expect(note).to_have_text("交出黃色的 1 區；下一頁按「開始搜尋」才開始算")
+        assert watched.page_errors == []
+
+
+def test_a_footer_reply_written_after_the_save_survives_the_verdict_that_save_asked_for(tmp_path: Path, browser: Browser) -> None:
+    """同一條的另一半：「拿去搜尋」自己存檔時就問了一次限制判決，做法沒存成那一句寫在那一次問了之後；那一次判決晚一點回來，
+    那一句不准被收掉（收的是之後又問的判決，不是按下之後的第一份回覆）。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off",
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.route("**/api/designs/**", lambda route: route.fulfill(status=500, content_type="application/json",
+                                                                    body=json.dumps({"error": "考卷故意讓它壞"}))
+                   if route.request.method == "PUT" else route.continue_())
+        page.locator("#zone-to-search").click()
+        note = page.locator("#zone-to-search-note")
+        expect(note).to_have_text("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次")
+        assert held, "存檔時問的那一次限制判決應該還在路上"
+        page.unroute("**/api/zone-limits")
+        for route in held:
+            route.continue_()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        expect(note).to_have_text("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次")
+        assert watched.page_errors == []

@@ -202,10 +202,10 @@ function readPairing(byId) {
   if (!found) return {...base, state: "unavailable", message: `配對沒算成：${zoneLimits.message ?? "限制檢查沒有做成"}`};
   if (!found.available) return {...base, state: "unavailable", message: found.message};
   if (found.reason) return {...base, state: "no-axis", message: found.reason};
+  // 判決點名的區一定在現在的切法裡：換區代號的每一條路（切牆、清掉再復原、改房間尺寸、換方案）重畫之前都先標判決在路上
+  // （staleZoneLimits），上面 zoneLimitsFresh 就擋掉了。以前這裡另有一道「點名的區找不到就當還在等」（第二趟追加第 1 條），
+  // 換方案那一條也標了之後走不到，拿掉（#1265 單元 3 之二收尾）。
   const at = surface => { if (!surface) return null; const [wall, key] = surface.split("@"); return byId.get(`${wall}/${key ?? "whole_wall"}`) ?? null; };
-  // 判決點名的區現在找不到（切法換了、判決還沒跟上）：那一份對不上現在的切法，當成還在等，不拿去畫、不丟錯（#1265 單元 3 之二第二趟追加第 1 條）。
-  const named = [...found.pairs.flatMap(pair => [pair.first, pair.second]), ...found.missed.flatMap(entry => [entry.first, entry.second, entry.other])];
-  if (named.some(surface => surface && !at(surface))) return base;
   const pairs = found.pairs.map((pair, index) => ({first: at(pair.first), second: at(pair.second), shape: PAIR_SHAPES[index % PAIR_SHAPES.length]}));
   const missed = found.missed.map(entry => ({...entry, firstItem: at(entry.first), secondItem: at(entry.second), otherItem: at(entry.other)}));
   const marks = new Map();
@@ -697,7 +697,7 @@ async function applyMethod(items, method, written = () => {}) {
   // 其餘這一次改到的區拿掉（再改做法、選別的就不寫）。
   items.forEach((item, index) => {
     setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
-    if (same.includes(item)) zoneSameAsOriginal.set(item.id, libraryEntry(method.materialId).label);
+    if (same.includes(item)) rememberSameAsOriginal(item.wall, item.key, libraryEntry(method.materialId).label);
     else zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
@@ -1099,13 +1099,23 @@ function deepestRow(items, walls, sync) {
   // 打的字讀不出來（數字格讀成空字串、另標 badInput）又遇到整個小框重畫（例如勾「顯示全部材料」）：新格子放不回那幾個字。
   // 那一次照樣不收、套用照擋，格子旁照講（#1265 單元 3 之二第二趟追加設計洞）：不丟掉，免得重畫正好落在打到一半時（「.」還沒打 5）
   // 默默換成別的值；不講的話空白的格子看起來像沒填卻報錯。重打任何字就照新打的判、這一句收掉。
-  const lost = draft.depthBad && !draft.depthText ? el("small", "zv-depth-lost", "剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收，重打一次") : null;
+  // 讀不出來時數字格的值一定是空字串（draft.depthText 跟著是 ""），只看 depthBad 就夠（收尾保險行）。
+  const lost = draft.depthBad
+    ? el("small", "zv-depth-lost", `剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收；重打一次，或按退格鍵、刪除鍵清成空白（空白＝${blankDepthWords(items)}）`)
+    : null;
   if (lost) { lost.id = "zone-panel-depth-lost"; input.setAttribute("aria-invalid", "true"); }
-  input.oninput = () => {
+  const typed = () => {
     draft.depthText = input.value; draft.depthBad = input.validity.badInput; draft.rangeRefused = ""; draftTouched = true;
     lost?.remove(); input.removeAttribute("aria-invalid");
     sync();
   };
+  input.oninput = typed;
+  // 出口（#1265 單元 3 之二收尾追加第 6 條）：重畫後的格子是空的，對它按退格、刪除（或剪下）值沒變，瀏覽器不發 input、只發
+  // beforeinput。那一句還掛著時，這一下就是人說「要空白」：照空白收（值本來就是空的，不換成別的）。
+  // 不另判格子是不是空的（收尾植錯判走不到、拿掉）：那一句還掛著＝重畫之後還沒發過 input（typed 第一件事就拿掉它），格子一定是重畫時放的空字串。
+  input.addEventListener("beforeinput", event => {
+    if (lost?.isConnected && event.inputType.startsWith("delete")) typed();
+  });
   const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
   row.append(name, input, el("span", "zv-unit", "cm"),
     el("small", null, `從${from}往房間算，貼上去的總厚不超過它；空白＝${blankDepthWords(items)}`));
@@ -1847,6 +1857,8 @@ function setSymmetry(on) {
   const design = designForEdit();
   if (on) delete design.left_right_symmetry; else design.left_right_symmetry = "off";
   unsaved = true; symmetryEditGeneration = zoneDesignGeneration; symmetryDetail = false; followed = [];
+  // 先畫後問（同 afterZoneChange）：上一版判決是另一個開關問的，鏡子、配對都對不上（#1265 單元 3 之二收尾追加第 4 條）。
+  staleZoneLimits();
   renderInputBars();
   renderElevation();
   refreshZoneLimits();

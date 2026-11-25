@@ -319,21 +319,23 @@ def test_the_input_page_has_no_control_that_changes_a_zone_and_every_zone_has_it
 GAP_TEXT = "這一面的分區沒有正好蓋滿整面（留了空）；請重切這一面"
 
 
-def _with_gap(route: Route) -> None:
-    """限制判決照真的問，回覆裡前牆加一條整面判決「沒蓋滿整面」（伺服器 zone_limits.py 的 not_covered，紅的）。"""
-    response = route.fetch()
-    data = cast(dict[str, object], response.json())
-    assert data["status"] == "checked", data
-    data["walls"] = {**cast(dict[str, object], data["walls"]), "x0": [{"code": "not_covered", "level": "red", "text": GAP_TEXT}]}
-    data["refusals"] = [*cast(list[str], data["refusals"]), f"前牆：{GAP_TEXT}"]
-    data["red"] = cast(int, data["red"]) + 1
-    route.fulfill(response=response, json=data)
+def _with_gaps(route: Route) -> None:
+    """限制判決照真的問，只是交出去的方案把前牆、左牆各換成只有一個 1 × 1 公尺的框（沒蓋滿整面）：「沒蓋滿整面」
+    （zone_limits.py 的 not_covered，紅的）、拒收原文與裡面的牆名都是伺服器自己判、自己寫的，考卷不手寫回覆。"""
+    body = cast(Doc, route.request.post_data_json)
+    scene = cast(Doc, cast(Doc, body["scheme"])["scene"])
+    zones = cast(Doc, scene.get("surface_zones_by_wall") or {})
+    for wall in ("x0", "y0"):
+        zones[wall] = [_box("z9", (0.0, 1.0), (0.0, 1.0))]
+    scene["surface_zones_by_wall"] = zones
+    route.continue_(post_data=json.dumps(body))
 
 
 def test_a_whole_wall_verdict_sits_above_the_list_under_the_summary_with_its_old_id(tmp_path: Path, browser: Browser) -> None:
     """第二趟（拆舊做法表）：這一面整面的判決（limit-wall-<牆>-<i>）從舊表上方搬到第 2 段右欄上方 #elevation-list-notes，
     接在限制總結（zone-limits-summary）底下、id 照舊；換到別一面，那幾行就不在。伺服器的整面判決只有紅的兩種（分區讀不出來、
-    沒蓋滿整面），切框的畫面走不到，這一題把 /api/zone-limits 的回覆加一條「沒蓋滿整面」再要一次判決。"""
+    沒蓋滿整面），切框的畫面走不到，這一題把交給 /api/zone-limits 的方案改成前牆、左牆都沒蓋滿再要一次判決。
+    收尾 K：右欄上方同一句只出現一次——總結不再抄這一面整面的那一句（改說寫在下面），別一面的那一句照寫在總結裡。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
@@ -341,19 +343,32 @@ def test_a_whole_wall_verdict_sits_above_the_list_under_the_summary_with_its_old
         page.locator("#elevation-wall-x0").click()
         _settled(page)
         notes = page.locator("#elevation-list-notes")
-        expect(notes.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        summary = notes.locator("#zone-limits-summary")
+        expect(summary).to_have_text("限制都沒超過")
         expect(page.locator("[id^=limit-wall-]")).to_have_count(0)
-        page.route("**/api/zone-limits", _with_gap)
+        page.route("**/api/zone-limits", _with_gaps)
         page.evaluate("refreshZoneLimits()")
         line = notes.locator("#limit-wall-x0-0")
         expect(line).to_have_text(GAP_TEXT)
         expect(line).to_have_class(re.compile(r"\blimit-red\b"))
         expect(line).to_be_visible()
-        expect(notes.locator("#zone-limits-summary")).to_contain_text("有 1 條超過限制")
+        assert cast(list[str], page.evaluate("zoneLimits.refusals")) == [f"前牆：{GAP_TEXT}", f"左牆：{GAP_TEXT}"]
+        head = "有 2 條超過限制（標紅的區），改好之前不能拿去搜尋："
+        expect(summary).to_have_text(f"{head}左牆：{GAP_TEXT}；前牆整面的 1 條寫在下面")
         order = cast(list[str], notes.evaluate("area => [...area.querySelectorAll('[id]')].map(node => node.id)"))
         assert order[:2] == ["zone-limits-summary", "limit-wall-x0-0"], order
+        assert notes.inner_text().count(GAP_TEXT) == 2  # 前牆一次（底下那一行）、左牆一次（總結裡）
+        # 換到左牆：底下換成左牆那一行，總結改抄前牆那一句。
         page.locator("#elevation-wall-y0").click()
         _settled(page)
+        expect(notes.locator("#limit-wall-y0-0")).to_have_text(GAP_TEXT)
+        expect(page.locator("#limit-wall-x0-0")).to_have_count(0)
+        expect(summary).to_have_text(f"{head}前牆：{GAP_TEXT}；左牆整面的 1 條寫在下面")
+        assert notes.inner_text().count(GAP_TEXT) == 2
+        # 換到沒問題的後牆：底下沒有整面那幾行，總結兩句都寫（總結講整份方案）。
+        page.locator("#elevation-wall-xL").click()
+        _settled(page)
         expect(page.locator("[id^=limit-wall-]")).to_have_count(0)
-        expect(notes.locator("#zone-limits-summary")).to_contain_text("有 1 條超過限制")  # 總結講整份方案，換面照舊
+        expect(summary).to_have_text(f"{head}前牆：{GAP_TEXT}；左牆：{GAP_TEXT}")
+        assert notes.inner_text().count(GAP_TEXT) == 2
         _assert_quiet(watched)
