@@ -481,3 +481,119 @@ def test_the_mirror_sentence_says_not_confirmed_when_the_check_fails_not_still_c
         _verdict_shown(page)
         expect(words).to_contain_text("鏡子是兩支喇叭的中線")
         assert watched.page_errors == []
+
+
+def test_a_running_scheme_whose_progress_cannot_be_read_still_gets_its_limits_checked(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 B3：打開一份正在計算的方案、接回計算進度失敗（伺服器回錯）。打開時已經把上一份的判決作廢，
+    限制檢查照樣要發，整頁不准卡在「還沒檢查限制／正在確認鏡子在哪…／總厚度上限還在核對」；進度讀不到的原因照樣寫在訊息列。"""
+    _write_room109_design(tmp_path, {"zones": {"x0": {"whole_wall": {"mode": "search", "allowed": WOOL}}}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        _settled(page)
+        page.evaluate("activeRuns = [{run_id: 'fake-run-1', scheme_id: 'room109', status: 'running', elapsed_s: 3, display_text: '計算中'}]")
+        page.route("**/api/runs/fake-run-1", lambda route: route.fulfill(status=500, content_type="application/json",
+                                                                          body=json.dumps({"error": "考卷編的：讀不到進度"})))
+        asked: list[str] = []
+        page.on("request", lambda request: asked.append(request.url) if request.url.endswith("/api/zone-limits") else None)
+        page.locator("#scheme-menu-button").click()
+        page.locator('#home-schemes [data-scheme="room109"] .home-open').click()
+        page.wait_for_function("document.getElementById('save-id').value === 'room109'")
+        _settled(page)
+        _verdict_shown(page)
+        assert asked, "打開之後應該問過限制"
+        expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        expect(page.locator("#elevation-axis-words")).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(page.locator("#wall-zone-what-x0-whole_wall")).not_to_contain_text("總厚度上限還在核對")
+        expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
+
+
+def test_the_mirror_sentence_says_checking_again_while_a_retry_after_a_failure_is_on_its_way(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 B4 之一：限制檢查失敗（鏡子那一句寫沒確認成）之後按「檢查」重試；重試還在路上時那一句要回到
+    「正在確認鏡子在哪…」，不准停在上一次的「沒確認成」。回來之後照新的判決寫。"""
+    _write_room109_design(tmp_path, {"zones": {}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _verdict_shown(page)
+        words = page.locator("#elevation-axis-words")
+        page.route("**/api/zone-limits", lambda route: route.abort())
+        page.locator("#check").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
+        expect(words).to_contain_text("鏡子在哪沒確認成")
+        page.unroute("**/api/zone-limits")
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        page.locator("#check").click()
+        page.wait_for_function("zoneLimitsReceived !== zoneLimitsGeneration")
+        expect(words).to_have_text("正在確認鏡子在哪…")
+        assert held, "重試應該還在路上"
+        _release(held)
+        page.unroute("**/api/zone-limits")
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        assert watched.page_errors == []
+
+
+def test_the_mirror_sentence_asks_for_the_room_size_when_the_height_is_blanked_not_still_checking(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 B4 之二：判決新鮮、鏡子在哪已經知道，把房間高度格清空（只打字、還沒離開，預覽也還沒回來）：
+    這時沒有發限制請求，那一句不准寫「正在確認鏡子在哪…」，要講房間尺寸沒填好。填回去就回到鏡子那一句。"""
+    _write_room109_design(tmp_path, {"zones": {}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _verdict_shown(page)
+        words = page.locator("#elevation-axis-words")
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        held: list[Route] = []
+        page.route("**/api/input-preview", lambda route: held.append(route))
+        asked: list[str] = []
+        page.on("request", lambda request: asked.append(request.url) if request.url.endswith("/api/zone-limits") else None)
+        height = page.locator("#room-Lz")
+        typed = height.input_value()
+        height.fill("")
+        expect(words).to_have_text("先把房間的長、寬、高都填好正數，才算得出鏡子在哪")
+        assert asked == [] and page.evaluate("zoneLimitsFresh()") is True
+        height.fill(typed)
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        _release(held)
+        page.unroute("**/api/input-preview")
+        assert watched.page_errors == []
+
+
+def _with_an_extra_message(route: Route) -> None:
+    """切牆的回覆照伺服器的原樣，只多一句 message：清掉（沒有鏡像那一份）走到組那一句時會丟錯——拿來撐開「分區已經換了、
+    中途丟錯」那一下（#1265 單元 3 之二收尾第二趟 D1；伺服器現在不會這樣回，考的是改寫分區之前就先標判決在路上）。"""
+    response = route.fetch()
+    body = cast(Doc, response.json())
+    body["message"] = "考卷編的：伺服器多寫了一句"
+    route.fulfill(response=response, json=body)
+
+
+def test_a_cut_that_throws_after_rewriting_the_zones_leaves_no_stale_pairing(tmp_path: Path, browser: Browser) -> None:
+    """D1：前牆左右兩條 auto1、auto2 配成一對；清掉前牆，回覆讓 applyCut 在改寫分區之後丟錯。那時判決要已經標成在路上：
+    再點一次前牆重畫，不准拿上一版的配對對新切法而丟錯；按「檢查」重問之後照常。"""
+    _pair_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        _verdict_shown(page)
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#wall-zone-what-x0-auto1")).to_contain_text("一對")
+        page.route("**/api/zone-cut", _with_an_extra_message)
+        page.locator("#elevation-clear").click()
+        _settled(page)
+        assert cast(list[Doc], page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.x0)"))[0]["area"] == "whole_wall"
+        assert page.evaluate("zoneLimitsFresh()") is False
+        page.locator("#elevation-wall-x0").click()
+        expect(page.locator("#wall-zone-what-x0-whole_wall")).to_be_visible()
+        assert watched.page_errors == []
+        page.unroute("**/api/zone-cut")
+        page.locator("#check").click()
+        _verdict_shown(page)
+        expect(page.locator("#elevation-list-zones .zone-item")).to_have_count(1)
+        assert watched.page_errors == []

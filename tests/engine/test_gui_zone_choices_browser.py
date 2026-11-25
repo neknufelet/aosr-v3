@@ -492,6 +492,38 @@ def test_the_same_as_original_remark_goes_once_the_original_ceiling_changes(tmp_
         expect(same).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
 
+def test_the_same_as_original_remark_goes_while_a_layer_of_the_original_ceiling_is_typed(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 B2：「換原本的牆」直接改天花構造的某一層（厚度），原本那一面就變了——右欄那一句
+    「選的…跟原本一樣，當成不貼」要馬上收，不等按「檢查」、不等限制重判；也不准打斷打字（那一格還是同一格、焦點與字都在）。"""
+    ceiling = "ceiling_fibrecement8mm_wool30_on_board_gap180"
+    built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == ceiling)
+    document = room109_document()
+    cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["ceiling"][0]["material"] = (
+        cast(dict[str, object], built))
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-ceiling").click()
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        same = page.locator("#zone-same-ceiling-whole_wall")
+        expect(same).to_contain_text("跟原本一樣，當成不貼")
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        page.locator("#edit-wall-original").click()
+        before = page.evaluate("zoneLimitsGeneration")
+        layer = page.locator("#layer-ceiling-1-thickness_m")
+        handle = layer.element_handle()
+        layer.fill("0.05")
+        expect(same).to_have_count(0)
+        assert page.evaluate("zoneLimitsGeneration") == before  # 不是重判限制收掉的
+        assert handle.evaluate("node => node.isConnected && document.activeElement === node && node.value === '0.05'")
+        layer.press("Tab")
+        expect(same).to_have_count(0)
+        expect_mode(page, "ceiling", "whole_wall", "keep_original")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, browser: Browser) -> None:
     """#1176 第 B 支（用語表）：做法名稱六面一律「不貼，保留原樣」；地板叫「原本的地板」、天花叫「原本的天花」，不叫原牆——
     表上每一格、底部那一行（伺服器回的那一句也照面叫）、原方案那一列都算。假房間 zone-naming-sample：地板本身是木地板、靠前牆鋪地毯，

@@ -124,7 +124,8 @@ function zoneRow(wall, item, group, words, marks) {
   if (red) body.append(limitLinesBlock(zoneLimitLines(wall, item.key), `limit-${wall}-${item.key}`));
   // 選的跟原本一樣、自己改成不貼的區（#1175）：那一區自己寫為什麼（舊做法表那一列的新家，#1265 單元 3 之二第二趟；
   // 「這間房貼什麼」小框套用時記，zone_modes.js 的 zoneSameAsOriginal）。原本那一面跟記下時一樣才寫（sameAsOriginalLabel 自己比，
-  // 收尾追加第 5 條起這裡不另判做法：改做法只有小框套用一條路，它自己重記或拿掉）。
+  // 收尾追加第 5 條起這裡不另判做法：改做法的三個入口——小框套用、改規則、改回跟其他牆面一樣——都走 zone_overview.js 的
+  // applyMethod，它自己重記或拿掉）。
   const same = sameAsOriginalLabel(wall, item.key);
   if (same) {
     const why = el("p", "ok", `選的「${same}」跟原本一樣，當成不貼（做法自己改成「${KEEP_WORDS}」）`); why.id = `zone-same-${wall}-${item.key}`;
@@ -143,14 +144,17 @@ function renderList(wall) {
   area.replaceChildren();
   // 清單上方：限制總結與兩句錯誤提示（設計設定讀不到、材料庫有問題）講的是整份方案，有方案就寫，選不選牆都看得到；
   // 這一面整面的判決接在總結底下（舊做法表上方那幾行，#1265 單元 3 之二第二趟搬來，id 照舊）。
+  // 列出來的區（照號碼排）一起交給總述：寫在那幾區底下的，總述不再抄（#1265 單元 3 之二收尾第二趟 A）。
   const shown = Boolean(wall && window.elevationGeometry.wallSize(wall)), lines = shown ? wallLimitLines(wall) : [];
-  byId("elevation-list-notes").replaceChildren(limitsSummary(shown ? wall : null), ...(lines.length ? [limitLinesBlock(lines, `limit-wall-${wall}`)] : []),
-                                               ...zoneProblemLines());
+  const items = shown ? window.zoneFaceZones(wall) : [];
+  const keys = items.toSorted((left, right) => left.label.number - right.label.number).map(item => item.key);
+  byId("elevation-list-notes").replaceChildren(limitsSummary(shown ? wall : null, keys),
+                                               ...(lines.length ? [limitLinesBlock(lines, `limit-wall-${wall}`)] : []), ...zoneProblemLines());
   if (!shown) {
     title.textContent = "選一面牆，這裡列出那一面的每一區";
     return;
   }
-  const items = window.zoneFaceZones(wall), marks = window.zonePairMarks();
+  const marks = window.zonePairMarks();
   // 交給搜尋的區那一句底下接逐組生效上限（zone_limits.js 的 depthTargetLines）。
   title.textContent = items.length === 1 ? `${wallNames[wall]}整面一區` : `${wallNames[wall]}這 ${items.length} 區`;
   for (const [group, words] of GROUPS) {

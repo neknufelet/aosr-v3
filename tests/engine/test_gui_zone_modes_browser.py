@@ -16,6 +16,7 @@ from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_ide
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_input_clear_undo_browser import _release
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write, _zones
 
 LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
@@ -565,4 +566,72 @@ def test_a_footer_reply_written_after_the_save_survives_the_verdict_that_save_as
             route.continue_()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         expect(note).to_have_text("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次")
+        assert watched.page_errors == []
+
+
+SAVE_FAILED = "每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次"
+HANDED = "交出黃色的 1 區；下一頁按「開始搜尋」才開始算"
+
+
+def test_a_save_failure_reply_outlives_the_relabel_after_unlock_and_goes_once_saved(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 B1：改了喇叭座標（牆名會跟著變）就立刻按「交給程式最佳化 ▸」、做法存檔失敗。
+    解鎖後自動補問的預覽回來、換牆名、又問了一次限制判決——那一次不是存檔的結果，頁底「做法沒存成」那一句不准被它收掉。
+    那一句講的是存檔：下一次做法存成了（按「儲存」）才收。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off",
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        # 打字那兩下的預覽扣住（改完座標就按，預覽還沒回來）；第三次是解鎖後自動補問的，放它回來換牆名、重問限制。
+        held: list[Route] = []
+        page.route("**/api/input-preview", lambda route: held.append(route) if len(held) < 2 else route.continue_())
+        page.route("**/api/designs/**", lambda route: route.fulfill(status=500, content_type="application/json",
+                                                                    body=json.dumps({"error": "考卷故意讓它壞"}))
+                   if route.request.method == "PUT" else route.continue_())
+        page.locator("#coordinates-fold summary").click()
+        page.locator("#speaker-left-x").fill("4.2")
+        page.locator("#speaker-right-x").fill("4.2")
+        before = cast(int, page.evaluate("zoneLimitsGeneration"))
+        page.locator("#zone-to-search").click()
+        page.wait_for_function(f"zoneLimitsGeneration >= {before + 2} && zoneLimitsShown === zoneLimitsGeneration")
+        expect(page.locator("#messages")).to_contain_text("每一區的做法沒存成")
+        note = page.locator("#zone-to-search-note")
+        expect(note).to_have_text(SAVE_FAILED)
+        assert page.evaluate("zoneSearchSaid") is not None
+        _release(held)
+        page.unroute("**/api/input-preview")
+        page.unroute("**/api/designs/**")
+        with page.expect_response(lambda r: r.url.endswith("/api/designs/room109") and r.request.method == "PUT") as design:
+            page.locator("#save").click()
+        assert design.value.ok, design.value.text()
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        expect(note).to_have_text(HANDED)
+        assert watched.page_errors == []
+
+
+def test_the_zone_page_reply_goes_with_the_footer_reply_once_a_later_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 D2：在「這間房貼什麼」按「拿去搜尋」、限制沒檢查成，那一頁寫原因；回輸入頁恢復連線按「檢查」，
+    新判決回來，頁底那一句收掉——那一頁的回話（#zone-page-note）是同一句，要一起收，不准再打開那一頁時還掛著。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off",
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        page.route("**/api/zone-limits", lambda route: route.abort())
+        page.locator("#check").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
+        page.locator("#zone-page-open").click()
+        page.locator("#zone-page-search").click()
+        expect(page.locator("#zone-page-note")).to_contain_text("限制沒檢查成")
+        page.locator("#zone-page-close").click()
+        page.unroute("**/api/zone-limits")
+        page.locator("#check").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
+        expect(page.locator("#zone-to-search-note")).to_have_text(HANDED)
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-page-note")).to_have_text("")
         assert watched.page_errors == []

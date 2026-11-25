@@ -479,7 +479,7 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
 # ---- 修補第 1 輪 ----
 
 KIND = "這類「鋼板直接貼在棉上」的構造"
-_OLD_TABLE_SETTLED = "!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration"
+_UNLOCKED_AND_VERDICT_SHOWN = "!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration"
 
 
 def _wall_zones() -> list[str]:

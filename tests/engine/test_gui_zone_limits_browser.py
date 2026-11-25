@@ -15,6 +15,7 @@ from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_input_clear_undo_browser import _release
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write, _zones
 from tests.engine.test_gui_zone_modes_browser import _modes, _write_room109_design, _region, _save
 
@@ -395,8 +396,11 @@ def test_which_limit_blocks_each_group_and_a_zone_nothing_fits_goes_red(tmp_path
         # 這一塊 0.03：每一組都放不下（「不貼」不算救）→ 紅、擋拿去搜尋，原文講哪一條擋。
         edit_depth(page, "x0", "auto1", "3")
         _red(page, "auto1")
-        expect(page.locator("#zone-limits-summary")).to_contain_text("程式能選的材料沒有一種放得進深度上限，這一區什麼都貼不上")
-        expect(page.locator("#zone-limits-summary")).to_contain_text("0.03 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺")
+        # 右欄正列著前牆：那一句寫在 auto1 底下（紅字），總述只指過去（#1265 單元 3 之二收尾第二趟 A；原本在總述裡考同樣兩段字）。
+        nothing_fits = page.locator("#wall-zone-x0-auto1 .limit-lines")
+        expect(nothing_fits).to_contain_text("程式能選的材料沒有一種放得進深度上限，這一區什麼都貼不上")
+        expect(nothing_fits).to_contain_text("0.03 公尺（這一塊的上限）比這一組最淺排法 0.05 公尺還淺")
+        expect(page.locator("#zone-limits-summary")).to_contain_text("的 1 條寫在那一區底下")
         page.locator("#elevation-panel").screenshot(path=str(shots / "depth-nothing-fits-red.png"))
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -427,6 +431,76 @@ def test_changing_the_list_rechecks_the_limits(tmp_path: Path, browser: Browser)
         _clear(page, "z1")
         assert watched.page_errors == [] and watched.console_errors == []
 
+
+
+GROUPS_EVERYTHING = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none", "deep_rock_wool"]
+
+
+def _nothing_fits_room(tmp_path: Path) -> None:
+    """前牆整面由程式最佳化（三種玻璃棉、不貼、深背岩棉），房間預設上限 3 公分：每一組都放不下，整面紅。"""
+    _write_room109_design(tmp_path, {"left_right_symmetry": "off", "room_max_depth_m": 0.03,
+                                     "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": GROUPS_EVERYTHING}}}})
+    (tmp_path / "materials.json").write_text(_deep_user_library(), encoding="utf-8")
+
+
+def _times_in_right_column(page: Page, sentence: str) -> int:
+    return cast(int, page.evaluate("text => document.getElementById('elevation-list').innerText.split(text).length - 1", sentence))
+
+
+def test_a_zone_where_nothing_fits_says_each_group_once_in_the_whole_right_column(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第二趟 A：前牆整面由程式最佳化、房間預設上限 3 公分，每一組都放不下（整面紅）。
+    整個右欄（含上方總述）每一組那一句只出現 1 次：寫在那一區底下的紅字；總述不抄、改指到那一區；逐組那幾行不再列一遍。
+    上限從哪裡來照樣看得到。換到左牆，前牆那幾句畫面上看不到，總述照列。房間預設放寬到 6 公分：不紅、只有深背岩棉放不下，
+    逐組那幾行照舊在（告訴人搜尋會跳過哪一組）。資料是考卷自己編的（109 號房、深背岩棉那一筆使用者材料）。"""
+    _nothing_fits_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _settled(page)
+        sentences = cast(list[str], page.evaluate("zoneLimits.caps.x0.whole_wall.targets.map(target => target.text)"))
+        refusal = cast(list[str], page.evaluate("zoneLimits.refusals"))
+        assert len(sentences) == 4 and len(refusal) == 1, (sentences, refusal)
+        summary = page.locator("#zone-limits-summary")
+        head = "有 1 條超過限制（標紅的區），改好之前不能拿去搜尋："
+        expect(summary).to_have_text(f"{head}前牆「整面」的 1 條寫在那一區底下")
+        expect(page.locator("#wall-zone-x0-whole_wall #limit-x0-whole_wall-0")).to_contain_text(sentences[0])
+        for sentence in sentences:
+            assert _times_in_right_column(page, sentence) == 1, sentence
+        expect(page.locator("[id^=depth-target-x0-whole_wall-]")).to_have_count(0)
+        expect(page.locator("#wall-zone-what-x0-whole_wall")).to_contain_text("總厚度最多 3 公分（房間預設）")
+        page.locator("#elevation-wall-y0").click()
+        expect(summary).to_have_text(head + refusal[0])
+        page.locator("#elevation-wall-x0").click()
+        _depth(page, "#depth-room", "6")
+        expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        expect(page.locator("[id^=depth-target-x0-whole_wall-]")).to_have_count(4)
+        expect(page.locator("#depth-target-x0-whole_wall-3")).to_have_class("limit-warn")
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_while_a_recut_is_checked_the_summary_keeps_the_zone_lines_no_zone_shows(tmp_path: Path, browser: Browser) -> None:
+    """同上那一間：在前牆畫一個框，新的判決還在路上。上一版判決紅的是「整面」，那一區已經不在右欄（換成新切的幾區），
+    底下沒有人寫那一條——總述照抄，不准說寫在那一區底下而把它藏掉。新的判決回來照新的寫。"""
+    _nothing_fits_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _settled(page)
+        refusal = cast(list[str], page.evaluate("zoneLimits.refusals"))
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        _drag(page, LY, LZ, (0.02, 0.02), (1.0, 1.2))
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsReceived !== zoneLimitsGeneration")
+        assert held, "限制檢查應該還在路上"
+        expect(page.locator("#wall-zone-x0-whole_wall")).to_have_count(0)
+        expect(page.locator("#zone-limits-summary")).to_have_text("有 1 條超過限制（標紅的區），改好之前不能拿去搜尋：" + refusal[0])
+        page.unroute("**/api/zone-limits")
+        _release(held)
+        _settled(page)
+        expect(page.locator("#zone-limits-summary")).not_to_contain_text(refusal[0])
+        assert watched.page_errors == []
 
 def _deep_user_library() -> str:
     """最淺排法 0.08 m（最薄 0.05 m＋空腔下界 0.03 m）、自己的上限 0.15 m 的使用者可最佳化材料。"""

@@ -244,6 +244,10 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
       return;
     }
     const changes = mirror ? data.walls : {[wall]: data};
+    // 底下先改寫分區、renderWalls 先畫、判決後問：上一版判決（配對、上限）對的是切之前，改寫第一格之前就標好（#1265 單元 3 之二
+    // 第二趟追加第 1 條；收尾第二趟 D1 從改寫之後挪上來：中間組字那一段萬一丟錯，分區已經換了、判決卻還算新鮮）。
+    // 沒切到任何一面（changes 空的）不標：那一路不重問，標了會一直「核對中」。
+    if (Object.keys(changes).length) staleZoneLimits();
     if (Object.keys(changes).length && !scheme.scene.surface_zones_by_wall) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
@@ -287,7 +291,6 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
         message, kind, blocked: data.blocked};
     }
     if (!Object.keys(changes).length) { renderElevation(); return; }
-    staleZoneLimits();  // 底下 renderWalls 先畫、判決後問：上一版判決（配對、上限）對的是切之前（#1265 單元 3 之二第二趟追加第 1 條）
     changedWalls = changes;
     data = changes[wall] ?? Object.values(changes)[0];
     elevationThin = [];
@@ -671,13 +674,21 @@ function pairWords(wall, key) {
 // 定不出對稱軸…）照原樣接上，不在這裡改字（下面 startsWith 那一行比的就是伺服器的字）。
 const MIRROR_LINE_WORDS = "鏡子：兩支喇叭的中線";
 function inputAxisWords(result) {
-  const axis = result?.axis, distances = axis && axisDistances(axis);
-  // 最新那一次判決回來了、可是沒做成（連不上、房間尺寸讀不出來）：沒有鏡子可講，照實講沒確認成，不寫成還在等
-  // （#1265 單元 3 之二收尾追加設計洞）。判決在路上才是「正在確認」。
-  if (!distances && !result && zoneLimitsFresh() && zoneLimits.status !== "checked") return `鏡子在哪沒確認成：${zoneLimits.message}`;
-  if (!distances) return result?.reason || result?.message || "正在確認鏡子在哪…";
+  // 沒有判決可看（symmetryResult 只給新鮮的）：最新那一次判決回來了、可是沒做成（連不上、房間尺寸讀不出來），沒有鏡子可講，
+  // 照實講沒確認成，不寫成還在等（#1265 單元 3 之二收尾追加設計洞）；判決在路上才是「正在確認」。
+  if (!result) return zoneLimitsFresh() && zoneLimits.status !== "checked" ? `鏡子在哪沒確認成：${zoneLimits.message}` : "正在確認鏡子在哪…";
+  const axis = result.axis;
+  if (!axis) return result.reason || result.message || "正在確認鏡子在哪…";
+  // 鏡子在哪已經知道，可是房間尺寸格現在讀不出來（例如高度清空、還沒離開那一格）：算不出離左牆多遠。這時沒有在問，
+  // 不寫「正在確認」，講尺寸沒填好（#1265 單元 3 之二收尾第二趟 B4 之二；用語同上面那一行「先把房間的長、寬、高都填好正數」）。
+  const distances = axisDistances(axis);
+  if (!distances) return "先把房間的長、寬、高都填好正數，才算得出鏡子在哪";
   return `畫一邊，另一邊照鏡子出現；鏡子是兩支喇叭的中線（離左牆 ${distances.left} 公尺，`
     + `${axis.centred ? "在房間正中" : "不在房間正中，左右牆不跟著畫"}）。只管畫框；兩邊貼不貼一樣，在「這間房貼什麼」設`;
+}
+// 開關底下那一句（renderElevation 畫；限制檢查失敗之後又問一次時 zone_limits.js 只重寫這一句，見 window.refreshAxisWords）。
+function axisSentence(on, result) {
+  return on ? inputAxisWords(result) : "跟「這間房貼什麼」那一頁的「左右對稱」是同一個開關，哪一頁切換都一樣。";
 }
 function selectedEditor(wall, view, width, height) {
   const area = $("elevation-selected"); area.replaceChildren();
@@ -969,8 +980,7 @@ function renderElevation() {
       window.zoneSymmetry.set(state);
     };
   }
-  $("elevation-axis-words").textContent = on ? inputAxisWords(result)
-    : "跟「這間房貼什麼」那一頁的「左右對稱」是同一個開關，哪一頁切換都一樣。";
+  $("elevation-axis-words").textContent = axisSentence(on, result);
   if (mirrorWarning && (mirrorWarning.owner !== scheme || mirrorWarning.generation !== zoneDesignGeneration || !on)) {
     mirrorWarning = null; banner();
     note("", "");
@@ -1072,6 +1082,12 @@ window.renderElevation = renderElevation;
 // 六面一起看的那一頁（zone_overview.js）畫圖用同一份幾何：哪一軸往右、鏡不鏡像、牆面寬高、喇叭與主位。
 window.elevationGeometry = {views, wallSize, screenBox, flip, project, markerItems};
 window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
+// 只重畫第 2 段牆那一行與右欄（wall_section.js），不動立面圖、不動牆面表單的格子（#1265 單元 3 之二收尾第二趟 B2：
+// 「換原本的牆」改構造某一層時，原本那一面跟著變；app.js 那一格的 input 叫這一支，打字的那一格不重建）。
+window.refreshWallSection = () => renderWallSection(elevationWall);
+// 只重寫鏡子那一句（#1265 單元 3 之二收尾第二趟 B4 之一）：失敗之後重試、請求還在路上，那一句要回到「正在確認」。
+// 不重畫整個立面圖：正在打字的格子、拖到一半的框不能換掉（zone_limits.js 判決回來時為這兩件事才延後重畫）。
+window.refreshAxisWords = () => { $("elevation-axis-words").textContent = axisSentence(window.zoneSymmetry.isOn(), symmetryResult()); };
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => {
     showSelectionBanner = false;

@@ -222,6 +222,47 @@ def test_a_malformed_design_is_red_not_an_error() -> None:
     assert result["red"] == 1 and "深度上限要填大於 0" in cast(list[str], result["refusals"])[0]
 
 
+
+
+def _rebuilt_order(result: dict[str, object]) -> list[str]:
+    """照回覆本身排出擋下的每一條（畫面 zone_limits.js 的 refusalSpans 同一個排法）：最上層（``design`` 每一條）、
+    整面紅的（``walls`` 逐面）、各區紅的（``zones`` 逐面逐區），面與區照回覆裡的順序。"""
+    design = cast(list[dict[str, str]], result["design"])
+    walls = cast(dict[str, list[dict[str, str]]], result["walls"])
+    zones = cast(dict[str, dict[str, list[dict[str, str]]]], result["zones"])
+    return ([line["text"] for line in design]
+            + [line["text"] for lines in walls.values() for line in lines if line["level"] == "red"]
+            + [line["text"] for items in zones.values() for lines in items.values() for line in lines if line["level"] == "red"])
+
+
+def _no_library() -> DepthTargets:
+    raise ValueError("考卷編的：材料庫讀不進來")
+
+
+def test_refusals_come_in_the_order_the_reply_itself_lays_out(tmp_path: Path) -> None:
+    """#1265 單元 3 之二收尾第二趟 A：畫面不比對字串，照回覆本身認擋下的每一條屬於誰（哪幾條是最上層、哪一面整面、哪一面的區），
+    靠的是 ``refusals`` 的排法：``design`` 每一條、``walls`` 逐面紅的、``zones`` 逐面逐區紅的，條數、順序都跟 ``refusals`` 一樣
+    （每一條是「牆名：」「區名：」接原文，或最上層的原文本身）。四種都考：設計設定格式不對、材料庫讀不進來（逐區走到一半才加進
+    最上層）、沒蓋滿（整面）、貼太深（一區），另加兩面都有紅的。"""
+    document = _cut(PRESET)
+    z1 = next(zone for zone in _zones(document)["x0"] if zone["id"] == "z1")
+    z1["v_m"] = [0.0, 1.0]                                                       # x0：z1 與上面那塊之間留空 → 整面紅
+    for wall in ("y0", "xL"):                                                    # 兩面整面貼 0.15
+        whole = _zones(document)[wall][0]
+        whole["material"] = {"kind": "mounted_on_wall", "layers": _layers(DEEP), "wall": whole["material"]}
+    capped = _design(room_max_depth_m=0.1, zones={"yL": {"whole_wall": {"mode": "search"}}}).model_dump(mode="json")
+    replies = [zone_limits(document, {"scheme_id": "room109", "room_max_depth_m": -1}),
+               zone_limits(document, capped),
+               zone_limits(document, capped, depth_targets=_no_library)]
+    codes = [[line["code"] for line in cast(list[dict[str, str]], reply["design"])] for reply in replies]
+    assert codes == [["design_invalid"], [], ["materials_unreadable"]]
+    for reply in replies:
+        refusals = cast(list[str], reply["refusals"])
+        rebuilt = _rebuilt_order(reply)
+        assert len(rebuilt) == len(refusals) == reply["red"], (rebuilt, refusals)
+        assert all(refusal.endswith(text) for refusal, text in zip(refusals, rebuilt, strict=True)), (rebuilt, refusals)
+    assert [refusal.split("：")[0] for refusal in cast(list[str], replies[1]["refusals"])] == ["前牆", "後牆「整面」", "左牆「整面」"]
+
 # ---- 可信範圍：材料頁同一條路 ----
 
 def _fake(status: str, calls: list[SurfaceMaterial], **extra: object) -> Callable[[SurfaceMaterial], dict[str, object]]:

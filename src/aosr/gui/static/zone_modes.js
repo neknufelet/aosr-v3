@@ -20,9 +20,13 @@ let zoneSurfaceGroups = {};
 let zoneNoteText = "";
 let zoneNoteKind = "";
 // 「拿去搜尋」（sendToSearch）沒送出去的那一句：{text, kind, generation}。輸入頁寫在頁底那顆鈕底下（zone-to-search-note，
-// renderSearchAction），「這間房貼什麼」那一頁照舊寫在 zone-page-note；下一次有別的回話（zoneNote）、換牆、換方案就拿掉。
-// 寫的時候記下那時問到第幾次限制判決（generation）：之後又問了一次、新的那一份畫上去了，那一句講的是舊的樣子，收掉
-// （#1265 單元 3 之二收尾追加第 2 條）。按下去那一次存檔自己問的那一份不算之後（那一句是看著它寫的）。
+// renderSearchAction），「這間房貼什麼」那一頁照舊寫在 zone-page-note（同一句，zoneNote 寫的）；下一次有別的回話（zoneNote）、
+// 換牆、換方案就拿掉。兩種句子收的時機不同（#1265 單元 3 之二收尾第二趟 B1）：
+// - 看著限制判決寫的（沒檢查成、超過限制、只放了固定成品、鋼板貼棉）：寫的時候記下那時問到第幾次限制判決（generation），
+//   之後又問了一次、新的那一份畫上去了，那一句講的是舊的樣子，收掉（收尾追加第 2 條）。按下去那一次存檔自己問的那一份不算之後。
+// - 講存檔結果的（做法沒存成、存檔途中換了方案、搜尋頁沒打開）：generation 是 null，判決再來幾份都不收——解鎖後自動補問的預覽
+//   換了牆名、重問限制，那一份跟存檔沒有關係；做法下一次存成了才收（prepareZoneDesignSave）。
+// 收的時候那一頁的回話一起收（dropSearchSaid，第二趟 D2）：zoneSearchSaid 在，zone-page-note 寫的就是它（別的回話會先把它清掉）。
 let zoneSearchSaid = null;
 // 同一份方案上次套用的候選清單，給新開的區當起點。
 let zoneLastAllowed = null;
@@ -30,8 +34,8 @@ let zoneLastAllowed = null;
 // #1265 單元 3 之二第二趟起寫在第 2 段右欄那一區底下（wall_section.js），由「這間房貼什麼」小框套用時記（zone_overview.js 的 applyMethod）。
 // 「牆/區」→ {label：選的那一筆的名字, material：記下時那一區原本那一面的材料}。畫的時候只認 sameAsOriginalLabel：那一區原本那一面
 // 跟記下時一樣才寫（#1265 單元 3 之二收尾追加第 5 條：之後「換原本的牆」、換構造預設、套實測阻抗改了原本那一面，
-// 那一句講的就不是現在的樣子；從源頭比，不逐條路去清）。做法不另比（收尾植錯判走不到、拿掉）：改得到一區做法的只有小框套用
-// （applyMethod → setZoneSetting），它每套用一次照新的結果重記或拿掉；清掉再復原、重切（自動補的代號重編）、換方案、載入範本都整面清掉。
+// 那一句講的就不是現在的樣子；從源頭比，不逐條路去清）。做法不另比（收尾植錯判走不到、拿掉）：改得到一區做法的只有 applyMethod
+// （小框套用、改規則、改回跟其他牆面一樣三個入口 → setZoneSetting），它每套用一次照新的結果重記或拿掉；清掉再復原、重切（自動補的代號重編）、換方案、載入範本都整面清掉。
 const zoneSameAsOriginal = new Map();
 function rememberSameAsOriginal(wall, key, label) {
   const zone = zoneList(wall).find(item => zoneKey(item) === key);
@@ -140,10 +144,15 @@ function zoneNote(text, kind) {
   if (line) { line.textContent = text; line.className = kind; }
 }
 // 「拿去搜尋」的回話：那一頁照舊（zoneNote），輸入頁寫在頁底那顆鈕底下（renderSearchAction 讀 zoneSearchSaid）。
-function searchNote(text, kind) {
+// byVerdict：這一句是看著限制判決寫的（講存檔結果的傳 false，見 zoneSearchSaid 上面）。
+function searchNote(text, kind, byVerdict = true) {
   zoneNote(text, kind);
-  zoneSearchSaid = {text, kind, generation: zoneLimitsGeneration};
+  zoneSearchSaid = {text, kind, generation: byVerdict ? zoneLimitsGeneration : null};
   renderSearchAction();
+}
+function dropSearchSaid() {
+  zoneSearchSaid = null;
+  zoneNote("", "");
 }
 
 // 開舊方案：讀它的設計設定（沒有就是全部固定）；讀不到照講、不當成沒有。
@@ -201,6 +210,7 @@ function prepareZoneDesignSave(name) {
     await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
     zoneDesignSaved = true;
     window.zonePageSaved?.();  // 「這間房貼什麼」那一頁的「改的還沒存進檔案」那一句（zone_overview.js）
+    if (zoneSearchSaid?.generation === null) dropSearchSaid();  // 講存檔結果的那一句（做法沒存成…）：這一次存成了
     if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
   };
 }
@@ -258,8 +268,8 @@ async function sendToSearch() {
     if (!stored) return;
     await refreshAfterSave(stored.message);
     // 鎖著的時候換不了方案；這一條是鎖漏掉時的第二道（同 pressedCopy 的 samePage）。
-    if (generation !== zoneDesignGeneration) { searchNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice"); return; }
-    if (!zoneDesignSaved) { searchNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice"); return; }
+    if (generation !== zoneDesignGeneration) { searchNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice", false); return; }
+    if (!zoneDesignSaved) { searchNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice", false); return; }
     await leaveForSearch(`/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`);
   });
 }
@@ -273,7 +283,7 @@ async function leaveForSearch(url) {
     setTimeout(() => resolve(true), LEAVE_WAIT_MS);
     window.location.href = url;
   });
-  if (stayed) searchNote("方案與每一區的做法都存好了，但等了一陣子搜尋頁還沒打開：再按一次「拿去搜尋」", "notice");
+  if (stayed) searchNote("方案與每一區的做法都存好了，但等了一陣子搜尋頁還沒打開：再按一次「拿去搜尋」", "notice", false);
 }
 function renderSearchAction() {
   const count = searchZoneCount(), button = $("zone-to-search"), note = $("zone-to-search-note");
@@ -282,7 +292,7 @@ function renderSearchAction() {
   button.disabled = !count || !!formRunning() || lockedEdit || red > 0 || stuck.length > 0 || refused.length > 0;
   const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
   // 按了沒送出去的那一句（zoneSearchSaid）排在擋住的理由後面：擋住時那一句就是其中一條，照擋住的寫；沒擋才寫它，不被下一次重畫換掉。
-  if (zoneSearchSaid && zoneLimitsShown > zoneSearchSaid.generation) zoneSearchSaid = null;
+  if (zoneSearchSaid?.generation != null && zoneLimitsShown > zoneSearchSaid.generation) dropSearchSaid();
   const said = formRunning() || lockedEdit || blocked.length ? null : zoneSearchSaid;
   note.className = blocked.length ? "limit-red" : said ? said.kind : "note";
   note.textContent = formRunning() ? "等這一次算完" : lockedEdit ? "先另存新名字" : blocked.length ? blocked.join("；") : said ? said.text :

@@ -364,7 +364,7 @@ async function changeInputScheme(load) {
     const nextPreview = await api("/api/input-preview", "POST", nextScheme);
     // 這一段沒有等待點：方案、預覽與格子一起換，舊回覆已由序號作廢。
     // 上一份的限制判決對的是上一份方案：先標判決在路上再畫（#1265 單元 3 之二收尾追加設計洞；打開、載入範本、換牆面材料、
-    // 改構造預設、套實測阻抗這幾個呼叫的人換成功之後都接著 refreshPlan，一定會重問）。
+    // 改構造預設、套實測阻抗這幾個呼叫的人換成功之後都接著 refreshPlan，一定會重問；打開時接回計算進度失敗也照問，第二趟 B3）。
     staleZoneLimits();
     scheme = nextScheme;
     useInputPreview(nextPreview);
@@ -580,8 +580,9 @@ async function openScheme(name) {
   $("result-stale").hidden = true;
   renderInputBars();
   const running = formRunning();
-  if (running && running.run_id !== runId) await follow(running.run_id);
-  await refreshPlan();
+  // 接回計算進度失敗也照樣檢查（#1265 單元 3 之二收尾第二趟 B3）：上一份的判決在 changeInputScheme 已作廢、要靠這一次 refreshPlan
+  // 重問限制；失敗的原因照樣丟給呼叫的人寫進訊息列（寫在圖面檢查那一句之後，不被它蓋掉）。
+  try { if (running && running.run_id !== runId) await follow(running.run_id); } finally { await refreshPlan(); }
   return true;
 }
 // ?scheme= 回輸入頁的方案段落；?zones= 打開同一份後再進「這間房貼什麼」。
@@ -1030,6 +1031,8 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     if (!event.target.matches("[data-layer-field]")) return;
     collectWallMaterials();
     for (const name of formWalls()) if (["assembly", "measured_impedance"].includes(wallMaterial(name).kind) && !measuredDrafts[name]) showPresetState(name);
+    // 原本那一面變了：右欄「選的跟原本一樣」那一句、牆那一行「原本的牆：…」照現在的寫（#1265 單元 3 之二收尾第二趟 B2）。
+    window.refreshWallSection();
   });
   for (const id of ["walls", "elevation-panel"]) $(id).addEventListener("focusout", relabelWallsOnLeave);
   document.addEventListener("pointerdown", () => { pressing = true; }, true);

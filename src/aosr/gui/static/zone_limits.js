@@ -49,6 +49,9 @@ function staleZoneLimits() { zoneLimitsFloor = zoneLimitsGeneration + 1; }
 function zoneLimitsFresh() { return Boolean(zoneLimits) && zoneLimitsReceived === zoneLimitsGeneration && zoneLimitsReceived >= zoneLimitsFloor; }
 function refreshZoneLimits() {
   zoneLimitsRequest = checkZoneLimits();
+  // 畫著的是一份沒做成的判決（鏡子那一句寫「沒確認成」）：新的一次已經出去了，那一句先改回「正在確認」（#1265 單元 3 之二收尾
+  // 第二趟 B4 之一）。只重寫那一句、不整頁重畫；做成的判決照舊等新的回來才換（每次重問都閃一下更糟）。
+  if (zoneLimits?.status !== "checked") window.refreshAxisWords();
   return zoneLimitsRequest;
 }
 // 「拿去搜尋」要的是最新那次的判決：還在路上就等它回來（不會丟錯：檢查失敗也是一份判決）。
@@ -174,8 +177,15 @@ function depthRow(wall, note) {
 // 判決在路上就不畫上一版的（做法剛改、最深剛改、切法剛換，那幾行對的是舊的）。不另判做法（#1265 單元 3 之二收尾）：
 // 伺服器只替由程式最佳化的區寫 targets（zone_limits.py 的 zone_limits，mode == "search" 那一段），判決新鮮時它看的就是
 // 現在這一份做法——改做法的每一條路（小框套用、切牆、清掉再復原）重畫之前都先 staleZoneLimits()，換方案把判決清成 null。
+// 一組都放不下、整區紅的時候（那一區有 depth_no_group 那一條紅）不畫（#1265 單元 3 之二收尾第二趟 A）：那一條紅字就是伺服器把
+// 每一組這一句接起來（zone_limits.py 的 no_group_words），已經寫在這一區底下（limit-<牆>-<區>-<i>），再列一次是同一件事寫兩遍。
+// 留紅字那一份：它是擋住的原因（開跑那邊擋的也是這一句），而且開頭那半句「這一區什麼都貼不上」只有它講；上限從哪裡來，
+// 每一組那一句裡有（「（房間預設的上限）」），右欄那一區那一句也寫（capWords）。認法照那一條的代號，不比對字。
+// 不紅、只有幾組放不下的區照畫：那幾行告訴人搜尋會跳過哪幾組。
+const NO_GROUP_FITS = "depth_no_group";
 function depthTargetLines(wall, key) {
   if (!zoneLimitsFresh()) return [];
+  if (zoneLimitLines(wall, key).some(line => line.code === NO_GROUP_FITS)) return [];
   const cap = zoneCap(wall, key), targets = cap?.targets ?? [];
   if (!targets.length) return [];
   const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
@@ -188,18 +198,42 @@ function depthTargetLines(wall, key) {
     return line;
   })];
 }
-// wall：第 2 段右欄現在列的那一面（沒列是 null）。那一面整面的判決就寫在總結底下（limit-wall-<牆>-<i>），總結不再抄一次，
-// 改說寫在下面（#1265 單元 3 之二收尾 K：右欄上方同一句只出現一次）。認哪一條是它照伺服器拒收原文的寫法（牆名：原文，
-// zone_limits.py 的 refusals）；對不上就照抄（多寫一次），不會把別一面的那一條藏掉。
-function limitsSummary(wall = null) {
+// 擋下的每一條（zoneLimits.refusals）屬於誰：照伺服器排的順序從回覆本身認（zone_limits.py 的 zone_limits 最後那幾行：最上層
+// ＝design 每一條、整面紅的＝walls 逐面、各區紅的＝zones 逐面逐區），不比對字串（#1265 單元 3 之二收尾第二趟 A；伺服器考卷
+// test_gui_zone_limits.py 的 test_refusals_come_in_the_order_the_reply_itself_lays_out 釘住這個排法）。回每一面整面那一段、
+// 那一面各區那一段各是 refusals 的第幾條到第幾條（[起, 迄)）。面的代號不是數字，物件照回覆的順序走；同一面裡區的先後不用（區代號
+// 可以是純數字，瀏覽器會把它排到前面），只算那一面各區一共幾條。
+function refusalSpans() {
+  const reds = lines => lines.filter(line => line.level === "red").length;
+  const spans = {walls: {}, zones: {}};
+  let at = zoneLimits.design.length;
+  for (const [wall, lines] of Object.entries(zoneLimits.walls)) spans.walls[wall] = [at, at += reds(lines)];
+  for (const [wall, items] of Object.entries(zoneLimits.zones)) {
+    spans.zones[wall] = [at, at += Object.values(items).reduce((sum, lines) => sum + reds(lines), 0)];
+  }
+  return spans;
+}
+// 右欄上方的總述（#1265 單元 3 之二收尾 K、第二趟 A：同一件事整欄只寫一次）。wall：第 2 段右欄現在列的那一面（沒列是 null）；
+// keys：那一面右欄列出來的區（代號，照號碼排）。那一面整面的判決寫在總述底下（limit-wall-<牆>-<i>），那一面紅的區每一條寫在
+// 那一區底下（limit-<牆>-<區>-<i>，wall_section.js）：總述不再抄，改說寫在哪裡。別面的照列（畫面上看不到）。
+// 那一面紅的區只要有一區沒列在右欄（判決還是上一版切法的），那一面各區的就照抄：寧可多寫一次，不藏掉。
+function limitsSummary(wall, keys) {
   const line = document.createElement("p"); line.id = "zone-limits-summary";
   if (!zoneLimits) { line.className = "note"; line.textContent = "還沒檢查限制"; return line; }
   if (zoneLimits.status !== "checked") { line.className = "notice"; line.textContent = `限制沒檢查成：${zoneLimits.message}`; return line; }
   const red = limitsRedCount();
   line.className = red ? "limit-red" : "ok";
-  const below = new Set(wall ? wallLimitLines(wall).filter(item => item.level === "red").map(item => `${wallNames[wall]}：${item.text}`) : []);
-  const listed = zoneLimits.refusals.filter(text => !below.has(text)), moved = zoneLimits.refusals.length - listed.length;
-  const parts = [...listed, ...(moved ? [`${wallNames[wall]}整面的 ${moved} 條寫在下面`] : [])];
+  const spans = refusalSpans(), none = [0, 0];
+  const redKeys = Object.keys(zoneLimits.zones[wall] ?? {}).filter(key => zoneIsRed(wall, key));
+  const zoned = keys.filter(key => redKeys.includes(key));
+  const [wallFrom, wallTo] = wall === null ? none : spans.walls[wall] ?? none;
+  const [zoneFrom, zoneTo] = zoned.length === redKeys.length ? spans.zones[wall] ?? none : none;
+  const below = index => (index >= wallFrom && index < wallTo) || (index >= zoneFrom && index < zoneTo);
+  const whole = zoneLimits.refusals.filter((text, index) => index >= wallFrom && index < wallTo).length;
+  const inZones = zoneLimits.refusals.filter((text, index) => index >= zoneFrom && index < zoneTo).length;
+  const parts = [...zoneLimits.refusals.filter((text, index) => !below(index)),
+    ...(whole ? [`${wallNames[wall]}整面的 ${whole} 條寫在下面`] : []),
+    ...(inZones ? [`${zoned.map(key => zoneCalled(wall, key)).join("、")}的 ${inZones} 條寫在${zoned.length > 1 ? "各區" : "那一區"}底下`] : [])];
   line.textContent = red ? `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋：${parts.join("；")}` : "限制都沒超過";
   return line;
 }

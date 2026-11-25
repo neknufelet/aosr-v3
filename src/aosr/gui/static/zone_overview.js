@@ -1110,8 +1110,8 @@ function deepestRow(items, walls, sync) {
     sync();
   };
   input.oninput = typed;
-  // 出口（#1265 單元 3 之二收尾追加第 6 條）：重畫後的格子是空的，對它按退格、刪除（或剪下）值沒變，瀏覽器不發 input、只發
-  // beforeinput。那一句還掛著時，這一下就是人說「要空白」：照空白收（值本來就是空的，不換成別的）。
+  // 出口（#1265 單元 3 之二收尾追加第 6 條）：重畫後的格子是空的，對它按退格、刪除值沒變，瀏覽器不發 input、只發
+  // beforeinput（空格子按剪下連 beforeinput 都不發，收尾第二趟照審查實測拿掉「或剪下」）。那一句還掛著時，這一下就是人說「要空白」：照空白收（值本來就是空的，不換成別的）。
   // 不另判格子是不是空的（收尾植錯判走不到、拿掉）：那一句還掛著＝重畫之後還沒發過 input（typed 第一件事就拿掉它），格子一定是重畫時放的空字串。
   input.addEventListener("beforeinput", event => {
     if (lost?.isConnected && event.inputType.startsWith("delete")) typed();
