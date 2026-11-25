@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, expect
 from aosr.gui import reference_only
-from tests.engine._zone_panel_steps import edit_candidates
+from tests.engine._zone_panel_steps import choose_mode, edit_candidates
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import NAME, symmetry_document
@@ -218,8 +218,8 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_
             page.locator("#elevation-wall-x0").click()
             edit_candidates(page, "x0", "a", remove=("glass_wool_48k",))
             assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == left
-            with page.expect_response("**/api/zone-material"):
-                page.locator("#zone-mode-x0-b").select_option("search")
+            # 舊做法表那一路拆了：另一區改從輸入頁「改這一區 ▸」開小框改成由程式最佳化（上一次的組合照樣帶）。
+            choose_mode(page, "x0", "b", "search")
             page.wait_for_function(_OLD_TABLE_SETTLED)
             assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == (WOOLS if HIT in left else ["none"]), left
             assert (watched.console_errors, watched.page_errors) == ([], [])

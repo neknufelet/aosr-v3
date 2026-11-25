@@ -185,40 +185,15 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 #elevation .zone-red .zone-number circle,#elevation .zone-number.zone-red circle{fill:#c0392b}
 .zone-drawn{cursor:move}
 .zone.moving rect{fill-opacity:.7;stroke-dasharray:6 3}
-/* 每一區的做法（#1105）：固定＝藍（原樣）、保留原牆＝灰、交給搜尋＝琥珀；立面圖與逐區表同一套。 */
+/* 每一區的做法（#1105）：固定＝藍（原樣）、保留原牆＝灰、交給搜尋＝琥珀；立面圖、圖例、第 2 段右欄清單同一套。 */
 .zone.zone-mode-keep_original rect,#elevation-frame.zone-mode-keep_original{fill:#e6e8ea}
 .zone.zone-mode-search rect,#elevation-frame.zone-mode-search{fill:#fbe7b5}
 .zone.zone-mode-search.selected rect{fill:#f5cf73}
-.zone-table tr.zone-mode-keep_original td:first-child{border-left:6px solid #9aa4ab}
-.zone-table tr.zone-mode-search td:first-child{border-left:6px solid #e0a526}
-.zone-table tr.zone-mode-fixed td:first-child{border-left:6px solid #15617b}
-/* 做法表塞進面板寬（#1176）：材料下拉選單跟著欄寬（不照最長那一筆名字撐寬，名字很長的 VPR 那幾筆會把深度上限那一欄擠出面板；
-   名字在關著的選單裡截掉、打開照樣看全名），代號這類沒有空格的長字照樣換行。 */
-.zone-table td[id^=zone-material-]{overflow-wrap:anywhere}
-/* 「區」「大小」兩欄不在字中間斷行（審查 11-15：「整面」斷成直的兩行）：中文字之間不斷，只在空白與括號前換行。 */
-.zone-table th:nth-child(-n+2),.zone-table td:nth-child(-n+2){word-break:keep-all}
-/* 「區」那一格（#1176）：號碼＋位置名可以在字中間換行（名字長，整句不斷會把表撐寬），整格至少放得下「① 整面」一行；
-   代號小字灰色另起一行。 */
-.zone-table td[id^=zone-name-]{min-width:7.5em}
-.zone-table .zone-label{word-break:normal;display:block}
-.zone-table .zone-num{font-size:1.2em}
-.zone-table .zone-code{display:block;color:#5b6670;font-size:.8em;word-break:normal}
 /* 停用的「拿去搜尋」照樣看得清楚（審查 11-15：白字淺底、整顆半透明太淡）：深字淺灰底、不透明；跟旁邊那一句留間隔。 */
 #zone-to-search:disabled{opacity:1;background:#d5dde1;color:#17212a}
 #input-footer #zone-to-search-note{margin:.5rem 0 0}
-.zone-table select[id^=zone-fixed-]{width:100%}
-.zone-table button[id^=zone-goto-]{display:block;background:transparent;color:#155b70;text-decoration:underline;font-size:14px;padding:.25rem 0}
-.zone-numbers summary{color:#5b6670;font-size:.9em}
-.zone-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.3rem 0}
-.zone-chip{display:inline-grid;align-items:center;border:1px solid #e0a526;
-  background:#fff8e6;border-radius:6px;padding:.2rem .3rem .2rem .55rem;max-width:26rem}
-.zone-chip small{color:#5b6670;font-size:max(13px,.85em)}
-.zone-problem{border:2px solid #c0392b;background:#fdecea;border-radius:8px;padding:.4rem .7rem;margin:.4rem 0}
-.zone-problem p{margin:.2rem 0}
-/* 超過限制（#1111）：紅框紅底；表裡那一列左邊紅條、每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
+/* 超過限制（#1111）：紅框紅底；每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
 .zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:#f9d6d2;stroke:#c0392b;stroke-width:3}
-.zone-table tr.zone-red td{background:#fdecea}
-.zone-table tr.zone-red td:first-child{border-left:6px solid #c0392b}
 .limit-lines p{margin:.15rem 0}
 .limit-red{color:#a52714;font-weight:600}
 .limit-warn{color:#9a5b00}
@@ -417,4 +392,3 @@ button.lnk{color:#155b70;margin-left:.4rem}
 .zone-sizes{font-size:.8125rem;margin:.4rem 0 0}
 .zone-sizes th,.zone-sizes td{padding:.3rem .35rem}
 .zone-sizes td:nth-child(2),.zone-sizes td:nth-child(3),.zone-sizes td:nth-child(4){text-align:right;white-space:nowrap}
-#wall-section #zone-table-fold{margin-top:.75rem}

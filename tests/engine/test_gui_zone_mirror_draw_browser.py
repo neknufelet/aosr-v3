@@ -71,7 +71,6 @@ def _room(tmp_path: Path, browser: Browser, boxes: tuple[CutBox, ...] = (), *, c
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
-        page.locator("#zone-table-fold > summary").click()
         page.locator(f"#elevation-wall-{wall}").click()
         _settled(page)
         yield page
@@ -198,7 +197,8 @@ def test_side_walls(tmp_path: Path, browser: Browser, centred: bool) -> None:
         else:
             assert _zones(page, "xL") == before
             expect(page.locator("#elevation-complete")).to_have_count(0)
-            expect(page.locator("#elevation-selected")).to_contain_text("對稱軸離左牆 2.45 公尺，房間正中是 2.60 公尺")
+            # 第二趟決定第 6 條：選取框這一句也叫鏡子（輸入頁上一個東西只用一個叫法）。
+            expect(page.locator("#elevation-selected")).to_contain_text("鏡子離左牆 2.45 公尺，房間正中是 2.60 公尺")
             expect(page.locator("#elevation-note")).to_contain_text("不在房間正中")
             _shot(page, tmp_path, "side-axis-offset")
 

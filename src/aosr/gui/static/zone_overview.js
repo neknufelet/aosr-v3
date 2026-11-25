@@ -6,7 +6,7 @@
    住在方案輸入頁裡當一個整頁的畫面（#zone-page）：打開時把原本那一頁藏起來，方案、每一區的做法、材料庫、區的號碼與名字
    都用那一頁已經讀好的同一份（zone_modes.js、elevation.js）。畫面是（方案、做法、材料庫）加上這一頁自己的幾個變數
    （選了哪幾區、面板上剛點的選項、哪幾個摺疊開著）算出來的：**畫的時候只讀**，不補寫沒列到的區、不碰設計設定——
-   打開看一看再存，設計檔與方案檔一個字都不會變。重畫掛在做法表重畫的同一條路上（renderZoneTable 開頭），開檔、切牆、
+   打開看一看再存，設計檔與方案檔一個字都不會變。重畫掛在輸入頁跟方案一起重畫的同一條路上（renderZoneTable 開頭），開檔、切牆、
    換材料、改做法之後都會跟著重畫。
 
    晚到的回應：限制檢查（/api/zone-limits）每次改動後才回來，回來時 zone_limits.js 的 showZoneLimits 會整塊重畫
@@ -53,7 +53,7 @@ const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
 let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
-let panelShowAll = false;       // 小框「指定貼一種」下拉的「顯示全部材料」（#1176 舊做法表那一個搬來，#1265）：只記在這一頁
+let panelShowAll = false;       // 小框「指定貼一種」下拉的「顯示全部材料」（#1176 舊做法表那一個搬來，#1265；舊表單元 3 之二第二趟拆了）：只記在這一頁
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
 let ruleDraft = false;          // 「其他牆面」下拉剛選了指定貼一種、還沒選貼哪一種
@@ -198,11 +198,14 @@ function readPairing(byId) {
   const on = symmetryIsOn(), found = zoneLimits?.symmetry;
   const base = {on, state: "pending", message: "", marks: new Map(), pairs: [], missed: [], axis: null, alone: 0, searched: 0};
   if (!on) return {...base, state: "off"};
-  if (!zoneLimits || zoneLimitsReceived !== zoneLimitsGeneration) return base;
+  if (!zoneLimitsFresh()) return base;
   if (!found) return {...base, state: "unavailable", message: `配對沒算成：${zoneLimits.message ?? "限制檢查沒有做成"}`};
   if (!found.available) return {...base, state: "unavailable", message: found.message};
   if (found.reason) return {...base, state: "no-axis", message: found.reason};
   const at = surface => { if (!surface) return null; const [wall, key] = surface.split("@"); return byId.get(`${wall}/${key ?? "whole_wall"}`) ?? null; };
+  // 判決點名的區現在找不到（切法換了、判決還沒跟上）：那一份對不上現在的切法，當成還在等，不拿去畫、不丟錯（#1265 單元 3 之二第二趟追加第 1 條）。
+  const named = [...found.pairs.flatMap(pair => [pair.first, pair.second]), ...found.missed.flatMap(entry => [entry.first, entry.second, entry.other])];
+  if (named.some(surface => surface && !at(surface))) return base;
   const pairs = found.pairs.map((pair, index) => ({first: at(pair.first), second: at(pair.second), shape: PAIR_SHAPES[index % PAIR_SHAPES.length]}));
   const missed = found.missed.map(entry => ({...entry, firstItem: at(entry.first), secondItem: at(entry.second), otherItem: at(entry.other)}));
   const marks = new Map();
@@ -687,13 +690,15 @@ async function applyMethod(items, method, written = () => {}) {
       inputBusy = false;
     }
   }
-  // 選的跟那一區原牆一模一樣（伺服器回 same_as_original，做法變成不貼）：回話照舊做法表那一句講，不說成改成指定貼一種
+  // 選的跟那一區原牆一模一樣（伺服器回 same_as_original，做法變成不貼）：回話照舊做法表當年那一句（sameAsOriginalWords）講，不說成改成指定貼一種
   // （#1265 單元 3 之二第 E 條：回話跟存下來的要對得上）。
   const same = items.filter((item, index) => method.mode === "fixed" && results[index]?.same_as_original);
-  // 舊做法表那一格「選的跟原本一樣」只寫在表上選的那一次；在這一頁選的照舊收掉（不把話寫回表上）。
+  // 「選的跟原本一樣」那一區自己寫為什麼（第 2 段右欄那一區底下，#1265 單元 3 之二第二趟）：這一次選到一樣的記下選的那一筆，
+  // 其餘這一次改到的區拿掉（再改做法、選別的就不寫）。
   items.forEach((item, index) => {
     setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
-    zoneSameAsOriginal.delete(item.id);
+    if (same.includes(item)) zoneSameAsOriginal.set(item.id, libraryEntry(method.materialId).label);
+    else zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
   const pickedNotes = new Set(results.filter(change => change.picked_entry).map(change => change.note));
@@ -706,7 +711,7 @@ async function applyMethod(items, method, written = () => {}) {
   return true;
 }
 // 一區照 method 改過之後的那一份（寫進去之前還要過 setZoneSetting 的收法）；套用與套用前的範圍檢查都用這一支。
-// change.same_as_original：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼（同做法表）。
+// change.same_as_original：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼。
 function settingAfter(item, method, change) {
   const kept = zoneSetting(item.wall, item.key).allowed;
   const next = {...zoneSetting(item.wall, item.key), mode: method.mode};
@@ -1075,7 +1080,7 @@ function rangeRow(entry, items, ticks, sync) {
 // 「這一區最深」（設計檔每一區的深度上限，公尺；這裡填公分）：選到的區目前都一樣就帶出來，不一樣就空著。
 // 打字只記進草稿、就地更新套用鈕（sync），不重畫。空格子裡不放提示字（瀏覽器畫提示字的灰量不到對比），空白是什麼意思寫在底下那一行：
 // 格子的值跟打開時一樣就是沒改（draftDepth），所以各區不同時空白＝各區照目前的。
-// 選中的區現在貼的是「不是這一面用的」那一筆（「顯示全部材料」選的，例如前牆貼門）：照舊做法表那一句寫出來；
+// 選中的區現在貼的是「不是這一面用的」那一筆（「顯示全部材料」選的，例如前牆貼門）：照 awayWords 那一句寫出來；
 // 直接取代整面的（地板本身就是木地板那一筆）是那一面本身，不寫。
 function awayLines(items) {
   return items.flatMap(item => {
@@ -1091,10 +1096,20 @@ function deepestRow(items, walls, sync) {
   const input = el("input", "zv-depth"); input.type = "number"; input.min = "0"; input.step = "any"; input.id = "zone-panel-depth";
   input.value = draft.depthText ?? shownDepth(items);
   if (draft.depthText !== null) input.dataset.typed = "1";  // 畫的是打到一半的字：重畫後放回焦點時不整格反白（renderZoneOverview）
-  input.oninput = () => { draft.depthText = input.value; draft.depthBad = input.validity.badInput; draft.rangeRefused = ""; draftTouched = true; sync(); };
+  // 打的字讀不出來（數字格讀成空字串、另標 badInput）又遇到整個小框重畫（例如勾「顯示全部材料」）：新格子放不回那幾個字。
+  // 那一次照樣不收、套用照擋，格子旁照講（#1265 單元 3 之二第二趟追加設計洞）：不丟掉，免得重畫正好落在打到一半時（「.」還沒打 5）
+  // 默默換成別的值；不講的話空白的格子看起來像沒填卻報錯。重打任何字就照新打的判、這一句收掉。
+  const lost = draft.depthBad && !draft.depthText ? el("small", "zv-depth-lost", "剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收，重打一次") : null;
+  if (lost) { lost.id = "zone-panel-depth-lost"; input.setAttribute("aria-invalid", "true"); }
+  input.oninput = () => {
+    draft.depthText = input.value; draft.depthBad = input.validity.badInput; draft.rangeRefused = ""; draftTouched = true;
+    lost?.remove(); input.removeAttribute("aria-invalid");
+    sync();
+  };
   const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
   row.append(name, input, el("span", "zv-unit", "cm"),
     el("small", null, `從${from}往房間算，貼上去的總厚不超過它；空白＝${blankDepthWords(items)}`));
+  if (lost) row.append(lost);
   return row;
 }
 // 草稿的順序獨立於各區存檔順序：跨區第一次出現的先列，剛加入的接在後面。
@@ -1519,7 +1534,7 @@ function panelCard() {
       };
       // 平常只列選中的每一面都能貼的；選了不列的那一筆再關掉「顯示全部」，那一筆照樣列（不然下拉跟選的對不上）。
       for (const entry of assignableEntries().filter(item => walls.every(wall => usableHere(item, wall)) || (item === current && !panelShowAll))) material.append(option(entry));
-      // 「顯示全部材料」打開：不列的分組列在後面（分組、組標題同舊做法表，zone_modes.js 的 hiddenGroups）。
+      // 「顯示全部材料」打開：不列的分組列在後面（分組、組標題照 zone_modes.js 的 hiddenGroups）。
       if (panelShowAll) for (const [group, entries] of hiddenGroups(walls, assignableEntries())) {
         const block = el("optgroup"); block.label = hiddenGroupLabel(group); block.append(...entries.map(option)); material.append(block);
       }
@@ -1794,7 +1809,7 @@ function listCard(group, index, compact) {
     const problem = el("p", "zv-problem", refused.map(line => line.text).join("；")); problem.id = `${prefix}-reference`; problem.setAttribute("role", "alert");
     card.append(problem);
   }
-  // 清單每一種都是固定成品：程式沒得選（同做法表的紅框），「拿去搜尋」也按不下去。
+  // 清單每一種都是固定成品：程式沒得選（allowedProblem），「拿去搜尋」也按不下去。
   if (allowedProblem(allowed)) {
     const problem = el("p", "zv-problem"); problem.id = `${prefix}-problem`; problem.setAttribute("role", "alert");
     problem.textContent = `${allowedProblem(allowed)}程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。要的就是這一筆、不必讓程式選：${editing ? "在上面的小框" : "按這張卡的「選這幾區」，"}改成「${ZONE_MODE_WORDS.fixed}」。`;
@@ -1982,7 +1997,7 @@ function resultBar() {
   if (windows) still.push(`窗 ${windows} 扇`);
   const rest = el("span", "zv-part"); rest.id = "zone-result-still";
   rest.append(el("span", "zv-sw still"), `保留原樣：${still.length ? still.join("、") : "沒有"}`);
-  // 「拿去搜尋」照做法表那一顆的擋法：沒有區由程式最佳化、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
+  // 「拿去搜尋」照輸入頁頁底那一顆（zone_modes.js 的 renderSearchAction）的擋法：沒有區由程式最佳化、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
   const go = button("zv-go", "拿去搜尋", "zone-page-search", () => action(sendToSearch));
   // 按不下去時旁邊一句講為什麼（細節在上面那一行紅字）。
   const why = !of("search").length ? "還沒有由程式最佳化的區" : stuckZoneNames().length || referenceRefusals().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
@@ -1993,7 +2008,7 @@ function resultBar() {
   bar.append(rest, box);
   return bar;
 }
-// 結果列上面那一行：剛才那一步的結果（同做法表底下那一行），以及「拿去搜尋」為什麼按不下去。
+// 結果列上面那一行：剛才那一步的結果（zone_modes.js 的 zoneNote），以及「拿去搜尋」為什麼按不下去。
 function noteLines() {
   const wrap = el("div", "zv-notes");
   const red = limitsRedCount(), stuck = stuckZoneNames();

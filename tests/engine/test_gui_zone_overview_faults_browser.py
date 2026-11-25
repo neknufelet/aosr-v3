@@ -16,6 +16,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
+from tests.engine._zone_panel_steps import choose_fixed, expect_mode
 from tests.engine._zone_naming_room import ZONE_NAMING_LIBRARY, ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _open_scheme, _write
@@ -537,9 +538,12 @@ def test_a_pick_that_is_the_wall_itself_writes_no_depth(tmp_path: Path, browser:
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_picking_what_the_wall_already_is_becomes_keep_original_and_drops_the_old_table_remark(tmp_path: Path, browser: Browser) -> None:
+def test_picking_what_the_wall_already_is_becomes_keep_original_and_says_so_on_the_list(tmp_path: Path, browser: Browser) -> None:
     """選的那一筆跟這一區原牆一模一樣（伺服器不疊一層、放回原樣）：新頁把做法記成「不貼，保留原樣」，不是指定貼。
-    舊做法表上那一區原本寫著「選的跟原本一樣，當成不貼」的那一句，在新頁改過那一區之後就拿掉（改回不貼也不再出現）。"""
+    #1265 單元 3 之二第二趟起舊做法表拆了（這一題原名 …_and_drops_the_old_table_remark）：「選的跟原本一樣，當成不貼」那一句的
+    新家是第 2 段右欄那一區（id 照舊），由小框套用時記（從輸入頁「改這一區 ▸」開的跟從新頁點區開的是同一個小框）。
+    舊題最後考「新頁改過之後舊表那一句拿掉」：舊表那一句沒了（丙）；新頁再選同一筆之後那一句照樣在（沒被新頁那一下抹掉）。
+    「改成別的做法就拿掉」由 test_gui_zone_choices_browser.py 的 test_picking_what_the_ceiling_already_is… 末段考。"""
     scheme = _bare_vpr_scheme()
     _write(tmp_path, scheme)
     _library(tmp_path)
@@ -547,7 +551,7 @@ def test_picking_what_the_wall_already_is_becomes_keep_original_and_drops_the_ol
         page = watched.page
         _open_scheme(page, SAMPLE)
         page.locator("#elevation-wall-xL").click()
-        page.locator("#zone-fixed-xL-auto1").select_option(VPR)
+        choose_fixed(page, "xL", "auto1", VPR)
         expect(page.locator("#zone-same-xL-auto1")).to_contain_text("跟原本一樣，當成不貼")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
         page.locator("#zone-page-open").click()
@@ -560,8 +564,8 @@ def test_picking_what_the_wall_already_is_becomes_keep_original_and_drops_the_ol
         assert _modes(page, ["xL/auto1"]) == {"xL/auto1": "keep_original"}
         expect(page.locator("#zone-map [data-wall='xL'][data-zone='auto1']")).to_have_attribute("data-shown", "still")
         page.locator("#zone-page-close").click()
-        expect(page.locator("#zone-mode-xL-auto1")).to_have_value("keep_original")
-        expect(page.locator("#zone-same-xL-auto1")).to_have_count(0)
+        expect_mode(page, "xL", "auto1", "keep_original")
+        expect(page.locator("#zone-same-xL-auto1")).to_contain_text("跟原本一樣，當成不貼")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -678,8 +682,9 @@ def test_a_zone_that_is_gone_after_a_recut_drops_out_of_the_selection_with_what_
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_the_old_table_unfolds_by_itself_when_a_limit_is_red(tmp_path: Path, browser: Browser) -> None:
-    """舊做法表平常收著；這一面有超過深度上限的區（紅字）時自己打開，不讓紅字藏在摺疊裡。"""
+def test_a_red_limit_on_this_wall_shows_in_the_right_list_without_unfolding_anything(tmp_path: Path, browser: Browser) -> None:
+    """這一面有超過深度上限的區（紅字）：紅字攤在第 2 段右欄清單上方，不藏在摺疊裡（#1265 單元 3 之二第二趟起舊做法表拆了，
+    這一題原名 test_the_old_table_unfolds_by_itself_when_a_limit_is_red：舊表收著、有紅字自己打開；「自己打開」那一件丙）。"""
     _prepare(tmp_path, {"schema_version": "aosr.zone_design.v1", "scheme_id": SAMPLE, "zones": {}, "wall_max_depth_m": {"yL": 0.01}})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -687,9 +692,8 @@ def test_the_old_table_unfolds_by_itself_when_a_limit_is_red(tmp_path: Path, bro
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg=SAMPLE)
         page.locator("#elevation-wall-yL").click()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
-        expect(page.locator("#elevation-zones .limit-red").first).to_be_visible()
-        expect(page.locator("#elevation-zones .notice")).to_have_count(0)
-        expect(page.locator("#zone-table-fold")).to_have_attribute("open", "")
+        expect(page.locator("#elevation-list-notes .limit-red").first).to_be_visible()
+        expect(page.locator("#elevation-list-notes .notice")).to_have_count(0)
         assert watched.page_errors == []
 
 

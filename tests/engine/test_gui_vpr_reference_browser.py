@@ -9,7 +9,7 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
-from tests.engine._zone_panel_steps import apply_and_return, edit_candidates, open_panel
+from tests.engine._zone_panel_steps import apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, open_panel
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
@@ -381,21 +381,17 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
         assert cast(list[str], page.evaluate("zoneDesign.zones.yL.s.allowed")) == ["none"]
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
-    # ③ 舊做法表：貼著它的區改成由程式最佳化。
+    # ③ 貼著它的區改成由程式最佳化：舊做法表那一路（/api/zone-material）跟著表拆了，改從輸入頁「改這一區 ▸」開小框走
+    # （/api/zone-material/batch；跟 ① 從那一頁點卡選區不是同一個入口）。
     _prepare(tmp_path, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
         page.locator("#elevation-wall-x0").click()
-        page.locator("#zone-mode-x0-a").select_option("fixed")
-        page.wait_for_function("!document.querySelector('main').inert")
-        with page.expect_response("**/api/zone-material"):
-            page.locator("#zone-fixed-x0-a").select_option(HIT)
-        page.wait_for_function("!document.querySelector('main').inert")
-        with page.expect_response("**/api/zone-material"):
-            page.locator("#zone-mode-x0-a").select_option("search")
+        choose_fixed(page, "x0", "a", HIT)
+        choose_mode(page, "x0", "a", "search")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
-        expect(page.locator("#zone-mode-x0-a")).to_have_value("search")
+        expect_mode(page, "x0", "a", "search")
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == WOOLS
         expect(page.locator("#zone-preset-x0-a-this_or_none")).to_have_count(0)
         open_panel(page, "x0", "a")
@@ -416,7 +412,10 @@ def test_the_old_table_lets_a_stored_one_be_unticked_and_not_ticked_back(tmp_pat
         page = watched.page
         _open_scheme(page, NAME)
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator(f"#zone-chip-x0-a-{HIT} small")).to_have_text(cast(str, WORDS["listed_why"]))
+        # 舊表方塊上那一句 → 小框那一列（同一份 reference_only 的字）。
+        open_panel(page, "x0", "a")
+        expect(page.locator(f"#zone-panel-row-{HIT} .zv-covered-why")).to_have_text(cast(str, WORDS["listed_why"]))
+        page.locator("#zone-page-close").click()
         edit_candidates(page, "x0", "a", remove=(HIT,))
         open_panel(page, "x0", "a")
         expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
@@ -432,8 +431,8 @@ _NO_LAST_GUARD = """() => { setZoneSetting = (wall, key, setting) => {
 
 
 def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guard(tmp_path: Path, browser: Browser) -> None:
-    """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①舊做法表剛改過的清單（上一次的組合）帶到下一區；
-    ②逐區表沒有候選輸入格；③從卡選區後小框的候選按鈕被人改成勾得到再點；④選整面套用時，
+    """最底下那一道之外，每一條路自己也擋（把最底下那一道換掉再試）：①剛改過的清單（上一次的組合）帶到下一區
+    （#1265 單元 3 之二第二趟起舊做法表拆了，改從輸入頁「改這一區 ▸」開小框）；②輸入頁沒有逐區表；③從卡選區後小框的候選按鈕被人改成勾得到再點；④選整面套用時，
     還沒交給程式的區照畫面上那一份清單起頭、但不帶它。"""
     _prepare(tmp_path, {"x0/a": LISTED}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -444,12 +443,12 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         # ① 動有它的那一份清單，再把另一區改成由程式最佳化：預帶的清單與底下那一句都沒有它。
         edit_candidates(page, "x0", "a", remove=("glass_wool_48k",))
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == [HIT, "none"]
-        with page.expect_response("**/api/zone-material"):
-            page.locator("#zone-mode-x0-b").select_option("search")
+        # ①（舊做法表那一路拆了）改從輸入頁「改這一區 ▸」開小框把另一區改成由程式最佳化：小框自己那一道也要擋。
+        choose_mode(page, "x0", "b", "search")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
-        # ② 舊表沒有這個寫入入口。
-        expect(page.locator("#zone-table-x0 input")).to_have_count(0)
+        # ② 輸入頁沒有這個寫入入口（逐區表整張拆了）。
+        expect(page.locator("#zone-table-fold")).to_have_count(0)
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
         # ③ 從卡選區後小框的候選按鈕硬改成勾得到再點：清單不變。
         page.locator("#zone-page-open").click()

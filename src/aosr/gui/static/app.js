@@ -335,7 +335,7 @@ function renderInputPreview() {
   }
   for (const name of Object.keys(scheme.speakers)) $( `height-${name}`).textContent = data.height_problems[name] || "";
   // 喇叭高度跟擺法推出值不同的提醒寫在「座標數字」摺疊裡那一支的 z 旁邊（#1265）：擺法是在「改喇叭與擺法」改的，
-  // 摺疊收著就看不到；有提醒就自己打開，不讓它藏著（同立面圖底下的做法表）。
+  // 摺疊收著就看不到；有提醒就自己打開，不讓它藏著。
   if (Object.keys(scheme.speakers).some(name => data.height_problems[name])) $("coordinates-fold").open = true;
   $("stand-height-hint").textContent = data.stand_hint;
   // #753：建搜尋才查的三條擺放問題先在這裡提醒，不擋存檔；字由伺服器寫。

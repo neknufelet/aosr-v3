@@ -127,3 +127,34 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         assert page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.ceiling[0].material)") == built
         assert _modes(page, "ceiling") == {"whole_wall": {"mode": "keep_original"}}
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_an_unreadable_depth_stays_refused_and_says_so_after_show_all_redraws_the_panel(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二第二趟追加設計洞：小框「最深」打了讀不出來的字（「--1」，數字格讀成空字串、另標不成數字），再勾「顯示全部材料」
+    （整個小框重畫、換一個新格子）：新格子放不回那幾個字，但那一次照樣不收、套用照擋，格子旁照講是怎麼回事，不讓空白的格子
+    看起來像沒填卻報錯；重打一個數字，那一句收掉、套用按得下去。"""
+    _write(tmp_path, room109_document())
+    _sample_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        _fixed_panel(page, "x0")
+        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        page.locator("#zone-panel-depth").press_sequentially("--1")
+        problem = page.locator("#zone-panel-problem")
+        expect(problem).to_contain_text("「最深」要填大於 0 的數字（公分，最少 0.1）")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        expect(page.locator("#zone-panel-depth-lost")).to_have_count(0)  # 還是同一格、看得到打的字：不另講
+        page.locator("#zone-panel-show-all").check()
+        expect(page.locator("#zone-panel-depth")).to_have_value("")
+        lost = page.locator("#zone-panel-depth-lost")
+        expect(lost).to_have_text("剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收，重打一次")
+        expect(page.locator("#zone-panel-depth")).to_have_attribute("aria-invalid", "true")
+        expect(problem).to_contain_text("「最深」要填大於 0 的數字（公分，最少 0.1）")
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        page.locator("#zone-panel-depth").press_sequentially("12")
+        expect(lost).to_have_count(0)
+        expect(page.locator("#zone-panel-depth")).not_to_have_attribute("aria-invalid", "true")
+        expect(problem).to_be_hidden()
+        expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        assert watched.page_errors == [] and watched.console_errors == []

@@ -145,7 +145,9 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page label.zv-opt-words{display:block;margin:0;cursor:pointer}
 #zone-page .zv-opt .zv-sw{margin-top:5px}
 #zone-page .zv-opt select.zv-pick-material{margin-top:5px;width:100%}
-/* 「顯示全部材料」開關與「不是這一面用的」那一句（#1176 舊做法表那一個搬到小框，#1265）。 */
+/* 「最深」打的字讀不出來、小框重畫後格子放不回去時格子旁那一句（#1265 單元 3 之二第二趟追加設計洞）：同「不是這一面用的」那一句的字級與顏色。 */
+#zone-page .zv-depth-lost{display:block;font-size:13px;color:#a33;line-height:1.4}
+/* 「顯示全部材料」開關與「不是這一面用的」那一句（#1176 舊做法表那一個搬到小框，#1265；舊表後來拆了）。 */
 #zone-page .zv-show-all{display:flex;gap:6px;align-items:flex-start;margin-top:6px;font-size:13px;color:var(--soft);line-height:1.4}
 #zone-page .zv-show-all input{margin-top:2px}
 #zone-page .zv-away{margin:6px 0 0;font-size:13px;color:#a33;line-height:1.4}
@@ -182,9 +184,6 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-notes{margin:0 24px;font-size:14px;min-height:22px}
 #zone-page .zv-notes p{margin:2px 0}
 #zone-page .zv-notes .limit-red{color:#b3261e;font-weight:600}
-/* 房間方案輸入那一頁收起來的舊做法表（進「這間房貼什麼」那一顆的樣子在 home.css 第 2 段） */
-#zone-table-fold{margin-top:10px}
-#zone-table-fold>summary{cursor:pointer;color:#555}
 /* 另外指定的記號、正在改的號碼、灰掉的原因、程式從哪幾種選 */
 #zone-page .zv-apart{fill:none;stroke:#fff;stroke-width:2;stroke-dasharray:6 4;pointer-events:none}
 #zone-page .zv-zone.still .zv-apart,#zone-page .zv-zone.search .zv-apart{stroke:var(--ink)}

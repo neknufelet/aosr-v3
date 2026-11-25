@@ -368,7 +368,7 @@ def test_the_page_says_optimized_by_the_program_everywhere(tmp_path: Path, brows
         _click_zone(page, "yL/z1")
         expect(page.locator("#zone-panel-option-search label")).to_contain_text("由程式最佳化")
         _pick_search(page)
-        for part in ("#zone-page", "#zone-table-fold"):
+        for part in ("#zone-page", "#elevation-panel"):  # 舊做法表（#zone-table-fold）拆了，改看它原本在的第 2 段整段
             words = cast(str, page.locator(part).evaluate("element => element.textContent"))
             assert OLD_WORDS not in words and "電腦" not in words, part
         assert watched.page_errors == [] and watched.console_errors == []

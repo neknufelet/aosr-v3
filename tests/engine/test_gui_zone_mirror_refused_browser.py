@@ -297,7 +297,7 @@ def test_repair_crossing_centres_box(tmp_path: Path, browser: Browser) -> None:
         boxes = _drawn(page)
         assert set(boxes) == {"z1"}
         _matches_mirror(page, FRONT, boxes["z1"], boxes["z1"])
-        expect(page.locator("#elevation-selected")).to_contain_text("自己對稱")
+        expect(page.locator("#elevation-selected")).to_contain_text("這一塊跨在鏡子正中，自己對稱")  # 第二趟決定第 6 條：叫鏡子
 
 
 def test_repair_side_message_and_switch(tmp_path: Path, browser: Browser) -> None:

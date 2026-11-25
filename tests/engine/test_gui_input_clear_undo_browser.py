@@ -125,3 +125,45 @@ def test_switching_walls_while_the_plan_check_is_on_its_way_keeps_the_slot_of_th
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#elevation-undo-clear")).to_have_count(1)
         _assert_quiet(watched)
+
+
+def test_saving_with_the_room_height_blanked_after_a_clear_draws_no_clear_button(tmp_path: Path, browser: Browser) -> None:
+    """第二趟 C 之 1：清掉前牆之後把房間高度清空（立面圖畫不出來，清掉／復原那一格空著），再按「儲存」：
+    存檔被擋（實測如此：存之前的圖面檢查 /api/plan 回 422「高 Lz（公尺）：空著沒填」，存檔請求根本沒送），那一格照樣空著，
+    不冒出「清掉這一面的切法」。
+    存檔那一路（forgetClearUndo）跟改動那一路（refreshClearUndo）同一個判法：只在那一格正寫著「已清掉…｜復原」時才重畫。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _drag(page, LY, LZ, (0.3, 0.3), (1.3, 1.3))
+        _settled(page)
+        _cut_by(page, "#elevation-clear")
+        _settled(page)
+        expect(page.locator("#elevation-undo-clear")).to_have_count(1)
+        page.locator("#room-Lz").click()
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+        expect(page.locator("#elevation-clear-slot button")).to_have_count(0)
+        before = (tmp_path / "schemes" / "room109.json").read_bytes()
+        refused: list[str] = []
+        saved: list[str] = []
+        page.on("response", lambda response: refused.append(f"{response.request.method} {response.url}") if response.status == 422 else None)
+        page.on("request", lambda request: saved.append(request.url) if request.method == "PUT" and "/api/schemes/" in request.url else None)
+        page.locator("#save").click()
+        _settled(page)
+        expect(page.locator("#messages")).to_have_class("notice")
+        expect(page.locator("#messages")).to_contain_text("高 Lz（公尺）：空著沒填")
+        assert (tmp_path / "schemes" / "room109.json").read_bytes() == before
+        expect(page.locator("#elevation-clear-slot button")).to_have_count(0)
+        expect(page.locator("#elevation-size")).to_have_text("先把房間的長、寬、高都填好正數，才畫得出這一面。")
+        # 擋下來的是存之前那一次圖面檢查：伺服器回 422（瀏覽器主控台照例記一行「Failed to load resource」），只認這一個、別的錯照樣算紅；
+        # 存檔請求一次都沒送。
+        assert len(refused) == 1 and refused[0].startswith("POST ") and refused[0].endswith("/api/plan"), refused
+        assert saved == [], saved
+        # 植錯實測（#1265 單元 3 之二第二趟回報）：把 forgetClearUndo 改回不判就重畫，這一題照樣綠——
+        # 清空高度那一下就是一個改動（markStale → refreshClearUndo 先把復原收掉），存檔輪到 forgetClearUndo 時已經沒東西可收。
+        # 那一行是保險：留著不畫的判法跟 refreshClearUndo 一樣，這一題守的是畫面上真的走得到的那一路。
+        assert watched.page_errors == []
+        assert watched.console_errors == ["Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"]

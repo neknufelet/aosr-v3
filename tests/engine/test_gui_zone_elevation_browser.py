@@ -30,15 +30,7 @@ def _open_scheme(page: Page, name: str) -> None:
     open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
     page.wait_for_function("!document.querySelector('main').inert")
-    _unfold_old_table(page)
-
-
-def _unfold_old_table(page: Page) -> None:
-    """舊做法表（深度上限、原本的方案、每一區的下拉）預設收著（#1176 第 C 支）：這些考卷考的是它，先展開再操作。"""
-    fold = page.locator("#zone-table-fold")
-    if not fold.evaluate("fold => fold.open"):
-        fold.locator("> summary").click()
-    expect(fold).to_have_attribute("open", "")
+    # 以前這裡接著展開舊做法表（#1176 第 C 支）；#1265 單元 3 之二第二趟舊做法表拆了，打開方案就是全部。
 
 
 def _zones(page: Page, wall: str) -> list[dict[str, object]]:

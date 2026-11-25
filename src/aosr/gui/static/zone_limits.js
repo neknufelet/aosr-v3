@@ -10,6 +10,11 @@ let zoneLimitsReceived = 0;  // 收下的是第幾次的判決（最新那次回
 let zoneLimitsShown = 0;     // 畫面上畫的是第幾次的判決；等於 zoneLimitsGeneration 表示最新的一次已經畫上去
 let zoneLimitsRequest = Promise.resolve();
 let zoneLimitsAfterDrag = 0; // 拖框中收下、放開滑鼠才畫的那一次
+// 判決在路上（#1265 單元 3 之二第二趟追加第 1 條）：切牆、清掉、復原、改做法這幾條路先重畫、後重問（refreshPlan 才叫
+// refreshZoneLimits），中間那一下收著的判決對的是舊切法、舊做法。重畫之前先 staleZoneLimits() 標好：這之前收的判決不算數，
+// 要等之後新問的那一次回來。配對（zone_overview.js 的 readPairing）、立面圖的鏡像（elevation.js 的 symmetryResult）、
+// 右欄那一區的上限（wall_section.js 的 capWords／noCapWords）、逐組上限（depthTargetLines）都看 zoneLimitsFresh() 這一個訊號。
+let zoneLimitsFloor = 0;
 const DEPTH_LEVEL_WORDS = {zone: "這一塊", wall: "這面牆", room: "房間預設"};
 
 // 這兩區的格子判決回來會重畫：立面圖那一區（第 2 段整段，#1265），和第 1 段右卡的總厚度上限（房間預設）那一格。
@@ -40,6 +45,8 @@ function showZoneLimits(generation) {
   if (again instanceof HTMLInputElement && again.type !== "checkbox") again.select();
 }
 
+function staleZoneLimits() { zoneLimitsFloor = zoneLimitsGeneration + 1; }
+function zoneLimitsFresh() { return Boolean(zoneLimits) && zoneLimitsReceived === zoneLimitsGeneration && zoneLimitsReceived >= zoneLimitsFloor; }
 function refreshZoneLimits() {
   zoneLimitsRequest = checkZoneLimits();
   return zoneLimitsRequest;
@@ -162,11 +169,13 @@ function depthRow(wall, note) {
 }
 // 交給搜尋的區（#1082 段 2-4）：「個案上限…每一組跟自己的上限取較嚴」那半句，接准用的每一組各自的生效上限、哪一條擋住；
 // 放不下的那一組標出來（橘字，搜尋不換過去）。伺服器逐組寫好一句（zoneLimits.caps[牆][區].targets）。
-// #1265 單元 3 之二第 C 條起畫在第 2 段右欄那一區底下（wall_section.js），舊做法表那一格不再寫；整頁一份、id 照舊。
-// 沒有逐組的（固定的區、沒給上限的）回空的，那一句照舊寫在舊做法表（zoneDepthCell）。
+// #1265 單元 3 之二第 C 條起畫在第 2 段右欄那一區底下（wall_section.js）；整頁一份、id 照舊。
+// 沒有逐組的（固定的區、沒給上限的）回空的：那一區的上限照右欄那一句（capWords、noCapWords）寫。
 function depthTargetLines(wall, key, setting) {
+  // 只給由程式最佳化的區（伺服器也只替它算 targets）；判決在路上就不畫上一版的（做法剛改、切法剛換，那幾行對的是舊的）。
+  if (setting.mode !== "search" || !zoneLimitsFresh()) return [];
   const cap = zoneCap(wall, key), targets = cap?.targets ?? [];
-  if (setting.mode === "keep_original" || !targets.length) return [];
+  if (!targets.length) return [];
   const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
   now.textContent = `個案上限 ${shownNumber(cap.value_m)} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}）；每一組跟自己的上限取較嚴：`;
   return [now, ...targets.map((target, index) => {
@@ -176,18 +185,6 @@ function depthTargetLines(wall, key, setting) {
     line.textContent = target.text;
     return line;
   })];
-}
-function zoneDepthCell(wall, key, setting, cell) {
-  if (setting.mode === "keep_original") { cell.textContent = "不加層"; return; }
-  const depth = document.createElement("p"); depth.className = "note"; depth.id = `depth-zone-${wall}-${key}`;
-  depth.textContent = setting.max_depth_m == null ? "這一區沒給" : `這一區給 ${shownNumber(setting.max_depth_m)}`;
-  cell.append(depth);
-  const cap = zoneCap(wall, key);
-  if (cap?.targets?.length) return;  // 逐組那幾行連那半句在第 2 段右欄（depthTargetLines）
-  const now = document.createElement("p"); now.className = "note"; now.id = `depth-cap-${wall}-${key}`;
-  now.textContent = !cap ? (setting.mode === "search" ? "沒給：照材料自己的限制" : "沒給上限")
-    : `生效：${shownNumber(cap.value_m)} 公尺（${DEPTH_LEVEL_WORDS[cap.level]}擋的）`;
-  cell.append(now);
 }
 function limitsSummary() {
   const line = document.createElement("p"); line.id = "zone-limits-summary";

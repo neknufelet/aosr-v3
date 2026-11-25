@@ -307,7 +307,7 @@ def test_the_list_counts_the_zones_and_each_goto_opens_that_zone(tmp_path: Path,
             expect(page.locator(f"#zone-goto-x0-{key}")).to_have_count(1)
             expect(page.locator(f"#elevation-panel #elevation-list #wall-zone-x0-{key} #zone-goto-x0-{key}")).to_have_count(1)
             expect(page.locator(f"#zone-goto-x0-{key}")).to_have_text("改這一區 ▸")
-        expect(page.locator("#zone-table-fold [id^=zone-goto-]")).to_have_count(0)
+        expect(page.locator("#zone-table-fold")).to_have_count(0)  # 舊做法表整張拆了（#1265 單元 3 之二第二趟），鈕只在右欄
         page.locator("#zone-goto-x0-auto1").click()
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "x0/auto1")
         _assert_quiet(watched)
@@ -475,7 +475,7 @@ def test_every_box_in_section_two_lives_in_one_place(tmp_path: Path, browser: Br
             assert page.get_by_label(label).evaluate("node => '#' + node.id") == box, label
         expect(page.get_by_role("button", name="設定每一區貼什麼 ▸")).to_have_count(1)
         expect(page.locator("#scheme-zone-open")).to_have_count(0)
-        expect(page.locator("#zone-table-fold #depth-wall-x0, #zone-table-fold [id^=zone-goto-]")).to_have_count(0)
+        expect(page.locator("#zone-table-fold")).to_have_count(0)  # 舊做法表整張拆了（#1265 單元 3 之二第二趟）
         duplicated = page.evaluate("""() => { const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
           return ids.filter((id, index) => ids.indexOf(id) !== index); }""")
         assert duplicated == []

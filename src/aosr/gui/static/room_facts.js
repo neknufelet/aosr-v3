@@ -1,7 +1,7 @@
 /* 輸入頁第 1 段「房間和擺位」（#1265）：右卡「這間房現在」一行一件事、平面圖上方切換看哪一張圖、「改…」打開那件事唯一的編輯處。
    - 房間、喇叭、主位、家具四句與姿勢由伺服器排（/api/input-preview 的 room_facts；每改一格都重問，字跟著資料走），這裡照印。
    - 結果那一行跟頁底條同一份狀態（home.js 的 renderInputBars 叫這裡），算好的時間與連結從結果清單那一份來。
-   - 總厚度上限（房間預設）與改造前（原方案）兩格住在這張卡裡（以前在立面圖底下的做法表）；值仍記在設計設定（zoneDesign），
+   - 總厚度上限（房間預設）與改造前（原方案）兩格住在這張卡裡（以前在立面圖底下的舊做法表，#1265 單元 3 之二第二趟拆了）；值仍記在設計設定（zoneDesign），
      存檔、重開、「這間房貼什麼」那一頁讀的都是同一份。
    - 四張圖疊在同一格、只露一張（不用 display:none：圖上的字靠量寬度躲開彼此，藏起來量不到）。 */
 (() => {
@@ -19,6 +19,8 @@ function toggleEditor(button) {
   const opening = area.hidden;
   area.hidden = !opening;
   button.setAttribute("aria-expanded", String(opening));
+  // 第 2 段牆那一行的兩塊：房間尺寸空著時那一行只因為這一塊開著才留著，關掉就照 wall_section.js 再判一次（設計洞 4 走乙）。
+  if (!opening && button.id.startsWith("edit-wall-")) window.refreshWallLine?.();
   if (!opening) return;
   // 第一個看得到的格子（牆面表單六面都在，只露選中那一面）。
   const first = [...area.querySelectorAll("input:not([disabled]), select:not([disabled]), button:not([disabled])")]
@@ -89,7 +91,7 @@ function originalWords() {
   if (!chosen) return "每一面都只有原本的牆（沒指定原方案）";
   return schemeNames.includes(chosen) ? `照「${chosen}」那一份方案` : `照「${chosen}」那一份方案（不在方案清單裡）`;
 }
-// 正在填的那一格不換掉（立面圖每打一個字都會重畫做法表，連帶叫到這裡）；字照樣換。
+// 正在填的那一格不換掉（立面圖每打一個字都會走 renderZoneTable 重畫，連帶叫到這裡）；字照樣換。
 function renderRoomEditors() {
   byId("fact-depth-text").textContent = depthWords();
   byId("fact-original-text").textContent = originalWords();

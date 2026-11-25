@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, expect
+from playwright.sync_api import Browser, Route, expect
 
 from aosr.gui.home_view import NO_SCHEME_MATERIALS_NOTE
 from aosr.gui.zone_symmetry import Axis, symmetry_axis
@@ -20,7 +20,8 @@ from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import room109_document
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
-from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
+from tests.engine.test_gui_input_clear_undo_browser import _release
+from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
 
 WIDTH = 5.0        # 房間寬（左牆到右牆）
 SPREAD = 0.7       # 兩支喇叭各離中線多遠
@@ -73,6 +74,31 @@ def test_the_mirror_sentence_says_where_the_mirror_is(tmp_path: Path, browser: B
         shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)  # 給了資料夾就把截圖存去那裡（證據），沒給存暫存
         if axis.centred:
             page.locator("#elevation-panel .card.elev").screenshot(path=str(shots / "u3b-mirror-words.png"))
+        _assert_quiet(watched)
+
+
+def test_while_the_mirror_is_being_checked_the_sentence_says_so_in_mirror_words(tmp_path: Path, browser: Browser) -> None:
+    """第二趟決定第 6 條：限制檢查（順便回鏡子在哪）還在路上時，開關底下那一句寫「正在確認鏡子在哪…」，不寫「對稱軸」；
+    回來之後寫鏡子在哪。用畫一個框讓檢查重問一次，攔住那一次。"""
+    document = _mirror_room(WIDTH / 2)
+    _write(tmp_path, document)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration")
+        words = page.locator("#elevation-axis-words")
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        _drag(page, WIDTH, cast(dict[str, dict[str, float]], document["scene"])["room_m"]["Lz"], (0.3, 0.3), (1.2, 1.4))
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+        assert held, "限制檢查應該還在路上"
+        expect(words).to_have_text("正在確認鏡子在哪…")
+        page.unroute("**/api/zone-limits")
+        _release(held)  # 被新一次蓋掉而中止的那幾個不用再放
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimitsReceived === zoneLimitsGeneration")
+        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
         _assert_quiet(watched)
 
 

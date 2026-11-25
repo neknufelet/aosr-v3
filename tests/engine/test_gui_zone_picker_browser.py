@@ -719,7 +719,7 @@ def test_table_links_select_one_zone_and_discard_another_zones_list_draft(tmp_pa
         # #1265 單元 3 起「改這一區 ▸」整顆搬到第 2 段右欄清單（派工單細節裁決 8），舊做法表裡不再有：一區一列改看清單。
         rows = page.locator("#elevation-list-zones .zone-item")
         assert rows.count() == 8
-        expect(page.locator("#zone-table-xL [id^=zone-goto-]")).to_have_count(0)
+        expect(page.locator("#zone-table-fold")).to_have_count(0)  # 舊做法表整張拆了（#1265 單元 3 之二第二趟）
         for row in rows.all():
             key = str(row.get_attribute("id")).removeprefix("wall-zone-xL-")
             called = page.evaluate("key => zoneCalled('xL', key)", key)
@@ -744,7 +744,12 @@ def test_table_links_select_one_zone_and_discard_another_zones_list_draft(tmp_pa
         assert watched.page_errors == []
 
 
-def test_table_displays_saved_depth_ranges_and_only_the_retained_controls(tmp_path: Path, browser: Browser) -> None:
+def test_saved_zone_depths_read_back_on_the_input_page_with_no_table_to_edit(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二第二趟起舊做法表拆了（這一題原名 test_table_displays_saved_depth_ranges_and_only_the_retained_controls）：
+    舊表沒有輸入格、只留做法兩個下拉、唯讀那一句、三格「這一區給／沒給／不加層」與方塊上的範圍那幾件跟著表走（丙；
+    輸入頁整頁沒有逐區控制項由 test_gui_input_wall_list_browser.py 新加那一題考；方塊上範圍那一句的寫法只有舊表有，
+    「這間房貼什麼」那一頁的範圍是另一個寫法、由 test_gui_zone_range_browser.py 考，不算逐字蓋到）。
+    留下的：「這一面另設」那一塊的三層說明照舊；存著的這一區最深 0.12 讀回輸入頁右欄那一區那一句（改字：公尺→公分）。"""
     _prepare(tmp_path, _design({"yL": {
         "z3": {"mode": "search", "allowed": WOOLS, "max_depth_m": 0.12,
                "ranges": {WOOLS[0]: {"porous_m": [0.05, 0.10], "cavity_m": [0, 0.05]}}},
@@ -755,19 +760,11 @@ def test_table_displays_saved_depth_ranges_and_only_the_retained_controls(tmp_pa
         _open_overview(page)
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-yL").click()
-        table = page.locator("#zone-table-yL")
-        expect(table.locator("input")).to_have_count(0)
-        expect(table.locator("button:not([id^=zone-goto-])")).to_have_count(0)
-        expect(table.locator("select:not([id^=zone-mode-]):not([id^=zone-fixed-])")).to_have_count(0)
-        expect(page.locator("#zone-table-readonly")).to_have_text(
-            "每一區的候選材料和最深，在「這間房貼什麼」那一頁改（按每一列的「改這一區 ▸」）；這張表只列出來對照。")
+        expect(page.locator("#zone-table-fold")).to_have_count(0)
         expect(page.locator("#depth-limits .note")).to_have_text(
             "三層（房間預設、這一面、每一區）取最小的；每一區的最深在「這間房貼什麼」選那一區設。指定貼一種的區：貼上去的總厚不能超過它；由程式最佳化的區：程式選的不會超過它")
-        expect(table.locator("#depth-zone-yL-z3")).to_have_text("這一區給 0.12")
-        expect(table.locator("#depth-zone-yL-z1")).to_have_text("這一區沒給")
-        expect(table.locator("#zone-depth-yL-auto1")).to_have_text("不加層")
-        expect(table.locator("#zone-chip-yL-z3-glass_wool_48k small")).to_have_text(
-            "這一區自己的範圍：棉 5～10 cm、空腔 0～5 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration && zoneLimitsReceived === zoneLimitsGeneration")
+        expect(page.locator("#wall-zone-what-yL-z3")).to_contain_text("總厚度最多 12 公分（這一塊）")
 
 
 def test_only_fixed_card_points_to_the_editor_while_selected(tmp_path: Path, browser: Browser) -> None:

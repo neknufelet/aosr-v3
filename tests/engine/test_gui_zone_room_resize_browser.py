@@ -43,7 +43,6 @@ def test_resize_saves_each_original_zone(tmp_path: Path, browser: Browser, axis:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, SAMPLE)
-        page.locator("#zone-table-fold > summary").click()
         page.locator("#room-" + axis).fill(str(value))
         page.locator("#room-" + axis).press("Tab")
         page.wait_for_function("!pendingRoomResize()")
@@ -72,7 +71,6 @@ def test_shrink_keeps_blocked_wall_and_names_its_zone(tmp_path: Path, browser: B
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, SAMPLE)
-        page.locator("#zone-table-fold > summary").click()
         page.locator("#elevation-wall-xL").click()
         right = _zones(page, "xL")
         page.locator("#room-Ly").fill("5.25")  # 右牆窗旁 auto4 剩 0.15 公尺；地毯放得下

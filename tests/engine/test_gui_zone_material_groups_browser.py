@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 from typing import cast
 import pytest
 from playwright.sync_api import Browser, Locator, expect
+from tests.engine._zone_panel_steps import choose_fixed, choose_mode
 from tests.engine._construction_cases import construction
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -469,8 +471,6 @@ def test_zone_map_uses_the_saved_original_to_identify_a_bare_copy(tmp_path: Path
 
 
 def test_table_pick_saves_the_entry_and_clears_it_on_replacement_or_mode_change(tmp_path: Path, browser: Browser) -> None:
-    from tests.engine.test_gui_zone_modes_browser import _choose
-
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -478,44 +478,37 @@ def test_table_pick_saves_the_entry_and_clears_it_on_replacement_or_mode_change(
         assert page.request.put(f"{base}/api/materials/table_sample", data=doc).ok
         _open_scheme(page, SAMPLE)
         page.locator("#elevation-wall-yL").click()
-        selector = "#zone-fixed-yL-z3"
-        _choose(page, selector, "table_sample")
+        choose_fixed(page, "yL", "z3", "table_sample")
         _save(page, design=True)
         path = tmp_path / "designs" / f"{SAMPLE}.json"
         assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "fixed", "picked_entry": "table_sample"}
-        _choose(page, selector, PLAIN_PRODUCT)
+        choose_fixed(page, "yL", "z3", PLAIN_PRODUCT)
         _save(page, design=True)
         assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "fixed"}
-        _choose(page, selector, "table_sample")
-        _choose(page, "#zone-mode-yL-z3", "keep_original")
+        choose_fixed(page, "yL", "z3", "table_sample")
+        choose_mode(page, "yL", "z3", "keep_original")
         _save(page, design=True)
         assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "keep_original"}
 
 
-@pytest.mark.parametrize(("batch", "recorded"), [(False, None), (True, "former_sample")])
-def test_invalid_draft_depth_does_not_block_a_material_change(tmp_path: Path, browser: Browser, batch: bool, recorded: str | None) -> None:
+# 舊做法表那一個入口（/api/zone-material）跟著表拆了（#1265 單元 3 之二第二趟），換材料只剩小框（/api/zone-material/batch）：
+# 原本兩組參數一組走舊表（草稿沒記材料庫那一筆）、一組走小框（記了），改成兩組都走小框。
+@pytest.mark.parametrize("recorded", [None, "former_sample"])
+def test_invalid_draft_depth_does_not_block_a_material_change(tmp_path: Path, browser: Browser, recorded: str | None) -> None:
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        if batch:
-            _open_overview(page)
-            _click_zone(page, "yL/z3")
-            page.locator("#zone-panel-mode-keep_original").check()
-        else:
-            _open_scheme(page, SAMPLE)
-            page.locator("#elevation-wall-yL").click()
-        # 深度輸入框本身會擋零。直接放入尚未存檔的草稿，再走兩個真正的換材料入口。
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-mode-keep_original").check()
+        # 深度輸入框本身會擋零。直接放入尚未存檔的草稿，再走真正的換材料入口。
         page.evaluate("""id => setZoneSetting("yL", "z3", {mode: "fixed", max_depth_m: 0, picked_entry: id})""", recorded)
-        path = "/api/zone-material/batch" if batch else "/api/zone-material"
-        with page.expect_response(lambda response: response.url.endswith(path)) as changed:
-            if batch:
-                page.locator("#zone-panel-apply").click()
-            else:
-                page.locator("#zone-mode-yL-z3").select_option("keep_original")
+        with page.expect_response(lambda response: response.url.endswith("/api/zone-material/batch")) as changed:
+            page.locator("#zone-panel-apply").click()
         assert changed.value.status == 200, changed.value.text()
         body = changed.value.request.post_data_json
         assert isinstance(body, dict)
-        choice = body["changes"][0] if batch else body
+        choice = body["changes"][0]
         assert choice["picked_entry"] == recorded and "setting" not in choice
 
 
@@ -538,7 +531,9 @@ def test_keep_original_table_words_follow_the_ceiling_verdict(tmp_path: Path, br
         page.locator("#elevation-wall-ceiling").click()
         page.wait_for_function('state => constructionAt("ceiling", "auto1")?.state === state', arg="original" if with_original else "unknown")
         words = "原本的天花「自編天花板」原樣"
-        expect(page.locator("#zone-keep-ceiling-auto1")).to_have_text(f"{words}，不貼東西" if with_original else "不貼，保留原樣")
+        # 舊表「不貼」那一格（#zone-keep-）→ 右欄那一區那一句的開頭（同一支 keepWords）。
+        expect(page.locator("#wall-zone-what-ceiling-auto1")).to_have_text(
+            re.compile("^" + re.escape(f"{words}，不貼東西。" if with_original else "不貼，保留原樣。")))
         now = page.evaluate('plainNow(zoneList("ceiling").find(z => z.id === "auto1").material, "ceiling", "auto1")')
         assert now == (f"沒貼東西（{words}）" if with_original else "不貼，保留原樣")
 

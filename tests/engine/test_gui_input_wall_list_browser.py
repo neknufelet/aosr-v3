@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import cast
 
@@ -22,8 +23,9 @@ from tests.engine.test_gui_input_clear_undo_browser import _release
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
 from tests.engine.test_gui_wall_words import _arrive, _late_rename
 from tests.engine._zone_symmetry_room import NAME as REFERENCE_ROOM
+from tests.engine.test_gui_vpr_reference import HIT
 from tests.engine.test_gui_vpr_reference_browser import LISTED, _prepare
-from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
+from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write, _zones
 
 Doc = dict[str, object]
 WOOL = ["glass_wool_48k", "none"]
@@ -151,6 +153,26 @@ def test_the_list_counts_choices_the_same_way_as_the_zone_page(tmp_path: Path, b
         count = panel.removeprefix("程式從下面勾的 ").split(" 種")[0]
         assert count.isdigit() and int(count) < len(LISTED), panel
         assert f"從 {count} 種裡挑" in listed, (listed, panel)
+        # 程式不會挑的那一筆另外點名，接在能挑的後面（第二趟追加保險行：這一段之前沒有斷言）。
+        pickable, aside = cast(list[list[str]], page.evaluate(
+            "ids => [pickableChoices(ids).map(choiceName), ids.filter(id => !pickableChoices(ids).includes(id)).map(choiceName)]", LISTED))
+        assert aside, aside
+        assert f"從 {count} 種裡挑（{'、'.join(pickable)}；{'、'.join(aside)}程式不會挑）" in listed, listed
+        _assert_quiet(watched)
+
+
+def test_a_list_of_only_what_the_program_never_picks_has_no_stray_separator(tmp_path: Path, browser: Browser) -> None:
+    """第二趟追加：清單只放了程式不會挑的那一類（「鋼板直接貼在棉上」那一筆）：寫「從 0 種裡挑（X程式不會挑）」，
+    括號開頭不多一個「；」。"""
+    _prepare(tmp_path, {"x0/a": [HIT]}, left_right_symmetry="off")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, REFERENCE_ROOM)
+        page.locator("#elevation-wall-x0").click()
+        listed = page.locator("#wall-zone-what-x0-a").inner_text()
+        hit = cast(str, page.evaluate("id => choiceName(id)", HIT))
+        assert f"從 0 種裡挑（{hit}程式不會挑）" in listed, listed
+        assert "（；" not in listed, listed
         _assert_quiet(watched)
 
 
@@ -208,3 +230,130 @@ def test_a_wall_tab_click_while_a_rename_waits_lands_on_that_wall_and_keeps_the_
         assert floor.input_value() == "2000"
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
+
+
+def test_blanking_the_room_size_keeps_only_an_open_wall_editor_line_so_it_can_be_closed(tmp_path: Path, browser: Browser) -> None:
+    """設計洞 4 走乙（第二趟決定第 1 條）：房間尺寸清成空白、畫不出這一面時，「換原本的牆」「這一面另設」那兩行裡
+    打開著的那一行照留（裡面那顆鈕是關掉那一塊唯一的地方），沒打開的照舊收起來；按那顆鈕關掉之後那一行也收起來；
+    填回去兩行都回來、那一塊還是收著。兩塊各考一次。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        lines = {"wall-original-editor": "#elevation-original-line", "wall-depth-editor": "#elevation-depth-line"}
+        for button, area in (("edit-wall-original", "wall-original-editor"), ("edit-wall-depth", "wall-depth-editor")):
+            other = next(line for name, line in lines.items() if name != area)
+            open_fact_editor(page, button)
+            expect(page.locator(f"#{area}")).to_be_visible()
+            page.locator("#room-Lx").fill("")
+            page.locator("#room-Lx").press("Tab")
+            expect(page.locator("#elevation-size")).to_have_text("先把房間的長、寬、高都填好正數，才畫得出這一面。")
+            expect(page.locator(lines[area])).to_be_visible()
+            expect(page.locator(f"#{button}")).to_be_visible()
+            expect(page.locator(f"#{button}")).to_have_attribute("aria-expanded", "true")
+            expect(page.locator(f"#{area}")).to_be_visible()
+            expect(page.locator(other)).to_be_hidden()
+            page.locator(f"#{button}").click()
+            expect(page.locator(f"#{area}")).to_be_hidden()
+            expect(page.locator(f"#{button}")).to_have_attribute("aria-expanded", "false")
+            expect(page.locator(lines[area])).to_be_hidden()
+            page.locator("#room-Lx").fill(str(ROOM_109["Lx"]))
+            page.locator("#room-Lx").press("Tab")
+            _settled(page)
+            expect(page.locator("#elevation-original-line")).to_be_visible()
+            expect(page.locator("#elevation-depth-line")).to_be_visible()
+            expect(page.locator(f"#{area}")).to_be_hidden()
+        _assert_quiet(watched)
+
+
+# 舊做法表那幾種逐區控制項與它們那一格的 id 前綴（#1265 單元 3 之二第二趟拆表前 zone_modes.js、zone_limits.js 畫的）。
+OLD_ZONE_CONTROL_PREFIXES = ("zone-table", "zone-row-", "zone-mode-", "zone-fixed-", "zone-material-", "zone-show-all", "zone-allowed-",
+                             "zone-chip-", "zone-preset", "zone-depth-", "depth-zone-", "zone-keep-", "zone-search-now-", "zone-name-",
+                             "zone-label-")
+# 第 2 段裡准有的 select／input：牆面表單（「換原本的牆」那一塊，分區的牆不列）、這一面總厚度（「這一面另設」那一塊，
+# 一面一格，不是每一區）、選取框那四格（框的位置與大小）。每一區的做法、材料、候選、最深一格都沒有。
+ALLOWED_SECTION_CONTROLS = re.compile(r"^((material-kind|wall)-(floor|ceiling|x0|xL|y0|yL)|depth-wall-(floor|ceiling|x0|xL|y0|yL)"
+                                      r"|elevation-(left|bottom|width|height))$")
+
+
+def _section_controls(page: Page) -> list[str]:
+    return cast(list[str], page.evaluate("""() => [...document.getElementById('wall-section').querySelectorAll('select, input, textarea')]
+        .map(node => node.id)"""))
+
+
+def test_the_input_page_has_no_control_that_changes_a_zone_and_every_zone_has_its_way_to_the_zone_page(
+        tmp_path: Path, browser: Browser) -> None:
+    """第二趟（拆舊做法表）新加：輸入頁整頁沒有任何能改每一區做法、材料、候選、總厚度的控制項——舊表那幾種 id 前綴一個都不在
+    （查 id、不查 class：「zone-mode-search」這種當顏色用的 class 照留）；第 2 段裡的 select／input 只剩牆面表單、這一面總厚度、
+    選取框四格，個數照實數；右欄每一區照樣有一顆「改這一區 ▸」。開頁、選前牆、畫一框（選取中）三個時候各看一次。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+
+        def check(expected_controls: int) -> None:
+            for prefix in OLD_ZONE_CONTROL_PREFIXES:
+                expect(page.locator(f"main [id^='{prefix}']")).to_have_count(0)
+            controls = _section_controls(page)
+            assert len(controls) == expected_controls, controls
+            assert all(ALLOWED_SECTION_CONTROLS.match(name) for name in controls), controls
+
+        check(12)  # 六面牆面表單各兩格（種類、數字），收在「換原本的牆」裡
+        page.locator("#elevation-wall-x0").click()
+        check(13)  # 加前牆「這一面另設」那一格
+        expect(page.locator("#elevation-list-zones .zone-item")).to_have_count(1)
+        expect(page.locator("#zone-goto-x0-whole_wall")).to_have_text("改這一區 ▸")
+        _drag(page, ROOM_109["Ly"], ROOM_109["Lz"], (0.3, 0.3), (1.3, 1.3))
+        _settled(page)
+        check(15)  # 前牆分區了：牆面表單少前牆那兩格；加選取框四格
+        keys = [str(zone["id"]) for zone in _zones(page, "x0")]
+        assert len(keys) > 1, keys
+        expect(page.locator("#elevation-list-zones .zone-item")).to_have_count(len(keys))
+        expect(page.locator("#elevation-list-zones [id^=zone-goto-x0-]")).to_have_count(len(keys))
+        for key in keys:
+            expect(page.locator(f"#wall-zone-x0-{key} #zone-goto-x0-{key}")).to_have_text("改這一區 ▸")
+        _assert_quiet(watched)
+
+
+GAP_TEXT = "這一面的分區沒有正好蓋滿整面（留了空）；請重切這一面"
+
+
+def _with_gap(route: Route) -> None:
+    """限制判決照真的問，回覆裡前牆加一條整面判決「沒蓋滿整面」（伺服器 zone_limits.py 的 not_covered，紅的）。"""
+    response = route.fetch()
+    data = cast(dict[str, object], response.json())
+    assert data["status"] == "checked", data
+    data["walls"] = {**cast(dict[str, object], data["walls"]), "x0": [{"code": "not_covered", "level": "red", "text": GAP_TEXT}]}
+    data["refusals"] = [*cast(list[str], data["refusals"]), f"前牆：{GAP_TEXT}"]
+    data["red"] = cast(int, data["red"]) + 1
+    route.fulfill(response=response, json=data)
+
+
+def test_a_whole_wall_verdict_sits_above_the_list_under_the_summary_with_its_old_id(tmp_path: Path, browser: Browser) -> None:
+    """第二趟（拆舊做法表）：這一面整面的判決（limit-wall-<牆>-<i>）從舊表上方搬到第 2 段右欄上方 #elevation-list-notes，
+    接在限制總結（zone-limits-summary）底下、id 照舊；換到別一面，那幾行就不在。伺服器的整面判決只有紅的兩種（分區讀不出來、
+    沒蓋滿整面），切框的畫面走不到，這一題把 /api/zone-limits 的回覆加一條「沒蓋滿整面」再要一次判決。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _settled(page)
+        notes = page.locator("#elevation-list-notes")
+        expect(notes.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        expect(page.locator("[id^=limit-wall-]")).to_have_count(0)
+        page.route("**/api/zone-limits", _with_gap)
+        page.evaluate("refreshZoneLimits()")
+        line = notes.locator("#limit-wall-x0-0")
+        expect(line).to_have_text(GAP_TEXT)
+        expect(line).to_have_class(re.compile(r"\blimit-red\b"))
+        expect(line).to_be_visible()
+        expect(notes.locator("#zone-limits-summary")).to_contain_text("有 1 條超過限制")
+        order = cast(list[str], notes.evaluate("area => [...area.querySelectorAll('[id]')].map(node => node.id)"))
+        assert order[:2] == ["zone-limits-summary", "limit-wall-x0-0"], order
+        page.locator("#elevation-wall-y0").click()
+        _settled(page)
+        expect(page.locator("[id^=limit-wall-]")).to_have_count(0)
+        expect(notes.locator("#zone-limits-summary")).to_contain_text("有 1 條超過限制")  # 總結講整份方案，換面照舊
+        _assert_quiet(watched)

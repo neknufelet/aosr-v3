@@ -66,8 +66,8 @@ def test_each_group_cap_sits_under_its_zone_in_the_list_once(tmp_path: Path, bro
         expect(warn).to_contain_text("深背岩棉（自填）：不可用")
         assert warn.evaluate("node => getComputedStyle(node).color") == "rgb(154, 91, 0)"
         expect(page.locator("[id^=depth-target-]")).to_have_count(len(targets))
-        expect(page.locator("#zone-table-fold [id^=depth-target-], #zone-table-fold #depth-cap-x0-whole_wall")).to_have_count(0)
-        expect(page.locator("#depth-zone-x0-whole_wall")).to_have_text("這一區沒給")  # 舊做法表那一格只剩這一區自己給的
+        # 舊做法表整張拆了（#1265 單元 3 之二第二趟）：逐組上限只在右欄那一區底下。舊表「這一區沒給」那一格跟著表走（丙）。
+        expect(page.locator("#zone-table-fold")).to_have_count(0)
         assert page.evaluate(DUPLICATE_IDS) == []
         shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)  # 給了資料夾就把截圖存去那裡（證據），沒給存暫存
         page.locator("#elevation-list").screenshot(path=str(shots / "u3b-list-depth-targets.png"))
