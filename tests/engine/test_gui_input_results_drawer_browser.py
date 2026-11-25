@@ -4,6 +4,8 @@
 永久刪除的確認框字不變；存檔鎖住期間抽屜裡的按鈕按不了；頁面中間不再有第二份結果清單。"""
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 
 from playwright.sync_api import Browser, Dialog, Locator, Page, Route, expect
@@ -17,6 +19,8 @@ from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser,
 from tests.engine.test_gui_result_standing import changed_snapshot
 
 FIRST, SECOND, THIRD = "1" * 32, "2" * 32, "3" * 32
+# 評分不同的紅底：比單一類別名（同一列另有 not-finished 等類別時也比得準，第三趟審查建議 2）。
+REGISTRY_DIFFERS = re.compile(r"(^|\s)registry-differs(\s|$)")
 
 
 def _renamed(result: SchemeResult, name: str) -> SchemeResult:
@@ -181,6 +185,41 @@ def test_check_two_to_compare_third_is_blocked(tmp_path: Path, browser: Browser,
         _assert_quiet(watched)
 
 
+def test_archive_two_picks_of_same_scheme_clears_both_even_if_reload_fails(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第三趟 G1：勾的 A、B 是同一份方案的兩筆，封存那一份時兩格一起清空；封存之後重讀清單失敗（不會再整張重畫）
+    也一樣。再勾別筆它是 A，網址不指到已封存的那一筆。"""
+    first, second, other = FIRST, SECOND, THIRD
+    same = _renamed(result, "same-scheme")
+    _saved(tmp_path, same)
+    _bundle(tmp_path, same, first)
+    _bundle(tmp_path, same, second)
+    _bundle(tmp_path, _renamed(result, "other-scheme"), other)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _dialogs(page)
+        check_result(page, first)
+        check_result(page, second)
+        page.route("**/api/results", lambda route: route.fulfill(
+            status=500, content_type="application/json", body='{"error":"清單暫時讀不到"}'))
+        result_row(page, first).get_by_role("button", name="封存").click()
+        expect(page.locator("#results-note")).to_contain_text("清單更新不了")
+        assert page.evaluate("() => [compareChoice.a?.run_id ?? null, compareChoice.b?.run_id ?? null]") == [None, None]
+        for run_id in (first, second):
+            expect(result_row(page, run_id).locator(".compare-mark")).to_have_text("")
+            expect(result_row(page, run_id).get_by_role("checkbox")).not_to_be_checked()
+        expect(page.locator("#compare-hint")).to_have_text("勾兩筆就能比較")
+        check_result(page, other)
+        expect(result_row(page, other).locator(".compare-mark")).to_have_text("A")
+        expect(page.locator("#compare-hint")).to_contain_text("已勾 A：other-scheme")
+        go = page.locator("#compare-go")
+        expect(go).to_have_attribute("aria-disabled", "true")
+        assert go.get_attribute("href") is None
+        # 主控台只准有攔下的那幾次 500（瀏覽器自己印的「讀取資源失敗」），頁面本身不准拋錯。
+        assert all("500" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
 def test_different_scoring_settings_turn_both_rows_red(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
     _bundle(tmp_path, _renamed(result, "room-one"), FIRST)
     _bundle(tmp_path, _renamed(result, "room-two"), SECOND)
@@ -192,7 +231,7 @@ def test_different_scoring_settings_turn_both_rows_red(tmp_path: Path, browser: 
         check_result(page, FIRST)
         check_result(page, SECOND)
         for run_id in (FIRST, SECOND, THIRD):
-            expect(result_row(page, run_id)).not_to_have_class("registry-differs")
+            expect(result_row(page, run_id)).not_to_have_class(REGISTRY_DIFFERS)
         expect(warning).to_be_hidden()
         plain = result_row(page, THIRD).evaluate("node => getComputedStyle(node).backgroundColor")
         result_row(page, SECOND).get_by_role("checkbox").uncheck()
@@ -200,7 +239,7 @@ def test_different_scoring_settings_turn_both_rows_red(tmp_path: Path, browser: 
         for run_id in (FIRST, THIRD):
             expect(result_row(page, run_id)).to_have_class("registry-differs")
             assert result_row(page, run_id).evaluate("node => getComputedStyle(node).backgroundColor") != plain
-        expect(result_row(page, SECOND)).not_to_have_class("registry-differs")
+        expect(result_row(page, SECOND)).not_to_have_class(REGISTRY_DIFFERS)
         expect(warning).to_be_visible()
         expect(warning).to_have_text("評分設定不同，放在一起比會不準")
         # 不擋比較。
@@ -208,7 +247,7 @@ def test_different_scoring_settings_turn_both_rows_red(tmp_path: Path, browser: 
         # 取消其中一筆：紅底與那一句一起收起（審查建議 3）。
         result_row(page, THIRD).get_by_role("checkbox").uncheck()
         for run_id in (FIRST, THIRD):
-            expect(result_row(page, run_id)).not_to_have_class("registry-differs")
+            expect(result_row(page, run_id)).not_to_have_class(REGISTRY_DIFFERS)
         expect(warning).to_be_hidden()
         _assert_quiet(watched)
 
@@ -395,6 +434,65 @@ def test_row_gone_moves_focus_to_next_row_same_button_or_close(
         expect(page.locator("#clear-archive")).to_be_hidden()
         assert page.evaluate("() => window.whenHidden") == "results-close"
         expect(page.locator("#results-close")).to_be_focused()
+        _assert_quiet(watched)
+
+
+def _stamp(root: Path, run_id: str, seconds: int) -> None:
+    """結果清單照結果檔的修改時間新到舊排：把那一筆的時間釘住，抽屜的順序就固定。"""
+    for path in (root / "results").glob(f"{run_id}*"):
+        os.utime(path, (seconds, seconds))
+
+
+def test_row_gone_lands_on_first_surviving_row_below(tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第三趟 G2：那一筆不在了，游標落到「原本在它下面、現在還在的第一筆」的同一顆，不是照數字位置：
+    同一份方案好幾筆一起被封存時不跳過真正的下一筆；上面同時插進新的一筆，也不落到原本在它上面的那一筆。"""
+    a1, a2, b1, c1, d1, new = "1" * 32, "2" * 32, "3" * 32, "4" * 32, "5" * 32, "6" * 32
+    same = _renamed(result, "room-one")
+    _saved(tmp_path, same)
+    for index, (item, run_id) in enumerate(((_renamed(result, "room-four"), d1), (_renamed(result, "room-three"), c1),
+                                            (_renamed(result, "room-two"), b1), (same, a2), (same, a1))):
+        _bundle(tmp_path, item, run_id)
+        _stamp(tmp_path, run_id, 1700000000 + index * 60)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _dialogs(page)
+        open_results(page)
+        assert _order(page, "#results-list", "runId") == [a1, a2, b1, c1, d1]
+        # 游標在 a2（第 2 列）按封存：a1、a2 同一份方案一起收走，剩 [b1, c1, d1]，落到 b1，不是第 2 列的 c1。
+        result_row(page, a2).get_by_role("button", name="封存").focus()
+        page.keyboard.press("Enter")
+        expect(result_row(page, a2)).to_have_count(0)
+        assert _order(page, "#results-list", "runId") == [b1, c1, d1]
+        expect(result_row(page, b1).get_by_role("button", name="封存")).to_be_focused()
+        # 游標在 c1（第 2 列）的「看」：c1 不在了、最上面同時多了新的一筆，剩 [new, b1, d1]，落到 d1，不是第 2 列的 b1。
+        result_row(page, c1).get_by_role("link", name="看", exact=True).focus()
+        for path in (tmp_path / "results").glob(f"{c1}*"):
+            path.unlink()
+        _bundle(tmp_path, _renamed(result, "room-new"), new)
+        _stamp(tmp_path, new, 1700001000)
+        page.evaluate("() => loadResultList().then(() => null)")
+        assert _order(page, "#results-list", "runId") == [new, b1, d1]
+        expect(result_row(page, d1).get_by_role("link", name="看", exact=True)).to_be_focused()
+        _assert_quiet(watched)
+
+
+def test_archive_block_folds_after_clear_then_new_archive(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """第三趟順手（審查建議 1）：已封存那一塊清空時一併收合，之後再封存一筆，它出現時是收著的，沒按「看已封存的」不自己展開。"""
+    _three(tmp_path, result)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _dialogs(page)
+        result_row(page, FIRST).get_by_role("button", name="封存").click()
+        expect(result_row(page, FIRST)).to_have_count(0)
+        open_archived(page)
+        page.wait_for_load_state("networkidle")
+        page.locator("#clear-archive").click()
+        expect(page.locator("#archived")).to_be_hidden()
+        result_row(page, SECOND).get_by_role("button", name="封存").click()
+        expect(result_row(page, SECOND)).to_have_count(0)
+        expect(page.locator("#archived")).to_be_visible()
+        assert page.locator("#archived").evaluate("node => node.open") is False
         _assert_quiet(watched)
 
 

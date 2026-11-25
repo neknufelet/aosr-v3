@@ -233,7 +233,9 @@ function closeResults() {
 // 抽屜開著時清單重畫（重讀、封存、搬回、刪除、換方案）或鎖頁解開（第二趟 F1、F3）：節點被換掉、或 main 被鎖住
 // 那一下，游標會無聲掉回 body，不會有 focusin。所以游標進抽屜時先記住它在哪（哪張表、哪一筆、哪一種按鈕，
 // 照按鈕種類認：勾選格、看、封存、搬回、永久刪除），重畫完與解鎖後放回同一筆的同一顆；那一筆不在了，
-// 放到原位置的下一列同一顆，沒有就放到「關閉 ✕」。main 鎖著時 .focus() 沒作用，留到解鎖再放。
+// 放到「原本在它下面、現在還在的第一筆」的同一顆（記的是下面那幾筆的代號、照順序，不記數字位置：同一份方案
+// 好幾筆一起封存、上面插進新的一筆都不會落錯，第三趟 G2），都不在了就放到「關閉 ✕」。
+// main 鎖著時 .focus() 沒作用，留到解鎖再放。
 const drawerLists = {"results-list": "runId", "archived-packages-list": "packageId", "archived-list": "runId"};
 let drawerFocus = null;
 const drawerKind = node => `${node.tagName}:${node.textContent}`;
@@ -243,9 +245,10 @@ function rowStops(row) {
 function noteDrawerFocus(node = document.activeElement) {
   if (!(node instanceof HTMLElement) || !$("results-panel").contains(node) || !node.getClientRects().length) return;
   const row = node.closest("tr"), body = row?.parentElement;
-  drawerFocus = body && body.id in drawerLists
-    ? {list: body.id, id: row.dataset[drawerLists[body.id]], kind: drawerKind(node), index: [...body.children].indexOf(row)}
-    : {node};
+  if (!body || !(body.id in drawerLists)) { drawerFocus = {node}; return; }
+  const key = drawerLists[body.id], rows = [...body.children];
+  drawerFocus = {list: body.id, id: row.dataset[key], kind: drawerKind(node),
+    below: rows.slice(rows.indexOf(row) + 1).map(item => item.dataset[key])};
 }
 function keepDrawerFocus() {
   const active = document.activeElement;
@@ -255,7 +258,8 @@ function keepDrawerFocus() {
   let target = key?.node?.isConnected ? key.node : null;
   if (key?.list) {
     const rows = [...$(key.list).children];
-    const row = rows.find(item => item.dataset[drawerLists[key.list]] === key.id) || rows[key.index];
+    const byId = id => rows.find(item => item.dataset[drawerLists[key.list]] === id);
+    const row = byId(key.id) || key.below.map(byId).find(Boolean);
     target = row && rowStops(row).find(node => drawerKind(node) === key.kind);
   }
   if (!target || target.disabled || !target.getClientRects().length) target = $("results-close");

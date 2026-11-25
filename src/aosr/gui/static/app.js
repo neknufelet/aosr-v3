@@ -705,9 +705,14 @@ function chooseCompare(side, item) {
   compareChoice[side] = item;
   drawCompareChoice();
 }
-function drawCompareChoice() {
-  // 「先勾的是 A」照字面成立（第二趟 F4）：A 那一筆取消勾選、封存或不在清單了，留著的 B 遞補成 A，再勾的是 B。
+// 放掉比較裡的筆（取消勾選、封存、重讀清單時不在了，三條路都走這裡；第三趟 G1）：只改狀態、不畫。
+// 先把符合的每一格一次清完，再做唯一一處遞補——A 空了、B 還在，B 補成 A（「先勾的是 A」照字面成立，第二趟 F4）。
+// 畫面由呼叫端畫一次（drawCompareChoice 只畫、不改狀態），不會清到一半就被搬動、漏清另一格。
+function dropCompare(gone) {
+  for (const side of ["a", "b"]) if (compareChoice[side] && gone(compareChoice[side])) compareChoice[side] = null;
   if (!compareChoice.a && compareChoice.b) [compareChoice.a, compareChoice.b] = [compareChoice.b, null];
+}
+function drawCompareChoice() {
   const {a, b} = compareChoice, both = Boolean(a && b);
   const differs = both && a.registry_text !== b.registry_text;
   for (const row of $("results-list").querySelectorAll("tr")) {
@@ -789,7 +794,7 @@ function drawerRow(item) {
   box.setAttribute("aria-label", `勾來比較：${item.scheme_id}（${item.finished_text}）`);
   box.onchange = () => {
     const side = ["a", "b"].find(key => compareChoice[key]?.run_id === item.run_id);
-    if (side) chooseCompare(side, null);
+    if (side) { dropCompare(picked => picked.run_id === item.run_id); drawCompareChoice(); }
     else if (!compareChoice.a) chooseCompare("a", item);
     else if (!compareChoice.b) chooseCompare("b", item);
     else drawCompareChoice();
@@ -846,10 +851,8 @@ async function archiveScheme(name) {
   const preview = await api(`/api/schemes/${encodeURIComponent(name)}/archive-preview`);
   if (!window.confirm(`會把「${name}」的設定檔和 ${preview.result_count} 筆結果一起收起來，下拉和清單都看不到，名字會空出來，之後可以從封存區整包搬回。確定封存嗎？`)) return;
   const data = await api(`/api/schemes/${encodeURIComponent(name)}/archive`, "POST", {});
-  for (const side of ["a", "b"]) {
-    if (compareChoice[side]?.scheme_id === name || data.result_ids.includes(compareChoice[side]?.run_id))
-      chooseCompare(side, null);
-  }
+  dropCompare(picked => picked.scheme_id === name || data.result_ids.includes(picked.run_id));
+  drawCompareChoice();
   if (data.result_ids.some((id) => $("result-link").getAttribute("href") === `/results/${id}`)) {
     $("result-link").hidden = true;
     $("result-stale").hidden = true;
@@ -902,6 +905,7 @@ async function loadArchiveList() {
   $("clear-archive").hidden = !preview || (!preview.package_ids.length && !preview.run_ids.length);
   $("clear-archive").onclick = () => action(() => clearArchive(preview));
   archive.hidden = !packages.length && !data.results.length;
+  if (archive.hidden) archive.open = false;  // 清空就收合，之後再封存一筆時它是收著出現的（第三趟，審查建議 1）
   archive.querySelector("summary").textContent = `看已封存的結果（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
   $("archive-say").hidden = archive.hidden;
   // 頂條「看已封存的」問過、而且真的一包也沒有：寫一句（home.js）；滑動提示只在真有表格時出現（第二趟 F5）。
@@ -954,12 +958,11 @@ async function loadResultList() {
   return data.results;
 }
 // 抽屜裡的結果列：每次重讀清單、打開抽屜（「現在開著」跟著換）都重畫；勾選跟著計算代號留住（清單裡沒有了就放掉），
-// 游標放回同一列的同一顆（那一列不在了放下一列，home.js 的 keepDrawerFocus）。
+// 游標放回同一列的同一顆（那一列不在了放原本在它下面、還在的第一列，home.js 的 keepDrawerFocus）。
 function drawResultRows() {
-  for (const side of ["a", "b"]) {
-    const item = compareChoice[side];
-    if (item) compareChoice[side] = resultRows.find(row => row.run_id === item.run_id) || null;
-  }
+  const fresh = picked => resultRows.find(row => row.run_id === picked.run_id);
+  dropCompare(picked => !fresh(picked));
+  for (const side of ["a", "b"]) if (compareChoice[side]) compareChoice[side] = fresh(compareChoice[side]);
   noteDrawerFocus();
   $("results-list").replaceChildren(...resultRows.map(item => resultRow(item)));
   const empty = !resultRows.length;
