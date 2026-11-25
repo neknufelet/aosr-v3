@@ -138,7 +138,11 @@ function drawSchemeMenu() {
   $("all-schemes").textContent = `看全部方案（${names.length} 份）`;
 }
 function formHasEdits() { return runEdited || window.zonePageHasEdits(); }
+// 回 false 時 leaveProblem 分兩種（#1265 單元 5b 第三趟不變式三）：空字串是使用者按了「取消」；不是空字串是按了「存了再走」
+// 但沒存成，寫的是沒存成的原因（save 剛寫進訊息列的那一句）。
+let leaveProblem = "";
 async function canLeaveForm() {
+  leaveProblem = "";
   // 鎖頁中的程式點擊照走 openScheme 自己的拒收提示。
   if (!formHasEdits() || inputBusy) return true;
   const dialog = $("leave-edits"), locked = formRunning() || finishedNames.has(openedId);
@@ -147,7 +151,16 @@ async function canLeaveForm() {
   dialog.returnValue = "cancel";
   dialog.showModal();
   await new Promise(resolve => dialog.addEventListener("close", resolve, {once: true}));
-  if (dialog.returnValue === "save") return await save() && !formHasEdits();
+  if (dialog.returnValue === "save") {
+    if (!await save()) { leaveProblem = $("messages").textContent || "存檔沒有成功"; return false; }
+    // 存好了但還有沒存的：方案存好、每一區的做法沒存成（save 的訊息是警示，抄在存檔回饋列），或等的時候又改了別的地方。
+    if (formHasEdits()) {
+      const feedback = $("save-feedback");
+      leaveProblem = feedback.className === "notice" && feedback.textContent ? feedback.textContent : "存的時候又改了別的地方，那幾下還沒存";
+      return false;
+    }
+    return true;
+  }
   return dialog.returnValue === "discard";
 }
 function bindBars() {
@@ -175,8 +188,10 @@ function bindBars() {
   $("show-results").onclick = () => openResults();
   $("all-schemes").onclick = () => { allSchemes = true; drawSchemeMenu(); menuItems()[0]?.focus(); };
   // 「從範本開一份新的…」：打開那一塊（範本、新方案的名字、開一份新的；app.js 的 newFromTemplate），游標到選中的範本。
+  // 每次打開那一塊提示欄都是空的（第三趟不變式四）；「開一份新的」還沒做完時只把那一塊叫回來，不清它要寫的原因。
   $("choose-template").onclick = () => {
     closeBarBoxes(); $("template-box").hidden = false;
+    if (!newSchemePending) sayBeside("new-scheme-note", "", "");
     document.querySelector('input[name="new-template"]:checked').focus();
   };
   $("show-archived").onclick = showArchived;

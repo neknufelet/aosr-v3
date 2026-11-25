@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Error, Page, Route, expect
 
 from tests.engine._input_page_steps import fill_new_scheme, new_from_template, open_example_scheme
@@ -292,4 +293,241 @@ def test_restoring_on_the_empty_screen_stays_locked_until_it_opens_and_says_the_
         assert sent == [], sent
         assert set(_folder(tmp_path)) == {"broken.json", "kept.json"}
         expect(page.locator("#save-id")).to_have_value("kept")
+        # 不變式四（第三趟）：搬回成功之後，鎖著時被擋下的那一句不留在那一塊。
+        expect(note).to_have_text("")
         assert watched.page_errors == []
+
+
+# 第三趟（審查 u5b2 三錯同一個缺口）：「開一份新的」從按下到結束一次只准一個，「存了再走」等清單的那段沒鎖也一樣。
+REFUSED_NEW = f"{BUSY}，沒有開新的；等它做完再按一次「開一份新的」"
+
+
+def _save_then_leave_with_the_list_held(page: Page, base: str, tmp_path: Path, name: str) -> list[Route]:
+    """開著的那一份改了房間長度，從選單開新的「name」，詢問裡按「存了再走」：舊方案存好、鎖已解（save 故意的），
+    重讀結果清單那一趟被攔住，回傳攔住的那一趟。"""
+    open_example_scheme(page, base, tmp_path)
+    page.locator("#room-Lx").fill("5.5")
+    held: list[Route] = []
+    page.route(f"{base}/api/results", lambda route: held.append(route) if not held else route.continue_())
+    fill_new_scheme(page, name, "stage_one")
+    page.locator("#new-scheme-go").click()
+    expect(page.locator("#leave-edits")).to_be_visible()
+    with page.expect_request(f"{base}/api/results"):
+        page.locator("#leave-edits").get_by_role("button", name="存了再走", exact=True).click()
+    page.wait_for_function("!inputBusy")
+    return held
+
+
+def _clickable(page: Page, selector: str) -> bool:
+    try:
+        page.locator(selector).click(timeout=500)
+        return True
+    except Error:
+        return False
+
+
+def test_a_second_press_while_the_old_scheme_is_being_saved_is_refused_and_sends_nothing(
+        tmp_path: Path, browser: Browser) -> None:
+    """不變式一（審查 u5b2 第 1 條甲）：「存了再走」存好舊方案、還在重讀清單（這時整頁沒鎖）：那一塊 inert，真按點不到；
+    頁面程式改名 fresh-2 再按「開一份新的」照鎖頁那句擋下、不送請求；程式按「取消」、按 Esc 都不關那一塊。
+    放行後只存出 fresh-1、開的是它，那一塊的提示欄是空的。"""
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        sent: list[str] = []
+        page.on("request", lambda request: sent.append(request.url) if request.method == "PUT" and "fresh" in request.url else None)
+        held = _save_then_leave_with_the_list_held(page, base, tmp_path, "fresh-1")
+        assert page.evaluate("[inputBusy, document.getElementById('new-scheme').inert, newSchemePending]") == [False, True, True]
+        assert _clickable(page, "#new-scheme-go") is False
+        assert _clickable(page, "#new-template-reference") is False
+        note = page.locator("#new-scheme-note")
+        # 頁面程式寫進名字格、發 input：名字格的即時提示不准在這段換掉提示欄（真打字 inert 擋著）。
+        page.evaluate("(() => { const field = document.getElementById('new-scheme-id');"
+                      " field.value = '中文'; field.dispatchEvent(new Event('input')); })()")
+        expect(note).to_have_text("")
+        page.evaluate("document.getElementById('new-scheme-id').value = 'fresh-2'")
+        page.locator("#new-scheme-go").evaluate("node => node.click()")
+        expect(note).to_have_text(REFUSED_NEW)
+        page.locator("#new-scheme-cancel").evaluate("node => node.click()")
+        page.keyboard.press("Escape")
+        expect(page.locator("#template-box")).to_be_visible()
+        held[0].continue_()
+        page.wait_for_function(f"openedId === 'fresh-1' && {UNLOCKED}")
+        page.wait_for_load_state("networkidle")
+        assert sent == [f"{base}/api/schemes/fresh-1"], sent
+        assert set(_folder(tmp_path)) == {"example.json", "fresh-1.json"}
+        expect(note).to_have_text("")
+        expect(page.locator("#template-box")).to_be_hidden()
+        _assert_quiet(watched)
+
+
+def test_cancel_while_the_old_scheme_is_being_saved_does_not_hide_the_reason(tmp_path: Path, browser: Browser) -> None:
+    """不變式一、三（審查 u5b2 第 1 條乙）：同一段空窗頁面程式按「取消」不起作用；接著真按「換一個方案」把那一塊收起來；
+    放行後新的那一份伺服器不收（422）：那一塊打開回來、原因寫在那一塊裡、看得到，游標回名字格。"""
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        page.route(f"{base}/api/schemes/fresh-c", lambda route: route.fulfill(status=422, json={"error": "伺服器不收這一份"})
+                   if route.request.method == "PUT" else route.continue_())
+        held = _save_then_leave_with_the_list_held(page, base, tmp_path, "fresh-c")
+        page.locator("#new-scheme-cancel").evaluate("node => node.click()")
+        expect(page.locator("#template-box")).to_be_visible()
+        # 這段沒鎖：真按「換一個方案」把那一塊收起來、打開選單；沒開成的時候那一塊要打開回來、選單收掉。
+        page.locator("#scheme-menu-button").click()
+        expect(page.locator("#template-box")).to_be_hidden()
+        held[0].continue_()
+        note = page.locator("#new-scheme-note")
+        expect(note).to_have_text("沒有開新的：伺服器不收這一份")
+        expect(page.locator("#scheme-menu")).to_be_hidden()
+        page.wait_for_function(UNLOCKED)
+        expect(page.locator("#template-box")).to_be_visible()
+        expect(note).to_be_visible()
+        expect(page.locator("#new-scheme-id")).to_be_focused()
+        assert page.evaluate("openedId") == "example"
+        assert watched.page_errors == []
+
+
+def test_a_failed_save_in_the_leave_question_says_so_in_the_box_and_cancel_says_nothing(
+        tmp_path: Path, browser: Browser) -> None:
+    """不變式三（審查 u5b2 第 2 條）：房間長度改成 -1，「存了再走」存不成：那一塊開著、提示欄寫「沒有開新的」配舊方案
+    沒存成的原因（跟存檔回饋列同一句），看得到；再按一次、詢問裡按「取消」：提示欄是空的——兩條出口分得出來；
+    取消之後游標回「開一份新的」，不掉到頁面底層。"""
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        open_example_scheme(page, base, tmp_path)
+        folder = _folder(tmp_path)
+        page.locator("#room-Lx").fill("-1")
+        fill_new_scheme(page, "fresh-x", "stage_one")
+        page.locator("#new-scheme-go").click()
+        expect(page.locator("#leave-edits")).to_be_visible()
+        page.locator("#leave-edits").get_by_role("button", name="存了再走", exact=True).click()
+        note = page.locator("#new-scheme-note")
+        expect(note).to_contain_text("沒有開新的：開著的這一份沒有存成")
+        page.wait_for_function(UNLOCKED)
+        page.wait_for_load_state("networkidle")
+        reason = page.locator("#save-feedback").text_content() or ""
+        assert reason != ""
+        expect(note).to_contain_text(reason)
+        expect(page.locator("#template-box")).to_be_visible()
+        expect(note).to_be_visible()
+        page.locator("#new-scheme-go").click()
+        expect(page.locator("#leave-edits")).to_be_visible()
+        page.locator("#leave-edits").get_by_role("button", name="取消", exact=True).click()
+        expect(page.locator("#leave-edits")).to_be_hidden()
+        page.wait_for_function("!newSchemePending")
+        expect(note).to_have_text("")
+        expect(page.locator("#template-box")).to_be_visible()
+        expect(page.locator("#new-scheme-go")).to_be_focused()
+        assert _folder(tmp_path) == folder
+        assert watched.page_errors == []
+
+
+@pytest.mark.parametrize("case", ["design", "edited"])
+def test_saved_but_still_unsaved_edits_say_the_real_reason(tmp_path: Path, browser: Browser, case: str) -> None:
+    """不變式三（「存了再走」存好方案、表單卻還有沒存的）：design＝每一區的做法沒存成（頁面程式把做法標成讀不到），
+    那一塊寫「沒有存成」配存檔回饋列那一句（做法沒存成的原因），不寫「又改了別的地方」；edited＝重讀清單那段沒鎖時
+    真的又改了房間長度，那一塊寫「又改了別的地方」。兩種都沒存出新的那一份。"""
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        if case == "design":
+            open_example_scheme(page, base, tmp_path)
+            page.locator("#room-Lx").fill("5.5")
+            page.evaluate("zoneDesignBroken = true")
+            fill_new_scheme(page, "fresh-d", "stage_one")
+            page.locator("#new-scheme-go").click()
+            page.locator("#leave-edits").get_by_role("button", name="存了再走", exact=True).click()
+        else:
+            held = _save_then_leave_with_the_list_held(page, base, tmp_path, "fresh-d")
+            page.locator("#room-Lx").fill("5.7")
+            held[0].continue_()
+        note = page.locator("#new-scheme-note")
+        expect(note).to_contain_text("沒有開新的：開著的這一份沒有存成")
+        page.wait_for_function(f"!newSchemePending && {UNLOCKED}")
+        if case == "design":
+            expect(note).to_contain_text("每一區的做法沒存成")
+            expect(note).not_to_contain_text("又改了別的地方")
+        else:
+            expect(note).to_contain_text("存的時候又改了別的地方")
+        expect(page.locator("#template-box")).to_be_visible()
+        assert "fresh-d.json" not in _folder(tmp_path)
+        assert watched.page_errors == []
+
+
+@pytest.mark.parametrize("taker", ["save", "save-as"])
+def test_after_the_leave_question_a_lock_taken_meanwhile_refuses_the_new_scheme(
+        tmp_path: Path, browser: Browser, taker: str) -> None:
+    """不變式二：「存了再走」存好、重讀清單那段空窗裡頁面程式按了「儲存」或「另存新名字」（copy-b；它的存檔被攔住、鎖著）：
+    詢問回來時看到 inputBusy，照鎖頁那句擋下、不送新方案的請求，那一塊開著寫那一句；放行之後資料夾沒有新的那一份。
+    「儲存」做完那一塊照開著、那一句照留；「另存新名字」存好會自己收掉頂條的彈出塊（storeSchemeAs，原本就這樣），不在這裡守。"""
+    stored = "example" if taker == "save" else "copy-b"
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        sent: list[str] = []
+        page.on("request", lambda request: sent.append(request.url) if "fresh-b" in request.url or "template=" in request.url else None)
+        held = _save_then_leave_with_the_list_held(page, base, tmp_path, "fresh-b")
+        puts: list[Route] = []
+        page.route(f"{base}/api/schemes/{stored}", lambda route: puts.append(route) if route.request.method == "PUT"
+                   else route.continue_())
+        page.evaluate("document.getElementById('save-as-id').value = 'copy-b'")
+        with page.expect_request(lambda request: request.method == "PUT" and request.url.endswith(f"/{stored}")):
+            page.locator(f"#{taker}").evaluate("node => node.click()")
+        assert page.evaluate("inputBusy") is True
+        held[0].continue_()
+        note = page.locator("#new-scheme-note")
+        expect(note).to_have_text(REFUSED_NEW)
+        page.wait_for_function("!newSchemePending")
+        expect(page.locator("#template-box")).to_be_visible()
+        puts[0].continue_()
+        page.wait_for_function(UNLOCKED)
+        page.wait_for_load_state("networkidle")
+        assert sent == [], sent
+        assert set(_folder(tmp_path)) == {"example.json", f"{stored}.json"}
+        expect(note).to_have_text(REFUSED_NEW)
+        if taker == "save":
+            expect(page.locator("#template-box")).to_be_visible()
+        assert page.evaluate("openedId") == stored
+        assert watched.page_errors == []
+
+
+def test_opening_the_box_again_starts_with_an_empty_note(tmp_path: Path, browser: Browser) -> None:
+    """不變式四：名字格空著按「開一份新的」（寫了沒開成的原因）→「取消」關掉 → 從選單再打開那一塊：提示欄是空的。"""
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        open_example_scheme(page, base, tmp_path)
+        fill_new_scheme(page, "", "reference")
+        page.locator("#new-scheme-go").click()
+        note = page.locator("#new-scheme-note")
+        expect(note).to_contain_text("沒有開新的：")
+        page.locator("#new-scheme-cancel").click()
+        expect(page.locator("#template-box")).to_be_hidden()
+        page.locator("#scheme-menu-button").click()
+        page.locator("#choose-template").click()
+        expect(page.locator("#template-box")).to_be_visible()
+        expect(note).to_have_text("")
+        _assert_quiet(watched)
+
+
+def test_a_refusal_during_a_successful_new_scheme_does_not_come_back_when_the_box_reopens(
+        tmp_path: Path, browser: Browser) -> None:
+    """不變式四（審查 u5b2 第 3 條）：空畫面開新的「first-a」、重讀清單卡住時頁面程式再按一次（被擋、寫了鎖頁那句）；
+    first-a 打開之後提示欄是空的，從選單再打開那一塊也是空的。空畫面搬回那一條見上面搬回那一題最後兩行。"""
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _empty_start(page)
+        held: list[Route] = []
+        page.route(f"{base}/api/schemes", lambda route: held.append(route) if route.request.method == "GET" and not held
+                   else route.continue_())
+        fill_new_scheme(page, "first-a", "reference")
+        with page.expect_request(f"{base}/api/schemes"):
+            page.locator("#new-scheme-go").click()
+        page.evaluate("document.getElementById('new-scheme-id').value = 'first-b'")
+        page.locator("#new-scheme-go").evaluate("node => node.click()")
+        note = page.locator("#new-scheme-note")
+        expect(note).to_have_text(REFUSED_NEW)
+        held[0].continue_()
+        page.wait_for_function(f"openedId === 'first-a' && {UNLOCKED}")
+        expect(note).to_have_text("")
+        page.locator("#scheme-menu-button").click()
+        page.locator("#choose-template").click()
+        expect(page.locator("#template-box")).to_be_visible()
+        expect(note).to_have_text("")
+        assert set(_folder(tmp_path)) == {"first-a.json"}
+        _assert_quiet(watched)
