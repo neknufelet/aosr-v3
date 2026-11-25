@@ -43,7 +43,8 @@ def open_example_scheme(page: Page, base_url: str, data_dir: Path, name: str = E
     path.write_text(json.dumps(scheme, ensure_ascii=False), encoding="utf-8")
     page.goto(f"{base_url}/?scheme={quote(name)}", wait_until="networkidle")
     page.wait_for_function("document.body.dataset.inputReady === 'true'")
-    page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
+    # 等 openedId（真正打開的方案代號）不等 save-id：名字撞上開頁範本時開檔失敗，save-id 也會剛好相等（5a 審查第 5 點）。
+    page.wait_for_function("name => openedId === name && document.getElementById('save-id').value === name", arg=name)
     page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
     return scheme
 
