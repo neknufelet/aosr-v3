@@ -226,7 +226,7 @@ function limitsSummary(wall, keys) {
   const spans = refusalSpans(), none = [0, 0];
   const redKeys = Object.keys(zoneLimits.zones[wall] ?? {}).filter(key => zoneIsRed(wall, key));
   const zoned = keys.filter(key => redKeys.includes(key));
-  const [wallFrom, wallTo] = wall === null ? none : spans.walls[wall] ?? none;
+  const [wallFrom, wallTo] = spans.walls[wall] ?? none;
   const [zoneFrom, zoneTo] = zoned.length === redKeys.length ? spans.zones[wall] ?? none : none;
   const below = index => (index >= wallFrom && index < wallTo) || (index >= zoneFrom && index < zoneTo);
   const whole = zoneLimits.refusals.filter((text, index) => index >= wallFrom && index < wallTo).length;

@@ -151,8 +151,7 @@ function searchNote(text, kind, byVerdict = true) {
   renderSearchAction();
 }
 function dropSearchSaid() {
-  zoneSearchSaid = null;
-  zoneNote("", "");
+  zoneNote("", "");  // zoneNote 第一行就把 zoneSearchSaid 清掉
 }
 
 // 開舊方案：讀它的設計設定（沒有就是全部固定）；讀不到照講、不當成沒有。
@@ -179,6 +178,12 @@ function resetZoneDesign() {
   zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
   zoneLimits = null; zoneSameAsOriginal.clear(); zoneLastAllowed = null;
 }
+// 做法這一次算存好了（寫了檔，或沒內容也沒存過、不用寫）：每一條這樣的路都只叫這一支（#1265 單元 3 之二收尾第三趟 E1）。
+function zoneDesignWritten() {
+  zoneDesignSaved = true;
+  window.zonePageSaved?.();  // 「這間房貼什麼」那一頁的「改的還沒存進檔案」那一句（zone_overview.js）
+  if (zoneSearchSaid?.generation === null) dropSearchSaid();  // 講存檔結果的那一句（做法沒存成…）：這一次存成了
+}
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
 // 分兩步（#1187）：按下儲存那一刻先把要送的那一份做好（這裡，沒有等待點），方案存好之後才送（回傳的那一支）；
@@ -188,7 +193,7 @@ function prepareZoneDesignSave(name) {
   if (zoneDesignBroken) return async () => { throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）"); };
   const touched = zoneDesign && designHasContent(zoneDesign);
   // 沒內容、也沒存過：不寫檔。那一頁要是標過「改的還沒存」（例如左右對稱關了又開回來，#1206），這裡一樣要清掉那一句。
-  if (!touched && !zoneDesignStored) return async () => { zoneDesignSaved = true; window.zonePageSaved?.(); };
+  if (!touched && !zoneDesignStored) return async () => { zoneDesignWritten(); };
   const design = structuredClone(designForEdit());
   design.scheme_id = name;
   for (const wall of Object.keys(design.zones)) {
@@ -208,9 +213,7 @@ function prepareZoneDesignSave(name) {
   const generation = zoneDesignGeneration;
   return async () => {
     await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
-    zoneDesignSaved = true;
-    window.zonePageSaved?.();  // 「這間房貼什麼」那一頁的「改的還沒存進檔案」那一句（zone_overview.js）
-    if (zoneSearchSaid?.generation === null) dropSearchSaid();  // 講存檔結果的那一句（做法沒存成…）：這一次存成了
+    zoneDesignWritten();
     if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
   };
 }
@@ -293,7 +296,8 @@ function renderSearchAction() {
   const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
   // 按了沒送出去的那一句（zoneSearchSaid）排在擋住的理由後面：擋住時那一句就是其中一條，照擋住的寫；沒擋才寫它，不被下一次重畫換掉。
   if (zoneSearchSaid?.generation != null && zoneLimitsShown > zoneSearchSaid.generation) dropSearchSaid();
-  const said = formRunning() || lockedEdit || blocked.length ? null : zoneSearchSaid;
+  // 沒有要交的區（!count）鈕停用了：「…再按一次」那類話不寫在灰掉的鈕底下（審查設計洞 1）。
+  const said = !count || formRunning() || lockedEdit || blocked.length ? null : zoneSearchSaid;
   note.className = blocked.length ? "limit-red" : said ? said.kind : "note";
   note.textContent = formRunning() ? "等這一次算完" : lockedEdit ? "先另存新名字" : blocked.length ? blocked.join("；") : said ? said.text :
     count ? `交出黃色的 ${count} 區；下一頁按「開始搜尋」才開始算` : "到「這間房貼什麼」設定要交給程式的區";

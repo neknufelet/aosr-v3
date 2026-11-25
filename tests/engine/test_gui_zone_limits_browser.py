@@ -502,6 +502,60 @@ def test_while_a_recut_is_checked_the_summary_keeps_the_zone_lines_no_zone_shows
         expect(page.locator("#zone-limits-summary")).not_to_contain_text(refusal[0])
         assert watched.page_errors == []
 
+def _numbered_zones_room(tmp_path: Path) -> None:
+    """前牆切成四塊，代號有兩個是純數字（"10"、"2"，瀏覽器會把純數字的鍵排到前面），那兩塊由程式最佳化；左牆整面也由程式
+    最佳化。房間預設上限 3 公分：那三區每一組都放不下，都紅（前牆同一面兩區紅）。資料是考卷自己編的。"""
+    document = room109_document()
+    zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], document["scene"])["surface_zones_by_wall"])
+    width, height = LY, LZ
+    zones["x0"] = [{"area": "rectangle", "id": zone_id, "u_m": [col * width / 2, width if col else width / 2],
+                    "v_m": [row * height / 2, height if row else height / 2],
+                    "material": {"kind": "constant_impedance", "impedance_pa_s_m": 4000.0}}
+                   for zone_id, (col, row) in zip(["10", "z1", "2", "z2"], [(0, 0), (0, 1), (1, 0), (1, 1)], strict=True)]
+    _write(tmp_path, document)
+    search = {"mode": "search", "allowed": GROUPS_EVERYTHING}
+    design = {"schema_version": "aosr.zone_design.v1", "scheme_id": "room109", "left_right_symmetry": "off", "room_max_depth_m": 0.03,
+              "zones": {"x0": {"10": search, "2": search}, "y0": {"whole_wall": search}}}
+    (tmp_path / "designs").mkdir(exist_ok=True)
+    (tmp_path / "designs" / "room109.json").write_text(json.dumps(design), encoding="utf-8")
+    (tmp_path / "materials.json").write_text(_deep_user_library(), encoding="utf-8")
+
+
+def test_two_red_zones_with_number_codes_on_one_wall_point_below_and_other_walls_stay_listed(tmp_path: Path,
+                                                                                              browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第三趟順手（審查建議 3）：同一面兩區紅、代號是純數字跟英數混排（瀏覽器把 "2"、"10" 排到前面，
+    判決 refusals 照伺服器的順序）。正在看前牆：總述指到「各區底下」、兩區照號碼列名，前牆那兩條不抄；別面（左牆）那一條照抄。
+    換到左牆：前牆那兩條照抄、左牆那一條改指到那一區底下。每一區底下寫的是它自己那一條。"""
+    _numbered_zones_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        _settled(page)
+        assert cast(list[str], page.evaluate("Object.keys(zoneLimits.zones.x0)"))[:2] == ["2", "10"], "瀏覽器應該把純數字代號排到前面"
+        refusal = cast(list[str], page.evaluate("zoneLimits.refusals"))
+        mine = {key: cast(list[str], page.evaluate(f"zoneLimits.zones.x0['{key}'].filter(l => l.level === 'red').map(l => l.text)"))
+                for key in ("2", "10")}
+        left = cast(list[str], page.evaluate("zoneLimits.zones.y0.whole_wall.filter(l => l.level === 'red').map(l => l.text)"))
+        assert [len(mine["2"]), len(mine["10"]), len(left)] == [1, 1, 1] and len(refusal) == 3, (mine, left, refusal)
+        order = cast(list[str], page.evaluate("window.zoneFaceZones('x0').filter(i => ['2', '10'].includes(i.key)).map(i => i.key)"))
+        names = [cast(str, page.evaluate(f"zoneCalled('x0', '{key}')")) for key in order]
+        head = "有 3 條超過限制（標紅的區），改好之前不能拿去搜尋："
+        # 左牆那一條是 refusals 裡最後一條（伺服器照 x0、y0 排），照抄在前；前牆兩區改指到下面。
+        summary = page.locator("#zone-limits-summary")
+        expect(summary).to_have_text(f"{head}{refusal[2]}；{'、'.join(names)}的 2 條寫在各區底下")
+        # 三區的那一條原文一字不差（都是房間預設擋住、同一張清單），所以不數整欄出現幾次：總述上面已逐字比過，這裡比每一區底下
+        # 各自一條、就是它自己那一條；前牆兩條帶區名的 refusals 原文不在總述裡（上面逐字比已經排除，這裡明寫一次）。
+        for key in ("2", "10"):
+            expect(page.locator(f"#wall-zone-x0-{key} .limit-lines p")).to_have_text([mine[key][0]])
+        assert refusal[0] not in summary.inner_text() and refusal[1] not in summary.inner_text()
+        page.locator("#elevation-wall-y0").click()
+        _settled(page)
+        expect(summary).to_have_text(f"{head}{refusal[0]}；{refusal[1]}；左牆「整面」的 1 條寫在那一區底下")
+        expect(page.locator("#wall-zone-y0-whole_wall #limit-y0-whole_wall-0")).to_have_text(left[0])
+        assert watched.page_errors == [] and watched.console_errors == []
+
+
 def _deep_user_library() -> str:
     """最淺排法 0.08 m（最薄 0.05 m＋空腔下界 0.03 m）、自己的上限 0.15 m 的使用者可最佳化材料。"""
     from pydantic import TypeAdapter

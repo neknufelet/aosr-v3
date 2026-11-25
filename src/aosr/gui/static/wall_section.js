@@ -147,7 +147,7 @@ function renderList(wall) {
   // 列出來的區（照號碼排）一起交給總述：寫在那幾區底下的，總述不再抄（#1265 單元 3 之二收尾第二趟 A）。
   const shown = Boolean(wall && window.elevationGeometry.wallSize(wall)), lines = shown ? wallLimitLines(wall) : [];
   const items = shown ? window.zoneFaceZones(wall) : [];
-  const keys = items.toSorted((left, right) => left.label.number - right.label.number).map(item => item.key);
+  const keys = items.map(item => item.key);  // zoneFaceZones 回來就照號碼排好了（zone_overview.js 的 faceZones 最後一行）
   byId("elevation-list-notes").replaceChildren(limitsSummary(shown ? wall : null, keys),
                                                ...(lines.length ? [limitLinesBlock(lines, `limit-wall-${wall}`)] : []), ...zoneProblemLines());
   if (!shown) {

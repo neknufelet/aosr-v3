@@ -581,8 +581,17 @@ async function openScheme(name) {
   renderInputBars();
   const running = formRunning();
   // 接回計算進度失敗也照樣檢查（#1265 單元 3 之二收尾第二趟 B3）：上一份的判決在 changeInputScheme 已作廢、要靠這一次 refreshPlan
-  // 重問限制；失敗的原因照樣丟給呼叫的人寫進訊息列（寫在圖面檢查那一句之後，不被它蓋掉）。
-  try { if (running && running.run_id !== runId) await follow(running.run_id); } finally { await refreshPlan(); }
+  // 重問限制。兩邊的錯各自接住、最後一起寫（第三趟 E2）：圖面檢查丟錯不吞掉進度那一句，圖面檢查寫好的那一句也不被進度那一句蓋掉。
+  let followFailed = null;
+  if (running && running.run_id !== runId) {
+    try { await follow(running.run_id); } catch (error) { followFailed = errorText(error); }
+  }
+  let planned;
+  try { planned = await refreshPlan(); } catch (error) {
+    throw followFailed === null ? error : new Error(`${followFailed}；${errorText(error)}`);
+  }
+  // 只有進度讀不到：方案已經打開好了，照樣回 true（?zones= 連結照樣進「這間房貼什麼」，審查設計洞 2），原因寫在訊息列。
+  if (followFailed !== null) say(planned ? followFailed : `${followFailed}；${planProblems}`, "notice");
   return true;
 }
 // ?scheme= 回輸入頁的方案段落；?zones= 打開同一份後再進「這間房貼什麼」。

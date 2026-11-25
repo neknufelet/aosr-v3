@@ -635,3 +635,49 @@ def test_the_zone_page_reply_goes_with_the_footer_reply_once_a_later_verdict_com
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-page-note")).to_have_text("")
         assert watched.page_errors == []
+
+
+NO_SEARCH_ZONE = "到「這間房貼什麼」設定要交給程式的區"
+
+
+def test_a_save_failure_reply_goes_also_when_the_save_writes_no_design_file(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第三趟 E1：沒存過設計檔的方案，按「交給程式最佳化 ▸」時做法存檔失敗；再清掉那一面的切法，
+    設計設定空了。這時頁底鈕沒有要交的區、已經停用，底下不准再寫「…再按一次」（審查設計洞 1）。
+    接著按「儲存」成功——沒內容也沒存過就不寫檔，這一次也算做法存好了：頁底與「這間房貼什麼」那一頁的那一句都要收。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        _drag(page, LY, LZ, (0.02, 0.02), (0.8, 1.0))
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        page.locator("#zone-goto-x0-z1").click()
+        page.locator("#zone-panel").get_by_role("radio", name="由程式最佳化").check()
+        page.locator("#zone-panel-apply").click()
+        page.locator("#zone-page-close").click()
+        page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
+        page.route("**/api/designs/**", lambda route: route.fulfill(status=500, content_type="application/json",
+                                                                    body=json.dumps({"error": "考卷故意讓它壞"}))
+                   if route.request.method == "PUT" else route.continue_())
+        page.locator("#zone-to-search").click()
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        note = page.locator("#zone-to-search-note")
+        expect(note).to_have_text(SAVE_FAILED)
+        page.unroute("**/api/designs/**")
+        page.locator("#elevation-clear").click()
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        assert page.evaluate("searchZoneCount()") == 0
+        expect(page.locator("#zone-to-search")).to_be_disabled()
+        expect(note).to_have_text(NO_SEARCH_ZONE)
+        with page.expect_response(lambda r: r.url.endswith("/api/schemes/room109") and r.request.method == "PUT") as stored:
+            page.locator("#save").click()
+        assert stored.value.ok, stored.value.text()
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
+        expect(page.locator("#messages")).to_have_text("方案已儲存")
+        assert not (tmp_path / "designs" / "room109.json").exists()
+        assert page.evaluate("zoneSearchSaid") is None
+        expect(note).to_have_text(NO_SEARCH_ZONE)
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-page-note")).to_have_text("")
+        assert watched.page_errors == []

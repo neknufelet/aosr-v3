@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Error, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
@@ -597,3 +598,72 @@ def test_a_cut_that_throws_after_rewriting_the_zones_leaves_no_stale_pairing(tmp
         _verdict_shown(page)
         expect(page.locator("#elevation-list-zones .zone-item")).to_have_count(1)
         assert watched.page_errors == []
+
+
+_PLAN_FAILS = {
+    # 圖面檢查自己丟錯（回的不是 JSON）：那一句是 reply 寫的「伺服器的回覆讀不懂…」。
+    "plan-throws": ({"status": 502, "content_type": "text/plain", "body": "bad gateway"}, "伺服器的回覆讀不懂（狀態碼 502）"),
+    # 圖面檢查回 400（refreshPlan 回 false，自己已經寫了訊息列）。
+    "plan-400": ({"status": 400, "content_type": "application/json", "body": json.dumps({"error": "考卷編的：圖面檢查有問題"})},
+                 "考卷編的：圖面檢查有問題"),
+}
+
+
+@pytest.mark.parametrize("plan_fails", sorted(_PLAN_FAILS))
+def test_a_running_scheme_whose_progress_and_plan_both_fail_keeps_both_reasons(tmp_path: Path, browser: Browser,
+                                                                                plan_fails: str) -> None:
+    """#1265 單元 3 之二收尾第三趟 E2：打開正在計算的方案，接回計算進度失敗、圖面檢查也失敗。訊息列兩邊的原因都要看得到：
+    圖面檢查丟錯不准吞掉進度那一句，圖面檢查寫好的那一句也不准被進度那一句蓋掉。限制檢查照樣要問（第二趟 B3）。"""
+    fulfill, plan_words = _PLAN_FAILS[plan_fails]
+    _write_room109_design(tmp_path, {"zones": {"x0": {"whole_wall": {"mode": "search", "allowed": WOOL}}}})
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        _settled(page)
+        page.evaluate("activeRuns = [{run_id: 'fake-run-1', scheme_id: 'room109', status: 'running', elapsed_s: 3, display_text: '計算中'}]")
+        page.route("**/api/runs/fake-run-1", lambda route: route.fulfill(status=500, content_type="application/json",
+                                                                          body=json.dumps({"error": "考卷編的：讀不到進度"})))
+        page.route("**/api/plan", lambda route: route.fulfill(**fulfill))
+        asked: list[str] = []
+        page.on("request", lambda request: asked.append(request.url) if request.url.endswith("/api/zone-limits") else None)
+        page.locator("#scheme-menu-button").click()
+        page.locator('#home-schemes [data-scheme="room109"] .home-open').click()
+        page.wait_for_function("document.getElementById('save-id').value === 'room109'")
+        _settled(page)
+        _verdict_shown(page)
+        assert asked, "打開之後應該問過限制"
+        messages = page.locator("#messages")
+        expect(messages).to_contain_text("考卷編的：讀不到進度")
+        expect(messages).to_contain_text(plan_words)
+        expect(messages).to_have_class("notice")
+
+
+def test_a_zones_link_to_a_running_scheme_whose_progress_cannot_be_read_still_opens_the_zone_page(tmp_path: Path,
+                                                                                                  browser: Browser) -> None:
+    """#1265 單元 3 之二收尾第三趟 E2（審查設計洞 2）：用 ?zones= 連結打開正在計算的方案，只有接回進度失敗。方案、做法、
+    限制檢查都好了，照樣進「這間房貼什麼」；進度讀不到的原因照樣寫在訊息列（回輸入頁看得到）。
+    開頁時先接回的是另一筆（清單第一筆），打開這一份時才接它自己那一筆、那一次失敗。"""
+    _write_room109_design(tmp_path, {"zones": {"x0": {"whole_wall": {"mode": "search", "allowed": WOOL}}}})
+    running = [{"run_id": "fake-other", "scheme_id": "other", "status": "running", "elapsed_s": 3, "display_text": "計算中"},
+               {"run_id": "fake-run-1", "scheme_id": "room109", "status": "running", "elapsed_s": 3, "display_text": "計算中"}]
+    with _serve(tmp_path) as base:
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        try:
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.route("**/api/runs", lambda route: route.fulfill(status=200, content_type="application/json",
+                                                                  body=json.dumps({"running": running}))
+                       if route.request.method == "GET" else route.continue_())
+            page.route("**/api/runs/fake-*", lambda route: route.fulfill(status=500, content_type="application/json",
+                                                                         body=json.dumps({"error": "考卷編的：讀不到進度"})))
+            page.goto(f"{base}/?zones=room109")
+            page.wait_for_function("document.getElementById('save-id').value === 'room109'")
+            _settled(page)
+            _verdict_shown(page)
+            expect(page.locator("#zone-page")).to_be_visible()
+            expect(page.locator("#zone-page h1")).to_have_text("這間房貼什麼")
+            page.locator("#zone-page-close").click()
+            expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
+            assert errors == []
+        finally:
+            page.close()
