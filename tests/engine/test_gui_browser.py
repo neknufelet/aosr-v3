@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 import pytest
 import uvicorn
-from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, Route, sync_playwright
+from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, Route, expect, sync_playwright
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
@@ -398,10 +398,11 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
         for scatter in page.locator("#scattering input").all():
             scatter.fill("0.2")
 
-        def shown_after_check() -> str:
+        def shown_after_check(expected: str | re.Pattern[str]) -> str:
+            # 等到寫的是這一次的那一句（只等「不是空的」不夠：上一次還在路上的回覆晚到，會先寫進來）。
             page.locator("#messages").evaluate("node => { node.textContent = ''; }")
             recheck(page)
-            page.wait_for_function("() => document.querySelector('#messages').textContent !== ''")
+            expect(page.locator("#messages")).to_have_text(expected)
             return page.locator("#messages").inner_text()
 
         for field, name in (("#room-Ly", "寬 Ly（公尺）"), ("#wall-floor", "地板阻抗"),
@@ -409,27 +410,29 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
                             ("#receiver-up-z", "主位上方 z 座標"), ("#receiver-main-x", "主位 x 座標")):
             before = page.locator(field).input_value()
             reveal(page, field).fill("")
-            assert shown_after_check() == f"{name}：空著沒填", field
+            assert shown_after_check(f"{name}：空著沒填") == f"{name}：空著沒填", field
             page.locator(field).fill(before)
-            assert shown_after_check() == "檢查通過", field
+            assert shown_after_check("檢查通過") == "檢查通過", field
         # 方案區的格子也寫中文名（方案代號是唯讀格，這裡直接清空它來考）。
         page.locator("#save-id").evaluate("node => { node.value = ''; }")
-        assert shown_after_check().startswith("方案代號：")
+        assert shown_after_check(re.compile("^方案代號：")).startswith("方案代號：")
         page.locator("#save-id").evaluate("(node, name) => { node.value = name; }",
                                           page.request.get(f"{base}/api/example").json()["scheme"]["scheme_id"])
-        assert shown_after_check() == "檢查通過"
+        assert shown_after_check("檢查通過") == "檢查通過"
         labels = page.request.get(f"{base}/api/labels").json()
         example = page.request.get(f"{base}/api/example").json()["scheme"]
         role = next(channel["role"] for channel in example["channel_group"]["channels"]
                     if channel["speaker_id"] == "left")
         # 喇叭跑出房間：檢查點名的是那支喇叭（路徑只寫整份方案），訊息列寫喇叭的中文名，不掛英文的「scheme：」。
         page.locator("#speaker-left-x").fill("99")
-        assert shown_after_check().startswith(f"{labels['speakers'][role]}：座標超出房間")
+        out = f"{labels['speakers'][role]}：座標超出房間"
+        assert shown_after_check(re.compile("^" + re.escape(out))).startswith(out)
         # 喇叭跟主位同一點：檢查每一對各報一次，訊息列只一行、寫喇叭的中文名。
         primary = page.evaluate("() => scheme.receiver_set.points.find((point) => point.role === 'primary').position_m")
         for axis, value in zip("xyz", primary, strict=True):
             page.locator(f"#speaker-left-{axis}").fill(str(value))
-        assert shown_after_check().split("\n") == [f"{labels['speakers'][role]}：跟主位放在同一點"
+        same = f"{labels['speakers'][role]}：跟主位放在同一點"
+        assert shown_after_check(re.compile("^" + re.escape(same))).split("\n") == [f"{labels['speakers'][role]}：跟主位放在同一點"
                                                     "（產品預設指向讓喇叭對準主位，兩者不能重合）"]
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
@@ -569,8 +572,7 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
         }""")
         page.locator("#messages").evaluate("(element) => { element.textContent = ''; }")
         recheck(page)
-        page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
-        assert page.locator("#messages").inner_text() == "檢查通過"
+        expect(page.locator("#messages")).to_have_text("檢查通過")
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
 
@@ -626,6 +628,17 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
         _assert_quiet(watched)
 
 
+def _click_until_detail_stays(page: Page) -> None:
+    """點放大圖第一個圓點，直到明細有字、而且 300 毫秒後還在。改一格之後頁面還會照同一份圖再畫幾次
+    （頂條、訊息列換行讓版面變了），每畫一次就清掉明細；負載重時那一下可能落在點完之後。"""
+    for _ in range(10):
+        page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
+        page.wait_for_timeout(300)
+        if page.locator("#plan-detail").inner_text():
+            return
+    raise AssertionError("點了十次圓點，明細都沒留住")
+
+
 def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         open_example_scheme(page := watched.page, base, tmp_path)
@@ -633,14 +646,15 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
         assert page.locator("#plan-detail").inner_text()
         reveal(page, "#receiver-front-x").fill("3.0")
         recheck(page)
-        page.wait_for_function("() => document.querySelector('#plan-detail').textContent === ''")
-        assert "x 3.00" in page.locator("#plan-legend li[data-id='receiver:front']").inner_text()
+        # 等到畫的是改完 x 的那一次（明細清空不夠：更早一次重畫也會清，之後這一次才落地、又把剛點出來的明細清掉）。
+        page.wait_for_function("""() => document.querySelector('#plan-detail').textContent === ''
+          && (document.querySelector("#plan-legend li[data-id='receiver:front']")?.textContent ?? '').includes('x 3.00')""")
         # 失敗那一支也要清明細：先再點一次，讓明細有字，才考得到。
-        page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
-        assert page.locator("#plan-detail").inner_text()
+        _click_until_detail_stays(page)
         page.locator("#room-Lx").fill("")
         recheck(page)
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('空著沒填')")
+        page.wait_for_function("() => !document.querySelector('#plan-legend li') && !document.querySelector('#plan-xy circle')")
         assert not page.locator("#plan-legend li").all_inner_texts()
         assert page.locator("#plan-detail").inner_text() == ""
         for svg in ("#plan-xy", "#plan-xz", "#zoom-xy", "#zoom-xz"):
