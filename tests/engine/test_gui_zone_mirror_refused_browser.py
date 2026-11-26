@@ -11,6 +11,7 @@ from aosr.gui.zone_edit import CutBox, WallName
 from aosr.gui.zone_symmetry import Frame, symmetry_axis
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._input_page_steps import reveal
 from tests.engine.test_gui_browser import browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag
 from tests.engine.test_gui_zone_mirror_draw_browser import (
@@ -264,12 +265,26 @@ def test_repair_narrow_gap(tmp_path: Path, browser: Browser) -> None:
         page.screenshot(path=tmp_path / "pair.png")
 
 
+def _resize_keeping_speakers(page: Page, width: float) -> None:
+    """改房間長度，對稱軸（兩支喇叭的中線）留在原地：改尺寸時喇叭與聆聽點會照比例跟著房間走（#1265），這幾題考的是軸不在正中的牆，
+    所以改完把喇叭與聆聽點的 x 都打回原值（只打回喇叭，主位就不在兩支喇叭中間了）。"""
+    ids = page.evaluate("[...Object.keys(scheme.speakers).map(n => `speaker-${n}-x`),"
+                        " ...scheme.receiver_set.points.map(p => `receiver-${p.receiver_id}-x`)]")
+    keep = {field: page.evaluate(f"numericInput('{field}')") for field in ids}
+    page.locator("#room-Lx").fill(str(width))
+    page.locator("#room-Lx").press("Tab")
+    page.evaluate("pendingRoomResize()")
+    for field, x in keep.items():
+        box = reveal(page, f"#{field}")
+        box.fill(str(x))
+        box.press("Tab")
+    page.wait_for_function("document.getElementById('check-state').dataset.kind !== 'pending'")
+
+
 def test_repair_fractional_wall(tmp_path: Path, browser: Browser) -> None:
     width = 5.207
     with _room(tmp_path, browser) as page:
-        page.locator("#room-Lx").fill(str(width))
-        page.locator("#room-Lx").press("Tab")
-        page.evaluate("pendingRoomResize()")
+        _resize_keeping_speakers(page, width)
         _settled(page)
         _drag(page, width, H, RIGHT_START, RIGHT_END)
         _settled(page)
@@ -389,9 +404,7 @@ def test_repair_leaves_a_full_strip_at_the_wall(tmp_path: Path, browser: Browser
     """軸只偏一點、框貼牆角：照多出的量挪或收，牆邊都剩窄條；改法要多挪一個最小邊，不能說「都不行」。"""
     width = 5.0  # 軸離左牆 2.45、正中 2.50：貼右牆角的框翻過去只多出 0.10
     with _room(tmp_path, browser) as page:
-        page.locator("#room-Lx").fill(str(width))
-        page.locator("#room-Lx").press("Tab")
-        page.evaluate("pendingRoomResize()")
+        _resize_keeping_speakers(page, width)
         _settled(page)
         _drag(page, width, H, RIGHT_START, (4.99, 2.0))
         _settled(page)

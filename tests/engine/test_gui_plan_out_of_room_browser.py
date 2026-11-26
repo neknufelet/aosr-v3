@@ -107,8 +107,8 @@ def _inside_viewbox(page: Page, view: str) -> list[str]:
 
 
 def test_short_room_keeps_drawing_room_speakers_and_listener_with_the_outside_ones_red(tmp_path: Path, browser: Browser) -> None:
-    """預設參考房長度改 2.5：四張圖都有畫；房間外框照 2.5 × 4 畫；喇叭有畫、沒紅；主位與周圍點畫在框外、標紅、沒被裁掉。
-    改回 6：紅標消失、「檢查通過」。"""
+    """預設參考房長度改 2.5（喇叭與聆聽點跟著房間挪，都還在裡面），再把主位 x 打成 3.2：四張圖都有畫；房間外框照 2.5 × 4 畫；
+    喇叭有畫、沒紅；主位畫在框外、標紅、沒被裁掉。主位改回挪好的 1.333：紅標消失、「檢查通過」。"""
     with _serve(tmp_path) as base, _open(browser, "about:blank", viewport_width=1440) as watched:
         page = watched.page
         page.set_viewport_size({"width": 1440, "height": 900})
@@ -116,6 +116,8 @@ def test_short_room_keeps_drawing_room_speakers_and_listener_with_the_outside_on
         check = page.locator("#check-state")
         expect(check).to_have_text("檢查通過")
         _commit(page, "#room-Lx", "2.5")
+        expect(page.locator("#receiver-main-x")).to_have_value("1.333")
+        _commit(page, "#receiver-main-x", "3.2")
         expect(check).to_have_text(PROBLEM)
         page.wait_for_function("document.querySelectorAll('#plan-xy g[data-keys]').length > 0")
         width, height = _room_frame(page, "plan-xy")
@@ -126,13 +128,17 @@ def test_short_room_keeps_drawing_room_speakers_and_listener_with_the_outside_on
             show_view(page, view)
             drawn, red = _drawn_keys(page, view), _red_keys(page, view)
             assert "receiver:main" in drawn and "receiver:main" in red, (view, drawn, red)
-            assert red <= LISTENERS, (view, red)
+            assert red == {"receiver:main"}, (view, red)
+            clipped = _inside_viewbox(page, view)
             if view.startswith("plan"):
                 assert SPEAKERS <= drawn, (view, drawn)
-            assert _inside_viewbox(page, view) == [], view
+                assert clipped == [], view
+            else:
+                # 放大圖對著主位畫：只有主位搬走、周圍點留在原地時，離得遠的周圍點本來就在放大範圍外；主位自己不准被裁。
+                assert not [item for item in clipped if "receiver:main" in item.split()], (view, clipped)
         legend = reveal(page, "#plan-legend li[data-id='receiver:main']")
         assert "x 3.20" in legend.inner_text()
-        _commit(page, "#room-Lx", "6")
+        _commit(page, "#receiver-main-x", "1.333")
         expect(check).to_have_text("檢查通過")
         for view in VIEWS:
             assert _red_keys(page, view) == set(), view

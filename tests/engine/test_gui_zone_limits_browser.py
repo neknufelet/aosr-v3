@@ -316,6 +316,34 @@ def test_send_to_search_waits_for_the_verdict_and_refuses_when_the_check_failed(
         assert watched.page_errors == []
 
 
+def test_waiting_for_the_verdict_on_a_request_that_already_came_back_lets_the_page_breathe(tmp_path: Path,
+                                                                                         browser: Browser) -> None:
+    """等最新判決時，手上那一個請求已經回來、判決卻還不是最新（世代號又往前了）：不准在同一個已經好了的請求上空轉。
+    空轉只讓出微任務、不讓出事件迴圈，計時器、網路回覆都進不來，整頁卡死（雲端考卷關分頁卡 30 分鐘，#1265）。
+    這裡把手上那一個換成會數次數的「已經好了」的請求（數到 1000 次就放它走，考卷不會跟著卡死），再排一個計時器 100 毫秒後重問：
+    讓出事件迴圈的話，計時器會跑、新的一次回來、等待結束，那個舊請求只被等了幾次。"""
+    _write(tmp_path, room109_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        _settled(page)
+        spins = page.evaluate("""async () => {
+          let calls = 0;
+          zoneLimitsRequest = {then(resolve) {
+            calls += 1;
+            if (calls >= 1000) zoneLimitsReceived = zoneLimitsGeneration;
+            resolve();
+          }};
+          zoneLimitsGeneration += 1;
+          setTimeout(() => { refreshZoneLimits(); }, 100);
+          await settledZoneLimits();
+          return calls;
+        }""")
+        assert spins < 10, f"在同一個已經回來的請求上空轉了 {spins} 次"
+        _settled(page)
+        assert watched.page_errors == []
+
+
 def test_a_plain_click_and_tab_or_enter_after_a_limit_still_show_the_verdict(tmp_path: Path, browser: Browser) -> None:
     """只點一下沒拖（收尾那條路會先重畫）不讓「拖框中」卡住；打完上限按 Tab 換格或按 Enter，判決照樣畫上去、
     焦點留在原來那一格（只有那一格打了還沒確定的字才延後）。

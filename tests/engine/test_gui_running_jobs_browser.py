@@ -226,6 +226,8 @@ def test_each_calculation_runs_the_form_on_screen(tmp_path: Path, browser: Brows
         for step, (lx, save_as) in enumerate(((None, None), ("5.5", None), ("5.6", "next"))):
             if lx is not None:
                 page.locator("#room-Lx").fill(lx)
+                # 離開那一格才算改定：喇叭與聆聽點這時跟著房間挪（#1265），下面記的表單才是開算那一刻的樣子。
+                page.locator("#room-Lx").press("Tab")
             if save_as is not None:
                 open_save_as(page)
                 page.locator("#save-as-id").fill(save_as)

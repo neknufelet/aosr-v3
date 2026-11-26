@@ -134,6 +134,7 @@ function renderForm() {
   rows("receivers", scheme.receiver_set.points.map((point) => [point.receiver_id,
        {x: point.position_m[0], y: point.position_m[1], z: point.position_m[2]}]), "receiver", pointName);
   renderInputSetup();
+  roomFollowed = {...scheme.scene.room_m};
   formScheme = scheme;
   renderInputPreview();
   action(updateMultiples);
@@ -522,6 +523,41 @@ function say(text, kind, besides = true) {
 function sayBeside(note, text, kind) {
   $(note).textContent = text;
   $(note).className = kind;
+}
+// 改房間尺寸，喇叭與聆聽點跟著走（老闆 11-26「一看房間就跑出去」）：長、寬照比例移（原本在房間裡的改完還在裡面、
+// 相對位置不變；原本就在房外的不動）；高度不跟著比例（耳朵、喇叭高度跟天花板無關），只有新高度放不下時才照比例降。
+// 主位周圍那幾個點是量主位附近的，間距不縮：跟著主位平移。比的是上一次收下的尺寸（roomFollowed），空白或打錯不算，改對時從上一次的算。
+let roomFollowed = null;
+function followRoomResize(event) {
+  const key = event.target?.id?.match(/^room-(L[xyz])$/)?.[1];
+  if (!key || !roomFollowed) return;
+  const before = roomFollowed[key], after = numericInput(event.target.id);
+  if (!(Number.isFinite(after) && after > 0) || !(before > 0) || after === before) return;
+  roomFollowed[key] = after;
+  const axis = {Lx: "x", Ly: "y", Lz: "z"}[key];
+  // 格子顯示到公釐，存的是沒四捨五入的值（同伺服器排過位數的格子：dataset.originalValue），縮了再放回去不會一路差下去。
+  const exact = value => Math.round(value * 1e9) / 1e9;
+  // 原本就在舊房間外面的點不動：常見的是先把喇叭搬到外面、再把房間放大到裝得下它。
+  const moved = value => value < 0 || value > before ? value : axis !== "z" || value > after ? exact(value * after / before) : value;
+  const set = (id, value) => {
+    const input = $(id);
+    input.value = String(Math.round(value * 1000) / 1000);
+    input.dataset.originalValue = JSON.stringify(value);
+  };
+  for (const name of Object.keys(scheme.speakers)) {
+    const id = `speaker-${name}-${axis}`, value = numericInput(id);
+    if (Number.isFinite(value)) set(id, moved(value));
+  }
+  const points = scheme.receiver_set.points;
+  const primary = points.find(point => point.role === "primary");
+  const primaryId = primary ? `receiver-${primary.receiver_id}-${axis}` : null;
+  const primaryBefore = primaryId ? numericInput(primaryId) : null;
+  const shift = Number.isFinite(primaryBefore) ? moved(primaryBefore) - primaryBefore : 0;
+  for (const point of points) {
+    const id = `receiver-${point.receiver_id}-${axis}`, value = numericInput(id);
+    if (!Number.isFinite(value)) continue;
+    set(id, point.role === "surrounding" ? exact(value + shift) : moved(value));
+  }
 }
 function collect() {
   requireInputMatch(true);
@@ -1368,6 +1404,8 @@ async function bootInputPage() {
   // 改了就自動檢查（#1265 單元 6）：這幾格改定（離開那一格、按 Enter，瀏覽器發 change）就重問平面圖與限制，不用再按「檢查」。
   // 規則只有一條：改到方案的才發（第二趟發現 3）。自己有交接的那幾格（onchange：換種類、套預設、家具勾選）交接完自己問，
   // 這裡不再多問一次；還沒套用的實測草稿不改方案，它的 change 在草稿那一塊就攔下（measured.js），走不到這裡。
+  // 尺寸那一格改定時先把喇叭與聆聽點挪好（捕獲階段：排在自動檢查與分區縮放前面，兩邊問的都是挪好的座標）。
+  $("room-fields").addEventListener("change", followRoomResize, true);
   for (const id of AUTO_CHECK_AREAS) $(id).addEventListener("change", event => {
     if (event.target instanceof HTMLElement && event.target.onchange) return;
     autoCheck();

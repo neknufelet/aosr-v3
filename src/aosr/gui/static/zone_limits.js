@@ -56,8 +56,16 @@ function refreshZoneLimits() {
   return zoneLimitsRequest;
 }
 // 「拿去搜尋」要的是最新那次的判決：還在路上就等它回來（不會丟錯：檢查失敗也是一份判決）。
+// 手上那一個請求回來了、判決卻還不是最新（中間又出去了一次，或 zoneLimitsRequest 指的是先出去的那一個）：
+// 不能再 await 同一個已經好了的請求——那只讓出微任務、不讓出事件迴圈，整頁會卡死（雲端考卷關分頁時卡住 30 分鐘）。
+// 換等目前的請求；還是同一個就讓出事件迴圈一下再看。
 async function settledZoneLimits() {
-  while (zoneLimitsReceived !== zoneLimitsGeneration) await zoneLimitsRequest;
+  while (zoneLimitsReceived !== zoneLimitsGeneration) {
+    const pending = zoneLimitsRequest;
+    await pending;
+    if (pending === zoneLimitsRequest && zoneLimitsReceived !== zoneLimitsGeneration)
+      await new Promise(resolve => setTimeout(resolve, 50));
+  }
   return zoneLimits;
 }
 function zoneLimitsDragEnded() {
