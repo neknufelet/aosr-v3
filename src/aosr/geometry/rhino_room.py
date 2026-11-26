@@ -32,13 +32,14 @@ class RhinoRoomError(ValueError):
     """整份檔讀不了；訊息是給人看的白話。"""
 
 
-def _point(vertex: rhino3dm.Point3f) -> Vec3:
+def _point(vertex: rhino3dm.Point3d) -> Vec3:
     return (float(vertex.X), float(vertex.Y), float(vertex.Z))
 
 
 def mesh_triangles(mesh: rhino3dm.Mesh, layer: str) -> tuple[LayerTriangle, ...]:
     """網格的每個面拆成三角形；四邊形照 0-1-2、0-2-3 拆，頂點順序保留法線方向。"""
-    points = [_point(mesh.Vertices[i]) for i in range(len(mesh.Vertices))]
+    # 用雙精度取點：``Vertices[i]`` 回的是單精度，離原點遠時會差到焊點距離的量級。
+    points = [_point(mesh.Vertices.Point3dAt(i)) for i in range(len(mesh.Vertices))]
     triangles = []
     for index in range(len(mesh.Faces)):
         a, b, c, d = mesh.Faces[index]
@@ -84,12 +85,16 @@ def read_rhino_room(path: Path, max_file_bytes: int) -> RoomShell:
     skipped: list[str] = []
     unreadable: list[str] = []
     for obj in model.Objects:
+        if obj.Attributes.Mode == rhino3dm.ObjectMode.InstanceDefinitionObject:
+            # 元件定義裡面的物件（喇叭外形、標示線）不是場景裡的東西，座標也是元件自己的局部座標。
+            continue
         full_path = model.Layers[obj.Attributes.LayerIndex].FullPath
         top, material = _split_layer(full_path)
         geometry = obj.Geometry
         if top in (SHELL_LAYER, SOLID_LAYER):
             if not isinstance(geometry, rhino3dm.Mesh):
-                unreadable.append(f"{_object_label(obj, full_path)}（{type(geometry).__name__}）")
+                unreadable.append(f"{_object_label(obj, full_path)}（{type(geometry).__name__}，這一版只讀網格，"
+                                  "請在 Rhino 用 Mesh 指令轉成網格再存）")
             elif top == SHELL_LAYER:
                 shell.extend(mesh_triangles(geometry, material))
             else:
@@ -98,12 +103,16 @@ def read_rhino_room(path: Path, max_file_bytes: int) -> RoomShell:
             kinds = SPEAKER_KINDS if top == SPEAKER_LAYER else SEAT_KINDS
             found = _placement(model, geometry, kinds)
             if found is None:
-                skipped.append(f"{full_path} 圖層裡認不出種類的元件")
+                unreadable.append(f"{full_path} 圖層裡認不出種類的元件（元件名要用 "
+                                  f"{'、'.join(kinds)} 開頭）")
             elif top == SPEAKER_LAYER:
                 speakers.append(found)
             else:
                 seats.append(found)
-        elif top not in (*UNREAD_LAYERS, SPEAKER_LAYER, SEAT_LAYER):
+        elif top in (SPEAKER_LAYER, SEAT_LAYER):
+            unreadable.append(f"{full_path} 圖層上不是元件的物件（{type(geometry).__name__}），"
+                              "喇叭與座位要用元件放")
+        elif top not in UNREAD_LAYERS:
             skipped.append(f"不在固定圖層裡的物件（{full_path}）")
     units = "m" if model.Settings.ModelUnitSystem == rhino3dm.UnitSystem.Meters else model.Settings.ModelUnitSystem.name
     return RoomShell(units, tuple(shell), tuple(solids), tuple(speakers), tuple(seats),

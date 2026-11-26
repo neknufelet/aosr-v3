@@ -13,7 +13,8 @@
 每一項問題都寫成白話、講得出是哪個圖層，擋不擋計算寫在 ``blocking``。
 
 **還沒做的（照票寫明）：** 遮擋判斷（平行面對還沒扣掉彼此看不到的）、縫寬、實體之間或
-實體與外殼逐面穿插、外殼凹凸。
+實體與外殼逐面穿插、外殼凹凸。中間有空腔的造型（外層朝外、內層朝空腔）會被誤判成翻面而擋下；
+這種造型很少見，擋下比漏掉安全，之後要支援時改成依巢狀判斷每一塊的朝向。
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from typing import TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.spatial import cKDTree
 
 from aosr.config.room_shell_import import RoomShellImportSettings
 
@@ -32,11 +34,13 @@ from aosr.config.room_shell_import import RoomShellImportSettings
 Vec3: TypeAlias = tuple[float, float, float]
 FloatArray: TypeAlias = NDArray[np.float64]
 
-SPEAKER_KINDS: tuple[str, ...] = ("SPK_BOOKSHELF", "SPK_FLOOR", "SPK_INWALL")
+IN_WALL_SPEAKER = "SPK_INWALL"
+SPEAKER_KINDS: tuple[str, ...] = ("SPK_BOOKSHELF", "SPK_FLOOR", IN_WALL_SPEAKER)
 MAIN_SEAT = "SEAT_MAIN"
 SEAT_KINDS: tuple[str, ...] = (MAIN_SEAT, "SEAT")
-# 射線法判斷點在不在封閉網格裡用的方向：三個分量刻意不整齊，避免剛好擦過整齊的邊與頂點。
-_RAY_DIRECTION: Vec3 = (0.5773, 0.6129, 0.5397)
+# 射線法判斷點在不在封閉網格裡用的三個方向：分量刻意不整齊、彼此不相干，取多數決，
+# 避免某一個方向剛好擦過整齊的邊與頂點時數錯。
+_RAY_DIRECTIONS: tuple[Vec3, ...] = ((0.5773, 0.6129, 0.5397), (-0.4211, 0.8167, -0.3947), (0.7071, -0.2236, -0.6708))
 
 
 @dataclass(frozen=True)
@@ -145,25 +149,41 @@ def signed_volume(triangles: Sequence[LayerTriangle]) -> float:
     return float(np.einsum("ij,ij->i", corners[:, 0], np.cross(corners[:, 1], corners[:, 2])).sum() / 6.0)
 
 
-def _edge_problems(triangles: Sequence[LayerTriangle], weld_m: float, where: str) -> list[Problem]:
+def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> NDArray[np.int64]:
+    """(N, 3) 頂點編號：相距不到 ``weld_m`` 的頂點（可以接力）算同一點。
+
+    用距離分群、不用四捨五入到格子：兩個只差一點點的頂點剛好落在格線兩邊時，格子法會把它們拆開。
+    """
+    points = _corners(triangles).reshape(-1, 3)
+    parent = np.arange(len(points))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = int(parent[index])
+        return index
+
+    for first, second in cKDTree(points).query_pairs(weld_m):
+        a, b = root(int(first)), root(int(second))
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+    roots = np.array([root(i) for i in range(len(points))], dtype=np.int64)
+    return roots.reshape(-1, 3)
+
+
+def _edges(ids: NDArray[np.int64]) -> list[tuple[int, int, int]]:
+    """每個三角形的三條有向邊 (三角形序號, 起點, 終點)。"""
+    return [(index, int(row[i]), int(row[(i + 1) % 3])) for index, row in enumerate(ids) for i in range(3)]
+
+
+def _edge_problems(triangles: Sequence[LayerTriangle], ids: NDArray[np.int64], where: str) -> list[Problem]:
     """封閉與朝向一致：每條邊恰好被兩個三角形用、而且兩次方向相反。"""
-    keys = np.rint(_corners(triangles) / weld_m).astype(np.int64)
-    undirected: Counter[tuple[tuple[int, ...], tuple[int, ...]]] = Counter()
-    directed: Counter[tuple[tuple[int, ...], tuple[int, ...]]] = Counter()
-    open_layers: set[str] = set()
-    flipped_layers: set[str] = set()
-    for triangle, corner in zip(triangles, keys, strict=True):
-        points = [tuple(int(v) for v in corner[i]) for i in range(3)]
-        for start, end in ((points[0], points[1]), (points[1], points[2]), (points[2], points[0])):
-            undirected[(min(start, end), max(start, end))] += 1
-            directed[(start, end)] += 1
-    for triangle, corner in zip(triangles, keys, strict=True):
-        points = [tuple(int(v) for v in corner[i]) for i in range(3)]
-        for start, end in ((points[0], points[1]), (points[1], points[2]), (points[2], points[0])):
-            if undirected[(min(start, end), max(start, end))] != 2:
-                open_layers.add(triangle.layer)
-            elif directed[(start, end)] != 1:
-                flipped_layers.add(triangle.layer)
+    edges = _edges(ids)
+    undirected = Counter((min(a, b), max(a, b)) for _, a, b in edges)
+    directed = Counter((a, b) for _, a, b in edges)
+    open_layers = {triangles[i].layer for i, a, b in edges if undirected[(min(a, b), max(a, b))] != 2}
+    flipped_layers = {triangles[i].layer for i, a, b in edges
+                      if undirected[(min(a, b), max(a, b))] == 2 and directed[(a, b)] != 1}
     problems = []
     if open_layers:
         bad = sum(1 for count in undirected.values() if count != 2)
@@ -175,21 +195,61 @@ def _edge_problems(triangles: Sequence[LayerTriangle], weld_m: float, where: str
     return problems
 
 
-def _orientation_problem(triangles: Sequence[LayerTriangle], inward: bool, where: str) -> list[Problem]:
-    """整個網格朝向對不對：外殼要朝房內（體積為負），房內實體要朝外（體積為正）。"""
-    volume = signed_volume(triangles)
-    if volume == 0.0:
-        return [Problem("zero_volume", True, f"{where}圍出來的體積是零，看起來不是一個封閉的空間")]
-    if (volume < 0) != inward:
-        side = "房間裡面" if inward else "外面（空氣那一側）"
-        return [Problem("faces_flipped", True, f"{where}的面整個翻反了：每個面應該朝{side}")]
-    return []
+def _components(ids: NDArray[np.int64]) -> list[list[int]]:
+    """共用邊連在一起的三角形分成一塊一塊。"""
+    owner: dict[tuple[int, int], int] = {}
+    parent = list(range(len(ids)))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for index, a, b in _edges(ids):
+        key = (min(a, b), max(a, b))
+        if key in owner:
+            first, second = root(owner[key]), root(index)
+            parent[max(first, second)] = min(first, second)
+        else:
+            owner[key] = index
+    groups: dict[int, list[int]] = {}
+    for index in range(len(ids)):
+        groups.setdefault(root(index), []).append(index)
+    return list(groups.values())
 
 
-def _inside_mask(points: FloatArray, triangles: Sequence[LayerTriangle]) -> NDArray[np.bool_]:
-    """每個點在不在封閉網格裡（射線穿過奇數個面就在裡面）。"""
-    corners = _corners(triangles)
-    direction = np.array(_RAY_DIRECTION, dtype=np.float64)
+def _orientation_problems(triangles: Sequence[LayerTriangle], ids: NDArray[np.int64], inward: bool,
+                          where: str, weld_m: float) -> list[Problem]:
+    """每一塊各自判朝向：外殼要朝房內（體積為負）而且只能有一塊，房內實體每一塊都要朝外（體積為正）。"""
+    pieces = _components(ids)
+    problems = []
+    if inward and len(pieces) > 1:
+        problems.append(Problem("shell_pieces", True, f"{where}分成 {len(pieces)} 塊互不相連的部分；"
+                                "外殼只能是一整塊，柱子、造型請放到 TREAT 圖層"))
+    for piece in pieces:
+        members = [triangles[i] for i in piece]
+        volume = signed_volume(members)
+        area = float(np.linalg.norm(_cross(_corners(members)), axis=1).sum() / 2.0)
+        layers = "、".join(sorted({t.layer for t in members}))
+        if abs(volume) <= weld_m * area:
+            problems.append(Problem("zero_volume", True, f"{where}有一塊（{layers}）圍出來的體積是零，"
+                                    "看起來不是一個封閉的空間"))
+        elif (volume < 0) != inward:
+            side = "房間裡面" if inward else "外面（空氣那一側）"
+            problems.append(Problem("faces_flipped", True, f"{where}有一塊（{layers}）的面整個翻反了："
+                                    f"每個面應該朝{side}"))
+    return problems
+
+
+def _mesh_problems(triangles: Sequence[LayerTriangle], inward: bool, where: str, weld_m: float) -> list[Problem]:
+    """封閉、相鄰一致都過了，才判每一塊的整體朝向。"""
+    ids = _weld(triangles, weld_m)
+    return _edge_problems(triangles, ids, where) or _orientation_problems(triangles, ids, inward, where, weld_m)
+
+
+def _parity(points: FloatArray, corners: FloatArray, direction: FloatArray) -> NDArray[np.bool_]:
+    """沿一個方向射出去，穿過奇數個面就在裡面。"""
     edge1, edge2 = corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]
     h = np.cross(direction, edge2)
     det = np.einsum("ij,ij->i", edge1, h)
@@ -205,6 +265,17 @@ def _inside_mask(points: FloatArray, triangles: Sequence[LayerTriangle]) -> NDAr
         hits = usable & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
         result[index] = int(hits.sum()) % 2 == 1
     return result
+
+
+def _inside_mask(points: FloatArray, triangles: Sequence[LayerTriangle]) -> NDArray[np.bool_]:
+    """每個點在不在封閉網格裡：三個不相干的方向各射一次，取多數。
+
+    單一方向剛好擦過兩個三角形共用的邊時會數錯；三個方向同時擦邊的機會小到可以不管。
+    """
+    corners = _corners(triangles)
+    votes = sum(_parity(points, corners, np.array(direction, dtype=np.float64)).astype(np.int64)
+                for direction in _RAY_DIRECTIONS)
+    return np.asarray(votes >= 2, dtype=np.bool_)
 
 
 def _on_surface_mask(points: FloatArray, triangles: Sequence[LayerTriangle], tolerance_m: float) -> NDArray[np.bool_]:
@@ -244,9 +315,11 @@ def _placement_problems(room: RoomShell, weld_m: float) -> list[Problem]:
     if not placements or not room.shell:
         return problems
     points = np.array([item.position for item in placements], dtype=np.float64)
-    inside_shell = _inside_mask(points, room.shell) & ~_on_surface_mask(points, room.shell, weld_m)
-    for item, inside in zip(placements, inside_shell, strict=True):
-        if not inside:
+    on_wall = _on_surface_mask(points, room.shell, weld_m)
+    inside_shell = _inside_mask(points, room.shell) & ~on_wall
+    for item, inside, flush in zip(placements, inside_shell, on_wall, strict=True):
+        # 嵌牆喇叭的聲學中心本來就在牆面上，貼著外殼也算數；其餘要真的在房內。
+        if not (inside or (flush and item.kind == IN_WALL_SPEAKER)):
             problems.append(Problem("placement_outside", True, f"{_label(item)}不在房間裡面"))
     for solid in room.solids:
         for item, inside in zip(placements, _inside_mask(points, solid.triangles), strict=True):
@@ -266,8 +339,7 @@ def _solid_problems(room: RoomShell, settings: RoomShellImportSettings) -> list[
     problems = []
     for solid in room.solids:
         where = f"造型「{solid.name}」"
-        own = _edge_problems(solid.triangles, settings.weld_m, where)
-        problems.extend(own or _orientation_problem(solid.triangles, False, where))
+        problems.extend(_mesh_problems(solid.triangles, False, where, settings.weld_m))
         if not room.shell:
             continue
         points = _corners(solid.triangles).reshape(-1, 3)
@@ -294,18 +366,21 @@ def plane_groups(triangles: Sequence[LayerTriangle], angle_deg: float, offset_m:
     cross = _cross(corners)
     areas = np.linalg.norm(cross, axis=1) / 2.0
     cos_limit = math.cos(math.radians(angle_deg))
-    groups: list[tuple[FloatArray, float, list[int]]] = []
+    centers = corners.mean(axis=1)
+    groups: list[tuple[FloatArray, FloatArray, list[int]]] = []
     for index in np.argsort(-areas, kind="stable"):
         if areas[index] == 0.0:
             continue
         normal = cross[index] / (2.0 * areas[index])
-        offset = float(normal @ corners[index, 0])
-        for group_normal, group_offset, members in groups:
-            if float(group_normal @ normal) >= cos_limit and abs(group_offset - offset) <= offset_m:
+        # 距離量的是這個三角形中心到那一組平面的距離，不是兩邊各自的 n·p 相減：
+        # 後者離原點越遠，同樣的角度差就差越多，結果會隨模型擺在哪裡而變。
+        for group_normal, group_point, members in groups:
+            if (float(group_normal @ normal) >= cos_limit
+                    and abs(float(group_normal @ (centers[index] - group_point))) <= offset_m):
                 members.append(int(index))
                 break
         else:
-            groups.append((normal, offset, [int(index)]))
+            groups.append((normal, centers[index], [int(index)]))
     result = []
     for normal, _, members in groups:
         weights = areas[members]
@@ -343,8 +418,7 @@ def check_room_shell(room: RoomShell, settings: RoomShellImportSettings) -> Impo
     if not room.shell:
         problems.append(Problem("no_shell", True, "模型裡沒有房間外殼（ROOM 圖層底下沒有面）"))
     else:
-        own = _edge_problems(room.shell, settings.weld_m, "房間外殼")
-        problems.extend(own or _orientation_problem(room.shell, True, "房間外殼"))
+        problems.extend(_mesh_problems(room.shell, True, "房間外殼", settings.weld_m))
     problems.extend(_solid_problems(room, settings))
     problems.extend(_placement_problems(room, settings.weld_m))
     every = (*room.shell, *(t for solid in room.solids for t in solid.triangles))
@@ -355,8 +429,7 @@ def check_room_shell(room: RoomShell, settings: RoomShellImportSettings) -> Impo
                                 f"上限是 {settings.max_planes} 個；請在 Rhino 裡簡化模型"))
     problems.extend(Problem("skipped", False, f"略過：{note}") for note in room.skipped)
     if room.unreadable:
-        problems.append(Problem("unreadable", True, "這一版只讀網格（Mesh），這些物件讀不了："
-                                f"{'、'.join(room.unreadable)}；請在 Rhino 用 Mesh 指令轉成網格再存"))
+        problems.append(Problem("unreadable", True, f"這些物件讀不了：{'；'.join(room.unreadable)}"))
     unnamed = sum(1 for triangle in every if not triangle.layer)
     if unnamed:
         problems.append(Problem("no_material_layer", True, f"有 {unnamed} 個面直接放在 ROOM 或 TREAT 上層，"

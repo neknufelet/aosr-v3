@@ -9,12 +9,13 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import rhino3dm
 
 from aosr.config.paths import config_path
 from aosr.config.room_shell_import import RoomShellImportSettings, load_room_shell_import_settings
 from aosr.geometry.rhino_room import RhinoRoomError, read_rhino_room
 from aosr.geometry.room_shell import (
-    LayerTriangle, Placement, RoomShell, Solid, Vec3, check_room_shell, signed_volume,
+    LayerTriangle, Placement, RoomShell, Solid, Vec3, check_room_shell, plane_groups, signed_volume,
 )
 
 
@@ -188,3 +189,108 @@ def test_reader_refuses_big_or_foreign_files(tmp_path: Path) -> None:
     foreign.write_bytes(b"solid nope\nendsolid nope\n")
     with pytest.raises(RhinoRoomError, match="讀不出"):
         read_rhino_room(foreign, 10_000)
+
+
+# ── 獨立審查（11-26）找到的十個洞，各一題 ──────────────────────────────────────
+
+
+def _layer_index(model: rhino3dm.File3dm, full_path: str) -> int:
+    return next(i for i in range(len(model.Layers)) if model.Layers[i].FullPath == full_path)
+
+
+def _tetra_mesh() -> rhino3dm.Mesh:
+    mesh = rhino3dm.Mesh()
+    for point in ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
+        mesh.Vertices.Add(*point)
+    for a, b, c in ((0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)):
+        mesh.Faces.AddFace(a, b, c)
+    return mesh
+
+
+def test_block_members_and_loose_speaker_objects(settings: RoomShellImportSettings, tmp_path: Path) -> None:
+    """元件定義裡的網格不是場景裡的造型；喇叭圖層上不是元件的東西要擋，不准靜靜消失。"""
+    model = rhino3dm.File3dm.Read(str(TEST_ROOM))
+    assert model is not None
+    member = rhino3dm.ObjectAttributes()
+    member.LayerIndex = _layer_index(model, "TREAT::Cloud_木板")
+    model.InstanceDefinitions.Add("PAIR", "", "", "", rhino3dm.Point3d(0.0, 0.0, 0.0), (_tetra_mesh(),), (member,))
+    loose = rhino3dm.ObjectAttributes()
+    loose.LayerIndex = _layer_index(model, "SPEAKER")
+    model.Objects.AddPoint(rhino3dm.Point3d(2.0, 2.0, 1.0), loose)
+    edited = tmp_path / "edited.3dm"
+    assert model.Write(str(edited), 8)
+    room = read_rhino_room(edited, settings.max_file_bytes)
+    assert [len(solid.triangles) for solid in room.solids] == [12]
+    assert len(room.unreadable) == 1 and "SPEAKER" in room.unreadable[0]
+    assert "unreadable" in codes(room, settings)
+
+
+def test_unknown_speaker_block_blocks(settings: RoomShellImportSettings, tmp_path: Path) -> None:
+    """喇叭圖層上認不出名字的元件不准只留一句提醒就算過。"""
+    model = rhino3dm.File3dm.Read(str(TEST_ROOM))
+    assert model is not None
+    index = model.InstanceDefinitions.Add("Genelec_8030", "", "", "", rhino3dm.Point3d(0.0, 0.0, 0.0),
+                                          (_tetra_mesh(),), (rhino3dm.ObjectAttributes(),))
+    definition = model.InstanceDefinitions.FindIndex(index)
+    assert definition is not None
+    placed = rhino3dm.ObjectAttributes()
+    placed.LayerIndex = _layer_index(model, "SPEAKER")
+    model.Objects.AddInstanceObject(
+        rhino3dm.InstanceReference(definition.Id, rhino3dm.Transform.Translation(2.0, 2.0, 1.0)), placed)
+    edited = tmp_path / "unknown-block.3dm"
+    assert model.Write(str(edited), 8)
+    room = read_rhino_room(edited, settings.max_file_bytes)
+    assert len(room.speakers) == 2
+    assert len(room.unreadable) == 1 and "SPK_BOOKSHELF" in room.unreadable[0]
+    assert not check_room_shell(room, settings).ok
+
+
+def test_every_disconnected_piece_is_judged(settings: RoomShellImportSettings) -> None:
+    room = good_room()
+    stray = box(10, 10, 0, 11, 11, 1, "Wall", inward=True)
+    assert "shell_pieces" in codes(replace(room, shell=(*room.shell, *stray)), settings)
+    mixed = Solid("cloud", (*room.solids[0].triangles, *box(2, 2, 1, 2.5, 2.5, 1.5, "Cloud", inward=True)))
+    assert "faces_flipped" in codes(replace(room, solids=(mixed,)), settings)
+
+
+def test_in_wall_speaker_may_sit_on_the_wall(settings: RoomShellImportSettings) -> None:
+    room = good_room()
+    flush = Placement("SPK_INWALL", (0.0, 2.0, 1.2), (1.0, 0.0, 0.0))
+    assert codes(replace(room, speakers=(flush,)), settings) == set()
+    floating = Placement("SPK_BOOKSHELF", (0.0, 2.0, 1.2), (1.0, 0.0, 0.0))
+    assert "placement_outside" in codes(replace(room, speakers=(floating,)), settings)
+
+
+def test_points_whose_ray_grazes_a_shared_edge_stay_inside(settings: RoomShellImportSettings) -> None:
+    # 審查實測：這一點用舊的單一方向會擦過天花對角線、被判成在房外。
+    room = good_room()
+    seat = Placement("SEAT_MAIN", (2.09589, 1.57097, 2.62221), (-1.0, 0.0, 0.0))
+    assert "placement_outside" not in codes(replace(room, seats=(seat,)), settings)
+
+
+def test_weld_tolerates_noise_across_grid_lines(settings: RoomShellImportSettings) -> None:
+    shifted = box(1.00015, 0, 0, 6.00015, 4, 3, "Wall", inward=True)
+    noisy = tuple(
+        LayerTriangle(t.layer, *((x + 2e-9, y, z) for x, y, z in (t.a, t.b, t.c))) if i % 2 else t
+        for i, t in enumerate(shifted))
+    room = replace(good_room(), shell=noisy, solids=(), speakers=(Placement("SPK_FLOOR", (2.0, 1.0, 1.0), (1.0, 0.0, 0.0)),),
+                   seats=(Placement("SEAT_MAIN", (4.0, 2.0, 1.2), (-1.0, 0.0, 0.0)),))
+    assert codes(room, settings) == set()
+
+
+def test_plane_grouping_does_not_depend_on_where_the_model_sits(settings: RoomShellImportSettings) -> None:
+    near = box(0, 0, 0, 5, 4, 3, "Wall", inward=True)
+    far = box(100, 100, 0, 105, 104, 3, "Wall", inward=True)
+    count = [len(plane_groups(shell, settings.coplanar_angle_deg, settings.coplanar_offset_m)) for shell in (near, far)]
+    assert count == [6, 6]
+    # 遠處一個只歪 0.3 度的三角形仍然跟同一面牆算同一個平面。
+    tilt = 0.3 * 3.141592653589793 / 180.0
+    wall = LayerTriangle("Wall", (100.0, 100.0, 0.0), (100.0 + 1.0 * tilt, 101.0, 0.0), (100.0, 100.0, 3.0))
+    assert len(plane_groups((*far, wall), settings.coplanar_angle_deg, settings.coplanar_offset_m)) == 6
+
+
+def test_flat_closed_solid_is_zero_volume(settings: RoomShellImportSettings) -> None:
+    room = good_room()
+    # 厚 0.15 毫米：比焊點距離大（面不會被焊在一起），體積卻小到等於零。
+    flat = Solid("flat", box(1, 1, 1, 2, 2, 1.00015, "Flat", inward=False))
+    assert "zero_volume" in codes(replace(room, solids=(*room.solids, flat)), settings)
