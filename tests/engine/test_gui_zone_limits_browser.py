@@ -9,7 +9,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
-from tests.engine._input_page_steps import reveal
+from tests.engine._input_page_steps import limits_all_clear, reveal
 from tests.engine._zone_panel_steps import choose_fixed, choose_mode, edit_candidates, edit_depth
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -47,7 +47,7 @@ def _red(page: Page, zone: str) -> None:
 
 def _clear(page: Page, zone: str) -> None:
     expect(page.locator(f"#elevation [data-zone-id={zone}]")).not_to_have_class(RED)
-    expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+    limits_all_clear(page)
     expect(page.locator("#zone-to-search")).to_be_enabled()
 
 
@@ -473,7 +473,7 @@ def test_a_zone_where_nothing_fits_says_each_group_once_in_the_whole_right_colum
         expect(summary).to_have_text(head + refusal[0])
         page.locator("#elevation-wall-x0").click()
         _depth(page, "#depth-room", "6")
-        expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        limits_all_clear(page)
         expect(page.locator("[id^=depth-target-x0-whole_wall-]")).to_have_count(4)
         expect(page.locator("#depth-target-x0-whole_wall-3")).to_have_class("limit-warn")
         assert watched.page_errors == [] and watched.console_errors == []

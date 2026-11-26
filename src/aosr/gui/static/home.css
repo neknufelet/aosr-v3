@@ -89,7 +89,9 @@
 #plan-legend{font-size:.8125rem;color:#46586a;padding-left:1.2rem}
 @media (max-width:1000px){.roomrow{grid-template-columns:minmax(0,1fr)}}
 /* 訊息列：多條問題一條一行；字級跟內文一樣，成功的綠色與問題的警示色由 style.css 的 .ok／.notice 管。 */
-#messages{white-space:pre-line;min-height:1.5em}
+#messages{white-space:pre-line;margin:0 0 .4rem}
+/* #1265 單元 6：訊息列搬到頂條「打開」那一句底下；空的不佔一行。平面圖檢查通過那一句（data-echo=check）頂條狀態旁已經寫了，不再顯示第二次。 */
+#messages:empty,#messages[data-echo=check]{display:none}
 /* 舊的單筆封存：代號、「搬回」不折行；時間可在日期與時刻之間折行；物理那一格字長，讓它折。
    物理那一格滑鼠停上去有技術細節（物理身分、程式提交），游標改成問號提示有東西可看。 */
 table:has(#archived-list) th,#archived-list td:not(:nth-child(2)):not(:nth-child(3)){white-space:nowrap}
@@ -279,6 +281,11 @@ html:has(#input-bars){scroll-padding-bottom:7rem}
   .input-nav{overflow-x:auto;white-space:nowrap}
 }
 
+/* 頂條狀態旁的檢查結果（check_state.js）：檢查中灰字、通過綠字、沒過紅字，問題那幾個字是可按的連結樣子。 */
+#check-state{font-size:.85rem;color:#46586a}
+#check-state[data-kind=ok]{color:#236336}
+#check-state[data-kind=problem]{color:#872c22;font-weight:600}
+#input-bars #check-state .check-go{background:none;border:0;padding:0;color:#872c22;font:inherit;text-decoration:underline;cursor:pointer}
 #save-state::before{content:"";display:inline-block;width:.5em;height:.5em;margin-right:.45em;border-radius:50%;background:currentColor;vertical-align:.1em}
 #input-bars,#input-footer{border-inline:0;border-radius:0;margin-inline:calc(50% - 50vw);padding-inline:max(1rem,calc((100vw - 1220px) / 2))}
 #lock-bar{margin-inline:calc(-1 * max(1rem,calc((100vw - 1220px) / 2)));padding-inline:max(1rem,calc((100vw - 1220px) / 2))}
@@ -421,8 +428,8 @@ html.drawer-open{overflow:hidden}
 #empty-title{display:none;font-size:1rem}
 body[data-input-start=empty] #empty-title{display:inline}
 /* 開頁的那道門（第二趟，審查第 5 條）："loading" 是還沒判定有沒有存過的方案，跟空畫面藏同一批；只多一行「讀取中…」。
-   頂條「打開」旁邊與存檔那一句一起藏（5c 第二趟，審查第 1 條）：門關著時沒有方案開著，那兩句沒有東西可指。 */
-body[data-input-start] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, .bar-actions, #lock-bar, #nav-zones, #open-note, #save-feedback){display:none}
+   頂條「打開」旁邊與存檔那一句一起藏（5c 第二趟，審查第 1 條）：門關著時沒有方案開著，那兩句沒有東西可指。訊息列與頂條檢查那一句（#1265 單元 6 搬上頂條）照同一道門藏。 */
+body[data-input-start] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, #check-state, .bar-actions, #lock-bar, #nav-zones, #open-note, #messages, #save-feedback){display:none}
 #boot-note{display:none;max-width:44rem;margin:4rem auto 2rem;color:#46586a}
 body[data-input-start=loading] #boot-note{display:block}
 #boot-note.notice{color:#872c22;font-weight:600}

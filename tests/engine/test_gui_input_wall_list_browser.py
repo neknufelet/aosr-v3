@@ -16,11 +16,11 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
-from tests.engine._input_page_steps import open_example_scheme, open_fact_editor, reveal
+from tests.engine._input_page_steps import limits_all_clear, open_example_scheme, open_fact_editor, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine.test_gui_input_clear_undo_browser import _release
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_quiet_but_plan_refused, _open, _serve, browser as browser
 from tests.engine.test_gui_wall_words import _arrive, _late_rename
 from tests.engine._zone_symmetry_room import NAME as REFERENCE_ROOM
 from tests.engine.test_gui_vpr_reference import HIT
@@ -265,7 +265,7 @@ def test_blanking_the_room_size_keeps_only_an_open_wall_editor_line_so_it_can_be
             expect(page.locator("#elevation-original-line")).to_be_visible()
             expect(page.locator("#elevation-depth-line")).to_be_visible()
             expect(page.locator(f"#{area}")).to_be_hidden()
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 # 舊做法表那幾種逐區控制項與它們那一格的 id 前綴（#1265 單元 3 之二第二趟拆表前 zone_modes.js、zone_limits.js 畫的）。
@@ -348,7 +348,7 @@ def test_a_whole_wall_verdict_sits_above_the_list_under_the_summary_with_its_old
         _settled(page)
         notes = page.locator("#elevation-list-notes")
         summary = notes.locator("#zone-limits-summary")
-        expect(summary).to_have_text("限制都沒超過")
+        limits_all_clear(page)
         expect(page.locator("[id^=limit-wall-]")).to_have_count(0)
         page.route("**/api/zone-limits", _with_gaps)
         page.evaluate("refreshZoneLimits()")

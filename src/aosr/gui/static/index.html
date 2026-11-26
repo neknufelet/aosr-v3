@@ -14,6 +14,7 @@
   <script src="/static/elevation.js" defer></script>
   <script src="/static/zone_modes.js" defer></script>
   <script src="/static/zone_limits.js" defer></script>
+  <script src="/static/check_state.js" defer></script>
   <script src="/static/zone_rules.js" defer></script>
   <script src="/static/material-kind.js" defer></script>
   <script src="/static/zone_overview.js" defer></script>
@@ -47,6 +48,7 @@
               <p id="new-scheme-note" aria-live="polite"></p></form></div>
         </div>
         <span id="save-state" role="status"></span>
+        <span id="check-state" data-kind="pending" aria-live="polite" tabindex="-1">檢查中…</span>
         <div class="bar-actions"><button id="show-results" type="button">算過的結果與比較 ▸</button>
           <div class="bar-anchor"><button id="save-as-toggle" aria-expanded="false" aria-controls="save-as-box">另存新名字</button>
             <form id="save-as-box" class="bar-popup" hidden><label>新名字<input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label>
@@ -55,6 +57,7 @@
         </div>
       </div>
       <div id="open-note" aria-live="polite"></div>
+      <p id="messages" aria-live="polite"></p>
       <div id="save-feedback" aria-live="polite"></div><div id="lock-bar" hidden></div>
     </header>
     <dialog id="leave-edits" aria-labelledby="leave-title"><form method="dialog">
@@ -185,8 +188,6 @@
         </div>
       </div>
     </section>
-    <section><h2>檢查</h2><div class="actions"><button id="check">檢查</button></div>
-      <p id="messages" aria-live="polite"></p></section>
     <footer id="input-footer">
       <div class="bar-row"><div class="bar-prompt"><strong id="next-title"></strong><small id="next-note"></small></div>
         <span id="current-stop"><button id="stop" disabled hidden>停止</button></span>

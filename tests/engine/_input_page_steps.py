@@ -255,3 +255,23 @@ def reveal(page: Page, selector: str) -> Locator:
         kind, name = holder
         {"wall": show_wall_form, "fold": open_fold, "editor": open_fact_editor, "view": show_view}[kind](page, name)
     return target
+
+
+def recheck(page: Page, field: str = "#room-Lx") -> None:
+    """#1265 單元 6 起沒有「檢查」鈕：改定一格（瀏覽器發 change）就自動重問平面圖與限制。以前按「檢查」重問的考卷改成對那一格
+    發一次 change——跟離開一格時瀏覽器發的是同一個事件；沒改東西、只要重問一次的（例如連線恢復後重試），值不變。"""
+    page.locator(field).dispatch_event("change")
+
+
+def limits_all_clear(page: Page) -> None:
+    """限制都沒超過：#1265 單元 6 起第 2 段右欄不再寫「限制都沒超過」，改看頂條狀態旁那一句（平面圖與最新那次限制判決都回來、
+    都沒問題才寫「檢查通過」），右欄那一句不在。"""
+    expect(page.locator("#check-state")).to_have_text("檢查通過")
+    expect(page.locator("#zone-limits-summary")).to_have_count(0)
+
+
+def commit_and_settle(page: Page, selector: str) -> None:
+    """離開剛改的那一格（瀏覽器發 change，#1265 單元 6 起就自動檢查），等那一次檢查回來（頂條那一句不再是「檢查中…」）。
+    考「按一顆鈕之後怎樣」的考卷先這樣做：不然按鈕那一下才離開那一格，自動檢查跟按鈕自己的檢查擠在同一刻。"""
+    page.locator(selector).blur()
+    page.wait_for_function("document.getElementById('check-state').dataset.kind !== 'pending'")

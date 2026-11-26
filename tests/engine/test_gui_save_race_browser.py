@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Browser, Locator, Page, Request, Route, expect
 
-from tests.engine._input_page_steps import archive_then_recreate, open_example_scheme, open_save_as, open_scheme, scheme_open_button
+from tests.engine._input_page_steps import archive_then_recreate, commit_and_settle, open_example_scheme, open_save_as, open_scheme, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -459,6 +459,8 @@ def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unl
             page.locator("#layer-floor-0-thickness_m").fill("")
         assert preview.value.status == 400
         expect(page.locator("#messages")).to_have_class("notice")
+        # #1265 單元 6 起離開一格就自動檢查：先離開那一格、等那一次回來，下面攔的才是「另存新名字」自己那一次。
+        commit_and_settle(page, "#layer-floor-0-thickness_m")
         open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, "**/api/plan", "POST")

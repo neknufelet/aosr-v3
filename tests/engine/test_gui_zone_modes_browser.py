@@ -9,7 +9,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
-from tests.engine._input_page_steps import open_example_scheme, reveal, scheme_open_button, scripted_open_scheme
+from tests.engine._input_page_steps import limits_all_clear, open_example_scheme, recheck, reveal, scheme_open_button, scripted_open_scheme
 from tests.engine._zone_panel_steps import (apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, fixed_value,
                                             listed, open_alone, open_panel)
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -516,7 +516,7 @@ def test_with_no_wall_picked_the_footer_button_follows_the_limits_summary(tmp_pa
             page.locator("#depth-room").fill("20")
             page.locator("#depth-room").press("Tab")
             page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
-            expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+            limits_all_clear(page)
             expect(page.locator("#zone-to-search")).to_be_enabled()
             expect(page.locator("#zone-to-search-note")).to_have_text("交出黃色的 1 區；下一頁按「開始搜尋」才開始算")
             assert watched.page_errors == [] and watched.console_errors == []
@@ -524,7 +524,7 @@ def test_with_no_wall_picked_the_footer_button_follows_the_limits_summary(tmp_pa
 
 def test_a_footer_reply_is_dropped_once_a_later_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
     """頁底那一句（searchNote 寫的，#1265 單元 3 之二收尾追加第 2 條）：限制檢查斷了時按「交給程式最佳化 ▸」，底下寫沒檢查成；
-    恢復後按「檢查」、新判決回來，那一句要收掉，照現在的樣子寫交出幾區。"""
+    恢復後重問一次（#1265 單元 6 起沒有「檢查」鈕，改定一格自動重問）、新判決回來，那一句要收掉，照現在的樣子寫交出幾區。"""
     _write_room109_design(tmp_path, {"left_right_symmetry": "off",
                                      "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}})
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
@@ -533,15 +533,15 @@ def test_a_footer_reply_is_dropped_once_a_later_verdict_comes_back(tmp_path: Pat
         page.locator("#elevation-wall-x0").click()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         page.route("**/api/zone-limits", lambda route: route.abort())
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
         page.locator("#zone-to-search").click()
         note = page.locator("#zone-to-search-note")
         expect(note).to_contain_text("限制沒檢查成")
         page.unroute("**/api/zone-limits")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
-        expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        limits_all_clear(page)
         expect(note).to_have_text("交出黃色的 1 區；下一頁按「開始搜尋」才開始算")
         assert watched.page_errors == []
 
@@ -616,7 +616,7 @@ def test_a_save_failure_reply_outlives_the_relabel_after_unlock_and_goes_once_sa
 
 
 def test_the_zone_page_reply_goes_with_the_footer_reply_once_a_later_verdict_comes_back(tmp_path: Path, browser: Browser) -> None:
-    """#1265 單元 3 之二收尾第二趟 D2：在「這間房貼什麼」按「拿去搜尋」、限制沒檢查成，那一頁寫原因；回輸入頁恢復連線按「檢查」，
+    """#1265 單元 3 之二收尾第二趟 D2：在「這間房貼什麼」按「拿去搜尋」、限制沒檢查成，那一頁寫原因；回輸入頁恢復連線重問一次（改定一格），
     新判決回來，頁底那一句收掉——那一頁的回話（#zone-page-note）是同一句，要一起收，不准再打開那一頁時還掛著。"""
     _write_room109_design(tmp_path, {"left_right_symmetry": "off",
                                      "zones": {"x0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}})
@@ -626,14 +626,14 @@ def test_the_zone_page_reply_goes_with_the_footer_reply_once_a_later_verdict_com
         page.locator("#elevation-wall-x0").click()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         page.route("**/api/zone-limits", lambda route: route.abort())
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
         page.locator("#zone-page-open").click()
         page.locator("#zone-page-search").click()
         expect(page.locator("#zone-page-note")).to_contain_text("限制沒檢查成")
         page.locator("#zone-page-close").click()
         page.unroute("**/api/zone-limits")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
         expect(page.locator("#zone-to-search-note")).to_have_text(HANDED)
         page.locator("#zone-page-open").click()

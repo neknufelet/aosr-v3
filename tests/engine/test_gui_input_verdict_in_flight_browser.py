@@ -26,6 +26,7 @@ from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag, _open_s
 from tests.engine.test_gui_zone_limits_browser import _deep_user_library
 from tests.engine.test_gui_zone_modes_browser import _write_room109_design
 from tests.engine.test_gui_zone_panel_show_all_browser import CEILING
+from tests.engine._input_page_steps import limits_all_clear, recheck
 
 Doc = dict[str, object]
 
@@ -514,14 +515,14 @@ def test_a_running_scheme_whose_progress_cannot_be_read_still_gets_its_limits_ch
         assert asked, "打開之後應該問過限制"
         expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator("#zone-limits-summary")).to_have_text("限制都沒超過")
+        limits_all_clear(page)
         expect(page.locator("#elevation-axis-words")).to_contain_text("鏡子是兩支喇叭的中線")
         expect(page.locator("#wall-zone-what-x0-whole_wall")).not_to_contain_text("總厚度上限還在核對")
         expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
 
 
 def test_the_mirror_sentence_says_checking_again_while_a_retry_after_a_failure_is_on_its_way(tmp_path: Path, browser: Browser) -> None:
-    """#1265 單元 3 之二收尾第二趟 B4 之一：限制檢查失敗（鏡子那一句寫沒確認成）之後按「檢查」重試；重試還在路上時那一句要回到
+    """#1265 單元 3 之二收尾第二趟 B4 之一：限制檢查失敗（鏡子那一句寫沒確認成）之後重問一次（#1265 單元 6 起沒有「檢查」鈕，改定一格自動重問）；重試還在路上時那一句要回到
     「正在確認鏡子在哪…」，不准停在上一次的「沒確認成」。回來之後照新的判決寫。"""
     _write_room109_design(tmp_path, {"zones": {}})
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
@@ -531,13 +532,13 @@ def test_the_mirror_sentence_says_checking_again_while_a_retry_after_a_failure_i
         _verdict_shown(page)
         words = page.locator("#elevation-axis-words")
         page.route("**/api/zone-limits", lambda route: route.abort())
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'error'")
         expect(words).to_contain_text("鏡子在哪沒確認成")
         page.unroute("**/api/zone-limits")
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("zoneLimitsReceived !== zoneLimitsGeneration")
         expect(words).to_have_text("正在確認鏡子在哪…")
         assert held, "重試應該還在路上"
@@ -586,7 +587,7 @@ def _with_an_extra_message(route: Route) -> None:
 
 def test_a_cut_that_throws_after_rewriting_the_zones_leaves_no_stale_pairing(tmp_path: Path, browser: Browser) -> None:
     """D1：前牆左右兩條 auto1、auto2 配成一對；清掉前牆，回覆讓 applyCut 在改寫分區之後丟錯。那時判決要已經標成在路上：
-    再點一次前牆重畫，不准拿上一版的配對對新切法而丟錯；按「檢查」重問之後照常。"""
+    再點一次前牆重畫，不准拿上一版的配對對新切法而丟錯；改定一格重問之後照常。"""
     _pair_room(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
@@ -603,7 +604,7 @@ def test_a_cut_that_throws_after_rewriting_the_zones_leaves_no_stale_pairing(tmp
         expect(page.locator("#wall-zone-what-x0-whole_wall")).to_be_visible()
         assert watched.page_errors == []
         page.unroute("**/api/zone-cut")
-        page.locator("#check").click()
+        recheck(page)
         _verdict_shown(page)
         expect(page.locator("#elevation-list-zones .zone-item")).to_have_count(1)
         assert watched.page_errors == []

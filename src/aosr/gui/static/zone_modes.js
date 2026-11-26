@@ -170,7 +170,7 @@ async function fetchZoneDesign(name) {
 function applyZoneDesign(state) {
   zoneDesignGeneration += 1;
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
-  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; zoneSameAsOriginal.clear();
+  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; renderCheckState(); zoneSameAsOriginal.clear();
   zoneLastAllowed = null;  // 「上一次的組合」不跨方案（審查 11-15）
 }
 // 做法這一次算存好了（寫了檔，或沒內容也沒存過、不用寫）：每一條這樣的路都只叫這一支（#1265 單元 3 之二收尾第三趟 E1）。
@@ -245,10 +245,13 @@ async function sendToSearch() {
   const resize = window.pendingRoomResize?.();
   if (resize) await resize;
   const limits = await settledZoneLimits();
+  // 限制檢查沒過（沒檢查成、有超過的）：不存不跳，頁底照講，並停在問題上（check_state.js：捲到第一個標紅的區、焦點在頂條那一句）。
   if (limits?.status !== "checked") {
-    searchNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
+    searchNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); await stopAtCheck("limits"); return;
   }
-  if (limitsRedCount()) { searchNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); return; }
+  if (limitsRedCount()) {
+    searchNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); await stopAtCheck("limits"); return;
+  }
   // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，不存不跳，照伺服器那一句講。
   const refused = referenceRefusals();
   if (refused.length) { searchNote(refused.map(line => line.text).join("；"), "notice"); return; }
@@ -260,16 +263,18 @@ async function sendToSearch() {
     window.zonePageKeep?.(refused);
     return;
   }
-  await holdInput(async () => {
+  const planFailed = await holdInput(async () => {
     const generation = zoneDesignGeneration, name = $("save-id").value;
     const stored = await storeScheme();
-    if (!stored) return;
+    // 存之前那一次平面圖檢查沒過（storeScheme 回 null）：沒存、不跳，鎖放開之後停在問題上。
+    if (!stored) return stored === null;
     await refreshAfterSave(stored.message);
     // 鎖著的時候換不了方案；這一條是鎖漏掉時的第二道（同 pressedCopy 的 samePage）。
     if (generation !== zoneDesignGeneration) { searchNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice", false); return; }
     if (!zoneDesignSaved) { searchNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice", false); return; }
     await leaveForSearch(`/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`);
   });
+  if (planFailed === true) await stopAtCheck("plan");
 }
 // 送出跳頁、等到離開這一頁（呼叫的人拿著鎖）：搜尋頁回來之前舊的這一頁還在畫面上。離開了這個等待就不會回來，鎖跟著頁面一起消失；
 // 兩種情況會回來、把鎖放開：按「上一頁」時瀏覽器把這一頁原樣搬回來（pageshow），或等了一陣子還在這一頁（搜尋頁沒打開成；

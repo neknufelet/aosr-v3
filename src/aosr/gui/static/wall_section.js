@@ -8,7 +8,7 @@
      每一區一顆「改這一區 ▸」（zone_modes.js 的 zoneGotoButton，整頁只有這一處）。
    - 摺疊：一區一列，離左、離下（牆面寫離地）、寬 × 高照立面圖畫面上的方向（同選取框那四格），現在貼的照牆面表單的寫法
      （wallText，固定阻抗帶數字與單位），底下接原本那一面的數字。
-   - 右欄上方（#1265 單元 3 之二第二趟，舊做法表拆了搬過來）：限制總結「限制都沒超過」（zone-limits-summary）、這一面整面的判決
+   - 右欄上方（#1265 單元 3 之二第二趟，舊做法表拆了搬過來）：限制總結（zone-limits-summary；有超過時才寫，都沒超過的「檢查通過」只在頂條，#1265 單元 6）、這一面整面的判決
      （limit-wall-<牆>-<i>）、設計設定讀不到與材料庫有問題那兩句。
    全部從方案（scheme）、每一區的做法（zoneDesign）、限制判決（zoneLimits）現算，畫的時候只讀不寫；跟方案同一條路重畫
    （zone_modes.js 的 renderZoneTable 開頭），開檔、切牆、換材料、改做法、判決回來都會走到。 */
@@ -148,7 +148,7 @@ function renderList(wall) {
   const shown = Boolean(wall && window.elevationGeometry.wallSize(wall)), lines = shown ? wallLimitLines(wall) : [];
   const items = shown ? window.zoneFaceZones(wall) : [];
   const keys = items.map(item => item.key);  // zoneFaceZones 回來就照號碼排好了（zone_overview.js 的 faceZones 最後一行）
-  byId("elevation-list-notes").replaceChildren(limitsSummary(shown ? wall : null, keys),
+  byId("elevation-list-notes").replaceChildren(...[limitsSummary(shown ? wall : null, keys)].filter(Boolean),
                                                ...(lines.length ? [limitLinesBlock(lines, `limit-wall-${wall}`)] : []), ...zoneProblemLines());
   if (!shown) {
     title.textContent = "選一面牆，這裡列出那一面的每一區";

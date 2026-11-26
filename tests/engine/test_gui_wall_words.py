@@ -20,7 +20,7 @@ from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import reference_document
 from tests.engine._input_page_steps import open_example_scheme, reveal
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_quiet_but_plan_refused, _open, _serve, browser
 from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data, _jobs
 
 # 109 part2d 存檔裡的喇叭與主位（公尺）。
@@ -181,16 +181,17 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
         page.keyboard.press("Tab")
         assert box.evaluate("node => node.isConnected && node === document.activeElement")
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
-        # 從牆面表單直接按「檢查」：那一下照樣按得到，按的時候換名，表單的值是剛打的那個。
+        # 從牆面表單直接按頂條「儲存」（#1265 單元 6 起沒有「檢查」鈕；儲存前照樣先做同一次圖面檢查）：那一下照樣按得到，
+        # 按的時候換名，表單的值是剛打的那個。
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
+        page.locator("#save").click()
         expect(page.locator("#messages")).to_have_text("寬 Ly（公尺）：空著沒填")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
         assert floor.input_value() == "2000"
         # 換過名就沒有擱著的了：再點進來、再離開，不准又整排重畫一次。
         again = floor.element_handle()
         floor.click()
-        page.locator("#check").click()
+        page.locator("#save").click()
         # 放開滑鼠時排的那一次（setTimeout 0）先跑完：同樣延遲的計時器照排進去的先後跑。
         page.evaluate("() => new Promise(resolve => setTimeout(resolve, 0))")
         assert again.evaluate("node => node.isConnected")
@@ -218,18 +219,24 @@ def test_a_click_on_a_wall_label_while_a_rename_waits_lands_in_its_box(tmp_path:
         # 標題換成那一段的。）
         page.locator("#wall-step-title").click()
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
-def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_path: Path, browser: Browser) -> None:
-    # 複查實測：600 寬時換名讓牆名變長、折行，下面的格子往下移；在按下與放開之間重畫，那一下就按到別處。
-    # #1265 起散射那一格搬到第 1 段「進階」摺疊（在牆面表單上面，換名擠不到它）：改按牆面表單底下、換名那兩區之外的
-    # 「檢查」。立面圖裡的鈕不行：焦點一進立面圖那一區換名本來就先不換，考不到「按著先不換」這一道。
+def test_the_bottom_calculate_button_pressed_from_the_wall_form_on_a_narrow_window_checks_and_renames_after(
+        tmp_path: Path, browser: Browser) -> None:
+    """600 寬、換名扣在牆面表單裡時，直接按頁底「照現在牆上貼的算一次」：按得到、那一下先做圖面檢查（寬 Ly 空著就不存、
+    不開算，訊息列寫原因），放開之後換名才落地。
+
+    這一題原本考「按著先不換」：換名讓牆名折行、下面的鈕往下移，按下與放開之間重畫就按到別處（按的是牆面表單底下的「檢查」）。
+    #1265 單元 6 拿掉「檢查」之後找過：600 寬換名落地時位置會變的鈕只剩立面圖那排牆名鈕（焦點進那一區換名本來就先不換，
+    考不到這一道）；頂條、第 1 段、第 2 段右欄、頁底那條都不動（#1265 單元 6 實測）。
+    所以「按著先不換」這一道改由點標籤字那一題（test_a_click_on_a_wall_label_while_a_rename_waits_lands_in_its_box）守，
+    這一題只考上面那幾件。"""
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=600) as watched:
         page = watched.page
         open_example_scheme(page, base, tmp_path)
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
-        check = page.locator("#check")
+        check = page.locator("#calculate")
         assert check.evaluate("""node => !node.closest('#walls, #elevation-panel')
           && Boolean(document.getElementById('walls').compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)""")
         # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開（換名還沒扣住，不影響下面考的）。
@@ -239,13 +246,15 @@ def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_p
         _arrive(page, held)
         walls, button = page.locator("#walls").bounding_box(), check.bounding_box()
         assert walls is not None and button is not None and button["y"] >= walls["y"] + walls["height"]
+        # #1265 單元 6 起寬 Ly 一離開就自動檢查、訊息列已經寫了那一句：等那一次回來、清掉訊息列，下面那一句才是按的那一下寫的。
+        page.wait_for_function("document.getElementById('check-state').dataset.kind !== 'pending'")
+        page.locator("#messages").evaluate("node => { node.textContent = ''; }")
         assert page.locator("#messages").inner_text() != "寬 Ly（公尺）：空著沒填"
         check.click()
         expect(page.locator("#messages")).to_have_text("寬 Ly（公尺）：空著沒填")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        # 寬 Ly 空著，檢查照設計回 422：主控台只准剛好那一條，頁面不准有錯。
-        assert watched.page_errors == []
-        assert watched.console_errors == ["Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"]
+        # 寬 Ly 空著，檢查照設計回 422：離開那一格的自動檢查一次、按的那一下一次；主控台每一條都要對上一次，頁面不准有錯。
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases_it(tmp_path: Path,
@@ -265,7 +274,7 @@ def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
         page.evaluate("() => document.dispatchEvent(new PointerEvent('pointercancel'))")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_a_late_rename_never_swaps_the_elevation_box_being_typed_in(tmp_path: Path, browser: Browser) -> None:
@@ -291,7 +300,7 @@ def test_a_late_rename_never_swaps_the_elevation_box_being_typed_in(tmp_path: Pa
         page.locator("#room-Lx").focus()
         expect(page.locator("#elevation-wall-x0 .wall-name")).to_have_text("x 起點牆")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_a_draft_with_a_bad_wall_value_still_names_walls_and_its_problem_says_front_wall(tmp_path: Path) -> None:

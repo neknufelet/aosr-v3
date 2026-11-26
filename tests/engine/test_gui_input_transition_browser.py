@@ -8,7 +8,7 @@ from playwright.sync_api import Browser, Request, Response, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_example_scheme, open_save_as, open_scheme, reveal, scheme_open_button
+from tests.engine._input_page_steps import open_example_scheme, open_save_as, open_scheme, recheck, reveal, scheme_open_button
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -114,7 +114,7 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
         assert "換不過去" in failure_text
         # 再改數字也要能收值，不留下缺格子的方案／預覽組合。
         page.locator("#room-Lx").fill(page.locator("#room-Lx").input_value())
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
         assert watched.page_errors == []
 

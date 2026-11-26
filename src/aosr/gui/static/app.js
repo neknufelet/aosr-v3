@@ -180,10 +180,20 @@ function relabelWallsOnLeave(event) {
   // 在區內換格（Tab、滑鼠點另一格）不算離開：瀏覽器自己換焦點時，這裡跑的當下新的那一格還沒拿到焦點。
   if (relabelLater && !inWallAreas(event.relatedTarget)) relabelWalls();
 }
+// 改定一格自動檢查（#1265 單元 6）：滑鼠按著時（點別的鈕讓那一格失焦）先不發，放開、那一下點完才發——回來會清掉或重畫
+// 平面圖、訊息列冒一行，版面在按下與放開之間跳了，那一下就沒按到。按的那一下自己問過平面圖（儲存、算），這一次就不必再問。
+let autoCheckLater = false, autoCheckAsked = 0;
+function autoCheck() {
+  if (pressing) { if (!autoCheckLater) autoCheckAsked = planAsked; autoCheckLater = true; return; }
+  const asked = autoCheckLater && autoCheckAsked !== planAsked;
+  autoCheckLater = false;
+  if (!asked) action(() => refreshPlan(undefined, true));
+}
 function relabelWallsAfterPress() {
   pressing = false;
   // 放開之後瀏覽器才發 click（點標籤字這時才把焦點交給那一格）：排到這一下點完，再看游標在不在區內。
   if (relabelLater) setTimeout(() => { if (relabelLater) relabelWalls(); }, 0);
+  if (autoCheckLater) setTimeout(() => { if (autoCheckLater) autoCheck(); }, 0);
 }
 // 帶牆名的幾塊照新名字重畫：牆面表單（連立面圖）重畫自方案，散射那排只換欄名、不動已填的值。
 // 重畫會清掉「約 ρc 的幾倍」那幾格、超限總述也是舊名字寫的：兩樣都重問一次（各自有序號丟掉晚到的舊回覆）。
@@ -476,15 +486,21 @@ async function updateMultiples() {
 }
 // 訊息列：成功（存好了、檢查通過、算完了）用 .ok，警示與錯誤用 .notice；兩種都是內文字級。
 // 訊息列換了新的一句，「打開」「開一份新的」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
-function say(text, kind) {
+// 改了就自動檢查那一次（refreshPlan 的 auto，#1265 單元 6）寫訊息列時 besides 是 false：那是離開一格順手做的，不是按了哪一顆，
+// 按鈕旁邊那幾句（沒打開的原因、沒另存、沒開新的）與存檔那一句照留，要等下一次按鈕自己的回話才換。
+// 訊息列寫過幾次（自動檢查那一次要知道自己出發之後有沒有別的回話寫進來）。
+let saidCount = 0;
+function say(text, kind, besides = true) {
+  saidCount += 1;
   $("messages").textContent = text;
-  $("save-feedback").textContent = "";
+  delete $("messages").dataset.echo;
+  if (besides) $("save-feedback").textContent = "";
   $("messages").className = kind;
   // 「這間房貼什麼」那一頁開著時這一列是藏起來的：警示照抄一份到那一頁（zone_overview.js）。
   window.zonePageSay?.(text, kind);
   // 結果抽屜開著時訊息列被遮住：封存、搬回、刪除的回話照抄一份到抽屜上方（#1265 單元 4）。
   if (!$("results-drawer").hidden) { $("results-note").textContent = text; $("results-note").className = kind; }
-  for (const note of ["open-note", "new-scheme-note", "save-as-note"]) sayBeside(note, "", "");
+  if (besides) for (const note of ["open-note", "new-scheme-note", "save-as-note"]) sayBeside(note, "", "");
 }
 // 「打開」與「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它們的結果（沒打開的原因、空名字、
 // 檢查沒過、撞名、存好了）寫在按鈕旁邊，用那一列自己的字眼。
@@ -1185,11 +1201,31 @@ async function follow(id) {
 // 帶 sent 的（存檔、另存、從範本開新的）一律不丟（5c 第三趟，複查第 1 條）：呼叫的人要拿 planProblems 與訊息列講沒存成的原因，
 // 照 #1265 單元 5c 以前的做法畫圖、寫訊息列、更新 planProblems，再回伺服器收不收。
 let planSeq = 0;
-async function refreshPlan(sent) {
+// 頂條那一句的平面圖那一半（check_state.js）：每問一次先標「檢查中…」；回來時中間沒有更新的一次再問，才把結果記上去
+// （更新的那一次自己會記）。丟錯（連不上、表單收不起來）也要記成「沒檢查成」，不准停在「檢查中…」。
+// auto：改定一格自動發的那一次（#1265 單元 6，bootInputPage 的 AUTO_CHECK_AREAS）。只問平面圖——那幾格動到限制判決的
+// （房間尺寸、左右對稱開著時的喇叭與座位）各自的 change 已經重問限制（elevation.js），不多問一次。它寫訊息列不清按鈕旁邊那幾句
+// （say 的 besides）；離開一格常常就是去按一顆鈕（儲存、另存、開新的、算）：那顆鈕的回話已經寫進訊息列，之後才回來的這一次
+// 只畫圖、記頂條，不寫訊息列。
+let planAsked = 0;
+async function refreshPlan(sent, auto = false) {
+  const turn = ++planAsked, saidAt = saidCount;
+  const settle = (state, count, words) => { if (turn === planAsked) planChecked(state, count, words); };
+  const quiet = () => auto && saidCount !== saidAt;
+  planChecking();
+  try { return await checkPlan(sent, settle, auto, quiet); } catch (error) {
+    settle("error", 1, errorText(error));
+    if (!auto) throw error;
+    // 自動那一次連不上、表單收不起來：頂條已經記了；訊息列照上面同一條規矩寫（不清按鈕旁邊那幾句、別的回話先到就不寫）。
+    if (!quiet()) say(errorText(error), "notice", false);
+    return false;
+  }
+}
+async function checkPlan(sent, settle, auto, quiet) {
   const resize = window.pendingRoomResize();
   if (resize && !sent) await resize;
   // 每次確定的改動都走到這裡：順手重判超過限制的區（#1111；不等它、不鎖頁，晚到的回覆自己丟掉）。
-  refreshZoneLimits();
+  if (!auto) refreshZoneLimits();
   const mine = ++planSeq, asked = scheme;
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(sent ?? collect())}));
@@ -1200,12 +1236,18 @@ async function refreshPlan(sent) {
     else for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
     planProblems = plan.problems ? problemLines(plan.problems) : (plan.error || "圖面檢查失敗");
-    say(planProblems, "notice");
+    if (!quiet()) say(planProblems, "notice", !auto);
+    settle(plan.problems?.length ? "problem" : "error", plan.problems?.length || 1, planProblems);
     return false;
   }
   shownPlan = plan;
   drawShownPlan();
-  say(plan.message, "ok");
+  if (!quiet()) {
+    say(plan.message, "ok", !auto);
+    // 「檢查通過」頂條狀態旁那一句已經寫了（check_state.js）：訊息列這一句照寫（存檔、另存照抄它），但不再顯示第二次（home.css）。
+    $("messages").dataset.echo = "check";
+  }
+  settle("ok");
   return true;
 }
 // 輸入頁上那幾張平面圖現在畫的是哪一份（沒畫是 null）。圖上的字靠量寬度避開彼此，輸入頁藏著的時候量不到：
@@ -1261,6 +1303,8 @@ async function action(work) {
   // 只印伺服器給的中文訊息，不帶 JS 的英文字首「Error: 」。
   try { await work(); } catch (error) { say(errorText(error), "notice"); }
 }
+const AUTO_CHECK_AREAS = ["room-fields", "speakers", "receivers", "scattering", "use-scattering", "source-model",
+  "furniture-sofa-fields", "furniture-table-fields", "furniture-cloud-fields", "cabinet-fields", "walls"];
 async function bootInputPage() {
   const example = await api("/api/example");
   inputDefaults = await api("/api/input-defaults");
@@ -1286,6 +1330,12 @@ async function bootInputPage() {
     $(id).addEventListener("input", () => action(updateMultiples));
     $(id).addEventListener("input", () => action(updateInputPreview));
   }
+  // 改了就自動檢查（#1265 單元 6）：這幾格改定（離開那一格、按 Enter，瀏覽器發 change）就重問平面圖與限制，不用再按「檢查」。
+  // 家具、喇叭擺法、姿勢那幾顆自己走 editInput；牆面表單只管數字格（換種類、套預設、實測表自己交接完就問，walls.js、measured.js）。
+  for (const id of AUTO_CHECK_AREAS) $(id).addEventListener("change", event => {
+    if (id === "walls" && !(event.target instanceof HTMLInputElement && event.target.type === "number")) return;
+    autoCheck();
+  });
   $("walls").addEventListener("input", event => {
     if (!event.target.matches("[data-layer-field]")) return;
     collectWallMaterials();
@@ -1307,7 +1357,6 @@ async function bootInputPage() {
     $(`shortcut-${name}`).textContent = `${inputDefaults.shortcuts[name].label}姿勢`;
     $(`shortcut-${name}`).onclick = () => action(() => editInput("shortcut", name));
   }
-  $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
   bindBars();
   $("new-scheme").onsubmit = event => { event.preventDefault(); action(newFromTemplate); };
@@ -1336,6 +1385,8 @@ async function bootInputPage() {
       await refreshAfterSave(stored.message);
       return api("/api/runs", "POST", {scheme_id: stored.id});
     });
+    // 存之前那一次平面圖檢查沒過（storeScheme 回 null，沒存、沒送）：停在問題上（check_state.js）。限制只擋搜尋，這裡不看。
+    if (state === null) await stopAtCheck("plan");
     if (!state) return;
     followedState = state;
     $("run-log").open = false;
@@ -1391,7 +1442,7 @@ async function openStartScheme() {
       // 已經換成這一份、只是之後接進度或圖面檢查丟錯：算打開了，原因留在訊息列（同 newSchemeSteps 的判法）。
       opened = openedId === name;
       if (opened) say(errorText(error), "notice");
-      else $("messages").textContent = errorText(error);
+      else { $("messages").textContent = errorText(error); delete $("messages").dataset.echo; }
     }
     // 原因是 changeInputScheme 寫進訊息列的那一句（門關著時不帶「保留原方案」），只留原因本身。
     if (!opened) {

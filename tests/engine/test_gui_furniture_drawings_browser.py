@@ -9,7 +9,7 @@ from playwright.sync_api import Browser, Page
 
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme, reveal
+from tests.engine._input_page_steps import open_scheme, recheck, reveal
 from tests.engine._gui_best_cases import best_store
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._gui_furniture_drawings import listening_document, working_document
@@ -190,7 +190,7 @@ def test_input_outside_and_blocked_furniture_remains_visible(browser: Browser, t
         page = watched.page
         open_scheme(page, "mix")
         page.wait_for_selector('#plan-xy [data-furniture="seat"]')
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間')")
         page.wait_for_function("document.getElementById('messages').textContent.includes('直達路徑被家具')")
         messages = page.locator("#messages").inner_text()

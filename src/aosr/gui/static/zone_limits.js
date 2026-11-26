@@ -1,5 +1,5 @@
 /* 超過限制的區塊標紅（#1111，#1082 第 1-4 段）：每次確定的改動之後（切完一面、換了做法或材料、改了深度上限、
-   改了房間尺寸、打開方案、按「檢查」）把表單現在的樣子與設計設定交伺服器判（/api/zone-limits），回來的每一條照原文
+   改了房間尺寸、打開方案、改了第 1 段任一格，#1265 單元 6 起不再有「檢查」鈕）把表單現在的樣子與設計設定交伺服器判（/api/zone-limits），回來的每一條照原文
    寫在那一區旁邊；紅的擋「拿去搜尋」（開跑那邊伺服器也照同一把再擋一次）。判法只在伺服器一份，這裡只畫。
    不從每個輸入事件發（房間、喇叭、座位每打一個字都會觸發），不鎖頁；晚到的回覆照世代號丟掉。
    回覆到的時候使用者正在立面圖那一區的某一格打字、或正在拖框：先不重畫（重畫會換掉那一格或那張圖，打到一半的字、
@@ -45,7 +45,8 @@ function showZoneLimits(generation) {
   if (again instanceof HTMLInputElement && again.type !== "checkbox") again.select();
 }
 
-function staleZoneLimits() { zoneLimitsFloor = zoneLimitsGeneration + 1; }
+// 頂條那一句（check_state.js）跟著這三個點換：標「之前收的不算數」、送出新的一次、收下最新那一次。
+function staleZoneLimits() { zoneLimitsFloor = zoneLimitsGeneration + 1; renderCheckState(); }
 function zoneLimitsFresh() { return Boolean(zoneLimits) && zoneLimitsReceived === zoneLimitsGeneration && zoneLimitsReceived >= zoneLimitsFloor; }
 function refreshZoneLimits() {
   zoneLimitsRequest = checkZoneLimits();
@@ -67,6 +68,7 @@ function zoneLimitsDragEnded() {
 async function checkZoneLimits() {
   zoneLimitsGeneration += 1;
   const generation = zoneLimitsGeneration;
+  renderCheckState();
   let result;
   try {
     const document = wallDocument();
@@ -79,6 +81,7 @@ async function checkZoneLimits() {
   if (generation !== zoneLimitsGeneration) return;
   zoneLimits = result;
   zoneLimitsReceived = generation;
+  renderCheckState();
   const typing = typingInElevation();
   if (typing) { typing.addEventListener("focusout", () => showZoneLimits(generation), {once: true}); return; }
   if (window.elevationDrawing?.()) { zoneLimitsAfterDrag = generation; return; }
@@ -222,7 +225,9 @@ function limitsSummary(wall, keys) {
   if (!zoneLimits) { line.className = "note"; line.textContent = "還沒檢查限制"; return line; }
   if (zoneLimits.status !== "checked") { line.className = "notice"; line.textContent = `限制沒檢查成：${zoneLimits.message}`; return line; }
   const red = limitsRedCount();
-  line.className = red ? "limit-red" : "ok";
+  // 都沒超過：右欄不寫（#1265 單元 6）。「檢查通過」只寫在頂條狀態旁（check_state.js），回 null 由呼叫的人略過。
+  if (!red) return null;
+  line.className = "limit-red";
   const spans = refusalSpans(), none = [0, 0];
   const redKeys = Object.keys(zoneLimits.zones[wall] ?? {}).filter(key => zoneIsRed(wall, key));
   const zoned = keys.filter(key => redKeys.includes(key));
@@ -234,7 +239,7 @@ function limitsSummary(wall, keys) {
   const parts = [...zoneLimits.refusals.filter((text, index) => !below(index)),
     ...(whole ? [`${wallNames[wall]}整面的 ${whole} 條寫在下面`] : []),
     ...(inZones ? [`${zoned.map(key => zoneCalled(wall, key)).join("、")}的 ${inZones} 條寫在${zoned.length > 1 ? "各區" : "那一區"}底下`] : [])];
-  line.textContent = red ? `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋：${parts.join("；")}` : "限制都沒超過";
+  line.textContent = `有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋：${parts.join("；")}`;
   return line;
 }
 window.refreshZoneLimits = refreshZoneLimits;

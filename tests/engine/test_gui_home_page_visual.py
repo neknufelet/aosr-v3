@@ -13,9 +13,9 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page, expect
 
-from tests.engine._input_page_steps import open_example_scheme, open_results, open_save_as, open_scheme, reveal
+from tests.engine._input_page_steps import commit_and_settle, open_example_scheme, open_results, open_save_as, open_scheme, recheck, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_quiet_but_plan_refused, _open, _serve, browser
 
 WIDTH = 1440
 # 同一行：兩格的垂直中線差不到幾個像素（按鈕比輸入格高一點，中線仍對齊）。
@@ -122,7 +122,7 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
         page = watched.page
         open_example_scheme(page, base, tmp_path)
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent === '檢查通過'")
         passed = _message_style(page)
         # 成功用共用的 .ok（綠），字級與字型跟內文一樣（原本是等寬小字的紅褐色，看起來像錯誤）。
@@ -131,7 +131,7 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
         assert green > red and green > blue, passed["color"]
         assert passed["size"] == passed["bodySize"] and passed["family"] == passed["bodyFamily"]
         page.locator("#room-Lx").fill("")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent.includes('空著沒填')")
         problem = _message_style(page)
         assert problem["kind"] == "notice"
@@ -209,6 +209,8 @@ def _blank_and_press(page: Page, button: str, fields: tuple[str, ...], trail: ob
     # 填了要真的留在格子裡：#1145 那次是按鍵落到頁面本身、格子沒清到，到後面才以別的樣子紅。
     # 全部填完才一起讀：每填一格就讀一次會在兩格之間多一趟來回，正好把那段先後蓋掉、病就看不到了。
     assert all(page.locator(field).input_value() == "" for field in fields), f"清空了沒留住\n{trail}"
+    # #1265 單元 6 起離開一格就自動檢查：先離開最後一格、等那一次回來，再清訊息列、按鈕（考的是按鈕自己的回話）。
+    commit_and_settle(page, fields[-1])
     page.locator("#messages").evaluate("node => { node.textContent = ''; }")
     if button == "#save-as":
         open_save_as(page)
@@ -249,8 +251,8 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         assert note.is_visible() and viewport is not None
         assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
         assert not (tmp_path / "schemes" / "next.json").exists()
-        # 之後底下換了新的一句（例如按檢查），旁邊那句就過時了，一起清掉。
-        page.locator("#check").click()
+        # 之後底下換了新的一句（例如按「儲存」；#1265 單元 6 起沒有「檢查」鈕，改定一格自動檢查不清按鈕旁邊的字），旁邊那句就過時了，一起清掉。
+        page.locator("#save").click()
         page.wait_for_function("() => document.getElementById('save-as-note').textContent === ''")
         for field, value in before.items():
             page.locator(field).fill(value)
@@ -267,7 +269,7 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
 
 
 def test_save_problems_show_right_under_the_buttons(tmp_path: Path, browser: Browser) -> None:
-    # 按「儲存」與「檢查」：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔
+    # 按「儲存」與改定一格自動檢查（#1265 單元 6 起沒有「檢查」鈕）：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔
     # （開著的那一份存好的檔逐位沒變、沒有多出別的檔）。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
@@ -282,11 +284,11 @@ def test_save_problems_show_right_under_the_buttons(tmp_path: Path, browser: Bro
         assert {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")} == before
         assert set(before) == {f"{name}.json"}
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
         assert page.locator("#messages").inner_text() == shown
-        # 訊息列緊貼在那一排按鈕底下：按的人眼睛就在那裡。
-        buttons, messages = _box(page, ".actions"), _box(page, "#messages")
+        # 訊息列緊貼在那一排按鈕底下：按的人眼睛就在那裡。#1265 單元 6 起訊息列搬到頂條，「儲存」那一排就是頂條那一排。
+        buttons, messages = _box(page, "#input-bars .bar-row"), _box(page, "#messages")
         assert 0 <= messages["y"] - (buttons["y"] + buttons["height"]) < 40
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
@@ -305,7 +307,7 @@ def test_browser_errors_are_said_in_plain_chinese(tmp_path: Path, browser: Brows
                                "伺服器的回覆讀不懂")):
             page.route("**/api/plan", answer)
             page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-            page.locator("#check").click()
+            recheck(page)
             page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
             shown = page.locator("#messages").inner_text()
             assert words in shown and not re.search(r"[A-Za-z]{3,}", shown), shown
@@ -383,8 +385,8 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
         assert viewport is not None
         assert button["y"] <= hint["y"] + hint["height"] and hint["y"] < button["y"] + button["height"] + 24
         assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
-        # 之後底下換了新的一句（按檢查），旁邊那句就過時了，一起清掉。
-        page.locator("#check").click()
+        # 之後底下換了新的一句（按「儲存」；#1265 單元 6 起沒有「檢查」鈕，改定一格自動檢查不清按鈕旁邊的字），旁邊那句就過時了，一起清掉。
+        page.locator("#save").click()
         page.wait_for_function("() => document.getElementById('open-note').textContent === ''")
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
@@ -438,7 +440,7 @@ def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: P
         after = _multiples(page)
         assert after["multiple-floor"] == before["multiple-floor"]
         assert after["multiple-ceiling"].startswith("約 ρc 的") and after["multiple-ceiling"] != before["multiple-ceiling"]
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_calculation_output_stays_in_technical_details() -> None:

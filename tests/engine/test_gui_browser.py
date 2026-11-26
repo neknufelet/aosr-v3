@@ -24,7 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._input_page_steps import check_result, close_results, open_example_scheme, open_results, open_save_as, open_scheme, reveal
+from tests.engine._input_page_steps import check_result, close_results, open_example_scheme, open_results, open_save_as, open_scheme, recheck, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -71,6 +71,8 @@ class Watched:
     console_errors: list[str] = field(default_factory=list)
     page_errors: list[str] = field(default_factory=list)
     response: Response | None = None
+    # 伺服器回 4xx／5xx 的每一個回覆（「狀態碼 路徑」）：瀏覽器主控台的「Failed to load resource」一條對一個。
+    failed_responses: list[str] = field(default_factory=list)
 
 
 @pytest.fixture(scope="module")
@@ -131,8 +133,13 @@ def _open(browser: Browser, url: str, device_scale_factor: float = 1,
     def on_page_error(error: Error) -> None:
         watched.page_errors.append(str(error))
 
+    def on_response(response: Response) -> None:
+        if response.status >= 400:
+            watched.failed_responses.append(f"{response.status} {urlsplit(response.url).path}")
+
     page.on("console", on_console)
     page.on("pageerror", on_page_error)
+    page.on("response", on_response)
     try:
         if response_path is None:
             page.goto(url, wait_until="networkidle")
@@ -171,6 +178,15 @@ def _assert_text_is_formatted(page: Page) -> None:
 def _assert_quiet(watched: Watched) -> None:
     assert watched.console_errors == []
     assert watched.page_errors == []
+
+
+def _assert_quiet_but_plan_refused(watched: Watched) -> None:
+    """頁面沒丟錯；主控台每一條錯都對得上這一頁收到的一次平面圖檢查拒收（``/api/plan`` 回 422：表單有格子空著，
+    #1265 單元 6 起改定一格就自動檢查，清空一格再離開必然有這一次）。別的請求出錯、或主控台多一條對不上的錯，照樣紅。"""
+    assert watched.page_errors == []
+    assert all(item == "422 /api/plan" for item in watched.failed_responses), watched.failed_responses
+    assert len(watched.console_errors) == len(watched.failed_responses), (watched.console_errors, watched.failed_responses)
+    assert all("422" in text for text in watched.console_errors), watched.console_errors
 
 
 def _copy_runner(tmp_path: Path, result: SchemeResult, *, wait: bool = False) -> tuple[str, ...]:
@@ -322,7 +338,7 @@ def test_buttons_work_even_if_a_list_fails_to_load(tmp_path: Path, browser: Brow
             page.route("**/api/results", broken)
             open_example_scheme(page, base, tmp_path)
             page.evaluate("() => { document.querySelector('#messages').textContent = ''; }")
-            page.locator("#check").click()
+            recheck(page)
             page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
         finally:
             page.close()
@@ -362,7 +378,7 @@ def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -
                 # 名稱表的說明跟喇叭與座位的列放在同一區（#1265 起是第 1 段），再按一次檢查也還在。
                 assert notice.evaluate("node => node.closest('section').querySelector('h2 .step-title').textContent") == "房間和擺位"
                 page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-                page.locator("#check").click()
+                recheck(page)
                 page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
                 assert notice.is_visible() and notice.inner_text() == shown
                 notice.locator("summary").click()
@@ -384,7 +400,7 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
 
         def shown_after_check() -> str:
             page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-            page.locator("#check").click()
+            recheck(page)
             page.wait_for_function("() => document.querySelector('#messages').textContent !== ''")
             return page.locator("#messages").inner_text()
 
@@ -552,7 +568,7 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
           return cells.length > 0 && cells.every((cell) => cell.textContent.trim() !== "");
         }""")
         page.locator("#messages").evaluate("(element) => { element.textContent = ''; }")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
         assert page.locator("#messages").inner_text() == "檢查通過"
         _assert_text_is_formatted(page)
@@ -616,14 +632,14 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
         reveal(page, "#zoom-xy g[data-keys]").first.locator("circle").click()
         assert page.locator("#plan-detail").inner_text()
         reveal(page, "#receiver-front-x").fill("3.0")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.querySelector('#plan-detail').textContent === ''")
         assert "x 3.00" in page.locator("#plan-legend li[data-id='receiver:front']").inner_text()
         # 失敗那一支也要清明細：先再點一次，讓明細有字，才考得到。
         page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
         assert page.locator("#plan-detail").inner_text()
         page.locator("#room-Lx").fill("")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('空著沒填')")
         assert not page.locator("#plan-legend li").all_inner_texts()
         assert page.locator("#plan-detail").inner_text() == ""
@@ -647,7 +663,7 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         left = page.evaluate("() => scheme.receiver_set.points.find(point => point.receiver_id === 'left').position_m")
         reveal(page, "#speaker-right-x").fill(str(left[0]))
         page.locator("#speaker-right-y").fill(str(left[1]))
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.querySelectorAll('#plan-legend li').length > 0")
         scheme = page.evaluate("() => collect()")
         plan = page.request.post(f"{base}/api/plan", data=scheme).json()
