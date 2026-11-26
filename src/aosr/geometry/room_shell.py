@@ -179,9 +179,9 @@ def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> tuple[NDArray[np
     reach = np.linalg.norm(points - points[roots], axis=1)
     far = np.zeros(len(points), dtype=np.bool_)
     np.logical_or.at(far, roots, reach > weld_m)
-    wide = far[roots]
     ids = roots.reshape(-1, 3)
-    layers = {t.layer or "無材料子圖層" for t, affected in zip(triangles, wide[ids].any(axis=1), strict=True) if affected}
+    touched = np.asarray(far[ids].any(axis=1), dtype=np.bool_)
+    layers = {t.layer or "無材料子圖層" for t, affected in zip(triangles, touched, strict=True) if affected}
     return ids, layers
 
 
