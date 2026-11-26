@@ -206,6 +206,24 @@ def show_wall_form(page: Page, wall: str) -> None:
     open_fact_editor(page, "edit-wall-original")
 
 
+def picked_wall(page: Page) -> str | None:
+    """第 2 段牆名那一排現在選中哪一面（``x0``、``floor``…）；一面都沒選回 None。"""
+    return cast(str | None, page.evaluate(
+        "document.querySelector('#elevation-walls button[aria-pressed=true]')?.id.replace('elevation-wall-', '') ?? null"))
+
+
+def back_to_wall(page: Page, wall: str | None) -> None:
+    """打開一份方案時第 2 段會換到那一份的前牆（#1265 單元 5c）：存檔重開之後要接著改原本那一面的考題，
+    照使用者會做的點回那一面（``wall`` 是重開前 ``picked_wall`` 記下的；None 不動）。"""
+    if wall is None:
+        return
+    tab = page.locator(f"#elevation-wall-{wall}")
+    if tab.get_attribute("aria-pressed") != "true":
+        _unlocked(page)
+        tab.click()
+        expect(tab).to_have_attribute("aria-pressed", "true")
+
+
 # 這一格住在哪一塊收起來的地方：第 2 段某一面的牆面表單、摺疊、「改…」打開的那一塊、或沒露出來的那一張圖；都不是回 null。
 _HOLDER_JS = """node => {
   const wall = node.closest('#walls .wall-editor');

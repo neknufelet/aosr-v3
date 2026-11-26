@@ -204,33 +204,6 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 .elevation-marker.seat circle{fill:#1d7a3a}
 #elevation-selected{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 
-/* 首頁第一屏（#1134）：左邊最近算的房間俯視圖（前牆在上），右邊三個大入口；窄螢幕上下排。 */
-#home h2{margin-bottom:.25rem}
-.home-top{display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-start}
-#home-picture{margin:0;flex:0 1 320px;min-width:0}
-#home-picture[hidden]{display:none}
-#home-room{width:100%;max-width:320px;height:auto;background:#fafcfc}
-.home-wall{fill:none;stroke:#46586a;stroke-width:2}
-.home-treated{stroke-width:7;stroke-linecap:butt}
-.home-simulated{stroke:#d9822b;background:#d9822b}
-.home-measured{stroke:#2b6cb0;background:#2b6cb0}
-.home-beam{stroke:#9fb3bf;stroke-dasharray:4 3}
-.home-speaker{fill:#15617b}
-.home-seat{fill:#872c22}
-.home-small{font-size:10px;fill:#46586a}
-.home-wall-name{font-size:12px;font-weight:600;fill:#1d2b36}
-.home-key{display:inline-block;width:1.2em;height:.45em;margin-right:.3em;vertical-align:middle}
-#home-picture figcaption{font-size:.9em;margin-top:.35rem}
-.home-legend,#home-unnamed{display:block}
-#home-unnamed[hidden]{display:none}
-.home-next{flex:1 1 280px;display:flex;flex-direction:column;gap:.6rem}
-.home-next h3{margin:0}
-a.home-go{display:block;padding:.7rem 1rem;border-radius:8px;background:#15617b;color:white;text-decoration:none}
-a.home-go[hidden]{display:none}
-a.home-go b{display:block;font-size:1.1em}
-a.home-go .home-note{display:block;font-size:.9em;opacity:.9}
-/* 手機寬：三個下一步排在圖前面，第一屏就看得到要按哪裡。 */
-@media (max-width:700px){.home-next{order:-1}}
 
 .mirror-axis,.mirror-preview,.mirror-link{pointer-events:none}
 .mirror-axis line,.mirror-link path{fill:none;stroke:#46586a;stroke-width:1.5;stroke-dasharray:2 4}
@@ -443,7 +416,7 @@ html.drawer-open{overflow:hidden}
 #empty-start .new-name button,#new-scheme-go{background:#172f3d;color:white;border:1px solid #172f3d;border-radius:6px;padding:.6rem 1.1rem;font:inherit}
 #new-scheme-note{white-space:pre-line;margin:.6rem 0 0}
 #new-scheme-note:empty{display:none}
-/* 空畫面：已存的方案一份都沒有（或清單讀不到）。頂條只留「還沒有開任何方案」，兩段、檢查、頁底、首頁兩張卡都不出現；
+/* 空畫面：已存的方案一份都沒有（或清單讀不到）。頂條只留「還沒有開任何方案」，兩段、檢查、頁底都不出現；
    卡片底下「看已封存的方案」打開的抽屜照樣住在 main 裡（main 不藏）。 */
 #empty-title{display:none;font-size:1rem}
 body[data-input-start=empty] #empty-title{display:inline}
@@ -459,5 +432,5 @@ body[data-input-start=loading] #boot-note{display:block}
 #empty-start .say{color:#46586a;margin:0 0 1.25rem}
 #empty-start #new-scheme-cancel{display:none}
 #empty-list-note{margin:0 0 1rem}
-#empty-archived{background:none;border:0;padding:0;color:#15617b;font-size:.8125rem;text-decoration:underline;cursor:pointer}
-#empty-archived[hidden]{display:none}
+#empty-results,#empty-archived{background:none;border:0;padding:0;color:#15617b;font-size:.8125rem;text-decoration:underline;cursor:pointer}
+#empty-results[hidden],#empty-archived[hidden]{display:none}

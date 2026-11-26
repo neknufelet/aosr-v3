@@ -506,7 +506,9 @@ def test_with_no_wall_picked_the_footer_button_follows_the_limits_summary(tmp_pa
             page = watched.page
             _open_scheme(page, "room109")
             page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration")
-            expect(page.locator("#elevation-walls button[aria-pressed=true]")).to_have_count(0)  # 一面牆都沒點
+            # 一面牆都沒點：#1265 單元 5c 起打開就選好前牆（x 起點牆），沒有「一面都沒選」的時候；頁底那顆照樣講整份方案。
+            expect(page.locator("#elevation-walls button[aria-pressed=true]")).to_have_count(1)
+            expect(page.locator("#elevation-wall-x0")).to_have_attribute("aria-pressed", "true")
             expect(page.locator("#zone-limits-summary")).to_contain_text("超過限制")
             expect(page.locator("#zone-to-search")).to_be_disabled()
             expect(page.locator("#zone-to-search-note")).to_contain_text("超過限制")

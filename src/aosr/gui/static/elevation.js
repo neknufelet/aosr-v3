@@ -967,6 +967,14 @@ function showElevationWall(name) {
   renderElevation();
 }
 window.showElevationWall = showElevationWall;
+// 打開一份方案時第 2 段先看前牆（#1265 單元 5c）：牆名照伺服器依喇叭與座位排的那一套（WALL_ROLES 認的「前牆」）。
+// 分不出前後（牆名是座標名）就不換：開頁那一份沒選任何一面，換方案時留著上一份選的那一面。只在打開那一下叫，
+// 之後搬喇叭、牆名換了都不搶使用者選的那一面。回選了哪一面，沒換回 null。
+window.showFrontWall = () => {
+  const front = Object.keys(wallNames).find(wall => WALL_ROLES[wallNames[wall]] === "front") ?? null;
+  if (front) showElevationWall(front);
+  return front;
+};
 function renderElevation() {
   if (dropDrag) dropDrag();  // 拖到一半被重畫：那一張圖要換掉了，這次拖曳作廢（見 trackDrag）
   const area = $("elevation");

@@ -592,6 +592,8 @@ async function openScheme(name, held = false) {
     if (material.kind === "constant_impedance") fixedWallDefaults[wall] = material.impedance_pa_s_m;
   }
   renderWalls();
+  // 第 2 段先看前牆（#1265 單元 5c，elevation.js 的 showFrontWall；分不出前後就照舊）。
+  window.showFrontWall();
   openedId = name;
   runEdited = false; dirtyField = "";
   $("scheme-archive-notice").hidden = true;
@@ -615,6 +617,7 @@ async function openScheme(name, held = false) {
 }
 // ?scheme= 回輸入頁的方案段落；?zones= 打開同一份後再進「這間房貼什麼」。
 // 打不開（清單裡沒有、存著的那一份檢查不過、讀不出）：原因寫在「打開」旁邊、捲到那裡，不開那一頁。
+// #1265 單元 5c 起只在空畫面（一份方案都沒有）時叫，只會走到「清單裡沒有」那一支；有方案時開頁走 openStartScheme。
 async function openSchemeFromLink() {
   const params = new URLSearchParams(location.search);
   const zones = params.get("zones");
@@ -710,14 +713,20 @@ async function newSchemeSteps(name, template, label) {
 // 空畫面（#1265 單元 5b）：開頁時已存的方案一份都沒有（或清單讀不到）。表單搬進那張卡，頂條與兩段由 CSS 照
 // body 的 data-input-start 藏起來（main 不藏：結果抽屜住在裡面，卡片底下「看已封存的方案」要打得開它）。
 // 這時還沒開任何方案，inputReady 不設；開了一份（從範本開新的、從封存區搬回）才收掉空畫面、設 inputReady。
-function enterEmptyStart(listProblem) {
+// unopened（#1265 單元 5c）：清單裡有方案、但每一份都打不開時，每一份沒打開的原因；寫在卡片上，不當成沒有方案。
+// missing：網址帶的名字不在清單裡那一句（不算進份數）。
+function enterEmptyStart(listProblem, unopened = [], missing = []) {
   document.body.dataset.inputStart = "empty";
   $("empty-slot").append($("new-scheme"));
   $("empty-start").hidden = false;
-  $("empty-list-note").hidden = listProblem === null;
-  $("empty-list-note").textContent = listProblem === null ? "" :
+  $("empty-list-note").hidden = listProblem === null && !unopened.length;
+  $("empty-list-note").textContent = listProblem !== null ?
     `方案清單讀不到（${listProblem}），不知道有沒有存過的方案：先確認本機的網頁伺服器開著，再重新整理這一頁。` +
-    "也可以直接從範本開一份新的；名字跟已存的撞到時，伺服器會擋下來、不蓋掉。";
+    "也可以直接從範本開一份新的；名字跟已存的撞到時，伺服器會擋下來、不蓋掉。" :
+    unopened.length ? `${missing.map(line => line + "。").join("")}存著的 ${unopened.length} 份方案都打不開：${unopened.join("；")}。` +
+    "可以先從範本開一份新的（名字不能跟打不開的那幾份一樣），或修好那幾份的檔案再重新整理這一頁。" : "";
+  // 結果抽屜的那一句（drawResultRows）照空畫面的說法寫。
+  drawResultRows();
 }
 function leaveEmptyStart() {
   if (document.body.dataset.inputStart !== "empty") return;
@@ -1077,7 +1086,7 @@ async function loadArchiveList() {
   keepDrawerFocus();
 }
 async function loadResultList() {
-  // 首頁第一屏跟著結果清單重讀（算完、封存之後「最近算的房間」會變）；它自己讀不到只寫在它那一行，不擋清單。
+  // 選單每份方案底下那一句白話跟著重讀（算完之後「電腦挑過材料」之類會變）；它讀不到只少那一句，不擋清單。
   if (typeof refreshHome === "function") refreshHome();
   const data = await api("/api/results");
   $("server-notice").hidden = !data.server_notice;
@@ -1099,13 +1108,19 @@ function drawResultRows() {
   $("results-list").replaceChildren(...resultRows.map(item => resultRow(item)));
   const empty = !resultRows.length;
   $("results-empty").hidden = !empty;
+  // 空畫面（#1265 單元 5c）：頁底那顆「照現在牆上貼的算一次」不在畫面上，那一句改指卡片；有結果時卡片底下多一句打開抽屜。
+  const start = document.body.dataset.inputStart === "empty";
+  $("results-empty").textContent = start ? "還沒有算過的結果；先從範本開一份方案，算好就列在這裡。" :
+    "還沒有算過的結果；在頁底按「照現在牆上貼的算一次」，算好就列在這裡。";
+  $("empty-results").hidden = empty;
+  $("empty-results").textContent = `看算過的結果（${resultRows.length} 筆）`;
   $("results-table").hidden = empty;
   $("compare-row").hidden = empty;
   drawCompareChoice();
   keepDrawerFocus();
 }
 async function resumeRuns() {
-  // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
+  // 只接回還在算的；已結束的那一筆不貼：開頁先開的那一份（openStartScheme）不一定是算的那一份，貼上去會讓人以為是這份的結果。
   // 同時在算好幾筆時主畫面跟最新開的那一筆（清單照開始時間新到舊），其餘的列在底下（#796）。
   // 接回跟「改看這一筆」走同一條路：同一套號碼，開頁時還在等回覆的開算也不會多排一條計時器。
   activeRuns = (await api("/api/runs")).running;
@@ -1322,9 +1337,48 @@ async function bootInputPage() {
     if (listProblem === null) await openSchemeFromLink();
     return;
   }
-  // 按鈕綁好、清單讀完才開門、接帶名字的連結。
-  showInputPage();
-  await openSchemeFromLink();
+  await openStartScheme();
+}
+// 有存過的方案時開頁先開哪一份（#1265 單元 5c）：網址帶的那一份（?scheme=、?zones=）在清單裡就先開它；沒帶、帶了不在、
+// 或它打不開，照選單「最近的方案」同一個排序（home.js 的 schemesNewestFirst）從最近存的那一份往下試，開好一份為止。
+// 門（body 的 data-input-start）一直關著、inputReady 不設，表單上那份開機範本一刻都不露出來；開好了才開門。
+// 一份都打不開：進空畫面，卡片上寫每一份為什麼沒打開。沒打開的原因（網址那一份不在、哪一份打不開）等開好那一份之後
+// 一次寫在「打開」旁邊：打開途中的圖面檢查會清掉旁邊的字（say）。
+async function openStartScheme() {
+  const params = new URLSearchParams(location.search);
+  const zones = params.get("zones"), asked = zones || params.get("scheme");
+  // missing：網址帶的名字不在清單裡；unopened：試過、打不開的那幾份（全都打不開時卡片上的份數只算這些）。
+  const missing = asked && !schemeNames.includes(asked) ?
+    [`沒有打開「${asked}」：已存的方案裡沒有這一份（可能封存了或改了名字）`] : [];
+  const unopened = [];
+  const order = schemesNewestFirst();
+  const tries = asked && schemeNames.includes(asked) ? [asked, ...order.filter(name => name !== asked)] : order;
+  for (const name of tries) {
+    // 開頁途中頁面程式動了表單、那一筆還在路上（使用者按不到：門關著）：等它做完再開，不把「上一個動作還沒做完」
+    // 當成這一份打不開、也不往下一份跳。
+    while (inputBusy) await new Promise(resolve => setTimeout(resolve, 50));
+    let opened = false;
+    try { opened = await openScheme(name); } catch (error) {
+      // 已經換成這一份、只是之後接進度或圖面檢查丟錯：算打開了，原因留在訊息列（同 newSchemeSteps 的判法）。
+      opened = openedId === name;
+      if (opened) say(errorText(error), "notice");
+      else $("messages").textContent = errorText(error);
+    }
+    // 原因是 changeInputScheme 寫進訊息列的那一句；開頁時「保留原方案」指的是沒露出來的開機範本，只留原因本身。
+    if (!opened) {
+      unopened.push(`沒有打開「${name}」：${$("messages").textContent.replace(/^方案與預覽換不過去，保留原方案：/u, "")}`);
+      continue;
+    }
+    showInputPage();
+    const said = [...missing, ...unopened];
+    if (said.length) sayBeside("open-note", `${said.join("；")}。先開了「${name}」；要別份從「換一個方案」另選`, "notice");
+    if (name === asked && zones) { window.openZoneOverview(); return; }
+    if (asked) $("scheme-section").scrollIntoView();
+    return;
+  }
+  // 一份都沒打開：每一份的原因都寫在卡片上；「打開」旁邊 openScheme 寫的最後那一句（帶著開機範本的字眼）清掉。
+  sayBeside("open-note", "", "");
+  enterEmptyStart(null, unopened, missing);
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   try { await bootInputPage(); } catch (error) { say(errorText(error), "notice"); }

@@ -1,80 +1,23 @@
-/* 首頁第一屏（#1134）：最近算的那間房（俯視圖）、三個入口、存著的方案每份一句白話。
-   字、座標、連到哪都由伺服器排好（/api/home）；這裡只把它畫成 SVG、排成連結。前牆朝上、左牆在左。 */
-const HOME_SVG = "http://www.w3.org/2000/svg";
-function homeSvg(tag, attrs = {}, text = "") {
-  const node = document.createElementNS(HOME_SVG, tag);
-  for (const [key, value] of Object.entries(attrs)) if (value !== "") node.setAttribute(key, String(value));
-  if (text) node.textContent = text;
-  return node;
-}
+/* 頂條「換一個方案 ▾」選單每份方案底下那一句白話（#1134 起由伺服器排好，/api/home 的 schemes）。#1265 單元 5c 拿掉 #home
+   兩張大卡後，這一支只剩填那一句：名字照舊叫 refreshHome（存檔、另存、從範本開新的之後都叫它）。 */
 function homeElement(tag, text = "", className = "") {
   const node = document.createElement(tag);
   if (text) node.textContent = text;
   if (className) node.className = className;
   return node;
 }
-// 俯視圖：房間外框、有貼東西的那幾段牆（實測藍、模擬橘）、喇叭、主位、四面牆名寫在牆外側。
-function drawHomeRoom(room) {
-  const svg = document.getElementById("home-room");
-  const pad = 30, longest = 240;
-  const scale = longest / Math.max(room.width_m, room.depth_m);
-  const width = room.width_m * scale, depth = room.depth_m * scale;
-  svg.setAttribute("viewBox", `0 0 ${width + 2 * pad} ${depth + 2 * pad}`);
-  svg.replaceChildren();
-  const at = (point) => [pad + point.x * scale, pad + point.y * scale];
-  svg.append(homeSvg("rect", {x: pad, y: pad, width, height: depth, class: "home-wall"}));
-  for (const segment of room.segments) {
-    const [x1, y1] = at(segment.from), [x2, y2] = at(segment.to);
-    svg.append(homeSvg("line", {x1, y1, x2, y2, class: `home-treated home-${segment.basis}`, "data-wall": segment.wall}));
-  }
-  const [px, py] = at(room.primary);
-  for (const speaker of room.speakers) {
-    const [sx, sy] = at(speaker.at);
-    svg.append(homeSvg("line", {x1: sx, y1: sy, x2: px, y2: py, class: "home-beam"}));
-  }
-  for (const speaker of room.speakers) {
-    const [sx, sy] = at(speaker.at);
-    svg.append(homeSvg("rect", {x: sx - 6, y: sy - 6, width: 12, height: 12, rx: 2, class: "home-speaker"}));
-    svg.append(homeSvg("text", {x: sx, y: sy + 20, "text-anchor": "middle", class: "home-small"}, speaker.name));
-  }
-  svg.append(homeSvg("circle", {cx: px, cy: py, r: 7, class: "home-seat"}));
-  svg.append(homeSvg("text", {x: px, y: py + 22, "text-anchor": "middle", class: "home-small"}, "主位"));
-  for (const wall of room.walls) {
-    const [wx, wy] = at(wall.at);
-    const side = wy <= pad + 0.5 ? "top" : wy >= pad + depth - 0.5 ? "bottom" : wx <= pad + 0.5 ? "left" : "right";
-    const [x, y, turn] = {top: [wx, pad - 10, 0], bottom: [wx, pad + depth + 20, 0],
-                          left: [pad - 10, wy, -90], right: [pad + width + 10, wy, 90]}[side];
-    svg.append(homeSvg("text", {x, y, "text-anchor": "middle", class: "home-wall-name", "data-wall": wall.wall,
-                                transform: turn ? `rotate(${turn} ${x} ${y})` : ""}, wall.name));
-  }
-}
-function homeLink(id, link) {
-  const anchor = document.getElementById(id);
-  anchor.href = link.url;
-  anchor.hidden = !link.url;
-  anchor.querySelector(".home-note").textContent = link.note;
-}
-// 每讀一次加一：晚到的舊回覆不蓋掉新的（開頁時這一支與結果清單各叫一次）。
+// 每讀一次加一：晚到的舊回覆不蓋掉新的（開頁時這一支與結果清單各叫一次）。讀不到只是選單少那一句白話，
+// 方案名字、存的時間、算過沒照樣列，不另外講。
 let homeSeq = 0;
 async function refreshHome() {
   const mine = ++homeSeq;
-  try { await drawHome(mine); } catch (error) {
-    if (mine === homeSeq) document.getElementById("home-facts").textContent = `首頁摘要讀不到：${error.message}`;
-  }
-}
-async function drawHome(mine) {
-  const reply = await fetch("/api/home", {cache: "no-store"});
   let data;
-  try { data = await reply.json(); } catch { throw new Error(`網頁伺服器回應 ${reply.status}，內容讀不懂`); }
-  if (!reply.ok) throw new Error(data.error || `網頁伺服器回應 ${reply.status}`);
+  try {
+    const reply = await fetch("/api/home", {cache: "no-store"});
+    if (!reply.ok) return;
+    data = await reply.json();
+  } catch { return; }
   if (mine !== homeSeq) return;
-  document.getElementById("home-title").textContent = data.title;
-  document.getElementById("home-facts").textContent = data.facts;
-  document.getElementById("home-picture").hidden = !data.room;
-  document.getElementById("home-unnamed").hidden = !data.room || data.room.named;
-  if (data.room) drawHomeRoom(data.room);
-  for (const [id, key] of [["home-result", "result"], ["home-materials", "materials"], ["home-layout", "layout"]])
-    homeLink(id, data.links[key]);
   schemeSummaries = new Map(data.schemes.map(item => [item.name, item.text]));
   if ($("scheme-menu").hidden) drawSchemeMenu();
 }
@@ -102,9 +45,13 @@ function toggleMenu() {
   $("scheme-menu-button").setAttribute("aria-expanded", "true");
   menuItems()[0]?.focus();
 }
+// 存著的方案新到舊（照存檔時間）：選單「最近的方案」那幾列、開頁先開哪一份（app.js 的 openStartScheme）都用這一份排序。
+function schemesNewestFirst() {
+  return [...schemeNames].sort((a, b) => (savedTimes[b] || 0) - (savedTimes[a] || 0));
+}
 function drawSchemeMenu() {
   const rows = $("home-schemes");
-  const names = [...schemeNames].sort((a, b) => (savedTimes[b] || 0) - (savedTimes[a] || 0));
+  const names = schemesNewestFirst();
   rows.replaceChildren(...names.map((name, index) => {
     const row = document.createElement("div");
     row.dataset.scheme = name;
@@ -196,6 +143,7 @@ function bindBars() {
   };
   $("show-archived").onclick = showArchived;
   $("empty-archived").onclick = showArchived;
+  $("empty-results").onclick = () => openResults();
   bindResultsDrawer();
   $("save-as-toggle").onclick = () => {
     const open = $("save-as-box").hidden;
@@ -234,8 +182,9 @@ function showArchived() {
 // 結果抽屜（#1265 單元 4）：頂條「算過的結果與比較 ▸」打開；關閉鈕、Esc、點遮罩關，關了游標回那顆鈕。
 // 開著時 Tab 只在抽屜裡轉。抽屜住在 main 裡：存檔、計算、開檔、切牆等把 main 鎖住（inert）的時候，
 // 抽屜裡的封存、搬回、刪除也一起按不了（這道鎖不另外接）。
-let archiveAsked = false;
+let archiveAsked = false, drawerOpener = null;
 function openResults() {
+  drawerOpener = document.activeElement;
   closeBarBoxes();
   $("results-note").textContent = ""; $("results-note").className = "";
   archiveAsked = false; $("archive-none").hidden = true;
@@ -249,10 +198,12 @@ function closeResults() {
   if ($("results-drawer").hidden) return;
   $("results-drawer").hidden = true;
   document.documentElement.classList.remove("drawer-open");
-  // 空畫面沒有「算過的結果與比較」那顆鈕：游標回卡片上打開抽屜的那一句（#1265 單元 5b）；封存刪光了那一句也藏起來，
-  // 就落在卡片裡選中的那個範本（第二趟，審查第 3 條），不掉到頁面底層。
-  if (document.body.dataset.inputStart !== "empty") $("show-results").focus();
-  else if (!$("empty-archived").hidden) $("empty-archived").focus();
+  // 空畫面沒有「算過的結果與比較」那顆鈕：游標回卡片上打開抽屜的那一句（#1265 單元 5b；5c 加「看算過的結果」那一句，
+  // 從哪一句打開就回哪一句，那一句藏起來了換另一句）；兩句都藏起來（封存刪光、結果都封存了），就落在卡片裡選中的那個範本
+  // （第二趟，審查第 3 條），不掉到頁面底層。
+  if (document.body.dataset.inputStart !== "empty") { $("show-results").focus(); return; }
+  const back = [drawerOpener, $("empty-results"), $("empty-archived")].find(node => node?.id?.startsWith("empty-") && !node.hidden);
+  if (back) back.focus();
   else document.querySelector('input[name="new-template"]:checked').focus();
 }
 // 抽屜開著時清單重畫（重讀、封存、搬回、刪除、換方案）或鎖頁解開（第二趟 F1、F3）：節點被換掉、或 main 被鎖住

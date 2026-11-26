@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, expect
 
-from tests.engine._input_page_steps import open_example_scheme, open_save_as, page_origin, scheme_open_button
+from tests.engine._input_page_steps import back_to_wall, open_example_scheme, open_save_as, page_origin, picked_wall, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_construction_options import P1, first_layer
@@ -22,11 +22,13 @@ def save_reload(page: Page, name: str) -> dict[str, object]:
         page.locator("#save-as").click()
     assert reply.value.ok, reply.value.text()
     saved = page.request.get(f"{page_origin(page)}/api/schemes/{name}").json()["scheme"]
+    wall = picked_wall(page)
     open_button = scheme_open_button(page, name)
     with page.expect_response("**/api/input-preview") as preview:
         open_button.click()
     assert preview.value.ok, preview.value.text()
     page.wait_for_function("!document.querySelector('main').inert")
+    back_to_wall(page, wall)  # 打開時換到前牆（#1265 單元 5c）：點回存之前看的那一面
     return cast(dict[str, object], saved)
 
 

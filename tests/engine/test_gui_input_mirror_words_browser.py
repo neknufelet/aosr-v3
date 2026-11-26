@@ -103,23 +103,23 @@ def test_while_the_mirror_is_being_checked_the_sentence_says_so_in_mirror_words(
 
 
 def test_the_home_note_points_at_buttons_that_are_really_on_the_bar(tmp_path: Path, browser: Browser) -> None:
-    """還沒算過任何一份：首頁「挑材料」底下那一句就是 NO_SCHEME_MATERIALS_NOTE；它講的「換一個方案」「這間房貼什麼」
-    兩顆都在頂條上、看得到；按頂上的「這間房貼什麼」真的進那一頁。"""
+    """還沒算過任何一份：原本首頁「挑材料」底下那一句（NO_SCHEME_MATERIALS_NOTE）講「換一個方案」「這間房貼什麼」兩顆；
+    #1265 單元 5c 拿掉 #home 兩張大卡，那一句不再上頁面（/api/home 還排它，home_view 的題守字）。這裡照舊守它講的兩顆
+    都在頂條上、看得到，按頂上的「這間房貼什麼」真的進那一頁。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=1440) as watched:
         page = watched.page
         page.wait_for_function("document.body.dataset.inputReady === 'true'")
-        note = page.locator("#home-materials .home-note")
-        expect(note).to_have_text(NO_SCHEME_MATERIALS_NOTE)
-        expect(note).to_be_visible()
+        expect(page.locator("#home-materials")).to_have_count(0)
         assert "設定每一區貼什麼" not in NO_SCHEME_MATERIALS_NOTE
+        assert "換一個方案" in NO_SCHEME_MATERIALS_NOTE and "這間房貼什麼" in NO_SCHEME_MATERIALS_NOTE
         expect(page.locator("#scheme-menu-button")).to_contain_text("換一個方案")
         expect(page.locator("#scheme-menu-button")).to_be_visible()
         nav = page.locator("#input-bars nav #nav-zones")
         expect(nav).to_have_text("這間房貼什麼")
         expect(nav).to_be_visible()
         shots = Path(os.environ.get("AOSR_SHOTS") or tmp_path)
-        page.locator("#home-materials").screenshot(path=str(shots / "u3b-home-note.png"))
+        page.locator("#input-bars").screenshot(path=str(shots / "u3b-home-note.png"))
         nav.click()
         expect(page.locator("#zone-page")).to_be_visible()
         _assert_quiet(watched)

@@ -62,6 +62,9 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         expect(page.locator("#elevation-frame")).to_be_in_viewport()
         # 從頁面最上面那顆（方案那一列）回分區頁，換按前牆：立面圖換成前牆，捲到立面圖那一塊
         # （不是捲回打開分區頁之前的地方：那時捲在最上面，立面圖在視窗外）。
+        # #1265 單元 5c 拿掉 #home 兩張大卡後整頁短了，1100 高的視窗捲到最上面也看得到立面圖：視窗改 900 高（老闆用的 1440×900
+        # 那一種的高度），「捲到最上面時立面圖在視窗外」這個前提才成立。
+        page.set_viewport_size({"width": 1400, "height": 900})
         page.evaluate("window.scrollTo(0, 0)")
         expect(page.locator("#elevation-frame")).not_to_be_in_viewport()
         # #1265 單元 3 拿掉方案那一列那顆（派工單細節裁決 5）：頁面最上面改按頂上導覽列的「這間房貼什麼」（同一支 openZoneOverview）。

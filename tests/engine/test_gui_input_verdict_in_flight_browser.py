@@ -440,6 +440,8 @@ def test_opening_another_scheme_never_pairs_its_zones_with_the_last_schemes_verd
         seen = cast(list[dict[str, object]], page.evaluate("window.pairMarksSeen"))
         assert any(entry["id"] == "plain109" for entry in seen), seen
         assert [entry for entry in seen if entry["id"] == "plain109" and entry["marks"]] == [], seen
+        # 打開時第 2 段換到那一份的前牆（#1265 單元 5c）：點回左牆再看右欄那一區。
+        page.locator("#elevation-wall-y0").click()
         expect(page.locator("#wall-zone-what-y0-whole_wall")).not_to_contain_text("一對")
         page.unroute("**/api/zone-limits")
         _release(held)

@@ -300,9 +300,12 @@ def test_the_input_page_has_no_control_that_changes_a_zone_and_every_zone_has_it
             assert len(controls) == expected_controls, controls
             assert all(ALLOWED_SECTION_CONTROLS.match(name) for name in controls), controls
 
-        check(12)  # 六面牆面表單各兩格（種類、數字），收在「換原本的牆」裡
+        # 開頁就選好前牆（#1265 單元 5c）：開頁跟「選前牆」是同一個時候，六面牆面表單各兩格（收在「換原本的牆」裡）
+        # 加前牆「這一面另設」那一格。
+        expect(page.locator("#elevation-wall-x0")).to_have_attribute("aria-pressed", "true")
+        check(13)
         page.locator("#elevation-wall-x0").click()
-        check(13)  # 加前牆「這一面另設」那一格
+        check(13)  # 再點一次前牆：不變
         expect(page.locator("#elevation-list-zones .zone-item")).to_have_count(1)
         expect(page.locator("#zone-goto-x0-whole_wall")).to_have_text("改這一區 ▸")
         _drag(page, ROOM_109["Ly"], ROOM_109["Lz"], (0.3, 0.3), (1.3, 1.3))
