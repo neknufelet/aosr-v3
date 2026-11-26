@@ -53,7 +53,6 @@
 /* 點平面圖上合併的標記時，一點一行（伺服器給的明細用換行分隔）。 */
 #plan-detail{white-space:pre-line;font-size:.8125rem;margin:.4rem 0 0}
 #plan-detail:empty{display:none}
-.room-plan .hint{color:#46586a;font-size:.8125rem;margin:.4rem .25rem 0;line-height:1.5}
 /* 右卡：結果一行，接著一行一件事（名字、現在的樣子、改那件事的鈕）；「改…」打開的那一塊排在那一行底下。 */
 .facts{padding:.75rem 1.25rem}
 .last{display:flex;align-items:baseline;flex-wrap:wrap;gap:.6rem;padding:.5rem .875rem;margin:0 0 .25rem;border-radius:8px;background:#f4f7f8;font-size:.9375rem;line-height:1.5}
@@ -320,6 +319,8 @@ html:has(#input-bars){scroll-padding-bottom:7rem}
 .mirror-switch{display:flex;align-items:center;gap:.6rem;font-size:.9375rem}
 .mirror-switch strong{font-weight:400}
 #elevation-axis-words{color:#46586a;font-size:.8125rem;line-height:1.4}
+/* #1265 說明字瘦身：這三格有些狀態沒有字（沒算過、開關關著、閒著的頁底），沒字時整格不佔位。 */
+#next-note:empty,#elevation-axis-words:empty,#room-result-text:empty{display:none}
 .wallline{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1.125rem;margin:.6rem .125rem .4rem;font-size:.8125rem;color:#46586a}
 .wallline b{color:#17212a;font-weight:600}
 .wallline .spacer{flex:1}
@@ -363,7 +364,6 @@ button.lnk{color:#155b70;margin-left:.4rem}
 .tag-still,.tag-unknown{background:#e6e8ea;color:#46545b}
 #zone-methods-row{margin:.75rem 0 0}
 #zone-methods-row button.go{display:block;width:100%;padding:.65rem .875rem;border-radius:8px;border:0;background:#172f3d;color:white;font-weight:600;font-size:.9375rem;text-align:left}
-#zone-methods-row small{display:block;color:#46586a;font-size:.8125rem;margin-top:.25rem}
 .side details.fold{margin-top:.6rem;border-top:1px solid #edf1f2;padding-top:.45rem}
 .side details.fold summary{cursor:pointer;font-size:.9375rem}
 .side details.fold summary::marker{color:#46586a}

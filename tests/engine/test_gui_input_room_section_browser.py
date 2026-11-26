@@ -31,7 +31,7 @@ ROOM = "room-facts"
 BEFORE = "room-before"
 RUN = "7" * 32
 VIEWS = ("plan-xy", "plan-xz", "zoom-xy", "zoom-xz")
-NEVER = "按頁底「照現在牆上貼的算一次」；算好後，結果就出現在這一行。"
+NEVER = ""  # #1265 說明字瘦身：還沒算過只留左邊的標籤，右邊不再寫怎麼算
 Doc = dict[str, object]
 
 
@@ -189,8 +189,8 @@ def test_card_lines_follow_the_coordinates_and_the_posture(tmp_path: Path, brows
         expect(page.locator("#fact-speakers-kind")).to_have_text("沒設喇叭類型與擺法")
         expect(page.locator("#fact-primary-text")).to_have_text("離前牆 3 公尺，在兩支喇叭的中線上，耳朵高 1.2 公尺")
         expect(page.locator("#fact-furniture-text")).to_have_text("沒有家具")
-        # 周圍點幾個照資料數（這份只有一個）。
-        expect(page.locator("#coordinates-summary")).to_have_text("座標數字（喇叭、主位，和主位周圍一起算聲音的 1 個點；x、y、z）")
+        # #1265 說明字瘦身：摺疊標題只寫「座標數字」，裡面有哪些點打開就看得到。
+        expect(page.locator("#coordinates-summary")).to_have_text("座標數字")
         open_fold(page, "coordinates-fold")
         for side in ("left", "right"):
             page.locator(f"#speaker-{side}-x").fill("0.75")
@@ -292,7 +292,7 @@ def test_total_depth_limit_saves_reopens_and_is_what_the_zone_page_reads(tmp_pat
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         _opened(page, ROOM)
-        expect(page.locator("#fact-depth-text")).to_contain_text("房間預設沒設上限")
+        expect(page.locator("#fact-depth-text")).to_have_text("總厚度上限：沒設")
         open_fact_editor(page, "edit-depth")
         depth = page.locator("#depth-room")
         # 不合理的值不收：卡上旁邊照講，格子畫回原值。
@@ -302,12 +302,11 @@ def test_total_depth_limit_saves_reopens_and_is_what_the_zone_page_reads(tmp_pat
         expect(depth).to_have_value("")
         depth.fill("15")  # #1265 單元 3 起填公分（存的照舊是公尺）
         depth.blur()
-        expect(page.locator("#fact-depth-text")).to_have_text(
-            "貼的東西總厚度最多 15 公分（從原牆表面往房間裡量，程式挑材料也不會超過）；這是房間預設，某一面要不同在下面立面圖那一面另設")
+        expect(page.locator("#fact-depth-text")).to_have_text("總厚度上限：15 公分")
         _save(page, design=True)
         assert _stored(tmp_path, "designs")["room_max_depth_m"] == 0.15
         _reopen(page, ROOM)
-        expect(page.locator("#fact-depth-text")).to_contain_text("最多 15 公分")
+        expect(page.locator("#fact-depth-text")).to_contain_text("上限：15 公分")
         open_fact_editor(page, "edit-depth")
         expect(page.locator("#depth-room")).to_have_value("15")
         # 「這間房貼什麼」那一頁不另寫房間上限：它跟立面圖的限制判決用的是開檔時從伺服器讀回的那一份設計設定。
@@ -337,7 +336,7 @@ def test_enter_in_the_total_depth_box_keeps_focus_and_the_verdict_draws(tmp_path
                                arg=before)
         expect(depth).to_be_focused()
         assert page.evaluate("zoneDesign.room_max_depth_m") == 0.3
-        expect(page.locator("#fact-depth-text")).to_contain_text("最多 30 公分")
+        expect(page.locator("#fact-depth-text")).to_contain_text("上限：30 公分")
         _assert_quiet(watched)
 
 

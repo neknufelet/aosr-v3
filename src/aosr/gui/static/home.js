@@ -295,7 +295,6 @@ function renderInputBars() {
   $("calculate-action").hidden = Boolean(running || done);
   $("calculate").disabled = Boolean(locked && dirty);
   $("calculate").textContent = failed ? "再算一次" : "照現在牆上貼的算一次";
-  $("calculate-note").hidden = Boolean(failed);
   const other = job && job.scheme_id !== openedId;
   const stopHome = $(other ? "followed-stop" : "current-stop");
   if ($("stop").parentNode !== stopHome) stopHome.append($("stop"));
@@ -310,8 +309,7 @@ function renderInputBars() {
   $("input-footer").dataset.state = running ? "running" : failed ? "failed" : done ? "done" : locked ? "locked" : "idle";
   $("next-note").textContent = running ? "算的是按下那一刻存好的版本。可以離開這頁，回來再看。" :
     failed ? "方案已經存好。先看出錯紀錄，再決定要不要再算。" : locked && dirty ? copyFirst :
-    done ? "這一份現在鎖住，留著比較。要再改就另存新名字。" : locked ? "沒改過可以直接再算。要修改這份方案，請另存新名字。" :
-    "不用先按儲存：按這兩顆會自動先存。算過的方案會留著比較。";
+    done ? "這一份現在鎖住，留著比較。要再改就另存新名字。" : locked ? "沒改過可以直接再算。要修改這份方案，請另存新名字。" : "";
   if (scheme) renderSearchAction();
   // 第 1 段右卡（room_facts.js）：結果那一行跟這一條同一份狀態與原因（有沒有改過也是頂條那一份 dirty）；
   // 總厚度上限、改造前跟著設計設定換字。

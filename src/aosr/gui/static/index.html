@@ -72,8 +72,7 @@
       <p><button type="button" id="empty-archived" hidden></button></p></div>
     <h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p>
     <section id="scheme-section" class="room-step" aria-labelledby="room-step-title">
-      <h2 id="room-step-title"><span class="step-no" aria-hidden="true">1</span><span class="step-title">房間和擺位</span>
-        <span class="say">邊上的數字是房間尺寸，直接改；喇叭與主位的位置在右邊改</span></h2>
+      <h2 id="room-step-title"><span class="step-no" aria-hidden="true">1</span><span class="step-title">房間和擺位</span></h2>
       <p id="scheme-archive-notice" class="notice" aria-live="polite" hidden></p>
       <div class="roomrow">
         <div class="card room-plan">
@@ -88,15 +87,14 @@
               <div class="drawing" data-view="zoom-xz"><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
           </div>
           <p id="plan-detail" aria-live="polite"></p>
-          <p class="hint">尺寸改了，牆上切好的區會跟著牆邊長或縮；放不下的那一面會講是哪一區。</p>
         </div>
         <div id="input-setup" class="card facts" role="group" aria-label="這間房現在">
-          <div id="room-result" class="last" data-state="never"><span class="k" id="room-result-title">還沒算過</span><span id="room-result-text">按頁底「照現在牆上貼的算一次」；算好後，結果就出現在這一行。</span><a id="room-result-link" hidden>看結果 ▸</a></div>
+          <div id="room-result" class="last" data-state="never"><span class="k" id="room-result-title">還沒算過</span><span id="room-result-text"></span><a id="room-result-link" hidden>看結果 ▸</a></div>
           <div class="fact" id="fact-room"><span class="k">房間</span>
             <div class="v"><span id="fact-room-text"></span><small id="fact-depth-text"></small></div>
             <button type="button" class="mini" id="edit-depth" aria-expanded="false" aria-controls="depth-editor">改總厚度上限</button>
             <div class="fact-editor" id="depth-editor" hidden></div></div>
-          <div class="fact" id="fact-speakers"><span class="k">喇叭</span>
+          <div class="fact" id="fact-speakers"><span class="k">喇叭位置</span>
             <div class="v"><span id="fact-speakers-text"></span><small id="fact-speakers-kind"></small>
               <p id="stand-height-hint" class="notice fact-note" aria-live="polite"></p></div>
             <button type="button" class="mini" id="edit-speakers" aria-expanded="false" aria-controls="speaker-editor">改喇叭與擺法</button>
@@ -111,8 +109,8 @@
                 <p>喇叭聲學中心高度在「座標數字」裡喇叭的 z 格填寫，可以手改；切換擺法會保留原高度。</p>
               </div>
               <p class="note">兩支喇叭放在哪（x、y、z）在下面「座標數字」改。</p></div></div>
-          <div class="fact" id="fact-primary"><span class="k">主位</span>
-            <div class="v"><span id="fact-primary-text"></span><small>工作／聆聽姿勢切換會一起改主位與周圍點的高度和家具；喇叭高度與天雲不動</small></div>
+          <div class="fact" id="fact-primary"><span class="k">主位位置</span>
+            <div class="v"><span id="fact-primary-text"></span></div>
             <span class="seg shortcut-actions" role="group" aria-label="姿勢"><button type="button" id="shortcut-working" aria-pressed="false">工作姿勢</button><button type="button" id="shortcut-listening" aria-pressed="false">聆聽姿勢</button></span></div>
           <div class="fact" id="fact-furniture"><span class="k">家具</span>
             <div class="v"><span id="fact-furniture-text"></span></div>
@@ -130,18 +128,18 @@
               <div id="furniture-cloud-fields" class="furniture-fields" hidden></div>
               <ul id="readonly-furniture" class="note" hidden></ul></div></div>
           <div class="fact" id="fact-original"><span class="k">改造前（原方案）</span>
-            <div class="v"><span id="fact-original-text">每一面都只有原本的牆（沒指定原方案）</span><small>結果頁的「改善多少」從這裡算起；要並排比兩次結果，用右上的「算過的結果與比較」</small></div>
+            <div class="v"><span id="fact-original-text">每一面都只有原本的牆（沒指定原方案）</span></div>
             <button type="button" class="mini" id="edit-original" aria-expanded="false" aria-controls="original-editor">指定一份方案當改造前</button>
             <div class="fact-editor" id="original-editor" hidden></div></div>
           <ul id="placement-warnings" class="notice" aria-live="polite" hidden></ul>
           <div id="labels-notice" hidden><p class="notice">喇叭與座位的中文名沒載到，下面先用代號顯示。</p>
             <details><summary>技術細節</summary><p id="labels-technical"></p></details></div>
-          <details class="fold" id="coordinates-fold"><summary id="coordinates-summary">座標數字（喇叭、主位，和主位周圍一起算聲音的點；x、y、z）</summary>
+          <details class="fold" id="coordinates-fold"><summary id="coordinates-summary">座標數字</summary>
             <h3>喇叭座標（公尺）</h3><div id="speakers"></div>
             <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
             <p>主位 z 座標只改主位；周圍點要逐點改。</p>
             <ul id="plan-legend"></ul></details>
-          <details class="fold" id="advanced-fold"><summary>進階：聲源模型、散射係數、比對設定、空氣（聲速、密度）</summary>
+          <details class="fold" id="advanced-fold"><summary>進階</summary>
             <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
             <h4>散射係數</h4><label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
             <h4>比對設定</h4><p id="feature-note" class="note"></p>
@@ -151,7 +149,7 @@
     </section>
     <section id="wall-section" class="room-step" aria-labelledby="wall-step-title">
       <h2 id="wall-step-title"><span class="step-no" aria-hidden="true">2</span><span class="step-title">牆上切區</span>
-        <span class="say">在牆上拖一個框就切出一區，灰色虛線格子上也能拖；按住框可以整塊搬，點框可以打數字改大小或刪掉</span></h2>
+        <span class="say">在牆上拖框切一區</span></h2>
       <div id="elevation-panel">
         <div class="cutrow">
           <div class="card elev">
@@ -175,14 +173,13 @@
             <div class="fact-editor" id="wall-depth-editor" hidden></div>
             <div id="elevation"><div id="elevation-banner" hidden></div></div>
             <p id="elevation-note" aria-live="polite"></p><div id="elevation-selected"></div>
-            <p class="legend" id="elevation-legend"><span><i class="sw zone-mode-search"></i>由程式最佳化</span><span><i class="sw zone-mode-fixed"></i>指定貼一種</span><span><i class="sw zone-mode-keep_original"></i>保留原樣</span><span>實線：畫的框；灰虛線：沒畫到的地方自動補成一區</span><span><i class="sw-mirror"></i>鏡子線：兩支喇叭的中線（兩邊一起畫開著時）</span></p>
+            <p class="legend" id="elevation-legend"><span><i class="sw zone-mode-search"></i>由程式最佳化</span><span><i class="sw zone-mode-fixed"></i>指定貼一種</span><span><i class="sw zone-mode-keep_original"></i>保留原樣</span><span>實線：畫的框；虛線：自動補的區</span><span><i class="sw-mirror"></i>點劃線：鏡子</span></p>
           </div>
           <div class="card side" id="elevation-list">
             <h3 id="elevation-list-title"></h3>
-            <p class="say">只列出來看；要改貼什麼，按下面「設定每一區貼什麼」，或某一區的「改這一區 ▸」。</p>
             <div id="elevation-list-notes"></div>
             <div id="elevation-list-zones"></div>
-            <p id="zone-methods-row"><button id="zone-page-open" class="go" type="button">設定每一區貼什麼 ▸</button><small>到「這間房貼什麼」，六面一起看、一起改；沒存的改動也帶著</small></p>
+            <p id="zone-methods-row"><button id="zone-page-open" class="go" type="button">設定每一區貼什麼 ▸</button></p>
             <details class="fold" id="zone-numbers-fold"><summary>每一區的位置與大小（公尺）</summary><div id="zone-numbers"></div></details>
           </div>
         </div>
@@ -192,7 +189,7 @@
       <div class="bar-row"><div class="bar-prompt"><strong id="next-title"></strong><small id="next-note"></small></div>
         <span id="current-stop"><button id="stop" disabled hidden>停止</button></span>
         <details id="run-log" hidden><summary>看出錯紀錄</summary><pre id="run-log-text"></pre></details>
-        <div id="calculate-action"><button id="calculate">照現在牆上貼的算一次</button><small id="calculate-note">黃色的區照它們現在存的材料算</small></div>
+        <div id="calculate-action"><button id="calculate">照現在牆上貼的算一次</button></div>
         <a id="result-link" class="button-link" hidden>算好了 ▸ 看結果</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
         <div id="search-action"><button id="zone-to-search" disabled>交給程式最佳化 ▸</button><small id="zone-to-search-note"></small></div>
       </div>

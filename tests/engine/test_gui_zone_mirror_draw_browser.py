@@ -463,9 +463,8 @@ def test_existing_exact_mirror_completes_pair_quietly(tmp_path: Path, browser: B
 def test_input_axis_words_and_switch(tmp_path: Path, browser: Browser, centred: bool) -> None:
     with _room(tmp_path, browser, (FIRST,), centred=centred) as page:
         distance = "2.60" if centred else "2.45"
-        where = "在房間正中" if centred else "不在房間正中，左右牆不跟著畫"
-        expect(page.locator("#elevation-axis-words")).to_have_text(
-            f"畫一邊，另一邊照鏡子出現；鏡子是兩支喇叭的中線（離左牆 {distance} 公尺，{where}）。只管畫框；兩邊貼不貼一樣，在「這間房貼什麼」設")
+        where = "" if centred else "；不在正中，左右牆不跟著畫"  # #1265 說明字瘦身：在正中不多講
+        expect(page.locator("#elevation-axis-words")).to_have_text(f"鏡子：喇叭中線，離左牆 {distance} 公尺{where}")
         page.locator("#elevation [data-zone-id=z1] > rect").click()
         expect(page.locator("#elevation-selected")).to_contain_text("這一塊沒有另一邊")
         expect(page.locator("#elevation-complete")).to_be_visible()

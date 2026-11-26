@@ -419,4 +419,4 @@ def test_side_wall_says_which_numbers_to_change(tmp_path: Path, browser: Browser
         }""")
         _settled(page)
         expect(page.locator("#elevation-axis-words")).to_contain_text("2.60")
-        expect(page.locator("#elevation-axis-words")).not_to_contain_text("不在房間正中")
+        expect(page.locator("#elevation-axis-words")).not_to_contain_text("不在正中")

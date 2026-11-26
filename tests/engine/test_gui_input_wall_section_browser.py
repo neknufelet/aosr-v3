@@ -84,7 +84,7 @@ def test_each_wall_button_says_how_many_zones_that_wall_has(tmp_path: Path, brow
 
 def test_drawing_both_sides_switches_on_and_off_and_the_mirror_line_is_dash_dot(tmp_path: Path, browser: Browser) -> None:
     """「兩邊一起畫」是左右對稱改名：開著時立面圖上畫鏡子線（點劃線，跟補滿格子的灰虛線分得開），底下那一句寫鏡子在哪；
-    關了鏡子線不見、那一句改講同一個開關在「這間房貼什麼」也有；開關存在設計設定（只存「關」）。"""
+    關了鏡子線不見、那一句清空（#1265 說明字瘦身：不再解釋同一個開關在別頁也有）；開關存在設計設定（只存「關」）。"""
     _write(tmp_path, room109_document())
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
@@ -100,7 +100,7 @@ def test_drawing_both_sides_switches_on_and_off_and_the_mirror_line_is_dash_dot(
         off.click()
         expect(off).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#elevation .mirror-axis")).to_have_count(0)
-        expect(page.locator("#elevation-axis-words")).to_have_text("跟「這間房貼什麼」那一頁的「左右對稱」是同一個開關，哪一頁切換都一樣。")
+        expect(page.locator("#elevation-axis-words")).to_have_text("")
         assert page.evaluate("zoneDesign.left_right_symmetry") == "off"
         on.click()
         expect(on).to_have_attribute("aria-pressed", "true")
@@ -152,15 +152,15 @@ def test_change_the_original_wall_opens_only_that_walls_form_and_saves(tmp_path:
 
 def test_this_wall_depth_is_typed_in_centimetres_saved_in_metres_and_is_what_the_zone_page_reads(
         tmp_path: Path, browser: Browser) -> None:
-    """牆那一行「貼的東西總厚度…（照房間預設）」＋「這一面另設」：打開的那一格用公分打，存的是公尺；
-    那一行改寫「（這一面另設）」；存檔、重開都在；「這間房貼什麼」那一頁判限制送的也是同一份。"""
+    """牆那一行「總厚度上限：照房間 N 公分」＋「這一面另設」：打開的那一格用公分打，存的是公尺；
+    那一行改寫「總厚度上限：這一面 N 公分」；存檔、重開都在；「這間房貼什麼」那一頁判限制送的也是同一份。"""
     _write_room109_design(tmp_path, {"left_right_symmetry": "off", "room_max_depth_m": 0.2})
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         _open_scheme(page, "room109")
         _wall(page, "x0")
         line = page.locator("#elevation-depth")
-        expect(line).to_have_text("貼的東西總厚度最多 20 公分（照房間預設）")
+        expect(line).to_have_text("總厚度上限：照房間 20 公分")
         open_fact_editor(page, "edit-wall-depth")
         box = page.locator("#depth-wall-x0")
         expect(box).to_be_focused()
@@ -171,10 +171,10 @@ def test_this_wall_depth_is_typed_in_centimetres_saved_in_metres_and_is_what_the
         page.wait_for_function("before => zoneLimitsGeneration > before && zoneLimitsShown === zoneLimitsGeneration",
                                arg=before)
         assert page.evaluate("zoneDesign.wall_max_depth_m") == {"x0": 0.12}
-        expect(line).to_have_text("貼的東西總厚度最多 12 公分（這一面另設）")
+        expect(line).to_have_text("總厚度上限：這一面 12 公分")
         # 別一面沒另設：照房間預設。
         _wall(page, "y0")
-        expect(line).to_have_text("貼的東西總厚度最多 20 公分（照房間預設）")
+        expect(line).to_have_text("總厚度上限：照房間 20 公分")
         _wall(page, "x0")
         _save(page, "room109")
         stored = json.loads((tmp_path / "designs" / "room109.json").read_text(encoding="utf-8"))
@@ -183,7 +183,7 @@ def test_this_wall_depth_is_typed_in_centimetres_saved_in_metres_and_is_what_the
         page.wait_for_function("document.body.dataset.inputReady === 'true'")
         _open_scheme(page, "room109")
         _wall(page, "x0")
-        expect(line).to_have_text("貼的東西總厚度最多 12 公分（這一面另設）")
+        expect(line).to_have_text("總厚度上限：這一面 12 公分")
         open_fact_editor(page, "edit-wall-depth")
         expect(page.locator("#depth-wall-x0")).to_have_value("12")
         page.locator("#zone-page-open").click()

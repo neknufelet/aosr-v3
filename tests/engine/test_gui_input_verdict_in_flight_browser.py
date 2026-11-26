@@ -461,7 +461,7 @@ def test_the_mirror_sentence_says_not_confirmed_when_the_check_fails_not_still_c
         page.locator("#elevation-wall-x0").click()
         _verdict_shown(page)
         words = page.locator("#elevation-axis-words")
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
         page.locator("#elevation-symmetry-off").click()
@@ -488,7 +488,7 @@ def test_the_mirror_sentence_says_not_confirmed_when_the_check_fails_not_still_c
         _release(held)
         page.unroute("**/api/zone-limits")
         _verdict_shown(page)
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         assert watched.page_errors == []
 
 
@@ -516,7 +516,7 @@ def test_a_running_scheme_whose_progress_cannot_be_read_still_gets_its_limits_ch
         expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
         page.locator("#elevation-wall-x0").click()
         limits_all_clear(page)
-        expect(page.locator("#elevation-axis-words")).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(page.locator("#elevation-axis-words")).to_contain_text("鏡子：喇叭中線")
         expect(page.locator("#wall-zone-what-x0-whole_wall")).not_to_contain_text("總厚度上限還在核對")
         expect(page.locator("#messages")).to_contain_text("考卷編的：讀不到進度")
 
@@ -545,7 +545,7 @@ def test_the_mirror_sentence_says_checking_again_while_a_retry_after_a_failure_i
         _release(held)
         page.unroute("**/api/zone-limits")
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         assert watched.page_errors == []
 
 
@@ -559,7 +559,7 @@ def test_the_mirror_sentence_asks_for_the_room_size_when_the_height_is_blanked_n
         page.locator("#elevation-wall-x0").click()
         _verdict_shown(page)
         words = page.locator("#elevation-axis-words")
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         held: list[Route] = []
         page.route("**/api/input-preview", lambda route: held.append(route))
         asked: list[str] = []
@@ -570,7 +570,7 @@ def test_the_mirror_sentence_asks_for_the_room_size_when_the_height_is_blanked_n
         expect(words).to_have_text("先把房間的長、寬、高都填好正數，才算得出鏡子在哪")
         assert asked == [] and page.evaluate("zoneLimitsFresh()") is True
         height.fill(typed)
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         _release(held)
         page.unroute("**/api/input-preview")
         assert watched.page_errors == []

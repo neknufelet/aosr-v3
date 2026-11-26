@@ -683,18 +683,17 @@ function inputAxisWords(result) {
   // 不寫「正在確認」，講尺寸沒填好（#1265 單元 3 之二收尾第二趟 B4 之二；用語同上面那一行「先把房間的長、寬、高都填好正數」）。
   const distances = axisDistances(axis);
   if (!distances) return "先把房間的長、寬、高都填好正數，才算得出鏡子在哪";
-  return `畫一邊，另一邊照鏡子出現；鏡子是兩支喇叭的中線（離左牆 ${distances.left} 公尺，`
-    + `${axis.centred ? "在房間正中" : "不在房間正中，左右牆不跟著畫"}）。只管畫框；兩邊貼不貼一樣，在「這間房貼什麼」設`;
+  return `鏡子：喇叭中線，離左牆 ${distances.left} 公尺` + (axis.centred ? "" : "；不在正中，左右牆不跟著畫");
 }
 // 開關底下那一句（renderElevation 畫；限制檢查失敗之後又問一次時 zone_limits.js 只重寫這一句，見 window.refreshAxisWords）。
 function axisSentence(on, result) {
-  return on ? inputAxisWords(result) : "跟「這間房貼什麼」那一頁的「左右對稱」是同一個開關，哪一頁切換都一樣。";
+  return on ? inputAxisWords(result) : "";
 }
 function selectedEditor(wall, view, width, height) {
   const area = $("elevation-selected"); area.replaceChildren();
   const current = drawnBoxes(wall).find(box => box.id === elevationSelected);
   if (!current) {
-    elevationSelected = null;  // 怎麼畫、怎麼搬、怎麼改寫在第 2 段標題旁那一句（#1265 單元 3）
+    elevationSelected = null;  // 沒選框時不擺編輯格；第 2 段標題旁只寫「在牆上拖框切一區」（#1265 說明字瘦身）
     return;
   }
   const [a0, a1, b0, b1] = screenBox(view, width, height, current);
@@ -1078,9 +1077,9 @@ function renderElevation() {
     startDrawing(svg, event, geometry, view, wall);
   });
   area.append(svg);
-  // 選中那一面的一行（#1265 單元 3）：牆名、寬高、站在哪裡看；幾區寫在上面那一排牆名鈕上。
+  // 選中那一面的一行（#1265 單元 3）：牆名、寬高；幾區寫在上面那一排牆名鈕上。
   const name = document.createElement("b"); name.textContent = wallNames[wall];
-  $("elevation-size").replaceChildren(name, ` 寬 ${metres(width)} × 高 ${metres(height)} 公尺，站在房間裡看這一面` +
+  $("elevation-size").replaceChildren(name, ` 寬 ${metres(width)} × 高 ${metres(height)} 公尺` +
     (problems ? "。" + problems : outside ? "。這一面有分區超出目前的牆面（房間尺寸改過）：請改框或清掉這一面的切法" : ""));
   selectedEditor(wall, view, width, height);
   renderClearSlot(wall);

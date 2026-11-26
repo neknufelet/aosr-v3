@@ -299,7 +299,7 @@ function renderSearchAction() {
   const said = !count || formRunning() || lockedEdit || blocked.length ? null : zoneSearchSaid;
   note.className = blocked.length ? "limit-red" : said ? said.kind : "note";
   note.textContent = formRunning() ? "等這一次算完" : lockedEdit ? "先另存新名字" : blocked.length ? blocked.join("；") : said ? said.text :
-    count ? `交出黃色的 ${count} 區；下一頁按「開始搜尋」才開始算` : "到「這間房貼什麼」設定要交給程式的區";
+    count ? `交出黃色的 ${count} 區；下一頁按「開始搜尋」才開始算` : "先到「這間房貼什麼」選區";
 
 }
 // 切完一面：自動補的代號每次重編，做法跟著 /api/zone-cut 回的 inherited（每一塊沿用了切之前哪一區的材料）走。

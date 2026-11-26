@@ -53,7 +53,7 @@ def test_the_mirror_sentence_says_where_the_mirror_is(tmp_path: Path, browser: B
     document = _mirror_room(middle)
     axis = _axis(document)
     assert axis.front == "x0" and axis.left == "y0" and axis.centred is (middle == WIDTH / 2)
-    where = "在房間正中" if axis.centred else "不在房間正中，左右牆不跟著畫"
+    where = "" if axis.centred else "；不在正中，左右牆不跟著畫"  # #1265 說明字瘦身：在正中不多講
     _write(tmp_path, document)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
@@ -62,8 +62,7 @@ def test_the_mirror_sentence_says_where_the_mirror_is(tmp_path: Path, browser: B
         page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration")
         expect(page.locator("#elevation-symmetry-on")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#elevation-axis-words")).to_have_text(
-            f"畫一邊，另一邊照鏡子出現；鏡子是兩支喇叭的中線（離左牆 {axis.across_m:.2f} 公尺，{where}）。"
-            "只管畫框；兩邊貼不貼一樣，在「這間房貼什麼」設")
+            f"鏡子：喇叭中線，離左牆 {axis.across_m:.2f} 公尺{where}")
         label = page.locator("#elevation .mirror-axis text")
         expect(label).to_have_text("鏡子：兩支喇叭的中線")
         # 那幾個字整串落在立面圖裡（線靠右時字不跑出圖外）。
@@ -88,7 +87,7 @@ def test_while_the_mirror_is_being_checked_the_sentence_says_so_in_mirror_words(
         page.locator("#elevation-wall-x0").click()
         page.wait_for_function("zoneLimitsGeneration > 0 && zoneLimitsShown === zoneLimitsGeneration")
         words = page.locator("#elevation-axis-words")
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
         _drag(page, WIDTH, cast(dict[str, dict[str, float]], document["scene"])["room_m"]["Lz"], (0.3, 0.3), (1.2, 1.4))
@@ -98,7 +97,7 @@ def test_while_the_mirror_is_being_checked_the_sentence_says_so_in_mirror_words(
         page.unroute("**/api/zone-limits")
         _release(held)  # 被新一次蓋掉而中止的那幾個不用再放
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimitsReceived === zoneLimitsGeneration")
-        expect(words).to_contain_text("鏡子是兩支喇叭的中線")
+        expect(words).to_contain_text("鏡子：喇叭中線")
         _assert_quiet(watched)
 
 

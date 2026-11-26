@@ -51,8 +51,6 @@ function renderRoomFacts() {
   const setup = scheme?.speaker_setup, names = setup ? speakerSetupNames(setup) : null;
   byId("fact-speakers-kind").textContent = !setup ? "沒設喇叭類型與擺法"
     : names ? `${names[0]}、放${names[1]}（${names[2]}）` : "設了喇叭類型與擺法（中文名沒載到）";
-  const around = (scheme?.receiver_set?.points || []).filter(point => point.role === "surrounding").length;
-  byId("coordinates-summary").textContent = `座標數字（喇叭、主位，和主位周圍一起算聲音的 ${around} 個點；x、y、z）`;
 }
 
 // 結果那一行：正在算＞沒算完（兩句都跟頁底條同一份）＞算好的結果（清單裡這一份最新的那一列）＞還沒算過。
@@ -76,16 +74,14 @@ function renderRoomResult(running, failed, reason, edited) {
       (edited && !finished.scheme_text ? "（修改前的設定算的）" : "");
     link.href = finished.result_url;
   } else {
-    title.textContent = "還沒算過";
-    text.textContent = "按頁底「照現在牆上貼的算一次」；算好後，結果就出現在這一行。";
+    title.textContent = "還沒算過";  // 狀態只寫狀態：怎麼算看頁底那兩顆就知道（#1265 說明字瘦身）
+    text.textContent = "";
   }
 }
 
 function depthWords() {
   const value = zoneDesign?.room_max_depth_m;
-  return value == null
-    ? "貼的東西總厚度：房間預設沒設上限（照每一面、每一區和材料自己的限制）；某一面要不同在下面立面圖那一面另設"
-    : `貼的東西總厚度最多 ${centimetres(value)} 公分（從原牆表面往房間裡量，程式挑材料也不會超過）；這是房間預設，某一面要不同在下面立面圖那一面另設`;
+  return value == null ? "總厚度上限：沒設" : `總厚度上限：${centimetres(value)} 公分`;
 }
 function originalWords() {
   const chosen = zoneDesign?.original_scheme_id;

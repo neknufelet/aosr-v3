@@ -122,7 +122,7 @@ def test_the_list_does_not_say_no_cap_while_the_limits_are_unknown(tmp_path: Pat
         page.route("**/api/zone-limits", lambda route: held.append(route))
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        expect(page.locator("#elevation-depth")).to_have_text("貼的東西總厚度最多 15 公分（照房間預設）")
+        expect(page.locator("#elevation-depth")).to_have_text("總厚度上限：照房間 15 公分")
         what = page.locator("#wall-zone-what-x0-z1")
         expect(what).to_contain_text("總厚度上限還在核對")
         expect(what).not_to_contain_text("沒給上限")

@@ -39,9 +39,9 @@ function originalLine(wall) {
 }
 function depthLine(wall) {
   const own = zoneDesign?.wall_max_depth_m?.[wall], room = zoneDesign?.room_max_depth_m;
-  if (own != null) return `貼的東西總厚度最多 ${centimetres(own)} 公分（這一面另設）`;
-  if (room != null) return `貼的東西總厚度最多 ${centimetres(room)} 公分（照房間預設）`;
-  return "貼的東西總厚度：這一面沒另設，房間預設也沒設上限";
+  if (own != null) return `總厚度上限：這一面 ${centimetres(own)} 公分`;
+  if (room != null) return `總厚度上限：照房間 ${centimetres(room)} 公分`;
+  return "總厚度上限：沒設";
 }
 // 收起牆那一行打開的一塊（room_facts.js 的 toggleEditor 打開的）：那一塊藏起來、鈕記成收著。
 function closeEditor(button, area) {

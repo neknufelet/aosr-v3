@@ -627,8 +627,8 @@ def test_the_first_view_shows_the_way_into_the_page(tmp_path: Path, browser: Bro
         expect(enter).to_be_visible()
         # 按鈕講的是動作（去設定），不是去看。
         expect(enter).to_have_text("設定每一區貼什麼 ▸")
-        # #1265 單元 3 起按鈕底下那一行照示意圖：「到「這間房貼什麼」，六面一起看、一起改；沒存的改動也帶著」。
-        expect(page.locator("#zone-methods-row")).to_contain_text("到「這間房貼什麼」，六面一起看、一起改")
+        # #1265 說明字瘦身：按鈕底下那一行說明拿掉，那一列只剩按鈕。
+        expect(page.locator("#zone-methods-row small")).to_have_count(0)
         # #1265 單元 3 起按鈕在第 2 段右欄（示意圖 input-page-v3：「前牆這 N 區」清單底下），跟立面圖並排。
         expect(page.locator("#elevation-panel .card.side #zone-page-open")).to_have_count(1)
         top = "selector => document.querySelector(selector).getBoundingClientRect().top"

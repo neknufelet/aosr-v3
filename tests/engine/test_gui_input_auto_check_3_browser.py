@@ -209,7 +209,9 @@ def test_both_bottom_buttons_stop_at_the_plan_when_its_check_cannot_reach_the_se
     _search_room(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        page.set_viewport_size({"width": 1440, "height": 900})
+        # 視窗 800 高（不是 900）：#1265 說明字瘦身後整頁變矮，900 高捲到底時平面圖還露出約 25 像素，「先捲離平面圖」做不到；
+        # 800 高捲到底時平面圖在視窗上緣外約 75 像素。斷言不動。
+        page.set_viewport_size({"width": 1440, "height": 800})
         _opened(page)
         sent = _sent(page)
         page.route("**/api/plan", lambda route: route.abort())

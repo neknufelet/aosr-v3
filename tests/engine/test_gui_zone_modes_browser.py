@@ -641,7 +641,7 @@ def test_the_zone_page_reply_goes_with_the_footer_reply_once_a_later_verdict_com
         assert watched.page_errors == []
 
 
-NO_SEARCH_ZONE = "到「這間房貼什麼」設定要交給程式的區"
+NO_SEARCH_ZONE = "先到「這間房貼什麼」選區"
 
 
 def test_a_save_failure_reply_goes_also_when_the_save_writes_no_design_file(tmp_path: Path, browser: Browser) -> None:
