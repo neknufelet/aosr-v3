@@ -5,6 +5,7 @@ from playwright.sync_api import Browser
 from typing import cast
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_example_scheme, open_scheme, reveal
 from tests.engine import _furniture_cases as schemes
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser as browser
@@ -23,8 +24,7 @@ def test_input_bad_furniture_plan_shows_chinese_problem_lines(browser: Browser, 
     (tmp_path / "schemes" / "bad-furniture.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("bad-furniture")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "bad-furniture")
         page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間接觸界線')")
         lines = page.locator("#messages").inner_text().splitlines()
         assert_chinese_lines(lines)
@@ -51,9 +51,10 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
     path.write_text(scheme.model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
+        reveal(page, "#furniture-notice")  # #1265 起家具提示收在「改家具」打開的那一塊裡，先打開
         assert not page.locator("#furniture-notice").is_visible()
-        page.locator("#scheme-list").select_option("loaded")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "loaded")
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#furniture-notice")
         assert notice.is_visible()
@@ -61,7 +62,7 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
         assert notice.evaluate("el => el.tagName") == "P"
         # 第八支第三步之二已提供編輯器：提示改為固定角色可改、其他原件唯讀保留。
         assert notice.inner_text() == (
-            f"這份方案有 {len(scheme.furniture)} 件家具：下方可修改本頁支援的家具；"
+            f"這份方案有 {len(scheme.furniture)} 件家具：按「改家具」修改本頁支援的家具；"
             "其餘唯讀列出並原樣保留。平面圖與側面圖照方案檔畫。")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/loaded")
                                   and response.request.method == "PUT") as saved:
@@ -81,11 +82,10 @@ def test_input_furniture_notice_is_cleared_when_a_plain_scheme_is_opened_next(br
             Scheme.model_validate(document | {"scheme_id": name}).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        notice = page.locator("#furniture-notice")
+        notice = reveal(page, "#furniture-notice")  # #1265 起家具提示收在「改家具」打開的那一塊裡，先打開
         assert not notice.is_visible()
         for name, shown in (("furnished", True), ("plain", False)):
-            page.locator("#scheme-list").select_option(name)
-            page.locator("#open-scheme").click()
+            open_scheme(page, name)
             page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
             assert notice.is_visible() is shown and notice.evaluate("el => el.hidden") is not shown
             assert notice.evaluate("el => el.tagName") == "P"

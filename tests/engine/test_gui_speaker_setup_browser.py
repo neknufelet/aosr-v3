@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_save_as, open_scheme, reveal
 from tests.engine import _speaker_setup_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
@@ -36,7 +37,7 @@ def test_input_notice_save_as_and_clearing(browser: Browser, tmp_path: Path) -> 
     plain_path.write_text(Scheme.model_validate(cases.document() | {"scheme_id": "plain", "speaker_setup": None}).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        notice = page.locator("#speaker-setup-notice")
+        notice = reveal(page, "#speaker-setup-notice")  # #1265 起長提示收在「改喇叭與擺法」打開的那一塊裡，先打開
         assert not notice.is_visible() and notice.evaluate("el => el.hidden")
         for mount, _, title in MOUNTS:
             _check_notice_save_and_clear(page, tmp_path, mount, title, schemes[mount])
@@ -78,13 +79,13 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     name = scheme.scheme_id
     path = tmp_path / "schemes" / f"{name}.json"
     notice = page.locator("#speaker-setup-notice")
-    page.locator("#scheme-list").select_option(name)
-    page.locator("#open-scheme").click()
+    open_scheme(page, name)
     page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
+    reveal(page, "#speaker-setup-notice")  # #1265 起長提示收在「改喇叭與擺法」打開的那一塊裡，先打開
     assert notice.is_visible() and notice.evaluate("el => el.tagName") == "P", mount
     # 編輯器已能改設定；取消舊「不能修改」宣稱，仍守存檔和讀回原值。
-    assert notice.inner_text() == (f"這份方案設了喇叭：{title}；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。")
-    page.locator("#speaker-left-x").fill("2.01")
+    assert notice.inner_text() == (f"這份方案設了喇叭：{title}；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
+    reveal(page, "#speaker-left-x").fill("2.01")
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{name}")
                               and response.request.method == "PUT") as saved:
         page.locator("#save").click()
@@ -96,6 +97,7 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     # 儲存的回覆一到考卷就往下走，頁面那邊整頁可能還鎖著（本機只早幾毫秒解鎖）：鎖著的格子收不下字，
     # fill 也不報錯。等解鎖才填，填完核字真的在格子裡，沒進去就紅在這一行、不是等另存的回覆逾時（#1231）。
     page.wait_for_function("!document.querySelector('main').inert")
+    open_save_as(page)
     page.locator("#save-as-id").fill(copy)
     expect(page.locator("#save-as-id")).to_have_value(copy)
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{copy}")
@@ -104,8 +106,7 @@ def _check_notice_save_and_clear(page: Page, tmp_path: Path, mount: str, title: 
     assert copied.value.ok
     assert Scheme.model_validate_json((tmp_path / "schemes" / f"{copy}.json").read_bytes()).speaker_setup == scheme.speaker_setup
     page.locator("#scheme-section").screenshot(path=str(tmp_path / f"input-speaker-{mount}.png"))
-    page.locator("#scheme-list").select_option("plain")
-    page.locator("#open-scheme").click()
+    open_scheme(page, "plain")
     page.wait_for_function("document.getElementById('save-id').value === 'plain'")
     assert not notice.is_visible() and notice.evaluate("el => el.hidden"), mount
     assert notice.inner_text() == ""
@@ -178,12 +179,11 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         page.route("**/api/labels", lambda route: route.fulfill(
             status=500, content_type="application/json", body='{"error": "名稱表壞了"}'))
         page.goto(url, wait_until="networkidle")
-        page.locator("#scheme-list").select_option("loaded")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "loaded")
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
-        notice = page.locator("#speaker-setup-notice")
+        notice = reveal(page, "#speaker-setup-notice")  # #1265 起長提示收在「改喇叭與擺法」打開的那一塊裡，先打開
         assert notice.is_visible()
-        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。")
+        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；按「改喇叭與擺法」修改，平面圖與側面圖照方案檔畫箱體。")
         # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。
         assert all("500" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []

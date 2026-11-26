@@ -6,13 +6,12 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
-from tests.engine._zone_panel_steps import open_panel
+from tests.engine._zone_panel_steps import choose_mode, open_panel
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
 from tests.engine.test_gui_zone_material_pick_browser import PLAIN_PRODUCT, _TEXT_STYLES, _design, _pick_search
-from tests.engine.test_gui_zone_modes_browser import _choose
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
     _apply, _click_zone, _open_overview, _prepare, _save, _stored)
@@ -31,8 +30,10 @@ def _prepare_candidates(tmp_path: Path) -> None:
 
 
 def _open_candidate_table(page: Page) -> Locator:
+    """輸入頁上那一區：以前是舊做法表那一格（#zone-material-yL-z3），#1265 單元 3 之二第二趟表拆了，
+    改看第 2 段右欄那一區那一列（同一區在輸入頁上的新家）。"""
     page.locator("#elevation-wall-yL").click()
-    return page.locator("#zone-material-yL-z3")
+    return page.locator("#wall-zone-yL-z3")
 
 
 def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, browser: Browser) -> None:
@@ -42,7 +43,7 @@ def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, brows
         page = watched.page
         _open_scheme(page, SAMPLE)
         page.locator("#elevation-wall-yL").click()
-        _choose(page, "#zone-mode-yL-z3", "search")
+        choose_mode(page, "yL", "z3", "search")
         open_panel(page, "yL", "z3")
         page.locator("#zone-panel-add").click()
         for choice in ("sample_tunable", "sample_rigid", "sample_product"):

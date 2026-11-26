@@ -11,6 +11,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -61,9 +62,13 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         expect(page.locator("#elevation-frame")).to_be_in_viewport()
         # 從頁面最上面那顆（方案那一列）回分區頁，換按前牆：立面圖換成前牆，捲到立面圖那一塊
         # （不是捲回打開分區頁之前的地方：那時捲在最上面，立面圖在視窗外）。
+        # #1265 單元 5c 拿掉 #home 兩張大卡後整頁短了，1100 高的視窗捲到最上面也看得到立面圖：視窗改 900 高（老闆用的 1440×900
+        # 那一種的高度），「捲到最上面時立面圖在視窗外」這個前提才成立。
+        page.set_viewport_size({"width": 1400, "height": 900})
         page.evaluate("window.scrollTo(0, 0)")
         expect(page.locator("#elevation-frame")).not_to_be_in_viewport()
-        page.locator("#scheme-zone-open").click()
+        # #1265 單元 3 拿掉方案那一列那顆（派工單細節裁決 5）：頁面最上面改按頂上導覽列的「這間房貼什麼」（同一支 openZoneOverview）。
+        page.locator("#nav-zones").click()
         expect(page.locator("#zone-map")).to_be_visible()
         before = page.locator("#zone-map [data-wall='yL'][data-zone]").count()
         page.locator("#zone-cut-yL").click()
@@ -219,8 +224,7 @@ def _check_rows(page: Page) -> dict[str, str | None]:
 
 def _switch_to(page: Page, scheme_id: str) -> None:
     page.locator("#zone-page-close").click()
-    page.locator("#scheme-list").select_option(scheme_id)
-    page.locator("#open-scheme").click()
+    open_scheme(page, scheme_id)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=scheme_id)
     page.wait_for_function("!document.querySelector('main').inert")
     page.locator("#zone-page-open").click()

@@ -263,6 +263,11 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         expect(page.locator("#zone-list-ranges")).to_have_count(0)
         expect(page.locator("#zone-list-choices > [data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
         expect(page.locator("#zone-list-choices > [data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        # 96K 那一句、名字拿掉「（可調厚度與空腔）」：舊做法表方塊上那兩條的新家是這張清單卡（adjustWords、shortLabel；
+        # #1265 單元 3 之二收尾追加設計洞：第二趟判成丙，src 裡兩支都還在用，補回來）。
+        expect(page.locator("#zone-list-choices > [data-choice=glass_wool_96k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        for wool in ("glass_wool_48k", "glass_wool_24k", "glass_wool_96k"):
+            expect(page.locator(f"#zone-list-choices > [data-choice={wool}]")).not_to_contain_text("（可調")
         expect(page.locator("#zone-others")).to_have_text("天花：由程式最佳化 1 區、指定貼 1 區、保留原樣 4 區地板、門、窗：保留原樣")
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.screenshot(path=str(tmp_path / "overview-search-rule.png"))

@@ -11,21 +11,6 @@ function zonedWall(name) {
 function formWalls() {
   return Object.keys(wallNames).filter(name => !zonedWall(name));
 }
-function renderZonedWall(name, row) {
-  const zones = scheme.scene.surface_zones_by_wall[name];
-  const heading = document.createElement("p"); heading.id = `zoned-${name}`;
-  heading.textContent = `${wallNames[name]}：分成 ${zones.length} 區（分區在立面圖上改，這張表單不改這一面）`;
-  const list = document.createElement("ul"); list.id = `zoned-list-${name}`;
-  // 只是顯示：座標到公釐、阻抗收位（wallText）；存檔照方案原值，不經過這裡。
-  const metres = value => Number(value.toFixed(3));
-  const material = zone => wallText(zone.material);
-  for (const zone of zones) {
-    const item = document.createElement("li");
-    item.textContent = `${zone.id}：u ${metres(zone.u_m[0])}–${metres(zone.u_m[1])}、v ${metres(zone.v_m[0])}–${metres(zone.v_m[1])} 公尺，${material(zone)}`;
-    list.append(item);
-  }
-  row.append(heading, list);
-}
 function sameMaterial(a, b) {
   if (a === b) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
@@ -138,7 +123,8 @@ function renderWalls() {
   const spec = inputDefaults.material_form;
   for (const name of Object.keys(wallNames)) {
     const row = document.createElement("div"); row.className = "wall-editor row"; row.id = `wall-editor-${name}`;
-    if (zonedWall(name)) { renderZonedWall(name, row); $("walls").append(row); continue; }
+    // 分區的牆：這張表單不改它（只改得到整面一區）；每一區的位置、大小與材料列在第 2 段右欄「每一區的位置與大小」（#1265 單元 3）。
+    if (zonedWall(name)) { $("walls").append(row); continue; }
     const material = wallMaterial(name);
     // 貼在原牆上的構造網頁上不能新選，只在方案已經是這一種時列出來顯示。
     const kinds = ["constant_impedance", "assembly", "measured_impedance", ...(material.kind === "mounted_on_wall" ? ["mounted_on_wall"] : [])];

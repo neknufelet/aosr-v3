@@ -5,6 +5,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._input_page_steps import back_to_wall, open_example_scheme, open_save_as, page_origin, picked_wall, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_construction_options import P1, first_layer
@@ -15,16 +16,19 @@ S2 = "slotted_wood_typ9_absorber40_gap98"
 
 
 def save_reload(page: Page, name: str) -> dict[str, object]:
+    open_save_as(page)
     page.locator("#save-as-id").fill(name)
     with page.expect_response(lambda reply: reply.url.endswith(f"/api/schemes/{name}") and reply.request.method == "PUT") as reply:
         page.locator("#save-as").click()
     assert reply.value.ok, reply.value.text()
-    saved = page.request.get(f"{page.url.rstrip('/')}/api/schemes/{name}").json()["scheme"]
-    page.locator("#scheme-list").select_option(name)
+    saved = page.request.get(f"{page_origin(page)}/api/schemes/{name}").json()["scheme"]
+    wall = picked_wall(page)
+    open_button = scheme_open_button(page, name)
     with page.expect_response("**/api/input-preview") as preview:
-        page.locator("#open-scheme").click()
+        open_button.click()
     assert preview.value.ok, preview.value.text()
     page.wait_for_function("!document.querySelector('main').inert")
+    back_to_wall(page, wall)  # 打開時換到前牆（#1265 單元 5c）：點回存之前看的那一面
     return cast(dict[str, object], saved)
 
 
@@ -45,6 +49,7 @@ def test_p1_selects_clear_optional_save_reload_preview(tmp_path: Path, browser: 
     width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", P1)
         expect(page.locator("#open-area-floor-0")).to_have_text("算出的開孔率約 15.51%")
@@ -76,6 +81,7 @@ def test_p1_selects_clear_optional_save_reload_preview(tmp_path: Path, browser: 
 def test_add_backing_fabric_in_two_empty_fields(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", "perforated_0p8mm_d10_gw24k_50mm")
         for field in ("backing_fabric_surface_mass_kg_m2", "backing_fabric_flow_resistance_pa_s_m"):
@@ -103,6 +109,7 @@ def test_add_backing_fabric_in_two_empty_fields(tmp_path: Path, browser: Browser
 def test_measured_draft_preserves_both_select_values(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         page.locator("#preset-floor").select_option(P1)
         page.locator("#layer-floor-1-flow_resistivity_source").select_option("measured")
@@ -122,6 +129,7 @@ def test_s2_without_source_reloads_as_the_unchanged_preset(tmp_path: Path, brows
     # S2 的吸音材沒寫流阻來源；網頁不准把選單預設值補寫回層裡，否則重開就變「自訂構造」。
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", S2)
         expect(page.locator("#preset-state-floor")).to_contain_text("使用預設")

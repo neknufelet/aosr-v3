@@ -10,6 +10,7 @@ from aosr.gui.measured_view import build_measured_view
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from governance.exit_codes import note
+from tests.engine._input_page_steps import scheme_open_button
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import LONG_DECIMAL, RAW_VALUES, _open, browser as browser
 from tests.engine.test_gui_construction_calculation_browser import calculate, recompute_floor_thickness, small_document
@@ -107,9 +108,9 @@ def test_fill_save_reload_one_real_run_and_result_pages(tmp_path: Path, browser:
     start = time.perf_counter()
     with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator('#scheme-list').select_option('small')
+        open_button = scheme_open_button(page, 'small')
         with page.expect_response('**/api/input-preview'):
-            page.locator('#open-scheme').click()
+            open_button.click()
         page.wait_for_function("!document.querySelector('main').inert")
         start_draft(page)
         _filled_draft_preset(page, 'glass_wool_96k_50mm')

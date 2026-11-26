@@ -344,7 +344,7 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
         shift = frame.across_length / 2 - axis.across_m
         amount = f"{abs(shift):.4f}".rstrip("0").ljust(4, "0")
         coordinate = "y" if axis.along == "x" else "x"
-        guidance = (f"要左右牆跟著畫，到下面『喇叭與座位』，把兩支喇叭、主位與周圍點的 {coordinate} "
+        guidance = (f"要左右牆跟著畫，到上面『房間和擺位』的『座標數字』，把兩支喇叭、主位與周圍點的 {coordinate} "
                     f"都{'加上' if shift > 0 else '減掉'} {amount}，對稱軸就在房間正中")
         reply = source_only(reason)
         return {**reply, "cause": reason, "reason": f"{reason}。{guidance}", "source_edit": editing,

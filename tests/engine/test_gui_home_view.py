@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 from typing import cast
 
@@ -199,19 +200,31 @@ def test_home_api_without_results_lists_saved_schemes(tmp_path: Path) -> None:
 
 
 def test_home_first_screen_opens_a_saved_scheme_into_the_form(tmp_path: Path, browser: Browser) -> None:
+    """#1265 單元 5c 拿掉 #home 兩張大卡（「還沒有算好的房間」那一行、「看這一間的結果」「挑材料」兩個入口）：開頁就開上一份，
+    頂條方案名字那格是它；選單那一列照樣寫 /api/home 排好的白話，從選單打開照樣進表單。
+    存兩份、mine 是舊的那一份（5c 第二趟，審查第 3 條）：開頁開的是另一份，點選單那一列之前名字那格不是 mine，
+    點了才是——選單那一顆沒真的打開（不叫 openScheme）時這一題要紅。"""
     (tmp_path / "schemes").mkdir()
     document = _part2d_layout() | {"scheme_id": "mine"}
     _whole(document, "xL")
     (tmp_path / "schemes" / "mine.json").write_text(Scheme.model_validate(document).model_dump_json(), encoding="utf-8")
+    newer = _part2d_layout() | {"scheme_id": "newer"}
+    (tmp_path / "schemes" / "newer.json").write_text(Scheme.model_validate(newer).model_dump_json(), encoding="utf-8")
+    for name, stamp in (("mine", 1_000_000_000), ("newer", 1_000_000_600)):
+        os.utime(tmp_path / "schemes" / f"{name}.json", (stamp, stamp))
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
-        expect(page.locator("#home-title")).to_have_text("還沒有算好的房間")
-        expect(page.locator("#home-result")).to_be_hidden()
-        expect(page.locator("#home-materials")).to_be_visible()
-        row = page.locator('#home-schemes li[data-scheme="mine"]')
+        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+        expect(page.locator("#save-id")).to_have_value("newer")
+        expect(page.locator("#home")).to_have_count(0)
+        page.locator("#scheme-menu-button").click()
+        row = page.locator('#home-schemes [data-scheme="mine"]')
         expect(row).to_contain_text("貼了吸音材料：後牆整面")
-        row.get_by_role("button", name="打開來改").click()
+        assert page.locator("#save-id").input_value() != "mine"
+        row.get_by_role("menuitem", name="mine", exact=True).click()
         expect(page.locator("#save-id")).to_have_value("mine")
+        page.wait_for_function("openedId === 'mine'")
         _assert_quiet(watched)
 
 

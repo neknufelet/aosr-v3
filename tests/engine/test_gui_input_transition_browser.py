@@ -8,6 +8,7 @@ from playwright.sync_api import Browser, Request, Response, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_example_scheme, open_save_as, open_scheme, recheck, reveal, scheme_open_button
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -33,8 +34,7 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
         (tmp_path / "schemes" / f"{name}.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("editable")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "editable")
         page.wait_for_function("document.getElementById('save-id').value === 'editable' && !document.querySelector('main').inert")
         page.wait_for_load_state("networkidle")
         held: list[Route] = []
@@ -49,10 +49,10 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
                 route.continue_()
 
         page.route("**/api/input-preview", delay_preview)
-        page.locator("#scheme-list").select_option("readonly")
+        open_button = scheme_open_button(page, "readonly")
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")
                                  and _posted_scheme(request)["scheme_id"] == "readonly"):
-            page.locator("#open-scheme").click()
+            open_button.click()
         # 真鍵盤嘗試修改任一數字格：新版 inert（暫停互動）擋住，舊版會收舊桌子格進新方案。
         page.locator("#room-Lx").evaluate("node => node.focus()")
         page.keyboard.press("ControlOrMeta+A")
@@ -62,6 +62,7 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
         held[0].continue_()
         page.wait_for_function("document.getElementById('save-id').value === 'readonly' && !document.querySelector('main').inert")
         page.wait_for_load_state("networkidle")
+        open_save_as(page)
         page.locator("#save-as-id").fill("kept-readonly")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/kept-readonly")
                                   and response.request.method == "PUT") as saved:
@@ -77,6 +78,7 @@ def test_delayed_open_preserves_readonly_same_id_table(browser: Browser, tmp_pat
 def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         failed = False
 
         def fail_first_cloud_preview(route: Route) -> None:
@@ -88,6 +90,7 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
             else:
                 route.continue_()
 
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", fail_first_cloud_preview)
         with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as edited:
             page.locator("#furniture-cloud").click()
@@ -97,6 +100,7 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
         failure_text = page.locator("#messages").inner_text()
         assert_chinese_lines(failure_text.splitlines())
         # 失敗後立即存檔；舊版補問預覽後仍缺天雲格子，這裡會印出英文空元素錯誤。
+        open_save_as(page)
         page.locator("#save-as-id").fill("kept-without-cloud")
         page.locator("#save-as").click()
         page.wait_for_function("document.getElementById('save-as-note').textContent !== ''")
@@ -110,7 +114,7 @@ def test_failed_preview_after_cloud_edit_keeps_old_form_and_saves(browser: Brows
         assert "換不過去" in failure_text
         # 再改數字也要能收值，不留下缺格子的方案／預覽組合。
         page.locator("#room-Lx").fill(page.locator("#room-Lx").input_value())
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
         assert watched.page_errors == []
 
@@ -120,6 +124,8 @@ def test_failed_preview_keeps_shortcut_and_speaker_setup_old(browser: Browser, t
     存檔也是舊的。每一格前清掉訊息列，「換不過去」才等得到這一格的字。"""
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
+        reveal(page, "#use-speaker-setup")
         for index, selector in enumerate(("#shortcut-working", "#shortcut-listening", "#use-speaker-setup")):
             page.evaluate("() => { document.getElementById('messages').textContent = ''; }")
             page.route("**/api/input-preview", lambda route: route.fulfill(status=503, json={"error": "預覽暫時讀不到"}), times=1)
@@ -133,6 +139,7 @@ def test_failed_preview_keeps_shortcut_and_speaker_setup_old(browser: Browser, t
             assert not page.locator("#furniture-sofa").is_checked(), selector
             assert page.locator("#furniture-table-kind").input_value() == "none", selector
             name = f"unchanged-{index}"
+            open_save_as(page)
             page.locator("#save-as-id").fill(name)
             def is_save(response: Response, name: str = name) -> bool:
                 return response.url.endswith(f"/api/schemes/{name}") and response.request.method == "PUT"
@@ -156,12 +163,12 @@ def test_delayed_old_preview_cannot_replace_new_scheme_preview(browser: Browser,
     (tmp_path / "schemes" / "readonly.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         held: list[Route] = []
         page.route("**/api/input-preview", lambda route: held.append(route), times=1)
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
             page.locator("#room-Lx").fill("6")
-        page.locator("#scheme-list").select_option("readonly")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "readonly")
         page.wait_for_function("document.getElementById('save-id').value === 'readonly' && !document.querySelector('main').inert")
         assert held
         with page.expect_response(lambda response: response.url.endswith("/api/input-preview")
@@ -182,7 +189,9 @@ def test_delayed_old_preview_cannot_replace_new_scheme_preview(browser: Browser,
 def test_delayed_cloud_edit_keeps_controls_and_fields_old_until_preview(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         held: list[Route] = []
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", lambda route: held.append(route), times=1)
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
             with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as edited:
@@ -195,6 +204,7 @@ def test_delayed_cloud_edit_keeps_controls_and_fields_old_until_preview(browser:
         assert held
         held[0].continue_()
         page.wait_for_function("document.getElementById('furniture-cloud').checked && !document.querySelector('main').inert")
+        open_save_as(page)
         page.locator("#save-as-id").fill("confirmed-cloud")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/confirmed-cloud")
                                   and response.request.method == "PUT") as saved:
@@ -218,8 +228,7 @@ def test_failed_handover_refreshes_preview_for_edited_values(browser: Browser, t
     (tmp_path / "schemes" / "desk-scheme.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("desk-scheme")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "desk-scheme")
         page.wait_for_function("document.getElementById('save-id').value === 'desk-scheme' && !document.querySelector('main').inert")
         page.wait_for_load_state("networkidle")
         assert "y 3.825" in page.locator("#furniture-table-coordinate").inner_text()
@@ -234,6 +243,8 @@ def test_failed_handover_refreshes_preview_for_edited_values(browser: Browser, t
             else:
                 route.continue_()
 
+        reveal(page, "#receiver-main-y")
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", hold_then_fail_cloud)
         with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
             page.locator("#receiver-main-y").fill("3.5")
@@ -252,6 +263,7 @@ def test_stale_refresh_failure_does_not_overwrite_newer_message(browser: Browser
     # 這時舊補問才失敗，不准把「檢查通過」蓋成舊錯誤。
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
         held: list[Route] = []
         phase = "fail-cloud"
@@ -269,6 +281,7 @@ def test_stale_refresh_failure_does_not_overwrite_newer_message(browser: Browser
             else:
                 route.continue_()
 
+        reveal(page, "#furniture-cloud")
         page.route("**/api/input-preview", route_preview)
         page.locator("#furniture-cloud").click()
         page.wait_for_function("!document.querySelector('main').inert")

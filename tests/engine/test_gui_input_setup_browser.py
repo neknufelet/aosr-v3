@@ -6,6 +6,8 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import (back_to_wall, open_example_scheme, open_save_as, open_scheme, page_origin, picked_wall,
+                                            reveal)
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -14,6 +16,7 @@ from tests.engine.test_gui_furniture_problem_text import assert_chinese_lines
 
 
 def _filled(page: Page, selector: str, value: str | bool) -> None:
+    reveal(page, selector)  # #1265 起家具與喇叭擺法收在「改家具」「改喇叭與擺法」裡，先打開
     with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as response:
         if isinstance(value, bool):
             # 勾選只表示送出意圖；等候預覽時仍畫舊值，完成後才核勾選狀態。
@@ -29,24 +32,27 @@ def _filled(page: Page, selector: str, value: str | bool) -> None:
 
 def _save_readback(page: Page, name: str) -> dict[str, object]:
     expected = page.evaluate("collect()") | {"scheme_id": name}
+    open_save_as(page)
     page.locator("#save-as-id").fill(name)
     with page.expect_response(lambda response: response.url.endswith(f"/api/schemes/{name}")
                               and response.request.method == "PUT") as response:
         page.locator("#save-as").click()
     assert response.value.ok, response.value.text()
-    saved = page.request.get(f"{page.url.rstrip('/')}/api/schemes/{name}").json()["scheme"]
+    saved = page.request.get(f"{page_origin(page)}/api/schemes/{name}").json()["scheme"]
     assert saved == Scheme.model_validate(expected).model_dump(mode="json")
-    page.locator("#scheme-list").select_option(name)
-    page.locator("#open-scheme").click()
+    wall = picked_wall(page)
+    open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
     # 另存已先顯示新名字；開檔還要等預覽交接完，才可開始下一次選單操作。
     page.wait_for_function("!document.querySelector('main').inert")
+    back_to_wall(page, wall)  # 打開時換到前牆（#1265 單元 5c）：點回存之前看的那一面
     return cast(dict[str, object], saved)
 
 
 def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         _filled(page, "#furniture-sofa", True)
         _filled(page, "#furniture-table-kind", "desk")
         _filled(page, "#use-speaker-setup", True)
@@ -58,7 +64,7 @@ def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, 
         assert_chinese_lines(page.locator("#height-left").inner_text().splitlines())
         assert page.locator("#speaker-left-z").is_enabled()
         assert page.locator("#speaker-left-z").input_value() == "1.2"
-        page.locator("#speaker-left-z").fill("0.955")
+        reveal(page, "#speaker-left-z").fill("0.955")
         page.locator("#speaker-right-z").fill("0.955")
         page.wait_for_function("document.getElementById('height-left').textContent === ''")
         assert page.locator("#furniture-table-coordinate").inner_text() == "房間底面中心：x 2.375、y 2、z 0.72 公尺"
@@ -95,6 +101,7 @@ def test_edit_furniture_mount_cloud_coordinates_and_roundtrip(browser: Browser, 
 def test_representative_lock_flag_and_kind_switch_height_preserved(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         _filled(page, "#use-speaker-setup", True)
         for kind, fields in CABINETS.items():
             if kind != "bookshelf":
@@ -118,9 +125,10 @@ def test_representative_lock_flag_and_kind_switch_height_preserved(browser: Brow
 def test_without_table_cannot_choose_desk_and_stand_hint_does_not_block_save(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         _filled(page, "#use-speaker-setup", True)
         assert page.locator('#speaker-mount option[value="desk"]').all() == []
-        page.locator("#speaker-left-z").fill("1.21")
+        reveal(page, "#speaker-left-z").fill("1.21")
         page.wait_for_function("document.getElementById('stand-height-hint').textContent !== ''")
         assert page.locator("#stand-height-hint").inner_text() == "搜尋只用一個高度，兩支要一樣"
         _save_readback(page, "different-height")
@@ -139,8 +147,7 @@ def test_readonly_extra_item_survives_browser_collect_and_save(browser: Browser,
     (tmp_path / "schemes" / "old.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("old")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "old")
         page.wait_for_function("document.getElementById('save-id').value === 'old'")
         page.wait_for_function("document.getElementById('readonly-furniture').textContent.includes('舊座椅')")
         assert "這一頁不能改" in page.locator("#readonly-furniture").inner_text()
@@ -159,6 +166,7 @@ def test_shortcut_browser_and_saved_fields(browser: Browser, tmp_path: Path, sho
                                          kinds: list[str], ear: float, up: float, down: float) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as response:
             page.locator(f"#shortcut-{shortcut}").click()
         assert response.value.ok
@@ -183,12 +191,12 @@ def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tm
     (tmp_path / "schemes" / "precise.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("precise")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "precise")
         page.wait_for_function("document.getElementById('save-id').value === 'precise'")
-        field = page.locator("#speaker-left-z")
+        field = reveal(page, "#speaker-left-z")
         assert field.input_value() == "1.23456789012"
         # 未動過的格子保留全部精度；答案讀正式存檔回應，不拿 collect() 當答案。
+        open_save_as(page)
         page.locator("#save-as-id").fill("untouched")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/untouched")
                                   and response.request.method == "PUT") as unchanged:
@@ -197,6 +205,7 @@ def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tm
         assert page.request.get(f"{url}/api/schemes/untouched").json()["scheme"]["speakers"]["left"]["z"] == 1.23456789012345
         field.fill("")
         field.press_sequentially("1.23456789012")
+        open_save_as(page)
         page.locator("#save-as-id").fill("retyped")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/retyped")
                                   and response.request.method == "PUT") as changed:
@@ -218,8 +227,7 @@ def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Bro
     (tmp_path / "schemes" / "readonly-desk.json").write_text(Scheme.model_validate(document).model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("readonly-desk")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "readonly-desk")
         page.wait_for_function("document.getElementById('save-id').value === 'readonly-desk'")
         assert page.locator("#furniture-table-kind").is_disabled()
         assert page.locator("#speaker-mount").input_value() == "desk"
@@ -233,6 +241,7 @@ def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Bro
             assert changed.value.json()["scheme"]["speaker_setup"] == setup
             page.wait_for_function("!document.getElementById('input-setup').hasAttribute('aria-busy')")
             assert page.locator("#speaker-mount").input_value() == "desk"
+        open_save_as(page)
         page.locator("#save-as-id").fill("kept-desk")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/kept-desk")
                                   and response.request.method == "PUT") as saved:
@@ -247,6 +256,7 @@ def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Bro
 def test_browser_draws_server_editability_and_mount_choices(browser: Browser, tmp_path: Path) -> None:
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
 
         def preview(route: Route) -> None:
             response = route.fetch()
@@ -273,9 +283,9 @@ def test_placement_warnings_are_listed_under_speaker_setup(browser: Browser, tmp
         Scheme.model_validate(project.model_dump(mode="json")).model_dump_json(), encoding="utf-8")
     with _serve(tmp_path) as url, _open(browser, url) as watched:
         page = watched.page
+        open_example_scheme(page, url, tmp_path)
         expect(page.locator("#placement-warnings")).to_be_hidden()
-        page.locator("#scheme-list").select_option(project.scheme_id)
-        page.locator("#open-scheme").click()
+        open_scheme(page, project.scheme_id)
         page.wait_for_function("id => document.getElementById('save-id').value === id"
                                " && !document.querySelector('main').inert", arg=project.scheme_id)
         tail = "，差 0.16 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。"

@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._input_page_steps import commit_and_settle, open_example_scheme, open_results, open_save_as, open_scheme, recheck, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_quiet_but_plan_refused, _open, _serve, browser
 
 WIDTH = 1440
 # 同一行：兩格的垂直中線差不到幾個像素（按鈕比輸入格高一點，中線仍對齊）。
@@ -40,22 +41,20 @@ def _same(first: float, second: float) -> bool:
 def test_scheme_rows_keep_each_button_beside_its_field(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
-        opened, listing, open_button = (_box(page, name) for name in ("#save-id", "#scheme-list", "#open-scheme"))
-        new_name, save_as, source = (_box(page, name) for name in ("#save-as-id", "#save-as", "#source-model"))
-        # 第一列：方案代號、開舊方案、打開。
-        assert abs(_middle(opened) - _middle(listing)) < SAME_LINE_PX
-        assert abs(_middle(listing) - _middle(open_button)) < SAME_LINE_PX
-        # 第二列：「另存新名字」按鈕緊跟在新名字那一格右邊，不掉到下一行。
-        assert abs(_middle(new_name) - _middle(save_as)) < SAME_LINE_PX
-        assert 0 <= save_as["x"] - (new_name["x"] + new_name["width"]) < 24
-        # 三列上下排開，每列第一格左邊對齊。
-        assert _middle(opened) < _middle(new_name) < _middle(source)
-        assert abs(opened["x"] - new_name["x"]) < EDGE_PX and abs(new_name["x"] - source["x"]) < EDGE_PX
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
+        for width in (1280, WIDTH):
+            page.set_viewport_size({"width": width, "height": 900})
+            for group in (("#save-id", "#scheme-menu-button", "#save-state"),
+                          ("#show-results", "#save-as-toggle", "#save")):
+                first, middle, last = (_box(page, selector) for selector in group)
+                assert max(abs(_middle(first) - _middle(box)) for box in (middle, last)) < SAME_LINE_PX
+                assert first["x"] + first["width"] <= middle["x"] < last["x"]
         # 峰谷配對容差那句講的是評分怎麼配對峰谷，不是聲源：不准擺在方案區（聲源模型底下）。
-        note = page.locator("#feature-note")
+        # #1265 起跟聲源模型同收在第 1 段「進階」摺疊，但在自己的「比對設定」小標底下，不在聲源模型那一列。
+        note = reveal(page, "#feature-note")
         assert "峰谷配對容差" in note.inner_text()
-        assert note.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
+        assert note.evaluate("node => [node.previousElementSibling.textContent, !node.closest('.scheme-row')]") == ["比對設定", True]
         _assert_quiet(watched)
 
 
@@ -73,22 +72,24 @@ LABELS_OUTSIDE_JS = """svg => {
 }"""
 
 
-def test_plan_panels_are_a_two_by_two_grid_with_readable_labels(tmp_path: Path, browser: Browser) -> None:
+def test_plan_views_show_one_drawing_at_a_time_with_readable_labels(tmp_path: Path, browser: Browser) -> None:
+    """#1265 起四張圖疊在第 1 段左邊同一格、上方切換一次露一張（原本兩欄兩列）：四張一樣寬、疊在同一處；
+    字級、字在畫框裡、外框置中塞滿這幾條照舊逐張考（切到那一張再量）。"""
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#zoom-xz circle").first.wait_for()
-        plan, side, zoom_plan, zoom_side = (_box(page, name) for name in PANELS)
-        # 兩欄兩列：上排整間房、下排聆聽區放大；同一欄左緣對齊、同一列上緣對齊，四格一樣寬、同列一樣高。
-        assert _same(plan["x"], zoom_plan["x"]) and _same(side["x"], zoom_side["x"]) and plan["x"] < side["x"]
-        assert _same(plan["y"], side["y"]) and _same(zoom_plan["y"], zoom_side["y"]) and plan["y"] < zoom_plan["y"]
-        assert all(_same(box["width"], plan["width"]) for box in (side, zoom_plan, zoom_side))
-        assert _same(plan["height"], side["height"]) and _same(zoom_plan["height"], zoom_side["height"])
-        # 兩欄合起來佔滿整個區塊的內寬（沒有落單的第四格旁邊空一塊）。
-        section = page.locator("#plan-drawings").bounding_box()
-        assert section is not None
-        assert _same(side["x"] + side["width"], section["x"] + section["width"])
+        open_example_scheme(page, base, tmp_path)
+        page.locator("#zoom-xz circle").first.wait_for(state="attached")
+        first = _box(page, PANELS[0])
         every_size: list[float] = []
         for name in PANELS:
+            page.locator(f"#view-{name[1:]}").click()
+            expect(page.locator(name)).to_be_visible()
+            for other in PANELS:
+                if other != name:
+                    expect(page.locator(other)).to_be_hidden()
+            box = _box(page, name)
+            # 疊在同一處：左緣、寬，還有上緣（#1265 單元 2 審查建議：只比 x 與寬，某一張往下掉也不會紅）。
+            assert _same(box["x"], first["x"]) and _same(box["width"], first["width"]) and _same(box["y"], first["y"]), name
             sizes = cast(list[float], page.locator(name).evaluate(LABEL_PX_JS))
             assert sizes, name
             every_size += sizes
@@ -98,11 +99,10 @@ def test_plan_panels_are_a_two_by_two_grid_with_readable_labels(tmp_path: Path, 
             assert page.locator(name).evaluate(LABELS_OUTSIDE_JS) == [], name
             # 房間（或聆聽區）的外框置中、塞滿格子：寬或高至少佔四分之三，左右留白一樣。
             frame = page.locator(f"{name} rect").first.bounding_box()
-            panel = _box(page, name)
             assert frame is not None
-            assert max(frame["width"] / panel["width"], frame["height"] / panel["height"]) >= 0.75, name
-            left_gap = frame["x"] - panel["x"]
-            right_gap = panel["x"] + panel["width"] - (frame["x"] + frame["width"])
+            assert max(frame["width"] / box["width"], frame["height"] / box["height"]) >= 0.75, name
+            left_gap = frame["x"] - box["x"]
+            right_gap = box["x"] + box["width"] - (frame["x"] + frame["width"])
             assert abs(left_gap - right_gap) < 2, (name, left_gap, right_gap)
         # 四張圖的畫框大小不同，字照樣一樣大（字級跟著畫框換算），不會放大圖的字特別大。
         assert max(every_size) - min(every_size) < 0.5, every_size
@@ -120,8 +120,9 @@ def _message_style(page: Page) -> dict[str, str]:
 def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent === '檢查通過'")
         passed = _message_style(page)
         # 成功用共用的 .ok（綠），字級與字型跟內文一樣（原本是等寬小字的紅褐色，看起來像錯誤）。
@@ -129,12 +130,22 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
         red, green, blue = (int(part) for part in re.findall(r"\d+", passed["color"])[:3])
         assert green > red and green > blue, passed["color"]
         assert passed["size"] == passed["bodySize"] and passed["family"] == passed["bodyFamily"]
+        # #1265 單元 6 起「檢查通過」使用者真正看到的是頂條那一句（訊息列同一句藏起來）：那一句也是綠的。
+        top = page.locator("#check-state")
+        expect(top).to_have_attribute("data-kind", "ok")
+        top_ok = top.evaluate("node => getComputedStyle(node).color")
+        red, green, blue = (int(part) for part in re.findall(r"\d+", top_ok)[:3])
+        assert green > red and green > blue, top_ok
         page.locator("#room-Lx").fill("")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent.includes('空著沒填')")
         problem = _message_style(page)
         assert problem["kind"] == "notice"
         assert problem["color"] != passed["color"]
+        expect(top).to_have_attribute("data-kind", "problem")
+        top_problem = top.evaluate("node => getComputedStyle(node).color")
+        red, green, blue = (int(part) for part in re.findall(r"\d+", top_problem)[:3])
+        assert red > green and red > blue, top_problem
         assert problem["size"] == problem["bodySize"]
         # 長度清空時伺服器照設計回 422，瀏覽器會記一筆「載入失敗」，那是預期的；JS 自己不准拋錯。
         assert all("422" in text for text in watched.console_errors), watched.console_errors
@@ -144,7 +155,8 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
 def test_rows_and_legend_use_chinese_names_from_label_table(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
         tables = page.request.get(f"{base}/api/labels").json()
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
         roles = {channel["speaker_id"]: channel["role"] for channel in scheme["channel_group"]["channels"]}
@@ -199,12 +211,19 @@ class _Trail:
 
 
 def _blank_and_press(page: Page, button: str, fields: tuple[str, ...], trail: object = "") -> None:
+    # #1265 單元 3 起牆面表單收在第 2 段「換原本的牆」裡：先全部打開，清空那幾下之間才不夾別的操作。
+    for field in fields:
+        reveal(page, field)
     for field in fields:
         page.locator(field).fill("")
     # 填了要真的留在格子裡：#1145 那次是按鍵落到頁面本身、格子沒清到，到後面才以別的樣子紅。
     # 全部填完才一起讀：每填一格就讀一次會在兩格之間多一趟來回，正好把那段先後蓋掉、病就看不到了。
     assert all(page.locator(field).input_value() == "" for field in fields), f"清空了沒留住\n{trail}"
+    # #1265 單元 6 起離開一格就自動檢查：先離開最後一格、等那一次回來，再清訊息列、按鈕（考的是按鈕自己的回話）。
+    commit_and_settle(page, fields[-1])
     page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+    if button == "#save-as":
+        open_save_as(page)
     page.locator(button).click()
     page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
 
@@ -214,19 +233,21 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
     # 空名字的提示還寫「新代號」，跟這一列的「新名字」對不上。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         trail = _Trail(page)
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
+        open_save_as(page)
         note, button = page.locator("#save-as-note"), _box(page, "#save-as")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
         # 空名字：提示貼在按鈕右邊、同一行，用這一列的字（新名字、另存新名字），游標回到新名字那一格。
         hint = _box(page, "#save-as-note")
-        assert abs(_middle(hint) - _middle(button)) < SAME_LINE_PX
-        assert 0 <= hint["x"] - (button["x"] + button["width"]) < 24
+        assert 0 <= hint["y"] - (button["y"] + button["height"]) < 24
         assert "「新名字」" in note.inner_text() and "「另存新名字」" in note.inner_text() and "代號" not in note.inner_text()
         assert note.get_attribute("class") == "notice"
         assert page.evaluate("() => document.activeElement.id") == "save-as-id"
         # 開始打字，提示就收掉。
+        open_save_as(page)
         page.locator("#save-as-id").fill("next")
         assert note.inner_text() == ""
         # 檢查沒過：問題（伺服器寫好的白話，同一句只一行、列出哪幾格）寫在按鈕旁邊，也寫在底下的訊息列。
@@ -240,12 +261,13 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
         assert note.is_visible() and viewport is not None
         assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
         assert not (tmp_path / "schemes" / "next.json").exists()
-        # 之後底下換了新的一句（例如按檢查），旁邊那句就過時了，一起清掉。
-        page.locator("#check").click()
+        # 之後底下換了新的一句（例如按「儲存」；#1265 單元 6 起沒有「檢查」鈕，改定一格自動檢查不清按鈕旁邊的字），旁邊那句就過時了，一起清掉。
+        page.locator("#save").click()
         page.wait_for_function("() => document.getElementById('save-as-note').textContent === ''")
         for field, value in before.items():
             page.locator(field).fill(value)
         assert {field: page.locator(field).input_value() for field in before} == before, f"填回去沒留住\n{trail}"
+        open_save_as(page)
         page.locator("#save-as").click()
         # 存好了、沒存成（「沒有另存：…」）都寫在旁邊：等旁邊有字就是有結局，沒存成立刻紅、印出原因，不空等逾時。
         page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
@@ -257,22 +279,26 @@ def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser
 
 
 def test_save_problems_show_right_under_the_buttons(tmp_path: Path, browser: Browser) -> None:
-    # 按「儲存」與「檢查」：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔。
+    # 按「儲存」與改定一格自動檢查（#1265 單元 6 起沒有「檢查」鈕）：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔
+    # （開著的那一份存好的檔逐位沒變、沒有多出別的檔）。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
         name = page.locator("#save-id").input_value()
+        before = {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")}
         _blank_and_press(page, "#save", ("#room-Ly", "#speaker-right-y"))
         shown = page.locator("#messages").inner_text()
         assert shown.split("\n") == ["寬 Ly（公尺）、右聲道喇叭 y 座標：空著沒填"], shown
         assert page.locator("#messages").get_attribute("class") == "notice"
-        assert not (tmp_path / "schemes" / f"{name}.json").exists()
+        assert {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")} == before
+        assert set(before) == {f"{name}.json"}
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
         assert page.locator("#messages").inner_text() == shown
-        # 訊息列緊貼在那一排按鈕底下：按的人眼睛就在那裡。
-        buttons, messages = _box(page, ".actions"), _box(page, "#messages")
+        # 訊息列緊貼在那一排按鈕底下：按的人眼睛就在那裡。#1265 單元 6 起訊息列搬到頂條，「儲存」那一排就是頂條那一排。
+        buttons, messages = _box(page, "#input-bars .bar-row"), _box(page, "#messages")
         assert 0 <= messages["y"] - (buttons["y"] + buttons["height"]) < 40
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
@@ -283,14 +309,15 @@ def test_browser_errors_are_said_in_plain_chinese(tmp_path: Path, browser: Brows
     # 訊息列要寫白話，不印英文原文。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
         for answer, words in ((lambda route: route.abort(), "連不上本機的網頁伺服器"),
                               (lambda route: route.fulfill(status=500, content_type="text/html",
                                                            body="<html>Internal Server Error</html>"),
                                "伺服器的回覆讀不懂")):
             page.route("**/api/plan", answer)
             page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-            page.locator("#check").click()
+            recheck(page)
             page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
             shown = page.locator("#messages").inner_text()
             assert words in shown and not re.search(r"[A-Za-z]{3,}", shown), shown
@@ -308,11 +335,15 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
     # 有 / 或 .. 的名字更只拿到英文的「Not Found」。現在打字時就在旁邊說，按下去也不送出。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
+        before = {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")}
         sent: list[str] = []
         page.on("request", lambda request: sent.append(request.url) if request.method == "PUT" else None)
+        open_save_as(page)
         note, button = page.locator("#save-as-note"), _box(page, "#save-as")
         for name in REFUSED_NAMES:
+            open_save_as(page)
             page.locator("#save-as-id").fill(name)
             # 一邊打就說：用這一列的字（新名字），講得出收哪些字、中文不收，不提別列的「方案代號」。
             live = note.inner_text()
@@ -324,14 +355,14 @@ def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: 
             assert note.inner_text() == f"沒有另存：{live}"
             assert page.evaluate("() => document.activeElement.id") == "save-as-id"
             hint = _box(page, "#save-as-note")
-            assert hint["y"] < _middle(button) < hint["y"] + hint["height"]
-            assert 0 <= hint["x"] - (button["x"] + button["width"]) < 24
+            assert 0 <= hint["y"] - (button["y"] + button["height"]) < 24
         # 收得下的名字打出來，旁邊的提示就收掉；底下的訊息列沒被這些提示蓋掉。
+        open_save_as(page)
         page.locator("#save-as-id").fill("living-room_2")
         assert note.inner_text() == ""
         assert page.locator("#messages").inner_text() == "檢查通過"
         assert not sent, sent
-        assert not list((tmp_path / "schemes").glob("*.json"))
+        assert {path.name: path.read_bytes() for path in (tmp_path / "schemes").glob("*.json")} == before
         _assert_quiet(watched)
 
 
@@ -339,7 +370,8 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
     # 存著的方案現在檢查不過時按「打開」：以前原因只寫在頁面最底下的訊息列，最上面看起來像沒反應。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
         opened = page.locator("#save-id").input_value()
         speaker = next(iter(scheme["speakers"]))
@@ -347,10 +379,9 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
         (tmp_path / "schemes").mkdir(parents=True, exist_ok=True)
         (tmp_path / "schemes" / "outside.json").write_text(json.dumps({**scheme, "scheme_id": "outside"}))
         page.reload(wait_until="networkidle")
-        page.locator("#plan-legend li").first.wait_for()
+        reveal(page, "#plan-legend li").first.wait_for()
         room = page.locator("#room-Lx").input_value()
-        page.locator("#scheme-list").select_option("outside")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "outside")
         page.wait_for_function("() => document.getElementById('open-note').textContent !== ''")
         below = page.locator("#messages").inner_text()
         note = page.locator("#open-note")
@@ -360,12 +391,12 @@ def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: 
         assert page.locator("#save-id").input_value() == opened
         assert page.locator("#room-Lx").input_value() == room
         # 那句緊跟著「打開」：在按鈕旁邊或正下方，整句落在視窗裡（bounding_box 以目前視窗的左上角為原點）。
-        button, hint, viewport = _box(page, "#open-scheme"), _box(page, "#open-note"), page.viewport_size
+        button, hint, viewport = _box(page, "#scheme-menu-button"), _box(page, "#open-note"), page.viewport_size
         assert viewport is not None
         assert button["y"] <= hint["y"] + hint["height"] and hint["y"] < button["y"] + button["height"] + 24
         assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
-        # 之後底下換了新的一句（按檢查），旁邊那句就過時了，一起清掉。
-        page.locator("#check").click()
+        # 之後底下換了新的一句（按「儲存」；#1265 單元 6 起沒有「檢查」鈕，改定一格自動檢查不清按鈕旁邊的字），旁邊那句就過時了，一起清掉。
+        page.locator("#save").click()
         page.wait_for_function("() => document.getElementById('open-note').textContent === ''")
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
@@ -378,12 +409,16 @@ def test_only_the_calculation_cell_carries_the_technical_tooltip(tmp_path: Path,
         {"scheme": {"scheme_id": "unreadable"}, "schema_version": "aosr.scheme_result.v4"}))
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
+        # #1265 單元 4：結果清單搬進結果抽屜，一列的算完時間、評分設定、物理收成小字裡的三段（全程時間不在抽屜，
+        # 在結果頁）；滑鼠說明只准掛在「物理」那一段。
+        open_results(page)
         row = page.locator("#results-list tr", has_text="unreadable")
         row.wait_for()
-        headers = page.locator("table:has(#results-list) th").all_inner_texts()
-        cells = row.locator("td").evaluate_all("cells => cells.map(cell => [cell.textContent, cell.title])")
-        assert {text for text, _ in cells[1:5]} == {"讀不出"}
-        assert {headers[index] for index, (_, title) in enumerate(cells) if title} == {"物理"}
+        cells = row.locator(".res-finished, .res-registry, .res-physics").evaluate_all(
+            "cells => cells.map(cell => [cell.textContent, cell.title])")
+        assert len(cells) == 3 and {text for text, _ in cells} == {"讀不出"}
+        assert row.locator("[title]").evaluate_all("nodes => nodes.map(node => node.className)") == ["res-physics"]
         _assert_quiet(watched)
 
 
@@ -397,24 +432,25 @@ def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: P
     # 沒改過的牆仍是那個數字的倍數、照留；改過或清空的那一格清掉；表單補齊了就全部回來。
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
+        open_example_scheme(page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
         page.wait_for_function("() => document.getElementById('multiple-floor').textContent !== ''")
         before = _multiples(page)
         assert all(text.startswith("約 ρc 的") for text in before.values()), before
-        floor = page.locator("#wall-floor").input_value()
+        floor = reveal(page, "#wall-floor").input_value()  # #1265 單元 3 起收在第 2 段「換原本的牆」裡
         page.locator("#wall-floor").fill("")
         page.wait_for_function("() => document.getElementById('multiple-floor').textContent === ''")
         assert {key: text for key, text in _multiples(page).items() if key != "multiple-floor"} == \
             {key: text for key, text in before.items() if key != "multiple-floor"}
-        page.locator("#wall-ceiling").fill("1000")
+        reveal(page, "#wall-ceiling").fill("1000")
         page.wait_for_function("() => document.getElementById('multiple-ceiling').textContent === ''")
         assert _multiples(page)["multiple-x0"] == before["multiple-x0"]
-        page.locator("#wall-floor").fill(floor)
+        reveal(page, "#wall-floor").fill(floor)
         page.wait_for_function("() => document.getElementById('multiple-ceiling').textContent !== ''")
         after = _multiples(page)
         assert after["multiple-floor"] == before["multiple-floor"]
         assert after["multiple-ceiling"].startswith("約 ρc 的") and after["multiple-ceiling"] != before["multiple-ceiling"]
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_calculation_output_stays_in_technical_details() -> None:
@@ -425,4 +461,4 @@ def test_calculation_output_stays_in_technical_details() -> None:
     assert '$("run-state").textContent = state.display_text;' in script
     assert not re.search(r'\$\("run-state"\)[^;]*stderr_tail', script)
     assert '$("run-log-text").textContent = state.stderr_tail.join' in script
-    assert re.search(r'<details id="run-log" hidden><summary>[^<]*技術細節[^<]*</summary><pre id="run-log-text">', page)
+    assert re.search(r'<details id="run-log" hidden><summary>看出錯紀錄</summary><pre id="run-log-text">', page)
