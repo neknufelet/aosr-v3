@@ -263,18 +263,14 @@ async function sendToSearch() {
     window.zonePageKeep?.(refused);
     return;
   }
-  const planFailed = await holdInput(async () => {
-    const generation = zoneDesignGeneration, name = $("save-id").value;
-    const stored = await storeScheme();
-    // 存之前那一次平面圖檢查沒過（storeScheme 回 null）：沒存、不跳，鎖放開之後停在問題上。
-    if (!stored) return stored === null;
+  // 存之前那一次平面圖檢查沒過（含連不上）：沒存、不跳，storeThen（app.js）在鎖放開之後停在問題上。
+  await storeThen(async (stored, {generation, name}) => {
     await refreshAfterSave(stored.message);
     // 鎖著的時候換不了方案；這一條是鎖漏掉時的第二道（同 pressedCopy 的 samePage）。
     if (generation !== zoneDesignGeneration) { searchNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice", false); return; }
     if (!zoneDesignSaved) { searchNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice", false); return; }
     await leaveForSearch(`/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`);
-  });
-  if (planFailed === true) await stopAtCheck("plan");
+  }, () => ({generation: zoneDesignGeneration, name: $("save-id").value}));
 }
 // 送出跳頁、等到離開這一頁（呼叫的人拿著鎖）：搜尋頁回來之前舊的這一頁還在畫面上。離開了這個等待就不會回來，鎖跟著頁面一起消失；
 // 兩種情況會回來、把鎖放開：按「上一頁」時瀏覽器把這一頁原樣搬回來（pageshow），或等了一陣子還在這一頁（搜尋頁沒打開成；

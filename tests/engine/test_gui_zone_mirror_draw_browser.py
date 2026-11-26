@@ -488,15 +488,21 @@ def test_toggle_only_edits_design_and_shows_both_states(tmp_path: Path, browser:
         expect(page.locator("#zone-page-unsaved")).to_be_visible()
 
 
-def test_positions_off_leave_the_limits_alone(tmp_path: Path, browser: Browser) -> None:
+def test_positions_off_leave_the_limits_verdict_alone(tmp_path: Path, browser: Browser) -> None:
     with _room(tmp_path, browser) as page:
         page.locator("#elevation-symmetry-off").click()
         _settled(page)
-        generation = page.evaluate("zoneLimitsGeneration")
+        # 單元 6 起改了就自動檢查，每一次平面圖檢查都重問限制（#1265 單元 6 第二趟審查第 1 條），所以不再比世代號；
+        # 對稱關著時座標跟鏡子無關，要守的是限制的判決與頂條那一句都不因改座標而變。
+        verdict = "JSON.stringify([zoneLimits.status, zoneLimits.zones, zoneLimits.refusals])"
+        before = page.evaluate(verdict)
+        sentence = page.locator("#check-state").text_content()
         for field in ("speaker-left-x", "receiver-main-x"):
             reveal(page, f"#{field}").fill("2.8")
             page.locator(f"#{field}").press("Tab")
-            assert page.evaluate("zoneLimitsGeneration") == generation
+            _settled(page)
+            assert page.evaluate(verdict) == before
+            expect(page.locator("#check-state")).to_have_text(sentence or "")
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-page-unsaved")).to_be_visible()
 

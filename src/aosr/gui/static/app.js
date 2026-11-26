@@ -182,10 +182,12 @@ function relabelWallsOnLeave(event) {
 }
 // 改定一格自動檢查（#1265 單元 6）：滑鼠按著時（點別的鈕讓那一格失焦）先不發，放開、那一下點完才發——回來會清掉或重畫
 // 平面圖、訊息列冒一行，版面在按下與放開之間跳了，那一下就沒按到。按的那一下自己問過平面圖（儲存、算），這一次就不必再問。
+// 按的那一顆問過沒有，比同一把序號 planSeq（refreshPlan 開頭取號）。按的那一顆先鎖頁、等分區縮放才問的時候（設計洞 3），
+// 延後的這一次照樣發，但它也先等同一次分區縮放，醒來時已經不是最新那一次（按的那一顆取了更新的號），不送就退出（refreshPlan）。
 let autoCheckLater = false, autoCheckAsked = 0;
 function autoCheck() {
-  if (pressing) { if (!autoCheckLater) autoCheckAsked = planAsked; autoCheckLater = true; return; }
-  const asked = autoCheckLater && autoCheckAsked !== planAsked;
+  if (pressing) { if (!autoCheckLater) autoCheckAsked = planSeq; autoCheckLater = true; return; }
+  const asked = autoCheckLater && autoCheckAsked !== planSeq;
   autoCheckLater = false;
   if (!asked) action(() => refreshPlan(undefined, true));
 }
@@ -541,7 +543,10 @@ async function storeScheme() {
   const taken = pressedCopy();
   const document = taken.document;
   const headers = openedId === null || openedId !== document.scheme_id ? {"If-None-Match": "*"} : {};
-  if (!await refreshPlan(document)) return null;
+  // 圖面檢查連不上也算沒過（#1265 單元 6 第二趟發現 4）：原因寫進訊息列，一樣回 null。
+  let passed;
+  try { passed = await refreshPlan(document); } catch (error) { say(errorText(error), "notice"); return null; }
+  if (!passed) return null;
   const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document, headers);
   if (taken.samePage()) {
     openedId = document.scheme_id;
@@ -558,6 +563,20 @@ async function storeScheme() {
   }
   renderInputBars();
   return {id: document.scheme_id, message: saved.message};
+}
+// 頁底兩顆（「照現在牆上貼的算一次」、zone_modes.js 的「交給程式最佳化 ▸」）共用（第二趟發現 4）：鎖著存檔，存成了做
+// after(stored, before 拿到的東西)；存之前平面圖沒過（含連不上：storeScheme 回 null）就在鎖放開之後停在平面圖問題上
+// （check_state.js 的 stopAtCheck）。兩顆不各自判；別的失敗（存檔被拒、做的事丟錯）holdInput 已經寫進訊息列，回 undefined。
+const PLAN_STOPPED = Symbol("平面圖擋下");
+async function storeThen(after, before = () => null) {
+  const out = await holdInput(async () => {
+    const context = before();
+    const stored = await storeScheme();
+    return stored === null ? PLAN_STOPPED : after(stored, context);
+  });
+  if (out !== PLAN_STOPPED) return out;
+  await stopAtCheck("plan");
+  return undefined;
 }
 // 存好之後重讀方案清單與結果清單（不鎖頁）。
 async function refreshAfterSave(message) {
@@ -1196,24 +1215,24 @@ async function follow(id) {
   await showOtherRuns();
 }
 // sent：存檔時檢查的是按下那一刻抄下來的那一份（#1187）；其餘照表單現況。
-// 每問一次加一（5c 第二趟，審查第 2 條）：不帶 sent 的畫面重算回來時已經不是最新那一次、或表單已換成別份方案（例如開頁途中
-// 開機範本那一次晚到、已經開好要開的那一份），整筆丟掉——不畫、不寫訊息列、不清任何提示，最新那一次自己會畫。
+// 一把序號 planSeq（單元 6 第二趟，審查發現 2）：每一次在 refreshPlan 開頭取號，頂條、畫圖、丟掉舊回覆都比這一把。
+// 不帶 sent 的：等分區縮放（房間尺寸改了，#1266）醒來時已經不是最新那一次，就不送平面圖檢查，直接退出（最新那一次自己會問、會記）；
+// 回來時已經不是最新、或表單已換成別份方案（例如開頁途中開機範本那一次晚到），整筆丟掉——不畫、不寫訊息列、不清任何提示。
 // 帶 sent 的（存檔、另存、從範本開新的）一律不丟（5c 第三趟，複查第 1 條）：呼叫的人要拿 planProblems 與訊息列講沒存成的原因，
 // 照 #1265 單元 5c 以前的做法畫圖、寫訊息列、更新 planProblems，再回伺服器收不收。
+// 不變式：所有請求都結束之後，頂條那一句是最新那一次的結果（最新那一次一定走到 settle），不會停在「檢查中…」。
+// 丟錯（連不上、表單收不起來）也記成「沒檢查成」。
+// auto：改定一格自動發的那一次（#1265 單元 6，bootInputPage 的 AUTO_CHECK_AREAS）。限制照樣每一次都重問（第二趟發現 1：
+// 牆面表單改厚度、流阻也動到限制判決，不另列哪一格要問）。它寫訊息列不清按鈕旁邊那幾句（say 的 besides）；
+// 離開一格常常就是去按一顆鈕（儲存、另存、開新的、算）：那顆鈕的回話已經寫進訊息列，之後才回來的這一次只畫圖、記頂條，不寫訊息列。
 let planSeq = 0;
-// 頂條那一句的平面圖那一半（check_state.js）：每問一次先標「檢查中…」；回來時中間沒有更新的一次再問，才把結果記上去
-// （更新的那一次自己會記）。丟錯（連不上、表單收不起來）也要記成「沒檢查成」，不准停在「檢查中…」。
-// auto：改定一格自動發的那一次（#1265 單元 6，bootInputPage 的 AUTO_CHECK_AREAS）。只問平面圖——那幾格動到限制判決的
-// （房間尺寸、左右對稱開著時的喇叭與座位）各自的 change 已經重問限制（elevation.js），不多問一次。它寫訊息列不清按鈕旁邊那幾句
-// （say 的 besides）；離開一格常常就是去按一顆鈕（儲存、另存、開新的、算）：那顆鈕的回話已經寫進訊息列，之後才回來的這一次
-// 只畫圖、記頂條，不寫訊息列。
-let planAsked = 0;
 async function refreshPlan(sent, auto = false) {
-  const turn = ++planAsked, saidAt = saidCount;
-  const settle = (state, count, words) => { if (turn === planAsked) planChecked(state, count, words); };
+  const turn = ++planSeq, saidAt = saidCount;
+  const latest = () => turn === planSeq;
+  const settle = (state, count, words) => { if (latest()) planChecked(state, count, words); };
   const quiet = () => auto && saidCount !== saidAt;
   planChecking();
-  try { return await checkPlan(sent, settle, auto, quiet); } catch (error) {
+  try { return await checkPlan(sent, latest, settle, auto, quiet); } catch (error) {
     settle("error", 1, errorText(error));
     if (!auto) throw error;
     // 自動那一次連不上、表單收不起來：頂條已經記了；訊息列照上面同一條規矩寫（不清按鈕旁邊那幾句、別的回話先到就不寫）。
@@ -1221,15 +1240,18 @@ async function refreshPlan(sent, auto = false) {
     return false;
   }
 }
-async function checkPlan(sent, settle, auto, quiet) {
+async function checkPlan(sent, latest, settle, auto, quiet) {
   const resize = window.pendingRoomResize();
-  if (resize && !sent) await resize;
+  if (resize && !sent) {
+    await resize;
+    if (!latest()) return true;
+  }
   // 每次確定的改動都走到這裡：順手重判超過限制的區（#1111；不等它、不鎖頁，晚到的回覆自己丟掉）。
-  if (!auto) refreshZoneLimits();
-  const mine = ++planSeq, asked = scheme;
+  refreshZoneLimits();
+  const asked = scheme;
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(sent ?? collect())}));
-  if (!sent && (mine !== planSeq || asked !== scheme)) return response.ok;
+  if (!sent && (!latest() || asked !== scheme)) return response.ok;
   if (!response.ok) {
     shownPlan = plan.plan ?? null;
     if (shownPlan) drawShownPlan();
@@ -1331,9 +1353,10 @@ async function bootInputPage() {
     $(id).addEventListener("input", () => action(updateInputPreview));
   }
   // 改了就自動檢查（#1265 單元 6）：這幾格改定（離開那一格、按 Enter，瀏覽器發 change）就重問平面圖與限制，不用再按「檢查」。
-  // 家具、喇叭擺法、姿勢那幾顆自己走 editInput；牆面表單只管數字格（換種類、套預設、實測表自己交接完就問，walls.js、measured.js）。
+  // 規則只有一條：改到方案的才發（第二趟發現 3）。自己有交接的那幾格（onchange：換種類、套預設、家具勾選）交接完自己問，
+  // 這裡不再多問一次；還沒套用的實測草稿不改方案，它的 change 在草稿那一塊就攔下（measured.js），走不到這裡。
   for (const id of AUTO_CHECK_AREAS) $(id).addEventListener("change", event => {
-    if (id === "walls" && !(event.target instanceof HTMLInputElement && event.target.type === "number")) return;
+    if (event.target instanceof HTMLElement && event.target.onchange) return;
     autoCheck();
   });
   $("walls").addEventListener("input", event => {
@@ -1379,14 +1402,11 @@ async function bootInputPage() {
     if (inputBusy) { say(`${busyWords}，這一次沒有開算；等它做完再按一次`, "notice"); return; }
     // 鎖涵蓋「存＋開算」整段：開算的是存下去的那一份（按下那一刻表單上那一份），不是那時畫面上的。
     // 中間重讀清單也在鎖裡（跟改動前同一個順序：存、重讀清單、開算、馬上問第一次進度）。
-    const state = await holdInput(async () => {
-      const stored = await storeScheme();
-      if (!stored) return null;
+    // 存之前那一次平面圖檢查沒過（含連不上）：沒存、沒送，storeThen 停在問題上。限制只擋搜尋，這裡不看。
+    const state = await storeThen(async stored => {
       await refreshAfterSave(stored.message);
       return api("/api/runs", "POST", {scheme_id: stored.id});
     });
-    // 存之前那一次平面圖檢查沒過（storeScheme 回 null，沒存、沒送）：停在問題上（check_state.js）。限制只擋搜尋，這裡不看。
-    if (state === null) await stopAtCheck("plan");
     if (!state) return;
     followedState = state;
     $("run-log").open = false;

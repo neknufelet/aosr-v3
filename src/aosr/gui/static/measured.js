@@ -1,4 +1,4 @@
-/* 實測草稿與列編輯；所有材料數字交既有方案預覽驗證，這裡不算吸音率。 */
+/* 實測草稿與列編輯；所有材料數字交既有方案預覽驗證，這裡不算吸音率。增刪列改到方案，跟改一格一樣自動檢查（app.js 的 autoCheck）。 */
 const measuredDrafts = {};
 function parsePastedTable(text) {
   const lines = text.replace(/\r/g, "").split("\n");
@@ -35,13 +35,13 @@ function renderMeasured(name, material, row) {
       input.append(hint); entry.append(input);
     }
     entry.append(measuredButton(`measured-delete-${name}-${index}`, "刪除這列", () => {
-      collect(); material.points.splice(index, 1); renderWalls(); markStale();
+      collect(); material.points.splice(index, 1); renderWalls(); markStale(); return autoCheck();
     }));
     rows.append(entry);
   });
   row.append(rows, measuredButton(`measured-add-${name}`, "增加一列", () => {
     collect(); material.points.push(Object.fromEntries(Object.keys(spec.point_fields).map(key => [key, null])));
-    renderWalls(); markStale();
+    renderWalls(); markStale(); return autoCheck();
   }), measuredText(`measured-source-${name}`, spec.fields.source_and_conditions, material.source_and_conditions));
   renderAssembly(name, material.base_assembly, row);
 }
@@ -87,6 +87,8 @@ function renderMeasuredDraft(name, row) {
     }
     event.stopPropagation(); // 草稿未套用，不觸發原方案的預覽或存值。
   });
+  // 草稿未套用，改定也不觸發原方案的自動檢查（app.js 的 AUTO_CHECK_AREAS：改到方案的才發）。
+  panel.addEventListener("change", event => event.stopPropagation());
   const error = document.createElement("p"); error.id = `measured-error-${name}`; error.className = "notice";
   error.textContent = draft.error; error.setAttribute("aria-live", "polite"); panel.append(error);
   panel.append(measuredButton(`measured-apply-${name}`, "套用實測表", () => applyMeasuredDraft(name)),

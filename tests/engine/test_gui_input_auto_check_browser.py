@@ -166,8 +166,9 @@ CHANGE_IN = """([area, pick]) => {
 }"""
 
 
-def test_every_field_area_checks_by_itself_and_the_wall_form_only_for_number_boxes(tmp_path: Path, browser: Browser) -> None:
-    """每一區改定都自己檢查（含收起來、還沒打開的家具格）；牆面表單只有數字格走這條路（下拉、勾選各自交接完才問，不多問一次）。"""
+def test_every_field_area_checks_by_itself_including_the_wall_form(tmp_path: Path, browser: Browser) -> None:
+    """每一區改定都自己檢查（含收起來、還沒打開的家具格）；牆面表單也是（#1265 單元 6 第二趟：改到方案的格子不分數字格、
+    下拉、文字格都算；自己有交接的那幾格、還沒套用的實測草稿另見 test_gui_input_auto_check_3_browser.py）。"""
     _room(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
@@ -175,12 +176,6 @@ def test_every_field_area_checks_by_itself_and_the_wall_form_only_for_number_box
         for area in AREAS:
             _checks_by_itself(page, partial(page.evaluate, CHANGE_IN, [area, "input, select"]))
         _checks_by_itself(page, lambda: page.evaluate(CHANGE_IN, ["walls", "input[type=number]"]))
-        asked: list[str] = []
-        page.on("request", lambda request: asked.append(request.url) if request.url.endswith("/api/plan") else None)
-        # 牆面表單裡不是數字格的東西發 change（下拉、勾選各自有自己的交接，這條路不再多問一次）。
-        page.evaluate("""() => document.getElementById("walls").dispatchEvent(new Event("change"))""")
-        page.wait_for_timeout(300)
-        assert asked == []
         expect(page.locator("#check-state")).to_have_text("檢查通過")
         _assert_quiet(watched)
 

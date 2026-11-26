@@ -130,12 +130,22 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
         red, green, blue = (int(part) for part in re.findall(r"\d+", passed["color"])[:3])
         assert green > red and green > blue, passed["color"]
         assert passed["size"] == passed["bodySize"] and passed["family"] == passed["bodyFamily"]
+        # #1265 單元 6 起「檢查通過」使用者真正看到的是頂條那一句（訊息列同一句藏起來）：那一句也是綠的。
+        top = page.locator("#check-state")
+        expect(top).to_have_attribute("data-kind", "ok")
+        top_ok = top.evaluate("node => getComputedStyle(node).color")
+        red, green, blue = (int(part) for part in re.findall(r"\d+", top_ok)[:3])
+        assert green > red and green > blue, top_ok
         page.locator("#room-Lx").fill("")
         recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent.includes('空著沒填')")
         problem = _message_style(page)
         assert problem["kind"] == "notice"
         assert problem["color"] != passed["color"]
+        expect(top).to_have_attribute("data-kind", "problem")
+        top_problem = top.evaluate("node => getComputedStyle(node).color")
+        red, green, blue = (int(part) for part in re.findall(r"\d+", top_problem)[:3])
+        assert red > green and red > blue, top_problem
         assert problem["size"] == problem["bodySize"]
         # 長度清空時伺服器照設計回 422，瀏覽器會記一筆「載入失敗」，那是預期的；JS 自己不准拋錯。
         assert all("422" in text for text in watched.console_errors), watched.console_errors

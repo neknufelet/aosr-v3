@@ -82,10 +82,20 @@ function goToCheck(name) {
 }
 // 頁底兩顆被檢查擋下（app.js 的「照現在牆上貼的算一次」、zone_modes.js 的 sendToSearch）：不送，捲到問題那裡，焦點放在頂條那一顆字
 // （它的名字念得出原因）。另一半檢查還在路上時頂條寫「檢查中…」、還沒有那一顆字：等限制判決回來再畫一次；還是沒有就放在整句上。
-// 「這間房貼什麼」那一頁開著時輸入頁藏著，捲不過去：那一頁自己有那一句（zone_overview.js），這裡不動。
+// 等限制判決的時候頁面已經解鎖（第二趟發現 5）：回來時重看一次，三件都成立才捲、才搶焦點，否則什麼都不做——
+// 還在輸入頁（「這間房貼什麼」那一頁開著時輸入頁藏著，那一頁自己有那一句，zone_overview.js）、那個問題還在（那一半不是「檢查通過」；
+// 還在路上的不知道好了沒，照樣停）、按下之後使用者沒有自己把焦點移走（焦點還在按的那一顆、或落在頁面本身）。
+function stillStopping(name, pressed) {
+  if (document.body.classList.contains("zone-page-open")) return false;
+  const verdict = name === "plan" ? planVerdict : limitsVerdict();
+  if (verdict.state === "ok") return false;
+  return document.activeElement === pressed || document.activeElement === document.body || document.activeElement === null;
+}
 async function stopAtCheck(name) {
-  if (document.body.classList.contains("zone-page-open")) return;
+  const pressed = document.activeElement;
+  if (!stillStopping(name, pressed)) return;
   await settledZoneLimits();
+  if (!stillStopping(name, pressed)) return;
   renderCheckState();
   goToCheck(name);
   const go = document.getElementById(`check-${name}`) ?? document.getElementById("check-state");
