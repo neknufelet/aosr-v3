@@ -395,6 +395,19 @@ def test_chained_weld_reports_affected_layers(settings: RoomShellImportSettings)
     assert "Floor" in text and "Wall" in text
 
 
+def test_weld_cluster_within_tolerance_pairwise_is_not_blocked(settings: RoomShellImportSettings) -> None:
+    # 盒角的幾次出現輪流錯開到三個軸上：兩兩相距 0.9 個焊點距離（沒有接力），
+    # 但外接盒對角線超過焊點距離；量外接盒會誤擋，這一題釘住不擋。
+    room = good_room()
+    d = 0.9 * settings.weld_m / 2 ** 0.5
+    offsets = iter([(d, 0., 0.), (0., d, 0.), (0., 0., d)] * 4)
+    shell = tuple(LayerTriangle(t.layer, *(next(offsets) if p == (0, 0, 0) else p for p in (t.a, t.b, t.c)))
+                  for t in room.shell)
+    report = check_room_shell(replace(room, shell=shell), settings)
+    assert "weld_spread" not in {p.code for p in report.problems}
+    assert report.ok, report.problems
+
+
 @pytest.mark.parametrize("layer", ["ROOM::Wall_乳膠漆", "TREAT::Cloud_木板"], ids=["room", "treat"])
 def test_faceless_mesh_is_unreadable(settings: RoomShellImportSettings, tmp_path: Path, layer: str) -> None:
     model = rhino3dm.File3dm.Read(str(TEST_ROOM))

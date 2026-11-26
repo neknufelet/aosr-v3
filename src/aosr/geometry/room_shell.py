@@ -173,11 +173,13 @@ def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> tuple[NDArray[np
         if a != b:
             parent[max(a, b)] = min(a, b)
     roots = np.array([root(i) for i in range(len(points))], dtype=np.int64)
-    # 近鄰可以接力，故按最後的群量外接盒對角線，並找出該群接到的每一個圖層。
-    low, high = points.copy(), points.copy()
-    np.minimum.at(low, roots, points)
-    np.maximum.at(high, roots, points)
-    wide = np.linalg.norm(high - low, axis=1) > weld_m
+    # 近鄰可以接力：量每一點到該群代表點的距離，超過容差就是接力接出來的（兩兩都在容差內的群不會超過）。
+    # 不用外接盒對角線：三點兩兩相距不到容差時，外接盒對角線仍可能超過容差而誤擋。
+    # 代價：代表點剛好在一串接力中間時，群內兩點最多差到兩倍容差（0.2 毫米）不會被擋，幾何上無影響。
+    reach = np.linalg.norm(points - points[roots], axis=1)
+    far = np.zeros(len(points), dtype=np.bool_)
+    np.logical_or.at(far, roots, reach > weld_m)
+    wide = far[roots]
     ids = roots.reshape(-1, 3)
     layers = {t.layer or "無材料子圖層" for t, affected in zip(triangles, wide[ids].any(axis=1), strict=True) if affected}
     return ids, layers
