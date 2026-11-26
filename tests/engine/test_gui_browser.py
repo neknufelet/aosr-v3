@@ -664,7 +664,9 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         reveal(page, "#speaker-right-x").fill(str(left[0]))
         page.locator("#speaker-right-y").fill(str(left[1]))
         recheck(page)
-        page.wait_for_function("() => document.querySelectorAll('#plan-legend li').length > 0")
+        # 等到畫的是搬完喇叭、加了 seat2 的那一次（只等「圖例有東西」不夠：上一次的圖例早就有內容，負載重時會拿舊圖比對）。
+        page.wait_for_function("""() => document.querySelector("#plan-legend li[data-id='receiver:seat2']")
+          && (document.querySelector("#plan-xy g[data-keys*='speaker:right']")?.dataset.keys ?? '').includes('receiver:left')""")
         scheme = page.evaluate("() => collect()")
         plan = page.request.post(f"{base}/api/plan", data=scheme).json()
         keys = {item["key"] for item in plan["speakers"] + plan["receivers"]}
