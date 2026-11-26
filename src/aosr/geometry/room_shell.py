@@ -38,9 +38,12 @@ IN_WALL_SPEAKER = "SPK_INWALL"
 SPEAKER_KINDS: tuple[str, ...] = ("SPK_BOOKSHELF", "SPK_FLOOR", IN_WALL_SPEAKER)
 MAIN_SEAT = "SEAT_MAIN"
 SEAT_KINDS: tuple[str, ...] = (MAIN_SEAT, "SEAT")
-# 射線法判斷點在不在封閉網格裡用的三個方向：分量刻意不整齊、彼此不相干，取多數決，
-# 避免某一個方向剛好擦過整齊的邊與頂點時數錯。
-_RAY_DIRECTIONS: tuple[Vec3, ...] = ((0.5773, 0.6129, 0.5397), (-0.4211, 0.8167, -0.3947), (0.7071, -0.2236, -0.6708))
+# 分量刻意不整齊；擦邊時還有其他方向可試，固定順序讓同一份檔每次得到相同判決。
+_RAY_DIRECTIONS: tuple[Vec3, ...] = (
+    (0.5773, 0.6129, 0.5397), (-0.4211, 0.8167, -0.3947), (0.7071, -0.2236, -0.6708),
+    (-0.8397, -0.4763, 0.2617), (0.3169, -0.9241, 0.2137), (0.1723, 0.3691, -0.9137),
+    (-0.2687, 0.1531, 0.9513), (0.8639, 0.2843, -0.4169), (-0.5917, -0.3473, -0.7279),
+)
 
 
 @dataclass(frozen=True)
@@ -146,11 +149,13 @@ def signed_volume(triangles: Sequence[LayerTriangle]) -> float:
     if not triangles:
         return 0.0
     corners = _corners(triangles)
+    # 封閉網格可任選四面體的共同頂點；移到網格第一個頂點，避免測量座標的大數相減吃掉體積。
+    corners = corners - corners[0, 0]
     return float(np.einsum("ij,ij->i", corners[:, 0], np.cross(corners[:, 1], corners[:, 2])).sum() / 6.0)
 
 
-def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> NDArray[np.int64]:
-    """(N, 3) 頂點編號：相距不到 ``weld_m`` 的頂點（可以接力）算同一點。
+def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> tuple[NDArray[np.int64], set[str]]:
+    """回傳 (N, 3) 頂點編號，以及焊在一起後整群跨度超過容差的圖層。
 
     用距離分群、不用四捨五入到格子：兩個只差一點點的頂點剛好落在格線兩邊時，格子法會把它們拆開。
     """
@@ -168,7 +173,14 @@ def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> NDArray[np.int64
         if a != b:
             parent[max(a, b)] = min(a, b)
     roots = np.array([root(i) for i in range(len(points))], dtype=np.int64)
-    return roots.reshape(-1, 3)
+    # 近鄰可以接力，故按最後的群量外接盒對角線，並找出該群接到的每一個圖層。
+    low, high = points.copy(), points.copy()
+    np.minimum.at(low, roots, points)
+    np.maximum.at(high, roots, points)
+    wide = np.linalg.norm(high - low, axis=1) > weld_m
+    ids = roots.reshape(-1, 3)
+    layers = {t.layer or "無材料子圖層" for t, affected in zip(triangles, wide[ids].any(axis=1), strict=True) if affected}
+    return ids, layers
 
 
 def _edges(ids: NDArray[np.int64]) -> list[tuple[int, int, int]]:
@@ -219,16 +231,14 @@ def _components(ids: NDArray[np.int64]) -> list[list[int]]:
     return list(groups.values())
 
 
-def _orientation_problems(triangles: Sequence[LayerTriangle], ids: NDArray[np.int64], inward: bool,
+def _orientation_problems(pieces: Sequence[Sequence[LayerTriangle]], inward: bool,
                           where: str, weld_m: float) -> list[Problem]:
     """每一塊各自判朝向：外殼要朝房內（體積為負）而且只能有一塊，房內實體每一塊都要朝外（體積為正）。"""
-    pieces = _components(ids)
     problems = []
     if inward and len(pieces) > 1:
         problems.append(Problem("shell_pieces", True, f"{where}分成 {len(pieces)} 塊互不相連的部分；"
                                 "外殼只能是一整塊，柱子、造型請放到 TREAT 圖層"))
-    for piece in pieces:
-        members = [triangles[i] for i in piece]
+    for members in pieces:
         volume = signed_volume(members)
         area = float(np.linalg.norm(_cross(_corners(members)), axis=1).sum() / 2.0)
         layers = "、".join(sorted({t.layer for t in members}))
@@ -242,40 +252,69 @@ def _orientation_problems(triangles: Sequence[LayerTriangle], ids: NDArray[np.in
     return problems
 
 
-def _mesh_problems(triangles: Sequence[LayerTriangle], inward: bool, where: str, weld_m: float) -> list[Problem]:
-    """封閉、相鄰一致都過了，才判每一塊的整體朝向。"""
-    ids = _weld(triangles, weld_m)
-    return _edge_problems(triangles, ids, where) or _orientation_problems(triangles, ids, inward, where, weld_m)
+def _check_mesh(triangles: Sequence[LayerTriangle], inward: bool, where: str,
+                weld_m: float) -> tuple[list[Problem], list[list[LayerTriangle]]]:
+    """封閉、相鄰一致都過了，才判每一塊的整體朝向；回傳同一組連通塊供內外判斷。"""
+    ids, wide_layers = _weld(triangles, weld_m)
+    pieces = [[triangles[i] for i in piece] for piece in _components(ids)]
+    problems = _edge_problems(triangles, ids, where)
+    if wide_layers:
+        problems.append(Problem("weld_spread", True, f"{where}有些頂點彼此差一點點但沒對齊，"
+                                f"在圖層：{'、'.join(sorted(wide_layers))}。請在 Rhino 用焊接或對齊頂點修正"))
+    if not problems:
+        problems.extend(_orientation_problems(pieces, inward, where, weld_m))
+    return problems, pieces
 
 
-def _parity(points: FloatArray, corners: FloatArray, direction: FloatArray) -> NDArray[np.bool_]:
-    """沿一個方向射出去，穿過奇數個面就在裡面。"""
+def _parity(points: FloatArray, corners: FloatArray, direction: FloatArray,
+            distance_tol: float) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+    """沿單位方向射線，分別回傳每個點的奇偶票與這一票是否乾淨。"""
     edge1, edge2 = corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]
+    normals = np.cross(edge1, edge2)
+    twice_area = np.linalg.norm(normals, axis=1)
     h = np.cross(direction, edge2)
     det = np.einsum("ij,ij->i", edge1, h)
-    usable = np.abs(det) > 1e-15
-    inv = np.where(usable, 1.0 / np.where(usable, det, 1.0), 0.0)
+    # 重心座標和夾角餘弦都是無因次量，留捨入餘裕才不會把邊上的點當成穩定交點。
+    slack = 1e-10
+    usable = np.abs(det) > slack * twice_area
+    parallel = ~usable & (twice_area > 0)
+    inv = np.divide(1.0, det, out=np.zeros_like(det), where=usable)
     result = np.zeros(len(points), dtype=np.bool_)
+    clean = np.ones(len(points), dtype=np.bool_)
     for index, point in enumerate(points):
         s = point - corners[:, 0]
         u = inv * np.einsum("ij,ij->i", s, h)
         q = np.cross(s, edge1)
         v = inv * (q @ direction)
         t = inv * np.einsum("ij,ij->i", edge2, q)
-        hits = usable & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
+        margin = np.minimum(np.minimum(u, v), 1 - (u + v))
+        hits = usable & (margin >= 0) & (t > 0)
         result[index] = int(hits.sum()) % 2 == 1
-    return result
+        near_hit = usable & (margin >= -slack) & (t >= -distance_tol)
+        grazing = near_hit & ((margin <= slack) | (t <= distance_tol))
+        plane_offset = np.abs(np.einsum("ij,ij->i", s, normals))
+        clean[index] = not (grazing.any() or (parallel & (plane_offset <= distance_tol * twice_area)).any())
+    return result, clean
 
 
-def _inside_mask(points: FloatArray, triangles: Sequence[LayerTriangle]) -> NDArray[np.bool_]:
-    """每個點在不在封閉網格裡：三個不相干的方向各射一次，取多數。
-
-    單一方向剛好擦過兩個三角形共用的邊時會數錯；三個方向同時擦邊的機會小到可以不管。
-    """
+def _inside_mask(points: FloatArray, triangles: Sequence[LayerTriangle], weld_m: float) -> NDArray[np.bool_]:
+    """每個點各自取前三條乾淨射線的多數決。"""
     corners = _corners(triangles)
-    votes = sum(_parity(points, corners, np.array(direction, dtype=np.float64)).astype(np.int64)
-                for direction in _RAY_DIRECTIONS)
-    return np.asarray(votes >= 2, dtype=np.bool_)
+    count = np.zeros(len(points), dtype=np.int64)
+    votes, all_votes = np.zeros_like(count), np.zeros_like(count)
+    # 這裡只辨認幾乎從面上出發的射線；距離取焊點容差的萬分之一，保留真正貼牆的判斷尺度。
+    distance_tol = weld_m * 1e-4
+    for direction in _RAY_DIRECTIONS:
+        pending = np.flatnonzero(count < 3)
+        if not pending.size:
+            break
+        unit = np.array(direction) / np.linalg.norm(direction)
+        inside, clean = _parity(points[pending], corners, unit, distance_tol)
+        all_votes[pending] += inside
+        votes[pending] += inside & clean
+        count[pending] += clean
+    # 極端情況：該點每個方向都不乾淨，才退回全方向的原始奇偶票；有乾淨票就只算那些票。
+    return np.where(count > 0, 2 * votes > count, 2 * all_votes > len(_RAY_DIRECTIONS))
 
 
 def _on_surface_mask(points: FloatArray, triangles: Sequence[LayerTriangle], tolerance_m: float) -> NDArray[np.bool_]:
@@ -301,7 +340,7 @@ def _on_surface_mask(points: FloatArray, triangles: Sequence[LayerTriangle], tol
 
 
 def _placement_problems(room: RoomShell, weld_m: float) -> list[Problem]:
-    """喇叭、座位：數量對、朝向有長度、位置在外殼裡、不在任何造型裡。"""
+    """喇叭、座位：數量對、朝向有長度、位置在外殼裡。"""
     problems = []
     if not room.speakers:
         problems.append(Problem("no_speaker", True, "模型裡沒有喇叭元件（元件名用 SPK_ 開頭）"))
@@ -316,15 +355,11 @@ def _placement_problems(room: RoomShell, weld_m: float) -> list[Problem]:
         return problems
     points = np.array([item.position for item in placements], dtype=np.float64)
     on_wall = _on_surface_mask(points, room.shell, weld_m)
-    inside_shell = _inside_mask(points, room.shell) & ~on_wall
+    inside_shell = _inside_mask(points, room.shell, weld_m) & ~on_wall
     for item, inside, flush in zip(placements, inside_shell, on_wall, strict=True):
         # 嵌牆喇叭的聲學中心本來就在牆面上，貼著外殼也算數；其餘要真的在房內。
         if not (inside or (flush and item.kind == IN_WALL_SPEAKER)):
             problems.append(Problem("placement_outside", True, f"{_label(item)}不在房間裡面"))
-    for solid in room.solids:
-        for item, inside in zip(placements, _inside_mask(points, solid.triangles), strict=True):
-            if inside:
-                problems.append(Problem("placement_in_solid", True, f"{_label(item)}在造型「{solid.name}」裡面"))
     return problems
 
 
@@ -337,13 +372,27 @@ def _label(item: Placement) -> str:
 def _solid_problems(room: RoomShell, settings: RoomShellImportSettings) -> list[Problem]:
     """每個造型自己封閉、朝外、而且整塊在外殼裡（貼著外殼的頂點也算在裡面）。"""
     problems = []
+    placements = (*room.speakers, *room.seats)
+    centers = np.array([item.position for item in placements], dtype=np.float64)
     for solid in room.solids:
         where = f"造型「{solid.name}」"
-        problems.extend(_mesh_problems(solid.triangles, False, where, settings.weld_m))
+        if not solid.triangles:
+            # 其他匯入入口也能直接建立造型，空造型沒有任何面可供驗證。
+            problems.append(Problem("empty_solid", True, f"{where}沒有面，請在 Rhino 補上封閉網格"))
+            continue
+        mesh_problems, pieces = _check_mesh(solid.triangles, False, where, settings.weld_m)
+        problems.extend(mesh_problems)
         if not room.shell:
             continue
+        # 一個造型可以含多個封閉塊；重疊區在兩塊材料裡，分塊判再取聯集才不會把交點抵消。
+        buried = np.zeros(len(placements), dtype=np.bool_)
+        for piece in pieces:
+            buried |= _inside_mask(centers, piece, settings.weld_m)
+        for item, inside_solid in zip(placements, buried, strict=True):
+            if inside_solid:
+                problems.append(Problem("placement_in_solid", True, f"{_label(item)}在{where}裡面"))
         points = _corners(solid.triangles).reshape(-1, 3)
-        inside = _inside_mask(points, room.shell) | _on_surface_mask(points, room.shell, settings.weld_m)
+        inside = _inside_mask(points, room.shell, settings.weld_m) | _on_surface_mask(points, room.shell, settings.weld_m)
         if not bool(inside.all()):
             problems.append(Problem("solid_outside", True, f"{where}有一部分跑到房間外面"))
     return problems
@@ -417,19 +466,30 @@ def check_room_shell(room: RoomShell, settings: RoomShellImportSettings) -> Impo
         problems.append(Problem("units", True, f"模型單位是「{room.units}」，要用公尺"))
     if not room.shell:
         problems.append(Problem("no_shell", True, "模型裡沒有房間外殼（ROOM 圖層底下沒有面）"))
-    else:
-        problems.extend(_mesh_problems(room.shell, True, "房間外殼", settings.weld_m))
+    problems.extend(Problem("skipped", False, f"略過：{note}") for note in room.skipped)
+    if room.unreadable:
+        problems.append(Problem("unreadable", True, f"這些物件讀不了：{'；'.join(room.unreadable)}"))
+    every = (*room.shell, *(t for solid in room.solids for t in solid.triangles))
+    # 先驗原始座標；非有限數會讓焊點的空間索引拋例外，也會讓射線、面積與方向的比較失去意義。
+    invalid_faces = np.flatnonzero(~np.isfinite(_corners(every)).all(axis=(1, 2)))
+    if invalid_faces.size:
+        layers = sorted({every[i].layer or "無材料子圖層" for i in invalid_faces})
+        problems.append(Problem("bad_coordinates", True, f"這些圖層的面有無效的頂點座標：{'、'.join(layers)}"))
+    bad_placements = [item for item in (*room.speakers, *room.seats)
+                      if not all(math.isfinite(x) for x in (*item.position, *item.facing))]
+    problems.extend(Problem("bad_placement", True, f"{_label(item)}的位置或朝向含無效數值") for item in bad_placements)
+    if bad_placements or invalid_faces.size:
+        return ImportReport(tuple(problems), (), 0, ())
+    if room.shell:
+        shell_problems, _ = _check_mesh(room.shell, True, "房間外殼", settings.weld_m)
+        problems.extend(shell_problems)
     problems.extend(_solid_problems(room, settings))
     problems.extend(_placement_problems(room, settings.weld_m))
-    every = (*room.shell, *(t for solid in room.solids for t in solid.triangles))
     problems.extend(_tiny_problems(every, settings.min_triangle_area_m2) if every else [])
     groups = plane_groups(every, settings.coplanar_angle_deg, settings.coplanar_offset_m)
     if len(groups) > settings.max_planes:
         problems.append(Problem("too_many_planes", True, f"合併同一平面之後還有 {len(groups)} 個面，"
                                 f"上限是 {settings.max_planes} 個；請在 Rhino 裡簡化模型"))
-    problems.extend(Problem("skipped", False, f"略過：{note}") for note in room.skipped)
-    if room.unreadable:
-        problems.append(Problem("unreadable", True, f"這些物件讀不了：{'；'.join(room.unreadable)}"))
     unnamed = sum(1 for triangle in every if not triangle.layer)
     if unnamed:
         problems.append(Problem("no_material_layer", True, f"有 {unnamed} 個面直接放在 ROOM 或 TREAT 上層，"

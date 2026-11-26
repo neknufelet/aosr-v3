@@ -13,9 +13,10 @@ import rhino3dm
 
 from aosr.config.paths import config_path
 from aosr.config.room_shell_import import RoomShellImportSettings, load_room_shell_import_settings
+from aosr.geometry import room_shell
 from aosr.geometry.rhino_room import RhinoRoomError, read_rhino_room
 from aosr.geometry.room_shell import (
-    LayerTriangle, Placement, RoomShell, Solid, Vec3, check_room_shell, plane_groups, signed_volume,
+    ImportReport, LayerTriangle, Placement, RoomShell, Solid, Vec3, check_room_shell, plane_groups, signed_volume,
 )
 
 
@@ -53,8 +54,10 @@ def good_room() -> RoomShell:
     return RoomShell("m", shell, (cloud,), speakers, seats)
 
 
-def codes(room: RoomShell, settings: RoomShellImportSettings) -> set[str]:
-    return {problem.code for problem in check_room_shell(room, settings).problems}
+def assert_blocked(report: ImportReport, code: str) -> None:
+    # 警告也能帶同一個代號，必須同時核對這一項和整份報告的判決。
+    assert any(p.code == code and p.blocking is True for p in report.problems), report.problems
+    assert report.ok is False
 
 
 def test_good_box_room_passes_with_hand_counted_facts(settings: RoomShellImportSettings) -> None:
@@ -80,69 +83,78 @@ def test_parallel_pairs_face_each_other(settings: RoomShellImportSettings) -> No
 def test_hole_in_shell_is_blocked(settings: RoomShellImportSettings) -> None:
     room = good_room()
     broken = replace(room, shell=room.shell[1:])
-    assert "not_closed" in codes(broken, settings)
-    assert not check_room_shell(broken, settings).ok
+    assert_blocked(check_room_shell(broken, settings), "not_closed")
 
 
 def test_one_flipped_face_is_blocked(settings: RoomShellImportSettings) -> None:
     room = good_room()
     first = room.shell[0]
     flipped = replace(room, shell=(LayerTriangle(first.layer, first.a, first.c, first.b), *room.shell[1:]))
-    assert "inconsistent_faces" in codes(flipped, settings)
+    assert_blocked(check_room_shell(flipped, settings), "inconsistent_faces")
 
 
 def test_whole_shell_flipped_is_blocked(settings: RoomShellImportSettings) -> None:
     room = good_room()
     outward = replace(room, shell=box(0, 0, 0, 5, 4, 3, "Wall", inward=False))
-    assert "faces_flipped" in codes(outward, settings)
+    assert_blocked(check_room_shell(outward, settings), "faces_flipped")
 
 
 def test_solid_facing_inward_is_blocked(settings: RoomShellImportSettings) -> None:
     room = good_room()
     inward_cloud = replace(room, solids=(Solid("cloud", box(1, 1, 2.5, 3, 3, 2.54, "Cloud", inward=True)),))
-    assert "faces_flipped" in codes(inward_cloud, settings)
+    assert_blocked(check_room_shell(inward_cloud, settings), "faces_flipped")
 
 
 def test_solid_poking_out_of_room_is_blocked(settings: RoomShellImportSettings) -> None:
     room = good_room()
     poking = replace(room, solids=(Solid("cloud", box(1, 1, 2.9, 3, 3, 3.2, "Cloud", inward=False)),))
-    assert "solid_outside" in codes(poking, settings)
+    assert_blocked(check_room_shell(poking, settings), "solid_outside")
 
 
 def test_panel_touching_wall_counts_as_inside(settings: RoomShellImportSettings) -> None:
     room = good_room()
     panel = Solid("panel", box(0, 1, 0.5, 0.1, 3, 2.0, "Panel", inward=False))
-    assert codes(replace(room, solids=(*room.solids, panel)), settings) == set()
+    assert check_room_shell(replace(room, solids=(*room.solids, panel)), settings).problems == ()
 
 
 def test_speaker_outside_or_inside_solid_is_blocked(settings: RoomShellImportSettings) -> None:
     room = good_room()
     outside = replace(room, speakers=(Placement("SPK_FLOOR", (6.0, 2.0, 1.0), (1.0, 0.0, 0.0)),))
-    assert "placement_outside" in codes(outside, settings)
+    assert_blocked(check_room_shell(outside, settings), "placement_outside")
     buried = replace(room, speakers=(Placement("SPK_FLOOR", (2.0, 2.0, 2.52), (1.0, 0.0, 0.0)),))
-    assert "placement_in_solid" in codes(buried, settings)
+    assert_blocked(check_room_shell(buried, settings), "placement_in_solid")
 
 
 def test_seats_and_speakers_must_exist(settings: RoomShellImportSettings) -> None:
     room = good_room()
-    assert {"no_speaker", "main_seat_count"} <= codes(replace(room, speakers=(), seats=()), settings)
+    missing = check_room_shell(replace(room, speakers=(), seats=()), settings)
+    assert_blocked(missing, "no_speaker")
+    assert_blocked(missing, "main_seat_count")
     no_facing = replace(room, seats=(Placement("SEAT_MAIN", (3.5, 2.0, 1.2), (0.0, 0.0, 0.0)),))
-    assert "no_facing" in codes(no_facing, settings)
+    assert_blocked(check_room_shell(no_facing, settings), "no_facing")
 
 
 def test_units_layers_and_unreadable_objects(settings: RoomShellImportSettings) -> None:
     room = good_room()
-    assert "units" in codes(replace(room, units="Millimeters"), settings)
+    assert_blocked(check_room_shell(replace(room, units="Millimeters"), settings), "units")
     unnamed = replace(room, shell=box(0, 0, 0, 5, 4, 3, "", inward=True))
-    assert "no_material_layer" in codes(unnamed, settings)
-    assert "unreadable" in codes(replace(room, unreadable=("牆（Brep）",)), settings)
+    assert_blocked(check_room_shell(unnamed, settings), "no_material_layer")
+    assert_blocked(check_room_shell(replace(room, unreadable=("牆（Brep）",)), settings), "unreadable")
     skipped = check_room_shell(replace(room, skipped=("家具",)), settings)
     assert skipped.ok and {p.code for p in skipped.problems} == {"skipped"}
 
 
+def test_units_and_flipped_faces_each_block_import(settings: RoomShellImportSettings) -> None:
+    # 兩個錯誤同時存在時，只看 report.ok 會漏掉其中一個被降成提醒。
+    shell = box(0, 0, 0, 5, 4, 3, "Wall", inward=False)
+    report = check_room_shell(replace(good_room(), shell=shell, units="Millimeters"), settings)
+    assert_blocked(report, "units")
+    assert_blocked(report, "faces_flipped")
+
+
 def test_plane_limit_and_tiny_faces(settings: RoomShellImportSettings) -> None:
     room = good_room()
-    assert "too_many_planes" in codes(room, settings.model_copy(update={"max_planes": 11}))
+    assert_blocked(check_room_shell(room, settings.model_copy(update={"max_planes": 11})), "too_many_planes")
     speck = Solid("speck", box(2, 2, 1, 2.005, 2.005, 1.005, "Speck", inward=False))
     report = check_room_shell(replace(room, solids=(*room.solids, speck)), settings)
     assert {p.code for p in report.problems} == {"tiny_faces"}
@@ -164,6 +176,15 @@ def test_owner_test_room_reads_and_passes(settings: RoomShellImportSettings) -> 
     assert [len(solid.triangles) for solid in room.solids] == [12]
     assert [s.kind for s in room.speakers] == ["SPK_BOOKSHELF", "SPK_BOOKSHELF"]
     assert [s.kind for s in room.seats] == ["SEAT_MAIN"]
+    # 由檔內各元件的變換矩陣讀出平移與 +Y 欄，釘住三個元件各自的位置和朝向。
+    expected_poses = (
+        ((1.160823941230774, 2.9000000953674316, 1.1000001430511475), (0.911921501159668, -0.41036468744277954, 0.0)),
+        ((1.160823941230774, 1.1000001430511475, 1.1000001430511475), (0.911921501159668, 0.41036468744277954, 0.0)),
+        ((3.1608235836029053, 2.0, 1.1999999284744263), (-1.0, 4.832871947314723e-16, 0.0)),
+    )
+    for item, (position, facing) in zip((*room.speakers, *room.seats), expected_poses, strict=True):
+        assert item.position == pytest.approx(position, rel=0, abs=1e-9)
+        assert item.facing == pytest.approx(facing, rel=0, abs=1e-9)
     report = check_room_shell(room, settings)
     assert report.ok, report.problems
     assert report.plane_count == 32
@@ -222,7 +243,7 @@ def test_block_members_and_loose_speaker_objects(settings: RoomShellImportSettin
     room = read_rhino_room(edited, settings.max_file_bytes)
     assert [len(solid.triangles) for solid in room.solids] == [12]
     assert len(room.unreadable) == 1 and "SPEAKER" in room.unreadable[0]
-    assert "unreadable" in codes(room, settings)
+    assert_blocked(check_room_shell(room, settings), "unreadable")
 
 
 def test_unknown_speaker_block_blocks(settings: RoomShellImportSettings, tmp_path: Path) -> None:
@@ -242,30 +263,30 @@ def test_unknown_speaker_block_blocks(settings: RoomShellImportSettings, tmp_pat
     room = read_rhino_room(edited, settings.max_file_bytes)
     assert len(room.speakers) == 2
     assert len(room.unreadable) == 1 and "SPK_BOOKSHELF" in room.unreadable[0]
-    assert not check_room_shell(room, settings).ok
+    assert_blocked(check_room_shell(room, settings), "unreadable")
 
 
 def test_every_disconnected_piece_is_judged(settings: RoomShellImportSettings) -> None:
     room = good_room()
     stray = box(10, 10, 0, 11, 11, 1, "Wall", inward=True)
-    assert "shell_pieces" in codes(replace(room, shell=(*room.shell, *stray)), settings)
+    assert_blocked(check_room_shell(replace(room, shell=(*room.shell, *stray)), settings), "shell_pieces")
     mixed = Solid("cloud", (*room.solids[0].triangles, *box(2, 2, 1, 2.5, 2.5, 1.5, "Cloud", inward=True)))
-    assert "faces_flipped" in codes(replace(room, solids=(mixed,)), settings)
+    assert_blocked(check_room_shell(replace(room, solids=(mixed,)), settings), "faces_flipped")
 
 
 def test_in_wall_speaker_may_sit_on_the_wall(settings: RoomShellImportSettings) -> None:
     room = good_room()
     flush = Placement("SPK_INWALL", (0.0, 2.0, 1.2), (1.0, 0.0, 0.0))
-    assert codes(replace(room, speakers=(flush,)), settings) == set()
+    assert check_room_shell(replace(room, speakers=(flush,)), settings).problems == ()
     floating = Placement("SPK_BOOKSHELF", (0.0, 2.0, 1.2), (1.0, 0.0, 0.0))
-    assert "placement_outside" in codes(replace(room, speakers=(floating,)), settings)
+    assert_blocked(check_room_shell(replace(room, speakers=(floating,)), settings), "placement_outside")
 
 
 def test_points_whose_ray_grazes_a_shared_edge_stay_inside(settings: RoomShellImportSettings) -> None:
     # 審查實測：這一點用舊的單一方向會擦過天花對角線、被判成在房外。
     room = good_room()
     seat = Placement("SEAT_MAIN", (2.09589, 1.57097, 2.62221), (-1.0, 0.0, 0.0))
-    assert "placement_outside" not in codes(replace(room, seats=(seat,)), settings)
+    assert check_room_shell(replace(room, seats=(seat,)), settings).ok
 
 
 def test_weld_tolerates_noise_across_grid_lines(settings: RoomShellImportSettings) -> None:
@@ -275,7 +296,7 @@ def test_weld_tolerates_noise_across_grid_lines(settings: RoomShellImportSetting
         for i, t in enumerate(shifted))
     room = replace(good_room(), shell=noisy, solids=(), speakers=(Placement("SPK_FLOOR", (2.0, 1.0, 1.0), (1.0, 0.0, 0.0)),),
                    seats=(Placement("SEAT_MAIN", (4.0, 2.0, 1.2), (-1.0, 0.0, 0.0)),))
-    assert codes(room, settings) == set()
+    assert check_room_shell(room, settings).problems == ()
 
 
 def test_plane_grouping_does_not_depend_on_where_the_model_sits(settings: RoomShellImportSettings) -> None:
@@ -293,4 +314,164 @@ def test_flat_closed_solid_is_zero_volume(settings: RoomShellImportSettings) -> 
     room = good_room()
     # 厚 0.15 毫米：比焊點距離大（面不會被焊在一起），體積卻小到等於零。
     flat = Solid("flat", box(1, 1, 1, 2, 2, 1.00015, "Flat", inward=False))
-    assert "zero_volume" in codes(replace(room, solids=(*room.solids, flat)), settings)
+    assert_blocked(check_room_shell(replace(room, solids=(*room.solids, flat)), settings), "zero_volume")
+
+
+@pytest.mark.parametrize(("width", "thickness", "flipped", "volume", "blocker"), [
+    (.1, .04, False, .0004, None), (.1, .04, True, -.0004, "faces_flipped"),
+    (1., .00015, False, .00015, "zero_volume"),
+], ids=["outward", "inward", "flat"])
+def test_survey_coordinates_preserve_panel_volume_and_orientation(
+    settings: RoomShellImportSettings, width: float, thickness: float, flipped: bool, volume: float, blocker: str | None,
+) -> None:
+    # 方板移到測量座標後，手算的面積乘厚度、翻面和近零體積的判決都應相同。
+    x, y, z = 500000, 2750000, 100
+    panel = box(x + 1, y + 1, z + 1, x + 1 + width, y + 1 + width, z + 1 + thickness, "Panel", inward=flipped)
+    room = good_room()
+    room = replace(room, shell=box(x, y, z, x + 5, y + 4, z + 3, "Wall", inward=True), solids=(Solid("panel", panel),),
+                   speakers=(replace(room.speakers[0], position=(x + 1, y + 3, z + 1.1)),),
+                   seats=(replace(room.seats[0], position=(x + 3.5, y + 2, z + 1.2)),))
+    report = check_room_shell(room, settings)
+    if blocker is None:
+        assert report.ok, report.problems
+    else:
+        assert_blocked(report, blocker)
+    assert signed_volume(panel) == pytest.approx(volume, rel=1e-8)
+
+
+@pytest.mark.parametrize(("bounds", "speaker", "inside"), [
+    ((-.105275, .0625, -.098675, .144325, 1., .134925), (.02, .3, .03), False),
+    ((-.105275, -1., -.098675, .28865, .30645, .6), (.02, 0., .03), True),
+], ids=["outside", "inside"])
+def test_two_grazing_rays_do_not_decide_the_seat(settings: RoomShellImportSettings,
+                                                 bounds: tuple[float, float, float, float, float, float],
+                                                 speaker: Vec3, inside: bool) -> None:
+    # 前兩條射線都擦共用邊；由盒子三軸的上下界可直接判原點在不在裡面。
+    room = good_room()
+    room = replace(room, shell=box(*bounds, "Wall", inward=True), solids=(),
+                   speakers=(replace(room.speakers[0], position=speaker),),
+                   seats=(replace(room.seats[0], position=(0., 0., 0.)),))
+    report = check_room_shell(room, settings)
+    if inside:
+        assert report.ok, report.problems
+    else:
+        assert_blocked(report, "placement_outside")
+        assert all("座位" in p.text for p in report.problems if p.code == "placement_outside")
+
+
+def test_each_placement_uses_its_own_clean_rays(settings: RoomShellImportSettings, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 前六個方向從喇叭射出會擦天花的 x=y 對角線，第七個從座位射出會擦側牆的 y=z 對角線。
+    directions = tuple((d, d, 1.) for d in (-.25, -.125, -.0625, .0625, .125, .25)) + ((1., .125, .125),)
+    monkeypatch.setattr(room_shell, "_RAY_DIRECTIONS", directions)
+    room = good_room()
+    room = replace(room, shell=box(0, 0, 0, 1, 1, 1, "Wall", inward=True), solids=(),
+                   speakers=(replace(room.speakers[0], position=(.25, .25, .5)),),
+                   seats=(replace(room.seats[0], position=(.25, .625, .625)),))
+    report = check_room_shell(room, settings)
+    assert report.ok, report.problems
+
+
+def test_seat_in_overlapping_pieces_of_one_solid_is_blocked(settings: RoomShellImportSettings) -> None:
+    a = box(1, 1, .5, 3, 3, 2.5, "foam", inward=False)
+    b = box(2, 1.5, .75, 4, 3.5, 2.75, "foam", inward=False)
+    room = good_room()
+    room = replace(room, solids=(Solid("foam", a + b),), speakers=(replace(room.speakers[0], position=(.3, .4, 1)),),
+                   seats=(replace(room.seats[0], position=(2.5, 2, 1.5)),))
+    report = check_room_shell(room, settings)
+    assert_blocked(report, "placement_in_solid")
+    buried, = (p for p in report.problems if p.code == "placement_in_solid")
+    assert "SEAT_MAIN" in buried.text and "foam" in buried.text
+
+
+def test_chained_weld_reports_affected_layers(settings: RoomShellImportSettings) -> None:
+    room = good_room()
+    steps = iter(i * .00009 for i in range(6))
+    shell = tuple(LayerTriangle("Floor" if i < 2 else t.layer,
+                                *((next(steps), 0., 0.) if p == (0, 0, 0) else p for p in (t.a, t.b, t.c)))
+                  for i, t in enumerate(room.shell))
+    report = check_room_shell(replace(room, shell=shell), settings)
+    assert_blocked(report, "weld_spread")
+    text = next(p.text for p in report.problems if p.code == "weld_spread")
+    assert "Floor" in text and "Wall" in text
+
+
+@pytest.mark.parametrize("layer", ["ROOM::Wall_乳膠漆", "TREAT::Cloud_木板"], ids=["room", "treat"])
+def test_faceless_mesh_is_unreadable(settings: RoomShellImportSettings, tmp_path: Path, layer: str) -> None:
+    model = rhino3dm.File3dm.Read(str(TEST_ROOM))
+    assert model is not None
+    attrs = rhino3dm.ObjectAttributes()
+    attrs.LayerIndex, attrs.Name = _layer_index(model, layer), "faceless"
+    mesh = rhino3dm.Mesh()
+    mesh.Vertices.Add(1., 1., 1.)
+    objects = model.Objects
+    assert hasattr(objects, "AddMesh")  # 寫考題用的 API 超出匯入器唯讀存根的範圍。
+    objects.AddMesh(mesh, attrs)
+    edited = tmp_path / "faceless.3dm"
+    assert model.Write(str(edited), 8)
+    room = read_rhino_room(edited, settings.max_file_bytes)
+    assert any("faceless" in note and "沒有面" in note for note in room.unreadable)
+    assert_blocked(check_room_shell(room, settings), "unreadable")
+
+
+def test_empty_solid_from_another_importer_is_blocked(settings: RoomShellImportSettings) -> None:
+    room = replace(good_room(), solids=(Solid("empty", ()),))
+    assert_blocked(check_room_shell(room, settings), "empty_solid")
+
+
+def test_rhino_speaker_with_nan_facing_is_blocked(settings: RoomShellImportSettings, tmp_path: Path) -> None:
+    model = rhino3dm.File3dm.Read(str(TEST_ROOM))
+    assert model is not None
+    attrs = rhino3dm.ObjectAttributes()
+    attrs.LayerIndex = _layer_index(model, "SPEAKER")
+    reference = next(obj.Geometry for obj in model.Objects if obj.Attributes.LayerIndex == attrs.LayerIndex
+                     and isinstance(obj.Geometry, rhino3dm.InstanceReference))
+    transform = rhino3dm.Transform.Translation(2., 1., 1.)
+    transform.M01 = float("nan")
+    model.Objects.AddInstanceObject(rhino3dm.InstanceReference(reference.ParentIdefId, transform), attrs)
+    edited = tmp_path / "nan-facing.3dm"
+    assert model.Write(str(edited), 8)
+    room = read_rhino_room(edited, settings.max_file_bytes)
+    assert_blocked(check_room_shell(room, settings), "bad_placement")
+
+
+@pytest.mark.parametrize("speaker", [True, False], ids=["speaker", "seat"])
+@pytest.mark.parametrize("position", [True, False], ids=["position", "facing"])
+def test_nonfinite_placement_is_blocked(settings: RoomShellImportSettings, speaker: bool, position: bool) -> None:
+    room = good_room()
+    item = room.speakers[0] if speaker else room.seats[0]
+    bad = replace(item, position=(1., float("inf"), 1.)) if position else replace(item, facing=(0., 1., float("nan")))
+    room = replace(room, speakers=(bad,)) if speaker else replace(room, seats=(bad,))
+    assert_blocked(check_room_shell(room, settings), "bad_placement")
+
+
+@pytest.mark.parametrize("shell", [True, False], ids=["shell-nan", "solid-inf"])
+def test_nonfinite_vertex_is_blocked_before_geometry(settings: RoomShellImportSettings, shell: bool) -> None:
+    room = good_room()
+    if shell:
+        room = replace(room, shell=(replace(room.shell[0], b=(1., float("nan"), 1.)), *room.shell[1:]))
+    else:
+        solid, = room.solids
+        faces = (*solid.triangles[:-1], replace(solid.triangles[-1], c=(1., 1., float("inf"))))
+        room = replace(room, solids=(replace(solid, triangles=faces),))
+    report = check_room_shell(room, settings)
+    assert_blocked(report, "bad_coordinates")
+    assert (report.plane_count, report.area_by_layer, report.parallel_pairs) == (0, (), ())
+
+
+def test_nonmanifold_shell_edge_is_blocked(settings: RoomShellImportSettings) -> None:
+    # 重複一面使它的三條邊各接三面；只驗破洞的考題漏得過這種未封閉。
+    room = good_room()
+    assert_blocked(check_room_shell(replace(room, shell=(*room.shell, room.shell[0])), settings), "not_closed")
+
+
+def test_millimeter_file_is_blocked_on_readback(settings: RoomShellImportSettings, tmp_path: Path) -> None:
+    model = rhino3dm.File3dm.Read(str(TEST_ROOM))
+    assert model is not None
+    units = rhino3dm.UnitSystem
+    assert hasattr(units, "Millimeters")  # 存根只列匯入器用到的 Meters，考題用真套件寫毫米檔。
+    model.Settings.ModelUnitSystem = units.Millimeters
+    edited = tmp_path / "millimeters.3dm"
+    assert model.Write(str(edited), 8)
+    room = read_rhino_room(edited, settings.max_file_bytes)
+    assert room.units == "Millimeters"
+    assert_blocked(check_room_shell(room, settings), "units")

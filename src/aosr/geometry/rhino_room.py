@@ -95,6 +95,9 @@ def read_rhino_room(path: Path, max_file_bytes: int) -> RoomShell:
             if not isinstance(geometry, rhino3dm.Mesh):
                 unreadable.append(f"{_object_label(obj, full_path)}（{type(geometry).__name__}，這一版只讀網格，"
                                   "請在 Rhino 用 Mesh 指令轉成網格再存）")
+            elif len(geometry.Faces) == 0:
+                # 零面的網格也能存進 .3dm；拆成三角形前先記下物件，外殼或造型才不會靜靜消失。
+                unreadable.append(f"{_object_label(obj, full_path)}（這個網格沒有面，請在 Rhino 補上網格面）")
             elif top == SHELL_LAYER:
                 shell.extend(mesh_triangles(geometry, material))
             else:
