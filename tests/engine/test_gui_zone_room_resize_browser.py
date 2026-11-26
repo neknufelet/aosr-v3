@@ -8,6 +8,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_fold
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import RUN_ID, _open, _save, _serve, browser as browser, result as result
@@ -42,7 +43,6 @@ def test_resize_saves_each_original_zone(tmp_path: Path, browser: Browser, axis:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, SAMPLE)
-        page.locator("#zone-table-fold > summary").click()
         page.locator("#room-" + axis).fill(str(value))
         page.locator("#room-" + axis).press("Tab")
         page.wait_for_function("!pendingRoomResize()")
@@ -56,8 +56,12 @@ def test_resize_saves_each_original_zone(tmp_path: Path, browser: Browser, axis:
         assert saved["scene"]["surface_zones_by_wall"] == expected
         assert json.loads(design.read_text())["zones"] == settings["zones"]
         if axis == "Lz":
-            expect(page.locator("#zoned-list-yL li").first).to_contain_text("v 0–3.2 公尺")
+            # #1265 單元 3 起分區的牆每一區列在第 2 段右欄「每一區的位置與大小」（選中那一面才列；寫寬 × 高，不寫 u／v）：
+            # 先點前牆再看第一區（z1，原本落地到頂）的高跟著變成 3.2。
             page.locator("#elevation-wall-yL").click()
+            open_fold(page, "zone-numbers-fold")  # 摺疊預設收著：點開、看得見才算（審查：收著時 to_contain_text 也讀得到字）
+            expect(page.locator("#zoned-list-yL #zone-size-yL-z1")).to_be_visible()
+            expect(page.locator("#zoned-list-yL #zone-size-yL-z1")).to_contain_text("× 3.2")
             page.locator("#elevation-panel").screenshot(path=tmp_path / "front-saved.png")
 
 
@@ -67,7 +71,6 @@ def test_shrink_keeps_blocked_wall_and_names_its_zone(tmp_path: Path, browser: B
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, SAMPLE)
-        page.locator("#zone-table-fold > summary").click()
         page.locator("#elevation-wall-xL").click()
         right = _zones(page, "xL")
         page.locator("#room-Ly").fill("5.25")  # 右牆窗旁 auto4 剩 0.15 公尺；地毯放得下
@@ -119,7 +122,7 @@ def _returned(page: Page, name: str = SAMPLE) -> None:
     for axis, value in (("Lx", "5.2"), ("Ly", "5.5"), ("Lz", "3.15")):
         expect(page.locator("#room-" + axis)).to_have_value(value)
     expect(page.locator("#zone-page")).to_be_hidden()
-    expect(page.locator("#open-scheme")).to_be_in_viewport()
+    expect(page.locator("#scheme-menu-button")).to_be_in_viewport()
 
 
 def test_return_from_gradient_opens_saved_input(tmp_path: Path, browser: Browser) -> None:

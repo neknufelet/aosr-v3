@@ -7,7 +7,6 @@ let elevationWall = null;
 let elevationSelected = null;
 let elevationThin = [];
 let mirrorWarning = null;
-let minLimitsGeneration = 0;
 let movingText = "";
 let showSelectionBanner = false;
 let bannerOwner = null;  // 說明條是哪一份方案上講的；換方案或對稱關掉就清（#1274）
@@ -158,10 +157,11 @@ async function applyRoomResize(live, request) {
       window.zoneOverviewResized(wall, zone, next);
       Object.assign(zone, next);
     }
-    const row = $(`wall-editor-${wall}`);
-    row.replaceChildren();
-    renderZonedWall(wall, row);
   }
+  // 每一區的新座標由下面重畫立面圖時一起寫進第 2 段右欄「每一區的位置與大小」（#1265 單元 3：牆面表單不再列分區的牆）。
+  // 先畫後問（同 applyCut）：上一版判決對的是舊尺寸；走到這裡 request 還是最新那一次，resizeRoom 的 finally 一定接著重問
+  // （#1265 單元 3 之二收尾追加第 4 條順手查到的）。
+  staleZoneLimits();
   renderElevation();
   window.renderZoneOverview();
 }
@@ -171,7 +171,9 @@ function resizeRoom() {
   const zones = scheme.scene.surface_zones_by_wall;
   const room = roomDimensions();
   const pending = room && zones && Object.values(zones).some(entries => entries[0].area === "rectangle");
-  const editors = ["walls", "elevation", "elevation-selected", "elevation-zones"].map($);
+  // 第 2 段的清掉／復原那一格與右欄清單（「改這一區 ▸」）也一起鎖（#1265 單元 3 審查設計洞 3：同時點會跟調尺寸改同一份分區）。
+  // 舊做法表（elevation-zones）拆了（#1265 單元 3 之二第二趟），不在這張單上。
+  const editors = ["walls", "elevation", "elevation-selected", "elevation-clear-slot", "elevation-list"].map($);
   // 框的拖曳起點、數字欄與牆面材料要等新座標，房間尺寸格仍可繼續改。
   for (const editor of editors) editor.inert = Boolean(pending);
   if (!pending) { refreshZoneLimits(); return; }
@@ -201,13 +203,17 @@ function resizeProblem(wall) {
 let pendingMirror = null;
 window.pendingMirrorCut = () => pendingMirror;
 
-async function cutWall(wall, boxes, done, change, repairing = false) {
+// cut：真的切了之後、等圖面檢查之前要同步做的事（清掉的復原快照在這裡記：applyCut 結束時頁面已解鎖，等 /api/plan 的空檔
+// 人可以改別格，等檢查回來才記就會把改完的樣子當成清掉後那一刻，檢查丟錯則整個沒記到；#1265 單元 3 審查設計洞 1）。
+async function cutWall(wall, boxes, done, change, repairing = false, cut = null) {
   const mirror = change && window.zoneSymmetry.isOn() ? change : null;
   const applied = applyCut(wall, boxes, done, mirror, repairing);
   if (mirror && !pendingMirror) pendingMirror = applied;
   let changed;
   try { changed = await applied; } finally { if (pendingMirror === applied) pendingMirror = null; }
+  if (changed) cut?.();
   if (changed) await refreshPlan();
+  return Boolean(changed);  // 清掉這一面的切法要知道真的切了沒（沒切就不給復原）
 }
 
 function cutZoneLabel(surface, wall) {
@@ -238,6 +244,10 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
       return;
     }
     const changes = mirror ? data.walls : {[wall]: data};
+    // 底下先改寫分區、renderWalls 先畫、判決後問：上一版判決（配對、上限）對的是切之前，改寫第一格之前就標好（#1265 單元 3 之二
+    // 第二趟追加第 1 條；收尾第二趟 D1 從改寫之後挪上來：中間組字那一段萬一丟錯，分區已經換了、判決卻還算新鮮）。
+    // 沒切到任何一面（changes 空的）不標：那一路不重問，標了會一直「核對中」。
+    if (Object.keys(changes).length) staleZoneLimits();
     if (Object.keys(changes).length && !scheme.scene.surface_zones_by_wall) {
       scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
       delete scheme.scene.impedance_pa_s_per_m_by_wall;
@@ -281,7 +291,6 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
         message, kind, blocked: data.blocked};
     }
     if (!Object.keys(changes).length) { renderElevation(); return; }
-    minLimitsGeneration = zoneLimitsGeneration + 1;
     changedWalls = changes;
     data = changes[wall] ?? Object.values(changes)[0];
     elevationThin = [];
@@ -345,7 +354,7 @@ function trackDrag(svg, event, move, complete, cancelled = () => {}) {
   svg.addEventListener("lostpointercapture", lost);
 }
 function symmetryResult() {
-  return window.zoneSymmetry.isOn() && zoneLimitsReceived >= minLimitsGeneration && zoneLimitsReceived === zoneLimitsGeneration ? zoneLimits?.symmetry : null;
+  return window.zoneSymmetry.isOn() && zoneLimitsFresh() ? zoneLimits.symmetry : null;
 }
 function mirrorBox(wall, box) {
   const result = symmetryResult();
@@ -466,7 +475,7 @@ function showSymmetry(svg, wall, g, layout) {
   const axis = node("g", {class: "mirror-axis"});
   axis.append(node("line", vertical ? {x1: x, x2: x, y1: pad, y2: pad + height * scale}
     : {x1: pad, x2: pad + width * scale, y1: y, y2: y}),
-    node("text", {x: vertical ? x + 5 : pad + 5, y: vertical ? pad + 15 : y - 5}, "對稱軸"));
+    node("text", {x: vertical ? x + 5 : pad + 5, y: vertical ? pad + 15 : y - 5}, MIRROR_LINE_WORDS));
   svg.append(axis);
   const drawn = new Map(drawnBoxes(wall).map(box => [wall + "@" + box.id, svgBox(views[wall], g, box)]));
   for (const [key, first] of drawn) {
@@ -494,7 +503,10 @@ function showSymmetry(svg, wall, g, layout) {
 function startDrawing(svg, event, geometry, view, wall) {
   const start = pointerMetres(svg, event, geometry);
   const preview = node("rect", {class: "zone-preview", x: 0, y: 0, width: 0, height: 0});
-  svg.append(preview);
+  // 拖的時候框旁的小字（#1265 單元 3）：吸附幾公分格、最小邊多少，跟著框的左上角走。
+  const hint = node("text", {class: "zone-preview-hint", x: 0, y: 0},
+    `框邊吸附 ${cutSpec().snap_m * 100} 公分格，最小邊 ${cutSpec().min_side_m * 100} 公分`);
+  svg.append(preview, hint);
   const corners = end => [Math.min(start[0], end[0]), Math.max(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[1], end[1])];
   const others = drawnBoxes(wall);
   const previewMirror = mirrorPreview(svg, wall, geometry);
@@ -508,11 +520,14 @@ function startDrawing(svg, event, geometry, view, wall) {
   const move = moved => {
     // 畫的就是吸過格點與邊、放開後要交出去的那一塊（#1274：不然鏡像預覽照吸過的框算，跟眼睛看到的對不上）。
     const box = snapped(...corners(pointerMetres(svg, moved, geometry)));
-    for (const [key, value] of Object.entries(svgBox(view, geometry, box))) preview.setAttribute(key, value);
+    const bounds = svgBox(view, geometry, box);
+    for (const [key, value] of Object.entries(bounds)) preview.setAttribute(key, value);
+    hint.setAttribute("x", String(bounds.x));
+    hint.setAttribute("y", String(Math.max(bounds.y - 6, 14)));
     previewMirror(box);
   };
   const complete = ended => {
-    preview.remove();
+    preview.remove(); hint.remove();
     svg.querySelector(".mirror-preview")?.remove();
     const [a0, a1, b0, b1] = corners(pointerMetres(svg, ended, geometry));
     // 幾乎沒拖：當作點在空白處，取消選取。
@@ -647,19 +662,39 @@ function axisDistances(axis) {
   const distance = axis.left.endsWith("0") ? axis.across_m : width - axis.across_m;
   return {left: distance.toFixed(2), centre: (width / 2).toFixed(2)};
 }
+// 這一區跟哪一區左右對稱（畫框時的幾何鏡像，限制判決順便回的 partners）：選取框底下那一句；沒有回空字串。第 2 段右欄
+// 清單講「跟誰一對」改用「這間房貼什麼」那一頁同一份配對（wall_section.js，#1265 單元 3 審查真錯 5）。
+function pairWords(wall, key) {
+  const partner = symmetryResult()?.partners?.[`${wall}@${key}`]?.split("@");
+  return partner ? `和${zoneCalled(...partner)}左右對稱` : "";
+}
+// 開關底下那一句與立面圖上那條線的字（#1265 單元 3 之二第 A 條，示意圖 input-page-v3 第 2 段）：講成鏡子；
+// 在不在房間正中照伺服器的判斷（axis.centred），不另算。只改輸入頁，「這間房貼什麼」那一頁的「左右對稱」字樣照舊。
+// 輸入頁上自己寫的幾句（還在等、選取框裡那兩句）也一起叫鏡子（第二趟決定第 6 條）；伺服器回來的原因字（跨在對稱軸上…、
+// 定不出對稱軸…）照原樣接上，不在這裡改字（下面 startsWith 那一行比的就是伺服器的字）。
+const MIRROR_LINE_WORDS = "鏡子：兩支喇叭的中線";
 function inputAxisWords(result) {
-  const axis = result?.axis, distances = axis && axisDistances(axis);
-  if (!distances) return result?.reason || result?.message || "正在確認對稱軸…";
-  return `對稱軸：兩支喇叭中點到主位，離左牆 ${distances.left} 公尺${axis.centred ? "" : "（不在房間正中，左右牆不跟著畫）"}`;
+  // 沒有判決可看（symmetryResult 只給新鮮的）：最新那一次判決回來了、可是沒做成（連不上、房間尺寸讀不出來），沒有鏡子可講，
+  // 照實講沒確認成，不寫成還在等（#1265 單元 3 之二收尾追加設計洞）；判決在路上才是「正在確認」。
+  if (!result) return zoneLimitsFresh() && zoneLimits.status !== "checked" ? `鏡子在哪沒確認成：${zoneLimits.message}` : "正在確認鏡子在哪…";
+  const axis = result.axis;
+  if (!axis) return result.reason || result.message || "正在確認鏡子在哪…";
+  // 鏡子在哪已經知道，可是房間尺寸格現在讀不出來（例如高度清空、還沒離開那一格）：算不出離左牆多遠。這時沒有在問，
+  // 不寫「正在確認」，講尺寸沒填好（#1265 單元 3 之二收尾第二趟 B4 之二；用語同上面那一行「先把房間的長、寬、高都填好正數」）。
+  const distances = axisDistances(axis);
+  if (!distances) return "先把房間的長、寬、高都填好正數，才算得出鏡子在哪";
+  return `鏡子：喇叭中線，離左牆 ${distances.left} 公尺` + (axis.centred ? "" : "；不在正中，左右牆不跟著畫");
+}
+// 開關底下那一句（renderElevation 畫；限制檢查失敗之後又問一次時 zone_limits.js 只重寫這一句，見 window.refreshAxisWords）。
+function axisSentence(on, result) {
+  return on ? inputAxisWords(result) : "";
 }
 function selectedEditor(wall, view, width, height) {
   const area = $("elevation-selected"); area.replaceChildren();
   const current = drawnBoxes(wall).find(box => box.id === elevationSelected);
   if (!current) {
-    elevationSelected = null;
-    const hint = document.createElement("p"); hint.className = "note";
-    hint.textContent = "在牆上空白處（含虛線的自動補滿格子）按住拖曳畫一個框；按住畫好的框拖曳可以整塊搬，點一下可以改尺寸或刪掉。";
-    area.append(hint); return;
+    elevationSelected = null;  // 沒選框時不擺編輯格；第 2 段標題旁只寫「在牆上拖框切一區」（#1265 說明字瘦身）
+    return;
   }
   const [a0, a1, b0, b1] = screenBox(view, width, height, current);
   const heading = document.createElement("p"); heading.id = "elevation-selected-name";
@@ -681,14 +716,14 @@ function selectedEditor(wall, view, width, height) {
     const status = document.createElement("div"); status.className = "elevation-pair-status";
     area.append(status);
     const result = symmetryResult();
-    if (partner) status.textContent = `和${zoneCalled(...partner)}左右對稱`;
+    if (partner) status.textContent = pairWords(wall, current.id);
     if (!result || partner) return;
-    if (selfMirrored(wall, current)) { status.textContent = "這一塊跨在對稱軸正中，自己對稱"; return; }
+    if (selfMirrored(wall, current)) { status.textContent = "這一塊跨在鏡子正中，自己對稱"; return; }
     if (!result.axis) {
       status.textContent = `${inputAxisWords(result)}。請先檢查方案，讓主位對齊兩支喇叭的中點。`;
     } else if (result.projections[wall][0] !== wall && !result.axis.centred) {
       const distances = axisDistances(result.axis);
-      if (distances) status.textContent = `對稱軸離左牆 ${distances.left} 公尺，房間正中是 ${distances.centre} 公尺：主位和兩支喇叭的中點都要在正中，左右牆才會跟著畫`;
+      if (distances) status.textContent = `鏡子離左牆 ${distances.left} 公尺，房間正中是 ${distances.centre} 公尺：主位和兩支喇叭的中點都要在正中，左右牆才會跟著畫`;
     } else if (result.placement_refusals?.[`${wall}@${current.id}`]) {
       const reason = result.placement_refusals[`${wall}@${current.id}`];
       const prefix = reason.startsWith("跨在對稱軸") ? "這一塊沒有另一邊：" : "這一塊翻過去放不下：";
@@ -731,7 +766,7 @@ function markerItems() {
 }
 // 牆名定得出前後左右時（#1134）牆的角色；地板天花沒有。只認伺服器排出來的這四個字，座標名一律回 null（不猜）。
 const WALL_ROLES = {"前牆": "front", "後牆": "back", "左牆": "side", "右牆": "side"};
-// 這一面每一區的號碼與位置名（#1176）：立面圖與做法表共用。畫面座標（鏡像翻好）、四邊隔壁那一面的名字、喇叭與主位的投影
+// 這一面每一區的號碼與位置名（#1176）：立面圖、第 2 段右欄與「這間房貼什麼」那一頁共用。畫面座標（鏡像翻好）、四邊隔壁那一面的名字、喇叭與主位的投影
 // 交給 zone_names.js 的 nameZones 算；房間尺寸填不出數字時照列表順序編號、名字退回代號（畫不出這一面，也就看不出位置）。
 function zoneLabels(wall) {
   const zones = wallZones(wall), size = wallSize(wall);
@@ -835,13 +870,110 @@ function zoneHoverText(label, key, mode, limits) {
   const code = key === "whole_wall" ? "" : `（代號 ${key}）`;
   return `${label.numberText} ${label.name}${code}：${ZONE_MODE_WORDS[mode]}${limits}`;
 }
+// 牆名鈕上的小字（#1265 單元 3）：這一面現在幾區；只有一區寫「整面」；門、窗、地毯這種整塊就是材料庫那一筆的區
+// 照區名那一支（zone_names.js 的 zoneSpecialName）點名、其餘寫幾區（「門、窗＋4 區」）。
+function tabWords(wall) {
+  const zones = zoneList(wall);
+  if (zones.length <= 1) return "整面";
+  const special = zones.map(zone => zoneSpecialName(zoneLibraryMatch(zone.material, wall, zoneKey(zone))));
+  const named = [...new Set(special.filter(Boolean))], rest = special.filter(name => !name).length;
+  if (!named.length) return `${zones.length} 區`;
+  return rest ? `${named.join("、")}＋${rest} 區` : named.join("、");
+}
+/* 「清掉這一面的切法」與復原（#1265 單元 3）：只回一步、只在這一頁、做下一個改動之前有效。
+   清掉前記下那一面的切法與設計設定裡那一面每一區的設定（深拷貝）；復原就原樣放回去，不再交伺服器重切
+   （重切會重新補滿、重編代號，貼的材料也回不來）。還算「下一個改動之前」：方案與做法那一份沒換過（開檔、範本）、
+   改動序號沒動（markStale），而且切法與做法跟清掉後那一刻一字不差（左右對稱開關、「這間房貼什麼」那一頁改做法不走 markStale）。 */
+let clearedWall = null;
+// 兩個呼叫的人都在有方案時才叫（clearUndoable 先比 owner === scheme、清掉鈕只畫在有方案時），不另判沒方案。
+function undoPrint() { return JSON.stringify([scheme.scene.surface_zones_by_wall, zoneDesign]); }
+function clearUndoable() {
+  const saved = clearedWall;
+  return Boolean(saved) && saved.owner === scheme && saved.generation === zoneDesignGeneration && saved.revision === editRevision
+    && saved.print === undoPrint();
+}
+// 做了下一個改動：復原那一句收掉（改動從哪裡來都會走到這裡：markStale、renderZoneTable 重畫）。
+function refreshClearUndo() {
+  if (!clearedWall || clearUndoable()) return;
+  clearedWall = null;
+  if ($("elevation-cleared")) renderClearSlot(elevationWall);
+}
+window.refreshClearUndo = refreshClearUndo;
+// 存檔、另存新名字（app.js）：方案物件沒換、改動序號也沒動，比對認不出來，由存檔那一路直接收掉（#1265 單元 3 審查真錯 3）。
+// 不另判那一格寫著什麼（#1265 單元 3 之二收尾 B 改判，回到第一趟的寫法）：第二趟加的那一道兩家實測都走不到，拿掉。
+// 還能復原（clearedWall 在）時一定選過牆：elevationWall 只在 showElevationWall 換成牆名，不會回到沒選。
+window.forgetClearUndo = () => {
+  if (!clearedWall) return;
+  clearedWall = null;
+  renderClearSlot(elevationWall);
+};
+function renderClearSlot(wall) {
+  // 叫到這裡時一定選了一面、畫得出這一面：立面圖重畫時沒選牆、尺寸不齊就先清空這一格回去了（renderElevation）；
+  // 清掉鈕那一路在切完那一刻同步畫（cut，那時剛畫好這一面）；改動那一路（refreshClearUndo）只在「已清掉…｜復原」那一句還在時才叫，
+  // 存檔那一路（forgetClearUndo）只在還能復原時叫。房間高度清空那一刻先重畫立面圖（markStale 先叫 renderInputBars），那一句已經不在。
+  // 以前清掉鈕在等圖面檢查回來之後才畫，空檔裡清空高度會被塞回去（#1265 單元 3 之二第二趟追加第 2 條），所以改到 cut 裡。
+  const slot = $("elevation-clear-slot"); slot.replaceChildren();
+  if (clearedWall?.wall === wall && clearUndoable()) {
+    const said = document.createElement("span"); said.id = "elevation-cleared"; said.setAttribute("role", "status");
+    said.textContent = `已清掉${wallNames[wall]} ${clearedWall.count} 區｜`;
+    const undo = document.createElement("button"); undo.type = "button"; undo.id = "elevation-undo-clear"; undo.className = "lnk";
+    undo.textContent = "復原";
+    undo.onclick = () => action(undoClear);
+    said.append(undo); slot.append(said);
+    return;
+  }
+  const count = wallZones(wall).filter(zone => zone.area === "rectangle").length;
+  const clear = document.createElement("button"); clear.type = "button"; clear.id = "elevation-clear"; clear.className = "danger";
+  clear.textContent = "清掉這一面的切法";
+  clear.disabled = !count;
+  clear.onclick = () => action(async () => {
+    const zones = structuredClone(wallZones(wall)), design = structuredClone(zoneDesign?.zones?.[wall] ?? null);
+    // 記快照與畫「已清掉…｜復原」都在 cut 裡同步做（切完、等圖面檢查之前；#1265 單元 3 之二第二趟追加第 2 條與審查設計洞 1）：
+    // 等 /api/plan 的空檔頁面已經解鎖，人可能換一面、把房間高度清空（立面圖畫不出來，那一格先被清空），檢查回來不能再畫回去；
+    // 檢查丟錯也照樣看得到復原。cut 緊接在 applyCut 解鎖之後同一串跑（中間沒有輪到人按東西的空檔），切的時候 main 整塊鎖著、
+    // 換牆的鈕與導覽列都在 main 裡面（「這間房貼什麼」那一頁也只能從 main 裡打開），看著的一定還是這一面，不另判。
+    const cut = () => {
+      clearedWall = {wall, count: zones.length, zones, design, owner: scheme, generation: zoneDesignGeneration,
+                     revision: editRevision, print: undoPrint()};
+      renderClearSlot(wall);
+    };
+    await cutWall(wall, [], () => { elevationSelected = null; }, undefined, false, cut);
+  });
+  slot.append(clear);
+}
+// 復原鈕只在還能復原時畫（renderClearSlot），之後任何改動都先走 refreshClearUndo 把它收掉；忙的時候整頁鎖著按不到；
+// 按下去同一步就重畫（renderWalls → renderElevation），按不到第二下。清掉前那一面沒有做法時，清掉也不會長出來
+// （remapZoneDesign 沒有舊的就不寫），不用另外刪。
+async function undoClear() {
+  const saved = clearedWall;
+  clearedWall = null;
+  scheme.scene.surface_zones_by_wall[saved.wall] = structuredClone(saved.zones);
+  if (saved.design) designForEdit().zones[saved.wall] = structuredClone(saved.design);
+  resizeProblems.delete(saved.wall);
+  elevationSelected = null; elevationThin = [];
+  staleZoneLimits();  // 同 applyCut：先畫後問
+  renderWalls();
+  note(`復原了：${wallNames[saved.wall]}回到清掉前的 ${saved.count} 區`, "ok");
+  markStale();
+  action(updateMultiples);
+  action(updateInputPreview);
+  await refreshPlan();
+}
 // 打開哪一面的立面圖（牆名那一排鈕、分區頁每一面的「切區 ▸」都走這裡，#1262）。
-// 換到別一面：上一面選的框、太窄的縫、訊息（立面圖與做法表底部那一行）一起清掉，不留在別面的表下面。
+// 換到別一面：上一面選的框、太窄的縫、訊息（立面圖底下那一行、回話那一行）一起清掉，不留到別面。
 function showElevationWall(name) {
   if (elevationWall !== name) { showSelectionBanner = false; mirrorWarning = null; banner(); elevationWall = name; elevationSelected = null; elevationThin = []; note("", ""); zoneNote("", ""); }
   renderElevation();
 }
 window.showElevationWall = showElevationWall;
+// 打開一份方案時第 2 段先看前牆（#1265 單元 5c）：牆名照伺服器依喇叭與座位排的那一套（WALL_ROLES 認的「前牆」）。
+// 分不出前後（牆名是座標名）就不換：開頁那一份沒選任何一面，換方案時留著上一份選的那一面。只在打開那一下叫，
+// 之後搬喇叭、牆名換了都不搶使用者選的那一面。回選了哪一面，沒換回 null。
+window.showFrontWall = () => {
+  const front = Object.keys(wallNames).find(wall => WALL_ROLES[wallNames[wall]] === "front") ?? null;
+  if (front) showElevationWall(front);
+  return front;
+};
 function renderElevation() {
   if (dropDrag) dropDrag();  // 拖到一半被重畫：那一張圖要換掉了，這次拖曳作廢（見 trackDrag）
   const area = $("elevation");
@@ -855,8 +987,7 @@ function renderElevation() {
       window.zoneSymmetry.set(state);
     };
   }
-  $("elevation-axis-words").textContent = on ? inputAxisWords(result)
-    : "跟「這間房貼什麼」那一頁的「左右對稱」是同一個開關，哪一頁切換都一樣。";
+  $("elevation-axis-words").textContent = axisSentence(on, result);
   if (mirrorWarning && (mirrorWarning.owner !== scheme || mirrorWarning.generation !== zoneDesignGeneration || !on)) {
     mirrorWarning = null; banner();
     note("", "");
@@ -866,13 +997,19 @@ function renderElevation() {
   if (mirrorWarning) { note(mirrorWarning.message, mirrorWarning.kind); resultBanner(mirrorWarning); }
   const buttons = $("elevation-walls"); buttons.replaceChildren();
   for (const name of Object.keys(wallNames)) {
-    const button = document.createElement("button"); button.id = `elevation-wall-${name}`; button.textContent = wallNames[name];
+    const button = document.createElement("button"); button.id = `elevation-wall-${name}`; button.type = "button"; button.className = "wall";
+    const words = document.createElement("span"); words.className = "wall-name"; words.textContent = wallNames[name];
+    const count = document.createElement("small"); count.id = `elevation-wall-count-${name}`; count.textContent = tabWords(name);
+    button.append(words, count);
     button.setAttribute("aria-pressed", String(name === elevationWall));
     button.onclick = () => showElevationWall(name);
     buttons.append(button);
   }
+  // 牆面表單（「換原本的牆」打開的那一塊）只露選中那一面；六面的格子都留在頁面上（存檔照樣逐面讀）。
+  for (const row of $("walls").children) row.hidden = row.id !== `wall-editor-${elevationWall}`;
   area.replaceChildren($("elevation-banner"));
   $("elevation-selected").replaceChildren();
+  $("elevation-clear-slot").replaceChildren();
   const problems = Object.keys(wallNames).map(resizeProblem).filter(Boolean).join(" ");
   if (!elevationWall) { $("elevation-size").textContent = problems || "選一面牆打開立面圖。"; renderZoneTable(null); return; }
   const wall = elevationWall, view = views[wall], size = wallSize(wall);
@@ -880,7 +1017,9 @@ function renderElevation() {
   const [width, height] = size;
   const scale = Math.min(560 / width, 320 / height), pad = 48;
   const geometry = {width, height, scale, pad};
+  // 照算好的大小畫（一個 viewBox 單位一像素，字固定 14 像素；home.css 只在卡片比圖窄時縮）。
   const svg = node("svg", {id: "elevation-svg", viewBox: `0 0 ${width * scale + 2 * pad} ${height * scale + 2 * pad}`,
+                           width: width * scale + 2 * pad, height: height * scale + 2 * pad,
                            "data-wall": wall, role: "img", "aria-label": `${wallNames[wall]}立面圖（站在房間裡看）`});
   svg.append(node("rect", {id: "elevation-frame", x: pad, y: pad, width: width * scale, height: height * scale}));
   const zones = wallZones(wall);
@@ -938,22 +1077,24 @@ function renderElevation() {
     startDrawing(svg, event, geometry, view, wall);
   });
   area.append(svg);
-  const count = zones.filter(zone => zone.area === "rectangle").length;
-  $("elevation-size").textContent = `${wallNames[wall]}：寬 ${metres(width)} 公尺 × 高 ${metres(height)} 公尺，` +
-    (count ? `分成 ${count} 區（實線是畫的框、虛線是自動補滿的；圓圈裡的號碼對下面表的「區」）` : "整面一區") +
-    `；框邊吸附 ${cutSpec().snap_m * 100} 公分格，最小邊 ${cutSpec().min_side_m * 100} 公分` +
-    (problems ? "。" + problems : outside ? "。這一面有分區超出目前的牆面（房間尺寸改過）：請改框或清掉這一面的切法" : "");
+  // 選中那一面的一行（#1265 單元 3）：牆名、寬高；幾區寫在上面那一排牆名鈕上。
+  const name = document.createElement("b"); name.textContent = wallNames[wall];
+  $("elevation-size").replaceChildren(name, ` 寬 ${metres(width)} × 高 ${metres(height)} 公尺` +
+    (problems ? "。" + problems : outside ? "。這一面有分區超出目前的牆面（房間尺寸改過）：請改框或清掉這一面的切法" : ""));
   selectedEditor(wall, view, width, height);
-  const clear = document.createElement("button"); clear.id = "elevation-clear"; clear.textContent = "清掉這一面的切法";
-  clear.disabled = !count;
-  clear.onclick = () => action(() => cutWall(wall, [], () => { elevationSelected = null; }));
-  $("elevation-selected").append(clear);
+  renderClearSlot(wall);
   renderZoneTable(wall);
 }
 window.renderElevation = renderElevation;
 // 六面一起看的那一頁（zone_overview.js）畫圖用同一份幾何：哪一軸往右、鏡不鏡像、牆面寬高、喇叭與主位。
 window.elevationGeometry = {views, wallSize, screenBox, flip, project, markerItems};
 window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits.js）要知道是不是正在拖框
+// 只重畫第 2 段牆那一行與右欄（wall_section.js），不動立面圖、不動牆面表單的格子（#1265 單元 3 之二收尾第二趟 B2：
+// 「換原本的牆」改構造某一層時，原本那一面跟著變；app.js 那一格的 input 叫這一支，打字的那一格不重建）。
+window.refreshWallSection = () => renderWallSection(elevationWall);
+// 只重寫鏡子那一句（#1265 單元 3 之二收尾第二趟 B4 之一）：失敗之後重試、請求還在路上，那一句要回到「正在確認」。
+// 不重畫整個立面圖：正在打字的格子、拖到一半的框不能換掉（zone_limits.js 判決回來時為這兩件事才延後重畫）。
+window.refreshAxisWords = () => { $("elevation-axis-words").textContent = axisSentence(window.zoneSymmetry.isOn(), symmetryResult()); };
 window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => {
     showSelectionBanner = false;

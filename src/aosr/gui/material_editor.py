@@ -201,7 +201,8 @@ class MaterialStore:
         """內建在前、使用者在後；使用者檔讀不進來時照講原因，清單只列內建。
 
         每一筆多帶 ``placement``（#1176，``material_surfaces.placement`` 現算）：能用在哪幾面、哪一組、一句白話理由；
-        ``surface_groups`` 是每一組的標題、``surface_group_short`` 是短名。立面圖的做法表照它過濾，材料庫格式不動。"""
+        ``surface_groups`` 是每一組的標題、``surface_group_short`` 是短名（材料庫清單那一欄用）。「這間房貼什麼」那一頁的小框照 ``placement`` 過濾
+        （以前是立面圖底下的舊做法表，#1265 單元 3 之二第二趟拆了），材料庫格式不動。"""
         problem = None
         try:
             user = self._user_entries()

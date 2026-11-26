@@ -50,15 +50,18 @@ function drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget)
     svg.append(group);
   }
 }
-function drawingRange(range, plan, vertical) {
+// 畫框撐到容得下家具、箱體，與跑出房間的點（伺服器列在 outside_keys，#1265）；合法方案沒有那一格，畫框跟以前一樣。
+function drawingRange(range, plan, vertical, markers, outside) {
   const points = [...(plan.furniture || []), ...(plan.cabinets || [])]
-    .flatMap(item => vertical ? item.side_polygon : item.polygon);
+    .flatMap(item => vertical ? item.side_polygon : item.polygon)
+    .concat(markers.filter(item => item.drawn && item.keys.some(key => outside.has(key))).map(item => [item.u, item.v]));
   return {u: [Math.min(range.u[0], ...points.map(p => p[0])), Math.max(range.u[1], ...points.map(p => p[0]))],
     v: [Math.min(range.v[0], ...points.map(p => p[1])), Math.max(range.v[1], ...points.map(p => p[1]))]};
 }
 function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detailTarget, scaleRoom, changedKeys, plan) {
   svg.replaceChildren();
-  const frame = zoomed ? range : drawingRange(range, plan, vertical);
+  const outside = new Set(plan.outside_keys || []);
+  const frame = zoomed ? range : drawingRange(range, plan, vertical, markers, outside);
   const width = frame.u[1] - frame.u[0];
   const height = frame.v[1] - frame.v[0];
   const frameWidth = scaleRoom ? Math.max(scaleRoom.Lx, width) : width;
@@ -104,11 +107,13 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
     if (zoomed && (item.u < range.u[0] || item.u > range.u[1] ||
                    item.v < range.v[0] || item.v > range.v[1])) continue;
     if (!item.drawn && !item.keys.some((key) => changedKeys.has(key))) continue;
-    const detail = item.detail_lines.join("\n");
-    const group = svgNode("g", {"data-keys": item.keys.join(" "), tabindex: 0});
+    // 跑出房間的點跟擋路的家具同一種紅（#1265），明細多一行講原因。
+    const away = item.keys.some(key => outside.has(key));
+    const detail = [...item.detail_lines, ...(away ? ["超出房間"] : [])].join("\n");
+    const group = svgNode("g", {"data-keys": item.keys.join(" "), tabindex: 0, ...(away ? {class: "outside-room"} : {})});
     const title = svgNode("title", {}); title.textContent = detail; group.append(title);
     const circle = svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5 * unit,
-      fill: item.kind === "receiver" ? "#167997" : "#db6b3a"});
+      fill: away ? "#c62828" : item.kind === "receiver" ? "#167997" : "#db6b3a"});
     const changed = item.keys.filter((key) => changedKeys.has(key));
     if (changed.length) group.append(svgNode("circle", {cx: x(item.u), cy: y(item.v),
       r: 9 * unit, fill: "none", stroke: "#b01b6a", "stroke-width": 2 * unit,
@@ -116,7 +121,7 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
     group.append(circle);
     if (item.caption) {
       const caption = svgNode("text", {x: x(item.u) + 8 * unit, y: y(item.v) - 8 * unit,
-        "font-size": 16 * unit});
+        "font-size": 16 * unit, ...(away ? {fill: "#c62828"} : {})});
       caption.textContent = item.caption;
       group.append(caption);
       captions.push([caption, circle]);

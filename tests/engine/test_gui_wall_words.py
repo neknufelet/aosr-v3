@@ -18,8 +18,9 @@ from aosr.gui.labels import WALLS
 from aosr.gui.wall_words import draft_wall_words, front_wall, wall_words
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import reference_document
+from tests.engine._input_page_steps import open_example_scheme, reveal
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_quiet_but_plan_refused, _open, _serve, browser
 from tests.engine.test_gui_gradient_jobs import NAME, FakeLauncher, _data, _jobs
 
 # 109 part2d 存檔裡的喇叭與主位（公尺）。
@@ -112,17 +113,19 @@ def test_input_preview_hands_the_page_the_names(tmp_path: Path) -> None:
 def test_home_form_renames_walls_when_the_speakers_move_to_the_other_end(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
-        # 範本（參考房）喇叭靠 x0、主位面向 x0。
+        open_example_scheme(page, base, tmp_path)
+        # 範例（參考房範本存成的那一份）喇叭靠 x0、主位面向 x0。
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
         expect(page.locator("#wall-editor-y0")).to_contain_text("左牆材料")
-        expect(page.locator("#elevation-wall-xL")).to_have_text("後牆")
+        # #1265 單元 3 起牆名鈕寫「牆名＋幾區」：牆名在鈕裡的 .wall-name。
+        expect(page.locator("#elevation-wall-xL .wall-name")).to_have_text("後牆")
         # 兩支喇叭搬到主位另一邊、靠 xL：前後左右整組換過來，表單與立面圖按鈕都跟著改。
         for name in ("left", "right"):
-            page.locator(f"#speaker-{name}-x").fill("5")
+            reveal(page, f"#speaker-{name}-x").fill("5")
         expect(page.locator("#wall-editor-xL")).to_contain_text("前牆材料")
         expect(page.locator("#wall-editor-x0")).to_contain_text("後牆材料")
         expect(page.locator("#wall-editor-yL")).to_contain_text("左牆材料")
-        expect(page.locator("#elevation-wall-y0")).to_have_text("右牆")
+        expect(page.locator("#elevation-wall-y0 .wall-name")).to_have_text("右牆")
         expect(page.locator("#scatter-xL").locator("xpath=..")).to_contain_text("前牆散射")
         # 重畫牆面表單會清空「約 ρc 的幾倍」那幾格：換名之後要重問、填回來（審查實測三次都被洗掉）。
         expect(page.locator("#multiple-x0")).to_contain_text("ρc")
@@ -152,7 +155,10 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
     # 現在游標在牆面表單裡就先不換名，在表單裡換格也不換；離開表單（包括直接去按按鈕）才換，打的字照留。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開（換名還沒扣住，不影響下面考的）。
+        reveal(page, "#wall-floor")
         held = _late_rename(page)
         floor = page.locator("#wall-floor")
         floor.focus()
@@ -165,25 +171,27 @@ def test_a_late_rename_never_swaps_the_wall_box_being_typed_in(tmp_path: Path, b
         page.keyboard.insert_text("2000")
         assert floor.input_value() == "2000"
         # 用滑鼠點表單裡的另一格（瀏覽器自己換焦點，不是程式呼叫 focus()）：點到的那一格也不准被換掉。
-        ceiling = page.locator("#wall-ceiling").element_handle()
-        page.locator("#wall-ceiling").click()
-        assert ceiling.evaluate("node => node.isConnected && node === document.activeElement")
-        assert box.evaluate("node => node.isConnected")
-        # 用 Tab 換到表單裡的下一格（沒有按著滑鼠）：一樣不算離開。
-        kind = page.locator("#material-kind-x0").element_handle()
-        page.keyboard.press("Tab")
+        # #1265 單元 3 起只露選中那一面的表單、別面的格子點不到：改點同一面的「地板材料」選單（點它的標籤字，
+        # 點選單本身會打開下拉、接著的 Tab 落不到表單）。
+        kind = page.locator("#material-kind-floor").element_handle()
+        page.locator("#material-kind-floor").locator("xpath=..").click(position={"x": 4, "y": 4})
         assert kind.evaluate("node => node.isConnected && node === document.activeElement")
+        assert box.evaluate("node => node.isConnected")
+        # 用 Tab 換到表單裡的下一格（沒有按著滑鼠）：一樣不算離開。（單元 3 起：從材料選單換回同一面的阻抗格。）
+        page.keyboard.press("Tab")
+        assert box.evaluate("node => node.isConnected && node === document.activeElement")
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
-        # 從牆面表單直接按「檢查」：那一下照樣按得到，按的時候換名，表單的值是剛打的那個。
+        # 從牆面表單直接按頂條「儲存」（#1265 單元 6 起沒有「檢查」鈕；儲存前照樣先做同一次圖面檢查）：那一下照樣按得到，
+        # 按的時候換名，表單的值是剛打的那個。
         page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
+        page.locator("#save").click()
         expect(page.locator("#messages")).to_have_text("寬 Ly（公尺）：空著沒填")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
         assert floor.input_value() == "2000"
         # 換過名就沒有擱著的了：再點進來、再離開，不准又整排重畫一次。
         again = floor.element_handle()
         floor.click()
-        page.locator("#check").click()
+        page.locator("#save").click()
         # 放開滑鼠時排的那一次（setTimeout 0）先跑完：同樣延遲的計時器照排進去的先後跑。
         page.evaluate("() => new Promise(resolve => setTimeout(resolve, 0))")
         assert again.evaluate("node => node.isConnected")
@@ -196,31 +204,57 @@ def test_a_click_on_a_wall_label_while_a_rename_waits_lands_in_its_box(tmp_path:
     # 焦點落到頁面本身、接著打的字落空。現在滑鼠按著不重畫，放開、點完才看游標在哪。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開（換名還沒扣住，不影響下面考的）。
+        reveal(page, "#wall-floor")
         held = _late_rename(page)
         page.locator("#wall-floor").focus()
         _arrive(page, held)
-        page.locator("#wall-ceiling").locator("xpath=..").click(position={"x": 4, "y": 4})
-        assert page.evaluate("() => document.activeElement.id") == "wall-ceiling"
+        # #1265 單元 3 起只露選中那一面的表單：表單裡另一格的標籤字改用同一面「地板材料」那一格的。
+        page.locator("#material-kind-floor").locator("xpath=..").click(position={"x": 4, "y": 4})
+        assert page.evaluate("() => document.activeElement.id") == "material-kind-floor"
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
-        # 點表單外不能聚焦的地方（區塊標題）離開：放開之後換名，頁面不出錯。
-        page.locator("h2", has_text="房間與材料").click()
+        # 點表單外不能聚焦的地方（區塊標題）離開：放開之後換名，頁面不出錯。（單元 3 起牆面表單住在第 2 段「牆上切區」，
+        # 標題換成那一段的。）
+        page.locator("#wall-step-title").click()
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
-def test_a_button_pressed_from_the_wall_form_on_a_narrow_window_is_pressed(tmp_path: Path, browser: Browser) -> None:
-    # 複查實測：600 寬時換名讓牆名變長、折行，下面的格子往下移；在按下與放開之間重畫，那一下就按到別處。
+def test_the_bottom_calculate_button_pressed_from_the_wall_form_on_a_narrow_window_checks_and_renames_after(
+        tmp_path: Path, browser: Browser) -> None:
+    """600 寬、換名扣在牆面表單裡時，直接按頁底「照現在牆上貼的算一次」：按得到、那一下先做圖面檢查（寬 Ly 空著就不存、
+    不開算，訊息列寫原因），放開之後換名才落地。
+
+    這一題原本考「按著先不換」：換名讓牆名折行、下面的鈕往下移，按下與放開之間重畫就按到別處（按的是牆面表單底下的「檢查」）。
+    #1265 單元 6 拿掉「檢查」之後找過：600 寬換名落地時位置會變的鈕只剩立面圖那排牆名鈕（焦點進那一區換名本來就先不換，
+    考不到這一道）；頂條、第 1 段、第 2 段右欄、頁底那條都不動（#1265 單元 6 實測）。
+    所以「按著先不換」這一道改由點標籤字那一題（test_a_click_on_a_wall_label_while_a_rename_waits_lands_in_its_box）守，
+    這一題只考上面那幾件。"""
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=600) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        check = page.locator("#calculate")
+        assert check.evaluate("""node => !node.closest('#walls, #elevation-panel')
+          && Boolean(document.getElementById('walls').compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)""")
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開（換名還沒扣住，不影響下面考的）。
+        reveal(page, "#wall-floor")
         held = _late_rename(page)
         page.locator("#wall-floor").focus()
         _arrive(page, held)
-        page.locator("#use-scattering").click()
-        expect(page.locator("#use-scattering")).to_be_checked()
+        walls, button = page.locator("#walls").bounding_box(), check.bounding_box()
+        assert walls is not None and button is not None and button["y"] >= walls["y"] + walls["height"]
+        # #1265 單元 6 起寬 Ly 一離開就自動檢查、訊息列已經寫了那一句：等那一次回來、清掉訊息列，下面那一句才是按的那一下寫的。
+        page.wait_for_function("document.getElementById('check-state').dataset.kind !== 'pending'")
+        page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+        assert page.locator("#messages").inner_text() != "寬 Ly（公尺）：空著沒填"
+        check.click()
+        expect(page.locator("#messages")).to_have_text("寬 Ly（公尺）：空著沒填")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        # 寬 Ly 空著，檢查照設計回 422：離開那一格的自動檢查一次、按的那一下一次；主控台每一條都要對上一次，頁面不准有錯。
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases_it(tmp_path: Path,
@@ -228,7 +262,10 @@ def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases
     # 按著（拖框、按住捲動）的時候離開也先不換；觸控被瀏覽器收回（pointercancel，不會有放開）一樣算放開，換名不准卡住。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開（換名還沒扣住，不影響下面考的）。
+        reveal(page, "#wall-floor")
         held = _late_rename(page)
         page.locator("#wall-floor").focus()
         _arrive(page, held)
@@ -237,29 +274,33 @@ def test_a_rename_waits_while_the_pointer_is_down_and_a_cancelled_press_releases
         expect(page.locator("#wall-editor-x0")).to_contain_text("前牆材料")
         page.evaluate("() => document.dispatchEvent(new PointerEvent('pointercancel'))")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_a_late_rename_never_swaps_the_elevation_box_being_typed_in(tmp_path: Path, browser: Browser) -> None:
     # 換名也重畫立面圖（按鈕與深度上限那幾格都帶牆名）：游標在立面圖裡一樣先不換，離開才換。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         page.locator("#elevation-wall-x0").click()
+        # #1265 單元 3 起這一面那一格收在第 2 段牆那一行「這一面另設」裡：先打開（換名還沒扣住）。
+        reveal(page, "#depth-wall-x0")
         held = _late_rename(page)
         # 寬 Ly 一離開就發超限檢查（房間尺寸改了，#1111），回來會重畫立面圖、照 id 把焦點放回去：那是另一條路，
         # 不是這裡考的，先等它畫完再點進去。
         page.locator("#room-Lx").focus()
         page.wait_for_function("() => zoneLimitsShown === zoneLimitsGeneration")
-        depth = page.locator("#depth-room")
+        # #1265 起房間預設那一格搬到第 1 段右卡；這一面那一格（單元 3 起在牆那一行「這一面另設」裡）帶牆名、換名會重畫。
+        depth = page.locator("#depth-wall-x0")
         depth.focus()
         box = depth.element_handle()
         _arrive(page, held)
         assert box.evaluate("node => node.isConnected && node === document.activeElement")
-        expect(page.locator("#elevation-wall-x0")).to_have_text("前牆")
+        expect(page.locator("#elevation-wall-x0 .wall-name")).to_have_text("前牆")
         page.locator("#room-Lx").focus()
-        expect(page.locator("#elevation-wall-x0")).to_have_text("x 起點牆")
+        expect(page.locator("#elevation-wall-x0 .wall-name")).to_have_text("x 起點牆")
         expect(page.locator("#wall-editor-x0")).to_contain_text("x 起點牆材料")
-        _assert_quiet(watched)
+        _assert_quiet_but_plan_refused(watched)
 
 
 def test_a_draft_with_a_bad_wall_value_still_names_walls_and_its_problem_says_front_wall(tmp_path: Path) -> None:

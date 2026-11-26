@@ -32,11 +32,12 @@ SAMPLE_NAMES: dict[str, list[tuple[str, int, str]]] = {
                 ("auto3", 5, "右邊中間那塊"), ("auto4", 6, "主位和兩支喇叭中間那塊")],
 }
 CIRCLED = "①②③④⑤⑥⑦⑧"
-# 表上每一列（照畫出來的順序）：區代號、「區」那一格的號碼與名字、小字代號。
-_TABLE_ROWS = """wall => [...document.querySelectorAll(`#zone-table-${wall} tr[id^=zone-row-]`)].map(row => {
-    const key = row.id.replace(`zone-row-${wall}-`, '');
-    return {key, label: document.getElementById(`zone-label-${wall}-${key}`).textContent,
-            code: row.querySelector('.zone-code')?.textContent ?? null}; })"""
+# 表上每一列（照畫出來的順序）：區代號、「區」那一格的號碼與名字。舊做法表（#zone-table-）拆了（#1265 單元 3 之二第二趟），
+# 改讀第 2 段「每一區的位置與大小」那張表（#zoned-list-，同一份 zoneLabels，也照號碼排）；舊表那一格底下的小字代號那張表不寫，
+# 代號改在立面圖每一塊滑過去的 title 裡考（伺服器的限制訊息寫代號，要對得起來）。
+_TABLE_ROWS = """wall => [...document.querySelectorAll(`#zoned-list-${wall} tr[id^=zone-size-]`)].map(row => {
+    const key = row.id.replace(`zone-size-${wall}-`, '');
+    return {key, label: row.querySelector('td').textContent}; })"""
 # 立面圖上每一個號碼圓：區代號 → {號碼, 圓心離畫面左緣幾 px}；另外畫面上的字（不准再出現「自動」「z1」）。
 _BADGES = """() => Object.fromEntries([...document.querySelectorAll('#elevation .zone-number')].map(g => [g.dataset.zoneKey,
     {number: Number(g.dataset.number), text: g.textContent, x: g.querySelector('circle').getBoundingClientRect().x}]))"""
@@ -55,7 +56,12 @@ def test_every_zone_of_the_sample_room_has_one_number_and_a_place_name_on_both_t
             # 表照號碼排，「區」那一格寫「① 位置名」，底下小字代號（整面一區伺服器也叫整面，不另寫）。
             assert [(row["key"], row["label"]) for row in rows] == [
                 (key, f"{CIRCLED[number - 1]} {name}") for key, number, name in expected], wall
-            assert [row["code"] for row in rows] == [None if key == "whole_wall" else f"代號 {key}" for key, _, _ in expected]
+            for key, _, _ in expected:  # 舊表小字代號 → 每一塊的 title（整面一區不另寫代號）
+                hover = page.locator(f"#elevation [data-zone-id={key}] title" if key != "whole_wall" else "#elevation-frame title")
+                if key == "whole_wall":
+                    expect(hover).not_to_contain_text("代號")
+                else:
+                    expect(hover).to_contain_text(f"（代號 {key}）")
             # 立面圖上同一個號碼；不再畫「z1」「自動」。
             badges = cast(dict[str, dict[str, object]], page.evaluate(_BADGES))
             assert {key: badge["number"] for key, badge in badges.items()} == {key: number for key, number, _ in expected}, wall
@@ -85,8 +91,9 @@ def test_left_and_right_follow_what_the_elevation_shows_on_the_mirrored_back_wal
             left_word = page.locator("#elevation-edge-left").text_content()
             right_word = page.locator("#elevation-edge-right").text_content()
             assert badges[toward_left]["x"] < badges[toward_right]["x"], wall
-            expect(page.locator(f"#zone-label-{wall}-{toward_left}")).to_contain_text(f"靠{left_word}")
-            expect(page.locator(f"#zone-label-{wall}-{toward_right}")).to_contain_text(f"靠{right_word}")
+            # 舊表「區」那一格（#zone-label-）→ 第 2 段右欄那一區的名字（同一份 zoneLabels）。
+            expect(page.locator(f"#wall-zone-name-{wall}-{toward_left}")).to_contain_text(f"靠{left_word}")
+            expect(page.locator(f"#wall-zone-name-{wall}-{toward_right}")).to_contain_text(f"靠{right_word}")
         assert watched.page_errors == [] and watched.console_errors == []
 
 

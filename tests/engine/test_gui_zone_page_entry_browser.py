@@ -4,15 +4,16 @@
 109 號房沒切區的那一份（存成 a-whole-room：名字排在清單第一個，沒指定開哪一份時開到的會是它）。
 視窗一律 1440 × 900；「在第一屏」＝按之前、沒捲過，整顆落在視窗裡（``getBoundingClientRect``）。
 
-- 首頁第一屏「挑材料」一下就進最近算的那一份的「這間房貼什麼」（不是清單第一份、不是第三階段頁）；沒切區的方案一樣進得去。
+- 開頁就開最近存的那一份（#1265 單元 5c 拿掉首頁「挑材料」大卡），頂上「這間房貼什麼」一下就進它那一頁；沒切區的方案一樣進得去。
 - 「打開來改」或「打開」之後，方案那一節的入口就在視窗裡，再一下進那一頁。
 - 帶著名字進來但那一份打不開（存著的檢查不過、清單裡沒有）：原因寫在「打開」旁邊，不開那一頁。
 - 結果頁「這一間挑材料」連到同一條路。
-- 帶著名字進來、輪到打開那一份時輸入頁正忙（開頁還沒完就改了表單，那一筆還在路上）：不開那一頁，也不把它開在範本上。
+- 帶著名字進來、輪到打開那一份時輸入頁正忙（開頁還沒完就改了表單，那一筆還在路上）：不把那一頁開在範本上；等那一筆回來才開那一份、進那一頁。
 """
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import cast
 
@@ -21,6 +22,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import RUN_ID, _assert_quiet, _open, _save, _serve, browser as browser, result as result
 from tests.engine.test_gui_wall_words import _part2d_layout
@@ -74,18 +76,22 @@ def _on_zone_page(page: Page, name: str, room: str) -> None:
 @pytest.mark.parametrize(("latest", "room"), [(SAMPLE, SAMPLE_ROOM), (WHOLE, WHOLE_ROOM)], ids=["zoned", "whole"])
 def test_home_first_screen_goes_straight_to_the_zone_page_of_the_latest_scheme(
         tmp_path: Path, browser: Browser, latest: str, room: str) -> None:
+    """#1265 單元 5c 拿掉首頁「挑材料」那張大卡：開頁就開最近存的那一份（這裡把 ``latest`` 存成最近的；它也是最近算的那一份），
+    第一屏頂上導覽列「這間房貼什麼」一下就進它的那一頁（不是清單第一份、不是第三階段頁）；沒切區的方案一樣進得去。"""
     _prepare(tmp_path, latest)
+    for name, stamp in ((SAMPLE, 1_000_000_000), (WHOLE, 1_000_000_000)):
+        os.utime(tmp_path / "schemes" / f"{name}.json", (stamp, stamp))
+    os.utime(tmp_path / "schemes" / f"{latest}.json", (1_000_000_600, 1_000_000_600))
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
         _first_screen(page)
-        link = page.locator("#home-materials")
-        expect(link.locator("b")).to_have_text("挑材料：每一面牆貼什麼")
+        _opened(page, latest)
+        expect(page.locator("#home-materials")).to_have_count(0)
+        link = page.locator("#nav-zones")
+        expect(link).to_have_text("這間房貼什麼")
         assert "第三階段" not in link.inner_text() and "/gradient" not in (link.get_attribute("href") or "")
-        expect(link).to_have_attribute("href", f"/?zones={latest}")
-        assert _inside(page, "#home-materials")
+        assert _inside(page, "#nav-zones")
         link.click()  # 第一下，也是唯一的一下
-        page.wait_for_url(f"{base}/?zones={latest}")
-        _opened(page, latest)  # 整頁重載後打開方案：等的時間照打開那一條（不擠在下面斷言的幾秒裡）
         _on_zone_page(page, latest, room)
         assert page.evaluate("window.scrollY") == 0
         _assert_quiet(watched)
@@ -100,15 +106,17 @@ def test_after_opening_a_scheme_the_way_in_is_on_the_first_screen(tmp_path: Path
         page = watched.page
         _first_screen(page)
         if way == "home-row":
-            page.locator(f'#home-schemes li[data-scheme="{SAMPLE}"] button.home-open').click()
+            page.locator("#scheme-menu-button").click()
+            page.locator(f'#home-schemes [data-scheme="{SAMPLE}"] button.home-open').click()
         else:
-            page.locator("#scheme-list").select_option(SAMPLE)
-            page.locator("#open-scheme").click()
+            open_scheme(page, SAMPLE)
         _opened(page, SAMPLE)
         # 碰那顆入口之前量：Playwright 的 click 會自己捲，量在後面就量不出「不用捲」。
-        assert _inside(page, "#scheme-zone-open")
-        expect(page.locator("#scheme-zone-open")).to_have_text("設定每一區貼什麼 ▸")
-        page.locator("#scheme-zone-open").click()
+        # #1265 單元 3 拿掉方案那一列那顆（派工單細節裁決 5）；第一屏上進那一頁的是頂上導覽列的「這間房貼什麼」
+        # （第 2 段右欄那顆在第一屏外，見回報量值）。
+        assert _inside(page, "#nav-zones")
+        expect(page.locator("#nav-zones")).to_have_text("這間房貼什麼")
+        page.locator("#nav-zones").click()
         _on_zone_page(page, SAMPLE, SAMPLE_ROOM)
         _assert_quiet(watched)
 
@@ -116,12 +124,16 @@ def test_after_opening_a_scheme_the_way_in_is_on_the_first_screen(tmp_path: Path
 @pytest.mark.parametrize("name", ["outside", "gone"])
 def test_a_link_to_a_scheme_that_cannot_open_says_why_and_stays_off_the_zone_page(
         tmp_path: Path, browser: Browser, name: str) -> None:
-    """outside：存著、但喇叭在房間外，打開時檢查不過；gone：清單裡沒有（封存了、舊書籤）。"""
+    """outside：存著、但喇叭在房間外，打開時檢查不過；gone：清單裡沒有（封存了、舊書籤）。#1265 單元 5c 起兩種都接著開
+    最近存的那一份（不留在沒存的開機範本上），原因照樣寫在「打開」旁邊，那一頁照樣不開。"""
     _prepare(tmp_path, SAMPLE)
     broken = _part2d_layout() | {"scheme_id": "outside"}
     speakers = cast(dict[str, dict[str, float]], broken["speakers"])
     speakers[next(iter(speakers))]["x"] = 99.0
     (tmp_path / "schemes" / "outside.json").write_text(json.dumps(broken), encoding="utf-8")
+    # 打不開之後開的是最近存的那一份（#1265 單元 5c）：把區名那一份存成最近的。
+    for scheme, stamp in ((WHOLE, 1_000_000_000), ("outside", 1_000_000_300), (SAMPLE, 1_000_000_600)):
+        os.utime(tmp_path / "schemes" / f"{scheme}.json", (stamp, stamp))
     with _serve(tmp_path) as base, _open(browser, f"{base}/?zones={name}") as watched:
         page = watched.page
         page.set_viewport_size({"width": 1440, "height": 900})
@@ -132,7 +144,11 @@ def test_a_link_to_a_scheme_that_cannot_open_says_why_and_stays_off_the_zone_pag
         if name == "gone":
             expect(note).to_contain_text("已存的方案裡沒有這一份")
         else:
-            assert note.inner_text() == f"沒有打開「{name}」：{page.locator('#messages').inner_text()}"
+            # #1265 單元 5c：打不開就開下一份，訊息列換成下一份的檢查結果；原因改跟伺服器拒收那一句直接比。
+            refused = page.request.get(f"{base}/api/schemes/{name}")
+            assert refused.status == 422, refused.text()
+            reason = "\n".join(problem["text"] for problem in refused.json()["problems"])
+            assert note.text_content() == f"沒有打開「{name}」：{reason}。先開了「{SAMPLE}」；要別份從「換一個方案」另選", note.text_content()
         expect(page.locator("#zone-page")).to_be_hidden()
         expect(page.locator("main")).to_be_visible()
         assert page.locator("#save-id").input_value() != name
@@ -142,8 +158,9 @@ def test_a_link_to_a_scheme_that_cannot_open_says_why_and_stays_off_the_zone_pag
 
 
 def test_a_link_arriving_while_the_form_is_busy_does_not_open_the_zone_page(tmp_path: Path, browser: Browser) -> None:
-    """帶著 ?zones=<名> 開頁，清單還沒載完就勾了沙發，那一筆改動還沒回來：輪到打開那一份時「打開」被擋下
-    （上一個動作還沒做完）。這時不准開「這間房貼什麼」——表單上還是範本，開了就是開在範本上。那一筆回來之後也不開。"""
+    """帶著 ?zones=<名> 開頁，清單還沒載完就勾了沙發，那一筆改動還沒回來：輪到打開那一份時頁面正忙。這時不准開
+    「這間房貼什麼」——表單上還是範本，開了就是開在範本上。#1265 單元 5c 起開頁等那一筆回來才開那一份（門一直關著），
+    開好了才進它的那一頁。"""
     _prepare(tmp_path, SAMPLE)
     held: dict[str, Route] = {}
     errors: list[str] = []
@@ -155,25 +172,29 @@ def test_a_link_arriving_while_the_form_is_busy_does_not_open_the_zone_page(tmp_
             page.route("**/api/results", lambda route: held.__setitem__("results", route))
             page.route("**/api/input-edit", lambda route: held.__setitem__("edit", route))
             page.goto(f"{base}/?zones={SAMPLE}", wait_until="commit")
-            page.wait_for_function("document.querySelectorAll('#scheme-list option').length > 0")
+            page.wait_for_function("document.querySelectorAll('#home-schemes .home-open').length > 0")
             template = page.locator("#save-id").input_value()
             assert template and template not in (SAMPLE, WHOLE)
-            page.locator("#furniture-sofa").click()
+            # 開頁判定完之前第 1 段藏著、點不到（#1265 單元 5b 第二趟，審查第 5 條）：改由頁面程式勾沙發、送出那一筆改動。
+            page.locator("#furniture-sofa").evaluate("node => { node.checked = true; node.dispatchEvent(new Event('change')); }")
             page.wait_for_function("inputBusy")
             while not {"results", "edit"} <= held.keys():
                 page.wait_for_timeout(20)
             held["results"].continue_()
-            page.wait_for_function("document.body.dataset.inputReady === 'true'")
-            # 開頁做完的同一步就輪到那條連結：被擋下的那一句寫在「打開」旁邊，那一頁沒開。
+            # #1265 單元 5c：開頁那道門等開好一份才開。那一筆還在路上時門照樣關著、旗子不設、那一頁不開，表單（藏著的）
+            # 還是範本；不把「上一個動作還沒做完」當成這一份打不開去開下一份。
+            page.wait_for_timeout(500)
             assert page.evaluate("inputBusy") is True
-            expect(page.locator("#open-note")).to_have_text(
-                f"上一個動作還沒做完，沒有打開「{SAMPLE}」；等它做完再按一次「打開」")
+            assert page.evaluate("document.body.dataset.inputStart") == "loading"
+            assert page.evaluate("document.body.dataset.inputReady") is None
             expect(page.locator("#zone-page")).to_be_hidden()
-            held["edit"].continue_()
-            page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
-            expect(page.locator("#zone-page")).to_be_hidden()
-            expect(page.locator("main")).to_be_visible()
             expect(page.locator("#save-id")).to_have_value(template)
+            held["edit"].continue_()
+            # 那一筆回來之後才開帶名字的那一份，再進它的「這間房貼什麼」——從頭到尾沒有開在範本上。
+            page.wait_for_function("document.body.dataset.inputReady === 'true'")
+            _opened(page, SAMPLE)
+            _on_zone_page(page, SAMPLE, SAMPLE_ROOM)
+            expect(page.locator("#open-note")).to_have_text("")
             assert errors == []
         finally:
             page.close()

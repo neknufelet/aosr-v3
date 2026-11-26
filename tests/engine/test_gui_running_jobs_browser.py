@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Page
 
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_example_scheme, open_save_as
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser, result
 
 
@@ -161,6 +162,7 @@ def test_switching_while_a_new_calculation_answers_leaves_one_poller(tmp_path: P
     started: list[str] = []
     with _serve(tmp_path, _sleep_runner(tmp_path)) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         try:
             started = _start_runs(page, base, ("other", "followed"))
             other, followed = started
@@ -219,11 +221,15 @@ def test_each_calculation_runs_the_form_on_screen(tmp_path: Path, browser: Brows
                       f"shutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n")
     with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         links = []
         for step, (lx, save_as) in enumerate(((None, None), ("5.5", None), ("5.6", "next"))):
             if lx is not None:
                 page.locator("#room-Lx").fill(lx)
+                # 離開那一格才算改定：喇叭與聆聽點這時跟著房間挪（#1265），下面記的表單才是開算那一刻的樣子。
+                page.locator("#room-Lx").press("Tab")
             if save_as is not None:
+                open_save_as(page)
                 page.locator("#save-as-id").fill(save_as)
                 page.locator("#save-as").click()
                 page.wait_for_function("name => document.querySelector('#save-id').value === name", arg=save_as)

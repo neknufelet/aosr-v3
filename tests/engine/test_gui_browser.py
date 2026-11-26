@@ -24,6 +24,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, 
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
 from aosr.reporting.result import SchemeResult, save_result
+from tests.engine._input_page_steps import check_result, close_results, open_example_scheme, open_results, open_save_as, open_scheme, recheck, reveal
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 from tests.engine._modal_cases import runner as modal_test_runner
@@ -70,6 +71,8 @@ class Watched:
     console_errors: list[str] = field(default_factory=list)
     page_errors: list[str] = field(default_factory=list)
     response: Response | None = None
+    # 伺服器回 4xx／5xx 的每一個回覆（「狀態碼 路徑」）：瀏覽器主控台的「Failed to load resource」一條對一個。
+    failed_responses: list[str] = field(default_factory=list)
 
 
 @pytest.fixture(scope="module")
@@ -130,8 +133,13 @@ def _open(browser: Browser, url: str, device_scale_factor: float = 1,
     def on_page_error(error: Error) -> None:
         watched.page_errors.append(str(error))
 
+    def on_response(response: Response) -> None:
+        if response.status >= 400:
+            watched.failed_responses.append(f"{response.status} {urlsplit(response.url).path}")
+
     page.on("console", on_console)
     page.on("pageerror", on_page_error)
+    page.on("response", on_response)
     try:
         if response_path is None:
             page.goto(url, wait_until="networkidle")
@@ -172,6 +180,15 @@ def _assert_quiet(watched: Watched) -> None:
     assert watched.page_errors == []
 
 
+def _assert_quiet_but_plan_refused(watched: Watched) -> None:
+    """頁面沒丟錯；主控台每一條錯都對得上這一頁收到的一次平面圖檢查拒收（``/api/plan`` 回 422：表單有格子空著，
+    #1265 單元 6 起改定一格就自動檢查，清空一格再離開必然有這一次）。別的請求出錯、或主控台多一條對不上的錯，照樣紅。"""
+    assert watched.page_errors == []
+    assert all(item == "422 /api/plan" for item in watched.failed_responses), watched.failed_responses
+    assert len(watched.console_errors) == len(watched.failed_responses), (watched.console_errors, watched.failed_responses)
+    assert all("422" in text for text in watched.console_errors), watched.console_errors
+
+
 def _copy_runner(tmp_path: Path, result: SchemeResult, *, wait: bool = False) -> tuple[str, ...]:
     """假計算：需要等待時由考卷放行，再把考卷結果抄到 --out。"""
     source = tmp_path / "fixture-result.json"
@@ -187,23 +204,26 @@ def _copy_runner(tmp_path: Path, result: SchemeResult, *, wait: bool = False) ->
 def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: Browser,
                                                       result: SchemeResult) -> None:
     with _serve(tmp_path, _copy_runner(tmp_path, result)) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#calculate").click()
         page.locator("#result-link").wait_for(state="visible")
         first = page.locator("#result-link").get_attribute("href")
         assert first is not None
         # 算完的訊息講白話：不印結果檔的路徑、也不印 32 位計算代號，看結果交給旁邊的「查看結果頁」連結。
         finished = page.locator("#messages").inner_text()
-        assert "算完了" in finished and "查看結果頁" in finished
+        assert "算完了" in finished and "算好了 ▸ 看結果" in finished
         assert first.rsplit("/", 1)[1] not in finished and "/" not in finished and ".json" not in finished
         assert page.locator("#result-stale").is_hidden()
         # 訊息叫人「按」查看結果頁，它就要長得像按鈕：跟結果清單的「查看」同一種樣子，沒有底線。
+        open_results(page)
         page.locator("#results-list tr a").first.wait_for()
         look = page.locator("#result-link").evaluate(BUTTON_LOOK_JS)
         assert look[5] == "none" and look == page.locator("#results-list tr a").first.evaluate(BUTTON_LOOK_JS)
-        page.locator("#speaker-left-x").fill("1.7")
+        close_results(page)
+        reveal(page, "#speaker-left-x").fill("1.7")
         assert page.locator("#result-stale").is_visible()
         assert page.locator("#result-link").get_attribute("href") == first
+        open_save_as(page)
         page.locator("#save-as-id").fill("next")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'next'")
@@ -213,8 +233,7 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         # 開舊方案時結果連結與舊結果標示一起藏：畫面上那份結果不一定是打開的這一份算的。
         page.locator("#speaker-left-x").fill("1.8")
         assert page.locator("#result-stale").is_visible()
-        page.locator("#scheme-list").select_option("next")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "next")
         page.wait_for_function("() => document.querySelector('#result-link').hidden")
         assert page.locator("#result-stale").is_hidden()
         _assert_quiet(watched)
@@ -222,13 +241,15 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
 
 def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browser: Browser,
                                                          result: SchemeResult) -> None:
-    # 算完時表單已經不是算的那一份（重新整理回到範本、或開算後改過），連結不准掛在表單旁邊。
+    # 算完時表單已經不是算的那一份（開算後換開另一份、或開算後改過），連結不准掛在表單旁邊。
     with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path, "other")
+        open_example_scheme(page, base, tmp_path)
         page.locator("#calculate").click()
         page.wait_for_function("() => !document.querySelector('#stop').disabled")
-        page.reload(wait_until="networkidle")
+        page.goto(f"{base}/?scheme=other", wait_until="networkidle")
+        page.wait_for_function("openedId === 'other' && !inputBusy")
         (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
                                timeout=15_000)
@@ -236,7 +257,7 @@ def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browse
         (tmp_path / "release").unlink()
         page.locator("#calculate").click()
         page.wait_for_function("() => !document.querySelector('#stop').disabled")
-        page.locator("#speaker-left-x").fill("1.7")
+        reveal(page, "#speaker-left-x").fill("1.7")
         (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#stop').disabled", timeout=15_000)
         assert "算完了" in page.locator("#messages").inner_text()
@@ -246,22 +267,27 @@ def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browse
 
 def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
                                             result: SchemeResult) -> None:
-    # 在算的時候改一格、再按計算：正在算的那份改不得，存檔被 409 擋。「開算後改過」的記號要留著，
-    # 不然原本那筆算完會把連結掛在改過的表單旁邊。
+    # 正在算的那份改動要保住：另存帶走改動，原本那筆算完也不能把連結掛在新表單旁邊。
     with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
         page.locator("#room-Lx").fill("5.5")
-        page.locator("#calculate").click()
-        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('正在計算')")
+        assert page.locator("#save").is_hidden() and page.locator("#calculate").is_hidden()
+        assert "有改動還沒存：房間長度" in page.locator("#save-state").inner_text()
+        assert page.evaluate("runEdited")
+        open_save_as(page)
+        page.locator("#save-as-id").fill("edited-room")
+        page.locator("#save-as").click()
+        page.wait_for_function("openedId === 'edited-room'")
+        edited = json.loads((tmp_path / "schemes" / "edited-room.json").read_text())
+        assert edited["scene"]["room_m"]["Lx"] == 5.5
         (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
                                timeout=15_000)
         assert page.locator("#result-link").is_hidden()
-        assert all("409" in text for text in watched.console_errors), watched.console_errors
-        assert watched.page_errors == []
+        _assert_quiet(watched)
 
 
 def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Browser,
@@ -269,9 +295,16 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
     # 第一筆還在算就再按一次計算：第一筆的計時器要停掉，不然算完後它每秒還在查、蓋掉訊息。
     with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
+        second = "another-room"
+        document = page.evaluate("structuredClone(scheme)")
+        document["scheme_id"] = second
+        (tmp_path / "schemes" / f"{second}.json").write_text(json.dumps(document))
+        first = page.locator("#save-id").input_value()
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
+        open_scheme(page, second)
+        page.wait_for_function("name => openedId === name", arg=second)
         with page.expect_response(lambda response: response.url == f"{base}/api/runs"
                                   and response.request.method == "POST") as second_run:
             page.locator("#calculate").click()
@@ -284,7 +317,7 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
                 pass
         # #796：第一筆還在算，換到底下那一列；兩筆都算完後那一列拿掉。
         page.wait_for_function("() => !document.querySelector('#other-runs').hidden")
-        assert [text.startswith("另一筆：") and "計算中" in text for text in page.locator("#other-runs li").all_inner_texts()] == [True]
+        assert [text.startswith(f"另一筆：「{first}」") and "計算中" in text for text in page.locator("#other-runs li").all_inner_texts()] == [True]
         (tmp_path / "release").touch()
         page.locator("#result-link").wait_for(state="visible", timeout=15_000)
         page.wait_for_function("() => document.querySelector('#other-runs').hidden", timeout=10_000)
@@ -303,9 +336,9 @@ def test_buttons_work_even_if_a_list_fails_to_load(tmp_path: Path, browser: Brow
         page = browser.new_page(viewport={"width": 1400, "height": 1100})
         try:
             page.route("**/api/results", broken)
-            page.goto(f"{base}/", wait_until="networkidle")
+            open_example_scheme(page, base, tmp_path)
             page.evaluate("() => { document.querySelector('#messages').textContent = ''; }")
-            page.locator("#check").click()
+            recheck(page)
             page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
         finally:
             page.close()
@@ -329,7 +362,7 @@ def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -
             with _open(browser, "about:blank") as watched:
                 page = watched.page
                 page.route("**/api/labels", broken)
-                page.goto(f"{base}/", wait_until="networkidle")
+                open_example_scheme(page, base, tmp_path)
                 page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
                 notice = page.locator("#labels-notice")
                 shown = notice.inner_text()
@@ -340,12 +373,12 @@ def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -
                 if broken is not server_error:
                     # 瀏覽器的英文原文沒有丟掉，只是收進技術細節。
                     assert "瀏覽器原文：" in (technical.text_content() or "")
-                title = page.locator("#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
+                title = reveal(page, "#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
                 assert title.inner_text() == "left"
-                # 名稱表的說明跟喇叭與座位的列放在同一區，再按一次檢查也還在。
-                assert notice.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
+                # 名稱表的說明跟喇叭與座位的列放在同一區（#1265 起是第 1 段），再按一次檢查也還在。
+                assert notice.evaluate("node => node.closest('section').querySelector('h2 .step-title').textContent") == "房間和擺位"
                 page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-                page.locator("#check").click()
+                recheck(page)
                 page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
                 assert notice.is_visible() and notice.inner_text() == shown
                 notice.locator("summary").click()
@@ -359,15 +392,15 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
     # 檢查回的是方案裡的欄位路徑（英文，例如 receiver_set.points.5.position_m.2）；伺服器把它寫成
     # 表單上那一格的中文名加白話，訊息列照印。座位用順序號找到是哪一個座位、軸用 0／1／2 對 x／y／z。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
-        page.locator("#plan-legend li").first.wait_for()
-        page.locator("#use-scattering").check()
+        open_example_scheme(page := watched.page, base, tmp_path)
+        reveal(page, "#plan-legend li").first.wait_for()
+        reveal(page, "#use-scattering").check()
         for scatter in page.locator("#scattering input").all():
             scatter.fill("0.2")
 
         def shown_after_check() -> str:
             page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-            page.locator("#check").click()
+            recheck(page)
             page.wait_for_function("() => document.querySelector('#messages').textContent !== ''")
             return page.locator("#messages").inner_text()
 
@@ -375,7 +408,7 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
                             ("#scatter-ceiling", "天花散射"), ("#speaker-right-y", "右聲道喇叭 y 座標"),
                             ("#receiver-up-z", "主位上方 z 座標"), ("#receiver-main-x", "主位 x 座標")):
             before = page.locator(field).input_value()
-            page.locator(field).fill("")
+            reveal(page, field).fill("")
             assert shown_after_check() == f"{name}：空著沒填", field
             page.locator(field).fill(before)
             assert shown_after_check() == "檢查通過", field
@@ -404,15 +437,15 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
 
 def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#room-Lx").fill("5.5")
+        open_save_as(page)
         page.locator("#save-as-id").fill("A")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'A'")
         before = (tmp_path / "schemes" / "A.json").read_bytes()
         page.locator("#room-Lx").fill("4.5")
-        page.locator("#scheme-list").select_option("A")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "A")
         page.wait_for_function("() => document.querySelector('#room-Lx').value === '5.5'")
         # 打開的那一份還沒有結果：改了按「儲存」要真的存進去，不是當成另存撞名。
         page.locator("#room-Lx").fill("5.7")
@@ -420,11 +453,13 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
         assert (tmp_path / "schemes" / "A.json").read_bytes() != before
         before = (tmp_path / "schemes" / "A.json").read_bytes()
+        open_save_as(page)
         page.locator("#save-as-id").fill("b")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'b'")
         page.locator("#room-Lx").fill("5.6")
         assert (tmp_path / "schemes" / "A.json").read_bytes() == before
+        open_save_as(page)
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
         # 撞名時伺服器照設計回 409，瀏覽器會記一筆「載入失敗」，那是預期的；JS 自己不准拋錯。
@@ -432,139 +467,40 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         assert watched.page_errors == []
 
 
-def _load_template(page: Page) -> None:
-    # 先清掉旁邊與訊息列上一次的字：載入最後一步是檢查（寫訊息列、清旁邊），
-    # 兩格同時有這一次的字才算載完，成功那句被檢查清掉就等不到。
-    page.evaluate("() => { for (const id of ['template-note', 'messages']) document.getElementById(id).textContent = ''; }")
-    page.locator("#load-template").click()
-    page.wait_for_function("() => document.querySelector('#messages').textContent !== ''"
-                           " && document.querySelector('#template-note').textContent.startsWith('已載入')")
-
-
-def _template_url(url: str) -> bool:
-    return "template=" in url
-
-
-def _check_template_same_name(page: Page, tmp_path: Path) -> None:
-    """原 test_template_save_does_not_overwrite_same_name_scheme。"""
-    page.locator("#save").click()
-    page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
-    name = page.locator("#save-id").input_value()
-    before = (tmp_path / "schemes" / f"{name}.json").read_bytes()
-    # 重新整理後表單是範本、不是從那份打開的：同名儲存要當成另存，不准蓋掉已經存的那份。
-    page.reload(wait_until="networkidle")
-    page.locator("#room-Lx").fill("5.5")
-    page.locator("#save").click()
-    page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
-    assert (tmp_path / "schemes" / f"{name}.json").read_bytes() == before
-
-
-def _check_template_load_failure(page: Page) -> None:
-    """原 test_template_load_failure_keeps_form：範本讀不到，表單原樣、原因寫在按鈕旁邊。"""
-    page.route(_template_url, lambda route: route.fulfill(status=400, json={"error": "範本壞了"}))
-    page.locator("#template-list").select_option("stage_one")
-    page.locator("#load-template").click()
-    page.wait_for_function("() => document.querySelector('#template-note').textContent.startsWith('沒有載入範本')")
-    assert "範本壞了" in str(page.locator("#template-note").text_content())
-    assert page.locator("#room-Lx").input_value() == "5.5"
-    assert page.locator("#save-id").input_value() == "reference-room-centred"
-    page.unroute(_template_url)
-
-
-def _check_stage_one_template(page: Page, tmp_path: Path) -> None:
-    """原 test_stage_one_template_loads_and_never_overwrites。"""
-    raw = json.loads((repo_root() / "blueprint" / "scheme_stage_one_template.json").read_text(encoding="utf-8"))
-    walls = raw["scene"]["impedance_pa_s_per_m_by_wall"]
-    assert page.locator("#save-id").input_value() == "reference-room-centred"
-    page.locator("#room-Lx").fill("5.5")
-    # 換範本跟「打開」一樣：上一份的量測草稿、結果連結、封存提示都收掉。
-    page.locator("#material-kind-ceiling").select_option("measured_impedance")
-    page.wait_for_selector("#measured-cancel-ceiling")
-    page.evaluate("() => { for (const id of ['result-link', 'result-stale', 'scheme-archive-notice'])"
-                  " document.getElementById(id).hidden = false; }")
-    page.locator("#template-list").select_option("stage_one")
-    _load_template(page)
-    assert page.locator("#template-note").text_content() == \
-        "已載入「第一階段範本（六面 30ρc、全向聲源、無家具）」；要留下來請按「另存新名字」"
-    assert page.locator("#save-id").input_value() == raw["scheme_id"]
-    assert page.locator("#source-model").input_value() == raw["source_model"]
-    assert page.locator("#room-Lx").input_value() == f"{raw['scene']['room_m']['Lx']:g}"
-    for wall, value in walls.items():
-        assert float(page.locator(f"#wall-{wall}").input_value()) == value
-    assert page.evaluate("() => document.getElementById('measured-cancel-ceiling')") is None
-    # 直接讀 hidden 屬性：沒有字的提示框本來就量不到大小，用「看不看得到」會放過沒藏的。
-    for hidden in ("result-link", "result-stale", "scheme-archive-notice"):
-        assert page.evaluate("id => document.getElementById(id).hidden", hidden) is True, hidden
-    # 牆換成構造再換回固定阻抗：填回去的是載入範本的 30ρc，不是開頁時參考房的值。
-    page.locator("#material-kind-floor").select_option("assembly")
-    page.wait_for_selector("#wall-editor-floor [data-layer-field]")
-    page.locator("#material-kind-floor").select_option("constant_impedance")
-    page.wait_for_selector("#wall-floor")
-    assert float(page.locator("#wall-floor").input_value()) == walls["floor"]
-    page.locator("#material-kind-floor").select_option("assembly")
-    page.wait_for_selector("#wall-editor-floor [data-layer-field]")
-    # 第一次按「儲存」照名字存一份；再載入一次範本、改了按「儲存」不准蓋掉那一份。
-    _load_template(page)
-    assert page.locator("#wall-floor").is_visible()
-    page.locator("#save").click()
-    page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
-    saved = tmp_path / "schemes" / f"{raw['scheme_id']}.json"
-    before = saved.read_bytes()
-    assert json.loads(before)["scene"]["impedance_pa_s_per_m_by_wall"] == walls
-    _load_template(page)
-    page.locator("#room-Lx").fill("5.5")
-    page.locator("#save").click()
-    page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
-    assert saved.read_bytes() == before
-    assert page.locator("#template-note").text_content() == ""
-    # 換回參考房：整張表單跟開頁時一樣。
-    page.locator("#template-list").select_option("reference")
-    _load_template(page)
-    assert page.locator("#save-id").input_value() == "reference-room-centred"
-    assert page.locator("#source-model").input_value() == "product_default"
-
-
-def test_template_save_load_failure_and_stage_one_template(tmp_path: Path, browser: Browser) -> None:
-    """三段在同一頁輪流做（#972 由三題合成一題，每段斷言原樣保留）：範本同名儲存不蓋掉已存那份、範本讀不到時
-    表單原樣、第一階段範本載入後永不蓋掉已存那份。"""
-    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
-        _check_template_same_name(page, tmp_path)
-        _check_template_load_failure(page)
-        _check_stage_one_template(page, tmp_path)
-        # 撞名的 409 是預期的；第二段考卷自己造的 400 只准一筆；JS 自己不准拋錯。
-        statuses = [re.findall(r"status of (\d+)", text) for text in watched.console_errors]
-        assert [item for item in statuses if item != ["409"]] == [["400"]], watched.console_errors
         assert watched.page_errors == []
 
 
 def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
                                           result: SchemeResult) -> None:
     _save(tmp_path, result)
+    # #1265 單元 4：選為 A／B 改成勾兩筆（同一筆不能同時當 A 和 B），多放一筆同一份方案的結果才勾得出兩筆。
+    save_result(result, tmp_path / "results" / f"{'b' * 32}.json")
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
+        open_results(page)
         page.locator("#results-list tr").first.wait_for()
         assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
         _assert_text_is_formatted(page)
         # 「物理」格只講白話（跟現在的物理同不同）；物理身分與提交代號只在滑鼠停留的說明裡。
-        version = page.locator("#results-list tr").first.locator("td").nth(3)
+        # （#1265 單元 4：結果抽屜裡「物理」是那一列小字裡的一段 .res-physics。）
+        version = page.locator("#results-list tr").first.locator(".res-physics")
         assert version.inner_text() in {"跟現在相同", "物理改過，要重算"}
         assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", version.inner_text())
         tip = version.get_attribute("title") or ""
         assert "物理身分" in tip and "程式提交" in tip
-        # 「查看」仍是連結（連到結果頁），但外觀跟同一列的「選為 A／B」按鈕一樣：底色、字色、圓角、
+        # 「看」仍是連結（連到結果頁），但外觀跟同一列的「封存」按鈕一樣：底色、字色、圓角、
         # 內距、高度都相同，沒有底線（以前是藍色底線字，跟旁邊的按鈕不像同一組動作）。
         row = page.locator("#results-list tr").first
         looks = [row.locator("a").evaluate(BUTTON_LOOK_JS),
                  *row.locator("button").evaluate_all(f"nodes => nodes.map({BUTTON_LOOK_JS})")]
         assert looks[0][5] == "none" and looks[1:]
         assert all(item == looks[0] for item in looks[1:]), looks
-        # 選好 A、B 才出現的「比較」也是同一種按鈕（以前是藍色底線小字）；沒選好之前藏著。
-        assert page.locator("#compare-link").is_hidden()
-        row.get_by_role("button", name="選為 A").click()
-        row.get_by_role("button", name="選為 B").click()
-        assert page.locator("#compare-link").is_visible()
-        assert page.locator("#compare-link").evaluate(BUTTON_LOOK_JS) == looks[0]
+        # 勾好兩筆才按得到的「比較」也是同一種按鈕（以前是藍色底線小字）；沒勾好之前停用。
+        assert page.locator("#compare-go").get_attribute("aria-disabled") == "true"
+        check_result(page, str(row.get_attribute("data-run-id")))
+        check_result(page, str(page.locator("#results-list tr").nth(1).get_attribute("data-run-id")))
+        assert page.locator("#compare-go").get_attribute("aria-disabled") == "false"
+        assert page.locator("#compare-go").evaluate(BUTTON_LOOK_JS) == looks[0]
         page.locator("#results-list tr a").first.click()
         _wait_for_lines(page)
         _assert_quiet(watched)
@@ -579,7 +515,7 @@ def test_failed_run_says_failed_and_hangs_no_result_link(tmp_path: Path, browser
     script.write_text(f"import shutil,sys\nshutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n"
                       "sys.stderr.write('寫完才出錯\\n')\nsys.exit(3)\n")
     with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('失敗')")
         assert page.locator("#result-link").is_hidden()
@@ -595,7 +531,7 @@ def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) 
     script = tmp_path / "sleep-runner.py"
     script.write_text("import time\ntime.sleep(60)\n")
     with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.locator("#calculate").click()
         page.wait_for_function("() => !document.querySelector('#stop').disabled")
         run_id = page.evaluate("() => runId")
@@ -606,7 +542,7 @@ def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) 
             page.locator("#stop").click()
             page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('已停止')")
             assert page.locator("#stop").is_disabled()
-            # 已結束的不接回：表單開的是範本，貼上一筆已停止的狀態會讓人以為是這份的。
+            # 已結束的不接回：重新整理後不再貼上一筆已停止的狀態（開頁那時一筆在算的都沒有）。
             page.reload(wait_until="networkidle")
             assert page.locator("#run-state").inner_text() == ""
             assert page.locator("#stop").is_disabled()
@@ -620,10 +556,10 @@ def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) 
 def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
                                                                 browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         # 平面圖與側面圖一打開就畫（第二步截圖抓過「要先存檔才畫」）。
         for svg in ("#plan-xy", "#plan-xz"):
-            page.locator(f"{svg} circle").first.wait_for()
+            reveal(page, f"{svg} circle").first.wait_for()
             assert page.locator(f"{svg} rect").count() > 0, svg
         # 六面牆的阻抗倍數（幾倍 ρc）是伺服器算好回來填的；載入時出錯會被接住、訊息又被「檢查通過」蓋掉，
         # 只有這幾格空著看得出來。
@@ -632,7 +568,7 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
           return cells.length > 0 && cells.every((cell) => cell.textContent.trim() !== "");
         }""")
         page.locator("#messages").evaluate("(element) => { element.textContent = ''; }")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
         assert page.locator("#messages").inner_text() == "檢查通過"
         _assert_text_is_formatted(page)
@@ -641,8 +577,8 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
 
 def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
-        page.locator("#zoom-xy circle").first.wait_for()
+        open_example_scheme(page := watched.page, base, tmp_path)
+        reveal(page, "#zoom-xy circle").first.wait_for()
         for svg in ("#zoom-xy", "#zoom-xz"):
             boxes = page.locator(f"{svg} text").evaluate_all(
                 "nodes => nodes.map(node => { const b = node.getBBox(); return {x:b.x,y:b.y,w:b.width,h:b.height}; })")
@@ -692,18 +628,18 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
 
 def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
-        page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
+        open_example_scheme(page := watched.page, base, tmp_path)
+        reveal(page, "#zoom-xy g[data-keys]").first.locator("circle").click()
         assert page.locator("#plan-detail").inner_text()
-        page.locator("#receiver-front-x").fill("3.0")
-        page.locator("#check").click()
+        reveal(page, "#receiver-front-x").fill("3.0")
+        recheck(page)
         page.wait_for_function("() => document.querySelector('#plan-detail').textContent === ''")
         assert "x 3.00" in page.locator("#plan-legend li[data-id='receiver:front']").inner_text()
         # 失敗那一支也要清明細：先再點一次，讓明細有字，才考得到。
         page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
         assert page.locator("#plan-detail").inner_text()
         page.locator("#room-Lx").fill("")
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('空著沒填')")
         assert not page.locator("#plan-legend li").all_inner_texts()
         assert page.locator("#plan-detail").inner_text() == ""
@@ -717,7 +653,7 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
 def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
                                                             browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
-        page = watched.page
+        open_example_scheme(page := watched.page, base, tmp_path)
         page.evaluate("""() => {
           scheme.receiver_set.points.push({receiver_id: 'seat2', position_m: [1.5, 1.2, 1.2],
             role: 'other_seat', importance: 0, direction_relative_to_primary: null});
@@ -725,9 +661,9 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         }""")
         # 右喇叭搬到「左」那個周圍點上，兩個疊成一格（座標照範例現讀，不寫死）。
         left = page.evaluate("() => scheme.receiver_set.points.find(point => point.receiver_id === 'left').position_m")
-        page.locator("#speaker-right-x").fill(str(left[0]))
+        reveal(page, "#speaker-right-x").fill(str(left[0]))
         page.locator("#speaker-right-y").fill(str(left[1]))
-        page.locator("#check").click()
+        recheck(page)
         page.wait_for_function("() => document.querySelectorAll('#plan-legend li').length > 0")
         scheme = page.evaluate("() => collect()")
         plan = page.request.post(f"{base}/api/plan", data=scheme).json()
@@ -825,6 +761,8 @@ def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
     notice = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
     with _serve(tmp_path) as base:
         with _open(browser, base) as watched:
+            open_example_scheme(watched.page, base, tmp_path)
+            open_results(watched.page)
             watched.page.locator("#results-list tr").first.wait_for(state="visible")
             assert watched.page.locator("#server-notice").is_hidden()
         state["current"] = "calc-v1:" + "1" * 64

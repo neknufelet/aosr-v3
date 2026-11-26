@@ -7,6 +7,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
+from tests.engine._input_page_steps import open_example_scheme, open_save_as, reveal, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
@@ -28,7 +29,8 @@ def pasted(separator: str = '\t', header: bool = False) -> str:
 
 def start_draft(page: Page) -> None:
     original = page.evaluate('collect()')
-    page.locator('#material-kind-floor').select_option('measured_impedance')
+    # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開。
+    reveal(page, '#material-kind-floor').select_option('measured_impedance')
     expect(page.locator('#measured-draft-floor')).to_be_visible()
     assert page.evaluate('collect()') == original
     page.locator('#measured-paste-floor').fill(pasted())
@@ -46,6 +48,7 @@ def apply_draft(page: Page, status: int = 200) -> None:
 def test_draft_edit_roundtrip_switch_and_paste_formats(tmp_path: Path, browser: Browser, width: int) -> None:
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         expect(page.locator('#preset-floor')).to_have_value('')
         _filled_draft_preset(page, 'glass_wool_96k_50mm')
@@ -94,6 +97,7 @@ def test_refusal_keeps_draft_and_original_scheme(tmp_path: Path, browser: Browse
     width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         original = page.evaluate('collect()')
         if case != 'base':
@@ -126,6 +130,7 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
     width = 1400
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         start_draft(page)
         _filled_draft_preset(page, 'glass_wool_96k_50mm')
         apply_draft(page)
@@ -138,6 +143,7 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
         # 攔在半路：這時另存自己的話都寫完了，才開始盯訊息列，放行後它一被改寫就是補問的回覆處理完了。
         held: list[Route] = []
         page.route('**/api/input-preview', lambda route: held.append(route))
+        open_save_as(page)
         page.locator('#save-as-id').fill('bad-base')
         with page.expect_request('**/api/input-preview'):
             with page.expect_response('**/api/schemes/bad-base') as saved:
@@ -167,6 +173,7 @@ def test_existing_measured_base_range_save_is_plain_422(tmp_path: Path, browser:
             assert saved_again.value.status == 422
         expect(page.locator('#save-as-note')).to_contain_text(refused)
         assert len(held) == 2
+        open_save_as(page)
         page.locator('#save-as-id').fill('other-name')
         assert page.locator('#save-as-note').inner_text() == ''
         page.evaluate('() => { window.saidAfterUnlock = false; }')
@@ -195,11 +202,12 @@ def test_raw_point_and_base_values_survive_save_and_parser_errors_keep_line_numb
     (tmp_path / 'schemes' / 'precision.json').write_text(Scheme.model_validate(data).model_dump_json())
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
-        page.locator('#scheme-list').select_option('precision')
+        open_button = scheme_open_button(page, 'precision')
         with page.expect_response('**/api/input-preview'):
-            page.locator('#open-scheme').click()
+            open_button.click()
         page.wait_for_function("!document.querySelector('main').inert")
-        page.locator('#measured-source-floor').fill('只改出處；原始數字必須原樣保存')
+        # #1265 單元 3 起牆面表單只露選中那一面、收在第 2 段「換原本的牆」裡：先選地板、打開。
+        reveal(page, '#measured-source-floor').fill('只改出處；原始數字必須原樣保存')
         saved = _save_readback(page, 'precision-saved')
         assert floor(saved)['points'] == floor(data)['points']
         assert floor(saved)['base_assembly'] == floor(data)['base_assembly']

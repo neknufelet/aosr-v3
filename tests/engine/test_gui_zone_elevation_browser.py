@@ -11,6 +11,7 @@ from playwright.sync_api import Browser, Page, expect
 
 from aosr.physics.zone_fill import Box, fill_wall
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ASSEMBLY, NEW, ROOM_109, room109_document, room109_quarters
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -26,19 +27,10 @@ def _write(tmp_path: Path, document: dict[str, object]) -> None:
 
 
 def _open_scheme(page: Page, name: str) -> None:
-    page.locator("#scheme-list").select_option(name)
-    page.locator("#open-scheme").click()
+    open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
     page.wait_for_function("!document.querySelector('main').inert")
-    _unfold_old_table(page)
-
-
-def _unfold_old_table(page: Page) -> None:
-    """舊做法表（深度上限、原本的方案、每一區的下拉）預設收著（#1176 第 C 支）：這些考卷考的是它，先展開再操作。"""
-    fold = page.locator("#zone-table-fold")
-    if not fold.evaluate("fold => fold.open"):
-        fold.locator("> summary").click()
-    expect(fold).to_have_attribute("open", "")
+    # 以前這裡接著展開舊做法表（#1176 第 C 支）；#1265 單元 3 之二第二趟舊做法表拆了，打開方案就是全部。
 
 
 def _zones(page: Page, wall: str) -> list[dict[str, object]]:
@@ -119,6 +111,7 @@ def _check_orientation_and_markers(page: Page) -> None:
     expect(page.locator("#elevation-edge-top")).to_have_text("左牆")
 
     # 表單上改了左喇叭的 y（還沒存），立面圖上的記號跟著搬：x 起點牆上往右移。
+    reveal(page, "#speaker-left-y")  # #1265 起座標收在第 1 段「座標數字」摺疊裡，量之前先打開
     page.locator("#elevation-wall-x0").click()
     before = _centre_x(page, "#elevation-speaker-left")
     page.locator("#speaker-left-y").fill("2.0")
@@ -152,10 +145,11 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
 
         saved = _save_readback(page, "room109-cut")
         assert cast(dict[str, list[object]], cast(dict[str, object], saved["scene"])[NEW])["xL"] == _zones(page, "xL")
+        # 重開時第 2 段先換到前牆（#1265 單元 5c），點回 x 終點牆（_save_readback）時選的框已清掉：照使用者會做的再點一下那一框。
+        page.locator("#elevation [data-zone-id=z1] rect").click()
         expect(page.locator("#elevation [data-zone-id=z1]")).to_have_class("zone zone-drawn zone-mode-fixed selected")
 
         # 改寬：只動「寬」那一格，貼牆那一邊照舊正好等於牆寬。
-        page.locator("#elevation [data-zone-id=z1] rect").click()
         page.locator("#elevation-width").fill("1.5")
         _cut_by(page, "press:Enter")
         z1 = next(zone for zone in _zones(page, "xL") if zone["id"] == "z1")
