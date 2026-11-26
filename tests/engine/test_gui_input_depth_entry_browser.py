@@ -170,6 +170,6 @@ def test_a_refused_note_is_gone_as_soon_as_another_scheme_opens(tmp_path: Path, 
         assert held, "限制檢查應該還在路上"
         expect(page.locator("#depth-room-note")).to_have_text("")
         expect(page.locator("#depth-wall-note")).to_have_text("")
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _assert_quiet(watched)

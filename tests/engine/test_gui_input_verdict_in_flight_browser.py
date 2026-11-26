@@ -91,8 +91,8 @@ def test_drawing_a_box_on_a_paired_wall_runs_to_the_end(tmp_path: Path, browser:
         assert held, "限制檢查應該還在路上"
         words = _in_flight_words(page, "y0")
         assert len(words) > 1 and all("總厚度上限還在核對" in text for text in words), words
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _ran_to_the_end(page)
         assert cast(int, page.evaluate("zoneLimitsGeneration")) > before
         assert len(cast(list[object], page.evaluate("scheme.scene.surface_zones_by_wall.y0"))) > 1
@@ -138,8 +138,8 @@ def test_undoing_a_clear_on_a_paired_wall_runs_to_the_end(tmp_path: Path, browse
         assert held, "限制檢查應該還在路上"
         words = _in_flight_words(page, "y0")
         assert len(words) == 2 and all("總厚度上限還在核對" in text for text in words), words
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _ran_to_the_end(page)
         expect(page.locator("#elevation-note")).to_contain_text("復原了：左牆回到清掉前的 2 區")
         assert [zone["id"] for zone in cast(list[Doc], page.evaluate("scheme.scene.surface_zones_by_wall.y0"))] == ["z1", "auto1"]
@@ -174,14 +174,14 @@ def test_blanking_the_height_while_a_clear_is_being_checked_never_puts_the_clear
         page.keyboard.press("Backspace")
         expect(page.locator("#elevation-size")).to_have_text("先把房間的長、寬、高都填好正數，才畫得出這一面。")
         page.evaluate("() => { window.planBefore = shownPlan; }")
-        page.unroute("**/api/plan")
         _release(held_plan)
+        page.unroute("**/api/plan")
         # 檢查回來那一刻（shownPlan 換成這一次的）之後同一串就輪到清掉鈕那一段重畫；換了就表示那一段已經跑完。
         page.wait_for_function("shownPlan !== window.planBefore")
         expect(page.locator("#elevation-clear-slot button")).to_have_count(0)
         expect(page.locator("#elevation-size")).to_have_text("先把房間的長、寬、高都填好正數，才畫得出這一面。")
-        page.unroute("**/api/zone-limits")
         _release(held_limits)
+        page.unroute("**/api/zone-limits")
         _settled(page)
         expect(page.locator("#elevation-clear-slot button")).to_have_count(0)
         _assert_quiet(watched)
@@ -219,8 +219,8 @@ def test_keep_to_search_says_the_cap_is_being_checked_not_that_there_is_none(tmp
         what = page.locator("#wall-zone-what-x0-whole_wall")
         expect(what).to_contain_text("總厚度上限還在核對")
         expect(what).not_to_contain_text("沒給上限")
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(what).to_contain_text("總厚度最多 15 公分（房間預設）")
         _assert_quiet(watched)
@@ -242,8 +242,8 @@ def test_search_to_fixed_drops_the_group_caps_before_the_verdict_comes_back(tmp_
         expect(page.locator("#wall-zone-x0-whole_wall .tag")).to_have_text("指定貼一種")
         expect(page.locator("#wall-zone-depths-x0-whole_wall")).to_have_count(0)
         expect(page.locator("[id^=depth-target-x0-whole_wall-], #depth-cap-x0-whole_wall")).to_have_count(0)
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(page.locator("#wall-zone-depths-x0-whole_wall")).to_have_count(0)
         _assert_quiet(watched)
@@ -277,8 +277,8 @@ def test_a_new_deepest_on_a_search_zone_says_checking_until_the_verdict_comes_ba
         expect(what).to_contain_text("總厚度上限還在核對")
         expect(what).not_to_contain_text("15 公分")
         expect(depths).to_have_count(0)
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(what).to_contain_text("總厚度最多 10 公分（這一塊）")
         _assert_quiet(watched)
@@ -311,8 +311,8 @@ def test_a_new_deepest_on_a_search_zone_drops_the_group_caps_until_the_verdict_c
         expect(page.locator("#wall-zone-x0-whole_wall .tag")).to_have_text("由程式最佳化")
         expect(page.locator("#wall-zone-depths-x0-whole_wall")).to_have_count(0)
         expect(page.locator("[id^=depth-target-x0-whole_wall-], #depth-cap-x0-whole_wall")).to_have_count(0)
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(page.locator("#wall-zone-depths-x0-whole_wall")).to_have_count(1)
         expect(cap).to_have_text("個案上限 0.05 公尺（這一塊）；每一組跟自己的上限取較嚴：")
@@ -346,8 +346,8 @@ def test_a_construction_put_back_by_a_new_method_is_not_named_until_the_verdict_
         held = _hold_limits_and_apply(page, "ceiling", "whole_wall", "search")
         expect(what).to_contain_text("總厚度上限還在核對")
         expect(what).not_to_contain_text("天花自編樣品")
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(what).not_to_contain_text("天花自編樣品")
         _assert_quiet(watched)
@@ -371,8 +371,8 @@ def test_turning_symmetry_on_does_not_blame_the_seat_before_the_verdict_comes_ba
         status = page.locator(".elevation-pair-status")
         expect(status).to_have_text("")
         assert held, "限制檢查應該還在路上"
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(status).not_to_contain_text("請先檢查方案")
         _assert_quiet(watched)
@@ -398,8 +398,8 @@ def test_a_room_resize_does_not_reuse_the_verdict_while_the_new_one_is_on_its_wa
         assert held, "限制檢查應該還在路上"
         words = _in_flight_words(page, "y0")
         assert all("總厚度上限還在核對" in text for text in words), words
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(what).to_contain_text("和右牆整面一對")
         _assert_quiet(watched)
@@ -444,8 +444,8 @@ def test_opening_another_scheme_never_pairs_its_zones_with_the_last_schemes_verd
         # 打開時第 2 段換到那一份的前牆（#1265 單元 5c）：點回左牆再看右欄那一區。
         page.locator("#elevation-wall-y0").click()
         expect(page.locator("#wall-zone-what-y0-whole_wall")).not_to_contain_text("一對")
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _verdict_shown(page)
         expect(page.locator("#wall-zone-what-y0-whole_wall")).not_to_contain_text("一對")
         _assert_quiet(watched)

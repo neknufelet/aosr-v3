@@ -130,8 +130,8 @@ def test_the_list_does_not_say_no_cap_while_the_limits_are_unknown(tmp_path: Pat
         held.pop().fulfill(status=500, content_type="application/json", body=json.dumps({"error": "考卷故意讓它壞"}))
         expect(what).to_contain_text("總厚度上限沒核對成（限制檢查沒做成）")
         expect(what).not_to_contain_text("沒給上限")
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         page.evaluate("refreshZoneLimits()")
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits?.status === 'checked'")
         expect(what).to_contain_text("總厚度最多 15 公分（房間預設）")
@@ -196,8 +196,8 @@ def test_the_clear_slot_and_the_list_are_locked_while_the_room_is_resizing(tmp_p
         page.wait_for_function(f"({locked})('elevation')")
         assert held
         assert page.evaluate(locked, "elevation-clear-slot") and page.evaluate(locked, "elevation-list")
-        page.unroute("**/api/zone-resize")
         _release(held)
+        page.unroute("**/api/zone-resize")
         page.wait_for_function(f"!({locked})('elevation')")
         assert not page.evaluate(locked, "elevation-clear-slot") and not page.evaluate(locked, "elevation-list")
         # 改房間高度那一下，預覽（/api/input-preview）帶新高度、舊的分區送出去，伺服器拒收 400「外框必須正好蓋滿整面」：
