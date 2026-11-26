@@ -191,6 +191,19 @@ function autoCheck() {
   autoCheckLater = false;
   if (!asked) action(() => refreshPlan(undefined, true));
 }
+// 頁底兩顆（「照現在牆上貼的算一次」、zone_modes.js 的 sendToSearch）按下那一刻、任何 await 之前呼叫（第三趟複查發現 1、2）：
+// 記下按的是哪一顆（stopAtCheck 回來時拿它比，使用者等待中把焦點移到別處就不捲、不搶焦點）；按下那一刻那一格失焦、延到放開的
+// 那一次自動檢查（含重問限制）當場做掉，不等放開後那個 setTimeout——兩顆之後等到的判決才是按下那一刻的表單問的。
+// flushed 是那一次檢查（沒有延後的就是已經好了的空等待）。
+function bottomPressed() {
+  const pressed = document.activeElement;
+  let flushed = Promise.resolve();
+  if (autoCheckLater) {
+    autoCheckLater = false;
+    flushed = action(() => refreshPlan(undefined, true));
+  }
+  return {pressed, flushed};
+}
 function relabelWallsAfterPress() {
   pressing = false;
   // 放開之後瀏覽器才發 click（點標籤字這時才把焦點交給那一格）：排到這一下點完，再看游標在不在區內。
@@ -568,14 +581,14 @@ async function storeScheme() {
 // after(stored, before 拿到的東西)；存之前平面圖沒過（含連不上：storeScheme 回 null）就在鎖放開之後停在平面圖問題上
 // （check_state.js 的 stopAtCheck）。兩顆不各自判；別的失敗（存檔被拒、做的事丟錯）holdInput 已經寫進訊息列，回 undefined。
 const PLAN_STOPPED = Symbol("平面圖擋下");
-async function storeThen(after, before = () => null) {
+async function storeThen(press, after, before = () => null) {
   const out = await holdInput(async () => {
     const context = before();
     const stored = await storeScheme();
     return stored === null ? PLAN_STOPPED : after(stored, context);
   });
   if (out !== PLAN_STOPPED) return out;
-  await stopAtCheck("plan");
+  await stopAtCheck("plan", press.pressed);
   return undefined;
 }
 // 存好之後重讀方案清單與結果清單（不鎖頁）。
@@ -1399,11 +1412,12 @@ async function bootInputPage() {
       sayBeside(note, refused ? hint : "", refused ? "notice" : "");
     });
   $("calculate").onclick = () => action(async () => {
+    const press = bottomPressed();
     if (inputBusy) { say(`${busyWords}，這一次沒有開算；等它做完再按一次`, "notice"); return; }
     // 鎖涵蓋「存＋開算」整段：開算的是存下去的那一份（按下那一刻表單上那一份），不是那時畫面上的。
     // 中間重讀清單也在鎖裡（跟改動前同一個順序：存、重讀清單、開算、馬上問第一次進度）。
     // 存之前那一次平面圖檢查沒過（含連不上）：沒存、沒送，storeThen 停在問題上。限制只擋搜尋，這裡不看。
-    const state = await storeThen(async stored => {
+    const state = await storeThen(press, async stored => {
       await refreshAfterSave(stored.message);
       return api("/api/runs", "POST", {scheme_id: stored.id});
     });

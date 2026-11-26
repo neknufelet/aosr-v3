@@ -237,6 +237,7 @@ function stuckWords(names) { return `先處理${names.join("、")}的紅框（�
 // 鎖（app.js 的 holdInput）從存檔一路拿到離開這一頁（#1188 第 5 條，同「計算」把重讀清單包在鎖裡）：存好之後還要重讀清單、
 // 搜尋頁也要一點時間才回來，那一段要是點得到、改得動，改的東西沒存就被帶去搜尋頁，搜尋頁讀到的比畫面上少。
 async function sendToSearch() {
+  const press = bottomPressed();
   const cut = window.pendingMirrorCut?.();
   if (cut) await cut;
   const stuck = stuckZoneNames();
@@ -244,13 +245,15 @@ async function sendToSearch() {
   // 房間尺寸調整還在路上（#1266）：先等它落地，底下等到的限制判決才是照新尺寸重問的那一次。
   const resize = window.pendingRoomResize?.();
   if (resize) await resize;
+  // 按下那一刻延後的那一次自動檢查（bottomPressed）先做完：它重問過限制，底下等到的才不是按下之前就收下的判決。
+  await press.flushed;
   const limits = await settledZoneLimits();
   // 限制檢查沒過（沒檢查成、有超過的）：不存不跳，頁底照講，並停在問題上（check_state.js：捲到第一個標紅的區、焦點在頂條那一句）。
   if (limits?.status !== "checked") {
-    searchNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); await stopAtCheck("limits"); return;
+    searchNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); await stopAtCheck("limits", press.pressed); return;
   }
   if (limitsRedCount()) {
-    searchNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); await stopAtCheck("limits"); return;
+    searchNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); await stopAtCheck("limits", press.pressed); return;
   }
   // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，不存不跳，照伺服器那一句講。
   const refused = referenceRefusals();
@@ -264,7 +267,7 @@ async function sendToSearch() {
     return;
   }
   // 存之前那一次平面圖檢查沒過（含連不上）：沒存、不跳，storeThen（app.js）在鎖放開之後停在問題上。
-  await storeThen(async (stored, {generation, name}) => {
+  await storeThen(press, async (stored, {generation, name}) => {
     await refreshAfterSave(stored.message);
     // 鎖著的時候換不了方案；這一條是鎖漏掉時的第二道（同 pressedCopy 的 samePage）。
     if (generation !== zoneDesignGeneration) { searchNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice", false); return; }

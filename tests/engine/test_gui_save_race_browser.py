@@ -521,6 +521,9 @@ def test_the_refused_words_beside_the_button_outlive_a_save_the_server_turns_dow
         with page.expect_response("**/api/input-preview") as preview:
             page.locator("#room-Lx").fill(str(cast(dict[str, dict[str, float]], example["scene"])["room_m"]["Lx"] + 0.5))
         assert preview.value.ok
+        # 先離開那一格、讓自動檢查做完：按鈕按下那一刻不再有延後的那一次，攔住的第一個平面圖檢查就是存檔自己那一次。
+        with page.expect_response("**/api/plan"):
+            page.locator("#room-Lx").blur()
         page.wait_for_load_state("networkidle")
         held = _hold_first(page, "**/api/plan", "POST")
         with page.expect_request("**/api/plan"):

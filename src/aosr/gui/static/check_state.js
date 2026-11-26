@@ -91,8 +91,8 @@ function stillStopping(name, pressed) {
   if (verdict.state === "ok") return false;
   return document.activeElement === pressed || document.activeElement === document.body || document.activeElement === null;
 }
-async function stopAtCheck(name) {
-  const pressed = document.activeElement;
+// pressed 是按下那一刻（任何 await 之前，app.js 的 bottomPressed）記下的那一顆：等平面圖或存檔時焦點早就可能換了地方。
+async function stopAtCheck(name, pressed) {
   if (!stillStopping(name, pressed)) return;
   await settledZoneLimits();
   if (!stillStopping(name, pressed)) return;
