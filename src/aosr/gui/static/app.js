@@ -941,11 +941,14 @@ async function moveResult(item, restore = false) {
   const data = await api(`/api/archive/${item.run_id}/restore`, "POST", {});
   await refreshMovedLists(data.message);
 }
+// 回清單重讀成不成：成了回 null，沒成回原因（5c 第三趟，複查第 3 條：空畫面搬回要把原因寫在看得到的卡片上）。
 async function refreshMovedLists(message, tone = "ok") {
   say(message, tone);
   try { await loadSchemeList(); await loadResultList(); } catch (error) {
     say(`${message}；清單更新不了，請重新整理：${errorText(error)}`, "notice");
+    return errorText(error);
   }
+  return null;
 }
 async function archiveScheme(name) {
   if (!name) return;
@@ -972,15 +975,17 @@ async function movePackage(item) {
   // 沒打開時寫 changeInputScheme 剛寫進訊息列的那一句（見 openScheme 上面）。
   if (document.body.dataset.inputStart === "empty") {
     if (inputBusy) { say(`${busyWords}，沒有搬回「${item.scheme_id}」；等它做完再按一次「搬回」`, "notice"); return; }
-    let restored = false, problem = "", results = 0, withScheme = true;
+    let restored = false, problem = "", results = 0, withScheme = true, listProblem = null;
     const opened = await holdInput(async () => {
       const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
       restored = true;
       // 包裡有沒有方案檔看搬回的回覆（封存清單的成員路徑），不看重讀後的清單：清單讀不到時 refreshMovedLists 不丟錯。
       // 沒有方案檔（只封存了結果）就不去打開它：打開只會撞上「找不到檔案」（5c 第二趟，審查第 4 條）。
-      results = data.result_ids.length;
-      withScheme = data.paths.some(path => path.replaceAll("\\", "/") === `schemes/${item.scheme_id}.json`);
-      await refreshMovedLists(data.message);
+      // 回覆缺 paths 當成包裡有方案檔（照 5c 以前去打開）、缺 result_ids 算 0 筆（5c 第三趟，複查第 2 條）。
+      results = data.result_ids?.length ?? 0;
+      withScheme = !Array.isArray(data.paths) ||
+        data.paths.some(path => path.replaceAll("\\", "/") === `schemes/${item.scheme_id}.json`);
+      listProblem = await refreshMovedLists(data.message);
       if (!withScheme) return false;
       try {
         if (await openScheme(item.scheme_id, true)) return true;
@@ -996,9 +1001,16 @@ async function movePackage(item) {
     if (!restored) return;
     closeResults();
     // 開好了：鎖著時被擋下的「開一份新的」那一句（holdInput 的 finally 剛寫回去）已經過時，清掉（不變式四）。
-    if (opened) { sayBeside("new-scheme-note", "", ""); leaveEmptyStart(); }
-    else if (!withScheme) sayBeside("new-scheme-note", `「${item.scheme_id}」的 ${results} 筆結果已經搬回；這一包裡沒有方案檔，` +
-      "沒有打開方案。結果在下面「看算過的結果」裡", "ok");
+    // 清單重讀失敗（5c 第三趟，複查第 3 條）：訊息列在空畫面被門藏著，原因寫在看得到的地方——開好了寫訊息列（門已開），
+    // 沒開好寫卡片；只有結果的包不再指去「看算過的結果」（那顆照舊清單畫，可能藏著）。
+    const reread = listProblem === null ? "" : `已經搬回，但清單更新不了，請重新整理這一頁：${listProblem}`;
+    if (opened) {
+      sayBeside("new-scheme-note", "", ""); leaveEmptyStart();
+      if (reread) say(`「${item.scheme_id}」${reread}`, "notice");
+    } else if (!withScheme) sayBeside("new-scheme-note", reread ? `「${item.scheme_id}」的 ${results} 筆結果${reread}` :
+      `「${item.scheme_id}」的 ${results} 筆結果已經搬回；這一包裡沒有方案檔，沒有打開方案。結果在下面「看算過的結果」裡`,
+      reread ? "notice" : "ok");
+    else if (reread) sayBeside("new-scheme-note", `「${item.scheme_id}」${reread}${problem ? `；沒有打開：${problem}` : ""}`, "notice");
     else sayBeside("new-scheme-note", `「${item.scheme_id}」已經搬回，但沒有打開：${problem}`, "notice");
     return;
   }
@@ -1168,9 +1180,10 @@ async function follow(id) {
   await showOtherRuns();
 }
 // sent：存檔時檢查的是按下那一刻抄下來的那一份（#1187）；其餘照表單現況。
-// 每問一次加一（5c 第二趟，審查第 2 條）：回來時已經不是最新那一次、或表單已換成別份方案（例如開頁途中開機範本那一次
-// 晚到、已經開好要開的那一份），整筆丟掉——不畫、不寫訊息列、不清任何提示，最新那一次自己會畫。
-// 丟掉的那一次照樣回伺服器收不收：存檔與「從範本開新的」看這個值決定存不存，判的是送出去的那一份，跟畫面無關。
+// 每問一次加一（5c 第二趟，審查第 2 條）：不帶 sent 的畫面重算回來時已經不是最新那一次、或表單已換成別份方案（例如開頁途中
+// 開機範本那一次晚到、已經開好要開的那一份），整筆丟掉——不畫、不寫訊息列、不清任何提示，最新那一次自己會畫。
+// 帶 sent 的（存檔、另存、從範本開新的）一律不丟（5c 第三趟，複查第 1 條）：呼叫的人要拿 planProblems 與訊息列講沒存成的原因，
+// 照 #1265 單元 5c 以前的做法畫圖、寫訊息列、更新 planProblems，再回伺服器收不收。
 let planSeq = 0;
 async function refreshPlan(sent) {
   const resize = window.pendingRoomResize();
@@ -1180,7 +1193,7 @@ async function refreshPlan(sent) {
   const mine = ++planSeq, asked = scheme;
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(sent ?? collect())}));
-  if (mine !== planSeq || asked !== scheme) return response.ok;
+  if (!sent && (mine !== planSeq || asked !== scheme)) return response.ok;
   if (!response.ok) {
     shownPlan = plan.plan ?? null;
     if (shownPlan) drawShownPlan();

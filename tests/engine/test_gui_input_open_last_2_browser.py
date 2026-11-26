@@ -5,15 +5,18 @@
 - ``inputReady``（頁面載完的旗子）設下那一刻，「打開」旁邊那一句已經寫好、該開的「這間房貼什麼」已經開了。
 - 空畫面搬回只有結果、沒有方案檔的包：不去打開那份方案，講人話、不露伺服器的檔案路徑，「看算過的結果」跟著更新。
 - 空畫面只有舊的單筆封存結果時，卡片上照樣有一句打得開抽屜。
+- 第三趟：存檔的圖面檢查不被序號丟掉（在存檔考卷檔）；空畫面搬回的回覆缺欄照樣打開；搬回後清單重讀失敗講得出來。
 方案的名字、喇叭擺哪都是考卷自己編的；只攔網路，伺服器是考卷自己起的。"""
 from __future__ import annotations
 
+import json
 import time
+import urllib.request
 from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Route, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.result import SchemeResult
 from tests.engine.test_gui_archive import _bundle
@@ -248,3 +251,98 @@ def test_an_empty_screen_with_only_single_archived_results_opens_the_drawer(tmp_
         expect(page.locator("#empty-results")).to_be_focused()
         assert page.evaluate("document.body.dataset.inputReady") is None
         assert watched.page_errors == []
+
+
+# ---- #1265 單元 5c 第三趟：空畫面搬回的兩個出口（複查第 2、3 條） ----
+
+def _archive_by_api(base: str, name: str) -> None:
+    request = urllib.request.Request(f"{base}/api/schemes/{name}/archive", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(request).read()
+
+
+def _move_back_on_the_empty_screen(page: Page, fail: dict[str, bool]) -> dict[str, str]:
+    """空畫面 → 「看已封存的方案」→ 搬回第一包；``fail["on"]`` 在按「搬回」前一刻打開（之後的清單請求回 500）。
+    等抽屜關上、網路靜下來才讀卡片、訊息列與門。"""
+    page.wait_for_function("document.body.dataset.inputStart === 'empty'")
+    page.wait_for_load_state("networkidle")
+    page.locator("#empty-archived").click()
+    fail["on"] = True
+    page.locator("#archived-packages-list tr button", has_text="搬回").first.click()
+    page.wait_for_function("document.getElementById('results-drawer').hidden && !inputBusy")
+    page.wait_for_load_state("networkidle")
+    return cast(dict[str, str], page.evaluate("""() => ({
+        inputStart: document.body.dataset.inputStart ?? null, openedId: openedId ?? null,
+        note: document.getElementById('new-scheme-note').textContent,
+        noteClass: document.getElementById('new-scheme-note').className,
+        messages: document.getElementById('messages').textContent,
+        messagesClass: document.getElementById('messages').className,
+        emptyResultsHidden: document.getElementById('empty-results').hidden})"""))
+
+
+def _fail_with(page: Page, pattern: str) -> dict[str, bool]:
+    fail = {"on": False}
+    page.route(pattern, lambda route: route.fulfill(status=500, content_type="application/json",
+               body=json.dumps({"error": "清單壞了"})) if fail["on"] else route.continue_())
+    return fail
+
+
+def test_moving_back_on_the_empty_screen_opens_the_scheme_when_the_reply_has_no_paths(tmp_path: Path, browser: Browser) -> None:
+    """複查第 2 條：搬回的回覆少了 ``paths``（成員路徑）與 ``result_ids``（結果代號）兩欄：當成包裡有方案檔，照樣打開它、離開空畫面，
+    卡片上不留「沒有打開：」斷尾，頁面程式不丟錯。"""
+    with _serve(tmp_path) as base:
+        _write(tmp_path, "has-scheme", _template(base), STAMPS[LATEST])
+        _archive_by_api(base, "has-scheme")
+        with _open(browser, "about:blank", viewport_width=1440) as watched:
+            page = watched.page
+
+            def on_restore(route: Route) -> None:
+                reply = route.fetch()
+                body = json.loads(reply.text())
+                body.pop("paths", None)
+                body.pop("result_ids", None)
+                route.fulfill(status=reply.status, content_type="application/json", body=json.dumps(body))
+
+            page.route("**/api/archive/packages/*/restore", on_restore)
+            page.goto(base)
+            state = _move_back_on_the_empty_screen(page, {"on": False})
+            assert state["openedId"] == "has-scheme" and state["inputStart"] is None, state
+            assert "沒有打開" not in state["note"], state
+            assert watched.page_errors == []
+
+
+def test_moving_back_only_results_on_the_empty_screen_says_when_the_lists_cannot_be_reread(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    """複查第 3 條：空畫面搬回只有結果的包、之後重讀結果清單回 500：卡片上用紅字講結果搬回了、清單更新不了、請重新整理，
+    帶上真正的原因；不再用綠字指去看不到的「看算過的結果」。"""
+    _bundle(tmp_path, result.model_copy(update={"scheme": result.scheme.model_copy(update={"scheme_id": "res-only"})}), "2" * 32)
+    with _serve(tmp_path) as base:
+        _archive_by_api(base, "res-only")
+        with _open(browser, "about:blank", viewport_width=1440) as watched:
+            page = watched.page
+            fail = _fail_with(page, "**/api/results")
+            page.goto(base)
+            state = _move_back_on_the_empty_screen(page, fail)
+            assert state["inputStart"] == "empty", state
+            assert state["noteClass"] == "notice", state
+            assert "結果已經搬回，但清單更新不了，請重新整理這一頁：" in state["note"] and "清單壞了" in state["note"], state
+            assert "看算過的結果" not in state["note"], state
+            assert watched.page_errors == []
+
+
+def test_moving_back_a_scheme_on_the_empty_screen_says_when_the_lists_cannot_be_reread(tmp_path: Path, browser: Browser) -> None:
+    """複查第 3 條（有方案檔那一條出口）：空畫面搬回有方案檔的包、重讀結果清單回 500：方案照樣打開（伺服器上那一份是好的），
+    開好之後訊息列用紅字講清單更新不了、請重新整理、真正的原因——不被打開時那一次圖面檢查的「檢查通過」蓋掉。"""
+    with _serve(tmp_path) as base:
+        _write(tmp_path, "has-scheme", _template(base), STAMPS[LATEST])
+        _archive_by_api(base, "has-scheme")
+        with _open(browser, "about:blank", viewport_width=1440) as watched:
+            page = watched.page
+            fail = _fail_with(page, "**/api/results")
+            page.goto(base)
+            state = _move_back_on_the_empty_screen(page, fail)
+            assert state["openedId"] == "has-scheme" and state["inputStart"] is None, state
+            assert state["messagesClass"] == "notice", state
+            assert "已經搬回，但清單更新不了，請重新整理這一頁：" in state["messages"] and "清單壞了" in state["messages"], state
+            assert "沒有打開" not in state["note"], state
+            assert watched.page_errors == []

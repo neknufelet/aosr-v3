@@ -13,6 +13,8 @@ from tests.engine._input_page_steps import archive_then_recreate, open_example_s
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_input_open_last_browser import LATEST as OL_LATEST, MIDDLE as OL_MIDDLE, STAMPS as OL_STAMPS
+from tests.engine.test_gui_input_open_last_browser import _opened as _ol_opened, _template as _ol_template, _write as _ol_write
 from tests.engine.test_gui_input_setup_browser import _filled
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 
@@ -581,3 +583,114 @@ def test_why_it_was_not_opened_stays_beside_open_when_the_preview_asked_afterwar
         assert "地板材料構造 › 第 1 層" in page.locator("#messages").inner_text()
         assert page.locator("#save-id").input_value() == shown
         assert watched.page_errors == []
+
+
+_RUN_ID = "a" * 32
+
+
+def _held(page: Page, held: list[Route], what: str) -> None:
+    """等攔下的請求出現（最多約 10 秒）。"""
+    for _ in range(500):
+        if held:
+            return
+        page.wait_for_timeout(20)
+    raise AssertionError(f"{what}沒有出去")
+
+
+def _hold_follow_and_save_plan(page: Page, mode: str, attack: dict[str, bool]) -> tuple[list[Route], list[Route]]:
+    """接進度那一步（儲存：/api/runs；另存：/api/runs/<代號>）與 ``attack`` 打開後的第一次圖面檢查都攔下來。"""
+    held_follow: list[Route] = []
+    held_save_plan: list[Route] = []
+
+    def on_runs(route: Route) -> None:
+        if mode == "save" and attack["on"]:
+            held_follow.append(route)
+        else:
+            route.continue_()
+
+    def on_run_item(route: Route) -> None:
+        if mode == "save":
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(
+                {"run_id": _RUN_ID, "scheme_id": "s-other", "status": "stopped", "display_text": "已停止", "stderr_tail": []}))
+        else:
+            held_follow.append(route)
+
+    def on_plan(route: Route) -> None:
+        if attack["on"] and not held_save_plan:
+            held_save_plan.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/api/runs", on_runs)
+    page.route(f"**/api/runs/{_RUN_ID}", on_run_item)
+    page.route("**/api/plan", on_plan)
+    return held_follow, held_save_plan
+
+
+def _turned_down_while_another_scheme_finishes_opening(tmp_path: Path, browser: Browser, mode: str) -> dict[str, str]:
+    """#1265 單元 5c 第三趟（複查第 1 條）：開一份有計算在跑的方案、接進度那一步還沒回來時改出一格檢查不過的（房長 -1），
+    按「儲存」或「另存新名字」；存檔那一次圖面檢查攔在半路，等「打開」尾端自己的那一次圖面檢查也送出去了才放行存檔那一次。
+    存檔那一次回來時已經不是最新的一次——帶著送出去那一份的檢查照樣要算數。回訊息列、頂條存檔那一句、另存旁那一句。"""
+    with _serve(tmp_path) as base:
+        doc = _ol_template(base)
+        _ol_write(tmp_path, "s-main", doc, OL_STAMPS[OL_LATEST])
+        _ol_write(tmp_path, "s-other", doc, OL_STAMPS[OL_MIDDLE])
+        with _open(browser, "about:blank", viewport_width=1440) as watched:
+            page = watched.page
+            attack = {"on": False}
+            held_follow, held_save_plan = _hold_follow_and_save_plan(page, mode, attack)
+            page.goto(base)
+            _ol_opened(page, "s-main")
+            page.wait_for_load_state("networkidle")
+            attack["on"] = True
+            page.evaluate(f'() => {{ activeRuns = [{{run_id: "{_RUN_ID}", scheme_id: "s-other", status: "running", display_text: "計算中"}}]; }}')
+            page.locator("#scheme-menu-button").click()
+            page.locator('#home-schemes [data-scheme="s-other"] button.home-open').click()
+            _held(page, held_follow, "接進度那一步的請求")
+            page.locator("#room-Lx").fill("-1")
+            if mode == "save":
+                page.locator("#save").click()
+            else:
+                page.locator("#save-as-toggle").click()
+                page.locator("#save-as-id").fill("copy-one")
+                page.locator("#save-as").click()
+            _held(page, held_save_plan, "存檔那一次圖面檢查")
+            held_open_plan: list[Route] = []
+            page.unroute("**/api/plan")
+            page.route("**/api/plan", lambda route: held_open_plan.append(route))
+            followed = {"running": []} if mode == "save" else {
+                "run_id": _RUN_ID, "scheme_id": "s-other", "status": "running", "display_text": "計算中", "stderr_tail": []}
+            held_follow[0].fulfill(status=200, content_type="application/json", body=json.dumps(followed))
+            _held(page, held_open_plan, "「打開」尾端那一次圖面檢查")
+            with page.expect_response("**/api/plan") as checked:
+                held_save_plan[0].continue_()
+            assert checked.value.status == 422, checked.value.status
+            # 存檔那一支做完（解鎖、頂條或另存旁邊寫好）才讀；「打開」那一次還攔著，蓋不到這幾處。
+            done = "#save-feedback" if mode == "save" else "#save-as-note"
+            page.wait_for_function("id => !inputBusy && document.querySelector(id).textContent !== ''", arg=done)
+            said = cast(dict[str, str], page.evaluate("""() => Object.fromEntries(
+                ['save-feedback', 'save-as-note', 'messages'].flatMap(id => [[id, document.getElementById(id).textContent],
+                    [id + '-class', document.getElementById(id).className]]))"""))
+            held_open_plan[0].continue_()
+            page.wait_for_load_state("networkidle")
+            assert not (tmp_path / "schemes" / "copy-one.json").exists()
+            assert watched.page_errors == []
+            return said
+
+
+def test_a_save_turned_down_by_the_plan_check_says_why_even_when_a_newer_check_is_on_its_way(
+        tmp_path: Path, browser: Browser) -> None:
+    """複查第 1 條（儲存）：頂條存檔那一句是紅字、寫圖面檢查的原因，不是上一次留下的綠字「檢查通過」。"""
+    said = _turned_down_while_another_scheme_finishes_opening(tmp_path, browser, "save")
+    assert said["save-feedback-class"] == "notice", said
+    assert "座標超出房間" in said["save-feedback"] and "檢查通過" not in said["save-feedback"], said
+    assert said["messages"] == said["save-feedback"], said
+
+
+def test_a_save_as_turned_down_by_the_plan_check_says_why_even_when_a_newer_check_is_on_its_way(
+        tmp_path: Path, browser: Browser) -> None:
+    """複查第 1 條（另存新名字）：另存旁邊寫「沒有另存：」加上圖面檢查的原因，不是斷尾；訊息列也是那個原因，不是清空。"""
+    said = _turned_down_while_another_scheme_finishes_opening(tmp_path, browser, "saveAs")
+    assert said["save-as-note-class"] == "notice", said
+    assert said["save-as-note"].startswith("沒有另存：") and "座標超出房間" in said["save-as-note"], said
+    assert "座標超出房間" in said["messages"], said
