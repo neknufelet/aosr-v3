@@ -420,8 +420,9 @@ html.drawer-open{overflow:hidden}
    卡片底下「看已封存的方案」打開的抽屜照樣住在 main 裡（main 不藏）。 */
 #empty-title{display:none;font-size:1rem}
 body[data-input-start=empty] #empty-title{display:inline}
-/* 開頁的那道門（第二趟，審查第 5 條）："loading" 是還沒判定有沒有存過的方案，跟空畫面藏同一批；只多一行「讀取中…」。 */
-body[data-input-start] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, .bar-actions, #lock-bar, #nav-zones){display:none}
+/* 開頁的那道門（第二趟，審查第 5 條）："loading" 是還沒判定有沒有存過的方案，跟空畫面藏同一批；只多一行「讀取中…」。
+   頂條「打開」旁邊與存檔那一句一起藏（5c 第二趟，審查第 1 條）：門關著時沒有方案開著，那兩句沒有東西可指。 */
+body[data-input-start] :is(main>h1, main>section, #input-footer, .scheme-name, #scheme-menu-button, #save-state, .bar-actions, #lock-bar, #nav-zones, #open-note, #save-feedback){display:none}
 #boot-note{display:none;max-width:44rem;margin:4rem auto 2rem;color:#46586a}
 body[data-input-start=loading] #boot-note{display:block}
 #boot-note.notice{color:#872c22;font-weight:600}

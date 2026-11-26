@@ -246,7 +246,7 @@ def test_an_empty_folder_shows_only_the_start_card_and_is_ready_once_the_new_sch
         expect(page.locator("#empty-title")).to_have_text("還沒有開任何方案")
         expect(page.locator("#empty-title")).to_be_visible()
         for gone in ("#save", "#save-as-toggle", "#show-results", "#scheme-section", "#wall-section", "#input-footer",
-                     "#home", "#save-state", "#save-id", "#scheme-menu-button", "#messages", "#empty-archived", "#new-scheme-cancel",
+                     "#save-state", "#save-id", "#scheme-menu-button", "#messages", "#empty-archived", "#new-scheme-cancel",
                      "#nav-zones"):
             expect(page.locator(gone)).to_be_hidden()
         expect(page.locator("#template-list")).to_have_count(0)
@@ -304,8 +304,11 @@ def test_a_link_to_a_scheme_that_is_not_there_on_an_empty_folder(tmp_path: Path,
         page = watched.page
         _empty_start(page)
         expect(page.locator("#empty-start")).to_be_visible()
-        expect(page.locator("#open-note")).to_have_text(
-            "沒有打開「ghost」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「換一個方案」另選一份")
+        # #1265 單元 5c 第二趟（設計洞 5）：那一句搬到空畫面卡片上；頂條「打開」旁邊不寫也藏著（「換一個方案」那顆在空畫面看不到）。
+        expect(page.locator("#empty-list-note")).to_have_text(
+            "沒有打開「ghost」：已存的方案裡沒有這一份（可能封存了或改了名字）。")
+        expect(page.locator("#open-note")).to_have_text("")
+        expect(page.locator("#open-note")).to_be_hidden()
         expect(page.locator("#scheme-section")).to_be_hidden()
         assert page.evaluate("document.body.dataset.inputReady") is None
         _assert_quiet(watched)

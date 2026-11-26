@@ -226,6 +226,7 @@ def back_to_wall(page: Page, wall: str | None) -> None:
 
 # 這一格住在哪一塊收起來的地方：第 2 段某一面的牆面表單、摺疊、「改…」打開的那一塊、或沒露出來的那一張圖；都不是回 null。
 _HOLDER_JS = """node => {
+  if (!node.isConnected) return ['detached', ''];
   const wall = node.closest('#walls .wall-editor');
   if (wall) return ['wall', wall.id.slice('wall-editor-'.length)];
   const fold = node.closest('details.fold');
@@ -241,7 +242,15 @@ def reveal(page: Page, selector: str) -> Locator:
     """收起來的格子（#1265 起第 1 段的座標、進階、家具、喇叭擺法、總厚度上限、原方案與另外三張圖，單元 3 起第 2 段
     每一面的牆面表單，都要先打開才點得到）：先打開它住的那一塊，回傳那一格；本來就露著的不動。"""
     target = page.locator(selector)
+    # 剛好碰上重畫（例如打開方案時座標格整排換新，app.js :: rows 的 replaceChildren）：抓到的是剛被換掉、已經不在頁面上的
+    # 舊格子，往上找不到它住的那一塊，會誤當成本來就露著而不展開；等新的那一格出來再找（5c 第二趟整套時好時壞）。
     holder = cast(list[str] | None, target.first.evaluate(_HOLDER_JS))
+    for _ in range(100):
+        if holder is None or holder[0] != "detached":
+            break
+        page.wait_for_timeout(50)
+        holder = cast(list[str] | None, target.first.evaluate(_HOLDER_JS))
+    assert holder is None or holder[0] != "detached", f"{selector} 一直是已經換掉的舊格子"
     if holder is not None:
         kind, name = holder
         {"wall": show_wall_form, "fold": open_fold, "editor": open_fact_editor, "view": show_view}[kind](page, name)

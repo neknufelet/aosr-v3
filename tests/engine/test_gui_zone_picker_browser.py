@@ -20,7 +20,7 @@ from tests.engine.test_gui_zone_material_pick_browser import (
 )
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, WOOLS
 from tests.engine.test_gui_zone_overview_tasks_browser import (
-    _ALLOWED, _SELECTED, _apply, _click_zone, _expect_value, _open_overview, _prepare, _send_to_search, _stored,
+    _ALLOWED, _SELECTED, _apply, _click_zone, _expect_value, _open_overview, _prepare, _send_to_search, _settled, _stored,
 )
 
 
@@ -327,6 +327,8 @@ def test_picking_a_card_scrolls_the_panel_heading_into_view(tmp_path: Path, brow
         page = watched.page
         page.set_viewport_size({"width": 1440, "height": 700})
         _open_overview(page)
+        # 等限制檢查回來、清單重畫完再捲（5c 第二趟整套撞到：捲到一半那張卡片被重畫換掉，Element is not attached）。
+        _settled(page)
         button = page.locator("#zone-list-2-select")
         button.scroll_into_view_if_needed()
         button.click()

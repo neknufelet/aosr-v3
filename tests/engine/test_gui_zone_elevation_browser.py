@@ -150,7 +150,6 @@ def test_elevation_faces_the_wall_draws_fills_saves_edits_and_deletes(tmp_path: 
         expect(page.locator("#elevation [data-zone-id=z1]")).to_have_class("zone zone-drawn zone-mode-fixed selected")
 
         # 改寬：只動「寬」那一格，貼牆那一邊照舊正好等於牆寬。
-        page.locator("#elevation [data-zone-id=z1] rect").click()
         page.locator("#elevation-width").fill("1.5")
         _cut_by(page, "press:Enter")
         z1 = next(zone for zone in _zones(page, "xL") if zone["id"] == "z1")

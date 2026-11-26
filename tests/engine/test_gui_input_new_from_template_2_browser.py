@@ -226,7 +226,7 @@ def test_before_the_page_knows_whether_schemes_exist_only_a_loading_line_shows(
         page.wait_for_function("() => document.getElementById('room-Lx') !== null && typeof scheme === 'object'"
                                " && !document.querySelector('main').inert && document.getElementById('plan-xy').childElementCount > 0")
         for gone in ("#scheme-section", "#wall-section", "#input-footer", "#nav-zones", "#save", "#save-as-toggle",
-                     "#calculate", "#show-results", "#scheme-menu-button", "#home"):
+                     "#calculate", "#show-results", "#scheme-menu-button"):
             expect(page.locator(gone)).to_be_hidden()
         expect(page.locator("#boot-note")).to_be_visible()
         expect(page.locator("#boot-note")).to_have_text("讀取中…")

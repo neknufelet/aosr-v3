@@ -380,7 +380,9 @@ async function changeInputScheme(load, held = false) {
       renderWalls();
       renderInputPreview();
     }
-    say(`方案與預覽換不過去，${scheme ? "保留原方案" : "請重新載入頁面"}：${errorText(error)}`, "notice");
+    // 開頁那道門還關著（開頁途中、空畫面）：表單上那份是沒露出來的開機範本，不算「原方案」，不講「保留原方案」（#1265 單元 5c 第二趟）。
+    const kept = !scheme ? "，請重新載入頁面" : "inputStart" in document.body.dataset ? "" : "，保留原方案";
+    say(`方案與預覽換不過去${kept}：${errorText(error)}`, "notice");
     failed = true;
     return false;
   } finally {
@@ -561,7 +563,8 @@ async function loadSchemeList() {
 }
 // 回有沒有真的打開，讓帶名字的連結知道是否繼續進入分區頁。held 見 changeInputScheme：拿著鎖的呼叫的人（從範本開新的、
 // 空畫面搬回）不會走被鎖擋下那一支，沒打開時原因就是 changeInputScheme 剛寫進訊息列的那一句，回來之前沒有等待點。
-async function openScheme(name, held = false) {
+// quiet：沒打開時不寫「打開」旁邊（開頁那一串 openStartScheme：門還關著，原因收起來、開好一份之後一次寫，5c 第二趟審查第 1 條）。
+async function openScheme(name, held = false, quiet = false) {
   if (!name) return false;
   if (!held && inputBusy) {
     refuseWhileBusy("open-note", `${busyWords}，沒有打開「${name}」；等它做完再按一次「打開」`);
@@ -578,7 +581,7 @@ async function openScheme(name, held = false) {
     return opened.scheme;
   }, held)) {
     // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列（changeInputScheme 剛寫的），也寫在「打開」旁邊。
-    sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
+    if (!quiet) sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
     return false;
   }
   for (const wall of Object.keys(measuredDrafts)) delete measuredDrafts[wall];
@@ -614,19 +617,6 @@ async function openScheme(name, held = false) {
   // 只有進度讀不到：方案已經打開好了，照樣回 true（?zones= 連結照樣進「這間房貼什麼」，審查設計洞 2），原因寫在訊息列。
   if (followFailed !== null) say(planned ? followFailed : `${followFailed}；${planProblems}`, "notice");
   return true;
-}
-// ?scheme= 回輸入頁的方案段落；?zones= 打開同一份後再進「這間房貼什麼」。
-// 打不開（清單裡沒有、存著的那一份檢查不過、讀不出）：原因寫在「打開」旁邊、捲到那裡，不開那一頁。
-// #1265 單元 5c 起只在空畫面（一份方案都沒有）時叫，只會走到「清單裡沒有」那一支；有方案時開頁走 openStartScheme。
-async function openSchemeFromLink() {
-  const params = new URLSearchParams(location.search);
-  const zones = params.get("zones");
-  const name = zones || params.get("scheme");
-  if (!name) return;
-  if (schemeNames.includes(name)) {
-    if (await openScheme(name) && zones) { window.openZoneOverview(); return; }
-  } else sayBeside("open-note", `沒有打開「${name}」：已存的方案裡沒有這一份（可能封存了或改了名字）；從「換一個方案」另選一份`, "notice");
-  $("scheme-section").scrollIntoView();
 }
 // 「從範本開一份新的」（#1265 單元 5b，取代「載入範本」）：頂條選單打開的那一塊與完全沒有方案時的空畫面共用這一份表單、
 // 這一支。先取名、先存（名字照「另存新名字」同一套規則；存檔帶 If-None-Match: *，撞名伺服器也擋），存成了才用「打開」
@@ -719,12 +709,12 @@ function enterEmptyStart(listProblem, unopened = [], missing = []) {
   document.body.dataset.inputStart = "empty";
   $("empty-slot").append($("new-scheme"));
   $("empty-start").hidden = false;
-  $("empty-list-note").hidden = listProblem === null && !unopened.length;
+  $("empty-list-note").hidden = listProblem === null && !unopened.length && !missing.length;
   $("empty-list-note").textContent = listProblem !== null ?
     `方案清單讀不到（${listProblem}），不知道有沒有存過的方案：先確認本機的網頁伺服器開著，再重新整理這一頁。` +
     "也可以直接從範本開一份新的；名字跟已存的撞到時，伺服器會擋下來、不蓋掉。" :
-    unopened.length ? `${missing.map(line => line + "。").join("")}存著的 ${unopened.length} 份方案都打不開：${unopened.join("；")}。` +
-    "可以先從範本開一份新的（名字不能跟打不開的那幾份一樣），或修好那幾份的檔案再重新整理這一頁。" : "";
+    missing.map(line => line + "。").join("") + (unopened.length ? `存著的 ${unopened.length} 份方案都打不開：${unopened.join("；")}。` +
+    "可以先從範本開一份新的（名字不能跟打不開的那幾份一樣），或修好那幾份的檔案再重新整理這一頁。" : "");
   // 結果抽屜的那一句（drawResultRows）照空畫面的說法寫。
   drawResultRows();
 }
@@ -982,11 +972,16 @@ async function movePackage(item) {
   // 沒打開時寫 changeInputScheme 剛寫進訊息列的那一句（見 openScheme 上面）。
   if (document.body.dataset.inputStart === "empty") {
     if (inputBusy) { say(`${busyWords}，沒有搬回「${item.scheme_id}」；等它做完再按一次「搬回」`, "notice"); return; }
-    let restored = false, problem = "";
+    let restored = false, problem = "", results = 0, withScheme = true;
     const opened = await holdInput(async () => {
       const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
       restored = true;
+      // 包裡有沒有方案檔看搬回的回覆（封存清單的成員路徑），不看重讀後的清單：清單讀不到時 refreshMovedLists 不丟錯。
+      // 沒有方案檔（只封存了結果）就不去打開它：打開只會撞上「找不到檔案」（5c 第二趟，審查第 4 條）。
+      results = data.result_ids.length;
+      withScheme = data.paths.some(path => path.replaceAll("\\", "/") === `schemes/${item.scheme_id}.json`);
       await refreshMovedLists(data.message);
+      if (!withScheme) return false;
       try {
         if (await openScheme(item.scheme_id, true)) return true;
         problem = $("messages").textContent;
@@ -1002,6 +997,8 @@ async function movePackage(item) {
     closeResults();
     // 開好了：鎖著時被擋下的「開一份新的」那一句（holdInput 的 finally 剛寫回去）已經過時，清掉（不變式四）。
     if (opened) { sayBeside("new-scheme-note", "", ""); leaveEmptyStart(); }
+    else if (!withScheme) sayBeside("new-scheme-note", `「${item.scheme_id}」的 ${results} 筆結果已經搬回；這一包裡沒有方案檔，` +
+      "沒有打開方案。結果在下面「看算過的結果」裡", "ok");
     else sayBeside("new-scheme-note", `「${item.scheme_id}」已經搬回，但沒有打開：${problem}`, "notice");
     return;
   }
@@ -1053,8 +1050,11 @@ async function loadArchiveList() {
   noteDrawerFocus();
   const packageList = $("archived-packages-list"); packageList.replaceChildren();
   $("archived-packages").hidden = !packages.length;
-  $("empty-archived").hidden = !packages.length;
-  $("empty-archived").textContent = `看已封存的方案（${packages.length} 份）`;
+  // 空畫面卡片那一句（5c 第二趟，設計洞 3）：只有舊的單筆封存結果（archive/results/）也要打得開抽屜。
+  const legacy = data.results.length;
+  $("empty-archived").hidden = !packages.length && !legacy;
+  $("empty-archived").textContent = !legacy ? `看已封存的方案（${packages.length} 份）` :
+    !packages.length ? `看已封存的結果（${legacy} 筆）` : `看已封存的方案（${packages.length} 份）與結果（${legacy} 筆）`;
   for (const item of packages) {
     const row = document.createElement("tr"); row.dataset.packageId = item.package_id;
     row.dataset.schemeId = item.scheme_id;
@@ -1168,13 +1168,19 @@ async function follow(id) {
   await showOtherRuns();
 }
 // sent：存檔時檢查的是按下那一刻抄下來的那一份（#1187）；其餘照表單現況。
+// 每問一次加一（5c 第二趟，審查第 2 條）：回來時已經不是最新那一次、或表單已換成別份方案（例如開頁途中開機範本那一次
+// 晚到、已經開好要開的那一份），整筆丟掉——不畫、不寫訊息列、不清任何提示，最新那一次自己會畫。
+// 丟掉的那一次照樣回伺服器收不收：存檔與「從範本開新的」看這個值決定存不存，判的是送出去的那一份，跟畫面無關。
+let planSeq = 0;
 async function refreshPlan(sent) {
   const resize = window.pendingRoomResize();
   if (resize && !sent) await resize;
   // 每次確定的改動都走到這裡：順手重判超過限制的區（#1111；不等它、不鎖頁，晚到的回覆自己丟掉）。
   refreshZoneLimits();
+  const mine = ++planSeq, asked = scheme;
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(sent ?? collect())}));
+  if (mine !== planSeq || asked !== scheme) return response.ok;
   if (!response.ok) {
     shownPlan = plan.plan ?? null;
     if (shownPlan) drawShownPlan();
@@ -1332,12 +1338,24 @@ async function bootInputPage() {
   try { await loadSchemeList(); } catch (error) { listProblem = errorText(error); }
   for (const load of [loadResultList, resumeRuns]) await action(load);
   // 已存的方案一份都沒有（網址帶的那一份當然也不在）或清單讀不到：整頁換成空畫面，不把藏著的開機範本攤出來。
+  // 網址帶了名字（?scheme=、?zones=）而一份方案都沒有：那一句寫在空畫面卡片上，不寫頂條「打開」旁邊——「換一個方案」那顆
+  // 在空畫面看不到（5c 第二趟，設計洞 5）。清單讀不到時不知道有沒有那一份，不講。
   if (listProblem !== null || !schemeNames.length) {
-    enterEmptyStart(listProblem);
-    if (listProblem === null) await openSchemeFromLink();
+    enterEmptyStart(listProblem, [], listProblem === null ? missingFromLink() : []);
     return;
   }
   await openStartScheme();
+}
+// 網址帶的那一份（?scheme=、?zones=；?zones= 開好之後再進「這間房貼什麼」）。
+function linkedScheme() {
+  const params = new URLSearchParams(location.search);
+  const zones = params.get("zones");
+  return {zones, asked: zones || params.get("scheme")};
+}
+// 網址帶的名字不在清單裡那一句（沒帶、或在清單裡就沒有）。
+function missingFromLink() {
+  const {asked} = linkedScheme();
+  return asked && !schemeNames.includes(asked) ? [`沒有打開「${asked}」：已存的方案裡沒有這一份（可能封存了或改了名字）`] : [];
 }
 // 有存過的方案時開頁先開哪一份（#1265 單元 5c）：網址帶的那一份（?scheme=、?zones=）在清單裡就先開它；沒帶、帶了不在、
 // 或它打不開，照選單「最近的方案」同一個排序（home.js 的 schemesNewestFirst）從最近存的那一份往下試，開好一份為止。
@@ -1345,11 +1363,9 @@ async function bootInputPage() {
 // 一份都打不開：進空畫面，卡片上寫每一份為什麼沒打開。沒打開的原因（網址那一份不在、哪一份打不開）等開好那一份之後
 // 一次寫在「打開」旁邊：打開途中的圖面檢查會清掉旁邊的字（say）。
 async function openStartScheme() {
-  const params = new URLSearchParams(location.search);
-  const zones = params.get("zones"), asked = zones || params.get("scheme");
+  const {zones, asked} = linkedScheme();
   // missing：網址帶的名字不在清單裡；unopened：試過、打不開的那幾份（全都打不開時卡片上的份數只算這些）。
-  const missing = asked && !schemeNames.includes(asked) ?
-    [`沒有打開「${asked}」：已存的方案裡沒有這一份（可能封存了或改了名字）`] : [];
+  const missing = missingFromLink();
   const unopened = [];
   const order = schemesNewestFirst();
   const tries = asked && schemeNames.includes(asked) ? [asked, ...order.filter(name => name !== asked)] : order;
@@ -1358,26 +1374,29 @@ async function openStartScheme() {
     // 當成這一份打不開、也不往下一份跳。
     while (inputBusy) await new Promise(resolve => setTimeout(resolve, 50));
     let opened = false;
-    try { opened = await openScheme(name); } catch (error) {
+    try { opened = await openScheme(name, false, true); } catch (error) {
       // 已經換成這一份、只是之後接進度或圖面檢查丟錯：算打開了，原因留在訊息列（同 newSchemeSteps 的判法）。
       opened = openedId === name;
       if (opened) say(errorText(error), "notice");
       else $("messages").textContent = errorText(error);
     }
-    // 原因是 changeInputScheme 寫進訊息列的那一句；開頁時「保留原方案」指的是沒露出來的開機範本，只留原因本身。
+    // 原因是 changeInputScheme 寫進訊息列的那一句（門關著時不帶「保留原方案」），只留原因本身。
     if (!opened) {
-      unopened.push(`沒有打開「${name}」：${$("messages").textContent.replace(/^方案與預覽換不過去，保留原方案：/u, "")}`);
+      unopened.push(`沒有打開「${name}」：${$("messages").textContent.replace(/^方案與預覽換不過去：/u, "")}`);
       continue;
     }
-    showInputPage();
+    // openScheme 回來時這一份的平面圖已經回來（晚到的舊平面圖由 refreshPlan 的序號丟掉）。下面這一串中間沒有等待點：
+    // 先寫「打開」旁邊那一句、開該開的那一頁，最後才開門、設 inputReady——inputReady 是「全部就緒」（5c 第二趟，設計洞 4）。
     const said = [...missing, ...unopened];
     if (said.length) sayBeside("open-note", `${said.join("；")}。先開了「${name}」；要別份從「換一個方案」另選`, "notice");
-    if (name === asked && zones) { window.openZoneOverview(); return; }
-    if (asked) $("scheme-section").scrollIntoView();
+    const toZones = name === asked && zones;
+    if (toZones) window.openZoneOverview();
+    showInputPage();
+    // 捲動要在開門之後：門關著時第 1 段藏著，捲不過去。
+    if (asked && !toZones) $("scheme-section").scrollIntoView();
     return;
   }
-  // 一份都沒打開：每一份的原因都寫在卡片上；「打開」旁邊 openScheme 寫的最後那一句（帶著開機範本的字眼）清掉。
-  sayBeside("open-note", "", "");
+  // 一份都沒打開：每一份的原因都寫在卡片上（quiet：「打開」旁邊本來就沒寫）。
   enterEmptyStart(null, unopened, missing);
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
